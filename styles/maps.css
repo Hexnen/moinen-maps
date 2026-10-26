@@ -1,0 +1,337 @@
+/* Moinen Maps: Scene Config "Pins" tab. Theme-agnostic: surfaces are mixed from currentColor so it follows light/dark UI themes. */
+.moinen-maps-tab {
+  --mm-surface: color-mix(in srgb, currentColor 6%, transparent);
+  --mm-edge: color-mix(in srgb, currentColor 14%, transparent);
+  --mm-accent: #e5322d;
+  --mm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  padding: 0.25rem 0.1rem 1rem;
+}
+
+/* hero: live preview + the master switches */
+.moinen-maps-tab .mm-hero {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: 1rem;
+  align-items: stretch;
+  margin-bottom: 1rem;
+}
+.mm-hero-fields { display: flex; flex-direction: column; justify-content: center; gap: 0.15rem; min-width: 0; }
+.mm-hero-fields .form-group { margin: 0.2rem 0; }
+
+.mm-stage {
+  position: relative;
+  display: grid;
+  place-items: end center;
+  min-height: 10.5rem;
+  padding: 0 0 1.5rem;
+  margin: 0;
+  border: 1px solid var(--mm-edge);
+  border-radius: 8px;
+  background: var(--mm-surface);
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background-color 0.2s var(--mm-ease-out), border-color 0.2s var(--mm-ease-out);
+}
+.mm-stage:hover { border-color: color-mix(in srgb, var(--mm-accent) 55%, transparent); }
+.mm-stage:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: 2px; }
+.mm-stage > * { grid-area: 1 / 1; }
+.mm-ground {
+  align-self: end;
+  justify-self: center;
+  width: 4.6rem; height: 1.3rem;
+  margin: 0 0 0.85rem 0.35rem;   /* offset away from the implied top-left light */
+  /* wide penumbra + tight contact core, same recipe as the canvas shadow */
+  background:
+    radial-gradient(ellipse 28% 36% at 50% 50%, rgb(24 14 30 / 0.85), rgb(24 14 30 / 0.6) 30%, rgb(24 14 30 / 0.2) 65%, transparent),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgb(24 14 30 / 0.34), rgb(24 14 30 / 0.24) 35%, rgb(24 14 30 / 0.09) 70%, transparent);
+  mix-blend-mode: multiply;
+  transform: scale(var(--mm-scale, 1));
+}
+.mm-stage.is-dropping .mm-ground { animation: mm-ground 1.15s linear both; }
+@keyframes mm-ground {
+  0%   { opacity: 0.25; transform: translateX(0.5rem) scale(calc(var(--mm-scale, 1) * 1.45)); animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
+  30%  { opacity: 1; transform: translateX(0) scale(calc(var(--mm-scale, 1) * 0.92)); }
+  36%  { opacity: 1; transform: scale(calc(var(--mm-scale, 1) * 1.08), calc(var(--mm-scale, 1) * 0.9)); animation-timing-function: ease-out; }
+  50%  { opacity: 0.5; transform: translateX(0.3rem) scale(calc(var(--mm-scale, 1) * (1 + 0.3 * var(--mm-bn)))); animation-timing-function: ease-in; }
+  62%  { opacity: 1; transform: scale(var(--mm-scale, 1)); }
+  72%  { opacity: 0.8; transform: translateX(0.12rem) scale(calc(var(--mm-scale, 1) * 1.08)); }
+  100% { opacity: 1; transform: scale(var(--mm-scale, 1)); }
+}
+.mm-stage.no-shadow .mm-ground { opacity: 0; }
+.mm-drop {
+  align-self: end;
+  width: 6.6rem; aspect-ratio: 320 / 352;
+  /* the canvas tip sits at 90.9% of its height; lift so the tip lands on the shadow */
+  margin-bottom: calc(1.5rem - 0.091 * 7.26rem);
+  transform-origin: 50% 90.9%;
+  transform: scale(var(--mm-scale, 1));
+}
+.mm-pin {
+  display: block;
+  width: 100%; height: 100%;
+  transform-origin: 50% 90.9%;
+}
+.mm-replay {
+  align-self: start; justify-self: end;
+  margin: 0.4rem;
+  font-size: 0.7rem;
+  opacity: 0.4;
+  transition: opacity 0.2s var(--mm-ease-out);
+}
+.mm-stage:hover .mm-replay, .mm-stage:focus-visible .mm-replay { opacity: 0.85; }
+
+/* drop preview: gravity in, impact squash, overshoot, two settling bounces */
+.mm-drop.is-dropping { animation: mm-drop 1.15s linear both; }
+@keyframes mm-drop {
+  0%   { transform: translateY(calc(var(--mm-h) * -1)) scale(0.62) rotate(-6deg); opacity: 0; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
+  6%   { opacity: 1; }
+  30%  { transform: translateY(0) scale(calc(0.97 * var(--mm-scale, 1)), calc(1.12 * var(--mm-scale, 1))) rotate(0); animation-timing-function: ease-out; }
+  36%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.38 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.42 * var(--mm-sq)))) rotate(2deg); animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1); }
+  50%  { transform: translateY(calc(var(--mm-bn) * -22px)) scale(calc(var(--mm-scale, 1) * 0.95), calc(var(--mm-scale, 1) * (1 + 0.12 * var(--mm-bn)))) rotate(-2deg); animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.6); }
+  62%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.14 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.16 * var(--mm-sq)))) rotate(0); animation-timing-function: ease-out; }
+  72%  { transform: translateY(calc(var(--mm-bn) * -7px)) scale(var(--mm-scale, 1)) rotate(0); animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.6); }
+  82%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.05 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.05 * var(--mm-sq)))); }
+  100% { transform: translateY(0) scale(var(--mm-scale, 1)); }
+}
+
+/* idle preview, strength and speed come from the sliders */
+.mm-pin[data-idle="breathe"] { animation: mm-breathe var(--mm-isp, 3.1s) ease-in-out infinite; }
+.mm-pin[data-idle="bob"]     { animation: mm-bob var(--mm-isp, 3.1s) ease-in-out infinite; }
+.mm-pin[data-idle="sway"]    { animation: mm-sway var(--mm-isp, 3.1s) ease-in-out infinite; }
+.mm-pin[data-idle="pulse"]   { animation: mm-pulse var(--mm-isp, 3.1s) ease-in-out infinite; }
+@keyframes mm-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(calc(1 - 0.022 * var(--mm-is, 0.5) * 2), calc(1 + 0.04 * var(--mm-is, 0.5) * 2)); } }
+@keyframes mm-bob   { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(calc(-3.2px * var(--mm-is, 0.5) * 2)); } }
+@keyframes mm-sway  { 0%, 100% { transform: rotate(calc(-5deg * var(--mm-is, 0.5) * 2)); } 50% { transform: rotate(calc(5deg * var(--mm-is, 0.5) * 2)); } }
+@keyframes mm-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(calc(1 + 0.07 * var(--mm-is, 0.5) * 2)); } }
+
+/* sections */
+.moinen-maps-tab .mm-sections { display: flex; flex-direction: column; gap: 0.75rem; transition: opacity 0.2s var(--mm-ease-out); }
+.moinen-maps-tab fieldset {
+  margin: 0;
+  padding: 0.35rem 0.85rem 0.6rem;
+  border: 1px solid var(--mm-edge);
+  border-radius: 8px;
+  background: var(--mm-surface);
+}
+.moinen-maps-tab legend {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0 0.4rem;
+  font-weight: 600;
+}
+.moinen-maps-tab legend i { color: var(--mm-accent); font-size: 0.85em; }
+.moinen-maps-tab .form-group { margin: 0.35rem 0; }
+.moinen-maps-tab .hint { margin: 0.1rem 0 0; opacity: 0.7; font-size: var(--font-size-12, 0.78rem); }
+/* a dependent group sits on its own tinted ground instead of a coloured side rule */
+.moinen-maps-tab .mm-sub {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.1rem 0.7rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  transition: opacity 0.2s var(--mm-ease-out);
+}
+.moinen-maps-tab .mm-sub .form-group:first-child { margin-top: 0.2rem; }
+.moinen-maps-tab .is-off { opacity: 0.4; }
+
+/* the two halves of the tab: pins, then districts */
+.moinen-maps-tab .mm-group {
+  display: flex; align-items: center; gap: 0.45rem;
+  margin: 0.6rem 0 -0.1rem; padding: 0;
+  border: 0;
+  font-size: var(--font-size-16, 1rem); font-weight: 700;
+}
+.moinen-maps-tab .mm-group:first-child { margin-top: 0; }
+.moinen-maps-tab .mm-group i { color: var(--mm-accent); font-size: 0.9em; }
+
+/* rarely used blocks (label typography) start folded */
+.moinen-maps-tab .mm-fold {
+  border: 1px solid var(--mm-edge); border-radius: 8px; background: var(--mm-surface);
+}
+.moinen-maps-tab .mm-fold > summary {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 0.85rem; cursor: pointer; font-weight: 600; list-style: none; border-radius: 8px;
+}
+.moinen-maps-tab .mm-fold > summary::-webkit-details-marker { display: none; }
+.moinen-maps-tab .mm-fold > summary::after { content: ""; width: 0.45rem; height: 0.45rem; margin: 0 0.2rem 0.2rem auto; border: solid currentColor; border-width: 0 2px 2px 0; opacity: 0.6; transform: rotate(45deg); transition: transform 0.2s var(--mm-ease-out); }
+.moinen-maps-tab .mm-fold[open] > summary::after { margin-bottom: 0; transform: rotate(-135deg); }
+.moinen-maps-tab .mm-fold > summary i { color: var(--mm-accent); font-size: 0.85em; }
+.moinen-maps-tab .mm-fold > summary:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
+.moinen-maps-tab .mm-fold-body { padding: 0 0.85rem 0.6rem; }
+
+@media (max-width: 34rem) {
+  .moinen-maps-tab .mm-hero { grid-template-columns: 1fr; }
+  .mm-stage { min-height: 8rem; }
+}
+/* reduced motion keeps the state change (the pin appears) and drops the travel, squash and loops */
+@keyframes mm-appear { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .mm-drop.is-dropping { animation: mm-appear 0.3s ease-out both; }
+  .mm-stage.is-dropping .mm-ground, .mm-pin[data-idle] { animation: none; }
+  .moinen-maps-tab .mm-fold > summary::after, #scene-controls button.tool[data-tool^="mm-"] > i { transition: none; }
+}
+
+/* ---- scene-controls tools: each pin type's button wears its colour ---- */
+#scene-controls button.tool[data-tool^="mm-"] > i { color: color-mix(in srgb, var(--mm-tool, currentColor) 78%, #fff); transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.5)); }
+#scene-controls button.tool[data-tool^="mm-"]:hover > i { transform: translateY(-2px) scale(1.12); }
+#scene-controls button.tool[data-tool^="mm-"][aria-pressed="true"] > i { transform: translateY(-1px) scale(1.12); }
+html.mm-has-pick #scene-controls button.tool[data-tool="color"] > i { color: var(--mm-pick); }
+#scene-controls button.layer[data-control="moinenmaps"] > i { color: #e5322d; }
+body.mm-placing #board { cursor: crosshair; }
+
+/* ---- colour/editor dialogs ---- */
+.moinen-maps-dialog .mm-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.75rem; }
+.moinen-maps-dialog .mm-swatch {
+  width: 1.9rem; height: 1.9rem; flex: none; padding: 0; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: var(--c, color-mix(in srgb, currentColor 8%, transparent));
+  display: grid; place-items: center; font-size: 0.8rem; cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.18s;
+}
+.moinen-maps-dialog .mm-swatch:hover { transform: translateY(-2px) scale(1.08); }
+.moinen-maps-dialog .mm-swatch:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 3px; }
+.moinen-maps-dialog .mm-swatch:disabled { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .moinen-maps-dialog .mm-swatch { transition: none; } .moinen-maps-dialog .mm-swatch:hover { transform: none; } }
+.moinen-maps-dialog .mm-fold { margin: 0.4rem 0; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 6px; }
+.moinen-maps-dialog .mm-fold > summary { padding: 0.4rem 0.6rem; cursor: pointer; font-weight: 600; }
+.moinen-maps-dialog .mm-fold > summary:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: -2px; }
+.moinen-maps-dialog .mm-fold-body { padding: 0 0.6rem 0.4rem; }
+.moinen-maps-dialog .is-off { opacity: 0.4; }
+.moinen-maps-dialog .mm-swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #15110f, 0 0 0 4px var(--c, #e5322d); }
+.moinen-maps-dialog .hint { opacity: 0.7; margin: 0 0 0.25rem; }
+
+/* ---- label typography ---- */
+.mm-fontpreview { margin: 0.4rem 0 0.6rem; padding: 0.55rem 0.8rem; border-radius: 6px; font-size: 1.5rem; line-height: 1.2; text-align: center; background: #e8dcc0; color: #15110f; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: opacity 0.2s; }
+.mm-inline { display: inline-flex; align-items: center; gap: 0.3rem; margin-right: 0.6rem; font-weight: normal; }
+.mm-fontselect option { font-size: 1.05rem; }
+
+/* ---- districts panel ---- */
+.moinen-maps-panel .window-content { padding: 0; overflow: hidden; }
+.mm-panel { --mm-edge: color-mix(in srgb, currentColor 14%, transparent); display: flex; flex-direction: column; height: 100%; padding: 0.6rem; gap: 0.5rem; }
+.mm-panel-head { display: flex; align-items: center; gap: 0.6rem; }
+.mm-panel-head .mm-search { flex: 1; }
+.mm-count { font-size: 0.78rem; opacity: 0.7; text-align: right; }
+.mm-panel-actions, .mm-bulk { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.mm-panel-actions button, .mm-bulk button { flex: 1; min-width: 0; padding: 0.25rem 0.5rem; }
+.mm-bulk { padding: 0.3rem 0.5rem; border-radius: 6px; background: color-mix(in srgb, var(--mm-accent, #e5322d) 16%, transparent); }
+.mm-bulk[hidden] { display: none; }
+.mm-bulk > span { flex: 2; font-size: 0.8rem; }
+.mm-bulk button { flex: 0 0 2rem; }
+.mm-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.mm-row { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.45rem; border-radius: 6px; background: color-mix(in srgb, currentColor 5%, transparent);
+  border: 1px solid transparent; cursor: pointer; transition: background-color 0.15s, border-color 0.15s, transform 0.15s cubic-bezier(0.22, 1, 0.36, 1); }
+.mm-row[hidden] { display: none; }
+.mm-row:focus-within { border-color: color-mix(in srgb, currentColor 40%, transparent); }
+.mm-row:hover, .mm-row.is-hover { background: color-mix(in srgb, #e5322d 14%, transparent); border-color: color-mix(in srgb, #e5322d 45%, transparent); }
+.mm-row.selected { background: color-mix(in srgb, #e5322d 22%, transparent); }
+.mm-row.hidden-district .mm-name { opacity: 0.6; }
+.mm-row.dragging { opacity: 0.4; }
+.mm-row.drop-before { box-shadow: 0 -2px 0 #e5322d; } .mm-row.drop-after { box-shadow: 0 2px 0 #e5322d; }
+.mm-grip { opacity: 0.35; cursor: grab; font-size: 0.8rem; }
+.mm-sel { margin: 0; flex: none; }
+.mm-swatchdot { width: 1.05rem; height: 1.05rem; flex: none; border-radius: 50%; background: var(--c); border: 2px solid #15110f; box-shadow: 0 0 0 1px color-mix(in srgb, #fff 30%, transparent); }
+.mm-swatchdot.none { background: repeating-linear-gradient(45deg, transparent 0 3px, color-mix(in srgb, currentColor 35%, transparent) 3px 5px); border-style: dashed; }
+.mm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 3px; }
+.mm-name:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+.mm-name.unnamed { font-style: italic; opacity: 0.6; }
+.mm-name[contenteditable="plaintext-only"] { background: color-mix(in srgb, currentColor 12%, transparent); padding: 0 0.3rem; border-radius: 3px; }
+.mm-icon { flex: none; width: 1.7rem; height: 1.7rem; padding: 0; line-height: 1; background: transparent; border: none; opacity: 0.7; }
+.mm-icon:hover, .mm-icon:focus-visible { opacity: 1; } .mm-icon.mm-danger:hover { color: #e5322d; }
+.mm-empty { text-align: center; opacity: 0.65; margin: 1rem 0; }
+@media (prefers-reduced-motion: reduce) { .mm-row { transition: none; } }
+.mm-panel :where(button, input[type="search"]):focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+
+/* ---- district attributes ---- */
+/* hover card: one reused element, ink on cream like the pin burst */
+.mm-card {
+  position: fixed; left: 0; top: 0; z-index: var(--z-index-tooltip, 9999);
+  min-width: 9rem; max-width: 18rem; padding: 0.5rem 0.75rem 0.6rem;
+  color: #15110f; background: #fff3e2;
+  border: 2.5px solid #15110f; border-radius: 14px 10px 13px 9px / 10px 14px 9px 12px;
+  box-shadow: 0 8px 18px rgb(0 0 0 / 0.3), 2px 3px 0 rgb(21 17 15 / 0.18);
+  font-size: 0.95rem; line-height: 1.25; pointer-events: none;
+  opacity: 0; transition: opacity 0.12s var(--mm-ease-out, ease-out);
+  will-change: transform;
+}
+.mm-card.on { opacity: 1; }
+.mm-card-title { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.3rem; padding-bottom: 0.3rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; border-bottom: 2px solid #15110f; }
+.mm-card-dot { flex: none; width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--mm-card-dot, transparent); border: 2px solid #15110f; }
+.mm-card.no-dot .mm-card-dot { display: none; }
+.mm-card dl { margin: 0; display: grid; gap: 0.15rem; }
+.mm-card dl > div { display: flex; justify-content: space-between; gap: 1.2rem; }
+.mm-card dt { margin: 0; color: #15110f; font-weight: 600; }
+.mm-card dd { margin: 0; color: #15110f; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mm-card dl > .gm dt, .mm-card dl > .gm dd { font-style: italic; opacity: 0.75; }
+@media (prefers-reduced-motion: reduce) { .mm-card { transition: none; } }
+
+/* attribute rows in the district dialog */
+.moinen-maps-dialog .mm-attr-list { list-style: none; margin: 0 0 0.4rem; padding: 0; display: grid; gap: 0.3rem; }
+.moinen-maps-dialog .mm-attr-row { display: grid; grid-template-columns: minmax(0, 1fr) 5.5rem auto auto auto auto; gap: 0.25rem; align-items: center; }
+.moinen-maps-dialog .mm-attr-val { text-align: right; font-variant-numeric: tabular-nums; }
+.moinen-maps-dialog .mm-attr-add, .moinen-maps-dialog .mm-attr-usual { width: 100%; }
+.moinen-maps-dialog .mm-attr-usual { margin-bottom: 0.3rem; }
+.moinen-maps-dialog .mm-attr-usual[hidden] { display: none; }
+.moinen-maps-dialog .mm-icon { width: 1.8rem; height: 1.8rem; padding: 0; line-height: 1; background: transparent; border: none; opacity: 0.75; }
+.moinen-maps-dialog .mm-icon:hover, .moinen-maps-dialog .mm-icon:focus-visible { opacity: 1; }
+.moinen-maps-dialog .mm-icon:disabled { opacity: 0.25; }
+.moinen-maps-dialog .mm-attr-vis[aria-pressed="false"] { opacity: 0.5; }
+.moinen-maps-dialog .mm-attr-vis[aria-pressed="true"] { color: var(--mm-accent, #e5322d); opacity: 1; }
+.moinen-maps-dialog :where(input, button, select):focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+
+/* panel: sorting, chips, totals */
+.mm-sortbar { display: flex; align-items: center; gap: 0.4rem; }
+.mm-sortbar[hidden], .mm-totals[hidden], .mm-chips[hidden] { display: none; }
+.mm-sortbar label { font-size: 0.8rem; opacity: 0.8; white-space: nowrap; }
+.mm-sortbar select { flex: 1; min-width: 0; }
+.mm-sortbar .mm-icon:disabled { opacity: 0.25; }
+.mm-row { flex-wrap: wrap; }
+.mm-list.is-sorted .mm-grip { opacity: 0.12; cursor: default; }
+.mm-chips { flex: 0 0 100%; display: flex; flex-wrap: wrap; gap: 0.3rem 0.4rem; padding: 0.1rem 0 0.15rem 1.5rem; }
+.mm-chip { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.05rem 0.2rem 0.05rem 0.5rem; border-radius: 999px; font-size: 0.8rem;
+  background: color-mix(in srgb, currentColor 9%, transparent); border: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.mm-chip.gm { border-style: dashed; }
+.mm-chip-name { opacity: 0.8; margin-right: 0.15rem; }
+.mm-chip-static { font-weight: 700; font-variant-numeric: tabular-nums; padding-right: 0.3rem; }
+.mm-chip .mm-chip-val { width: 3.2rem; height: 1.4rem; margin: 0; padding: 0 0.2rem; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; background: transparent; border-color: transparent; }
+.mm-chip .mm-chip-val:hover, .mm-chip .mm-chip-val:focus { border-color: color-mix(in srgb, currentColor 35%, transparent); }
+.mm-step { flex: none; width: 1.4rem; height: 1.4rem; margin: 0; padding: 0; line-height: 1; border-radius: 50%; font-weight: 700; background: color-mix(in srgb, currentColor 10%, transparent); border: none; }
+.mm-step:hover { background: color-mix(in srgb, var(--mm-accent, #e5322d) 35%, transparent); }
+.mm-step:active { transform: scale(0.92); }
+.mm-chip :where(button, input):focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+.mm-totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem; padding: 0.4rem 0.5rem; border-top: 1px solid var(--mm-edge); font-size: 0.85rem; }
+.mm-totals-title { font-weight: 700; }
+.mm-total { display: inline-flex; gap: 0.3rem; align-items: baseline; margin: 0; padding: 0.1rem 0.4rem; background: transparent; border: 1px solid transparent; border-radius: 4px; line-height: 1.3; }
+.mm-total:hover, .mm-total[aria-pressed="true"] { border-color: color-mix(in srgb, currentColor 30%, transparent); }
+.mm-total-sum { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .mm-step:active { transform: none; } }
+
+/* ---- dialogs never outgrow the window: header and footer stay pinned, the body scrolls ---- */
+.moinen-maps-dialog { max-height: calc(100vh - 1rem); }
+.moinen-maps-dialog .window-content { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.moinen-maps-dialog .dialog-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.moinen-maps-dialog .dialog-content {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.35rem;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, currentColor 35%, transparent) transparent;
+}
+.moinen-maps-dialog .form-footer { flex: none; }
+.moinen-maps-dialog .dialog-content::-webkit-scrollbar { width: 8px; }
+.moinen-maps-dialog .dialog-content::-webkit-scrollbar-thumb { border-radius: 4px; background: color-mix(in srgb, currentColor 35%, transparent); }
+.moinen-maps-dialog .mm-attr-list { max-height: 40vh; overflow-y: auto; padding-right: 2px; scrollbar-width: thin; }
+.moinen-maps-panel { max-height: calc(100vh - 1rem); }
+.mm-list { min-height: 5rem; scrollbar-width: thin; }
+
+/* the live font sample stays in view while its options are adjusted below it */
+.mm-fold-body > .mm-fontpreview { position: sticky; top: 0; z-index: 1; box-shadow: 0 6px 8px -4px rgb(0 0 0 / 0.35); }
+.moinen-maps-tab .mm-fold { scroll-margin-top: 0.25rem; }
+
+/* ---- live preview strip (every editor) ---- */
+.mm-live { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 0.45rem; margin: 0 0 0.5rem; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.8rem;
+  background: color-mix(in srgb, var(--mm-accent, #e5322d) 16%, var(--color-cool-5, #15110f)); }
+.mm-live-dot { flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--mm-accent, #e5322d); animation: mm-live-pulse 2s ease-in-out infinite; }
+.mm-live.is-idle { background: color-mix(in srgb, currentColor 8%, transparent); }
+.mm-live.is-idle .mm-live-dot { animation: none; opacity: 0.4; background: currentColor; }
+.mm-live-text { flex: 1; min-width: 0; }
+.mm-live-reset { flex: none; width: auto; margin: 0; padding: 0.1rem 0.5rem; font-size: 0.78rem; line-height: 1.4; }
+.mm-live-reset:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+@keyframes mm-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .mm-live-dot { animation: none; } }
+.moinen-maps-tab .mm-live { margin: 0 0 0.6rem; }

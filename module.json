@@ -1,0 +1,14 @@
+{
+  "id": "moinen-maps",
+  "title": "Moinen Maps",
+  "description": "Turns map notes into beautiful animated pins: a bouncy, squeezy drop, gentle idle motion, configured per scene.",
+  "version": "0.1.0",
+  "compatibility": { "minimum": "14", "verified": "14" },
+  "authors": [{ "name": "santa" }],
+  "esmodules": ["scripts/main.mjs"],
+  "styles": ["styles/maps.css"],
+  "languages": [
+    { "lang": "en", "name": "English", "path": "lang/en.json" },
+    { "lang": "pl", "name": "Polski", "path": "lang/pl.json" }
+  ]
+}
