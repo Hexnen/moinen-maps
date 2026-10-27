@@ -68,6 +68,8 @@ class Pin extends PIXI.Container {
     this.S = 40;
     this.hv = 0;            // eased hover/selection amount
     this.idleK = 0;         // eased idle amplitude (fades in after an animation ends)
+    this._hid = isHidden(note.document);   // the user's pin filter: hidden pins shrink away, shown ones drop back in
+    this.pres = this._hid ? 0 : 1;         // 0 = gone, 1 = fully present
     this._shadowS = 0;
     this._glyphSrc = null;
     register(this);
@@ -137,6 +139,32 @@ class Pin extends PIXI.Container {
     const h = this.S * 1.6 * cfg.dropHeight;
     this.anim = { kind: "drop", y: -h, vy: 0, h0: h, q: 0, qv: 0, r: 0, rv: 0, t: 0, landed: false, e: 0.1 + 0.34 * cfg.bounce, hits: 0 };
     this.applyPose(this.anim, 0, 0);
+  }
+
+  /**
+   * The pin filter: a hidden pin shrinks into its tip and fades, a shown one drops back in (or just fades in with reduced motion / drops off).
+   * Returns false while the pin is gone, so the rest of the tick is skipped.
+   */
+  stepPresence(dt) {
+    const note = this.note, hid = isHidden(note.document), still = reducedMotion();
+    if ( hid !== this._hid ) {
+      this._hid = hid;
+      if ( !hid ) {
+        if ( note.isVisible ) note.visible = true;
+        const cfg = this.cfg;
+        if ( !still && cfg.drop ) { this.pres = 1; this.drop(); }       // reuse the bouncy drop; it fades the pin in itself
+        else if ( still ) this.pres = 1;
+      }
+    }
+    const target = hid ? 0 : 1;
+    if ( this.pres !== target ) {
+      this.pres = still ? target : target > this.pres ? Math.min(1, this.pres + dt / 0.3) : Math.max(0, this.pres - dt / 0.22);
+    }
+    const k = this.pres;
+    if ( k === 0 ) { if ( note.visible ) note.visible = false; return false; }
+    const e = k * k * (3 - 2 * k);
+    this.scale.set(0.35 + 0.65 * e); this.alpha = e;
+    return true;
   }
 
   /** Move hop: crouch, spring up, land softly. */
@@ -223,7 +251,7 @@ class Pin extends PIXI.Container {
   tick(dt, now) {
     const cfg = this.cfg;
     const note = this.note;
-    if ( note.visible && isHidden(note.document) ) note.visible = false;   // the user's pin filter
+    if ( !this.stepPresence(dt) ) return;
     // hover / selection feedback, eased
     const controlled = note.controlled || note.isPreview;
     const over = note.hover || note.layer?.highlightObjects;

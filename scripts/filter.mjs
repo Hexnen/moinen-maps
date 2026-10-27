@@ -61,9 +61,13 @@ export function applyFilter() {
   Hooks.callAll("moinenMapsPanel");
 }
 
-/** Called from a note's refresh: keep a filtered note invisible and unselected. */
+/**
+ * Called from a note's refresh: keep a filtered note invisible and unselected. A drawn pin that is still shrinking away stays visible
+ * until its animation ends (pin.mjs then hides the note).
+ */
 export function enforce(note) {
   if ( !isHidden(note.document) ) return;
-  if ( note.visible ) note.visible = false;
+  const pin = note._mmPin;
+  if ( !(pin && !pin.destroyed && pin.pres > 0) && note.visible ) note.visible = false;
   if ( note.controlled ) note.release();
 }
