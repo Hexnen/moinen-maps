@@ -4,7 +4,7 @@
  * A label is built once per change (PIXI.Text caches its own texture); per-glyph builds are used only for curved / small-caps text.
  * Only fonts that already exist in Foundry (CONFIG.fontDefinitions, user-added fonts) are offered here; nothing is bundled or downloaded.
  */
-import { sceneConfig, reducedMotion } from "./config.mjs";
+import { sceneConfig, osReducedMotion } from "./config.mjs";
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -103,7 +103,7 @@ export function revealFoldsOnOpen(root) {
   root.addEventListener("toggle", (e) => {
     const d = e.target;
     if ( d?.tagName !== "DETAILS" || !d.open ) return;
-    requestAnimationFrame(() => d.querySelector(":scope > summary")?.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" }));
+    requestAnimationFrame(() => d.querySelector(":scope > summary")?.scrollIntoView({ block: "start", behavior: osReducedMotion() ? "auto" : "smooth" }));
   }, true);
 }
 

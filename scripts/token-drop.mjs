@@ -14,7 +14,7 @@
  * refreshes a token, so the pose is re-captured and re-applied inside the `refreshToken` hook in the same frame, and restored at the end by
  * raising Foundry's own refresh flags. Hooks only (no method wrappers), so it cannot conflict with modules that wrap Token.
  */
-import { sceneConfig, reducedMotion } from "./config.mjs";
+import { sceneConfig, reducedMotion, dbg } from "./config.mjs";
 import { shadowTextures } from "./pin-art.mjs";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -29,6 +29,7 @@ const TAU = Math.PI * 2;
 const ACTIVE = new Set();           // running mesh effects (Drop)
 const BY_TOKEN = new Map();         // Token placeable -> Drop
 const GHOSTS = new Set();
+const GHOST_BY_TOKEN = new Map();
 const POPUPS = new Set();
 const RETICLES = new Map();         // `${tokenId}|${userId}` -> Reticle
 let ticking = false;
@@ -71,6 +72,21 @@ function sortNextTo(obj, token, step) {
   canvas.primary.addChild(obj);
 }
 
+/**
+ * Put a token's visuals back exactly as Foundry draws them: recomputed from the document by Foundry's own refresh routines, never from a
+ * pose we captured. Safe to call at any time (also for a token that is being deleted).
+ */
+function restoreExact(t) {
+  if ( !t || t.destroyed || !t.mesh || t.mesh.destroyed ) return;
+  try {
+    t.position.set(t.document.x, t.document.y);
+    t._refreshMeshSizeAndScale?.(); t._refreshPosition?.(); t._refreshRotation?.(); t._refreshMesh?.();
+  } catch ( err ) { dbg("restoreExact failed", err); }
+  // and let Foundry redo them on its next frame as well. Not refreshSize/refreshTransform: they reach the turn marker, whose mesh may not exist yet
+  // for a token that has just joined a combat, and Foundry then throws inside its own refresh
+  t.renderFlags?.set({ refreshPosition: true, refreshRotation: true, refreshMesh: true, refreshState: true });
+}
+
 /* ================================================================== mesh effects: drop, hop, pop, lock, enter */
 
 class Drop {
@@ -85,15 +101,15 @@ class Drop {
     this.tilt = Math.random() < 0.5 ? -1 : 1;
     this.base = null;                        // the mesh/container values Foundry last set (captured, never written back by us)
     this.dirty = true;
-    this.pose = { y: 0, sx: 1, sy: 1, rot: 0, alpha: kind === "drop" || kind === "pop" ? 0 : 1 };
+    this.pose = { y: kind === "pop" ? -height * 0.06 : 0, sx: kind === "pop" ? 0.9 : 1, sy: kind === "pop" ? 0.9 : 1, rot: 0, alpha: kind === "drop" || kind === "pop" ? 0 : 1 };
     this.dead = false;
     this.t = 0;
     this.ripple = { t: 0, on: false };
-    this.rippleWanted = kind === "drop" ? !!cfg.ripple : kind === "enter" ? !!cfg.combatRipple : false;
+    this.rippleWanted = kind === "drop" || kind === "pop" ? !!cfg.ripple : kind === "enter" ? !!cfg.combatRipple : false;
     this.popped = false;
     const S = this.S, g = S * 36;
     if ( kind === "drop" ) {
-      const h = S * 1.5 * cfg.dropHeight;
+      const h = S * 1.5 * Math.max(cfg.dropHeight, 0.05);
       this.a = { kind, y: -h, vy: 0, h0: h, q: 0, qv: 0, r: 0, rv: 0, t: 0, landed: false, e: 0.1 + 0.34 * cfg.bounce, hits: 0 };
       this.pose.y = -h;
     } else if ( kind === "hop" || kind === "enter" ) {
@@ -123,13 +139,29 @@ class Drop {
   }
 
   /** Foundry just refreshed the token (the mesh holds its own values again): capture them and re-apply the pose in the same frame. */
-  refreshed() { this.ready = true; this.dirty = true; this.capture(); this.apply(); }
+  refreshed(flags) {
+    this.ready = true;
+    // Foundry resets only the parts its flags name: position (mesh + container) on refreshPosition, scale/alpha/anchor on refreshMesh or
+    // refreshSize, rotation on refreshRotation. Re-capturing a part Foundry did NOT reset would capture our own offset as the "base" and
+    // make the token creep away from where it belongs, so each part is captured only when it was reset.
+    const f = flags ?? {}, all = !this.base || !flags || f.refreshTransform || f.refresh || f.redraw;
+    this.capture({ pos: all || f.refreshPosition, scale: all || f.refreshMesh || f.refreshSize, rot: all || f.refreshRotation });
+    this.apply();
+  }
 
-  capture() {
+  capture(parts = { pos: true, scale: true, rot: true }) {
     const t = this.token, m = t.mesh;
-    if ( !m || m.destroyed || !this.dirty || !this.ready ) return;
+    if ( !m || m.destroyed || !this.ready ) return;
+    const first = !this.base, b = this.base ??= { px: 0, py: 0, sx: 1, sy: 1, rot: 0, alpha: 1, cy: 0 };
     this.dirty = false;
-    this.base = { px: m.position.x, py: m.position.y, sx: m.scale.x, sy: m.scale.y, rot: m.rotation, alpha: m.alpha, cy: t.position.y };
+    if ( parts.pos ) { b.px = m.position.x; b.py = m.position.y; b.cy = t.position.y; }
+    if ( parts.scale ) {
+      b.sx = m.scale.x; b.sy = m.scale.y;
+      // a reveal aims at the document's own alpha; Foundry animates the mesh alpha of a hidden token by itself and we do not fight that
+      b.alpha = m.alpha;
+    }
+    if ( parts.rot ) b.rot = m.rotation;
+    if ( first && !this.kids && (this.kind === "drop") ) this.kids = t.children.filter((c) => !c._mmReticle && !c.destroyed).map((c) => [c, c.alpha]);
   }
 
   /** Physics of a drop / hop / enter (identical to the pins). Returns true when settled. */
@@ -172,9 +204,15 @@ class Drop {
   poseAnalytic(dt) {
     const p = this.pose, t = this.t += dt, k = this.k;
     if ( this.kind === "pop" ) {
-      const s = Math.max(0, 1 - Math.exp(-9 * t) * Math.cos(19 * t));
-      p.sx = s * (1 - 0.06 * (s - 1) * k); p.sy = s * (1 + 0.1 * (s - 1) * k); p.alpha = clamp(t / 0.07, 0, 1); p.rot = 0; p.y = 0;
-      return t > 0.85;
+      // simple and robust: 300 ms ease-out from 90% size (a hair above the ground) to rest, with at most a tiny overshoot;
+      // the alpha rises from what the token had before (0, or the GM's half-transparent hidden look) to full in the first 60%
+      const u = clamp(t / 0.3, 0, 1), c = 1.1, e = 1 + (c + 1) * (u - 1) ** 3 + c * (u - 1) ** 2;
+      p.sx = p.sy = 0.9 + 0.1 * e;
+      p.y = Math.min(0, -this.S * 0.06 * (1 - e));
+      p.alpha = 1 - (1 - clamp(t / 0.18, 0, 1)) ** 2;   // only the ground shadow uses this; the token's own alpha belongs to Foundry's hidden-token fade
+      p.rot = 0;
+      if ( this.rippleWanted && !this.ripple.on && !this.popRipple && t > 0.08 ) { this.popRipple = true; this.ripple.t = 0; this.ripple.on = true; }   // a tiny ground ripple as it lands
+      return u >= 1;
     }
     // lock: squeezed first, overshoots, settles; a quick sideways shake like a recoil
     const A = 0.15 * k, e = Math.exp(-9 * t);
@@ -190,10 +228,12 @@ class Drop {
     if ( this.delay > 0 ) {
       this.delay -= dt;           // staggered: waiting for its turn (a falling token is invisible and parked in the air)
       if ( this.kind === "drop" ) { this.pose.y = -this.a.h0; this.pose.alpha = 0; }
-      else if ( this.kind === "pop" ) this.pose.alpha = this.pose.sx = this.pose.sy = 0;
+      else if ( this.kind === "pop" ) { this.pose.alpha = 0; this.pose.sx = this.pose.sy = 1; this.pose.y = 0; }   // waiting: at rest, not shrunk and raised
     } else {
       if ( this.kind === "pop" || this.kind === "lock" ) {
-        if ( this.poseAnalytic(dt) ) { this.apply(); return this.end(); }
+        const finished = this.poseAnalytic(dt);
+        if ( this.ripple.on ) this.tickRipple(dt);
+        if ( finished && !this.ripple.on ) { this.apply(); return this.end(); }
       } else {
         if ( this.kind === "enter" && !this.popped ) { this.popped = true; if ( this.number != null && this.cfg.combatNumber ) spawnNumber(t, this.number); }
         const done = this.step(dt);
@@ -207,10 +247,10 @@ class Drop {
 
   tickRipple(dt) {
     const r = this.ripple; r.t += dt;
-    const k = r.t / (this.kind === "enter" ? 0.7 : 0.55);
+    const k = r.t / (this.kind === "enter" ? 0.7 : this.kind === "pop" ? 0.4 : 0.55);
     if ( k >= 1 ) { r.on = false; this.rip.visible = false; return; }
     const e = 1 - (1 - k) ** 3;
-    this.rip.visible = true; this.rip.scale.set(0.5 + e * this.ripMax); this.rip.alpha = (1 - k) * (this.kind === "enter" ? 0.75 : 0.55);
+    this.rip.visible = true; this.rip.scale.set(0.5 + e * (this.kind === "pop" ? 0.7 : this.ripMax)); this.rip.alpha = (1 - k) * (this.kind === "enter" ? 0.75 : this.kind === "pop" ? 0.4 : 0.55);
   }
 
   /** Write the pose onto the visuals. Squash and tilt pivot at the bottom-centre of the token's footprint, where it touches the ground. */
@@ -219,8 +259,9 @@ class Drop {
     if ( !b || !m || m.destroyed ) return;
     const doc = t.document, gx = doc.x + this.W / 2, gy = doc.y + this.H;
     place(m, b, p, gx, gy);
-    m.alpha = b.alpha * p.alpha;
+    if ( this.kind !== "pop" ) m.alpha = b.alpha * p.alpha;
     t.position.y = b.cy + p.y;                    // bars, nameplate and effects fall with the token
+    if ( this.kids ) for ( const [c, a] of this.kids ) if ( !c.destroyed ) c.alpha = a * p.alpha;   // ...and fade in with it, not before
     this.#applyShadow(gx, gy);
   }
 
@@ -245,8 +286,8 @@ class Drop {
     this.dead = true;
     ACTIVE.delete(this); if ( BY_TOKEN.get(this.token) === this ) BY_TOKEN.delete(this.token);
     if ( this.shadow && !this.shadow.destroyed ) this.shadow.destroy({ children: true });
-    const t = this.token;
-    if ( t && !t.destroyed && t.mesh && !t.mesh.destroyed ) t.renderFlags?.set({ refreshTransform: true, refreshMesh: true });
+    if ( this.kids ) for ( const [c, a] of this.kids ) if ( !c.destroyed ) c.alpha = a;
+    restoreExact(this.token);
   }
 }
 
@@ -275,7 +316,7 @@ class Ghost {
     }
     sortNextTo(root, token, 1);
     root.visible = true;
-    GHOSTS.add(this);
+    GHOSTS.add(this); GHOST_BY_TOKEN.set(token, this); this.token = token;
     startTicker();
   }
 
@@ -301,7 +342,7 @@ class Ghost {
 
   end() {
     if ( this.dead ) return;
-    this.dead = true; GHOSTS.delete(this);
+    this.dead = true; GHOSTS.delete(this); if ( GHOST_BY_TOKEN.get(this.token) === this ) GHOST_BY_TOKEN.delete(this.token);
     if ( !this.root.destroyed ) this.root.destroy({ children: true });   // the shared texture is not destroyed
   }
 }
@@ -320,7 +361,7 @@ class Reticle {
     const g = this.g = new PIXI.Container();
     g.addChild(this.#draw(R, color, hashStr(user.id) + index, cfg.reticleStyle, width));
     g.position.set(width / 2, height / 2);
-    g.eventMode = "none";
+    g.eventMode = "none"; g._mmReticle = true;
     token.addChild(g);
     g.zIndex = 5000;
     this.k = clamp(Number(cfg.intensity ?? 1) || 1, 0.2, 2);
@@ -416,11 +457,13 @@ const tokenCfg = (doc) => sceneConfig(doc.parent).tokens;
 
 /** Is this animation on for this token and this client? `flag` names the per-effect switch in the Tokens settings. */
 function allowed(token, c, flag = "enabled") {
-  if ( !c?.[flag] || reducedMotion() ) return false;
-  if ( c.who === "gm" && !game.user.isGM ) return false;
+  const name = token.document?.name;
+  if ( !c?.[flag] ) { dbg(`skip ${flag} for "${name}": switched off in the scene's Tokens settings`); return false; }
+  if ( reducedMotion() ) { dbg(`skip ${flag} for "${name}": OS reduced motion is on and "Respect reduced motion" is enabled`); return false; }
+  if ( c.who === "gm" && !game.user.isGM ) { dbg(`skip ${flag} for "${name}": set to GM only`); return false; }
   const owned = !!token.document.actor?.hasPlayerOwner;
-  if ( c.filter === "player" && !owned ) return false;
-  if ( c.filter === "npc" && owned ) return false;
+  if ( c.filter === "player" && !owned ) { dbg(`skip ${flag} for "${name}": applies to player-owned tokens only`); return false; }
+  if ( c.filter === "npc" && owned ) { dbg(`skip ${flag} for "${name}": applies to NPC tokens only`); return false; }
   return true;
 }
 
@@ -436,7 +479,7 @@ function startDrop(token, ready = false) {
   const c = tokenCfg(token.document);
   if ( !token.mesh || token.mesh.destroyed || BY_TOKEN.has(token) || !allowed(token, c) ) return;
   const idx = nextBurstIndex("drop");
-  if ( idx === null ) return;                                  // a mass drop: skip, never lag
+  if ( idx === null ) { dbg("skip drop: more than 25 tokens at once"); return; }                                  // a mass drop: skip, never lag
   startFx(token, "drop", c, Math.min(idx * STAGGER, MAX_DELAY), ready);
 }
 
@@ -450,7 +493,8 @@ export function onCreateToken(doc) {
 }
 export function onDrawToken(token) {
   const doc = token.document;
-  if ( doc._mmDrop && Date.now() - doc._mmDrop < 3000 ) { doc._mmDrop = 0; startDrop(token); }
+  token._mmHid = !!doc.hidden;
+  if ( doc._mmDrop &&Date.now() - doc._mmDrop < 3000 ) { doc._mmDrop = 0; startDrop(token); }
   // a redraw drops our children: bring back the reticles of a token that is still targeted
   if ( token.targeted?.size ) for ( const u of token.targeted ) addReticle(u, token, true);
 }
@@ -458,7 +502,7 @@ export function onDrawToken(token) {
 /** Foundry has just applied its refresh flags to this token: its mesh and container hold their own values again. */
 export function onRefreshToken(token, flags) {
   const d = BY_TOKEN.get(token);
-  if ( d && flags && (flags.refreshMesh || flags.refreshPosition || flags.refreshSize || flags.refreshRotation || flags.refreshTransform || flags.refresh || flags.redraw) ) d.refreshed();
+  if ( d && flags && (flags.refreshMesh || flags.refreshPosition || flags.refreshSize || flags.refreshRotation || flags.refreshTransform || flags.refresh || flags.redraw) ) d.refreshed(flags);
   if ( token.targeted?.size && tokenCfg(token.document).hideNative && tokenCfg(token.document).target && token.target ) token.target.visible = false;
 }
 
@@ -478,6 +522,13 @@ export function onUpdateToken(doc, changes) {
  * token pops in. The ghost is only made from a token this client can see right now, so nothing is revealed that the player could not see.
  */
 function onHiddenChanged(token, hidden) {
+  // a new toggle ends whatever the previous one was doing (the token is restored exactly; a ghost still on stage is removed), and the same
+  // change is never animated twice
+  if ( token._mmHid === hidden ) { dbg(`skip hide/reveal for "${token.document.name}": already handled`); return; }   // an echo must not cut the running one short
+  token._mmHid = hidden;
+  const running = BY_TOKEN.get(token);
+  if ( running && running.kind !== "drop" ) running.end();        // a falling token is never interrupted
+  GHOST_BY_TOKEN.get(token)?.end();
   const c = tokenCfg(token.document);
   if ( !allowed(token, c, "hide") ) return;
   const idx = nextBurstIndex(hidden ? "hide" : "unhide");
@@ -487,12 +538,19 @@ function onHiddenChanged(token, hidden) {
     const m = token.mesh;
     if ( !m || m.destroyed || !token.visible || !m.visible || !m.renderable ) return;
     new Ghost(token, c, delay);
-  } else startFx(token, "pop", c, delay, true);
+  } else {
+    // Foundry does not necessarily raise a refresh for a visibility change, so nothing waits for one: capture and write the start pose right now,
+    // in the same tick as the change, before the next paint
+    const fx = startFx(token, "pop", c, delay, true);
+    fx?.refreshed();
+  }
 }
 
 export function onDeleteToken(doc) {
-  const t = doc.object, d = BY_TOKEN.get(t); if ( d ) d.end();
-  for ( const [key, r] of RETICLES ) if ( r.token === t ) r.end();
+  // doc.object is already gone by now, so match on the document
+  for ( const [t, d] of [...BY_TOKEN] ) if ( t.document === doc ) d.end();
+  for ( const [t, g] of [...GHOST_BY_TOKEN] ) if ( t.document === doc ) g.end();
+  for ( const r of [...RETICLES.values()] ) if ( r.token.document === doc ) r.end();
 }
 
 /* ---- targeting ---- */
@@ -501,7 +559,12 @@ function addReticle(user, token, quiet = false) {
   const c = tokenCfg(token.document);
   if ( !allowed(token, c, "target") || !token.mesh || token.destroyed ) return;
   const key = `${token.id}|${user.id}`;
-  if ( RETICLES.has(key) && !RETICLES.get(key).dead ) return;
+  const old = RETICLES.get(key);
+  if ( old && !old.dead ) {
+    // a redraw destroys the reticle's container; a quick retarget catches it fading out
+    if ( old.g?.destroyed || old.g?.parent !== token ) old.end();
+    else { if ( old.state === "out" ) { old.state = "idle"; old.t = 0; } return; }
+  }
   const index = [...RETICLES.values()].filter((r) => r.token === token && !r.dead).length;   // several users on one token: concentric rings
   const r = new Reticle(token, user, c, index);
   RETICLES.set(key, r);
@@ -518,26 +581,47 @@ export function onTargetToken(user, token, targeted) {
 
 /* ---- combat ---- */
 
+/**
+ * A combat applies to the viewed scene when it is linked to it, OR when it is not linked to any scene at all (`combat.scene === null`).
+ * The Combat Tracker creates unlinked encounters by default, and those cover every scene; requiring a matching scene id is what made the entry
+ * animation never play in a real session.
+ */
+const combatApplies = (combat) => !!combat && (!combat.scene || combat.scene.id === canvas.scene?.id);
+
 function enterToken(cb, delay, withNumber) {
-  const t = cb.token?.object, c = t ? tokenCfg(t.document) : null;
-  if ( !t || !t.mesh || !allowed(t, c, "combat") ) return;
-  startFx(t, "enter", c, delay, true, { number: withNumber ? cb.initiative : null });
+  const doc = cb.token, t = doc?.object;
+  if ( !doc || doc.parent?.id !== canvas.scene?.id ) { dbg(`skip combat entry for "${cb.name}": its token is not on the viewed scene`); return; }
+  if ( !t || !t.mesh ) { dbg(`skip combat entry for "${cb.name}": the token has no placeable on the canvas yet`); return; }
+  const c = tokenCfg(doc);
+  if ( !allowed(t, c, "combat") ) return;
+  if ( !startFx(t, "enter", c, delay, true, { number: withNumber ? cb.initiative : null }) ) dbg(`skip combat entry for "${cb.name}": another effect is running on the token`);
 }
 
 export function onCreateCombatant(cb) {
   const combat = cb.combat;
-  if ( !combat || combat.scene?.id !== canvas.scene?.id ) return;
-  const idx = nextBurstIndex("combat"); if ( idx === null ) return;
+  if ( !combatApplies(combat) ) { dbg(`skip combatant "${cb.name}": its combat belongs to another scene`); return; }
+  const idx = nextBurstIndex("combat"); if ( idx === null ) { dbg("skip combat entries: more than 25 at once"); return; }
   enterToken(cb, tokenCfg(canvas.scene).combatStagger ? Math.min(idx * STAGGER, MAX_DELAY) : 0, true);
 }
 
-/** Combat starts: the field wakes up, highest initiative first. */
-export function onUpdateCombat(combat, changes) {
-  if ( !("round" in changes) || changes.round !== 1 || combat.scene?.id !== canvas.scene?.id ) return;
-  const list = [...combat.combatants].filter((cb) => cb.token?.object).sort((a, b) => (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity));
-  if ( list.length > MAX_BURST ) return;
+let lastStart = { id: "", t: 0 };
+/** Combat begins: the field wakes up in turn order (highest initiative first). Both `combatStart` and the round-1 `updateCombat` call this once. */
+function wakeField(combat) {
+  if ( !combatApplies(combat) ) { dbg("skip combat start: the combat belongs to another scene"); return; }
+  const now = Date.now();
+  if ( lastStart.id === combat.id && now - lastStart.t < 1500 ) return;
+  lastStart = { id: combat.id, t: now };
+  const ordered = combat.turns?.length ? [...combat.turns] : [...combat.combatants].sort((a, b) => (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity));
+  const seen = new Set(), list = [];
+  for ( const cb of ordered ) { const id = cb.tokenId ?? cb.id; if ( !seen.has(id) ) { seen.add(id); list.push(cb); } }
+  if ( list.length > MAX_BURST ) { dbg("skip combat start: more than 25 combatants"); return; }
   const stagger = tokenCfg(canvas.scene).combatStagger;
+  dbg(`combat start: ${list.length} combatant(s) wake up`);
   list.forEach((cb, i) => enterToken(cb, stagger ? Math.min(i * 0.09, 1) : 0, true));
+}
+export function onCombatStart(combat) { wakeField(combat); }
+export function onUpdateCombat(combat, changes, options) {
+  if ( "round" in changes && changes.round === 1 && !(options?.direction < 0) ) wakeField(combat);   // stepping back from round 2 is not a start
 }
 
 /* ---- lifecycle ---- */
@@ -545,8 +629,10 @@ export function onUpdateCombat(combat, changes) {
 export function teardownTokenDrops() {
   for ( const d of [...ACTIVE] ) d.end();      // restores any token that is still alive, destroys every shadow
   for ( const g of [...GHOSTS] ) g.end();
+  GHOST_BY_TOKEN.clear();
   for ( const p of [...POPUPS] ) p.end();
   for ( const r of [...RETICLES.values()] ) r.end();
+  lastStart = { id: "", t: 0 };
   BY_TOKEN.clear(); RETICLES.clear(); stopTicker();
   for ( const k of Object.keys(bursts) ) delete bursts[k];
 }

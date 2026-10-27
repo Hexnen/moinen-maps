@@ -194,6 +194,21 @@ export function setSceneDraft(sceneId, data = null) {
   Hooks.callAll("moinenMapsSceneDraft");
 }
 
-/** True when the user asks the OS for less motion: drops, hops, idle loops and district blooms are skipped. */
+/** True when the OS asks for less motion (Windows "animation effects" off, macOS "reduce motion"). Used for UI niceties such as smooth scrolling. */
 const reduceMQ = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
-export const reducedMotion = () => !!reduceMQ?.matches;
+export const osReducedMotion = () => !!reduceMQ?.matches;
+const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
+/**
+ * Should the map animations (pins, districts, tokens) stand still? Only when the OS asks for it AND the user opted in with the module setting
+ * "Respect reduced motion" (default off). These are gameplay effects, and a system-wide switch must never silently make them vanish.
+ */
+export const reducedMotion = () => osReducedMotion() && !!setting("respectReducedMotion", false);
+
+/** Debug switch (module setting or CONFIG.debug.moinenMaps): logs why an animation did not play. */
+export const debugOn = () => !!(globalThis.CONFIG?.debug?.moinenMaps || setting("debugAnimations", false));
+export const dbg = (...a) => { if ( debugOn() ) console.debug("moinen-maps |", ...a); };
+
+export function registerCoreSettings() {
+  game.settings.register(MODULE_ID, "respectReducedMotion", { name: "MOINENMAPS.Setting.respectMotion", hint: "MOINENMAPS.Setting.respectMotionHint", scope: "client", config: true, type: Boolean, default: false });
+  game.settings.register(MODULE_ID, "debugAnimations", { name: "MOINENMAPS.Setting.debug", hint: "MOINENMAPS.Setting.debugHint", scope: "client", config: true, type: Boolean, default: false });
+}

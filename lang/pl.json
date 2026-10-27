@@ -333,5 +333,9 @@
   "MOINENMAPS.Tok.combatStaggerHint": "Wyłączone: wszyscy podskakują naraz.",
   "MOINENMAPS.Tok.combatRipple": "Fala uderzeniowa",
   "MOINENMAPS.Tok.combatNumber": "Numer inicjatywy",
-  "MOINENMAPS.GlyphInside": "Wnętrze pinu"
+  "MOINENMAPS.GlyphInside": "Wnętrze pinu",
+  "MOINENMAPS.Setting.respectMotion": "Szanuj ograniczenie ruchu",
+  "MOINENMAPS.Setting.respectMotionHint": "Gdy system prosi o ograniczenie ruchu, wyłącz też animacje pinezek, dzielnic i żetonów. Domyślnie wyłączone: to efekty rozgrywki.",
+  "MOINENMAPS.Setting.debug": "Debugowanie animacji",
+  "MOINENMAPS.Setting.debugHint": "Zapisuje w konsoli przeglądarki (poziom debug), dlaczego animacja się nie odtworzyła."
 }

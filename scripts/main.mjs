@@ -2,13 +2,13 @@ import { MODULE_ID } from "./config.mjs";
 import { onRenderSceneConfig } from "./scene-tab.mjs";
 import { onCanvasReady, teardown, onUpdateSceneDistricts, onCanvasPan, onAttrStoreChanged } from "./districts.mjs";
 import { api, isStore, resetStore } from "./attrs.mjs";
-import { setSceneDraft } from "./config.mjs";
+import { setSceneDraft, registerCoreSettings } from "./config.mjs";
 import { refreshAllDistricts } from "./districts.mjs";
 import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, installPatches } from "./tools.mjs";
 import { registerFilterSettings } from "./filter.mjs";
 import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
-import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, teardownTokenDrops } from "./token-drop.mjs";
+import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, onCombatStart, teardownTokenDrops } from "./token-drop.mjs";
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);
@@ -28,6 +28,7 @@ Hooks.on("deleteToken", onDeleteToken);
 Hooks.on("targetToken", onTargetToken);
 Hooks.on("createCombatant", onCreateCombatant);
 Hooks.on("updateCombat", onUpdateCombat);
+Hooks.on("combatStart", onCombatStart);
 Hooks.on("canvasTearDown", teardownTokenDrops);
 // Scene Config live preview: a draft of the form values is laid over the scene config; closing the sheet (or leaving the scene) drops it
 let draftFrame = 0;
@@ -38,7 +39,7 @@ Hooks.on("moinenMapsSceneDraft", () => {
 Hooks.on("closeSceneConfig", () => setSceneDraft(null));
 Hooks.on("canvasTearDown", () => setSceneDraft(null));
 
-Hooks.once("init", () => { registerSettings(); registerFilterSettings(); });
+Hooks.once("init", () => { registerCoreSettings(); registerSettings(); registerFilterSettings(); });
 // the floating pin filter follows what is on the map
 Hooks.on("canvasReady", () => refreshPanel());
 Hooks.on("canvasTearDown", () => removePanel());

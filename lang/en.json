@@ -333,5 +333,9 @@
   "MOINENMAPS.Tok.combatStaggerHint": "Off: everyone hops at once.",
   "MOINENMAPS.Tok.combatRipple": "Shockwave ring",
   "MOINENMAPS.Tok.combatNumber": "Initiative number",
-  "MOINENMAPS.GlyphInside": "Inside the pin"
+  "MOINENMAPS.GlyphInside": "Inside the pin",
+  "MOINENMAPS.Setting.respectMotion": "Respect reduced motion",
+  "MOINENMAPS.Setting.respectMotionHint": "When your operating system asks for reduced motion, also stand still the pin, district and token animations. Off by default: these are gameplay effects.",
+  "MOINENMAPS.Setting.debug": "Debug animations",
+  "MOINENMAPS.Setting.debugHint": "Log to the browser console (debug level) why an animation did not play."
 }
