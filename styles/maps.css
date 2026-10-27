@@ -178,6 +178,44 @@ html.mm-has-pick #scene-controls button.tool[data-tool="color"] > i { color: var
 #scene-controls button.layer[data-control="moinenmaps"] > i { color: #e5322d; }
 body.mm-placing #board { cursor: crosshair; }
 
+/* ---- pin palette: a popover beside the toolbar holding one preset's pins ---- */
+.mm-palette {
+  position: fixed; z-index: calc(var(--z-index-ui, 30) + 5); width: 15.5rem; padding: 0.5rem; border-radius: 8px;
+  background: var(--color-cool-5-90, rgb(24 24 32 / 0.96)); color: var(--color-light-1, #eee);
+  border: 1px solid var(--color-cool-4, rgb(255 255 255 / 0.18)); box-shadow: 0 6px 22px rgb(0 0 0 / 0.5);
+  animation: mm-pal-in 0.16s var(--mm-ease-out, ease-out) both;
+}
+@keyframes mm-pal-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.mm-pal-head { display: flex; gap: 0.35rem; margin-bottom: 0.45rem; }
+.mm-pal-head select { flex: 1; min-width: 0; }
+.mm-pal-manage { flex: none; width: 2rem; padding: 0; line-height: 1; }
+.mm-pal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.3rem; }
+.mm-pal-grid .hint { grid-column: 1 / -1; opacity: 0.7; margin: 0.3rem 0; }
+.mm-pal-type {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem; min-width: 0; padding: 0.3rem 0.2rem; line-height: 1.15;
+  border: 1px solid transparent; border-radius: 6px; background: rgb(255 255 255 / 0.05); cursor: pointer;
+  transition: transform 0.16s var(--mm-ease-out, ease-out), background 0.16s;
+}
+.mm-pal-type img { height: 2.3rem; width: auto; pointer-events: none; }
+.mm-pal-type span { font-size: 0.7rem; text-align: center; overflow-wrap: anywhere; }
+.mm-pal-type:hover { transform: translateY(-2px); background: rgb(255 255 255 / 0.12); }
+.mm-pal-type:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
+.mm-pal-type.on { border-color: var(--c, var(--mm-accent, #e5322d)); background: color-mix(in srgb, var(--c, #e5322d) 22%, transparent); }
+@media (prefers-reduced-motion: reduce) { .mm-palette { animation: none; } .mm-pal-type { transition: none; } .mm-pal-type:hover { transform: none; } }
+
+/* ---- pin preset manager ---- */
+.mm-pm .mm-pm-bar { display: flex; gap: 0.35rem; margin-bottom: 0.5rem; }
+.mm-pm .mm-pm-bar select { flex: 1; min-width: 0; }
+.mm-pm .mm-pm-bar button { flex: none; width: 2.2rem; padding: 0; }
+.mm-pm .mm-pm-list { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.4rem 0; max-height: 20rem; overflow-y: auto; }
+.mm-pm .mm-pm-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) 8rem 3.2rem repeat(3, 1.7rem); gap: 0.3rem; align-items: center; }
+.mm-pm .mm-pm-row.mm-pm-ro { grid-template-columns: 2rem minmax(0, 1fr) 8rem 1.2rem; }
+.mm-pm .mm-pm-thumb { width: 2rem; height: 2rem; object-fit: contain; }
+.mm-pm .mm-pm-glyph { opacity: 0.65; font-size: 0.85rem; }
+.mm-pm .mm-pm-row .mm-icon { padding: 0; width: 1.7rem; height: 1.7rem; line-height: 1; }
+.mm-pm .mm-pm-row color-picker { width: 3.2rem; }
+.mm-pm .hint { opacity: 0.7; margin: 0.2rem 0; }
+
 /* ---- colour/editor dialogs ---- */
 .moinen-maps-dialog .mm-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.75rem; }
 .moinen-maps-dialog .mm-swatch {

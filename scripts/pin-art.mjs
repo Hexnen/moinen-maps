@@ -293,8 +293,94 @@ const GLYPHS = {
     const P = [[-0.085, CY + 0.12], [-0.085, CY - 0.04]].concat(arcPts(0, CY - 0.04, 0.085, Math.PI, Math.PI * 2, 12)).concat([[0.085, CY + 0.12], [-0.085, CY + 0.12]]);
     brush(ctx, P, 0.03, rnd, INK, 0.004);
     ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(0.04, CY + 0.045, 0.018, 0, TAU); ctx.fill();
+  },
+  castle(ctx, rnd) {
+    brush(ctx, [[-0.12, CY + 0.12], [-0.12, CY - 0.1], [-0.07, CY - 0.1], [-0.07, CY - 0.06], [-0.025, CY - 0.06], [-0.025, CY - 0.1], [0.025, CY - 0.1], [0.025, CY - 0.06],
+      [0.07, CY - 0.06], [0.07, CY - 0.1], [0.12, CY - 0.1], [0.12, CY + 0.12], [-0.12, CY + 0.12]], 0.028, rnd, INK, 0.004);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(-0.036, CY + 0.12); ctx.lineTo(-0.036, CY + 0.07); ctx.arc(0, CY + 0.07, 0.036, Math.PI, 0); ctx.lineTo(0.036, CY + 0.12); ctx.closePath(); ctx.fill();
+  },
+  mug(ctx, rnd) {
+    brush(ctx, [[-0.08, CY - 0.06], [-0.08, CY + 0.11], [0.05, CY + 0.11], [0.05, CY - 0.06]], 0.03, rnd, INK, 0.004);
+    brush(ctx, arcPts(0.05, CY + 0.02, 0.05, -Math.PI / 2, Math.PI / 2, 10), 0.028, rnd, INK, 0.003);
+    for ( const cx of [-0.05, -0.015, 0.02] ) brush(ctx, arcPts(cx, CY - 0.06, 0.026, Math.PI, Math.PI * 2, 8), 0.02, rnd, INK, 0.002);
+    brush(ctx, [[-0.04, CY - 0.01], [-0.04, CY + 0.07]], 0.014, rnd);
+  },
+  sword(ctx, rnd) {
+    brush(ctx, [[0, CY - 0.14], [0.03, CY - 0.1], [0.03, CY + 0.04], [-0.03, CY + 0.04], [-0.03, CY - 0.1], [0, CY - 0.14]], 0.024, rnd, INK, 0.003);
+    brush(ctx, [[-0.075, CY + 0.045], [0.075, CY + 0.045]], 0.03, rnd, INK, 0.003);
+    brush(ctx, [[0, CY + 0.06], [0, CY + 0.11]], 0.032, rnd, INK, 0.003);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(0, CY + 0.127, 0.021, 0, TAU); ctx.fill();
+  },
+  tree(ctx, rnd) {
+    ctx.fillStyle = INK;
+    for ( const P of [[[0, CY - 0.13], [-0.065, CY - 0.03], [0.065, CY - 0.03]], [[0, CY - 0.07], [-0.1, CY + 0.06], [0.1, CY + 0.06]]] ) {
+      ctx.beginPath(); P.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill();
+      brush(ctx, P.concat([P[0]]), 0.014, rnd, INK, 0.003);
+    }
+    brush(ctx, [[0, CY + 0.06], [0, CY + 0.13]], 0.036, rnd, INK, 0.003);
+  },
+  mountain(ctx, rnd) {
+    brush(ctx, [[-0.135, CY + 0.1], [-0.04, CY - 0.1], [0.02, CY + 0.0], [0.06, CY - 0.05], [0.135, CY + 0.1], [-0.135, CY + 0.1]], 0.028, rnd, INK, 0.004);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.moveTo(-0.04, CY - 0.1); ctx.lineTo(-0.075, CY - 0.035); ctx.lineTo(-0.05, CY - 0.05); ctx.lineTo(-0.035, CY - 0.025); ctx.lineTo(-0.015, CY - 0.05); ctx.lineTo(-0.0, CY - 0.035); ctx.closePath(); ctx.fill();
+  },
+  potion(ctx, rnd) {
+    const a0 = -1.9106, a1 = -7.5142;
+    brush(ctx, [[-0.03, CY - 0.1], [-0.03, CY - 0.035]].concat(arcPts(0, CY + 0.05, 0.09, a0, a1, 26)).concat([[0.03, CY - 0.1]]), 0.028, rnd, INK, 0.004);
+    brush(ctx, [[-0.05, CY - 0.115], [0.05, CY - 0.115]], 0.03, rnd, INK, 0.003);
+    brush(ctx, [[-0.075, CY + 0.045], [-0.03, CY + 0.055], [0.03, CY + 0.035], [0.075, CY + 0.045]], 0.016, rnd);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(-0.03, CY + 0.09, 0.016, 0, TAU); ctx.arc(0.035, CY + 0.08, 0.012, 0, TAU); ctx.fill();
+  },
+  book(ctx, rnd) {
+    brush(ctx, [[0, CY - 0.09], [-0.12, CY - 0.11], [-0.12, CY + 0.09], [0, CY + 0.11], [0.12, CY + 0.09], [0.12, CY - 0.11], [0, CY - 0.09], [0, CY + 0.11]], 0.026, rnd, INK, 0.004);
+    for ( const sx of [-1, 1] ) for ( const dy of [-0.045, -0.005, 0.035] ) brush(ctx, [[sx * 0.03, CY + dy - 0.005], [sx * 0.092, CY + dy - 0.016]], 0.012, rnd);
+  },
+  house(ctx, rnd) {
+    brush(ctx, [[-0.11, CY + 0.11], [-0.11, CY - 0.01], [0, CY - 0.125], [0.11, CY - 0.01], [0.11, CY + 0.11], [-0.11, CY + 0.11]], 0.03, rnd, INK, 0.004);
+    ctx.fillStyle = INK; ctx.fillRect(-0.03, CY + 0.03, 0.06, 0.08);
+  },
+  shop(ctx, rnd) {
+    brush(ctx, [[-0.12, CY - 0.03], [-0.1, CY - 0.11], [0.1, CY - 0.11], [0.12, CY - 0.03], [-0.12, CY - 0.03]], 0.026, rnd, INK, 0.003);
+    for ( const x of [-0.04, 0.04] ) brush(ctx, [[x, CY - 0.11], [x, CY - 0.03]], 0.016, rnd);
+    brush(ctx, [[-0.1, CY - 0.03], [-0.1, CY + 0.11], [0.1, CY + 0.11], [0.1, CY - 0.03]], 0.026, rnd, INK, 0.003);
+    ctx.fillStyle = INK; ctx.fillRect(-0.03, CY + 0.03, 0.06, 0.08);
+  },
+  cross(ctx, rnd) {
+    const P = [[-0.035, -0.12], [0.035, -0.12], [0.035, -0.035], [0.12, -0.035], [0.12, 0.035], [0.035, 0.035], [0.035, 0.12], [-0.035, 0.12], [-0.035, 0.035], [-0.12, 0.035], [-0.12, -0.035], [-0.035, -0.035]]
+      .map(([x, y]) => [x, CY + y]);
+    ctx.fillStyle = INK; ctx.beginPath(); P.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); ctx.fill();
+    brush(ctx, P.concat([P[0]]), 0.012, rnd, INK, 0.003);
+  },
+  badge(ctx, rnd) {
+    brush(ctx, [[-0.1, CY - 0.11], [0.1, CY - 0.11], [0.1, CY - 0.01], [0.06, CY + 0.07], [0, CY + 0.13], [-0.06, CY + 0.07], [-0.1, CY - 0.01], [-0.1, CY - 0.11]], 0.028, rnd, INK, 0.004);
+    ctx.fillStyle = INK; ctx.beginPath();
+    for ( let i = 0; i < 10; i++ ) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.026 : 0.062; ctx[i ? "lineTo" : "moveTo"](Math.cos(a) * r, CY - 0.02 + Math.sin(a) * r); }
+    ctx.closePath(); ctx.fill();
+  },
+  car(ctx, rnd) {
+    brush(ctx, [[-0.13, CY + 0.06], [-0.13, CY + 0.0], [-0.08, CY - 0.01], [-0.05, CY - 0.07], [0.06, CY - 0.07], [0.09, CY - 0.01], [0.13, CY + 0.0], [0.13, CY + 0.06], [-0.13, CY + 0.06]], 0.028, rnd, INK, 0.004);
+    brush(ctx, [[0.005, CY - 0.065], [0.005, CY - 0.012]], 0.016, rnd);
+    ctx.fillStyle = INK; for ( const x of [-0.07, 0.07] ) { ctx.beginPath(); ctx.arc(x, CY + 0.075, 0.034, 0, TAU); ctx.fill(); }
+  },
+  camera(ctx, rnd) {
+    brush(ctx, [[-0.12, CY - 0.05], [-0.12, CY + 0.09], [0.12, CY + 0.09], [0.12, CY - 0.05], [-0.12, CY - 0.05]], 0.028, rnd, INK, 0.004);
+    brush(ctx, [[-0.05, CY - 0.05], [-0.035, CY - 0.095], [0.035, CY - 0.095], [0.05, CY - 0.05]], 0.024, rnd, INK, 0.003);
+    brush(ctx, arcPts(0, CY + 0.02, 0.052, 0, TAU, 22), 0.024, rnd, INK, 0.003);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(0, CY + 0.02, 0.022, 0, TAU); ctx.fill();
+  },
+  triangle(ctx, rnd) {
+    brush(ctx, [[0, CY - 0.125], [0.125, CY + 0.1], [-0.125, CY + 0.1], [0, CY - 0.125]], 0.03, rnd, INK, 0.004);
+    brush(ctx, [[0, CY - 0.05], [0, CY + 0.03]], 0.032, rnd, INK, 0.003);
+    ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(0, CY + 0.07, 0.02, 0, TAU); ctx.fill();
+  },
+  cup(ctx, rnd) {
+    brush(ctx, [[-0.08, CY - 0.01], [-0.06, CY + 0.1], [0.06, CY + 0.1], [0.08, CY - 0.01], [-0.08, CY - 0.01]], 0.028, rnd, INK, 0.004);
+    brush(ctx, arcPts(0.08, CY + 0.04, 0.042, -Math.PI / 2, Math.PI / 2, 10), 0.024, rnd, INK, 0.003);
+    for ( const dx of [-0.03, 0.03] ) brush(ctx, [[dx, CY - 0.045], [dx - 0.014, CY - 0.07], [dx + 0.014, CY - 0.095], [dx, CY - 0.125]], 0.014, rnd);
   }
 };
+
+/** Every glyph id that has a drawer ("star" is the plain burst). */
+export const GLYPH_IDS = Object.keys(GLYPHS);
 
 const burstCache = new Map();
 /** Canvas of the cream burst for a glyph + variant (rendered once). */

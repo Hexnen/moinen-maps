@@ -1,22 +1,22 @@
 import { toggleDistrictsPanel, playersMayList } from "./panel.mjs";
 import { openBrushOptions, clearDistricts, registerDistrictSettings } from "./districts.mjs";
-import { MODULE_ID, PIN_TYPES, PIN_COLORS, pinTypeOf } from "./config.mjs";
+import { MODULE_ID, PIN_COLORS, pinTypeOf, findPinType, allPresets, presetLabel, typeLabel } from "./config.mjs";
+import { registerPresetSettings, currentPinType, togglePalette, paletteOpen, refreshToolButton } from "./presets.mjs";
 import { fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
 const GROUP = "moinenmaps";
-const PREFIX = "mm-";
+const PIN_TOOL = "mm-pin";
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 
 export const activeToolName = () => ui.controls?.control?.name === GROUP ? (ui.controls.tool?.name ?? "") : "";
-export const activePinType = () => {
-  const n = activeToolName();
-  return n.startsWith(PREFIX) ? PIN_TYPES.find((t) => PREFIX + t.id === n) ?? null : null;
-};
+/** The pin type the placing tool will drop (the palette's selection), or null while another tool is active. */
+export const activePinType = () => activeToolName() === PIN_TOOL ? currentPinType() : null;
 const pickedColor = () => { try { return game.settings.get(MODULE_ID, "pinColor") || ""; } catch { return ""; } };
 
 export function registerSettings() {
   registerDistrictSettings();
+  registerPresetSettings();
   game.settings.register(MODULE_ID, "pinColor", { scope: "client", config: false, type: String, default: "", onChange: syncColorVar });
 }
 
@@ -41,12 +41,10 @@ export function onGetSceneControlButtons(controls) {
   const tools = {
     select: { name: "select", order: 1, title: "MOINENMAPS.Tool.select", icon: "fa-solid fa-expand", interaction: true, control: true }
   };
-  PIN_TYPES.forEach((t, i) => {
-    tools[PREFIX + t.id] = {
-      name: PREFIX + t.id, order: 10 + i, title: `MOINENMAPS.Type.${t.id}`, icon: `fa-solid ${t.fa}`,
-      interaction: true, control: true
-    };
-  });
+  // one placing tool (drops the pin picked in the palette) and the palette button that opens the preset lists
+  tools[PIN_TOOL] = { name: PIN_TOOL, order: 10, title: "MOINENMAPS.Tool.pin", icon: `fa-solid ${currentPinType().fa}`, interaction: true, control: true };
+  tools["mm-palette"] = { name: "mm-palette", order: 11, title: "MOINENMAPS.Tool.palette", icon: "fa-solid fa-layer-group", button: true,
+    onChange: () => togglePalette(ui.controls?.element?.querySelector('button.tool[data-tool="mm-palette"]')) };
   const dist = { interaction: true, control: true };
   tools["mm-district"] = { ...dist, name: "mm-district", order: 30, title: "MOINENMAPS.Tool.district", icon: "fa-solid fa-paintbrush" };
   tools["mm-district-erase"] = { ...dist, name: "mm-district-erase", order: 31, title: "MOINENMAPS.Tool.districtErase", icon: "fa-solid fa-eraser" };
@@ -79,10 +77,7 @@ export function onGetSceneControlButtons(controls) {
 export function onRenderSceneControls() {
   const root = ui.controls?.element;
   if ( !root ) return;
-  for ( const t of PIN_TYPES ) {
-    const b = root.querySelector(`button.tool[data-tool="${PREFIX}${t.id}"]`);
-    if ( b ) b.style.setProperty("--mm-tool", t.color);
-  }
+  refreshToolButton();
   document.body.classList.toggle("mm-placing", !!activePinType());
   syncColorVar();
 }
@@ -141,7 +136,7 @@ export function installPatches() {
   }
   // Escape leaves the placing tool (the tool otherwise stays active so several pins can be dropped in a row)
   window.addEventListener("keydown", (ev) => {
-    if ( ev.key !== "Escape" || !activePinType() ) return;
+    if ( ev.key !== "Escape" || !activePinType() || paletteOpen() ) return;
     if ( document.querySelector("dialog[open], .application.dialog") ) return;
     ev.preventDefault(); ev.stopPropagation();
     ui.controls.activate({ tool: "select" });
@@ -205,13 +200,13 @@ export async function openPinEditor(doc) {
   const snap = { text: doc.text, global: doc.global, src: doc.texture.src, pin: type.id, color: doc.flags?.[MODULE_ID]?.color };
   const colorEntry = (c) => c ? { [`flags.${MODULE_ID}.color`]: c } : { [`flags.${MODULE_ID}.-=color`]: null };
   const draw = () => { const n = doc.object; n?.renderFlags?.set({ refresh: true }); };
-  const draft = (v) => { doc.updateSource({ text: v.text, global: v.global, "texture.src": PIN_TYPES.find((t) => t.id === v.pin)?.icon ?? snap.src, [`flags.${MODULE_ID}.pin`]: v.pin, ...colorEntry(v.color) }); draw(); };
+  const draft = (v) => { doc.updateSource({ text: v.text, global: v.global, "texture.src": findPinType(v.pin)?.icon ?? snap.src, [`flags.${MODULE_ID}.pin`]: v.pin, ...colorEntry(v.color) }); draw(); };
   let committed = false, reopen = false, dlgRef = null, done = false;
   const live = frameThrottle(() => {
     const form = dlgRef?.element?.querySelector("form"); if ( done || !form || !dlgRef.element.isConnected ) return;
     const f = form.elements; draft({ text: f.text.value.trim(), global: f.global.checked, pin: f.type.value, color: f.pick.value });
   });
-  const typeOpts = PIN_TYPES.map((t) => `<option value="${t.id}"${t.id === type.id ? " selected" : ""}>${esc(T(`Type.${t.id}`))}</option>`).join("");
+  const typeOpts = allPresets().map((p) => `<optgroup label="${esc(presetLabel(p))}">${p.types.map((t) => `<option value="${esc(t.id)}"${t.id === type.id ? " selected" : ""}>${esc(typeLabel(t))}</option>`).join("")}</optgroup>`).join("");
   try {
   await DialogV2.prompt({
     window: { title: T("Editor.title"), icon: "fa-solid fa-location-dot" },
@@ -235,7 +230,7 @@ export async function openPinEditor(doc) {
         committed = true;
         // diff:false because the draft already sits in the local source; this is the single database write
         await doc.update({
-          text: f.text.value.trim(), global: f.global.checked, texture: { src: PIN_TYPES.find((t) => t.id === f.type.value)?.icon ?? type.icon },
+          text: f.text.value.trim(), global: f.global.checked, texture: { src: findPinType(f.type.value)?.icon ?? type.icon },
           [`flags.${MODULE_ID}.pin`]: f.type.value,
           [`flags.${MODULE_ID}.color`]: f.pick.value || null
         }, { diff: false });
