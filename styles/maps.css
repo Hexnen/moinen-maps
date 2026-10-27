@@ -236,6 +236,11 @@ body.mm-placing #board { cursor: crosshair; }
 .mm-filter-row.is-off { opacity: 0.5; }
 .mm-filter-row.is-off img { filter: grayscale(1); }
 .mm-filter-row.is-off .mm-filter-label { text-decoration: line-through; }
+.mm-filter-tabs { display: flex; gap: 0.15rem; margin-bottom: 0.35rem; border-bottom: 1px solid rgb(255 255 255 / 0.15); }
+.mm-filter-tabs button { flex: 1; padding: 0.2rem 0.3rem; background: none; border: 0; border-bottom: 2px solid transparent; color: inherit; font-size: 0.78rem; opacity: 0.65; border-radius: 4px 4px 0 0; }
+.mm-filter-tabs button:hover { opacity: 1; background: rgb(255 255 255 / 0.08); }
+.mm-filter-tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--mm-accent, #e5322d); font-weight: 700; }
+.mm-filter-tabs button:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: -2px; }
 .mm-filter-hint { margin: 0.35rem 0.1rem 0; font-size: 0.7rem; opacity: 0.6; line-height: 1.3; }
 @media (prefers-reduced-motion: reduce) { .mm-filter { animation: none; } .mm-filter-row, .mm-filter-row img { transition: none; } }
 
