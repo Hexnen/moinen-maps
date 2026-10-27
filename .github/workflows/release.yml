@@ -1,0 +1,56 @@
+name: Release
+
+# Publishes an installable release: module.json (the manifest URL Foundry installs from) and module.zip.
+#   - push a tag like v0.2.0, or
+#   - run the workflow by hand (Actions > Release > Run workflow) on any branch; it tags v<version from module.json>.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$(jq -r .version module.json)"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp the manifest with this release
+        run: |
+          jq --arg v "${{ steps.v.outputs.version }}" --arg repo "${GITHUB_REPOSITORY}" '
+            .version = $v
+            | .url = "https://github.com/\($repo)"
+            | .manifest = "https://github.com/\($repo)/releases/latest/download/module.json"
+            | .download = "https://github.com/\($repo)/releases/download/v\($v)/module.zip"
+            | .bugs = "https://github.com/\($repo)/issues"' module.json > module.stamped.json
+          mv module.stamped.json module.json
+          jq . module.json
+
+      - name: Check that every file the manifest names exists
+        run: |
+          for f in $(jq -r '(.esmodules // [])[], (.scripts // [])[], (.styles // [])[], (.languages // [])[].path' module.json); do
+            test -f "$f" || { echo "missing: $f"; exit 1; }
+          done
+
+      - name: Build module.zip
+        run: zip -r module.zip module.json README.md scripts styles lang
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.v.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            module.json
+            module.zip
