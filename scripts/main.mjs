@@ -5,6 +5,8 @@ import { api, isStore, resetStore } from "./attrs.mjs";
 import { setSceneDraft } from "./config.mjs";
 import { refreshAllDistricts } from "./districts.mjs";
 import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, installPatches } from "./tools.mjs";
+import { registerFilterSettings } from "./filter.mjs";
+import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
@@ -25,7 +27,11 @@ Hooks.on("moinenMapsSceneDraft", () => {
 Hooks.on("closeSceneConfig", () => setSceneDraft(null));
 Hooks.on("canvasTearDown", () => setSceneDraft(null));
 
-Hooks.once("init", () => registerSettings());
+Hooks.once("init", () => { registerSettings(); registerFilterSettings(); });
+// the floating pin filter follows what is on the map
+Hooks.on("canvasReady", () => refreshPanel());
+Hooks.on("canvasTearDown", () => removePanel());
+for ( const h of ["createNote", "updateNote", "deleteNote", "refreshNote", "sightRefresh", "updateScene", "moinenMapsPanel"] ) Hooks.on(h, () => schedulePanel());
 // macros and other modules: game.modules.get("moinen-maps").api  (+ hook "moinenMaps.districtAttrChanged")
 Hooks.once("ready", () => { game.modules.get(MODULE_ID).api = api; });
 // the GM-only attribute store is a hidden journal entry; follow its changes

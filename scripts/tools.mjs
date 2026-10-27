@@ -43,6 +43,8 @@ export function onGetSceneControlButtons(controls) {
   };
   // one placing tool (drops the pin picked in the palette) and the palette button that opens the preset lists
   tools[PIN_TOOL] = { name: PIN_TOOL, order: 10, title: "MOINENMAPS.Tool.pin", icon: `fa-solid ${currentPinType().fa}`, interaction: true, control: true };
+  tools["mm-filter"] = { name: "mm-filter", order: 12, title: "MOINENMAPS.Tool.filter", icon: "fa-solid fa-filter", toggle: true,
+    active: game.settings.get(MODULE_ID, "pinPanel"), onChange: (_e, on) => game.settings.set(MODULE_ID, "pinPanel", on) };
   tools["mm-palette"] = { name: "mm-palette", order: 11, title: "MOINENMAPS.Tool.palette", icon: "fa-solid fa-layer-group", button: true,
     onChange: () => togglePalette(ui.controls?.element?.querySelector('button.tool[data-tool="mm-palette"]')) };
   const dist = { interaction: true, control: true };

@@ -1,5 +1,6 @@
 import { sceneConfig, pinTypeOf, reducedMotion } from "./config.mjs";
 import { applyPinText } from "./labels.mjs";
+import { enforce, isHidden } from "./filter.mjs";
 import { shadowTextures, burstTexture, pinTextures, PPU, FW, FH, OX, OY, VARIANTS } from "./pin-art.mjs";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -222,6 +223,7 @@ class Pin extends PIXI.Container {
   tick(dt, now) {
     const cfg = this.cfg;
     const note = this.note;
+    if ( note.visible && isHidden(note.document) ) note.visible = false;   // the user's pin filter
     // hover / selection feedback, eased
     const controlled = note.controlled || note.isPreview;
     const over = note.hover || note.layer?.highlightObjects;
@@ -328,6 +330,7 @@ export function onCreateNote(doc) {
 }
 
 export function onRefreshNote(note) {
+  enforce(note);
   const pin = note._mmPin;
   if ( !pin || pin.destroyed ) return;
   pin.redraw();
