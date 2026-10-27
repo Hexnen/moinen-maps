@@ -1,11 +1,10 @@
-import { MODULE_ID, sceneConfig, allPresets, findPinType, typeLabel, pinTypeOf, presetLabel } from "./config.mjs";
-import { NOTE_CAT, categoryOf, hiddenIds, setHidden } from "./filter.mjs";
+import { MODULE_ID, sceneConfig, allPresets, findPinType, typeLabel, pinTypeOf } from "./config.mjs";
+import { NOTE_CAT, categoryOf, hiddenState, setHidden } from "./filter.mjs";
 import { thumb } from "./presets.mjs";
 
 /**
- * The floating pin filter: a small draggable legend on scenes where pins are on, listing the kinds of pins the user can see with a
- * count each, in two tabs: per pin type, and per preset. Click a row to hide or show it (Ctrl/Shift-click shows only that one).
- * Purely client-side.
+ * The floating pin filter: a small draggable legend on scenes where pins are on. Pins are grouped by type; a group's eye hides or shows
+ * the whole type, its arrow unfolds the list of that type's pins, and each pin can be hidden on its own (or panned to). Client-side only.
  */
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -22,26 +21,26 @@ export function schedulePanel() {
 
 export function removePanel() { el?.remove(); el = null; sig = ""; }
 
-/** The categories the user currently sees on this scene, in preset order, with counts. */
+const typeOfCat = (id) => findPinType(id) ?? pinTypeOf({ flags: { [MODULE_ID]: { pin: id } } });
+
+/** The pins the user currently sees, grouped by type in preset order: [{ id, pins: [{ id, label, x, y }] }]. */
 function collect() {
   const scene = canvas.scene;
   if ( !canvas.ready || !scene || !sceneConfig(scene).enabled ) return null;
-  const counts = new Map();
+  const by = new Map();
   for ( const note of canvas.notes.placeables ) {
     if ( !note.isVisible ) continue;
-    const id = categoryOf(note.document);
-    counts.set(id, (counts.get(id) ?? 0) + 1);
+    const d = note.document, id = categoryOf(d);
+    (by.get(id) ?? by.set(id, []).get(id)).push(d);
   }
-  if ( !counts.size ) return null;
+  if ( !by.size ) return null;
   const order = allPresets().flatMap((p) => p.types.map((t) => t.id)).concat(NOTE_CAT);
   const rank = (id) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
-  return [...counts].sort((a, b) => rank(a[0]) - rank(b[0])).map(([id, n]) => ({ id, n, group: id === NOTE_CAT ? NOTE_CAT : (findPinType(id) ?? pinTypeOf({ flags: { [MODULE_ID]: { pin: id } } })).preset }));
-}
-
-function describe(id, scene) {
-  if ( id === NOTE_CAT ) return { label: T("Filter.notes"), img: thumb("book", sceneConfig(scene).color) };
-  const t = findPinType(id) ?? pinTypeOf({ flags: { [MODULE_ID]: { pin: id } } });
-  return { label: typeLabel(t), img: thumb(t.glyph, t.color) };
+  return [...by].sort((a, b) => rank(a[0]) - rank(b[0])).map(([id, docs]) => {
+    const base = id === NOTE_CAT ? T("Filter.notes") : typeLabel(typeOfCat(id));
+    const pins = docs.map((d, i) => ({ id: d.id, x: d.x, y: d.y, label: (d.text || d.entry?.name || "").trim() || game.i18n.format("MOINENMAPS.Filter.pinN", { type: base, n: i + 1 }) }));
+    return { id, label: base, pins };
+  });
 }
 
 const getState = () => game.settings.get(MODULE_ID, "pinPanelState") ?? {};
@@ -58,34 +57,37 @@ function place() {
   el.style.left = `${x}px`; el.style.top = `${y}px`;
 }
 
+const eyeIcon = (state) => state === "true" ? "fa-eye" : state === "false" ? "fa-eye-slash" : "fa-circle-half-stroke";
+
 export function refreshPanel() {
-  const cats = game.settings.get(MODULE_ID, "pinPanel") ? collect() : null;
-  if ( !cats ) return removePanel();
-  const scene = canvas.scene, hidden = hiddenIds(scene.id), collapsed = !!getState().collapsed, tab = getState().tab === "presets" ? "presets" : "types";
-  const next = JSON.stringify([scene.id, cats, [...hidden], collapsed, tab, game.i18n.lang]);
+  const groups = game.settings.get(MODULE_ID, "pinPanel") ? collect() : null;
+  if ( !groups ) return removePanel();
+  const scene = canvas.scene, hs = hiddenState(scene.id), st = getState(), collapsed = !!st.collapsed, open = st.open ?? {};
+  const isOff = (g, p) => hs.t.has(g.id) || hs.n.has(p.id);
+  const next = JSON.stringify([scene.id, groups, [...hs.t], [...hs.n], collapsed, open, game.i18n.lang]);
   if ( el && next === sig ) return;
   sig = next;
-  const total = cats.reduce((a, c) => a + c.n, 0), shown = cats.reduce((a, c) => a + (hidden.has(c.id) ? 0 : c.n), 0);
-  const row = (c) => {
-    const d = describe(c.id, scene), off = hidden.has(c.id);
-    return `<li><button type="button" class="mm-filter-row${off ? " is-off" : ""}" role="switch" aria-checked="${!off}" data-id="${esc(c.id)}">
-      <img src="${d.img}" alt="" inert><span class="mm-filter-label">${esc(d.label)}</span><span class="mm-filter-n">${c.n}</span>
-      <i class="fa-solid ${off ? "fa-eye-slash" : "fa-eye"}" inert></i></button></li>`;
-  };
-  // tab "presets": one row per preset (and the map notes); tab "types": one row per pin type
-  const groups = new Map();
-  for ( const c of cats ) if ( c.group !== NOTE_CAT ) (groups.get(c.group) ?? groups.set(c.group, []).get(c.group)).push(c);
-  const names = new Map(allPresets().map((p) => [p.id, p]));
-  const groupRow = (g, items) => {
-    const off = items.filter((c) => hidden.has(c.id)).length, state = off === 0 ? "true" : off === items.length ? "false" : "mixed";
-    const preset = names.get(g), first = findPinType(items[0].id) ?? pinTypeOf({ flags: { [MODULE_ID]: { pin: items[0].id } } });
-    return `<li><button type="button" class="mm-filter-row${state === "false" ? " is-off" : ""}" role="switch" aria-checked="${state}" data-group="${esc(g)}">
-      <img src="${thumb(first.glyph, first.color)}" alt="" inert><span class="mm-filter-label">${esc(preset ? presetLabel(preset) : g)}</span><span class="mm-filter-n">${items.reduce((a, c) => a + c.n, 0)}</span>
-      <i class="fa-solid ${state === "true" ? "fa-eye" : state === "false" ? "fa-eye-slash" : "fa-circle-half-stroke"}" inert></i></button></li>`;
-  };
-  const notes = cats.filter((c) => c.group === NOTE_CAT);
-  const rows = tab === "presets" ? [...groups].map(([g, items]) => groupRow(g, items)).join("") + notes.map(row).join("") : cats.map(row).join("");
-  const tabBtn = (id) => `<button type="button" role="tab" id="mm-ft-${id}" aria-selected="${tab === id}" aria-controls="mm-filter-panel" data-tab="${id}"${tab === id ? "" : ' tabindex="-1"'}>${esc(T(`Filter.tab.${id}`))}</button>`;
+  const total = groups.reduce((a, g) => a + g.pins.length, 0);
+  const shown = groups.reduce((a, g) => a + g.pins.filter((p) => !isOff(g, p)).length, 0);
+  const rows = groups.map((g) => {
+    const off = g.pins.filter((p) => isOff(g, p)).length, state = off === 0 ? "true" : off === g.pins.length ? "false" : "mixed";
+    const t = g.id === NOTE_CAT ? null : typeOfCat(g.id);
+    const img = t ? thumb(t.glyph, t.color) : thumb("book", sceneConfig(scene).color);
+    const isOpen = !!open[g.id];
+    const pins = isOpen ? `<ul class="mm-filter-pins" id="mm-fg-${esc(g.id)}">${g.pins.map((p) => {
+      const po = isOff(g, p);
+      return `<li class="mm-filter-pin${po ? " is-off" : ""}"><button type="button" class="mm-filter-pinrow" role="switch" aria-checked="${!po}" data-pin="${esc(p.id)}" data-group="${esc(g.id)}">
+        <span class="mm-filter-label">${esc(p.label)}</span><i class="fa-solid ${po ? "fa-eye-slash" : "fa-eye"}" inert></i></button>
+        <button type="button" class="mm-filter-go" data-go="${esc(p.id)}" aria-label="${esc(T("Filter.locate"))}" data-tooltip="${esc(T("Filter.locate"))}"><i class="fa-solid fa-crosshairs" inert></i></button></li>`;
+    }).join("")}</ul>` : "";
+    return `<li class="mm-filter-group${state === "false" ? " is-off" : ""}">
+      <div class="mm-filter-grouprow">
+        <button type="button" class="mm-filter-fold" data-fold="${esc(g.id)}" aria-expanded="${isOpen}" ${isOpen ? `aria-controls="mm-fg-${esc(g.id)}"` : ""} aria-label="${esc(T(isOpen ? "Filter.foldClose" : "Filter.foldOpen"))}: ${esc(g.label)}"><i class="fa-solid ${isOpen ? "fa-chevron-down" : "fa-chevron-right"}" inert></i></button>
+        <button type="button" class="mm-filter-row" role="switch" aria-checked="${state}" data-group="${esc(g.id)}" data-tooltip="${esc(T("Filter.hint"))}">
+          <img src="${img}" alt="" inert><span class="mm-filter-label">${esc(g.label)}</span>
+          <span class="mm-filter-n">${state === "mixed" ? `${g.pins.length - off}/${g.pins.length}` : g.pins.length}</span><i class="fa-solid ${eyeIcon(state)}" inert></i></button>
+      </div>${pins}</li>`;
+  }).join("");
   const fresh = !el;
   if ( fresh ) {
     el = document.createElement("aside");
@@ -94,6 +96,7 @@ export function refreshPanel() {
     el.addEventListener("click", onClick);
     el.addEventListener("pointerdown", onDragStart);
   }
+  const keep = el.querySelector(".mm-filter-list")?.scrollTop ?? 0;
   el.classList.toggle("is-collapsed", collapsed);
   el.innerHTML = `<header class="mm-filter-head">
       <i class="fa-solid fa-location-dot" inert></i><span class="mm-filter-title">${esc(T("Filter.title"))}</span>
@@ -102,40 +105,47 @@ export function refreshPanel() {
       <button type="button" data-act="close" aria-label="${esc(T("Filter.close"))}" data-tooltip="${esc(T("Filter.close"))}"><i class="fa-solid fa-xmark" inert></i></button>
     </header>
     <div class="mm-filter-body"${collapsed ? " hidden" : ""}>
-      <div class="mm-filter-tabs" role="tablist" aria-label="${esc(T("Filter.title"))}">${tabBtn("types")}${tabBtn("presets")}</div>
       <div class="mm-filter-tools"><button type="button" data-act="all">${esc(T("Filter.showAll"))}</button><button type="button" data-act="none">${esc(T("Filter.hideAll"))}</button></div>
-      <ul class="mm-filter-list" id="mm-filter-panel" role="tabpanel" aria-labelledby="mm-ft-${tab}">${rows}</ul>
-      <p class="mm-filter-hint">${esc(T(tab === "presets" ? "Filter.groupHint" : "Filter.hint"))}</p>
+      <ul class="mm-filter-list">${rows}</ul>
+      <p class="mm-filter-hint">${esc(T("Filter.hint"))}</p>
     </div>`;
+  const list = el.querySelector(".mm-filter-list"); if ( list ) list.scrollTop = keep;
   place();
 }
 
 async function onClick(ev) {
   const b = ev.target.closest("button"); if ( !b ) return;
-  const scene = canvas.scene, cats = collect() ?? [], all = cats.map((c) => c.id);
-  if ( b.dataset.tab ) { await saveState({ tab: b.dataset.tab }); refreshPanel(); return el.querySelector(`[data-tab="${b.dataset.tab}"]`)?.focus(); }
+  const scene = canvas.scene, groups = collect() ?? [], hs = hiddenState(scene.id);
+  const allIds = groups.map((g) => g.id), find = (id) => groups.find((g) => g.id === id);
   if ( b.dataset.act === "collapse" ) { await saveState({ collapsed: !getState().collapsed }); return refreshPanel(); }
   if ( b.dataset.act === "close" ) { await game.settings.set(MODULE_ID, "pinPanel", false); return ui.notifications.info(T("Filter.closed")); }
-  if ( b.dataset.act === "all" ) return setHidden(scene.id, new Set());
-  if ( b.dataset.act === "none" ) return setHidden(scene.id, new Set(all));
-  const hidden = hiddenIds(scene.id);
+  if ( b.dataset.act === "all" ) return setHidden(scene.id, { t: new Set(), n: new Set() });
+  if ( b.dataset.act === "none" ) return setHidden(scene.id, { t: new Set(allIds), n: hs.n });
+  if ( b.dataset.fold ) { const open = { ...(getState().open ?? {}) }; open[b.dataset.fold] = !open[b.dataset.fold]; await saveState({ open }); return refreshPanel(); }
+  if ( b.dataset.go ) {
+    const d = scene.notes.get(b.dataset.go); if ( !d ) return;
+    return canvas.animatePan({ x: d.x, y: d.y, duration: 400 });
+  }
+  if ( b.dataset.pin ) {
+    // a single pin. Showing one inside a hidden type unfolds the type: the others stay hidden one by one
+    const g = find(b.dataset.group), id = b.dataset.pin;
+    if ( !g ) return;
+    if ( hs.t.has(g.id) ) { hs.t.delete(g.id); for ( const p of g.pins ) if ( p.id !== id ) hs.n.add(p.id); hs.n.delete(id); }
+    else hs.n.has(id) ? hs.n.delete(id) : hs.n.add(id);
+    return setHidden(scene.id, hs);
+  }
   if ( b.dataset.group ) {
-    const mine = cats.filter((c) => c.group === b.dataset.group).map((c) => c.id);
-    if ( ev.ctrlKey || ev.shiftKey || ev.metaKey ) {
-      const only = all.every((x) => mine.includes(x) || hidden.has(x)) && mine.every((x) => !hidden.has(x)) && mine.length < all.length;
-      return setHidden(scene.id, only ? new Set() : new Set(all.filter((x) => !mine.includes(x))));
+    const g = find(b.dataset.group); if ( !g ) return;
+    const mineIds = new Set(g.pins.map((p) => p.id));
+    if ( ev.ctrlKey || ev.shiftKey || ev.metaKey ) {     // show only this type
+      const alone = allIds.length > 1 && allIds.every((x) => x === g.id || hs.t.has(x)) && !hs.t.has(g.id);
+      for ( const x of mineIds ) hs.n.delete(x);
+      return setHidden(scene.id, { t: alone ? new Set() : new Set(allIds.filter((x) => x !== g.id)), n: hs.n });
     }
-    const allOff = mine.every((x) => hidden.has(x));
-    for ( const x of mine ) allOff ? hidden.delete(x) : hidden.add(x);
-    return setHidden(scene.id, hidden);
+    const allShown = !hs.t.has(g.id) && g.pins.every((p) => !hs.n.has(p.id));
+    if ( allShown ) hs.t.add(g.id); else { hs.t.delete(g.id); for ( const x of mineIds ) hs.n.delete(x); }
+    return setHidden(scene.id, hs);
   }
-  const id = b.dataset.id; if ( !id ) return;
-  if ( ev.ctrlKey || ev.shiftKey || ev.metaKey ) {
-    const only = all.length > 1 && all.every((x) => x === id || hidden.has(x)) && !hidden.has(id);
-    return setHidden(scene.id, only ? new Set() : new Set(all.filter((x) => x !== id)));
-  }
-  hidden.has(id) ? hidden.delete(id) : hidden.add(id);
-  return setHidden(scene.id, hidden);
 }
 
 /** Drag by the header; the position is remembered per user. */

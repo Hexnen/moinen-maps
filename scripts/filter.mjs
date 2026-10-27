@@ -1,8 +1,8 @@
 import { MODULE_ID, sceneConfig } from "./config.mjs";
 
 /**
- * Pin filter state: which pin categories a user has hidden on a scene. A category is a standalone pin's type id, or "note" for
- * ordinary map notes (journal pins). The filter is per user (client setting) and per scene; it never touches the documents.
+ * Pin filter state: what a user has hidden on a scene, either a whole pin type (`t`: standalone type ids, or "note" for ordinary map
+ * notes) or single pins (`n`: note ids). Per user (client setting) and per scene; it never touches the documents.
  */
 export const NOTE_CAT = "note";
 
@@ -22,19 +22,35 @@ export function registerFilterSettings() {
 }
 
 let cache = null;
-const store = () => cache ??= foundry.utils.deepClone(game.settings.get(MODULE_ID, "pinFilter") ?? {});
+/** Normalised store: { [sceneId]: { t: string[], n: string[] } } (an older flat array meant hidden types only). */
+const store = () => {
+  if ( cache ) return cache;
+  const raw = game.settings.get(MODULE_ID, "pinFilter") ?? {};
+  cache = {};
+  for ( const [id, v] of Object.entries(raw) ) {
+    const e = Array.isArray(v) ? { t: v, n: [] } : { t: v?.t ?? [], n: v?.n ?? [] };
+    if ( e.t.length || e.n.length ) cache[id] = e;
+  }
+  return cache;
+};
 
-export const hiddenIds = (sceneId) => new Set(store()[sceneId] ?? []);
-
-/** True when the user hid this note's category on a scene where pins are on. */
-export function isHidden(doc) {
-  const hidden = store()[doc?.parent?.id];
-  return !!hidden?.length && hidden.includes(categoryOf(doc)) && !!sceneConfig(doc.parent).enabled;
+/** The hidden types and pins of a scene, as fresh sets the caller may edit. */
+export function hiddenState(sceneId) {
+  const e = store()[sceneId];
+  return { t: new Set(e?.t ?? []), n: new Set(e?.n ?? []) };
 }
 
-export async function setHidden(sceneId, ids) {
+/** True when the user hid this note (its type or the pin itself) on a scene where pins are on. */
+export function isHidden(doc) {
+  const e = store()[doc?.parent?.id];
+  return !!e && (e.t.includes(categoryOf(doc)) || e.n.includes(doc.id)) && !!sceneConfig(doc.parent).enabled;
+}
+
+export async function setHidden(sceneId, { t, n }) {
   const all = { ...store() };
-  if ( ids.size ) all[sceneId] = [...ids]; else delete all[sceneId];
+  const live = canvas.scene?.id === sceneId ? canvas.scene.notes : null;
+  const ids = [...n].filter((id) => !live || live.has(id));      // forget pins that no longer exist
+  if ( t.size || ids.length ) all[sceneId] = { t: [...t], n: ids }; else delete all[sceneId];
   cache = all;
   await game.settings.set(MODULE_ID, "pinFilter", all);
 }
