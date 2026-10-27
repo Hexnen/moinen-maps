@@ -8,6 +8,7 @@ import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, inst
 import { registerFilterSettings } from "./filter.mjs";
 import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
+import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, teardownTokenDrops } from "./token-drop.mjs";
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);
@@ -18,6 +19,16 @@ Hooks.on("updateScene", (scene, changed) => {
   if ( scene.id === canvas.scene?.id && foundry.utils.hasProperty(changed, `flags.${MODULE_ID}`) ) refreshPins();
 });
 Hooks.on("canvasReady", () => refreshPins());
+// cosmetic token drop (hooks only, nothing is written to the token)
+Hooks.on("createToken", onCreateToken);
+Hooks.on("drawToken", onDrawToken);
+Hooks.on("refreshToken", onRefreshToken);
+Hooks.on("updateToken", onUpdateToken);
+Hooks.on("deleteToken", onDeleteToken);
+Hooks.on("targetToken", onTargetToken);
+Hooks.on("createCombatant", onCreateCombatant);
+Hooks.on("updateCombat", onUpdateCombat);
+Hooks.on("canvasTearDown", teardownTokenDrops);
 // Scene Config live preview: a draft of the form values is laid over the scene config; closing the sheet (or leaving the scene) drops it
 let draftFrame = 0;
 Hooks.on("moinenMapsSceneDraft", () => {
