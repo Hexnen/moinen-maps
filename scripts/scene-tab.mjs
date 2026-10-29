@@ -41,7 +41,7 @@ function tabHtml(scene, active) {
       <h3 class="mm-group"><i class="fa-solid fa-location-dot" inert></i> ${esc(T("Scene.GroupPins"))}</h3>
       <fieldset class="mm-look">${legend("fa-paintbrush", "Scene.Pins")}
         ${range("size", "Size", c.size, 0.5, 2, 0.05)}
-        ${select("glyph", "Glyph", c.glyph, [["note", T("GlyphNote")], ["dot", T("GlyphDot")]], "GlyphHint")}
+        ${select("glyph", "GlyphInside", c.glyph, [["note", T("GlyphNote")], ["dot", T("GlyphDot")]], "GlyphHint")}
         ${check("shadow", "Shadow", c.shadow)}
         ${check("glow", "Glow", c.glow, "GlowHint")}
       </fieldset>
@@ -65,6 +65,36 @@ function tabHtml(scene, active) {
         ${row("Label.textColor", `<color-picker name="${N}.pinText.color" value="${esc(c.pinText.color || "#ffffff")}"></color-picker>`)}
         ${row("Label.halo", `<color-picker name="${N}.pinText.halo" value="${esc(c.pinText.halo || "#000000")}"></color-picker>`)}
         ${range("pinText.haloWidth", "Label.haloWidth", c.pinText.haloWidth, 0, 16, 0.5)}`)}
+
+      <h3 class="mm-group"><i class="fa-solid fa-user" inert></i> ${esc(T("Scene.GroupTokens"))}</h3>
+      <fieldset class="mm-tokenset">${legend("fa-user", "Scene.Tokens")}
+        ${select("tokens.who", "Tok.who", c.tokens.who, [["all", T("Tok.whoAll")], ["gm", T("Tok.whoGM")]])}
+        ${select("tokens.filter", "Tok.filter", c.tokens.filter, [["all", T("Tok.filterAll")], ["player", T("Tok.filterPlayer")], ["npc", T("Tok.filterNpc")]])}
+        ${range("tokens.intensity", "Tok.intensity", c.tokens.intensity, 0.3, 1.6, 0.05, "Tok.intensityHint")}
+        ${check("tokens.enabled", "Tok.enabled", c.tokens.enabled, "Tok.enabledHint")}
+        <div class="mm-sub" data-mm="tok-sub">
+          ${range("tokens.dropHeight", "DropHeight", c.tokens.dropHeight, 0.3, 2, 0.05)}
+          ${range("tokens.bounce", "Bounce", c.tokens.bounce, 0, 1, 0.05)}
+          ${range("tokens.squeeze", "Squeeze", c.tokens.squeeze, 0, 1, 0.05)}
+          ${check("tokens.shadow", "Tok.shadow", c.tokens.shadow)}
+          ${check("tokens.ripple", "Tok.ripple", c.tokens.ripple)}
+          ${check("tokens.hop", "Tok.hop", c.tokens.hop, "Tok.hopHint")}
+        </div>
+        ${check("tokens.hide", "Tok.hide", c.tokens.hide, "Tok.hideHint")}
+        ${check("tokens.target", "Tok.target", c.tokens.target, "Tok.targetHint")}
+        <div class="mm-sub" data-mm="tok-target-sub">
+          ${select("tokens.reticleStyle", "Tok.reticleStyle", c.tokens.reticleStyle, [["crosshair", T("Tok.styleCrosshair")], ["brackets", T("Tok.styleBrackets")]])}
+          ${check("tokens.reticleUser", "Tok.reticleUser", c.tokens.reticleUser, "Tok.reticleUserHint")}
+          ${row("Tok.reticleColor", `<color-picker name="${N}.tokens.reticleColor" value="${esc(c.tokens.reticleColor)}"></color-picker>`)}
+          ${check("tokens.hideNative", "Tok.hideNative", c.tokens.hideNative, "Tok.hideNativeHint")}
+        </div>
+        ${check("tokens.combat", "Tok.combat", c.tokens.combat, "Tok.combatHint")}
+        <div class="mm-sub" data-mm="tok-combat-sub">
+          ${check("tokens.combatStagger", "Tok.combatStagger", c.tokens.combatStagger, "Tok.combatStaggerHint")}
+          ${check("tokens.combatRipple", "Tok.combatRipple", c.tokens.combatRipple)}
+          ${check("tokens.combatNumber", "Tok.combatNumber", c.tokens.combatNumber)}
+        </div>
+      </fieldset>
 
       <h3 class="mm-group"><i class="fa-solid fa-draw-polygon" inert></i> ${esc(T("Scene.GroupDistricts"))}</h3>
       <fieldset class="mm-hoverset">${legend("fa-hand-pointer", "Scene.Districts")}
@@ -137,6 +167,10 @@ function wire(tab, scene, app) {
     dep("hoverColor", hm === "highlight");   // only the highlight effect uses a colour
     dep("hoverStrength", hm !== "none");
     dep("districtInkColor", val("districtInk") === "custom");
+    const tokOff = !on("tokens.enabled"), tsub = tab.querySelector('[data-mm="tok-sub"]');
+    tsub.classList.toggle("is-off", tokOff); tsub.inert = tokOff;
+    for ( const [flag, sel] of [["tokens.target", "tok-target-sub"], ["tokens.combat", "tok-combat-sub"]] ) { const s = tab.querySelector(`[data-mm="${sel}"]`), off = !on(flag); s.classList.toggle("is-off", off); s.inert = off; }
+    dep("tokens.reticleColor", on("tokens.target") && !on("tokens.reticleUser"));   // a fixed colour only when not using each user's own
     const idleOff = val("idle") === "none" || !on("enabled"), isub = tab.querySelector('[data-mm="idle-sub"]');
     isub.classList.toggle("is-off", idleOff); isub.inert = idleOff;
   };
