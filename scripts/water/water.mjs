@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import { engineInfo, bake, ramp, disposeEngine } from "./engine.mjs";
 import { WaterDisplay } from "./display.mjs";
+import * as Cache from "./cache.mjs";
 
 /**
  * The water of the open scene: loads its masks and settings from the scene flag, bakes them in the worker, plays the result, and
@@ -9,7 +10,7 @@ import { WaterDisplay } from "./display.mjs";
  * bake is deterministic (the seed is a setting), so everyone sees the same water.
  */
 
-let S = null, display = null, info = null;
+let S = null, display = null, info = null, lite = null;
 let gen = 0, bakeTimer = 0, saveTimer = 0;
 const status = { baking: false, progress: 0, error: "" };
 
@@ -22,6 +23,8 @@ const tell = (kind) => Hooks.callAll("moinenMapsWater", kind);
 
 export const state = () => S;
 export const waterInfo = () => info;
+/** The engine's tables: the full ones once the worker has run, else the cached codes and defaults. */
+const tables = () => info ?? lite;
 export const waterStatus = () => status;
 
 /* ---------------------------------------------------------------- lifecycle */
@@ -52,17 +55,25 @@ export async function onUpdateScene(scene, changed, options, userId) {
 
 async function start() {
   try {
-    info ??= await engineInfo();
+    await ensureTables();
   } catch ( err ) {
     console.error(`${MODULE_ID} | water engine`, err);
     status.error = String(err?.message ?? err); tell("status");
     return;
   }
-  S.params = { ...foundry.utils.deepClone(info.defaults), ...S.params };
+  S.params = { ...foundry.utils.deepClone(tables().defaults), ...S.params };
   if ( !Array.isArray(S.params.guides) ) S.params.guides = [];
   display ??= new WaterDisplay();
-  display.setPalette(info.codes, S.params.colors, S.params.alpha);
+  display.setPalette(tables().codes, S.params.colors, S.params.alpha);
   await rebake();
+}
+
+/** The GM always starts the worker (the settings window needs the looks); a player with a cached scene does not. */
+async function ensureTables() {
+  if ( game.user.isGM ) { info ??= await engineInfo(); return; }
+  if ( info || lite ) return;
+  lite = await Cache.getMeta();
+  if ( !lite ) info = await engineInfo();
 }
 
 /* ---------------------------------------------------------------- baking */
@@ -78,20 +89,40 @@ export async function rebake() {
   if ( !Model.hasPaint(S) ) { display?.clear(); status.baking = false; tell("status"); return; }
   if ( !S.enabled ) return;
   try {
-    info ??= await engineInfo();
+    await ensureTables();
     display ??= new WaterDisplay();
-    display.setPalette(info.codes, S.params.colors, S.params.alpha);
+    display.setPalette(tables().codes, S.params.colors, S.params.alpha);
   } catch ( err ) { status.error = String(err?.message ?? err); tell("status"); return; }
-  status.baking = true; status.progress = 0; status.error = ""; tell("status");
   const origin = { x: Model.sceneRect(scene).x, y: Model.sceneRect(scene).y };
+  // baked before on this browser: no worker, no waiting
+  const key = Cache.makeKey(scene.id, S);
+  const hit = await Cache.getBake(key);
+  if ( my !== gen ) return;
+  if ( hit ) {
+    display.begin(hit.box, S.px, origin, hit.ms ?? S.params.ms);
+    hit.frames.forEach((f, i) => display.addFrame(i + 1, f));
+    display.commit();
+    status.baking = false; status.progress = 1; tell("status");
+    if ( !game.user.isGM ) setTimeout(() => { if ( my === gen && !status.baking ) disposeEngine(); }, 1500);
+    return;
+  }
+  status.baking = true; status.progress = 0; status.error = ""; tell("status");
+  const frames = [];
   try {
     const res = await bake({ W: S.w, H: S.h, masks: S.masks, maskKey: `${scene.id}:${S.px}:${S.rev}`, params: S.params }, {
       onBegin: (b) => { if ( my === gen ) display.begin(b.box, S.px, origin, b.ms ?? S.params.ms); },
-      onFrame: (i, levels) => { if ( my === gen ) display.addFrame(i, levels); },
+      onFrame: (i, levels) => { if ( my === gen ) { display.addFrame(i, levels); frames[i - 1] = levels; } },
       onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } }
     });
     if ( my !== gen || res?.superseded ) return;
-    if ( res?.empty ) display?.clear(); else display?.commit();
+    if ( res?.empty ) display?.clear();
+    else {
+      display?.commit();
+      if ( frames.length === res.frames && frames.every(Boolean) ) {
+        Cache.putBake(key, { box: res.box, ms: res.ms, frames: frames.map((f) => f.slice()) });
+        if ( info ) Cache.putMeta(info.codes, info.defaults);
+      }
+    }
   } catch ( err ) {
     if ( my === gen ) { console.error(`${MODULE_ID} | water bake`, err); status.error = String(err?.message ?? err); }
   }
