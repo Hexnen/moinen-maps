@@ -39,7 +39,7 @@ export async function onCanvasReady() {
 
 export function teardown() {
   gen++;
-  clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); bakeTimer = saveTimer = repaintTimer = 0;
+  clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = 0;
   display?.destroy(); display = null;
   S = null; status.baking = false; status.progress = 0; status.error = "";
 }
@@ -66,6 +66,16 @@ async function start() {
   display ??= new WaterDisplay();
   display.setPalette(tables().codes, S.params.colors, S.params.alpha);
   await rebake();
+}
+
+/**
+ * The worker holds 100+ MB for a big scene. A player never edits, so it is let go as soon as the water is baked; the GM keeps it
+ * a couple of minutes (settings changes reuse what it prepared) and then lets it go too. A new bake starts it again.
+ */
+let releaseTimer = 0;
+function releaseWorker() {
+  clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(() => { releaseTimer = 0; if ( !status.baking ) disposeEngine(); }, game.user.isGM ? 120000 : 1500);
 }
 
 /** The GM always starts the worker (the settings window needs the looks); a player with a cached scene does not. */
@@ -103,9 +113,10 @@ export async function rebake() {
     hit.frames.forEach((f, i) => display.addFrame(i + 1, f));
     display.commit();
     status.baking = false; status.progress = 1; tell("status");
-    if ( !game.user.isGM ) setTimeout(() => { if ( my === gen && !status.baking ) disposeEngine(); }, 1500);
+    releaseWorker();
     return;
   }
+  clearTimeout(releaseTimer);
   status.baking = true; status.progress = 0; status.error = ""; tell("status");
   const frames = [];
   try {
@@ -127,8 +138,7 @@ export async function rebake() {
     if ( my === gen ) { console.error(`${MODULE_ID} | water bake`, err); status.error = String(err?.message ?? err); }
   }
   if ( my === gen ) { status.baking = false; status.progress = 1; tell("status"); }
-  // players never edit: the worker (100+ MB for a big scene) is let go once the water is baked; a new bake starts it again
-  if ( my === gen && !game.user.isGM ) setTimeout(() => { if ( !status.baking && my === gen ) disposeEngine(); }, 1500);
+  if ( my === gen ) releaseWorker();
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
