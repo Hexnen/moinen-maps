@@ -16,7 +16,7 @@ const status = { baking: false, progress: 0, error: "" };
 /** Settings that only change colours: no new bake. */
 const COLOR_ONLY = new Set(["colors", "alpha", "palBase", "palHue", "palSat", "palRange"]);
 /** Settings the display reads itself. */
-const LIVE_ONLY = new Set(["ms", "fxOn", "fxStrength", "fxRings", "fxSplash", "fxWake", "fxWho"]);
+const LIVE_ONLY = new Set(["ms", "fxOn", "fxStrength", "fxRings", "fxSplash", "fxWake", "fxWho", "reflectOn", "reflectType", "reflectOpacity", "reflectBlur", "reflectOffset", "reflectRipple", "reflectDistort", "reflectLength", "reflectFade", "reflectTint", "reflectWho"]);
 
 const tell = (kind) => Hooks.callAll("moinenMapsWater", kind);
 
