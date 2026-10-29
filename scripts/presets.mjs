@@ -136,7 +136,7 @@ function renderPalette() {
 /* ---------------------------------------------------------------------------------------------- */
 
 const newId = (prefix) => `${prefix}-${foundry.utils.randomID(8)}`;
-const glyphLabel = (g) => T(`Glyph.${g}`);
+const glyphLabel = (g) => T(`PinGlyph.${g}`);
 
 /** Create, edit, duplicate and delete custom presets. Built-in presets are shown read-only and can be duplicated. */
 export async function openPresetManager(startId) {

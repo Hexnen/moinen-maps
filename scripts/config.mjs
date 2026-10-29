@@ -134,7 +134,7 @@ export const resolvePreset = (p) => ({ ...p, types: p.types.map((t) => resolveTy
 export const typeLabel = (t) => {
   if ( t.name ) return t.name;
   const k = `MOINENMAPS.Type.${t.id}`;
-  return game.i18n.localize(game.i18n.has(k) ? k : `MOINENMAPS.Glyph.${t.glyph}`);
+  return game.i18n.localize(game.i18n.has(k) ? k : `MOINENMAPS.PinGlyph.${t.glyph}`);
 };
 export const presetLabel = (p) => p.custom ? p.name : game.i18n.localize(`MOINENMAPS.Preset.${p.id}`);
 
