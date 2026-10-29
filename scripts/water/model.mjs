@@ -6,7 +6,7 @@ import { MODULE_ID } from "../config.mjs";
  */
 export const FLAG = "water";
 export const LAYERS = ["water", "river", "fall"];
-const MAX_PIXELS = 600000;
+const MAX_PIXELS = 262144;     // 512 x 512 art pixels: about 5 s to bake and 170 MB in the worker; the cost grows faster than the area
 let REV = 0;
 /** A revision number no other set has had: the worker keys its cached masks by it. */
 export const nextRev = () => ++REV;

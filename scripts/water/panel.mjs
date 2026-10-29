@@ -145,7 +145,8 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
         return this.#row("frames", label("frames"), hint("frames"), `<select id="mm-wp-frames" name="frames">${FRAME_CHOICES.map((n) => `<option value="${n}"${Number(P.frames) === n ? " selected" : ""}>${n}</option>`).join("")}</select>`);
       case "px": {
         const r = Model.sceneRect(), least = Model.clampPx(1, r);
-        return this.#row("px", label("px"), hint("px"), `<range-picker id="mm-wp-px" name="px" min="${least}" max="64" step="1" value="${S.px}"></range-picker>`);
+        return this.#row("px", label("px"), hint("px"), `<range-picker id="mm-wp-px" name="px" min="${least}" max="64" step="1" value="${S.px}"></range-picker>`)
+          + `<p class="hint mm-wp-pxinfo" aria-live="polite">${esc(this.#pxInfo(S))}</p>`;
       }
       case "enabled":
         return this.#row("enabled", label("enabled"), hint("enabled"), `<input type="checkbox" id="mm-wp-enabled" name="enabled"${S.enabled ? " checked" : ""}>`);
@@ -164,6 +165,12 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
       default:
         return "";
     }
+  }
+
+  /** What the art-pixel size means for this scene: the grid of art pixels and a rough bake time (about 20 µs a pixel on a typical machine). */
+  #pxInfo(S) {
+    const secs = Math.max(1, Math.round(S.w * S.h * 2e-5));
+    return game.i18n.format("MOINENMAPS.Water.pxInfo", { w: S.w, h: S.h, s: secs });
   }
 
   /* ---------------------------------------------------------------- events */
@@ -205,7 +212,7 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
     if ( ["palBase", "palHue", "palSat", "palRange"].includes(name) ) return this.#palette(name, value);
     if ( name === "rodKind" ) return game.settings.set(MODULE_ID, "waterRodKind", String(value));
     if ( name === "rodBranch" ) return game.settings.set(MODULE_ID, "waterRodBranch", !!value);
-    if ( name === "px" ) { Water.setPx(Number(value)); return; }
+    if ( name === "px" ) { Water.setPx(Number(value)); const i = this.element?.querySelector(".mm-wp-pxinfo"); if ( i ) i.textContent = this.#pxInfo(Water.state()); return; }
     if ( name === "enabled" ) return Water.setEnabled(!!value);
     if ( name === "frames" ) return Water.setParams({ frames: Number(value) });
     if ( name === "fallStyle" || name === "light" || name === "fxWho" || name === "reflectType" || name === "reflectWho" || name === "reflectBlurType" || name === "submergeWho" ) return Water.setParams({ [name]: String(value) });

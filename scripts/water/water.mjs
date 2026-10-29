@@ -1,6 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
-import { engineInfo, bake, ramp } from "./engine.mjs";
+import { engineInfo, bake, ramp, disposeEngine } from "./engine.mjs";
 import { WaterDisplay } from "./display.mjs";
 
 /**
@@ -96,6 +96,8 @@ export async function rebake() {
     if ( my === gen ) { console.error(`${MODULE_ID} | water bake`, err); status.error = String(err?.message ?? err); }
   }
   if ( my === gen ) { status.baking = false; status.progress = 1; tell("status"); }
+  // players never edit: the worker (100+ MB for a big scene) is let go once the water is baked; a new bake starts it again
+  if ( my === gen && !game.user.isGM ) setTimeout(() => { if ( !status.baking && my === gen ) disposeEngine(); }, 1500);
 }
 
 /* ---------------------------------------------------------------- editing (GM) */

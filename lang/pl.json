@@ -409,6 +409,7 @@
   "MOINENMAPS.Water.h.guideFoam": "Plamki piany niesione wzdłuż prętów",
   "MOINENMAPS.Water.f.px": "Rozmiar piksela",
   "MOINENMAPS.Water.h.px": "Pikseli sceny na jeden piksel obrazu. Mniejszy to drobniej, ale wolniej się liczy",
+  "MOINENMAPS.Water.pxInfo": "{w} × {h} pikseli obrazu, liczenie ok. {s} s",
   "MOINENMAPS.Water.f.enabled": "Pokaż wodę",
   "MOINENMAPS.Water.h.enabled": "Włącz lub wyłącz wodę na tej scenie (malowanie zostaje)",
   "MOINENMAPS.Water.f.frames": "Klatki",
