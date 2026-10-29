@@ -113,7 +113,7 @@ function make(t) {
   tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
   const sprite = new PIXI.Sprite(tex); sprite.eventMode = "none"; sprite.visible = false;
   root.addChild(sprite);
-  return { out, mid, fin, tmp, tex, sprite, seed: Math.floor(Math.random() * 1000), last: -1e9, dims: "" };
+  return { out, mid, fin, tmp, tex, sprite, seed: Math.floor(Math.random() * 1000), last: performance.now() - Math.random() * STEP_MS, dims: "" };
 }
 
 function destroyState(st) { st.sprite.destroy(); st.tex.destroy(true); }

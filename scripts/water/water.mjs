@@ -36,7 +36,7 @@ export async function onCanvasReady() {
 
 export function teardown() {
   gen++;
-  clearTimeout(bakeTimer); clearTimeout(saveTimer); bakeTimer = saveTimer = 0;
+  clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); bakeTimer = saveTimer = repaintTimer = 0;
   display?.destroy(); display = null;
   S = null; status.baking = false; status.progress = 0; status.error = "";
 }
@@ -124,10 +124,17 @@ export function setParams(patch) {
   Object.assign(S.params, patch);
   const keys = Object.keys(patch);
   if ( keys.some((k) => !COLOR_ONLY.has(k) && !LIVE_ONLY.has(k)) ) scheduleBake();
-  if ( keys.some((k) => k === "colors" || k === "alpha") ) display?.setPalette(info.codes, S.params.colors, S.params.alpha);
+  if ( keys.some((k) => k === "colors" || k === "alpha") ) scheduleRepaint();
   if ( keys.includes("ms") && display?.set ) display.set.ms = S.params.ms;
   scheduleSave();
   tell("params");
+}
+
+/** Repaint the frames at most about ten times a second: a slider fires many events and every repaint redraws all the frames. */
+let repaintTimer = 0;
+function scheduleRepaint() {
+  if ( repaintTimer ) return;
+  repaintTimer = setTimeout(() => { repaintTimer = 0; if ( S && info ) display?.setPalette(info.codes, S.params.colors, S.params.alpha); }, 100);
 }
 
 /** Take the settings of one of the engine's looks (colours and every slider), keeping frames, frame time, seed, rods and opacity. */
