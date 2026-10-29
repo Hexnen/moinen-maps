@@ -185,7 +185,7 @@ function onTick() {
   const now = performance.now(), k = P.fxStrength / 5, seen = new Set();
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document;
-    if ( !t.visible || doc.hidden && !game.user.isGM || (doc.elevation ?? 0) > 0 ) continue;
+    if ( !t.visible || doc.hidden && !game.user.isGM || (doc.elevation ?? 0) > 0 || (doc.elevation ?? 0) < 0 ) continue;
     seen.add(t.id);
     const c = t.center, wet = inWater(c);
     const radius = Math.max(2, Math.round((Math.max(t.w, t.h) / 2) / s.px * 0.8));

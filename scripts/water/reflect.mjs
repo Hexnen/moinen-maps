@@ -2,20 +2,68 @@ import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
 
 /**
- * Reflections of tokens in the water: a vertical mirror image under every token, drawn only where there is water, in the water's own
- * pixel grid, with blur, opacity, offset, ripple, distortion, a fade with distance and a tint from the water. A "shadow" type draws a
- * dark silhouette instead of the mirror image. A light layer over the baked water (no new bake).
+ * Reflections of tokens in the water: a vertical mirror image under every token, drawn only where there is water, on the water's pixel
+ * grid. The effects: reflection or shadow (a black silhouette), offset, opacity, a choice of blur shapes, ripple (waves that grow with
+ * distance and loop with the water), scanline shift (rows jittering sideways); plus length, fade with distance and a tint from the
+ * water. The set of effects follows Reflecto by Devkidd (https://devkidd.itch.io/reflecto, an Aseprite extension); the code is our own.
  *
- * The idea follows Reflecto (Devkidd, an Aseprite extension, https://devkidd.itch.io/reflecto); no code of it is used.
- *
- * Settings (per scene, in the water settings): see REFLECT_DEFAULTS.
+ * A light layer over the baked water (no new bake). Settings (per scene, in the water settings): see REFLECT_DEFAULTS.
  */
 
 export const REFLECT_DEFAULTS = {
-  reflectOn: false, reflectType: "reflection", reflectOpacity: 45, reflectBlur: 1, reflectOffset: 0, reflectRipple: 3,
-  reflectDistort: 2, reflectLength: 100, reflectFade: 5, reflectTint: 3, reflectWho: "all"
+  reflectOn: false, reflectType: "reflection", reflectOpacity: 50, reflectOffset: 0, reflectBlurType: "none",
+  reflectRipple: true, reflectAmp: 30, reflectFreq: 20, reflectSpeed: 1, reflectScan: false, reflectScanValue: 3,
+  reflectLength: 100, reflectFade: 5, reflectTint: 3, reflectWho: "all"
 };
 export const REFLECT_KEYS = Object.keys(REFLECT_DEFAULTS);
+export const BLUR_TYPES = ["none", "3x3", "3x3hard", "5x5", "7x7", "9x9", "17x17", "5x3left", "17x3left", "3x17top", "5x5diagback", "5x5diagfwd"];
+
+/**
+ * Blur shapes as sampling windows: width, height, the anchor (which window cell sits on the output pixel) and which cells count.
+ * "left" shapes smear toward the left, "top" toward the top, the diagonals along a diagonal; "hard" weighs the centre more.
+ */
+function kernel(name) {
+  const box = (w, h, ax = (w - 1) >> 1, ay = (h - 1) >> 1) => ({ w, h, ax, ay, k: new Float32Array(w * h).fill(1) });
+  switch ( name ) {
+    case "3x3": return box(3, 3);
+    case "3x3hard": { const o = box(3, 3); o.k.set([0, 1, 0, 1, 3, 1, 0, 1, 0]); return o; }
+    case "5x5": return box(5, 5);
+    case "7x7": return box(7, 7);
+    case "9x9": return box(9, 9);
+    case "17x17": return box(17, 17);
+    case "5x3left": return box(5, 3, 4, 1);
+    case "17x3left": return box(17, 3, 16, 1);
+    case "3x17top": return box(3, 17, 1, 16);
+    case "5x5diagback": { const o = box(5, 5); o.k.fill(0); for ( let i = 0; i < 5; i++ ) o.k[i * 5 + i] = 1; return o; }
+    case "5x5diagfwd": { const o = box(5, 5); o.k.fill(0); for ( let i = 0; i < 5; i++ ) o.k[i * 5 + (4 - i)] = 1; return o; }
+    default: return null;
+  }
+}
+const kernelCache = new Map();
+const kernelOf = (name) => { if ( !kernelCache.has(name) ) kernelCache.set(name, kernel(name)); return kernelCache.get(name); };
+
+/** Convolve a canvas in place (premultiplied alpha, so soft edges do not darken). Returns false when the canvas cannot be read. */
+function blurCanvas(ctx, W, H, kn) {
+  let img;
+  try { img = ctx.getImageData(0, 0, W, H); } catch { return false; }
+  const src = img.data, out = new Uint8ClampedArray(src.length), total = kn.k.reduce((a, b) => a + b, 0) || 1;
+  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for ( let j = 0; j < kn.h; j++ ) {
+      const yy = y + j - kn.ay; if ( yy < 0 || yy >= H ) continue;
+      for ( let i = 0; i < kn.w; i++ ) {
+        const wgt = kn.k[j * kn.w + i]; if ( !wgt ) continue;
+        const xx = x + i - kn.ax; if ( xx < 0 || xx >= W ) continue;
+        const o = (yy * W + xx) * 4, al = src[o + 3] * wgt;
+        r += src[o] * al; g += src[o + 1] * al; b += src[o + 2] * al; a += al;
+      }
+    }
+    const o = (y * W + x) * 4;
+    if ( a > 0 ) { out[o] = r / a; out[o + 1] = g / a; out[o + 2] = b / a; out[o + 3] = a / (total * 255) * 255 / 1; }
+  }
+  ctx.putImageData(new ImageData(out, W, H), 0, 0);
+  return true;
+}
 
 const STEP_MS = 90;
 const REDUCED = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -25,7 +73,6 @@ const states = new Map();
 
 const S = () => Water.state();
 const cfg = () => ({ ...REFLECT_DEFAULTS, ...(S()?.params ?? {}) });
-const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 const hexRGB = (c) => { const n = parseInt(String(c).replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 
 /* ---------------------------------------------------------------- the water mask */
@@ -60,13 +107,13 @@ const wetAt = (x, y) => {
 /* ---------------------------------------------------------------- one token's reflection */
 
 function make(t) {
-  const out = document.createElement("canvas"), fin = document.createElement("canvas"), tmp = document.createElement("canvas");
+  const out = document.createElement("canvas"), mid = document.createElement("canvas"), fin = document.createElement("canvas"), tmp = document.createElement("canvas");
   fin.width = fin.height = 2;
   const tex = PIXI.Texture.from(fin, { scaleMode: PIXI.SCALE_MODES.NEAREST });
   tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
   const sprite = new PIXI.Sprite(tex); sprite.eventMode = "none"; sprite.visible = false;
   root.addChild(sprite);
-  return { out, fin, tmp, tex, sprite, seed: Math.floor(Math.random() * 1000), last: -1e9, dims: "" };
+  return { out, mid, fin, tmp, tex, sprite, seed: Math.floor(Math.random() * 1000), last: -1e9, dims: "" };
 }
 
 function destroyState(st) { st.sprite.destroy(); st.tex.destroy(true); }
@@ -74,8 +121,10 @@ function destroyState(st) { st.sprite.destroy(); st.tex.destroy(true); }
 function draw(t, st, P, now) {
   const s = S(), px = s.px, rect = Model.sceneRect();
   const tw = Math.max(2, Math.round(t.w / px)), th = Math.max(2, Math.round(t.h / px));
-  const mx = Math.ceil(P.reflectRipple * 0.5) + 2, H = Math.max(2, Math.round(th * P.reflectLength / 100));
-  const W = tw + mx * 2;
+  const amp = P.reflectRipple ? P.reflectAmp / 10 : 0, scan = P.reflectScan ? Math.round(P.reflectScanValue) : 0;
+  const kn = kernelOf(P.reflectBlurType);
+  const mx = Math.ceil(amp) + scan + (kn ? kn.w : 0) + 1, my = kn ? kn.h : 0;
+  const H = Math.max(2, Math.round(th * P.reflectLength / 100)) + my, W = tw + mx * 2;
   const doc = t.document;
   // a token above the water (elevation) is reflected further down
   const lift = Math.max(0, doc.elevation ?? 0) / (canvas.scene?.grid?.distance || 5) * (canvas.grid?.size ?? 100) * 0.25 / px;
@@ -94,7 +143,7 @@ function draw(t, st, P, now) {
   const dims = `${W}x${H}x${tw}x${th}`;
   if ( dims !== st.dims ) {
     st.dims = dims;
-    for ( const c of [st.out, st.fin] ) { c.width = W; c.height = H; }
+    for ( const c of [st.out, st.mid, st.fin] ) { c.width = W; c.height = H; }
     st.tmp.width = tw; st.tmp.height = th;
     // a canvas that changed size needs a texture of its own
     st.tex.destroy(true);
@@ -102,35 +151,48 @@ function draw(t, st, P, now) {
     st.tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     st.sprite.texture = st.tex;
   }
-  const tctx = st.tmp.getContext("2d"), octx = st.out.getContext("2d"), fctx = st.fin.getContext("2d");
-  // 1. the token, upside down, on the water's pixel grid (the downscale is what makes it pixel art)
+  const tctx = st.tmp.getContext("2d"), octx = st.out.getContext("2d"), mctx = st.mid.getContext("2d"), fctx = st.fin.getContext("2d");
+  // 1. the token upside down, on the water's pixel grid (the downscale is what makes it pixel art)
   tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, tw, th);
   tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = "high";
   tctx.save(); tctx.translate(0, th); tctx.scale(1, -1);
   try { tctx.drawImage(src, fr.x, fr.y, fr.width, fr.height, 0, 0, tw, th); } catch { tctx.restore(); return; }
   tctx.restore();
-  // 2. row by row, shifted sideways: ripple (a travelling wave, stronger with distance) and distortion (a slower wobble and jitter)
+  // 2. ripple: every row slides sideways on a travelling wave that grows toward the bottom; the wave comes back to where it
+  //    started once per loop of the water, `speed` times over
+  const loop = Math.max(400, (s.params.frames ?? 16) * (s.params.ms ?? 90)), turn = ((now % loop) / loop) * P.reflectSpeed * Math.PI * 2;
+  const freq = P.reflectFreq / 100;
   octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, W, H);
-  const phase = now / 600, A = P.reflectRipple * 0.4, D = P.reflectDistort * 0.25, step = Math.floor(now / 180);
-  for ( let y = 0; y < Math.min(H, th); y++ ) {
-    const depth = 0.35 + 0.65 * (y / H);
-    const dx = Math.round(A * depth * Math.sin(y * 0.95 + phase) + D * Math.sin(y * 0.37 - phase * 0.6) + (hash(y + st.seed, step) - 0.5) * D * 0.8);
+  for ( let y = 0; y < th && y < H; y++ ) {
+    const dx = Math.round(amp * (y / th) * Math.sin(turn - y * freq));
     octx.drawImage(st.tmp, 0, y, tw, 1, mx + dx, y, tw, 1);
   }
-  // 3. blur, a silhouette for the shadow type, the fade with distance
-  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.clearRect(0, 0, W, H);
-  fctx.filter = P.reflectBlur > 0 ? `blur(${(P.reflectBlur * 0.5).toFixed(2)}px)` : "none";
-  fctx.drawImage(st.out, 0, 0);
-  fctx.filter = "none";
-  if ( P.reflectType === "shadow" ) {
-    fctx.globalCompositeOperation = "source-in"; fctx.fillStyle = "#0a1220"; fctx.fillRect(0, 0, W, H);
+  // 3. scanline shift: every row jumps by its own random amount (a new throw every step)
+  let cur = st.out;
+  if ( scan > 0 ) {
+    mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H);
+    for ( let y = 0; y < H; y++ ) {
+      const dx = Math.floor(Math.random() * (scan * 2 + 1)) - scan;
+      mctx.drawImage(st.out, 0, y, W, 1, dx, y, W, 1);
+    }
+    cur = st.mid;
   }
+  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.clearRect(0, 0, W, H);
+  fctx.drawImage(cur, 0, 0);
+  // 4. shadow: the silhouette in black
+  if ( P.reflectType === "shadow" ) { fctx.globalCompositeOperation = "source-in"; fctx.fillStyle = "#000"; fctx.fillRect(0, 0, W, H); fctx.globalCompositeOperation = "source-over"; }
+  // 5. blur
+  if ( kn && !blurCanvas(fctx, W, H, kn) ) {
+    // a picture the browser will not let us read: a smooth blur of about the same reach
+    mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H); mctx.drawImage(st.fin, 0, 0);
+    fctx.clearRect(0, 0, W, H); fctx.filter = `blur(${Math.max(kn.w, kn.h) / 6}px)`; fctx.drawImage(st.mid, 0, 0); fctx.filter = "none";
+  }
+  // 6. fade with distance from the token
   if ( P.reflectFade > 0 ) {
     const g = fctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, `rgba(0,0,0,${Math.max(0, 1 - P.reflectFade / 8)})`);
-    fctx.globalCompositeOperation = "destination-in"; fctx.fillStyle = g; fctx.fillRect(0, 0, W, H);
+    fctx.globalCompositeOperation = "destination-in"; fctx.fillStyle = g; fctx.fillRect(0, 0, W, H); fctx.globalCompositeOperation = "source-over";
   }
-  fctx.globalCompositeOperation = "source-over";
   st.tex.baseTexture.update();
   // a reflection takes a little of the water's colour
   const cols = (s.params.colors ?? []).map(hexRGB), tint = P.reflectType === "shadow" || !cols[3] ? [255, 255, 255] : cols[3];

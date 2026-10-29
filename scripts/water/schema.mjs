@@ -30,8 +30,11 @@ export const SECTIONS = {
     ["", [r("lap"), r("waves"), r("shade"), r("sparkle"), r("net"), r("cell"), r("patches"), r("depth"), r("drift"), r("angle")]],
     ["tide", [t("tide"), r("tideAmp"), r("tideCycles"), r("tideUneven"), r("tideWet")]],
     ["tokens", [t("fxOn"), r("fxStrength"), t("fxRings"), t("fxSplash"), t("fxWake"), { kind: "select", key: "fxWho", options: ["all", "gm"] }]],
-    ["reflect", [t("reflectOn"), { kind: "select", key: "reflectType", options: ["reflection", "shadow"] }, r("reflectOpacity"), r("reflectBlur"), r("reflectOffset"), r("reflectRipple"),
-      r("reflectDistort"), r("reflectLength"), r("reflectFade"), r("reflectTint"), { kind: "select", key: "reflectWho", options: ["all", "gm"] }]]
+    ["submerge", [t("submergeOn"), r("submergeStrength"), r("submergeDepth"), t("submergeBubbles"), { kind: "select", key: "submergeWho", options: ["all", "gm"] }]],
+    ["reflect", [t("reflectOn"), { kind: "select", key: "reflectType", options: ["reflection", "shadow"] }, r("reflectOpacity"), r("reflectOffset"),
+      { kind: "select", key: "reflectBlurType", options: ["none", "3x3", "3x3hard", "5x5", "7x7", "9x9", "17x17", "5x3left", "17x3left", "3x17top", "5x5diagback", "5x5diagfwd"] },
+      t("reflectRipple"), r("reflectAmp"), r("reflectFreq"), r("reflectSpeed"), t("reflectScan"), r("reflectScanValue"), r("reflectLength"), r("reflectFade"), r("reflectTint"),
+      { kind: "select", key: "reflectWho", options: ["all", "gm"] }]]
   ],
   river: [
     ["", [r("flow"), r("rush"), r("rapids"), r("streaks"), r("rangle"), r("rnet"), r("rcell"), r("banks"), r("rdepth"), r("rpatches")]],
@@ -55,4 +58,4 @@ export const SECTIONS = {
 };
 
 /** Ranges the engine does not list (scene-level settings). */
-export const EXTRA_RANGE = { reflectOpacity: [0, 100], reflectBlur: [0, 5], reflectOffset: [-8, 16], reflectRipple: [0, 10], reflectDistort: [0, 10], reflectLength: [20, 150], reflectFade: [0, 10], reflectTint: [0, 10], fxStrength: [0, 10], px: [1, 64], palHue: [0, 60], palSat: [0, 60], palRange: [20, 180] };
+export const EXTRA_RANGE = { submergeStrength: [0, 10], submergeDepth: [1, 100], reflectAmp: [0, 100], reflectFreq: [0, 100], reflectSpeed: [1, 20], reflectScanValue: [0, 12], reflectOpacity: [0, 100], reflectOffset: [-8, 16], reflectLength: [20, 150], reflectFade: [0, 10], reflectTint: [0, 10], fxStrength: [0, 10], px: [1, 64], palHue: [0, 60], palSat: [0, 60], palRange: [20, 180] };

@@ -6,6 +6,7 @@ import { ALPHA_GROUPS, ALPHA_START } from "./paint.mjs";
 import * as Rods from "./rods.mjs";
 import { FX_DEFAULTS } from "./ripples.mjs";
 import { REFLECT_DEFAULTS } from "./reflect.mjs";
+import { SUBMERGE_DEFAULTS } from "./submerge.mjs";
 
 /**
  * The water settings window: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
@@ -116,7 +117,7 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
   }
 
   #field(f, S, info) {
-    const P = { ...FX_DEFAULTS, ...REFLECT_DEFAULTS, ...S.params };
+    const P = { ...FX_DEFAULTS, ...REFLECT_DEFAULTS, ...SUBMERGE_DEFAULTS, ...S.params };
     switch ( f.kind ) {
       case "range": {
         const [lo, hi] = this.#rangeOf(f.key, info);
@@ -207,7 +208,7 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
     if ( name === "px" ) { Water.setPx(Number(value)); return; }
     if ( name === "enabled" ) return Water.setEnabled(!!value);
     if ( name === "frames" ) return Water.setParams({ frames: Number(value) });
-    if ( name === "fallStyle" || name === "light" || name === "fxWho" || name === "reflectType" || name === "reflectWho" ) return Water.setParams({ [name]: String(value) });
+    if ( name === "fallStyle" || name === "light" || name === "fxWho" || name === "reflectType" || name === "reflectWho" || name === "reflectBlurType" || name === "submergeWho" ) return Water.setParams({ [name]: String(value) });
     if ( typeof value === "boolean" ) { Water.setParams({ [name]: value }); return; }
     const num = Number(value); if ( Number.isFinite(num) ) Water.setParams({ [name]: num });
   }
