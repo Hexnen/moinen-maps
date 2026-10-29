@@ -3,6 +3,8 @@ import * as Model from "./model.mjs";
 import { engineInfo, bake, ramp, disposeEngine } from "./engine.mjs";
 import { WaterDisplay } from "./display.mjs";
 import * as Cache from "./cache.mjs";
+import { publishBake, fetchBake } from "./publish.mjs";
+import { CODES } from "./codes-table.mjs";
 
 /**
  * The water of the open scene: loads its masks and settings from the scene flag, bakes them in the worker, plays the result, and
@@ -39,7 +41,7 @@ export async function onCanvasReady() {
 
 export function teardown() {
   gen++;
-  clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = 0;
+  clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); clearTimeout(publishTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = publishTimer = 0;
   display?.destroy(); display = null;
   S = null; status.baking = false; status.progress = 0; status.error = "";
 }
@@ -78,12 +80,36 @@ function releaseWorker() {
   releaseTimer = setTimeout(() => { releaseTimer = 0; if ( !status.baking ) disposeEngine(); }, game.user.isGM ? 120000 : 1500);
 }
 
+/* ---------------------------------------------------------------- publishing the bake (GM) */
+
+let publishTimer = 0, publishFailed = false;
+/** A few seconds after the last bake the GM uploads it to the world folder, so players need not bake. */
+function schedulePublish(key, bake) {
+  clearTimeout(publishTimer);
+  if ( !game.user.isGM || publishFailed || !S ) return;
+  publishTimer = setTimeout(async () => {
+    publishTimer = 0;
+    const scene = canvas.scene;
+    if ( !S || !scene || S.baked?.key === key || Cache.makeKey(scene.id, S) !== key ) return;     // edited again meanwhile
+    try {
+      await save();                                              // the masks and settings first, so the key means the same to everyone
+      const baked = await publishBake(scene.id, key, bake);
+      S.baked = baked;
+      await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
+    } catch ( err ) {
+      publishFailed = true;
+      console.warn(`${MODULE_ID} | could not publish the baked water`, err);
+      ui.notifications.warn(game.i18n.localize("MOINENMAPS.Water.publishFailed"));
+    }
+  }, 3000);
+}
+
 /** The GM always starts the worker (the settings window needs the looks); a player with a cached scene does not. */
 async function ensureTables() {
   if ( game.user.isGM ) { info ??= await engineInfo(); return; }
   if ( info || lite ) return;
-  lite = await Cache.getMeta();
-  if ( !lite ) info = await engineInfo();
+  // a player who only plays a published or cached bake needs the code table and nothing else: no worker
+  lite = { codes: CODES, defaults: (await Cache.getMeta())?.defaults ?? {} };
 }
 
 /* ---------------------------------------------------------------- baking */
@@ -104,11 +130,17 @@ export async function rebake() {
     display.setPalette(tables().codes, S.params.colors, S.params.alpha);
   } catch ( err ) { status.error = String(err?.message ?? err); tell("status"); return; }
   const origin = { x: Model.sceneRect(scene).x, y: Model.sceneRect(scene).y };
-  // baked before on this browser: no worker, no waiting
+  // baked before on this browser, or published by the GM: no worker, no waiting
   const key = Cache.makeKey(scene.id, S);
-  const hit = await Cache.getBake(key);
+  let hit = await Cache.getBake(key);
   if ( my !== gen ) return;
+  if ( !hit && S.baked?.key === key ) {
+    hit = await fetchBake(S.baked);
+    if ( my !== gen ) return;
+    if ( hit ) Cache.putBake(key, { box: hit.box, ms: hit.ms, frames: hit.frames.map((f) => f.slice()) });
+  }
   if ( hit ) {
+    if ( S.baked?.key !== key ) schedulePublish(key, hit);     // baked here before but never uploaded
     display.begin(hit.box, S.px, origin, hit.ms ?? S.params.ms);
     hit.frames.forEach((f, i) => display.addFrame(i + 1, f));
     display.commit();
@@ -131,7 +163,8 @@ export async function rebake() {
       display?.commit();
       if ( frames.length === res.frames && frames.every(Boolean) ) {
         Cache.putBake(key, { box: res.box, ms: res.ms, frames: frames.map((f) => f.slice()) });
-        if ( info ) Cache.putMeta(info.codes, info.defaults);
+        if ( info ) { Cache.putMeta(info.codes, info.defaults); if ( info.codes.length === CODES.length && info.codes.some((v, i) => v !== CODES[i]) ) console.warn(`${MODULE_ID} | codes-table.mjs is out of date with lib/wowe/codes.lua`); }
+        schedulePublish(key, { box: res.box, ms: res.ms, frames });
       }
     }
   } catch ( err ) {

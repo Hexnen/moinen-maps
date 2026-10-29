@@ -75,7 +75,7 @@ export function load(scene = canvas.scene) {
   const { w, h } = gridOf(f.px);
   const masks = {};
   for ( const l of LAYERS ) masks[l] = rleDecode(f.m?.[l], w * h);
-  return { px: f.px, w, h, masks, params: foundry.utils.deepClone(f.params ?? {}), enabled: f.enabled !== false, rev: nextRev() };
+  return { px: f.px, w, h, masks, params: foundry.utils.deepClone(f.params ?? {}), enabled: f.enabled !== false, rev: nextRev(), baked: f.baked ?? null };
 }
 
 /** The flag payload of a water set. */
