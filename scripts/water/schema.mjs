@@ -28,7 +28,8 @@ export const SECTIONS = {
   ],
   water: [
     ["", [r("lap"), r("waves"), r("shade"), r("sparkle"), r("net"), r("cell"), r("patches"), r("depth"), r("drift"), r("angle")]],
-    ["tide", [t("tide"), r("tideAmp"), r("tideCycles"), r("tideUneven"), r("tideWet")]]
+    ["tide", [t("tide"), r("tideAmp"), r("tideCycles"), r("tideUneven"), r("tideWet")]],
+    ["tokens", [t("fxOn"), r("fxStrength"), t("fxRings"), t("fxSplash"), t("fxWake"), { kind: "select", key: "fxWho", options: ["all", "gm"] }]]
   ],
   river: [
     ["", [r("flow"), r("rush"), r("rapids"), r("streaks"), r("rangle"), r("rnet"), r("rcell"), r("banks"), r("rdepth"), r("rpatches")]],
@@ -52,4 +53,4 @@ export const SECTIONS = {
 };
 
 /** Ranges the engine does not list (scene-level settings). */
-export const EXTRA_RANGE = { px: [1, 64], palHue: [0, 60], palSat: [0, 60], palRange: [20, 180] };
+export const EXTRA_RANGE = { fxStrength: [0, 10], px: [1, 64], palHue: [0, 60], palSat: [0, 60], palRange: [20, 180] };

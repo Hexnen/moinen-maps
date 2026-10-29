@@ -9,6 +9,7 @@ import { registerFilterSettings } from "./filter.mjs";
 import * as WaterScene from "./water/water.mjs";
 import * as WaterEditor from "./water/editor.mjs";
 import * as WaterRods from "./water/rods.mjs";
+import * as WaterRipples from "./water/ripples.mjs";
 import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
 import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, onCombatStart, teardownTokenDrops } from "./token-drop.mjs";
@@ -44,9 +45,9 @@ Hooks.on("canvasTearDown", () => setSceneDraft(null));
 
 Hooks.once("init", () => { registerCoreSettings(); registerSettings(); registerFilterSettings(); });
 // the floating pin filter follows what is on the map
-Hooks.on("canvasReady", () => { refreshPanel(); WaterScene.onCanvasReady(); WaterEditor.onCanvasReady(); WaterRods.onCanvasReady(); });
+Hooks.on("canvasReady", () => { refreshPanel(); WaterScene.onCanvasReady(); WaterEditor.onCanvasReady(); WaterRods.onCanvasReady(); WaterRipples.onCanvasReady(); });
 Hooks.on("updateScene", WaterScene.onUpdateScene);
-Hooks.on("canvasTearDown", () => { removePanel(); WaterRods.teardown(); WaterEditor.teardown(); WaterScene.teardown(); });
+Hooks.on("canvasTearDown", () => { removePanel(); WaterRipples.teardown(); WaterRods.teardown(); WaterEditor.teardown(); WaterScene.teardown(); });
 for ( const h of ["createNote", "updateNote", "deleteNote", "refreshNote", "sightRefresh", "updateScene", "moinenMapsPanel"] ) Hooks.on(h, () => schedulePanel());
 // macros and other modules: game.modules.get("moinen-maps").api  (+ hook "moinenMaps.districtAttrChanged")
 Hooks.once("ready", () => { game.modules.get(MODULE_ID).api = api; });
