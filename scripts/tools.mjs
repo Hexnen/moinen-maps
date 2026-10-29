@@ -3,6 +3,7 @@ import { openBrushOptions, clearDistricts, registerDistrictSettings } from "./di
 import { MODULE_ID, PIN_COLORS, pinTypeOf, findPinType, allPresets, presetLabel, typeLabel } from "./config.mjs";
 import { syncTool as syncWaterTool, registerWaterEditorSettings } from "./water/editor.mjs";
 import { openWaterPanel } from "./water/panel.mjs";
+import { RODS_TOOL, syncRodTool, registerRodSettings } from "./water/rods.mjs";
 import { registerPresetSettings, currentPinType, togglePalette, paletteOpen, refreshToolButton } from "./presets.mjs";
 import { fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
@@ -20,6 +21,7 @@ export function registerSettings() {
   registerDistrictSettings();
   registerPresetSettings();
   registerWaterEditorSettings();
+  registerRodSettings();
   game.settings.register(MODULE_ID, "pinColor", { scope: "client", config: false, type: String, default: "", onChange: syncColorVar });
 }
 
@@ -64,7 +66,8 @@ export function onGetSceneControlButtons(controls) {
   tools["mm-w-river"] = { ...wt, name: "mm-w-river", order: 41, title: "MOINENMAPS.Tool.waterRiver", icon: "fa-solid fa-water" };
   tools["mm-w-fall"] = { ...wt, name: "mm-w-fall", order: 42, title: "MOINENMAPS.Tool.waterFall", icon: "fa-solid fa-arrows-down-to-line" };
   tools["mm-w-erase"] = { ...wt, name: "mm-w-erase", order: 43, title: "MOINENMAPS.Tool.waterErase", icon: "fa-solid fa-droplet-slash" };
-  tools["mm-w-opts"] = { name: "mm-w-opts", order: 44, title: "MOINENMAPS.Tool.waterOpts", icon: "fa-solid fa-faucet-drip", button: true, onChange: () => openWaterPanel() };
+  tools[RODS_TOOL] = { ...wt, name: RODS_TOOL, order: 44, title: "MOINENMAPS.Tool.waterRods", icon: "fa-solid fa-bezier-curve" };
+  tools["mm-w-opts"] = { name: "mm-w-opts", order: 45, title: "MOINENMAPS.Tool.waterOpts", icon: "fa-solid fa-faucet-drip", button: true, onChange: () => openWaterPanel() };
   tools.color = { name: "color", order: 17, title: "MOINENMAPS.Tool.color", icon: "fa-solid fa-palette", button: true,
     onChange: () => openColorDialog() };
   tools.clear = { name: "clear", order: 60, title: "MOINENMAPS.Tool.clear", icon: "fa-solid fa-trash", button: true,
@@ -79,7 +82,7 @@ export function onGetSceneControlButtons(controls) {
       canvas.notes.setAllRenderFlags({ refreshState: true });
       if ( active && !tool.control ) canvas.notes.releaseAll();
       document.body.classList.toggle("mm-placing", !!activePinType());
-      syncWaterTool();
+      syncWaterTool(); syncRodTool();
     },
     tools,
     activeTool: "select"
@@ -91,8 +94,8 @@ export function onRenderSceneControls() {
   const root = ui.controls?.element;
   if ( !root ) return;
   refreshToolButton();
-  for ( const [name, color] of [["mm-w-water", "#2f86d6"], ["mm-w-river", "#46d0d0"], ["mm-w-fall", "#e8f4ff"], ["mm-w-erase", "#ffffff"], ["mm-w-opts", "#46d0d0"]] ) root.querySelector(`button.tool[data-tool="${name}"]`)?.style.setProperty("--mm-tool", color);
-  syncWaterTool();
+  for ( const [name, color] of [["mm-w-water", "#2f86d6"], ["mm-w-river", "#46d0d0"], ["mm-w-fall", "#e8f4ff"], ["mm-w-erase", "#ffffff"], [RODS_TOOL, "#ffa63d"], ["mm-w-opts", "#46d0d0"]] ) root.querySelector(`button.tool[data-tool="${name}"]`)?.style.setProperty("--mm-tool", color);
+  syncWaterTool(); syncRodTool();
   document.body.classList.toggle("mm-placing", !!activePinType());
   syncColorVar();
 }

@@ -254,7 +254,9 @@ body.mm-placing #board { cursor: crosshair; }
 @media (prefers-reduced-motion: reduce) { .mm-filter { animation: none; } .mm-filter-row, .mm-filter-row img { transition: none; } }
 
 /* ---- water ---- */
-body.mm-painting-water #board { cursor: crosshair; }
+body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair; }
+.mm-wp-rodbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.4rem; }
+.mm-wp-rodbtns button { padding: 0.25rem 0.4rem; }
 .mm-water-panel .window-content { padding: 0; overflow: hidden; }
 .mm-wp { display: flex; flex-direction: column; height: 100%; }
 .mm-wp-status { padding: 0.3rem 0.7rem; font-size: 0.78rem; opacity: 0.75; border-bottom: 1px solid var(--mm-edge); }

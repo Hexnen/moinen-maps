@@ -3,6 +3,7 @@ import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
 import { TABS, SECTIONS, LOOK_GROUPS, COLOR_NAMES, FRAME_CHOICES, EXTRA_RANGE } from "./schema.mjs";
 import { ALPHA_GROUPS, ALPHA_START } from "./paint.mjs";
+import * as Rods from "./rods.mjs";
 
 /**
  * The water settings window: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
@@ -33,6 +34,7 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
 
   tab = "look";
   #hook = null;
+  #rodHook = null;
   #palTimer = 0;
 
   get title() { return T("Water.title"); }
@@ -64,12 +66,15 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
 
   _onFirstRender() {
     this.#hook = (kind) => { if ( kind === "status" ) this.#updateStatus(); else if ( kind === "loaded" ) this.render(); };
+    this.#rodHook = () => { if ( this.tab === "rods" ) this.render(); };
+    Hooks.on("moinenMapsRods", this.#rodHook);
     Hooks.on("moinenMapsWater", this.#hook);
   }
 
   _onClose() {
     if ( this.#hook ) Hooks.off("moinenMapsWater", this.#hook);
-    this.#hook = null; panel = null;
+    if ( this.#rodHook ) Hooks.off("moinenMapsRods", this.#rodHook);
+    this.#hook = this.#rodHook = null; panel = null;
   }
 
   /* ---------------------------------------------------------------- status */
@@ -143,8 +148,16 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
         return this.#row("enabled", label("enabled"), hint("enabled"), `<input type="checkbox" id="mm-wp-enabled" name="enabled"${S.enabled ? " checked" : ""}>`);
       case "opacity":
         return ALPHA_GROUPS.map((g) => this.#row(`alpha.${g}`, T(`Water.a.${g}`), "", `<range-picker id="mm-wp-alpha.${g}" name="alpha.${g}" min="0" max="100" step="5" value="${Number(P.alpha?.[g] ?? ALPHA_START[g] ?? 100)}"></range-picker>`)).join("");
-      case "rods":
-        return `<p class="hint">${esc(T("Water.rodsHint"))}</p>`;
+      case "rods": {
+        const kind = game.settings.get(MODULE_ID, "waterRodKind"), branch = game.settings.get(MODULE_ID, "waterRodBranch"), n = (P.guides ?? []).length;
+        return `<p class="hint">${esc(T("Water.rodsHint"))}</p>
+          ${this.#row("rodKind", T("Water.rod.kind"), T("Water.rod.kindHint"), `<select id="mm-wp-rodKind" name="rodKind"><option value="flow"${kind === "flow" ? " selected" : ""}>${esc(T("Water.rod.flow"))}</option><option value="lip"${kind === "lip" ? " selected" : ""}>${esc(T("Water.rod.lip"))}</option></select>`)}
+          ${this.#row("rodBranch", T("Water.rod.branch"), T("Water.rod.branchHint"), `<input type="checkbox" id="mm-wp-rodBranch" name="rodBranch"${branch ? " checked" : ""}>`)}
+          <div class="mm-wp-rodbtns"><button type="button" data-act="rod-tool"><i class="fa-solid fa-bezier-curve" inert></i> ${esc(T("Water.rod.draw"))}</button>
+            <button type="button" data-act="rod-reverse" data-tooltip="${esc(T("Water.rod.reverseHint"))}"><i class="fa-solid fa-arrows-left-right" inert></i> ${esc(T("Water.rod.reverse"))}</button>
+            <button type="button" data-act="rod-undo"><i class="fa-solid fa-rotate-left" inert></i> ${esc(T("Water.rod.undo"))}</button>
+            <button type="button" data-act="rod-clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("Water.rod.clear"))} (${n})</button></div>`;
+      }
       default:
         return "";
     }
@@ -158,6 +171,10 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
     if ( b.dataset.tab ) { this.tab = b.dataset.tab; return this.render(); }
     if ( b.dataset.look ) { Water.applyLook(b.dataset.look); return this.render(); }
     if ( b.dataset.act === "create" ) { await Water.ensureState(); return this.render(); }
+    if ( b.dataset.act === "rod-tool" ) return ui.controls.activate({ control: "moinenmaps", tool: Rods.RODS_TOOL });
+    if ( b.dataset.act === "rod-reverse" ) return Rods.reverseSelected();
+    if ( b.dataset.act === "rod-undo" ) return Rods.undoRod();
+    if ( b.dataset.act === "rod-clear" ) { Rods.clearRods(); return this.render(); }
     if ( b.dataset.act === "variation" ) { Water.newVariation(); return; }
     if ( b.dataset.act === "clear" && S ) {
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Water.clear") }, content: `<p>${esc(T("Water.clearConfirm"))}</p>`, rejectClose: false });
@@ -183,6 +200,8 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
     }
     if ( name.startsWith("alpha.") ) return Water.setParams({ alpha: { ...S.params.alpha, [name.slice(6)]: Number(value) } });
     if ( ["palBase", "palHue", "palSat", "palRange"].includes(name) ) return this.#palette(name, value);
+    if ( name === "rodKind" ) return game.settings.set(MODULE_ID, "waterRodKind", String(value));
+    if ( name === "rodBranch" ) return game.settings.set(MODULE_ID, "waterRodBranch", !!value);
     if ( name === "px" ) { Water.setPx(Number(value)); return; }
     if ( name === "enabled" ) return Water.setEnabled(!!value);
     if ( name === "frames" ) return Water.setParams({ frames: Number(value) });

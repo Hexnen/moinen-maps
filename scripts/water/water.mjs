@@ -59,6 +59,7 @@ async function start() {
     return;
   }
   S.params = { ...foundry.utils.deepClone(info.defaults), ...S.params };
+  if ( !Array.isArray(S.params.guides) ) S.params.guides = [];
   display ??= new WaterDisplay();
   display.setPalette(info.codes, S.params.colors, S.params.alpha);
   await rebake();
