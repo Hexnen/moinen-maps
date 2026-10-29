@@ -3,7 +3,7 @@ import { MODULE_ID } from "../config.mjs";
 /**
  * The client of the water worker (lib/water-worker.js): one worker for the session, started on first use.
  */
-let worker = null, ready = null, info = null, nextId = 1, sentKey = null;
+let worker = null, ready = null, info = null, nextId = 1;
 const pending = new Map();
 
 const route = (path) => foundry.utils.getRoute(`modules/${MODULE_ID}/lib/${path}`);
@@ -48,9 +48,7 @@ export function engineInfo() {
  */
 export async function bake(req, { onBegin, onFrame, onProgress } = {}) {
   await engineInfo();
-  const fresh = req.maskKey !== sentKey;
-  sentKey = req.maskKey;
-  return post({ type: "bake", W: req.W, H: req.H, masks: fresh ? req.masks : {}, maskKey: req.maskKey, params: req.params, onBegin, onFrame, onProgress });
+  return post({ type: "bake", W: req.W, H: req.H, masks: req.masks, maskKey: req.maskKey, params: req.params, onBegin, onFrame, onProgress });
 }
 
 /** The six colours made from one (shadow .. foam). */
@@ -62,5 +60,5 @@ export async function ramp(hex, hue, sat, range) {
 export const cachedInfo = () => info;
 
 export function disposeEngine() {
-  worker?.terminate(); worker = null; ready = null; info = null; sentKey = null; pending.clear();
+  worker?.terminate(); worker = null; ready = null; info = null; pending.clear();
 }

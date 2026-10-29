@@ -7,6 +7,8 @@ import { buildLut, paintFrame } from "./paint.mjs";
  * A bake fills a new frame set (`next`); the one playing (`set`) stays until the new one is complete (`commit`), unless nothing is
  * playing yet, in which case the frames show as they arrive.
  */
+const REDUCED = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
+
 export class WaterDisplay {
   constructor() {
     this.root = new PIXI.Container();
@@ -89,6 +91,7 @@ export class WaterDisplay {
 
   tick(dtMS) {
     if ( this.paused || !this.set ) return;
+    if ( REDUCED?.matches ) return this.show(0);     // reduced motion: one still frame
     this.t += dtMS;
     const n = this.set.textures.filter(Boolean).length;
     this.show(n < 2 ? 0 : Math.floor(this.t / Math.max(20, this.set.ms)) % n);
