@@ -22,7 +22,7 @@
  *   water      a flooded hole over a deep substrate fills deeper there (level carried to the water engine in the cover's green).
  */
 
-export const SUBSTRATE_VERSION = 1;
+export const SUBSTRATE_VERSION = 2;   // 2: the read set (readsOf), not the windows round both
 const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const INTERACT = {
   blast:    { "*": { deepen: 0.4 }, cracks: { deepen: 0.25 }, flood: { deepen: 0.2 } },
@@ -41,12 +41,19 @@ const fnvStr = (s, h = 2166136261) => { for ( let i = 0; i < s.length; i++ ) h =
 
 /* ================================================================ where a stroke can be (art px, conservative, from its data alone) */
 
-/** The margin the bake's organic / torn outline may add round a stroke's mask box (core.mjs partsOf: FM). */
-const outlineMargin = (P) => 4 + Math.ceil(12 * 1.3) + (P?.jagged ? 22 : 0);
-/** A box round a stroke's OWN pixels (where its substrate is read). */
+/**
+ * The margin the bake's organic / torn outline may add round a stroke's mask box (core.mjs partsOf: FM = 4 + ceil(OA x 1.3) + 22 when
+ * torn, OA = clamp(Rb x 0.27, 1.2, 12) for every kind but a tear, Rb the deepest inner distance: at most half the box's short side).
+ */
+const outlineMargin = (o, P, K) => {
+  const Rb = (Math.floor(Math.min(o.w, o.h) / 2) + 1) * K, org = (o.t & 7) !== 5 && Rb >= 3;
+  const OA = org ? clamp(Rb * 0.27, 1.2, 12) : 0, jag = P?.jagged && (P.jag ?? 0.6) > 0;
+  return 4 + Math.ceil(OA * 1.3) + (jag ? 22 : 0) + 1;
+};
+/** A box round a stroke's OWN pixels (its torn outline: where its substrate is read, where its cover can lie). */
 export function ownBox(o, P, K = 2) {
   if ( o.k ) return { x0: o.x0 * K, y0: o.y0 * K, x1: (o.x0 + o.w) * K, y1: (o.y0 + o.h) * K };
-  const m = outlineMargin(P);
+  const m = outlineMargin(o, P, K);
   return { x0: o.x0 * K - m, y0: o.y0 * K - m, x1: (o.x0 + o.w) * K + m, y1: (o.y0 + o.h) * K + m };
 }
 /** A box round everything a stroke's sprites may cover (its parts' windows: thrown pieces, halos, hairlines; core.mjs bake step 2). */
@@ -60,19 +67,96 @@ export function spriteBox(o, P, K = 2) {
 }
 const meets = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 
+/** A stroke's highest painted level (bytes: its level bytes; what its halo, lip and thrown pieces count as). */
+const maxLv = new WeakMap();
+export const maxLevel = (o, bytes = o?.bytes) => { if ( !bytes ) return 1; let m = maxLv.get(bytes); if ( m ) return m; m = 1; for ( const v of bytes ) if ( (v & 3) > m ) m = v & 3; maxLv.set(bytes, m); return m; };
+
 /**
- * For every stroke (in creation order), the indices of the OLDER strokes (erase strokes too) that may lie under its own pixels. An
- * erase stroke depends on nothing (it is not baked).
+ * THE READ SET: does newer stroke B (index i) read older stroke A (index j)? Only what B really reads, never the wide windows:
+ *   - A's OWN pixels (its torn outline, its cover) can lie inside B's own pixels: B is made of them (its substrate, its severity cut);
+ *     A's halo, lips and thrown pieces count only through such an A (an A whose own pixels stay clear of B's is not read: its halo
+ *     under B stays visible where B lays nothing, B's ground covers it where B does);
+ *   - A is of a HIGHER level than all of B and its own pixels lie within B's reach: it clips what B draws round itself;
+ *   - an erase stroke anywhere B reaches (it takes older damage out of B's substrate and out of what clips B).
+ * The same predicate picks the strokes composed in the bake (SubstrateSource) and the strokes in B's signature digest (fullSigs), so
+ * the digest covers exactly what the bake reads.
  */
-export function depsOf(objects, P, K = 2) {
+export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
   const own = objects.map((o) => ownBox(o, P, K)), spr = objects.map((o) => spriteBox(o, P, K));
+  const lv = objects.map((o) => o.k ? 0 : maxLevel(o, bytesOf(o)));
+  const mar = objects.map((o) => o.k ? 0 : outlineMargin(o, P, K));
+  const memo = new Map();
+  return (j, i) => {
+    const key = j * 65536 + i; let v = memo.get(key);
+    if ( v === undefined ) memo.set(key, v = reads(j, i));
+    return v;
+  };
+  function reads(j, i) {
+    const a = objects[j];
+    if ( a.k ) return meets(own[j], spr[i]);
+    if ( lv[j] > lv[i] && meets(own[j], spr[i]) ) return true;
+    // own pixels against own pixels, at mask resolution: their torn outlines can only touch where the masks lie closer than the two
+    // outline margins (boxes alone chain every long diagonal stroke to everything near it)
+    return meets(own[j], own[i]) && masksNear(a, bytesOf(a), objects[i], bytesOf(objects[i]), (mar[j] + mar[i]) / K);
+  }
+}
+
+/** Distance (mask px, chamfer 1 / 1.4142) from a stroke's painted pixels over its box padded by `pad`; cached per bytes. */
+const fields = new WeakMap();
+function fieldOf(o, bytes, pad) {
+  let f = fields.get(bytes);
+  if ( f && f.pad >= pad ) return f;
+  const W = o.w + 2 * pad, H = o.h + 2 * pad, d = new Float32Array(W * H).fill(1e6);
+  for ( let y = 0; y < o.h; y++ ) for ( let x = 0; x < o.w; x++ ) if ( bytes[y * o.w + x] ) d[(y + pad) * W + x + pad] = 0;
+  const D = 1.4142;
+  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
+    const i = y * W + x; let v = d[i];
+    if ( x > 0 ) v = Math.min(v, d[i - 1] + 1);
+    if ( y > 0 ) { v = Math.min(v, d[i - W] + 1); if ( x > 0 ) v = Math.min(v, d[i - W - 1] + D); if ( x < W - 1 ) v = Math.min(v, d[i - W + 1] + D); }
+    d[i] = v;
+  }
+  for ( let y = H - 1; y >= 0; y-- ) for ( let x = W - 1; x >= 0; x-- ) {
+    const i = y * W + x; let v = d[i];
+    if ( x < W - 1 ) v = Math.min(v, d[i + 1] + 1);
+    if ( y < H - 1 ) { v = Math.min(v, d[i + W] + 1); if ( x < W - 1 ) v = Math.min(v, d[i + W + 1] + D); if ( x > 0 ) v = Math.min(v, d[i + W - 1] + D); }
+    d[i] = v;
+  }
+  f = { d, W, H, pad };
+  fields.set(bytes, f);
+  return f;
+}
+/** Do two strokes' painted pixels come closer than `r` mask px anywhere? */
+function masksNear(a, ab, b, bb, r) {
+  if ( !ab || !bb ) return true;
+  const pad = Math.ceil(r) + 1, f = fieldOf(a, ab, Math.max(pad, 24));
+  const P0 = f.pad;
+  for ( let y = 0; y < b.h; y++ ) {
+    const fy = b.y0 + y - a.y0 + P0; if ( fy < 0 || fy >= f.H ) continue;
+    for ( let x = 0; x < b.w; x++ ) {
+      if ( !bb[y * b.w + x] ) continue;
+      const fx = b.x0 + x - a.x0 + P0; if ( fx < 0 || fx >= f.W ) continue;
+      if ( f.d[fy * f.W + fx] < r ) return true;
+    }
+  }
+  return false;
+}
+
+/** For every stroke (creation order) the indices of the older strokes it reads (readsOf). An erase stroke reads nothing. */
+export function depsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
+  const reads = readsOf(objects, P, K, bytesOf);
   return objects.map((o, i) => {
     if ( o.k ) return [];
     const out = [];
-    // under its own pixels (its substrate), or under anything it draws round them (a higher level there clips it: the severity rule)
-    for ( let j = 0; j < i; j++ ) if ( meets(spr[j], own[i]) || meets(own[j], spr[i]) ) out.push(j);
+    for ( let j = 0; j < i; j++ ) if ( reads(j, i) ) out.push(j);
     return out;
   });
+}
+
+/** The longest chain of strokes each waiting for the one under it (waves of a cold bake). */
+export function criticalPath(deps) {
+  const d = [];
+  deps.forEach((ds, i) => { d[i] = ds.length ? 1 + Math.max(...ds.map((k) => d[k])) : 0; });
+  return d.length ? Math.max(...d) + 1 : 0;
 }
 
 /**
@@ -80,11 +164,13 @@ export function depsOf(objects, P, K = 2) {
  * substrates), else own + "~" + a digest of those older strokes' ids and full signatures (so a change anywhere down the chain reaches
  * the strokes above it, and only those). Returns [{ own, sig, deps }].
  */
-export function fullSigs(objects, ownSig, P, K = 2) {
-  const deps = depsOf(objects, P, K), out = [];
+export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes) {
+  const deps = depsOf(objects, P, K, bytesOf), out = [];
   objects.forEach((o, i) => {
     const own = ownSig(o), d = deps[i];
-    const sig = d.length ? `${own}~${fnvStr(`${SUBSTRATE_VERSION}|` + d.map((j) => `${objects[j].id}:${out[j].sig}`).join("|")).toString(36)}` : own;
+    // (the digest names the older strokes' OWN signatures: B reads their plain looks, made from their own data alone - a change further
+    // down never reaches B unless B reads that stroke itself)
+    const sig = d.length ? `${own}~${fnvStr(`${SUBSTRATE_VERSION}|` + d.map((j) => `${objects[j].id}:${out[j].own}`).join("|")).toString(36)}` : own;
     out.push({ own, sig, deps: d });
   });
   return out;
@@ -128,24 +214,27 @@ export function levelAt(o, ax, ay, K = 2) {
 }
 
 /** A stroke's highest painted level (what its halo, lip and thrown pieces count as). */
-const maxLv = new WeakMap();
-const maxLevel = (o) => { const b = o?.bytes; if ( !b ) return 1; let m = maxLv.get(b); if ( m ) return m; m = 1; for ( const v of b ) if ( (v & 3) > m ) m = v & 3; maxLv.set(b, m); return m; };
+
 
 /**
  * The older strokes of one bake call: the strokes baked in this call (`add`, as their areas come out, in creation order) and the
  * records of older strokes that are not (`under`: index -> sprites, from the main thread), plus the erase strokes (`objects[j].k`).
  */
 export class SubstrateSource {
-  constructor(objects, under, P, K) {
-    this.objects = objects ?? []; this.K = K; this.P = P;
+  /**
+   * `plain(j)` -> the area results of stroke j baked from its own data alone (core.mjs bakes them on demand, cached). `under`
+   * (index -> sprites) may hand in such plain looks instead (records of strokes known to have no substrate).
+   */
+  constructor(objects, under, P, K, plain = null) {
+    this.objects = objects ?? []; this.K = K; this.P = P; this.plain = plain;
     this.byIndex = new Map();
     for ( const [j, sprites] of Object.entries(under ?? {}) ) this.byIndex.set(Number(j), partsOfSprites(sprites, this.objects[Number(j)]));
-    this.boxes = this.objects.map((o) => spriteBox(o, P, K));
+    this.reads = readsOf(this.objects, P, K);
   }
-  add(index, res) {
-    const list = this.byIndex.get(index) ?? [];
-    if ( !this.byIndex.has(index) ) this.byIndex.set(index, list);
-    list.push(...partsOfSprites(spritesOfResult(res), this.objects[index]));
+  /** Stroke j's plain look as parts (null when nobody can give it). */
+  partsOf(j) {
+    if ( !this.byIndex.has(j) && this.plain ) this.byIndex.set(j, this.plain(j).flatMap((res) => partsOfSprites(spritesOfResult(res), this.objects[j])));
+    return this.byIndex.get(j) ?? null;
   }
 
   /**
@@ -159,12 +248,11 @@ export class SubstrateSource {
   compose(win, index, map) {
     const { W, H, RX, RY, own, px } = win, K = this.K;
     if ( !px.length ) return null;
-    const wbox = { x0: RX, y0: RY, x1: RX + W, y1: RY + H };
     const layers = [];
     for ( let j = 0; j < index; j++ ) {
-      const o = this.objects[j]; if ( !o || !meets(this.boxes[j], wbox) ) continue;
+      const o = this.objects[j]; if ( !o || !this.reads(j, index) ) continue;
       if ( o.k && !o.skip ) layers.push({ erase: o });
-      else { const parts = this.byIndex.get(j); if ( parts?.length ) layers.push({ parts }); }
+      else { const parts = this.partsOf(j); if ( parts?.length ) layers.push({ parts }); }
     }
     if ( !layers.length ) return null;
     // (levels are the PAINTED levels of the mask bytes, not the bake's smoothed severity)

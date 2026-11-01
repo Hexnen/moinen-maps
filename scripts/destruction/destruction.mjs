@@ -42,6 +42,7 @@ let lastRecs = null;                // the strokes on screen (their hash is comp
  * assembled from them, so the GM and every player show the same pixels whatever their source.
  */
 const recs = new Map();
+const plainRecs = new Map();         // `<base>|<stroke id>|<own signature>` -> its PLAIN look (baked from its own data alone: substrate.mjs)
 const depOnly = new Set();           // strokes whose new record differs only by the strokes under them (substrate.mjs): silent swap
 const depStats = { swaps: 0 };
 let shownRecs = new Map();           // stroke id -> record on screen (its older look stays until the new one is here)
@@ -136,7 +137,7 @@ function teardown() {
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
   played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
-  netAbort?.abort(); netAbort = null; recs.clear(); shownRecs = new Map(); staleRecs.clear(); waitingSince.clear(); persistAgain = false;
+  netAbort?.abort(); netAbort = null; recs.clear(); plainRecs.clear(); shownRecs = new Map(); staleRecs.clear(); waitingSince.clear(); persistAgain = false;
   forgetSceneMap();
   disposeBaker();
   Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", warning: "", source: "", stats: null, hash: "", areas: [] });
@@ -381,16 +382,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     }
     toBake = late;
   }
-  // a stroke baked here is baked over the strokes under it (substrate.mjs): one of those without its record is baked too (first)
-  if ( toBake.length ) {
-    const byIndex = new Map(want.map((w) => [w.index, w])), inBake = new Set(toBake.map((w) => w.index));
-    for ( let k = 0; k < toBake.length; k++ ) for ( const j of toBake[k].deps ) {
-      // (a deferred stroke under it lends its older look as the substrate instead: no chain of re-bakes for one new stroke)
-      const d = byIndex.get(j); if ( !d || inBake.has(j) || recs.has(d.rk) || deferred.has(d.objId) ) continue;
-      inBake.add(j); toBake.push(d);
-    }
-    toBake.sort((a, b) => a.index - b.index);
-  }
+  // (a stroke is baked over the PLAIN looks of the older strokes it reads, which the worker bakes from their data itself
+  // (substrate.mjs): no stroke waits for another's record, any set of strokes bakes in any order and in parallel)
   if ( toBake.length ) {
     // why this client bakes on its own (a loop is then easy to see: console and api.destruction.net.trace().events)
     const why = taken.length ? "edit" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
@@ -412,20 +405,23 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       const t = performance.now();
       const getMap = () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; };
       // only these strokes: the others are left out (an erase stroke is skipped by the bake), so their indices stay as they are
-      // the others are `skip`ped (an erase stroke stays one: it is part of what lies under a newer stroke); `under`: the records of the
-      // older strokes under these that are not baked in this call (their sprites are the substrate)
-      const inputOf = (list) => {
+      // the others are `skip`ped (an erase stroke stays one: it is part of what lies under a newer stroke; a skipped stroke still lends
+      // its plain look, baked from its data in the worker, to the newer strokes that read it)
+      // `under`: the PLAIN looks of the older strokes these read, where this client has them (else the worker bakes them from data)
+      const inputOf = (list, plain = false) => {
         const need = new Set(list.map((w) => w.index)), under = {};
-        for ( const w of list ) for ( const j of w.deps ) {
-          if ( need.has(j) || objs[j].k || under[j] ) continue;
-          const r = recs.get(rkOf(j)) ?? (deferred.has(S.objects[j].id) ? staleRecs.get(S.objects[j].id) ?? shownRecs.get(S.objects[j].id) : null);
-          if ( r ) under[j] = r.sprites;
-        }
-        return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+        if ( !plain ) for ( const w of list ) for ( const j of w.deps ) { if ( need.has(j) || objs[j].k || under[j] ) continue; const pl = plainOf(j, base, FS); if ( pl ) under[j] = pl; }
+        return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, plain, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       };
-      const take = (list, res) => {
+      const take = (list, res, plain = false) => {
         const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
-        for ( const w of list ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, sprites: parts.get(w.index) ?? [] }); waitingSince.delete(w.rk); }
+        for ( const w of list ) {
+          const sprites = parts.get(w.index) ?? [];
+          if ( plain || !overSubstrate(sprites) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
+          // a plain look is the stroke's final look when it reads nothing
+          if ( plain && w.deps.length ) continue;
+          recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, sprites }); waitingSince.delete(w.rk);
+        }
         status.stats = res.stats;
       };
       if ( !bigBake ) {
@@ -433,24 +429,30 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         if ( my !== gen ) return;
         take(toBake, res);
       } else {
-        // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked
-        // in WAVES: a stroke over others being baked waits for their wave (its substrate is their sprites)
-        const lanes = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 2) - 1)), depth = new Map();
-        for ( const w of toBake ) depth.set(w.index, Math.max(0, ...w.deps.filter((j) => depth.has(j)).map((j) => depth.get(j) + 1)));
+        // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked. TWO WAVES (substrate.mjs):
+        // 1. the plain looks (from their own data alone) of every stroke a stroke here reads, and of the strokes here that read nothing
+        //    (that look is their final one); 2. the strokes that read others, over those plain looks. Nothing waits longer than that.
+        const lanes = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 2) - 1));
+        const byIndex = new Map(want.map((w) => [w.index, w])), plainNeed = new Map();
+        for ( const w of toBake ) {
+          if ( !w.deps.length ) plainNeed.set(w.index, w);
+          for ( const j of w.deps ) { const d = byIndex.get(j); if ( d && !plainOf(j, base, FS) ) plainNeed.set(j, d); }
+        }
         let timer = 0;
         const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 80); };
         Reveal.whenRevealed(() => soon());
-        for ( let wave = 0; wave <= Math.max(...depth.values()); wave++ ) {
-          const order = prioritise(toBake.filter((w) => depth.get(w.index) === wave), objs);
+        for ( const [wave, list, plain] of [[0, [...plainNeed.values()], true], [1, toBake.filter((w) => w.deps.length), false]] ) {
+          const order = prioritise(list, objs);
           const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [], tw = performance.now();
           for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
-          await runBakePool(jobs.map(inputOf), getMap, { n: lanes, onDone: (i, res) => {
+          await runBakePool(jobs.map((jb) => inputOf(jb, plain)), getMap, { n: lanes, onDone: (i, res) => {
             if ( my !== gen ) return;
-            take(jobs[i], res);
-            status.bakeDone += jobs[i].length; status.progress = status.bakeDone / status.bakeTotal; tell("status");
-            soon(); early();
+            take(jobs[i], res, plain);
+            const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
+            status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal; tell("status");
+            if ( done ) { soon(); early(); }
           } });
-          Trace.event("bake-wave", { wave, n: order.length, jobs: jobs.length, ms: Math.round(performance.now() - tw) });
+          Trace.event("bake-wave", { wave, plain, n: order.length, jobs: jobs.length, ms: Math.round(performance.now() - tw) });
           if ( my !== gen ) break;
         }
         clearTimeout(timer);
@@ -487,6 +489,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
   for ( const k of recs.keys() ) if ( !live.has(k) ) recs.delete(k);
+  { const keep = new Set(want.map((w) => `${base}|${w.objId}|${w.own}`)); for ( const k of plainRecs.keys() ) if ( !keep.has(k) ) plainRecs.delete(k); }
   T.total = performance.now() - T.t0;
   const source = Object.entries(src).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ") || "memory";
   Object.assign(status, { baking: false, waiting: !complete, loading: 0, progress: 1, source, hash: "", error: "", perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])) });
@@ -590,6 +593,16 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
  * entries come from the scene flag (server time): recent ones play, older ones are shown settled. Areas this client has shown before
  * never enter again.
  */
+/** Was a record baked over a substrate (a part's cover row carries field 7 = 1, core.mjs)? Else it is the stroke's plain look too. */
+const overSubstrate = (sprites) => sprites.some((s) => s.m[0] === 2 && s.m[7] === 1);
+/** Stroke j's plain look, when this client has it: kept from a plain bake, or its final record when that was not over a substrate. */
+function plainOf(j, base, FS) {
+  const o = S?.objects?.[j]; if ( !o || o.k ) return null;
+  const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p;
+  const r = recs.get(`${base}|${o.id}|${FS[j].sig}`);
+  return r && !overSubstrate(r.sprites) ? r.sprites : null;
+}
+
 function playEntries(added, removed, taken, mask, first) {
   if ( !display ) return;
   const all = forceEntry; forceEntry = false;

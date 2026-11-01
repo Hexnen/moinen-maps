@@ -67,7 +67,7 @@ export const objSig = (S, o) => fnv(enc(objStr(S, o))).toString(36);
  * change of an older stroke re-bakes only the strokes over it, on every client alike.
  */
 export function sigsOf(S) {
-  return fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K);
+  return fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
 }
 
 /** The manifest of the scene (null for none, or the first format). */

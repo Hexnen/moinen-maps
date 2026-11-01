@@ -160,7 +160,8 @@ const warm = new Map();
 Cur.bake(input([A, B]), warm);
 const before = warm.size;
 const r2 = Cur.bake(input([A, B, Cc]), warm);
-check(r2.stats.reused === before && r2.stats.baked >= 1, `adding a stroke bakes only it (reused ${r2.stats.reused}, baked ${r2.stats.baked})`);
+// (the cache also holds the PLAIN looks newer strokes read, substrate.mjs: a hit on one counts as reused, a plain bake as `plain`)
+check(r2.stats.reused >= before && r2.stats.baked === 1, `adding a stroke bakes only it (reused ${r2.stats.reused}, baked ${r2.stats.baked}, plain looks baked ${r2.stats.plain ?? 0})`);
 const B2 = { ...B, c: 9 };
 const r3 = Cur.bake(input([A, B2, Cc]), warm);
 check(r3.stats.baked >= 1 && r3.stats.reused >= 2, `changing one stroke's cause re-bakes only that stroke (reused ${r3.stats.reused}, baked ${r3.stats.baked})`);

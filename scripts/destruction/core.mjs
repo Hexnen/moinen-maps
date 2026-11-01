@@ -567,10 +567,24 @@ export function bake(I, cache = null) {
   /* ---------------------------------------------------------------- 2. per part: window, hash, cache or bake */
   const scatter = clamp(P.scatter ?? 1, 0.2, 3);
   const results = [];
-  // THE SUBSTRATE (substrate.mjs): an area reads, inside its own pixels only, the look of the OLDER strokes under it (baked in this call
-  // before it, or sent by the caller in I.under); with nothing older there it bakes exactly as before. Older strokes never read newer.
-  const src = new SubstrateSource(I.objects, I.under, P, K);
+  // THE SUBSTRATE (substrate.mjs): an area reads, inside its own pixels only, the PLAIN look (baked from its own data alone) of the
+  // older strokes in its read set; with nothing older there it bakes exactly as before. Older strokes never read newer ones, and no
+  // stroke waits for another's bake: the plain looks are baked here as needed (cached), so every stroke can be baked in any order.
+  const plainOf = new Map();
+  // (I.under: index -> sprites of plain looks the caller already has; I.plain: bake the requested strokes' plain looks only)
+  const src = new SubstrateSource(I.objects, I.under, P, K, (j) => {
+    if ( !plainOf.has(j) ) { const ob = I.objects[j], out = []; for ( const c of partsOf(ob) ) { const r = areaOf({ ...c, index: j, ob }, false); if ( r ) out.push(r); } plainOf.set(j, out); }
+    return plainOf.get(j);
+  });
   comps.forEach((c, k) => {
+    const res = areaOf(c, !I.plain);
+    if ( res ) results.push({ ...res, index: c.index });
+    progress(0.2 + 0.75 * (k + 1) / comps.length);
+  });
+  return assemble(results, stats, t0, progress);
+
+  /** One part in its window: cached or baked; `withSub`: over its substrate (false: its plain look, for newer strokes' substrates). */
+  function areaOf(c, withSub) {
     const { FX, FY, FW, FH, sev, frag, lab } = c.F;
     let x0 = FW, y0 = FH, x1 = -1, y1 = -1;
     for ( const i of c.px ) { const x = i % FW, y = (i - x) / FW; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
@@ -619,12 +633,12 @@ export function bake(I, cache = null) {
       h = fnvInts(h, 0x7fff);
     }
     // the substrate under its own pixels (null: only the plain map there - hash and bytes as without substrates)
-    const sub = src.compose(win, c.index, I.map);
+    const sub = withSub ? src.compose(win, c.index, I.map) : null;
     if ( sub ) {
       h = fnvInts(h, 0x5b57, sub.hash);
       // the severity rule: its pixels inside older damage of a higher level are not its own (a lower level never covers a higher)
       if ( sub.exclude(win, I.map.data, I.map.w) ) stats.excluded = (stats.excluded ?? 0) + 1;
-      if ( win.px.length < 6 ) { stats.cutOff = (stats.cutOff ?? 0) + 1; progress(0.2 + 0.75 * (k + 1) / comps.length); return; }
+      if ( win.px.length < 6 ) { stats.cutOff = (stats.cutOff ?? 0) + 1; return null; }
     }
     const hash = h >>> 0;
     let res = cache?.get(hash);
@@ -634,19 +648,16 @@ export function bake(I, cache = null) {
       if ( sub ) { win.clean = cropMap(I.map, RX, RY, W, H); win.sub = sub; stats.substrate = (stats.substrate ?? 0) + 1; }
       res = bakeArea(win, P, seed, (fnvStr(String(c.ob.id)) ^ Math.imul(c.ay * AW + c.ax, 31)) >>> 0, jag);
       for ( const it of res.items ) if ( it.m[0] === 0 ) overlayOutside(it.img, win);
-      if ( sub ) finishOverSubstrate(res.items, win, c.type, sub);
+      if ( sub ) { finishOverSubstrate(res.items, win, c.type, sub); for ( const it of res.items ) if ( it.m[0] === 2 ) it.m[7] = 1; }   // (cover row field 7: baked over a substrate - not a plain look)
       // the cause rides on the base row: field 11 holds the material in bits 0-3, the cause in bits 4-7 (0: unchanged bytes)
       if ( cause ) for ( const it of res.items ) if ( it.m[0] === 0 ) it.m[11] = (it.m[11] & 15) | (cause << 4);
       res.win = { x: RX, y: RY, w: W, h: H };
       res.hash = hash;
-      stats.baked++;
+      if ( withSub ) stats.baked++; else stats.plain = (stats.plain ?? 0) + 1;
       if ( cache ) { cache.set(hash, res); trimCache(cache); }
     }
-    results.push({ ...res, index: c.index });
-    src.add(c.index, res);
-    progress(0.2 + 0.75 * (k + 1) / comps.length);
-  });
-  return assemble(results, stats, t0, progress);
+    return res;
+  }
 }
 
 /**
