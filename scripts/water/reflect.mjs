@@ -239,9 +239,14 @@ function onTick() {
   const s = S(), P = cfg();
   const on = s && s.enabled && P.reflectOn && !REDUCED?.matches && (P.reflectWho === "all" || game.user.isGM);
   if ( !on ) { if ( states.size ) clear(); if ( root ) root.visible = false; return; }
-  root.visible = true;
   const now = performance.now();
-  if ( dirty && now - lastMask > 250 ) { lastMask = now; rebuildMask(); }
+  // the first mask at once (and after a clock that went back: a frozen or replayed clock), later ones at most four times a second
+  if ( dirty && (!maskTex || Math.abs(now - lastMask) > 250) ) { lastMask = now; rebuildMask(); }
+  // NEVER draw the layer with a mask that has no texture: PIXI's sprite mask over Texture.EMPTY breaks the frame from there on, and
+  // everything sorted above the reflections (the destruction's dust and entries, the districts, lights, roads, the token rings) is
+  // not drawn at all
+  root.visible = !!(maskTex?.valid && maskSprite?.texture === maskTex);
+  if ( !root.visible ) return;
   const seen = new Set();
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document;
@@ -260,7 +265,7 @@ function clear() { for ( const st of states.values() ) destroyState(st); states.
 
 export function onCanvasReady() {
   teardown();
-  root = new PIXI.Container(); root.eventMode = "none";
+  root = new PIXI.Container(); root.eventMode = "none"; root.visible = false;     // shown once its mask has a texture (onTick)
   // over the water (240) and the destruction's strokes (247: the flooded holes' water lies in them), under its dust (249), the
   // districts (250), the rings (255), tiles and tokens
   Object.assign(root, { elevation: 0, sortLayer: 248, sort: 0, _lastSortedIndex: 0 });
