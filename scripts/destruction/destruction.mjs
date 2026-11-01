@@ -267,7 +267,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   };
   const show = reshow = () => {
     if ( my !== gen || S !== S0 ) return Promise.resolve();
-    if ( !firstLoad ) {
+    if ( !firstLoad && !redoSet.size ) {
       // (records whose pixels were let go after they went on screen get them back first, when an area of theirs is not on screen)
       const dry = needPixels(want);
       if ( !dry.length ) { showOnce(want); return Promise.resolve(); }
@@ -283,14 +283,16 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         // (the composite's shells all at once: its bands only match with every one of them in)
         const near = prioritise(want.filter((w) => best(w) && !best(w).shell && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
         const allow = new Set(want.filter((w) => best(w) && (best(w).shell || shownRecs.get(w.objId) === best(w))).map((w) => w.objId));
-        for ( let i = 0; i < near.length || i === 0; i += SHOW_BATCH ) {
-          for ( const w of near.slice(i, i + SHOW_BATCH) ) allow.add(w.objId);
+        // (a background Rebake swaps a few strokes per step: each sync stays short while the scene is in use)
+        const step = firstLoad ? SHOW_BATCH : 4;
+        for ( let i = 0; i < near.length || i === 0; i += step ) {
+          for ( const w of near.slice(i, i + step) ) allow.add(w.objId);
           const dry = needPixels(want);
           if ( dry.length ) { await Promise.all(dry.map(hydrate)); if ( my !== gen || S !== S0 ) return; }
           showOnce(want, allow);
           // every stroke in view is on screen (hidden): the reveal can come now; the strokes off screen follow unseen
           if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index])) ) prepping = prepareReveal(my);
-          if ( i + SHOW_BATCH < near.length ) { await new Promise((r) => setTimeout(r, 0)); if ( my !== gen || S !== S0 ) return; }
+          if ( i + step < near.length ) { await new Promise((r) => setTimeout(r, firstLoad ? 0 : 16)); if ( my !== gen || S !== S0 ) return; }
         }
       } while ( showAgain && my === gen && S === S0 );
     })().finally(() => { showing = null; });
@@ -435,7 +437,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
     // a long bake on a scene load: the reveal does not wait for all of it (it shows what is ready after its longer budget, the rest
     // fades in stroke by stroke as it is baked, nearest to the view first)
-    const bigBake = firstLoad && toBake.length >= BIG_BAKE;
+    // (a Rebake all of many strokes too: two waves on the lane pool, the plain looks they read baked once, with the current code)
+    const bigBake = (firstLoad || redoSet.size) && toBake.length >= BIG_BAKE;
     if ( bigBake ) Reveal.progressive("destruction", 1500);
     // the plain looks these strokes are baked over, from records whose pixels were let go: back from their chunks (memory, IndexedDB)
     // - a few ms each, where the worker would bake each again from its data
@@ -477,7 +480,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked. TWO WAVES (substrate.mjs):
         // 1. the plain looks (from their own data alone) of every stroke a stroke here reads, and of the strokes here that read nothing
         //    (that look is their final one); 2. the strokes that read others, over those plain looks. Nothing waits longer than that.
-        const lanes = bakeLanes();
+        // (a Rebake all: at most 4 lanes - each lane holds every plain look its jobs read, sent once)
+        const lanes = redoSet.size ? Math.min(4, bakeLanes()) : bakeLanes();
         Trace.event("bake-lanes", { lanes, cores: navigator.hardwareConcurrency ?? 0 });
         const byIndex = new Map(want.map((w) => [w.index, w])), plainNeed = new Map();
         for ( const w of toBake ) {
@@ -501,12 +505,32 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
               if ( queue.length ) await new Promise((r) => setTimeout(r, 0));
             }
           })().finally(() => { draining = null; });
-          await runBakePool(jobs.map((jb) => inputOf(jb, plain)), getMap, { n: lanes, onDone: (i, res) => {
+          // (a background Rebake: the plain looks its strokes read go to each lane ONCE, a look per message between frames (prime), and the
+          // jobs only name them - copying them into every job held the page for up to 1.5 s per job)
+          let inputs = jobs.map((jb) => inputOf(jb, plain)), prime = null;
+          if ( redoSet.size && !plain ) {
+            const sent = new Map();
+            inputs = jobs.map((jb) => {
+              const need = new Set(jb.map((w) => w.index)), underKeys = {};
+              for ( const w of jb ) for ( const j of w.deps ) {
+                if ( need.has(j) || objs[j].k || underKeys[j] ) continue;
+                const pl = plainOf(j, base, FS); if ( !pl ) continue;
+                const k = `${S.objects[j].id}|${FS[j].own}`;
+                underKeys[j] = k; if ( !sent.has(k) ) sent.set(k, pl);
+              }
+              return { ...inputOf(jb, plain), under: {}, underKeys };
+            });
+            prime = [...sent].map(([key, sprites]) => ({ key, sprites }));
+            Trace.event("rebake-prime", { looks: prime.length, mpx: Math.round(prime.reduce((a, p) => a + p.sprites.reduce((q, s) => q + s.w * s.h, 0), 0) / 1e5) / 10 });
+          }
+          await runBakePool(inputs, getMap, { n: lanes, prime, onDone: (i, res) => {
             queue.push(() => {
               if ( my !== gen ) return;
               take(jobs[i], res, plain);
               const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
-              status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal; tell("status");
+              status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal;
+              if ( redoSet.size && status.rebake ) status.rebake.live = status.bakeDone;   // (the Rebake all line counts within a pass)
+              tell("status");
               if ( done ) { soon(); early(); }
             });
             drain();
@@ -892,7 +916,9 @@ function olderLooks(want) {
  * strokes that read it), one pass every 250 ms while nothing else bakes; each new look is swapped in silently; the manifest is written
  * once at the end. Pause / resume / cancel from the Damage panel. status.rebake: { total, done, paused } while it runs.
  */
-const REBAKE_BATCH = 2, REBAKE_EVERY = 250;
+// a pass is a big bake of up to REBAKE_BATCH strokes on the lane pool (two waves: the plain looks they read once, then the strokes);
+// pause and cancel act between passes
+const REBAKE_BATCH = 96, REBAKE_EVERY = 250;
 let rebakeQueue = [], rebakeTimer = 0;
 export function rebakeStrokes(ids = null) {
   if ( !S || !game.user.isGM ) return;
@@ -924,7 +950,9 @@ function pumpRebake(ms = REBAKE_EVERY) {
     if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
     const batch = rebakeQueue.splice(0, REBAKE_BATCH);
     await rebake({ awaitPublish: false, redo: batch });
-    if ( status.rebake ) { status.rebake.done += batch.length; tell("status"); }
+    // a pass that failed (an error, a backoff) stops the Rebake all and says so: never "done" with strokes not baked
+    if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }
+    if ( status.rebake ) { status.rebake.done += batch.length; status.rebake.live = 0; tell("status"); }
     pumpRebake(REBAKE_EVERY);
   }, ms);
 }

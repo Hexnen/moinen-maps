@@ -75,13 +75,17 @@ export async function runBake(input, getMap, { onProgress, retried = false } = {
  * extra workers made for this bake (no area cache: up to 8 of them must not each hold ~160 MB) and let go after it. `n` lanes at most
  * (never more than the cores minus one).
  */
-export async function runBakePool(jobs, getMap, { n = 4, onDone = null } = {}) {
+export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCache = false, prime = null } = {}) {
   const lanes = Math.max(1, Math.min(n, jobs.length, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
   let next = 0, error = null;
   const retry = [];                  // jobs an extra lane took and could not finish: the main lane does them
   const take = () => (error || next >= jobs.length ? -1 : next++);
   const extra = [];
+  // PRIME (a Rebake all): every lane first gets the plain looks its jobs read, ONE message per look (each a small copy on the page,
+  // between frames) - the jobs then only name them (`underKeys`) instead of carrying them (copying them into every job held the page)
+  const primeLane = async (send) => { for ( const p of prime ?? [] ) { await send({ kind: "plain", key: p.key, sprites: p.sprites }); await new Promise((r) => setTimeout(r, 0)); } };
   const laneMain = async () => {
+    if ( prime?.length ) { start(); await primeLane((msg) => call(msg)); }
     for ( let i = take(); i >= 0; i = take() ) { const r = await runBake(jobs[i], getMap); onDone?.(i, r); }
     while ( retry.length && !error ) { const i = retry.shift(); onDone?.(i, await runBake(jobs[i], getMap)); }
   };
@@ -97,9 +101,10 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null } = {}) {
     });
     const m = getMap(), copy = new Uint8ClampedArray(m.map.data);
     await ask({ kind: "map", mapKey: m.key, map: { w: m.map.w, h: m.map.h, data: copy } }, [copy.buffer]);
+    await primeLane((msg) => ask(msg));
     for ( let i = take(); i >= 0; i = take() ) {
       let r;
-      try { r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: true } }); }   // (an extra lane keeps no area cache: it goes after this bake)
+      try { r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: !keepCache } }); }   // (an extra lane keeps no area cache - it goes after this bake - unless asked: a Rebake all's lanes keep the plain looks they baked for their next jobs)
       catch ( err ) { retry.push(i); throw err; }
       onDone?.(i, r);
     }

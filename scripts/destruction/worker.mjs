@@ -10,6 +10,8 @@ import { encodePng } from "./png.mjs";
 
 let map = null, mapKey = "";
 const areas = new Map();
+/** Plain looks sent ahead by a Rebake all (key "<stroke id>|<own signature>" -> sprites). */
+const plains = new Map();
 
 self.onmessage = async (ev) => {
   const m = ev.data;
@@ -17,9 +19,15 @@ self.onmessage = async (ev) => {
     if ( m.kind === "map" ) {
       map = m.map; mapKey = m.mapKey; areas.clear();
       self.postMessage({ id: m.id, ok: true, result: true });
+    } else if ( m.kind === "plain" ) {
+      // a plain look sent ahead (a Rebake all): jobs name it in `underKeys`
+      plains.set(m.key, m.sprites);
+      self.postMessage({ id: m.id, ok: true, result: true });
     } else if ( m.kind === "bake" ) {
       if ( !map || m.input.mapKey !== mapKey ) throw new Error("NOMAP");
-      const res = bake({ ...m.input, map, onProgress: (p) => self.postMessage({ id: m.id, progress: p }) }, m.input.noCache ? null : areas);
+      const under = { ...(m.input.under ?? {}) };
+      for ( const [j, key] of Object.entries(m.input.underKeys ?? {}) ) { const s = plains.get(key); if ( s && !under[j] ) under[j] = s; }
+      const res = bake({ ...m.input, under, map, onProgress: (p) => self.postMessage({ id: m.id, progress: p }) }, m.input.noCache ? null : areas);
       self.postMessage({ id: m.id, ok: true, result: res }, [res.sheet.data.buffer, res.meta.buffer]);
     } else if ( m.kind === "encode" ) {
       const png = await encodePng(m.w, m.h, m.data);

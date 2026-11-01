@@ -154,7 +154,7 @@ function statusLine() {
   // strokes still in a compatible older look (their new look is baked later: in the background, or on Rebake all)
   if ( st.compat ) parts.push(game.i18n.format(`MOINENMAPS.Destr.oldLook.${st.compat.mode === "ask" ? "ask" : "background"}`, { v: st.compat.from, n: st.compat.left }));
   // a Rebake all running, or the strokes pinned to the look of an older version (about half a second each to bake again)
-  if ( st.rebake ) parts.push(game.i18n.format(st.rebake.paused ? "MOINENMAPS.Destr.rebakePaused" : "MOINENMAPS.Destr.rebaking", { done: st.rebake.done, total: st.rebake.total }));
+  if ( st.rebake ) parts.push(game.i18n.format(st.rebake.paused ? "MOINENMAPS.Destr.rebakePaused" : "MOINENMAPS.Destr.rebaking", { done: st.rebake.done + (st.rebake.live ?? 0), total: st.rebake.total }));
   else if ( st.olderLook ) parts.push(game.i18n.format("MOINENMAPS.Destr.olderLook", { n: st.olderLook.n, from: st.olderLook.from, to: st.olderLook.to, eta: Math.max(1, Math.round(st.olderLook.n * 0.6)) }));
   return parts.join(" · ");
 }
