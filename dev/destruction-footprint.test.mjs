@@ -34,7 +34,7 @@ function split(r) {
   const objs = new Map(); let cur = null;
   for ( let k = 0; k < r.count; k++ ) {
     const o = k * F, m = r.meta;
-    const s = { kind: m[o], sx: m[o + 1], sy: m[o + 2], w: m[o + 3], h: m[o + 4], x: m[o + 5], y: m[o + 6] };
+    const s = { kind: m[o], sx: m[o + 1], sy: m[o + 2], w: m[o + 3], h: m[o + 4], x: m[o + 5], y: m[o + 6], flags: m[o + 11] & 15, ptype: m[o + 13] };
     let hh = 2166136261;
     for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) { const q = ((s.sy + y) * r.sheet.w + s.sx + x) * 4; for ( let c = 0; c < 4; c++ ) hh = Math.imul(hh ^ r.sheet.data[q + c], 16777619); }
     s.sig = `${s.kind},${s.w},${s.h},${s.x},${s.y},${hh >>> 0}`;
@@ -74,7 +74,7 @@ function ownOf(ob, g) {
   return m;
 }
 const T = core.TYPES, CAUSES = [0, 1, 8];
-const matrix = T.map(() => T.map(() => 0));
+const matrix = T.map(() => T.map(() => 0)), replacedM = T.map(() => T.map(() => 0));
 let pairs = 0, clean = 0;
 for ( let a = 0; a < 6; a++ ) for ( let b = 0; b < 6; b++ ) for ( const c of CAUSES ) for ( const [cfg, dx] of [["overlap", 12], ["touch", 30], ["far", 80]] ) {
   const A = disc(`A${a}`, a, 50, 45, 11), B = disc(`B${b}${c}${cfg}`, b, 50 + dx, 45 + (b === 5 ? 3 : 0), b === 5 ? 9 : 11, c);
@@ -88,22 +88,32 @@ for ( let a = 0; a < 6; a++ ) for ( let b = 0; b < 6; b++ ) for ( const c of CAU
     for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) { const X = s.x + x + dx, Y = s.y + y + dy; if ( X >= 0 && Y >= 0 && X < AW && Y < AH ) own[Y * AW + X] = 1; }
   }
   const cA = compose(rA), cAB = compose(rAB);
-  // B's pieces (plates, thrown chips) may land on A: debris on top, not the ground cleared; counted apart
+  // B's debris may land on A: chips (thrown or loose) and heaved plates pushed out over its rim lie ON TOP, they are not the ground
+  // cleared. A tear's lips (pieces of kind gash) are ground: not exempt
+  const debris = (s) => s.kind === 1 && ((s.flags & 3) || ((s.flags & 4) && s.ptype !== 5));
   const onTop = new Uint8Array(AW * AH);
-  for ( const s of split(rAB).get(1) ?? [] ) if ( s.kind === 1 ) for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) {
+  for ( const s of split(rAB).get(1) ?? [] ) if ( debris(s) ) for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) {
     const X = s.x + x, Y = s.y + y; if ( X >= 0 && Y >= 0 && X < AW && Y < AH && rAB.sheet.data[((s.sy + y) * rAB.sheet.w + s.sx + x) * 4 + 3] ) onTop[Y * AW + X] = 1;
   }
-  let cleared = 0, changedFar = 0;
+  // how opaque B's base is at each pixel: clearing is LAYING ground (a faint lightening over A's darker pixel is not)
+  const bA = new Uint8Array(AW * AH);
+  for ( const s of split(rAB).get(1) ?? [] ) if ( s.kind === 0 || (s.kind === 1 && !debris(s)) ) for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) {
+    const X = s.x + x, Y = s.y + y; if ( X >= 0 && Y >= 0 && X < AW && Y < AH ) bA[Y * AW + X] = Math.max(bA[Y * AW + X], rAB.sheet.data[((s.sy + y) * rAB.sheet.w + s.sx + x) * 4 + 3]);
+  }
+  // REPLACED: B's opaque halo / lip laid over A, A's look gone entirely (what B shows there on the plain map, whatever A was)
+  const cB = compose(bake([B]));
+  let cleared = 0, changedFar = 0, replaced = 0;
   for ( let i = 0; i < AW * AH; i++ ) {
     if ( own[i] || onTop[i] ) continue;
     let dA = 0, dAB = 0, dd = 0;
     for ( let k = 0; k < 3; k++ ) { dA += Math.abs(cA[i * 3 + k] - map[i * 4 + k]); dAB += Math.abs(cAB[i * 3 + k] - map[i * 4 + k]); dd += Math.abs(cAB[i * 3 + k] - cA[i * 3 + k]); }
-    if ( dA > 24 && dAB <= 6 ) cleared++;
-    if ( dd > 3 && dA > 3 ) changedFar++;   // only where A shows
+    if ( dA > 24 && dAB <= 6 && bA[i] >= 128 ) { cleared++; if ( process.env.WHERE ) console.log('  at', i % AW, (i / AW) | 0, [...cA.slice(i * 3, i * 3 + 3)].map(Math.round), [...cAB.slice(i * 3, i * 3 + 3)].map(Math.round)); }
+    if ( dd > 3 && dA > 3 ) changedFar++;
+    if ( dA > 24 && bA[i] >= 250 && Math.abs(cAB[i * 3] - cB[i * 3]) + Math.abs(cAB[i * 3 + 1] - cB[i * 3 + 1]) + Math.abs(cAB[i * 3 + 2] - cB[i * 3 + 2]) <= 3 ) replaced++;   // only where A shows
   }
   pairs++;
   if ( cleared <= 2 ) clean++;
-  matrix[a][b] += cleared;
+  matrix[a][b] += cleared; replacedM[a][b] += replaced;
   // (a stain or moss pixel of the cause can happen to match the plain ground's colour: up to 2 such pixels are not a clearing)
   ok(cleared <= 2, `${T[a]} <- ${T[b]} (cause ${c}, ${cfg}): ${cleared} pixels of the older damage cleared outside the newer stroke's own pixels`);
   if ( cfg === "far" ) ok(changedFar === 0, `${T[a]} <- ${T[b]} (cause ${c}, far): ${changedFar} pixels of the older object changed`);
@@ -113,6 +123,9 @@ if ( process.argv.includes("--matrix") ) {
   console.log("cleared px (rows: older A, cols: newer B; sum over overlap/touch/far and causes none/fire/decay)");
   console.log("".padEnd(10) + T.map((t) => t.padStart(9)).join(""));
   T.forEach((t, a) => console.log(t.padEnd(10) + matrix[a].map((v) => String(v).padStart(9)).join("")));
+  console.log("replaced px (B's opaque halo / lip / hairline laid over A outside B's own pixels, A's look gone; not asserted)");
+  console.log("".padEnd(10) + T.map((t) => t.padStart(9)).join(""));
+  T.forEach((t, a) => console.log(t.padEnd(10) + replacedM[a].map((v) => String(v).padStart(9)).join("")));
 }
 console.log(fails ? `FAILED ${fails}` : "PASS");
 process.exit(fails ? 1 : 0);

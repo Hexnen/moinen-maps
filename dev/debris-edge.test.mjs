@@ -44,7 +44,7 @@ for ( const [pn, params] of [["default", BASE], ["max", MAX]] ) for ( let t = 0;
     }
   });
 }
-check(chips.length > 50, `thrown chips found: ${chips.length}`);
+check(chips.length > 30, `thrown chips found: ${chips.length}`);   // (a sample-size check; organic outlines since 696b73a throw a few less here)
 const outside = chips.filter((c) => c.x < 0 || c.y < 0 || c.x > AW || c.y > AH).length;
 check(outside === 0, `no chip lands outside the scene (${outside})`);
 const near = chips.filter((c) => c.x < 2 || c.y < 2 || c.x > AW - 2 || c.y > AH - 2).length;
