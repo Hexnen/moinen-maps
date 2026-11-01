@@ -1015,7 +1015,7 @@ export class DestructionDisplay {
         const gr = this.pixelCanvas();
         a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: Math.min(R * 0.45, 16) * pw });
       });
-      ring("ring", 30 * k, 0xf3e6cc, Math.min(R * 1.9, 90) * pw, 430 * k, 2);
+      once("ring", 30 * k, () => this.burst(a.ox, a.oy, R * 1.3 * pw, now, { n: 22, color: 0xd8cdb8, rise: -2, speed: 1.4 }));   // a skirt of dust puffs, not a drawn ring
       once("dust", 60 * k, () => this.burst(a.ox, a.oy, R * pw, now));
       once("rain", 260 * k, () => { for ( let q = 0; q < Math.round(10 * pw); q++ ) { const ang = Math.random() * 6.28, d = R * (0.5 + Math.random()); this.spawn({ x: a.ox + Math.cos(ang) * d, y: a.oy + Math.sin(ang) * d * 0.8 - 6, vx: 0, vy: 0, fall: 40, life: 380, color: 0x4a3f36, size: Math.random() < 0.4 ? 2 : 1 }); } });
     } else if ( type === "collapse" ) {

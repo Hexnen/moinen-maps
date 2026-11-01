@@ -70,7 +70,8 @@ export function causeEffects(d, g, a, now, el) {
   });
   // all accents in art pixels on the art grid (pixel-fx.mjs): no soft discs, no vector rings or lines
   if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => pxFlash(gr, V, a.ox, a.oy, Math.min(R * 0.5, 14) * pw, t, { seed: a.seed + 31, colors: [0xffffff, cl.flash, cl.ring ?? cl.flash], rays: 5 }));
-  if ( cl.ring ) draw("ring", a.delay + a.reveal * 0.15, 520 * k, (gr, t) => pxRing(gr, V, a.ox, a.oy, Math.min(R * 1.6, 80) * pw * (1 - (1 - t) ** 3), t, { core: cl.ring, outer: 0x3a3028, seed: a.seed + 37, dash: 7 }));
+  // the cause's shock: a skirt of puffs in its colour, never a drawn ring
+  if ( cl.ring ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
   if ( cl.bolt ) for ( const [key, at] of [["bolt1", 0], ["bolt2", 110 * k], ["bolt3", 260 * k]] ) {
     // a bolt from above to the strike: a jagged polyline, white core, blue glow, flickering
     const pts = [], H = 40 + R * 1.5, seg = 8;
