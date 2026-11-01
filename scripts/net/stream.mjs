@@ -161,9 +161,24 @@ const enqueue = (prio, fn) => new Promise((resolve) => { queue.push({ prio, run:
 
 /** Decoded chunks of this session, by id (a scene switch keeps them: going back costs nothing). */
 const memo = new Map();
-const MEMO_MAX = 600;
-const remember = (id, v) => { memo.delete(id); memo.set(id, v); while ( memo.size > MEMO_MAX ) memo.delete(memo.keys().next().value); };
-export const forget = (id) => memo.delete(id);
+// at most this many decoded chunks AND this many bytes of their pixels (a busy scene's decoded strokes were ~230 MB; the destruction
+// records let go of theirs once on screen and forget them here, see destruction.mjs dry())
+const MEMO_MAX = 600, MEMO_BYTES = 96 * 1048576;
+let memoBytes = 0;
+const sizeOf = (v) => {
+  let n = 0;
+  for ( const s of v?.sprites ?? [] ) n += s.img?.byteLength ?? 0;
+  for ( const l of v?.levels ?? [] ) n += l?.byteLength ?? 0;
+  return n;
+};
+const drop = (id) => { if ( !memo.has(id) ) return false; memoBytes -= memo.get(id).size; memo.delete(id); return true; };
+const remember = (id, v) => {
+  drop(id);
+  const size = sizeOf(v);
+  memo.set(id, { v, size }); memoBytes += size;
+  while ( memo.size > 1 && (memo.size > MEMO_MAX || memoBytes > MEMO_BYTES) ) drop(memo.keys().next().value);
+};
+export const forget = (id) => drop(id);
 
 /** Decode in the pool. `own`: the bytes are not needed here any more, so they move to the worker without a copy. */
 async function decode(bytes, id, own = false) {
@@ -216,10 +231,10 @@ async function download(dir, id, reload = false, signal = null) {
  * a tombstone from the GC). -> the decoded payload, or null when it cannot be had.
  */
 export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
-  if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id)); }
+  if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id).v); }
   if ( inflight.has(id) ) return inflight.get(id);
   const p = enqueue(prio, async () => {
-    if ( memo.has(id) ) return memo.get(id);
+    if ( memo.has(id) ) return memo.get(id).v;
     if ( signal?.aborted ) return null;
     let bytes = preloaded.get(id) ?? await idbGet(id), from = "idb";
     preloaded.delete(id);
@@ -312,22 +327,27 @@ export const pathOf = fileOf;
 let gcRunning = false;
 /**
  * Tombstone what no manifest names (see gcPick). Only the active GM, one run at a time, at most `max` files a run. A scene's folder
- * past `cap` files shortens the grace to 5 minutes (storage cap). Returns the names tombstoned.
+ * past `cap` files shortens the grace to 5 minutes (storage cap). Returns the names tombstoned. A run that leaves unreferenced files
+ * behind (more than `max`, or still within their grace) books the next run itself (scheduleGc `follow`): a backlog of old versions
+ * (a re-bake of a whole scene leaves hundreds) drains in minutes, not one batch per publish.
  */
-export async function collectGarbage(sceneId, { grace = 15 * 60000, cap = 400, max = 64 } = {}) {
+export async function collectGarbage(sceneId, { grace = 15 * 60000, cap = 400, max = 160 } = {}) {
   if ( gcRunning || !game.user.isGM || !game.users.activeGM?.isSelf ) return [];
   gcRunning = true;
   try {
-    const done = [];
+    const done = [], left = { more: false, waitUntil: Infinity };
     // the scene's chunk folder (every file), and the module's folder: files of the first format (water-, destruction-, flood-*.png)
-    done.push(...await sweep(chunkDir(sceneId), () => true, { grace, cap, max }));
-    done.push(...await sweep(root(), (name) => /^(water|destruction|flood)-.+\.png$/.test(name), { grace, cap: Infinity, max }));
+    done.push(...await sweep(chunkDir(sceneId), () => true, { grace, cap, max, left }));
+    done.push(...await sweep(root(), (name) => /^(water|destruction|flood)-.+\.png$/.test(name), { grace, cap: Infinity, max, left }));
     if ( done.length ) console.log(`${MODULE_ID} | GC: ${done.length} unused bake file(s) emptied`, done);
+    // more to do: the next batch soon (a minute), or the files still in their grace when it has passed
+    if ( left.more ) followGc(sceneId, 60000);
+    else if ( Number.isFinite(left.waitUntil) ) followGc(sceneId, Math.max(60000, left.waitUntil - Date.now() + 5000));
     return done;
   } finally { gcRunning = false; }
 }
 
-async function sweep(dir, accept, { grace, cap, max }) {
+async function sweep(dir, accept, { grace, cap, max, left = null }) {
   {
     let listing;
     try { listing = await picker().browse("data", dir); } catch { return []; }   // no folder yet
@@ -336,7 +356,13 @@ async function sweep(dir, accept, { grace, cap, max }) {
     // per folder: gcPick forgets sightings of files no longer in the folder it is given
     const seen = loadMap(`${SEEN_KEY}:${dir}`), dead = loadMap(`${DEAD_KEY}:${dir}`);
     for ( const f of files ) if ( refs.has(f) ) dead.delete(f);                  // uploaded again since
-    const pick = gcPick(files, refs, seen, Date.now(), { grace: files.length > cap ? Math.min(grace, 5 * 60000) : grace, max, dead: new Set(dead.keys()), manifests });
+    const g = files.length > cap ? Math.min(grace, 5 * 60000) : grace;
+    const pick = gcPick(files, refs, seen, Date.now(), { grace: g, max, dead: new Set(dead.keys()), manifests });
+    if ( left && manifests ) {
+      if ( pick.length >= max ) left.more = true;
+      // unreferenced files still in their grace: when the earliest of them may go
+      for ( const [name, at] of seen ) if ( !pick.includes(name) ) left.waitUntil = Math.min(left.waitUntil, at + g);
+    }
     const done = [];
     for ( const f of pick ) {
       const name = f.split("/").pop(), id = name.replace(/\.png$/, "");
@@ -345,7 +371,7 @@ async function sweep(dir, accept, { grace, cap, max }) {
       try {
         const res = await picker().upload("data", dir, new File([TOMB], name, { type: "image/png" }), {}, { notify: false });
         if ( res?.status === "error" ) throw new Error(res.message);
-        dead.set(f, Date.now()); seen.delete(f); known(dir).delete(id); memo.delete(id); stats.tombstones++;
+        dead.set(f, Date.now()); seen.delete(f); known(dir).delete(id); drop(id); stats.tombstones++;
         done.push(f);
       } catch ( err ) { console.warn(`${MODULE_ID} | GC could not tombstone ${f}`, err); break; }
     }
@@ -354,18 +380,34 @@ async function sweep(dir, accept, { grace, cap, max }) {
   }
 }
 
-let gcTimer = 0;
-/** A GC run a while after a publish (2 min), never more often than every 10 min. */
+let gcTimer = 0, gcFollow = 0;
+/**
+ * A GC run a while after a publish or a scene load (2 min), at most one every 10 min: a request inside those 10 min is moved to their
+ * end (it was dropped before, so a GM who kept editing never had a run and a re-baked scene kept every old version on the server).
+ */
 let lastGc = 0;
-export function scheduleGc(sceneId) {
+export function scheduleGc(sceneId, delay = 120000) {
   if ( !game.user.isGM ) return;
   clearTimeout(gcTimer);
   gcTimer = setTimeout(() => {
-    if ( Date.now() - lastGc < 10 * 60000 ) return;
+    const wait = lastGc + 10 * 60000 - Date.now();
+    if ( wait > 0 ) { gcTimer = setTimeout(() => scheduleGc(sceneId, 0), wait); return; }
     lastGc = Date.now();
     collectGarbage(sceneId).catch((err) => console.warn(`${MODULE_ID} | GC`, err));
-  }, 120000);
+  }, delay);
 }
+/** The next batch of a run that left files behind (not bound by the 10 min: it only drains what is unreferenced already). */
+function followGc(sceneId, ms) {
+  clearTimeout(gcFollow);
+  gcFollow = setTimeout(() => {
+    if ( canvas?.scene?.id !== sceneId ) return;               // another scene now: its own load books its run
+    lastGc = Date.now();
+    collectGarbage(sceneId).catch((err) => console.warn(`${MODULE_ID} | GC`, err));
+  }, ms);
+}
+// the active GM sweeps the scene's folder a while after it is loaded too (not only after a publish: a scene nobody edits any more
+// still has the old versions of its last re-bake on the server)
+globalThis.Hooks?.on?.("canvasReady", () => { try { if ( game.user?.isGM && game.users.activeGM?.isSelf && canvas.scene ) scheduleGc(canvas.scene.id); } catch { /* not ready */ } });
 
 /** For the API: the codec worker and the queue (tests). */
-export const debug = () => ({ workers: workers.length, busy: workers.map((s) => s.busy), broken, queue: queue.length, running, memo: memo.size, inflight: inflight.size });
+export const debug = () => ({ workers: workers.length, busy: workers.map((s) => s.busy), broken, queue: queue.length, running, memo: memo.size, memoMB: Math.round(memoBytes / 1048576), inflight: inflight.size });

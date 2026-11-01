@@ -254,7 +254,12 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   };
   const show = () => {
     if ( my !== gen || S !== S0 ) return Promise.resolve();
-    if ( !firstLoad ) { showOnce(want); return Promise.resolve(); }
+    if ( !firstLoad ) {
+      // (records whose pixels were let go after they went on screen get them back first, when an area of theirs is not on screen)
+      const dry = needPixels(want);
+      if ( !dry.length ) { showOnce(want); return Promise.resolve(); }
+      return Promise.all(dry.map(hydrate)).then(() => { if ( my === gen && S === S0 ) showOnce(want); });
+    }
     if ( showing ) { showAgain = true; return showing; }
     showing = (async () => {
       do {
@@ -266,6 +271,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const allow = new Set(want.filter((w) => best(w) && shownRecs.get(w.objId) === best(w)).map((w) => w.objId));
         for ( let i = 0; i < near.length || i === 0; i += SHOW_BATCH ) {
           for ( const w of near.slice(i, i + SHOW_BATCH) ) allow.add(w.objId);
+          const dry = needPixels(want);
+          if ( dry.length ) { await Promise.all(dry.map(hydrate)); if ( my !== gen || S !== S0 ) return; }
           showOnce(want, allow);
           // every stroke in view is on screen (hidden): the reveal can come now; the strokes off screen follow unseen
           if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index])) ) prepping = prepareReveal(my);
@@ -311,7 +318,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       if ( firstLoad && fetch.length >= 20 ) Reveal.progressive("destruction", 1500);
       await Promise.all(prioritise(fetch, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
-        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
+        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, dir: M.dir, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
         else failed.push(w);
       }));
       clearTimeout(timer);
@@ -329,7 +336,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       if ( firstLoad ) Reveal.progressive("destruction", 1500);   // the scene waits for the older look (not the water alone)
       await Promise.all(prioritise(old, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio });
-        if ( got?.sprites && got.F === META_FIELDS ) { staleRecs.set(w.objId, { rk: `${M.base}|${w.objId}|${w.sig}`, objId: w.objId, id: w.id, sprites: got.sprites, stale: true }); src.stale = (src.stale ?? 0) + 1; }
+        if ( got?.sprites && got.F === META_FIELDS ) { staleRecs.set(w.objId, { rk: `${M.base}|${w.objId}|${w.sig}`, objId: w.objId, id: w.id, dir: M.dir, sprites: got.sprites, stale: true }); src.stale = (src.stale ?? 0) + 1; }
       }));
       T.stale = performance.now() - t;
       if ( my !== gen ) return;
@@ -402,6 +409,13 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     // fades in stroke by stroke as it is baked, nearest to the view first)
     const bigBake = firstLoad && toBake.length >= BIG_BAKE;
     if ( bigBake ) Reveal.progressive("destruction", 1500);
+    // the plain looks these strokes are baked over, from records whose pixels were let go: back from their chunks (memory, IndexedDB)
+    // - a few ms each, where the worker would bake each again from its data
+    {
+      const dry = new Set();
+      for ( const w of toBake ) for ( const j of w.deps ) { const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null; if ( r?.sprites.lean ) dry.add(r); }
+      if ( dry.size ) { await Promise.all([...dry].map(hydrate)); if ( my !== gen ) return; }
+    }
     try {
       const t = performance.now();
       const getMap = () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; };
@@ -583,10 +597,12 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
     const r = (!allow || allow.has(w.objId) ? fresh ?? staleRecs.get(w.objId) : null) ?? shownRecs.get(w.objId);
     if ( fresh && r === fresh ) staleRecs.delete(w.objId);
     if ( !r ) continue;
+    // (a record without its pixels whose areas are not on screen - its chunk could not be had again - is left out: never a blank sheet)
+    if ( r.sprites.lean && !onScreen(r) ) continue;
     // a new look only because the strokes under it changed (its own inputs did not): swapped in one frame, no entry, no fade
     const prev = shownRecs.get(w.objId);
     if ( prev && prev !== r && prev.own && prev.own === w.own && !prev.stale ) depOnly.add(w.objId);
-    list.push({ index: w.index, sprites: r.sprites });
+    list.push({ index: w.index, sprites: r.sprites, id: r.id ?? null });
     next.set(w.objId, r);
   }
   shownRecs = next;
@@ -595,6 +611,10 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   // the areas already on screen need no pixels (the display keeps them by hash)
   const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h));
   const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs);
+  // MEMORY: the display holds its own copy of every area's pixels now; a record that can be had again from its chunk lets go of its
+  // own copy (a big scene's records were ~230 MB of RGBA kept twice). They come back (hydrate) when an area of theirs must be built
+  // again, or the stroke is baked over.
+  for ( const r of next.values() ) if ( !r.sprites.lean && r.id && r.dir && onScreen(r) ) dry(r);
   playEntries(added, removed, taken, mask, first);
   if ( soft ) { const t = performance.now(); for ( const g of added ) if ( !g.anim && !g.fade && !g.reused ) { g.fade = { start: t, dur: 300 }; display.applyFade(g, t); } }
   lastRecs = list;
@@ -614,9 +634,48 @@ const overSubstrate = (sprites) => sprites.some((s) => s.m[0] === 2 && s.m[7] ==
 /** Stroke j's plain look, when this client has it: kept from a plain bake, or its final record when that was not over a substrate. */
 function plainOf(j, base, FS) {
   const o = S?.objects?.[j]; if ( !o || o.k ) return null;
-  const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p;
+  const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p.lean ? null : p;
   const r = recs.get(`${base}|${o.id}|${FS[j].sig}`);
-  return r && !overSubstrate(r.sprites) ? r.sprites : null;
+  return r && !r.sprites.lean && !overSubstrate(r.sprites) ? r.sprites : null;
+}
+
+/* ---------------------------------------------------------------- records without their pixels (memory) */
+
+/** The base rows' area hashes of a record. */
+const hashesOf = (r) => r.sprites.filter((s) => s.m[0] === 0).map((s) => ((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0);
+/** Is every area of a record on screen (the display keeps its pixels)? */
+const onScreen = (r) => !!display && hashesOf(r).every((h) => display.groups.has(h));
+/**
+ * Let go of a record's pixels (its rows stay): `sprites.lean`. The decoded chunk in the stream's memory goes too (it is the same
+ * object): what is kept is the chunk's compressed bytes (IndexedDB), decoded again when needed.
+ */
+function dry(r) {
+  for ( const s of r.sprites ) s.img = null;
+  r.sprites.lean = true;
+  Net.forget(r.id);
+}
+/** Records that must have their pixels for the next sheet (an area of theirs is not on screen). */
+function needPixels(want) {
+  const out = new Set();
+  for ( const w of want ) for ( const r of [recs.get(w.rk), staleRecs.get(w.objId), shownRecs.get(w.objId)] ) if ( r?.sprites.lean && !onScreen(r) ) out.add(r);
+  return [...out];
+}
+/** A record's pixels back from its chunk (memory, IndexedDB, the server), in place. A chunk that cannot be had drops the record. */
+async function hydrate(r) {
+  if ( !r.sprites.lean ) return true;
+  r.hydrating ??= (async () => {
+    const got = await Net.getChunk(r.dir, r.id).catch(() => null);
+    const ok = got?.sprites?.length === r.sprites.length && got.sprites.every((s, k) => s.img && s.w === r.sprites[k].w && s.h === r.sprites[k].h);
+    if ( ok ) { r.sprites.forEach((s, k) => { s.img = got.sprites[k].img; }); r.sprites.lean = false; }
+    else {
+      console.warn(`${MODULE_ID} | destruction: chunk ${r.id} could not be read again`);
+      if ( recs.get(r.rk) === r ) recs.delete(r.rk);
+      if ( staleRecs.get(r.objId) === r ) staleRecs.delete(r.objId);
+    }
+    if ( !ok ) Trace.event("hydrate-failed", { id: r.id });
+    return ok;
+  })().finally(() => { r.hydrating = null; });
+  return r.hydrating;
 }
 
 function playEntries(added, removed, taken, mask, first) {
@@ -766,12 +825,15 @@ async function persistOnce() {
     if ( Date.now() < publishRetryAt ) { schedulePersist(0); return; }
     if ( todo.length ) {
       const t = performance.now();
+      // (a record that let go of its pixels - a chunk of another folder, a copied scene - gets them back to be encoded here)
+      const dryOnes = todo.filter((q) => q.r.sprites.lean);
+      if ( dryOnes.length && !(await Promise.all(dryOnes.map((q) => hydrate(q.r)))).every(Boolean) ) { schedulePersist(0); return; }
       const out = await Net.job({ kind: "objects", F: META_FIELDS, objs: todo.map((q) => ({ key: q.o.id, sprites: q.r.sprites })) });
       status.perf.encode = Math.round(performance.now() - t);
       const byKey = new Map(out.map((e) => [e.key, e]));
       for ( const q of todo ) {
         const e = byKey.get(q.o.id);
-        q.r.id = e.id;
+        q.r.id = e.id; q.r.dir = dir;
         c[q.o.id] = `${q.sig}:${e.id}`;
         Net.keep(e.id, e.bytes, { F: META_FIELDS, sprites: q.r.sprites });
       }
@@ -1009,7 +1071,8 @@ export const destructionApi = {
   rebakeAll: () => { Trace.event("rebake-all"); return rebake({ awaitPublish: false, all: true }); },
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
-  status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
+  // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
+  status: () => { if ( lastRecs && !status.hash ) status.hash = lastRecs.some((r) => r.sprites.lean) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
