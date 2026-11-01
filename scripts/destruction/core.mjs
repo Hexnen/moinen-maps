@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 18;   // 18: pieces placed in the window as if the scene had no edge; what lands past it is culled, what crosses it clipped
+export const CORE_VERSION = 19;   // 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -1362,7 +1362,18 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( C.cls.mat === M.metal && (x % 8 === 0 || y % 8 === 0) && depth > 0.1 ) col = mix(pal.girder, rp[2], 0.3);
       if ( C.cls.mat === M.snow && h2(x, y, seed + 31) < 0.06 ) col = pal.chunk;
       if ( C.cls.mat === M.grass && dn < 0.25 && h2(x, y, seed + 33) < 0.05 ) col = rp[0];   // roots
-      if ( t === T_COLLAPSE && depth > 0.35 ) { const k = clamp((depth - 0.35) / 0.4, 0, 1), th = h2(x, y, seed + 44) * 0.55 + vnoise(x / 2, y / 2, seed + 45) * 0.45; if ( th < k ) col = pal.void; else if ( th < k + 0.2 ) col = rp[0]; }
+      if ( t === T_COLLAPSE && depth > 0.3 ) {
+        // a cave-in in layered depth, not a flat black disc: the slope in two darkening bands (dithered at their seams), then the
+        // pit; the pit's far (north) side shows its wall in strata, lit, and rubble that fell in lies on its floor
+        const dz = depth + (vnoise(x / 3, y / 3, seed + 45) - 0.5) * 0.12 + (bayer(x, y) - 0.5) * 0.05;
+        const deepAt = (j) => { if ( j < 0 || j >= N || !own[j] ) return false; const dj = Math.pow(Math.min(1, din[j] / maxD), 0.75) * (sev[j] - 0.6) / 2.4; return dj > 0.66; };
+        if ( dz < 0.46 ) col = rp[1];
+        else if ( dz < 0.66 ) col = (dz < 0.5 && ((x + y) & 1)) ? rp[1] : rp[0];
+        else if ( !deepAt(i - W) ) col = pal.strata[0];
+        else if ( !deepAt(i - 2 * W) ) col = (x & 1) ? pal.strata[1] : mul(pal.strata[1], 0.8);
+        else if ( !deepAt(i - 3 * W) ) col = mix(rp[0], pal.void, 0.5);
+        else col = h2(x, y, seed + 46) < 0.035 ? rp[2 + (h2(x, y, seed + 47) < 0.4 ? 1 : 0)] : h2(x >> 1, y >> 1, seed + 48) < 0.06 ? mix(rp[0], pal.void, 0.4) : pal.void;
+      }
       // flooded: the water itself is the water engine's (flood.mjs) laid over this; under a shallow pool (broken) the wet bottom shows,
       // under a deep one (crater) the dark of the deep water
       if ( t === T_FLOOD && sv <= 2.45 ) col = mul(col, 0.8);
