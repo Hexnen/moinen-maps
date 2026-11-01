@@ -696,6 +696,8 @@
   "MOINENMAPS.Setting.framePacingEven": "Even (within Foundry's cap)",
   "MOINENMAPS.Setting.framePacingDisplay": "Display refresh rate",
   "MOINENMAPS.Setting.framePacingFoundry": "Foundry (unchanged)",
+  "MOINENMAPS.Setting.smoothWater": "Smooth water animation",
+  "MOINENMAPS.Setting.smoothWaterHint": "The painted water's loop cross-fades from one baked frame into the next instead of stepping about 11 times a second, so it flows smoothly at any frame rate. Off: the frames step as baked (crisper, chunkier).",
   "MOINENMAPS.WS.pins": "Pins",
   "MOINENMAPS.WS.districts": "Districts",
   "MOINENMAPS.WS.water": "Water",

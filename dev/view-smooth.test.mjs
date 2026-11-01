@@ -55,4 +55,23 @@ ok(V.vsyncsPerFrame("even", 0, 1000 / 165) === 1, "no cap: every vsync");
   const bad = g.filter((x) => Math.abs(x - 3 * P) >= P * 0.5);
   ok(bad.every((x) => x > 3 * P), "after a missed vsync only a longer gap, never a short one");
   ok(bad.length < g.length * 0.1, `missed vsyncs: ${bad.length} of ${g.length} gaps longer`); }
+// the water loop's mix: drawn at an even 55 fps the loop's phase (frame + mix) advances by the same step every drawn frame
+{ globalThis.PIXI ??= { Mesh: class {}, Program: { from() {} }, MeshGeometry: class {}, Shader: class {}, Texture: {}, Container: class {}, Sprite: class {} };
+  const W = await import(pathToFileURL(path.join(root, "scripts/water/display.mjs")).href);
+  const ms = 90, N = 16, steps = [];
+  let prev = null;
+  for ( let t = 5000; t < 9000; t += 1000 / 55 ) {
+    const [i, j, m] = W.loopMix(t, ms, N, true);
+    ok(j === (i + 1) % N && m >= 0 && m <= 1, "smooth: frame i mixed into i + 1");
+    const ph = i + m;
+    if ( prev !== null ) steps.push(((ph - prev) % N + N) % N);
+    prev = ph;
+  }
+  const mean = steps.reduce((a, b) => a + b, 0) / steps.length, sd = Math.sqrt(steps.reduce((a, b) => a + (b - mean) ** 2, 0) / steps.length);
+  ok(sd / mean < 0.05, `water phase per drawn frame even (CV ${(sd / mean).toFixed(4)})`);
+  const [a, b, m0] = W.loopMix(5000, ms, N, false);
+  ok(a === b && m0 === 0, "off: one frame, no mix");
+  ok(W.loopMix(123, ms, 1, true)[2] === 0, "a single frame: no mix");
+  console.log(`water loop: phase step per drawn frame ${mean.toFixed(4)} frames, CV ${(sd / mean).toFixed(5)}`);
+}
 console.log(`view-smooth: ${n} checks ok`);

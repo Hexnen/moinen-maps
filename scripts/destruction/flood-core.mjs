@@ -193,25 +193,25 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     if ( coming && u < fill[i] ) { P32[i] = 0; continue; }
     const ex = Math.floor((cx + x + 0.5) / prep.ratio) - eng.x0 - box.x0, ey = Math.floor((cy + y + 0.5) / prep.ratio) - eng.y0 - box.y0;
     const b = ex >= 0 && ey >= 0 && ex < box.w && ey < box.h ? frame[ey * box.w + ex] : 0;
-    let r, g, bl, a;
-    if ( b ) { const q = b * 4; r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; a = LB[q + 3]; }
-    else { r = baseC[0]; g = baseC[1]; bl = baseC[2]; a = fallbackA; }
-    if ( !a ) { P32[i] = 0; continue; }
-    const ax = cx + x, ay = cy + y, dep = prep.depth[i];
-    // highlights (the engine's wave and sparkle codes) only in a few drifting patches: sparse and irregular, never even rows of dashes
-    if ( b && (r + g + bl) > (baseC[0] + baseC[1] + baseC[2]) + 90 && vnoise(ax / 7, ay / 4.5, 47) < 0.58 ) { r = baseC[0]; g = baseC[1]; bl = baseC[2]; }
-    // the shallows at the rim: lighter, toward the ring colour
-    if ( dep < 0.2 && prep.level >= 2 ) { const t = (0.2 - dep) / 0.2 * 0.3; r += (ringC[0] - r) * t; g += (ringC[1] - g) * t; bl += (ringC[2] - bl) * t; }
-    // depth: toward the shadow colour in bands of a third (contours with a little wobble, never a checkerboard)
-    const s = shade[i] / 255;
-    if ( s > 0 ) {
-      const k = Math.floor(s * 3 + 0.35 + (vnoise((cx + x) / 5, (cy + y) / 5, 41) - 0.5) * 0.5) / 3;
-      if ( k > 0 ) { r += (shadow[0] - r) * k * 0.7; g += (shadow[1] - g) * k * 0.7; bl += (shadow[2] - bl) * k * 0.7; a = Math.max(a, Math.round(a + (255 * master - a) * k)); }
-    }
+    // the water's TONE is ours, not the engine's per-cell tones (big squares in four or five tones read as a checkerboard): two or
+    // three clean depth bands - light shallows at the rim, the mid tone, a dark deep middle - with an ordered dither only along the
+    // band seams; the engine only adds its highlights, in a few drifting patches
+    const ax = cx + x, ay = cy + y, dep = prep.depth[i], L = prep.level;
+    const ev = b ? LB[b * 4 + 3] : 0;
+    if ( b && !ev ) { P32[i] = 0; continue; }
+    const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = (e) => Math.abs(dw - e) < 0.035 ? (bayer(ax, ay) < 0.5 ? -0.04 : 0.04) : 0;
+    const band = L <= 1 ? 1 : (dw + seam(0.2) < 0.2 ? 0 : L >= 3 && dw + seam(0.55) >= 0.55 ? 2 : 1);
+    const T = [[0.38, ringC], [0, baseC], [0.62, shadow]][band];
+    let r = baseC[0] + (T[1][0] - baseC[0]) * T[0], g = baseC[1] + (T[1][1] - baseC[1]) * T[0], bl = baseC[2] + (T[1][2] - baseC[2]) * T[0];
+    let a = 255 * master * (band === 2 ? 1 : 0.92);
+    // highlights: the engine's bright wave / sparkle cells in a few patches, and a few short light streaks of sky on the deeper water
+    if ( b ) { const q = b * 4; if ( LB[q] + LB[q + 1] + LB[q + 2] > baseC[0] + baseC[1] + baseC[2] + 90 && vnoise(ax / 7, ay / 4.5, 47) > 0.62 ) { r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; } }
+    if ( L >= 2 && dep > 0.25 && h2(Math.floor(ax / 6), ay, 71) < 0.03 && (ax % 6) < 4 ) { r += (foamC[0] - r) * 0.5; g += (foamC[1] - g) * 0.5; bl += (foamC[2] - bl) * 0.5; }
     a = a * op[i] / 255;
-    // foam at the rim: a broken line where the water meets the shore (a pool; patches of it, not a drawn outline)
-    if ( prep.level >= 2 && (!water[i - 1] || !water[i + 1] || !water[i - cw] || !water[i + cw]) && vnoise(ax / 3, ay / 3, 53) > 0.56 ) {
-      r += (foamC[0] - r) * 0.75; g += (foamC[1] - g) * 0.75; bl += (foamC[2] - bl) * 0.75; a = Math.max(a, 170 * master);
+    // foam: broken blobs of varying width where the water meets the shore (0-2.5 px, gaps), never a constant offset outline
+    if ( L >= 2 ) {
+      const dpx = dep * Math.max(2.5, prep.R), fw = 2.6 * vnoise(ax / 4, ay / 4, 53) - 0.4;
+      if ( dpx < fw && vnoise(ax / 2.5, ay / 2.5, 54) > 0.38 ) { r += (foamC[0] - r) * 0.8; g += (foamC[1] - g) * 0.8; bl += (foamC[2] - bl) * 0.8; a = Math.max(a, 180 * master); }
     }
     if ( coming ) {
       if ( u - fill[i] < BAND ) { r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 220 * master); }

@@ -1,5 +1,6 @@
 /**
- * SMOOTH VIEW: two client settings that make zooming and animation smooth on fast displays.
+ * SMOOTH VIEW: client settings that make zooming and animation smooth on fast displays (and 'Smooth water animation', read by
+ * scripts/water/display.mjs).
  *
  * 1. SMOOTH WHEEL ZOOM. Foundry zooms by 5% per wheel notch, at once, from the wheel event (a fast spin or a trackpad sends several
  *    notches per frame; each is a full canvas.pan with its hooks). Here a notch only moves a TARGET; the view glides to it in log
@@ -118,6 +119,8 @@ export function registerSmoothView() {
       scope: "client", config: true, type: String, default: "even",
       choices: { even: "MOINENMAPS.Setting.framePacingEven", display: "MOINENMAPS.Setting.framePacingDisplay", foundry: "MOINENMAPS.Setting.framePacingFoundry" },
       onChange: () => { if ( canvas?.app ) { const t = canvas.app.ticker; t.maxFPS = cap; applyPacing(); } } });
+    game.settings.register(MODULE_ID, "smoothWater", { name: "MOINENMAPS.Setting.smoothWater", hint: "MOINENMAPS.Setting.smoothWaterHint",
+      scope: "client", config: true, type: Boolean, default: true });
     const C = foundry.canvas.Canvas, lw = game.modules.get("lib-wrapper")?.active ? globalThis.libWrapper : null;
     // a module that already glides the wheel zoom (EZGlide overrides the same handler) keeps it: two glides would fight
     if ( GLIDERS.some((id) => game.modules.get(id)?.active) ) Z.foreign = GLIDERS.find((id) => game.modules.get(id)?.active);

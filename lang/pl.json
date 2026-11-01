@@ -696,6 +696,8 @@
   "MOINENMAPS.Setting.framePacingEven": "Równe (w limicie Foundry)",
   "MOINENMAPS.Setting.framePacingDisplay": "Częstotliwość ekranu",
   "MOINENMAPS.Setting.framePacingFoundry": "Foundry (bez zmian)",
+  "MOINENMAPS.Setting.smoothWater": "Płynna animacja wody",
+  "MOINENMAPS.Setting.smoothWaterHint": "Pętla malowanej wody płynnie przechodzi z jednej wypieczonej klatki w następną zamiast przeskakiwać około 11 razy na sekundę, więc płynie gładko przy każdym klatkażu. Wyłączone: klatki przeskakują tak, jak zostały wypieczone (ostrzej, bardziej skokowo).",
   "MOINENMAPS.WS.pins": "Pinezki",
   "MOINENMAPS.WS.districts": "Dzielnice",
   "MOINENMAPS.WS.water": "Woda",
