@@ -16,6 +16,9 @@
  */
 import { sceneConfig, reducedMotion, dbg } from "./config.mjs";
 import { shadowTextures } from "./pin-art.mjs";
+import { fxFor, tokenFxOn, runtime } from "./tokens/settings.mjs";
+// The enter / leave styles other than the drop, the classic reveal pop and the puff ghost are drawn by tokens/fx.mjs (through `runtime`);
+// the scene's Tokens settings (and a token's own override) say which style plays (tokens/styles.mjs).
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const easeOutBack = (t) => { const c = 1.9; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
@@ -76,7 +79,7 @@ function sortNextTo(obj, token, step) {
  * Put a token's visuals back exactly as Foundry draws them: recomputed from the document by Foundry's own refresh routines, never from a
  * pose we captured. Safe to call at any time (also for a token that is being deleted).
  */
-function restoreExact(t) {
+export function restoreExact(t) {
   if ( !t || t.destroyed || !t.mesh || t.mesh.destroyed ) return;
   try {
     t.position.set(t.document.x, t.document.y);
@@ -458,6 +461,7 @@ const tokenCfg = (doc) => sceneConfig(doc.parent).tokens;
 /** Is this animation on for this token and this client? `flag` names the per-effect switch in the Tokens settings. */
 function allowed(token, c, flag = "enabled") {
   const name = token.document?.name;
+  if ( !tokenFxOn() ) { dbg(`skip ${flag} for "${name}": token effects are off on this client`); return false; }
   if ( !c?.[flag] ) { dbg(`skip ${flag} for "${name}": switched off in the scene's Tokens settings`); return false; }
   if ( reducedMotion() ) { dbg(`skip ${flag} for "${name}": OS reduced motion is on and "Respect reduced motion" is enabled`); return false; }
   if ( c.who === "gm" && !game.user.isGM ) { dbg(`skip ${flag} for "${name}": set to GM only`); return false; }
@@ -472,15 +476,27 @@ function startFx(token, kind, c, delay = 0, ready = false, extra = {}) {
   if ( !token?.mesh || token.mesh.destroyed || token.destroyed ) return null;
   const cur = BY_TOKEN.get(token);
   if ( cur ) { if ( cur.kind === "drop" ) return null; cur.end(); }
+  // an enter / death of tokens/fx.mjs is running: it keeps the token (a hop or a lock-on would fight it)
+  if ( kind !== "drop" && kind !== "pop" && runtime.busy?.(token) ) { dbg(`skip ${kind} for "${token.document.name}": a token effect is running`); return null; }
+  if ( token._mmDead && (kind === "hop" || kind === "enter" || kind === "lock") ) { dbg(`skip ${kind} for "${token.document.name}": the token is dead`); return null; }
+  Hooks.callAll("moinenMapsTokenFxBusy", token);   // tokens/fx.mjs hands the mesh back as Foundry draws it before we capture it
   return new Drop(token, kind, c, delay, ready, extra);
 }
+
+/** Is an effect of this file posing the token's mesh right now? (tokens/fx.mjs yields while it is) */
+export const tokenBusy = (token) => BY_TOKEN.has(token);
 
 function startDrop(token, ready = false) {
   const c = tokenCfg(token.document);
   if ( !token.mesh || token.mesh.destroyed || BY_TOKEN.has(token) || !allowed(token, c) ) return;
+  const style = fxFor(token.document).enterStyle;
+  if ( style === "none" ) { dbg(`skip enter for "${token.document.name}": its enter style is none`); return; }
   const idx = nextBurstIndex("drop");
   if ( idx === null ) { dbg("skip drop: more than 25 tokens at once"); return; }                                  // a mass drop: skip, never lag
-  startFx(token, "drop", c, Math.min(idx * STAGGER, MAX_DELAY), ready);
+  const delay = Math.min(idx * STAGGER, MAX_DELAY);
+  if ( style === "drop" ) startFx(token, "drop", c, delay, ready);
+  else if ( style === "classic" ) { const fx = startFx(token, "pop", c, delay, ready); if ( ready ) fx?.refreshed(); }
+  else runtime.enter?.(token, style, delay, ready);
 }
 
 /** A token was created during this session (never fires for tokens that merely load with the scene). */
@@ -531,26 +547,44 @@ function onHiddenChanged(token, hidden) {
   GHOST_BY_TOKEN.get(token)?.end();
   const c = tokenCfg(token.document);
   if ( !allowed(token, c, "hide") ) return;
+  const fx = fxFor(token.document), style = hidden ? fx.hideStyle : fx.revealStyle;
+  if ( style === "none" ) { dbg(`skip ${hidden ? "hide" : "reveal"} for "${token.document.name}": its style is none`); return; }
   const idx = nextBurstIndex(hidden ? "hide" : "unhide");
   if ( idx === null ) return;
   const delay = Math.min(idx * STAGGER, MAX_DELAY);
   if ( hidden ) {
     const m = token.mesh;
     if ( !m || m.destroyed || !token.visible || !m.visible || !m.renderable ) return;
-    new Ghost(token, c, delay);
-  } else {
+    if ( style === "puff" ) new Ghost(token, c, delay);
+    else runtime.leave?.(token, style, delay, "hide");
+  } else if ( style === "classic" || style === "drop" ) {
     // Foundry does not necessarily raise a refresh for a visibility change, so nothing waits for one: capture and write the start pose right now,
     // in the same tick as the change, before the next paint
     const fx = startFx(token, "pop", c, delay, true);
     fx?.refreshed();
-  }
+  } else runtime.enter?.(token, style, delay, true);
 }
 
+/**
+ * A token is deleted: the leave style of the token plays on a ghost (tokens/fx.mjs; the puff is the hide ghost of this file). The
+ * placeable still exists while this hook runs (Foundry destroys it right after, in _onDeleteOperation) but may already be gone: then
+ * nothing plays. A token that is dead (its death has played) does not leave again.
+ */
 export function onDeleteToken(doc) {
-  // doc.object is already gone by now, so match on the document
+  const token = doc._object ?? null;
   for ( const [t, d] of [...BY_TOKEN] ) if ( t.document === doc ) d.end();
   for ( const [t, g] of [...GHOST_BY_TOKEN] ) if ( t.document === doc ) g.end();
   for ( const r of [...RETICLES.values()] ) if ( r.token.document === doc ) r.end();
+  if ( !token || token.destroyed || doc.parent?.id !== canvas.scene?.id ) return;
+  if ( token._mmDead ) { dbg(`skip leave for "${doc.name}": it is dead`); return; }
+  const c = tokenCfg(doc), style = fxFor(doc).leaveStyle;
+  if ( style === "none" || !allowed(token, { ...c, leave: true }, "leave") ) return;
+  const m = token.mesh;
+  if ( !m || m.destroyed || !token.visible || !m.visible || !m.renderable ) return;
+  const idx = nextBurstIndex("leave"); if ( idx === null ) { dbg("skip leave: more than 25 tokens at once"); return; }
+  const delay = Math.min(idx * STAGGER, MAX_DELAY);
+  if ( style === "puff" ) new Ghost(token, c, delay);
+  else runtime.leave?.(token, style, delay, "delete");
 }
 
 /* ---- targeting ---- */

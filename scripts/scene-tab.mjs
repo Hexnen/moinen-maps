@@ -3,6 +3,7 @@ import { compositePin } from "./pin-art.mjs";
 import { dotsFieldsHtml, wireDotsFields } from "./dots.mjs";
 import { lightsCfg, lightFieldsHtml, wireLightFields, previewWhileOpen } from "./lights.mjs";
 import { labelFieldsHtml, fontFamilies, wireFontPreview, fg, revealFoldsOnOpen, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
+import { useTool } from "./workspace/shell.mjs";
 
 const TAB = "moinenmaps";
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -69,6 +70,7 @@ function tabHtml(scene, active) {
 
       <h3 class="mm-group"><i class="fa-solid fa-user" inert></i> ${esc(T("Scene.GroupTokens"))}</h3>
       <fieldset class="mm-tokenset">${legend("fa-user", "Scene.Tokens")}
+        <p class="mm-tfx-link"><span class="hint">${esc(T("TokFx.sceneLink"))}</span> <button type="button" data-mm="tokfx"><i class="fa-solid fa-chess-pawn" inert></i> ${esc(T("TokFx.openWorkspace"))}</button></p>
         ${select("tokens.who", "Tok.who", c.tokens.who, [["all", T("Tok.whoAll")], ["gm", T("Tok.whoGM")]])}
         ${select("tokens.filter", "Tok.filter", c.tokens.filter, [["all", T("Tok.filterAll")], ["player", T("Tok.filterPlayer")], ["npc", T("Tok.filterNpc")]])}
         ${range("tokens.intensity", "Tok.intensity", c.tokens.intensity, 0.3, 1.6, 0.05, "Tok.intensityHint")}
@@ -207,6 +209,8 @@ function wire(tab, scene, app) {
   tab.addEventListener("change", changed);
   tab.addEventListener("input", changed);
   stage.addEventListener("click", replay);
+  // the Tokens workspace section is the main place for the token effects (enter / leave / idle / death and these older ones)
+  tab.querySelector('[data-mm="tokfx"]')?.addEventListener("click", () => { app.close(); useTool("tokens", "mm-t-pick"); });
   sync();
   setTimeout(replay, 250);
 }

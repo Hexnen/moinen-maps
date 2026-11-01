@@ -1,3 +1,5 @@
+import { FX_DEFAULTS } from "./tokens/styles.mjs";
+
 export const MODULE_ID = "moinen-maps";
 
 /** Halftone dot fill: size = largest dot diameter as a fraction of the spacing; spacing in grid squares; tint = background wash. */
@@ -40,7 +42,8 @@ export const DEFAULTS = {
   tokens: { enabled: true, who: "all", filter: "all", intensity: 1, dropHeight: 1, bounce: 0.55, squeeze: 0.5, shadow: true, ripple: true, hop: false,
     hide: true,                                                                   // a token hidden / revealed: ghost puff / pop-in
     target: true, reticleStyle: "crosshair", reticleUser: true, reticleColor: "#e5322d", hideNative: false,   // targeting: a hand-inked reticle
-    combat: true, combatStagger: true, combatRipple: true, combatNumber: true },    // joining a combat / combat start
+    combat: true, combatStagger: true, combatRipple: true, combatNumber: true,     // joining a combat / combat start
+    ...FX_DEFAULTS },                                                             // enter / leave / idle / death styles (tokens/styles.mjs)
   label: { family: "", sizeMode: "fit", size: 36, weight: "700", italic: false, spacing: 3, caseMode: "upper", color: "auto", autoColor: true,
     halo: "#fff3e2", haloWidth: 7, shadow: false, opacity: 1, curved: false, angle: 0, offsetX: 0, offsetY: 0 },   // district label typography
   pinText: { family: "", size: 0, color: "", halo: "", haloWidth: 0 },                  // note tooltip text (0 / "" = Foundry's own)
