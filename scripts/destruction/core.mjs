@@ -22,7 +22,7 @@ import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
 
-export const CORE_VERSION = 31;   // 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 32;   // 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -914,7 +914,7 @@ function bakeArea(A, P, seed, uid, jag) {
       seeds.push({ x: e.x + (R() - 0.5), y: e.y + (R() - 0.5), e: ei, sec: ei * 64 + 63 }); group[base] = base;
       // (the level is a real gradation: a higher level breaks into more and smaller plates)
       const lv1 = C.maxSev < 1.5, M = lv1 ? 3 : clamp(Math.round((3 + Math.floor(R() * 3) + (C.maxSev > 2.4 ? 1 : 0)) * (fz?.spokes ?? 1) * 0.85), 3, 8);
-      const sz = lv1 ? 2 : clamp(1.45 - 0.33 * C.maxSev, 0.6, 1.1);
+      const sz = lv1 ? 2 : clamp(1.5 - 0.25 * C.maxSev, 0.82, 1.1);
       const wts = Array.from({ length: M }, () => 0.45 + R()), tot = wts.reduce((s, v) => s + v, 0), ringK = fz?.ring ?? 1;
       let ang = R() * TAU2;
       for ( let j = 0; j < M; j++ ) {
@@ -1050,7 +1050,7 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( cell.seed.sec !== undefined && C.maxSev >= 1.5 ) {   // (a level-1 crack stays a hairline)
           const cl = C.cellAt.get(i - 1), ca = C.cellAt.get(i - W), sec = cell.seed.sec, y = (i - x) / W;
           const main = (q) => q !== undefined && q !== cell.id && C.cells[q].seed.sec !== sec;
-          if ( (main(cl) || main(ca) || main(cr) || main(cb)) && Math.hypot(x - e.x, y - e.y) < e.R * (0.6 + 0.4 * (C.maxSev - 1.5)) + 2 ) continue;
+          if ( (main(cl) || main(ca) || main(cr) || main(cb)) && Math.hypot(x - e.x, y - e.y) < e.R * (0.5 + 0.2 * (C.maxSev - 1.5)) + 2 ) continue;
         }
         if ( (sv >= 1.8 || jag) && type !== T_CRACKS ) {
           const rim = !(inside[i - 1] && inside[i + 1] && inside[i - W] && inside[i + W]) || C.cellAt.get(i - 1) !== cell.id || C.cellAt.get(i - W) !== cell.id;
