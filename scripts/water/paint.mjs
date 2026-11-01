@@ -29,12 +29,18 @@ function opacities(alpha) {
   return A;
 }
 
+/** The overall opacity 0..1 (percent in `alpha.all`), laid over the finished colour of every group. */
+export function overall(alpha) {
+  const v = Number(alpha?.all ?? 100);
+  return Math.max(0, Math.min(100, Number.isFinite(v) ? v : 100)) / 100;
+}
+
 /**
  * A 256-entry lookup byte -> packed RGBA (little endian, ready for a Uint32Array over ImageData).
  * `codes` is the worker's table (3 bytes per code: colour, element + 1, under); `colors` six hex strings; `alpha` percent per group.
  */
 export function buildLut(codes, colors, alpha) {
-  const A = opacities(alpha), cols = colors.map(rgbOf);
+  const A = opacities(alpha), cols = colors.map(rgbOf), master = overall(alpha);
   const lut = new Uint32Array(256), bytes = new Uint8Array(lut.buffer);
   for ( let b = 0; b < 256; b++ ) {
     const lv = codes[b * 3], el = codes[b * 3 + 1] - 1, under = codes[b * 3 + 2];
@@ -52,7 +58,7 @@ export function buildLut(codes, colors, alpha) {
       }
       a = oa;
     }
-    bytes[b * 4] = Math.round(r); bytes[b * 4 + 1] = Math.round(g); bytes[b * 4 + 2] = Math.round(bl); bytes[b * 4 + 3] = Math.round(a * 255);
+    bytes[b * 4] = Math.round(r); bytes[b * 4 + 1] = Math.round(g); bytes[b * 4 + 2] = Math.round(bl); bytes[b * 4 + 3] = Math.round(a * master * 255);
   }
   return lut;
 }

@@ -164,7 +164,8 @@ class WaterSettings {
       case "enabled":
         return this.#row("enabled", label("enabled"), hint("enabled"), `<input type="checkbox" id="mm-wp-enabled" name="enabled"${S.enabled ? " checked" : ""}>`);
       case "opacity":
-        return ALPHA_GROUPS.map((g) => this.#row(`alpha.${g}`, T(`Water.a.${g}`), "", `<range-picker id="mm-wp-alpha.${g}" name="alpha.${g}" min="0" max="100" step="5" value="${Number(P.alpha?.[g] ?? ALPHA_START[g] ?? 100)}"></range-picker>`)).join("");
+        return this.#row("alpha.all", T("Water.a.all"), T("Water.a.allHint"), `<range-picker id="mm-wp-alpha.all" name="alpha.all" min="0" max="100" step="5" value="${Number(P.alpha?.all ?? 100)}"></range-picker>`)
+          + ALPHA_GROUPS.map((g) => this.#row(`alpha.${g}`, T(`Water.a.${g}`), "", `<range-picker id="mm-wp-alpha.${g}" name="alpha.${g}" min="0" max="100" step="5" value="${Number(P.alpha?.[g] ?? ALPHA_START[g] ?? 100)}"></range-picker>`)).join("");
       case "rods": {
         const kind = game.settings.get(MODULE_ID, "waterRodKind"), branch = game.settings.get(MODULE_ID, "waterRodBranch"), n = (P.guides ?? []).length;
         return `<p class="hint">${esc(T("Water.rodsHint"))}</p>
