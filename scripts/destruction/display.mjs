@@ -310,11 +310,11 @@ export class DestructionDisplay {
     const coverFrame = r.cover >= 0 ? { tex: frame(coverIdx), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
     const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, baseTex: baseSpr.texture, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
     if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
-    else if ( r.cover >= 0 ) {
-      // a damage that does not glow: a faint rim light and lift in a dark scene (cause-fx addRim; nothing by day)
-      const q = rects[coverIdx], p = pk.pos[coverIdx], cd = new Uint8Array(q.w * q.h * 4);
-      for ( let y = 0; y < q.h; y++ ) cd.set(buf.subarray(((p.y + y) * pk.W + p.x) * 4, ((p.y + y) * pk.W + p.x + q.w) * 4), y * q.w * 4);
-      Cause.addRim(this, g, { w: q.w, h: q.h, data: cd }, meta[r.cover + 5], meta[r.cover + 6]);
+    if ( r.cover >= 0 ) {
+      // every damage, glowing or not: a rim light on its lips and the lit bevels of its cracks in a dark scene (cause-fx addRim, read
+      // from its cover and its base; nothing by day)
+      const cut = (i) => { const q = rects[i], p = pk.pos[i], out = new Uint8Array(q.w * q.h * 4); for ( let y = 0; y < q.h; y++ ) out.set(buf.subarray(((p.y + y) * pk.W + p.x) * 4, ((p.y + y) * pk.W + p.x + q.w) * 4), y * q.w * 4); return { w: q.w, h: q.h, data: out }; };
+      Cause.addRim(this, g, cut(coverIdx), meta[r.cover + 5], meta[r.cover + 6], cut(0), info.x, info.y);
     }
     // its debris: chunk variants cut from its plates (the map under it) and its base, and the few that stay at rest by its rim
     // (sprites at the end of its shard container: part of its settled look, the same on every client)

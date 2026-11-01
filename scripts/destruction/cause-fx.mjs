@@ -1,5 +1,6 @@
 import { reducedMotion } from "../config.mjs";
-import { pxFlash, pxLine, boltTree, boltCells, pxBolt, pxRunDisc, sigilCells, hashU } from "./pixel-fx.mjs";
+import { pxFlash, pxLine, pxRing, pxArcs, lineCells, boltTree, boltCells, pxBolt, pxRunDisc, sigilCells, hashU } from "./pixel-fx.mjs";
+import { clawCount } from "./core.mjs";
 
 /**
  * The CAUSE of a damage on screen (display side; the bake side is the CAUSE table of core.mjs). On top of the kind's entry and idle:
@@ -22,11 +23,11 @@ const TAU = Math.PI * 2;
 export const CAUSE_LOOK = [
   null,
   /* fire      */ { slow: 1.1, curve: (f) => Math.sqrt(f), share: 0.35, tint: 0xffa060, front: 0.35, edge: { color: [0xff9a3c, 0xffd36b, 0xd2401c, 0xffb347], rise: -6, life: 650, flicker: true },
-    flash: 0xffb060, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 0.5 },
+    hot: null, heat: true, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 0.5 },
   /* acid      */ { slow: 1.5, curve: (f) => f, share: 0.6, tint: 0xd8ff80, front: 0.5, edge: { color: [0xb6ff4a, 0xe8ff9a, 0x7fd02a], rise: -3, life: 650 },
-    ring: 0x9fe060, idle: "bubble", pulse: "slow", light: 0.35, hot: [0xeaff9a, 0xb6ff4a, 0x6fa02a], stain: 0x9fe050 },
+    ring: 0x9fe060, pops: true, idle: "bubble", pulse: "slow", light: 0.35, hot: [0xeaff9a, 0xb6ff4a, 0x6fa02a], stain: 0x9fe050 },
   /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.1, tint: null, front: 0.08, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
-    bolt: true, idle: "spark", pulse: "crackle", light: 0.4, hot: [0xffffff, 0xdcecff, 0x9fc8ff], stain: 0xd8ecff },
+    bolt: true, idle: null, pulse: "crackle", light: 0.4, hot: [0xffffff, 0xdcecff, 0x9fc8ff], stain: 0xd8ecff },
   /* arcane    */ { slow: 1.25, curve: (f, a) => clamp01(Math.sqrt(f) * 0.78 + (((a / TAU) % 1) + 1) % 1 * 0.22), share: 0.6, tint: 0xd8b0ff, front: 0.6,
     edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5, hot: [0xf0d8ff, 0xc890ff, 0x7a4ad8], stain: 0xb070ff },
   /* impact    */ { slow: 0.7, curve: (f) => Math.pow(f, 0.45), share: 0.4, tint: null, front: 0.3, edge: { color: [0xcfc6b8, 0xb9ae9e], vy: -2, rise: -3, life: 600, drag: 2.4 },
@@ -34,16 +35,16 @@ export const CAUSE_LOOK = [
   /* claws     */ { slow: 0.8, curve: (f) => f, share: 0.4, tint: null, front: 0, edge: { color: [0xfff0b0, 0xe8dcc8], vy: -5, fall: 30, life: 260, drag: 2 },
     slash: true, idle: null, hot: null },
   /* water     */ { slow: 1.3, curve: (f) => Math.pow(f, 0.7), share: 0.6, tint: 0xb8d4ff, front: 0.5, edge: { color: [0xe6f4ff, 0x9fc8ee], vy: -1, life: 450, drag: 3 },
-    ring: 0xcfe8ff, idle: "drip", hot: null, stain: 0x203448 },
+    ring: 0xcfe8ff, well: true, idle: "drip", hot: null, stain: 0x203448 },
   /* decay     */ { slow: 1.9, curve: (f) => f, share: 0.6, tint: 0xc8d4a0, front: 0.35, edge: { color: [0x9aa868, 0xb9ae9e, 0x6f7f45], rise: -2, life: 1400 },
-    idle: "spore", hot: null, stain: 0x3a4a22 },
+    flakes: true, idle: "spore", hot: null, stain: 0x3a4a22 },
   /* frost     */ { slow: 1.15, curve: (f) => Math.pow(f, 0.6), share: 0.55, tint: 0xe4f2ff, front: 0.5, edge: { color: [0xffffff, 0xd8ecff], rise: -1, life: 520 },
-    ring: 0xe8f4ff, idle: "glint", hot: [0xffffff, 0xe0f0ff, 0xa8d0f0], stain: 0xe8f4ff }
+    ring: 0xe8f4ff, crystal: true, idle: "glint", hot: [0xffffff, 0xe0f0ff, 0xa8d0f0], stain: 0xe8f4ff }
 ];
 export const causeLook = (c) => CAUSE_LOOK[c | 0] ?? null;
 const pick = (a) => a[(Math.random() * a.length) | 0];
 /** Per cause: the share of its edge particles that are chips (fire: coals, acid: crumbs, lightning: glass, frost: ice). */
-const CHIP = [0, 0.15, 0.2, 0.3, 0, 0, 0, 0, 0, 0.3];
+const CHIP = [0, 0.15, 0.2, 0, 0, 0, 0, 0, 0, 0.3];   // (lightning: none - its glass chips at rest read as black pebbles)
 
 /** A particle of the cause at (x, y) (art px). */
 export function causeParticle(d, cl, x, y, k = 1) {
@@ -99,30 +100,127 @@ export function causeEffects(d, g, a, now, el) {
   if ( cl.rune ) draw("rune", a.delay, 1100 * k, (gr, t) => {
     // a ring of inscribed SIGILS (pixel-fx sigilStrokes: curved and angular strokes with ticks, never a cross) that turns a little,
     // each glyph lighting in turn and pulsing, then dying by dropout
-    const rr = Math.max(6, R * 0.66) * (1 + 0.9 * Math.pow(1 - Math.min(1, t * 2.2), 2)), n = clamp01(R * 0.66 / 30) > 0.5 ? 8 : 6, rot = t * 0.5, sz = Math.max(2, Math.min(4, rr * 0.16));
+    const rr = Math.max(6, R * 0.66) * (1 + 0.9 * Math.pow(1 - Math.min(1, t * 2.2), 2)), n = clamp01(R * 0.66 / 30) > 0.5 ? 6 : 5, rot = t * 0.5, sz = Math.max(2, Math.min(4, rr * 0.16));
     for ( let i = 0; i < n; i++ ) {
       const on = clamp01((t * 1.6 - i / n * 0.5) * 3), pul = 0.75 + 0.25 * Math.sin(t * 18 + i * 1.3), al = on * pul * (t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1);
       if ( al < 0.12 ) continue;
       const ang = rot + i / n * TAU, cx = a.ox + Math.cos(ang) * rr, cy = a.oy + Math.sin(ang) * rr * 0.82;
-      gr.beginFill(i & 1 ? 0xd8a8ff : 0xf0d8ff, 1);
+      gr.beginFill(i & 1 ? 0xb070ff : 0xd8a8ff, 1);
       for ( const [x, y] of sigilCells(a.seed * 13 + i, cx, cy, sz) ) if ( hashU(x, y, i) < al ) gr.drawRect(V.ox + x * ap, V.oy + y * ap, ap, ap);
       gr.endFill();
     }
   }, PIXI.BLEND_MODES.ADD);
   if ( cl.shock ) {
-    // a heavy blow: the ground jolts for a moment, a dust skirt
-    const j = el < 140 * k ? (((Math.floor(el / 35) & 1) ? 1 : -1) * ap) : 0;
+    // IMPACT, a heavy blow: anticipation - the shadow of what falls tightens onto the spot (0-55 ms); the HIT - a sharp white shock
+    // ring broken into arcs races out, straight radial fractures shoot from the spot, the ground thumps (2 px down, a damped
+    // rebound), chips pop, a low dust skirt rolls out
+    const hit = 55 * k;
+    draw("shadow", 0, hit, (gr, t) => pxRunDisc(gr, V, a.ox, a.oy + 1, Math.max(2, R * (0.55 - 0.4 * t)), 0x1a1612, 0.18 + 0.4 * t, a.seed + 41));
+    draw("shock", hit, 260 * k, (gr, t) => {
+      const e = 1 - Math.pow(1 - t, 2.2);
+      pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.35 + 1.25 * e) * pw), t, { core: 0xffffff, outer: 0xe6dccb, seed: a.seed + 43, dash: 7, thick: t < 0.4 ? 2 : 1 });
+    });
+    const nf = 6 + Math.floor(hashU(a.seed, 1, 47) * 3);
+    draw("fract", hit, 420 * k, (gr, t) => {
+      const grow = Math.min(1, t * 4), al = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+      for ( let q = 0; q < nf; q++ ) {
+        const an = (q + 0.4 * hashU(q, 2, a.seed + 47)) / nf * TAU, L = R * (0.75 + 0.45 * hashU(q, 3, a.seed + 47)) * grow, c = Math.cos(an), s = Math.sin(an) * 0.85;
+        pxLine(gr, V, a.ox + c * 1.5, a.oy + s * 1.5, a.ox + c * L, a.oy + s * L, 0x15110d, { alpha: al, drop: 1 - al, seed: q + 5 });
+        pxLine(gr, V, a.ox + c * 1.5 + 1, a.oy + s * 1.5 + 1, a.ox + c * L + 1, a.oy + s * L + 1, 0xf2e8d6, { alpha: al * 0.8, drop: 1 - al, seed: q + 9 });
+      }
+    });
+    const je = el - hit, J = [2, -1, 1, 0];
+    const j = je >= 0 && je < 140 * k ? J[Math.min(3, Math.floor(je / (35 * k)))] * ap : 0;
     g.baseCont?.position.set(0, j); g.shardCont?.position.set(0, j);
-    once("skirt", 40 * k, () => d.burst(a.ox, a.oy, R * pw, now, { n: 20, color: 0xcfc6b8, rise: -3, speed: 1.3 }));
+    once("chips", hit + 10 * k, () => { if ( g.chunks ) d.chunks(g, a, { count: Math.min(10, Math.round((4 + R * 0.2) * pw)), reach: [0.5, 1.3], H: [3, 7], sizes: [3, 5], seed: 7 }); });
+    once("skirt", hit + 40 * k, () => d.burst(a.ox, a.oy, R * 1.1 * pw, now, { n: 22, color: 0xcfc6b8, rise: -1.5, speed: 1.6 }));
   }
   if ( cl.slash ) {
+    // CLAWS: one swipe - the furrows' streaks (as many as the bake's furrows: 3 on a tear, else clawCount) cut in one after another,
+    // each a bright line that grows fast along the axis with a hot leading edge, then fades
     const ang = g.info.axis || 0, ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux, L = Math.max(10, g.info.len || R * 2) * 0.6;
-    draw("slash", 0, 260 * k, (gr, t) => {
-      const grow = Math.min(1, t * 3), al = 1 - t;
-      for ( const off of [-1, 0, 1] ) {
-        const cx = a.ox + nx * off * Math.max(2, R * 0.5), cy = a.oy + ny * off * Math.max(2, R * 0.5);
-        pxLine(gr, V, cx - ux * L, cy - uy * L, cx - ux * L + ux * 2 * L * grow, cy - uy * L + uy * 2 * L * grow, 0xfff4d8, { drop: 1 - al, seed: off + 3 });
+    const n = a.tear ? 3 : clawCount(g.info.R), sp = Math.max(2.5, R * (a.tear ? 0.5 : 1.7 / n));
+    for ( let q = 0; q < n; q++ ) draw(`slash${q}`, q * 38 * k, 240 * k, (gr, t) => {
+      const grow = Math.min(1, t * 4), al = 1 - t, off = (q - (n - 1) / 2) * sp, Lq = L * (q === 0 || q === n - 1 ? 0.85 : 1);
+      const cx = a.ox + nx * off, cy = a.oy + ny * off, x0 = cx - ux * Lq, y0 = cy - uy * Lq, x1 = x0 + ux * 2 * Lq * grow, y1 = y0 + uy * 2 * Lq * grow;
+      pxLine(gr, V, x0, y0, x1, y1, 0xfff4d8, { drop: 1 - al, seed: q + 3 });
+      if ( t < 0.3 ) pxLine(gr, V, x1 - ux * 4, y1 - uy * 4, x1, y1, 0xffc860, { seed: q + 13 });
+    });
+  }
+  if ( cl.heat ) {
+    // FIRE's own anticipation (no starburst): heat shimmer - wavy warm lines wobbling up off the spot; an ember swirl rising round
+    // it; a scorched ring creeping out ahead of the burn (dark char arcs with an ember edge)
+    draw("shimmer", 0, 520 * k, (gr, t) => {
+      const al = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8;
+      for ( let q = 0; q < 4; q++ ) {
+        const yy = a.oy - 2 - q * 3 - t * 9, w = Math.round(R * (0.5 - q * 0.07));
+        gr.beginFill(q & 1 ? 0xffd890 : 0xffb060, 0.22 * al);
+        for ( let x = -w; x <= w; x++ ) if ( hashU(x, q, a.seed + 51) < 0.55 ) gr.drawRect(V.ox + Math.round(a.ox + x) * ap, V.oy + Math.round(yy + Math.sin(x * 0.7 + t * 30 + q * 2) * 1.2) * ap, ap, ap);
+        gr.endFill();
       }
+    }, PIXI.BLEND_MODES.ADD);
+    once("swirl", 30 * k, () => {
+      for ( let q = 0; q < 10; q++ ) {
+        const an = q / 10 * TAU, r = R * 0.35;
+        d.spawn({ x: a.ox + Math.cos(an) * r, y: a.oy + Math.sin(an) * r * 0.8, vx: -Math.sin(an) * 9, vy: Math.cos(an) * 5, rise: -7 - (q % 3) * 2, drag: 1.5, life: 700 + q * 40, color: q % 3 ? 0xff9a3c : 0xffd36b, flicker: true });
+      }
+    });
+    draw("scorch", 60 * k, Math.max(300, (a.delay + a.reveal) * 0.9), (gr, t) =>
+      pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.25 + 0.9 * t) * pw), t * 0.6, { core: 0x24160e, outer: 0xff8a3c, seed: a.seed + 53, dash: 10, thick: 2 }));
+  }
+  if ( cl.pops ) {
+    // ACID hisses: bubbles swell on the eaten floor and POP (a dot, a taller bead, a ring of four, gone), each at its own moment
+    const nb = Math.min(14, 5 + Math.round(R * 0.3));
+    draw("pops", a.delay, (a.reveal + a.band) * 1.2, (gr, t) => {
+      for ( let q = 0; q < nb; q++ ) {
+        const t0 = hashU(q, 1, a.seed + 61) * 0.8, u = (t - t0) / 0.18; if ( u < 0 || u > 1 ) continue;
+        const an = hashU(q, 2, a.seed + 61) * TAU, rr = R * 0.75 * Math.sqrt(hashU(q, 3, a.seed + 61)), x = Math.round(a.ox + Math.cos(an) * rr), y = Math.round(a.oy + Math.sin(an) * rr * 0.8);
+        if ( u < 0.6 ) { gr.beginFill(u < 0.3 ? 0xb6ff4a : 0xeaff9a, 1); gr.drawRect(V.ox + x * ap, V.oy + (y - (u > 0.3 ? 1 : 0)) * ap, ap, ap * (u > 0.3 ? 2 : 1)); gr.endFill(); }
+        else { gr.beginFill(0xd8ff8a, 1 - (u - 0.6) / 0.4); for ( const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] ) gr.drawRect(V.ox + (x + dx) * ap, V.oy + (y + dy - 1) * ap, ap, ap); gr.endFill(); }
+      }
+    });
+  }
+  if ( cl.well ) {
+    // WATER wells up: slow broken ripple arcs spreading from the low spot as the pit fills
+    for ( const [key, f, rr] of [["well1", 0.15, 0.7], ["well2", 0.5, 0.55], ["well3", 0.85, 0.45]] ) draw(key, a.delay + a.reveal * f, 650 * k, (gr, t) =>
+      pxArcs(gr, V, a.ox, a.oy, Math.max(2, R * rr * pw * (0.3 + 0.7 * (1 - Math.pow(1 - t, 2)))), t, { seed: a.seed + key.length * 7 + Math.round(f * 100), core: t < 0.5 ? 0xd8f0f4 : 0x9fd0dc }));
+  }
+  if ( cl.flakes ) {
+    // ROT crumbles: flakes break off the sagging rim and fall in, dull spores drift up slowly
+    for ( const [key, f] of [["fl1", 0.25], ["fl2", 0.55], ["fl3", 0.85]] ) once(key, a.delay + a.reveal * f, () => {
+      for ( let q = 0; q < 5; q++ ) {
+        const an = Math.random() * TAU, r = R * (0.8 + Math.random() * 0.25);
+        d.spawn({ x: a.ox + Math.cos(an) * r, y: a.oy + Math.sin(an) * r * 0.8, vx: -Math.cos(an) * 4, vy: -2, fall: 24, drag: 1.2, life: 520 + Math.random() * 200, color: q & 1 ? 0x5a4a32 : 0x7a6a48, alpha: 0.95 });
+      }
+      for ( let q = 0; q < 2; q++ ) d.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.7, vx: (Math.random() - 0.5) * 1.2, vy: 0, rise: -1.4, life: 1500, color: 0xa8b47a, alpha: 0.6 });
+    });
+  }
+  if ( cl.crystal ) {
+    // FROST grows: crystal needles shoot out on the 30 / 90 / 150-degree lines from the spot, each branching once at 60 degrees
+    draw("crystal", 0, Math.max(360, a.delay + a.reveal * 0.6), (gr, t) => {
+      const grow = 1 - Math.pow(1 - Math.min(1, t * 1.6), 2), al = t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25;
+      for ( let q = 0; q < 6; q++ ) {
+        const an = (q + 0.5) * Math.PI / 3, L = R * (0.6 + 0.35 * hashU(q, 1, a.seed + 71)) * grow, c = Math.cos(an), s = Math.sin(an);
+        pxLine(gr, V, a.ox, a.oy, a.ox + c * L, a.oy + s * L, 0xf4fbff, { alpha: al, seed: q + 21 });
+        if ( L > 4 ) for ( const sg of [-1, 1] ) {
+          const b = an + sg * Math.PI / 3, x0 = a.ox + c * L * 0.55, y0 = a.oy + s * L * 0.55;
+          pxLine(gr, V, x0, y0, x0 + Math.cos(b) * L * 0.3, y0 + Math.sin(b) * L * 0.3, 0xbfe2ff, { alpha: al * 0.85, seed: q * 3 + sg + 31 });
+        }
+      }
+    });
+  }
+  if ( cl.bolt ) {
+    // after the strike: a few tiny flicker ARCS jumping along the bolt's own trail on the ground (near it only), then quiet
+    once("arcs", 160 * k, () => {
+      const gr = d.pixelCanvas(); gr.blendMode = PIXI.BLEND_MODES.ADD;
+      const s0 = a.seed * 7 + 5, pts = Array.from({ length: 4 }, (_, q) => { const an = hashU(q, 1, s0) * TAU, r = R * 0.5 * hashU(q, 2, s0); return [a.ox + Math.cos(an) * r, a.oy + Math.sin(an) * r * 0.8]; });
+      a.fx.push({ g: gr, kind: "cause", t0: now, dur: 380 * k, draw: (t) => {
+        const q = Math.floor(t * 8) % pts.length; if ( (Math.floor(t * 23) & 1) ) return;
+        const [x, y] = pts[q], cells = [];
+        let X = x, Y = y;
+        for ( let s = 0; s < 4; s++ ) { const nx2 = X + (hashU(q, s, s0 + 9) < 0.5 ? -1 : 1), ny2 = Y + (hashU(q, s, s0 + 10) - 0.5) * 2; lineCells(X, Y, nx2, ny2, cells); X = nx2; Y = ny2; }
+        gr.beginFill(0xdcecff, 0.9); for ( const [cx, cy] of cells ) gr.drawRect(V.ox + cx * ap, V.oy + cy * ap, ap, ap); gr.endFill();
+      } });
     });
   }
 }
@@ -174,33 +272,43 @@ export function addLight(d, g, tex, x, y) {
 }
 
 /**
- * DARK-SCENE READABILITY for a damage that does not glow (no cause, impact, claws, water, rot, frost): a faint rim light on its lips and
- * an ambient lift over its own pixels, laid into Foundry's illumination like the cause lights, only as the scene grows dark (nothing by
- * day: tickLights). Made from the cover (the stroke's own pixels, cw x ch RGBA at x, y art px): edge pixels full, the inside faint,
- * softened by two box blurs; the colour per cause (a cool moonlit grey for plain damage, blue for water, green for rot, ice for frost).
+ * DARK-SCENE READABILITY for EVERY damage (glowing or not): laid into Foundry's illumination like the cause lights, only as the scene
+ * grows dark (nothing by day: tickLights), so its look in the dark is the same pixels lit where it matters:
+ *  - a thin light edge on its lips (the cover's own border: the stroke's pixels next to untouched ground);
+ *  - the lit BEVEL of every dark line (a crack, a fracture, a furrow, the hole's inner edge: a pixel next to a much darker one), so a
+ *    black crack on dark ground reads as a dark line between lit edges instead of vanishing;
+ *  - a faint lift over the inside, a little over the dark lines themselves outside the cover (hairlines out in the ground).
+ * Read once from the cover (cw x ch at x, y) and the base (bw x bh at bx, by, art px) when the area is built, kept with it (one
+ * sprite, no blur, no animation); the colour per cause (moonlit grey for plain damage, dust for impact and claws, blue for water,
+ * green for rot and acid, ice for frost, ember for fire, white-blue for lightning, violet for arcane).
  */
-const RIM = [[175, 182, 196], null, null, null, null, [210, 198, 176], [205, 186, 158], [130, 182, 232], [160, 210, 120], [196, 230, 255]];
-export function addRim(d, g, cov, x, y) {
-  const col = RIM[g.info.cause | 0]; if ( !col || !cov?.data ) return;
-  const { w, h, data } = cov, B = 4, LW = w + 2 * B, LH = h + 2 * B;
-  let A = new Float32Array(LW * LH);
-  const inA = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h && data[(Y * w + X) * 4 + 3] > 0;
+const RIM = [[175, 182, 196], [255, 160, 92], [176, 240, 120], [196, 222, 255], [206, 162, 255], [216, 206, 186], [212, 194, 166], [140, 196, 236], [172, 212, 132], [206, 234, 255]];
+export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
+  const col = RIM[g.info.cause | 0] ?? RIM[0]; if ( !cov?.data ) return;
+  // the lift over the inside: more where the floor is mid-dark (water, the plain hole, char round the embers)
+  const lift = [0.5, 0.55, 0.42, 0.42, 0.42, 0.42, 0.42, 0.7, 0.45, 0.42][g.info.cause | 0] ?? 0.42;
+  const src = base?.data ? base : cov, w = src.w, h = src.h, data = src.data, ox = base?.data ? bx : x, oy = base?.data ? by : y;
+  const inC = (X, Y) => { const cx = X + ox - x, cy = Y + oy - y; return cx >= 0 && cy >= 0 && cx < cov.w && cy < cov.h && cov.data[(cy * cov.w + cx) * 4 + 3] > 0; };
+  const al = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h ? data[(Y * w + X) * 4 + 3] : 0;
+  const lum = (X, Y) => { const o = (Y * w + X) * 4; return 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]; };
+  const B = 1, LW = w + 2 * B, LH = h + 2 * B, A = new Float32Array(LW * LH), N4 = [[-1, 0], [1, 0], [0, -1], [0, 1]];
   for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) {
-    if ( !inA(X, Y) ) continue;
-    const edge = !inA(X - 1, Y) || !inA(X + 1, Y) || !inA(X, Y - 1) || !inA(X, Y + 1);
-    A[(Y + B) * LW + X + B] = edge ? 1 : 0.22;
-  }
-  for ( let pass = 0; pass < 2; pass++ ) {
-    const T = new Float32Array(LW * LH), r = 1;
-    for ( let Y = 0; Y < LH; Y++ ) for ( let X = 0; X < LW; X++ ) { let s = 0, n = 0; for ( let k = -r; k <= r; k++ ) { const q = X + k; if ( q >= 0 && q < LW ) { s += A[Y * LW + q]; n++; } } T[Y * LW + X] = s / n; }
-    for ( let Y = 0; Y < LH; Y++ ) for ( let X = 0; X < LW; X++ ) { let s = 0, n = 0; for ( let k = -r; k <= r; k++ ) { const q = Y + k; if ( q >= 0 && q < LH ) { s += T[q * LW + X]; n++; } } A[Y * LW + X] = s / n; }
+    const c = inC(X, Y);
+    if ( !c && !al(X, Y) ) continue;
+    const Lm = base?.data && al(X, Y) ? lum(X, Y) : 128;
+    let v = c ? lift : 0, dark = false;
+    if ( c && N4.some(([dx, dy]) => !inC(X + dx, Y + dy)) ) v = 1;
+    if ( base?.data ) for ( const [dx, dy] of N4 ) if ( al(X + dx, Y + dy) && lum(X + dx, Y + dy) < 70 && lum(X + dx, Y + dy) < Lm - 40 ) { dark = true; break; }
+    if ( dark ) v = Math.max(v, 0.9);
+    else if ( !c && Lm < 70 ) v = Math.max(v, 0.4);
+    A[(Y + B) * LW + X + B] = v;
   }
   const px = new Uint8Array(LW * LH * 4);
-  for ( let i = 0; i < LW * LH; i++ ) { const v = Math.min(1, A[i] * 1.6); px[i * 4] = col[0] * v; px[i * 4 + 1] = col[1] * v; px[i * 4 + 2] = col[2] * v; px[i * 4 + 3] = 255 * v; }
+  for ( let i = 0; i < LW * LH; i++ ) { const v = A[i]; if ( !v ) continue; px[i * 4] = col[0] * v; px[i * 4 + 1] = col[1] * v; px[i * 4 + 2] = col[2] * v; px[i * 4 + 3] = 255 * v; }
   const tex = PIXI.Texture.fromBuffer(px, LW, LH);
   const L = ensureLights(d), ap = d.ap, o = d.origin, pool = new PIXI.Sprite(tex);
   pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
-  pool.position.set(o.x + (x - B) * ap, o.y + (y - B) * ap); pool.visible = false;
+  pool.position.set(o.x + (ox - B) * ap, o.y + (oy - B) * ap); pool.visible = false;
   L.layer.addChild(pool);
   g.rim = { pool, tex };
   L.groups.add(g);
