@@ -268,6 +268,9 @@ export class DestructionDisplay {
       const p = pk.pos[i];
       for ( let y = 0; y < q.h; y++ ) buf.set(rgba.subarray(((q.sy + y) * sw + q.sx) * 4, ((q.sy + y) * sw + q.sx + q.w) * 4), ((p.y + y) * pk.W + p.x) * 4);
     });
+    // MEMORY: `rgba` (the whole assembled sheet) lives in this call's closure context (the copy above reads it from an arrow), which the
+    // group's long-lived `frame` closure keeps: every area held on to its sheet (~330 MB on the 'map' scene). Not read below.
+    rgba = null;
     const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: pk.W, height: pk.H }), {
       width: pk.W, height: pk.H, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.ON, alphaMode: PIXI.ALPHA_MODES.UNPACK,
       format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP
