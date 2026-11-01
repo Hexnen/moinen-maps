@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { perfLow } from "../perf-mode.mjs";
 
 /**
  * STATIC CACHE of the destruction layer (PERF). Every damage object (map patch + ruin + shards, an erase stroke, ...) is a container in
@@ -31,6 +32,7 @@ const MOVE_MARGIN = 48;        // art px around a moving object (flying pieces, 
 const SETTLE_MS = 500;         // objects that stopped moving are drawn live this long after the last start/stop, then cached
 
 export const cacheEnabled = () => {
+  if ( perfLow() ) return true;                                  // performance mode Low: always
   if ( globalThis.CONFIG?.moinenMaps?.noDestructionCache ) return false;
   try { return game.settings.get(MODULE_ID, "destructionCache") !== false; } catch { return true; }
 };

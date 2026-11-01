@@ -1,6 +1,7 @@
 import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
 import { wetAt as wetWorld, wetRegions, anyWet } from "./wet.mjs";
+import { perfLow } from "../perf-mode.mjs";
 
 /**
  * Reflections of tokens in the water: a vertical mirror image under every token, drawn only where there is water, on the water's pixel
@@ -237,7 +238,7 @@ function draw(t, st, P, now) {
 
 function onTick() {
   const s = S(), P = cfg();
-  const on = s && s.enabled && P.reflectOn && !REDUCED?.matches && (P.reflectWho === "all" || game.user.isGM);
+  const on = s && s.enabled && P.reflectOn && !REDUCED?.matches && (P.reflectWho === "all" || game.user.isGM) && !perfLow();   // (performance mode Low: none)
   if ( !on ) { if ( states.size ) clear(); if ( root ) root.visible = false; return; }
   const now = performance.now();
   // the first mask at once (and after a clock that went back: a frozen or replayed clock), later ones at most four times a second

@@ -215,9 +215,12 @@ export const reducedMotion = () => osReducedMotion() && !!setting("respectReduce
 export const debugOn = () => !!(globalThis.CONFIG?.debug?.moinenMaps || setting("debugAnimations", false));
 export const dbg = (...a) => { if ( debugOn() ) console.debug("moinen-maps |", ...a); };
 
+import { registerPerfMode } from "./perf-mode.mjs";
+
 export function registerCoreSettings() {
   game.settings.register(MODULE_ID, "respectReducedMotion", { name: "MOINENMAPS.Setting.respectMotion", hint: "MOINENMAPS.Setting.respectMotionHint", scope: "client", config: true, type: Boolean, default: false });
   game.settings.register(MODULE_ID, "debugAnimations", { name: "MOINENMAPS.Setting.debug", hint: "MOINENMAPS.Setting.debugHint", scope: "client", config: true, type: Boolean, default: false });
   // the destruction layer drawn from a cache while it does not move (static-cache.mjs); off only to compare or to rule it out
+  registerPerfMode();
   game.settings.register(MODULE_ID, "destructionCache", { name: "MOINENMAPS.Setting.destructionCache", hint: "MOINENMAPS.Setting.destructionCacheHint", scope: "client", config: true, type: Boolean, default: true });
 }

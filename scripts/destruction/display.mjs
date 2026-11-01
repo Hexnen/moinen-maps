@@ -5,6 +5,7 @@ import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
 import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
+import { perfMode, particleCap } from "../perf-mode.mjs";
 
 /** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
 function maskedMap(ms, mask) {
@@ -353,7 +354,9 @@ export class DestructionDisplay {
 
   /** Areas whose entry ended a while ago (nothing moves in them, nothing held under them) go back to one sprite each. */
   reflatten(now) {
+    const t0 = performance.now();
     for ( const g of this.order ) {
+      if ( performance.now() - t0 > 4 ) return;      // a few per frame (after a Detonate they all settle together)
       if ( !g.reflatAt || now < g.reflatAt ) continue;
       if ( g.anim || g.fade || g.made < g.pieces.length || g.cont.alpha < 1 ) { g.reflatAt = now + 300; continue; }
       g.reflatAt = 0;
@@ -495,9 +498,11 @@ export class DestructionDisplay {
   clockSlice(budget, vw) {
     const t0 = performance.now();
     const on = (q) => { const r = q.g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+    this.clocks = this.clocks.filter((q) => !q.g.dead && q.g.anim && (q.g.anim.rev === q.R || q.g.anim.crev === q.R));   // ended or replaced
     this.clocks.sort((a, b) => (on(b) - on(a)) || ((a.g.anim?.start ?? 0) - (b.g.anim?.start ?? 0)));
     while ( this.clocks.length ) {
       const q = this.clocks[0], { w, h, x0, y0, data, timeOf, dark } = q;
+      if ( !q.g.dead && q.g.anim && !on(q) ) return;   // off screen: built when it comes into view (erode waits for it)
       if ( q.g.dead || !q.g.anim || (q.g.anim.rev !== q.R && q.g.anim.crev !== q.R) ) { this.clocks.shift(); continue; }   // ended or replaced
       q.keys ??= new Float64Array(w * h);
       const keys = q.keys;
@@ -594,7 +599,11 @@ export class DestructionDisplay {
     this.endAnim(g);
     const now = performance.now();
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
-    if ( reducedMotion() ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
+    // an area far off screen is simply there (an entry nobody sees is not simulated: on a Detonate of every area that was most of
+    // the cost); the view grown by half of it on every side (strictly the view in performance mode Medium); Low: a short fade
+    const perf = perfMode();
+    if ( !this.onScreen(g, perf === "medium" ? 0 : 0.5) ) { for ( const u of under ) u.heldBy = null; this.stats.offscreenEntries = (this.stats.offscreenEntries ?? 0) + 1; return; }
+    if ( reducedMotion() || perf === "low" ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
     if ( g.flat ) this.unflatten(g);
     // an older look held under this one: its shards are caught by the front (tick), so they must exist
     for ( const u of under ) if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); }
@@ -920,8 +929,14 @@ export class DestructionDisplay {
   sceneRect() { const r = canvas.dimensions?.sceneRect; return r ? { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height } : null; }
   inScene(x, y) { const r = this._sr ??= this.sceneRect(); return !r || (x >= r.x0 && y >= r.y0 && x < r.x1 && y < r.y1); }
 
+  /** Is an area (with room for its debris) in the current view, grown by `m` of its size on every side? */
+  onScreen(g, m = 0) {
+    const vw = this.view(), r = g.info.rect, mx = (vw.x1 - vw.x0) * m, my = (vw.y1 - vw.y0) * m;
+    return !(r.x0 > vw.x1 + mx || r.y0 > vw.y1 + my || r.x1 < vw.x0 - mx || r.y1 < vw.y0 - my);
+  }
+
   spawn(q) {
-    if ( this.particles.length > 260 ) return;
+    if ( this.particles.length > particleCap() ) return;
     this.stats.spawned = (this.stats.spawned ?? 0) + 1;
     if ( !this.inScene(this.origin.x + q.x * this.ap, this.origin.y + q.y * this.ap) ) { this.stats.culled = (this.stats.culled ?? 0) + 1; return; }
     let s = this.pool.pop();
@@ -1045,7 +1060,7 @@ export class DestructionDisplay {
     const onScreen = !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0);
     if ( now > a.end ) { this.endAnim(g); return; }
     const el = now - a.start, ap = this.ap;
-    this.erode(g, a, now, onScreen);
+    if ( onScreen ) this.erode(g, a, now, onScreen);   // off screen nothing is uploaded; back on screen it catches up, or endAnim shows it whole
     // collapse: the ground trembles before it gives
     if ( type === "collapse" ) {
       const j = el < a.delay ? (((Math.floor(el / 45) & 1) ? 1 : -1) * ap) : 0;
@@ -1188,7 +1203,7 @@ export class DestructionDisplay {
   }
 
   idleTick(now, vw) {
-    if ( !this.idle.on || reducedMotion() || (this.idle.who === "gm" && !game.user.isGM) || !this.order.length ) return;
+    if ( !this.idle.on || reducedMotion() || perfMode() === "low" || (this.idle.who === "gm" && !game.user.isGM) || !this.order.length ) return;
     for ( const g of this.order ) {
       const ar = g.info;
       if ( g.anim || ar.x > vw.x1 || ar.y > vw.y1 || ar.x + ar.w < vw.x0 || ar.y + ar.h < vw.y0 ) continue;

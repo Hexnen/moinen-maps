@@ -19,6 +19,7 @@
  */
 import { MODULE_ID, sceneConfig, reducedMotion, LIGHT_DEFAULTS } from "./config.mjs";
 import { fg } from "./labels.mjs";
+import { perfLow } from "./perf-mode.mjs";
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
@@ -342,7 +343,7 @@ function sleep() { if ( ticking ) { canvas.app?.ticker?.remove(tick); ticking = 
 
 function tick() {
   const dt = Math.min((canvas.app.ticker.deltaMS || 16) / 1000, 0.1), now = performance.now() / 1000;
-  const still = reducedMotion();
+  const still = reducedMotion() || perfLow();   // (performance mode Low: no twinkle)
   let busy = false;
   for ( const e of ENTRIES.values() ) {
     const g = goal(e);

@@ -1,6 +1,7 @@
 import { TrafficSim, buildNetwork, catchUp, carPose, EPOCH, DT } from "./traffic.mjs";
 import { carTexture, shadowTexture, beamTexture, glowTexture } from "./art.mjs";
 import { reducedMotion } from "../config.mjs";
+import { perfLow } from "../perf-mode.mjs";
 
 /**
  * Draws the traffic: pooled sprites in one container (primary group, just above the districts' tint and under tiles and
@@ -112,7 +113,8 @@ export class TrafficView {
       if ( this.handover ) this.handover = false;     // keep the old roads' cars (configure) until this one is ready
       else if ( this.sim?.ready && this.sim.epoch === epoch - 1 ) { this.old = this.sim; this.oldFade = t; this.pools.reverse(); }
       else { this.old = null; this.#hideAll(1); }
-      this.sim = new TrafficSim(this.net, this.T, this.key, epoch);
+      // performance mode Low: at most 15 cars on this client (its own simulation; nothing shared changes)
+      this.sim = new TrafficSim(this.net, perfLow() && this.T ? { ...this.T, max: Math.min(this.T.max ?? 15, 15) } : this.T, this.key, epoch);
       this.sim.ready = false;
       this.#hideAll(0);
     }
