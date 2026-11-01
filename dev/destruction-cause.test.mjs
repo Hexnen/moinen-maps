@@ -34,7 +34,9 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   { rev: "58e8e7e", other: /CORE_VERSION|compat:/ }, "adfb461", "807ddc7", "a3f8d38",
   { rev: "0e1b7ef", other: /CORE_VERSION|compat:/ }, "80f6dfb",
   // the crack settle grains (display only) replaced lines the debris round (f0287ac) added
-  "3fcd3f2"];   // (50458de was reverted in e5714bb and redone as 7115e86)
+  "3fcd3f2",
+  // the dark rim kept as one byte per pixel (memory) edited lines the rim rounds added
+  "77bf544"];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
