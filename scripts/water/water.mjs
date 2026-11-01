@@ -14,6 +14,8 @@ import { CODES } from "./codes-table.mjs";
 
 let S = null, display = null, info = null, lite = null;
 let gen = 0, bakeTimer = 0, saveTimer = 0;
+/** Bumped by every teardown (scene change): async work started for one scene stops when it comes back to another. */
+let life = 0;
 const status = { baking: false, progress: 0, error: "" };
 
 /** Settings that only change colours: no new bake. */
@@ -40,7 +42,7 @@ export async function onCanvasReady() {
 }
 
 export function teardown() {
-  gen++;
+  gen++; life++;
   clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); clearTimeout(publishTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = publishTimer = 0;
   display?.destroy(); display = null;
   S = null; status.baking = false; status.progress = 0; status.error = "";
@@ -56,13 +58,18 @@ export async function onUpdateScene(scene, changed, options, userId) {
 }
 
 async function start() {
+  // the first start waits for the worker: a scene change meanwhile (teardown) must not let this one go on with the next scene's
+  // water (or with none: S is null then)
+  const my = life;
   try {
     await ensureTables();
   } catch ( err ) {
+    if ( my !== life ) return;
     console.error(`${MODULE_ID} | water engine`, err);
     status.error = String(err?.message ?? err); tell("status");
     return;
   }
+  if ( my !== life || !S ) return;
   S.params = { ...foundry.utils.deepClone(tables().defaults), ...S.params };
   if ( !Array.isArray(S.params.guides) ) S.params.guides = [];
   display ??= new WaterDisplay();
@@ -91,10 +98,12 @@ function schedulePublish(key, bake) {
     publishTimer = 0;
     const scene = canvas.scene;
     if ( !S || !scene || S.baked?.key === key || Cache.makeKey(scene.id, S) !== key ) return;     // edited again meanwhile
+    const my = life;
     try {
       await save();                                              // the masks and settings first, so the key means the same to everyone
+      if ( my !== life ) return;                                 // left the scene meanwhile
       const baked = await publishBake(scene.id, key, bake);
-      S.baked = baked;
+      if ( my === life ) S.baked = baked;                        // the upload belongs to that scene even when we have left it
       await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
     } catch ( err ) {
       publishFailed = true;
