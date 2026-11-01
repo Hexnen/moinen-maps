@@ -50,19 +50,23 @@ export function collapseOutline({ ob, K, Rb, os, directional, lvT }) {
   const cx = (ob.x0 + ob.w / 2) * K, cy = (ob.y0 + ob.h / 2) * K;
   const r = (k) => h2(os, k, 9187);
   // the sampling radius scale by angle: s > 1 pulls the rim in, s < 1 pushes it out (outline radius ~ Rb / s)
-  const H2 = [0.13 + 0.06 * r(1), r(2) * TAU], H3 = [0.09 + 0.05 * r(3), r(4) * TAU], H5 = [0.045 + 0.03 * r(5), r(6) * TAU], H8 = [0.025, r(7) * TAU];
-  const notches = Array.from({ length: 2 + (r(8) < 0.5 ? 1 : 0) }, (_, q) => ({ a: r(10 + q) * TAU, d: 0.16 + 0.12 * r(20 + q), w: 0.16 + 0.12 * r(30 + q) }));
+  // (a 1st harmonic: one side bulges, the other is pulled in - never a mirror-symmetric teardrop or lozenge)
+  const H1 = [0.1 + 0.07 * r(0), r(9) * TAU], H2 = [0.1 + 0.07 * r(1), r(2) * TAU], H3 = [0.09 + 0.07 * r(3), r(4) * TAU], H5 = [0.045 + 0.03 * r(5), r(6) * TAU], H8 = [0.025, r(7) * TAU];
+  const notches = Array.from({ length: 2 + Math.floor(r(8) * 3) }, (_, q) => ({ a: r(10 + q) * TAU, d: 0.16 + 0.16 * r(20 + q), w: 0.14 + 0.14 * r(30 + q) }));
   const sRaw = (a) => {
-    let s = 1 + H2[0] * Math.cos(2 * a + H2[1]) + H3[0] * Math.cos(3 * a + H3[1]) + H5[0] * Math.cos(5 * a + H5[1]) + H8[0] * Math.cos(8 * a + H8[1]);
+    let s = 1 + H1[0] * Math.cos(a + H1[1]) + H2[0] * Math.cos(2 * a + H2[1]) + H3[0] * Math.cos(3 * a + H3[1]) + H5[0] * Math.cos(5 * a + H5[1]) + H8[0] * Math.cos(8 * a + H8[1]);
     for ( const n of notches ) { const t = 1 - angDist(a, n.a) / n.w; if ( t > 0 ) s += n.d * t * t; }
     // a finer wobble along the rim (noise round the circle, ~6 px of rim per lattice cell): no straight stretch of outline
-    s += (vnoise(Math.cos(a) * Rb / 6 + 40, Math.sin(a) * Rb / 6 + 40, os + 31) - 0.5) * 0.16;
+    s += (vnoise(Math.cos(a) * Rb / 6 + 40, Math.sin(a) * Rb / 6 + 40, os + 31) - 0.5) * 0.22;
     return clamp(s, 0.7, 1.6);
   };
   // area kept: the pit covers as much ground as the brush did (mean of 1 / s^2 round the circle = 1), so a level never looks smaller
   // than the one below it by the luck of its notches
   let m2 = 0; for ( let q = 0; q < 96; q++ ) m2 += 1 / sRaw(q / 96 * TAU) ** 2;
-  const norm = Math.sqrt(m2 / 96), sOf = (a) => sRaw(a) * norm;
+  // (and a deeper cave-in takes a little more ground: level 1 about 0.9 of the brush's area, level 3 about 1.15)
+  let lvMax = 0; for ( let y = 0; y < ob.h; y++ ) for ( let x = 0; x < ob.w; x++ ) lvMax = Math.max(lvMax, lvT(ob.x0 + x, ob.y0 + y));
+  const areaK = lvMax >= 3 ? 1.15 : lvMax === 2 ? 1 : 0.9;
+  const norm = Math.sqrt(m2 / 96 / areaK), sOf = (a) => sRaw(a) * norm;
   // the mask read SMOOTHED (three box blurs of radius 3 mask px): a brush disc of mask pixels has straight runs along its top, bottom and
   // sides, and the reshaping above would stretch them into long straight edges
   // The occupancy (damaged or not) is blurred and sharpened again round its half; the level comes from the nearest damaged mask
@@ -111,7 +115,7 @@ function trench(path, plen, { ob, K, Rb, os, lvT }) {
   for ( let k = 1; k < path.length; k++ ) {
     const [x0, y0] = path[k - 1], [x1, y1] = path[k], l = Math.hypot(x1 - x0, y1 - y0);
     if ( l < 1e-6 ) continue;
-    const pad = Rb * 1.6 + 3;
+    const pad = Rb * 2.1 + 3;
     segs.push({ x0, y0, x1, y1, l, s0: acc, ux: (x1 - x0) / l, uy: (y1 - y0) / l, bx0: Math.min(x0, x1) - pad, by0: Math.min(y0, y1) - pad, bx1: Math.max(x0, x1) + pad, by1: Math.max(y0, y1) + pad, lv0: lvAt(x0, y0), lv1: lvAt(x1, y1) });
     acc += l;
   }
@@ -119,11 +123,13 @@ function trench(path, plen, { ob, K, Rb, os, lvT }) {
   if ( !lmax ) lmax = 3;
   const halfW = (s) => {
     const e = Math.min(s, plen - s), taper = 0.5 + 0.5 * clamp(e / (1.3 * Rb), 0, 1);
-    return Rb * (0.55 + 0.68 * vnoise(s / (1.5 * Rb), 0.5, os + 21) + 0.12 * (vnoise(s / (0.5 * Rb), 2.5, os + 22) - 0.5)) * taper;
+    // pinches (down to ~0.4 of the brush) and bulges (pockets up to ~1.5): a sharpened noise, plus a pocket now and then
+    const n = vnoise(s / (1.25 * Rb), 0.5, os + 21), sh = n * n * (3 - 2 * n), pocket = Math.max(0, vnoise(s / (0.9 * Rb), 4.5, os + 24) - 0.62) * 1.6;
+    return Rb * (0.4 + 0.95 * sh + pocket + 0.12 * (vnoise(s / (0.5 * Rb), 2.5, os + 22) - 0.5)) * taper;
   };
   const offOf = (s) => Rb * 0.3 * (vnoise(s / (2.2 * Rb), 3.5, os + 23) - 0.5) * 2;
   return {
-    margin: Math.ceil(Rb * 0.5) + 3,
+    margin: Math.ceil(Rb * 1.05) + 3,
     field(ax, ay) {
       let bd = Infinity, bq = 0, bs = 0, cap = false, lv = 0;
       for ( let k = 0; k < segs.length; k++ ) {
@@ -178,6 +184,30 @@ export function collapseSeeds(C, din, W, seed, R) {
     (grid.get(key) ?? grid.set(key, []).get(key)).push(s);
   }
   if ( !seeds.length ) seeds.push({ x: C.epi[0].x + 0.5, y: C.epi[0].y + 0.5, e: 0, band: 0 });
+  // level 1: the rim ring is ONE whole plate (no cracks round the sag's edge), and some plates of the next band join it, so the
+  // cracks inside never close into a ring - they open from the middle out (merge: the seed whose plate it joins)
+  if ( !lv1 ) {
+    // levels 2-3: about a third of the second band's plates are one piece with the rim plate beside them, so the crack between the
+    // two bands never runs all the way round (no closed ring of gaps)
+    const rim = seeds.map((s, j) => (s.band === 0 ? j : -1)).filter((j) => j >= 0);
+    if ( rim.length ) seeds.forEach((s, j) => {
+      if ( s.band !== 1 || h2(j, 44, seed) >= 0.33 ) return;
+      let b = rim[0], bd = Infinity; for ( const q of rim ) { const d = (seeds[q].x - s.x) ** 2 + (seeds[q].y - s.y) ** 2; if ( d < bd ) { bd = d; b = q; } }
+      s.merge = b;
+    });
+  }
+  if ( lv1 ) {
+    // the rim in three or four long arcs (a few radial cracks between them, never a closed ring), each arc taking some plates of the
+    // next band with it
+    let cx = 0, cy = 0; for ( const s of seeds ) { cx += s.x; cy += s.y; } cx /= seeds.length; cy /= seeds.length;
+    const ns = 3 + (h2(seed, 42, 7) < 0.5 ? 1 : 0), a0 = h2(seed, 43, 7) * TAU, first = new Array(ns).fill(-1);
+    const sec = (s) => Math.floor((((Math.atan2(s.y - cy, s.x - cx) - a0) % TAU + TAU) % TAU) / TAU * ns);
+    seeds.forEach((s, j) => {
+      if ( !(s.band === 0 || (s.band === 1 && h2(j, 41, seed) < 0.45)) ) return;
+      const q = sec(s); if ( first[q] < 0 ) first[q] = j;
+      s.merge = first[q]; s.ring = true;
+    });
+  }
   return { seeds, bw };
 }
 
@@ -195,14 +225,28 @@ export function collapseFate(ctx, base, cell) {
   if ( gl < 0.5 * base.px.length * 0.2 ) { ix = -base.ox; iy = -base.oy; }
   const band = cell.seed.band ?? Math.floor(ds / base.px.length / bw), sv = base.sv;
   const plate = (d, slope, z0, T, th = 0, extra = {}) => ({ ...base, dx: ix * d, dy: iy * d, th, tx: -ix * slope, ty: -iy * slope, z0, T, ...extra });
+  const dn = ds / base.px.length / Math.max(2, ctx.maxD);
   if ( sv < 1.5 ) {
-    // level 1: sagging ground - the rim ring stays, the plates inside tip a little towards the middle and sink a hair
-    if ( band === 0 ) return [{ ...base, dx: 0, dy: 0, th: 0, tx: 0, ty: 0, z0: 0, T: 0 }];
-    const d = R() < 0.55 ? 1 : 0, slope = (0.1 + 0.07 * band + R() * 0.05) * liftK;
-    return [{ ...plate(0, slope, -0.5 * band, 0), dx: Math.round(ix * d), dy: Math.round(iy * d) }];
+    // level 1: ONE shallow sag - the rim ring stays, every plate inside tips towards the middle and sinks more the further in it lies
+    // (the bowl reads by its shading), the middle has gone into a small hole
+    // (a rim arc tips a hair inward: lit on the far side of the sag, shaded on the near side - the bowl reads by its light)
+    if ( band === 0 || cell.seed.ring ) return [plate(0, 0.09 * liftK, -0.4, 0)];
+    if ( dn > 0.78 ) { stats.pulverised++; return []; }
+    const d = 0.6 + band * 0.4, slope = (0.07 + 0.05 * band + R() * 0.04) * liftK;   // (gentle: a sag, not a break)
+    return [{ ...plate(0, slope, -1.6 * band, 0), dx: Math.round(ix * d), dy: Math.round(iy * d) }];
   }
   const deep = sv >= 2.45;
-  if ( band === 0 ) return [plate((deep ? 0.8 : 0.5) + R() * 1.1, (0.3 + R() * 0.22) * liftK, -1.2, 2, (R() - 0.5) * 0.16)];
+  if ( band === 0 ) {
+    // the lip: tilted shards of mixed size and tilt (not a row of even bright slabs) - a plate breaks in two or three now and then,
+    // each piece its own tip and turn
+    const parts = base.px.length > 40 && R() < 0.55 ? split(base.px, Math.ceil(base.px.length / (2 + (R() < 0.4 ? 1 : 0))), R) : [base.px];
+    return parts.map((px) => {
+      let ccx = 0, ccy = 0; for ( const i of px ) { const x = i % W; ccx += x; ccy += (i - x) / W; }
+      const a = (R() - 0.5) * 1.1, ca = Math.cos(a), sa = Math.sin(a), jx = ix * ca - iy * sa, jy = ix * sa + iy * ca;   // tip turned off the inward line
+      const slope = (0.18 + R() * 0.5) * liftK, d = (deep ? 0.8 : 0.5) + R() * 1.4;
+      return { ...base, px, cx: ccx / px.length, cy: ccy / px.length, dx: ix * d, dy: iy * d, th: (R() - 0.5) * 0.3, tx: -jx * slope, ty: -jy * slope, z0: -0.8 - R() * 1.2, T: 1 + (R() < 0.6 ? 1 : 0) };
+    });
+  }
   if ( band === 1 ) {
     if ( deep && R() < 0.42 ) { stats.pulverised++; return []; }
     return [plate((deep ? 1.6 : 1.1) + R() * 1.6, ((deep ? 0.62 : 0.5) + R() * 0.3) * liftK, deep ? -3 : -2.4, 2, (R() - 0.5) * 0.3)];
@@ -228,20 +272,26 @@ export function collapseFate(ctx, base, cell) {
  * top left, -1..1): a sloped wall in three tone bands (lit ones lighter), strata lines along the contours of the wall, then the deep
  * void with a faint ambient floor. Returns the colour.
  */
-export function collapseShade(pal, seed, x, y, d, depth, lit) {
+export function collapseShade(pal, seed, x, y, d, depth, lit, col = null, sv = 3, dn = depth) {
   const rp = pal.ramp;
+  // level 1 (a sag): the generic shading, only its middle gone into a small dark hole
+  if ( sv < 1.5 ) {
+    const q = dn + (vnoise(x / 2.5, y / 2.5, seed + 44) - 0.5) * 0.12;
+    return q > 0.86 ? (bayer(x, y) < 0.3 ? mix(rp[0], pal.void, 0.5) : pal.void) : q > 0.76 ? mix(rp[0], pal.void, 0.35) : col ?? rp[1];
+  }
   const dz = depth + (vnoise(x / 3, y / 3, seed + 45) - 0.5) * 0.1 + (bayer(x, y) - 0.5) * 0.07;
   const L = lit > 0.18 ? 1 : lit < -0.18 ? -1 : 0;
-  // strata: thin layers along the wall's contours (equal distance to the rim), wavering, broken now and then
-  const sf = ((d / 2.7 + vnoise(x / 7, y / 7, seed + 49) * 1.1) % 1 + 1) % 1, brk = vnoise(x / 4, y / 4, seed + 50) < 0.3;
-  if ( dz < 0.16 ) return L > 0 ? rp[3] : L < 0 ? rp[1] : rp[2];
-  if ( dz < 0.42 ) {
-    if ( sf < 0.17 && !brk ) return L > 0 ? pal.strata[0] : mul(pal.strata[1], 0.9);
+  // strata: thin layers along the wall's contours (equal distance to the rim), wavering, broken now and then - one clear band of
+  // them between the lip and the void
+  const sf = ((d / 2.4 + vnoise(x / 7, y / 7, seed + 49) * 1.1) % 1 + 1) % 1, brk = vnoise(x / 4, y / 4, seed + 50) < 0.2;
+  if ( dz < 0.13 ) return L > 0 ? rp[3] : L < 0 ? rp[1] : rp[2];
+  if ( dz < 0.4 ) {
+    if ( sf < 0.26 && !brk ) return L > 0 ? pal.strata[0] : sf < 0.1 ? mul(pal.strata[0], 0.85) : pal.strata[1];
     return L > 0 ? rp[2] : L < 0 ? rp[0] : rp[1];
   }
-  if ( dz < 0.62 ) {
-    if ( sf < 0.11 && !brk ) return mix(pal.strata[1], pal.void, L > 0 ? 0.15 : 0.45);
-    return L > 0 ? rp[1] : mix(rp[0], pal.void, L < 0 ? 0.55 : 0.25);
+  if ( dz < 0.52 ) {
+    if ( sf < 0.14 && !brk ) return mix(pal.strata[1], pal.void, L > 0 ? 0.2 : 0.5);
+    return L > 0 ? rp[1] : mix(rp[0], pal.void, L < 0 ? 0.6 : 0.3);
   }
   // the void: almost black, a faint floor of fallen dirt in patches (dithered), a rare lit grain
   const fl = vnoise(x / 5, y / 5, seed + 47) * 0.8 + vnoise(x / 2, y / 2, seed + 48) * 0.2;

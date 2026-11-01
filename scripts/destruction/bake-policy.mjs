@@ -50,7 +50,9 @@ export const BAKE_VERSIONS = {
   // 40 changes a cave-in's SHAPE (its outline from the smoothed mask, a finer rim wobble, a wider window): no compat, re-baked at load
   40: { compat: null, note: "collapse: whole level-1 outline, no straight rim runs" },
   41: { compat: null, note: "crack strokes, smooth floors, sinking flood pieces" },
-  42: { compat: 41, note: "cause floors and specks calmer, claws three gouges" }
+  42: { compat: 41, note: "cause floors and specks calmer, claws three gouges" },
+  // 43 changes a cave-in's SHAPE (an asymmetric outline, islands dropped, a trench's pockets, a deeper level's wider pit): no compat
+  43: { compat: null, note: "collapse: one-bowl sag at level 1, shard lip, strata band and bigger void, no outward hairlines" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */

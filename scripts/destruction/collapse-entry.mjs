@@ -90,29 +90,43 @@ export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 99
   const lumG = gn ? 0.299 * gr / gn + 0.587 * gg / gn + 0.114 * gb / gn : 128;
   const G = gn ? ((Math.round(gr / gn * 0.8) << 16) | (Math.round(gg / gn * 0.8) << 8) | Math.round(gb / gn * 0.8)) : 0x6e665c;
   const P = pathFront, trench = !!P;
+  // (the cave-in keeps its own budget: a slow cause - rot - does not stretch it past ~2 s; the rot creeps inside it instead)
+  k = 1 / (disp.look?.speed || 1);
   const A = (trench ? 90 : 200) * k;                                     // anticipation
-  const D = trench ? 420 * k : Math.min(1000, 700 + maxD * 12) * k;   // the slump of the rings (a trench: across, behind its head)
+  const D = trench ? 420 * k : Math.min(950, 700 + maxD * 10) * k;    // the slump of the rings (a trench: across, behind its head)
   const delay = trench ? 40 * k : A;
   const along = trench ? (x, y) => P.at(x, y) : () => 0;
   // DECAY: the rot creeps out from rough seeds along the cracks (and a few on the rim), not in from a ring
-  const decay = (info.cause | 0) === DECAY, creepMs = 16 * k;
-  // the hairlines of the anticipation: from the deepest point out (2-3 of them), each cell with its moment
+  const decay = (info.cause | 0) === DECAY, creepMs = 9 * k;
+  // the hairlines of the anticipation: from the deepest point out, OPEN and branching (never joining into a ring): 2-3 main cracks
+  // that wander (no straight leader) and stop well inside the rim, each with one or two forks at 30-60 degrees
   const E = { x: GX + (deep % GW), y: GY + Math.floor(deep / GW) };
   const cracks = [];
   if ( !trench ) {
+    const walk = (x, y, a, maxS, fmin, t0, tSpan, sd, main) => {
+      const cells = [];
+      let bend = (hash2(sd, 0, 73) - 0.5) * 0.25;
+      for ( let s = 0; s < maxS; s++ ) {
+        if ( s % 4 === 0 ) bend = (hash2(sd, s, 74) - 0.5) * 0.5;          // the bend changes every few px: a crooked line
+        a += bend + (hash2(sd, s, 72) - 0.5) * 0.35;
+        x += Math.cos(a); y += Math.sin(a);
+        const i = at(x, y); if ( i < 0 || !own[i] || fOf(i) < fmin ) break;
+        const X = Math.floor(x), Y = Math.floor(y), last = cells[cells.length - 1];
+        if ( !last || last.x !== X || last.y !== Y ) cells.push({ x: X, y: Y, a });
+      }
+      cells.forEach((q, j) => { q.t = t0 + (j / Math.max(1, cells.length)) * tSpan; q.main = main && j < cells.length * 0.3; });
+      return cells;
+    };
     const n = 2 + (hash2(seed, 1, 71) < 0.5 ? 1 : 0), a0 = hash2(seed, 2, 71) * Math.PI * 2;
     for ( let c = 0; c < n; c++ ) {
-      let a = a0 + (c + (hash2(seed, 3 + c, 71) - 0.5) * 0.5) * Math.PI * 2 / n, x = E.x + 0.5, y = E.y + 0.5;
-      const cells = [];
-      for ( let s = 0; s < 80; s++ ) {
-        a += (hash2(seed + c, s, 72) - 0.5) * 0.7;
-        x += Math.cos(a); y += Math.sin(a);
-        const i = at(x, y); if ( i < 0 || !own[i] || fOf(i) < 0.18 ) break;
-        const X = Math.floor(x), Y = Math.floor(y), last = cells[cells.length - 1];
-        if ( !last || last.x !== X || last.y !== Y ) cells.push({ x: X, y: Y, s });
+      const a = a0 + (c + (hash2(seed, 3 + c, 71) - 0.5) * 0.45) * Math.PI * 2 / n;
+      const main = walk(E.x + 0.5, E.y + 0.5, a, Math.round(maxD * 0.75), 0.38, 0, A * 0.65, seed * 7 + c, true);
+      cracks.push(main);
+      for ( let b = 0; b < 1 + (hash2(seed, 20 + c, 71) < 0.5 ? 1 : 0); b++ ) {
+        const at0 = Math.floor(main.length * (0.35 + 0.3 * hash2(seed, 30 + c * 3 + b, 71))); const q = main[at0]; if ( !q ) continue;
+        const fa = q.a + (hash2(seed, 40 + c * 3 + b, 71) < 0.5 ? -1 : 1) * (Math.PI / 6 + hash2(seed, 50 + c * 3 + b, 71) * Math.PI / 6);
+        cracks.push(walk(q.x + 0.5, q.y + 0.5, fa, Math.round(maxD * 0.35), 0.42, q.t, A * 0.3, seed * 7 + 100 + c * 3 + b, false));
       }
-      cells.forEach((q, j) => { q.t = (j / Math.max(1, cells.length)) * A * 0.8; q.main = j < cells.length * 0.4; });
-      cracks.push(cells);
     }
   }
   const seedsDecay = [];
@@ -121,35 +135,48 @@ export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 99
     for ( let i = 0, m = 0; i < N && m < 6; i++ ) if ( own[i] && din[i] <= 1.01 && hash2(i, 9, seed) < 0.02 ) { seedsDecay.push({ x: GX + i % GW, y: GY + Math.floor(i / GW) }); m++; }
     if ( !seedsDecay.length ) seedsDecay.push(E);
   }
-  const creep = decay ? (x, y) => { let b = Infinity; for ( const q of seedsDecay ) { const d = (q.x - x) ** 2 + (q.y - y) ** 2; if ( d < b ) b = d; } return Math.min(450 * k, Math.sqrt(b) * creepMs * (0.7 + 0.6 * noise(x * 1.7, y * 1.7))); } : () => 0;
-  // when a ring at depth f goes (ms after start)
-  const ringAt = (f) => delay + (trench ? D * (0.04 + 0.45 * f ** 0.9) : D * (0.03 + 0.55 * f ** 0.9));
+  const creep = decay ? (x, y) => { let b = Infinity; for ( const q of seedsDecay ) { const d = (q.x - x) ** 2 + (q.y - y) ** 2; if ( d < b ) b = d; } return Math.min(260 * k, Math.sqrt(b) * creepMs * (0.7 + 0.6 * noise(x * 1.7, y * 1.7))); } : () => 0;
+  // the rings go in three clear STAGES (rim, middle band, core - a visible difference between frames), each stage sweeping round the
+  // pit by sectors (an angular stagger: the rim never breaks all round at once, so no closed outline flashes in)
+  const sweep = (x, y) => vnoise(Math.cos(Math.atan2(y - E.y, x - E.x)) * 1.6 + 7, Math.sin(Math.atan2(y - E.y, x - E.x)) * 1.6 + 7, seed + 75);
+  const stageOf = (f) => (f < 0.3 ? 0 : f < 0.6 ? 1 : 2);
+  const ringAt = (f, x, y) => delay + (trench ? D * (0.04 + 0.45 * f ** 0.9) : D * (0.04 + 0.24 * stageOf(f) + 0.3 * sweep(x, y)));
+  const cap = (trench ? 0 : 0) + 1150 * k;                               // (the last ground pixel by ~1.15 s: edge shedding ends in time)
   const pixelTime = (ax, ay) => {
-    const i = at(ax, ay), nz = (noise(ax, ay) - 0.5) * 70 * k + (hash2(ax | 0, ay | 0, seed) - 0.5) * 24 * k;
-    if ( i >= 0 && own[i] ) return along(ax, ay) + ringAt(fOf(i)) + 10 * k + nz + creep(ax, ay);   // (as its plates go, not before: no outlined ring first)
-    // outside the pit (lip, hairlines, halo, shadows): after the rim has gone, spreading out
+    const i = at(ax, ay), nz = (noise(ax, ay) - 0.5) * 50 * k + (hash2(ax | 0, ay | 0, seed) - 0.5) * 20 * k;
+    // inside: as its plates go, not before (no outlined ring first); the rot from its seeds during the crack phase already
+    if ( i >= 0 && own[i] ) {
+      // (the rim's own edge - the gap the plates leave as they tip in - opens last, by sectors: no closed outline while it slumps)
+      const tp = (din[i] < 2.5 && !trench ? delay + D * (0.62 + 0.3 * sweep(ax, ay)) : ringAt(fOf(i), ax, ay) + 10 * k) + nz;
+      return along(ax, ay) + Math.min(trench ? tp : cap, decay ? Math.min(tp, Math.max(A * 0.7 + creep(ax, ay) * 2, tp - 200 * k)) : tp);   // (the rot runs ahead of the slabs along its seeds, by at most 200 ms)
+    }
+    // outside the pit (lip, halo, shadows): only after the rim beside it has gone, by sectors, spreading out
     const dn = i < 0 ? 1 : clamp01(dout[i] / (0.5 * maxD + 4));
-    return along(ax, ay) + delay + D * (trench ? 0.2 + 0.5 * dn : 0.15 + 0.6 * dn) + nz * 1.5 + creep(ax, ay);
+    return along(ax, ay) + Math.min(trench ? Infinity : cap, delay + D * (trench ? 0.25 + 0.5 * dn : 0.62 + 0.3 * sweep(ax, ay) + 0.25 * dn) + nz * 1.5);
   };
-  // the ground under the plates darkens in stages as they sink (the depth grows): sagged ground, deeper, its own colour
-  const st = (t) => (r, gg2, b, i) => (own[i] ? mixP(r, gg2, b, G, t) : (r << 16) | (gg2 << 8) | b);
-  const stages = [{ dt: 0, col: st(0.55) }, { dt: 0.13 * D, col: st(0.28) }, { dt: 0.28 * D, col: null }];
+  // the ground under the plates darkens in stages as they sink (the depth grows) - from a little above its final tone, never a pale
+  // flash
+  const Gd = lerpC(G, 0x000000, 0.25);
+  const stg = (t) => (r, gg2, b, i) => (own[i] ? mixP(r, gg2, b, Gd, t) : (r << 16) | (gg2 << 8) | b);
+  const stages = [{ dt: 0, col: stg(0.3) }, { dt: 0.1 * D, col: stg(0.12) }, { dt: 0.2 * D, col: null }];
   const reveal = (trench ? P.D : 0) + D * 0.9;
   const C = {
-    delay, reveal, band: 160 * k, pixelTime, stages, own, din, maxD, E, G, cracks, trench, A, D, k, seed, GX, GY, GW, GH, at, fOf,
-    arrive: (x, y) => along(x, y) + ringAt(fOf(at(x, y))),
-    // (nothing of it outlives ~2 s at entry speed 1 - a slow cause's creep included - plus a trench's run)
-    endBy: start + (trench ? P.D : 0) + Math.min(delay + D + 750 * k, 1950 / (disp.look?.speed || 1)),
-    /** A piece's life: the ring it belongs to (its source), a shiver before, ease-in drop, overshoot, squash, settle. */
+    delay, reveal, band: 120 * k, pixelTime, stages, own, din, maxD, E, G, cracks, trench, A, D, k, seed, GX, GY, GW, GH, at, fOf,
+    arrive: (x, y) => along(x, y) + ringAt(fOf(at(x, y)), x, y),
+    // (nothing of it outlives ~2 s at entry speed 1, plus a trench's run)
+    endBy: start + (trench ? P.D : 0) + Math.min(delay + D + 750 * k, 1900 * k),
+    /** A piece's life: its stage (its source), a shiver before, a visible sink (ease-in, darkening as it drops), overshoot, squash, settle. */
     piece(p, n) {
       const i = at(p.sx, p.sy), f = fOf(i), hA = hash2(n, 1, seed), hB = hash2(n, 2, seed);
       const size = p.w ? Math.sqrt(p.w * p.h) : 6, dd = Math.hypot(p.fx - p.sx, p.fy - p.sy);
-      const t0 = start + along(p.sx, p.sy) + ringAt(f) + (hA - 0.5) * 70 * k + creep(p.sx, p.sy) * 0.5;
-      const dur = (190 + 150 * f + Math.min(120, size * 4) + Math.min(120, dd * 25)) * k * (0.85 + 0.3 * hB);
-      const ov = dd > 0.5 ? Math.max(1, dd * 0.12) : 0;
+      const t0 = start + along(p.sx, p.sy) + ringAt(f, p.sx, p.sy) + (hA - 0.5) * 40 * k;
+      const dur = (250 + 120 * f + Math.min(100, size * 3) + Math.min(100, dd * 20)) * k * (0.9 + 0.2 * hB);
+      // the drop overshoots its rest inward and down by 1.5-3 px (so the sink reads over two or three frames), then comes back
+      const ov = Math.max(1.5, Math.min(3, dd * 0.35));
+      const ux = dd > 0.5 ? (p.fx - p.sx) / dd : (E.x - p.sx) / (Math.hypot(E.x - p.sx, E.y - p.sy) || 1), uy = dd > 0.5 ? (p.fy - p.sy) / dd : (E.y - p.sy) / (Math.hypot(E.x - p.sx, E.y - p.sy) || 1);
       const lit = lumP[n] > lumG * 1.03 ? Math.max(0.68, lumG / lumP[n]) : 1, grey = Math.round(255 * lit);
-      return { p, t0, dur, arc: 0, spin: 1, bounces: 1, pre: (trench ? 220 : 90 + 40 * hB) * k, dusted: false, seed: n, coll: C, tint0: (grey << 16) | (grey << 8) | grey,
-        ovx: dd > 0.5 ? (p.fx - p.sx) / dd * ov : 0, ovy: (dd > 0.5 ? (p.fy - p.sy) / dd * ov : 0) + 0.8, hop: p.chip || f > 0.45 };
+      return { p, t0, dur, arc: 0, spin: 1, bounces: 1, pre: (trench ? 90 : 120 + 40 * hB) * k, dusted: false, seed: n, coll: C, fadeIn: !trench && !!C.patch, tint0: (grey << 16) | (grey << 8) | grey,
+        ovx: ux * ov, ovy: uy * ov + 1, hop: p.chip || f > 0.45 };
     }
   };
   // the tremor patch: the plain map over the pit, jittered by an art pixel while the ground trembles (taps only)
@@ -175,13 +202,16 @@ export function collapsePlace(disp, p, t, it) {
   if ( tm < 0 ) {
     // it shows where it lies a moment before it goes, shivers loose (one art pixel), and starts to tip (leans: a slight squash)
     if ( tm < -it.pre ) { s.visible = false; return; }
-    s.visible = true; s.alpha = 1; s.tint = it.tint0 ?? 0xFFFFFF;
-    const f = 1 + tm / it.pre, sh = f > 0.35 ? ((Math.floor(tm / 40 + it.seed) & 1) ? 1 : -1) : 0;
+    // (over the still map patch it fades in where it lies - the ground there takes on the plate's tilt and shade - never popping in
+    // dark or lit; a trench has no patch: opaque)
+    const f = 1 + tm / it.pre;
+    s.visible = true; s.alpha = it.fadeIn ? Math.min(1, f * 1.4) : 1; s.tint = it.tint0 ?? 0xFFFFFF;
+    const sh = f > 0.35 ? ((Math.floor(tm / 40 + it.seed) & 1) ? 1 : -1) : 0;
     s.position.set(o.x + Math.round(p.sx + sh) * ap, o.y + p.sy * ap);
     s.rotation = 0; s.scale.set(ap, ap * (f > 0.75 ? 0.95 : 1));
     return;
   }
-  s.visible = true; s.alpha = 1; s.tint = t >= 1 ? 0xFFFFFF : lerpC(it.tint0 ?? 0xFFFFFF, 0xFFFFFF, t * t);
+  s.visible = true; s.alpha = 1; s.tint = t >= 1 ? 0xFFFFFF : lerpC(lerpC(it.tint0 ?? 0xFFFFFF, 0xFFFFFF, t * t), 0x000000, 0.16 * Math.sin(t * Math.PI));   // (in shadow as it drops)
   if ( t >= 1 ) {
     // landed: past its rest by the overshoot, back with a damped swing, squash and a small hop on the rubble, then still
     const st = tm - it.dur;
@@ -208,12 +238,14 @@ export function collapseFx(disp, g, a, now, el) {
   const life = (ms) => Math.max(0, Math.min(ms, left()));
   // tremor: the ground over the pit jitters by an art pixel, faster as it nears the give; then the patch goes
   if ( C.patch ) {
-    if ( el < C.A + C.D * 0.12 ) {
+    // (it stays, still, under the plates until the last ring has gone: they fade in over the plain ground, not over the dark pit)
+    if ( el < C.A ) {
       const ph = Math.floor(el / (el < C.A * 0.6 ? 55 : 35) * 1) + C.seed;
       C.patch.position.set(((ph & 1) ? 1 : -1) * ap, (ph % 3 === 0 ? 1 : 0) * ap);
       // a touch darker as it sags
-      if ( C.patchMap ) C.patchMap.tint = lerpC(0xffffff, 0xcac4bc, clamp01(el / (C.A + C.D * 0.12)));
-    } else collapseEnd(disp, g, a);
+      if ( C.patchMap ) C.patchMap.tint = lerpC(0xffffff, 0xd2ccc4, clamp01(el / C.A));
+    } else if ( el < C.A + C.D ) C.patch.position.set(0, 0);
+    else collapseEnd(disp, g, a);
   }
   // the hairline cracks of the anticipation (from the deepest point out), gone as the plates under them give
   if ( C.cracks.length && !C.crackFx ) {
@@ -241,9 +273,12 @@ export function collapseFx(disp, g, a, now, el) {
     const wind = (hash2(C.seed, 11, 3) < 0.5 ? -1 : 1) * (1.5 + hash2(C.seed, 12, 3) * 2);
     const rim = [];
     for ( let i = 0; i < own.length; i++ ) if ( own[i] && din[i] <= 1.01 && hash2(i, 13, C.seed) < 0.3 ) rim.push(i);
-    const step = Math.max(1, Math.round(rim.length / 32));
+    // (the curtain rises from stretches of the rim, not all round it: a ring of puffs read as an outline)
+    const stretch = (i) => vnoise((GX + i % GW) / 9, (GY + Math.floor(i / GW)) / 9, C.seed + 19) > 0.5;
+    const step = Math.max(1, Math.round(rim.length / 22));
     for ( let q = 0; q < rim.length; q += step ) {
       const i = rim[q], x = GX + i % GW, y = GY + Math.floor(i / GW), big = hash2(i, 18, C.seed) < 0.25;
+      if ( !stretch(i) ) continue;
       C.events.push({ t: a.start + C.arrive(x, y) + Math.random() * 90 * k, f: () => disp.spawn({ x, y: y - 1, vx: wind + (Math.random() - 0.5) * 2, vy: -1, rise: -5 - Math.random() * 6, life: life(600 + Math.random() * 300), color: lerpC(C.G, 0xd8d0c2, 0.55 + Math.random() * 0.2), alpha: 0.5, size: big ? 3 : 2, drag: 1.5 }) });
     }
     // rubble tumbling in from the rim towards the deepest part while the inner rings go: chunks cut from the area's own plates

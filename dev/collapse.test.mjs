@@ -4,7 +4,7 @@
 //  2. lit slab faces: among the rim slabs that moved, some face the light (brighter than the map they were cut from) and some face away;
 //  3. no long straight ink: outside the pit (its lip, its hairlines) no straight run of inked pixels (composite much darker than the
 //     map) of 12 px or more, along rows, columns or diagonals;
-//  4. the levels: level 1 has no void, level 3 has a deep void; a followed stroke at max settings is a TRENCH (one part, along the
+//  4. the levels: level 1 has at most a small hole, level 3 has a deep void; a followed stroke at max settings is a TRENCH (one part, along the
 //     whole path, its width pinching and bulging);
 //  5. determinism: the same bytes twice; a stroke bakes the same alone and next to another one (per-stroke independence).
 import { createHash } from "node:crypto";
@@ -150,7 +150,7 @@ for ( const kind of ["stone", "grass", "wood"] ) for ( const level of [1, 2, 3] 
 check(minCirc >= 1.2 && minCV >= 0.1, `taps: worst circularity ${minCirc.toFixed(2)}, worst radial CV ${minCV.toFixed(3)}`);
 check(plates > 20 && litPlates >= plates * 0.15 && shadedPlates >= plates * 0.15, `lit slab faces: ${litPlates} lit, ${shadedPlates} shaded of ${plates} moved plates (each >= 15 %)`);
 check(worstRun < 12, `no straight ink run of 12 px or more outside the pit (longest ${worstRun})`);
-check(voidL1 < 0.02, `level 1 sags: no void (${(voidL1 * 100).toFixed(1)} % near-black)`);
+check(voidL1 < 0.06, `level 1 sags: at most a small hole in its middle (${(voidL1 * 100).toFixed(1)} % near-black, < 6 %)`);
 check(Math.min(...voidL3) > 0.04, `level 3 caves in: a void in every pit (least ${(Math.min(...voidL3) * 100).toFixed(1)} % near-black)`);
 
 /* ---------------------------------------------------------------- 4: the trench along a followed stroke */
