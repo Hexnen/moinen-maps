@@ -82,13 +82,57 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
   const retry = [];                  // jobs an extra lane took and could not finish: the main lane does them
   const take = () => (error || next >= jobs.length ? -1 : next++);
   const extra = [];
-  // PRIME (a Rebake all): every lane first gets the plain looks its jobs read, ONE message per look (each a small copy on the page,
-  // between frames) - the jobs then only name them (`underKeys`) instead of carrying them (copying them into every job held the page)
-  const primeLane = async (send) => { for ( const p of prime ?? [] ) { const t0 = performance.now(), sent = send({ kind: "plain", key: p.key, sprites: p.sprites }); const ms = performance.now() - t0; if ( ms > 20 ) Trace.event("slow", { name: "prime:post", ms: Math.round(ms) }); await sent; await new Promise((r) => setTimeout(r, 0)); } };
+  // PRIME (a Rebake all): the jobs only name the plain looks they read (`underKeys`) instead of carrying them (copying them into every
+  // job held the page). A lane gets a look right before its first job that reads it, ONE message per look (a small copy on the page,
+  // between frames), and every lane lets it go as soon as no job left reads it - each lane held every look of the scene before
+  // (~250 MB per lane on "map"), the main lane even after the Rebake.
+  const looks = new Map((prime ?? []).map((p) => [p.key, p.sprites]));
+  const keysOf = (i) => [...new Set(Object.values(jobs[i]?.underKeys ?? {}))].filter((k) => looks.has(k));
+  const refs = new Map();
+  if ( looks.size ) for ( let i = 0; i < jobs.length; i++ ) for ( const k of keysOf(i) ) refs.set(k, (refs.get(k) ?? 0) + 1);
+  const laneSets = [];               // { have: Set, send }
+  const lane = (send) => { const l = { have: new Set(), send, px: 0, peak: 0, sent: 0 }; laneSets.push(l); allLanes.push(l); return l; };
+  const allLanes = [], pxOf = (k) => (looks.get(k) ?? []).reduce((a, s) => a + s.w * s.h, 0), pxKey = new Map();
+  const ensure = async (l, i) => {
+    // a lane holds only the looks of the job it runs: what this job does not read goes first (sent again if a later job of this
+    // lane reads it - a copy of ~1 MB, well under a millisecond, against holding the scene's every look in every lane)
+    const need = new Set(keysOf(i)), off = [...l.have].filter((k) => !need.has(k));
+    if ( off.length ) { for ( const k of off ) { l.have.delete(k); l.px -= pxKey.get(k) ?? 0; } l.send({ kind: "dropPlain", keys: off }).catch(() => {}); }
+    for ( const k of need ) {
+      if ( l.have.has(k) || !refs.get(k) ) continue;
+      const t0 = performance.now(), sent = l.send({ kind: "plain", key: k, sprites: looks.get(k) });
+      const ms = performance.now() - t0; if ( ms > 20 ) Trace.event("slow", { name: "prime:post", ms: Math.round(ms) });
+      l.have.add(k);
+      const px = pxOf(k); pxKey.set(k, px); l.px += px; l.sent++; l.peak = Math.max(l.peak, l.px);
+      await sent; await new Promise((r) => setTimeout(r, 0));
+    }
+  };
+  const doneWith = (i) => {
+    const gone = [];
+    for ( const k of keysOf(i) ) { const n = (refs.get(k) ?? 1) - 1; refs.set(k, n); if ( n <= 0 ) { gone.push(k); looks.delete(k); } }
+    if ( !gone.length ) return;
+    for ( const l of laneSets ) {
+      const keys = gone.filter((k) => l.have.has(k));
+      if ( !keys.length ) continue;
+      for ( const k of keys ) { l.have.delete(k); l.px -= pxKey.get(k) ?? 0; }
+      l.send({ kind: "dropPlain", keys }).catch(() => {});
+    }
+  };
+  const finish = (i, r) => { onDone?.(i, r); if ( refs.size ) doneWith(i); };
+  // the main lane: its worker stays after the pool (a new one, after a failure, holds none of the looks)
+  let mainLane = null, mainWorker = null;
+  const runMain = async (i) => {
+    if ( refs.size ) {
+      start();
+      mainLane ??= lane((msg) => call(msg));
+      if ( mainWorker !== worker ) { mainWorker = worker; mainLane.have.clear(); }
+      await ensure(mainLane, i);
+    }
+    return runBake(jobs[i], getMap);
+  };
   const laneMain = async () => {
-    if ( prime?.length ) { start(); await primeLane((msg) => call(msg)); }
-    for ( let i = take(); i >= 0; i = take() ) { const r = await runBake(jobs[i], getMap); onDone?.(i, r); }
-    while ( retry.length && !error ) { const i = retry.shift(); onDone?.(i, await runBake(jobs[i], getMap)); }
+    for ( let i = take(); i >= 0; i = take() ) finish(i, await runMain(i));
+    while ( retry.length && !error ) { const i = retry.shift(); finish(i, await runMain(i)); }
   };
   const laneExtra = async () => {
     const w = new Worker(foundry.utils.getRoute(`modules/${MODULE_ID}/scripts/destruction/worker.mjs`), { type: "module" });
@@ -102,13 +146,17 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     });
     const m = getMap(), copy = new Uint8ClampedArray(m.map.data);
     await ask({ kind: "map", mapKey: m.key, map: { w: m.map.w, h: m.map.h, data: copy } }, [copy.buffer]);
-    await primeLane((msg) => ask(msg));
+    const l = refs.size ? lane((msg) => ask(msg)) : null;
     for ( let i = take(); i >= 0; i = take() ) {
       let r;
-      try { r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: !keepCache } }); }   // (an extra lane keeps no area cache - it goes after this bake - unless asked: a Rebake all's lanes keep the plain looks they baked for their next jobs)
-      catch ( err ) { retry.push(i); throw err; }
-      onDone?.(i, r);
+      try {
+        if ( l ) await ensure(l, i);
+        r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: !keepCache } });   // (an extra lane keeps no area cache - it goes after this bake - unless asked: a Rebake all's lanes keep the plain looks they baked for their next jobs)
+      } catch ( err ) { retry.push(i); throw err; }
+      finish(i, r);
     }
+    // (this lane's worker goes with the pool: its looks with it)
+    if ( l ) { laneSets.splice(laneSets.indexOf(l), 1); l.have.clear(); }
   };
   // an extra lane that fails only stops itself (its job goes to the main lane); the main lane failing fails the bake
   const extraLane = () => laneExtra().catch((err) => console.warn(`${MODULE_ID} | destruction: an extra bake worker stopped`, err));
@@ -116,9 +164,15 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     const others = Array.from({ length: lanes - 1 }, extraLane);
     await laneMain().catch((err) => { error ??= err; });
     await Promise.all(others);
-    if ( !error ) while ( retry.length ) { const i = retry.shift(); onDone?.(i, await runBake(jobs[i], getMap)); }
+    if ( !error ) while ( retry.length ) { const i = retry.shift(); finish(i, await runMain(i)); }
   }
-  finally { for ( const w of extra ) w.terminate(); }
+  finally {
+    for ( const w of extra ) w.terminate();
+    // the main worker keeps none of the Rebake's looks after it (a failed job left some behind)
+    if ( mainLane && mainWorker === worker && worker ) call({ kind: "dropPlain", keys: null }).catch(() => {});
+    // (what each lane held at most of the looks, Mpx of RGBA: x4 bytes)
+    if ( allLanes.length ) Trace.event("prime-lanes", { looks: prime.length, lanes: allLanes.map((l) => ({ sent: l.sent, peakMpx: Math.round(l.peak / 1e5) / 10 })) });
+  }
   if ( error ) throw error;
 }
 

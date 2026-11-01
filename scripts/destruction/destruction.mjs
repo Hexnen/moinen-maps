@@ -456,8 +456,18 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     // - a few ms each, where the worker would bake each again from its data
     {
       const dry = new Set();
-      for ( const w of toBake ) for ( const j of w.deps ) { const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null; if ( r?.sprites.lean || r?.shell ) dry.add(r); }
-      if ( dry.size ) { await Promise.all([...dry].map(hydrate)); if ( my !== gen ) return; }
+      const shells = new Map();
+      for ( const w of toBake ) for ( const j of w.deps ) {
+        const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null;
+        if ( r?.shell ) shells.set(r, j); else if ( r?.sprites.lean ) dry.add(r);
+      }
+      // (a shell stays a shell on screen - filled in place, all of them were built again in ONE sync: 1.5 s at the start of a Rebake
+      // all on "map"): its chunk only lends its plain look, when it is one)
+      const lend = [...shells].map(async ([r, j]) => {
+        const got = r.id && r.dir ? await Net.getChunk(r.dir, r.id).catch(() => null) : null;
+        if ( got?.F === META_FIELDS && got.sprites?.every((s) => s.img) && !overSubstrate(got.sprites) ) plainRecs.set(`${base}|${S0.objects[j].id}|${FS[j].own}`, got.sprites);
+      });
+      if ( dry.size || lend.length ) { await Promise.all([...[...dry].map(hydrate), ...lend]); if ( my !== gen ) return; }
     }
     try {
       const t = performance.now();
