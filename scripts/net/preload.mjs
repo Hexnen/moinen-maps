@@ -3,6 +3,8 @@ import * as Net from "./stream.mjs";
 import { chunkRecords } from "../water/publish.mjs";
 import * as Composite from "../destruction/composite.mjs";
 import { cacheEnabled } from "../destruction/static-cache.mjs";
+import * as Model from "../destruction/model.mjs";
+import * as Store from "../destruction/store.mjs";
 
 /**
  * Starting early. The codec workers start when the game is ready (not on the first chunk), and a scene's chunks are read ahead at
@@ -58,6 +60,13 @@ function registerPreload() {
     const scene = canvas.scene;
     if ( !scene ) return;
     Net.prefetch(chunksOf(scene, viewOf(scene))).catch((err) => console.warn(`${MODULE_ID} | read ahead`, err));
+    // the strokes' signatures too (IndexedDB, else the codec worker): the destruction's first pass needs them at canvasReady
+    if ( !off() && scene.flags?.[MODULE_ID]?.destruction ) {
+      try {
+        const S = Store.attachPaths(Model.load(scene), scene);
+        if ( S?.objects?.length ) Store.warmSigs(S, Net.getMeta, (m) => Net.job(m)).catch(() => {});
+      } catch ( err ) { console.warn(`${MODULE_ID} | read ahead (signatures)`, err); }
+    }
   });
   // a scene that becomes active: players are about to see it
   Hooks.on("updateScene", (scene, changed) => {

@@ -260,6 +260,32 @@ export async function resolve(spec, ctx, next) { const r = await next(spec, ctx)
   if ( !bakes ) problems.push("the rebake baked nothing");
   // 4. the API answers
   try { D.destructionApi.status(); D.destructionApi.net.trace(); } catch ( err ) { problems.push(`api: ${err}`); }
+  // 5. stroke signatures kept by their inputs' digest (store.mjs sigsKey / warmSigs): equal inputs -> the same key, a changed stroke,
+  // order or setting -> another; a read-ahead entry is taken only when whole; what is taken equals what would be computed
+  {
+    const clone = (s) => ({ ...s, params: { ...s.params }, objects: s.objects.map((o) => ({ ...o })) });
+    const k0 = Store.sigsKey(S), A = clone(S);
+    if ( Store.sigsKey(A) !== k0 ) problems.push("sigsKey: a copy of the same state has another key");
+    const B = clone(S); B.objects[1].x0 += 1;
+    const C = clone(S); C.objects.reverse();
+    const P = clone(S); P.params.seedOffset = (P.params.seedOffset ?? 0) + 1;
+    for ( const [n, s] of [["moved stroke", B], ["order", C], ["setting", P]] ) if ( Store.sigsKey(s) === k0 ) problems.push(`sigsKey ignores the ${n}`);
+    const truth = Store.sigsOf(clone(S));
+    const fresh = clone(S);   // a new state object: no per-state entry, found by its digest
+    if ( !(await Store.warmSigs(fresh, async () => null)) ) problems.push("warmSigs: computed signatures were not found by their digest");
+    const bad = clone(S); bad.objects = bad.objects.slice(0, 3);
+    if ( await Store.warmSigs(bad, async () => truth) ) problems.push("warmSigs took an entry of the wrong length");
+    if ( JSON.stringify(Store.sigsOf(fresh)) !== JSON.stringify(truth) ) problems.push("sigsOf from the digest store differs from the computed one");
+    // the codec worker's "sigs" job (a first load: off the page) gives exactly what the page computes
+    const Chunks = await import(pathToFileURL(path.join(ROOT, "scripts/net/chunks.mjs")).href);
+    const other = clone(S); other.params.workerCheck = 1;
+    const viaJob = clone(other);
+    if ( !(await Store.warmSigs(viaJob, async () => null, (m) => Chunks.work(m).then((r) => r.result))) ) problems.push("warmSigs: the sigs job gave nothing");
+    const jobOut = Store.sigsOf(viaJob);
+    const pageOut = (await import(pathToFileURL(path.join(ROOT, "scripts/destruction/substrate.mjs")).href))
+      .fullSigs(other.objects, (o) => Store.objSig(other, o), other.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
+    if ( JSON.stringify(jobOut) !== JSON.stringify(pageOut) ) problems.push("the sigs job differs from the page's signatures");
+  }
   Hooks.callAll("canvasTearDown");
   done("destruction load path");
 }

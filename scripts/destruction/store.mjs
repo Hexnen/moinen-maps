@@ -1,7 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
-import { fullSigs } from "./substrate.mjs";
+import { fullSigs, SUBSTRATE_VERSION } from "./substrate.mjs";
 import * as Model from "./model.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 
@@ -90,14 +90,65 @@ export const objSig = (S, o) => fnv(enc(objStr(S, o))).toString(36);
  * change of an older stroke re-bakes only the strokes over it, on every client alike.
  */
 export function sigsOf(S) {
-  // (kept per state: the same strokes and settings give the same signatures; computing them for 250 strokes holds the page ~55 ms)
+  // (kept per state: the same strokes and settings give the same signatures; computing them for 250 strokes holds the page ~55 ms
+  // with warm caches, ~660 ms on a scene's first load - so they are also kept by their inputs' digest, and in IndexedDB across loads)
   const memo = sigMemo.get(S), pj = JSON.stringify(S.params);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return memo.out;
-  const out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
+  const key = sigsKey(S, pj);
+  let out = sigStore.get(key);
+  if ( !out ) {
+    // (a stroke's levels decoded once: the dependency test asks for them per pair, 236 ms of the 290 on a 269-stroke scene)
+    const bytes = new Map(), bytesOf = (o) => o.bytes ?? bytes.get(o) ?? bytes.set(o, Model.objBytes(o)).get(o);
+    out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, bytesOf);
+    rememberSigs(key, out);
+    onSigs?.(key, out);
+  }
   sigMemo.set(S, { objects: S.objects, pj, out });
   return out;
 }
 const sigMemo = new WeakMap();
+/** Signatures by the digest of everything they are made of (the strokes' own inputs, their order, the settings, the grid). */
+const sigStore = new Map();
+const rememberSigs = (key, out) => { sigStore.delete(key); sigStore.set(key, out); while ( sigStore.size > 6 ) sigStore.delete(sigStore.keys().next().value); };
+export function sigsKey(S, pj = JSON.stringify(S.params)) {
+  const b = enc(`${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|${(S.objects ?? []).map((o) => objStr(S, o)).join(";")}`);
+  return `sg1:${S.mw}x${S.mh}:${fnv(b).toString(36)}${fnv(b, 0x9747b28c).toString(36)}:${(S.objects ?? []).length}`;
+}
+/**
+ * Read the state's signatures ahead from a store (`get(key)` -> the array or null; IndexedDB in the page) so `sigsOf` finds them
+ * instead of computing them. Only an array of the right length with every field is taken (a damaged entry is computed again).
+ */
+export const hasSigs = (S) => { const m = sigMemo.get(S); return !!m && m.objects === S.objects && m.pj === JSON.stringify(S.params); };
+export async function warmSigs(S, get, compute = null) {
+  const memo = sigMemo.get(S), pj = JSON.stringify(S.params);
+  if ( memo && memo.objects === S.objects && memo.pj === pj ) return true;
+  const key = sigsKey(S, pj);
+  if ( sigStore.has(key) ) return true;
+  // (one read / job per digest: the read-ahead at canvasInit and the load's own pass ask for the same)
+  if ( !sigsPending.has(key) ) sigsPending.set(key, readSigs(S, key, get, compute).finally(() => sigsPending.delete(key)));
+  return sigsPending.get(key);
+}
+const sigsPending = new Map();
+async function readSigs(S, key, get, compute) {
+  const n = (S.objects ?? []).length;
+  const whole = (out) => Array.isArray(out) && out.length === n
+    && out.every((f) => f && typeof f.own === "string" && typeof f.sig === "string" && Array.isArray(f.deps));
+  let out = null;
+  try { out = await get(key); } catch { out = null; }
+  if ( whole(out) ) { rememberSigs(key, out); return true; }
+  // not kept (a client's first load of this state): computed off the page (`compute(msg)`: the codec worker's "sigs" job) - the
+  // dependency test over every pair of strokes held the page 220-650 ms
+  if ( !compute ) return false;
+  const objs = (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, own: objSig(S, o), bytes: o.k ? null : Model.objBytes(o) }));
+  try { out = await compute({ kind: "sigs", objs, P: S.params, K: Model.K }); } catch { out = null; }
+  if ( !whole(out) ) return false;
+  rememberSigs(key, out);
+  onSigs?.(key, out);
+  return true;
+}
+/** Called with freshly computed signatures (destruction.mjs keeps them in IndexedDB). */
+let onSigs = null;
+export const setSigsSink = (fn) => { onSigs = fn; };
 
 /** The manifest of the scene (null for none, or the first format). */
 export const manifestOf = (S) => S?.baked?.v === 2 && S.baked.c && typeof S.baked.dir === "string" ? S.baked : null;

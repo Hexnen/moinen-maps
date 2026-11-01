@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import * as Trace from "../net/trace.mjs";
 
 /**
  * Runs the bake in a module worker, never on the page: a big bake must not freeze the client. When the worker cannot start, the bake
@@ -83,7 +84,7 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
   const extra = [];
   // PRIME (a Rebake all): every lane first gets the plain looks its jobs read, ONE message per look (each a small copy on the page,
   // between frames) - the jobs then only name them (`underKeys`) instead of carrying them (copying them into every job held the page)
-  const primeLane = async (send) => { for ( const p of prime ?? [] ) { await send({ kind: "plain", key: p.key, sprites: p.sprites }); await new Promise((r) => setTimeout(r, 0)); } };
+  const primeLane = async (send) => { for ( const p of prime ?? [] ) { const t0 = performance.now(), sent = send({ kind: "plain", key: p.key, sprites: p.sprites }); const ms = performance.now() - t0; if ( ms > 20 ) Trace.event("slow", { name: "prime:post", ms: Math.round(ms) }); await sent; await new Promise((r) => setTimeout(r, 0)); } };
   const laneMain = async () => {
     if ( prime?.length ) { start(); await primeLane((msg) => call(msg)); }
     for ( let i = take(); i >= 0; i = take() ) { const r = await runBake(jobs[i], getMap); onDone?.(i, r); }

@@ -58,6 +58,10 @@ let compositeTimer = 0, compositeTries = 0;
 const AWAIT_CHUNK = 12000;
 /** Strokes to bake on a scene load from which on the bake is spread over several workers and shown as it comes. */
 const BIG_BAKE = 6;
+/** Shells filled (their chunks' areas built) per step at first; the steps then adapt to what one cost (fill()). */
+const FILL_STEP = 2;
+// freshly computed stroke signatures are kept in IndexedDB (a moment later, off the pass) so the next load of this state reads them
+Store.setSigsSink((key, out) => setTimeout(() => Net.putMeta(key, out), 1500));
 /** Strokes put on screen per step of a scene load (a pause for the page between steps). */
 const SHOW_BATCH = 12;
 /** Strokes re-baked per idle pass in the background (a compatible older look being replaced). */
@@ -233,12 +237,18 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     loaded = true;   // the scene's state is known: what is painted from now on is new and enters
     Object.assign(status, { baking: false, waiting: false, progress: 0, areas: [] }); tell("status"); return;
   }
+  // the strokes' signatures from the last load of this same state (IndexedDB): computing them cold held the page ~660 ms
+  // (before anything is taken from the state: a change meanwhile simply runs this pass on the new state)
+  // (else computed in the codec worker: off the page)
+  if ( !Store.hasSigs(S) ) { await Store.warmSigs(S, Net.getMeta, (m) => Net.job(m)); if ( my !== gen || !S ) return; }
   const bg = backgroundInfo()?.path ?? "";
   const key = Store.makeKey(scene, S, bg);
   const taken = strokes.splice(0), mask = S.mask.slice();
   if ( key === shownKey && display && !force && !idle && !all && !redo?.length ) { maybeBlast(); return; }
   // (the base has no bake version: a published stroke stays valid whatever the code's version is - bake-policy.mjs, version pinning)
+  const tStart = performance.now();
   const S0 = S, base = Store.baseKey(scene, S, bg), legacy = Store.legacyBaseKey(scene, S, bg), objs = objectsIn();
+  slow("pass:keys+objects", tStart);
   Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
   // (the FULL signature: its own inputs + a digest of the older strokes under it, substrate.mjs; `own` alone tells a dependent re-bake)
@@ -249,7 +259,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // Rebake (all or one stroke): these strokes are baked again with the current code; their pinned look stays on screen meanwhile
   const redoSet = new Set(redo ?? []);
   for ( const w of want ) if ( redoSet.has(w.objId) ) recs.delete(w.rk);
-  const src = { mem: 0, chunk: 0, legacy: 0, baked: 0 };
+  slow("pass:want", tStart);
+  const src ={ mem: 0, chunk: 0, legacy: 0, baked: 0 };
   const firstLoad = !loaded;
   let first = firstLoad;
   /**
@@ -264,6 +275,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     showRecs(list, objs, taken, mask, first, firstLoad && !Reveal.holding("destruction"), allow);
     first = false; loaded = true; shownMask = mask;
     T.show = (T.show ?? 0) + performance.now() - t;
+    slow("showOnce", t, { n: list.length, allow: allow?.size ?? null });
   };
   const show = reshow = () => {
     if ( my !== gen || S !== S0 ) return Promise.resolve();
@@ -460,7 +472,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, plain, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       };
       const take = (list, res, plain = false) => {
+        const t0 = performance.now();
         const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+        slow("take:split", t0, { n: list.length, plain });
         for ( const w of list ) {
           const sprites = parts.get(w.index) ?? [];
           if ( plain || !overSubstrate(sprites) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
@@ -507,7 +521,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           })().finally(() => { draining = null; });
           // (a background Rebake: the plain looks its strokes read go to each lane ONCE, a look per message between frames (prime), and the
           // jobs only name them - copying them into every job held the page for up to 1.5 s per job)
+          const tIn = performance.now();
           let inputs = jobs.map((jb) => inputOf(jb, plain)), prime = null;
+          slow("inputs", tIn, { jobs: jobs.length, plain });
           if ( redoSet.size && !plain ) {
             const sent = new Map();
             inputs = jobs.map((jb) => {
@@ -521,6 +537,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
               return { ...inputOf(jb, plain), under: {}, underKeys };
             });
             prime = [...sent].map(([key, sprites]) => ({ key, sprites }));
+            slow("inputs+prime", tIn, { looks: prime.length });
             Trace.event("rebake-prime", { looks: prime.length, mpx: Math.round(prime.reduce((a, p) => a + p.sprites.reduce((q, s) => q + s.w * s.h, 0), 0) / 1e5) / 10 });
           }
           await runBakePool(inputs, getMap, { n: lanes, prime, onDone: (i, res) => {
@@ -573,7 +590,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // strokes pinned to an older look than the current code would draw for their kind (Damage panel: "Rebake all")
   status.olderLook = olderLooks(want);
   // the composite's shells that need their pixels anyway (flooded holes, a dark scene); the GM keeps the composite up to date
-  if ( src.composite ) setTimeout(shellNeeds, 0);
+  // (after the scene's reveal: filled during the load, their building held the reveal back ~0.5 s)
+  if ( src.composite ) Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) shellNeeds(); }, 50));
   if ( complete && game.user.isGM ) scheduleComposite();
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
@@ -777,6 +795,9 @@ async function compositeLoad(scene, base, want, M) {
   return covered.length;
 }
 
+/** Profiling (tests): a step that held the page more than 20 ms goes into net.trace().events as slow. */
+const slow = (name, t0, data = null) => { const ms = performance.now() - t0; if ( ms > 20 ) Trace.event("slow", { name, ms: Math.round(ms), ...(data ?? {}) }); };
+
 /** The records shown or kept as shells. */
 const shellRecs = () => [...new Set([...recs.values(), ...shownRecs.values(), ...staleRecs.values()])].filter((r) => r.shell);
 
@@ -784,10 +805,26 @@ const shellRecs = () => [...new Set([...recs.values(), ...shownRecs.values(), ..
 async function fill(list, why) {
   if ( !list.length ) return true;
   const my = gen, t = performance.now();
-  const oks = await Promise.all(list.map(hydrate));
-  if ( my !== gen ) return false;
+  // the chunks all come at once (one IndexedDB read, the pool decodes), but they go on screen a few strokes per frame: a shell
+  // replaced by its areas builds them (~15 ms a stroke), and 98 at once held the page 1.5 s. A shell not yet filled keeps showing
+  // the composite's bands meanwhile, so nothing changes on screen but the order.
+  for ( const r of list ) if ( r.id && r.dir ) Net.getChunk(r.dir, r.id).catch(() => null);
+  const oks = [];
+  let step = FILL_STEP;
+  for ( let i = 0; i < list.length; i += step ) {
+    const part = list.slice(i, i + step);
+    oks.push(...await Promise.all(part.map(hydrate)));
+    if ( my !== gen ) return false;
+    const t1 = performance.now();
+    await reshow?.();
+    if ( my !== gen ) return false;
+    // (the next step as big as fits ~24 ms, from what this one cost)
+    const per = (performance.now() - t1) / Math.max(1, part.length);
+    step = Math.max(1, Math.min(8, Math.floor(24 / Math.max(1, per))));
+    if ( i + part.length < list.length ) await new Promise((r) => setTimeout(r, 16));
+    if ( my !== gen ) return false;
+  }
   Trace.event("shells-filled", { why, n: list.length, failed: oks.filter((v) => !v).length, ms: Math.round(performance.now() - t) });
-  await reshow?.();
   if ( oks.some((v) => !v) ) { shownKey = ""; rebake({ awaitPublish: false }); }   // (a chunk that could not be had: fetched or baked again)
   return oks.every(Boolean);
 }

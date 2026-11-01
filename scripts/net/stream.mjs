@@ -138,6 +138,17 @@ async function idbPut(id, bytes) {
   if ( ++puts % 40 === 1 ) trimIdb();
 }
 
+/** Small JSON values kept next to the chunks (same store and LRU, so they age out alike): e.g. a scene's stroke signatures. */
+export async function getMeta(id) {
+  try {
+    const b = await idbGet(id);
+    return b ? JSON.parse(new TextDecoder().decode(b)) : null;
+  } catch { return null; }
+}
+export function putMeta(id, value) {
+  try { return idbPut(id, new TextEncoder().encode(JSON.stringify(value))).catch(() => null); } catch { return Promise.resolve(null); }
+}
+
 /** Keep the cache under CAP bytes: the chunks not used for the longest go first. */
 async function trimIdb() {
   const all = await tx(["lru"], "readonly", (l) => l.getAll());

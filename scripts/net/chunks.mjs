@@ -488,6 +488,11 @@ export async function work(m) {
     for ( const s of o.sprites ) transfer.push(s.img.buffer);
     return { result: o, transfer };
   }
+  if ( m.kind === "sigs" ) {
+    // the strokes' full signatures (substrate.mjs fullSigs) off the page: { objs: [{ id, k, t, x0, y0, w, h, own, bytes }], P, K }
+    const { fullSigs } = await import("../destruction/substrate.mjs");
+    return { result: fullSigs(m.objs, (o) => o.own, m.P, m.K, (o) => o.bytes), transfer };
+  }
   throw new Error(`unknown job ${m.kind}`);
 }
 
