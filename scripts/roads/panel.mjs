@@ -174,7 +174,12 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   host.addEventListener("change", onInput);
   const refresh = () => sync(host);
   // the bar is rebuilt when the tool or (edit tool) the selected road changes; everything else updates in place
-  const rebuild = (kind) => kind === "loaded" || (sections.includes("bar") && (kind === "mode" || kind === "select" || (kind === "edited" && Editor.mode() === "edit")));
+  // (an edit of the selected road updates its controls in place, so a slider or field being used with the keys keeps the focus)
+  const barRoadGone = () => {
+    const shown = host.querySelector("[data-road]")?.dataset.road, id = Editor.selectedEdge();
+    return String(shown ?? "") !== String(id ?? "") || (id != null && !Roads.state()?.G.edges.has(id));
+  };
+  const rebuild = (kind) => kind === "loaded" || (sections.includes("bar") && (kind === "mode" || kind === "select" || (kind === "edited" && Editor.mode() === "edit" && barRoadGone())));
   const hook = (kind) => { if ( rebuild(kind) ) host.innerHTML = html(); else refresh(); };
   Hooks.on("moinenMapsRoads", hook);
   const timer = setInterval(() => { const s = host.querySelector(".mm-rd-status"); if ( s ) s.textContent = statusText(); }, 1000);
@@ -193,6 +198,12 @@ function sync(host) {
     writeControl(el, v);     // silent: a <range-picker> reports every value set from code as a change
   };
   set("w", b.w); set("l", b.l); set("o", b.o); set("eraser", b.eraser);
+  // the selected road's own controls (edit tool)
+  const roadId = host.querySelector("[data-road]")?.dataset.road, road = roadId != null ? R?.G.edges.get(Number(roadId)) : null;
+  if ( road ) {
+    set("rw", road.w); set("rl", road.l); set("ro", road.o); set("rsp", road.sp ?? 1);
+    host.querySelectorAll("[data-rkind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.rkind === road.k)));
+  }
   host.querySelectorAll("[data-kind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.kind === b.k)));
   host.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === m)));
   host.querySelectorAll(".mm-rd-hint").forEach((h) => { h.textContent = T(hintKey(m, !!h.dataset.short)); });
