@@ -20,6 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
+import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
 
 export const CORE_VERSION = 31;   // 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
@@ -167,14 +168,14 @@ const CAUSE = [
     crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.02, glow: [255, 128, 40] },
   /* acid     */ { acc: [80, 0.55, 0.38], ramp: { k: 0.2, s: 0.85, sa: 0.03, l: 0.85 }, deb: { to: "acc", k: 0.2, holes: 0.3 }, frac: { ring: 0.8 }, fate: { gone: 0.22, thr: 0.6 },
     crack: { mode: "radial", n: 0.5, len: 0.7, br: 0, col: "acc" }, halo: { kind: "stain", r: 0.95 }, edge: "pitted", fill: "acid", fx: "bubble", fxD: 0.03, glow: [170, 255, 70], glowK: 0.45 },
-  /* lightning*/ { acc: [205, 0.45, 0.7], ramp: { k: 0.15, s: 0.6, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 1.6, ring: 1.1 }, fate: { thr: 1.2 },
-    crack: { mode: "branch", n: 0.55, len: 0.75, br: 0.07, col: "bolt", always: true }, halo: { kind: "burn", r: 0.25 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.025, glow: [175, 220, 255] },
+  /* lightning*/ { acc: [205, 0.45, 0.7], ramp: { k: 0.15, s: 0.6, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 0.8, ring: 1.4 }, fate: { thr: 1.2 },
+    crack: { mode: "bolt", n: 1, len: 1.25, br: 0, col: "bolt", always: true }, halo: { kind: "burn", r: 0.12 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.008, glow: [175, 220, 255] },
   /* arcane   */ { acc: [280, 0.55, 0.6], ramp: { k: 0.25, s: 0.9, sa: 0.03, l: 0.9 }, deb: { to: "acc", k: 0.14 }, frac: { swirl: 0.13 },
     crack: { mode: "spiral", n: 1.3, len: 1.2, br: 0.03, col: "arc" }, halo: { kind: "motes", r: 0.8 }, edge: "rune", fill: "rune", fx: "mote", fxD: 0.02, glow: [200, 120, 255] },
   /* impact   */ { acc: [32, 0.22, 0.5], ramp: { k: 0, s: 0.9, l: 0.82 }, frac: { spokes: 1.45, ring: 1.25 }, fate: { gone: -0.1, thr: 1.15 },
-    crack: { mode: "radial", n: 1.7, len: 1.35, br: 0.01, col: "ink", straight: true }, halo: { kind: "pressed", r: 0.7 }, edge: "pressed", fill: "bowl", fx: "dust", fxD: 0.03, glow: null },
+    crack: { mode: "radial", n: 1.7, len: 1.35, br: 0.01, col: "ink", straight: true }, halo: { kind: "pressed", r: 1.0 }, edge: "pressed", fill: "bowl", fx: "dust", fxD: 0.03, glow: null },
   /* claws    */ { acc: [12, 0.3, 0.42], ramp: null, frac: { along: 0.35 }, fate: { thr: 0.7 },
-    crack: { mode: "parallel", n: 1, len: 1.2, br: 0, col: "ink", always: true }, halo: { kind: "scrape", r: 0.45 }, edge: "scraped", fill: "groove", fx: "splinter", fxD: 0.025, glow: null },
+    crack: { mode: "parallel", n: 1, len: 1.2, br: 0, col: "ink", always: true }, halo: { kind: "scrape", r: 1.1 }, edge: "scraped", fill: "groove", fx: "splinter", fxD: 0.025, glow: null },
   /* water    */ { acc: [205, 0.45, 0.42], ramp: { k: 0.2, s: 0.9, l: 0.8 }, deb: { to: "wet", k: 0.3 }, frac: { ring: 1.2 }, fate: { gone: 0.1, thr: 0.5 },
     crack: { mode: "radial", n: 0.4, len: 0.8, br: 0, col: "ink" }, halo: { kind: "wet", r: 1 }, edge: "smooth", fill: "silt", fx: "drop", fxD: 0.025, glow: null },
   /* decay    */ { acc: [96, 0.45, 0.33], ramp: { k: 0.28, s: 0.8, l: 0.9 }, deb: { to: "moss", k: 0.4 }, frac: { ring: 0.85 }, fate: { gone: 0.15, thr: 0.35 },
@@ -210,7 +211,7 @@ function causePalette(P, cz, cls) {
  */
 export function causeKit(K) {
   const { cz, pal, seed, W, H, mapAt, put, glow, isIn, inside, din, maxD, E0, Rr, C, haloR } = K;
-  const rp = pal.ramp;
+  const rp = pal.ramp, rune = {};
   /** The cause's treatment of the exposed layer at (x, y); null when it drew the pixel itself (emissive). */
   function fill(x, y, col, depth, dn, lit) {
     switch ( cz.fill ) {
@@ -231,8 +232,8 @@ export function causeKit(K) {
         const fz = clamp(dn * 1.6 - 0.7, 0, 1);
         if ( fz <= 0 ) return col;
         let c = mix(col, mix(rp[1], pal.accLo, 0.3), fz * 0.55);
-        if ( vnoise(x / 2, y / 2, seed + 521) > 0.72 && (x + y) % 3 === 0 ) c = mix(c, pal.accHi, 0.75);
-        if ( dn > 0.5 && Math.abs(vnoise(x / 3, y / 3, seed + 522) - 0.5) < 0.03 ) { glow(x, y, pal.accHi, 210); return null; }
+        // (a rare glassy glint; no veins of light - those read as a web: the strike's own trail carries the light)
+        if ( vnoise(x / 2, y / 2, seed + 521) > 0.8 && h2(x, y, seed + 523) < 0.25 ) c = mix(c, pal.accHi, 0.6);
         return c;
       }
       case "rune": {   // a dashed rune circle round the impact, with ticks pointing in
@@ -240,22 +241,30 @@ export function causeKit(K) {
         // never a drawn circle: the ring's radius wanders with the angle, some runes are missing
         const sf = ang / (Math.PI * 2) * 18, seg = Math.floor(sf), gone = h2(seg, 5, seed + 571) < 0.3;
         const rr = Rr * 0.58 * (1 + 0.12 * Math.sin(2 * ang + seed % 7) + 0.07 * Math.sin(5 * ang + seed % 11)) + (h2(seg, 6, seed + 572) - 0.5) * 1.2;
+        // inscribed SIGILS between short arcs of the ring (pixel-fx sigilStrokes: curved and angular strokes with ticks, never a cross)
+        const sig = (rune.sig ??= (() => {
+          const S = new Set(); if ( Rr < 5 ) return S;
+          const n = clamp(Math.round(Rr * 0.58 * Math.PI * 2 / 10), 4, 9), sz = clamp(Rr * 0.12, 2, 4);
+          for ( let q = 0; q < n; q++ ) {
+            const a = (q + 0.5) / n * Math.PI * 2 + h2(q, 7, seed + 573) * 0.3, r2 = Rr * 0.58 * (0.92 + 0.12 * h2(q, 8, seed + 573));
+            for ( const [gx, gy] of sigilCells(seed * 7 + q, E0.x + Math.cos(a) * r2, E0.y + Math.sin(a) * r2 * 0.82, sz) ) S.add(gy * W + gx);
+          }
+          return S;
+        })());
+        if ( sig.has(y * W + x) ) { glow(x, y, pal.accHi, 235); return null; }
         if ( gone ) return mix(col, pal.accLo, clamp(depth * 0.3, 0, 0.25));
-        if ( Rr >= 5 && Math.abs(d - rr) < 0.55 && seg % 3 !== 2 ) { glow(x, y, pal.accHi, 235); return null; }
-        if ( Rr >= 5 && seg % 3 === 2 && d < rr && d > rr - Math.max(2, Rr * 0.2) ) {
-          const ta = (seg + 0.5) / 18 * Math.PI * 2 - Math.PI;
-          if ( Math.abs(dx * Math.sin(ta) - dy * Math.cos(ta)) < 0.55 ) { glow(x, y, pal.acc, 200); return null; }
-        }
+        if ( Rr >= 5 && Math.abs(d - rr) < 0.55 && seg % 3 === 0 ) { glow(x, y, pal.acc, 190); return null; }
         return mix(col, pal.accLo, clamp(depth * 0.3, 0, 0.25));
       }
       case "bowl": {   // pressed in hard: a deeper bowl, radial striations from the impact
-        let c = mul(col, clamp(1 + lit * 0.22 - depth * 0.15, 0.6, 1.25));
+        // (the floor compacted and dusty, lighter towards its rim: pressed in, not dug out)
+        let c = mul(mix(col, pal.dust, 0.32 * (1 - dn)), clamp(1 + lit * 0.22 - depth * 0.15, 0.6, 1.25));
         if ( dn > 0.25 && h2(Math.floor((Math.atan2(y - E0.y, x - E0.x) + Math.PI) * 9), 0, seed + 531) < 0.3 && ((x ^ y) & 1) ) c = mul(c, 0.82);
         return c;
       }
       case "groove": { // parallel grooves along the axis, lit on one side
         const q = (x + 0.5 - C.cx) * -C.axis[1] + (y + 0.5 - C.cy) * C.axis[0], per = Math.max(3, C.maxD / 1.6), f = ((q / per) % 1 + 1) % 1;
-        return f < 0.22 ? rp[0] : f < 0.32 ? mix(rp[3], col, 0.3) : col;
+        return f < 0.22 ? rp[0] : f < 0.36 ? mix(rp[4], [235, 225, 205], 0.25) : col;
       }
       case "silt": {   // washed out: sediment bands, standing water in the deepest part
         if ( depth > 0.62 ) {
@@ -287,11 +296,14 @@ export function causeKit(K) {
       case "pitted": c = hv < 0.45 ? pal.ink : hv < 0.75 ? pal.accLo : mix(m, pal.acc, 0.5); break;
       case "glassy": if ( hv < 0.15 && !soft ) return glow(x, y, pal.accHi, 140); c = mix(pal.accHi, m, 0.25); break;
       case "rune": if ( hv < 0.2 && !soft ) return glow(x, y, pal.acc, 200); c = pal.ink; break;
-      case "pressed": c = mul(pal.ink, 0.8); break;
+      // impact: a pressed, heavy rim, a lit chip now and then on it
+      case "pressed": c = hv < 0.12 ? mul(m, 1.22) : mul(pal.ink, 0.8); break;
       case "scraped": c = hv < 0.35 ? mul(m, 1.25) : mix(m, pal.ink, 0.7); break;
-      case "smooth": c = mix(m, pal.ink, 0.35); break;
+      // water: a smooth, scoured, wet lip (dark and blue-washed, no ink)
+      case "smooth": c = mix(mix(m, pal.waterR[1], 0.35), pal.ink, 0.3); break;
       case "moss": c = hv < 0.5 ? pal.acc : pal.accLo; break;
-      case "frost": c = hv < 0.22 ? pal.accHi : hv < 0.55 ? mix(m, pal.accHi, 0.3) : mix(m, pal.ink, 0.45); break;
+      // frost: a soft rime, a rare bright crystal - never a white outline
+      case "frost": c = hv < 0.07 ? pal.accHi : hv < 0.5 ? mix(m, pal.accHi, 0.16) : mix(m, pal.ink, 0.4); break;
       default: c = pal.ink;
     }
     put(x, y, soft ? mix(m, c, 0.6) : c);
@@ -304,9 +316,29 @@ export function causeKit(K) {
       case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.22 + 0.15 * k)); break;
       case "burn": if ( n < k * 0.4 ) put(x, y, mul(m, 0.62)); break;
       case "motes": if ( hv < k * 0.035 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
-      case "pressed": if ( d < 3 + C.maxD * 0.15 && n < 0.8 ) put(x, y, mul(m, 0.72)); else if ( n < k * 0.35 ) put(x, y, pal.dust); break;
-      case "scrape": if ( n < k * 0.3 ) put(x, y, mix(m, pal.dust, 0.5)); break;
-      case "wet": if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]); else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.66), pal.waterR[2], 0.18)); break;
+      case "pressed": {
+        // impact: the ground pressed down round the rim, shock streaks radiating out, stone chips flung on it (lit top, dark under)
+        const ang = Math.atan2(y - E0.y, x - E0.x), streak = h2(Math.floor((ang + Math.PI) * 11), 1, seed + 615) < 0.32;
+        if ( hv < k * 0.07 ) { put(x, y, mul(m, 1.3)); if ( !inside[i + W] ) put(x, y + 1, mul(m, 0.45)); }
+        else if ( d < 3 + C.maxD * 0.15 && n < 0.8 ) put(x, y, mul(m, 0.7));
+        else if ( streak && n < k * 0.95 ) put(x, y, mul(m, 0.78));
+        else if ( n < k * 0.3 ) put(x, y, mix(m, pal.dust, 0.6));
+        break;
+      }
+      case "scrape": {
+        // claws: parallel scratches along the stroke through the ground beside it, a bright gouge with a dark lip under it
+        const q = (x + 0.5 - C.cx) * -C.axis[1] + (y + 0.5 - C.cy) * C.axis[0], per = Math.max(3, C.maxD / 1.4), f = ((q / per) % 1 + 1) % 1;
+        if ( f < 0.16 && n < k * 1.4 ) put(x, y, mul(m, 1.28)); else if ( f < 0.3 && n < k * 1.4 ) put(x, y, mix(m, pal.ink, 0.55)); else if ( n < k * 0.25 ) put(x, y, mix(m, pal.dust, 0.45));
+        break;
+      }
+      case "wet": {
+        // water erosion: wet-darkened ground, sediment fanned out in bands, a few standing drops
+        const band = ((d * 0.55 + vnoise(x / 6, y / 6, seed + 616) * 1.8) % 1) < 0.18;
+        if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]);
+        else if ( band && d > 2 && n < k * 1.2 ) put(x, y, mix(m, pal.dust, 0.55));
+        else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.6), pal.waterR[2], 0.24));
+        break;
+      }
       case "moss": if ( n < k * 0.75 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
       case "rime": if ( hv < k * 0.02 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.25 + 0.25 * k)); break;
     }
@@ -318,10 +350,16 @@ export function causeKit(K) {
       const x = i % W, y = (i - x) / W, m = mapAt(i), hv = h2(x, y, seed + 631), root = k < path.length * 0.5;
       switch ( col ) {
         case "ember": if ( root && hv < 0.45 ) glow(x, y, pal.ember[hv < 0.2 ? 1 : 0], 220); else put(x, y, mix(m, pal.char[0], 0.85)); break;
-        case "bolt":
-          if ( k < path.length * 0.35 && hv < 0.4 ) glow(x, y, hv < 0.15 ? [255, 255, 255] : pal.accHi, 230); else put(x, y, mix(m, pal.char[0], 0.8));
-          if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.char[0], 0.35));
+        case "bolt": {
+          // the fused trail of a strike: a dark scorched channel with a thin bright residual along the main channel's root half,
+          // two pixels thick there (tapering), a faint burn shoulder; the forks thinner and darker, the twigs hairlines
+          const dep = path.depth | 0, f = k / path.length;
+          if ( !dep && f < 0.5 && hv < 0.5 ) glow(x, y, hv < 0.12 ? [235, 245, 255] : pal.accHi, 200);
+          else put(x, y, mix(m, mix(pal.char[0], pal.accLo, 0.25), dep > 1 ? 0.6 : 0.88));
+          if ( !dep && f < 0.6 && y + 1 < H ) put(x, y + 1, mix(mapAt(i + W), pal.char[0], f < 0.3 ? 0.8 : 0.55));
+          if ( dep < 2 && y > 0 && !inside[i - W] && h2(x, y, seed + 633) < 0.6 ) put(x, y - 1, mix(mapAt(i - W), pal.char[1], 0.3));
           break;
+        }
         case "acc": put(x, y, mix(m, pal.accLo, 0.85)); break;
         case "arc": if ( (k & 1) === 0 ) glow(x, y, pal.acc, 180); else put(x, y, mix(m, pal.accLo, 0.8)); break;
         case "ice": put(x, y, mix(pal.accHi, [255, 255, 255], 0.35)); if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.ink, 0.35)); break;
@@ -1341,7 +1379,26 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( path.length ) C.cracks.push(path);
     };
     const reach = (k = 1) => Math.min((3 + R() * (C.maxD * 0.9 + 4) * (Math.max(1.5, C.maxSev) / 3)) * cr.len * k, room);
-    if ( mode === "parallel" ) {
+    if ( mode === "bolt" ) {
+      // lightning: one strike (two on a big or long area) - a branching channel from the impact out across the damage and past its rim
+      // (pixel-fx boltTree: a jagged main channel, 2-4 forks at 30-60 degrees, a twig), never an area-filling web
+      const nb = C.maxD > 9 || C.epi.length > 1 ? 2 : 1, a0 = R() * Math.PI * 2;
+      for ( let b = 0; b < nb; b++ ) {
+        // the second channel leaves the other way (one strike through the damage, never a star from its centre)
+        const e = C.epi[(b * Math.max(1, C.epi.length - 1)) % C.epi.length], a = a0 + b * (Math.PI + (R() - 0.5));
+        const L = Math.min((C.maxD * 1.1 + 6) * cr.len * (0.8 + R() * 0.4), room + e.R * 0.5);
+        const tree = boltTree(seed * 13 + C.uid * 7 + b, e.x, e.y, e.x + Math.cos(a) * L, e.y + Math.sin(a) * L * 0.85, { forks: 2 + Math.floor(R() * 3) });
+        const toPath = (pts, depth) => {
+          const p = [];
+          for ( let q = 1; q < pts.length; q++ ) for ( const [x, y] of lineCells(pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1]) ) {
+            if ( x < 1 || y < 1 || x >= W - 1 || y >= H - 1 ) continue;
+            const i = y * W + x; if ( p[p.length - 1] !== i ) p.push(i);
+          }
+          p.depth = depth; if ( p.length ) C.cracks.push(p);
+        };
+        toPath(tree.main, 0); for ( const f of tree.forks ) toPath(f.pts, f.depth);
+      }
+    } else if ( mode === "parallel" ) {
       // scratches: three or four lines along the axis, each running out of both ends of the damage
       const ax = C.axis, nx = -ax[1], ny = ax[0], wid = Math.max(2, C.maxD), g = clamp(Math.round(wid / 3), 3, 4);
       for ( let k = 0; k < g; k++ ) {
