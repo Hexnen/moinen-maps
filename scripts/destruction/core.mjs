@@ -399,7 +399,25 @@ export function bake(I, cache = null) {
     const T = ob.t & 7, bytes = ob.bytes;
     // this stroke's mask alone
     const lvT = (mx, my) => { const x = mx - ob.x0, y = my - ob.y0; return (x < 0 || y < 0 || x >= ob.w || y >= ob.h) ? 0 : bytes[y * ob.w + x] & 3; };
-    const FM = 4 + (jag ? 22 : 0);
+    // ORGANIC OUTLINE: a brush stamps discs, and a disc (or a row of them, scalloped) reads as a stamp, not as broken ground. Every
+    // stroke but a tear (its opening follows its spine) reads its own mask through a domain warp scaled to its brush: big lobes about
+    // a brush radius apart (up to ~a fifth of the radius in or out), a finer octave, and chipped bites along the rim. Seeded by the
+    // stroke's id, from its own pixels only (the same outline whatever else is painted), and everything after it (the depth, the lip,
+    // the halo, the hole's cut-out) follows this one outline.
+    let Rb = 0;
+    {
+      const md = new Float32Array(ob.w * ob.h);
+      for ( let i = 0; i < md.length; i++ ) md[i] = bytes[i] ? 1e6 : 0;
+      // (the border of the box counts as outside)
+      const PW = ob.w + 2, PH = ob.h + 2, pd = new Float32Array(PW * PH);
+      for ( let y = 0; y < ob.h; y++ ) for ( let x = 0; x < ob.w; x++ ) pd[(y + 1) * PW + x + 1] = md[y * ob.w + x];
+      chamfer(pd, PW, PH);
+      for ( const v of pd ) if ( v > Rb && v < 1e5 ) Rb = v;
+      Rb *= K;
+    }
+    const org = T !== T_GASH && Rb >= 3, OA = org ? clamp(Rb * 0.27, 1.2, 12) : 0, OL = Math.max(6, Rb * 0.95), OL2 = Math.max(3, Rb * 0.42);
+    const os = (fnvStr(String(ob.id)) & 0xffff) + seed * 7;
+    const FM = 4 + Math.ceil(OA * 1.3) + (jag ? 22 : 0);
     const FX = Math.max(0, ob.x0 * K - FM), FY = Math.max(0, ob.y0 * K - FM);
     const FW = Math.min(AW, (ob.x0 + ob.w) * K + FM) - FX, FH = Math.min(AH, (ob.y0 + ob.h) * K + FM) - FY, FN = FW * FH;
     if ( FW <= 0 || FH <= 0 ) return [];
@@ -408,10 +426,14 @@ export function bake(I, cache = null) {
       const ax = FX + x, ay = FY + y;
       // torn: the mask is read through a warp (two octaves, up to ~7 art px), so the outline tears into lobes and inlets
       let wx = 0, wy = 0;
+      if ( org ) {
+        wx = (vnoise(ax / OL, ay / OL, os + 1) - 0.5) * 2.4 * OA + (vnoise(ax / OL2, ay / OL2, os + 3) - 0.5) * 0.9 * OA;
+        wy = (vnoise(ax / OL, ay / OL, os + 2) - 0.5) * 2.4 * OA + (vnoise(ax / OL2, ay / OL2, os + 4) - 0.5) * 0.9 * OA;
+      }
       if ( jag ) {
         const A = 7 * jag;
-        wx = (vnoise(ax / 7, ay / 7, seed + 310) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 312) - 0.5) * 0.7 * A;
-        wy = (vnoise(ax / 7, ay / 7, seed + 311) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 313) - 0.5) * 0.7 * A;
+        wx += (vnoise(ax / 7, ay / 7, seed + 310) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 312) - 0.5) * 0.7 * A;
+        wy += (vnoise(ax / 7, ay / 7, seed + 311) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 313) - 0.5) * 0.7 * A;
       }
       const mx = (ax + wx + 0.5) / K - 0.5, my = (ay + wy + 0.5) / K - 0.5;
       const ix = Math.floor(mx), iy = Math.floor(my), fx = mx - ix, fy = my - iy;
@@ -425,6 +447,8 @@ export function bake(I, cache = null) {
         const cb = h2(ax >> 1, ay >> 1, seed + 304);
         if ( cb < 0.13 * jag ) n -= 1.3; else if ( cb > 1 - 0.09 * jag ) n += 1;
       }
+      // chipped bites along the organic rim: where a mid-scale noise peaks, the rim is bitten in (2 x 2 steps)
+      if ( org ) { const b = vnoise((ax >> 1) / (OL2 * 0.45), (ay >> 1) / (OL2 * 0.45), os + 5); if ( b > 0.66 ) n -= (b - 0.66) * 5.5; }
       if ( bil + n * Math.min(1, bil + 0.3) <= 0.5 ) continue;
       const i = y * FW + x;
       inside[i] = 1; sev[i] = clamp(bil, 1, 3);

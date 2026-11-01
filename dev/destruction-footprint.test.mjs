@@ -81,7 +81,13 @@ for ( let a = 0; a < 6; a++ ) for ( let b = 0; b < 6; b++ ) for ( const c of CAU
   const rA = bake([A]), rAB = bake([A, B]);
   const sigA = split(rA).get(0).map((s) => s.sig).join("|"), sigA2 = split(rAB).get(0)?.map((s) => s.sig).join("|");
   ok(sigA === sigA2, `${T[a]} <- ${T[b]} (cause ${c}, ${cfg}): the older object's bytes are unchanged`);
-  const cA = compose(rA), cAB = compose(rAB), own = ownOf(B, 1);
+  // B's own pixels: its cover sprite (the stroke's pixels as baked, torn outline included), grown by 1 px
+  const own = new Uint8Array(AW * AH);
+  for ( const s of split(rAB).get(1) ?? [] ) if ( s.kind === 2 ) for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) {
+    if ( !rAB.sheet.data[((s.sy + y) * rAB.sheet.w + s.sx + x) * 4 + 3] ) continue;
+    for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) { const X = s.x + x + dx, Y = s.y + y + dy; if ( X >= 0 && Y >= 0 && X < AW && Y < AH ) own[Y * AW + X] = 1; }
+  }
+  const cA = compose(rA), cAB = compose(rAB);
   // B's pieces (plates, thrown chips) may land on A: debris on top, not the ground cleared; counted apart
   const onTop = new Uint8Array(AW * AH);
   for ( const s of split(rAB).get(1) ?? [] ) if ( s.kind === 1 ) for ( let y = 0; y < s.h; y++ ) for ( let x = 0; x < s.w; x++ ) {
