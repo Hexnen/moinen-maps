@@ -8,6 +8,7 @@ import * as Chunks from "../net/chunks.mjs";
 import * as Trace from "../net/trace.mjs";
 import * as Reveal from "../net/reveal.mjs";
 import * as Policy from "./bake-policy.mjs";
+import { perfLow } from "../perf-mode.mjs";
 /** This client's loop breaker (bake-policy.mjs): the same strokes baked or published again and again stop it, with a reason. */
 const breaker = new Policy.Breaker();
 /** The last failed bake: { key, n, at } (its automatic retries back off). */
@@ -432,7 +433,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked. TWO WAVES (substrate.mjs):
         // 1. the plain looks (from their own data alone) of every stroke a stroke here reads, and of the strokes here that read nothing
         //    (that look is their final one); 2. the strokes that read others, over those plain looks. Nothing waits longer than that.
-        const lanes = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 2) - 1));
+        const lanes = bakeLanes();
+        Trace.event("bake-lanes", { lanes, cores: navigator.hardwareConcurrency ?? 0 });
         const byIndex = new Map(want.map((w) => [w.index, w])), plainNeed = new Map();
         for ( const w of toBake ) {
           if ( !w.deps.length ) plainNeed.set(w.index, w);
@@ -445,13 +447,27 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           const order = prioritise(list, objs);
           const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [], tw = performance.now();
           for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
+          // results are taken on the page a slice at a time (~8 ms, then a pause): many lanes finishing together never make a long task
+          const queue = [];
+          let draining = null;
+          const drain = () => draining ??= (async () => {
+            while ( queue.length ) {
+              const t0 = performance.now();
+              while ( queue.length && performance.now() - t0 < 8 ) queue.shift()();
+              if ( queue.length ) await new Promise((r) => setTimeout(r, 0));
+            }
+          })().finally(() => { draining = null; });
           await runBakePool(jobs.map((jb) => inputOf(jb, plain)), getMap, { n: lanes, onDone: (i, res) => {
-            if ( my !== gen ) return;
-            take(jobs[i], res, plain);
-            const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
-            status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal; tell("status");
-            if ( done ) { soon(); early(); }
+            queue.push(() => {
+              if ( my !== gen ) return;
+              take(jobs[i], res, plain);
+              const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
+              status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal; tell("status");
+              if ( done ) { soon(); early(); }
+            });
+            drain();
           } });
+          while ( queue.length || draining ) await (draining ?? drain());
           Trace.event("bake-wave", { wave, plain, n: order.length, jobs: jobs.length, ms: Math.round(performance.now() - tw) });
           if ( my !== gen ) break;
         }
@@ -662,6 +678,26 @@ function maybeBlast(first = false) {
  * worker (in parallel with the next bake), uploaded (only what the server lacks, a few at a time) and named in the manifest together
  * with the entries that played since. One run at a time; a run asked for meanwhile follows it.
  */
+/* ---------------------------------------------------------------- how many workers a big bake uses */
+
+/**
+ * Lanes (workers) for a big bake: the client setting "Bake threads" (auto, or 1-8). Auto: the logical cores minus two (the page and
+ * the GPU's process keep theirs), 2 to 8; only 2 in performance mode Low, while the tab is hidden, or on a battery running low and
+ * not charging. Each lane is a separate thread (the page only takes the results, a slice per frame).
+ */
+let battery = null;
+try { globalThis.navigator?.getBattery?.().then((b) => { battery = b; }).catch(() => {}); } catch { /* not offered */ }
+export function bakeLanes() {
+  let set = "auto";
+  try { set = String(game.settings.get(MODULE_ID, "destrThreads") ?? "auto"); } catch { /* not registered yet */ }
+  if ( set !== "auto" ) return Math.max(1, Math.min(8, Number(set) || 2));
+  const cores = globalThis.navigator?.hardwareConcurrency ?? 4;
+  let n = Math.max(2, Math.min(8, cores - 2));
+  const saving = battery && !battery.charging && battery.level < 0.25;
+  if ( perfLow() || document.visibilityState === "hidden" || saving ) n = 2;
+  return n;
+}
+
 /* ---------------------------------------------------------------- re-baking a compatible older look (GM, in the background) */
 
 /** "background" (default: when this tab is idle), "ask" (only on Rebake all), "now" (at load, as before). Client setting. */
@@ -993,6 +1029,10 @@ export function registerDestruction() {
   Hooks.once("init", () => game.settings.register(MODULE_ID, "destrRebake", {
     name: "MOINENMAPS.Destr.rebakeSetting", hint: "MOINENMAPS.Destr.rebakeSettingHint", scope: "client", config: true, type: String, default: "background",
     choices: { background: "MOINENMAPS.Destr.rebake.background", ask: "MOINENMAPS.Destr.rebake.ask", now: "MOINENMAPS.Destr.rebake.now" }
+  }));
+  Hooks.once("init", () => game.settings.register(MODULE_ID, "destrThreads", {
+    name: "MOINENMAPS.Destr.threadsSetting", hint: "MOINENMAPS.Destr.threadsSettingHint", scope: "client", config: true, type: String, default: "auto",
+    choices: Object.fromEntries([["auto", "MOINENMAPS.Destr.threadsAuto"], ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => [String(n), String(n)])])
   }));
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);

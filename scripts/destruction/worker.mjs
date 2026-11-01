@@ -19,7 +19,7 @@ self.onmessage = async (ev) => {
       self.postMessage({ id: m.id, ok: true, result: true });
     } else if ( m.kind === "bake" ) {
       if ( !map || m.input.mapKey !== mapKey ) throw new Error("NOMAP");
-      const res = bake({ ...m.input, map, onProgress: (p) => self.postMessage({ id: m.id, progress: p }) }, areas);
+      const res = bake({ ...m.input, map, onProgress: (p) => self.postMessage({ id: m.id, progress: p }) }, m.input.noCache ? null : areas);
       self.postMessage({ id: m.id, ok: true, result: res }, [res.sheet.data.buffer, res.meta.buffer]);
     } else if ( m.kind === "encode" ) {
       const png = await encodePng(m.w, m.h, m.data);

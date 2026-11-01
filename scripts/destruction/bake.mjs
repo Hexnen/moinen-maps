@@ -72,7 +72,8 @@ export async function runBake(input, getMap, { onProgress, retried = false } = {
  * A big bake (a scene opened with nothing cached for this bake version: dozens of strokes) on several workers at once. `jobs` are
  * inputs (each a subset of the strokes, nearest to the view first); every job resolves `onDone(i, result)` as soon as it is baked, so
  * the visible strokes come first. Lane 0 is the usual worker (it keeps what it baked for the GM's next edit); the other lanes are
- * extra workers made for this bake and let go after it. `n` lanes at most (never more than the cores minus one, at most 4).
+ * extra workers made for this bake (no area cache: up to 8 of them must not each hold ~160 MB) and let go after it. `n` lanes at most
+ * (never more than the cores minus one).
  */
 export async function runBakePool(jobs, getMap, { n = 4, onDone = null } = {}) {
   const lanes = Math.max(1, Math.min(n, jobs.length, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
@@ -98,7 +99,7 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null } = {}) {
     await ask({ kind: "map", mapKey: m.key, map: { w: m.map.w, h: m.map.h, data: copy } }, [copy.buffer]);
     for ( let i = take(); i >= 0; i = take() ) {
       let r;
-      try { r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key } }); }
+      try { r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: true } }); }   // (an extra lane keeps no area cache: it goes after this bake)
       catch ( err ) { retry.push(i); throw err; }
       onDone?.(i, r);
     }
