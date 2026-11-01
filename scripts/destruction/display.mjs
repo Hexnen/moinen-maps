@@ -693,7 +693,8 @@ export class DestructionDisplay {
       // anticipation: it appears where it lies and shivers before it gives
       if ( tm < -a.pre ) { s.visible = false; return; }
       const f = 1 + tm / a.pre;
-      s.visible = true; s.alpha = clamp01(f * 1.6);
+      // opaque from its first frame (a piece is a cut of the map: half see-through it read as a ghost of a polygon)
+      s.visible = true; s.alpha = 1;
       const shiver = f > 0.45 ? ((Math.floor(tm / 45 + a.seed) & 1) ? 1 : -1) * (type === "collapse" ? 1 : 0.5) : 0;
       s.position.set(o.x + Math.round(p.sx + shiver) * ap, o.y + p.sy * ap);
       s.rotation = 0; s.scale.set(ap);

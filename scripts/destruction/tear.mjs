@@ -324,7 +324,7 @@ export function bakeTear(X) {
     let r;
     switch ( mat ) {
       case "grass": r = inner ? mix(pal.strata[0], rp[1], 0.3) : mix(c, pal.strata[0], 0.55); if ( !inner && h2(x, y, sd + 51) < 0.3 ) r = mul(c, 1.18); break;
-      case "stone": r = add(mul(mix(c, grey(c), 0.5), inner ? 1.28 : 1.12), 4, 4, 6); break;
+      case "stone": r = add(mul(mix(c, grey(c), 0.4), inner ? 1.13 : 1.05), 2, 2, 3); break;   // fresh stone, a step lighter (not a white rim)
       case "wood":  r = add(mul(c, inner ? 1.32 : 1.15), 18, 10, 0); break;
       case "metal": r = inner ? mul(ink, 1.1) : mix(mul(c, 1.6), [236, 240, 245], 0.35); break;
       case "sand":  r = mul(c, inner ? 0.78 : 0.9); break;
