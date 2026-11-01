@@ -21,7 +21,7 @@
 import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 
-export const CORE_VERSION = 25;   // 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 26;   // 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -1114,7 +1114,7 @@ function bakeArea(A, P, seed, uid, jag) {
     let f = ((-s.tx * L[0] - ty * L[1] + L[2]) / nl) / L[2];
     if ( s.z0 < 0 ) f *= 0.82;
     // a piece of the map must still read as the map: tilt shades it, it never glows
-    f = Math.round(clamp(f, 0.6, 1.12) / 0.06) * 0.06;
+    f = 1 + Math.round((clamp(f, 0.6, 1.12) - 1) / 0.06) * 0.06;
     const rgba = new Uint8ClampedArray(tw * th * 4);
     const isTop = (x, y) => x >= 0 && y >= 0 && x < tw && y < th && top[y * tw + x] >= 0;
     // side: the slab's thickness below its top face
@@ -1154,7 +1154,7 @@ function bakeArea(A, P, seed, uid, jag) {
       rgba[o] = col[0]; rgba[o + 1] = col[1]; rgba[o + 2] = col[2]; rgba[o + 3] = 255;
     }
     // ink the silhouette where it is lifted (resting plates join the map seamlessly)
-    if ( T > 0 || s.chip ) {
+    if ( T > 0 || s.chip || s.type === T_CRACKS ) {
       const ink = C.pal.ink;
       const filled = (x, y) => x >= 0 && y >= 0 && x < tw && y < th && rgba[(y * tw + x) * 4 + 3] > 0;
       const out = [];
@@ -1438,7 +1438,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const i = y * W + x; if ( inside[i] ) continue;
       const d = dout[i]; if ( d > haloR || d < 1.5 ) continue;
       const k = Math.pow(1 - d / haloR, 1.4), n = vnoise(x / 2.2, y / 2.2, seed + 71) * 0.75 + h2(x, y, seed + 72) * 0.25;
-      if ( type === T_SCORCH ) { if ( n < k * 0.95 ) put(x, y, n < k * 0.45 ? pal.char[0] : mix(mapAt(i), pal.char[1], 0.7)); }
+      if ( type === T_SCORCH ) { const ns = vnoise(x / 3.4, y / 3.4, seed + 73) * 0.85 + bayer(x, y) * 0.15; if ( ns < k * 1.05 ) put(x, y, ns < k * 0.5 ? pal.char[0] : mix(mix(mapAt(i), [74, 62, 44], 0.35), pal.char[1], 0.55)); }
       else if ( type === T_BLAST ) { if ( n < k * 0.75 ) put(x, y, mul(mapAt(i), n < k * 0.35 ? 0.5 : 0.7)); }
       else if ( n < k * 0.22 && (x + y) % 3 ) put(x, y, mix(mapAt(i), pal.dust, 0.45));
     }

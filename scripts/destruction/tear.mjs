@@ -380,7 +380,7 @@ export function bakeTear(X) {
     let v = 2.7 - dn * (1.4 + 1.8 * deep) + (h2(x, y, sd + 61) - 0.5) * 0.7 + (vnoise(x / 3, y / 3, sd + 62) - 0.5) * 0.7;
     if ( toNorth < Math.min(2.5, w * 0.6) ) v -= 1.1;              // the north lip's shadow
     else if ( toNorth > m + 0.5 && m < 1.2 ) v += 0.6;             // the south slope catches light
-    let c = rp[clamp(Math.floor(v + bayer(x, y) - 0.5), 0, 4)];
+    let c = rp[clamp(Math.floor(v + (vnoise(x / 2.5, y / 2.5, sd + 60) - 0.5) * 0.9 + bayer(x, y) - 0.5), 0, 4)];
     if ( deep > 0.55 && dn > 0.5 ) { const k = (dn - 0.5) / 0.4 * (deep - 0.4) / 0.6, th = h2(x, y, sd + 63) * 0.5 + vnoise(x / 2, y / 2, sd + 64) * 0.5; if ( th < k ) c = pal.void; else if ( th < k + 0.18 ) c = rp[0]; }
     switch ( mat ) {
       case "grass": if ( toNorth < 3 && h2(x, y >> 1, sd + 65) < 0.09 ) c = mix(pal.strata[1], rp[0], 0.4); break;   // roots
@@ -451,7 +451,7 @@ export function bakeTear(X) {
     const a0 = ang;
     for ( let k = 0; k < len; k++ ) {
       // jitters, bends a little, never curls back (pulled towards its first heading)
-      ang += (vnoise(k / 5, depth + 0.5, sd + 83) - 0.5) * 0.22 + (R() - 0.5) * 0.35 + (a0 - ang) * 0.15;
+      ang += (vnoise(k / 5, depth + 0.5, sd + 83) - 0.5) * 0.3 + (R() - 0.5) * 0.35 + (a0 - ang) * 0.04 + (h2(depth, Math.round(a0 * 100), sd + 86) - 0.5) * 0.18;
       x += Math.cos(ang); y += Math.sin(ang);
       const w = w0 * (1 - k / len);
       // dark at the root, fading to a faint scratch at its end
