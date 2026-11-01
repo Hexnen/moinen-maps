@@ -492,6 +492,53 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
 }
 
 /**
+ * NIGHT LIGHTS BENCHMARK: `districts` synthetic districts (vertical strips over the scene, style town at full density: up to
+ * 900 windows + 360 lamps each, twinkle and switching on) or, with districts = 0, the scene's own districts, forced to night;
+ * per frame CPU / GPU (perf) and the lights' own ticker time, against the same frames with the lights off. `grabAt`: a frame of the
+ * whole canvas at rest with a frozen clock is returned for A/B (pixels) as `px`.
+ */
+export async function lightsBench({ districts = 5, n = 165, grabAt = null } = {}) {
+  const L = await import("../scripts/lights.mjs"), Dm = await import("../scripts/districts.mjs");
+  const r = canvas.dimensions.sceneRect, views = new Map();
+  for ( let i = 0; i < districts; i++ ) {
+    const x0 = r.x + r.width * i / districts, x1 = r.x + r.width * (i + 1) / districts;
+    views.set(`bench${i}`, { data: { id: `bench${i}`, rings: [[x0, r.y, x1, r.y, x1, r.y + r.height, x0, r.y + r.height]],
+      lights: { on: "on", own: true, style: "town", density: 1, twinkle: 0.35, switching: 0.25, glow: 0.6, size: 1, warmth: "warm" } }, visible: true, baseAlpha: 1 });
+  }
+  const run = async (night) => {
+    if ( districts ) L.lightsSync(views);
+    L.setNightPreview("*", night);
+    await runFrames(Array(560).fill(null));                // ~3.4 s of real time: the night fades in completely (to the snap)
+    const inst = instrument(); let p;
+    try { p = await perf(n); } finally { var s = inst.snap(); inst.restore(); }
+    const lt = Object.entries(s.tick).filter(([k]) => /function tick\(\) \{ const dt = Math\.min\(\(canvas/.test(k) || k.includes("lightsTick")).reduce((a, [, v]) => a + v, 0);
+    return { cpu: p.cpu, gpu: p.gpu, draws: p.draws, lightsTickMs: +(lt / (n + 5)).toFixed(3) };
+  };
+  try {
+    const on = await run(true);
+    const count = L._stats?.() ?? null;
+    let px = null;
+    if ( grabAt !== null ) {
+      // the lights alone (their cores in the primary group, their halos in the illumination layer), each drawn into a screen-sized
+      // texture with its world transform, at a frozen clock
+      const real = performance.now.bind(performance); performance.now = () => grabAt;
+      try {
+        step(2);
+        const R = canvas.app.renderer, cores = canvas.primary.children.find((c) => c.sortLayer === 251);
+        const halos = canvas.effects.illumination.lights.children.find((c) => c.zIndex === 1e6 && c !== cores);
+        px = [cores, halos].map((o) => { if ( !o ) return null; const rt = PIXI.RenderTexture.create({ width: R.screen.width, height: R.screen.height });
+          R.render(o, { renderTexture: rt, transform: o.parent.worldTransform.clone(), clear: true }); const a = R.extract.pixels(rt); rt.destroy(true); return a; });
+      } finally { performance.now = real; }
+    }
+    const off = await run(false);
+    return { districts, lights: count, on, off, px };
+  } finally {
+    L.setNightPreview("*", false);
+    Dm.refreshAllDistricts?.();
+  }
+}
+
+/**
  * CRISPNESS CHECK (resting damage vs the same damage drawn live, as in an entry frame): at each zoom the destruction layer is drawn
  * with its cache (resting: bands, flattened areas) and with the cache off (live sprites), flood water hidden; over the screen pixels
  * of the damage (either frame opaque) the mean Sobel gradient magnitude of the luma is compared: `ratio` = cached / live. Blurred
@@ -761,4 +808,28 @@ export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = nu
   const seams = [...seam].map(([k2, v]) => [k2, +(v.dev / Math.max(1e-6, v.ctl)).toFixed(2)]).sort((a, b) => b[1] - a[1]).slice(0, 8);
   return { from, to: +to.toFixed(4), steps, points: nD, damageChange: +(eD / Math.max(1, nD)).toFixed(3), mapChange: +(eM / Math.max(1, nD)).toFixed(3),
     ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), swim: +(jD / Math.max(1, nJ)).toFixed(3), beat: +(bSum / Math.max(1, bN)).toFixed(4), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
+}
+
+/**
+ * REST CHECK: the destruction layer's own tick with nothing moving (median / mean ms of its tick and of the cache's part over 120
+ * stepped frames at zoom 1.2), and the worst frame while a zoom crosses the live layer's NEAREST / LINEAR switch (2.4 <-> 3.4).
+ */
+export function restCheck() {
+  const d = D(), T = canvas.app.ticker, r = canvas.dimensions.sceneRect;
+  canvas.pan({ x: r.x + r.width / 2, y: r.y + r.height / 2, scale: 1.2 });
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  let t = performance.now();
+  const fm = [], cm = [], sw = [];
+  try {
+    for ( let i = 0; i < 20; i++ ) { t += 16.7; T.update(t); }
+    for ( let i = 0; i < 120; i++ ) { t += 16.7; T.update(t); fm.push(d.stats.frameMs); cm.push(d.stats.cacheMs ?? 0); }
+    for ( const [z0, z1] of [[2.4, 3.4], [3.4, 2.4]] ) {
+      canvas.pan({ scale: z0 }); for ( let i = 0; i < 5; i++ ) { t += 16.7; T.update(t); }
+      let mx = 0;
+      for ( let k = 1; k <= 20; k++ ) { canvas.pan({ scale: z0 + (z1 - z0) * k / 20 }); const a = performance.now(); t += 16.7; T.update(t); mx = Math.max(mx, performance.now() - a); }
+      sw.push(+mx.toFixed(2));
+    }
+  } finally { T.maxFPS = mf; if ( st ) T.start(); }
+  const avg = (a) => +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3);
+  return { tickMed: med(fm), tickAvg: avg(fm), cacheMed: med(cm), switchMaxFrame: sw, fast: d.cache?.stats.fast ?? null, particles: d.particles.length };
 }
