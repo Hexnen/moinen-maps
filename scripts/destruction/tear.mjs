@@ -730,7 +730,12 @@ export function bakeTear(X) {
       }
     }
     const mi = at(L / 2), haloR = cz.halo ? Math.min(14, (3 + maxD * cz.halo.r) * clamp(P.halo ?? 0.6, 0.15, 1) * (0.35 + lvMax / 3)) : 0;
-    const kit = X.causeKit({ cz, pal, seed: sd, W, H, mapAt: cur, put: kput, glow: kglow, isIn: (x, y) => x >= 0 && y >= 0 && x < W && y < H && openA[y * W + x] === 1,
+    const klight = (x, y, c, a) => {   // (the light sprite only: a glow in the dark that leaves the day pixels as they are)
+      if ( !glowA || x < 0 || y < 0 || x >= W || y >= H ) return;
+      const q = y * W + x; if ( a <= glowA[q] ) return;
+      glowA[q] = a; glowC[q * 3] = c[0]; glowC[q * 3 + 1] = c[1]; glowC[q * 3 + 2] = c[2];
+    };
+    const kit = X.causeKit({ cz, pal, seed: sd, W, H, mapAt: cur, put: kput, glow: kglow, lightOnly: klight, isIn: (x, y) => x >= 0 && y >= 0 && x < W && y < H && openA[y * W + x] === 1,
       inside: openA, din: X.din ?? dO, maxD, E0: { x: SX[mi], y: SY[mi] }, Rr: Math.max(3, wMax * 1.6), C: { cx: C.cx, cy: C.cy, axis: C.axis, maxD }, haloR });
     const fire = cz.fill === "char", frost = cz.fill === "ice", acid = cz.fill === "acid";
     // the floor
