@@ -69,6 +69,7 @@ function selfCheck(ms, retried = false) {
 }
 
 function teardown() {
+  flushSave();
   gen++;
   for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer] ) clearTimeout(t);
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
@@ -109,19 +110,12 @@ function simplify(pts) {
   const step = (out.length - 1) / 95;
   return Array.from({ length: 96 }, (_, i) => out[Math.round(i * step)]);
 }
-/**
- * Paths go only when no point of theirs lies on damage any more (an area keeps the path it was made with: dropping it by age would
- * re-bake that area differently). A hard cap drops the oldest beyond 200.
- */
-function prunePaths() {
-  if ( !S?.paths?.length ) return;
-  const on = (x, y) => { const mx = Math.floor(x / Model.K), my = Math.floor(y / Model.K); return mx >= 0 && my >= 0 && mx < S.mw && my < S.mh && (S.mask[my * S.mw + mx] & 3); };
-  S.paths = S.paths.filter((q) => { for ( let i = 0; i + 2 < q.p.length; i += 3 ) if ( on(q.p[i], q.p[i + 1]) ) return true; return false; }).slice(-200);
-}
-/** The stored brush paths as [[x, y, ms], ...] (art px). */
-const unflat = (p) => { const out = []; for ( let i = 0; i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
-const pathsOf = (S) => (S.paths ?? []).map((q) => unflat(q.p ?? []).map(([x, y]) => [x, y]));
-const pathById = (id) => { const q = id && S?.paths?.find((r) => r.id === id); return q ? unflat(q.p) : null; };
+/** A stroke's stored brush path as [[x, y, ms], ...] (art px). */
+const unflat = (p) => { const out = []; for ( let i = 0; p && i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
+const pathOfObj = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o?.p ? unflat(o.p) : null; };
+/** The stroke objects as the bake and the display take them (their level bytes decoded, their paths as pairs). */
+const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
+  path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
 /* ---------------------------------------------------------------- baking */
@@ -183,7 +177,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
     try {
       const t = performance.now();
-      const input = { mask, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params, paths: S.params.directional ? pathsOf(S) : [] };
+      const input = { objects: objectsIn(), mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       const res = await runBake(input, () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; },
         { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
       if ( my !== gen ) return;
@@ -210,7 +204,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   display ??= new DestructionDisplay();
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   const first = !loaded;
-  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, meta, S.ap, origin());
+  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, meta, S.ap, origin(), objectsIn());
   T.show = performance.now() - t;
   if ( source === "published" ) Store.putCached(key, { blob, metaRows });   // only a file that decoded and read
   playEntries(added, removed, taken, mask, first);
@@ -241,11 +235,11 @@ function playEntries(added, removed, taken, mask, first) {
   }
   const flag = new Map((S.entries ?? []).map((e) => [e.h, e]));
   const sNow = now(), pNow = performance.now(), dirOn = !!S.params.directional;
-  const overlaps = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  const fresh = new Map(taken.filter((s) => s.id).map((s) => [s.id, s]));
   for ( const g of added ) {
-    const h = g.hash, r = g.info.rect;
-    // the older areas this one replaced stay underneath until it is in place (never a blank frame)
-    const under = removed.filter((q) => overlaps(q.info.rect, r));
+    const h = g.hash;
+    // the same stroke's older look (a setting changed) stays underneath until the new one is in (never a blank frame)
+    const under = removed.filter((q) => q.objId && q.objId === g.objId);
     // shown here before (a look toggle switched back, an undo), or a new look of existing damage: no entry, a cross-fade
     if ( g.reused || (played.has(h) && !all) ) { played.add(h); display.swap(g, under); continue; }
     played.add(h);
@@ -253,21 +247,20 @@ function playEntries(added, removed, taken, mask, first) {
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
       if ( sNow - e.t > ENTRY_WINDOW ) { display.swap(g, under); continue; }
-      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, box: e.b ?? null, under,
-        path: dirOn ? pathById(e.p) : null });
+      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under,
+        path: dirOn ? pathOfObj(e.p) : null });
       continue;
     }
     if ( first && !taken.length && !all ) continue;   // what was already there when the scene opened
-    const hits = edits.filter((s) => overlaps(s.box, r) || (s.box.x0 <= r.x1 && s.box.x1 >= r.x0 && s.box.y0 <= r.y1 && s.box.y1 >= r.y0));
-    // not touched by an edit: a setting changed (torn borders, a slider, a new variation without Detonate): the new look fades in
-    if ( !hits.length && !all ) { display.swap(g, under); continue; }
-    const box = under.length && !all ? hits.reduce((u, s) => union(u, s.box), null) : null;
-    // with "follows the stroke" off the entry is the plain radial one from the area's epicentre (or the middle of the change)
-    const s0 = hits[0], o = !all && dirOn ? s0?.a ?? null : null;
+    // only a stroke painted just now enters; anything else (a setting changed, a new variation without Detonate) fades to its new look
+    const s0 = all ? null : fresh.get(g.objId);
+    if ( !s0 && !all ) { display.swap(g, under); continue; }
+    // with "follows the stroke" off the entry is the plain radial one from the epicentre
+    const o = s0 && dirOn ? s0.a ?? null : null;
     const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
-    const sp = !all && dirOn ? hits.find((s) => s.path) : null;
-    display.enter(g, { start: pNow, o, dir: d, box, under, path: sp?.path ?? null });
-    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: box, p: sp?.pid ?? null });
+    const path = s0 && dirOn ? s0.path : null;
+    display.enter(g, { start: pNow, o, dir: d, under, path });
+    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
 
@@ -337,22 +330,23 @@ export function ensureState() {
   return S;
 }
 
-/** The mask changed inside `box` (mask pixels); `stroke` { a, b } (scene points) where it started and ended. */
+/**
+ * A stroke ended: `box` (mask pixels) and `stroke` { buf (levels on the whole mask grid), erase, type, a, b (scene points), path }.
+ * It becomes a new stroke object at the top; nothing painted before it changes. Without `stroke.buf` (clear), only the bake follows.
+ */
 export function edited(box, stroke = null) {
   if ( !S ) return;
   S.rev = Model.nextRev();
-  if ( box ) {
+  if ( box && stroke?.buf ) {
     const ab = artBox(box);
-    const a = stroke?.a ? toArt(stroke.a) : [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2];
-    let path = null, pid = null;
-    // follows the stroke: the brush path goes into the scene flag (art px, ms since the stroke began), the bake and the entry read it
-    if ( S.params.directional && stroke?.path?.length > 1 && !stroke.erase ) {
-      path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
-      pid = foundry.utils.randomID(8);
-      S.paths = [...(S.paths ?? []), { id: pid, p: path.flat() }];
-    }
-    prunePaths();
-    strokes.push({ box: ab, a, b: stroke?.b ? toArt(stroke.b) : null, path, pid });
+    const a = stroke.a ? toArt(stroke.a) : [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2];
+    // follows the stroke: the brush path is kept with the stroke (art px, ms since it began); the bake and the entry read it
+    let path = null;
+    if ( S.params.directional && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
+    const id = foundry.utils.randomID(10);
+    S.objects = [...(S.objects ?? []), Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null })];
+    Model.composite(S);
+    strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
   }
   editedHere = true;
   scheduleBake(); scheduleSave();
@@ -391,9 +385,18 @@ export function setEnabled(on) {
 
 export function clearAll() {
   if ( !S ) return;
-  S.mask.fill(0);
+  S.objects = []; Model.composite(S);
   edited(null);
   Editor.refreshOverlay();
+}
+
+/** Undo: the last stroke object goes; everything painted before it stays exactly as it was. */
+export function undoLast() {
+  if ( !S?.objects?.length ) return false;
+  S.objects = S.objects.slice(0, -1); Model.composite(S);
+  edited(null);
+  Editor.refreshOverlay();
+  return true;
 }
 
 /** Everyone sees every piece break again, at the same moment. */
@@ -404,9 +407,20 @@ export async function detonate() {
   maybeBlast();
 }
 
+let saveFor = null;                  // the scene a pending save belongs to
 function scheduleSave(ms = 700) {
   clearTimeout(saveTimer);
+  saveFor = canvas.scene;
   saveTimer = setTimeout(() => { saveTimer = 0; save(); }, ms);
+}
+
+/** A save still pending (a scene switch within the pause, the page going away): written now, to the scene it belongs to. */
+function flushSave() {
+  if ( !saveTimer || !S || !game.user.isGM || !saveFor ) return;
+  clearTimeout(saveTimer); saveTimer = 0;
+  const scene = saveFor, data = Model.encode(S);
+  saveFor = null;
+  scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: data }).catch((err) => console.warn(`${MODULE_ID} | destruction: could not save`, err));
 }
 
 export async function save() {
@@ -432,8 +446,10 @@ export const destructionApi = {
   paint(x, y, radius, { level = 3, type = "blast", erase = false } = {}) {
     if ( !game.user.isGM ) return false;
     const s = ensureState();
-    const box = Model.stamp(s, x, y, radius, { mode: erase ? "erase" : "raise", level, type: typeof type === "string" ? Math.max(0, Model.TYPES.indexOf(type)) : type });
-    if ( box ) { edited(box, { a: { x, y }, b: null }); Editor.refreshOverlay(); }
+    const t = typeof type === "string" ? Math.max(0, Model.TYPES.indexOf(type)) : type;
+    const buf = { mask: new Uint8Array(s.mw * s.mh), mw: s.mw, mh: s.mh, mpx: s.mpx };
+    const box = Model.stamp(buf, x, y, radius, { mode: "raise", level: erase ? 1 : level, type: t });
+    if ( box ) { edited(box, { buf: buf.mask, erase, type: t, a: { x, y }, b: null }); Editor.refreshOverlay(); }
     return !!box;
   },
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
@@ -449,11 +465,12 @@ export const destructionApi = {
 
 export function registerDestruction() {
   moduleApi.destruction = destructionApi;
-  Editor.bindHost({ state: () => S, ensureState, edited });
+  Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast });
   Hooks.once("init", () => Editor.registerEditorSettings(() => tell("brush")));
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.destruction ??= destructionApi; } });
-  window.addEventListener("beforeunload", () => disposeBaker());
+  window.addEventListener("beforeunload", () => { flushSave(); disposeBaker(); });
+  document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
 }

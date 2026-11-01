@@ -42,9 +42,10 @@ const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Ma
 
 export function makeKey(scene, S, bgPath) {
   const params = Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k)).sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
-  const paths = S.params.directional ? (S.paths ?? []).map((q) => q.p.filter((v, i) => i % 3 !== 2).join(",")).join(";") : "";
-  const extra = fnv(new TextEncoder().encode(`${params}|${bgPath}|${scene.width}x${scene.height}|${S.seed}|${paths}`));
-  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(S.mask).toString(36)}:${extra.toString(36)}`;
+  // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke)
+  const objs = (S.objects ?? []).map((o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${S.params.directional && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}`).join(";");
+  const extra = fnv(new TextEncoder().encode(`${params}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`));
+  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(new TextEncoder().encode(objs)).toString(36)}:${extra.toString(36)}`;
 }
 
 export async function getCached(key) {

@@ -65,9 +65,11 @@ function pack(rects) {
 
 export class DestructionDisplay {
   constructor() {
-    this.base = layer(247);
-    this.shards = layer(248);
+    // one layer of damage objects in creation order: each object is a container [map patch, base, shards], so a later stroke covers
+    // an earlier one (its patch lays the plain map over the older damage where the new stroke lies, then draws itself)
+    this.objs = layer(247);
     this.fx = layer(249);
+    this.erasers = new Map();      // object id -> eraser group (a patch of plain map, no bake)
     this.groups = new Map();       // hash -> group
     this.spare = new Map();        // hash -> group no longer shown, kept for a quick return (stash)
     this.order = [];               // groups in sheet order
@@ -92,14 +94,15 @@ export class DestructionDisplay {
    * Show a bake: `rgba` (the sheet, w x h), `meta` (placement table), art pixel size and the scene origin. Keeps the groups whose hash
    * is still there; returns { added: [group], removed: [group] }.
    */
-  sync(rgba, w, h, meta, ap, origin) {
+  sync(rgba, w, h, meta, ap, origin, objects = []) {
     this.ap = ap; this.origin = origin;
     const F = META_FIELDS, n = meta.length / F;
     const rows = [];
     let cur = null;
     for ( let k = 0; k < n; k++ ) {
       const o = k * F;
-      if ( meta[o] === 0 ) { cur = { hash: ((meta[o + 12] & 0xffff) | ((meta[o + 13] & 0xffff) << 16)) >>> 0, base: o, pieces: [] }; rows.push(cur); }
+      if ( meta[o] === 0 ) { cur = { hash: ((meta[o + 12] & 0xffff) | ((meta[o + 13] & 0xffff) << 16)) >>> 0, base: o, cover: -1, pieces: [], index: meta[o + 16] }; rows.push(cur); }
+      else if ( meta[o] === 2 ) { if ( cur ) cur.cover = o; }
       else cur?.pieces.push(o);
     }
     const next = [], added = [], seen = new Set();
@@ -114,18 +117,37 @@ export class DestructionDisplay {
         this.groups.set(r.hash, g); added.push(g);
       } else if ( !g ) {
         const i = this.dying.findIndex((q) => q.hash === r.hash);
-        if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); g.heldBy = null; g.baseCont.alpha = g.shardCont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
+        if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); g.heldBy = null; g.cont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
         else { g = this.build(r, rgba, w, meta); g.reused = false; }
         this.groups.set(r.hash, g); added.push(g);
       }
+      g.objIndex = r.index; g.objId = objects[r.index]?.id ?? null;
       next.push(g);
     }
     const removed = [];
     for ( const [hash, g] of this.groups ) if ( !seen.has(hash) ) { this.groups.delete(hash); removed.push(g); }
     for ( const g of removed ) this.retire(g);
+    // erase strokes: plain map laid over everything painted before them (no bake)
+    const keepErase = new Set();
+    objects.forEach((o, index) => {
+      if ( !o.k ) return;
+      keepErase.add(o.id);
+      let e = this.erasers.get(o.id);
+      if ( !e ) { e = this.buildEraser(o); if ( e ) { this.erasers.set(o.id, e); e.fresh = true; } }
+      if ( e ) e.objIndex = index;
+    });
+    for ( const [id, e] of this.erasers ) if ( !keepErase.has(id) ) { this.erasers.delete(id); this.killEraser(e); }
+    // creation order (stroke index, then the sheet's order inside a stroke), on top of whatever is fading out
+    const all = [...next, ...this.erasers.values()].map((g, k) => ({ g, k })).sort((a, b) => (a.g.objIndex - b.g.objIndex) || (a.k - b.k)).map((q) => q.g);
     this.order = next;
-    // sheet order on top of whatever is fading out (addChild moves a child to the end)
-    for ( const g of next ) { this.base.addChild(g.baseCont); this.shards.addChild(g.shardCont); }
+    for ( const g of all ) this.objs.addChild(g.cont);
+    // an object that lies over older ones gets its map patch (once: unchanged objects never change)
+    const rects = [];
+    for ( const g of all ) {
+      const r = g.info.rect;
+      if ( !g.erase && !g.patch && g.coverFrame && rects.some((q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0) ) this.addPatch(g);
+      rects.push(r);
+    }
     this.stats.groups = next.length;
     this.stats.sprites = next.reduce((a, g) => a + g.pieces.length + 1, 0);
     return { added, removed };
@@ -133,7 +155,7 @@ export class DestructionDisplay {
 
   /** One area: its own atlas texture, base sprite and shard sprites. */
   build(r, rgba, sw, meta) {
-    const rects = [r.base, ...r.pieces].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
+    const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
     const pk = pack(rects);
     const buf = new Uint8Array(pk.W * pk.H * 4);
     rects.forEach((q, i) => {
@@ -150,9 +172,10 @@ export class DestructionDisplay {
     const b = r.base;
     const info = { hash: r.hash, x: meta[b + 5], y: meta[b + 6], w: meta[b + 3], h: meta[b + 4], ex: meta[b + 7], ey: meta[b + 8], R: meta[b + 9],
       type: TYPES[meta[b + 10]] ?? "blast", mat: meta[b + 11], axis: meta[b + 14] / 1000, len: meta[b + 15] / 10 };
-    const baseCont = new PIXI.Container(), shardCont = new PIXI.Container();
-    baseCont.eventMode = shardCont.eventMode = "none";
-    baseCont.cullable = shardCont.cullable = true;   // off-screen areas are not drawn at all
+    const cont = new PIXI.Container(), baseCont = new PIXI.Container(), shardCont = new PIXI.Container();
+    cont.eventMode = baseCont.eventMode = shardCont.eventMode = "none";
+    cont.cullable = true;   // off-screen objects are not drawn at all
+    cont.addChild(baseCont, shardCont);
     const baseSpr = new PIXI.Sprite(frame(0));
     baseSpr.eventMode = "none"; baseSpr.scale.set(ap);
     baseSpr.position.set(org.x + info.x * ap, org.y + info.y * ap);
@@ -172,8 +195,10 @@ export class DestructionDisplay {
     info.rect = rect;
     // culling by a fixed area (no bounds walk over thousands of shards each frame); room for flying pieces
     const m = 48, cull = new PIXI.Rectangle(org.x + (rect.x0 - m) * ap, org.y + (rect.y0 - m) * ap, (rect.x1 - rect.x0 + 2 * m) * ap, (rect.y1 - rect.y0 + 2 * m) * ap);
-    baseCont.cullArea = cull; shardCont.cullArea = cull;
-    const g = { hash: r.hash, tex, info, baseCont, shardCont, baseSpr, pieces, made: 0, frame, anim: null, fade: null, next: 0 };
+    cont.cullArea = cull;
+    // the cover (this object's own pixels) as a frame of the same atlas: the mask of its map patch
+    const coverFrame = r.cover >= 0 ? { tex: frame(rects.length - 1), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
+    const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
     this.materialize(g, 300);
     return g;
   }
@@ -206,6 +231,48 @@ export class DestructionDisplay {
     this.dying.push(g);
   }
 
+  /** The plain map, as the scene draws it (same texture and placement as the background), for patches. */
+  mapSprite() {
+    const bg = canvas.primary?.background, tex = bg?.texture;
+    if ( !tex?.valid || tex === PIXI.Texture.WHITE || tex === PIXI.Texture.EMPTY ) return null;
+    const s = new PIXI.Sprite(tex);
+    s.eventMode = "none";
+    s.anchor.copyFrom(bg.anchor); s.pivot.copyFrom(bg.pivot); s.position.set(bg.x, bg.y); s.scale.set(bg.scale.x, bg.scale.y); s.rotation = bg.rotation ?? 0;
+    return s;
+  }
+
+  /** A later object covers what lies under it: the plain map, masked by the object's own pixels, drawn first in its container. */
+  addPatch(g) {
+    const ms = this.mapSprite(); if ( !ms ) return;
+    const c = g.coverFrame, ap = this.ap, o = this.origin;
+    const mask = new PIXI.Sprite(c.tex);
+    mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(o.x + c.x * ap, o.y + c.y * ap);
+    const patch = new PIXI.Container(); patch.eventMode = "none";
+    patch.addChild(ms, mask); ms.mask = mask;
+    g.patch = patch;
+    g.cont.addChildAt(patch, 0);
+  }
+
+  /** An erase stroke: the plain map over its pixels (art-pixel steps of its mask), no bake. */
+  buildEraser(ob) {
+    const K = 2, ap = this.ap, org = this.origin, bytes = ob.bytes;
+    if ( !bytes ) return null;
+    const W = ob.w * K, H = ob.h * K, a = new Uint8Array(W * H * 4);
+    for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) if ( bytes[(y >> 1) * ob.w + (x >> 1)] ) { const q = (y * W + x) * 4; a[q] = a[q + 1] = a[q + 2] = a[q + 3] = 255; }
+    const tex = PIXI.Texture.fromBuffer(a, W, H);
+    const ms = this.mapSprite(); if ( !ms ) { tex.destroy(true); return null; }
+    const mask = new PIXI.Sprite(tex); mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(org.x + ob.x0 * K * ap, org.y + ob.y0 * K * ap);
+    const cont = new PIXI.Container(); cont.eventMode = "none";
+    cont.addChild(ms, mask); ms.mask = mask;
+    const rect = { x0: ob.x0 * K, y0: ob.y0 * K, x1: (ob.x0 + ob.w) * K, y1: (ob.y0 + ob.h) * K };
+    return { erase: true, id: ob.id, cont, tex, info: { rect }, objIndex: 0 };
+  }
+
+  killEraser(e) {
+    if ( !e.cont.destroyed ) e.cont.destroy({ children: true });
+    e.tex.destroy(true);
+  }
+
   /**
    * A group that left the screen is kept a while, detached (its texture stays on the GPU): switching a look toggle back, or an undo,
    * shows it again at once instead of building and uploading it again. The oldest beyond SPARE are destroyed.
@@ -213,8 +280,8 @@ export class DestructionDisplay {
   stash(g) {
     g.heldBy = null; g.fade = null;
     for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) { p.spr.visible = true; p.spr.alpha = 1; } }
-    g.baseCont.alpha = g.shardCont.alpha = 1;
-    g.baseCont.parent?.removeChild(g.baseCont); g.shardCont.parent?.removeChild(g.shardCont);
+    g.cont.alpha = 1;
+    g.cont.parent?.removeChild(g.cont);
     this.spare.delete(g.hash); this.spare.set(g.hash, g);
     while ( this.spare.size > 24 ) { const [h0, old] = this.spare.entries().next().value; this.spare.delete(h0); this.kill(old); }
   }
@@ -224,8 +291,9 @@ export class DestructionDisplay {
     this.endAnim(g);
     for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
     g.baseSpr?.texture?.destroy(false);
-    if ( g.baseCont && !g.baseCont.destroyed ) g.baseCont.destroy({ children: true });
-    if ( !g.shardCont.destroyed ) g.shardCont.destroy({ children: true });
+    g.coverFrame?.tex.destroy(false);
+    if ( g.patch && !g.patch.destroyed ) g.patch.destroy({ children: true });
+    if ( !g.cont.destroyed ) g.cont.destroy({ children: true });
     g.tex.destroy();
   }
 
@@ -515,7 +583,7 @@ export class DestructionDisplay {
         continue;
       }
       const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / 260);
-      g.shardCont.alpha = 1 - f; g.baseCont.alpha = 1 - f;
+      g.cont.alpha = 1 - f;
       if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); }
     }
     this.idleTick(t0, vw);
@@ -536,7 +604,7 @@ export class DestructionDisplay {
 
   applyFade(g, now) {
     const f = clamp01((now - g.fade.start) / g.fade.dur);
-    g.shardCont.alpha = f; g.baseCont.alpha = f;
+    g.cont.alpha = f;
     if ( f >= 1 ) g.fade = null;
   }
 
@@ -658,7 +726,8 @@ export class DestructionDisplay {
 
   clear() {
     for ( const g of [...this.groups.values(), ...this.dying, ...this.spare.values()] ) this.kill(g);
-    this.groups.clear(); this.spare.clear(); this.order = []; this.dying = [];
+    for ( const e of this.erasers.values() ) this.killEraser(e);
+    this.groups.clear(); this.spare.clear(); this.erasers.clear(); this.order = []; this.dying = [];
     for ( const q of this.particles ) { q.spr.visible = false; this.pool.push(q.spr); }
     this.particles = [];
     this.stats.groups = this.stats.sprites = 0;
@@ -667,6 +736,6 @@ export class DestructionDisplay {
   destroy() {
     canvas.app?.ticker?.remove(this._tick);
     this.clear();
-    for ( const c of [this.base, this.shards, this.fx] ) if ( !c.destroyed ) c.destroy({ children: true });
+    for ( const c of [this.objs, this.fx] ) if ( !c.destroyed ) c.destroy({ children: true });
   }
 }

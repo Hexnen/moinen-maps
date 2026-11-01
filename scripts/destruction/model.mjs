@@ -9,7 +9,7 @@ import { MODULE_ID } from "../config.mjs";
  * pixel-art standard of moinen-pixel-vfx), so the torn outline can be ragged at art-pixel scale while the mask stays small.
  */
 export const FLAG = "destruction";
-export const VERSION = 1;
+export const VERSION = 2;
 /** Damage types, by index (bits 2-4 of a mask byte). */
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const MATERIALS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -81,24 +81,98 @@ export function grids(ap, r = sceneRect()) {
 
 /* ---------------------------------------------------------------- the scene's destruction */
 
+/*
+ * DAMAGE OBJECTS (flag v2). Every brush stroke is an object of its own, in creation order:
+ *   { id, k (0 damage, 1 erase), t (type), x0, y0, w, h (its box in mask pixels), m (run-length bytes of the box: level per pixel),
+ *     p (its brush path, flat [x, y, ms, ...] in art px, when it follows the stroke) }
+ * An object is baked from its own pixels only and never changes when later strokes are painted: a later stroke is drawn over it and
+ * covers it where it lies (at display time), an erase stroke is a cover of plain map. `S.mask` is the composite (later strokes win,
+ * erase clears), used for the painting overlay, the bake key and "is anything painted".
+ * Flags of the first format (one merged mask `m`) convert on load: every connected region of one type (8-connected, in scan order)
+ * becomes one object, the same on every client.
+ */
+const boxBytes = new WeakMap();
+/** An object's level bytes (w * h), decoded once. */
+export function objBytes(o) {
+  let b = boxBytes.get(o);
+  if ( !b ) { b = rleDecode(o.m, o.w * o.h); boxBytes.set(o, b); }
+  return b;
+}
+
+/** A new object from a full-grid buffer of levels (0 = not painted) inside `box` (mask px). */
+export function makeObject(buf, mw, box, { id, erase = false, type = 0, path = null } = {}) {
+  const w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1, b = new Uint8Array(w * h);
+  for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) b[y * w + x] = buf[(box.y0 + y) * mw + box.x0 + x] & 3;
+  const o = { id, k: erase ? 1 : 0, t: type & 7, x0: box.x0, y0: box.y0, w, h, m: rleEncode(b) };
+  if ( path?.length ) o.p = path;
+  boxBytes.set(o, b);
+  return o;
+}
+
+/** The composite mask: objects in order, a later one wins where it is painted, an erase clears. */
+export function composite(S) {
+  const m = S.mask ?? new Uint8Array(S.mw * S.mh);
+  m.fill(0);
+  for ( const o of S.objects ?? [] ) {
+    const b = objBytes(o);
+    for ( let y = 0; y < o.h; y++ ) {
+      const Y = o.y0 + y; if ( Y < 0 || Y >= S.mh ) continue;
+      for ( let x = 0; x < o.w; x++ ) {
+        const l = b[y * o.w + x]; if ( !l ) continue;
+        const X = o.x0 + x; if ( X < 0 || X >= S.mw ) continue;
+        m[Y * S.mw + X] = o.k ? 0 : byteOf(l, o.t);
+      }
+    }
+  }
+  S.mask = m;
+  return m;
+}
+
+/** First-format mask -> objects: each connected region of one type (8-connected, scan order) is one object. */
+export function objectsFromMask(mask, mw, mh) {
+  const seen = new Uint8Array(mask.length), out = [], stack = [];
+  for ( let s0 = 0; s0 < mask.length; s0++ ) {
+    if ( !(mask[s0] & 3) || seen[s0] ) continue;
+    const T = typeOf(mask[s0]), px = [];
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+    seen[s0] = 1; stack.push(s0);
+    while ( stack.length ) {
+      const i = stack.pop(); px.push(i);
+      const x = i % mw, y = (i - x) / mw;
+      if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y;
+      for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) {
+        const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= mw || Y >= mh ) continue;
+        const j = Y * mw + X; if ( !seen[j] && (mask[j] & 3) && typeOf(mask[j]) === T ) { seen[j] = 1; stack.push(j); }
+      }
+    }
+    const buf = new Uint8Array(mask.length);
+    for ( const i of px ) buf[i] = mask[i] & 3;
+    out.push(makeObject(buf, mw, { x0, y0, x1, y1 }, { id: `c${s0.toString(36)}`, type: T }));
+  }
+  return out;
+}
+
 export function blank(scene = canvas.scene) {
   const ap = artPx(scene), g = grids(ap);
-  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [], paths: [] };
+  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), objects: [], seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [] };
 }
 
 export function load(scene = canvas.scene) {
   const f = scene?.flags?.[MODULE_ID]?.[FLAG];
   if ( !f || !f.ap ) return null;
   const g = grids(f.ap);
-  return {
-    ap: f.ap, ...g, mask: rleDecode(f.m, g.mw * g.mh), seed: Number(f.seed) || 1,
+  const S = {
+    ap: f.ap, ...g, mask: new Uint8Array(g.mw * g.mh), seed: Number(f.seed) || 1,
     params: cleanParams(f.params), enabled: f.enabled !== false, blast: f.blast ?? null, baked: f.baked ?? null, rev: nextRev(),
-    entries: Array.isArray(f.entries) ? f.entries : [], paths: Array.isArray(f.paths) ? f.paths : []
+    entries: Array.isArray(f.entries) ? f.entries : []
   };
+  S.objects = Array.isArray(f.o) ? f.o.filter((o) => o && o.id && o.w > 0 && o.h > 0) : (f.m ? objectsFromMask(rleDecode(f.m, g.mw * g.mh), g.mw, g.mh) : []);
+  composite(S);
+  return S;
 }
 
 export function encode(S) {
-  return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, m: rleEncode(S.mask), blast: S.blast ?? null, entries: S.entries ?? [], paths: S.paths ?? [] };
+  return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, o: S.objects ?? [], m: null, blast: S.blast ?? null, entries: S.entries ?? [], paths: null };
 }
 
 export function cleanParams(p = {}) {

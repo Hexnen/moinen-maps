@@ -133,6 +133,7 @@ function mountDamage(host) {
   render();
   const onClick = async (ev) => {
     const b = ev.target.closest("[data-act]"); if ( !b ) return;
+    b.blur();   // the button must not keep the keyboard (Ctrl+Z right after Detonate undoes the last stroke)
     if ( b.dataset.act === "detonate" ) D.detonate();
     else if ( b.dataset.act === "variation" ) D.newVariation();
     else if ( b.dataset.act === "clear" ) {

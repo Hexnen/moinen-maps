@@ -9,7 +9,6 @@ import { trackMarkers } from "../workspace/markers.mjs";
  * Keys: [ ] brush size, 1 2 3 level, Ctrl+Z undo, Escape cancels the stroke.
  */
 const OVERLAY = [null, [242, 193, 78], [239, 138, 58], [224, 69, 58]];
-const UNDO_MAX = 30;
 let mode = null;               // "paint" | "erase" | null
 let host = null;               // the engine: { state(), ensureState(), edited(box), tellBrush() }
 let cursor = null, overlay = null, overlayCtx = null, overlayImg = null, overlayTex = null, listeners = null;
@@ -139,10 +138,10 @@ function onDown(ev) {
   ev.stopImmediatePropagation(); ev.preventDefault();
   const S = host.ensureState();
   if ( !overlay ) buildOverlay();
-  undo.push({ mask: S.mask.slice(), mw: S.mw, paths: (S.paths ?? []).slice() });   // the brush paths go back with the mask
-  if ( undo.length > UNDO_MAX ) undo.shift();
   const p = worldPoint(ev);
-  stroke = { last: p, first: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set(), t0: performance.now(), path: [[p.x, p.y, 0]] };
+  // the stroke is painted into a buffer of its own (it becomes a stroke object at the end); the overlay shows it on the composite
+  stroke = { last: p, first: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set(), t0: performance.now(), path: [[p.x, p.y, 0]],
+    buf: { mask: new Uint8Array(S.mw * S.mh), mw: S.mw, mh: S.mh, mpx: S.mpx }, before: S.mask.slice() };
   paint(p, p);
 }
 
@@ -151,15 +150,23 @@ function paint(a, b) {
   const r = radius(), br = brush();
   const step = Math.max(1, Math.min(r, S.mpx * 2) * 0.5);
   const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step));
-  const opts = { mode: mode === "erase" ? "erase" : stroke.deepen ? "deepen" : "raise", level: br.level, type: br.type, touched: stroke.touched };
+  const erase = mode === "erase";
+  const opts = { mode: "raise", level: erase ? 1 : br.level, type: br.type };
   let box = null;
   for ( let i = 1; i <= n; i++ ) {
-    const hit = Model.stamp(S, a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n, r, opts);
+    const hit = Model.stamp(stroke.buf, a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n, r, opts);
     if ( hit ) box = box ? { x0: Math.min(box.x0, hit.x0), y0: Math.min(box.y0, hit.y0), x1: Math.max(box.x1, hit.x1), y1: Math.max(box.y1, hit.y1) } : hit;
   }
   if ( box ) {
     stroke.changed = true;
     stroke.box = stroke.box ? { x0: Math.min(stroke.box.x0, box.x0), y0: Math.min(stroke.box.y0, box.y0), x1: Math.max(stroke.box.x1, box.x1), y1: Math.max(stroke.box.y1, box.y1) } : box;
+    // the composite shows the stroke on top at once (Shift: one level deeper than what was there)
+    const m = stroke.buf.mask, W = S.mw;
+    for ( let y = box.y0; y <= box.y1; y++ ) for ( let x = box.x0; x <= box.x1; x++ ) {
+      const i = y * W + x; if ( !m[i] ) continue;
+      if ( stroke.deepen && !erase ) m[i] = Model.byteOf(Math.min(3, Model.levelOf(stroke.before[i]) + 1), br.type);
+      S.mask[i] = erase ? 0 : Model.byteOf(Model.levelOf(m[i]), br.type);
+    }
     paintOverlay(box);
   }
 }
@@ -181,20 +188,18 @@ function onUp(ev) { if ( ev.button === 0 ) endStroke(); }
 function endStroke() {
   if ( !stroke ) return;
   const s = stroke; stroke = null;
-  if ( !s.changed ) { undo.pop(); return; }
+  if ( !s.changed ) return;
   const end = s.path[s.path.length - 1];
   if ( end[0] !== s.last.x || end[1] !== s.last.y ) s.path.push([s.last.x, s.last.y, Math.round(performance.now() - s.t0)]);
-  host.edited(s.box, { a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type });
+  const buf = s.buf.mask; for ( let i = 0; i < buf.length; i++ ) if ( buf[i] ) buf[i] = Model.levelOf(buf[i]);
+  host.edited(s.box, { buf, a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type });
 }
 
+/** Undo: the last stroke object goes, nothing else changes. */
 function undoStroke() {
-  const S = host?.state(), u = undo.pop();
-  if ( !S || !u || u.mw !== S.mw || u.mask.length !== S.mask.length ) return;
-  const before = S.mask.slice();
-  S.mask.set(u.mask);
-  if ( u.paths ) S.paths = u.paths;
+  if ( stroke ) return;
+  host?.undo?.();
   paintOverlay(null);
-  host.edited(Model.diffBox(before, S.mask, S.mw));
 }
 
 const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)); };
@@ -215,9 +220,11 @@ export function onCanvasReady() {
     pan: () => overlayFilter(),
     leave: () => { cursor?.clear(); lastPoint = null; },
     key: (e) => {
-      if ( !mode || typing(e) ) return;
-      if ( (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" ) { e.preventDefault(); e.stopPropagation(); undoStroke(); }
-      else if ( e.key === "Escape" && stroke ) { e.preventDefault(); e.stopPropagation(); endStroke(); }
+      if ( typing(e) ) return;
+      const ours = e.target instanceof Element && !!e.target.closest?.(".mm-d-actions, [data-tool^='mm-d'], [data-act='detonate']");
+      if ( (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && (mode || ours) ) { e.preventDefault(); e.stopPropagation(); undoStroke(); return; }
+      if ( !mode ) return;
+      if ( e.key === "Escape" && stroke ) { e.preventDefault(); e.stopPropagation(); endStroke(); }
       else if ( !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "[" || e.key === "]") ) {
         const v = clamp(brush().size + (e.key === "]" ? 0.25 : -0.25), 0.25, 10);
         game.settings.set(MODULE_ID, "destrBrush", Math.round(v * 4) / 4);
