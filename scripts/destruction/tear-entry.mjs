@@ -1,8 +1,8 @@
 /**
  * The TEAR's entry (display side; the bake is tear.mjs). The rip starts as a pinprick and runs along its spine with a fast tearing
- * front: the ruin dissolves in on a soft, narrow band behind the front (the display's per-pixel erosion), the lips, cut into pieces,
- * peel apart from the closed state (a flutter just before they give, a quick peel with a small lift, a one-pixel snap past their
- * rest, settled), fibres stretch and snap at the front (pale flecks flicked apart), crumbs of the material spill sideways, and each
+ * front: the ruin dissolves in on a soft, narrow band behind the front (the display's per-pixel erosion; its dark slit comes first),
+ * the lips, cut into pieces, peel apart from the closed state (they rise out of the map as they go, flutter by a pixel, lift a
+ * little, snap one pixel past their rest and settle), fibres stretch and snap at the front (pale flecks flicked apart), crumbs of the material spill sideways, and each
  * tip snaps with a small burst. Without "follows the stroke" the puncture lies on the spine (where the bake put it) and the rip runs
  * both ways; with it the rip starts at the stroke's start and runs at the drawing speed. Reduced motion: the display's fade.
  */
@@ -84,26 +84,24 @@ export function tearPlace(display, p, t, it) {
   const dx = p.fx - p.sx, dy = p.fy - p.sy, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
   const tm = t * it.dur;
   s.rotation = 0;
-  if ( tm < 0 ) {
-    if ( tm < -it.pre ) { s.visible = false; return; }
-    // closed, the lips still meet; in the last moments they flutter by a pixel as the front comes
-    const f = 1 + tm / it.pre, fl = f > 0.7 ? ((Math.floor(tm / (35 * it.k) + it.seed) & 1) ? 1 : 0) : 0;
-    s.visible = true; s.alpha = 1;
-    s.position.set(o.x + Math.round(p.sx + ux * fl) * ap, o.y + Math.round(p.sy + uy * fl) * ap);
-    s.scale.set(ap);
-    return;
-  }
-  s.visible = true; s.alpha = 1;
+  // closed, the lips still meet: that is the plain map under it, so the piece is not drawn (a piece shown shifted onto the spine
+  // doubled a band of the map at its outer edge)
+  if ( tm < 0 ) { s.visible = false; return; }
+  s.visible = true;
   if ( t >= 1 ) {
+    s.alpha = 1;
     // the snap: one pixel past its rest, then still
     const st = (t - 1) * it.dur, snap = st < 55 * it.k ? 1 : 0;
     s.position.set(o.x + Math.round(p.fx + ux * snap) * ap, o.y + Math.round(p.fy + uy * snap) * ap);
     s.scale.set(ap);
     return;
   }
-  // the peel: fast out of the closed state, the lip lifts a little (curls) and is foreshortened while it is up
+  // the peel: it comes up out of the map as it leaves the closed state (alpha over the first 40 %), flutters by a pixel at first,
+  // lifts a little (curls) and is foreshortened while it is up
   const e = 1 - (1 - t) ** 4, up = Math.sin(Math.PI * t) * it.lift;
-  s.position.set(o.x + Math.round(p.sx + dx * e) * ap, o.y + Math.round(p.sy + dy * e - up) * ap);
+  const fl = t < 0.35 ? ((Math.floor(t * it.dur / (30 * it.k) + it.seed) & 1) ? 1 : -1) * 0.6 : 0;
+  s.alpha = clamp01(t * 2.5);
+  s.position.set(o.x + Math.round(p.sx + dx * e + ux * fl) * ap, o.y + Math.round(p.sy + dy * e + uy * fl - up) * ap);
   s.scale.set(ap, ap * (1 - 0.1 * Math.sin(Math.PI * t)));
 }
 
