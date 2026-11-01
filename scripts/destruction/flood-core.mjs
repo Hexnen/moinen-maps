@@ -202,7 +202,7 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = () => 0;
     // a soft wet gradient (no contour bands): light shallows at the edge, the mid tone, a dark deep middle in a crater
     const tt = L <= 1 ? 0.5 : clamp(dw / 0.55, 0, 1), lerp3 = (A, B, s) => [A[0] + (B[0] - A[0]) * s, A[1] + (B[1] - A[1]) * s, A[2] + (B[2] - A[2]) * s];
-    const sh = lerp3(baseC, ringC, 0.38), dp = lerp3(baseC, shadow, 0.62), C3 = tt < 0.4 ? lerp3(sh, baseC, tt / 0.4) : L >= 3 ? lerp3(baseC, dp, (tt - 0.4) / 0.6) : baseC;
+    const sh = lerp3(baseC, ringC, 0.12), dp = lerp3(baseC, shadow, 0.62), C3 = tt < 0.4 ? lerp3(sh, baseC, tt / 0.4) : L >= 3 ? lerp3(baseC, dp, (tt - 0.4) / 0.6) : baseC;
     const band = tt > 0.7 && L >= 3 ? 2 : 1;
     let r = C3[0], g = C3[1], bl = C3[2];
     let a = 255 * master * (band === 2 ? 1 : 0.92);
@@ -213,10 +213,12 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     if ( L >= 2 ) {
       // a few irregular wet highlights near the edge (no outline)
       const dpx = dep * Math.max(2.5, prep.R);
-      if ( dpx < 2 && vnoise(ax / 3, ay / 3, 54) > 0.7 ) { r += (foamC[0] - r) * 0.55; g += (foamC[1] - g) * 0.55; bl += (foamC[2] - bl) * 0.55; }
+      // the edge wet and dark, irregular (no light rim)
+      if ( dpx < 1.2 + 1.6 * vnoise(ax / 3, ay / 3, 54) ) { r += (shadow[0] - r) * 0.35; g += (shadow[1] - g) * 0.35; bl += (shadow[2] - bl) * 0.35; }
     }
     if ( coming ) {
-      if ( u - fill[i] < BAND ) { r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 220 * master); }
+      // the rising front: a soft wet edge (the water there thin and dark, fading in) - no pale line
+      if ( u - fill[i] < BAND ) { const f = (u - fill[i]) / BAND; r += (shadow[0] - r) * 0.3; g += (shadow[1] - g) * 0.3; bl += (shadow[2] - bl) * 0.3; a *= 0.35 + 0.65 * f; }
       else if ( rings ) for ( let k = 0; k < rings.length; k++ ) {
         // broken ARCS: each spring's ring its own speed, a wobbling radius and whole segments missing
         const [sx, sy, rr0] = rings[k], ang = Math.atan2((y - sy) * 1.15, x - sx), rr = rr0 * (0.75 + 0.45 * h2(k, 5, 61)) * (1 + 0.08 * Math.sin(ang * 3 + k));

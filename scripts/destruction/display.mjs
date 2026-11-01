@@ -1201,6 +1201,37 @@ export class DestructionDisplay {
    * dies down after the front. Embers leave the hottest tips (varied size and colour, short lives that end before the settle), wisps of
    * smoke the dying ones.
    */
+  /**
+   * Heat shimmer: a few one-row strips of the scene's own background map just above the burnt area (above its whole rectangle, so
+   * nothing of the soot is covered), each copied 1 art px off its place in a slow wave of its own; on for ~1.2 s and fading. Cheap: four
+   * sprites sharing the background texture, made once per burn; none in Low performance or with reduced motion.
+   */
+  shimmer(a, g, R) {
+    if ( reducedMotion() || perfMode() === "low" ) return;
+    const tex = canvas.primary?.background?.texture, sr = canvas.dimensions?.sceneRect;
+    if ( !tex?.valid || !sr ) return;
+    const ap = this.ap, o = this.origin, top = g.info.rect.y0 - 1, w = Math.round(R * 1.3), x0 = Math.round(a.ox - w / 2), rows = [];
+    for ( let k = 0; k < 4; k++ ) {
+      const y = top - k * 2, cx = o.x + x0 * ap, cy = o.y + y * ap;
+      const tx = (cx - sr.x) * tex.width / sr.width, ty = (cy - sr.y) * tex.height / sr.height, tw = w * ap * tex.width / sr.width, th = ap * tex.height / sr.height;
+      if ( tx < 0 || ty < 0 || tx + tw > tex.width || ty + th > tex.height ) continue;
+      const s = new PIXI.Sprite(new PIXI.Texture(tex.baseTexture, new PIXI.Rectangle(tx, ty, tw, th)));
+      s.eventMode = "none"; s.position.set(cx, cy); s.width = w * ap; s.height = ap; s.visible = false;
+      this.fx.addChild(s); rows.push({ s, cx, k });
+    }
+    if ( !rows.length ) return;
+    const holder = { destroyed: false, clear() {}, destroy() { if ( this.destroyed ) return; this.destroyed = true; for ( const r of rows ) if ( !r.s.destroyed ) r.s.destroy({ texture: true }); } };
+    a.fx.push({ g: holder, kind: "shimmer", t0: a.start + a.delay + 120 * a.k, dur: 1200 * a.k, draw: (t) => {
+      const step = Math.floor(t * 1200 / 90);
+      for ( const r of rows ) {
+        // one art pixel left or right, a wave rising through the rows; thinning out as it fades
+        const dx = Math.round(Math.sin(step * 0.9 - r.k * 1.3)) * ap;
+        r.s.visible = dx !== 0 && (t < 0.7 || ((step + r.k) & 1) === 0);
+        r.s.x = r.cx + dx;
+      }
+    } });
+  }
+
   flames(gr, a, T, el, life, R) {
     const v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y }, k = a.k, now = a.start + a.delay + el;
     // (the tongues stand inside the charred disc: past ~0.7 of the reach they burnt on the unburnt grass)
@@ -1320,6 +1351,7 @@ export class DestructionDisplay {
         const T = Array.from({ length: n + Math.ceil(n / 2) }, (_, q) => ({ inner: q >= n, ang: cl[q % nc] + (hash2(q, 1, a.seed) - 0.5) * 1.4 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
           off: hash2(q, 6, a.seed) * 70, h: 0.3 + 1.6 * hash2(q, 3, a.seed) ** 2.6, w: 2 + Math.round(3.5 * hash2(q, 4, a.seed)), flip: hash2(q, 7, a.seed) < 0.5, lean: (hash2(q, 9, a.seed) - 0.5) * 0.45, ph: hash2(q, 5, a.seed) * 6.28 }));
         a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
+        this.shimmer(a, g, R);
       });
       // smoke: a few dark puffs from the burnt ground behind the front
       once("smoke", a.reveal * 0.5, () => {
