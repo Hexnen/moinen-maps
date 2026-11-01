@@ -21,7 +21,7 @@
 import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 
-export const CORE_VERSION = 27;   // 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 28;   // 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -164,11 +164,11 @@ export const CAUSES = ["none", "fire", "acid", "lightning", "arcane", "impact", 
 const CAUSE = [
   null,
   /* fire     */ { acc: [24, 0.92, 0.55], ramp: { k: 0.45, s: 0.7, l: 0.6 }, deb: { to: "char", k: 0.55 }, fate: { gone: 0.1 },
-    crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.045, glow: [255, 128, 40] },
+    crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.02, glow: [255, 128, 40] },
   /* acid     */ { acc: [80, 0.55, 0.38], ramp: { k: 0.2, s: 0.85, sa: 0.03, l: 0.85 }, deb: { to: "acc", k: 0.2, holes: 0.3 }, frac: { ring: 0.8 }, fate: { gone: 0.22, thr: 0.6 },
     crack: { mode: "radial", n: 0.5, len: 0.7, br: 0, col: "acc" }, halo: { kind: "stain", r: 0.95 }, edge: "pitted", fill: "acid", fx: "bubble", fxD: 0.03, glow: [170, 255, 70], glowK: 0.45 },
   /* lightning*/ { acc: [205, 0.45, 0.7], ramp: { k: 0.15, s: 0.6, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 1.6, ring: 1.1 }, fate: { thr: 1.2 },
-    crack: { mode: "branch", n: 0.55, len: 0.75, br: 0.07, col: "bolt", always: true }, halo: { kind: "burn", r: 0.45 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.025, glow: [175, 220, 255] },
+    crack: { mode: "branch", n: 0.55, len: 0.75, br: 0.07, col: "bolt", always: true }, halo: { kind: "burn", r: 0.25 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.025, glow: [175, 220, 255] },
   /* arcane   */ { acc: [280, 0.55, 0.6], ramp: { k: 0.25, s: 0.9, sa: 0.03, l: 0.9 }, deb: { to: "acc", k: 0.14 }, frac: { swirl: 0.13 },
     crack: { mode: "spiral", n: 1.3, len: 1.2, br: 0.03, col: "arc" }, halo: { kind: "motes", r: 0.8 }, edge: "rune", fill: "rune", fx: "mote", fxD: 0.02, glow: [200, 120, 255] },
   /* impact   */ { acc: [32, 0.22, 0.5], ramp: { k: 0, s: 0.9, l: 0.82 }, frac: { spokes: 1.45, ring: 1.25 }, fate: { gone: -0.1, thr: 1.15 },
@@ -343,7 +343,7 @@ export function causeKit(K) {
         case "ember": glow(x, y, pal.ember[(hv * 3) | 0], 255); break;
         case "bubble": glow(x, y, pal.accHi, 160); if ( isIn(x + 1, y) ) put(x + 1, y, pal.acc); if ( isIn(x, y + 1) ) put(x, y + 1, pal.accLo); break;
         case "spark": glow(x, y, hv < 0.5 ? [255, 255, 255] : pal.accHi, 255); break;
-        case "mote": glow(x, y, pal.accHi, 230); if ( hv < 0.3 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) glow(x + a, y + b, pal.acc, 140); break;
+        case "mote": glow(x, y, pal.accHi, 230); if ( hv < 0.3 && isIn(x + 1, y + 1) ) glow(x + 1, y + 1, pal.acc, 140); break;
         case "dust": put(x, y, mix(pal.dust, rp[4], 0.5)); break;
         case "splinter": for ( let k = 0; k < 3; k++ ) { const X = Math.round(x + C.axis[0] * k), Y = Math.round(y + C.axis[1] * k); if ( isIn(X, Y) ) put(X, Y, k ? rp[3] : rp[4]); } break;
         case "drop": put(x, y, pal.waterR[4]); if ( isIn(x, y + 1) ) put(x, y + 1, pal.waterR[1]); break;
