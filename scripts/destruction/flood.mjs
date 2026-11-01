@@ -514,7 +514,8 @@ async function ensureMapColors(upd) {
   let r = 0, g = 0, b = 0, n = 0;
   for ( let i = 0; i < px.length; i += 4 ) { r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; }
   if ( !n ) return;
-  const water = [63, 108, 154], k = 0.22, mix = [r / n, g / n, b / n].map((v, i) => Math.round(water[i] * (1 - k) + v * k));
+  // a clear blue-green, a touch of the map's own colour (a muddy blue read as dirty paint)
+  const water = [44, 112, 126], k = 0.16, mix = [r / n, g / n, b / n].map((v, i) => Math.round(water[i] * (1 - k) + v * k));
   const hex = mix.map((v) => v.toString(16).padStart(2, "0")).join("");
   await engine();
   const cols = await post({ type: "palette", hex, hue: 12, sat: 18, range: 100 });

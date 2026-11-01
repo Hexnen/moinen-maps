@@ -2,7 +2,7 @@ import { META_FIELDS } from "./core.mjs";
 import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
-import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
+import { pxRing, pxFlash, PixelCanvas, pxArcs, tongueCells, pxTongue } from "./pixel-fx.mjs";
 import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
 import { perfMode, particleCap } from "../perf-mode.mjs";
@@ -99,12 +99,14 @@ const LOOK = {
  */
 const mixP = (r, g, b, c, t) => (Math.round(r + (((c >> 16) & 255) - r) * t) << 16) | (Math.round(g + (((c >> 8) & 255) - g) * t) << 8) | Math.round(b + ((c & 255) - b) * t);
 const FRONT = {
-  scorch:   [{ dt: 0, col: (r, g, b, i) => (hash2(i, 1, 5) < 0.5 ? 0xffeca0 : 0xffc85a) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0xff7a24, 0.78) },
-             { dt: 170, col: (r, g, b) => mixP(r, g, b, 0x9a3214, 0.6) }, { dt: 300 }],
+  // (the burning edge is a coherent glow band, cooling through red to char; the bright flame is the tongues - no per-pixel speckle)
+  scorch:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xff9a3c, 0.62) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0xc8461c, 0.5) },
+             { dt: 170, col: (r, g, b) => mixP(r, g, b, 0x5a2414, 0.4) }, { dt: 280 }],
   flood:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 2, 5) < 0.6 ? 0xf2f8ff : 0xcfe6fa) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0x8cc0ea, 0.6) }, { dt: 210 }],
   collapse: [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.72) }, { dt: 120, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.4) }, { dt: 240 }],
   blast:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 3, 5) < 0.5 ? 0xfff4d6 : 0xffd890) }, { dt: 50, col: (r, g, b) => mixP(r, g, b, 0xff9a48, 0.55) }, { dt: 140 }],
-  cracks:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xf4ecdc, 0.45) }, { dt: 90 }]
+  // (a crack opens dark - never a pale haze - with a rare grain of dust flashing in it)
+  cracks:   [{ dt: 0, col: (r, g, b, i) => (hash2(i, 4, 5) < 0.08 ? 0xd8cfbf : mixP(r, g, b, 0x0e0c0a, 0.3)) }, { dt: 80 }]
 };
 
 /** Particle sprites in art pixels (white, tinted per particle): one texture each, made once. */
@@ -299,6 +301,12 @@ export class DestructionDisplay {
     const coverFrame = r.cover >= 0 ? { tex: frame(coverIdx), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
     const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, baseTex: baseSpr.texture, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
     if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
+    else if ( r.cover >= 0 ) {
+      // a damage that does not glow: a faint rim light and lift in a dark scene (cause-fx addRim; nothing by day)
+      const q = rects[coverIdx], p = pk.pos[coverIdx], cd = new Uint8Array(q.w * q.h * 4);
+      for ( let y = 0; y < q.h; y++ ) cd.set(buf.subarray(((p.y + y) * pk.W + p.x) * 4, ((p.y + y) * pk.W + p.x + q.w) * 4), y * q.w * 4);
+      Cause.addRim(this, g, { w: q.w, h: q.h, data: cd }, meta[r.cover + 5], meta[r.cover + 6]);
+    }
     if ( !this.flatten(g) ) this.materialize(g, 300);
     return g;
   }
@@ -801,8 +809,14 @@ export class DestructionDisplay {
       a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: Math.min(P.wr * 0.5, 12) * pw, x, y });
       this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
     } else if ( type === "scorch" ) {
-      for ( let q = 0; q < 3; q++ ) { const s = side(); this.spawn({ x: x - uy * s, y: y + ux * s, vx: -ux * 4, vy: -uy * 4, rise: -6 - Math.random() * 4, life: 700 + Math.random() * 500, color: 0xff9a3c, flicker: true }); }
-      if ( Math.random() < 0.4 ) this.spawn({ x, y, vx: 0, vy: 0, rise: -4, life: 1300, color: 0x5a524c, alpha: 0.7, size: 2 });
+      // a fire front along the stroke: a few flame tongues spring up at the head and burn down behind it (no ember confetti)
+      if ( Math.random() < 0.7 ) {
+        const s = side() * 0.8, bx = x - uy * s, by = y + ux * s, gr = this.pixelCanvas(), v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y };
+        const h0 = 3 + P.wr * 0.25 * (0.7 + Math.random() * 0.6), w = 3 + ((Math.random() * 3) | 0), ph = Math.random() * 6;
+        a.fx.push({ g: gr, kind: "flames", t0: now, dur: 420 * a.k, draw: (t) => { const st = Math.floor(t * 6); pxTongue(gr, v, bx, by, tongueCells(h0 * (t < 0.15 ? t / 0.15 : 1 - (t - 0.15) * 0.9), w, ph + st, w)); } });
+      }
+      if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0, vy: 0, rise: -6 - Math.random() * 4, life: 500 + Math.random() * 400, color: Math.random() < 0.5 ? 0xffd04a : 0xff8a24 });
+      if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0.8, vy: 0, rise: -4, life: 1100, color: 0x4a4440, alpha: 0.55, size: 2 });
     } else if ( type === "flood" ) {
       for ( let q = 0; q < 2; q++ ) { const s = side() * 0.6; this.spawn({ x: x - ux * 6 - uy * s, y: y - uy * 6 + ux * s, vx: ux * 10, vy: uy * 10, life: 500, color: 0xe6f4ff, alpha: 0.9, drag: 3 }); }
     } else if ( type === "collapse" ) {
@@ -876,7 +890,7 @@ export class DestructionDisplay {
     // yellow, glow orange and cool to char; water arrives as foam; a cave-in darkens as it sinks; a blast scorches pale-hot. Every
     // stage is a cursor over the same sorted clock, so the stages trail the front as bands of a fixed width in time
     const S = R.stages, keys = R.keys, buf = R.buf, data = R.data, el = now - a.start, last = S.length - 1;
-    const every = Math.max(9, Math.round(keys.length / 140)), shedMax = a.type === "scorch" ? 8 : 4;
+    const every = Math.max(9, Math.round(keys.length / 140)), shedMax = a.type === "scorch" ? 2 : a.type === "flood" ? 1 : 4;
     let n = 0, shed = 0;
     for ( let s = 0; s <= last; s++ ) {
       const lim = (Math.max(0, el - S[s].dt) + 1) * 1048576, st = S[s].col;
@@ -896,8 +910,8 @@ export class DestructionDisplay {
   edgeParticle(g, a, x, y, now) {
     if ( a.cl && Math.random() < a.cl.share ) return Cause.causeParticle(this, a.cl, x, y, a.k);   // the cause's share of the edge
     const t = a.type, j = () => (Math.random() - 0.5);
-    if ( t === "scorch" ) this.spawn({ x, y, vx: j() * 3, vy: 0, rise: -6 - Math.random() * 5, life: 500 + Math.random() * 500, color: 0xff9a3c, flicker: true });
-    else if ( t === "flood" ) this.spawn({ x, y, vx: j() * 6, vy: -1, life: 380, color: 0xe6f4ff, alpha: 0.9, drag: 3 });
+    if ( t === "scorch" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -4 - Math.random() * 4, life: 350 + Math.random() * 300, color: Math.random() < 0.5 ? 0xd2401c : 0xff8a24 });
+    else if ( t === "flood" ) this.spawn({ x, y, vx: j() * 2, vy: -0.5, life: 260, color: 0xb8d8f0, alpha: 0.75, drag: 3 });
     else if ( t === "gash" ) tearEdge(this, g, x, y);
     else if ( t === "cracks" ) this.spawn({ x, y, vx: j() * 4, vy: -1, rise: -2, life: 420, color: 0xc8beb0, alpha: 0.7 });
     else if ( t === "collapse" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -7, life: 700, color: 0xb9ae9e, alpha: 0.75, size: Math.random() < 0.3 ? 2 : 1 });
@@ -1125,6 +1139,37 @@ export class DestructionDisplay {
     }
   }
 
+  /**
+   * A burn's flame tongues at `el` ms of their life `life`: the outer ring rides the front out to the burn's reach and stands there,
+   * the inner ring burns behind it and dies first; each tongue's height flickers in steps (a new pose every ~70 ms), the whole fire
+   * dies down after the front. Embers leave the hottest tips (varied size and colour, short lives that end before the settle), wisps of
+   * smoke the dying ones.
+   */
+  flames(gr, a, T, el, life, R) {
+    const v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y }, k = a.k, now = a.start + a.delay + el;
+    const step = Math.floor(el / (70 * k)), reach = Math.max(4, R * 0.95);
+    const fadeOut = el < a.reveal ? 1 : clamp01(1 - (el - a.reveal) / Math.max(1, life - a.reveal));
+    for ( const tg of T ) {
+      const lag = tg.lag * 140 * k, tf = clamp01((el - lag) / a.reveal);
+      if ( el < lag ) continue;
+      let rr = Math.min(reach, a.Rmax * easeOut(tf)), s = fadeOut;
+      if ( tg.inner ) { rr *= 0.55; s *= clamp01(1.4 - tf * 1.2); }
+      s *= clamp01(el / (90 * k));
+      if ( s < 0.08 ) continue;
+      const fl = 0.8 + 0.35 * hash2(step, tg.ang * 100, 7), h = (3 + R * 0.2) * tg.h * s * fl * (tg.inner ? 0.65 : 1), w = Math.max(2, Math.round(tg.w * Math.sqrt(s)));
+      if ( h < 1.5 ) continue;
+      const bx = a.ox + Math.cos(tg.ang) * rr, by = a.oy + Math.sin(tg.ang) * rr * 0.85;
+      pxTongue(gr, v, bx, by, tongueCells(h, w, tg.ph + step * 0.9, tg.w));
+      // embers from the hot tips, smoke from the dying tongues (none that would outlive the entry)
+      const left = a.end - now - 80;
+      if ( left > 200 && s > 0.45 && Math.random() < 0.05 ) {
+        const big = Math.random() < 0.18, c = [0xfff0a0, 0xffd04a, 0xff8a24, 0xd2401c][(Math.random() * 4) | 0];
+        this.spawn({ x: bx + (Math.random() - 0.5) * 2, y: by - h, vx: (Math.random() - 0.5) * 3, vy: 0, rise: -6 - Math.random() * 6, life: Math.min(left, 350 + Math.random() * 550), color: c, size: big ? 2 : 1, flicker: big });
+      }
+      if ( left > 400 && s < 0.6 && Math.random() < 0.03 ) this.spawn({ x: bx, y: by - h - 1, vx: 1 + Math.random(), vy: 0, rise: -4 - Math.random() * 2, life: Math.min(left, 900), color: 0x4a4440, alpha: 0.55, size: 2 });
+    }
+  }
+
   dust(it, type) {
     it.dusted = true;
     if ( it.p.thrown ) for ( let q = 0; q < 3; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 3, life: 420, color: 0xd8d0c2, alpha: 0.8, drag: 3 });
@@ -1195,19 +1240,24 @@ export class DestructionDisplay {
       once("crack", 0, () => { for ( let q = 0; q < 8; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.8, vx: 0, vy: 0, rise: -2, life: 300, color: 0xbdb3a4, alpha: 0.6 }); });
       once("billow", a.delay + a.reveal * 0.75, () => this.burst(a.ox, a.oy, R * 0.6 * pw, now, { rise: -10, speed: 0.6, color: 0xb9ae9e }));
     } else if ( type === "scorch" ) {
-      if ( tFront < 1 && Math.random() < 0.9 ) for ( let q = 0; q < 2; q++ ) {
-        const ang = Math.random() * 6.28;
-        this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: (Math.random() - 0.5) * 3, vy: 0, rise: -5 - Math.random() * 5, life: 600 + Math.random() * 500, color: 0xff9a3c, flicker: true });
-      }
-      // smoke: dark puffs rising from the burnt ground behind the front, a second, thinner wave as it cools
-      for ( const [key, at, n, col] of [["smoke", 0.4, 6, 0x4a4440], ["smoke2", 0.85, 4, 0x6a625c]] ) once(key, a.reveal * at, () => {
-        for ( let q = 0; q < n; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R * 1.2, y: a.oy + (Math.random() - 0.5) * R * 0.7, vx: 0.6 + Math.random(), vy: 0, rise: -3 - Math.random() * 3, life: 1400 + Math.random() * 600, color: col, alpha: 0.7, size: Math.random() < 0.6 ? 3 : 2 });
+      // FLAME TONGUES ride the front (pixel-fx tongueCells: curved licking shapes in four tone bands, flickering frame by frame), die
+      // down at the rim; embers rise in clusters from the hottest tongue tips, smoke wisps from the dying ones
+      once("flames", a.delay, () => {
+        const gr = this.pixelCanvas(), n = Math.max(6, Math.min(16, Math.round(5 + R * 0.35))), life = a.reveal + a.band * 0.8;
+        const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: ((q % n) + hash2(q, 1, a.seed) * 0.8) / n * 6.283 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
+          h: 0.7 + 0.6 * hash2(q, 3, a.seed), w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
+        a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
+      });
+      // smoke: a few dark puffs from the burnt ground behind the front
+      once("smoke", a.reveal * 0.5, () => {
+        for ( let q = 0; q < 4; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.6, vx: 0.6 + Math.random(), vy: 0, rise: -3 - Math.random() * 3, life: 1300 + Math.random() * 500, color: 0x4a4440, alpha: 0.6, size: Math.random() < 0.6 ? 3 : 2 });
       });
     } else if ( type === "flood" ) {
-      ring("r1", a.delay + a.reveal * 0.3, 0xe6f4ff, R * 0.9 * pw, 650 * k, 1, { outer: 0x5f8fbf, dash: 7 });
-      ring("r2", a.delay + a.reveal * 0.6, 0xe6f4ff, R * 0.7 * pw, 600 * k, 1, { outer: 0x5f8fbf, dash: 6 });
-      ring("r3", a.delay + a.reveal * 0.9, 0xcfe8ff, R * 0.5 * pw, 550 * k, 1, { outer: 0x4f7fae, dash: 5 });
-      if ( tFront < 1 && Math.random() < 0.5 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR * 0.8, y: a.oy + Math.sin(ang) * frontR * 0.6, vx: 0, vy: 0, rise: -2, life: 400, color: 0xe6f4ff, alpha: 0.9 }); }
+      // ripples: broken arcs of varied radius and speed (pixel-fx arcCells), never closed rings
+      for ( const [key, f, rr, dur] of [["r1", 0.3, 0.9, 700], ["r2", 0.6, 0.7, 620], ["r3", 0.9, 0.55, 560]] ) once(key, a.delay + a.reveal * f, () => {
+        const gr = this.pixelCanvas(), v = { ap, ox: o.x, oy: o.y }, sd = a.seed + key.length * 31 + Math.round(f * 100), cx = a.ox + (hash2(sd, 1, 3) - 0.5) * R * 0.4, cy = a.oy + (hash2(sd, 2, 3) - 0.5) * R * 0.3;
+        a.fx.push({ g: gr, kind: "arcs", t0: a.start + a.delay + a.reveal * f, dur: dur * k, draw: (t) => pxArcs(gr, v, cx, cy, R * rr * pw * easeOut(t), t, { seed: sd, core: t < 0.5 ? 0xd8eef8 : 0xa8d0e8 }) });
+      });
     } else if ( type === "cracks" ) {
       if ( tFront < 1 && Math.random() < 0.6 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: 0, vy: 0, rise: -3, life: 380, color: 0xc8beb0, alpha: 0.7 }); }
     } else if ( type === "gash" && a.wipe ) {
@@ -1222,8 +1272,8 @@ export class DestructionDisplay {
       }
     }
     // the settle beat: when the ruin is in, a last soft puff of dust round the rim (the debris landing), then stillness
-    if ( !a.tear && (type === "blast" || type === "collapse" || type === "scorch") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
-      const n = Math.round(Math.min(10, 4 + R / 4) * pw), col = type === "scorch" ? 0x5a524c : 0xc9bfae;
+    if ( !a.tear && (type === "blast" || type === "collapse" || type === "scorch" || type === "cracks") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
+      const n = Math.round(Math.min(10, 4 + R / 4) * pw * (type === "cracks" ? 0.5 : 1)), col = type === "scorch" ? 0x5a524c : 0xc9bfae;
       for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, size: Math.random() < 0.5 ? 3 : 2 }); }
     });
     // rings and flashes

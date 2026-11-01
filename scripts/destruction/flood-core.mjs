@@ -91,7 +91,8 @@ export function prepareFlood(A) {
       depth[i] = d;
       // a crater: see-through at the rim (its broken lip and the plates that slid in still show), opaque in the deep middle
       const o = L >= 3 ? 0.5 + 0.5 * Math.min(1, Math.pow(d, 0.7) * 1.15) : L === 2 ? 0.42 + 0.33 * d : 0.8;
-      const s = L >= 3 ? 0.62 * Math.pow(d, 1.2) : L === 2 ? 0.22 * d : 0;
+      // depth falloff: darker toward the deep middle, the shallows at the rim light (the bottom shows there)
+      const s = L >= 3 ? 0.78 * Math.pow(d, 1.1) : L === 2 ? 0.42 * Math.pow(d, 1.1) : 0;
       op[i] = Math.round(o * 255); shade[i] = Math.round(s * 255);
       // the water wells up from the deepest points (and, cracked, from the cracks) and rises to the rim
       let f = 0.9 * (1 - d) + 0.1 * h2(cx + x, cy + y, seed + 21);
@@ -196,6 +197,11 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     if ( b ) { const q = b * 4; r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; a = LB[q + 3]; }
     else { r = baseC[0]; g = baseC[1]; bl = baseC[2]; a = fallbackA; }
     if ( !a ) { P32[i] = 0; continue; }
+    const ax = cx + x, ay = cy + y, dep = prep.depth[i];
+    // highlights (the engine's wave and sparkle codes) only in a few drifting patches: sparse and irregular, never even rows of dashes
+    if ( b && (r + g + bl) > (baseC[0] + baseC[1] + baseC[2]) + 90 && vnoise(ax / 7, ay / 4.5, 47) < 0.58 ) { r = baseC[0]; g = baseC[1]; bl = baseC[2]; }
+    // the shallows at the rim: lighter, toward the ring colour
+    if ( dep < 0.2 && prep.level >= 2 ) { const t = (0.2 - dep) / 0.2 * 0.3; r += (ringC[0] - r) * t; g += (ringC[1] - g) * t; bl += (ringC[2] - bl) * t; }
     // depth: toward the shadow colour in bands of a third (contours with a little wobble, never a checkerboard)
     const s = shade[i] / 255;
     if ( s > 0 ) {
@@ -203,11 +209,19 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
       if ( k > 0 ) { r += (shadow[0] - r) * k * 0.7; g += (shadow[1] - g) * k * 0.7; bl += (shadow[2] - bl) * k * 0.7; a = Math.max(a, Math.round(a + (255 * master - a) * k)); }
     }
     a = a * op[i] / 255;
+    // foam at the rim: a broken line where the water meets the shore (a pool; patches of it, not a drawn outline)
+    if ( prep.level >= 2 && (!water[i - 1] || !water[i + 1] || !water[i - cw] || !water[i + cw]) && vnoise(ax / 3, ay / 3, 53) > 0.46 ) {
+      r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 190 * master);
+    }
     if ( coming ) {
       if ( u - fill[i] < BAND ) { r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 220 * master); }
-      else if ( rings ) for ( const [sx, sy, rr] of rings ) {
+      else if ( rings ) for ( let k = 0; k < rings.length; k++ ) {
+        // broken ARCS: each spring's ring its own speed, a wobbling radius and whole segments missing
+        const [sx, sy, rr0] = rings[k], ang = Math.atan2((y - sy) * 1.15, x - sx), rr = rr0 * (0.75 + 0.45 * h2(k, 5, 61)) * (1 + 0.08 * Math.sin(ang * 3 + k));
+        const seg = Math.floor((ang + Math.PI) / (Math.PI * 2) * 7);
+        if ( h2(seg, k, 62) < 0.4 ) continue;
         const d = Math.hypot(x - sx, (y - sy) * 1.15);
-        if ( rr > 1 && Math.abs(d - rr) < 0.55 ) { r = ringC[0]; g = ringC[1]; bl = ringC[2]; a = Math.max(a, 200 * master); break; }
+        if ( rr > 1 && Math.abs(d - rr) < 0.55 ) { r = ringC[0]; g = ringC[1]; bl = ringC[2]; a = Math.max(a, 200 * master * clamp(1.4 - u, 0.3, 1)); break; }
       }
     }
     px[o] = r; px[o + 1] = g; px[o + 2] = bl; px[o + 3] = Math.round(a);
