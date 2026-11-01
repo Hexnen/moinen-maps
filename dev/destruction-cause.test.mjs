@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = "scripts/destruction";
 // { rev, other }: a commit that also carries a change of another kind; `other` matches those hunks (left in both baselines)
-export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev: "6c9c1c7", other: /CORE_VERSION/ }, { rev: "f0e1afe", other: /CORE_VERSION/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
+export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev: "6c9c1c7", other: /CORE_VERSION/ }, { rev: "f0e1afe", other: /CORE_VERSION/ }, { rev: "301412e", other: /CORE_VERSION/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
