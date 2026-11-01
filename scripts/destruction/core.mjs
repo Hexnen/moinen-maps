@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 23;   // 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 24;   // 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -1355,7 +1355,8 @@ function bakeArea(A, P, seed, uid, jag) {
       const gx = (din[i + 1] ?? 0) - (din[i - 1] ?? 0), gy = (din[i + W] ?? 0) - (din[i - W] ?? 0), gl = Math.hypot(gx, gy) || 1;
       const lit = ((gx / gl) * -0.7071 + (gy / gl) * -0.7071) * Math.min(1, depth * 3 + 0.2);
       let v = (sv < 1.5 ? 1.1 : 3.4) - depth * (t === T_COLLAPSE ? 2.9 : 2.1) + lit * 1.3 + (h2(x, y, seed + 11) - 0.5) * 0.8 + (vnoise(x / 3, y / 3, seed + 12) - 0.5) * 0.7;
-      let idx = clamp(Math.floor(v + bayer(x, y) - 0.5), 0, 4);
+      // banded shading: flat tone bands with a narrow dithered seam between them (not a field of checkerboard)
+      let idx = clamp(Math.floor(v + (bayer(x, y) - 0.5) * 0.45), 0, 4);
       col = rp[idx];
       // materials
       if ( C.cls.mat === M.wood && t !== T_SCORCH && t !== T_FLOOD ) {
@@ -1385,7 +1386,8 @@ function bakeArea(A, P, seed, uid, jag) {
         col = pal.waterR[clamp(Math.floor(k + bayer(x, y) - 0.5), 1, 3)];
         if ( h2(Math.floor(x / 3), y, seed + 43) < 0.04 ) col = pal.waterR[4];                 // glints in dashes
       }
-      if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.035 ) col = pal.ember[Math.floor(h2(x, y, seed + 52) * 3)];
+      // embers in clusters along the hottest seams, a few bright, most dull (no even confetti)
+      if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.07 * clamp((vnoise(x / 5, y / 5, seed + 53) - 0.55) * 4, 0, 1) ) { const e = h2(x, y, seed + 52); col = e < 0.2 ? pal.ember[1] : e < 0.55 ? pal.ember[0] : mix(pal.ember[2], pal.char[1], 0.4); }
       if ( cz ) { col = kit.fill(x, y, col, depth, dn, lit); if ( !col ) continue; }
       put(x, y, col);
     }
