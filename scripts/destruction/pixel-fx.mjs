@@ -134,7 +134,8 @@ export function boltTree(seed, x0, y0, x1, y1, { forks = null, rough = 0.2 } = {
   const nf = forks ?? 2 + Math.floor(hashU(seed, 1, 301) * 3), out = [];
   for ( let f = 0; f < nf; f++ ) {
     const at = 0.2 + 0.55 * ((f + hashU(seed, f, 302)) / nf), k = Math.min(main.length - 2, Math.max(1, Math.round(at * (main.length - 1))));
-    const [px, py] = main[k], [qx, qy] = main[k + 1], dir = Math.atan2(qy - py, qx - px);
+    // (measured from the channel's overall heading: a fork off a local zig would run back along the main channel)
+    const [px, py] = main[k], dir = Math.atan2(y1 - y0, x1 - x0);
     const side = (f & 1 ? 1 : -1) * (hashU(seed, f, 303) < 0.25 ? -1 : 1);
     const ang = dir + side * (Math.PI / 6 + hashU(seed, f, 304) * Math.PI / 6), fl = len * (0.2 + 0.22 * hashU(seed, f, 305));
     const pts = jag(px, py, px + Math.cos(ang) * fl, py + Math.sin(ang) * fl, seed + 17 * (f + 1), 3, 0.18);
@@ -232,7 +233,7 @@ export function arcCells(cx, cy, r, t, seed = 1) {
   for ( let k = 0; k < n; k++ ) {
     const sp = 0.7 + 0.45 * hashU(seed, k, 402), rr = r * sp * (0.85 + 0.15 * hashU(seed, k, 403));
     if ( rr < 1.5 ) continue;
-    const a0 = hashU(seed, k, 404) * Math.PI * 2, span = (35 + 75 * hashU(seed, k, 405)) * Math.PI / 180, steps = Math.max(4, Math.round(rr * span * 1.2));
+    const a0 = hashU(seed, k, 404) * Math.PI * 2, span = (30 + (n > 4 ? 25 : 40) * hashU(seed, k, 405)) * Math.PI / 180, steps = Math.max(4, Math.round(rr * span * 1.2));
     const seen = new Set();
     for ( let s = 0; s <= steps; s++ ) {
       const a = a0 + span * s / steps, wob = Math.sin(a * 3 + seed) * rr * 0.06, x = Math.round(cx + Math.cos(a) * (rr + wob)), y = Math.round(cy + Math.sin(a) * (rr + wob) * 0.8);
