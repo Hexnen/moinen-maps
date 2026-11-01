@@ -4,7 +4,9 @@ import { onCanvasReady, teardown, onUpdateSceneDistricts, onCanvasPan, onAttrSto
 import { api, isStore, resetStore } from "./attrs.mjs";
 import { setSceneDraft, registerCoreSettings } from "./config.mjs";
 import { refreshAllDistricts } from "./districts.mjs";
-import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, installPatches } from "./tools.mjs";
+import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, onWorkspaceTool, installPatches } from "./tools.mjs";
+import "./workspace/sections.mjs";
+import { syncWorkspace } from "./workspace/shell.mjs";
 import { registerFilterSettings } from "./filter.mjs";
 import * as WaterScene from "./water/water.mjs";
 import * as WaterEditor from "./water/editor.mjs";
@@ -50,7 +52,8 @@ Hooks.once("init", () => { registerCoreSettings(); registerSettings(); registerF
 Hooks.on("canvasReady", () => { refreshPanel(); WaterScene.onCanvasReady(); WaterEditor.onCanvasReady(); WaterRods.onCanvasReady(); WaterReflect.onCanvasReady(); WaterRipples.onCanvasReady(); WaterSubmerge.onCanvasReady(); });
 Hooks.on("updateScene", WaterScene.onUpdateScene);
 Hooks.on("canvasTearDown", () => { removePanel(); WaterSubmerge.teardown(); WaterRipples.teardown(); WaterReflect.teardown(); WaterRods.teardown(); WaterEditor.teardown(); WaterScene.teardown(); });
-for ( const h of ["createNote", "updateNote", "deleteNote", "refreshNote", "sightRefresh", "updateScene", "moinenMapsPanel"] ) Hooks.on(h, () => schedulePanel());
+// drawNote too: a new note is not visible yet when createNote fires, only once it is drawn
+for ( const h of ["createNote", "drawNote", "updateNote", "deleteNote", "refreshNote", "sightRefresh", "updateScene", "moinenMapsPanel"] ) Hooks.on(h, () => schedulePanel());
 // macros and other modules: game.modules.get("moinen-maps").api  (+ hook "moinenMaps.districtAttrChanged")
 Hooks.once("ready", () => { game.modules.get(MODULE_ID).api = api; });
 // the GM-only attribute store is a hidden journal entry; follow its changes
@@ -60,6 +63,9 @@ for ( const h of ["createJournalEntry", "updateJournalEntry", "deleteJournalEntr
 Hooks.once("setup", () => installPatches());
 Hooks.on("getSceneControlButtons", onGetSceneControlButtons);
 Hooks.on("renderSceneControls", onRenderSceneControls);
+// the workspace (options bar + dock) follows the toolbar, and appears or goes with the canvas
+Hooks.on("canvasReady", () => syncWorkspace());
+Hooks.on("moinenMapsTool", onWorkspaceTool);
 Hooks.on("canvasReady", onCanvasReady);
 Hooks.on("canvasTearDown", teardown);
 Hooks.on("updateScene", onUpdateSceneDistricts);

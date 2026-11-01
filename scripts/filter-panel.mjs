@@ -3,7 +3,7 @@ import { NOTE_CAT, categoryOf, hiddenState, setHidden } from "./filter.mjs";
 import { thumb } from "./presets.mjs";
 
 /**
- * The floating pin filter: a small draggable legend on scenes where pins are on. Pins are grouped by type; a group's eye hides or shows
+ * The pin filter: a small draggable legend floating over scenes where pins are on, or a panel in the GM's Pins workspace dock. Pins are grouped by type; a group's eye hides or shows
  * the whole type, its arrow unfolds the list of that type's pins, and each pin can be hidden on its own (or panned to). Client-side only.
  */
 
@@ -59,14 +59,10 @@ function place() {
 
 const eyeIcon = (state) => state === "true" ? "fa-eye" : state === "false" ? "fa-eye-slash" : "fa-circle-half-stroke";
 
-export function refreshPanel() {
-  const groups = game.settings.get(MODULE_ID, "pinPanel") ? collect() : null;
-  if ( !groups ) return removePanel();
-  const scene = canvas.scene, hs = hiddenState(scene.id), st = getState(), collapsed = !!st.collapsed, open = st.open ?? {};
+/** The type rows (with their unfolded pin lists) and the shown/total counts. */
+function listHtml(scene, groups, open) {
+  const hs = hiddenState(scene.id);
   const isOff = (g, p) => hs.t.has(g.id) || hs.n.has(p.id);
-  const next = JSON.stringify([scene.id, groups, [...hs.t], [...hs.n], collapsed, open, game.i18n.lang]);
-  if ( el && next === sig ) return;
-  sig = next;
   const total = groups.reduce((a, g) => a + g.pins.length, 0);
   const shown = groups.reduce((a, g) => a + g.pins.filter((p) => !isOff(g, p)).length, 0);
   const rows = groups.map((g) => {
@@ -88,6 +84,61 @@ export function refreshPanel() {
           <span class="mm-filter-n">${state === "mixed" ? `${g.pins.length - off}/${g.pins.length}` : g.pins.length}</span><i class="fa-solid ${eyeIcon(state)}" inert></i></button>
       </div>${pins}</li>`;
   }).join("");
+  return { rows, shown, total, sig: [...hs.t, "|", ...hs.n] };
+}
+
+let dockHost = null, dockSig = "";
+
+/**
+ * Show the filter inside the workspace dock instead of floating over the map (the floating one steps aside meanwhile).
+ * Returns the cleanup, which hands the filter back to the floating panel.
+ */
+export function dockFilter(host) {
+  dockHost = host; dockSig = "";
+  host.classList.add("mm-filter", "is-docked");
+  host.addEventListener("click", onClick);
+  host.addEventListener("change", onDockChange);
+  removePanel();
+  refreshPanel();
+  return () => {
+    host.removeEventListener("click", onClick); host.removeEventListener("change", onDockChange);
+    if ( dockHost === host ) { dockHost = null; dockSig = ""; }
+    refreshPanel();
+  };
+}
+
+/** The docked filter's switch for the floating legend (the same client setting as in the module settings). */
+function onDockChange(ev) { if ( ev.target.name === "floating" ) game.settings.set(MODULE_ID, "pinPanel", ev.target.checked); }
+
+function renderDocked() {
+  const scene = canvas.scene, groups = collect() ?? [], open = getState().open ?? {};
+  const { rows, shown, total, sig: hsig } = scene ? listHtml(scene, groups, open) : { rows: "", shown: 0, total: 0, sig: [] };
+  const floating = !!game.settings.get(MODULE_ID, "pinPanel");
+  const next = JSON.stringify([scene?.id, groups, hsig, open, floating, game.i18n.lang]);
+  if ( next === dockSig ) return;
+  dockSig = next;
+  const keep = dockHost.querySelector(".mm-filter-list")?.scrollTop ?? 0;
+  // a redraw (an eye was clicked) keeps the keyboard on the same control
+  const a = dockHost.contains(document.activeElement) ? document.activeElement : null;
+  const focus = a ? ["data-pin", "data-group", "data-fold", "data-go", "data-act", "name"].map((k) => [k, a.getAttribute(k)]).find(([, v]) => v) : null;
+  dockHost.innerHTML = `<div class="mm-filter-tools">
+      <span class="mm-filter-count" aria-label="${esc(game.i18n.format("MOINENMAPS.Filter.shown", { n: shown, total }))}">${shown}/${total}</span>
+      <button type="button" data-act="all"${groups.length ? "" : " disabled"}>${esc(T("Filter.showAll"))}</button><button type="button" data-act="none"${groups.length ? "" : " disabled"}>${esc(T("Filter.hideAll"))}</button></div>
+    ${groups.length ? `<ul class="mm-filter-list">${rows}</ul><p class="mm-filter-hint">${esc(T("Filter.hint"))}</p>` : `<p class="mm-filter-hint">${esc(T("WS.filterEmpty"))}</p>`}
+    <label class="mm-ws-check"><input type="checkbox" name="floating"${floating ? " checked" : ""}> ${esc(T("WS.filterFloating"))}</label>`;
+  const l = dockHost.querySelector(".mm-filter-list"); if ( l ) l.scrollTop = keep;
+  if ( focus ) dockHost.querySelector(`[${focus[0]}="${CSS.escape(focus[1])}"]`)?.focus();
+}
+
+export function refreshPanel() {
+  if ( dockHost ) return renderDocked();
+  const groups = game.settings.get(MODULE_ID, "pinPanel") ? collect() : null;
+  if ( !groups ) return removePanel();
+  const scene = canvas.scene, st = getState(), collapsed = !!st.collapsed, open = st.open ?? {};
+  const { rows, shown, total, sig: hsig } = listHtml(scene, groups, open);
+  const next = JSON.stringify([scene.id, groups, hsig, collapsed, open, game.i18n.lang]);
+  if ( el && next === sig ) return;
+  sig = next;
   const fresh = !el;
   if ( fresh ) {
     el = document.createElement("aside");
@@ -114,7 +165,7 @@ export function refreshPanel() {
 }
 
 async function onClick(ev) {
-  const b = ev.target.closest("button"); if ( !b ) return;
+  const b = ev.target.closest("button"); if ( !b || !canvas.scene ) return;
   const scene = canvas.scene, groups = collect() ?? [], hs = hiddenState(scene.id);
   const allIds = groups.map((g) => g.id), find = (id) => groups.find((g) => g.id === id);
   if ( b.dataset.act === "collapse" ) { await saveState({ collapsed: !getState().collapsed }); return refreshPanel(); }

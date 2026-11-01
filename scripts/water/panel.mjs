@@ -7,10 +7,12 @@ import * as Rods from "./rods.mjs";
 import { FX_DEFAULTS } from "./ripples.mjs";
 import { REFLECT_DEFAULTS } from "./reflect.mjs";
 import { SUBMERGE_DEFAULTS } from "./submerge.mjs";
+import { useTool } from "../workspace/shell.mjs";
 
 /**
- * The water settings window: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
+ * The water settings: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
  * (the map re-bakes a moment after the last change). A change to the colours or opacity repaints without baking.
+ * Shown as a panel of the Water workspace dock (it used to be a window of its own).
  */
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -22,27 +24,65 @@ const hexOf = (c) => `#${String(c).replace("#", "")}`;
 
 let panel = null;
 
-export function openWaterPanel(tab) {
-  if ( panel?.rendered ) { if ( tab ) panel.tab = tab; panel.render({ force: true }); panel.bringToFront?.(); return panel; }
-  panel = new WaterPanel(); if ( tab ) panel.tab = tab;
-  panel.render({ force: true });
-  return panel;
+/** Build the settings into `host` (a dock panel), opened on `tab`. Returns the cleanup. */
+export function mountWaterSettings(host, { tab } = {}) {
+  panel?.destroy();
+  panel = new WaterSettings(host, tab);
+  const mine = panel;
+  return () => mine.destroy();
 }
 
-class WaterPanel extends foundry.applications.api.ApplicationV2 {
-  static DEFAULT_OPTIONS = {
-    id: "moinen-maps-water", tag: "div", classes: ["moinen-maps-dialog", "mm-water-panel"],
-    window: { icon: "fa-solid fa-water", resizable: true }, position: { width: 460, height: 680 }
-  };
+/** Show one tab of the docked settings, if they are on screen (the workspace follows the active water tool). */
+export function showWaterTab(tab) {
+  if ( !panel || panel.tab === tab || !TABS.includes(tab) ) return;
+  panel.tab = tab; panel.render();
+}
 
+class WaterSettings {
   tab = "look";
   #hook = null;
   #rodHook = null;
   #palTimer = 0;
+  #listeners = null;
 
-  get title() { return T("Water.title"); }
+  /** @param {HTMLElement} host */
+  constructor(host, tab) {
+    this.element = host;
+    if ( TABS.includes(tab) ) this.tab = tab;
+    host.classList.add("mm-wp", "mm-water-panel");
+    this.#listeners = { click: (ev) => this.#onClick(ev), input: (ev) => this.#onInput(ev), key: (ev) => this.#onKey(ev) };
+    host.addEventListener("click", this.#listeners.click);
+    host.addEventListener("input", this.#listeners.input);
+    host.addEventListener("change", this.#listeners.input);
+    host.addEventListener("keydown", this.#listeners.key);
+    this.#hook = (kind) => { if ( kind === "status" ) this.#updateStatus(); else if ( kind === "loaded" ) this.render(); };
+    this.#rodHook = () => { if ( this.tab === "rods" ) this.render(); };
+    Hooks.on("moinenMapsRods", this.#rodHook);
+    Hooks.on("moinenMapsWater", this.#hook);
+    this.render();
+  }
 
-  async _renderHTML() {
+  destroy() {
+    const host = this.element;
+    if ( this.#listeners ) {
+      host.removeEventListener("click", this.#listeners.click); host.removeEventListener("input", this.#listeners.input);
+      host.removeEventListener("change", this.#listeners.input); host.removeEventListener("keydown", this.#listeners.key);
+      this.#listeners = null;
+    }
+    if ( this.#hook ) Hooks.off("moinenMapsWater", this.#hook);
+    if ( this.#rodHook ) Hooks.off("moinenMapsRods", this.#rodHook);
+    this.#hook = this.#rodHook = null;
+    clearTimeout(this.#palTimer);
+    if ( panel === this ) panel = null;
+  }
+
+  /** Redraw the panel; the dock keeps its scroll position. */
+  async render() {
+    if ( !this.element?.isConnected ) return;
+    this.element.innerHTML = this.#html();
+  }
+
+  #html() {
     const S = Water.state(), info = Water.waterInfo();
     const body = !S ? this.#emptyHtml() : !info ? `<p class="hint">${esc(T("Water.loading"))}</p>` : this.#tabHtml(S, info);
     const tabs = TABS.map((id) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${this.tab === id}"${this.tab === id ? "" : ' tabindex="-1"'}>${esc(T(`Water.tab.${id}`))}</button>`).join("");
@@ -51,33 +91,6 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
       <div class="mm-wp-body" role="tabpanel">${body}</div>
       ${S ? `<footer class="mm-wp-foot"><button type="button" data-act="variation"><i class="fa-solid fa-dice" inert></i> ${esc(T("Water.variation"))}</button>
         <button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("Water.clear"))}</button></footer>` : ""}`;
-  }
-
-  _replaceHTML(result, content) {
-    const keep = content.querySelector(".mm-wp-body")?.scrollTop ?? 0;
-    content.innerHTML = result;
-    const body = content.querySelector(".mm-wp-body"); if ( body ) body.scrollTop = keep;
-    content.classList.add("mm-wp");
-    if ( !content._mmWired ) {
-      content._mmWired = true;
-      content.addEventListener("click", (ev) => this.#onClick(ev));
-      content.addEventListener("input", (ev) => this.#onInput(ev));
-      content.addEventListener("change", (ev) => this.#onInput(ev));
-      content.addEventListener("keydown", (ev) => this.#onKey(ev));
-    }
-  }
-
-  _onFirstRender() {
-    this.#hook = (kind) => { if ( kind === "status" ) this.#updateStatus(); else if ( kind === "loaded" ) this.render(); };
-    this.#rodHook = () => { if ( this.tab === "rods" ) this.render(); };
-    Hooks.on("moinenMapsRods", this.#rodHook);
-    Hooks.on("moinenMapsWater", this.#hook);
-  }
-
-  _onClose() {
-    if ( this.#hook ) Hooks.off("moinenMapsWater", this.#hook);
-    if ( this.#rodHook ) Hooks.off("moinenMapsRods", this.#rodHook);
-    this.#hook = this.#rodHook = null; panel = null;
   }
 
   /* ---------------------------------------------------------------- status */
@@ -185,7 +198,7 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
       catch ( err ) { console.error(`${MODULE_ID} | water engine`, err); ui.notifications.error(T("Water.engineFailed")); return; }
       return this.render();
     }
-    if ( b.dataset.act === "rod-tool" ) return ui.controls.activate({ control: "moinenmaps", tool: Rods.RODS_TOOL });
+    if ( b.dataset.act === "rod-tool" ) return useTool("water", Rods.RODS_TOOL);
     if ( b.dataset.act === "rod-reverse" ) return Rods.reverseSelected();
     if ( b.dataset.act === "rod-undo" ) return Rods.undoRod();
     if ( b.dataset.act === "rod-clear" ) { Rods.clearRods(); return this.render(); }

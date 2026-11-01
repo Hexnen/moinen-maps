@@ -1,18 +1,19 @@
 import { toggleDistrictsPanel, playersMayList } from "./panel.mjs";
-import { openBrushOptions, clearDistricts, registerDistrictSettings } from "./districts.mjs";
+import { registerDistrictSettings } from "./districts.mjs";
 import { MODULE_ID, PIN_COLORS, pinTypeOf, findPinType, allPresets, presetLabel, typeLabel } from "./config.mjs";
 import { syncTool as syncWaterTool, registerWaterEditorSettings } from "./water/editor.mjs";
-import { openWaterPanel } from "./water/panel.mjs";
-import { RODS_TOOL, syncRodTool, registerRodSettings } from "./water/rods.mjs";
-import { registerPresetSettings, currentPinType, togglePalette, paletteOpen, refreshToolButton } from "./presets.mjs";
+import { syncRodTool, registerRodSettings } from "./water/rods.mjs";
+import { registerPresetSettings, currentPinType, refreshToolButton } from "./presets.mjs";
 import { fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
+import { GROUP, sections, sectionTool, activeSection } from "./workspace/registry.mjs";
+import { registerWorkspaceSettings, syncWorkspace, workspaceTool, useTool } from "./workspace/shell.mjs";
 
-const GROUP = "moinenmaps";
 const PIN_TOOL = "mm-pin";
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 
-export const activeToolName = () => ui.controls?.control?.name === GROUP ? (ui.controls.tool?.name ?? "") : "";
+/** The tool in hand in the open workspace section (see workspace/shell.mjs), else "". Tool names are unique across sections. */
+export const activeToolName = () => workspaceTool();
 /** The pin type the placing tool will drop (the palette's selection), or null while another tool is active. */
 export const activePinType = () => activeToolName() === PIN_TOOL ? currentPinType() : null;
 const pickedColor = () => { try { return game.settings.get(MODULE_ID, "pinColor") || ""; } catch { return ""; } };
@@ -22,82 +23,67 @@ export function registerSettings() {
   registerPresetSettings();
   registerWaterEditorSettings();
   registerRodSettings();
-  game.settings.register(MODULE_ID, "pinColor", { scope: "client", config: false, type: String, default: "", onChange: syncColorVar });
-}
-
-/** Expose the picked colour to CSS (toolbar swatch) */
-export function syncColorVar() {
-  document.documentElement.style.setProperty("--mm-pick", pickedColor() || "transparent");
-  document.documentElement.classList.toggle("mm-has-pick", !!pickedColor());
+  registerWorkspaceSettings();
+  // the placing tool wears the picked colour
+  game.settings.register(MODULE_ID, "pinColor", { scope: "client", config: false, type: String, default: "", onChange: () => refreshToolButton() });
 }
 
 /* ---------------------------------------------------------------------------------------------- */
 /*  Toolbar                                                                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
+/**
+ * One button in the first column of the scene controls ("Moinen Maps Tools"); its second column lists the sections (Pins, Districts,
+ * Water, and the ones still to come). The tools of a section are in the workspace bar across the top of the canvas.
+ */
 export function onGetSceneControlButtons(controls) {
+  const base = { name: GROUP, order: 8.5, title: "MOINENMAPS.WS.group", icon: "fa-solid fa-location-dot", layer: "notes" };
   if ( !game.user.isGM ) {
     // players only get a read-only list of revealed districts, and only when the scene allows it
     if ( !playersMayList() ) return;
-    controls[GROUP] = { name: GROUP, order: 8.5, title: "MOINENMAPS.Group", icon: "fa-solid fa-location-dot", layer: "notes", tools: {
+    controls[GROUP] = { ...base, tools: {
       districtsList: { name: "districtsList", order: 1, title: "MOINENMAPS.Tool.districtsList", icon: "fa-solid fa-list-ul", button: true, onChange: () => toggleDistrictsPanel() } } };
     return;
   }
-  const tools = {
-    select: { name: "select", order: 1, title: "MOINENMAPS.Tool.select", icon: "fa-solid fa-expand", interaction: true, control: true }
-  };
-  // one placing tool (drops the pin picked in the palette) and the palette button that opens the preset lists
-  tools[PIN_TOOL] = { name: PIN_TOOL, order: 10, title: "MOINENMAPS.Tool.pin", icon: `fa-solid ${currentPinType().fa}`, interaction: true, control: true };
-  tools["mm-filter"] = { name: "mm-filter", order: 12, title: "MOINENMAPS.Tool.filter", icon: "fa-solid fa-filter", toggle: true,
-    active: game.settings.get(MODULE_ID, "pinPanel"), onChange: (_e, on) => game.settings.set(MODULE_ID, "pinPanel", on) };
-  tools["mm-palette"] = { name: "mm-palette", order: 11, title: "MOINENMAPS.Tool.palette", icon: "fa-solid fa-layer-group", button: true,
-    onChange: () => togglePalette(ui.controls?.element?.querySelector('button.tool[data-tool="mm-palette"]')) };
-  const dist = { interaction: true, control: true };
-  tools["mm-district"] = { ...dist, name: "mm-district", order: 30, title: "MOINENMAPS.Tool.district", icon: "fa-solid fa-paintbrush" };
-  tools["mm-district-erase"] = { ...dist, name: "mm-district-erase", order: 31, title: "MOINENMAPS.Tool.districtErase", icon: "fa-solid fa-eraser" };
-  tools["mm-district-merge"] = { name: "mm-district-merge", order: 32, title: "MOINENMAPS.Tool.districtMerge", icon: "fa-solid fa-object-group", toggle: true,
-    active: game.settings.get(MODULE_ID, "districtMerge"), onChange: (_e, on) => game.settings.set(MODULE_ID, "districtMerge", on) };
-  tools["mm-district-opts"] = { name: "mm-district-opts", order: 33, title: "MOINENMAPS.Tool.districtOpts", icon: "fa-solid fa-sliders", button: true, onChange: () => openBrushOptions() };
-  tools["mm-districts-list"] = { name: "mm-districts-list", order: 34, title: "MOINENMAPS.Tool.districtsList", icon: "fa-solid fa-list-ul", button: true, onChange: () => toggleDistrictsPanel() };
-  tools["mm-district-clear"] = { name: "mm-district-clear", order: 61, title: "MOINENMAPS.Tool.districtClear", icon: "fa-solid fa-broom", button: true, onChange: () => clearDistricts() };
-  // water: three brushes (still water, river, fall), an eraser and the settings window
-  const wt = { interaction: true, control: true };
-  tools["mm-w-water"] = { ...wt, name: "mm-w-water", order: 40, title: "MOINENMAPS.Tool.waterWater", icon: "fa-solid fa-droplet" };
-  tools["mm-w-river"] = { ...wt, name: "mm-w-river", order: 41, title: "MOINENMAPS.Tool.waterRiver", icon: "fa-solid fa-water" };
-  tools["mm-w-fall"] = { ...wt, name: "mm-w-fall", order: 42, title: "MOINENMAPS.Tool.waterFall", icon: "fa-solid fa-arrows-down-to-line" };
-  tools["mm-w-erase"] = { ...wt, name: "mm-w-erase", order: 43, title: "MOINENMAPS.Tool.waterErase", icon: "fa-solid fa-droplet-slash" };
-  tools[RODS_TOOL] = { ...wt, name: RODS_TOOL, order: 44, title: "MOINENMAPS.Tool.waterRods", icon: "fa-solid fa-bezier-curve" };
-  tools["mm-w-opts"] = { name: "mm-w-opts", order: 45, title: "MOINENMAPS.Tool.waterOpts", icon: "fa-solid fa-faucet-drip", button: true, onChange: () => openWaterPanel() };
-  tools.color = { name: "color", order: 17, title: "MOINENMAPS.Tool.color", icon: "fa-solid fa-palette", button: true,
-    onChange: () => openColorDialog() };
-  tools.clear = { name: "clear", order: 60, title: "MOINENMAPS.Tool.clear", icon: "fa-solid fa-trash", button: true,
-    onChange: () => clearPins() };
+  const tools = {};
+  for ( const s of sections() ) {
+    const name = sectionTool(s);
+    tools[name] = { name, order: s.order, icon: s.icon,
+      title: s.soon ? game.i18n.format("MOINENMAPS.WS.soonTitle", { section: game.i18n.localize(s.title) }) : s.title };
+  }
   controls[GROUP] = {
-    name: GROUP, order: 8.5, title: "MOINENMAPS.Group", icon: "fa-solid fa-location-dot", layer: "notes",
+    ...base, tools, activeTool: sectionTool(sections()[0]),
     onChange: (event, active) => {
       // Activating the notes layer makes SceneControls jump to the core "notes" group, so hop back to ours afterwards.
       if ( active && !canvas.notes.active ) { canvas.notes.activate(); setTimeout(() => ui.controls.activate({ control: GROUP }), 50); }
+      if ( !active ) setTimeout(syncWorkspace, 0);   // leaving for a group of Foundry's own
     },
-    onToolChange: (_event, tool, active) => {
-      canvas.notes.setAllRenderFlags({ refreshState: true });
-      if ( active && !tool.control ) canvas.notes.releaseAll();
-      document.body.classList.toggle("mm-placing", !!activePinType());
-      syncWaterTool(); syncRodTool();
-    },
-    tools,
-    activeTool: "select"
+    onToolChange: (_event, _tool, active) => { if ( active ) syncWorkspace(); }
   };
 }
 
-/** Colour the toolbar buttons with their pin colour (CSS custom property per tool). */
+/** The tool in hand changed (hook "moinenMapsTool"): the notes layer, the cursor classes and the water overlays follow it. */
+export function onWorkspaceTool(tool) {
+  if ( !canvas.ready ) return;
+  canvas.notes.setAllRenderFlags({ refreshState: true });
+  const def = activeSection()?.tools?.().find((t) => t.name === tool);
+  if ( !def?.control ) canvas.notes.releaseAll();
+  document.body.classList.toggle("mm-placing", !!activePinType());
+  syncWaterTool(); syncRodTool();
+}
+
+/** Colour the sections in the second column (CSS custom property per section) and follow the controls with the workspace. */
 export function onRenderSceneControls() {
   const root = ui.controls?.element;
   if ( !root ) return;
-  refreshToolButton();
-  for ( const [name, color] of [["mm-w-water", "#2f86d6"], ["mm-w-river", "#46d0d0"], ["mm-w-fall", "#e8f4ff"], ["mm-w-erase", "#ffffff"], [RODS_TOOL, "#ffa63d"], ["mm-w-opts", "#46d0d0"]] ) root.querySelector(`button.tool[data-tool="${name}"]`)?.style.setProperty("--mm-tool", color);
+  if ( game.user.isGM ) for ( const s of sections() ) {
+    const b = root.querySelector(`button.tool[data-tool="${sectionTool(s)}"]`); if ( !b ) continue;
+    if ( s.color ) b.style.setProperty("--mm-tool", s.color);
+    b.classList.add("mm-section"); b.classList.toggle("mm-soon", !!s.soon);
+  }
+  syncWorkspace();
   syncWaterTool(); syncRodTool();
   document.body.classList.toggle("mm-placing", !!activePinType());
-  syncColorVar();
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -154,15 +140,15 @@ export function installPatches() {
   }
   // Escape leaves the placing tool (the tool otherwise stays active so several pins can be dropped in a row)
   window.addEventListener("keydown", (ev) => {
-    if ( ev.key !== "Escape" || !activePinType() || paletteOpen() ) return;
+    if ( ev.key !== "Escape" || !activePinType() ) return;
     if ( document.querySelector("dialog[open], .application.dialog") ) return;
     ev.preventDefault(); ev.stopPropagation();
-    ui.controls.activate({ tool: "select" });
+    useTool("pins", "select");
   }, true);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/*  Dialogs                                                                                        */
+/*  Swatches and the pin editor                                                                    */
 /* ---------------------------------------------------------------------------------------------- */
 
 export function swatchesHtml(current, withDefault = true, withNone = false) {
@@ -174,40 +160,6 @@ export function wireSwatches(el, input) {
     el.querySelectorAll(".mm-swatch").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", String(x === b)); });
     input.value = b.dataset.color; input.dispatchEvent(new Event("change", { bubbles: true }));
   }));
-}
-
-/** Choose the colour used for the next pins you drop ("" = each type's own colour). */
-export async function openColorDialog() {
-  const cur = pickedColor();
-  const DialogV2 = foundry.applications.api.DialogV2;
-  let reopen = false, done = false;
-  try {
-  await DialogV2.prompt({
-    window: { title: T("Tool.color"), icon: "fa-solid fa-palette" },
-    classes: ["moinen-maps-dialog"],
-    position: { width: 340 },
-    content: `${liveBarHtml()}<p class="hint">${esc(T("ColorHint"))}</p>${swatchesHtml(cur)}
-      ${fg(T("ColorCustom"), `<color-picker name="color" value="${esc(cur || "#e5322d")}"></color-picker>`)}
-      <input type="hidden" name="pick" value="${esc(cur)}">`,
-    render: (_ev, dlg) => {
-      const el = dlg.element, pick = el.querySelector('[name="pick"]');
-      wireSwatches(el, pick); fitDialog(dlg);
-      // live: the toolbar's colour tool wears the colour being chosen
-      const show = frameThrottle(() => { if ( done ) return; const v = pick.value; document.documentElement.style.setProperty("--mm-pick", v || "transparent"); document.documentElement.classList.toggle("mm-has-pick", !!v); });
-      for ( const ev of ["input", "change", "click"] ) el.addEventListener(ev, show);
-      wireLiveBar(el, () => { reopen = true; dlg.close(); });
-      el.querySelector('color-picker[name="color"]').addEventListener("change", (e) => {
-        pick.value = e.target.value; el.querySelectorAll(".mm-swatch").forEach((x) => { x.classList.remove("on"); x.setAttribute("aria-pressed", "false"); });
-      });
-    },
-    ok: {
-      label: T("Apply"), icon: "fa-solid fa-check",
-      callback: (_ev, button) => game.settings.set(MODULE_ID, "pinColor", button.form.elements.pick.value || "")
-    },
-    rejectClose: false
-  });
-  } finally { done = true; syncColorVar(); }   // discards the preview unless Apply stored a new colour
-  if ( reopen ) openColorDialog();
 }
 
 /** Label / type / colour editor for a standalone pin. */
@@ -263,7 +215,8 @@ export async function openPinEditor(doc) {
   if ( reopen ) openPinEditor(doc);
 }
 
-async function clearPins() {
+/** Delete every standalone pin of the scene (after a confirmation). */
+export async function clearPins() {
   const ids = canvas.scene.notes.filter((n) => pinTypeOf(n) && !n.entryId).map((n) => n.id);
   if ( !ids.length ) return ui.notifications.info(T("Clear.none"));
   const ok = await foundry.applications.api.DialogV2.confirm({

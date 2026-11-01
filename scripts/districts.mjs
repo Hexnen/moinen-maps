@@ -168,7 +168,7 @@ function look(d) {
   };
 }
 /** Read a dialog form including custom elements (range-picker, color-picker), which FormData silently omits. */
-function readForm(form) {
+export function readForm(form) {
   const out = {};
   for ( const el of form.querySelectorAll("[name]") ) {
     if ( el.type === "checkbox" ) out[el.name] = el.checked;
@@ -534,7 +534,7 @@ let stroke = null, lastMove = 0;
 let lastPoint = null;
 const brushActive = () => game.user.isGM && [PAINT, ERASE].includes(activeToolName());
 const worldPoint = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
-let brushDraft = null;   // live preview of the brush options dialog (size, colour)
+let brushDraft = null;   // live preview of the brush options being adjusted in the workspace (size, colour)
 const bopt = (k) => brushDraft?.[k] ?? opt(k);
 const brushRadius = () => canvas.grid.size * bopt("districtSize") / 2;
 
@@ -752,55 +752,16 @@ export async function openEditor(id) {
   if ( reopen ) openEditor(id);
 }
 
-/** Brush options: size, colour, border and fill used by the next strokes. */
-export async function openBrushOptions() {
-  const DialogV2 = foundry.applications.api.DialogV2, cur = opt("districtColor");
-  const sel = (name, val, opts) => `<select name="${name}">${opts.map(([v, l]) => `<option value="${v}"${v === val ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
-  let dlgRef = null, reopen = false, done = false;   // `done` stops a queued preview frame from re-applying a draft after the dialog ended
-  const hadPoint = !!lastPoint;
-  const showRing = () => { if ( cursor ) drawCursor(lastPoint ?? canvas.canvasCoordinatesFromClient({ x: innerWidth / 2, y: innerHeight / 2 })); };
-  const preview = frameThrottle(() => {
-    const form = dlgRef?.element?.querySelector("form"); if ( done || !form || !dlgRef.element.isConnected ) return;
-    const f = readForm(form); brushDraft = { districtSize: clamp(Number(f.size) || 0.7, 0.2, 4), districtColor: f.pick || cur };
-    showRing();   // the brush ring shows the size and colour the next strokes will have
-  });
-  try {
-  await DialogV2.prompt({
-    window: { title: T("District.brush"), icon: "fa-solid fa-paintbrush" }, classes: ["moinen-maps-dialog"], position: { width: 380 },
-    content: `${liveBarHtml()}${fg(T("District.size"), `<range-picker name="size" value="${opt("districtSize")}" min="0.2" max="4" step="0.1"></range-picker>`, T("District.sizeHint"))}
-      ${fgGroup(T("Editor.color"), swatchesHtml(cur, false, true))}
-      ${fg(T("District.border"), sel("border", opt("districtBorder"), [["solid", T("District.solid")], ["dashed", T("District.dashed")], ["none", T("District.borderNone")]]))}
-      ${fg(T("District.fill"), sel("fill", opt("districtFill"), [["soft", T("District.soft")], ["hatch", T("District.hatch")], ["paper", T("District.paper")], ["dots", T("District.dots")]]))}
-      <details class="mm-fold"><summary>${esc(T("Dots.section"))}</summary><div class="mm-fold-body">${dotsFieldsHtml("bd_", dotsCfg({ dots: opt("districtDots") }))}</div></details>
-      ${fg(T("District.opacity"), `<range-picker name="opacity" value="${opt("districtOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-      <details class="mm-fold"><summary>${esc(T("District.inkSection"))}</summary><div class="mm-fold-body">
-        ${fg(T("District.ink"), `${sel("ink", opt("districtInk"), [["ink", T("District.inkDark")], ["match", T("District.inkMatch")], ["custom", T("District.inkCustom")]])}<color-picker name="inkColor" value="${esc(opt("districtInkColor"))}"></color-picker>`)}
-        ${fg(T("District.inkOpacity"), `<range-picker name="inkOpacity" value="${opt("districtInkOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-        ${fg(T("District.inkWidth"), `<range-picker name="inkWidth" value="${opt("districtInkWidth")}" min="0.2" max="4" step="0.1"></range-picker>`)}
-      </div></details>
-      <input type="hidden" name="pick" value="${esc(cur)}">`,
-    render: (_e, dlg) => {
-      const el = dlg.element; dlgRef = dlg; LIVE.add(dlg);
-      wireSwatches(el, el.querySelector('[name="pick"]')); fitDialog(dlg); wireDotsFields(el, "bd_");
-      wireLiveBar(el, () => { reopen = true; dlg.close(); });
-      for ( const ev of ["input", "change", "click"] ) el.addEventListener(ev, preview);
-      preview();
-    },
-    ok: { label: T("Apply"), icon: "fa-solid fa-check", callback: async (_e, b) => {
-      const f = readForm(b.form), set = (k, v) => game.settings.set(MODULE_ID, k, v);
-      await set("districtSize", Number(f.size)); await set("districtColor", f.pick || cur);
-      await set("districtBorder", f.border); await set("districtFill", f.fill); await set("districtDots", readDotsValues(f, "bd_"));
-      await set("districtOpacity", clamp(Number(f.opacity), 0, 1)); await set("districtInk", f.ink); await set("districtInkColor", f.inkColor);
-      await set("districtInkOpacity", clamp(Number(f.inkOpacity), 0, 1)); await set("districtInkWidth", clamp(Number(f.inkWidth), 0.2, 4));
-    } },
-    rejectClose: false
-  });
-  } finally {
-    done = true; if ( dlgRef ) LIVE.delete(dlgRef);
-    brushDraft = null;
-    if ( cursor ) { if ( brushActive() && hadPoint && lastPoint ) drawCursor(lastPoint ); else { cursor.clear(); if ( !hadPoint ) lastPoint = null; } }
-  }
-  if ( reopen ) openBrushOptions();
+/**
+ * Live preview of the brush options while they are being adjusted in the workspace (a slider being dragged): the ring shows `draft`
+ * ({ districtSize, districtColor }) over the stored options; null ends the preview. Nothing is stored here.
+ */
+export function previewBrush(draft) {
+  brushDraft = draft;
+  if ( !cursor ) return;
+  if ( draft ) drawCursor(lastPoint ?? canvas.canvasCoordinatesFromClient({ x: innerWidth / 2, y: innerHeight / 2 }));
+  else if ( brushActive() && lastPoint ) drawCursor(lastPoint);
+  else { cursor.clear(); lastPoint = null; }
 }
 
 export async function clearDistricts() {

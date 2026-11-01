@@ -1,6 +1,7 @@
 /**
- * Districts panel: a window listing every district of the scene. DOM is built once and updated by key (district id), so painting,
- * erasing or another GM's edit only touches the rows that changed. Order in the list is the stacking order on the canvas.
+ * Districts list: every district of the scene, shown in the GM's Districts workspace dock and, read-only, in a window for players
+ * (when the scene allows it). DOM is built once and updated by key (district id), so painting, erasing or another GM's edit only
+ * touches the rows that changed. Order in the list is the stacking order on the canvas.
  */
 import { MODULE_ID, sceneConfig } from "./config.mjs";
 import { swatchesHtml, wireSwatches } from "./tools.mjs";
@@ -12,13 +13,10 @@ const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 const { ApplicationV2 } = foundry.applications.api;
 
-export class DistrictsPanel extends ApplicationV2 {
-  static DEFAULT_OPTIONS = {
-    id: "moinen-maps-districts", classes: ["moinen-maps-panel"], tag: "div",
-    window: { title: "MOINENMAPS.Panel.title", icon: "fa-solid fa-draw-polygon", resizable: true },
-    position: { width: 420, height: 560 }
-  };
+let UID = 0;
 
+/** The list itself, mounted into any element: the workspace dock (GM) or the players' window. */
+export class DistrictsList {
   /** @type {Set<string>} */ selected = new Set();
   filter = "";
   sortBy = "";      // lower-cased attribute name, "" = canvas order
@@ -27,10 +25,13 @@ export class DistrictsPanel extends ApplicationV2 {
   #rows = new Map();
   #hooks = [];
   #timer = 0;
+  uid = ++UID;
+  /** @type {HTMLElement|null} */ root = null;
   get readOnly() { return !game.user.isGM; }
 
-  async _renderHTML() {
-    const root = document.createElement("div");
+  /** Build the list into `host`; returns the cleanup. */
+  mount(host) {
+    const root = this.root = document.createElement("div");
     root.className = "mm-panel";
     root.innerHTML = `
       <div class="mm-panel-head">
@@ -38,8 +39,8 @@ export class DistrictsPanel extends ApplicationV2 {
         <span class="mm-count" data-mm="count" role="status"></span>
       </div>
       <div class="mm-sortbar" data-mm="sortbar" hidden>
-        <label for="mm-sort-${this.id}">${esc(T("Attr.sort"))}</label>
-        <select id="mm-sort-${this.id}" data-mm="sort"></select>
+        <label for="mm-sort-${this.uid}">${esc(T("Attr.sort"))}</label>
+        <select id="mm-sort-${this.uid}" data-mm="sort"></select>
         <button type="button" class="mm-icon" data-act="sortdir" aria-pressed="false" aria-label="${esc(T("Attr.sortDir"))}" data-tooltip="${esc(T("Attr.sortDir"))}"><i class="fa-solid fa-arrow-down-wide-short" inert></i></button>
       </div>
       ${this.readOnly ? "" : `<div class="mm-panel-actions">
@@ -57,26 +58,23 @@ export class DistrictsPanel extends ApplicationV2 {
       <ul class="mm-list" data-mm="list"></ul>
       <p class="mm-empty" data-mm="empty" hidden>${esc(T("Panel.empty"))}</p>
       <footer class="mm-totals" data-mm="totals" aria-label="${esc(T("Attr.totals"))}" hidden></footer>`;
-    return root;
-  }
-
-  _replaceHTML(result, content) {
-    content.replaceChildren(result);
+    host.replaceChildren(root);
     this.#rows.clear();
-    this.#bind(result);
-    this.sync();
-  }
-
-  _onFirstRender() {
+    this.#bind(root);
     this.#hooks.push(["moinenMapsDistrictsChanged", Hooks.on("moinenMapsDistrictsChanged", () => this.#queue())],
-      ["moinenMapsDistrictHover", Hooks.on("moinenMapsDistrictHover", (id) => this.#markHover(id))]);
+      ["moinenMapsDistrictHover", Hooks.on("moinenMapsDistrictHover", (id) => this.#markHover(id))],
+      // another scene: its districts replace the list
+      ["canvasReady", Hooks.on("canvasReady", () => this.#queue())]);
+    this.sync();
+    return () => this.destroy();
   }
 
-  _onClose() {
+  destroy() {
     for ( const [n, id] of this.#hooks ) Hooks.off(n, id);
     this.#hooks = [];
     clearTimeout(this.#timer);
     previewHover(null);
+    this.root?.remove(); this.root = null;
   }
 
   #queue() { clearTimeout(this.#timer); this.#timer = setTimeout(() => this.sync(), 30); }
@@ -84,8 +82,8 @@ export class DistrictsPanel extends ApplicationV2 {
   /* ------------------------------------------------------------ keyed DOM sync */
 
   sync() {
-    const root = this.element?.querySelector(".mm-panel");
-    if ( !root ) return;
+    const root = this.root;
+    if ( !root || !canvas.ready ) return;
     const all = listDistricts().filter((d) => game.user.isGM || d.revealed);
     const attrMap = new Map(all.map((d) => [d.id, attrsOf(d)]));
     this.#syncSortUi(root, attrMap);
@@ -365,6 +363,28 @@ export class DistrictsPanel extends ApplicationV2 {
   }
 }
 
+/** The players' read-only window around the list (GMs have the list in their workspace dock). */
+class DistrictsPanel extends ApplicationV2 {
+  static DEFAULT_OPTIONS = {
+    id: "moinen-maps-districts", classes: ["moinen-maps-panel"], tag: "div",
+    window: { title: "MOINENMAPS.Panel.title", icon: "fa-solid fa-draw-polygon", resizable: true },
+    position: { width: 420, height: 560 }
+  };
+
+  /** @type {DistrictsList|null} */ list = null;
+
+  async _renderHTML() { return document.createElement("div"); }
+
+  _replaceHTML(_result, content) {
+    if ( this.list?.root?.isConnected ) return this.list.sync();
+    this.list?.destroy();
+    this.list = new DistrictsList();
+    this.list.mount(content);
+  }
+
+  _onClose() { this.list?.destroy(); this.list = null; }
+}
+
 let panel = null;
 export function toggleDistrictsPanel(force) {
   if ( panel?.rendered && force !== true ) { panel.close(); return false; }
@@ -372,6 +392,5 @@ export function toggleDistrictsPanel(force) {
   panel.render({ force: true, position: { height: Math.min(560, window.innerHeight - 64) } });   // never taller than the window
   return true;
 }
-export const districtsPanel = () => panel;
 export const playersMayList = () => !!sceneConfig(canvas.scene ?? game.scenes.viewed)?.districtListForPlayers;
 void MODULE_ID;

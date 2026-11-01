@@ -167,24 +167,21 @@
 @media (prefers-reduced-motion: reduce) {
   .mm-drop.is-dropping { animation: mm-appear 0.3s ease-out both; }
   .mm-stage.is-dropping .mm-ground, .mm-pin[data-idle] { animation: none; }
-  .moinen-maps-tab .mm-fold > summary::after, #scene-controls button.tool[data-tool^="mm-"] > i { transition: none; }
+  .moinen-maps-tab .mm-fold > summary::after, #scene-controls button.tool[data-tool^="mm-"]::before, #scene-controls button.mm-section::before { transition: none; }
+  #scene-controls button.tool[data-tool^="mm-"]:hover::before { transform: none; }
 }
 
-/* ---- scene-controls tools: each pin type's button wears its colour ---- */
-#scene-controls button.tool[data-tool^="mm-"] > i { color: color-mix(in srgb, var(--mm-tool, currentColor) 78%, #fff); transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.5)); }
-#scene-controls button.tool[data-tool^="mm-"]:hover > i { transform: translateY(-2px) scale(1.12); }
-#scene-controls button.tool[data-tool^="mm-"][aria-pressed="true"] > i { transform: translateY(-1px) scale(1.12); }
-html.mm-has-pick #scene-controls button.tool[data-tool="color"] > i { color: var(--mm-pick); }
-#scene-controls button.layer[data-control="moinenmaps"] > i { color: #e5322d; }
+/* ---- scene-controls: each section and tool wears its colour (in v14 the button itself is the icon) ---- */
+#scene-controls button.tool[data-tool^="mm-"], #scene-controls button.mm-section { color: color-mix(in srgb, var(--mm-tool, currentColor) 78%, #fff); }
+#scene-controls button.tool[data-tool^="mm-"]::before, #scene-controls button.mm-section::before { display: inline-block; transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.5)); }
+#scene-controls button.tool[data-tool^="mm-"]:hover::before { transform: translateY(-2px) scale(1.12); }
+#scene-controls button.tool[data-tool^="mm-"][aria-pressed="true"]::before { transform: translateY(-1px) scale(1.12); }
+/* a section that is still to come: drawn in pencil (dashed), not yet inked */
+#scene-controls button.mm-soon { border-style: dashed; opacity: 0.6; }
+#scene-controls button.mm-soon:hover, #scene-controls button.mm-soon[aria-pressed="true"] { opacity: 1; }
 body.mm-placing #board { cursor: crosshair; }
 
-/* ---- pin palette: a popover beside the toolbar holding one preset's pins ---- */
-.mm-palette {
-  position: fixed; z-index: calc(var(--z-index-ui, 30) + 5); width: 15.5rem; padding: 0.5rem; border-radius: 8px;
-  background: var(--color-cool-5-90, rgb(24 24 32 / 0.96)); color: var(--color-light-1, #eee);
-  border: 1px solid var(--color-cool-4, rgb(255 255 255 / 0.18)); box-shadow: 0 6px 22px rgb(0 0 0 / 0.5);
-  animation: mm-pal-in 0.16s var(--mm-ease-out, ease-out) both;
-}
+/* ---- pin palette: one preset's pins (a panel of the Pins workspace dock) ---- */
 @keyframes mm-pal-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 .mm-pal-head { display: flex; gap: 0.35rem; margin-bottom: 0.45rem; }
 .mm-pal-head select { flex: 1; min-width: 0; }
@@ -192,16 +189,16 @@ body.mm-placing #board { cursor: crosshair; }
 .mm-pal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.3rem; }
 .mm-pal-grid .hint { grid-column: 1 / -1; opacity: 0.7; margin: 0.3rem 0; }
 .mm-pal-type {
-  display: flex; flex-direction: column; align-items: center; gap: 0.1rem; min-width: 0; padding: 0.3rem 0.2rem; line-height: 1.15;
-  border: 1px solid transparent; border-radius: 6px; background: rgb(255 255 255 / 0.05); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem; min-width: 0; padding: 0.3rem 0.2rem; line-height: 1.15; color: inherit;
+  border: 1px solid transparent; border-radius: 6px; background: var(--mm-ws-raise, rgb(255 255 255 / 0.05)); cursor: pointer;
   transition: transform 0.16s var(--mm-ease-out, ease-out), background 0.16s;
 }
 .mm-pal-type img { height: 2.3rem; width: auto; pointer-events: none; }
 .mm-pal-type span { font-size: 0.7rem; text-align: center; overflow-wrap: anywhere; }
-.mm-pal-type:hover { transform: translateY(-2px); background: rgb(255 255 255 / 0.12); }
+.mm-pal-type:hover { transform: translateY(-2px); background: color-mix(in srgb, currentColor 13%, transparent); }
 .mm-pal-type:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
 .mm-pal-type.on { border-color: var(--c, var(--mm-accent, #e5322d)); background: color-mix(in srgb, var(--c, #e5322d) 22%, transparent); }
-@media (prefers-reduced-motion: reduce) { .mm-palette { animation: none; } .mm-pal-type { transition: none; } .mm-pal-type:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mm-pal-type { transition: none; } .mm-pal-type:hover { transform: none; } }
 
 /* ---- floating pin filter ---- */
 .mm-filter {
@@ -257,30 +254,30 @@ body.mm-placing #board { cursor: crosshair; }
 body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair; }
 .mm-wp-rodbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.4rem; }
 .mm-wp-rodbtns button { padding: 0.25rem 0.4rem; }
-.mm-water-panel .window-content { padding: 0; overflow: hidden; }
-.mm-wp { display: flex; flex-direction: column; height: 100%; }
-.mm-wp-status { padding: 0.3rem 0.7rem; font-size: 0.78rem; opacity: 0.75; border-bottom: 1px solid var(--mm-edge); }
-.mm-wp-tabs { display: flex; gap: 0.1rem; padding: 0.3rem 0.5rem 0; border-bottom: 1px solid var(--mm-edge); flex: none; }
-.mm-wp-tabs button { flex: 1; padding: 0.3rem 0.2rem; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; color: inherit; opacity: 0.65; cursor: pointer; font-size: 0.85rem; }
+/* the water settings, a panel of the Water workspace dock: the dock scrolls, the panel only lays out */
+.mm-wp { display: flex; flex-direction: column; }
+.mm-wp-status { padding: 0 0 0.35rem; font-size: 0.78rem; opacity: 0.75; border-bottom: 1px solid var(--mm-edge); }
+.mm-wp-tabs { display: flex; flex-wrap: wrap; gap: 0.1rem; padding: 0.3rem 0 0; border-bottom: 1px solid var(--mm-edge); flex: none; }
+.mm-wp-tabs button { flex: 1 0 30%; height: auto; padding: 0.3rem 0.2rem; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; color: inherit; opacity: 0.65; cursor: pointer; font-size: 0.85rem; }
 .mm-wp-tabs button:hover { opacity: 1; background: var(--mm-surface); }
 .mm-wp-tabs button[aria-selected="true"] { opacity: 1; font-weight: 700; border-bottom-color: var(--mm-accent); }
 .mm-wp-tabs button:focus-visible, .mm-wp-looklist button:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
-.mm-wp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0.4rem 0.7rem 0.8rem; }
+.mm-wp-body { padding: 0.4rem 0 0.6rem; }
 .mm-wp-sec { margin-bottom: 0.7rem; }
 .mm-wp-sec h4 { margin: 0.4rem 0 0.3rem; padding-bottom: 0.15rem; border-bottom: 1px solid var(--mm-edge); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.8; }
 .mm-wp-sec h5 { margin: 0.4rem 0 0.2rem; font-size: 0.78rem; opacity: 0.65; }
-.mm-wp-row { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 0.5rem; align-items: center; padding: 0.12rem 0; }
+.mm-wp-row { display: grid; grid-template-columns: 6.8rem minmax(0, 1fr); gap: 0.5rem; align-items: center; padding: 0.12rem 0; }
 .mm-wp-row label { cursor: help; overflow: hidden; text-overflow: ellipsis; }
 .mm-wp-ctl { min-width: 0; display: flex; align-items: center; }
 .mm-wp-ctl range-picker, .mm-wp-ctl select, .mm-wp-ctl color-picker { width: 100%; }
-.mm-wp-looklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.2rem, 1fr)); gap: 0.3rem; }
-.mm-wp-looklist button { display: flex; flex-direction: column; align-items: stretch; gap: 0.15rem; padding: 0.25rem; font-size: 0.78rem; cursor: pointer; border-radius: 6px; }
+.mm-wp-looklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.6rem, 1fr)); gap: 0.3rem; }
+.mm-wp-looklist button { height: auto; display: flex; flex-direction: column; align-items: stretch; gap: 0.15rem; padding: 0.25rem; font-size: 0.78rem; cursor: pointer; border-radius: 6px; }
 .mm-wp-looklist button[aria-pressed="true"] { outline: 2px solid var(--mm-accent); }
 .mm-wp-swatches { display: flex; height: 0.7rem; border-radius: 3px; overflow: hidden; }
 .mm-wp-swatches i { flex: 1; }
 .mm-wp-colors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.3rem 0.6rem; }
 .mm-wp-color { display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.75rem; cursor: help; }
-.mm-wp-foot { display: flex; gap: 0.4rem; padding: 0.4rem 0.7rem; border-top: 1px solid var(--mm-edge); flex: none; }
+.mm-wp-foot { display: flex; gap: 0.4rem; padding: 0.5rem 0 0; border-top: 1px solid var(--mm-edge); flex: none; }
 .mm-wp-foot button { flex: 1; }
 
 /* ---- pin preset manager ---- */
@@ -297,25 +294,25 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-pm .hint { opacity: 0.7; margin: 0.2rem 0; }
 
 /* ---- colour/editor dialogs ---- */
-.moinen-maps-dialog .mm-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.75rem; }
-.moinen-maps-dialog .mm-swatch {
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.75rem; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatch {
   width: 1.9rem; height: 1.9rem; flex: none; padding: 0; border-radius: 50%;
   border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
   background: var(--c, color-mix(in srgb, currentColor 8%, transparent));
   display: grid; place-items: center; font-size: 0.8rem; cursor: pointer;
   transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.18s;
 }
-.moinen-maps-dialog .mm-swatch:hover { transform: translateY(-2px) scale(1.08); }
-.moinen-maps-dialog .mm-swatch:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 3px; }
-.moinen-maps-dialog .mm-swatch:disabled { opacity: 0.4; cursor: default; }
-@media (prefers-reduced-motion: reduce) { .moinen-maps-dialog .mm-swatch { transition: none; } .moinen-maps-dialog .mm-swatch:hover { transform: none; } }
-.moinen-maps-dialog .mm-fold { margin: 0.4rem 0; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 6px; }
-.moinen-maps-dialog .mm-fold > summary { padding: 0.4rem 0.6rem; cursor: pointer; font-weight: 600; }
-.moinen-maps-dialog .mm-fold > summary:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: -2px; }
-.moinen-maps-dialog .mm-fold-body { padding: 0 0.6rem 0.4rem; }
-.moinen-maps-dialog .is-off { opacity: 0.4; }
-.moinen-maps-dialog .mm-swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #15110f, 0 0 0 4px var(--c, #e5322d); }
-.moinen-maps-dialog .hint { opacity: 0.7; margin: 0 0 0.25rem; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatch:hover { transform: translateY(-2px) scale(1.08); }
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatch:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 3px; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatch:disabled { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) { :is(.moinen-maps-dialog, .mm-ws) .mm-swatch { transition: none; } :is(.moinen-maps-dialog, .mm-ws) .mm-swatch:hover { transform: none; } }
+:is(.moinen-maps-dialog, .mm-ws) .mm-fold { margin: 0.4rem 0; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 6px; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-fold > summary { padding: 0.4rem 0.6rem; cursor: pointer; font-weight: 600; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-fold > summary:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: -2px; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-fold-body { padding: 0 0.6rem 0.4rem; }
+:is(.moinen-maps-dialog, .mm-ws) .is-off { opacity: 0.4; }
+:is(.moinen-maps-dialog, .mm-ws) .mm-swatch.on { border-color: #fff; box-shadow: 0 0 0 2px #15110f, 0 0 0 4px var(--c, #e5322d); }
+:is(.moinen-maps-dialog, .mm-ws) .hint { opacity: 0.7; margin: 0 0 0.25rem; }
 
 /* ---- label typography ---- */
 .mm-fontpreview { margin: 0.4rem 0 0.6rem; padding: 0.55rem 0.8rem; border-radius: 6px; font-size: 1.5rem; line-height: 1.2; text-align: center; background: #e8dcc0; color: #15110f; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: opacity 0.2s; }
@@ -453,3 +450,208 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 @keyframes mm-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .mm-live-dot { animation: none; } }
 .moinen-maps-tab .mm-live { margin: 0 0 0.6rem; }
+
+/* ---- workspace: the options bar across the top and the dock of panels on the right (GM, while a Moinen Maps section is open) ---- */
+#moinen-maps-workspace {
+  --mm-ink: #15110f;
+  --mm-cream: #fff3e2;
+  --mm-accent: #e5322d;
+  --mm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --mm-ws-ground: var(--color-cool-5-90, rgb(11 10 19 / 0.92));
+  --mm-ws-text: var(--color-text-primary, #efe6d8);
+  --mm-ws-muted: color-mix(in srgb, var(--mm-ws-text) 74%, transparent);
+  --mm-ws-raise: color-mix(in srgb, var(--mm-ws-text) 7%, transparent);
+  --mm-ws-edge: color-mix(in srgb, var(--mm-ws-text) 16%, transparent);
+  --mm-edge: var(--mm-ws-edge);
+  --mm-surface: var(--mm-ws-raise);
+  position: absolute; inset: 0; z-index: var(--z-index-app, 30);
+  margin: 0; padding: 0; min-width: 0; min-height: 0; max-height: none;
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+  pointer-events: none;
+  color: var(--mm-ws-text);
+  font-size: var(--font-size-13, 0.8125rem);
+}
+#interface.theme-light #moinen-maps-workspace, body.theme-light #moinen-maps-workspace {
+  --mm-ws-ground: rgb(255 243 226 / 0.96);
+  --mm-ws-text: #15110f;
+}
+#moinen-maps-workspace ::selection { background: color-mix(in srgb, var(--mm-accent) 45%, transparent); }
+#moinen-maps-workspace :where(button, input, select, summary, range-picker, color-picker, [tabindex]):focus-visible { outline: 2px solid var(--mm-accent); outline-offset: 1px; }
+.mm-ws-bar, .mm-ws-dock {
+  position: absolute; pointer-events: auto;
+  background: var(--mm-ws-ground); color: var(--mm-ws-text);
+  border: 1px solid var(--mm-ws-edge); border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+  animation: mm-ws-in 0.18s var(--mm-ease-out) both;
+}
+@keyframes mm-ws-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* the bar: the section's inked label, then two tiers: the tools and the section's actions, and under them the active tool's options */
+.mm-ws-bar {
+  top: var(--mm-ws-bar-top, 16px); left: var(--mm-ws-left, 320px); right: var(--mm-ws-bar-right, var(--mm-ws-right, 64px));
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  min-height: 2.75rem; padding: 0.35rem 0.35rem 0.35rem 0.45rem;
+}
+.mm-ws-bar > .mm-ws-tag { margin-top: 0.2rem; }
+.mm-ws-bar > .mm-ws-fold { margin-top: 0.15rem; }
+.mm-ws-bar.is-folded { right: auto; }
+.mm-ws-tag {
+  flex: none; display: inline-flex; align-items: center; gap: 0.45rem;
+  padding: 0.15rem 0.7rem 0.2rem 0.55rem;
+  color: var(--mm-ink); background: var(--mm-cream);
+  border: 2px solid var(--mm-ink); border-radius: 10px 7px 9px 6px / 7px 10px 6px 9px;
+  font-size: var(--font-size-14, 0.875rem); font-weight: 700; white-space: nowrap;
+  transform: rotate(-1.2deg);
+}
+.mm-ws-tag i { color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 82%, var(--mm-ink)); }
+.mm-ws-tag.is-soon { border-style: dashed; }
+.mm-ws-bar-body {
+  flex: 1; min-width: 0; display: grid; align-items: center; gap: 0.35rem 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "tools name side" "opts opts opts";
+}
+.mm-ws-tools { grid-area: tools; }
+.mm-ws-tool { grid-area: name; overflow: hidden; text-overflow: ellipsis; }
+.mm-ws-side { grid-area: side; }
+.mm-ws-opts { grid-area: opts; }
+.mm-ws-bar-body[hidden] { display: none; }
+.mm-ws-tool { font-weight: 700; white-space: nowrap; }
+/* the section's tools: one pressed at a time, each icon in its own ink */
+.mm-ws-tools, .mm-ws-side { flex: none; display: flex; align-items: center; gap: 2px; }
+.mm-ws-side { gap: 4px; }
+.mm-ws-toolbtn {
+  flex: none; display: grid; place-items: center; width: 2rem; height: 2rem; margin: 0; padding: 0;
+  color: color-mix(in srgb, var(--mm-tool, var(--mm-ws-text)) 80%, #fff); background: var(--mm-ws-raise);
+  border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-size: 0.95rem;
+  transition: background-color 0.15s var(--mm-ease-out), border-color 0.15s var(--mm-ease-out);
+}
+.mm-ws-toolbtn > i { filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.45)); transition: transform 0.18s var(--mm-ease-out); }
+.mm-ws-toolbtn:hover { background: color-mix(in srgb, var(--mm-ws-text) 14%, transparent); }
+.mm-ws-toolbtn:hover > i { transform: translateY(-1px) scale(1.08); }
+.mm-ws-toolbtn[aria-pressed="true"] { background: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 30%, var(--mm-ws-ground)); border-color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 75%, transparent); }
+.mm-ws-paneltog { width: 1.75rem; height: 1.75rem; color: var(--mm-ws-muted); background: none; font-size: 0.85rem; }
+.mm-ws-paneltog > i { filter: none; }
+/* the section's actions (clear all...) stand apart from the shortcuts to its panels */
+.mm-ws-side > [data-action] + .mm-ws-paneltog { margin-left: 0.6rem; }
+.mm-ws-side > [data-action]:hover { color: var(--mm-accent); }
+#interface.theme-light .mm-ws-toolbtn, body.theme-light .mm-ws-toolbtn { color: color-mix(in srgb, var(--mm-tool, var(--mm-ws-text)) 85%, #15110f); }
+@media (prefers-reduced-motion: reduce) { .mm-ws-toolbtn, .mm-ws-toolbtn > i { transition: none; } .mm-ws-toolbtn:hover > i { transform: none; } }
+.mm-ws-opts { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 1rem; padding-top: 0.35rem; border-top: 1px solid var(--mm-ws-edge); }
+.mm-ws-opts:empty { display: none; }
+.mm-ws-opt { display: inline-flex; align-items: center; gap: 0.45rem; margin: 0; white-space: nowrap; }
+.mm-ws-opt > label, .mm-ws-label { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+.mm-ws-opt > label[data-tooltip] { cursor: help; }
+.mm-ws-opt select { width: auto; max-width: 9rem; }
+.mm-ws-range range-picker { width: 10rem; }
+.mm-ws-range range-picker input[type="number"] { flex: 0 0 3rem; }
+.mm-ws-check { gap: 0.35rem; cursor: pointer; }
+.mm-ws-check input { margin: 0; }
+.mm-ws-hint { margin-left: auto; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); white-space: normal; }
+.mm-ws-colors .mm-swatches { display: flex; flex-wrap: nowrap; gap: 0.25rem; margin: 0; }
+.mm-ws-colors .mm-swatch { width: 1.35rem; height: 1.35rem; border-width: 2px; font-size: 0.65rem; }
+.mm-ws-colors color-picker { width: 4.6rem; }
+.mm-ws .mm-swatch.on { border-color: var(--mm-ws-text); box-shadow: 0 0 0 2px var(--mm-ws-ground), 0 0 0 4px var(--c, var(--mm-accent)); }
+.mm-ws-pinpick {
+  flex: none; display: inline-flex; align-items: center; gap: 0.4rem; width: auto; height: 2rem; margin: 0; padding: 0 0.6rem 0 0.25rem;
+  color: inherit; background: var(--mm-ws-raise); border: 1px solid var(--mm-ws-edge); border-radius: 6px; cursor: pointer;
+}
+.mm-ws-pinpick img { height: 1.65rem; width: auto; }
+.mm-ws-pinpick:hover { background: color-mix(in srgb, var(--mm-ws-text) 13%, transparent); }
+.mm-ws-fold {
+  flex: none; display: grid; place-items: center; width: 1.75rem; height: 1.75rem; margin: 0; padding: 0;
+  color: var(--mm-ws-muted); background: none; border: 0; border-radius: 4px; cursor: pointer;
+}
+.mm-ws-fold:hover { color: var(--mm-ws-text); background: var(--mm-ws-raise); }
+.mm-ws-btn { flex: none; width: auto; height: 1.9rem; margin: 0; padding: 0 0.6rem; white-space: nowrap; }
+
+/* dock: a column of panels left of the sidebar, below the bar, above the hotbar */
+.mm-ws-dock {
+  top: var(--mm-ws-top, 76px); right: var(--mm-ws-right, 64px); width: 300px;
+  max-height: calc(100% - var(--mm-ws-top, 76px) - var(--mm-ws-bottom, 16px));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.mm-ws-dock.is-folded { width: auto; }
+.mm-ws-dock-head { flex: none; display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.3rem 0.25rem 0.7rem; }
+.mm-ws-dock-title { flex: 1; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); font-weight: 600; }
+.mm-ws-dock.is-folded .mm-ws-dock-head { padding: 0.25rem; }
+.mm-ws-dock.is-folded .mm-ws-dock-title { display: none; }
+.mm-ws-panels {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--mm-ws-text) 30%, transparent) transparent;
+}
+.mm-ws-panels[hidden], .mm-ws-rail[hidden] { display: none; }
+.mm-ws-panel + .mm-ws-panel { margin-top: 2px; }
+.mm-ws-panel-head { margin: 0; padding: 0; border: 0; font-size: inherit; }
+.mm-ws-panel-head button {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%; height: auto; margin: 0; padding: 0.45rem 0.7rem;
+  color: inherit; background: var(--mm-ws-raise); border: 0; border-radius: 0;
+  font-size: var(--font-size-14, 0.875rem); font-weight: 700; text-align: left; cursor: pointer;
+}
+.mm-ws-panel-head button:hover { background: color-mix(in srgb, var(--mm-ws-text) 12%, transparent); }
+.mm-ws-panel-head button > i:first-child { width: 1.1rem; text-align: center; color: var(--mm-sec, var(--mm-accent)); }
+.mm-ws-panel-head span { flex: 1; }
+.mm-ws-chev { font-size: 0.7rem; color: var(--mm-ws-muted); transform: rotate(-90deg); transition: transform 0.18s var(--mm-ease-out); }
+.mm-ws-panel.is-open .mm-ws-chev { transform: none; }
+.mm-ws-panel-body { padding: 0.55rem 0.7rem 0.75rem; }
+.mm-ws-panel-body[hidden] { display: none; }
+.mm-ws-panel-body .form-group { margin: 0.3rem 0; }
+.mm-ws-panel-body .form-group > label { flex: 0 0 6.5rem; }
+.mm-ws-rail { display: flex; flex-direction: column; gap: 0.2rem; padding: 0 0.25rem 0.3rem; }
+.mm-ws-rail button { width: 1.75rem; height: 1.75rem; margin: 0; padding: 0; color: var(--mm-ws-muted); background: var(--mm-ws-raise); border: 0; border-radius: 4px; cursor: pointer; }
+.mm-ws-rail button:hover { color: var(--mm-ws-text); }
+
+/* panels that used to be windows, popovers and dialogs (Foundry gives every button a fixed height: these hold more than a line) */
+#moinen-maps-workspace :is(.mm-pal-type, .mm-ws-panel-head button, .mm-filter-row, .mm-filter-pinrow, .mm-row) { height: auto; min-height: 0; }
+.mm-ws .mm-pal-head { display: flex; gap: 0.35rem; margin-bottom: 0.5rem; }
+.mm-ws .mm-pal-grid { gap: 0.35rem; }
+.mm-ws .mm-pal-type span { font-size: var(--font-size-11, 0.7rem); }
+.mm-filter.is-docked { position: static; z-index: auto; width: auto; overflow: visible; font-size: inherit; color: inherit; background: none; border: 0; border-radius: 0; box-shadow: none; animation: none; }
+.mm-filter.is-docked .mm-filter-tools { align-items: center; }
+.mm-filter.is-docked .mm-filter-count { flex: 0 0 auto; padding-right: 0.2rem; }
+.mm-filter.is-docked .mm-filter-list { max-height: 40vh; }
+.mm-filter.is-docked .mm-filter-row, .mm-filter.is-docked .mm-filter-pinrow, .mm-filter.is-docked .mm-filter-fold, .mm-filter.is-docked .mm-filter-go { color: inherit; }
+.mm-filter.is-docked .mm-filter-row { background: var(--mm-ws-raise); }
+.mm-filter.is-docked .mm-filter-row:hover, .mm-filter.is-docked .mm-filter-pinrow:hover { background: color-mix(in srgb, var(--mm-ws-text) 13%, transparent); }
+.mm-filter.is-docked .mm-filter-pins { border-left-color: var(--mm-ws-edge); }
+.mm-filter.is-docked .mm-ws-check { display: flex; margin-top: 0.5rem; color: var(--mm-ws-muted); }
+.mm-ws .mm-pm .mm-pm-bar { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
+.mm-ws .mm-pm .mm-pm-bar select { flex: 1; min-width: 0; }
+.mm-ws .mm-pm .mm-pm-bar button { flex: none; width: 2rem; padding: 0; }
+.mm-ws .mm-pm .mm-pm-list { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.4rem 0; }
+.mm-ws .mm-pm .mm-pm-row:not(.mm-pm-ro) {
+  display: grid; gap: 0.25rem 0.3rem; align-items: center; padding-bottom: 0.4rem;
+  grid-template-columns: 2rem minmax(0, 1fr) 1.7rem 1.7rem 1.7rem;
+  grid-template-areas: "thumb name color color color" "thumb glyph up down del";
+}
+.mm-ws .mm-pm .mm-pm-row:not(.mm-pm-ro) + .mm-pm-row { padding-top: 0.45rem; border-top: 1px solid var(--mm-ws-edge); }
+.mm-ws .mm-pm .mm-pm-thumb { grid-area: thumb; width: 2rem; height: 2rem; object-fit: contain; }
+.mm-ws .mm-pm [name="name"] { grid-area: name; min-width: 0; }
+.mm-ws .mm-pm [name="glyph"] { grid-area: glyph; min-width: 0; }
+.mm-ws .mm-pm .mm-pm-row color-picker { grid-area: color; width: 100%; }
+.mm-ws .mm-pm [data-act="up"] { grid-area: up; } .mm-ws .mm-pm [data-act="down"] { grid-area: down; } .mm-ws .mm-pm [data-act="del"] { grid-area: del; }
+.mm-ws .mm-pm .mm-pm-row.mm-pm-ro { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto 1.1rem; gap: 0.35rem; align-items: center; }
+.mm-ws .mm-pm .mm-pm-ro .mm-pm-thumb { width: 1.8rem; height: 1.8rem; }
+.mm-ws .mm-pm .mm-pm-add { width: 100%; }
+.mm-pm-foot { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; }
+.mm-pm-state { flex: 1; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+.mm-pm-foot button { flex: none; width: auto; padding: 0 0.6rem; }
+.mm-pm-foot .mm-primary:not(:disabled) { color: var(--mm-cream); background: color-mix(in srgb, var(--mm-accent) 80%, var(--mm-ink)); border-color: var(--mm-ink); }
+.mm-ws .mm-panel { height: auto; padding: 0; }
+.mm-ws .mm-list { max-height: 45vh; min-height: 0; }
+.mm-ws .mm-row { color: inherit; }
+.mm-ws-soon { display: grid; justify-items: center; gap: 0.4rem; padding: 0.6rem 0.4rem; text-align: center; }
+.mm-ws-soon > i { font-size: 1.8rem; color: var(--mm-ws-muted); }
+.mm-ws-soon p { margin: 0; }
+.mm-ws-soon .hint { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+
+/* narrow windows: the bar wraps under its label, the dock gives the map more room */
+@media (max-width: 1100px) {
+  .mm-ws-bar-body { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "tools side" "opts opts"; }
+  .mm-ws-tool { display: none; }
+  .mm-ws-side { justify-self: end; }
+  .mm-ws-dock { width: 260px; }
+  .mm-ws-hint { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-ws-bar, .mm-ws-dock { animation: none; }
+  .mm-ws-chev { transition: none; }
+}
