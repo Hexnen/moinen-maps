@@ -650,7 +650,7 @@ function bakeArea(A, P, seed, uid, jag) {
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
-  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, chamfer });
+  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, cz: C.cz, cause: C.cause, causeKit, softLight, chamfer });
   fracture(C);
   fates(C);
   drawBase(C);
