@@ -1,28 +1,40 @@
-// Destruction causes: checks of the bake outside Foundry.   node dev/destruction-cause.test.mjs [baseline-rev]
-//  1. cause 0 is today's look: every stroke baked by the current core with no cause, with c = 0 and with a scene default of 0 gives
-//     the same bytes (sheet pixels and placement table) as the core of the baseline revision (default 4efd67d, before causes);
+// Destruction causes: checks of the bake outside Foundry.   node dev/destruction-cause.test.mjs
+//  1. cause 0 is the look without causes, proved two ways (no frozen copy of the core: it would go stale with every later change):
+//     a. history: for every commit that added or changed cause code, the core of that commit with no cause, c = 0 and a scene default
+//        of 0 bakes the same bytes (sheet pixels and placement table) as the core of its parent;
+//     b. today: the working-tree core with no cause bakes the same bytes as the working-tree core with every cause commit's change
+//        taken back out (reverse patch, dev/lib/baseline.mjs) - so later non-cause changes (tears, flooded holes, ...) are in both;
 //  2. determinism: every cause x kind bakes to the same bytes twice (fresh caches), and differs from cause 0;
 //  3. independence: a stroke's sprites are the same alone and among overlapping strokes of other causes and kinds;
 //  4. the scene default only reaches strokes without a cause of their own (c = 0 + default d == c = d; c = e + default d == c = e);
 //  5. emissive causes bake a light sprite (kind 3), the others do not; the base row carries the cause (field 17).
+// A new commit that changes cause code in scripts/destruction/*.mjs goes into CAUSE_COMMITS.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
+import { revTree, withoutCommits } from "./lib/baseline.mjs";
+import { execFileSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// the baseline: a git revision of core.mjs, or a file (a core.mjs without the cause code, when other work changed it since)
-const BASE_REV = process.argv[2] || "4efd67d";
+const DIR = "scripts/destruction";
+export const CAUSE_COMMITS = ["291ebda", "7cd5dcd"];
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
-const baseFile = path.join(tmp, "core-base.mjs");
-if ( fs.existsSync(BASE_REV) ) fs.copyFileSync(BASE_REV, baseFile);
-else fs.writeFileSync(baseFile, execFileSync("git", ["show", `${BASE_REV}:scripts/destruction/core.mjs`], { cwd: root }));
-// a baseline that imports its neighbours (tear.mjs) finds them next to it
-for ( const f of fs.readdirSync(path.join(root, "scripts/destruction")) ) if ( f !== "core.mjs" && f.endsWith(".mjs") ) fs.copyFileSync(path.join(root, "scripts/destruction", f), path.join(tmp, f));
-const Base = await import(pathToFileURL(baseFile).href);
-const Cur = await import(pathToFileURL(path.join(root, "scripts/destruction/core.mjs")).href);
+const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
+// today's baseline: the working tree minus the cause commits (only the files they touched)
+const baseDir = path.join(tmp, "today-base");
+fs.mkdirSync(baseDir);
+for ( const f of fs.readdirSync(path.join(root, DIR)) ) if ( f.endsWith(".mjs") ) {
+  const touched = CAUSE_COMMITS.filter((r) => execFileSync("git", ["diff", "--name-only", `${r}^`, r, "--", `${DIR}/${f}`], { cwd: root }).toString().trim());
+  fs.writeFileSync(path.join(baseDir, f), touched.length ? withoutCommits(root, `${DIR}/${f}`, touched) : fs.readFileSync(path.join(root, DIR, f)));
+}
+const Base = await load(baseDir);
+const Cur = await import(pathToFileURL(path.join(root, DIR, "core.mjs")).href);
+const HIST = [];
+for ( const rev of CAUSE_COMMITS ) {
+  HIST.push({ rev, Old: await load(revTree(root, `${rev}^`, DIR, path.join(tmp, `${rev}-parent`))), New: await load(revTree(root, rev, DIR, path.join(tmp, rev))) });
+}
 
 let failed = 0;
 const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"} ${msg}`); if ( !ok ) failed++; };
@@ -88,16 +100,20 @@ for ( let t = 0; t < 6; t++ ) {
   strokes.push({ ob: capsule(`s${sid++}`, t, (cx - 40) / K, (cy - 20) / K, (cx + 40) / K, (cy + 15) / K, 5), p: { directional: true } }); // a followed stroke
 }
 
-/* 1. cause 0 = the baseline's bytes */
-let same = 0;
-for ( const { ob, p } of strokes ) {
-  const b = Base.bake(input([ob], p)), c0 = Cur.bake(input([ob], p)), c1 = Cur.bake(input([{ ...ob, c: 0 }], { ...p, cause: 0 }));
-  const ok = bytesOf(b) === bytesOf(c0) && bytesOf(b) === bytesOf(c1);
-  if ( ok ) same++; else check(false, `stroke ${ob.id} (kind ${Cur.TYPES[ob.t]}${p.jagged ? ", torn" : ""}${p.directional ? ", followed" : ""}) differs from ${BASE_REV} with cause 0`);
+/* 1. cause 0 = the look without causes */
+function sameAsBase(Old, New, label) {
+  let same = 0;
+  for ( const { ob, p } of strokes ) {
+    const b = Old.bake(input([ob], p)), c0 = New.bake(input([ob], p)), c1 = New.bake(input([{ ...ob, c: 0 }], { ...p, cause: 0 }));
+    const ok = bytesOf(b) === bytesOf(c0) && bytesOf(b) === bytesOf(c1);
+    if ( ok ) same++; else check(false, `${label}: stroke ${ob.id} (kind ${New.TYPES[ob.t]}${p.jagged ? ", torn" : ""}${p.directional ? ", followed" : ""}) differs with cause 0`);
+  }
+  check(same === strokes.length, `${label}: cause 0 is bit-identical, ${same}/${strokes.length} strokes (every kind, plain, torn, followed)`);
+  const several = strokes.slice(0, 6).map((s) => s.ob).concat(strokes.slice(15, 18).map((s) => s.ob));
+  check(bytesOf(Old.bake(input(several))) === bytesOf(New.bake(input(several))), `${label}: a bake of several overlapping strokes is bit-identical too`);
 }
-check(same === strokes.length, `cause 0 is bit-identical to ${BASE_REV}: ${same}/${strokes.length} strokes (every kind, plain, torn, followed)`);
-const all0 = Base.bake(input(strokes.slice(0, 6).map((s) => s.ob))), all1 = Cur.bake(input(strokes.slice(0, 6).map((s) => s.ob)));
-check(bytesOf(all0) === bytesOf(all1), "a bake of several overlapping strokes is bit-identical too");
+for ( const { rev, Old, New } of HIST ) sameAsBase(Old, New, `commit ${rev} vs its parent`);
+sameAsBase(Base, Cur, "working tree vs working tree without the cause commits");
 
 /* 2. determinism, and every cause changes the look */
 let det = 0, diff = 0, total = 0, lights = 0;
