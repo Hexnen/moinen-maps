@@ -18,8 +18,9 @@ export const LEVELS = [1, 2, 3];
 export const K = 2;
 const MAX_ART = 4e6;          // art pixels of the whole scene (2000 x 2000): above that the art pixel grows, so a bake never exceeds ~100 MB
 
-export const PARAM_DEFAULTS = { debris: 0.7, scatter: 1, lift: 1, rubble: 0.6, halo: 0.6, edge: 0.7, material: "auto", anim: true, idle: true, fxWho: "all" };
-export const LIMITS = { debris: [0, 1], scatter: [0.3, 2], lift: [0, 1.6], rubble: [0, 1], halo: [0, 1], edge: [0, 1] };
+export const PARAM_DEFAULTS = { debris: 0.7, scatter: 1, lift: 1, rubble: 0.6, halo: 0.6, edge: 0.7, material: "auto", jagged: false, jag: 0.6, directional: false,
+  anim: true, idle: true, fxWho: "all", entry: true, entrySpeed: 1, entryPower: 1 };
+export const LIMITS = { debris: [0, 1], scatter: [0.3, 2], lift: [0, 1.6], rubble: [0, 1], halo: [0, 1], edge: [0, 1], jag: [0.1, 1], entrySpeed: [0.4, 2.5], entryPower: [0.3, 1.6] };
 
 let REV = 0;
 export const nextRev = () => ++REV;
@@ -82,7 +83,7 @@ export function grids(ap, r = sceneRect()) {
 
 export function blank(scene = canvas.scene) {
   const ap = artPx(scene), g = grids(ap);
-  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev() };
+  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [], paths: [] };
 }
 
 export function load(scene = canvas.scene) {
@@ -91,19 +92,20 @@ export function load(scene = canvas.scene) {
   const g = grids(f.ap);
   return {
     ap: f.ap, ...g, mask: rleDecode(f.m, g.mw * g.mh), seed: Number(f.seed) || 1,
-    params: cleanParams(f.params), enabled: f.enabled !== false, blast: f.blast ?? null, baked: f.baked ?? null, rev: nextRev()
+    params: cleanParams(f.params), enabled: f.enabled !== false, blast: f.blast ?? null, baked: f.baked ?? null, rev: nextRev(),
+    entries: Array.isArray(f.entries) ? f.entries : [], paths: Array.isArray(f.paths) ? f.paths : []
   };
 }
 
 export function encode(S) {
-  return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, m: rleEncode(S.mask), blast: S.blast ?? null };
+  return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, m: rleEncode(S.mask), blast: S.blast ?? null, entries: S.entries ?? [], paths: S.paths ?? [] };
 }
 
 export function cleanParams(p = {}) {
   const out = { ...PARAM_DEFAULTS };
   for ( const [k, [lo, hi]] of Object.entries(LIMITS) ) if ( Number.isFinite(Number(p[k])) ) out[k] = Math.min(hi, Math.max(lo, Number(p[k])));
   if ( MATERIALS.includes(p.material) ) out.material = p.material;
-  for ( const k of ["anim", "idle"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
+  for ( const k of ["anim", "idle", "entry", "jagged", "directional"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
   if ( p.fxWho === "gm" || p.fxWho === "all" ) out.fxWho = p.fxWho;
   return out;
 }

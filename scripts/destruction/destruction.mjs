@@ -1,29 +1,41 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
-import { readMeta } from "./core.mjs";
-import { runBake, disposeBaker } from "./bake.mjs";
-import { mapPixels, backgroundInfo } from "./source.mjs";
+import { readMeta, LIVE_PARAMS } from "./core.mjs";
+import { runBake, encodeInWorker, disposeBaker } from "./bake.mjs";
+import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
 import { DestructionDisplay } from "./display.mjs";
 import * as Editor from "./editor.mjs";
 
 /**
  * The destruction of the open scene: loads the mask from the scene flag, bakes it (worker) or takes a cached or published bake,
- * shows it, plays the break, and takes the GM's edits (bake and save after a short pause, upload of the bake for the players).
+ * shows it, plays the entry of what is new, and takes the GM's edits.
+ *
+ * One bake at a time: an edit during a bake marks the state dirty and the next bake starts when this one is on screen, so every
+ * result shown is newer than the one before (no stale bake can replace a newer one) and no bake is thrown away. The worker keeps the
+ * areas it baked, so a stroke only bakes the areas it touched; the display only adds and removes the areas whose hash changed.
+ * The GM shows the raw bake at once; the PNG (for the IndexedDB cache and the players) is encoded in the worker a moment after the
+ * last edit, uploaded and named in the scene flag together with the ENTRIES: which areas appeared and when (server time), so players
+ * present play the same entry at the same moment and a reload or a late bake never replays an old one.
  * Public API: `game.modules.get("moinen-maps").api.destruction`. Hook fired: "moinenMapsDestruction" ("loaded" | "edited" |
  * "params" | "status" | "brush").
  */
 
-let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, publishTimer = 0, publishFailed = false;
-let shownKey = "", pendingBox = null, playedBlast = null;
-const status = { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", ms: 0, areas: [] };
+let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, persistTimer = 0, publishFailed = false;
+let inflight = false, again = null, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
+let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
+const played = new Set();            // area hashes already shown on this client (they never enter again)
+const entryLog = new Map();          // GM: area hash -> { t (server time), o, d } of entries played here, for the flag
+const ENTRY_WINDOW = 8000;           // an entry older than this (server time) is shown settled
+const status = { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", ms: 0, areas: [], perf: {} };
 
 export const tell = (kind) => Hooks.callAll("moinenMapsDestruction", kind);
 export const state = () => S;
 export const getStatus = () => status;
 const origin = () => { const r = Model.sceneRect(); return { x: r.x, y: r.y }; };
 const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
+const now = () => game.time.serverTime;
 
 /* ---------------------------------------------------------------- lifecycle */
 
@@ -33,16 +45,37 @@ function onCanvasReady() {
   S = Model.load(canvas.scene);
   Editor.onCanvasReady();
   if ( S?.enabled && Model.hasPaint(S) ) rebake();
+  selfCheck(10000);
   tell("loaded");
+}
+
+/**
+ * Masks on the scene but nothing on screen a while after load: say why (console and the Damage panel) and bake here once more,
+ * ignoring the cache and the published file.
+ */
+function selfCheck(ms, retried = false) {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(() => {
+    checkTimer = 0;
+    if ( !S || !S.enabled || !Model.hasPaint(S) || display?.groups.size ) return;
+    if ( status.baking || status.waiting || inflight ) return selfCheck(4000, retried);
+    const why = status.error || (shownKey ? "the bake had no areas" : "no bake reached the screen");
+    console.error(`${MODULE_ID} | destruction: masks present but nothing displayed (${why})`);
+    status.error = game.i18n.format("MOINENMAPS.Destr.notShown", { why }); tell("status");
+    if ( !retried ) { shownKey = ""; rebake({ awaitPublish: false, force: true }).then(() => selfCheck(6000, true)); }
+  }, ms);
 }
 
 function teardown() {
   gen++;
-  for ( const t of [bakeTimer, saveTimer, publishTimer] ) clearTimeout(t);
-  bakeTimer = saveTimer = publishTimer = 0;
+  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer] ) clearTimeout(t);
+  bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
   display?.destroy(); display = null;
-  S = null; shownKey = ""; pendingBox = null;
+  S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
+  played.clear(); entryLog.clear(); playedBlast = null; loaded = false;
+  forgetSceneMap();
+  disposeBaker();
   Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", areas: [] });
 }
 
@@ -51,127 +84,198 @@ function onUpdateScene(scene, changed, _options, userId) {
   const f = changed.flags?.[MODULE_ID];
   if ( !f || !(Model.FLAG in f || `-=${Model.FLAG}` in f) ) return;
   if ( userId === game.user.id ) return;                    // our own save: already shown
-  const prev = S;
   S = Model.load(scene);
   if ( !S ) { display?.clear(); shownKey = ""; tell("loaded"); return; }
-  const box = prev ? Model.diffBox(prev.mask, S.mask, S.mw) : null;
-  if ( box ) pendingBox = union(pendingBox, artBox(box));
-  if ( S.enabled && Model.hasPaint(S) ) rebake(); else { display?.clear(); shownKey = ""; }
+  display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
+  if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.clear(); shownKey = ""; }
   Editor.refreshOverlay();
   tell("loaded");
 }
 
+const lookOf = (P) => ({ entry: P.entry && P.anim, speed: P.entrySpeed, power: P.entryPower });
 const union = (a, b) => !a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
 /** Mask box -> art box (a little wider: shards near the edge of a stroke move too). */
 const artBox = (b) => b && { x0: b.x0 * Model.K - 3, y0: b.y0 * Model.K - 3, x1: (b.x1 + 1) * Model.K + 3, y1: (b.y1 + 1) * Model.K + 3 };
+const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
 /* ---------------------------------------------------------------- baking */
 
-function scheduleBake(ms = 300) {
+function scheduleBake(ms = 120) {
   clearTimeout(bakeTimer);
   bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, ms);
 }
 
-/** What the bake needs: the mask and the map's pixels around the damage (with room for thrown debris). */
-function buildInput() {
-  let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
-  for ( let i = 0; i < S.mask.length; i++ ) if ( S.mask[i] & 3 ) { const x = i % S.mw, y = (i - x) / S.mw; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
-  const K = Model.K, span = Math.max(x1 - x0, y1 - y0) * K;
-  const margin = Math.round(Math.min(160, Math.max(14, span * 0.6 * S.params.scatter + 10)));
-  const ax0 = Math.max(0, x0 * K - margin), ay0 = Math.max(0, y0 * K - margin);
-  const ax1 = Math.min(S.aw, (x1 + 1) * K + margin), ay1 = Math.min(S.ah, (y1 + 1) * K + margin);
-  const box = { x0: ax0, y0: ay0, w: ax1 - ax0, h: ay1 - ay0 };
-  return { mask: S.mask, mw: S.mw, mh: S.mh, K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params, map: { ...box, data: mapPixels(S.ap, box) } };
-}
-
 /** `force`: bake here even when a cached or published bake exists (a check that the bake is deterministic). */
-export async function rebake({ awaitPublish = true, force = false } = {}) {
+export async function rebake(opts = {}) {
   if ( !S ) return;
   clearTimeout(bakeTimer); bakeTimer = 0;
-  const my = ++gen, scene = canvas.scene;
-  if ( !Model.hasPaint(S) || !S.enabled ) { display?.clear(); shownKey = ""; Object.assign(status, { baking: false, waiting: false, progress: 0 }); tell("status"); return; }
+  if ( inflight ) { again = { ...(again ?? {}), ...opts }; return; }
+  inflight = true; again = null;
+  try { await bakeOnce(opts); }
+  catch ( err ) { console.error(`${MODULE_ID} | destruction`, err); }
+  finally { inflight = false; }
+  if ( again && S ) { const o = again; again = null; rebake(o); }
+}
+
+async function bakeOnce({ awaitPublish = true, force = false } = {}) {
+  const my = gen, scene = canvas.scene, T = { t0: performance.now() };
+  if ( !Model.hasPaint(S) || !S.enabled ) {
+    display?.clear(); shownKey = ""; shownMask = null;
+    Object.assign(status, { baking: false, waiting: false, progress: 0, areas: [] }); tell("status"); return;
+  }
   const key = Store.makeKey(scene, S, backgroundInfo()?.path ?? "");
-  if ( key === shownKey && display && !force ) { maybePlay(); return; }
-  let blob = null, metaRows = 0, source = "";
+  const taken = strokes.splice(0), mask = S.mask.slice();
+  if ( key === shownKey && display && !force ) { maybeBlast(); return; }
+  let sheet = null, metaRows = 0, source = "", blob = null, stats = null;
   const hit = force ? null : await Store.getCached(key);
   if ( my !== gen ) return;
-  if ( hit?.blob ) { blob = hit.blob; metaRows = hit.metaRows; source = "cache"; }
+  if ( hit?.blob ) { blob = hit.blob; metaRows = hit.metaRows; stats = hit.stats ?? null; source = "cache"; }
   if ( !blob && !force && S.baked?.key === key ) {
     blob = await Store.fetchPublished(S.baked);
     if ( my !== gen ) return;
     if ( blob ) { metaRows = S.baked.metaRows; source = "published"; Store.putCached(key, { blob, metaRows }); }
   }
+  if ( blob ) {
+    const t = performance.now();
+    const dec = await Store.decodeSheet(blob);
+    if ( my !== gen ) return;
+    sheet = { data: dec.rgba, w: dec.w, h: dec.h }; T.decode = performance.now() - t;
+  }
   // a player whose GM is painting: wait for the GM's upload, bake here only when it does not come
-  if ( !blob && awaitPublish && !game.user.isGM && game.users.activeGM ) {
+  if ( !sheet && awaitPublish && !game.user.isGM && game.users.activeGM ) {
+    strokes.unshift(...taken);
     status.waiting = true; tell("status");
     bakeTimer = setTimeout(() => { bakeTimer = 0; rebake({ awaitPublish: false }); }, 12000);
     return;
   }
   status.waiting = false;
-  if ( !blob ) {
+  if ( !sheet ) {
     Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
     try {
-      const t0 = performance.now();
-      const res = await runBake(buildInput(), { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
+      const t = performance.now();
+      const input = { mask, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+      const res = await runBake(input, () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; },
+        { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
       if ( my !== gen ) return;
-      blob = await Store.encodePng(res.sheet);
-      metaRows = res.metaRows; source = "baked"; status.stats = res.stats; status.ms = Math.round(performance.now() - t0);
-      Store.putCached(key, { blob, metaRows, stats: res.stats });
+      sheet = res.sheet; metaRows = res.metaRows; stats = res.stats; source = "baked";
+      T.bake = performance.now() - t; status.ms = Math.round(T.bake);
     } catch ( err ) {
       if ( my !== gen ) return;
       console.error(`${MODULE_ID} | destruction bake`, err);
       Object.assign(status, { baking: false, error: String(err?.message ?? err) }); tell("status");
       return;
     }
-  } else if ( hit?.stats ) status.stats = hit.stats;
-  if ( game.user.isGM && S.baked?.key !== key ) schedulePublish(key, blob, metaRows);
-  const dec = await Store.decodePng(blob);
-  if ( my !== gen ) return;
-  const meta = readMeta(dec.rgba, dec.w, dec.h, metaRows);
-  display ??= new DestructionDisplay();
-  display.show(dec.canvas, meta, S.ap, origin());
-  display.setIdle(S.params.idle, S.params.fxWho);
-  shownKey = key;
-  Object.assign(status, { baking: false, progress: 1, source, hash: fnv(dec.rgba).toString(16), areas: display.areas.map((a) => ({ type: a.type, mat: Model.MATERIALS[a.mat + 1] ?? "earth" })) });
-  tell("status");
-  maybePlay();
-}
-
-/** After a new bake is on screen: play the break for what was just painted, or for a detonation that has not been seen yet. */
-function maybePlay() {
-  if ( !display || !S ) return;
-  const motion = S.params.anim;
-  const b = S.blast;
-  if ( b?.id && b.id !== playedBlast ) {
-    playedBlast = b.id;
-    const late = game.time.serverTime - b.t;
-    if ( motion && late < 15000 ) { display.play(b.box ?? null, performance.now() - late); pendingBox = null; return; }
   }
-  if ( pendingBox && motion ) display.play(pendingBox);
-  pendingBox = null;
+  let t = performance.now();
+  const meta = readMeta(sheet.data, sheet.w, sheet.h, metaRows);
+  display ??= new DestructionDisplay();
+  display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
+  const first = !loaded;
+  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, meta, S.ap, origin());
+  T.show = performance.now() - t;
+  playEntries(added, removed, taken, mask, first);
+  shownKey = key; shownMask = mask; loaded = true;
+  t = performance.now();
+  const hash = fnv(sheet.data).toString(16);
+  T.hash = performance.now() - t; T.total = performance.now() - T.t0;
+  Object.assign(status, { baking: false, progress: 1, source, hash, error: "", stats: stats ?? status.stats, perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])),
+    areas: display.areas.map((a) => ({ type: a.type, mat: Model.MATERIALS[a.mat + 1] ?? "earth", hash: a.hash })) });
+  tell("status");
+  if ( source === "baked" ) schedulePersist(key, sheet, metaRows, stats);
+  else if ( game.user.isGM && S.baked?.key !== key && blob ) schedulePersist(key, null, metaRows, stats, blob);
+  maybeBlast(first);
 }
 
-/* ---------------------------------------------------------------- publishing (GM) */
+/**
+ * Which new areas enter, and how. A new area under the GM's stroke enters from the stroke's start (gashes along it); an area that
+ * replaced an older one (a stroke grew it) only reveals the changed part and fades the rest over. On load, or for a player, the
+ * entries come from the scene flag (server time): recent ones play, older ones are shown settled. Areas this client has shown before
+ * never enter again.
+ */
+function playEntries(added, removed, taken, mask, first) {
+  if ( !display ) return;
+  const all = forceEntry; forceEntry = false;
+  // the edits this bake covers: the GM's strokes, or (a player, a reload) the difference to what was on screen
+  let edits = taken;
+  if ( !edits.length && shownMask && shownMask.length === mask.length ) {
+    const b = Model.diffBox(shownMask, mask, S.mw);
+    if ( b ) { const ab = artBox(b); edits = [{ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null }]; }
+  }
+  const flag = new Map((S.entries ?? []).map((e) => [e.h, e]));
+  const sNow = now(), pNow = performance.now();
+  for ( const g of added ) {
+    const h = g.hash, r = g.info.rect;
+    if ( played.has(h) && !all ) continue;
+    played.add(h);
+    const e = flag.get(h);
+    if ( e && (first || !game.user.isGM) ) {
+      // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
+      if ( sNow - e.t > ENTRY_WINDOW ) continue;
+      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: e.o ?? null, dir: e.d ?? null, box: e.b ?? null, fadeRest: !!e.b });
+      continue;
+    }
+    if ( first && !all ) continue;
+    const hits = edits.filter((s) => s.box.x0 <= r.x1 && s.box.x1 >= r.x0 && s.box.y0 <= r.y1 && s.box.y1 >= r.y0);
+    if ( !hits.length && !all ) continue;
+    const replaced = removed.some((q) => { const o = q.info.rect; return o.x0 < r.x1 && o.x1 > r.x0 && o.y0 < r.y1 && o.y1 > r.y0; });
+    const box = replaced && !all ? hits.reduce((u, s) => union(u, s.box), null) : null;
+    const s0 = hits[0], o = all ? null : s0?.a ?? null;
+    const d = s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
+    display.enter(g, { start: pNow, o, dir: g.info.type === "gash" || S.params.directional ? d : null, box, fadeRest: !!box });
+    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: box });
+  }
+}
 
-function schedulePublish(key, blob, metaRows) {
-  clearTimeout(publishTimer);
-  if ( !game.user.isGM || publishFailed ) return;
-  publishTimer = setTimeout(async () => {
-    publishTimer = 0;
-    const scene = canvas.scene;
-    if ( !S || !scene || S.baked?.key === key || shownKey !== key ) return;
+/** After a bake is on screen: a detonation that has not been seen here yet. */
+function maybeBlast(first = false) {
+  if ( !display || !S ) return;
+  const b = S.blast;
+  if ( !b?.id || b.id === playedBlast ) return;
+  playedBlast = b.id;
+  const late = now() - b.t;
+  if ( S.params.anim && late < (first ? 4000 : 15000) ) display.detonate(performance.now() - late);   // the shared moment (in the future, or already running)
+}
+
+/* ---------------------------------------------------------------- the PNG: cache, publish (GM) */
+
+/**
+ * A moment after the last bake on screen: the PNG (encoded in the worker), into the IndexedDB cache, and (GM) uploaded and named in
+ * the scene flag with the entries that played since.
+ */
+function schedulePersist(key, sheet, metaRows, stats, blob = null) {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(async () => {
+    persistTimer = 0;
+    const my = gen, scene = canvas.scene;
+    if ( !S || shownKey !== key ) return;
     try {
+      if ( !blob ) {
+        const t = performance.now();
+        const png = await encodeInWorker(sheet.w, sheet.h, sheet.data);
+        status.perf.encode = Math.round(performance.now() - t);
+        blob = new Blob([png], { type: "image/png" });
+        await Store.putCached(key, { blob, metaRows, stats });
+      }
+      if ( my !== gen || !S || shownKey !== key || !game.user.isGM || publishFailed || S.baked?.key === key ) return;
       await save();
       const baked = await Store.publish(scene.id, key, blob, metaRows);
+      if ( my !== gen || !S ) return;
       S.baked = baked;
-      await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
+      // the entries that played since: everybody here plays them a moment after the upload, at the same server time
+      const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
+      for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
+      for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
+      S.entries = [...entryLog.values()];
+      await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked, [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries });
       tell("status");
     } catch ( err ) {
-      publishFailed = true;
-      console.warn(`${MODULE_ID} | could not publish the destruction`, err);
-      ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
+      if ( game.user.isGM ) {
+        publishFailed = true;
+        console.warn(`${MODULE_ID} | could not publish the destruction`, err);
+        ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
+      } else console.warn(`${MODULE_ID} | destruction cache`, err);
     }
-  }, 2500);
+  }, 900);
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
@@ -181,11 +285,15 @@ export function ensureState() {
   return S;
 }
 
-/** The mask changed inside `box` (mask pixels): the pieces there break when the new bake shows. */
-export function edited(box) {
+/** The mask changed inside `box` (mask pixels); `stroke` { a, b } (scene points) where it started and ended. */
+export function edited(box, stroke = null) {
   if ( !S ) return;
   S.rev = Model.nextRev();
-  if ( box ) pendingBox = union(pendingBox, artBox(box));
+  if ( box ) {
+    const ab = artBox(box);
+    const a = stroke?.a ? toArt(stroke.a) : [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2];
+    strokes.push({ box: ab, a, b: stroke?.b ? toArt(stroke.b) : null });
+  }
   scheduleBake(); scheduleSave();
   tell("edited");
 }
@@ -199,15 +307,16 @@ export function setParams(patch) {
   if ( !changed.length ) return;
   if ( !S ) ensureState();
   S.params = next;
-  const live = changed.every((k) => ["anim", "idle", "fxWho"].includes(k));
-  if ( live ) display?.setIdle(S.params.idle, S.params.fxWho); else scheduleBake(200);
+  const live = changed.every((k) => LIVE_PARAMS.has(k));
+  display?.setIdle(S.params.idle, S.params.fxWho); display?.setLook(lookOf(S.params));
+  if ( !live ) scheduleBake(200);
   scheduleSave(); tell("params");
 }
 
 export function newVariation() {
   if ( !S ) return;
   S.seed = 1 + Math.floor(Math.random() * 99998);
-  pendingBox = { x0: 0, y0: 0, x1: S.aw, y1: S.ah };
+  forceEntry = true;
   scheduleBake(50); scheduleSave(); tell("params");
 }
 
@@ -215,7 +324,7 @@ export function setEnabled(on) {
   if ( !game.user.isGM || (S ? S.enabled : true) === !!on ) return;
   if ( !S ) ensureState();
   S.enabled = !!on;
-  if ( on ) rebake(); else { gen++; display?.clear(); shownKey = ""; }
+  if ( on ) rebake(); else { gen++; display?.clear(); shownKey = ""; shownMask = null; }
   scheduleSave(); tell("params");
 }
 
@@ -229,9 +338,9 @@ export function clearAll() {
 /** Everyone sees every piece break again, at the same moment. */
 export async function detonate() {
   if ( !S || !game.user.isGM ) return;
-  S.blast = { id: foundry.utils.randomID(), t: game.time.serverTime + 350, box: null };
+  S.blast = { id: foundry.utils.randomID(), t: now() + 350, box: null };
   await save();
-  maybePlay();
+  maybeBlast();
 }
 
 function scheduleSave(ms = 700) {
@@ -263,16 +372,16 @@ export const destructionApi = {
     if ( !game.user.isGM ) return false;
     const s = ensureState();
     const box = Model.stamp(s, x, y, radius, { mode: erase ? "erase" : "raise", level, type: typeof type === "string" ? Math.max(0, Model.TYPES.indexOf(type)) : type });
-    if ( box ) { edited(box); Editor.refreshOverlay(); }
+    if ( box ) { edited(box, { a: { x, y }, b: null }); Editor.refreshOverlay(); }
     return !!box;
   },
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   state: () => S ? Model.encode(S) : null,
-  status: () => ({ ...status, key: shownKey, baked: S?.baked ?? null }),
-  /** The break, replayed locally (all pieces). */
-  replay: () => display?.play(null),
+  status: () => ({ ...status, key: shownKey, baked: S?.baked ?? null, inflight }),
+  /** Every area enters again, locally. */
+  replay: () => display?.detonate(performance.now()),
   display: () => display,
   TYPES: Model.TYPES, MATERIALS: Model.MATERIALS
 };

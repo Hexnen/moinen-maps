@@ -11,14 +11,34 @@ export function backgroundInfo() {
   if ( !tex?.valid || tex === PIXI.Texture.WHITE || tex === PIXI.Texture.EMPTY || !bg.visible || bg.rotation ) return null;
   const src = tex.baseTexture?.resource?.source;
   if ( !src ) return null;
-  return { bg, tex, src, path: canvas.scene?.background?.src ?? tex.baseTexture.cacheId ?? "" };
+  return { bg, tex, src, path: canvas.level?.background?.src ?? tex.baseTexture.cacheId ?? "" };
 }
+
+/**
+ * The whole scene at art resolution, sampled once per (scene, background, art pixel) and kept: { key, map: { w, h, data } }. The bake
+ * cuts every area's window out of this one picture, so an area's pixels never depend on where other damage lies.
+ */
+let whole = null;
+export function sceneMap(S) {
+  const info = backgroundInfo();
+  // the same on every client (it is part of every area's hash)
+  const key = `${canvas.scene?.id}|${info?.path ?? ""}|${S.ap}|${S.aw}x${S.ah}|${bgColor()}`;
+  if ( whole?.key !== key || whole.tex !== info?.tex?.baseTexture ) {
+    whole = { key, wkey: `${key}#${++sampled}`, tex: info?.tex?.baseTexture, map: { w: S.aw, h: S.ah, data: mapPixels(S.ap, { x0: 0, y0: 0, w: S.aw, h: S.ah }) } };
+  }
+  return whole;
+}
+let sampled = 0;
+export function forgetSceneMap() { whole = null; }
+
+/** The colour under the map (v14: the level's background colour; Scene#backgroundColor is deprecated and logs on every read). */
+const bgColor = () => { const c = canvas.level?.background?.color; return c?.css ?? (c ? String(c) : "#808080"); };
 
 /** RGBA (Uint8ClampedArray) of a box of art pixels { x0, y0, w, h }. */
 export function mapPixels(ap, box) {
   const r = sceneRect();
   const c = new OffscreenCanvas(Math.max(1, box.w), Math.max(1, box.h)), ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.fillStyle = canvas.scene?.backgroundColor?.css ?? String(canvas.scene?.backgroundColor ?? "#808080");
+  ctx.fillStyle = bgColor();
   ctx.fillRect(0, 0, box.w, box.h);
   const info = backgroundInfo();
   if ( info ) {
