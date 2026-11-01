@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import { readMeta, LIVE_PARAMS, META_FIELDS } from "./core.mjs";
-import { runBake, disposeBaker } from "./bake.mjs";
+import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
 import * as Trace from "../net/trace.mjs";
@@ -37,10 +37,17 @@ let lastRecs = null;                // the strokes on screen (their hash is comp
  * assembled from them, so the GM and every player show the same pixels whatever their source.
  */
 const recs = new Map();
+const depOnly = new Set();           // strokes whose new record differs only by the strokes under them (substrate.mjs): silent swap
+const depStats = { swaps: 0 };
 let shownRecs = new Map();           // stroke id -> record on screen (its older look stays until the new one is here)
+const staleRecs = new Map();         // stroke id -> its look from an older bake version (shown until its new record is in)
 const waitingSince = new Map();      // player: record key -> when its chunk was first missed (bake it here after AWAIT_CHUNK)
 let netAbort = null, persisting = null, persistAgain = false;
 const AWAIT_CHUNK = 12000;
+/** Strokes to bake on a scene load from which on the bake is spread over several workers and shown as it comes. */
+const BIG_BAKE = 6;
+/** Strokes put on screen per step of a scene load (a pause for the page between steps). */
+const SHOW_BATCH = 12;
 let inflight = null, again = null, paramRev = 0, publishBackoff = 0, publishRetryAt = 0, editedHere = false, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
 let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
 const played = new Set();            // area hashes already shown on this client (they never enter again)
@@ -122,7 +129,7 @@ function teardown() {
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
   played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
-  netAbort?.abort(); netAbort = null; recs.clear(); shownRecs = new Map(); waitingSince.clear(); persistAgain = false;
+  netAbort?.abort(); netAbort = null; recs.clear(); shownRecs = new Map(); staleRecs.clear(); waitingSince.clear(); persistAgain = false;
   forgetSceneMap();
   disposeBaker();
   Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", warning: "", source: "", stats: null, hash: "", areas: [] });
@@ -201,21 +208,60 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const S0 = S, base = Store.baseKey(scene, S, bg), objs = objectsIn();
   Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
-  const want = [];
-  S.objects.forEach((o, index) => { if ( !o.k ) { const sig = Store.objSig(S, o); want.push({ index, objId: o.id, sig, rk: `${base}|${o.id}|${sig}` }); } });
+  // (the FULL signature: its own inputs + a digest of the older strokes under it, substrate.mjs; `own` alone tells a dependent re-bake)
+  const want = [], FS = Store.sigsOf(S);
+  const rkOf = (index) => `${base}|${S.objects[index].id}|${FS[index].sig}`;
+  S.objects.forEach((o, index) => { if ( !o.k ) { const sig = FS[index].sig; want.push({ index, objId: o.id, sig, own: FS[index].own, deps: FS[index].deps, rk: rkOf(index) }); } });
   if ( force ) for ( const w of want ) recs.delete(w.rk);
   const src = { mem: 0, chunk: 0, legacy: 0, baked: 0 };
   const firstLoad = !loaded;
   let first = firstLoad;
-  /** Everything we have on screen now (a stroke without its record yet keeps its older look, or waits). */
-  const show = () => {
-    if ( my !== gen || S !== S0 ) return;
+  /**
+   * Everything we have on screen now (a stroke without its record yet keeps its older look, or waits). On a scene load the strokes go
+   * in a few at a time, those nearest to the view first, with a pause for the page between (a big scene's whole set in one sync held
+   * the page for a second); a call while one runs is folded into it.
+   */
+  let showing = null, showAgain = false, prepping = null;
+  const showOnce = (list, allow = null) => {
     const t = performance.now();
-    showRecs(want, objs, taken, mask, first);
+    // after the scene's reveal (or without one) a stroke that comes in during the load fades in by itself (no pop, no entry)
+    showRecs(list, objs, taken, mask, first, firstLoad && !Reveal.holding("destruction"), allow);
     first = false; loaded = true; shownMask = mask;
     T.show = (T.show ?? 0) + performance.now() - t;
   };
+  const show = () => {
+    if ( my !== gen || S !== S0 ) return Promise.resolve();
+    if ( !firstLoad ) { showOnce(want); return Promise.resolve(); }
+    if ( showing ) { showAgain = true; return showing; }
+    showing = (async () => {
+      do {
+        showAgain = false;
+        // new strokes and new looks replacing an older one (stale while revalidate), nearest first, a batch per step; the others keep
+        // what they show
+        const best = (w) => recs.get(w.rk) ?? staleRecs.get(w.objId);
+        const near = prioritise(want.filter((w) => best(w) && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
+        const allow = new Set(want.filter((w) => best(w) && shownRecs.get(w.objId) === best(w)).map((w) => w.objId));
+        for ( let i = 0; i < near.length || i === 0; i += SHOW_BATCH ) {
+          for ( const w of near.slice(i, i + SHOW_BATCH) ) allow.add(w.objId);
+          showOnce(want, allow);
+          // every stroke in view is on screen (hidden): the reveal can come now; the strokes off screen follow unseen
+          if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index])) ) prepping = prepareReveal(my);
+          if ( i + SHOW_BATCH < near.length ) { await new Promise((r) => setTimeout(r, 0)); if ( my !== gen || S !== S0 ) return; }
+        }
+      } while ( showAgain && my === gen && S === S0 );
+    })().finally(() => { showing = null; });
+    return showing;
+  };
   const missing = () => want.filter((w) => !recs.has(w.rk));
+  // a scene load: as soon as every stroke in view has its record, those go on screen (hidden) and the reveal is prepared; the rest
+  // keeps coming and is added unseen (off screen) or with its own short fade
+  let earlyDone = false;
+  const early = () => {
+    if ( earlyDone || !firstLoad || !Reveal.holding("destruction") ) return;
+    if ( !want.every((w) => recs.has(w.rk) || staleRecs.has(w.objId) || shownRecs.has(w.objId) || !inView(objs[w.index])) ) return;
+    earlyDone = true; Trace.markOnce("damage:inView");
+    show();
+  };
   src.mem = want.length - missing().length;
 
   // 1. the GM's manifest: the chunks of strokes whose inputs are unchanged (IndexedDB first, then the server), shown as they land
@@ -231,16 +277,37 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
       let timer = 0;
       // a few chunks landing together: one sync; while the scene's reveal is held back nothing is shown piece by piece (all of it goes
       // on screen at once below); if the reveal comes first (its budget ran out), what is here shows then and the rest as it lands
-      const soon = () => { if ( !timer && !Reveal.holding() ) timer = setTimeout(() => { timer = 0; show(); }, 60); };
+      const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 60); };
       Reveal.whenRevealed(() => { if ( status.loading > 0 ) soon(); });
+      // many chunks (a cold browser, a slow line): the reveal does not wait for all of them (see the big bake below)
+      if ( firstLoad && fetch.length >= 20 ) Reveal.progressive("destruction", 1500);
       await Promise.all(prioritise(fetch, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
-        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: w.id, sprites: got.sprites }); src.chunk++; status.loading--; soon(); }
+        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
         else failed.push(w);
       }));
       clearTimeout(timer);
       T.fetch = performance.now() - t;
       if ( my !== gen ) return;
+    }
+  } else if ( M && Store.staleOk(M.base, base) ) {
+    // STALE WHILE REVALIDATE: the manifest is of an older bake version (same settings, map and grid, a version whose pixels are still
+    // a faithful picture of the same strokes): its chunks are shown at once as the strokes' "older look" and the new bake replaces
+    // them stroke by stroke with a short cross-fade - never a scene without its damage while the new bake runs
+    const old = [];
+    for ( const w of missing() ) { const e = Store.entryOf(M, w.objId); if ( (e?.sig === w.sig || e?.sig === w.own) && !shownRecs.has(w.objId) && !staleRecs.has(w.objId) ) old.push({ ...w, id: e.id }); }
+    if ( old.length ) {
+      const t = performance.now();
+      if ( firstLoad ) Reveal.progressive("destruction", 1500);   // the scene waits for the older look (not the water alone)
+      await Promise.all(prioritise(old, objs).map(async (w) => {
+        const got = await Net.getChunk(M.dir, w.id, { prio: w.prio });
+        if ( got?.sprites && got.F === META_FIELDS ) { staleRecs.set(w.objId, { rk: `${M.base}|${w.objId}|${w.sig}`, objId: w.objId, id: w.id, sprites: got.sprites, stale: true }); src.stale = (src.stale ?? 0) + 1; }
+      }));
+      T.stale = performance.now() - t;
+      if ( my !== gen ) return;
+      Trace.markOnce("damage:stale", { n: src.stale ?? 0, of: old.length });
+      // the older look goes into the scene's one reveal right away; the new bake replaces it stroke by stroke afterwards
+      if ( firstLoad && src.stale ) early();
     }
   } else if ( !force && S.baked?.path && S.baked.key === key ) {
     // the first format: one sheet for the whole scene, read once and cut into strokes (the GM's next publish replaces it)
@@ -250,7 +317,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     try {
       const meta = dec && readMeta(dec.rgba, dec.w, dec.h, S.baked.metaRows);
       const parts = meta ? Chunks.splitSheet(dec.rgba, dec.w, meta, META_FIELDS) : null;
-      if ( parts ) for ( const w of missing() ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: null, sprites: parts.get(w.index) ?? [] }); src.legacy++; }
+      if ( parts ) for ( const w of missing() ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, sprites: parts.get(w.index) ?? [] }); src.legacy++; }
     } catch ( err ) { console.warn(`${MODULE_ID} | destruction: unusable published file`, err); }
     T.decode = performance.now() - t;
   }
@@ -262,7 +329,8 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const broken = new Set(failed.map((w) => w.rk));
   // the GM's chunk is only expected when a GM is here AND the manifest is of this bake version (or there is none yet): a manifest
   // of another bake version means the GM's client runs other code - waiting would only delay the scene by AWAIT_CHUNK
-  const sameVersion = !M || String(M.base).split(":")[0] === String(base).split(":")[0];
+  // (with the older look on screen meanwhile, waiting costs nothing: the GM's client publishes the new version for everyone)
+  const sameVersion = !M || String(M.base).split(":")[0] === String(base).split(":")[0] || !!src.stale;
   if ( toBake.length && !force && awaitPublish && !game.user.isGM && game.users.activeGM && sameVersion ) {
     const t = Date.now();
     for ( const w of toBake ) if ( !waitingSince.has(w.rk) ) waitingSince.set(w.rk, t);
@@ -274,20 +342,69 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     }
     toBake = late;
   }
+  // a stroke baked here is baked over the strokes under it (substrate.mjs): one of those without its record is baked too (first)
   if ( toBake.length ) {
-    Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
-    if ( src.chunk || src.legacy ) show();   // what just landed, while the rest bakes
+    const byIndex = new Map(want.map((w) => [w.index, w])), inBake = new Set(toBake.map((w) => w.index));
+    for ( let k = 0; k < toBake.length; k++ ) for ( const j of toBake[k].deps ) {
+      const d = byIndex.get(j); if ( !d || inBake.has(j) || recs.has(d.rk) ) continue;
+      inBake.add(j); toBake.push(d);
+    }
+    toBake.sort((a, b) => a.index - b.index);
+  }
+  if ( toBake.length ) {
+    Object.assign(status, { baking: true, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length }); tell("status");
+    if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
+    // a long bake on a scene load: the reveal does not wait for all of it (it shows what is ready after its longer budget, the rest
+    // fades in stroke by stroke as it is baked, nearest to the view first)
+    const bigBake = firstLoad && toBake.length >= BIG_BAKE;
+    if ( bigBake ) Reveal.progressive("destruction", 1500);
     try {
-      const t = performance.now(), need = new Set(toBake.map((w) => w.index));
+      const t = performance.now();
+      const getMap = () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; };
       // only these strokes: the others are left out (an erase stroke is skipped by the bake), so their indices stay as they are
-      const input = { objects: objs.map((o, i) => need.has(i) ? o : { ...o, k: 1 }), mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
-      const res = await runBake(input, () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; },
-        { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
-      if ( my !== gen ) return;
-      const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
-      for ( const w of toBake ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: null, sprites: parts.get(w.index) ?? [] }); waitingSince.delete(w.rk); }
+      // the others are `skip`ped (an erase stroke stays one: it is part of what lies under a newer stroke); `under`: the records of the
+      // older strokes under these that are not baked in this call (their sprites are the substrate)
+      const inputOf = (list) => {
+        const need = new Set(list.map((w) => w.index)), under = {};
+        for ( const w of list ) for ( const j of w.deps ) {
+          if ( need.has(j) || objs[j].k || under[j] ) continue;
+          const r = recs.get(rkOf(j)); if ( r ) under[j] = r.sprites;
+        }
+        return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+      };
+      const take = (list, res) => {
+        const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+        for ( const w of list ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, sprites: parts.get(w.index) ?? [] }); waitingSince.delete(w.rk); }
+        status.stats = res.stats;
+      };
+      if ( !bigBake ) {
+        const res = await runBake(inputOf(toBake), getMap, { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
+        if ( my !== gen ) return;
+        take(toBake, res);
+      } else {
+        // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked
+        // in WAVES: a stroke over others being baked waits for their wave (its substrate is their sprites)
+        const lanes = Math.max(1, Math.min(4, (navigator.hardwareConcurrency ?? 2) - 1)), depth = new Map();
+        for ( const w of toBake ) depth.set(w.index, Math.max(0, ...w.deps.filter((j) => depth.has(j)).map((j) => depth.get(j) + 1)));
+        let timer = 0;
+        const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 80); };
+        Reveal.whenRevealed(() => soon());
+        for ( let wave = 0; wave <= Math.max(...depth.values()); wave++ ) {
+          const order = prioritise(toBake.filter((w) => depth.get(w.index) === wave), objs);
+          const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [];
+          for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
+          await runBakePool(jobs.map(inputOf), getMap, { n: lanes, onDone: (i, res) => {
+            if ( my !== gen ) return;
+            take(jobs[i], res);
+            status.bakeDone += jobs[i].length; status.progress = status.bakeDone / status.bakeTotal; tell("status");
+            soon(); early();
+          } });
+          if ( my !== gen ) break;
+        }
+        clearTimeout(timer);
+        if ( my !== gen ) return;
+      }
       src.baked = toBake.length;
-      status.stats = res.stats;
       T.bake = performance.now() - t; status.ms = Math.round(T.bake);
     } catch ( err ) {
       if ( my !== gen ) return;
@@ -300,8 +417,9 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   }
 
   // 3. on screen: everything we have (on a scene load, hidden until the reveal: every shard made, every texture uploaded)
-  show();
-  if ( firstLoad && Reveal.holding("destruction") && display ) await prepareReveal(my);
+  await show();
+  if ( my !== gen ) return;
+  if ( firstLoad && Reveal.holding("destruction") && display ) await (prepping ?? prepareReveal(my));
   const complete = want.every((w) => recs.has(w.rk));
   if ( complete ) { shownKey = key; waitingSince.clear(); Trace.markOnce("damage:all", { groups: display?.groups.size ?? 0, uploads: display?.stats?.uploads ?? 0, ...src }); }
   // records no stroke uses any more (an older look, an undone stroke) are let go
@@ -323,14 +441,18 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
 async function prepareReveal(my) {
   const T = performance.now(), slice = () => new Promise((r) => setTimeout(r, 0));
   let t = performance.now();
-  for ( const g of display.order ) {
+  // only what is in view (an area off screen is not drawn: its shards are made and its texture uploaded later, unseen)
+  const vw = display.view?.(), inView = (g) => { const r = g.info?.rect; return !vw || !r || !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+  const visible = display.order.filter(inView);
+  Trace.markOnce("damage:visible", { groups: visible.length, of: display.order.length });
+  for ( const g of visible ) {
     while ( g.made < g.pieces.length ) {
       display.materialize(g, 800);
       if ( performance.now() - t > 8 ) { await slice(); if ( my !== gen || !display ) return; t = performance.now(); }
     }
   }
   Trace.markOnce("damage:made", { ms: Math.round(performance.now() - T) });
-  await Reveal.upload([...display.groups.values()].map((g) => g.tex));
+  await Reveal.upload(visible.map((g) => g.tex));
   Trace.markOnce("damage:uploaded", { ms: Math.round(performance.now() - T) });
   // the flooded holes fill with their own water loop a moment after their area is in: wait for it while the reveal waits
   const until = performance.now() + 1500;
@@ -344,6 +466,15 @@ async function prepareReveal(my) {
   if ( my !== gen ) return;
   Trace.markOnce("damage:prepared", { ms: Math.round(performance.now() - T) });
   Reveal.ready("destruction");
+}
+
+/** Is a stroke (its box, with room for its debris) in the current view? */
+function inView(o) {
+  const r = Model.sceneRect(), mpx = S.ap * Model.K, st = canvas.stage, sc = st?.scale?.x || 1;
+  if ( !st || !o ) return true;
+  const hw = (canvas.app?.screen?.width ?? 1920) / 2 / sc, hh = (canvas.app?.screen?.height ?? 1080) / 2 / sc, m = 64 * S.ap;
+  const x0 = r.x + o.x0 * mpx - m, y0 = r.y + o.y0 * mpx - m, x1 = r.x + (o.x0 + o.w) * mpx + m, y1 = r.y + (o.y0 + o.h) * mpx + m;
+  return !(x0 > st.pivot.x + hw || x1 < st.pivot.x - hw || y0 > st.pivot.y + hh || y1 < st.pivot.y - hh);
 }
 
 /** Chunks to download, nearest first: the newest strokes (their entry is about to play), then by distance to the view. */
@@ -362,11 +493,18 @@ function prioritise(list, objs) {
  * The display gets one sheet assembled from the strokes' records, in stroke order. A stroke whose record is not here yet keeps the
  * look it had on screen (a setting changed: the new look replaces it when it lands) or is left out for now (a new stroke).
  */
-function showRecs(want, objs, taken, mask, first) {
+function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   const list = [], next = new Map();
+  depOnly.clear();
   for ( const w of want ) {
-    const r = recs.get(w.rk) ?? shownRecs.get(w.objId);
+    // (allow: the strokes that may take their new record - or their older look - in this step; the others keep what they show)
+    const fresh = recs.get(w.rk);
+    const r = (!allow || allow.has(w.objId) ? fresh ?? staleRecs.get(w.objId) : null) ?? shownRecs.get(w.objId);
+    if ( fresh && r === fresh ) staleRecs.delete(w.objId);
     if ( !r ) continue;
+    // a new look only because the strokes under it changed (its own inputs did not): swapped in one frame, no entry, no fade
+    const prev = shownRecs.get(w.objId);
+    if ( prev && prev !== r && prev.own && prev.own === w.own && !prev.stale ) depOnly.add(w.objId);
     list.push({ index: w.index, sprites: r.sprites });
     next.set(w.objId, r);
   }
@@ -377,6 +515,7 @@ function showRecs(want, objs, taken, mask, first) {
   const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h));
   const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs);
   playEntries(added, removed, taken, mask, first);
+  if ( soft ) { const t = performance.now(); for ( const g of added ) if ( !g.anim && !g.fade && !g.reused ) { g.fade = { start: t, dur: 300 }; display.applyFade(g, t); } }
   lastRecs = list;
   Reveal.attach("destruction", display.objs, display.fx, display.causeLights?.layer);   // (only while this layer is held back)
   if ( display.groups.size ) Trace.markOnce("damage:first", { groups: display.groups.size });
@@ -405,6 +544,7 @@ function playEntries(added, removed, taken, mask, first) {
     const h = g.hash;
     // the same stroke's older look (a setting changed) stays underneath until the new one is in (never a blank frame)
     const under = removed.filter((q) => q.objId && q.objId === g.objId);
+    if ( depOnly.has(g.objId) && under.length ) { played.add(h); display.swap(g, under, 0); depStats.swaps++; continue; }
     // shown here before (a look toggle switched back, an undo), or a new look of existing damage: no entry, a cross-fade
     if ( g.reused || (played.has(h) && !all) ) { played.add(h); display.swap(g, under); continue; }
     played.add(h);
@@ -466,10 +606,10 @@ async function persistOnce() {
   if ( shownKey !== key ) return;                   // not all on screen yet: the bake that completes it asks again
   const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && M.base === base;
   seedKnown(scene);
-  const c = {}, todo = [];
-  for ( const o of S.objects ) {
+  const c = {}, todo = [], FS = Store.sigsOf(S);
+  for ( const [index, o] of S.objects.entries() ) {
     if ( o.k ) continue;
-    const sig = Store.objSig(S, o), r = recs.get(`${base}|${o.id}|${sig}`);
+    const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
     if ( !r ) return;                                // should not happen once complete; a later run publishes
     const e = same ? Store.entryOf(M, o.id) : null;
     if ( e?.sig === sig ) c[o.id] = `${sig}:${e.id}`;
@@ -690,6 +830,8 @@ function backups(scene = canvas.scene) {
 }
 
 export const destructionApi = {
+  /** Substrates (substrate.mjs): how many strokes were swapped in silently because older damage under them changed. */
+  substrate: () => ({ ...depStats }),
   backup: () => backups(),
   restoreBackup,
   /** Switch the GM's tool: "paint" | "erase" | null. */

@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
+import { fullSigs } from "./substrate.mjs";
 import * as Model from "./model.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 
@@ -40,8 +41,34 @@ export function baseKey(scene, S, bgPath) {
   return `${CORE_VERSION}:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(`${paramStr(S)}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`)).toString(36)}`;
 }
 
-/** One stroke's signature. */
+/**
+ * Stale while revalidate: may the chunks of a manifest made by an OLDER bake version stand in (shown at once, replaced stroke by stroke
+ * as the new bake lands)? Only when everything but the version is the same (settings, map, grids, seed: the same strokes, drawn by
+ * an earlier look) and that version is not listed as unfaithful. Bake versions so far changed the look only, never what is damaged
+ * where; a bump that changes the shape of the damage (or the chunk layout) goes into STALE_UNFAITHFUL.
+ */
+export const STALE_UNFAITHFUL = new Set([]);
+const STALE_MIN = 15;              // older chunks are not read as an older look (the chunk format starts at 14/15)
+export function staleOk(oldBase, base) {
+  const a = String(oldBase ?? "").split(":"), b = String(base).split(":");
+  if ( a.length !== b.length || a[0] === b[0] ) return false;
+  const v = Number(a[0]);
+  if ( !Number.isFinite(v) || v < STALE_MIN || v > Number(b[0]) || STALE_UNFAITHFUL.has(v) ) return false;
+  return a.slice(1).join(":") === b.slice(1).join(":");
+}
+
+/** One stroke's signature: its own inputs only. */
 export const objSig = (S, o) => fnv(enc(objStr(S, o))).toString(36);
+
+/**
+ * Every stroke's FULL signature, in stroke order ([{ own, sig, deps }]): its own, plus a digest of the older strokes that may lie
+ * under or right round it (substrate.mjs: a newer stroke is baked over them; an older one never depends on a newer one). A stroke
+ * with nothing older near it keeps its own signature exactly. Records, chunks and the manifest are keyed by the full signature, so a
+ * change of an older stroke re-bakes only the strokes over it, on every client alike.
+ */
+export function sigsOf(S) {
+  return fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K);
+}
 
 /** The manifest of the scene (null for none, or the first format). */
 export const manifestOf = (S) => S?.baked?.v === 2 && S.baked.c && typeof S.baked.dir === "string" ? S.baked : null;
