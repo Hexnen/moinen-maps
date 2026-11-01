@@ -241,7 +241,9 @@ export class StaticCache {
     } else this.win = null;
     const W = this.win;
     const lv = levels(U);
-    const sig = `${U.length}|${res}|${d.filter}|${W ? `${W.x0},${W.y0},${W.x1},${W.y1}` : "scene"}|${U.map((u, i) => (u.live ? "L" : "") + lv[i]).join(",")}`;
+    // (no sampling flag: the bands are drawn one texel per scene pixel, where the live layer's NEAREST and LINEAR give the same texels
+    // - measured equal on "map" - so a zoom across that switch re-draws nothing)
+    const sig = `${U.length}|${res}|${W ? `${W.x0},${W.y0},${W.x1},${W.y1}` : "scene"}|${U.map((u, i) => (u.live ? "L" : "") + lv[i]).join(",")}`;
     if ( this.dirty || sig !== this.sig || this.bands.some((b) => b.tiles.some((t) => !t.rt.valid || t.rt.baseTexture.destroyed)) ) {
       this.bake(U, lv, sr, res, !W, W);
       this.sig = sig; this.dirty = false;
@@ -301,7 +303,7 @@ export class StaticCache {
 
   /**
    * Draw the bands (statics of each even level, in order) into textures covering their content and build the show list. A band whose
-   * members, density and sampling are unchanged keeps its textures (a new stroke entering on top re-draws nothing underneath).
+   * members and density are unchanged keeps its textures (a new stroke entering on top re-draws nothing underneath).
    */
   bake(U, lv, sr, res, mips, win = null) {
     const t0 = performance.now(), R = canvas.app.renderer, d = this.d, ap = d.ap, o = d.origin, live = d.live;
@@ -341,7 +343,7 @@ export class StaticCache {
     for ( let k = 0; k < plan.length; k++ ) {
       const p = plan[k];
       if ( p ) {
-        const key = `${p.L}|${eff}|${mips}|${d.filter}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
+        const key = `${p.L}|${eff}|${mips}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
         let band = old.get(key);
         if ( band && band.tiles.every((t) => t.rt.valid && !t.rt.baseTexture.destroyed) ) keep.add(band);
         else {
