@@ -65,6 +65,7 @@ function onCanvasReady() {
   teardown();
   if ( !canvas.scene ) return;
   R = Model.load(canvas.scene);
+  lastSaved = JSON.stringify(Model.encode(R));
   display = new RoadDisplay();
   traffic = new TrafficView();
   seen = { graph: "", look: "", sim: "", show: "" };
@@ -74,6 +75,7 @@ function onCanvasReady() {
 }
 
 function teardown() {
+  flushSave();                                   // before R goes: an edit made just before leaving the scene is not lost
   clearTimeout(saveTimer); saveTimer = 0;
   Editor.teardown();
   display?.destroy(); traffic?.destroy();
@@ -87,6 +89,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   if ( !f || !(Model.FLAG in f || `-=${Model.FLAG}` in f) ) return;
   if ( userId === game.user.id ) return;          // our own save: already shown
   R = Model.load(scene);
+  lastSaved = JSON.stringify(Model.encode(R));
   apply();
   tell("loaded");
 }
@@ -191,14 +194,35 @@ export function setRoad(id, patch) {
 export const shuffleTraffic =() => setTraffic({ seed: Math.floor(Math.random() * 999998) + 1 });
 export const clearRoads = () => edit((G) => { if ( !G.edges.size ) return false; G.edges.clear(); G.nodes.clear(); return true; });
 
+/** The scene a waiting save belongs to, and the payload last written to (or read from) the scene: nothing is written twice. */
+let saveSceneId = null, lastSaved = "";
+
 function scheduleSave(ms = 500) {
   clearTimeout(saveTimer);
+  saveSceneId = canvas.scene?.id ?? null;
   saveTimer = setTimeout(() => { saveTimer = 0; save(); }, ms);
 }
 
+/** Write the roads to their scene (the one they were edited on), unless that exact payload is already there. */
 export async function save() {
-  if ( !game.user.isGM || !R || !canvas.scene ) return;
-  await canvas.scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: Model.encode(R) });
+  if ( !game.user.isGM || !R ) return;
+  const scene = game.scenes.get(saveSceneId) ?? canvas.scene;
+  if ( !scene ) return;
+  const payload = Model.encode(R), text = JSON.stringify(payload);
+  if ( text === lastSaved ) return;
+  lastSaved = text;
+  try { await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: payload }); }
+  catch ( err ) { lastSaved = ""; console.warn(`${MODULE_ID} | could not save the roads`, err); }
+}
+
+/**
+ * An edit still waiting for its save (leaving the scene, closing or hiding the page): save it now, to the scene it was made on.
+ * Best effort: the update is sent, nobody waits for it.
+ */
+function flushSave() {
+  if ( !saveTimer ) return;
+  clearTimeout(saveTimer); saveTimer = 0;
+  save();
 }
 
 /* ---------------------------------------------------------------- facts for panels */
@@ -263,5 +287,6 @@ export function registerRoads() {
   Hooks.on("canvasPan", () => Editor.onPan());
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.roads ??= roadsApi; } });
   // textures of the cars belong to the renderer: free them when the page goes
-  window.addEventListener("beforeunload", () => destroyTextures());
+  window.addEventListener("beforeunload", () => { flushSave(); destroyTextures(); });
+  document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
 }
