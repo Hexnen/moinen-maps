@@ -11,6 +11,8 @@
  *   collapseShade    the exposed layer: lip -> a sloped wall in tone bands lit from the top left, with strata lines along the
  *                    contours -> the deep void with a faint ambient floor
  *   collapseLip      the torn lip's ink: broken, of varying weight, occluded in long stretches (no inked lasso)
+ *   slabFace         a sunk slab's top face: the map's own texture (its contrast lifted a little), darkened by depth, a soft gradient
+ *                    from the rim side (lighter) to the void side (darker), a seam or two, lit only along its top-left edge
  * Deterministic: everything is drawn from the stroke's own seed and pixels.
  */
 
@@ -310,4 +312,46 @@ export function collapseLip(x, y, seed) {
   if ( w > 0.5 ) return 0.55;
   if ( w > 0.38 ) return 0.28;
   return 0;
+}
+
+/**
+ * A sunk slab's top face (renderShard, cave-in slabs only). s: the shard (tilt tx/ty, z0), f: its shading (tilt x depth, quantised),
+ * top: screen pixel -> source map index (or -1), tw x th, map (RGBA of the window), W, seed, ink. Returns (x, y, src, open) -> [r, g, b]
+ * (open: nothing drawn right of it - the shaded edge). A lit slab is NOT a bright flat face: its face keeps the ground's tone at most
+ * (the map's own pixels, blades and noise, a touch more contrast), its light is a 1-2 px band along the top-left edge (up to 1.12x);
+ * every slab falls off from its rim side to its void side and darkens in three bands down its face; one or two dark seams cross it.
+ */
+export function slabFace(s, f, top, tw, th, map, W, seed, ink) {
+  const tl = Math.hypot(s.tx, s.ty), ix = tl > 0.02 ? -s.tx / tl : 0, iy = tl > 0.02 ? -s.ty / tl : 1;
+  // its extent along the inward line and its mean colour (from its own pixels)
+  let p0 = Infinity, p1 = -Infinity, mr = 0, mg = 0, mb = 0, n = 0;
+  for ( let q = 0; q < top.length; q++ ) {
+    const src = top[q]; if ( src < 0 ) continue;
+    const sx = src % W, sy = (src - sx) / W, pr = sx * ix + sy * iy;
+    if ( pr < p0 ) p0 = pr; if ( pr > p1 ) p1 = pr;
+    mr += map[src * 4]; mg += map[src * 4 + 1]; mb += map[src * 4 + 2]; n++;
+  }
+  if ( !n ) return null;
+  mr /= n; mg /= n; mb /= n;
+  const span = Math.max(1, p1 - p0), lit = f > 1.02, face = Math.min(f, 1), edgeK = lit ? Math.min(1.12, Math.max(1.08, f)) : f * 1.08;
+  // the seams: one or two lines across the slab (roughly along the rim), each a little crooked
+  const sh = h2(s.cx | 0, s.cy | 0, seed + 811), nSeam = span > 6 ? 1 + (sh < 0.4 ? 1 : 0) : 0;
+  const seams = Array.from({ length: nSeam }, (_, k) => p0 + span * (0.35 + 0.3 * h2(k, s.cx | 0, seed + 812)));
+  const isTop = (x, y) => x >= 0 && y >= 0 && x < tw && y < th && top[y * tw + x] >= 0;
+  return (x, y, src, open) => {
+    const sx = src % W, sy = (src - sx) / W, u = (sx * ix + sy * iy - p0) / span;
+    // the map's own texture, its contrast lifted a little (blades and noise read; no flat fill)
+    let c = [mr + (map[src * 4] - mr) * 1.3, mg + (map[src * 4 + 1] - mg) * 1.3, mb + (map[src * 4 + 2] - mb) * 1.3];
+    const edge1 = !isTop(x - 1, y) || !isTop(x, y - 1), edge2 = edge1 || !isTop(x - 2, y) || !isTop(x, y - 2);
+    let g;
+    if ( edge1 || (lit && edge2) ) g = edge1 ? edgeK : (edgeK + face) / 2;               // the lit top-left edge (1-2 px)
+    else g = face * (1 - 0.14 * u) * (1 - 0.04 * Math.floor(3 * y / Math.max(1, th)));   // rim side at the ground's tone, void side darker, three bands
+    if ( open && !isTop(x + 1, y) ) g *= 0.8;                                             // the shaded edge
+    c = mul(c, g);
+    for ( const sp of seams ) {
+      const d = Math.abs(sx * ix + sy * iy - sp + (vnoise(sx / 3, sy / 3, seed + 813) - 0.5) * 1.6);
+      if ( d < 0.5 && !edge1 ) return mix(c, ink, 0.5);
+    }
+    return c;
+  };
 }

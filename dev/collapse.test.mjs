@@ -1,7 +1,8 @@
 // Collapse ('zapadnięcie'), checks of the bake outside Foundry.   node dev/collapse.test.mjs [-v]
 //  1. the pit is not a disc: for taps of level 2 and 3 on stone, grass and planks (several seeds) the outline (the cover: the
 //     stroke's own pixels) has a circularity P^2 / (4 pi A) >= 1.2 (marching-squares perimeter) and a radial CV >= 0.1;
-//  2. lit slab faces: among the rim slabs that moved, some face the light (brighter than the map they were cut from) and some face away;
+//  2. lit slab faces: among the rim slabs that moved, some face the light (a lit top-left edge, the face within 1.12 x the ground it was
+//     cut from) and some face away (face < 0.92 x); no face is a bright flat fill, they keep the ground's texture;
 //  3. no long straight ink: outside the pit (its lip, its hairlines) no straight run of inked pixels (composite much darker than the
 //     map) of 12 px or more, along rows, columns or diagonals;
 //  4. the levels: level 1 has at most a small hole, level 3 has a deep void; a followed stroke at max settings is a TRENCH (one part, along the
@@ -96,7 +97,7 @@ function shape(own) {
 const digest = (res) => createHash("sha1").update(Buffer.from(res.sheet.data.buffer)).update(Buffer.from(res.meta.buffer)).digest("hex");
 
 /* ---------------------------------------------------------------- 1-3, 5: taps */
-let minCirc = Infinity, minCV = Infinity, worstRun = 0, litPlates = 0, shadedPlates = 0, plates = 0, voidL1 = 0, voidL3 = [];
+let minCirc = Infinity, minCV = Infinity, worstRun = 0, litPlates = 0, shadedPlates = 0, plates = 0, flatBright = 0, texOk = 0, texN = 0, voidL1 = 0, voidL3 = [];
 for ( const kind of ["stone", "grass", "wood"] ) for ( const level of [1, 2, 3] ) for ( let s = 0; s < 4; s++ ) {
   const map = makeMap(kind, CW, CH, s * 997), id = `t-${kind}-${level}-${s}`;
   const ob = stroke(id, level, [[85, 60]], 11 + s);
@@ -108,16 +109,29 @@ for ( const kind of ["stone", "grass", "wood"] ) for ( const level of [1, 2, 3] 
     check(sh.circ >= 1.2 && sh.cv >= 0.1, `${id}: outline circularity ${sh.circ.toFixed(2)} (>= 1.2), radial CV ${sh.cv.toFixed(3)} (>= 0.1)`);
     // lit faces: a moved plate (not a chip) brighter / darker than the map where it came from
     for ( const r of rows(res) ) if ( r[0] === 1 && !(r[11] & 1) && (r[11] & 4) && r[12] >= -30 ) {   // (the rim slabs: sunk at most 3 px)
-      // (the median of the pixels' ratios to the map where the plate came from: its top face, not its inked edges and dark side)
-      const qs = [];
-      for ( let y = 0; y < r[4]; y++ ) for ( let x = 0; x < r[3]; x++ ) {
-        const s2 = ((r[2] + y) * res.sheet.w + r[1] + x) * 4; if ( !res.sheet.data[s2 + 3] ) continue;
-        const X = r[7] + x, Y = r[8] + y; if ( X < 0 || Y < 0 || X >= CW || Y >= CH ) continue;
-        qs.push(lum(res.sheet.data, s2) / Math.max(1, lum(map, (Y * CW + X) * 4)));
-      }
-      if ( qs.length < 8 ) continue;
-      qs.sort((p, q) => p - q);
-      plates++; const q = qs[qs.length >> 1]; if ( q > 1.04 ) litPlates++; else if ( q < 0.92 ) shadedPlates++; if ( process.env.QDBG ) console.log('q', kind, level, r[3], r[4], q.toFixed(2));
+      // against the ground it was cut from (the map's mean and spread under its source box): LIT = a lit top-left edge (its edge
+      // pixels' median > 1.05 x the ground) with the face within 1.12 x the ground; SHADED = the face's median < 0.92 x; a face is never
+      // a bright flat fill (median <= 1.12 x) and keeps the ground's texture (its spread >= 0.5 x the ground's)
+      // (the ground's median: a mortar line or plank seam under a small slab's box must not lower it)
+      const gls = [];
+      for ( let y = 0; y < r[4]; y++ ) for ( let x = 0; x < r[3]; x++ ) { const X = r[7] + x, Y = r[8] + y; if ( X < 0 || Y < 0 || X >= CW || Y >= CH ) continue; gls.push(lum(map, (Y * CW + X) * 4)); }
+      if ( !gls.length ) continue;
+      gls.sort((p, q) => p - q);
+      const gm = gls[gls.length >> 1], gsd = Math.sqrt(gls.reduce((s, v) => s + (v - gm) ** 2, 0) / gls.length);
+      const A = (x, y) => x >= 0 && y >= 0 && x < r[3] && y < r[4] && res.sheet.data[((r[2] + y) * res.sheet.w + r[1] + x) * 4 + 3] > 0;
+      // (the top-left edge: the first pixel down each column, and the first along each row in the upper part - the slab's dark side
+      // shows below its face, so the left edge low down is side, not face)
+      const edge = [], face = [], L = (x, y) => lum(res.sheet.data, ((r[2] + y) * res.sheet.w + r[1] + x) * 4) / Math.max(1, gm);
+      for ( let x = 0; x < r[3]; x++ ) for ( let y = 0; y < r[4]; y++ ) if ( A(x, y) ) { edge.push(L(x, y)); break; }
+      for ( let y = 0; y < r[4] * 0.6; y++ ) for ( let x = 0; x < r[3]; x++ ) if ( A(x, y) ) { if ( A(x, y - 1) ) edge.push(L(x, y)); break; }
+      for ( let y = 1; y < r[4] - 1; y++ ) for ( let x = 1; x < r[3] - 1; x++ ) if ( A(x, y) && A(x - 1, y) && A(x, y - 1) && A(x + 1, y) && A(x, y + 1) && A(x - 2, y) && A(x, y - 2) ) face.push(L(x, y));
+      if ( face.length < 8 || edge.length < 3 ) continue;
+      const med = (a) => a.slice().sort((p, q) => p - q)[a.length >> 1];
+      const fm = med(face), em = med(edge), fsd = Math.sqrt(face.reduce((s, v) => s + (v - fm) ** 2, 0) / face.length) * gm;
+      plates++; if ( em > 1.05 && fm <= 1.12 ) litPlates++; else if ( fm < 0.92 ) shadedPlates++;
+      if ( fm > 1.15 ) flatBright++;   // (the 1.12 cap plus slack: a small slab's source box sits a pixel or two off its sprite)
+      texN++; if ( gsd > 2 && fsd >= gsd * 0.5 ) texOk++;
+      if ( process.env.QDBG ) console.log('q', kind, level, r[3], r[4], em.toFixed(2), fm.toFixed(2), (fsd / Math.max(1, gsd)).toFixed(2));
     }
   }
   // ink outside the pit: much darker than the map; straight runs along rows, columns and both diagonals
@@ -148,7 +162,8 @@ for ( const kind of ["stone", "grass", "wood"] ) for ( const level of [1, 2, 3] 
   }
 }
 check(minCirc >= 1.2 && minCV >= 0.1, `taps: worst circularity ${minCirc.toFixed(2)}, worst radial CV ${minCV.toFixed(3)}`);
-check(plates > 20 && litPlates >= plates * 0.15 && shadedPlates >= plates * 0.15, `lit slab faces: ${litPlates} lit, ${shadedPlates} shaded of ${plates} moved plates (each >= 15 %)`);
+check(plates > 20 && litPlates >= plates * 0.15 && shadedPlates >= plates * 0.15, `lit slab faces: ${litPlates} lit (a lit edge, the face within 1.12 x the ground), ${shadedPlates} shaded of ${plates} moved plates (each >= 15 %)`);
+check(flatBright === 0 && texOk >= texN * 0.8, `slab faces textured, never bright flat fills: ${flatBright} brighter than 1.15 x the ground, ${texOk} of ${texN} keep >= half the ground's texture (>= 80 %)`);
 check(worstRun < 12, `no straight ink run of 12 px or more outside the pit (longest ${worstRun})`);
 check(voidL1 < 0.06, `level 1 sags: at most a small hole in its middle (${(voidL1 * 100).toFixed(1)} % near-black, < 6 %)`);
 check(Math.min(...voidL3) > 0.04, `level 3 caves in: a void in every pit (least ${(Math.min(...voidL3) * 100).toFixed(1)} % near-black)`);
@@ -179,5 +194,5 @@ for ( const kind of ["stone", "grass"] ) {
   check(digest(res) === digest(bake([ob], map, kind, MAX, 91)), `trench on ${kind}: the same bytes twice`);
 }
 
-console.log(failed ? `${failed} collapse check(s) FAILED` : `collapse: outline (circ >= ${minCirc.toFixed(2)}, CV >= ${minCV.toFixed(3)}), lit faces ${litPlates}/${shadedPlates} of ${plates}, ink runs < 12 (${worstRun}), levels, trench, determinism - all ok`);
+console.log(failed ? `${failed} collapse check(s) FAILED` : `collapse: outline (circ >= ${minCirc.toFixed(2)}, CV >= ${minCV.toFixed(3)}), lit faces ${litPlates}/${shadedPlates} of ${plates}, textured ${texOk}/${texN}, ink runs < 12 (${worstRun}), levels, trench, determinism - all ok`);
 process.exit(failed ? 1 : 0);

@@ -60,7 +60,8 @@ export const BAKE_VERSIONS = {
   48: { compat: null, note: "crack generator rebuilt" },
   49: { compat: 48, note: "cause specks as tonal patches" },
   50: { compat: null, note: "wood cracks with weight, banded cave-in slabs" },
-  51: { compat: null, note: "cause geometry broken up (spokes, acid pits, claw streaks, moss), tear zig-zag and star irregular" }
+  51: { compat: null, note: "cause geometry broken up (spokes, acid pits, claw streaks, moss), tear zig-zag and star irregular" },
+  52: { compat: 51, note: "cave-in slabs textured: lit edge, rim-to-void gradient, seams" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
