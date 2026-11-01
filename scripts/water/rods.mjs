@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import * as Water from "./water.mjs";
 import { activeToolName } from "../tools.mjs";
+import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Guide rods: bendable lines drawn on the map that steer the water (flow rods) or mark the edge a fall goes over (lip rods).
@@ -337,6 +338,7 @@ export function syncRodTool() {
   if ( on && !gfx && canvas.interface ) {
     gfx = new PIXI.Graphics(); gfx.eventMode = "none"; gfx.zIndex = 850;
     canvas.interface.sortableChildren = true; canvas.interface.addChild(gfx);
+    trackMarkers(gfx, { ring: true });     // the GM's marker opacity; rods and handles stay faintly visible so they can be grabbed
   }
   if ( !on ) { hover = null; drag = null; }
   document.body.classList.toggle("mm-painting-rods", on);

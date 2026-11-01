@@ -1,6 +1,7 @@
 import * as Graph from "./graph.mjs";
 import { KIND_LOOK } from "./art.mjs";
 import * as Roads from "./roads.mjs";
+import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Editing the shape of a drawn road (the "edit" tool), after the water rods: click a road to select it and its control points
@@ -44,6 +45,7 @@ export function attach() {
   if ( marks && !marks.destroyed ) return;
   marks = new PIXI.Graphics(); marks.eventMode = "none"; marks.zIndex = 862;
   canvas.interface.sortableChildren = true; canvas.interface.addChild(marks);
+  trackMarkers(marks, { ring: true });     // the GM's marker opacity; handles stay faintly visible so they can still be grabbed
 }
 
 export function detach() {

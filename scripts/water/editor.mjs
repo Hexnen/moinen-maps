@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import * as Water from "./water.mjs";
 import { activeToolName } from "../tools.mjs";
+import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Painting the water's masks (GM): three brush tools (still water, river, fall) and an eraser, a ring cursor and a translucent
@@ -60,6 +61,7 @@ function buildOverlay() {
   overlay.position.set(r.x, r.y); overlay.scale.set(S.px);
   canvas.interface.sortableChildren = true;
   canvas.interface.addChild(overlay);
+  trackMarkers(overlay);                   // the GM's marker opacity (workspace bar)
   paintOverlay(null);
 }
 
@@ -191,6 +193,7 @@ export function onCanvasReady() {
   cursor = new PIXI.Graphics(); cursor.eventMode = "none"; cursor.zIndex = 900;
   canvas.interface.sortableChildren = true;
   canvas.interface.addChild(cursor);
+  trackMarkers(cursor, { ring: true });
   const view = canvas.app.view;
   listeners = {
     down: onDown, move: onMove, up: onUp, cancel: cancelStroke,

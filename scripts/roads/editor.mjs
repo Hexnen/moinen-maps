@@ -3,6 +3,7 @@ import * as Graph from "./graph.mjs";
 import { KIND_LOOK } from "./art.mjs";
 import * as Roads from "./roads.mjs";
 import * as Shape from "./shape.mjs";
+import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Painting roads (GM). Two tools:
@@ -58,6 +59,8 @@ function ensureGfx() {
   overlay = new PIXI.Graphics(); overlay.eventMode = "none"; overlay.zIndex = 855;
   gfx = new PIXI.Graphics(); gfx.eventMode = "none"; gfx.zIndex = 860;
   canvas.interface.addChild(overlay); canvas.interface.addChild(gfx);
+  // the GM's marker opacity (workspace bar): the junction markers fade fully, the pen and the stroke being drawn stay faintly visible
+  trackMarkers(overlay); trackMarkers(gfx, { ring: true });
 }
 
 /* ---------------------------------------------------------------- drawing the editor's marks */
@@ -372,7 +375,7 @@ export function onCanvasReady() {
   if ( mode === "edit" ) Shape.attach();
   // guide lines live under the editor marks; only the GM's client ever draws them
   guides = new PIXI.Graphics(); guides.eventMode = "none"; guides.zIndex = 850;
-  canvas.interface.sortableChildren = true; canvas.interface.addChild(guides);
+  canvas.interface.sortableChildren = true; canvas.interface.addChild(guides); trackMarkers(guides);
   const view = canvas.app.view;
   listeners = {
     down: onDown, move: onMove, up: onUp, key: onKey, cancel,
