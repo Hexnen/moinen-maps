@@ -49,16 +49,19 @@ const px = (gr, v, x, y, w = 1, h = 1) => gr.drawRect(v.ox + x * v.ap, v.oy + y 
  */
 export function pxRing(gr, v, cx, cy, r, t, { core = 0xf3e6cc, outer = 0x9c8f7c, seed = 1, dash = 8, thick = 1, alpha = 1 } = {}) {
   if ( r < 1 ) return;
-  const n = Math.max(12, Math.round(r * 2 * Math.PI * 1.2)), seen = new Set(), gap = 0.18 + 0.5 * t;
+  // never a circle: the radius wanders with the angle (three slow lobes, phases from the seed) and per arc, whole arcs are missing
+  // (a partial, torn front, more of it gone as it spreads), the arcs differ in length
+  const n = Math.max(12, Math.round(r * 2 * Math.PI * 1.2)), seen = new Set(), gap = 0.3 + 0.45 * t;
+  const p1 = hashU(seed, 1, 21) * 6.28, p2 = hashU(seed, 2, 21) * 6.28, p3 = hashU(seed, 3, 21) * 6.28;
   const cells = [[], []];
   for ( let i = 0; i < n; i++ ) {
     const a = (i / n) * Math.PI * 2, arc = (a / (Math.PI * 2)) * dash + hashU(seed, 3, 7) * dash;
-    // a gap where the arc's own phase falls in its gap share (the arcs differ in length: the phase is warped per arc)
     const ai = Math.floor(arc), ph = arc - ai, g = gap * (0.6 + 0.8 * hashU(ai, seed, 11));
-    if ( ph < g ) continue;
-    const wob = (hashU(ai, seed, 13) - 0.5) * 1.2;
+    if ( ph < g || hashU(ai, seed, 17) < 0.28 ) continue;
+    const lob = 1 + 0.16 * Math.sin(2 * a + p1) + 0.1 * Math.sin(3 * a + p2) + 0.06 * Math.sin(5 * a + p3);
+    const wob = (hashU(ai, seed, 13) - 0.5) * (1.2 + r * 0.08) + (ph - 0.5) * (hashU(ai, seed, 19) - 0.5) * r * 0.12;
     for ( let k = 0; k < thick + 1; k++ ) {
-      const rr = r + wob + k, x = Math.round(cx + Math.cos(a) * rr), y = Math.round(cy + Math.sin(a) * rr * 0.8), key = (y << 16) ^ x;
+      const rr = r * lob + wob + k, x = Math.round(cx + Math.cos(a) * rr), y = Math.round(cy + Math.sin(a) * rr * 0.8), key = (y << 16) ^ x;
       if ( seen.has(key) ) continue; seen.add(key);
       if ( hashU(x, y, seed) < t * 0.9 ) continue;              // dropout as it fades
       cells[k < thick ? 0 : 1].push(x, y);
