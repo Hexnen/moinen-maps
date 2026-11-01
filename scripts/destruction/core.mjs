@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 22;   // 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 23;   // 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -215,13 +215,13 @@ export function causeKit(K) {
     switch ( cz.fill ) {
       case "char": {   // charred, with glowing fissures deep in the burn
         col = mix(col, pal.char[clamp(Math.floor(1 + lit * 2 + bayer(x, y)), 0, 4)], clamp(0.35 + depth * 1.3 + (vnoise(x / 2.5, y / 2.5, seed + 501) - 0.5) * 0.5, 0, 0.92));
-        if ( depth > 0.3 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.02 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
+        if ( depth > 0.3 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.014 && vnoise(x / 7, y / 7, seed + 504) > 0.42 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
         return col;
       }
       case "acid": {   // pools of acid in the deep parts, a bright meniscus, pitted rock around them
         const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.32) * 1.3;
         if ( depth > 0.32 && n < lim ) {
-          const rim = n > lim - 0.06, c = rim ? pal.acc : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
+          const rim = n > lim - 0.06, hp = h2(x, y, seed + 513), c = rim ? pal.acc : hp < 0.05 ? pal.accHi : hp < 0.2 ? mix(pal.accLo, pal.ink, 0.35) : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
           glow(x, y, c, rim ? 150 : 80); return null;
         }
         return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.08 + depth * 0.2);
@@ -290,7 +290,7 @@ export function causeKit(K) {
       case "scraped": c = hv < 0.35 ? mul(m, 1.25) : mix(m, pal.ink, 0.7); break;
       case "smooth": c = mix(m, pal.ink, 0.35); break;
       case "moss": c = hv < 0.5 ? pal.acc : pal.accLo; break;
-      case "frost": c = hv < 0.5 ? pal.accHi : mix(m, pal.accHi, 0.5); break;
+      case "frost": c = hv < 0.22 ? pal.accHi : hv < 0.55 ? mix(m, pal.accHi, 0.3) : mix(m, pal.ink, 0.45); break;
       default: c = pal.ink;
     }
     put(x, y, soft ? mix(m, c, 0.6) : c);
