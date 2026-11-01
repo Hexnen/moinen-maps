@@ -650,7 +650,7 @@ function bakeArea(A, P, seed, uid, jag) {
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
-  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, cz: C.cz, cause: C.cause, causeKit, softLight, chamfer });
+  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, chamfer });
   fracture(C);
   fates(C);
   drawBase(C);
@@ -968,27 +968,15 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( dist > 0 && C.cz?.fate?.thr ) dist *= C.cz.fate.thr;
         let lx = ccx + Math.cos(a) * dist, ly = ccy + Math.sin(a) * dist;
         if ( dist > 0 ) {
-          // the room left in that direction (the window is cut by the scene's edge). A throw that does not fit is never squeezed
-          // against the edge (that piled every long throw into one band along the map's border): it bounces off the edge it would
-          // cross (the direction mirrored on that axis) when that has room, else it lands at its own random share of the room left -
-          // spread over the whole free ground, never stacked at a border. The share is a hash of the chip (the stream R stays as it was).
-          let ca = Math.cos(a), sa = Math.sin(a);
-          const roomOf2 = (ca, sa) => {
-            const rx = ca > 1e-6 ? (W - 10 - ccx) / ca : ca < -1e-6 ? (9 - ccx) / ca : Infinity;
-            const ry = sa > 1e-6 ? (H - 10 - ccy) / sa : sa < -1e-6 ? (9 - ccy) / sa : Infinity;
-            return { r: Math.max(0, Math.min(rx, ry)), x: rx <= ry };
-          };
-          let rm = roomOf2(ca, sa);
-          if ( dist > rm.r * 0.75 ) {
-            const fa = rm.x ? -ca : ca, fb = rm.x ? sa : -sa, rb = roomOf2(fa, fb);
-            if ( rb.r > rm.r ) { ca = fa; sa = fb; rm = rb; }
-            const hv = h2(Math.round(ccx * 8) + 7919 * chip.length, Math.round(ccy * 8), seed + 977);
-            if ( dist > rm.r * 0.75 ) dist = rm.r * (0.2 + 0.55 * hv);
-          }
+          // the room left in that direction: a long throw is shortened smoothly so it always lands well inside the window
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const rx = ca > 1e-6 ? (W - 10 - ccx) / ca : ca < -1e-6 ? (9 - ccx) / ca : Infinity;
+          const ry = sa > 1e-6 ? (H - 10 - ccy) / sa : sa < -1e-6 ? (9 - ccy) / sa : Infinity;
+          const room = Math.max(1, Math.min(rx, ry));
+          if ( dist > room * 0.5 ) dist = room * 0.5 + room * 0.5 * Math.tanh((dist - room * 0.5) / (room * 0.5));
           lx = ccx + ca * dist; ly = ccy + sa * dist;
         }
-        // a chip that still lands outside its window (nowhere to go) is crushed, not stacked on the border
-        if ( lx < 2 || ly < 2 || lx > W - 3 || ly > H - 3 ) { stats.pulverised++; continue; }
+        lx = clamp(lx, 2, W - 3); ly = clamp(ly, 2, H - 3);
         const li = Math.round(ly) * W + Math.round(lx);
         const stackUp = occ[li] ?? 0;
         const tiltA = R() * Math.PI * 2, slope = R() * 0.55 * liftK;

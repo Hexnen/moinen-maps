@@ -486,63 +486,6 @@ export function bakeTear(X) {
     const q = o + W + 1; if ( !openA[q] && own[q] ) { const b = layer[q] ? [col[q * 4], col[q * 4 + 1], col[q * 4 + 2]] : mapAt(x + 1, y + 1); put(q, mix(b, rp[0], 0.4), layer[q] || BASE); }
   }
 
-  /* ---------------------------------------------------------------- 8b. the cause (core.mjs's CAUSE table, the same kit as every kind) */
-  // the floor, the torn lip, a halo round the opening, the hairlines' colour, the specks and the emissive light. Cause 0: nothing here
-  // runs, the tear is exactly the plain one.
-  let light = null;
-  const cz = X.cz;
-  if ( cz && X.causeKit ) {
-    const glowA = cz.glow ? new Uint8Array(N) : null, glowC = glowA ? new Uint8Array(N * 3) : null;
-    const cur = (o) => layer[o] ? [col[o * 4], col[o * 4 + 1], col[o * 4 + 2]] : [map[o * 4], map[o * 4 + 1], map[o * 4 + 2]];
-    const kput = (x, y, c, a = 255) => {
-      if ( x < 0 || y < 0 || x >= W || y >= H ) return;
-      const o = y * W + x;
-      put(o, a < 255 ? mix(cur(o), c, a / 255) : c, layer[o] || BASE);
-    };
-    const kglow = (x, y, c, a = 255) => {
-      kput(x, y, c);
-      if ( !glowA || x < 0 || y < 0 || x >= W || y >= H ) return;
-      const q = y * W + x; if ( a <= glowA[q] ) return;
-      glowA[q] = a; glowC[q * 3] = c[0]; glowC[q * 3 + 1] = c[1]; glowC[q * 3 + 2] = c[2];
-    };
-    // distance from the opening (the halo's and the lip's measure)
-    const dO = new Float32Array(N);
-    for ( let o = 0; o < N; o++ ) dO[o] = openA[o] ? 0 : 1e6;
-    X.chamfer(dO, W, H);
-    const mi = at(L / 2), haloR = cz.halo ? Math.min(14, (3 + maxD * cz.halo.r) * clamp(P.halo ?? 0.6, 0.15, 1) * (0.35 + lvMax / 3)) : 0;
-    const kit = X.causeKit({ cz, pal, seed: sd, W, H, mapAt: cur, put: kput, glow: kglow, isIn: (x, y) => x >= 0 && y >= 0 && x < W && y < H && openA[y * W + x] === 1,
-      inside: openA, din: X.din ?? dO, maxD, E0: { x: SX[mi], y: SY[mi] }, Rr: Math.max(3, wMax * 1.6), C: { cx: C.cx, cy: C.cy, axis: C.axis, maxD }, haloR });
-    // the floor
-    const openList = [];
-    for ( let o = 0; o < N; o++ ) {
-      if ( !openA[o] ) continue;
-      openList.push(o);
-      const i = at(sA[o]), w = wAt(i); if ( w < 0.9 ) continue;
-      const x = o % W, y = (o - x) / W, d = dA[o], m = Math.min(eL[i] - d, eR[i] + d), dn = clamp(m / Math.max(0.8, w), 0, 1);
-      const toNorth = northSide(i) > 0 ? eL[i] - d : eR[i] + d, lit = toNorth < Math.min(2.5, w * 0.6) ? -0.6 : 0.3;
-      const c = kit.fill(x, y, cur(o), Math.pow(dn, 0.75) * (0.35 + 0.65 * deepOf(i)), dn, lit);
-      if ( c ) put(o, c, layer[o] || BASE);
-    }
-    // the halo round the opening (on the lips and, softly, the ground just past them), then the torn lip itself
-    if ( haloR > 0.5 ) for ( let o = 0; o < N; o++ ) { const d = dO[o]; if ( d >= 1.5 && d < haloR ) kit.halo(o % W, (o - (o % W)) / W, o, d); }
-    for ( let o = 0; o < N; o++ ) {
-      if ( openA[o] || !layer[o] || dO[o] > 1.01 ) continue;
-      const x = o % W, y = (o - x) / W, i = near[o] >= 0 ? near[o] : at(L / 2);
-      kit.lip(x, y, o, 1 + 2 * deepOf(i));
-    }
-    kit.crackLines([crackList]);
-    if ( cz.fx ) kit.fx(openList, null);
-    if ( glowA ) {
-      let x0 = W, y0 = H, x1 = -1, y1 = -1;
-      for ( let o = 0; o < N; o++ ) if ( glowA[o] ) { const x = o % W, y = (o - x) / W; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
-      if ( x1 >= 0 ) {
-        const w = x1 - x0 + 1, h = y1 - y0 + 1, a = new Uint8Array(w * h), c = new Uint8Array(w * h * 3);
-        for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) { const q = (y + y0) * W + x + x0, k = y * w + x; a[k] = glowA[q]; c[k * 3] = glowC[q * 3]; c[k * 3 + 1] = glowC[q * 3 + 1]; c[k * 3 + 2] = glowC[q * 3 + 2]; }
-        light = X.softLight(a, c, w, h, x0, y0, cz.glowK ?? 1);
-      }
-    }
-  }
-
   /* ---------------------------------------------------------------- 9. sprites */
   const items = [];
   const row = () => new Int16Array(MF);
@@ -571,10 +514,8 @@ export function bakeTear(X) {
     for ( const i of X.px ) { const x = i % W - cx0, y = (i - (i % W)) / W - cy0, q = (y * cw + x) * 4; cov[q] = cov[q + 1] = cov[q + 2] = cov[q + 3] = 255; }
     const mc = row(); mc[0] = 2; mc[3] = cw; mc[4] = ch; mc[5] = RX + cx0; mc[6] = RY + cy0;
     items.push({ img: { w: cw, h: ch, data: cov, x: cx0, y: cy0 }, m: mc });
-    // the cause's light (kind 3), as core's areas
-    if ( light ) { const ml = row(); ml[0] = 3; ml[3] = light.w; ml[4] = light.h; ml[5] = RX + light.x; ml[6] = RY + light.y; ml[7] = X.cause ?? 0; items.push({ img: light, m: ml }); }
   }
-  let bytes = base.data.length + (light?.data.length ?? 0), pieces = 0;
+  let bytes = base.data.length, pieces = 0;
   // lip pieces, in screen order (lower ones drawn later); each knows where it lay before the rip opened (the closed lips)
   const segs = [...segAcc.entries()].map(([lay, a]) => ({ lay, a })).filter((q) => q.a.n >= 2);
   const imgs = segs.map(({ lay, a }) => ({ lay, a, img: crop((o) => layer[o] === lay) })).filter((q) => q.img).sort((p, q) => (p.img.y + p.img.h) - (q.img.y + q.img.h));
