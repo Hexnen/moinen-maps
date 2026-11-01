@@ -29,6 +29,11 @@ export function chunksOf(scene, at = null) {
   const C = !off() && M?.v === 2 && Composite.enabled() && cacheEnabled() ? Composite.manifestOf(scene) : null;
   if ( C && C.base === M.base ) {
     for ( const id of C.t ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir: C.dir, id, prio: -1 }); }
+    // ... and the flooded strokes' own chunks: their shells are filled right after the reveal (their water reads the areas)
+    for ( const [oid, v] of Object.entries(M.c ?? {}) ) {
+      const id = String(v).split(":")[1];
+      if ( id && !seen.has(id) && Model.TYPES[objs[oid]?.t] === "flood" ) { seen.add(id); out.push({ dir: M.dir, id, prio: 1 }); }
+    }
     for ( const r of chunkRecords(scene) ) for ( const id of r.ids ) if ( id.startsWith("w") && !seen.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: 0 }); }
     return out;
   }

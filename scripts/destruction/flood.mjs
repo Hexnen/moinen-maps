@@ -226,6 +226,7 @@ function makeEntry(g) {
   const e = { g, hash: g.hash, prep: null, key: "", bakeParams: null, res: null, tex: [], fillTex: null, fillBuf: null, sprite: null,
     anim: null, fillAt: null, fillDur: 0, readyAt: 0, step: -1, state: "new", my: life };
   const t0 = performance.now();
+  stats.made = (stats.made ?? 0) + 1;
   const A = readArea(g);
   const t1 = performance.now();
   e.prep = A ? FC.prepareFlood(A) : null;
@@ -245,6 +246,29 @@ function makeEntry(g) {
   // the area is entering now: the water follows the break
   if ( g.anim ) noteAnim(e, g.anim);
   return e;
+}
+
+/** A hole's entry moved into a new group of the same area (true), or false when it must be made again. */
+function rebind(e, g) {
+  if ( e.dead || e.state === "none" || !e.prep || g.hash !== e.hash || !g.cont || g.cont.destroyed ) return false;
+  if ( e.tex.some((q) => q.t.baseTexture?.destroyed) ) return false;
+  const ap = D.destructionApi.display()?.ap ?? 1;
+  if ( ap !== e.ap ) return false;
+  for ( const k of ["sprite", "mix"] ) {
+    const o = e[k];
+    if ( o && !o.destroyed ) { o.parent?.removeChild(o); g.cont.addChild(o); continue; }
+    if ( k === "sprite" ) {
+      const sp = new PIXI.Sprite(PIXI.Texture.EMPTY), at = D.destructionApi.display()?.origin ?? { x: 0, y: 0 };
+      sp.eventMode = "none"; sp.position.set(at.x + e.prep.cx * ap, at.y + e.prep.cy * ap); sp.scale.set(ap);
+      g.cont.addChild(sp); e.sprite = sp;
+    } else {
+      const mx = new LoopMix(); mx.visible = false; mx.position.copyFrom(e.sprite.position); mx.scale.set(ap);
+      g.cont.addChild(mx); e.mix = mx;
+    }
+  }
+  e.g = g;
+  stats.rebound = (stats.rebound ?? 0) + 1;
+  return true;
 }
 
 function keyOf(e) {
@@ -378,7 +402,9 @@ function sync() {
   for ( const g of disp.order ) {
     if ( g.info?.type !== "flood" || g.dead ) continue;
     let e = entries.get(g.hash);
-    if ( e && e.g !== g ) { freeEntry(e); entries.delete(g.hash); e = null; }
+    // the same area (same hash) in a new group - a load swapping the composite's shells for their areas: the hole keeps what it
+    // made (its prepared area, its loop and textures) and only moves into the new group; made again it cost ~240 ms per load
+    if ( e && e.g !== g && !rebind(e, g) ) { freeEntry(e); entries.delete(g.hash); e = null; }
     if ( !e ) {
       // a few holes per frame (reading the area and preparing it is ~2-10 ms a hole, 16-21 ms for a scene's holes at once and
       // over 100 ms under load): past SYNC_MS the rest are made at the next frames
@@ -388,7 +414,11 @@ function sync() {
     }
   }
   if ( more ) canvas.app.ticker.addOnce(() => sync());
-  for ( const [h, e] of entries ) if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
+  for ( const [h, e] of entries ) {
+    if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
+    // (its sprite went with something else while its area stays: made again at the next sync)
+    else if ( e.state !== "none" && (!e.sprite || e.sprite.destroyed) ) { freeEntry(e); entries.delete(h); changed = true; scheduleSync(); }
+  }
   stats.entries = entries.size;
   if ( entries.size ) markOnce("flood:listed", { holes: entries.size, ms: Math.round(performance.now() - t0) });
   if ( entries.size && !tickFn ) { tickFn = () => tick(); canvas.app.ticker.add(tickFn); }
@@ -400,7 +430,9 @@ function tick() {
   let gone = false;
   for ( const [h, e] of entries ) {
     const g = e.g;
-    if ( g.dead || g.cont?.destroyed || !e.sprite || e.sprite.destroyed ) { freeEntry(e); entries.delete(h); gone = true; continue; }
+    // (its group gone: the next sync moves the hole into the area's new group - rebind - or lets it go)
+    if ( e.state === "none" && !g.dead ) continue;    // (an area without water: nothing to draw)
+    if ( g.dead || g.cont?.destroyed || !e.sprite || e.sprite.destroyed ) { gone = true; continue; }
     if ( g.anim && g.anim !== e.anim && e.prep ) noteAnim(e, g.anim);      // a detonation replays the break: the water too
     if ( e.mix?.visible ) { e.mix.visible = false; e.sprite.visible = true; }    // (shown again below only at rest)
     if ( !e.tex.length || !g.cont.parent ) { if ( e.sprite ) e.sprite.texture = PIXI.Texture.EMPTY; continue; }
