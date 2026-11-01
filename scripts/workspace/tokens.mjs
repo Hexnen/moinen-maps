@@ -93,9 +93,9 @@ async function clearOverrides(tokens) {
 }
 
 /** Play the effect of a set on the picked tokens (this screen only). Nothing picked: a hint. */
-function playSet(set, style = null) {
+function playSet(set, style = null, quiet = false) {
   const list = pickedTokens();
-  if ( !list.length ) { ui.notifications.info(T("TokFx.pickFirst")); return; }
+  if ( !list.length ) { if ( !quiet ) ui.notifications.info(T("TokFx.pickFirst")); return; }
   const kind = SETS[set]?.play ?? set;
   list.slice(0, St.MAX_BURST).forEach((t, i) => preview(t, kind, style, kind === "idle" ? 0 : Math.min(i * 0.075, 0.75)));
 }
@@ -180,7 +180,7 @@ function wirePanel(host, { deps = [], playOnChange = null } = {}) {
     const set = chip.closest(".mm-tfx-chips").dataset.set, style = chip.dataset.style;
     syncChips(host, set, style);
     writeScene({ [SETS[set].key]: style });
-    if ( style !== "none" ) playSet(set, style);
+    if ( style !== "none" ) playSet(set, style, true);
   };
   const onChange = (ev) => {
     if ( isEcho() ) return;
@@ -226,8 +226,8 @@ function tokensBar(host) {
     if ( isEcho() ) return;
     const c = ev.target.closest?.("[name]"); if ( !c ) return;
     if ( c.name === "set" ) { barSet = c.value; try { localStorage.setItem("mm-tokfx-set", barSet); } catch {} draw(); return; }
-    if ( c.name === "style" ) { writeScene({ [SETS[barSet].key]: c.value }); if ( c.value !== "none" ) playSet(barSet, c.value); return; }
-    if ( c.name === "intensity" || c.name === "speed" ) { const v = Number(c.value); if ( Number.isFinite(v) ) { writeScene({ [c.name]: v }); playSet(barSet); } }
+    if ( c.name === "style" ) { writeScene({ [SETS[barSet].key]: c.value }); if ( c.value !== "none" ) playSet(barSet, c.value, true); return; }
+    if ( c.name === "intensity" || c.name === "speed" ) { const v = Number(c.value); if ( Number.isFinite(v) ) { writeScene({ [c.name]: v }); playSet(barSet, null, true); } }
   };
   const onClick = async (ev) => {
     const b = ev.target.closest("[data-act]"); if ( !b ) return;
@@ -295,7 +295,7 @@ function idlePanel(host) {
       ${rowCheck("idleTurn", "TokFx.idleTurn", "TokFx.idleTurnHint")}
     </div>
     <p class="hint mm-tfx-note">${esc(T("TokFx.idleNote"))}</p>`;
-  return wirePanel(host, { deps: [['[data-dep="idle"]', () => cfg().idleStyle !== "none"]], playOnChange: (k) => { if ( k === "idleAmp" || k === "idleSpeed" ) playSet("idle"); } });
+  return wirePanel(host, { deps: [['[data-dep="idle"]', () => cfg().idleStyle !== "none"]], playOnChange: (k) => { if ( k === "idleAmp" || k === "idleSpeed" ) playSet("idle", null, true); } });
 }
 
 function deathPanel(host) {
@@ -369,7 +369,7 @@ function overridesPanel(host) {
     const pick = ev.target.closest("[data-pick]");
     if ( pick ) { if ( pick.checked ) picked.add(pick.dataset.pick); else picked.delete(pick.dataset.pick); changed("picks"); return; }
     const ov = ev.target.closest("[data-ov]");
-    if ( ov && ov.value !== "*" ) { await writeOverride(pickedTokens(), ov.dataset.ov, ov.value); if ( ov.value && ov.value !== "none" && SETS[ov.dataset.ov] ) playSet(ov.dataset.ov, ov.value); }
+    if ( ov && ov.value !== "*" ) { await writeOverride(pickedTokens(), ov.dataset.ov, ov.value); if ( ov.value && ov.value !== "none" && SETS[ov.dataset.ov] ) playSet(ov.dataset.ov, ov.value, true); }
   };
   const onClick = async (ev) => {
     const b = ev.target.closest("[data-act]"); if ( !b ) return;

@@ -230,7 +230,7 @@ class Rig {
   constructor(token) {
     this.token = token; this.id = token.document.id;
     this.seed = St.seedOf(this.id); this.tilt = St.tiltOf(this.id); this.phase = St.phaseOf(this.id);
-    this.base = null; this.ready = !!token.mesh && !token.renderFlags?.size; this.age = 0;
+    this.base = null; this.ready = poseSettled(token); this.age = 0;
     this.main = St.pose(); this.idle = St.pose(); this.out = St.pose(); this.last = St.pose({ alpha: -1 });
     this.fx = null; this.corpse = null; this.idleStyle = "none"; this.idleForce = null;
     this.applied = false; this.grey = 0; this.filter = null; this.glowSpr = null; this.shadow = null; this.overlay = null; this.overlayKey = "";
@@ -437,6 +437,18 @@ class Rig {
   }
 }
 
+/**
+ * Does the mesh hold Foundry's own pose? Not while a refresh that sets it is pending (a token just drawn has all of them pending; an
+ * existing token whose effects or bars changed only has other flags, and its mesh is fine to capture now).
+ */
+const POSE_FLAGS = ["redraw", "refresh", "refreshTransform", "refreshPosition", "refreshMesh", "refreshSize", "refreshRotation"];
+function poseSettled(token) {
+  if ( !token?.mesh || token.mesh.destroyed ) return false;
+  const f = token.renderFlags; if ( !f?.size ) return true;
+  for ( const k of POSE_FLAGS ) if ( f.has?.(k) ) return false;
+  return true;
+}
+
 const rigOf = (token) => { const r = RIGS.get(token); return r && !r.disposed ? r : new Rig(token); };
 
 /* ================================================================== effects that run on a Rig */
@@ -475,8 +487,9 @@ function enterFx(token, style, delay, c) {
   if ( lowMode() && style !== "fade" ) style = "fade";
   const dur = lowMode() ? 0.25 : St.durationOf(St.ENTER_STYLES, style, sp);
   const ctx = { k, tilt: rig.tilt, dir: style === "slide" ? edgeDir(token) : null };
-  const show = token.visible;
-  const emit = !show || lowMode() ? null : (r, u, prev) => {
+  // particles only where this client sees the token (asked each frame: a new token is not yet visible when its entry starts)
+  const emit = lowMode() ? null : (r, u, prev) => {
+    if ( !token.visible ) return;
     const g = geom(token), em = r.emitter(), seed = r.seed;
     if ( style === "fade" && crossed(u, prev, 0.01) ) dust(em, g.gx, g.gy, g.W, 14, seed, { up: 1.4 });
     else if ( style === "pop" && crossed(u, prev, 0.12) ) sparkles(em, g.cx, g.cy, 10, g.W * 0.3, seed);
@@ -506,15 +519,15 @@ function deathFx(token, style, delay, c, look) {
   const low = lowMode();
   const dur = low ? 0.35 : St.durationOf(St.DEATH_STYLES, style, sp);
   const ctx = { k, tilt: rig.tilt };
-  const show = token.visible;
   let geo0 = null;
-  const emit = !show || low ? null : (r, u, prev) => {
+  const emit = low ? null : (r, u, prev) => {
+    if ( !token.visible ) return;
     const g = geom(token), em = r.emitter(), seed = r.seed;
     geo0 ??= meshGeo(token.mesh);
     switch ( style ) {
       case "fall": if ( crossed(u, prev, 0.63) ) { const side = g.gx + rig.tilt * g.H * 0.45; dust(em, side, g.gy, g.W * 0.9, 16, seed, { spread: 1.3 }); } break;
       case "collapse": if ( crossed(u, prev, 0.15) ) dust(em, g.gx, g.gy, g.W, 16, seed, { spread: 1.2 }); break;
-      case "grey": if ( crossed(u, prev, 0.35) && show ) EXTRAS.add(new SkullRise(token, dur * 0.9)); break;
+      case "grey": if ( crossed(u, prev, 0.35) ) EXTRAS.add(new SkullRise(token, dur * 0.9)); break;
       case "disintegrate": if ( crossed(u, prev, 0.05) ) cellParticles(em, geo0, "ash", seed, { dur }); break;
       case "explode": if ( crossed(u, prev, 0.3) ) { cellParticles(em, geo0, "confetti", seed, { gy: g.gy, k: 1.2 * k }); sparkles(em, g.cx, g.cy, 18, g.W * 0.15, seed, [BONE, 0xffffff, 0xffe08a], 0.5); smoke(em, g.cx, g.cy, g.W * 0.7, 12, seed); } break;
       case "soul": if ( crossed(u, prev, 0.2) ) EXTRAS.add(new Wisp(token, dur * 0.85)); break;
