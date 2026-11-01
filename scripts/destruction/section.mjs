@@ -153,6 +153,9 @@ function statusLine() {
   if ( S.baked?.key && st.key === S.baked.key ) parts.push(T("Destr.published"));
   // strokes still in a compatible older look (their new look is baked later: in the background, or on Rebake all)
   if ( st.compat ) parts.push(game.i18n.format(`MOINENMAPS.Destr.oldLook.${st.compat.mode === "ask" ? "ask" : "background"}`, { v: st.compat.from, n: st.compat.left }));
+  // a Rebake all running, or the strokes pinned to the look of an older version (about half a second each to bake again)
+  if ( st.rebake ) parts.push(game.i18n.format(st.rebake.paused ? "MOINENMAPS.Destr.rebakePaused" : "MOINENMAPS.Destr.rebaking", { done: st.rebake.done, total: st.rebake.total }));
+  else if ( st.olderLook ) parts.push(game.i18n.format("MOINENMAPS.Destr.olderLook", { n: st.olderLook.n, from: st.olderLook.from, to: st.olderLook.to, eta: Math.max(1, Math.round(st.olderLook.n * 0.6)) }));
   return parts.join(" · ");
 }
 
@@ -164,14 +167,14 @@ function mountDamage(host) {
     const matOf = new Map();
     for ( const a of st.areas ) if ( a.obj && !matOf.has(a.obj) ) matOf.set(a.obj, a.mat);
     const def = Model.causeOf(S?.params?.cause), zero = game.i18n.format("MOINENMAPS.Destr.causeDefault", { cause: causeName(def) });
-    const gm = game.user.isGM;
+    const gm = game.user.isGM, older = new Set(st.olderLook?.ids ?? []);
     const rows = (S?.objects ?? []).filter((o) => !o.k).reverse().map((o) => {
       const t = Model.TYPES[o.t] ?? "blast", c = Model.causeOf(o.c), eff = Model.CAUSES[c || def], mat = matOf.get(o.id);
       const opts = causeOptions(zero).map(([v, l]) => `<option value="${v}"${v === c ? " selected" : ""}>${esc(l)}</option>`).join("");
       // the dock is narrow: kind and cause on the row, the surface it tore up in the kind's tooltip
       const kind = T(`Destr.type.${t}`), tip = mat ? `${kind} · ${T(`Destr.mat.${mat}`)}` : kind;
       return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(kind)}</span>
-        <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span></li>`;
+        <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span>${gm && older.has(o.id) && !st.rebake ? `<button type="button" class="mm-d-rebake" data-act="rebakeOne" data-obj="${esc(o.id)}" data-tooltip="${esc(T("Destr.rebakeOne"))}" aria-label="${esc(T("Destr.rebakeOne"))}"><i class="fa-solid fa-rotate" inert></i></button>` : ""}</li>`;
     }).join("");
     host.innerHTML = `<p class="mm-d-status" role="status">${esc(statusLine())}</p>
       ${rows ? `<ul class="mm-d-areas mm-d-objs" aria-label="${esc(T("Destr.strokesLabel"))}">${rows}</ul>` : ""}
@@ -180,7 +183,9 @@ function mountDamage(host) {
         <button type="button" class="mm-ws-btn" data-act="variation"${S && Model.hasPaint(S) ? "" : " disabled"} data-tooltip="${esc(T("Destr.variationHint"))}"><i class="fa-solid fa-dice" inert></i> ${esc(T("Destr.variation"))}</button>
         <button type="button" class="mm-ws-btn" data-act="clear"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-trash" inert></i> ${esc(T("Destr.clear"))}</button>
         ${gm && st.paused ? `<button type="button" class="mm-ws-btn" data-act="bakeNow" data-tooltip="${esc(T("Destr.bakeNowHint"))}"><i class="fa-solid fa-rotate" inert></i> ${esc(T("Destr.bakeNow"))}</button>` : ""}
-        ${gm && st.compat && !st.paused ? `<button type="button" class="mm-ws-btn" data-act="rebakeAll" data-tooltip="${esc(T("Destr.rebakeAllHint"))}"><i class="fa-solid fa-wand-magic-sparkles" inert></i> ${esc(T("Destr.rebakeAll"))}</button>` : ""}
+        ${gm && (st.compat || st.olderLook) && !st.paused && !st.rebake ? `<button type="button" class="mm-ws-btn" data-act="rebakeAll" data-tooltip="${esc(T("Destr.rebakeAllHint"))}"><i class="fa-solid fa-wand-magic-sparkles" inert></i> ${esc(T("Destr.rebakeAll"))}</button>` : ""}
+        ${gm && st.rebake ? `<button type="button" class="mm-ws-btn" data-act="rebakePause"><i class="fa-solid ${st.rebake.paused ? "fa-play" : "fa-pause"}" inert></i> ${esc(T(st.rebake.paused ? "Destr.rebakeResume" : "Destr.rebakePause"))}</button>
+          <button type="button" class="mm-ws-btn" data-act="rebakeCancel"><i class="fa-solid fa-xmark" inert></i> ${esc(T("Destr.rebakeCancel"))}</button>` : ""}
       </div>
       ${optCheck({ name: "enabled", label: T("Destr.enabled"), checked: S ? S.enabled : true, hint: T("Destr.enabledHint") })}`;
   };
@@ -192,6 +197,9 @@ function mountDamage(host) {
     else if ( b.dataset.act === "variation" ) D.newVariation();
     else if ( b.dataset.act === "bakeNow" ) D.bakeNow();
     else if ( b.dataset.act === "rebakeAll" ) D.rebakeAll();
+    else if ( b.dataset.act === "rebakePause" ) D.rebakePause(!D.getStatus().rebake?.paused);
+    else if ( b.dataset.act === "rebakeCancel" ) D.rebakeCancel();
+    else if ( b.dataset.act === "rebakeOne" ) D.rebakeAll([b.dataset.obj]);
     else if ( b.dataset.act === "clear" ) {
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.clear") }, content: `<p>${esc(T("Destr.clearConfirm"))}</p>` });
       if ( ok ) D.clearAll();

@@ -1,7 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
-import { readMeta, LIVE_PARAMS, META_FIELDS } from "./core.mjs";
+import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION } from "./core.mjs";
 import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
@@ -136,7 +136,7 @@ function integrity(scene) {
 function teardown() {
   flushSave();
   gen++;
-  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer] ) clearTimeout(t);
+  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer] ) clearTimeout(t);
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
@@ -225,7 +225,7 @@ export async function rebake(opts = {}) {
   if ( again && S ) { const o = again; again = null; rebake(o); }
 }
 
-async function bakeOnce({ awaitPublish = true, force = false, idle = false, all = false } = {}) {
+async function bakeOnce({ awaitPublish = true, force = false, idle = false, all = false, redo = null } = {}) {
   const my = gen, scene = canvas.scene, T = { t0: performance.now() }, rev = paramRev;
   if ( !Model.hasPaint(S) || !S.enabled ) {
     display?.fadeAll(); shownKey = ""; shownMask = null;   // erased or cleared: the damage fades out, it does not vanish
@@ -235,8 +235,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const bg = backgroundInfo()?.path ?? "";
   const key = Store.makeKey(scene, S, bg);
   const taken = strokes.splice(0), mask = S.mask.slice();
-  if ( key === shownKey && display && !force && !idle && !all ) { maybeBlast(); return; }
-  const S0 = S, base = Store.baseKey(scene, S, bg), objs = objectsIn();
+  if ( key === shownKey && display && !force && !idle && !all && !redo?.length ) { maybeBlast(); return; }
+  // (the base has no bake version: a published stroke stays valid whatever the code's version is - bake-policy.mjs, version pinning)
   Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
   // (the FULL signature: its own inputs + a digest of the older strokes under it, substrate.mjs; `own` alone tells a dependent re-bake)
@@ -322,12 +322,12 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const failed = [];
   // a manifest of a NEWER bake version (a client with newer code published it) is used as it is: never baked again here for it,
   // never overwritten (bake-policy.mjs) - an older client re-baking and re-publishing it is how two tabs took turns for ever
-  const rule = force ? "none" : Policy.manifestRule(M?.base, base);
+  const rule = force ? "none" : Store.sameBase(M?.base, base, legacy) ? "same" : Policy.manifestRule(M?.base, base);
   status.newerManifest = rule === "newer";
   if ( rule === "newer" ) { Trace.event("manifest-newer", { manifest: M.base, mine: base }); }
   if ( M && (rule === "same" || rule === "newer") ) {
     const fetch = [];
-    for ( const w of missing() ) { const e = Store.entryOf(M, w.objId); if ( e?.sig === w.sig ) fetch.push({ ...w, id: e.id }); }
+    for ( const w of missing() ) { const e = Store.entryOf(M, w.objId); if ( e?.sig === w.sig && !redoSet.has(w.objId) ) fetch.push({ ...w, id: e.id, ver: e.ver }); }
     if ( fetch.length ) {
       const t = performance.now();
       status.waiting = true; status.loading = fetch.length; tell("status");
@@ -341,7 +341,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       if ( firstLoad && fetch.length >= 20 ) Reveal.progressive("destruction", 1500);
       await Promise.all(prioritise(fetch, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
-        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, dir: M.dir, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
+        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, ver: w.ver, dir: M.dir, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
         else failed.push(w);
       }));
       clearTimeout(timer);
@@ -417,16 +417,16 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // (substrate.mjs): no stroke waits for another's record, any set of strokes bakes in any order and in parallel)
   if ( toBake.length ) {
     // why this client bakes on its own (a loop is then easy to see: console and api.destruction.net.trace().events)
-    const why = taken.length ? "edit" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
+    const why = taken.length ? "edit" : redoSet.size ? "rebake" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
     Trace.event("bake", { why, n: toBake.length, of: want.length });
     if ( !taken.length ) console.warn(`${MODULE_ID} | destruction: baking ${toBake.length} of ${want.length} stroke(s) here (${why})`);
     if ( !taken.length && !force && bakeFail?.key === key ) {
       const wait = Math.min(8 * 60000, 15000 * 2 ** (bakeFail.n - 1)) - (Date.now() - bakeFail.at);
       if ( wait > 0 ) { Trace.event("bake-backoff", { wait }); clearTimeout(bakeTimer); bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, wait); return; }
     }
-    if ( !taken.length && !force && !idle && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
+    if ( !taken.length && !force && !idle && !redoSet.size && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
     // (an idle pass in the background is not "baking" for the status: the compatible look is on screen and stays until it is replaced)
-    Object.assign(status, { baking: !idle, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length, bakeStart: Date.now() }); tell("status");
+    Object.assign(status, { baking: !idle && !redoSet.size, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length, bakeStart: Date.now() }); tell("status");
     if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
     // a long bake on a scene load: the reveal does not wait for all of it (it shows what is ready after its longer budget, the rest
     // fades in stroke by stroke as it is baked, nearest to the view first)
@@ -458,7 +458,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           if ( plain || !overSubstrate(sprites) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
           // a plain look is the stroke's final look when it reads nothing
           if ( plain && w.deps.length ) continue;
-          recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, sprites }); waitingSince.delete(w.rk);
+          recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, ver: CORE_VERSION, sprites }); waitingSince.delete(w.rk);
         }
         status.stats = res.stats;
       };
@@ -539,6 +539,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     Trace.event("compat-shown", { from: status.compat?.from, left: deferred.size, mode });
   }
   if ( complete ) { shownKey = key; waitingSince.clear(); Trace.markOnce("damage:all", { groups: display?.groups.size ?? 0, uploads: display?.stats?.uploads ?? 0, ...src }); }
+  // strokes pinned to an older look than the current code would draw for their kind (Damage panel: "Rebake all")
+  status.olderLook = olderLooks(want);
   // the composite's shells that need their pixels anyway (flooded holes, a dark scene); the GM keeps the composite up to date
   if ( src.composite ) setTimeout(shellNeeds, 0);
   if ( complete && game.user.isGM ) scheduleComposite();
@@ -550,7 +552,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const source = Object.entries(src).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ") || "memory";
   Object.assign(status, { baking: false, waiting: !complete, loading: 0, progress: 1, source, hash: "", error: "", perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])) });
   tell("status");
-  if ( game.user.isGM && complete ) schedulePersist(src.baked + src.legacy);
+  // (during a Rebake all the manifest is written once, at its end)
   maybeBlast(firstLoad);
 }
 
@@ -718,7 +720,7 @@ async function hydrate(r) {
 async function compositeLoad(scene, base, want, M) {
   if ( !Composite.enabled() || !cacheEnabled() ) return 0;
   const CM = Composite.manifestOf(scene);
-  if ( !CM || CM.base !== base ) return 0;
+  if ( !CM || !Store.sameBase(CM.base, base, Store.legacyBaseKey(scene, S, backgroundInfo()?.path ?? "")) ) return 0;
   const c = await Composite.load(CM);
   if ( !c ) return 0;
   const ix = c.index, byId = new Map(want.map((w) => [w.objId, w])), covered = [];
@@ -734,7 +736,7 @@ async function compositeLoad(scene, base, want, M) {
     if ( recs.has(w.rk) ) continue;
     const e = M ? Store.entryOf(M, w.objId) : null;
     const areas = (ix.strokes[w.objId].hashes ?? []).map((h) => ix.areas[h]).filter(Boolean);
-    recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: e?.sig === w.sig ? e.id : null, dir: M?.dir ?? null, sprites: [], shell: areas });
+    recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: e?.sig === w.sig ? e.id : null, ver: e?.sig === w.sig ? e.ver : CORE_VERSION, dir: M?.dir ?? null, sprites: [], shell: areas });
   }
   Trace.event("composite", { strokes: covered.length, of: want.length, mpx: Math.round(c.px / 1e5) / 10 });
   return covered.length;
@@ -861,6 +863,65 @@ function maybeBlast(first = false) {
  * worker (in parallel with the next bake), uploaded (only what the server lacks, a few at a time) and named in the manifest together
  * with the entries that played since. One run at a time; a run asked for meanwhile follows it.
  */
+/* ---------------------------------------------------------------- pinned older looks and Rebake all (bake-policy.mjs) */
+
+/** The strokes on screen whose look is older than the current code's for their kind: { n, from, to, ids } or null. */
+function olderLooks(want) {
+  if ( !S ) return null;
+  const ids = [];
+  let from = Infinity;
+  for ( const w of want ) {
+    const r = recs.get(w.rk) ?? shownRecs.get(w.objId), o = S.objects[w.index];
+    if ( !r || !o ) continue;
+    const ver = Number.isFinite(r.ver) ? r.ver : CORE_VERSION;
+    if ( Policy.olderLook(ver, Model.TYPES[o.t], !!(o.c || S.params.cause), CORE_VERSION) ) { ids.push(w.objId); from = Math.min(from, ver); }
+  }
+  return ids.length ? { n: ids.length, from, to: CORE_VERSION, ids } : null;
+}
+
+/*
+ * REBAKE ALL (or one stroke): in the background, a couple of strokes at a time (the nearest to the view first, each followed by the
+ * strokes that read it), one pass every 250 ms while nothing else bakes; each new look is swapped in silently; the manifest is written
+ * once at the end. Pause / resume / cancel from the Damage panel. status.rebake: { total, done, paused } while it runs.
+ */
+const REBAKE_BATCH = 2, REBAKE_EVERY = 250;
+let rebakeQueue = [], rebakeTimer = 0;
+export function rebakeStrokes(ids = null) {
+  if ( !S || !game.user.isGM ) return;
+  const bg = backgroundInfo()?.path ?? "", base = Store.baseKey(canvas.scene, S, bg), FS = Store.sigsOf(S), objs = objectsIn();
+  const list = ids ?? status.olderLook?.ids ?? [];
+  if ( !list.length ) return;
+  const wantIds = new Set(list), entries = [];
+  S.objects.forEach((o, index) => {
+    if ( o.k || !wantIds.has(o.id) ) return;
+    // the strokes that read this one (their substrate changes with it)
+    const dependents = S.objects.filter((q, j) => !q.k && FS[j]?.deps?.includes(index)).map((q) => q.id);
+    entries.push({ objId: o.id, index, dist: inView(objs[index]) ? 0 : 1, dependents });
+  });
+  void base;
+  rebakeQueue = Policy.rebakeOrder(entries);
+  status.rebake = { total: rebakeQueue.length, done: 0, paused: false };
+  Trace.event("rebake-start", { n: rebakeQueue.length });
+  tell("status");
+  pumpRebake(50);
+}
+function pumpRebake(ms = REBAKE_EVERY) {
+  clearTimeout(rebakeTimer);
+  rebakeTimer = setTimeout(async () => {
+    rebakeTimer = 0;
+    const R = status.rebake;
+    if ( !S || !R || R.paused ) return;
+    if ( !rebakeQueue.length ) { status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
+    if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
+    const batch = rebakeQueue.splice(0, REBAKE_BATCH);
+    await rebake({ awaitPublish: false, redo: batch });
+    if ( status.rebake ) { status.rebake.done += batch.length; tell("status"); }
+    pumpRebake(REBAKE_EVERY);
+  }, ms);
+}
+export function rebakePause(paused = true) { if ( status.rebake ) { status.rebake.paused = paused; tell("status"); if ( !paused ) pumpRebake(50); } }
+export function rebakeCancel() { rebakeQueue = []; clearTimeout(rebakeTimer); if ( status.rebake ) { Trace.event("rebake-cancel", status.rebake); status.rebake = null; tell("status"); schedulePersist(0); } }
+
 /* ---------------------------------------------------------------- how many workers a big bake uses */
 
 /**
@@ -927,9 +988,10 @@ async function persistOnce() {
   const my = gen, scene = canvas.scene, bg = backgroundInfo()?.path ?? "";
   const base = Store.baseKey(scene, S, bg), key = Store.makeKey(scene, S, bg);
   if ( shownKey !== key ) return;                   // not all on screen yet: the bake that completes it asks again
-  const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && M.base === base;
-  // never over a manifest of a newer bake version (a client with newer code made it): this one would only undo it (bake-policy.mjs)
-  if ( M && !Policy.mayPublish(M.base, base) ) { Trace.event("publish-skipped", { why: "version-newer", manifest: M.base, mine: base }); return; }
+  // (a manifest of 0.4.1 with the same settings counts as the same: its entries stay, rewritten with the version they were baked at)
+  const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg));
+  // (versions no longer decide who may publish: every entry carries the version it was baked with, and an entry is only replaced by a
+  // record of the same stroke baked with a newer version, or by a changed stroke - never downgraded)
   seedKnown(scene);
   const c = {}, todo = [], FS = Store.sigsOf(S);
   for ( const [index, o] of S.objects.entries() ) {
@@ -937,8 +999,8 @@ async function persistOnce() {
     const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
     if ( !r ) return;                                // should not happen once complete; a later run publishes
     const e = same ? Store.entryOf(M, o.id) : null;
-    if ( e?.sig === sig ) c[o.id] = `${sig}:${e.id}`;
-    else if ( r.id && Net.known(dir).has(r.id) ) c[o.id] = `${sig}:${r.id}`;
+    if ( e?.sig === sig && !((r.ver ?? -1) > (e.ver ?? -1) && r.id !== e.id) ) c[o.id] = Policy.entryString(sig, e.id, e.ver);
+    else if ( r.id && Net.known(dir).has(r.id) ) c[o.id] = Policy.entryString(sig, r.id, r.ver ?? CORE_VERSION);
     else todo.push({ o, sig, r });
   }
   const stale = M ? Object.keys(M.c).filter((id) => !(id in c) && !todo.some((q) => q.o.id === id)) : [];
@@ -958,7 +1020,7 @@ async function persistOnce() {
       for ( const q of todo ) {
         const e = byKey.get(q.o.id);
         q.r.id = e.id; q.r.dir = dir;
-        c[q.o.id] = `${q.sig}:${e.id}`;
+        c[q.o.id] = Policy.entryString(q.sig, e.id, q.r.ver ?? CORE_VERSION);
         Net.keep(e.id, e.bytes, { F: META_FIELDS, sprites: q.r.sprites });
       }
       const t2 = performance.now();
@@ -1193,7 +1255,7 @@ export const destructionApi = {
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
   /** Rebake all: the strokes shown in a compatible older look are baked now (and published by the GM). */
-  rebakeAll: () => { Trace.event("rebake-all"); return rebake({ awaitPublish: false, all: true }); },
+  /** Rebake all: the strokes in an older look baked again with the current code, in the background (rebakeStrokes); `ids`: some only. */
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
@@ -1208,7 +1270,7 @@ export const destructionApi = {
 
 /** The Damage panel's buttons (section.mjs). */
 export const bakeNow = () => destructionApi.bakeNow();
-export const rebakeAll = () => destructionApi.rebakeAll();
+export const rebakeAll = (ids = null) => destructionApi.rebakeAll(ids);
 
 export function registerDestruction() {
   moduleApi.destruction = destructionApi;

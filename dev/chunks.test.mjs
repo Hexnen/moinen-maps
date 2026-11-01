@@ -161,7 +161,8 @@ await test("manifest: entries name only codec ids (never a path); copies of a sc
   globalThis.Hooks ??= { on() {}, once() {}, callAll() {}, call() {} };
   const Store = await import("../scripts/destruction/store.mjs"), Pub = await import("../scripts/water/publish.mjs");
   const M = { v: 2, dir: "worlds/w/moinen-maps/c/A", c: { s1: "abc:d0123456789abcd", s2: "abc:../../evil", s3: "nocolon", s4: 5, s5: "x:d0123456789abc" } };
-  assert.deepEqual(Store.entryOf(M, "s1"), { sig: "abc", id: "d0123456789abcd" });
+  // (0.4.2: an entry carries the version its stroke was baked with; "sig:id" of 0.4.1 takes its manifest base's version, -1 here)
+  assert.deepEqual(Store.entryOf(M, "s1"), { sig: "abc", id: "d0123456789abcd", ver: -1 });
   for ( const k of ["s2", "s3", "s4", "s5", "missing"] ) assert.equal(Store.entryOf(M, k), null, k);
   // scene B is a copy of A (its manifest still names A's folder): the GC's references include A's files through B too
   const flags = (dir, c) => ({ flags: { "moinen-maps": { destruction: { v: 3, baked: { v: 2, dir, c } }, destructionObjects: { s1: { id: "s1", v: 2 } } } } });

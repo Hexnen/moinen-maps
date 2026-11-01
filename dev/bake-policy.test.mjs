@@ -4,7 +4,7 @@
  * Run: node dev/bake-policy.test.mjs
  */
 import assert from "node:assert/strict";
-import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS } from "../scripts/destruction/bake-policy.mjs";
+import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS, strokeVersion, olderLook, parseEntry, entryString, rebakeOrder } from "../scripts/destruction/bake-policy.mjs";
 
 let passed = 0;
 const test = (name, fn) => { try { fn(); passed++; console.log("ok  ", name); } catch ( err ) { console.error("FAIL", name, err); process.exitCode = 1; } };
@@ -90,6 +90,59 @@ test("visual compatibility of bake versions follows the declared chain only", ()
   assert.ok(!compatible(31, 30, T));            // never a newer one as compatible with an older
   assert.ok(compatible(31, 31, T));
   for ( const [v, e] of Object.entries(BAKE_VERSIONS) ) assert.ok(e.compat < Number(v), `version ${v} points forward`);
+});
+
+/* ---------------------------------------------------------------- version pinning (0.4.2) */
+
+test("per-kind versions: a tear-only bump makes only tears look older", () => {
+  const T = { 10: { kinds: ["global"] }, 11: { kinds: ["gash"] }, 12: { kinds: ["cause"] }, 13: { kinds: ["collapse", "cracks"] } };
+  assert.equal(strokeVersion("gash", false, 13, T), 11);
+  assert.equal(strokeVersion("blast", false, 13, T), 10);
+  assert.equal(strokeVersion("blast", true, 13, T), 12);
+  assert.equal(strokeVersion("cracks", true, 13, T), 13);
+  assert.ok(olderLook(10, "gash", false, 13, T));
+  assert.ok(!olderLook(10, "blast", false, 13, T));
+  assert.ok(olderLook(11, "blast", true, 13, T));
+  // every entry of the real table names what it touched once 0.4.2's mapping ran (entries without kinds count as global)
+  for ( const [v, e] of Object.entries(BAKE_VERSIONS) ) if ( Number(v) >= 25 ) assert.ok(Array.isArray(e.kinds) && e.kinds.length, `version ${v} has no kinds`);
+});
+
+test("entries: 0.4.1 'sig:id' take the manifest's version, 0.4.2 'sig:id:ver' their own", () => {
+  assert.deepEqual(parseEntry("abc:d0123456789abcd", 44), { sig: "abc", id: "d0123456789abcd", ver: 44 });
+  assert.deepEqual(parseEntry(entryString("abc", "d0123456789abcd", 52), 44), { sig: "abc", id: "d0123456789abcd", ver: 52 });
+  assert.equal(parseEntry("nonsense"), null);
+});
+
+test("rebake order: nearest first, each followed by the strokes that read it, no repeats", () => {
+  const order = rebakeOrder([{ objId: "a", index: 0, dist: 1, dependents: ["c"] }, { objId: "b", index: 1, dist: 0, dependents: ["c"] }, { objId: "c", index: 2, dist: 1 }]);
+  assert.deepEqual(order, ["b", "c", "a"]);
+});
+
+/**
+ * A scene of 240 strokes under version pinning: a stroke is baked when it has no entry or its signature changed (never because of
+ * the bake version). A signature is a stroke's own inputs plus the OWN signatures of the older strokes it reads (substrate.mjs).
+ */
+test("240 strokes: ten version bumps bake nothing; one tear's cause changed bakes it and the strokes that read it", () => {
+  let seed = 3; const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  const strokes = Array.from({ length: 240 }, (_, i) => ({ id: `s${i}`, kind: ["blast", "gash", "cracks", "collapse"][i % 4], cause: i % 7, deps: [] }));
+  strokes.forEach((s, i) => { for ( let j = Math.max(0, i - 6); j < i; j++ ) if ( rnd() < 0.3 ) s.deps.push(j); });
+  const own = (s) => `${s.id}|${s.kind}|${s.cause}`;
+  const sigs = () => strokes.map((s) => `${own(s)}<${s.deps.map((j) => own(strokes[j])).join(",")}`);
+  let version = 44;
+  const manifest = new Map(sigs().map((sig, i) => [strokes[i].id, { sig, ver: version }]));
+  const load = () => {
+    const now = sigs(); let bakes = 0;
+    now.forEach((sig, i) => { const e = manifest.get(strokes[i].id); if ( !e || e.sig !== sig ) { bakes++; manifest.set(strokes[i].id, { sig, ver: version }); } });
+    return bakes;
+  };
+  let total = 0;
+  for ( let b = 0; b < 10; b++ ) { version++; total += load(); }
+  assert.equal(total, 0, "a version bump re-baked strokes");
+  const tear = strokes.findIndex((s) => s.kind === "gash" && strokes.some((q) => q.deps.includes(strokes.indexOf(s))));
+  const readers = strokes.filter((q) => q.deps.includes(tear)).length;
+  strokes[tear].cause = (strokes[tear].cause + 1) % 7;
+  assert.equal(load(), 1 + readers);
+  assert.equal(load(), 0);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);

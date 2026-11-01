@@ -65,6 +65,69 @@ export const BAKE_VERSIONS = {
   53: { compat: 52, note: "fire ember bed, seams and lip glow in the light sprite (day pixels unchanged)" }
 };
 
+/*
+ * VERSION PINNING (0.4.2). A published stroke keeps the look it was baked with: its chunk stays valid whatever the module's bake version
+ * is now. It is baked again only when the stroke itself changes (its signature: pixels, kind, cause, path, the settings and the
+ * strokes under it), when its chunk is missing or unreadable, or when the user asks ("Rebake all", a stroke's own Rebake). A new
+ * stroke is baked with the current code. An update of the module therefore never re-bakes a scene by itself.
+ *
+ * Which strokes then show an OLDER LOOK than the current code would draw: those whose recorded version is below the latest version
+ * that touched their kind (or their cause). Every BAKE_VERSIONS entry names what it touched:
+ *     NN: { kinds: ["gash"], note: "..." }       a kind: blast, collapse, scorch, flood, cracks, gash (the tear)
+ *     NN: { kinds: ["cause"], note: "..." }      the cause treatments (strokes with a cause, their own or the scene's)
+ *     NN: { kinds: ["global"], note: "..." }     everything (no `kinds` counts as global too)
+ * `compat` is no longer read for validity (kept as history); a bump's only effect is the "older look" count and Rebake all.
+ */
+const KIND_OF_VERSION = {
+  25: ["global"], 26: ["global"], 27: ["global"], 28: ["cause"], 29: ["gash", "collapse"], 30: ["cracks"], 31: ["cause"], 32: ["cracks"],
+  33: ["cause"], 35: ["gash"], 36: ["collapse"], 37: ["cracks"], 38: ["cause"], 39: ["gash"], 40: ["collapse"], 41: ["cracks", "flood"],
+  42: ["cause"], 43: ["collapse"], 44: ["cracks", "blast", "scorch"], 45: ["cause"], 46: ["cause", "gash"], 47: ["cause"], 48: ["cracks"],
+  49: ["cause"], 50: ["cracks", "collapse"], 51: ["cause", "gash"], 52: ["collapse"], 53: ["cause"]
+};
+for ( const [v, kinds] of Object.entries(KIND_OF_VERSION) ) if ( BAKE_VERSIONS[v] && !BAKE_VERSIONS[v].kinds ) BAKE_VERSIONS[v].kinds = kinds;
+
+/**
+ * The version the current code would give a stroke of `kind` (with or without a cause): the newest entry up to `now` that touched it.
+ * Versions with no entry (before the table) count as global.
+ */
+export function strokeVersion(kind, hasCause, now, table = BAKE_VERSIONS) {
+  for ( let v = now; v > 0; v-- ) {
+    const e = table[v];
+    const kinds = e ? (e.kinds?.length ? e.kinds : ["global"]) : (v < 25 ? ["global"] : []);
+    if ( kinds.includes("global") || kinds.includes(kind) || (hasCause && kinds.includes("cause")) ) return v;
+  }
+  return 0;
+}
+
+/** Does a stroke baked at `ver` show an older look than the current code would draw? */
+export const olderLook = (ver, kind, hasCause, now, table = BAKE_VERSIONS) => Number.isFinite(ver) && ver < strokeVersion(kind, hasCause, now, table);
+
+/**
+ * A manifest entry: "sig:id" (until 0.4.1: baked at the manifest's version) or "sig:id:ver" (pinned per stroke). -> { sig, id, ver }.
+ * `manifestVer`: the version a 0.4.1 entry was baked with (its manifest base's version).
+ */
+export function parseEntry(v, manifestVer = -1) {
+  if ( typeof v !== "string" ) return null;
+  const [sig, id, ver] = v.split(":");
+  if ( !sig || !id ) return null;
+  const n = ver !== undefined && ver !== "" ? Number(ver) : NaN;
+  return { sig, id, ver: Number.isFinite(n) ? n : manifestVer };
+}
+export const entryString = (sig, id, ver) => `${sig}:${id}:${ver}`;
+
+/**
+ * Rebake all: the order strokes are re-baked in - the older looks nearest the view first, each followed by the strokes that read it
+ * (their substrate changes with it). `list`: [{ objId, index, dist, dependents: [objId] }]. -> [objId] without repeats.
+ */
+export function rebakeOrder(list) {
+  const out = [], seen = new Set();
+  for ( const w of [...list].sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0) || a.index - b.index) ) {
+    if ( !seen.has(w.objId) ) { seen.add(w.objId); out.push(w.objId); }
+    for ( const d of w.dependents ?? [] ) if ( !seen.has(d) ) { seen.add(d); out.push(d); }
+  }
+  return out;
+}
+
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
 export function compatible(old, now, table = BAKE_VERSIONS) {
   if ( old === now ) return true;

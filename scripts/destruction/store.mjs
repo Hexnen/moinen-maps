@@ -36,10 +36,33 @@ export function makeKey(scene, S, bgPath) {
   return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(objs)).toString(36)}:${extra.toString(36)}`;
 }
 
-/** What every stroke's bake depends on besides the stroke itself. */
+/**
+ * What every stroke's bake depends on besides the stroke itself - WITHOUT the bake version (0.4.2, version pinning, bake-policy.mjs):
+ * "p:<art px>:<grid>:<settings, map, size, seed>". A setting still at its default does not count (a new setting added by an update,
+ * at its default, does not change any key). Records, chunks, the manifest and the composite are keyed by it.
+ */
 export function baseKey(scene, S, bgPath) {
+  const defs = Model.PARAM_DEFAULTS ?? {};
+  const ps = Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !S.params.cause) && !(k in defs && JSON.stringify(S.params[k]) === JSON.stringify(defs[k])))
+    .sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
+  return `p:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(`${ps}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`)).toString(36)}`;
+}
+
+/** The base key of 0.4.1 and before ("<bake version>:<rest>"): a manifest or composite made then still counts (migration). */
+export function legacyBaseKey(scene, S, bgPath) {
   return `${CORE_VERSION}:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(`${paramStr(S)}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`)).toString(36)}`;
 }
+
+/** Is a stored base (a manifest's, a composite's) the same as this scene's now - pinned, or of 0.4.1 with the same settings? */
+export function sameBase(stored, base, legacy) {
+  if ( !stored ) return false;
+  if ( stored === base ) return true;
+  const a = String(stored).split(":"), b = String(legacy ?? "").split(":");
+  return a[0] !== "p" && /^\d+$/.test(a[0]) && a.length === b.length && a.slice(1).join(":") === b.slice(1).join(":");
+}
+
+/** The bake version a 0.4.1 manifest's entries were made with (its base's first field), else -1. */
+export const legacyVersion = (stored) => { const v = String(stored ?? "").split(":")[0]; return /^\d+$/.test(v) ? Number(v) : -1; };
 
 /**
  * Stale while revalidate: may the chunks of a manifest made by an OLDER bake version stand in (shown at once, replaced stroke by stroke
@@ -76,9 +99,12 @@ export const manifestOf = (S) => S?.baked?.v === 2 && S.baked.c && typeof S.bake
 export function entryOf(M, objId) {
   const v = M?.c?.[objId];
   if ( typeof v !== "string" ) return null;
-  const i = v.indexOf(":"), id = v.slice(i + 1);
+  // "sig:id" (0.4.1: baked at the manifest's version) or "sig:id:ver" (0.4.2: the version this stroke was baked with)
+  const [sig, id, ver] = v.split(":");
   // the id names a file: only what the codec makes ("d" + 14 base-36), never a path
-  return i > 0 && /^d[0-9a-z]{14}$/.test(id) ? { sig: v.slice(0, i), id } : null;
+  if ( !sig || !/^d[0-9a-z]{14}$/.test(id ?? "") ) return null;
+  const n = ver !== undefined && ver !== "" ? Number(ver) : NaN;
+  return { sig, id, ver: Number.isFinite(n) ? n : legacyVersion(M.base) };
 }
 
 /* ---------------------------------------------------------------- the strokes' paths, in their own flag key */
