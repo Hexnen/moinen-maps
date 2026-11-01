@@ -65,18 +65,27 @@ export function cacheRes(sceneW, sceneH, zoomedIn = false) {
 }
 
 /**
- * Mip levels for a band: zoomed out the live atlases are sampled with mipmaps; a band without them aliases (5% of the pixels off by
- * more than 60 at zoom 0.5). PIXI 7 does not build them for render textures, so: generate them by hand once after the band is drawn.
+ * Mip levels for a band (or a flattened area): zoomed out the live atlases are sampled with mipmaps; a band without them aliases (5%
+ * of the pixels off by more than 60 at zoom 0.5). PIXI 7 does not build them for a render texture by itself after it is drawn into,
+ * so: mark it mipmapped and let PIXI re-apply its style (generateMipmap plus the MIN / MAG filters from ITS scaleMode, NEAREST or
+ * LINEAR) - no GL filter set behind PIXI's back (a hand-set LINEAR_MIPMAP_LINEAR stayed on the texture whatever its scaleMode).
  */
 export function mipmaps(R, rt) {
-  const gl = R.gl; if ( !gl ) return;
+  if ( !R.gl ) return;
+  const bt = rt.baseTexture;
+  bt.mipmap = PIXI.MIPMAP_MODES.ON;
+  bt.dirtyStyleId++;
   R.renderTexture.bind(null);
-  R.texture.bind(rt.baseTexture, 0);
-  const gt = rt.baseTexture._glTextures?.[R.CONTEXT_UID]; if ( !gt ) return;
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gt.mipmap = true;
-  rt.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
+  R.texture.bind(bt, 0);                                  // -> updateTextureStyle: mipmaps rebuilt, filters from bt.scaleMode
+}
+
+/** The sampling of every texture of the display's areas (atlases, flattened areas, covers): NEAREST 0 / LINEAR 1. */
+export function setSampling(d, mode) {
+  for ( const g of d.groups.values() ) {
+    if ( g.tex ) g.tex.scaleMode = mode;
+    if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = mode;
+    if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = mode;
+  }
 }
 
 /**
@@ -139,7 +148,9 @@ export class SharpTile extends PIXI.Container {
     const b = this.rt.baseTexture, un = this.shader.uniforms;
     un.uTex = this.rt; un.uSize[0] = b.realWidth; un.uSize[1] = b.realHeight;
     // screen pixels per texel (the canvas's own resolution included)
-    un.uScale = Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
+    // (`nearest`: the live layer samples NEAREST now - zoomed in past 3 screen px per art pixel - so the tile does too, a hard step at
+    // every texel edge, the same pixels as the shards in an entry frame; else one screen pixel of smoothing at each texel edge)
+    un.uScale = this.nearest ? 1e4 : Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
     renderer.state.set(this.state);
@@ -268,8 +279,9 @@ export class StaticCache {
    */
   align(z) {
     const M = this.show.parent?.worldTransform, res = this.stats.res; if ( !M ) return;
-    const one = Math.abs(z / res - 1) < 0.01, a = M.a, dpr = canvas.app.renderer.resolution || 1;
+    const one = Math.abs(z / res - 1) < 0.01, a = M.a, dpr = canvas.app.renderer.resolution || 1, nearest = this.d.filter === 0;
     for ( const b of this.bands ) for ( const t of b.tiles ) {
+      t.spr.nearest = nearest && z / res > 1.5;            // magnified: the live layer's sampling (an entry frame and the rest look alike)
       if ( !one ) { t.spr.position.set(t.x, t.y); continue; }
       const sx = (a * t.x + M.tx) * dpr, sy = (M.d * t.y + M.ty) * dpr;
       t.spr.position.set(t.x + (Math.round(sx) - sx) / (a * dpr), t.y + (Math.round(sy) - sy) / (M.d * dpr));
@@ -336,6 +348,10 @@ export class StaticCache {
     const old = new Map(force ? [] : this.bands.map((b) => [b.key, b]));
     const keep = new Set();
     this.show.removeChildren();
+    // the bands are drawn with the sampling that is right for pixel art at THEIR density, whatever the live layer uses at the moment:
+    // an art pixel covering a texel or more is copied as a whole block (NEAREST), a denser art grid is averaged (LINEAR + mipmaps).
+    // (Drawn with the live layer's sampling of the moment, a band made zoomed out kept LINEAR-blurred art pixels when zoomed in.)
+    const smp = eff * ap >= 0.999 ? 0 : 1, liveSmp = d.filter;
     const bands = [], runs = [];
     const waters = U.filter((u) => u.water);
     const wasVis = live.visible;
@@ -343,11 +359,12 @@ export class StaticCache {
     for ( let k = 0; k < plan.length; k++ ) {
       const p = plan[k];
       if ( p ) {
-        const key = `${p.L}|${eff}|${mips}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
+        const key = `${p.L}|${eff}|${mips}|${smp}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
         let band = old.get(key);
         if ( band && band.tiles.every((t) => t.rt.valid && !t.rt.baseTexture.destroyed) ) keep.add(band);
         else {
           band = { key, level: p.L, tiles: [] };
+          if ( d.filter !== smp ) { setSampling(d, smp); d.filter = smp; }
           live.visible = true;
           const set = new Set(p.members);
           for ( const c of live.children ) c.renderable = set.has(c);
@@ -373,6 +390,7 @@ export class StaticCache {
     for ( const c of live.children ) c.renderable = true;
     for ( const u of waters ) u.water.renderable = true;
     live.visible = wasVis;
+    if ( d.filter !== liveSmp ) { setSampling(d, liveSmp); d.filter = liveSmp; }
     this.freeBands(this.bands.filter((b) => !keep.has(b)));
     this.bands = bands; this.runs = runs;
     const ms = performance.now() - t0;

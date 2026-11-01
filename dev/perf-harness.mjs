@@ -492,6 +492,64 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
 }
 
 /**
+ * CRISPNESS CHECK (resting damage vs the same damage drawn live, as in an entry frame): at each zoom the destruction layer is drawn
+ * with its cache (resting: bands, flattened areas) and with the cache off (live sprites), flood water hidden; over the screen pixels
+ * of the damage (either frame opaque) the mean Sobel gradient magnitude of the luma is compared: `ratio` = cached / live. Blurred
+ * resting damage (LINEAR-magnified art pixels) shows as a ratio well under 1. Pass: every ratio from zoom 3 up within 10% of 1
+ * ("map" before the fix: 0.69 at zoom 4 and 6 - the cache's sharp-bilinear edges against the live layer's NEAREST; after: 1.000).
+ * `shards` (default on): also the flattened areas un-flattened into shard sprites (an entry frame's drawing) against their flattened
+ * textures: `flatVsShards` = flattened / shards, also within 10%.
+ */
+export function crispCheck({ zooms = [1, 2, 3, 4, 6], region = null, shards = true } = {}) {
+  const d = D(), R = canvas.app.renderer, T = canvas.app.ticker; CONFIG.moinenMaps ??= {};
+  const was = CONFIG.moinenMaps.noDestructionCache, mf = T.maxFPS; T.maxFPS = 0;
+  if ( !region ) {
+    const g = [...d.groups.values()].sort((a, b) => b.pieces.length - a.pieces.length)[0];
+    const r = g.info.rect, ap = d.ap, o = d.origin;
+    region = { x: o.x + (r.x0 + r.x1) / 2 * ap, y: o.y + (r.y0 + r.y1) / 2 * ap };
+  }
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  const sob = (px, W, H) => { let s = 0, n = 0;
+    const L = (x, y) => { const i = (y * W + x) * 4; return 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; };
+    const A = (x, y) => px[(y * W + x) * 4 + 3];
+    return { at: (x, y) => { const gx = L(x + 1, y - 1) + 2 * L(x + 1, y) + L(x + 1, y + 1) - L(x - 1, y - 1) - 2 * L(x - 1, y) - L(x - 1, y + 1);
+      const gy = L(x - 1, y + 1) + 2 * L(x, y + 1) + L(x + 1, y + 1) - L(x - 1, y - 1) - 2 * L(x, y - 1) - L(x + 1, y - 1); return Math.hypot(gx, gy); }, A }; };
+  const rows = [];
+  try {
+    for ( const z of zooms ) {
+      canvas.pan({ x: region.x, y: region.y, scale: z });
+      CONFIG.moinenMaps.noDestructionCache = false; T.update(performance.now()); T.update(performance.now());
+      const mode = d.cache?.stats.mode, a = grab();
+      CONFIG.moinenMaps.noDestructionCache = true; T.update(performance.now()); T.update(performance.now());
+      const b = grab();
+      const W = Math.round(R.screen.width * R.resolution), H = Math.round(R.screen.height * R.resolution);
+      const sa = sob(a, W, H), sb = sob(b, W, H);
+      let ga = 0, gb = 0, n = 0;
+      for ( let y = 1; y < H - 1; y += 2 ) for ( let x = 1; x < W - 1; x += 2 ) {
+        if ( sa.A(x, y) < 200 && sb.A(x, y) < 200 ) continue;
+        ga += sa.at(x, y); gb += sb.at(x, y); n++;
+      }
+      const row = { zoom: z, mode, px: n, cached: +(ga / Math.max(1, n)).toFixed(2), live: +(gb / Math.max(1, n)).toFixed(2), ratio: +(ga / Math.max(1e-6, gb)).toFixed(3) };
+      if ( shards ) {
+        // the flattened areas as shard sprites (as in an entry frame) against the flattened textures (live, cache off)
+        const flat = d.order.filter((g) => g.flat);
+        for ( const g of flat ) { d.unflatten(g); d.materialize(g, Infinity); }
+        T.update(performance.now()); T.update(performance.now());
+        const c = grab(), sc = sob(c, W, H); let gc = 0;
+        for ( let y = 1; y < H - 1; y += 2 ) for ( let x = 1; x < W - 1; x += 2 ) { if ( sa.A(x, y) < 200 && sb.A(x, y) < 200 ) continue; gc += sc.at(x, y); }
+        for ( const g of flat ) d.flatten(g);
+        T.update(performance.now());
+        Object.assign(row, { shards: +(gc / Math.max(1, n)).toFixed(2), flatVsShards: +(gb / Math.max(1e-6, gc)).toFixed(3) });
+      }
+      rows.push(row);
+    }
+  } finally { CONFIG.moinenMaps.noDestructionCache = was; T.update(performance.now()); T.maxFPS = mf; ws.forEach((w) => { w.visible = true; }); }
+  // judged from zoom 3 up (where the live layer samples NEAREST); below it the cache is a little crisper than the live LINEAR drawing
+  return { pass: rows.filter((r) => r.zoom >= 3).every((r) => Math.abs(r.ratio - 1) <= 0.1 && (r.flatVsShards === undefined || Math.abs(r.flatVsShards - 1) <= 0.1)), rows };
+}
+
+/**
  * ANIMATION PACING BENCHMARK (the settled scene's continuous animation: painted water loop, cars, pins, lights, flood loops).
  * The canvas ticker is driven through its own requestAnimationFrame callback (`ticker._tick`) with vsync timestamps at `hz`
  * (rAF stubbed, real time kept by busy-waiting), so Foundry's fps cap / the frame pacing gate (scripts/view-smooth.mjs) decide which
