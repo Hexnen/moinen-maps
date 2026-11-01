@@ -55,6 +55,19 @@ export function registerSection(def) {
   SECTIONS.set(def.id, { panels: [], ...def });
 }
 
+/**
+ * Add tools and dock panels to a section that exists (a feature that belongs to it, e.g. the districts' night lights as a panel of
+ * the Districts dock). Panels with an id the section already has replace it. Call before the section is shown.
+ * @param {string} id
+ * @param {{tools?: () => WorkspaceTool[], panels?: WorkspacePanel[]}} more
+ */
+export function extendSection(id, { tools, panels = [] } = {}) {
+  const s = SECTIONS.get(id); if ( !s ) return;
+  if ( tools ) { const own = s.tools; s.tools = () => [...(own?.() ?? []), ...tools()]; }
+  const ids = new Set(panels.map((p) => p.id));
+  s.panels = [...s.panels.filter((p) => !ids.has(p.id)), ...panels];
+}
+
 /** All sections in toolbar order. */
 export const sections = () => [...SECTIONS.values()].sort((a, b) => a.order - b.order);
 export const sectionById = (id) => SECTIONS.get(id) ?? null;
