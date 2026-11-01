@@ -58,7 +58,7 @@ function chamfer(d, W, H) {
  * or null when the hole holds no water.
  */
 export function prepareFlood(A) {
-  const { cx, cy, cw, ch, cover, open, level, seed } = A, N = cw * ch;
+  const { cx, cy, cw, ch, cover, open, level, seed } = A, N = cw * ch, ratio = A.ratio > 0 ? A.ratio : SCALE;
   const water = new Uint8Array(N), damp = new Uint8Array(N);
   const count = [0, 0, 0, 0];
   for ( let y = 0; y < ch; y++ ) for ( let x = 0; x < cw; x++ ) {
@@ -86,7 +86,7 @@ export function prepareFlood(A) {
     if ( water[i] ) {
       const L = level[i] || 1, d = clamp(din[i] / ref, 0, 1);
       depth[i] = d;
-      const o = L >= 3 ? 0.6 + 0.4 * Math.pow(d, 0.8) : L === 2 ? 0.42 + 0.33 * d : 0.8;
+      const o = L >= 3 ? 0.74 + 0.26 * Math.pow(d, 0.6) : L === 2 ? 0.42 + 0.33 * d : 0.8;
       const s = L >= 3 ? 0.62 * Math.pow(d, 1.2) : L === 2 ? 0.22 * d : 0;
       op[i] = Math.round(o * 255); shade[i] = Math.round(s * 255);
       // the water wells up from the deepest points (and, cracked, from the cracks) and rises to the rim
@@ -101,20 +101,23 @@ export function prepareFlood(A) {
   const keep = [];
   for ( const s of springs ) { if ( keep.length >= 3 ) break; if ( keep.every((q) => (q[1] - s[1]) ** 2 + (q[2] - s[2]) ** 2 > 64) ) keep.push(s); }
   springs = keep.map((s) => [s[1], s[2]]);
-  // the engine's window: whole water pixels on a grid fixed to the scene (SCALE art px each), the hole plus a margin
-  const ex0 = Math.floor((cx - MARGIN) / SCALE), ey0 = Math.floor((cy - MARGIN) / SCALE);
-  const ew = Math.ceil((cx + cw + MARGIN) / SCALE) - ex0, eh = Math.ceil((cy + ch + MARGIN) / SCALE) - ey0;
-  const mask = new Uint8Array(ew * eh);
+  // the engine's window: whole water pixels on a grid fixed to the scene (`ratio` art px each: SCALE, or the painted water's own grid
+  // so a hole beside painted water has its pixels on the same grid), the hole plus a margin
+  const k = ratio, M = Math.max(MARGIN, Math.ceil(k * 2));
+  const cell = (a) => Math.floor((a + 0.5) / k);
+  const ex0 = cell(cx - M), ey0 = cell(cy - M);
+  const ew = cell(cx + cw + M) - ex0 + 1, eh = cell(cy + ch + M) - ey0 + 1;
+  const mask = new Uint16Array(ew * eh);
   for ( let y = 0; y < ch; y++ ) for ( let x = 0; x < cw; x++ ) {
     if ( !water[y * cw + x] ) continue;
-    const ex = Math.floor((cx + x) / SCALE) - ex0, ey = Math.floor((cy + y) / SCALE) - ey0;
-    mask[ey * ew + ex]++;
+    mask[(cell(cy + y) - ey0) * ew + cell(cx + x) - ex0]++;
   }
   // a water pixel is water when at least half of its art pixels are (thin cracks: one of two still counts on a 2-wide grid)
-  const half = Math.max(1, Math.floor((SCALE * SCALE) / 2));
-  for ( let i = 0; i < mask.length; i++ ) mask[i] = mask[i] >= half ? 1 : 0;
+  const half = Math.max(1, Math.floor((k * k) / 2));
+  const m8 = new Uint8Array(ew * eh);
+  for ( let i = 0; i < mask.length; i++ ) m8[i] = mask[i] >= half ? 1 : 0;
   const dominant = count[3] >= count[2] && count[3] >= count[1] ? 3 : count[2] >= count[1] ? 2 : 1;
-  return { cx, cy, cw, ch, water, damp, depth, op, shade, fill, springs, R: maxD, eng: { x0: ex0, y0: ey0, w: ew, h: eh, mask }, level: dominant };
+  return { cx, cy, cw, ch, water, damp, depth, op, shade, fill, springs, R: maxD, ratio: k, eng: { x0: ex0, y0: ey0, w: ew, h: eh, mask: m8 }, level: dominant };
 }
 
 function chamferPadded(d, W, H) {
@@ -137,6 +140,7 @@ export function floodParams(base, prep, hash) {
   Object.assign(p, { guides: [], guideOn: false, drift: 0, seed: ((Number(base?.seed) || 1) * 31 + (hash % 99991)) % 999983 + 1 });
   if ( prep.level === 1 ) Object.assign(p, { tide: true, tideAmp: 1, tideCycles: 1, tideUneven: 6, tideWet: 6 });
   else p.tide = false;
+  p.grid = Math.round((prep.ratio ?? SCALE) * 1000) / 1000;     // the water grid (part of the key; the engine ignores it)
   return p;
 }
 
@@ -176,23 +180,23 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     const i = y * cw + x, o = i * 4;
     if ( !water[i] ) {
       if ( damp[i] && (!coming || u >= fill[i]) ) {
-        // damp ground: the shadow colour laid thin, in two dithered strengths
-        const a = (bayer(cx + x, cy + y) < 0.5 ? 0.3 : 0.17) * master * (coming ? clamp((u - fill[i]) / 0.3, 0, 1) : 1);
+        // damp ground: the shadow colour laid thin, with a few darker wet specks (no checkerboard)
+        const a = (h2(cx + x, cy + y, 31) < 0.12 ? 0.34 : 0.2) * master * (coming ? clamp((u - fill[i]) / 0.3, 0, 1) : 1);
         px[o] = shadow[0]; px[o + 1] = shadow[1]; px[o + 2] = shadow[2]; px[o + 3] = Math.round(a * 255);
       } else P32[i] = 0;
       continue;
     }
     if ( coming && u < fill[i] ) { P32[i] = 0; continue; }
-    const ex = Math.floor((cx + x) / SCALE) - eng.x0 - box.x0, ey = Math.floor((cy + y) / SCALE) - eng.y0 - box.y0;
+    const ex = Math.floor((cx + x + 0.5) / prep.ratio) - eng.x0 - box.x0, ey = Math.floor((cy + y + 0.5) / prep.ratio) - eng.y0 - box.y0;
     const b = ex >= 0 && ey >= 0 && ex < box.w && ey < box.h ? frame[ey * box.w + ex] : 0;
     let r, g, bl, a;
     if ( b ) { const q = b * 4; r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; a = LB[q + 3]; }
     else { r = baseC[0]; g = baseC[1]; bl = baseC[2]; a = fallbackA; }
     if ( !a ) { P32[i] = 0; continue; }
-    // depth: toward the shadow colour, in dithered steps of a third
+    // depth: toward the shadow colour in bands of a third (contours with a little wobble, never a checkerboard)
     const s = shade[i] / 255;
     if ( s > 0 ) {
-      const k = Math.floor(s * 3 + bayer(cx + x, cy + y)) / 3;
+      const k = Math.floor(s * 3 + 0.35 + (vnoise((cx + x) / 5, (cy + y) / 5, 41) - 0.5) * 0.5) / 3;
       if ( k > 0 ) { r += (shadow[0] - r) * k * 0.7; g += (shadow[1] - g) * k * 0.7; bl += (shadow[2] - bl) * k * 0.7; a = Math.max(a, Math.round(a + (255 * master - a) * k)); }
     }
     a = a * op[i] / 255;

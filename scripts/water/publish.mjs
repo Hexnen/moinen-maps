@@ -12,8 +12,8 @@ export const folder = () => `worlds/${game.world.id}/${MODULE_ID}`;
 const COLS = 4;
 const canvasOf = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
 
-/** Uploads a bake. Returns the record to store in the scene flag, or throws. */
-export async function publishBake(sceneId, key, { box, ms, frames }) {
+/** Uploads a bake (as `<name>.png`; the scene's water: water-<scene>). Returns the record to store in the scene flag, or throws. */
+export async function publishBake(sceneId, key, { box, ms, frames }, name = `water-${sceneId}`) {
   const n = frames.length, cols = Math.min(COLS, n), rows = Math.ceil(n / cols);
   const W = box.w * cols, H = box.h * rows;
   const c = canvasOf(W, H), ctx = c.getContext("2d");
@@ -28,7 +28,7 @@ export async function publishBake(sceneId, key, { box, ms, frames }) {
   ctx.putImageData(img, 0, 0);
   const blob = await new Promise((res) => c.toBlob(res, "image/png"));
   if ( !blob ) throw new Error("could not encode the baked water");
-  const file = new File([blob], `water-${sceneId}.png`, { type: "image/png" });
+  const file = new File([blob], `${name}.png`, { type: "image/png" });
   const FP = picker(), dir = folder();
   try { await FP.createDirectory("data", dir); } catch { /* it exists already */ }
   const res = await FP.upload("data", dir, file, {}, { notify: false });

@@ -1,5 +1,6 @@
 import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
+import { wetAt as wetWorld, wetRegions, anyWet } from "./wet.mjs";
 
 /**
  * Reflections of tokens in the water: a vertical mirror image under every token, drawn only where there is water, on the water's pixel
@@ -77,31 +78,62 @@ const hexRGB = (c) => { const n = parseInt(String(c).replace("#", ""), 16); retu
 
 /* ---------------------------------------------------------------- the water mask */
 
-/** Where reflections may show: water and river, not the falls. */
+/**
+ * Where reflections may show: water and river, not the falls; plus the water of wet.mjs (the flooded holes). With holes the mask is
+ * drawn on their finer grid (the painted water's pixels as blocks of it), so a hole's ragged outline clips the reflection exactly.
+ */
 function rebuildMask() {
   const s = S(); dirty = false;
   if ( !s ) return;
-  if ( !maskCanvas || maskCanvas.width !== s.w || maskCanvas.height !== s.h ) {
-    maskCanvas = document.createElement("canvas"); maskCanvas.width = s.w; maskCanvas.height = s.h;
+  const regions = wetRegions(), r = Model.sceneRect();
+  const mpx = regions.length ? Math.min(s.px, ...regions.map((q) => q.px)) : s.px;
+  const MW = regions.length ? Math.ceil(r.width / mpx) : s.w, MH = regions.length ? Math.ceil(r.height / mpx) : s.h;
+  if ( !maskCanvas || maskCanvas.width !== MW || maskCanvas.height !== MH ) {
+    maskCanvas = document.createElement("canvas"); maskCanvas.width = MW; maskCanvas.height = MH;
     maskTex?.destroy(true);
     maskTex = PIXI.Texture.from(maskCanvas, { scaleMode: PIXI.SCALE_MODES.NEAREST });
     maskTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     maskSprite.texture = maskTex;
   }
-  const img = new ImageData(s.w, s.h), d = img.data, m = s.masks;
-  for ( let i = 0, n = s.w * s.h; i < n; i++ ) {
-    if ( (m.water[i] || m.river[i]) && !m.fall[i] ) { d[i * 4 + 3] = 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; }
+  const img = new ImageData(MW, MH), d = img.data, m = s.masks;
+  const set = (i) => { d[i * 4 + 3] = 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = 255; };
+  if ( mpx === s.px ) {
+    for ( let i = 0, n = s.w * s.h; i < n; i++ ) if ( (m.water[i] || m.river[i]) && !m.fall[i] ) set(i);
+  } else {
+    for ( let y = 0; y < MH; y++ ) {
+      const sy = Math.floor((y + 0.5) * mpx / s.px); if ( sy >= s.h ) break;
+      for ( let x = 0; x < MW; x++ ) {
+        const sx = Math.floor((x + 0.5) * mpx / s.px); if ( sx >= s.w ) break;
+        const i = sy * s.w + sx;
+        if ( (m.water[i] || m.river[i]) && !m.fall[i] ) set(y * MW + x);
+      }
+    }
+  }
+  for ( const q of regions ) {
+    const k = q.px / mpx, ox = Math.round((q.x - r.x) / mpx), oy = Math.round((q.y - r.y) / mpx);
+    for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) {
+      if ( !q.a[y * q.w + x] ) continue;
+      for ( let yy = 0; yy < k; yy++ ) for ( let xx = 0; xx < k; xx++ ) {
+        const X = ox + Math.floor(x * k) + xx, Y = oy + Math.floor(y * k) + yy;
+        if ( X >= 0 && Y >= 0 && X < MW && Y < MH ) set(Y * MW + X);
+      }
+    }
   }
   maskCanvas.getContext("2d").putImageData(img, 0, 0);
   maskTex.baseTexture.update();
-  const r = Model.sceneRect();
-  maskSprite.position.set(r.x, r.y); maskSprite.scale.set(s.px);
+  maskSprite.position.set(r.x, r.y); maskSprite.scale.set(mpx);
 }
 
+/** Water at an art pixel of the painted water's grid: painted, or (its centre) in the water of wet.mjs. */
 const wetAt = (x, y) => {
-  const s = S(); if ( x < 0 || y < 0 || x >= s.w || y >= s.h ) return false;
-  const i = y * s.w + x;
-  return (s.masks.water[i] === 1 || s.masks.river[i] === 1) && !s.masks.fall[i];
+  const s = S();
+  if ( x >= 0 && y >= 0 && x < s.w && y < s.h ) {
+    const i = y * s.w + x;
+    if ( (s.masks.water[i] === 1 || s.masks.river[i] === 1) && !s.masks.fall[i] ) return true;
+  }
+  if ( !anyWet() ) return false;
+  const r = Model.sceneRect();
+  return !!wetWorld(r.x + (x + 0.5) * s.px, r.y + (y + 0.5) * s.px);
 };
 
 /* ---------------------------------------------------------------- one token's reflection */
@@ -229,14 +261,15 @@ function clear() { for ( const st of states.values() ) destroyState(st); states.
 export function onCanvasReady() {
   teardown();
   root = new PIXI.Container(); root.eventMode = "none";
-  // over the water (240), under the districts (250), the rings (255), tiles and tokens
-  Object.assign(root, { elevation: 0, sortLayer: 245, sort: 0, _lastSortedIndex: 0 });
+  // over the water (240) and the destruction's strokes (247: the flooded holes' water lies in them), under its dust (249), the
+  // districts (250), the rings (255), tiles and tokens
+  Object.assign(root, { elevation: 0, sortLayer: 248, sort: 0, _lastSortedIndex: 0 });
   maskSprite = new PIXI.Sprite(PIXI.Texture.EMPTY); maskSprite.eventMode = "none";
   root.addChild(maskSprite);
   root.mask = maskSprite;
   canvas.primary.addChild(root);
   dirty = true;
-  hook = (kind) => { if ( kind === "loaded" || kind === "edited" ) dirty = true; };
+  hook = (kind) => { if ( kind === "loaded" || kind === "edited" || kind === "wet" ) dirty = true; };
   Hooks.on("moinenMapsWater", hook);
   tick = () => onTick();
   canvas.app.ticker.add(tick);

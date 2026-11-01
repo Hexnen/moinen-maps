@@ -1,5 +1,6 @@
 import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
+import { wetAt, anyWet } from "./wet.mjs";
 
 /**
  * Tokens under the water: a token whose elevation is below zero and that stands in water is veiled by the water. A silhouette of the
@@ -25,12 +26,16 @@ const cfg = () => ({ ...SUBMERGE_DEFAULTS, ...(S()?.params ?? {}) });
 const hexRGB = (c) => { const n = parseInt(String(c).replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
 
+/** The water under a point: { px, colors } (painted water first, then the water of wet.mjs: the flooded holes), or null. */
 function inWater(p) {
-  const s = S(); if ( !s ) return false;
-  const r = Model.sceneRect(), x = Math.floor((p.x - r.x) / s.px), y = Math.floor((p.y - r.y) / s.px);
-  if ( x < 0 || y < 0 || x >= s.w || y >= s.h ) return false;
-  const i = y * s.w + x;
-  return !s.masks.fall[i] && (s.masks.water[i] === 1 || s.masks.river[i] === 1);
+  const s = S();
+  if ( s?.enabled ) {
+    const r = Model.sceneRect(), x = Math.floor((p.x - r.x) / s.px), y = Math.floor((p.y - r.y) / s.px);
+    const i = y * s.w + x;
+    if ( x >= 0 && y >= 0 && x < s.w && y < s.h && !s.masks.fall[i] && (s.masks.water[i] === 1 || s.masks.river[i] === 1) ) return { px: s.px, colors: s.params.colors ?? [] };
+  }
+  const w = wetAt(p.x, p.y);
+  return w ? { px: w.px, colors: w.colors ?? [] } : null;
 }
 
 function pixelTexture(canvas) {
@@ -69,8 +74,8 @@ function make() {
 
 function destroyState(st) { st.sprite.destroy(); st.tex.destroy(true); }
 
-function drawVeil(t, st, P, depth, now) {
-  const s = S(), px = s.px, rect = Model.sceneRect();
+function drawVeil(t, st, P, depth, now, water) {
+  const px = water.px, rect = Model.sceneRect();
   const tw = Math.max(2, Math.round(t.w / px)), th = Math.max(2, Math.round(t.h / px));
   const amp = 0.8 + depth * 1.6, mx = Math.ceil(amp) + 1;
   const W = tw + mx * 2;
@@ -87,7 +92,7 @@ function drawVeil(t, st, P, depth, now) {
     st.out.width = W; st.out.height = th; st.tmp.width = tw; st.tmp.height = th;
     st.tex.destroy(true); st.tex = pixelTexture(st.out); st.sprite.texture = st.tex;
   }
-  const cols = (s.params.colors ?? []).map(hexRGB);
+  const cols = water.colors.map(hexRGB);
   const base = cols[2] ?? [63, 108, 154], deep = cols[1] ?? [43, 84, 128];
   const [r, g, b] = mix(base, deep, Math.min(1, depth * 0.8));
   const tctx = st.tmp.getContext("2d"), octx = st.out.getContext("2d");
@@ -107,22 +112,22 @@ function drawVeil(t, st, P, depth, now) {
 
 /* ---------------------------------------------------------------- bubbles */
 
-function emitBubble(t, depth) {
-  const s = S(), cols = (s.params.colors ?? []).map((c) => String(c).replace("#", ""));
+function emitBubble(t, depth, W) {
+  const s = { px: W.px }, cols = W.colors.map((c) => String(c).replace("#", ""));
   const wx = t.x + Math.random() * t.w, wy = t.y + t.h * (0.3 + Math.random() * 0.6);
   const big = Math.random() < 0.35;
   const sp = new PIXI.Sprite(big ? ring(2, cols[5] ?? "ffffff") : dot());
   sp.anchor.set(0.5); sp.eventMode = "none"; sp.scale.set(s.px);
   if ( !big ) sp.tint = parseInt(cols[5] ?? "ffffff", 16);
   root.addChild(sp);
-  bubbles.push({ sp, born: performance.now(), ms: 1100 + Math.random() * 700, wx, wy, drift: (Math.random() - 0.5) * 5 });
+  bubbles.push({ sp, px: W.px, born: performance.now(), ms: 1100 + Math.random() * 700, wx, wy, drift: (Math.random() - 0.5) * 5 });
 }
 
 function stepBubbles(now) {
-  const s = S(), r = Model.sceneRect();
+  const r = Model.sceneRect();
   bubbles = bubbles.filter((b) => {
-    const t = (now - b.born) / b.ms;
-    if ( t >= 1 || !s ) { b.sp.destroy(); return false; }
+    const t = (now - b.born) / b.ms, s = { px: b.px };
+    if ( t >= 1 ) { b.sp.destroy(); return false; }
     const q = Math.floor(t * (b.ms / STEP_MS)) / (b.ms / STEP_MS);
     const ax = (b.wx - r.x) / s.px + b.drift * q + Math.sin(q * 9 + b.born) * 0.8, ay = (b.wy - r.y) / s.px - q * 14;
     b.sp.position.set(r.x + Math.round(ax) * s.px, r.y + Math.round(ay) * s.px);
@@ -135,18 +140,19 @@ function stepBubbles(now) {
 
 function onTick() {
   const s = S(), P = cfg();
-  const on = s && s.enabled && P.submergeOn && !REDUCED?.matches && (P.submergeWho === "all" || game.user.isGM);
+  const on = (s?.enabled || anyWet()) && P.submergeOn && !REDUCED?.matches && (P.submergeWho === "all" || game.user.isGM);
   if ( !on ) { if ( states.size || bubbles.length ) clear(); return; }
   const now = performance.now(), seen = new Set();
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document, elev = doc.elevation ?? 0;
-    if ( elev >= 0 || !t.visible || (doc.hidden && !game.user.isGM) || !inWater(t.center) ) continue;
+    if ( elev >= 0 || !t.visible || (doc.hidden && !game.user.isGM) ) continue;
+    const W = inWater(t.center); if ( !W ) continue;
     seen.add(t.id);
     const depth = Math.min(1, Math.max(0.15, -elev / Math.max(1, P.submergeDepth)));
     let st = states.get(t.id);
     if ( !st ) { st = make(); states.set(t.id, st); }
-    drawVeil(t, st, P, depth, now);
-    if ( P.submergeBubbles && now >= st.nextBubble ) { emitBubble(t, depth); st.nextBubble = now + 260 / (0.5 + depth); }
+    drawVeil(t, st, P, depth, now, W);
+    if ( P.submergeBubbles && now >= st.nextBubble ) { emitBubble(t, depth, W); st.nextBubble = now + 260 / (0.5 + depth); }
   }
   for ( const [id, st] of states ) if ( !seen.has(id) ) { destroyState(st); states.delete(id); }
   stepBubbles(now);

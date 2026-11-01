@@ -937,6 +937,7 @@
   "MOINENMAPS.Destr.pLook": "Look",
   "MOINENMAPS.Destr.pMotion": "Motion",
   "MOINENMAPS.Destr.publishFailed": "Moinen Maps: the destruction could not be saved to the world folder; players will bake it themselves.",
+  "MOINENMAPS.Flood.publishFailed": "Moinen Maps: the water of the flooded holes could not be saved to the world folder; players will bake it themselves.",
   "MOINENMAPS.Roads.tool.edit": "Edit road shapes",
   "MOINENMAPS.Roads.mode.edit": "Edit",
   "MOINENMAPS.Roads.f.roadSpeed": "Speed",

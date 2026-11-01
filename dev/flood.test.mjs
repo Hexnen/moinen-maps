@@ -77,4 +77,16 @@ assert.ok(meanA(L3, r3, rim(L3)) < a3, "a crater is clearer at the rim than in t
 const at = (u) => { const px = FC.paintFlood(L3, r3.frames[0], r3.box, kit, u); let n = 0; for ( let i = 3; i < px.length; i += 4 ) if ( px[i] ) n++; return n; };
 assert.ok(at(0) < at(0.5) && at(0.5) < at(1.2), "the water rises");
 console.log("ok 4 levels", { broken: a2.toFixed(0), crater: a3.toFixed(0), fill: [at(0), at(0.5), at(1.2)] });
+
+// 5. the painted water's grid (13 scene px over 3 px art pixels): the hole's water pixels sit on that grid
+const G = (() => { const h0 = hole(3); return FC.prepareFlood({ ...h0, cover: h0.water, open: h0.water, level: new Uint8Array(h0.cw * h0.ch).fill(3), seed: 5, ratio: 13 / 3 }); })();
+const rg = await bakeHole(w, G, 5), pg = FC.paintFlood(G, rg.frames[3], rg.box, kit);
+let bad = 0;
+for ( let y = 0; y < G.ch; y++ ) for ( let x = 1; x < G.cw; x++ ) {
+  // two art pixels in the same 13-px cell, both water and not on the rising line: the same colour
+  const a = (y * G.cw + x - 1) * 4, b = a + 4, sameCell = Math.floor((G.cx + x - 0.5) * 3 / 13) === Math.floor((G.cx + x + 0.5) * 3 / 13);
+  if ( sameCell && G.water[y * G.cw + x] && G.water[y * G.cw + x - 1] && G.shade[y * G.cw + x] === 0 && G.shade[y * G.cw + x - 1] === 0 && (pg[a] !== pg[b] || pg[a + 1] !== pg[b + 1])) bad++;
+}
+assert.equal(bad, 0, "one colour per painted-water pixel (outside the depth bands)");
+console.log("ok 5 painted-water grid", `${G.eng.w}x${G.eng.h}`);
 console.log("all flood tests passed");

@@ -18,7 +18,9 @@ import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
 import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, onCombatStart, teardownTokenDrops } from "./token-drop.mjs";
 import { registerRoads } from "./roads/roads.mjs";
+import { registerFlood } from "./destruction/flood.mjs";
 registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
+registerFlood();   // the water of the flooded holes (destruction kind "flood"): its own hooks (scripts/destruction/flood.mjs)
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);

@@ -96,7 +96,9 @@ export class WaterDisplay {
     if ( REDUCED?.matches ) return this.show(0);     // reduced motion: one still frame
     this.t += dtMS;
     const n = this.set.textures.filter(Boolean).length;
-    this.show(n < 2 ? 0 : Math.floor(this.t / Math.max(20, this.set.ms)) % n);
+    // one clock for every loop of water on the scene (the flooded holes of the destruction run on it too): the frame is the time
+    // divided by the frame time, so two loops with the same frames and frame time are always on the same frame
+    this.show(n < 2 ? 0 : Math.floor(performance.now() / Math.max(20, this.set.ms)) % n);
   }
 
   clear() {
