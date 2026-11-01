@@ -18,7 +18,7 @@
  * the placement table, so a single PNG carries the whole bake.
  */
 
-export const CORE_VERSION = 9;
+export const CORE_VERSION = 10;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -167,7 +167,7 @@ export function bake(I, cache = null) {
   for ( let i = 0; i < I.mask.length; i++ ) if ( I.mask[i] & 3 ) { const x = i % I.mw, y = (i - x) / I.mw; if ( x < mx0 ) mx0 = x; if ( x > mx1 ) mx1 = x; if ( y < my0 ) my0 = y; if ( y > my1 ) my1 = y; }
   const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, materials: [], baked: 0, reused: 0 };
   if ( mx1 < 0 ) return assemble([], stats, t0, progress);
-  const FM = 4 + (jag ? 10 : 0);
+  const FM = 4 + (jag ? 22 : 0);
   const FX = Math.max(0, mx0 * K - FM), FY = Math.max(0, my0 * K - FM);
   const FW = Math.min(AW, (mx1 + 1) * K + FM) - FX, FH = Math.min(AH, (my1 + 1) * K + FM) - FY, FN = FW * FH;
   const inside = new Uint8Array(FN), sev = new Float32Array(FN), typ = new Uint8Array(FN), frag = new Int32Array(FN);
@@ -175,7 +175,14 @@ export function bake(I, cache = null) {
   const edge = clamp(P.edge ?? 0.7, 0, 1);
   for ( let y = 0; y < FH; y++ ) for ( let x = 0; x < FW; x++ ) {
     const ax = FX + x, ay = FY + y;
-    const mx = (ax + 0.5) / K - 0.5, my = (ay + 0.5) / K - 0.5;
+    // torn: the mask is read through a warp (two octaves, up to ~7 art px), so the outline tears into lobes and inlets
+    let wx = 0, wy = 0;
+    if ( jag ) {
+      const A = 7 * jag;
+      wx = (vnoise(ax / 7, ay / 7, seed + 310) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 312) - 0.5) * 0.7 * A;
+      wy = (vnoise(ax / 7, ay / 7, seed + 311) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 313) - 0.5) * 0.7 * A;
+    }
+    const mx = (ax + wx + 0.5) / K - 0.5, my = (ay + wy + 0.5) / K - 0.5;
     const ix = Math.floor(mx), iy = Math.floor(my), fx = mx - ix, fy = my - iy;
     const a = lv(ix, iy), b = lv(ix + 1, iy), c = lv(ix, iy + 1), d = lv(ix + 1, iy + 1);
     if ( !(a | b | c | d) ) continue;
@@ -193,7 +200,7 @@ export function bake(I, cache = null) {
     inside[i] = 1; sev[i] = clamp(bil, 1, 3);
     // the type of the strongest mask pixel around
     let best = -1, bt = 0;
-    const cx = Math.floor((ax + 0.5) / K), cy = Math.floor((ay + 0.5) / K);
+    const cx = Math.floor((ax + wx + 0.5) / K), cy = Math.floor((ay + wy + 0.5) / K);
     for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) {
       const X = cx + dx, Y = cy + dy; if ( X < 0 || Y < 0 || X >= I.mw || Y >= I.mh ) continue;
       const v = I.mask[Y * I.mw + X], l = v & 3;
