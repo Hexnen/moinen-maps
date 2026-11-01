@@ -402,19 +402,27 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
     }
     A[(Y + B) * LW + X + B] = v;
   }
-  const px = new Uint8Array(LW * LH * 4);
-  for ( let i = 0; i < LW * LH; i++ ) { const v = A[i]; if ( !v ) continue; px[i * 4] = col[0] * v; px[i * 4 + 1] = col[1] * v; px[i * 4 + 2] = col[2] * v; px[i * 4 + 3] = 255 * v; }
-  const tex = PIXI.Texture.fromBuffer(px, LW, LH);
-  const L = ensureLights(d), ap = d.ap, o = d.origin, pool = new PIXI.Sprite(tex);
+  // MEMORY: kept as one byte per pixel (its strength); the texture is made when a dark scene first shows it (tickLights, rimTexture):
+  // by day a scene's rims took ~115 MB of RGBA nobody saw
+  const A8 = new Uint8Array(LW * LH);
+  for ( let i = 0; i < LW * LH; i++ ) A8[i] = Math.round(A[i] * 255);
+  const L = ensureLights(d), ap = d.ap, o = d.origin, pool = new PIXI.Sprite(PIXI.Texture.EMPTY);
   pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
   pool.position.set(o.x + (ox - B) * ap, o.y + (oy - B) * ap); pool.visible = false;
   L.layer.addChild(pool);
-  g.rim = { pool, tex };
+  g.rim = { pool, tex: null, A8, col, LW, LH };
   L.groups.add(g);
 }
 
+/** A rim's texture from its strengths (the cause's colour times the strength, the strength as alpha). */
+function rimTexture(r) {
+  const px = new Uint8Array(r.LW * r.LH * 4), A8 = r.A8, col = r.col;
+  for ( let i = 0; i < A8.length; i++ ) { const a = A8[i]; if ( !a ) continue; const v = a / 255; px[i * 4] = col[0] * v; px[i * 4 + 1] = col[1] * v; px[i * 4 + 2] = col[2] * v; px[i * 4 + 3] = a; }
+  r.tex = PIXI.Texture.fromBuffer(px, r.LW, r.LH); r.pool.texture = r.tex; r.A8 = null;
+}
+
 export function dropLight(d, g) {
-  if ( g.rim ) { d.causeLights?.groups.delete(g); if ( !g.rim.pool.destroyed ) g.rim.pool.destroy(); g.rim.tex.destroy(true); g.rim = null; }
+  if ( g.rim ) { d.causeLights?.groups.delete(g); if ( !g.rim.pool.destroyed ) g.rim.pool.destroy(); g.rim.tex?.destroy(true); g.rim = null; }
   if ( !g.light ) return;
   d.causeLights?.groups.delete(g);
   if ( !g.light.pool.destroyed ) g.light.pool.destroy();
@@ -435,7 +443,7 @@ export function tickLights(d, now) {
   const rimK = Math.min(1, Math.max(0, (dark - 0.5) / 0.35));
   for ( const g of L.groups ) {
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
-    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
+    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; if ( a > 0.01 && !g.rim.tex ) rimTexture(g.rim); g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
     const lt = g.light; if ( !lt ) continue;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);
