@@ -157,13 +157,17 @@ export const canRedo = () => redo.length > 0;
 
 export function setTraffic(patch) {
   if ( !game.user.isGM || !R ) return;
-  R = canonical({ ...R, traffic: Model.cleanTraffic({ ...R.traffic, ...patch }) });
+  const traffic = Model.cleanTraffic({ ...R.traffic, ...patch });
+  if ( foundry.utils.equals(traffic, R.traffic) ) return;     // nothing changed: no new simulation, no save
+  R = canonical({ ...R, traffic });
   apply(); scheduleSave(); tell("params");
 }
 
 export function setLook(patch) {
   if ( !game.user.isGM || !R ) return;
-  R = canonical({ ...R, look: Model.cleanLook({ ...R.look, ...patch }) });
+  const look = Model.cleanLook({ ...R.look, ...patch });
+  if ( foundry.utils.equals(look, R.look) ) return;
+  R = canonical({ ...R, look });
   apply(); scheduleSave(); tell("params");
 }
 

@@ -8,6 +8,7 @@ import { FX_DEFAULTS } from "./ripples.mjs";
 import { REFLECT_DEFAULTS } from "./reflect.mjs";
 import { SUBMERGE_DEFAULTS } from "./submerge.mjs";
 import { useTool } from "../workspace/shell.mjs";
+import { writeControl, isEcho } from "../workspace/ui.mjs";
 
 /**
  * The water settings: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
@@ -217,11 +218,30 @@ class WaterSettings {
     this.render().then(() => this.element?.querySelector(`[data-tab="${this.tab}"]`)?.focus());
   }
 
+  /** The value a control shows for `name` (as #field draws it): a change to that same value is no edit. */
+  #shown(name) {
+    const S = Water.state(), P = { ...FX_DEFAULTS, ...REFLECT_DEFAULTS, ...SUBMERGE_DEFAULTS, ...S.params };
+    if ( /^color\d$/.test(name) ) return P.colors?.[Number(name.slice(5))];
+    if ( name.startsWith("alpha.") ) { const g = name.slice(6); return P.alpha?.[g] ?? (g === "all" ? 100 : ALPHA_START[g] ?? 100); }
+    if ( name === "palBase" ) return P.palBase ?? P.colors?.[2];
+    if ( name === "rodKind" ) return game.settings.get(MODULE_ID, "waterRodKind");
+    if ( name === "rodBranch" ) return game.settings.get(MODULE_ID, "waterRodBranch");
+    if ( name === "px" ) return S.px;
+    if ( name === "enabled" ) return S.enabled;
+    return P[name];
+  }
+
   #onInput(ev) {
+    if ( isEcho() ) return;
     const S = Water.state(); if ( !S ) return;
     const el = ev.target.closest?.("range-picker, color-picker, select, input[type=checkbox]"); if ( !el || !el.name ) return;
+    // a range-picker / color-picker commits with "change"; its "input" (its inner slider being dragged, or the copy it sends with
+    // every change) carries no new value
+    if ( ev.type === "input" && el.matches("range-picker, color-picker") ) return;
     const name = el.name;
     const value = el.matches("input[type=checkbox]") ? el.checked : el.matches("select") ? el.value : el.value;
+    const was = this.#shown(name);
+    if ( value === was || (was != null && String(value).replace("#", "").toLowerCase() === String(was).replace("#", "").toLowerCase()) ) return;
     if ( name.startsWith("color") && /^color\d$/.test(name) ) {
       const colors = [...S.params.colors]; colors[Number(name.slice(5))] = String(value).replace("#", "").toLowerCase();
       return Water.setParams({ colors });
@@ -245,7 +265,8 @@ class WaterSettings {
     clearTimeout(this.#palTimer);
     this.#palTimer = setTimeout(async () => {
       await Water.colorsFrom(String(next.palBase).replace("#", "").toLowerCase(), next.palHue, next.palSat, next.palRange);
-      this.element?.querySelectorAll("color-picker[name^=color]").forEach((cp) => { cp.value = hexOf(Water.state().params.colors[Number(cp.name.slice(5))]); });
+      // silent: setting a <color-picker> from code reports a change, which would write each colour back again
+      this.element?.querySelectorAll("color-picker[name^=color]").forEach((cp) => writeControl(cp, hexOf(Water.state().params.colors[Number(cp.name.slice(5))])));
     }, 120);
   }
 }

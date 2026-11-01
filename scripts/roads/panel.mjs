@@ -4,6 +4,7 @@ import * as Roads from "./roads.mjs";
 import * as Editor from "./editor.mjs";
 import { kindSwatch } from "./art.mjs";
 import * as Graph from "./graph.mjs";
+import { writeControl, isEcho } from "../workspace/ui.mjs";
 
 /**
  * The roads' controls, in three sections that can be mounted into any element: "brush" (the tool, road kind, width, lanes,
@@ -146,6 +147,7 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
     }
   };
   const onInput = (ev) => {
+    if ( isEcho() ) return;     // sync() writing the state back into a control is not an edit
     const el = ev.target.closest?.("[name]"); if ( !el || !host.contains(el) ) return;
     const name = el.name, v = el.type === "checkbox" ? el.checked : el.value;
     const road = el.closest("[data-road]")?.dataset.road;
@@ -188,7 +190,7 @@ function sync(host) {
   const t = R?.traffic, l = R?.look;
   const set = (name, v) => {
     const el = host.querySelector(`[name="${CSS.escape(name)}"]`); if ( !el || el.contains(document.activeElement) || el === document.activeElement ) return;
-    if ( el.type === "checkbox" ) el.checked = !!v; else if ( String(el.value) !== String(v) ) el.value = v;
+    writeControl(el, v);     // silent: a <range-picker> reports every value set from code as a change
   };
   set("w", b.w); set("l", b.l); set("o", b.o); set("eraser", b.eraser);
   host.querySelectorAll("[data-kind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.kind === b.k)));

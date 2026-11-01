@@ -14,6 +14,20 @@ let N = 0;
 const uid = (name) => `mm-ws-${String(name).replace(/[^\w-]/g, "")}-${++N}`;
 
 /**
+ * Write a value into a control WITHOUT it reporting a change: Foundry's <range-picker> / <color-picker> dispatch "input" and "change"
+ * whenever their value is set from code (even to the same value). Echoing a stored value back into a control must never look like
+ * the user's edit (control -> setting -> hook -> control); change handlers return early while `isEcho()` is true.
+ */
+let echoing = 0;
+export const isEcho = () => echoing > 0;
+export function writeControl(c, v) {
+  if ( c.matches("input[type=checkbox]") ) { if ( c.checked !== !!v ) c.checked = !!v; return; }
+  if ( String(c.value) === String(v) || (typeof v === "number" && Number(c.value) === v) ) return;
+  echoing++;
+  try { c.value = v; } finally { echoing--; }
+}
+
+/**
  * Call `fn(key)` whenever one of these client settings of the module changes (key without the module prefix). Returns the unsubscribe.
  * @param {string[]} keys
  * @param {(key: string) => void} fn
@@ -57,11 +71,13 @@ export function bindSettings(host, map, { onInput } = {}) {
   const spec = Object.fromEntries(Object.entries(map).map(([n, v]) => [n, typeof v === "string" ? { key: v } : v]));
   const valueOf = (c) => c.matches("input[type=checkbox]") ? c.checked : c.matches("range-picker, input[type=number]") ? Number(c.value) : c.value;
   const onChange = (ev) => {
+    if ( isEcho() ) return;
     const c = ev.target.closest?.("[name]"), s = c && spec[c.name]; if ( !s ) return;
     const v = s.read ? s.read(c) : valueOf(c);
-    store(s.key, v);
+    if ( v !== setting(s.key) ) store(s.key, v);
   };
   const onIn = (ev) => {
+    if ( isEcho() ) return;
     const c = ev.target.closest?.("[name]"); if ( !c || !spec[c.name] || !onInput ) return;
     // a range-picker's own value only changes on release; while dragging, its inner slider has the number
     onInput(c.name, ev.target.matches?.("input[type=range]") ? ev.target.valueAsNumber : valueOf(c));
@@ -74,8 +90,7 @@ export function bindSettings(host, map, { onInput } = {}) {
       const c = host.querySelector(`[name="${n}"]`); if ( !c || c.contains(document.activeElement) ) continue;
       const v = setting(key);
       if ( s.write ) s.write(v, c);
-      else if ( c.matches("input[type=checkbox]") ) c.checked = !!v;
-      else c.value = v;
+      else writeControl(c, v);
     }
   });
   return () => { host.removeEventListener("change", onChange); host.removeEventListener("input", onIn); off(); };
