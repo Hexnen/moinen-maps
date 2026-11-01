@@ -21,8 +21,10 @@ import { registerTokenFx } from "./tokens/fx.mjs";
 import { registerTokenFxSetting } from "./tokens/settings.mjs";
 import { registerRoads } from "./roads/roads.mjs";
 import { registerFlood } from "./destruction/flood.mjs";
+import { registerSmoothView } from "./view-smooth.mjs";
 registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
 registerFlood();   // the water of the flooded holes (destruction kind "flood"): its own hooks (scripts/destruction/flood.mjs)
+registerSmoothView();   // smooth wheel zoom + even frame pacing on fast displays (client settings, scripts/view-smooth.mjs)
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);
