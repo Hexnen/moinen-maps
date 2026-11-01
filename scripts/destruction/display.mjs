@@ -1,5 +1,6 @@
 import { META_FIELDS } from "./core.mjs";
 import { reducedMotion } from "../config.mjs";
+import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 
 /**
  * Shows a bake, AREA BY AREA: every damaged area is a group (its own small texture atlas, a base sprite with what lies beneath, and
@@ -375,7 +376,7 @@ export class DestructionDisplay {
    * (follows the stroke only), `under` older looks of the same stroke kept underneath until it is in, `path` [[x, y, ms], ...]: the
    * front runs along the brush path at the drawing speed.
    */
-  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null } = {}) {
+  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null } = {}) {
     this.endAnim(g);
     const now = performance.now();
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
@@ -391,9 +392,11 @@ export class DestructionDisplay {
     }
     const Rmax = Math.max(...[[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => Math.hypot(x - ox, y - oy))) + 2;
     const pathFront = this.pathFront(path, g, k);
-    const delay = pathFront ? 40 * k : L.delay * k;
-    const reveal = pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-    const band = Math.max(160 * k, reveal * 0.38);
+    // a tear has its own clock (tear-entry.mjs): a pinprick, then a fast front both ways along its spine on a narrow band
+    const tear = info.type === "gash" ? tearClock(info, { pathFront, spine, k }) : null;
+    const delay = tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
+    const reveal = tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
+    const band = tear ? tear.band : Math.max(160 * k, reveal * 0.38);
     const front = (x, y) => {   // 0..1: when the front reaches (x, y)
       if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
       // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
@@ -401,7 +404,7 @@ export class DestructionDisplay {
       return clamp01(Math.hypot(x - ox, y - oy) / Rmax);
     };
     // the front's arrival at a point (ms after start)
-    const arrive = pathFront ? (x, y) => delay + pathFront.at(x, y) : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
+    const arrive = tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y) : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
     const seed = g.hash % 9973;
     const noise = (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;   // 0..1, smooth
     // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
@@ -444,6 +447,7 @@ export class DestructionDisplay {
     // 2. the pieces' lives
     const list = [], byPiece = new Map();
     g.pieces.forEach((p, n) => {
+      if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       const size = p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
@@ -454,7 +458,7 @@ export class DestructionDisplay {
       list.push(it); byPiece.set(p, it);
       this.place(p, -9, it, info.type);
     });
-    g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront ? null : wipe, list, byPiece, fx: [], rev, crev,
+    g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront || tear ? null : wipe, tear, list, byPiece, fx: [], rev, crev,
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     for ( const u of under ) u.heldBy = g;
@@ -616,7 +620,7 @@ export class DestructionDisplay {
     const t = a.type, j = () => (Math.random() - 0.5);
     if ( t === "scorch" ) this.spawn({ x, y, vx: j() * 3, vy: 0, rise: -6 - Math.random() * 5, life: 500 + Math.random() * 500, color: 0xff9a3c, flicker: true });
     else if ( t === "flood" ) this.spawn({ x, y, vx: j() * 6, vy: -1, life: 380, color: 0xe6f4ff, alpha: 0.9, drag: 3 });
-    else if ( t === "gash" ) this.spawn({ x, y, vx: j() * 14, vy: -6 - Math.random() * 6, fall: 30, life: 260, color: Math.random() < 0.5 ? 0xfff0b0 : 0xffc860, drag: 2 });
+    else if ( t === "gash" ) tearEdge(this, g, x, y);
     else if ( t === "cracks" ) this.spawn({ x, y, vx: j() * 4, vy: -1, rise: -2, life: 420, color: 0xc8beb0, alpha: 0.7 });
     else if ( t === "collapse" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -7, life: 700, color: 0xb9ae9e, alpha: 0.75, size: Math.random() < 0.3 ? 2 : 1 });
     else this.spawn({ x, y, vx: j() * 8, vy: -2 - Math.random() * 3, rise: -4, life: 520, color: 0xcfc6b8, alpha: 0.8, drag: 2.4, size: Math.random() < 0.25 ? 2 : 1 });
@@ -634,6 +638,7 @@ export class DestructionDisplay {
       s.position.set(o.x + p.fx * ap, o.y + p.fy * ap); s.rotation = 0; s.scale.set(ap);
       return;
     }
+    if ( a.tear ) return tearPlace(this, p, t, a);
     const tm = t * a.dur;
     if ( tm < 0 ) {
       // anticipation: it appears where it lies and shivers before it gives
@@ -807,7 +812,8 @@ export class DestructionDisplay {
       const gr = new PIXI.Graphics(); gr.eventMode = "none"; this.fx.addChild(gr);
       a.fx.push({ g: gr, kind: "ring", t0: a.start + at, dur, color, maxR, width });
     });
-    if ( a.path ) this.pathEffects(g, a, now, el);
+    if ( a.tear ) tearFx(this, g, a, now, el);
+    else if ( a.path ) this.pathEffects(g, a, now, el);
     else if ( type === "blast" ) {
       once("flash", 0, () => {
         const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);

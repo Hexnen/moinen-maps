@@ -18,7 +18,9 @@
  * the placement table, so a single PNG carries the whole bake.
  */
 
-export const CORE_VERSION = 14;
+import { bakeTear } from "./tear.mjs";
+
+export const CORE_VERSION = 15;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -372,9 +374,9 @@ export function bake(I, cache = null) {
         h = Math.imul(h ^ v, 16777619);
       }
     }
-    // follows the stroke: the stroke's own brush path (part of its hash)
+    // follows the stroke: the stroke's own brush path (part of its hash); a tear always runs along its path (its spine)
     win.paths = [];
-    if ( P.directional && c.ob.path?.length > 1 ) {
+    if ( (P.directional || c.type === T_GASH) && c.ob.path?.length > 1 ) {
       const loc = c.ob.path.map(([x, y]) => [x - RX, y - RY]);
       win.paths.push(loc);
       for ( const [x, y] of loc ) h = fnvInts(h, Math.round(x * 4) + 65536, Math.round(y * 4) + 65536);
@@ -465,6 +467,8 @@ function bakeArea(A, P, seed, uid, jag) {
   const stats = { shards: 0, chips: 0, pulverised: 0, materials: [] };
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
+  // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
+  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS });
   fracture(C);
   fates(C);
   drawBase(C);

@@ -248,7 +248,7 @@ function playEntries(added, removed, taken, mask, first) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
       if ( sNow - e.t > ENTRY_WINDOW ) { display.swap(g, under); continue; }
       display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under,
-        path: dirOn ? pathOfObj(e.p) : null });
+        path: dirOn ? pathOfObj(e.p) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
       continue;
     }
     if ( first && !taken.length && !all ) continue;   // what was already there when the scene opened
@@ -259,7 +259,7 @@ function playEntries(added, removed, taken, mask, first) {
     const o = s0 && dirOn ? s0.a ?? null : null;
     const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
     const path = s0 && dirOn ? s0.path : null;
-    display.enter(g, { start: pNow, o, dir: d, under, path });
+    display.enter(g, { start: pNow, o, dir: d, under, path, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
     if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
@@ -342,7 +342,8 @@ export function edited(box, stroke = null) {
     const a = stroke.a ? toArt(stroke.a) : [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2];
     // follows the stroke: the brush path is kept with the stroke (art px, ms since it began); the bake and the entry read it
     let path = null;
-    if ( S.params.directional && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
+    // (a tear keeps it always: its brush path is the tear's spine)
+    if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
     const id = foundry.utils.randomID(10);
     S.objects = [...(S.objects ?? []), Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null })];
     Model.composite(S);
