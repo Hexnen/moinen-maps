@@ -26,12 +26,14 @@ export class RoadDisplay {
     for ( const t of tiles ) {
       if ( !t.canvas ) { next.set(t.key, old.get(t.key)); old.delete(t.key); continue; }
       baked++;
-      const s = new PIXI.Sprite(PIXI.Texture.from(t.canvas));
+      // the tile is the inner frame of its canvas; around it a gutter of the neighbours' roads (art.mjs GUTTER), so the filter at the
+      // tile's edge reads real pixels, never a clamped edge (a hairline seam along tile borders that came and went with the zoom)
+      const base = PIXI.BaseTexture.from(t.canvas), f = t.frame ?? { x: 0, y: 0, w: t.canvas.width, h: t.canvas.height };
+      const s = new PIXI.Sprite(new PIXI.Texture(base, new PIXI.Rectangle(f.x, f.y, f.w, f.h)));
       s.eventMode = "none";
       s.position.set(t.x, t.y);
-      // exactly one tile wide: the canvas is TILE * res rounded, so 1 / res could leave a hairline gap between tiles (a seam that
-      // flickers while zooming)
-      s.scale.set(t.w / t.canvas.width, t.h / t.canvas.height);
+      // exactly one tile wide: the frame is TILE * res rounded, so 1 / res could leave a hairline gap between tiles
+      s.scale.set(t.w / f.w, t.h / f.h);
       this.root.addChild(s);
       next.set(t.key, { sig: t.sig, sprite: s });
     }

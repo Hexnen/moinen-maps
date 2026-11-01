@@ -71,6 +71,13 @@ function strokeLine(ctx, p, width, style, dash) {
 /* ---------------------------------------------------------------- road baking */
 
 export const TILE = 1024;
+/**
+ * Scene px of overlap painted around every tile (the tile shows only its own TILE x TILE): sampled LINEAR and from mipmaps, a texture
+ * read at its very edge clamps to its last texel, so where a road crossed the border of two tiles the two halves were filtered
+ * differently - a hairline seam along the tile edge that came and went with the zoom. With the gutter the filter reads the real
+ * neighbouring pixels.
+ */
+export const GUTTER = 16;
 
 /**
  * Bake the network into tiles: [{ x, y, w, h, canvas, res }]. Only tiles the roads touch are made. `budget` caps the texels
@@ -96,7 +103,7 @@ export function bakeRoads(R, g, { budget = 40e6, maxRes = 2, keep = null } = {})
   const tiles = [];
   for ( let ty = ty0; ty <= ty1; ty++ ) for ( let tx = tx0; tx <= tx1; tx++ ) {
     const tb = { x0: tx * TILE, y0: ty * TILE, x1: (tx + 1) * TILE, y1: (ty + 1) * TILE };
-    const its = items.filter((it) => overlap(it.bb, tb));
+    const its = items.filter((it) => overlap(it.bb, { x0: tb.x0 - GUTTER, y0: tb.y0 - GUTTER, x1: tb.x1 + GUTTER, y1: tb.y1 + GUTTER }));
     if ( its.length ) tiles.push({ tb, its });
   }
   const res = Math.min(maxRes, Math.sqrt(budget / Math.max(1, tiles.length * TILE * TILE)));
@@ -108,12 +115,14 @@ export function bakeRoads(R, g, { budget = 40e6, maxRes = 2, keep = null } = {})
     // the caller still shows this tile as it was: nothing to draw (`keep` answers whether it has the tile with this signature)
     if ( keep?.(key, sig) ) return { key, sig, x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: null, res };
     const c = document.createElement("canvas");
-    c.width = c.height = Math.max(8, Math.round(TILE * res));
+    const gut = Math.round(GUTTER * res), inner = Math.max(8, Math.round(TILE * res));
+    c.width = c.height = inner + 2 * gut;
     const ctx = c.getContext("2d");
-    ctx.setTransform(res, 0, 0, res, -tb.x0 * res, -tb.y0 * res);
+    ctx.setTransform(res, 0, 0, res, gut - tb.x0 * res, gut - tb.y0 * res);
     ctx.lineCap = ctx.lineJoin = "round";
-    drawNetwork(ctx, its, ctxInfo, tb);
-    return { key, sig, x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: c, res };
+    drawNetwork(ctx, its, ctxInfo, { x0: tb.x0 - GUTTER, y0: tb.y0 - GUTTER, x1: tb.x1 + GUTTER, y1: tb.y1 + GUTTER });
+    // `frame`: the tile itself inside the canvas (canvas px)
+    return { key, sig, x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: c, frame: { x: gut, y: gut, w: inner, h: inner }, res };
   });
 }
 

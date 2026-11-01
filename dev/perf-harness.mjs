@@ -201,3 +201,59 @@ export async function abOld(oldUrl, times = [0, 60, 120, 300, 600, 1000, 1600, 2
     return [dt, +(s / (x.length / 4)).toFixed(3), m, bad];
   });
 }
+
+/**
+ * SEAM CHECK: a zoom sweep (and a few pan offsets); every frame the whole canvas (or `target`) is drawn to a texture and searched for
+ * thin vertical / horizontal lines: a column whose pixels stand out from BOTH neighbours (by more than `thr`, summed RGB) while the two
+ * neighbours agree with each other, over a large share of the rows. Lines in the map art sit at the same scene x at every zoom and
+ * are there with the module off too; a seam from a texture edge appears at some zooms only. Returns the lines found:
+ * [{ zoom, axis, screen, scene, score }] and per zoom the number of lines.
+ */
+export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, minScore = 0.35, target = null } = {}) {
+  const R = canvas.app.renderer, T = canvas.app.ticker;
+  zooms ??= Array.from({ length: 58 }, (_, i) => +(0.3 + i * 0.1).toFixed(2));
+  const found = [], per = {};
+  const W = R.screen.width, H = R.screen.height;
+  const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: R.resolution });
+  const PW = Math.round(W * R.resolution), PH = Math.round(H * R.resolution);
+  try {
+    for ( const z of zooms ) for ( const off of offsets ) {
+      const r = canvas.dimensions.sceneRect;
+      canvas.pan({ x: r.x + r.width / 2 + off, y: r.y + r.height / 2 + off * 0.5, scale: z });
+      step(2);
+      // what reached the screen: the frame just drawn, read from the default framebuffer (the primary group draws through its own
+      // render texture, so drawing the stage again into a texture is not the same picture); `target`: that object alone
+      let px;
+      if ( target ) { R.render(target, { renderTexture: rt, clear: true, transform: target.parent?.worldTransform ?? null }); px = R.extract.pixels(rt); }
+      else { const T2 = canvas.app.ticker, mf = T2.maxFPS; T2.maxFPS = 0; T2.update(performance.now()); T2.maxFPS = mf; R.renderTexture.bind(null); px = R.extract.pixels(); }
+      const M = canvas.stage.worldTransform, s = M.a * R.resolution;
+      const at = (x, y) => { const i = (y * PW + x) * 4; return [px[i], px[i + 1], px[i + 2], px[i + 3]]; };
+      const diff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) + Math.abs(a[3] - b[3]);
+      let n = 0;
+      // columns
+      for ( let x = 1; x < PW - 1; x++ ) {
+        let hit = 0, rows = 0;
+        for ( let y = 0; y < PH; y += 3 ) {
+          const L = at(x - 1, y), C = at(x, y), Rr = at(x + 1, y);
+          if ( !L[3] && !C[3] && !Rr[3] ) continue;
+          rows++;
+          if ( diff(L, Rr) < thr * 0.5 && diff(C, L) > thr && diff(C, Rr) > thr ) hit++;
+        }
+        if ( rows > 30 && hit / rows >= minScore ) { n++; found.push({ zoom: z, off, axis: "x", screen: x, scene: +(((x / R.resolution) - M.tx) / M.a).toFixed(1), score: +(hit / rows).toFixed(2) }); }
+      }
+      // rows
+      for ( let y = 1; y < PH - 1; y++ ) {
+        let hit = 0, cols = 0;
+        for ( let x = 0; x < PW; x += 3 ) {
+          const U = at(x, y - 1), C = at(x, y), Dn = at(x, y + 1);
+          if ( !U[3] && !C[3] && !Dn[3] ) continue;
+          cols++;
+          if ( diff(U, Dn) < thr * 0.5 && diff(C, U) > thr && diff(C, Dn) > thr ) hit++;
+        }
+        if ( cols > 30 && hit / cols >= minScore ) { n++; found.push({ zoom: z, off, axis: "y", screen: y, scene: +(((y / R.resolution) - M.ty) / M.d).toFixed(1), score: +(hit / cols).toFixed(2) }); }
+      }
+      per[`${z}/${off}`] = n;
+    }
+  } finally { rt.destroy(true); }
+  return { found, per };
+}
