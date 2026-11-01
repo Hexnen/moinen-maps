@@ -350,10 +350,11 @@ export class Debris {
   makeRest(g) {
     const info = g.info, t = info.type, set = g.chunks;
     g.rest = [];
-    if ( !set || (t !== "blast" && t !== "cracks") || info.cause === 1 || info.cause === 2 ) return;
+    // (blasts only - a crack strokes area keeps no chunk at rest - and 2-4 of them lying against the rim, nothing out in the open)
+    if ( !set || t !== "blast" || info.cause === 1 || info.cause === 2 ) return;
     const R = Math.max(4, info.R), r = info.rect, keep = { x0: r.x0 + 1, y0: r.y0 + 1, x1: r.x1 - 1, y1: r.y1 - 1 };
-    const n = t === "blast" ? Math.min(6, 2 + Math.round(R / 10)) : Math.min(3, 1 + Math.round(R / 16));
-    const plan = planThrow({ seed: (g.hash % 99991) + 13, count: n * 3, ox: info.ex, oy: info.ey, R, reach: t === "blast" ? [0.95, 1.4] : [0.6, 1.2],
+    const n = Math.min(4, 2 + Math.round(R / 18));
+    const plan = planThrow({ seed: (g.hash % 99991) + 13, count: n * 3, ox: info.ex, oy: info.ey, R, reach: [0.88, 1.06],
       H: [6, 12], landing: "rest", rest: n, keep, frames: set.frames, scene: this.sceneArt() });
     for ( const c of plan ) {
       if ( c.fate !== "rest" ) continue;

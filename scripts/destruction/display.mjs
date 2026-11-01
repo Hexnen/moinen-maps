@@ -1214,7 +1214,9 @@ export class DestructionDisplay {
       const fl = 0.8 + 0.35 * hash2(step, tg.ang * 100, 7), h = (3 + R * 0.2) * tg.h * s * fl * (tg.inner ? 0.65 : 1), w = Math.max(2, Math.round(tg.w * Math.sqrt(s)));
       if ( h < 1.5 ) continue;
       const bx = a.ox + Math.cos(tg.ang) * rr, by = a.oy + Math.sin(tg.ang) * rr * 0.85;
-      pxTongue(gr, v, bx, by, tongueCells(h, w, tg.ph + step * 0.9, tg.w));   // (step: this tongue's own pose clock)
+      // (step: this tongue's own pose clock; each one mirrored or not and leaning its own way - never twenty stamps of one sprite)
+      const tc = tongueCells(h, w, tg.ph + step * 0.9, tg.w).map(([x, y, q]) => [(tg.flip ? -x : x) + Math.round(-y * tg.lean), y, q]);
+      pxTongue(gr, v, bx, by, tc);
       // embers from the hot tips, smoke from the dying tongues (none that would outlive the entry)
       const left = a.end - now - 80;
       if ( left > 200 && s > 0.45 && Math.random() < 0.05 ) {
@@ -1313,7 +1315,7 @@ export class DestructionDisplay {
         const gr = this.pixelCanvas(), n = Math.max(5, Math.min(12, Math.round(4 + R * 0.25))), life = a.reveal + a.band * 0.8;
         const nc = 3 + Math.floor(hash2(9, 1, a.seed) * 2), cl = Array.from({ length: nc }, (_, c) => (c + hash2(c, 8, a.seed) * 0.6) / nc * 6.283);
         const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: cl[q % nc] + (hash2(q, 1, a.seed) - 0.5) * 0.9 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
-          off: hash2(q, 6, a.seed) * 70, h: 0.4 + 1.1 * hash2(q, 3, a.seed) ** 1.5, w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
+          off: hash2(q, 6, a.seed) * 70, h: 0.35 + 1.25 * hash2(q, 3, a.seed) ** 1.5, w: 2 + Math.round(3.5 * hash2(q, 4, a.seed)), flip: hash2(q, 7, a.seed) < 0.5, lean: (hash2(q, 9, a.seed) - 0.5) * 0.45, ph: hash2(q, 5, a.seed) * 6.28 }));
         a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
       });
       // smoke: a few dark puffs from the burnt ground behind the front

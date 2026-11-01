@@ -90,7 +90,7 @@ export function prepareFlood(A) {
       const L = level[i] || 1, d = clamp(din[i] / ref, 0, 1);
       depth[i] = d;
       // a crater: see-through at the rim (its broken lip and the plates that slid in still show), opaque in the deep middle
-      const o = L >= 3 ? 0.5 + 0.5 * Math.min(1, Math.pow(d, 0.7) * 1.15) : L === 2 ? 0.42 + 0.33 * d : 0.8;
+      const o = L >= 3 ? 0.5 + 0.5 * Math.min(1, Math.pow(d, 0.7) * 1.15) : L === 2 ? 0.55 + 0.22 * d : 0.8;
       // depth falloff: darker toward the deep middle, the shallows at the rim light (the bottom shows there)
       const s = L >= 3 ? 0.78 * Math.pow(d, 1.1) : L === 2 ? 0.42 * Math.pow(d, 1.1) : 0;
       op[i] = Math.round(o * 255); shade[i] = Math.round(s * 255);
@@ -198,8 +198,8 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     // band seams; the engine only adds its highlights, in a few drifting patches
     const ax = cx + x, ay = cy + y, dep = prep.depth[i], L = prep.level;
     const ev = b ? LB[b * 4 + 3] : 0;
-    if ( b && !ev ) { P32[i] = 0; continue; }
-    const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = (e) => Math.abs(dw - e) < 0.035 ? (bayer(ax, ay) < 0.5 ? -0.04 : 0.04) : 0;
+    if ( dep < 0.08 && vnoise(ax / 2.2, ay / 2.2, 57) < 0.33 ) { P32[i] = 0; continue; }
+    const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = () => 0;
     const band = L <= 1 ? 1 : (dw + seam(0.2) < 0.2 ? 0 : L >= 3 && dw + seam(0.55) >= 0.55 ? 2 : 1);
     const T = [[0.38, ringC], [0, baseC], [0.62, shadow]][band];
     let r = baseC[0] + (T[1][0] - baseC[0]) * T[0], g = baseC[1] + (T[1][1] - baseC[1]) * T[0], bl = baseC[2] + (T[1][2] - baseC[2]) * T[0];
