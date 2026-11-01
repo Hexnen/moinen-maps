@@ -93,7 +93,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   S = Model.load(scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
-  if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.clear(); shownKey = ""; }
+  if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.fadeAll(); shownKey = ""; }
   Editor.refreshOverlay();
   tell("loaded");
 }
@@ -140,7 +140,7 @@ export async function rebake(opts = {}) {
 async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const my = gen, scene = canvas.scene, T = { t0: performance.now() }, rev = paramRev;
   if ( !Model.hasPaint(S) || !S.enabled ) {
-    display?.clear(); shownKey = ""; shownMask = null;
+    display?.fadeAll(); shownKey = ""; shownMask = null;   // erased or cleared: the damage fades out, it does not vanish
     loaded = true;   // the scene's state is known: what is painted from now on is new and enters
     Object.assign(status, { baking: false, waiting: false, progress: 0, areas: [] }); tell("status"); return;
   }

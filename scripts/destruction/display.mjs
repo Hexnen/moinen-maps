@@ -144,10 +144,14 @@ export class DestructionDisplay {
       if ( !o.k ) return;
       keepErase.add(o.id);
       let e = this.erasers.get(o.id);
-      if ( !e ) { e = this.buildEraser(o); if ( e ) { this.erasers.set(o.id, e); e.fresh = true; } }
+      if ( !e ) {
+        e = this.buildEraser(o);
+        if ( e ) { this.erasers.set(o.id, e); if ( this.synced ) this.eraseMotion(e, false); }   // a new erase stroke dissolves the damage out
+      }
       if ( e ) e.objIndex = index;
     });
-    for ( const [id, e] of this.erasers ) if ( !keepErase.has(id) ) { this.erasers.delete(id); this.killEraser(e); }
+    for ( const [id, e] of this.erasers ) if ( !keepErase.has(id) && !e.leaving ) { e.leaving = true; this.eraseMotion(e, true); }   // undone: the damage dissolves back
+    this.synced = true;
     // creation order (stroke index, then the sheet's order inside a stroke), on top of whatever is fading out
     const all = [...next, ...this.erasers.values()].map((g, k) => ({ g, k })).sort((a, b) => (a.g.objIndex - b.g.objIndex) || (a.k - b.k)).map((q) => q.g);
     this.order = next;
@@ -276,12 +280,60 @@ export class DestructionDisplay {
     const cont = new PIXI.Container(); cont.eventMode = "none";
     cont.addChild(ms, mask); ms.mask = mask;
     const rect = { x0: ob.x0 * K, y0: ob.y0 * K, x1: (ob.x0 + ob.w) * K, y1: (ob.y0 + ob.h) * K };
-    return { erase: true, id: ob.id, cont, tex, info: { rect }, objIndex: 0 };
+    return { erase: true, id: ob.id, cont, tex, info: { rect }, objIndex: 0, data: a, w: W, h: H, frame: mask.texture };
   }
 
   killEraser(e) {
+    if ( e.dis ) { e.dis.tex.destroy(true); e.dis = null; }
     if ( !e.cont.destroyed ) e.cont.destroy({ children: true });
     e.tex.destroy(true);
+  }
+
+  /**
+   * A mask that dissolves in (or out) pixel by pixel: `data` the full mask (RGBA, w x h), `x0, y0` its place (art px), `timeOf(ax, ay)`
+   * the moment of each pixel (ms after the start). The covers of strokes painted over older damage and the erase strokes use it, with
+   * the same per-pixel clock as the ruin they belong to, so at every pixel the old look turns into the new one directly.
+   */
+  makeDissolve(data, w, h, x0, y0, timeOf, out = false) {
+    const keys = new Float64Array(w * h);
+    let c = 0;
+    for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
+      const i = y * w + x; if ( !data[i * 4 + 3] ) continue;
+      keys[c++] = Math.max(0, Math.round(timeOf(x0 + x + 0.5, y0 + y + 0.5))) * 1048576 + i;
+    }
+    const sorted = keys.subarray(0, c).sort();
+    const buf = out ? new Uint8Array(data) : new Uint8Array(w * h * 4);
+    const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: w, height: h }), {
+      width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+      format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
+    return { keys: sorted, next: 0, buf, data, tex, out, end: sorted.length ? Math.floor(sorted[sorted.length - 1] / 1048576) : 0 };
+  }
+
+  /** Advance a dissolve to `rel` ms; true while it is not finished. */
+  stepDissolve(D, rel) {
+    const lim = (Math.max(0, rel) + 1) * 1048576, keys = D.keys, buf = D.buf, data = D.data;
+    let n = 0;
+    while ( D.next < keys.length && keys[D.next] < lim ) {
+      const q = (keys[D.next] % 1048576) * 4;
+      if ( D.out ) buf[q + 3] = buf[q] = buf[q + 1] = buf[q + 2] = 0;
+      else { buf[q] = data[q]; buf[q + 1] = data[q + 1]; buf[q + 2] = data[q + 2]; buf[q + 3] = data[q + 3]; }
+      D.next++; n++;
+    }
+    if ( n ) D.tex.update();
+    return D.next < keys.length;
+  }
+
+  /** An erase stroke dissolves in (the damage under it dissolves out), or out again (undo), in ~0.3 s with a soft, noisy edge. */
+  eraseMotion(e, out) {
+    const mask = e.cont.children[1]; if ( !mask ) return;
+    if ( reducedMotion() || !this.look.entry ) { if ( out ) e.gone = true; return; }
+    const r = e.info.rect, cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2, R = Math.max(4, Math.hypot(r.x1 - r.x0, r.y1 - r.y0) / 2);
+    const seed = (e.id.length * 131 + e.id.charCodeAt(0)) | 0;
+    const timeOf = (x, y) => 260 * Math.min(1, Math.hypot(x - cx, y - cy) / R) + (vnoise(x / 6, y / 6, seed) - 0.5) * 150 + (hash2(x | 0, y | 0, seed) - 0.5) * 40 + 75;
+    if ( e.dis ) { e.dis.tex.destroy(true); e.dis = null; }
+    e.dis = this.makeDissolve(e.data, e.w, e.h, r.x0, r.y0, timeOf, out);
+    e.disStart = performance.now(); e.disOut = out;
+    mask.texture = new PIXI.Texture(e.dis.tex);
   }
 
   /**
@@ -352,6 +404,9 @@ export class DestructionDisplay {
     const arrive = pathFront ? (x, y) => delay + pathFront.at(x, y) : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
     const seed = g.hash % 9973;
     const noise = (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;   // 0..1, smooth
+    // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
+    // so the ruin and the cover of the same pixel share it)
+    const pixelTime = (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     let rev = null;
     const bd = this.baseOf(g);
@@ -361,7 +416,7 @@ export class DestructionDisplay {
       for ( let y = 0; y < bh; y++ ) for ( let x = 0; x < bw; x++ ) {
         const i = y * bw + x, q = i * 4; if ( !bd[q + 3] ) continue;
         const ax = info.x + x + 0.5, ay = info.y + y + 0.5;
-        let t = arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(x, y, seed) - 0.5) * band * 0.22;
+        let t = pixelTime(ax, ay);
         if ( bd[q] + bd[q + 1] + bd[q + 2] < 150 ) t -= band * 0.4;   // cracks and inked lips first
         keys[c++] = Math.max(0, Math.round(t)) * 1048576 + i;
       }
@@ -372,6 +427,19 @@ export class DestructionDisplay {
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       rev = { keys: sorted, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture };
       g.baseSpr.texture = new PIXI.Texture(tex);
+    }
+    // the cover over older strokes (the plain map under this stroke's own pixels) dissolves in on the same clock: at every pixel the
+    // older damage stays until this stroke's ruin takes its place, never old -> clean map -> new
+    let crev = null;
+    const pm = g.patch?.children?.[1];
+    if ( pm && g.coverFrame ) {
+      const fr = g.coverFrame.tex.frame, data = g.tex?.resource?.data, TW = g.tex?.width;
+      if ( data && TW ) {
+        const cd = new Uint8Array(fr.width * fr.height * 4);
+        for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
+        crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime);
+        crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
+      }
     }
     // 2. the pieces' lives
     const list = [], byPiece = new Map();
@@ -386,7 +454,7 @@ export class DestructionDisplay {
       list.push(it); byPiece.set(p, it);
       this.place(p, -9, it, info.type);
     });
-    g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront ? null : wipe, list, byPiece, fx: [], rev,
+    g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront ? null : wipe, list, byPiece, fx: [], rev, crev,
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     for ( const u of under ) u.heldBy = g;
@@ -480,6 +548,18 @@ export class DestructionDisplay {
   }
 
   /**
+   * Nothing is left to show (everything erased or cleared): the damage fades out instead of vanishing; erase strokes stay over it
+   * until it has gone, so nothing old flashes back.
+   */
+  fadeAll() {
+    for ( const g of this.groups.values() ) this.retire(g);
+    this.groups.clear(); this.order = [];
+    const t = performance.now() + 320;
+    for ( const e of this.erasers.values() ) { e.leaving = true; e.killAt = t; }
+    this.stats.groups = this.stats.sprites = 0;
+  }
+
+  /**
    * No entry (a look setting changed, a returning area): the new look fades in over the old one, which stays whole underneath until
    * it is covered, so there is no blank frame and no flash.
    */
@@ -501,6 +581,11 @@ export class DestructionDisplay {
       if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); }
       a.rev.tex.destroy();
     }
+    if ( a.crev ) {
+      const pm = g.patch?.children?.[1];
+      if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; t.destroy(false); }
+      a.crev.tex.destroy();
+    }
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
     for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
     if ( g.baseCont && !g.baseCont.destroyed ) g.baseCont.position.set(0, 0);
@@ -512,6 +597,7 @@ export class DestructionDisplay {
    * dissolving edge itself carries the dust, embers, spray or sparks. One upload per frame, only while something changed.
    */
   erode(g, a, now, onScreen) {
+    if ( a.crev ) this.stepDissolve(a.crev, now - a.start);
     const R = a.rev; if ( !R || R.next >= R.keys.length ) return;
     const lim = (Math.max(0, now - a.start) + 1) * 1048576, keys = R.keys, buf = R.buf, data = R.data;
     let n = 0, shed = 0;
@@ -633,6 +719,16 @@ export class DestructionDisplay {
       if ( g.fade ) this.applyFade(g, t0);
       if ( g.anim ) this.animate(g, t0, vw);
     }
+    // erase strokes dissolving in or out
+    for ( const [id, e] of this.erasers ) {
+      if ( e.dis && !this.stepDissolve(e.dis, t0 - e.disStart) ) {
+        const mask = e.cont.children[1];
+        if ( e.disOut ) e.gone = true;
+        else if ( mask && !mask.destroyed ) { const t = mask.texture; mask.texture = e.frame; t.destroy(false); }
+        if ( !e.gone ) { e.dis.tex.destroy(true); e.dis = null; }
+      }
+      if ( e.gone || (e.leaving && !e.dis && (!e.killAt || t0 >= e.killAt)) ) { this.erasers.delete(id); this.killEraser(e); }
+    }
     for ( let i = this.dying.length - 1; i >= 0; i-- ) {
       const g = this.dying[i], h = g.heldBy;
       if ( h && !h.dead && (h.anim || h.fade) ) {
@@ -696,7 +792,7 @@ export class DestructionDisplay {
       }
     }
     if ( onScreen ) this.effects(g, a, now, el);
-    if ( !busy && (!a.rev || a.rev.next >= a.rev.keys.length) && !a.fx.length ) this.endAnim(g);
+    if ( !busy && (!a.rev || a.rev.next >= a.rev.keys.length) && (!a.crev || a.crev.next >= a.crev.keys.length) && !a.fx.length ) this.endAnim(g);
   }
 
   /** The type's own effects: one-shots at fixed moments, and what rides on the front. */
