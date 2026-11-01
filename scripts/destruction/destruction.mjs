@@ -789,7 +789,9 @@ async function compositeLoad(scene, base, want, M) {
   const ix = c.index, byId = new Map(want.map((w) => [w.objId, w])), covered = [];
   for ( const [id, s] of Object.entries(ix.strokes ?? {}) ) {
     const w = byId.get(id);
-    if ( !w || w.sig !== s.sig ) { c.destroy(); Trace.event("composite-stale", { stroke: id }); return 0; }
+    // (the same inputs AND the same chunk: a stroke re-baked by newer code under the same signature has other areas - version pinning)
+    const e = M ? Store.entryOf(M, id) : null;
+    if ( !w || w.sig !== s.sig || (s.cid && s.cid !== e?.id) ) { c.destroy(); Trace.event("composite-stale", { stroke: id, why: !w ? "gone" : w.sig !== s.sig ? "signature" : "chunk" }); return 0; }
     covered.push(w);
   }
   const last = Math.max(-1, ...covered.map((w) => w.index));
@@ -881,13 +883,27 @@ async function pixelsForEntries() {
 /** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
 const hydrateShells = (why) => fill(shellRecs(), why);
 
-/** The cache asks for the pixels of shells it must draw itself (a band the composite does not have, drawing without the cache). */
+/**
+ * The cache asks for the pixels of shells it must draw itself (a band the composite does not have, drawing without the cache). Every ask
+ * is kept until it is served: an ask made while a fill runs (the cache re-draws as each step lands and asks for the rest) is served by the
+ * next round - before, it was dropped, and the cache waited for ever with a stale band (no composite publish, "cache-not-settled").
+ */
 let pixelAsk = null;
+const asked = new Set();
 function requestPixels(groups) {
-  const want = new Set(groups.map((g) => g.hash));
-  const list = shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h)));
-  if ( !list.length ) return;
-  pixelAsk ??= Promise.resolve().then(() => fill(shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h))), "cache")).finally(() => { pixelAsk = null; });
+  for ( const g of groups ) asked.add(g.hash);
+  pixelAsk ??= (async () => {
+    while ( asked.size ) {
+      const want = new Set(asked); asked.clear();
+      const list = shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h)));
+      if ( list.length ) await fill(list, "cache");
+      else if ( [...want].some((h) => display?.groups.get(h)?.shell) ) {
+        // a shell no record stands behind any more (its stroke's record changed): the scene is shown again from its records
+        Trace.event("shells-orphan", { n: [...want].filter((h) => display?.groups.get(h)?.shell).length });
+        await reshow?.();
+      }
+    }
+  })().finally(() => { pixelAsk = null; });
 }
 
 /**
@@ -920,13 +936,19 @@ function scheduleComposite(ms = 4000) {
     if ( !S || !display || !canvas.scene || !game.users.activeGM?.isSelf || inflight || persisting ) return scheduleComposite(3000);
     const scene = canvas.scene, bg = backgroundInfo()?.path ?? "", key = Store.makeKey(scene, S, bg);
     if ( shownKey !== key ) return;                 // not all on screen: the pass that completes it books a run
-    const FS = Store.sigsOf(S), strokes = S.objects.map((o, i) => (o.k ? null : { id: o.id, sig: FS[i].sig })).filter(Boolean);
+    const FS = Store.sigsOf(S), M = Store.manifestOf(S);
+    const strokes = S.objects.map((o, i) => { if ( o.k ) return null; const e = M ? Store.entryOf(M, o.id) : null; return { id: o.id, sig: FS[i].sig, cid: e?.sig === FS[i].sig ? e.id : null }; }).filter(Boolean);
+    // a composite can only be made of real areas: shells left (their bands waiting) get their pixels first, then the next try publishes
+    if ( display.shellCount && display.cache?.waiting ) { Trace.event("composite-fill", { shells: display.shellCount }); await hydrateShells("publish"); return scheduleComposite(1500); }
     let why;
     try { why = await Composite.publish(display, { scene, dir: Net.chunkDir(scene.id), base: Store.baseKey(scene, S, bg), strokes }); }
     catch ( err ) { why = "error"; console.warn(`${MODULE_ID} | destruction: composite not published`, err); }
     if ( why === "published" || why === "same" ) { compositeTries = 0; return; }
-    Trace.event("composite-wait", { why });
-    if ( ++compositeTries < 30 ) scheduleComposite(why === "error" ? 30000 : 2000);
+    Trace.event("composite-wait", { why, tries: compositeTries });
+    // tried again, less and less often (2 s doubling to 60 s), as long as this scene and state stay: never given up silently
+    compositeTries++;
+    if ( compositeTries === 30 ) console.warn(`${MODULE_ID} | destruction: the settled composite still not published (${why})`);
+    scheduleComposite(why === "error" ? 30000 : Math.min(60000, 2000 * 2 ** Math.min(5, Math.floor(compositeTries / 5))));
   }, ms);
 }
 
@@ -1398,6 +1420,9 @@ export const destructionApi = {
   /** Every area enters again, locally. */
   replay: () => pixelsForEntries().then(() => display?.detonate(performance.now())),
   display: () => display,
+  /** Tests: every area shown as a shell and the record behind it (composite.mjs; the composite harness). */
+  shells: () => [...(display?.groups.values() ?? [])].filter((g) => g.shell).map((g) => { const r = shownRecs.get(g.objId);
+    return { hash: g.hash, obj: g.objId, inRecs: [...recs.values()].filter((q) => q.objId === g.objId).map((q) => (q === r ? "=" : "") + (q.shell ? "shell" : q.sprites.lean ? "lean" : "px")).join(","), rec: r ? { has: Array.isArray(r.shell) ? r.shell.some((a) => a.h === g.hash) : null, hs: Array.isArray(r.shell) ? r.shell.map((a) => a.h).slice(0, 3) : null, shell: !!r.shell, lean: !!r.sprites?.lean, hydrating: !!r.hydrating, id: r.id ?? null, n: r.sprites?.length ?? 0 } : null }; }),
   TYPES: Model.TYPES, MATERIALS: Model.MATERIALS, CAUSES: Model.CAUSES
 };
 

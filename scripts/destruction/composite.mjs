@@ -22,7 +22,7 @@ import * as Trace from "../net/trace.mjs";
  * L, eff, smp, mips, rect, tiles: [[x, y, w, h, id]] }] } - `tv` is the composite's own format version, apart from the bake version
  * (a tile format change never re-bakes anything). Off: client setting "destrComposite", or `CONFIG.moinenMaps.noComposite = true`.
  */
-export const TILE_VERSION = 5;          // 5: bands culled under the bands above (2-4 were test versions, never released)
+export const TILE_VERSION = 6;          // 5: bands culled under the bands above (2-4 were test versions); 6: strokes' chunk ids in the index
 export const KEY = "destructionComposite";
 
 export const enabled = () => {
@@ -171,6 +171,19 @@ function readTile(R, rt) {
 }
 
 /**
+ * SETTLED (pure; tests): null when the cache's drawing of the layer is final - drawn scene-wide for what is there now (not dirty, no band
+ * waiting for a shell's pixels), nothing moving but the flooded holes' water, nothing fading out, every hole's water in, every band's
+ * tiles valid - else why not.
+ */
+export function unsettled({ mode, dirty, waiting, moving = 0, dying = 0, holes = [], bands = [] }) {
+  if ( !String(mode).startsWith("scene") || dirty || waiting ) return `cache-not-settled:${mode}${dirty ? ",dirty" : ""}${waiting ? ",waiting" : ""}`;
+  if ( moving || dying ) return `moving:${moving}${dying ? `,dying ${dying}` : ""}`;
+  if ( holes.some((s) => s !== "ready" && s !== "none") ) return "water-not-ready";
+  if ( !bands.length || bands.some((b) => !b.meta || !b.ok) ) return "bands";
+  return null;
+}
+
+/**
  * Publish the composite of what is on screen (GM): only when the layer is settled (nothing moving but the flooded holes' water, every
  * hole's water in, no band waiting for pixels) and the scene-wide bands are drawn at a whole texel density. `ctx`: { scene, dir, base,
  * strokes: [{ id, sig }] } in order. -> "published" | "same" | a reason it was not.
@@ -178,13 +191,13 @@ function readTile(R, rt) {
 export async function publish(d, ctx) {
   const C = d?.cache, R = canvas.app?.renderer;
   if ( !C || !R?.gl || !d.groups.size ) return "no-display";
-  if ( !String(C.mode).startsWith("scene") || C.dirty || C.waiting ) return "cache-not-settled";
-  const U = C.units();
-  if ( U.some((u) => u.live && !u.water) || d.dying.length ) return "moving";
-  const holes = D.flood?.status?.()?.holes ?? [];
-  if ( holes.some((h) => h.state !== "ready" && h.state !== "none") ) return "water-not-ready";
-  const bands = C.bands.filter((b) => b.ckey && b.tiles.length);
-  if ( !bands.length || bands.some((b) => !b.meta || b.tiles.some((t) => !t.shared && (!t.rt.valid || t.rt.baseTexture.destroyed))) ) return "bands";
+  // SETTLED, deterministically: the cache drawn for what is on screen now. A tab in the background has no ticker (requestAnimationFrame
+  // stops): one frame is driven here (fades and swaps run on the clock, the cache re-draws what changed), then it is checked
+  if ( C.dirty || !String(C.mode).startsWith("scene") || document.visibilityState === "hidden" ) { try { d.tick(); } catch { /* torn down */ } }
+  const U = C.units(), bands = C.bands.filter((b) => b.ckey && b.tiles.length);
+  const why = unsettled({ mode: C.mode, dirty: C.dirty, waiting: C.waiting, moving: U.filter((u) => u.live && !u.water).length, dying: d.dying.length,
+    holes: (D.flood?.status?.()?.holes ?? []).map((h) => h.state), bands: bands.map((b) => ({ meta: !!b.meta, ok: b.tiles.every((t) => t.shared || (t.rt.valid && !t.rt.baseTexture.destroyed)) })) });
+  if ( why ) return why;
   const old = manifestOf(ctx.scene), oldBands = new Map((old?.dir === ctx.dir && old.base === ctx.base ? old.bands : []).map((b) => [b.key, b]));
   // the index: every area (its description and whether its hole has water), every stroke's areas, every band's members
   const areas = {}, byObj = new Map();
@@ -195,7 +208,7 @@ export async function publish(d, ctx) {
     if ( g.objId ) { if ( !byObj.has(g.objId) ) byObj.set(g.objId, []); byObj.get(g.objId).push(g.hash); }
   }
   const strokes = {};
-  for ( const s of ctx.strokes ) strokes[s.id] = { sig: s.sig, hashes: byObj.get(s.id) ?? [] };
+  for ( const s of ctx.strokes ) strokes[s.id] = { sig: s.sig, ...(s.cid ? { cid: s.cid } : {}), hashes: byObj.get(s.id) ?? [] };
   const index = { v: 1, base: ctx.base, areas, strokes, bands: bands.map((b) => ({ key: b.ckey, hashes: b.hashes })) };
   // the tiles: a band drawn from the composite keeps its ids, any other is read back
   const out = [], todo = [], all = [];

@@ -244,6 +244,29 @@ await test("composite culling: only texels the bands above hide with a texel of 
   assert.ok(mid.data.every((v, i) => v === [1, 2, 3, 255][i % 4]));
 });
 
+await test("composite: settled after a Rebake all (the frames of one, in order) - a publish is due once nothing moves", async () => {
+  globalThis.Hooks ??= { on() {}, once() {}, callAll() {}, call() {} };
+  const { unsettled } = await import("../scripts/destruction/composite.mjs");
+  const band = { meta: true, ok: true };
+  // a Rebake all: the loaded scene (shells, bands from the composite), the records swapped in (the cache waits for shells' pixels,
+  // cross-fades), the last swap, the water back: only the last frame is settled
+  const frames = [
+    { mode: "scene+live", dirty: false, waiting: false, bands: [band] },                                          // loaded: settled
+    { mode: "scene+live", dirty: true, waiting: false, bands: [band] },                                           // a swap landed
+    { mode: "scene+live", dirty: false, waiting: true, bands: [band] },                                           // bands wait for shells
+    { mode: "busy", dirty: false, waiting: false, moving: 200, bands: [band] },                                   // the swaps cross-fade
+    { mode: "scene+live", dirty: false, waiting: false, moving: 3, dying: 2, bands: [band] },                     // the last ones
+    { mode: "scene+live", dirty: false, waiting: false, holes: ["ready", "baking"], bands: [band] },               // a hole's water
+    { mode: "scene+live", dirty: false, waiting: false, holes: ["ready", "none"], bands: [band, { meta: true, ok: false }] },
+    { mode: "scene+live", dirty: false, waiting: false, holes: ["ready", "none"], bands: [band, band] }];        // settled
+  const got = frames.map((f) => unsettled(f));
+  assert.equal(got[0], null);
+  assert.deepEqual(got.slice(1, 7).map((w) => w.split(":")[0]), ["cache-not-settled", "cache-not-settled", "cache-not-settled", "moving", "water-not-ready", "bands"]);
+  assert.equal(got[7], null);
+  assert.equal(unsettled({ mode: "live" }), "cache-not-settled:live");
+  assert.equal(unsettled({ mode: "scene", bands: [] }), "bands");
+});
+
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);
