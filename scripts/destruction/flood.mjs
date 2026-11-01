@@ -11,6 +11,7 @@ import { publishBake, fetchBake } from "../water/publish.mjs";
 import { addWet, wetChanged } from "../water/wet.mjs";
 import * as Reveal from "../net/reveal.mjs";
 import { markOnce } from "../net/trace.mjs";
+import { LoopMix, loopMix } from "../water/display.mjs";
 
 /**
  * FLOODED HOLES: the water of the module's water engine in every flooded area of the destruction (damage kind "flood").
@@ -53,6 +54,8 @@ const stats = { bakes: 0, bakeMs: 0, fetched: 0, cached: 0, frameMs: 0, entries:
 const flagOf = () => canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? {};
 const hkey = (h) => (h >>> 0).toString(36);
 const now = () => performance.now();
+const smoothWater = () => { try { return game.settings.get(MODULE_ID, "smoothWater") !== false; } catch { return true; } };
+const SYNC_MS = 3;               // per frame for making new holes' entries (sync)
 
 /* ================================================================ the worker (a water engine of its own) */
 
@@ -234,6 +237,9 @@ function makeEntry(g) {
   sp.position.set(o.x + e.prep.cx * ap, o.y + e.prep.cy * ap); sp.scale.set(ap);
   g.cont.addChild(sp);     // over the ruin and its plates, in the area's own place among the strokes
   e.sprite = sp;
+  // the loop cross-faded like the painted water ('Smooth water animation'): a mixing quad in the sprite's place, shown instead of it
+  const mx = new LoopMix(); mx.visible = false; mx.position.copyFrom(sp.position); mx.scale.set(ap);
+  g.cont.addChild(mx); e.mix = mx;
   e.ap = ap;
   keyOf(e);
   // the area is entering now: the water follows the break
@@ -353,7 +359,8 @@ function freeEntry(e) {
   clearTimeout(e.waitTimer);
   freeTextures(e);
   if ( e.sprite && !e.sprite.destroyed ) e.sprite.destroy();
-  e.sprite = null;
+  if ( e.mix && !e.mix.destroyed ) e.mix.destroy();
+  e.sprite = null; e.mix = null;
 }
 
 /* ================================================================ following the destruction display */
@@ -366,17 +373,21 @@ function scheduleSync() {
 function sync() {
   const disp = D.destructionApi.display?.();
   if ( !canvas.ready || !disp ) { if ( entries.size ) clearAll(); return; }
-  let changed = false;
+  let changed = false, more = false;
   const t0 = performance.now();
   for ( const g of disp.order ) {
     if ( g.info?.type !== "flood" || g.dead ) continue;
     let e = entries.get(g.hash);
     if ( e && e.g !== g ) { freeEntry(e); entries.delete(g.hash); e = null; }
     if ( !e ) {
+      // a few holes per frame (reading the area and preparing it is ~2-10 ms a hole, 16-21 ms for a scene's holes at once and
+      // over 100 ms under load): past SYNC_MS the rest are made at the next frames
+      if ( performance.now() - t0 > SYNC_MS ) { more = true; continue; }
       e = makeEntry(g); entries.set(g.hash, e); changed = true;
       if ( e.state === "new" ) load(e);
     }
   }
+  if ( more ) canvas.app.ticker.addOnce(() => sync());
   for ( const [h, e] of entries ) if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
   stats.entries = entries.size;
   if ( entries.size ) markOnce("flood:listed", { holes: entries.size, ms: Math.round(performance.now() - t0) });
@@ -391,6 +402,7 @@ function tick() {
     const g = e.g;
     if ( g.dead || g.cont?.destroyed || !e.sprite || e.sprite.destroyed ) { freeEntry(e); entries.delete(h); gone = true; continue; }
     if ( g.anim && g.anim !== e.anim && e.prep ) noteAnim(e, g.anim);      // a detonation replays the break: the water too
+    if ( e.mix?.visible ) { e.mix.visible = false; e.sprite.visible = true; }    // (shown again below only at rest)
     if ( !e.tex.length || !g.cont.parent ) { if ( e.sprite ) e.sprite.texture = PIXI.Texture.EMPTY; continue; }
     const n = e.tex.length, ms = Math.max(20, e.res.ms ?? 90);
     // the loop stands still exactly when the painted water's does (the OS setting), so the two never part
@@ -421,8 +433,17 @@ function tick() {
     }
     e.sprite.alpha = 1;
     e.sprite.texture = e.tex[idx].t;
+    // at rest: the loop cross-faded (the same frame time, frame index and mix as the painted water, so the two stay in step)
+    const tk = canvas.app.ticker, [i0, j0, m] = n < 2 || REDUCED_OS?.matches ? [idx, idx, 0] : loopMix(tk.lastTime ? tk.lastTime + (tk.elapsedMS || 0) : t0, ms, n, smoothWater());
+    const blend = m > 0.002 && e.mix;
+    if ( blend ) { const a = e.tex[i0].t, b = e.tex[j0].t; e.sprite.texture = a; e.mix.set(a, b, m, a.width, a.height); }
+    else if ( i0 !== idx ) e.sprite.texture = e.tex[i0].t;
+    if ( e.mix ) e.mix.visible = !!blend;
+    e.sprite.visible = !blend;
   }
-  if ( gone ) wetChanged();
+  // a hole's area replaced under it (a load swaps the groups, e.g. a settled composite hydrating): look for the new ones; before,
+  // the holes stayed dry until the next destruction change
+  if ( gone ) { wetChanged(); scheduleSync(); }
   stats.frameMs = Math.round((now() - t0) * 1000) / 1000;
 }
 
