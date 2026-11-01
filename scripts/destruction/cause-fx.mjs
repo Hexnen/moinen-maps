@@ -343,7 +343,7 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
   if ( !cov?.data ) return;
   const ci = g.info.cause | 0, rc = RIM[ci] ?? RIM[0], tk = TINT[ci] ?? 0, col = [0, 1, 2].map((k) => MOON[k] + (rc[k] - MOON[k]) * tk);
   // (a tear's cover is its whole stroke - mostly lips pulled aside, not damage: lifting all of it showed the stroke as a flat band)
-  const lift = ([0.55, 0.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.52, 0.5][ci] ?? 0.5) * (g.info.type === "gash" ? 0.35 : 1), seed = (g.hash % 9973) | 0;
+  const lift = ([0.7, 0.6, 0.5, 0.5, 0.5, 0.55, 0.55, 0.95, 0.65, 0.5][ci] ?? 0.5) * (g.info.type === "gash" ? 0.5 : 1), seed = (g.hash % 9973) | 0;
   const src = base?.data ? base : cov, w = src.w, h = src.h, data = src.data, ox = base?.data ? bx : x, oy = base?.data ? by : y;
   const inC = (X, Y) => { const cx = X + ox - x, cy = Y + oy - y; return cx >= 0 && cy >= 0 && cx < cov.w && cy < cov.h && cov.data[(cy * cov.w + cx) * 4 + 3] > 0; };
   const al = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h ? data[(Y * w + X) * 4 + 3] : 0;
