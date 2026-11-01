@@ -136,7 +136,11 @@ function statusLine() {
   const n = st.stats;
   const parts = [game.i18n.format("MOINENMAPS.Destr.areas", { n: st.areas.length })];
   if ( n ) parts.push(game.i18n.format("MOINENMAPS.Destr.pieces", { n: n.shards }));
-  parts.push(T(`Destr.src.${st.source || "baked"}`));
+  // where the strokes came from: status.source is "memory" or "chunk 3, baked 1" (destruction.mjs); unknown words are left out
+  for ( const part of (st.source || "").split(",") ) {
+    const [k, n] = part.trim().split(/\s+/);
+    if ( k && game.i18n.has(`MOINENMAPS.Destr.src.${k}`) ) parts.push(game.i18n.format(`MOINENMAPS.Destr.src.${k}`, { n: n ?? "" }));
+  }
   if ( S.baked?.key && st.key === S.baked.key ) parts.push(T("Destr.published"));
   return parts.join(" · ");
 }

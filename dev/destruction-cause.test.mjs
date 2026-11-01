@@ -19,7 +19,7 @@ import { execFileSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = "scripts/destruction";
-export const CAUSE_COMMITS = ["291ebda", "7cd5dcd"];
+export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe"];
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
