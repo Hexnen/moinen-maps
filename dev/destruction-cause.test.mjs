@@ -28,7 +28,7 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   { rev: "8163962", other: /CORE_VERSION|compat:/ },
   // the tear bake's perf rewrite (byte-identical) edited the lines that call the cause kit: taken back out whole
   "206f36e", { rev: "4b2c806", other: /CORE_VERSION|compat:/ }, { rev: "dc0c18f", other: /CORE_VERSION|compat:/ },
-  { rev: "dc94d82", other: /CORE_VERSION|compat:/ }, "f8e22f0", { rev: "2cd003c", other: /CORE_VERSION|compat:/ }, "2a72421"];   // (50458de was reverted in e5714bb and redone as 7115e86)
+  { rev: "dc94d82", other: /CORE_VERSION|compat:/ }, "f8e22f0", { rev: "2cd003c", other: /CORE_VERSION|compat:/ }, "2a72421", { rev: "965441d", other: /CORE_VERSION|compat:/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
