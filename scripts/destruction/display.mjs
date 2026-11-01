@@ -9,6 +9,12 @@ import { MaskedPatch } from "./masked-map.mjs";
 import { perfMode, particleCap } from "../perf-mode.mjs";
 import { Debris } from "./debris.mjs";
 import { buildShell } from "./composite.mjs";
+import { PieceBatch, RectCanvas, RectLayer, batchStats } from "./piece-batch.mjs";
+import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, plainInfo, countSort, clockMask, clockUpper } from "./entry-clock.mjs";
+import { ClockPool } from "./clock-pool.mjs";
+
+/** Entering areas draw their pieces as one batched geometry each (piece-batch.mjs); `CONFIG.moinenMaps.noBatchRender = true`: sprites (A/B). */
+const batchOn = () => !globalThis.CONFIG?.moinenMaps?.noBatchRender;
 
 /** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
 function maskedMap(ms, mask) {
@@ -36,6 +42,7 @@ function maskedMap(ms, mask) {
  */
 const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const PAD = 4;
+const WAIT_MS = 150;   // how long an entry waits for its pixels (waitPixels)
 const NEAREST = 0, LINEAR = 1;
 
 function layer(sortLayer) {
@@ -47,51 +54,49 @@ function layer(sortLayer) {
 }
 
 const easeOut = (t) => 1 - (1 - t) ** 3;
-/** Deterministic hash (0..1) and smooth value noise, for the entry's per-pixel and per-piece timing. */
-function hash2(x, y, s) {
-  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1274126177)) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1103515245); h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-}
-function vnoise(x, y, s) {
-  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
-  const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
 /**
- * vnoise(X / scale, Y / scale, s) over a known box, the same numbers (same lattice hashes, same arithmetic) from a precomputed grid of
- * the lattice hashes: an entry evaluates it for every pixel of its ruin, and the hashes were most of that cost (PERF). Outside the box:
- * vnoise itself.
+ * PERF: a buffer texture that uploads only the rows written since its last upload (an entry's eroding ruin and its covers change a
+ * band of rows per frame; the whole texture went up every frame - a Detonate re-sent ~all of its 30 MPx of ruins each frame).
+ * `mark(y0, y1)` before `baseTexture.update()`; unmarked updates upload it all.
  */
-function latticeNoise(x0, y0, x1, y1, scale, s) {
-  const gx0 = Math.floor(x0 / scale) - 1, gy0 = Math.floor(y0 / scale) - 1;
-  const GW = Math.floor(x1 / scale) - gx0 + 3, GH = Math.floor(y1 / scale) - gy0 + 3;
-  if ( !(GW > 0 && GH > 0) || GW * GH > 4e6 ) return (X, Y) => vnoise(X / scale, Y / scale, s);
-  const G = new Float64Array(GW * GH);
-  for ( let j = 0; j < GH; j++ ) for ( let i = 0; i < GW; i++ ) G[j * GW + i] = hash2(gx0 + i, gy0 + j, s);
-  return (X, Y) => {
-    const x = X / scale, y = Y / scale, xi = Math.floor(x), yi = Math.floor(y), i = xi - gx0, j = yi - gy0;
-    if ( i < 0 || j < 0 || i + 1 >= GW || j + 1 >= GH ) return vnoise(x, y, s);
-    const fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), q = j * GW + i;
-    const a = G[q], b = G[q + 1], c = G[q + GW], d = G[q + GW + 1];
-    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-  };
+class RowResource extends PIXI.BufferResource {
+  /** `o.blank`: the buffer is all zero now - its first upload allocates the texture empty and sends only the rows marked since. */
+  constructor(data, o) { super(data, o); this.y0 = Infinity; this.y1 = -1; this.x0 = Infinity; this.x1 = -1; this.blank = !!o.blank; }
+  /** Rows y0..y1 (and, optionally, columns x0..x1 of them) changed. */
+  mark(y0, y1, x0 = 0, x1 = Infinity) { if ( y0 < this.y0 ) this.y0 = y0; if ( y1 > this.y1 ) this.y1 = y1; if ( x0 < this.x0 ) this.x0 = x0; if ( x1 > this.x1 ) this.x1 = x1; }
+  upload(renderer, bt, gt) {
+    const y0 = this.y0, y1 = this.y1, w = bt.realWidth, h = bt.realHeight, gl = renderer.gl;
+    const x0 = Math.max(0, this.x0), x1 = Math.min(w - 1, this.x1);
+    this.y0 = Infinity; this.y1 = -1; this.x0 = Infinity; this.x1 = -1;
+    if ( this.blank && this.data && !(gt.width === w && gt.height === h) ) {
+      gt.width = w; gt.height = h; this.blank = false;   // (a later re-upload - a lost context - sends it all)
+      gl.texImage2D(bt.target, 0, gt.internalFormat, w, h, 0, bt.format, gt.type, null);
+      if ( y1 < y0 ) return true;
+    } else if ( !(gt.width === w && gt.height === h && y1 >= y0 && this.data) ) return super.upload(renderer, bt, gt);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, this.unpackAlignment);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, bt.alphaMode === PIXI.ALPHA_MODES.UNPACK);
+    if ( x1 - x0 + 1 < w && renderer.context.webGLVersion >= 2 ) {
+      // only the changed columns of those rows (WebGL2 reads the rectangle straight out of the full buffer)
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, w); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, x0);
+      gl.texSubImage2D(bt.target, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1, bt.format, gt.type, this.data.subarray(y0 * w * 4, (y1 + 1) * w * 4));
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0); gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    } else gl.texSubImage2D(bt.target, 0, 0, y0, w, y1 - y0 + 1, bt.format, gt.type, this.data.subarray(y0 * w * 4, (y1 + 1) * w * 4));
+    return true;
+  }
 }
+
+/** The pieces' indices by the moment their life begins (t0 - pre), ties in list order (= a stable sort by that moment). */
+function startOrderOf(list) {
+  const N = list.length, K = new Float64Array(N), o = new Array(N);
+  for ( let k = 0; k < N; k++ ) { K[k] = list[k].t0 - list[k].pre; o[k] = k; }
+  return o.sort((x, y) => (K[x] - K[y]) || (x - y));
+}
+
 const easeIn = (t) => t * t;
 const clamp01 = (t) => t < 0 ? 0 : t > 1 ? 1 : t;
 const lerpColor = (a, b, t) => {
   const r = ((a >> 16) & 255) + ((((b >> 16) & 255) - ((a >> 16) & 255)) * t), g = ((a >> 8) & 255) + ((((b >> 8) & 255) - ((a >> 8) & 255)) * t), bl = (a & 255) + (((b & 255) - (a & 255)) * t);
   return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(bl);
-};
-
-/** Per type: reveal delay and duration (ms at speed 1), how the front runs, piece motion. */
-const LOOK = {
-  blast:    { delay: 70,  reveal: 420, flight: 1,    arc: 1,    order: "out" },
-  collapse: { delay: 200, reveal: 560, flight: 1.1,  arc: 0.35, order: "in" },
-  scorch:   { delay: 0,   reveal: 950, flight: 1.3,  arc: 0.5,  order: "out" },
-  flood:    { delay: 120, reveal: 680, flight: 1.4,  arc: 0.3,  order: "out" },
-  cracks:   { delay: 0,   reveal: 260, flight: 0.8,  arc: 0.6,  order: "out" },
-  gash:     { delay: 40,  reveal: 460, flight: 0.9,  arc: 0.7,  order: "wipe" }
 };
 
 /**
@@ -180,6 +185,7 @@ export class DestructionDisplay {
     this.look = { entry: true, speed: 1, power: 1 };
     this.filter = NEAREST;
     this.stats = { frameMs: 0, sprites: 0, groups: 0, uploads: 0, entries: 0 };
+    this.batchStats = batchStats;   // (piece-batch.mjs counters)
     this.ap = 1; this.origin = { x: 0, y: 0 };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
@@ -220,6 +226,9 @@ export class DestructionDisplay {
         const full = this.build(r, rgba, w, meta);
         full.reused = true; full.info.water = g.info.water;
         if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
+        // (an entry waiting for these pixels, or queued by a Detonate, goes on with the area that replaces the shell)
+        for ( const M of [this.pending, this.enterQueue] ) if ( M?.has(g) ) { const v = M.get(g); M.delete(g); M.set(full, v); }
+        for ( const w of this.pending?.values() ?? [] ) if ( w.opts.under?.includes(g) ) w.opts.under = w.opts.under.map((u) => (u === g ? full : u));
         this.groups.set(r.hash, full); this.kill(g); g = full; replaced++;
         added.push(g);
       } else if ( !g && r.shell ) {
@@ -329,9 +338,10 @@ export class DestructionDisplay {
     if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
     if ( r.cover >= 0 ) {
       // every damage, glowing or not: a rim light on its lips and the lit bevels of its cracks in a dark scene (cause-fx addRim, read
-      // from its cover and its base; nothing by day)
-      const cut = (i) => { const q = rects[i], p = pk.pos[i], out = new Uint8Array(q.w * q.h * 4); for ( let y = 0; y < q.h; y++ ) out.set(buf.subarray(((p.y + y) * pk.W + p.x) * 4, ((p.y + y) * pk.W + p.x + q.w) * 4), y * q.w * 4); return { w: q.w, h: q.h, data: out }; };
-      Cause.addRim(this, g, cut(coverIdx), meta[r.cover + 5], meta[r.cover + 6], cut(0), info.x, info.y);
+      // from its cover and its base; nothing by day). PERF: not in the build - read from the atlas a few areas per frame (rimSlice;
+      // ~10 ms an area: rebuilding the 232 areas of 'map' from their chunks spent ~2 s of one task in it); the atlas is kept until then
+      g.rimArgs = { cover: coverIdx, cx: meta[r.cover + 5], cy: meta[r.cover + 6] };
+      (this.rimQueue ??= []).push(g);
     }
     // its debris: chunk variants cut from its plates (the map under it) and its base, and the few that stay at rest by its rim
     // (sprites at the end of its shard container: part of its settled look, the same on every client)
@@ -349,10 +359,31 @@ export class DestructionDisplay {
    */
   freeAtlas(g) {
     const r = g.tex?.resource;
-    if ( !r?.data || g.atlasFree || g.anim ) return false;
+    // (not while its rim light is still to be read from it, nor while it waits to enter: detonate sets the entries up over frames)
+    if ( !r?.data || g.atlasFree || g.anim || g.rimArgs || this.enterQueue?.has(g) || this.pending?.has(g) ) return false;
     this.stats.atlasFreed = (this.stats.atlasFreed ?? 0) + r.data.byteLength;
     r.data = null; g.atlasFree = true;
     return true;
+  }
+
+  /**
+   * The rim lights of built areas (cause-fx addRim), up to `budget` ms: on-screen areas first; an area flattened meanwhile may let go
+   * of its atlas afterwards (afterFlatten again).
+   */
+  rimSlice(budget, vw) {
+    const Q = this.rimQueue; if ( !Q?.length ) return;
+    const t0 = performance.now(), on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+    if ( Q.length > 1 && !Q.sorted ) { Q.sort((a, b) => on(b) - on(a)); Q.sorted = true; }
+    while ( Q.length && performance.now() - t0 < budget ) {
+      const g = Q.shift(), A = g.atlas, data = g.tex?.resource?.data, R = g.rimArgs;
+      if ( !R || g.dead || !A || !data ) { g.rimArgs = null; continue; }
+      const cut = (i) => { const [w, h] = A.sizes[i], p = A.pos[i], out = new Uint8Array(w * h * 4); for ( let y = 0; y < h; y++ ) out.set(data.subarray(((p.y + y) * A.W + p.x) * 4, ((p.y + y) * A.W + p.x + w) * 4), y * w * 4); return { w, h, data: out }; };
+      Cause.addRim(this, g, cut(R.cover), R.cx, R.cy, cut(0), g.info.x, g.info.y);
+      g.rimArgs = null;
+      this.stats.rims = (this.stats.rims ?? 0) + 1;
+      if ( g.flat ) this.afterFlatten?.(g);
+    }
+    Q.sorted = false;
   }
 
   /** The atlas again from the area's sprites ([base, its shards in order, cover?, light?] as built), exactly as build laid it out. */
@@ -408,6 +439,14 @@ export class DestructionDisplay {
 
   /** An area's shard sprites back to the pool (it is flattened). */
   release(g) {
+    if ( g.batch ) {
+      // batched: the poses go, the geometry back to its pool, the base sprite draws itself again
+      for ( const p of g.pieces ) p.spr = null;
+      if ( !g.batch.destroyed ) { g.batch.parent?.removeChild(g.batch); g.batch.destroy(); }
+      g.batch = null; g.bmode = null; g.madeIdx = []; g.sheetCur = 0;
+      return;
+    }
+    g.bmode = null;
     for ( const p of g.pieces ) {
       const s = p.spr; if ( !s ) continue;
       p.spr = null;
@@ -454,10 +493,7 @@ export class DestructionDisplay {
   materialize(g, n, until = Infinity) {
     const N = g.pieces.length; if ( g.made >= N || n <= 0 ) return 0;
     const a = g.anim, timed = !!(a && !a.tear && a.list?.length === N);
-    if ( timed && !a.startOrder ) {
-      const o = Array.from({ length: N }, (_, k) => k), L = a.list;
-      o.sort((x, y) => (L[x].t0 - L[x].pre) - (L[y].t0 - L[y].pre)); a.startOrder = o; a.matCur = 0;
-    }
+    if ( timed && !a.startOrder ) { a.startOrder = startOrderOf(a.list); a.matCur = 0; }
     let made = 0;
     while ( made < n && g.made < N ) {
       let k;
@@ -475,6 +511,21 @@ export class DestructionDisplay {
 
   makePiece(g, k) {
     const ap = this.ap, org = this.origin, p = g.pieces[k];
+    // BATCHED (piece-batch.mjs): the piece is a quad of its area's one geometry, its pose a PiecePose; the mode is chosen when the
+    // area makes its first piece and kept until it is released (flattened again)
+    g.bmode ??= batchOn() && g.atlas && g.tex ? "batch" : "sprite";
+    if ( g.bmode === "batch" ) {
+      if ( !g.batch || g.batch.destroyed ) {
+        g.batch = new PieceBatch(g.pieces.length, g.tex, g.atlas, g.baseSpr); g.shardCont.addChildAt(g.batch, 0);
+        // an entry's ruin before its first pixel shows nothing: its base quad is not drawn (nor its texture uploaded) until then
+        g.batch.baseBlank = () => { const R = g.anim?.rev; return !!R && !R.shown && g.baseSpr?._texture?.baseTexture === R.tex; };
+      }
+      p.spr = g.batch.make(k, org.x + p.fx * ap, org.y + p.fy * ap, ap);
+      if ( p.fading ) p.spr.alpha = 0;
+      const it = g.anim?.byPiece?.get(p);
+      if ( it ) this.place(p, (performance.now() - it.t0) / it.dur, it, g.info.type);
+      return;
+    }
     // pooled: an area flattened again after its entry gives its shard sprites back (flatten / release)
     const spr = p.spr = this.spritePool.pop() ?? new PIXI.Sprite();
     spr.texture = g.frame(p.frame); spr.visible = true; spr.alpha = 1; spr.tint = 0xFFFFFF; spr.rotation = 0;
@@ -569,23 +620,23 @@ export class DestructionDisplay {
   makeDissolve(data, w, h, x0, y0, timeOf, out = false, lazy = false) {
     if ( lazy ) {   // the clock comes later (clockSlice); nothing shows until then
       const buf = new Uint8Array(w * h * 4);
-      const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: w, height: h }), {
+      const tex = new PIXI.BaseTexture(new RowResource(buf, { width: w, height: h, blank: true }), {
         width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       return { keys: null, next: 0, buf, data, tex, out, end: 0 };
     }
-    const keys = new Float64Array(w * h);
-    let c = 0;
+    const tm = new Int32Array(w * h), ix = new Uint32Array(w * h);
+    let c = 0, tmax = 0;
     for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
       const i = y * w + x; if ( !data[i * 4 + 3] ) continue;
-      keys[c++] = Math.max(0, Math.round(timeOf(x0 + x + 0.5, y0 + y + 0.5))) * 1048576 + i;
+      const v = Math.max(0, Math.round(timeOf(x0 + x + 0.5, y0 + y + 0.5))); tm[c] = v; ix[c++] = i; if ( v > tmax ) tmax = v;
     }
-    const sorted = keys.subarray(0, c).sort();
+    const sorted = countSort(tm, ix, c, tmax);
     const buf = out ? new Uint8Array(data) : new Uint8Array(w * h * 4);
-    const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: w, height: h }), {
+    const tex = new PIXI.BaseTexture(new RowResource(buf, { width: w, height: h, blank: !out }), {
       width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
       format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
-    return { keys: sorted, next: 0, buf, data, tex, out, end: sorted.length ? Math.floor(sorted[sorted.length - 1] / 1048576) : 0 };
+    return { keys: sorted.ix, tms: sorted.tm, next: 0, buf, data, tex, out, end: c ? sorted.tm[c - 1] : 0 };
   }
 
   /**
@@ -601,39 +652,68 @@ export class DestructionDisplay {
       const q = this.clocks[0], { w, h, x0, y0, data, timeOf, dark } = q;
       if ( !q.g.dead && q.g.anim && !on(q) ) return;   // off screen: built when it comes into view (erode waits for it)
       if ( q.g.dead || !q.g.anim || (q.g.anim.rev !== q.R && q.g.anim.crev !== q.R) ) { this.clocks.shift(); continue; }   // ended or replaced
-      q.keys ??= new Float64Array(w * h);
-      const keys = q.keys;
+      // PERF: each pixel's moment (whole ms) and index in pixel order, then a counting sort by moment (stable: ties stay in pixel
+      // order) - the same keys as sorting (moment << 20 | pixel), in linear time (the sort was ~40% of building a clock)
+      q.tm ??= new Int32Array(w * h); q.ix ??= new Uint32Array(w * h);
+      const tm = q.tm, ix = q.ix;
       for ( ; q.y < h; q.y++ ) {
         const y = q.y;
         for ( let x = 0; x < w; x++ ) {
           const i = y * w + x, p = i * 4; if ( !data[p + 3] ) continue;
           let t = timeOf(x0 + x + 0.5, y0 + y + 0.5);
           if ( dark && data[p] + data[p + 1] + data[p + 2] < 150 ) t -= dark;
-          keys[q.c++] = Math.max(0, Math.round(t)) * 1048576 + i;
+          const v = Math.max(0, Math.round(t));
+          tm[q.c] = v; ix[q.c++] = i; if ( v > (q.tmax ?? 0) ) q.tmax = v;
         }
         if ( (y & 7) === 7 && performance.now() - t0 > budget ) { q.y++; return; }
       }
-      const sorted = keys.subarray(0, q.c).sort();
-      q.R.keys = sorted;
-      if ( q.R.end !== undefined ) q.R.end = sorted.length ? Math.floor(sorted[sorted.length - 1] / 1048576) : 0;
+      const sorted = countSort(tm, ix, q.c, q.tmax ?? 0);
+      q.tm = q.ix = null;
+      q.R.keys = sorted.ix; q.R.tms = sorted.tm;
+      if ( q.R.end !== undefined ) q.R.end = q.c ? sorted.tm[q.c - 1] : 0;
       this.clocks.shift();
       this.stats.clocks = (this.stats.clocks ?? 0) + 1;
       if ( performance.now() - t0 > budget ) return;
     }
   }
 
+  /**
+   * An entry's clocks (its ruin's and its cover's): to the clock workers when they are there (the same clock code, entry-clock.mjs: the
+   * same keys), else - or when a worker fails - built here a slice per frame (clockSlice). `local`: here anyway.
+   */
+  clockJobs(list, spec, local = false) {
+    if ( local || !ClockPool.available() || this.clockPool?.broken ) { this.clocks.push(...list); return; }
+    const pool = this.clockPool ??= new ClockPool();
+    const jobs = list.map((q) => ({ mask: clockMask(q.data, q.w, q.h, q.dark > 0), w: q.w, h: q.h, x0: q.x0, y0: q.y0, dark: q.dark }));
+    const t = performance.now();
+    pool.run(spec, jobs).then((keys) => {
+      list.forEach((q, i) => {
+        const a = q.g.anim; if ( q.g.dead || !a || (a.rev !== q.R && a.crev !== q.R) ) return;   // ended or replaced meanwhile
+        const k = keys[i]; q.R.keys = k.ix; q.R.tms = k.tm;
+        if ( q.R.end !== undefined ) q.R.end = k.tm.length ? k.tm[k.tm.length - 1] : 0;
+        this.stats.clocks = (this.stats.clocks ?? 0) + 1;
+      });
+      this.stats.clockWorkerMs = Math.round(performance.now() - t);
+    }, (err) => {
+      console.warn("moinen-maps | destruction: clock worker failed, clocks made on the page", err);
+      this.clocks.push(...list.filter((q) => !q.g.dead && q.g.anim && (q.g.anim.rev === q.R || q.g.anim.crev === q.R)));
+    });
+  }
+
   /** Advance a dissolve to `rel` ms; true while it is not finished. */
   stepDissolve(D, rel) {
     if ( !D.keys ) return true;
-    const lim = (Math.max(0, rel) + 1) * 1048576, keys = D.keys, buf = D.buf, data = D.data;
+    const lim = (Math.max(0, rel) + 1) * 1048576, keys = D.keys, tms = D.tms, buf = D.buf, data = D.data;
     let n = 0;
-    while ( D.next < keys.length && keys[D.next] < lim ) {
-      const q = (keys[D.next] % 1048576) * 4;
+    let lo = Infinity, hi = -1;
+    while ( D.next < keys.length && tms[D.next] * 1048576 + keys[D.next] < lim ) {
+      const px = keys[D.next], q = px * 4;
+      if ( px < lo ) lo = px; if ( px > hi ) hi = px;
       if ( D.out ) buf[q + 3] = buf[q] = buf[q + 1] = buf[q + 2] = 0;
       else { buf[q] = data[q]; buf[q + 1] = data[q + 1]; buf[q + 2] = data[q + 2]; buf[q + 3] = data[q + 3]; }
       D.next++; n++;
     }
-    if ( n ) D.tex.update();
+    if ( n ) { const W = D.tex.realWidth; D.tex.resource.mark?.(Math.floor(lo / W), Math.floor(hi / W)); D.tex.update(); D.shown = true; }
     return D.next < keys.length;
   }
 
@@ -694,10 +774,16 @@ export class DestructionDisplay {
    * front runs along the brush path at the drawing speed.
    */
   enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null } = {}) {
+    this.enterQueue?.delete(g);
     this.endAnim(g);
     const now = performance.now();
-    // (an area shown from the composite or without its atlas: no pixels to play an entry with - shown as it lies)
-    if ( g.shell || g.atlasFree || under.some((u) => u.shell || u.atlasFree) ) { for ( const u of under ) u.heldBy = null; this.stats.noPixelEntries = (this.stats.noPixelEntries ?? 0) + 1; return; }
+    // an area shown from the composite or without its atlas has no pixels to play an entry with: they are asked for (pixelSource,
+    // destruction.mjs) and the entry waits up to WAIT_MS for them (waitPixels); without a source it is shown as it lies
+    if ( g.shell || g.atlasFree || under.some((u) => u.shell || u.atlasFree) ) {
+      const pm = perfMode(), playable = this.look.entry && !reducedMotion() && pm !== "low" && this.onScreen(g, pm === "medium" ? 0 : 0.5);
+      if ( this.pixelSource && playable && !arguments[1]?.noWait ) { this.waitPixels(g, { ...(arguments[1] ?? {}), start }); return; }
+      for ( const u of under ) u.heldBy = null; this.stats.noPixelEntries = (this.stats.noPixelEntries ?? 0) + 1; return;
+    }
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
     // an area far off screen is simply there (an entry nobody sees is not simulated: on a Detonate of every area that was most of
     // the cost); the view grown by half of it on every side (strictly the view in performance mode Medium); Low: a short fade
@@ -707,61 +793,41 @@ export class DestructionDisplay {
     if ( g.flat ) this.unflatten(g);
     // an older look held under this one: its shards are caught by the front (tick), so they must exist
     for ( const u of under ) if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); }
-    // the cause tunes the clock on top of the kind's (cause-fx.mjs): rot creeps, lightning strikes, arcane spirals
-    const CL = Cause.causeLook(g.info.cause);
-    const info = g.info, L = LOOK[info.type] ?? LOOK.blast, k = (1 / (this.look.speed || 1)) * (CL?.slow ?? 1), pw = this.look.power;
-    const ox = o?.[0] ?? info.ex, oy = o?.[1] ?? info.ey;
+    // the entry's clock (entry-clock.mjs, shared with the clock worker): the kind's, tuned by the cause (rot creeps, lightning
+    // strikes, arcane spirals); a tear's and a cave-in's own
+    const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (this.look.speed || 1)) * (Cause.causeLook(info.cause)?.slow ?? 1));
+    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: this.look.speed, pathFront });
+    const { CL, L, k, ox, oy, Rmax, tear, seed, noise } = C;
     const r = info.rect;
-    let wipe = null;
-    const d = dir && Math.hypot(dir[0], dir[1]) > 0.1 ? [dir[0] / Math.hypot(dir[0], dir[1]), dir[1] / Math.hypot(dir[0], dir[1])] : null;
-    if ( d ) {
-      const proj = [[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => (x - ox) * d[0] + (y - oy) * d[1]);
-      wipe = { u: d, p0: Math.min(...proj, 0) - 2, p1: Math.max(...proj) + 2 };
-    }
-    const Rmax = Math.max(...[[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => Math.hypot(x - ox, y - oy))) + 2;
-    const pathFront = this.pathFront(path, g, k);
-    // a tear has its own clock (tear-entry.mjs): a pinprick, then a fast front both ways along its spine on a narrow band
-    const tear = info.type === "gash" ? tearClock(info, { pathFront, spine, k }) : null;
     // a cave-in has its own clock too (collapse-entry.mjs): anticipation, then the rings slump from the rim inwards
     const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront }) : null;
-    const delay = coll ? coll.delay : tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
-    const reveal = coll ? coll.reveal : tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-    const band = coll ? coll.band : tear ? tear.band : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
-    const front = (x, y) => {   // 0..1: when the front reaches (x, y)
-      if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
-      // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
-      if ( L.order === "in" ) return 1 - clamp01(Math.hypot(x - ox, y - oy) / (Math.max(6, info.R) + 3));
-      return clamp01(Math.hypot(x - ox, y - oy) / Rmax);
-    };
-    // the front's arrival at a point (ms after start)
-    const arrive = coll ? coll.arrive : tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y)
-      : CL ? (x, y) => delay + reveal * CL.curve(front(x, y), Math.atan2(y - oy, x - ox)) * 0.85
-      : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
-    const seed = g.hash % 9973;
-    // 0..1, smooth: vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35, from lattice grids over the area
-    const n7 = latticeNoise(r.x0, r.y0, r.x1, r.y1, 7, seed), n26 = latticeNoise(r.x0, r.y0, r.x1, r.y1, 2.6, seed + 17);
-    const noise = (x, y) => n7(x, y) * 0.65 + n26(x, y) * 0.35;
-    // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
-    // so the ruin and the cover of the same pixel share it)
-    const pixelTime = coll ? coll.pixelTime : (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
+    const wipe = C.wipe;
+    const delay = coll ? coll.delay : C.delay, reveal = coll ? coll.reveal : C.reveal, band = coll ? coll.band : C.band;
+    const arrive = coll ? coll.arrive : C.arrive;
+    const pixelTime = coll ? coll.pixelTime : C.pixelTime;
+    // what the clock worker needs to make the same clock (clock-worker.mjs)
+    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: this.look.speed, coll: null };
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
     // the start of an entry anyway)
     let rev = null;
+    const clockJobs = [];
     const bd = this.baseOf(g);
     if ( bd ) {
       const bw = info.w, bh = info.h;
       const buf = new Uint8Array(bw * bh * 4);
-      const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: bw, height: bh }), {
+      const tex = new PIXI.BaseTexture(new RowResource(buf, { width: bw, height: bh, blank: true }), {
         width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       const stages = coll ? coll.stages : (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s, si) => ({ dt: s.dt * k,
         col: s.col && CL?.stain != null ? (r, g, b) => mixP(r, g, b, CL.stain, si ? 0.3 : 0.6) : s.col ?? null }));
       rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
       g.baseSpr.texture = new PIXI.Texture(tex);
+      // PERF: a blank ruin draws nothing - not drawn (its texture not even allocated on the GPU) until its first pixel (erode)
+      if ( !g.batch?.folded ) g.baseSpr.renderable = false;
       // (dark: cracks and inked lips first)
-      this.clocks.push({ g, R: rev, w: bw, h: bh, x0: info.x, y0: info.y, data: bd, timeOf: pixelTime, dark: band * 0.4, y: 0, c: 0, keys: null });
+      clockJobs.push({ g, R: rev, w: bw, h: bh, x0: info.x, y0: info.y, data: bd, timeOf: pixelTime, dark: band * 0.4, y: 0, c: 0, keys: null });
     }
     // the cover over older strokes (the plain map under this stroke's own pixels) dissolves in on the same clock: at every pixel the
     // older damage stays until this stroke's ruin takes its place, never old -> clean map -> new
@@ -774,8 +840,21 @@ export class DestructionDisplay {
         for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
         crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true);
         crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
-        this.clocks.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null });
+        g.patch.renderable = false;      // (blank: nothing to draw until its first pixel, see erode)
+        clockJobs.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null });
       }
+    }
+    // the clocks: made by the clock workers (clock-pool.mjs, the same code) or here, a slice per frame (clockSlice)
+    if ( clockJobs.length ) {
+      if ( coll ) {
+        const cf = g.coverFrame, fr = cf?.tex?.frame, data = g.tex?.resource?.data, TW = g.tex?.width;
+        if ( fr && data && TW ) {
+          const mask = new Uint8Array(fr.width * fr.height);
+          for ( let y = 0; y < fr.height; y++ ) for ( let x = 0; x < fr.width; x++ ) if ( data[((fr.y + y) * TW + fr.x + x) * 4 + 3] ) mask[y * fr.width + x] = 1;
+          spec.coll = { mask, fw: fr.width, fh: fr.height, cx: cf.x, cy: cf.y };
+        }
+      }
+      this.clockJobs(clockJobs, spec, !!coll && !spec.coll);
     }
     // 2. the pieces' lives
     const list = [], byPiece = new Map();
@@ -807,6 +886,50 @@ export class DestructionDisplay {
     this.stats.entries++;
   }
 
+  /**
+   * PIXELS BEFORE AN ENTRY: an area (or an older look held under it) without its pixels - a shell of the settled composite, an atlas
+   * let go after flatten - waits up to WAIT_MS for them: they are asked for in one batch per frame (`pixelSource(groups)` ->
+   * Promise<Map(group -> its sprites as display.build laid them out)>, destruction.mjs; a shell is refilled in place, its group
+   * replaced by sync), atlases are rebuilt a few per frame (restoreSlice), and the entry starts as soon as everything is there, on its
+   * original clock (what was due meanwhile is shown in its pose of now). Not in time: the area fades in where it lies (a short fade).
+   */
+  waitPixels(g, opts) {
+    const P = this.pending ??= new Map();
+    if ( !P.has(g) ) P.set(g, { opts, deadline: performance.now() + WAIT_MS });
+    const ask = this.pixelAsks ??= new Set();
+    for ( const x of [g, ...(opts.under ?? [])] ) if ( x.shell || x.atlasFree ) ask.add(x);
+    this.stats.waits = (this.stats.waits ?? 0) + 1;
+  }
+
+  /** Asks for the pixels waited for (once per frame), rebuilds atlases (~`budget` ms), starts or gives up the waiting entries. */
+  pixelsSlice(now, budget) {
+    const A = this.pixelAsks;
+    if ( A?.size && this.pixelSource ) {
+      const list = [...A].filter((x) => !x.dead && !x.asked); A.clear();
+      for ( const x of list ) x.asked = true;
+      if ( list.length ) Promise.resolve(this.pixelSource(list)).then((got) => {
+        for ( const [x, sprites] of got ?? [] ) if ( !x.dead && x.atlasFree && sprites?.length ) (this.restoreQ ??= []).push({ g: x, sprites });
+      }, (err) => console.warn("moinen-maps | destruction: pixels for an entry", err)).finally(() => { for ( const x of list ) x.asked = false; });
+    }
+    const Q = this.restoreQ, t0 = performance.now();
+    while ( Q?.length && performance.now() - t0 < budget ) {
+      const { g, sprites } = Q.shift();
+      if ( !g.dead && this.restoreAtlas(g, sprites) ) this.stats.restored = (this.stats.restored ?? 0) + 1;
+    }
+    const P = this.pending; if ( !P?.size ) return;
+    for ( const [g, w] of P ) {
+      const under = w.opts.under ?? [], all = [g, ...under];
+      if ( g.dead || this.groups.get(g.hash) !== g ) { P.delete(g); continue; }
+      if ( all.every((x) => !x.shell && !x.atlasFree) ) { P.delete(g); this.enter(g, { ...w.opts, noWait: true }); this.stats.waitedIn = (this.stats.waitedIn ?? 0) + 1; continue; }
+      if ( now < w.deadline ) continue;
+      // not in time: shown where it lies, fading in (the older look under it goes as usual)
+      P.delete(g);
+      for ( const u of under ) u.heldBy = null;
+      if ( this.look.entry ) { g.fade = { start: now, dur: 280 }; this.applyFade(g, now); }
+      this.stats.noPixelEntries = (this.stats.noPixelEntries ?? 0) + 1;
+    }
+  }
+
   /** The ruin's own pixels (its frame of the group's atlas buffer). */
   baseOf(g) {
     const data = g.tex?.resource?.data, fr = (g.anim?.rev?.frame ?? g.baseTex ?? g.baseSpr?.texture)?.frame, W = g.tex?.width;
@@ -833,37 +956,14 @@ export class DestructionDisplay {
    * plus a little per pixel away from the path). Short taps return null (radial entry).
    */
   pathFront(path, g, k) {
-    if ( !path || path.length < 2 ) return null;
-    const pts = path.map((q) => [q[0], q[1]]);
-    let len = 0; const cum = [0];
-    for ( let i = 1; i < pts.length; i++ ) { len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); cum.push(len); }
-    if ( len < 12 ) return null;   // a tap: radial
-    const T = path[path.length - 1][2] || 0;
-    const D = Math.min(2200, Math.max(350, T || len * 6)) * k;
-    const tt = path.map((q, i) => T > 0 ? (q[2] || 0) / T * D : cum[i] / len * D);
-    const near = (x, y) => {
-      let bd = Infinity, bt = 0;
-      for ( let i = 1; i < pts.length; i++ ) {
-        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], sx = x1 - x0, sy = y1 - y0, l2 = sx * sx + sy * sy || 1;
-        const t = clamp01(((x - x0) * sx + (y - y0) * sy) / l2), d = (x - x0 - sx * t) ** 2 + (y - y0 - sy * t) ** 2;
-        if ( d < bd ) { bd = d; bt = tt[i - 1] + (tt[i] - tt[i - 1]) * t; }
-      }
-      return [Math.sqrt(bd), bt];
-    };
+    const P = pathTimes(path, k); if ( !P ) return null;
     let wr = 6, cover = 0;
-    for ( const p of g.pieces ) { const [d] = near(p.sx, p.sy); if ( d + 6 > wr ) wr = Math.min(d + 6, 80); }
+    for ( const p of g.pieces ) { const [d] = P.near(p.sx, p.sy); if ( d + 6 > wr ) wr = Math.min(d + 6, 80); }
     // how far the ruin reaches from the path at most (halo, torn lobes): after the run the discs grow to it, never a square pop
     const r = g.info.rect;
-    for ( let x = r.x0; x <= r.x1; x += 6 ) for ( const y of [r.y0, r.y1] ) cover = Math.max(cover, near(x, y)[0]);
-    for ( let y = r.y0; y <= r.y1; y += 6 ) for ( const x of [r.x0, r.x1] ) cover = Math.max(cover, near(x, y)[0]);
-    const head = (el) => {
-      for ( let i = 1; i < pts.length; i++ ) if ( tt[i] >= el ) {
-        const f = (el - tt[i - 1]) / ((tt[i] - tt[i - 1]) || 1);
-        return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f, pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]];
-      }
-      return null;
-    };
-    return { pts, tt, D, wr, cover: Math.max(wr, cover + 4), head, at: (x, y) => { const [d, t] = near(x, y); return t + d * 4 * k; } };
+    for ( let x = r.x0; x <= r.x1; x += 6 ) for ( const y of [r.y0, r.y1] ) cover = Math.max(cover, P.near(x, y)[0]);
+    for ( let y = r.y0; y <= r.y1; y += 6 ) for ( const x of [r.x0, r.x1] ) cover = Math.max(cover, P.near(x, y)[0]);
+    return Object.assign(P, { wr, cover: Math.max(wr, cover + 4) });
   }
 
   /** What rides on the head of a followed stroke: rolling explosions, a fire front, water surging in behind, a cave-in, a racing fracture, a claw. */
@@ -930,8 +1030,29 @@ export class DestructionDisplay {
     for ( const u of under ) u.heldBy = g;
   }
 
-  /** Everything enters again (Detonate), from each area's own impact. */
-  detonate(start) { for ( const g of this.order ) this.enter(g, { start }); }
+  /**
+   * Everything enters again (Detonate), from each area's own impact. PERF: the entries are set up a slice per frame (~8 ms: areas on
+   * screen first), not all in the call - 258 areas of 'map' took ~300 ms before the first frame; each keeps the shared start (one set
+   * up a few frames late catches up: its first ~70-200 ms show nothing anyway). `CONFIG.moinenMaps.enterAtOnce = true`: all at once.
+   */
+  detonate(start) {
+    if ( globalThis.CONFIG?.moinenMaps?.enterAtOnce ) { for ( const g of this.order ) this.enter(g, { start }); return; }
+    const vw = this.view(), on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+    const list = this.order.map((g, i) => ({ g, i, on: on(g) })).sort((a, b) => (b.on - a.on) || (a.i - b.i));
+    this.enterQueue = new Map(list.map((q) => [q.g, { start }]));
+    this.drainEnters(performance.now(), 8);
+  }
+
+  /** Set up queued entries (detonate) for up to `budget` ms. */
+  drainEnters(t0, budget) {
+    const Q = this.enterQueue; if ( !Q?.size ) return;
+    for ( const [g, o] of Q ) {
+      if ( performance.now() - t0 > budget ) return;
+      Q.delete(g);
+      if ( g.dead || this.groups.get(g.hash) !== g ) continue;
+      this.enter(g, o);
+    }
+  }
 
   endAnim(g) {
     const a = g.anim; if ( !a ) return;
@@ -943,12 +1064,13 @@ export class DestructionDisplay {
     if ( !g.dead ) g.reflatAt = performance.now() + 900;    // back to one sprite after the cache has settled (static-cache SETTLE_MS)
     if ( a.rev ) {
       // the ruin in full: back to its frame of the atlas
-      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); }
+      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); if ( !g.batch?.folded ) g.baseSpr.renderable = true; }
       a.rev.tex.destroy();
     }
     if ( a.crev ) {
       const pm = g.patch?.children?.[1];
       if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; t.destroy(false); }
+      if ( g.patch && !g.patch.destroyed ) g.patch.renderable = true;
       a.crev.tex.destroy();
     }
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
@@ -961,27 +1083,54 @@ export class DestructionDisplay {
    * Erode the ruin up to `now`: every pixel whose moment has come is copied in; a few of them shed the type's particles, so the
    * dissolving edge itself carries the dust, embers, spray or sparks. One upload per frame, only while something changed.
    */
-  erode(g, a, now, onScreen) {
-    if ( a.crev ) this.stepDissolve(a.crev, now - a.start);
+  erode(g, a, now, onScreen, maxPx = Infinity) {
+    if ( a.crev ) { this.stepDissolve(a.crev, now - a.start); if ( a.crev.shown && g.patch && !g.patch.renderable ) g.patch.renderable = true; }
     const R = a.rev; if ( !R || !R.keys || R.next >= R.keys.length ) return;
     // the FRONT's signature: a pixel passes through the kind's stages before it settles (FRONT below): burning pixels flare
     // yellow, glow orange and cool to char; water arrives as foam; a cave-in darkens as it sinks; a blast scorches pale-hot. Every
     // stage is a cursor over the same sorted clock, so the stages trail the front as bands of a fixed width in time
     const S = R.stages, keys = R.keys, buf = R.buf, data = R.data, el = now - a.start, last = S.length - 1;
     const every = Math.max(9, Math.round(keys.length / 140)), shedMax = a.type === "scorch" ? 2 : a.type === "flood" ? 1 : 4;
-    let n = 0, shed = 0;
+    // PERF: every stage's new cursor first (binary search), then each pixel written ONCE with the colour of the latest stage it
+    // reached - the last stage first, an earlier stage only for pixels a later one did not reach this frame (a clock that comes in
+    // late caught up through every stage of every pixel; same pixels as stage by stage)
+    let n = 0, shed = 0, lo = Infinity, hi = -1, cx0 = Infinity, cx1 = -1;
+    const nc = R.nc ??= new Float64Array(S.length), N = keys.length, W = R.w;
+    // PERF: at most `maxPx` pixels newly reached this frame (the display's per-frame budget, shared by the eroding areas): when more
+    // are due - a whole-scene Detonate, a clock that came in late - the ruin is shown as it was a few ms earlier and catches up over
+    // the next frames instead of one long frame
+    let elE = el;
+    const tms = R.tms, CK = { ix: keys, tm: tms };
+    if ( R.cur[0] + maxPx < N && tms[R.cur[0] + maxPx] * 1048576 + keys[R.cur[0] + maxPx] < (Math.max(0, el - S[0].dt) + 1) * 1048576 ) {
+      elE = Math.min(el, Math.max((R.elDone ?? -1) + 1, tms[R.cur[0] + maxPx] - 1 + S[0].dt));
+      this.stats.erodeLag = (this.stats.erodeLag ?? 0) + 1;
+    }
+    R.elDone = elE;
     for ( let s = 0; s <= last; s++ ) {
-      const lim = (Math.max(0, el - S[s].dt) + 1) * 1048576, st = S[s].col;
-      while ( R.cur[s] < keys.length && keys[R.cur[s]] < lim ) {
-        const i = keys[R.cur[s]] % 1048576, q = i * 4;
+      const lim = (Math.max(0, elE - S[s].dt) + 1) * 1048576;
+      nc[s] = clockUpper(CK, R.cur[s], lim);
+    }
+    for ( let s = last; s >= 0; s-- ) {
+      const st = S[s].col, to = nc[s], from = s < last ? Math.max(R.cur[s], nc[s + 1]) : R.cur[s];
+      for ( let j = from; j < to; j++ ) {
+        const i = keys[j], q = i * 4, cx = i % W;
+        if ( i < lo ) lo = i; if ( i > hi ) hi = i; if ( cx < cx0 ) cx0 = cx; if ( cx > cx1 ) cx1 = cx;
         if ( st && data[q + 3] === 255 ) { const c = st(data[q], data[q + 1], data[q + 2], i); buf[q] = c >> 16; buf[q + 1] = (c >> 8) & 255; buf[q + 2] = c & 255; buf[q + 3] = 255; }
         else { buf[q] = data[q]; buf[q + 1] = data[q + 1]; buf[q + 2] = data[q + 2]; buf[q + 3] = data[q + 3]; }
-        if ( s === 0 && onScreen && (R.cur[0] % every) === 0 && shed < shedMax ) { shed++; this.edgeParticle(g, a, g.info.x + (i % R.w), g.info.y + Math.floor(i / R.w), now); }
-        R.cur[s]++; n++;
+        n++;
       }
     }
+    // the edge's particles: pixels passing the first stage at every `every`-th place of the clock (as before)
+    if ( onScreen ) for ( let j = Math.ceil(R.cur[0] / every) * every; j < nc[0] && shed < shedMax; j += every ) {
+      shed++; const i = keys[j]; this.edgeParticle(g, a, g.info.x + (i % R.w), g.info.y + Math.floor(i / R.w), now);
+    }
+    for ( let s = 0; s <= last; s++ ) R.cur[s] = nc[s];
     R.next = R.cur[last];
-    if ( n ) R.tex.update();
+    return n;
+    if ( n ) {
+      R.tex.resource.mark?.(Math.floor(lo / W), Math.floor(hi / W), cx0, cx1); R.tex.update();
+      if ( !R.shown ) { R.shown = true; if ( g.baseSpr && !g.batch?.folded ) g.baseSpr.renderable = true; }
+    }
   }
 
   /** What the dissolving edge sheds, by type. */
@@ -1050,7 +1199,24 @@ export class DestructionDisplay {
   /* ---------------------------------------------------------------- particles (pooled) */
 
   /** A pooled pixel canvas for an accent (ring, flash, bolt...): art pixels as sprites in the fx layer (pixel-fx.mjs). */
-  pixelCanvas() { const c = new PixelCanvas(this.fx, this.pxPool ??= []); c.clip = this.sceneRect(); c.stats = this.stats; return c; }
+  pixelCanvas() {
+    // batched (piece-batch.mjs RectLayer: one geometry for every accent's art pixels); `noBatchRender`: pooled sprites (A/B)
+    const c = batchOn() ? new RectCanvas(this.rects ??= this.fx.addChild(new RectLayer())) : new PixelCanvas(this.fx, this.pxPool ??= []);
+    c.clip = this.sceneRect(); c.stats = this.stats; return c;
+  }
+
+  /**
+   * The sprite path's pooled pixel sprites (noBatchRender) stay children of the fx layer; a whole-scene Detonate left ~0.8 M of them
+   * there, walked by the scene graph every frame at rest. Once nothing enters, the pool is cut to 4096 (one O(n) rebuild of the list).
+   */
+  trimPixelPool() {
+    const P = this.pxPool; if ( !P || P.length <= 4096 || this.order.some((g) => g.anim) ) return;
+    const drop = new Set(P.splice(4096));
+    const keep = this.fx.children.filter((c) => !drop.has(c));
+    this.fx.removeChildren();
+    for ( const s of drop ) if ( !s.destroyed ) s.destroy();
+    if ( keep.length ) this.fx.addChild(...keep);
+  }
 
   /** The scene's rectangle (canvas px): nothing runtime is drawn past it (debris may leave the map, it is not rendered there). */
   sceneRect() { const r = canvas.dimensions?.sceneRect; return r ? { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height } : null; }
@@ -1131,22 +1297,38 @@ export class DestructionDisplay {
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
     const vw = this.view();
+    const T = this.stats.parts ??= {}; let tp = performance.now();
+    const lap = (k) => { const t = performance.now(); T[k] = t - tp; tp = t; };   // (the tick's parts, ms: stats.parts)
+    lap("pre");
     // entering areas first and faster (a flattened area makes its shards when it enters: they must exist before the front reaches them)
-    let budget = 350;
+    // (batched pieces cost a few array writes each: many more per frame)
+    const bat = batchOn();
+    let budget = bat ? 4000 : 350;
     const need = this.order.filter((g) => g.anim && g.made < g.pieces.length);
     if ( need.length ) {
-      budget = 2500;
+      budget = bat ? 30000 : 2500;
       const share = Math.max(40, Math.floor(budget / need.length));     // every entering area its earliest pieces first
       for ( const g of need ) if ( budget > 0 ) budget -= this.materialize(g, Math.min(share, budget));
       for ( const g of need ) if ( budget > 0 ) budget -= this.materialize(g, budget);
     }
     for ( const g of this.order ) if ( budget > 0 && g.made < g.pieces.length ) budget -= this.materialize(g, budget);
+    lap("materialize");
+    if ( this.enterQueue?.size ) this.drainEnters(t0, 8);
+    if ( this.pending?.size || this.pixelAsks?.size || this.restoreQ?.length ) this.pixelsSlice(t0, 4);
+    lap("enter");
+    if ( bat ) this.uploadAhead(t0, vw);
     if ( this.clocks.length ) this.clockSlice(6, vw);
+    lap("clocks");
+    // rim lights: a little per frame by day, more in a dark scene (where they show)
+    if ( this.rimQueue?.length ) this.rimSlice((canvas.environment?.darknessLevel ?? 0) >= 0.45 ? 8 : 3, vw);
     this.reflatten(t0);
+    lap("reflatten");
+    this._erodeLeft = globalThis.CONFIG?.moinenMaps?.erodeBudget ?? 50000;   // pixels the eroding ruins may take in this frame
     for ( const g of this.order ) {
       if ( g.fade ) this.applyFade(g, t0);
       if ( g.anim ) this.animate(g, t0, vw);
     }
+    lap("animate");
     // erase strokes dissolving in or out
     for ( const [id, e] of this.erasers ) {
       if ( e.dis && !this.stepDissolve(e.dis, t0 - e.disStart) ) {
@@ -1182,9 +1364,14 @@ export class DestructionDisplay {
       g.cont.alpha = 1 - f;
       if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); }
     }
+    lap("erase+dying");
+    this.trimPixelPool();
     this.idleTick(t0, vw);
+    lap("idle");
     Cause.tickLights(this, t0);
+    lap("lights");
     this.debris.tick(t0, vw);
+    lap("debris");
     // particles: crisp art-pixel steps, fading by pixel dropout rather than soft alpha
     const ap = this.ap, o = this.origin;
     for ( let i = this.particles.length - 1; i >= 0; i-- ) {
@@ -1199,10 +1386,35 @@ export class DestructionDisplay {
       if ( !this.inScene(X, Y) ) { this.stats.culled = (this.stats.culled ?? 0) + 1; q.spr.visible = false; this.pool.push(q.spr); this.particles[i] = this.particles[this.particles.length - 1]; this.particles.pop(); continue; }
       q.spr.position.set(X, Y);
     }
+    lap("particles");
     const tc = performance.now();
     this.cache?.update();
     this.stats.cacheMs = performance.now() - tc;
     this.stats.frameMs = performance.now() - t0;
+  }
+
+  /**
+   * PERF: the atlases of entering areas go to the GPU a few per frame (~3 ms; at least one), on-screen areas and the earliest pieces
+   * first - drawn on demand, a Detonate uploaded every atlas (~65 MPx) in its first frame. A piece whose atlas is not there yet waits
+   * (piece-batch.mjs); a single entry's atlas goes up in its first frame. `CONFIG.moinenMaps.atlasNow = true`: on demand (A/B).
+   */
+  uploadAhead(t0, vw) {
+    const R = canvas.app?.renderer; if ( !R?.texture ) return;
+    let list = null;
+    for ( const g of this.order ) {
+      const b = g.batch; if ( !g.anim || !b || b.destroyed || b.atlasReady(R) ) continue;
+      (list ??= []).push(g);
+    }
+    if ( !list ) return;
+    const on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+    const first = (g) => { const a = g.anim, it = a.startOrder ? a.list[a.startOrder[0]] : null; return it ? it.t0 - it.pre : a.start; };
+    list.sort((a, b) => (on(b) - on(a)) || (first(a) - first(b)));
+    const ts = performance.now();
+    for ( const g of list ) {
+      if ( performance.now() - ts > 3 ) break;
+      R.texture.bind(g.tex, 0);
+      this.stats.atlasAhead = (this.stats.atlasAhead ?? 0) + 1;
+    }
   }
 
   applyFade(g, now) {
@@ -1217,7 +1429,9 @@ export class DestructionDisplay {
     if ( now > a.end ) { this.endAnim(g); return; }
     const el = now - a.start, ap = this.ap;
     this._owner = g;
-    if ( onScreen ) this.erode(g, a, now, onScreen);   // off screen nothing is uploaded; back on screen it catches up, or endAnim shows it whole
+    if ( onScreen ) {
+      this._erodeLeft = Math.max(0, this._erodeLeft - (this.erode(g, a, now, onScreen, Math.max(4000, this._erodeLeft)) ?? 0));
+    }   // off screen nothing is uploaded; back on screen it catches up, or endAnim shows it whole
     // collapse: the ground trembles before it gives
     if ( type === "collapse" ) {
       const j = el < a.delay ? (((Math.floor(el / 45) & 1) ? 1 : -1) * ap) : 0;
@@ -1332,7 +1546,8 @@ export class DestructionDisplay {
    */
   livesActive(a, now, onScreen, type) {
     if ( !a.byStart ) {
-      a.byStart = a.list.slice().sort((p, q) => (p.t0 - p.pre) - (q.t0 - q.pre)); a.nextStart = 0; a.act = [];
+      a.startOrder ??= startOrderOf(a.list);
+      a.byStart = a.startOrder.map((k) => a.list[k]); a.nextStart = 0; a.act = [];
       a.busyUntil = a.list.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);   // = some piece has t < 1 + 400 / dur
     }
     const B = a.byStart, act = a.act;
@@ -1496,6 +1711,7 @@ export class DestructionDisplay {
   }
 
   clear() {
+    this.enterQueue?.clear(); this.pending?.clear(); this.pixelAsks?.clear(); if ( this.restoreQ ) this.restoreQ.length = 0;
     for ( const g of [...this.groups.values(), ...this.dying, ...this.spare.values()] ) this.kill(g);
     for ( const e of this.erasers.values() ) this.killEraser(e);
     this.groups.clear(); this.spare.clear(); this.erasers.clear(); this.order = []; this.dying = [];
@@ -1508,6 +1724,7 @@ export class DestructionDisplay {
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick);
+    this.clockPool?.destroy(); this.clockPool = null;
     Cause.disposeLights(this);
     this.clear();
     this.debris?.destroy(); this.debris = null;

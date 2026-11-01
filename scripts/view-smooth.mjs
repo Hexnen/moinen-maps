@@ -17,7 +17,17 @@
 const MODULE_ID = "moinen-maps";   // (no import of config.mjs: the pacing rules are node-tested without Foundry)
 
 export const TAU_MS = 55;
-const get = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
+const read = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
+// PERF: the frame gate asks for its mode on every requestAnimationFrame; game.settings.get builds a setting document each time (its
+// data cleaning showed as 18-32 ms frames some seconds after a scene opened, and as garbage every vsync). Kept here, read again when
+// a client setting changes (and at most once a second anyway).
+const cache = new Map();
+const get = (k, d) => {
+  const c = cache.get(k), t = performance.now();
+  if ( c && t - c.at < 1000 ) return c.v;
+  const v = read(k, d); cache.set(k, { v, at: t }); return v;
+};
+globalThis.Hooks?.on?.("clientSettingChanged", () => cache.clear());
 
 /* ------------------------------------------------------------------ frame pacing (pure parts are node-tested) */
 

@@ -260,14 +260,35 @@ export function causeEffects(d, g, a, now, el) {
 
 /** A ragged, soft-edged patch (wet ground, creeping rot): its rim wanders with the angle, its alpha falls off outwards in two
  * steps and drops out by pixel near the edge - never a flat disc. */
+// PERF (display): a blot is drawn again every frame as it grows (~1/3 of a whole-scene Detonate's accent time went into it); what
+// of a cell does not depend on the radius (its distance, its rim's lobe, its dropout hash) is kept per blot (centre + seed) over a
+// square that grows ahead of the radius - the same numbers, computed once per cell
+const BLOTS = new Map();
+function blotGrid(cx, cy, R2, seed) {
+  const key = `${Math.round(cx)}|${Math.round(cy)}|${seed}`;
+  let G = BLOTS.get(key);
+  if ( G && G.R2 >= R2 ) return G;
+  if ( G ) R2 = Math.max(R2, Math.ceil(G.R2 * 1.6));
+  const S = 2 * R2 + 1, hyp = new Float64Array(S * S), lob = new Float64Array(S * S), h = new Float64Array(S * S);
+  for ( let y = -R2; y <= R2; y++ ) for ( let x = -R2; x <= R2; x++ ) {
+    const q = (y + R2) * S + (x + R2), an = Math.atan2(y, x);
+    lob[q] = 0.8 + 0.4 * vn(an * 1.6 + 7, 0.5, seed) + 0.15 * vn(x / 3, y / 3, seed + 1);
+    hyp[q] = Math.hypot(x, y / 0.8);
+    h[q] = hashU(Math.round(cx) + x, Math.round(cy) + y, seed + 2);
+  }
+  G = { R2, S, hyp, lob, h };
+  BLOTS.delete(key); BLOTS.set(key, G);
+  while ( BLOTS.size > 64 ) BLOTS.delete(BLOTS.keys().next().value);
+  return G;
+}
 function blot(gr, V, cx, cy, r, color, alpha, seed) {
   if ( alpha < 0.02 ) return;
-  const R2 = Math.ceil(r * 1.3), steps = [[], []];
+  const R2 = Math.ceil(r * 1.3), steps = [[], []], G = blotGrid(cx, cy, R2, seed), o = G.R2, S = G.S;
   for ( let y = -R2; y <= R2; y++ ) for ( let x = -R2; x <= R2; x++ ) {
-    const an = Math.atan2(y, x), lob = 0.8 + 0.4 * vn(an * 1.6 + 7, 0.5, seed) + 0.15 * vn(x / 3, y / 3, seed + 1);
-    const d = Math.hypot(x, y / 0.8) / (r * lob); if ( d > 1 ) continue;
+    const q = (y + o) * S + (x + o);
+    const d = G.hyp[q] / (r * G.lob[q]); if ( d > 1 ) continue;
     const X = Math.round(cx) + x, Y = Math.round(cy) + y;
-    if ( d > 0.65 && hashU(X, Y, seed + 2) < (d - 0.65) * 2.2 ) continue;
+    if ( d > 0.65 && G.h[q] < (d - 0.65) * 2.2 ) continue;
     steps[d < 0.55 ? 0 : 1].push(X, Y);
   }
   steps.forEach((st, k) => { gr.beginFill(color, alpha * (k ? 0.55 : 1)); for ( let i = 0; i < st.length; i += 2 ) gr.drawRect(V.ox + st[i] * V.ap, V.oy + st[i + 1] * V.ap, V.ap, V.ap); gr.endFill(); });

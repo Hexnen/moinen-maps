@@ -241,7 +241,8 @@ export class StaticCache {
       // something in the layer the cache does not know: live, over everything
       if ( !g ) { out.push({ obj: k, cont: k, r: { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 }, live: true, m: 0 }); continue; }
       if ( g.erase ) { const mv = !!(g.dis || g.leaving); out.push({ obj: k, cont: k, r: g.info.rect, live: mv, m: mv ? 4 : 0, g }); continue; }
-      const mv = dying.has(g) || !!g.anim || !!g.fade || g.made < g.pieces.length || k.alpha < 1;
+      // (an area queued to enter - display.detonate sets them up a slice per frame - counts as moving already)
+      const mv = dying.has(g) || !!g.anim || !!g.fade || g.made < g.pieces.length || k.alpha < 1 || !!d.enterQueue?.has(g);
       const bloom = g.light?.bloom, glow = !!(bloom && !bloom.destroyed && bloom.alpha > 0.003);
       let extras = k.children.filter((ch) => ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont);
       // (a flooded hole whose water had arrived when the settled composite was made - composite.mjs - keeps a water unit while its own

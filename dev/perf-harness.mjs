@@ -148,15 +148,20 @@ export function entryCheck() {
       if ( g.anim.tear ) continue;                // a tear's pieces keep their own clock (tear-entry.mjs)
       if ( now < it.t0 - it.pre && it.p.spr?.visible && it.p.spr.alpha > 0 ) early++;
     }
+    // (a cave-in's tremor patch - the plain map over its pit, trembling from the start by design: collapse-entry.mjs - is map pixels,
+    // not damage shown early: hidden in both pictures)
+    const tremor = entering.map((g) => g.anim?.coll?.patch).filter((p) => p && p.visible);
+    for ( const p of tremor ) p.visible = false;
     const a = grab();
     for ( const g of entering ) g.cont.visible = false;
     const b = grab();
     for ( const g of entering ) g.cont.visible = true;
+    for ( const p of tremor ) p.visible = true;
     let sum = 0, max = 0, bad = 0;
     for ( let i = 0; i < a.length; i++ ) { const v = Math.abs(a[i] - b[i]); sum += v; if ( v > max ) max = v; if ( v > 8 ) bad++; }
     for ( const g of entering ) d.endAnim(g);
     F += 10000; T.update(F);
-    return { areas: entering.length, early, mean: +(sum / (a.length / 4)).toFixed(3), max, bad };
+    return { areas: entering.length, early, mean: +(sum / (a.length / 4)).toFixed(3), max, bad, tremorPatches: tremor.length };
   } finally {
     performance.now = real; waters.forEach((w) => { w.visible = true; });
     CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start();
@@ -200,6 +205,147 @@ export async function abOld(oldUrl, times = [0, 60, 120, 300, 600, 1000, 1600, 2
     for ( let i = 0; i < x.length; i++ ) { const v = Math.abs(x[i] - y[i]); s += v; if ( v > m ) m = v; if ( v > 8 ) bad++; }
     return [dt, +(s / (x.length / 4)).toFixed(3), m, bad];
   });
+}
+
+/**
+ * BATCHED vs SPRITE pieces (frozen clock): the same entry played twice from the same state, first with every piece a PIXI sprite
+ * (CONFIG.moinenMaps.noBatchRender = true) and then batched (piece-batch.mjs); the destruction layer grabbed at each time (ms after
+ * the start). `only(g)` picks the areas that enter (default: all, a whole-scene Detonate); `preMat` makes every piece at once in both
+ * runs (the sprite path makes 2500 per frame: without it the comparison would include that lag); `opts(g)` entry options per area.
+ * `pair` the two modes (true = sprites). Math.random is seeded alike in both runs (without it two sprite runs differ by a few hundred
+ * pixels: random debris and rubble).
+ * Flood water hidden (it loops on its own clock). Returns per time [ms, mean |d| per channel... per pixel, max, channels off by more
+ * than 8, pixels that differ at all] and `shots` (the two frames per time, RGBA) when `keep`.
+ */
+export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400, 3600], only = null, preMat = true, opts = null, keep = false, pair = [true, false] } = {}) {
+  const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance);
+  CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache, wasB = CONFIG.moinenMaps.noBatchRender, wasW = CONFIG.moinenMaps.noClockWorker;
+  CONFIG.moinenMaps.noDestructionCache = true; const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  // (the clocks made on the page: a frozen clock never lets the workers' answers in; clockCheck() compares the two)
+  CONFIG.moinenMaps.noClockWorker = true;
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  const groups = only ? d.order.filter(only) : [...d.order];
+  // every area back to its resting state with no pieces made (the next run makes them in its own mode)
+  const reset = () => { for ( const g of d.order ) { if ( g.anim ) d.endAnim(g); if ( !g.flat && !d.flatten(g) ) { d.release(g); g.made = 0; } } };
+  const run = (sprites) => {
+    CONFIG.moinenMaps.noBatchRender = sprites;
+    // Math.random seeded the same in both runs (particles, debris, rubble): the two runs differ only by the renderer
+    let seed = 12345; Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    let F = real(); performance.now = () => F;
+    reset(); T.update(F);
+    const start = F + 5;
+    for ( const g of groups ) d.enter(g, { start, ...(opts?.(g) ?? {}) });
+    if ( preMat ) for ( const g of d.order ) d.materialize(g, Infinity);   // (all: a light area that does not enter is made too)
+    // (every atlas on the GPU before the first frame: the batched path otherwise sends a few per frame and holds their pieces back)
+    if ( preMat ) for ( const g of groups ) if ( g.tex && !g.tex.destroyed ) canvas.app.renderer.texture.bind(g.tex, 0);
+    const shots = []; let t = F;
+    for ( const dt of times ) { while ( t < start + dt ) { t = Math.min(start + dt, t + 16); F = t; T.update(F); } shots.push(grab()); }
+    const info = { batched: groups.filter((g) => g.batch).length, sprites: groups.filter((g) => g.made && !g.batch).length };
+    for ( const g of groups ) d.endAnim(g);
+    F += 10000; T.update(F);
+    performance.now = real;
+    return { shots, info };
+  };
+  let a, b; const rnd = Math.random;
+  try { a = run(pair[0]); b = run(pair[1]); reset(); }
+  finally { Math.random = rnd; performance.now = real; CONFIG.moinenMaps.noBatchRender = wasB; CONFIG.moinenMaps.noClockWorker = wasW; ws.forEach((w) => { w.visible = true; }); CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start(); }
+  const rows = times.map((dt, k) => {
+    const x = a.shots[k], y = b.shots[k]; let s = 0, m = 0, bad = 0, px = 0;
+    for ( let i = 0; i < x.length; i += 4 ) {
+      let any = false;
+      for ( let c = 0; c < 4; c++ ) { const v = Math.abs(x[i + c] - y[i + c]); s += v; if ( v > m ) m = v; if ( v > 8 ) bad++; if ( v ) any = true; }
+      if ( any ) px++;
+    }
+    return [dt, +(s / (x.length / 4)).toFixed(3), m, bad, px];
+  });
+  return { areas: groups.length, sprite: a.info, batch: b.info, rows, shots: keep ? { a: a.shots, b: b.shots } : undefined };
+}
+
+/**
+ * BATCH VERTEX CHECK: for `n` areas (the biggest first), every piece made batched and, beside it, a PIXI sprite posed the same way
+ * (as display.makePiece / place leave it at rest) in the same container: the quad's four vertices, UVs and packed colour compared
+ * with what PIXI's batcher would take from the sprite (vertexData, uvs, Color.toPremultiplied). Returns { pieces, vertices, uvs,
+ * colours } - the counts that differ (all 0: the same numbers).
+ */
+export function batchVertexCheck(n = 12) {
+  const d = D(); CONFIG.moinenMaps ??= {};
+  const was = [CONFIG.moinenMaps.noBatchRender, CONFIG.moinenMaps.noDestructionCache];
+  CONFIG.moinenMaps.noBatchRender = false; CONFIG.moinenMaps.noDestructionCache = true;
+  let pieces = 0, vbad = 0, ubad = 0, cbad = 0;
+  try {
+    const list = d.order.filter((g) => g.flat && !g.anim && g.pieces.length).sort((a, b) => b.pieces.length - a.pieces.length).slice(0, n);
+    for ( const g of list ) { d.unflatten(g); d.materialize(g, Infinity); }
+    step(2);
+    for ( const g of list ) {
+      const b = g.batch, D2 = b.G.dynF32, U = b.G.dynU32, S = b.G.statF32, ap = d.ap, o = d.origin;
+      for ( let k = 0; k < g.pieces.length; k++ ) {
+        const p = g.pieces[k], s = new PIXI.Sprite(g.frame(p.frame)); s.anchor.set(0.5); s.scale.set(ap); s.position.set(o.x + p.fx * ap, o.y + p.fy * ap);
+        g.shardCont.addChild(s); s.updateTransform(); s.calculateVertices(); g.shardCont.removeChild(s);
+        const q = (k + 1) * 12, v = s.vertexData, u = s.uvs;
+        if ( [0, 1, 3, 4, 6, 7, 9, 10].some((j, i) => D2[q + j] !== v[i]) ) vbad++;
+        if ( [0, 1, 3, 4, 6, 7, 9, 10].some((j, i) => S[q + j] !== u[i]) ) ubad++;
+        if ( U[q + 2] !== (PIXI.Color.shared.setValue(s._tintRGB).toPremultiplied(Math.min(s.worldAlpha, 1), true) >>> 0) ) cbad++;
+        pieces++; s.destroy({ texture: true });
+      }
+    }
+    for ( const g of list ) d.flatten(g);
+  } finally { [CONFIG.moinenMaps.noBatchRender, CONFIG.moinenMaps.noDestructionCache] = was; step(1); }
+  return { pieces, vertices: vbad, uvs: ubad, colours: cbad };
+}
+
+/**
+ * CLOCK CHECK: every area enters (entries set up at once), its clocks made by the clock workers (clock-pool.mjs) and, a second time,
+ * on the page (clockSlice); per clock the two sorted pixel orders and moments compared. Returns { clocks, same, differ, ms }.
+ */
+export async function clockCheck() {
+  const d = D(), T = canvas.app.ticker; CONFIG.moinenMaps ??= {};
+  const wasW = CONFIG.moinenMaps.noClockWorker, wasE = CONFIG.moinenMaps.enterAtOnce, mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const snap = () => d.order.filter((g) => g.anim).flatMap((g) => [g.anim.rev, g.anim.crev].filter(Boolean).map((R) => ({ h: g.hash, c: R === g.anim.crev, ix: R.keys, tm: R.tms })));
+  try {
+    CONFIG.moinenMaps.enterAtOnce = true;
+    CONFIG.moinenMaps.noClockWorker = false;
+    let t = performance.now(); d.detonate(performance.now());
+    const all = () => d.order.filter((g) => g.anim).every((g) => [g.anim.rev, g.anim.crev].every((R) => !R || R.keys));
+    while ( !all() && performance.now() - t < 60000 ) await new Promise((r) => setTimeout(r, 20));
+    const ms = Math.round(performance.now() - t);
+    const A = snap();
+    for ( const g of d.order ) d.endAnim(g);
+    CONFIG.moinenMaps.noClockWorker = true;
+    d.detonate(performance.now());
+    d.clockSlice(1e9, { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 });
+    const B = snap();
+    for ( const g of d.order ) d.endAnim(g);
+    let same = 0, differ = 0;
+    const key = (q) => `${q.h}|${q.c}`, bm = new Map(B.map((q) => [key(q), q]));
+    for ( const a of A ) {
+      const b = bm.get(key(a));
+      const eq = !!b && a.ix && b.ix && a.ix.length === b.ix.length && a.ix.every((v, i) => v === b.ix[i] && a.tm[i] === b.tm[i]);
+      if ( eq ) same++; else differ++;
+    }
+    return { clocks: A.length, same, differ, workerMs: ms };
+  } finally { CONFIG.moinenMaps.noClockWorker = wasW; CONFIG.moinenMaps.enterAtOnce = wasE; T.maxFPS = mf; if ( st ) T.start(); step(5); }
+}
+
+/**
+ * AFTER-LOAD CHECK (call it right after the scene opens, e.g. from a driver that reloads the page): for `ms` (default 15 s) of real
+ * frames (requestAnimationFrame, nothing stepped) every frame's ticker listeners (instrument()) and the long tasks between frames
+ * (PerformanceObserver 'longtask'). Returns the frames whose ticker work took more than `over` ms (default 8) with the listeners in
+ * them, and the long tasks; `destructionMax` = the destruction display's own tick, worst frame.
+ */
+export async function loadCheck({ ms = 15000, over = 8 } = {}) {
+  const inst = instrument(), rows = [], tasks = [];
+  let obs = null;
+  try { obs = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) tasks.push({ at: Math.round(e.startTime), ms: Math.round(e.duration) }); }); obs.observe({ type: "longtask", buffered: false }); } catch { obs = null; }
+  const t0 = performance.now();
+  try {
+    await new Promise((res) => { const f = () => { const fr = inst.frame(); rows.push({ t: Math.round(performance.now() - t0), ...fr }); if ( performance.now() - t0 < ms ) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+  } finally { inst.restore(); obs?.disconnect(); }
+  const tickOf = (r) => Object.entries(r).filter(([k]) => k.includes(".")).reduce((a, [, v]) => a + v, 0);
+  const isD = (k) => /DestructionDisplay/.test(k);
+  const big = rows.filter((r) => tickOf(r) > over).map((r) => ({ t: r.t, ms: +tickOf(r).toFixed(1), ...Object.fromEntries(Object.entries(r).filter(([k, v]) => k !== "t" && v >= 1).map(([k, v]) => [k.slice(0, 60), +v.toFixed(1)])) }));
+  const dmax = Math.max(0, ...rows.map((r) => Object.entries(r).filter(([k]) => isD(k)).reduce((a, [, v]) => a + v, 0)));
+  return { frames: rows.length, over: big.length, destructionMax: +dmax.toFixed(1), big: big.slice(0, 30), longTasks: tasks.filter((x) => x.at >= t0) };
 }
 
 /**

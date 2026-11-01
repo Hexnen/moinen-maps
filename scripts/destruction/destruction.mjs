@@ -602,6 +602,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // the composite's shells that need their pixels anyway (flooded holes, a dark scene); the GM keeps the composite up to date
   // (after the scene's reveal: filled during the load, their building held the reveal back ~0.5 s)
   if ( src.composite ) Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) shellNeeds(); }, 50));
+  // (and, a little later, the pixels of what is in and around the view, so that an entry there rarely has to wait for them)
+  Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) prefetchNear(); }, 2500));
   if ( complete && game.user.isGM ) scheduleComposite();
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
@@ -699,6 +701,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   display ??= new DestructionDisplay();
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
+  display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   // the areas already on screen need no pixels (the display keeps them by hash; a shell's pixels replace it)
   const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h) && !display.groups.get(h).shell);
@@ -880,6 +883,34 @@ async function pixelsForEntries() {
   Trace.event("atlases-restored", { n, of: free.length });
 }
 
+/**
+ * The display's entries ask for the pixels of areas that have none (display.waitPixels): the shells among them are refilled (fill,
+ * in steps: each replaced in place as its step lands), the freed atlases' records hydrated -> Map(group -> its sprites).
+ */
+async function pixelSource(groups) {
+  const out = new Map(), recOf = (g) => shownRecs.get(g.objId);
+  const shells = [...new Set(groups.filter((g) => g.shell).map(recOf).filter((r) => r?.shell))];
+  if ( shells.length ) fill(shells, "entries");
+  await Promise.all(groups.filter((g) => g.atlasFree).map(async (g) => { const r = recOf(g); if ( r && (await hydrate(r)) && !r.sprites.lean ) out.set(g, areaSprites(r, g.hash)); }));
+  return out;
+}
+
+/**
+ * After a load, in the background: the areas in view (and half a view round it) that have no pixels get them ahead of an entry
+ * (display.waitPixels waits 150 ms at most): their shells filled (fill: a few per step), the chunks of their freed atlases read into the
+ * stream's memory. `CONFIG.moinenMaps.noPrefetch = true`: none.
+ */
+function prefetchNear() {
+  if ( !display || !canvas.ready || globalThis.CONFIG?.moinenMaps?.noPrefetch ) return;
+  const vw = display.view(), mx = (vw.x1 - vw.x0) * 0.5, my = (vw.y1 - vw.y0) * 0.5;
+  const near = (r) => !(r.x0 > vw.x1 + mx || r.y0 > vw.y1 + my || r.x1 < vw.x0 - mx || r.y1 < vw.y0 - my);
+  const groups = [...display.groups.values()].filter((g) => (g.shell || g.atlasFree) && g.info?.rect && near(g.info.rect));
+  const shells = [...new Set(groups.filter((g) => g.shell).map((g) => shownRecs.get(g.objId)).filter((r) => r?.shell))];
+  Trace.event("prefetch", { shells: shells.length, atlases: groups.filter((g) => g.atlasFree).length });
+  if ( shells.length ) fill(shells, "prefetch");
+  for ( const g of groups ) if ( g.atlasFree ) { const r = shownRecs.get(g.objId); if ( r?.id && r.dir ) Net.getChunk(r.dir, r.id).catch(() => null); }
+}
+
 /** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
 const hydrateShells = (why) => fill(shellRecs(), why);
 
@@ -1012,7 +1043,7 @@ function maybeBlast(first = false) {
   playedBlast = b.id;
   const late = ageOf(b.t, now());                  // Infinity: a legacy (uptime) or far-future moment, never played
   // (every area enters: the shells get their pixels first)
-  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( display.shellCount || display.stats.atlasFreed ) pixelsForEntries().then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
+  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( !display.pixelSource && (display.shellCount || display.stats.atlasFreed) ) pixelsForEntries().then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
 }
 
 /* ---------------------------------------------------------------- publishing the chunks (GM) */
@@ -1428,7 +1459,8 @@ export const destructionApi = {
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
-  replay: () => pixelsForEntries().then(() => display?.detonate(performance.now())),
+  // (the display asks for the pixels it lacks itself: an entry waits up to 150 ms for them - display.waitPixels)
+  replay: () => (display?.pixelSource ? Promise.resolve(display.detonate(performance.now())) : pixelsForEntries().then(() => display?.detonate(performance.now()))),
   display: () => display,
   /** Tests: every area shown as a shell and the record behind it (composite.mjs; the composite harness). */
   shells: () => [...(display?.groups.values() ?? [])].filter((g) => g.shell).map((g) => { const r = shownRecs.get(g.objId);
