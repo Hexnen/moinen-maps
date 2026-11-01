@@ -210,8 +210,8 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     }
     a = a * op[i] / 255;
     // foam at the rim: a broken line where the water meets the shore (a pool; patches of it, not a drawn outline)
-    if ( prep.level >= 2 && (!water[i - 1] || !water[i + 1] || !water[i - cw] || !water[i + cw]) && vnoise(ax / 3, ay / 3, 53) > 0.46 ) {
-      r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 190 * master);
+    if ( prep.level >= 2 && (!water[i - 1] || !water[i + 1] || !water[i - cw] || !water[i + cw]) && vnoise(ax / 3, ay / 3, 53) > 0.56 ) {
+      r += (foamC[0] - r) * 0.75; g += (foamC[1] - g) * 0.75; bl += (foamC[2] - bl) * 0.75; a = Math.max(a, 170 * master);
     }
     if ( coming ) {
       if ( u - fill[i] < BAND ) { r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 220 * master); }

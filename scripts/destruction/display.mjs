@@ -100,8 +100,8 @@ const LOOK = {
 const mixP = (r, g, b, c, t) => (Math.round(r + (((c >> 16) & 255) - r) * t) << 16) | (Math.round(g + (((c >> 8) & 255) - g) * t) << 8) | Math.round(b + ((c & 255) - b) * t);
 const FRONT = {
   // (the burning edge is a coherent glow band, cooling through red to char; the bright flame is the tongues - no per-pixel speckle)
-  scorch:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xff9a3c, 0.62) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0xc8461c, 0.5) },
-             { dt: 170, col: (r, g, b) => mixP(r, g, b, 0x5a2414, 0.4) }, { dt: 280 }],
+  scorch:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xe8742a, 0.45) }, { dt: 60, col: (r, g, b) => mixP(r, g, b, 0x9a3214, 0.42) },
+             { dt: 140, col: (r, g, b) => mixP(r, g, b, 0x3a1a10, 0.35) }, { dt: 230 }],
   flood:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 2, 5) < 0.6 ? 0xf2f8ff : 0xcfe6fa) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0x8cc0ea, 0.6) }, { dt: 210 }],
   collapse: [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.72) }, { dt: 120, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.4) }, { dt: 240 }],
   blast:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 3, 5) < 0.5 ? 0xfff4d6 : 0xffd890) }, { dt: 50, col: (r, g, b) => mixP(r, g, b, 0xff9a48, 0.55) }, { dt: 140 }],
@@ -810,10 +810,11 @@ export class DestructionDisplay {
       this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
     } else if ( type === "scorch" ) {
       // a fire front along the stroke: a few flame tongues spring up at the head and burn down behind it (no ember confetti)
-      if ( Math.random() < 0.7 ) {
-        const s = side() * 0.8, bx = x - uy * s, by = y + ux * s, gr = this.pixelCanvas(), v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y };
-        const h0 = 3 + P.wr * 0.25 * (0.7 + Math.random() * 0.6), w = 3 + ((Math.random() * 3) | 0), ph = Math.random() * 6;
-        a.fx.push({ g: gr, kind: "flames", t0: now, dur: 420 * a.k, draw: (t) => { const st = Math.floor(t * 6); pxTongue(gr, v, bx, by, tongueCells(h0 * (t < 0.15 ? t / 0.15 : 1 - (t - 0.15) * 0.9), w, ph + st, w)); } });
+      // (a line of fire behind the head: each tongue burns ~0.8 s, so a dozen stand along the fresh burn)
+      {
+        const s = side() * 0.7, bx = x - uy * s - ux * 2, by = y + ux * s - uy * 2, gr = this.pixelCanvas(), v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y };
+        const h0 = 3 + P.wr * 0.3 * (0.5 + Math.random() * 0.9), w = 3 + ((Math.random() * 3) | 0), ph = Math.random() * 6;
+        a.fx.push({ g: gr, kind: "flames", t0: now, dur: 800 * a.k, draw: (t) => { const st = Math.floor(t * 6); pxTongue(gr, v, bx, by, tongueCells(h0 * (t < 0.15 ? t / 0.15 : 1 - (t - 0.15) * 0.9), w, ph + st, w)); } });
       }
       if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0, vy: 0, rise: -6 - Math.random() * 4, life: 500 + Math.random() * 400, color: Math.random() < 0.5 ? 0xffd04a : 0xff8a24 });
       if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0.8, vy: 0, rise: -4, life: 1100, color: 0x4a4440, alpha: 0.55, size: 2 });
@@ -1147,7 +1148,8 @@ export class DestructionDisplay {
    */
   flames(gr, a, T, el, life, R) {
     const v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y }, k = a.k, now = a.start + a.delay + el;
-    const step = Math.floor(el / (70 * k)), reach = Math.max(4, R * 0.95);
+    // (the tongues stand inside the charred disc: past ~0.7 of the reach they burnt on the unburnt grass)
+    const step = Math.floor(el / (70 * k)), reach = Math.max(4, R * 0.7);
     const fadeOut = el < a.reveal ? 1 : clamp01(1 - (el - a.reveal) / Math.max(1, life - a.reveal));
     for ( const tg of T ) {
       const lag = tg.lag * 140 * k, tf = clamp01((el - lag) / a.reveal);
@@ -1243,9 +1245,9 @@ export class DestructionDisplay {
       // FLAME TONGUES ride the front (pixel-fx tongueCells: curved licking shapes in four tone bands, flickering frame by frame), die
       // down at the rim; embers rise in clusters from the hottest tongue tips, smoke wisps from the dying ones
       once("flames", a.delay, () => {
-        const gr = this.pixelCanvas(), n = Math.max(6, Math.min(16, Math.round(5 + R * 0.35))), life = a.reveal + a.band * 0.8;
+        const gr = this.pixelCanvas(), n = Math.max(5, Math.min(12, Math.round(4 + R * 0.25))), life = a.reveal + a.band * 0.8;
         const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: ((q % n) + hash2(q, 1, a.seed) * 0.8) / n * 6.283 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
-          h: 0.7 + 0.6 * hash2(q, 3, a.seed), w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
+          h: 0.45 + 0.9 * hash2(q, 3, a.seed), w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
         a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
       });
       // smoke: a few dark puffs from the burnt ground behind the front

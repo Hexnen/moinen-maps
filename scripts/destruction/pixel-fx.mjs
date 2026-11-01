@@ -205,7 +205,7 @@ export function tongueCells(h, w, phase, seed = 1) {
     if ( x1 < x0 ) x1 = x0;
     for ( let x = x0; x <= x1; x++ ) {
       const rel = Math.abs(x - sway) / Math.max(0.6, hw), b = f * 0.95 + rel * 0.45;
-      out.push([x, -j, f > 0.86 ? 4 : b < 0.32 ? 0 : b < 0.55 ? 1 : b < 0.8 ? 2 : 3]);
+      out.push([x, -j, f > 0.86 ? 4 : b < 0.22 ? 0 : b < 0.48 ? 1 : b < 0.76 ? 2 : 3]);
     }
     prev = [x0, x1];
   }
