@@ -141,26 +141,47 @@ export class DestructionDisplay {
       type: TYPES[meta[b + 10]] ?? "blast", mat: meta[b + 11], axis: meta[b + 14] / 1000, len: meta[b + 15] / 10 };
     const baseCont = new PIXI.Container(), shardCont = new PIXI.Container();
     baseCont.eventMode = shardCont.eventMode = "none";
+    baseCont.cullable = shardCont.cullable = true;   // off-screen areas are not drawn at all
     const baseSpr = new PIXI.Sprite(frame(0));
     baseSpr.eventMode = "none"; baseSpr.scale.set(ap);
     baseSpr.position.set(org.x + info.x * ap, org.y + info.y * ap);
     baseCont.addChild(baseSpr);
     const rect = { x0: info.x, y0: info.y, x1: info.x + info.w, y1: info.y + info.h };
+    // the shard sprites are made a few hundred per frame (tick -> materialize): a big area has thousands, and making them all at
+    // once held the page for ~50 ms
     const pieces = r.pieces.map((o, k) => {
       const w = meta[o + 3], h = meta[o + 4];
-      const spr = new PIXI.Sprite(frame(k + 1));
-      spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
       const fx = meta[o + 5] + w / 2, fy = meta[o + 6] + h / 2;
-      spr.position.set(org.x + fx * ap, org.y + fy * ap);
-      shardCont.addChild(spr);
       const flags = meta[o + 11];
       rect.x0 = Math.min(rect.x0, meta[o + 5], meta[o + 7]); rect.y0 = Math.min(rect.y0, meta[o + 6], meta[o + 8]);
       rect.x1 = Math.max(rect.x1, meta[o + 5] + w, meta[o + 7] + w); rect.y1 = Math.max(rect.y1, meta[o + 6] + h, meta[o + 8] + h);
-      return { spr, fx, fy, sx: meta[o + 7] + w / 2, sy: meta[o + 8] + h / 2, rot: meta[o + 9] / 1000, dist: meta[o + 10] / 4,
+      return { spr: null, frame: k + 1, fx, fy, sx: meta[o + 7] + w / 2, sy: meta[o + 8] + h / 2, rot: meta[o + 9] / 1000, dist: meta[o + 10] / 4,
         chip: !!(flags & 1), thrown: !!(flags & 2), moved: !!(flags & 4), z0: meta[o + 12] / 10, ptype: TYPES[meta[o + 13]] ?? info.type };
     });
     info.rect = rect;
-    return { hash: r.hash, tex, info, baseCont, shardCont, baseSpr, pieces, anim: null, fade: null, next: 0 };
+    // culling by a fixed area (no bounds walk over thousands of shards each frame); room for flying pieces
+    const m = 48, cull = new PIXI.Rectangle(org.x + (rect.x0 - m) * ap, org.y + (rect.y0 - m) * ap, (rect.x1 - rect.x0 + 2 * m) * ap, (rect.y1 - rect.y0 + 2 * m) * ap);
+    baseCont.cullArea = cull; shardCont.cullArea = cull;
+    const g = { hash: r.hash, tex, info, baseCont, shardCont, baseSpr, pieces, made: 0, frame, anim: null, fade: null, next: 0 };
+    this.materialize(g, 300);
+    return g;
+  }
+
+  /** Make up to `n` more shard sprites of a group (in order, so the drawing order stays); returns how many were made. */
+  materialize(g, n) {
+    const ap = this.ap, org = this.origin, end = Math.min(g.pieces.length, g.made + n), start = g.made;
+    for ( ; g.made < end; g.made++ ) {
+      const p = g.pieces[g.made];
+      const spr = p.spr = new PIXI.Sprite(g.frame(p.frame));
+      spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
+      spr.position.set(org.x + p.fx * ap, org.y + p.fy * ap);
+      if ( p.fading ) spr.alpha = 0;
+      g.shardCont.addChild(spr);
+      const it = g.anim?.byPiece?.get(p);
+      if ( it ) this.place(p, Math.max(0, (performance.now() - it.t0) / it.dur), it, g.info.type);
+    }
+    if ( g.made >= g.pieces.length ) g.frame = null;
+    return g.made - start;
   }
 
   /** An area that is gone: fades out; when a new area took its place, its base goes at once (the new one covers it). */
@@ -175,7 +196,7 @@ export class DestructionDisplay {
 
   kill(g) {
     this.endAnim(g);
-    for ( const p of g.pieces ) p.spr.texture.destroy(false);
+    for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
     g.baseSpr?.texture?.destroy(false);
     if ( g.baseCont && !g.baseCont.destroyed ) g.baseCont.destroy({ children: true });
     if ( !g.shardCont.destroyed ) g.shardCont.destroy({ children: true });
@@ -213,7 +234,7 @@ export class DestructionDisplay {
       const f = clamp01(Math.hypot(x - ox, y - oy) / Rmax);
       return L.order === "in" ? 1 - f : f;
     };
-    const list = [];
+    const list = [], byPiece = new Map();
     for ( const p of g.pieces ) {
       if ( !inBox(p.sx, p.sy) ) continue;
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
@@ -221,14 +242,15 @@ export class DestructionDisplay {
       const dur = (p.thrown ? 380 + Math.min(420, dd * 14) : 260 + Math.min(200, dd * 30)) * L.flight * k;
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw + (info.type === "cracks" ? 1.5 : 0);
       list.push({ p, t0, dur, arc, dusted: false });
+      byPiece.set(p, list[list.length - 1]);
       this.place(p, 0, list[list.length - 1], info.type);
     }
     const mask = new PIXI.Graphics();
     g.baseCont.addChild(mask);
     g.baseSpr.mask = mask;
-    g.anim = { start, delay, reveal, ox, oy, Rmax, wipe, box, list, mask, fx: [], end: start + delay + reveal + 1400 * k, fired: new Set(), type: info.type, k, pw,
+    g.anim = { start, delay, reveal, ox, oy, Rmax, wipe, box, list, byPiece, mask, fx: [], end: start + delay + reveal + 1400 * k, fired: new Set(), type: info.type, k, pw,
       fadeRest: fadeRest ? { start, dur: 260 } : null };
-    if ( fadeRest ) for ( const p of g.pieces ) if ( !inBox(p.sx, p.sy) ) { p.fading = true; p.spr.alpha = 0; }
+    if ( fadeRest ) for ( const p of g.pieces ) if ( !inBox(p.sx, p.sy) ) { p.fading = true; if ( p.spr ) p.spr.alpha = 0; }
     this.stats.entries++;
     this.drawMask(g, now);
   }
@@ -242,7 +264,7 @@ export class DestructionDisplay {
     if ( g.baseSpr && !g.baseSpr.destroyed ) g.baseSpr.mask = null;
     if ( !a.mask.destroyed ) a.mask.destroy();
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
-    for ( const p of g.pieces ) { if ( p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; p.fading = false; }
+    for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
     if ( g.baseCont && !g.baseCont.destroyed ) g.baseCont.position.set(0, 0);
     g.shardCont.position.set(0, 0);
   }
@@ -276,6 +298,7 @@ export class DestructionDisplay {
   /** Position of a piece at flight time t (0 = at its source, 1 = landed, > 1 settling). */
   place(p, t, a, type) {
     const ap = this.ap, o = this.origin, s = p.spr;
+    if ( !s ) return;
     if ( t >= 1 || !a ) {
       const b = a ? Math.min(1, (t - 1) / 0.35) : 1, hop = a && b < 1 ? Math.sin(b * Math.PI) * Math.min(2, a.arc * 0.15) * (1 - b) : 0;
       s.position.set(o.x + p.fx * ap, o.y + Math.round(p.fy - hop) * ap);
@@ -331,11 +354,14 @@ export class DestructionDisplay {
   tick() {
     const t0 = performance.now();
     if ( !canvas.stage ) return;
-    // sampling: crisp when an art pixel covers 1.5+ screen pixels, smooth (mipmapped) below
+    // sampling: crisp when an art pixel covers 3+ screen pixels; below that NEAREST shimmers while zooming and panning (an art pixel
+    // flips between 1 and 2 screen pixels), so it is LINEAR + mipmaps there
     const z = canvas.stage.scale.x * this.ap;
-    const want = this.filter === NEAREST ? (z < 1.3 ? LINEAR : NEAREST) : (z > 1.7 ? NEAREST : LINEAR);
+    const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) g.tex.scaleMode = want; }
     const vw = this.view();
+    let budget = 350;
+    for ( const g of this.order ) if ( budget > 0 && g.made < g.pieces.length ) budget -= this.materialize(g, budget);
     for ( const g of this.order ) {
       if ( g.fade ) this.applyFade(g, t0);
       if ( g.anim ) this.animate(g, t0, vw);
@@ -384,8 +410,10 @@ export class DestructionDisplay {
       const t = (now - it.t0) / it.dur;
       if ( onScreen || t >= 1 ) this.place(it.p, Math.max(0, t), it, type);
       if ( t < 1.35 ) busy = true;
-      if ( type === "scorch" ) it.p.spr.tint = lerpColor(0xffa060, 0xffffff, clamp01(t));
-      else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
+      if ( it.p.spr ) {
+        if ( type === "scorch" ) it.p.spr.tint = lerpColor(0xffa060, 0xffffff, clamp01(t));
+        else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
+      }
       if ( onScreen && t >= 1 && !it.dusted ) {
         it.dusted = true;
         if ( it.p.thrown ) for ( let q = 0; q < 3; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 3, life: 420, color: 0xd8d0c2, alpha: 0.8, drag: 3 });
@@ -394,7 +422,7 @@ export class DestructionDisplay {
     }
     if ( a.fadeRest ) {
       const f = clamp01((now - a.fadeRest.start) / a.fadeRest.dur);
-      for ( const p of g.pieces ) if ( p.fading ) { p.spr.alpha = f; if ( f >= 1 ) p.fading = false; }
+      for ( const p of g.pieces ) if ( p.fading ) { if ( p.spr ) p.spr.alpha = f; if ( f >= 1 ) p.fading = false; }
       if ( f >= 1 ) a.fadeRest = null;
     }
     if ( onScreen ) this.effects(g, a, now, el);

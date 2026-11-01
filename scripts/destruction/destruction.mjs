@@ -23,6 +23,7 @@ import * as Editor from "./editor.mjs";
  */
 
 let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, persistTimer = 0, publishFailed = false;
+let lastSheet = null;               // the sheet on screen (its hash is computed only when asked: 4 MB of FNV costs ~20 ms)
 let inflight = false, again = null, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
 let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
 const played = new Set();            // area hashes already shown on this client (they never enter again)
@@ -73,7 +74,7 @@ function teardown() {
   Editor.teardown();
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
-  played.clear(); entryLog.clear(); playedBlast = null; loaded = false;
+  played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastSheet = null;
   forgetSceneMap();
   disposeBaker();
   Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", areas: [] });
@@ -175,10 +176,8 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   T.show = performance.now() - t;
   playEntries(added, removed, taken, mask, first);
   shownKey = key; shownMask = mask; loaded = true;
-  t = performance.now();
-  const hash = fnv(sheet.data).toString(16);
-  T.hash = performance.now() - t; T.total = performance.now() - T.t0;
-  Object.assign(status, { baking: false, progress: 1, source, hash, error: "", stats: stats ?? status.stats, perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])),
+  lastSheet = sheet.data; T.total = performance.now() - T.t0;
+  Object.assign(status, { baking: false, progress: 1, source, hash: "", error: "", stats: stats ?? status.stats, perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])),
     areas: display.areas.map((a) => ({ type: a.type, mat: Model.MATERIALS[a.mat + 1] ?? "earth", hash: a.hash })) });
   tell("status");
   if ( source === "baked" ) schedulePersist(key, sheet, metaRows, stats);
@@ -379,7 +378,7 @@ export const destructionApi = {
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   state: () => S ? Model.encode(S) : null,
-  status: () => ({ ...status, key: shownKey, baked: S?.baked ?? null, inflight }),
+  status: () => { if ( lastSheet && !status.hash ) status.hash = fnv(lastSheet).toString(16); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Every area enters again, locally. */
   replay: () => display?.detonate(performance.now()),
   display: () => display,

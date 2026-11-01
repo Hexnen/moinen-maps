@@ -20,8 +20,15 @@ function db() {
   }).catch(() => null);
   return dbp;
 }
-const run = async (mode, fn) => {
-  const d = await db(); if ( !d ) return null;
+/** A cache that does not answer (an open blocked by another tab, a pending delete) is a miss after a moment, never a hang. */
+const timeout = (p, ms = 1500) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+const run = async (mode, fn) => timeout(runInner(mode, fn));
+let downUntil = 0;
+const runInner = async (mode, fn) => {
+  if ( Date.now() < downUntil ) return null;
+  const d = await timeout(db(), 1200);
+  if ( !d ) { dbp = null; downUntil = Date.now() + 30000; return null; }
+  d.onversionchange ??= () => { d.close(); dbp = null; };
   return new Promise((resolve) => {
     try {
       const tx = d.transaction("bakes", mode), r = fn(tx.objectStore("bakes"));

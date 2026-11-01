@@ -507,11 +507,19 @@ function bakeArea(A, P, seed, uid, jag) {
       }
     }
     // nearest seed (domain-warped, so cracks are jagged), through a bucket grid
-    const B = 6, gw = Math.ceil(W / B) + 1, buckets = new Map();
-    seeds.forEach((s, k) => { const key = Math.floor(s.y / B) * gw + Math.floor(s.x / B); (buckets.get(key) ?? buckets.set(key, []).get(key)).push(k); });
+    // a flat bucket grid (linked lists), searched ring by ring outwards until no closer seed can exist: the true nearest seed, and
+    // each bucket visited once (the old search re-scanned every inner ring and could look at hundreds of buckets per pixel)
+    const B = 6, gw = Math.ceil(W / B) + 2, gh = Math.ceil(H / B) + 2, ns = seeds.length;
+    const head = new Int32Array(gw * gh).fill(-1), nxt = new Int32Array(ns), sxs = new Float64Array(ns), sys = new Float64Array(ns);
+    seeds.forEach((s, k) => {
+      sxs[k] = s.x; sys[k] = s.y;
+      const bx = clamp(Math.floor(s.x / B) + 1, 0, gw - 1), by = clamp(Math.floor(s.y / B) + 1, 0, gh - 1), key = by * gw + bx;
+      nxt[k] = head[key]; head[key] = k;
+    });
     const cellOf = new Int32Array(C.px.length);
     // wood splits along its grain: distance across the grain counts more, so cells grow into long splinters
-    const wood = C.cls.mat === M.wood, kx = wood && !C.cls.grainX ? 0.3 : 1, ky = wood && C.cls.grainX ? 0.3 : 1;
+    const wood = C.cls.mat === M.wood, kx = wood && !C.cls.grainX ? 0.3 : 1, ky = wood && C.cls.grainX ? 0.3 : 1, kmin = Math.min(kx, ky);
+    const maxRad = Math.max(gw, gh);
     C.px.forEach((i, k) => {
       const x = i % W, y = (i - x) / W;
       // torn (jagged): a stronger, finer warp makes angular, chipped cuts instead of smooth cell edges
@@ -519,13 +527,16 @@ function bakeArea(A, P, seed, uid, jag) {
       const qx = x + 0.5 + (vnoise(x / 2.3, y / 2.3, seed + 101) - 0.5) * wa + (jag ? (vnoise(x / 0.9, y / 0.9, seed + 103) - 0.5) * 1.8 * jag : 0);
       const qy = y + 0.5 + (vnoise(x / 2.3, y / 2.3, seed + 202) - 0.5) * wa + (jag ? (vnoise(x / 0.9, y / 0.9, seed + 204) - 0.5) * 1.8 * jag : 0);
       let best = -1, bd = Infinity;
-      for ( let rad = 1; best < 0 || rad <= (wood ? 4 : 2); rad++ ) {
-        const bx = Math.floor(qx / B), by = Math.floor(qy / B);
-        for ( let dy = -rad; dy <= rad; dy++ ) for ( let dx = -rad; dx <= rad; dx++ ) {
-          const list = buckets.get((by + dy) * gw + bx + dx); if ( !list ) continue;
-          for ( const s of list ) { const d = ((seeds[s].x - qx) * kx) ** 2 + ((seeds[s].y - qy) * ky) ** 2; if ( d < bd ) { bd = d; best = s; } }
-        }
-        if ( rad > 40 ) break;
+      const bx = Math.floor(qx / B) + 1, by = Math.floor(qy / B) + 1;
+      const visit = (X, Y) => {
+        if ( X < 0 || Y < 0 || X >= gw || Y >= gh ) return;
+        for ( let s = head[Y * gw + X]; s >= 0; s = nxt[s] ) { const d = ((sxs[s] - qx) * kx) ** 2 + ((sys[s] - qy) * ky) ** 2; if ( d < bd ) { bd = d; best = s; } }
+      };
+      for ( let rad = 0; rad <= maxRad; rad++ ) {
+        if ( best >= 0 && ((rad - 1) * B * kmin) ** 2 > bd ) break;
+        if ( rad === 0 ) { visit(bx, by); continue; }
+        for ( let d = -rad; d <= rad; d++ ) { visit(bx + d, by - rad); visit(bx + d, by + rad); }
+        for ( let d = -rad + 1; d < rad; d++ ) { visit(bx - rad, by + d); visit(bx + rad, by + d); }
       }
       cellOf[k] = best;
     });
@@ -635,10 +646,16 @@ function bakeArea(A, P, seed, uid, jag) {
     if ( k <= 1 ) return [px];
     const seeds = Array.from({ length: k }, () => px[Math.floor(R() * px.length)]);
     const out = seeds.map(() => []);
+    const ssx = Int32Array.from(seeds, (s) => s % W), ssy = Int32Array.from(seeds, (s) => (s - (s % W)) / W);
     for ( const i of px ) {
       const x = i % W, y = (i - x) / W;
       let best = 0, bd = Infinity;
-      seeds.forEach((s, j) => { const sx = s % W, sy = (s - sx) / W, d = (sx - x) ** 2 + (sy - y) ** 2 + h2(i, j, seed) * 3; if ( d < bd ) { bd = d; best = j; } });
+      for ( let j = 0; j < k; j++ ) {
+        const base = (ssx[j] - x) ** 2 + (ssy[j] - y) ** 2;
+        if ( base >= bd ) continue;                       // the noise only adds: it cannot win (same result, far less hashing)
+        const d = base + h2(i, j, seed) * 3;
+        if ( d < bd ) { bd = d; best = j; }
+      }
       out[best].push(i);
     }
     return out.filter((c) => c.length >= 2);

@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
+import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Painting the damage (GM): a brush and an eraser on the mask grid, a ring cursor and a translucent overlay of the mask (amber =
@@ -12,6 +13,7 @@ const UNDO_MAX = 30;
 let mode = null;               // "paint" | "erase" | null
 let host = null;               // the engine: { state(), ensureState(), edited(box), tellBrush() }
 let cursor = null, overlay = null, overlayCtx = null, overlayImg = null, overlayTex = null, listeners = null;
+let dirty = null, flushing = false;   // overlay pixels changed since the last upload (mask px box), uploaded once per frame
 let stroke = null, lastPoint = null;
 const undo = [];
 
@@ -65,21 +67,45 @@ function buildOverlay() {
   const c = document.createElement("canvas"); c.width = S.mw; c.height = S.mh;
   overlayCtx = c.getContext("2d");
   overlayImg = overlayCtx.createImageData(S.mw, S.mh);
-  overlayTex = PIXI.Texture.from(c, { scaleMode: PIXI.SCALE_MODES.NEAREST });
-  overlayTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+  // mipmapped: the one-pixel hatch would shimmer when zoomed out (sampling follows the zoom, see overlayFilter)
+  overlayTex = PIXI.Texture.from(c, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.ON });
   overlay = new PIXI.Sprite(overlayTex);
   overlay.eventMode = "none"; overlay.zIndex = 800;
   const r = Model.sceneRect();
   overlay.position.set(r.x, r.y); overlay.scale.set(S.mpx);
   canvas.interface.sortableChildren = true;
   canvas.interface.addChild(overlay);
+  trackMarkers(overlay);
+  overlayFilter();
   paintOverlay(null);
+}
+
+/** Crisp when a mask pixel covers 2+ screen pixels, smooth (mipmapped) below. */
+function overlayFilter() {
+  const S = host?.state(); if ( !overlayTex || !S || !canvas.stage ) return;
+  const want = canvas.stage.scale.x * S.mpx >= 2 ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR;
+  if ( overlayTex.baseTexture.scaleMode !== want ) overlayTex.baseTexture.scaleMode = want;
 }
 
 function destroyOverlay() {
   if ( overlay && !overlay.destroyed ) overlay.destroy({ children: true });
   overlayTex?.destroy(true);
   overlay = overlayCtx = overlayImg = overlayTex = null;
+  dirty = null;
+}
+
+/** Upload the changed part of the overlay at most once per frame (pointer moves can come faster than frames). */
+function scheduleFlush() {
+  if ( flushing ) return;
+  flushing = true;
+  canvas.app.ticker.addOnce(flush, null, PIXI.UPDATE_PRIORITY.HIGH);
+}
+function flush() {
+  flushing = false;
+  if ( !dirty || !overlayCtx ) { dirty = null; return; }
+  const b = dirty; dirty = null;
+  overlayCtx.putImageData(overlayImg, 0, 0, b.x0, b.y0, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+  overlayTex.baseTexture.update();
 }
 
 /** Only the outline and a light hatch of the mask, so the baked result stays readable under it. */
@@ -96,8 +122,8 @@ function paintOverlay(box) {
     d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2];
     d[o + 3] = edge ? 220 : ((x + y) % 4 === 0 ? 90 : 0);
   }
-  overlayCtx.putImageData(overlayImg, 0, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-  overlayTex.baseTexture.update();
+  dirty = dirty ? { x0: Math.min(dirty.x0, x0), y0: Math.min(dirty.y0, y0), x1: Math.max(dirty.x1, x1), y1: Math.max(dirty.y1, y1) } : { x0, y0, x1, y1 };
+  scheduleFlush();
 }
 
 export function refreshOverlay() {
@@ -116,7 +142,7 @@ function onDown(ev) {
   undo.push({ mask: S.mask.slice(), mw: S.mw });
   if ( undo.length > UNDO_MAX ) undo.shift();
   const p = worldPoint(ev);
-  stroke = { last: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set() };
+  stroke = { last: p, first: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set(), t0: performance.now(), path: [[p.x, p.y, 0]] };
   paint(p, p);
 }
 
@@ -142,7 +168,12 @@ function onMove(ev) {
   if ( !mode ) { cursor?.clear(); return; }
   const p = worldPoint(ev);
   drawCursor(p);
-  if ( stroke ) { paint(stroke.last, p); stroke.last = p; }
+  if ( stroke ) {
+    paint(stroke.last, p); stroke.last = p;
+    // the stroke's path (scene px, ms since the start), thinned to a point every few pixels
+    const q = stroke.path[stroke.path.length - 1];
+    if ( Math.hypot(p.x - q[0], p.y - q[1]) >= Math.max(4, radius() * 0.25) ) stroke.path.push([p.x, p.y, Math.round(performance.now() - stroke.t0)]);
+  }
 }
 
 function onUp(ev) { if ( ev.button === 0 ) endStroke(); }
@@ -150,7 +181,10 @@ function onUp(ev) { if ( ev.button === 0 ) endStroke(); }
 function endStroke() {
   if ( !stroke ) return;
   const s = stroke; stroke = null;
-  if ( s.changed ) host.edited(s.box); else undo.pop();
+  if ( !s.changed ) { undo.pop(); return; }
+  const end = s.path[s.path.length - 1];
+  if ( end[0] !== s.last.x || end[1] !== s.last.y ) s.path.push([s.last.x, s.last.y, Math.round(performance.now() - s.t0)]);
+  host.edited(s.box, { a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type });
 }
 
 function undoStroke() {
@@ -172,10 +206,12 @@ export function onCanvasReady() {
   cursor = new PIXI.Graphics(); cursor.eventMode = "none"; cursor.zIndex = 900;
   canvas.interface.sortableChildren = true;
   canvas.interface.addChild(cursor);
+  trackMarkers(cursor, { ring: true });
   const view = canvas.app.view;
   listeners = {
     down: onDown, move: onMove, up: onUp,
     cancel: () => endStroke(),
+    pan: () => overlayFilter(),
     leave: () => { cursor?.clear(); lastPoint = null; },
     key: (e) => {
       if ( !mode || typing(e) ) return;
@@ -197,6 +233,7 @@ export function onCanvasReady() {
   window.addEventListener("pointercancel", listeners.cancel);
   window.addEventListener("blur", listeners.cancel);
   window.addEventListener("keydown", listeners.key, true);
+  listeners.panId = Hooks.on("canvasPan", listeners.pan);
   if ( mode ) buildOverlay();
 }
 
@@ -207,6 +244,7 @@ export function teardown() {
     v?.removeEventListener("pointerleave", listeners.leave);
     window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel);
     window.removeEventListener("blur", listeners.cancel); window.removeEventListener("keydown", listeners.key, true);
+    Hooks.off("canvasPan", listeners.panId);
     listeners = null;
   }
   destroyOverlay();

@@ -62,6 +62,8 @@ function bindParams(host) {
 
 function bar(host, ctx) {
   const mode = TOOLS[ctx.tool];
+  const P0 = () => D.state()?.params ?? Model.PARAM_DEFAULTS;
+  const quick = (k, icon, label) => `<button type="button" class="mm-ws-toolbtn" data-quick="${k}" aria-pressed="${!!P0()[k]}" aria-label="${esc(T(label))}" data-tooltip="${esc(T(label))}"><i class="${icon}" inert></i></button>`;
   if ( !mode ) { host.innerHTML = optHint(T("Destr.pickHint")); return; }
   const b = Editor.brush();
   const size = optRange({ name: "size", label: T("Destr.size"), value: b.size, min: 0.25, max: 10, step: 0.25, hint: T("Destr.sizeHint") });
@@ -72,10 +74,12 @@ function bar(host, ctx) {
     host.innerHTML = `${size}
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
+      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}</div></div>
       ${optHint(T("Destr.paintHint"))}`;
   }
   const onClick = (ev) => {
-    const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]");
+    const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]");
+    if ( qb ) D.setParams({ [qb.dataset.quick]: !P0()[qb.dataset.quick] });
     if ( lb && Number(lb.dataset.level) !== Editor.brush().level ) game.settings.set(MODULE_ID, "destrLevel", Number(lb.dataset.level));
     if ( tb && Number(tb.dataset.type) !== Editor.brush().type ) game.settings.set(MODULE_ID, "destrType", Number(tb.dataset.type));
   };
@@ -87,6 +91,7 @@ function bar(host, ctx) {
   };
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   const id = Hooks.on("moinenMapsDestruction", (kind) => {
+    if ( kind === "params" || kind === "loaded" ) { for ( const x of host.querySelectorAll("[data-quick]") ) x.setAttribute("aria-pressed", String(!!P0()[x.dataset.quick])); return; }
     if ( kind !== "brush" ) return;
     const nb = Editor.brush();
     for ( const x of host.querySelectorAll("[data-level]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.level) === nb.level));
@@ -147,8 +152,17 @@ function mountLook(host) {
   const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Destr.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Destr.h.${k}`) });
   host.innerHTML = `<div class="mm-d-form">
     ${optSelect({ name: "p.material", label: T("Destr.f.material"), value: P.material, hint: T("Destr.h.material"), options: Model.MATERIALS.map((m) => [m, T(`Destr.mat.${m}`)]) })}
-    ${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}${range("edge")}</div>`;
-  return bindParams(host);
+    ${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}${range("edge")}
+    ${optCheck({ name: "p.jagged", label: T("Destr.f.jagged"), checked: P.jagged, hint: T("Destr.h.jagged") })}
+    <div class="mm-d-jag"${P.jagged ? "" : " hidden"}>${range("jag")}</div>
+    ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}</div>`;
+  // the tearing slider only while torn borders are on
+  const id = Hooks.on("moinenMapsDestruction", (kind) => {
+    if ( kind !== "loaded" && kind !== "params" ) return;
+    const j = host.querySelector(".mm-d-jag"); if ( j ) j.hidden = !(D.state()?.params ?? Model.PARAM_DEFAULTS).jagged;
+  });
+  const off = bindParams(host);
+  return () => { off(); Hooks.off("moinenMapsDestruction", id); };
 }
 
 function mountMotion(host) {
@@ -157,6 +171,9 @@ function mountMotion(host) {
     ${optCheck({ name: "p.anim", label: T("Destr.f.anim"), checked: P.anim, hint: T("Destr.h.anim") })}
     ${optCheck({ name: "p.idle", label: T("Destr.f.idle"), checked: P.idle, hint: T("Destr.h.idle") })}
     ${optSelect({ name: "p.fxWho", label: T("Destr.f.fxWho"), value: P.fxWho, options: [["all", T("Destr.o.all")], ["gm", T("Destr.o.gm")]] })}
+    ${optCheck({ name: "p.entry", label: T("Destr.f.entry"), checked: P.entry, hint: T("Destr.h.entry") })}
+    ${optRange({ name: "p.entrySpeed", label: T("Destr.f.entrySpeed"), value: P.entrySpeed, min: Model.LIMITS.entrySpeed[0], max: Model.LIMITS.entrySpeed[1], step: 0.1, hint: T("Destr.h.entrySpeed") })}
+    ${optRange({ name: "p.entryPower", label: T("Destr.f.entryPower"), value: P.entryPower, min: Model.LIMITS.entryPower[0], max: Model.LIMITS.entryPower[1], step: 0.1, hint: T("Destr.h.entryPower") })}
     <p class="mm-ws-hint">${esc(T("Destr.motionHint"))}</p></div>`;
   return bindParams(host);
 }
