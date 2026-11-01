@@ -678,9 +678,12 @@ export class DestructionDisplay {
    * No entry (a look setting changed, a returning area): the new look fades in over the old one, which stays whole underneath until
    * it is covered, so there is no blank frame and no flash.
    */
-  swap(g, under = []) {
+  swap(g, under = [], dur = 220) {
     if ( !under.length ) return;
-    g.fade = { start: performance.now(), dur: 220 };
+    // dur 0: in one frame (a stroke baked again only because older damage under it changed: the old look goes at the next tick,
+    // before anything is drawn - no fade through a half-transparent cover, no blank frame)
+    if ( !dur ) { g.cont.alpha = 1; g.fade = null; for ( const u of under ) u.heldBy = g; this.stats.silentSwaps = (this.stats.silentSwaps ?? 0) + 1; return; }
+    g.fade = { start: performance.now(), dur };
     this.applyFade(g, performance.now());
     for ( const u of under ) u.heldBy = g;
   }
