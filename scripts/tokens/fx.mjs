@@ -26,7 +26,7 @@ const EARTH = [0x6b5236, 0x8a6a45, 0x4a3826, 0x9c8f7c];
 const BEAM = [0xffffff, 0xd8f4ff, 0x8fd8ff, 0x5ab4ff];
 const SPARK = [0xfffbe8, 0xffe08a, 0xffffff];
 const PORTAL = [0xc59bff, 0x8a5cff, 0x6fe0ff, 0xffffff];
-const SMOKE = [0x9a948c, 0x7d7871, 0xb7b1a8, 0x5f5a54];
+const SMOKE = [0xc9c3b9, 0xa9a39a, 0xdedad2, 0x8a847b];
 const SOUL = 0xcfe8ff;
 
 const RIGS = new Map();        // Token -> Rig
@@ -90,11 +90,15 @@ function sortNextTo(obj, token, step) {
 
 /** Offset, scale and tilt a display object about the ground point (gx, gy) from the base transform `b`; x / y of the pose in token units. */
 function place(obj, b, p, gx, gy, W, H) {
-  const rotated = Math.abs(b.rot) > 0.001;
-  const u = Math.sqrt(Math.max(0, p.sx * p.sy)), sx = rotated ? u : p.sx, sy = rotated ? u : p.sy;
-  const rx = (b.px - gx) * sx, ry = (b.py - gy) * sy, c = Math.cos(p.rot), s = Math.sin(p.rot);
+  // the squash is along the screen's axes: a mesh turned by a quarter turn squashes along its other axis; a mesh at any other angle
+  // squashes uniformly (its own axes would tilt the squash)
+  const q = Math.round(b.rot / (Math.PI / 2)), off = Math.abs(b.rot - q * Math.PI / 2) > 0.05;
+  const u = Math.sqrt(Math.max(0, p.sx * p.sy));
+  const wx = off ? u : p.sx, wy = off ? u : p.sy;            // on screen
+  const lx = q & 1 ? wy : wx, ly = q & 1 ? wx : wy;           // on the mesh's own axes
+  const rx = (b.px - gx) * wx, ry = (b.py - gy) * wy, c = Math.cos(p.rot), s = Math.sin(p.rot);
   obj.position.set(gx + rx * c - ry * s + p.x * W, gy + rx * s + ry * c + p.y * H);
-  obj.scale.set(b.sx * sx, b.sy * sy);
+  obj.scale.set(b.sx * lx, b.sy * ly);
   obj.rotation = b.rot + p.rot;
 }
 
@@ -127,19 +131,21 @@ function clods(em, gx, gy, W, n, seed) {
   }
 }
 /** A flickering vertical column of light from far above down to the ground (one frame's worth). */
-function beam(em, cx, gy, W, H, seed, n = 7) {
+function beam(em, cx, gy, W, H, seed, n = 12) {
   const ap = em.ap;
   for ( let i = 0; i < n; i++ ) {
     const k = Math.random();     // a flicker, not part of any shared state
     em.add(cx + (k - 0.5) * W * 0.36, gy - H * 3.2 * Math.random(), 0, ap * 30, { life: 0.1 + 0.08 * k, color: BEAM[(i + (k * 4 | 0)) % BEAM.length], add: true, drop: false, size: k < 0.3 ? 2 : 1 });
   }
 }
+/** A cloud of chunky pixel smoke over a body: puffs of 3-5 art px, the biggest in the middle, billowing out and up. */
 function smoke(em, cx, cy, W, n, seed) {
   const ap = em.ap;
   for ( let i = 0; i < n; i++ ) {
-    const a = St.rand01(seed, i + 900) * St.TAU, r = W * 0.35 * Math.sqrt(St.rand01(seed, i + 950)), sp = ap * (6 + 14 * St.rand01(seed, i + 990));
-    em.add(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.8, Math.cos(a) * sp, Math.sin(a) * sp - ap * 10,
-      { life: 0.55 + 0.35 * St.rand01(seed, i + 30), drag: 2.5, g: -ap * 8, color: pick(SMOKE, seed, i), size: 2 + (St.rand01(seed, i + 40) < 0.5 ? 1 : 0), delay: 0.05 * St.rand01(seed, i + 60) });
+    const a = St.rand01(seed, i + 900) * St.TAU, k = Math.sqrt(St.rand01(seed, i + 950)), r = W * 0.42 * k, sp = ap * (8 + 16 * St.rand01(seed, i + 990));
+    const size = Math.round(5 - 2 * k + (St.rand01(seed, i + 40) < 0.3 ? 1 : 0));
+    em.add(cx + Math.cos(a) * r - size * ap / 2, cy + Math.sin(a) * r * 0.85 - size * ap / 2, Math.cos(a) * sp, Math.sin(a) * sp * 0.8 - ap * 8,
+      { life: 0.6 + 0.35 * St.rand01(seed, i + 30), drag: 2.2, g: -ap * 10, color: pick(SMOKE, seed, i), size, delay: 0.04 * St.rand01(seed, i + 60) });
   }
 }
 
@@ -413,6 +419,8 @@ class Rig {
 
   #endFx(cut = false) {
     const fx = this.fx; this.fx = null;
+    if ( this.crackBox && !this.crackBox.destroyed ) this.crackBox.destroy({ children: true });
+    this.crackBox = null;
     if ( this.kids ) this.#kidsAlpha(1, true);
     fx?.onEnd?.(this, cut);
   }
@@ -423,7 +431,7 @@ class Rig {
     if ( this.fx ) { const fx = this.fx; this.fx = null; fx.onEnd?.(this, true); }
     if ( restore ) this.release(); else if ( this.kids ) this.#kidsAlpha(1, true);
     if ( this.filter ) { const m = this.token.mesh; if ( m && !m.destroyed ) { m.filters = (m.filters ?? []).filter((f) => f !== this.filter); if ( !m.filters.length ) m.filters = null; } this.filter = null; }
-    for ( const o of [this.glowSpr, this.shadow, this.overlay] ) if ( o && !o.destroyed ) o.destroy({ children: true });
+    for ( const o of [this.glowSpr, this.shadow, this.overlay, this.crackBox] ) if ( o && !o.destroyed ) o.destroy({ children: true });
     this.#dropRoot();
     if ( RIGS.get(this.token) === this ) RIGS.delete(this.token);
   }
@@ -510,7 +518,14 @@ function deathFx(token, style, delay, c, look) {
       case "disintegrate": if ( crossed(u, prev, 0.05) ) cellParticles(em, geo0, "ash", seed, { dur }); break;
       case "explode": if ( crossed(u, prev, 0.3) ) { cellParticles(em, geo0, "confetti", seed, { gy: g.gy, k: 1.2 * k }); sparkles(em, g.cx, g.cy, 18, g.W * 0.15, seed, [BONE, 0xffffff, 0xffe08a], 0.5); smoke(em, g.cx, g.cy, g.W * 0.7, 12, seed); } break;
       case "soul": if ( crossed(u, prev, 0.2) ) EXTRAS.add(new Wisp(token, dur * 0.85)); break;
-      case "petrify": if ( Math.floor(u * 6) !== Math.floor(prev * 6) && u < 0.7 ) dust(em, g.gx, g.gy - g.H * 0.4 * St.rand01(seed, Math.floor(u * 6)), g.W * 0.6, 4, seed + Math.floor(u * 6), { colors: [0x9c968c, 0x77736c, 0xbab4aa], up: -0.5 }); break;
+      case "petrify":
+        // the cracks spread over the body in steps (the corpse overlay then keeps them all)
+        if ( Math.floor(u * 5) !== Math.floor(prev * 5) && u > 0.15 ) {
+          if ( r.crackBox && !r.crackBox.destroyed ) r.crackBox.destroy({ children: true });
+          const box = r.crackBox = new PIXI.Container(); box.eventMode = "none"; box._mmReticle = true; box.zIndex = 4000;
+          drawCracks(box, g.W, g.H, seed, artPx(), Math.min(1, u * 1.15)); token.addChild(box);
+        }
+        if ( Math.floor(u * 6) !== Math.floor(prev * 6) && u < 0.7 ) dust(em, g.gx, g.gy - g.H * 0.4 * St.rand01(seed, Math.floor(u * 6)), g.W * 0.6, 4, seed + Math.floor(u * 6), { colors: [0x9c968c, 0x77736c, 0xbab4aa], up: -0.5 }); break;
       case "ragdoll": if ( crossed(u, prev, 0.4) ) dust(em, g.gx + rig.tilt * g.W * 0.2, g.gy, g.W * 0.7, 10, seed); break;
       case "melt": if ( crossed(u, prev, 0.02) ) cellParticles(em, geo0, "drip", seed, { dur, gy: g.gy + 2 }); break;
       default: break;
@@ -587,7 +602,7 @@ class Leave {
       case "warp": if ( u < 0.6 ) { const k = em.ap; for ( let i = 0; i < 6; i++ ) em.add(cx + (Math.random() - 0.5) * W * 0.4, gy - H * Math.random(), 0, -k * 160, { life: 0.35, color: BEAM[i % 4], add: true }); } if ( crossed(u, prev, 0.58) ) sparkles(em, cx, gy - H * 0.6, 12, W * 0.1, s, BEAM); break;
       case "sink": if ( crossed(u, prev, 0.001) || crossed(u, prev, 0.5) ) { clods(em, gx, gy, W, 8, s + (u > 0.4 ? 9 : 0)); dust(em, gx, gy, W, 8, s); } break;
       case "burst": if ( crossed(u, prev, 0.17) ) { const cells = cellParticles(em, this.geo, "confetti", s, { gy: gy + H * 0.05, k: this.k }); sparkles(em, cx, cy, 10, W * 0.2, s, [...paletteOf(cells, 3), 0xffd04a, 0xff8a24], 0.5); } break;
-      case "smoke": if ( crossed(u, prev, 0.001) ) smoke(em, cx, cy + H * 0.1, W, 26, s); break;
+      case "smoke": if ( crossed(u, prev, 0.001) ) smoke(em, cx, cy + H * 0.05, W, 44, s); break;
       case "slide": if ( u > 0.1 && Math.floor(u * 12) !== Math.floor(prev * 12) ) { const p = this.pose; dust(em, gx + p.x * W, gy + p.y * H, W * 0.5, 3, s + Math.floor(u * 12), { spread: 0.5 }); } break;
       default: break;
     }
@@ -615,7 +630,8 @@ class Wisp {
     this.s.alpha = 0.55 * Math.sin(Math.PI * Math.min(1, u * 1.15));
     this.s.position.set(this.x0 + Math.sin(u * 7) * this.H * 0.05, this.y0 - e * this.H * 0.9);
     this.s.scale.set(this.sx * (1 - 0.35 * u), this.sy * (1 + 0.15 * u));
-    if ( Math.floor(u * 10) !== Math.floor((u - dt / this.dur) * 10) ) this.em.add(this.s.position.x + (Math.random() - 0.5) * this.H * 0.4, this.s.position.y + this.H * 0.2, 0, -this.em.ap * 12, { life: 0.5, color: SOUL, add: true });
+    const step = Math.floor(u * 10);
+    if ( u < 1 && step !== this.step ) this.step = step, this.em.add(this.s.position.x + (Math.random() - 0.5) * this.H * 0.4, this.s.position.y + this.H * 0.2, 0, -this.em.ap * 12, { life: 0.5, color: SOUL, add: true });
     const alive = this.em.update(dt);
     return u < 1 || alive > 0;
   }
@@ -731,7 +747,7 @@ function schedule(tokens) {
   pending ??= new Set();
   for ( const t of tokens ) if ( t && !t.destroyed ) pending.add(t);
   if ( pending.size && !pending.frame ) {
-    pending.frame = requestAnimationFrame(() => {
+    pending.frame = setTimeout(() => {   // not a frame callback: a background tab gets no frames, and the state must still follow
       const list = [...(pending ?? [])].filter((t) => !t.destroyed && t.document?.parent?.id === canvas.scene?.id);
       pending = null;
       for ( const t of list ) { try { syncDeath(t, true); } catch ( err ) { console.error(`${MODULE_ID} | token death`, err); } }
@@ -756,7 +772,7 @@ function syncIdle() {
   startTicker();
 }
 let idleQueued = false;
-function queueIdle() { if ( idleQueued ) return; idleQueued = true; requestAnimationFrame(() => { idleQueued = false; syncIdle(); }); }
+function queueIdle() { if ( idleQueued ) return; idleQueued = true; setTimeout(() => { idleQueued = false; syncIdle(); }, 0); }
 
 /* ================================================================== hooks */
 
@@ -781,7 +797,7 @@ function teardown() {
   for ( const x of [...EXTRAS] ) x.end();
   EXTRAS.clear(); RIGS.clear(); KNOWN.clear(); stopTicker();
   for ( const k of Object.keys(bursts) ) delete bursts[k];
-  if ( pending?.frame ) cancelAnimationFrame(pending.frame);
+  if ( pending?.frame ) clearTimeout(pending.frame);
   pending = null;
   drainPools();
 }

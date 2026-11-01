@@ -255,10 +255,10 @@ export function enterPose(style, u, ctx = {}, out = pose()) {
       out.rot = -dx * 0.12 * (1 - e) * k; break;
     }
     case "rise": {
-      // grows up out of the ground: height from 0, a little overshoot, wobble
-      const e = u < 0.75 ? backOut(u / 0.75, 1.6) : 1;
-      out.sy = Math.max(0.001, e); out.sx = 1 + 0.25 * (1 - clamp(u / 0.75, 0, 1));
-      out.alpha = clamp(u / 0.1, 0, 1); out.rot = 0.05 * tilt * Math.sin(u * 18) * (1 - u); break;
+      // grows up out of the ground: its height from 0 (pivot at the feet), a little overshoot, settles with a wobble
+      const g = clamp(u / 0.7, 0, 1), e = u < 0.7 ? easeInOut(g) * 1.06 : 1.06 - 0.06 * easeOut((u - 0.7) / 0.3);
+      out.sy = Math.max(0.001, e); out.sx = 1 + 0.14 * (1 - g);
+      out.alpha = clamp(u / 0.08, 0, 1); out.rot = 0.05 * tilt * Math.sin(u * 18) * (1 - u); break;
     }
     case "portal": {
       const a = clamp((u - 0.3) / 0.7, 0, 1), e = backOut(a, 1.4);
@@ -350,7 +350,7 @@ export function deathPose(style, u, ctx = {}, out = pose()) {
       // swells, trembles, gone in a flash
       const a = clamp(u / 0.3, 0, 1);
       out.sx = out.sy = 1 + 0.18 * easeIn(a) * k; out.rot = 0.04 * Math.sin(u * 90) * a * k;
-      out.glow = a; out.alpha = u < 0.3 ? 1 : 0; out.grey = 0; break;
+      out.glow = u < 0.3 ? a : Math.max(0, 1 - (u - 0.3) / 0.12); out.alpha = u < 0.3 ? 1 : 0; out.grey = 0; break;
     }
     case "soul": out.alpha = 1 - 0.1 * g; out.sy = 1 - 0.04 * g; break;   // the wisp is a separate copy (runtime)
     case "petrify": out.rot = u < 0.5 ? 0.02 * Math.sin(u * 70) * (1 - u * 2) * k : 0; out.grey = easeOut(clamp(u / 0.6, 0, 1)); break;

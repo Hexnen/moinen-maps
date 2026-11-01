@@ -728,7 +728,7 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-tfx-chip[aria-checked="true"] { background: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 28%, var(--mm-ws-ground)); border-color: var(--mm-sec, var(--mm-accent)); font-weight: 700; }
 .mm-tfx-chip:focus-visible { outline: 2px solid var(--mm-sec, var(--mm-accent)); outline-offset: 1px; }
 .mm-tfx-desc { margin: 0.15rem 0 0.45rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); min-height: 1.1em; }
-.mm-tfx-h { margin: 0.6rem 0 0.1rem; padding: 0; border: 0; font-size: var(--font-size-13, 0.8125rem); font-weight: 700; }
+.mm-tfx-h { margin: 0.6rem 0 0.1rem; padding: 0; border: 0; font-family: var(--font-body, inherit); font-size: var(--font-size-13, 0.8125rem); font-weight: 700; text-transform: none; letter-spacing: normal; color: var(--mm-ws-text); }
 .mm-tfx-block { margin: 0 0 0.3rem; }
 .mm-tfx-note { margin: 0.5rem 0 0; }
 .mm-tfx-drop { margin: 0.2rem 0 0.4rem; }
