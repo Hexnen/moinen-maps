@@ -1,6 +1,7 @@
 import { META_FIELDS } from "./core.mjs";
 import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
+import { collapseClock, collapsePlace, collapseFx, collapseEnd } from "./collapse-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas, pxArcs, tongueCells, pxTongue } from "./pixel-fx.mjs";
 import { StaticCache, mipmaps } from "./static-cache.mjs";
@@ -671,9 +672,11 @@ export class DestructionDisplay {
     const pathFront = this.pathFront(path, g, k);
     // a tear has its own clock (tear-entry.mjs): a pinprick, then a fast front both ways along its spine on a narrow band
     const tear = info.type === "gash" ? tearClock(info, { pathFront, spine, k }) : null;
-    const delay = tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
-    const reveal = tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-    const band = tear ? tear.band : Math.max(160 * k, reveal * 0.38);
+    // a cave-in has its own clock too (collapse-entry.mjs): anticipation, then the rings slump from the rim inwards
+    const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront }) : null;
+    const delay = coll ? coll.delay : tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
+    const reveal = coll ? coll.reveal : tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
+    const band = coll ? coll.band : tear ? tear.band : Math.max(160 * k, reveal * 0.38);
     const front = (x, y) => {   // 0..1: when the front reaches (x, y)
       if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
       // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
@@ -681,7 +684,7 @@ export class DestructionDisplay {
       return clamp01(Math.hypot(x - ox, y - oy) / Rmax);
     };
     // the front's arrival at a point (ms after start)
-    const arrive = tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y)
+    const arrive = coll ? coll.arrive : tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y)
       : CL ? (x, y) => delay + reveal * CL.curve(front(x, y), Math.atan2(y - oy, x - ox)) * 0.85
       : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
     const seed = g.hash % 9973;
@@ -690,7 +693,7 @@ export class DestructionDisplay {
     const noise = (x, y) => n7(x, y) * 0.65 + n26(x, y) * 0.35;
     // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
     // so the ruin and the cover of the same pixel share it)
-    const pixelTime = (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
+    const pixelTime = coll ? coll.pixelTime : (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
@@ -703,7 +706,7 @@ export class DestructionDisplay {
       const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: bw, height: bh }), {
         width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
-      const stages = (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s) => ({ dt: s.dt * k, col: s.col ?? null }));
+      const stages = coll ? coll.stages : (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s) => ({ dt: s.dt * k, col: s.col ?? null }));
       rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
       g.baseSpr.texture = new PIXI.Texture(tex);
       // (dark: cracks and inked lips first)
@@ -727,6 +730,7 @@ export class DestructionDisplay {
     const list = [], byPiece = new Map();
     g.pieces.forEach((p, n) => {
       if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
+      if ( coll ) { const it = coll.piece(p, n); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
@@ -742,6 +746,7 @@ export class DestructionDisplay {
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
+    if ( coll ) { g.anim.coll = coll; g.anim.end = Math.max(g.anim.end, coll.endBy + 200 * k); }
     // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
     this.debris.hideRest(g);
     this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k);
@@ -880,6 +885,7 @@ export class DestructionDisplay {
   endAnim(g) {
     const a = g.anim; if ( !a ) return;
     g.anim = null;
+    collapseEnd(this, g, a);
     // nothing of the entry floats on: its chunks are down (the staying ones shown), its particles end within 300 ms
     this.debris?.endArea(g);
     { const t = performance.now(); for ( const q of this.particles ) if ( q.g === g ) q.life = Math.min(q.life, t - q.born + 300); }
@@ -952,6 +958,7 @@ export class DestructionDisplay {
       return;
     }
     if ( a.tear ) { tearPlace(this, p, t, a); if ( s.visible && !this.inScene(s.x, s.y) ) s.visible = false; return; }
+    if ( a.coll ) { collapsePlace(this, p, t, a); if ( s.visible && !this.inScene(s.x, s.y) ) s.visible = false; return; }
     const tm = t * a.dur;
     if ( tm < 0 ) {
       // anticipation: it appears where it lies and shivers before it gives
@@ -1273,6 +1280,7 @@ export class DestructionDisplay {
       a.fx.push({ g: gr, kind: "ring", t0: a.start + at, dur, color, maxR, width, ...extra });
     });
     if ( a.tear ) tearFx(this, g, a, now, el);
+    else if ( a.coll ) collapseFx(this, g, a, now, el);
     else if ( a.path ) this.pathEffects(g, a, now, el);
     else if ( type === "blast" ) {
       once("flash", 0, () => {

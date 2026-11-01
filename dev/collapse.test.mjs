@@ -128,8 +128,10 @@ for ( const kind of ["stone", "grass", "wood"] ) for ( const level of [1, 2, 3] 
     const px = x - dx, py = y - dy; if ( px >= 0 && py >= 0 && px < CW && py < CH && ink[py * CW + px] ) continue;   // not a run's start
     let n = 0, X = x, Y = y; while ( X >= 0 && Y >= 0 && X < CW && Y < CH && ink[Y * CW + X] ) { n++; X += dx; Y += dy; }
     if ( n > worstRun ) worstRun = n;
+    if ( n >= 12 && verbose ) console.log(`ink run ${n} in ${id} at ${x},${y} dir ${dx},${dy}`);
   }
   if ( process.env.DUMP === id ) (await import("node:fs")).writeFileSync(process.env.DUMP_TO, comp);   // raw RGBA CW x CH, for a look
+  if ( process.env.DUMPMASK === id ) for ( let y = 10; y < 110; y++ ) { let s = ""; for ( let x = 30; x < 140; x++ ) s += own[y * CW + x] ? "#" : (lum(comp, (y * CW + x) * 4) < lum(map, (y * CW + x) * 4) * 0.55 ? "x" : "."); console.log(y, s); }
   // the void: near-black pixels in the pit
   // (not on planks: the dark of a plank floor's cavity is near-black by its palette)
   let v = 0, n = 0; for ( let i = 0; i < CW * CH; i++ ) if ( own[i] ) { n++; if ( lum(comp, i * 4) < 22 ) v++; }

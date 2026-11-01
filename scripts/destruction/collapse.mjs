@@ -52,28 +52,43 @@ export function collapseOutline({ ob, K, Rb, os, directional, lvT }) {
   // the sampling radius scale by angle: s > 1 pulls the rim in, s < 1 pushes it out (outline radius ~ Rb / s)
   const H2 = [0.13 + 0.06 * r(1), r(2) * TAU], H3 = [0.09 + 0.05 * r(3), r(4) * TAU], H5 = [0.045 + 0.03 * r(5), r(6) * TAU], H8 = [0.025, r(7) * TAU];
   const notches = Array.from({ length: 2 + (r(8) < 0.5 ? 1 : 0) }, (_, q) => ({ a: r(10 + q) * TAU, d: 0.16 + 0.12 * r(20 + q), w: 0.16 + 0.12 * r(30 + q) }));
-  const sOf = (a) => {
+  const sRaw = (a) => {
     let s = 1 + H2[0] * Math.cos(2 * a + H2[1]) + H3[0] * Math.cos(3 * a + H3[1]) + H5[0] * Math.cos(5 * a + H5[1]) + H8[0] * Math.cos(8 * a + H8[1]);
     for ( const n of notches ) { const t = 1 - angDist(a, n.a) / n.w; if ( t > 0 ) s += n.d * t * t; }
+    // a finer wobble along the rim (noise round the circle, ~6 px of rim per lattice cell): no straight stretch of outline
+    s += (vnoise(Math.cos(a) * Rb / 6 + 40, Math.sin(a) * Rb / 6 + 40, os + 31) - 0.5) * 0.16;
     return clamp(s, 0.7, 1.6);
   };
-  // the mask read SMOOTHED (two box blurs of radius 2 mask px): a brush disc of mask pixels has straight runs along its top, bottom and
+  // area kept: the pit covers as much ground as the brush did (mean of 1 / s^2 round the circle = 1), so a level never looks smaller
+  // than the one below it by the luck of its notches
+  let m2 = 0; for ( let q = 0; q < 96; q++ ) m2 += 1 / sRaw(q / 96 * TAU) ** 2;
+  const norm = Math.sqrt(m2 / 96), sOf = (a) => sRaw(a) * norm;
+  // the mask read SMOOTHED (three box blurs of radius 3 mask px): a brush disc of mask pixels has straight runs along its top, bottom and
   // sides, and the reshaping above would stretch them into long straight edges
-  const P = 6, BW = ob.w + 2 * P, BH = ob.h + 2 * P;
+  // The occupancy (damaged or not) is blurred and sharpened again round its half; the level comes from the nearest damaged mask
+  // pixel - so a level-1 tap keeps a whole outline (a blurred level 1 sank under the edge noise and broke into crumbs).
+  const P = 11, BW = ob.w + 2 * P, BH = ob.h + 2 * P;
   let a = new Float32Array(BW * BH), b = new Float32Array(BW * BH);
-  for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) a[y * BW + x] = lvT(ob.x0 + x - P, ob.y0 + y - P);
-  for ( let pass = 0; pass < 2; pass++ ) {
-    for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) { let s = 0; for ( let k = -2; k <= 2; k++ ) s += a[y * BW + clamp(x + k, 0, BW - 1)]; b[y * BW + x] = s / 5; }
-    for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) { let s = 0; for ( let k = -2; k <= 2; k++ ) s += b[clamp(y + k, 0, BH - 1) * BW + x]; a[y * BW + x] = s / 5; }
+  const lv = new Uint8Array(BW * BH);
+  for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) { const v = lvT(ob.x0 + x - P, ob.y0 + y - P); lv[y * BW + x] = v; a[y * BW + x] = v ? 1 : 0; }
+  // (the level grown outwards by nine mask px - past the blur - so the sharpened edge never reads a 0 level and is never cut straight)
+  const lvd = lv.slice();
+  for ( let pass = 0; pass < 9; pass++ ) { const src = lvd.slice(); for ( let y = 1; y < BH - 1; y++ ) for ( let x = 1; x < BW - 1; x++ ) { const i = y * BW + x; lvd[i] = Math.max(src[i], src[i - 1], src[i + 1], src[i - BW], src[i + BW]); } }
+  for ( let pass = 0; pass < 3; pass++ ) {
+    for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) { let s = 0; for ( let k = -3; k <= 3; k++ ) s += a[y * BW + clamp(x + k, 0, BW - 1)]; b[y * BW + x] = s / 7; }
+    for ( let y = 0; y < BH; y++ ) for ( let x = 0; x < BW; x++ ) { let s = 0; for ( let k = -3; k <= 3; k++ ) s += b[clamp(y + k, 0, BH - 1) * BW + x]; a[y * BW + x] = s / 7; }
   }
-  const at = (mx, my) => { const x = mx - ob.x0 + P, y = my - ob.y0 + P; return x < 0 || y < 0 || x >= BW || y >= BH ? 0 : a[y * BW + x]; };
+  const at = (arr, mx, my) => { const x = mx - ob.x0 + P, y = my - ob.y0 + P; return x < 0 || y < 0 || x >= BW || y >= BH ? 0 : arr[y * BW + x]; };
   return {
-    margin: Math.ceil(Rb * 0.45) + 2,
-    /** The smoothed level at mask coordinates (mx, my), bilinear. */
+    // (room for the outward lobes plus the organic warp on top of them: a window too tight cut a lobe off flat)
+    margin: Math.ceil(Rb * 0.5 + 0.45 * clamp(Rb * 0.27, 1.2, 12)) + 4,
+    /** The level at mask coordinates (mx, my): the smoothed outline (bilinear occupancy, sharpened) times the mask's level there. */
     sample(mx, my) {
       const ix = Math.floor(mx), iy = Math.floor(my), fx = mx - ix, fy = my - iy;
-      const p = at(ix, iy), q = at(ix + 1, iy), r2 = at(ix, iy + 1), s = at(ix + 1, iy + 1);
-      return (p + (q - p) * fx) * (1 - fy) + (r2 + (s - r2) * fx) * fy;
+      const p = at(a, ix, iy), q = at(a, ix + 1, iy), r2 = at(a, ix, iy + 1), s = at(a, ix + 1, iy + 1);
+      const occ = (p + (q - p) * fx) * (1 - fy) + (r2 + (s - r2) * fx) * fy;
+      const L = at(lvd, Math.round(mx), Math.round(my));
+      return L * clamp((occ - 0.5) * 2.5 + 0.5, 0, 1);
     },
     warp(ax, ay) {
       const dx = ax - cx, dy = ay - cy, d = Math.hypot(dx, dy);
