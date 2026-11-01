@@ -699,6 +699,15 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-d-areas li { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr) auto; align-items: center; gap: 0.45rem; padding: 0.3rem 0.45rem; background: var(--mm-ws-raise); border-radius: 4px; }
 .mm-d-areas li > i { color: var(--mm-sec, var(--mm-accent)); text-align: center; }
 .mm-d-mat { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+/* causes: the bar's cause buttons (each in its own ink), and every stroke's cause in the Damage list */
+.mm-d-causes { flex-wrap: wrap; }
+.mm-d-objs { max-height: 18rem; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--mm-ws-edge) transparent; }
+.mm-d-objs li { grid-template-columns: 1.2rem minmax(0, 1fr) minmax(0, max-content) minmax(6.5rem, 9rem); }
+.mm-d-objs .mm-d-mat { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-d-cause { display: inline-flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.mm-d-cause > i { flex: none; width: 1rem; text-align: center; color: color-mix(in srgb, var(--mm-tool, var(--mm-ws-muted)) 85%, #fff); }
+.mm-d-cause select { flex: 1; min-width: 0; height: 1.6rem; font-size: var(--font-size-12, 0.75rem); }
+#interface.theme-light .mm-d-cause > i, body.theme-light .mm-d-cause > i { color: color-mix(in srgb, var(--mm-tool, var(--mm-ws-muted)) 80%, #15110f); }
 .mm-d-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.55rem; }
 .mm-d-actions .mm-ws-btn:disabled { opacity: 0.45; cursor: default; }
 .mm-d-form { display: grid; gap: 0.45rem; }

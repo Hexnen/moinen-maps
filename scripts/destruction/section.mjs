@@ -8,13 +8,21 @@ import * as D from "./destruction.mjs";
 /**
  * Destruction as a workspace section (takes over the "destruction" placeholder of workspace/soon.mjs).
  *  - bar: a hand (the map as usual), the damage brush and the eraser; the brush's options are its size, its level (cracked, broken,
- *    crater) and the kind of damage; Detonate replays the break for everyone.
- *  - dock: Damage (what the bake found: each area's kind and the surface it tore up, the bake state, variation, clear),
- *    Look (how much debris, how far it flies, how it heaves, rubble, halo, ragged edge, the surface underneath) and Motion.
+ *    crater), the kind of damage and its cause (what did it; "scene default" stores none); Detonate replays the break for everyone.
+ *  - dock: Damage (every stroke, newest first: its kind, the surface it tore up and its cause, changeable per stroke; the bake state,
+ *    variation, clear), Look (the scene's default cause, how much debris, how far it flies, how it heaves, rubble, halo, ragged edge,
+ *    the surface underneath) and Motion.
  */
 const TOOLS = { "mm-d-pick": null, "mm-d-paint": "paint", "mm-d-erase": "erase" };
 const TYPE_ICON = { blast: "fa-solid fa-explosion", collapse: "fa-solid fa-hill-rockslide", scorch: "fa-solid fa-fire", flood: "fa-solid fa-water", cracks: "fa-solid fa-burst", gash: "fa-solid fa-paw" };
 const LEVEL_COLOR = ["", "#f2c14e", "#ef8a3a", "#e0453a"];
+/** Causes (what did the damage): an icon and an ink each; "none" is the scene default. */
+const CAUSE_ICON = { none: "fa-regular fa-circle", fire: "fa-solid fa-fire-flame-curved", acid: "fa-solid fa-flask", lightning: "fa-solid fa-bolt", arcane: "fa-solid fa-wand-sparkles",
+  impact: "fa-solid fa-meteor", claws: "fa-solid fa-dragon", water: "fa-solid fa-droplet", decay: "fa-solid fa-hourglass-half", frost: "fa-solid fa-snowflake" };
+const CAUSE_INK = { none: "", fire: "#ff8a3c", acid: "#a8e04a", lightning: "#9fd2ff", arcane: "#c08cff", impact: "#d9c3a5", claws: "#e8dcc8", water: "#6fb7ff", decay: "#9aa868", frost: "#dff0ff" };
+const causeName = (c) => T(c ? `Destr.cause.${Model.CAUSES[c]}` : "Destr.causeNone");
+/** The cause options of a select: 0 = the scene default (named), then every cause. */
+const causeOptions = (zeroLabel) => Model.CAUSES.map((c, i) => [i, i ? causeName(i) : zeroLabel]);
 
 /**
  * Kill switch, per browser: localStorage "mm-destruction" = "off" leaves the feature out entirely (no hooks, no section; the
@@ -71,15 +79,24 @@ function bar(host, ctx) {
   else {
     const levels = Model.LEVELS.map((l) => `<button type="button" class="mm-ws-toolbtn mm-d-level" data-level="${l}" aria-pressed="${l === b.level}" style="--mm-tool:${LEVEL_COLOR[l]}" data-tooltip="${esc(T(`Destr.levelHint${l}`))}"><span class="mm-d-dot" inert></span><span>${esc(T(`Destr.level${l}`))}</span></button>`).join("");
     const types = Model.TYPES.map((t, i) => `<button type="button" class="mm-ws-toolbtn" data-type="${i}" aria-pressed="${i === b.type}" aria-label="${esc(T(`Destr.type.${t}`))}" data-tooltip="${esc(`${T(`Destr.type.${t}`)}: ${T(`Destr.typeHint.${t}`)}`)}"><i class="${TYPE_ICON[t]}" inert></i></button>`).join("");
+    // the cause: 0 = the scene's default (the stroke stores none), named in its tooltip
+    const sceneCause = causeName(P0().cause ?? 0);
+    const causes = Model.CAUSES.map((c, i) => {
+      const name = i ? causeName(i) : game.i18n.format("MOINENMAPS.Destr.causeDefault", { cause: sceneCause });
+      const tip = `${name}: ${T(`Destr.causeHint.${c}`)} (Shift+${i})`;
+      return `<button type="button" class="mm-ws-toolbtn mm-d-causebtn" data-cause="${i}" aria-pressed="${i === b.cause}" aria-label="${esc(name)}" data-tooltip="${esc(tip)}"${CAUSE_INK[c] ? ` style="--mm-tool:${CAUSE_INK[c]}"` : ""}><i class="${CAUSE_ICON[c]}" inert></i></button>`;
+    }).join("");
     host.innerHTML = `${size}
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
+      <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.causeLabel"))}</span><div class="mm-ws-tools mm-d-causes" role="group" aria-label="${esc(T("Destr.causeLabel"))}">${causes}</div></div>
       <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}</div></div>
       ${optHint(T("Destr.paintHint"))}`;
   }
   const onClick = (ev) => {
-    const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]");
+    const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]"), cb = ev.target.closest("[data-cause]");
     if ( qb ) D.setParams({ [qb.dataset.quick]: !P0()[qb.dataset.quick] });
+    if ( cb && Number(cb.dataset.cause) !== Editor.brush().cause ) game.settings.set(MODULE_ID, "destrCause", Number(cb.dataset.cause));
     if ( lb && Number(lb.dataset.level) !== Editor.brush().level ) game.settings.set(MODULE_ID, "destrLevel", Number(lb.dataset.level));
     if ( tb && Number(tb.dataset.type) !== Editor.brush().type ) game.settings.set(MODULE_ID, "destrType", Number(tb.dataset.type));
   };
@@ -91,11 +108,18 @@ function bar(host, ctx) {
   };
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   const id = Hooks.on("moinenMapsDestruction", (kind) => {
-    if ( kind === "params" || kind === "loaded" ) { for ( const x of host.querySelectorAll("[data-quick]") ) x.setAttribute("aria-pressed", String(!!P0()[x.dataset.quick])); return; }
+    if ( kind === "params" || kind === "loaded" ) {
+      for ( const x of host.querySelectorAll("[data-quick]") ) x.setAttribute("aria-pressed", String(!!P0()[x.dataset.quick]));
+      // the "scene default" button names the scene's cause
+      const d0 = host.querySelector("[data-cause='0']");
+      if ( d0 ) { const name = game.i18n.format("MOINENMAPS.Destr.causeDefault", { cause: causeName(P0().cause ?? 0) }); d0.setAttribute("aria-label", name); d0.dataset.tooltip = `${name}: ${T("Destr.causeHint.none")} (Shift+0)`; }
+      return;
+    }
     if ( kind !== "brush" ) return;
     const nb = Editor.brush();
     for ( const x of host.querySelectorAll("[data-level]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.level) === nb.level));
     for ( const x of host.querySelectorAll("[data-type]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.type) === nb.type));
+    for ( const x of host.querySelectorAll("[data-cause]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.cause) === nb.cause));
     const s = host.querySelector("[name=size]"); if ( s && !s.contains(document.activeElement) ) writeControl(s, nb.size);
   });
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off("moinenMapsDestruction", id); };
@@ -120,9 +144,20 @@ function statusLine() {
 function mountDamage(host) {
   const render = () => {
     const st = D.getStatus(), S = D.state();
-    const areas = st.areas.map((a, i) => `<li><i class="${TYPE_ICON[a.type] ?? TYPE_ICON.blast}" inert></i><span>${esc(T(`Destr.type.${a.type}`))}</span><span class="mm-d-mat">${esc(T(`Destr.mat.${a.mat}`))}</span></li>`).join("");
+    // one row per stroke (newest first): its kind, the surface it tore up, and its cause (a select: change it and only that stroke
+    // bakes again); "scene default" names the cause it follows
+    const matOf = new Map();
+    for ( const a of st.areas ) if ( a.obj && !matOf.has(a.obj) ) matOf.set(a.obj, a.mat);
+    const def = Model.causeOf(S?.params?.cause), zero = game.i18n.format("MOINENMAPS.Destr.causeDefault", { cause: causeName(def) });
+    const gm = game.user.isGM;
+    const rows = (S?.objects ?? []).filter((o) => !o.k).reverse().map((o) => {
+      const t = Model.TYPES[o.t] ?? "blast", c = Model.causeOf(o.c), eff = Model.CAUSES[c || def], mat = matOf.get(o.id);
+      const opts = causeOptions(zero).map(([v, l]) => `<option value="${v}"${v === c ? " selected" : ""}>${esc(l)}</option>`).join("");
+      return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span>${esc(T(`Destr.type.${t}`))}</span><span class="mm-d-mat">${mat ? esc(T(`Destr.mat.${mat}`)) : ""}</span>
+        <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span></li>`;
+    }).join("");
     host.innerHTML = `<p class="mm-d-status" role="status">${esc(statusLine())}</p>
-      ${areas ? `<ul class="mm-d-areas" aria-label="${esc(T("Destr.areasLabel"))}">${areas}</ul>` : ""}
+      ${rows ? `<ul class="mm-d-areas mm-d-objs" aria-label="${esc(T("Destr.strokesLabel"))}">${rows}</ul>` : ""}
       <div class="mm-d-actions">
         <button type="button" class="mm-ws-btn" data-act="detonate"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-explosion" inert></i> ${esc(T("Destr.detonate"))}</button>
         <button type="button" class="mm-ws-btn" data-act="variation"${S && Model.hasPaint(S) ? "" : " disabled"} data-tooltip="${esc(T("Destr.variationHint"))}"><i class="fa-solid fa-dice" inert></i> ${esc(T("Destr.variation"))}</button>
@@ -141,7 +176,10 @@ function mountDamage(host) {
       if ( ok ) D.clearAll();
     }
   };
-  const onChange = (ev) => { if ( ev.target.name === "enabled" && ev.target.checked !== (D.state()?.enabled ?? true) ) D.setEnabled(ev.target.checked); };
+  const onChange = (ev) => {
+    if ( ev.target.name === "enabled" && ev.target.checked !== (D.state()?.enabled ?? true) ) D.setEnabled(ev.target.checked);
+    if ( ev.target.dataset?.causeOf ) { D.setObjectCause(ev.target.dataset.causeOf, Number(ev.target.value)); ev.target.blur(); }
+  };
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   let frame = 0;
   const id = Hooks.on("moinenMapsDestruction", () => { if ( frame ) return; frame = requestAnimationFrame(() => { frame = 0; if ( !host.contains(document.activeElement) || document.activeElement === document.body ) render(); else host.querySelector(".mm-d-status").textContent = statusLine(); }); });
@@ -152,6 +190,7 @@ function mountLook(host) {
   const P = D.state()?.params ?? Model.PARAM_DEFAULTS, L = Model.LIMITS;
   const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Destr.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Destr.h.${k}`) });
   host.innerHTML = `<div class="mm-d-form">
+    ${optSelect({ name: "p.cause", label: T("Destr.f.cause"), value: Model.causeOf(P.cause), hint: T("Destr.h.cause"), options: causeOptions(T("Destr.causeNone")) })}
     ${optSelect({ name: "p.material", label: T("Destr.f.material"), value: P.material, hint: T("Destr.h.material"), options: Model.MATERIALS.map((m) => [m, T(`Destr.mat.${m}`)]) })}
     ${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}${range("edge")}
     ${optCheck({ name: "p.jagged", label: T("Destr.f.jagged"), checked: P.jagged, hint: T("Destr.h.jagged") })}
