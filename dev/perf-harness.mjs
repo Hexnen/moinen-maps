@@ -349,6 +349,17 @@ export function instrument() {
   wrapObj(PIXI.Container.prototype, "sortChildren", () => bump(c.gl, "sortChildren"));
   wrapObj(PIXI.Texture, "from", () => bump(c.gl, "Texture.from"));
   if ( R.filter ) wrapObj(R.filter, "push", () => bump(c.gl, "filterPass"));
+  // timers: a callback longer than 2 ms is counted as a task between frames (label: the start of its source)
+  c.tasks = {};
+  for ( const k of ["setTimeout", "setInterval"] ) {
+    const o = globalThis[k];
+    globalThis[k] = function(fn, ...a) {
+      if ( typeof fn !== "function" ) return o.call(this, fn, ...a);
+      return o.call(this, function(...b) { const t = performance.now(); try { return fn.apply(this, b); } finally { const ms = performance.now() - t;
+        if ( ms > 2 ) bump(c.tasks, `${k}:${String(fn).slice(0, 70).replace(/\s+/g, " ")}`, ms); } }, ...a);
+    };
+    undo.push(() => { globalThis[k] = o; });
+  }
   // hooks: the time of every callAll / call, and of each canvasPan listener on its own
   for ( const k of ["callAll", "call"] ) {
     const o = Hooks[k];
@@ -369,7 +380,7 @@ export function instrument() {
   }
   const r2 = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +v.toFixed(2)]));
   return {
-    snap() { const out = { hooks: r2(c.hooks), hookMs: r2(c.hookMs), pan: r2(c.pan), tick: r2(c.tick), gl: r2(c.gl) }; for ( const k of Object.keys(c) ) c[k] = {}; fr = {}; return out; },
+    snap() { const out = { hooks: r2(c.hooks), hookMs: r2(c.hookMs), pan: r2(c.pan), tick: r2(c.tick), gl: r2(c.gl), tasks: r2(c.tasks) }; for ( const k of Object.keys(c) ) c[k] = {}; fr = {}; return out; },
     frame() { const f = fr; fr = {}; return f; },
     restore() { for ( const u of undo.reverse() ) u(); }
   };
@@ -394,8 +405,13 @@ export async function runFrames(frames, { hz = 165, cb = null } = {}) {
   try {
     for ( let i = 0; i < frames.length; i++ ) {
       slot += per;
-      let gap = 0;
-      while ( performance.now() < slot - 0.3 ) { const a = performance.now(); await yieldTask(); gap = Math.max(gap, performance.now() - a); }
+      let gap = 0, gc = 0;
+      while ( performance.now() < slot - 0.3 ) {
+        const a = performance.now(), h0 = performance.memory?.usedJSHeapSize ?? 0;
+        await yieldTask();
+        const g = performance.now() - a, h1 = performance.memory?.usedJSHeapSize ?? 0;
+        if ( g > gap ) { gap = g; gc = h0 - h1 > 1 << 20 ? (h0 - h1) / 1048576 : 0; }   // the heap shrank by > 1 MB meanwhile: a GC
+      }
       until(slot);
       const now0 = performance.now();
       if ( now0 - slot > per ) slot = Math.ceil((now0 - t00) / per) * per + t00;   // late: the next vsync after it
@@ -408,7 +424,7 @@ export async function runFrames(frames, { hz = 165, cb = null } = {}) {
       if ( ext ) gl.endQuery(ext.TIME_ELAPSED_EXT);
       gl.finish();
       const t1 = performance.now();
-      rows.push({ input: ti - t, cpu: t1 - t, q, t: t - t00, gap, interval: prev === null ? per : t - prev });
+      rows.push({ input: ti - t, cpu: t1 - t, q, t: t - t00, gap, gc, interval: prev === null ? per : t - prev });
       prev = t;
       cb?.(i, t);
     }
@@ -444,15 +460,18 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
     const phase = async (name, frames) => { inst.snap(); const fl = [];
       const rows = await runFrames(frames, { hz, cb: (i) => { fl[i] = inst.frame(); fl[i].zoom = +canvas.stage.scale.x.toFixed(3); } }); const s = inst.snap();
       // the long frames with what ran in them (ms per ticker listener / canvasPan listener, GL counts)
-      const spikes = rows.map((x, i) => [i, x.cpu, fl[i], x.gap]).filter((x) => x[1] + x[3] > 8).sort((a, b) => b[1] + b[3] - a[1] - a[3]).slice(0, 6)
-        .map(([i, ms, f, gap]) => ({ i, ms: +ms.toFixed(1), gap: +gap.toFixed(1), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v >= 0.5).map(([k, v]) => [k.slice(0, 40), +v.toFixed(1)])) }));
+      const spikes = rows.map((x, i) => [i, x.cpu, fl[i], x.gap, x.gc]).filter((x) => x[1] + x[3] > 8).sort((a, b) => b[1] + b[3] - a[1] - a[3]).slice(0, 6)
+        .map(([i, ms, f, gap, gc]) => ({ i, ms: +ms.toFixed(1), gap: +gap.toFixed(1), gcMB: +gc.toFixed(1), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v >= 0.5).map(([k, v]) => [k.slice(0, 40), +v.toFixed(1)])) }));
       // GPU-side work started during the gesture (frames with input and the 30 after the last one: ~180 ms of settle)
       const last = frames.reduce((a, f, i) => (f ? i : a), -1);
-      const heavy = ["createTexture", "texImage2D", "RenderTexture.create", "generateMipmap", "Texture.from"];
-      const during = {}; for ( let i = 0; i <= Math.min(rows.length - 1, last + 30); i++ ) for ( const k of heavy ) if ( fl[i]?.[k] ) during[k] = (during[k] ?? 0) + fl[i][k];
+      // (generateMipmap alone is not counted: PIXI rebuilds a texture's mipmaps on the GPU when its scaleMode changes - the destruction
+      // layer's NEAREST / LINEAR switch at 2.6 / 3 screen px per art pixel, 37 small shard atlases, ~0 ms - it is reported as `mips`)
+      const heavy = ["createTexture", "texImage2D", "texSubImage2D", "RenderTexture.create", "Texture.from"];
+      const during = {}; let mips = 0;
+      for ( let i = 0; i <= Math.min(rows.length - 1, last + 30); i++ ) { mips += fl[i]?.generateMipmap ?? 0; for ( const k of heavy ) if ( fl[i]?.[k] ) during[k] = (during[k] ?? 0) + fl[i][k]; }
       out[name] = { frames: rows.length, cost: dist(rows.map((x) => x.cpu + Math.max(0, x.gap - 0.2))), cpu: dist(rows.map((x) => x.cpu)), gap: dist(rows.map((x) => x.gap)),
         input: dist(rows.map((x) => x.input)), gpu: dist(rows.filter((x) => x.gpu !== undefined).map((x) => x.gpu)),
-        zoom: +canvas.stage.scale.x.toFixed(3), during, spikes, ...s };
+        zoom: +canvas.stage.scale.x.toFixed(3), during, mips, spikes, ...s };
       const c = out[name].cost;
       out[name].pass = c.p99 < 8 && c.max < 16 && c.over33 === 0 && (name === "rest" || !Object.keys(during).length); };
     await phase("rest", idle(165));
@@ -470,6 +489,78 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
   out.pass = Object.values(out).every((v) => v.pass);
   if ( !quiet ) console.log("zoomBench", out);
   return out;
+}
+
+/**
+ * ANIMATION PACING BENCHMARK (the settled scene's continuous animation: painted water loop, cars, pins, lights, flood loops).
+ * The canvas ticker is driven through its own requestAnimationFrame callback (`ticker._tick`) with vsync timestamps at `hz`
+ * (rAF stubbed, real time kept by busy-waiting), so Foundry's fps cap / the frame pacing gate (scripts/view-smooth.mjs) decide which
+ * vsyncs draw - as in a browser on a `hz` display. `pacing`: "foundry" (PIXI's own cap), "even", "display" (the client setting is
+ * set for the run and put back). Per drawn frame: its vsync time, CPU; tracked: the painted water's frame (texture), the first
+ * visible cars' positions, the pins' body transform. Returns:
+ *  - frames: drawn frames, fps, gap CV (stddev / mean of the gaps between drawn frames; 0 = perfectly even), gap kinds in vsyncs;
+ *  - water: per shown loop frame how long it stayed on screen (ms): mean, CV, and how many of them were held 1 drawn frame more or
+ *    less than the median (the stepped loop's own quantisation);
+ *  - cars: per car the screen speed between drawn frames (px per ms) - its CV over the run (constant speed = 0 at even pacing) and
+ *    the mean |second difference| of the displacement per vsync (jerk);
+ *  - cpu: the drawn frames' CPU distribution.
+ */
+export async function animBench({ hz = 165, seconds = 3, pacing = "even" } = {}) {
+  const T = canvas.app.ticker, per = 1000 / hz, MID = "moinen-maps";
+  const was = game.settings.get(MID, "framePacing");
+  if ( was !== pacing ) await game.settings.set(MID, "framePacing", pacing);
+  const VS = await import("../scripts/view-smooth.mjs");
+  VS.applyPacing();
+  // the tracked objects
+  const water = canvas.primary.children.find((c) => c.sortLayer === 240 && c.children[0] instanceof PIXI.Sprite)?.children[0];
+  const cars = []; const walk = (o) => { for ( const c of o.children ?? [] ) { if ( c.constructor.name === "CarSprite" ) { if ( c.visible && c.worldVisible ) cars.push(c); } else walk(c); } };
+  walk(canvas.primary); cars.splice(6);
+  const pins = canvas.notes.placeables.map((n) => n.children.find((c) => c.constructor.name === "Pin")).filter(Boolean).slice(0, 4);
+  // a drawn frame = one that reached the renderer (PIXI's cap returns early inside update())
+  const oraf = globalThis.requestAnimationFrame, ou = T.update, R = canvas.app.renderer, orr = R.render; let drew = false, cpu = 0;
+  globalThis.requestAnimationFrame = () => 0;
+  R.render = function(...a) { drew = true; return orr.apply(this, a); };
+  T.update = function(t) { const a = performance.now(); ou.call(this, t); cpu = performance.now() - a; };
+  const rows = [];
+  const t0 = performance.now(); let t = t0;
+  try {
+    while ( t - t0 < seconds * 1000 ) {
+      t += per;
+      until(t);
+      drew = false;
+      T._tick(t + (Math.random() - 0.5) * 0.3);
+      if ( !drew ) continue;
+      const g = canvas.stage.worldTransform;
+      rows.push({ t, cpu, tex: water?.texture?.baseTexture?.uid ?? null,
+        cars: cars.map((c) => { const p = c.getGlobalPosition(); return [p.x, p.y, c.visible]; }),
+        pins: pins.map((p) => [p.body.scale.y, p.body.y]) });
+    }
+  } finally {
+    delete T.update; delete R.render; globalThis.requestAnimationFrame = oraf;
+    if ( was !== pacing ) await game.settings.set(MID, "framePacing", was);
+    VS.applyPacing(); T.start();
+  }
+  const cv = (a) => { if ( a.length < 2 ) return null; const m = a.reduce((x, y) => x + y, 0) / a.length; const v = a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length; return m ? +(Math.sqrt(v) / m).toFixed(3) : null; };
+  const gaps = rows.slice(1).map((r, i) => r.t - rows[i].t), kinds = {};
+  for ( const x of gaps ) { const k = Math.round(x / per); kinds[k] = (kinds[k] ?? 0) + 1; }
+  // water: hold time of each loop frame (first and last are cut off)
+  const holds = []; let since = null;
+  for ( let i = 1; i < rows.length; i++ ) if ( rows[i].tex !== rows[i - 1].tex ) { if ( since !== null ) holds.push(rows[i].t - since); since = rows[i].t; }
+  const hm = holds.length ? [...holds].sort((a, b) => a - b)[holds.length >> 1] : 0;
+  const carStats = cars.map((_, k) => {
+    const sp = [], d = [];
+    for ( let i = 1; i < rows.length; i++ ) {
+      const a = rows[i - 1].cars[k], b = rows[i].cars[k]; if ( !a?.[2] || !b?.[2] ) continue;
+      const dist = Math.hypot(b[0] - a[0], b[1] - a[1]); if ( dist > 200 ) continue;           // a respawn
+      sp.push(dist / (rows[i].t - rows[i - 1].t)); d.push(dist / Math.max(1, Math.round((rows[i].t - rows[i - 1].t) / per)));
+    }
+    const jerk = d.slice(1).map((x, i) => Math.abs(x - d[i]));
+    return { speedCV: cv(sp.filter((x) => x > 0.005)), meanSpeed: sp.length ? +(sp.reduce((x, y) => x + y, 0) / sp.length).toFixed(4) : 0,
+      jerk: jerk.length ? +(jerk.reduce((x, y) => x + y, 0) / jerk.length).toFixed(4) : null };
+  }).filter((c) => c.meanSpeed > 0.005);
+  return { pacing, hz, frames: rows.length, fps: +(rows.length / seconds).toFixed(1), gapCV: cv(gaps), gapsInVsyncs: kinds,
+    water: { frames: holds.length, holdMs: hm ? +hm.toFixed(1) : null, holdCV: cv(holds), off: holds.filter((x) => Math.abs(x - hm) > per / 2).length },
+    cars: carStats, cpu: dist(rows.map((r) => r.cpu)) };
 }
 
 /** Compact table of a zoomBench result: per phase [frames, zoom, cost p50, p95, p99, max, >6.06 ms, >16.7, >33.3, gpu p50, gpu p95, longest
