@@ -842,7 +842,7 @@
   "MOINENMAPS.Destr.typeHint.scorch": "spalona nawierzchnia, zwęglenie i żar",
   "MOINENMAPS.Destr.typeHint.flood": "dziura wypełniona wodą, płyty zatopione",
   "MOINENMAPS.Destr.typeHint.cracks": "popękany grunt, nic nie wylatuje",
-  "MOINENMAPS.Destr.typeHint.gash": "ślady pazurów lub ostrza wzdłuż pociągnięcia",
+  "MOINENMAPS.Destr.typeHint.gash": "powierzchnia rozdarta wzdłuż pociągnięcia",
   "MOINENMAPS.Destr.paintHint": "Shift+pociągnięcie pogłębia o poziom. 1 2 3 poziom, [ ] rozmiar, Ctrl+Z cofnij.",
   "MOINENMAPS.Destr.empty": "Na tej scenie nie ma jeszcze zniszczeń. Weź pędzel i maluj.",
   "MOINENMAPS.Destr.error": "Wypiekanie nie powiodło się",
