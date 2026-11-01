@@ -62,7 +62,9 @@ export function bakeTear(X) {
   const pal = C.pal, rp = pal.ramp, ink = pal.ink;
   const maxD = Math.max(1.5, C.maxD);
   const debrisK = clamp(P.debris ?? 0.7, 0, 1), rubbleK = clamp(P.rubble ?? 0.6, 0, 1);
-  const mapAt = (x, y) => { x = clamp(Math.round(x), 0, W - 1); y = clamp(Math.round(y), 0, H - 1); const o = (y * W + x) * 4; return [map[o], map[o + 1], map[o + 2]]; };
+  // the map beside a pulled lip: past the window's edge (the scene's edge at a border) it is mirrored, never the last row smeared out
+  const mir = (v, n) => { v = Math.round(v); if ( n < 2 ) return 0; const p = 2 * n - 2; v = ((v % p) + p) % p; return v < n ? v : p - v; };
+  const mapAt = (x, y) => { x = mir(x, W); y = mir(y, H); const o = (y * W + x) * 4; return [map[o], map[o + 1], map[o + 2]]; };
   const isOwn = (x, y) => x >= 0 && y >= 0 && x < W && y < H && own[y * W + x] === 1;
   const nearOwn = (x, y, r) => { const X0 = Math.round(x), Y0 = Math.round(y); for ( let dy = -r; dy <= r; dy++ ) for ( let dx = -r; dx <= r; dx++ ) if ( isOwn(X0 + dx, Y0 + dy) ) return true; return false; };
 
