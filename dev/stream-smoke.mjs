@@ -15,7 +15,10 @@ export async function run({ wait = 4000 } = {}) {
   await sleep(600);
   check("status after the bake", () => { const s = D.status(); return /baked 1/.test(s.source) && !s.error; });
   await sleep(wait);
-  const f = canvas.scene.flags["moinen-maps"].destruction, id = f.o.at(-1).id;
+  // the newest stroke: layout 3 keeps the strokes under their own key (place `s`), layout 2 in the array `o`
+  const F = canvas.scene.flags["moinen-maps"], f = F.destruction;
+  const objs = F.destructionObjects ? Object.values(F.destructionObjects).sort((a, b) => a.s - b.s) : f.o;
+  const id = objs.at(-1).id;
   check("status after the publish", () => { const s = D.status(); return !s.error && s.baked?.v === 2; });
   check("one chunk uploaded", () => D.net.stats().uploads === 1);
   check("manifest names the stroke", () => typeof f.baked?.c?.[id] === "string");

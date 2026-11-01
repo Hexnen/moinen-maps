@@ -234,7 +234,10 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   // AWAIT_CHUNK; a chunk that was named but could not be had (gone, broken) is baked at once
   let toBake = missing();
   const broken = new Set(failed.map((w) => w.rk));
-  if ( toBake.length && !force && awaitPublish && !game.user.isGM && game.users.activeGM ) {
+  // the GM's chunk is only expected when a GM is here AND the manifest is of this bake version (or there is none yet): a manifest
+  // of another bake version means the GM's client runs other code - waiting would only delay the scene by AWAIT_CHUNK
+  const sameVersion = !M || String(M.base).split(":")[0] === String(base).split(":")[0];
+  if ( toBake.length && !force && awaitPublish && !game.user.isGM && game.users.activeGM && sameVersion ) {
     const t = Date.now();
     for ( const w of toBake ) if ( !waitingSince.has(w.rk) ) waitingSince.set(w.rk, t);
     const late = toBake.filter((w) => broken.has(w.rk) || t - waitingSince.get(w.rk) >= AWAIT_CHUNK);
