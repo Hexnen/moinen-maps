@@ -116,9 +116,10 @@ export function causeEffects(d, g, a, now, el) {
     // rebound), chips pop, a low dust skirt rolls out
     const hit = 55 * k;
     draw("shadow", 0, hit, (gr, t) => pxRunDisc(gr, V, a.ox, a.oy + 1, Math.max(2, R * (0.55 - 0.4 * t)), 0x1a1612, 0.18 + 0.4 * t, a.seed + 41));
-    draw("shock", hit, 260 * k, (gr, t) => {
+    draw("shock", hit, 320 * k, (gr, t) => {
+      // (white arcs with a dark outer pixel: it reads on pale stone as well as on dark ground)
       const e = 1 - Math.pow(1 - t, 2.2);
-      pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.35 + 1.25 * e) * pw), t, { core: 0xffffff, outer: 0xe6dccb, seed: a.seed + 43, dash: 7, thick: t < 0.4 ? 2 : 1 });
+      pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.35 + 1.25 * e) * pw), t * 0.6, { core: 0xffffff, outer: 0x4a4038, seed: a.seed + 43, dash: 7, thick: 2 });
     });
     const nf = 6 + Math.floor(hashU(a.seed, 1, 47) * 3);
     draw("fract", hit, 420 * k, (gr, t) => {
@@ -138,12 +139,17 @@ export function causeEffects(d, g, a, now, el) {
   if ( cl.slash ) {
     // CLAWS: one swipe - the furrows' streaks (as many as the bake's furrows: 3 on a tear, else clawCount) cut in one after another,
     // each a bright line that grows fast along the axis with a hot leading edge, then fades
-    const ang = g.info.axis || 0, ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux, L = Math.max(10, g.info.len || R * 2) * 0.6;
-    const n = a.tear ? 3 : clawCount(g.info.R), sp = Math.max(2.5, R * (a.tear ? 0.5 : 1.7 / n));
-    for ( let q = 0; q < n; q++ ) draw(`slash${q}`, q * 38 * k, 240 * k, (gr, t) => {
+    const ang = g.info.axis || 0, ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux, L = Math.max(10, g.info.len || R * 2) * (a.tear ? 0.45 : 0.6);
+    // (a tear's swipe runs over the middle of its area, not from its pinprick; white with a dark under-line, so it never melts into
+    // the blast front's hot cream; solid while it cuts, breaking up only as it fades)
+    const n = a.tear ? 3 : clawCount(g.info.R), sp = a.tear ? 3.5 : Math.max(2.5, R * 1.7 / n);
+    const mx = a.tear ? g.info.x + g.info.w / 2 : a.ox, my = a.tear ? g.info.y + g.info.h / 2 : a.oy;
+    for ( let q = 0; q < n; q++ ) draw(`slash${q}`, q * 25 * k, 220 * k, (gr, t) => {
       const grow = Math.min(1, t * 4), al = 1 - t, off = (q - (n - 1) / 2) * sp, Lq = L * (q === 0 || q === n - 1 ? 0.85 : 1);
-      const cx = a.ox + nx * off, cy = a.oy + ny * off, x0 = cx - ux * Lq, y0 = cy - uy * Lq, x1 = x0 + ux * 2 * Lq * grow, y1 = y0 + uy * 2 * Lq * grow;
-      pxLine(gr, V, x0, y0, x1, y1, 0xfff4d8, { drop: 1 - al, seed: q + 3 });
+      const cx = mx + nx * off, cy = my + ny * off, x0 = cx - ux * Lq, y0 = cy - uy * Lq, x1 = x0 + ux * 2 * Lq * grow, y1 = y0 + uy * 2 * Lq * grow;
+      const drop = Math.max(0, (t - 0.5) * 2);
+      pxLine(gr, V, x0, y0 + 1, x1, y1 + 1, 0x241a12, { alpha: 0.8, drop, seed: q + 23 });
+      pxLine(gr, V, x0, y0, x1, y1, 0xffffff, { drop, seed: q + 3 });
       if ( t < 0.3 ) pxLine(gr, V, x1 - ux * 4, y1 - uy * 4, x1, y1, 0xffc860, { seed: q + 13 });
     });
   }
