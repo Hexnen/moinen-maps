@@ -706,7 +706,8 @@ export class DestructionDisplay {
       const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: bw, height: bh }), {
         width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
-      const stages = coll ? coll.stages : (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s) => ({ dt: s.dt * k, col: s.col ?? null }));
+      const stages = coll ? coll.stages : (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s, si) => ({ dt: s.dt * k,
+        col: s.col && CL?.stain != null ? (r, g, b) => mixP(r, g, b, CL.stain, si ? 0.3 : 0.6) : s.col ?? null }));
       rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
       g.baseSpr.texture = new PIXI.Texture(tex);
       // (dark: cracks and inked lips first)
@@ -841,7 +842,7 @@ export class DestructionDisplay {
       if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0, vy: 0, rise: -6 - Math.random() * 4, life: 500 + Math.random() * 400, color: Math.random() < 0.5 ? 0xffd04a : 0xff8a24 });
       if ( Math.random() < 0.15 ) this.spawn({ x, y, vx: 0.8, vy: 0, rise: -4, life: 1100, color: 0x4a4440, alpha: 0.55, size: 2 });
     } else if ( type === "flood" ) {
-      for ( let q = 0; q < 2; q++ ) { const s = side() * 0.6; this.spawn({ x: x - ux * 6 - uy * s, y: y - uy * 6 + ux * s, vx: ux * 10, vy: uy * 10, life: 500, color: 0xe6f4ff, alpha: 0.9, drag: 3 }); }
+      if ( Math.random() < 0.4 ) { const s = side() * 0.4; this.spawn({ x: x - ux * 4 - uy * s, y: y - uy * 4 + ux * s, vx: ux * 4, vy: uy * 4, life: 300, color: 0xa8d0e8, alpha: 0.8, drag: 3 }); }
     } else if ( type === "collapse" ) {
       const s = side(); this.spawn({ x: x - uy * s, y: y + ux * s, vx: 0, vy: 0, rise: -7, life: 800, color: 0xb9ae9e, alpha: 0.8, size: 2 });
     } else if ( type === "cracks" ) {
@@ -1200,7 +1201,7 @@ export class DestructionDisplay {
   flames(gr, a, T, el, life, R) {
     const v = { ap: this.ap, ox: this.origin.x, oy: this.origin.y }, k = a.k, now = a.start + a.delay + el;
     // (the tongues stand inside the charred disc: past ~0.7 of the reach they burnt on the unburnt grass)
-    const step = Math.floor(el / (70 * k)), reach = Math.max(4, R * 0.7);
+    const reach = Math.max(4, R * 0.7);
     const fadeOut = el < a.reveal ? 1 : clamp01(1 - (el - a.reveal) / Math.max(1, life - a.reveal));
     for ( const tg of T ) {
       const lag = tg.lag * 140 * k, tf = clamp01((el - lag) / a.reveal);
@@ -1209,10 +1210,11 @@ export class DestructionDisplay {
       if ( tg.inner ) { rr *= 0.55; s *= clamp01(1.4 - tf * 1.2); }
       s *= clamp01(el / (90 * k));
       if ( s < 0.08 ) continue;
+      const step = Math.floor((el + (tg.off ?? 0)) / (70 * k));
       const fl = 0.8 + 0.35 * hash2(step, tg.ang * 100, 7), h = (3 + R * 0.2) * tg.h * s * fl * (tg.inner ? 0.65 : 1), w = Math.max(2, Math.round(tg.w * Math.sqrt(s)));
       if ( h < 1.5 ) continue;
       const bx = a.ox + Math.cos(tg.ang) * rr, by = a.oy + Math.sin(tg.ang) * rr * 0.85;
-      pxTongue(gr, v, bx, by, tongueCells(h, w, tg.ph + step * 0.9, tg.w));
+      pxTongue(gr, v, bx, by, tongueCells(h, w, tg.ph + step * 0.9, tg.w));   // (step: this tongue's own pose clock)
       // embers from the hot tips, smoke from the dying tongues (none that would outlive the entry)
       const left = a.end - now - 80;
       if ( left > 200 && s > 0.45 && Math.random() < 0.05 ) {
@@ -1285,7 +1287,9 @@ export class DestructionDisplay {
     else if ( type === "blast" ) {
       once("flash", 0, () => {
         const gr = this.pixelCanvas();
-        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: Math.min(R * 0.45, 16) * pw });
+        // the cause's own anticipation: frost blooms white-blue, acid green, arcane violet; a blow, claws, water and rot have no flash
+        if ( a.cl && a.cl.hot === null ) { gr.destroy(); return; }
+        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, colors: a.cl?.hot ?? undefined, maxR: Math.min(R * 0.45, 16) * pw });
       });
       // (dust in the ground's own tone: no pale flecks over a dark map)
       once("ring", 30 * k, () => this.burst(a.ox, a.oy, R * 1.3 * pw, now, { n: 22, color: this.tone(g, 1, 0xb8ab94), rise: -2, speed: 1.4 }));   // a skirt of dust puffs, not a drawn ring
@@ -1307,8 +1311,9 @@ export class DestructionDisplay {
       // down at the rim; embers rise in clusters from the hottest tongue tips, smoke wisps from the dying ones
       once("flames", a.delay, () => {
         const gr = this.pixelCanvas(), n = Math.max(5, Math.min(12, Math.round(4 + R * 0.25))), life = a.reveal + a.band * 0.8;
-        const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: ((q % n) + hash2(q, 1, a.seed) * 0.8) / n * 6.283 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
-          h: 0.45 + 0.9 * hash2(q, 3, a.seed), w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
+        const nc = 3 + Math.floor(hash2(9, 1, a.seed) * 2), cl = Array.from({ length: nc }, (_, c) => (c + hash2(c, 8, a.seed) * 0.6) / nc * 6.283);
+        const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: cl[q % nc] + (hash2(q, 1, a.seed) - 0.5) * 0.9 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
+          off: hash2(q, 6, a.seed) * 70, h: 0.4 + 1.1 * hash2(q, 3, a.seed) ** 1.5, w: 3 + Math.round(2 * hash2(q, 4, a.seed)), ph: hash2(q, 5, a.seed) * 6.28 }));
         a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
       });
       // smoke: a few dark puffs from the burnt ground behind the front
