@@ -129,6 +129,8 @@ function bar(host, ctx) {
 
 function statusLine() {
   const st = D.getStatus(), S = D.state();
+  // strokes gone missing are said first, even when nothing is left to show
+  if ( st.warning ) return `${T("Destr.warning")}: ${st.warning}`;
   if ( !S || !Model.hasPaint(S) ) return T("Destr.empty");
   if ( st.error ) return `${T("Destr.error")}: ${st.error}`;
   if ( st.baking ) return game.i18n.format("MOINENMAPS.Destr.baking", { pct: Math.round(st.progress * 100) });

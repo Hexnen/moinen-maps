@@ -70,7 +70,7 @@ const up1 = Store.flagUpdate(A, scene);
 apply(scene, up1);
 const F = scene.flags[MID];
 check(F.destruction.v === 3 && F.destruction.o == null, `the first save writes layout 3 (v ${F.destruction.v}, o ${J(F.destruction.o)})`);
-check(Object.keys(F.destructionObjects ?? {}).length === objs.length && Object.values(F.destructionObjects).every((o) => !o.p), "every stroke under its own key, without its path");
+check(Object.keys(F.destructionObjects ?? {}).length === objs.length && J(F.destructionObjects.obj5x.p) === J([1, 2, 0, 9, 9, 40]) && J(F.destructionObjects.obj2x.p) === J([5, 5, 0, 20, 20, 30]), "every stroke under its own key, its path with it (an old-code tab rewrites destructionPaths, never these)");
 check(J(F.destructionPaths.obj5x) === J([1, 2, 0, 9, 9, 40]) && J(F.destructionPaths.obj2x) === J([5, 5, 0, 20, 20, 30]), "the paths in destructionPaths (inline one moved there)");
 check(F.destruction.baked?.c?.obj0x === "s:id0", "the manifest is left alone by a save");
 const B = load(scene), after = sig(B, scene);

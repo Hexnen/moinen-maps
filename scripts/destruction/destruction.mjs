@@ -46,7 +46,7 @@ let strokes = [];                    // edits since the last bake started: { box
 const played = new Set();            // area hashes already shown on this client (they never enter again)
 const entryLog = new Map();          // GM: area hash -> { t (server time), o, d } of entries played here, for the flag
 const ENTRY_WINDOW = 8000;           // an entry older than this (server time) is shown settled
-const status = { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", ms: 0, areas: [], perf: {} };
+const status = { baking: false, waiting: false, progress: 0, error: "", warning: "", source: "", stats: null, hash: "", ms: 0, areas: [], perf: {} };
 
 export const tell = (kind) => Hooks.callAll("moinenMapsDestruction", kind);
 export const state = () => S;
@@ -63,6 +63,7 @@ function onCanvasReady() {
   teardown();
   if ( !canvas.scene ) return;
   S = Store.attachPaths(Model.load(canvas.scene), canvas.scene);
+  integrity(canvas.scene);
   Editor.onCanvasReady();
   if ( S?.enabled && Model.hasPaint(S) ) { Reveal.expect("destruction"); rebake(); }
   selfCheck(10000);
@@ -87,6 +88,26 @@ function selfCheck(ms, retried = false) {
   }, ms);
 }
 
+/**
+ * Strokes that seem to have gone, said in the Damage panel and the console (never fixed silently): the published manifest names
+ * strokes the scene no longer holds (while there is paint and damage is on, every publish brings the manifest up to date, so a
+ * lasting mismatch means strokes were dropped), a browser tab running the module from before layout 3 wrote the scene, or a save
+ * dropped strokes nobody undid (Store.SNAPSHOT keeps them).
+ */
+function integrity(scene) {
+  const F = scene?.flags?.[MODULE_ID] ?? {}, f = F[Model.FLAG], warn = [];
+  if ( Model.mixedLayout(f, F[Model.OBJS]) ) warn.push(game.i18n.localize("MOINENMAPS.Destr.mixedLayout"));
+  const M = S && Store.manifestOf(S), ids = new Set((S?.objects ?? []).map((o) => o.id));
+  const gone = M && S.enabled && Model.hasPaint(S) ? Object.keys(M.c).filter((id) => !ids.has(id)) : [];
+  if ( gone.length ) warn.push(game.i18n.format("MOINENMAPS.Destr.strokesGone", { n: gone.length, total: Object.keys(M.c).length }));
+  // the snapshot taken before a save dropped strokes nobody undid: said while any of those strokes is still missing
+  const B3 = F[Store.SNAPSHOT], lost = Array.isArray(B3?.gone) ? B3.gone.filter((id) => !ids.has(id)) : [];
+  if ( lost.length ) warn.push(game.i18n.format("MOINENMAPS.Destr.snapshotKept", { n: lost.length, when: new Date(B3.at).toLocaleString() }));
+  if ( warn.length && (F[Store.BACKUP] || B3) ) warn.push(game.i18n.localize("MOINENMAPS.Destr.backupHint"));
+  status.warning = warn.join(" ");
+  if ( warn.length ) console.warn(`${MODULE_ID} | destruction: ${status.warning}`, { gone });
+}
+
 function teardown() {
   flushSave();
   gen++;
@@ -100,7 +121,7 @@ function teardown() {
   netAbort?.abort(); netAbort = null; recs.clear(); shownRecs = new Map(); waitingSince.clear(); persistAgain = false;
   forgetSceneMap();
   disposeBaker();
-  Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", areas: [] });
+  Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", warning: "", source: "", stats: null, hash: "", areas: [] });
 }
 
 function onUpdateScene(scene, changed, _options, userId) {
@@ -112,6 +133,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   // another GM saved while this GM has strokes not saved yet: keep ours (our save follows and wins), never drop them
   if ( game.user.isGM && saveTimer ) return;
   S = Store.attachPaths(Model.load(scene), scene);
+  integrity(scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
   if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.fadeAll(); shownKey = ""; }
@@ -581,6 +603,7 @@ export function setEnabled(on) {
 
 export function clearAll() {
   if ( !S ) return;
+  for ( const o of S.objects ?? [] ) S.dropOk?.add(o.id);          // on purpose: the save may delete them all (no snapshot)
   S.objects = []; Model.composite(S);
   edited(null);
   Editor.refreshOverlay();
@@ -589,6 +612,7 @@ export function clearAll() {
 /** Undo: the last stroke object goes; everything painted before it stays exactly as it was. */
 export function undoLast() {
   if ( !S?.objects?.length ) return false;
+  S.dropOk?.add(S.objects.at(-1).id);                               // on purpose (several undos within one save pause: each one)
   S.objects = S.objects.slice(0, -1); Model.composite(S);
   edited(null);
   Editor.refreshOverlay();
@@ -624,12 +648,46 @@ export async function save() {
   if ( !S || !game.user.isGM || !canvas.scene ) return;
   clearTimeout(saveTimer); saveTimer = 0;
   const upd = Store.flagUpdate(S, canvas.scene);
-  if ( Object.keys(upd).length ) await canvas.scene.update(upd);    // nothing changed: no write
+  if ( !Object.keys(upd).length ) return;                            // nothing changed: no write
+  await canvas.scene.update(upd);
+  if ( Store.snapshotIn(upd) ) integrity(canvas.scene);               // a drop nobody asked for: say it (the snapshot is in the scene)
 }
 
 /* ---------------------------------------------------------------- API */
 
+/**
+ * Bring back strokes kept in the scene: `from` "v3" (the snapshot taken before a save dropped strokes nobody undid), "v2" (the copy
+ * of the layout-2 array, written once with the scene's first layout-3 save) or "auto" (the snapshot when there is one). "merge"
+ * (default): every kept stroke the scene lacks comes back after the strokes there are (nothing current is touched); "replace": the
+ * scene's strokes become exactly the kept ones (strokes painted since are dropped - use only on purpose). Returns how many came back.
+ */
+export async function restoreBackup({ mode = "merge", from = "auto" } = {}) {
+  if ( !game.user.isGM || !canvas.scene ) return 0;
+  const s = ensureState(), back = Store.backupObjects(canvas.scene, s, from);
+  if ( !back?.length ) { ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.noBackup")); return 0; }
+  const replace = mode === "replace";
+  const have = new Set((replace ? [] : s.objects).map((o) => o.id));
+  const add = back.filter((o) => !have.has(o.id));
+  if ( replace ) for ( const o of s.objects ) s.dropOk?.add(o.id);
+  else { let next = Model.nextSeq(s); for ( const o of add ) o.s = next++; }     // after the strokes there are, in their own order
+  s.objects = replace ? add : [...s.objects, ...add];
+  Model.composite(s); s.rev = Model.nextRev();
+  editedHere = true;
+  await save();
+  integrity(canvas.scene);
+  rebake(); Editor.refreshOverlay(); tell("edited");
+  return add.length;
+}
+
+/** What a scene keeps (see restoreBackup): { v2: { at, n, ids }, v3: { at, n, gone } } (null where there is none). */
+function backups(scene = canvas.scene) {
+  const F = scene?.flags?.[MODULE_ID] ?? {}, B2 = F[Store.BACKUP], B3 = F[Store.SNAPSHOT];
+  return { v2: B2 ? { at: B2.at, n: B2.n, ids: (B2.o ?? []).map((o) => o?.id) } : null, v3: B3 ? { at: B3.at, n: B3.n, gone: B3.gone ?? [] } : null };
+}
+
 export const destructionApi = {
+  backup: () => backups(),
+  restoreBackup,
   /** Switch the GM's tool: "paint" | "erase" | null. */
   activate: (m = "paint") => Editor.setMode(m),
   deactivate: () => Editor.setMode(null),

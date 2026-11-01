@@ -9,7 +9,7 @@ import { MODULE_ID } from "../config.mjs";
  * pixel-art standard of moinen-pixel-vfx), so the torn outline can be ragged at art-pixel scale while the mask stays small.
  */
 export const FLAG = "destruction";
-/** The stroke objects of layout 3, one flag key per stroke: `destructionObjects.<id>` = the object without its path, `s` its place. */
+/** The stroke objects of layout 3, one flag key per stroke: `destructionObjects.<id>` = the object (with its path), `s` its place. */
 export const OBJS = "destructionObjects";
 export const VERSION = 3;
 /** Damage types, by index (bits 2-4 of a mask byte). */
@@ -179,7 +179,7 @@ export function objectsFromMask(mask, mw, mh) {
 
 export function blank(scene = canvas.scene) {
   const ap = artPx(scene), g = grids(ap);
-  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), objects: [], seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [] };
+  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), objects: [], seen: new Set(), dropOk: new Set(), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [] };
 }
 
 export function load(scene = canvas.scene) {
@@ -192,26 +192,65 @@ export function load(scene = canvas.scene) {
     entries: Array.isArray(f.entries) ? f.entries : []
   };
   S.objects = objectsOf(f, scene?.flags?.[MODULE_ID]?.[OBJS], g);
+  // the stroke ids this client has seen stored: a save deletes only those (never a stroke another client added meanwhile)
+  S.seen = new Set(S.objects.map((o) => o.id));
+  S.dropOk = new Set();                                // strokes undone / cleared here on purpose (a save may delete them)
   composite(S);
   return S;
 }
 
 const validObj = (o) => o && typeof o === "object" && typeof o.id === "string" && o.id && o.w > 0 && o.h > 0 && typeof o.m === "string";
+/** A stroke id usable as one flag key (no dots, no operator prefix, nothing a plain object treats specially). */
+export const safeId = (k) => typeof k === "string" && /^[A-Za-z0-9_]+$/.test(k) && k !== "__proto__";
+const fnv36 = (s) => { let h = 2166136261; for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0).toString(36); };
+/** The id a stroke had in the array before it was renamed to a safe key (its path in destructionPaths is still filed under it). */
+export const formerId = new WeakMap();
+/**
+ * The strokes of a layout-2 array, every one kept: an id that cannot be a flag key (or a number, or a repeat) gets a safe one, the
+ * same on every client (`x` + hash; a repeat `_2`, `_3` in array order). The old loader took any truthy id, so does this one.
+ */
+function arrayObjects(arr) {
+  const used = new Set(), out = [];
+  for ( const o of arr ) {
+    if ( !o || typeof o !== "object" || !o.id || !(o.w > 0) || !(o.h > 0) ) continue;
+    const was = String(o.id);
+    let id = safeId(was) ? was : `x${fnv36(was)}`;
+    if ( used.has(id) ) { let n = 2; while ( used.has(`${id}_${n}`) ) n++; id = `${id}_${n}`; }
+    used.add(id);
+    const c = { ...o, id, m: typeof o.m === "string" ? o.m : "" };
+    if ( id !== o.id ) formerId.set(c, was);
+    out.push(c);
+  }
+  return out;
+}
+const bySeq = (a, b) => (a.s - b.s) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 /**
  * The stroke objects of a stored destruction, in creation order, every one with its place `s` (copies, never the flag's objects):
  *   layout 3 (v >= 3): one flag key per stroke (OBJS), ordered by `s`, then id;
  *   layout 2: the array `o` of the main flag, `s` = its index (the same on every client; the GM's next save writes layout 3);
  *   layout 1: one merged mask `m`, cut into objects (objectsFromMask), `s` = their index.
+ * NEVER DROPS A STORED STROKE. Both an array and per-stroke keys (a browser tab still running the module from before layout 3 saved
+ * the scene after it was converted: the old code wrote `v: 2` and an array holding only what it knew): the union, the keyed strokes
+ * first in their order, then the array's strokes they lack (painted later, in that tab). Something undone in such a tab comes back;
+ * nothing is lost.
  */
 export function objectsOf(f, objs, g) {
-  if ( (f.v | 0) >= 3 ) {
-    const list = Object.values(objs && typeof objs === "object" ? objs : {}).filter(validObj).map((o) => ({ ...o, s: Number.isFinite(o.s) ? o.s : 0 }));
-    return list.sort((a, b) => (a.s - b.s) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const keyed = Object.values(objs && typeof objs === "object" ? objs : {}).filter(validObj).map((o) => ({ ...o, s: Number.isFinite(o.s) ? o.s : 0 })).sort(bySeq);
+  const arr = Array.isArray(f.o) ? arrayObjects(f.o) : null;
+  if ( (f.v | 0) < 3 && arr && !keyed.length ) return arr.map((o, i) => { o.s = i; return o; });
+  if ( arr?.length ) {
+    const have = new Set(keyed.map((o) => o.id));
+    let next = keyed.reduce((m, o) => Math.max(m, o.s), -1) + 1;
+    for ( const o of arr ) if ( !have.has(o.id) ) { o.s = next++; keyed.push(o); }
+    return keyed;
   }
-  if ( Array.isArray(f.o) ) return f.o.filter(validObj).map((o, i) => ({ ...o, s: i }));
+  if ( (f.v | 0) >= 3 || keyed.length ) return keyed;
   if ( f.m ) return objectsFromMask(rleDecode(f.m, g.mw * g.mh), g.mw, g.mh).map((o, i) => { o.s = i; return o; });
   return [];
 }
+
+/** Is this flag a mix of both layouts (a tab running the module from before layout 3 wrote it)? */
+export const mixedLayout = (f, objs) => !!f && (f.v | 0) < 3 && Array.isArray(f.o) && !!objs && typeof objs === "object" && Object.keys(objs).length > 0;
 
 /** The place of a new stroke: after every stroke there is. */
 export const nextSeq = (S) => (S.objects ?? []).reduce((m, o) => Math.max(m, Number.isFinite(o.s) ? o.s : -1), -1) + 1;

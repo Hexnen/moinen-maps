@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
 import * as Model from "./model.mjs";
-import { setChanged, syncMap, safeKey } from "../flag-diff.mjs";
+import { setChanged, syncMap } from "../flag-diff.mjs";
 
 /**
  * Where a bake is kept and how it travels (see scripts/net): every stroke's sprites are one CHUNK, a small immutable file named by a
@@ -15,8 +15,10 @@ import { setChanged, syncMap, safeKey } from "../flag-diff.mjs";
  *
  * The strokes' brush paths live in their own flag key, `destructionPaths` { <stroke id>: [x, y, ms, ...] }, written key by key: a new
  * stroke sends its own path, not every path of the scene again. The strokes themselves too (layout 3): `destructionObjects.<id>`
- * (the object without its path, `s` its place in the order), so a stroke, an undo or a changed cause writes ONE key; the main flag
- * `destruction` keeps the small fields. A save names only what changed (flag-diff.mjs); nothing changed, no write.
+ * (the object with its path `p` too - a tab still running the module from before layout 3 rewrites destructionPaths but never this -
+ * and `s` its place in the order), so a stroke, an undo or a changed cause writes ONE key; the main flag `destruction` keeps the small
+ * fields. A save names only what changed (flag-diff.mjs); nothing changed, no write. A save never drops a stroke it has not seen
+ * stored or written itself, and one that drops strokes nobody undid keeps a snapshot first (SNAPSHOT, below).
  */
 const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
 const enc = (s) => new TextEncoder().encode(s);
@@ -61,9 +63,52 @@ export function attachPaths(S, scene) {
   const P = scene?.flags?.[MODULE_ID]?.[PATHS];
   if ( !S || !P || typeof P !== "object" ) return S;
   // (in place: the objects are load()'s own copies, and their decoded bytes stay with them)
-  for ( const o of S.objects ?? [] ) if ( !o.p && Array.isArray(P[o.id]) ) o.p = P[o.id];
+  for ( const o of S.objects ?? [] ) {
+    if ( o.p ) continue;
+    const p = P[o.id] ?? P[Model.formerId.get(o)];     // a stroke renamed to a safe key keeps the path filed under its old id
+    if ( Array.isArray(p) ) o.p = p;
+  }
   return S;
 }
+
+/* ---------------------------------------------------------------- safety net: copies of the strokes, kept in the scene */
+
+/**
+ * V2: one copy of the scene's layout-2 strokes (array `o`, the paths, the chunk manifest), written ONCE with the first layout-3 save,
+ * never changed. V3: a rolling one-slot snapshot of the stored strokes (the per-stroke map, the paths, the manifest), written right
+ * before a save that would drop more than one stroke (or the last ones) that were not undone or cleared on purpose here.
+ * Both keep a copy of the manifest ({ v: 2, dir, c }), so the chunk GC (water/publish.mjs chunkRecords walks every flag of the
+ * module) keeps the backed-up strokes' files too.
+ */
+export const BACKUP = "destructionBackupV2";
+export const SNAPSHOT = "destructionBackupV3";
+const BACKUP_MAX = 24 * 1024 * 1024;                  // characters of JSON; a bigger copy is not written (console error)
+const manifestCopy = (b) => b?.v === 2 && typeof b.dir === "string" && b.c && typeof b.c === "object" ? { v: 2, dir: b.dir, c: { ...b.c } } : null;
+/** A deep copy (never the scene's own objects: the same update deletes from them), or null when it is too big. */
+const capped = (o, what) => {
+  const s = JSON.stringify(o), size = s.length;
+  if ( size <= BACKUP_MAX ) return JSON.parse(s);
+  console.error(`${MODULE_ID} | destruction: ${what} not written (${size} characters)`);
+  return null;
+};
+
+/**
+ * A backup's strokes as objects, with their paths; null when there is none. `which`: "v3" (the snapshot), "v2" (the layout-2 copy) or
+ * "auto" (the snapshot when there is one, else the layout-2 copy).
+ */
+export function backupObjects(scene, g, which = "auto") {
+  const F = scene?.flags?.[MODULE_ID] ?? {};
+  const B3 = F[SNAPSHOT], B2 = F[BACKUP];
+  const use = which === "auto" ? (B3?.objs ? "v3" : "v2") : which;
+  let S;
+  if ( use === "v3" && B3?.objs && typeof B3.objs === "object" ) S = { objects: Model.objectsOf({ v: 3 }, B3.objs, g) };
+  else if ( use === "v2" && Array.isArray(B2?.o) ) S = { objects: Model.objectsOf({ v: 2, o: B2.o }, null, g) };
+  else return null;
+  return attachPaths(S, { flags: { [MODULE_ID]: { [PATHS]: (use === "v3" ? B3.paths : B2.paths) ?? {} } } }).objects;
+}
+
+/** The snapshot an update writes (flagUpdate adds one before a suspicious drop), or null. */
+export const snapshotIn = (upd) => upd?.[`flags.${MODULE_ID}.${SNAPSHOT}`] ?? null;
 
 /**
  * The scene update that saves `S` against what the scene holds now: only the main flag's fields that changed, one key per new or
@@ -73,19 +118,44 @@ export function attachPaths(S, scene) {
 export function flagUpdate(S, scene) {
   const F = scene?.flags?.[MODULE_ID] ?? {}, P = `flags.${MODULE_ID}`, upd = {};
   const objs = {}, paths = {};
+  // a stroke that cannot be stored under its own key is never left out silently: nothing is written (load() renames such ids)
+  const unsafe = (S.objects ?? []).filter((o) => !Model.safeId(o.id));
+  if ( unsafe.length ) { console.error(`${MODULE_ID} | destruction: not saved, stroke ids not usable as flag keys`, unsafe.map((o) => o.id)); return {}; }
   (S.objects ?? []).forEach((o, i) => {
-    if ( !safeKey(o.id) ) return;                    // (never for our ids: randomID or the first format's c<base36>)
+    // the path stays in the stroke's own key too: a tab still running the module from before layout 3 rewrites destructionPaths
+    // with only the paths it knows (it deleted every other one), but never touches destructionObjects
     const { p, ...rest } = o;
+    if ( Array.isArray(p) && p.length ) rest.p = p;
     rest.s = Number.isFinite(o.s) ? o.s : i;
     objs[o.id] = rest;
     if ( Array.isArray(p) && p.length ) paths[o.id] = p;
+    S.seen?.add(o.id);                               // written now: a later undo may delete it
   });
-  syncMap(upd, `${P}.${Model.OBJS}`, F[Model.OBJS], objs);
-  syncMap(upd, `${P}.${PATHS}`, F[PATHS], paths);
+  // deletions only of strokes this client has seen stored or written itself: a stroke another GM added meanwhile stays
+  const seen = S.seen ?? null, only = (map) => !seen || !map ? map : Object.fromEntries(Object.entries(map).filter(([id]) => seen.has(id) || id in objs));
+  const storedObjs = F[Model.OBJS] && typeof F[Model.OBJS] === "object" ? F[Model.OBJS] : {}, deletable = only(storedObjs);
+  syncMap(upd, `${P}.${Model.OBJS}`, deletable, objs);
+  syncMap(upd, `${P}.${PATHS}`, only(F[PATHS]), paths);
   const main = Model.encodeMain(S), old = F[Model.FLAG] ?? {};
-  // layout 2 -> 3: the old array goes with the same update that writes the strokes key by key
+  // a drop nobody asked for (more than one stroke, or the last ones, not undone / cleared here): the stored strokes are kept first
+  const dropped = Object.keys(deletable).filter((id) => deletable[id] != null && !(id in objs));     // what syncMap deletes
+  const unasked = dropped.filter((id) => !S.dropOk?.has(id));
+  if ( unasked.length > 1 || (unasked.length && !Object.keys(objs).length) ) {
+    const snap = capped({ at: Date.now(), why: "drop", n: Object.keys(storedObjs).length, gone: unasked, objs: storedObjs, paths: F[PATHS] ?? null, baked: manifestCopy(old.baked) }, "snapshot");
+    if ( snap ) upd[`${P}.${SNAPSHOT}`] = snap;
+    console.warn(`${MODULE_ID} | destruction: a save drops ${unasked.length} stroke(s) not undone here - snapshot kept in ${SNAPSHOT}`, unasked);
+  }
+  S.dropOk?.clear();
+  // layout 2 -> 3: the old array goes with the same update that writes the strokes key by key, and is kept ONCE as a backup
   setChanged(upd, `${P}.${Model.FLAG}`, old, main, ["v", "ap", "seed", "enabled", "params", "blast", "entries", "m", "paths"]);
-  if ( old.o != null ) upd[`${P}.${Model.FLAG}.o`] = null;
+  if ( old.o != null ) {
+    upd[`${P}.${Model.FLAG}.o`] = null;
+    if ( Array.isArray(old.o) && old.o.length && !F[BACKUP] ) {
+      const backup = capped({ at: Date.now(), n: old.o.length, o: old.o, paths: F[PATHS] ?? null, baked: manifestCopy(old.baked),
+        keyed: Model.mixedLayout(old, storedObjs) ? Object.keys(storedObjs) : null }, "layout-2 backup");
+      if ( backup ) upd[`${P}.${BACKUP}`] = backup;
+    }
+  }
   return upd;
 }
 
