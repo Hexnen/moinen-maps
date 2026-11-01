@@ -2,6 +2,7 @@ import { META_FIELDS } from "./core.mjs";
 import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
+import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
 
 /**
  * Shows a bake, AREA BY AREA: every damaged area is a group (its own small texture atlas, a base sprite with what lies beneath, and
@@ -59,6 +60,34 @@ const LOOK = {
   cracks:   { delay: 0,   reveal: 430, flight: 0.8,  arc: 0.6,  order: "out" },
   gash:     { delay: 40,  reveal: 460, flight: 0.9,  arc: 0.7,  order: "wipe" }
 };
+
+/**
+ * The front's signature per kind: the stages a ruin pixel passes through as the front reaches it (ms after its own moment, at entry
+ * speed 1), each a colour from its final colour (r, g, b, pixel index) -> 0xRRGGBB; the last stage (no colour) is the final pixel.
+ * Few flat colours, hard steps (pixel art): a burning edge flares and cools to char, water arrives as a foam line, a cave-in
+ * darkens as it sinks, a blast scorches pale-hot, a fracture flashes its dust. Tears have their own clock (tear-entry.mjs).
+ */
+const mixP = (r, g, b, c, t) => (Math.round(r + (((c >> 16) & 255) - r) * t) << 16) | (Math.round(g + (((c >> 8) & 255) - g) * t) << 8) | Math.round(b + ((c & 255) - b) * t);
+const FRONT = {
+  scorch:   [{ dt: 0, col: (r, g, b, i) => (hash2(i, 1, 5) < 0.5 ? 0xffeca0 : 0xffc85a) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0xff7a24, 0.78) },
+             { dt: 170, col: (r, g, b) => mixP(r, g, b, 0x9a3214, 0.6) }, { dt: 300 }],
+  flood:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 2, 5) < 0.6 ? 0xf2f8ff : 0xcfe6fa) }, { dt: 70, col: (r, g, b) => mixP(r, g, b, 0x8cc0ea, 0.6) }, { dt: 210 }],
+  collapse: [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.72) }, { dt: 120, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.4) }, { dt: 240 }],
+  blast:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 3, 5) < 0.5 ? 0xfff4d6 : 0xffd890) }, { dt: 50, col: (r, g, b) => mixP(r, g, b, 0xff9a48, 0.55) }, { dt: 140 }],
+  cracks:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xf4ecdc, 0.45) }, { dt: 90 }]
+};
+
+/** Particle sprites in art pixels (white, tinted per particle): one texture each, made once. */
+function makeShapes() {
+  const make = (rows) => {
+    const h = rows.length, w = rows[0].length, a = new Uint8Array(w * h * 4);
+    rows.forEach((row, y) => [...row].forEach((ch, x) => { if ( ch === "." ) return; const v = ch === "#" ? 255 : 170, q = (y * w + x) * 4; a[q] = a[q + 1] = a[q + 2] = v; a[q + 3] = 255; }));
+    const t = PIXI.Texture.fromBuffer(a, w, h); t.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST; t.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+    return t;
+  };
+  return { dot: make(["#"]), bar: make(["##"]), sq: make(["##", "#+"]), diag: make(["#.", "+#"]), crumb: make([".#", "##"]),
+    plus: make([".#.", "###", ".+."]), chunk: make(["##.", "###", ".++"]), puff: make([".##.", "####", "+##+", ".++."]) };
+}
 
 /** Shelf-pack rectangles (tallest first) with a gutter; returns { W, H, pos }. */
 function pack(rects) {
@@ -347,7 +376,7 @@ export class DestructionDisplay {
    */
   stash(g) {
     g.heldBy = null; g.fade = null;
-    for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) { p.spr.visible = true; p.spr.alpha = 1; } }
+    for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) this.place(p, 2, null, g.info.type); }   // back where it lies (a newer front may have flung it)
     g.cont.alpha = 1;
     g.cont.parent?.removeChild(g.cont);
     this.spare.delete(g.hash); this.spare.set(g.hash, g);
@@ -437,7 +466,8 @@ export class DestructionDisplay {
       const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: bw, height: bh }), {
         width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
-      rev = { keys: sorted, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture };
+      const stages = (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s) => ({ dt: s.dt * k, col: s.col ?? null }));
+      rev = { keys: sorted, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
       g.baseSpr.texture = new PIXI.Texture(tex);
     }
     // the cover over older strokes (the plain map under this stroke's own pixels) dissolves in on the same clock: at every pixel the
@@ -542,7 +572,7 @@ export class DestructionDisplay {
     a.nextFx = now + (type === "blast" ? 110 : 45) * a.k;
     const side = () => (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 0.7) * P.wr;
     if ( type === "blast" ) {
-      const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
+      const gr = this.pixelCanvas();
       a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: Math.min(P.wr * 0.5, 12) * pw, x, y });
       this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
     } else if ( type === "scorch" ) {
@@ -613,15 +643,23 @@ export class DestructionDisplay {
   erode(g, a, now, onScreen) {
     if ( a.crev ) this.stepDissolve(a.crev, now - a.start);
     const R = a.rev; if ( !R || R.next >= R.keys.length ) return;
-    const lim = (Math.max(0, now - a.start) + 1) * 1048576, keys = R.keys, buf = R.buf, data = R.data;
+    // the FRONT's signature: a pixel passes through the kind's stages before it settles (FRONT below): burning pixels flare
+    // yellow, glow orange and cool to char; water arrives as foam; a cave-in darkens as it sinks; a blast scorches pale-hot. Every
+    // stage is a cursor over the same sorted clock, so the stages trail the front as bands of a fixed width in time
+    const S = R.stages, keys = R.keys, buf = R.buf, data = R.data, el = now - a.start, last = S.length - 1;
+    const every = Math.max(9, Math.round(keys.length / 140)), shedMax = a.type === "scorch" ? 8 : 4;
     let n = 0, shed = 0;
-    const every = Math.max(9, Math.round(keys.length / 140));
-    while ( R.next < keys.length && keys[R.next] < lim ) {
-      const i = keys[R.next] % 1048576, q = i * 4;
-      buf[q] = data[q]; buf[q + 1] = data[q + 1]; buf[q + 2] = data[q + 2]; buf[q + 3] = data[q + 3];
-      if ( onScreen && (R.next % every) === 0 && shed < 4 ) { shed++; this.edgeParticle(g, a, g.info.x + (i % R.w), g.info.y + Math.floor(i / R.w), now); }
-      R.next++; n++;
+    for ( let s = 0; s <= last; s++ ) {
+      const lim = (Math.max(0, el - S[s].dt) + 1) * 1048576, st = S[s].col;
+      while ( R.cur[s] < keys.length && keys[R.cur[s]] < lim ) {
+        const i = keys[R.cur[s]] % 1048576, q = i * 4;
+        if ( st && data[q + 3] === 255 ) { const c = st(data[q], data[q + 1], data[q + 2], i); buf[q] = c >> 16; buf[q + 1] = (c >> 8) & 255; buf[q + 2] = c & 255; buf[q + 3] = 255; }
+        else { buf[q] = data[q]; buf[q + 1] = data[q + 1]; buf[q + 2] = data[q + 2]; buf[q + 3] = data[q + 3]; }
+        if ( s === 0 && onScreen && (R.cur[0] % every) === 0 && shed < shedMax ) { shed++; this.edgeParticle(g, a, g.info.x + (i % R.w), g.info.y + Math.floor(i / R.w), now); }
+        R.cur[s]++; n++;
+      }
     }
+    R.next = R.cur[last];
     if ( n ) R.tex.update();
   }
 
@@ -649,7 +687,7 @@ export class DestructionDisplay {
       s.position.set(o.x + p.fx * ap, o.y + p.fy * ap); s.rotation = 0; s.scale.set(ap);
       return;
     }
-    if ( a.tear ) return tearPlace(this, p, t, a);
+    if ( a.tear ) { tearPlace(this, p, t, a); if ( s.visible && !this.inScene(s.x, s.y) ) s.visible = false; return; }
     const tm = t * a.dur;
     if ( tm < 0 ) {
       // anticipation: it appears where it lies and shivers before it gives
@@ -679,6 +717,7 @@ export class DestructionDisplay {
     let x = p.sx + (p.fx - p.sx) * e, y = p.sy + (p.fy - p.sy) * e - a.arc * 4 * t * (1 - t);
     if ( type === "collapse" ) y -= 1.2 * Math.sin(Math.min(1, t * 2) * Math.PI) * (t < 0.5 ? 1 : 0);   // a small lift, then the drop
     s.position.set(o.x + Math.round(x) * ap, o.y + Math.round(y) * ap);
+    if ( !this.inScene(s.x, s.y) ) s.visible = false;   // a flight is shown only while it is over the scene
     s.rotation = p.rot * (1 - e) * a.spin;
     let sc = 1 + 0.1 * Math.sin(Math.min(1, t) * Math.PI);
     if ( type === "flood" ) sc = 1.06 - 0.06 * e;
@@ -687,19 +726,32 @@ export class DestructionDisplay {
 
   /* ---------------------------------------------------------------- particles (pooled) */
 
+  /** A pooled pixel canvas for an accent (ring, flash, bolt...): art pixels as sprites in the fx layer (pixel-fx.mjs). */
+  pixelCanvas() { const c = new PixelCanvas(this.fx, this.pxPool ??= []); c.clip = this.sceneRect(); c.stats = this.stats; return c; }
+
+  /** The scene's rectangle (canvas px): nothing runtime is drawn past it (debris may leave the map, it is not rendered there). */
+  sceneRect() { const r = canvas.dimensions?.sceneRect; return r ? { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height } : null; }
+  inScene(x, y) { const r = this._sr ??= this.sceneRect(); return !r || (x >= r.x0 && y >= r.y0 && x < r.x1 && y < r.y1); }
+
   spawn(q) {
     if ( this.particles.length > 260 ) return;
+    this.stats.spawned = (this.stats.spawned ?? 0) + 1;
+    if ( !this.inScene(this.origin.x + q.x * this.ap, this.origin.y + q.y * this.ap) ) { this.stats.culled = (this.stats.culled ?? 0) + 1; return; }
     let s = this.pool.pop();
     if ( !s || s.destroyed ) { s = new PIXI.Sprite(PIXI.Texture.WHITE); s.eventMode = "none"; this.fx.addChild(s); }
     s.visible = true; s.tint = q.color; s.alpha = q.alpha ?? 1;
-    s.width = s.height = this.ap * (q.size ?? 1);
+    // a few pixel sprites instead of one square: specks, grains, crumbs, puffs (art pixels, nearest)
+    const sh = this.shapes ??= makeShapes(), size = q.size ?? 1, r = Math.random();
+    s.texture = q.shape ? sh[q.shape] : size >= 3 ? (r < 0.5 ? sh.puff : sh.chunk) : size === 2 ? (r < 0.4 ? sh.sq : r < 0.7 ? sh.crumb : sh.diag) : (r < 0.72 ? sh.dot : sh.bar);
+    s.anchor.set(0); s.scale.set(this.ap);
     q.spr = s; q.born ??= performance.now();
     this.particles.push(q);
   }
 
   burst(x, y, R, start, { n = 14 + Math.min(18, R), color = 0xcfc6b8, rise = -6, speed = 1 } = {}) {
     for ( let k = 0; k < n; k++ ) {
-      const a = (k / n) * Math.PI * 2 + Math.random() * 0.3, sp = (R * 0.6 + 4) * (0.7 + Math.random() * 0.6) * speed;
+      // uneven: random directions and a wide spread of speeds, so the dust is a cloud with a ragged front, never a neat ring of specks
+      const a = Math.random() * Math.PI * 2, sp = (R * 0.6 + 4) * (0.25 + Math.random() * 1.05) * speed;
       this.spawn({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 - 2, life: 650 + Math.random() * 300, color, alpha: 0.85, size: Math.random() < 0.3 ? 2 : 1, born: start, drag: 2.6, rise });
     }
   }
@@ -723,6 +775,7 @@ export class DestructionDisplay {
   tick() {
     const t0 = performance.now();
     if ( !canvas.stage ) return;
+    this._sr = this.sceneRect();
     // sampling: crisp when an art pixel covers 3+ screen pixels; below that NEAREST shimmers while zooming and panning (an art pixel
     // flips between 1 and 2 screen pixels), so it is LINEAR + mipmaps there
     const z = canvas.stage.scale.x * this.ap;
@@ -751,7 +804,19 @@ export class DestructionDisplay {
         // under the area that replaced it: whole until the new front (or the cross-fade) has passed; its pieces go with the front
         g.dieStart = t0;
         const a = h.anim;
-        if ( a ) for ( const p of g.pieces ) if ( p.spr?.visible && t0 >= a.reach(p.fx, p.fy) ) p.spr.visible = false;
+        // the older pieces are caught by the new front: they shiver as it nears, tear loose and are flung out with the new debris
+        // (a short hop away from the new impact, spinning, dropping out pixel-art style), instead of just vanishing
+        if ( a ) for ( const p of g.pieces ) {
+          const s = p.spr; if ( !s?.visible || s.destroyed ) continue;
+          const u = t0 - a.reach(p.fx, p.fy), ap = this.ap, o = this.origin;
+          if ( u < -90 ) continue;
+          if ( u < 0 ) { s.position.set(o.x + (p.fx + ((Math.floor(t0 / 40) & 1) ? 0.5 : -0.5)) * ap, o.y + p.fy * ap); continue; }
+          if ( u > 340 ) { s.visible = false; continue; }
+          const f = u / 340, e = 1 - (1 - f) ** 3, dx = p.fx - a.ox, dy = p.fy - a.oy, dl = Math.hypot(dx, dy) || 1, d = 3 + 7 * hash2(p.frame, 7, a.seed);
+          s.position.set(o.x + Math.round(p.fx + dx / dl * d * e) * ap, o.y + Math.round(p.fy + dy / dl * d * e - 10 * f * (1 - f)) * ap);
+          s.rotation = (hash2(p.frame, 8, a.seed) - 0.5) * 1.6 * e;
+          s.visible = f < 0.55 || ((Math.floor(t0 / 50) + p.frame) & 1) === 0;
+        }
         continue;
       }
       const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / 260);
@@ -770,7 +835,9 @@ export class DestructionDisplay {
       const x = q.x + q.vx * k, y = q.y + q.vy * k + (q.rise ?? 0) * age + (q.fall ?? 0) * age * age;
       q.spr.visible = (age * 1000) / q.life < 0.6 || ((Math.floor(t0 / 60) + (q.seed ??= (Math.random() * 7) | 0)) & 1) === 0;
       if ( q.flicker ) q.spr.tint = Math.floor(t0 / 90 + q.seed) % 3 ? q.color : 0xffd36b;
-      q.spr.position.set(o.x + Math.round(x) * ap, o.y + Math.round(y) * ap);
+      const X = o.x + Math.round(x) * ap, Y = o.y + Math.round(y) * ap;
+      if ( !this.inScene(X, Y) ) { this.stats.culled = (this.stats.culled ?? 0) + 1; q.spr.visible = false; this.pool.push(q.spr); this.particles[i] = this.particles[this.particles.length - 1]; this.particles.pop(); continue; }
+      q.spr.position.set(X, Y);
     }
     this.stats.frameMs = performance.now() - t0;
   }
@@ -822,15 +889,15 @@ export class DestructionDisplay {
     const R = Math.max(4, g.info.R);
     const tFront = clamp01((el - a.delay) / a.reveal);
     const frontR = a.Rmax * easeOut(tFront);
-    const ring = (key, at, color, maxR, dur, width) => once(key, at, () => {
-      const gr = new PIXI.Graphics(); gr.eventMode = "none"; this.fx.addChild(gr);
-      a.fx.push({ g: gr, kind: "ring", t0: a.start + at, dur, color, maxR, width });
+    const ring = (key, at, color, maxR, dur, width, extra = {}) => once(key, at, () => {
+      const gr = this.pixelCanvas();
+      a.fx.push({ g: gr, kind: "ring", t0: a.start + at, dur, color, maxR, width, ...extra });
     });
     if ( a.tear ) tearFx(this, g, a, now, el);
     else if ( a.path ) this.pathEffects(g, a, now, el);
     else if ( type === "blast" ) {
       once("flash", 0, () => {
-        const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
+        const gr = this.pixelCanvas();
         a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: Math.min(R * 0.45, 16) * pw });
       });
       ring("ring", 30 * k, 0xf3e6cc, Math.min(R * 1.9, 90) * pw, 430 * k, 2);
@@ -844,12 +911,14 @@ export class DestructionDisplay {
         const ang = Math.random() * 6.28;
         this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: (Math.random() - 0.5) * 3, vy: 0, rise: -5 - Math.random() * 5, life: 600 + Math.random() * 500, color: 0xff9a3c, flicker: true });
       }
-      once("smoke", a.reveal * 0.4, () => { for ( let q = 0; q < 6; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.6, vx: 0.5, vy: 0, rise: -4 - Math.random() * 3, life: 1500, color: 0x5a524c, alpha: 0.7, size: 2 }); });
-      ring("glow", 0, 0xffb060, R * 0.8 * pw, 300 * k, 1);
+      // smoke: dark puffs rising from the burnt ground behind the front, a second, thinner wave as it cools
+      for ( const [key, at, n, col] of [["smoke", 0.4, 6, 0x4a4440], ["smoke2", 0.85, 4, 0x6a625c]] ) once(key, a.reveal * at, () => {
+        for ( let q = 0; q < n; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R * 1.2, y: a.oy + (Math.random() - 0.5) * R * 0.7, vx: 0.6 + Math.random(), vy: 0, rise: -3 - Math.random() * 3, life: 1400 + Math.random() * 600, color: col, alpha: 0.7, size: Math.random() < 0.6 ? 3 : 2 });
+      });
     } else if ( type === "flood" ) {
-      ring("r1", a.delay + a.reveal * 0.3, 0xcfe8ff, R * 0.9 * pw, 650 * k, 1);
-      ring("r2", a.delay + a.reveal * 0.6, 0xcfe8ff, R * 0.7 * pw, 600 * k, 1);
-      ring("r3", a.delay + a.reveal * 0.9, 0x9fc8ee, R * 0.5 * pw, 550 * k, 1);
+      ring("r1", a.delay + a.reveal * 0.3, 0xe6f4ff, R * 0.9 * pw, 650 * k, 1, { outer: 0x5f8fbf, dash: 7 });
+      ring("r2", a.delay + a.reveal * 0.6, 0xe6f4ff, R * 0.7 * pw, 600 * k, 1, { outer: 0x5f8fbf, dash: 6 });
+      ring("r3", a.delay + a.reveal * 0.9, 0xcfe8ff, R * 0.5 * pw, 550 * k, 1, { outer: 0x4f7fae, dash: 5 });
       if ( tFront < 1 && Math.random() < 0.5 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR * 0.8, y: a.oy + Math.sin(ang) * frontR * 0.6, vx: 0, vy: 0, rise: -2, life: 400, color: 0xe6f4ff, alpha: 0.9 }); }
     } else if ( type === "cracks" ) {
       if ( tFront < 1 && Math.random() < 0.6 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: 0, vy: 0, rise: -3, life: 380, color: 0xc8beb0, alpha: 0.7 }); }
@@ -864,6 +933,11 @@ export class DestructionDisplay {
         }
       }
     }
+    // the settle beat: when the ruin is in, a last soft puff of dust round the rim (the debris landing), then stillness
+    if ( !a.tear && (type === "blast" || type === "collapse" || type === "scorch") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
+      const n = Math.round(Math.min(10, 4 + R / 4) * pw), col = type === "scorch" ? 0x5a524c : 0xc9bfae;
+      for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, size: Math.random() < 0.5 ? 3 : 2 }); }
+    });
     // rings and flashes
     for ( let i = a.fx.length - 1; i >= 0; i-- ) {
       const f = a.fx[i], t = (now - f.t0) / f.dur;
@@ -871,15 +945,13 @@ export class DestructionDisplay {
       if ( t < 0 ) continue;
       f.g.clear();
       if ( f.draw ) { f.draw(t); continue; }   // a cause's accent draws itself (cause-fx.mjs)
+      const v = { ap, ox: o.x, oy: o.y };
       if ( f.kind === "flash" ) {
-        // a soft flash: nested discs, the core brightest
-        const cx = X(f.x ?? a.ox), cy = Y(f.y ?? a.oy), rr = f.maxR * (0.6 + 0.6 * t) * ap, al = 1 - t;
-        for ( const [m, q] of [[1, 0.22], [0.7, 0.3], [0.4, 0.45]] ) f.g.beginFill(f.color, q * al).drawCircle(cx, cy, rr * m).endFill();
+        // a pixel-art flash: a ragged disc in three hard bands and a few rays, art pixels on the art grid
+        pxFlash(f.g, v, f.x ?? a.ox, f.y ?? a.oy, f.maxR, t, { seed: a.seed + i, colors: f.colors });
       } else {
-        // a soft ring: a bright line inside a wider faint one, thinning as it spreads
-        const rx = f.maxR * easeOut(t) * ap, ry = rx * 0.8, al = 0.85 * (1 - t) ** 1.5, w = Math.max(1, f.width * ap);
-        f.g.lineStyle(w * 3, f.color, al * 0.25).drawEllipse(X(a.ox), Y(a.oy), rx, ry);
-        f.g.lineStyle(w, f.color, al).drawEllipse(X(a.ox), Y(a.oy), rx, ry);
+        // a pixel-art ring: broken arcs of art pixels that open up and drop out as the ring spreads (no vector ellipse)
+        pxRing(f.g, v, a.ox, a.oy, f.maxR * easeOut(t), t, { core: f.color, outer: f.outer ?? lerpColor(f.color, 0x3a3028, 0.45), seed: a.seed + i * 7, thick: f.width > 1 ? 2 : 1, dash: f.dash ?? 9 });
       }
     }
   }

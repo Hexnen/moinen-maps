@@ -1,4 +1,5 @@
 import { reducedMotion } from "../config.mjs";
+import { pxRing, pxFlash, pxLine } from "./pixel-fx.mjs";
 
 /**
  * The CAUSE of a damage on screen (display side; the bake side is the CAUSE table of core.mjs). On top of the kind's entry and idle:
@@ -62,19 +63,14 @@ export function causeEffects(d, g, a, now, el) {
     const ang = Math.random() * TAU, fr = a.Rmax * Math.sqrt(tFront);
     causeParticle(d, cl, a.ox + Math.cos(ang) * fr, a.oy + Math.sin(ang) * fr * 0.85, k);
   }
-  const draw = (key, at, dur, paint, blend = PIXI.BLEND_MODES.ADD) => once(key, at, () => {
-    const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = blend; d.fx.addChild(gr);
+  const V = { ap, ox: o.x, oy: o.y };
+  const draw = (key, at, dur, paint, blend = PIXI.BLEND_MODES.NORMAL) => once(key, at, () => {
+    const gr = d.pixelCanvas(); gr.blendMode = blend;
     a.fx.push({ g: gr, kind: "cause", t0: a.start + at, dur, draw: (t) => paint(gr, t) });
   });
-  if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => {
-    const rr = Math.min(R * 0.5, 16) * pw * (0.6 + 0.6 * t) * ap, al = 1 - t;
-    for ( const [m, q] of [[1, 0.2], [0.65, 0.3], [0.35, 0.5]] ) gr.beginFill(cl.flash, q * al).drawCircle(X(a.ox), Y(a.oy), rr * m).endFill();
-  });
-  if ( cl.ring ) draw("ring", a.delay + a.reveal * 0.15, 520 * k, (gr, t) => {
-    const rx = Math.min(R * 1.6, 80) * pw * (1 - (1 - t) ** 3) * ap, al = 0.8 * (1 - t) ** 1.5, w = Math.max(1, ap);
-    gr.lineStyle(w * 3, cl.ring, al * 0.25).drawEllipse(X(a.ox), Y(a.oy), rx, rx * 0.8);
-    gr.lineStyle(w, cl.ring, al).drawEllipse(X(a.ox), Y(a.oy), rx, rx * 0.8);
-  });
+  // all accents in art pixels on the art grid (pixel-fx.mjs): no soft discs, no vector rings or lines
+  if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => pxFlash(gr, V, a.ox, a.oy, Math.min(R * 0.5, 14) * pw, t, { seed: a.seed + 31, colors: [0xffffff, cl.flash, cl.ring ?? cl.flash], rays: 5 }));
+  if ( cl.ring ) draw("ring", a.delay + a.reveal * 0.15, 520 * k, (gr, t) => pxRing(gr, V, a.ox, a.oy, Math.min(R * 1.6, 80) * pw * (1 - (1 - t) ** 3), t, { core: cl.ring, outer: 0x3a3028, seed: a.seed + 37, dash: 7 }));
   if ( cl.bolt ) for ( const [key, at] of [["bolt1", 0], ["bolt2", 110 * k], ["bolt3", 260 * k]] ) {
     // a bolt from above to the strike: a jagged polyline, white core, blue glow, flickering
     const pts = [], H = 40 + R * 1.5, seg = 8;
@@ -82,21 +78,19 @@ export function causeEffects(d, g, a, now, el) {
     for ( let s = 0; s <= seg; s++ ) { pts.push([x, y]); const f = (s + 1) / seg; x = a.ox + (x - a.ox) * (1 - f) + (Math.random() - 0.5) * 10 * (1 - f); y = a.oy - H + H * f; }
     draw(key, at, 170 * k, (gr, t) => {
       if ( (Math.floor(t * 7) & 1) && t > 0.3 ) return;
-      const al = 1 - t * 0.7;
-      gr.lineStyle(Math.max(2, 3 * ap), 0x8fc8ff, 0.35 * al).moveTo(X(pts[0][0]), Y(pts[0][1]));
-      for ( const p of pts ) gr.lineTo(X(p[0]), Y(p[1]));
-      gr.lineStyle(Math.max(1, ap), 0xffffff, al).moveTo(X(pts[0][0]), Y(pts[0][1]));
-      for ( const p of pts ) gr.lineTo(X(p[0]), Y(p[1]));
+      // a pixel bolt: a blue halo line one pixel to the right, the white core over it
+      for ( let q = 1; q < pts.length; q++ ) pxLine(gr, V, pts[q - 1][0] + 1, pts[q - 1][1], pts[q][0] + 1, pts[q][1], 0x8fc8ff, { drop: t * 0.6, seed: q });
+      for ( let q = 1; q < pts.length; q++ ) pxLine(gr, V, pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1], 0xffffff, { drop: t * 0.4, seed: q + 50 });
     });
   }
   if ( cl.rune ) draw("rune", a.delay, 1100 * k, (gr, t) => {
     // a rune ring that turns and fades: twelve dashes and their ticks
-    const rr = Math.max(5, R * 0.62) * ap, al = Math.sin(Math.min(1, t * 1.4) * Math.PI) * 0.85, rot = t * 0.9;
-    gr.lineStyle(Math.max(1, ap), 0xd8a8ff, al);
+    const rr = Math.max(5, R * 0.62), al = Math.sin(Math.min(1, t * 1.4) * Math.PI) * 0.85, rot = t * 0.9;
+    if ( al < 0.15 ) return;
     for ( let i = 0; i < 12; i++ ) {
       const a0 = rot + i / 12 * TAU, a1 = a0 + TAU / 24;
-      gr.moveTo(X(a.ox) + Math.cos(a0) * rr, Y(a.oy) + Math.sin(a0) * rr * 0.82).lineTo(X(a.ox) + Math.cos(a1) * rr, Y(a.oy) + Math.sin(a1) * rr * 0.82);
-      gr.moveTo(X(a.ox) + Math.cos(a0) * rr * 0.82, Y(a.oy) + Math.sin(a0) * rr * 0.82 * 0.82).lineTo(X(a.ox) + Math.cos(a0) * rr, Y(a.oy) + Math.sin(a0) * rr * 0.82);
+      pxLine(gr, V, a.ox + Math.cos(a0) * rr, a.oy + Math.sin(a0) * rr * 0.82, a.ox + Math.cos(a1) * rr, a.oy + Math.sin(a1) * rr * 0.82, 0xd8a8ff, { drop: 1 - al, seed: i });
+      pxLine(gr, V, a.ox + Math.cos(a0) * rr * 0.82, a.oy + Math.sin(a0) * rr * 0.82 * 0.82, a.ox + Math.cos(a0) * rr, a.oy + Math.sin(a0) * rr * 0.82, 0xb070ff, { drop: 1 - al, seed: i + 20 });
     }
   });
   if ( cl.shock ) {
@@ -111,7 +105,7 @@ export function causeEffects(d, g, a, now, el) {
       const grow = Math.min(1, t * 3), al = 1 - t;
       for ( const off of [-1, 0, 1] ) {
         const cx = a.ox + nx * off * Math.max(2, R * 0.35), cy = a.oy + ny * off * Math.max(2, R * 0.35);
-        gr.lineStyle(Math.max(1, ap), 0xfff4d8, al).moveTo(X(cx - ux * L), Y(cy - uy * L)).lineTo(X(cx - ux * L + ux * 2 * L * grow), Y(cy - uy * L + uy * 2 * L * grow));
+        pxLine(gr, V, cx - ux * L, cy - uy * L, cx - ux * L + ux * 2 * L * grow, cy - uy * L + uy * 2 * L * grow, 0xfff4d8, { drop: 1 - al, seed: off + 3 });
       }
     });
   }
