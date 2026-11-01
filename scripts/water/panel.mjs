@@ -180,7 +180,11 @@ class WaterPanel extends foundry.applications.api.ApplicationV2 {
     const S = Water.state();
     if ( b.dataset.tab ) { this.tab = b.dataset.tab; return this.render(); }
     if ( b.dataset.look ) { Water.applyLook(b.dataset.look); return this.render(); }
-    if ( b.dataset.act === "create" ) { await Water.ensureState(); return this.render(); }
+    if ( b.dataset.act === "create" ) {
+      try { await Water.ensureState(); }
+      catch ( err ) { console.error(`${MODULE_ID} | water engine`, err); ui.notifications.error(T("Water.engineFailed")); return; }
+      return this.render();
+    }
     if ( b.dataset.act === "rod-tool" ) return ui.controls.activate({ control: "moinenmaps", tool: Rods.RODS_TOOL });
     if ( b.dataset.act === "rod-reverse" ) return Rods.reverseSelected();
     if ( b.dataset.act === "rod-undo" ) return Rods.undoRod();
