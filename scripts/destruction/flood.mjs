@@ -4,6 +4,7 @@ import * as Model from "./model.mjs";
 import * as FC from "./flood-core.mjs";
 import { mapPixels } from "./source.mjs";
 import * as Water from "../water/water.mjs";
+import * as WaterModel from "../water/model.mjs";
 import { buildLut, overall } from "../water/paint.mjs";
 import { CODES } from "../water/codes-table.mjs";
 import { publishBake, fetchBake } from "../water/publish.mjs";
@@ -184,8 +185,8 @@ function readArea(g) {
  * the same pixel size on the same grid and the two read as one body; without: FC.SCALE (16 water pixels per grid square).
  */
 function gridRatio() {
-  const f = canvas.scene?.flags?.[MODULE_ID]?.water, ap = D.state()?.ap ?? D.destructionApi.display?.()?.ap ?? 1;
-  return f?.px && f.enabled !== false ? Math.max(1, f.px / ap) : FC.SCALE;
+  const S = Water.state(), ap = D.state()?.ap ?? D.destructionApi.display?.()?.ap ?? 1;
+  return S?.px && S.enabled && WaterModel.hasPaint(S) ? Math.max(1, S.px / ap) : FC.SCALE;
 }
 
 function makeEntry(g) {
@@ -402,7 +403,8 @@ function onWater(kind) {
     let regrid = false;
     for ( const [h, e] of entries ) {
       // the painted water came, went or changed its pixel size: the hole is made again on the new grid
-      if ( e.prep && Math.abs(e.prep.ratio - ratio) > 1e-6 ) { freeEntry(e); entries.delete(h); regrid = true; }
+      const want = e.prep?.level >= 2 ? ratio : FC.SCALE;
+      if ( e.prep && Math.abs(e.prep.ratio - want) > 1e-6 ) { freeEntry(e); entries.delete(h); regrid = true; }
     }
     if ( regrid ) scheduleSync();
     for ( const e of entries.values() ) {
@@ -517,6 +519,8 @@ const provider = {
     let best = null;
     for ( const e of entries.values() ) {
       if ( e.state !== "ready" || !e.g.cont?.parent ) continue;
+      // still coming in (the break, then the rising water): no water for the tokens before it has half filled the hole
+      if ( e.fillAt !== null && now() < e.fillAt + e.fillDur * 0.5 ) continue;
       const d = FC.waterAt(e.prep, ax - e.prep.cx, ay - e.prep.cy);
       if ( d < 0 || (best && best.idx > e.g.objIndex) ) continue;
       if ( coveredLater(disp, e.g.objIndex, ax, ay) ) continue;

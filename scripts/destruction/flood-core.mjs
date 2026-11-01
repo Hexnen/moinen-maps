@@ -58,7 +58,7 @@ function chamfer(d, W, H) {
  * or null when the hole holds no water.
  */
 export function prepareFlood(A) {
-  const { cx, cy, cw, ch, cover, open, level, seed } = A, N = cw * ch, ratio = A.ratio > 0 ? A.ratio : SCALE;
+  const { cx, cy, cw, ch, cover, open, level, seed } = A, N = cw * ch;
   const water = new Uint8Array(N), damp = new Uint8Array(N);
   const count = [0, 0, 0, 0];
   for ( let y = 0; y < ch; y++ ) for ( let x = 0; x < cw; x++ ) {
@@ -70,6 +70,9 @@ export function prepareFlood(A) {
     const puddle = vnoise(ax / 6.5, ay / 6.5, seed + 11) * 0.75 + vnoise(ax / 2.5, ay / 2.5, seed + 12) * 0.25 > 0.64;
     if ( open[i] || puddle ) water[i] = 1; else damp[i] = 1;
   }
+  const dominant = count[3] >= count[2] && count[3] >= count[1] ? 3 : count[2] >= count[1] ? 2 : 1;
+  // the painted water's grid only for a pool (broken, crater); a cracked stroke's thin seeping cracks stay on the fine grid
+  const ratio = A.ratio > 0 && dominant >= 2 ? A.ratio : SCALE;
   let any = false; for ( let i = 0; i < N && !any; i++ ) any = water[i] === 1;
   if ( !any && !damp.some((v) => v) ) return null;
   // depth: the distance to the shore, as a share of the deepest point of the hole
@@ -86,7 +89,8 @@ export function prepareFlood(A) {
     if ( water[i] ) {
       const L = level[i] || 1, d = clamp(din[i] / ref, 0, 1);
       depth[i] = d;
-      const o = L >= 3 ? 0.74 + 0.26 * Math.pow(d, 0.6) : L === 2 ? 0.42 + 0.33 * d : 0.8;
+      // a crater: see-through at the rim (its broken lip and the plates that slid in still show), opaque in the deep middle
+      const o = L >= 3 ? 0.5 + 0.5 * Math.min(1, Math.pow(d, 0.7) * 1.15) : L === 2 ? 0.42 + 0.33 * d : 0.8;
       const s = L >= 3 ? 0.62 * Math.pow(d, 1.2) : L === 2 ? 0.22 * d : 0;
       op[i] = Math.round(o * 255); shade[i] = Math.round(s * 255);
       // the water wells up from the deepest points (and, cracked, from the cracks) and rises to the rim
@@ -116,7 +120,6 @@ export function prepareFlood(A) {
   const half = Math.max(1, Math.floor((k * k) / 2));
   const m8 = new Uint8Array(ew * eh);
   for ( let i = 0; i < mask.length; i++ ) m8[i] = mask[i] >= half ? 1 : 0;
-  const dominant = count[3] >= count[2] && count[3] >= count[1] ? 3 : count[2] >= count[1] ? 2 : 1;
   return { cx, cy, cw, ch, water, damp, depth, op, shade, fill, springs, R: maxD, ratio: k, eng: { x0: ex0, y0: ey0, w: ew, h: eh, mask: m8 }, level: dominant };
 }
 
