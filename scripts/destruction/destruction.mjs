@@ -122,6 +122,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const my = gen, scene = canvas.scene, T = { t0: performance.now() };
   if ( !Model.hasPaint(S) || !S.enabled ) {
     display?.clear(); shownKey = ""; shownMask = null;
+    loaded = true;   // the scene's state is known: what is painted from now on is new and enters
     Object.assign(status, { baking: false, waiting: false, progress: 0, areas: [] }); tell("status"); return;
   }
   const key = Store.makeKey(scene, S, backgroundInfo()?.path ?? "");
@@ -213,7 +214,7 @@ function playEntries(added, removed, taken, mask, first) {
       display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: e.o ?? null, dir: e.d ?? null, box: e.b ?? null, fadeRest: !!e.b });
       continue;
     }
-    if ( first && !all ) continue;
+    if ( first && !taken.length && !all ) continue;   // what was already there when the scene opened
     const hits = edits.filter((s) => s.box.x0 <= r.x1 && s.box.x1 >= r.x0 && s.box.y0 <= r.y1 && s.box.y1 >= r.y0);
     if ( !hits.length && !all ) continue;
     const replaced = removed.some((q) => { const o = q.info.rect; return o.x0 < r.x1 && o.x1 > r.x0 && o.y0 < r.y1 && o.y1 > r.y0; });

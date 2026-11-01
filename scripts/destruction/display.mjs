@@ -40,7 +40,7 @@ const lerpColor = (a, b, t) => {
 /** Per type: reveal delay and duration (ms at speed 1), how the front runs, piece motion. */
 const LOOK = {
   blast:    { delay: 70,  reveal: 420, flight: 1,    arc: 1,    order: "out" },
-  collapse: { delay: 300, reveal: 760, flight: 1.25, arc: 0.35, order: "in" },
+  collapse: { delay: 200, reveal: 560, flight: 1.1,  arc: 0.35, order: "in" },
   scorch:   { delay: 0,   reveal: 950, flight: 1.3,  arc: 0.5,  order: "out" },
   flood:    { delay: 120, reveal: 680, flight: 1.4,  arc: 0.3,  order: "out" },
   cracks:   { delay: 0,   reveal: 430, flight: 0.8,  arc: 0.6,  order: "out" },
@@ -271,7 +271,7 @@ export class DestructionDisplay {
 
   drawMask(g, now) {
     const a = g.anim, m = a.mask, ap = this.ap, o = this.origin, r = g.info.rect;
-    const t = clamp01((now - a.start - a.delay) / a.reveal), e = a.type === "collapse" ? easeIn(t) : easeOut(t);
+    const t = clamp01((now - a.start - a.delay) / a.reveal), e = a.type === "collapse" ? t * t * (3 - 2 * t) : easeOut(t);
     m.clear().beginFill(0xFFFFFF);
     const X = (x) => o.x + x * ap, Y = (y) => o.y + y * ap;
     if ( a.wipe ) {
@@ -280,12 +280,14 @@ export class DestructionDisplay {
       m.drawPolygon(pts.flatMap(([x, y]) => [X(x), Y(y)]));
     } else if ( a.type === "collapse" ) {
       // the pit opens from the rim inwards: everything but a shrinking disc at the centre
-      const rr = a.Rmax * (1 - e);
+      // (a thick ring, not a rectangle with a hole: holes in a stencil mask drew garbage)
+      const rr = a.Rmax * (1 - e), outer = a.Rmax + 4;
       if ( rr <= 0.5 ) m.drawRect(X(r.x0 - 2), Y(r.y0 - 2), (r.x1 - r.x0 + 4) * ap, (r.y1 - r.y0 + 4) * ap);
-      else {
-        m.drawRect(X(r.x0 - 2), Y(r.y0 - 2), (r.x1 - r.x0 + 4) * ap, (r.y1 - r.y0 + 4) * ap);
-        m.beginHole().drawCircle(X(a.ox), Y(a.oy), rr * ap).endHole();
-      }
+      else if ( outer - rr > 0.05 ) {
+        m.endFill().lineStyle({ width: (outer - rr) * ap, color: 0xFFFFFF, alpha: 1, alignment: 0.5 });
+        m.drawCircle(X(a.ox), Y(a.oy), (outer + rr) / 2 * ap);
+        m.lineStyle(0).beginFill(0xFFFFFF);
+      } else m.drawRect(X(a.ox), Y(a.oy), 0.01, 0.01);   // nothing open yet (an empty mask would show everything)
     } else m.drawCircle(X(a.ox), Y(a.oy), Math.max(0.01, a.Rmax * e) * ap);
     if ( a.box ) {
       // outside the changed part the area was already there: no reveal
@@ -299,6 +301,8 @@ export class DestructionDisplay {
   place(p, t, a, type) {
     const ap = this.ap, o = this.origin, s = p.spr;
     if ( !s ) return;
+    // before the front reaches it the piece is not there: the map below still looks whole
+    s.visible = !a || t > 0;
     if ( t >= 1 || !a ) {
       const b = a ? Math.min(1, (t - 1) / 0.35) : 1, hop = a && b < 1 ? Math.sin(b * Math.PI) * Math.min(2, a.arc * 0.15) * (1 - b) : 0;
       s.position.set(o.x + p.fx * ap, o.y + Math.round(p.fy - hop) * ap);
@@ -411,7 +415,8 @@ export class DestructionDisplay {
       if ( onScreen || t >= 1 ) this.place(it.p, Math.max(0, t), it, type);
       if ( t < 1.35 ) busy = true;
       if ( it.p.spr ) {
-        if ( type === "scorch" ) it.p.spr.tint = lerpColor(0xffa060, 0xffffff, clamp01(t));
+        // a burning plate glows as it curls, then cools back to the map's colours
+        if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
         else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
       }
       if ( onScreen && t >= 1 && !it.dusted ) {
@@ -444,7 +449,7 @@ export class DestructionDisplay {
     if ( type === "blast" ) {
       once("flash", 0, () => {
         const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
-        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 170 * k, color: 0xfff1c4, maxR: R * 0.9 * pw });
+        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: R * 0.45 * pw });
       });
       ring("ring", 30 * k, 0xf3e6cc, R * 1.9 * pw, 430 * k, 2);
       once("dust", 60 * k, () => this.burst(a.ox, a.oy, R * pw, now));
