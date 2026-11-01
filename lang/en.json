@@ -174,6 +174,8 @@
   "MOINENMAPS.Water.c.light": "Light",
   "MOINENMAPS.Water.c.highlight": "Highlight",
   "MOINENMAPS.Water.c.foam": "Foam",
+  "MOINENMAPS.Water.a.all": "Overall opacity",
+  "MOINENMAPS.Water.a.allHint": "Fades all the water at once, on top of the opacity of each part below.",
   "MOINENMAPS.Water.a.water": "Water",
   "MOINENMAPS.Water.a.deep": "Deep water",
   "MOINENMAPS.Water.a.fall": "Falls",
@@ -726,8 +728,6 @@
   "MOINENMAPS.WS.waterSize": "Brush",
   "MOINENMAPS.WS.waterBrushHint": "[ and ]: brush size · Ctrl+Z: undo a stroke",
   "MOINENMAPS.WS.rodHint": "Drag: new rod · Del: remove the selected one · Ctrl+Z: undo",
-  "MOINENMAPS.WS.group": "Moinen Maps Tools",
-  "MOINENMAPS.WS.tools": "Tools",
   "MOINENMAPS.Roads.title": "Roads",
   "MOINENMAPS.Roads.tool.pick": "Hand (no road tool)",
   "MOINENMAPS.Roads.tool.draw": "Paint roads",
@@ -805,5 +805,7 @@
   "MOINENMAPS.Roads.hintDrawShort": "Drag or click points · double-click ends · Alt-click restyles · right-click deletes · [ ] width",
   "MOINENMAPS.Roads.hintEraseShort": "Drag over roads to cut them · [ ] size · Ctrl+Z undo",
   "MOINENMAPS.Roads.pickHint": "Pick the road pen or the eraser.",
-  "MOINENMAPS.Roads.gmOnly": "Only the GM edits roads."
+  "MOINENMAPS.Roads.gmOnly": "Only the GM edits roads.",
+  "MOINENMAPS.WS.group": "Moinen Maps Tools",
+  "MOINENMAPS.WS.tools": "Tools"
 }
