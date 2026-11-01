@@ -6,6 +6,7 @@ import { pxRing, pxFlash, PixelCanvas, pxArcs, tongueCells, pxTongue } from "./p
 import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
 import { perfMode, particleCap } from "../perf-mode.mjs";
+import { Debris } from "./debris.mjs";
 
 /** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
 function maskedMap(ms, mask) {
@@ -161,6 +162,9 @@ export class DestructionDisplay {
     this.live = this.objs.addChild(new PIXI.Container());
     this.live.eventMode = "none";
     this.fx = layer(249);
+    // flying CHUNKS cut from each area's own map pixels (debris.mjs): pooled, under the dust in the fx layer
+    this.perf = perfMode;
+    this.debris = new Debris(this);
     this.erasers = new Map();      // object id -> eraser group (a patch of plain map, no bake)
     this.groups = new Map();       // hash -> group
     this.spare = new Map();        // hash -> group no longer shown, kept for a quick return (stash)
@@ -307,6 +311,10 @@ export class DestructionDisplay {
       for ( let y = 0; y < q.h; y++ ) cd.set(buf.subarray(((p.y + y) * pk.W + p.x) * 4, ((p.y + y) * pk.W + p.x + q.w) * 4), y * q.w * 4);
       Cause.addRim(this, g, { w: q.w, h: q.h, data: cd }, meta[r.cover + 5], meta[r.cover + 6]);
     }
+    // its debris: chunk variants cut from its plates (the map under it) and its base, and the few that stay at rest by its rim
+    // (sprites at the end of its shard container: part of its settled look, the same on every client)
+    this.debris.makeSet(g, buf, pk.W, [...rects.slice(1, 1 + r.pieces.length).map((q, i) => ({ x: pk.pos[i + 1].x, y: pk.pos[i + 1].y, w: q.w, h: q.h })), { x: pk.pos[0].x, y: pk.pos[0].y, w: rects[0].w, h: rects[0].h }]);
+    this.debris.makeRest(g);
     if ( !this.flatten(g) ) this.materialize(g, 300);
     return g;
   }
@@ -614,6 +622,7 @@ export class DestructionDisplay {
     g.baseTex?.destroy(false);
     g.coverFrame?.tex.destroy(false);
     Cause.dropLight(this, g);
+    this.debris?.dropArea(g);
     if ( g.patch && !g.patch.destroyed ) g.patch.destroy({ children: true });
     if ( !g.cont.destroyed ) g.cont.destroy({ children: true });
     g.tex.destroy();
@@ -732,6 +741,9 @@ export class DestructionDisplay {
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
+    // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
+    this.debris.hideRest(g);
+    this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k);
     // a flattened area has no shards yet: the ones due in its first 150 ms at once, the rest a slice per frame, earliest first (tick)
     if ( g.made < g.pieces.length && !tear ) this.materialize(g, Infinity, start + 150);
     for ( const u of under ) u.heldBy = g;
@@ -808,6 +820,10 @@ export class DestructionDisplay {
       const gr = this.pixelCanvas();
       a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: Math.min(P.wr * 0.5, 12) * pw, x, y });
       this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
+      // clods of the ground thrown off each rolling explosion, landing close beside the path
+      const n = (a.chunkN = (a.chunkN ?? 0) + 1);
+      this.chunks(g, a, { count: Math.round(3 * pw), H: [4, 10], seed: n, from: () => [x, y],
+        to: (i, h) => { const an = h(4) * 6.283, d = P.wr * (0.5 + 0.9 * h(5)); return [x + Math.cos(an) * d, y + Math.sin(an) * d * 0.8]; } });
     } else if ( type === "scorch" ) {
       // a fire front along the stroke: a few flame tongues spring up at the head and burn down behind it (no ember confetti)
       // (a line of fire behind the head: each tongue burns ~0.8 s, so a dozen stand along the fresh burn)
@@ -863,6 +879,9 @@ export class DestructionDisplay {
   endAnim(g) {
     const a = g.anim; if ( !a ) return;
     g.anim = null;
+    // nothing of the entry floats on: its chunks are down (the staying ones shown), its particles end within 300 ms
+    this.debris?.endArea(g);
+    { const t = performance.now(); for ( const q of this.particles ) if ( q.g === g ) q.life = Math.min(q.life, t - q.born + 300); }
     if ( !g.dead ) g.reflatAt = performance.now() + 900;    // back to one sprite after the cache has settled (static-cache SETTLE_MS)
     if ( a.rev ) {
       // the ruin in full: back to its frame of the atlas
@@ -916,7 +935,7 @@ export class DestructionDisplay {
     else if ( t === "gash" ) tearEdge(this, g, x, y);
     else if ( t === "cracks" ) this.spawn({ x, y, vx: j() * 4, vy: -1, rise: -2, life: 420, color: 0xc8beb0, alpha: 0.7 });
     else if ( t === "collapse" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -7, life: 700, color: 0xb9ae9e, alpha: 0.75, size: Math.random() < 0.3 ? 2 : 1 });
-    else this.spawn({ x, y, vx: j() * 8, vy: -2 - Math.random() * 3, rise: -4, life: 520, color: 0xcfc6b8, alpha: 0.8, drag: 2.4, size: Math.random() < 0.25 ? 2 : 1 });
+    else this.spawn({ x, y, vx: j() * 8, vy: -2 - Math.random() * 3, rise: -4, life: 520, color: Math.random() < 0.5 ? this.tone(g, 2, 0xa8977c) : this.tone(g, 3, 0x7c6c58), alpha: 0.8, drag: 2.4, size: 2 });   // grains of the ground, no pale flecks
   }
 
   /**
@@ -995,7 +1014,7 @@ export class DestructionDisplay {
     const sh = this.shapes ??= makeShapes(), size = q.size ?? 1, r = Math.random();
     s.texture = q.shape ? sh[q.shape] : size >= 3 ? (r < 0.5 ? sh.puff : sh.chunk) : size === 2 ? (r < 0.4 ? sh.sq : r < 0.7 ? sh.crumb : sh.diag) : (r < 0.8 ? sh.dot : sh.crumb);
     s.anchor.set(0); s.scale.set(this.ap);
-    q.spr = s; q.born ??= performance.now();
+    q.spr = s; q.born ??= performance.now(); q.g ??= this._owner;
     this.particles.push(q);
   }
 
@@ -1003,8 +1022,28 @@ export class DestructionDisplay {
     for ( let k = 0; k < n; k++ ) {
       // uneven: random directions and a wide spread of speeds, so the dust is a cloud with a ragged front, never a neat ring of specks
       const a = Math.random() * Math.PI * 2, sp = (R * 0.6 + 4) * (0.25 + Math.random() * 1.05) * speed;
-      this.spawn({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 - 2, life: 650 + Math.random() * 300, color, alpha: 0.85, size: Math.random() < 0.3 ? 2 : 1, born: start, drag: 2.6, rise });
+      this.spawn({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 - 2, life: 650 + Math.random() * 300, color, alpha: 0.85, size: 2, born: start, drag: 2.6, rise });   // puffs, never 1-px flecks
     }
+  }
+
+  /** Throw chunks of an area during its entry (debris.mjs spawnChunks): from its impact unless `from` says otherwise, scaled by power. */
+  chunks(g, a, o = {}) {
+    if ( !g.chunks ) return 0;
+    return this.debris.spawnChunks({ area: g, origin: [a.ox, a.oy], start: performance.now(), speed: Math.sqrt(a.pw || 1), ...o, delay: o.delay ?? [0, 40 * a.k], seed: (o.seed ?? 0) * 977 + (a.seed | 0) });
+  }
+
+  /** A tone of the area's own ground (its chunk set's palette: 0 glint, 1 light, 2 mid, 3 dark), else `def`. */
+  tone(g, i, def) { return g.chunks?.tone?.[i] ?? def; }
+
+  /** Up to `n` points on the area's fissures (dark pixels of its ruin), seeded. */
+  fissures(g, a, n, seed) {
+    const d = a.rev?.data, w = g.info.w, h = g.info.h, out = [];
+    if ( !d || !n ) return out;
+    for ( let t = 0; t < n * 40 && out.length < n; t++ ) {
+      const x = (hash2(seed | 0, t, 41) * w) | 0, y = (hash2(seed | 0, t, 42) * h) | 0, q = (y * w + x) * 4;
+      if ( d[q + 3] === 255 && d[q] + d[q + 1] + d[q + 2] < 150 ) out.push([g.info.x + x, g.info.y + y]);
+    }
+    return out;
   }
 
   setIdle(on, who) { this.idle = { on, who }; }
@@ -1086,6 +1125,7 @@ export class DestructionDisplay {
     }
     this.idleTick(t0, vw);
     Cause.tickLights(this, t0);
+    this.debris.tick(t0, vw);
     // particles: crisp art-pixel steps, fading by pixel dropout rather than soft alpha
     const ap = this.ap, o = this.origin;
     for ( let i = this.particles.length - 1; i >= 0; i-- ) {
@@ -1117,16 +1157,19 @@ export class DestructionDisplay {
     const onScreen = !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0);
     if ( now > a.end ) { this.endAnim(g); return; }
     const el = now - a.start, ap = this.ap;
+    this._owner = g;
     if ( onScreen ) this.erode(g, a, now, onScreen);   // off screen nothing is uploaded; back on screen it catches up, or endAnim shows it whole
     // collapse: the ground trembles before it gives
     if ( type === "collapse" ) {
       const j = el < a.delay ? (((Math.floor(el / 45) & 1) ? 1 : -1) * ap) : 0;
       g.shardCont.position.set(j, 0); g.baseCont.position.set(j, 0);
     }
+    this._owner = g;    // what the entry spawns is its own (endAnim ends it)
     const busy = a.tear ? this.livesAll(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
     if ( onScreen ) this.effects(g, a, now, el);
     if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
-    if ( !busy && (!a.rev || (a.rev.keys && a.rev.next >= a.rev.keys.length)) && (!a.crev || (a.crev.keys && a.crev.next >= a.crev.keys.length)) && !a.fx.length ) this.endAnim(g);
+    this._owner = null;
+    if ( !busy && (!a.rev || (a.rev.keys && a.rev.next >= a.rev.keys.length)) && (!a.crev || (a.crev.keys && a.crev.next >= a.crev.keys.length)) && !a.fx.length && !this.debris.busy(g) ) this.endAnim(g);
   }
 
   /** One piece's frame: its pose and colour; `fin`: after this it never changes again (at rest, final colour). */
@@ -1174,7 +1217,7 @@ export class DestructionDisplay {
 
   dust(it, type) {
     it.dusted = true;
-    if ( it.p.thrown ) for ( let q = 0; q < 3; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 3, life: 420, color: 0xd8d0c2, alpha: 0.8, drag: 3 });
+    if ( it.p.thrown ) for ( let q = 0; q < 2; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 6, vy: -1 - Math.random() * 2, life: 380, color: 0xb0a28a, alpha: 0.7, drag: 3, size: 2 });   // a puff where it lands
     else if ( type === "cracks" && Math.random() < 0.3 ) this.spawn({ x: it.p.fx, y: it.p.fy, vx: (Math.random() - 0.5) * 4, vy: -1, rise: -3, life: 500, color: 0xc8beb0, alpha: 0.7 });
   }
 
@@ -1235,12 +1278,21 @@ export class DestructionDisplay {
         const gr = this.pixelCanvas();
         a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: Math.min(R * 0.45, 16) * pw });
       });
-      once("ring", 30 * k, () => this.burst(a.ox, a.oy, R * 1.3 * pw, now, { n: 22, color: 0xd8cdb8, rise: -2, speed: 1.4 }));   // a skirt of dust puffs, not a drawn ring
-      once("dust", 60 * k, () => this.burst(a.ox, a.oy, R * pw, now, { color: 0x8a7a62 }));
-      once("rain", 260 * k, () => { for ( let q = 0; q < Math.round(10 * pw); q++ ) { const ang = Math.random() * 6.28, d = R * (0.5 + Math.random()); this.spawn({ x: a.ox + Math.cos(ang) * d, y: a.oy + Math.sin(ang) * d * 0.8 - 6, vx: 0, vy: 0, fall: 40, life: 380, color: 0x4a3f36, size: Math.random() < 0.4 ? 2 : 1 }); } });
+      // (dust in the ground's own tone: no pale flecks over a dark map)
+      once("ring", 30 * k, () => this.burst(a.ox, a.oy, R * 1.3 * pw, now, { n: 22, color: this.tone(g, 1, 0xb8ab94), rise: -2, speed: 1.4 }));   // a skirt of dust puffs, not a drawn ring
+      once("dust", 60 * k, () => this.burst(a.ox, a.oy, R * pw, now, { color: this.tone(g, 3, 0x8a7a62) }));
+      // the THROW: clods of the ground itself (chunks cut from this area's plates), radiating at varied speeds, the heavy ones lower and
+      // shorter, a second smaller wave as the crater opens; they land, hop, skid and crumble (the few that stay: makeRest)
+      once("chunks", 25 * k, () => this.chunks(g, a, { count: Math.min(36, Math.round((8 + R * 0.45) * pw)), reach: [0.75, 2.2], H: [5, 15], delay: [0, 70 * k] }));
+      once("chunks2", 150 * k, () => this.chunks(g, a, { count: Math.min(14, Math.round((3 + R * 0.2) * pw)), reach: [0.6, 1.5], H: [3, 8], sizes: [3, 5], seed: 2 }));
     } else if ( type === "collapse" ) {
-      once("crack", 0, () => { for ( let q = 0; q < 8; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.8, vx: 0, vy: 0, rise: -2, life: 300, color: 0xbdb3a4, alpha: 0.6 }); });
+      once("crack", 0, () => { for ( let q = 0; q < 6; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.8, vx: 0, vy: 0, rise: -2, life: 300, color: 0x8a7d6a, alpha: 0.6, size: 2 }); });
       once("billow", a.delay + a.reveal * 0.75, () => this.burst(a.ox, a.oy, R * 0.6 * pw, now, { rise: -10, speed: 0.6, color: 0xb9ae9e }));
+      // RUBBLE: slabs of the rim break off and drop INTO the pit in three waves (they sink dark where they land)
+      for ( const [key, f, n] of [["rub1", 0.2, 0.3], ["rub2", 0.5, 0.25], ["rub3", 0.85, 0.15]] ) once(key, a.delay + a.reveal * f, () => this.chunks(g, a, {
+        count: Math.min(14, Math.round((3 + R * n) * pw)), landing: "into", H: [1.5, 4], seed: key.length + f * 10,
+        from: (i, h) => { const an = h(4) * 6.283, d = R * (0.85 + 0.25 * h(5)); return [a.ox + Math.cos(an) * d, a.oy + Math.sin(an) * d * 0.8]; },
+        to: (i, h) => { const an = h(4) * 6.283 + (h(12) - 0.5) * 0.4, d = R * (0.15 + 0.4 * h(13)); return [a.ox + Math.cos(an) * d, a.oy + Math.sin(an) * d * 0.8]; } }));
     } else if ( type === "scorch" ) {
       // FLAME TONGUES ride the front (pixel-fx tongueCells: curved licking shapes in four tone bands, flickering frame by frame), die
       // down at the rim; embers rise in clusters from the hottest tongue tips, smoke wisps from the dying ones
@@ -1254,14 +1306,33 @@ export class DestructionDisplay {
       once("smoke", a.reveal * 0.5, () => {
         for ( let q = 0; q < 4; q++ ) this.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.6, vx: 0.6 + Math.random(), vy: 0, rise: -3 - Math.random() * 3, life: 1300 + Math.random() * 500, color: 0x4a4440, alpha: 0.6, size: Math.random() < 0.6 ? 3 : 2 });
       });
+      // charred CLODS popping off the burnt ground behind the front (the map's own pixels, charred dark)
+      for ( const [key, f] of [["clod1", 0.3], ["clod2", 0.65]] ) once(key, a.delay + a.reveal * f, () => this.chunks(g, a, {
+        count: Math.min(10, Math.round((2 + R * 0.15) * pw)), reach: [0.3, 1.2], H: [3, 8], tint: 0x6a5244, seed: f * 10,
+        from: (i, h) => { const an = h(4) * 6.283, d = R * f * (0.6 + 0.6 * h(5)); return [a.ox + Math.cos(an) * d, a.oy + Math.sin(an) * d * 0.8]; } }));
     } else if ( type === "flood" ) {
       // ripples: broken arcs of varied radius and speed (pixel-fx arcCells), never closed rings
       for ( const [key, f, rr, dur] of [["r1", 0.3, 0.9, 700], ["r2", 0.6, 0.7, 620], ["r3", 0.9, 0.55, 560]] ) once(key, a.delay + a.reveal * f, () => {
         const gr = this.pixelCanvas(), v = { ap, ox: o.x, oy: o.y }, sd = a.seed + key.length * 31 + Math.round(f * 100), cx = a.ox + (hash2(sd, 1, 3) - 0.5) * R * 0.4, cy = a.oy + (hash2(sd, 2, 3) - 0.5) * R * 0.3;
         a.fx.push({ g: gr, kind: "arcs", t0: a.start + a.delay + a.reveal * f, dur: dur * k, draw: (t) => pxArcs(gr, v, cx, cy, R * rr * pw * easeOut(t), t, { seed: sd, core: t < 0.5 ? 0xd8eef8 : 0xa8d0e8 }) });
       });
+      // planks and stones of the bank break off and splash INTO the water (they sink blue), a few are thrown up onto the bank
+      once("splash", a.delay + a.reveal * 0.25, () => {
+        const rim = (i, h) => { const an = h(4) * 6.283, d = R * (0.8 + 0.3 * h(5)); return [a.ox + Math.cos(an) * d, a.oy + Math.sin(an) * d * 0.8]; };
+        this.chunks(g, a, { count: Math.min(12, Math.round((3 + R * 0.2) * pw)), landing: "into", sink: 0x6f9cc8, H: [2, 6], from: rim,
+          to: (i, h) => { const an = h(4) * 6.283 + (h(12) - 0.5) * 0.5, d = R * (0.2 + 0.45 * h(13)); return [a.ox + Math.cos(an) * d, a.oy + Math.sin(an) * d * 0.8]; } });
+        this.chunks(g, a, { count: Math.min(5, Math.round((1 + R * 0.08) * pw)), reach: [1.05, 1.5], H: [3, 7], sizes: [3, 5], seed: 3, from: rim });
+      });
     } else if ( type === "cracks" ) {
-      if ( tFront < 1 && Math.random() < 0.6 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: 0, vy: 0, rise: -3, life: 380, color: 0xc8beb0, alpha: 0.7 }); }
+      if ( tFront < 1 && Math.random() < 0.2 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: 0, vy: 0, rise: -3, life: 380, color: 0x8f8474, alpha: 0.7, size: 2 }); }
+      // CHIPS pop off the plates along the fissures as they open and after (chunks of the ground cut where a crack runs: they hop a
+      // few pixels sideways and crumble), a little dust lifts and settles over ~1.5 s
+      for ( const [key, at, n] of [["chip0", 0.4, 4], ["chip1", 0.85, 3], ["chip2", 1.25, 2], ["chip3", 1.8, 2]] ) once(key, a.delay + a.reveal * at, () => {
+        const pts = this.fissures(g, a, Math.round(n * pw), a.seed + key.length * 7 + at * 100);
+        if ( pts.length ) this.chunks(g, a, { count: pts.length, H: [2, 5], sizes: [3, 5], seed: at * 10, from: (i) => pts[i % pts.length],
+          to: (i, h) => { const p = pts[i % pts.length], an = h(4) * 6.283, d = 2 + 4 * h(5); return [p[0] + Math.cos(an) * d, p[1] + Math.sin(an) * d * 0.8]; } });
+        for ( const [x, y] of pts.slice(0, 2) ) this.spawn({ x: x + 1, y, vx: (Math.random() - 0.5) * 2, vy: 0, rise: -1.2, life: 900 + Math.random() * 300, color: 0xa89c8a, alpha: 0.5, drag: 2, size: 2 });
+      });
     } else if ( type === "gash" && a.wipe ) {
       // sparks and splinters on the claw's leading edge
       if ( tFront < 1 ) {
@@ -1275,7 +1346,7 @@ export class DestructionDisplay {
     }
     // the settle beat: when the ruin is in, a last soft puff of dust round the rim (the debris landing), then stillness
     if ( !a.tear && (type === "blast" || type === "collapse" || type === "scorch" || type === "cracks") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
-      const n = Math.round(Math.min(10, 4 + R / 4) * pw * (type === "cracks" ? 0.5 : 1)), col = type === "scorch" ? 0x5a524c : 0xc9bfae;
+      const n = Math.round(Math.min(10, 4 + R / 4) * pw * (type === "cracks" ? 0.5 : 1)), col = type === "scorch" ? 0x5a524c : this.tone(g, 1, 0xc9bfae);
       for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, size: Math.random() < 0.5 ? 3 : 2 }); }
     });
     // rings and flashes
@@ -1327,6 +1398,7 @@ export class DestructionDisplay {
     this.groups.clear(); this.spare.clear(); this.erasers.clear(); this.order = []; this.dying = [];
     for ( const q of this.particles ) { q.spr.visible = false; this.pool.push(q.spr); }
     this.particles = [];
+    this.debris?.clear();
     this.stats.groups = this.stats.sprites = 0;
     this.cache?.invalidate();
   }
@@ -1335,6 +1407,7 @@ export class DestructionDisplay {
     canvas.app?.ticker?.remove(this._tick);
     Cause.disposeLights(this);
     this.clear();
+    this.debris?.destroy(); this.debris = null;
     this.cache?.destroy(); this.cache = null;
     for ( const sp of [...this.spritePool, ...(this._flatPool ?? []), this._flatBase] ) if ( sp && !sp.destroyed ) sp.destroy();
     this.spritePool = []; this._flatPool = null; this._flatBase = null; this._flatTmp?.destroy(); this._flatTmp = null;

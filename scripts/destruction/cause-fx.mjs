@@ -42,10 +42,19 @@ export const CAUSE_LOOK = [
 ];
 export const causeLook = (c) => CAUSE_LOOK[c | 0] ?? null;
 const pick = (a) => a[(Math.random() * a.length) | 0];
+/** Per cause: the share of its edge particles that are chips (fire: coals, acid: crumbs, lightning: glass, frost: ice). */
+const CHIP = [0, 0.15, 0.2, 0.3, 0, 0, 0, 0, 0, 0.3];
 
 /** A particle of the cause at (x, y) (art px). */
 export function causeParticle(d, cl, x, y, k = 1) {
   const e = cl.edge, j = () => Math.random() - 0.5;
+  // a share of the edge comes off as CHIPS of the cause's material (debris.mjs: ice chips, glass, coals, dissolving crumbs), not specks
+  const g = d._owner, ch = CHIP[CAUSE_LOOK.indexOf(cl)] ?? 0;
+  if ( ch && g?.chunks && g.anim && Math.random() < ch ) {
+    const n = (g.anim.chunkN = (g.anim.chunkN ?? 0) + 1);
+    d.chunks(g, g.anim, { count: 1, sizes: [3, 5], H: [2, 6], seed: 300 + n, from: () => [x, y], to: (i, h) => [x + (h(4) - 0.5) * 12, y + (h(5) - 0.5) * 9] });
+    return;
+  }
   d.spawn({ x, y, vx: j() * 6 + (e.vx ?? 0), vy: (e.vy ?? 0) + j() * 2, rise: e.rise, fall: e.fall, drag: e.drag, life: e.life * (0.7 + Math.random() * 0.6) * k,
     color: pick(e.color), alpha: 0.9, flicker: e.flicker, size: Math.random() < 0.2 ? 2 : 1 });
 }
@@ -70,8 +79,9 @@ export function causeEffects(d, g, a, now, el) {
   });
   // all accents in art pixels on the art grid (pixel-fx.mjs): no soft discs, no vector rings or lines
   if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => pxFlash(gr, V, a.ox, a.oy, Math.min(R * 0.5, 14) * pw, t, { seed: a.seed + 31, colors: [0xffffff, cl.flash, cl.ring ?? cl.flash], rays: 5 }));
-  // the cause's shock: a skirt of puffs in its colour, never a drawn ring
-  if ( cl.ring ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
+  // the cause's shock: a skirt of puffs in its colour, never a drawn ring; not round a tear (round its puncture the puffs spread
+  // into curved arcs that read as vector ring segments)
+  if ( cl.ring && !a.tear ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
   if ( cl.bolt ) {
     // ONE strike (two channels on a big area): a branching bolt from above (screen-up) to the strike point - a jagged main channel,
     // 2-4 forks and a twig (pixel-fx boltTree), white core over a blue glow, on ~170 ms with one flicker gap; a hard, small additive

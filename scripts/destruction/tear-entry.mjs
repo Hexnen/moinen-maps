@@ -123,16 +123,23 @@ export function tearFx(display, g, a, now, el) {
     for ( const [x, y, dx, dy] of T.heads(el) ) {
       const l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, nx = -uy, ny = ux, sd = Math.random() < 0.5 ? -1 : 1;
       // crumbs spill out sideways and fall
-      display.spawn({ x: x + nx * sd, y: y + ny * sd, vx: nx * sd * (6 + Math.random() * 8) * pw + ux * 4, vy: ny * sd * 6 * pw - 4, fall: 28, life: 320 + Math.random() * 160, color: Math.random() < 0.6 ? lite : dark, drag: 2.4 });
-      // a fibre stretched across snaps: two pale flecks flicked apart
-      if ( Math.random() < 0.4 ) for ( const s of [-1, 1] ) display.spawn({ x: x + nx * s, y: y + ny * s, vx: nx * s * 12 * pw, vy: ny * s * 12 * pw - 2, fall: 18, life: 200, color: fib, drag: 4 });
-      // now and then a clod of the surface is flung off the lip (a bigger piece on a higher arc)
-      if ( Math.random() < 0.18 ) display.spawn({ x: x + nx * sd * 2, y: y + ny * sd * 2, vx: nx * sd * (10 + Math.random() * 10) * pw, vy: ny * sd * 8 * pw - 9, fall: 40, life: 420 + Math.random() * 160, color: Math.random() < 0.5 ? lite : dark, drag: 1.6, size: Math.random() < 0.5 ? 3 : 2 });
+      display.spawn({ x: x + nx * sd, y: y + ny * sd, vx: nx * sd * (6 + Math.random() * 8) * pw + ux * 4, vy: ny * sd * 6 * pw - 4, fall: 28, life: 320 + Math.random() * 160, color: Math.random() < 0.6 ? lite : dark, drag: 2.4, size: 2 });
+      // a fibre stretched across snaps: two pale flecks flicked apart (rarely: many read as confetti)
+      if ( Math.random() < 0.15 ) for ( const s of [-1, 1] ) display.spawn({ x: x + nx * s, y: y + ny * s, vx: nx * s * 12 * pw, vy: ny * s * 12 * pw - 2, fall: 18, life: 200, color: fib, drag: 4 });
+      // now and then a CLOD of the surface is flung off the lip: a chunk cut from the lips' own pixels (debris.mjs), on an arc to a
+      // few pixels beside the rip, where it hops and crumbles
+      if ( Math.random() < 0.18 ) {
+        const n = (a.chunkN = (a.chunkN ?? 0) + 1), bx = x + nx * sd * 2, by = y + ny * sd * 2;
+        display.chunks(g, a, { count: 1, H: [3, 7], seed: n, from: () => [bx, by],
+          to: (i, h) => { const d = 3 + 7 * h(5) * pw; return [bx + nx * sd * d + ux * (h(6) - 0.3) * 4, by + ny * sd * d + uy * (h(6) - 0.3) * 4]; } });
+      }
     }
   }
   T.tips.forEach((tp, i) => once(`tip${i}`, tp.at, () => {
-    // the tip snaps: a burst of crumbs and a few clods
-    for ( let q = 0; q < Math.round(11 * pw); q++ ) { const an = Math.random() * 6.28, sp = 6 + Math.random() * 14; display.spawn({ x: tp.x, y: tp.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8 - 4, fall: 32, life: 320 + Math.random() * 180, color: q & 1 ? lite : dark, drag: 2.4, size: q < 3 ? 2 : 1 }); }
+    // the tip snaps: a few crumbs and a burst of clods (chunks of the lips) landing round it
+    for ( let q = 0; q < Math.round(5 * pw); q++ ) { const an = Math.random() * 6.28, sp = 6 + Math.random() * 10; display.spawn({ x: tp.x, y: tp.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8 - 4, fall: 32, life: 320 + Math.random() * 180, color: q & 1 ? lite : dark, drag: 2.4, size: 2 }); }
+    display.chunks(g, a, { count: Math.round(5 * pw), H: [4, 9], seed: 50 + i, from: () => [tp.x, tp.y],
+      to: (j, h) => { const an = h(4) * 6.283, d = 3 + 8 * h(5); return [tp.x + Math.cos(an) * d, tp.y + Math.sin(an) * d * 0.8]; } });
     display.spawn({ x: tp.x, y: tp.y, vx: 0, vy: 0, rise: -3, life: 600, color: 0xcfc6b8, alpha: 0.6, size: 2 });
   }));
   // the settle: a little dust lifts off the opened rip
