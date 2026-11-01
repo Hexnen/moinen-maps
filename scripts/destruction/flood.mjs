@@ -9,6 +9,8 @@ import { buildLut, overall } from "../water/paint.mjs";
 import { CODES } from "../water/codes-table.mjs";
 import { publishBake, fetchBake } from "../water/publish.mjs";
 import { addWet, wetChanged } from "../water/wet.mjs";
+import * as Reveal from "../net/reveal.mjs";
+import { markOnce } from "../net/trace.mjs";
 
 /**
  * FLOODED HOLES: the water of the module's water engine in every flooded area of the destruction (damage kind "flood").
@@ -123,6 +125,31 @@ async function cachePut(key, res) {
   }
 }
 
+/**
+ * READ AHEAD (canvasInit, while Foundry still loads the scene's textures): every loop the scene's `flood` flag names, by its key - all
+ * from IndexedDB in ONE transaction, and the ones not there downloaded at once (their chunks go through the codec pool together with the
+ * damage chunks, which net/preload.mjs reads ahead at the same moment). A hole then finds its loop waiting when the damage is in.
+ * Only ever a cache: load() still checks the key the hole computes itself, so nothing here decides what is shown.
+ */
+let ahead = new Map();               // key -> Promise<{ box, ms, frames } | null>
+function readAhead(scene) {
+  ahead = new Map();
+  const recs = Object.values(scene?.flags?.[MODULE_ID]?.[FLAG]?.baked ?? {}).filter((r) => r?.key);
+  if ( OFF || !recs.length ) return;
+  markOnce("flood:ahead", { n: recs.length });
+  const got = idb("readonly", (s) => { const reqs = recs.map((r) => [r.key, s.get(r.key)]); return { get result() { return reqs; } }; });
+  for ( const rec of recs ) {
+    ahead.set(rec.key, got.then(async (reqs) => {
+      const hit = reqs?.find(([k]) => k === rec.key)?.[1]?.result;
+      if ( hit?.frames?.length ) { stats.cached++; return hit; }
+      const res = await fetchBake(rec);
+      if ( res ) { stats.fetched++; cachePut(rec.key, res); }
+      return res;
+    }).catch(() => null));
+  }
+  Promise.all(ahead.values()).then(() => markOnce("flood:aheadDone"));
+}
+
 /* ================================================================ the look */
 
 /** The scene water's settings as stored (the same on every client: the key must be). Null without painted water. */
@@ -192,8 +219,11 @@ function gridRatio() {
 function makeEntry(g) {
   const e = { g, hash: g.hash, prep: null, key: "", bakeParams: null, res: null, tex: [], fillTex: null, fillBuf: null, sprite: null,
     anim: null, fillAt: null, fillDur: 0, readyAt: 0, step: -1, state: "new", my: life };
+  const t0 = performance.now();
   const A = readArea(g);
+  const t1 = performance.now();
   e.prep = A ? FC.prepareFlood(A) : null;
+  stats.readMs = (stats.readMs ?? 0) + t1 - t0; stats.prepMs = (stats.prepMs ?? 0) + performance.now() - t1;
   if ( !e.prep ) { e.state = "none"; return e; }
   const sp = new PIXI.Sprite(PIXI.Texture.EMPTY);
   sp.eventMode = "none";
@@ -229,8 +259,9 @@ async function load(e) {
   e.state = "loading";
   const my = life, key = e.key;
   try {
-    let res = await cacheGet(key);
-    if ( res ) stats.cached++;
+    // read ahead at canvasInit (one transaction, downloads started then), else this hole's own look in the cache
+    let res = ahead.has(key) ? await ahead.get(key) : null;
+    if ( !res ) { res = await cacheGet(key); if ( res ) stats.cached++; }
     if ( !res ) {
       const rec = flagOf().baked?.[hkey(e.hash)];
       if ( rec?.key === key ) { res = await fetchBake(rec); if ( res ) { stats.fetched++; cachePut(key, res); } }
@@ -245,7 +276,7 @@ async function load(e) {
     if ( !res ) res = await bake(e);
     if ( my !== life || e.key !== key || e.dead ) return;
     if ( !res ) { e.state = "none"; return; }
-    show(e, res);
+    await show(e, res, my);
   } catch ( err ) {
     if ( my !== life ) return;
     console.warn(`${MODULE_ID} | flooded hole`, err);
@@ -272,10 +303,15 @@ async function bake(e) {
 }
 
 /** The frames on the GPU: one texture per frame, painted at art resolution and clipped to the hole. */
-function show(e, res) {
+async function show(e, res, my = life) {
   freeTextures(e);
-  e.res = res; e.state = "ready"; e.readyAt = now();
+  e.res = res;
   paintAll(e);
+  // a scene being opened (its one reveal still held back): the frames go to the GPU now, a slice at a time, so the reveal never pays
+  // for them in one frame; "ready" only then (the damage waits for its holes, destruction.mjs prepareReveal)
+  if ( Reveal.holding() ) { await Reveal.upload(e.tex.map((q) => q.t.baseTexture), 8); if ( my !== life || e.dead ) return; }
+  e.state = "ready"; e.readyAt = now();
+  if ( [...entries.values()].every((q) => q.state === "ready" || q.state === "none") ) markOnce("flood:ready", { holes: entries.size });
   // the water comes later than the break (a bake, a download): it still wells up if that is not long after
   if ( e.fillAt !== null ) {
     if ( e.readyAt - e.fillAt > ENTRY_WINDOW ) e.fillAt = null;
@@ -328,6 +364,7 @@ function sync() {
   const disp = D.destructionApi.display?.();
   if ( !canvas.ready || !disp ) { if ( entries.size ) clearAll(); return; }
   let changed = false;
+  const t0 = performance.now();
   for ( const g of disp.order ) {
     if ( g.info?.type !== "flood" || g.dead ) continue;
     let e = entries.get(g.hash);
@@ -339,6 +376,7 @@ function sync() {
   }
   for ( const [h, e] of entries ) if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
   stats.entries = entries.size;
+  if ( entries.size ) markOnce("flood:listed", { holes: entries.size, ms: Math.round(performance.now() - t0) });
   if ( entries.size && !tickFn ) { tickFn = () => tick(); canvas.app.ticker.add(tickFn); }
   if ( changed ) wetChanged();
 }
@@ -569,6 +607,14 @@ export function registerFlood() {
   Hooks.on("moinenMapsWater", onWater);
   Hooks.on("updateScene", onUpdateScene);
   Hooks.on("canvasTearDown", teardown);
+  Hooks.on("canvasInit", () => readAhead(canvas.scene));
+  // while a scene's reveal is held back, look for new flooded areas every 25 ms: the damage goes on screen (hidden) without a hook of
+  // its own, and the reveal waits for the holes (without this they were listed only at the next "status", after the reveal)
+  Hooks.on("canvasReady", () => {
+    const my = life, until = performance.now() + 4000;
+    const poll = () => { if ( my !== life || !Reveal.holding() || performance.now() > until ) return; sync(); setTimeout(poll, 25); };
+    setTimeout(poll, 0);
+  });
   D.destructionApi.flood = floodApi;
   window.addEventListener("beforeunload", disposeEngine);
 }
