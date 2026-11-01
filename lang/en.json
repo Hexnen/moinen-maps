@@ -699,6 +699,8 @@
   "MOINENMAPS.WS.dockLabel": "Panels: {section}",
   "MOINENMAPS.WS.panels": "Panels",
   "MOINENMAPS.WS.barFold": "Fold the options bar",
+  "MOINENMAPS.WS.markers": "Marker opacity",
+  "MOINENMAPS.WS.markersHint": "How strongly the editing markers show (water overlay, road markers, handles, guides). Lower it to see the effect underneath. Only on your screen.",
   "MOINENMAPS.WS.barOpen": "Unfold the options bar",
   "MOINENMAPS.WS.dockFold": "Fold the dock",
   "MOINENMAPS.WS.dockOpen": "Unfold the dock",

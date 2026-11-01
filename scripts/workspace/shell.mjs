@@ -1,5 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { GROUP, activeSection, sectionById, sectionTool } from "./registry.mjs";
+import { registerMarkerSettings, markerOpacity, previewMarkerOpacity, setMarkerOpacity, onMarkers } from "./markers.mjs";
+import { isEcho, writeControl } from "./ui.mjs";
 
 /**
  * The workspace on screen while one of our sections is picked in the second column of the scene controls (GM only):
@@ -22,6 +24,21 @@ const AVOID = ["#invincible-challenges"];
 
 export function registerWorkspaceSettings() {
   game.settings.register(MODULE_ID, "workspace", { scope: "client", config: false, type: Object, default: { bar: true, dock: true, panels: {}, tools: {} } });
+  registerMarkerSettings();
+}
+
+/**
+ * The marker opacity slider of the bar: dragging previews (nothing stored), the release stores once. A value changed elsewhere is
+ * written back silently (never read as an edit, see ui.mjs writeControl) and never while the slider is held.
+ */
+function wireMarkers(box) {
+  const picker = box.querySelector("range-picker");
+  const onIn = (ev) => { if ( isEcho() ) return; if ( ev.target.matches?.("input[type=range]") ) previewMarkerOpacity(ev.target.valueAsNumber); };
+  const onChange = (ev) => { if ( isEcho() ) return; const t = ev.target, v = t.matches?.("input") ? Number(t.value) : Number(picker.value); if ( Number.isFinite(v) ) setMarkerOpacity(v); };
+  box.addEventListener("input", onIn);
+  box.addEventListener("change", onChange);
+  const off = onMarkers((v) => { if ( !picker.contains(document.activeElement) ) writeControl(picker, v); });
+  return () => { box.removeEventListener("input", onIn); box.removeEventListener("change", onChange); off(); previewMarkerOpacity(null); };
 }
 
 const getState = () => { try { return { bar: true, dock: true, panels: {}, tools: {}, ...(game.settings.get(MODULE_ID, "workspace") ?? {}) }; } catch { return { bar: true, dock: true, panels: {}, tools: {} }; } };
@@ -134,11 +151,15 @@ class Workspace extends foundry.applications.api.ApplicationV2 {
     const s = this.section, tools = toolsOf(s), modes = tools.filter((t) => !t.button), actions = tools.filter((t) => t.button);
     const btn = (t, attr) => `<button type="button" class="mm-ws-toolbtn" ${attr} aria-label="${esc(L(t.title))}" data-tooltip="${esc(L(t.title))}"${t.color ? ` style="--mm-tool:${esc(t.color)}"` : ""}><i class="${esc(t.icon)}" inert></i></button>`;
     const active = modes.find((t) => t.name === this.tool);
+    const markers = modes.length ? `<div class="mm-ws-markers" data-tooltip="${esc(T("WS.markersHint"))}"><i class="fa-solid fa-eye" inert></i>
+      <range-picker name="markerOpacity" value="${markerOpacity()}" min="0" max="1" step="0.05" aria-label="${esc(T("WS.markers"))}"></range-picker></div>` : "";
     host.innerHTML = `${modes.length ? `<div class="mm-ws-tools" role="group" aria-label="${esc(T("WS.tools"))}">${modes.map((t) => btn(t, `data-tool="${esc(t.name)}" aria-pressed="${t.name === this.tool}"`)).join("")}</div>` : ""}
       ${active ? `<span class="mm-ws-tool">${esc(L(active.title))}</span>` : ""}<div class="mm-ws-opts"></div>
-      <div class="mm-ws-side">${actions.map((t) => btn(t, `data-action="${esc(t.name)}"`)).join("")}
+      <div class="mm-ws-side">${markers}${actions.map((t) => btn(t, `data-action="${esc(t.name)}"`)).join("")}
         ${s.panels.map((p) => `<button type="button" class="mm-ws-toolbtn mm-ws-paneltog" data-act="rail" data-panel="${esc(p.id)}" aria-label="${esc(L(p.title))}" data-tooltip="${esc(L(p.title))}"><i class="${esc(p.icon)}" inert></i></button>`).join("")}</div>`;
     const box = host.querySelector(".mm-ws-opts");
+    this.#cleanup("markers");
+    const mk = host.querySelector(".mm-ws-markers"); if ( mk ) this.#run("markers", () => wireMarkers(mk));
     if ( s.bar && getState().bar ) this.#run("bar", () => s.bar(box, this.#ctx()));
     if ( focus ) host.querySelector(`[data-tool="${CSS.escape(focus)}"], [data-action="${CSS.escape(focus)}"]`)?.focus();
   }

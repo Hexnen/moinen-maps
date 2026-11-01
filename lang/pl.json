@@ -699,6 +699,8 @@
   "MOINENMAPS.WS.dockLabel": "Panele: {section}",
   "MOINENMAPS.WS.panels": "Panele",
   "MOINENMAPS.WS.barFold": "Zwiń pasek opcji",
+  "MOINENMAPS.WS.markers": "Krycie markerów",
+  "MOINENMAPS.WS.markersHint": "Jak mocno widać markery edycji (nakładka wody, znaczniki dróg, uchwyty, prowadnice). Zmniejsz, by zobaczyć efekt pod spodem. Tylko na Twoim ekranie.",
   "MOINENMAPS.WS.barOpen": "Rozwiń pasek opcji",
   "MOINENMAPS.WS.dockFold": "Zwiń dok",
   "MOINENMAPS.WS.dockOpen": "Rozwiń dok",

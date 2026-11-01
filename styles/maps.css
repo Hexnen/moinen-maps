@@ -543,6 +543,10 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-ws-opt select { width: auto; max-width: 9rem; }
 .mm-ws-range range-picker { width: 10rem; }
 .mm-ws-range range-picker input[type="number"] { flex: 0 0 3rem; }
+/* the GM's marker opacity (workspace/markers.mjs): a small slider at the start of the bar's right side */
+.mm-ws-markers { display: inline-flex; align-items: center; gap: 0.35rem; margin-right: 0.6rem; color: var(--mm-ws-muted); font-size: 0.85rem; }
+.mm-ws-markers range-picker { width: 7.5rem; }
+.mm-ws-markers range-picker input[type="number"] { flex: 0 0 2.8rem; }
 .mm-ws-check { gap: 0.35rem; cursor: pointer; }
 .mm-ws-check input { margin: 0; }
 .mm-ws-hint { margin-left: auto; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); white-space: normal; }
