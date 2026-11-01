@@ -111,6 +111,16 @@ export function backupObjects(scene, g, which = "auto") {
 export const snapshotIn = (upd) => upd?.[`flags.${MODULE_ID}.${SNAPSHOT}`] ?? null;
 
 /**
+ * Strokes stored before their path went into their own key (layout 3 as first written): their path is only in destructionPaths,
+ * which a tab still running the module from before layout 3 rewrites with the paths it knows. The active GM copies them over once.
+ */
+export function pathsOnlyApart(scene) {
+  const F = scene?.flags?.[MODULE_ID] ?? {}, O = F[Model.OBJS], PP = F[PATHS];
+  if ( !O || typeof O !== "object" || !PP || typeof PP !== "object" ) return 0;
+  return Object.entries(O).filter(([id, o]) => o && !Array.isArray(o.p) && Array.isArray(PP[id]) && PP[id].length).length;
+}
+
+/**
  * The scene update that saves `S` against what the scene holds now: only the main flag's fields that changed, one key per new or
  * changed stroke and path, a deletion per gone one. A scene of layout 2 (array `o`) is written as layout 3 in full the first time
  * (the stored OBJS is empty then). Empty when nothing changed.

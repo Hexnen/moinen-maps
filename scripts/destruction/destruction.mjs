@@ -64,6 +64,10 @@ function onCanvasReady() {
   if ( !canvas.scene ) return;
   S = Store.attachPaths(Model.load(canvas.scene), canvas.scene);
   integrity(canvas.scene);
+  // the active GM copies paths kept only in destructionPaths into their strokes' own keys, once (an old-code tab cannot lose them then)
+  if ( S && game.user.isGM && game.users.activeGM?.isSelf && Store.pathsOnlyApart(canvas.scene) ) {
+    save().catch((err) => console.warn(`${MODULE_ID} | destruction: could not copy the paths into the stroke keys`, err));
+  }
   Editor.onCanvasReady();
   if ( S?.enabled && Model.hasPaint(S) ) { Reveal.expect("destruction"); rebake(); }
   selfCheck(10000);

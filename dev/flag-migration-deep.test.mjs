@@ -274,5 +274,18 @@ mixed("old tab presses Clear", (S) => { S.objects = []; });
   check(!Store.snapshotIn(Store.flagUpdate(S3, sc)), "four undos inside one save pause: no snapshot");
 }
 
+/* ================================================================= 11. layout 3 as first written: paths only in destructionPaths */
+{
+  // the main world's scenes were converted before a stroke kept its path in its own key: an old-code tab would delete those paths
+  const sc = v2Scene(Array.from({ length: 10 }, (_, i) => stroke(`pa${String(i).padStart(8, "0")}`, { type: 5, path: [i, i, 0, i + 9, i + 2, 40] }))); migrate(sc);
+  for ( const o of Object.values(sc.flags[MID].destructionObjects) ) delete o.p;              // as ad0428d stored them
+  check(Store.pathsOnlyApart(sc) === 10, `paths only in destructionPaths found (${Store.pathsOnlyApart(sc)})`);
+  const u = Store.flagUpdate(loadNew(sc), sc); apply(sc, u);                                 // what the active GM's load does once
+  check(Store.pathsOnlyApart(sc) === 0 && Object.keys(u).length === 10, `one save copies them into the stroke keys (${Object.keys(u).length} keys)`);
+  const oldS = Old.load(sc); oldS.objects = [...oldS.objects, stroke("oldTab0002")]; apply(sc, Old.flagUpdate(oldS, sc));
+  const after = loadNew(sc);
+  check(after.objects.length === 11 && after.objects.filter((o) => o.p?.length).length === 10, "an old-code tab's write afterwards: all strokes and all 10 paths stay");
+}
+
 console.log(failed ? `\n${failed} check(s) failed` : "\nall checks passed");
 process.exit(failed ? 1 : 0);
