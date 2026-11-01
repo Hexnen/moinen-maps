@@ -25,7 +25,7 @@ export const CAUSE_LOOK = [
   /* acid      */ { slow: 1.5, curve: (f) => f, share: 0.6, tint: 0xd8ff80, front: 0.5, edge: { color: [0xb6ff4a, 0xe8ff9a, 0x7fd02a], rise: -3, life: 650 },
     ring: 0x9fe060, idle: "bubble", pulse: "slow", light: 0.35 },
   /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.5, tint: 0xd8ecff, front: 0.6, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 220, drag: 2 },
-    flash: 0xe6f4ff, bolt: true, idle: "spark", pulse: "crackle", light: 0.55 },
+    flash: 0xe6f4ff, bolt: true, idle: "spark", pulse: "crackle", light: 0.4 },
   /* arcane    */ { slow: 1.25, curve: (f, a) => clamp01(Math.sqrt(f) * 0.78 + (((a / TAU) % 1) + 1) % 1 * 0.22), share: 0.6, tint: 0xd8b0ff, front: 0.6,
     edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5 },
   /* impact    */ { slow: 0.7, curve: (f) => Math.pow(f, 0.45), share: 0.4, tint: null, front: 0.3, edge: { color: [0xcfc6b8, 0xb9ae9e], vy: -2, rise: -3, life: 600, drag: 2.4 },
@@ -155,8 +155,9 @@ export function addLight(d, g, tex, x, y) {
   bloom.eventMode = "none"; bloom.blendMode = PIXI.BLEND_MODES.ADD; bloom.scale.set(ap); bloom.position.set(o.x + x * ap, o.y + y * ap); bloom.alpha = 0;
   g.baseCont.addChildAt(bloom, Math.min(1, g.baseCont.children.length));
   const pool = new PIXI.Sprite(tex);
-  pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap * 1.6); pool.anchor.set(0.5);
-  pool.position.set(o.x + (x + tex.frame.width / 2) * ap, o.y + (y + tex.frame.height / 2) * ap); pool.visible = false;
+  // exactly over its pixels (the cores must sit on the glowing pixels; the soft margin is baked into the texture)
+  pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
+  pool.position.set(o.x + x * ap, o.y + y * ap); pool.visible = false;
   L.layer.addChild(pool);
   g.light = { bloom, pool, tex, base: cl?.light ?? 0.4, seed: (g.hash % 997) / 97 };
   L.groups.add(g);
@@ -176,13 +177,16 @@ export function tickLights(d, now) {
   const L = d.causeLights; if ( !L?.groups.size ) return;
   L.attach();
   const still = reducedMotion() || !d.idle.on;
+  // no bloom by day (the pixels carry the look; a soft glow over a lit map reads as a smudge); it grows with the scene's darkness,
+  // where the pool lifts the dark too
+  const dark = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0)), bloomK = dark * dark;
   for ( const g of L.groups ) {
     const lt = g.light; if ( !lt ) continue;
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);
-    lt.pool.visible = a > 0.01; lt.pool.alpha = Math.min(1, a);
-    lt.bloom.alpha = Math.min(1, a) * lt.base;
+    lt.pool.visible = a > 0.01; lt.pool.alpha = Math.min(1, a) * 0.85;
+    lt.bloom.alpha = Math.min(1, a) * lt.base * bloomK;
   }
 }
 

@@ -164,11 +164,11 @@ const CAUSE = [
   null,
   /* fire     */ { acc: [24, 0.92, 0.55], ramp: { k: 0.45, s: 0.7, l: 0.6 }, deb: { to: "char", k: 0.55 }, fate: { gone: 0.1 },
     crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.045, glow: [255, 128, 40] },
-  /* acid     */ { acc: [74, 0.82, 0.5], ramp: { k: 0.35, s: 0.9, sa: 0.08, l: 0.85 }, deb: { to: "acc", k: 0.28, holes: 0.3 }, frac: { ring: 0.8 }, fate: { gone: 0.22, thr: 0.6 },
+  /* acid     */ { acc: [80, 0.55, 0.38], ramp: { k: 0.2, s: 0.85, sa: 0.03, l: 0.85 }, deb: { to: "acc", k: 0.2, holes: 0.3 }, frac: { ring: 0.8 }, fate: { gone: 0.22, thr: 0.6 },
     crack: { mode: "radial", n: 0.5, len: 0.7, br: 0, col: "acc" }, halo: { kind: "stain", r: 0.95 }, edge: "pitted", fill: "acid", fx: "bubble", fxD: 0.03, glow: [170, 255, 70], glowK: 0.45 },
-  /* lightning*/ { acc: [205, 0.75, 0.74], ramp: { k: 0.25, s: 0.55, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 1.6, ring: 1.1 }, fate: { thr: 1.2 },
-    crack: { mode: "branch", n: 2.4, len: 1.7, br: 0.2, col: "bolt", always: true }, halo: { kind: "burn", r: 0.6 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.025, glow: [175, 220, 255] },
-  /* arcane   */ { acc: [282, 0.72, 0.62], ramp: { k: 0.42, s: 1, sa: 0.1, l: 0.9 }, deb: { to: "acc", k: 0.14 }, frac: { swirl: 0.13 },
+  /* lightning*/ { acc: [205, 0.45, 0.7], ramp: { k: 0.15, s: 0.6, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 1.6, ring: 1.1 }, fate: { thr: 1.2 },
+    crack: { mode: "branch", n: 1.7, len: 1.7, br: 0.2, col: "bolt", always: true }, halo: { kind: "burn", r: 0.6 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.025, glow: [175, 220, 255] },
+  /* arcane   */ { acc: [280, 0.55, 0.6], ramp: { k: 0.25, s: 0.9, sa: 0.03, l: 0.9 }, deb: { to: "acc", k: 0.14 }, frac: { swirl: 0.13 },
     crack: { mode: "spiral", n: 1.3, len: 1.2, br: 0.03, col: "arc" }, halo: { kind: "motes", r: 0.8 }, edge: "rune", fill: "rune", fx: "mote", fxD: 0.02, glow: [200, 120, 255] },
   /* impact   */ { acc: [32, 0.22, 0.5], ramp: { k: 0, s: 0.9, l: 0.82 }, frac: { spokes: 1.45, ring: 1.25 }, fate: { gone: -0.1, thr: 1.15 },
     crack: { mode: "radial", n: 1.7, len: 1.35, br: 0.01, col: "ink", straight: true }, halo: { kind: "pressed", r: 0.7 }, edge: "pressed", fill: "bowl", fx: "dust", fxD: 0.03, glow: null },
@@ -178,8 +178,8 @@ const CAUSE = [
     crack: { mode: "radial", n: 0.4, len: 0.8, br: 0, col: "ink" }, halo: { kind: "wet", r: 1 }, edge: "smooth", fill: "silt", fx: "drop", fxD: 0.025, glow: null },
   /* decay    */ { acc: [96, 0.45, 0.33], ramp: { k: 0.28, s: 0.8, l: 0.9 }, deb: { to: "moss", k: 0.4 }, frac: { ring: 0.85 }, fate: { gone: 0.15, thr: 0.35 },
     crack: { mode: "root", n: 1.4, len: 1.1, br: 0.06, col: "root", always: true }, halo: { kind: "moss", r: 0.75 }, edge: "moss", fill: "moss", fx: "spore", fxD: 0.02, glow: null },
-  /* frost    */ { acc: [203, 0.38, 0.84], ramp: { k: 0.45, s: 0.7, sa: 0.05, l: 1.1 }, deb: { to: "ice", k: 0.3, rim: true }, frac: { spokes: 1.2, ring: 0.9 },
-    crack: { mode: "crystal", n: 1.6, len: 1.1, br: 0.14, col: "ice", always: true }, halo: { kind: "rime", r: 0.9 }, edge: "frost", fill: "ice", fx: "glint", fxD: 0.025, glow: null }
+  /* frost    */ { acc: [203, 0.32, 0.78], ramp: { k: 0.35, s: 0.7, sa: 0.03, l: 1.05 }, deb: { to: "ice", k: 0.22, rim: true }, frac: { spokes: 1.2, ring: 0.9 },
+    crack: { mode: "crystal", n: 1.6, len: 1.1, br: 0.14, col: "ice", always: true }, halo: { kind: "rime", r: 0.9 }, edge: "frost", fill: "ice", fx: "glint", fxD: 0.01, glow: null }
 ];
 /** A cause by index (null for 0 and anything unknown). */
 export const causeRow = (c) => CAUSE[c | 0] ?? null;
@@ -1124,21 +1124,21 @@ function bakeArea(A, P, seed, uid, jag) {
       switch ( cz.fill ) {
         case "char": {   // charred, with glowing fissures deep in the burn
           col = mix(col, pal.char[clamp(Math.floor(1 + lit * 2 + bayer(x, y)), 0, 4)], clamp(0.35 + depth * 1.3 + (vnoise(x / 2.5, y / 2.5, seed + 501) - 0.5) * 0.5, 0, 0.92));
-          if ( depth > 0.2 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.035 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
+          if ( depth > 0.3 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.02 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
           return col;
         }
         case "acid": {   // pools of acid in the deep parts, a bright meniscus, pitted rock around them
-          const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.2) * 1.8;
-          if ( depth > 0.2 && n < lim ) {
-            const rim = n > lim - 0.08, c = rim ? pal.accHi : bayer(x, y) < 0.5 ? pal.acc : mix(pal.acc, pal.accLo, 0.5);
+          const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.32) * 1.3;
+          if ( depth > 0.32 && n < lim ) {
+            const rim = n > lim - 0.06, c = rim ? pal.acc : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
             glow(x, y, c, rim ? 150 : 80); return null;
           }
-          return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.15 + depth * 0.3);
+          return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.08 + depth * 0.2);
         }
         case "glass": {  // fused glassy ground towards the strike, specks of light, veins of light near it
-          const fz = clamp(dn * 1.4 - 0.25, 0, 1);
+          const fz = clamp(dn * 1.6 - 0.7, 0, 1);
           if ( fz <= 0 ) return col;
-          let c = mix(col, mix(pal.accLo, rp[1], 0.4), fz * 0.75);
+          let c = mix(col, mix(rp[1], pal.accLo, 0.3), fz * 0.55);
           if ( vnoise(x / 2, y / 2, seed + 521) > 0.72 && (x + y) % 3 === 0 ) c = mix(c, pal.accHi, 0.75);
           if ( dn > 0.5 && Math.abs(vnoise(x / 3, y / 3, seed + 522) - 0.5) < 0.03 ) { glow(x, y, pal.accHi, 210); return null; }
           return c;
@@ -1151,7 +1151,7 @@ function bakeArea(A, P, seed, uid, jag) {
             const ta = (seg + 0.5) / 18 * Math.PI * 2 - Math.PI;
             if ( Math.abs(dx * Math.sin(ta) - dy * Math.cos(ta)) < 0.55 ) { glow(x, y, pal.acc, 200); return null; }
           }
-          return mix(col, pal.accLo, clamp(depth * 0.6, 0, 0.45));
+          return mix(col, pal.accLo, clamp(depth * 0.3, 0, 0.25));
         }
         case "bowl": {   // pressed in hard: a deeper bowl, radial striations from the impact
           let c = mul(col, clamp(1 + lit * 0.22 - depth * 0.15, 0.6, 1.25));
@@ -1163,8 +1163,8 @@ function bakeArea(A, P, seed, uid, jag) {
           return f < 0.22 ? rp[0] : f < 0.32 ? mix(rp[3], col, 0.3) : col;
         }
         case "silt": {   // washed out: sediment bands, standing water in the deepest part
-          if ( depth > 0.5 ) {
-            const c = pal.waterR[clamp(Math.floor(clamp(3 - (depth - 0.5) * 6, 1, 3) + bayer(x, y) - 0.5), 1, 3)];
+          if ( depth > 0.62 ) {
+            const c = pal.waterR[clamp(Math.floor(clamp(3 - (depth - 0.62) * 6, 1, 3) + bayer(x, y) - 0.5), 1, 3)];
             return h2(x >> 1, y, seed + 541) < 0.03 ? pal.waterR[4] : c;
           }
           return ((depth * 7 + vnoise(x / 5, y / 5, seed + 542) * 1.6) % 1) < 0.16 ? mix(rp[3], pal.dust, 0.45) : mul(col, 0.9);
@@ -1176,9 +1176,9 @@ function bakeArea(A, P, seed, uid, jag) {
           return mix(col, pal.accLo, 0.12);
         }
         case "ice": {    // an ice sheet in the hole, crystal facets
-          if ( depth < 0.15 ) return mix(col, pal.accHi, 0.2);
-          if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.6 ) return mix(pal.accHi, [255, 255, 255], 0.5);
-          return mix(col, depth > 0.4 ? pal.acc : pal.accHi, 0.6);
+          if ( depth < 0.2 ) return mix(col, pal.accHi, 0.15);
+          if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.4 ) return mix(pal.accHi, [255, 255, 255], 0.3);
+          return mix(col, pal.acc, 0.4);
         }
       }
       return col;
@@ -1206,14 +1206,14 @@ function bakeArea(A, P, seed, uid, jag) {
       const k = Math.pow(1 - d / cHaloR, 1.3), n = vnoise(x / 2.4, y / 2.4, seed + 611) * 0.75 + h2(x, y, seed + 612) * 0.25, hv = h2(x, y, seed + 613), m = mapAt(i);
       switch ( cz.halo.kind ) {
         case "char": if ( n < k * 0.4 && hv < 0.025 ) glow(x, y, pal.ember[1], 200); else if ( n < k * 0.9 ) put(x, y, n < k * 0.4 ? pal.char[0] : mix(m, pal.char[1], 0.65)); break;
-        case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.4 + 0.2 * k)); break;
+        case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.22 + 0.15 * k)); break;
         case "burn": if ( n < k * 0.4 ) put(x, y, mul(m, 0.62)); break;
         case "motes": if ( hv < k * 0.035 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
         case "pressed": if ( d < 3 + C.maxD * 0.15 && n < 0.8 ) put(x, y, mul(m, 0.72)); else if ( n < k * 0.35 ) put(x, y, pal.dust); break;
         case "scrape": if ( n < k * 0.3 ) put(x, y, mix(m, pal.dust, 0.5)); break;
         case "wet": if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]); else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.66), pal.waterR[2], 0.18)); break;
         case "moss": if ( n < k * 0.75 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
-        case "rime": if ( hv < k * 0.05 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.35 + 0.3 * k)); break;
+        case "rime": if ( hv < k * 0.02 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.25 + 0.25 * k)); break;
       }
     }
     /** The cause's hairline cracks: glowing embers, a bolt's burn with a bright root, arcane light, ice, roots. */
@@ -1224,7 +1224,7 @@ function bakeArea(A, P, seed, uid, jag) {
         switch ( col ) {
           case "ember": if ( root && hv < 0.45 ) glow(x, y, pal.ember[hv < 0.2 ? 1 : 0], 220); else put(x, y, mix(m, pal.char[0], 0.85)); break;
           case "bolt":
-            if ( root && hv < 0.6 ) glow(x, y, hv < 0.2 ? [255, 255, 255] : pal.accHi, 230); else put(x, y, mix(m, pal.char[0], 0.8));
+            if ( k < path.length * 0.35 && hv < 0.4 ) glow(x, y, hv < 0.15 ? [255, 255, 255] : pal.accHi, 230); else put(x, y, mix(m, pal.char[0], 0.8));
             if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.char[0], 0.35));
             break;
           case "acc": put(x, y, mix(m, pal.accLo, 0.85)); break;
@@ -1253,7 +1253,7 @@ function bakeArea(A, P, seed, uid, jag) {
           case "splinter": for ( let k = 0; k < 3; k++ ) { const X = Math.round(x + C.axis[0] * k), Y = Math.round(y + C.axis[1] * k); if ( isIn(X, Y) ) put(X, Y, k ? rp[3] : rp[4]); } break;
           case "drop": put(x, y, pal.waterR[4]); if ( isIn(x, y + 1) ) put(x, y + 1, pal.waterR[1]); break;
           case "spore": put(x, y, mix(pal.accHi, [230, 220, 200], 0.4)); if ( isIn(x + 1, y) ) put(x + 1, y, pal.accHi); if ( isIn(x, y + 1) ) put(x, y + 1, rp[1]); break;
-          case "glint": put(x, y, [255, 255, 255]); if ( hv < 0.5 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) put(x + a, y + b, pal.accHi); break;
+          case "glint": put(x, y, hv < 0.3 ? [255, 255, 255] : pal.accHi); if ( hv < 0.2 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) put(x + a, y + b, pal.accHi); break;
         }
       }
     }
@@ -1425,7 +1425,8 @@ function softLight(a, c, w, h, x0, y0, gain = 1) {
   const data = new Uint8ClampedArray(n * 4);
   for ( let o = 0; o < n; o++ ) {
     const al = A[o]; if ( al < 0.004 && !core[o] ) continue;
-    const s = Math.max(core[o], Math.min(1, al * 3.2 * gain)), inv = al > 1e-6 ? 1 / al : 0;
+    // the soft margin never lights more than half (a dense network of glowing cracks must not flood the dark), the cores do
+    const s = Math.max(core[o], Math.min(0.5, al * 2.4 * gain)), inv = al > 1e-6 ? 1 / al : 0;
     const wht = 0.25 + 0.4 * s;
     data[o * 4] = Math.round(lerp(Rc[o] * inv, 255, wht)); data[o * 4 + 1] = Math.round(lerp(Gc[o] * inv, 255, wht)); data[o * 4 + 2] = Math.round(lerp(Bc[o] * inv, 255, wht));
     data[o * 4 + 3] = Math.round(s * 255);
