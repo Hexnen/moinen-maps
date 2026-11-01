@@ -37,7 +37,8 @@ export const BAKE_VERSIONS = {
   25: { compat: 24, note: "substrates: newer strokes read the older damage under them" },
   26: { compat: 25 }, 27: { compat: 26, note: "dominant hairlines, dust-puff shock" }, 28: { compat: 27, note: "cause specks and halos" },
   29: { compat: 28, note: "torn lip ink, short cave-in hairlines" }, 30: { compat: 29, note: "cracks as a hierarchy" },
-  31: { compat: 30, note: "cause treatments: bolts, sigils, rim, scratches, erosion, rime" }
+  31: { compat: 30, note: "cause treatments: bolts, sigils, rim, scratches, erosion, rime" },
+  32: { compat: 31, note: "crack plates a little bigger at the crater level" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
