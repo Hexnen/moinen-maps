@@ -173,16 +173,17 @@ await test("manifest: entries name only codec ids (never a path); copies of a sc
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);
+// (the GC empties these once the GM's publish has converted the scene to chunks: then the two tests are skipped)
 const wf = new URL("water-v83pU5UG6nIrsDFT.png", WORLD), df = new URL("destruction-v83pU5UG6nIrsDFT.png", WORLD);
 
-if ( fs.existsSync(wf) ) await test("real water (16 frames): bit-exact through tiles", async () => {
+if ( fs.existsSync(wf) && fs.statSync(wf).size > 1000 ) await test("real water (16 frames): bit-exact through tiles", async () => {
   const d = await decodePng(fs.readFileSync(wf)), bw = d.w / 4, bh = d.h / 4, box = { x0: 13, y0: 5, w: bw, h: bh };
   const frames = Array.from({ length: 16 }, (_, f) => { const a = new Uint8Array(bw * bh), ox = (f % 4) * bw, oy = Math.floor(f / 4) * bh; for ( let y = 0; y < bh; y++ ) for ( let x = 0; x < bw; x++ ) a[y * bw + x] = d.rgba[((oy + y) * d.w + ox + x) * 4]; return a; });
   const r = await waterRoundTrip(frames, box);
   console.log(`      water ${bw}x${bh}x16: ${r.tiles} tiles, ${r.bytes} bytes (file today ${fs.statSync(wf).size})`);
 });
 
-if ( fs.existsSync(df) ) await test("real destruction sheet: split, chunk, assemble, bit-exact sprites and rows", async () => {
+if ( fs.existsSync(df) && fs.statSync(df).size > 1000 ) await test("real destruction sheet: split, chunk, assemble, bit-exact sprites and rows", async () => {
   const { readMeta } = await import("../scripts/destruction/core.mjs");
   const d = await decodePng(fs.readFileSync(df));
   let meta = null;
