@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 17;   // 17: debris bounces off the map edge instead of piling up
+export const CORE_VERSION = 18;   // 18: pieces placed in the window as if the scene had no edge; what lands past it is culled, what crosses it clipped
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -388,7 +388,7 @@ export function bake(I, cache = null) {
   // same whatever was painted before or after it, whatever the type. A later stroke covers an earlier one at display time; nothing
   // here ever reads another object. An object's connected parts are baked separately; their random streams come from the stroke's id
   // and their first pixel.
-  const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, materials: [], baked: 0, reused: 0 };
+  const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [], baked: 0, reused: 0 };
   const edge = clamp(P.edge ?? 0.7, 0, 1);
   const comps = [];
   (I.objects ?? []).forEach((ob, index) => { if ( !ob.k ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
@@ -530,6 +530,10 @@ export function bake(I, cache = null) {
     const ownId = lab[c.px[0]];
     // only this part's own pixels: everything else in its window is intact ground for it
     const win = { W, H, RX, RY, inside: new Uint8Array(N), sev: new Float32Array(N), typ: new Uint8Array(N), own: new Uint8Array(N), frag: new Int32Array(N), px: [] };
+    // the window as it would be without the scene's edge (window px; beyond 0..W / 0..H where the scene cuts it): pieces are placed
+    // in it, so a stroke at the border throws exactly as anywhere else; what lands beyond the scene is culled when it is packed
+    win.vb = [FX + x0 - margin - RX, FY + y0 - margin - RY, FX + x1 + 1 + margin - RX, FY + y1 + 1 + margin - RY];
+    win.aw = AW; win.ah = AH;
     let h = fnvInts(fnvStr(String(c.ob.id), head), RX, RY, W, H, c.type === T_FLOOD ? 0xf10d1 : c.type);   // flood: the bottom under the engine's water (flood.mjs)
     // its cause: its own, else the scene's default; part of its hash only when there is one (cause 0 keeps the old hash and bytes)
     const cause = Math.min(CAUSES.length - 1, Math.max(0, (c.ob.c | 0) || (P.cause | 0)));
@@ -624,7 +628,7 @@ function trimCache(cache) {
 function assemble(results, stats, t0, progress) {
   const items = [];
   results.forEach((r, a) => {
-    stats.areas++; stats.shards += r.stats.shards; stats.chips += r.stats.chips; stats.pulverised += r.stats.pulverised; stats.materials.push(...r.stats.materials);
+    stats.areas++; stats.shards += r.stats.shards; stats.chips += r.stats.chips; stats.pulverised += r.stats.pulverised; stats.culled += r.stats.culled ?? 0; stats.materials.push(...r.stats.materials);
     for ( const it of r.items ) items.push({ ...it, area: a, hash: r.hash, index: r.index ?? 0 });
   });
   const pack = shelfPack(items.map((it) => ({ w: it.img.w, h: it.img.h })));
@@ -670,7 +674,7 @@ function bakeArea(A, P, seed, uid, jag) {
   for ( let i = 0; i < N; i++ ) { din[i] = inside[i] ? 1e6 : 0; dout[i] = inside[i] ? 0 : 1e6; }
   chamfer(din, W, H); chamfer(dout, W, H);
   const occ = new Uint8Array(N);
-  const stats = { shards: 0, chips: 0, pulverised: 0, materials: [] };
+  const stats = { shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [] };
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
@@ -992,28 +996,18 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( dist > 0 && C.cz?.fate?.thr ) dist *= C.cz.fate.thr;
         let lx = ccx + Math.cos(a) * dist, ly = ccy + Math.sin(a) * dist;
         if ( dist > 0 ) {
-          // the room left in that direction (the window is cut by the scene's edge). A throw that does not fit is never squeezed
-          // against the edge (that piled every long throw into one band along the map's border): it bounces off the edge it would
-          // cross (the direction mirrored on that axis) when that has room, else it lands at its own random share of the room left -
-          // spread over the whole free ground, never stacked at a border. The share is a hash of the chip (the stream R stays as it was).
-          let ca = Math.cos(a), sa = Math.sin(a);
-          const roomIn = (ca, sa) => {
-            const rx = ca > 1e-6 ? (W - 10 - ccx) / ca : ca < -1e-6 ? (9 - ccx) / ca : Infinity;
-            const ry = sa > 1e-6 ? (H - 10 - ccy) / sa : sa < -1e-6 ? (9 - ccy) / sa : Infinity;
-            return { r: Math.max(0, Math.min(rx, ry)), x: rx <= ry };
-          };
-          let rm = roomIn(ca, sa);
-          if ( dist > rm.r * 0.75 ) {
-            const fa = rm.x ? -ca : ca, fb = rm.x ? sa : -sa, rb = roomIn(fa, fb);
-            if ( rb.r > rm.r ) { ca = fa; sa = fb; rm = rb; }
-            const hv = h2(Math.round(ccx * 8) + 7919 * chip.length, Math.round(ccy * 8), seed + 977);
-            if ( dist > rm.r * 0.75 ) dist = rm.r * (0.2 + 0.55 * hv);
-          }
+          // the room left in that direction, in the window as it would be without the scene's edge (A.vb): a long throw is shortened
+          // smoothly so it lands well inside that window. At the border nothing is squeezed or bounced: a chip may land past the
+          // map's edge (it is culled when packed - never drawn, never in the sheet), so no pile ever forms along the border.
+          const ca = Math.cos(a), sa = Math.sin(a), [vx0, vy0, vx1, vy1] = A.vb ?? [0, 0, W, H];
+          const rx = ca > 1e-6 ? (vx1 - 10 - ccx) / ca : ca < -1e-6 ? (vx0 + 9 - ccx) / ca : Infinity;
+          const ry = sa > 1e-6 ? (vy1 - 10 - ccy) / sa : sa < -1e-6 ? (vy0 + 9 - ccy) / sa : Infinity;
+          const room = Math.max(1, Math.min(rx, ry));
+          if ( dist > room * 0.5 ) dist = room * 0.5 + room * 0.5 * Math.tanh((dist - room * 0.5) / (room * 0.5));
           lx = ccx + ca * dist; ly = ccy + sa * dist;
         }
-        // a chip that still lands outside its window (nowhere to go) is crushed, not stacked on the border
-        if ( lx < 2 || ly < 2 || lx > W - 3 || ly > H - 3 ) { stats.pulverised++; continue; }
-        const li = Math.round(ly) * W + Math.round(lx);
+        if ( !A.vb ) { lx = clamp(lx, 2, W - 3); ly = clamp(ly, 2, H - 3); }
+        const li = clamp(Math.round(ly), 0, H - 1) * W + clamp(Math.round(lx), 0, W - 1);   // (stacking only: a chip past the edge is culled)
         const stackUp = occ[li] ?? 0;
         const tiltA = R() * Math.PI * 2, slope = R() * 0.55 * liftK;
         C.shards.push({ ...base, px: chip, cx: ccx, cy: ccy, dx: lx - ccx, dy: ly - ccy, th: (R() - 0.5) * Math.PI * 2,
@@ -1467,6 +1461,18 @@ function bakeArea(A, P, seed, uid, jag) {
   let bytes = C.base.data.length + (C.light?.data.length ?? 0);
   for ( const s of C.shards ) {
     if ( s.skip || !s.img ) continue;
+    // cut by the scene's edge: a piece that lies wholly past it is culled (no sprite, no bytes), one across it is clipped
+    if ( A.aw ) {
+      const im = s.img, ax = RX + im.x, ay = RY + im.y;
+      const cx0 = Math.max(0, -ax), cy0 = Math.max(0, -ay), cx1 = Math.min(im.w, A.aw - ax), cy1 = Math.min(im.h, A.ah - ay);
+      if ( cx1 <= cx0 || cy1 <= cy0 ) { stats.culled++; continue; }
+      if ( cx0 || cy0 || cx1 < im.w || cy1 < im.h ) {
+        const w = cx1 - cx0, h = cy1 - cy0, data = new Uint8ClampedArray(w * h * 4);
+        for ( let y = 0; y < h; y++ ) data.set(im.data.subarray(((y + cy0) * im.w + cx0) * 4, ((y + cy0) * im.w + cx1) * 4), y * w * 4);
+        s.img = { w, h, data, x: im.x + cx0, y: im.y + cy0 };
+        s.src = { x: s.src.x + cx0, y: s.src.y + cy0 };
+      }
+    }
     const m = row();
     m[0] = 1; m[3] = s.img.w; m[4] = s.img.h; m[5] = RX + s.img.x; m[6] = RY + s.img.y;
     m[7] = RX + s.src.x; m[8] = RY + s.src.y;                    // where the piece came from
