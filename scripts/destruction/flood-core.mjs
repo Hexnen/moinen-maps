@@ -198,20 +198,22 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     // band seams; the engine only adds its highlights, in a few drifting patches
     const ax = cx + x, ay = cy + y, dep = prep.depth[i], L = prep.level;
     const ev = b ? LB[b * 4 + 3] : 0;
-    if ( dep < 0.08 && vnoise(ax / 2.2, ay / 2.2, 57) < 0.33 ) { P32[i] = 0; continue; }
+    if ( dep < 0.16 && vnoise(ax / 3, ay / 3, 57) * 0.7 + vnoise(ax / 1.4, ay / 1.4, 58) * 0.3 < 0.2 + dep * 1.6 - 0.05 ) { P32[i] = 0; continue; }   // (an organic, eaten edge: no facets)
     const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = () => 0;
-    const band = L <= 1 ? 1 : (dw + seam(0.2) < 0.2 ? 0 : L >= 3 && dw + seam(0.55) >= 0.55 ? 2 : 1);
-    const T = [[0.38, ringC], [0, baseC], [0.62, shadow]][band];
-    let r = baseC[0] + (T[1][0] - baseC[0]) * T[0], g = baseC[1] + (T[1][1] - baseC[1]) * T[0], bl = baseC[2] + (T[1][2] - baseC[2]) * T[0];
+    // a soft wet gradient (no contour bands): light shallows at the edge, the mid tone, a dark deep middle in a crater
+    const tt = L <= 1 ? 0.5 : clamp(dw / 0.55, 0, 1), lerp3 = (A, B, s) => [A[0] + (B[0] - A[0]) * s, A[1] + (B[1] - A[1]) * s, A[2] + (B[2] - A[2]) * s];
+    const sh = lerp3(baseC, ringC, 0.38), dp = lerp3(baseC, shadow, 0.62), C3 = tt < 0.4 ? lerp3(sh, baseC, tt / 0.4) : L >= 3 ? lerp3(baseC, dp, (tt - 0.4) / 0.6) : baseC;
+    const band = tt > 0.7 && L >= 3 ? 2 : 1;
+    let r = C3[0], g = C3[1], bl = C3[2];
     let a = 255 * master * (band === 2 ? 1 : 0.92);
     // highlights: the engine's bright wave / sparkle cells in a few patches, and a few short light streaks of sky on the deeper water
     if ( b ) { const q = b * 4; if ( LB[q] + LB[q + 1] + LB[q + 2] > baseC[0] + baseC[1] + baseC[2] + 90 && vnoise(ax / 7, ay / 4.5, 47) > 0.62 ) { r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; } }
-    if ( L >= 2 && dep > 0.25 && h2(Math.floor(ax / 6), ay, 71) < 0.03 && (ax % 6) < 4 ) { r += (foamC[0] - r) * 0.5; g += (foamC[1] - g) * 0.5; bl += (foamC[2] - bl) * 0.5; }
     a = a * op[i] / 255;
     // foam: broken blobs of varying width where the water meets the shore (0-2.5 px, gaps), never a constant offset outline
     if ( L >= 2 ) {
-      const dpx = dep * Math.max(2.5, prep.R), fw = 2.6 * vnoise(ax / 4, ay / 4, 53) - 0.4;
-      if ( dpx < fw && vnoise(ax / 2.5, ay / 2.5, 54) > 0.38 ) { r += (foamC[0] - r) * 0.8; g += (foamC[1] - g) * 0.8; bl += (foamC[2] - bl) * 0.8; a = Math.max(a, 180 * master); }
+      // a few irregular wet highlights near the edge (no outline)
+      const dpx = dep * Math.max(2.5, prep.R);
+      if ( dpx < 2 && vnoise(ax / 3, ay / 3, 54) > 0.7 ) { r += (foamC[0] - r) * 0.55; g += (foamC[1] - g) * 0.55; bl += (foamC[2] - bl) * 0.55; }
     }
     if ( coming ) {
       if ( u - fill[i] < BAND ) { r = foamC[0]; g = foamC[1]; bl = foamC[2]; a = Math.max(a, 220 * master); }

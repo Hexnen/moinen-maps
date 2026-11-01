@@ -56,7 +56,8 @@ export const BAKE_VERSIONS = {
   44: { compat: null, note: "crack strokes reshaped, blast/scorch floors" },
   45: { compat: 44, note: "cause specks clustered" },
   46: { compat: null, note: "cause identities beyond colour: claw furrows, compact impact crater, standing water, faceted ice, acid pits, sagging rot; tear silhouettes per cause" },
-  47: { compat: 46, note: "frost facet edges broken, no cross through the centre" }
+  47: { compat: 46, note: "frost facet edges broken, no cross through the centre" },
+  48: { compat: null, note: "crack generator rebuilt" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */

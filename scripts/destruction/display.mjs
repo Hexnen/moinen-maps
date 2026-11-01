@@ -89,7 +89,7 @@ const LOOK = {
   collapse: { delay: 200, reveal: 560, flight: 1.1,  arc: 0.35, order: "in" },
   scorch:   { delay: 0,   reveal: 950, flight: 1.3,  arc: 0.5,  order: "out" },
   flood:    { delay: 120, reveal: 680, flight: 1.4,  arc: 0.3,  order: "out" },
-  cracks:   { delay: 0,   reveal: 430, flight: 0.8,  arc: 0.6,  order: "out" },
+  cracks:   { delay: 0,   reveal: 260, flight: 0.8,  arc: 0.6,  order: "out" },
   gash:     { delay: 40,  reveal: 460, flight: 0.9,  arc: 0.7,  order: "wipe" }
 };
 
@@ -108,7 +108,7 @@ const FRONT = {
   collapse: [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.72) }, { dt: 120, col: (r, g, b) => mixP(r, g, b, 0x15110e, 0.4) }, { dt: 240 }],
   blast:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 3, 5) < 0.5 ? 0xfff4d6 : 0xffd890) }, { dt: 50, col: (r, g, b) => mixP(r, g, b, 0xff9a48, 0.55) }, { dt: 140 }],
   // (a crack opens dark - never a pale haze - with a rare grain of dust flashing in it)
-  cracks:   [{ dt: 0, col: (r, g, b, i) => (hash2(i, 4, 5) < 0.08 ? 0xd8cfbf : mixP(r, g, b, 0x0e0c0a, 0.3)) }, { dt: 80 }]
+  cracks:   [{ dt: 0, col: (r, g, b) => mixP(r, g, b, 0xe8e0d0, 0.55) }, { dt: 35, col: (r, g, b) => mixP(r, g, b, 0x0e0c0a, 0.3) }, { dt: 90 }]
 };
 
 /** Particle sprites in art pixels (white, tinted per particle): one texture each, made once. */
@@ -679,7 +679,7 @@ export class DestructionDisplay {
     const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront }) : null;
     const delay = coll ? coll.delay : tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
     const reveal = coll ? coll.reveal : tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-    const band = coll ? coll.band : tear ? tear.band : Math.max(160 * k, reveal * 0.38);
+    const band = coll ? coll.band : tear ? tear.band : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
     const front = (x, y) => {   // 0..1: when the front reaches (x, y)
       if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
       // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
@@ -944,7 +944,7 @@ export class DestructionDisplay {
     if ( t === "scorch" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -4 - Math.random() * 4, life: 350 + Math.random() * 300, color: Math.random() < 0.5 ? 0xd2401c : 0xff8a24 });
     else if ( t === "flood" ) this.spawn({ x, y, vx: j() * 2, vy: -0.5, life: 260, color: 0xb8d8f0, alpha: 0.75, drag: 3 });
     else if ( t === "gash" ) tearEdge(this, g, x, y);
-    else if ( t === "cracks" ) this.spawn({ x, y, vx: j() * 4, vy: -1, rise: -2, life: 420, color: 0xc8beb0, alpha: 0.7 });
+    else if ( t === "cracks" ) { /* (no floating specks) */ }
     else if ( t === "collapse" ) this.spawn({ x, y, vx: j() * 2, vy: 0, rise: -7, life: 700, color: 0xb9ae9e, alpha: 0.75, size: Math.random() < 0.3 ? 2 : 1 });
     else this.spawn({ x, y, vx: j() * 8, vy: -2 - Math.random() * 3, rise: -4, life: 520, color: Math.random() < 0.5 ? this.tone(g, 2, 0xa8977c) : this.tone(g, 3, 0x7c6c58), alpha: 0.8, drag: 2.4, size: 2 });   // grains of the ground, no pale flecks
   }
@@ -1218,7 +1218,7 @@ export class DestructionDisplay {
       if ( h < 1.5 ) continue;
       const bx = a.ox + Math.cos(tg.ang) * rr, by = a.oy + Math.sin(tg.ang) * rr * 0.85;
       // (step: this tongue's own pose clock; each one mirrored or not and leaning its own way - never twenty stamps of one sprite)
-      const tc = tongueCells(h, w, tg.ph + step * 0.9, tg.w).map(([x, y, q]) => [(tg.flip ? -x : x) + Math.round(-y * tg.lean), y, q]);
+      const tc = tongueCells(h, w, tg.ph + step * 0.9, tg.w).map(([x, y, q]) => [(tg.flip ? -x : x) + Math.round(-y * tg.lean), y, tg.h < 0.9 ? Math.max(q, 1) : q]);
       pxTongue(gr, v, bx, by, tc);
       // embers from the hot tips, smoke from the dying tongues (none that would outlive the entry)
       const left = a.end - now - 80;
@@ -1317,8 +1317,8 @@ export class DestructionDisplay {
       once("flames", a.delay, () => {
         const gr = this.pixelCanvas(), n = Math.max(5, Math.min(12, Math.round(4 + R * 0.25))), life = a.reveal + a.band * 0.8;
         const nc = 3 + Math.floor(hash2(9, 1, a.seed) * 2), cl = Array.from({ length: nc }, (_, c) => (c + hash2(c, 8, a.seed) * 0.6) / nc * 6.283);
-        const T = Array.from({ length: n * 2 }, (_, q) => ({ inner: q >= n, ang: cl[q % nc] + (hash2(q, 1, a.seed) - 0.5) * 0.9 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
-          off: hash2(q, 6, a.seed) * 70, h: 0.35 + 1.25 * hash2(q, 3, a.seed) ** 1.5, w: 2 + Math.round(3.5 * hash2(q, 4, a.seed)), flip: hash2(q, 7, a.seed) < 0.5, lean: (hash2(q, 9, a.seed) - 0.5) * 0.45, ph: hash2(q, 5, a.seed) * 6.28 }));
+        const T = Array.from({ length: n + Math.ceil(n / 2) }, (_, q) => ({ inner: q >= n, ang: cl[q % nc] + (hash2(q, 1, a.seed) - 0.5) * 1.4 + (q >= n ? 0.4 : 0), lag: hash2(q, 2, a.seed),
+          off: hash2(q, 6, a.seed) * 70, h: 0.3 + 1.6 * hash2(q, 3, a.seed) ** 2.6, w: 2 + Math.round(3.5 * hash2(q, 4, a.seed)), flip: hash2(q, 7, a.seed) < 0.5, lean: (hash2(q, 9, a.seed) - 0.5) * 0.45, ph: hash2(q, 5, a.seed) * 6.28 }));
         a.fx.push({ g: gr, kind: "flames", t0: a.start + a.delay, dur: life, draw: (t) => this.flames(gr, a, T, t * life, life, R) });
       });
       // smoke: a few dark puffs from the burnt ground behind the front
