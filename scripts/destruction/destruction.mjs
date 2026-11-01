@@ -11,6 +11,7 @@ import * as Store from "./store.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 import { DestructionDisplay } from "./display.mjs";
 import * as Editor from "./editor.mjs";
+import { sharedNow, ageOf } from "../shared-clock.mjs";
 
 /**
  * The destruction of the open scene: loads the mask from the scene flag, bakes it (worker) or takes a cached or published bake,
@@ -50,7 +51,9 @@ export const state = () => S;
 export const getStatus = () => status;
 const origin = () => { const r = Model.sceneRect(); return { x: r.x, y: r.y }; };
 const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
-const now = () => game.time.serverTime;
+// the shared wall clock (ms since 1970, server's clock): game.time.serverTime is the world's UPTIME in v14, so a moment stored with it
+// lay hours ahead after a relaunch and every entry waited hidden for it (the damage looked gone). Legacy / far-future moments: settled
+const now = () => sharedNow();
 
 /* ---------------------------------------------------------------- lifecycle */
 
@@ -336,8 +339,9 @@ function playEntries(added, removed, taken, mask, first) {
     const e = flag.get(h);
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
-      if ( sNow - e.t > ENTRY_WINDOW ) { display.swap(g, under); continue; }
-      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under,
+      const age = ageOf(e.t, sNow);
+      if ( age > ENTRY_WINDOW ) { display.swap(g, under); continue; }
+      display.enter(g, { start: pNow + Math.max(0, -age), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under,
         path: dirOn ? pathOfObj(e.p) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
       continue;
     }
@@ -360,7 +364,7 @@ function maybeBlast(first = false) {
   const b = S.blast;
   if ( !b?.id || b.id === playedBlast ) return;
   playedBlast = b.id;
-  const late = now() - b.t;
+  const late = ageOf(b.t, now());                  // Infinity: a legacy (uptime) or far-future moment, never played
   if ( S.params.anim && late < (first ? 4000 : 15000) ) display.detonate(performance.now() - late);   // the shared moment (in the future, or already running)
 }
 
@@ -425,7 +429,7 @@ async function persistOnce() {
     // the entries that played since: everybody here plays them a moment after the upload, at the same server time
     const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
     for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
-    for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
+    for ( const [h, e] of entryLog ) if ( !keep.has(h) || ageOf(e.t, at) > 60000 ) entryLog.delete(h);
     S.entries = [...entryLog.values()];
     // the manifest key by key: a new stroke adds one entry, an undo deletes one (flag-diff.mjs)
     const BK = `flags.${MODULE_ID}.${Model.FLAG}.baked`, stored = scene.flags?.[MODULE_ID]?.[Model.FLAG]?.baked;
