@@ -139,7 +139,7 @@ function onDown(ev) {
   ev.stopImmediatePropagation(); ev.preventDefault();
   const S = host.ensureState();
   if ( !overlay ) buildOverlay();
-  undo.push({ mask: S.mask.slice(), mw: S.mw });
+  undo.push({ mask: S.mask.slice(), mw: S.mw, paths: (S.paths ?? []).slice() });   // the brush paths go back with the mask
   if ( undo.length > UNDO_MAX ) undo.shift();
   const p = worldPoint(ev);
   stroke = { last: p, first: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set(), t0: performance.now(), path: [[p.x, p.y, 0]] };
@@ -192,6 +192,7 @@ function undoStroke() {
   if ( !S || !u || u.mw !== S.mw || u.mask.length !== S.mask.length ) return;
   const before = S.mask.slice();
   S.mask.set(u.mask);
+  if ( u.paths ) S.paths = u.paths;
   paintOverlay(null);
   host.edited(Model.diffBox(before, S.mask, S.mw));
 }

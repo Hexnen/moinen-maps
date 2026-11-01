@@ -69,6 +69,7 @@ export class DestructionDisplay {
     this.shards = layer(248);
     this.fx = layer(249);
     this.groups = new Map();       // hash -> group
+    this.spare = new Map();        // hash -> group no longer shown, kept for a quick return (stash)
     this.order = [];               // groups in sheet order
     this.dying = [];               // groups fading out
     this.particles = [];           // live particles
@@ -106,12 +107,22 @@ export class DestructionDisplay {
       if ( seen.has(r.hash) ) continue;
       seen.add(r.hash);
       let g = this.groups.get(r.hash);
-      if ( !g ) { g = this.build(r, rgba, w, meta); this.groups.set(r.hash, g); added.push(g); }
+      if ( !g && this.spare.has(r.hash) ) {
+        // shown before (a toggle switched back, an undo): the same sprites and texture, no rebuild, no upload
+        g = this.spare.get(r.hash); this.spare.delete(r.hash);
+        g.tex.scaleMode = this.filter; g.reused = true;
+        this.groups.set(r.hash, g); added.push(g);
+      } else if ( !g ) {
+        const i = this.dying.findIndex((q) => q.hash === r.hash);
+        if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); g.heldBy = null; g.baseCont.alpha = g.shardCont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
+        else { g = this.build(r, rgba, w, meta); g.reused = false; }
+        this.groups.set(r.hash, g); added.push(g);
+      }
       next.push(g);
     }
     const removed = [];
     for ( const [hash, g] of this.groups ) if ( !seen.has(hash) ) { this.groups.delete(hash); removed.push(g); }
-    for ( const g of removed ) this.retire(g, added);
+    for ( const g of removed ) this.retire(g);
     this.order = next;
     // sheet order on top of whatever is fading out (addChild moves a child to the end)
     for ( const g of next ) { this.base.addChild(g.baseCont); this.shards.addChild(g.shardCont); }
@@ -184,17 +195,32 @@ export class DestructionDisplay {
     return g.made - start;
   }
 
-  /** An area that is gone: fades out; when a new area took its place, its base goes at once (the new one covers it). */
-  retire(g, added) {
-    const r = g.info.rect;
-    const covered = added.some((a) => { const q = a.info.rect; return q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0; });
+  /**
+   * An area that is gone fades out. When a new area took its place and enters (enter with `under`), the old one stays underneath
+   * instead: its pieces go as the new front passes them and it is removed when the entry ends, so the change is revealed along the
+   * front (before, the unchanged part was cut out by a rectangle and showed as square blocks).
+   */
+  retire(g) {
     this.endAnim(g);
-    if ( covered ) { g.baseCont.destroy({ children: true }); g.baseCont = null; }
     g.dieStart = performance.now();
     this.dying.push(g);
   }
 
+  /**
+   * A group that left the screen is kept a while, detached (its texture stays on the GPU): switching a look toggle back, or an undo,
+   * shows it again at once instead of building and uploading it again. The oldest beyond SPARE are destroyed.
+   */
+  stash(g) {
+    g.heldBy = null; g.fade = null;
+    for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) { p.spr.visible = true; p.spr.alpha = 1; } }
+    g.baseCont.alpha = g.shardCont.alpha = 1;
+    g.baseCont.parent?.removeChild(g.baseCont); g.shardCont.parent?.removeChild(g.shardCont);
+    this.spare.delete(g.hash); this.spare.set(g.hash, g);
+    while ( this.spare.size > 24 ) { const [h0, old] = this.spare.entries().next().value; this.spare.delete(h0); this.kill(old); }
+  }
+
   kill(g) {
+    g.dead = true;
     this.endAnim(g);
     for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
     g.baseSpr?.texture?.destroy(false);
@@ -207,24 +233,27 @@ export class DestructionDisplay {
 
   /**
    * The entry of a group. `start` (performance.now() time; may lie in the past for a late start), `o` the impact (art px; default the
-   * area's epicentre), `dir` the stroke direction (unit, art px) or null, `box` the changed part (art px; null = all of it),
-   * `fadeRest` fades the rest in (an area that replaced an older one). `path` [[x, y, ms], ...] (art px): the brush path of the stroke,
-   * when the damage follows the stroke: the front then runs along it at the speed it was drawn.
+   * area's epicentre, or the middle of the changed part), `dir` the stroke direction (unit, art px; only when the damage follows the
+   * stroke) or null, `box` the changed part (art px; null = all of it), `under` the older areas this one replaced (kept underneath
+   * until the front has passed). `path` [[x, y, ms], ...] (art px): the brush path, when the damage follows the stroke: the front then
+   * runs along it at the speed it was drawn. Everything is revealed by a round, ragged front: never by axis-aligned blocks.
    */
-  enter(g, { start = performance.now(), o = null, dir = null, box = null, fadeRest = false, path = null } = {}) {
+  enter(g, { start = performance.now(), o = null, dir = null, box = null, under = [], path = null } = {}) {
     this.endAnim(g);
     const now = performance.now();
-    if ( !this.look.entry ) return;
+    if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
     if ( reducedMotion() ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
     const info = g.info, L = LOOK[info.type] ?? LOOK.blast, k = 1 / (this.look.speed || 1), pw = this.look.power;
-    const ox = o?.[0] ?? info.ex, oy = o?.[1] ?? info.ey;
+    // the changed part of an area that grew, as a disc around the change (pieces outside it were there already: they only appear)
+    const reg = box ? { cx: (box.x0 + box.x1) / 2, cy: (box.y0 + box.y1) / 2, r: Math.hypot(box.x1 - box.x0, box.y1 - box.y0) / 2 + 4 } : null;
+    const ox = o?.[0] ?? reg?.cx ?? info.ex, oy = o?.[1] ?? reg?.cy ?? info.ey;
     const r = info.rect;
-    const inBox = (x, y) => !box || (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1);
-    // the front: radial from the impact, or a wipe along the stroke
+    const inReg = (x, y) => !reg || Math.hypot(x - reg.cx, y - reg.cy) <= reg.r;
+    // the front: radial from the impact, or a wipe along the stroke (follows the stroke only)
     let wipe = null;
     const d = dir && Math.hypot(dir[0], dir[1]) > 0.1 ? [dir[0] / Math.hypot(dir[0], dir[1]), dir[1] / Math.hypot(dir[0], dir[1])] : null;
-    if ( L.order === "wipe" || d ) {
-      const u = d ?? [Math.cos(info.axis), Math.sin(info.axis)];
+    if ( d ) {
+      const u = d;
       const proj = [[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => (x - ox) * u[0] + (y - oy) * u[1]);
       wipe = { u, p0: Math.min(...proj, 0) - 2, p1: Math.max(...proj) + 2 };
     }
@@ -236,26 +265,40 @@ export class DestructionDisplay {
       const f = clamp01(Math.hypot(x - ox, y - oy) / Rmax);
       return L.order === "in" ? 1 - f : f;
     };
+    // when the front reaches a point (absolute time); a little noise so the pieces do not tear loose in perfect rings
+    const jit = (x, y) => (((Math.imul(Math.round(x) * 73856093 ^ Math.round(y) * 19349663, 83492791) >>> 0) % 1000) / 1000 - 0.5) * 70 * k;
+    const reach = pathFront ? (x, y) => start + 40 * k + pathFront.at(x, y) : (x, y) => start + delay + reveal * Math.sqrt(front(x, y)) * 0.9;
     const list = [], byPiece = new Map();
     for ( const p of g.pieces ) {
-      if ( !inBox(p.sx, p.sy) ) continue;
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
-      const t0 = pathFront ? start + 40 * k + pathFront.at(p.sx, p.sy) : start + delay + reveal * Math.sqrt(front(p.sx, p.sy)) * 0.9;
-      const dur = (p.thrown ? 380 + Math.min(420, dd * 14) : 260 + Math.min(200, dd * 30)) * L.flight * k;
+      const still = !inReg(p.sx, p.sy);
+      const t0 = reach(p.sx, p.sy) + jit(p.sx, p.sy);
+      const dur = still ? 1 : (p.thrown ? 380 + Math.min(420, dd * 14) : 260 + Math.min(200, dd * 30)) * L.flight * k;
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw + (info.type === "cracks" ? 1.5 : 0);
-      list.push({ p, t0, dur, arc, dusted: false });
+      list.push({ p, t0, dur, arc, still, dusted: still });
       byPiece.set(p, list[list.length - 1]);
       this.place(p, 0, list[list.length - 1], info.type);
     }
     const mask = new PIXI.Graphics();
     g.baseCont.addChild(mask);
     g.baseSpr.mask = mask;
-    g.anim = { start, delay: pathFront ? 40 * k : delay, reveal: pathFront ? pathFront.D : reveal, ox, oy, Rmax, wipe: pathFront ? null : wipe, box, list, byPiece, mask, fx: [],
-      path: pathFront, end: start + (pathFront ? pathFront.D + 40 * k : delay + reveal) + 1400 * k, fired: new Set(), type: info.type, k, pw,
-      fadeRest: fadeRest ? { start, dur: 260 } : null };
-    if ( fadeRest ) for ( const p of g.pieces ) if ( !inBox(p.sx, p.sy) ) { p.fading = true; if ( p.spr ) p.spr.alpha = 0; }
+    g.anim = { start, delay: pathFront ? 40 * k : delay, reveal: pathFront ? pathFront.D : reveal, ox, oy, Rmax, wipe: pathFront ? null : wipe, list, byPiece, mask, fx: [],
+      path: pathFront, end: start + (pathFront ? pathFront.D + 340 * k : delay + reveal) + 1400 * k, fired: new Set(), type: info.type, k, pw, reach,
+      seed: g.hash % 997 };
+    for ( const u of under ) u.heldBy = g;
     this.stats.entries++;
     this.drawMask(g, now);
+  }
+
+  /** A ragged disc (a polygon whose radius wobbles with the angle, the same every frame) instead of a perfect circle. */
+  blob(m, x, y, r, seed) {
+    if ( r < 3 ) { m.drawCircle(x, y, Math.max(0.01, r)); return; }
+    const n = 28, pts = new Array(n * 2);
+    for ( let i = 0; i < n; i++ ) {
+      const a = (i / n) * Math.PI * 2, w = Math.sin(a * 3 + seed) * 0.06 + Math.sin(a * 7 + seed * 1.7) * 0.05 + Math.sin(a * 13 + seed * 2.3) * 0.03;
+      pts[i * 2] = x + Math.cos(a) * r * (1.14 + w); pts[i * 2 + 1] = y + Math.sin(a) * r * (1.14 + w);   // never inside r
+    }
+    m.drawPolygon(pts);
   }
 
   /**
@@ -268,7 +311,7 @@ export class DestructionDisplay {
     const pts = path.map((q) => [q[0], q[1]]);
     let len = 0; const cum = [0];
     for ( let i = 1; i < pts.length; i++ ) { len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); cum.push(len); }
-    if ( len < Math.max(12, g.info.R * 1.2) ) return null;
+    if ( len < 12 ) return null;   // a tap: radial
     const T = path[path.length - 1][2] || 0;
     const D = Math.min(2200, Math.max(350, T || len * 6)) * k;
     const tt = path.map((q, i) => T > 0 ? (q[2] || 0) / T * D : cum[i] / len * D);
@@ -281,8 +324,12 @@ export class DestructionDisplay {
       }
       return [Math.sqrt(bd), bt];
     };
-    let wr = 6;
+    let wr = 6, cover = 0;
     for ( const p of g.pieces ) { const [d] = near(p.sx, p.sy); if ( d + 6 > wr ) wr = Math.min(d + 6, 80); }
+    // how far the ruin reaches from the path at most (halo, torn lobes): after the run the discs grow to it, never a square pop
+    const r = g.info.rect;
+    for ( let x = r.x0; x <= r.x1; x += 6 ) for ( const y of [r.y0, r.y1] ) cover = Math.max(cover, near(x, y)[0]);
+    for ( let y = r.y0; y <= r.y1; y += 6 ) for ( const x of [r.x0, r.x1] ) cover = Math.max(cover, near(x, y)[0]);
     const head = (el) => {
       for ( let i = 1; i < pts.length; i++ ) if ( tt[i] >= el ) {
         const f = (el - tt[i - 1]) / ((tt[i] - tt[i - 1]) || 1);
@@ -290,7 +337,7 @@ export class DestructionDisplay {
       }
       return null;
     };
-    return { pts, tt, D, wr, head, at: (x, y) => { const [d, t] = near(x, y); return t + d * 4 * k; } };
+    return { pts, tt, D, wr, cover: Math.max(wr, cover + 4), head, at: (x, y) => { const [d, t] = near(x, y); return t + d * 4 * k; } };
   }
 
   /** What rides on the head of a followed stroke: rolling explosions, a fire front, water surging in behind, a cave-in, a racing fracture, a claw. */
@@ -320,6 +367,17 @@ export class DestructionDisplay {
     if ( type !== "flood" && Math.random() < 0.6 ) this.spawn({ x: x - ux * 4, y: y - uy * 4, vx: -ux * 3, vy: -uy * 3, rise: -2, life: 700, color: 0xcfc6b8, alpha: 0.7, drag: 2 });
   }
 
+  /**
+   * No entry (a look setting changed, a returning area): the new look fades in over the old one, which stays whole underneath until
+   * it is covered, so there is no blank frame and no flash.
+   */
+  swap(g, under = []) {
+    if ( !under.length ) return;
+    g.fade = { start: performance.now(), dur: 220 };
+    this.applyFade(g, performance.now());
+    for ( const u of under ) u.heldBy = g;
+  }
+
   /** Everything enters again (Detonate), from each area's own impact. */
   detonate(start) { for ( const g of this.order ) this.enter(g, { start }); }
 
@@ -340,12 +398,20 @@ export class DestructionDisplay {
     m.clear().beginFill(0xFFFFFF);
     const X = (x) => o.x + x * ap, Y = (y) => o.y + y * ap;
     if ( a.path ) {
-      // the ruin opens behind the head of the stroke: a disc at every path point already passed, and at the head
+      // the ruin opens behind the head of the stroke: one thick line along the path drawn so far (round joins and caps), then it
+      // widens to cover the halo and the torn lobes
       const P = a.path, el = now - a.start - a.delay;
-      if ( el >= P.D ) m.drawRect(X(r.x0 - 4), Y(r.y0 - 4), (r.x1 - r.x0 + 8) * ap, (r.y1 - r.y0 + 8) * ap);
+      const after = clamp01((el - P.D) / (300 * a.k)), w = P.wr + (P.cover - P.wr) * easeOut(after);
+      const pts = [];
+      for ( let i = 0; i < P.pts.length && P.tt[i] <= el; i++ ) pts.push(P.pts[i]);
+      const h = el < P.D ? P.head(el) : null; if ( h ) pts.push(h);
+      if ( !pts.length ) m.drawRect(X(a.ox), Y(a.oy), 0.01, 0.01);
       else {
-        for ( let i = 0; i < P.pts.length && P.tt[i] <= el; i++ ) m.drawCircle(X(P.pts[i][0]), Y(P.pts[i][1]), P.wr * ap);
-        const h = P.head(el); if ( h ) m.drawCircle(X(h[0]), Y(h[1]), P.wr * ap); else m.drawRect(X(a.ox), Y(a.oy), 0.01, 0.01);
+        m.endFill().lineStyle({ width: 2 * w * ap, color: 0xFFFFFF, alpha: 1, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+        m.moveTo(X(pts[0][0]), Y(pts[0][1]));
+        if ( pts.length === 1 ) m.lineTo(X(pts[0][0]) + 0.01, Y(pts[0][1]));
+        for ( let i = 1; i < pts.length; i++ ) m.lineTo(X(pts[i][0]), Y(pts[i][1]));
+        m.lineStyle(0).beginFill(0xFFFFFF);
       }
     } else if ( a.wipe ) {
       const { u, p0, p1 } = a.wipe, f = p0 + (p1 - p0) * e, n = [-u[1], u[0]], B = a.Rmax + 4;
@@ -361,12 +427,7 @@ export class DestructionDisplay {
         m.drawCircle(X(a.ox), Y(a.oy), (outer + rr) / 2 * ap);
         m.lineStyle(0).beginFill(0xFFFFFF);
       } else m.drawRect(X(a.ox), Y(a.oy), 0.01, 0.01);   // nothing open yet (an empty mask would show everything)
-    } else m.drawCircle(X(a.ox), Y(a.oy), Math.max(0.01, a.Rmax * e) * ap);
-    if ( a.box ) {
-      // outside the changed part the area was already there: no reveal
-      const b = a.box, x0 = r.x0 - 4, y0 = r.y0 - 4, x1 = r.x1 + 4, y1 = r.y1 + 4;
-      for ( const [ax, ay, bx, by] of [[x0, y0, x1, b.y0], [x0, b.y1, x1, y1], [x0, b.y0, b.x0, b.y1], [b.x1, b.y0, x1, b.y1]] ) if ( bx > ax && by > ay ) m.drawRect(X(ax), Y(ay), (bx - ax) * ap, (by - ay) * ap);
-    }
+    } else this.blob(m, X(a.ox), Y(a.oy), Math.max(0.01, a.Rmax * e) * ap, a.seed);
     m.endFill();
   }
 
@@ -376,6 +437,7 @@ export class DestructionDisplay {
     if ( !s ) return;
     // before the front reaches it the piece is not there: the map below still looks whole
     s.visible = !a || t > 0;
+    if ( a?.still ) a = null;   // a piece that was there before the change: it only appears, it does not fly
     if ( t >= 1 || !a ) {
       const b = a ? Math.min(1, (t - 1) / 0.35) : 1, hop = a && b < 1 ? Math.sin(b * Math.PI) * Math.min(2, a.arc * 0.15) * (1 - b) : 0;
       s.position.set(o.x + p.fx * ap, o.y + Math.round(p.fy - hop) * ap);
@@ -444,9 +506,17 @@ export class DestructionDisplay {
       if ( g.anim ) this.animate(g, t0, vw);
     }
     for ( let i = this.dying.length - 1; i >= 0; i-- ) {
-      const g = this.dying[i], f = clamp01((t0 - g.dieStart) / 260);
-      g.shardCont.alpha = 1 - f; if ( g.baseCont ) g.baseCont.alpha = 1 - f;
-      if ( f >= 1 ) { this.kill(g); this.dying.splice(i, 1); }
+      const g = this.dying[i], h = g.heldBy;
+      if ( h && !h.dead && (h.anim || h.fade) ) {
+        // under the area that replaced it: whole until the new front (or the cross-fade) has passed; its pieces go with the front
+        g.dieStart = t0;
+        const a = h.anim;
+        if ( a ) for ( const p of g.pieces ) if ( p.spr?.visible && t0 >= a.reach(p.fx, p.fy) ) p.spr.visible = false;
+        continue;
+      }
+      const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / 260);
+      g.shardCont.alpha = 1 - f; g.baseCont.alpha = 1 - f;
+      if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); }
     }
     this.idleTick(t0, vw);
     // particles: crisp art-pixel steps, fading by pixel dropout rather than soft alpha
@@ -487,7 +557,7 @@ export class DestructionDisplay {
       const t = (now - it.t0) / it.dur;
       if ( onScreen || t >= 1 ) this.place(it.p, Math.max(0, t), it, type);
       if ( t < 1.35 ) busy = true;
-      if ( it.p.spr ) {
+      if ( it.p.spr && !it.still ) {
         // a burning plate glows as it curls, then cools back to the map's colours
         if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
         else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
@@ -498,13 +568,8 @@ export class DestructionDisplay {
         else if ( type === "cracks" && Math.random() < 0.3 ) this.spawn({ x: it.p.fx, y: it.p.fy, vx: (Math.random() - 0.5) * 4, vy: -1, rise: -3, life: 500, color: 0xc8beb0, alpha: 0.7 });
       }
     }
-    if ( a.fadeRest ) {
-      const f = clamp01((now - a.fadeRest.start) / a.fadeRest.dur);
-      for ( const p of g.pieces ) if ( p.fading ) { if ( p.spr ) p.spr.alpha = f; if ( f >= 1 ) p.fading = false; }
-      if ( f >= 1 ) a.fadeRest = null;
-    }
     if ( onScreen ) this.effects(g, a, now, el);
-    if ( !busy && el > a.delay + a.reveal + 200 && !a.fx.length ) this.endAnim(g);
+    if ( !busy && el > a.delay + a.reveal + 350 * a.k && !a.fx.length ) this.endAnim(g);
   }
 
   /** The type's own effects: one-shots at fixed moments, and what rides on the front. */
@@ -523,9 +588,9 @@ export class DestructionDisplay {
     else if ( type === "blast" ) {
       once("flash", 0, () => {
         const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
-        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: R * 0.45 * pw });
+        a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: Math.min(R * 0.45, 16) * pw });
       });
-      ring("ring", 30 * k, 0xf3e6cc, R * 1.9 * pw, 430 * k, 2);
+      ring("ring", 30 * k, 0xf3e6cc, Math.min(R * 1.9, 90) * pw, 430 * k, 2);
       once("dust", 60 * k, () => this.burst(a.ox, a.oy, R * pw, now));
       once("rain", 260 * k, () => { for ( let q = 0; q < Math.round(10 * pw); q++ ) { const ang = Math.random() * 6.28, d = R * (0.5 + Math.random()); this.spawn({ x: a.ox + Math.cos(ang) * d, y: a.oy + Math.sin(ang) * d * 0.8 - 6, vx: 0, vy: 0, fall: 40, life: 380, color: 0x4a3f36, size: Math.random() < 0.4 ? 2 : 1 }); } });
     } else if ( type === "collapse" ) {
@@ -592,8 +657,8 @@ export class DestructionDisplay {
   }
 
   clear() {
-    for ( const g of [...this.groups.values(), ...this.dying] ) this.kill(g);
-    this.groups.clear(); this.order = []; this.dying = [];
+    for ( const g of [...this.groups.values(), ...this.dying, ...this.spare.values()] ) this.kill(g);
+    this.groups.clear(); this.spare.clear(); this.order = []; this.dying = [];
     for ( const q of this.particles ) { q.spr.visible = false; this.pool.push(q.spr); }
     this.particles = [];
     this.stats.groups = this.stats.sprites = 0;

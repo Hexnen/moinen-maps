@@ -53,6 +53,8 @@ export async function getCached(key) {
   return hit;
 }
 
+export function dropCached(key) { return run("readwrite", (s) => { s.delete(key); return null; }); }
+
 export async function putCached(key, rec) {
   await run("readwrite", (s) => s.put({ key, ...rec, at: Date.now() }));
   const all = await run("readonly", (s) => s.getAll());

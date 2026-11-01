@@ -22,9 +22,9 @@ import * as Editor from "./editor.mjs";
  * "params" | "status" | "brush").
  */
 
-let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, persistTimer = 0, publishFailed = false;
+let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, persistTimer = 0;
 let lastSheet = null;               // the sheet on screen (its hash is computed only when asked: 4 MB of FNV costs ~20 ms)
-let inflight = false, again = null, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
+let inflight = null, again = null, paramRev = 0, publishBackoff = 0, publishRetryAt = 0, editedHere = false, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
 let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
 const played = new Set();            // area hashes already shown on this client (they never enter again)
 const entryLog = new Map();          // GM: area hash -> { t (server time), o, d } of entries played here, for the flag
@@ -59,6 +59,7 @@ function selfCheck(ms, retried = false) {
   checkTimer = setTimeout(() => {
     checkTimer = 0;
     if ( !S || !S.enabled || !Model.hasPaint(S) || display?.groups.size ) return;
+    if ( shownKey && status.stats?.areas === 0 ) return;   // only specks below the smallest area: nothing to show is right
     if ( status.baking || status.waiting || inflight ) return selfCheck(4000, retried);
     const why = status.error || (shownKey ? "the bake had no areas" : "no bake reached the screen");
     console.error(`${MODULE_ID} | destruction: masks present but nothing displayed (${why})`);
@@ -70,6 +71,7 @@ function selfCheck(ms, retried = false) {
 function teardown() {
   gen++;
   for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer] ) clearTimeout(t);
+  inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
   display?.destroy(); display = null;
@@ -85,8 +87,10 @@ function onUpdateScene(scene, changed, _options, userId) {
   const f = changed.flags?.[MODULE_ID];
   if ( !f || !(Model.FLAG in f || `-=${Model.FLAG}` in f) ) return;
   if ( userId === game.user.id ) return;                    // our own save: already shown
+  // another GM saved while this GM has strokes not saved yet: keep ours (our save follows and wins), never drop them
+  if ( game.user.isGM && saveTimer ) return;
   S = Model.load(scene);
-  if ( !S ) { display?.clear(); shownKey = ""; tell("loaded"); return; }
+  if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
   if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.clear(); shownKey = ""; }
   Editor.refreshOverlay();
@@ -97,6 +101,23 @@ const lookOf = (P) => ({ entry: P.entry && P.anim, speed: P.entrySpeed, power: P
 const union = (a, b) => !a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
 /** Mask box -> art box (a little wider: shards near the edge of a stroke move too). */
 const artBox = (b) => b && { x0: b.x0 * Model.K - 3, y0: b.y0 * Model.K - 3, x1: (b.x1 + 1) * Model.K + 3, y1: (b.y1 + 1) * Model.K + 3 };
+/** A brush path thinned to a point every 6+ art px and at most 96 points (the flag stays small; the bake and entry read this). */
+function simplify(pts) {
+  const out = [pts[0]];
+  for ( let i = 1; i < pts.length; i++ ) { const q = out[out.length - 1]; if ( Math.hypot(pts[i][0] - q[0], pts[i][1] - q[1]) >= 6 || i === pts.length - 1 ) out.push(pts[i]); }
+  if ( out.length <= 96 ) return out;
+  const step = (out.length - 1) / 95;
+  return Array.from({ length: 96 }, (_, i) => out[Math.round(i * step)]);
+}
+/**
+ * Paths go only when no point of theirs lies on damage any more (an area keeps the path it was made with: dropping it by age would
+ * re-bake that area differently). A hard cap drops the oldest beyond 200.
+ */
+function prunePaths() {
+  if ( !S?.paths?.length ) return;
+  const on = (x, y) => { const mx = Math.floor(x / Model.K), my = Math.floor(y / Model.K); return mx >= 0 && my >= 0 && mx < S.mw && my < S.mh && (S.mask[my * S.mw + mx] & 3); };
+  S.paths = S.paths.filter((q) => { for ( let i = 0; i + 2 < q.p.length; i += 3 ) if ( on(q.p[i], q.p[i + 1]) ) return true; return false; }).slice(-200);
+}
 /** The stored brush paths as [[x, y, ms], ...] (art px). */
 const unflat = (p) => { const out = []; for ( let i = 0; i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
 const pathsOf = (S) => (S.paths ?? []).map((q) => unflat(q.p ?? []).map(([x, y]) => [x, y]));
@@ -115,15 +136,15 @@ export async function rebake(opts = {}) {
   if ( !S ) return;
   clearTimeout(bakeTimer); bakeTimer = 0;
   if ( inflight ) { again = { ...(again ?? {}), ...opts }; return; }
-  inflight = true; again = null;
+  const tok = inflight = {}; again = null;
   try { await bakeOnce(opts); }
   catch ( err ) { console.error(`${MODULE_ID} | destruction`, err); }
-  finally { inflight = false; }
+  finally { if ( inflight === tok ) inflight = null; }   // a teardown meanwhile already let it go
   if ( again && S ) { const o = again; again = null; rebake(o); }
 }
 
 async function bakeOnce({ awaitPublish = true, force = false } = {}) {
-  const my = gen, scene = canvas.scene, T = { t0: performance.now() };
+  const my = gen, scene = canvas.scene, T = { t0: performance.now() }, rev = paramRev;
   if ( !Model.hasPaint(S) || !S.enabled ) {
     display?.clear(); shownKey = ""; shownMask = null;
     loaded = true;   // the scene's state is known: what is painted from now on is new and enters
@@ -139,12 +160,15 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   if ( !blob && !force && S.baked?.key === key ) {
     blob = await Store.fetchPublished(S.baked);
     if ( my !== gen ) return;
-    if ( blob ) { metaRows = S.baked.metaRows; source = "published"; Store.putCached(key, { blob, metaRows }); }
+    if ( blob ) { metaRows = S.baked.metaRows; source = "published"; }
   }
   if ( blob ) {
     const t = performance.now();
-    const dec = await Store.decodeSheet(blob);
+    let dec = null;
+    try { dec = await Store.decodeSheet(blob); }
+    catch ( err ) { console.warn(`${MODULE_ID} | destruction: unreadable ${source} file`, err); if ( source === "cache" ) Store.dropCached(key); }
     if ( my !== gen ) return;
+    if ( !dec ) { blob = null; again = { awaitPublish: false, force: true }; return; }
     sheet = { data: dec.rgba, w: dec.w, h: dec.h }; T.decode = performance.now() - t;
   }
   // a player whose GM is painting: wait for the GM's upload, bake here only when it does not come
@@ -172,13 +196,23 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
       return;
     }
   }
+  // a setting changed while this baked (clicking through toggles): the bake for the final state follows, this one is not shown
+  if ( rev !== paramRev && !force ) { strokes.unshift(...taken); Object.assign(status, { baking: false }); tell("status"); if ( !bakeTimer ) again ??= {}; return; }
   let t = performance.now();
-  const meta = readMeta(sheet.data, sheet.w, sheet.h, metaRows);
+  let meta;
+  try { meta = readMeta(sheet.data, sheet.w, sheet.h, metaRows); }
+  catch ( err ) {
+    // a broken file (cache or published): forget it and bake here
+    console.warn(`${MODULE_ID} | destruction: unusable bake (${source})`, err);
+    if ( source !== "baked" ) { Store.dropCached(key); again = { awaitPublish: false, force: true }; }
+    return;
+  }
   display ??= new DestructionDisplay();
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   const first = !loaded;
   const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, meta, S.ap, origin());
   T.show = performance.now() - t;
+  if ( source === "published" ) Store.putCached(key, { blob, metaRows });   // only a file that decoded and read
   playEntries(added, removed, taken, mask, first);
   shownKey = key; shownMask = mask; loaded = true;
   lastSheet = sheet.data; T.total = performance.now() - T.t0;
@@ -206,28 +240,33 @@ function playEntries(added, removed, taken, mask, first) {
     if ( b ) { const ab = artBox(b); edits = [{ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null }]; }
   }
   const flag = new Map((S.entries ?? []).map((e) => [e.h, e]));
-  const sNow = now(), pNow = performance.now();
+  const sNow = now(), pNow = performance.now(), dirOn = !!S.params.directional;
+  const overlaps = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
   for ( const g of added ) {
     const h = g.hash, r = g.info.rect;
-    if ( played.has(h) && !all ) continue;
+    // the older areas this one replaced stay underneath until it is in place (never a blank frame)
+    const under = removed.filter((q) => overlaps(q.info.rect, r));
+    // shown here before (a look toggle switched back, an undo), or a new look of existing damage: no entry, a cross-fade
+    if ( g.reused || (played.has(h) && !all) ) { played.add(h); display.swap(g, under); continue; }
     played.add(h);
     const e = flag.get(h);
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
-      if ( sNow - e.t > ENTRY_WINDOW ) continue;
-      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: e.o ?? null, dir: e.d ?? null, box: e.b ?? null, fadeRest: !!e.b,
-        path: S.params.directional ? pathById(e.p) : null });
+      if ( sNow - e.t > ENTRY_WINDOW ) { display.swap(g, under); continue; }
+      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, box: e.b ?? null, under,
+        path: dirOn ? pathById(e.p) : null });
       continue;
     }
     if ( first && !taken.length && !all ) continue;   // what was already there when the scene opened
-    const hits = edits.filter((s) => s.box.x0 <= r.x1 && s.box.x1 >= r.x0 && s.box.y0 <= r.y1 && s.box.y1 >= r.y0);
-    if ( !hits.length && !all ) continue;
-    const replaced = removed.some((q) => { const o = q.info.rect; return o.x0 < r.x1 && o.x1 > r.x0 && o.y0 < r.y1 && o.y1 > r.y0; });
-    const box = replaced && !all ? hits.reduce((u, s) => union(u, s.box), null) : null;
-    const s0 = hits[0], o = all ? null : s0?.a ?? null;
-    const d = s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
-    const sp = !all && S.params.directional ? hits.find((s) => s.path) : null;
-    display.enter(g, { start: pNow, o, dir: g.info.type === "gash" || S.params.directional ? d : null, box, fadeRest: !!box, path: sp?.path ?? null });
+    const hits = edits.filter((s) => overlaps(s.box, r) || (s.box.x0 <= r.x1 && s.box.x1 >= r.x0 && s.box.y0 <= r.y1 && s.box.y1 >= r.y0));
+    // not touched by an edit: a setting changed (torn borders, a slider, a new variation without Detonate): the new look fades in
+    if ( !hits.length && !all ) { display.swap(g, under); continue; }
+    const box = under.length && !all ? hits.reduce((u, s) => union(u, s.box), null) : null;
+    // with "follows the stroke" off the entry is the plain radial one from the area's epicentre (or the middle of the change)
+    const s0 = hits[0], o = !all && dirOn ? s0?.a ?? null : null;
+    const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
+    const sp = !all && dirOn ? hits.find((s) => s.path) : null;
+    display.enter(g, { start: pNow, o, dir: d, box, under, path: sp?.path ?? null });
     if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: box, p: sp?.pid ?? null });
   }
 }
@@ -262,7 +301,10 @@ function schedulePersist(key, sheet, metaRows, stats, blob = null) {
         blob = new Blob([png], { type: "image/png" });
         await Store.putCached(key, { blob, metaRows, stats });
       }
-      if ( my !== gen || !S || shownKey !== key || !game.user.isGM || publishFailed || S.baked?.key === key ) return;
+      // one GM publishes: the one who painted here, or the active GM (two GMs never race on the file and the flag)
+      const publisher = game.user.isGM && (editedHere || game.users.activeGM?.isSelf);
+      if ( my !== gen || !S || shownKey !== key || !publisher || S.baked?.key === key ) return;
+      if ( Date.now() < publishRetryAt ) { schedulePersist(key, null, metaRows, stats, blob); return; }
       await save();
       const baked = await Store.publish(scene.id, key, blob, metaRows);
       if ( my !== gen || !S ) return;
@@ -273,15 +315,19 @@ function schedulePersist(key, sheet, metaRows, stats, blob = null) {
       for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
       S.entries = [...entryLog.values()];
       await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked, [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries });
+      publishBackoff = 0;
       tell("status");
     } catch ( err ) {
       if ( game.user.isGM ) {
-        publishFailed = true;
-        console.warn(`${MODULE_ID} | could not publish the destruction`, err);
-        ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
+        // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
+        if ( !publishBackoff ) ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
+        publishBackoff = Math.min(8 * 60000, publishBackoff ? publishBackoff * 2 : 15000);
+        publishRetryAt = Date.now() + publishBackoff;
+        console.warn(`${MODULE_ID} | could not publish the destruction (next try in ${publishBackoff / 1000} s)`, err);
+        if ( shownKey === key ) schedulePersist(key, null, metaRows, stats, blob);
       } else console.warn(`${MODULE_ID} | destruction cache`, err);
     }
-  }, 900);
+  }, Math.max(900, publishRetryAt - Date.now()));
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
@@ -301,12 +347,14 @@ export function edited(box, stroke = null) {
     let path = null, pid = null;
     // follows the stroke: the brush path goes into the scene flag (art px, ms since the stroke began), the bake and the entry read it
     if ( S.params.directional && stroke?.path?.length > 1 && !stroke.erase ) {
-      path = stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; });
+      path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
       pid = foundry.utils.randomID(8);
-      S.paths = [...(S.paths ?? []), { id: pid, p: path.flat() }].slice(-48);
+      S.paths = [...(S.paths ?? []), { id: pid, p: path.flat() }];
     }
+    prunePaths();
     strokes.push({ box: ab, a, b: stroke?.b ? toArt(stroke.b) : null, path, pid });
   }
+  editedHere = true;
   scheduleBake(); scheduleSave();
   tell("edited");
 }
@@ -322,14 +370,14 @@ export function setParams(patch) {
   S.params = next;
   const live = changed.every((k) => LIVE_PARAMS.has(k));
   display?.setIdle(S.params.idle, S.params.fxWho); display?.setLook(lookOf(S.params));
-  if ( !live ) scheduleBake(200);
+  if ( !live ) { paramRev++; scheduleBake(250); }
   scheduleSave(); tell("params");
 }
 
 export function newVariation() {
   if ( !S ) return;
   S.seed = 1 + Math.floor(Math.random() * 99998);
-  forceEntry = true;
+  forceEntry = true; paramRev++;
   scheduleBake(50); scheduleSave(); tell("params");
 }
 

@@ -18,7 +18,7 @@
  * the placement table, so a single PNG carries the whole bake.
  */
 
-export const CORE_VERSION = 11;
+export const CORE_VERSION = 12;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -160,8 +160,11 @@ export function bake(I, cache = null) {
   const P = I.params, seed = I.seed | 0, K = I.K, AW = I.aw, AH = I.ah;
   const progress = I.onProgress ?? (() => {});
   const jag = P.jagged ? clamp(P.jag ?? 0.6, 0, 1) : 0;
-  const paramStr = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
-  const head = fnvStr(`${CORE_VERSION}|${seed}|${paramStr}|${I.mapKey ?? ""}|${AW}x${AH}`);
+  // an area's hash holds only the settings that change it: the torn-border amount only when torn borders are on (below), "follows
+  // the stroke" only through the brush paths that cross the area's window. Toggling a setting an area does not use is a cache hit.
+  const OWN = new Set(["jagged", "jag", "directional"]);
+  const paramStr = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !OWN.has(k)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
+  const head = fnvInts(fnvStr(`${CORE_VERSION}|${seed}|${paramStr}|${I.mapKey ?? ""}|${AW}x${AH}`), jag ? Math.round(jag * 1000) + 1 : 0);
 
   /* ---------------------------------------------------------------- 1. the ragged field (absolute art coordinates only) */
   let mx0 = Infinity, my0 = Infinity, mx1 = -1, my1 = -1;
@@ -289,7 +292,12 @@ export function bake(I, cache = null) {
     let x0 = FW, y0 = FH, x1 = -1, y1 = -1;
     for ( const i of c.px ) { const x = i % FW, y = (i - x) / FW; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
     const span = Math.max(x1 - x0, y1 - y0);
-    const margin = Math.round(Math.min(160, Math.max(14, span * 0.6 * scatter + 10)));
+    // room for everything that leaves the area at the current settings: thrown chips (throw), the halo, hairline cracks. What would
+    // still reach the edge of a capped window is shortened smoothly in bakeArea (never clamped: that piled chips in straight lines and
+    // cut halos and cracks along the window's edge)
+    const halo = clamp(P.halo ?? 0.6, 0, 1);
+    const reach = Math.max(span * 0.6 * scatter + 3 * scatter + 14, span * 0.7 * halo + 10, span * 0.55 + 12);
+    const margin = Math.round(Math.min(256, Math.max(14, reach)));
     const RX = Math.max(0, FX + x0 - margin), RY = Math.max(0, FY + y0 - margin);
     const W = Math.min(AW, FX + x1 + 1 + margin) - RX, H = Math.min(AH, FY + y1 + 1 + margin) - RY, N = W * H;
     const ownId = lab[c.px[0]];
@@ -329,6 +337,7 @@ export function bake(I, cache = null) {
     else {
       win.map = cropMap(I.map, RX, RY, W, H);
       res = bakeArea(win, P, seed, ay * AW + ax, jag);
+      res.win = { x: RX, y: RY, w: W, h: H };
       res.hash = hash;
       stats.baked++;
       if ( cache ) { cache.set(hash, res); trimCache(cache); }
@@ -374,7 +383,7 @@ function assemble(results, stats, t0, progress) {
     meta.set(it.m, o);
     meta[o + 1] = p.x; meta[o + 2] = p.y;
     if ( it.m[0] === 0 ) { meta[o + 12] = it.hash & 0xffff; meta[o + 13] = (it.hash >>> 16) & 0xffff; }
-    else meta[o + 11] = (it.area << 4) | (it.m[11] & 15);
+    else meta[o + 11] = ((Math.min(it.area, 2047)) << 4) | (it.m[11] & 15);   // int16: area indices past 2047 share the last one (only a stagger hint)
   });
   // the table in the last rows: a 4-byte count, then the int16s little endian; three bytes per pixel, alpha 255
   const bytes = new Uint8Array(metaRows * SW * 3);
@@ -424,6 +433,22 @@ function bakeArea(A, P, seed, uid, jag) {
     }
     return best;
   }
+  /** pixel -> cell id, a typed array (a Map of millions of entries was slow and huge); get() is undefined where no cell is. */
+  function cellMap(n) {
+    const a = new Int32Array(n).fill(-1);
+    return { get: (i) => (i >= 0 && i < n && a[i] >= 0 ? a[i] : undefined), set: (i, v) => { a[i] = v; } };
+  }
+  /** The path direction near (x, y), looked up on a 4 px grid (the fracture asks for every pixel). */
+  function pathDir(x, y) {
+    const G = 4, gx = (x / G) | 0, gy = (y / G) | 0, gw = Math.ceil(W / G) + 1;
+    const dirGrid = C.dirGrid ??= new Map();
+    const key = gy * gw + gx;
+    let f = dirGrid.get(key);
+    if ( !f ) { f = pathFrame(gx * G + G / 2, gy * G + G / 2); dirGrid.set(key, f); }
+    return f;
+  }
+  /** How far the area can reach out before the window ends (art px). */
+  function roomOf(C) { return Math.min(C.x0, C.y0, W - 1 - C.x1, H - 1 - C.y1); }
   /** At (x, y): the path's direction at its nearest point (ux, uy) and the side of the path the point lies on (+1 / -1). */
   function pathFrame(x, y) {
     const pts = C.path.pts;
@@ -493,9 +518,9 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( C.type !== T_GASH ) {
         C.epi = [];
         let acc = step / 2;
-        for ( let k = 1; k < pts.length; k++ ) {
+        for ( let k = 1; k < pts.length && C.epi.length < 12; k++ ) {
           const [x0, y0] = pts[k - 1], [x1, y1] = pts[k], sl = Math.hypot(x1 - x0, y1 - y0);
-          for ( let s = 0; s < sl; s += 1 ) {
+          for ( let s = 0; s < sl && C.epi.length < 12; s += 1 ) {
             if ( (acc += 1) < step ) continue;
             acc = 0;
             const px = x0 + (x1 - x0) * s / sl, py = y0 + (y1 - y0) * s / sl;
@@ -533,7 +558,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const ax = C.axis, nx = -ax[1], ny = ax[0], wid = Math.max(2, C.maxD), g = clamp(Math.round(wid / 4.5), 2, 4);
       const grooves = Array.from({ length: g }, (_, k) => -wid * 0.8 + (k + 0.5) * (wid * 1.6) / g);
       const cells = new Map();
-      C.cellAt = new Map();
+      C.cellAt = cellMap(N);
       for ( const i of C.px ) {
         const x = i % W, y = (i - x) / W, dx = x + 0.5 - C.cx, dy = y + 0.5 - C.cy;
         const t = dx * ax[0] + dy * ax[1], q = dx * nx + dy * ny + (vnoise(t / 3, 1.5, seed + 91) - 0.5) * 1.4;
@@ -596,7 +621,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const qy = y + 0.5 + (vnoise(x / 2.3, y / 2.3, seed + 202) - 0.5) * wa + (jag ? (vnoise(x / 0.9, y / 0.9, seed + 204) - 0.5) * 1.8 * jag : 0);
       let best = -1, bd = Infinity;
       const bx = Math.floor(qx / B) + 1, by = Math.floor(qy / B) + 1;
-      const f = C.path ? pathFrame(x, y) : null;
+      const f = C.path ? pathDir(x, y) : null;
       const visit = (X, Y) => {
         if ( X < 0 || Y < 0 || X >= gw || Y >= gh ) return;
         for ( let s = head[Y * gw + X]; s >= 0; s = nxt[s] ) {
@@ -616,7 +641,7 @@ function bakeArea(A, P, seed, uid, jag) {
     // cells
     const cells = new Map();
     C.px.forEach((i, k) => { const s = cellOf[k], key = fragOf[i] ? -fragOf[i] : s; (cells.get(key) ?? cells.set(key, { seed: seeds[s], px: [] }).get(key)).px.push(i); });
-    C.cellAt = new Map(); // pixel -> cell id (for crack gaps)
+    C.cellAt = cellMap(N); // pixel -> cell id (for crack gaps)
     C.cells = [...cells.values()];
     C.cells.forEach((c, id) => { c.id = id; for ( const i of c.px ) C.cellAt.set(i, id); });
   }
@@ -694,6 +719,15 @@ function bakeArea(A, P, seed, uid, jag) {
         else if ( R() < 0.45 ) dist = (e.R - dl) * (0.15 + R() * 0.6);                       // comes to rest on the slope, leaning
         else dist = ((e.R - dl) + 1 + Math.pow(R(), 1.6) * (e.R * 0.6 + 3)) * scatter;        // thrown out past the rim, most land close
         let lx = ccx + Math.cos(a) * dist, ly = ccy + Math.sin(a) * dist;
+        if ( dist > 0 ) {
+          // the room left in that direction: a long throw is shortened smoothly so it always lands well inside the window
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const rx = ca > 1e-6 ? (W - 10 - ccx) / ca : ca < -1e-6 ? (9 - ccx) / ca : Infinity;
+          const ry = sa > 1e-6 ? (H - 10 - ccy) / sa : sa < -1e-6 ? (9 - ccy) / sa : Infinity;
+          const room = Math.max(1, Math.min(rx, ry));
+          if ( dist > room * 0.5 ) dist = room * 0.5 + room * 0.5 * Math.tanh((dist - room * 0.5) / (room * 0.5));
+          lx = ccx + ca * dist; ly = ccy + sa * dist;
+        }
         lx = clamp(lx, 2, W - 3); ly = clamp(ly, 2, H - 3);
         const li = Math.round(ly) * W + Math.round(lx);
         const stackUp = occ[li] ?? 0;
@@ -766,7 +800,7 @@ function bakeArea(A, P, seed, uid, jag) {
     }
     const T = s.T | 0;
     const tx0 = Math.floor(sx0) - 1, ty0 = Math.floor(sy0) - 1, tw = Math.ceil(sx1) - tx0 + 2, th = Math.ceil(sy1) - ty0 + 2 + T;
-    if ( tw <= 0 || th <= 0 || tw > 400 || th > 400 ) { s.skip = true; return; }
+    if ( tw <= 0 || th <= 0 || tw > 1600 || th > 1600 ) { s.skip = true; stats.dropped = (stats.dropped ?? 0) + 1; return; }   // (was 400: big heaved plates of huge areas went missing)
     const top = new Int32Array(tw * th).fill(-1);   // source map index of each top pixel
     for ( let y = 0; y < th; y++ ) for ( let x = 0; x < tw; x++ ) {
       const X = tx0 + x + 0.5 - ocx, Y = ty0 + y + 0.5 - ocy;
@@ -887,7 +921,8 @@ function bakeArea(A, P, seed, uid, jag) {
       let e = C.epi[0], bd = Infinity;
       for ( const q of C.epi ) { const d = (q.x - x) ** 2 + (q.y - y) ** 2; if ( d < bd ) { bd = d; e = q; } }
       const dx = x - e.x, dy = y - e.y, dl = Math.hypot(dx, dy) || 1;
-      walk(x, y, dx / dl, dy / dl, 3 + R() * (C.maxD * 0.9 + 4) * (C.maxSev / 3), 0);
+      // never as far as the window's edge (a crack cut off there reads as a straight line)
+      walk(x, y, dx / dl, dy / dl, Math.min(3 + R() * (C.maxD * 0.9 + 4) * (C.maxSev / 3), Math.max(2, roomOf(C) - 2)), 0);
     }
     for ( const path of C.cracks ) for ( const i of path ) {
       const x = i % W, y = (i - x) / W, r = C.rect;
@@ -898,7 +933,7 @@ function bakeArea(A, P, seed, uid, jag) {
   /* ---------------------------------------------------------------- what lies beneath, the halos, the lip, the shadows */
   function drawBase(C) {
     const pal = C.pal, rp = pal.ramp, type = C.type;
-    const haloR = (type === T_SCORCH ? 4 + C.maxD * 1.4 : type === T_BLAST ? 2 + C.maxD * 0.9 : type === T_COLLAPSE ? 2 + C.maxD * 0.5 : 0) * clamp(P.halo ?? 0.6, 0, 1) * (C.maxSev / 3);
+    const haloR = Math.min(roomOf(C) - 2, (type === T_SCORCH ? 4 + C.maxD * 1.4 : type === T_BLAST ? 2 + C.maxD * 0.9 : type === T_COLLAPSE ? 2 + C.maxD * 0.5 : 0) * clamp(P.halo ?? 0.6, 0, 1) * (C.maxSev / 3));
     const r = C.rect;
     r.x0 = clamp(Math.floor(Math.min(r.x0, C.x0 - haloR - 2)), 0, W - 1); r.y0 = clamp(Math.floor(Math.min(r.y0, C.y0 - haloR - 2)), 0, H - 1);
     r.x1 = clamp(Math.ceil(Math.max(r.x1, C.x1 + haloR + 2)), 0, W - 1); r.y1 = clamp(Math.ceil(Math.max(r.y1, C.y1 + haloR + 2)), 0, H - 1);
@@ -1071,6 +1106,8 @@ export function readMeta(rgba, W, H, metaRows) {
   const n = metaRows * W, bytes = new Uint8Array(n * 3);
   for ( let k = 0; k < n; k++ ) { const o = ((H - metaRows) * W + k) * 4; bytes[k * 3] = rgba[o]; bytes[k * 3 + 1] = rgba[o + 1]; bytes[k * 3 + 2] = rgba[o + 2]; }
   const count = new DataView(bytes.buffer).getUint32(0, true);
+  // a file that does not hold what it says (truncated, foreign, an older format) is refused, never read past its end
+  if ( !Number.isFinite(count) || count * META_FIELDS * 2 + 4 > bytes.length || metaRows <= 0 || metaRows > H ) throw new Error("bad destruction sheet (${count} sprites in ${metaRows} rows)");
   const meta = new Int16Array(count * META_FIELDS);
   new Uint8Array(meta.buffer).set(bytes.subarray(4, 4 + count * META_FIELDS * 2));
   return meta;

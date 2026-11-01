@@ -41,7 +41,7 @@ function call(msg, transfer = [], onProgress = null) {
     let w;
     try { w = start(); } catch ( err ) { reject(err); return; }
     const id = nextId++;
-    const watchdog = setTimeout(() => { if ( pending.has(id) ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
+    const watchdog = setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
     pending.set(id, { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog });
     w.postMessage({ id, ...msg }, transfer);
   });
@@ -74,4 +74,9 @@ export function encodeInWorker(w, h, data) {
   return call({ kind: "encode", w, h, data: copy }, [copy.buffer]);
 }
 
-export function disposeBaker() { worker?.terminate(); worker = null; workerMap = ""; clearTimeout(idleTimer); }
+/** Let the worker go: every pending call is rejected and its watchdog cleared (an old watchdog must never kill a newer worker). */
+export function disposeBaker() {
+  worker?.terminate(); worker = null; workerMap = ""; clearTimeout(idleTimer);
+  for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(new Error("the destruction worker was let go")); }
+  pending.clear();
+}
