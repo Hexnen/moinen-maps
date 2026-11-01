@@ -1,6 +1,6 @@
 import { reducedMotion } from "../config.mjs";
 import { pxFlash, pxLine, pxRing, pxArcs, lineCells, boltTree, boltCells, pxBolt, pxRunDisc, sigilCells, hashU } from "./pixel-fx.mjs";
-import { clawCount } from "./core.mjs";
+import { clawCount, impactSpokes } from "./core.mjs";
 
 /**
  * The CAUSE of a damage on screen (display side; the bake side is the CAUSE table of core.mjs). On top of the kind's entry and idle:
@@ -29,7 +29,7 @@ export const CAUSE_LOOK = [
   /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.1, tint: null, front: 0.08, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
     bolt: true, idle: null, pulse: "crackle", light: 0.4, hot: [0xffffff, 0xdcecff, 0x9fc8ff], stain: 0xd8ecff },
   /* arcane    */ { slow: 1.25, curve: (f, a) => clamp01(Math.sqrt(f) * 0.78 + (((a / TAU) % 1) + 1) % 1 * 0.22), share: 0.6, tint: 0xd8b0ff, front: 0.6,
-    edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5, hot: [0xf0d8ff, 0xc890ff, 0x7a4ad8], stain: 0xb070ff },
+    edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5, hot: null, stain: 0xb070ff },
   /* impact    */ { slow: 0.7, curve: (f) => Math.pow(f, 0.45), share: 0.4, tint: null, front: 0.3, edge: { color: [0xcfc6b8, 0xb9ae9e], vy: -2, rise: -3, life: 600, drag: 2.4 },
     ring: 0xf3e6cc, shock: true, idle: "dust", hot: null, stain: 0x8a7a62 },
   /* claws     */ { slow: 0.8, curve: (f) => f, share: 0.4, tint: null, front: 0, edge: { color: [0xfff0b0, 0xe8dcc8], vy: -5, fall: 30, life: 260, drag: 2 },
@@ -121,13 +121,19 @@ export function causeEffects(d, g, a, now, el) {
       const e = 1 - Math.pow(1 - t, 2.2);
       pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.35 + 1.25 * e) * pw), t * 0.6, { core: 0xffffff, outer: 0x4a4038, seed: a.seed + 43, dash: 7, thick: 2 });
     });
-    const nf = 6 + Math.floor(hashU(a.seed, 1, 47) * 3);
+    const nf = 6 + Math.floor(hashU(a.seed, 1, 47) * 3), fan = impactSpokes(nf, a.seed + 47);
+    const fl = fan.map((_, q) => 0.22 + 0.78 * Math.pow(hashU(q, 3, a.seed + 47), 1.4)), fk = fan.map((_, q) => hashU(q, 4, a.seed + 47) < 0.4 ? (hashU(q, 5, a.seed + 47) < 0.5 ? -1 : 1) * (0.45 + 0.35 * hashU(q, 6, a.seed + 47)) : 0);
     draw("fract", hit, 420 * k, (gr, t) => {
       const grow = Math.min(1, t * 4), al = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
       for ( let q = 0; q < nf; q++ ) {
-        const an = (q + 0.4 * hashU(q, 2, a.seed + 47)) / nf * TAU, L = R * (0.75 + 0.45 * hashU(q, 3, a.seed + 47)) * grow, c = Math.cos(an), s = Math.sin(an) * 0.85;
-        pxLine(gr, V, a.ox + c * 1.5, a.oy + s * 1.5, a.ox + c * L, a.oy + s * L, 0x15110d, { alpha: al, drop: 1 - al, seed: q + 5 });
-        pxLine(gr, V, a.ox + c * 1.5 + 1, a.oy + s * 1.5 + 1, a.ox + c * L + 1, a.oy + s * L + 1, 0xf2e8d6, { alpha: al * 0.8, drop: 1 - al, seed: q + 9 });
+        // (two legs with a kink: the ray wanders; it stops short of the rim or reaches it, now and then forking)
+        const an = fan[q], L = R * 0.95 * fl[q] * grow, kink = (hashU(q, 7, a.seed + 47) - 0.5) * 0.35, c = Math.cos(an), s = Math.sin(an) * 0.85;
+        const mx = a.ox + c * L * 0.5, my = a.oy + s * L * 0.5, ex = mx + Math.cos(an + kink) * L * 0.5, ey = my + Math.sin(an + kink) * L * 0.5 * 0.85;
+        for ( const [x0, y0, x1, y1, w] of [[a.ox + c * 1.5, a.oy + s * 1.5, mx, my, 1], [mx, my, ex, ey, 0.7]] ) {
+          pxLine(gr, V, x0, y0, x1, y1, 0x15110d, { alpha: al * w, drop: 1 - al, seed: q + 5 });
+          pxLine(gr, V, x0 + 1, y0 + 1, x1 + 1, y1 + 1, 0xf2e8d6, { alpha: al * 0.7 * w, drop: Math.min(1, 1 - al + 0.3), seed: q + 9 });
+        }
+        if ( fk[q] && L > 5 ) pxLine(gr, V, mx, my, mx + Math.cos(an + fk[q]) * L * 0.35, my + Math.sin(an + fk[q]) * L * 0.3, 0x15110d, { alpha: al * 0.7, drop: 1 - al, seed: q + 15 });
       }
     });
     const je = el - hit, J = [2, -1, 1, 0];
@@ -143,13 +149,16 @@ export function causeEffects(d, g, a, now, el) {
     // (a tear's swipe runs over the middle of its area, not from its pinprick; white with a dark under-line, so it never melts into
     // the blast front's hot cream; solid while it cuts, breaking up only as it fades)
     const n = a.tear ? 3 : clawCount(g.info.R), sp = a.tear ? 3.5 : Math.max(2.5, R * 1.7 / n);
-    const mx = a.tear ? g.info.x + g.info.w / 2 : a.ox, my = a.tear ? g.info.y + g.info.h / 2 : a.oy;
+    const mid = a.tear || a.coll, mx = mid ? g.info.x + g.info.w / 2 : a.ox, my = mid ? g.info.y + g.info.h / 2 : a.oy;
     for ( let q = 0; q < n; q++ ) draw(`slash${q}`, q * 25 * k, 220 * k, (gr, t) => {
       const grow = Math.min(1, t * 4), al = 1 - t, off = (q - (n - 1) / 2) * sp, Lq = L * (q === 0 || q === n - 1 ? 0.85 : 1);
       const cx = mx + nx * off, cy = my + ny * off, x0 = cx - ux * Lq, y0 = cy - uy * Lq, x1 = x0 + ux * 2 * Lq * grow, y1 = y0 + uy * 2 * Lq * grow;
-      const drop = Math.max(0, (t - 0.5) * 2);
-      pxLine(gr, V, x0, y0 + 1, x1, y1 + 1, 0x241a12, { alpha: 0.8, drop, seed: q + 23 });
-      pxLine(gr, V, x0, y0, x1, y1, 0xffffff, { drop, seed: q + 3 });
+      // (the tail fades first: the visible part starts further along as it dies; the middle third is two pixels thick)
+      const tail = Math.max(0, (t - 0.35) / 0.65), sx = x0 + (x1 - x0) * tail, sy = y0 + (y1 - y0) * tail;
+      const m0x = sx + (x1 - sx) * 0.33, m0y = sy + (y1 - sy) * 0.33, m1x = sx + (x1 - sx) * 0.7, m1y = sy + (y1 - sy) * 0.7;
+      pxLine(gr, V, m0x, m0y + 1, m1x, m1y + 1, 0x241a12, { alpha: 0.7 * al, seed: q + 23 });
+      pxLine(gr, V, sx, sy, x1, y1, 0xfff6e8, { alpha: 0.55 + 0.45 * al, drop: 0.35 * tail, seed: q + 3 });
+      pxLine(gr, V, m0x + nx, m0y + ny, m1x + nx, m1y + ny, 0xffffff, { alpha: al, seed: q + 33 });
       if ( t < 0.3 ) pxLine(gr, V, x1 - ux * 4, y1 - uy * 4, x1, y1, 0xffc860, { seed: q + 13 });
     });
   }
@@ -187,11 +196,19 @@ export function causeEffects(d, g, a, now, el) {
     });
   }
   if ( cl.well ) {
+    // WATER's anticipation: the ground darkens wet from the low spot and a ring of water surges up and out before the ground goes
+    draw("wet", 0, Math.max(260, a.delay + a.reveal * 0.4), (gr, t) => blot(gr, V, a.ox, a.oy, Math.max(2, R * (0.25 + 0.6 * Math.min(1, t * 1.5)) * pw), 0x1a3040, 0.36 * (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3), a.seed + 81));
+    draw("surge", 20 * k, 420 * k, (gr, t) => pxArcs(gr, V, a.ox, a.oy, Math.max(2, R * (0.2 + 0.85 * (1 - Math.pow(1 - t, 2))) * pw), t, { seed: a.seed + 83, core: 0xe6f6fa }));
     // WATER wells up: slow broken ripple arcs spreading from the low spot as the pit fills
     for ( const [key, f, rr] of [["well1", 0.15, 0.7], ["well2", 0.5, 0.55], ["well3", 0.85, 0.45]] ) draw(key, a.delay + a.reveal * f, 650 * k, (gr, t) =>
       pxArcs(gr, V, a.ox, a.oy, Math.max(2, R * rr * pw * (0.3 + 0.7 * (1 - Math.pow(1 - t, 2)))), t, { seed: a.seed + key.length * 7 + Math.round(f * 100), core: t < 0.5 ? 0xd8f0f4 : 0x9fd0dc }));
   }
   if ( cl.flakes ) {
+    // ROT's anticipation: a creeping darkening that PULSES twice (the rot drawing breath) before the ground sags
+    draw("rot", 0, Math.max(420, a.delay + a.reveal * 0.5), (gr, t) => {
+      const beat = 0.55 + 0.45 * Math.abs(Math.sin(t * Math.PI * 2));
+      blot(gr, V, a.ox, a.oy, Math.max(2, R * (0.2 + 0.75 * t) * pw), 0x1e2414, 0.36 * beat * (t < 0.8 ? 1 : 1 - (t - 0.8) / 0.2), a.seed + 85);
+    });
     // ROT crumbles: flakes break off the sagging rim and fall in, dull spores drift up slowly
     for ( const [key, f] of [["fl1", 0.25], ["fl2", 0.55], ["fl3", 0.85]] ) once(key, a.delay + a.reveal * f, () => {
       for ( let q = 0; q < 5; q++ ) {
@@ -201,14 +218,24 @@ export function causeEffects(d, g, a, now, el) {
       for ( let q = 0; q < 2; q++ ) d.spawn({ x: a.ox + (Math.random() - 0.5) * R, y: a.oy + (Math.random() - 0.5) * R * 0.7, vx: (Math.random() - 0.5) * 1.2, vy: 0, rise: -1.4, life: 1500, color: 0xa8b47a, alpha: 0.6 });
     });
   }
+  if ( cl.rune ) {
+    // ARCANE's anticipation: an IMPLOSION - motes drawn in from a wide ring to the spot (convergence), a small violet pop when they meet
+    once("implode", 0, () => {
+      for ( let q = 0; q < 14; q++ ) {
+        const an = q / 14 * TAU + hashU(q, 1, a.seed + 87) * 0.3, r = R * (1.2 + 0.4 * hashU(q, 2, a.seed + 87)), v = r / 0.22;
+        d.spawn({ x: a.ox + Math.cos(an) * r, y: a.oy + Math.sin(an) * r * 0.8, vx: -Math.cos(an) * v, vy: -Math.sin(an) * v * 0.8, life: 210, color: q & 1 ? 0xd8a8ff : 0xf0d8ff, alpha: 0.95 });
+      }
+    });
+    draw("pop", 210, 140 * k, (gr, t) => pxRunDisc(gr, V, a.ox, a.oy, Math.max(1.5, Math.min(R * 0.3, 8) * (0.4 + t)), 0xc890ff, 0.7 * (1 - t), a.seed + 89), PIXI.BLEND_MODES.ADD);
+  }
   if ( cl.crystal ) {
     // FROST grows: crystal needles shoot out on the 30 / 90 / 150-degree lines from the spot, each branching once at 60 degrees
     draw("crystal", 0, Math.max(360, a.delay + a.reveal * 0.6), (gr, t) => {
       const grow = 1 - Math.pow(1 - Math.min(1, t * 1.6), 2), al = t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25;
       for ( let q = 0; q < 6; q++ ) {
-        const an = (q + 0.5) * Math.PI / 3, L = R * (0.6 + 0.35 * hashU(q, 1, a.seed + 71)) * grow, c = Math.cos(an), s = Math.sin(an);
+        const an = (q + 0.5) * Math.PI / 3 + (hashU(q, 2, a.seed + 71) - 0.5) * 0.3, L = R * (0.35 + 0.6 * hashU(q, 1, a.seed + 71)) * grow, c = Math.cos(an), s = Math.sin(an);
         pxLine(gr, V, a.ox, a.oy, a.ox + c * L, a.oy + s * L, 0xf4fbff, { alpha: al, seed: q + 21 });
-        if ( L > 4 ) for ( const sg of [-1, 1] ) {
+        if ( L > 4 && hashU(q, 3, a.seed + 71) < 0.6 ) for ( const sg of [-1, 1] ) {
           const b = an + sg * Math.PI / 3, x0 = a.ox + c * L * 0.55, y0 = a.oy + s * L * 0.55;
           pxLine(gr, V, x0, y0, x0 + Math.cos(b) * L * 0.3, y0 + Math.sin(b) * L * 0.3, 0xbfe2ff, { alpha: al * 0.85, seed: q * 3 + sg + 31 });
         }
@@ -229,6 +256,21 @@ export function causeEffects(d, g, a, now, el) {
       } });
     });
   }
+}
+
+/** A ragged, soft-edged patch (wet ground, creeping rot): its rim wanders with the angle, its alpha falls off outwards in two
+ * steps and drops out by pixel near the edge - never a flat disc. */
+function blot(gr, V, cx, cy, r, color, alpha, seed) {
+  if ( alpha < 0.02 ) return;
+  const R2 = Math.ceil(r * 1.3), steps = [[], []];
+  for ( let y = -R2; y <= R2; y++ ) for ( let x = -R2; x <= R2; x++ ) {
+    const an = Math.atan2(y, x), lob = 0.8 + 0.4 * vn(an * 1.6 + 7, 0.5, seed) + 0.15 * vn(x / 3, y / 3, seed + 1);
+    const d = Math.hypot(x, y / 0.8) / (r * lob); if ( d > 1 ) continue;
+    const X = Math.round(cx) + x, Y = Math.round(cy) + y;
+    if ( d > 0.65 && hashU(X, Y, seed + 2) < (d - 0.65) * 2.2 ) continue;
+    steps[d < 0.55 ? 0 : 1].push(X, Y);
+  }
+  steps.forEach((st, k) => { gr.beginFill(color, alpha * (k ? 0.55 : 1)); for ( let i = 0; i < st.length; i += 2 ) gr.drawRect(V.ox + st[i] * V.ap, V.oy + st[i + 1] * V.ap, V.ap, V.ap); gr.endFill(); });
 }
 
 /** Idle life of a settled damage: the cause's own particle now and then (instead of the kind's, about two times in three). */
@@ -279,34 +321,71 @@ export function addLight(d, g, tex, x, y) {
 
 /**
  * DARK-SCENE READABILITY for EVERY damage (glowing or not): laid into Foundry's illumination like the cause lights, only as the scene
- * grows dark (nothing by day: tickLights), so its look in the dark is the same pixels lit where it matters:
- *  - a thin light edge on its lips (the cover's own border: the stroke's pixels next to untouched ground);
- *  - the lit BEVEL of every dark line (a crack, a fracture, a furrow, the hole's inner edge: a pixel next to a much darker one), so a
- *    black crack on dark ground reads as a dark line between lit edges instead of vanishing;
- *  - a faint lift over the inside, a little over the dark lines themselves outside the cover (hairlines out in the ground).
- * Read once from the cover (cw x ch at x, y) and the base (bw x bh at bx, by, art px) when the area is built, kept with it (one
- * sprite, no blur, no animation); the colour per cause (moonlit grey for plain damage, dust for impact and claws, blue for water,
- * green for rot and acid, ice for frost, ember for fire, white-blue for lightning, violet for arcane).
+ * grows dark (nothing by day: tickLights), so in the dark its own pixels are lit where it matters - never an outline drawn round it:
+ *  - an INNER GLOW along its lips: a band of varied width (1-3 px, wandering along the edge) fading inwards, broken in places (its
+ *    strength rides a slow noise, a few stretches nearly out), brighter on the lips facing the top-left light, dimmer on the far ones;
+ *  - the lit BEVEL beside its dark lines (a crack, a fracture, a furrow, a tear's opening: a pixel next to a much darker one), so a
+ *    black crack on dark ground reads as a dark line between lit edges - also broken by the same noise, 1-2 px wide;
+ *  - a faint lift over the inside (more where the floor is mid-dark: water, the plain hole, char round the embers).
+ * The light is moonlight with a hint of the cause's colour (the emissive causes keep more of theirs): a decal never gets a uniform
+ * cause-coloured contour. Read once from the cover (cw x ch at x, y) and the base (bw x bh at bx, by, art px) when the area is built,
+ * kept with it (one sprite, no animation).
  */
+const MOON = [182, 190, 204];
 const RIM = [[175, 182, 196], [255, 160, 92], [176, 240, 120], [196, 222, 255], [206, 162, 255], [216, 206, 186], [212, 194, 166], [140, 196, 236], [172, 212, 132], [206, 234, 255]];
+const TINT = [0, 0.8, 0.45, 0.4, 0.55, 0.25, 0.25, 0.4, 0.35, 0.35];   // how much of the cause's colour the rim light keeps
+function vn(x, y, s) {   // value noise 0..1 (smooth), on the art grid
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = hashU(xi, yi, s), b = hashU(xi + 1, yi, s), c = hashU(xi, yi + 1, s), e = hashU(xi + 1, yi + 1, s);
+  return (a + (b - a) * u) + ((c + (e - c) * u) - (a + (b - a) * u)) * v;
+}
 export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
-  const col = RIM[g.info.cause | 0] ?? RIM[0]; if ( !cov?.data ) return;
-  // the lift over the inside: more where the floor is mid-dark (water, the plain hole, char round the embers)
-  const lift = [0.5, 0.55, 0.42, 0.42, 0.42, 0.42, 0.42, 0.7, 0.45, 0.42][g.info.cause | 0] ?? 0.42;
+  if ( !cov?.data ) return;
+  const ci = g.info.cause | 0, rc = RIM[ci] ?? RIM[0], tk = TINT[ci] ?? 0, col = [0, 1, 2].map((k) => MOON[k] + (rc[k] - MOON[k]) * tk);
+  const lift = [0.55, 0.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.52, 0.5][ci] ?? 0.5, seed = (g.hash % 9973) | 0;
   const src = base?.data ? base : cov, w = src.w, h = src.h, data = src.data, ox = base?.data ? bx : x, oy = base?.data ? by : y;
   const inC = (X, Y) => { const cx = X + ox - x, cy = Y + oy - y; return cx >= 0 && cy >= 0 && cx < cov.w && cy < cov.h && cov.data[(cy * cov.w + cx) * 4 + 3] > 0; };
   const al = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h ? data[(Y * w + X) * 4 + 3] : 0;
   const lum = (X, Y) => { const o = (Y * w + X) * 4; return 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]; };
-  const B = 1, LW = w + 2 * B, LH = h + 2 * B, A = new Float32Array(LW * LH), N4 = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  // distance inwards from the cover's edge (0 = an edge pixel), up to 4, and the edge's outward direction (towards the outside)
+  const D = new Uint8Array(w * h).fill(255), N4 = [[-1, 0], [1, 0], [0, -1], [0, 1]], dirX = new Float32Array(w * h), dirY = new Float32Array(w * h);
+  let front = [];
+  for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) {
+    if ( !inC(X, Y) ) continue;
+    let ex = 0, ey = 0;
+    for ( const [dx, dy] of N4 ) if ( !inC(X + dx, Y + dy) ) { ex += dx; ey += dy; }
+    if ( ex || ey || N4.some(([dx, dy]) => !inC(X + dx, Y + dy)) ) { const i = Y * w + X; D[i] = 0; dirX[i] = ex; dirY[i] = ey; front.push(i); }
+  }
+  for ( let r = 1; r <= 4 && front.length; r++ ) {
+    const next = [];
+    for ( const i of front ) {
+      const X = i % w, Y = (i - X) / w;
+      for ( const [dx, dy] of N4 ) {
+        const q = (Y + dy) * w + X + dx; if ( X + dx < 0 || Y + dy < 0 || X + dx >= w || Y + dy >= h || D[q] !== 255 || !inC(X + dx, Y + dy) ) continue;
+        D[q] = r; dirX[q] = dirX[i]; dirY[q] = dirY[i]; next.push(q);
+      }
+    }
+    front = next;
+  }
+  const B = 1, LW = w + 2 * B, LH = h + 2 * B, A = new Float32Array(LW * LH);
   for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) {
     const c = inC(X, Y);
     if ( !c && !al(X, Y) ) continue;
-    const Lm = base?.data && al(X, Y) ? lum(X, Y) : 128;
-    let v = c ? lift : 0, dark = false;
-    if ( c && N4.some(([dx, dy]) => !inC(X + dx, Y + dy)) ) v = 1;
-    if ( base?.data ) for ( const [dx, dy] of N4 ) if ( al(X + dx, Y + dy) && lum(X + dx, Y + dy) < 70 && lum(X + dx, Y + dy) < Lm - 40 ) { dark = true; break; }
-    if ( dark ) v = Math.max(v, 0.9);
-    else if ( !c && Lm < 70 ) v = Math.max(v, 0.4);
+    const i = Y * w + X, Lm = base?.data && al(X, Y) ? lum(X, Y) : 128;
+    // the band's own width (1-3 px) and strength (broken in places) wander slowly along the edge
+    const wv = 1 + 2 * vn((X + ox) / 7, (Y + oy) / 7, seed + 3), br = vn((X + ox) / 5, (Y + oy) / 5, seed + 5), on = br < 0.18 ? 0.15 : 0.6 + 0.4 * br;
+    let v = c ? lift : 0;
+    if ( c && D[i] < 255 && D[i] < wv ) {
+      const l = Math.hypot(dirX[i], dirY[i]) || 1, face = (-(dirX[i] + dirY[i]) / l) * 0.7071;   // 1: the edge faces the top-left light
+      v = Math.max(v, Math.pow(1 - D[i] / (wv + 0.5), 0.7) * on * (0.75 + 0.25 * face) * (g.info.type === "gash" ? 0.5 : 1));   // (a tear: its opening's bevel carries it, the stroke's border only faintly)
+    }
+    if ( base?.data ) {
+      let dark = 0;
+      for ( const [dx, dy] of N4 ) if ( al(X + dx, Y + dy) && lum(X + dx, Y + dy) < 70 && lum(X + dx, Y + dy) < Lm - 40 ) { dark = 1; break; }
+      if ( !dark && Lm >= 70 && vn((X + ox) / 4, (Y + oy) / 4, seed + 7) > 0.55 ) for ( const [dx, dy] of N4 ) if ( al(X + 2 * dx, Y + 2 * dy) && lum(X + 2 * dx, Y + 2 * dy) < 70 && lum(X + 2 * dx, Y + 2 * dy) < Lm - 40 ) { dark = 0.55; break; }
+      if ( dark ) v = Math.max(v, 0.95 * dark * on);
+      else if ( !c && Lm < 70 ) v = Math.max(v, 0.35 * on);
+    }
     A[(Y + B) * LW + X + B] = v;
   }
   const px = new Uint8Array(LW * LH * 4);
