@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 16;
+export const CORE_VERSION = 17;   // 17: debris bounces off the map edge instead of piling up
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
