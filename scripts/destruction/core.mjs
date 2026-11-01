@@ -22,6 +22,7 @@ import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 import { collapseOutline, collapseSeeds, collapseFate, collapseShade, collapseLip } from "./collapse.mjs";
 import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
+import { boltTree as boltTreeK, lineCells as lineCellsK } from "./pixel-fx.mjs";   // (crack strokes: kind code, not cause code)
 
 export const CORE_VERSION = 42;   // 42: cause floors calmer (fewer ember, spark, mote, bubble, spore and glint specks, acid pools in two bands, smaller sigils, moss in patches on lit parts, no 0-degree frost facets, a water halo near the rim), claws cut three gouges, no cause halo or rim hairlines on crack strokes; 41: crack STROKES (tapered branching fissures with a bevel, along the stroke, no cells), smooth lit floor bands with a few bigger stones, a flooded hole's pieces sink into it; 40: a cave-in's outline read from the smoothed occupancy (a level-1 pit stays whole, no straight runs of the brush mask), a finer wobble along its rim, room for its outward lobes; 39: a tear's flap seams short nicks, fibres slanted and short (no sticks across a wide gap), its far wall's strata dithered with a wandering height, turf roots and crumbs in soil tones; 38: a lightning lip scorched with rare glass beads (no white outline); 37: cracks readable at max settings (a milder warp of torn cracks, no wide main fissures there, no knot of tiny plates round the impact); 36: a cave-in shaped as an organic pit or a trench along a followed stroke, plates in rings along its rim (tilted, lit, sinking by band), a layered wall with strata and a void floor, a broken lip; 35: a tear opens asymmetrically (one tip blunt, the other a needle or a fork, pinches and bulges, the lips shifted against each other, its middle off the spine), its lips cut into flaps of varied length that settle, curl back or tear off into the gap, fibres that snap as pieces, curved forking hairlines, dithered diagonal edges, fire veins broken and branching, frost crystals at 60 degrees with a soft rime, acid eats a pitted edge; 33: lightning forks leave at 30-60 degrees off the channel's heading; 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
@@ -941,7 +942,7 @@ function bakeArea(A, P, seed, uid, jag) {
         let L = 0; for ( let q = 1; q < pts.length; q++ ) L += Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]);
         let run = 0;
         for ( let q = 1; q < pts.length; q++ ) {
-          const sl = Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]), cells = lineCells(pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1]);
+          const sl = Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]), cells = lineCellsK(pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1]);
           cells.forEach(([x, y], j) => {
             const f = (run + sl * j / Math.max(1, cells.length)) / (L || 1), w = Math.max(1, Math.round(w0 * Math.pow(1 - f, 0.8) + 0.25));
             const put = (X, Y, c) => { if ( X < 0 || Y < 0 || X >= W || Y >= H ) return; const i = Y * W + X; if ( ownA[i] && crackAt[i] < c ) crackAt[i] = c; };
@@ -951,7 +952,7 @@ function bakeArea(A, P, seed, uid, jag) {
         }
       };
       const tree = (x0, y0, x1, y1, w0, forks, sd) => {
-        const t = boltTree(sd, x0, y0, x1, y1, { forks, rough: 0.13 });
+        const t = boltTreeK(sd, x0, y0, x1, y1, { forks, rough: 0.13 });
         paint(t.main, w0, 2);
         for ( const f of t.forks ) paint(f.pts, f.depth > 1 ? 1 : Math.max(1, w0 - 1), f.depth > 1 ? 1 : (lv1 ? 1 : 2));
       };
@@ -1139,10 +1140,11 @@ function bakeArea(A, P, seed, uid, jag) {
         continue;
       }
       // crater: pulverised, sunk, or thrown out as chips
-      let gone = type === T_FLOOD ? 0.5 : type === T_COLLAPSE ? 0.75 : type === T_SCORCH ? 0.85 : 0.35 + (1 - debris) * 0.55;
+      let gone = type === T_FLOOD ? 0.85 : type === T_COLLAPSE ? 0.75 : type === T_SCORCH ? 0.85 : 0.35 + (1 - debris) * 0.55;
       if ( C.cz?.fate?.gone ) gone = clamp(gone + C.cz.fate.gone, 0.05, 0.95);   // acid dissolves, rot crumbles, a fist leaves pieces
-      if ( u < 0.35 && R() < gone + 0.25 ) { stats.pulverised++; continue; }
-      if ( R() < gone * 0.6 ) { stats.pulverised++; continue; }
+      const goneF = gone - (type === T_FLOOD ? 0.35 : 0);   // (a flooded hole keeps more of its pieces: they sink into it rather than vanish)
+      if ( u < 0.35 && R() < goneF + 0.25 ) { stats.pulverised++; continue; }
+      if ( R() < goneF * 0.6 ) { stats.pulverised++; continue; }
       const chipMax = Math.round(10 + 30 * u);
       for ( const chip of split(keep, chipMax, R) ) {
         let ccx = 0, ccy = 0; for ( const i of chip ) { const x = i % W; ccx += x; ccy += (i - x) / W; }
@@ -1188,8 +1190,7 @@ function bakeArea(A, P, seed, uid, jag) {
     // hairline cracks out into the intact map
     // (a cause's hairlines neither on crack strokes - a strike's bolt trail still crosses them)
     if ( C.cz ) { if ( ((C.maxSev >= 1.8 && C.type !== T_FLOOD) || C.cz.crack?.always) && (C.type !== T_CRACKS || C.cz.crack?.mode === "bolt") ) causeCracks(C, R, C.cz.crack); }
-    // (crack strokes are their own cracks: hairlines from the mask's rim would start in the middle of intact ground)
-    else if ( C.maxSev >= 1.8 && C.type !== T_FLOOD && C.type !== T_CRACKS ) growCracks(C, R);
+    else if ( C.maxSev >= 1.8 && C.type !== T_FLOOD ) growCracks(C, R);
   }
 
   /** Split a pixel set into chips of about `max` pixels (nearest of k random seeds). */
@@ -1342,6 +1343,7 @@ function bakeArea(A, P, seed, uid, jag) {
 
   /** Hairline cracks running from the rim out into the intact map, roughly away from the impact, branching now and then. */
   function growCracks(C, R) {
+    if ( C.type === T_CRACKS ) return;   // (crack strokes are their own cracks: hairlines from the mask's rim would start in intact ground)
     const rim = [];
     for ( const i of C.px ) if ( din[i] <= 1.01 ) rim.push(i);
     if ( !rim.length ) return;

@@ -22,7 +22,12 @@ const DIR = "scripts/destruction";
 // { rev, other }: a commit that also carries a change of another kind; `other` matches those hunks (left in both baselines)
 export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev: "6c9c1c7", other: /CORE_VERSION/ }, { rev: "f0e1afe", other: /CORE_VERSION/ }, { rev: "301412e", other: /CORE_VERSION/ }, "9297084", "007d3a0",
   // the tear's own cause treatments (fire veins, frost crystals, acid edge) came with its reshaping: only the hunks that call the kit are cause code
-  { rev: "9a52b7c", other: /^(?![\s\S]*(kit\.|glowHook|frostLines|fireVeins|kglow|causeKit))/ }, { rev: "8163962", other: /CORE_VERSION|compat:/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
+  { rev: "9a52b7c", other: /^(?![\s\S]*(kit\.|glowHook|frostLines|fireVeins|kglow|causeKit))/ },
+  // the debris round changed cause-fx too: only its CHIP shares and its "no skirt round a tear" hunks are cause code
+  { rev: "f0287ac", other: /^(?![\s\S]*(CHIP|cl\.ring && !a\.tear))/ },
+  { rev: "8163962", other: /CORE_VERSION|compat:/ },
+  // the tear bake's perf rewrite (byte-identical) edited the lines that call the cause kit: taken back out whole
+  "206f36e", { rev: "4b2c806", other: /CORE_VERSION|compat:/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
