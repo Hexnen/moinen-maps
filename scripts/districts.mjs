@@ -14,6 +14,7 @@ import { PIN_COLORS } from "./config.mjs";
 import { attrsOf, attrEditorHtml, wireAttrEditor, collectAttrs, cleanAttrs, writeAttrs, showCard, moveCard, hideCard, destroyCard, inkFor, fmt, pruneStore } from "./attrs.mjs";
 import { dotsCfg, paintDots, dotsFieldsHtml, readDotsValues, wireDotsFields } from "./dots.mjs";
 import { lightsSync, lightsCfg, lightFieldsHtml, readLightValues, wireLightFields, previewWhileOpen } from "./lights.mjs";
+import { trackMarkers } from "./workspace/markers.mjs";
 import { labelCfg, ensureFont, buildLabel, labelFieldsHtml, readLabelValues, wireFontPreview, fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -495,13 +496,13 @@ function updateView(v, d) {
 }
 function refreshDistrict(id) {
   if ( !layer || layer.destroyed ) return;
-  const raw = (canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? []).find((x) => x.id === id), v = VIEWS.get(id);
+  const raw = storedList().find((x) => x.id === id), v = VIEWS.get(id);
   if ( raw && v ) updateView(v, effective(raw));
 }
 
 function sync(animateNew = true) {
   if ( !layer || layer.destroyed ) return;
-  const list = canvas.scene.flags?.[MODULE_ID]?.[FLAG] ?? [];
+  const list = storedList();
   const ids = new Set();
   for ( const raw of list ) {
     const d = effective(raw);
@@ -523,8 +524,20 @@ export function panIfOffscreen(id) {
   const b = v.bbox, t = canvas.stage.worldTransform, p0 = t.apply({ x: b.x0, y: b.y0 }), p1 = t.apply({ x: b.x1, y: b.y1 }), r = canvas.app.view.getBoundingClientRect();
   if ( p1.x < 0 || p1.y < 0 || p0.x > r.width || p0.y > r.height ) panToDistrict(id);
 }
-const readList = () => foundry.utils.deepClone(canvas.scene.flags?.[MODULE_ID]?.[FLAG] ?? []);
-const save = async (list) => { const r = await canvas.scene.update({ [`flags.${MODULE_ID}.${FLAG}`]: list }); if ( game.user.isGM ) pruneStore(list); return r; };
+/**
+ * The list written last by this client and not yet confirmed by the server (null when none is in flight). Until the echo of a save
+ * lands, the scene document still holds the previous list: a second stroke made meanwhile must build on the unsaved one (else it
+ * overwrites the first stroke), and the map must show it (else the older echo flashes back for a moment).
+ */
+let pendingList = null;
+const storedList = () => pendingList ?? canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? [];
+const readList = () => foundry.utils.deepClone(storedList());
+const save = async (list) => {
+  const scene = canvas.scene;
+  pendingList = list; sync(true);
+  try { const r = await scene.update({ [`flags.${MODULE_ID}.${FLAG}`]: foundry.utils.deepClone(list) }); if ( game.user.isGM ) pruneStore(list); return r; }
+  finally { if ( pendingList === list ) { pendingList = null; if ( canvas.scene === scene ) sync(false); } }
+};
 
 /* ------------------------------------------------------------------ painting */
 
@@ -557,7 +570,7 @@ function drawLive() {
   live.moveTo(p[0][0], p[0][1]);
   if ( p.length === 1 ) live.lineTo(p[0][0] + 0.01, p[0][1]);
   for ( let i = 1; i < p.length; i++ ) live.lineTo(p[i][0], p[i][1]);
-  live.alpha = stroke.erase ? 0.3 : 0.38;
+  trackMarkers(live, { ring: true, base: stroke.erase ? 0.3 : 0.38 });   // times the GM's marker opacity (never invisible)
 }
 
 function onDown(ev) {
@@ -627,7 +640,7 @@ async function commit({ pts, erase }) {
 
 let hovered = null, previewed = null;
 function topAt(x, y) {
-  const list = canvas.scene.flags?.[MODULE_ID]?.[FLAG] ?? [];
+  const list = storedList();
   for ( let i = list.length - 1; i >= 0; i-- ) {
     const d = list[i]; if ( !d.revealed && !game.user.isGM ) continue;
     const bb = bboxOf(d.rings);
@@ -799,6 +812,7 @@ export function onCanvasReady() {
   // cursor ring and live stroke are UI feedback, above everything
   const host = canvas.interface; host.sortableChildren = true;
   host.addChild(cursor); host.addChild(live); live.zIndex = 899;
+  trackMarkers(cursor, { ring: true });
   sync(false);
   const view_ = canvas.app.view;
   listeners = {
@@ -837,7 +851,7 @@ export function teardown() {
   }
   for ( const v of VIEWS.values() ) if ( !v.destroyed ) v.destroy({ children: true, texture: true });
   for ( const dlg of [...LIVE] ) dlg.close();
-  LIVE.clear(); DRAFT.clear(); pendingIds.clear(); brushDraft = null;
+  LIVE.clear(); DRAFT.clear(); pendingIds.clear(); brushDraft = null; pendingList = null;
   clearTimeout(draftTimer); if ( draftRaf ) cancelAnimationFrame(draftRaf); draftRaf = draftTimer = 0;
   VIEWS.clear(); destroyCard();
   if ( ticking ) { canvas.app?.ticker?.remove(sharedTick); ticking = false; }
