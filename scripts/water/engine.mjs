@@ -34,7 +34,8 @@ export function engineInfo() {
     worker = new Worker(route("water-worker.js"));
     worker.onmessage = onMessage;
     worker.onerror = (e) => { console.error(`${MODULE_ID} | water worker`, e); for ( const p of pending.values() ) p.reject(new Error("water worker failed")); pending.clear(); };
-    const base = new URL(route(""), location.href).href;
+    // the folder of the worker, with its trailing slash: getRoute() drops a trailing slash, and the worker appends file names to this
+    const base = new URL(".", new URL(route("water-worker.js"), location.href)).href;
     info = await post({ type: "init", base });
     return info;
   })().catch((err) => { ready = null; worker?.terminate(); worker = null; throw err; });
