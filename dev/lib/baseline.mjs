@@ -46,11 +46,13 @@ function find(hay, needle, from) {
 }
 
 /** Take the change of one diff back out of `text` (the + lines become the - lines again). Throws when a hunk cannot be placed. */
-export function reverseApply(text, diff, label = "patch") {
+export function reverseApply(text, diff, label = "patch", only = null) {
   const crlf = text.includes("\r\n");
   let lines = text.split(/\r?\n/);
   let from = 0;
   for ( const h of hunks(diff) ) {
+    // `only(hunkText)`: take back only the hunks it accepts (a commit that also carries a change of another kind)
+    if ( only && !only(h.map(([t, l]) => t + l).join("\n")) ) continue;
     let lo = 0, hi = h.length;
     let placed = false;
     while ( true ) {
@@ -70,12 +72,20 @@ export function reverseApply(text, diff, label = "patch") {
   return lines.join(crlf ? "\r\n" : "\n");
 }
 
-/** The working-tree `file` (repo-relative) without the changes that `revs` made to it. */
+/**
+ * The working-tree `file` (repo-relative) without the changes that `revs` made to it. A rev is a commit id, or { rev, other } where
+ * `other` (a RegExp) marks the hunks of that commit that are NOT part of the feature (they stay in).
+ */
 export function withoutCommits(root, file, revs) {
   let text = fs.readFileSync(path.join(root, file), "utf8");
-  for ( const rev of [...revs].reverse() ) {
-    const diff = git(root, "diff", `${rev}^`, rev, "--", file);
-    if ( diff.trim() ) text = reverseApply(text, diff, `${rev} ${file}`);
+  for ( const r of [...revs].reverse() ) {
+    const rev = r.rev ?? r, diff = git(root, "diff", `${rev}^`, rev, "--", file);
+    if ( diff.trim() ) text = reverseApply(text, diff, `${rev} ${file}`, r.other ? (h) => !r.other.test(h) : null);
   }
   return text;
+}
+
+/** `text` (the file at `rev`) with the hunks of that commit matched by `other` taken back out: the commit's feature change alone. */
+export function onlyFeature(root, file, rev, other, text) {
+  return reverseApply(text, git(root, "diff", `${rev}^`, rev, "--", file), `${rev} ${file}`, (h) => other.test(h));
 }

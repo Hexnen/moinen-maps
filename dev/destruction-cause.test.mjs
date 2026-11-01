@@ -14,26 +14,30 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { revTree, withoutCommits } from "./lib/baseline.mjs";
+import { revTree, withoutCommits, onlyFeature } from "./lib/baseline.mjs";
 import { execFileSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = "scripts/destruction";
-export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe"];
+// { rev, other }: a commit that also carries a change of another kind; `other` matches those hunks (left in both baselines)
+export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", { rev: "50458de", other: /bounces off the edge/ }];
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
 const baseDir = path.join(tmp, "today-base");
 fs.mkdirSync(baseDir);
 for ( const f of fs.readdirSync(path.join(root, DIR)) ) if ( f.endsWith(".mjs") ) {
-  const touched = CAUSE_COMMITS.filter((r) => execFileSync("git", ["diff", "--name-only", `${r}^`, r, "--", `${DIR}/${f}`], { cwd: root }).toString().trim());
+  const touched = CAUSE_COMMITS.filter((r) => execFileSync("git", ["diff", "--name-only", `${r.rev ?? r}^`, r.rev ?? r, "--", `${DIR}/${f}`], { cwd: root }).toString().trim());
   fs.writeFileSync(path.join(baseDir, f), touched.length ? withoutCommits(root, `${DIR}/${f}`, touched) : fs.readFileSync(path.join(root, DIR, f)));
 }
 const Base = await load(baseDir);
 const Cur = await import(pathToFileURL(path.join(root, DIR, "core.mjs")).href);
 const HIST = [];
-for ( const rev of CAUSE_COMMITS ) {
-  HIST.push({ rev, Old: await load(revTree(root, `${rev}^`, DIR, path.join(tmp, `${rev}-parent`))), New: await load(revTree(root, rev, DIR, path.join(tmp, rev))) });
+for ( const r of CAUSE_COMMITS ) {
+  const rev = r.rev ?? r, dir = revTree(root, rev, DIR, path.join(tmp, rev));
+  // a commit with other changes too: those are taken back out of its tree, so only its cause change is compared with the parent
+  if ( r.other ) for ( const f of fs.readdirSync(dir) ) fs.writeFileSync(path.join(dir, f), onlyFeature(root, `${DIR}/${f}`, rev, r.other, fs.readFileSync(path.join(dir, f), "utf8")));
+  HIST.push({ rev, Old: await load(revTree(root, `${rev}^`, DIR, path.join(tmp, `${rev}-parent`))), New: await load(dir) });
 }
 
 let failed = 0;
@@ -127,8 +131,8 @@ for ( let c = 1; c < Cur.CAUSES.length; c++ ) for ( const { ob } of discs ) {
   if ( bytesOf(a) !== bytesOf(z) ) diff++; else check(false, `cause ${Cur.CAUSES[c]} x ${Cur.TYPES[ob.t]} looks like cause 0`);
   let hasLight = false, base17 = -1;
   for ( let k = 0; k < a.meta.length; k += Cur.META_FIELDS ) { if ( a.meta[k] === 3 ) hasLight = true; if ( a.meta[k] === 0 ) base17 = a.meta[k + 11] >> 4; }
-  // the tear (gash) is baked by tear.mjs: it takes the cause's palette but not its emissive specks
-  const wantLight = EMISSIVE.has(Cur.CAUSES[c]) && Cur.TYPES[ob.t] !== "gash";
+  // the tear (gash, tear.mjs) takes the cause like every kind since 50458de, its light sprite too
+  const wantLight = EMISSIVE.has(Cur.CAUSES[c]);
   if ( hasLight === wantLight && base17 === c ) lights++;
   else check(false, `cause ${Cur.CAUSES[c]} x ${Cur.TYPES[ob.t]}: light sprite ${hasLight}, cause on the base row = ${base17}`);
 }
@@ -157,6 +161,19 @@ check(r2.stats.reused === before && r2.stats.baked >= 1, `adding a stroke bakes 
 const B2 = { ...B, c: 9 };
 const r3 = Cur.bake(input([A, B2, Cc]), warm);
 check(r3.stats.baked >= 1 && r3.stats.reused >= 2, `changing one stroke's cause re-bakes only that stroke (reused ${r3.stats.reused}, baked ${r3.stats.baked})`);
+
+/* 3b. tears (gash along a path) x every cause: deterministic, unlike cause 0, and the same alone and under other strokes */
+const tear = strokes.find((s) => Cur.TYPES[s.ob.t] === "gash" && s.ob.path).ob;
+let tDet = 0, tInd = 0;
+const others = [{ ...capsule("O1", 0, tear.x0 + 4, tear.y0 + 3, tear.x0 + 4, tear.y0 + 3, 7), c: 2 }, { ...capsule("O2", 2, tear.x0 + tear.w - 3, tear.y0 + 2, tear.x0 + tear.w + 6, tear.y0 + 8, 5), c: 9 }];
+for ( let c = 1; c < Cur.CAUSES.length; c++ ) {
+  const ob = { ...tear, c }, a = Cur.bake(input([ob])), b = Cur.bake(input([ob]), new Map());
+  if ( bytesOf(a) === bytesOf(b) && bytesOf(a) !== bytesOf(Cur.bake(input([tear]))) ) tDet++; else check(false, `tear x ${Cur.CAUSES[c]}: not deterministic or like cause 0`);
+  const alone = areasOf(a), mixed = areasOf(Cur.bake(input([others[0], ob, others[1]]), new Map()));
+  if ( [...alone.values()].every((x) => mixed.get(x.hash)?.d === x.d) ) tInd++; else check(false, `tear x ${Cur.CAUSES[c]}: its sprites change among other strokes`);
+}
+check(tDet === Cur.CAUSES.length - 1, `tear x every cause is deterministic and differs from cause 0: ${tDet}/${Cur.CAUSES.length - 1}`);
+check(tInd === Cur.CAUSES.length - 1, `tear x every cause bakes the same sprites alone and among other strokes: ${tInd}/${Cur.CAUSES.length - 1}`);
 
 /* 4. the scene default */
 const ob0 = strokes[0].ob;
