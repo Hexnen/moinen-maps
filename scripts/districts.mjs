@@ -280,6 +280,7 @@ function sharedTick(frames) {
   for ( const v of VIEWS.values() ) if ( v.tick(dt) ) busy = true;
   if ( !busy ) { canvas.app.ticker.remove(sharedTick); ticking = false; }
 }
+const RES_SETTLE_MS = 300;    // a halftone district re-bakes for a new zoom this long after the zoom stopped (checkRes)
 const wake = () => { if ( !ticking && canvas.app?.ticker ) { canvas.app.ticker.add(sharedTick); ticking = true; } };
 
 class DistrictView extends PIXI.Container {
@@ -335,7 +336,10 @@ class DistrictView extends PIXI.Container {
     // is 4x larger than needed (memory). Zooming back and forth no longer re-bakes (a hitch and a visible pop) at every step.
     const want = dotRes(this.bakeDims[0], this.bakeDims[1]);
     if ( want === this.bakedRes || (want < this.bakedRes && want > this.bakedRes / 4) ) { clearTimeout(this._rt); this._rt = 0; return; }
-    if ( !this._rt ) this._rt = setTimeout(() => { this._rt = 0; if ( !this.destroyed ) this.set(this.data, false); }, 350);
+    // only once the zoom has stood still for RES_SETTLE_MS (the timer starts again with every pan: before, it fired 350 ms after the
+    // first crossing even in the middle of a gliding zoom - a re-bake and two texture uploads inside the gesture)
+    clearTimeout(this._rt);
+    this._rt = setTimeout(() => { this._rt = 0; if ( !this.destroyed ) this.set(this.data, false); }, RES_SETTLE_MS);
   }
 
   /**

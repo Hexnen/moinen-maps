@@ -457,6 +457,8 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
   const out = {};
   let p = null;
   try {
+    // (each gesture is followed by 90 idle frames, ~550 ms: work deferred until the zoom settles lands there, after the 30-frame
+    // window that counts as the gesture)
     const phase = async (name, frames) => { inst.snap(); const fl = [];
       const rows = await runFrames(frames, { hz, cb: (i) => { fl[i] = inst.frame(); fl[i].zoom = +canvas.stage.scale.x.toFixed(3); } }); const s = inst.snap();
       // the long frames with what ran in them (ms per ticker listener / canvasPan listener, GL counts)
@@ -475,10 +477,10 @@ export async function zoomBench({ hz = 165, quiet = false } = {}) {
       const c = out[name].cost;
       out[name].pass = c.p99 < 8 && c.max < 16 && c.over33 === 0 && (name === "rest" || !Object.keys(during).length); };
     await phase("rest", idle(165));
-    await phase("zoomOut", [...gesture(1, 24, 900), ...idle(40)]);                  // 1 -> ~0.3
-    await phase("zoomIn", [...gesture(-1, 46, 1500), ...idle(40)]);                 // 0.3 -> ~3
-    await phase("zoomInDeep", [...gesture(-1, 14, 600), ...idle(40)]);              // 3 -> ~6
-    await phase("zoomBack", [...gesture(1, 36, 1300), ...idle(40)]);                // 6 -> ~1
+    await phase("zoomOut", [...gesture(1, 24, 900), ...idle(90)]);                  // 1 -> ~0.3
+    await phase("zoomIn", [...gesture(-1, 46, 1500), ...idle(90)]);                 // 0.3 -> ~3
+    await phase("zoomInDeep", [...gesture(-1, 14, 600), ...idle(90)]);              // 3 -> ~6
+    await phase("zoomBack", [...gesture(1, 36, 1300), ...idle(90)]);                // 6 -> ~1
     // drag pan: 400 px right and back over 2 s, every frame (a pointer drag pans per pointermove)
     const n = Math.round(2 * hz), x0 = canvas.stage.pivot.x, y0 = canvas.stage.pivot.y;
     await phase("pan", Array.from({ length: n }, (_, i) => () => canvas.pan({ x: x0 + 400 * Math.sin(Math.PI * i / n), y: y0 + 120 * Math.sin(2 * Math.PI * i / n) })));
