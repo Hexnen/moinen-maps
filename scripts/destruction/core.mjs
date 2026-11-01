@@ -354,7 +354,7 @@ export function bake(I, cache = null) {
     const ownId = lab[c.px[0]];
     // only this part's own pixels: everything else in its window is intact ground for it
     const win = { W, H, RX, RY, inside: new Uint8Array(N), sev: new Float32Array(N), typ: new Uint8Array(N), own: new Uint8Array(N), frag: new Int32Array(N), px: [] };
-    let h = fnvInts(fnvStr(String(c.ob.id), head), RX, RY, W, H, c.type);
+    let h = fnvInts(fnvStr(String(c.ob.id), head), RX, RY, W, H, c.type === T_FLOOD ? 0xf10d1 : c.type);   // flood: the bottom under the engine's water (flood.mjs)
     // its cause: its own, else the scene's default; part of its hash only when there is one (cause 0 keeps the old hash and bytes)
     const cause = Math.min(CAUSES.length - 1, Math.max(0, (c.ob.c | 0) || (P.cause | 0)));
     win.cause = cause;
@@ -1288,7 +1288,10 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( C.cls.mat === M.snow && h2(x, y, seed + 31) < 0.06 ) col = pal.chunk;
       if ( C.cls.mat === M.grass && dn < 0.25 && h2(x, y, seed + 33) < 0.05 ) col = rp[0];   // roots
       if ( t === T_COLLAPSE && depth > 0.35 ) { const k = clamp((depth - 0.35) / 0.4, 0, 1), th = h2(x, y, seed + 44) * 0.55 + vnoise(x / 2, y / 2, seed + 45) * 0.45; if ( th < k ) col = pal.void; else if ( th < k + 0.2 ) col = rp[0]; }
-      if ( t === T_FLOOD && depth > 0.18 ) {
+      // flooded: the water itself is the water engine's (flood.mjs) laid over this; under a shallow pool (broken) the wet bottom shows,
+      // under a deep one (crater) the dark of the deep water
+      if ( t === T_FLOOD && sv <= 2.45 ) col = mul(col, 0.8);
+      else if ( t === T_FLOOD && depth > 0.18 ) {
         const k = clamp(4 - (depth - 0.18) * 7 + (vnoise(x / 4, y / 2, seed + 41) - 0.5) * 1.2, 0, 4);
         col = pal.waterR[clamp(Math.floor(k + bayer(x, y) - 0.5), 1, 3)];
         if ( h2(Math.floor(x / 3), y, seed + 43) < 0.04 ) col = pal.waterR[4];                 // glints in dashes
@@ -1298,7 +1301,7 @@ function bakeArea(A, P, seed, uid, jag) {
       put(x, y, col);
     }
     // 2. rubble: chips of the surface and stones, thicker towards the rim
-    if ( type !== T_FLOOD && type !== T_CRACKS ) for ( const i of C.px ) {
+    if ( type !== T_CRACKS ) for ( const i of C.px ) {     // (flooded too: the rubble lies under the water)
       if ( C.keep.has(i) ) continue;
       const x = i % W, y = (i - x) / W, dn = din[i] / maxD;
       const dens =rubble * (0.035 + 0.09 * Math.exp(-((dn - 0.35) ** 2) / 0.05)) * (sev[i] / 3);
