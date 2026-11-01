@@ -201,7 +201,10 @@ function bake(d) {
   const flatBB = bboxOf(rings.map((r) => r.flat()));
   const pad = S * 0.4, w = flatBB.x1 - flatBB.x0 + pad * 2, h = flatBB.y1 - flatBB.y0 + pad * 2;
   const res = d.fill === "dots" ? dotRes(w, h) : Math.min(2, 2048 / Math.max(w, h));
-  const mk = () => { const c = document.createElement("canvas"); c.width = Math.ceil(w * res); c.height = Math.ceil(h * res); const x = c.getContext("2d"); x.scale(res, res); x.translate(-flatBB.x0 + pad, -flatBB.y0 + pad); x.lineCap = x.lineJoin = "round"; return x; };
+  // the silhouette is a soft blurred blob (hover highlight, map-hover mask): it never needs more than the plain districts' 2x,
+  // even when a halftone look follows the zoom up to 4x (a 4x silhouette was up to 64 MB of texture for nothing)
+  const silRes = Math.min(res, 2);
+  const mk = (r = res) => { const c = document.createElement("canvas"); c.width = Math.ceil(w * r); c.height = Math.ceil(h * r); const x = c.getContext("2d"); x.scale(r, r); x.translate(-flatBB.x0 + pad, -flatBB.y0 + pad); x.lineCap = x.lineJoin = "round"; return x; };
   const path = (ctx, jitter = 0, seed = 0) => {
     ctx.beginPath();
     const r2 = rng(hashStr(d.id) + seed);
@@ -257,10 +260,10 @@ function bake(d) {
   }
 
   // silhouette (for the highlight layer): soft white blob
-  const sil = mk();
-  try { sil.filter = `blur(${S * 0.05}px)`; } catch {}
+  const sil = mk(silRes);
+  try { sil.filter = `blur(${S * 0.05 * silRes / res}px)`; } catch {}     // canvas pixels: the same blur on the map as before
   sil.fillStyle = "#fff"; path(sil); sil.fill("evenodd");
-  return { look: ctx.canvas, sil: sil.canvas, x: flatBB.x0 - pad, y: flatBB.y0 - pad, res, w, h };
+  return { look: ctx.canvas, sil: sil.canvas, x: flatBB.x0 - pad, y: flatBB.y0 - pad, res, silRes, w, h };
 }
 
 /* ------------------------------------------------------------------ views */
@@ -300,11 +303,11 @@ class DistrictView extends PIXI.Container {
     this.dropMap();
     const b = bake(data);
     this.bakedRes = b.res; this.bakeDims = [b.w, b.h];
-    for ( const [spr, cnv] of [[this.look, b.look], [this.hi, b.sil]] ) {
+    for ( const [spr, cnv, res] of [[this.look, b.look, b.res], [this.hi, b.sil, b.silRes]] ) {
       spr.texture?.destroy(true);
       const tex = PIXI.Texture.from(cnv, { scaleMode: PIXI.SCALE_MODES.LINEAR });
       tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
-      spr.texture = tex; spr.position.set(b.x, b.y); spr.scale.set(1 / b.res);
+      spr.texture = tex; spr.position.set(b.x, b.y); spr.scale.set(1 / res);
     }
     this.bbox = bboxOf(data.rings); this.baseAlpha = game.user.isGM && !data.revealed ? 0.7 : 1;
     const spot = labelSpot(data.rings, this.bbox);
@@ -328,11 +331,24 @@ class DistrictView extends PIXI.Container {
   /** A halftone district re-bakes (debounced) when the zoom has moved far enough that its dots would blur or waste memory. */
   checkRes() {
     if ( this.data.fill !== "dots" || !this.bakeDims ) return;
-    if ( dotRes(this.bakeDims[0], this.bakeDims[1]) === this.bakedRes ) { clearTimeout(this._rt); this._rt = 0; return; }
+    // sharper when zooming in; when zooming out the mipmapped texture already looks right, so it is only baked smaller once it
+    // is 4x larger than needed (memory). Zooming back and forth no longer re-bakes (a hitch and a visible pop) at every step.
+    const want = dotRes(this.bakeDims[0], this.bakeDims[1]);
+    if ( want === this.bakedRes || (want < this.bakedRes && want > this.bakedRes / 4) ) { clearTimeout(this._rt); this._rt = 0; return; }
     if ( !this._rt ) this._rt = setTimeout(() => { this._rt = 0; if ( !this.destroyed ) this.set(this.data, false); }, 350);
   }
 
-  destroy(opts) { clearTimeout(this._rt); super.destroy(opts); }
+  /**
+   * The baked look and silhouette are this view's own canvases: free them with their base textures. (A container destroyed with
+   * { texture: true } frees a sprite's Texture but keeps its BaseTexture, which stays on the GPU and in PIXI's cache for good: every
+   * scene change leaked every district's textures.) The map-hover crop shares the scene background's base: never destroyed here.
+   */
+  destroy(opts) {
+    clearTimeout(this._rt);
+    this.dropMap();
+    for ( const spr of [this.look, this.hi] ) { if ( spr && !spr.destroyed && spr.texture && spr.texture !== PIXI.Texture.EMPTY ) spr.texture.destroy(true); }
+    super.destroy({ children: true });     // labels and attribute texts (PIXI.Text) free their own canvases
+  }
 
   dropMap() {
     if ( this.mapCont && !this.mapCont.destroyed ) { this.mapCont.mask = null; this.mapSprite?.texture?.destroy(false); this.mapCont.destroy({ children: true }); }
