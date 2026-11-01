@@ -1,5 +1,5 @@
 import { reducedMotion } from "../config.mjs";
-import { pxRing, pxFlash, pxLine } from "./pixel-fx.mjs";
+import { pxFlash, pxLine, boltTree, boltCells, pxBolt, pxRunDisc, sigilCells, hashU } from "./pixel-fx.mjs";
 
 /**
  * The CAUSE of a damage on screen (display side; the bake side is the CAUSE table of core.mjs). On top of the kind's entry and idle:
@@ -21,11 +21,11 @@ const TAU = Math.PI * 2;
 
 export const CAUSE_LOOK = [
   null,
-  /* fire      */ { slow: 1.1, curve: (f) => Math.sqrt(f), share: 0.6, tint: 0xffa060, front: 0.8, edge: { color: [0xff9a3c, 0xffd36b, 0xff7a2a], rise: -6, life: 700, flicker: true },
+  /* fire      */ { slow: 1.1, curve: (f) => Math.sqrt(f), share: 0.35, tint: 0xffa060, front: 0.35, edge: { color: [0xff9a3c, 0xffd36b, 0xd2401c, 0xffb347], rise: -6, life: 650, flicker: true },
     flash: 0xffb060, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 0.5 },
   /* acid      */ { slow: 1.5, curve: (f) => f, share: 0.6, tint: 0xd8ff80, front: 0.5, edge: { color: [0xb6ff4a, 0xe8ff9a, 0x7fd02a], rise: -3, life: 650 },
     ring: 0x9fe060, idle: "bubble", pulse: "slow", light: 0.35 },
-  /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.5, tint: 0xd8ecff, front: 0.6, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 220, drag: 2 },
+  /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.25, tint: null, front: 0.25, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
     flash: 0xe6f4ff, bolt: true, idle: "spark", pulse: "crackle", light: 0.4 },
   /* arcane    */ { slow: 1.25, curve: (f, a) => clamp01(Math.sqrt(f) * 0.78 + (((a / TAU) % 1) + 1) % 1 * 0.22), share: 0.6, tint: 0xd8b0ff, front: 0.6,
     edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5 },
@@ -72,28 +72,33 @@ export function causeEffects(d, g, a, now, el) {
   if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => pxFlash(gr, V, a.ox, a.oy, Math.min(R * 0.5, 14) * pw, t, { seed: a.seed + 31, colors: [0xffffff, cl.flash, cl.ring ?? cl.flash], rays: 5 }));
   // the cause's shock: a skirt of puffs in its colour, never a drawn ring
   if ( cl.ring ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
-  if ( cl.bolt ) for ( const [key, at] of [["bolt1", 0], ["bolt2", 110 * k], ["bolt3", 260 * k]] ) {
-    // a bolt from above to the strike: a jagged polyline, white core, blue glow, flickering
-    const pts = [], H = 40 + R * 1.5, seg = 8;
-    let x = a.ox + (Math.random() - 0.5) * R, y = a.oy - H;
-    for ( let s = 0; s <= seg; s++ ) { pts.push([x, y]); const f = (s + 1) / seg; x = a.ox + (x - a.ox) * (1 - f) + (Math.random() - 0.5) * 10 * (1 - f); y = a.oy - H + H * f; }
-    draw(key, at, 170 * k, (gr, t) => {
-      if ( (Math.floor(t * 7) & 1) && t > 0.3 ) return;
-      // a pixel bolt: a blue halo line one pixel to the right, the white core over it
-      for ( let q = 1; q < pts.length; q++ ) pxLine(gr, V, pts[q - 1][0] + 1, pts[q - 1][1], pts[q][0] + 1, pts[q][1], 0x8fc8ff, { drop: t * 0.6, seed: q });
-      for ( let q = 1; q < pts.length; q++ ) pxLine(gr, V, pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1], 0xffffff, { drop: t * 0.4, seed: q + 50 });
-    });
+  if ( cl.bolt ) {
+    // ONE strike (two channels on a big area): a branching bolt from above (screen-up) to the strike point - a jagged main channel,
+    // 2-4 forks and a twig (pixel-fx boltTree), white core over a blue glow, on ~170 ms with one flicker gap; a hard, small additive
+    // flash of the ground round the strike; a second, fainter restrike 90 ms later on the same channel. Deterministic per area.
+    const H = 34 + R * 1.4, s0 = a.seed * 7 + 3, chans = R > 18 ? 2 : 1, trees = [];
+    for ( let c = 0; c < chans; c++ ) {
+      const sx = a.ox + (hashU(s0, c, 1) - 0.5) * R * 0.9, ex = a.ox + (c ? (hashU(s0, c, 2) - 0.5) * R * 0.7 : 0), ey = a.oy + (c ? (hashU(s0, c, 3) - 0.5) * R * 0.5 : 0);
+      trees.push(boltCells(boltTree(s0 + c * 131, sx, a.oy - H * (c ? 0.8 : 1), ex, ey)));
+    }
+    const ADD = PIXI.BLEND_MODES.ADD;
+    draw("boltflash", 0, 120 * k, (gr, t) => { if ( t < 0.5 ) pxRunDisc(gr, V, a.ox, a.oy, Math.min(R * 1.5, 46) * pw, 0xdcecff, 0.22 * (1 - t * 2), s0); }, ADD);
+    trees.forEach((cells, c) => draw(`bolt${c}`, c * 35 * k, 175 * k, (gr, t) => pxBolt(gr, V, cells, t, { seed: s0 + c, glow: c ? 0x6fa8ff : 0x8fc8ff })));
+    draw("restrike", 90 * k, 110 * k, (gr, t) => pxBolt(gr, V, trees[0], 0.5 + t * 0.5, { seed: s0 + 9, glow: 0x5f90e8 }));
   }
   if ( cl.rune ) draw("rune", a.delay, 1100 * k, (gr, t) => {
-    // a rune ring that turns and fades: twelve dashes and their ticks
-    const rr = Math.max(5, R * 0.62), al = Math.sin(Math.min(1, t * 1.4) * Math.PI) * 0.85, rot = t * 0.9;
-    if ( al < 0.15 ) return;
-    for ( let i = 0; i < 12; i++ ) {
-      const a0 = rot + i / 12 * TAU, a1 = a0 + TAU / 24;
-      pxLine(gr, V, a.ox + Math.cos(a0) * rr, a.oy + Math.sin(a0) * rr * 0.82, a.ox + Math.cos(a1) * rr, a.oy + Math.sin(a1) * rr * 0.82, 0xd8a8ff, { drop: 1 - al, seed: i });
-      pxLine(gr, V, a.ox + Math.cos(a0) * rr * 0.82, a.oy + Math.sin(a0) * rr * 0.82 * 0.82, a.ox + Math.cos(a0) * rr, a.oy + Math.sin(a0) * rr * 0.82, 0xb070ff, { drop: 1 - al, seed: i + 20 });
+    // a ring of inscribed SIGILS (pixel-fx sigilStrokes: curved and angular strokes with ticks, never a cross) that turns a little,
+    // each glyph lighting in turn and pulsing, then dying by dropout
+    const rr = Math.max(6, R * 0.66), n = clamp01(rr / 30) > 0.5 ? 8 : 6, rot = t * 0.5, sz = Math.max(2, Math.min(4, rr * 0.16));
+    for ( let i = 0; i < n; i++ ) {
+      const on = clamp01((t * 1.6 - i / n * 0.5) * 3), pul = 0.75 + 0.25 * Math.sin(t * 18 + i * 1.3), al = on * pul * (t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1);
+      if ( al < 0.12 ) continue;
+      const ang = rot + i / n * TAU, cx = a.ox + Math.cos(ang) * rr, cy = a.oy + Math.sin(ang) * rr * 0.82;
+      gr.beginFill(i & 1 ? 0xd8a8ff : 0xf0d8ff, 1);
+      for ( const [x, y] of sigilCells(a.seed * 13 + i, cx, cy, sz) ) if ( hashU(x, y, i) < al ) gr.drawRect(V.ox + x * ap, V.oy + y * ap, ap, ap);
+      gr.endFill();
     }
-  });
+  }, PIXI.BLEND_MODES.ADD);
   if ( cl.shock ) {
     // a heavy blow: the ground jolts for a moment, a dust skirt
     const j = el < 140 * k ? (((Math.floor(el / 35) & 1) ? 1 : -1) * ap) : 0;
@@ -158,7 +163,41 @@ export function addLight(d, g, tex, x, y) {
   L.groups.add(g);
 }
 
+/**
+ * DARK-SCENE READABILITY for a damage that does not glow (no cause, impact, claws, water, rot, frost): a faint rim light on its lips and
+ * an ambient lift over its own pixels, laid into Foundry's illumination like the cause lights, only as the scene grows dark (nothing by
+ * day: tickLights). Made from the cover (the stroke's own pixels, cw x ch RGBA at x, y art px): edge pixels full, the inside faint,
+ * softened by two box blurs; the colour per cause (a cool moonlit grey for plain damage, blue for water, green for rot, ice for frost).
+ */
+const RIM = [[150, 156, 168], null, null, null, null, [166, 160, 150], [170, 156, 140], [120, 170, 220], [140, 176, 112], [190, 226, 255]];
+export function addRim(d, g, cov, x, y) {
+  const col = RIM[g.info.cause | 0]; if ( !col || !cov?.data ) return;
+  const { w, h, data } = cov, B = 4, LW = w + 2 * B, LH = h + 2 * B;
+  let A = new Float32Array(LW * LH);
+  const inA = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h && data[(Y * w + X) * 4 + 3] > 0;
+  for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) {
+    if ( !inA(X, Y) ) continue;
+    const edge = !inA(X - 1, Y) || !inA(X + 1, Y) || !inA(X, Y - 1) || !inA(X, Y + 1);
+    A[(Y + B) * LW + X + B] = edge ? 1 : 0.22;
+  }
+  for ( let pass = 0; pass < 2; pass++ ) {
+    const T = new Float32Array(LW * LH), r = 1;
+    for ( let Y = 0; Y < LH; Y++ ) for ( let X = 0; X < LW; X++ ) { let s = 0, n = 0; for ( let k = -r; k <= r; k++ ) { const q = X + k; if ( q >= 0 && q < LW ) { s += A[Y * LW + q]; n++; } } T[Y * LW + X] = s / n; }
+    for ( let Y = 0; Y < LH; Y++ ) for ( let X = 0; X < LW; X++ ) { let s = 0, n = 0; for ( let k = -r; k <= r; k++ ) { const q = Y + k; if ( q >= 0 && q < LH ) { s += T[q * LW + X]; n++; } } A[Y * LW + X] = s / n; }
+  }
+  const px = new Uint8Array(LW * LH * 4);
+  for ( let i = 0; i < LW * LH; i++ ) { const v = Math.min(1, A[i] * 1.6); px[i * 4] = col[0] * v; px[i * 4 + 1] = col[1] * v; px[i * 4 + 2] = col[2] * v; px[i * 4 + 3] = 255 * v; }
+  const tex = PIXI.Texture.fromBuffer(px, LW, LH);
+  const L = ensureLights(d), ap = d.ap, o = d.origin, pool = new PIXI.Sprite(tex);
+  pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
+  pool.position.set(o.x + (x - B) * ap, o.y + (y - B) * ap); pool.visible = false;
+  L.layer.addChild(pool);
+  g.rim = { pool, tex };
+  L.groups.add(g);
+}
+
 export function dropLight(d, g) {
+  if ( g.rim ) { d.causeLights?.groups.delete(g); if ( !g.rim.pool.destroyed ) g.rim.pool.destroy(); g.rim.tex.destroy(true); g.rim = null; }
   if ( !g.light ) return;
   d.causeLights?.groups.delete(g);
   if ( !g.light.pool.destroyed ) g.light.pool.destroy();
@@ -175,9 +214,12 @@ export function tickLights(d, now) {
   // no bloom by day (the pixels carry the look; a soft glow over a lit map reads as a smudge); it grows with the scene's darkness,
   // where the pool lifts the dark too
   const dark = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0)), bloomK = dark * dark;
+  // the rims of non-glowing damage: none by day, from a darkness of 0.5 up to full at 0.85
+  const rimK = Math.min(1, Math.max(0, (dark - 0.5) / 0.35));
   for ( const g of L.groups ) {
-    const lt = g.light; if ( !lt ) continue;
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
+    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = a * 0.8; }
+    const lt = g.light; if ( !lt ) continue;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);
     lt.pool.visible = a > 0.01; lt.pool.alpha = Math.min(1, a) * 0.85;
