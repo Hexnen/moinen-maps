@@ -113,10 +113,18 @@ function periodicRise(M, W, H) {
     const params = { ...P0, jagged, jag: 0.8 };
     const alone = new Map();
     for ( const o of [T1, T2, B, C] ) for ( const [h, s] of signatures(bake([o], map, W, H, params)) ) alone.set(h, s);
+    // one-way (substrate.mjs): a stroke never changes because of a NEWER one - its areas in the whole bake are exactly those of a bake
+    // of it and the strokes before it; the first stroke (nothing under it) is exactly as alone
     for ( const order of [[T1, T2, B, C], [C, B, T2, T1], [B, T1, C, T2]] ) {
       const all = signatures(bake(order, map, W, H, params));
-      const same = [...all].filter(([h, s]) => alone.get(h) === s).length;
-      ok(same === all.size && all.size === alone.size, `independence torn=${jagged} order ${order.map((o) => o.id).join(",")}: ${same}/${all.size} objects identical to alone`);
+      let same = 0, n = 0;
+      for ( let k = 0; k < order.length; k++ ) {
+        const pre = signatures(bake(order.slice(0, k + 1), map, W, H, params));
+        for ( const [h, s] of pre ) { n++; if ( all.get(h) === s ) same++; }
+      }
+      const first = signatures(bake([order[0]], map, W, H, params));
+      const firstAlone = [...first].every(([h, s]) => alone.get(h) === s);
+      ok(same === n && firstAlone, `one-way independence torn=${jagged} order ${order.map((o) => o.id).join(",")}: ${same}/${n} areas of every prefix unchanged by newer strokes, the first as alone`);
     }
   }
 }

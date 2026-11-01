@@ -545,6 +545,28 @@ export function bakeTear(X) {
     }
   }
 
+  /* ---------------------------------------------------------------- 8c. over older damage (substrate.mjs) */
+  // The map this tear reads (`map`, mapAt) is already the SUBSTRATE inside its own pixels: the lips, the pulled band, the chips, flaps
+  // and fibres are cut from the older damage under it (a pit's slabs, a crater's rim, charred ground, cracks pulled apart). Here the
+  // opening's floor goes deeper than the floor it was torn into, and over water the rip only darkens the water (the lips are left
+  // to the older look: water does not tear). What the tear does not draw stays the older look, live (core.mjs shrinks the cover).
+  if ( C.sub ) {
+    const S = C.sub;
+    for ( const o of X.px ) {
+      if ( !S.kind[o] ) continue;
+      if ( S.yields(o, X.type) ) {
+        if ( !openA[o] || !layer[o] ) { layer[o] = 0; continue; }
+        const c = S.fx(o, [col[o * 4], col[o * 4 + 1], col[o * 4 + 2]], X.type, C.clean);
+        if ( !c ) { layer[o] = 0; continue; }
+        col[o * 4] = c[0]; col[o * 4 + 1] = c[1]; col[o * 4 + 2] = c[2]; col[o * 4 + 3] = c.a ?? 255; layer[o] = BASE;
+        continue;
+      }
+      if ( !openA[o] || layer[o] !== BASE ) continue;
+      const c = S.fx(o, [col[o * 4], col[o * 4 + 1], col[o * 4 + 2]], X.type, C.clean);
+      if ( c ) { col[o * 4] = c[0]; col[o * 4 + 1] = c[1]; col[o * 4 + 2] = c[2]; }
+    }
+  }
+
   /* ---------------------------------------------------------------- 9. sprites */
   const items = [];
   const row = () => new Int16Array(MF);
@@ -570,7 +592,9 @@ export function bakeTear(X) {
     let cx0 = W, cy0 = H, cx1 = -1, cy1 = -1;
     for ( const i of X.px ) { const x = i % W, y = (i - x) / W; if ( x < cx0 ) cx0 = x; if ( x > cx1 ) cx1 = x; if ( y < cy0 ) cy0 = y; if ( y > cy1 ) cy1 = y; }
     const cw = cx1 - cx0 + 1, ch = cy1 - cy0 + 1, cov = new Uint8ClampedArray(cw * ch * 4);
-    for ( const i of X.px ) { const x = i % W - cx0, y = (i - (i % W)) / W - cy0, q = (y * cw + x) * 4; cov[q] = cov[q + 1] = cov[q + 2] = cov[q + 3] = 255; }
+    // only the pixels the tear really lays (its opening, lips, chips at full opacity): elsewhere in its stroke it lays no ground, so
+    // whatever lies there (older damage) stays visible, and a lower level painted later is not cut off there (the severity rule)
+    for ( const i of X.px ) { if ( !layer[i] || col[i * 4 + 3] < 255 ) continue; const x = i % W - cx0, y = (i - (i % W)) / W - cy0, q = (y * cw + x) * 4; cov[q] = cov[q + 1] = cov[q + 2] = cov[q + 3] = 255; }
     const mc = row(); mc[0] = 2; mc[3] = cw; mc[4] = ch; mc[5] = RX + cx0; mc[6] = RY + cy0;
     items.push({ img: { w: cw, h: ch, data: cov, x: cx0, y: cy0 }, m: mc });
     // the cause's light (kind 3), as core's areas

@@ -145,14 +145,15 @@ const A = { ...capsule("A", 0, 90, 35, 90, 35, 12), c: 1 };
 const B = { ...capsule("B", 1, 100, 40, 125, 55, 8), c: 8 };
 const Cc = { ...capsule("C", 4, 30, 100, 60, 110, 5), c: 3 };
 const Dd = { ...capsule("D", 5, 70, 30, 110, 40, 4), c: 6 };
-const alone = areasOf(Cur.bake(input([A])));
+// one-way (substrate.mjs): a stroke never changes because of a NEWER one - it is the same as in a bake of it and the strokes before it
 let indep = 0;
 for ( const order of [[A, B, Cc, Dd], [Dd, A, Cc, B], [B, Cc, Dd, A]] ) {
   const together = areasOf(Cur.bake(input(order), new Map()));
-  const ok = [...alone.values()].every((a) => together.get(a.hash)?.d === a.d);
+  let ok = true;
+  for ( let k = 0; k < order.length; k++ ) for ( const a of areasOf(Cur.bake(input(order.slice(0, k + 1)), new Map())).values() ) if ( together.get(a.hash)?.d !== a.d ) ok = false;
   if ( ok ) indep++;
 }
-check(indep === 3, `a stroke's sprites are the same alone and among overlapping strokes of other causes (3 orders): ${indep}/3`);
+check(indep === 3, `a stroke's sprites are the same with or without the newer overlapping strokes of other causes (3 orders): ${indep}/3`);
 const warm = new Map();
 Cur.bake(input([A, B]), warm);
 const before = warm.size;
@@ -169,11 +170,13 @@ const others = [{ ...capsule("O1", 0, tear.x0 + 4, tear.y0 + 3, tear.x0 + 4, tea
 for ( let c = 1; c < Cur.CAUSES.length; c++ ) {
   const ob = { ...tear, c }, a = Cur.bake(input([ob])), b = Cur.bake(input([ob]), new Map());
   if ( bytesOf(a) === bytesOf(b) && bytesOf(a) !== bytesOf(Cur.bake(input([tear]))) ) tDet++; else check(false, `tear x ${Cur.CAUSES[c]}: not deterministic or like cause 0`);
-  const alone = areasOf(a), mixed = areasOf(Cur.bake(input([others[0], ob, others[1]]), new Map()));
-  if ( [...alone.values()].every((x) => mixed.get(x.hash)?.d === x.d) ) tInd++; else check(false, `tear x ${Cur.CAUSES[c]}: its sprites change among other strokes`);
+  // newer strokes over it never change it; an older one under it is its substrate (the tear over O1 = the bake of O1 and the tear)
+  const alone = areasOf(a), mixed = areasOf(Cur.bake(input([ob, others[1], others[0]]), new Map()));
+  const under = areasOf(Cur.bake(input([others[0], ob]), new Map())), mixed2 = areasOf(Cur.bake(input([others[0], ob, others[1]]), new Map()));
+  if ( [...alone.values()].every((x) => mixed.get(x.hash)?.d === x.d) && [...under.values()].every((x) => mixed2.get(x.hash)?.d === x.d) ) tInd++; else check(false, `tear x ${Cur.CAUSES[c]}: its sprites change because of newer strokes`);
 }
 check(tDet === Cur.CAUSES.length - 1, `tear x every cause is deterministic and differs from cause 0: ${tDet}/${Cur.CAUSES.length - 1}`);
-check(tInd === Cur.CAUSES.length - 1, `tear x every cause bakes the same sprites alone and among other strokes: ${tInd}/${Cur.CAUSES.length - 1}`);
+check(tInd === Cur.CAUSES.length - 1, `tear x every cause bakes the same sprites whatever newer strokes lie over it: ${tInd}/${Cur.CAUSES.length - 1}`);
 
 /* 4. the scene default */
 const ob0 = strokes[0].ob;

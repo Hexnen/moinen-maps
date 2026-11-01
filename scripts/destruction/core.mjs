@@ -19,8 +19,9 @@
  */
 
 import { bakeTear } from "./tear.mjs";
+import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 
-export const CORE_VERSION = 24;   // 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 25;   // 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -394,7 +395,8 @@ export function bake(I, cache = null) {
   const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [], baked: 0, reused: 0 };
   const edge = clamp(P.edge ?? 0.7, 0, 1);
   const comps = [];
-  (I.objects ?? []).forEach((ob, index) => { if ( !ob.k ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
+  // (`skip`: a stroke the caller does not want baked this time - its record is elsewhere; `k`: an erase stroke)
+  (I.objects ?? []).forEach((ob, index) => { if ( !ob.k && !ob.skip ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
   if ( !comps.length ) return assemble([], stats, t0, progress);
   progress(0.2);
 
@@ -517,6 +519,9 @@ export function bake(I, cache = null) {
   /* ---------------------------------------------------------------- 2. per part: window, hash, cache or bake */
   const scatter = clamp(P.scatter ?? 1, 0.2, 3);
   const results = [];
+  // THE SUBSTRATE (substrate.mjs): an area reads, inside its own pixels only, the look of the OLDER strokes under it (baked in this call
+  // before it, or sent by the caller in I.under); with nothing older there it bakes exactly as before. Older strokes never read newer.
+  const src = new SubstrateSource(I.objects, I.under, P, K);
   comps.forEach((c, k) => {
     const { FX, FY, FW, FH, sev, frag, lab } = c.F;
     let x0 = FW, y0 = FH, x1 = -1, y1 = -1;
@@ -565,13 +570,23 @@ export function bake(I, cache = null) {
       for ( const [x, y] of loc ) h = fnvInts(h, Math.round(x * 4) + 65536, Math.round(y * 4) + 65536);
       h = fnvInts(h, 0x7fff);
     }
+    // the substrate under its own pixels (null: only the plain map there - hash and bytes as without substrates)
+    const sub = src.compose(win, c.index, I.map);
+    if ( sub ) {
+      h = fnvInts(h, 0x5b57, sub.hash);
+      // the severity rule: its pixels inside older damage of a higher level are not its own (a lower level never covers a higher)
+      if ( sub.exclude(win, I.map.data, I.map.w) ) stats.excluded = (stats.excluded ?? 0) + 1;
+      if ( win.px.length < 6 ) { stats.cutOff = (stats.cutOff ?? 0) + 1; progress(0.2 + 0.75 * (k + 1) / comps.length); return; }
+    }
     const hash = h >>> 0;
     let res = cache?.get(hash);
     if ( res ) { cache.delete(hash); cache.set(hash, res); stats.reused++; }
     else {
-      win.map = cropMap(I.map, RX, RY, W, H);
+      win.map = sub ? sub.rgba : cropMap(I.map, RX, RY, W, H);
+      if ( sub ) { win.clean = cropMap(I.map, RX, RY, W, H); win.sub = sub; stats.substrate = (stats.substrate ?? 0) + 1; }
       res = bakeArea(win, P, seed, (fnvStr(String(c.ob.id)) ^ Math.imul(c.ay * AW + c.ax, 31)) >>> 0, jag);
       for ( const it of res.items ) if ( it.m[0] === 0 ) overlayOutside(it.img, win);
+      if ( sub ) finishOverSubstrate(res.items, win, c.type, sub);
       // the cause rides on the base row: field 11 holds the material in bits 0-3, the cause in bits 4-7 (0: unchanged bytes)
       if ( cause ) for ( const it of res.items ) if ( it.m[0] === 0 ) it.m[11] = (it.m[11] & 15) | (cause << 4);
       res.win = { x: RX, y: RY, w: W, h: H };
@@ -580,6 +595,7 @@ export function bake(I, cache = null) {
       if ( cache ) { cache.set(hash, res); trimCache(cache); }
     }
     results.push({ ...res, index: c.index });
+    src.add(c.index, res);
     progress(0.2 + 0.75 * (k + 1) / comps.length);
   });
   return assemble(results, stats, t0, progress);
@@ -596,7 +612,8 @@ export function bake(I, cache = null) {
  * scorch ~1.4 maxD + 4, collapse ~0.5 maxD, a cause's halo its own r; hairlines up to ~maxD); thrown chips land on top as pieces.
  */
 function overlayOutside(img, win) {
-  const { W, own, map } = win, d = img.data;
+  // (over a substrate the area's own pixels read it; outside them it still touches only the plain map)
+  const { W, own } = win, map = win.clean ?? win.map, d = img.data;
   for ( let y = 0; y < img.h; y++ ) for ( let x = 0; x < img.w; x++ ) {
     const q = (y * img.w + x) * 4; if ( d[q + 3] !== 255 ) continue;
     const wi = (img.y + y) * W + img.x + x; if ( own[wi] ) continue;
@@ -680,6 +697,7 @@ function bakeArea(A, P, seed, uid, jag) {
   const stats = { shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [] };
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
+  C.sub = A.sub ?? null; C.clean = A.clean ?? null;   // the older damage under its own pixels (substrate.mjs), for the tear too
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
   if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, cz: C.cz, cause: C.cause, causeKit, softLight, chamfer });
   fracture(C);
@@ -811,7 +829,7 @@ function bakeArea(A, P, seed, uid, jag) {
     });
     // what is being torn up: the map under the area
     const forced = MATS.indexOf(P.material);
-    C.cls = classify(map, W, C.px);
+    C.cls = classify(A.clean ?? map, W, C.px);   // (the material of the ground itself, not of older damage on it)
     if ( forced >= 0 ) C.cls.mat = forced;
     C.pal = palette(C.cls, C.type);
     // the cause (null = unspecified: nothing below changes)
@@ -1349,12 +1367,14 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( wall ) {
         const above = (y - wall) * W + x;
         col = wall === 1 ? mul(above >= 0 ? mapAt(Math.max(0, above)) : rp[2], 0.6) : wall === 2 ? pal.strata[0] : (x + y) & 1 ? pal.strata[1] : mul(pal.strata[1], 0.86);
+        if ( A.sub ) { col = A.sub.fx(i, col, type, A.clean); if ( !col ) continue; if ( col.a ) { put(x, y, col, col.a); continue; } }
         put(x, y, col); continue;
       }
       // a bowl lit from the top left: the gradient of the depth decides
       const gx = (din[i + 1] ?? 0) - (din[i - 1] ?? 0), gy = (din[i + W] ?? 0) - (din[i - W] ?? 0), gl = Math.hypot(gx, gy) || 1;
       const lit = ((gx / gl) * -0.7071 + (gy / gl) * -0.7071) * Math.min(1, depth * 3 + 0.2);
-      let v = (sv < 1.5 ? 1.1 : 3.4) - depth * (t === T_COLLAPSE ? 2.9 : 2.1) + lit * 1.3 + (h2(x, y, seed + 11) - 0.5) * 0.8 + (vnoise(x / 3, y / 3, seed + 12) - 0.5) * 0.7;
+      // (cracks keep their plates: the gaps between them only go darker with the level - a broken crack is never lighter than a hairline)
+      let v = (sv < 1.5 ? 1.1 : t === T_CRACKS ? 1.1 - (sv - 1.5) * 0.6 : 3.4) - depth * (t === T_COLLAPSE ? 2.9 : 2.1) + lit * 1.3 + (h2(x, y, seed + 11) - 0.5) * 0.8 + (vnoise(x / 3, y / 3, seed + 12) - 0.5) * 0.7;
       // banded shading: flat tone bands with a narrow dithered seam between them (not a field of checkerboard)
       let idx = clamp(Math.floor(v + (bayer(x, y) - 0.5) * 0.45), 0, 4);
       col = rp[idx];
@@ -1389,11 +1409,15 @@ function bakeArea(A, P, seed, uid, jag) {
       // embers in clusters along the hottest seams, a few bright, most dull (no even confetti)
       if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.07 * clamp((vnoise(x / 5, y / 5, seed + 53) - 0.55) * 4, 0, 1) ) { const e = h2(x, y, seed + 52); col = e < 0.2 ? pal.ember[1] : e < 0.55 ? pal.ember[0] : mix(pal.ember[2], pal.char[1], 0.4); }
       if ( cz ) { col = kit.fill(x, y, col, depth, dn, lit); if ( !col ) continue; }
+      // over older damage (substrate.mjs INTERACT): deeper, charred, or left to the older look
+      if ( A.sub ) { col = A.sub.fx(i, col, type, A.clean); if ( !col ) continue; if ( col.a ) { put(x, y, col, col.a); continue; } }
       put(x, y, col);
     }
+    // plates it left in place over older damage: a char over them where its rule chars (nothing drawn otherwise: the older look stays)
+    if ( A.sub ) for ( const i of C.keep ) { const c = A.sub.keepFx(i, type, pal.char?.[0] ?? rp[0]); if ( c ) put(i % W, (i - (i % W)) / W, c, c.a); }
     // 2. rubble: chips of the surface and stones, thicker towards the rim
     if ( type !== T_CRACKS ) for ( const i of C.px ) {     // (flooded too: the rubble lies under the water)
-      if ( C.keep.has(i) ) continue;
+      if ( C.keep.has(i) || A.sub?.yields(i, type) ) continue;
       const x = i % W, y = (i - x) / W, dn = din[i] / maxD;
       const dens =rubble * (0.035 + 0.09 * Math.exp(-((dn - 0.35) ** 2) / 0.05)) * (sev[i] / 3);
       if ( h2(x, y, seed + 61) >= dens || !isIn(x + 1, y + 1) ) continue;
