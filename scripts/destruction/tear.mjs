@@ -276,13 +276,23 @@ export function bakeTear(X) {
 
   /* ---------------------------------------------------------------- 3. every pixel near the spine: arc length, signed distance */
   const best = new Float32Array(N).fill(Infinity), near = new Int32Array(N).fill(-1);
+  // PERF: only the stroke's own pixels need their nearest spine point (everything the tear draws lies on them; any other pixel ends
+  // with near = -1 below), so each row is scanned only over its own pixels' span
+  const rowLo = new Int32Array(H).fill(W), rowHi = new Int32Array(H).fill(-1);
+  for ( const o of X.px ) { const x = o % W, y = (o - x) / W; if ( x < rowLo[y] ) rowLo[y] = x; if ( x > rowHi[y] ) rowHi[y] = x; }
   for ( let i = 0; i < NS; i++ ) {
     const rad = Math.ceil(Math.max(eL[i], eR[i]) + zOf(i) * 1.7 + 4);
-    const cx = SX[i], cy = SY[i];
-    for ( let y = Math.max(0, Math.floor(cy - rad)); y <= Math.min(H - 1, Math.ceil(cy + rad)); y++ ) for ( let x = Math.max(0, Math.floor(cx - rad)); x <= Math.min(W - 1, Math.ceil(cx + rad)); x++ ) {
-      const d2 = (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2;
-      if ( d2 > rad * rad ) continue;
-      const o = y * W + x; if ( d2 < best[o] ) { best[o] = d2; near[o] = i; }
+    const cx = SX[i], cy = SY[i], r2 = rad * rad, xa = Math.max(0, Math.floor(cx - rad)), xb = Math.min(W - 1, Math.ceil(cx + rad));
+    for ( let y = Math.max(0, Math.floor(cy - rad)); y <= Math.min(H - 1, Math.ceil(cy + rad)); y++ ) {
+      // (PERF: only the row's span inside the disk, one pixel of margin; the exact test below decides as before)
+      const dy = y + 0.5 - cy, dy2 = dy * dy; if ( dy2 > r2 ) continue;
+      const half = Math.sqrt(r2 - dy2), x0 = Math.max(xa, rowLo[y], Math.floor(cx - 0.5 - half) - 1), x1 = Math.min(xb, rowHi[y], Math.ceil(cx - 0.5 + half) + 1), row = y * W;
+      for ( let x = x0; x <= x1; x++ ) {
+        const o = row + x; if ( !own[o] ) continue;
+        const dx = x + 0.5 - cx, d2 = dx * dx + dy2;
+        if ( d2 > r2 ) continue;
+        if ( d2 < best[o] ) { best[o] = d2; near[o] = i; }
+      }
     }
   }
   const col = new Uint8ClampedArray(N * 4), layer = new Int32Array(N);
@@ -324,7 +334,8 @@ export function bakeTear(X) {
       segB[k].push({ b, len, tone: 0.93 + 0.14 * R(), fold: clamp(0.8 + w * 0.2 + R() * 0.9, 1, 2.6), lift: 0.6 + R() * 2.6, off: clamp(1.6 + R() * 2, 1.5, Math.max(1.5, w * 0.8)) });
     }
   }
-  const segOf = (k, s) => { const c = cuts[k]; let j = 0; while ( j + 1 < c.length && c[j + 1] <= s ) j++; return j; };
+  // (the last cut at or before s, else the first: a binary search, PERF)
+  const segOf = (k, s) => { const c = cuts[k]; let lo = 0, hi = c.length - 1; while ( lo < hi ) { const m = (lo + hi + 1) >> 1; if ( c[m] <= s ) lo = m; else hi = m - 1; } return lo; };
   const pieceW = wMax >= 1.4;
   const segAcc = new Map(), FOLD = 1 << 20, DROP = 1 << 21;
   const fcol = new Uint8ClampedArray(N * 4), flay = new Int32Array(N);   // curled-back folds, drawn over their lips
@@ -619,9 +630,19 @@ export function bakeTear(X) {
       glowA[q] = a; glowC[q * 3] = c[0]; glowC[q * 3 + 1] = c[1]; glowC[q * 3 + 2] = c[2];
     };
     // distance from the opening (the halo's and the lip's measure)
-    const dO = new Float32Array(N);
-    for ( let o = 0; o < N; o++ ) dO[o] = openA[o] ? 0 : 1e6;
-    X.chamfer(dO, W, H);
+    // PERF: measured only over the opening's box grown by 20 px (every use below asks for d < 14 at most; outside it stays 1e6)
+    const dO = new Float32Array(N).fill(1e6);
+    {
+      let x0 = W, y0 = H, x1 = -1, y1 = -1;
+      for ( let o = 0; o < N; o++ ) if ( openA[o] ) { const x = o % W, y = (o - x) / W; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
+      if ( x1 >= 0 ) {
+        x0 = Math.max(0, x0 - 20); y0 = Math.max(0, y0 - 20); x1 = Math.min(W - 1, x1 + 20); y1 = Math.min(H - 1, y1 + 20);
+        const w = x1 - x0 + 1, h = y1 - y0 + 1, sub = new Float32Array(w * h);
+        for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) sub[y * w + x] = openA[(y + y0) * W + x + x0] ? 0 : 1e6;
+        X.chamfer(sub, w, h);
+        for ( let y = 0; y < h; y++ ) dO.set(sub.subarray(y * w, (y + 1) * w), (y + y0) * W + x0);
+      }
+    }
     const mi = at(L / 2), haloR = cz.halo ? Math.min(14, (3 + maxD * cz.halo.r) * clamp(P.halo ?? 0.6, 0.15, 1) * (0.35 + lvMax / 3)) : 0;
     const kit = X.causeKit({ cz, pal, seed: sd, W, H, mapAt: cur, put: kput, glow: kglow, isIn: (x, y) => x >= 0 && y >= 0 && x < W && y < H && openA[y * W + x] === 1,
       inside: openA, din: X.din ?? dO, maxD, E0: { x: SX[mi], y: SY[mi] }, Rr: Math.max(3, wMax * 1.6), C: { cx: C.cx, cy: C.cy, axis: C.axis, maxD }, haloR });
@@ -758,9 +779,21 @@ export function bakeTear(X) {
   /* ---------------------------------------------------------------- 9. sprites */
   const items = [];
   const row = () => new Int16Array(MF);
-  const crop = (pred, src = col, under = null) => {
+  // PERF: every piece's box from ONE pass over each label array (a crop per piece scanned the whole window: pieces x window)
+  const boxesOf = (lab) => {
+    const m = new Map();
+    for ( let o = 0; o < N; o++ ) {
+      const v = lab[o]; if ( !v ) continue;
+      const x = o % W, y = (o - x) / W, b = m.get(v);
+      if ( !b ) m.set(v, [x, y, x, y]);
+      else { if ( x < b[0] ) b[0] = x; if ( x > b[2] ) b[2] = x; if ( y < b[1] ) b[1] = y; if ( y > b[3] ) b[3] = y; }
+    }
+    return m;
+  };
+  const crop = (pred, src = col, under = null, box = undefined) => {
     let x0 = W, y0 = H, x1 = -1, y1 = -1;
-    for ( let o = 0; o < N; o++ ) if ( pred(o) ) { const x = o % W, y = (o - x) / W; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
+    if ( box === undefined ) { for ( let o = 0; o < N; o++ ) if ( pred(o) ) { const x = o % W, y = (o - x) / W; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; } }
+    else if ( box ) [x0, y0, x1, y1] = box;
     if ( x1 < 0 ) return null;
     const w = x1 - x0 + 1, h = y1 - y0 + 1, data = new Uint8ClampedArray(w * h * 4);
     for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
@@ -800,11 +833,11 @@ export function bakeTear(X) {
   // snapping fibre; 15/16 a vector x16 art px; 17 a parameter) and where it lay before the rip opened (7/8: the closed lips).
   // Drawn in this order: what lies in the gap (dropped strips, fibres), the lips (lower ones later), the folds over their lips.
   const stagger = (s) => Math.round(Math.min(8000, Math.abs(s - sp) * 4));
-  const groups = [[], [], []];
+  const groups = [[], [], []], layBox = boxesOf(layer), foldBox = boxesOf(flay), fibBox = boxesOf(fibLay);
   for ( const [lay, a] of segAcc ) {
     if ( a.n < 2 ) continue;
     const fold = lay >= FOLD && lay < DROP, drop = lay >= DROP;
-    const img = fold ? crop((o) => flay[o] === lay, fcol) : crop((o) => layer[o] === lay);
+    const img = fold ? crop((o) => flay[o] === lay, fcol, null, foldBox.get(lay) ?? null) : crop((o) => layer[o] === lay, col, null, layBox.get(lay) ?? null);
     if ( !img ) continue;
     const k = a.e / a.n, l = Math.hypot(a.ox, a.oy) || 1, ux = a.ox / l, uy = a.oy / l, im = at(a.i / a.n);
     const m = row();
@@ -829,7 +862,7 @@ export function bakeTear(X) {
   }
   for ( const f of fibs ) {
     if ( !f ) continue;
-    const img = crop((o) => fibLay[o] === f.id, fibCol); if ( !img ) continue;
+    const img = crop((o) => fibLay[o] === f.id, fibCol, null, fibBox.get(f.id) ?? null); if ( !img ) continue;
     const m = row(), cx = img.x + img.w / 2, cy = img.y + img.h / 2;
     m[0] = 1; m[3] = img.w; m[4] = img.h; m[5] = RX + img.x; m[6] = RY + img.y; m[7] = m[5]; m[8] = m[6];
     m[10] = stagger(0); m[11] = 4; m[13] = X.type;
