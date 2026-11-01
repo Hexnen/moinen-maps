@@ -169,6 +169,7 @@ export async function rebake() {
     }
   } catch ( err ) {
     if ( my === gen ) { console.error(`${MODULE_ID} | water bake`, err); status.error = String(err?.message ?? err); }
+    if ( my === gen ) disposeEngine();     // a failed bake may leave the engine broken: the next bake starts a fresh one
   }
   if ( my === gen ) { status.baking = false; status.progress = 1; tell("status"); }
   if ( my === gen ) releaseWorker();

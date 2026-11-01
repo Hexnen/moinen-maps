@@ -61,5 +61,7 @@ export async function ramp(hex, hue, sat, range) {
 export const cachedInfo = () => info;
 
 export function disposeEngine() {
-  worker?.terminate(); worker = null; ready = null; info = null; pending.clear();
+  worker?.terminate(); worker = null; ready = null; info = null;
+  for ( const p of pending.values() ) p.reject(new Error("water engine stopped"));     // nothing waits forever on a stopped worker
+  pending.clear();
 }
