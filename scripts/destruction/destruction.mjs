@@ -379,7 +379,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     // why this client bakes on its own (a loop is then easy to see: console and api.destruction.net.trace().events)
     const why = taken.length ? "edit" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
     Trace.event("bake", { why, n: toBake.length, of: want.length });
-    if ( !taken.length ) console.warn(` | destruction: baking  of  stroke(s) here ()`);
+    if ( !taken.length ) console.warn(`${MODULE_ID} | destruction: baking ${toBake.length} of ${want.length} stroke(s) here (${why})`);
     if ( !taken.length && !force && bakeFail?.key === key ) {
       const wait = Math.min(8 * 60000, 15000 * 2 ** (bakeFail.n - 1)) - (Date.now() - bakeFail.at);
       if ( wait > 0 ) { Trace.event("bake-backoff", { wait }); clearTimeout(bakeTimer); bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, wait); return; }
@@ -424,7 +424,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
         Reveal.whenRevealed(() => soon());
         for ( let wave = 0; wave <= Math.max(...depth.values()); wave++ ) {
           const order = prioritise(toBake.filter((w) => depth.get(w.index) === wave), objs);
-          const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [];
+          const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [], tw = performance.now();
           for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
           await runBakePool(jobs.map(inputOf), getMap, { n: lanes, onDone: (i, res) => {
             if ( my !== gen ) return;
@@ -432,6 +432,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
             status.bakeDone += jobs[i].length; status.progress = status.bakeDone / status.bakeTotal; tell("status");
             soon(); early();
           } });
+          Trace.event("bake-wave", { wave, n: order.length, jobs: jobs.length, ms: Math.round(performance.now() - tw) });
           if ( my !== gen ) break;
         }
         clearTimeout(timer);
@@ -628,7 +629,7 @@ function pauseBaking(kind, why) {
   const msg = game.i18n.localize("MOINENMAPS.Destr.bakePaused");
   Object.assign(status, { baking: false, waiting: false, paused: true, error: msg });
   Trace.event("breaker", { kind, why, tripped: breaker.tripped });
-  console.warn(` | destruction:  of the same strokes again and again () - automatic baking paused on this client`, breaker.tripped);
+  console.warn(`${MODULE_ID} | destruction: ${kind} of the same strokes again and again (${why}) - automatic baking paused on this client`, breaker.tripped);
   tell("status");
 }
 
