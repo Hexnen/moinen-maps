@@ -255,6 +255,63 @@ export function bakeTear(X) {
     const n = 1 + Math.floor(R() * 2);
     for ( let j = i; j < Math.min(NS, i + n); j++ ) eL[j] = eR[j] = 0;
   }
+  // THE CAUSE'S OWN SILHOUETTE (only with a cause; cause 0 never comes here, its tear is the plain one): claws rip three parallel
+  // furrows (the entry's three streaks), impact a short slit with a star of radial rips round its middle, frost a straight rift with
+  // crystal spurs at 60 degrees, water a meandering channel with smooth banks, acid a ragged eaten slit, rot a sagging frayed split,
+  // arcane an angular rift in straight runs, fire a wide charred split, lightning a sharp zig-zag slit. Pure hashes (no draw from R:
+  // the plain tear's random stream stays as it is)
+  const CS = X.cz ? tearShape(X.cz.fill) : null;
+  function tearShape(f) {
+    const Lq = Math.max(1, L), mid = L / 2, cs = { shift: null, spurs: [], lanes: 0 };
+    let mx = 0.6; for ( let i = 0; i < NS; i++ ) mx = Math.max(mx, hw[i]);
+    const tri = (u) => { const q = ((u % 1) + 1) % 1; return q < 0.5 ? 4 * q - 1 : 3 - 4 * q; };
+    const env = (s) => Math.pow(Math.sin(Math.PI * clamp(s / Lq, 0, 1)), 0.6);
+    const scale = (k) => { for ( let i = 0; i < NS; i++ ) { eL[i] *= k(i); eR[i] *= k(i); } };
+    const avg = (e, r) => { const c = Float64Array.from(e); for ( let i = 0; i < NS; i++ ) { let s = 0, n = 0; for ( let j = Math.max(0, i - r); j <= Math.min(L, i + r); j++ ) { s += c[j]; n++; } e[i] = s / n; } };
+    const fine = (i) => Math.min(1, hw[i] / 2);
+    switch ( f ) {
+      case "groove": scale(() => 1.5); cs.lanes = 3; break;
+      case "char": avg(eL, 2); avg(eR, 2); scale(() => 1.3); break;
+      case "glass": { const P = 11 + 4 * h2(1, 1, sd + 801), ph = h2(2, 1, sd + 801), A = 1.5 + 0.8 * Math.min(6, mx); cs.shift = (s) => tri(s / P + ph) * A * env(s) * (0.55 + 0.7 * h2(Math.floor(s / P * 2 + ph * 2), 5, sd + 801)); scale(() => 0.5); break; }
+      case "acid": for ( let i = 0; i < NS; i++ ) {
+        eL[i] = Math.max(0, eL[i] + ((vnoise(i / 2.2, 5.5, sd + 803) > 0.62 ? 1.5 : 0) + (h2(i, 1, sd + 804) - 0.5) * 1.4) * fine(i));
+        eR[i] = Math.max(0, eR[i] + ((vnoise(i / 2.2, 8.5, sd + 803) > 0.62 ? 1.5 : 0) + (h2(i, 2, sd + 804) - 0.5) * 1.4) * fine(i));
+      } break;
+      case "moss": for ( let i = 0; i < NS; i++ ) {
+        const k = 1 + 0.4 * env(i);
+        eL[i] = Math.max(0, eL[i] * k + (h2(i, 3, sd + 805) - 0.5) * 1.3 * fine(i)); eR[i] = Math.max(0, eR[i] * k + (h2(i, 4, sd + 805) - 0.5) * 1.3 * fine(i));
+      } break;
+      case "rune": {
+        const cL = Float64Array.from(eL), cR = Float64Array.from(eR);
+        for ( let i = 0; i < NS; i++ ) { const j = clamp(Math.floor(i / 6) * 6 + 3, 0, L); eL[i] = cL[j]; eR[i] = cR[j]; }
+        const P = 14 + 6 * h2(3, 1, sd + 806), ph = h2(4, 1, sd + 806), A = 1.4 + 0.3 * Math.min(6, mx);
+        cs.shift = (s) => tri(s / P + ph) * A * env(s); break;
+      }
+      case "silt": {
+        avg(eL, 4); avg(eR, 4);
+        const P = 20 + 8 * h2(5, 1, sd + 807), ph = h2(6, 1, sd + 807) * 6.283, A = Math.min(3.5, 1 + 0.45 * mx);
+        cs.shift = (s) => Math.sin(s / P * 6.283 + ph) * A * env(s); break;
+      }
+      case "ice": {
+        avg(eL, 3); avg(eR, 3); scale(() => 0.65);
+        let side = h2(7, 1, sd + 808) < 0.5 ? 1 : -1;
+        for ( let s = 4 + 4 * h2(8, 1, sd + 808), n = 0; s < L - 3; s += 7 + 5 * h2(n, 2, sd + 808), n++ ) {
+          const i = at(s); if ( hw[i] < 0.8 ) continue;
+          const a = Math.atan2(TY[i], TX[i]) + side * (h2(n, 3, sd + 808) < 0.5 ? 1 : 2) * Math.PI / 3, e0 = side > 0 ? eL[i] : eR[i];
+          cs.spurs.push({ x: SX[i] + NX[i] * side * e0 * 0.5, y: SY[i] + NY[i] * side * e0 * 0.5, a, len: e0 * 0.5 + 3 + 0.9 * hw[i], w: 1.35 });
+          side = -side;
+        }
+        break;
+      }
+      case "bowl": {
+        scale((i) => 0.4 + 0.6 * Math.exp(-(((i - mid) / (Lq * 0.18)) ** 2)));
+        const i = at(mid), n = 5 + Math.floor(h2(9, 1, sd + 809) * 2), a0 = h2(9, 2, sd + 809) * 6.283;
+        for ( let k = 0; k < n; k++ ) cs.spurs.push({ x: SX[i], y: SY[i], a: a0 + (k + 0.3 * h2(k, 3, sd + 809)) / n * 6.283, len: 3 + (1.2 + 0.8 * h2(k, 4, sd + 809)) * Math.min(7, mx), w: 1.2 });
+        break;
+      }
+    }
+    return cs;
+  }
   const wAt = (i) => (eL[i] + eR[i]) / 2;
   // the pull of the lips is smooth (a moving average of each lip's edge): the jagged edge only cuts the lip, it never makes the
   // displaced map jump from pixel to pixel
@@ -304,7 +361,8 @@ export function bakeTear(X) {
     const x = o % W, y = (o - x) / W, px = x + 0.5 - SX[i], py = y + 0.5 - SY[i];
     const s = i + px * TX[i] + py * TY[i];
     if ( s < -0.6 || s > L + 0.6 ) { near[o] = -1; continue; }
-    const d = px * NX[i] + py * NY[i];
+    let d = px * NX[i] + py * NY[i];
+    if ( CS?.shift ) d -= CS.shift(s);   // (a cause's meander or zig-zag: the gap's middle runs off the spine)
     sA[o] = s; dA[o] = d;
     const side = d >= 0 ? 1 : -1, edge = side > 0 ? eL[i] : eR[i];
     // the lip's edge is dithered below the pixel (a per-pixel offset plus a short wavelength along the tear), so a diagonal edge
@@ -314,6 +372,22 @@ export function bakeTear(X) {
     // the opening never reaches past the stroke's own pixels (a tear changes only what it was painted on)
     // (and it keeps a rounded inset from the stroke's border: a bulge never runs along the brush mask in a straight edge)
     if ( edge > 0.05 && Math.abs(d) < edge + jit && own[o] && (!X.din || edge < 1.5 || X.din[o] > 1 + h2(x, y, sd + 10) * 1.2) ) openA[o] = 1;
+    if ( CS?.lanes && openA[o] ) {
+      // claws: inside the envelope only three furrows are open (the middle one the longest), torn ridges between them
+      const env = (eL[i] + eR[i]) / 2, sp = env * 0.7, k = clamp(Math.round(d / sp), -1, 1), dd = d - k * sp, t = clamp(s / Math.max(1, L), 0, 1);
+      const hwL = env * 0.17 * (k ? clamp(1 - ((t - 0.5) / 0.44) ** 2, 0, 1) : 1);
+      if ( hwL > 0.35 && Math.abs(dd) < hwL + jit * 0.4 ) dA[o] = dd; else openA[o] = 0;
+    }
+  }
+  // a cause's spurs (impact: a star of radial rips round the middle; frost: crystal rifts at 60 degrees off the rift), tapering
+  const spurA = CS?.spurs.length ? new Uint8Array(N) : null;
+  if ( spurA ) for ( const sp of CS.spurs ) {
+    const ux = Math.cos(sp.a), uy = Math.sin(sp.a), r = Math.ceil(sp.len + 2);
+    for ( let y = Math.max(0, Math.floor(sp.y - r)); y <= Math.min(H - 1, Math.ceil(sp.y + r)); y++ ) for ( let x = Math.max(0, Math.floor(sp.x - r)); x <= Math.min(W - 1, Math.ceil(sp.x + r)); x++ ) {
+      const o = y * W + x; if ( near[o] < 0 || !own[o] || openA[o] ) continue;
+      const qx = x + 0.5 - sp.x, qy = y + 0.5 - sp.y, t = qx * ux + qy * uy; if ( t < 0 || t > sp.len ) continue;
+      if ( Math.abs(qx * -uy + qy * ux) < sp.w * (1 - 0.7 * t / sp.len) + (h2(x, y, sd + 811) - 0.5) * 0.3 ) { openA[o] = 1; spurA[o] = 1; }
+    }
   }
 
   /* ---------------------------------------------------------------- 4. the lips: pulled apart, sheared, an underside rim, cut into flaps */
@@ -368,6 +442,7 @@ export function bakeTear(X) {
     if ( Z > 0 ) c = mul(c, 1 + 0.1 * toLight * clamp(1 - e / Z, 0, 1));
     const flat = c;
     if ( e < rim ) c = rimColour(c, e, i, side, x, y);
+    if ( CS?.lanes && e < 0 ) c = mul(mapAt(x, y), e < -1 && h2(x, y, sd + 812) < 0.25 ? 0.82 : 1.1);   // (claws: torn turf ridges between the furrows)
     if ( !(pieceW && wAt(i) >= 1.1) ) { put(o, c, BASE); continue; }
     const k = side > 0 ? 0 : 1, sn = s + (vnoise(e / 2.5, s / 7, sd + 41) - 0.5) * 5, j = segOf(k, sn), seg = segB[k][j];
     let lay = 2 + k * 4096 + j;
@@ -680,6 +755,10 @@ export function bakeTear(X) {
       const c = kit.fill(x, y, under, depth, dn, lit);
       if ( c ) put(o, c, layer[o] || BASE);
     }
+    // the spurs: dark rips (impact), icy rifts (frost); their lips come with the opening's below
+    if ( spurA ) for ( const o of openList ) if ( spurA[o] ) put(o, frost ? mix(pal.accLo, ink, 0.55) : mix(rp[0], ink, 0.6), layer[o] || BASE);
+    // claws: each furrow dark at its bottom, its far (north) wall in shade, its near slope catching the light
+    if ( CS?.lanes ) for ( const o of openList ) { const dn2 = !openA[o + W], up = !openA[o - W]; put(o, dn2 ? mix(rp[3], [235, 225, 205], 0.15) : up ? mix(rp[0], ink, 0.7) : mix(rp[0], ink, 0.45), layer[o] || BASE); }
     // the halo round the opening (on the lips and, softly, the ground just past them), then the torn lip itself
     if ( haloR > 0.5 ) for ( let o = 0; o < N; o++ ) { const d = dO[o]; if ( d >= 1.5 && d < haloR ) kit.halo(o % W, (o - (o % W)) / W, o, d); }
     for ( let o = 0; o < N; o++ ) {
@@ -687,9 +766,10 @@ export function bakeTear(X) {
       const x = o % W, y = (o - x) / W, i = near[o] >= 0 ? near[o] : at(L / 2);
       if ( frost ) {   // a soft rime on the lip, a rare bright crystal - never an inked outline
         const hv = h2(x, y, sd + 721), m = cur(o);
-        put(o, hv < 0.06 ? pal.accHi : mix(m, pal.accHi, 0.18 + 0.2 * vnoise(x / 2.5, y / 2.5, sd + 722)), layer[o]);
+        put(o, hv < 0.02 ? pal.accHi : mix(m, pal.accHi, 0.18 + 0.2 * vnoise(x / 2.5, y / 2.5, sd + 722)), layer[o]);
         continue;
       }
+      if ( CS?.lanes ) { const hv = h2(x, y, sd + 813); put(o, hv < 0.5 ? mul(cur(o), 1.16) : mix(cur(o), ink, 0.3), layer[o]); continue; }   // (claws: lit and shaded furrow lips, the ridges stay turf)
       kit.lip(x, y, o, 1 + 2 * deepOf(i));
       if ( acid ) {   // an eaten edge: pits bitten into the lip, a bead of acid now and then
         const hv = h2(x, y, sd + 731);

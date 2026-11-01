@@ -54,7 +54,8 @@ export const BAKE_VERSIONS = {
   // 43 changes a cave-in's SHAPE (an asymmetric outline, islands dropped, a trench's pockets, a deeper level's wider pit): no compat
   43: { compat: null, note: "collapse: one-bowl sag at level 1, shard lip, strata band and bigger void, no outward hairlines" },
   44: { compat: null, note: "crack strokes reshaped, blast/scorch floors" },
-  45: { compat: 44, note: "cause specks clustered" }
+  45: { compat: 44, note: "cause specks clustered" },
+  46: { compat: null, note: "cause identities beyond colour: claw furrows, compact impact crater, standing water, faceted ice, acid pits, sagging rot; tear silhouettes per cause" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
