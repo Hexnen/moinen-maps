@@ -90,8 +90,14 @@ export const objSig = (S, o) => fnv(enc(objStr(S, o))).toString(36);
  * change of an older stroke re-bakes only the strokes over it, on every client alike.
  */
 export function sigsOf(S) {
-  return fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
+  // (kept per state: the same strokes and settings give the same signatures; computing them for 250 strokes holds the page ~55 ms)
+  const memo = sigMemo.get(S), pj = JSON.stringify(S.params);
+  if ( memo && memo.objects === S.objects && memo.pj === pj ) return memo.out;
+  const out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
+  sigMemo.set(S, { objects: S.objects, pj, out });
+  return out;
 }
+const sigMemo = new WeakMap();
 
 /** The manifest of the scene (null for none, or the first format). */
 export const manifestOf = (S) => S?.baked?.v === 2 && S.baked.c && typeof S.baked.dir === "string" ? S.baked : null;

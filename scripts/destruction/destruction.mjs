@@ -137,6 +137,7 @@ function teardown() {
   flushSave();
   gen++;
   for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer] ) clearTimeout(t);
+  rebakeQueue = []; status.rebake = null; status.olderLook = null;
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
@@ -237,6 +238,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const taken = strokes.splice(0), mask = S.mask.slice();
   if ( key === shownKey && display && !force && !idle && !all && !redo?.length ) { maybeBlast(); return; }
   // (the base has no bake version: a published stroke stays valid whatever the code's version is - bake-policy.mjs, version pinning)
+  const S0 = S, base = Store.baseKey(scene, S, bg), legacy = Store.legacyBaseKey(scene, S, bg), objs = objectsIn();
   Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
   // (the FULL signature: its own inputs + a digest of the older strokes under it, substrate.mjs; `own` alone tells a dependent re-bake)
@@ -244,6 +246,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const rkOf = (index) => `${base}|${S.objects[index].id}|${FS[index].sig}`;
   S.objects.forEach((o, index) => { if ( !o.k ) { const sig = FS[index].sig; want.push({ index, objId: o.id, sig, own: FS[index].own, deps: FS[index].deps, rk: rkOf(index) }); } });
   if ( force ) for ( const w of want ) recs.delete(w.rk);
+  // Rebake (all or one stroke): these strokes are baked again with the current code; their pinned look stays on screen meanwhile
+  const redoSet = new Set(redo ?? []);
+  for ( const w of want ) if ( redoSet.has(w.objId) ) recs.delete(w.rk);
   const src = { mem: 0, chunk: 0, legacy: 0, baked: 0 };
   const firstLoad = !loaded;
   let first = firstLoad;
@@ -466,6 +471,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const res = await runBake(inputOf(toBake), getMap, { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
         if ( my !== gen ) return;
         take(toBake, res);
+        // (a background rebake: taking the result and putting it on screen go in separate tasks, each well under a frame)
+        if ( redoSet.size ) { await new Promise((r) => setTimeout(r, 0)); if ( my !== gen ) return; }
       } else {
         // several workers, the strokes nearest to the view first, each batch on screen as soon as it is baked. TWO WAVES (substrate.mjs):
         // 1. the plain looks (from their own data alone) of every stroke a stroke here reads, and of the strokes here that read nothing
@@ -553,6 +560,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   Object.assign(status, { baking: false, waiting: !complete, loading: 0, progress: 1, source, hash: "", error: "", perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])) });
   tell("status");
   // (during a Rebake all the manifest is written once, at its end)
+  if ( game.user.isGM && complete && !status.rebake ) schedulePersist(src.baked + src.legacy);
   maybeBlast(firstLoad);
 }
 
@@ -892,11 +900,12 @@ export function rebakeStrokes(ids = null) {
   const list = ids ?? status.olderLook?.ids ?? [];
   if ( !list.length ) return;
   const wantIds = new Set(list), entries = [];
+  // the strokes that read each stroke (their substrate changes with it), in one pass
+  const readers = new Map();
+  S.objects.forEach((q, j) => { if ( !q.k ) for ( const i of FS[j]?.deps ?? [] ) { if ( !readers.has(i) ) readers.set(i, []); readers.get(i).push(q.id); } });
   S.objects.forEach((o, index) => {
     if ( o.k || !wantIds.has(o.id) ) return;
-    // the strokes that read this one (their substrate changes with it)
-    const dependents = S.objects.filter((q, j) => !q.k && FS[j]?.deps?.includes(index)).map((q) => q.id);
-    entries.push({ objId: o.id, index, dist: inView(objs[index]) ? 0 : 1, dependents });
+    entries.push({ objId: o.id, index, dist: inView(objs[index]) ? 0 : 1, dependents: readers.get(index) ?? [] });
   });
   void base;
   rebakeQueue = Policy.rebakeOrder(entries);
@@ -1253,9 +1262,10 @@ export const destructionApi = {
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
-  /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
-  /** Rebake all: the strokes shown in a compatible older look are baked now (and published by the GM). */
   /** Rebake all: the strokes in an older look baked again with the current code, in the background (rebakeStrokes); `ids`: some only. */
+  rebakeAll: (ids = null) => { Trace.event("rebake-all"); return rebakeStrokes(ids); },
+  rebakePause: (p = true) => rebakePause(p), rebakeCancel: () => rebakeCancel(),
+  /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
