@@ -10,7 +10,7 @@ import { markOnce } from "./trace.mjs";
  * (FADE ms). What arrives after the reveal is shown as before (per stroke). localStorage "mm-reveal" = "off": no holding at all.
  */
 const BUDGET = 500, FADE = 260, LATE = 2500;
-let phase = "done", readyAt = 0, budgetTimer = 0;
+let phase = "done", readyAt = 0, budgetTimer = 0, budgetMs = BUDGET, budgetStart = 0;
 const parts = new Map();          // name -> { ready, objs: Set }
 const onGo = [];
 
@@ -51,6 +51,20 @@ export function ready(name) {
   else if ( !p.shown ) fadeIn([p], "late");
 }
 
+/**
+ * A layer with a long job on this load (a big bake, many downloads): the reveal waits up to ms (from the first frame) instead of the
+ * usual budget - the others stay hidden with it - and then shows it with what it has; the rest of it comes in stroke by stroke.
+ */
+export function progressive(name, ms = 1500) {
+  const p = parts.get(name);
+  if ( phase !== "holding" || !p ) return;
+  p.progressive = true;
+  if ( ms <= budgetMs ) return;
+  budgetMs = ms;
+  markOnce("reveal:extended", { name, ms });
+  if ( budgetStart ) { clearTimeout(budgetTimer); budgetTimer = setTimeout(() => go("budget"), Math.max(0, budgetStart + budgetMs - performance.now())); }
+}
+
 /** Called once when the reveal happens (budget or all ready). */
 export function whenRevealed(fn) { if ( phase === "holding" ) onGo.push(fn); else fn(); }
 
@@ -78,9 +92,9 @@ function fadeIn(list, why) {
 function go(why) {
   if ( phase !== "holding" ) return;
   phase = "revealing"; clearTimeout(budgetTimer);
-  const late = [...parts].filter(([, p]) => !p.ready).map(([n]) => n);
+  const late = [...parts].filter(([, p]) => !p.ready && !p.progressive).map(([n]) => n);
   markOnce("reveal", { why, late });
-  fadeIn([...parts.values()].filter((p) => p.ready), "reveal");
+  fadeIn([...parts.values()].filter((p) => p.ready || p.progressive), "reveal");
   // a late layer comes in by itself when ready, and after LATE ms at the latest (what it has by then; the rest as it lands)
   if ( late.length ) setTimeout(() => { const rest = [...parts.values()].filter((p) => !p.shown); if ( rest.length ) fadeIn(rest, "cap"); }, LATE);
   if ( !late.length ) phase = "done";
@@ -112,7 +126,7 @@ export async function upload(baseTextures, slice = 16) {
 }
 
 Hooks.on("canvasInit", () => {
-  clearTimeout(budgetTimer); parts.clear(); onGo.length = 0; readyAt = 0;
+  clearTimeout(budgetTimer); parts.clear(); onGo.length = 0; readyAt = 0; budgetMs = BUDGET; budgetStart = 0;
   phase = off() ? "done" : "holding";
 });
 Hooks.on("canvasReady", () => {
@@ -121,7 +135,7 @@ Hooks.on("canvasReady", () => {
   // the budget counts from the first frame drawn after canvasReady: Foundry's own first frame (the map's texture going to the GPU)
   // can hold the page for a few hundred ms, and no layer could use that time anyway
   let started = false;
-  const start = () => { if ( started ) return; started = true; clearTimeout(budgetTimer); budgetTimer = setTimeout(() => go("budget"), BUDGET); };
+  const start = () => { if ( started ) return; started = true; budgetStart = performance.now(); clearTimeout(budgetTimer); budgetTimer = setTimeout(() => go("budget"), budgetMs); };
   canvas.app?.ticker?.addOnce(start);
   budgetTimer = setTimeout(start, 300);         // (a ticker that does not run)
   // every layer registers in its own canvasReady handler: look once they all ran
