@@ -79,6 +79,77 @@ export function mipmaps(R, rt) {
   rt.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
 }
 
+/**
+ * One band tile drawn with a SHARP-BILINEAR shader: magnified, every texel is a crisp square with one screen pixel of smoothing at its
+ * edges (fractional zooms neither blur nor alias the art); minified, the mipmaps as usual. The same texture therefore looks the same
+ * at every zoom, apart from its size: no NEAREST / LINEAR switch and no change of the drawing texture with the zoom.
+ */
+const SHARP_VERT = `#version 300 es
+precision highp float;
+in vec2 aVertexPosition;
+in vec2 aUV;
+uniform mat3 projectionMatrix;
+out vec2 vUV;
+void main() {
+  gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);
+  vUV = aUV;
+}`;
+const SHARP_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec2 uSize;
+uniform float uScale;
+uniform float uAlpha;
+out vec4 fragColor;
+void main() {
+  if ( uScale > 1.0 ) {
+    vec2 p = vUV * uSize - 0.5;
+    vec2 i = floor(p);
+    vec2 f = clamp((p - i - 0.5) * uScale + 0.5, 0.0, 1.0);
+    fragColor = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0) * uAlpha;
+  }
+  else fragColor = texture(uTex, vUV) * uAlpha;
+}`;
+let sharpProgram = null;
+
+export class SharpTile extends PIXI.Container {
+  constructor(rt, w, h, res) {
+    super();
+    this.eventMode = "none";
+    this.rt = rt; this.w = w; this.h = h; this.res = res;
+    this.texture = rt;                                  // (for code that reads a tile's texture)
+    this.pos = new Float32Array(8); this.uv = new Float32Array(8);
+    this.geom = new PIXI.Geometry()
+      .addAttribute("aVertexPosition", new PIXI.Buffer(this.pos, false, false), 2)
+      .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
+      .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
+    sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uAlpha: 1 });
+    this.state = PIXI.State.for2d();
+  }
+
+  render(renderer) {
+    if ( !this.visible || this.worldAlpha <= 0 || !this.renderable || !this.rt?.valid ) return;
+    const M = this.worldTransform, w = this.w, h = this.h, p = this.pos, uv = this.uv, u = this.rt._uvs;
+    const xs = [0, w, w, 0], ys = [0, 0, h, h];
+    for ( let k = 0; k < 4; k++ ) { p[k * 2] = M.a * xs[k] + M.c * ys[k] + M.tx; p[k * 2 + 1] = M.b * xs[k] + M.d * ys[k] + M.ty; }
+    uv[0] = u.x0; uv[1] = u.y0; uv[2] = u.x1; uv[3] = u.y1; uv[4] = u.x2; uv[5] = u.y2; uv[6] = u.x3; uv[7] = u.y3;
+    this.geom.getBuffer("aVertexPosition").update(); this.geom.getBuffer("aUV").update();
+    const b = this.rt.baseTexture, un = this.shader.uniforms;
+    un.uTex = this.rt; un.uSize[0] = b.realWidth; un.uSize[1] = b.realHeight;
+    // screen pixels per texel (the canvas's own resolution included)
+    un.uScale = Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
+    renderer.batch.flush();
+    renderer.shader.bind(this.shader);
+    renderer.state.set(this.state);
+    renderer.geometry.bind(this.geom, this.shader);
+    renderer.geometry.draw(PIXI.DRAW_MODES.TRIANGLES, 6, 0);
+  }
+
+  destroy(options) { this.geom?.destroy(); this.geom = null; this.shader?.destroy?.(); this.shader = null; super.destroy(options); }
+}
+
 /** Draws given display objects (living elsewhere in the tree, their transforms kept current there) at its place in the order. */
 class Run extends PIXI.Container {
   constructor(live) { super(); this.live = live; this.items = []; this.eventMode = "none"; }
@@ -156,7 +227,9 @@ export class StaticCache {
     // around the view (half a view of margin each side), 1 texel per screen pixel (exact); kept while the view stays inside the window
     // and the zoom within 15%, then drawn again (hysteresis both ways: back to scene-wide below 1.2)
     const inView = !!this.win;
-    const needView = z > eff * (inView ? 1.2 : 1.4);
+    // (VIEW mode is off: the bands are drawn sharp at any magnification by SharpTile, so the look no longer changes at a switch and a
+    // pan never re-draws them; `CONFIG.moinenMaps.cacheViewMode = true` brings it back for comparison)
+    const needView = !!globalThis.CONFIG?.moinenMaps?.cacheViewMode && z > eff * (inView ? 1.2 : 1.4);
     if ( needView ) {
       const v = this.viewRect(), w = this.win;
       if ( !w || v.x0 < w.x0 || v.y0 < w.y0 || v.x1 > w.x1 || v.y1 > w.y1 || z / w.res > 1.15 || w.res / z > 1.15 ) {
@@ -170,7 +243,7 @@ export class StaticCache {
     const lv = levels(U);
     const sig = `${U.length}|${res}|${d.filter}|${W ? `${W.x0},${W.y0},${W.x1},${W.y1}` : "scene"}|${U.map((u, i) => (u.live ? "L" : "") + lv[i]).join(",")}`;
     if ( this.dirty || sig !== this.sig || this.bands.some((b) => b.tiles.some((t) => !t.rt.valid || t.rt.baseTexture.destroyed)) ) {
-      this.bake(U, lv, sr, res, !zoomedIn && !W, W);
+      this.bake(U, lv, sr, res, !W, W);
       this.sig = sig; this.dirty = false;
       this.sticky = new Set(U.filter((u) => u.live && !u.water).map((u) => u.obj));
     }
@@ -285,7 +358,7 @@ export class StaticCache {
             const rt = PIXI.RenderTexture.create({ width: tw, height: th, resolution: eff, scaleMode: PIXI.SCALE_MODES.LINEAR });
             R.render(live, { renderTexture: rt, transform: new PIXI.Matrix(1, 0, 0, 1, -tx, -ty), clear: true });
             if ( mips && globalThis.CONFIG?.moinenMaps?.destructionCacheMips !== false ) mipmaps(R, rt);   // (dev knob)
-            const spr = new PIXI.Sprite(rt); spr.eventMode = "none"; spr.position.set(tx, ty);
+            const spr = new SharpTile(rt, tw, th, eff); spr.position.set(tx, ty);
             band.tiles.push({ rt, spr, x: tx, y: ty, w: tw, h: th });
           }
           drawn++;

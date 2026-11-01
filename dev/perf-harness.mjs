@@ -257,3 +257,68 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
   } finally { rt.destroy(true); }
   return { found, per };
 }
+
+/**
+ * OUTLINE CHECK: does the damage look the same at every zoom, apart from its size? A region (default: around the largest tear) is
+ * drawn at each zoom (the destruction layer alone, as it reaches the screen with the current cache / flatten settings) and sampled
+ * back onto one grid of `cell` scene px (box average of the screen pixels in each cell). Per zoom: dark outline cells (luma < 70,
+ * mostly opaque) relative to zoom 1, and the correlation of the Sobel edge maps with zoom 1. `sweep` adds the same metrics over a
+ * fine zoom sweep and the largest jump between neighbouring zoom steps (a switch of the sampling shows as a jump).
+ */
+export function outlineCheck({ zooms = [0.5, 0.725, 1, 1.25, 2, 3.5, 6], cell = 2, region = null, sweep = false } = {}) {
+  const R = canvas.app.renderer, d = D(), ap = d.ap, o = d.origin;
+  if ( !region ) {
+    const g = [...d.groups.values()].filter((q) => q.info.type === "gash").sort((a, b) => b.pieces.length - a.pieces.length)[0] ?? d.order[0];
+    const r = g.info.rect, cx = o.x + (r.x0 + r.x1) / 2 * ap, cy = o.y + (r.y0 + r.y1) / 2 * ap;
+    region = { x: Math.round(cx - 100), y: Math.round(cy - 60), w: 200, h: 120 };
+  }
+  const GW = Math.floor(region.w / cell), GH = Math.floor(region.h / cell);
+  const grabGrid = (z) => {
+    canvas.pan({ x: region.x + region.w / 2, y: region.y + region.h / 2, scale: z });
+    step(3);
+    const W = R.screen.width, H = R.screen.height, rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: R.resolution });
+    R.render(d.objs, { renderTexture: rt, transform: canvas.primary.worldTransform.clone(), clear: true });
+    const px = R.extract.pixels(rt), PW = Math.round(W * R.resolution), PH = Math.round(H * R.resolution); rt.destroy(true);
+    const M = canvas.primary.worldTransform, k = R.resolution;
+    const L = new Float32Array(GW * GH), A = new Float32Array(GW * GH);
+    for ( let gy = 0; gy < GH; gy++ ) for ( let gx = 0; gx < GW; gx++ ) {
+      const sx0 = Math.floor((M.a * (region.x + gx * cell) + M.tx) * k), sx1 = Math.max(sx0 + 1, Math.floor((M.a * (region.x + (gx + 1) * cell) + M.tx) * k));
+      const sy0 = Math.floor((M.d * (region.y + gy * cell) + M.ty) * k), sy1 = Math.max(sy0 + 1, Math.floor((M.d * (region.y + (gy + 1) * cell) + M.ty) * k));
+      let l = 0, a = 0, n = 0;
+      for ( let y = sy0; y < sy1; y++ ) for ( let x = sx0; x < sx1; x++ ) {
+        if ( x < 0 || y < 0 || x >= PW || y >= PH ) continue;
+        const i = (y * PW + x) * 4; l += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]; a += px[i + 3]; n++;
+      }
+      L[gy * GW + gx] = n ? l / n : 0; A[gy * GW + gx] = n ? a / n : 0;
+    }
+    return { L, A };
+  };
+  const sobel = (L) => { const E = new Float32Array(GW * GH); for ( let y = 1; y < GH - 1; y++ ) for ( let x = 1; x < GW - 1; x++ ) {
+    const v = (dx, dy) => L[(y + dy) * GW + x + dx];
+    const gx = -v(-1, -1) - 2 * v(-1, 0) - v(-1, 1) + v(1, -1) + 2 * v(1, 0) + v(1, 1);
+    const gy = -v(-1, -1) - 2 * v(0, -1) - v(1, -1) + v(-1, 1) + 2 * v(0, 1) + v(1, 1);
+    E[y * GW + x] = Math.hypot(gx, gy); } return E; };
+  const dark = ({ L, A }) => { let n = 0; for ( let i = 0; i < L.length; i++ ) if ( A[i] > 128 && L[i] * 255 / Math.max(1, A[i]) < 70 ) n++; return n; };
+  const corr = (a, b) => { let sa = 0, sb = 0, n = a.length; for ( let i = 0; i < n; i++ ) { sa += a[i]; sb += b[i]; } const ma = sa / n, mb = sb / n;
+    let num = 0, da = 0, db = 0; for ( let i = 0; i < n; i++ ) { const x = a[i] - ma, y = b[i] - mb; num += x * y; da += x * x; db += y * y; } return num / Math.sqrt(da * db || 1); };
+  // the flooded holes' water loops on its own clock: hidden while measuring (restored at the end)
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  try {
+  const ref = grabGrid(1), refE = sobel(ref.L), refDark = dark(ref);
+  const rows = zooms.map((z) => { const g = grabGrid(z); return { zoom: +canvas.stage.scale.x.toFixed(3), darkRatio: +(dark(g) / Math.max(1, refDark)).toFixed(3), edgeCorr: +corr(sobel(g.L), refE).toFixed(3), mode: d.cache?.stats.mode }; });
+  let sw = null;
+  if ( sweep ) {
+    const zs = Array.from({ length: 115 }, (_, i) => +(0.3 + i * 0.05).toFixed(2));
+    const pts = zs.map((z) => { const g = grabGrid(z); return { z, dark: dark(g) / Math.max(1, refDark), corr: corr(sobel(g.L), refE) }; });
+    let jump = { dark: 0, corr: 0, at: null };
+    for ( let i = 1; i < pts.length; i++ ) {
+      const dd = Math.abs(pts[i].dark - pts[i - 1].dark), dc = Math.abs(pts[i].corr - pts[i - 1].corr);
+      if ( dd > jump.dark ) jump = { ...jump, dark: +dd.toFixed(3), at: pts[i].z };
+      if ( dc > jump.corr ) jump.corr = +dc.toFixed(3);
+    }
+    sw = { jump, curve: pts.filter((_, i) => i % 5 === 0).map((p) => [p.z, +p.dark.toFixed(2), +p.corr.toFixed(2)]) };
+  }
+  return { region, refDark, rows, sweep: sw };
+  } finally { ws.forEach((w) => { w.visible = true; }); }
+}
