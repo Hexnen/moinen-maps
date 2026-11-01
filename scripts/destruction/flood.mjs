@@ -202,7 +202,10 @@ function readArea(g) {
     cover[i] = 1;
     const bx = cx + x - info.x, by = cy + y - info.y;
     if ( bx >= 0 && by >= 0 && bx < bw && by < bh && base[(by * bw + bx) * 4 + 3] ) open[i] = 1;
-    level[i] = lvAt(cx + x, cy + y);
+    // over a deeper hole painted before it (a pit, a crater) the water is deeper there: the bake carries that level in the cover's
+    // green (substrate.mjs finishOverSubstrate: 255 - 40 x level; the cover's mask reads red and alpha only)
+    const g = cov[i * 4 + 1], deeper = g < 255 ? Math.min(3, Math.round((255 - g) / 40)) : 0;
+    level[i] = Math.max(lvAt(cx + x, cy + y), deeper);
   }
   return { cx, cy, cw, ch, cover, open, level, seed: g.hash % 99991, ratio: gridRatio() };
 }
