@@ -1,8 +1,11 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
-import { readMeta, LIVE_PARAMS } from "./core.mjs";
-import { runBake, encodeInWorker, disposeBaker } from "./bake.mjs";
+import { readMeta, LIVE_PARAMS, META_FIELDS } from "./core.mjs";
+import { runBake, disposeBaker } from "./bake.mjs";
+import * as Net from "../net/stream.mjs";
+import * as Chunks from "../net/chunks.mjs";
+import { seedKnown } from "../water/publish.mjs";
 import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
 import { DestructionDisplay } from "./display.mjs";
@@ -23,7 +26,17 @@ import * as Editor from "./editor.mjs";
  */
 
 let S = null, display = null, gen = 0, bakeTimer = 0, saveTimer = 0, persistTimer = 0;
-let lastSheet = null;               // the sheet on screen (its hash is computed only when asked: 4 MB of FNV costs ~20 ms)
+let lastRecs = null;                // the strokes on screen (their hash is computed only when asked: 4 MB of FNV costs ~20 ms)
+/*
+ * STROKE RECORDS: what one stroke looks like (its sprites), from its chunk (memory, IndexedDB, the server) or baked here, keyed by
+ * `<base>|<stroke id>|<signature>`: valid as long as the settings and the stroke itself are unchanged. The display gets a sheet
+ * assembled from them, so the GM and every player show the same pixels whatever their source.
+ */
+const recs = new Map();
+let shownRecs = new Map();           // stroke id -> record on screen (its older look stays until the new one is here)
+const waitingSince = new Map();      // player: record key -> when its chunk was first missed (bake it here after AWAIT_CHUNK)
+let netAbort = null, persisting = null, persistAgain = false;
+const AWAIT_CHUNK = 12000;
 let inflight = null, again = null, paramRev = 0, publishBackoff = 0, publishRetryAt = 0, editedHere = false, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
 let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
 const played = new Set();            // area hashes already shown on this client (they never enter again)
@@ -43,7 +56,7 @@ const now = () => game.time.serverTime;
 function onCanvasReady() {
   teardown();
   if ( !canvas.scene ) return;
-  S = Model.load(canvas.scene);
+  S = Store.attachPaths(Model.load(canvas.scene), canvas.scene);
   Editor.onCanvasReady();
   if ( S?.enabled && Model.hasPaint(S) ) rebake();
   selfCheck(10000);
@@ -77,7 +90,8 @@ function teardown() {
   Editor.teardown();
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
-  played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastSheet = null;
+  played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
+  netAbort?.abort(); netAbort = null; recs.clear(); shownRecs = new Map(); waitingSince.clear(); persistAgain = false;
   forgetSceneMap();
   disposeBaker();
   Object.assign(status, { baking: false, waiting: false, progress: 0, error: "", source: "", stats: null, hash: "", areas: [] });
@@ -90,7 +104,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   if ( userId === game.user.id ) return;                    // our own save: already shown
   // another GM saved while this GM has strokes not saved yet: keep ours (our save follows and wins), never drop them
   if ( game.user.isGM && saveTimer ) return;
-  S = Model.load(scene);
+  S = Store.attachPaths(Model.load(scene), scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
   if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.fadeAll(); shownKey = ""; }
@@ -144,44 +158,93 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     loaded = true;   // the scene's state is known: what is painted from now on is new and enters
     Object.assign(status, { baking: false, waiting: false, progress: 0, areas: [] }); tell("status"); return;
   }
-  const key = Store.makeKey(scene, S, backgroundInfo()?.path ?? "");
+  const bg = backgroundInfo()?.path ?? "";
+  const key = Store.makeKey(scene, S, bg);
   const taken = strokes.splice(0), mask = S.mask.slice();
   if ( key === shownKey && display && !force ) { maybeBlast(); return; }
-  let sheet = null, metaRows = 0, source = "", blob = null, stats = null;
-  const hit = force ? null : await Store.getCached(key);
-  if ( my !== gen ) return;
-  if ( hit?.blob ) { blob = hit.blob; metaRows = hit.metaRows; stats = hit.stats ?? null; source = "cache"; }
-  if ( !blob && !force && S.baked?.key === key ) {
-    blob = await Store.fetchPublished(S.baked);
-    if ( my !== gen ) return;
-    if ( blob ) { metaRows = S.baked.metaRows; source = "published"; }
-  }
-  if ( blob ) {
+  const S0 = S, base = Store.baseKey(scene, S, bg), objs = objectsIn();
+  // the strokes to show, each with the key of the record that shows it
+  const want = [];
+  S.objects.forEach((o, index) => { if ( !o.k ) { const sig = Store.objSig(S, o); want.push({ index, objId: o.id, sig, rk: `${base}|${o.id}|${sig}` }); } });
+  if ( force ) for ( const w of want ) recs.delete(w.rk);
+  const src = { mem: 0, chunk: 0, legacy: 0, baked: 0 };
+  const firstLoad = !loaded;
+  let first = firstLoad;
+  /** Everything we have on screen now (a stroke without its record yet keeps its older look, or waits). */
+  const show = () => {
+    if ( my !== gen || S !== S0 ) return;
     const t = performance.now();
-    let dec = null;
-    try { dec = await Store.decodeSheet(blob); }
-    catch ( err ) { console.warn(`${MODULE_ID} | destruction: unreadable ${source} file`, err); if ( source === "cache" ) Store.dropCached(key); }
-    if ( my !== gen ) return;
-    if ( !dec ) { blob = null; again = { awaitPublish: false, force: true }; return; }
-    sheet = { data: dec.rgba, w: dec.w, h: dec.h }; T.decode = performance.now() - t;
-  }
-  // a player whose GM is painting: wait for the GM's upload, bake here only when it does not come
-  if ( !sheet && awaitPublish && !game.user.isGM && game.users.activeGM ) {
-    strokes.unshift(...taken);
-    status.waiting = true; tell("status");
-    bakeTimer = setTimeout(() => { bakeTimer = 0; rebake({ awaitPublish: false }); }, 12000);
-    return;
-  }
-  status.waiting = false;
-  if ( !sheet ) {
-    Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
-    try {
+    showRecs(want, objs, taken, mask, first);
+    first = false; loaded = true; shownMask = mask;
+    T.show = (T.show ?? 0) + performance.now() - t;
+  };
+  const missing = () => want.filter((w) => !recs.has(w.rk));
+  src.mem = want.length - missing().length;
+
+  // 1. the GM's manifest: the chunks of strokes whose inputs are unchanged (IndexedDB first, then the server), shown as they land
+  const M = force ? null : Store.manifestOf(S);
+  const failed = [];
+  if ( M && M.base === base ) {
+    const fetch = [];
+    for ( const w of missing() ) { const e = Store.entryOf(M, w.objId); if ( e?.sig === w.sig ) fetch.push({ ...w, id: e.id }); }
+    if ( fetch.length ) {
       const t = performance.now();
-      const input = { objects: objectsIn(), mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+      status.waiting = true; status.loading = fetch.length; tell("status");
+      netAbort ??= new AbortController();
+      let timer = 0;
+      const soon = () => { if ( !timer ) timer = setTimeout(() => { timer = 0; show(); }, 60); };   // a few chunks landing together: one sync
+      await Promise.all(prioritise(fetch, objs).map(async (w) => {
+        const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
+        if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: w.id, sprites: got.sprites }); src.chunk++; status.loading--; soon(); }
+        else failed.push(w);
+      }));
+      clearTimeout(timer);
+      T.fetch = performance.now() - t;
+      if ( my !== gen ) return;
+    }
+  } else if ( !force && S.baked?.path && S.baked.key === key ) {
+    // the first format: one sheet for the whole scene, read once and cut into strokes (the GM's next publish replaces it)
+    const t = performance.now();
+    const dec = await Store.fetchLegacy(S.baked);
+    if ( my !== gen ) return;
+    try {
+      const meta = dec && readMeta(dec.rgba, dec.w, dec.h, S.baked.metaRows);
+      const parts = meta ? Chunks.splitSheet(dec.rgba, dec.w, meta, META_FIELDS) : null;
+      if ( parts ) for ( const w of missing() ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: null, sprites: parts.get(w.index) ?? [] }); src.legacy++; }
+    } catch ( err ) { console.warn(`${MODULE_ID} | destruction: unusable published file`, err); }
+    T.decode = performance.now() - t;
+  }
+  if ( S !== S0 ) return;   // a newer state arrived meanwhile: the next pass (queued) shows it, with what landed here kept
+
+  // 2. strokes nobody has published (yet): a player waits for the GM's chunk, per stroke, and bakes only what is still missing after
+  // AWAIT_CHUNK; a chunk that was named but could not be had (gone, broken) is baked at once
+  let toBake = missing();
+  const broken = new Set(failed.map((w) => w.rk));
+  if ( toBake.length && !force && awaitPublish && !game.user.isGM && game.users.activeGM ) {
+    const t = Date.now();
+    for ( const w of toBake ) if ( !waitingSince.has(w.rk) ) waitingSince.set(w.rk, t);
+    const late = toBake.filter((w) => broken.has(w.rk) || t - waitingSince.get(w.rk) >= AWAIT_CHUNK);
+    if ( late.length < toBake.length ) {
+      const next = Math.min(...toBake.filter((w) => !late.includes(w)).map((w) => waitingSince.get(w.rk) + AWAIT_CHUNK)) - t;
+      clearTimeout(bakeTimer);
+      bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, Math.max(50, next));
+    }
+    toBake = late;
+  }
+  if ( toBake.length ) {
+    Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
+    if ( src.chunk || src.legacy ) show();   // what just landed, while the rest bakes
+    try {
+      const t = performance.now(), need = new Set(toBake.map((w) => w.index));
+      // only these strokes: the others are left out (an erase stroke is skipped by the bake), so their indices stay as they are
+      const input = { objects: objs.map((o, i) => need.has(i) ? o : { ...o, k: 1 }), mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       const res = await runBake(input, () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; },
         { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
       if ( my !== gen ) return;
-      sheet = res.sheet; metaRows = res.metaRows; stats = res.stats; source = "baked";
+      const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+      for ( const w of toBake ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: null, sprites: parts.get(w.index) ?? [] }); waitingSince.delete(w.rk); }
+      src.baked = toBake.length;
+      status.stats = res.stats;
       T.bake = performance.now() - t; status.ms = Math.round(T.bake);
     } catch ( err ) {
       if ( my !== gen ) return;
@@ -189,33 +252,58 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
       Object.assign(status, { baking: false, error: String(err?.message ?? err) }); tell("status");
       return;
     }
+    // a setting changed while this baked (clicking through toggles): the bake for the final state follows, this one is not shown
+    if ( (rev !== paramRev || S !== S0) && !force ) { strokes.unshift(...taken); Object.assign(status, { baking: false }); tell("status"); if ( !bakeTimer ) again ??= {}; return; }
   }
-  // a setting changed while this baked (clicking through toggles): the bake for the final state follows, this one is not shown
-  if ( rev !== paramRev && !force ) { strokes.unshift(...taken); Object.assign(status, { baking: false }); tell("status"); if ( !bakeTimer ) again ??= {}; return; }
-  let t = performance.now();
-  let meta;
-  try { meta = readMeta(sheet.data, sheet.w, sheet.h, metaRows); }
-  catch ( err ) {
-    // a broken file (cache or published): forget it and bake here
-    console.warn(`${MODULE_ID} | destruction: unusable bake (${source})`, err);
-    if ( source !== "baked" ) { Store.dropCached(key); again = { awaitPublish: false, force: true }; }
-    return;
+
+  // 3. on screen: everything we have
+  show();
+  const complete = want.every((w) => recs.has(w.rk));
+  if ( complete ) { shownKey = key; waitingSince.clear(); }
+  // records no stroke uses any more (an older look, an undone stroke) are let go
+  const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
+  for ( const k of recs.keys() ) if ( !live.has(k) ) recs.delete(k);
+  T.total = performance.now() - T.t0;
+  const source = Object.entries(src).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ") || "memory";
+  Object.assign(status, { baking: false, waiting: !complete, loading: 0, progress: 1, source, hash: "", error: "", perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])) });
+  tell("status");
+  if ( game.user.isGM && complete ) schedulePersist(src.baked + src.legacy);
+  maybeBlast(firstLoad);
+}
+
+/** Chunks to download, nearest first: the newest strokes (their entry is about to play), then by distance to the view. */
+function prioritise(list, objs) {
+  const r = Model.sceneRect(), mpx = S.ap * Model.K, c = canvas.stage?.pivot ?? { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  const newest = objs.length - 3;
+  for ( const w of list ) {
+    const o = objs[w.index];
+    const d = Math.hypot(r.x + (o.x0 + o.w / 2) * mpx - c.x, r.y + (o.y0 + o.h / 2) * mpx - c.y);
+    w.prio = (w.index >= newest ? 0 : 1e7) + d;
   }
+  return list.sort((a, b) => a.prio - b.prio);
+}
+
+/**
+ * The display gets one sheet assembled from the strokes' records, in stroke order. A stroke whose record is not here yet keeps the
+ * look it had on screen (a setting changed: the new look replaces it when it lands) or is left out for now (a new stroke).
+ */
+function showRecs(want, objs, taken, mask, first) {
+  const list = [], next = new Map();
+  for ( const w of want ) {
+    const r = recs.get(w.rk) ?? shownRecs.get(w.objId);
+    if ( !r ) continue;
+    list.push({ index: w.index, sprites: r.sprites });
+    next.set(w.objId, r);
+  }
+  shownRecs = next;
   display ??= new DestructionDisplay();
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
-  const first = !loaded;
-  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, meta, S.ap, origin(), objectsIn());
-  T.show = performance.now() - t;
-  if ( source === "published" ) Store.putCached(key, { blob, metaRows });   // only a file that decoded and read
+  // the areas already on screen need no pixels (the display keeps them by hash)
+  const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h));
+  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs);
   playEntries(added, removed, taken, mask, first);
-  shownKey = key; shownMask = mask; loaded = true;
-  lastSheet = sheet.data; T.total = performance.now() - T.t0;
-  Object.assign(status, { baking: false, progress: 1, source, hash: "", error: "", stats: stats ?? status.stats, perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])),
-    areas: display.order.map((g) => ({ type: g.info.type, mat: Model.MATERIALS[g.info.mat + 1] ?? "earth", hash: g.info.hash, cause: g.info.cause ?? 0, obj: g.objId ?? null })) });
-  tell("status");
-  if ( source === "baked" ) schedulePersist(key, sheet, metaRows, stats);
-  else if ( game.user.isGM && S.baked?.key !== key && blob ) schedulePersist(key, null, metaRows, stats, blob);
-  maybeBlast(first);
+  lastRecs = list;
+  status.areas = display.order.map((g) => ({ type: g.info.type, mat: Model.MATERIALS[g.info.mat + 1] ?? "earth", hash: g.info.hash, cause: g.info.cause ?? 0, obj: g.objId ?? null }));
 }
 
 /**
@@ -274,53 +362,84 @@ function maybeBlast(first = false) {
   if ( S.params.anim && late < (first ? 4000 : 15000) ) display.detonate(performance.now() - late);   // the shared moment (in the future, or already running)
 }
 
-/* ---------------------------------------------------------------- the PNG: cache, publish (GM) */
+/* ---------------------------------------------------------------- publishing the chunks (GM) */
 
 /**
- * A moment after the last bake on screen: the PNG (encoded in the worker), into the IndexedDB cache, and (GM) uploaded and named in
- * the scene flag with the entries that played since.
+ * A moment after a bake is on screen (sooner for a small edit): the strokes the manifest does not name yet are encoded in the codec
+ * worker (in parallel with the next bake), uploaded (only what the server lacks, a few at a time) and named in the manifest together
+ * with the entries that played since. One run at a time; a run asked for meanwhile follows it.
  */
-function schedulePersist(key, sheet, metaRows, stats, blob = null) {
+function schedulePersist(fresh = 0) {
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
-    persistTimer = 0;
-    const my = gen, scene = canvas.scene;
-    if ( !S || shownKey !== key ) return;
-    try {
-      if ( !blob ) {
-        const t = performance.now();
-        const png = await encodeInWorker(sheet.w, sheet.h, sheet.data);
-        status.perf.encode = Math.round(performance.now() - t);
-        blob = new Blob([png], { type: "image/png" });
-        await Store.putCached(key, { blob, metaRows, stats });
+  persistTimer = setTimeout(() => { persistTimer = 0; persist(); }, Math.max(fresh <= 2 ? 300 : 900, publishRetryAt - Date.now()));
+}
+
+async function persist() {
+  if ( persisting ) { persistAgain = true; return; }
+  // one GM publishes: the one who painted here, or the active GM (two GMs never race on the files and the flag)
+  if ( !S || !canvas.scene || !game.user.isGM || !(editedHere || game.users.activeGM?.isSelf) ) return;
+  persisting = persistOnce().finally(() => { persisting = null; if ( persistAgain ) { persistAgain = false; schedulePersist(0); } });
+  return persisting;
+}
+
+async function persistOnce() {
+  const my = gen, scene = canvas.scene, bg = backgroundInfo()?.path ?? "";
+  const base = Store.baseKey(scene, S, bg), key = Store.makeKey(scene, S, bg);
+  if ( shownKey !== key ) return;                   // not all on screen yet: the bake that completes it asks again
+  const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && M.base === base;
+  seedKnown(scene);
+  const c = {}, todo = [];
+  for ( const o of S.objects ) {
+    if ( o.k ) continue;
+    const sig = Store.objSig(S, o), r = recs.get(`${base}|${o.id}|${sig}`);
+    if ( !r ) return;                                // should not happen once complete; a later run publishes
+    const e = same ? Store.entryOf(M, o.id) : null;
+    if ( e?.sig === sig ) c[o.id] = `${sig}:${e.id}`;
+    else if ( r.id && Net.known(dir).has(r.id) ) c[o.id] = `${sig}:${r.id}`;
+    else todo.push({ o, sig, r });
+  }
+  const stale = M ? Object.keys(M.c).filter((id) => !(id in c) && !todo.some((q) => q.o.id === id)) : [];
+  if ( !todo.length && same && !stale.length && Object.keys(c).every((id) => M.c[id] === c[id]) && M.key === key ) return;
+  try {
+    if ( Date.now() < publishRetryAt ) { schedulePersist(0); return; }
+    if ( todo.length ) {
+      const t = performance.now();
+      const out = await Net.job({ kind: "objects", F: META_FIELDS, objs: todo.map((q) => ({ key: q.o.id, sprites: q.r.sprites })) });
+      status.perf.encode = Math.round(performance.now() - t);
+      const byKey = new Map(out.map((e) => [e.key, e]));
+      for ( const q of todo ) {
+        const e = byKey.get(q.o.id);
+        q.r.id = e.id;
+        c[q.o.id] = `${q.sig}:${e.id}`;
+        Net.keep(e.id, e.bytes, { F: META_FIELDS, sprites: q.r.sprites });
       }
-      // one GM publishes: the one who painted here, or the active GM (two GMs never race on the file and the flag)
-      const publisher = game.user.isGM && (editedHere || game.users.activeGM?.isSelf);
-      if ( my !== gen || !S || shownKey !== key || !publisher || S.baked?.key === key ) return;
-      if ( Date.now() < publishRetryAt ) { schedulePersist(key, null, metaRows, stats, blob); return; }
-      await save();
-      const baked = await Store.publish(scene.id, key, blob, metaRows);
-      if ( my !== gen || !S ) return;
-      S.baked = baked;
-      // the entries that played since: everybody here plays them a moment after the upload, at the same server time
-      const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
-      for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
-      for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
-      S.entries = [...entryLog.values()];
-      await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked, [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries });
-      publishBackoff = 0;
-      tell("status");
-    } catch ( err ) {
-      if ( game.user.isGM ) {
-        // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
-        if ( !publishBackoff ) ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
-        publishBackoff = Math.min(8 * 60000, publishBackoff ? publishBackoff * 2 : 15000);
-        publishRetryAt = Date.now() + publishBackoff;
-        console.warn(`${MODULE_ID} | could not publish the destruction (next try in ${publishBackoff / 1000} s)`, err);
-        if ( shownKey === key ) schedulePersist(key, null, metaRows, stats, blob);
-      } else console.warn(`${MODULE_ID} | destruction cache`, err);
+      const t2 = performance.now();
+      await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));
+      status.perf.upload = Math.round(performance.now() - t2);
     }
-  }, Math.max(900, publishRetryAt - Date.now()));
+    if ( my !== gen || !S ) return;
+    await save();                                    // the strokes first, so the signatures mean the same to everyone
+    const cc = { ...c };
+    if ( M ) for ( const id of Object.keys(M.c) ) if ( !(id in c) ) cc[`-=${id}`] = null;
+    const baked = { v: 2, dir, base, key, at: now(), c: cc, path: null, metaRows: null };
+    // the entries that played since: everybody here plays them a moment after the upload, at the same server time
+    const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
+    for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
+    for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
+    S.entries = [...entryLog.values()];
+    await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked, [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries });
+    if ( S ) S.baked = { ...baked, c };
+    publishBackoff = 0; publishRetryAt = 0;
+    Net.scheduleGc(scene.id);
+    tell("status");
+  } catch ( err ) {
+    // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
+    if ( !publishBackoff ) ui.notifications.warn(game.i18n.localize("MOINENMAPS.Destr.publishFailed"));
+    publishBackoff = Math.min(8 * 60000, publishBackoff ? publishBackoff * 2 : 15000);
+    publishRetryAt = Date.now() + publishBackoff;
+    console.warn(`${MODULE_ID} | could not publish the destruction (next try in ${publishBackoff / 1000} s)`, err);
+    if ( my === gen ) schedulePersist(0);
+  }
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
@@ -438,15 +557,15 @@ function scheduleSave(ms = 700) {
 function flushSave() {
   if ( !saveTimer || !S || !game.user.isGM || !saveFor ) return;
   clearTimeout(saveTimer); saveTimer = 0;
-  const scene = saveFor, data = Model.encode(S);
+  const scene = saveFor, upd = Store.flagUpdate(S, scene);
   saveFor = null;
-  scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: data }).catch((err) => console.warn(`${MODULE_ID} | destruction: could not save`, err));
+  scene.update(upd).catch((err) => console.warn(`${MODULE_ID} | destruction: could not save`, err));
 }
 
 export async function save() {
   if ( !S || !game.user.isGM || !canvas.scene ) return;
   clearTimeout(saveTimer); saveTimer = 0;
-  await canvas.scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: Model.encode(S) });
+  await canvas.scene.update(Store.flagUpdate(S, canvas.scene));
 }
 
 /* ---------------------------------------------------------------- API */
@@ -479,7 +598,9 @@ export const destructionApi = {
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   state: () => S ? Model.encode(S) : null,
-  status: () => { if ( lastSheet && !status.hash ) status.hash = fnv(lastSheet).toString(16); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
+  status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
+  /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
+  net: { stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
   replay: () => display?.detonate(performance.now()),
   display: () => display,
@@ -493,7 +614,7 @@ export function registerDestruction() {
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);
-  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.destruction ??= destructionApi; } });
+  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.destruction ??= destructionApi; } Store.dropOldCache(); });
   window.addEventListener("beforeunload", () => { flushSave(); disposeBaker(); });
   document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
 }

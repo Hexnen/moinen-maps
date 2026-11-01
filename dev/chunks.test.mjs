@@ -67,6 +67,8 @@ await test("water tiles: bit-exact, unaligned box, sparse and full modes, empty 
   const r = await waterRoundTrip(synthWater(box, 16, rnd(7)), box);
   assert.ok(r.tiles > 0);
   await waterRoundTrip(synthWater(box, 16, rnd(8), { with255: true }), box);
+  const neg = { x0: -50, y0: -3, w: 200, h: 140 };
+  await waterRoundTrip(synthWater(neg, 5, rnd(9)), neg);
   const empty = Array.from({ length: 4 }, () => new Uint8Array(box.w * box.h));
   for ( const t of C.waterTiles(box) ) assert.equal(C.packWaterTile(empty, box, t), null);
   // tiles cover the box exactly once

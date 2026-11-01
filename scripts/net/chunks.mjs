@@ -150,11 +150,11 @@ export function packWaterTile(frames, box, t) {
   }
   if ( !any ) return null;
   const sparse = !has255;
-  const body = 12 + (sparse ? N + vary * n : N * n);
+  const body = 16 + (sparse ? N + vary * n : N * n);
   const p = header(KIND_WATER, body), dv = new DataView(p.buffer);
-  dv.setUint16(8, box.x0 + t.x0, true); dv.setUint16(10, box.y0 + t.y0, true); dv.setUint16(12, t.w, true); dv.setUint16(14, t.h, true);
-  dv.setUint16(16, n, true); p[18] = sparse ? 1 : 0; p[19] = 0;
-  let o = 20, s = 20 + N;
+  dv.setInt32(8, box.x0 + t.x0, true); dv.setInt32(12, box.y0 + t.y0, true); dv.setUint16(16, t.w, true); dv.setUint16(18, t.h, true);
+  dv.setUint16(20, n, true); p[22] = sparse ? 1 : 0; p[23] = 0;
+  let o = 24, s = 24 + N;
   for ( let y = 0; y < t.h; y++ ) {
     const row = (t.y0 + y) * BW + t.x0;
     for ( let x = 0; x < t.w; x++ ) {
@@ -176,9 +176,9 @@ export function packWaterTile(frames, box, t) {
 export function unpackWaterTile(p) {
   if ( kindOf(p) !== KIND_WATER ) throw new Error("not a water tile");
   const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
-  const ax = dv.getUint16(8, true), ay = dv.getUint16(10, true), w = dv.getUint16(12, true), h = dv.getUint16(14, true), n = dv.getUint16(16, true), sparse = p[18] === 1;
+  const ax = dv.getInt32(8, true), ay = dv.getInt32(12, true), w = dv.getUint16(16, true), h = dv.getUint16(18, true), n = dv.getUint16(20, true), sparse = p[22] === 1;
   const N = w * h, levels = Array.from({ length: n }, () => new Uint8Array(N));
-  let o = 20, s = 20 + N;
+  let o = 24, s = 24 + N;
   for ( let i = 0; i < N; i++ ) {
     if ( sparse ) {
       const v = p[o++];
@@ -355,6 +355,52 @@ export function recordsHash(recs) {
     for ( let i = 0; i < s.img.length; i++ ) h = Math.imul(h ^ s.img[i], 16777619);
   }
   return (h >>> 0).toString(16);
+}
+
+/* ---------------------------------------------------------------- the worker's jobs */
+
+/**
+ * One job (the codec worker runs these; the page runs them inline only when no worker can start). -> { result, transfer }.
+ *   { kind: "water", box, frames, known }   -> [{ tx, ty, id (0: empty tile), bytes (PNG; null when `known` has the id) }]
+ *   { kind: "objects", objs: [{ key, sprites }], F } -> [{ key, id, bytes }]
+ *   { kind: "decode", bytes, cid }           -> the decoded payload (water tile, or { F, sprites }); its hash must match the chunk id
+ * (`id` is the worker's request number, never a chunk id)
+ */
+export async function work(m) {
+  const transfer = [];
+  if ( m.kind === "water" ) {
+    const known = new Set(m.known ?? []), out = [];
+    for ( const t of waterTiles(m.box) ) {
+      const p = packWaterTile(m.frames, m.box, t);
+      if ( !p ) { out.push({ tx: t.tx, ty: t.ty, id: 0, bytes: null }); continue; }
+      const id = `w${hash64(p)}`, bytes = known.has(id) ? null : await wrap(p);
+      if ( bytes ) transfer.push(bytes.buffer);
+      out.push({ tx: t.tx, ty: t.ty, id, bytes });
+    }
+    return { result: out, transfer };
+  }
+  if ( m.kind === "objects" ) {
+    const out = [];
+    for ( const o of m.objs ) {
+      const p = packObject(o.sprites, m.F), bytes = await wrap(p);
+      transfer.push(bytes.buffer);
+      out.push({ key: o.key, id: `d${hash64(p)}`, bytes });
+    }
+    return { result: out, transfer };
+  }
+  if ( m.kind === "decode" ) {
+    const p = await unwrap(m.bytes);
+    if ( m.cid && String(m.cid).slice(1) !== hash64(p) ) throw new Error("chunk content does not match its name");
+    if ( kindOf(p) === KIND_WATER ) {
+      const t = unpackWaterTile(p);
+      transfer.push(...t.levels.map((l) => l.buffer));
+      return { result: t, transfer };
+    }
+    const o = unpackObject(p);
+    for ( const s of o.sprites ) transfer.push(s.img.buffer);
+    return { result: o, transfer };
+  }
+  throw new Error(`unknown job ${m.kind}`);
 }
 
 /* ---------------------------------------------------------------- manifests and the garbage collector */

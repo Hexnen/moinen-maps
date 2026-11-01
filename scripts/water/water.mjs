@@ -4,6 +4,7 @@ import { engineInfo, bake, ramp, disposeEngine } from "./engine.mjs";
 import { WaterDisplay } from "./display.mjs";
 import * as Cache from "./cache.mjs";
 import { publishBake, fetchBake } from "./publish.mjs";
+import { scheduleGc } from "../net/stream.mjs";
 import { CODES } from "./codes-table.mjs";
 
 /**
@@ -100,11 +101,12 @@ let publishTimer = 0, publishBackoff = 0, publishRetryAt = 0;
 function schedulePublish(key, bake) {
   clearTimeout(publishTimer);
   if ( !game.user.isGM || !S ) return;
-  const wait = Math.max(3000, publishRetryAt - Date.now());
+  // the bake itself already waited for the edits to settle, and only the changed tiles go up: a short pause is enough
+  const wait = Math.max(1200, publishRetryAt - Date.now());
   publishTimer = setTimeout(async () => {
     publishTimer = 0;
     const scene = canvas.scene;
-    if ( !S || !scene || S.baked?.key === key || Cache.makeKey(scene.id, S) !== key ) return;     // edited again meanwhile
+    if ( !S || !scene || (S.baked?.key === key && S.baked?.v === 2) || Cache.makeKey(scene.id, S) !== key ) return;     // edited again meanwhile
     const my = life;
     try {
       await save();                                              // the masks and settings first, so the key means the same to everyone
@@ -113,6 +115,8 @@ function schedulePublish(key, bake) {
       if ( my === life ) S.baked = baked;                        // the upload belongs to that scene even when we have left it
       await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
       publishBackoff = 0; publishRetryAt = 0;
+      scheduleGc(scene.id);                                      // tiles no manifest names any more go, much later
+
     } catch ( err ) {
       if ( !publishBackoff ) ui.notifications.warn(game.i18n.localize("MOINENMAPS.Water.publishFailed"));
       publishBackoff = Math.min(8 * 60000, publishBackoff ? publishBackoff * 2 : 15000);
@@ -163,7 +167,7 @@ export async function rebake({ awaitPublish = true } = {}) {
     if ( hit ) Cache.putBake(key, { box: hit.box, ms: hit.ms, frames: hit.frames.map((f) => f.slice()) });
   }
   if ( hit ) {
-    if ( S.baked?.key !== key ) schedulePublish(key, hit);     // baked here before but never uploaded
+    if ( S.baked?.key !== key || S.baked?.v !== 2 ) schedulePublish(key, hit);     // baked here before but never uploaded (or in the first format)
     display.begin(hit.box, S.px, origin, hit.ms ?? S.params.ms);
     hit.frames.forEach((f, i) => display.addFrame(i + 1, f));
     display.commit();
