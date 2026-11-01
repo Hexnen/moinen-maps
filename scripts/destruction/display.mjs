@@ -349,7 +349,7 @@ export class DestructionDisplay {
     const side = () => (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 0.7) * P.wr;
     if ( type === "blast" ) {
       const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
-      a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: P.wr * 0.5 * pw, x, y });
+      a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: Math.min(P.wr * 0.5, 12) * pw, x, y });
       this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
     } else if ( type === "scorch" ) {
       for ( let q = 0; q < 3; q++ ) { const s = side(); this.spawn({ x: x - uy * s, y: y + ux * s, vx: -ux * 4, vy: -uy * 4, rise: -6 - Math.random() * 4, life: 700 + Math.random() * 500, color: 0xff9a3c, flicker: true }); }
