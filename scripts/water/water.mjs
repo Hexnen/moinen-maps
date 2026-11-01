@@ -42,6 +42,7 @@ export async function onCanvasReady() {
 }
 
 export function teardown() {
+  flushSave();
   gen++; life++;
   clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); clearTimeout(publishTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = publishTimer = 0;
   display?.destroy(); display = null;
@@ -277,9 +278,18 @@ export function newVariation() { setParams({ seed: Math.floor(Math.random() * 99
 
 /* ---------------------------------------------------------------- saving */
 
+let saveSceneId = null;
 function scheduleSave(ms = 900) {
   clearTimeout(saveTimer);
+  saveSceneId = canvas.scene?.id ?? null;
   saveTimer = setTimeout(() => { saveTimer = 0; save(); }, ms);
+}
+
+/** Leaving the scene (teardown) while an edit still waits for its save: save it now, to the scene it was made on. */
+function flushSave() {
+  if ( !saveTimer || !S || !game.user.isGM ) return;
+  const scene = game.scenes.get(saveSceneId);
+  scene?.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: Model.encode(S) }).catch((err) => console.warn(`${MODULE_ID} | could not save the water`, err));
 }
 
 export async function save() {
