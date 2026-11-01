@@ -144,6 +144,32 @@ await test("GC: never a referenced file, only after the grace, none when no mani
   assert.deepEqual(C.toUpload(["x", "y", "x", 0, "z"], new Set(["y"])), ["x", "z"]);
 });
 
+await test("decode: a chunk whose content does not match its name is refused (partial upload, tombstone, wrong file)", async () => {
+  const p = C.packObject([{ m: Int16Array.from({ length: F }, (_, i) => i === 3 || i === 4 ? 2 : 0), w: 2, h: 2, img: new Uint8Array(16).fill(200) }], F);
+  const png = await C.wrap(p), id = `d${C.hash64(p)}`;
+  const ok = await C.work({ kind: "decode", bytes: png, cid: id });
+  assert.equal(ok.result.sprites.length, 1);
+  const other = await C.wrap(C.packObject([{ m: Int16Array.from({ length: F }, (_, i) => i === 3 || i === 4 ? 2 : 0), w: 2, h: 2, img: new Uint8Array(16).fill(7) }], F));
+  await assert.rejects(C.work({ kind: "decode", bytes: other, cid: id }), /does not match/);   // a valid chunk under another name
+  await assert.rejects(C.work({ kind: "decode", bytes: png.subarray(0, png.length >> 1), cid: id }));   // cut off half way
+  // a damaged header asking for a huge image is refused before anything is inflated
+  const big = png.slice(); const dv = new DataView(big.buffer); dv.setUint32(16, 4096); dv.setUint32(20, 1 << 20);
+  await assert.rejects(C.unwrap(big), /too large|not a chunk/);
+});
+
+await test("manifest: entries name only codec ids (never a path); copies of a scene keep their files referenced", async () => {
+  globalThis.Hooks ??= { on() {}, once() {}, callAll() {}, call() {} };
+  const Store = await import("../scripts/destruction/store.mjs"), Pub = await import("../scripts/water/publish.mjs");
+  const M = { v: 2, dir: "worlds/w/moinen-maps/c/A", c: { s1: "abc:d0123456789abcd", s2: "abc:../../evil", s3: "nocolon", s4: 5, s5: "x:d0123456789abc" } };
+  assert.deepEqual(Store.entryOf(M, "s1"), { sig: "abc", id: "d0123456789abcd" });
+  for ( const k of ["s2", "s3", "s4", "s5", "missing"] ) assert.equal(Store.entryOf(M, k), null, k);
+  // scene B is a copy of A (its manifest still names A's folder): the GC's references include A's files through B too
+  const flags = (dir, c) => ({ flags: { "moinen-maps": { destruction: { v: 3, baked: { v: 2, dir, c } }, destructionObjects: { s1: { id: "s1", v: 2 } } } } });
+  const A = flags("worlds/w/moinen-maps/c/A", { s1: "x:d0000000000000a" }), B = flags("worlds/w/moinen-maps/c/A", { s1: "x:d0000000000000b" });
+  const ids = [A, B].flatMap((s) => Pub.chunkRecords(s)).flatMap((r) => r.ids.map((id) => `${r.dir}/${id}`));
+  assert.deepEqual(ids.sort(), ["worlds/w/moinen-maps/c/A/d0000000000000a", "worlds/w/moinen-maps/c/A/d0000000000000b"]);
+});
+
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);

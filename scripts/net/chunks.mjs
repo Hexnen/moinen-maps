@@ -94,6 +94,8 @@ export async function unwrap(bytes) {
     p += 12 + n;
   }
   if ( !w || !h || w > ROW ) throw new Error("not a chunk");
+  // a damaged header must not make the inflate allocate without bound (a stroke's chunk is a few hundred kB; 64 MB is far above)
+  if ( (w + 1) * h > 64 * 1048576 ) throw new Error("chunk too large");
   const z = new Uint8Array(zl); let o = 0; for ( const c of idat ) { z.set(c, o); o += c.length; }
   const raw = await inflate(z);
   if ( raw.length !== (w + 1) * h ) throw new Error("bad chunk size");

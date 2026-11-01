@@ -47,8 +47,9 @@ export const manifestOf = (S) => S?.baked?.v === 2 && S.baked.c && typeof S.bake
 export function entryOf(M, objId) {
   const v = M?.c?.[objId];
   if ( typeof v !== "string" ) return null;
-  const i = v.indexOf(":");
-  return i > 0 ? { sig: v.slice(0, i), id: v.slice(i + 1) } : null;
+  const i = v.indexOf(":"), id = v.slice(i + 1);
+  // the id names a file: only what the codec makes ("d" + 14 base-36), never a path
+  return i > 0 && /^d[0-9a-z]{14}$/.test(id) ? { sig: v.slice(0, i), id } : null;
 }
 
 /* ---------------------------------------------------------------- the strokes' paths, in their own flag key */
