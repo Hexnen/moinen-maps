@@ -672,13 +672,21 @@ export function gapCheck({ steps = [1.1, 1.25], n = 8, offsets = [0, 0.37, 0.71]
  * SEAMS: for every vertical / horizontal edge of a cache tile, the step-to-step mean deviation of the screen column (row) at that
  * edge from its two neighbours, against the same for a column 5 px away (ratio; > 1.5 is a seam). Returns { ratio, steps, seams, ... }.
  */
-export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = null, grid = 3, maxSteps = 140 } = {}) {
+export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = null, grid = 3, maxSteps = 140, beat = true } = {}) {
   const R = canvas.app.renderer, d = D(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect;
   region ??= { x: sr.x + sr.width * 0.3, y: sr.y + sr.height * 0.3, w: sr.width * 0.4, h: sr.height * 0.4 };
   const cx = region.x + region.w / 2, cy = region.y + region.h / 2;
+  // below the canvas's own minimum (another window size or DPR reaches it): the stage is scaled by hand round the same centre
+  const setZoom = (z) => {
+    canvas.pan({ x: cx, y: cy, scale: z });
+    if ( Math.abs(canvas.stage.scale.x - z) > 1e-6 ) { canvas.stage.scale.set(z, z); canvas.stage.pivot.set(cx, cy); canvas.stage.position.set(R.screen.width / 2, R.screen.height / 2); }
+  };
   canvas.pan({ x: cx, y: cy, scale: 0.01 }); step(1);
   to ??= canvas.stage.scale.x;                       // what the canvas allows
   const frame = () => { const mf = T.maxFPS; T.maxFPS = 0; T.update(performance.now()); T.maxFPS = mf; R.renderTexture.bind(null); return R.extract.pixels(); };
+  const BLK = 24, blocks = [];
+  for ( let y = region.y; y + BLK <= region.y + region.h; y += BLK ) for ( let x = region.x; x + BLK <= region.x + region.w; x += BLK ) blocks.push([x, y]);
+  let bp = null, bpp = null, bSum = 0, bN = 0;
   const pts = [];
   for ( let y = region.y; y < region.y + region.h; y += grid ) for ( let x = region.x; x < region.x + region.w; x += grid ) pts.push([x, y]);
   const k = R.resolution, PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
@@ -709,10 +717,27 @@ export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = nu
   const fxWas = d.fx.visible; d.fx.visible = false;
   try {
     for ( let z = from; z >= to - 1e-9 && steps < maxSteps; z -= stepSize, steps++ ) {
-      canvas.pan({ x: cx, y: cy, scale: Math.max(z, to) });
+      setZoom(Math.max(z, to));
       d.objs.visible = true; const full = frame();
       d.objs.visible = false; const map = frame(); d.objs.visible = true;
       const sD = sample(full), sM = sample(map);
+      // BEAT: the damage layer alone; per block of the region (fixed in the scene) its fine-detail energy (|pixel - mean of its 4
+      // neighbours|): resampled at a scale that drifts, that energy swells and sinks in bands that sweep over the picture (the
+      // waving); its second difference over steps, relative to its level
+      if ( beat ) {
+        const g = grab(), Mb = canvas.primary.worldTransform, BW = Math.round(R.screen.width), BH = Math.round(R.screen.height);
+        const Lb = (x, y) => { const q = (y * BW + x) * 4; return g[q] + g[q + 1] + g[q + 2]; };
+        const e = new Float32Array(blocks.length);
+        blocks.forEach(([bx, by], bi) => {
+          const x0 = Math.max(1, Math.round(Mb.a * bx + Mb.tx)), y0 = Math.max(1, Math.round(Mb.d * by + Mb.ty));
+          const x1 = Math.min(BW - 1, Math.round(Mb.a * (bx + BLK) + Mb.tx)), y1 = Math.min(BH - 1, Math.round(Mb.d * (by + BLK) + Mb.ty));
+          let s2 = 0, n2 = 0;
+          for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) { s2 += Math.abs(Lb(x, y) - (Lb(x - 1, y) + Lb(x + 1, y) + Lb(x, y - 1) + Lb(x, y + 1)) / 4); n2++; }
+          e[bi] = n2 ? s2 / n2 : 0;
+        });
+        if ( bp && bpp ) for ( let bi = 0; bi < e.length; bi++ ) { const lvl = (e[bi] + bp[bi] + bpp[bi]) / 3; if ( lvl > 2 ) { bSum += Math.abs(e[bi] - 2 * bp[bi] + bpp[bi]) / lvl; bN++; } }
+        bpp = bp; bp = e;
+      }
       if ( prevD ) for ( let i = 0; i < pts.length; i++ ) {
         if ( Number.isNaN(sD[i]) || Number.isNaN(prevD[i]) ) continue;
         if ( Math.abs(sD[i] - sM[i]) < 6 ) continue;      // no damage at this point
@@ -735,5 +760,5 @@ export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = nu
   } finally { d.objs.visible = true; d.fx.visible = fxWas; performance.now = real; }
   const seams = [...seam].map(([k2, v]) => [k2, +(v.dev / Math.max(1e-6, v.ctl)).toFixed(2)]).sort((a, b) => b[1] - a[1]).slice(0, 8);
   return { from, to: +to.toFixed(4), steps, points: nD, damageChange: +(eD / Math.max(1, nD)).toFixed(3), mapChange: +(eM / Math.max(1, nD)).toFixed(3),
-    ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
+    ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), swim: +(jD / Math.max(1, nJ)).toFixed(3), beat: +(bSum / Math.max(1, bN)).toFixed(4), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
 }

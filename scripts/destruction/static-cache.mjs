@@ -112,6 +112,8 @@ uniform sampler2D uTex;
 uniform vec2 uSize;
 uniform float uScale;
 uniform float uSharp;
+uniform float uSoft;
+uniform vec2 uSoftK;
 uniform float uAlpha;
 out vec4 fragColor;
 void main() {
@@ -121,10 +123,30 @@ void main() {
     // uSharp 0: plain bilinear (as the live layer below its NEAREST switch, and as the map); 1: crisp texels with one screen pixel
     // of smoothing at their edges
     vec2 f = mix(fr, clamp((fr - 0.5) * uScale + 0.5, 0.0, 1.0), uSharp);
-    fragColor = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0) * uAlpha;
+    vec4 c = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0);
+    if ( uSoft > 0.0 ) {
+      // while the zoom moves: four bilinear taps half a texel apart (a smooth kernel that looks the same at every phase of the
+      // texel grid, so no bands of sharp and blurred texels sweep over the art)
+      vec2 h = uSoftK.x / uSize;
+      vec4 s = 0.25 * (textureLod(uTex, vUV + vec2(-h.x, -h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, -h.y), 0.0)
+                     + textureLod(uTex, vUV + vec2(-h.x, h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, h.y), 0.0));
+      c = mix(c, s, uSoft);
+    }
+    fragColor = c * uAlpha;
   }
-  else fragColor = texture(uTex, vUV) * uAlpha;
+  // minified: the mipmaps, half a level softer while the zoom moves (the level blend no longer flips fine detail on and off)
+  else fragColor = texture(uTex, vUV, uSoft * uSoftK.y) * uAlpha;
 }`;
+/**
+ * ZOOM SOFTENING (0..1), shared by every tile: 1 while the canvas scale changes, back to 0 over SOFT_MS after it stops. Resampled at a
+ * scale that drifts, fine pixel art beats against the screen grid - bands of sharp and blurred texels sweep across it (the "waving"
+ * in the last phase of a zoom-out); a phase-independent kernel while it moves, crisp again when it stands still.
+ */
+let zoomSoft = 0;
+const SOFT_MS = 220;
+// the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
+// "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
+const SOFT_TAP = 0.75, SOFT_BIAS = 1.0;
 let sharpProgram = null;
 
 export class SharpTile extends PIXI.Container {
@@ -139,7 +161,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uAlpha: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAlpha: 1 });
     this.state = PIXI.State.for2d();
   }
 
@@ -161,6 +183,8 @@ export class SharpTile extends PIXI.Container {
     // live layer: dev/perf-harness wavingCheck) and the clamped edge of a tile showed as a line. So: plain bilinear up to 1.5 screen
     // px per texel (like the live layer and the map), crisp from 3 (where the live layer turns NEAREST), a smooth ramp between
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - 1.5) / 1.5));
+    un.uSoft = globalThis.CONFIG?.moinenMaps?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison)
+    const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
     renderer.state.set(this.state);
@@ -233,6 +257,11 @@ export class StaticCache {
 
   /** Once per frame, after the display's tick. */
   update() {
+    // the zoom softening: is the scale moving?
+    { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
+      if ( this.lastScale && Math.abs(sc / this.lastScale - 1) > 1e-5 ) this.movedAt = t;
+      this.lastScale = sc;
+      zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / SOFT_MS) : 0; }
     const d = this.d, kids = d.live.children, sr = canvas.dimensions?.sceneRect, R = canvas.app?.renderer;
     if ( !cacheEnabled() || !kids.length || !sr || !R ) return this.allLive("off");
     const U = this.units();
