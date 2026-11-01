@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 20;   // 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 21;   // 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -464,10 +464,10 @@ export function bake(I, cache = null) {
       const dist = new Float32Array(FN);
       for ( let i = 0; i < FN; i++ ) dist[i] = inside[i] ? 0 : 1e6;
       chamfer(dist, FW, FH);
-      const reach = 2 + 4 * jag;
+      const reach = 2 + 2.5 * jag;
       for ( let y = 2; y < FH - 2; y++ ) for ( let x = 2; x < FW - 2; x++ ) {
         const i = y * FW + x, d = dist[i];
-        if ( d < 2 || d > reach || h2((FX + x) >> 1, (FY + y) >> 1, seed + 305 + T) >= 0.075 * jag ) continue;
+        if ( d < 2 || d > reach || h2((FX + x) >> 1, (FY + y) >> 1, seed + 305 + T) >= 0.03 * jag ) continue;
         inside[i] = 1; sev[i] = 1.6; frag[i] = -1;
       }
     }
@@ -739,7 +739,7 @@ function bakeArea(A, P, seed, uid, jag) {
     const n = C.px.length;
     // a crater is never torn out right up to its edge: a band of heaved, broken plates (the lip) rings it, wider in a bigger crater
     const rimW = clamp(maxD * 0.34, 1.8, 7);
-    for ( const i of C.px ) if ( sev[i] > 2.4 && din[i] < rimW + (h2(i, 3, seed) - 0.5) * 1.5 ) sev[i] = Math.min(sev[i], 2.15);
+    for ( const i of C.px ) { const x = i % W, y = (i - x) / W; if ( sev[i] > 2.4 && din[i] < rimW * (0.45 + 1.1 * vnoise(x / 9, y / 9, seed + 77)) + (h2(i, 3, seed) - 0.5) * 1.5 ) sev[i] = Math.min(sev[i], 2.15); }
     sumS = 0; for ( const i of C.px ) sumS += sev[i];
     Object.assign(C, { x0, y0, x1, y1, cx: sx / n, cy: sy / n, maxD, meanSev: sumS / n, maxSev: 0, rimW });
     for ( const i of C.px ) if ( sev[i] > C.maxSev ) C.maxSev = sev[i];
@@ -992,7 +992,7 @@ function bakeArea(A, P, seed, uid, jag) {
         let dist;
         if ( type === T_COLLAPSE ) dist = -(dl * (0.3 + R() * 0.5));                         // falls in
         else if ( R() < 0.45 ) dist = (e.R - dl) * (0.15 + R() * 0.6);                       // comes to rest on the slope, leaning
-        else dist = ((e.R - dl) + 1 + Math.pow(R(), 1.6) * (e.R * 0.6 + 3)) * scatter;        // thrown out past the rim, most land close
+        else dist = Math.min(((e.R - dl) + 1 + Math.pow(R(), 1.6) * (e.R * 0.6 + 3)) * scatter, (e.R - dl) + 2 + e.R * 0.55 * scatter);   // thrown out past the rim, most land close; never further than about half the crater's reach past it
         if ( dist > 0 && C.cz?.fate?.thr ) dist *= C.cz.fate.thr;
         let lx = ccx + Math.cos(a) * dist, ly = ccy + Math.sin(a) * dist;
         if ( dist > 0 ) {
@@ -1204,7 +1204,7 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( path[path.length - 1] !== i ) path.push(i);
         if ( depth < (jag > 0.4 ? 2 : 1) && R() < 0.035 + 0.09 * jag ) walk(x, y, dx + (R() - 0.5) * 1.4, dy + (R() - 0.5) * 1.4, (len - k) * 0.45, depth + 1);
       }
-      if ( path.length ) C.cracks.push(path);
+      if ( path.length ) { path.depth = depth; C.cracks.push(path); }
     };
     for ( let k = 0; k < count; k++ ) {
       const i = rim[Math.floor(R() * rim.length)], x = i % W, y = (i - x) / W;
@@ -1411,7 +1411,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const k = Math.pow(1 - d / haloR, 1.4), n = vnoise(x / 2.2, y / 2.2, seed + 71) * 0.75 + h2(x, y, seed + 72) * 0.25;
       if ( type === T_SCORCH ) { if ( n < k * 0.95 ) put(x, y, n < k * 0.45 ? pal.char[0] : mix(mapAt(i), pal.char[1], 0.7)); }
       else if ( type === T_BLAST ) { if ( n < k * 0.75 ) put(x, y, mul(mapAt(i), n < k * 0.35 ? 0.5 : 0.7)); }
-      else if ( n < k * 0.4 ) put(x, y, pal.dust);
+      else if ( n < k * 0.22 && (x + y) % 3 ) put(x, y, mix(mapAt(i), pal.dust, 0.45));
     }
     // 3b. the cause's halo over the kind's
     if ( cHaloR > 0.5 ) for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
@@ -1433,11 +1433,15 @@ function bakeArea(A, P, seed, uid, jag) {
     // 5. hairline cracks: one ink pixel, with a lighter lip of the map's own colour up-left of it (a cause draws its own), then the
     // cause's specks
     if ( cz ) { kit.crackLines(C.cracks); if ( cz.fx ) kit.fx(C.px, (i) => C.keep.has(i)); }
-    else for ( const path of C.cracks ) for ( const i of path ) {
-      const x = i % W, y = (i - x) / W;
-      put(x, y, mix(mapAt(i), pal.ink, 0.85));
+    else for ( const path of C.cracks ) path.forEach((i, k) => {
+      // a hierarchy: a main fissure is two pixels wide at its root and tapers to one, branches are dark, the far ends of
+      // branches fade to hairlines
+      const x = i % W, y = (i - x) / W, f = k / path.length, dep = path.depth | 0;
+      const ink = dep ? (f < 0.6 ? 0.8 : 0.55) : f < 0.75 ? 0.9 : 0.7;
+      put(x, y, mix(mapAt(i), pal.ink, ink));
+      if ( !dep && f < 0.4 ) { const q = i + W; if ( y + 1 < H && !inside[q] ) put(x, y + 1, mix(mapAt(q), pal.ink, f < 0.2 ? 0.75 : 0.5)); }
       const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14));
-    }
+    });
     // 6. shard shadows: one flat colour, alpha ~100
     const shadowCol = mul(pal.ramp[0], 0.7);
     const shadowSeen = new Set();

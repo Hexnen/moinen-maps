@@ -54,7 +54,7 @@ check(culled > 0, `pieces landing past the edge are culled, not kept: ${culled}`
 const mid = Core.bake({ objects: [disc("mid", 0, MW / 2, MH / 2, 9)], mw: MW, mh: MH, K, aw: AW, ah: AH, seed: 5, params: MAX, map: MAP, mapKey: "edge" });
 check(mid.stats.culled === 0, `a stroke in the middle culls nothing (${mid.stats.culled})`);
 const near = chips.filter((c) => c.x < 2 || c.y < 2 || c.x > AW - 2 || c.y > AH - 2).length;
-check(near <= chips.length * 0.05, `chips within 2 art px of the border: ${near} of ${chips.length} (<= 5 %)`);
+check(near <= Math.max(2, chips.length * 0.05), `chips within 2 art px of the border: ${near} of ${chips.length} (<= 5 %, at least 2 allowed in a small sample)`);
 for ( const [name, dist] of [["top", (c) => c.y], ["bottom", (c) => AH - c.y], ["left", (c) => c.x], ["right", (c) => AW - c.x]] ) {
   const strip = chips.map(dist).filter((d) => d < 12);
   const bins = new Array(6).fill(0); for ( const d of strip ) bins[Math.max(0, Math.floor(d / 2))]++;
