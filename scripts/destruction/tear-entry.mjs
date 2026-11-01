@@ -104,7 +104,7 @@ export function tearPlace(display, p, t, it) {
   // lifts a little (curls) and is foreshortened while it is up
   const e = 1 - (1 - t) ** 4, up = Math.sin(Math.PI * t) * it.lift;
   const fl = t < 0.35 ? ((Math.floor(t * it.dur / (30 * it.k) + it.seed) & 1) ? 1 : -1) * 0.6 : 0;
-  s.alpha = clamp01(t * 2.5);
+  s.alpha = 1;   // a lip is opaque from its first frame (no ghost)
   s.position.set(o.x + Math.round(p.sx + dx * e + ux * fl) * ap, o.y + Math.round(p.sy + dy * e + uy * fl - up) * ap);
   s.scale.set(ap, ap * (1 - 0.1 * Math.sin(Math.PI * t)));
 }
@@ -126,15 +126,18 @@ export function tearFx(display, g, a, now, el) {
       display.spawn({ x: x + nx * sd, y: y + ny * sd, vx: nx * sd * (6 + Math.random() * 8) * pw + ux * 4, vy: ny * sd * 6 * pw - 4, fall: 28, life: 320 + Math.random() * 160, color: Math.random() < 0.6 ? lite : dark, drag: 2.4 });
       // a fibre stretched across snaps: two pale flecks flicked apart
       if ( Math.random() < 0.4 ) for ( const s of [-1, 1] ) display.spawn({ x: x + nx * s, y: y + ny * s, vx: nx * s * 12 * pw, vy: ny * s * 12 * pw - 2, fall: 18, life: 200, color: fib, drag: 4 });
+      // now and then a clod of the surface is flung off the lip (a bigger piece on a higher arc)
+      if ( Math.random() < 0.18 ) display.spawn({ x: x + nx * sd * 2, y: y + ny * sd * 2, vx: nx * sd * (10 + Math.random() * 10) * pw, vy: ny * sd * 8 * pw - 9, fall: 40, life: 420 + Math.random() * 160, color: Math.random() < 0.5 ? lite : dark, drag: 1.6, size: Math.random() < 0.5 ? 3 : 2 });
     }
   }
   T.tips.forEach((tp, i) => once(`tip${i}`, tp.at, () => {
-    for ( let q = 0; q < Math.round(6 * pw); q++ ) { const an = Math.random() * 6.28, sp = 6 + Math.random() * 10; display.spawn({ x: tp.x, y: tp.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8 - 3, fall: 30, life: 300 + Math.random() * 120, color: q & 1 ? lite : dark, drag: 2.6 }); }
+    // the tip snaps: a burst of crumbs and a few clods
+    for ( let q = 0; q < Math.round(11 * pw); q++ ) { const an = Math.random() * 6.28, sp = 6 + Math.random() * 14; display.spawn({ x: tp.x, y: tp.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp * 0.8 - 4, fall: 32, life: 320 + Math.random() * 180, color: q & 1 ? lite : dark, drag: 2.4, size: q < 3 ? 2 : 1 }); }
     display.spawn({ x: tp.x, y: tp.y, vx: 0, vy: 0, rise: -3, life: 600, color: 0xcfc6b8, alpha: 0.6, size: 2 });
   }));
   // the settle: a little dust lifts off the opened rip
   once("settle", a.delay + a.reveal + a.band * 0.5, () => {
-    for ( let q = 0; q < 4; q++ ) { const h = T.heads(a.delay + Math.random() * (el - a.delay))[0]; if ( h ) display.spawn({ x: h[0], y: h[1], vx: (Math.random() - 0.5) * 3, vy: 0, rise: -2.5, life: 700, color: 0xcfc6b8, alpha: 0.55 }); }
+    for ( let q = 0; q < 7; q++ ) { const h = T.heads(a.delay + Math.random() * (el - a.delay))[0]; if ( h ) display.spawn({ x: h[0], y: h[1], vx: (Math.random() - 0.5) * 3, vy: 0, rise: -2.5, life: 650 + Math.random() * 250, color: 0xcfc6b8, alpha: 0.5, size: Math.random() < 0.5 ? 3 : 2 }); }
   });
 }
 
