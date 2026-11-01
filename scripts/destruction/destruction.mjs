@@ -10,6 +10,8 @@ import * as Reveal from "../net/reveal.mjs";
 import * as Policy from "./bake-policy.mjs";
 /** This client's loop breaker (bake-policy.mjs): the same strokes baked or published again and again stop it, with a reason. */
 const breaker = new Policy.Breaker();
+/** The last failed bake: { key, n, at } (its automatic retries back off). */
+let bakeFail = null;
 import { seedKnown } from "../water/publish.mjs";
 import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
@@ -378,6 +380,10 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     const why = taken.length ? "edit" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
     Trace.event("bake", { why, n: toBake.length, of: want.length });
     if ( !taken.length ) console.warn(` | destruction: baking  of  stroke(s) here ()`);
+    if ( !taken.length && !force && bakeFail?.key === key ) {
+      const wait = Math.min(8 * 60000, 15000 * 2 ** (bakeFail.n - 1)) - (Date.now() - bakeFail.at);
+      if ( wait > 0 ) { Trace.event("bake-backoff", { wait }); clearTimeout(bakeTimer); bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, wait); return; }
+    }
     if ( !taken.length && !force && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
     Object.assign(status, { baking: true, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length }); tell("status");
     if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
@@ -436,6 +442,9 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     } catch ( err ) {
       if ( my !== gen ) return;
       console.error(`${MODULE_ID} | destruction bake`, err);
+      // a failing bake is tried again on its own only after a growing pause (15 s doubling to 8 min), never back to back
+      bakeFail = { key, n: (bakeFail?.key === key ? bakeFail.n : 0) + 1, at: Date.now() };
+      Trace.event("bake-failed", { n: bakeFail.n, error: String(err?.message ?? err).slice(0, 160) });
       Object.assign(status, { baking: false, error: String(err?.message ?? err) }); tell("status");
       return;
     }
@@ -901,7 +910,7 @@ export const destructionApi = {
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
-  bakeNow: () => { breaker.reset(); Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
+  bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
