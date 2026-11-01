@@ -43,7 +43,8 @@ export const BAKE_VERSIONS = {
   // 35 changes a tear's SHAPE (asymmetric opening, flaps torn off, inset from the stroke's border): no compat, re-baked at load
   35: { compat: null, note: "tears: asymmetric opening, flaps that curl or tear off, snapping fibres" },
   // 36 changes a cave-in's SHAPE (an organic pit, a trench along a followed stroke): no compat, re-baked at load
-  36: { compat: null, note: "collapse: organic pit or trench, rings of tilted lit slabs, layered wall and void" }
+  36: { compat: null, note: "collapse: organic pit or trench, rings of tilted lit slabs, layered wall and void" },
+  37: { compat: 36, note: "cracks readable at max settings (milder warp, fewer tiny plates)" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
