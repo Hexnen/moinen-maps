@@ -23,7 +23,8 @@ const FIBRE = [0xa8c870, 0xd8c8a8, 0xd8d4cc, 0xf0d0a0, 0xf0e2c0, 0xffffff, 0xd8e
  * puncture at the base's epicentre, running both ways; else the area's axis through the puncture.
  */
 export function tearClock(info, { pathFront, spine, k }) {
-  const msPx = 2.4 * k, delay = 70 * k, px = info.ex, py = info.ey;
+  let msPx = 2.4 * k;
+  const delay = 70 * k, px = info.ex, py = info.ey;
   const fin = (D, arrive, heads, tips, punct) => ({ delay, reveal: D, band: Math.max(70 * k, D * 0.16), arrive, heads, tips, punct, msPx });
   if ( pathFront ) {
     const P = pathFront, end = P.pts[P.pts.length - 1];
@@ -44,6 +45,8 @@ export function tearClock(info, { pathFront, spine, k }) {
       return [Math.sqrt(bd), bc];
     };
     const cp = near(px, py)[1];
+    // a rip that forms, not one that switches on: its front runs out to the farther tip in about a third of a second, whatever its length
+    msPx = Math.min(10, Math.max(2.4, 340 / Math.max(1, cp, len - cp))) * k;
     const pointAt = (c) => {
       for ( let i = 1; i < pts.length; i++ ) if ( cum[i] >= c ) {
         const f = (c - cum[i - 1]) / ((cum[i] - cum[i - 1]) || 1), dx = pts[i][0] - pts[i - 1][0], dy = pts[i][1] - pts[i - 1][1];
@@ -62,6 +65,7 @@ export function tearClock(info, { pathFront, spine, k }) {
   const ux = Math.cos(info.axis), uy = Math.sin(info.axis), r = info.rect;
   const proj = [[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => (x - px) * ux + (y - py) * uy);
   const half = Math.max(4, info.len / 2), lo = Math.max(Math.min(...proj), -half * 1.6), hi = Math.min(Math.max(...proj), half * 1.6);
+  msPx = Math.min(10, Math.max(2.4, 340 / Math.max(1, -lo, hi))) * k;
   const D = Math.max(-lo, hi) * msPx;
   return fin(D, (x, y) => { const t = (x - px) * ux + (y - py) * uy, n = Math.abs((y - py) * ux - (x - px) * uy); return delay + Math.abs(t) * msPx + n * 2 * k; },
     (el) => { const u = (el - delay) / msPx, out = []; if ( u < 0 ) return out;
