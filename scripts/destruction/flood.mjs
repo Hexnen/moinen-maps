@@ -180,7 +180,7 @@ function framePixels(g, frame) {
 function readArea(g) {
   const cf = g.coverFrame; if ( !cf?.tex?.frame ) return null;
   const fr = cf.tex.frame, cw = fr.width, ch = fr.height, cx = cf.x, cy = cf.y, N = cw * ch;
-  const cov = framePixels(g, fr), baseFr = (g.anim?.rev?.frame ?? g.baseSpr?.texture)?.frame;
+  const cov = framePixels(g, fr), baseFr = (g.anim?.rev?.frame ?? g.baseTex ?? g.baseSpr?.texture)?.frame;
   const base = g.anim?.rev?.data ?? framePixels(g, baseFr);
   if ( !cov || !base ) return null;
   const info = g.info, bw = info.w, bh = info.h;

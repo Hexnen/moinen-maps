@@ -452,7 +452,7 @@ async function prepareReveal(my) {
     }
   }
   Trace.markOnce("damage:made", { ms: Math.round(performance.now() - T) });
-  await Reveal.upload(visible.map((g) => g.tex));
+  await Reveal.upload(visible.flatMap((g) => display.texturesOf(g)));
   Trace.markOnce("damage:uploaded", { ms: Math.round(performance.now() - T) });
   // the flooded holes fill with their own water loop a moment after their area is in: wait for it while the reveal waits
   const until = performance.now() + 1500;

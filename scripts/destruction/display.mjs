@@ -3,7 +3,7 @@ import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
-import { StaticCache } from "./static-cache.mjs";
+import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
 
 /** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
@@ -120,12 +120,27 @@ function makeShapes() {
 
 /** Shelf-pack rectangles (tallest first) with a gutter; returns { W, H, pos }. */
 function pack(rects) {
+  // PERF: the first rect (an area's base, by far the largest) alone at the top, the rest in shelves under it, as wide as the base or a
+  // square of their own area: shelves the base's height beside it left ~2/3 of every atlas empty (76 Mpx of atlases for 24 Mpx of
+  // bases on the "map" scene, in the JS heap and on the GPU)
+  if ( rects.length > 1 && !globalThis.CONFIG?.moinenMaps?.squareAtlas ) {
+    const b = rects[0], rest = rects.slice(1);
+    const area = rest.reduce((a, r) => a + (r.w + PAD) * (r.h + PAD), 0);
+    const W = Math.max(b.w + PAD * 2, Math.ceil(Math.sqrt(area * 1.15)), ...rest.map((r) => r.w + PAD * 2));
+    const sub = shelves(rest, W, b.h + PAD * 2);
+    return { W, H: Math.max(b.h + PAD * 2, sub.H), pos: [{ x: PAD, y: PAD }, ...sub.pos] };
+  }
   const area = rects.reduce((a, r) => a + (r.w + PAD) * (r.h + PAD), 0);
   let W = 64; while ( W * W < area * 1.3 && W < 4096 ) W *= 2;
   W = Math.max(W, ...rects.map((r) => r.w + PAD * 2));
+  return shelves(rects, W, PAD);
+}
+
+/** Shelf-pack rectangles (tallest first) in width W from y0. */
+function shelves(rects, W, y0) {
   const order = rects.map((r, i) => i).sort((a, b) => rects[b].h - rects[a].h || rects[b].w - rects[a].w);
   const pos = new Array(rects.length);
-  let x = PAD, y = PAD, rowH = 0;
+  let x = PAD, y = y0, rowH = 0;
   for ( const i of order ) {
     const r = rects[i];
     if ( x + r.w + PAD > W ) { x = PAD; y += rowH + PAD; rowH = 0; }
@@ -152,6 +167,7 @@ export class DestructionDisplay {
     this.pool = [];                // spare particle sprites
     this.idle = { on: true, who: "all" };
     this.clocks = [];              // per-pixel entry clocks still to build (clockSlice)
+    this.spritePool = [];          // shard sprites given back by areas flattened again (materialize takes them first)
     this.look = { entry: true, speed: 1, power: 1 };
     this.filter = NEAREST;
     this.stats = { frameMs: 0, sprites: 0, groups: 0, uploads: 0, entries: 0 };
@@ -280,10 +296,84 @@ export class DestructionDisplay {
     cont.cullArea = cull;
     // the cover (this object's own pixels) as a frame of the same atlas: the mask of its map patch
     const coverFrame = r.cover >= 0 ? { tex: frame(coverIdx), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
-    const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
+    const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, baseTex: baseSpr.texture, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
     if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
-    this.materialize(g, 300);
+    if ( !this.flatten(g) ) this.materialize(g, 300);
     return g;
+  }
+
+  /**
+   * PERF: a settled area as ONE sprite. Its shards never move once settled, so instead of making a sprite per shard (60k on a busy
+   * scene: ~3 s of a load, ~60 MB of objects, and every live frame walked them) the base and the shards at rest are drawn once, by
+   * the GPU in their own order and sampling, into a texture of the area's rectangle at its art resolution; the atlas is then dropped
+   * from the GPU (kept in memory: an entry, a patch's cover read it again). The shard sprites are made only when the area enters
+   * (unflatten). Not for an area with a cause light (its bloom lies between the ruin and the shards).
+   * `CONFIG.moinenMaps.noFlatten = true`: shards as sprites (A/B).
+   */
+  flatten(g) {
+    const R = canvas.app?.renderer;
+    if ( !R || g.flat || g.light || globalThis.CONFIG?.moinenMaps?.noFlatten ) return false;
+    const ap = this.ap, o = this.origin, r = g.info.rect, w = Math.max(1, r.x1 - r.x0), h = Math.max(1, r.y1 - r.y0);
+    if ( w * h > 16e6 || !g.frame ) return false;
+    const tmp = this._flatTmp ??= new PIXI.Container(), pool = this._flatPool ??= [];
+    const base = this._flatBase ??= new PIXI.Sprite();
+    base.texture = g.baseTex; base.anchor.set(0); base.scale.set(ap); base.position.set(o.x + g.info.x * ap, o.y + g.info.y * ap);
+    tmp.addChild(base);
+    const texs = [];
+    for ( let k = 0; k < g.pieces.length; k++ ) {
+      const p = g.pieces[k], s = pool[k] ??= new PIXI.Sprite(), t = g.frame(p.frame);
+      texs.push(t); s.texture = t; s.anchor.set(0.5); s.scale.set(ap); s.rotation = 0; s.alpha = 1; s.tint = 0xFFFFFF; s.visible = true;
+      s.position.set(o.x + p.fx * ap, o.y + p.fy * ap);                      // place(p, 2, null): at rest
+      tmp.addChild(s);
+    }
+    const rt = PIXI.RenderTexture.create({ width: w * ap, height: h * ap, resolution: 1 / ap, scaleMode: this.filter === NEAREST ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR });
+    R.render(tmp, { renderTexture: rt, transform: new PIXI.Matrix(1, 0, 0, 1, -(o.x + r.x0 * ap), -(o.y + r.y0 * ap)), clear: true });
+    mipmaps(R, rt);
+    tmp.removeChildren();
+    for ( const t of texs ) t.destroy(false);
+    this.release(g);
+    g.flatTex = rt; g.flat = true; g.made = g.pieces.length; g.cont._mmv = (g.cont._mmv | 0) + 1;
+    g.baseSpr.texture = rt; g.baseSpr.scale.set(1); g.baseSpr.position.set(o.x + r.x0 * ap, o.y + r.y0 * ap);
+    g.tex.dispose();                                                          // off the GPU until an entry needs it
+    this.stats.flat = (this.stats.flat ?? 0) + 1;
+    return true;
+  }
+
+  /** An area's shard sprites back to the pool (it is flattened). */
+  release(g) {
+    for ( const p of g.pieces ) {
+      const s = p.spr; if ( !s ) continue;
+      p.spr = null;
+      if ( s.destroyed ) continue;
+      s.texture?.destroy(false); s.texture = PIXI.Texture.EMPTY;
+      s.parent?.removeChild(s);
+      if ( this.spritePool.length < 80000 ) this.spritePool.push(s); else s.destroy();
+    }
+  }
+
+  /** Areas whose entry ended a while ago (nothing moves in them, nothing held under them) go back to one sprite each. */
+  reflatten(now) {
+    for ( const g of this.order ) {
+      if ( !g.reflatAt || now < g.reflatAt ) continue;
+      if ( g.anim || g.fade || g.made < g.pieces.length || g.cont.alpha < 1 ) { g.reflatAt = now + 300; continue; }
+      g.reflatAt = 0;
+      if ( this.dying.some((u) => u.heldBy === g) ) { g.reflatAt = now + 300; continue; }
+      this.flatten(g);
+    }
+  }
+
+  /** The base textures a group draws now (a flattened one: its flat texture and cover; else its atlas and cover), for an upload ahead. */
+  texturesOf(g) {
+    return [g.flat ? g.flatTex?.baseTexture : g.tex, g.coverTex?.baseTexture].filter(Boolean);
+  }
+
+  /** Back to base + shard sprites (an entry): the shards are made a few hundred per frame, as on a load. */
+  unflatten(g) {
+    if ( !g.flat ) return;
+    const ap = this.ap, o = this.origin;
+    g.baseSpr.texture = g.baseTex; g.baseSpr.scale.set(ap); g.baseSpr.position.set(o.x + g.info.x * ap, o.y + g.info.y * ap);
+    g.flatTex?.destroy(true); g.flatTex = null; g.flat = false; g.made = 0; g.cont._mmv = (g.cont._mmv | 0) + 1;
+    this.stats.unflat = (this.stats.unflat ?? 0) + 1;
   }
 
   /** Make up to `n` more shard sprites of a group (in order, so the drawing order stays); returns how many were made. */
@@ -291,7 +381,9 @@ export class DestructionDisplay {
     const ap = this.ap, org = this.origin, end = Math.min(g.pieces.length, g.made + n), start = g.made;
     for ( ; g.made < end; g.made++ ) {
       const p = g.pieces[g.made];
-      const spr = p.spr = new PIXI.Sprite(g.frame(p.frame));
+      // pooled: an area flattened again after its entry gives its shard sprites back (flatten / release)
+      const spr = p.spr = this.spritePool.pop() ?? new PIXI.Sprite();
+      spr.texture = g.frame(p.frame); spr.visible = true; spr.alpha = 1; spr.tint = 0xFFFFFF; spr.rotation = 0;
       spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
       spr.position.set(org.x + p.fx * ap, org.y + p.fy * ap);
       if ( p.fading ) spr.alpha = 0;
@@ -299,7 +391,6 @@ export class DestructionDisplay {
       const it = g.anim?.byPiece?.get(p);
       if ( it ) this.place(p, Math.max(0, (performance.now() - it.t0) / it.dur), it, g.info.type);
     }
-    if ( g.made >= g.pieces.length ) g.frame = null;
     return g.made - start;
   }
 
@@ -328,11 +419,26 @@ export class DestructionDisplay {
   addPatch(g) {
     const ms = this.mapSprite(); if ( !ms ) return;
     const c = g.coverFrame, ap = this.ap, o = this.origin;
-    const mask = new PIXI.Sprite(c.tex);
+    const mask = new PIXI.Sprite(this.coverTexture(g));
     mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(o.x + c.x * ap, o.y + c.y * ap);
     const patch = maskedMap(ms, mask);
     g.patch = patch;
     g.cont.addChildAt(patch, 0);
+  }
+
+  /**
+   * The cover as its own small texture (a copy of its frame of the atlas, same sampling): a patch drawn from the atlas frame kept the
+   * whole atlas on the GPU for a few pixels of mask (PERF, see flatten).
+   */
+  coverTexture(g) {
+    const fr = g.coverFrame.tex.frame, data = g.tex?.resource?.data, TW = g.tex?.width;
+    if ( !data || !TW ) return g.coverFrame.tex;
+    const w = fr.width, h = fr.height, buf = new Uint8Array(w * h * 4);
+    for ( let y = 0; y < h; y++ ) buf.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + w) * 4), y * w * 4);
+    const bt = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: w, height: h }), {
+      width: w, height: h, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.ON, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+      format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
+    return g.coverTex = new PIXI.Texture(bt);
   }
 
   /** An erase stroke: the plain map over its pixels (art-pixel steps of its mask), no bake. */
@@ -459,7 +565,9 @@ export class DestructionDisplay {
     g.dead = true;
     this.endAnim(g);
     for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
-    g.baseSpr?.texture?.destroy(false);
+    if ( g.flatTex ) { g.flatTex.destroy(true); g.flatTex = null; }
+    if ( g.coverTex ) { g.coverTex.destroy(true); g.coverTex = null; }
+    g.baseTex?.destroy(false);
     g.coverFrame?.tex.destroy(false);
     Cause.dropLight(this, g);
     if ( g.patch && !g.patch.destroyed ) g.patch.destroy({ children: true });
@@ -487,6 +595,9 @@ export class DestructionDisplay {
     const now = performance.now();
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
     if ( reducedMotion() ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
+    if ( g.flat ) this.unflatten(g);
+    // an older look held under this one: its shards are caught by the front (tick), so they must exist
+    for ( const u of under ) if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); }
     // the cause tunes the clock on top of the kind's (cause-fx.mjs): rot creeps, lightning strikes, arcane spirals
     const CL = Cause.causeLook(g.info.cause);
     const info = g.info, L = LOOK[info.type] ?? LOOK.blast, k = (1 / (this.look.speed || 1)) * (CL?.slow ?? 1), pw = this.look.power;
@@ -578,7 +689,7 @@ export class DestructionDisplay {
 
   /** The ruin's own pixels (its frame of the group's atlas buffer). */
   baseOf(g) {
-    const data = g.tex?.resource?.data, fr = (g.anim?.rev?.frame ?? g.baseSpr?.texture)?.frame, W = g.tex?.width;
+    const data = g.tex?.resource?.data, fr = (g.anim?.rev?.frame ?? g.baseTex ?? g.baseSpr?.texture)?.frame, W = g.tex?.width;
     if ( !data || !fr || !W ) return null;
     const out = new Uint8Array(fr.width * fr.height * 4);
     for ( let y = 0; y < fr.height; y++ ) out.set(data.subarray(((fr.y + y) * W + fr.x) * 4, ((fr.y + y) * W + fr.x + fr.width) * 4), y * fr.width * 4);
@@ -694,6 +805,7 @@ export class DestructionDisplay {
   endAnim(g) {
     const a = g.anim; if ( !a ) return;
     g.anim = null;
+    if ( !g.dead ) g.reflatAt = performance.now() + 900;    // back to one sprite after the cache has settled (static-cache SETTLE_MS)
     if ( a.rev ) {
       // the ruin in full: back to its frame of the atlas
       if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); }
@@ -855,11 +967,12 @@ export class DestructionDisplay {
     // flips between 1 and 2 screen pixels), so it is LINEAR + mipmaps there
     const z = canvas.stage.scale.x * this.ap;
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
-    if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) g.tex.scaleMode = want; }
+    if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
     const vw = this.view();
     let budget = 350;
     for ( const g of this.order ) if ( budget > 0 && g.made < g.pieces.length ) budget -= this.materialize(g, budget);
     if ( this.clocks.length ) this.clockSlice(6, vw);
+    this.reflatten(t0);
     for ( const g of this.order ) {
       if ( g.fade ) this.applyFade(g, t0);
       if ( g.anim ) this.animate(g, t0, vw);
@@ -1114,6 +1227,8 @@ export class DestructionDisplay {
     Cause.disposeLights(this);
     this.clear();
     this.cache?.destroy(); this.cache = null;
+    for ( const sp of [...this.spritePool, ...(this._flatPool ?? []), this._flatBase] ) if ( sp && !sp.destroyed ) sp.destroy();
+    this.spritePool = []; this._flatPool = null; this._flatBase = null; this._flatTmp?.destroy(); this._flatTmp = null;
     for ( const c of [this.objs, this.fx] ) if ( !c.destroyed ) c.destroy({ children: true });
   }
 }

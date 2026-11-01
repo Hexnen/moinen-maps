@@ -66,7 +66,7 @@ export function cacheRes(sceneW, sceneH, zoomedIn = false) {
  * Mip levels for a band: zoomed out the live atlases are sampled with mipmaps; a band without them aliases (5% of the pixels off by
  * more than 60 at zoom 0.5). PIXI 7 does not build them for render textures, so: generate them by hand once after the band is drawn.
  */
-function mipmaps(R, rt) {
+export function mipmaps(R, rt) {
   const gl = R.gl; if ( !gl ) return;
   R.renderTexture.bind(null);
   R.texture.bind(rt.baseTexture, 0);
@@ -266,7 +266,7 @@ export class StaticCache {
     for ( let k = 0; k < plan.length; k++ ) {
       const p = plan[k];
       if ( p ) {
-        const key = `${p.L}|${eff}|${mips}|${d.filter}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}`).join(",")}`;
+        const key = `${p.L}|${eff}|${mips}|${d.filter}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
         let band = old.get(key);
         if ( band && band.tiles.every((t) => t.rt.valid && !t.rt.baseTexture.destroyed) ) keep.add(band);
         else {
