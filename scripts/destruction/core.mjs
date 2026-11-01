@@ -21,7 +21,7 @@
 import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 
-export const CORE_VERSION = 28;   // 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 29;   // 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -1233,7 +1233,7 @@ function bakeArea(A, P, seed, uid, jag) {
       for ( const q of C.epi ) { const d = (q.x - x) ** 2 + (q.y - y) ** 2; if ( d < bd ) { bd = d; e = q; } }
       const dx = x - e.x, dy = y - e.y, dl = Math.hypot(dx, dy) || 1;
       // never as far as the window's edge (a crack cut off there reads as a straight line)
-      walk(x, y, dx / dl, dy / dl, Math.min(3 + R() * (C.maxD * 0.9 + 4) * (C.maxSev / 3), Math.max(2, roomOf(C) - 2)), 0);
+      walk(x, y, dx / dl, dy / dl, Math.min((3 + R() * (C.maxD * 0.9 + 4) * (C.maxSev / 3)) * (C.type === T_COLLAPSE ? 0.45 : 1), Math.max(2, roomOf(C) - 2)), 0);
     }
     for ( const path of C.cracks ) for ( const i of path ) {
       const x = i % W, y = (i - x) / W, r = C.rect;
@@ -1478,6 +1478,15 @@ function bakeArea(A, P, seed, uid, jag) {
       const x = s.shadow[k], y = s.shadow[k + 1], key = y * 65536 + x;
       if ( shadowSeen.has(key) ) continue; shadowSeen.add(key);
       put(x, y, shadowCol, 100);
+    }
+    // 7. the torn lip's ink, broken and of varying weight (never an even inked lasso round the hole); cracks keep their full ink
+    if ( !C.cz && type !== T_CRACKS ) for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
+      const i = y * W + x; if ( inside[i] || dout[i] > 1.01 ) continue;
+      let s = 0;
+      for ( const j of [i - 1, i + 1, i - W, i + W] ) if ( j >= 0 && j < N && own[j] === 1 && !C.keep.has(j) ) s = Math.max(s, sev[j]);
+      if ( s < 1.6 ) continue;
+      const w = vnoise(x / 4.5, y / 4.5, seed + 91) + (h2(x, y, seed + 92) - 0.5) * 0.25;
+      if ( w <= 0.62 ) { const o = ((y - r.y0) * bw + (x - r.x0)) * 4; if ( w > 0.34 ) { const c = mix(mapAt(i), pal.ink, 0.6); img[o] = c[0]; img[o + 1] = c[1]; img[o + 2] = c[2]; } else if ( w > 0.2 ) { const c = mix(mapAt(i), pal.ink, 0.3); img[o] = c[0]; img[o + 1] = c[1]; img[o + 2] = c[2]; } else img[o + 3] = 0; }
     }
     C.base = { x: r.x0, y: r.y0, w: bw, h: bh, data: img };
     if ( glowA && glowA.some((a) => a) ) C.light = softLight(glowA, glowC, bw, bh, r.x0, r.y0, cz.glowK ?? 1);
