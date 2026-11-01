@@ -33,7 +33,8 @@ export function chunkMask(seed, size) {
   // a degenerate polygon (a sliver) is drawn again with the next seed: a chunk is never a stick
   for ( let k = 0; k < 8; k++ ) {
     const mk = mask0(seed + k * 7919, size);
-    if ( mk.w >= 2 && mk.h >= 2 && maskAspect(mk) <= 2.2 ) return mk;
+    const lo = Math.max(2, Math.round(size * 0.45));   // (and never much smaller than asked)
+    if ( Math.min(mk.w, mk.h) >= lo && Math.max(mk.w, mk.h) >= size - 1 && maskAspect(mk) <= 2.2 ) return mk;
   }
   return mask0(seed, 3);
 }
@@ -43,11 +44,12 @@ function mask0(seed, size) {
     rows.forEach((r, y) => [...r].forEach((c, x) => { m[y * w + x] = c === "#" ? 1 : 0; }));
     return { w, h, m };
   }
-  const n = 3 + Math.floor(hashD(seed, 2, 801) * 4), asp = 0.55 + 0.45 * hashD(seed, 3, 801), flip = hashD(seed, 4, 801) < 0.5;
+  // (mostly 3-5 corners and a wide radius jitter: angular shards and clods, not lozenges)
+  const n = 3 + Math.floor(Math.pow(hashD(seed, 2, 801), 1.3) * 4), asp = 0.55 + 0.45 * hashD(seed, 3, 801), flip = hashD(seed, 4, 801) < 0.5;
   const rx = size / 2 * (flip ? asp : 1), ry = size / 2 * (flip ? 1 : asp), a0 = hashD(seed, 5, 801) * Math.PI * 2;
   const pts = [];
   for ( let i = 0; i < n; i++ ) {
-    const a = a0 + (i + (hashD(seed, i, 802) - 0.5) * 0.55) / n * Math.PI * 2, r = 0.78 + 0.32 * hashD(seed, i, 803);
+    const a = a0 + (i + (hashD(seed, i, 802) - 0.5) * 0.55) / n * Math.PI * 2, r = 0.6 + 0.5 * hashD(seed, i, 803);
     pts.push([Math.cos(a) * rx * r * (n === 3 ? 1.4 : 1.2), Math.sin(a) * ry * r * (n === 3 ? 1.4 : 1.2)]);
   }
   const inside = (x, y) => {
@@ -86,16 +88,17 @@ export function maskAspect(mk) {
 }
 
 /**
- * Light the chunk: a pixel whose top or left neighbour lies outside it is its LIT edge (lighter), one whose bottom or right neighbour
+ * Light the chunk: a pixel whose top or left neighbour lies outside it is its LIT edge (brighter, same hue), one whose bottom or right neighbour
  * lies outside is its SHADED rim (darker); a pixel on both stays as it is. `rgba` w*h*4 in place.
  */
-export function shadeChunk(rgba, mk, { lit = 0.3, dark = 0.4 } = {}) {
+export function shadeChunk(rgba, mk, { lit = 1.24, dark = 0.34 } = {}) {
   const { w, h, m } = mk, out = (x, y) => x < 0 || y < 0 || x >= w || y >= h || !m[y * w + x];
   const src = new Uint8Array(rgba);
   for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
     if ( !m[y * w + x] ) continue;
     const L = out(x, y - 1) || out(x - 1, y), D = out(x, y + 1) || out(x + 1, y), q = (y * w + x) * 4;
-    if ( L && !D ) for ( let c = 0; c < 3; c++ ) rgba[q + c] = Math.round(src[q + c] + (255 - src[q + c]) * lit);
+    // (lit by scaling, keeping the hue: mixing towards white greyed small chunks into pale beetles)
+    if ( L && !D ) for ( let c = 0; c < 3; c++ ) rgba[q + c] = Math.min(255, Math.round(src[q + c] * lit + 8));
     else if ( D && !L ) for ( let c = 0; c < 3; c++ ) rgba[q + c] = Math.round(src[q + c] * (1 - dark));
   }
   return rgba;
@@ -196,7 +199,7 @@ export function outlineChunk(mk, px) {
       const v = out[j * 4] + out[j * 4 + 1] + out[j * 4 + 2]; if ( v < bv ) { bv = v; best = j; }
     }
     if ( best < 0 ) continue;
-    for ( let c = 0; c < 3; c++ ) out[q * 4 + c] = Math.round(out[best * 4 + c] * 0.4);
+    for ( let c = 0; c < 3; c++ ) out[q * 4 + c] = Math.round(out[best * 4 + c] * 0.5);
     out[q * 4 + 3] = 255; m[q] = 2;
   }
   for ( let i = 0; i < m.length; i++ ) if ( m[i] ) m[i] = 1;

@@ -1346,7 +1346,7 @@ export class DestructionDisplay {
       }
     }
     // the settle beat: when the ruin is in, a last soft puff of dust round the rim (the debris landing), then stillness
-    if ( !a.tear && (type === "blast" || type === "collapse" || type === "scorch" || type === "cracks") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
+    if ( !a.tear && !a.coll && (type === "blast" || type === "collapse" || type === "scorch" || type === "cracks") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
       const n = Math.round(Math.min(10, 4 + R / 4) * pw * (type === "cracks" ? 0.5 : 1)), col = type === "scorch" ? 0x5a524c : this.tone(g, 1, 0xc9bfae);
       for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, size: Math.random() < 0.5 ? 3 : 2 }); }
     });
