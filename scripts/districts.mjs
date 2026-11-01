@@ -13,6 +13,7 @@ import { swatchesHtml, wireSwatches, activeToolName } from "./tools.mjs";
 import { PIN_COLORS } from "./config.mjs";
 import { attrsOf, attrEditorHtml, wireAttrEditor, collectAttrs, cleanAttrs, writeAttrs, showCard, moveCard, hideCard, destroyCard, inkFor, fmt, pruneStore } from "./attrs.mjs";
 import { dotsCfg, paintDots, dotsFieldsHtml, readDotsValues, wireDotsFields } from "./dots.mjs";
+import { lightsSync, lightsCfg, lightFieldsHtml, readLightValues, wireLightFields, previewWhileOpen } from "./lights.mjs";
 import { labelCfg, ensureFont, buildLabel, labelFieldsHtml, readLabelValues, wireFontPreview, fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -471,6 +472,7 @@ function runDrafts() {
   draftRaf = draftTimer = 0; lastDraftRun = performance.now();
   for ( const id of pendingIds ) refreshDistrict(id );
   pendingIds.clear();
+  lightsSync(VIEWS);
 }
 /** At most one rebake per ~70 ms and per frame, only for the districts that changed. */
 function scheduleDrafts() {
@@ -511,6 +513,7 @@ function sync(animateNew = true) {
   for ( const [id, v] of [...VIEWS] ) if ( !ids.has(id) ) { v.destroy({ children: true, texture: true }); VIEWS.delete(id); }
   // later districts paint on top
   list.forEach((d, i) => { const v = VIEWS.get(d.id); if ( v ) layer.setChildIndex(v, Math.min(i, layer.children.length - 1)); });
+  lightsSync(VIEWS);
 }
 
 const LIVE = new Set();   // open editor dialogs, closed when the canvas goes away so no draft can outlive its scene
@@ -658,12 +661,15 @@ export async function openEditor(id) {
   const DialogV2 = foundry.applications.api.DialogV2;
   const sel = (name, val, opts) => `<select name="${name}">${opts.map(([v, l]) => `<option value="${v}"${v === val ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   let dlgRef = null, reopen = false, done = false;   // `done` stops a queued preview frame from re-applying a draft after the dialog ended
+  let stopNight = () => {};
   const patchOf = (r, cur) => ({ name: r.name.trim(), color: r.pick || cur.color || "none", border: r.border, fill: r.fill,
     opacity: clamp(Number(r.opacity), 0, 1), ink: r.ink, inkColor: r.inkColor, inkOpacity: clamp(Number(r.inkOpacity), 0, 1), inkWidth: clamp(Number(r.inkWidth), 0.2, 4),
     revealed: !!r.revealed,
     label: r.lb_on ? { on: true, ...readLabelValues(r, "lb_") } : { on: false },
     hover: { mode: r.hmode, color: r.hcolor || cur.hover?.color || "" },
-    dots: r.fill === "dots" ? readDotsValues(r, "dt_") : cur.dots });
+    dots: r.fill === "dots" ? readDotsValues(r, "dt_") : cur.dots,
+    lights: { ...(cur.lights ?? {}), on: ["on", "off"].includes(r.nl_on) ? r.nl_on : "inherit", own: !!r.nl_own, ...(r.nl_own ? readLightValues(r, "nl_") : {}) } });
+  const LC = lightsCfg(d), sceneLightsOn = lightsCfg({ id: d.id }).on;
   // live: every edit lays a draft over this one district (rebaked at most once per frame); nothing is written until Apply
   const preview = frameThrottle(() => {
     const form = dlgRef?.element?.querySelector("form"); if ( done || !form || !dlgRef.element.isConnected ) return;
@@ -695,6 +701,12 @@ export async function openEditor(id) {
         ${fg(T("Label.override"), `<input type="checkbox" name="lb_on"${d.label?.on ? " checked" : ""}>`, T("Label.overrideHint"))}
         ${labelFieldsHtml("lb_", labelCfg(d))}
       </div></details>
+      <details class="mm-fold mm-nightfold"><summary>${esc(T("Night.section"))}</summary><div class="mm-fold-body">
+        <p class="hint mm-night-note">${esc(T("Night.previewHint"))}</p>
+        ${fg(T("Night.on"), sel("nl_on", ["on", "off"].includes(d.lights?.on) ? d.lights.on : "inherit", [["inherit", game.i18n.format("MOINENMAPS.Night.inherit", { state: T(sceneLightsOn ? "Night.stateOn" : "Night.stateOff") })], ["on", T("Night.stateOn")], ["off", T("Night.stateOff")]]))}
+        ${fg(T("Night.own"), `<input type="checkbox" name="nl_own"${d.lights?.own ? " checked" : ""}>`, T("Night.ownHint"))}
+        <div class="mm-sub" data-mm="night-look">${lightFieldsHtml("nl_", LC)}</div>
+      </div></details>
       <input type="hidden" name="pick" value="${esc(d.color)}">`,
     render: (_e, dlg) => {
       const el = dlg.element; dlgRef = dlg; LIVE.add(dlg);
@@ -710,6 +722,12 @@ export async function openEditor(id) {
       fillSel.addEventListener("change", () => { if ( fillSel.value === "dots" ) dotsFold.open = true; });
       const upd = () => { dotsFold.classList.toggle("is-off", fillSel.value !== "dots"); dotsFold.querySelector(".mm-fold-body").inert = fillSel.value !== "dots"; dep("inkColor", el.querySelector('[name="ink"]').value === "custom"); dep("hcolor", ["inherit", "highlight"].includes(el.querySelector('[name="hmode"]').value)); };
       el.addEventListener("change", upd); upd();
+      // night lights: the look fields only count with "own look"; while the section is open the district shows its lights as at night
+      wireLightFields(el, "nl_");
+      const nightLook = el.querySelector('[data-mm="night-look"]'), ownBox = el.querySelector('[name="nl_own"]');
+      const updNight = () => { nightLook.classList.toggle("is-off", !ownBox.checked); nightLook.inert = !ownBox.checked; };
+      ownBox.addEventListener("change", updNight); updNight();
+      stopNight = previewWhileOpen(el.querySelector(".mm-nightfold"), id);
     },
     buttons: [
       { action: "save", label: T("Apply"), icon: "fa-solid fa-check", default: true, callback: (_e, b) => ({ ...readForm(b.form), attrs: collectAttrs(b.form) }) },
@@ -729,6 +747,7 @@ export async function openEditor(id) {
   } finally {
     done = true; if ( dlgRef ) LIVE.delete(dlgRef);
     previewHover(null); clearDraft(id);   // cancel, Escape, close or error: back to the stored look
+    stopNight();
   }
   if ( reopen ) openEditor(id);
 }
@@ -885,6 +904,7 @@ export const isLocalHidden = (id) => LOCAL_HIDDEN.has(id);
 export function setLocalHidden(id, on) {
   on ? LOCAL_HIDDEN.add(id) : LOCAL_HIDDEN.delete(id);
   const v = VIEWS.get(id); if ( v ) v.visible = canShow(v.data);
+  lightsSync(VIEWS);
 }
 /** Mirror a panel row hover on the canvas, reusing the normal hover effect. */
 export function previewHover(id) {

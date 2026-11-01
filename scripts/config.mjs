@@ -3,6 +3,9 @@ export const MODULE_ID = "moinen-maps";
 /** Halftone dot fill: size = largest dot diameter as a fraction of the spacing; spacing in grid squares; tint = background wash. */
 export const DOT_DEFAULTS = { size: 0.55, spacing: 0.16, angle: 45, useFill: true, color: "#15110f", tint: 0.2, shape: "round", gradient: "none", overprint: false };
 
+/** Night lights of a district (see lights.mjs): look + whether districts light up by default. */
+export const LIGHT_DEFAULTS = { on: false, style: "windows", warmth: "warm", color: "#ffd27a", density: 0.5, size: 1, glow: 0.6, twinkle: 0.35, switching: 0.25 };
+
 export const DEFAULTS = {
   enabled: true,
   color: "#e5322d",
@@ -29,6 +32,10 @@ export const DEFAULTS = {
   hoverStrength: 0.6,
   dots: { ...DOT_DEFAULTS },   // scene default for districts filled with halftone dots
   attrDisplay: "hover",    // district attributes on the map: off | hover | always
+  lights: { ...LIGHT_DEFAULTS },   // night lights: scene default for districts that do not set their own
+  nightMode: "auto",       // auto (follow the scene darkness) | on (always night) | off
+  nightStart: 0.35,        // darkness at which the first lights come on
+  nightFull: 0.7,          // darkness at which every light is on
   // cosmetic drop animation for tokens placed on this scene (never written to the token document)
   tokens: { enabled: true, who: "all", filter: "all", intensity: 1, dropHeight: 1, bounce: 0.55, squeeze: 0.5, shadow: true, ripple: true, hop: false,
     hide: true,                                                                   // a token hidden / revealed: ghost puff / pop-in

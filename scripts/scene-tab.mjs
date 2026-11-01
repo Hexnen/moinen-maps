@@ -1,6 +1,7 @@
 import { MODULE_ID, IDLE_MODES, sceneConfig, setSceneDraft } from "./config.mjs";
 import { compositePin } from "./pin-art.mjs";
 import { dotsFieldsHtml, wireDotsFields } from "./dots.mjs";
+import { lightsCfg, lightFieldsHtml, wireLightFields, previewWhileOpen } from "./lights.mjs";
 import { labelFieldsHtml, fontFamilies, wireFontPreview, fg, revealFoldsOnOpen, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
 const TAB = "moinenmaps";
@@ -115,6 +116,14 @@ function tabHtml(scene, active) {
         ${check("districtNoColor", "District.noColor", c.districtNoColor, "District.noColorHint")}
       </fieldset>
       ${fold("mm-dotsset", "fa-braille", "Scene.Dots", dotsFieldsHtml(`${N}.dots.`, c.dots))}
+      ${fold("mm-nightset", "fa-moon", "Scene.Night", `<p class="hint">${esc(T("Night.scenePreviewHint"))}</p>
+        ${check("lights.on", "Night.sceneOn", c.lights.on, "Night.sceneOnHint")}
+        ${select("nightMode", "Night.mode", c.nightMode, [["auto", T("Night.modeAuto")], ["on", T("Night.modeOn")], ["off", T("Night.modeOff")]], "Night.modeHint")}
+        <div class="mm-sub" data-mm="night-auto">
+          ${range("nightStart", "Night.start", c.nightStart, 0, 1, 0.05, "Night.startHint")}
+          ${range("nightFull", "Night.full", c.nightFull, 0, 1, 0.05, "Night.fullHint")}
+        </div>
+        ${lightFieldsHtml(`${N}.lights.`, lightsCfg({}, scene))}`)}
       ${fold("mm-labelset", "fa-font", "Label.sceneSection", labelFieldsHtml(`${N}.label.`, c.label))}
       <fieldset class="mm-playerset">${legend("fa-users", "Scene.Players")}
         ${check("districtListForPlayers", "Panel.players", c.districtListForPlayers, "Panel.playersHint")}
@@ -173,6 +182,8 @@ function wire(tab, scene, app) {
     dep("tokens.reticleColor", on("tokens.target") && !on("tokens.reticleUser"));   // a fixed colour only when not using each user's own
     const idleOff = val("idle") === "none" || !on("enabled"), isub = tab.querySelector('[data-mm="idle-sub"]');
     isub.classList.toggle("is-off", idleOff); isub.inert = idleOff;
+    const nauto = tab.querySelector('[data-mm="night-auto"]'), nOff = val("nightMode") !== "auto";   // thresholds only matter when following the darkness
+    if ( nauto ) { nauto.classList.toggle("is-off", nOff); nauto.inert = nOff; }
   };
 
   let timer = 0;
@@ -221,4 +232,7 @@ export function onRenderSceneConfig(app, html) {
   setSceneDraft(null);   // a fresh render shows the stored values: no stale draft
   wire(tab, app.document, app); revealFoldsOnOpen(tab); wireDotsFields(tab, `${N}.dots.`);
   wireFontPreview(tab, `${N}.label.`);
+  wireLightFields(tab, `${N}.lights.`);
+  // while the night-lights fold is open the viewed scene shows its lights as at night (unless the form says "off")
+  if ( app.document.id === canvas.scene?.id ) previewWhileOpen(tab.querySelector(".mm-nightset"), "*");
 }
