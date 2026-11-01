@@ -153,7 +153,9 @@ function mountDamage(host) {
     const rows = (S?.objects ?? []).filter((o) => !o.k).reverse().map((o) => {
       const t = Model.TYPES[o.t] ?? "blast", c = Model.causeOf(o.c), eff = Model.CAUSES[c || def], mat = matOf.get(o.id);
       const opts = causeOptions(zero).map(([v, l]) => `<option value="${v}"${v === c ? " selected" : ""}>${esc(l)}</option>`).join("");
-      return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span>${esc(T(`Destr.type.${t}`))}</span><span class="mm-d-mat">${mat ? esc(T(`Destr.mat.${mat}`)) : ""}</span>
+      // the dock is narrow: kind and cause on the row, the surface it tore up in the kind's tooltip
+      const kind = T(`Destr.type.${t}`), tip = mat ? `${kind} · ${T(`Destr.mat.${mat}`)}` : kind;
+      return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(kind)}</span>
         <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span></li>`;
     }).join("");
     host.innerHTML = `<p class="mm-d-status" role="status">${esc(statusLine())}</p>
