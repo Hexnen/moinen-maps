@@ -893,5 +893,16 @@
   "MOINENMAPS.Destr.pDamage": "Zniszczenia",
   "MOINENMAPS.Destr.pLook": "Wygląd",
   "MOINENMAPS.Destr.pMotion": "Ruch",
-  "MOINENMAPS.Destr.publishFailed": "Moinen Maps: nie udało się zapisać zniszczeń w folderze świata; gracze wypieką je sami."
+  "MOINENMAPS.Destr.publishFailed": "Moinen Maps: nie udało się zapisać zniszczeń w folderze świata; gracze wypieką je sami.",
+  "MOINENMAPS.Roads.tool.edit": "Edycja kształtu dróg",
+  "MOINENMAPS.Roads.mode.edit": "Edytuj",
+  "MOINENMAPS.Roads.f.roadSpeed": "Prędkość",
+  "MOINENMAPS.Roads.h.roadSpeed": "Jak szybko auta jadą tą drogą względem jej rodzaju (1 = zwykle).",
+  "MOINENMAPS.Roads.f.vary": "Zróżnicowanie wielkości",
+  "MOINENMAPS.Roads.h.vary": "Auta różnią się wielkością losowo, najwyżej o tyle.",
+  "MOINENMAPS.Roads.reverse": "Odwróć drogę (kierunek jednokierunkowej)",
+  "MOINENMAPS.Roads.deleteRoad": "Usuń tę drogę",
+  "MOINENMAPS.Roads.editPick": "Kliknij drogę, by edytować jej kształt i ustawienia.",
+  "MOINENMAPS.Roads.hintEdit": "Kliknij drogę, by ją zaznaczyć. Przeciągnij punkt, by wygiąć drogę (koniec upuszczony na drogę lub skrzyżowanie łączy się z nimi), przeciągnij linię po nowy punkt (klik dodaje punkt), prawy klik na punkcie lub Delete go usuwa, dwuklik robi ostry zakręt. Shift+przeciągnięcie linii przesuwa drogę, Shift+przeciągnięcie ślepego końca ją wydłuża. [ ]: szerokość, Delete: droga, Ctrl+Z: cofnij.",
+  "MOINENMAPS.Roads.hintEditShort": "Przeciągaj punkty · linia: nowy punkt · prawy klik: usuń · dwuklik: narożnik · Shift: przesuń / wydłuż · [ ] szerokość"
 }

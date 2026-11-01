@@ -893,5 +893,16 @@
   "MOINENMAPS.Destr.pDamage": "Damage",
   "MOINENMAPS.Destr.pLook": "Look",
   "MOINENMAPS.Destr.pMotion": "Motion",
-  "MOINENMAPS.Destr.publishFailed": "Moinen Maps: the destruction could not be saved to the world folder; players will bake it themselves."
+  "MOINENMAPS.Destr.publishFailed": "Moinen Maps: the destruction could not be saved to the world folder; players will bake it themselves.",
+  "MOINENMAPS.Roads.tool.edit": "Edit road shapes",
+  "MOINENMAPS.Roads.mode.edit": "Edit",
+  "MOINENMAPS.Roads.f.roadSpeed": "Speed",
+  "MOINENMAPS.Roads.h.roadSpeed": "How fast cars drive this road, relative to its kind (1 = normal).",
+  "MOINENMAPS.Roads.f.vary": "Size variation",
+  "MOINENMAPS.Roads.h.vary": "Cars differ in size by up to this much, at random.",
+  "MOINENMAPS.Roads.reverse": "Turn the road around (one-way direction)",
+  "MOINENMAPS.Roads.deleteRoad": "Delete this road",
+  "MOINENMAPS.Roads.editPick": "Click a road to edit its shape and settings.",
+  "MOINENMAPS.Roads.hintEdit": "Click a road to select it. Drag a point to bend the road (an end joins a road or junction it is dropped on), drag the line for a new point (a click adds one there), right-click a point or press Delete to remove it, double-click a point for a sharp corner. Shift-drag the line to move the road, Shift-drag a dead end to extend it. [ ]: width, Delete: the road, Ctrl+Z: undo.",
+  "MOINENMAPS.Roads.hintEditShort": "Drag points · drag the line: new point · right-click: remove · double-click: corner · Shift: move / extend · [ ] width"
 }

@@ -125,12 +125,13 @@ function drawNetwork(ctx, its, info, tb) {
     ctx.save();
     try { ctx.filter = `blur(${(g * 0.07 * ctx.getTransform().a).toFixed(1)}px)`; } catch {}
     ctx.translate(g * 0.05, g * 0.075);
-    for ( const it of sorted ) strokeLine(ctx, it.p, it.W + g * 0.1, `rgba(18,12,6,${(0.55 * look.shadow).toFixed(3)})`);
+    for ( const it of sorted ) strokeLine(ctx, it.p, it.W + Math.min(g * 0.1, it.W * 0.6), `rgba(18,12,6,${(0.55 * look.shadow).toFixed(3)})`);
     ctx.restore();
   }
   // ink outline under the whole network
   const inkW = g * 0.032 * look.ink;
-  if ( inkW > 0 ) for ( const it of sorted ) if ( it.e.k !== "path" ) strokeLine(ctx, it.ink, it.W + inkW * 2, INK);
+  // the ink never outweighs a narrow road: at most a quarter of its width a side
+  if ( inkW > 0 ) for ( const it of sorted ) if ( it.e.k !== "path" ) strokeLine(ctx, it.ink, it.W + Math.min(inkW, it.W * 0.25) * 2, INK);
   // kerbs, then each kind's surface and texture, lowest kind first
   for ( const it of sorted ) { const L = KIND_LOOK[it.e.k]; if ( L.kerb ) strokeLine(ctx, it.p, it.W, L.kerb); }
   for ( const k of KINDS ) {
@@ -141,8 +142,9 @@ function drawNetwork(ctx, its, info, tb) {
     for ( const it of group ) texture(ctx, it, L, g, tb);
   }
   // markings
-  if ( look.marks ) for ( const it of sorted ) if ( it.e.k === "asphalt" ) markings(ctx, it, info);
-  if ( look.crossings ) for ( const it of sorted ) if ( it.e.k === "asphalt" ) zebras(ctx, it, info);
+  // markings only where they can be read: a centre line from 0.3 square, crossings from 0.4
+  if ( look.marks ) for ( const it of sorted ) if ( it.e.k === "asphalt" && it.W >= g * 0.3 ) markings(ctx, it, info);
+  if ( look.crossings ) for ( const it of sorted ) if ( it.e.k === "asphalt" && it.W >= g * 0.4 ) zebras(ctx, it, info);
 }
 
 function texture(ctx, it, L, g, tb) {
@@ -185,7 +187,7 @@ function texture(ctx, it, L, g, tb) {
       const [x, y] = pointAtS(p, ss, r() * total);
       const ox = (r() - 0.5) * W * 0.8, oy = (r() - 0.5) * W * 0.8;
       if ( Math.hypot(ox, oy) > W * 0.42 ) continue;
-      ctx.beginPath(); ctx.arc(x + ox, y + oy, g * (0.012 + r() * 0.014), 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + ox, y + oy, Math.min(g * (0.012 + r() * 0.014), W * 0.06), 0, Math.PI * 2); ctx.fill();
     }
     // a frayed edge: little tufts of the rim colour biting into the surface
     ctx.fillStyle = L.kerb;
@@ -195,10 +197,10 @@ function texture(ctx, it, L, g, tb) {
       let dx = p[j * 2] - p[k * 2], dy = p[j * 2 + 1] - p[k * 2 + 1];
       const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
       const side = r() < 0.5 ? -1 : 1, lat = side * W * (0.4 + r() * 0.06);
-      ctx.beginPath(); ctx.arc(x - dy * lat, y + dx * lat, g * (0.015 + r() * 0.02), 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x - dy * lat, y + dx * lat, Math.min(g * (0.015 + r() * 0.02), W * 0.08), 0, Math.PI * 2); ctx.fill();
     }
   } else if ( e.k === "path" ) {
-    for ( const o of [-0.5, 0.5] ) strokeLine(ctx, offsetLine(p, W * o), g * 0.018, L.edge, [g * 0.08, g * 0.06]);
+    for ( const o of [-0.5, 0.5] ) strokeLine(ctx, offsetLine(p, W * o), Math.min(g * 0.018, W * 0.15), L.edge, [g * 0.08, g * 0.06]);
   }
   ctx.setLineDash([]);
 }
@@ -363,7 +365,9 @@ const RES = { ink: 104, pixel: 22 };
 
 function makeTexture(canvas, pixel) {
   const tex = PIXI.Texture.from(canvas, pixel ? { scaleMode: PIXI.SCALE_MODES.NEAREST } : {});
+  // inked sprites shrink a long way (cars down to a few screen pixels): mipmaps keep them smooth instead of sparkling
   if ( pixel ) tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+  else { tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON; tex.baseTexture.anisotropicLevel = 4; }
   return tex;
 }
 

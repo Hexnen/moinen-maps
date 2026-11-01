@@ -98,7 +98,7 @@ function apply() {
   const graph = JSON.stringify([enc.n, enc.e]), look = JSON.stringify(enc.look);
   const sim = JSON.stringify(SIM_KEYS.map((k) => enc.traffic[k]));
   const g = gridSize();
-  if ( graph !== seen.graph || look !== seen.look ) display.render(Model.hasRoads(R) ? R : null, g);
+  if ( graph !== seen.graph || look !== seen.look || previewing ) { previewing = false; display.render(Model.hasRoads(R) ? R : null, g); }
   if ( graph !== seen.graph || sim !== seen.sim ) traffic.configure(R, g, sceneRect(), canvas.scene.id);
   else traffic.restyle(R);
   seen = { ...seen, graph, look, sim };
@@ -136,6 +136,14 @@ export function edit(fn) {
   return true;
 }
 
+let previewing = false;
+/** Show the roads of graph G (an edit being dragged) without keeping them; null goes back to the real roads. */
+export function previewGraph(G) {
+  if ( !display || !R ) return;
+  if ( G ) { previewing = true; display.render({ ...R, G }, gridSize()); }
+  else if ( previewing ) { previewing = false; display.render(Model.hasRoads(R) ? R : null, gridSize()); }
+}
+
 function restoreGraph(snap) {
   const enc = Model.encode(R);
   R = Model.load({ flags: { [MODULE_ID]: { [Model.FLAG]: { ...enc, n: snap.n, e: snap.e, next: snap.next } } } });
@@ -159,7 +167,24 @@ export function setLook(patch) {
   apply(); scheduleSave(); tell("params");
 }
 
-export const shuffleTraffic = () => setTraffic({ seed: Math.floor(Math.random() * 999998) + 1 });
+/** Change one road's kind, width, lanes, one-way or speed (patch of { k, w, l, o, sp }). Keeps its id. */
+export function setRoad(id, patch) {
+  return edit((G) => {
+    const e = G.edges.get(id); if ( !e ) return false;
+    const next = {
+      k: Model.KINDS.includes(patch.k) ? patch.k : e.k,
+      w: patch.w != null ? Math.min(Model.LIMITS.width[1], Math.max(Model.LIMITS.width[0], Number(patch.w) || e.w)) : e.w,
+      l: patch.l != null ? (Number(patch.l) === 1 ? 1 : 2) : e.l,
+      o: patch.o != null ? (patch.o ? 1 : 0) : e.o,
+      sp: patch.sp != null ? Math.min(Model.LIMITS.roadSpeed[1], Math.max(Model.LIMITS.roadSpeed[0], Number(patch.sp) || 1)) : (e.sp ?? 1)
+    };
+    if ( next.k === e.k && next.w === e.w && next.l === e.l && next.o === e.o && next.sp === (e.sp ?? 1) ) return false;
+    Object.assign(e, next);
+    return true;
+  });
+}
+
+export const shuffleTraffic =() => setTraffic({ seed: Math.floor(Math.random() * 999998) + 1 });
 export const clearRoads = () => edit((G) => { if ( !G.edges.size ) return false; G.edges.clear(); G.nodes.clear(); return true; });
 
 function scheduleSave(ms = 500) {
@@ -188,13 +213,14 @@ export const roadsApi = {
   tools: [
     { id: "draw", mode: "draw", icon: "fa-solid fa-road", title: "MOINENMAPS.Roads.tool.draw" },
     { id: "erase", mode: "erase", icon: "fa-solid fa-eraser", title: "MOINENMAPS.Roads.tool.erase" },
+    { id: "edit", mode: "edit", icon: "fa-solid fa-bezier-curve", title: "MOINENMAPS.Roads.tool.edit" },
     { id: "settings", button: true, icon: "fa-solid fa-car-side", title: "MOINENMAPS.Roads.tool.settings", run: () => openRoadsPanel() }
   ],
   /** Sections of controls a host can mount in its own panels: "brush" (an options bar), "traffic" and "look" (dock panels). */
   sections: ["bar", "brush", "traffic", "look"],
   /** The whole workspace section (scripts/workspace/registry.mjs shape): registerSection(api.roads.section()). */
   section: () => roadsSection(),
-  /** Switch the GM's road tool on ("draw" | "erase") or off (null). */
+  /** Switch the GM's road tool on ("draw" | "erase" | "edit") or off (null). */
   activate: (mode = "draw") => Editor.setMode(mode),
   deactivate: () => Editor.setMode(null),
   mode: () => Editor.mode(),
@@ -202,7 +228,9 @@ export const roadsApi = {
   openSettings: () => openRoadsPanel(),
   /** Render one or more sections into a host element; returns { refresh(), destroy() }. */
   mount: (host, sections) => mountRoadControls(host, sections),
-  brush, setBrush,
+  brush, setBrush, setRoad,
+  /** The road selected with the edit tool (an edge id), or null. */
+  selected: () => Editor.selectedEdge(),
   undo: undoEdit, redo: redoEdit, clear: clearRoads,
   setTraffic, setLook, shuffle: shuffleTraffic,
   state: () => R ? Model.encode(R) : null,

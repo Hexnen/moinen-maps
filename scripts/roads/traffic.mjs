@@ -188,7 +188,9 @@ export function buildNetwork(R, g, rect) {
   const brake = g * 1.3;
   const pieces = [];
   const nodes = new Map();          // node id -> { id, x, y, deg, in: [lane], out: [lane], conns: [], portal }
-  const edges = [...G.edges.values()].filter((e) => KIND_INFO[e.k]?.cars);
+  // a road narrower than the cars (two of them side by side, or one on a one-way road) carries no traffic
+  const carW = T.size * g * 0.5;
+  const edges = [...G.edges.values()].filter((e) => KIND_INFO[e.k]?.cars && e.w * g >= (e.o ? 0.9 : 1.8) * carW);
   for ( const e of edges ) for ( const id of [e.a, e.b] ) {
     if ( !nodes.has(id) ) { const n = G.nodes.get(id); nodes.set(id, { id, x: n.x, y: n.y, deg: 0, maxW: 0, in: [], out: [], conns: [], portal: false }); }
   }
@@ -207,7 +209,7 @@ export function buildNetwork(R, g, rect) {
   for ( const e of edges ) {
     const c = edgeCurve(e, g).p, A = nodes.get(e.a), B = nodes.get(e.b);
     const off = (e.w * g) / 4;
-    const kv = v0 * KIND_INFO[e.k].speed;
+    const kv = v0 * KIND_INFO[e.k].speed * (e.sp ?? 1);
     const dirs = e.o ? [1] : [1, -1];
     for ( const dir of dirs ) {
       const base = dir === 1 ? c : reversed(c);
@@ -253,7 +255,7 @@ export function buildNetwork(R, g, rect) {
     }
     // which connectors may not be used at the same time: they cross or come close, or they merge into one lane
     for ( const C of n.conns ) C.conflicts = [];
-    const carW = g * 0.3;
+    const clashW = Math.max(g * 0.05, T.size * g * 0.6);
     for ( let i = 0; i < n.conns.length; i++ ) for ( let j = i + 1; j < n.conns.length; j++ ) {
       const A = n.conns[i], B = n.conns[j];
       if ( A.from === B.from ) continue;           // one queue: the following distance handles it
@@ -261,7 +263,7 @@ export function buildNetwork(R, g, rect) {
       if ( !clash ) {
         const pa = A.p, pb = B.p;
         outer: for ( let a = 1; a < (pa.length >> 1) - 1; a++ ) for ( let b = 1; b < (pb.length >> 1) - 1; b++ ) {
-          if ( sq(pa[a * 2] - pb[b * 2]) + sq(pa[a * 2 + 1] - pb[b * 2 + 1]) < carW * carW ) { clash = true; break outer; }
+          if ( sq(pa[a * 2] - pb[b * 2]) + sq(pa[a * 2 + 1] - pb[b * 2 + 1]) < clashW * clashW ) { clash = true; break outer; }
         }
       }
       if ( clash ) { A.conflicts.push(B.id); B.conflicts.push(A.id); }
@@ -292,6 +294,8 @@ export class TrafficSim {
     this.net = net; this.T = T; this.epoch = epoch;
     this.g = net.g;
     this.step = 0;
+    // following distances scale with the cars (tiny cars keep tiny gaps)
+    this.gap = Math.max(this.g * 0.02, T.size * this.g * 0.3);
     this.r = { r: hash32(key, T.seed, epoch) | 0 };
     const kinds = T.kinds.length ? T.kinds : ["sedan"];
     this.kinds = kinds; this.kindW = kinds.map((k) => WEIGHTS[k] ?? 1);
@@ -314,7 +318,9 @@ export class TrafficSim {
     c.type = this.kinds[k];
     c.color = Math.floor(rnd(c.r) * PALETTE_SIZE);
     const B = BODY[c.type] ?? BODY.sedan, size = this.T.size * this.g;
-    c.len = size * B.len; c.wid = size * B.wid;
+    // optional size variation per car (the same on every client: from the car's own seeded generator)
+    const vary = this.T.vary > 0 ? 1 + (rnd(c.r) - 0.5) * 2 * this.T.vary : 1;
+    c.len = size * B.len * vary; c.wid = size * B.wid * vary;
     c.f = 0.86 + rnd(c.r) * 0.24;
   }
 
@@ -324,7 +330,7 @@ export class TrafficSim {
     for ( const o of this.cars ) {
       if ( o.piece < 0 || o.hidden > 0 ) continue;
       const [ox, oy] = posOn(this.net.pieces[o.piece], o.s);
-      const need = (len + o.len) * 0.5 + this.g * 0.25;
+      const need = (len + o.len) * 0.5 + this.gap * 1.8;
       if ( sq(x - ox) + sq(y - oy) < need * need ) return false;
     }
     return true;
@@ -377,9 +383,9 @@ export class TrafficSim {
     const onOut = byPiece.get(O.id);
     if ( onOut ) for ( const o of onOut ) room = Math.min(room, o.s - o.len * 0.5);
     const onC = byPiece.get(C.id);
-    if ( onC ) for ( const o of onC ) queued += o.len + this.g * 0.14;
-    for ( const o of this.cars ) if ( o !== c && o.res === C.id && o.piece !== C.id ) queued += o.len + this.g * 0.14;
-    const need = Math.min(c.len + this.g * 0.14, O.L * 0.8);
+    if ( onC ) for ( const o of onC ) queued += o.len + this.gap;
+    for ( const o of this.cars ) if ( o !== c && o.res === C.id && o.piece !== C.id ) queued += o.len + this.gap;
+    const need = Math.min(c.len + this.gap, O.L * 0.8);
     return room - queued >= need || (!onOut?.length && queued === 0);
   }
 
@@ -431,7 +437,7 @@ export class TrafficSim {
         for ( const sib of piece.next ) {
           if ( sib === nextId ) continue;
           const list = byPiece.get(sib);
-          if ( list ) for ( const o of list ) if ( o.s < o.len + this.g * 0.6 && (!best || o.s < best.s) ) best = o;
+          if ( list ) for ( const o of list ) if ( o.s < o.len * 2 + this.gap * 2 && (!best || o.s < best.s) ) best = o;
         }
         if ( best ) {
           const gap = acc + best.s - (c.len + best.len) * 0.5;
@@ -450,7 +456,7 @@ export class TrafficSim {
   /** One step of DT seconds. */
   advance() {
     const net = this.net, P = net.pieces, g = this.g, dt = DT;
-    const accel = g * 0.9, hard = g * 4.5, gapMin = g * 0.14;
+    const accel = g * 0.9, hard = g * 4.5, gapMin = this.gap;
     this.step++;
     // who is where
     const byPiece = new Map(), byNode = new Map();

@@ -208,11 +208,11 @@ function addEdge(G, a, b, pts, style) {
   const id = G.next++;
   const A = G.nodes.get(a), B = G.nodes.get(b);
   const p = pts.slice(); p[0] = A.x; p[1] = A.y; p[p.length - 2] = B.x; p[p.length - 1] = B.y;
-  const e = { id, a, b, pts: p, k: style.k, w: style.w, l: style.l, o: style.o ? 1 : 0 };
+  const e = { id, a, b, pts: p, k: style.k, w: style.w, l: style.l, o: style.o ? 1 : 0, ...(style.sp && style.sp !== 1 ? { sp: style.sp } : {}) };
   G.edges.set(id, e);
   return e;
 }
-const styleOf = (e) => ({ k: e.k, w: e.w, l: e.l, o: e.o });
+const styleOf = (e) => ({ k: e.k, w: e.w, l: e.l, o: e.o, sp: e.sp });
 
 /** Control points for a piece of dense curve: simplified tightly so the Catmull-Rom curve through them retraces it. */
 const controls = (dense, g) => simplify(dense, g * 0.025);
@@ -420,7 +420,119 @@ export function reverseEdge(G, id) {
   return true;
 }
 
-const sameStyle = (a, b) => a.k === b.k && Math.abs(a.w - b.w) < 1e-6 && a.l === b.l && a.o === b.o;
+/* ---------------------------------------------------------------- editing a drawn road (its control points) */
+
+/** Move a node; every road that ends there follows. */
+export function moveNode(G, id, x, y) {
+  const n = G.nodes.get(id); if ( !n ) return false;
+  n.x = x; n.y = y;
+  for ( const e of G.edges.values() ) {
+    if ( e.a === id ) { e.pts[0] = x; e.pts[1] = y; }
+    if ( e.b === id ) { e.pts[e.pts.length - 2] = x; e.pts[e.pts.length - 1] = y; }
+  }
+  return true;
+}
+
+/** The indices of the control points that sit on the same spot as point i (a corner is a doubled point). */
+export function twins(e, i) {
+  const out = [i], n = e.pts.length >> 1;
+  for ( const d of [-1, 1] ) for ( let j = i + d; j >= 0 && j < n && e.pts[j * 2] === e.pts[i * 2] && e.pts[j * 2 + 1] === e.pts[i * 2 + 1]; j += d ) out.push(j);
+  return out;
+}
+
+/** Move control point i of a road (an end moves its node, and the roads joined there). */
+export function movePoint(G, id, i, x, y) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  const n = e.pts.length >> 1;
+  if ( i <= 0 ) return moveNode(G, e.a, x, y);
+  if ( i >= n - 1 ) return moveNode(G, e.b, x, y);
+  for ( const j of twins(e, i) ) { if ( j === 0 || j === n - 1 ) continue; e.pts[j * 2] = x; e.pts[j * 2 + 1] = y; }
+  return true;
+}
+
+/** A new control point before index i (1..n-1). */
+export function insertPoint(G, id, i, x, y) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  const n = e.pts.length >> 1;
+  i = Math.max(1, Math.min(n - 1, i));
+  e.pts.splice(i * 2, 0, x, y);
+  return true;
+}
+
+/** Remove an inner control point (with its corner twin). */
+export function removePoint(G, id, i) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  const n = e.pts.length >> 1;
+  if ( i <= 0 || i >= n - 1 ) return false;
+  const ids = twins(e, i).filter((j) => j > 0 && j < n - 1).sort((a, b) => b - a);
+  for ( const j of ids ) e.pts.splice(j * 2, 2);
+  return true;
+}
+
+/** A smooth point becomes a corner (a doubled control point: the curve turns sharply there) and back. */
+export function toggleCorner(G, id, i) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  const n = e.pts.length >> 1;
+  if ( i <= 0 || i >= n - 1 ) return false;
+  const t = twins(e, i).filter((j) => j > 0 && j < n - 1);
+  if ( t.length > 1 ) e.pts.splice(Math.max(...t) * 2, 2);
+  else e.pts.splice(i * 2, 0, e.pts[i * 2], e.pts[i * 2 + 1]);
+  return true;
+}
+
+/** Which control span (1-based index of the point after it) holds arc length s of the road's curve. */
+export function spanAt(e, g, s) {
+  const c = edgeCurve(e, g), n = e.pts.length >> 1;
+  for ( let i = 1; i < n; i++ ) {
+    const at = nearestOn(c.p, c.ss, e.pts[i * 2], e.pts[i * 2 + 1]).s;
+    if ( at >= s ) return i;
+  }
+  return n - 1;
+}
+
+/** Move a whole road by (dx, dy): its points and both ends (roads joined at the ends follow). */
+export function translateEdge(G, id, dx, dy) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  for ( let i = 2; i < e.pts.length - 2; i++ ) e.pts[i] += i % 2 ? dy : dx;
+  const A = G.nodes.get(e.a), B = G.nodes.get(e.b);
+  const ax = A.x + dx, ay = A.y + dy, bx = B.x + dx, by = B.y + dy;
+  moveNode(G, e.a, ax, ay);
+  if ( e.b !== e.a ) moveNode(G, e.b, bx, by);
+  return true;
+}
+
+/** Grow a road past a dead end: the end moves to (x, y) and where it was becomes a control point. */
+export function extendEnd(G, id, atStart, x, y) {
+  const e = G.edges.get(id); if ( !e ) return false;
+  const node = atStart ? e.a : e.b;
+  if ( degree(G, node) !== 1 ) return false;
+  const n = G.nodes.get(node);
+  if ( atStart ) e.pts.splice(2, 0, n.x, n.y); else e.pts.splice(e.pts.length - 2, 0, n.x, n.y);
+  return moveNode(G, node, x, y);
+}
+
+/**
+ * A node let go at its spot: when it lies on another node it merges into it; on another road (not one of its own) that road
+ * is split there and the node becomes the junction. Then the graph is tidied.
+ */
+export function dropNode(G, id, g, snapR) {
+  const n = G.nodes.get(id); if ( !n ) return false;
+  const own = new Set(incident(G, id).map((e) => e.id));
+  let best = null, bd = snapR;
+  for ( const m of G.nodes.values() ) { if ( m.id === id ) continue; const d = Math.hypot(m.x - n.x, m.y - n.y); if ( d <= bd ) { bd = d; best = m; } }
+  if ( best ) {
+    for ( const e of G.edges.values() ) { if ( e.a === id ) e.a = best.id; if ( e.b === id ) e.b = best.id; }
+    G.nodes.delete(id);
+    moveNode(G, best.id, best.x, best.y);
+  } else {
+    const h = nearestEdge(G, n.x, n.y, snapR, g, (e) => !own.has(e.id));
+    if ( h ) { moveNode(G, id, h.x, h.y); splitEdge(G, h.e, [{ s: h.s, node: id }], g); }
+  }
+  normalize(G, g);
+  return true;
+}
+
+const sameStyle = (a, b) => a.k === b.k && Math.abs(a.w - b.w) < 1e-6 && a.l === b.l && a.o === b.o && (a.sp ?? 1) === (b.sp ?? 1);
 
 /**
  * Tidy up: merge nodes closer than a quarter square, drop slivers and orphans, and join two edges of one style that meet end to
@@ -469,7 +581,7 @@ export function normalize(G, g) {
       const pts = o1.pts.concat(o2.pts.slice(2));
       G.edges.delete(e1.id); G.edges.delete(e2.id); G.nodes.delete(n.id);
       const id = G.next++;
-      G.edges.set(id, { id, a: o1.a, b: o2.b, pts, k: e1.k, w: e1.w, l: e1.l, o: e1.o });
+      G.edges.set(id, { id, a: o1.a, b: o2.b, pts, k: e1.k, w: e1.w, l: e1.l, o: e1.o, ...(e1.sp && e1.sp !== 1 ? { sp: e1.sp } : {}) });
       again = true;
       break;
     }

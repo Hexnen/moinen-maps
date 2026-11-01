@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Graph from "./graph.mjs";
 import { KIND_LOOK } from "./art.mjs";
 import * as Roads from "./roads.mjs";
+import * as Shape from "./shape.mjs";
 
 /**
  * Painting roads (GM). Two tools:
@@ -34,15 +35,17 @@ const colorNum = (css) => { const c = Color.from(css); return Number(c); };
 const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)); };
 
 export const mode_ = () => mode;
+export const selectedEdge = () => Shape.selectedEdge();
 export { mode_ as mode };
 
-/** Switch the tool: "draw", "erase" or null (off). */
+/** Switch the tool: "draw", "erase", "edit" (the shape of drawn roads) or null (off). */
 export function setMode(m) {
-  m = m === "draw" || m === "erase" ? m : null;
+  m = m === "draw" || m === "erase" || m === "edit" ? m : null;
   if ( m && !game.user.isGM ) return;
   if ( m === mode ) return;
   mode = m;
   press = null; poly = null; polyStraight = []; eraseTrail = null;
+  if ( m === "edit" && canvas.ready ) Shape.attach(); else Shape.reset();
   document.body.classList.toggle("mm-painting-roads", !!mode);
   if ( mode && canvas.ready ) ensureGfx();
   redraw();
@@ -161,9 +164,10 @@ function drawOverlay() {
 
 function redraw() {
   drawOverlay(); drawGuides();
+  if ( mode === "edit" ) Shape.draw();
   if ( !gfx ) return;
   gfx.clear();
-  if ( !mode || !cursorAt ) return;
+  if ( !mode || !cursorAt || mode === "edit" ) return;
   const z = zoom(), b = Roads.brush(), W = b.w * g();
   const L = KIND_LOOK[b.k];
   if ( mode === "erase" ) {
@@ -232,6 +236,7 @@ function onDown(ev) {
   ev.stopImmediatePropagation(); ev.preventDefault();
   const p = worldPoint(ev);
   cursorAt = p;
+  if ( mode === "edit" ) { Shape.down(ev, p); return; }
   if ( mode === "erase" ) { eraseTrail = [p.x, p.y]; redraw(); return; }
   if ( ev.altKey ) {
     const hit = edgeAt(p);
@@ -249,6 +254,7 @@ function onMove(ev) {
   if ( !mode ) return;
   const p = worldPoint(ev);
   cursorAt = p; shiftDown = ev.shiftKey;
+  if ( mode === "edit" ) { Shape.move(ev, p); return; }
   if ( mode === "erase" && eraseTrail ) {
     const lx = eraseTrail[eraseTrail.length - 2], ly = eraseTrail[eraseTrail.length - 1];
     if ( Math.hypot(p.x - lx, p.y - ly) > 2 / zoom() ) eraseTrail.push(p.x, p.y);
@@ -268,6 +274,7 @@ function onUp(ev) {
   if ( ev.button === 2 ) {
     const pr = press; press = null;
     if ( !pr?.right || Math.hypot(ev.clientX - pr.sx, ev.clientY - pr.sy) > 5 ) return;
+    if ( mode === "edit" ) { Shape.right(p); return; }
     if ( mode !== "draw" ) return;
     if ( poly ) { finishPoly(); return; }
     const hit = edgeAt(p);
@@ -275,6 +282,7 @@ function onUp(ev) {
     return;
   }
   if ( ev.button !== 0 ) return;
+  if ( mode === "edit" ) { Shape.up(ev, p); return; }
   if ( mode === "erase" ) {
     const trail = eraseTrail; eraseTrail = null;
     if ( trail ) Roads.edit((G) => Graph.erase(G, trail, Roads.brush().eraser * g() / 2, g()));
@@ -318,12 +326,28 @@ function toggleGuide() {
   Roads.setBrush({ k: k === "guide" ? lastPainted : "guide" });
 }
 
+/** One step of the [ ] keys: 0.1 square, finer (0.05) below 0.3; from 0.05 to 3 squares. */
+export function stepWidth(w, dir) {
+  const d = (dir > 0 ? w >= 0.3 : w > 0.3) ? 0.1 : 0.05;
+  return Math.round(Math.min(3, Math.max(0.05, w + d * dir)) * 100) / 100;
+}
+
 function onKey(e) {
   if ( !mode || typing(e) ) return;
   const k = e.key;
   if ( (e.ctrlKey || e.metaKey) && (k.toLowerCase() === "z" || k.toLowerCase() === "y") ) {
     e.preventDefault(); e.stopPropagation();
     if ( k.toLowerCase() === "y" || e.shiftKey ) Roads.redoEdit(); else Roads.undoEdit();
+    return;
+  }
+  if ( mode === "edit" ) {
+    if ( Shape.key(e) ) { e.preventDefault(); e.stopPropagation(); return; }
+    const road = Shape.selectedRoad();
+    if ( road && !e.ctrlKey && !e.metaKey && (k === "[" || k === "]") ) {
+      e.preventDefault(); e.stopPropagation();
+      const w = stepWidth(road.w, k === "]" ? 1 : -1), id = road.id;
+      Roads.edit((G) => { const x = G.edges.get(id); if ( !x || x.w === w ) return false; x.w = w; return true; });
+    }
     return;
   }
   if ( k === "Escape" && (poly || press || eraseTrail) ) { e.preventDefault(); e.stopPropagation(); cancel(); return; }
@@ -335,7 +359,7 @@ function onKey(e) {
     e.preventDefault(); e.stopPropagation();
     const b = Roads.brush(), d = k === "]" ? 0.1 : -0.1;
     if ( mode === "erase" ) Roads.setBrush({ eraser: Math.round(Math.min(4, Math.max(0.15, b.eraser + d * 2)) * 100) / 100 });
-    else Roads.setBrush({ w: Math.round(Math.min(3, Math.max(0.3, b.w + d)) * 100) / 100 });
+    else Roads.setBrush({ w: stepWidth(b.w, k === "]" ? 1 : -1) });
   }
 }
 
@@ -345,6 +369,7 @@ export function onCanvasReady() {
   teardownListeners();
   if ( !game.user.isGM ) return;
   if ( mode ) ensureGfx();
+  if ( mode === "edit" ) Shape.attach();
   // guide lines live under the editor marks; only the GM's client ever draws them
   guides = new PIXI.Graphics(); guides.eventMode = "none"; guides.zIndex = 850;
   canvas.interface.sortableChildren = true; canvas.interface.addChild(guides);
@@ -353,7 +378,10 @@ export function onCanvasReady() {
     down: onDown, move: onMove, up: onUp, key: onKey, cancel,
     menu: (e) => { if ( mode ) e.preventDefault(); },
     leave: () => { cursorAt = null; redraw(); },
-    dbl: (e) => { if ( mode === "draw" && poly ) { e.preventDefault(); e.stopPropagation(); finishPoly(); } }
+    dbl: (e) => {
+      if ( mode === "draw" && poly ) { e.preventDefault(); e.stopPropagation(); finishPoly(); }
+      else if ( mode === "edit" && Shape.dblclick(worldPoint(e)) ) { e.preventDefault(); e.stopPropagation(); }
+    }
   };
   view.addEventListener("pointerdown", listeners.down, true);
   view.addEventListener("pointermove", listeners.move);
@@ -367,7 +395,10 @@ export function onCanvasReady() {
   redraw();
 }
 
-function onRoadsEvent(kind) { if ( ["edited", "loaded", "brush", "params"].includes(kind) ) redraw(); }
+function onRoadsEvent(kind) {
+  if ( mode === "edit" && (kind === "edited" || kind === "loaded") && Shape.selectedEdge() != null && !Roads.state()?.G.edges.has(Shape.selectedEdge()) ) Shape.select(null);
+  if ( ["edited", "loaded", "brush", "params"].includes(kind) ) redraw();
+}
 export function onPan() { if ( mode || Roads.state()?.look.guides === "always" ) redraw(); }
 
 function teardownListeners() {
@@ -384,6 +415,7 @@ function teardownListeners() {
 
 export function teardown() {
   teardownListeners();
+  Shape.detach();
   for ( const o of [gfx, overlay, guides] ) if ( o && !o.destroyed ) o.destroy();
   gfx = overlay = guides = null; press = poly = eraseTrail = cursorAt = null; polyStraight = [];
 }

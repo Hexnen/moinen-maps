@@ -5,11 +5,11 @@ import { mountRoadControls } from "./panel.mjs";
  * Roads as a workspace section (scripts/workspace/registry.mjs: WorkspaceSection). Registered by scripts/roads/workspace.mjs, which
  * takes over the "roads" placeholder (same id).
  *
- * Tools (left of the bar): the hand (no road tool: the map behaves as usual), the road pen and the eraser. Options (the rest of the
+ * Tools (left of the bar): the hand (no road tool: the map behaves as usual), the road pen, the shape editor and the eraser. Options (the rest of the
  * bar): the brush (kind, width, lanes, one-way) or the eraser size, with undo and redo. Dock: the traffic, then the road look.
  */
 
-export const ROAD_TOOLS = { "mm-r-pick": null, "mm-r-draw": "draw", "mm-r-erase": "erase" };
+export const ROAD_TOOLS = { "mm-r-pick": null, "mm-r-draw": "draw", "mm-r-edit": "edit", "mm-r-erase": "erase" };
 
 let watching = false;
 /** Whatever tool the workspace hands over next (another section's, or none): the pen goes down unless it is a road tool. */
@@ -27,7 +27,8 @@ export function roadsSection() {
     tools: () => [
       { name: "mm-r-pick", order: 1, title: "MOINENMAPS.Roads.tool.pick", icon: "fa-solid fa-arrow-pointer" },
       { name: "mm-r-draw", order: 2, title: "MOINENMAPS.Roads.tool.draw", icon: "fa-solid fa-road", color: "#e0b04a" },
-      { name: "mm-r-erase", order: 3, title: "MOINENMAPS.Roads.tool.erase", icon: "fa-solid fa-eraser", color: "#ffffff" }
+      { name: "mm-r-edit", order: 3, title: "MOINENMAPS.Roads.tool.edit", icon: "fa-solid fa-bezier-curve", color: "#ffe08a" },
+      { name: "mm-r-erase", order: 4, title: "MOINENMAPS.Roads.tool.erase", icon: "fa-solid fa-eraser", color: "#ffffff" }
     ],
     onToolChange: (tool, active) => { if ( tool in ROAD_TOOLS ) Editor.setMode(active ? ROAD_TOOLS[tool] : null); },
     bar: (host, ctx) => {

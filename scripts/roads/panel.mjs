@@ -3,6 +3,7 @@ import * as Model from "./model.mjs";
 import * as Roads from "./roads.mjs";
 import * as Editor from "./editor.mjs";
 import { kindSwatch } from "./art.mjs";
+import * as Graph from "./graph.mjs";
 
 /**
  * The roads' controls, in three sections that can be mounted into any element: "brush" (the tool, road kind, width, lanes,
@@ -34,32 +35,54 @@ function brushHtml(p) {
     <div class="mm-rd-tools" role="group" aria-label="${esc(T("f.tool"))}">
       <button type="button" data-mode="draw" aria-pressed="${m === "draw"}"><i class="fa-solid fa-road" inert></i> ${esc(T("mode.draw"))}</button>
       <button type="button" data-mode="erase" aria-pressed="${m === "erase"}"><i class="fa-solid fa-eraser" inert></i> ${esc(T("mode.erase"))}</button>
+      <button type="button" data-mode="edit" aria-pressed="${m === "edit"}"><i class="fa-solid fa-bezier-curve" inert></i> ${esc(T("mode.edit"))}</button>
       <button type="button" data-act="undo" data-tooltip="${esc(T("undo"))}" aria-label="${esc(T("undo"))}"${Roads.canUndo() ? "" : " disabled"}><i class="fa-solid fa-rotate-left" inert></i></button>
       <button type="button" data-act="redo" data-tooltip="${esc(T("redo"))}" aria-label="${esc(T("redo"))}"${Roads.canRedo() ? "" : " disabled"}><i class="fa-solid fa-rotate-right" inert></i></button>
     </div>
     <div class="mm-rd-kinds" role="radiogroup" aria-label="${esc(T("f.kind"))}">${kinds}</div>
-    ${row(`${p}-w`, "width", range(`${p}-w`, "w", 0.3, 3, 0.1, b.w))}
+    ${row(`${p}-w`, "width", range(`${p}-w`, "w", 0.05, 3, 0.05, b.w))}
     ${row(`${p}-l`, "lanes", select(`${p}-l`, "l", [2, 1], b.l, "o.lanes"))}
     ${row(`${p}-o`, "oneway", check(`${p}-o`, "o", b.o))}
     ${row(`${p}-eraser`, "eraser", range(`${p}-eraser`, "eraser", 0.15, 4, 0.05, b.eraser))}
-    <p class="hint mm-rd-hint" aria-live="polite">${esc(T(m === "erase" ? "hintErase" : "hintDraw"))}</p></section>`;
+    <p class="hint mm-rd-hint" aria-live="polite">${esc(T(hintKey(m)))}</p></section>`;
 }
 
 /** The brush on one line, for a host's options bar (the workspace's bar classes: mm-ws-opt, mm-ws-btn, mm-ws-hint). */
+const hintKey = (m, short = false) => `${m === "erase" ? "hintErase" : m === "edit" ? "hintEdit" : "hintDraw"}${short ? "Short" : ""}`;
+
+/** The options bar of the edit tool: the selected road's own kind, width, lanes, one-way and speed. */
+function editBarHtml(p) {
+  const id = Editor.selectedEdge(), e = id != null ? Roads.state()?.G.edges.get(id) : null;
+  const undo = `<button type="button" class="mm-ws-btn" data-act="undo" aria-label="${esc(T("undo"))}" data-tooltip="${esc(T("undo"))}"${Roads.canUndo() ? "" : " disabled"}><i class="fa-solid fa-rotate-left" inert></i></button>
+    <button type="button" class="mm-ws-btn" data-act="redo" aria-label="${esc(T("redo"))}" data-tooltip="${esc(T("redo"))}"${Roads.canRedo() ? "" : " disabled"}><i class="fa-solid fa-rotate-right" inert></i></button>`;
+  if ( !e ) return `<div class="mm-rd-bar">${undo}<span class="mm-ws-hint">${esc(T("editPick"))}</span></div>`;
+  const kinds = Model.KINDS.slice().reverse().map((k) => `<button type="button" class="mm-rd-kind mm-rd-kind-sm" data-rkind="${k}" aria-pressed="${e.k === k}" aria-label="${esc(T(`kinds.${k}`))}" data-tooltip="${esc(T(`kinds.${k}`))}"><img src="${kindSwatch(k, 40, 16)}" alt="" inert></button>`).join("");
+  const opt = (id2, name, ctl) => `<div class="mm-ws-opt mm-ws-range"><label for="${id2}" data-tooltip="${esc(game.i18n.has(`MOINENMAPS.Roads.h.${name}`) ? T(`h.${name}`) : "")}">${esc(T(`f.${name}`))}</label>${ctl}</div>`;
+  return `<div class="mm-rd-bar" data-road="${e.id}"><div class="mm-rd-kinds mm-rd-kinds-bar" role="radiogroup" aria-label="${esc(T("f.kind"))}">${kinds}</div>
+    ${opt(`${p}-rw`, "width", range(`${p}-rw`, "rw", 0.05, 3, 0.05, e.w))}
+    <div class="mm-ws-opt"><label for="${p}-rl">${esc(T("f.lanes"))}</label>${select(`${p}-rl`, "rl", [2, 1], e.l, "o.lanes")}</div>
+    <label class="mm-ws-opt mm-ws-check" data-tooltip="${esc(T("h.oneway"))}"><input type="checkbox" name="ro"${e.o ? " checked" : ""}> <span>${esc(T("f.oneway"))}</span></label>
+    ${opt(`${p}-rsp`, "roadSpeed", range(`${p}-rsp`, "rsp", 0.2, 2, 0.1, e.sp ?? 1))}
+    <button type="button" class="mm-ws-btn" data-act="reverse" data-tooltip="${esc(T("reverse"))}" aria-label="${esc(T("reverse"))}"><i class="fa-solid fa-arrows-left-right" inert></i></button>
+    <button type="button" class="mm-ws-btn mm-danger" data-act="delroad" data-tooltip="${esc(T("deleteRoad"))}" aria-label="${esc(T("deleteRoad"))}"><i class="fa-solid fa-trash" inert></i></button>
+    ${undo}<span class="mm-ws-hint mm-rd-hint" data-short="1">${esc(T("hintEditShort"))}</span></div>`;
+}
+
 function barHtml(p) {
   const b = Roads.brush(), m = Editor.mode();
+  if ( m === "edit" ) return editBarHtml(p);
   const kinds = Model.KINDS.slice().reverse().map((k) => `<button type="button" class="mm-rd-kind mm-rd-kind-sm" data-kind="${k}" aria-pressed="${b.k === k}" aria-label="${esc(T(`kinds.${k}`))}" data-tooltip="${esc(T(`kinds.${k}`))}"><img src="${kindSwatch(k, 40, 16)}" alt="" inert></button>`).join("");
   const opt = (id, name, ctl) => `<div class="mm-ws-opt mm-ws-range"><label for="${id}" data-tooltip="${esc(game.i18n.has(`MOINENMAPS.Roads.h.${name}`) ? T(`h.${name}`) : "")}">${esc(T(`f.${name}`))}</label>${ctl}</div>`;
   const size = m === "erase"
     ? opt(`${p}-eraser`, "eraser", range(`${p}-eraser`, "eraser", 0.15, 4, 0.05, b.eraser))
     : `<div class="mm-rd-kinds mm-rd-kinds-bar" role="radiogroup" aria-label="${esc(T("f.kind"))}">${kinds}</div>
-       ${opt(`${p}-w`, "width", range(`${p}-w`, "w", 0.3, 3, 0.1, b.w))}
+       ${opt(`${p}-w`, "width", range(`${p}-w`, "w", 0.05, 3, 0.05, b.w))}
        <div class="mm-ws-opt"><label for="${p}-l">${esc(T("f.lanes"))}</label>${select(`${p}-l`, "l", [2, 1], b.l, "o.lanes")}</div>
        <label class="mm-ws-opt mm-ws-check" data-tooltip="${esc(T("h.oneway"))}"><input type="checkbox" name="o"${b.o ? " checked" : ""}> <span>${esc(T("f.oneway"))}</span></label>`;
   return `<div class="mm-rd-bar">${size}
     <button type="button" class="mm-ws-btn" data-act="undo" aria-label="${esc(T("undo"))}" data-tooltip="${esc(T("undo"))}"${Roads.canUndo() ? "" : " disabled"}><i class="fa-solid fa-rotate-left" inert></i></button>
     <button type="button" class="mm-ws-btn" data-act="redo" aria-label="${esc(T("redo"))}" data-tooltip="${esc(T("redo"))}"${Roads.canRedo() ? "" : " disabled"}><i class="fa-solid fa-rotate-right" inert></i></button>
-    <span class="mm-ws-hint mm-rd-hint" data-short="1">${esc(T(m === "erase" ? "hintEraseShort" : "hintDrawShort"))}</span></div>`;
+    <span class="mm-ws-hint mm-rd-hint" data-short="1">${esc(T(hintKey(m, true)))}</span></div>`;
 }
 
 function trafficHtml(p) {
@@ -69,7 +92,8 @@ function trafficHtml(p) {
     ${row(`${p}-on`, "on", check(`${p}-on`, "on", t.on))}
     ${row(`${p}-density`, "density", range(`${p}-density`, "density", 0, 100, 5, Math.round(t.density * 100)))}
     ${row(`${p}-speed`, "speed", range(`${p}-speed`, "speed", 0.2, 3, 0.1, t.speed))}
-    ${row(`${p}-size`, "size", range(`${p}-size`, "size", 0.15, 1.5, 0.05, t.size))}
+    ${row(`${p}-size`, "size", range(`${p}-size`, "size", 0.03, 1.5, 0.01, t.size))}
+    ${row(`${p}-vary`, "vary", range(`${p}-vary`, "vary", 0, 50, 5, Math.round((t.vary ?? 0) * 100)))}
     ${row(`${p}-max`, "max", range(`${p}-max`, "max", 0, 150, 5, t.max))}
     <div class="mm-rd-types" role="group" aria-label="${esc(T("f.types"))}"><span class="mm-rd-types-label">${esc(T("f.types"))}</span>${types}</div>
     ${row(`${p}-side`, "side", select(`${p}-side`, "side", ["right", "left"], t.side, "o.side"))}
@@ -106,6 +130,10 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   host.innerHTML = html();
   const onClick = async (ev) => {
     const b = ev.target.closest("button"); if ( !b || !host.contains(b) ) return;
+    const road = b.closest("[data-road]")?.dataset.road;
+    if ( b.dataset.rkind && road ) { Roads.setRoad(Number(road), { k: b.dataset.rkind }); return; }
+    if ( b.dataset.act === "reverse" && road ) { Roads.edit((G) => Graph.reverseEdge(G, Number(road))); return; }
+    if ( b.dataset.act === "delroad" && road ) { Roads.edit((G) => Graph.removeEdge(G, Number(road), Roads.gridSize())); return; }
     if ( b.dataset.kind ) { Roads.setBrush({ k: b.dataset.kind }); if ( !Editor.mode() ) Editor.setMode("draw"); return; }
     if ( b.dataset.mode ) { Editor.setMode(Editor.mode() === b.dataset.mode ? null : b.dataset.mode); return; }
     const act = b.dataset.act;
@@ -120,6 +148,12 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   const onInput = (ev) => {
     const el = ev.target.closest?.("[name]"); if ( !el || !host.contains(el) ) return;
     const name = el.name, v = el.type === "checkbox" ? el.checked : el.value;
+    const road = el.closest("[data-road]")?.dataset.road;
+    if ( road && ["rw", "rl", "ro", "rsp"].includes(name) ) {
+      const key = { rw: "w", rl: "l", ro: "o", rsp: "sp" }[name];
+      return Roads.setRoad(Number(road), { [key]: name === "ro" ? !!v : Number(v) });
+    }
+    if ( name === "vary" ) return Roads.setTraffic({ vary: Number(v) / 100 });
     if ( ["w", "l", "o", "eraser"].includes(name) ) return Roads.setBrush({ [name]: name === "o" ? !!v : Number(v) });
     if ( name.startsWith("kind:") ) {
       const kinds = Model.BODY_TYPES.filter((k) => host.querySelector(`[name="kind:${k}"]`)?.checked);
@@ -137,7 +171,9 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   host.addEventListener("click", onClick);
   host.addEventListener("change", onInput);
   const refresh = () => sync(host);
-  const hook = (kind) => { if ( kind === "loaded" || (kind === "mode" && sections.includes("bar")) ) host.innerHTML = html(); else refresh(); };
+  // the bar is rebuilt when the tool or (edit tool) the selected road changes; everything else updates in place
+  const rebuild = (kind) => kind === "loaded" || (sections.includes("bar") && (kind === "mode" || kind === "select" || (kind === "edited" && Editor.mode() === "edit")));
+  const hook = (kind) => { if ( rebuild(kind) ) host.innerHTML = html(); else refresh(); };
   Hooks.on("moinenMapsRoads", hook);
   const timer = setInterval(() => { const s = host.querySelector(".mm-rd-status"); if ( s ) s.textContent = statusText(); }, 1000);
   return {
@@ -157,11 +193,11 @@ function sync(host) {
   set("w", b.w); set("l", b.l); set("o", b.o); set("eraser", b.eraser);
   host.querySelectorAll("[data-kind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.kind === b.k)));
   host.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === m)));
-  host.querySelectorAll(".mm-rd-hint").forEach((h) => { h.textContent = T(`${m === "erase" ? "hintErase" : "hintDraw"}${h.dataset.short ? "Short" : ""}`); });
+  host.querySelectorAll(".mm-rd-hint").forEach((h) => { h.textContent = T(hintKey(m, !!h.dataset.short)); });
   const u = host.querySelector('[data-act="undo"]'), r = host.querySelector('[data-act="redo"]');
   if ( u ) u.disabled = !Roads.canUndo(); if ( r ) r.disabled = !Roads.canRedo();
   if ( t ) {
-    set("on", t.on); set("density", Math.round(t.density * 100)); set("speed", t.speed); set("size", t.size); set("max", t.max);
+    set("on", t.on); set("density", Math.round(t.density * 100)); set("speed", t.speed); set("size", t.size); set("vary", Math.round((t.vary ?? 0) * 100)); set("max", t.max);
     set("side", t.side); set("lights", t.lights); set("who", t.who); set("style", t.style);
     for ( const k of Model.BODY_TYPES ) set(`kind:${k}`, t.kinds.includes(k));
   }
