@@ -18,7 +18,7 @@
  * the placement table, so a single PNG carries the whole bake.
  */
 
-export const CORE_VERSION = 10;
+export const CORE_VERSION = 11;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -150,7 +150,8 @@ function fnvStr(s, h = 2166136261) { for ( let i = 0; i < s.length; i++ ) h = Ma
  *
  * @param {object} I
  *   mask Uint8Array (mw*mh), mw, mh, K (art px per mask px), aw, ah (art grid), seed, params,
- *   map: { w: aw, h: ah, data: RGBA of the WHOLE scene at art resolution }, mapKey (identifies the map pixels), onProgress(p)
+ *   map: { w: aw, h: ah, data: RGBA of the WHOLE scene at art resolution }, mapKey (identifies the map pixels), onProgress(p),
+ *   paths: brush paths [[x, y], ...] in art px (used when params.directional)
  * @param {Map} [cache]  area hash -> area result (kept by the worker between bakes)
  * @returns {{ sheet: {w, h, data: Uint8ClampedArray}, metaRows, meta: Int16Array, count, stats }}
  */
@@ -311,6 +312,15 @@ export function bake(I, cache = null) {
         h = Math.imul(h ^ v, 16777619);
       }
     }
+    // follows the stroke: the brush paths through this window are inputs of the area (part of its hash)
+    win.paths = [];
+    if ( P.directional ) for ( const path of I.paths ?? [] ) {
+      if ( !path.some(([x, y]) => x >= RX && y >= RY && x < RX + W && y < RY + H) ) continue;
+      const loc = path.map(([x, y]) => [x - RX, y - RY]);
+      win.paths.push(loc);
+      for ( const [x, y] of loc ) h = fnvInts(h, Math.round(x * 4) + 65536, Math.round(y * 4) + 65536);
+      h = fnvInts(h, 0x7fff);
+    }
     const hash = h >>> 0;
     // the area's own id for its random streams: its first pixel (absolute), the same whatever else is on the map
     const ax = FX + c.anchor % FW, ay = FY + Math.floor(c.anchor / FW);
@@ -393,11 +403,38 @@ function bakeArea(A, P, seed, uid, jag) {
   chamfer(din, W, H); chamfer(dout, W, H);
   const occ = new Uint8Array(N);
   const stats = { shards: 0, chips: 0, pulverised: 0, materials: [] };
-  const C = { id: 0, uid, px: A.px };
+  const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
   fracture(C);
   fates(C);
   drawBase(C);
+
+  /* ---------------------------------------------------------------- the brush path (follows the stroke) */
+  /** The stroke that made this area: the path with most points on it (window coordinates), when it is long enough to matter. */
+  function pickPath(paths) {
+    let best = null, bn = 0;
+    for ( const pts of paths ?? [] ) {
+      let n = 0, len = 0;
+      for ( let k = 0; k < pts.length; k++ ) {
+        const x = Math.round(pts[k][0]), y = Math.round(pts[k][1]);
+        if ( x >= 0 && y >= 0 && x < W && y < H && own[y * W + x] ) n++;
+        if ( k ) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+      }
+      if ( n >= 3 && n > bn && len >= 10 ) { bn = n; best = { pts, length: len }; }
+    }
+    return best;
+  }
+  /** At (x, y): the path's direction at its nearest point (ux, uy) and the side of the path the point lies on (+1 / -1). */
+  function pathFrame(x, y) {
+    const pts = C.path.pts;
+    let bd = Infinity, ux = 1, uy = 0, side = 1;
+    for ( let k = 1; k < pts.length; k++ ) {
+      const [x0, y0] = pts[k - 1], [x1, y1] = pts[k], sx = x1 - x0, sy = y1 - y0, l2 = sx * sx + sy * sy || 1;
+      const t = clamp(((x - x0) * sx + (y - y0) * sy) / l2, 0, 1), px = x0 + sx * t, py = y0 + sy * t, d = (x - px) ** 2 + (y - py) ** 2;
+      if ( d < bd ) { bd = d; const l = Math.sqrt(l2); ux = sx / l; uy = sy / l; side = Math.sign(ux * (y - py) - uy * (x - px)) || 1; }
+    }
+    return { ux, uy, side };
+  }
 
   /* ---------------------------------------------------------------- analysis */
   function analyse(C) {
@@ -447,6 +484,28 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( bi >= 0 ) C.epi.push({ x: bi % W, y: Math.floor(bi / W), R: 1 });
       }
       if ( !C.epi.length ) C.epi.push({ x: Math.round(C.cx), y: Math.round(C.cy), R: 1 });
+    }
+    // follows the stroke: the impacts lie along the brush path, in the order it was drawn, and the axis is the path's own
+    if ( C.path ) {
+      const pts = C.path.pts, step = C.type === T_GASH ? Infinity : 2.6 * maxD + 6;
+      const a0 = pts[0], a1 = pts[pts.length - 1], dl = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1;
+      C.axis = [(a1[0] - a0[0]) / dl, (a1[1] - a0[1]) / dl]; C.len = Math.max(C.len, C.path.length); C.elong = Math.max(C.elong, 3);
+      if ( C.type !== T_GASH ) {
+        C.epi = [];
+        let acc = step / 2;
+        for ( let k = 1; k < pts.length; k++ ) {
+          const [x0, y0] = pts[k - 1], [x1, y1] = pts[k], sl = Math.hypot(x1 - x0, y1 - y0);
+          for ( let s = 0; s < sl; s += 1 ) {
+            if ( (acc += 1) < step ) continue;
+            acc = 0;
+            const px = x0 + (x1 - x0) * s / sl, py = y0 + (y1 - y0) * s / sl;
+            let bi = -1, bs = -1;
+            for ( const i of C.px ) { const x = i % W, y = (i - x) / W; if ( (x - px) ** 2 + (y - py) ** 2 > (step / 2) ** 2 ) continue; const sc = score(i); if ( sc > bs ) { bs = sc; bi = i; } }
+            if ( bi >= 0 && C.epi.length < 12 ) C.epi.push({ x: bi % W, y: Math.floor(bi / W), R: 1 });
+          }
+        }
+        if ( !C.epi.length ) C.epi.push({ x: Math.round(pts[0][0]), y: Math.round(pts[0][1]), R: 1 });
+      }
     }
     // each pixel belongs to its nearest epicentre; R = that impact's reach
     C.owner = new Uint8Array(n);
@@ -525,7 +584,9 @@ function bakeArea(A, P, seed, uid, jag) {
     });
     const cellOf = new Int32Array(C.px.length);
     // wood splits along its grain: distance across the grain counts more, so cells grow into long splinters
-    const wood = C.cls.mat === M.wood, kx = wood && !C.cls.grainX ? 0.3 : 1, ky = wood && C.cls.grainX ? 0.3 : 1, kmin = Math.min(kx, ky);
+    const wood = C.cls.mat === M.wood, kx = wood && !C.cls.grainX ? 0.3 : 1, ky = wood && C.cls.grainX ? 0.3 : 1;
+    // follows the stroke: distance across the path counts less, so plates grow long across it and tear like a furrow
+    const ACROSS = 0.45, kmin = C.path ? Math.min(kx, ky, ACROSS) : Math.min(kx, ky);
     const maxRad = Math.max(gw, gh);
     C.px.forEach((i, k) => {
       const x = i % W, y = (i - x) / W;
@@ -535,9 +596,14 @@ function bakeArea(A, P, seed, uid, jag) {
       const qy = y + 0.5 + (vnoise(x / 2.3, y / 2.3, seed + 202) - 0.5) * wa + (jag ? (vnoise(x / 0.9, y / 0.9, seed + 204) - 0.5) * 1.8 * jag : 0);
       let best = -1, bd = Infinity;
       const bx = Math.floor(qx / B) + 1, by = Math.floor(qy / B) + 1;
+      const f = C.path ? pathFrame(x, y) : null;
       const visit = (X, Y) => {
         if ( X < 0 || Y < 0 || X >= gw || Y >= gh ) return;
-        for ( let s = head[Y * gw + X]; s >= 0; s = nxt[s] ) { const d = ((sxs[s] - qx) * kx) ** 2 + ((sys[s] - qy) * ky) ** 2; if ( d < bd ) { bd = d; best = s; } }
+        for ( let s = head[Y * gw + X]; s >= 0; s = nxt[s] ) {
+          const dx = sxs[s] - qx, dy = sys[s] - qy;
+          const d = f ? (dx * f.ux + dy * f.uy) ** 2 + (ACROSS * (dy * f.ux - dx * f.uy)) ** 2 : (dx * kx) ** 2 + (dy * ky) ** 2;
+          if ( d < bd ) { bd = d; best = s; }
+        }
       };
       for ( let rad = 0; rad <= maxRad; rad++ ) {
         if ( best >= 0 && ((rad - 1) * B * kmin) ** 2 > bd ) break;
@@ -568,6 +634,11 @@ function bakeArea(A, P, seed, uid, jag) {
       const e = C.epi[cell.seed.e] ?? C.epi[0];
       let ox = cx - e.x, oy = cy - e.y; const dl = Math.hypot(ox, oy) || 1; ox /= dl; oy /= dl;
       if ( type === T_GASH ) { const nx = -C.axis[1], ny = C.axis[0], q = (cx - C.cx) * nx + (cy - C.cy) * ny; ox = nx * Math.sign(q || 1); oy = ny * Math.sign(q || 1); }
+      else if ( C.path ) {
+        // a furrow: the spoil goes out to both sides of the path, a little behind the plough
+        const f = pathFrame(cx, cy), side = f.side || 1;
+        ox = -f.uy * side - f.ux * 0.35; oy = f.ux * side - f.uy * 0.35; const l = Math.hypot(ox, oy) || 1; ox /= l; oy /= l;
+      }
       const u = clamp(dl / Math.max(2, e.R), 0, 1.2);
       // pixels of the plate: one-pixel cracks on its right and bottom borders (towards other plates), a ragged rim when broken
       const keep = [];

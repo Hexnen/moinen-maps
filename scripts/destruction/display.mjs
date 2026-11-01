@@ -208,9 +208,10 @@ export class DestructionDisplay {
   /**
    * The entry of a group. `start` (performance.now() time; may lie in the past for a late start), `o` the impact (art px; default the
    * area's epicentre), `dir` the stroke direction (unit, art px) or null, `box` the changed part (art px; null = all of it),
-   * `fadeRest` fades the rest in (an area that replaced an older one).
+   * `fadeRest` fades the rest in (an area that replaced an older one). `path` [[x, y, ms], ...] (art px): the brush path of the stroke,
+   * when the damage follows the stroke: the front then runs along it at the speed it was drawn.
    */
-  enter(g, { start = performance.now(), o = null, dir = null, box = null, fadeRest = false } = {}) {
+  enter(g, { start = performance.now(), o = null, dir = null, box = null, fadeRest = false, path = null } = {}) {
     this.endAnim(g);
     const now = performance.now();
     if ( !this.look.entry ) return;
@@ -229,6 +230,7 @@ export class DestructionDisplay {
     }
     const Rmax = Math.max(...[[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]].map(([x, y]) => Math.hypot(x - ox, y - oy))) + 2;
     const delay = L.delay * k, reveal = L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
+    const pathFront = this.pathFront(path, g, k);
     const front = (x, y) => {   // 0..1: when the front reaches (x, y)
       if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
       const f = clamp01(Math.hypot(x - ox, y - oy) / Rmax);
@@ -238,7 +240,7 @@ export class DestructionDisplay {
     for ( const p of g.pieces ) {
       if ( !inBox(p.sx, p.sy) ) continue;
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
-      const t0 = start + delay + reveal * Math.sqrt(front(p.sx, p.sy)) * 0.9;
+      const t0 = pathFront ? start + 40 * k + pathFront.at(p.sx, p.sy) : start + delay + reveal * Math.sqrt(front(p.sx, p.sy)) * 0.9;
       const dur = (p.thrown ? 380 + Math.min(420, dd * 14) : 260 + Math.min(200, dd * 30)) * L.flight * k;
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw + (info.type === "cracks" ? 1.5 : 0);
       list.push({ p, t0, dur, arc, dusted: false });
@@ -248,11 +250,74 @@ export class DestructionDisplay {
     const mask = new PIXI.Graphics();
     g.baseCont.addChild(mask);
     g.baseSpr.mask = mask;
-    g.anim = { start, delay, reveal, ox, oy, Rmax, wipe, box, list, byPiece, mask, fx: [], end: start + delay + reveal + 1400 * k, fired: new Set(), type: info.type, k, pw,
+    g.anim = { start, delay: pathFront ? 40 * k : delay, reveal: pathFront ? pathFront.D : reveal, ox, oy, Rmax, wipe: pathFront ? null : wipe, box, list, byPiece, mask, fx: [],
+      path: pathFront, end: start + (pathFront ? pathFront.D + 40 * k : delay + reveal) + 1400 * k, fired: new Set(), type: info.type, k, pw,
       fadeRest: fadeRest ? { start, dur: 260 } : null };
     if ( fadeRest ) for ( const p of g.pieces ) if ( !inBox(p.sx, p.sy) ) { p.fading = true; if ( p.spr ) p.spr.alpha = 0; }
     this.stats.entries++;
     this.drawMask(g, now);
+  }
+
+  /**
+   * The front of a stroke that is followed: per path point the time it is reached (the drawing speed; the whole run clamped to
+   * 0.35 .. 2.2 s and divided by the entry speed), the head at a time, and when the front reaches any point (its nearest path point
+   * plus a little per pixel away from the path). Short taps return null (radial entry).
+   */
+  pathFront(path, g, k) {
+    if ( !path || path.length < 2 ) return null;
+    const pts = path.map((q) => [q[0], q[1]]);
+    let len = 0; const cum = [0];
+    for ( let i = 1; i < pts.length; i++ ) { len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); cum.push(len); }
+    if ( len < Math.max(12, g.info.R * 1.2) ) return null;
+    const T = path[path.length - 1][2] || 0;
+    const D = Math.min(2200, Math.max(350, T || len * 6)) * k;
+    const tt = path.map((q, i) => T > 0 ? (q[2] || 0) / T * D : cum[i] / len * D);
+    const near = (x, y) => {
+      let bd = Infinity, bt = 0;
+      for ( let i = 1; i < pts.length; i++ ) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], sx = x1 - x0, sy = y1 - y0, l2 = sx * sx + sy * sy || 1;
+        const t = clamp01(((x - x0) * sx + (y - y0) * sy) / l2), d = (x - x0 - sx * t) ** 2 + (y - y0 - sy * t) ** 2;
+        if ( d < bd ) { bd = d; bt = tt[i - 1] + (tt[i] - tt[i - 1]) * t; }
+      }
+      return [Math.sqrt(bd), bt];
+    };
+    let wr = 6;
+    for ( const p of g.pieces ) { const [d] = near(p.sx, p.sy); if ( d + 6 > wr ) wr = Math.min(d + 6, 80); }
+    const head = (el) => {
+      for ( let i = 1; i < pts.length; i++ ) if ( tt[i] >= el ) {
+        const f = (el - tt[i - 1]) / ((tt[i] - tt[i - 1]) || 1);
+        return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f, pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]];
+      }
+      return null;
+    };
+    return { pts, tt, D, wr, head, at: (x, y) => { const [d, t] = near(x, y); return t + d * 4 * k; } };
+  }
+
+  /** What rides on the head of a followed stroke: rolling explosions, a fire front, water surging in behind, a cave-in, a racing fracture, a claw. */
+  pathEffects(g, a, now, el) {
+    const P = a.path, h = P.head(el - a.delay); if ( !h ) return;
+    const [x, y, dx, dy] = h, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, type = a.type, pw = a.pw;
+    if ( now < (a.nextFx ?? 0) ) return;
+    a.nextFx = now + (type === "blast" ? 110 : 45) * a.k;
+    const side = () => (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 0.7) * P.wr;
+    if ( type === "blast" ) {
+      const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
+      a.fx.push({ g: gr, kind: "flash", t0: now, dur: 120 * a.k, color: 0xfff1c4, maxR: P.wr * 0.5 * pw, x, y });
+      this.burst(x, y, P.wr * 0.5 * pw, now, { n: 8 });
+    } else if ( type === "scorch" ) {
+      for ( let q = 0; q < 3; q++ ) { const s = side(); this.spawn({ x: x - uy * s, y: y + ux * s, vx: -ux * 4, vy: -uy * 4, rise: -6 - Math.random() * 4, life: 700 + Math.random() * 500, color: 0xff9a3c, flicker: true }); }
+      if ( Math.random() < 0.4 ) this.spawn({ x, y, vx: 0, vy: 0, rise: -4, life: 1300, color: 0x5a524c, alpha: 0.7, size: 2 });
+    } else if ( type === "flood" ) {
+      for ( let q = 0; q < 2; q++ ) { const s = side() * 0.6; this.spawn({ x: x - ux * 6 - uy * s, y: y - uy * 6 + ux * s, vx: ux * 10, vy: uy * 10, life: 500, color: 0xe6f4ff, alpha: 0.9, drag: 3 }); }
+    } else if ( type === "collapse" ) {
+      const s = side(); this.spawn({ x: x - uy * s, y: y + ux * s, vx: 0, vy: 0, rise: -7, life: 800, color: 0xb9ae9e, alpha: 0.8, size: 2 });
+    } else if ( type === "cracks" ) {
+      this.spawn({ x, y, vx: ux * 6, vy: uy * 6, rise: -3, life: 380, color: 0xc8beb0, alpha: 0.7 });
+    } else {
+      for ( let q = 0; q < 2; q++ ) { const s = side() * 0.8; this.spawn({ x: x - uy * s, y: y + ux * s, vx: ux * 22 + (Math.random() - 0.5) * 8, vy: uy * 22 - 6, fall: 30, life: 280, color: Math.random() < 0.5 ? 0xfff0b0 : 0xffc860, drag: 2 }); }
+    }
+    // dust trailing behind the head
+    if ( type !== "flood" && Math.random() < 0.6 ) this.spawn({ x: x - ux * 4, y: y - uy * 4, vx: -ux * 3, vy: -uy * 3, rise: -2, life: 700, color: 0xcfc6b8, alpha: 0.7, drag: 2 });
   }
 
   /** Everything enters again (Detonate), from each area's own impact. */
@@ -274,7 +339,15 @@ export class DestructionDisplay {
     const t = clamp01((now - a.start - a.delay) / a.reveal), e = a.type === "collapse" ? t * t * (3 - 2 * t) : easeOut(t);
     m.clear().beginFill(0xFFFFFF);
     const X = (x) => o.x + x * ap, Y = (y) => o.y + y * ap;
-    if ( a.wipe ) {
+    if ( a.path ) {
+      // the ruin opens behind the head of the stroke: a disc at every path point already passed, and at the head
+      const P = a.path, el = now - a.start - a.delay;
+      if ( el >= P.D ) m.drawRect(X(r.x0 - 4), Y(r.y0 - 4), (r.x1 - r.x0 + 8) * ap, (r.y1 - r.y0 + 8) * ap);
+      else {
+        for ( let i = 0; i < P.pts.length && P.tt[i] <= el; i++ ) m.drawCircle(X(P.pts[i][0]), Y(P.pts[i][1]), P.wr * ap);
+        const h = P.head(el); if ( h ) m.drawCircle(X(h[0]), Y(h[1]), P.wr * ap); else m.drawRect(X(a.ox), Y(a.oy), 0.01, 0.01);
+      }
+    } else if ( a.wipe ) {
       const { u, p0, p1 } = a.wipe, f = p0 + (p1 - p0) * e, n = [-u[1], u[0]], B = a.Rmax + 4;
       const pts = [[p0, -B], [f, -B], [f, B], [p0, B]].map(([s, q]) => [a.ox + u[0] * s + n[0] * q, a.oy + u[1] * s + n[1] * q]);
       m.drawPolygon(pts.flatMap(([x, y]) => [X(x), Y(y)]));
@@ -446,7 +519,8 @@ export class DestructionDisplay {
       const gr = new PIXI.Graphics(); gr.eventMode = "none"; this.fx.addChild(gr);
       a.fx.push({ g: gr, kind: "ring", t0: a.start + at, dur, color, maxR, width });
     });
-    if ( type === "blast" ) {
+    if ( a.path ) this.pathEffects(g, a, now, el);
+    else if ( type === "blast" ) {
       once("flash", 0, () => {
         const gr = new PIXI.Graphics(); gr.eventMode = "none"; gr.blendMode = PIXI.BLEND_MODES.ADD; this.fx.addChild(gr);
         a.fx.push({ g: gr, kind: "flash", t0: a.start, dur: 140 * k, color: 0xfff1c4, maxR: R * 0.45 * pw });
@@ -488,7 +562,7 @@ export class DestructionDisplay {
       if ( t >= 1 ) { f.g.destroy(); a.fx.splice(i, 1); continue; }
       if ( t < 0 ) continue;
       f.g.clear();
-      if ( f.kind === "flash" ) f.g.beginFill(f.color, 0.9 * (1 - t)).drawCircle(X(a.ox), Y(a.oy), f.maxR * (0.6 + 0.6 * t) * ap).endFill();
+      if ( f.kind === "flash" ) f.g.beginFill(f.color, 0.9 * (1 - t)).drawCircle(X(f.x ?? a.ox), Y(f.y ?? a.oy), f.maxR * (0.6 + 0.6 * t) * ap).endFill();
       else f.g.lineStyle(Math.max(1, f.width * ap), f.color, 0.85 * (1 - t)).drawEllipse(X(a.ox), Y(a.oy), f.maxR * easeOut(t) * ap, f.maxR * easeOut(t) * 0.8 * ap);
     }
   }

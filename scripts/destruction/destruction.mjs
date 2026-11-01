@@ -97,6 +97,10 @@ const lookOf = (P) => ({ entry: P.entry && P.anim, speed: P.entrySpeed, power: P
 const union = (a, b) => !a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
 /** Mask box -> art box (a little wider: shards near the edge of a stroke move too). */
 const artBox = (b) => b && { x0: b.x0 * Model.K - 3, y0: b.y0 * Model.K - 3, x1: (b.x1 + 1) * Model.K + 3, y1: (b.y1 + 1) * Model.K + 3 };
+/** The stored brush paths as [[x, y, ms], ...] (art px). */
+const unflat = (p) => { const out = []; for ( let i = 0; i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
+const pathsOf = (S) => (S.paths ?? []).map((q) => unflat(q.p ?? []).map(([x, y]) => [x, y]));
+const pathById = (id) => { const q = id && S?.paths?.find((r) => r.id === id); return q ? unflat(q.p) : null; };
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
 /* ---------------------------------------------------------------- baking */
@@ -155,7 +159,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     Object.assign(status, { baking: true, progress: 0, error: "" }); tell("status");
     try {
       const t = performance.now();
-      const input = { mask, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+      const input = { mask, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params, paths: S.params.directional ? pathsOf(S) : [] };
       const res = await runBake(input, () => { const t1 = performance.now(); const m = sceneMap(S); T.map = (T.map ?? 0) + performance.now() - t1; return m; },
         { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
       if ( my !== gen ) return;
@@ -211,7 +215,8 @@ function playEntries(added, removed, taken, mask, first) {
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
       if ( sNow - e.t > ENTRY_WINDOW ) continue;
-      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: e.o ?? null, dir: e.d ?? null, box: e.b ?? null, fadeRest: !!e.b });
+      display.enter(g, { start: pNow + Math.max(0, e.t - sNow), o: e.o ?? null, dir: e.d ?? null, box: e.b ?? null, fadeRest: !!e.b,
+        path: S.params.directional ? pathById(e.p) : null });
       continue;
     }
     if ( first && !taken.length && !all ) continue;   // what was already there when the scene opened
@@ -221,8 +226,9 @@ function playEntries(added, removed, taken, mask, first) {
     const box = replaced && !all ? hits.reduce((u, s) => union(u, s.box), null) : null;
     const s0 = hits[0], o = all ? null : s0?.a ?? null;
     const d = s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
-    display.enter(g, { start: pNow, o, dir: g.info.type === "gash" || S.params.directional ? d : null, box, fadeRest: !!box });
-    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: box });
+    const sp = !all && S.params.directional ? hits.find((s) => s.path) : null;
+    display.enter(g, { start: pNow, o, dir: g.info.type === "gash" || S.params.directional ? d : null, box, fadeRest: !!box, path: sp?.path ?? null });
+    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: box, p: sp?.pid ?? null });
   }
 }
 
@@ -292,7 +298,14 @@ export function edited(box, stroke = null) {
   if ( box ) {
     const ab = artBox(box);
     const a = stroke?.a ? toArt(stroke.a) : [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2];
-    strokes.push({ box: ab, a, b: stroke?.b ? toArt(stroke.b) : null });
+    let path = null, pid = null;
+    // follows the stroke: the brush path goes into the scene flag (art px, ms since the stroke began), the bake and the entry read it
+    if ( S.params.directional && stroke?.path?.length > 1 && !stroke.erase ) {
+      path = stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; });
+      pid = foundry.utils.randomID(8);
+      S.paths = [...(S.paths ?? []), { id: pid, p: path.flat() }].slice(-48);
+    }
+    strokes.push({ box: ab, a, b: stroke?.b ? toArt(stroke.b) : null, path, pid });
   }
   scheduleBake(); scheduleSave();
   tell("edited");
