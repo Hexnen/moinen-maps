@@ -18,6 +18,10 @@ let mode = null;
 let gfx = null, overlay = null, listeners = null;
 let press = null;          // { x, y, sx, sy, raw: [...], drag }
 let poly = null;           // clicked points [x, y, ...] of a road being drawn point by point
+let polyStraight = [];     // per span of `poly`: clicked with Shift (a straight span)
+let guides = null;         // the GM's view of the guide lines (never shown to players)
+let shiftDown = false;
+let lastPainted = "asphalt";
 let eraseTrail = null;     // flat world points while erasing
 let cursorAt = null;
 let lastClick = { t: 0, x: 0, y: 0 };
@@ -38,7 +42,7 @@ export function setMode(m) {
   if ( m && !game.user.isGM ) return;
   if ( m === mode ) return;
   mode = m;
-  press = null; poly = null; eraseTrail = null;
+  press = null; poly = null; polyStraight = []; eraseTrail = null;
   document.body.classList.toggle("mm-painting-roads", !!mode);
   if ( mode && canvas.ready ) ensureGfx();
   redraw();
@@ -57,6 +61,89 @@ function ensureGfx() {
 
 function trace(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); }
 
+/** A polyline offset sideways by `off` (the edges of a guide's corridor). */
+function offset(p, off) {
+  const n = p.length >> 1, out = new Array(n * 2);
+  for ( let i = 0; i < n; i++ ) {
+    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+    let dx = p[i1 * 2] - p[i0 * 2], dy = p[i1 * 2 + 1] - p[i0 * 2 + 1];
+    const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    out[i * 2] = p[i * 2] - dy * off; out[i * 2 + 1] = p[i * 2 + 1] + dx * off;
+  }
+  return out;
+}
+
+function dashed(G, p, dash, gap) {
+  let on = true, left = dash;
+  G.moveTo(p[0], p[1]);
+  for ( let i = 2; i < p.length; i += 2 ) {
+    let ax = p[i - 2], ay = p[i - 1];
+    const bx = p[i], by = p[i + 1];
+    let seg = Math.hypot(bx - ax, by - ay);
+    while ( seg > 1e-9 ) {
+      const t = Math.min(seg, left), f = t / seg;
+      const x = ax + (bx - ax) * f, y = ay + (by - ay) * f;
+      if ( on ) G.lineTo(x, y); else G.moveTo(x, y);
+      ax = x; ay = y; seg -= t; left -= t;
+      if ( left <= 1e-6 ) { on = !on; left = on ? dash : gap; }
+    }
+  }
+}
+
+/**
+ * Guide lines (roads traced over the map's own drawing): a faint corridor as wide as the road with a dashed centre line and
+ * one-way arrows. GM only: while a road tool is in hand, or always when the scene says so. Players never see them.
+ */
+function drawGuides() {
+  if ( !guides || guides.destroyed ) return;
+  guides.clear();
+  const R = Roads.state();
+  if ( !R || !game.user.isGM || !(mode || R.look.guides === "always") ) return;
+  const z = zoom(), gs = g();
+  for ( const e of R.G.edges.values() ) {
+    if ( e.k !== "guide" ) continue;
+    const p = Graph.edgeCurve(e, gs).p, W = e.w * gs;
+    guides.lineStyle({ width: W, color: 0x46D0D0, alpha: mode ? 0.16 : 0.1, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND }); trace(guides, p);
+    for ( const s of [-0.5, 0.5] ) { guides.lineStyle({ width: 1.2 / z, color: 0x46D0D0, alpha: 0.7 }); trace(guides, offset(p, W * s)); }
+    guides.lineStyle({ width: 3 / z, color: 0x15110F, alpha: 0.5 }); dashed(guides, p, 10 / z, 7 / z);
+    guides.lineStyle({ width: 1.5 / z, color: 0xE8F4FF, alpha: 0.95 }); dashed(guides, p, 10 / z, 7 / z);
+    if ( e.o ) {
+      const ss = Graph.lengths(p), L = ss[ss.length - 1], a = Math.min(W * 0.3, 14 / z);
+      for ( let s = gs; s < L - gs * 0.5; s += gs * 2 ) {
+        const [x, y] = Graph.pointAtS(p, ss, s), [x2, y2] = Graph.pointAtS(p, ss, s + 1);
+        const dx = x2 - x, dy = y2 - y, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+        guides.lineStyle({ width: 2 / z, color: 0xE8F4FF, alpha: 0.95 });
+        guides.moveTo(x - ux * a - uy * a, y - uy * a + ux * a); guides.lineTo(x, y); guides.lineTo(x - ux * a + uy * a, y - uy * a - ux * a);
+      }
+    }
+  }
+}
+
+/** The control points of the road being clicked (with the cursor as the next point): straight spans get extra points. */
+function polyPoints(withCursor) {
+  if ( !poly ) return null;
+  const pts = poly.slice(), flags = polyStraight.slice();
+  if ( withCursor && cursorAt ) {
+    const q = shiftDown ? Graph.snapAngle(pts[pts.length - 2], pts[pts.length - 1], cursorAt.x, cursorAt.y) : cursorAt;
+    pts.push(q.x, q.y); flags.push(shiftDown);
+  }
+  const out = [pts[0], pts[1]];
+  for ( let i = 2; i < pts.length; i += 2 ) {
+    if ( flags[(i >> 1) - 1] ) out.push(...Graph.straighten([pts[i - 2], pts[i - 1], pts[i], pts[i + 1]], g()).slice(2));
+    else out.push(pts[i], pts[i + 1]);
+  }
+  return out;
+}
+
+/** A freehand stroke: smoothed (a guide harder), or with Shift a straight line at a multiple of 15 degrees. */
+function strokePoints(raw, straight) {
+  if ( straight ) {
+    const e = Graph.snapAngle(raw[0], raw[1], raw[raw.length - 2], raw[raw.length - 1]);
+    return Graph.straighten([raw[0], raw[1], e.x, e.y], g());
+  }
+  return Graph.smoothStroke(raw, g(), Roads.brush().k === "guide");
+}
+
 /** Nodes of the network while a tool is on: junctions white, dead ends amber, map-edge exits teal. */
 function drawOverlay() {
   if ( !overlay ) return;
@@ -73,7 +160,7 @@ function drawOverlay() {
 }
 
 function redraw() {
-  drawOverlay();
+  drawOverlay(); drawGuides();
   if ( !gfx ) return;
   gfx.clear();
   if ( !mode || !cursorAt ) return;
@@ -91,9 +178,13 @@ function redraw() {
   }
   // the road being drawn: a translucent band of the brush's kind with an ink edge
   let line = null;
-  if ( press?.drag && press.raw.length >= 4 ) line = press.raw;
-  else if ( poly ) line = Graph.curve(poly.concat([cursorAt.x, cursorAt.y]), g() * 0.1);
-  if ( line ) {
+  if ( press?.drag && press.raw.length >= 4 ) line = shiftDown ? Graph.curve(strokePoints(press.raw, true), g() * 0.1) : press.raw;
+  else if ( poly ) line = Graph.curve(polyPoints(true), g() * 0.1);
+  if ( line && b.k === "guide" ) {
+    // a guide shows where the cars will run without hiding the map's own road
+    gfx.lineStyle({ width: W, color: 0x46D0D0, alpha: 0.22, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND }); trace(gfx, line);
+    gfx.lineStyle({ width: 2 / z, color: 0xE8F4FF, alpha: 0.95 }); trace(gfx, line);
+  } else if ( line ) {
     gfx.lineStyle({ width: W + 4 / z, color: 0x15110F, alpha: 0.55, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND }); trace(gfx, line);
     gfx.lineStyle({ width: W, color: colorNum(L.surface), alpha: 0.7, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND }); trace(gfx, line);
   }
@@ -122,7 +213,7 @@ function addRoad(ctrl) {
 }
 
 function finishPoly() {
-  const p = poly; poly = null;
+  const p = poly ? polyPoints(false) : null; poly = null; polyStraight = [];
   if ( p && p.length >= 4 ) addRoad(p);
   redraw();
 }
@@ -157,7 +248,7 @@ function onDown(ev) {
 function onMove(ev) {
   if ( !mode ) return;
   const p = worldPoint(ev);
-  cursorAt = p;
+  cursorAt = p; shiftDown = ev.shiftKey;
   if ( mode === "erase" && eraseTrail ) {
     const lx = eraseTrail[eraseTrail.length - 2], ly = eraseTrail[eraseTrail.length - 1];
     if ( Math.hypot(p.x - lx, p.y - ly) > 2 / zoom() ) eraseTrail.push(p.x, p.y);
@@ -194,7 +285,7 @@ function onUp(ev) {
   if ( !pr ) return;
   if ( pr.drag ) {
     pr.raw.push(p.x, p.y);
-    addRoad(Graph.smoothStroke(pr.raw, g()));
+    addRoad(strokePoints(pr.raw, ev.shiftKey));
     redraw();
     return;
   }
@@ -206,17 +297,26 @@ function onUp(ev) {
   if ( !poly ) {
     const R = Roads.state(), s = R ? Graph.snapTarget(R.G, q.x, q.y, snapR(), g()) : null;
     if ( s ) q = { x: s.x, y: s.y };
-    poly = [q.x, q.y];
+    poly = [q.x, q.y]; polyStraight = [];
   } else {
     const lx = poly[poly.length - 2], ly = poly[poly.length - 1];
     const onLast = Math.hypot(q.x - lx, q.y - ly) < 10 / zoom();
     if ( dbl || onLast ) { finishPoly(); return; }
-    poly.push(q.x, q.y);
+    // Shift: a straight span at a multiple of 15 degrees (roads drawn on a grid)
+    if ( ev.shiftKey ) q = Graph.snapAngle(lx, ly, q.x, q.y);
+    poly.push(q.x, q.y); polyStraight.push(ev.shiftKey);
   }
   redraw();
 }
 
-function cancel() { press = null; poly = null; eraseTrail = null; redraw(); }
+function cancel() { press = null; poly = null; polyStraight = []; eraseTrail = null; redraw(); }
+
+/** G: switch the brush between a guide line and the last painted kind. */
+function toggleGuide() {
+  const k = Roads.brush().k;
+  if ( k !== "guide" ) lastPainted = k;
+  Roads.setBrush({ k: k === "guide" ? lastPainted : "guide" });
+}
 
 function onKey(e) {
   if ( !mode || typing(e) ) return;
@@ -228,7 +328,9 @@ function onKey(e) {
   }
   if ( k === "Escape" && (poly || press || eraseTrail) ) { e.preventDefault(); e.stopPropagation(); cancel(); return; }
   if ( k === "Enter" && poly ) { e.preventDefault(); e.stopPropagation(); finishPoly(); return; }
-  if ( k === "Backspace" && poly ) { e.preventDefault(); e.stopPropagation(); poly.splice(-2, 2); if ( !poly.length ) poly = null; redraw(); return; }
+  if ( k === "Backspace" && poly ) { e.preventDefault(); e.stopPropagation(); poly.splice(-2, 2); polyStraight.pop(); if ( !poly.length ) poly = null; redraw(); return; }
+  if ( k === "Shift" ) { shiftDown = true; redraw(); return; }
+  if ( mode === "draw" && !e.ctrlKey && !e.metaKey && !e.altKey && k.toLowerCase() === "g" ) { e.preventDefault(); e.stopPropagation(); toggleGuide(); return; }
   if ( !e.ctrlKey && !e.metaKey && (k === "[" || k === "]") ) {
     e.preventDefault(); e.stopPropagation();
     const b = Roads.brush(), d = k === "]" ? 0.1 : -0.1;
@@ -243,6 +345,9 @@ export function onCanvasReady() {
   teardownListeners();
   if ( !game.user.isGM ) return;
   if ( mode ) ensureGfx();
+  // guide lines live under the editor marks; only the GM's client ever draws them
+  guides = new PIXI.Graphics(); guides.eventMode = "none"; guides.zIndex = 850;
+  canvas.interface.sortableChildren = true; canvas.interface.addChild(guides);
   const view = canvas.app.view;
   listeners = {
     down: onDown, move: onMove, up: onUp, key: onKey, cancel,
@@ -262,8 +367,8 @@ export function onCanvasReady() {
   redraw();
 }
 
-function onRoadsEvent(kind) { if ( kind === "edited" || kind === "loaded" || kind === "brush" ) redraw(); }
-export function onPan() { if ( mode ) redraw(); }
+function onRoadsEvent(kind) { if ( ["edited", "loaded", "brush", "params"].includes(kind) ) redraw(); }
+export function onPan() { if ( mode || Roads.state()?.look.guides === "always" ) redraw(); }
 
 function teardownListeners() {
   if ( !listeners ) return;
@@ -279,8 +384,8 @@ function teardownListeners() {
 
 export function teardown() {
   teardownListeners();
-  for ( const o of [gfx, overlay] ) if ( o && !o.destroyed ) o.destroy();
-  gfx = overlay = null; press = poly = eraseTrail = cursorAt = null;
+  for ( const o of [gfx, overlay, guides] ) if ( o && !o.destroyed ) o.destroy();
+  gfx = overlay = guides = null; press = poly = eraseTrail = cursorAt = null; polyStraight = [];
 }
 
 export const _debug = () => ({ mode, poly, press, module: MODULE_ID });

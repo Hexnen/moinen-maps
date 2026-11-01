@@ -112,11 +112,11 @@ export function simplify(p, tol) {
   return out;
 }
 
-/** A shaky freehand line to a few smooth control points. */
-export function smoothStroke(raw, g) {
+/** A shaky freehand line to a few smooth control points (`loose`: a guide traced over a drawn road, smoothed harder). */
+export function smoothStroke(raw, g, loose = false) {
   let p = resample(raw, g * 0.12);
   // a few passes of a moving average, ends pinned
-  for ( let pass = 0; pass < 3; pass++ ) {
+  for ( let pass = 0; pass < (loose ? 5 : 3); pass++ ) {
     const q = p.slice(), n = p.length >> 1;
     for ( let i = 1; i < n - 1; i++ ) {
       q[i * 2] = (p[i * 2 - 2] + 2 * p[i * 2] + p[i * 2 + 2]) / 4;
@@ -124,7 +124,25 @@ export function smoothStroke(raw, g) {
     }
     p = q;
   }
-  return simplify(p, g * 0.06);
+  return simplify(p, g * (loose ? 0.1 : 0.06));
+}
+
+/** Straight lines (clicked with Shift): extra control points along each straight span keep the curve from bulging. */
+export function straighten(pts, g) {
+  const out = [pts[0], pts[1]];
+  for ( let i = 2; i < pts.length; i += 2 ) {
+    const ax = pts[i - 2], ay = pts[i - 1], bx = pts[i], by = pts[i + 1];
+    const n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / (g * 0.5)));
+    for ( let k = 1; k <= n; k++ ) out.push(ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n);
+  }
+  return out;
+}
+
+/** A point moved so the line from (ax, ay) to it runs at a multiple of 15 degrees (Shift while tracing). */
+export function snapAngle(ax, ay, x, y) {
+  const L = Math.hypot(x - ax, y - ay); if ( !L ) return { x, y };
+  const step = Math.PI / 12, a = Math.round(Math.atan2(y - ay, x - ax) / step) * step;
+  return { x: ax + Math.cos(a) * L, y: ay + Math.sin(a) * L };
 }
 
 /** Intersections of segment ab with segment cd: { t, u } (fractions) or null. */
@@ -463,9 +481,10 @@ export function normalize(G, g) {
 }
 
 /** Bounding box of the whole network, padded by the widest road. */
-export function graphBounds(G, g) {
+export function graphBounds(G, g, filter) {
   let bb = null;
   for ( const e of G.edges.values() ) {
+    if ( filter && !filter(e) ) continue;
     const b = bbox(edgeCurve(e, g).p, (e.w * g) / 2 + g * 0.3);
     bb = bb ? { x0: Math.min(bb.x0, b.x0), y0: Math.min(bb.y0, b.y0), x1: Math.max(bb.x1, b.x1), y1: Math.max(bb.y1, b.y1) } : b;
   }

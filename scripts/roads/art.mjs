@@ -22,7 +22,9 @@ export const KIND_LOOK = {
   asphalt: { kerb: "#b7ae9c", kerbW: 0.09, surface: "#4a4c52", wear: "rgba(255,255,255,0.07)", mark: "#efe3bf" },
   cobble: { kerb: "#665d51", kerbW: 0.07, surface: "#8a8172", stone: "#a3998a", stone2: "#958b7b", joint: "#5d554a" },
   dirt: { kerb: "#7a5d3d", kerbW: 0.07, surface: "#a8855b", rut: "#866740", pebble: "#c7a97f" },
-  path: { kerb: null, kerbW: 0, surface: "#d2bf97", edge: "rgba(21,17,15,0.75)" }
+  path: { kerb: null, kerbW: 0, surface: "#d2bf97", edge: "rgba(21,17,15,0.75)" },
+  // never baked: only the GM's editor draws it (a thin dashed trace), the map's own road shows through
+  guide: { kerb: null, kerbW: 0, surface: "#46d0d0", line: "#46d0d0" }
 };
 
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -76,7 +78,7 @@ export const TILE = 1024;
  */
 export function bakeRoads(R, g, { budget = 40e6, maxRes = 2 } = {}) {
   const G = R.G, look = R.look;
-  const bounds = graphBounds(G, g);
+  const bounds = graphBounds(G, g, (e) => e.k !== "guide");
   if ( !bounds ) return [];
   const items = [];
   const degree = new Map();
@@ -84,6 +86,7 @@ export function bakeRoads(R, g, { budget = 40e6, maxRes = 2 } = {}) {
   const nodeTrim = new Map();
   for ( const e of G.edges.values() ) for ( const id of [e.a, e.b] ) nodeTrim.set(id, Math.max(nodeTrim.get(id) ?? 0, (e.w * g) / 2));
   for ( const e of G.edges.values() ) {
+    if ( e.k === "guide" ) continue;           // guide lines follow a road drawn in the map: nothing to paint
     const c = edgeCurve(e, g);
     const W = e.w * g;
     items.push({ e, p: c.p, ss: c.ss, W, bb: bbox(c.p, W / 2 + g * 0.3), ink: waver(c.p, g * 0.012, e.id * 7919) });
@@ -436,6 +439,13 @@ export function glowTexture() {
 export function kindSwatch(kind, w = 64, h = 22) {
   const c = document.createElement("canvas"); c.width = w; c.height = h;
   const ctx = c.getContext("2d"), L = KIND_LOOK[kind];
+  if ( kind === "guide" ) {
+    // the map shows through: a thin dashed trace between two faint edges
+    ctx.fillStyle = "rgba(70,208,208,0.12)"; ctx.fillRect(0, h * 0.15, w, h * 0.7);
+    strokeLine(ctx, [0, h / 2, w, h / 2], 2, L.line, [5, 3]);
+    for ( const y of [h * 0.15, h * 0.85] ) strokeLine(ctx, [0, y, w, y], 1, "rgba(70,208,208,0.6)");
+    return c.toDataURL();
+  }
   ctx.lineCap = "butt";
   const p = [0, h / 2, w, h / 2];
   const W = h * 0.8, g = h * 1.1;

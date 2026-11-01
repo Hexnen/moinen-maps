@@ -10,7 +10,9 @@ import { emptyGraph } from "./graph.mjs";
  *                                                   edges; the flat list is the interior control points (ends are the nodes)
  *     next: id counter,
  *     traffic: { on, density, speed, size, max, kinds, side, lights, who, style, seed },
- *     look: { shadow, ink, marks, crossings } }
+ *     look: { shadow, ink, marks, crossings, guides } }
+ *
+ * Kind "guide" (same v1 payload: older sets simply have none) is a road traced over one drawn in the map image.
  *
  * Arrays replace each other on update, so a save never leaves stale roads behind.
  */
@@ -18,8 +20,10 @@ export const FLAG = "roads";
 export const VERSION = 1;
 
 /** Road kinds, lowest first: where two kinds overlap at a junction the later one is drawn on top. `cars` = cars may drive it. */
-export const KINDS = ["dirt", "path", "cobble", "asphalt"];
+export const KINDS = ["guide", "dirt", "path", "cobble", "asphalt"];
 export const KIND_INFO = {
+  // a guide line traces a road that is already drawn in the map image: cars drive it, the module paints nothing there
+  guide: { cars: true, speed: 1, painted: false },
   dirt: { cars: true, speed: 0.6 },
   path: { cars: false, speed: 0 },
   cobble: { cars: true, speed: 0.75 },
@@ -31,7 +35,8 @@ export const BODY_TYPES = ["compact", "sedan", "van", "pickup", "truck", "bus", 
 export const TRAFFIC_DEFAULTS = Object.freeze({
   on: true, density: 0.5, speed: 1, size: 0.45, max: 60, kinds: [...BODY_TYPES], side: "right", lights: "auto", who: "all", style: "ink", seed: 1
 });
-export const LOOK_DEFAULTS = Object.freeze({ shadow: 0.6, ink: 1, marks: true, crossings: true });
+/** guides: when the GM sees guide lines: "tool" (only while a road tool is in hand) or "always". Players never see them. */
+export const LOOK_DEFAULTS = Object.freeze({ shadow: 0.6, ink: 1, marks: true, crossings: true, guides: "tool" });
 export const LIMITS = { width: [0.3, 3], size: [0.15, 1.5], speed: [0.2, 3], max: [0, 150], density: [0, 1] };
 
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -56,7 +61,7 @@ export function cleanTraffic(t = {}) {
 
 export function cleanLook(l = {}) {
   const D = LOOK_DEFAULTS;
-  return { shadow: num(l.shadow, D.shadow, 0, 1), ink: num(l.ink, D.ink, 0, 3), marks: l.marks !== false, crossings: l.crossings !== false };
+  return { shadow: num(l.shadow, D.shadow, 0, 1), ink: num(l.ink, D.ink, 0, 3), marks: l.marks !== false, crossings: l.crossings !== false, guides: l.guides === "always" ? "always" : "tool" };
 }
 
 /** A fresh, empty roads set. */

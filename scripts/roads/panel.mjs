@@ -86,6 +86,7 @@ function lookHtml(p) {
     ${row(`${p}-ink`, "ink", range(`${p}-ink`, "ink", 0, 3, 0.1, l.ink))}
     ${row(`${p}-marks`, "marks", check(`${p}-marks`, "marks", l.marks))}
     ${row(`${p}-crossings`, "crossings", check(`${p}-crossings`, "crossings", l.crossings))}
+    ${row(`${p}-guides`, "guides", select(`${p}-guides`, "guides", ["tool", "always"], l.guides, "o.guides"))}
     <div class="mm-rd-btns"><button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("clear"))}</button></div></section>`;
 }
 
@@ -130,6 +131,7 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
     if ( ["side", "lights", "who", "style"].includes(name) ) return Roads.setTraffic({ [name]: String(v) });
     if ( name === "ink" ) return Roads.setLook({ ink: Number(v) });
     if ( ["marks", "crossings"].includes(name) ) return Roads.setLook({ [name]: !!v });
+    if ( name === "guides" ) return Roads.setLook({ guides: String(v) });
   };
   // a range-picker reports while dragging ("input"); everything else on change
   host.addEventListener("click", onClick);
@@ -163,7 +165,7 @@ function sync(host) {
     set("side", t.side); set("lights", t.lights); set("who", t.who); set("style", t.style);
     for ( const k of Model.BODY_TYPES ) set(`kind:${k}`, t.kinds.includes(k));
   }
-  if ( l ) { set("shadow", Math.round(l.shadow * 100)); set("ink", l.ink); set("marks", l.marks); set("crossings", l.crossings); }
+  if ( l ) { set("shadow", Math.round(l.shadow * 100)); set("ink", l.ink); set("marks", l.marks); set("crossings", l.crossings); set("guides", l.guides); }
   const s = host.querySelector(".mm-rd-status"); if ( s ) s.textContent = statusText();
 }
 
