@@ -65,7 +65,7 @@ function records(r) {
     if ( m[0] === 0 ) { cur = m[16]; if ( !recs.has(cur) ) recs.set(cur, []); }
     const w = m[3], h = m[4], img = new Uint8Array(w * h * 4);
     for ( let y = 0; y < h; y++ ) img.set(r.sheet.data.subarray(((m[2] + y) * r.sheet.w + m[1]) * 4, ((m[2] + y) * r.sheet.w + m[1] + w) * 4), y * w * 4);
-    recs.get(cur).push({ m, w, h, data: img });
+    recs.get(cur).push({ m, w, h, img });   // (as Chunks.splitSheet gives them: pixels in `img`)
   }
   return recs;
 }

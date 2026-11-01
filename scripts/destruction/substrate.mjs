@@ -96,7 +96,10 @@ export function fullSigs(objects, ownSig, P, K = 2) {
 function partsOfSprites(sprites, ob) {
   const parts = [];
   let cur = null;
-  for ( const s of sprites ) {
+  for ( const s0 of sprites ) {
+    // (records from chunks / splitSheet hold the pixels in `img`, core's own results in `data`)
+    const s = s0.data ? s0 : { m: s0.m, w: s0.w, h: s0.h, data: s0.img };
+    if ( !s.data ) continue;
     const k = s.m[0];
     if ( k === 0 ) { cur = { type: s.m[10], cover: null, base: s, pieces: [], ob }; parts.push(cur); }
     else if ( !cur ) continue;
