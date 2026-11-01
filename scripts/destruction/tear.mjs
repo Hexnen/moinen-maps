@@ -272,7 +272,13 @@ export function bakeTear(X) {
     switch ( f ) {
       case "groove": scale(() => 1.5); cs.lanes = 3; break;
       case "char": avg(eL, 2); avg(eR, 2); scale(() => 1.3); break;
-      case "glass": { const P = 11 + 4 * h2(1, 1, sd + 801), ph = h2(2, 1, sd + 801), A = 1.5 + 0.8 * Math.min(6, mx); cs.shift = (s) => tri(s / P + ph) * A * env(s) * (0.55 + 0.7 * h2(Math.floor(s / P * 2 + ph * 2), 5, sd + 801)); scale(() => 0.5); break; }
+      case "glass": {
+        // (an irregular zig-zag: corner points at uneven spacing, each swinging its own amount, never a regular sawtooth)
+        const A = 1.5 + 0.8 * Math.min(6, mx), ks = [0], ys = [0];
+        for ( let q = 1, u = 0; u < L + 20; q++ ) { u += 5 + 11 * h2(q, 1, sd + 801); ks.push(u); ys.push((q & 1 ? 1 : -1) * A * (0.35 + 0.9 * h2(q, 2, sd + 801)) * (h2(q, 3, sd + 801) < 0.15 ? -0.4 : 1)); }
+        cs.shift = (s) => { let q = 1; while ( q < ks.length - 1 && ks[q] < s ) q++; const f = clamp((s - ks[q - 1]) / Math.max(1e-6, ks[q] - ks[q - 1]), 0, 1); return lerp(ys[q - 1], ys[q], f) * env(s); };
+        scale(() => 0.5); break;
+      }
       case "acid": for ( let i = 0; i < NS; i++ ) {
         eL[i] = Math.max(0, eL[i] + ((vnoise(i / 2.2, 5.5, sd + 803) > 0.62 ? 1.5 : 0) + (h2(i, 1, sd + 804) - 0.5) * 1.4) * fine(i));
         eR[i] = Math.max(0, eR[i] + ((vnoise(i / 2.2, 8.5, sd + 803) > 0.62 ? 1.5 : 0) + (h2(i, 2, sd + 804) - 0.5) * 1.4) * fine(i));
@@ -298,7 +304,7 @@ export function bakeTear(X) {
         for ( let s = 4 + 4 * h2(8, 1, sd + 808), n = 0; s < L - 3; s += 7 + 5 * h2(n, 2, sd + 808), n++ ) {
           const i = at(s); if ( hw[i] < 0.8 ) continue;
           const a = Math.atan2(TY[i], TX[i]) + side * (h2(n, 3, sd + 808) < 0.5 ? 1 : 2) * Math.PI / 3, e0 = side > 0 ? eL[i] : eR[i];
-          cs.spurs.push({ x: SX[i] + NX[i] * side * e0 * 0.5, y: SY[i] + NY[i] * side * e0 * 0.5, a, len: e0 * 0.5 + 3 + 0.9 * hw[i], w: 1.35 });
+          cs.spurs.push({ x: SX[i] + NX[i] * side * e0 * 0.5, y: SY[i] + NY[i] * side * e0 * 0.5, a: a + (h2(n, 9, sd + 808) - 0.5) * 0.25, len: e0 * 0.5 + (1.5 + 3 * h2(n, 10, sd + 808)) * (0.6 + 0.4 * hw[i] / 3), w: 1 + 0.5 * h2(n, 11, sd + 808) });
           side = -side;
         }
         break;
@@ -306,7 +312,12 @@ export function bakeTear(X) {
       case "bowl": {
         scale((i) => 0.4 + 0.6 * Math.exp(-(((i - mid) / (Lq * 0.18)) ** 2)));
         const i = at(mid), n = 5 + Math.floor(h2(9, 1, sd + 809) * 2), a0 = h2(9, 2, sd + 809) * 6.283;
-        for ( let k = 0; k < n; k++ ) cs.spurs.push({ x: SX[i], y: SY[i], a: a0 + (k + 0.3 * h2(k, 3, sd + 809)) / n * 6.283, len: 3 + (1.2 + 0.8 * h2(k, 4, sd + 809)) * Math.min(7, mx), w: 1.2 });
+        const gaps = Array.from({ length: n }, (_, k) => 0.35 + 1.3 * h2(k, 3, sd + 809)), gs = gaps.reduce((a, b) => a + b, 0);
+        for ( let k = 0, acc = 0; k < n; acc += gaps[k], k++ ) {
+          const a = a0 + acc / gs * 6.283, len = 2 + (0.4 + 1.6 * h2(k, 4, sd + 809)) * Math.min(7, mx);
+          cs.spurs.push({ x: SX[i], y: SY[i], a, len, w: 0.8 + 0.6 * h2(k, 5, sd + 809) });
+          if ( len > 6 && h2(k, 6, sd + 809) < 0.45 ) { const b = a + (h2(k, 7, sd + 809) < 0.5 ? -1 : 1) * (0.45 + 0.35 * h2(k, 8, sd + 809)); cs.spurs.push({ x: SX[i] + Math.cos(a) * len * 0.55, y: SY[i] + Math.sin(a) * len * 0.55, a: b, len: len * 0.4, w: 0.7 }); }
+        }
         break;
       }
     }
@@ -769,7 +780,7 @@ export function bakeTear(X) {
         put(o, hv < 0.02 ? pal.accHi : mix(m, pal.accHi, 0.18 + 0.2 * vnoise(x / 2.5, y / 2.5, sd + 722)), layer[o]);
         continue;
       }
-      if ( CS?.lanes ) { const hv = h2(x, y, sd + 813); put(o, hv < 0.5 ? mul(cur(o), 1.16) : mix(cur(o), ink, 0.3), layer[o]); continue; }   // (claws: lit and shaded furrow lips, the ridges stay turf)
+      if ( CS?.lanes ) { const south = o >= W && openA[o - W], north = o + W < N && openA[o + W]; put(o, south && !north ? mul(cur(o), 1.12) : north ? mix(cur(o), ink, 0.35) : cur(o), layer[o]); continue; }   // (claws: lit and shaded furrow lips, the ridges stay turf)
       kit.lip(x, y, o, 1 + 2 * deepOf(i));
       if ( acid ) {   // an eaten edge: pits bitten into the lip, a bead of acid now and then
         const hv = h2(x, y, sd + 731);
