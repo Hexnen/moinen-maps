@@ -22,7 +22,7 @@ import * as Trace from "../net/trace.mjs";
  * L, eff, smp, mips, rect, tiles: [[x, y, w, h, id]] }] } - `tv` is the composite's own format version, apart from the bake version
  * (a tile format change never re-bakes anything). Off: client setting "destrComposite", or `CONFIG.moinenMaps.noComposite = true`.
  */
-export const TILE_VERSION = 1;
+export const TILE_VERSION = 5;          // 5: bands culled under the bands above (2-4 were test versions, never released)
 export const KEY = "destructionComposite";
 
 export const enabled = () => {
@@ -66,10 +66,23 @@ export class Composite {
     this.px = this.list.reduce((a, b) => a + b.tiles.reduce((q, t) => q + t.tex.baseTexture.realWidth * t.tex.baseTexture.realHeight, 0), 0);
   }
 
+  /**
+   * The bands of the drawing the cache is about to make ([{ L, key, hashes }]). A composite band is ALIVE while a band of the drawing is it
+   * or grew from it; it may be used only while every composite band above it is alive (its texels hidden by theirs were cleared when it
+   * was published: CULLING, see publish).
+   */
+  plan(list) {
+    const alive = new Set();
+    for ( const b of this.list ) {
+      if ( list.some((q) => q.L === b.L && (q.key === b.key || (b.hashes.length && b.hashes.length < q.hashes.length && b.hashes.every((h, i) => q.hashes[i] === h)))) ) alive.add(b.key);
+    }
+    this.valid = new Set(this.list.filter((b) => this.list.every((u) => u.L <= b.L || alive.has(u.key))).map((b) => b.key));
+  }
+
   /** The tiles of a band the cache is about to draw (`p` its plan: the same box), or null. */
   band(key, p) {
     const b = this.bands.get(key);
-    if ( !b || b.rect[0] !== p.x0 || b.rect[1] !== p.y0 || b.rect[2] !== p.x1 || b.rect[3] !== p.y1 ) return null;
+    if ( !b || (this.valid && !this.valid.has(key)) || b.rect[0] !== p.x0 || b.rect[1] !== p.y0 || b.rect[2] !== p.x1 || b.rect[3] !== p.y1 ) return null;
     if ( b.tiles.some((t) => t.tex.baseTexture.destroyed) ) return null;
     return b.tiles;
   }
@@ -81,7 +94,7 @@ export class Composite {
   prefix(L, eff, smp, mips, hashes, shells) {
     let best = null;
     for ( const b of this.list ) {
-      if ( b.L !== L || b.eff !== eff || b.smp !== smp || b.mips !== !!mips ) continue;
+      if ( b.L !== L || b.eff !== eff || b.smp !== smp || b.mips !== !!mips || (this.valid && !this.valid.has(b.key)) ) continue;
       const n = b.hashes.length;
       if ( !n || n >= hashes.length || (best && best.hashes.length >= n) ) continue;
       let ok = true;
@@ -185,18 +198,20 @@ export async function publish(d, ctx) {
   for ( const s of ctx.strokes ) strokes[s.id] = { sig: s.sig, hashes: byObj.get(s.id) ?? [] };
   const index = { v: 1, base: ctx.base, areas, strokes, bands: bands.map((b) => ({ key: b.ckey, hashes: b.hashes })) };
   // the tiles: a band drawn from the composite keeps its ids, any other is read back
-  const out = [], todo = [];
+  const out = [], todo = [], all = [];
   for ( const b of bands ) {
-    const prev = oldBands.get(b.ckey), ent = { key: b.ckey, ...b.meta, tiles: [] };
+    const ent = { key: b.ckey, ...b.meta, tiles: [] };
     out.push(ent);
     for ( const t of b.tiles ) {
       // (a tile drawn from the composite is the composite's own file)
-      if ( t.shared && t.id ) { ent.tiles.push([t.x, t.y, t.w, t.h, t.id]); continue; }
+      if ( t.shared && t.id ) { ent.tiles.push([t.x, t.y, t.w, t.h, t.id]); const bt = t.rt.baseTexture; all.push({ L: b.meta.L, x: t.x, y: t.y, w: bt.realWidth, h: bt.realHeight, data: bt.resource?.data ?? null }); continue; }
       const px = readTile(R, t.rt), row = [t.x, t.y, t.w, t.h, null];
       ent.tiles.push(row);
-      todo.push({ row, tile: { x: t.x, y: t.y, w: px.w, h: px.h, res: b.meta.eff, data: px.data } });
+      const tile = { x: t.x, y: t.y, w: px.w, h: px.h, res: b.meta.eff, data: px.data };
+      todo.push({ row, tile }); all.push({ L: b.meta.L, ...tile, fresh: true });
     }
   }
+  if ( bands.every((b) => b.meta.eff === 1) && all.every((q) => q.data) ) cull(all);
   const t0 = performance.now();
   const res = await Net.job({ kind: "tiles", tiles: todo.map((q) => q.tile), index, known: [...Net.known(ctx.dir)] }, todo.map((q) => q.tile.data.buffer));
   todo.forEach((q, k) => { q.row[4] = res.tiles[k].id; });
@@ -209,6 +224,63 @@ export async function publish(d, ctx) {
   await ctx.scene.update({ [`flags.${MODULE_ID}.${KEY}`]: m });
   Trace.event("composite-published", { bands: out.length, tiles: ids.length - 1, uploaded: up.length, bytes: up.reduce((a, c) => a + c.bytes.length, 0), ms: Math.round(performance.now() - t0) });
   return "published";
+}
+
+/** Texels of margin round a cleared one: the magnified edge smoothing (1) and the mip levels down to zoom 1/4 (2^2 blocks, bilinear). */
+export const MARGIN = 9;
+
+/** Chebyshev distance (capped at `cap`) of every texel of the box to the nearest texel that is not set (outside the box: not set). */
+function chebyshev(m, W, H, x0, y0, x1, y1, cap) {
+  const d = new Uint8Array(W * H);
+  const at = (x, y) => (x < x0 || y < y0 || x >= x1 || y >= y1 ? 0 : d[y * W + x]);
+  for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) {
+    const i = y * W + x;
+    d[i] = !m[i] ? 0 : Math.min(cap, 1 + Math.min(at(x - 1, y), at(x - 1, y - 1), at(x, y - 1), at(x + 1, y - 1)));
+  }
+  for ( let y = y1 - 1; y >= y0; y-- ) for ( let x = x1 - 1; x >= x0; x-- ) {
+    const i = y * W + x; if ( !d[i] ) continue;
+    d[i] = Math.min(d[i], 1 + Math.min(at(x + 1, y), at(x + 1, y + 1), at(x, y + 1), at(x - 1, y + 1)));
+  }
+  return d;
+}
+
+/**
+ * CULLING (one texel per scene px only): a band's texels that the opaque texels of the bands ABOVE it hide - with a texel of margin all
+ * round, so a magnified band's one pixel of edge smoothing never reaches a cleared texel - are cleared before they are published
+ * (~half the bytes on a busy scene). A client uses such a band only while every band above it is still the composite's (Composite.plan).
+ * Mip levels (zoomed out) of a cleared region differ where an upper band is not fully opaque at that level; at zoom >= 1 the picture is
+ * the same. `all`: [{ L, x, y, w, h, data, fresh }] (fresh tiles are cleared in place; the others only hide).
+ */
+export function cull(all, margin = MARGIN) {
+  const x0 = Math.min(...all.map((q) => q.x)), y0 = Math.min(...all.map((q) => q.y));
+  const W = Math.max(...all.map((q) => q.x + q.w)) - x0, H = Math.max(...all.map((q) => q.y + q.h)) - y0;
+  // HIDDEN: a texel whose 3x3 is opaque in ONE band above (two bands each covering a part do not: at their seams each is half
+  // transparent where it smooths its own edge, and the band under them shows)
+  const hide = new Uint8Array(W * H), cover = new Uint8Array(W * H);
+  const hidden = (X, Y) => hide[Y * W + X] === 1;
+  const levels = [...new Set(all.map((q) => q.L))].sort((a, b) => b - a);
+  let cleared = 0;
+  for ( const L of levels ) {
+    const here = all.filter((q) => q.L === L);
+    for ( const q of here ) if ( q.fresh ) {
+      const d = q.data, ox = q.x - x0, oy = q.y - y0;
+      for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) {
+        const i = (y * q.w + x) * 4; if ( !d[i + 3] || !hidden(ox + x, oy + y) ) continue;
+        d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; cleared++;
+      }
+    }
+    cover.fill(0);
+    let bx0 = W, by0 = H, bx1 = 0, by1 = 0;
+    for ( const q of here ) {
+      const d = q.data, ox = q.x - x0, oy = q.y - y0;
+      bx0 = Math.min(bx0, ox); by0 = Math.min(by0, oy); bx1 = Math.max(bx1, ox + q.w); by1 = Math.max(by1, oy + q.h);
+      for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) if ( d[(y * q.w + x) * 4 + 3] === 255 ) cover[(oy + y) * W + ox + x] = 1;
+    }
+    // (the square of `margin` texels round it opaque in this band: Chebyshev distance to its nearest non-opaque texel, two passes)
+    const dist = chebyshev(cover, W, H, bx0, by0, bx1, by1, margin + 1);
+    for ( let y = by0; y < by1; y++ ) for ( let x = bx0; x < bx1; x++ ) if ( dist[y * W + x] > margin ) hide[y * W + x] = 1;
+  }
+  return cleared;
 }
 
 /** The destruction module's API object (flood status), set by destruction.mjs (no import cycle). */

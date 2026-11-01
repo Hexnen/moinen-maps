@@ -670,6 +670,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   shownRecs = next;
   display ??= new DestructionDisplay();
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
+  display.afterFlatten ??= afterFlatten;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   // the areas already on screen need no pixels (the display keeps them by hash; a shell's pixels replace it)
   const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h) && !display.groups.get(h).shell);
@@ -753,6 +754,8 @@ async function compositeLoad(scene, base, want, M) {
   if ( !Composite.enabled() || !cacheEnabled() ) return 0;
   const CM = Composite.manifestOf(scene);
   if ( !CM || !Store.sameBase(CM.base, base, Store.legacyBaseKey(scene, S, backgroundInfo()?.path ?? "")) ) return 0;
+  // the composite IS the damage on this load: the scene's one reveal waits for it (a few files, read ahead since canvasInit)
+  Reveal.progressive("destruction", 4000);
   const c = await Composite.load(CM);
   if ( !c ) return 0;
   const ix = c.index, byId = new Map(want.map((w) => [w.objId, w])), covered = [];
@@ -788,6 +791,46 @@ async function fill(list, why) {
   if ( oks.some((v) => !v) ) { shownKey = ""; rebake({ awaitPublish: false }); }   // (a chunk that could not be had: fetched or baked again)
   return oks.every(Boolean);
 }
+/* ---------------------------------------------------------------- atlases let go after flatten (display.freeAtlas) */
+
+/**
+ * MEMORY: a flattened area of a stroke whose chunk can be had again lets go of its atlas' CPU copy, right after the sync that built
+ * it (its map patch reads it first). Not a flooded hole (its water reads its atlas). `CONFIG.moinenMaps.keepAtlas = true`: kept.
+ */
+const atlasQueue = new Set();
+let atlasTimer = 0;
+function afterFlatten(g) {
+  if ( g.info?.type === "flood" || globalThis.CONFIG?.moinenMaps?.keepAtlas ) return;
+  atlasQueue.add(g);
+  atlasTimer ||= setTimeout(() => {
+    atlasTimer = 0;
+    for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir && !r.shell ) display?.freeAtlas(q); }
+    atlasQueue.clear();
+  }, 0);
+}
+/** A record's sprites of one area (by its base row's hash) as display.build laid them out: base, shards in order, cover, light. */
+function areaSprites(r, hash) {
+  const out = { base: null, pieces: [], cover: null, light: null };
+  let on = false;
+  for ( const s of r.sprites ) {
+    if ( s.m[0] === 0 ) { on = (((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0) === hash; if ( on ) out.base = s; continue; }
+    if ( !on ) continue;
+    if ( s.m[0] === 2 ) out.cover = s; else if ( s.m[0] === 3 ) out.light = s; else out.pieces.push(s);
+  }
+  return out.base ? [out.base, ...out.pieces, ...(out.cover ? [out.cover] : []), ...(out.light ? [out.light] : [])] : [];
+}
+/** Before every area enters again (Detonate, replay): the shells their pixels, the areas their atlases. */
+async function pixelsForEntries() {
+  if ( !display ) return;
+  if ( display.shellCount ) await hydrateShells("entries");
+  const free = [...display.groups.values()].filter((g) => g.atlasFree);
+  const recsOf = new Map(free.map((g) => [g, shownRecs.get(g.objId)]));
+  await Promise.all([...new Set(recsOf.values())].filter(Boolean).map(hydrate));
+  let n = 0;
+  for ( const g of free ) { const r = recsOf.get(g); if ( r && !r.sprites.lean && display?.restoreAtlas(g, areaSprites(r, g.hash)) ) n++; }
+  Trace.event("atlases-restored", { n, of: free.length });
+}
+
 /** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
 const hydrateShells = (why) => fill(shellRecs(), why);
 
@@ -807,11 +850,16 @@ function requestPixels(groups) {
 function shellNeeds() {
   const list = shellRecs(); if ( !list.length ) return;
   const dark = canvas.environment?.darknessLevel ?? 0;
-  if ( dark >= 0.45 ) return void hydrateShells("dark");
-  fill(list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l))), "flood/light");
+  // a dark scene's rim light needs an area's pixels: only the shells in view (and a margin) get them, the others as the view reaches
+  // them (canvasPan below)
+  const vw = dark >= 0.45 ? display?.view?.() : null, m = 160;
+  const inView = (a) => !!vw && !(a.rect[0] > vw.x1 + m || a.rect[1] > vw.y1 + m || a.rect[2] < vw.x0 - m || a.rect[3] < vw.y0 - m);
+  fill(list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || inView(a))), dark >= 0.45 ? "dark/view" : "flood/light");
 }
 let darkTimer = 0;
-Hooks.on("lightingRefresh", () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); });
+const darkCheck = () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); };
+Hooks.on("lightingRefresh", darkCheck);
+Hooks.on("canvasPan", darkCheck);
 
 /**
  * GM: publish the composite of what is on screen once it is settled (composite.mjs publish says when it is not: tried again a few
@@ -885,7 +933,7 @@ function maybeBlast(first = false) {
   playedBlast = b.id;
   const late = ageOf(b.t, now());                  // Infinity: a legacy (uptime) or far-future moment, never played
   // (every area enters: the shells get their pixels first)
-  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( display.shellCount ) hydrateShells("detonate").then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
+  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( display.shellCount || display.stats.atlasFreed ) pixelsForEntries().then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
 }
 
 /* ---------------------------------------------------------------- publishing the chunks (GM) */
@@ -1301,7 +1349,7 @@ export const destructionApi = {
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
-  replay: () => (display?.shellCount ? hydrateShells("replay") : Promise.resolve()).then(() => display?.detonate(performance.now())),
+  replay: () => pixelsForEntries().then(() => display?.detonate(performance.now())),
   display: () => display,
   TYPES: Model.TYPES, MATERIALS: Model.MATERIALS, CAUSES: Model.CAUSES
 };

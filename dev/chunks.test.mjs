@@ -213,6 +213,37 @@ await test("composite manifest: band keys across clients, tile diffing", async (
   assert.deepEqual(recs, [{ dir: "worlds/w/moinen-maps/c/A", ids: ["k1", "x2"] }]);
 });
 
+await test("composite culling: only texels the bands above hide with a texel of margin, never the top band, never transparent ones", async () => {
+  globalThis.Hooks ??= { on() {}, once() {}, callAll() {}, call() {} };
+  const { cull } = await import("../scripts/destruction/composite.mjs");
+  const tile = (L, x, y, w, h, fill) => { const data = new Uint8Array(w * h * 4); for ( let i = 0; i < w * h; i++ ) data.set(fill(i % w, (i / w) | 0), i * 4); return { L, x, y, w, h, data, fresh: true }; };
+  const low = tile(0, 0, 0, 10, 10, () => [10, 20, 30, 200]);
+  const top = tile(2, 2, 2, 6, 6, (x, y) => (x === 0 && y === 0 ? [5, 5, 5, 128] : [50, 60, 70, 255]));   // one corner not opaque
+  const mid = tile(1, 0, 0, 3, 3, () => [1, 2, 3, 255]);
+  const topCopy = top.data.slice();
+  cull([low, top, mid], 1);
+  assert.ok(Buffer.from(top.data).equals(Buffer.from(topCopy)), "the top band is never cleared");
+  const a = (q, x, y) => q.data[(y * q.w + x) * 4 + 3];
+  // hidden with a margin: inside the opaque 6x6 at (2..7) less the corner, eroded by one -> (3..6) minus what touches the corner (2,2)
+  for ( let y = 0; y < 10; y++ ) for ( let x = 0; x < 10; x++ ) {
+    // (and (1,1): the middle band's opaque 3x3 at (0..2) hides it too)
+    // ((3,3) stays: the top band's corner (2,2) is half transparent; the middle band covers (2,2) but not the rest of (3,3)'s 3x3 -
+    // two bands each covering a part do not hide)
+    const inner = (x >= 3 && x <= 6 && y >= 3 && y <= 6 && !(x === 3 && y === 3)) || (x === 1 && y === 1);
+    assert.equal(a(low, x, y) === 0, inner, `low ${x},${y}`);
+  }
+  // without the middle band, the top band's half-transparent corner keeps (3,3)
+  const low2 = tile(0, 0, 0, 10, 10, () => [10, 20, 30, 200]), top2 = tile(2, 2, 2, 6, 6, (x, y) => (x === 0 && y === 0 ? [5, 5, 5, 128] : [50, 60, 70, 255]));
+  cull([low2, top2], 1);
+  assert.ok(a(low2, 3, 3) && !a(low2, 4, 4) && a(low2, 2, 2) && a(low2, 7, 7));
+  // the default margin (mip levels down to zoom 1/4): 9 texels of the upper band's opaque area round a cleared texel
+  const big = tile(0, 0, 0, 40, 40, () => [9, 9, 9, 255]), over = tile(2, 0, 0, 40, 40, () => [7, 7, 7, 255]);
+  cull([big, over]);
+  for ( let y = 0; y < 40; y++ ) for ( let x = 0; x < 40; x++ ) assert.equal(a(big, x, y) === 0, x >= 9 && y >= 9 && x <= 30 && y <= 30, `big ${x},${y}`);
+  // the middle band is hidden by the top band only where it overlaps it with a margin: nowhere (it lies at its corner)
+  assert.ok(mid.data.every((v, i) => v === [1, 2, 3, 255][i % 4]));
+});
+
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);

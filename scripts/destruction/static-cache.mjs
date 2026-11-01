@@ -404,6 +404,8 @@ export class StaticCache {
     const waters = U.filter((u) => u.water);
     const wasVis = live.visible;
     let drawn = 0, px = 0;
+    // (the composite learns every band of this drawing first: a band of it may be used only while the bands above it still are)
+    d.composite?.plan?.(plan.filter(Boolean).map((p) => { const hashes = p.groups.map((g) => g?.hash ?? 0); return { L: p.L, hashes, key: !win && Number.isInteger(1 / eff) ? bandKeyOf(p.L, eff, smp, mips, hashes) : "" }; }));
     for ( let k = 0; k < plan.length; k++ ) {
       const p = plan[k];
       if ( p ) {

@@ -279,7 +279,7 @@ export class DestructionDisplay {
     const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : []), ...(r.light >= 0 ? [r.light] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
     const coverIdx = 1 + r.pieces.length, lightIdx = r.light >= 0 ? coverIdx + (r.cover >= 0 ? 1 : 0) : -1;
     const pk = pack(rects);
-    const buf = new Uint8Array(pk.W * pk.H * 4);
+    let buf = new Uint8Array(pk.W * pk.H * 4);
     rects.forEach((q, i) => {
       const p = pk.pos[i];
       for ( let y = 0; y < q.h; y++ ) buf.set(rgba.subarray(((q.sy + y) * sw + q.sx) * 4, ((q.sy + y) * sw + q.sx + q.w) * 4), ((p.y + y) * pk.W + p.x) * 4);
@@ -324,7 +324,8 @@ export class DestructionDisplay {
     cont.cullArea = cull;
     // the cover (this object's own pixels) as a frame of the same atlas: the mask of its map patch
     const coverFrame = r.cover >= 0 ? { tex: frame(coverIdx), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
-    const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, baseTex: baseSpr.texture, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
+    const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, baseTex: baseSpr.texture, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0,
+      atlas: { pos: pk.pos, W: pk.W, H: pk.H, sizes: rects.map((q) => [q.w, q.h]) } };   // (its layout: restoreAtlas)
     if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
     if ( r.cover >= 0 ) {
       // every damage, glowing or not: a rim light on its lips and the lit bevels of its cracks in a dark scene (cause-fx addRim, read
@@ -337,7 +338,34 @@ export class DestructionDisplay {
     this.debris.makeSet(g, buf, pk.W, [...rects.slice(1, 1 + r.pieces.length).map((q, i) => ({ x: pk.pos[i + 1].x, y: pk.pos[i + 1].y, w: q.w, h: q.h })), { x: pk.pos[0].x, y: pk.pos[0].y, w: rects[0].w, h: rects[0].h }]);
     this.debris.makeRest(g);
     if ( !this.flatten(g) ) this.materialize(g, 300);
+    buf = null;     // MEMORY: (the closure context above keeps it otherwise) the atlas lives in its texture only: freeAtlas can let it go
     return g;
+  }
+
+  /**
+   * MEMORY: a flattened area's atlas lets go of its CPU copy (the GPU copy went at flatten): ~300 MB on a busy scene whose strokes all
+   * have their pixels. Only for an area destruction.mjs can give the pixels back (restoreAtlas, from its stroke's chunk); an area
+   * without its atlas never enters (enter: shown as it lies) until it has it again.
+   */
+  freeAtlas(g) {
+    const r = g.tex?.resource;
+    if ( !r?.data || g.atlasFree || g.anim ) return false;
+    this.stats.atlasFreed = (this.stats.atlasFreed ?? 0) + r.data.byteLength;
+    r.data = null; g.atlasFree = true;
+    return true;
+  }
+
+  /** The atlas again from the area's sprites ([base, its shards in order, cover?, light?] as built), exactly as build laid it out. */
+  restoreAtlas(g, sprites) {
+    const A = g.atlas; if ( !g.atlasFree || !A || sprites.length !== A.sizes.length ) return false;
+    const buf = new Uint8Array(A.W * A.H * 4);
+    for ( let i = 0; i < sprites.length; i++ ) {
+      const s = sprites[i], [w, h] = A.sizes[i], p = A.pos[i];
+      if ( !s.img || s.w !== w || s.h !== h ) return false;
+      for ( let y = 0; y < h; y++ ) buf.set(s.img.subarray(y * w * 4, (y + 1) * w * 4), ((p.y + y) * A.W + p.x) * 4);
+    }
+    g.tex.resource.data = buf; g.tex.update(); g.atlasFree = false;
+    return true;
   }
 
   /**
@@ -374,6 +402,7 @@ export class DestructionDisplay {
     g.baseSpr.texture = rt; g.baseSpr.scale.set(1); g.baseSpr.position.set(o.x + r.x0 * ap, o.y + r.y0 * ap);
     g.tex.dispose();                                                          // off the GPU until an entry needs it
     this.stats.flat = (this.stats.flat ?? 0) + 1;
+    this.afterFlatten?.(g);
     return true;
   }
 
@@ -667,6 +696,8 @@ export class DestructionDisplay {
   enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null } = {}) {
     this.endAnim(g);
     const now = performance.now();
+    // (an area shown from the composite or without its atlas: no pixels to play an entry with - shown as it lies)
+    if ( g.shell || g.atlasFree || under.some((u) => u.shell || u.atlasFree) ) { for ( const u of under ) u.heldBy = null; this.stats.noPixelEntries = (this.stats.noPixelEntries ?? 0) + 1; return; }
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
     // an area far off screen is simply there (an entry nobody sees is not simulated: on a Detonate of every area that was most of
     // the cost); the view grown by half of it on every side (strictly the view in performance mode Medium); Low: a short fade
