@@ -655,3 +655,32 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
   .mm-ws-bar, .mm-ws-dock { animation: none; }
   .mm-ws-chev { transition: none; }
 }
+
+/* ------------------------------------------------------------------ roads (scripts/roads) */
+body.mm-painting-roads #board { cursor: crosshair; }
+.mm-rd { display: block; }
+.mm-rd-body { padding: 0 0.7rem 0.8rem; }
+.mm-rd-status { margin: 0 -0.7rem 0.3rem; font-variant-numeric: tabular-nums; }
+.mm-rd-tools { display: grid; grid-template-columns: 1fr 1fr 2.2rem 2.2rem; gap: 0.3rem; margin: 0.2rem 0 0.5rem; }
+.mm-rd-tools button { margin: 0; padding: 0.3rem 0.4rem; white-space: nowrap; }
+.mm-rd button[aria-pressed="true"] { outline: 2px solid var(--mm-accent); outline-offset: -2px; font-weight: 700; }
+.mm-rd button:disabled { opacity: 0.4; cursor: default; }
+.mm-rd-kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem; margin-bottom: 0.4rem; }
+.mm-rd-kind { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0.25rem; height: auto; min-height: 3.1rem; margin: 0; padding: 0.3rem; font-size: 0.75rem; line-height: 1.1; border-radius: 6px; cursor: pointer; }
+.mm-rd-kind img { display: block; width: 100%; height: 1.15rem; object-fit: cover; border: 0; border-radius: 3px; image-rendering: auto; }
+.mm-rd-kinds-bar { display: inline-grid; grid-template-columns: repeat(4, 2.6rem); margin: 0; }
+.mm-rd-kind-sm { padding: 0.2rem; height: 1.9rem; min-height: 0; justify-content: center; }
+.mm-rd-kind-sm img { height: 1rem; }
+.mm-rd-types { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; margin: 0.35rem 0; }
+.mm-rd-types-label { flex: 0 0 8.5rem; }
+.mm-rd-chip { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.1rem 0.45rem 0.1rem 0.15rem; border-radius: 999px; background: var(--mm-surface); font-size: 0.78rem; cursor: pointer; }
+.mm-rd-chip input { margin: 0; }
+.mm-rd-chip:has(input:checked) { background: color-mix(in srgb, var(--mm-accent) 22%, transparent); }
+.mm-rd-chip:focus-within { outline: 2px solid var(--mm-accent); outline-offset: 1px; }
+.mm-rd-btns { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+.mm-rd-btns button { flex: 1; margin: 0; }
+.mm-rd-hint { margin: 0.45rem 0 0; font-size: 0.78rem; line-height: 1.35; opacity: 0.8; }
+.mm-rd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.mm-rd-bar .mm-rd-hint { margin: 0; }
+.mm-rd-bar range-picker { width: 9rem; }
+.mm-rd-noheads .mm-wp-sec > h4 { display: none; }

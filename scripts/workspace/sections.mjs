@@ -6,3 +6,4 @@ import "./pins.mjs";
 import "./districts.mjs";
 import "./water.mjs";
 import "./soon.mjs";
+import "../roads/workspace.mjs";   // Roads take over their placeholder

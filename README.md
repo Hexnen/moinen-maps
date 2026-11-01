@@ -2,7 +2,7 @@
 
 Foundry VTT v14 module: map notes become hand-inked animated pins (bouncy drop, hop, idle motion), standalone pins without notes from one toolbar tool with a pin palette (Classic, Fantasy and Modern presets, plus your own custom presets), and freehand painted "districts" with inked outlines, hatch/halftone fills, labels, attributes and hover effects. Configured per scene in the Pins tab of Scene Config.
 
-The GM works from one scene-controls button, **Moinen Maps Tools**. Its second column holds the sections (Pins, Districts, Water, and Destruction, Roads and Zones still to come); a section opens a workspace: its tools, the active tool's options and its actions in a bar across the top of the canvas, its lists and settings as collapsible panels in a dock left of the sidebar. Players get only the read-only list of revealed districts, when the scene allows it.
+The GM works from one scene-controls button, **Moinen Maps Tools**. Its second column holds the sections (Pins, Districts, Water, Roads, and Destruction and Zones still to come); a section opens a workspace: its tools, the active tool's options and its actions in a bar across the top of the canvas, its lists and settings as collapsible panels in a dock left of the sidebar. Players get only the read-only list of revealed districts, when the scene allows it.
 
 ## Water
 
@@ -16,6 +16,16 @@ Paint rivers, lakes, ponds and waterfalls on the map and they become a seamlessl
 - **Tokens under the water:** a token with an elevation below zero that stands in water is veiled by the water (darker the deeper it is, wavering) with bubbles rising from it. Nothing is baked and the token itself is untouched.
 - **How it is shared:** the masks and settings are saved in the scene. A few seconds after the GM's last change the GM's client uploads the baked water as one PNG to `worlds/<world>/moinen-maps/` and players download it, with no baking, no worker and no waiting (about 66 KB for 16 frames of a small scene). A client that cannot get it (the GM has no upload right, or edited since) bakes the same seeded loop itself, and keeps the result in the browser for next time. The art pixel size (Output tab) sets how many scene pixels one pixel of the water art covers; smaller is finer and slower to bake.
 - The waterfalls and the mouth are drawn for a side or oblique view (falling toward the bottom of the screen); lakes, ponds and rivers work from any angle (set the river's Way and the drift's direction).
+
+## Roads
+
+Paint roads on the map and little cars start driving on them. Moinen Maps Tools → Roads: the road pen and the eraser in the bar at the top (with the brush: road kind, width, lanes, one-way), the traffic and the road look in the dock.
+
+- **Painting:** drag to paint a road freehand (it is smoothed into a curve), or click point by point and finish with a double-click, Enter, a click on the last point or a right-click. An end that stops near a road or junction joins it; where a road crosses another both get a junction. Alt-click a road to give it the current brush, Alt+Shift-click to turn a one-way road around, right-click to delete a road. The eraser cuts roads where you drag it. `[` and `]` change the width (or the eraser size), `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo.
+- **Kinds:** asphalt (kerbs, dashed centre line, one-way chevrons, zebra crossings at junctions), cobblestones (stone by stone), dirt road (ruts, pebbles, a frayed rim) and a footpath (no cars). Inked like the districts, with a soft ground shadow; drawn above the water (a road over a river is a bridge), under the districts' tint, tiles and tokens.
+- **Traffic:** seven kinds of tiny top-down cars (small car, sedan, van, pickup, lorry, bus, taxi) in nine colours, inked or as pixel art. They keep to the right (or left), slow down for curves, keep their distance, take turns at junctions (the one that waited longest goes first, and nobody drives into a full junction), turn round at dead ends and drive off the map where a road leaves it, coming back in elsewhere. Headlights and tail lights at night (automatic with the scene's darkness, or always on/off), brake lights, a little sway on rough roads. Density, speed, car size, a cap on the number of cars, which vehicles, and who sees them (everyone or only the GM) are set per scene.
+- **How it is shared:** the roads and settings are one small scene flag. Nothing else is ever sent: every client runs the same seeded simulation from the server clock, so the GM and the players see the same cars in the same places. The simulation restarts from a new seeded layout every 20 minutes (the cars cross-fade); a client that joins steps from the start of that period, which takes a few frames.
+- Reduced motion (the module's setting with the system preference) keeps the cars moving but drops their sway and flicker.
 
 ## Credits
 

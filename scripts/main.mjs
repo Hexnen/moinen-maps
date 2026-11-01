@@ -17,6 +17,8 @@ import * as WaterSubmerge from "./water/submerge.mjs";
 import { schedulePanel, refreshPanel, removePanel } from "./filter-panel.mjs";
 import { onDrawNote, onCreateNote, onRefreshNote, onUpdateNote, refreshPins } from "./pin.mjs";
 import { onCreateToken, onDrawToken, onRefreshToken, onUpdateToken, onDeleteToken, onTargetToken, onCreateCombatant, onUpdateCombat, onCombatStart, teardownTokenDrops } from "./token-drop.mjs";
+import { registerRoads } from "./roads/roads.mjs";
+registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
 
 Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);
