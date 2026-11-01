@@ -365,9 +365,12 @@ const RES = { ink: 104, pixel: 22 };
 
 function makeTexture(canvas, pixel) {
   const tex = PIXI.Texture.from(canvas, pixel ? { scaleMode: PIXI.SCALE_MODES.NEAREST } : {});
-  // inked sprites shrink a long way (cars down to a few screen pixels): mipmaps keep them smooth instead of sparkling
-  if ( pixel ) tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
-  else { tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON; tex.baseTexture.anisotropicLevel = 4; }
+  // cars shrink a long way (down to a few screen pixels): mipmaps keep them smooth instead of sparkling. Pixel cars too: a
+  // 26-texel body is drawn at ~18 px at zoom 1 and ~9 px at 0.5, and plain nearest sampling then drops different texels every
+  // frame (the cars flicker, worst while zooming). With mipmaps a NEAREST texture is still sampled nearest when enlarged (crisp
+  // pixels when zoomed in) and from its box-filtered smaller levels when shrunk (NEAREST_MIPMAP_NEAREST).
+  tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
+  if ( !pixel ) tex.baseTexture.anisotropicLevel = 4;
   return tex;
 }
 

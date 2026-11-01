@@ -24,7 +24,9 @@ export class RoadDisplay {
       const s = new PIXI.Sprite(tex);
       s.eventMode = "none";
       s.position.set(t.x, t.y);
-      s.scale.set(1 / t.res);
+      // exactly one tile wide: the canvas is TILE * res rounded, so 1 / res could leave a hairline gap between tiles (a seam that
+      // flickers while zooming)
+      s.scale.set(t.w / t.canvas.width, t.h / t.canvas.height);
       this.root.addChild(s);
       this.sprites.push(s);
     }

@@ -67,7 +67,9 @@ export class WaterDisplay {
     const c = document.createElement("canvas"); c.width = box.w; c.height = box.h;
     c.getContext("2d").putImageData(new ImageData(paintFrame(levels, box.w, box.h, this.lut), box.w, box.h), 0, 0);
     const tex = PIXI.Texture.from(c, { scaleMode: PIXI.SCALE_MODES.NEAREST });
-    tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+    // nearest when enlarged (crisp art pixels); when zoomed out so far that an art pixel is under a screen pixel, the mipmaps
+    // (NEAREST_MIPMAP_NEAREST) stop the animated water from sparkling as different texels are dropped every frame
+    tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.ON;
     return tex;
   }
 
