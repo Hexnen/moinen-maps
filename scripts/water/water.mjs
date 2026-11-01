@@ -119,8 +119,12 @@ function scheduleBake(ms = 350) {
   bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, ms);
 }
 
-export async function rebake() {
+/** How long a player waits for the GM's upload of new water before baking it himself. */
+const AWAIT_PUBLISH = 12000;
+
+export async function rebake({ awaitPublish = true } = {}) {
   if ( !S ) return;
+  clearTimeout(bakeTimer); bakeTimer = 0;
   const my = ++gen, scene = canvas.scene;
   if ( !Model.hasPaint(S) ) { display?.clear(); status.baking = false; tell("status"); return; }
   if ( !S.enabled ) return;
@@ -146,6 +150,12 @@ export async function rebake() {
     display.commit();
     status.baking = false; status.progress = 1; tell("status");
     releaseWorker();
+    return;
+  }
+  // a player whose GM is painting: the GM's client uploads the new water a few seconds after it has baked it, so wait for that
+  // (the water shown so far stays) and bake here only when it does not come
+  if ( awaitPublish && !game.user.isGM && game.users.activeGM ) {
+    bakeTimer = setTimeout(() => { bakeTimer = 0; rebake({ awaitPublish: false }); }, AWAIT_PUBLISH);
     return;
   }
   clearTimeout(releaseTimer);
