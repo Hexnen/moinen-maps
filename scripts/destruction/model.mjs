@@ -9,7 +9,9 @@ import { MODULE_ID } from "../config.mjs";
  * pixel-art standard of moinen-pixel-vfx), so the torn outline can be ragged at art-pixel scale while the mask stays small.
  */
 export const FLAG = "destruction";
-export const VERSION = 2;
+/** The stroke objects of layout 3, one flag key per stroke: `destructionObjects.<id>` = the object without its path, `s` its place. */
+export const OBJS = "destructionObjects";
+export const VERSION = 3;
 /** Damage types, by index (bits 2-4 of a mask byte). */
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const MATERIALS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -189,13 +191,39 @@ export function load(scene = canvas.scene) {
     params: cleanParams(f.params), enabled: f.enabled !== false, blast: f.blast ?? null, baked: f.baked ?? null, rev: nextRev(),
     entries: Array.isArray(f.entries) ? f.entries : []
   };
-  S.objects = Array.isArray(f.o) ? f.o.filter((o) => o && o.id && o.w > 0 && o.h > 0) : (f.m ? objectsFromMask(rleDecode(f.m, g.mw * g.mh), g.mw, g.mh) : []);
+  S.objects = objectsOf(f, scene?.flags?.[MODULE_ID]?.[OBJS], g);
   composite(S);
   return S;
 }
 
+const validObj = (o) => o && typeof o === "object" && typeof o.id === "string" && o.id && o.w > 0 && o.h > 0 && typeof o.m === "string";
+/**
+ * The stroke objects of a stored destruction, in creation order, every one with its place `s` (copies, never the flag's objects):
+ *   layout 3 (v >= 3): one flag key per stroke (OBJS), ordered by `s`, then id;
+ *   layout 2: the array `o` of the main flag, `s` = its index (the same on every client; the GM's next save writes layout 3);
+ *   layout 1: one merged mask `m`, cut into objects (objectsFromMask), `s` = their index.
+ */
+export function objectsOf(f, objs, g) {
+  if ( (f.v | 0) >= 3 ) {
+    const list = Object.values(objs && typeof objs === "object" ? objs : {}).filter(validObj).map((o) => ({ ...o, s: Number.isFinite(o.s) ? o.s : 0 }));
+    return list.sort((a, b) => (a.s - b.s) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  if ( Array.isArray(f.o) ) return f.o.filter(validObj).map((o, i) => ({ ...o, s: i }));
+  if ( f.m ) return objectsFromMask(rleDecode(f.m, g.mw * g.mh), g.mw, g.mh).map((o, i) => { o.s = i; return o; });
+  return [];
+}
+
+/** The place of a new stroke: after every stroke there is. */
+export const nextSeq = (S) => (S.objects ?? []).reduce((m, o) => Math.max(m, Number.isFinite(o.s) ? o.s : -1), -1) + 1;
+
+/** The whole state as one object (the API's state(); `o` the strokes in order). The scene stores it split up: Store.flagUpdate. */
 export function encode(S) {
   return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, o: S.objects ?? [], m: null, blast: S.blast ?? null, entries: S.entries ?? [], paths: null };
+}
+
+/** The main flag of layout 3: the small fields only (no strokes: they live in OBJS, their paths in destructionPaths). */
+export function encodeMain(S) {
+  return { v: VERSION, ap: S.ap, seed: S.seed, enabled: S.enabled, params: S.params, o: null, m: null, blast: S.blast ?? null, entries: S.entries ?? [], paths: null };
 }
 
 export function cleanParams(p = {}) {

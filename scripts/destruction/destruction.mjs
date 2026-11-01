@@ -8,6 +8,7 @@ import * as Chunks from "../net/chunks.mjs";
 import { seedKnown } from "../water/publish.mjs";
 import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
+import { setChanged, syncMap } from "../flag-diff.mjs";
 import { DestructionDisplay } from "./display.mjs";
 import * as Editor from "./editor.mjs";
 
@@ -100,7 +101,8 @@ function teardown() {
 function onUpdateScene(scene, changed, _options, userId) {
   if ( scene.id !== canvas.scene?.id ) return;
   const f = changed.flags?.[MODULE_ID];
-  if ( !f || !(Model.FLAG in f || `-=${Model.FLAG}` in f) ) return;
+  // the main flag, a stroke (layout 3: one key per stroke) or a path changed (a deletion arrives under the key itself in v14)
+  if ( !f || ![Model.FLAG, Model.OBJS, Store.PATHS].some((k) => k in f || `-=${k}` in f) ) return;
   if ( userId === game.user.id ) return;                    // our own save: already shown
   // another GM saved while this GM has strokes not saved yet: keep ours (our save follows and wins), never drop them
   if ( game.user.isGM && saveTimer ) return;
@@ -419,15 +421,18 @@ async function persistOnce() {
     }
     if ( my !== gen || !S ) return;
     await save();                                    // the strokes first, so the signatures mean the same to everyone
-    const cc = { ...c };
-    if ( M ) for ( const id of Object.keys(M.c) ) if ( !(id in c) ) cc[`-=${id}`] = null;
-    const baked = { v: 2, dir, base, key, at: now(), c: cc, path: null, metaRows: null };
+    const baked = { v: 2, dir, base, key, at: now(), c, path: null, metaRows: null };
     // the entries that played since: everybody here plays them a moment after the upload, at the same server time
     const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
     for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
     for ( const [h, e] of entryLog ) if ( !keep.has(h) || at - e.t > 60000 ) entryLog.delete(h);
     S.entries = [...entryLog.values()];
-    await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked, [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries });
+    // the manifest key by key: a new stroke adds one entry, an undo deletes one (flag-diff.mjs)
+    const BK = `flags.${MODULE_ID}.${Model.FLAG}.baked`, stored = scene.flags?.[MODULE_ID]?.[Model.FLAG]?.baked;
+    const upd = { [`flags.${MODULE_ID}.${Model.FLAG}.entries`]: S.entries };
+    setChanged(upd, BK, stored, baked, ["v", "dir", "base", "key", "at", "path", "metaRows"]);
+    syncMap(upd, `${BK}.c`, stored?.c, c);
+    await scene.update(upd);
     if ( S ) S.baked = { ...baked, c };
     publishBackoff = 0; publishRetryAt = 0;
     Net.scheduleGc(scene.id);
@@ -464,7 +469,9 @@ export function edited(box, stroke = null) {
     // (a tear keeps it always: its brush path is the tear's spine)
     if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
     const id = foundry.utils.randomID(10);
-    S.objects = [...(S.objects ?? []), Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause ?? 0 })];
+    const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause ?? 0 });
+    ob.s = Model.nextSeq(S);                         // its place in the order (layout 3 stores the strokes key by key)
+    S.objects = [...(S.objects ?? []), ob];
     Model.composite(S);
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
   }
@@ -559,13 +566,15 @@ function flushSave() {
   clearTimeout(saveTimer); saveTimer = 0;
   const scene = saveFor, upd = Store.flagUpdate(S, scene);
   saveFor = null;
+  if ( !Object.keys(upd).length ) return;
   scene.update(upd).catch((err) => console.warn(`${MODULE_ID} | destruction: could not save`, err));
 }
 
 export async function save() {
   if ( !S || !game.user.isGM || !canvas.scene ) return;
   clearTimeout(saveTimer); saveTimer = 0;
-  await canvas.scene.update(Store.flagUpdate(S, canvas.scene));
+  const upd = Store.flagUpdate(S, canvas.scene);
+  if ( Object.keys(upd).length ) await canvas.scene.update(upd);    // nothing changed: no write
 }
 
 /* ---------------------------------------------------------------- API */

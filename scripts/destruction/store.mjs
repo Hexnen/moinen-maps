@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
 import * as Model from "./model.mjs";
+import { setChanged, syncMap, safeKey } from "../flag-diff.mjs";
 
 /**
  * Where a bake is kept and how it travels (see scripts/net): every stroke's sprites are one CHUNK, a small immutable file named by a
@@ -13,7 +14,9 @@ import * as Model from "./model.mjs";
  * replaces it.
  *
  * The strokes' brush paths live in their own flag key, `destructionPaths` { <stroke id>: [x, y, ms, ...] }, written key by key: a new
- * stroke sends its own path, not every path of the scene again.
+ * stroke sends its own path, not every path of the scene again. The strokes themselves too (layout 3): `destructionObjects.<id>`
+ * (the object without its path, `s` its place in the order), so a stroke, an undo or a changed cause writes ONE key; the main flag
+ * `destruction` keeps the small fields. A save names only what changed (flag-diff.mjs); nothing changed, no write.
  */
 const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
 const enc = (s) => new TextEncoder().encode(s);
@@ -56,17 +59,33 @@ export const PATHS = "destructionPaths";
 export function attachPaths(S, scene) {
   const P = scene?.flags?.[MODULE_ID]?.[PATHS];
   if ( !S || !P || typeof P !== "object" ) return S;
-  S.objects = (S.objects ?? []).map((o) => (o.p || !Array.isArray(P[o.id])) ? o : { ...o, p: P[o.id] });
+  // (in place: the objects are load()'s own copies, and their decoded bytes stay with them)
+  for ( const o of S.objects ?? [] ) if ( !o.p && Array.isArray(P[o.id]) ) o.p = P[o.id];
   return S;
 }
 
-/** The scene update that saves `S`: the destruction flag without the paths, and the paths key by key (gone strokes deleted). */
+/**
+ * The scene update that saves `S` against what the scene holds now: only the main flag's fields that changed, one key per new or
+ * changed stroke and path, a deletion per gone one. A scene of layout 2 (array `o`) is written as layout 3 in full the first time
+ * (the stored OBJS is empty then). Empty when nothing changed.
+ */
 export function flagUpdate(S, scene) {
-  const data = Model.encode(S), paths = {};
-  data.o = (data.o ?? []).map((o) => { if ( !o.p ) return o; paths[o.id] = o.p; const { p, ...rest } = o; void p; return rest; });
-  const old = scene?.flags?.[MODULE_ID]?.[PATHS];
-  if ( old && typeof old === "object" ) for ( const id of Object.keys(old) ) if ( !(id in paths) ) paths[`-=${id}`] = null;
-  return { [`flags.${MODULE_ID}.${Model.FLAG}`]: data, [`flags.${MODULE_ID}.${PATHS}`]: paths };
+  const F = scene?.flags?.[MODULE_ID] ?? {}, P = `flags.${MODULE_ID}`, upd = {};
+  const objs = {}, paths = {};
+  (S.objects ?? []).forEach((o, i) => {
+    if ( !safeKey(o.id) ) return;                    // (never for our ids: randomID or the first format's c<base36>)
+    const { p, ...rest } = o;
+    rest.s = Number.isFinite(o.s) ? o.s : i;
+    objs[o.id] = rest;
+    if ( Array.isArray(p) && p.length ) paths[o.id] = p;
+  });
+  syncMap(upd, `${P}.${Model.OBJS}`, F[Model.OBJS], objs);
+  syncMap(upd, `${P}.${PATHS}`, F[PATHS], paths);
+  const main = Model.encodeMain(S), old = F[Model.FLAG] ?? {};
+  // layout 2 -> 3: the old array goes with the same update that writes the strokes key by key
+  setChanged(upd, `${P}.${Model.FLAG}`, old, main, ["v", "ap", "seed", "enabled", "params", "blast", "entries", "m", "paths"]);
+  if ( old.o != null ) upd[`${P}.${Model.FLAG}.o`] = null;
+  return upd;
 }
 
 /* ---------------------------------------------------------------- the first format (read only) */

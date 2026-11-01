@@ -302,11 +302,13 @@ function scheduleSave(ms = 900) {
 function flushSave() {
   if ( !saveTimer || !S || !game.user.isGM ) return;
   const scene = game.scenes.get(saveSceneId);
-  scene?.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: Model.encode(S) }).catch((err) => console.warn(`${MODULE_ID} | could not save the water`, err));
+  const upd = scene && Model.flagUpdate(S, scene);
+  if ( upd && Object.keys(upd).length ) scene.update(upd).catch((err) => console.warn(`${MODULE_ID} | could not save the water`, err));
 }
 
 export async function save() {
   if ( !S || !game.user.isGM || !canvas.scene ) return;
   const scene = canvas.scene;
-  await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: Model.encode(S) });
+  const upd = Model.flagUpdate(S, scene);
+  if ( Object.keys(upd).length ) await scene.update(upd);           // only the changed masks and fields; nothing changed, no write
 }

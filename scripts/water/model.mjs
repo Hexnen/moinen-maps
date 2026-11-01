@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { setChanged } from "../flag-diff.mjs";
 
 /**
  * The water of a scene: three painted masks (still water, river, fall) on a grid of "art pixels" (PX scene pixels each), plus the
@@ -81,6 +82,18 @@ export function load(scene = canvas.scene) {
 /** The flag payload of a water set. */
 export function encode(S) {
   return { v: 1, px: S.px, enabled: S.enabled, params: S.params, m: Object.fromEntries(LAYERS.map((l) => [l, rleEncode(S.masks[l])])) };
+}
+
+/**
+ * The scene update that saves a water set against what `scene` holds: only the fields that changed, each of the three masks under
+ * its own key and only when its run-length string changed (painting a river does not send the still water again). Empty when
+ * nothing changed: no write.
+ */
+export function flagUpdate(S, scene) {
+  const data = encode(S), stored = scene?.flags?.[MODULE_ID]?.[FLAG], P = `flags.${MODULE_ID}.${FLAG}`, upd = {};
+  setChanged(upd, P, stored, data, ["v", "px", "enabled", "params"]);
+  setChanged(upd, `${P}.m`, stored?.m, data.m, LAYERS);
+  return upd;
 }
 
 export const hasPaint = (S) => LAYERS.some((l) => S.masks[l].some((v) => v));
