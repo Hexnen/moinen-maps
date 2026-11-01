@@ -267,30 +267,51 @@ function destroyEntry(e) {
   e.core.destroy({ children: true }); e.halo.destroy({ children: true });
 }
 
+/**
+ * The lights of a district as PARTICLE CONTAINERS, one per texture (windows, lamps, bokeh; their halos: pool, wide pool): positions,
+ * sizes, rotations and texture frames are uploaded once, only the tint + alpha of each light goes to the GPU per frame (a typed-array
+ * loop in PIXI's particle renderer) - no per-sprite transform, bounds or batch work. The layout groups the lights by kind (windows,
+ * then lamps, then bokeh), so drawing kind after kind keeps the order of the single container this replaces (pixel-equal); the halos
+ * blend MAX_COLOR (order-free). A particle container draws every child: an unlit light has alpha 0 (not `visible = false`).
+ */
+const pc = (n, blend) => {
+  const c = new PIXI.ParticleContainer(Math.max(1, n), { vertices: false, position: false, rotation: false, uvs: false, tint: true });
+  c.blendMode = blend; c.eventMode = "none"; c.interactiveChildren = false;
+  return c;
+};
+
 function buildEntry(e, d, cfg) {
-  for ( const c of e.core.removeChildren() ) c.destroy();
-  for ( const c of e.halo.removeChildren() ) c.destroy();
+  for ( const c of e.core.removeChildren() ) c.destroy({ children: true });
+  for ( const c of e.halo.removeChildren() ) c.destroy({ children: true });
   const S = canvas.grid.size, tex = bakeTextures(), list = layoutLights(d, cfg, S);
   const n = list.length, rec = new Float32Array(n * STRIDE);
   e.cores = new Array(n); e.halos = new Array(n); e.count = n;
-  const MAXC = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD;
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const MAXC = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD, NORMAL = PIXI.BLEND_MODES.NORMAL, ADD = PIXI.BLEND_MODES.ADD;
+  // one container per kind for the cores (in layout order) and per halo texture
+  const counts = [0, 0, 0]; for ( const l of list ) counts[l.kind]++;
+  const cores = [pc(counts[KIND.window], NORMAL), pc(counts[KIND.lamp], NORMAL), pc(counts[KIND.bokeh], ADD)];
+  const halos = [pc(counts[KIND.window] + counts[KIND.bokeh], MAXC), pc(counts[KIND.lamp], MAXC)];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, lastKind = -1;
+  const order = [];
   list.forEach((l, i) => {
     const t = l.kind === KIND.window ? tex.window : l.kind === KIND.lamp ? tex.lamp : tex.bokeh;
     const s = new PIXI.Sprite(t); s.anchor.set(0.5); s.position.set(l.x, l.y); s.width = l.w; s.height = l.h; s.rotation = l.rot;
     // the lamp core is whiter than its pool, like a hot filament
     s.tint = l.kind === KIND.lamp ? l.color.mix(Color.from("#ffffff"), 0.45) : l.color;
-    if ( l.kind === KIND.bokeh ) s.blendMode = PIXI.BLEND_MODES.ADD;
-    s.visible = false; e.core.addChild(s); e.cores[i] = s;
+    s.alpha = 0; cores[l.kind].addChild(s); e.cores[i] = s;
+    if ( l.kind !== lastKind ) { order.push(l.kind); lastKind = l.kind; }
     const hr = (l.kind === KIND.window ? 0.24 :l.kind === KIND.lamp ? 0.95 : 0.7) * S * cfg.size * (0.45 + cfg.glow);
     const h = new PIXI.Sprite(l.kind === KIND.lamp ? tex.haloWide : tex.halo); h.anchor.set(0.5); h.position.set(l.x, l.y); h.width = h.height = hr * 2;
     // the pool is nearly white in its flat middle, so the darkness never dims the core (emissive), and takes the light's colour outwards
-    h.tint = l.color.mix(Color.from("#ffffff"), 0.55); h.blendMode = MAXC; h.visible = false;
-    e.halo.addChild(h); e.halos[i] = h;
+    h.tint = l.color.mix(Color.from("#ffffff"), 0.55); h.alpha = 0;
+    halos[l.kind === KIND.lamp ? 1 : 0].addChild(h); e.halos[i] = h;
     const o = i * STRIDE;
     rec[o] = l.phase; rec[o + 1] = l.rate; rec[o + 2] = l.dusk; rec[o + 3] = l.period; rec[o + 4] = l.kind; rec[o + 5] = l.tv ? l.swPhase : -1;
     x0 = Math.min(x0, l.x - hr); y0 = Math.min(y0, l.y - hr); x1 = Math.max(x1, l.x + hr); y1 = Math.max(y1, l.y + hr);
   });
+  for ( const k of order ) e.core.addChild(cores[k]);
+  for ( const c of cores ) if ( !c.parent ) c.destroy();
+  for ( const c of halos ) { if ( c.children.length ) e.halo.addChild(c); else c.destroy(); }
   e.rec = rec;
   e.animated = list.some((l) => l.period > 0 || l.tv);   // switching lights or screens move even with twinkle at 0
   // culling: a district off screen costs one rectangle test
@@ -358,13 +379,13 @@ function tick() {
   if ( !busy ) sleep();
 }
 
-/** Per-light alpha: dusk order, twinkle, switching. Alpha only, so the batch never re-uploads geometry. */
+/** Per-light alpha: dusk order, twinkle, switching. Alpha only (0 = unlit): the particle containers upload only tint + alpha. */
 function apply(e, t, still) {
   const { rec, cores, halos, count, cfg } = e, n = e.n, base = e.base, tw = still ? 0 : cfg.twinkle, glowK = 0.7 + 0.3 * cfg.glow;
   for ( let i = 0, o = 0; i < count; i++, o += STRIDE ) {
     let a = (n - rec[o + 2]) / 0.2;
     const c = cores[i], h = halos[i];
-    if ( a <= 0 ) { c.visible = h.visible = false; continue; }
+    if ( a <= 0 ) { c.alpha = h.alpha = 0; continue; }
     if ( a > 1 ) a = 1;
     if ( !still ) {
       const ph = rec[o], rate = rec[o + 1], kind = rec[o + 4];
@@ -375,13 +396,15 @@ function apply(e, t, still) {
       const per = rec[o + 3];
       if ( per > 0 ) a *= clamp((Math.sin(t * TAU / per + ph * 3.3) + 0.25) * 3, 0, 1);                     // someone switches it off for a while
     }
-    if ( a <= 0.003 ) { c.visible = h.visible = false; continue; }
-    c.visible = h.visible = true;
+    if ( a <= 0.003 ) { c.alpha = h.alpha = 0; continue; }
     c.alpha = a * base; h.alpha = a * base * glowK;
   }
 }
 
 /** While an editor shows its night-light controls, its district (or every district: "*") shows the lights as at night. */
+/** (bench) how many lights are built. */
+export const _stats = () => ({ lights: [...ENTRIES.values()].reduce((a, e) => a + (e.count || 0), 0), districts: ENTRIES.size });
+
 export function setNightPreview(id, on) {
   if ( on ) PREVIEW.add(id); else PREVIEW.delete(id);
   if ( canvas.ready ) retarget();
