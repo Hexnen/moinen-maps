@@ -22,7 +22,7 @@ let seen = { graph: "", look: "", sim: "", show: "" };
 const undo = [], redo = [];
 const UNDO_MAX = 60;
 /** Settings that change what the simulation does (a new simulation); the rest only change how cars look. */
-const SIM_KEYS = ["density", "speed", "size", "max", "kinds", "side", "seed"];
+const SIM_KEYS = Model.SIM_KEYS;
 
 export const tell = (kind) => Hooks.callAll("moinenMapsRoads", kind);
 export const state = () => R;

@@ -36,6 +36,13 @@ export const TRAFFIC_DEFAULTS = Object.freeze({
   on: true, density: 0.5, speed: 1, size: 0.45, vary: 0, max: 60, kinds: [...BODY_TYPES], side: "right", lights: "auto", who: "all", style: "ink", seed: 1
 });
 /** guides: when the GM sees guide lines: "tool" (only while a road tool is in hand) or "always". Players never see them. */
+/**
+ * Traffic settings the simulation reads (traffic.mjs): changing one starts a new simulation from the start of the epoch on every
+ * client. Anything not listed here (on, lights, who, style) only changes how cars are shown. dev/roads-determinism.test.mjs checks
+ * that every setting traffic.mjs reads is listed.
+ */
+export const SIM_KEYS = Object.freeze(["density", "speed", "size", "vary", "max", "kinds", "side", "seed"]);
+
 export const LOOK_DEFAULTS = Object.freeze({ shadow: 0.6, ink: 1, marks: true, crossings: true, guides: "tool" });
 export const LIMITS = { width: [0.05, 3], size: [0.03, 1.5], speed: [0.2, 3], max: [0, 150], density: [0, 1], vary: [0, 0.5], roadSpeed: [0.2, 2] };
 
