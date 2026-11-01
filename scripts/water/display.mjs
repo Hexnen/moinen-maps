@@ -160,7 +160,8 @@ export class WaterDisplay {
     // one clock for every loop of water on the scene (the flooded holes of the destruction run on it too): the frame is the time
     // divided by the frame time, so two loops with the same frames and frame time are always on the same frame
     // (the ticker's frame time: one moment per drawn frame, the vsync it is shown at, not when this callback happens to run)
-    const [i, j, m] = loopMix(canvas.app.ticker.lastTime || performance.now(), this.set.ms, n, smoothOn());
+    const tk = canvas.app.ticker;                    // (lastTime is set after the listeners: + elapsedMS = this frame)
+    const [i, j, m] = loopMix(tk.lastTime ? tk.lastTime + (tk.elapsedMS || 0) : performance.now(), this.set.ms, n, smoothOn());
     this.show(i, j, m);
   }
 

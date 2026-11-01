@@ -601,7 +601,7 @@ export function catchUp(sim, step, budgetMs) {
   const t0 = performance.now();
   while ( sim.step < step ) {
     sim.advance();
-    if ( (sim.step & 15) === 0 && performance.now() - t0 > budgetMs ) return sim.step >= step;
+    if ( (sim.step & 3) === 0 && performance.now() - t0 > budgetMs ) return sim.step >= step;   // (checked every 4 steps: a budget of 2 ms holds)
   }
   return true;
 }

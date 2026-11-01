@@ -10,9 +10,25 @@ import { perfLow } from "../perf-mode.mjs";
  */
 
 const FADE_EPOCH = 2.5;          // seconds the old epoch's cars take to fade out
-const CATCHUP_MS = 9;          // per frame, while a simulation catches up with the clock
+const CATCHUP_MS = 9;          // per frame, while a new simulation catches up with the clock (its cars are not shown yet)
+const RUN_MS = 2;              // per frame, for a running simulation that fell behind (after a stall): it catches up over frames
 
-const now = () => (game.time?.serverTime ?? Date.now()) / 1000;
+/**
+ * The traffic's clock (s): the server time, but SMOOTH - mapped from the drawn frame's time (the ticker's, one moment per frame)
+ * plus an offset that glides (at most 5% of the elapsed time) towards the server's: Foundry re-syncs serverTime every 30 s and the
+ * estimate moves by a few ms, which made every car jump; only an offset off by more than a second (a sleep, a clock change) is
+ * taken at once. All clients still drive the same cars.
+ */
+let clockOff = null, clockAt = 0;
+export function now() {
+  // (the frame being drawn: PIXI sets lastTime only after the listeners ran, elapsedMS before them)
+  const pn = performance.now(), tk = canvas?.app?.ticker, frame = tk?.lastTime ? tk.lastTime + (tk.elapsedMS || 0) : pn;
+  const target = (game.time?.serverTime ?? Date.now()) - pn;
+  if ( clockOff === null || Math.abs(target - clockOff) > 1000 ) clockOff = target;
+  else if ( frame > clockAt ) { const lim = (frame - clockAt) * 0.05; clockOff += Math.max(-lim, Math.min(lim, target - clockOff)); }
+  if ( frame > clockAt ) clockAt = frame;
+  return (frame + clockOff) / 1000;
+}
 
 class CarSprite extends PIXI.Container {
   constructor(beams) {
@@ -120,7 +136,9 @@ export class TrafficView {
     }
     const sim = this.sim;
     const was = sim.ready;
-    sim.ready = catchUp(sim, step, sim.ready ? 30 : CATCHUP_MS) || sim.ready;
+    // a running simulation behind the clock (a stall, a hidden tab) catches up RUN_MS per frame and is shown at the last state it
+    // reached meanwhile (one long frame of 30 ms before)
+    sim.ready = catchUp(sim, step, sim.ready ? RUN_MS : CATCHUP_MS) || sim.ready;
     if ( sim.ready && !was && this.old && this.oldFade === Infinity ) this.oldFade = t - FADE_EPOCH * 0.7;   // a quick cross-fade
     const night = this.#night(), calm = reducedMotion();
     const view = this.#viewRect();
