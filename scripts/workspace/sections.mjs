@@ -6,4 +6,5 @@ import "./pins.mjs";
 import "./districts.mjs";
 import "./water.mjs";
 import "./soon.mjs";
+import "../destruction/section.mjs";   // Destruction takes over its placeholder (localStorage "mm-destruction" = "off" leaves it out)
 import "../roads/workspace.mjs";   // Roads take over their placeholder
