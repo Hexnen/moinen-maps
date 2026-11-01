@@ -18,7 +18,7 @@
  * the placement table, so a single PNG carries the whole bake.
  */
 
-export const CORE_VERSION = 12;
+export const CORE_VERSION = 13;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -166,133 +166,125 @@ export function bake(I, cache = null) {
   const paramStr = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !OWN.has(k)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
   const head = fnvInts(fnvStr(`${CORE_VERSION}|${seed}|${paramStr}|${I.mapKey ?? ""}|${AW}x${AH}`), jag ? Math.round(jag * 1000) + 1 : 0);
 
-  /* ---------------------------------------------------------------- 1. the ragged field (absolute art coordinates only) */
-  let mx0 = Infinity, my0 = Infinity, mx1 = -1, my1 = -1;
-  for ( let i = 0; i < I.mask.length; i++ ) if ( I.mask[i] & 3 ) { const x = i % I.mw, y = (i - x) / I.mw; if ( x < mx0 ) mx0 = x; if ( x > mx1 ) mx1 = x; if ( y < my0 ) my0 = y; if ( y > my1 ) my1 = y; }
+  /* ---------------------------------------------------------------- 1. damage objects: one field per damage TYPE */
+  // Every type is a layer of its own: its field is read from the mask pixels of that type only, so a burn next to a flood looks
+  // exactly as each would alone (types never merge, never share cracks, halos, rubble, ramps or material inputs). Inside one type a
+  // connected region is one object. Each object is then baked from its own pixels only (+ the map under it): nothing another object
+  // does can change it. Objects are ordered by their first pixel (top-left), then by type: stable whatever else is painted.
   const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, materials: [], baked: 0, reused: 0 };
-  if ( mx1 < 0 ) return assemble([], stats, t0, progress);
-  const FM = 4 + (jag ? 22 : 0);
-  const FX = Math.max(0, mx0 * K - FM), FY = Math.max(0, my0 * K - FM);
-  const FW = Math.min(AW, (mx1 + 1) * K + FM) - FX, FH = Math.min(AH, (my1 + 1) * K + FM) - FY, FN = FW * FH;
-  const inside = new Uint8Array(FN), sev = new Float32Array(FN), typ = new Uint8Array(FN), frag = new Int32Array(FN);
-  const lv = (mx, my) => (mx < 0 || my < 0 || mx >= I.mw || my >= I.mh) ? 0 : (I.mask[my * I.mw + mx] & 3);
+  const present = new Set();
+  for ( let i = 0; i < I.mask.length; i++ ) if ( I.mask[i] & 3 ) present.add((I.mask[i] >> 2) & 7);
+  if ( !present.size ) return assemble([], stats, t0, progress);
   const edge = clamp(P.edge ?? 0.7, 0, 1);
-  for ( let y = 0; y < FH; y++ ) for ( let x = 0; x < FW; x++ ) {
-    const ax = FX + x, ay = FY + y;
-    // torn: the mask is read through a warp (two octaves, up to ~7 art px), so the outline tears into lobes and inlets
-    let wx = 0, wy = 0;
-    if ( jag ) {
-      const A = 7 * jag;
-      wx = (vnoise(ax / 7, ay / 7, seed + 310) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 312) - 0.5) * 0.7 * A;
-      wy = (vnoise(ax / 7, ay / 7, seed + 311) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 313) - 0.5) * 0.7 * A;
-    }
-    const mx = (ax + wx + 0.5) / K - 0.5, my = (ay + wy + 0.5) / K - 0.5;
-    const ix = Math.floor(mx), iy = Math.floor(my), fx = mx - ix, fy = my - iy;
-    const a = lv(ix, iy), b = lv(ix + 1, iy), c = lv(ix, iy + 1), d = lv(ix + 1, iy + 1);
-    if ( !(a | b | c | d) ) continue;
-    const bil = lerp(lerp(a, b, fx), lerp(c, d, fx), fy);
-    let n = (vnoise(ax / 3.1, ay / 3.1, seed) - 0.5) * 1.1 * edge + (h2(ax, ay, seed + 7) - 0.5) * 0.45 * edge;
-    if ( jag ) {
-      // torn: three octaves of roughness, and bites and teeth in 2 x 2 art-pixel blocks (stepped, chipped lips)
-      n += ((vnoise(ax / 1.7, ay / 1.7, seed + 301) - 0.5) * 1.0 + (vnoise(ax / 5.3, ay / 5.3, seed + 302) - 0.5) * 1.5 + (vnoise(ax / 11, ay / 11, seed + 303) - 0.5) * 1.2) * jag;
-      const cb = h2(ax >> 1, ay >> 1, seed + 304);
-      if ( cb < 0.13 * jag ) n -= 1.3; else if ( cb > 1 - 0.09 * jag ) n += 1;
-    }
-    const s = bil + n * Math.min(1, bil + 0.3);
-    if ( s <= 0.5 ) continue;
-    const i = y * FW + x;
-    inside[i] = 1; sev[i] = clamp(bil, 1, 3);
-    // the type of the strongest mask pixel around
-    let best = -1, bt = 0;
-    const cx = Math.floor((ax + wx + 0.5) / K), cy = Math.floor((ay + wy + 0.5) / K);
-    for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) {
-      const X = cx + dx, Y = cy + dy; if ( X < 0 || Y < 0 || X >= I.mw || Y >= I.mh ) continue;
-      const v = I.mask[Y * I.mw + X], l = v & 3;
-      const w = l * 4 - (dx * dx + dy * dy);
-      if ( l && w > best ) { best = w; bt = (v >> 2) & 7; }
-    }
-    typ[i] = bt;
-  }
-  // tidy: no single-pixel whiskers, no pin holes
-  for ( let pass = 0; pass < 2; pass++ ) for ( let y = 1; y < FH - 1; y++ ) for ( let x = 1; x < FW - 1; x++ ) {
-    const i = y * FW + x, nb = inside[i - 1] + inside[i + 1] + inside[i - FW] + inside[i + FW];
-    if ( inside[i] && nb <= 1 ) inside[i] = 0;
-    else if ( !inside[i] && nb >= 3 ) { inside[i] = 1; sev[i] = Math.max(1, sev[i - 1], sev[i + 1], sev[i - FW], sev[i + FW]); typ[i] = typ[i - 1] || typ[i + 1] || typ[i - FW] || typ[i + FW]; }
-  }
-  if ( jag ) {
-    // torn-off fragments just outside the rim: 2 x 2 blocks a few pixels out, of the type of the damage next to them
-    const dist = new Float32Array(FN);
-    for ( let i = 0; i < FN; i++ ) dist[i] = inside[i] ? 0 : 1e6;
-    chamfer(dist, FW, FH);
-    const reach = 2 + 4 * jag;
-    for ( let y = 2; y < FH - 2; y++ ) for ( let x = 2; x < FW - 2; x++ ) {
-      const i = y * FW + x, d = dist[i];
-      if ( d < 2 || d > reach || h2((FX + x) >> 1, (FY + y) >> 1, seed + 305) >= 0.075 * jag ) continue;
-      let bt = -1, bd = Infinity;
-      for ( let dy = -7; dy <= 7; dy++ ) for ( let dx = -7; dx <= 7; dx++ ) {
-        const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= FW || Y >= FH ) continue;
-        const j = Y * FW + X; if ( !inside[j] || frag[j] ) continue;
-        const dd = dx * dx + dy * dy; if ( dd < bd ) { bd = dd; bt = typ[j]; }
-      }
-      if ( bt < 0 ) continue;
-      inside[i] = 1; sev[i] = 1.6; typ[i] = bt; frag[i] = -1;
-    }
-  }
-  progress(0.1);
-
-  /* ---------------------------------------------------------------- 2. connected areas (in scan order: stable anchors) */
-  const lab = new Int32Array(FN).fill(-1);
   let comps = [];
-  const stack = new Int32Array(FN);
-  for ( let s0 = 0; s0 < FN; s0++ ) {
-    if ( !inside[s0] || lab[s0] >= 0 ) continue;
-    const id = comps.length, px = [];
-    let sp = 0; stack[sp++] = s0; lab[s0] = id;
-    while ( sp ) {
-      const i = stack[--sp]; px.push(i);
-      const x = i % FW, y = (i - x) / FW;
-      for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) {
-        const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= FW || Y >= FH ) continue;
-        const j = Y * FW + X; if ( inside[j] && lab[j] < 0 ) { lab[j] = id; stack[sp++] = j; }
-      }
-    }
-    comps.push({ id, px, anchor: s0 });
-  }
-  if ( jag ) {
-    // a small piece close to a big area belongs to it (a fragment torn off its rim), as its own little plate
-    const big = (c) => c.px.length >= 48;
-    for ( const c of comps ) {
-      if ( big(c) ) continue;
-      let to = -1;
-      for ( const i of c.px ) {
-        const x = i % FW, y = (i - x) / FW;
-        for ( let dy = -8; dy <= 8 && to < 0; dy++ ) for ( let dx = -8; dx <= 8; dx++ ) {
-          const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= FW || Y >= FH ) continue;
-          const l = lab[Y * FW + X]; if ( l >= 0 && l !== c.id && big(comps[l]) ) { to = l; break; }
-        }
-        if ( to >= 0 ) break;
-      }
-      if ( to < 0 ) continue;
-      for ( const i of c.px ) { lab[i] = to; frag[i] = c.anchor + 1; }
-      comps[to].px.push(...c.px); c.merged = true;
-    }
-    comps = comps.filter((c) => !c.merged);
-  }
-  comps = comps.filter((c) => {
-    if ( c.px.length >= 6 ) return true;
-    for ( const i of c.px ) { inside[i] = 0; lab[i] = -2; }
-    return false;
-  });
+  for ( const T of [...present].sort((a, b) => a - b) ) comps.push(...objectsOfType(T));
+  comps.sort((a, b) => a.ay - b.ay || a.ax - b.ax || a.type - b.type);
   progress(0.2);
 
-  /* ---------------------------------------------------------------- 3. per area: window, hash, cache or bake */
+  function objectsOfType(T) {
+    // the mask of this type alone
+    const lvT = (mx, my) => { if ( mx < 0 || my < 0 || mx >= I.mw || my >= I.mh ) return 0; const v = I.mask[my * I.mw + mx]; return ((v >> 2) & 7) === T ? v & 3 : 0; };
+    let mx0 = Infinity, my0 = Infinity, mx1 = -1, my1 = -1;
+    for ( let i = 0; i < I.mask.length; i++ ) { const v = I.mask[i]; if ( (v & 3) && ((v >> 2) & 7) === T ) { const x = i % I.mw, y = (i - x) / I.mw; if ( x < mx0 ) mx0 = x; if ( x > mx1 ) mx1 = x; if ( y < my0 ) my0 = y; if ( y > my1 ) my1 = y; } }
+    const FM = 4 + (jag ? 22 : 0);
+    const FX = Math.max(0, mx0 * K - FM), FY = Math.max(0, my0 * K - FM);
+    const FW = Math.min(AW, (mx1 + 1) * K + FM) - FX, FH = Math.min(AH, (my1 + 1) * K + FM) - FY, FN = FW * FH;
+    const inside = new Uint8Array(FN), sev = new Float32Array(FN), frag = new Int32Array(FN);
+    for ( let y = 0; y < FH; y++ ) for ( let x = 0; x < FW; x++ ) {
+      const ax = FX + x, ay = FY + y;
+      // torn: the mask is read through a warp (two octaves, up to ~7 art px), so the outline tears into lobes and inlets
+      let wx = 0, wy = 0;
+      if ( jag ) {
+        const A = 7 * jag;
+        wx = (vnoise(ax / 7, ay / 7, seed + 310) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 312) - 0.5) * 0.7 * A;
+        wy = (vnoise(ax / 7, ay / 7, seed + 311) - 0.5) * 2 * A + (vnoise(ax / 2.5, ay / 2.5, seed + 313) - 0.5) * 0.7 * A;
+      }
+      const mx = (ax + wx + 0.5) / K - 0.5, my = (ay + wy + 0.5) / K - 0.5;
+      const ix = Math.floor(mx), iy = Math.floor(my), fx = mx - ix, fy = my - iy;
+      const a = lvT(ix, iy), b = lvT(ix + 1, iy), c = lvT(ix, iy + 1), d = lvT(ix + 1, iy + 1);
+      if ( !(a | b | c | d) ) continue;
+      const bil = lerp(lerp(a, b, fx), lerp(c, d, fx), fy);
+      let n = (vnoise(ax / 3.1, ay / 3.1, seed) - 0.5) * 1.1 * edge + (h2(ax, ay, seed + 7) - 0.5) * 0.45 * edge;
+      if ( jag ) {
+        // torn: three octaves of roughness, and bites and teeth in 2 x 2 art-pixel blocks (stepped, chipped lips)
+        n += ((vnoise(ax / 1.7, ay / 1.7, seed + 301) - 0.5) * 1.0 + (vnoise(ax / 5.3, ay / 5.3, seed + 302) - 0.5) * 1.5 + (vnoise(ax / 11, ay / 11, seed + 303) - 0.5) * 1.2) * jag;
+        const cb = h2(ax >> 1, ay >> 1, seed + 304);
+        if ( cb < 0.13 * jag ) n -= 1.3; else if ( cb > 1 - 0.09 * jag ) n += 1;
+      }
+      if ( bil + n * Math.min(1, bil + 0.3) <= 0.5 ) continue;
+      const i = y * FW + x;
+      inside[i] = 1; sev[i] = clamp(bil, 1, 3);
+    }
+    // tidy: no single-pixel whiskers, no pin holes
+    for ( let pass = 0; pass < 2; pass++ ) for ( let y = 1; y < FH - 1; y++ ) for ( let x = 1; x < FW - 1; x++ ) {
+      const i = y * FW + x, nb = inside[i - 1] + inside[i + 1] + inside[i - FW] + inside[i + FW];
+      if ( inside[i] && nb <= 1 ) inside[i] = 0;
+      else if ( !inside[i] && nb >= 3 ) { inside[i] = 1; sev[i] = Math.max(1, sev[i - 1], sev[i + 1], sev[i - FW], sev[i + FW]); }
+    }
+    if ( jag ) {
+      // torn-off fragments just outside the rim: 2 x 2 blocks a few pixels out
+      const dist = new Float32Array(FN);
+      for ( let i = 0; i < FN; i++ ) dist[i] = inside[i] ? 0 : 1e6;
+      chamfer(dist, FW, FH);
+      const reach = 2 + 4 * jag;
+      for ( let y = 2; y < FH - 2; y++ ) for ( let x = 2; x < FW - 2; x++ ) {
+        const i = y * FW + x, d = dist[i];
+        if ( d < 2 || d > reach || h2((FX + x) >> 1, (FY + y) >> 1, seed + 305 + T) >= 0.075 * jag ) continue;
+        inside[i] = 1; sev[i] = 1.6; frag[i] = -1;
+      }
+    }
+    // connected objects (scan order: stable anchors)
+    const lab = new Int32Array(FN).fill(-1);
+    let cs = [];
+    const stack = new Int32Array(FN);
+    for ( let s0 = 0; s0 < FN; s0++ ) {
+      if ( !inside[s0] || lab[s0] >= 0 ) continue;
+      const id = cs.length, px = [];
+      let sp = 0; stack[sp++] = s0; lab[s0] = id;
+      while ( sp ) {
+        const i = stack[--sp]; px.push(i);
+        const x = i % FW, y = (i - x) / FW;
+        for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) {
+          const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= FW || Y >= FH ) continue;
+          const j = Y * FW + X; if ( inside[j] && lab[j] < 0 ) { lab[j] = id; stack[sp++] = j; }
+        }
+      }
+      cs.push({ id, px, anchor: s0 });
+    }
+    if ( jag ) {
+      // a small piece close to a big object of the same type belongs to it (a fragment torn off its rim), as its own little plate
+      const big = (c) => c.px.length >= 48;
+      for ( const c of cs ) {
+        if ( big(c) ) continue;
+        let to = -1;
+        for ( const i of c.px ) {
+          const x = i % FW, y = (i - x) / FW;
+          for ( let dy = -8; dy <= 8 && to < 0; dy++ ) for ( let dx = -8; dx <= 8; dx++ ) {
+            const X = x + dx, Y = y + dy; if ( X < 0 || Y < 0 || X >= FW || Y >= FH ) continue;
+            const l = lab[Y * FW + X]; if ( l >= 0 && l !== c.id && big(cs[l]) ) { to = l; break; }
+          }
+          if ( to >= 0 ) break;
+        }
+        if ( to < 0 ) continue;
+        for ( const i of c.px ) { lab[i] = to; frag[i] = c.anchor + 1; }
+        cs[to].px.push(...c.px); c.merged = true;
+      }
+      cs = cs.filter((c) => !c.merged);
+    }
+    cs = cs.filter((c) => c.px.length >= 6);
+    const F = { FX, FY, FW, FH, inside, sev, frag, lab };
+    return cs.map((c) => ({ ...c, F, type: T, ax: FX + c.anchor % FW, ay: FY + Math.floor(c.anchor / FW) }));
+  }
+
+  /* ---------------------------------------------------------------- 2. per object: window, hash, cache or bake */
   const scatter = clamp(P.scatter ?? 1, 0.2, 3);
   const results = [];
   comps.forEach((c, k) => {
+    const { FX, FY, FW, FH, sev, frag, lab } = c.F;
     let x0 = FW, y0 = FH, x1 = -1, y1 = -1;
     for ( const i of c.px ) { const x = i % FW, y = (i - x) / FW; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
     const span = Math.max(x1 - x0, y1 - y0);
-    // room for everything that leaves the area at the current settings: thrown chips (throw), the halo, hairline cracks. What would
+    // room for everything that leaves the object at the current settings: thrown chips (throw), the halo, hairline cracks. What would
     // still reach the edge of a capped window is shortened smoothly in bakeArea (never clamped: that piled chips in straight lines and
     // cut halos and cracks along the window's edge)
     const halo = clamp(P.halo ?? 0.6, 0, 1);
@@ -301,8 +293,9 @@ export function bake(I, cache = null) {
     const RX = Math.max(0, FX + x0 - margin), RY = Math.max(0, FY + y0 - margin);
     const W = Math.min(AW, FX + x1 + 1 + margin) - RX, H = Math.min(AH, FY + y1 + 1 + margin) - RY, N = W * H;
     const ownId = lab[c.px[0]];
+    // only this object's own pixels: everything else in its window is intact ground for it
     const win = { W, H, RX, RY, inside: new Uint8Array(N), sev: new Float32Array(N), typ: new Uint8Array(N), own: new Uint8Array(N), frag: new Int32Array(N), px: [] };
-    let h = fnvInts(head, RX, RY, W, H);
+    let h = fnvInts(head, RX, RY, W, H, c.type);
     for ( let y = 0; y < H; y++ ) {
       const fy = RY + y - FY;
       for ( let x = 0; x < W; x++ ) {
@@ -310,17 +303,15 @@ export function bake(I, cache = null) {
         let v = 0;
         if ( fx >= 0 && fy >= 0 && fx < FW && fy < FH ) {
           const i = fy * FW + fx;
-          if ( inside[i] ) {
-            const mine = lab[i] === ownId;
-            win.inside[o] = 1; win.sev[o] = sev[i]; win.typ[o] = typ[i];
-            if ( mine ) { win.own[o] = 1; win.frag[o] = frag[i] > 0 ? frag[i] : 0; win.px.push(o); }
-            v = (mine ? 2 : 1) | (typ[i] << 2) | (Math.round(sev[i] * 64) << 5) | (mine && frag[i] > 0 ? 1 << 14 : 0);
+          if ( lab[i] === ownId ) {
+            win.inside[o] = 1; win.sev[o] = sev[i]; win.typ[o] = c.type; win.own[o] = 1; win.frag[o] = frag[i] > 0 ? frag[i] : 0; win.px.push(o);
+            v = 1 | (Math.round(sev[i] * 64) << 5) | (frag[i] > 0 ? 1 << 14 : 0);
           }
         }
         h = Math.imul(h ^ v, 16777619);
       }
     }
-    // follows the stroke: the brush paths through this window are inputs of the area (part of its hash)
+    // follows the stroke: the brush paths through this window are inputs of the object (part of its hash)
     win.paths = [];
     if ( P.directional ) for ( const path of I.paths ?? [] ) {
       if ( !path.some(([x, y]) => x >= RX && y >= RY && x < RX + W && y < RY + H) ) continue;
@@ -330,13 +321,13 @@ export function bake(I, cache = null) {
       h = fnvInts(h, 0x7fff);
     }
     const hash = h >>> 0;
-    // the area's own id for its random streams: its first pixel (absolute), the same whatever else is on the map
-    const ax = FX + c.anchor % FW, ay = FY + Math.floor(c.anchor / FW);
+    // the object's own id for its random streams: its first pixel (absolute) and its type
+    const ax = c.ax, ay = c.ay;
     let res = cache?.get(hash);
     if ( res ) { cache.delete(hash); cache.set(hash, res); stats.reused++; }
     else {
       win.map = cropMap(I.map, RX, RY, W, H);
-      res = bakeArea(win, P, seed, ay * AW + ax, jag);
+      res = bakeArea(win, P, seed, (ay * AW + ax) * 8 + c.type, jag);
       res.win = { x: RX, y: RY, w: W, h: H };
       res.hash = hash;
       stats.baked++;
