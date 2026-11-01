@@ -24,21 +24,21 @@ export const CAUSE_LOOK = [
   /* fire      */ { slow: 1.1, curve: (f) => Math.sqrt(f), share: 0.35, tint: 0xffa060, front: 0.35, edge: { color: [0xff9a3c, 0xffd36b, 0xd2401c, 0xffb347], rise: -6, life: 650, flicker: true },
     flash: 0xffb060, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 0.5 },
   /* acid      */ { slow: 1.5, curve: (f) => f, share: 0.6, tint: 0xd8ff80, front: 0.5, edge: { color: [0xb6ff4a, 0xe8ff9a, 0x7fd02a], rise: -3, life: 650 },
-    ring: 0x9fe060, idle: "bubble", pulse: "slow", light: 0.35 },
-  /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.25, tint: null, front: 0.25, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
-    flash: 0xe6f4ff, bolt: true, idle: "spark", pulse: "crackle", light: 0.4 },
+    ring: 0x9fe060, idle: "bubble", pulse: "slow", light: 0.35, hot: [0xeaff9a, 0xb6ff4a, 0x6fa02a], stain: 0x9fe050 },
+  /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.1, tint: null, front: 0.08, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
+    bolt: true, idle: "spark", pulse: "crackle", light: 0.4, hot: [0xffffff, 0xdcecff, 0x9fc8ff], stain: 0xd8ecff },
   /* arcane    */ { slow: 1.25, curve: (f, a) => clamp01(Math.sqrt(f) * 0.78 + (((a / TAU) % 1) + 1) % 1 * 0.22), share: 0.6, tint: 0xd8b0ff, front: 0.6,
-    edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5 },
+    edge: { color: [0xc890ff, 0xf0d8ff, 0x9a6aff], rise: -4, life: 900 }, ring: 0xb070ff, rune: true, idle: "mote", pulse: "breathe", light: 0.5, hot: [0xf0d8ff, 0xc890ff, 0x7a4ad8], stain: 0xb070ff },
   /* impact    */ { slow: 0.7, curve: (f) => Math.pow(f, 0.45), share: 0.4, tint: null, front: 0.3, edge: { color: [0xcfc6b8, 0xb9ae9e], vy: -2, rise: -3, life: 600, drag: 2.4 },
-    ring: 0xf3e6cc, shock: true, idle: "dust" },
+    ring: 0xf3e6cc, shock: true, idle: "dust", hot: null, stain: 0x8a7a62 },
   /* claws     */ { slow: 0.8, curve: (f) => f, share: 0.4, tint: null, front: 0, edge: { color: [0xfff0b0, 0xe8dcc8], vy: -5, fall: 30, life: 260, drag: 2 },
-    slash: true, idle: null },
+    slash: true, idle: null, hot: null },
   /* water     */ { slow: 1.3, curve: (f) => Math.pow(f, 0.7), share: 0.6, tint: 0xb8d4ff, front: 0.5, edge: { color: [0xe6f4ff, 0x9fc8ee], vy: -1, life: 450, drag: 3 },
-    ring: 0xcfe8ff, idle: "drip" },
+    ring: 0xcfe8ff, idle: "drip", hot: null, stain: 0x203448 },
   /* decay     */ { slow: 1.9, curve: (f) => f, share: 0.6, tint: 0xc8d4a0, front: 0.35, edge: { color: [0x9aa868, 0xb9ae9e, 0x6f7f45], rise: -2, life: 1400 },
-    idle: "spore" },
+    idle: "spore", hot: null, stain: 0x3a4a22 },
   /* frost     */ { slow: 1.15, curve: (f) => Math.pow(f, 0.6), share: 0.55, tint: 0xe4f2ff, front: 0.5, edge: { color: [0xffffff, 0xd8ecff], rise: -1, life: 520 },
-    ring: 0xe8f4ff, idle: "glint" }
+    ring: 0xe8f4ff, idle: "glint", hot: [0xffffff, 0xe0f0ff, 0xa8d0f0], stain: 0xe8f4ff }
 ];
 export const causeLook = (c) => CAUSE_LOOK[c | 0] ?? null;
 const pick = (a) => a[(Math.random() * a.length) | 0];
@@ -92,14 +92,14 @@ export function causeEffects(d, g, a, now, el) {
       trees.push(boltCells(boltTree(s0 + c * 131, sx, a.oy - H * (c ? 0.8 : 1), ex, ey)));
     }
     const ADD = PIXI.BLEND_MODES.ADD;
-    draw("boltflash", 0, 120 * k, (gr, t) => { if ( t < 0.5 ) pxRunDisc(gr, V, a.ox, a.oy, Math.min(R * 1.5, 46) * pw, 0xdcecff, 0.22 * (1 - t * 2), s0); }, ADD);
+    draw("boltflash", 0, 80 * k, (gr, t) => { if ( t < 0.6 ) pxRunDisc(gr, V, a.ox, a.oy, Math.min(R * 0.6, 14) * pw, 0xdcecff, 0.3 * (1 - t / 0.6), s0); }, ADD);   // (a short fused flash at the strike, no speckle cloud)
     trees.forEach((cells, c) => draw(`bolt${c}`, c * 35 * k, 175 * k, (gr, t) => pxBolt(gr, V, cells, t, { seed: s0 + c, glow: c ? 0x6fa8ff : 0x8fc8ff })));
     draw("restrike", 90 * k, 110 * k, (gr, t) => pxBolt(gr, V, trees[0], 0.5 + t * 0.5, { seed: s0 + 9, glow: 0x5f90e8 }));
   }
   if ( cl.rune ) draw("rune", a.delay, 1100 * k, (gr, t) => {
     // a ring of inscribed SIGILS (pixel-fx sigilStrokes: curved and angular strokes with ticks, never a cross) that turns a little,
     // each glyph lighting in turn and pulsing, then dying by dropout
-    const rr = Math.max(6, R * 0.66), n = clamp01(rr / 30) > 0.5 ? 8 : 6, rot = t * 0.5, sz = Math.max(2, Math.min(4, rr * 0.16));
+    const rr = Math.max(6, R * 0.66) * (1 + 0.9 * Math.pow(1 - Math.min(1, t * 2.2), 2)), n = clamp01(R * 0.66 / 30) > 0.5 ? 8 : 6, rot = t * 0.5, sz = Math.max(2, Math.min(4, rr * 0.16));
     for ( let i = 0; i < n; i++ ) {
       const on = clamp01((t * 1.6 - i / n * 0.5) * 3), pul = 0.75 + 0.25 * Math.sin(t * 18 + i * 1.3), al = on * pul * (t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1);
       if ( al < 0.12 ) continue;
@@ -120,7 +120,7 @@ export function causeEffects(d, g, a, now, el) {
     draw("slash", 0, 260 * k, (gr, t) => {
       const grow = Math.min(1, t * 3), al = 1 - t;
       for ( const off of [-1, 0, 1] ) {
-        const cx = a.ox + nx * off * Math.max(2, R * 0.35), cy = a.oy + ny * off * Math.max(2, R * 0.35);
+        const cx = a.ox + nx * off * Math.max(2, R * 0.5), cy = a.oy + ny * off * Math.max(2, R * 0.5);
         pxLine(gr, V, cx - ux * L, cy - uy * L, cx - ux * L + ux * 2 * L * grow, cy - uy * L + uy * 2 * L * grow, 0xfff4d8, { drop: 1 - al, seed: off + 3 });
       }
     });
@@ -179,7 +179,7 @@ export function addLight(d, g, tex, x, y) {
  * day: tickLights). Made from the cover (the stroke's own pixels, cw x ch RGBA at x, y art px): edge pixels full, the inside faint,
  * softened by two box blurs; the colour per cause (a cool moonlit grey for plain damage, blue for water, green for rot, ice for frost).
  */
-const RIM = [[150, 156, 168], null, null, null, null, [166, 160, 150], [170, 156, 140], [120, 170, 220], [140, 176, 112], [190, 226, 255]];
+const RIM = [[175, 182, 196], null, null, null, null, [210, 198, 176], [205, 186, 158], [130, 182, 232], [160, 210, 120], [196, 230, 255]];
 export function addRim(d, g, cov, x, y) {
   const col = RIM[g.info.cause | 0]; if ( !col || !cov?.data ) return;
   const { w, h, data } = cov, B = 4, LW = w + 2 * B, LH = h + 2 * B;
@@ -228,7 +228,7 @@ export function tickLights(d, now) {
   const rimK = Math.min(1, Math.max(0, (dark - 0.5) / 0.35));
   for ( const g of L.groups ) {
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
-    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = a * 0.8; }
+    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
     const lt = g.light; if ( !lt ) continue;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);

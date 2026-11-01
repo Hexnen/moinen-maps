@@ -23,7 +23,7 @@ import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 import { collapseOutline, collapseSeeds, collapseFate, collapseShade, collapseLip } from "./collapse.mjs";
 import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
 
-export const CORE_VERSION = 41;   // 41: crack STROKES (tapered branching fissures with a bevel, along the stroke, no cells), smooth lit floor bands with a few bigger stones, a flooded hole's pieces sink into it; 40: a cave-in's outline read from the smoothed occupancy (a level-1 pit stays whole, no straight runs of the brush mask), a finer wobble along its rim, room for its outward lobes; 39: a tear's flap seams short nicks, fibres slanted and short (no sticks across a wide gap), its far wall's strata dithered with a wandering height, turf roots and crumbs in soil tones; 38: a lightning lip scorched with rare glass beads (no white outline); 37: cracks readable at max settings (a milder warp of torn cracks, no wide main fissures there, no knot of tiny plates round the impact); 36: a cave-in shaped as an organic pit or a trench along a followed stroke, plates in rings along its rim (tilted, lit, sinking by band), a layered wall with strata and a void floor, a broken lip; 35: a tear opens asymmetrically (one tip blunt, the other a needle or a fork, pinches and bulges, the lips shifted against each other, its middle off the spine), its lips cut into flaps of varied length that settle, curl back or tear off into the gap, fibres that snap as pieces, curved forking hairlines, dithered diagonal edges, fire veins broken and branching, frost crystals at 60 degrees with a soft rime, acid eats a pitted edge; 33: lightning forks leave at 30-60 degrees off the channel's heading; 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 42;   // 42: cause floors calmer (fewer ember, spark, mote, bubble, spore and glint specks, acid pools in two bands, smaller sigils, moss in patches on lit parts, no 0-degree frost facets, a water halo near the rim), claws cut three gouges, no cause halo or rim hairlines on crack strokes; 41: crack STROKES (tapered branching fissures with a bevel, along the stroke, no cells), smooth lit floor bands with a few bigger stones, a flooded hole's pieces sink into it; 40: a cave-in's outline read from the smoothed occupancy (a level-1 pit stays whole, no straight runs of the brush mask), a finer wobble along its rim, room for its outward lobes; 39: a tear's flap seams short nicks, fibres slanted and short (no sticks across a wide gap), its far wall's strata dithered with a wandering height, turf roots and crumbs in soil tones; 38: a lightning lip scorched with rare glass beads (no white outline); 37: cracks readable at max settings (a milder warp of torn cracks, no wide main fissures there, no knot of tiny plates round the impact); 36: a cave-in shaped as an organic pit or a trench along a followed stroke, plates in rings along its rim (tilted, lit, sinking by band), a layered wall with strata and a void floor, a broken lip; 35: a tear opens asymmetrically (one tip blunt, the other a needle or a fork, pinches and bulges, the lips shifted against each other, its middle off the spine), its lips cut into flaps of varied length that settle, curl back or tear off into the gap, fibres that snap as pieces, curved forking hairlines, dithered diagonal edges, fire veins broken and branching, frost crystals at 60 degrees with a soft rime, acid eats a pitted edge; 33: lightning forks leave at 30-60 degrees off the channel's heading; 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -166,23 +166,23 @@ export const CAUSES = ["none", "fire", "acid", "lightning", "arcane", "impact", 
 const CAUSE = [
   null,
   /* fire     */ { acc: [24, 0.92, 0.55], ramp: { k: 0.45, s: 0.7, l: 0.6 }, deb: { to: "char", k: 0.55 }, fate: { gone: 0.1 },
-    crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.02, glow: [255, 128, 40] },
+    crack: { mode: "radial", n: 1.1, len: 1, br: 0.02, col: "ember" }, halo: { kind: "char", r: 1.1 }, edge: "char", fill: "char", fx: "ember", fxD: 0.005, glow: [255, 128, 40] },
   /* acid     */ { acc: [80, 0.55, 0.38], ramp: { k: 0.2, s: 0.85, sa: 0.03, l: 0.85 }, deb: { to: "acc", k: 0.2, holes: 0.3 }, frac: { ring: 0.8 }, fate: { gone: 0.22, thr: 0.6 },
-    crack: { mode: "radial", n: 0.5, len: 0.7, br: 0, col: "acc" }, halo: { kind: "stain", r: 0.95 }, edge: "pitted", fill: "acid", fx: "bubble", fxD: 0.03, glow: [170, 255, 70], glowK: 0.45 },
+    crack: { mode: "radial", n: 0.5, len: 0.7, br: 0, col: "acc" }, halo: { kind: "stain", r: 0.95 }, edge: "pitted", fill: "acid", fx: "bubble", fxD: 0.008, glow: [170, 255, 70], glowK: 0.75 },
   /* lightning*/ { acc: [205, 0.45, 0.7], ramp: { k: 0.15, s: 0.6, l: 0.85 }, deb: { to: "char", k: 0.25 }, frac: { spokes: 0.8, ring: 1.4 }, fate: { thr: 1.2 },
-    crack: { mode: "bolt", n: 1, len: 1.25, br: 0, col: "bolt", always: true }, halo: { kind: "burn", r: 0.12 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.008, glow: [175, 220, 255] },
+    crack: { mode: "bolt", n: 1, len: 1.25, br: 0, col: "bolt", always: true }, halo: { kind: "burn", r: 0.12 }, edge: "glassy", fill: "glass", fx: "spark", fxD: 0.003, glow: [175, 220, 255] },
   /* arcane   */ { acc: [280, 0.55, 0.6], ramp: { k: 0.25, s: 0.9, sa: 0.03, l: 0.9 }, deb: { to: "acc", k: 0.14 }, frac: { swirl: 0.13 },
-    crack: { mode: "spiral", n: 1.3, len: 1.2, br: 0.03, col: "arc" }, halo: { kind: "motes", r: 0.8 }, edge: "rune", fill: "rune", fx: "mote", fxD: 0.02, glow: [200, 120, 255] },
+    crack: { mode: "spiral", n: 1.3, len: 1.2, br: 0.03, col: "arc" }, halo: { kind: "motes", r: 0.8 }, edge: "rune", fill: "rune", fx: "mote", fxD: 0.005, glow: [200, 120, 255] },
   /* impact   */ { acc: [32, 0.22, 0.5], ramp: { k: 0, s: 0.9, l: 0.82 }, frac: { spokes: 1.45, ring: 1.25 }, fate: { gone: -0.1, thr: 1.15 },
     crack: { mode: "radial", n: 1.7, len: 1.35, br: 0.01, col: "ink", straight: true }, halo: { kind: "pressed", r: 1.0 }, edge: "pressed", fill: "bowl", fx: "dust", fxD: 0.03, glow: null },
   /* claws    */ { acc: [12, 0.3, 0.42], ramp: null, frac: { along: 0.35 }, fate: { thr: 0.7 },
     crack: { mode: "parallel", n: 1, len: 1.2, br: 0, col: "ink", always: true }, halo: { kind: "scrape", r: 1.1 }, edge: "scraped", fill: "groove", fx: "splinter", fxD: 0.025, glow: null },
   /* water    */ { acc: [205, 0.45, 0.42], ramp: { k: 0.2, s: 0.9, l: 0.8 }, deb: { to: "wet", k: 0.3 }, frac: { ring: 1.2 }, fate: { gone: 0.1, thr: 0.5 },
-    crack: { mode: "radial", n: 0.4, len: 0.8, br: 0, col: "ink" }, halo: { kind: "wet", r: 1 }, edge: "smooth", fill: "silt", fx: "drop", fxD: 0.025, glow: null },
-  /* decay    */ { acc: [96, 0.45, 0.33], ramp: { k: 0.28, s: 0.8, l: 0.9 }, deb: { to: "moss", k: 0.4 }, frac: { ring: 0.85 }, fate: { gone: 0.15, thr: 0.35 },
-    crack: { mode: "root", n: 1.4, len: 1.1, br: 0.06, col: "root", always: true }, halo: { kind: "moss", r: 0.75 }, edge: "moss", fill: "moss", fx: "spore", fxD: 0.02, glow: null },
+    crack: { mode: "radial", n: 0.4, len: 0.8, br: 0, col: "ink" }, halo: { kind: "wet", r: 0.5 }, edge: "smooth", fill: "silt", fx: "drop", fxD: 0.01, glow: null },
+  /* decay    */ { acc: [96, 0.45, 0.33], ramp: { k: 0.28, s: 0.8, l: 0.9 }, deb: { to: "moss", k: 0.3 }, frac: { ring: 0.85 }, fate: { gone: 0.15, thr: 0.35 },
+    crack: { mode: "root", n: 1.4, len: 1.1, br: 0.06, col: "root", always: true }, halo: { kind: "moss", r: 0.75 }, edge: "moss", fill: "moss", fx: "spore", fxD: 0.008, glow: null },
   /* frost    */ { acc: [203, 0.32, 0.78], ramp: { k: 0.35, s: 0.7, sa: 0.03, l: 1.05 }, deb: { to: "ice", k: 0.22, rim: true }, frac: { spokes: 1.2, ring: 0.9 },
-    crack: { mode: "crystal", n: 1.6, len: 1.1, br: 0.14, col: "ice", always: true }, halo: { kind: "rime", r: 0.9 }, edge: "frost", fill: "ice", fx: "glint", fxD: 0.01, glow: null }
+    crack: { mode: "crystal", n: 1.6, len: 1.1, br: 0.14, col: "ice", always: true }, halo: { kind: "rime", r: 0.9 }, edge: "frost", fill: "ice", fx: "glint", fxD: 0.004, glow: null }
 ];
 /** A cause by index (null for 0 and anything unknown). */
 export const causeRow = (c) => CAUSE[c | 0] ?? null;
@@ -224,7 +224,7 @@ export function causeKit(K) {
       case "acid": {   // pools of acid in the deep parts, a bright meniscus, pitted rock around them
         const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.32) * 1.3;
         if ( depth > 0.32 && n < lim ) {
-          const rim = n > lim - 0.06, hp = h2(x, y, seed + 513), c = rim ? pal.acc : hp < 0.05 ? pal.accHi : hp < 0.2 ? mix(pal.accLo, pal.ink, 0.35) : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
+          const rim = n > lim - 0.06, deep = n < lim - 0.22, c = rim ? pal.acc : h2(x, y, seed + 513) < 0.015 ? pal.accHi : deep ? mix(pal.accLo, pal.ink, 0.3) : mix(pal.acc, pal.accLo, 0.55);
           glow(x, y, c, rim ? 150 : 80); return null;
         }
         return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.08 + depth * 0.2);
@@ -245,7 +245,7 @@ export function causeKit(K) {
         // inscribed SIGILS between short arcs of the ring (pixel-fx sigilStrokes: curved and angular strokes with ticks, never a cross)
         const sig = (rune.sig ??= (() => {
           const S = new Set(); if ( Rr < 5 ) return S;
-          const n = clamp(Math.round(Rr * 0.58 * Math.PI * 2 / 10), 4, 9), sz = clamp(Rr * 0.12, 2, 4);
+          const n = clamp(Math.round(Rr * 0.58 * Math.PI * 2 / 10), 4, 9), sz = clamp(Rr * 0.09, 1.5, 3);
           for ( let q = 0; q < n; q++ ) {
             const a = (q + 0.5) / n * Math.PI * 2 + h2(q, 7, seed + 573) * 0.3, r2 = Rr * 0.58 * (0.92 + 0.12 * h2(q, 8, seed + 573));
             for ( const [gx, gy] of sigilCells(seed * 7 + q, E0.x + Math.cos(a) * r2, E0.y + Math.sin(a) * r2 * 0.82, sz) ) S.add(gy * W + gx);
@@ -276,13 +276,13 @@ export function causeKit(K) {
       }
       case "moss": {   // moss patches and mould spots over the old wound
         const n = vnoise(x / 3.5, y / 3.5, seed + 551) * 0.75 + h2(x, y, seed + 552) * 0.25;
-        if ( n > 0.6 - dn * 0.12 ) return n > 0.74 ? pal.acc : bayer(x, y) < 0.5 ? pal.accLo : mix(pal.acc, pal.accLo, 0.5);
+        if ( n > 0.7 - dn * 0.08 && lit > -0.2 ) return n > 0.74 ? pal.acc : bayer(x, y) < 0.5 ? pal.accLo : mix(pal.acc, pal.accLo, 0.5);
         if ( h2(x, y, seed + 553) < 0.015 ) return mix(pal.accHi, [235, 230, 210], 0.5);
         return mix(col, pal.accLo, 0.12);
       }
       case "ice": {    // an ice sheet in the hole, crystal facets
         if ( depth < 0.2 ) return mix(col, pal.accHi, 0.15);
-        if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.4 ) return mix(pal.accHi, [255, 255, 255], 0.3);
+        if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.15 ) return mix(pal.accHi, [255, 255, 255], 0.3);
         return mix(col, pal.acc, 0.4);
       }
     }
@@ -317,7 +317,7 @@ export function causeKit(K) {
       case "char": if ( n < k * 0.4 && hv < 0.025 ) glow(x, y, pal.ember[1], 200); else if ( n < k * 0.9 ) put(x, y, n < k * 0.4 ? pal.char[0] : mix(m, pal.char[1], 0.65)); break;
       case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.22 + 0.15 * k)); break;
       case "burn": if ( n < k * 0.4 ) put(x, y, mul(m, 0.62)); break;
-      case "motes": if ( hv < k * 0.035 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
+      case "motes": if ( hv < k * 0.012 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
       case "pressed": {
         // impact: the ground pressed down round the rim, shock streaks radiating out, stone chips flung on it (lit top, dark under)
         const ang = Math.atan2(y - E0.y, x - E0.x), streak = h2(Math.floor((ang + Math.PI) * 11), 1, seed + 615) < 0.32;
@@ -338,10 +338,10 @@ export function causeKit(K) {
         const band = ((d * 0.55 + vnoise(x / 6, y / 6, seed + 616) * 1.8) % 1) < 0.18;
         if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]);
         else if ( band && d > 2 && n < k * 1.2 ) put(x, y, mix(m, pal.dust, 0.55));
-        else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.6), pal.waterR[2], 0.24));
+        else if ( n < k * 0.9 ) put(x, y, mix(mul(m, 0.6), pal.waterR[2], 0.24));
         break;
       }
-      case "moss": if ( n < k * 0.75 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
+      case "moss": if ( n < k * 0.5 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
       case "rime": if ( hv < k * 0.02 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.25 + 0.25 * k)); break;
     }
   }
@@ -1186,7 +1186,8 @@ function bakeArea(A, P, seed, uid, jag) {
     }
     stats.shards += C.shards.length;
     // hairline cracks out into the intact map
-    if ( C.cz ) { if ( (C.maxSev >= 1.8 && C.type !== T_FLOOD) || C.cz.crack?.always ) causeCracks(C, R, C.cz.crack); }
+    // (a cause's hairlines neither on crack strokes - a strike's bolt trail still crosses them)
+    if ( C.cz ) { if ( ((C.maxSev >= 1.8 && C.type !== T_FLOOD) || C.cz.crack?.always) && (C.type !== T_CRACKS || C.cz.crack?.mode === "bolt") ) causeCracks(C, R, C.cz.crack); }
     // (crack strokes are their own cracks: hairlines from the mask's rim would start in the middle of intact ground)
     else if ( C.maxSev >= 1.8 && C.type !== T_FLOOD && C.type !== T_CRACKS ) growCracks(C, R);
   }
@@ -1415,7 +1416,7 @@ function bakeArea(A, P, seed, uid, jag) {
         let a = Math.atan2(dy, dx);
         if ( mode === "spiral" ) a += 0.17 * (depth & 1 ? -1 : 1);
         else if ( mode === "root" ) a += (vnoise(k / 3.5, depth * 5.3, seed + 521) - 0.5) * 1.1;
-        else if ( mode === "crystal" ) { a = Math.round(a / sixth) * sixth; if ( R() < 0.12 ) a += (R() < 0.5 ? -1 : 1) * sixth; }
+        else if ( mode === "crystal" ) { a = Math.round((a - sixth / 2) / sixth) * sixth + sixth / 2; if ( R() < 0.12 ) a += (R() < 0.5 ? -1 : 1) * sixth; }
         let best = a, bl = Infinity;
         for ( const da of TURN ) {
           const b = a + da + (R() - 0.5) * (mode === "crystal" || mode === "parallel" ? 0.04 : 0.3), X = Math.round(x + Math.cos(b)), Y = Math.round(y + Math.sin(b));
@@ -1460,7 +1461,7 @@ function bakeArea(A, P, seed, uid, jag) {
       }
     } else if ( mode === "parallel" ) {
       // scratches: three or four lines along the axis, each running out of both ends of the damage
-      const ax = C.axis, nx = -ax[1], ny = ax[0], wid = Math.max(2, C.maxD), g = clamp(Math.round(wid / 3), 3, 4);
+      const ax = C.axis, nx = -ax[1], ny = ax[0], wid = Math.max(2, C.maxD), g = 3;   // (three gouges: the three streaks of the entry)
       for ( let k = 0; k < g; k++ ) {
         const q = -wid * 0.75 + (k + 0.5) * (wid * 1.5) / g;
         for ( const sgn of [1, -1] ) {
@@ -1497,7 +1498,8 @@ function bakeArea(A, P, seed, uid, jag) {
     const haloR = Math.min(roomOf(C) - 2, (type === T_SCORCH ? 4 + C.maxD * 1.4 : type === T_BLAST ? 2 + C.maxD * 0.9 : type === T_COLLAPSE ? 2 + C.maxD * 0.5 : 0) * clamp(P.halo ?? 0.6, 0, 1) * (C.maxSev / 3));
     // the cause's own halo (its own radius, on top of the kind's)
     const cz = C.cz;
-    const cHaloR = cz?.halo ? Math.min(roomOf(C) - 2, (3 + C.maxD * cz.halo.r) * clamp(P.halo ?? 0.6, 0.15, 1) * (0.35 + C.maxSev / 3)) : 0;
+    // (cracks: no cause halo - round the stroke's mask it drew a ring, a lasso round thin crack strokes)
+    const cHaloR = cz?.halo && type !== T_CRACKS ? Math.min(roomOf(C) - 2, (3 + C.maxD * cz.halo.r) * clamp(P.halo ?? 0.6, 0.15, 1) * (0.35 + C.maxSev / 3)) : 0;
     const outR = cz ? Math.max(haloR, cHaloR) : haloR;
     const r = C.rect;
     r.x0 = clamp(Math.floor(Math.min(r.x0, C.x0 - outR - 2)), 0, W - 1); r.y0 = clamp(Math.floor(Math.min(r.y0, C.y0 - outR - 2)), 0, H - 1);
