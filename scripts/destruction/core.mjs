@@ -199,6 +199,158 @@ function causePalette(P, cz, cls) {
   P.glow = cz.glow ?? null;
 }
 
+/**
+ * A cause's treatment of an area, shared by every kind (drawBase below) and the tear (tear.mjs): the exposed layer (fill), the torn
+ * lip (lip), the halo on the ground around (halo), the hairline cracks (crackLines) and the specks (fx). One row of the CAUSE table
+ * drives it all. The caller hands in how to read and write its own pixels:
+ *   cz, pal, seed, W, H, mapAt(i) -> [r, g, b] (what lies there before this cause's touch), put(x, y, col[, a]), glow(x, y, col[, a]),
+ *   isIn(x, y) (this area's own pixel), inside (Uint8Array: any damage), din (distance inside), maxD, E0 {x, y}, Rr (impact reach),
+ *   C { cx, cy, axis, maxD, px, keep (Set), cracks }, haloR (the cause halo's radius)
+ */
+export function causeKit(K) {
+  const { cz, pal, seed, W, H, mapAt, put, glow, isIn, inside, din, maxD, E0, Rr, C, haloR } = K;
+  const rp = pal.ramp;
+  /** The cause's treatment of the exposed layer at (x, y); null when it drew the pixel itself (emissive). */
+  function fill(x, y, col, depth, dn, lit) {
+    switch ( cz.fill ) {
+      case "char": {   // charred, with glowing fissures deep in the burn
+        col = mix(col, pal.char[clamp(Math.floor(1 + lit * 2 + bayer(x, y)), 0, 4)], clamp(0.35 + depth * 1.3 + (vnoise(x / 2.5, y / 2.5, seed + 501) - 0.5) * 0.5, 0, 0.92));
+        if ( depth > 0.3 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.02 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
+        return col;
+      }
+      case "acid": {   // pools of acid in the deep parts, a bright meniscus, pitted rock around them
+        const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.32) * 1.3;
+        if ( depth > 0.32 && n < lim ) {
+          const rim = n > lim - 0.06, c = rim ? pal.acc : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
+          glow(x, y, c, rim ? 150 : 80); return null;
+        }
+        return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.08 + depth * 0.2);
+      }
+      case "glass": {  // fused glassy ground towards the strike, specks of light, veins of light near it
+        const fz = clamp(dn * 1.6 - 0.7, 0, 1);
+        if ( fz <= 0 ) return col;
+        let c = mix(col, mix(rp[1], pal.accLo, 0.3), fz * 0.55);
+        if ( vnoise(x / 2, y / 2, seed + 521) > 0.72 && (x + y) % 3 === 0 ) c = mix(c, pal.accHi, 0.75);
+        if ( dn > 0.5 && Math.abs(vnoise(x / 3, y / 3, seed + 522) - 0.5) < 0.03 ) { glow(x, y, pal.accHi, 210); return null; }
+        return c;
+      }
+      case "rune": {   // a dashed rune circle round the impact, with ticks pointing in
+        const dx = x + 0.5 - E0.x, dy = (y + 0.5 - E0.y) / 0.82, d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx) + Math.PI;
+        const rr = Rr * 0.58, sf = ang / (Math.PI * 2) * 18, seg = Math.floor(sf);
+        if ( Rr >= 5 && Math.abs(d - rr) < 0.55 && seg % 3 !== 2 ) { glow(x, y, pal.accHi, 235); return null; }
+        if ( Rr >= 5 && seg % 3 === 2 && d < rr && d > rr - Math.max(2, Rr * 0.2) ) {
+          const ta = (seg + 0.5) / 18 * Math.PI * 2 - Math.PI;
+          if ( Math.abs(dx * Math.sin(ta) - dy * Math.cos(ta)) < 0.55 ) { glow(x, y, pal.acc, 200); return null; }
+        }
+        return mix(col, pal.accLo, clamp(depth * 0.3, 0, 0.25));
+      }
+      case "bowl": {   // pressed in hard: a deeper bowl, radial striations from the impact
+        let c = mul(col, clamp(1 + lit * 0.22 - depth * 0.15, 0.6, 1.25));
+        if ( dn > 0.25 && h2(Math.floor((Math.atan2(y - E0.y, x - E0.x) + Math.PI) * 9), 0, seed + 531) < 0.3 && ((x ^ y) & 1) ) c = mul(c, 0.82);
+        return c;
+      }
+      case "groove": { // parallel grooves along the axis, lit on one side
+        const q = (x + 0.5 - C.cx) * -C.axis[1] + (y + 0.5 - C.cy) * C.axis[0], per = Math.max(3, C.maxD / 1.6), f = ((q / per) % 1 + 1) % 1;
+        return f < 0.22 ? rp[0] : f < 0.32 ? mix(rp[3], col, 0.3) : col;
+      }
+      case "silt": {   // washed out: sediment bands, standing water in the deepest part
+        if ( depth > 0.62 ) {
+          const c = pal.waterR[clamp(Math.floor(clamp(3 - (depth - 0.62) * 6, 1, 3) + bayer(x, y) - 0.5), 1, 3)];
+          return h2(x >> 1, y, seed + 541) < 0.03 ? pal.waterR[4] : c;
+        }
+        return ((depth * 7 + vnoise(x / 5, y / 5, seed + 542) * 1.6) % 1) < 0.16 ? mix(rp[3], pal.dust, 0.45) : mul(col, 0.9);
+      }
+      case "moss": {   // moss patches and mould spots over the old wound
+        const n = vnoise(x / 3.5, y / 3.5, seed + 551) * 0.75 + h2(x, y, seed + 552) * 0.25;
+        if ( n > 0.6 - dn * 0.12 ) return n > 0.74 ? pal.acc : bayer(x, y) < 0.5 ? pal.accLo : mix(pal.acc, pal.accLo, 0.5);
+        if ( h2(x, y, seed + 553) < 0.015 ) return mix(pal.accHi, [235, 230, 210], 0.5);
+        return mix(col, pal.accLo, 0.12);
+      }
+      case "ice": {    // an ice sheet in the hole, crystal facets
+        if ( depth < 0.2 ) return mix(col, pal.accHi, 0.15);
+        if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.4 ) return mix(pal.accHi, [255, 255, 255], 0.3);
+        return mix(col, pal.acc, 0.4);
+      }
+    }
+    return col;
+  }
+  /** The cause's torn lip at (x, y) (s: the severity next to it). */
+  function lip(x, y, i, s) {
+    const m = mapAt(i), hv = h2(x, y, seed + 621), soft = s < 1.6;
+    let c;
+    switch ( cz.edge ) {
+      case "char": if ( hv < 0.1 && !soft ) return glow(x, y, pal.ember[0], 220); c = pal.char[0]; break;
+      case "pitted": c = hv < 0.45 ? pal.ink : hv < 0.75 ? pal.accLo : mix(m, pal.acc, 0.5); break;
+      case "glassy": if ( hv < 0.15 && !soft ) return glow(x, y, pal.accHi, 140); c = mix(pal.accHi, m, 0.25); break;
+      case "rune": if ( hv < 0.2 && !soft ) return glow(x, y, pal.acc, 200); c = pal.ink; break;
+      case "pressed": c = mul(pal.ink, 0.8); break;
+      case "scraped": c = hv < 0.35 ? mul(m, 1.25) : mix(m, pal.ink, 0.7); break;
+      case "smooth": c = mix(m, pal.ink, 0.35); break;
+      case "moss": c = hv < 0.5 ? pal.acc : pal.accLo; break;
+      case "frost": c = hv < 0.5 ? pal.accHi : mix(m, pal.accHi, 0.5); break;
+      default: c = pal.ink;
+    }
+    put(x, y, soft ? mix(m, c, 0.6) : c);
+  }
+  /** The cause's halo on the intact ground at (x, y), d from the damage. */
+  function halo(x, y, i, d) {
+    const k = Math.pow(1 - d / haloR, 1.3), n = vnoise(x / 2.4, y / 2.4, seed + 611) * 0.75 + h2(x, y, seed + 612) * 0.25, hv = h2(x, y, seed + 613), m = mapAt(i);
+    switch ( cz.halo.kind ) {
+      case "char": if ( n < k * 0.4 && hv < 0.025 ) glow(x, y, pal.ember[1], 200); else if ( n < k * 0.9 ) put(x, y, n < k * 0.4 ? pal.char[0] : mix(m, pal.char[1], 0.65)); break;
+      case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.22 + 0.15 * k)); break;
+      case "burn": if ( n < k * 0.4 ) put(x, y, mul(m, 0.62)); break;
+      case "motes": if ( hv < k * 0.035 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
+      case "pressed": if ( d < 3 + C.maxD * 0.15 && n < 0.8 ) put(x, y, mul(m, 0.72)); else if ( n < k * 0.35 ) put(x, y, pal.dust); break;
+      case "scrape": if ( n < k * 0.3 ) put(x, y, mix(m, pal.dust, 0.5)); break;
+      case "wet": if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]); else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.66), pal.waterR[2], 0.18)); break;
+      case "moss": if ( n < k * 0.75 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
+      case "rime": if ( hv < k * 0.02 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.25 + 0.25 * k)); break;
+    }
+  }
+  /** The cause's hairline cracks: glowing embers, a bolt's burn with a bright root, arcane light, ice, roots. */
+  function crackLines(paths) {
+    const col = cz.crack?.col ?? "ink";
+    for ( const path of paths ) path.forEach((i, k) => {
+      const x = i % W, y = (i - x) / W, m = mapAt(i), hv = h2(x, y, seed + 631), root = k < path.length * 0.5;
+      switch ( col ) {
+        case "ember": if ( root && hv < 0.45 ) glow(x, y, pal.ember[hv < 0.2 ? 1 : 0], 220); else put(x, y, mix(m, pal.char[0], 0.85)); break;
+        case "bolt":
+          if ( k < path.length * 0.35 && hv < 0.4 ) glow(x, y, hv < 0.15 ? [255, 255, 255] : pal.accHi, 230); else put(x, y, mix(m, pal.char[0], 0.8));
+          if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.char[0], 0.35));
+          break;
+        case "acc": put(x, y, mix(m, pal.accLo, 0.85)); break;
+        case "arc": if ( (k & 1) === 0 ) glow(x, y, pal.acc, 180); else put(x, y, mix(m, pal.accLo, 0.8)); break;
+        case "ice": put(x, y, mix(pal.accHi, [255, 255, 255], 0.35)); if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.ink, 0.35)); break;
+        case "root": put(x, y, mix(m, mix(pal.accLo, pal.ink, 0.5), 0.85)); break;
+        default: put(x, y, mix(m, pal.ink, 0.85));
+      }
+      if ( col === "ink" || col === "root" || col === "acc" ) { const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14)); }
+    });
+  }
+  /** The cause's specks in the ruin (deterministic): embers, bubbles, sparks, motes, dust, splinters, drops, spores, glints. */
+  function fx(px, skip) {
+    const D = cz.fxD ?? 0.02, plus = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for ( const i of px ) {
+      if ( skip?.(i) ) continue;
+      const x = i % W, y = (i - x) / W, dn = Math.min(1, din[i] / maxD);
+      if ( h2(x, y, seed + 601) >= D * (0.4 + dn) ) continue;
+      const hv = h2(x, y, seed + 602);
+      switch ( cz.fx ) {
+        case "ember": glow(x, y, pal.ember[(hv * 3) | 0], 255); break;
+        case "bubble": glow(x, y, pal.accHi, 160); if ( isIn(x + 1, y) ) put(x + 1, y, pal.acc); if ( isIn(x, y + 1) ) put(x, y + 1, pal.accLo); break;
+        case "spark": glow(x, y, hv < 0.5 ? [255, 255, 255] : pal.accHi, 255); break;
+        case "mote": glow(x, y, pal.accHi, 230); if ( hv < 0.3 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) glow(x + a, y + b, pal.acc, 140); break;
+        case "dust": put(x, y, mix(pal.dust, rp[4], 0.5)); break;
+        case "splinter": for ( let k = 0; k < 3; k++ ) { const X = Math.round(x + C.axis[0] * k), Y = Math.round(y + C.axis[1] * k); if ( isIn(X, Y) ) put(X, Y, k ? rp[3] : rp[4]); } break;
+        case "drop": put(x, y, pal.waterR[4]); if ( isIn(x, y + 1) ) put(x, y + 1, pal.waterR[1]); break;
+        case "spore": put(x, y, mix(pal.accHi, [230, 220, 200], 0.4)); if ( isIn(x + 1, y) ) put(x + 1, y, pal.accHi); if ( isIn(x, y + 1) ) put(x, y + 1, rp[1]); break;
+        case "glint": put(x, y, hv < 0.3 ? [255, 255, 255] : pal.accHi); if ( hv < 0.2 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) put(x + a, y + b, pal.accHi); break;
+      }
+    }
+  }
+  return { fill, lip, halo, crackLines, fx };
+}
+
 /* ================================================================ the bake */
 
 /** Settings that only change playback, not the picture (never part of a bake key). */
@@ -1119,144 +1271,7 @@ function bakeArea(A, P, seed, uid, jag) {
       glowA[q] = a; glowC[q * 3] = col[0]; glowC[q * 3 + 1] = col[1]; glowC[q * 3 + 2] = col[2];
     };
     const E0 = C.epi[0], Rr = Math.max(3, ...C.epi.map((q) => q.R));
-    /** The cause's treatment of the exposed layer at (x, y); null when it drew the pixel itself (emissive). */
-    function causeFill(x, y, col, depth, dn, lit) {
-      switch ( cz.fill ) {
-        case "char": {   // charred, with glowing fissures deep in the burn
-          col = mix(col, pal.char[clamp(Math.floor(1 + lit * 2 + bayer(x, y)), 0, 4)], clamp(0.35 + depth * 1.3 + (vnoise(x / 2.5, y / 2.5, seed + 501) - 0.5) * 0.5, 0, 0.92));
-          if ( depth > 0.3 && Math.abs(vnoise(x / 4, y / 4, seed + 502) - 0.5) < 0.02 ) { glow(x, y, pal.ember[(h2(x, y, seed + 503) * 2) | 0], 230); return null; }
-          return col;
-        }
-        case "acid": {   // pools of acid in the deep parts, a bright meniscus, pitted rock around them
-          const n = vnoise(x / 3.2, y / 3.2, seed + 511), lim = (depth - 0.32) * 1.3;
-          if ( depth > 0.32 && n < lim ) {
-            const rim = n > lim - 0.06, c = rim ? pal.acc : bayer(x, y) < 0.3 ? pal.acc : mix(pal.acc, pal.accLo, 0.6);
-            glow(x, y, c, rim ? 150 : 80); return null;
-          }
-          return h2(x, y, seed + 512) < 0.08 ? mul(col, 0.6) : mix(col, pal.accLo, 0.08 + depth * 0.2);
-        }
-        case "glass": {  // fused glassy ground towards the strike, specks of light, veins of light near it
-          const fz = clamp(dn * 1.6 - 0.7, 0, 1);
-          if ( fz <= 0 ) return col;
-          let c = mix(col, mix(rp[1], pal.accLo, 0.3), fz * 0.55);
-          if ( vnoise(x / 2, y / 2, seed + 521) > 0.72 && (x + y) % 3 === 0 ) c = mix(c, pal.accHi, 0.75);
-          if ( dn > 0.5 && Math.abs(vnoise(x / 3, y / 3, seed + 522) - 0.5) < 0.03 ) { glow(x, y, pal.accHi, 210); return null; }
-          return c;
-        }
-        case "rune": {   // a dashed rune circle round the impact, with ticks pointing in
-          const dx = x + 0.5 - E0.x, dy = (y + 0.5 - E0.y) / 0.82, d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx) + Math.PI;
-          const rr = Rr * 0.58, sf = ang / (Math.PI * 2) * 18, seg = Math.floor(sf);
-          if ( Rr >= 5 && Math.abs(d - rr) < 0.55 && seg % 3 !== 2 ) { glow(x, y, pal.accHi, 235); return null; }
-          if ( Rr >= 5 && seg % 3 === 2 && d < rr && d > rr - Math.max(2, Rr * 0.2) ) {
-            const ta = (seg + 0.5) / 18 * Math.PI * 2 - Math.PI;
-            if ( Math.abs(dx * Math.sin(ta) - dy * Math.cos(ta)) < 0.55 ) { glow(x, y, pal.acc, 200); return null; }
-          }
-          return mix(col, pal.accLo, clamp(depth * 0.3, 0, 0.25));
-        }
-        case "bowl": {   // pressed in hard: a deeper bowl, radial striations from the impact
-          let c = mul(col, clamp(1 + lit * 0.22 - depth * 0.15, 0.6, 1.25));
-          if ( dn > 0.25 && h2(Math.floor((Math.atan2(y - E0.y, x - E0.x) + Math.PI) * 9), 0, seed + 531) < 0.3 && ((x ^ y) & 1) ) c = mul(c, 0.82);
-          return c;
-        }
-        case "groove": { // parallel grooves along the axis, lit on one side
-          const q = (x + 0.5 - C.cx) * -C.axis[1] + (y + 0.5 - C.cy) * C.axis[0], per = Math.max(3, C.maxD / 1.6), f = ((q / per) % 1 + 1) % 1;
-          return f < 0.22 ? rp[0] : f < 0.32 ? mix(rp[3], col, 0.3) : col;
-        }
-        case "silt": {   // washed out: sediment bands, standing water in the deepest part
-          if ( depth > 0.62 ) {
-            const c = pal.waterR[clamp(Math.floor(clamp(3 - (depth - 0.62) * 6, 1, 3) + bayer(x, y) - 0.5), 1, 3)];
-            return h2(x >> 1, y, seed + 541) < 0.03 ? pal.waterR[4] : c;
-          }
-          return ((depth * 7 + vnoise(x / 5, y / 5, seed + 542) * 1.6) % 1) < 0.16 ? mix(rp[3], pal.dust, 0.45) : mul(col, 0.9);
-        }
-        case "moss": {   // moss patches and mould spots over the old wound
-          const n = vnoise(x / 3.5, y / 3.5, seed + 551) * 0.75 + h2(x, y, seed + 552) * 0.25;
-          if ( n > 0.6 - dn * 0.12 ) return n > 0.74 ? pal.acc : bayer(x, y) < 0.5 ? pal.accLo : mix(pal.acc, pal.accLo, 0.5);
-          if ( h2(x, y, seed + 553) < 0.015 ) return mix(pal.accHi, [235, 230, 210], 0.5);
-          return mix(col, pal.accLo, 0.12);
-        }
-        case "ice": {    // an ice sheet in the hole, crystal facets
-          if ( depth < 0.2 ) return mix(col, pal.accHi, 0.15);
-          if ( ((x + 2 * y) % 9 === 0 || (x - 2 * y) % 11 === 0) && h2(x, y, seed + 561) < 0.4 ) return mix(pal.accHi, [255, 255, 255], 0.3);
-          return mix(col, pal.acc, 0.4);
-        }
-      }
-      return col;
-    }
-    /** The cause's torn lip at (x, y) (s: the severity next to it). */
-    function causeLip(x, y, i, s) {
-      const m = mapAt(i), hv = h2(x, y, seed + 621), soft = s < 1.6;
-      let c;
-      switch ( cz.edge ) {
-        case "char": if ( hv < 0.1 && !soft ) return glow(x, y, pal.ember[0], 220); c = pal.char[0]; break;
-        case "pitted": c = hv < 0.45 ? pal.ink : hv < 0.75 ? pal.accLo : mix(m, pal.acc, 0.5); break;
-        case "glassy": if ( hv < 0.15 && !soft ) return glow(x, y, pal.accHi, 140); c = mix(pal.accHi, m, 0.25); break;
-        case "rune": if ( hv < 0.2 && !soft ) return glow(x, y, pal.acc, 200); c = pal.ink; break;
-        case "pressed": c = mul(pal.ink, 0.8); break;
-        case "scraped": c = hv < 0.35 ? mul(m, 1.25) : mix(m, pal.ink, 0.7); break;
-        case "smooth": c = mix(m, pal.ink, 0.35); break;
-        case "moss": c = hv < 0.5 ? pal.acc : pal.accLo; break;
-        case "frost": c = hv < 0.5 ? pal.accHi : mix(m, pal.accHi, 0.5); break;
-        default: c = pal.ink;
-      }
-      put(x, y, soft ? mix(m, c, 0.6) : c);
-    }
-    /** The cause's halo on the intact ground at (x, y), d from the damage. */
-    function causeHalo(x, y, i, d) {
-      const k = Math.pow(1 - d / cHaloR, 1.3), n = vnoise(x / 2.4, y / 2.4, seed + 611) * 0.75 + h2(x, y, seed + 612) * 0.25, hv = h2(x, y, seed + 613), m = mapAt(i);
-      switch ( cz.halo.kind ) {
-        case "char": if ( n < k * 0.4 && hv < 0.025 ) glow(x, y, pal.ember[1], 200); else if ( n < k * 0.9 ) put(x, y, n < k * 0.4 ? pal.char[0] : mix(m, pal.char[1], 0.65)); break;
-        case "stain": if ( hv < k * 0.07 ) put(x, y, mul(m, 0.4)); else if ( n < k * 0.6 ) put(x, y, mix(m, pal.acc, 0.22 + 0.15 * k)); break;
-        case "burn": if ( n < k * 0.4 ) put(x, y, mul(m, 0.62)); break;
-        case "motes": if ( hv < k * 0.035 ) glow(x, y, pal.accHi, 200); else if ( n < k * 0.35 ) put(x, y, mix(m, pal.acc, 0.25)); break;
-        case "pressed": if ( d < 3 + C.maxD * 0.15 && n < 0.8 ) put(x, y, mul(m, 0.72)); else if ( n < k * 0.35 ) put(x, y, pal.dust); break;
-        case "scrape": if ( n < k * 0.3 ) put(x, y, mix(m, pal.dust, 0.5)); break;
-        case "wet": if ( hv < k * 0.03 ) put(x, y, pal.waterR[4]); else if ( n < k * 1.1 + 0.15 ) put(x, y, mix(mul(m, 0.66), pal.waterR[2], 0.18)); break;
-        case "moss": if ( n < k * 0.75 ) put(x, y, n < k * 0.35 ? pal.acc : mix(m, pal.accLo, 0.55)); break;
-        case "rime": if ( hv < k * 0.02 ) put(x, y, [250, 252, 255]); else if ( n < k * 0.85 ) put(x, y, mix(m, pal.accHi, 0.25 + 0.25 * k)); break;
-      }
-    }
-    /** The cause's hairline cracks: glowing embers, a bolt's burn with a bright root, arcane light, ice, roots. */
-    function causeCrackLines() {
-      const col = cz.crack?.col ?? "ink";
-      for ( const path of C.cracks ) path.forEach((i, k) => {
-        const x = i % W, y = (i - x) / W, m = mapAt(i), hv = h2(x, y, seed + 631), root = k < path.length * 0.5;
-        switch ( col ) {
-          case "ember": if ( root && hv < 0.45 ) glow(x, y, pal.ember[hv < 0.2 ? 1 : 0], 220); else put(x, y, mix(m, pal.char[0], 0.85)); break;
-          case "bolt":
-            if ( k < path.length * 0.35 && hv < 0.4 ) glow(x, y, hv < 0.15 ? [255, 255, 255] : pal.accHi, 230); else put(x, y, mix(m, pal.char[0], 0.8));
-            if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.char[0], 0.35));
-            break;
-          case "acc": put(x, y, mix(m, pal.accLo, 0.85)); break;
-          case "arc": if ( (k & 1) === 0 ) glow(x, y, pal.acc, 180); else put(x, y, mix(m, pal.accLo, 0.8)); break;
-          case "ice": put(x, y, mix(pal.accHi, [255, 255, 255], 0.35)); if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.ink, 0.35)); break;
-          case "root": put(x, y, mix(m, mix(pal.accLo, pal.ink, 0.5), 0.85)); break;
-          default: put(x, y, mix(m, pal.ink, 0.85));
-        }
-        if ( col === "ink" || col === "root" || col === "acc" ) { const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14)); }
-      });
-    }
-    /** The cause's specks in the ruin (deterministic): embers, bubbles, sparks, motes, dust, splinters, drops, spores, glints. */
-    function causeFx() {
-      const D = cz.fxD ?? 0.02, plus = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-      for ( const i of C.px ) {
-        if ( C.keep.has(i) ) continue;
-        const x = i % W, y = (i - x) / W, dn = Math.min(1, din[i] / maxD);
-        if ( h2(x, y, seed + 601) >= D * (0.4 + dn) ) continue;
-        const hv = h2(x, y, seed + 602);
-        switch ( cz.fx ) {
-          case "ember": glow(x, y, pal.ember[(hv * 3) | 0], 255); break;
-          case "bubble": glow(x, y, pal.accHi, 160); if ( isIn(x + 1, y) ) put(x + 1, y, pal.acc); if ( isIn(x, y + 1) ) put(x, y + 1, pal.accLo); break;
-          case "spark": glow(x, y, hv < 0.5 ? [255, 255, 255] : pal.accHi, 255); break;
-          case "mote": glow(x, y, pal.accHi, 230); if ( hv < 0.3 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) glow(x + a, y + b, pal.acc, 140); break;
-          case "dust": put(x, y, mix(pal.dust, rp[4], 0.5)); break;
-          case "splinter": for ( let k = 0; k < 3; k++ ) { const X = Math.round(x + C.axis[0] * k), Y = Math.round(y + C.axis[1] * k); if ( isIn(X, Y) ) put(X, Y, k ? rp[3] : rp[4]); } break;
-          case "drop": put(x, y, pal.waterR[4]); if ( isIn(x, y + 1) ) put(x, y + 1, pal.waterR[1]); break;
-          case "spore": put(x, y, mix(pal.accHi, [230, 220, 200], 0.4)); if ( isIn(x + 1, y) ) put(x + 1, y, pal.accHi); if ( isIn(x, y + 1) ) put(x, y + 1, rp[1]); break;
-          case "glint": put(x, y, hv < 0.3 ? [255, 255, 255] : pal.accHi); if ( hv < 0.2 ) for ( const [a, b] of plus ) if ( isIn(x + a, y + b) ) put(x + a, y + b, pal.accHi); break;
-        }
-      }
-    }
+    const kit = cz ? causeKit({ cz, pal, seed, W, H, mapAt, put, glow, isIn, inside, din, maxD, E0, Rr, C, haloR: cHaloR }) : null;
     // 1. the exposed layer
     for ( const i of C.px ) {
       if ( C.keep.has(i) ) continue;
@@ -1297,7 +1312,7 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( h2(Math.floor(x / 3), y, seed + 43) < 0.04 ) col = pal.waterR[4];                 // glints in dashes
       }
       if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.035 ) col = pal.ember[Math.floor(h2(x, y, seed + 52) * 3)];
-      if ( cz ) { col = causeFill(x, y, col, depth, dn, lit); if ( !col ) continue; }
+      if ( cz ) { col = kit.fill(x, y, col, depth, dn, lit); if ( !col ) continue; }
       put(x, y, col);
     }
     // 2. rubble: chips of the surface and stones, thicker towards the rim
@@ -1331,7 +1346,7 @@ function bakeArea(A, P, seed, uid, jag) {
     if ( cHaloR > 0.5 ) for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
       const i = y * W + x; if ( inside[i] ) continue;
       const d = dout[i]; if ( d > cHaloR || d < 1.5 ) continue;
-      causeHalo(x, y, i, d);
+      kit.halo(x, y, i, d);
     }
     // 4. the torn lip: an inked line around the hole on the intact side, a light lip above-left of it
     for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
@@ -1340,13 +1355,13 @@ function bakeArea(A, P, seed, uid, jag) {
       // only where the surface is really torn open next to it: never along plates that stayed
       for ( const j of [i - 1, i + 1, i - W, i + W] ) if ( j >= 0 && j < N && own[j] === 1 && !C.keep.has(j) ) { near = j; s = Math.max(s, sev[j]); }
       if ( near < 0 ) continue;
-      if ( cz ) { causeLip(x, y, i, s); continue; }
+      if ( cz ) { kit.lip(x, y, i, s); continue; }
       if ( s >= 1.6 ) put(x, y, pal.ink);
       else put(x, y, mix(mapAt(i), pal.ink, 0.55));
     }
     // 5. hairline cracks: one ink pixel, with a lighter lip of the map's own colour up-left of it (a cause draws its own), then the
     // cause's specks
-    if ( cz ) { causeCrackLines(); if ( cz.fx ) causeFx(); }
+    if ( cz ) { kit.crackLines(C.cracks); if ( cz.fx ) kit.fx(C.px, (i) => C.keep.has(i)); }
     else for ( const path of C.cracks ) for ( const i of path ) {
       const x = i % W, y = (i - x) / W;
       put(x, y, mix(mapAt(i), pal.ink, 0.85));
