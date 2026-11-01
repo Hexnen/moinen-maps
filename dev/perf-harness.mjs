@@ -322,3 +322,194 @@ export function outlineCheck({ zooms = [0.5, 0.725, 1, 1.25, 2, 3.5, 6], cell = 
   return { region, refDark, rows, sweep: sw };
   } finally { ws.forEach((w) => { w.visible = true; }); }
 }
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * ZOOM / PAN BENCHMARK and the instruments it shares with the animation benchmark.
+ * A hidden pane has no requestAnimationFrame: frames are stepped by hand at `hz` (default 165: 6.06 ms per frame), each frame waits
+ * for its slot in real time (busy wait), so a frame that takes longer than its slot makes the next one late, like a dropped vsync.
+ * Input (wheel / drag) runs between frames, as the browser delivers it. Per frame: CPU of the input handlers + the ticker update +
+ * gl.finish, GPU (EXT_disjoint_timer_query_webgl2 round the update). Counted per phase: hook calls and their time (per hook and per
+ * canvasPan listener), ticker listeners' time (per listener), GL texture uploads / creations / mipmap builds / framebuffer binds /
+ * draws, RenderTexture.create, getBounds / sortChildren calls, filter passes.
+ * --------------------------------------------------------------------------------------------------------------------------------- */
+const pct = (a, p) => { if ( !a.length ) return null; const s = [...a].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(2); };
+export const dist = (a) => ({ n: a.length, p50: pct(a, 0.5), p95: pct(a, 0.95), p99: pct(a, 0.99), max: a.length ? +Math.max(...a).toFixed(1) : null,
+  over6: a.filter((x) => x > 6.06).length, over16: a.filter((x) => x > 16.7).length, over33: a.filter((x) => x > 33.3).length });
+
+/** Install the counters; returns { snap(), restore() }: snap() reads and zeroes the counters. */
+export function instrument() {
+  const R = canvas.app.renderer, gl = R.gl, T = canvas.app.ticker, undo = [];
+  const c = { hooks: {}, hookMs: {}, pan: {}, tick: {}, gl: {} };
+  let fr = {};                                         // this frame's counts (frame() reads and resets them)
+  const bump = (o, k, v = 1) => { o[k] = (o[k] ?? 0) + v; if ( o !== c.hooks ) fr[k] = (fr[k] ?? 0) + v; };
+  const wrapObj = (obj, name, pre) => { const o = obj[name]; obj[name] = function(...a) { pre(...a); return o.apply(this, a); }; undo.push(() => { obj[name] = o; }); };
+  for ( const n of ["texImage2D", "texSubImage2D", "generateMipmap", "createTexture", "deleteTexture", "bindFramebuffer", "drawElements", "drawArrays", "createFramebuffer"] ) wrapObj(gl, n, () => bump(c.gl, n));
+  wrapObj(PIXI.RenderTexture, "create", () => bump(c.gl, "RenderTexture.create"));
+  wrapObj(PIXI.DisplayObject.prototype, "getBounds", () => bump(c.gl, "getBounds"));
+  wrapObj(PIXI.Container.prototype, "sortChildren", () => bump(c.gl, "sortChildren"));
+  wrapObj(PIXI.Texture, "from", () => bump(c.gl, "Texture.from"));
+  if ( R.filter ) wrapObj(R.filter, "push", () => bump(c.gl, "filterPass"));
+  // hooks: the time of every callAll / call, and of each canvasPan listener on its own
+  for ( const k of ["callAll", "call"] ) {
+    const o = Hooks[k];
+    Hooks[k] = function(name, ...a) { const t = performance.now(); try { return o.call(this, name, ...a); } finally { bump(c.hooks, name); bump(c.hookMs, name, performance.now() - t); } };
+    undo.push(() => { Hooks[k] = o; });
+  }
+  for ( const h of Hooks.events.canvasPan ?? [] ) {
+    const fn = h.fn, label = `${fn.name || "anon"}:${String(fn).slice(0, 60).replace(/\s+/g, " ")}`;
+    h.fn = function(...a) { const t = performance.now(); try { return fn.apply(this, a); } finally { bump(c.pan, label, performance.now() - t); } };
+    undo.push(() => { h.fn = fn; });
+  }
+  // ticker listeners (the list as it is now; a listener added later is not timed)
+  for ( let l = T._head.next; l; l = l.next ) {
+    const key = l._fn ? "_fn" : "fn", fn = l[key]; if ( !fn ) continue;
+    const label = `${l.context?.constructor?.name ?? ""}.${fn.name || "anon"}@${l.priority}:${String(fn).slice(0, 50).replace(/\s+/g, " ")}`;
+    l[key] = function(...a) { const t = performance.now(); try { return fn.apply(this, a); } finally { bump(c.tick, label, performance.now() - t); } };
+    undo.push(() => { l[key] = fn; });
+  }
+  const r2 = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => [k, +v.toFixed(2)]));
+  return {
+    snap() { const out = { hooks: r2(c.hooks), hookMs: r2(c.hookMs), pan: r2(c.pan), tick: r2(c.tick), gl: r2(c.gl) }; for ( const k of Object.keys(c) ) c[k] = {}; fr = {}; return out; },
+    frame() { const f = fr; fr = {}; return f; },
+    restore() { for ( const u of undo.reverse() ) u(); }
+  };
+}
+
+/** Busy-wait until `t` (performance.now()). */
+const until = (t) => { while ( performance.now() < t ) { /* spin */ } };
+
+/**
+ * Run `frames` (an array of per-frame input functions or null) at `hz`. Returns per-frame rows { input, cpu, gpu, t }.
+ * `cb(i, t)` (optional) after every frame (e.g. to sample positions for the animation benchmark).
+ */
+export async function runFrames(frames, { hz = 165, cb = null } = {}) {
+  const R = canvas.app.renderer, gl = R.gl, ext = gl.getExtension("EXT_disjoint_timer_query_webgl2"), T = canvas.app.ticker;
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const per = 1000 / hz, rows = [];
+  // between frames the event loop runs (timers, messages, idle callbacks: work the module defers with setTimeout lands there, as
+  // in a browser); `gap` = the longest task seen while waiting, `interval` = start to start of consecutive frames (ideal: 1000 / hz)
+  const ch = new MessageChannel(); let wake = null; ch.port1.onmessage = () => wake?.();
+  const yieldTask = () => new Promise((r) => { wake = r; ch.port2.postMessage(0); });
+  let slot = performance.now(); const t00 = slot; let prev = null;
+  try {
+    for ( let i = 0; i < frames.length; i++ ) {
+      slot += per;
+      let gap = 0;
+      while ( performance.now() < slot - 0.3 ) { const a = performance.now(); await yieldTask(); gap = Math.max(gap, performance.now() - a); }
+      until(slot);
+      const now0 = performance.now();
+      if ( now0 - slot > per ) slot = Math.ceil((now0 - t00) / per) * per + t00;   // late: the next vsync after it
+      const t = performance.now();
+      frames[i]?.(i);
+      const ti = performance.now();
+      let q = null;
+      if ( ext ) { q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+      T.update(ti);
+      if ( ext ) gl.endQuery(ext.TIME_ELAPSED_EXT);
+      gl.finish();
+      const t1 = performance.now();
+      rows.push({ input: ti - t, cpu: t1 - t, q, t: t - t00, gap, interval: prev === null ? per : t - prev });
+      prev = t;
+      cb?.(i, t);
+    }
+  } finally { T.maxFPS = mf; if ( st ) T.start(); ch.port1.close(); }
+  await new Promise((r) => setTimeout(r, 250));
+  for ( const r of rows ) { if ( r.q ) { if ( gl.getQueryParameter(r.q, gl.QUERY_RESULT_AVAILABLE) ) r.gpu = gl.getQueryParameter(r.q, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(r.q); } delete r.q; }
+  return rows;
+}
+
+/** A wheel notch through Foundry's own handler (5% per notch round the view centre), as the mouse manager calls it. */
+export const wheelNotch = (dir) => canvas._onMouseWheel({ delta: dir, deltaY: dir, clientX: innerWidth / 2, clientY: innerHeight / 2,
+  preventDefault() {}, stopPropagation() {}, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, target: canvas.app.view });
+
+/**
+ * The zoom sequence: wheel notches 1 -> 0.3 -> 3 -> 6 -> 1, delivered like a free-spinning wheel / trackpad (a gesture: dense at its
+ * start, thinning out with inertia), then a drag pan and an animatePan, with idle frames after each. Every phase is measured on its
+ * own. Returns per phase the frame-time distribution (cpu = input + ticker + gl.finish), input handler time, GPU, the reached zoom
+ * and the instrument counts; `rest` = idle frames at zoom 1 for reference.
+ */
+export async function zoomBench({ hz = 165, quiet = false } = {}) {
+  const r = canvas.dimensions.sceneRect, cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+  canvas.pan({ x: cx, y: cy, scale: 1 }); step(30);
+  const gesture = (dir, n, ms) => {
+    const nf = Math.ceil(ms / (1000 / hz)) + 1, f = Array(nf).fill(0);
+    for ( let k = 0; k < n; k++ ) f[Math.min(nf - 1, Math.round((ms * (k / n) ** 1.6) / (1000 / hz)))]++;
+    return f.map((c) => (c ? () => { for ( let j = 0; j < c; j++ ) wheelNotch(dir); } : null));
+  };
+  const idle = (n) => Array(n).fill(null);
+  const inst = instrument();
+  const out = {};
+  let p = null;
+  try {
+    const phase = async (name, frames) => { inst.snap(); const fl = [];
+      const rows = await runFrames(frames, { hz, cb: (i) => { fl[i] = inst.frame(); fl[i].zoom = +canvas.stage.scale.x.toFixed(3); } }); const s = inst.snap();
+      // the long frames with what ran in them (ms per ticker listener / canvasPan listener, GL counts)
+      const spikes = rows.map((x, i) => [i, x.cpu, fl[i], x.gap]).filter((x) => x[1] + x[3] > 8).sort((a, b) => b[1] + b[3] - a[1] - a[3]).slice(0, 6)
+        .map(([i, ms, f, gap]) => ({ i, ms: +ms.toFixed(1), gap: +gap.toFixed(1), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v >= 0.5).map(([k, v]) => [k.slice(0, 40), +v.toFixed(1)])) }));
+      // GPU-side work started during the gesture (frames with input and the 30 after the last one: ~180 ms of settle)
+      const last = frames.reduce((a, f, i) => (f ? i : a), -1);
+      const heavy = ["createTexture", "texImage2D", "RenderTexture.create", "generateMipmap", "Texture.from"];
+      const during = {}; for ( let i = 0; i <= Math.min(rows.length - 1, last + 30); i++ ) for ( const k of heavy ) if ( fl[i]?.[k] ) during[k] = (during[k] ?? 0) + fl[i][k];
+      out[name] = { frames: rows.length, cost: dist(rows.map((x) => x.cpu + Math.max(0, x.gap - 0.2))), cpu: dist(rows.map((x) => x.cpu)), gap: dist(rows.map((x) => x.gap)),
+        input: dist(rows.map((x) => x.input)), gpu: dist(rows.filter((x) => x.gpu !== undefined).map((x) => x.gpu)),
+        zoom: +canvas.stage.scale.x.toFixed(3), during, spikes, ...s };
+      const c = out[name].cost;
+      out[name].pass = c.p99 < 8 && c.max < 16 && c.over33 === 0 && (name === "rest" || !Object.keys(during).length); };
+    await phase("rest", idle(165));
+    await phase("zoomOut", [...gesture(1, 24, 900), ...idle(40)]);                  // 1 -> ~0.3
+    await phase("zoomIn", [...gesture(-1, 46, 1500), ...idle(40)]);                 // 0.3 -> ~3
+    await phase("zoomInDeep", [...gesture(-1, 14, 600), ...idle(40)]);              // 3 -> ~6
+    await phase("zoomBack", [...gesture(1, 36, 1300), ...idle(40)]);                // 6 -> ~1
+    // drag pan: 400 px right and back over 2 s, every frame (a pointer drag pans per pointermove)
+    const n = Math.round(2 * hz), x0 = canvas.stage.pivot.x, y0 = canvas.stage.pivot.y;
+    await phase("pan", Array.from({ length: n }, (_, i) => () => canvas.pan({ x: x0 + 400 * Math.sin(Math.PI * i / n), y: y0 + 120 * Math.sin(2 * Math.PI * i / n) })));
+    // animatePan (as a pan to a pin), there and back with a change of scale
+    await phase("animatePan", [() => { p = canvas.animatePan({ x: x0 + 300, y: y0 + 200, scale: 2, duration: 400 }); }, ...idle(80),
+      () => { p = canvas.animatePan({ x: x0, y: y0, scale: 1, duration: 400 }); }, ...idle(80)]);
+  } finally { inst.restore(); for ( let k = 0; k < 200 && p && CanvasAnimation.animations["canvas.animatePan"]; k++ ) step(1); canvas.pan({ x: cx, y: cy, scale: 1 }); }
+  out.pass = Object.values(out).every((v) => v.pass);
+  if ( !quiet ) console.log("zoomBench", out);
+  return out;
+}
+
+/** Compact table of a zoomBench result: per phase [frames, zoom, cost p50, p95, p99, max, >6.06 ms, >16.7, >33.3, gpu p50, gpu p95, longest
+ * task between frames, pass]; cost = input + ticker + gl.finish + any task that ran between the frames. */
+export const table = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v.cost).map(([k, v]) => [k, [v.frames, v.zoom, v.cost.p50, v.cost.p95, v.cost.p99, v.cost.max,
+  v.cost.over6, v.cost.over16, v.cost.over33, v.gpu.p50, v.gpu.p95, v.gap.max, v.pass ? "PASS" : `FAIL${Object.keys(v.during).length ? ` (gpu work: ${JSON.stringify(v.during)})` : ""}`]]));
+
+/**
+ * GAP CHECK: the destruction layer with its cache against the same layer drawn live, over a zoom sweep (mouse-wheel steps from the
+ * fit zoom, x1.1 .. x1.25 per step, both ways) and pan offsets. A GAP pixel is one where the cached frame is (nearly) transparent but
+ * the live frame shows damage: a crack between cache tiles or bands. Must be 0. Returns per frame the gap count and where they sit
+ * (scene x / y histogram peaks), plus the cache's tile rectangles.
+ */
+export function gapCheck({ steps = [1.1, 1.25], n = 8, offsets = [0, 0.37, 0.71], minAlpha = 96 } = {}) {
+  const R = canvas.app.renderer, d = D(); CONFIG.moinenMaps ??= {};
+  const was = CONFIG.moinenMaps.noDestructionCache, r = canvas.dimensions.sceneRect;
+  const fitZ = Math.min(R.screen.width / r.width, R.screen.height / r.height);
+  const zooms = new Set([fitZ]);
+  for ( const f of steps ) for ( let k = -n; k <= n; k++ ) zooms.add(+(fitZ * f ** k).toFixed(4));
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  const rows = [];
+  try {
+    for ( const z of [...zooms].sort((a, b) => a - b) ) for ( const off of offsets ) {
+      canvas.pan({ x: r.x + r.width / 2 + off * 13, y: r.y + r.height / 2 + off * 7, scale: z });
+      CONFIG.moinenMaps.noDestructionCache = false; step(2); const a = grab();
+      CONFIG.moinenMaps.noDestructionCache = true; step(1); const b = grab();
+      const M = canvas.primary.worldTransform, k = R.resolution, PW = Math.round(R.screen.width * k);
+      let gaps = 0; const hx = new Map(), hy = new Map();
+      for ( let i = 0; i < a.length; i += 4 ) {
+        if ( b[i + 3] >= minAlpha && a[i + 3] < b[i + 3] - minAlpha ) {
+          gaps++;
+          const p = i / 4, sx = Math.round(((p % PW) / k - M.tx) / M.a), sy = Math.round((Math.floor(p / PW) / k - M.ty) / M.d);
+          hx.set(sx, (hx.get(sx) ?? 0) + 1); hy.set(sy, (hy.get(sy) ?? 0) + 1);
+        }
+      }
+      const top = (h) => [...h].sort((p, q) => q[1] - p[1]).slice(0, 3);
+      rows.push({ zoom: +canvas.stage.scale.x.toFixed(4), off, gaps, x: top(hx), y: top(hy) });
+    }
+  } finally { CONFIG.moinenMaps.noDestructionCache = was; ws.forEach((w) => { w.visible = true; }); step(1); }
+  const tiles = (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => [b.level, +t.x.toFixed(2), +t.y.toFixed(2), +t.w.toFixed(2), +t.h.toFixed(2)]));
+  return { frames: rows.length, withGaps: rows.filter((q) => q.gaps).length, worst: rows.sort((p, q) => q.gaps - p.gaps).slice(0, 6), tiles };
+}
