@@ -45,6 +45,7 @@ export function teardown() {
   flushSave();
   gen++; life++;
   clearTimeout(bakeTimer); clearTimeout(saveTimer); clearTimeout(repaintTimer); clearTimeout(releaseTimer); clearTimeout(publishTimer); bakeTimer = saveTimer = repaintTimer = releaseTimer = publishTimer = 0;
+  publishBackoff = 0; publishRetryAt = 0;        // a failed upload on the last scene does not hold up the next one
   display?.destroy(); display = null;
   S = null; status.baking = false; status.progress = 0; status.error = "";
 }
@@ -90,11 +91,16 @@ function releaseWorker() {
 
 /* ---------------------------------------------------------------- publishing the bake (GM) */
 
-let publishTimer = 0, publishFailed = false;
+/**
+ * A failed upload is tried again after a growing pause (15 s doubling up to 8 min, like the destruction's), so one passing network
+ * or storage error does not leave the players baking for themselves until the page is reloaded. Leaving the scene starts afresh.
+ */
+let publishTimer = 0, publishBackoff = 0, publishRetryAt = 0;
 /** A few seconds after the last bake the GM uploads it to the world folder, so players need not bake. */
 function schedulePublish(key, bake) {
   clearTimeout(publishTimer);
-  if ( !game.user.isGM || publishFailed || !S ) return;
+  if ( !game.user.isGM || !S ) return;
+  const wait = Math.max(3000, publishRetryAt - Date.now());
   publishTimer = setTimeout(async () => {
     publishTimer = 0;
     const scene = canvas.scene;
@@ -106,12 +112,15 @@ function schedulePublish(key, bake) {
       const baked = await publishBake(scene.id, key, bake);
       if ( my === life ) S.baked = baked;                        // the upload belongs to that scene even when we have left it
       await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
+      publishBackoff = 0; publishRetryAt = 0;
     } catch ( err ) {
-      publishFailed = true;
-      console.warn(`${MODULE_ID} | could not publish the baked water`, err);
-      ui.notifications.warn(game.i18n.localize("MOINENMAPS.Water.publishFailed"));
+      if ( !publishBackoff ) ui.notifications.warn(game.i18n.localize("MOINENMAPS.Water.publishFailed"));
+      publishBackoff = Math.min(8 * 60000, publishBackoff ? publishBackoff * 2 : 15000);
+      publishRetryAt = Date.now() + publishBackoff;
+      console.warn(`${MODULE_ID} | could not publish the baked water (next try in ${publishBackoff / 1000} s)`, err);
+      if ( my === life ) schedulePublish(key, bake);             // the same bake, once the pause is over (unless edited again)
     }
-  }, 3000);
+  }, wait);
 }
 
 /** The GM always starts the worker (the settings window needs the looks); a player with a cached scene does not. */
