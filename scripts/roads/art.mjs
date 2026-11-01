@@ -76,7 +76,7 @@ export const TILE = 1024;
  * Bake the network into tiles: [{ x, y, w, h, canvas, res }]. Only tiles the roads touch are made. `budget` caps the texels
  * of all tiles together (the resolution drops on very large networks).
  */
-export function bakeRoads(R, g, { budget = 40e6, maxRes = 2 } = {}) {
+export function bakeRoads(R, g, { budget = 40e6, maxRes = 2, keep = null } = {}) {
   const G = R.G, look = R.look;
   const bounds = graphBounds(G, g, (e) => e.k !== "guide");
   if ( !bounds ) return [];
@@ -102,13 +102,18 @@ export function bakeRoads(R, g, { budget = 40e6, maxRes = 2 } = {}) {
   const res = Math.min(maxRes, Math.sqrt(budget / Math.max(1, tiles.length * TILE * TILE)));
   const ctxInfo = { g, look, degree, nodeTrim, G };
   return tiles.map(({ tb, its }) => {
+    // everything the tile's pixels depend on: its roads (shape, kind, size, id for the seeded textures) and their junction trims
+    const key = `${tb.x0},${tb.y0}`;
+    const sig = JSON.stringify([res, g, look, its.map(({ e }) => [e.id, e.k, e.w, e.l, e.o, e.pts, trimFor(ctxInfo, e.a), trimFor(ctxInfo, e.b)])]);
+    // the caller still shows this tile as it was: nothing to draw (`keep` answers whether it has the tile with this signature)
+    if ( keep?.(key, sig) ) return { key, sig, x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: null, res };
     const c = document.createElement("canvas");
     c.width = c.height = Math.max(8, Math.round(TILE * res));
     const ctx = c.getContext("2d");
     ctx.setTransform(res, 0, 0, res, -tb.x0 * res, -tb.y0 * res);
     ctx.lineCap = ctx.lineJoin = "round";
     drawNetwork(ctx, its, ctxInfo, tb);
-    return { x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: c, res };
+    return { key, sig, x: tb.x0, y: tb.y0, w: TILE, h: TILE, canvas: c, res };
   });
 }
 
