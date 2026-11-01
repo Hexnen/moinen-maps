@@ -337,7 +337,7 @@ export function assembleSheet(recs, F, skip = null) {
 function shelfPack(rects) {
   const area = rects.reduce((a, r) => a + (r.w + 1) * (r.h + 1), 0);
   let W = 256; while ( W * W < area * 1.25 && W < 4096 ) W *= 2;
-  W = Math.max(W, ...rects.map((r) => r.w + 1));
+  for ( const r of rects ) if ( r.w + 1 > W ) W = r.w + 1;   // (no spread: a big bake has more sprites than a call takes arguments)
   const order = rects.map((r, i) => i).sort((a, b) => rects[b].h - rects[a].h || rects[b].w - rects[a].w);
   const pos = new Array(rects.length);
   let x = 0, y = 0, rowH = 0;
@@ -357,6 +357,78 @@ export function recordsHash(recs) {
     for ( let i = 0; i < s.img.length; i++ ) h = Math.imul(h ^ s.img[i], 16777619);
   }
   return (h >>> 0).toString(16);
+}
+
+/* ---------------------------------------------------------------- settled composite tiles (composite.mjs) */
+
+/**
+ * kind 3  COMPOSITE TILE  one tile of a band of the destruction layer's settled look as the static cache draws it (static-cache.mjs):
+ *                         texels exactly as the GPU left them in the band's render texture (premultiplied RGBA), so a client that
+ *                         uploads them unchanged (alpha mode PMA) samples the same texels as its own band would. Header: scene x, y
+ *                         (int32), texel w, h (u16), texels per scene px x 1000 (u16), mode (u8: 1 alpha plane + RGB where alpha > 0,
+ *                         0 raw RGBA - a texel with alpha 0 and colour cannot be premultiplied, kept raw just in case).
+ * kind 4  COMPOSITE INDEX the composite's description (JSON: strokes, their areas, the bands' members), small.
+ */
+export const KIND_TILE = 3, KIND_INDEX = 4;
+
+/** { x, y, w, h, res, data (w*h*4 premultiplied RGBA) } -> payload. */
+export function packTile(t) {
+  const d = t.data, N = t.w * t.h;
+  let raw = false, vis = 0;
+  for ( let i = 0; i < N; i++ ) { const a = d[i * 4 + 3]; if ( a ) vis++; else if ( d[i * 4] | d[i * 4 + 1] | d[i * 4 + 2] ) { raw = true; break; } }
+  const body = 16 + (raw ? N * 4 : N + vis * 3);
+  const p = header(KIND_TILE, body), dv = new DataView(p.buffer);
+  dv.setInt32(8, t.x, true); dv.setInt32(12, t.y, true); dv.setUint16(16, t.w, true); dv.setUint16(18, t.h, true);
+  dv.setUint16(20, Math.round(t.res * 1000), true); p[22] = raw ? 0 : 1; p[23] = 0;
+  if ( raw ) p.set(d.subarray(0, N * 4), 24);
+  else {
+    let oa = 24, oc = 24 + N;
+    for ( let i = 0; i < N; i++ ) { const a = d[i * 4 + 3]; p[oa++] = a; if ( a ) { p[oc++] = d[i * 4]; p[oc++] = d[i * 4 + 1]; p[oc++] = d[i * 4 + 2]; } }
+  }
+  return p;
+}
+
+/** A tile payload -> { x, y, w, h, res, data: Uint8Array (w*h*4) }. */
+export function unpackTile(p) {
+  if ( kindOf(p) !== KIND_TILE ) throw new Error("not a composite tile");
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  const x = dv.getInt32(8, true), y = dv.getInt32(12, true), w = dv.getUint16(16, true), h = dv.getUint16(18, true), res = dv.getUint16(20, true) / 1000;
+  const N = w * h, data = new Uint8Array(N * 4);
+  if ( p[22] === 0 ) { if ( p.length !== 24 + N * 4 ) throw new Error("bad tile"); data.set(p.subarray(24)); }
+  else {
+    let oa = 24, oc = 24 + N;
+    for ( let i = 0; i < N; i++ ) { const a = p[oa++]; if ( a ) { data[i * 4] = p[oc++]; data[i * 4 + 1] = p[oc++]; data[i * 4 + 2] = p[oc++]; data[i * 4 + 3] = a; } }
+    if ( oc !== p.length ) throw new Error("bad tile");
+  }
+  return { x, y, w, h, res, data };
+}
+
+/** A JSON-able object -> index payload, and back. */
+export function packIndex(o) {
+  const b = new TextEncoder().encode(JSON.stringify(o)), p = header(KIND_INDEX, b.length);
+  p.set(b, 8);
+  return p;
+}
+export function unpackIndex(p) {
+  if ( kindOf(p) !== KIND_INDEX ) throw new Error("not a composite index");
+  return JSON.parse(new TextDecoder().decode(p.subarray(8)));
+}
+
+/**
+ * A band's key across clients: its level, density, sampling, mipmaps and its members' area hashes in order (the runtime key of the
+ * cache names containers instead). Pure.
+ */
+export const bandKey = (L, res, smp, mips, hashes) => `${L}|${res}|${smp}|${mips ? 1 : 0}|${hashString(hashes.join("."))}:${hashes.length}`;
+const hashString = (s) => { let h1 = 0x811c9dc5, h2 = 0x9747b28c; for ( let i = 0; i < s.length; i++ ) { const v = s.charCodeAt(i); h1 = Math.imul(h1 ^ v, 16777619); h2 = Math.imul(h2 ^ v, 0x5bd1e995); h2 ^= h2 >>> 15; } return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36); };
+
+/**
+ * The tiles of a new composite against the last one: which tile ids are new (to upload) and which are kept. `prev`/`next`:
+ * [{ key, tiles: [{ x, y, w, h, id }] }]. Pure. -> { upload: [id], kept: [id], dropped: [id] }.
+ */
+export function diffComposite(prev, next) {
+  const old = new Set((prev ?? []).flatMap((b) => b.tiles.map((t) => t.id)));
+  const now = new Set(next.flatMap((b) => b.tiles.map((t) => t.id)));
+  return { upload: [...now].filter((id) => !old.has(id)), kept: [...now].filter((id) => old.has(id)), dropped: [...old].filter((id) => !now.has(id)) };
 }
 
 /* ---------------------------------------------------------------- the worker's jobs */
@@ -390,9 +462,23 @@ export async function work(m) {
     }
     return { result: out, transfer };
   }
+  if ( m.kind === "tiles" ) {
+    // composite tiles and the index: { tiles: [{ x, y, w, h, res, data }], index } -> { tiles: [{ id, bytes }], index: { id, bytes } }
+    const known = new Set(m.known ?? []), tiles = [];
+    for ( const t of m.tiles ) {
+      const p = packTile(t), id = `k${hash64(p)}`, bytes = known.has(id) ? null : await wrap(p);
+      if ( bytes ) transfer.push(bytes.buffer);
+      tiles.push({ id, bytes });
+    }
+    const ip = packIndex(m.index), iid = `x${hash64(ip)}`, ib = await wrap(ip);
+    transfer.push(ib.buffer);
+    return { result: { tiles, index: { id: iid, bytes: ib } }, transfer };
+  }
   if ( m.kind === "decode" ) {
     const p = await unwrap(m.bytes);
     if ( m.cid && String(m.cid).slice(1) !== hash64(p) ) throw new Error("chunk content does not match its name");
+    if ( kindOf(p) === KIND_TILE ) { const t = unpackTile(p); transfer.push(t.data.buffer); return { result: { tile: t }, transfer }; }
+    if ( kindOf(p) === KIND_INDEX ) return { result: { index: unpackIndex(p) }, transfer };
     if ( kindOf(p) === KIND_WATER ) {
       const t = unpackWaterTile(p);
       transfer.push(...t.levels.map((l) => l.buffer));

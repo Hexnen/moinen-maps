@@ -121,10 +121,16 @@ async function tx(stores, mode, fn) {
   }), 3000);
 }
 
+/**
+ * The stored bytes themselves, not a copy: they move to the codec worker (decode `own`) and are detached here - a copy left the read's
+ * result alive with its request (a warm load kept ~25 MB of chunk bytes that way).
+ */
+const view = (b) => (b instanceof ArrayBuffer ? new Uint8Array(b) : new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
+
 async function idbGet(id) {
   const hit = await tx(["chunks"], "readonly", (s) => s.get(id));
   if ( hit?.bytes ) tx(["lru"], "readwrite", (l) => l.put({ id, at: Date.now(), size: hit.bytes.byteLength }));
-  return hit?.bytes ? new Uint8Array(hit.bytes) : null;
+  return hit?.bytes ? view(hit.bytes) : null;
 }
 
 async function idbPut(id, bytes) {
@@ -169,7 +175,7 @@ const sizeOf = (v) => {
   let n = 0;
   for ( const s of v?.sprites ?? [] ) n += s.img?.byteLength ?? 0;
   for ( const l of v?.levels ?? [] ) n += l?.byteLength ?? 0;
-  return n;
+  return n + (v?.tile?.data?.byteLength ?? 0);
 };
 const drop = (id) => { if ( !memo.has(id) ) return false; memoBytes -= memo.get(id).size; memo.delete(id); return true; };
 const remember = (id, v) => {
@@ -195,7 +201,7 @@ async function idbGetMany(ids) {
   if ( !ids.length ) return out;
   const reqs = [];
   await tx(["chunks"], "readonly", (s) => { for ( const id of ids ) { const r = s.get(id); reqs.push([id, r]); } return null; });
-  for ( const [id, r] of reqs ) { const v = r.result; if ( v?.bytes ) out.set(id, new Uint8Array(v.bytes)); }
+  for ( const [id, r] of reqs ) { const v = r.result; if ( v?.bytes ) out.set(id, view(v.bytes)); }
   if ( out.size ) tx(["lru"], "readwrite", (l) => { const at = Date.now(); for ( const [id, b] of out ) l.put({ id, at, size: b.byteLength }); return null; });
   return out;
 }

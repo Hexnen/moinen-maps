@@ -18,6 +18,8 @@ import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 import { DestructionDisplay } from "./display.mjs";
+import * as Composite from "./composite.mjs";
+import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
 
@@ -50,6 +52,9 @@ let shownRecs = new Map();           // stroke id -> record on screen (its older
 const staleRecs = new Map();         // stroke id -> its look from an older bake version (shown until its new record is in)
 const waitingSince = new Map();      // player: record key -> when its chunk was first missed (bake it here after AWAIT_CHUNK)
 let netAbort = null, persisting = null, persistAgain = false;
+let reshow = null;                   // the latest pass's show(): records that got their pixels go on screen through it
+let compositeShown = null;           // the settled composite the display draws its shells' bands from (composite.mjs)
+let compositeTimer = 0, compositeTries = 0;
 const AWAIT_CHUNK = 12000;
 /** Strokes to bake on a scene load from which on the bake is spread over several workers and shown as it comes. */
 const BIG_BAKE = 6;
@@ -135,6 +140,9 @@ function teardown() {
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
+  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0;
+  if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
+  compositeShown?.destroy(); compositeShown = null; reshow = null;
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
   played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
@@ -252,7 +260,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     first = false; loaded = true; shownMask = mask;
     T.show = (T.show ?? 0) + performance.now() - t;
   };
-  const show = () => {
+  const show = reshow = () => {
     if ( my !== gen || S !== S0 ) return Promise.resolve();
     if ( !firstLoad ) {
       // (records whose pixels were let go after they went on screen get them back first, when an area of theirs is not on screen)
@@ -267,8 +275,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         // new strokes and new looks replacing an older one (stale while revalidate), nearest first, a batch per step; the others keep
         // what they show
         const best = (w) => recs.get(w.rk) ?? staleRecs.get(w.objId);
-        const near = prioritise(want.filter((w) => best(w) && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
-        const allow = new Set(want.filter((w) => best(w) && shownRecs.get(w.objId) === best(w)).map((w) => w.objId));
+        // (the composite's shells all at once: its bands only match with every one of them in)
+        const near = prioritise(want.filter((w) => best(w) && !best(w).shell && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
+        const allow = new Set(want.filter((w) => best(w) && (best(w).shell || shownRecs.get(w.objId) === best(w))).map((w) => w.objId));
         for ( let i = 0; i < near.length || i === 0; i += SHOW_BATCH ) {
           for ( const w of near.slice(i, i + SHOW_BATCH) ) allow.add(w.objId);
           const dry = needPixels(want);
@@ -294,8 +303,22 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   };
   src.mem = want.length - missing().length;
 
-  // 1. the GM's manifest: the chunks of strokes whose inputs are unchanged (IndexedDB first, then the server), shown as they land
+  // 0. SETTLED COMPOSITE (composite.mjs): on a scene load, the strokes the GM's composite holds (the same signatures, the scene's
+  // strokes being those plus newer ones on top) are shown from its tiles as shells; their own chunks come only when needed
   const M = force ? null : Store.manifestOf(S);
+  if ( firstLoad && !force && !all ) {
+    const t = performance.now(), got = await compositeLoad(scene, base, want, M);
+    if ( my !== gen ) return;
+    if ( got ) { src.composite = got; T.composite = performance.now() - t; early(); }
+  }
+  // anything but new strokes on top of the shells (an undo, a changed stroke, a setting): every shell gets its pixels first, so the
+  // change is drawn from real areas (the composite has no picture of the scene without them)
+  else if ( shellRecs().length && (force || all || [...shownRecs.values()].some((r) => r.shell && !want.some((w) => w.rk === r.rk))) ) {
+    await hydrateShells("change");
+    if ( my !== gen || S !== S0 ) return;
+  }
+
+  // 1. the GM's manifest: the chunks of strokes whose inputs are unchanged (IndexedDB first, then the server), shown as they land
   const failed = [];
   // a manifest of a NEWER bake version (a client with newer code published it) is used as it is: never baked again here for it,
   // never overwritten (bake-policy.mjs) - an older client re-baking and re-publishing it is how two tabs took turns for ever
@@ -413,7 +436,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     // - a few ms each, where the worker would bake each again from its data
     {
       const dry = new Set();
-      for ( const w of toBake ) for ( const j of w.deps ) { const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null; if ( r?.sprites.lean ) dry.add(r); }
+      for ( const w of toBake ) for ( const j of w.deps ) { const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null; if ( r?.sprites.lean || r?.shell ) dry.add(r); }
       if ( dry.size ) { await Promise.all([...dry].map(hydrate)); if ( my !== gen ) return; }
     }
     try {
@@ -516,6 +539,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     Trace.event("compat-shown", { from: status.compat?.from, left: deferred.size, mode });
   }
   if ( complete ) { shownKey = key; waitingSince.clear(); Trace.markOnce("damage:all", { groups: display?.groups.size ?? 0, uploads: display?.stats?.uploads ?? 0, ...src }); }
+  // the composite's shells that need their pixels anyway (flooded holes, a dark scene); the GM keeps the composite up to date
+  if ( src.composite ) setTimeout(shellNeeds, 0);
+  if ( complete && game.user.isGM ) scheduleComposite();
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
   for ( const k of recs.keys() ) if ( !live.has(k) ) recs.delete(k);
@@ -553,7 +579,8 @@ async function prepareReveal(my) {
   const until = performance.now() + 1500;
   while ( my === gen && Reveal.holding("destruction") && performance.now() < until ) {
     // (its holes are listed a moment after the areas are in: none listed yet while there are flood strokes is not "done")
-    const holes = destructionApi.flood?.status?.()?.holes, floods = S?.objects?.some((o) => !o.k && Model.TYPES[o.t] === "flood");
+    // (holes shown from the settled composite get their water a moment later, after their pixels: not waited for here)
+    const holes = destructionApi.flood?.status?.()?.holes, floods = S?.objects?.some((o) => !o.k && Model.TYPES[o.t] === "flood") && !display.order.some((g) => g.shell && g.info.type === "flood");
     if ( !floods || !destructionApi.flood ) break;
     if ( holes?.length && holes.every((h) => h.state === "ready" || h.state === "none") ) break;
     await new Promise((r) => setTimeout(r, 30));
@@ -589,7 +616,7 @@ function prioritise(list, objs) {
  * look it had on screen (a setting changed: the new look replaces it when it lands) or is left out for now (a new stroke).
  */
 function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
-  const list = [], next = new Map();
+  const list = [], next = new Map(), shells = [];
   depOnly.clear();
   for ( const w of want ) {
     // (allow: the strokes that may take their new record - or their older look - in this step; the others keep what they show)
@@ -602,19 +629,21 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
     // a new look only because the strokes under it changed (its own inputs did not): swapped in one frame, no entry, no fade
     const prev = shownRecs.get(w.objId);
     if ( prev && prev !== r && prev.own && prev.own === w.own && !prev.stale ) depOnly.add(w.objId);
-    list.push({ index: w.index, sprites: r.sprites, id: r.id ?? null });
+    list.push({ index: w.index, sprites: r.sprites, id: r.id ?? null, shell: !!r.shell });
+    if ( r.shell ) for ( const a of r.shell ) shells.push({ ...a, index: w.index, obj: w.objId });
     next.set(w.objId, r);
   }
   shownRecs = next;
   display ??= new DestructionDisplay();
+  if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
-  // the areas already on screen need no pixels (the display keeps them by hash)
-  const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h));
-  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs);
+  // the areas already on screen need no pixels (the display keeps them by hash; a shell's pixels replace it)
+  const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h) && !display.groups.get(h).shell);
+  const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs, shells);
   // MEMORY: the display holds its own copy of every area's pixels now; a record that can be had again from its chunk lets go of its
   // own copy (a big scene's records were ~230 MB of RGBA kept twice). They come back (hydrate) when an area of theirs must be built
   // again, or the stroke is baked over.
-  for ( const r of next.values() ) if ( !r.sprites.lean && r.id && r.dir && onScreen(r) ) dry(r);
+  for ( const r of next.values() ) if ( !r.shell && !r.sprites.lean && r.id && r.dir && onScreen(r) ) dry(r);
   playEntries(added, removed, taken, mask, first);
   if ( soft ) { const t = performance.now(); for ( const g of added ) if ( !g.anim && !g.fade && !g.reused ) { g.fade = { start: t, dur: 300 }; display.applyFade(g, t); } }
   lastRecs = list;
@@ -636,7 +665,7 @@ function plainOf(j, base, FS) {
   const o = S?.objects?.[j]; if ( !o || o.k ) return null;
   const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p.lean ? null : p;
   const r = recs.get(`${base}|${o.id}|${FS[j].sig}`);
-  return r && !r.sprites.lean && !overSubstrate(r.sprites) ? r.sprites : null;
+  return r && !r.shell && !r.sprites.lean && !overSubstrate(r.sprites) ? r.sprites : null;
 }
 
 /* ---------------------------------------------------------------- records without their pixels (memory) */
@@ -662,10 +691,12 @@ function needPixels(want) {
 }
 /** A record's pixels back from its chunk (memory, IndexedDB, the server), in place. A chunk that cannot be had drops the record. */
 async function hydrate(r) {
-  if ( !r.sprites.lean ) return true;
+  if ( !r.sprites.lean && !r.shell ) return true;
   r.hydrating ??= (async () => {
-    const got = await Net.getChunk(r.dir, r.id).catch(() => null);
-    const ok = got?.sprites?.length === r.sprites.length && got.sprites.every((s, k) => s.img && s.w === r.sprites[k].w && s.h === r.sprites[k].h);
+    const got = r.id && r.dir ? await Net.getChunk(r.dir, r.id).catch(() => null) : null;
+    // a shell (composite.mjs) takes the chunk's sprites as they are
+    if ( r.shell && got?.F === META_FIELDS && got.sprites?.every((s) => s.img) ) { r.sprites = got.sprites; r.shell = null; return true; }
+    const ok = !r.shell && got?.sprites?.length === r.sprites.length && got.sprites.every((s, k) => s.img && s.w === r.sprites[k].w && s.h === r.sprites[k].h);
     if ( ok ) { r.sprites.forEach((s, k) => { s.img = got.sprites[k].img; }); r.sprites.lean = false; }
     else {
       console.warn(`${MODULE_ID} | destruction: chunk ${r.id} could not be read again`);
@@ -676,6 +707,98 @@ async function hydrate(r) {
     return ok;
   })().finally(() => { r.hydrating = null; });
   return r.hydrating;
+}
+
+/* ---------------------------------------------------------------- the settled composite (composite.mjs) */
+
+/**
+ * Scene load: the composite's strokes as shells. Only when the composite is of this bake (`base`), every stroke it holds is here with
+ * the same signature, and the scene's other strokes are all newer (on top: drawn over its bands). -> the number of strokes, or 0.
+ */
+async function compositeLoad(scene, base, want, M) {
+  if ( !Composite.enabled() || !cacheEnabled() ) return 0;
+  const CM = Composite.manifestOf(scene);
+  if ( !CM || CM.base !== base ) return 0;
+  const c = await Composite.load(CM);
+  if ( !c ) return 0;
+  const ix = c.index, byId = new Map(want.map((w) => [w.objId, w])), covered = [];
+  for ( const [id, s] of Object.entries(ix.strokes ?? {}) ) {
+    const w = byId.get(id);
+    if ( !w || w.sig !== s.sig ) { c.destroy(); Trace.event("composite-stale", { stroke: id }); return 0; }
+    covered.push(w);
+  }
+  const last = Math.max(-1, ...covered.map((w) => w.index));
+  if ( want.some((w) => w.index < last && !ix.strokes[w.objId]) ) { c.destroy(); Trace.event("composite-stale", { why: "an older stroke is not in it" }); return 0; }
+  compositeShown?.destroy(); compositeShown = c;
+  for ( const w of covered ) {
+    if ( recs.has(w.rk) ) continue;
+    const e = M ? Store.entryOf(M, w.objId) : null;
+    const areas = (ix.strokes[w.objId].hashes ?? []).map((h) => ix.areas[h]).filter(Boolean);
+    recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: e?.sig === w.sig ? e.id : null, dir: M?.dir ?? null, sprites: [], shell: areas });
+  }
+  Trace.event("composite", { strokes: covered.length, of: want.length, mpx: Math.round(c.px / 1e5) / 10 });
+  return covered.length;
+}
+
+/** The records shown or kept as shells. */
+const shellRecs = () => [...new Set([...recs.values(), ...shownRecs.values(), ...staleRecs.values()])].filter((r) => r.shell);
+
+/** Records' pixels back from their chunks, then on screen (the shells replaced by their areas in place). */
+async function fill(list, why) {
+  if ( !list.length ) return true;
+  const my = gen, t = performance.now();
+  const oks = await Promise.all(list.map(hydrate));
+  if ( my !== gen ) return false;
+  Trace.event("shells-filled", { why, n: list.length, failed: oks.filter((v) => !v).length, ms: Math.round(performance.now() - t) });
+  await reshow?.();
+  if ( oks.some((v) => !v) ) { shownKey = ""; rebake({ awaitPublish: false }); }   // (a chunk that could not be had: fetched or baked again)
+  return oks.every(Boolean);
+}
+/** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
+const hydrateShells = (why) => fill(shellRecs(), why);
+
+/** The cache asks for the pixels of shells it must draw itself (a band the composite does not have, drawing without the cache). */
+let pixelAsk = null;
+function requestPixels(groups) {
+  const want = new Set(groups.map((g) => g.hash));
+  const list = shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h)));
+  if ( !list.length ) return;
+  pixelAsk ??= Promise.resolve().then(() => fill(shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h))), "cache")).finally(() => { pixelAsk = null; });
+}
+
+/**
+ * After a load from the composite: the shells that need their pixels anyway get them, in the background - a flooded hole (its water
+ * reads its cover and base), a glowing cause light in a dark scene, every shell in a dark scene (the rim light).
+ */
+function shellNeeds() {
+  const list = shellRecs(); if ( !list.length ) return;
+  const dark = canvas.environment?.darknessLevel ?? 0;
+  if ( dark >= 0.45 ) return void hydrateShells("dark");
+  fill(list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l))), "flood/light");
+}
+let darkTimer = 0;
+Hooks.on("lightingRefresh", () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); });
+
+/**
+ * GM: publish the composite of what is on screen once it is settled (composite.mjs publish says when it is not: tried again a few
+ * times). Only the active GM; after a publish of the strokes, and on a load whose composite is missing or out of date.
+ */
+function scheduleComposite(ms = 4000) {
+  if ( !game.user.isGM || !Composite.enabled() ) return;
+  clearTimeout(compositeTimer);
+  compositeTimer = setTimeout(async () => {
+    compositeTimer = 0;
+    if ( !S || !display || !canvas.scene || !game.users.activeGM?.isSelf || inflight || persisting ) return scheduleComposite(3000);
+    const scene = canvas.scene, bg = backgroundInfo()?.path ?? "", key = Store.makeKey(scene, S, bg);
+    if ( shownKey !== key ) return;                 // not all on screen: the pass that completes it books a run
+    const FS = Store.sigsOf(S), strokes = S.objects.map((o, i) => (o.k ? null : { id: o.id, sig: FS[i].sig })).filter(Boolean);
+    let why;
+    try { why = await Composite.publish(display, { scene, dir: Net.chunkDir(scene.id), base: Store.baseKey(scene, S, bg), strokes }); }
+    catch ( err ) { why = "error"; console.warn(`${MODULE_ID} | destruction: composite not published`, err); }
+    if ( why === "published" || why === "same" ) { compositeTries = 0; return; }
+    Trace.event("composite-wait", { why });
+    if ( ++compositeTries < 30 ) scheduleComposite(why === "error" ? 30000 : 2000);
+  }, ms);
 }
 
 function playEntries(added, removed, taken, mask, first) {
@@ -727,7 +850,8 @@ function maybeBlast(first = false) {
   if ( !b?.id || b.id === playedBlast ) return;
   playedBlast = b.id;
   const late = ageOf(b.t, now());                  // Infinity: a legacy (uptime) or far-future moment, never played
-  if ( S.params.anim && late < (first ? 4000 : 15000) ) display.detonate(performance.now() - late);   // the shared moment (in the future, or already running)
+  // (every area enters: the shells get their pixels first)
+  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( display.shellCount ) hydrateShells("detonate").then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
 }
 
 /* ---------------------------------------------------------------- publishing the chunks (GM) */
@@ -826,7 +950,7 @@ async function persistOnce() {
     if ( todo.length ) {
       const t = performance.now();
       // (a record that let go of its pixels - a chunk of another folder, a copied scene - gets them back to be encoded here)
-      const dryOnes = todo.filter((q) => q.r.sprites.lean);
+      const dryOnes = todo.filter((q) => q.r.sprites.lean || q.r.shell);
       if ( dryOnes.length && !(await Promise.all(dryOnes.map((q) => hydrate(q.r)))).every(Boolean) ) { schedulePersist(0); return; }
       const out = await Net.job({ kind: "objects", F: META_FIELDS, objs: todo.map((q) => ({ key: q.o.id, sprites: q.r.sprites })) });
       status.perf.encode = Math.round(performance.now() - t);
@@ -858,6 +982,7 @@ async function persistOnce() {
     if ( S ) S.baked = { ...baked, c };
     publishBackoff = 0; publishRetryAt = 0;
     Net.scheduleGc(scene.id);
+    scheduleComposite();
     tell("status");
   } catch ( err ) {
     // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
@@ -1072,11 +1197,11 @@ export const destructionApi = {
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
-  status: () => { if ( lastRecs && !status.hash ) status.hash = lastRecs.some((r) => r.sprites.lean) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
+  status: () => { if ( lastRecs && !status.hash ) status.hash = lastRecs.some((r) => r.sprites.lean || r.shell) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean || r.shell ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
-  replay: () => display?.detonate(performance.now()),
+  replay: () => (display?.shellCount ? hydrateShells("replay") : Promise.resolve()).then(() => display?.detonate(performance.now())),
   display: () => display,
   TYPES: Model.TYPES, MATERIALS: Model.MATERIALS, CAUSES: Model.CAUSES
 };
@@ -1100,7 +1225,8 @@ export function registerDestruction() {
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);
-  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.destruction ??= destructionApi; } Store.dropOldCache(); });
+  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.destruction ??= destructionApi; } Store.dropOldCache(); Composite.D.flood = destructionApi.flood ?? null; });
+  Composite.registerSetting();
   window.addEventListener("beforeunload", () => { flushSave(); disposeBaker(); });
   document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
 }

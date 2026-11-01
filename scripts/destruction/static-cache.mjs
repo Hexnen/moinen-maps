@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
+import { bandKey as bandKeyOf } from "../net/chunks.mjs";
 
 /**
  * STATIC CACHE of the destruction layer (PERF). Every damage object (map patch + ruin + shards, an erase stroke, ...) is a container in
@@ -30,6 +31,7 @@ const MAX_MPX = 16e6;
 const LIVE_SHARE = 0.7;        // more than this share of the objects moving (a Detonate): no cache at all, no bake
 const MOVE_MARGIN = 48;        // art px around a moving object (flying pieces, shakes)
 const SETTLE_MS = 500;         // objects that stopped moving are drawn live this long after the last start/stop, then cached
+const WATER_SLOT = { renderable: true, parent: null, destroyed: false };   // a flooded hole's water that is not here yet (draws nothing)
 
 export const cacheEnabled = () => {
   if ( perfLow() ) return true;                                  // performance mode Low: always
@@ -206,11 +208,14 @@ export class StaticCache {
       const g = ent.get(k);
       // something in the layer the cache does not know: live, over everything
       if ( !g ) { out.push({ obj: k, cont: k, r: { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 }, live: true, m: 0 }); continue; }
-      if ( g.erase ) { const mv = !!(g.dis || g.leaving); out.push({ obj: k, cont: k, r: g.info.rect, live: mv, m: mv ? 4 : 0 }); continue; }
+      if ( g.erase ) { const mv = !!(g.dis || g.leaving); out.push({ obj: k, cont: k, r: g.info.rect, live: mv, m: mv ? 4 : 0, g }); continue; }
       const mv = dying.has(g) || !!g.anim || !!g.fade || g.made < g.pieces.length || k.alpha < 1;
       const bloom = g.light?.bloom, glow = !!(bloom && !bloom.destroyed && bloom.alpha > 0.003);
-      const extras = k.children.filter((ch) => ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont);
-      const self = { obj: k, cont: k, r: g.info.rect, live: mv || glow, m: mv ? MOVE_MARGIN : 0, extras };
+      let extras = k.children.filter((ch) => ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont);
+      // (a flooded hole whose water had arrived when the settled composite was made - composite.mjs - keeps a water unit while its own
+      // water is not here yet: the bands stay those of the composite instead of folding together for a moment)
+      if ( !extras.length && g.info?.water ) extras = [WATER_SLOT];
+      const self = { obj: k, cont: k, r: g.info.rect, live: mv || glow, m: mv ? MOVE_MARGIN : 0, extras, g };
       out.push(self);
       // the water of a flooded hole: its own live unit on top of its (static) object
       if ( !self.live ) for ( const w of extras ) out.push({ obj: w, cont: k, r: g.info.rect, live: true, m: 0, water: w, owner: self });
@@ -295,6 +300,8 @@ export class StaticCache {
   }
 
   allLive(why) {
+    // drawn live, shells (areas shown from the settled composite only) would be missing: their pixels are asked for
+    if ( this.d.shellCount ) this.d.needPixels?.([...this.d.groups.values()].filter((g) => g.shell));
     if ( !this.liveAll ) {
       this.d.live.visible = true;
       for ( const k of this.d.live.children ) k.renderable = true;
@@ -306,7 +313,7 @@ export class StaticCache {
   }
 
   freeBands(bands = this.bands) {
-    for ( const b of bands ) for ( const t of b.tiles ) { t.spr.destroy(); t.rt.destroy(true); }
+    for ( const b of bands ) for ( const t of b.tiles ) { t.spr.destroy(); if ( !t.shared ) t.rt.destroy(true); }   // (a composite tile's texture is the composite's)
     if ( bands === this.bands ) {
       this.bands = []; this.show.removeChildren(); this.runs = []; this.sig = "";
       Object.assign(this.stats, { bands: 0, tiles: 0, mpx: 0 });
@@ -320,6 +327,7 @@ export class StaticCache {
   bake(U, lv, sr, res, mips, win = null) {
     const t0 = performance.now(), R = canvas.app.renderer, d = this.d, ap = d.ap, o = d.origin, live = d.live;
     const force = this.dirty;
+    this.waiting = false;              // (a band of shells without a composite for them: kept stale, re-drawn when their pixels come)
     const top = lv.reduce((a, v) => Math.max(a, v), 0);
     let sx0 = Math.floor(sr.x), sy0 = Math.floor(sr.y), sx1 = Math.ceil(sr.x + sr.width), sy1 = Math.ceil(sr.y + sr.height);
     if ( win ) { sx0 = Math.max(sx0, win.x0); sy0 = Math.max(sy0, win.y0); sx1 = Math.min(sx1, win.x1); sy1 = Math.min(sy1, win.y1); }
@@ -327,16 +335,16 @@ export class StaticCache {
     const plan = [];
     let area = 0;
     for ( let L = 0; L <= top + 1; L += 2 ) {
-      const members = [], rects = [];
+      const members = [], rects = [], groups = [];
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for ( let i = 0; i < U.length; i++ ) if ( lv[i] === L && !U[i].live ) {
-        members.push(U[i].cont); const r = U[i].r;
+        members.push(U[i].cont); groups.push(U[i].g ?? null); const r = U[i].r;
         rects.push({ x0: o.x + r.x0 * ap - 2, y0: o.y + r.y0 * ap - 2, x1: o.x + r.x1 * ap + 2, y1: o.y + r.y1 * ap + 2 });
         x0 = Math.min(x0, o.x + r.x0 * ap); y0 = Math.min(y0, o.y + r.y0 * ap); x1 = Math.max(x1, o.x + r.x1 * ap); y1 = Math.max(y1, o.y + r.y1 * ap);
       }
       x0 = Math.max(sx0, Math.floor(x0) - 2); y0 = Math.max(sy0, Math.floor(y0) - 2); x1 = Math.min(sx1, Math.ceil(x1) + 2); y1 = Math.min(sy1, Math.ceil(y1) + 2);
       const ok = members.length && x1 > x0 && y1 > y0;
-      plan.push(ok ? { L, members, rects, x0, y0, x1, y1 } : null);
+      plan.push(ok ? { L, members, rects, groups, x0, y0, x1, y1 } : null);
       if ( ok ) area += (x1 - x0) * (y1 - y0);
     }
     // 2. the density: what was asked, within the memory cap for all bands together (a view window is small anyway)
@@ -360,13 +368,33 @@ export class StaticCache {
       const p = plan[k];
       if ( p ) {
         const key = `${p.L}|${eff}|${mips}|${smp}|${p.x0},${p.y0},${p.x1},${p.y1}|${p.members.map((c) => `${this.idOf(c)}.${c.children.length}.${c._mmv | 0}`).join(",")}`;
+        // SETTLED COMPOSITE (composite.mjs): the band as the GM's client drew it, keyed by its members' area hashes - its tiles are used
+        // as they are; areas shown as shells (no pixels of their own) can only be drawn from it
+        const hashes = p.groups.map((g) => g?.hash ?? 0), shells = p.groups.filter((g) => g?.shell);
+        const ckey = !win && Number.isInteger(1 / eff) ? bandKeyOf(p.L, eff, smp, mips, hashes) : "";
+        const comp = d.composite, exact = ckey ? comp?.band(ckey, p) : null;
         let band = old.get(key);
         if ( band && band.tiles.every((t) => t.rt.valid && !t.rt.baseTexture.destroyed) ) keep.add(band);
+        else if ( exact ) {
+          band = { key, level: p.L, tiles: exact.map((t) => { const spr = new SharpTile(t.tex, t.w, t.h, eff); spr.position.set(t.x, t.y); return { rt: t.tex, spr, x: t.x, y: t.y, w: t.w, h: t.h, shared: true, id: t.id }; }) };
+          this.stats.fromComposite = (this.stats.fromComposite ?? 0) + 1;
+        } else if ( shells.length && !(ckey && comp?.prefix(p.L, eff, smp, mips, hashes, shells)) ) {
+          // shells and no composite for them: their pixels are asked for (destruction.mjs hydrates their strokes); meanwhile the band
+          // keeps what it showed (a stale band of the same level), or nothing is drawn for it this frame
+          d.needPixels?.(shells);
+          const prev = this.bands.find((b) => b.level === p.L);
+          this.waiting = true;
+          if ( prev ) { keep.add(prev); band = prev; }
+          else band = { key: `${key}|wait`, level: p.L, tiles: [] };
+          this.dirty = true;
+        }
         else {
+          const delta = shells.length && ckey ? comp?.prefix(p.L, eff, smp, mips, hashes, shells) : null;
           band = { key, level: p.L, tiles: [] };
           if ( d.filter !== smp ) { setSampling(d, smp); d.filter = smp; }
           live.visible = true;
-          const set = new Set(p.members);
+          // (a band that only GREW past a composite of its first members: the composite's texels first, then only the newer members)
+          const set = new Set(delta ? p.members.slice(delta.n) : p.members);
           for ( const c of live.children ) c.renderable = set.has(c);
           for ( const u of waters ) u.water.renderable = false;          // the water is never in a band
           for ( let ty = p.y0; ty < p.y1; ty += T ) for ( let tx = p.x0; tx < p.x1; tx += T ) {
@@ -375,13 +403,16 @@ export class StaticCache {
             // sparse: no texture for a tile none of the band's objects touches
             if ( !p.rects.some((r) => r.x0 < tx + tw && r.x1 > tx && r.y0 < ty + th && r.y1 > ty) ) continue;
             const rt = PIXI.RenderTexture.create({ width: tw, height: th, resolution: eff, scaleMode: PIXI.SCALE_MODES.LINEAR });
-            R.render(live, { renderTexture: rt, transform: new PIXI.Matrix(1, 0, 0, 1, -tx, -ty), clear: true });
+            const m = new PIXI.Matrix(1, 0, 0, 1, -tx, -ty);
+            if ( delta ) { R.render(delta.under(tx, ty, tw, th), { renderTexture: rt, transform: m, clear: true }); R.render(live, { renderTexture: rt, transform: m, clear: false }); }
+            else R.render(live, { renderTexture: rt, transform: m, clear: true });
             if ( mips && globalThis.CONFIG?.moinenMaps?.destructionCacheMips !== false ) mipmaps(R, rt);   // (dev knob)
             const spr = new SharpTile(rt, tw, th, eff); spr.position.set(tx, ty);
             band.tiles.push({ rt, spr, x: tx, y: ty, w: tw, h: th });
           }
           drawn++;
         }
+        band.ckey ??= ckey; band.hashes ??= hashes; band.meta ??= { L: p.L, eff, smp, mips: !!mips, rect: [p.x0, p.y0, p.x1, p.y1] };   // (what composite.mjs publishes from)
         for ( const t of band.tiles ) { this.show.addChild(t.spr); px += t.w * t.h * eff * eff; }
         bands.push(band);
       }
@@ -393,6 +424,7 @@ export class StaticCache {
     if ( d.filter !== liveSmp ) { setSampling(d, liveSmp); d.filter = liveSmp; }
     this.freeBands(this.bands.filter((b) => !keep.has(b)));
     this.bands = bands; this.runs = runs;
+    d.composite?.restore?.();
     const ms = performance.now() - t0;
     Object.assign(this.stats, { bakes: this.stats.bakes + 1, bakeMs: Math.round(ms * 10) / 10, drawn, res: eff, bands: bands.length,
       tiles: bands.reduce((a, b) => a + b.tiles.length, 0), mpx: Math.round(px / 1e5) / 10 });

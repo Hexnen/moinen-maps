@@ -170,6 +170,48 @@ await test("manifest: entries name only codec ids (never a path); copies of a sc
   assert.deepEqual(ids.sort(), ["worlds/w/moinen-maps/c/A/d0000000000000a", "worlds/w/moinen-maps/c/A/d0000000000000b"]);
 });
 
+await test("composite tiles: bit-exact (premultiplied planes, raw fallback), named by content, refused under another name", async () => {
+  const r = rnd(21);
+  for ( const [w, h] of [[1, 1], [37, 19], [1024, 3], [300, 300]] ) {
+    const data = new Uint8Array(w * h * 4);
+    for ( let i = 0; i < w * h; i++ ) { const a = r() < 0.4 ? 0 : r() < 0.2 ? Math.floor(r() * 255) : 255; if ( a ) { data[i * 4] = Math.floor(r() * (a + 1)); data[i * 4 + 1] = Math.floor(r() * (a + 1)); data[i * 4 + 2] = Math.floor(r() * (a + 1)); data[i * 4 + 3] = a; } }
+    const t = { x: -5 + w, y: 1234, w, h, res: 1, data };
+    const p = C.packTile(t);
+    assert.equal(p[22], 1);
+    const back = C.unpackTile(await C.unwrap(await roundTrip(p)));
+    assert.deepEqual({ ...back, data: null }, { ...t, data: null });
+    assert.ok(Buffer.from(back.data).equals(Buffer.from(data)), `${w}x${h}`);
+    // colour under alpha 0 (not premultiplied): raw, still exact
+    const odd = data.slice(); odd[0] = 3; odd[3] = 0;
+    const q = C.packTile({ ...t, data: odd });
+    assert.equal(q[22], 0);
+    assert.ok(Buffer.from(C.unpackTile(q).data).equals(Buffer.from(odd)));
+  }
+  const res = await C.work({ kind: "tiles", tiles: [{ x: 0, y: 0, w: 2, h: 1, res: 1, data: new Uint8Array([9, 9, 9, 255, 0, 0, 0, 0]) }], index: { a: 1 } });
+  const tid = res.result.tiles[0].id, dec = await C.work({ kind: "decode", bytes: res.result.tiles[0].bytes, cid: tid });
+  assert.deepEqual(Array.from(dec.result.tile.data), [9, 9, 9, 255, 0, 0, 0, 0]);
+  assert.deepEqual((await C.work({ kind: "decode", bytes: res.result.index.bytes, cid: res.result.index.id })).result.index, { a: 1 });
+  await assert.rejects(C.work({ kind: "decode", bytes: res.result.tiles[0].bytes, cid: res.result.index.id }), /does not match/);
+  // known ids are not encoded again
+  const again = await C.work({ kind: "tiles", tiles: [{ x: 0, y: 0, w: 2, h: 1, res: 1, data: new Uint8Array([9, 9, 9, 255, 0, 0, 0, 0]) }], index: { a: 1 }, known: [tid] });
+  assert.equal(again.result.tiles[0].id, tid); assert.equal(again.result.tiles[0].bytes, null);
+});
+
+await test("composite manifest: band keys across clients, tile diffing", async () => {
+  const k = C.bandKey(0, 1, 0, true, [5, 6, 7]);
+  assert.equal(k, C.bandKey(0, 1, 0, true, [5, 6, 7]));
+  for ( const o of [C.bandKey(2, 1, 0, true, [5, 6, 7]), C.bandKey(0, 1, 1, true, [5, 6, 7]), C.bandKey(0, 1, 0, false, [5, 6, 7]), C.bandKey(0, 1, 0, true, [5, 7, 6]), C.bandKey(0, 1, 0, true, [5, 6])] ) assert.notEqual(o, k);
+  const prev = [{ key: "a", tiles: [{ id: "k1" }, { id: "k2" }] }, { key: "b", tiles: [{ id: "k3" }] }];
+  const next = [{ key: "a2", tiles: [{ id: "k1" }, { id: "k4" }] }, { key: "b", tiles: [{ id: "k3" }] }];
+  assert.deepEqual(C.diffComposite(prev, next), { upload: ["k4"], kept: ["k1", "k3"], dropped: ["k2"] });
+  assert.deepEqual(C.diffComposite(null, next).upload, ["k1", "k4", "k3"]);
+  // the GC keeps a composite's files: its record names them like a water record ({ v: 2, dir, t })
+  globalThis.Hooks ??= { on() {}, once() {}, callAll() {}, call() {} };
+  const Pub = await import("../scripts/water/publish.mjs");
+  const recs = Pub.chunkRecords({ flags: { "moinen-maps": { destructionComposite: { v: 2, dir: "worlds/w/moinen-maps/c/A", t: ["k1", "x2"] } } } });
+  assert.deepEqual(recs, [{ dir: "worlds/w/moinen-maps/c/A", ids: ["k1", "x2"] }]);
+});
+
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);

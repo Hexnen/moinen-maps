@@ -965,6 +965,8 @@
   "MOINENMAPS.Destr.rebake.ask": "Tylko na żądanie",
   "MOINENMAPS.Destr.rebake.now": "Od razu",
   "MOINENMAPS.Destr.threadsSetting": "Zniszczenia: wątki wypiekania",
+  "MOINENMAPS.Destr.compositeSetting": "Zniszczenia: najpierw gotowy obraz",
+  "MOINENMAPS.Destr.compositeSettingHint": "Przy otwarciu sceny pokaż zniszczenia z gotowego obrazu ich ustalonego wyglądu, który opublikował klient MG (kilka plików), a dane pojedynczego pociągnięcia pobieraj dopiero, gdy są potrzebne (wejście, zalana dziura, cofnięcie, ciemna scena). Wyłączone: każde pociągnięcie pobierane jak dotąd.",
   "MOINENMAPS.Destr.threadsSettingHint": "Ile wątków w tle wypieka zniszczenia, gdy scenę trzeba wypiec od nowa. Auto: rdzenie procesora minus dwa (od 2 do 8), tylko 2 w trybie wydajności Niski, w ukrytej karcie albo przy słabej baterii.",
   "MOINENMAPS.Destr.threadsAuto": "Auto",
   "MOINENMAPS.Destr.bakePaused": "Wypiekanie wstrzymane: manifest zniszczeń ciągle się zmienia (klienci w różnych wersjach?). Przeładuj wszystkie karty Foundry, potem Wypiecz teraz.",

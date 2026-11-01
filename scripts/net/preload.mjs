@@ -1,6 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Net from "./stream.mjs";
 import { chunkRecords } from "../water/publish.mjs";
+import * as Composite from "../destruction/composite.mjs";
+import { cacheEnabled } from "../destruction/static-cache.mjs";
 
 /**
  * Starting early. The codec workers start when the game is ready (not on the first chunk), and a scene's chunks are read ahead at
@@ -21,6 +23,13 @@ export function chunksOf(scene, at = null) {
   const objs = F.destructionObjects && typeof F.destructionObjects === "object" ? F.destructionObjects : Object.fromEntries((D?.o ?? []).map((o) => [o?.id, o]));
   const mpx = (D?.ap ?? 1) * K, cx = at?.x ?? (scene.width ?? 0) / 2, cy = at?.y ?? (scene.height ?? 0) / 2;
   const dx = scene.dimensions?.sceneX ?? 0, dy = scene.dimensions?.sceneY ?? 0;
+  // a settled composite of this bake (composite.mjs): its few files first, the strokes' own chunks not at all (fetched when needed)
+  const C = !off() && M?.v === 2 && Composite.enabled() && cacheEnabled() ? Composite.manifestOf(scene) : null;
+  if ( C && C.base === M.base ) {
+    for ( const id of C.t ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir: C.dir, id, prio: -1 }); }
+    for ( const r of chunkRecords(scene) ) for ( const id of r.ids ) if ( id.startsWith("w") && !seen.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: 0 }); }
+    return out;
+  }
   if ( M?.v === 2 && M.c && !off() ) {
     for ( const [oid, v] of Object.entries(M.c) ) {
       const id = String(v).split(":")[1], o = objs[oid];

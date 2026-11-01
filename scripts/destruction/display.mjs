@@ -8,6 +8,7 @@ import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
 import { perfMode, particleCap } from "../perf-mode.mjs";
 import { Debris } from "./debris.mjs";
+import { buildShell } from "./composite.mjs";
 
 /** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
 function maskedMap(ms, mask) {
@@ -194,7 +195,7 @@ export class DestructionDisplay {
    * Show a bake: `rgba` (the sheet, w x h), `meta` (placement table), art pixel size and the scene origin. Keeps the groups whose hash
    * is still there; returns { added: [group], removed: [group] }.
    */
-  sync(rgba, w, h, meta, ap, origin, objects = []) {
+  sync(rgba, w, h, meta, ap, origin, objects = [], shells = null) {
     this.ap = ap; this.origin = origin;
     const F = META_FIELDS, n = meta.length / F;
     const rows = [];
@@ -206,12 +207,25 @@ export class DestructionDisplay {
       else if ( meta[o] === 3 ) { if ( cur ) cur.light = o; }   // the cause's light (cause-fx.mjs)
       else cur?.pieces.push(o);
     }
+    // areas shown from the settled composite only (composite.mjs shells): no rows, no pixels
+    for ( const a of shells ?? [] ) rows.push({ hash: a.h, shell: a, index: a.index });
     const next = [], added = [], seen = new Set();
+    let replaced = 0;
     for ( const r of rows ) {
       if ( seen.has(r.hash) ) continue;
       seen.add(r.hash);
       let g = this.groups.get(r.hash);
-      if ( !g && this.spare.has(r.hash) ) {
+      if ( g?.shell && !r.shell && rgba ) {
+        // a shell's pixels came: the area itself takes its place at once (no entry, no fade: the same pixels)
+        const full = this.build(r, rgba, w, meta);
+        full.reused = true; full.info.water = g.info.water;
+        if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
+        this.groups.set(r.hash, full); this.kill(g); g = full; replaced++;
+        added.push(g);
+      } else if ( !g && r.shell ) {
+        g = buildShell(this, r.shell);
+        this.groups.set(r.hash, g); added.push(g);
+      } else if ( !g && this.spare.has(r.hash) ) {
         // shown before (a toggle switched back, an undo): the same sprites and texture, no rebuild, no upload
         g = this.spare.get(r.hash); this.spare.delete(r.hash);
         g.tex.scaleMode = this.filter; g.reused = true;
@@ -228,6 +242,8 @@ export class DestructionDisplay {
     const removed = [];
     for ( const [hash, g] of this.groups ) if ( !seen.has(hash) ) { this.groups.delete(hash); removed.push(g); }
     for ( const g of removed ) this.retire(g);
+    this.shellCount = next.reduce((a, g) => a + (g.shell ? 1 : 0), 0);
+    if ( replaced ) this.cache?.invalidate();     // (the bands' members are other containers now; their pixels are the same)
     // erase strokes: plain map laid over everything painted before them (no bake)
     const keepErase = new Set();
     objects.forEach((o, index) => {

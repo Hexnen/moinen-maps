@@ -1991,7 +1991,7 @@ function chamfer(d, W, H) {
 function shelfPack(rects) {
   const area = rects.reduce((a, r) => a + (r.w + 1) * (r.h + 1), 0);
   let W = 256; while ( W * W < area * 1.25 && W < 4096 ) W *= 2;
-  W = Math.max(W, ...rects.map((r) => r.w + 1));
+  for ( const r of rects ) if ( r.w + 1 > W ) W = r.w + 1;   // (no spread: a big bake has more sprites than a call takes arguments)
   const order = rects.map((r, i) => i).sort((a, b) => rects[b].h - rects[a].h || rects[b].w - rects[a].w);
   const pos = new Array(rects.length);
   let x = 0, y = 0, rowH = 0;
