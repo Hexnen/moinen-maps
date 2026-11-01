@@ -662,3 +662,78 @@ export function gapCheck({ steps = [1.1, 1.25], n = 8, offsets = [0, 0.37, 0.71]
   const tiles = (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => [b.level, +t.x.toFixed(2), +t.y.toFixed(2), +t.w.toFixed(2), +t.h.toFixed(2)]));
   return { frames: rows.length, withGaps: rows.filter((q) => q.gaps).length, worst: rows.sort((p, q) => q.gaps - p.gaps).slice(0, 6), tiles };
 }
+
+/**
+ * WAVING CHECK (temporal): the stage scale is stepped from `from` down to `to` (default: the scene's fit / minimum zoom) in small
+ * steps, as a gliding zoom-out draws it; each step the frame that reaches the screen is read twice - with the destruction layer and
+ * without it (the map alone) - and both are sampled at fixed SCENE points of a region (bilinear between screen pixels). Per step the
+ * change of every sample from the previous step; WAVING = that change over the damaged points, relative to the same change of the
+ * map alone at the same points (both are minified alike: the damage should not shimmer more than the map; ratio <= 1.3).
+ * SEAMS: for every vertical / horizontal edge of a cache tile, the step-to-step mean deviation of the screen column (row) at that
+ * edge from its two neighbours, against the same for a column 5 px away (ratio; > 1.5 is a seam). Returns { ratio, steps, seams, ... }.
+ */
+export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = null, grid = 3, maxSteps = 140 } = {}) {
+  const R = canvas.app.renderer, d = D(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect;
+  region ??= { x: sr.x + sr.width * 0.3, y: sr.y + sr.height * 0.3, w: sr.width * 0.4, h: sr.height * 0.4 };
+  const cx = region.x + region.w / 2, cy = region.y + region.h / 2;
+  canvas.pan({ x: cx, y: cy, scale: 0.01 }); step(1);
+  to ??= canvas.stage.scale.x;                       // what the canvas allows
+  const frame = () => { const mf = T.maxFPS; T.maxFPS = 0; T.update(performance.now()); T.maxFPS = mf; R.renderTexture.bind(null); return R.extract.pixels(); };
+  const pts = [];
+  for ( let y = region.y; y < region.y + region.h; y += grid ) for ( let x = region.x; x < region.x + region.w; x += grid ) pts.push([x, y]);
+  const k = R.resolution, PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
+  const sample = (px) => {
+    const M = canvas.stage.worldTransform, out = new Float32Array(pts.length);
+    for ( let i = 0; i < pts.length; i++ ) {
+      const X = (M.a * pts[i][0] + M.tx) * k - 0.5, Y = (M.d * pts[i][1] + M.ty) * k - 0.5, x0 = Math.floor(X), y0 = Math.floor(Y), fx = X - x0, fy = Y - y0;
+      if ( x0 < 0 || y0 < 0 || x0 + 1 >= PW || y0 + 1 >= PH ) { out[i] = NaN; continue; }
+      const L = (x, y) => { const q = (y * PW + x) * 4; return 0.299 * px[q] + 0.587 * px[q + 1] + 0.114 * px[q + 2]; };
+      out[i] = (L(x0, y0) * (1 - fx) + L(x0 + 1, y0) * fx) * (1 - fy) + (L(x0, y0 + 1) * (1 - fx) + L(x0 + 1, y0 + 1) * fx) * fy;
+    }
+    return out;
+  };
+  const tiles = (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => ({ x: t.x, y: t.y, w: t.w, h: t.h })));
+  const edgeDev = (px, sx, y0, y1, horiz) => {      // mean |c - (l + r) / 2| along a screen column (or row)
+    let s = 0, n = 0;
+    for ( let t = Math.max(1, y0); t < Math.min(horiz ? PW : PH, y1) - 1; t += 2 ) {
+      const at = (a, b) => { const q = ((horiz ? a : b) * PW + (horiz ? b : a)) * 4; return px[q] + px[q + 1] + px[q + 2]; };
+      if ( sx < 1 || sx >= (horiz ? PH : PW) - 1 ) continue;
+      s += Math.abs(at(sx, t) - (at(sx - 1, t) + at(sx + 1, t)) / 2); n++;
+    }
+    return n ? s / n : 0;
+  };
+  let prevD = null, prevM = null, pp = null, ppM = null, eD = 0, eM = 0, nD = 0, steps = 0, jD = 0, jM = 0, nJ = 0;
+  const seam = new Map();
+  // a frozen clock (water, lights, particles hold still: only the scale changes between steps); dust and embers hidden
+  const real = performance.now.bind(performance); let F = real(); performance.now = () => (F += 0.001);
+  const fxWas = d.fx.visible; d.fx.visible = false;
+  try {
+    for ( let z = from; z >= to - 1e-9 && steps < maxSteps; z -= stepSize, steps++ ) {
+      canvas.pan({ x: cx, y: cy, scale: Math.max(z, to) });
+      d.objs.visible = true; const full = frame();
+      d.objs.visible = false; const map = frame(); d.objs.visible = true;
+      const sD = sample(full), sM = sample(map);
+      if ( prevD ) for ( let i = 0; i < pts.length; i++ ) {
+        if ( Number.isNaN(sD[i]) || Number.isNaN(prevD[i]) ) continue;
+        if ( Math.abs(sD[i] - sM[i]) < 6 ) continue;      // no damage at this point
+        eD += Math.abs(sD[i] - prevD[i]); eM += Math.abs(sM[i] - prevM[i]); nD++;
+        // JITTER: the second difference over three steps - a value gliding with the zoom has little, one that pops back and forth
+        // (texels flipping between one and two screen pixels, aliasing) has a lot
+        if ( pp && !Number.isNaN(pp[i]) ) { jD += Math.abs(sD[i] - 2 * prevD[i] + pp[i]); jM += Math.abs(sM[i] - 2 * prevM[i] + ppM[i]); nJ++; }
+      }
+      pp = prevD; ppM = prevM; prevD = sD; prevM = sM;
+      // seams at the cache tiles' edges (this step), against a control column 5 px away
+      const M = canvas.stage.worldTransform;
+      for ( const t of tiles ) for ( const [ex, horiz] of [[t.x, false], [t.x + t.w, false], [t.y, true], [t.y + t.h, true]] ) {
+        const s = Math.round(((horiz ? M.d * ex + M.ty : M.a * ex + M.tx)) * k);
+        const a0 = Math.round(((horiz ? M.a * t.x + M.tx : M.d * t.y + M.ty)) * k), a1 = Math.round(((horiz ? M.a * (t.x + t.w) + M.tx : M.d * (t.y + t.h) + M.ty)) * k);
+        const dev = edgeDev(full, s, a0, a1, horiz), ctl = edgeDev(full, s + 5, a0, a1, horiz) + edgeDev(full, s - 5, a0, a1, horiz);
+        const key = `${horiz ? "y" : "x"}=${+ex.toFixed(1)}`, cur = seam.get(key) ?? { dev: 0, ctl: 0, n: 0 };
+        cur.dev += dev; cur.ctl += ctl / 2; cur.n++; seam.set(key, cur);
+      }
+    }
+  } finally { d.objs.visible = true; d.fx.visible = fxWas; performance.now = real; }
+  const seams = [...seam].map(([k2, v]) => [k2, +(v.dev / Math.max(1e-6, v.ctl)).toFixed(2)]).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  return { from, to: +to.toFixed(4), steps, points: nD, damageChange: +(eD / Math.max(1, nD)).toFixed(3), mapChange: +(eM / Math.max(1, nD)).toFixed(3),
+    ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
+}

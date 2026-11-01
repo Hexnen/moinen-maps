@@ -111,13 +111,16 @@ in vec2 vUV;
 uniform sampler2D uTex;
 uniform vec2 uSize;
 uniform float uScale;
+uniform float uSharp;
 uniform float uAlpha;
 out vec4 fragColor;
 void main() {
   if ( uScale > 1.0 ) {
     vec2 p = vUV * uSize - 0.5;
-    vec2 i = floor(p);
-    vec2 f = clamp((p - i - 0.5) * uScale + 0.5, 0.0, 1.0);
+    vec2 i = floor(p), fr = p - i;
+    // uSharp 0: plain bilinear (as the live layer below its NEAREST switch, and as the map); 1: crisp texels with one screen pixel
+    // of smoothing at their edges
+    vec2 f = mix(fr, clamp((fr - 0.5) * uScale + 0.5, 0.0, 1.0), uSharp);
     fragColor = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0) * uAlpha;
   }
   else fragColor = texture(uTex, vUV) * uAlpha;
@@ -136,7 +139,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uAlpha: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uAlpha: 1 });
     this.state = PIXI.State.for2d();
   }
 
@@ -153,6 +156,11 @@ export class SharpTile extends PIXI.Container {
     // (`nearest`: the live layer samples NEAREST now - zoomed in past 3 screen px per art pixel - so the tile does too, a hard step at
     // every texel edge, the same pixels as the shards in an entry frame; else one screen pixel of smoothing at each texel edge)
     un.uScale = this.nearest ? 1e4 : Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
+    // WAVING (v0.4.1, "zniszczenia falują" in the last phase of a zoom-out): sharpened at 1-2.5 screen px per texel, every texel was
+    // drawn one or two pixels wide by turns and the pattern crawled with every step of a gliding zoom (the cache shimmered 1.7x the
+    // live layer: dev/perf-harness wavingCheck) and the clamped edge of a tile showed as a line. So: plain bilinear up to 1.5 screen
+    // px per texel (like the live layer and the map), crisp from 3 (where the live layer turns NEAREST), a smooth ramp between
+    un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - 1.5) / 1.5));
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
     renderer.state.set(this.state);
@@ -352,7 +360,10 @@ export class StaticCache {
     const eff = win || res <= cap ? res : Math.max(0.25, Math.floor(cap * 4) / 4);
     if ( !win ) this.capRes = cap;
     const maxTex = Math.min(8192, R.gl?.getParameter?.(R.gl.MAX_TEXTURE_SIZE) || 4096);
-    const T = Math.max(128, Math.floor(Math.min(maxTex, win ? maxTex : 1024) / eff));   // tile size in scene px (sparse tiles of 1024 texels)
+    // tile size in scene px: a band in ONE texture whenever it fits (up to 4096 texels a side). Sparse tiles of 1024 texels saved a
+    // little memory but every tile edge was a line where the filter could not read across (clamped): "rysy od tili" in a zoom-out
+    // (dev/perf-harness wavingCheck seams); only a band bigger than that is cut, at 4096-texel steps
+    const T = Math.max(128, Math.floor(Math.min(maxTex, 4096) / eff));
     const old = new Map(force ? [] : this.bands.map((b) => [b.key, b]));
     const keep = new Set();
     this.show.removeChildren();
@@ -376,7 +387,21 @@ export class StaticCache {
         let band = old.get(key);
         if ( band && band.tiles.every((t) => t.rt.valid && !t.rt.baseTexture.destroyed) ) keep.add(band);
         else if ( exact ) {
-          band = { key, level: p.L, tiles: exact.map((t) => { const spr = new SharpTile(t.tex, t.w, t.h, eff); spr.position.set(t.x, t.y); return { rt: t.tex, spr, x: t.x, y: t.y, w: t.w, h: t.h, shared: true, id: t.id }; }) };
+          const bw = p.x1 - p.x0, bh = p.y1 - p.y0;
+          if ( exact.length > 1 && bw * eff <= 4096 && bh * eff <= 4096 ) {
+            // a composite published in several tiles (older clients cut bands at 1024 texels): its tiles drawn texel for texel into ONE
+            // texture here, so no tile edge is left for the filter to stop at (the seams of a zoom-out)
+            const rt = PIXI.RenderTexture.create({ width: bw, height: bh, resolution: eff, scaleMode: PIXI.SCALE_MODES.LINEAR });
+            const c = new PIXI.Container(), was = exact.map((t) => t.tex.baseTexture.scaleMode);
+            for ( const t of exact ) { t.tex.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST; const s = new PIXI.Sprite(t.tex); s.position.set(t.x - p.x0, t.y - p.y0); c.addChild(s); }
+            R.render(c, { renderTexture: rt, clear: true });
+            exact.forEach((t, i) => { t.tex.baseTexture.scaleMode = was[i]; });
+            c.destroy({ children: true });
+            if ( mips && globalThis.CONFIG?.moinenMaps?.destructionCacheMips !== false ) mipmaps(R, rt);
+            const spr = new SharpTile(rt, bw, bh, eff); spr.position.set(p.x0, p.y0);
+            band = { key, level: p.L, tiles: [{ rt, spr, x: p.x0, y: p.y0, w: bw, h: bh }] };
+            this.stats.joinedComposite = (this.stats.joinedComposite ?? 0) + 1;
+          } else band = { key, level: p.L, tiles: exact.map((t) => { const spr = new SharpTile(t.tex, t.w, t.h, eff); spr.position.set(t.x, t.y); return { rt: t.tex, spr, x: t.x, y: t.y, w: t.w, h: t.h, shared: true, id: t.id }; }) };
           this.stats.fromComposite = (this.stats.fromComposite ?? 0) + 1;
         } else if ( shells.length && !(ckey && comp?.prefix(p.L, eff, smp, mips, hashes, shells)) ) {
           // shells and no composite for them: their pixels are asked for (destruction.mjs hydrates their strokes); meanwhile the band
