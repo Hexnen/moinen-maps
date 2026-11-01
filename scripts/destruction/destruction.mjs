@@ -735,8 +735,8 @@ function plainOf(j, base, FS) {
 
 /** The base rows' area hashes of a record. */
 const hashesOf = (r) => r.sprites.filter((s) => s.m[0] === 0).map((s) => ((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0);
-/** Is every area of a record on screen (the display keeps its pixels)? */
-const onScreen = (r) => !!display && hashesOf(r).every((h) => display.groups.has(h));
+/** Is every area of a record on screen with its pixels (the display keeps them; a shell has none)? */
+const onScreen = (r) => !!display && hashesOf(r).every((h) => { const g = display.groups.get(h); return !!g && !g.shell; });
 /**
  * Let go of a record's pixels (its rows stay): `sprites.lean`. The decoded chunk in the stream's memory goes too (it is the same
  * object): what is kept is the chunk's compressed bytes (IndexedDB), decoded again when needed.
@@ -888,20 +888,30 @@ const hydrateShells = (why) => fill(shellRecs(), why);
  * is kept until it is served: an ask made while a fill runs (the cache re-draws as each step lands and asks for the rest) is served by the
  * next round - before, it was dropped, and the cache waited for ever with a stale band (no composite publish, "cache-not-settled").
  */
-let pixelAsk = null;
+let pixelAsk = null, lastOrphans = 0;
+const ASK_DELAY = 700;
 const asked = new Set();
 function requestPixels(groups) {
   for ( const g of groups ) asked.add(g.hash);
   pixelAsk ??= (async () => {
+    // (served a moment later, and only while the cache still waits: a stroke fading out for 260 ms - an undo - splits the bands for a
+    // few frames and asked for every shell under it; once it is gone the composite's bands match again and nothing is needed)
+    await new Promise((r) => setTimeout(r, ASK_DELAY));
     while ( asked.size ) {
+      if ( !display?.cache?.waiting ) { asked.clear(); break; }
       const want = new Set(asked); asked.clear();
       const list = shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h)));
-      if ( list.length ) await fill(list, "cache");
-      else if ( [...want].some((h) => display?.groups.get(h)?.shell) ) {
-        // a shell no record stands behind any more (its stroke's record changed): the scene is shown again from its records
-        Trace.event("shells-orphan", { n: [...want].filter((h) => display?.groups.get(h)?.shell).length });
-        await reshow?.();
-      }
+      if ( list.length ) { await fill(list, "cache"); continue; }
+      // a shell whose stroke's record is no shell any more (filled, perhaps let go of its pixels since): that record gets its pixels and
+      // the scene is shown again from its records - once per set of such shells (a set that stays is not tried in a loop)
+      // (at most every 500 ms: while a pass is on its way the records are not all there yet; the cache asks again as it re-draws)
+      const orphans = [...want].filter((h) => display?.groups.get(h)?.shell);
+      if ( !orphans.length || performance.now() - lastOrphans < 500 ) break;
+      lastOrphans = performance.now();
+      const objs = new Set(orphans.map((h) => display.groups.get(h).objId));
+      Trace.event("shells-orphan", { n: orphans.length });
+      await Promise.all([...shownRecs.values()].filter((r) => objs.has(r.objId) && r.sprites.lean).map(hydrate));
+      await reshow?.();
     }
   })().finally(() => { pixelAsk = null; });
 }
@@ -1198,7 +1208,7 @@ async function persistOnce() {
     if ( S ) S.baked = { ...baked, c };
     publishBackoff = 0; publishRetryAt = 0;
     Net.scheduleGc(scene.id);
-    scheduleComposite();
+    scheduleComposite(800);      // (soon: players whose shells lost their bands with this change take the new composite)
     tell("status");
   } catch ( err ) {
     // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
