@@ -207,7 +207,7 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     let r = C3[0], g = C3[1], bl = C3[2];
     let a = 255 * master * (band === 2 ? 1 : 0.92);
     // highlights: the engine's bright wave / sparkle cells in a few patches, and a few short light streaks of sky on the deeper water
-    if ( b ) { const q = b * 4; if ( LB[q] + LB[q + 1] + LB[q + 2] > baseC[0] + baseC[1] + baseC[2] + 90 && vnoise(ax / 7, ay / 4.5, 47) > 0.62 ) { r = LB[q]; g = LB[q + 1]; bl = LB[q + 2]; } }
+    if ( b ) { const q = b * 4; if ( LB[q] + LB[q + 1] + LB[q + 2] > baseC[0] + baseC[1] + baseC[2] + 90 && vnoise(ax / 7, ay / 4.5, 47) > 0.72 && h2(ax, ay, 49) < 0.45 + 0.3 * vnoise(ax / 2, ay / 2, 48) - 0.25 ) { r += (LB[q] - r) * 0.65; g += (LB[q + 1] - g) * 0.65; bl += (LB[q + 2] - bl) * 0.65; } }
     a = a * op[i] / 255;
     // foam: broken blobs of varying width where the water meets the shore (0-2.5 px, gaps), never a constant offset outline
     if ( L >= 2 ) {

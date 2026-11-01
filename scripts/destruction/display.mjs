@@ -1403,7 +1403,7 @@ export class DestructionDisplay {
           const c = bd && bd[q + 3] ? (Math.min(255, bd[q] * 1.08) << 16) | (Math.min(255, bd[q + 1] * 1.08) << 8) | Math.min(255, bd[q + 2] * 1.08) : 0xb8ad9c;
           this.spawn({ x, y: y - 1, vx: (Math.random() - 0.5) * 6, vy: -4 - Math.random() * 3, fall: 34, life: 420, color: c, size: 2, shape: Math.random() < 0.5 ? "diag" : "crumb" });
         }
-        for ( const [x, y] of pts.slice(0, 2) ) this.spawn({ x: x + 1, y, vx: (Math.random() - 0.5) * 2, vy: 0, rise: -1.2, life: 900 + Math.random() * 300, color: 0xa89c8a, alpha: 0.5, drag: 2, size: 2 });
+        for ( const [x, y] of pts.slice(0, 1) ) this.spawn({ x: x + 1, y, vx: (Math.random() - 0.5) * 2, vy: 0, rise: -1.2, life: 700 + Math.random() * 300, color: this.tone(g, 2, 0xa89c8a), alpha: 0.5, drag: 2, size: 1, shape: Math.random() < 0.5 ? "crumb" : "dot" });
       });
     } else if ( type === "gash" && a.wipe ) {
       // sparks and splinters on the claw's leading edge
@@ -1418,8 +1418,8 @@ export class DestructionDisplay {
     }
     // the settle beat: when the ruin is in, a last soft puff of dust round the rim (the debris landing), then stillness
     if ( !a.tear && !a.coll && (type === "blast" || type === "collapse" || type === "scorch" || type === "cracks") ) once("settle", a.delay + a.reveal + a.band * 0.4, () => {
-      const n = Math.round(Math.min(10, 4 + R / 4) * pw * (type === "cracks" ? 0.5 : 1)), col = type === "scorch" ? 0x5a524c : this.tone(g, 1, 0xc9bfae);
-      for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, size: Math.random() < 0.5 ? 3 : 2 }); }
+      const ck = type === "cracks", n = Math.round(Math.min(10, 4 + R / 4) * pw * (ck ? 0.3 : 1)), col = type === "scorch" ? 0x5a524c : this.tone(g, ck ? 2 : 1, 0xc9bfae);
+      for ( let q = 0; q < n; q++ ) { const an = (q / n) * 6.28 + Math.random() * 0.5, d = R * (0.85 + Math.random() * 0.3); this.spawn({ x: a.ox + Math.cos(an) * d, y: a.oy + Math.sin(an) * d * 0.8, vx: Math.cos(an) * 3, vy: Math.sin(an) * 2, rise: -2, life: 650 + Math.random() * 300, color: col, alpha: 0.6, drag: 3, ...(ck ? { size: Math.random() < 0.6 ? 1 : 2, shape: Math.random() < 0.5 ? "crumb" : "diag" } : { size: Math.random() < 0.5 ? 3 : 2 }) }); }
     });
     // rings and flashes
     for ( let i = a.fx.length - 1; i >= 0; i-- ) {
