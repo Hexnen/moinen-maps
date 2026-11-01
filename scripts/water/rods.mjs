@@ -128,6 +128,8 @@ const clone = (rods) => foundry.utils.deepClone(rods ?? []);
 
 let gfx = null, listeners = null, drag = null, hover = null;
 let selected = -1;
+/** A press waiting for the engine to start; `up` once the button was let go. */
+let waiting = null;
 const undo = [];
 
 const S = () => Water.state();
@@ -211,8 +213,18 @@ async function onDown(ev) {
   if ( !active() ) return;
   if ( ev.button !== 0 && ev.button !== 2 ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
-  await Water.ensureState();
-  if ( !S() ) return;
+  if ( !S() ) {
+    // a scene without water starts the engine first, which takes a moment: a press let go meanwhile places nothing
+    if ( waiting ) return;
+    const wait = waiting = { up: false };
+    try { await Water.ensureState(); }
+    catch ( err ) {
+      console.error(`${MODULE_ID} | water engine`, err);
+      ui.notifications.error(game.i18n.localize("MOINENMAPS.Water.engineFailed"));
+      return;
+    } finally { waiting = null; }
+    if ( wait.up || !active() || !S() ) return;
+  }
   const [x, y] = toArt(worldPoint(ev));
   const list = clone(rods());
   const dot = hitDot(x, y), line = dot ? null : hitLine(x, y);
@@ -279,6 +291,7 @@ function onMove(ev) {
 }
 
 function onUp(ev) {
+  if ( waiting ) waiting.up = true;
   if ( !drag ) return;
   const d = drag; drag = null;
   const list = d.list;
@@ -291,6 +304,7 @@ function onUp(ev) {
 }
 
 function cancelDrag() {
+  if ( waiting ) waiting.up = true;
   if ( !drag ) return;
   S().params.guides = clone(drag.snapshot); drag = null; draw();
 }
@@ -364,6 +378,6 @@ export function teardown() {
     Hooks.off("canvasPan", draw); Hooks.off("moinenMapsWater", draw);
   }
   if ( gfx && !gfx.destroyed ) gfx.destroy({ children: true });
-  gfx = null; drag = null; hover = null; selected = -1; undo.length = 0;
+  gfx = null; drag = null; hover = null; waiting = null; selected = -1; undo.length = 0;
   document.body.classList.remove("mm-painting-rods");
 }
