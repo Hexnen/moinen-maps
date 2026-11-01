@@ -23,7 +23,7 @@ const TAU = Math.PI * 2;
 export const CAUSE_LOOK = [
   null,
   /* fire      */ { slow: 1.1, curve: (f) => Math.sqrt(f), share: 0.35, tint: 0xffa060, front: 0.35, edge: { color: [0xff9a3c, 0xffd36b, 0xd2401c, 0xffb347], rise: -6, life: 650, flicker: true },
-    hot: null, heat: true, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 0.5 },
+    hot: null, heat: true, ring: 0xffa050, idle: "ember", pulse: "flicker", light: 1.0 },
   /* acid      */ { slow: 1.5, curve: (f) => f, share: 0.6, tint: 0xd8ff80, front: 0.5, edge: { color: [0xb6ff4a, 0xe8ff9a, 0x7fd02a], rise: -3, life: 650 },
     ring: 0x9fe060, pops: true, idle: "bubble", pulse: "slow", light: 0.35, hot: [0xeaff9a, 0xb6ff4a, 0x6fa02a], stain: 0x9fe050 },
   /* lightning */ { slow: 0.55, curve: (f) => Math.pow(f, 0.35), share: 0.1, tint: null, front: 0.08, edge: { color: [0xffffff, 0xaad8ff], vy: -7, fall: 40, life: 200, drag: 2 },
@@ -343,7 +343,8 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
   if ( !cov?.data ) return;
   const ci = g.info.cause | 0, rc = RIM[ci] ?? RIM[0], tk = TINT[ci] ?? 0, col = [0, 1, 2].map((k) => MOON[k] + (rc[k] - MOON[k]) * tk);
   // (a tear's cover is its whole stroke - mostly lips pulled aside, not damage: lifting all of it showed the stroke as a flat band)
-  const lift = ([0.7, 0.6, 0.5, 0.5, 0.5, 0.55, 0.55, 0.95, 0.65, 0.5][ci] ?? 0.5) * (g.info.type === "gash" ? 0.5 : 1), seed = (g.hash % 9973) | 0;
+  const tear = g.info.type === "gash", lift0 = [0.9, 0.6, 0.5, 0.5, 0.6, 0.55, 0.55, 0.95, 0.75, 0.5][ci] ?? 0.5;
+  const lift = lift0 * (tear ? 0.5 : 1), seed = (g.hash % 9973) | 0;
   const src = base?.data ? base : cov, w = src.w, h = src.h, data = src.data, ox = base?.data ? bx : x, oy = base?.data ? by : y;
   const inC = (X, Y) => { const cx = X + ox - x, cy = Y + oy - y; return cx >= 0 && cy >= 0 && cx < cov.w && cy < cov.h && cov.data[(cy * cov.w + cx) * 4 + 3] > 0; };
   const al = (X, Y) => X >= 0 && Y >= 0 && X < w && Y < h ? data[(Y * w + X) * 4 + 3] : 0;
@@ -368,6 +369,18 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
     }
     front = next;
   }
+  // a tear: the lift fades with the distance from its opening (its dark pixels) - the lips beside the rip lit, the stroke's far
+  // border not (no flat band in the stroke's shape)
+  let DK = null;
+  if ( tear && base?.data ) {
+    DK = new Uint8Array(w * h).fill(255); let fr = [];
+    for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) if ( al(X, Y) && lum(X, Y) < 60 ) { DK[Y * w + X] = 0; fr.push(Y * w + X); }
+    for ( let r = 1; r <= 6 && fr.length; r++ ) {
+      const nx = [];
+      for ( const i of fr ) { const X = i % w, Y = (i - X) / w; for ( const [dx, dy] of N4 ) { const q = (Y + dy) * w + X + dx; if ( X + dx < 0 || Y + dy < 0 || X + dx >= w || Y + dy >= h || DK[q] !== 255 ) continue; DK[q] = r; nx.push(q); } }
+      fr = nx;
+    }
+  }
   const B = 1, LW = w + 2 * B, LH = h + 2 * B, A = new Float32Array(LW * LH);
   for ( let Y = 0; Y < h; Y++ ) for ( let X = 0; X < w; X++ ) {
     const c = inC(X, Y);
@@ -375,7 +388,7 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
     const i = Y * w + X, Lm = base?.data && al(X, Y) ? lum(X, Y) : 128;
     // the band's own width (1-3 px) and strength (broken in places) wander slowly along the edge
     const wv = 1 + 2 * vn((X + ox) / 7, (Y + oy) / 7, seed + 3), br = vn((X + ox) / 5, (Y + oy) / 5, seed + 5), on = br < 0.18 ? 0.15 : 0.6 + 0.4 * br;
-    let v = c ? lift : 0;
+    let v = c ? (DK ? Math.max(lift, Math.min(1, lift0 * 1.2) * Math.max(0, 1 - DK[i] / 6) * (0.75 + 0.25 * br)) : lift) : 0;
     if ( c && D[i] < 255 && D[i] < wv ) {
       const l = Math.hypot(dirX[i], dirY[i]) || 1, face = (-(dirX[i] + dirY[i]) / l) * 0.7071;   // 1: the edge faces the top-left light
       v = Math.max(v, Math.pow(1 - D[i] / (wv + 0.5), 0.7) * on * (0.75 + 0.25 * face) * (g.info.type === "gash" ? 0.5 : 1));   // (a tear: its opening's bevel carries it, the stroke's border only faintly)
