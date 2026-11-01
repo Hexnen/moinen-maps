@@ -93,3 +93,33 @@ export async function boot() {
   await new Promise((r) => setTimeout(r, 4000)); step(30);
   return { ...D()?.cache?.stats };
 }
+
+/**
+ * A timeline: run `fn` (e.g. a Detonate), then step frames for `ms` of real time; per frame CPU (ticker + gl.finish), GPU (timer
+ * query), the layer's own tick, the cache mode, animating areas and particles. Returns { fnMs, rows, sum: { median, p95, max } }.
+ */
+export async function trace(ms = 4500, fn = null) {
+  const R = canvas.app.renderer, gl = R.gl, ext = gl.getExtension("EXT_disjoint_timer_query_webgl2"), T = canvas.app.ticker, d = D();
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const rows = [], qs = [];
+  const a = performance.now(); fn?.(); const fnMs = performance.now() - a;
+  const t0 = performance.now();
+  try {
+    while ( performance.now() - t0 < ms ) {
+      const t = performance.now(); let q = null;
+      if ( ext ) { q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+      T.update(t);
+      if ( ext ) gl.endQuery(ext.TIME_ELAPSED_EXT);
+      gl.finish();
+      rows.push({ t: Math.round(t - t0), cpu: performance.now() - t, layer: d.stats.frameMs, mode: d.cache?.stats.mode, anim: [...d.groups.values()].filter((g) => g.anim).length,
+        parts: d.particles.length, q });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  } finally { T.maxFPS = mf; if ( st ) T.start(); }
+  await new Promise((r) => setTimeout(r, 300));
+  for ( const r of rows ) { if ( r.q && gl.getQueryParameter(r.q, gl.QUERY_RESULT_AVAILABLE) ) r.gpu = gl.getQueryParameter(r.q, gl.QUERY_RESULT) / 1e6; if ( r.q ) gl.deleteQuery(r.q); delete r.q; }
+  const stat = (k, rs = rows) => { const v = rs.map((r) => r[k]).filter((x) => x !== undefined).sort((x, y) => x - y); return v.length ? { med: +v[v.length >> 1].toFixed(2), p95: +v[Math.floor(v.length * 0.95)].toFixed(2), max: +v[v.length - 1].toFixed(1) } : null; };
+  const animRows = rows.filter((r) => r.anim > 0);
+  return { fnMs: Math.round(fnMs), frames: rows.length, animFrames: animRows.length, cpu: stat("cpu", animRows), gpu: stat("gpu", animRows), layer: stat("layer", animRows),
+    rows: rows.map((r) => [r.t, +r.cpu.toFixed(1), r.gpu === undefined ? null : +r.gpu.toFixed(1), +r.layer.toFixed(1), r.mode, r.anim, r.parts]) };
+}

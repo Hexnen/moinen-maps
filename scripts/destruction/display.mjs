@@ -45,6 +45,25 @@ function vnoise(x, y, s) {
   const a = hash2(xi, yi, s), b = hash2(xi + 1, yi, s), c = hash2(xi, yi + 1, s), d = hash2(xi + 1, yi + 1, s);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
+/**
+ * vnoise(X / scale, Y / scale, s) over a known box, the same numbers (same lattice hashes, same arithmetic) from a precomputed grid of
+ * the lattice hashes: an entry evaluates it for every pixel of its ruin, and the hashes were most of that cost (PERF). Outside the box:
+ * vnoise itself.
+ */
+function latticeNoise(x0, y0, x1, y1, scale, s) {
+  const gx0 = Math.floor(x0 / scale) - 1, gy0 = Math.floor(y0 / scale) - 1;
+  const GW = Math.floor(x1 / scale) - gx0 + 3, GH = Math.floor(y1 / scale) - gy0 + 3;
+  if ( !(GW > 0 && GH > 0) || GW * GH > 4e6 ) return (X, Y) => vnoise(X / scale, Y / scale, s);
+  const G = new Float64Array(GW * GH);
+  for ( let j = 0; j < GH; j++ ) for ( let i = 0; i < GW; i++ ) G[j * GW + i] = hash2(gx0 + i, gy0 + j, s);
+  return (X, Y) => {
+    const x = X / scale, y = Y / scale, xi = Math.floor(x), yi = Math.floor(y), i = xi - gx0, j = yi - gy0;
+    if ( i < 0 || j < 0 || i + 1 >= GW || j + 1 >= GH ) return vnoise(x, y, s);
+    const fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), q = j * GW + i;
+    const a = G[q], b = G[q + 1], c = G[q + GW], d = G[q + GW + 1];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+}
 const easeIn = (t) => t * t;
 const clamp01 = (t) => t < 0 ? 0 : t > 1 ? 1 : t;
 const lerpColor = (a, b, t) => {
@@ -123,6 +142,7 @@ export class DestructionDisplay {
     this.particles = [];           // live particles
     this.pool = [];                // spare particle sprites
     this.idle = { on: true, who: "all" };
+    this.clocks = [];              // per-pixel entry clocks still to build (clockSlice)
     this.look = { entry: true, speed: 1, power: 1 };
     this.filter = NEAREST;
     this.stats = { frameMs: 0, sprites: 0, groups: 0, uploads: 0, entries: 0 };
@@ -333,7 +353,14 @@ export class DestructionDisplay {
    * the moment of each pixel (ms after the start). The covers of strokes painted over older damage and the erase strokes use it, with
    * the same per-pixel clock as the ruin they belong to, so at every pixel the old look turns into the new one directly.
    */
-  makeDissolve(data, w, h, x0, y0, timeOf, out = false) {
+  makeDissolve(data, w, h, x0, y0, timeOf, out = false, lazy = false) {
+    if ( lazy ) {   // the clock comes later (clockSlice); nothing shows until then
+      const buf = new Uint8Array(w * h * 4);
+      const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: w, height: h }), {
+        width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+        format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
+      return { keys: null, next: 0, buf, data, tex, out, end: 0 };
+    }
     const keys = new Float64Array(w * h);
     let c = 0;
     for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
@@ -348,8 +375,41 @@ export class DestructionDisplay {
     return { keys: sorted, next: 0, buf, data, tex, out, end: sorted.length ? Math.floor(sorted[sorted.length - 1] / 1048576) : 0 };
   }
 
+  /**
+   * Build the pending per-pixel clocks (an entry's ruin and its cover) for up to `budget` ms: on-screen areas first, then by their
+   * start. The same keys enter() used to make at once: max(0, round(timeOf - (dark pixel ? dark : 0))) << 20 | pixel, sorted.
+   */
+  clockSlice(budget, vw) {
+    const t0 = performance.now();
+    const on = (q) => { const r = q.g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+    this.clocks.sort((a, b) => (on(b) - on(a)) || ((a.g.anim?.start ?? 0) - (b.g.anim?.start ?? 0)));
+    while ( this.clocks.length ) {
+      const q = this.clocks[0], { w, h, x0, y0, data, timeOf, dark } = q;
+      if ( q.g.dead || !q.g.anim || (q.g.anim.rev !== q.R && q.g.anim.crev !== q.R) ) { this.clocks.shift(); continue; }   // ended or replaced
+      q.keys ??= new Float64Array(w * h);
+      const keys = q.keys;
+      for ( ; q.y < h; q.y++ ) {
+        const y = q.y;
+        for ( let x = 0; x < w; x++ ) {
+          const i = y * w + x, p = i * 4; if ( !data[p + 3] ) continue;
+          let t = timeOf(x0 + x + 0.5, y0 + y + 0.5);
+          if ( dark && data[p] + data[p + 1] + data[p + 2] < 150 ) t -= dark;
+          keys[q.c++] = Math.max(0, Math.round(t)) * 1048576 + i;
+        }
+        if ( (y & 7) === 7 && performance.now() - t0 > budget ) { q.y++; return; }
+      }
+      const sorted = keys.subarray(0, q.c).sort();
+      q.R.keys = sorted;
+      if ( q.R.end !== undefined ) q.R.end = sorted.length ? Math.floor(sorted[sorted.length - 1] / 1048576) : 0;
+      this.clocks.shift();
+      this.stats.clocks = (this.stats.clocks ?? 0) + 1;
+      if ( performance.now() - t0 > budget ) return;
+    }
+  }
+
   /** Advance a dissolve to `rel` ms; true while it is not finished. */
   stepDissolve(D, rel) {
+    if ( !D.keys ) return true;
     const lim = (Math.max(0, rel) + 1) * 1048576, keys = D.keys, buf = D.buf, data = D.data;
     let n = 0;
     while ( D.next < keys.length && keys[D.next] < lim ) {
@@ -449,31 +509,29 @@ export class DestructionDisplay {
       : CL ? (x, y) => delay + reveal * CL.curve(front(x, y), Math.atan2(y - oy, x - ox)) * 0.85
       : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
     const seed = g.hash % 9973;
-    const noise = (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;   // 0..1, smooth
+    // 0..1, smooth: vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35, from lattice grids over the area
+    const n7 = latticeNoise(r.x0, r.y0, r.x1, r.y1, 7, seed), n26 = latticeNoise(r.x0, r.y0, r.x1, r.y1, 2.6, seed + 17);
+    const noise = (x, y) => n7(x, y) * 0.65 + n26(x, y) * 0.35;
     // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
     // so the ruin and the cover of the same pixel share it)
     const pixelTime = (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
+    // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
+    // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
+    // the start of an entry anyway)
     let rev = null;
     const bd = this.baseOf(g);
     if ( bd ) {
-      const bw = info.w, bh = info.h, keys = new Float64Array(bw * bh);
-      let c = 0;
-      for ( let y = 0; y < bh; y++ ) for ( let x = 0; x < bw; x++ ) {
-        const i = y * bw + x, q = i * 4; if ( !bd[q + 3] ) continue;
-        const ax = info.x + x + 0.5, ay = info.y + y + 0.5;
-        let t = pixelTime(ax, ay);
-        if ( bd[q] + bd[q + 1] + bd[q + 2] < 150 ) t -= band * 0.4;   // cracks and inked lips first
-        keys[c++] = Math.max(0, Math.round(t)) * 1048576 + i;
-      }
-      const sorted = keys.subarray(0, c).sort();
+      const bw = info.w, bh = info.h;
       const buf = new Uint8Array(bw * bh * 4);
       const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: bw, height: bh }), {
         width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       const stages = (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s) => ({ dt: s.dt * k, col: s.col ?? null }));
-      rev = { keys: sorted, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
+      rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
       g.baseSpr.texture = new PIXI.Texture(tex);
+      // (dark: cracks and inked lips first)
+      this.clocks.push({ g, R: rev, w: bw, h: bh, x0: info.x, y0: info.y, data: bd, timeOf: pixelTime, dark: band * 0.4, y: 0, c: 0, keys: null });
     }
     // the cover over older strokes (the plain map under this stroke's own pixels) dissolves in on the same clock: at every pixel the
     // older damage stays until this stroke's ruin takes its place, never old -> clean map -> new
@@ -484,8 +542,9 @@ export class DestructionDisplay {
       if ( data && TW ) {
         const cd = new Uint8Array(fr.width * fr.height * 4);
         for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
-        crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime);
+        crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true);
         crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
+        this.clocks.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null });
       }
     }
     // 2. the pieces' lives
@@ -647,7 +706,7 @@ export class DestructionDisplay {
    */
   erode(g, a, now, onScreen) {
     if ( a.crev ) this.stepDissolve(a.crev, now - a.start);
-    const R = a.rev; if ( !R || R.next >= R.keys.length ) return;
+    const R = a.rev; if ( !R || !R.keys || R.next >= R.keys.length ) return;
     // the FRONT's signature: a pixel passes through the kind's stages before it settles (FRONT below): burning pixels flare
     // yellow, glow orange and cool to char; water arrives as foam; a cave-in darkens as it sinks; a blast scorches pale-hot. Every
     // stage is a cursor over the same sorted clock, so the stages trail the front as bands of a fixed width in time
@@ -790,6 +849,7 @@ export class DestructionDisplay {
     const vw = this.view();
     let budget = 350;
     for ( const g of this.order ) if ( budget > 0 && g.made < g.pieces.length ) budget -= this.materialize(g, budget);
+    if ( this.clocks.length ) this.clockSlice(6, vw);
     for ( const g of this.order ) {
       if ( g.fade ) this.applyFade(g, t0);
       if ( g.anim ) this.animate(g, t0, vw);
@@ -868,26 +928,65 @@ export class DestructionDisplay {
       const j = el < a.delay ? (((Math.floor(el / 45) & 1) ? 1 : -1) * ap) : 0;
       g.shardCont.position.set(j, 0); g.baseCont.position.set(j, 0);
     }
+    const busy = a.tear ? this.livesAll(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
+    if ( onScreen ) this.effects(g, a, now, el);
+    if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
+    if ( !busy && (!a.rev || (a.rev.keys && a.rev.next >= a.rev.keys.length)) && (!a.crev || (a.crev.keys && a.crev.next >= a.crev.keys.length)) && !a.fx.length ) this.endAnim(g);
+  }
+
+  /** One piece's frame: its pose and colour; `fin`: after this it never changes again (at rest, final colour). */
+  life(it, a, t, onScreen, type) {
+    if ( onScreen || t >= 1 ) this.place(it.p, t, it, type);
+    if ( it.p.spr ) {
+      // a burning plate glows as it curls, then cools back to the map's colours
+      if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
+      else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
+      if ( a.cl?.tint ) it.p.spr.tint = t <= 0 || t >= 1.5 ? 0xFFFFFF : lerpColor(a.cl.tint, 0xffffff, clamp01(t / 1.5));   // the cause's tint while it moves
+    }
+  }
+
+  dust(it, type) {
+    it.dusted = true;
+    if ( it.p.thrown ) for ( let q = 0; q < 3; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 3, life: 420, color: 0xd8d0c2, alpha: 0.8, drag: 3 });
+    else if ( type === "cracks" && Math.random() < 0.3 ) this.spawn({ x: it.p.fx, y: it.p.fy, vx: (Math.random() - 0.5) * 4, vy: -1, rise: -3, life: 500, color: 0xc8beb0, alpha: 0.7 });
+  }
+
+  /** Every piece, every frame (a tear: its own clock in tear-entry.mjs). True while some piece still moves. */
+  livesAll(a, now, onScreen, type) {
     let busy = false;
     for ( const it of a.list ) {
       const t = (now - it.t0) / it.dur;
-      if ( onScreen || t >= 1 ) this.place(it.p, t, it, type);
+      this.life(it, a, t, onScreen, type);
       if ( t < 1 + 400 / it.dur ) busy = true;
-      if ( it.p.spr ) {
-        // a burning plate glows as it curls, then cools back to the map's colours
-        if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
-        else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
-        if ( a.cl?.tint ) it.p.spr.tint = t <= 0 || t >= 1.5 ? 0xFFFFFF : lerpColor(a.cl.tint, 0xffffff, clamp01(t / 1.5));   // the cause's tint while it moves
-      }
-      if ( onScreen && t >= 1 && !it.dusted ) {
-        it.dusted = true;
-        if ( it.p.thrown ) for ( let q = 0; q < 3; q++ ) this.spawn({ x: it.p.fx + (Math.random() - 0.5) * 3, y: it.p.fy + 1, vx: (Math.random() - 0.5) * 8, vy: -2 - Math.random() * 3, life: 420, color: 0xd8d0c2, alpha: 0.8, drag: 3 });
-        else if ( type === "cracks" && Math.random() < 0.3 ) this.spawn({ x: it.p.fx, y: it.p.fy, vx: (Math.random() - 0.5) * 4, vy: -1, rise: -3, life: 500, color: 0xc8beb0, alpha: 0.7 });
-      }
+      if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
     }
-    if ( onScreen ) this.effects(g, a, now, el);
-    if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
-    if ( !busy && (!a.rev || a.rev.next >= a.rev.keys.length) && (!a.crev || a.crev.next >= a.crev.keys.length) && !a.fx.length ) this.endAnim(g);
+    return busy;
+  }
+
+  /**
+   * PERF: the same lives, visiting only the pieces whose life has begun (by the moment they appear: before it a piece is hidden, as
+   * enter left it) and not placing again a piece at rest in its final pose and colour (a Detonate visited ~50k pieces every frame).
+   */
+  livesActive(a, now, onScreen, type) {
+    if ( !a.byStart ) {
+      a.byStart = a.list.slice().sort((p, q) => (p.t0 - p.pre) - (q.t0 - q.pre)); a.nextStart = 0; a.act = [];
+      a.busyUntil = a.list.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);   // = some piece has t < 1 + 400 / dur
+    }
+    const B = a.byStart, act = a.act;
+    while ( a.nextStart < B.length && B[a.nextStart].t0 - B[a.nextStart].pre <= now ) act.push(B[a.nextStart++]);
+    let w = 0;
+    for ( let i = 0; i < act.length; i++ ) {
+      const it = act[i], t = (now - it.t0) / it.dur;
+      if ( !it.fin ) {
+        this.life(it, a, t, onScreen, type);
+        // at rest: past the landing squash and hops (place), past the cause's tint (1.5), the scorch / flood colours constant from 1
+        if ( it.p.spr && t >= 1 && (t - 1) * it.dur >= Math.max(70, it.bounces * 150) && (!a.cl?.tint || t >= 1.5) ) it.fin = true;
+      }
+      if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
+      if ( !(it.fin && it.dusted) ) act[w++] = it;
+    }
+    act.length = w;
+    return now < a.busyUntil;
   }
 
   /** The type's own effects: one-shots at fixed moments, and what rides on the front. */

@@ -28,6 +28,7 @@ import { MODULE_ID } from "../config.mjs";
 const MAX_MPX = 16e6;
 const LIVE_SHARE = 0.7;        // more than this share of the objects moving (a Detonate): no cache at all, no bake
 const MOVE_MARGIN = 48;        // art px around a moving object (flying pieces, shakes)
+const SETTLE_MS = 500;         // objects that stopped moving are drawn live this long after the last start/stop, then cached
 
 export const cacheEnabled = () => {
   if ( globalThis.CONFIG?.moinenMaps?.noDestructionCache ) return false;
@@ -100,7 +101,7 @@ export class StaticCache {
     display.objs.addChild(this.show);                   // over `live`, which is not drawn while this shows
     this.bands = [];                                     // [{ tiles: [{ rt, spr, x, y, w, h }] }]
     this.dirty = true; this.sig = ""; this.liveAll = true; this.mode = "live"; this.runs = [];
-    this.ids = new WeakMap(); this.nextId = 1;
+    this.ids = new WeakMap(); this.nextId = 1; this.sticky = new Set(); this.act = ""; this.changedAt = 0;
     this.stats = { bakes: 0, bakeMs: 0, units: 0, live: 0, bands: 0, mode: "live", res: 0, tiles: 0, mpx: 0 };
     this._ctx = { contextChange: () => { this.dirty = true; } };
     canvas.app.renderer.runners?.contextChange?.add(this._ctx);
@@ -139,7 +140,12 @@ export class StaticCache {
     if ( !cacheEnabled() || !kids.length || !sr || !R ) return this.allLive("off");
     const U = this.units();
     const moving = U.reduce((a, u) => a + (u.live && !u.water ? 1 : 0), 0);
-    if ( moving > kids.length * LIVE_SHARE ) return this.allLive("busy");
+    if ( moving > kids.length * LIVE_SHARE ) { this.sticky.clear(); return this.allLive("busy"); }
+    // STICKY: an object that stops moving stays live until nothing has started or stopped for SETTLE_MS, so the end of a Detonate
+    // (areas settling one after another) re-draws the bands once, not once per area (drawing a still object live is still exact)
+    const now = performance.now(), act = U.map((u) => (u.live ? 1 : 0)).join("");
+    if ( act !== this.act ) { this.act = act; this.changedAt = now; }
+    if ( this.sticky.size && now - this.changedAt < SETTLE_MS ) for ( const u of U ) if ( !u.live && this.sticky.has(u.obj) ) { u.live = true; u.m = MOVE_MARGIN; }
     const z = canvas.stage.scale.x * (R.resolution || 1);
     const zoomedIn = d.filter === 0;                     // the atlases are sampled NEAREST
     let res = globalThis.CONFIG?.moinenMaps?.destructionCacheRes ?? cacheRes(sr.width, sr.height, false);   // (dev knob)
@@ -164,6 +170,7 @@ export class StaticCache {
     if ( this.dirty || sig !== this.sig || this.bands.some((b) => b.tiles.some((t) => !t.rt.valid || t.rt.baseTexture.destroyed)) ) {
       this.bake(U, lv, sr, res, !zoomedIn && !W, W);
       this.sig = sig; this.dirty = false;
+      this.sticky = new Set(U.filter((u) => u.live && !u.water).map((u) => u.obj));
     }
     // the runs: the live units of each odd level, in order
     for ( const run of this.runs ) run.items.length = 0;
