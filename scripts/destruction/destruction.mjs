@@ -7,6 +7,9 @@ import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
 import * as Trace from "../net/trace.mjs";
 import * as Reveal from "../net/reveal.mjs";
+import * as Policy from "./bake-policy.mjs";
+/** This client's loop breaker (bake-policy.mjs): the same strokes baked or published again and again stop it, with a reason. */
+const breaker = new Policy.Breaker();
 import { seedKnown } from "../water/publish.mjs";
 import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
@@ -143,6 +146,18 @@ function onUpdateScene(scene, changed, _options, userId) {
   if ( userId === game.user.id ) return;                    // our own save: already shown
   // another GM saved while this GM has strokes not saved yet: keep ours (our save follows and wins), never drop them
   if ( game.user.isGM && saveTimer ) return;
+  // only the manifest (and the entries that go with it) changed, while everything is on screen here and nothing waits for a chunk:
+  // take them over, no bake pass (an echo of another client's publish must never start one)
+  const d = f[Model.FLAG], manifestOnly = d && typeof d === "object" && !(Model.OBJS in f) && !(Store.PATHS in f) && !(`-=${Model.OBJS}` in f) && !(`-=${Store.PATHS}` in f)
+    && Object.keys(d).every((k) => k === "baked" || k === "entries");
+  if ( manifestOnly && S && shownKey && !status.waiting && !status.baking ) {
+    const F = scene.flags?.[MODULE_ID]?.[Model.FLAG];
+    S.baked = F?.baked ?? S.baked; S.entries = Array.isArray(F?.entries) ? F.entries : S.entries;
+    Trace.event("remote-manifest", { base: S.baked?.base ?? null });
+    tell("status");
+    return;
+  }
+  Trace.event("remote-change", { keys: Object.keys(f), main: d && typeof d === "object" ? Object.keys(d) : null });
   S = Store.attachPaths(Model.load(scene), scene);
   integrity(scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
@@ -190,6 +205,8 @@ export async function rebake(opts = {}) {
   finally {
     if ( inflight === tok ) inflight = null;   // a teardown meanwhile already let it go
     if ( gen === g0 ) Reveal.ready("destruction");   // whatever this pass managed (waiting, failed): never hold the reveal for more
+    // the status never stays on "baking" after a pass ended (an early return, an error, a superseded state)
+    if ( gen === g0 && status.baking && !inflight ) { status.baking = false; tell("status"); }
   }
   if ( again && S ) { const o = again; again = null; rebake(o); }
 }
@@ -267,7 +284,12 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   // 1. the GM's manifest: the chunks of strokes whose inputs are unchanged (IndexedDB first, then the server), shown as they land
   const M = force ? null : Store.manifestOf(S);
   const failed = [];
-  if ( M && M.base === base ) {
+  // a manifest of a NEWER bake version (a client with newer code published it) is used as it is: never baked again here for it,
+  // never overwritten (bake-policy.mjs) - an older client re-baking and re-publishing it is how two tabs took turns for ever
+  const rule = force ? "none" : Policy.manifestRule(M?.base, base);
+  status.newerManifest = rule === "newer";
+  if ( rule === "newer" ) { Trace.event("manifest-newer", { manifest: M.base, mine: base }); }
+  if ( M && (rule === "same" || rule === "newer") ) {
     const fetch = [];
     for ( const w of missing() ) { const e = Store.entryOf(M, w.objId); if ( e?.sig === w.sig ) fetch.push({ ...w, id: e.id }); }
     if ( fetch.length ) {
@@ -352,6 +374,11 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     toBake.sort((a, b) => a.index - b.index);
   }
   if ( toBake.length ) {
+    // why this client bakes on its own (a loop is then easy to see: console and api.destruction.net.trace().events)
+    const why = taken.length ? "edit" : force ? "user" : rule === "none" ? "no-manifest" : rule === "older" ? "version-older" : rule === "other" ? "settings-changed" : failed.length ? "chunk-missing" : "signature-changed";
+    Trace.event("bake", { why, n: toBake.length, of: want.length });
+    if ( !taken.length ) console.warn(` | destruction: baking  of  stroke(s) here ()`);
+    if ( !taken.length && !force && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
     Object.assign(status, { baking: true, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length }); tell("status");
     if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
     // a long bake on a scene load: the reveal does not wait for all of it (it shows what is ready after its longer budget, the rest
@@ -587,6 +614,15 @@ function maybeBlast(first = false) {
  * worker (in parallel with the next bake), uploaded (only what the server lacks, a few at a time) and named in the manifest together
  * with the entries that played since. One run at a time; a run asked for meanwhile follows it.
  */
+/** The breaker tripped: no more automatic bakes or publishes on this client until "Bake now" (api.destruction.bakeNow) or a reload. */
+function pauseBaking(kind, why) {
+  const msg = game.i18n.localize("MOINENMAPS.Destr.bakePaused");
+  Object.assign(status, { baking: false, waiting: false, paused: true, error: msg });
+  Trace.event("breaker", { kind, why, tripped: breaker.tripped });
+  console.warn(` | destruction:  of the same strokes again and again () - automatic baking paused on this client`, breaker.tripped);
+  tell("status");
+}
+
 function schedulePersist(fresh = 0) {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistTimer = 0; persist(); }, Math.max(fresh <= 2 ? 300 : 900, publishRetryAt - Date.now()));
@@ -605,6 +641,8 @@ async function persistOnce() {
   const base = Store.baseKey(scene, S, bg), key = Store.makeKey(scene, S, bg);
   if ( shownKey !== key ) return;                   // not all on screen yet: the bake that completes it asks again
   const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && M.base === base;
+  // never over a manifest of a newer bake version (a client with newer code made it): this one would only undo it (bake-policy.mjs)
+  if ( M && !Policy.mayPublish(M.base, base) ) { Trace.event("publish-skipped", { why: "version-newer", manifest: M.base, mine: base }); return; }
   seedKnown(scene);
   const c = {}, todo = [], FS = Store.sigsOf(S);
   for ( const [index, o] of S.objects.entries() ) {
@@ -618,6 +656,8 @@ async function persistOnce() {
   }
   const stale = M ? Object.keys(M.c).filter((id) => !(id in c) && !todo.some((q) => q.o.id === id)) : [];
   if ( !todo.length && same && !stale.length && Object.keys(c).every((id) => M.c[id] === c[id]) && M.key === key ) return;
+  if ( !breaker.hit("publish", key) ) { pauseBaking("publish", "manifest keeps changing"); return; }
+  Trace.event("publish", { n: todo.length, of: Object.keys(c).length + todo.length, over: M?.base ?? null })
   try {
     if ( Date.now() < publishRetryAt ) { schedulePersist(0); return; }
     if ( todo.length ) {
@@ -860,6 +900,8 @@ export const destructionApi = {
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
+  /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
+  bakeNow: () => { breaker.reset(); Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */

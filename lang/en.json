@@ -941,6 +941,7 @@
   "MOINENMAPS.Destr.h.directional": "The brush stroke matters: a long stroke becomes a ploughed furrow along its path, and its entry runs along the path in the order and at the speed it was drawn",
   "MOINENMAPS.Destr.quickJagged": "Torn borders (on/off)",
   "MOINENMAPS.Destr.quickDirectional": "Follows the stroke (on/off)",
+  "MOINENMAPS.Destr.bakePaused": "Baking paused: the damage manifest keeps changing (clients on different versions?). Reload all Foundry tabs, then Bake now.",
   "MOINENMAPS.Destr.notShown": "Damage not displayed: {why}. Baking it here again.",
   "MOINENMAPS.Destr.warning": "Warning",
   "MOINENMAPS.Destr.mixedLayout": "A browser tab running an older version of the module saved this scene's damage. No stroke was dropped (both versions are merged), but reload every Foundry tab (F5) now.",

@@ -86,9 +86,19 @@ export function showFilm({ from = 0, to = 1e9, cols = 6, step = 1 } = {}) {
   return shots.length;
 }
 
+/**
+ * Why the client did something on its own (a bake started, a publish skipped, a remote change taken over, the breaker tripped): the
+ * last 200 events with wall-clock time, kept for the whole session (not only a load) so a loop can be seen afterwards.
+ */
+const events = [];
+export function event(reason, data = null) {
+  events.push({ at: new Date().toISOString().slice(11, 23), reason, ...(data ? { data } : {}) });
+  if ( events.length > 200 ) events.shift();
+}
+
 export function report() {
   const lt = state.longtasks;
   const fr = state.frames ?? [];
-  return { frames: { n: fr.length, total: Math.round(fr.reduce((a, b) => a + b, 0)), max: Math.round(Math.max(0, ...fr)) }, marks: state.marks.map(({ once, ...m }) => m), longtasks: { count: lt.length, total: lt.reduce((a, e) => a + e.ms, 0), max: Math.max(0, ...lt.map((e) => e.ms)), list: lt },
+  return { events: events.slice(), frames: { n: fr.length, total: Math.round(fr.reduce((a, b) => a + b, 0)), max: Math.round(Math.max(0, ...fr)) }, marks: state.marks.map(({ once, ...m }) => m), longtasks: { count: lt.length, total: lt.reduce((a, e) => a + e.ms, 0), max: Math.max(0, ...lt.map((e) => e.ms)), list: lt },
     hitches: { count: state.hitches.length, max: Math.max(0, ...state.hitches.map((e) => e.ms)), list: state.hitches } };
 }
