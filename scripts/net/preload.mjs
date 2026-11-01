@@ -1,0 +1,60 @@
+import { MODULE_ID } from "../config.mjs";
+import * as Net from "./stream.mjs";
+import { chunkRecords } from "../water/publish.mjs";
+
+/**
+ * Starting early. The codec workers start when the game is ready (not on the first chunk), and a scene's chunks are read ahead at
+ * `canvasInit` - while Foundry still loads the scene's own textures - so when the destruction and the water ask for them at
+ * `canvasReady` they are decoded already. A scene being activated is read ahead too (players are about to be pulled into it).
+ * Nothing here decides what is shown: the loaders check every chunk against the scene's state as before.
+ */
+const K = 2;                       // mask pixels per art pixel (destruction model)
+const off = () => { try { return localStorage.getItem("mm-destruction") === "off"; } catch { return false; } };
+
+/** Every chunk the scene's flags name, nearest to `at` (scene px) first: water tiles and flooded loops (small), then the strokes. */
+export function chunksOf(scene, at = null) {
+  const F = scene?.flags?.[MODULE_ID];
+  if ( !F ) return [];
+  const out = [], seen = new Set();
+  const D = F.destruction, M = D?.baked;
+  // where each stroke lies (either layout: the strokes in their own key, or the array of the main flag)
+  const objs = F.destructionObjects && typeof F.destructionObjects === "object" ? F.destructionObjects : Object.fromEntries((D?.o ?? []).map((o) => [o?.id, o]));
+  const mpx = (D?.ap ?? 1) * K, cx = at?.x ?? (scene.width ?? 0) / 2, cy = at?.y ?? (scene.height ?? 0) / 2;
+  const dx = scene.dimensions?.sceneX ?? 0, dy = scene.dimensions?.sceneY ?? 0;
+  if ( M?.v === 2 && M.c && !off() ) {
+    for ( const [oid, v] of Object.entries(M.c) ) {
+      const id = String(v).split(":")[1], o = objs[oid];
+      if ( !id || seen.has(id) ) continue;
+      seen.add(id);
+      const d = o ? Math.hypot(dx + (o.x0 + o.w / 2) * mpx - cx, dy + (o.y0 + o.h / 2) * mpx - cy) : 1e6;
+      out.push({ dir: M.dir, id, prio: 1000 + d });
+    }
+  }
+  for ( const r of chunkRecords(scene) ) {
+    for ( const id of r.ids ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: id.startsWith("w") ? 0 : 2000 }); }
+  }
+  return out;
+}
+
+/** Where the view of a scene will be when it opens. */
+function viewOf(scene) {
+  const v = scene?._viewPosition ?? scene?.initial;
+  return v && Number.isFinite(v.x) ? { x: v.x, y: v.y } : null;
+}
+
+let warmed = false;
+function registerPreload() {
+  Hooks.once("ready", () => { if ( !warmed ) { warmed = true; Net.warm(); } });
+  Hooks.on("canvasInit", () => {
+    const scene = canvas.scene;
+    if ( !scene ) return;
+    Net.prefetch(chunksOf(scene, viewOf(scene))).catch((err) => console.warn(`${MODULE_ID} | read ahead`, err));
+  });
+  // a scene that becomes active: players are about to see it
+  Hooks.on("updateScene", (scene, changed) => {
+    if ( changed.active !== true || scene.id === canvas.scene?.id ) return;
+    Net.prefetch(chunksOf(scene, viewOf(scene))).catch(() => {});
+  });
+}
+
+registerPreload();

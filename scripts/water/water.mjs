@@ -5,6 +5,9 @@ import { WaterDisplay } from "./display.mjs";
 import * as Cache from "./cache.mjs";
 import { publishBake, fetchBake } from "./publish.mjs";
 import { scheduleGc } from "../net/stream.mjs";
+import { markOnce } from "../net/trace.mjs";
+import * as Reveal from "../net/reveal.mjs";
+import "../net/preload.mjs";   // reads a scene's chunks ahead (canvasInit) and warms the codec workers
 import { CODES } from "./codes-table.mjs";
 
 /**
@@ -38,7 +41,15 @@ export async function onCanvasReady() {
   teardown();
   const scene = canvas.scene;
   S = scene ? Model.load(scene) : null;
-  if ( S?.enabled && Model.hasPaint(S) ) await start();
+  const my = life;
+  if ( S?.enabled && Model.hasPaint(S) ) {
+    Reveal.expect("water");                      // part of the scene's one reveal (net/reveal.mjs)
+    markOnce("water:start");
+    await start();
+    // every frame's texture on the GPU before the reveal, not one per frame while the loop first plays
+    if ( my === life && Reveal.holding("water") && display?.set ) await Reveal.upload(display.set.textures.filter(Boolean).map((t) => t.baseTexture));
+  }
+  if ( my === life ) Reveal.ready("water");
   tell("loaded");
 }
 
@@ -73,9 +84,11 @@ async function start() {
     return;
   }
   if ( my !== life || !S ) return;
+  markOnce("water:tables");
   S.params = { ...foundry.utils.deepClone(tables().defaults), ...S.params };
   if ( !Array.isArray(S.params.guides) ) S.params.guides = [];
   display ??= new WaterDisplay();
+  Reveal.attach("water", display.root);
   display.setPalette(tables().codes, S.params.colors, S.params.alpha);
   await rebake();
 }
@@ -129,11 +142,54 @@ function schedulePublish(key, bake) {
 
 /** The GM always starts the worker (the settings window needs the looks); a player with a cached scene does not. */
 async function ensureTables() {
-  if ( game.user.isGM ) { info ??= await engineInfo(); return; }
+  if ( game.user.isGM ) {
+    if ( info ) return;
+    // the GM's worker starts now, but a scene whose water is cached or published does not wait for it (its start took ~0.5 s of
+    // every scene load): the cached code table and defaults are enough to show it
+    markOnce("water:boot");
+    const boot = engineInfo().then((i) => { info = i; tell("status"); return i; });
+    markOnce("water:booted");
+    if ( lite ) { boot.catch((err) => console.warn(`${MODULE_ID} | water engine`, err)); return; }
+    const meta = await earlyMeta();
+    markOnce("water:meta");
+    if ( meta?.defaults && Object.keys(meta.defaults).length ) { lite ??= { codes: CODES, defaults: meta.defaults }; boot.catch((err) => console.warn(`${MODULE_ID} | water engine`, err)); return; }
+    info ??= await boot;
+    return;
+  }
   if ( info || lite ) return;
   // a player who only plays a published or cached bake needs the code table and nothing else: no worker
-  lite = { codes: CODES, defaults: (await Cache.getMeta())?.defaults ?? {} };
+  markOnce("water:lite", { early: !!early });
+  // (the read-ahead's answer even when it is "no table here": asking IndexedDB again waits behind the scene's first frame)
+  const m0 = earlyValue ? earlyValue.meta : await earlyMeta();
+  lite = { codes: CODES, defaults: m0?.defaults ?? {} };
+  markOnce("water:liteDone");
 }
+
+/*
+ * Reading ahead: at canvasInit - before Foundry's first frame of the scene holds the page for a few hundred ms - the cached code table
+ * and the scene's cached frames come out of IndexedDB. The load uses them when the key still matches (it is checked as always).
+ */
+let early = null, earlyValue = null;
+/** The cached table: straight from the read-ahead when it is in (no await: a continuation can wait behind the scene's first frame). */
+const earlyMeta = () => earlyValue ? earlyValue.meta : (async () => early ? (await early)?.meta ?? null : Cache.getMeta())();
+Hooks.on("canvasInit", () => {
+  early = null; earlyValue = null;
+  const scene = canvas.scene;
+  if ( !scene?.flags?.[MODULE_ID]?.[Model.FLAG] ) return;
+  early = (async () => {
+    markOnce("water:early");
+    const meta = await Cache.getMeta();
+    markOnce("water:earlyMeta");
+    const S1 = Model.load(scene);
+    if ( !S1?.enabled || !Model.hasPaint(S1) ) return (earlyValue = { meta });
+    S1.params = { ...foundry.utils.deepClone(meta?.defaults ?? {}), ...S1.params };
+    if ( !Array.isArray(S1.params.guides) ) S1.params.guides = [];
+    const key = Cache.makeKey(scene.id, S1);
+    const hit = await Cache.getBake(key);
+    markOnce("water:earlyBake", { hit: !!hit });
+    return (earlyValue = { meta, key, hit });
+  })().catch(() => null);
+});
 
 /* ---------------------------------------------------------------- baking */
 
@@ -159,18 +215,22 @@ export async function rebake({ awaitPublish = true } = {}) {
   const origin = { x: Model.sceneRect(scene).x, y: Model.sceneRect(scene).y };
   // baked before on this browser, or published by the GM: no worker, no waiting
   const key = Cache.makeKey(scene.id, S);
-  let hit = await Cache.getBake(key);
+  const ahead = earlyValue ?? (early ? await early : null);
+  early = null; earlyValue = null;
+  let hit = ahead?.key === key && ahead.hit ? ahead.hit : await Cache.getBake(key), hitFrom = "idb";
   if ( my !== gen ) return;
   if ( !hit && S.baked?.key === key ) {
-    hit = await fetchBake(S.baked);
+    hit = await fetchBake(S.baked); hitFrom = "net";
     if ( my !== gen ) return;
     if ( hit ) Cache.putBake(key, { box: hit.box, ms: hit.ms, frames: hit.frames.map((f) => f.slice()) });
   }
   if ( hit ) {
+    markOnce("water:frames", { from: hitFrom });
     if ( S.baked?.key !== key || S.baked?.v !== 2 ) schedulePublish(key, hit);     // baked here before but never uploaded (or in the first format)
     display.begin(hit.box, S.px, origin, hit.ms ?? S.params.ms);
     hit.frames.forEach((f, i) => display.addFrame(i + 1, f));
     display.commit();
+    markOnce("water:shown", { from: hitFrom });
     status.baking = false; status.progress = 1; tell("status");
     releaseWorker();
     return;

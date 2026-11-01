@@ -5,6 +5,8 @@ import { readMeta, LIVE_PARAMS, META_FIELDS } from "./core.mjs";
 import { runBake, disposeBaker } from "./bake.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
+import * as Trace from "../net/trace.mjs";
+import * as Reveal from "../net/reveal.mjs";
 import { seedKnown } from "../water/publish.mjs";
 import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
@@ -62,7 +64,7 @@ function onCanvasReady() {
   if ( !canvas.scene ) return;
   S = Store.attachPaths(Model.load(canvas.scene), canvas.scene);
   Editor.onCanvasReady();
-  if ( S?.enabled && Model.hasPaint(S) ) rebake();
+  if ( S?.enabled && Model.hasPaint(S) ) { Reveal.expect("destruction"); rebake(); }
   selfCheck(10000);
   tell("loaded");
 }
@@ -149,10 +151,13 @@ export async function rebake(opts = {}) {
   if ( !S ) return;
   clearTimeout(bakeTimer); bakeTimer = 0;
   if ( inflight ) { again = { ...(again ?? {}), ...opts }; return; }
-  const tok = inflight = {}; again = null;
+  const tok = inflight = {}, g0 = gen; again = null;
   try { await bakeOnce(opts); }
   catch ( err ) { console.error(`${MODULE_ID} | destruction`, err); }
-  finally { if ( inflight === tok ) inflight = null; }   // a teardown meanwhile already let it go
+  finally {
+    if ( inflight === tok ) inflight = null;   // a teardown meanwhile already let it go
+    if ( gen === g0 ) Reveal.ready("destruction");   // whatever this pass managed (waiting, failed): never hold the reveal for more
+  }
   if ( again && S ) { const o = again; again = null; rebake(o); }
 }
 
@@ -168,6 +173,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const taken = strokes.splice(0), mask = S.mask.slice();
   if ( key === shownKey && display && !force ) { maybeBlast(); return; }
   const S0 = S, base = Store.baseKey(scene, S, bg), objs = objectsIn();
+  Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
   const want = [];
   S.objects.forEach((o, index) => { if ( !o.k ) { const sig = Store.objSig(S, o); want.push({ index, objId: o.id, sig, rk: `${base}|${o.id}|${sig}` }); } });
@@ -197,7 +203,10 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
       status.waiting = true; status.loading = fetch.length; tell("status");
       netAbort ??= new AbortController();
       let timer = 0;
-      const soon = () => { if ( !timer ) timer = setTimeout(() => { timer = 0; show(); }, 60); };   // a few chunks landing together: one sync
+      // a few chunks landing together: one sync; while the scene's reveal is held back nothing is shown piece by piece (all of it goes
+      // on screen at once below); if the reveal comes first (its budget ran out), what is here shows then and the rest as it lands
+      const soon = () => { if ( !timer && !Reveal.holding() ) timer = setTimeout(() => { timer = 0; show(); }, 60); };
+      Reveal.whenRevealed(() => { if ( status.loading > 0 ) soon(); });
       await Promise.all(prioritise(fetch, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
         if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, id: w.id, sprites: got.sprites }); src.chunk++; status.loading--; soon(); }
@@ -261,10 +270,11 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
     if ( (rev !== paramRev || S !== S0) && !force ) { strokes.unshift(...taken); Object.assign(status, { baking: false }); tell("status"); if ( !bakeTimer ) again ??= {}; return; }
   }
 
-  // 3. on screen: everything we have
+  // 3. on screen: everything we have (on a scene load, hidden until the reveal: every shard made, every texture uploaded)
   show();
+  if ( firstLoad && Reveal.holding("destruction") && display ) await prepareReveal(my);
   const complete = want.every((w) => recs.has(w.rk));
-  if ( complete ) { shownKey = key; waitingSince.clear(); }
+  if ( complete ) { shownKey = key; waitingSince.clear(); Trace.markOnce("damage:all", { groups: display?.groups.size ?? 0, uploads: display?.stats?.uploads ?? 0, ...src }); }
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
   for ( const k of recs.keys() ) if ( !live.has(k) ) recs.delete(k);
@@ -274,6 +284,37 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   tell("status");
   if ( game.user.isGM && complete ) schedulePersist(src.baked + src.legacy);
   maybeBlast(firstLoad);
+}
+
+/**
+ * A scene load, before its reveal (the damage is on screen but hidden): every shard sprite made (the display otherwise makes a few
+ * hundred per frame, so a big area's pieces would appear over several frames), every area's texture uploaded a slice at a time, and
+ * the flooded holes' water in; then this layer is ready. Time slices of ~8 ms, so the page never stalls.
+ */
+async function prepareReveal(my) {
+  const T = performance.now(), slice = () => new Promise((r) => setTimeout(r, 0));
+  let t = performance.now();
+  for ( const g of display.order ) {
+    while ( g.made < g.pieces.length ) {
+      display.materialize(g, 800);
+      if ( performance.now() - t > 8 ) { await slice(); if ( my !== gen || !display ) return; t = performance.now(); }
+    }
+  }
+  Trace.markOnce("damage:made", { ms: Math.round(performance.now() - T) });
+  await Reveal.upload([...display.groups.values()].map((g) => g.tex));
+  Trace.markOnce("damage:uploaded", { ms: Math.round(performance.now() - T) });
+  // the flooded holes fill with their own water loop a moment after their area is in: wait for it while the reveal waits
+  const until = performance.now() + 1500;
+  while ( my === gen && Reveal.holding("destruction") && performance.now() < until ) {
+    // (its holes are listed a moment after the areas are in: none listed yet while there are flood strokes is not "done")
+    const holes = destructionApi.flood?.status?.()?.holes, floods = S?.objects?.some((o) => !o.k && Model.TYPES[o.t] === "flood");
+    if ( !floods || !destructionApi.flood ) break;
+    if ( holes?.length && holes.every((h) => h.state === "ready" || h.state === "none") ) break;
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  if ( my !== gen ) return;
+  Trace.markOnce("damage:prepared", { ms: Math.round(performance.now() - T) });
+  Reveal.ready("destruction");
 }
 
 /** Chunks to download, nearest first: the newest strokes (their entry is about to play), then by distance to the view. */
@@ -308,6 +349,8 @@ function showRecs(want, objs, taken, mask, first) {
   const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs);
   playEntries(added, removed, taken, mask, first);
   lastRecs = list;
+  Reveal.attach("destruction", display.objs, display.fx, display.causeLights?.layer);   // (only while this layer is held back)
+  if ( display.groups.size ) Trace.markOnce("damage:first", { groups: display.groups.size });
   status.areas = display.order.map((g) => ({ type: g.info.type, mat: Model.MATERIALS[g.info.mat + 1] ?? "earth", hash: g.info.hash, cause: g.info.cause ?? 0, obj: g.objId ?? null }));
 }
 
@@ -613,7 +656,7 @@ export const destructionApi = {
   state: () => S ? Model.encode(S) : null,
   status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
-  net: { stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
+  net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
   replay: () => display?.detonate(performance.now()),
   display: () => display,

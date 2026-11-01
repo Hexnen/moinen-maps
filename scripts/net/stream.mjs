@@ -26,45 +26,70 @@ const fileOf = (dir, id) => `${dir}/${id}.png`;
 
 /* ---------------------------------------------------------------- the codec worker */
 
-const IDLE = 20000, WATCHDOG = 30000;
-let worker = null, broken = false, nextId = 1, idleTimer = 0;
-const pending = new Map();
+/*
+ * A small pool of codec workers (up to 3, never more than the cores minus one): a load decodes dozens of chunks, one worker made them
+ * wait in line. Each job goes to the worker with the fewest jobs; the pool is let go after IDLE without work, and started ahead of
+ * time (warm) when the game is ready, so the first chunk does not pay for starting a worker.
+ */
+const IDLE = 30000, WATCHDOG = 30000;
+const POOL = Math.max(1, Math.min(3, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
+const workers = [];                  // { w, busy }
+let broken = false, nextId = 1, idleTimer = 0;
+const pending = new Map();           // id -> { resolve, reject, watchdog, slot }
 
-function startWorker() {
-  if ( worker || broken ) return worker;
-  try {
-    worker = new Worker(foundry.utils.getRoute(`modules/${MODULE_ID}/scripts/net/chunk-worker.mjs`), { type: "module" });
-  } catch ( err ) { broken = true; console.warn(`${MODULE_ID} | chunk worker unavailable, decoding on the page`, err); return null; }
-  worker.onmessage = (ev) => {
+function spawn() {
+  let w;
+  try { w = new Worker(foundry.utils.getRoute(`modules/${MODULE_ID}/scripts/net/chunk-worker.mjs`), { type: "module" }); }
+  catch ( err ) { broken = true; console.warn(`${MODULE_ID} | chunk worker unavailable, decoding on the page`, err); return null; }
+  const slot = { w, busy: 0 };
+  w.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
-    pending.delete(m.id); clearTimeout(p.watchdog);
+    pending.delete(m.id); clearTimeout(p.watchdog); slot.busy--;
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
-    if ( !pending.size ) { clearTimeout(idleTimer); idleTimer = setTimeout(stopWorker, IDLE); }
+    if ( !pending.size ) { clearTimeout(idleTimer); idleTimer = setTimeout(stopWorkers, IDLE); }
   };
-  worker.onerror = (e) => {
+  w.onerror = (e) => {
     console.warn(`${MODULE_ID} | chunk worker failed`, e?.message ?? e);
-    const w = worker; worker = null; w?.terminate();
-    for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(new Error("chunk worker failed")); }
-    pending.clear();
+    w.terminate();
+    workers.splice(workers.indexOf(slot), 1);
+    for ( const [id, p] of pending ) if ( p.slot === slot ) { clearTimeout(p.watchdog); pending.delete(id); p.reject(new Error("chunk worker failed")); }
   };
-  return worker;
+  workers.push(slot);
+  return slot;
 }
 
-function stopWorker() {
+function pick() {
+  if ( broken ) return null;
+  const free = workers.find((s) => !s.busy);
+  if ( free ) return free;
+  if ( workers.length < POOL ) return spawn() ?? workers[0] ?? null;
+  return workers.reduce((a, b) => (b.busy < a.busy ? b : a), workers[0]) ?? null;
+}
+
+function stopWorkers() {
   if ( pending.size ) return;
-  worker?.terminate(); worker = null;
+  for ( const s of workers.splice(0) ) s.w.terminate();
 }
 
-/** Run a codec job in the worker (inline only when no worker can start). */
+/** Start the pool (and open the cache) before it is needed: the first scene load then decodes at once. */
+export function warm(n = POOL) {
+  if ( broken ) return;
+  while ( workers.length < n && spawn() );
+  db();
+  clearTimeout(idleTimer); idleTimer = setTimeout(stopWorkers, IDLE * 4);
+}
+
+/** Run a codec job in a worker (inline only when no worker can start). */
 export function job(msg, transfer = []) {
   clearTimeout(idleTimer);
-  const w = startWorker();
-  if ( !w ) return work(msg).then((r) => r.result);
+  const slot = pick();
+  if ( !slot ) return work(msg).then((r) => r.result);
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    const watchdog = setTimeout(() => { if ( pending.delete(id) ) reject(new Error("chunk job took too long")); }, WATCHDOG);
-    pending.set(id, { resolve, reject, watchdog });
-    w.postMessage({ ...msg, id }, transfer);
+    const watchdog = setTimeout(() => { if ( pending.delete(id) ) { slot.busy--; reject(new Error("chunk job took too long")); } }, WATCHDOG);
+    pending.set(id, { resolve, reject, watchdog, slot });
+    slot.busy++;
+    slot.w.postMessage({ ...msg, id }, transfer);
   });
 }
 
@@ -120,7 +145,7 @@ async function trimIdb() {
 
 /* ---------------------------------------------------------------- downloading */
 
-const LIMIT = 4;
+const LIMIT = 6;
 let running = 0;
 const queue = [];        // { prio, run }
 
@@ -140,12 +165,41 @@ const MEMO_MAX = 600;
 const remember = (id, v) => { memo.delete(id); memo.set(id, v); while ( memo.size > MEMO_MAX ) memo.delete(memo.keys().next().value); };
 export const forget = (id) => memo.delete(id);
 
-async function decode(bytes, id) {
+/** Decode in the pool. `own`: the bytes are not needed here any more, so they move to the worker without a copy. */
+async function decode(bytes, id, own = false) {
   const t = performance.now();
-  const copy = bytes.slice();
-  const r = await job({ kind: "decode", bytes: copy, cid: id }, [copy.buffer]);
+  const b = own && bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+  const r = await job({ kind: "decode", bytes: b, cid: id }, [b.buffer]);
   stats.decodeMs += performance.now() - t;
   return r;
+}
+
+/** Many chunks out of IndexedDB in ONE transaction (a load asks for dozens; one transaction each cost ~10 ms apiece). */
+async function idbGetMany(ids) {
+  const out = new Map();
+  if ( !ids.length ) return out;
+  const reqs = [];
+  await tx(["chunks"], "readonly", (s) => { for ( const id of ids ) { const r = s.get(id); reqs.push([id, r]); } return null; });
+  for ( const [id, r] of reqs ) { const v = r.result; if ( v?.bytes ) out.set(id, new Uint8Array(v.bytes)); }
+  if ( out.size ) tx(["lru"], "readwrite", (l) => { const at = Date.now(); for ( const [id, b] of out ) l.put({ id, at, size: b.byteLength }); return null; });
+  return out;
+}
+
+/** Chunk bytes read ahead from IndexedDB by `prefetch`, waiting for their decode. */
+const preloaded = new Map();
+/** Chunks on their way (one request and one decode per id, whoever asks). */
+const inflight = new Map();
+
+/**
+ * Read ahead: every chunk a scene names, before the scene asks for them (canvasInit, while Foundry still loads its textures): one
+ * IndexedDB transaction for all, then decode (pool) and download what is missing, nearest first. `list`: [{ dir, id, prio }].
+ */
+export async function prefetch(list) {
+  const todo = list.filter((c) => c.id && !memo.has(c.id) && !inflight.has(c.id) && !preloaded.has(c.id));
+  if ( !todo.length ) return;
+  const got = await idbGetMany(todo.map((c) => c.id));
+  for ( const [id, b] of got ) preloaded.set(id, b);
+  await Promise.all(todo.map((c) => getChunk(c.dir, c.id, { prio: c.prio ?? 0 })));
 }
 
 async function download(dir, id, reload = false, signal = null) {
@@ -163,14 +217,16 @@ async function download(dir, id, reload = false, signal = null) {
  */
 export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
   if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id)); }
-  return enqueue(prio, async () => {
+  if ( inflight.has(id) ) return inflight.get(id);
+  const p = enqueue(prio, async () => {
     if ( memo.has(id) ) return memo.get(id);
     if ( signal?.aborted ) return null;
-    let bytes = await idbGet(id), from = "idb";
+    let bytes = preloaded.get(id) ?? await idbGet(id), from = "idb";
+    preloaded.delete(id);
     if ( !bytes ) { bytes = await download(dir, id, false, signal); from = "net"; }
     if ( !bytes ) { stats.failed++; return null; }
     let out = null;
-    try { out = await decode(bytes, id); }
+    try { out = await decode(bytes, id, from === "idb"); }
     catch ( err ) {
       if ( from === "idb" ) tx(["chunks", "lru"], "readwrite", (s, l) => { s.delete(id); l.delete(id); return null; });
       bytes = await download(dir, id, true, signal).catch(() => null);
@@ -182,6 +238,9 @@ export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
     remember(id, out);
     return out;
   });
+  inflight.set(id, p);
+  p.finally(() => inflight.delete(id));
+  return p;
 }
 
 /** A chunk the GM made here: straight into memory and IndexedDB (no request later). */
@@ -309,4 +368,4 @@ export function scheduleGc(sceneId) {
 }
 
 /** For the API: the codec worker and the queue (tests). */
-export const debug = () => ({ worker: !!worker, broken, queue: queue.length, running, memo: memo.size });
+export const debug = () => ({ workers: workers.length, busy: workers.map((s) => s.busy), broken, queue: queue.length, running, memo: memo.size, inflight: inflight.size });
