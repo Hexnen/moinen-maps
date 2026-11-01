@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = "scripts/destruction";
 // { rev, other }: a commit that also carries a change of another kind; `other` matches those hunks (left in both baselines)
-export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", { rev: "50458de", other: /bounces off the edge/ }];
+export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86"];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
@@ -131,7 +131,7 @@ for ( let c = 1; c < Cur.CAUSES.length; c++ ) for ( const { ob } of discs ) {
   if ( bytesOf(a) !== bytesOf(z) ) diff++; else check(false, `cause ${Cur.CAUSES[c]} x ${Cur.TYPES[ob.t]} looks like cause 0`);
   let hasLight = false, base17 = -1;
   for ( let k = 0; k < a.meta.length; k += Cur.META_FIELDS ) { if ( a.meta[k] === 3 ) hasLight = true; if ( a.meta[k] === 0 ) base17 = a.meta[k + 11] >> 4; }
-  // the tear (gash, tear.mjs) takes the cause like every kind since 50458de, its light sprite too
+  // the tear (gash, tear.mjs) takes the cause like every kind since 7115e86, its light sprite too
   const wantLight = EMISSIVE.has(Cur.CAUSES[c]);
   if ( hasLight === wantLight && base17 === c ) lights++;
   else check(false, `cause ${Cur.CAUSES[c]} x ${Cur.TYPES[ob.t]}: light sprite ${hasLight}, cause on the base row = ${base17}`);
