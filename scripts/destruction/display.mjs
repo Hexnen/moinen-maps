@@ -3,6 +3,7 @@ import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
+import { StaticCache } from "./static-cache.mjs";
 
 /**
  * Shows a bake, AREA BY AREA: every damaged area is a group (its own small texture atlas, a base sprite with what lies beneath, and
@@ -110,6 +111,9 @@ export class DestructionDisplay {
     // one layer of damage objects in creation order: each object is a container [map patch, base, shards], so a later stroke covers
     // an earlier one (its patch lays the plain map over the older damage where the new stroke lies, then draws itself)
     this.objs = layer(247);
+    // the objects themselves live in `live`; what does not move is shown from a cache under it (static-cache.mjs, PERF)
+    this.live = this.objs.addChild(new PIXI.Container());
+    this.live.eventMode = "none";
     this.fx = layer(249);
     this.erasers = new Map();      // object id -> eraser group (a patch of plain map, no bake)
     this.groups = new Map();       // hash -> group
@@ -125,6 +129,7 @@ export class DestructionDisplay {
     this.ap = 1; this.origin = { x: 0, y: 0 };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
+    this.cache = new StaticCache(this);
   }
 
   /** Every area shown, in order: { type, mat, hash, ... }. */
@@ -187,7 +192,7 @@ export class DestructionDisplay {
     // creation order (stroke index, then the sheet's order inside a stroke), on top of whatever is fading out
     const all = [...next, ...this.erasers.values()].map((g, k) => ({ g, k })).sort((a, b) => (a.g.objIndex - b.g.objIndex) || (a.k - b.k)).map((q) => q.g);
     this.order = next;
-    for ( const g of all ) this.objs.addChild(g.cont);
+    for ( const g of all ) this.live.addChild(g.cont);
     // an object that lies over older ones gets its map patch (once: unchanged objects never change)
     const rects = [];
     for ( const g of all ) {
@@ -840,6 +845,9 @@ export class DestructionDisplay {
       if ( !this.inScene(X, Y) ) { this.stats.culled = (this.stats.culled ?? 0) + 1; q.spr.visible = false; this.pool.push(q.spr); this.particles[i] = this.particles[this.particles.length - 1]; this.particles.pop(); continue; }
       q.spr.position.set(X, Y);
     }
+    const tc = performance.now();
+    this.cache?.update();
+    this.stats.cacheMs = performance.now() - tc;
     this.stats.frameMs = performance.now() - t0;
   }
 
@@ -989,12 +997,14 @@ export class DestructionDisplay {
     for ( const q of this.particles ) { q.spr.visible = false; this.pool.push(q.spr); }
     this.particles = [];
     this.stats.groups = this.stats.sprites = 0;
+    this.cache?.invalidate();
   }
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick);
     Cause.disposeLights(this);
     this.clear();
+    this.cache?.destroy(); this.cache = null;
     for ( const c of [this.objs, this.fx] ) if ( !c.destroyed ) c.destroy({ children: true });
   }
 }

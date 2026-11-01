@@ -682,6 +682,8 @@
   "MOINENMAPS.Setting.respectMotionHint": "Gdy system prosi o ograniczenie ruchu, wyłącz też animacje pinezek, dzielnic i żetonów. Domyślnie wyłączone: to efekty rozgrywki.",
   "MOINENMAPS.Setting.debug": "Debugowanie animacji",
   "MOINENMAPS.Setting.debugHint": "Zapisuje w konsoli przeglądarki (poziom debug), dlaczego animacja się nie odtworzyła.",
+  "MOINENMAPS.Setting.destructionCache": "Buforuj osiadłe zniszczenia",
+  "MOINENMAPS.Setting.destructionCacheHint": "Rysuj nieruchome zniszczenia z gotowego obrazu zamiast dziesiątek tysięcy kawałków w każdej klatce (dużo szybciej). Wyłącz tylko do porównania lub wykluczenia błędu.",
   "MOINENMAPS.WS.pins": "Pinezki",
   "MOINENMAPS.WS.districts": "Dzielnice",
   "MOINENMAPS.WS.water": "Woda",

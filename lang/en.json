@@ -682,6 +682,8 @@
   "MOINENMAPS.Setting.respectMotionHint": "When your operating system asks for reduced motion, also stand still the pin, district and token animations. Off by default: these are gameplay effects.",
   "MOINENMAPS.Setting.debug": "Debug animations",
   "MOINENMAPS.Setting.debugHint": "Log to the browser console (debug level) why an animation did not play.",
+  "MOINENMAPS.Setting.destructionCache": "Cache settled destruction",
+  "MOINENMAPS.Setting.destructionCacheHint": "Draw the damage that does not move from a ready image instead of tens of thousands of pieces every frame (much faster). Turn off only to compare or to rule it out.",
   "MOINENMAPS.WS.pins": "Pins",
   "MOINENMAPS.WS.districts": "Districts",
   "MOINENMAPS.WS.water": "Water",
