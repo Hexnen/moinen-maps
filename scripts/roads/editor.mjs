@@ -320,7 +320,8 @@ function onUp(ev) {
   redraw();
 }
 
-function cancel() { press = null; poly = null; polyStraight = []; eraseTrail = null; redraw(); }
+/** Drop whatever gesture is under way (also a shape drag of the edit tool: the real roads come back on screen). */
+function cancel() { press = null; poly = null; polyStraight = []; eraseTrail = null; Shape.cancel(); redraw(); }
 
 /** G: switch the brush between a guide line and the last painted kind. */
 function toggleGuide() {
@@ -379,6 +380,8 @@ export function onCanvasReady() {
   const view = canvas.app.view;
   listeners = {
     down: onDown, move: onMove, up: onUp, key: onKey, cancel,
+    // a road being clicked point by point survives losing focus; a drag (pen, eraser, shape) does not
+    blur: () => { press = null; eraseTrail = null; Shape.cancel(); redraw(); },
     menu: (e) => { if ( mode ) e.preventDefault(); },
     leave: () => { cursorAt = null; redraw(); },
     dbl: (e) => {
@@ -393,6 +396,7 @@ export function onCanvasReady() {
   view.addEventListener("dblclick", listeners.dbl, true);
   window.addEventListener("pointerup", listeners.up);
   window.addEventListener("pointercancel", listeners.cancel);
+  window.addEventListener("blur", listeners.blur);          // the window lost focus mid-drag: the pointerup may never come
   window.addEventListener("keydown", listeners.key, true);
   Hooks.on("moinenMapsRoads", onRoadsEvent);
   redraw();
@@ -410,7 +414,7 @@ function teardownListeners() {
   v?.removeEventListener("pointerdown", listeners.down, true); v?.removeEventListener("pointermove", listeners.move);
   v?.removeEventListener("pointerleave", listeners.leave); v?.removeEventListener("contextmenu", listeners.menu, true);
   v?.removeEventListener("dblclick", listeners.dbl, true);
-  window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel);
+  window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel); window.removeEventListener("blur", listeners.blur);
   window.removeEventListener("keydown", listeners.key, true);
   Hooks.off("moinenMapsRoads", onRoadsEvent);
   listeners = null;

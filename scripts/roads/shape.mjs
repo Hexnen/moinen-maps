@@ -39,7 +39,8 @@ export function select(id) {
   Roads.tell("select");
 }
 
-export function reset() { drag = null; clearTimeout(previewTimer); previewTimer = 0; select(null); }
+/** The tool goes away: a drag in progress is dropped (the real roads come back on screen) and the selection cleared. */
+export function reset() { cancel(); clearTimeout(previewTimer); previewTimer = 0; select(null); }
 
 export function attach() {
   if ( marks && !marks.destroyed ) return;
@@ -49,6 +50,8 @@ export function attach() {
 }
 
 export function detach() {
+  if ( drag ) Roads.previewGraph(null);
+  clearTimeout(previewTimer); previewTimer = 0;
   if ( marks && !marks.destroyed ) marks.destroy();
   marks = null; drag = null; sel = null; pick = hover = -1;
 }
@@ -206,7 +209,8 @@ export function key(ev) {
   if ( ev.key === "Escape" ) { if ( cancel() ) return true; if ( sel != null ) { select(null); return true; } return false; }
   if ( (ev.key === "Delete" || ev.key === "Backspace") && e ) {
     if ( pick > 0 && pick < (e.pts.length >> 1) - 1 ) { Roads.edit((G) => Graph.removePoint(G, e.id, pick)); pick = -1; }
-    else { const id = e.id; select(null); Roads.edit((G) => Graph.removeEdge(G, id, g())); }
+    // only Delete removes the whole road; Backspace is too easy to hit by accident (it is still taken, so nothing else acts on it)
+    else if ( ev.key === "Delete" ) { const id = e.id; select(null); Roads.edit((G) => Graph.removeEdge(G, id, g())); }
     draw();
     return true;
   }
