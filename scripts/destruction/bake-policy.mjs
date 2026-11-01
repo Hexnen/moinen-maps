@@ -39,7 +39,9 @@ export const BAKE_VERSIONS = {
   29: { compat: 28, note: "torn lip ink, short cave-in hairlines" }, 30: { compat: 29, note: "cracks as a hierarchy" },
   31: { compat: 30, note: "cause treatments: bolts, sigils, rim, scratches, erosion, rime" },
   32: { compat: 31, note: "crack plates a little bigger at the crater level" },
-  33: { compat: 32, note: "lightning forks at 30-60 degrees off the channel" }
+  33: { compat: 32, note: "lightning forks at 30-60 degrees off the channel" },
+  // 35 changes a tear's SHAPE (asymmetric opening, flaps torn off, inset from the stroke's border): no compat, re-baked at load
+  35: { compat: null, note: "tears: asymmetric opening, flaps that curl or tear off, snapping fibres" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
