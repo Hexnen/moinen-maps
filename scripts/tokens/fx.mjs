@@ -207,7 +207,12 @@ function drawCracks(box, W, H, seed, ap, upto = 1) {
     for ( let k = 0; k < n; k++ ) {
       const [x0, y0] = pts[k], [x1, y1] = pts[k + 1];
       const steps = Math.max(1, Math.round(Math.hypot((x1 - x0) * W, (y1 - y0) * H) / ap));
-      for ( let q = 0; q <= steps; q++ ) addPx(box, Math.round((x0 + (x1 - x0) * q / steps) * W / ap) * ap, Math.round((y0 + (y1 - y0) * q / steps) * H / ap) * ap, ap, 0x2a2622, 0.75);
+      for ( let q = 0; q <= steps; q++ ) {
+        // a dark crack with a lit lower lip, so it reads at any zoom
+        const x = Math.round((x0 + (x1 - x0) * q / steps) * W / ap) * ap, y = Math.round((y0 + (y1 - y0) * q / steps) * H / ap) * ap;
+        addPx(box, x, y + ap, ap, 0xe4ded4, 0.55);
+        addPx(box, x, y, ap, 0x1c1916, 0.95);
+      }
     }
   }
 }
@@ -387,7 +392,9 @@ class Rig {
 
   /** The corpse badge (skull) and petrified cracks: children of the token, re-made after a redraw. */
   #overlay() {
-    const t = this.token, want = this.corpse && !this.fx ? `${this.corpse.skull ? "s" : ""}${this.corpse.cracks ? "c" : ""}` : "";
+    // no skull of ours when Foundry already lays its own big Dead overlay over the token
+    const t = this.token, skull = this.corpse?.skull && !coreDeadOverlay(t);
+    const want = this.corpse && !this.fx ? `${skull ? "s" : ""}${this.corpse.cracks ? "c" : ""}` : "";
     const ok = this.overlay && !this.overlay.destroyed && this.overlay.parent === t;
     if ( want === this.overlayKey && (ok || !want) ) return;
     if ( this.overlay && !this.overlay.destroyed ) this.overlay.destroy({ children: true });
@@ -396,7 +403,7 @@ class Rig {
     const box = this.overlay = new PIXI.Container(); box.eventMode = "none"; box._mmReticle = true;
     const { width: W, height: H } = t.document.getSize(), ap = artPx();
     if ( this.corpse.cracks ) drawCracks(box, W, H, this.seed, ap);
-    if ( this.corpse.skull ) drawSkull(box, Math.round((W - 9 * ap) / ap) * ap, ap * 2, ap);
+    if ( skull ) drawSkull(box, Math.round((W - 9 * ap) / ap) * ap, ap * 2, ap);
     box.zIndex = 4000;
     t.addChild(box);
   }
@@ -702,6 +709,12 @@ Hooks.on("moinenMapsTokenFxBusy", (token) => { const r = RIGS.get(token); if ( r
 /* ================================================================== death: detection and state */
 
 const DEFEATED = () => CONFIG.specialStatusEffects?.DEFEATED ?? "dead";
+/** Does the token show Foundry's own overlay icon of the Dead status (toggled as an overlay from the HUD or the combat tracker)? */
+function coreDeadOverlay(token) {
+  const id = DEFEATED();
+  for ( const e of token.actor?.effects ?? [] ) if ( !e.disabled && e.statuses?.has(id) && e.getFlag?.("core", "overlay") ) return true;
+  return false;
+}
 /** A combat counts for the viewed scene when linked to it or to no scene (see token-drop.mjs combatApplies). */
 const combatApplies = (combat) => !!combat && (!combat.scene || combat.scene.id === canvas.scene?.id);
 function combatHere() { return game.combats?.some?.((c) => c.started && combatApplies(c)) ?? false; }

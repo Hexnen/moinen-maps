@@ -350,7 +350,7 @@ function overridesPanel(host) {
     const rows = toks.map((t) => {
       const o = St.overridesOf(tokenFlag(t.document)), on = picked.has(t.id), dead = isDeadDoc(t.document);
       const chips = Object.entries(o).map(([k, v]) => `<span class="mm-tfx-ov"><span>${esc(keyLabel(k))}</span> ${esc(valueLabel(k, v))}</span>`).join("");
-      return `<li class="${on ? "is-picked" : ""}"><label><input type="checkbox" data-pick="${esc(t.id)}"${on ? " checked" : ""}>
+      return `<li class="${on ? "is-picked" : ""}"><label><input type="checkbox" data-pick="${esc(t.id)}" aria-label="${esc(t.document.name)}"${on ? " checked" : ""}>
         <img src="${esc(t.document.texture.src)}" alt="" inert><span class="mm-tfx-name">${esc(t.document.name)}${dead ? ` <i class="fa-solid fa-skull" data-tooltip="${esc(T("TokFx.isDead"))}" aria-label="${esc(T("TokFx.isDead"))}"></i>` : ""}</span></label>
         ${chips ? `<div class="mm-tfx-ovs">${chips}</div>` : ""}</li>`;
     }).join("");

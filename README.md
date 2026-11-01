@@ -2,7 +2,7 @@
 
 Foundry VTT v14 module: map notes become hand-inked animated pins (bouncy drop, hop, idle motion), standalone pins without notes from one toolbar tool with a pin palette (Classic, Fantasy and Modern presets, plus your own custom presets), and freehand painted "districts" with inked outlines, hatch/halftone fills, labels, attributes and hover effects. Configured per scene in the Pins tab of Scene Config.
 
-The GM works from one scene-controls button, **Moinen Maps Tools**. Its second column holds the sections (Pins, Districts, Water, Roads, and Destruction and Zones still to come); a section opens a workspace: its tools, the active tool's options and its actions in a bar across the top of the canvas, its lists and settings as collapsible panels in a dock left of the sidebar. Players get only the read-only list of revealed districts, when the scene allows it.
+The GM works from one scene-controls button, **Moinen Maps Tools**. Its second column holds the sections (Pins, Districts, Water, Roads, Tokens, and Destruction and Zones still to come); a section opens a workspace: its tools, the active tool's options and its actions in a bar across the top of the canvas, its lists and settings as collapsible panels in a dock left of the sidebar. Players get only the read-only list of revealed districts, when the scene allows it.
 
 ## Water
 
@@ -16,6 +16,16 @@ Paint rivers, lakes, ponds and waterfalls on the map and they become a seamlessl
 - **Tokens under the water:** a token with an elevation below zero that stands in water is veiled by the water (darker the deeper it is, wavering) with bubbles rising from it. Nothing is baked and the token itself is untouched.
 - **How it is shared:** the masks and settings are saved in the scene. A few seconds after the GM's last change the GM's client uploads the baked water as one PNG to `worlds/<world>/moinen-maps/` and players download it, with no baking, no worker and no waiting (about 66 KB for 16 frames of a small scene). A client that cannot get it (the GM has no upload right, or edited since) bakes the same seeded loop itself, and keeps the result in the browser for next time. The art pixel size (Output tab) sets how many scene pixels one pixel of the water art covers; smaller is finer and slower to bake.
 - The waterfalls and the mouth are drawn for a side or oblique view (falling toward the bottom of the screen); lakes, ponds and rivers work from any angle (set the river's Way and the drift's direction).
+
+## Tokens
+
+How tokens enter and leave the scene, how they idle and how they die. Moinen Maps Tools → Tokens: a pick tool (click a token, Shift+click adds; Foundry's own selection is where it starts) and buttons that play an effect on the picked tokens on your screen only, plus one that marks them dead or alive (the core Dead status). The bar holds the effect in hand, its style for the scene, intensity, speed and "Set on picked"; the dock holds Entering, Leaving, Idle, Death, Targeting and combat (the older drop, hide / reveal, reticle and combat entry options, also still in the Scene Config Tokens fieldset) and the scene's tokens with their own styles.
+
+- **Entering** (placed on the map or dragged in; revealed): drop, soft pop, fade in with dust, pop with a squash, materialise (its pixels fly in), warp in (a beam and a flash), slide in from the nearest scene edge, rise out of the ground, portal, none.
+- **Leaving** (deleted; hidden): played on a copy of the token, so the deletion itself is never delayed: puff, dissolve into its pixels, fade with dust, shrink to a sparkle, warp out, sink, burst into confetti of its own colours, pixel smoke, slide off, none. A dead token does not leave again.
+- **Idle:** breathe, bob, sway, wobble, hover (its shadow pulses), flicker, glow, wiggle on hover; strength, tempo, when (always, standing still, out of combat), stronger on its combat turn. The mesh transform only, a different phase per token, nothing off screen, paused during other effects and while dragged; off in Performance mode Low and with reduced motion.
+- **Death:** a token is dead when it is marked defeated in the combat tracker, has the Dead status, or (off by default) its hit points reach 0 (the known path of the game system or one you type; in Invincible health 0 means broken). Fall over, collapse, grey and skull, disintegrate, burst (no gore), soul wisp, petrify, slump, melt; then the corpse look (lies as it fell, standing grey, faded out, unchanged) applied on every later draw, so a reload never plays the death again; revived tokens stand up again (or at once).
+- **Own styles:** any token can override each style (flags.moinen-maps.fx); the token's own style beats the scene's, which beats the built-in. Nothing here writes a document while it plays: every client draws the same from the same hooks. Each player can switch token effects off for their own screen (module setting "Token effects on this client"). Bursts of more than 25 tokens at once are not animated.
 
 ## Roads
 
