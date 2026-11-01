@@ -123,3 +123,81 @@ export async function trace(ms = 4500, fn = null) {
   return { fnMs: Math.round(fnMs), frames: rows.length, animFrames: animRows.length, cpu: stat("cpu", animRows), gpu: stat("gpu", animRows), layer: stat("layer", animRows),
     rows: rows.map((r) => [r.t, +r.cpu.toFixed(1), r.gpu === undefined ? null : +r.gpu.toFixed(1), +r.layer.toFixed(1), r.mode, r.anim, r.parts]) };
 }
+
+/**
+ * ENTRY START CHECK (frozen clock): every area enters (a local Detonate) at a frozen moment; the shards are made as they would be
+ * (frames stepped a hundredth of a ms apart); then nothing of an entering area may show before its time:
+ *  - every piece whose life has not begun (now < t0 - pre) is hidden or not made,
+ *  - the layer's pixels equal the layer with every entering area hidden (flood water hidden in both: it loops on its own clock).
+ * Returns { areas, early (visible pieces before their time), mean, max, bad (pixels off by more than 8) }; all 0 is a pass.
+ */
+export function entryCheck() {
+  const d = D(), A = game.modules.get("moinen-maps").api.destruction, T = canvas.app.ticker, real = performance.now.bind(performance);
+  CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache; CONFIG.moinenMaps.noDestructionCache = true;
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const waters = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; waters.push(ch); }
+  let F = real(); performance.now = () => F;
+  try {
+    T.update(F);
+    A.replay();                                   // every area enters, start = now
+    for ( let i = 0; i < 60; i++ ) { F += 0.01; T.update(F); }
+    const now = F, entering = d.order.filter((g) => g.anim);
+    let early = 0;
+    for ( const g of entering ) for ( const it of g.anim.list ) {
+      if ( g.anim.tear ) continue;                // a tear's pieces keep their own clock (tear-entry.mjs)
+      if ( now < it.t0 - it.pre && it.p.spr?.visible && it.p.spr.alpha > 0 ) early++;
+    }
+    const a = grab();
+    for ( const g of entering ) g.cont.visible = false;
+    const b = grab();
+    for ( const g of entering ) g.cont.visible = true;
+    let sum = 0, max = 0, bad = 0;
+    for ( let i = 0; i < a.length; i++ ) { const v = Math.abs(a[i] - b[i]); sum += v; if ( v > max ) max = v; if ( v > 8 ) bad++; }
+    for ( const g of entering ) d.endAnim(g);
+    F += 10000; T.update(F);
+    return { areas: entering.length, early, mean: +(sum / (a.length / 4)).toFixed(3), max, bad };
+  } finally {
+    performance.now = real; waters.forEach((w) => { w.visible = true; });
+    CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start();
+  }
+}
+
+/**
+ * FROZEN-CLOCK A/B of a whole-scene entry against another renderer: `oldUrl` a copy of an older display.mjs served next to this one
+ * (e.g. `git show <rev>:scripts/destruction/display.mjs > scripts/destruction/zz-display-old.mjs`, deleted after); its entry methods
+ * run on shard sprites made beforehand (as the old renderer had them), then this renderer runs from its own state (flattened areas).
+ * Returns per time [ms, mean |d| per pixel, max, channels off by more than 8]; flood water hidden (it loops on its own clock).
+ * `preMat`: make this renderer's shards at once too (isolates the logic from the shards being made over frames).
+ */
+export async function abOld(oldUrl, times = [0, 60, 120, 300, 600, 1000, 1600, 2400, 3600], preMat = false) {
+  const Old = (await import(`${oldUrl}?v=${Date.now()}`)).DestructionDisplay.prototype;
+  const d = D(), T = canvas.app.ticker, names = ["enter", "animate", "erode", "makeDissolve", "stepDissolve", "endAnim"];
+  const real = performance.now.bind(performance); CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache;
+  CONFIG.moinenMaps.noDestructionCache = true; const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  const run = (useOld) => {
+    let F = real(); performance.now = () => F; T.update(F);
+    if ( useOld ) { for ( const g of d.order ) if ( g.flat ) d.unflatten(g); for ( const g of d.order ) d.materialize(g, Infinity); for ( const n of names ) d[n] = Old[n]; }
+    const start = F + 5;
+    for ( const g of d.order ) d.enter(g, { start });
+    if ( !useOld && preMat ) for ( const g of d.order ) d.materialize(g, Infinity);
+    const shots = []; let t = F;
+    for ( const dt of times ) { while ( t < start + dt ) { t = Math.min(start + dt, t + 16); F = t; T.update(F); } shots.push(grab()); }
+    for ( const g of d.order ) d.endAnim(g);
+    F += 10000; T.update(F);
+    for ( const n of names ) delete d[n];
+    performance.now = real;
+    if ( useOld ) for ( const g of d.order ) d.flatten(g);
+    return shots;
+  };
+  let a, b;
+  try { a = run(true); b = run(false); }
+  finally { performance.now = real; for ( const n of names ) delete d[n]; ws.forEach((w) => { w.visible = true; }); CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start(); }
+  return times.map((dt, k) => {
+    const x = a[k], y = b[k]; let s = 0, m = 0, bad = 0;
+    for ( let i = 0; i < x.length; i++ ) { const v = Math.abs(x[i] - y[i]); s += v; if ( v > m ) m = v; if ( v > 8 ) bad++; }
+    return [dt, +(s / (x.length / 4)).toFixed(3), m, bad];
+  });
+}

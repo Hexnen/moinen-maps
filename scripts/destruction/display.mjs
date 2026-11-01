@@ -288,7 +288,7 @@ export class DestructionDisplay {
       const flags = meta[o + 11];
       rect.x0 = Math.min(rect.x0, meta[o + 5], meta[o + 7]); rect.y0 = Math.min(rect.y0, meta[o + 6], meta[o + 8]);
       rect.x1 = Math.max(rect.x1, meta[o + 5] + w, meta[o + 7] + w); rect.y1 = Math.max(rect.y1, meta[o + 6] + h, meta[o + 8] + h);
-      return { spr: null, frame: k + 1, fx, fy, sx: meta[o + 7] + w / 2, sy: meta[o + 8] + h / 2, rot: meta[o + 9] / 1000, dist: meta[o + 10] / 4,
+      return { spr: null, frame: k + 1, w, h, fx, fy, sx: meta[o + 7] + w / 2, sy: meta[o + 8] + h / 2, rot: meta[o + 9] / 1000, dist: meta[o + 10] / 4,
         chip: !!(flags & 1), thrown: !!(flags & 2), moved: !!(flags & 4), z0: meta[o + 12] / 10, ptype: TYPES[meta[o + 13]] ?? info.type };
     });
     info.rect = rect;
@@ -350,6 +350,7 @@ export class DestructionDisplay {
       s.parent?.removeChild(s);
       if ( this.spritePool.length < 80000 ) this.spritePool.push(s); else s.destroy();
     }
+    g.madeIdx = []; g.sheetCur = 0;
   }
 
   /** Areas whose entry ended a while ago (nothing moves in them, nothing held under them) go back to one sprite each. */
@@ -375,26 +376,56 @@ export class DestructionDisplay {
     if ( !g.flat ) return;
     const ap = this.ap, o = this.origin;
     g.baseSpr.texture = g.baseTex; g.baseSpr.scale.set(ap); g.baseSpr.position.set(o.x + g.info.x * ap, o.y + g.info.y * ap);
-    g.flatTex?.destroy(true); g.flatTex = null; g.flat = false; g.made = 0; g.cont._mmv = (g.cont._mmv | 0) + 1;
+    g.flatTex?.destroy(true); g.flatTex = null; g.flat = false; g.made = 0; g.madeIdx = []; g.sheetCur = 0; g.cont._mmv = (g.cont._mmv | 0) + 1;
     this.stats.unflat = (this.stats.unflat ?? 0) + 1;
   }
 
-  /** Make up to `n` more shard sprites of a group (in order, so the drawing order stays); returns how many were made. */
-  materialize(g, n) {
-    const ap = this.ap, org = this.origin, end = Math.min(g.pieces.length, g.made + n), start = g.made;
-    for ( ; g.made < end; g.made++ ) {
-      const p = g.pieces[g.made];
-      // pooled: an area flattened again after its entry gives its shard sprites back (flatten / release)
-      const spr = p.spr = this.spritePool.pop() ?? new PIXI.Sprite();
-      spr.texture = g.frame(p.frame); spr.visible = true; spr.alpha = 1; spr.tint = 0xFFFFFF; spr.rotation = 0;
-      spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
-      spr.position.set(org.x + p.fx * ap, org.y + p.fy * ap);
-      if ( p.fading ) spr.alpha = 0;
-      g.shardCont.addChild(spr);
-      const it = g.anim?.byPiece?.get(p);
-      if ( it ) this.place(p, Math.max(0, (performance.now() - it.t0) / it.dur), it, g.info.type);
+  /**
+   * Make up to `n` more shard sprites of a group; returns how many were made. While the area enters (a flattened area makes its
+   * shards only then) the ones whose life begins first are made first; each sprite goes to its sheet position among the made ones,
+   * so the drawing order is the sheet's whatever order they are made in.
+   */
+  materialize(g, n, until = Infinity) {
+    const N = g.pieces.length; if ( g.made >= N || n <= 0 ) return 0;
+    const a = g.anim, timed = !!(a && !a.tear && a.list?.length === N);
+    if ( timed && !a.startOrder ) {
+      const o = Array.from({ length: N }, (_, k) => k), L = a.list;
+      o.sort((x, y) => (L[x].t0 - L[x].pre) - (L[y].t0 - L[y].pre)); a.startOrder = o; a.matCur = 0;
     }
-    return g.made - start;
+    let made = 0;
+    while ( made < n && g.made < N ) {
+      let k;
+      if ( timed ) {
+        while ( a.matCur < N && g.pieces[a.startOrder[a.matCur]].spr ) a.matCur++;
+        if ( a.matCur >= N ) break;
+        const it = a.list[a.startOrder[a.matCur]]; if ( it.t0 - it.pre > until ) break;   // (only those due before `until`)
+        k = a.startOrder[a.matCur++];
+      }
+      else { g.sheetCur ??= 0; while ( g.sheetCur < N && g.pieces[g.sheetCur].spr ) g.sheetCur++; if ( g.sheetCur >= N ) break; k = g.sheetCur++; }
+      this.makePiece(g, k); made++; g.made++;
+    }
+    return made;
+  }
+
+  makePiece(g, k) {
+    const ap = this.ap, org = this.origin, p = g.pieces[k];
+    // pooled: an area flattened again after its entry gives its shard sprites back (flatten / release)
+    const spr = p.spr = this.spritePool.pop() ?? new PIXI.Sprite();
+    spr.texture = g.frame(p.frame); spr.visible = true; spr.alpha = 1; spr.tint = 0xFFFFFF; spr.rotation = 0;
+    spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
+    spr.position.set(org.x + p.fx * ap, org.y + p.fy * ap);
+    if ( p.fading ) spr.alpha = 0;
+    // its sheet position among the made ones (binary search over their sheet indices)
+    const M = g.madeIdx ??= [];
+    let lo = 0, hi = M.length;
+    while ( lo < hi ) { const mid = (lo + hi) >> 1; if ( M[mid] < k ) lo = mid + 1; else hi = mid; }
+    M.splice(lo, 0, k);
+    g.shardCont.addChildAt(spr, lo);
+    const it = g.anim?.byPiece?.get(p);
+    // a piece made during its area's entry takes the pose of its own moment: hidden before its life begins (enter hid every piece
+    // with place(p, -9); a flattened area has no sprites then, so they are hidden here as they are made - livesActive never visits
+    // a piece before its start)
+    if ( it ) this.place(p, (performance.now() - it.t0) / it.dur, it, g.info.type);
   }
 
   /**
@@ -680,7 +711,8 @@ export class DestructionDisplay {
       if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
-      const size = p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
+      // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
+      const size = p.w ? Math.sqrt(p.w * p.h) : p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
       const t0 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * 90 * k;
       const dur = (p.thrown ? 380 + Math.min(460, dd * 14) : 260 + Math.min(220, dd * 30)) * L.flight * k * (0.8 + 0.45 * hB) * (0.85 + Math.min(0.5, size / 40));
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw * (0.7 + 0.6 * hC) + (info.type === "cracks" ? 1.5 : 0);
@@ -692,6 +724,8 @@ export class DestructionDisplay {
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
+    // a flattened area has no shards yet: the ones due in its first 150 ms at once, the rest a slice per frame, earliest first (tick)
+    if ( g.made < g.pieces.length && !tear ) this.materialize(g, Infinity, start + 150);
     for ( const u of under ) u.heldBy = g;
     this.stats.entries++;
   }
@@ -984,7 +1018,15 @@ export class DestructionDisplay {
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
     const vw = this.view();
+    // entering areas first and faster (a flattened area makes its shards when it enters: they must exist before the front reaches them)
     let budget = 350;
+    const need = this.order.filter((g) => g.anim && g.made < g.pieces.length);
+    if ( need.length ) {
+      budget = 2500;
+      const share = Math.max(40, Math.floor(budget / need.length));     // every entering area its earliest pieces first
+      for ( const g of need ) if ( budget > 0 ) budget -= this.materialize(g, Math.min(share, budget));
+      for ( const g of need ) if ( budget > 0 ) budget -= this.materialize(g, budget);
+    }
     for ( const g of this.order ) if ( budget > 0 && g.made < g.pieces.length ) budget -= this.materialize(g, budget);
     if ( this.clocks.length ) this.clockSlice(6, vw);
     this.reflatten(t0);
