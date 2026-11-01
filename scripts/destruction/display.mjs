@@ -4,6 +4,15 @@ import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.
 import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas } from "./pixel-fx.mjs";
 import { StaticCache } from "./static-cache.mjs";
+import { MaskedPatch } from "./masked-map.mjs";
+
+/** The plain map under a mask: one shader quad (masked-map.mjs); `CONFIG.moinenMaps.spriteMasks = true`: PIXI's sprite mask (A/B). */
+function maskedMap(ms, mask) {
+  if ( !globalThis.CONFIG?.moinenMaps?.spriteMasks ) return new MaskedPatch(ms, mask);
+  const c = new PIXI.Container(); c.eventMode = "none";
+  c.addChild(ms, mask); ms.mask = mask;
+  return c;
+}
 
 /**
  * Shows a bake, AREA BY AREA: every damaged area is a group (its own small texture atlas, a base sprite with what lies beneath, and
@@ -321,8 +330,7 @@ export class DestructionDisplay {
     const c = g.coverFrame, ap = this.ap, o = this.origin;
     const mask = new PIXI.Sprite(c.tex);
     mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(o.x + c.x * ap, o.y + c.y * ap);
-    const patch = new PIXI.Container(); patch.eventMode = "none";
-    patch.addChild(ms, mask); ms.mask = mask;
+    const patch = maskedMap(ms, mask);
     g.patch = patch;
     g.cont.addChildAt(patch, 0);
   }
@@ -336,8 +344,7 @@ export class DestructionDisplay {
     const tex = PIXI.Texture.fromBuffer(a, W, H);
     const ms = this.mapSprite(); if ( !ms ) { tex.destroy(true); return null; }
     const mask = new PIXI.Sprite(tex); mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(org.x + ob.x0 * K * ap, org.y + ob.y0 * K * ap);
-    const cont = new PIXI.Container(); cont.eventMode = "none";
-    cont.addChild(ms, mask); ms.mask = mask;
+    const cont = maskedMap(ms, mask);
     const rect = { x0: ob.x0 * K, y0: ob.y0 * K, x1: (ob.x0 + ob.w) * K, y1: (ob.y0 + ob.h) * K };
     return { erase: true, id: ob.id, cont, tex, info: { rect }, objIndex: 0, data: a, w: W, h: H, frame: mask.texture };
   }
