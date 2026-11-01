@@ -19,6 +19,8 @@ const opt = (k) => game.settings.get(MODULE_ID, k);
 
 let cursor = null, overlay = null, overlayCtx = null, overlayImg = null, overlayTex = null, listeners = null;
 let stroke = null, lastPoint = null;
+/** A stroke waiting for the engine to start: where the pointer went meanwhile and whether the button was let go. */
+let starting = null;
 const undo = [];
 
 export function registerWaterEditorSettings() {
@@ -94,18 +96,30 @@ export function syncTool() {
 /* ---------------------------------------------------------------- strokes */
 
 async function onDown(ev) {
-  if ( ev.button !== 0 || !active() || stroke ) return;
+  if ( ev.button !== 0 || !active() || stroke || starting ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
-  const S = await Water.ensureState();
+  const from = worldPoint(ev);
+  // the first stroke on a scene without water starts the engine, which takes a moment: the pointer is followed meanwhile and the
+  // stroke is drawn once the engine is ready, even when the button was let go before that
+  const wait = starting = { to: from, up: false };
+  let S;
+  try { S = await Water.ensureState(); }
+  catch ( err ) {
+    console.error(`${MODULE_ID} | water engine`, err);
+    ui.notifications.error(T("Water.engineFailed"));
+    return;
+  } finally { starting = null; }
+  if ( !active() ) return;
   if ( !overlay ) buildOverlay();
   const layer = layerOf();
   // a snapshot of what this stroke may change, for undo
   const names = layer ? [layer] : Model.LAYERS;
   undo.push({ rev: S.rev, px: S.px, layers: Object.fromEntries(names.map((n) => [n, S.masks[n].slice()])) });
   if ( undo.length > UNDO_MAX ) undo.shift();
-  const p = worldPoint(ev);
-  stroke = { last: p, changed: false };
-  paint(p, p);
+  stroke = { last: from, changed: false };
+  paint(from, from);
+  if ( wait.to !== from ) { paint(from, wait.to); stroke.last = wait.to; }
+  if ( wait.up ) endStroke();
 }
 
 function paint(a, b) {
@@ -140,16 +154,23 @@ function onMove(ev) {
   if ( !active() ) { cursor?.clear(); return; }
   const p = worldPoint(ev);
   drawCursor(p);
-  if ( stroke ) { paint(stroke.last, p); stroke.last = p; }
+  if ( starting ) starting.to = p;
+  else if ( stroke ) { paint(stroke.last, p); stroke.last = p; }
 }
 
 function onUp(ev) {
-  if ( !stroke || ev.button !== 0 ) return;
+  if ( ev.button !== 0 ) return;
+  if ( starting ) starting.up = true;
+  else endStroke();
+}
+
+function endStroke() {
+  if ( !stroke ) return;
   const s = stroke; stroke = null;
   if ( s.changed ) Water.edited(); else undo.pop();
 }
 
-function cancelStroke() { if ( stroke ) { stroke = null; Water.edited(); } }
+function cancelStroke() { if ( starting ) starting.up = true; if ( stroke ) { stroke = null; Water.edited(); } }
 
 /** Ctrl+Z while a water tool is active: back one stroke. */
 function undoStroke() {
@@ -211,6 +232,6 @@ export function teardown() {
   }
   destroyOverlay();
   if ( cursor && !cursor.destroyed ) cursor.destroy({ children: true });
-  cursor = null; stroke = null; lastPoint = null; undo.length = 0;
+  cursor = null; stroke = null; starting = null; lastPoint = null; undo.length = 0;
   document.body.classList.remove("mm-painting-water");
 }

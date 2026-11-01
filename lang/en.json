@@ -411,6 +411,7 @@
   "MOINENMAPS.Water.h.px": "Scene pixels per art pixel. Smaller is finer, and slower to bake",
   "MOINENMAPS.Water.pxInfo": "{w} × {h} art pixels, about {s} s to bake",
   "MOINENMAPS.Water.publishFailed": "The baked water could not be uploaded to the world folder (the GM needs file upload rights). Players will bake it themselves.",
+  "MOINENMAPS.Water.engineFailed": "The water engine could not start, so the water cannot be painted. The console (F12) says why.",
   "MOINENMAPS.Water.f.enabled": "Show the water",
   "MOINENMAPS.Water.h.enabled": "Turn the water on this scene on or off (the paint is kept)",
   "MOINENMAPS.Water.f.frames": "Frames",
