@@ -295,7 +295,8 @@ export class DestructionDisplay {
       rect.x0 = Math.min(rect.x0, meta[o + 5], meta[o + 7]); rect.y0 = Math.min(rect.y0, meta[o + 6], meta[o + 8]);
       rect.x1 = Math.max(rect.x1, meta[o + 5] + w, meta[o + 7] + w); rect.y1 = Math.max(rect.y1, meta[o + 6] + h, meta[o + 8] + h);
       return { spr: null, frame: k + 1, w, h, fx, fy, sx: meta[o + 7] + w / 2, sy: meta[o + 8] + h / 2, rot: meta[o + 9] / 1000, dist: meta[o + 10] / 4,
-        chip: !!(flags & 1), thrown: !!(flags & 2), moved: !!(flags & 4), z0: meta[o + 12] / 10, ptype: TYPES[meta[o + 13]] ?? info.type };
+        chip: !!(flags & 1), thrown: !!(flags & 2), moved: !!(flags & 4), z0: meta[o + 12] / 10, ptype: TYPES[meta[o + 13]] ?? info.type,
+        tk: meta[o + 14], tvx: meta[o + 15] / 16, tvy: meta[o + 16] / 16, tq: meta[o + 17] };   // (a tear piece's part in its entry: tear.mjs / tear-entry.mjs)
     });
     info.rect = rect;
     // culling by a fixed area (no bounds walk over thousands of shards each frame); room for flying pieces

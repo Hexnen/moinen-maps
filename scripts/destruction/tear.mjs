@@ -362,7 +362,9 @@ export function bakeTear(X) {
     let lay = 2 + k * 4096 + j;
     // each flap its own tilt (a step lighter or darker), and a dark seam where two flaps parted, from the gap outwards
     c = mul(c, seg.tone);
-    if ( e < Z * 0.7 && Math.min(sn - cuts[k][j], (cuts[k][j + 1] ?? Infinity) - sn) < 0.55 ) c = mix(c, ink, 0.5 * (1 - e / (Z * 0.7)) + 0.15);
+    // (short: a nick of 1-3 px at the torn edge, never a stick across the lip)
+    const seamL = Math.min(Z * 0.6, 1 + 2 * h2(j, k, sd + 42));
+    if ( e < seamL && Math.min(sn - cuts[k][j], (cuts[k][j + 1] ?? Infinity) - sn) < 0.55 ) c = mix(c, ink, 0.45 * (1 - e / seamL) + 0.1);
     if ( seg.b === CURL ) {
       const f = seg.fold;
       if ( e < f ) {
@@ -434,13 +436,16 @@ export function bakeTear(X) {
     const x = o % W, y = (o - x) / W, i = at(sA[o]), d = dA[o], w = wAt(i), deep = deepOf(i);
     if ( w < 0.9 ) { put(o, mix(mapAt(x, y), ink, 0.86), BASE); continue; }   // a hairline rip: one dark pixel
     // the far wall: the north lip's broken face, seen face-on by the oblique camera
-    const wallH = clamp(Math.round(w * 0.55 + deep), 1, 4);
+    // (its height wanders from column to column: never even bands along the rip)
+    const wallH = clamp(Math.round(w * 0.55 + deep + (vnoise(x / 3.5, 0.5, sd + 59) - 0.5) * 1.6), 1, 4);
     let wall = 0;
     for ( let k = 1; k <= wallH; k++ ) { const q = o - k * W; if ( q < 0 || !openA[q] ) { wall = k; break; } }
     if ( wall ) {
       // (the top row is the lip's own torn edge in shade: on turf the soil, never a row of dark green)
       const above = mapAt(x, y - wall), top = mat === "grass" ? mix(mul(above, 0.55), pal.strata[0], 0.65) : mul(above, 0.55);
-      put(o, wall === 1 ? top : wall === 2 ? pal.strata[0] : ((x + y) & 1 ? pal.strata[1] : mul(pal.strata[1], 0.86)), BASE);
+      // the strata dithered into each other (a ragged seam, not a ruled line)
+      const band = wall + (bayer(x, y) - 0.5) * 0.9 + (h2(x, y, sd + 58) - 0.5) * 0.5;
+      put(o, band < 1.5 ? top : band < 2.5 ? pal.strata[0] : ((x + y) & 1 ? pal.strata[1] : mul(pal.strata[1], 0.86)), BASE);
       continue;
     }
     const toL = eL[i] - d, toR = eR[i] + d, m = Math.min(toL, toR), dn = clamp(m / Math.max(0.8, w), 0, 1);
@@ -478,11 +483,14 @@ export function bakeTear(X) {
       if ( s < 0 ) continue;
       const i0 = at(s), w = wAt(i0); if ( w < 1.5 ) continue;
       placed.push(s);
-      const i1 = at(s + (R() < 0.5 ? -1 : 1) * (0.8 + R()) * w);   // always slanted, never a comb of upright ticks
+      const i1 = at(s + (R() < 0.5 ? -1 : 1) * Math.max((0.8 + R()) * w, 0.9 * (eL[i0] + eR[i0])));   // always slanted, never a comb of upright ticks
       const a = [SX[i0] + NX[i0] * (eL[i0] + 0.2), SY[i0] + NY[i0] * (eL[i0] + 0.2)], b = [SX[i1] - NX[i1] * (eR[i1] + 0.2), SY[i1] - NY[i1] * (eR[i1] + 0.2)];
       const fc = fibreColour(a), whole = R() < 0.22, span = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      // a strand runs slanted (never a straight stick across the gap) and is no longer than a hand's breadth of the gap
+      const along = Math.abs((b[0] - a[0]) * TX[i0] + (b[1] - a[1]) * TY[i0]), across = Math.abs((b[0] - a[0]) * NX[i0] + (b[1] - a[1]) * NY[i0]);
+      if ( along < 0.6 * across ) continue;
       if ( whole ) { fibre(a, b, 0, 1, fc, Math.min(2, span * 0.15), 0); continue; }
-      const tb = 0.3 + 0.4 * R(), keepB = 0.6 + 0.4 * R(), snapAt = R();
+      const tb = Math.min(0.3 + 0.4 * R(), 9 / span), keepB = Math.min(0.6 + 0.4 * R(), 9 / Math.max(1, span * (1 - tb))), snapAt = R();
       for ( const [p, q, t1] of [[a, b, tb], [b, a, (1 - tb) * keepB]] ) {
         const id = fibs.length + 1;
         if ( fibre(p, q, 0, t1, fc, 1 + R(), id) ) fibs.push({ id, root: p, reach: span / Math.max(1, span * t1), snapAt });
@@ -493,7 +501,7 @@ export function bakeTear(X) {
   function fibreColour(p) {
     // in the gap's shade: never brighter than the lip it hangs from; turf hangs ROOTS (pale earthy), never green specks
     const c = mapAt(p[0], p[1]);
-    if ( mat === "grass" ) return R() < 0.5 ? mix(pal.strata[0], [190, 168, 120], 0.4) : mix(pal.strata[0], rp[2], 0.3);
+    if ( mat === "grass" ) return R() < 0.5 ? mix(pal.strata[0], [150, 128, 94], 0.3) : mix(pal.strata[0], rp[2], 0.3);
     if ( mat === "wood" ) return mix(add(mul(c, 1.2), 12, 6, 0), rp[2], 0.3);
     return mix(mul(mix(c, grey(c), 0.5), 1.05), rp[2], 0.35);
   }
@@ -836,6 +844,6 @@ export function bakeTear(X) {
   const DBG = globalThis.__MM_TEAR_DEBUG;
   if ( Array.isArray(DBG) ) DBG.push({ W, H, RX, RY, L, eL, eR, open: openA, col, layer, crack: crackList.slice(), mat, bluntEnd, fork,
     segs: [...segAcc.values()].filter((a) => a.n >= 2).map((a) => ({ len: a.seg.len, b: a.seg.b, n: a.n })), fibres: fibs.filter(Boolean).length,
-    kinds: groups.flat().map((it) => it.m[14]) });
+    kinds: groups.flat().map((it) => it.m[14]), fibreBoxes: groups[0].filter((it) => it.m[14] === 4).map((it) => [it.img.w, it.img.h]) });
   return { items, stats, bytes };
 }

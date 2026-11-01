@@ -14,9 +14,9 @@ function hash2(x, y, s) {
   return (h >>> 0) / 4294967296;
 }
 /** Crumb colours (light, dark) by material index (core MATS: grass, earth, stone, wood, sand, snow, water, metal). */
-const CRUMB = [[0x6e9a44, 0x5a3e26], [0x8a6844, 0x5a4030], [0xb0aca4, 0x6e6a64], [0xe0b070, 0x7a4e2a], [0xdcc48e, 0xa89060], [0xf6f9ff, 0xb8c6d8], [0xa8d0ec, 0x4a6880], [0xe6ecf2, 0xffd890]];
+const CRUMB = [[0x7a5a36, 0x5a3e26], [0x8a6844, 0x5a4030], [0xb0aca4, 0x6e6a64], [0xe0b070, 0x7a4e2a], [0xdcc48e, 0xa89060], [0xf6f9ff, 0xb8c6d8], [0xa8d0ec, 0x4a6880], [0xe6ecf2, 0xffd890]];
 /** The pale fibre flicked off when a strand snaps. */
-const FIBRE = [0xa8c870, 0xd8c8a8, 0xd8d4cc, 0xf0d0a0, 0xf0e2c0, 0xffffff, 0xd8ecff, 0xfff4d8];
+const FIBRE = [0xb8a070, 0xd8c8a8, 0xd8d4cc, 0xf0d0a0, 0xf0e2c0, 0xffffff, 0xd8ecff, 0xfff4d8];
 
 /**
  * When the front reaches each point. `pathFront` (follows the stroke) wins; else the stroke's own path (`spine`, art px) with the
@@ -73,40 +73,91 @@ export function tearClock(info, { pathFront, spine, k }) {
     [{ x: px + ux * hi, y: py + uy * hi, at: delay + hi * msPx }, { x: px + ux * lo, y: py + uy * lo, at: delay - lo * msPx }], [px, py]);
 }
 
-/** A lip piece's life: shown closed just before the front (so the gap under it never flashes), a flutter, the peel, the snap. */
+/**
+ * A tear piece's life (its part from the bake, field 14 of the sheet: p.tk). Every motion ends at t = 1 in the pose the bake drew
+ * (nothing moves after ~2 s, the area can be flattened again):
+ *   0 a lip flap: shown closed just before the front (the gap under it never flashes), it peels open lifting by its own height,
+ *     flutters by 1-2 px, foreshortened while it is up, drops back with a snap one pixel past its rest; flaps staggered along the front
+ *   2 a curled fold: once its flap is open it flips over from the gap edge onto its lip (small at the hinge, overshoots, flutters)
+ *   3 a strip that tears off: peels open with its lip, hangs there fluttering, then drops into the gap
+ *   4 a snapping fibre: held taut across the gap after the front passes, it snaps (one by one) and flicks back to hang
+ */
 export function tearPiece(p, n, seed, clock, start, k) {
-  const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed);
-  const dd = Math.hypot(p.fx - p.sx, p.fy - p.sy);
-  const t0 = start + clock.arrive(p.sx, p.sy) - clock.band * 0.1 + (hA - 0.5) * 30 * k;
-  const dur = (150 + Math.min(160, dd * 22)) * k * (0.85 + 0.35 * hB);
-  return { p, t0, dur, pre: clock.band + 60 * k, arc: 0, seed: n, tear: true, k, lift: Math.min(2, 0.5 + dd * 0.3), dusted: false };
+  const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed), kind = p.tk | 0, q = p.tq | 0;
+  const arr = start + clock.arrive(p.sx, p.sy);
+  const it = { p, pre: clock.band + 60 * k, arc: 0, seed: n, tear: true, k, kind, dusted: false };
+  if ( kind === 4 ) {
+    const snapAt = Math.floor(q / 1000) / 9, hold = (40 + 260 * (0.6 * snapAt + 0.4 * hA)) * k;
+    return Object.assign(it, { t0: arr - 20 * k, dur: hold + 180 * k, hold, reach: Math.min(1.6, Math.max(1, (q % 1000) / 100)), snapped: false });
+  }
+  if ( kind === 2 ) return Object.assign(it, { t0: arr + (120 + 130 * hA) * k, dur: (210 + 90 * hB) * k });
+  if ( kind === 3 ) return Object.assign(it, { t0: arr - clock.band * 0.1 + (hA - 0.5) * 20 * k, dur: (440 + 180 * hB) * k });
+  const dd = Math.hypot(p.fx - p.sx, p.fy - p.sy), lift = Math.min(3.5, (q & 1023) / 10 || 0.5 + dd * 0.3);
+  const t0 = arr - clock.band * 0.1 + (hA - 0.5) * 30 * k + hC * 40 * k;
+  const dur = (170 + Math.min(160, dd * 22) + lift * 35) * k * (0.85 + 0.35 * hB);
+  return Object.assign(it, { t0, dur, lift, flut: hC < 0.4 ? 2 : 1 });
 }
 
 export function tearPlace(display, p, t, it) {
   const ap = display.ap, o = display.origin, s = p.spr;
   if ( !s ) return;
-  const dx = p.fx - p.sx, dy = p.fy - p.sy, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
-  const tm = t * it.dur;
+  const tm = t * it.dur, kind = it.kind | 0;
   s.rotation = 0;
+  // offsets from the rest pose are whole art pixels (the sprite's centre may sit on a half pixel)
+  const pose = (dx, dy, sx = 1, sy = sx) => { s.position.set(o.x + (p.fx + Math.round(dx)) * ap, o.y + (p.fy + Math.round(dy)) * ap); s.scale.set(ap * sx, ap * sy); };
   // closed, the lips still meet: that is the plain map under it, so the piece is not drawn (a piece shown shifted onto the spine
   // doubled a band of the map at its outer edge)
   if ( tm < 0 ) { s.visible = false; return; }
-  s.visible = true;
-  if ( t >= 1 ) {
-    s.alpha = 1;
-    // the snap: one pixel past its rest, then still
-    const st = (t - 1) * it.dur, snap = st < 55 * it.k ? 1 : 0;
-    s.position.set(o.x + Math.round(p.fx + ux * snap) * ap, o.y + Math.round(p.fy + uy * snap) * ap);
-    s.scale.set(ap);
+  s.visible = true; s.alpha = 1;   // opaque from its first frame (no ghost)
+  const flick = (n, per) => ((Math.floor(tm / (per * it.k) + it.seed) & 1) ? 1 : -1) * n;
+  if ( kind === 4 ) {
+    // the fibre: taut (stretched about its root to the far lip), then it snaps and flicks back, swinging, to hang
+    const rx = p.tvx, ry = p.tvy;
+    let f = it.reach, sw = 0;
+    if ( tm >= it.hold ) {
+      const q = Math.min(1, (tm - it.hold) / (it.dur - it.hold));
+      if ( !it.snapped ) {
+        it.snapped = true;
+        const tx = p.fx + rx - rx * 2 * it.reach, ty = p.fy + ry - ry * 2 * it.reach;
+        for ( const sg of [-1, 1] ) display.spawn({ x: tx, y: ty, vx: sg * 10 - rx * 3, vy: -4 - ry * 3, fall: 22, life: 220, color: 0xd6c6a0, drag: 4 });
+      }
+      f = t >= 1 ? 1 : Math.max(0.75, 1 + (it.reach - 1) * Math.exp(-5 * q) * Math.cos(9 * q));
+      sw = t >= 1 ? 0 : Math.sin(14 * q) * Math.exp(-4 * q) * 1.2;
+    }
+    const l = Math.hypot(rx, ry) || 1;
+    pose(rx - rx * f - ry / l * sw, ry - ry * f + rx / l * sw, f);
     return;
   }
-  // the peel: it comes up out of the map as it leaves the closed state (alpha over the first 40 %), flutters by a pixel at first,
-  // lifts a little (curls) and is foreshortened while it is up
+  if ( kind === 2 ) {
+    // the fold flips over from the hinge: small at the gap edge, it opens out onto its lip, overshoots a little, flutters, lies still
+    if ( t >= 1 ) { pose(0, 0); return; }
+    const e = 1 - (1 - t) ** 3, sc = 0.3 + 0.7 * e + 0.14 * Math.sin(Math.PI * Math.min(1, Math.max(0, (t - 0.5) / 0.5)));
+    const fl = t > 0.55 && t < 0.9 ? flick(1, 30) : 0, l = Math.hypot(p.tvx, p.tvy) || 1;
+    pose(p.tvx * (1 - e) + p.tvx / l * fl * 0.6, p.tvy * (1 - e) + p.tvy / l * fl * 0.6, sc);
+    return;
+  }
+  const dx = p.sx - p.fx, dy = p.sy - p.fy;   // to the closed pose
+  if ( kind === 3 ) {
+    // torn off: peels open with its lip, hangs there fluttering, then drops into the gap (a little hop, falling faster)
+    if ( t >= 1 ) { pose(0, 0); return; }
+    const lx = p.tvx, ly = p.tvy;   // its lip pose (from the rest in the gap)
+    if ( t < 0.3 ) { const e = 1 - (1 - t / 0.3) ** 3; pose(dx + (lx - dx) * e, dy + (ly - dy) * e - Math.sin(Math.PI * t / 0.3) * 1.5, 1, 0.92); return; }
+    if ( t < 0.55 ) { pose(lx + flick(1, 28), ly - 1, 1, 0.9); return; }
+    const q = (t - 0.55) / 0.45;
+    pose(lx * (1 - q * q), ly * (1 - q * q) - Math.sin(Math.PI * q) * 1.5, 1, 0.9 + 0.1 * q);
+    return;
+  }
+  // a lip flap
+  const l = Math.hypot(dx, dy) || 1, ux = -dx / l, uy = -dy / l;   // outwards (its way open)
+  if ( t >= 1 ) {
+    // the snap: one pixel past its rest, then still
+    const snap = (t - 1) * it.dur < 55 * it.k ? 1 : 0;
+    pose(ux * snap, uy * snap);
+    return;
+  }
   const e = 1 - (1 - t) ** 4, up = Math.sin(Math.PI * t) * it.lift;
-  const fl = t < 0.35 ? ((Math.floor(t * it.dur / (30 * it.k) + it.seed) & 1) ? 1 : -1) * 0.6 : 0;
-  s.alpha = 1;   // a lip is opaque from its first frame (no ghost)
-  s.position.set(o.x + Math.round(p.sx + dx * e + ux * fl) * ap, o.y + Math.round(p.sy + dy * e + uy * fl - up) * ap);
-  s.scale.set(ap, ap * (1 - 0.1 * Math.sin(Math.PI * t)));
+  const fl = t < 0.55 ? flick(it.flut * (1 - t / 0.55), 28) : 0;
+  pose(dx * (1 - e) + ux * fl, dy * (1 - e) + uy * fl - up, 1, 1 - 0.14 * Math.sin(Math.PI * t));
 }
 
 /** The front: the pinprick, crumbs and snapping fibres at every running head, the snap at each tip, a short settle. */

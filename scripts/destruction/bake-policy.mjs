@@ -45,7 +45,8 @@ export const BAKE_VERSIONS = {
   // 36 changes a cave-in's SHAPE (an organic pit, a trench along a followed stroke): no compat, re-baked at load
   36: { compat: null, note: "collapse: organic pit or trench, rings of tilted lit slabs, layered wall and void" },
   37: { compat: 36, note: "cracks readable at max settings (milder warp, fewer tiny plates)" },
-  38: { compat: 37, note: "lightning lip without a white outline" }
+  38: { compat: 37, note: "lightning lip without a white outline" },
+  39: { compat: 38, note: "tears: short flap seams, slanted short fibres, dithered wall strata" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */

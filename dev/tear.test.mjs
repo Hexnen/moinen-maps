@@ -231,6 +231,9 @@ const std = (a) => { const m = a.reduce((p, q) => p + q, 0) / a.length; return M
   const cnt = (k) => kinds.filter((q) => q === k).length;
   ok(cnt(2) >= rec.length / 2 && cnt(3) >= 3 && cnt(4) >= rec.length, `flaps: ${cnt(2)} curled folds, ${cnt(3)} strips torn off, ${cnt(4)} snapping fibre halves, ${cnt(0)} flaps settling`);
 
+  const sticks = rec.flatMap((d) => d.fibreBoxes).filter(([w, h]) => Math.min(w, h) === 1 && Math.max(w, h) >= 7).length;
+  ok(sticks === 0, `fibres: no snapped strand is a straight stick (1 px wide and 7+ long): ${sticks}`);
+
   // 9. no green in a turf gap
   let green = 0, tot = 0;
   for ( const d of rec ) if ( d.kind === "grass" ) for ( let o = 0; o < d.open.length; o++ ) {
