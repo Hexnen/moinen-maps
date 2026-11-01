@@ -48,6 +48,14 @@ for ( const hz of [60, 75, 120, 144, 165, 240] ) {
   if ( hz === 165 ) ok(kinds.size > 1, `165 Hz: PIXI's cap mixes ${[...kinds].join(" / ")} vsync gaps`);
   console.log(`${String(hz).padStart(3)} Hz  PIXI cap: gaps of ${[...kinds].sort().join("/")} vsyncs (${(1000 / (gp.reduce((a, b) => a + b, 0) / gp.length)).toFixed(1)} fps)   even: ${k} vsyncs (${(1000 / (k * P)).toFixed(1)} fps)`);
 }
+// the choice per (display Hz, Foundry cap; 0 = none): never below an uncapped / fast-capped Foundry, never far from a low cap
+{ const rows = [];
+  for ( const [hz, cap] of [[60, 60], [144, 60], [144, 144], [165, 60], [165, 144], [165, 165], [165, 0], [240, 120], [120, 60], [75, 60], [165, 30]] ) {
+    const r = V.pacingFor("even", cap, hz); rows.push(`${hz}Hz/cap ${cap || "none"} -> k=${r.k} ${r.fps} fps`);
+    if ( !cap || cap >= 90 ) ok(r.k === 1 && r.fps === hz, `${hz} Hz cap ${cap}: every refresh (${r.fps} fps)`);
+    else ok(r.fps >= cap * 0.9 || r.k === 1 || hz / (r.k - 1) > cap * 1.5, `${hz} Hz cap ${cap}: ${r.fps} fps near the cap`);
+  }
+  console.log(`even: ${rows.join("; ")}`); }
 // uncapped Foundry (performance mode Maximum): every vsync
 ok(V.vsyncsPerFrame("even", 0, 1000 / 165) === 1, "no cap: every vsync");
 // a missed vsync (a long frame) does not shift the rhythm for more than one frame

@@ -10,7 +10,8 @@
  * 2. FRAME PACING. Foundry caps the canvas at 60 fps (maxFPS, unless the performance mode is Maximum). PIXI's cap on a 165 Hz display
  *    draws on every 3rd vsync four times and on the 2nd once (18 / 18 / 18 / 18 / 12 ms): animations and a zoom judder although the
  *    fps counter says ~58. "Even" keeps about the cap but draws on every k-th vsync with k fixed (165 Hz / 60 -> every 3rd: 55 fps, all
- *    frames 18.2 ms apart); "Display" draws on every vsync (165 fps); "Foundry" leaves PIXI's cap as it is. The vsync period is read
+ *    frames 18.2 ms apart); with no cap (performance mode Maximum) or a cap of 90+ it draws every vsync, so it never lowers an
+ *    uncapped Foundry's frame rate; "Display" draws on every vsync (165 fps); "Foundry" leaves PIXI's cap as it is. The vsync period is read
  *    from the requestAnimationFrame timestamps themselves (trimmed mean of the last 31 intervals).
  */
 const MODULE_ID = "moinen-maps";   // (no import of config.mjs: the pacing rules are node-tested without Foundry)
@@ -30,9 +31,17 @@ export function vsyncPeriod(intervals) {
 
 /** How many vsyncs per drawn frame: `cap` = Foundry's fps cap (0 = none), `period` = vsync ms. */
 export function vsyncsPerFrame(mode, cap, period) {
-  if ( mode === "display" || !cap || !period ) return 1;
+  // no cap (Foundry's performance mode Maximum: what gives 165 fps on a 165 Hz display), a cap of 90+ or a cap at the display's rate:
+  // every vsync - "Even" never lowers the frame rate of an uncapped or fast-capped Foundry
+  if ( mode === "display" || !cap || !period || cap >= 90 ) return 1;
   // the whole number of vsyncs nearest to the cap's frame time (165 / 60 -> 3: 55 fps; 144 -> 2: 72; 120 -> 2: 60; 75 -> 1: 75; 60 -> 1)
   return Math.max(1, Math.round((1000 / cap) / period));
+}
+
+/** What a mode gives on a display: { hz, k, fps } (`cap` 0 = none). */
+export function pacingFor(mode, cap, hz) {
+  const k = mode === "foundry" ? null : vsyncsPerFrame(mode, cap, 1000 / hz);
+  return { hz, cap, k, fps: k === null ? (cap ? Math.min(cap, hz) : hz) : +(hz / k).toFixed(1) };
 }
 
 /**
@@ -71,7 +80,12 @@ export function applyPacing() {
   t.maxFPS = mode === "foundry" ? cap : 0;          // PIXI's own cap off: the gate decides
 }
 
-export const pacingInfo = () => ({ mode: get("framePacing", "even"), cap, period: vsyncPeriod(ivs), k: vsyncsPerFrame(get("framePacing", "even"), cap, vsyncPeriod(ivs)), gated: !!gated?._mmGate });
+/** The pacing now: mode, Foundry's cap (0 = none), the measured display rate, k and the frame rate it gives (api.view.pacing()). */
+export function pacingInfo() {
+  const mode = get("framePacing", "even"), P = vsyncPeriod(ivs), hz = P ? Math.round(1000 / P) : null;
+  return { mode, cap, period: P, gated: !!gated?._mmGate, ...(hz ? pacingFor(mode, cap, hz) : { hz: null, k: null, fps: null }) };
+}
+const describe = (i) => i.hz ? `${i.mode}: ${i.fps} fps on this display (${i.hz} Hz) with Foundry's cap ${i.cap || "none"}${i.k ? `, every ${i.k === 1 ? "refresh" : `${i.k}. refresh`}` : ""}` : `${i.mode} (display rate not measured yet)`;
 
 /* ------------------------------------------------------------------ smooth wheel zoom */
 
@@ -131,6 +145,21 @@ export function registerSmoothView() {
     C.prototype._configurePerformanceMode = function(...a) { const r = pm.apply(this, a); applyPacing(); return r; };
   });
   Hooks.on("canvasInit", () => { zoomStop(); applyPacing(); });
-  Hooks.on("canvasReady", () => applyPacing());
+  Hooks.on("canvasReady", () => {
+    applyPacing();
+    // once the display rate is known: what the pacing gives, in the console
+    setTimeout(() => { const i = pacingInfo(); if ( i.hz ) console.log(`moinen-maps | frame pacing ${describe(i)}`); }, 2000);
+  });
+  // api.view.pacing() / api.view.zoom() (after main.mjs has set the api object at ready)
+  Hooks.once("ready", () => setTimeout(() => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= {}; m.api.view = { pacing: pacingInfo, zoom: zoomInfo }; } }, 0));
+  // the settings window shows what the pacing gives on this display under the setting's hint
+  Hooks.on("renderSettingsConfig", (app, html) => {
+    const root = html instanceof HTMLElement ? html : html?.[0] ?? app.element;
+    const el = root?.querySelector?.(`[name="${MODULE_ID}.framePacing"]`)?.closest(".form-group"); if ( !el ) return;
+    const i = pacingInfo(), p = document.createElement("p"); p.className = "hint"; p.style.fontWeight = "600";
+    p.textContent = i.hz ? game.i18n.format("MOINENMAPS.Setting.framePacingNow", { mode: game.i18n.localize(`MOINENMAPS.Setting.framePacing${i.mode[0].toUpperCase()}${i.mode.slice(1)}`),
+      fps: i.fps, hz: i.hz, cap: i.cap || game.i18n.localize("MOINENMAPS.Setting.framePacingNoCap") }) : "";
+    if ( p.textContent ) el.append(p);
+  });
   Hooks.on("canvasTearDown", () => zoomStop());
 }
