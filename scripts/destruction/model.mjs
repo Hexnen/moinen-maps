@@ -14,17 +14,28 @@ export const VERSION = 2;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const MATERIALS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
 export const LEVELS = [1, 2, 3];
+/**
+ * Causes (what did the damage), by index: a stroke object's `c` (missing / 0: unspecified, it takes the scene default
+ * `params.cause`; both 0: the look from before causes, bit for bit). Same order as core.mjs CAUSES.
+ */
+export const CAUSES = ["none", "fire", "acid", "lightning", "arcane", "impact", "claws", "water", "decay", "frost"];
 /** Mask pixels per art pixel along each axis. */
 export const K = 2;
 const MAX_ART = 4e6;          // art pixels of the whole scene (2000 x 2000): above that the art pixel grows, so a bake never exceeds ~100 MB
 
 export const PARAM_DEFAULTS = { debris: 0.7, scatter: 1, lift: 1, rubble: 0.6, halo: 0.6, edge: 0.7, material: "auto", jagged: false, jag: 0.6, directional: false,
-  anim: true, idle: true, fxWho: "all", entry: true, entrySpeed: 1, entryPower: 1 };
+  anim: true, idle: true, fxWho: "all", entry: true, entrySpeed: 1, entryPower: 1, cause: 0 };
 export const LIMITS = { debris: [0, 1], scatter: [0.3, 2], lift: [0, 1.6], rubble: [0, 1], halo: [0, 1], edge: [0, 1], jag: [0.1, 1], entrySpeed: [0.4, 2.5], entryPower: [0.3, 1.6] };
 
 let REV = 0;
 export const nextRev = () => ++REV;
 
+/** A cause index from anything (a number, a numeric string, a cause's name); unknown -> 0. */
+export const causeOf = (v) => {
+  if ( typeof v === "string" && CAUSES.includes(v) ) return CAUSES.indexOf(v);
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 && n < CAUSES.length ? n : 0;
+};
 export const levelOf = (b) => b & 3;
 export const typeOf = (b) => (b >> 2) & 7;
 export const byteOf = (level, type) => (level & 3) | ((type & 7) << 2);
@@ -84,7 +95,7 @@ export function grids(ap, r = sceneRect()) {
 /*
  * DAMAGE OBJECTS (flag v2). Every brush stroke is an object of its own, in creation order:
  *   { id, k (0 damage, 1 erase), t (type), x0, y0, w, h (its box in mask pixels), m (run-length bytes of the box: level per pixel),
- *     p (its brush path, flat [x, y, ms, ...] in art px, when it follows the stroke) }
+ *     p (its brush path, flat [x, y, ms, ...] in art px, when it follows the stroke), c (its cause, see CAUSES; absent = unspecified) }
  * An object is baked from its own pixels only and never changes when later strokes are painted: a later stroke is drawn over it and
  * covers it where it lies (at display time), an erase stroke is a cover of plain map. `S.mask` is the composite (later strokes win,
  * erase clears), used for the painting overlay, the bake key and "is anything painted".
@@ -100,13 +111,25 @@ export function objBytes(o) {
 }
 
 /** A new object from a full-grid buffer of levels (0 = not painted) inside `box` (mask px). */
-export function makeObject(buf, mw, box, { id, erase = false, type = 0, path = null } = {}) {
+export function makeObject(buf, mw, box, { id, erase = false, type = 0, path = null, cause = 0 } = {}) {
   const w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1, b = new Uint8Array(w * h);
   for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) b[y * w + x] = buf[(box.y0 + y) * mw + box.x0 + x] & 3;
   const o = { id, k: erase ? 1 : 0, t: type & 7, x0: box.x0, y0: box.y0, w, h, m: rleEncode(b) };
+  // its cause, only when it has one (an unspecified stroke stays as it was stored before causes existed)
+  const c = causeOf(cause);
+  if ( c && !erase ) o.c = c;
   if ( path?.length ) o.p = path;
   boxBytes.set(o, b);
   return o;
+}
+
+/** A copy of a stroke object with another cause (0: unspecified, the field goes); its decoded bytes come along. */
+export function withCause(o, cause) {
+  const c = causeOf(cause), n = { ...o };
+  delete n.c;
+  if ( c && !o.k ) n.c = c;
+  const b = boxBytes.get(o); if ( b ) boxBytes.set(n, b);
+  return n;
 }
 
 /** The composite mask: objects in order, a later one wins where it is painted, an erase clears. */
@@ -181,6 +204,7 @@ export function cleanParams(p = {}) {
   if ( MATERIALS.includes(p.material) ) out.material = p.material;
   for ( const k of ["anim", "idle", "entry", "jagged", "directional"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
   if ( p.fxWho === "gm" || p.fxWho === "all" ) out.fxWho = p.fxWho;
+  out.cause = causeOf(p.cause);
   return out;
 }
 

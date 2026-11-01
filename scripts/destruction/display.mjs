@@ -1,6 +1,7 @@
 import { META_FIELDS } from "./core.mjs";
 import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
+import * as Cause from "./cause-fx.mjs";
 
 /**
  * Shows a bake, AREA BY AREA: every damaged area is a group (its own small texture atlas, a base sprite with what lies beneath, and
@@ -115,6 +116,7 @@ export class DestructionDisplay {
       const o = k * F;
       if ( meta[o] === 0 ) { cur = { hash: ((meta[o + 12] & 0xffff) | ((meta[o + 13] & 0xffff) << 16)) >>> 0, base: o, cover: -1, pieces: [], index: meta[o + 16] }; rows.push(cur); }
       else if ( meta[o] === 2 ) { if ( cur ) cur.cover = o; }
+      else if ( meta[o] === 3 ) { if ( cur ) cur.light = o; }   // the cause's light (cause-fx.mjs)
       else cur?.pieces.push(o);
     }
     const next = [], added = [], seen = new Set();
@@ -171,7 +173,8 @@ export class DestructionDisplay {
 
   /** One area: its own atlas texture, base sprite and shard sprites. */
   build(r, rgba, sw, meta) {
-    const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
+    const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : []), ...(r.light >= 0 ? [r.light] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
+    const coverIdx = 1 + r.pieces.length, lightIdx = r.light >= 0 ? coverIdx + (r.cover >= 0 ? 1 : 0) : -1;
     const pk = pack(rects);
     const buf = new Uint8Array(pk.W * pk.H * 4);
     rects.forEach((q, i) => {
@@ -187,7 +190,7 @@ export class DestructionDisplay {
     const frame = (i) => new PIXI.Texture(tex, new PIXI.Rectangle(pk.pos[i].x, pk.pos[i].y, rects[i].w, rects[i].h));
     const b = r.base;
     const info = { hash: r.hash, x: meta[b + 5], y: meta[b + 6], w: meta[b + 3], h: meta[b + 4], ex: meta[b + 7], ey: meta[b + 8], R: meta[b + 9],
-      type: TYPES[meta[b + 10]] ?? "blast", mat: meta[b + 11], axis: meta[b + 14] / 1000, len: meta[b + 15] / 10 };
+      type: TYPES[meta[b + 10]] ?? "blast", mat: meta[b + 11] & 15, cause: (meta[b + 11] >> 4) & 15, axis: meta[b + 14] / 1000, len: meta[b + 15] / 10 };
     const cont = new PIXI.Container(), baseCont = new PIXI.Container(), shardCont = new PIXI.Container();
     cont.eventMode = baseCont.eventMode = shardCont.eventMode = "none";
     cont.cullable = true;   // off-screen objects are not drawn at all
@@ -213,8 +216,9 @@ export class DestructionDisplay {
     const m = 48, cull = new PIXI.Rectangle(org.x + (rect.x0 - m) * ap, org.y + (rect.y0 - m) * ap, (rect.x1 - rect.x0 + 2 * m) * ap, (rect.y1 - rect.y0 + 2 * m) * ap);
     cont.cullArea = cull;
     // the cover (this object's own pixels) as a frame of the same atlas: the mask of its map patch
-    const coverFrame = r.cover >= 0 ? { tex: frame(rects.length - 1), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
+    const coverFrame = r.cover >= 0 ? { tex: frame(coverIdx), x: meta[r.cover + 5], y: meta[r.cover + 6] } : null;
     const g = { hash: r.hash, tex, info, cont, baseCont, shardCont, baseSpr, pieces, made: 0, frame, coverFrame, patch: null, anim: null, fade: null, next: 0 };
+    if ( lightIdx >= 0 ) Cause.addLight(this, g, frame(lightIdx), meta[r.light + 5], meta[r.light + 6]);
     this.materialize(g, 300);
     return g;
   }
@@ -356,6 +360,7 @@ export class DestructionDisplay {
     for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
     g.baseSpr?.texture?.destroy(false);
     g.coverFrame?.tex.destroy(false);
+    Cause.dropLight(this, g);
     if ( g.patch && !g.patch.destroyed ) g.patch.destroy({ children: true });
     if ( !g.cont.destroyed ) g.cont.destroy({ children: true });
     g.tex.destroy();
@@ -381,7 +386,9 @@ export class DestructionDisplay {
     const now = performance.now();
     if ( !this.look.entry ) { for ( const u of under ) u.heldBy = null; return; }
     if ( reducedMotion() ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
-    const info = g.info, L = LOOK[info.type] ?? LOOK.blast, k = 1 / (this.look.speed || 1), pw = this.look.power;
+    // the cause tunes the clock on top of the kind's (cause-fx.mjs): rot creeps, lightning strikes, arcane spirals
+    const CL = Cause.causeLook(g.info.cause);
+    const info = g.info, L = LOOK[info.type] ?? LOOK.blast, k = (1 / (this.look.speed || 1)) * (CL?.slow ?? 1), pw = this.look.power;
     const ox = o?.[0] ?? info.ex, oy = o?.[1] ?? info.ey;
     const r = info.rect;
     let wipe = null;
@@ -404,7 +411,9 @@ export class DestructionDisplay {
       return clamp01(Math.hypot(x - ox, y - oy) / Rmax);
     };
     // the front's arrival at a point (ms after start)
-    const arrive = tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y) : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
+    const arrive = tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y)
+      : CL ? (x, y) => delay + reveal * CL.curve(front(x, y), Math.atan2(y - oy, x - ox)) * 0.85
+      : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
     const seed = g.hash % 9973;
     const noise = (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;   // 0..1, smooth
     // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
@@ -461,6 +470,7 @@ export class DestructionDisplay {
     g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront || tear ? null : wipe, tear, list, byPiece, fx: [], rev, crev,
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
+    g.anim.cl = CL; g.glowIn = 0;
     for ( const u of under ) u.heldBy = g;
     this.stats.entries++;
   }
@@ -617,6 +627,7 @@ export class DestructionDisplay {
 
   /** What the dissolving edge sheds, by type. */
   edgeParticle(g, a, x, y, now) {
+    if ( a.cl && Math.random() < a.cl.share ) return Cause.causeParticle(this, a.cl, x, y, a.k);   // the cause's share of the edge
     const t = a.type, j = () => (Math.random() - 0.5);
     if ( t === "scorch" ) this.spawn({ x, y, vx: j() * 3, vy: 0, rise: -6 - Math.random() * 5, life: 500 + Math.random() * 500, color: 0xff9a3c, flicker: true });
     else if ( t === "flood" ) this.spawn({ x, y, vx: j() * 6, vy: -1, life: 380, color: 0xe6f4ff, alpha: 0.9, drag: 3 });
@@ -748,6 +759,7 @@ export class DestructionDisplay {
       if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); }
     }
     this.idleTick(t0, vw);
+    Cause.tickLights(this, t0);
     // particles: crisp art-pixel steps, fading by pixel dropout rather than soft alpha
     const ap = this.ap, o = this.origin;
     for ( let i = this.particles.length - 1; i >= 0; i-- ) {
@@ -789,6 +801,7 @@ export class DestructionDisplay {
         // a burning plate glows as it curls, then cools back to the map's colours
         if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
         else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
+        if ( a.cl?.tint ) it.p.spr.tint = t <= 0 || t >= 1.5 ? 0xFFFFFF : lerpColor(a.cl.tint, 0xffffff, clamp01(t / 1.5));   // the cause's tint while it moves
       }
       if ( onScreen && t >= 1 && !it.dusted ) {
         it.dusted = true;
@@ -797,6 +810,7 @@ export class DestructionDisplay {
       }
     }
     if ( onScreen ) this.effects(g, a, now, el);
+    if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
     if ( !busy && (!a.rev || a.rev.next >= a.rev.keys.length) && (!a.crev || a.crev.next >= a.crev.keys.length) && !a.fx.length ) this.endAnim(g);
   }
 
@@ -856,6 +870,7 @@ export class DestructionDisplay {
       if ( t >= 1 ) { f.g.destroy(); a.fx.splice(i, 1); continue; }
       if ( t < 0 ) continue;
       f.g.clear();
+      if ( f.draw ) { f.draw(t); continue; }   // a cause's accent draws itself (cause-fx.mjs)
       if ( f.kind === "flash" ) {
         // a soft flash: nested discs, the core brightest
         const cx = X(f.x ?? a.ox), cy = Y(f.y ?? a.oy), rr = f.maxR * (0.6 + 0.6 * t) * ap, al = 1 - t;
@@ -879,6 +894,7 @@ export class DestructionDisplay {
       g.next = now + rate * (0.6 + Math.random() * 0.8);
       const a = Math.random() * Math.PI * 2, r = ar.R * (0.4 + Math.random() * 0.6);
       const x = ar.ex + Math.cos(a) * r, y = ar.ey + Math.sin(a) * r * 0.8;
+      if ( ar.cause && Cause.causeIdle(this, g, x, y) ) continue;
       if ( ar.type === "scorch" || (ar.type === "blast" && Math.random() < 0.5) ) {
         this.spawn({ x, y, vx: (Math.random() - 0.5) * 3, vy: 0, rise: -6 - Math.random() * 5, life: 1300 + Math.random() * 900, color: 0xff9a3c, flicker: true });
         if ( Math.random() < 0.5 ) this.spawn({ x: x + 1, y, vx: 0, vy: 0, rise: -3, life: 1600, color: 0x5a524c, alpha: 0.7, size: 2 });
@@ -904,6 +920,7 @@ export class DestructionDisplay {
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick);
+    Cause.disposeLights(this);
     this.clear();
     for ( const c of [this.objs, this.fx] ) if ( !c.destroyed ) c.destroy({ children: true });
   }

@@ -114,7 +114,7 @@ function simplify(pts) {
 const unflat = (p) => { const out = []; for ( let i = 0; p && i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
 const pathOfObj = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o?.p ? unflat(o.p) : null; };
 /** The stroke objects as the bake and the display take them (their level bytes decoded, their paths as pairs). */
-const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
+const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
   path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
@@ -211,7 +211,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   shownKey = key; shownMask = mask; loaded = true;
   lastSheet = sheet.data; T.total = performance.now() - T.t0;
   Object.assign(status, { baking: false, progress: 1, source, hash: "", error: "", stats: stats ?? status.stats, perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])),
-    areas: display.areas.map((a) => ({ type: a.type, mat: Model.MATERIALS[a.mat + 1] ?? "earth", hash: a.hash })) });
+    areas: display.order.map((g) => ({ type: g.info.type, mat: Model.MATERIALS[g.info.mat + 1] ?? "earth", hash: g.info.hash, cause: g.info.cause ?? 0, obj: g.objId ?? null })) });
   tell("status");
   if ( source === "baked" ) schedulePersist(key, sheet, metaRows, stats);
   else if ( game.user.isGM && S.baked?.key !== key && blob ) schedulePersist(key, null, metaRows, stats, blob);
@@ -345,13 +345,32 @@ export function edited(box, stroke = null) {
     // (a tear keeps it always: its brush path is the tear's spine)
     if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
     const id = foundry.utils.randomID(10);
-    S.objects = [...(S.objects ?? []), Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null })];
+    S.objects = [...(S.objects ?? []), Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause ?? 0 })];
     Model.composite(S);
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
   }
   editedHere = true;
   scheduleBake(); scheduleSave();
   tell("edited");
+}
+
+/**
+ * The cause of one stroke object (0: unspecified, it follows the scene default). Only that stroke bakes again (its hash holds its
+ * cause); everything else stays exactly as it was. The new look fades over the old one.
+ */
+export function setObjectCause(id, cause) {
+  if ( !S || !game.user.isGM ) return false;
+  const i = (S.objects ?? []).findIndex((o) => o.id === id);
+  if ( i < 0 || S.objects[i].k ) return false;
+  const c = Model.causeOf(cause);
+  if ( (S.objects[i].c | 0) === c ) return false;
+  S.objects = S.objects.map((o, k) => k === i ? Model.withCause(o, c) : o);
+  Model.composite(S);
+  S.rev = Model.nextRev();
+  editedHere = true;
+  scheduleBake(60); scheduleSave();
+  tell("edited");
+  return true;
 }
 
 export function setParams(patch) {
@@ -438,21 +457,24 @@ export const destructionApi = {
   deactivate: () => Editor.setMode(null),
   mode: () => Editor.getMode(),
   brush: () => Editor.brush(),
-  setBrush: async ({ size, level, type } = {}) => {
+  setBrush: async ({ size, level, type, cause } = {}) => {
     if ( size !== undefined ) await game.settings.set(MODULE_ID, "destrBrush", size);
     if ( level !== undefined ) await game.settings.set(MODULE_ID, "destrLevel", level);
     if ( type !== undefined ) await game.settings.set(MODULE_ID, "destrType", typeof type === "string" ? Model.TYPES.indexOf(type) : type);
+    if ( cause !== undefined ) await game.settings.set(MODULE_ID, "destrCause", Model.causeOf(cause));
   },
-  /** Paint a disc from a macro (scene coordinates, radius in scene pixels). */
-  paint(x, y, radius, { level = 3, type = "blast", erase = false } = {}) {
+  /** Paint a disc from a macro (scene coordinates, radius in scene pixels); `cause` a name or index (0 / omitted: the scene default). */
+  paint(x, y, radius, { level = 3, type = "blast", erase = false, cause = 0 } = {}) {
     if ( !game.user.isGM ) return false;
     const s = ensureState();
     const t = typeof type === "string" ? Math.max(0, Model.TYPES.indexOf(type)) : type;
     const buf = { mask: new Uint8Array(s.mw * s.mh), mw: s.mw, mh: s.mh, mpx: s.mpx };
     const box = Model.stamp(buf, x, y, radius, { mode: "raise", level: erase ? 1 : level, type: t });
-    if ( box ) { edited(box, { buf: buf.mask, erase, type: t, a: { x, y }, b: null }); Editor.refreshOverlay(); }
+    if ( box ) { edited(box, { buf: buf.mask, erase, type: t, cause: Model.causeOf(cause), a: { x, y }, b: null }); Editor.refreshOverlay(); }
     return !!box;
   },
+  /** The cause of a painted stroke (by its id; see state().o); only that stroke bakes again. */
+  setCause: (id, cause) => setObjectCause(id, cause),
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
@@ -461,7 +483,7 @@ export const destructionApi = {
   /** Every area enters again, locally. */
   replay: () => display?.detonate(performance.now()),
   display: () => display,
-  TYPES: Model.TYPES, MATERIALS: Model.MATERIALS
+  TYPES: Model.TYPES, MATERIALS: Model.MATERIALS, CAUSES: Model.CAUSES
 };
 
 export function registerDestruction() {

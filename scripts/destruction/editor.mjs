@@ -6,7 +6,8 @@ import { trackMarkers } from "../workspace/markers.mjs";
  * Painting the damage (GM): a brush and an eraser on the mask grid, a ring cursor and a translucent overlay of the mask (amber =
  * cracked, orange = broken, red = crater) while a tool is in hand. Strokes edit the mask at once; the bake and the save follow a
  * moment after the last stroke. Shift while painting deepens what is there by one level per stroke (layered passes).
- * Keys: [ ] brush size, 1 2 3 level, Ctrl+Z undo, Escape cancels the stroke.
+ * Keys: [ ] brush size, 1 2 3 level, Shift+0..9 cause (0: the scene default), , . previous / next cause, Ctrl+Z undo, Escape
+ * cancels the stroke.
  */
 const OVERLAY = [null, [242, 193, 78], [239, 138, 58], [224, 69, 58]];
 let mode = null;               // "paint" | "erase" | null
@@ -24,12 +25,15 @@ export function registerEditorSettings(onChange) {
   game.settings.register(MODULE_ID, "destrBrush", { scope: "client", config: false, type: Number, default: 1.5, onChange: f });
   game.settings.register(MODULE_ID, "destrLevel", { scope: "client", config: false, type: Number, default: 3, onChange: f });
   game.settings.register(MODULE_ID, "destrType", { scope: "client", config: false, type: Number, default: 0, onChange: f });
+  // the brush's cause: 0 = the scene's default (the stroke stores none)
+  game.settings.register(MODULE_ID, "destrCause", { scope: "client", config: false, type: Number, default: 0, onChange: f });
 }
 
 export const brush = () => ({
   size: clamp(Number(opt("destrBrush", 1.5)) || 1.5, 0.25, 10),
   level: clamp(Math.round(Number(opt("destrLevel", 3)) || 3), 1, 3),
-  type: clamp(Math.round(Number(opt("destrType", 0)) || 0), 0, Model.TYPES.length - 1)
+  type: clamp(Math.round(Number(opt("destrType", 0)) || 0), 0, Model.TYPES.length - 1),
+  cause: Model.causeOf(opt("destrCause", 0))
 });
 const radius = () => canvas.grid.size * brush().size / 2;
 const worldPoint = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
@@ -192,7 +196,7 @@ function endStroke() {
   const end = s.path[s.path.length - 1];
   if ( end[0] !== s.last.x || end[1] !== s.last.y ) s.path.push([s.last.x, s.last.y, Math.round(performance.now() - s.t0)]);
   const buf = s.buf.mask; for ( let i = 0; i < buf.length; i++ ) if ( buf[i] ) buf[i] = Model.levelOf(buf[i]);
-  host.edited(s.box, { buf, a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type });
+  host.edited(s.box, { buf, a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type, cause: brush().cause });
 }
 
 /** Undo: the last stroke object goes, nothing else changes. */
@@ -231,6 +235,15 @@ export function onCanvasReady() {
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && mode === "paint" && /^[123]$/.test(e.key) ) {
         e.preventDefault(); e.stopPropagation();
         game.settings.set(MODULE_ID, "destrLevel", Number(e.key));
+      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && mode === "paint" && e.shiftKey && /^Digit[0-9]$/.test(e.code) ) {
+        // the cause: Shift+1..9, Shift+0 = the scene default (by key position, whatever the keyboard layout prints)
+        e.preventDefault(); e.stopPropagation();
+        game.settings.set(MODULE_ID, "destrCause", Math.min(Model.CAUSES.length - 1, Number(e.code.slice(5))));
+      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && mode === "paint" && (e.key === "," || e.key === ".") ) {
+        // , . step through the causes
+        e.preventDefault(); e.stopPropagation();
+        const n = Model.CAUSES.length;
+        game.settings.set(MODULE_ID, "destrCause", (brush().cause + (e.key === "." ? 1 : n - 1)) % n);
       }
     }
   };

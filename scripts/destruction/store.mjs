@@ -41,9 +41,10 @@ const runInner = async (mode, fn) => {
 const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
 
 export function makeKey(scene, S, bgPath) {
-  const params = Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k)).sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
-  // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke)
-  const objs = (S.objects ?? []).map((o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${S.params.directional && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}`).join(";");
+  // the scene's default cause only when it is set (a scene from before causes keeps its key, its cache and its published file)
+  const params = Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !S.params.cause)).sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
+  // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke; their cause when they have one)
+  const objs = (S.objects ?? []).map((o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${S.params.directional && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}${o.c ? ",c" + o.c : ""}`).join(";");
   const extra = fnv(new TextEncoder().encode(`${params}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`));
   return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(new TextEncoder().encode(objs)).toString(36)}:${extra.toString(36)}`;
 }
