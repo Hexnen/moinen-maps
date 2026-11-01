@@ -36,7 +36,10 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   // the crack settle grains (display only) replaced lines the debris round (f0287ac) added
   "3fcd3f2",
   // the dark rim kept as one byte per pixel (memory) edited lines the rim rounds added
-  "77bf544"];   // (50458de was reverted in e5714bb and redone as 7115e86)
+  "77bf544",
+  // the batched-renderer round moved the dark rim out of the area's build (display rimSlice) and made the blot of a cause's anticipation
+  // read its cells from a kept grid (byte-identical): only those hunks are cause code
+  { rev: "a1e829c", other: /^(?![\s\S]*(rimArgs|rimQueue|rimSlice|addRim|BLOTS|blotGrid))/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
