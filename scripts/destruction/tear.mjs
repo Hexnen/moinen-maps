@@ -274,7 +274,8 @@ export function bakeTear(X) {
     sA[o] = s; dA[o] = d;
     const side = d >= 0 ? 1 : -1, edge = side > 0 ? eL[i] : eR[i];
     const jit = (jag ? (h2(x >> 1, y >> 1, sd + 7) - 0.5) * 0.8 * jag : 0) + (h2(x, y, sd + 8) - 0.5) * 0.3;
-    if ( edge > 0.05 && Math.abs(d) < edge + jit ) openA[o] = 1;
+    // the opening never reaches past the stroke's own pixels (a tear changes only what it was painted on)
+    if ( edge > 0.05 && Math.abs(d) < edge + jit && own[o] ) openA[o] = 1;
   }
 
   /* ---------------------------------------------------------------- 4. the lips: pulled apart, sheared, an underside rim */
@@ -290,14 +291,18 @@ export function bakeTear(X) {
     const x = o % W, y = (o - x) / W, d = dA[o], s = sA[o], side = d >= 0 ? 1 : -1, ad = Math.abs(d);
     const edge = side > 0 ? eL[i] : eR[i], e = ad - edge, Z = zOf(i), rim = rimOf(i, side);
     if ( e >= Math.max(Z, rim) ) { near[o] = -1; continue; }
+    // the lips are the stroke's own pixels only: nothing outside its mask is laid over (older or neighbouring damage stays as it is)
+    if ( !own[o] ) { near[o] = -1; continue; }
     // the displaced map: what lay at u from the spine is now at u + pull * g(u), g = (1 - u / Z)^2; relative to the pixel itself,
-    // so far out (g = 0) it is the map exactly
+    // so far out (g = 0) it is the map exactly. Towards the mask's own border the pull eases out to nothing (3 px), so the lip meets
+    // the ground outside the stroke without a seam
     let c;
     if ( Z > 0 ) {
       const pull = side > 0 ? pL[i] : pR[i];
       let u = Math.max(0, ad - pull);
       for ( let it = 0; it < 6; it++ ) { const g = u < Z ? (1 - u / Z) ** 2 : 0; u = Math.max(0, ad - pull * g); }
-      const g = u < Z ? (1 - u / Z) ** 2 : 0, sh = shearSign * side * 0.35 * pull * g, back = ad - u;
+      const ease = X.din ? clamp((X.din[o] - 0.5) / 3, 0, 1) : 1;
+      const g = (u < Z ? (1 - u / Z) ** 2 : 0) * ease, sh = shearSign * side * 0.35 * pull * g, back = (ad - u) * ease;
       c = mapAt(x - NX[i] * side * back - TX[i] * sh, y - NY[i] * side * back - TY[i] * sh);
     } else c = mapAt(x, y);
     // the lifted lip catches a little light on one side, a little shade on the other
@@ -428,12 +433,12 @@ export function bakeTear(X) {
   }
 
   /* ---------------------------------------------------------------- 7. secondary rips near the tips, hairlines past the tips */
-  const marked = new Uint8Array(N);
+  const marked = new Uint8Array(N), crackList = [];
   const crackPx = (x, y, strong) => {
     x = Math.round(x); y = Math.round(y);
     if ( x < 2 || y < 2 || x >= W - 2 || y >= H - 2 ) return false;
     const o = y * W + x; if ( openA[o] || marked[o] ) return true;
-    marked[o] = 1;
+    marked[o] = 1; crackList.push(o);
     const base = layer[o] ? [col[o * 4], col[o * 4 + 1], col[o * 4 + 2]] : mapAt(x, y);
     put(o, mix(base, ink, strong ? 0.88 : 0.62), layer[o] || BASE);
     const q = o - W;
@@ -474,11 +479,11 @@ export function bakeTear(X) {
     const e = (side > 0 ? eL[i] : eR[i]) + rimOf(i, side) + 1 + h2(i, side, sd + 92) * 4;
     const x = Math.round(SX[i] + NX[i] * side * e + (h2(i, side, sd + 93) - 0.5) * 3 - 0.5), y = Math.round(SY[i] + NY[i] * side * e - 0.5);
     if ( x < 1 || y < 1 || x >= W - 2 || y >= H - 2 ) continue;
-    const o = y * W + x; if ( openA[o] ) continue;
+    const o = y * W + x; if ( openA[o] || !own[o] ) continue;
     const c = rimColour(mapAt(SX[i], SY[i]), 1.5, i, side, x, y);
     put(o, c, layer[o] || BASE);
-    if ( h2(i, side, sd + 94) < 0.4 && !openA[o + 1] ) put(o + 1, mul(c, 0.8), layer[o + 1] || BASE);
-    const q = o + W + 1; if ( !openA[q] ) { const b = layer[q] ? [col[q * 4], col[q * 4 + 1], col[q * 4 + 2]] : mapAt(x + 1, y + 1); put(q, mix(b, rp[0], 0.4), layer[q] || BASE); }
+    if ( h2(i, side, sd + 94) < 0.4 && !openA[o + 1] && own[o + 1] ) put(o + 1, mul(c, 0.8), layer[o + 1] || BASE);
+    const q = o + W + 1; if ( !openA[q] && own[q] ) { const b = layer[q] ? [col[q * 4], col[q * 4 + 1], col[q * 4 + 2]] : mapAt(x + 1, y + 1); put(q, mix(b, rp[0], 0.4), layer[q] || BASE); }
   }
 
   /* ---------------------------------------------------------------- 9. sprites */

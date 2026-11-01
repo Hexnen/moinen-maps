@@ -20,7 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 
-export const CORE_VERSION = 15;
+export const CORE_VERSION = 16;
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -540,6 +540,7 @@ export function bake(I, cache = null) {
     else {
       win.map = cropMap(I.map, RX, RY, W, H);
       res = bakeArea(win, P, seed, (fnvStr(String(c.ob.id)) ^ Math.imul(c.ay * AW + c.ax, 31)) >>> 0, jag);
+      for ( const it of res.items ) if ( it.m[0] === 0 ) overlayOutside(it.img, win);
       // the cause rides on the base row: field 11 holds the material in bits 0-3, the cause in bits 4-7 (0: unchanged bytes)
       if ( cause ) for ( const it of res.items ) if ( it.m[0] === 0 ) it.m[11] = (it.m[11] & 15) | (cause << 4);
       res.win = { x: RX, y: RY, w: W, h: H };
@@ -551,6 +552,35 @@ export function bake(I, cache = null) {
     progress(0.2 + 0.75 * (k + 1) / comps.length);
   });
   return assemble(results, stats, t0, progress);
+}
+
+/**
+ * THE FOOTPRINT RULE. An object owns its own pixels (its mask, as torn): there it may lay anything (the display first lays the plain
+ * map there, then the object). Outside its mask it only TOUCHES the ground: its halo (scorch, dust, the cause's stain, rime, moss...),
+ * the inked lip, the hairline cracks and the ground shadows of its pieces. Those were baked as finished colours over the plain map,
+ * which laid a patch of clean map over any older damage next to it. Here every such pixel becomes the least opaque overlay that gives
+ * exactly the same colour over the plain map (per channel: darkening towards black, lightening towards white, the smallest alpha that
+ * reaches the colour), so over the plain map the look is unchanged (to a level of rounding) and over older damage it only darkens,
+ * stains or inks it, never clears it. Declared footprint per kind: the mask, plus up to the halo radius around it (blast ~0.9 maxD,
+ * scorch ~1.4 maxD + 4, collapse ~0.5 maxD, a cause's halo its own r; hairlines up to ~maxD); thrown chips land on top as pieces.
+ */
+function overlayOutside(img, win) {
+  const { W, own, map } = win, d = img.data;
+  for ( let y = 0; y < img.h; y++ ) for ( let x = 0; x < img.w; x++ ) {
+    const q = (y * img.w + x) * 4; if ( d[q + 3] !== 255 ) continue;
+    const wi = (img.y + y) * W + img.x + x; if ( own[wi] ) continue;
+    const mo = wi * 4;
+    let a = 0;
+    for ( let k = 0; k < 3; k++ ) {
+      const c = d[q + k], m = map[mo + k];
+      const ak = c > m ? (c - m) / (255 - m || 1) : c < m ? (m - c) / (m || 1) : 0;
+      if ( ak > a ) a = ak;
+    }
+    if ( a <= 0.004 ) { d[q] = d[q + 1] = d[q + 2] = d[q + 3] = 0; continue; }
+    const A = Math.min(255, Math.ceil(a * 255)), af = A / 255;
+    for ( let k = 0; k < 3; k++ ) d[q + k] = clamp(Math.round((d[q + k] - map[mo + k] * (1 - af)) / af), 0, 255);
+    d[q + 3] = A;
+  }
 }
 
 function cropMap(map, RX, RY, W, H) {
@@ -620,7 +650,7 @@ function bakeArea(A, P, seed, uid, jag) {
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
-  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS });
+  if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, chamfer });
   fracture(C);
   fates(C);
   drawBase(C);
