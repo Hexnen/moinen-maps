@@ -53,6 +53,8 @@ const AWAIT_CHUNK = 12000;
 const BIG_BAKE = 6;
 /** Strokes put on screen per step of a scene load (a pause for the page between steps). */
 const SHOW_BATCH = 12;
+/** Strokes re-baked per idle pass in the background (a compatible older look being replaced). */
+const IDLE_BATCH = 3;
 let inflight = null, again = null, paramRev = 0, publishBackoff = 0, publishRetryAt = 0, editedHere = false, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
 let strokes = [];                    // edits since the last bake started: { box (art px), a, b (art px) }
 const played = new Set();            // area hashes already shown on this client (they never enter again)
@@ -127,7 +129,7 @@ function integrity(scene) {
 function teardown() {
   flushSave();
   gen++;
-  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer] ) clearTimeout(t);
+  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer] ) clearTimeout(t);
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
@@ -152,7 +154,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   // take them over, no bake pass (an echo of another client's publish must never start one)
   const d = f[Model.FLAG], manifestOnly = d && typeof d === "object" && !(Model.OBJS in f) && !(Store.PATHS in f) && !(`-=${Model.OBJS}` in f) && !(`-=${Store.PATHS}` in f)
     && Object.keys(d).every((k) => k === "baked" || k === "entries");
-  if ( manifestOnly && S && shownKey && !status.waiting && !status.baking ) {
+  if ( manifestOnly && S && shownKey && !status.waiting && !status.baking && !status.compat ) {
     const F = scene.flags?.[MODULE_ID]?.[Model.FLAG];
     S.baked = F?.baked ?? S.baked; S.entries = Array.isArray(F?.entries) ? F.entries : S.entries;
     Trace.event("remote-manifest", { base: S.baked?.base ?? null });
@@ -213,7 +215,7 @@ export async function rebake(opts = {}) {
   if ( again && S ) { const o = again; again = null; rebake(o); }
 }
 
-async function bakeOnce({ awaitPublish = true, force = false } = {}) {
+async function bakeOnce({ awaitPublish = true, force = false, idle = false, all = false } = {}) {
   const my = gen, scene = canvas.scene, T = { t0: performance.now() }, rev = paramRev;
   if ( !Model.hasPaint(S) || !S.enabled ) {
     display?.fadeAll(); shownKey = ""; shownMask = null;   // erased or cleared: the damage fades out, it does not vanish
@@ -223,7 +225,7 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   const bg = backgroundInfo()?.path ?? "";
   const key = Store.makeKey(scene, S, bg);
   const taken = strokes.splice(0), mask = S.mask.slice();
-  if ( key === shownKey && display && !force ) { maybeBlast(); return; }
+  if ( key === shownKey && display && !force && !idle && !all ) { maybeBlast(); return; }
   const S0 = S, base = Store.baseKey(scene, S, bg), objs = objectsIn();
   Trace.markOnce("damage:start");
   // the strokes to show, each with the key of the record that shows it
@@ -350,6 +352,19 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   // 2. strokes nobody has published (yet): a player waits for the GM's chunk, per stroke, and bakes only what is still missing after
   // AWAIT_CHUNK; a chunk that was named but could not be had (gone, broken) is baked at once
   let toBake = missing();
+  // a COMPATIBLE older bake version's look (bake-policy.mjs BAKE_VERSIONS: only details changed) stands as final: those strokes are
+  // re-baked later - in the background when this tab is idle, on "Rebake all", or at once (client setting). Players never bake them.
+  const compatOld = !!M && rule === "older" && !force && !all && Policy.compatible(Policy.verOf(M.base), Policy.verOf(base));
+  const mode = rebakeMode();
+  let deferred = new Set();
+  if ( compatOld && (mode !== "now" || !game.user.isGM) ) {
+    let later = toBake.filter((w) => staleRecs.has(w.objId) || shownRecs.get(w.objId)?.stale);
+    // an idle pass takes the next few, oldest first (a stroke is baked over the strokes under it: those come before it)
+    if ( idle && game.user.isGM ) { later.sort((a, b) => a.index - b.index); later = later.slice(IDLE_BATCH); }
+    deferred = new Set(later.map((w) => w.objId));
+    toBake = toBake.filter((w) => !deferred.has(w.objId));
+  }
+  status.compat = deferred.size ? { from: Policy.verOf(M.base), to: Policy.verOf(base), left: deferred.size, of: want.length, mode } : null;
   const broken = new Set(failed.map((w) => w.rk));
   // the GM's chunk is only expected when a GM is here AND the manifest is of this bake version (or there is none yet): a manifest
   // of another bake version means the GM's client runs other code - waiting would only delay the scene by AWAIT_CHUNK
@@ -370,7 +385,8 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   if ( toBake.length ) {
     const byIndex = new Map(want.map((w) => [w.index, w])), inBake = new Set(toBake.map((w) => w.index));
     for ( let k = 0; k < toBake.length; k++ ) for ( const j of toBake[k].deps ) {
-      const d = byIndex.get(j); if ( !d || inBake.has(j) || recs.has(d.rk) ) continue;
+      // (a deferred stroke under it lends its older look as the substrate instead: no chain of re-bakes for one new stroke)
+      const d = byIndex.get(j); if ( !d || inBake.has(j) || recs.has(d.rk) || deferred.has(d.objId) ) continue;
       inBake.add(j); toBake.push(d);
     }
     toBake.sort((a, b) => a.index - b.index);
@@ -384,8 +400,9 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
       const wait = Math.min(8 * 60000, 15000 * 2 ** (bakeFail.n - 1)) - (Date.now() - bakeFail.at);
       if ( wait > 0 ) { Trace.event("bake-backoff", { wait }); clearTimeout(bakeTimer); bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, wait); return; }
     }
-    if ( !taken.length && !force && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
-    Object.assign(status, { baking: true, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length }); tell("status");
+    if ( !taken.length && !force && !idle && !breaker.hit("bake", key) ) { pauseBaking("bake", why); return; }
+    // (an idle pass in the background is not "baking" for the status: the compatible look is on screen and stays until it is replaced)
+    Object.assign(status, { baking: !idle, progress: 0, error: "", bakeDone: 0, bakeTotal: toBake.length, bakeStart: Date.now() }); tell("status");
     if ( src.chunk || src.legacy || src.stale ) show();   // what just landed (or the older look), while the rest bakes
     // a long bake on a scene load: the reveal does not wait for all of it (it shows what is ready after its longer budget, the rest
     // fades in stroke by stroke as it is baked, nearest to the view first)
@@ -401,7 +418,8 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
         const need = new Set(list.map((w) => w.index)), under = {};
         for ( const w of list ) for ( const j of w.deps ) {
           if ( need.has(j) || objs[j].k || under[j] ) continue;
-          const r = recs.get(rkOf(j)); if ( r ) under[j] = r.sprites;
+          const r = recs.get(rkOf(j)) ?? (deferred.has(S.objects[j].id) ? staleRecs.get(S.objects[j].id) ?? shownRecs.get(S.objects[j].id) : null);
+          if ( r ) under[j] = r.sprites;
         }
         return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       };
@@ -458,6 +476,13 @@ async function bakeOnce({ awaitPublish = true, force = false } = {}) {
   if ( my !== gen ) return;
   if ( firstLoad && Reveal.holding("destruction") && display ) await (prepping ?? prepareReveal(my));
   const complete = want.every((w) => recs.has(w.rk));
+  // on screen in full - some strokes perhaps in a compatible older look that stands until its background re-bake
+  const shownFull = complete || want.every((w) => recs.has(w.rk) || (deferred.has(w.objId) && (staleRecs.has(w.objId) || shownRecs.get(w.objId)?.stale)));
+  if ( shownFull && !complete ) {
+    shownKey = key;
+    if ( game.user.isGM && mode === "background" ) scheduleIdleRebake(idle ? 250 : 4000);   // (the next few right after, while still idle)
+    Trace.event("compat-shown", { from: status.compat?.from, left: deferred.size, mode });
+  }
   if ( complete ) { shownKey = key; waitingSince.clear(); Trace.markOnce("damage:all", { groups: display?.groups.size ?? 0, uploads: display?.stats?.uploads ?? 0, ...src }); }
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
@@ -624,6 +649,26 @@ function maybeBlast(first = false) {
  * worker (in parallel with the next bake), uploaded (only what the server lacks, a few at a time) and named in the manifest together
  * with the entries that played since. One run at a time; a run asked for meanwhile follows it.
  */
+/* ---------------------------------------------------------------- re-baking a compatible older look (GM, in the background) */
+
+/** "background" (default: when this tab is idle), "ask" (only on Rebake all), "now" (at load, as before). Client setting. */
+export function rebakeMode() {
+  try { const v = game.settings.get(MODULE_ID, "destrRebake"); return ["background", "ask", "now"].includes(v) ? v : "background"; } catch { return "background"; }
+}
+let lastInput = Date.now(), idleTimer = 0;
+for ( const ev of ["pointerdown", "keydown", "wheel"] ) globalThis.addEventListener?.(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true });
+/** A few strokes at a time, only while nobody uses this tab (3 s without input, the tab visible, no other bake running). */
+function scheduleIdleRebake(ms = 4000) {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    idleTimer = 0;
+    if ( !S || !status.compat || rebakeMode() !== "background" ) return;
+    if ( Date.now() - lastInput < 3000 || document.visibilityState !== "visible" || inflight ) return scheduleIdleRebake(2000);
+    Trace.event("bake-idle", { left: status.compat.left });
+    rebake({ awaitPublish: false, idle: true });
+  }, ms);
+}
+
 /** The breaker tripped: no more automatic bakes or publishes on this client until "Bake now" (api.destruction.bakeNow) or a reload. */
 function pauseBaking(kind, why) {
   const msg = game.i18n.localize("MOINENMAPS.Destr.bakePaused");
@@ -911,6 +956,8 @@ export const destructionApi = {
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
   /** "Bake now": after the loop breaker paused this client (status.paused), bake and publish again. */
+  /** Rebake all: the strokes shown in a compatible older look are baked now (and published by the GM). */
+  rebakeAll: () => { Trace.event("rebake-all"); return rebake({ awaitPublish: false, all: true }); },
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   status: () => { if ( lastRecs && !status.hash ) status.hash = Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
@@ -922,10 +969,18 @@ export const destructionApi = {
   TYPES: Model.TYPES, MATERIALS: Model.MATERIALS, CAUSES: Model.CAUSES
 };
 
+/** The Damage panel's buttons (section.mjs). */
+export const bakeNow = () => destructionApi.bakeNow();
+export const rebakeAll = () => destructionApi.rebakeAll();
+
 export function registerDestruction() {
   moduleApi.destruction = destructionApi;
   Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast });
   Hooks.once("init", () => Editor.registerEditorSettings(() => tell("brush")));
+  Hooks.once("init", () => game.settings.register(MODULE_ID, "destrRebake", {
+    name: "MOINENMAPS.Destr.rebakeSetting", hint: "MOINENMAPS.Destr.rebakeSettingHint", scope: "client", config: true, type: String, default: "background",
+    choices: { background: "MOINENMAPS.Destr.rebake.background", ask: "MOINENMAPS.Destr.rebake.ask", now: "MOINENMAPS.Destr.rebake.now" }
+  }));
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);

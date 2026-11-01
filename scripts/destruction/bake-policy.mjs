@@ -24,6 +24,36 @@ export function manifestRule(manifestBase, myBase) {
 /** May this client write its manifest over the scene's? Never over a newer version's. */
 export const mayPublish = (manifestBase, myBase) => !manifestBase || verOf(manifestBase) <= verOf(myBase);
 
+/*
+ * VISUAL COMPATIBILITY OF BAKE VERSIONS. A version that only changes DETAILS of the look (colours, specks, lips, hairlines, a cause's
+ * treatment, shading) - not WHICH pixels are damaged, not the chunk layout - declares the version before it as compatible:
+ *     BAKE_VERSIONS[30] = { compat: 29, note: "cracks as a hierarchy" }
+ * A scene published by a compatible older version is then shown as it is (no wait, no bake at load); the new look is baked later in
+ * the background when the tab is idle (or on "Rebake all", or never - the client setting), and swapped in stroke by stroke. A bump that
+ * changes the damage's shape or the chunk format declares NO compat (an older scene is then re-baked at load, its old look shown only
+ * while that runs). Compatibility is transitive along the chain: 31 -> 30 -> 29 means a 29 scene is compatible with 31.
+ */
+export const BAKE_VERSIONS = {
+  25: { compat: 24, note: "substrates: newer strokes read the older damage under them" },
+  26: { compat: 25 }, 27: { compat: 26, note: "dominant hairlines, dust-puff shock" }, 28: { compat: 27, note: "cause specks and halos" },
+  29: { compat: 28, note: "torn lip ink, short cave-in hairlines" }, 30: { compat: 29, note: "cracks as a hierarchy" },
+  31: { compat: 30, note: "cause treatments: bolts, sigils, rim, scratches, erosion, rime" }
+};
+
+/** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */
+export function compatible(old, now, table = BAKE_VERSIONS) {
+  if ( old === now ) return true;
+  let v = now;
+  for ( let guard = 0; guard < 1000; guard++ ) {
+    const c = table[v]?.compat;
+    if ( !Number.isFinite(c) || c >= v ) return false;
+    if ( c === old ) return true;
+    if ( c < old ) return false;
+    v = c;
+  }
+  return false;
+}
+
 export const LIMIT = 2, WINDOW = 120000;
 
 /** The per-client breaker: `hit(kind, key)` -> true when allowed (and counted), false when tripped. */

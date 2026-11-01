@@ -133,7 +133,14 @@ function statusLine() {
   if ( st.warning ) return `${T("Destr.warning")}: ${st.warning}`;
   if ( !S || !Model.hasPaint(S) ) return T("Destr.empty");
   if ( st.error ) return `${T("Destr.error")}: ${st.error}`;
-  if ( st.baking ) return game.i18n.format("MOINENMAPS.Destr.baking", { pct: Math.round(st.progress * 100) });
+  if ( st.baking ) {
+    const line = game.i18n.format("MOINENMAPS.Destr.baking", { pct: Math.round(st.progress * 100) });
+    // strokes baked of how many, and about how long is left (from the pace so far)
+    const total = st.bakeTotal ?? 0, done = st.bakeDone || Math.round((st.progress ?? 0) * total);
+    if ( total < 2 || !done ) return line;
+    const eta = Math.max(1, Math.round(((Date.now() - (st.bakeStart ?? Date.now())) / done) * (total - done) / 1000));
+    return `${line} · ${game.i18n.format("MOINENMAPS.Destr.bakingCount", { done, total, eta })}`;
+  }
   if ( st.waiting ) return T("Destr.waiting");
   const n = st.stats;
   const parts = [game.i18n.format("MOINENMAPS.Destr.areas", { n: st.areas.length })];
@@ -144,6 +151,8 @@ function statusLine() {
     if ( k && game.i18n.has(`MOINENMAPS.Destr.src.${k}`) ) parts.push(game.i18n.format(`MOINENMAPS.Destr.src.${k}`, { n: n ?? "" }));
   }
   if ( S.baked?.key && st.key === S.baked.key ) parts.push(T("Destr.published"));
+  // strokes still in a compatible older look (their new look is baked later: in the background, or on Rebake all)
+  if ( st.compat ) parts.push(game.i18n.format(`MOINENMAPS.Destr.oldLook.${st.compat.mode === "ask" ? "ask" : "background"}`, { v: st.compat.from, n: st.compat.left }));
   return parts.join(" · ");
 }
 
@@ -170,6 +179,8 @@ function mountDamage(host) {
         <button type="button" class="mm-ws-btn" data-act="detonate"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-explosion" inert></i> ${esc(T("Destr.detonate"))}</button>
         <button type="button" class="mm-ws-btn" data-act="variation"${S && Model.hasPaint(S) ? "" : " disabled"} data-tooltip="${esc(T("Destr.variationHint"))}"><i class="fa-solid fa-dice" inert></i> ${esc(T("Destr.variation"))}</button>
         <button type="button" class="mm-ws-btn" data-act="clear"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-trash" inert></i> ${esc(T("Destr.clear"))}</button>
+        ${gm && st.paused ? `<button type="button" class="mm-ws-btn" data-act="bakeNow" data-tooltip="${esc(T("Destr.bakeNowHint"))}"><i class="fa-solid fa-rotate" inert></i> ${esc(T("Destr.bakeNow"))}</button>` : ""}
+        ${gm && st.compat && !st.paused ? `<button type="button" class="mm-ws-btn" data-act="rebakeAll" data-tooltip="${esc(T("Destr.rebakeAllHint"))}"><i class="fa-solid fa-wand-magic-sparkles" inert></i> ${esc(T("Destr.rebakeAll"))}</button>` : ""}
       </div>
       ${optCheck({ name: "enabled", label: T("Destr.enabled"), checked: S ? S.enabled : true, hint: T("Destr.enabledHint") })}`;
   };
@@ -179,6 +190,8 @@ function mountDamage(host) {
     b.blur();   // the button must not keep the keyboard (Ctrl+Z right after Detonate undoes the last stroke)
     if ( b.dataset.act === "detonate" ) D.detonate();
     else if ( b.dataset.act === "variation" ) D.newVariation();
+    else if ( b.dataset.act === "bakeNow" ) D.bakeNow();
+    else if ( b.dataset.act === "rebakeAll" ) D.rebakeAll();
     else if ( b.dataset.act === "clear" ) {
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.clear") }, content: `<p>${esc(T("Destr.clearConfirm"))}</p>` });
       if ( ok ) D.clearAll();

@@ -4,7 +4,7 @@
  * Run: node dev/bake-policy.test.mjs
  */
 import assert from "node:assert/strict";
-import { manifestRule, mayPublish, Breaker, verOf } from "../scripts/destruction/bake-policy.mjs";
+import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS } from "../scripts/destruction/bake-policy.mjs";
 
 let passed = 0;
 const test = (name, fn) => { try { fn(); passed++; console.log("ok  ", name); } catch ( err ) { console.error("FAIL", name, err); process.exitCode = 1; } };
@@ -80,6 +80,16 @@ test("the breaker stops a loop it cannot otherwise see (the same key published a
   // spread over time (one every 3 min) it never trips
   const c = new Breaker({ now: () => clock.t });
   for ( let i = 0; i < 10; i++ ) { clock.t += 180000; assert.ok(c.hit("bake", "k")); }
+});
+
+test("visual compatibility of bake versions follows the declared chain only", () => {
+  const T = { 31: { compat: 30 }, 30: { compat: 29 }, 29: {}, 28: { compat: 27 } };
+  assert.ok(compatible(30, 31, T));
+  assert.ok(compatible(29, 31, T));
+  assert.ok(!compatible(28, 31, T));            // 29 declared nothing: the chain stops there
+  assert.ok(!compatible(31, 30, T));            // never a newer one as compatible with an older
+  assert.ok(compatible(31, 31, T));
+  for ( const [v, e] of Object.entries(BAKE_VERSIONS) ) assert.ok(e.compat < Number(v), `version ${v} points forward`);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);
