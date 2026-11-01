@@ -1433,15 +1433,15 @@ function bakeArea(A, P, seed, uid, jag) {
     // 5. hairline cracks: one ink pixel, with a lighter lip of the map's own colour up-left of it (a cause draws its own), then the
     // cause's specks
     if ( cz ) { kit.crackLines(C.cracks); if ( cz.fx ) kit.fx(C.px, (i) => C.keep.has(i)); }
-    else for ( const path of C.cracks ) path.forEach((i, k) => {
+    else for ( const path of C.cracks ) for ( const i of path ) {
       // a hierarchy: a main fissure is two pixels wide at its root and tapers to one, branches are dark, the far ends of
       // branches fade to hairlines
-      const x = i % W, y = (i - x) / W, f = k / path.length, dep = path.depth | 0;
+      const x = i % W, y = (i - x) / W, f = path.indexOf(i) / path.length, dep = path.depth | 0;
       const ink = dep ? (f < 0.6 ? 0.8 : 0.55) : f < 0.75 ? 0.9 : 0.7;
       put(x, y, mix(mapAt(i), pal.ink, ink));
       if ( !dep && f < 0.4 ) { const q = i + W; if ( y + 1 < H && !inside[q] ) put(x, y + 1, mix(mapAt(q), pal.ink, f < 0.2 ? 0.75 : 0.5)); }
       const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14));
-    });
+    }
     // 6. shard shadows: one flat colour, alpha ~100
     const shadowCol = mul(pal.ramp[0], 0.7);
     const shadowSeen = new Set();
