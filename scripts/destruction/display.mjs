@@ -1375,13 +1375,18 @@ export class DestructionDisplay {
         this.chunks(g, a, { count: Math.min(5, Math.round((1 + R * 0.08) * pw)), reach: [1.05, 1.5], H: [3, 7], sizes: [3, 5], seed: 3, from: rim });
       });
     } else if ( type === "cracks" ) {
-      if ( tFront < 1 && Math.random() < 0.2 ) { const ang = Math.random() * 6.28; this.spawn({ x: a.ox + Math.cos(ang) * frontR, y: a.oy + Math.sin(ang) * frontR * 0.85, vx: 0, vy: 0, rise: -3, life: 380, color: 0x8f8474, alpha: 0.7, size: 2 }); }
       // CHIPS pop off the plates along the fissures as they open and after (chunks of the ground cut where a crack runs: they hop a
       // few pixels sideways and crumble), a little dust lifts and settles over ~1.5 s
       for ( const [key, at, n] of [["chip0", 0.4, 4], ["chip1", 0.85, 3], ["chip2", 1.25, 2], ["chip3", 1.8, 2]] ) once(key, a.delay + a.reveal * at, () => {
         const pts = this.fissures(g, a, Math.round(n * pw), a.seed + key.length * 7 + at * 100);
-        if ( pts.length ) this.chunks(g, a, { count: pts.length, H: [2, 5], sizes: [3, 5], seed: at * 10, from: (i) => pts[i % pts.length],
-          to: (i, h) => { const p = pts[i % pts.length], an = h(4) * 6.283, d = 2 + 4 * h(5); return [p[0] + Math.cos(an) * d, p[1] + Math.sin(an) * d * 0.8]; } });
+        // (a flake of the surface beside the crack: its lit lip's own tone, two pixels, an irregular diagonal or crumb shape; it hops off
+        // and is gone - never a chunk cut from the dark crack itself, which read as a round dark blob)
+        const bd = a.rev?.data, bw = g.info.w;
+        for ( const [x, y] of pts ) {
+          const lx = x - g.info.x, ly = y - g.info.y + 1, q = (ly * bw + lx) * 4;
+          const c = bd && bd[q + 3] ? (Math.min(255, bd[q] * 1.08) << 16) | (Math.min(255, bd[q + 1] * 1.08) << 8) | Math.min(255, bd[q + 2] * 1.08) : 0xb8ad9c;
+          this.spawn({ x, y: y - 1, vx: (Math.random() - 0.5) * 6, vy: -4 - Math.random() * 3, fall: 34, life: 420, color: c, size: 2, shape: Math.random() < 0.5 ? "diag" : "crumb" });
+        }
         for ( const [x, y] of pts.slice(0, 2) ) this.spawn({ x: x + 1, y, vx: (Math.random() - 0.5) * 2, vy: 0, rise: -1.2, life: 900 + Math.random() * 300, color: 0xa89c8a, alpha: 0.5, drag: 2, size: 2 });
       });
     } else if ( type === "gash" && a.wipe ) {
