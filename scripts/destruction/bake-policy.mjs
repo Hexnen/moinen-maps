@@ -48,7 +48,8 @@ export const BAKE_VERSIONS = {
   38: { compat: 37, note: "lightning lip without a white outline" },
   39: { compat: 38, note: "tears: short flap seams, slanted short fibres, dithered wall strata" },
   // 40 changes a cave-in's SHAPE (its outline from the smoothed mask, a finer rim wobble, a wider window): no compat, re-baked at load
-  40: { compat: null, note: "collapse: whole level-1 outline, no straight rim runs" }
+  40: { compat: null, note: "collapse: whole level-1 outline, no straight rim runs" },
+  41: { compat: null, note: "crack strokes, smooth floors, sinking flood pieces" }
 };
 
 /** May the chunks of bake version `old` stand in as FINAL for version `now` (until a background re-bake replaces them)? */

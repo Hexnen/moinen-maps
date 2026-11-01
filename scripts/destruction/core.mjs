@@ -23,7 +23,7 @@ import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
 import { collapseOutline, collapseSeeds, collapseFate, collapseShade, collapseLip } from "./collapse.mjs";
 import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
 
-export const CORE_VERSION = 40;   // 40: a cave-in's outline read from the smoothed occupancy (a level-1 pit stays whole, no straight runs of the brush mask), a finer wobble along its rim, room for its outward lobes; 39: a tear's flap seams short nicks, fibres slanted and short (no sticks across a wide gap), its far wall's strata dithered with a wandering height, turf roots and crumbs in soil tones; 38: a lightning lip scorched with rare glass beads (no white outline); 37: cracks readable at max settings (a milder warp of torn cracks, no wide main fissures there, no knot of tiny plates round the impact); 36: a cave-in shaped as an organic pit or a trench along a followed stroke, plates in rings along its rim (tilted, lit, sinking by band), a layered wall with strata and a void floor, a broken lip; 35: a tear opens asymmetrically (one tip blunt, the other a needle or a fork, pinches and bulges, the lips shifted against each other, its middle off the spine), its lips cut into flaps of varied length that settle, curl back or tear off into the gap, fibres that snap as pieces, curved forking hairlines, dithered diagonal edges, fire veins broken and branching, frost crystals at 60 degrees with a soft rime, acid eats a pitted edge; 33: lightning forks leave at 30-60 degrees off the channel's heading; 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
+export const CORE_VERSION = 41;   // 41: crack STROKES (tapered branching fissures with a bevel, along the stroke, no cells), smooth lit floor bands with a few bigger stones, a flooded hole's pieces sink into it; 40: a cave-in's outline read from the smoothed occupancy (a level-1 pit stays whole, no straight runs of the brush mask), a finer wobble along its rim, room for its outward lobes; 39: a tear's flap seams short nicks, fibres slanted and short (no sticks across a wide gap), its far wall's strata dithered with a wandering height, turf roots and crumbs in soil tones; 38: a lightning lip scorched with rare glass beads (no white outline); 37: cracks readable at max settings (a milder warp of torn cracks, no wide main fissures there, no knot of tiny plates round the impact); 36: a cave-in shaped as an organic pit or a trench along a followed stroke, plates in rings along its rim (tilted, lit, sinking by band), a layered wall with strata and a void floor, a broken lip; 35: a tear opens asymmetrically (one tip blunt, the other a needle or a fork, pinches and bulges, the lips shifted against each other, its middle off the spine), its lips cut into flaps of varied length that settle, curl back or tear off into the gap, fibres that snap as pieces, curved forking hairlines, dithered diagonal edges, fire veins broken and branching, frost crystals at 60 degrees with a soft rime, acid eats a pitted edge; 33: lightning forks leave at 30-60 degrees off the channel's heading; 32: crack plates a little bigger at the crater level, main fissures wide over half the reach; 31: lightning leaves branching fused bolt trails (no web), arcane inscribes sigils, impact a pressed rim with shock streaks and chips, claws parallel scratches beside it, water erosion wet ground and sediment bands, frost a soft rime lip; 30: cracks as a hierarchy (irregular fan of main fissures, uneven rings, missing segments, impacts further apart), hairlines spaced and branching at 30-60 degrees, flood floor glints in patches; 29: a broken, variable-weight lip ink; short cave-in hairlines; 28: 28: fewer fire specks, a lighter lightning burn, arcane motes without '+' glyphs; 27: 27: at most six hairline fractures per area; 26: 26: flat plates keep the map's tone, moved crack plates inked, smooth soot round a burn, tear floors dithered, curved tear side rips; 25: 25: substrates (a newer stroke over older damage reads it under its own pixels, one way), the severity rule (a lower level never covers a higher one), a tear's cover is what it lays, cracks darken with their level; 24: banded floors (no checkerboard), clustered embers; 23: fire fissures broken, acid pools pitted, frost lip a rime not an outline; 22: lightning as a few bolts, a lobed broken rune ring; 21: lobed rune rings, a wandering crater lip band, throws within reach, fewer rim studs, crack hierarchy, few lightning bolts; 20: a tear in stone shows a quieter fresh-stone rim; 19: a cave-in in layered depth (slope bands, lit pit wall, rubble on its floor); 18: pieces placed as if the scene had no edge, culled past it
 export const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const T_BLAST = 0, T_COLLAPSE = 1, T_SCORCH = 2, T_FLOOD = 3, T_CRACKS = 4, T_GASH = 5;
 export const MATS = ["grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -924,47 +924,75 @@ function bakeArea(A, P, seed, uid, jag) {
       return;
     }
     /**
-     * CRACKS: a hierarchy, not a stamped spiderweb. Per impact an irregular fan of 3-7 MAIN fissures (uneven gaps), a wide sector split
-     * once more by a secondary crack, rings of its own per sector (start, growth and offset differ, so the ring cracks do not line up
-     * round the centre), bigger plates, and missing segments: a cell merged with its neighbour in the ring (no radial crack there) or
-     * with the cell inside it (no ring crack). `sec` names the main sector (its borders are the main fissures, wider near the impact).
+     * CRACKS as STROKES, not cell borders: per impact a few main fissures (along the followed stroke when there is one, else an
+     * irregular fan; on wood bent towards the grain), each a jagged channel with 2-4 branches at 30-60 degrees and a twig (pixel-fx
+     * boltTree), thick at its origin and tapering to one pixel. A tree never closes a loop. The level grades it: level 1 two or three
+     * hairlines, level 2 three fissures two pixels wide at their root, level 3 four or five, three pixels wide. The surface between them
+     * stays whole (one plate that is never moved); the crack pixels are the ruin (C.crackAt: 3 main root, 2 main / branch, 1 hairline),
+     * cut in with a bevel by drawBase.
      */
-    const group = [], TAU2 = Math.PI * 2;
-    const crackSeeds = (e, ei) => {
-      const fz = C.cz?.frac, base = seeds.length;
-      seeds.push({ x: e.x + (R() - 0.5), y: e.y + (R() - 0.5), e: ei, sec: ei * 64 + 63 }); group[base] = base;
-      // (the level is a real gradation: a higher level breaks into more and smaller plates)
-      const lv1 = C.maxSev < 1.5, M = lv1 ? 3 : clamp(Math.round((3 + Math.floor(R() * 3) + (C.maxSev > 2.4 ? 1 : 0)) * (fz?.spokes ?? 1) * 0.85), 3, 8);
-      const sz = lv1 ? 2 : clamp(1.5 - 0.25 * C.maxSev, 0.82, 1.1);
-      const wts = Array.from({ length: M }, () => 0.45 + R()), tot = wts.reduce((s, v) => s + v, 0), ringK = fz?.ring ?? 1;
-      let ang = R() * TAU2;
-      for ( let j = 0; j < M; j++ ) {
-        const span = wts[j] / tot * TAU2, sub = span > 1.15 ? 2 : 1, cut = sub === 2 ? 0.35 + R() * 0.3 : 1;
-        let r = (lv1 ? 2.2 : 3.4) + R() * 2.6, prev = null;   // (no knot of tiny plates round the impact)
-        while ( r < e.R + 3 ) {
-          // (level 1: a few radiating hairlines and no ring at all)
-          const rn = lv1 ? e.R + 3.5 : r * (1.35 + (0.15 + R() * 0.55) * sz) * (ringK > 1 ? 1 + (ringK - 1) * 0.4 : ringK) + 1.6 * sz, rm = (r + rn) / 2, w = (3.5 + rm * 0.8) * sz, row = [];
-          for ( let s = 0; s < sub; s++ ) {
-            const a0 = ang + span * (s ? cut : 0), sp = span * (s ? 1 - cut : cut), f = Math.max(1, Math.round(sp * rm / w));
-            for ( let q = 0; q < f; q++ ) {
-              const a = a0 + sp * (q + 0.5 + (R() - 0.5) * 0.4) / f, rr = rm + (R() - 0.5) * (rn - r) * 0.4, aa = fz?.swirl ? a + rr * fz.swirl : a, idx = seeds.length;
-              seeds.push({ x: e.x + Math.cos(aa) * rr, y: e.y + Math.sin(aa) * rr, e: ei, sec: ei * 64 + j });
-              let gk = idx;
-              if ( row.length && R() < 0.3 ) gk = group[row[row.length - 1]];
-              else if ( prev && R() < 0.2 ) gk = group[prev[Math.min(prev.length - 1, Math.floor(row.length / Math.max(1, f * sub) * prev.length))]];
-              group[idx] = gk; row.push(idx);
-            }
-          }
-          prev = row; r = rn;
+    const group = [];
+    const crackStrokes = () => {
+      const ownA = new Uint8Array(N); for ( const i of C.px ) ownA[i] = 1;
+      const crackAt = C.crackAt = new Uint8Array(N), lv = C.maxSev, lv1 = lv < 1.5, lv3 = lv > 2.4;
+      const wood = C.cls.mat === M.wood, grainA = C.cls.grainX ? Math.PI / 2 : 0;   // (grainX: the planks change across x, the grain runs along y)
+      const toGrain = (a) => { if ( !wood ) return a; let g = grainA; if ( Math.cos(a - g) < 0 ) g += Math.PI; return a + ((((g - a) + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) * 0.6; };
+      const paint = (pts, w0, cls) => {
+        let L = 0; for ( let q = 1; q < pts.length; q++ ) L += Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]);
+        let run = 0;
+        for ( let q = 1; q < pts.length; q++ ) {
+          const sl = Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]), cells = lineCells(pts[q - 1][0], pts[q - 1][1], pts[q][0], pts[q][1]);
+          cells.forEach(([x, y], j) => {
+            const f = (run + sl * j / Math.max(1, cells.length)) / (L || 1), w = Math.max(1, Math.round(w0 * Math.pow(1 - f, 0.8) + 0.25));
+            const put = (X, Y, c) => { if ( X < 0 || Y < 0 || X >= W || Y >= H ) return; const i = Y * W + X; if ( ownA[i] && crackAt[i] < c ) crackAt[i] = c; };
+            put(x, y, w >= 2 && cls === 2 ? 3 : cls); if ( w >= 2 ) put(x + 1, y, cls); if ( w >= 3 ) put(x, y + 1, cls);
+          });
+          run += sl;
         }
-        ang += span;
-      }
+      };
+      const tree = (x0, y0, x1, y1, w0, forks, sd) => {
+        const t = boltTree(sd, x0, y0, x1, y1, { forks, rough: 0.13 });
+        paint(t.main, w0, 2);
+        for ( const f of t.forks ) paint(f.pts, f.depth > 1 ? 1 : Math.max(1, w0 - 1), f.depth > 1 ? 1 : (lv1 ? 1 : 2));
+      };
+      const w0 = lv1 ? 1 : lv3 ? 3 : 2, nf = lv1 ? 1 : lv3 ? 3 : 2;
+      C.epi.forEach((e, ei) => {
+        const reach = Math.max(4, e.R) + 2, sd = seed * 7 + C.uid * 131 + ei * 17;
+        let n = lv1 ? 2 + (R() < 0.4 ? 1 : 0) : lv3 ? 4 + (R() < 0.5 ? 1 : 0) : 3;
+        // along a followed stroke: one main fissure runs with it (its own stretch of the path), the rest fan out
+        if ( C.path && C.path.pts.length > 1 ) {
+          const pts = C.path.pts, k = Math.round(ei / Math.max(1, C.epi.length - 1) * (pts.length - 1)), k0 = Math.max(0, k - 1), k1 = Math.min(pts.length - 1, k + 1);
+          const dx = pts[k1][0] - pts[k0][0], dy = pts[k1][1] - pts[k0][1], dl = Math.hypot(dx, dy) || 1, half = Math.max(reach, 0.6 * dl);
+          tree(e.x - dx / dl * half, e.y - dy / dl * half, e.x + dx / dl * half, e.y + dy / dl * half, w0, nf + 1, sd + 5);
+          n = Math.max(1, n - 2);
+        }
+        const wts = Array.from({ length: n }, () => 0.5 + R()), tot = wts.reduce((s, v) => s + v, 0);
+        let ang = R() * Math.PI * 2;
+        for ( let j = 0; j < n; j++ ) {
+          const a = toGrain(ang + (R() - 0.5) * 0.3), L = reach * (0.75 + 0.45 * R());
+          tree(e.x, e.y, e.x + Math.cos(a) * L, e.y + Math.sin(a) * L * 0.85, j === 0 ? w0 : Math.max(1, w0 - (R() < 0.5 ? 1 : 0)), nf, sd + j * 3);
+          ang += wts[j] / tot * Math.PI * 2;
+        }
+        // wood: short splinters along the grain beside the fissures
+        const onCrack = []; for ( const i of C.px ) if ( crackAt[i] >= 2 ) onCrack.push(i);
+        if ( wood && !lv1 && onCrack.length ) for ( let s = 0; s < 3 + nf * 2; s++ ) {
+          const a = grainA + (R() < 0.5 ? Math.PI : 0) + (R() - 0.5) * 0.15, i0 = onCrack[Math.floor(R() * onCrack.length)];
+          const sx = i0 % W, sy = (i0 - (i0 % W)) / W, l = 3 + R() * 5;
+          paint([[sx, sy], [sx + Math.cos(a) * l, sy + Math.sin(a) * l]], 1, 1);
+        }
+      });
+      // the rest is one whole plate (never moved)
+      const plate = { seed: { x: C.epi[0].x, y: C.epi[0].y, e: 0 }, px: [], whole: true };
+      for ( const i of C.px ) if ( !crackAt[i] ) plate.px.push(i);
+      C.cells = plate.px.length ? [plate] : [];
+      C.cellAt = cellMap(N);
+      C.cells.forEach((c, id) => { c.id = id; for ( const i of c.px ) C.cellAt.set(i, id); });
     };
+    if ( C.type === T_CRACKS ) { crackStrokes(); return; }
     // a cave-in: rings of plates along its own outline (collapse.mjs)
     if ( C.type === T_COLLAPSE ) { const cs = collapseSeeds(C, din, W, seed + C.uid, R); C.collBand = cs.bw; for ( const s of cs.seeds ) seeds.push(s); }
     else for ( let ei = 0; ei < C.epi.length; ei++ ) {
       const e = C.epi[ei];
-      if ( C.type === T_CRACKS ) { crackSeeds(e, ei); continue; }
       seeds.push({ x: e.x + (R() - 0.5), y: e.y + (R() - 0.5), e: ei });
       const m0 = 6 + Math.floor(R() * 5), a0 = R() * Math.PI * 2, fz = C.cz?.frac;
       const m = fz?.spokes ? Math.max(4, Math.round(m0 * fz.spokes)) : m0;
@@ -1089,8 +1117,8 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( CX && type === T_COLLAPSE ) { for ( const s of collapseFate(CX, base, cell) ) C.shards.push(s); continue; }
       if ( type === T_CRACKS || sv < 1.5 ) {
         // cracked: the plate stays; now and then a hair's breadth out or sunk a little
-        const nudge = R() < 0.3 ? 1 : 0;
-        C.shards.push({ ...base, dx: Math.round(ox * nudge), dy: Math.round(oy * nudge), th: 0, tx: 0, ty: 0, z0: (type === T_CRACKS && sv > 2.2 && R() < 0.4) ? -1 : 0, T: 0 });
+        const nudge = R() < 0.3 && !cell.whole ? 1 : 0;   // (the whole plate round crack strokes never moves)
+        C.shards.push({ ...base, dx: Math.round(ox * nudge), dy: Math.round(oy * nudge), th: 0, tx: 0, ty: 0, z0: (type === T_CRACKS && sv > 2.2 && R() < 0.4 && !cell.whole) ? -1 : 0, T: 0 });
         continue;
       }
       if ( sv < 2.45 || type === T_GASH ) {
@@ -1111,7 +1139,7 @@ function bakeArea(A, P, seed, uid, jag) {
         continue;
       }
       // crater: pulverised, sunk, or thrown out as chips
-      let gone = type === T_FLOOD ? 0.85 : type === T_COLLAPSE ? 0.75 : type === T_SCORCH ? 0.85 : 0.35 + (1 - debris) * 0.55;
+      let gone = type === T_FLOOD ? 0.5 : type === T_COLLAPSE ? 0.75 : type === T_SCORCH ? 0.85 : 0.35 + (1 - debris) * 0.55;
       if ( C.cz?.fate?.gone ) gone = clamp(gone + C.cz.fate.gone, 0.05, 0.95);   // acid dissolves, rot crumbles, a fist leaves pieces
       if ( u < 0.35 && R() < gone + 0.25 ) { stats.pulverised++; continue; }
       if ( R() < gone * 0.6 ) { stats.pulverised++; continue; }
@@ -1121,7 +1149,7 @@ function bakeArea(A, P, seed, uid, jag) {
         ccx /= chip.length; ccy /= chip.length;
         const a = Math.atan2(oy, ox) + (R() - 0.5) * 0.7;
         let dist;
-        if ( type === T_COLLAPSE ) dist = -(dl * (0.3 + R() * 0.5));                         // falls in
+        if ( type === T_COLLAPSE || type === T_FLOOD ) dist = -(dl * (0.3 + R() * 0.5));   // (a flooded hole's pieces sink into it, none float off)                         // falls in
         else if ( R() < 0.45 ) dist = (e.R - dl) * (0.15 + R() * 0.6);                       // comes to rest on the slope, leaning
         else dist = Math.min(((e.R - dl) + 1 + Math.pow(R(), 1.6) * (e.R * 0.6 + 3)) * scatter, (e.R - dl) + 2 + e.R * 0.55 * scatter);   // thrown out past the rim, most land close; never further than about half the crater's reach past it
         if ( dist > 0 && C.cz?.fate?.thr ) dist *= C.cz.fate.thr;
@@ -1142,7 +1170,7 @@ function bakeArea(A, P, seed, uid, jag) {
         const stackUp = occ[li] ?? 0;
         const tiltA = R() * Math.PI * 2, slope = R() * 0.55 * liftK;
         C.shards.push({ ...base, px: chip, cx: ccx, cy: ccy, dx: lx - ccx, dy: ly - ccy, th: (R() - 0.5) * Math.PI * 2,
-          tx: Math.cos(tiltA) * slope, ty: Math.sin(tiltA) * slope, z0: (type === T_COLLAPSE ? -2 : R() * 1.2 + stackUp * 1.3) * Math.max(0.4, liftK), T: chip.length > 14 ? 2 : 1, chip: 1, thrown: dist > 0 });
+          tx: Math.cos(tiltA) * slope, ty: Math.sin(tiltA) * slope, z0: (type === T_COLLAPSE || type === T_FLOOD ? -2 : R() * 1.2 + stackUp * 1.3) * Math.max(0.4, liftK), T: chip.length > 14 ? 2 : 1, chip: 1, thrown: dist > 0 });
         for ( let dy = -1; dy <= 1; dy++ ) for ( let dx = -1; dx <= 1; dx++ ) { const j = li + dy * W + dx; if ( j >= 0 && j < N && occ[j] < 6 ) occ[j]++; }
         stats.chips++;
       }
@@ -1159,7 +1187,8 @@ function bakeArea(A, P, seed, uid, jag) {
     stats.shards += C.shards.length;
     // hairline cracks out into the intact map
     if ( C.cz ) { if ( (C.maxSev >= 1.8 && C.type !== T_FLOOD) || C.cz.crack?.always ) causeCracks(C, R, C.cz.crack); }
-    else if ( C.maxSev >= 1.8 && C.type !== T_FLOOD ) growCracks(C, R);
+    // (crack strokes are their own cracks: hairlines from the mask's rim would start in the middle of intact ground)
+    else if ( C.maxSev >= 1.8 && C.type !== T_FLOOD && C.type !== T_CRACKS ) growCracks(C, R);
   }
 
   /** Split a pixel set into chips of about `max` pixels (nearest of k random seeds). */
@@ -1344,7 +1373,7 @@ function bakeArea(A, P, seed, uid, jag) {
           walk(x, y, Math.cos(fa), Math.sin(fa), (len - k) * 0.45, depth + 1);
         }
       }
-      if ( path.length ) { path.depth = depth; C.cracks.push(path); }
+      if ( path.length >= 5 ) { path.depth = depth; C.cracks.push(path); }   // (a stub of a few pixels reads as a stray dash)
     };
     // the fractures start apart from each other round the rim (a minimum spacing: never two leaving from the same spot)
     const starts = [], gap = Math.max(5, C.maxD * 0.9);
@@ -1517,7 +1546,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const gx = (din[i + 1] ?? 0) - (din[i - 1] ?? 0), gy = (din[i + W] ?? 0) - (din[i - W] ?? 0), gl = Math.hypot(gx, gy) || 1;
       const lit = ((gx / gl) * -0.7071 + (gy / gl) * -0.7071) * Math.min(1, depth * 3 + 0.2);
       // (cracks keep their plates: the gaps between them only go darker with the level - a broken crack is never lighter than a hairline)
-      let v = (sv < 1.5 ? 1.1 : t === T_CRACKS ? 1.1 - (sv - 1.5) * 0.6 : 3.4) - depth * (t === T_COLLAPSE ? 2.9 : 2.1) + lit * 1.3 + (h2(x, y, seed + 11) - 0.5) * 0.8 + (vnoise(x / 3, y / 3, seed + 12) - 0.5) * 0.7;
+      let v = (sv < 1.5 ? 1.1 : t === T_CRACKS ? 1.1 - (sv - 1.5) * 0.6 : 3.4) - depth * (t === T_COLLAPSE ? 2.9 : 2.1) + lit * 1.7 + (h2(x, y, seed + 11) - 0.5) * 0.22 + (vnoise(x / 4, y / 4, seed + 12) - 0.5) * 0.6;   // (smooth bands lit from the top left: no per-pixel speckle)
       // banded shading: flat tone bands with a narrow dithered seam between them (not a field of checkerboard)
       let idx = clamp(Math.floor(v + (bayer(x, y) - 0.5) * 0.45), 0, 4);
       col = rp[idx];
@@ -1531,6 +1560,8 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( C.cls.mat === M.grass && dn < 0.25 && h2(x, y, seed + 33) < 0.05 ) col = rp[0];   // roots
       // a cave-in in layered depth: the wall in lit / shaded tone bands with strata, then the void with a faint floor (collapse.mjs)
       if ( t === T_COLLAPSE && C.collBand && sv >= 1.5 ) col = collapseShade(pal, seed, x, y, din[i], depth, lit);
+      // cracks: the stroke's own tone - a main fissure's root near black, the branches dark, hairlines the map inked (drawBase bevels them)
+      if ( t === T_CRACKS && C.crackAt?.[i] ) { const q = C.crackAt[i]; col = q >= 3 ? mul(rp[0], 0.75) : q === 2 ? mix(rp[0], pal.ink, 0.4) : mix(mapAt(i), pal.ink, 0.72); }
       // flooded: the water itself is the water engine's (flood.mjs) laid over this; under a shallow pool (broken) the wet bottom shows,
       // under a deep one (crater) the dark of the deep water
       if ( t === T_FLOOD && sv <= 2.45 ) col = mul(col, 0.8);
@@ -1540,11 +1571,21 @@ function bakeArea(A, P, seed, uid, jag) {
         if ( vnoise(x / 5, y / 3, seed + 43) > 0.74 && h2(x, y, seed + 44) < 0.1 ) col = pal.waterR[4];   // a few glints in patches (no even dashes)
       }
       // embers in clusters along the hottest seams, a few bright, most dull (no even confetti)
-      if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.07 * clamp((vnoise(x / 5, y / 5, seed + 53) - 0.55) * 4, 0, 1) ) { const e = h2(x, y, seed + 52); col = e < 0.2 ? pal.ember[1] : e < 0.55 ? pal.ember[0] : mix(pal.ember[2], pal.char[1], 0.4); }
+      if ( t === T_SCORCH && depth > 0.4 && h2(x, y, seed + 51) < 0.035 * clamp((vnoise(x / 5, y / 5, seed + 53) - 0.55) * 4, 0, 1) ) { const e = h2(x, y, seed + 52); col = e < 0.2 ? pal.ember[1] : e < 0.55 ? pal.ember[0] : mix(pal.ember[2], pal.char[1], 0.4); }
       if ( cz ) { col = kit.fill(x, y, col, depth, dn, lit); if ( !col ) continue; }
       // over older damage (substrate.mjs INTERACT): deeper, charred, or left to the older look
       if ( A.sub ) { col = A.sub.fx(i, col, type, A.clean); if ( !col ) continue; if ( col.a ) { put(x, y, col, col.a); continue; } }
       put(x, y, col);
+    }
+    // crack strokes cut in: a lit edge on the side facing the light (below / right of the groove), a shaded one on the other
+    if ( type === T_CRACKS && C.crackAt ) for ( const i of C.px ) {
+      if ( !C.crackAt[i] ) continue;
+      const x = i % W, y = (i - x) / W;
+      for ( const [j, lit] of [[i + W, 1], [i + 1, 1], [i - W, 0], [i - 1, 0]] ) {
+        if ( j < 0 || j >= N || !C.keep.has(j) || C.crackAt[j] ) continue;
+        if ( lit && h2(j, 3, seed + 85) < 0.75 ) put(j % W, (j - (j % W)) / W, mul(mapAt(j), 1.16));
+        else if ( !lit ) put(j % W, (j - (j % W)) / W, mix(mapAt(j), pal.ink, C.crackAt[i] >= 2 ? 0.42 : 0.25));
+      }
     }
     // plates it left in place over older damage: a char over them where its rule chars (nothing drawn otherwise: the older look stays)
     if ( A.sub ) for ( const i of C.keep ) { const c = A.sub.keepFx(i, type, pal.char?.[0] ?? rp[0]); if ( c ) put(i % W, (i - (i % W)) / W, c, c.a); }
@@ -1552,13 +1593,14 @@ function bakeArea(A, P, seed, uid, jag) {
     if ( type !== T_CRACKS ) for ( const i of C.px ) {     // (flooded too: the rubble lies under the water)
       if ( C.keep.has(i) || A.sub?.yields(i, type) ) continue;
       const x = i % W, y = (i - x) / W, dn = din[i] / maxD;
-      const dens =rubble * (0.035 + 0.09 * Math.exp(-((dn - 0.35) ** 2) / 0.05)) * (sev[i] / 3) * (type === T_COLLAPSE && dn > 0.55 ? 1.7 : 1);
+      // (a handful of bigger, readable stones - not a field of single light squares)
+      const dens =rubble * 0.4 * (0.035 + 0.09 * Math.exp(-((dn - 0.35) ** 2) / 0.05)) * (sev[i] / 3) * (type === T_COLLAPSE && dn > 0.55 ? 1.7 : 1);
       if ( h2(x, y, seed + 61) >= dens || !isIn(x + 1, y + 1) ) continue;
       const fromMap = h2(x, y, seed + 62) < (type === T_COLLAPSE ? 0.65 : 0.3);
       const sx = clamp(x + Math.round((h2(x, y, seed + 63) - 0.5) * 8), 0, W - 1), sy = clamp(y + Math.round((h2(x, y, seed + 64) - 0.5) * 8), 0, H - 1);
       const light = fromMap ? mul(mapAt(sy * W + sx), 0.9) : rp[3 + (h2(x, y, seed + 66) < 0.4 ? 1 : 0)];
       // a stone of 1, 2 or 4 pixels: lit top-left, shaded bottom-right, a dark pixel of shadow under it
-      const sz = h2(x, y, seed + 65), wide = sz > 0.55, tall = sz > 0.85;
+      const sz = h2(x, y, seed + 65), wide = sz > 0.25, tall = sz > 0.55;
       put(x, y, light);
       if ( wide && isIn(x + 1, y) ) put(x + 1, y, mul(light, 0.78));
       if ( tall && isIn(x, y + 1) ) { put(x, y + 1, mul(light, 0.82)); if ( isIn(x + 1, y + 1) ) put(x + 1, y + 1, mul(light, 0.66)); }
@@ -1587,7 +1629,7 @@ function bakeArea(A, P, seed, uid, jag) {
       let near = -1, s = 0;
       // only where the surface is really torn open next to it: never along plates that stayed
       for ( const j of [i - 1, i + 1, i - W, i + W] ) if ( j >= 0 && j < N && own[j] === 1 && !C.keep.has(j) ) { near = j; s = Math.max(s, sev[j]); }
-      if ( near < 0 ) continue;
+      if ( near < 0 || (type === T_CRACKS && C.crackAt) ) continue;   // (crack strokes carry their own bevel, no lip)
       if ( cz ) { kit.lip(x, y, i, s); continue; }
       if ( s >= 1.6 ) put(x, y, pal.ink);
       else put(x, y, mix(mapAt(i), pal.ink, 0.55));
