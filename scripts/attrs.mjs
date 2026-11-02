@@ -10,6 +10,7 @@
  * The hover card is one reused DOM element; nothing here runs per frame.
  */
 import { MODULE_ID, sceneConfig } from "./config.mjs";
+import { addDeletion } from "./flag-diff.mjs";
 import { labelCfg } from "./labels.mjs";
 
 const FLAG = "districts";
@@ -120,7 +121,7 @@ export function pruneStore(list) {
   const doc = storeDoc(), sid = canvas.scene?.id, map = doc?.flags?.[MODULE_ID]?.store?.[sid];
   if ( !map ) return;
   const ids = new Set(list.map((d) => d.id)), gone = Object.keys(map).filter((k) => !ids.has(k));
-  if ( gone.length ) doc.update(Object.fromEntries(gone.map((k) => [`flags.${MODULE_ID}.store.${sid}.-=${k}`, null])));
+  if ( gone.length ) { const upd = {}; for ( const k of gone ) addDeletion(upd, `flags.${MODULE_ID}.store.${sid}.${k}`); doc.update(upd); }
 }
 
 /** Set one attribute's value by id (the panel stepper). */

@@ -6,6 +6,7 @@ import { fg } from "../labels.mjs";
 import * as St from "../tokens/styles.mjs";
 import { FX_FLAG, tokenFlag } from "../tokens/settings.mjs";
 import { preview, refreshTokenFx, isDeadDoc } from "../tokens/fx.mjs";
+import { addDeletion } from "../flag-diff.mjs";
 
 /**
  * Tokens: how tokens enter and leave the scene, their idle motion and their death (scripts/tokens), plus the older token effects
@@ -80,7 +81,7 @@ async function writeOverride(tokens, key, value) {
   const updates = [];
   for ( const t of tokens ) {
     const has = Object.prototype.hasOwnProperty.call(tokenFlag(t.document), key), cur = tokenFlag(t.document)[key];
-    if ( value === "" ) { if ( has ) updates.push({ _id: t.id, [`flags.${MODULE_ID}.${FX_FLAG}.-=${key}`]: null }); }
+    if ( value === "" ) { if ( has ) { const u = { _id: t.id }; addDeletion(u, `flags.${MODULE_ID}.${FX_FLAG}.${key}`); updates.push(u); } }
     else if ( cur !== value ) updates.push({ _id: t.id, [`flags.${MODULE_ID}.${FX_FLAG}.${key}`]: value });
   }
   if ( updates.length ) await s.updateEmbeddedDocuments("Token", updates);
@@ -88,7 +89,7 @@ async function writeOverride(tokens, key, value) {
 }
 async function clearOverrides(tokens) {
   const s = scene(); if ( !s || !game.user.isGM ) return;
-  const updates = tokens.filter((t) => Object.keys(tokenFlag(t.document)).length).map((t) => ({ _id: t.id, [`flags.${MODULE_ID}.-=${FX_FLAG}`]: null }));
+  const updates = tokens.filter((t) => Object.keys(tokenFlag(t.document)).length).map((t) => { const u = { _id: t.id }; addDeletion(u, `flags.${MODULE_ID}.${FX_FLAG}`); return u; });
   if ( updates.length ) await s.updateEmbeddedDocuments("Token", updates);
 }
 

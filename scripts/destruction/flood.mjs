@@ -10,6 +10,7 @@ import { CODES } from "../water/codes-table.mjs";
 import { publishBake, fetchBake } from "../water/publish.mjs";
 import { addWet, wetChanged } from "../water/wet.mjs";
 import * as Reveal from "../net/reveal.mjs";
+import { addDeletion } from "../flag-diff.mjs";
 import { markOnce } from "../net/trace.mjs";
 import { LoopMix, loopMix } from "../water/display.mjs";
 
@@ -585,7 +586,7 @@ async function publish() {
     }
     // records of holes that are gone (the display knows every area of the scene)
     const shown = new Set([...entries.keys()].map(hkey));
-    for ( const h of Object.keys(baked) ) if ( !shown.has(h) ) upd[`flags.${MODULE_ID}.${FLAG}.baked.-=${h}`] = null;
+    for ( const h of Object.keys(baked) ) if ( !shown.has(h) ) addDeletion(upd, `flags.${MODULE_ID}.${FLAG}.baked.${h}`);
     if ( Object.keys(upd).length ) await scene.update(upd);
     publishBackoff = 0;
   } catch ( err ) {
