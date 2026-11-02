@@ -1086,7 +1086,9 @@ export class DestructionDisplay {
     if ( !under.length ) return;
     // dur 0: in one frame (a stroke baked again only because older damage under it changed: the old look goes at the next tick,
     // before anything is drawn - no fade through a half-transparent cover, no blank frame)
-    if ( !dur ) { g.cont.alpha = 1; g.fade = null; for ( const u of under ) u.heldBy = g; this.stats.silentSwaps = (this.stats.silentSwaps ?? 0) + 1; return; }
+    // (the old look is gone at the next tick, before the cache looks: its levels and flags are then the ones it last drew, so nothing
+    // told it that a band's members are other areas now - it kept drawing the old look, for the GM only: the bands are re-drawn)
+    if ( !dur ) { g.cont.alpha = 1; g.fade = null; for ( const u of under ) u.heldBy = g; this.stats.silentSwaps = (this.stats.silentSwaps ?? 0) + 1; this.cache?.invalidate(); return; }
     g.fade = { start: performance.now(), dur };
     this.applyFade(g, performance.now());
     for ( const u of under ) u.heldBy = g;

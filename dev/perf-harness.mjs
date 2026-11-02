@@ -3,6 +3,8 @@
 //                      GPU (EXT_disjoint_timer_query_webgl2), draw calls and framebuffer binds per frame, the layer's own tick + cache ms
 //   H.cmp()            the destruction layer drawn with the cache vs live at the current view: mean |dRGB| per pixel, max, % pixels > 60
 //   H.fit(scale)       centre the scene at a zoom (default: fit the window)
+//   H.rebakeAndShare(name) + H.diffShared(name)   GM vs a COLD player after Detonate -> reload -> Rebake all (bar: shown.max <= 8); H.selfDiff()
+//                      the GM's own bands against its live areas (a stale band shows here); recipe at blockMeans below
 const D = () => game.modules.get("moinen-maps").api.destruction.display();
 const med = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? +s[s.length >> 1].toFixed(2) : null; };
 
@@ -1385,4 +1387,114 @@ export async function rebakeBench({ ids = null, maxS = 420 } = {}) {
   const top = [...gaps].sort((a, b) => b - a).slice(0, 12);
   return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: { n: gaps.length, max: top[0] ?? 0, over100: gaps.filter((g) => g > 100).length, top },
     heapMB: { start: Math.round(start), peak: Math.round(peak), end: Math.round(heap()) }, events: ev.slice(-8) };
+}
+
+/**
+ * GM vs PLAYER PICTURE (the players must see exactly what the GM sees): run `blockMeans()` on the GM's page and on a COLD player's page
+ * (another origin, e.g. 127.0.0.2 / 127.0.0.3, so another IndexedDB; both pages with the same window size) after `boot()`, then compare
+ * the two lists with `blockDiff(a, b)`. The destruction layer is drawn live at the whole-scene view and read in `bw` x `bh` px blocks
+ * (RGBA mean per block); the water of flooded holes loops with the clock, so the clock is frozen for the grab.
+ * Sequence of the regression (diverge-fix): GM `api.destruction.detonate()` -> GM reload -> `rebakeAll(ids of every stroke)` -> a cold
+ * player loads -> `blockDiff` max <= 8.
+ */
+export function blockMeans({ bw = 32, bh = 24, live = false, region = null } = {}) {
+  // the whole scene drawn with a transform of its own (the canvas's pan is not used: a player cannot zoom out as far as the GM, and
+  // innerWidth / innerHeight of a background tab need not match the renderer)
+  const R = canvas.app.renderer, sr = region ?? canvas.dimensions.sceneRect, W = Math.round(R.screen.width * R.resolution), H = Math.round(R.screen.height * R.resolution);
+  const sc = Math.min(W / sr.width, H / sr.height), m = new PIXI.Matrix(sc, 0, 0, sc, Math.round((W - sr.width * sc) / 2 - sr.x * sc), Math.round((H - sr.height * sc) / 2 - sr.y * sc));
+  const real = performance.now.bind(performance), at = real();
+  performance.now = () => at;
+  let px;
+  try {
+    step(3);
+    const d = D(), sh = d.cache?.show, sv = sh?.visible, lv = d.live.visible;
+    if ( live ) { if ( sh ) sh.visible = false; d.live.visible = true; }
+    const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1 });
+    try { R.render(d.objs, { renderTexture: rt, transform: m, clear: true }); px = R.extract.pixels(rt); }
+    finally { rt.destroy(true); if ( live ) { if ( sh ) sh.visible = sv; d.live.visible = lv; } }
+  } finally { performance.now = real; canvas.app.ticker.lastTime = real(); }
+  const nx = Math.ceil(W / bw), ny = Math.ceil(H / bh), out = new Array(nx * ny * 4).fill(0), cnt = new Array(nx * ny).fill(0);
+  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
+    const b = (Math.floor(y / bh) * nx + Math.floor(x / bw)), i = (y * W + x) * 4;
+    cnt[b]++; for ( let c = 0; c < 4; c++ ) out[b * 4 + c] += px[i + c];
+  }
+  for ( let b = 0; b < nx * ny; b++ ) for ( let c = 0; c < 4; c++ ) out[b * 4 + c] = Math.round(out[b * 4 + c] / cnt[b] * 10) / 10;
+  // (packed: one byte a channel mean as base64, so a result can be carried from one page to the other as one short string)
+  return { nx, ny, bw, bh, packed: btoa(String.fromCharCode(...out.map((v) => Math.min(255, Math.round(v))))) };
+}
+
+/** Compare two `blockMeans()` results (JSON from the two pages): the largest per-channel block difference and how many blocks differ by more than `over`. */
+export function blockDiff(a, b, over = 8) {
+  if ( a.packed.length !== b.packed.length ) return { error: "different sizes", a: [a.nx, a.ny], b: [b.nx, b.ny] };
+  const A = Uint8Array.from(atob(a.packed), (c) => c.charCodeAt(0)), B = Uint8Array.from(atob(b.packed), (c) => c.charCodeAt(0));
+  let max = 0, n = 0, worst = null;
+  for ( let k = 0; k < A.length; k += 4 ) {
+    let m = 0; for ( let c = 0; c < 4; c++ ) m = Math.max(m, Math.abs(A[k + c] - B[k + c]));
+    if ( m > over ) n++;
+    if ( m > max ) { max = m; worst = [(k / 4) % a.nx, Math.floor(k / 4 / a.nx)]; }
+  }
+  return { max: +max.toFixed(1), blocksOver: n, over, worst };
+}
+
+/** The views a GM-vs-player comparison looks at: the whole scene and its four quarters (2x), as scene rectangles. */
+export function divergeViews() {
+  const r = canvas.dimensions.sceneRect, hw = r.width / 2, hh = r.height / 2;
+  return [null, ...[0, 1].flatMap((j) => [0, 1].map((i) => ({ x: r.x + i * hw, y: r.y + j * hh, width: hw, height: hh })))];
+}
+
+/** GM: `blockMeans()` of every view (divergeViews, drawn as shown and drawn live) uploaded to the world folder as `<name>.json` (the lane servers' test world), so another origin can compare. */
+export async function shareMeans(name = "diverge-gm", opts = {}) {
+  const FP = foundry.applications.apps.FilePicker.implementation;
+  const out = divergeViews().map((region) => ({ region, shown: blockMeans({ ...opts, region }), live: blockMeans({ ...opts, region, live: true }) }));
+  await FP.upload("data", `worlds/${game.world.id}`, new File([JSON.stringify(out)], `${name}.json`, { type: "application/json" }), {}, { notify: false });
+  return { name, views: out.length };
+}
+
+/**
+ * Player: this page's views against the GM's `shareMeans(name)`: { shown: { max, blocksOver }, live: { max, blocksOver } | null, shells, views } (the
+ * regression bar: shown.max <= 8; live is the areas' own pixels drawn without the cache - null while areas are still shells, which have none).
+ * `views`: [{ i, shown: [max, blocks], live: [max, blocks] }].
+ */
+export async function diffShared(name = "diverge-gm", opts = {}) {
+  const gm = await (await fetch(`/worlds/${game.world.id}/${name}.json?${Date.now()}`)).json();
+  const shells = D()?.shellCount ?? 0, res = { shown: { max: 0, blocksOver: 0 }, live: shells ? null : { max: 0, blocksOver: 0 }, shells, views: [] };
+  gm.forEach((g, i) => {
+    const sh = blockDiff(g.shown, blockMeans({ ...opts, region: g.region })), lv = shells ? null : blockDiff(g.live, blockMeans({ ...opts, region: g.region, live: true }));
+    for ( const [k, d] of [["shown", sh], ["live", lv]] ) if ( d ) { res[k].max = Math.max(res[k].max, d.max); res[k].blocksOver += d.blocksOver; }
+    res.views.push({ i, shown: [sh.max, sh.blocksOver], live: lv ? [lv.max, lv.blocksOver] : null });
+  });
+  return res;
+}
+
+/**
+ * GM side of the regression "Detonate -> reload -> Rebake all -> a cold player loads" (the player: \`boot()\` then \`diffShared(name)\`, bar
+ * shown.max <= 8): on the GM's page, after \`detonate()\` and a reload (\`boot()\` first), this rebakes every stroke, waits for the pass, the publish and
+ * the settled composite (frames are stepped: a background tab has no ticker), then \`shareMeans(name)\`. Returns { strokes, seconds, publish, composite }.
+ */
+export async function rebakeAndShare(name = "diverge-gm", { maxS = 420 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, T = A.net.trace, ids = A.state().o.filter((o) => !o.k).map((o) => o.id);
+  const at0 = canvas.scene.flags[MODULE]?.destructionComposite?.at ?? 0, n0 = T().events.length, t0 = performance.now();
+  A.rebakeAll(ids);
+  const gone = (re) => T().events.slice(n0).filter((e) => re.test(e.reason));
+  while ( performance.now() - t0 < maxS * 1000 ) {
+    await new Promise((r) => setTimeout(r, 300)); step(20);
+    if ( !A.status().rebake && performance.now() - t0 > 1500 && gone(/^rebake-done$/).length ) break;
+  }
+  // (the publish follows the pass; the composite follows the publish once nothing moves - and is not rewritten when its tiles are the same)
+  let tPub = 0;
+  for ( let i = 0; i < 400; i++ ) {
+    step(60); await new Promise((r) => setTimeout(r, 300));
+    if ( (canvas.scene.flags[MODULE]?.destructionComposite?.at ?? 0) > at0 && !A.status().baking ) break;
+    if ( gone(/^publish$/).length || !A.status().baking ) tPub ||= performance.now();
+    if ( tPub && performance.now() - tPub > 15000 && !gone(/^composite-wait$/).length ) break;
+  }
+  await boot();
+  const pub = gone(/^publish$/).pop()?.data ?? null, comp = gone(/^composite-published$/).length;
+  await shareMeans(name);
+  return { strokes: ids.length, seconds: Math.round((performance.now() - t0) / 100) / 10, publish: pub, composite: comp };
+}
+
+/** This page's own pictures per view: the areas as shown (cache bands) against the areas drawn live (without the cache): [[view, max, blocks over 8]] (a band that is not the areas' picture shows here). */
+export function selfDiff() {
+  return divergeViews().map((region, i) => { const d = blockDiff(blockMeans({ region }), blockMeans({ region, live: true })); return [i, d.max, d.blocksOver]; });
 }

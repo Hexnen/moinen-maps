@@ -118,6 +118,32 @@ export function parseEntry(v, manifestVer = -1) {
 export const entryString = (sig, id, ver) => `${sig}:${id}:${ver}`;
 
 /**
+ * What the manifest names for one stroke the GM holds a record of (pure; dev/bake-policy.test.mjs). `e`: the manifest's entry
+ * { sig, id, ver } or null; `sig`: the stroke's full signature now; `r`: the record { id, ver, baked } (`id` once its chunk is known -
+ * loaded or uploaded here; `baked`: this client baked it, it is not a chunk's content read back); `known(id)`: the server has that chunk.
+ * -> { keep: true } (the entry stays), { use: { id, ver } } (a chunk the server has) or { encode: id | null } (encode the record and
+ * upload it; `encode` is the entry's chunk id when the record may be the very same bytes - then the entry stays if the encoded id is it).
+ *
+ * A signature is the stroke's inputs and the INPUTS of the older strokes it reads, not their looks: when an older stroke's look changes
+ * (Rebake all after a bake-version bump, a stroke rebaked over another look) the strokes over it are baked again with the same
+ * signature and the same version but other pixels. Keeping the entry then left the players the old chunk while the GM showed the new
+ * bake (0.4.4): a freshly baked record of an equal version is compared by its chunk id, the content address.
+ */
+export function entryChoice(e, sig, r, known = () => false) {
+  const rv = Number.isFinite(r.ver) ? r.ver : -1, ev = Number.isFinite(e?.ver) ? e.ver : -1;
+  if ( e?.sig === sig ) {
+    if ( rv < ev || (r.id && r.id === e.id) ) return { keep: true };          // never downgraded; the chunk the entry names
+    if ( rv > ev || r.baked ) {
+      if ( r.id && known(r.id) ) return { use: { id: r.id, ver: r.ver } };
+      return { encode: rv > ev ? null : e.id };
+    }
+    return { keep: true };                                                    // a record read back from another chunk of an equal version: the entry is newer
+  }
+  if ( r.id && known(r.id) ) return { use: { id: r.id, ver: r.ver } };
+  return { encode: null };
+}
+
+/**
  * Rebake all: the order strokes are re-baked in - the older looks nearest the view first, each followed by the strokes that read it
  * (their substrate changes with it). `list`: [{ objId, index, dist, dependents: [objId] }]. -> [objId] without repeats.
  */
