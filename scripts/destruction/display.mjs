@@ -1,4 +1,5 @@
 import { META_FIELDS } from "./core.mjs";
+import { pack } from "./atlas-layout.mjs";
 import { reducedMotion } from "../config.mjs";
 import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
 import { collapseClock, collapsePlace, collapseFx, collapseEnd } from "./collapse-entry.mjs";
@@ -42,7 +43,6 @@ function maskedMap(ms, mask) {
  * Reduced motion: a short fade.
  */
 const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
-const PAD = 4;
 const ONCE_MS = 5;   // per frame, the entries' one-shot effects (effects)
 const WAIT_MS = 150;   // how long an entry waits for its pixels (waitPixels) ...
 const WAIT_LATE_MS = 700;   // ... or this long past its own start (a Detonate's start lies ahead; the pixels of a whole scene take a while)
@@ -147,37 +147,6 @@ function makeShapes() {
   };
   return { dot: make(["#"]), bar: make(["##"]), sq: make(["##", "#+"]), diag: make(["#.", "+#"]), crumb: make([".#", "##"]),
     plus: make([".#.", "###", ".+."]), chunk: make(["##.", "###", ".++"]), puff: make([".##.", "####", "+##+", ".++."]) };
-}
-
-/** Shelf-pack rectangles (tallest first) with a gutter; returns { W, H, pos }. */
-function pack(rects) {
-  // PERF: the first rect (an area's base, by far the largest) alone at the top, the rest in shelves under it, as wide as the base or a
-  // square of their own area: shelves the base's height beside it left ~2/3 of every atlas empty (76 Mpx of atlases for 24 Mpx of
-  // bases on the "map" scene, in the JS heap and on the GPU)
-  if ( rects.length > 1 && !globalThis.CONFIG?.moinenMaps?.squareAtlas ) {
-    const b = rects[0], rest = rects.slice(1);
-    const area = rest.reduce((a, r) => a + (r.w + PAD) * (r.h + PAD), 0);
-    const W = Math.max(b.w + PAD * 2, Math.ceil(Math.sqrt(area * 1.15)), ...rest.map((r) => r.w + PAD * 2));
-    const sub = shelves(rest, W, b.h + PAD * 2);
-    return { W, H: Math.max(b.h + PAD * 2, sub.H), pos: [{ x: PAD, y: PAD }, ...sub.pos] };
-  }
-  const area = rects.reduce((a, r) => a + (r.w + PAD) * (r.h + PAD), 0);
-  let W = 64; while ( W * W < area * 1.3 && W < 4096 ) W *= 2;
-  W = Math.max(W, ...rects.map((r) => r.w + PAD * 2));
-  return shelves(rects, W, PAD);
-}
-
-/** Shelf-pack rectangles (tallest first) in width W from y0. */
-function shelves(rects, W, y0) {
-  const order = rects.map((r, i) => i).sort((a, b) => rects[b].h - rects[a].h || rects[b].w - rects[a].w);
-  const pos = new Array(rects.length);
-  let x = PAD, y = y0, rowH = 0;
-  for ( const i of order ) {
-    const r = rects[i];
-    if ( x + r.w + PAD > W ) { x = PAD; y += rowH + PAD; rowH = 0; }
-    pos[i] = { x, y }; x += r.w + PAD; rowH = Math.max(rowH, r.h);
-  }
-  return { W, H: y + rowH + PAD, pos };
 }
 
 export class DestructionDisplay {
@@ -293,24 +262,64 @@ export class DestructionDisplay {
     this.order = next;
     for ( const g of all ) this.live.addChild(g.cont);
     // an object that lies over older ones gets its map patch (once: unchanged objects never change)
+    this.patchPass(all);
+    this.stats.groups = next.length;
+    this.stats.sprites = next.reduce((a, g) => a + g.pieces.length + 1, 0);
+    return { added, removed };
+  }
+
+  /** The map patches of the objects that lie over older ones (`all`: groups and erasers in creation order; once per object: `patch`). */
+  patchPass(all) {
     const rects = [];
     for ( const g of all ) {
       const r = g.info.rect;
       if ( !g.erase && !g.patch && g.coverFrame && rects.some((q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0) ) this.addPatch(g);
       rects.push(r);
     }
-    this.stats.groups = next.length;
-    this.stats.sprites = next.reduce((a, g) => a + g.pieces.length + 1, 0);
-    return { added, removed };
+  }
+
+  /**
+   * A shell's area built from what the codec worker made of its chunk (chunks.mjs packShellAreas; stream.mjs shellsOf): the atlas and its
+   * layout as they are - no sheet assembled, nothing copied - and, when it came with it, the dark rim (the area keeps no atlas for it).
+   * Queued (swapQ) and made a few per frame (pixelsSlice); the group replaces the shell in place, as in sync (an entry waiting for it goes
+   * on with the new group). `x`: { data, W, H, pos, sizes, meta, rim? }.
+   */
+  queueSwap(g, x) { (this.swapQ ??= []).push({ g, x }); }
+
+  swapShell(g, x) {
+    if ( g.dead || !g.shell || this.groups.get(g.hash) !== g || !x?.data ) return false;
+    const F = META_FIELDS, meta = x.meta, r = { hash: g.hash, base: 0, pieces: [], cover: -1, light: -1, index: g.objIndex };
+    for ( let k = 1; k < x.sizes.length; k++ ) { const o = k * F; if ( meta[o] === 2 ) r.cover = o; else if ( meta[o] === 3 ) r.light = o; else r.pieces.push(o); }
+    const full = this.build(r, null, 0, meta, { pk: { W: x.W, H: x.H, pos: x.pos }, buf: x.data });
+    full.reused = true; full.info.water = g.info.water;
+    if ( x.rim && !g.rim ) Cause.setRim(this, g, x.rim);
+    this.adoptRim(g, full);
+    if ( x.rim === false && full.rimArgs ) { full.rimArgs = null; const i = this.rimQueue?.indexOf(full) ?? -1; if ( i >= 0 ) this.rimQueue.splice(i, 1); }   // (the worker found no rim: nothing to read from the atlas)
+    if ( x.late ) full.rimLate = true;       // (its rim is read later, off the page: lateRims; not "known without a rim" until then)
+    if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
+    for ( const M of [this.pending, this.enterQueue] ) if ( M?.has(g) ) { const v = M.get(g); M.delete(g); M.set(full, v); }
+    for ( const w of this.pending?.values() ?? [] ) if ( w.opts.under?.includes(g) ) w.opts.under = w.opts.under.map((u) => (u === g ? full : u));
+    full.objIndex = g.objIndex; full.objId = g.objId;
+    this.groups.set(g.hash, full);
+    const at = this.live.children.indexOf(g.cont), k = this.order.indexOf(g);
+    if ( k >= 0 ) this.order[k] = full;
+    if ( at >= 0 ) this.live.addChildAt(full.cont, at); else this.live.addChild(full.cont);
+    this.kill(g);
+    this.shellCount = Math.max(0, (this.shellCount ?? 1) - 1);
+    this.patchPass([...this.order, ...this.erasers.values()].map((q, i) => ({ q, i })).sort((a, b) => (a.q.objIndex - b.q.objIndex) || (a.i - b.i)).map((p) => p.q));
+    this.cache?.invalidate();
+    this.stats.swapped = (this.stats.swapped ?? 0) + 1;
+    return true;
   }
 
   /** One area: its own atlas texture, base sprite and shard sprites. */
-  build(r, rgba, sw, meta) {
+  build(r, rgba, sw, meta, packed = null) {
     const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : []), ...(r.light >= 0 ? [r.light] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
     const coverIdx = 1 + r.pieces.length, lightIdx = r.light >= 0 ? coverIdx + (r.cover >= 0 ? 1 : 0) : -1;
-    const pk = pack(rects);
-    let buf = new Uint8Array(pk.W * pk.H * 4);
-    rects.forEach((q, i) => {
+    // (`packed`: the atlas and its layout, made in the codec worker - a shell's area, swapShell)
+    const pk = packed ? packed.pk : pack(rects);
+    let buf = packed ? packed.buf : new Uint8Array(pk.W * pk.H * 4);
+    if ( !packed ) rects.forEach((q, i) => {
       const p = pk.pos[i];
       for ( let y = 0; y < q.h; y++ ) buf.set(rgba.subarray(((q.sy + y) * sw + q.sx) * 4, ((q.sy + y) * sw + q.sx + q.w) * 4), ((p.y + y) * pk.W + p.x) * 4);
     });
@@ -987,6 +996,12 @@ export class DestructionDisplay {
         for ( const [x, px] of got ?? [] ) give(x, px);
       }, (err) => console.warn("moinen-maps | destruction: pixels for an entry", err)).finally(() => { for ( const x of list ) x.asked = false; });
     }
+    // shells' areas from the worker: the ones an entry waits for first
+    const SQ = this.swapQ, tS = performance.now();
+    if ( SQ?.length ) {
+      if ( this.pending?.size && SQ.length > 1 ) SQ.sort((a, b) => (this.pending.has(b.g) ? 1 : 0) - (this.pending.has(a.g) ? 1 : 0));
+      while ( SQ.length && performance.now() - tS < (this.pending?.size ? budget * 3 : budget) ) { const { g, x } = SQ.shift(); g.swapAsked = false; this.swapShell(g, x); }
+    }
     const Q = this.restoreQ, t0 = performance.now();
     while ( Q?.length && performance.now() - t0 < budget ) {
       const { g, sprites, data } = Q.shift();
@@ -1494,6 +1509,7 @@ export class DestructionDisplay {
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
     const vw = this.view();
+    if ( this.swapQ?.length && !(this.pending?.size || this.pixelAsks?.size || this.restoreQ?.length) ) this.pixelsSlice(t0, 4);   // (shells' areas from the worker, swapShell)
     const T = this.stats.parts ??= {}; let tp = performance.now();
     const lap = (k) => { const t = performance.now(); T[k] = t - tp; tp = t; };   // (the tick's parts, ms: stats.parts)
     lap("pre");
@@ -1913,7 +1929,7 @@ export class DestructionDisplay {
   }
 
   clear() {
-    this.enterQueue?.clear(); this.pending?.clear(); this.pixelAsks?.clear(); if ( this.restoreQ ) this.restoreQ.length = 0;
+    this.enterQueue?.clear(); this.pending?.clear(); this.pixelAsks?.clear(); if ( this.restoreQ ) this.restoreQ.length = 0; if ( this.swapQ ) this.swapQ.length = 0;
     for ( const g of [...this.groups.values(), ...this.dying, ...this.spare.values()] ) this.kill(g);
     for ( const e of this.erasers.values() ) this.killEraser(e);
     this.groups.clear(); this.spare.clear(); this.erasers.clear(); this.order = []; this.dying = [];

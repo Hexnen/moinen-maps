@@ -19,6 +19,8 @@
  *                        stroke index are zeroed: a chunk does not change when other strokes change.
  */
 
+import { pack as shellPack } from "../destruction/atlas-layout.mjs";
+
 export const KIND_WATER = 1, KIND_OBJECT = 2;
 const VERSION = 1, ROW = 4096;
 /** Water tiles: art pixels per side. */
@@ -329,6 +331,38 @@ export function packAreaAtlases(sprites, specs) {
 }
 
 /**
+ * PERF (a shell's area, Detonate): the area a composite shell stands for, built in the codec worker - laid out with the display's own
+ * layout (atlas-layout.mjs pack) and its atlas packed, straight from a decoded chunk's sprites; the page only makes the area's sprites from
+ * it (display.build `packed`, swapShell). `specs`: [{ hash, index (the stroke's index in the scene) }]; `square`: CONFIG.moinenMaps.squareAtlas.
+ * -> [{ hash, data (the atlas), W, H, pos, sizes, meta (the area's rows, Int16Array of F fields each: sheet position = the layout) }]
+ * (data null: the area is not in the chunk).
+ */
+export function packShellAreas(sprites, specs, square = false) {
+  const areas = new Map();
+  let cur = null;
+  for ( const s of sprites ) {
+    if ( s.m[0] === 0 ) { cur = { base: s, pieces: [], cover: null, light: null }; areas.set(((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0, cur); continue; }
+    if ( !cur ) continue;
+    if ( s.m[0] === 2 ) cur.cover = s; else if ( s.m[0] === 3 ) cur.light = s; else cur.pieces.push(s);
+  }
+  return specs.map((sp) => {
+    const a = areas.get(sp.hash);
+    if ( !a ) return { hash: sp.hash, data: null };
+    const list = [a.base, ...a.pieces, ...(a.cover ? [a.cover] : []), ...(a.light ? [a.light] : [])];
+    if ( list.some((s) => !s.img) ) return { hash: sp.hash, data: null };
+    const pk = shellPack(list.map((s) => ({ w: s.w, h: s.h })), square), F = a.base.m.length;
+    const data = new Uint8Array(pk.W * pk.H * 4), meta = new Int16Array(list.length * F);
+    list.forEach((s, i) => {
+      const p = pk.pos[i];
+      for ( let y = 0; y < s.h; y++ ) data.set(s.img.subarray(y * s.w * 4, (y + 1) * s.w * 4), ((p.y + y) * pk.W + p.x) * 4);
+      meta.set(s.m, i * F); meta[i * F + 1] = p.x; meta[i * F + 2] = p.y;
+    });
+    meta[16] = Math.min(32767, sp.index | 0);
+    return { hash: sp.hash, data, W: pk.W, H: pk.H, pos: pk.pos, sizes: list.map((s) => [s.w, s.h]), meta };
+  });
+}
+
+/**
  * Strokes -> one sheet as the display takes it: `recs` [{ index (stroke index), sprites }] in stroke order. The placement rows get
  * their sheet position, the stroke index (base rows) and the area index (shards: a stagger hint, counted over the areas in order,
  * as the bake does). `skip(hash)`: an area whose pixels are not needed (the display holds it already): its rows are kept, its
@@ -443,6 +477,47 @@ export function unpackIndex(p) {
 }
 
 /**
+ * kind 6  RIMS  the dark rims of areas (rim-store.mjs): what cause-fx addRim makes from an area's cover and base - a pure function of the
+ *                 pixels - kept next to the composite so a dark scene lights the lips of its damage without fetching the strokes' chunks.
+ *                 Body: rim count (u32), none count (u32), then per rim (sorted by hash): hash (u32), cause (u8), type (u8, RIM_TYPES), LW, LH (u16),
+ *                 place x, y (i32), colour (3 x f32), the strengths (LW x LH bytes); then the hashes (u32) of areas that have no rim at all.
+ */
+export const KIND_RIMS = 6;
+export const RIM_TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
+export function packRims(rims, none = []) {
+  const list = [...rims].sort((a, b) => a.hash - b.hash), nn = [...new Set(none)].sort((a, b) => a - b);
+  let n = 8 + nn.length * 4;
+  for ( const r of list ) n += 4 + 2 + 4 + 8 + 12 + r.A8.length;
+  const p = header(KIND_RIMS, n), dv = new DataView(p.buffer);
+  dv.setUint32(8, list.length, true); dv.setUint32(12, nn.length, true);
+  let o = 16;
+  for ( const r of list ) {
+    dv.setUint32(o, r.hash >>> 0, true); p[o + 4] = r.cause & 255; p[o + 5] = Math.max(0, RIM_TYPES.indexOf(r.type)); dv.setUint16(o + 6, r.LW, true); dv.setUint16(o + 8, r.LH, true);
+    dv.setInt32(o + 10, r.ox | 0, true); dv.setInt32(o + 14, r.oy | 0, true);
+    for ( let k = 0; k < 3; k++ ) dv.setFloat32(o + 18 + k * 4, r.col[k], true);
+    p.set(r.A8, o + 30); o += 30 + r.A8.length;
+  }
+  for ( const h of nn ) { dv.setUint32(o, h >>> 0, true); o += 4; }
+  return p;
+}
+export function unpackRims(p) {
+  if ( kindOf(p) !== KIND_RIMS ) throw new Error("not a rims chunk");
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength), n = dv.getUint32(8, true), nn = dv.getUint32(12, true), rims = [], none = [];
+  let o = 16;
+  for ( let i = 0; i < n; i++ ) {
+    if ( o + 30 > p.length ) throw new Error("bad rims chunk");
+    const LW = dv.getUint16(o + 6, true), LH = dv.getUint16(o + 8, true);
+    if ( o + 30 + LW * LH > p.length ) throw new Error("bad rims chunk");
+    rims.push({ hash: dv.getUint32(o, true), cause: p[o + 4], type: RIM_TYPES[p[o + 5]] ?? "blast", LW, LH, ox: dv.getInt32(o + 10, true), oy: dv.getInt32(o + 14, true),
+      col: [0, 1, 2].map((k) => dv.getFloat32(o + 18 + k * 4, true)), A8: p.slice(o + 30, o + 30 + LW * LH) });
+    o += 30 + LW * LH;
+  }
+  for ( let i = 0; i < nn; i++ ) { none.push(dv.getUint32(o, true)); o += 4; }
+  if ( o !== p.length ) throw new Error("bad rims chunk");
+  return { rims, none };
+}
+
+/**
  * A band's key across clients: its level, density, sampling, mipmaps and its members' area hashes in order (the runtime key of the
  * cache names containers instead). Pure.
  */
@@ -508,6 +583,7 @@ function decodePayload(p, transfer) {
   const k = kindOf(p);
   if ( k === KIND_TILE ) { const t = unpackTile(p); transfer.push(t.data.buffer); return { tile: t }; }
   if ( k === KIND_INDEX ) return { index: unpackIndex(p) };
+  if ( k === KIND_RIMS ) { const o = unpackRims(p); for ( const r of o.rims ) transfer.push(r.A8.buffer); return o; }
   if ( k === KIND_WATER ) { const t = unpackWaterTile(p); transfer.push(...t.levels.map((l) => l.buffer)); return t; }
   if ( k === KIND_OBJECT ) { const o = unpackObject(p); for ( const s of o.sprites ) transfer.push(s.img.buffer); return o; }
   throw new Error("unknown chunk kind");
@@ -666,6 +742,12 @@ export async function work(m) {
     transfer.push(ib.buffer);
     return { result: { tiles, index: { id: iid, bytes: ib }, cleared }, transfer };
   }
+  if ( m.kind === "rimpack" ) {
+    // the rims of the areas on screen (rim-store.mjs publish) into one chunk: { rims: [{ hash, cause, type, col, LW, LH, ox, oy, A8 }], none: [hash] } -> { id, bytes }
+    const p = packRims(m.rims, m.none ?? []), bytes = await wrap(p);
+    transfer.push(bytes.buffer);
+    return { result: { id: `r${hash64(p)}`, bytes }, transfer };
+  }
   if ( m.kind === "bundle" ) {
     // small chunks into one file: { members: [{ id, bytes (the chunk's PNG) }] } -> { id, bytes, ids (the members that went in) }
     const parts = [];
@@ -700,6 +782,18 @@ export async function work(m) {
       const atlases = packAreaAtlases(o.sprites, m.pack);
       for ( const a of atlases ) if ( a.data ) transfer.push(a.data.buffer);
       return { result: { atlases }, transfer };
+    }
+    if ( m.shells ) {
+      // a shell's areas (packShellAreas) and, in a dark scene, their rims in the same pass (rim-job.mjs)
+      const o = unpackObject(p), shells = packShellAreas(o.sprites, m.shells, !!m.square);
+      for ( const a of shells ) if ( a.data ) transfer.push(a.data.buffer, a.meta.buffer);
+      let rims = null;
+      if ( m.rims?.length ) {
+        const { rimsOf } = await import("../destruction/rim-job.mjs");
+        rims = await rimsOf(o.sprites, m.rims);
+        for ( const r of rims ) if ( r.rim ) transfer.push(r.rim.A8.buffer);
+      }
+      return { result: { shells, rims }, transfer };
     }
     return { result: decodePayload(p, transfer), transfer };
   }

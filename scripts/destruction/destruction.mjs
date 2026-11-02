@@ -20,6 +20,7 @@ import { setChanged, syncMap } from "../flag-diff.mjs";
 import { DestructionDisplay } from "./display.mjs";
 import * as Cause from "./cause-fx.mjs";
 import * as Composite from "./composite.mjs";
+import * as RimStore from "./rim-store.mjs";
 import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
@@ -617,6 +618,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   if ( src.composite ) Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) shellNeeds(); }, 50));
   // (and, a little later, the pixels of what is in and around the view, so that an entry there rarely has to wait for them)
   Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) prefetchNear(); }, 2500));
+  // (the GM files the areas' rims beside the composite - rim-store.mjs - once they are all made)
+  Reveal.whenRevealed(() => setTimeout(() => { if ( my === gen ) scheduleRims(1000); }, 6000));
   if ( complete && game.user.isGM ) scheduleComposite();
   // records no stroke uses any more (an older look, an undone stroke) are let go
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
@@ -879,7 +882,7 @@ function afterFlatten(g) {
   atlasQueue.add(g);
   atlasTimer ||= setTimeout(() => {
     atlasTimer = 0;
-    for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir && !r.shell ) display?.freeAtlas(q); }
+    for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir ) display?.freeAtlas(q); }
     atlasQueue.clear();
   }, 0);
 }
@@ -912,8 +915,8 @@ async function pixelsForEntries() {
  */
 async function pixelSource(groups, deliver = null) {
   const out = new Map(), recOf = (g) => shownRecs.get(g.objId), put = (g, px) => { out.set(g, px); deliver?.(g, px); };   // (deliver: each area as soon as it is there)
-  const shells = [...new Set(groups.filter((g) => g.shell).map(recOf).filter((r) => r?.shell))];
-  if ( shells.length ) fill(shells, "entries");
+  const sg = groups.filter((g) => g.shell);
+  if ( sg.length ) fillFast(sg, "entries");
   // PERF: a freed atlas comes back as a FINISHED buffer packed in the codec worker (Net.atlasesOf: one IndexedDB read for all, the
   // chunks decoded by the whole pool, nothing kept on the page but the atlas itself - the record's sprites are not filled in, so no
   // second copy of the pixels stays behind); the order of `groups` (on-screen, nearest first) is the order of the jobs. A chunk that
@@ -929,7 +932,7 @@ async function pixelSource(groups, deliver = null) {
   const free = groups.filter((g) => g.atlasFree), byRec = new Map(), slow = [];
   free.forEach((g, i) => {
     const r = recOf(g);
-    if ( r?.id && r.dir && g.atlas && !r.shell ) { if ( !byRec.has(r) ) byRec.set(r, []); byRec.get(r).push({ g, i }); } else slow.push(g);
+    if ( r?.id && r.dir && g.atlas ) { if ( !byRec.has(r) ) byRec.set(r, []); byRec.get(r).push({ g, i }); } else slow.push(g);
   });
   await Net.preread([...byRec.keys()].map((r) => r.id));
   await Promise.all([...byRec].map(async ([r, items]) => {
@@ -952,12 +955,83 @@ function prefetchNear() {
   const vw = display.view(), mx = (vw.x1 - vw.x0) * 0.5, my = (vw.y1 - vw.y0) * 0.5;
   const near = (r) => !(r.x0 > vw.x1 + mx || r.y0 > vw.y1 + my || r.x1 < vw.x0 - mx || r.y1 < vw.y0 - my);
   const groups = [...display.groups.values()].filter((g) => (g.shell || g.atlasFree) && g.info?.rect && near(g.info.rect));
-  const shells = [...new Set(groups.filter((g) => g.shell).map((g) => shownRecs.get(g.objId)).filter((r) => r?.shell))];
+  const sg = groups.filter((g) => g.shell), shells = [...new Set(sg.map((g) => shownRecs.get(g.objId)).filter((r) => r?.shell))];
   Trace.event("prefetch", { shells: shells.length, atlases: groups.filter((g) => g.atlasFree).length });
-  if ( shells.length ) fill(shells, "prefetch");
+  // a dark scene lit from the composite's rims (rim-store.mjs) needs no stroke's pixels ahead: what IndexedDB holds is built, nothing is downloaded
+  // for it (a cold player fetched ~27 MB of bundles here); a Detonate asks for what it needs
+  if ( sg.length ) fillFast(sg, "prefetch", { noDownload: (canvas.environment?.darknessLevel ?? 0) > 0.05 && !!display.rimStore });
   // (the chunks' compressed bytes only - read out of IndexedDB in one go; the decode and the packing are done when an entry asks, in the
   // pool: decoded here they sat in the stream's memory, up to its cap, as a second copy of the atlases)
-  Net.preread(groups.filter((g) => g.atlasFree).map((g) => shownRecs.get(g.objId)).filter((r) => r?.id && r.dir && !r.shell).map((r) => r.id)).catch(() => null);
+  Net.preread(groups.filter((g) => g.atlasFree).map((g) => shownRecs.get(g.objId)).filter((r) => r?.id && r.dir).map((r) => r.id)).catch(() => null);
+}
+
+/**
+ * PERF (Detonate, prefetch): shells' areas built in the codec worker (chunks.mjs packShellAreas, via Net.shellsOf) instead of page-side
+ * (hydrate: the whole chunk decoded and moved over, a sheet assembled, every area built in a sync - ~25 ms a stroke): the page gets each
+ * area's atlas and layout finished, and its dark rim with it, and only makes the sprites (display.swapShell, a few per frame). The
+ * shell's record stays a shell record (its sprites are not on the page). A record with a flooded hole, or whose chunk is not in IndexedDB,
+ * takes the page-side way (fill). `CONFIG.moinenMaps.noShellJob = true`: always that.
+ */
+async function fillFast(groups, why, { noDownload = false } = {}) {
+  const my = gen, byRec = new Map(), old = new Set();
+  for ( const g of groups ) {
+    if ( !g.shell || g.swapAsked || g.dead ) continue;
+    const r = shownRecs.get(g.objId);
+    if ( !r?.shell ) continue;
+    if ( globalThis.CONFIG?.moinenMaps?.noShellJob || !r.id || !r.dir || r.shell.some((a) => a.type === "flood") ) { old.add(r); continue; }
+    if ( !byRec.has(r) ) byRec.set(r, []);
+    byRec.get(r).push(g);
+  }
+  if ( old.size && !noDownload ) fill([...old], why);
+  if ( !byRec.size ) return;
+  // (the rims - ~10 ms an area, the bulk of the job - are made in the same pass only in a dark scene, where they show; by day they are read
+  // later, off the page, once the areas are in (lateRims): an entry waits for the area, not for a light nobody sees)
+  const t = performance.now(), left = new Set(), sq = !!globalThis.CONFIG?.moinenMaps?.squareAtlas, dark = (canvas.environment?.darknessLevel ?? 0) > 0.05;
+  await Net.preread([...byRec.keys()].map((r) => r.id));
+  await Promise.all([...byRec].map(async ([r, gs]) => {
+    for ( const g of gs ) g.swapAsked = true;
+    const got = await Net.shellsOf(r.dir, r.id, gs.map((g) => ({ hash: g.hash, index: g.objIndex })),
+      dark ? gs.filter((g) => !g.rim && !g.rimDone).map((g) => ({ hash: g.hash, cause: g.info.cause | 0, type: g.info.type })) : null, sq).catch(() => null);
+    const by = new Map((got?.shells ?? []).map((s) => [s.hash, s])), rims = new Map((got?.rims ?? []).map((x) => [x.hash, x.rim]));
+    for ( const g of gs ) {
+      const x = by.get(g.hash);
+      if ( my === gen && display && x?.data && g.shell && !g.dead ) {
+        x.rim = dark ? (rims.has(g.hash) ? (rims.get(g.hash) ?? false) : null) : (g.rim ? null : false);
+        x.late = !dark && !g.rim && !g.rimDone;
+        if ( x.late ) lateRims(r, g.hash);
+        display.queueSwap(g, x);
+      }
+      else { g.swapAsked = false; if ( my === gen && !g.dead ) left.add(r); }
+    }
+  }));
+  Trace.event("shells-built", { why, strokes: byRec.size, left: left.size, ms: Math.round(performance.now() - t) });
+  if ( left.size && my === gen && !noDownload ) fill([...left], why);      // (noDownload: only what IndexedDB holds is built, nothing is fetched)
+}
+
+/** Areas built in the worker by day, whose rims are still to be read (record -> hashes). */
+const lateQ = new Map();
+let lateTimer = 0;
+function lateRims(r, hash) {
+  if ( !lateQ.has(r) ) lateQ.set(r, new Set());
+  lateQ.get(r).add(hash);
+  lateTimer ||= setTimeout(drainLate, 1500);
+}
+/** The rims of areas built in the worker (lateRims): a stroke at a time, off the page, once the swaps are in; set on whatever group the hash is now. */
+async function drainLate() {
+  clearTimeout(lateTimer); lateTimer = 0;
+  const my = gen;
+  while ( lateQ.size && my === gen && display ) {
+    if ( display.swapQ?.length || display.pending?.size ) { await new Promise((res) => setTimeout(res, 300)); continue; }
+    const [r, hs] = lateQ.entries().next().value; lateQ.delete(r);
+    const todo = [...hs].map((h) => display.groups.get(h)).filter((g) => g && !g.shell && !g.rim && !g.dead);
+    if ( !todo.length || !r.id || !r.dir ) continue;
+    const got = await Net.rimsOf(r.dir, r.id, todo.map((g) => ({ hash: g.hash, cause: g.info.cause | 0, type: g.info.type }))).catch(() => null);
+    if ( my !== gen || !display ) return;
+    for ( const x of got ?? [] ) { const g = display.groups.get(x.hash); if ( g && !g.shell && !g.rim && x.rim ) { Cause.setRim(display, g, x.rim); display.stats.rimJobs = (display.stats.rimJobs ?? 0) + 1; } }
+    for ( const g of todo ) g.rimLate = false;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  if ( !lateQ.size ) scheduleRims(2500);
 }
 
 /** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
@@ -981,7 +1055,11 @@ function requestPixels(groups) {
       if ( !display?.cache?.waiting ) { asked.clear(); break; }
       const want = new Set(asked); asked.clear();
       const list = shellRecs().filter((r) => !r.hydrating && r.shell.some((a) => want.has(a.h)));
-      if ( list.length ) { await fill(list, "cache"); continue; }
+      if ( list.length ) {
+        // (the cache's asks are served the fast way too: the areas are built in the worker; what could not be goes the page-side way)
+        await fillFast([...want].map((h) => display?.groups.get(h)).filter((g) => g?.shell), "cache");
+        continue;
+      }
       // a shell whose stroke's record is no shell any more (filled, perhaps let go of its pixels since): that record gets its pixels and
       // the scene is shown again from its records - once per set of such shells (a set that stays is not tried in a loop)
       // (at most every 500 ms: while a pass is on its way the records are not all there yet; the cache asks again as it re-draws)
@@ -1003,6 +1081,16 @@ function requestPixels(groups) {
 function shellNeeds() {
   const list = shellRecs(); if ( !list.length ) return;
   const dark = canvas.environment?.darknessLevel ?? 0;
+  // a dark scene: the rims the composite's scene keeps (rim-store.mjs) go on the shells first - no chunk is fetched or decoded for them
+  if ( dark > 0.05 && display && RimStore.enabled() && RimStore.manifestOf(canvas.scene) ) {
+    if ( !display.rimP ) {
+      const d0 = display;
+      d0.rimP = RimStore.load(canvas.scene).then((st) => { d0.rimStore = st; }, () => null).then(() => { d0.rimLoaded = true; if ( display === d0 ) shellNeeds(); });
+      return;
+    }
+    if ( !display.rimLoaded ) return;         // (asked: shellNeeds runs again when it is in)
+    takeStoreRims();
+  }
   // a dark scene's rim light needs an area's pixels: only the shells in view (and a margin) get them, the others as the view reaches
   // them (canvasPan below)
   const vw = dark >= 0.45 ? display?.view?.() : null, m = 160;
@@ -1010,7 +1098,9 @@ function shellNeeds() {
   // PERF: a shell in view only for its dark rim is not filled (chunk decoded on the page, area built, atlas kept until the rim was read: ~1.7 MB
   // and ~25 ms a stroke, and every stroke in view at once): the rim is read from its chunk in the codec worker (rim-job.mjs) and set on the
   // shell (shellRims). A stroke with a flooded hole or a light, or one whose chunk is not in IndexedDB, is filled as before.
-  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || inView(a)));
+  // (an area whose rim is there - from the store, or known to have none - is not asked about again)
+  const settledRim = (a) => { const g = display?.groups.get(a.h); return !!g && (!g.shell || !!g.rim || !!g.rimDone); };
+  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || (inView(a) && !settledRim(a))));
   const rimOnly = [], full = [];
   for ( const r of need ) (vw && r.id && r.dir && !r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l)) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
   Trace.event("shell-needs", { dark: +dark.toFixed(2), of: list.length, need: need.length, rimOnly: rimOnly.length, full: full.length, noId: need.filter((r) => !r.id || !r.dir).length, view: !!vw });
@@ -1022,15 +1112,42 @@ async function shellRims(list, inView) {
   const left = [];
   await Net.preread(list.map((r) => r.id));
   await Promise.all(list.map(async (r) => {
-    const todo = r.shell.filter((a) => inView(a)).map((a) => ({ a, g: display?.groups.get(a.h) })).filter(({ g }) => g?.shell && !g.rim && !g.rimAsked);
+    const todo = r.shell.filter((a) => inView(a)).map((a) => ({ a, g: display?.groups.get(a.h) })).filter(({ g }) => g?.shell && !g.rim && !g.rimDone && !g.rimAsked);
     if ( !todo.length ) return;
     for ( const { g } of todo ) g.rimAsked = true;
     const got = await Net.rimsOf(r.dir, r.id, todo.map(({ a }) => ({ hash: a.h, cause: a.cause | 0, type: a.type }))).catch(() => null);
     for ( const { g } of todo ) g.rimAsked = false;
     if ( !got ) { left.push(r); return; }
-    for ( const x of got ) { const g = display?.groups.get(x.hash); if ( g?.shell && x.rim ) { Cause.setRim(display, g, x.rim); display.stats.rimJobs = (display.stats.rimJobs ?? 0) + 1; } }
+    for ( const x of got ) { const g = display?.groups.get(x.hash); if ( g?.shell && x.rim ) { Cause.setRim(display, g, x.rim); display.stats.rimJobs = (display.stats.rimJobs ?? 0) + 1; } else if ( g?.shell ) g.rimDone = true; }
   }));
   return left;
+}
+/** The stored rims (display.rimStore, rim-store.mjs load) onto the shells that have none; an area the store knows has no rim is marked done. Each is taken once. */
+function takeStoreRims() {
+  const st = display?.rimStore; if ( !st ) return 0;
+  let n = 0;
+  for ( const g of display.order ) {
+    if ( !g.shell || g.rim || g.rimDone ) continue;
+    const x = st.rims.get(g.hash);
+    if ( x && x.cause === (g.info.cause | 0) && x.type === g.info.type ) { if ( Cause.setRim(display, g, x.rim) ) { st.rims.delete(g.hash); n++; } }
+    else if ( st.none.has(g.hash) ) g.rimDone = true;
+  }
+  display.stats.rimStore = (display.stats.rimStore ?? 0) + n;
+  return n;
+}
+/** GM: file the rims of what is on screen once the areas' rims are made (rim-store.mjs publish), tried again while they are not. */
+let rimsTimer = 0, rimsTries = 0;
+function scheduleRims(ms) {
+  if ( !game.user.isGM || !RimStore.enabled() ) return;
+  clearTimeout(rimsTimer);
+  rimsTimer = setTimeout(async () => {
+    rimsTimer = 0;
+    if ( !display || !canvas.scene || !game.users.activeGM?.isSelf || inflight || persisting ) return;
+    if ( (display.rimQueue?.length || display.swapQ?.length || lateQ.size) && rimsTries++ < 20 ) return scheduleRims(3000);
+    rimsTries = 0;
+    try { await RimStore.publish(display, { scene: canvas.scene, dir: Net.chunkDir(canvas.scene.id) }); }
+    catch ( err ) { console.warn(`${MODULE_ID} | destruction: rims not filed`, err); }
+  }, ms);
 }
 let darkTimer = 0;
 const darkCheck = () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); };
@@ -1056,7 +1173,7 @@ function scheduleComposite(ms = 4000) {
     let why;
     try { why = await Composite.publish(display, { scene, dir: Net.chunkDir(scene.id), base: Store.baseKey(scene, S, bg), strokes }); }
     catch ( err ) { why = "error"; console.warn(`${MODULE_ID} | destruction: composite not published`, err); }
-    if ( why === "published" || why === "same" ) { compositeTries = 0; return; }
+    if ( why === "published" || why === "same" ) { compositeTries = 0; scheduleRims(2500); return; }
     Trace.event("composite-wait", { why, tries: compositeTries });
     // tried again, less and less often (2 s doubling to 60 s), as long as this scene and state stay: never given up silently
     compositeTries++;

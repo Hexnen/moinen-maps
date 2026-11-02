@@ -3,6 +3,7 @@ import * as Net from "./stream.mjs";
 import "./bundle.mjs";
 import { chunkRecords } from "../water/publish.mjs";
 import * as Composite from "../destruction/composite.mjs";
+import * as RimStore from "../destruction/rim-store.mjs";
 import { cacheEnabled } from "../destruction/static-cache.mjs";
 import * as Model from "../destruction/model.mjs";
 import * as Store from "../destruction/store.mjs";
@@ -36,6 +37,8 @@ export function chunksOf(scene, at = null) {
       if ( id && !seen.has(id) && Model.TYPES[objs[oid]?.t] === "flood" ) { seen.add(id); out.push({ dir: M.dir, id, prio: 1 }); }
     }
     for ( const r of chunkRecords(scene) ) for ( const id of r.ids ) if ( id.startsWith("w") && !seen.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: 0 }); }
+    // a dark scene: the rims kept beside the composite (rim-store.mjs), instead of the strokes' chunks the dark rim light would need
+    if ( (scene.environment?.darknessLevel ?? 0) > 0.05 && RimStore.enabled() ) for ( const { dir, id } of RimStore.idsOf(scene) ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir, id, prio: 0 }); }
     return out;
   }
   if ( M?.v === 2 && M.c && !off() ) {
