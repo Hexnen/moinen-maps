@@ -1,7 +1,8 @@
 /**
  * Districts: a decorative, hand-inked overlay for marking neighbourhoods and territories.
  *
- * Storage: one scene flag, `flags.moinen-maps.districts = [{id, name, color, border, fill, opacity, hover, revealed, rings}]`.
+ * Storage: one flag key per district, `flags.moinen-maps.districtsById.<id> = {id, name, color, border, fill, opacity, hover, revealed, rings, s}`
+ * (districts-store.mjs; a scene from before has the array `districts` until its first save), so two GMs painting at once keep both.
  * Chosen over Drawing documents because a flag syncs atomically with the scene, keeps the whole set in one update, and lets
  * us render the ink/hatch/glow look ourselves (a Drawing can only draw a flat polygon). Rings are small flat integer arrays
  * (a brush stroke is unioned with Clipper, cleaned and Douglas-Peucker simplified); smoothing happens when baking.
@@ -15,6 +16,7 @@ import { attrsOf, attrEditorHtml, wireAttrEditor, collectAttrs, cleanAttrs, writ
 import { dotsCfg, paintDots, dotsFieldsHtml, readDotsValues, wireDotsFields } from "./dots.mjs";
 import { lightsSync, lightsCfg, lightFieldsHtml, readLightValues, wireLightFields, previewWhileOpen } from "./lights.mjs";
 import { trackMarkers } from "./workspace/markers.mjs";
+import { listOf, updateFor } from "./districts-store.mjs";
 import { labelCfg, ensureFont, buildLabel, labelFieldsHtml, readLabelValues, wireFontPreview, fg, fgGroup, fitDialog, liveBarHtml, wireLiveBar, frameThrottle } from "./labels.mjs";
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -550,12 +552,20 @@ export function panIfOffscreen(id) {
  * overwrites the first stroke), and the map must show it (else the older echo flashes back for a moment).
  */
 let pendingList = null;
-const storedList = () => pendingList ?? canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? [];
-const readList = () => foundry.utils.deepClone(storedList());
+const storedList = () => pendingList ?? listOf(canvas.scene?.flags?.[MODULE_ID]);
+/** What each list handed out by readList() was when it was read: a save writes only what differs from it (districts-store.mjs). */
+const bases = new WeakMap();
+const readList = () => { const l = foundry.utils.deepClone(storedList()), b = foundry.utils.deepClone(l); bases.set(l, b); return l; };
 const save = async (list) => {
   const scene = canvas.scene;
+  const upd = updateFor(scene.flags?.[MODULE_ID], list, bases.get(list) ?? null, `flags.${MODULE_ID}`);
   pendingList = list; sync(true);
-  try { const r = await scene.update({ [`flags.${MODULE_ID}.${FLAG}`]: foundry.utils.deepClone(list) }); if ( game.user.isGM ) pruneStore(list); return r; }
+  try {
+    const r = Object.keys(upd).length ? await scene.update(upd) : null;
+    bases.set(list, foundry.utils.deepClone(list));
+    if ( game.user.isGM ) pruneStore(list);
+    return r;
+  }
   finally { if ( pendingList === list ) { pendingList = null; if ( canvas.scene === scene ) sync(false); } }
 };
 
