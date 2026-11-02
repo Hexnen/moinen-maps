@@ -329,6 +329,9 @@ export class StaticCache {
     const now = performance.now(), act = U.map((u) => (u.live ? 1 : 0)).join("");
     if ( act !== this.act ) { this.act = act; this.changedAt = now; }
     if ( this.sticky.size && now - this.changedAt < SETTLE_MS ) for ( const u of U ) if ( !u.live && this.sticky.has(u.obj) ) { u.live = true; u.m = MOVE_MARGIN; }
+    // (an object held live that way draws its own water inside its container: a water unit of its own would draw it a second time, over it,
+    // until the object settles into the bands - the flood's blue came out doubled for SETTLE_MS after its entry ended, then dropped: endPopCheck)
+    for ( let i = U.length - 1; i >= 0; i-- ) if ( U[i].water && U[i].owner.live ) { U[i].water.renderable = true; U.splice(i, 1); }
     const z = canvas.stage.scale.x * (R.resolution || 1);
     const zoomedIn = d.filter === 0;                     // the atlases are sampled NEAREST
     let res = globalThis.CONFIG?.moinenMaps?.destructionCacheRes ?? cacheRes(sr.width, sr.height, false);   // (dev knob)
