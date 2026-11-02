@@ -162,3 +162,68 @@ export async function saveStrip(name, url) {
   const r = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
   return r?.path ?? null;
 }
+
+/* ================================================================== the whole check */
+
+/**
+ * GM page: the GM-side scenario, one row per claim (real pointer events). `player` (optional): an async () => probe() of the PLAYER page,
+ * wired by the runner (two tabs, two origins; there is no channel between them) - without it the player rows are skipped and say so.
+ * Steps: staging by mode (drag staged, tap not), hidden on the GM without preview / visible with it (pixels), the counter, undo / redo,
+ * a staged carry does not move the token, Action plays, flags p -> y -> d, Clear takes staged ones, the kill switch.
+ *   await C.cinematicCheck();   playerRows(beforeAction, afterShow) judges the two player probes
+ */
+export async function cinematicCheck({ player = null } = {}) {
+  const rows = [], d = D();
+  const P = async () => (player ? await player() : null);
+  try {
+    await gmSetup({ mode: "drags", preview: false });
+    d.setCinematic({ over: { pauseBefore: 600, gap: 400 } });
+    const a = await gmPaint({ from: [0.25, 0.3], to: [0.45, 0.3] }), b = await gmPaint({ tap: true, from: [0.7, 0.6] });
+    rows.push(row("a drag is staged in 'drags' mode (cin p, queue place, origin kept), a tap is not", a?.cin?.s === "p" && a.cin.q === 0 && Array.isArray(a.cin.o) && b && !b.cin));
+    await sleep(2500);
+    let p = await probe(), sa = p.strokes.find((s) => s.id === a.id), sb = p.strokes.find((s) => s.id === b.id);
+    rows.push(row("GM without preview: the staged stroke is not on the display (0 groups, 0 pixels), the tap is", sa.groups === 0 && sa.ink === 0 && sb.groups > 0 && sb.ink > 0, { sa: [sa.groups, sa.ink], sb: [sb.groups, sb.ink] }));
+    rows.push(row("the counter says 1 staged", p.status.staged === 1));
+    let q = await P(); if ( q ) { const x = q.strokes.find((s) => s.id === a.id); rows.push(row("PLAYER: the staged stroke is not on the display (0 groups, 0 pixels)", x && x.groups === 0 && x.ink === 0, { x: x && [x.groups, x.ink] })); }
+    d.setCinematic({ preview: true }); await sleep(2500);
+    p = await probe(); sa = p.strokes.find((s) => s.id === a.id);
+    rows.push(row("GM preview ON: the GM sees it at once (pixels)", sa.groups > 0 && sa.ink > 0, { ink: sa.ink }));
+    q = await P(); if ( q ) { const x = q.strokes.find((s) => s.id === a.id); rows.push(row("PLAYER: still nothing with the GM's preview on", x && x.groups === 0 && x.ink === 0)); }
+    d.setCinematic({ preview: false }); await sleep(1500);
+    // undo / redo of a staged stroke
+    const a2 = await gmPaint({ from: [0.25, 0.8], to: [0.4, 0.82] }), n0 = CIN().status().staged;
+    const u = await gmUndo(); rows.push(row("undo removes the last staged stroke (the counter drops by one)", n0 === 2 && u.staged === 1 && !objs().some((o) => o.id === a2.id)));
+    const rd = await gmRedo(); p = await probe();
+    rows.push(row("redo brings it back still staged (cin p, hidden)", rd.staged === 2 && p.strokes.find((s) => s.id === a2.id)?.cin?.s === "p" && p.strokes.find((s) => s.id === a2.id)?.groups === 0));
+    // a staged carry: the token does not move
+    const tok = canvas.tokens.placeables.find((t) => !t.document.locked), R0 = R();
+    await tok.document.update({ x: 300, y: 700 }, { animate: false }); await sleep(500);
+    const c0 = [(300 + tok.w / 2) / R0.width, (700 + tok.h / 2) / R0.height];
+    const cs = await gmPaint({ ctrl: true, from: c0, to: [c0[0] + 0.2, c0[1] - 0.05], wait: false }); await sleep(3500);
+    const tk0 = objs().find((o) => o.id === cs?.id)?.tk, t0 = tk0 && canvas.tokens.get(tk0.id);
+    rows.push(row("a staged carry: tk kept, the token has NOT moved (document) after 3.5 s", !!(cs?.tk && cs.cin?.s === "p" && t0 && t0.document.x === tk0.x0 && t0.document.y === tk0.y0)));
+    // Action
+    window.__cinCheckStart = CIN().now(); watch();
+    const show = await gmAction();
+    rows.push(row("Action: a show record with both staged strokes in queue order", show?.ids?.length === 3, { ids: show?.ids }));
+    await waitShow(40000); await sleep(1500);
+    const w = watchReport(); p = await probe();
+    const starts = Object.values(w.entries).map((e) => e.start);
+    rows.push(row("the show played: every staged stroke settled as d, flags gone, counter 0", p.strokes.filter((s) => s.cin).every((s) => s.cin.s === "d") && Object.keys(p.flag ?? {}).length === 0, { cin: p.strokes.map((s) => s.cin?.s) }));
+    rows.push(row("entries started exactly on the shared schedule", show.offs.every((o, i) => starts.some((s) => Math.abs(s - (show.t0 + o)) <= 60)), { starts: starts.map((s) => s - show.t0), offs: show.offs }));
+    const ct = objs().find((o) => o.id === cs.id)?.tk, ctok = ct && canvas.tokens.get(ct.id);
+    rows.push(row("the carried token moved for real at the end of its stroke's play", ct && Math.abs(ctok.document.x - ct.x1) <= 2 && Math.abs(ctok.document.y - ct.y1) <= 2));
+    q = await P(); if ( q ) rows.push(row("PLAYER: every staged stroke is on the display and settled d", q.strokes.filter((s) => s.cin).every((s) => s.cin.s === "d" && s.groups > 0)));
+    // Clear takes staged strokes too
+    await gmPaint({ from: [0.2, 0.8], to: [0.4, 0.8] }); const before = CIN().status().staged; const cl = await gmClear();
+    rows.push(row("Clear removes staged strokes too", before === 1 && cl.staged === 0 && cl.n === 0));
+    // kill switch
+    await gmPaint({ from: [0.2, 0.2], to: [0.4, 0.2] });
+    CONFIG.moinenMaps.noCinematic = true; CIN().refresh(); await sleep(2000);
+    const kp = await probe(); const k2 = await gmPaint({ from: [0.5, 0.2], to: [0.7, 0.2] });
+    rows.push(row("kill switch: the staged stroke shows at once, the counter is 0, a new drag is not staged", kp.strokes[0].groups > 0 && kp.status.staged === 0 && kp.status.mode === "off" && k2 && !k2.cin));
+    CONFIG.moinenMaps.noCinematic = false;
+  } catch ( err ) { rows.push(row(`exception: ${err?.message ?? err}`, false)); }
+  finally { try { await gmEnd(); } catch { /* leave */ } }
+  return { ok: rows.every((r) => r.ok), rows };
+}
