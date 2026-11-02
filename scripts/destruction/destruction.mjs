@@ -149,7 +149,7 @@ function teardown() {
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
-  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0;
+  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null;
   if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
   compositeShown?.destroy(); compositeShown = null; reshow = null;
   display?.destroy(); display = null;
@@ -1100,11 +1100,23 @@ function shellNeeds() {
   // shell (shellRims). A stroke with a flooded hole or a light, or one whose chunk is not in IndexedDB, is filled as before.
   // (an area whose rim is there - from the store, or known to have none - is not asked about again)
   const settledRim = (a) => { const g = display?.groups.get(a.h); return !!g && (!g.shell || !!g.rim || !!g.rimDone); };
-  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || (inView(a) && !settledRim(a))));
-  const rimOnly = [], full = [];
-  for ( const r of need ) (vw && r.id && r.dir && !r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l)) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
+  // (a glowing cause light is drawn live: its area needs its pixels - in a dark scene, and wherever the composite was made in the dark and drew it
+  // live, see Composite.liveHashes. Such an area is built in the codec worker like a Detonate's (fillFast); a flooded hole takes the page-side fill)
+  const lit = (a) => !!a.l && (dark > 0.05 || !!display?.composite?.liveHashes?.has(a.h));
+  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || lit(a) || (inView(a) && !settledRim(a))));
+  const rimOnly = [], full = [], litGroups = [], noJob = !!globalThis.CONFIG?.moinenMaps?.noShellJob;
+  for ( const r of need ) {
+    const flood = r.shell.some((a) => a.type === "flood");
+    if ( !flood && !noJob && r.id && r.dir && r.shell.some(lit) ) {
+      litGroups.push(...r.shell.filter(lit).map((a) => display?.groups.get(a.h)).filter((g) => g?.shell));
+      if ( vw && !globalThis.CONFIG?.moinenMaps?.noRimJob && r.shell.some((a) => !lit(a) && inView(a) && !settledRim(a)) ) rimOnly.push(r);
+      continue;
+    }
+    (vw && r.id && r.dir && !flood && !r.shell.some(lit) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
+  }
   Trace.event("shell-needs", { dark: +dark.toFixed(2), of: list.length, need: need.length, rimOnly: rimOnly.length, full: full.length, noId: need.filter((r) => !r.id || !r.dir).length, view: !!vw });
   if ( rimOnly.length ) shellRims(rimOnly, inView).then((left) => { if ( left.length ) fill(left, "dark/view"); });
+  if ( litGroups.length ) fillFast(litGroups, "lit");
   fill(full, dark >= 0.45 ? "dark/view" : "flood/light");
 }
 /** The dark rims of the shells of these records that are in view and have none yet, from their chunks (worker); -> the records that could not (fill them). */
@@ -1150,7 +1162,18 @@ function scheduleRims(ms) {
   }, ms);
 }
 let darkTimer = 0;
-const darkCheck = () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); };
+// (the GM: the glowing cause lights are live units only in the dark, so the composite's bands differ by day and by night - a change of the scene's darkness
+// across the lights' threshold publishes it again, a moment after the lights settled)
+let lastDark = null;
+const darkCheck = () => {
+  clearTimeout(darkTimer);
+  darkTimer = setTimeout(() => {
+    const dk = canvas.environment?.darknessLevel ?? 0;
+    if ( lastDark !== null && game.user.isGM && display && (lastDark > 0.05) !== (dk > 0.05) ) scheduleComposite(9000);
+    lastDark = dk;
+    if ( shellRecs().length && dk > 0.05 ) shellNeeds();
+  }, 300);
+};
 Hooks.on("lightingRefresh", darkCheck);
 Hooks.on("canvasPan", darkCheck);
 
