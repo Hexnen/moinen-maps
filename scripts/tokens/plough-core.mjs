@@ -31,7 +31,23 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : a > b ? a : v;
 /* ------------------------------------------------------------------ bodies */
 
 /** A body: { cx, cy, w, h, round } (centre and footprint in scene px; round = a disc of the smaller side, else an axis-aligned rectangle). */
-export const body = (cx, cy, w, h, round = false) => ({ cx, cy, w, h, round: !!round });
+export const body = (cx, cy, w, h, round = false, z = 0) => ({ cx, cy, w, h, round: !!round, z: Number(z) || 0 });
+
+/* ------------------------------------------------------------------ height (HOVER / FLIGHT) */
+
+export const BAND = 0.5;           // grid cells: a token plays in the carrier's height band when its height differs by less than this
+export const FLY_CELLS = 1;        // a token with a flying status but neither elevation nor a vfx hover counts as hovering this high
+/**
+ * A token's effective height in GRID CELLS: its document elevation (scene units / units per cell) + the vfx hover height (px / cell px: moinen-pixel-vfx api.visual.baseHeight) and, when
+ * it carries a flying status but no height at all, FLY_CELLS. Pure: `{ elevation, perCell (distance units per cell), hoverPx, cellPx, flying }`.
+ */
+export function heightCells({ elevation = 0, perCell = 1, hoverPx = 0, cellPx = 100, flying = false } = {}) {
+  const e = (Number(elevation) || 0) / (Number(perCell) > 0 ? Number(perCell) : 1), h = (Number(hoverPx) || 0) / (Number(cellPx) > 0 ? Number(cellPx) : 100);
+  const z = Math.max(0, e) + Math.max(0, h);
+  return z > 0 ? z : flying ? FLY_CELLS : 0;
+}
+/** Do two bodies play in the same height band (|dz| < band)? A body without `z` is on the ground. */
+export const sameBand = (a, b, band = BAND) => Math.abs((a?.z || 0) - (b?.z || 0)) < band;
 
 /**
  * How deep two bodies overlap (scene px, > 0 when they do, <= 0 when they do not; 0 when they merely touch). `a` / `b` are bodies, optionally
@@ -100,7 +116,7 @@ function stepsFor(tl) {
  * `others` the free tokens [{ id, ...body }] in a stable order, `rect` the scene rect (a pushed centre stays inside it).
  * Returns { hits: [{ id, body, t0, samples: [[t, cx, cy], ...], ux, uy }] } in the order the tokens joined the pile; deterministic.
  */
-export function simulate({ tl, carrier, others, rect = null, maxPile = MAX_PILE }) {
+export function simulate({ tl, carrier, others, rect = null, maxPile = MAX_PILE, ignoreHeight = false, band = BAND }) {
   const out = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 };
   const free = others.map((o) => ({ ...o }));
   const pile = [];                                                     // { src, body, cx, cy, parent, ux, uy, samples, t0 }
@@ -136,6 +152,7 @@ export function simulate({ tl, carrier, others, rect = null, maxPile = MAX_PILE 
         const A = ai < 0 ? cur : pile[ai];
         for ( let f = 0; f < free.length && pile.length < maxPile; f++ ) {
           const F = free[f];
+          if ( !ignoreHeight && !sameBand(A.body, F, band) ) continue;           // it hovers above / below the pusher: the pusher passes under / over it
           if ( !overlaps(A.body, A.cx, A.cy, F, F.cx, F.cy) ) continue;
           // the moment of contact: the pusher's step from where it was (ao) to where it is (A), bisected
           const ax0 = ai < 0 ? ox : prevPos[ai]?.[0] ?? A.cx, ay0 = ai < 0 ? oy : prevPos[ai]?.[1] ?? A.cy;
@@ -246,13 +263,13 @@ export function resolveFinals({ carrierEnd, members, fixed = [], snap = null, re
  * ART px), `geo` { ap, ox, oy }, `carrier` { w, h, round }, `others` [{ id, x, y (top-left), w, h, round }], `rect` the scene rect,
  * `snap` { grid, gx, gy } | null. Returns the array (possibly empty); the order of the tokens in `others` does not matter (sorted by id).
  */
-export function ploughRecord({ tk, geo, carrier, others, rect = null, snap = null, maxPile = MAX_PILE }) {
+export function ploughRecord({ tk, geo, carrier, others, rect = null, snap = null, maxPile = MAX_PILE, ignoreHeight = false, band = BAND }) {
   const tl = buildTimeline(tk, { ...geo, k: 1 });
   if ( !tl || !others?.length ) return [];
-  const cb = body(tk.x0 + carrier.w / 2, tk.y0 + carrier.h / 2, carrier.w, carrier.h, carrier.round);
-  const list = others.filter((o) => o && o.id !== tk.id).map((o) => ({ id: o.id, ...body(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, o.round) }))
+  const cb = body(tk.x0 + carrier.w / 2, tk.y0 + carrier.h / 2, carrier.w, carrier.h, carrier.round, carrier.z);
+  const list = others.filter((o) => o && o.id !== tk.id).map((o) => ({ id: o.id, ...body(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, o.round, o.z) }))
     .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-  const sim = simulate({ tl, carrier: cb, others: list, rect, maxPile });
+  const sim = simulate({ tl, carrier: cb, others: list, rect, maxPile, ignoreHeight, band });
   if ( !sim.hits.length ) return [];
   const pile = new Set(sim.hits.map((h) => h.id));
   const carrierEnd = body(tk.x1 + carrier.w / 2, tk.y1 + carrier.h / 2, carrier.w, carrier.h, carrier.round);

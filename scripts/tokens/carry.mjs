@@ -20,7 +20,7 @@
  * pose, the dust, the hand-over and the z-order treatment of the carried one) whose timeline is its recorded centre path, starting at the
  * moment of contact; it has no real move of its own: the carried token's Carry moves every document in ONE batched update.
  */
-import { reducedMotion, dbg } from "../config.mjs";
+import { reducedMotion, dbg, MODULE_ID } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
 import { restoreExact, tokenBusy, claimToken, releaseToken } from "../token-drop.mjs";
 import { Emitter, artPx } from "./pixels.mjs";
@@ -29,6 +29,14 @@ import * as C from "./carry-core.mjs";
 import * as X from "./plough-core.mjs";
 import * as Fx from "./carry-fx.mjs";
 import * as Front from "./carry-front.mjs";
+
+/** moinen-pixel-vfx's official "visual transform" API (>= 0.2.0: api.visual.version), or null (older / absent: the heuristic carry-fx stays in charge). */
+const VFX_ID = "moinen-pixel-vfx", VIS_SRC = "moinen-maps-carry";
+export function vfxVisual() {
+  try { const m = game.modules.get(VFX_ID); const v = m?.active ? m.api?.visual : null; return v && v.version >= 1 ? v : null; } catch { return null; }
+}
+/** The base hover height (flight / levitation passive, canvas px) a token floats at right now, without anything the carry adds. 0 without the API. */
+const hoverOf = (token, V = vfxVisual()) => { try { return V ? Math.max(0, V.baseHeight(token) || 0) : 0; } catch { return 0; } };
 const FRONT_GRACE_MS = 300;    // the token stays in front at least this long after its carry ends, and until the stroke's entry has ended (Front.release)
 
 const ACTIVE = new Map();      // Token -> Carry
@@ -50,6 +58,7 @@ let ticking = false;
 let others = [], othersAt = 0;
 /** The passive effects of the tokens that ride go with them (carry-fx.mjs): after every other listener of the frame (this one runs late), once the offsets are fresh. */
 function followFx() {
+  if ( vfxVisual() ) return;                                    // the official API carries the passives (Carry.declare): the heuristic is only the fallback
   const riders = [];
   for ( const c of ACTIVE.values() ) if ( c.visual && !c.dead && c.base ) { const d = c.doc; riders.push({ id: d.id, cx: d.x + c.W / 2, cy: d.y + c.H / 2, r: Math.max(c.W, c.H), ox: c.off.x, oy: c.off.y, lift: c.lift ?? 0 }); }
   if ( !riders.length ) return;
@@ -119,6 +128,10 @@ class Carry {
     if ( this.visual ) {
       Hooks.callAll("moinenMapsTokenFxBusy", token);        // an idle pose of tokens/fx.mjs lets go first (restoreExact)
       claimToken(token);
+      // a hovering token: its mesh stands raised by the vfx module's own tick. Take the base from Foundry's natural place (restoreExact) and add the live hover back in apply(),
+      // so the base never contains the hover once and lacks it the next time (that was the jump)
+      this.V = vfxVisual();
+      if ( this.V && hoverOf(token, this.V) > 0 ) restoreExact(token);
       this.capture();
       this.root = new PIXI.Container(); this.root.eventMode = "none"; sortNextTo(this.root, token, 2);
       this.em = new Emitter(this.root);
@@ -185,11 +198,20 @@ class Carry {
     // the squash is along the screen's axes: a rotated mesh squashes uniformly
     const rotated = Math.abs(b.rot) > 0.001, u = Math.sqrt(p.sx * p.sy), sx = rotated ? u : p.sx, sy = rotated ? u : p.sy;
     const ry = -this.H / 2 * sy, c = Math.cos(p.rot), s = Math.sin(p.rot);
-    m.position.set(b.px - ry * s + o.x, b.py + this.H / 2 + ry * c + o.y + p.lift);
+    const hover = hoverOf(t, this.V);
+    m.position.set(b.px - ry * s + o.x, C.liftedY(b.py + this.H / 2 + ry * c + o.y, p.lift, hover));
     m.scale.set(b.sx * sx, b.sy * sy);
     m.rotation = b.rot + p.rot;
     t.position.set(b.cx + o.x, b.cy + o.y + p.lift);
     this.lift = p.lift;
+    this.declare(hover);
+  }
+
+  /** Tell moinen-pixel-vfx how the token is shown (offset, pose lift; the mesh is ours): its attached sprites, adaptive bodies, afterimages and shadows follow, the ground shadow stays down. */
+  declare(hover) {
+    const V = this.V; if ( !V ) return;
+    try { V.set(this.token, { dx: this.off.x, dy: this.off.y, lift: -(this.lift ?? 0), owned: true, source: VIS_SRC }); } catch ( err ) { dbg("carry visual", err); }
+    this.declared = true;
   }
 
   /** Puffs at lift-off and landing, dust behind it while it flies (not in performance mode Low, not for a token this client cannot see). */
@@ -239,7 +261,10 @@ class Carry {
       releaseToken(this.token);
       this.em?.clear();
       if ( this.root && !this.root.destroyed ) this.root.destroy({ children: true });
+      if ( this.declared ) { try { this.V.clear(this.token, VIS_SRC); } catch { /* ignore */ } this.declared = false; }
       restoreExact(this.token);
+      // the hover is not ours to drop: Foundry's natural place lacks it, the vfx tick adds it next frame; do it now so the hand-over does not blink one frame at ground level
+      const h = hoverOf(this.token, this.V); if ( h > 0 && this.token.mesh && !this.token.mesh.destroyed ) this.token.mesh.position.y -= h;
     }
     if ( !ACTIVE.size && ticking ) { canvas.app?.ticker?.remove(tick); ticking = false; }
   }
@@ -317,7 +342,19 @@ function isRound(doc) {
   if ( g?.isGridless ) return doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_1 || doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_2;
   return !!g?.isHexagonal;
 }
-const rowOf = (doc) => { const { width, height } = doc.getSize(), p = predicted(doc.id); return { id: doc.id, x: p?.x ?? doc.x, y: p?.y ?? doc.y, w: width, h: height, round: isRound(doc) }; };
+const FLY_STATUSES = new Set(["fly", "flying", "hover", "levitate", "levitating"]);
+/** The token's effective height in grid cells (document elevation + the vfx hover/flight height + a flying status): the plough only meets tokens in its own height band. */
+export function heightOfDoc(doc) {
+  try {
+    const sc = doc.parent ?? canvas.scene, g = sc?.grid ?? canvas.grid, perCell = Number(g?.distance) || 1, cellPx = Number(g?.size) || 100;
+    const V = vfxVisual(), hoverPx = V && doc.object ? Math.max(0, V.baseHeight(doc.object) || 0) : 0;
+    const flying = [...(doc.statuses ?? doc.actor?.statuses ?? [])].some((s) => FLY_STATUSES.has(String(s).toLowerCase()));
+    return X.heightCells({ elevation: doc.elevation, perCell, hoverPx, cellPx, flying });
+  } catch { return 0; }
+}
+const rowOf = (doc) => { const { width, height } = doc.getSize(), p = predicted(doc.id); return { id: doc.id, x: p?.x ?? doc.x, y: p?.y ?? doc.y, w: width, h: height, round: isRound(doc), z: heightOfDoc(doc) }; };
+/** "Superhero ignores height" (client setting, off by default): the plough then also meets hovering / flying tokens, which keep their own height all the way (never a pop). */
+const ignoresHeight = () => { try { return !!game.settings.get(MODULE_ID, "superIgnoreHeight"); } catch { return false; } };
 
 /**
  * `tk.hit` for a carry record: the tokens of the scene as they are now, minus the locked ones and the ones hidden from the players (a
@@ -331,7 +368,7 @@ export function ploughOf(tk, { geo, snap = null, rect = null }) {
     const d = t.document; if ( !d || t.destroyed || d.id === tk.id || d.locked || d.hidden ) continue;
     others.push(rowOf(d));
   }
-  return X.ploughRecord({ tk, geo, carrier: rowOf(doc), others, rect, snap: snap ? { grid: snap.grid ?? canvas.grid.size, fn: snap.fn, gx: 0, gy: 0 } : null });
+  return X.ploughRecord({ tk, geo, carrier: rowOf(doc), others, rect, ignoreHeight: ignoresHeight(), snap: snap ? { grid: snap.grid ?? canvas.grid.size, fn: snap.fn, gx: 0, gy: 0 } : null });
 }
 
 /** Foundry refreshed a token. */
