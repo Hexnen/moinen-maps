@@ -63,7 +63,7 @@ const FILL_STEP = 2;
 // freshly computed stroke signatures are kept in IndexedDB (a moment later, off the pass) so the next load of this state reads them
 Store.setSigsSink((key, out) => setTimeout(() => Net.putMeta(key, out), 1500));
 /** Strokes put on screen per step of a scene load (a pause for the page between steps). */
-const SHOW_BATCH = 12;
+const SHOW_BATCH = 12, SHOW_PX = 1.2e6;     // (SHOW_PX: pixels of new looks one background step puts on screen)
 /** Strokes re-baked per idle pass in the background (a compatible older look being replaced). */
 const IDLE_BATCH = 3;
 let inflight = null, again = null, paramRev = 0, publishBackoff = 0, publishRetryAt = 0, editedHere = false, shownKey = "", shownMask = null, playedBlast = null, forceEntry = false, loaded = false, checkTimer = 0;
@@ -275,7 +275,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     showRecs(list, objs, taken, mask, first, firstLoad && !Reveal.holding("destruction"), allow);
     first = false; loaded = true; shownMask = mask;
     T.show = (T.show ?? 0) + performance.now() - t;
-    slow("showOnce", t, { n: list.length, allow: allow?.size ?? null });
+    slow("showOnce", t, { n: list.length, allow: allow?.size ?? null, ...showParts });
   };
   const show = reshow = () => {
     if ( my !== gen || S !== S0 ) return Promise.resolve();
@@ -296,15 +296,20 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const near = prioritise(want.filter((w) => best(w) && !best(w).shell && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
         const allow = new Set(want.filter((w) => best(w) && (best(w).shell || shownRecs.get(w.objId) === best(w))).map((w) => w.objId));
         // (a background Rebake swaps a few strokes per step: each sync stays short while the scene is in use)
-        const step = firstLoad ? SHOW_BATCH : 4;
-        for ( let i = 0; i < near.length || i === 0; i += step ) {
-          for ( const w of near.slice(i, i + step) ) allow.add(w.objId);
+        // (and at most SHOW_PX pixels of new looks per step: display.sync costs ~5-9 ms per Mpx of new pixels, so four big strokes at once
+        // held the page 65-85 ms)
+        const step = firstLoad ? SHOW_BATCH : 4, pxOf = (w) => (best(w)?.sprites ?? []).reduce((a, q) => a + (q.w * q.h || 0), 0);
+        for ( let i = 0, n = 0; i < near.length || i === 0; i += n || step ) {
+          n = 0;
+          if ( firstLoad ) n = step;
+          else for ( let px = 0; i + n < near.length && n < step && (n === 0 || px + pxOf(near[i + n]) <= SHOW_PX); n++ ) px += pxOf(near[i + n]);
+          for ( const w of near.slice(i, i + n) ) allow.add(w.objId);
           const dry = needPixels(want);
           if ( dry.length ) { await Promise.all(dry.map(hydrate)); if ( my !== gen || S !== S0 ) return; }
           showOnce(want, allow);
           // every stroke in view is on screen (hidden): the reveal can come now; the strokes off screen follow unseen
           if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index])) ) prepping = prepareReveal(my);
-          if ( i + step < near.length ) { await new Promise((r) => setTimeout(r, firstLoad ? 0 : 16)); if ( my !== gen || S !== S0 ) return; }
+          if ( i + n < near.length ) { await new Promise((r) => setTimeout(r, firstLoad ? 0 : 16)); if ( my !== gen || S !== S0 ) return; }
         }
       } while ( showAgain && my === gen && S === S0 );
     })().finally(() => { showing = null; });
@@ -679,7 +684,9 @@ function prioritise(list, objs) {
  * The display gets one sheet assembled from the strokes' records, in stroke order. A stroke whose record is not here yet keeps the
  * look it had on screen (a setting changed: the new look replaces it when it lands) or is left out for now (a new stroke).
  */
+let showParts = null, tShow0 = 0;
 function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
+  tShow0 = performance.now();
   const list = [], next = new Map(), shells = [];
   depOnly.clear();
   for ( const w of want ) {
@@ -704,8 +711,12 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   // the areas already on screen need no pixels (the display keeps them by hash; a shell's pixels replace it)
+  const tA = performance.now();
   const sheet = Chunks.assembleSheet(list, META_FIELDS, (h) => display.groups.has(h) && !display.groups.get(h).shell);
+  const tS = performance.now();
   const { added, removed } = display.sync(sheet.data, sheet.w, sheet.h, sheet.meta, S.ap, origin(), objs, shells);
+  const tE = performance.now();
+  showParts = { pre: Math.round((tA - tShow0) * 10) / 10, asm: Math.round((tS - tA) * 10) / 10, sync: Math.round((tE - tS) * 10) / 10, sheetMpx: Math.round(sheet.w * sheet.h / 1e5) / 10 };
   // MEMORY: the display holds its own copy of every area's pixels now; a record that can be had again from its chunk lets go of its
   // own copy (a big scene's records were ~230 MB of RGBA kept twice). They come back (hydrate) when an area of theirs must be built
   // again, or the stroke is baked over.
@@ -1078,6 +1089,14 @@ function olderLooks(want) {
 // pause and cancel act between passes
 const REBAKE_BATCH = 96, REBAKE_EVERY = 250;
 let rebakeQueue = [], rebakeTimer = 0;
+/** Plain looks nothing left in the Rebake queue reads are let go (they were kept for the whole session: 270 MB on "map"); the final looks stay. */
+function trimPlain() {
+  if ( !S || !plainRecs.size ) return;
+  const FS = Store.sigsOf(S), base = Store.baseKey(canvas.scene, S, backgroundInfo()?.path ?? ""), at = new Map(S.objects.map((o, i) => [o.id, i]));
+  const need = new Set();
+  for ( const id of rebakeQueue ) for ( const j of FS[at.get(id)]?.deps ?? [] ) need.add(`${base}|${S.objects[j].id}|${FS[j].own}`);
+  for ( const k of [...plainRecs.keys()] ) if ( !need.has(k) ) plainRecs.delete(k);
+}
 export function rebakeStrokes(ids = null) {
   if ( !S || !game.user.isGM ) return;
   const bg = backgroundInfo()?.path ?? "", base = Store.baseKey(canvas.scene, S, bg), FS = Store.sigsOf(S), objs = objectsIn();
@@ -1104,13 +1123,14 @@ function pumpRebake(ms = REBAKE_EVERY) {
     rebakeTimer = 0;
     const R = status.rebake;
     if ( !S || !R || R.paused ) return;
-    if ( !rebakeQueue.length ) { status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
+    if ( !rebakeQueue.length ) { trimPlain(); status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
     if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
     const batch = rebakeQueue.splice(0, REBAKE_BATCH);
     await rebake({ awaitPublish: false, redo: batch });
     // a pass that failed (an error, a backoff) stops the Rebake all and says so: never "done" with strokes not baked
     if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }
     if ( status.rebake ) { status.rebake.done += batch.length; status.rebake.live = 0; tell("status"); }
+    trimPlain();
     pumpRebake(REBAKE_EVERY);
   }, ms);
 }
@@ -1457,6 +1477,11 @@ export const destructionApi = {
   // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
   status: () => { if ( lastRecs && !status.hash ) status.hash = lastRecs.some((r) => r.sprites.lean || r.shell) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean || r.shell ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
+  /** (bench) the pixels the records hold, in Mpx of RGBA (x4 bytes): by map, and the stream's memory. */
+  memory: () => {
+    const px = (list) => { const seen = new Set(); let n = 0; for ( const sp of list ) for ( const s of sp ) { if ( !s.img || seen.has(s.img) ) continue; seen.add(s.img); n += s.w * s.h; } return Math.round(n / 1e5) / 10; };
+    return { recs: px([...recs.values()].map((r) => r.sprites)), plain: px([...plainRecs.values()]), shown: px([...shownRecs.values()].map((r) => r.sprites)), stale: px([...staleRecs.values()].map((r) => r.sprites)), counts: [recs.size, plainRecs.size, shownRecs.size, staleRecs.size], net: Net.debug() };
+  },
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
   // (the display asks for the pixels it lacks itself: an entry waits up to 150 ms for them - display.waitPixels)

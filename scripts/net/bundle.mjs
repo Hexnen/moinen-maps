@@ -15,8 +15,8 @@ import { floodIds } from "./preload.mjs";
  * A client registers it (stream.mjs setBundles) and then takes every member from its bundle: one request for ~100 chunks. Nothing else
  * changes: the chunks keep their ids and their single files (a bundle that is missing costs only the requests it would have saved),
  * manifests are untouched, a stale bundle list only names chunks that are no longer asked for. Members go to buckets by a hash of
- * their id (chunks.mjs bundleBuckets): a changed chunk changes ONE bundle. Off: `CONFIG.moinenMaps.noBundles = true` (the GM does not
- * publish, a client does not read them).
+ * their id (chunks.mjs bundleBuckets): a changed chunk changes ONE bundle. Off: `CONFIG.moinenMaps.noBundles = true` or localStorage
+ * "mm-bundles" = "off" (the GM does not publish, a client does not read them).
  */
 export const KEY = "chunkBundle";
 /** Largest single file (bytes) that goes into a bundle, by the kind of chunk. */
@@ -24,7 +24,7 @@ export const LIMIT = { w: 65536, d: 32768, k: 131072, x: 131072 };
 /** The flooded strokes' chunks (every load fetches them) go into one bundle of their own, whatever their size (up to this). */
 export const FLOOD_LIMIT = 262144;
 
-const off = () => !!globalThis.CONFIG?.moinenMaps?.noBundles;
+const off = () => { try { if ( localStorage.getItem("mm-bundles") === "off" ) return true; } catch { /* blocked */ } return !!globalThis.CONFIG?.moinenMaps?.noBundles; };   // (localStorage "mm-bundles" = "off": before a reload)
 
 /** The scene's bundle record, or null. */
 export function manifestOf(scene) {
