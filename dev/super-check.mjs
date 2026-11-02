@@ -408,7 +408,9 @@ export function superWatch() {
 
 /** After the plough ended: what the player saw. */
 export async function superWatchReport() {
-  const w = window.__superWatch; w.s.stop();
+  const w = window.__superWatch, K0 = await w.K;
+  await wait(() => K0._carryStats().played > 0, 25000); await wait(() => K0._carryStats().active === 0, 25000); await sleep(1200);      // (this client's own entry starts later than the GM's: wait for its carry to end)
+  w.s.stop();
   const K = await w.K, o = strokes().filter((q) => q.tk?.hit?.length).at(-1), tk = o?.tk, hits = tk?.hit ?? [];
   const tokens = w.ids.map((id) => canvas.tokens.get(id));
   const ix = (id) => w.ids.indexOf(id), ci = ix(tk?.id);
@@ -432,7 +434,7 @@ export async function superWatchReport() {
 /* ================================================================== the live case for a player's page (three calls on the GM's page) */
 
 /** 1) GM page: the row is laid out and the brush is in hand (settings: Superhero on, moves for real). Then arm superWatch() on the player's page. */
-export async function superSetup({ snap = false, free = false } = {}) {
+export async function superSetup({ snap = false, free = false, ends = "real" } = {}) {
   const made = [], M = await mods();
   await ensureTokens(5, made);
   const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5);
@@ -441,7 +443,7 @@ export async function superSetup({ snap = false, free = false } = {}) {
   const rest = canvas.tokens.placeables.filter((t) => t !== carrier && !rowT.includes(t));
   for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
   await canvas.scene.updateEmbeddedDocuments("Token", [{ _id: carrier.document.id, sort: 0 }, ...rowT.map((t, i) => ({ _id: t.document.id, sort: 1000 + 10 * i })), ...rest.map((t) => ({ _id: t.document.id, sort: 5000 }))], { animate: false, diff: false });   // (the pushed tokens sort HIGHER than the carrier)
-  await prep({ snap, free }); const { c } = await layout(carrier, rowT, G, R, snap || free ? { gaps: [4.2, 5.2, 6.2, 7.2, 8.2], dy: [0.12, -0.1, 0.1, 0, 0.1] } : undefined);
+  await prep({ snap, free, ends }); const { c } = await layout(carrier, rowT, G, R, snap || free ? { gaps: [4.2, 5.2, 6.2, 7.2, 8.2], dy: [0.12, -0.1, 0.1, 0, 0.1] } : undefined);
   window.__sup = { M, made, saved, carrier, rowT, G, c, tokens: [carrier, ...rowT] };
   return { carrier: carrier.document.name, row: rowT.map((t) => t.document.name) };
 }
