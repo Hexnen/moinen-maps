@@ -6,6 +6,7 @@ import { setSceneDraft, registerCoreSettings } from "./config.mjs";
 import { refreshAllDistricts } from "./districts.mjs";
 import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, onWorkspaceTool, installPatches } from "./tools.mjs";
 import "./workspace/sections.mjs";
+import "./destruction/cinematic-panel.mjs";      // cinematic screen effects: CinematicFx (api.cinematic), client settings, the "Cinematic effects" dock panel
 import { syncWorkspace } from "./workspace/shell.mjs";
 import { registerFilterSettings } from "./filter.mjs";
 import * as WaterScene from "./water/water.mjs";
