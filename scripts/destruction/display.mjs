@@ -11,6 +11,7 @@ import { perfMode, particleCap } from "../perf-mode.mjs";
 import { Debris } from "./debris.mjs";
 import { buildShell } from "./composite.mjs";
 import { PieceBatch, RectCanvas, RectLayer, batchStats } from "./piece-batch.mjs";
+import { GpuPieceBatch, STUB, gpuPiecesSupported } from "./piece-gpu.mjs";
 import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, plainInfo, countSort, clockUpper, timeBytes } from "./entry-clock.mjs";
 import { ClockPool } from "./clock-pool.mjs";
 import { ErodeGPU, MAX_STAGES } from "./erode-gpu.mjs";
@@ -601,6 +602,7 @@ export class DestructionDisplay {
    */
   retire(g) {
     this.endAnim(g);
+    this.downGpu(g);       // (its pieces are flung by the front that replaces it: CPU poses)
     g.dieStart = performance.now();
     this.dying.push(g);
   }
@@ -787,7 +789,7 @@ export class DestructionDisplay {
    */
   stash(g) {
     g.heldBy = null; g.fade = null;
-    for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) this.place(p, 2, null, g.info.type); }   // back where it lies (a newer front may have flung it)
+    if ( !g.batch?.gpu ) for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) this.place(p, 2, null, g.info.type); }   // back where it lies (a newer front may have flung it)
     g.cont.alpha = 1;
     g.cont.parent?.removeChild(g.cont);
     this.spare.delete(g.hash); this.spare.set(g.hash, g);
@@ -843,7 +845,7 @@ export class DestructionDisplay {
     if ( reducedMotion() || perf === "low" ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
     if ( g.flat ) this.unflatten(g);
     // an older look held under this one: its shards are caught by the front (tick), so they must exist
-    for ( const u of under ) if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); }
+    for ( const u of under ) { if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); } else this.downGpu(u); }
     // the entry's clock (entry-clock.mjs, shared with the clock worker): the kind's, tuned by the cause (rot creeps, lightning
     // strikes, arcane spirals); a tear's and a cave-in's own
     const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (this.look.speed || 1)) * (Cause.causeLook(info.cause)?.slow ?? 1));
@@ -923,6 +925,9 @@ export class DestructionDisplay {
       this.clockJobs(clockJobs, spec, !!coll && !spec.coll);
     }
     // 2. the pieces' lives
+    // (GPU pieces, piece-gpu.mjs: a plain entry's pieces move in the vertex shader - no pose is placed here or per frame)
+    const gpu = !tear && !coll && info.type !== "collapse" && this.gpuPieces(g);
+    if ( !gpu ) this.downGpu(g);
     const list = [], byPiece = new Map();
     g.pieces.forEach((p, n) => {
       if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
@@ -936,18 +941,19 @@ export class DestructionDisplay {
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw * (0.7 + 0.6 * hC) + (info.type === "cracks" ? 1.5 : 0);
       const it = { p, t0, dur, arc, spin: 0.6 + 0.9 * hA, bounces: p.chip ? 2 : 1, pre: (60 + 60 * hB) * k, dusted: false, seed: n };
       list.push(it); byPiece.set(p, it);
-      this.place(p, -9, it, info.type);
+      if ( !gpu ) this.place(p, -9, it, info.type);
     });
     g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront || tear ? null : wipe, tear, list, byPiece, fx: [], rev, crev,
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
     if ( coll ) { g.anim.coll = coll; g.anim.end = Math.max(g.anim.end, coll.endBy + 200 * k); }
+    if ( gpu ) this.gpuEnter(g, g.anim);
     // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
     this.debris.hideRest(g);
     this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k);
     // a flattened area has no shards yet: the ones due in its first 150 ms at once, the rest a slice per frame, earliest first (tick)
-    if ( g.made < g.pieces.length && !tear ) this.materialize(g, Infinity, start + 150);
+    if ( g.made < g.pieces.length && !tear && !gpu ) this.materialize(g, Infinity, start + 150);
     for ( const u of under ) u.heldBy = g;
     this.stats.entries++;
   }
@@ -1175,7 +1181,8 @@ export class DestructionDisplay {
       a.crev.time?.destroy(); a.crev.time = null;
     }
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
-    for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
+    if ( g.batch?.gpu ) g.batch.setRest();      // (GPU pieces: all at rest)
+    else for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
     if ( g.baseCont && !g.baseCont.destroyed ) g.baseCont.position.set(0, 0);
     g.shardCont.position.set(0, 0);
   }
@@ -1651,7 +1658,8 @@ export class DestructionDisplay {
       g.shardCont.position.set(j, 0); g.baseCont.position.set(j, 0);
     }
     this._owner = g;    // what the entry spawns is its own (endAnim ends it)
-    const busy = a.tear ? this.livesAll(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
+    if ( a.gpu && g.batch?.gpu ) g.batch.setClock(now);
+    const busy = a.tear ? this.livesAll(a, now, onScreen, type) : a.gpu ? this.livesGpu(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
     if ( onScreen ) this.effects(g, a, now, el);
     if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
     this._owner = null;
@@ -1751,6 +1759,65 @@ export class DestructionDisplay {
       if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
     }
     return busy;
+  }
+
+  /** Can an entry's pieces move on the GPU (piece-gpu.mjs)? */
+  gpuPieces(g) {
+    return batchOn() && !globalThis.CONFIG?.moinenMaps?.noGpuPieces && !!g.atlas && !!g.tex && gpuPiecesSupported(canvas.app?.renderer);
+  }
+
+  /** The area's pieces become instances of a GPU batch (their numbers uploaded once); the entry's clock drives them. */
+  gpuEnter(g, a) {
+    const N = g.pieces.length;
+    let b = g.batch;
+    if ( b && !b.destroyed && !b.gpu ) { this.release(g); b = null; }
+    if ( !b || b.destroyed ) {
+      b = g.batch = new GpuPieceBatch(N, g.tex, g.atlas, g.baseSpr); g.bmode = "batch"; g.shardCont.addChildAt(b, 0);
+      b.baseBlank = () => { const R = g.anim?.rev; return !!R && !R.shown && g.baseSpr?._texture?.baseTexture === R.tex; };
+    }
+    b.load(this, g, a);
+    for ( const p of g.pieces ) p.spr = STUB;
+    g.made = N; g.madeIdx = []; a.gpu = true;
+    b.setClock(performance.now());
+  }
+
+  /** Back to CPU-posed pieces (an older look caught by a newer front, or an entry that is not a plain one): made again, at rest. */
+  downGpu(g) {
+    if ( !g.batch?.gpu ) return;
+    const a = g.anim;
+    this.release(g);
+    g.made = 0; g.sheetCur = 0; g.madeIdx = [];
+    if ( a ) { a.gpu = false; a.matCur = 0; a.byStart = null; }
+    this.materialize(g, Infinity);
+  }
+
+  /**
+   * GPU pieces: nothing to pose. Only what the CPU still does when a piece lands: its puff of dust (thrown pieces; cracks' specks), in
+   * the order livesActive would have called it (by the moment a piece's life begins).
+   */
+  livesGpu(a, now, onScreen, type) {
+    if ( !a.gl ) {
+      const L = a.list, idx = [];
+      for ( let k = 0; k < L.length; k++ ) if ( L[k].p.thrown || type === "cracks" ) idx.push(k);
+      idx.sort((x, y) => (L[x].t0 + L[x].dur) - (L[y].t0 + L[y].dur));
+      a.startOrder ??= startOrderOf(L);
+      const rank = new Int32Array(L.length); a.startOrder.forEach((k, r) => { rank[k] = r; });
+      a.gl = { idx, ptr: 0, rank };
+      a.busyUntil = L.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);
+    }
+    const G = a.gl, L = a.list;
+    if ( onScreen && G.ptr < G.idx.length ) {
+      const due = [];
+      while ( G.ptr < G.idx.length ) {
+        const it = L[G.idx[G.ptr]];
+        if ( it.dusted ) { G.ptr++; continue; }
+        if ( !((now - it.t0) / it.dur >= 1) ) break;
+        due.push(G.idx[G.ptr++]);
+      }
+      if ( due.length > 1 ) due.sort((x, y) => G.rank[x] - G.rank[y]);
+      for ( const k of due ) this.dust(L[k], type);
+    }
+    return now < a.busyUntil;
   }
 
   /**
