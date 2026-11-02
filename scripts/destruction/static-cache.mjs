@@ -149,7 +149,8 @@ void main() {
  * in the last phase of a zoom-out); a phase-independent kernel while it moves, crisp again when it stands still.
  */
 let zoomSoft = 0;
-const SOFT_MS = 80;                                      // (was 220: the user found the wait after a zoom too long; CONFIG.moinenMaps.softMs to try others)
+const SOFT_RATE = 0.35;                                  // css px per frame the farthest screen point must move to count as 'zooming' (CONFIG.moinenMaps.softRate)
+const SOFT_MS = 80;                                     // (was 220: the user found the wait after a zoom too long; CONFIG.moinenMaps.softMs to try others)
 // the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
 // "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
 const SOFT_TAP = 0.35, SOFT_BIAS = 0.5;
@@ -309,7 +310,12 @@ export class StaticCache {
   update() {
     // the zoom softening: is the scale moving?
     { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
-      if ( this.lastScale && Math.abs(sc / this.lastScale - 1) > 1e-5 ) this.movedAt = t;
+      // (the view eases into its final scale for a long, tiny tail: only a scale change that still moves the screen's farthest point by more
+      // than `softRate` css px in a frame counts as moving, so the softening is gone as soon as the zoom is visibly slow; was any change > 1e-5)
+      if ( this.lastScale ) {
+        const s = canvas.app?.screen, edge = s ? 0.5 * Math.hypot(s.width, s.height) : 800, rate = globalThis.CONFIG?.moinenMaps?.softRate ?? SOFT_RATE;
+        if ( Math.abs(sc / this.lastScale - 1) * edge > rate ) this.movedAt = t;
+      }
       this.lastScale = sc;
       zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / (globalThis.CONFIG?.moinenMaps?.softMs ?? SOFT_MS)) : 0; }
     const d = this.d, kids = d.live.children, sr = canvas.dimensions?.sceneRect, R = canvas.app?.renderer;
