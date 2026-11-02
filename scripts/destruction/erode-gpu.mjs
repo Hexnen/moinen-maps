@@ -17,6 +17,9 @@
  */
 export const MAX_STAGES = 6;
 const LUT_ROWS = 256;
+const POOL = new Map();                // "WxH" -> finished entries' render textures, ready for the next entry of that size
+const POOL_MAX = 64 * 1048576;
+let poolBytes = 0;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -82,6 +85,10 @@ export class ErodeGPU {
     this.lutTex = null;
     this.shader = null; this.geom = null; this.state = null;
     this.passes = 0; this.ms = 0;
+    // (a lost GL context empties the render textures: the ruins are filled again - epoch)
+    this.epoch = 0;
+    this._ctx = { contextChange: () => { this.epoch++; } };
+    canvas.app?.renderer?.runners?.contextChange?.add(this._ctx);
   }
 
   /** The look-up row of a constant mix [c, t]: the same three tables as display.lutOf; -1 when the rows are used up. */
@@ -110,11 +117,25 @@ export class ErodeGPU {
       uA: new Float32Array(MAX_STAGES * 4), uB: new Float32Array(MAX_STAGES * 4) });
   }
 
-  /** A render texture the size of the ruin, sampled like the buffer texture it replaces (`filter`). */
+  /**
+   * A render texture the size of the ruin, sampled like the buffer texture it replaces (`filter`). One a finished entry gave back
+   * (release) is used again when its size is the same (a second Detonate of the scene allocates none): a pass overwrites every texel.
+   */
   makeTarget(w, h, filter) {
+    const kept = POOL.get(`${w}x${h}`)?.pop();
+    if ( kept && !kept.tex.destroyed && !kept.base.destroyed ) { poolBytes -= w * h * 4; kept.base.scaleMode = filter; return kept; }
     const base = new PIXI.BaseRenderTexture({ width: w, height: h, scaleMode: filter, mipmap: PIXI.MIPMAP_MODES.OFF, resolution: 1 });
     base.alphaMode = PIXI.ALPHA_MODES.PMA;
     return { base, tex: new PIXI.RenderTexture(base) };
+  }
+
+  /** A target (makeTarget().tex) back to the pool, or freed when the pool is full. */
+  release(tex) {
+    const base = tex.baseTexture; if ( !base || base.destroyed ) return;
+    const w = base.realWidth, h = base.realHeight, key = `${w}x${h}`;
+    if ( poolBytes + w * h * 4 > POOL_MAX ) { tex.destroy(true); return; }
+    if ( !POOL.has(key) ) POOL.set(key, []);
+    POOL.get(key).push({ base, tex }); poolBytes += w * h * 4;
   }
 
   /** The clock as a texture from entry-clock timeBytes (RG8, moment + 1 in two bytes, rows padded to an even width). */
@@ -146,6 +167,9 @@ export class ErodeGPU {
   }
 
   destroy() {
+    canvas.app?.renderer?.runners?.contextChange?.remove(this._ctx);
+    for ( const list of POOL.values() ) for ( const t of list ) t.tex.destroy(true);
+    POOL.clear(); poolBytes = 0;
     this.shader?.destroy(); this.geom?.destroy(); this.lutTex?.destroy(); this.shader = this.geom = this.lutTex = null;
   }
 }

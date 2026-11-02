@@ -1146,14 +1146,16 @@ export class DestructionDisplay {
     if ( !g.dead ) g.reflatAt = performance.now() + 900;    // back to one sprite after the cache has settled (static-cache SETTLE_MS)
     if ( a.rev ) {
       // the ruin in full: back to its frame of the atlas
-      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); if ( !g.batch?.folded ) g.baseSpr.renderable = true; }
-      a.rev.tex.destroy(); a.rev.time?.destroy(); a.rev.time = null;
+      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; if ( !a.rev.rt ) t.destroy(false); if ( !g.batch?.folded ) g.baseSpr.renderable = true; }
+      if ( a.rev.rt ) this.gpuErode?.release(a.rev.rt); else a.rev.tex.destroy();
+      a.rev.time?.destroy(); a.rev.time = null;
     }
     if ( a.crev ) {
       const pm = g.patch?.children?.[1];
-      if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; t.destroy(false); }
+      if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; if ( !a.crev.rt ) t.destroy(false); }
       if ( g.patch && !g.patch.destroyed ) g.patch.renderable = true;
-      a.crev.tex.destroy(); a.crev.time?.destroy(); a.crev.time = null;
+      if ( a.crev.rt ) this.gpuErode?.release(a.crev.rt); else a.crev.tex.destroy();
+      a.crev.time?.destroy(); a.crev.time = null;
     }
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
     for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
@@ -1282,6 +1284,7 @@ export class DestructionDisplay {
   /** The cover's dissolve on the GPU (the same clock and pass as the ruin's, one stage). */
   coverGpu(g, a, now) {
     const D = a.crev;
+    if ( D.epoch !== this.gpuErode.epoch ) { D.epoch = this.gpuErode.epoch; if ( D.next ) { D.dirty = true; D.el = now - a.start; } }
     if ( D.keys && D.next < D.keys.length ) {
       const rel = now - a.start, nx = clockUpper({ ix: D.keys, tm: D.tms }, D.next, (Math.max(0, rel) + 1) * 1048576);
       D.el = rel;
@@ -1297,6 +1300,7 @@ export class DestructionDisplay {
    */
   erodeGpu(g, a, R, now, onScreen) {
     if ( !R.keys ) return 0;
+    if ( R.epoch !== this.gpuErode.epoch ) { R.epoch = this.gpuErode.epoch; if ( R.next ) R.dirty = true; }     // (a lost context: filled again)
     const S = R.stages, last = S.length - 1, N = R.keys.length, el = now - a.start;
     if ( R.next < N ) {
       const keys = R.keys, nc = R.nc ??= new Float64Array(S.length), CK = { ix: keys, tm: R.tms };
@@ -1923,6 +1927,7 @@ export class DestructionDisplay {
     this.clockPool?.destroy(); this.clockPool = null;
     Cause.disposeLights(this);
     this.clear();
+    this.gpuErode?.destroy(); this.gpuErode = null;
     this.debris?.destroy(); this.debris = null;
     this.cache?.destroy(); this.cache = null;
     for ( const sp of [...this.spritePool, ...(this._flatPool ?? []), this._flatBase] ) if ( sp && !sp.destroyed ) sp.destroy();
