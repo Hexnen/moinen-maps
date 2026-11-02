@@ -60,7 +60,7 @@ export async function capture({ name, bg, rows, times = [0, 90, 200, 400, 800, 1
   H.fit(zoom ?? Math.min(innerWidth / (SZ * 3), innerHeight / (SZ * rows.length)));
   const boot = await H.boot();
   // every area needs its pixels (an area shown as a shell / with its atlas freed has no entry to play: it waits for them on the real clock)
-  for ( let i = 0; i < 6 && api().display().order.some((g) => g.shell || g.atlasFree); i++ ) { await api().replay(); await sleep(50); }
+  for ( let i = 0; i < 40 && (api().display().pending?.size || api().display().restoreQ?.length || api().display().order.some((g) => g.shell || g.atlasFree)); i++ ) { await api().replay(); await sleep(50); }
   const d = api().display(), T = canvas.app.ticker, real = performance.now.bind(performance);
   CONFIG.moinenMaps ??= {}; const was = [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker];
   CONFIG.moinenMaps.noDestructionCache = true; CONFIG.moinenMaps.noClockWorker = true;
@@ -82,6 +82,11 @@ export async function capture({ name, bg, rows, times = [0, 90, 200, 400, 800, 1
     for ( const g of d.order ) d.endAnim(g);
     F += 10000; T.update(F); shots.push(grabScene());   // the resting look
   } finally { performance.now = real; Math.random = rnd; [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker] = was; T.maxFPS = mf; if ( st ) T.start(); }
+  // no receiver: per cell the count of visible pixels (alpha > 8) in every frame, to see an entry animate from nothing (or not)
+  if ( !post ) {
+    const ink = rows.map((row, r) => row.map((spec, c) => shots.map((px) => { let n = 0; for ( let y = 0; y < SZ; y++ ) { const o = ((r * SZ + y) * SZ * 3 + c * SZ) * 4; for ( let x = 0; x < SZ; x++ ) if ( px[o + x * 4 + 3] > 8 ) n++; } return n; })));
+    return { baked, boot, entered, areas: d.order.length, frames: shots.length, times: [...times, "rest"], ink };
+  }
   // post one strip per stroke (frames side by side)
   const W = SZ * 3, nF = shots.length; let sent = 0;
   for ( let r = 0; r < rows.length; r++ ) for ( let c = 0; c < 3; c++ ) {

@@ -502,6 +502,10 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
       const at = (x, y) => { const i = (y * PW + x) * 4; return [px[i], px[i + 1], px[i + 2], px[i + 3]]; };
       const diff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) + Math.abs(a[3] - b[3]);
       let n = 0;
+      // (Foundry's own scene outline - the interface group, not the primary one that holds this module's layers - is a dark line 1-2 px
+      // outside the scene rectangle at some zooms / resolutions: 1.25 at 1137x733 puts it at scene -1.4 / +0.2 past the far edges; not a seam)
+      const sr = canvas.dimensions.sceneRect, tol = 4 * R.resolution;
+      const onBorder = (v, ax) => (ax === "x" ? [sr.x, sr.x + sr.width].map((e) => (e * M.a + M.tx) * R.resolution) : [sr.y, sr.y + sr.height].map((e) => (e * M.d + M.ty) * R.resolution)).some((e) => Math.abs(v - e) <= tol);
       // columns
       for ( let x = 1; x < PW - 1; x++ ) {
         let hit = 0, rows = 0;
@@ -511,7 +515,7 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
           rows++;
           if ( diff(L, Rr) < thr * 0.5 && diff(C, L) > thr && diff(C, Rr) > thr ) hit++;
         }
-        if ( rows > 30 && hit / rows >= minScore ) { n++; found.push({ zoom: z, off, axis: "x", screen: x, scene: +(((x / R.resolution) - M.tx) / M.a).toFixed(1), score: +(hit / rows).toFixed(2) }); }
+        if ( rows > 30 && hit / rows >= minScore && !onBorder(x, "x") ) { n++; found.push({ zoom: z, off, axis: "x", screen: x, scene: +(((x / R.resolution) - M.tx) / M.a).toFixed(1), score: +(hit / rows).toFixed(2) }); }
       }
       // rows
       for ( let y = 1; y < PH - 1; y++ ) {
@@ -522,7 +526,7 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
           cols++;
           if ( diff(U, Dn) < thr * 0.5 && diff(C, U) > thr && diff(C, Dn) > thr ) hit++;
         }
-        if ( cols > 30 && hit / cols >= minScore ) { n++; found.push({ zoom: z, off, axis: "y", screen: y, scene: +(((y / R.resolution) - M.ty) / M.d).toFixed(1), score: +(hit / cols).toFixed(2) }); }
+        if ( cols > 30 && hit / cols >= minScore && !onBorder(y, "y") ) { n++; found.push({ zoom: z, off, axis: "y", screen: y, scene: +(((y / R.resolution) - M.ty) / M.d).toFixed(1), score: +(hit / cols).toFixed(2) }); }
       }
       per[`${z}/${off}`] = n;
     }
@@ -1129,7 +1133,7 @@ export async function makeTokens(n = 48, { size = 1, distinct = true, rect = nul
   const sc = canvas.scene, g = canvas.grid.size, r = rect ?? canvas.dimensions.sceneRect;
   let srcs = [canvas.tokens.placeables.find((t) => t.document.texture.src)?.document.texture.src ?? "icons/svg/mystery-man.svg"];
   if ( distinct ) {
-    try { const b = await FilePicker.browse("public", "icons/svg"); srcs = b.files.filter((f) => f.endsWith(".svg")); } catch { /* keep the one */ }
+    try { const b = await foundry.applications.apps.FilePicker.implementation.browse("public", "icons/svg"); srcs = b.files.filter((f) => f.endsWith(".svg")); } catch { /* keep the one */ }
   }
   const cols = Math.max(1, Math.floor(r.width / (g * (size + 0.5)))), data = [];
   for ( let i = 0; i < n; i++ ) {
