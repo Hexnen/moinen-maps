@@ -12,7 +12,7 @@ import { Debris } from "./debris.mjs";
 import { buildShell } from "./composite.mjs";
 import { PieceBatch, RectCanvas, RectLayer, batchStats } from "./piece-batch.mjs";
 import { GpuPieceBatch, STUB, gpuPiecesSupported } from "./piece-gpu.mjs";
-import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, plainInfo, countSort, clockUpper, timeBytes } from "./entry-clock.mjs";
+import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, ATONCE_JITTER, plainInfo, countSort, clockUpper, timeBytes } from "./entry-clock.mjs";
 import { ClockPool } from "./clock-pool.mjs";
 import { ErodeGPU, MAX_STAGES } from "./erode-gpu.mjs";
 
@@ -919,7 +919,7 @@ export class DestructionDisplay {
    * (follows the stroke only), `under` older looks of the same stroke kept underneath until it is in, `path` [[x, y, ms], ...]: the
    * front runs along the brush path at the drawing speed.
    */
-  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null } = {}) {
+  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null, simul = false } = {}) {
     this.enterQueue?.delete(g);
     this.endAnim(g);
     const now = performance.now();
@@ -945,8 +945,8 @@ export class DestructionDisplay {
     // strikes, arcane spirals); a tear's and a cave-in's own
     const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (this.look.speed || 1)) * (Cause.causeLook(info.cause)?.slow ?? 1));
     lapE("unflat");
-    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: this.look.speed, pathFront });
-    const { CL, L, k, ox, oy, Rmax, tear, seed, noise } = C;
+    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: this.look.speed, pathFront, simul });
+    const { CL, L, k, ox, oy, Rmax, tear, seed, noise, atOnce } = C;
     const r = info.rect;
     // a cave-in has its own clock too (collapse-entry.mjs): anticipation, then the rings slump from the rim inwards
     const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront, ...this.collPrep(g) }) : null;
@@ -956,7 +956,7 @@ export class DestructionDisplay {
     const arrive = coll ? coll.arrive : C.arrive;
     const pixelTime = coll ? coll.pixelTime : C.pixelTime;
     // what the clock worker needs to make the same clock (clock-worker.mjs)
-    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: this.look.speed, coll: null };
+    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: this.look.speed, simul, coll: null };
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
@@ -1030,7 +1030,7 @@ export class DestructionDisplay {
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
       const size = p.w ? Math.sqrt(p.w * p.h) : p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
-      const t0 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * 90 * k;
+      const t0 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * (atOnce ? ATONCE_JITTER : 90) * k;
       const dur = (p.thrown ? 380 + Math.min(460, dd * 14) : 260 + Math.min(220, dd * 30)) * L.flight * k * (0.8 + 0.45 * hB) * (0.85 + Math.min(0.5, size / 40));
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw * (0.7 + 0.6 * hC) + (info.type === "cracks" ? 1.5 : 0);
       const it = { p, t0, dur, arc, spin: 0.6 + 0.9 * hA, bounces: p.chip ? 2 : 1, pre: (60 + 60 * hB) * k, dusted: false, seed: n };
@@ -1261,10 +1261,10 @@ export class DestructionDisplay {
    * up a few frames late catches up: its first ~70-200 ms show nothing anyway). `CONFIG.moinenMaps.enterAtOnce = true`: all at once.
    */
   detonate(start) {
-    if ( globalThis.CONFIG?.moinenMaps?.enterAtOnce ) { for ( const g of this.order ) this.enter(g, { start }); return; }
+    if ( globalThis.CONFIG?.moinenMaps?.enterAtOnce ) { for ( const g of this.order ) this.enter(g, { start, ...(this.entryOptsFor?.(g) ?? {}) }); return; }
     const vw = this.view(), on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
     const list = this.order.map((g, i) => ({ g, i, on: on(g) })).sort((a, b) => (b.on - a.on) || (a.i - b.i));
-    this.enterQueue = new Map(list.map((q) => [q.g, { start }]));
+    this.enterQueue = new Map(list.map((q) => [q.g, { start, ...(this.entryOptsFor?.(q.g) ?? {}) }]));
     this.drainEnters(performance.now(), 8);
   }
 

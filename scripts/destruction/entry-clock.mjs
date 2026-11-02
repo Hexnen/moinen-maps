@@ -20,6 +20,10 @@ export const LOOK = {
 };
 
 
+/** Directional off: the radial stagger of the whole area (ms at speed 1) and the per-piece jitter (ms): a blast goes off at once. */
+export const ATONCE_MS = 36;
+export const ATONCE_JITTER = 10;
+
 /** Deterministic hash (0..1) and smooth value noise, for the entry's per-pixel and per-piece timing. */
 export function hash2(x, y, s) {
   let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(s | 0, 1274126177)) | 0;
@@ -97,8 +101,10 @@ export const plainInfo = (i) => ({ x: i.x, y: i.y, w: i.w, h: i.h, ex: i.ex, ey:
  * The clock of an entry (not a cave-in's: collapse-entry.mjs collapseClock replaces delay, reveal, band, arrive and pixelTime).
  * `info` the area's info, `hash` its hash, `o` the impact (default its epicentre), `dir` the stroke direction, `path` the followed
  * stroke, `spine` a tear's own path, `speed` the entry speed, `pathFront` (optional) the display's front of `path`.
+ * `simul`: the stroke does NOT follow its path (directional off): with no path, no direction and no tear the whole area goes off AT
+ * ONCE (ATONCE_MS of radial stagger from the epicentre, nothing that sweeps across it); `atOnce` in the result says so.
  */
-export function clockOf({ info, hash, o = null, dir = null, path = null, spine = null, speed = 1, pathFront = undefined }) {
+export function clockOf({ info, hash, o = null, dir = null, path = null, spine = null, speed = 1, pathFront = undefined, simul = false }) {
   // the cause tunes the clock on top of the kind's (cause-fx.mjs): rot creeps, lightning strikes, arcane spirals
   const CL = causeLook(info.cause);
   const L = LOOK[info.type] ?? LOOK.blast, k = (1 / (speed || 1)) * (CL?.slow ?? 1);
@@ -114,9 +120,10 @@ export function clockOf({ info, hash, o = null, dir = null, path = null, spine =
   if ( pathFront === undefined ) pathFront = pathTimes(path, k);
   // a tear has its own clock (tear-entry.mjs): a pinprick, then a fast front both ways along its spine on a narrow band
   const tear = info.type === "gash" ? tearClock(info, { pathFront, spine, k }) : null;
-  const delay = tear ? tear.delay : pathFront ? 40 * k : L.delay * k;
-  const reveal = tear ? tear.reveal : pathFront ? pathFront.D : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-  const band = tear ? tear.band : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
+  const atOnce = !!simul && !pathFront && !wipe && !tear;
+  const delay = tear ? tear.delay : pathFront ? 40 * k : atOnce ? Math.min(L.delay, 40) * k : L.delay * k;
+  const reveal = tear ? tear.reveal : pathFront ? pathFront.D : atOnce ? ATONCE_MS * k : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
+  const band = tear ? tear.band : atOnce ? 24 * k : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
   const front = (x, y) => {   // 0..1: when the front reaches (x, y)
     if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
     // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
@@ -125,6 +132,7 @@ export function clockOf({ info, hash, o = null, dir = null, path = null, spine =
   };
   // the front's arrival at a point (ms after start)
   const arrive = tear ? tear.arrive : pathFront ? (x, y) => delay + pathFront.at(x, y)
+    : atOnce ? (x, y) => delay + reveal * front(x, y)
     : CL ? (CL.curve.length > 1 ? (x, y) => delay + reveal * CL.curve(front(x, y), Math.atan2(y - oy, x - ox)) * 0.85 : (x, y) => delay + reveal * CL.curve(front(x, y)) * 0.85)   // (the angle only for a curve that reads it)
     : (x, y) => delay + reveal * Math.sqrt(front(x, y)) * 0.85;
   const seed = hash % 9973;
@@ -134,7 +142,7 @@ export function clockOf({ info, hash, o = null, dir = null, path = null, spine =
   // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
   // so the ruin and the cover of the same pixel share it)
   const pixelTime = (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
-  return { CL, L, k, ox, oy, wipe, Rmax, pathFront, tear, delay, reveal, band, front, arrive, seed, noise, pixelTime };
+  return { CL, L, k, atOnce, ox, oy, wipe, Rmax, pathFront, tear, delay, reveal, band, front, arrive, seed, noise, pixelTime };
 }
 
 /**

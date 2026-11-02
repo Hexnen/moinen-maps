@@ -207,6 +207,10 @@ function simplify(pts) {
 /** A stroke's stored brush path as [[x, y, ms], ...] (art px). */
 const unflat = (p) => { const out = []; for ( let i = 0; p && i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
 const pathOfObj = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o?.p ? unflat(o.p) : null; };
+/** Does this stroke follow its path? Its own setting (pinned scenes: the one it was painted with), else the scene's. */
+const followsPath = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return !!(o ? Pin.effP(o, S.params) : S.params).directional; };
+/** The entry options a Detonate gives an area: its stroke's own path when it follows it, otherwise everything goes off at once. */
+const entryOptsFor = (g) => { const on = followsPath(g.objId); return { simul: !on, path: on ? pathOfObj(g.objId) : null }; };
 /** The stroke objects as the bake and the display take them (their level bytes decoded, their paths as pairs). */
 const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, pr: o.pr, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
   path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
@@ -1230,7 +1234,8 @@ function playEntries(added, removed, taken, mask, first) {
     if ( b ) { const ab = artBox(b); edits = [{ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null }]; }
   }
   const flag = new Map((S.entries ?? []).map((e) => [e.h, e]));
-  const sNow = now(), pNow = performance.now(), dirOn = !!S.params.directional;
+  const sNow = now(), pNow = performance.now();
+  display.entryOptsFor = entryOptsFor;
   const fresh = new Map(taken.filter((s) => s.id).map((s) => [s.id, s]));
   for ( const g of added ) {
     const h = g.hash;
@@ -1241,11 +1246,12 @@ function playEntries(added, removed, taken, mask, first) {
     if ( g.reused || (played.has(h) && !all) ) { played.add(h); display.swap(g, under); continue; }
     played.add(h);
     const e = flag.get(h);
+    const dirOn = followsPath(g.objId) || (!g.objId && !!S.params.directional);   // (this stroke's own setting, not the scene's current one)
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
       const age = ageOf(e.t, sNow);
       if ( age > ENTRY_WINDOW ) { display.swap(g, under); continue; }
-      display.enter(g, { start: pNow + Math.max(0, -age), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under,
+      display.enter(g, { start: pNow + Math.max(0, -age), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under, simul: !dirOn,
         path: dirOn ? pathOfObj(e.p) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
       continue;
     }
@@ -1257,7 +1263,7 @@ function playEntries(added, removed, taken, mask, first) {
     const o = s0 && dirOn ? s0.a ?? null : null;
     const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
     const path = s0 && dirOn ? s0.path : null;
-    display.enter(g, { start: pNow, o, dir: d, under, path, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
+    display.enter(g, { start: pNow, o, dir: d, under, path, simul: !dirOn, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
     if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
@@ -1741,6 +1747,7 @@ export function setObjectCause(id, cause) {
   return true;
 }
 
+let lookNoticeShown = false;
 export function setParams(patch) {
   if ( !game.user.isGM ) return;
   const before = S?.params ?? Model.PARAM_DEFAULTS;
@@ -1750,6 +1757,8 @@ export function setParams(patch) {
   if ( !changed.length ) return;
   if ( !S ) ensureState();
   S.params = next;
+  // (once per session, when strokes already exist: a look setting reaches only the strokes painted from now on)
+  if ( S.params.pin && !lookNoticeShown && S.objects?.length && changed.some((k) => k !== "cause" && Pin.PIN_SET.has(k)) ) { lookNoticeShown = true; ui.notifications?.info(game.i18n.localize("MOINENMAPS.Destr.lookNewOnlyNotice")); }
   // (a scene that pins: the look settings are the strokes' own, a change reaches the strokes painted from now on - nothing bakes)
   const live = changed.every((k) => LIVE_PARAMS.has(k) || (S.params.pin && Pin.PIN_SET.has(k)));
   display?.setIdle(S.params.idle, S.params.fxWho); display?.setLook(lookOf(S.params));

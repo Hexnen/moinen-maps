@@ -2234,3 +2234,37 @@ export async function stripPng(a, times, { name = "strip", win = 150, scale = 3,
   const r = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
   return { box: [bx, by, win], times: idx.map((i) => a.frameT[i]), path: r?.path };
 }
+
+/**
+ * DIRECTION CHECK ("follows the stroke"): enters areas of the given type twice at a frozen clock - once as a stroke that does NOT
+ * follow its path (simul: true, the toggle OFF) and once with a painted path through the area, left->right and right->left (ON) - and
+ * measures the spread of the pieces' start times (g.anim.list t0, the CPU and GPU piece paths both read it). OFF must be small (all at
+ * once), ON large and ordered along the path (correlation of t0 with the piece's x: positive left->right, negative reversed).
+ * Returns { rows: [{ type, hash, pieces, off: {spread, corr}, ltr: {...}, rtl: {...} }], ok }. NOT yet run in a lane (see the commit).
+ */
+export function directionCheck({ types = ["blast", "scorch", "flood", "cracks"], per = 2, maxOff = 90, minOn = 250 } = {}) {
+  const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance);
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const rows = [];
+  const corr = (xs, ts) => { const n = xs.length, mx = xs.reduce((a, b) => a + b, 0) / n, mt = ts.reduce((a, b) => a + b, 0) / n; let sxy = 0, sxx = 0, syy = 0; for ( let i = 0; i < n; i++ ) { sxy += (xs[i] - mx) * (ts[i] - mt); sxx += (xs[i] - mx) ** 2; syy += (ts[i] - mt) ** 2; } return sxy / Math.sqrt(sxx * syy || 1); };
+  try {
+    for ( const type of types ) {
+      const gs = d.order.filter((g) => g.info.type === type && !g.dead && !g.shell && !g.atlasFree && (g.info.rect.x1 - g.info.rect.x0) > 60).slice(0, per);
+      for ( const g of gs ) {
+        const r = g.info.rect, cy = (r.y0 + r.y1) / 2, F = real(); performance.now = () => F;
+        const line = (rev) => { const P = []; const n = 24; for ( let i = 0; i <= n; i++ ) P.push([Math.round(r.x0 + (r.x1 - r.x0) * (rev ? 1 - i / n : i / n)), Math.round(cy), Math.round(i / n * 800)]); return P; };
+        const run = (opts) => {
+          d.enter(g, { start: F, ...opts }); const L = g.anim?.list ?? [];
+          const xs = L.map((it) => it.p.sx), ts = L.map((it) => it.t0 - F);
+          const res = { pieces: L.length, spread: L.length ? Math.round(Math.max(...ts) - Math.min(...ts)) : 0, corr: L.length > 2 ? +corr(xs, ts).toFixed(2) : null };
+          d.endAnim(g); return res;
+        };
+        const off = run({ simul: true }), ltr = run({ path: line(false) }), rtl = run({ path: line(true) });
+        performance.now = real;
+        rows.push({ type, hash: g.hash?.slice?.(0, 6), pieces: off.pieces, off, ltr, rtl,
+          ok: off.spread <= maxOff && ltr.spread >= minOn && rtl.spread >= minOn && ltr.corr > 0.5 && rtl.corr < -0.5 });
+      }
+    }
+  } finally { performance.now = real; T.maxFPS = mf; if ( st ) T.start(); }
+  return { rows, ok: rows.length > 0 && rows.every((q) => q.ok) };
+}
