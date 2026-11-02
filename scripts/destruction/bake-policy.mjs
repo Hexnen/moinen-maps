@@ -62,7 +62,8 @@ export const BAKE_VERSIONS = {
   50: { compat: null, note: "wood cracks with weight, banded cave-in slabs" },
   51: { compat: null, note: "cause geometry broken up (spokes, acid pits, claw streaks, moss), tear zig-zag and star irregular" },
   52: { compat: 51, note: "cave-in slabs textured: lit edge, rim-to-void gradient, seams" },
-  53: { compat: 52, note: "fire ember bed, seams and lip glow in the light sprite (day pixels unchanged)" }
+  53: { compat: 52, note: "fire ember bed, seams and lip glow in the light sprite (day pixels unchanged)" },
+  54: { compat: 53, kinds: ["cracks", "gash"], note: "soft ground: cracks open longer and show soil (dark soil heart, crumbs on the lit lip); tear depth deep soil brown, not black" }
 };
 
 /*

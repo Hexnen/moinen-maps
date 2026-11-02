@@ -551,7 +551,7 @@ export function bakeTear(X) {
     if ( toNorth < Math.min(2.5, w * 0.6) ) v -= 1.1;              // the north lip's shadow
     else if ( toNorth > m + 0.5 && m < 1.2 ) v += 0.6;             // the south slope catches light
     let c = rp[clamp(Math.floor(v + (vnoise(x / 2.5, y / 2.5, sd + 60) - 0.5) * 0.9 + bayer(x, y) - 0.5), 0, 4)];
-    if ( deep > 0.55 && dn > 0.5 ) { const k = (dn - 0.5) / 0.4 * (deep - 0.4) / 0.6, th = h2(x, y, sd + 63) * 0.5 + vnoise(x / 2, y / 2, sd + 64) * 0.5; if ( th < k ) c = pal.void; else if ( th < k + 0.18 ) c = rp[0]; }
+    if ( deep > 0.55 && dn > 0.5 ) { const k = (dn - 0.5) / 0.4 * (deep - 0.4) / 0.6, th = h2(x, y, sd + 63) * 0.5 + vnoise(x / 2, y / 2, sd + 64) * 0.5; if ( th < k ) c = (mat === "grass" || mat === "earth" || mat === "sand") ? mix(rp[1], pal.void, 0.3) : pal.void; else if ( th < k + 0.18 ) c = rp[0]; }   // (soft ground: the depth is deep soil brown, not a hole of black)
     switch ( mat ) {
       case "grass": if ( toNorth < 3 && h2(x, y >> 1, sd + 65) < 0.09 ) c = mix(pal.strata[1], rp[0], 0.4); break;   // roots
       case "snow": if ( h2(x, y, sd + 66) < 0.06 && pal.chunk ) c = pal.chunk; break;
