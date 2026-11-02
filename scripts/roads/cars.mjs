@@ -140,6 +140,7 @@ export class TrafficView {
   }
 
   tick() {
+    if ( this.build ) this.#advanceBuild();       // (the network build goes on BUILD_MS a frame until it is done)
     if ( !this.shown || !this.net || !this.T?.on || !this.net.lanes.length ) { if ( this.sim ) { this.sim = null; this.old = null; this.#hideAll(0); this.#hideAll(1); } return; }
     const t0 = performance.now();
     const t = now();
