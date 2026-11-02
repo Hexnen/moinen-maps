@@ -27,7 +27,7 @@ const enc = (s) => new TextEncoder().encode(s);
 
 /** The settings that change a bake (the scene's default cause only when it is set: a scene from before causes keeps its keys). */
 /** The scene's settings as the keys see them: a scene that pins (stroke-params.mjs) has its look settings in its strokes, so the scene's current ones are not part of any key. */
-const keyParams = (S) => S.params.pin ? { ...S.params, ...PIN_DEFAULTS } : S.params;
+const keyParams = (S) => { const { cinematic, ...P } = S.params; return S.params.pin ? { ...P, ...PIN_DEFAULTS } : P; };   // (the cinematic block is live: never part of a key)
 const pjOf = (S) => JSON.stringify(keyParams(S));
 const paramStr = (S) => { const P = keyParams(S); return Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !P.cause)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|"); };
 /** One stroke's own inputs (its path when the damage follows the stroke, or when it is a tear: the path is its spine). */

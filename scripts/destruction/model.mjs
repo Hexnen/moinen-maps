@@ -9,6 +9,7 @@ import { MODULE_ID } from "../config.mjs";
  * pixel-art standard of moinen-pixel-vfx), so the torn outline can be ragged at art-pixel scale while the mask stays small.
  */
 import { pinDiff, samePr } from "./stroke-params.mjs";
+import * as Cin from "./cinematic-core.mjs";
 export const FLAG = "destruction";
 /** The stroke objects of layout 3, one flag key per stroke: `destructionObjects.<id>` = the object (with its path), `s` its place. */
 export const OBJS = "destructionObjects";
@@ -341,6 +342,7 @@ export function cleanParams(p = {}) {
   if ( MATERIALS.includes(p.material) ) out.material = p.material;
   for ( const k of ["anim", "idle", "entry", "jagged", "directional", "pin"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
   if ( p.fxWho === "gm" || p.fxWho === "all" ) out.fxWho = p.fxWho;
+  if ( p.cinematic && typeof p.cinematic === "object" ) out.cinematic = Cin.sanitize(p.cinematic);       // (live; cinematic-core.mjs)
   out.cause = causeOf(p.cause);
   return out;
 }
