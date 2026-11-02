@@ -328,7 +328,10 @@ export class StaticCache {
     const M = this.show.parent?.worldTransform, res = this.stats.res; if ( !M ) return;
     const one = Math.abs(z / res - 1) < 0.01, a = M.a, dpr = canvas.app.renderer.resolution || 1, nearest = this.d.filter === 0;
     for ( const b of this.bands ) for ( const t of b.tiles ) {
-      t.spr.nearest = nearest && z / res > 1.5;            // magnified: the live layer's sampling (an entry frame and the rest look alike)
+      // magnified: the live layer's sampling (an entry frame and the rest look alike). An art pixel of 2+ texels is copied as a block at ANY
+      // magnification too: its texels are one colour, so only the art pixels' own edges move (by under half a screen pixel, as in the live
+      // layer's NEAREST), and the rim no longer comes out as a half-transparent LINEAR ramp where the live layer is crisp (gapCheck, zoom 1-1.5)
+      t.spr.nearest = nearest && (z / res > 1.5 || (res * this.d.ap >= 2 && !globalThis.CONFIG?.moinenMaps?.cacheLinearRim));   // (cacheLinearRim: dev knob, the old look)
       // (pixel-aligned tiles are crisper than the live layer, which sits at the pan's fractional offset like the map: 1.3x the gradient at
       // zoom 1 on "map" - off unless `CONFIG.moinenMaps.cacheAlign` is set; the resting look is the live look)
       if ( !one || !globalThis.CONFIG?.moinenMaps?.cacheAlign ) { t.spr.position.set(t.x, t.y); continue; }
