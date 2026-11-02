@@ -187,3 +187,17 @@ export function clockKeys(timeOf, mask, w, h, x0, y0, dark) {
   }
   return countSort(tm, ix, c, tmax);
 }
+
+/**
+ * A clock as bytes for the GPU erode (erode-gpu.mjs): one RG8 texel a pixel of a w x h image (rows padded to an even width, so a row
+ * is a whole number of 4-byte units whatever the upload alignment), `moment + 1` in R (low) and G (high) (0 = the pixel never comes);
+ * a moment past 65534 ms is held there. `ix`, `tm` the sorted clock (clockKeys).
+ */
+export function timeBytes(ix, tm, w, h) {
+  const tw = w + (w & 1), u8 = new Uint8Array(tw * h * 2);
+  for ( let j = 0; j < ix.length; j++ ) {
+    const v = (tm[j] > 65534 ? 65534 : tm[j]) + 1, i = ix[j], y = (i / w) | 0, q = (y * tw + i - y * w) * 2;
+    u8[q] = v & 255; u8[q + 1] = v >> 8;
+  }
+  return u8;
+}

@@ -10,8 +10,9 @@ import { perfMode, particleCap } from "../perf-mode.mjs";
 import { Debris } from "./debris.mjs";
 import { buildShell } from "./composite.mjs";
 import { PieceBatch, RectCanvas, RectLayer, batchStats } from "./piece-batch.mjs";
-import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, plainInfo, countSort, clockUpper } from "./entry-clock.mjs";
+import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, plainInfo, countSort, clockUpper, timeBytes } from "./entry-clock.mjs";
 import { ClockPool } from "./clock-pool.mjs";
+import { ErodeGPU, MAX_STAGES } from "./erode-gpu.mjs";
 
 /** Entering areas draw their pieces as one batched geometry each (piece-batch.mjs); `CONFIG.moinenMaps.noBatchRender = true`: sprites (A/B). */
 const batchOn = () => !globalThis.CONFIG?.moinenMaps?.noBatchRender;
@@ -113,6 +114,8 @@ const mixP = (r, g, b, c, t) => (Math.round(r + (((c >> 16) & 255) - r) * t) << 
  * (lutOf: per channel, the same rounded value mixP gives - byte for byte - without three closure calls per pixel).
  */
 const mx = (c, t) => ({ mix: [c, t], col: (r, g, b) => mixP(r, g, b, c, t) });
+/** A stage that picks one of two colours by a hash of the pixel (`hash`: the same pick on the GPU, erode-gpu.mjs). */
+const hx = (salt, thr, a, b) => ({ hash: [salt, thr, a, b], col: (r, g, bl, i) => (hash2(i, salt, 5) < thr ? a : b) });
 const LUTS = new Map();
 function lutOf([c, t]) {
   const key = `${c}|${t}`;
@@ -127,9 +130,9 @@ const FRONT = {
   // (the burning edge is a coherent glow band, cooling through red to char; the bright flame is the tongues - no per-pixel speckle)
   scorch:   [{ dt: 0, ...mx(0xe8742a, 0.45) }, { dt: 60, ...mx(0x9a3214, 0.42) },
              { dt: 140, ...mx(0x3a1a10, 0.35) }, { dt: 230 }],
-  flood:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 2, 5) < 0.6 ? 0xf2f8ff : 0xcfe6fa) }, { dt: 70, ...mx(0x8cc0ea, 0.6) }, { dt: 210 }],
+  flood:    [{ dt: 0, ...hx(2, 0.6, 0xf2f8ff, 0xcfe6fa) }, { dt: 70, ...mx(0x8cc0ea, 0.6) }, { dt: 210 }],
   collapse: [{ dt: 0, ...mx(0x15110e, 0.72) }, { dt: 120, ...mx(0x15110e, 0.4) }, { dt: 240 }],
-  blast:    [{ dt: 0, col: (r, g, b, i) => (hash2(i, 3, 5) < 0.5 ? 0xfff4d6 : 0xffd890) }, { dt: 50, ...mx(0xff9a48, 0.55) }, { dt: 140 }],
+  blast:    [{ dt: 0, ...hx(3, 0.5, 0xfff4d6, 0xffd890) }, { dt: 50, ...mx(0xff9a48, 0.55) }, { dt: 140 }],
   // (a crack opens dark - never a pale haze - with a rare grain of dust flashing in it)
   cracks:   [{ dt: 0, ...mx(0xe8e0d0, 0.55) }, { dt: 35, ...mx(0x0e0c0a, 0.3) }, { dt: 90 }]
 };
@@ -707,6 +710,7 @@ export class DestructionDisplay {
       const sorted = countSort(tm, ix, q.c, q.tmax ?? 0);
       q.tm = q.ix = null;
       q.R.keys = sorted.ix; q.R.tms = sorted.tm;
+      if ( q.R.gpu ) q.R.time = this.gpuErode.timeTexture(timeBytes(sorted.ix, sorted.tm, w, h), w, h);
       if ( q.R.end !== undefined ) q.R.end = q.c ? sorted.tm[q.c - 1] : 0;
       this.clocks.shift();
       this.stats.clocks = (this.stats.clocks ?? 0) + 1;
@@ -721,12 +725,13 @@ export class DestructionDisplay {
   clockJobs(list, spec, local = false) {
     if ( local || !ClockPool.available() || this.clockPool?.broken ) { this.clocks.push(...list); return; }
     const pool = this.clockPool ??= new ClockPool();
-    const jobs = list.map((q) => ({ data: q.data, w: q.w, h: q.h, x0: q.x0, y0: q.y0, dark: q.dark }));   // (the worker makes the pixel mask: clockMask)
+    const jobs = list.map((q) => ({ data: q.data, w: q.w, h: q.h, x0: q.x0, y0: q.y0, dark: q.dark, gpu: q.gpu }));   // (the worker makes the pixel mask: clockMask)
     const t = performance.now();
     pool.run(spec, jobs).then((keys) => {
       list.forEach((q, i) => {
         const a = q.g.anim; if ( q.g.dead || !a || (a.rev !== q.R && a.crev !== q.R) ) return;   // ended or replaced meanwhile
         const k = keys[i]; q.R.keys = k.ix; q.R.tms = k.tm;
+        if ( q.R.gpu ) q.R.time = this.gpuErode.timeTexture(k.tx ?? timeBytes(k.ix, k.tm, q.w, q.h), q.w, q.h);
         if ( q.R.end !== undefined ) q.R.end = k.tm.length ? k.tm[k.tm.length - 1] : 0;
         this.stats.clocks = (this.stats.clocks ?? 0) + 1;
       });
@@ -853,18 +858,26 @@ export class DestructionDisplay {
     const bd = this.baseOf(g);
     if ( bd ) {
       const bw = info.w, bh = info.h;
-      const buf = new Uint8Array(bw * bh * 4);
-      const tex = new PIXI.BaseTexture(new RowResource(buf, { width: bw, height: bh, blank: true }), {
-        width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
-        format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       const stages = coll ? coll.stages : (tear ? [{ dt: 0 }] : FRONT[info.type] ?? [{ dt: 0 }]).map((s, si) => (s.col && CL?.stain != null
-        ? { dt: s.dt * k, ...mx(CL.stain, si ? 0.3 : 0.6) } : { dt: s.dt * k, col: s.col ?? null, mix: s.mix ?? null }));
-      rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
-      g.baseSpr.texture = new PIXI.Texture(tex);
+        ? { dt: s.dt * k, ...mx(CL.stain, si ? 0.3 : 0.6) } : { dt: s.dt * k, col: s.col ?? null, mix: s.mix ?? null, hash: s.hash ?? null }));
+      const gs = coll ? null : this.gpuStages(stages);
+      if ( gs ) {
+        // GPU erode (erode-gpu.mjs): a render texture the pass fills from the atlas and the clock; no CPU buffer
+        const T = this.gpuErode.makeTarget(bw, bh, this.filter);
+        rev = { keys: null, next: 0, buf: null, data: bd, tex: T.base, rt: T.tex, gpu: gs, w: bw, h: bh, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
+        g.baseSpr.texture = T.tex;
+      } else {
+        const buf = new Uint8Array(bw * bh * 4);
+        const tex = new PIXI.BaseTexture(new RowResource(buf, { width: bw, height: bh, blank: true }), {
+          width: bw, height: bh, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+          format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
+        rev = { keys: null, next: 0, buf, data: bd, tex, w: bw, frame: g.baseSpr.texture, stages, cur: new Int32Array(stages.length) };
+        g.baseSpr.texture = new PIXI.Texture(tex);
+      }
       // PERF: a blank ruin draws nothing - not drawn (its texture not even allocated on the GPU) until its first pixel (erode)
       if ( !g.batch?.folded ) g.baseSpr.renderable = false;
       // (dark: cracks and inked lips first)
-      clockJobs.push({ g, R: rev, w: bw, h: bh, x0: info.x, y0: info.y, data: bd, timeOf: pixelTime, dark: band * 0.4, y: 0, c: 0, keys: null });
+      clockJobs.push({ g, R: rev, w: bw, h: bh, x0: info.x, y0: info.y, data: bd, timeOf: pixelTime, dark: band * 0.4, y: 0, c: 0, keys: null, gpu: !!rev.gpu });
     }
     // the cover over older strokes (the plain map under this stroke's own pixels) dissolves in on the same clock: at every pixel the
     // older damage stays until this stroke's ruin takes its place, never old -> clean map -> new
@@ -875,10 +888,17 @@ export class DestructionDisplay {
       if ( data && TW ) {
         const cd = new Uint8Array(fr.width * fr.height * 4);
         for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
-        crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true);
-        crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
+        const gs = this.gpuStages([{ dt: 0 }]);
+        if ( gs ) {
+          const T = this.gpuErode.makeTarget(fr.width, fr.height, PIXI.SCALE_MODES.NEAREST);
+          crev = { keys: null, next: 0, buf: null, data: cd, tex: T.base, rt: T.tex, gpu: gs, out: false, end: 0, w: fr.width, h: fr.height, stages: [{ dt: 0 }], cur: new Int32Array(1), fr };
+          crev.frame = pm.texture; pm.texture = T.tex;
+        } else {
+          crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true);
+          crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
+        }
         g.patch.renderable = false;      // (blank: nothing to draw until its first pixel, see erode)
-        clockJobs.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null });
+        clockJobs.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null, gpu: !!crev.gpu });
       }
     }
     // the clocks: made by the clock workers (clock-pool.mjs, the same code) or here, a slice per frame (clockSlice)
@@ -1128,14 +1148,16 @@ export class DestructionDisplay {
     if ( !g.dead ) g.reflatAt = performance.now() + 900;    // back to one sprite after the cache has settled (static-cache SETTLE_MS)
     if ( a.rev ) {
       // the ruin in full: back to its frame of the atlas
-      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; t.destroy(false); if ( !g.batch?.folded ) g.baseSpr.renderable = true; }
-      a.rev.tex.destroy();
+      if ( g.baseSpr && !g.baseSpr.destroyed ) { const t = g.baseSpr.texture; g.baseSpr.texture = a.rev.frame; if ( !a.rev.rt ) t.destroy(false); if ( !g.batch?.folded ) g.baseSpr.renderable = true; }
+      if ( a.rev.rt ) this.gpuErode?.release(a.rev.rt); else a.rev.tex.destroy();
+      a.rev.time?.destroy(); a.rev.time = null;
     }
     if ( a.crev ) {
       const pm = g.patch?.children?.[1];
-      if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; t.destroy(false); }
+      if ( pm && !pm.destroyed ) { const t = pm.texture; pm.texture = a.crev.frame; if ( !a.crev.rt ) t.destroy(false); }
       if ( g.patch && !g.patch.destroyed ) g.patch.renderable = true;
-      a.crev.tex.destroy();
+      if ( a.crev.rt ) this.gpuErode?.release(a.crev.rt); else a.crev.tex.destroy();
+      a.crev.time?.destroy(); a.crev.time = null;
     }
     for ( const f of a.fx ) if ( !f.g.destroyed ) f.g.destroy();
     for ( const p of g.pieces ) { p.fading = false; if ( !p.spr || p.spr.destroyed ) continue; this.place(p, 2, null, g.info.type); p.spr.alpha = 1; p.spr.tint = 0xFFFFFF; }
@@ -1148,8 +1170,11 @@ export class DestructionDisplay {
    * dissolving edge itself carries the dust, embers, spray or sparks. One upload per frame, only while something changed.
    */
   erode(g, a, now, onScreen, maxPx = Infinity) {
-    if ( a.crev ) { this.stepDissolve(a.crev, now - a.start); if ( a.crev.shown && g.patch && !g.patch.renderable ) g.patch.renderable = true; }
-    const R = a.rev; if ( !R || !R.keys || R.next >= R.keys.length ) return;
+    if ( a.crev?.gpu ) this.coverGpu(g, a, now);
+    else if ( a.crev ) { this.stepDissolve(a.crev, now - a.start); if ( a.crev.shown && g.patch && !g.patch.renderable ) g.patch.renderable = true; }
+    const R = a.rev;
+    if ( R?.gpu ) return this.erodeGpu(g, a, R, now, onScreen);
+    if ( !R || !R.keys || R.next >= R.keys.length ) return;
     // the FRONT's signature: a pixel passes through the kind's stages before it settles (FRONT below): burning pixels flare
     // yellow, glow orange and cool to char; water arrives as foam; a cave-in darkens as it sinks; a blast scorches pale-hot. Every
     // stage is a cursor over the same sorted clock, so the stages trail the front as bands of a fixed width in time
@@ -1219,6 +1244,87 @@ export class DestructionDisplay {
       if ( !R.shown ) { R.shown = true; if ( g.baseSpr && !g.batch?.folded ) g.baseSpr.renderable = true; }
     }
     return n;
+  }
+
+  /** The GPU erode's stage tables (erode-gpu.mjs) for a stage list, or null: the entry takes the CPU path. */
+  gpuStages(stages) {
+    if ( !ErodeGPU.supported(canvas.app?.renderer) || stages.length > MAX_STAGES ) return null;
+    const E = this.gpuErode ??= new ErodeGPU(), n = stages.length;
+    const H = new Int32Array(MAX_STAGES * 4), A = new Float32Array(MAX_STAGES * 4), B = new Float32Array(MAX_STAGES * 4);
+    for ( let s = 0; s < n; s++ ) {
+      const st = stages[s], o = s * 4;
+      if ( s === n - 1 ) { if ( st.col || st.mix ) return null; continue; }      // (the last stage is the pixel's own colour)
+      if ( st.mix ) { const row = E.rowOf(st.mix, lutOf); if ( row < 0 ) return null; H[o] = 0; H[o + 1] = row; }
+      else if ( st.hash ) {
+        const [salt, thr, a, b] = st.hash;
+        H[o] = 1; H[o + 2] = salt; H[o + 3] = Math.ceil(thr * 4294967296) | 0;
+        A[o] = (a >> 16) & 255; A[o + 1] = (a >> 8) & 255; A[o + 2] = a & 255; B[o] = (b >> 16) & 255; B[o + 1] = (b >> 8) & 255; B[o + 2] = b & 255;
+      } else return null;
+    }
+    return { n, H, A, B };
+  }
+
+  /**
+   * One GPU erode pass for a ruin (or a cover): its render texture filled for the stages at R.el. Not before the area's atlas is on the
+   * GPU (uploadAhead sends them a few a frame; a pass would upload it all at once) - true when it drew.
+   */
+  gpuFill(g, R, fr) {
+    const rd = canvas.app?.renderer, tex = g.tex;
+    if ( !rd || !R.time || !tex || tex.destroyed || !R.rt || R.rt.destroyed ) return false;
+    if ( tex._glTextures?.[rd.CONTEXT_UID]?.dirtyId !== tex.dirtyId && g.batch && !g.batch.destroyed && (R.waitN = (R.waitN | 0) + 1) < 90 ) return false;
+    const S = R.stages, lim = R.lim ??= new Float32Array(MAX_STAGES * 4);
+    for ( let s = 0; s < S.length; s++ ) {
+      // the CPU's test: sort key (moment * 2^20 + pixel) below (max(0, el - dt) + 1) * 2^20, as a whole moment and a fraction of a moment
+      const Y = Math.max(0, R.el - S[s].dt) + 1, T = Math.floor(Y);
+      lim[s * 4] = T; lim[s * 4 + 1] = (Y - T) * 1048576;
+    }
+    this.gpuErode.pass(rd, R.rt, R.gpu, lim, tex, fr, R.time);
+    this.stats.gpuErodes = (this.stats.gpuErodes ?? 0) + 1;
+    return true;
+  }
+
+  /** The cover's dissolve on the GPU (the same clock and pass as the ruin's, one stage). */
+  coverGpu(g, a, now) {
+    const D = a.crev;
+    if ( D.epoch !== this.gpuErode.epoch ) { D.epoch = this.gpuErode.epoch; if ( D.next ) { D.dirty = true; D.el = now - a.start; } }
+    if ( D.keys && D.next < D.keys.length ) {
+      const rel = now - a.start, nx = clockUpper({ ix: D.keys, tm: D.tms }, D.next, (Math.max(0, rel) + 1) * 1048576);
+      D.el = rel;
+      if ( nx !== D.next ) { D.next = nx; D.dirty = true; }
+    }
+    if ( D.dirty && this.gpuFill(g, D, D.fr) ) { D.dirty = false; D.shown = true; }
+    if ( D.shown && g.patch && !g.patch.renderable ) g.patch.renderable = true;
+  }
+
+  /**
+   * Erode the ruin on the GPU: only the cursors move here (binary searches over the sorted clock: the edge's particles and the entry's
+   * end need them); the pixels are the pass's (gpuFill). Pixels are shown at the moment they are due - there is no catching-up budget.
+   */
+  erodeGpu(g, a, R, now, onScreen) {
+    if ( !R.keys ) return 0;
+    if ( R.epoch !== this.gpuErode.epoch ) { R.epoch = this.gpuErode.epoch; if ( R.next ) R.dirty = true; }     // (a lost context: filled again)
+    const S = R.stages, last = S.length - 1, N = R.keys.length, el = now - a.start;
+    if ( R.next < N ) {
+      const keys = R.keys, nc = R.nc ??= new Float64Array(S.length), CK = { ix: keys, tm: R.tms };
+      const every = Math.max(9, Math.round(N / 140)), shedMax = a.type === "scorch" ? 2 : a.type === "flood" ? 1 : 4;
+      let moved = false, shed = 0;
+      for ( let s = 0; s <= last; s++ ) { nc[s] = clockUpper(CK, R.cur[s], (Math.max(0, el - S[s].dt) + 1) * 1048576); if ( nc[s] !== R.cur[s] ) moved = true; }
+      // the edge's particles: pixels passing the first stage at every `every`-th place of the clock (as the CPU path)
+      if ( onScreen ) for ( let j = Math.ceil(R.cur[0] / every) * every; j < nc[0] && shed < shedMax; j += every ) {
+        shed++; const i = keys[j]; this.edgeParticle(g, a, g.info.x + (i % R.w), g.info.y + Math.floor(i / R.w), now);
+      }
+      for ( let s = 0; s <= last; s++ ) R.cur[s] = nc[s];
+      R.next = R.cur[last];
+      if ( moved ) R.dirty = true;
+    }
+    if ( R.dirty ) {
+      R.el = el;
+      if ( this.gpuFill(g, R, R.frame.frame) ) {
+        R.dirty = false;
+        if ( !R.shown ) { R.shown = true; if ( g.baseSpr && !g.batch?.folded ) g.baseSpr.renderable = true; }
+      }
+    }
+    return 0;
   }
 
   /** What the dissolving edge sheds, by type. */
@@ -1823,6 +1929,7 @@ export class DestructionDisplay {
     this.clockPool?.destroy(); this.clockPool = null;
     Cause.disposeLights(this);
     this.clear();
+    this.gpuErode?.destroy(); this.gpuErode = null;
     this.debris?.destroy(); this.debris = null;
     this.cache?.destroy(); this.cache = null;
     for ( const sp of [...this.spritePool, ...(this._flatPool ?? []), this._flatBase] ) if ( sp && !sp.destroyed ) sp.destroy();
