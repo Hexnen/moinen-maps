@@ -98,6 +98,8 @@ class Carry {
     if ( this.hit ) this.real = false;                        // (only the carried token's Carry moves documents)
     this.lastEl = -1e9; this.lastDust = 0; this.started = false; this.landed = false;
     this.root = null; this.em = null;
+    this.tag = `carry:${this.objId}`;
+    Front.hold(this.doc.id, this.tag, this.hit ? C.RANK_PUSHED : C.RANK_CARRIER);   // above every layer of the destruction (and the editor's overlay) for the whole carry; the carrier above the tokens it pushes, those above all others
     if ( this.visual ) {
       Hooks.callAll("moinenMapsTokenFxBusy", token);        // an idle pose of tokens/fx.mjs lets go first (restoreExact)
       claimToken(token);
@@ -105,8 +107,6 @@ class Carry {
       this.root = new PIXI.Container(); this.root.eventMode = "none"; sortNextTo(this.root, token, 2);
       this.em = new Emitter(this.root);
     }
-    this.tag = `carry:${this.objId}`;
-    Front.hold(this.doc.id, this.tag);                      // above every layer of the destruction (and the editor's overlay) for the whole carry
     Front.release(this.doc.id, "grab");                     // (the editor held it from the press)
     ACTIVE.set(token, this);
     startTicker();

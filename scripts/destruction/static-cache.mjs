@@ -149,7 +149,7 @@ void main() {
  * in the last phase of a zoom-out); a phase-independent kernel while it moves, crisp again when it stands still.
  */
 let zoomSoft = 0;
-const SOFT_MS = 220;
+const SOFT_MS = 80;                                      // (was 220: the user found the wait after a zoom too long; CONFIG.moinenMaps.softMs to try others)
 // the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
 // "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
 const SOFT_TAP = 0.35, SOFT_BIAS = 0.5;
@@ -311,7 +311,7 @@ export class StaticCache {
     { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
       if ( this.lastScale && Math.abs(sc / this.lastScale - 1) > 1e-5 ) this.movedAt = t;
       this.lastScale = sc;
-      zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / SOFT_MS) : 0; }
+      zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / (globalThis.CONFIG?.moinenMaps?.softMs ?? SOFT_MS)) : 0; }
     const d = this.d, kids = d.live.children, sr = canvas.dimensions?.sceneRect, R = canvas.app?.renderer;
     if ( !cacheEnabled() || !kids.length || !sr || !R ) return this.allLive("off");
     const same = this.fingerprint(kids, sr);

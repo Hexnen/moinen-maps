@@ -13,7 +13,9 @@
 //   3  superhero OFF: no hit, nothing in the row moves at all;
 //   4  'returns': the pile rides and every token is back, no document moves;
 //   5  locked and hidden tokens are not pushed; a token a user is dragging and one that is controlled are handled;
-//   6  snap: finals are on distinct cells; 7 idle: nothing runs.
+//   6  snap: finals are on distinct cells; 7 idle: nothing runs;
+//   8  ORDER: the carrier draws over every pushed token (their sort set higher on purpose), those over the untouched tokens (scene graph + pixels, every
+//      step of a frozen clock); keys back afterwards.  superCheck({ negative: true }) lowers the carrier on purpose: the order rows must then FAIL.
 const MODULE = "moinen-maps";
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 const D = () => game.modules.get(MODULE).api.destruction;
@@ -122,7 +124,84 @@ async function ensureTokens(n, made) {
   await sleep(600);
 }
 
-export async function superCheck() {
+
+/** Foundry's primary draw order of two meshes: does `a` draw over `b`? (elevation, sortLayer, sort) */
+const keyOver = (a, b) => { const x = [a.elevation ?? 0, a.sortLayer ?? 0, a.sort ?? 0], y = [b.elevation ?? 0, b.sortLayer ?? 0, b.sort ?? 0]; for ( let i = 0; i < 3; i++ ) if ( x[i] !== y[i] ) return x[i] > y[i]; return false; };
+
+/**
+ * THE CARRIER IS ALWAYS IN FRONT OF WHAT IT PUSHES. The pushed tokens' own `sort` is set HIGHER than the carrier's on purpose (and the tokens
+ * left alone higher still). The clock is frozen and stepped through the whole plough and after it; in every step
+ *   - scene graph: the carrier's mesh sorts and draws after every pushed mesh, those after every other token's mesh and after the destruction
+ *     (keys and indices in the sorted primary group);
+ *   - pixels: nothing of the pushed tokens covers the carrier's pixels (the pixels the carrier covers are the same with the pushed meshes hidden),
+ *     measured on frames where the pushed meshes really overlap the carrier's box (non-vacuous);
+ * afterwards every mesh has its own keys back. `negative` lowers the carrier to the tokens' layer after each step: both tests must then FAIL.
+ */
+async function frontPushed(M, tokens, rest, { negative = false, steps = 60 } = {}) {
+  const { B, K } = M, d = D(), CC = await import(`/modules/${MODULE}/dev/carry-check.mjs`);
+  const F = await import(`/modules/${MODULE}/scripts/tokens/carry-front.mjs`), { graphOrder, pixelFront, destructionRoots } = CC._front;
+  const carrier = tokens[0], rowT = tokens.slice(1), G = canvas.grid.size, R = canvas.dimensions.sceneRect, out = [];
+  const sorts = new Map(canvas.tokens.placeables.map((t) => [t.document.id, t.document.sort]));
+  await canvas.scene.updateEmbeddedDocuments("Token", [{ _id: carrier.document.id, sort: 0 }, ...rowT.map((t, i) => ({ _id: t.document.id, sort: 1000 + 10 * i })), ...rest.map((t) => ({ _id: t.document.id, sort: 5000 }))], { animate: false, diff: false });
+  await sleep(300);
+  const keys0 = new Map(canvas.tokens.placeables.map((t) => [t.document.id, [t.mesh.elevation, t.mesh.sortLayer, t.mesh.sort]]));
+  await prep(); const { c } = await layout(carrier, rowT, G, R);
+  const before = new Set(strokes().map((o) => o.id));
+  await B.drive(line(c, { x: c.x + 15 * G, y: c.y }, 50), { dt: 14, ctrl: true });
+  await wait(() => strokes().some((o) => !before.has(o.id)), 3000);
+  const o = strokes().find((q) => !before.has(q.id)), hits = o?.tk?.hit ?? [];
+  let a = null; await wait(() => { const g = d.display()?.order.find((q) => q.objId === o?.id && q.anim?.path); a = g?.anim ?? null; return !!a; }, 12000, 10);
+  const tag = negative ? "NEGATIVE: " : "";
+  if ( !a || hits.length < 3 ) return [row(tag + "ordering: a plough with >= 3 pushed tokens is running", false, { hits: hits.length, a: !!a })];
+  const pushed = hits.map((h) => canvas.tokens.get(h.id)), t0 = a.start + a.delay, D_ = a.path.D;
+  const T = canvas.app.ticker, real = performance.now.bind(performance), mf = T.maxFPS, was = T.started;
+  const bad = [], px = []; let frames = 0, overlap = 0, covered = 0, maskMax = 0, maxRank = 0;
+  T.maxFPS = 0; T.stop();
+  try {
+    for ( let i = 0; i < steps; i++ ) {
+      const el = Math.round(-100 + (D_ + 1600) * i / (steps - 1)), Ft = t0 + el;
+      performance.now = () => Ft; T.update(Ft);
+      if ( negative ) { carrier.mesh.sortLayer = 700; carrier.mesh.sort = 0; canvas.primary.sortDirty = true; }
+      await sleep(25);
+      const holds = F._frontState().holds.map((h) => h[0]);
+      if ( !holds.includes(carrier.document.id) || !pushed.every((t) => holds.includes(t.document.id)) ) continue;   // (before the plough starts / after the hold)
+      graphOrder(carrier, []);                                 // (sorts the group; the indices are read below)
+      const ch = canvas.primary.children, ic = ch.indexOf(carrier.mesh), ip = pushed.map((t) => ch.indexOf(t.mesh)), ir = rest.map((t) => ch.indexOf(t.mesh));
+      const why = [];
+      for ( const [j, t] of pushed.entries() ) {
+        if ( !keyOver(carrier.mesh, t.mesh) ) why.push(["key: pushed over carrier", t.document.name, t.mesh.sortLayer, t.mesh.sort]);
+        if ( ip[j] > ic ) why.push(["index: pushed above carrier", t.document.name, ip[j], ic]);
+        for ( const [k, r] of rest.entries() ) if ( ip[j] < ir[k] || !keyOver(t.mesh, r.mesh) ) why.push(["pushed under an untouched token", t.document.name, r.document.name]);
+      }
+      for ( const [k, r] of rest.entries() ) if ( !keyOver(carrier.mesh, r.mesh) || ic < ir[k] ) why.push(["carrier under an untouched token", r.document.name]);
+      for ( const r of destructionRoots() ) { const i2 = ch.indexOf(r); if ( i2 > Math.min(ic, ...ip) ) why.push(["destruction above a token", i2]); }
+      for ( const t of [carrier, ...pushed] ) maxRank = Math.max(maxRank, t.mesh.sortLayer - 700);
+      if ( why.length ) bad.push({ el, why: why[0] });
+      const cb = carrier.mesh.getBounds(), ov = pushed.some((t) => { const b = t.mesh.getBounds(); return Math.min(cb.right, b.right) - Math.max(cb.left, b.left) > 6 && Math.min(cb.bottom, b.bottom) - Math.max(cb.top, b.top) > 6; });
+      if ( ov ) {
+        overlap++;
+        const p = pixelFront(carrier, [], pushed.map((t) => t.mesh)); covered = Math.max(covered, p.covered); maskMax = Math.max(maskMax, p.mask);
+        if ( p.covered > Math.max(8, p.mask * 0.01) ) px.push({ el, covered: p.covered, mask: p.mask });
+      }
+      frames++;
+    }
+    const Fe = t0 + D_ + 9000; performance.now = () => Fe; T.update(Fe);
+  } finally { performance.now = real; T.maxFPS = mf; if ( was ) T.start(); }
+  out.push(row(tag + `ordering, scene graph: the carrier sorts and draws over ${hits.length} pushed tokens (whose sort is higher), those over the untouched tokens and the destruction (${frames} steps)`, frames > steps * 0.4 && bad.length === 0, { frames, bad: bad.slice(0, 2) }));
+  out.push(row(tag + `ordering, pixels: no pushed token covers the carrier's pixels (${overlap} steps where they overlap)`, overlap >= 5 && maskMax > 400 && px.length === 0, { overlap, covered, maskMax, px: px.slice(0, 3) }));
+  if ( !negative ) {
+    await wait(() => K._carryStats().active === 0, 8000); await sleep(1100);
+    const st = F._frontState();
+    const same = canvas.tokens.placeables.every((t) => { const k = keys0.get(t.document.id), n = [t.mesh.elevation, t.mesh.sortLayer, t.mesh.sort]; return k && k.every((v, i) => v === n[i]); });
+    out.push(row("ordering: afterwards every mesh has its own keys back (elevation, layer, sort), nothing is held", same && st.holds.length === 0 && !st.under && st.pending === 0, { st, now: tokens.map((t) => [t.mesh.sortLayer, t.mesh.sort]) }));
+    out.push(row("ordering: the pushed meshes were lifted one step, the carrier two (elevation untouched)", maxRank === 2 && tokens.every((t) => t.mesh.elevation === keys0.get(t.document.id)[0]), { maxRank }));
+  }
+  key("keydown", { key: "z", ctrlKey: true }); await sleep(900);
+  await canvas.scene.updateEmbeddedDocuments("Token", [...sorts].filter(([id]) => canvas.scene.tokens.has(id)).map(([id, sort]) => ({ _id: id, sort })), { animate: false, diff: false });
+  return out;
+}
+
+export async function superCheck({ negative = false } = {}) {
   const M = await mods(), { K } = M, d = D();
   const rows = [], made = [];
   const upd = watchUpdates();
@@ -231,6 +310,11 @@ export async function superCheck() {
     rows.push(row("snap: pushed tokens end on distinct grid cells (and the ones left alone do not share one)", h7.length >= 3 && new Set(cells).size === cells.length && h7.every((h) => (h.x1 - R.x) % G === 0 && (h.y1 - R.y) % G === 0) && clashes(tokens).length === 0, { cells }));
     key("keydown", { key: "z", ctrlKey: true }); await sleep(900);
 
+    /* 8 the carrier is ALWAYS in front of what it pushes (the pushed tokens' sorts deliberately higher), then the negative control */
+    await prep(); await layout(carrier, rowT, G, R);
+    rows.push(...await frontPushed(M, tokens, rest));
+    if ( negative ) { await prep(); await layout(carrier, rowT, G, R); rows.push(...await frontPushed(M, tokens, rest, { negative: true })); }
+
     /* 7 idle */
     await prep(); await layout(carrier, rowT, G, R);
     await sleep(600);
@@ -300,6 +384,24 @@ export async function superStrip({ name = "plough", n = 10, size = 0.62, count =
 export function superWatch() {
   const tokens = canvas.tokens.placeables, K = import(`/modules/${MODULE}/scripts/tokens/carry.mjs`);
   const s = sampler(tokens), w = window.__superWatch = { s, ids: tokens.map((t) => t.document.id), homes: tokens.map(cen), K };
+  // the draw order, every frame: of the tokens that moved this frame the carrier (the one the others are pushed by) must sort over the pushed ones
+  const ord = w.ord = { frames: 0, held: 0, bad: [], maxSortLayer: 0, minSortLayer: 1e9, ids: w.ids }; let on = true; w.ordStop = () => { on = false; };
+  const check = () => {
+    if ( !on ) return;
+    const ms = tokens.map((t) => t.mesh), moved = ms.map((m, i) => !!m && !m.destroyed && Math.hypot(m.position.x - w.homes[i].x, m.position.y - w.homes[i].y) > 3);
+    ord.frames++;
+    if ( moved.some(Boolean) ) {
+      const lift = ms.map((m) => (m?.sortLayer ?? 0) - 700), ci = lift.indexOf(Math.max(...lift));      // the carrier is the most lifted
+      if ( lift[ci] === 2 ) {
+        ord.held++;
+        ms.forEach((m, i) => { if ( i !== ci && moved[i] && !keyOver(ms[ci], m) ) ord.bad.push({ i, ci, a: [ms[ci].sortLayer, ms[ci].sort], b: [m.sortLayer, m.sort] }); });
+        ms.forEach((m, i) => { if ( i !== ci && lift[i] === 1 ) ms.forEach((q, j) => { if ( j !== ci && lift[j] === 0 && !keyOver(m, q) ) ord.bad.push({ pushedUnder: i, other: j }); }); });
+      }
+      for ( const l of lift ) { ord.maxSortLayer = Math.max(ord.maxSortLayer, l); ord.minSortLayer = Math.min(ord.minSortLayer, l); }
+    }
+    requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
   return { watching: tokens.length, user: game.user.name, gm: game.user.isGM };
 }
 
@@ -320,7 +422,9 @@ export async function superWatchReport() {
     let step = 0; for ( let j = 1; j < w.s.rows.length; j++ ) { const a = w.s.rows[j - 1].p[ci], b = w.s.rows[j].p[ci]; if ( Number.isFinite(a[0]) && Number.isFinite(b[0]) ) step = Math.max(step, Math.hypot(b[0] - a[0], b[1] - a[1])); }
     out.carrierMaxStep = Math.round(step);
   }
-  out.ok = !!o && hits.length >= 3 && K._carryStats().active === 0 && out.carrierMaxStep < canvas.grid.size * 3 && out.rows.every((r) => r.maxStep < canvas.grid.size * 3) && out.rows.every((r) => r.moved > 8 && r.minAhead >= tokens[0].w - canvas.grid.size * 0.45 && r.atFinal && r.meshOnDoc);
+  w.ordStop?.(); const ord = w.ord;
+  out.order = { frames: ord.frames, held: ord.held, bad: ord.bad.slice(0, 3), maxLift: ord.maxSortLayer, sortsRaised: tokens.map((t) => t.document.sort), keysBack: tokens.every((t) => t.mesh.sortLayer === 700) };
+  out.ok = !!o && hits.length >= 3 && K._carryStats().active === 0 && out.carrierMaxStep < canvas.grid.size * 3 && out.rows.every((r) => r.maxStep < canvas.grid.size * 3) && ord.held > 20 && ord.bad.length === 0 && out.order.keysBack && ord.maxSortLayer === 2 && out.rows.every((r) => r.moved > 8 && r.minAhead >= tokens[0].w - canvas.grid.size * 0.45 && r.atFinal && r.meshOnDoc);
   return out;
 }
 
@@ -332,9 +436,10 @@ export async function superSetup({ snap = false } = {}) {
   await ensureTokens(5, made);
   const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5);
   const G = canvas.grid.size, R = canvas.dimensions.sceneRect;
-  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y }));
+  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y, sort: t.document.sort }));
   const rest = canvas.tokens.placeables.filter((t) => t !== carrier && !rowT.includes(t));
   for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
+  await canvas.scene.updateEmbeddedDocuments("Token", [{ _id: carrier.document.id, sort: 0 }, ...rowT.map((t, i) => ({ _id: t.document.id, sort: 1000 + 10 * i })), ...rest.map((t) => ({ _id: t.document.id, sort: 5000 }))], { animate: false, diff: false });   // (the pushed tokens sort HIGHER than the carrier)
   await prep({ snap }); const { c } = await layout(carrier, rowT, G, R);
   window.__sup = { M, made, saved, carrier, rowT, G, c, tokens: [carrier, ...rowT] };
   return { carrier: carrier.document.name, row: rowT.map((t) => t.document.name) };

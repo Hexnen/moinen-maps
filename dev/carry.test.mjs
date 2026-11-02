@@ -153,6 +153,21 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
     "front: the editor's overlay and cursor lie over the destruction and under every token (elevation 0 and above)");
   check(!C.drawsOver(T, T) && C.drawsOver({ elevation: 1 }, { elevation: 0, sortLayer: 9999 }) && C.drawsOver({ sortLayer: 2 }, { sortLayer: 1, sort: 9 }), "front: the comparator is Foundry's (elevation, then sortLayer, then sort)");
 
+
+  // the ORDER RULE with pushed tokens: the carrier over every pushed token, those over every other token, whatever their `sort`
+  {
+    const norm = (sort, sl = 700, el = 0) => ({ elevation: el, sortLayer: sl, sort });
+    const rk = (k, r) => C.frontKeys(k, r);
+    for ( const [name, sc, sp, so] of [["equal sorts", 5, 5, 5], ["the carrier's sort lowest", 0, 50, 9], ["the carrier's sort highest", 90, 4, 7], ["inverted sorts", 1, 1000, 100000]] ) {
+      const car = rk(norm(sc), C.RANK_CARRIER), pu = [0, 1, 2].map((i) => rk(norm(sp + i * 11 - 11), C.RANK_PUSHED)), other = norm(so);
+      check(pu.every((p) => C.drawsOver(car, p) && !C.drawsOver(p, car)), `rank: ${name}: the carrier draws over every one of three pushed tokens`);
+      check(pu.every((p) => C.drawsOver(p, other)) && C.drawsOver(car, other), `rank: ${name}: pushed tokens and the carrier draw over every other token`);
+      check(layers.every((l) => pu.every((p) => C.drawsOver(p, l)) && C.drawsOver(car, l)) && pu.every((p) => C.drawsOver(p, C.OVER_KEYS)), `rank: ${name}: all of them over the destruction and the editor overlay`);
+    }
+    check(rk(norm(3, 100), 0).sortLayer === 700 && rk(norm(3, 700), 2).sortLayer === 702 && rk({}, 1).sortLayer === 701 && rk(norm(3), -4).sortLayer === 700, "rank: a plain token keeps the tokens' layer, ranks lift by whole steps, a bad rank is 0");
+    check(rk(norm(3, 700, 5), C.RANK_PUSHED).elevation === 5 && rk(norm(3), 2).sort === 3, "rank: elevation and sort are never touched");
+  }
+
   // the hold, with a stubbed canvas and clock
   let now = 1000;
   const realNow = performance.now.bind(performance); performance.now = () => now;
@@ -164,10 +179,10 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
   const a = mk("a"), b = mk("b", 700);
   const step = (ms) => { now += ms; for ( const f of [...listeners] ) f(); };
   F.hold("a", "grab");
-  check(a.mesh.sortLayer === 700 && canvas.primary.sortDirty && unders.at(-1) === true, "front: a hold gives the mesh the tokens' layer and puts the overlay under the tokens");
+  check(a.mesh.sortLayer === 700 + C.RANK_CARRIER && canvas.primary.sortDirty && unders.at(-1) === true, "front: a hold gives the mesh the tokens' layer and puts the overlay under the tokens");
   F.hold("a", "carry:1"); F.release("a", "grab");
   check(F._frontState().holds.length === 1 && unders.at(-1) === true, "front: the carry takes the hold over from the grab with no gap");
-  a.mesh.sortLayer = 100; F.onRefresh(a); check(a.mesh.sortLayer === 700, "front: Foundry's refresh resets the mesh, the refresh hook gives the keys back");
+  a.mesh.sortLayer = 100; F.onRefresh(a); check(a.mesh.sortLayer === 700 + C.RANK_CARRIER, "front: Foundry's refresh resets the mesh, the refresh hook gives the keys back");
   b.mesh.sortLayer = 650; F.onRefresh(b); check(b.mesh.sortLayer === 650, "front: a token that is not held is never touched");
   let live = true;
   F.release("a", "carry:1", 300, () => live);
@@ -182,6 +197,26 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
   check(F._frontState().holds.length === 0, "front: a release never waits longer than MAX_WAIT_MS for an entry that does not end");
   F.hold("a", "x"); F.release("a", "x", 500); F.clear();
   check(F._frontState().holds.length === 0 && F._frontState().pending === 0 && listeners.size === 0 && unders.at(-1) === false, "front: clear (the scene goes away) lets go of everything");
+
+  // hold with ranks: a carrier and three pushed tokens whose own sorts are HIGHER than the carrier's
+  {
+    const car = mk("car"), ps = ["p1", "p2", "p3"].map((id) => mk(id)), plain = mk("plain");
+    car.mesh.sort = 1; ps.forEach((p, i) => { p.mesh.sort = 50 + i; p.mesh.sortLayer = 700; }); car.mesh.sortLayer = 700; plain.mesh.sort = 999; plain.mesh.sortLayer = 700;
+    const key = (t) => [t.mesh.elevation, t.mesh.sortLayer, t.mesh.sort];
+    const over = (x, y) => C.drawsOver({ elevation: x.mesh.elevation, sortLayer: x.mesh.sortLayer, sort: x.mesh.sort }, { elevation: y.mesh.elevation, sortLayer: y.mesh.sortLayer, sort: y.mesh.sort });
+    F.hold("car", "carry:s", C.RANK_CARRIER);
+    for ( const p of ps ) F.hold(p.document.id, "carry:s", C.RANK_PUSHED);
+    check(ps.every((p) => over(car, p) && !over(p, car)) && ps.every((p) => over(p, plain)) && over(car, plain), "rank hold: the carrier over three pushed tokens with higher sorts, those over a plain token with the highest sort");
+    check(key(plain)[1] === 700 && plain.mesh.sort === 999, "rank hold: a plain token keeps its keys");
+    ps.forEach((p) => { p.mesh.sortLayer = 700; F.onRefresh(p); }); car.mesh.sortLayer = 700; F.onRefresh(car);
+    check(ps.every((p) => over(car, p)) && ps.every((p) => p.mesh.sortLayer === 701) && car.mesh.sortLayer === 702, "rank hold: Foundry's refresh resets, the keys come back exactly (no compounding after repeated refreshes)");
+    for ( let i = 0; i < 5; i++ ) { F.onRefresh(car); F.hold("car", "carry:s", C.RANK_CARRIER); }
+    check(car.mesh.sortLayer === 702, "rank hold: re-enforcing never compounds");
+    F.hold("p1", "grab", C.RANK_CARRIER); check(ps[0].mesh.sortLayer === 702, "rank hold: the highest rank of a token's holds wins");
+    F.release("p1", "grab"); check(ps[0].mesh.sortLayer === 701, "rank hold: ... and a released hold drops back to the next one");
+    for ( const p of ps ) F.release(p.document.id, "carry:s"); F.release("car", "carry:s");
+    check(F._frontState().holds.length === 0 && ps.every((p) => p.mesh.sortLayer === 700) && car.mesh.sortLayer === 700 && car.mesh.sort === 1 && ps[2].mesh.sort === 52, "rank hold: all released: every mesh has its own layer and sort back");
+  }
   const idle = JSON.stringify(F._frontState()); F.onRefresh(a); check(JSON.stringify(F._frontState()) === idle && listeners.size === 0, "front: idle - nothing held, no listener, a token refresh costs one lookup");
   performance.now = realNow;
 }

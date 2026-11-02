@@ -188,7 +188,7 @@ export async function carryCheck() {
   } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 400) })); }
   finally {
     try { await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "carryEnds", "real"); } catch { /* ignore */ }
-    try { await doc.update({ x: origin.x, y: origin.y }, { animate: false, diff: false }); for ( const o of others ) await o.doc.update({ x: o.x, y: o.y }, { animate: false, diff: false }); } catch { /* ignore */ }
+    try { await doc.update({ x: origin.x, y: origin.y }, { animate: false, diff: false }); for ( const o of others ) await o.doc.update({ x: o.x, y: o.y, sort: o.sort }, { animate: false, diff: false }); } catch { /* ignore */ }
     Hooks.off("updateToken", hook); d.clear(); d.deactivate();
   }
   return { ok: rows.every((r) => r.ok), rows };
@@ -266,6 +266,8 @@ function graphOrder(token, ui = []) {
   for ( const r of destructionRoots() ) { const i = ch.indexOf(r); if ( i < 0 || i > im ) bad.push(["destruction root above/out of the group", r.sortLayer, i, im]); }
   for ( const o of ui ) { const i = ch.indexOf(o); if ( i < 0 || i > im ) bad.push(["editor overlay/cursor above the token", o.constructor.name, i, im]); }
   // everything that sorts below the mesh by its keys must also draw before it (a stale sort order would break this)
+  // the carried token also draws over every OTHER token, whatever its `sort` (the order rule of carry-core frontKeys)
+  for ( const t of canvas.tokens.placeables ) { const o = t.mesh; if ( !o || o === m || o.destroyed ) continue; const i = ch.indexOf(o); if ( i > im || less(m, o) || !less(o, m) ) bad.push(["another token draws over the carried one", t.document.name, o.sortLayer, o.sort, i, im]); }
   ch.forEach((c, i) => { if ( c !== m && i > im && less(c, m) ) bad.push(["sorted below, drawn above", c.constructor.name, c.sortLayer, i, im]); });
   return { im, n: ch.length, bad };
 }
@@ -326,14 +328,14 @@ export async function carryFrontCheck({ steps = 60, legs = 6, dt = 14, negative 
   if ( !token ) return { ok: false, rows: [row("a token to carry", false)] };
   const doc = token.document, R = canvas.dimensions.sceneRect;
   const home = { x: Math.round(R.x + R.width * 0.1), y: Math.round(R.y + R.height * 0.45) };
-  const others = canvas.tokens.placeables.filter((t) => t !== token).map((t) => ({ t, doc: t.document, x: t.document.x, y: t.document.y }));
+  const others = canvas.tokens.placeables.filter((t) => t !== token).map((t) => ({ t, doc: t.document, x: t.document.x, y: t.document.y, sort: t.document.sort }));
   const origin = { x: doc.x, y: doc.y, elevation: doc.elevation };
   const keysOf = (t) => ({ e: t.mesh.elevation, l: t.mesh.sortLayer, s: t.mesh.sort });
   const same = (a, b) => a.e === b.e && a.l === b.l && a.s === b.s;
   const T = canvas.app.ticker, real = performance.now.bind(performance), mf = T.maxFPS, was = T.started;
   const saved = [], report = {};
   try {
-    for ( const [i, o] of others.entries() ) await o.doc.update({ x: Math.round(R.x + R.width - 100), y: Math.round(R.y + 60 + i * 120) }, { animate: false, diff: false });
+    for ( const [i, o] of others.entries() ) await o.doc.update({ x: Math.round(R.x + R.width - 100), y: Math.round(R.y + 60 + i * 120), sort: 5000 + i }, { animate: false, diff: false });   // (their sort is HIGHER than the carried token's: it still draws over them)
     // the clock frozen and stepped through the entry of `o` (its running area `a`) and a while after it
     const observe = async (tag, a, o, ko, key) => {
       const t0 = a.start + a.delay, D_ = a.path.D, bad = [], px = [], moved = [];
