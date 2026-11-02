@@ -496,7 +496,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           if ( plain || !overSubstrate(sprites) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
           // a plain look is the stroke's final look when it reads nothing
           if ( plain && w.deps.length ) continue;
-          recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, ver: CORE_VERSION, sprites }); waitingSince.delete(w.rk);
+          recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, ver: CORE_VERSION, sprites, baked: true }); waitingSince.delete(w.rk);
         }
         status.stats = res.stats;
       };
@@ -1254,10 +1254,10 @@ async function persistOnce() {
     if ( o.k ) continue;
     const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
     if ( !r ) return;                                // should not happen once complete; a later run publishes
-    const e = same ? Store.entryOf(M, o.id) : null;
-    if ( e?.sig === sig && !((r.ver ?? -1) > (e.ver ?? -1) && r.id !== e.id) ) c[o.id] = Policy.entryString(sig, e.id, e.ver);
-    else if ( r.id && Net.known(dir).has(r.id) ) c[o.id] = Policy.entryString(sig, r.id, r.ver ?? CORE_VERSION);
-    else todo.push({ o, sig, r });
+    const e = same ? Store.entryOf(M, o.id) : null, pick = Policy.entryChoice(e, sig, r, (id) => Net.known(dir).has(id));
+    if ( pick.keep ) c[o.id] = Policy.entryString(sig, e.id, e.ver);
+    else if ( pick.use ) c[o.id] = Policy.entryString(sig, pick.use.id, pick.use.ver ?? CORE_VERSION);
+    else todo.push({ o, sig, r, same: pick.encode, e });
   }
   const stale = M ? Object.keys(M.c).filter((id) => !(id in c) && !todo.some((q) => q.o.id === id)) : [];
   if ( !todo.length && same && !stale.length && Object.keys(c).every((id) => M.c[id] === c[id]) && M.key === key ) return;
@@ -1276,11 +1276,12 @@ async function persistOnce() {
       for ( const q of todo ) {
         const e = byKey.get(q.o.id);
         q.r.id = e.id; q.r.dir = dir;
-        c[q.o.id] = Policy.entryString(q.sig, e.id, q.r.ver ?? CORE_VERSION);
+        // a bake that came out as the very bytes of the entry's chunk (the usual Rebake all of a stroke nothing changed under): the entry stays
         Net.keep(e.id, e.bytes, { F: META_FIELDS, sprites: q.r.sprites });
+        c[q.o.id] = q.same && e.id === q.same ? Policy.entryString(q.sig, q.e.id, q.e.ver) : Policy.entryString(q.sig, e.id, q.r.ver ?? CORE_VERSION);
       }
       const t2 = performance.now();
-      await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));
+      await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));   // (only what the server lacks: a chunk the entry names that is gone is put back too)
       status.perf.upload = Math.round(performance.now() - t2);
     }
     if ( my !== gen || !S ) return;
