@@ -264,6 +264,7 @@ function attachHalos() {
 function sigOf(d, cfg) { return JSON.stringify([d.rings, d.id, cfg.style, cfg.warmth, cfg.color, cfg.density, cfg.size, cfg.switching, canvas.grid.size]); }
 
 function destroyEntry(e) {
+  if ( e.job ) { e.job.dead = true; const k = JOBS.indexOf(e.job); if ( k >= 0 ) JOBS.splice(k, 1); }
   e.core.destroy({ children: true }); e.halo.destroy({ children: true });
 }
 
@@ -280,44 +281,121 @@ const pc = (n, blend) => {
   return c;
 };
 
-function buildEntry(e, d, cfg) {
-  for ( const c of e.core.removeChildren() ) c.destroy({ children: true });
-  for ( const c of e.halo.removeChildren() ) c.destroy({ children: true });
+/**
+ * Build a district's lights over frames (PERF, round 2): a generator that yields every CHUNK lights, so a driver (pump) can spend ~BUILD_MS
+ * of a frame on it - the 5 synthetic districts (4888 lights) took 24-33 ms in one go. The new containers are filled on the side and
+ * swapped in when the build is done (the old lights stay up until then).
+ *
+ * The lights are also split into spatial CELLS (an edge of ~450 lights' worth of area): every kind of light has one particle container
+ * per cell, each with its own cull rectangle, so a cell off screen costs the renderer nothing (before: all 4888 lights' tint + alpha were
+ * uploaded every frame whatever the zoom) and `apply` skips its lights. The cores are added kind after kind (all windows, then lamps,
+ * then bokeh), so overlaps between kinds keep the old order; within a kind lights never overlap meaningfully (a lattice, spaced lamps, an
+ * additive blend) and the halos blend MAX_COLOR (order-free).
+ */
+// (CAP keeps a district at 1260 lights at most, so today every district is ONE cell, culled as a whole; the split is there for raised caps)
+const CHUNK = 160, BUILD_MS = 3, CELL_SPLIT = 1500, CELL_LIGHTS = 900;
+function* buildSteps(e, d, cfg, job) {
   const S = canvas.grid.size, tex = bakeTextures(), list = layoutLights(d, cfg, S);
+  yield;
+  if ( job.dead ) return;
   const n = list.length, rec = new Float32Array(n * STRIDE);
-  e.cores = new Array(n); e.halos = new Array(n); e.count = n;
-  const MAXC = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD, NORMAL = PIXI.BLEND_MODES.NORMAL, ADD = PIXI.BLEND_MODES.ADD;
-  // one container per kind for the cores (in layout order) and per halo texture
-  const counts = [0, 0, 0]; for ( const l of list ) counts[l.kind]++;
-  const cores = [pc(counts[KIND.window], NORMAL), pc(counts[KIND.lamp], NORMAL), pc(counts[KIND.bokeh], ADD)];
-  const halos = [pc(counts[KIND.window] + counts[KIND.bokeh], MAXC), pc(counts[KIND.lamp], MAXC)];
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, lastKind = -1;
-  const order = [];
+  const hrOf = (l) => (l.kind === KIND.window ? 0.24 : l.kind === KIND.lamp ? 0.95 : 0.7) * S * cfg.size * (0.45 + cfg.glow);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, maxHr = 0;
+  for ( const l of list ) { const hr = hrOf(l); x0 = Math.min(x0, l.x - hr); y0 = Math.min(y0, l.y - hr); x1 = Math.max(x1, l.x + hr); y1 = Math.max(y1, l.y + hr); maxHr = Math.max(maxHr, hr); }
+  // the cells: only a big district is split (more than CELL_SPLIT lights), into cells of ~CELL_LIGHTS lights - every container costs a
+  // draw call, so a district of a thousand lights stays one cell (it is culled as a whole)
+  const parts = n > CELL_SPLIT ? Math.ceil(n / CELL_LIGHTS) : 1;
+  const edge = !n ? 1 : parts === 1 ? Math.max(x1 - x0, y1 - y0, 1) : clamp(Math.sqrt(((x1 - x0) * (y1 - y0)) / parts), 5 * S, 30 * S);
+  const nx = n ? Math.max(1, Math.ceil((x1 - x0) / edge)) : 1, ny = n ? Math.max(1, Math.ceil((y1 - y0) / edge)) : 1;
+  const cellOf = new Uint16Array(n), cells = new Map();
   list.forEach((l, i) => {
+    const c = Math.min(ny - 1, Math.floor((l.y - y0) / edge)) * nx + Math.min(nx - 1, Math.floor((l.x - x0) / edge));
+    cellOf[i] = c;
+    let q = cells.get(c);
+    if ( !q ) { q = { id: c, items: [], x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, kinds: [0, 0, 0], cores: [], halos: [], n: -1, vis: true }; cells.set(c, q); }
+    q.items.push(i); q.kinds[l.kind]++;
+    const hr = hrOf(l);
+    q.x0 = Math.min(q.x0, l.x - hr); q.y0 = Math.min(q.y0, l.y - hr); q.x1 = Math.max(q.x1, l.x + hr); q.y1 = Math.max(q.y1, l.y + hr);
+  });
+  yield;
+  if ( job.dead ) return;
+  const MAXC = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD, NORMAL = PIXI.BLEND_MODES.NORMAL, ADD = PIXI.BLEND_MODES.ADD;
+  const blend = [NORMAL, NORMAL, ADD];
+  const cellList = [...cells.values()];
+  for ( const q of cellList ) {
+    q.items = Uint32Array.from(q.items); q.rect = new PIXI.Rectangle(q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0);
+    for ( let k = 0; k < 3; k++ ) if ( q.kinds[k] ) { const c = pc(q.kinds[k], blend[k]); c.cullable = true; c.cullArea = q.rect; q.cores[k] = c; }
+    const wn = q.kinds[KIND.window] + q.kinds[KIND.bokeh];
+    if ( wn ) { const c = pc(wn, MAXC); c.cullable = true; c.cullArea = q.rect; q.halos[0] = c; }
+    if ( q.kinds[KIND.lamp] ) { const c = pc(q.kinds[KIND.lamp], MAXC); c.cullable = true; c.cullArea = q.rect; q.halos[1] = c; }
+  }
+  const sprCores = new Array(n), sprHalos = new Array(n);
+  for ( let i = 0; i < n; i++ ) {
+    const l = list[i], q = cells.get(cellOf[i]);
     const t = l.kind === KIND.window ? tex.window : l.kind === KIND.lamp ? tex.lamp : tex.bokeh;
-    const s = new PIXI.Sprite(t); s.anchor.set(0.5); s.position.set(l.x, l.y); s.width = l.w; s.height = l.h; s.rotation = l.rot;
+    const sp = new PIXI.Sprite(t); sp.anchor.set(0.5); sp.position.set(l.x, l.y); sp.width = l.w; sp.height = l.h; sp.rotation = l.rot;
     // the lamp core is whiter than its pool, like a hot filament
-    s.tint = l.kind === KIND.lamp ? l.color.mix(Color.from("#ffffff"), 0.45) : l.color;
-    s.alpha = 0; cores[l.kind].addChild(s); e.cores[i] = s;
-    if ( l.kind !== lastKind ) { order.push(l.kind); lastKind = l.kind; }
-    const hr = (l.kind === KIND.window ? 0.24 :l.kind === KIND.lamp ? 0.95 : 0.7) * S * cfg.size * (0.45 + cfg.glow);
+    sp.tint = l.kind === KIND.lamp ? l.color.mix(Color.from("#ffffff"), 0.45) : l.color;
+    sp.alpha = 0; q.cores[l.kind].addChild(sp); sprCores[i] = sp;
+    const hr = hrOf(l);
     const h = new PIXI.Sprite(l.kind === KIND.lamp ? tex.haloWide : tex.halo); h.anchor.set(0.5); h.position.set(l.x, l.y); h.width = h.height = hr * 2;
     // the pool is nearly white in its flat middle, so the darkness never dims the core (emissive), and takes the light's colour outwards
     h.tint = l.color.mix(Color.from("#ffffff"), 0.55); h.alpha = 0;
-    halos[l.kind === KIND.lamp ? 1 : 0].addChild(h); e.halos[i] = h;
+    q.halos[l.kind === KIND.lamp ? 1 : 0].addChild(h); sprHalos[i] = h;
     const o = i * STRIDE;
     rec[o] = l.phase; rec[o + 1] = l.rate; rec[o + 2] = l.dusk; rec[o + 3] = l.period; rec[o + 4] = l.kind; rec[o + 5] = l.tv ? l.swPhase : -1;
-    x0 = Math.min(x0, l.x - hr); y0 = Math.min(y0, l.y - hr); x1 = Math.max(x1, l.x + hr); y1 = Math.max(y1, l.y + hr);
-  });
-  for ( const k of order ) e.core.addChild(cores[k]);
-  for ( const c of cores ) if ( !c.parent ) c.destroy();
-  for ( const c of halos ) { if ( c.children.length ) e.halo.addChild(c); else c.destroy(); }
-  e.rec = rec;
+    if ( i % CHUNK === CHUNK - 1 ) { yield; if ( job.dead ) break; }
+  }
+  // dead (a newer build replaced this one, or the scene closed): the half-made containers go
+  if ( job.dead ) { for ( const q of cellList ) for ( const c of [...q.cores, ...q.halos] ) c?.destroy({ children: true }); return; }
+  // done: swap in (the cores kind after kind, cell after cell)
+  for ( const c of e.core.removeChildren() ) c.destroy({ children: true });
+  for ( const c of e.halo.removeChildren() ) c.destroy({ children: true });
+  for ( const k of [0, 1, 2] ) for ( const q of cellList ) if ( q.cores[k] ) e.core.addChild(q.cores[k]);
+  for ( const q of cellList ) for ( const c of q.halos ) if ( c ) e.halo.addChild(c);
+  e.cores = sprCores; e.halos = sprHalos; e.count = n; e.rec = rec; e.cells = cellList; e.maxHr = maxHr;
   e.animated = list.some((l) => l.period > 0 || l.tv);   // switching lights or screens move even with twinkle at 0
-  // culling: a district off screen costs one rectangle test
+  // culling: a district off screen costs one rectangle test (and a cell off screen one more)
   const area = n ? new PIXI.Rectangle(x0, y0, x1 - x0, y1 - y0) : new PIXI.Rectangle();
   for ( const c of [e.core, e.halo] ) { c.cullable = true; c.cullArea = area; }
   e.applied = -1;
+}
+
+/* The builds wait in a queue, one entry at a time, a few ms of each frame (an editor's draft replaces a build under way). */
+const JOBS = [];       // { e, gen, dead }
+let pumping = false;
+function queueBuild(e, d, cfg) {
+  const old = JOBS.findIndex((j) => j.e === e);
+  if ( old >= 0 ) { JOBS[old].dead = true; JOBS.splice(old, 1); }
+  if ( e.job ) e.job.dead = true;
+  const job = { e, dead: false, gen: null }; job.gen = buildSteps(e, d, cfg, job);
+  e.job = job; JOBS.push(job);
+}
+/** Run builds for ~ms; true while some are left. */
+function runSlice(ms) {
+  const t0 = performance.now();
+  while ( JOBS.length && performance.now() - t0 < ms ) {
+    const j = JOBS[0];
+    let r;
+    try { r = j.gen.next(); } catch ( err ) { console.error(`${MODULE_ID} | night lights`, err); r = { done: true }; j.dead = true; }
+    if ( r.done || j.dead ) { JOBS.shift(); if ( j.e.job === j ) j.e.job = null; if ( !j.dead ) j.e.applied = -1; }
+  }
+  return JOBS.length > 0;
+}
+/** After a sync: the first slice at once (a scene with one small district is built before it is drawn), the rest over the next frames. */
+function pump() {
+  if ( JOBS.length ) runSlice(BUILD_MS);
+  if ( JOBS.length && !pumping && canvas.app?.ticker ) { canvas.app.ticker.add(pumpTick); pumping = true; }
+  wake();
+}
+function pumpTick() {
+  if ( !runSlice(BUILD_MS) ) { canvas.app?.ticker?.remove(pumpTick); pumping = false; }
+  wake();
+}
+function stopBuilds() {
+  for ( const j of JOBS ) j.dead = true;
+  JOBS.length = 0;
+  if ( pumping ) { canvas.app?.ticker?.remove(pumpTick); pumping = false; }
 }
 
 /**
@@ -334,17 +412,18 @@ export function lightsSync(views) {
     seen.add(id);
     let e = ENTRIES.get(id);
     if ( !e ) {
-      e = { id, n: 0, sig: "", core: new PIXI.Container(), halo: new PIXI.Container(), count: 0, rec: null, cores: [], halos: [], applied: -1 };
+      e = { id, n: 0, sig: "", core: new PIXI.Container(), halo: new PIXI.Container(), count: 0, rec: null, cores: [], halos: [], cells: [], job: null, applied: -1 };
       for ( const c of [e.core, e.halo] ) { c.eventMode = "none"; c.interactiveChildren = false; c.visible = false; }
       coreLayer.addChild(e.core); haloLayer.addChild(e.halo);
       ENTRIES.set(id, e);
     }
     const sig = sigOf(d, cfg);
-    if ( sig !== e.sig && v.visible ) { e.sig = sig; buildEntry(e, d, cfg); }   // a district this client cannot see is laid out only once revealed
+    if ( sig !== e.sig && v.visible ) { e.sig = sig; queueBuild(e, d, cfg); }   // a district this client cannot see is laid out only once revealed
     e.cfg = cfg; e.shown = !!v.visible; e.base = v.baseAlpha ?? 1; e.applied = -1;
   }
   for ( const [id, e] of [...ENTRIES] ) if ( !seen.has(id) ) { destroyEntry(e); ENTRIES.delete(id); }
   retarget();
+  pump();
 }
 
 /** Re-read the scene darkness / override and start the ticker when something has to move. */
@@ -362,10 +441,18 @@ function wake() {
 }
 function sleep() { if ( ticking ) { canvas.app?.ticker?.remove(tick); ticking = false; } }
 
+/** The part of the scene on screen, in scene coordinates (with a margin: the stage moves between this tick and the render), or null. */
+function viewRect() {
+  const st = canvas.stage, sc = canvas.app?.screen;
+  if ( !st || !sc || st.rotation ) return null;
+  const kx = st.scale.x || 1, ky = st.scale.y || 1, m = 160 / Math.min(kx, ky);
+  return { x0: (0 - st.position.x) / kx + st.pivot.x - m, y0: (0 - st.position.y) / ky + st.pivot.y - m, x1: (sc.width - st.position.x) / kx + st.pivot.x + m, y1: (sc.height - st.position.y) / ky + st.pivot.y + m };
+}
+
 function tick() {
   const dt = Math.min((canvas.app.ticker.deltaMS || 16) / 1000, 0.1), now = performance.now() / 1000;
   const still = reducedMotion() || perfLow();   // (performance mode Low: no twinkle)
-  let busy = false;
+  let busy = false, vr;
   for ( const e of ENTRIES.values() ) {
     const g = goal(e);
     // night fades in and out over ~1 s (instantly with reduced motion)
@@ -373,31 +460,48 @@ function tick() {
     const show = e.shown && e.n > 0.001 && e.count > 0;
     e.core.visible = e.halo.visible = show;
     const moving = !still && (e.cfg.twinkle > 0 || e.animated);
-    if ( show && (moving || e.applied !== e.n) ) { apply(e, now, still); e.applied = e.n; }
+    if ( show ) {
+      vr ??= (globalThis.CONFIG?.moinenMaps?.noLightCull ? null : viewRect()) ?? false;      // (CONFIG.moinenMaps.noLightCull: every cell updated and drawn, for A/B)
+      apply(e, now, still, vr || null, moving);
+      e.applied = e.n;
+    }
     if ( e.n !== g || (show && moving) ) busy = true;
   }
   if ( !busy ) sleep();
 }
 
-/** Per-light alpha: dusk order, twinkle, switching. Alpha only (0 = unlit): the particle containers upload only tint + alpha. */
-function apply(e, t, still) {
-  const { rec, cores, halos, count, cfg } = e, n = e.n, base = e.base, tw = still ? 0 : cfg.twinkle, glowK = 0.7 + 0.3 * cfg.glow;
-  for ( let i = 0, o = 0; i < count; i++, o += STRIDE ) {
-    let a = (n - rec[o + 2]) / 0.2;
-    const c = cores[i], h = halos[i];
-    if ( a <= 0 ) { c.alpha = h.alpha = 0; continue; }
-    if ( a > 1 ) a = 1;
-    if ( !still ) {
-      const ph = rec[o], rate = rec[o + 1], kind = rec[o + 4];
-      if ( rec[o + 5] >= 0 ) a *= 0.72 + 0.28 * Math.sin(t * 9.1 + ph) * Math.sin(t * 5.3 + rec[o + 5]);        // a screen flickers
-      else if ( kind === KIND.lamp ) a *= 1 - tw * (0.12 * (0.5 + 0.5 * Math.sin(t * rate * 3.1 + ph)) + (Math.sin(t * 0.37 * rate + ph) > 0.992 ? 0.6 : 0)); // hum + a rare stutter
-      else if ( kind === KIND.bokeh ) a *= 1 - tw * 0.45 * (0.5 + 0.5 * Math.sin(t * rate * 0.6 + ph));          // slow breathing
-      else a *= 1 - tw * 0.3 * (0.5 + 0.5 * Math.sin(t * rate * 1.7 + ph)) * (0.5 + 0.5 * Math.sin(t * 0.23 + ph * 1.7)); // a lamp behind a curtain
-      const per = rec[o + 3];
-      if ( per > 0 ) a *= clamp((Math.sin(t * TAU / per + ph * 3.3) + 0.25) * 3, 0, 1);                     // someone switches it off for a while
+/**
+ * Per-light alpha: dusk order, twinkle, switching. Alpha only (0 = unlit): the particle containers upload only tint + alpha. Only the
+ * cells on screen (`vr`) are updated - a cell that comes into view later is updated then (`q.n` is the night level it holds; -2 =
+ * skipped while off screen); a still scene updates a cell only when its level changed or it was off screen.
+ */
+function apply(e, t, still, vr, moving) {
+  const { rec, cores, halos, cfg } = e, n = e.n, base = e.base, tw = still ? 0 : cfg.twinkle, glowK = 0.7 + 0.3 * cfg.glow, force = e.applied !== n;
+  for ( const q of e.cells ) {
+    const on = !vr || !(q.x1 < vr.x0 || q.x0 > vr.x1 || q.y1 < vr.y0 || q.y0 > vr.y1);
+    // (PIXI 7.4 in Foundry has no culler: a cell off screen is not drawn because it is not visible)
+    if ( on !== q.vis ) { q.vis = on; for ( const c of q.cores ) if ( c ) c.visible = on; for ( const c of q.halos ) if ( c ) c.visible = on; }
+    if ( !on ) { q.n = -2; continue; }
+    if ( !moving && !force && q.n === n ) continue;
+    q.n = n;
+    const items = q.items;
+    for ( let k = 0; k < items.length; k++ ) {
+      const i = items[k], o = i * STRIDE, c = cores[i], h = halos[i];
+      let a = (n - rec[o + 2]) / 0.2;
+      if ( a <= 0 ) { c.alpha = h.alpha = 0; continue; }
+      if ( a > 1 ) a = 1;
+      if ( !still ) {
+        const ph = rec[o], rate = rec[o + 1], kind = rec[o + 4];
+        if ( rec[o + 5] >= 0 ) a *= 0.72 + 0.28 * Math.sin(t * 9.1 + ph) * Math.sin(t * 5.3 + rec[o + 5]);        // a screen flickers
+        else if ( kind === KIND.lamp ) a *= 1 - tw * (0.12 * (0.5 + 0.5 * Math.sin(t * rate * 3.1 + ph)) + (Math.sin(t * 0.37 * rate + ph) > 0.992 ? 0.6 : 0)); // hum + a rare stutter
+        else if ( kind === KIND.bokeh ) a *= 1 - tw * 0.45 * (0.5 + 0.5 * Math.sin(t * rate * 0.6 + ph));          // slow breathing
+        else a *= 1 - tw * 0.3 * (0.5 + 0.5 * Math.sin(t * rate * 1.7 + ph)) * (0.5 + 0.5 * Math.sin(t * 0.23 + ph * 1.7)); // a lamp behind a curtain
+        const per = rec[o + 3];
+        if ( per > 0 ) a *= clamp((Math.sin(t * TAU / per + ph * 3.3) + 0.25) * 3, 0, 1);                     // someone switches it off for a while
+      }
+      if ( a <= 0.003 ) { c.alpha = h.alpha = 0; continue; }
+      c.alpha = a * base; h.alpha = a * base * glowK;
     }
-    if ( a <= 0.003 ) { c.alpha = h.alpha = 0; continue; }
-    c.alpha = a * base; h.alpha = a * base * glowK;
   }
 }
 
@@ -411,7 +515,7 @@ export function setNightPreview(id, on) {
 }
 
 function teardown() {
-  sleep();
+  sleep(); stopBuilds();
   for ( const e of ENTRIES.values() ) destroyEntry(e);
   ENTRIES.clear(); PREVIEW.clear();
   for ( const l of [coreLayer, haloLayer] ) if ( l && !l.destroyed ) l.destroy({ children: true });
@@ -429,6 +533,8 @@ function listenDarkness() {
 
 Hooks.on("canvasReady", () => { listenDarkness(); retarget(); });
 Hooks.on("canvasTearDown", () => { if ( envTarget && envListener ) envTarget.removeEventListener?.("darknessChange", envListener); envTarget = envListener = null; teardown(); });
+// a pan brings cells into view: a still scene wakes for one frame to update them
+Hooks.on("canvasPan", () => { if ( ENTRIES.size ) wake(); });
 Hooks.on("lightingRefresh", () => { attachHalos(); if ( ENTRIES.size ) retarget(); });
 Hooks.on("initializeCanvasEnvironment", () => { if ( ENTRIES.size ) retarget(); });
 Hooks.on("updateScene", (scene) => { if ( scene.id === canvas.scene?.id && ENTRIES.size ) retarget(); });

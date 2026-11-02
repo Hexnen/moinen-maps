@@ -1225,3 +1225,131 @@ export async function badgeCheck({ zooms = [1, 1.37, 2, 3.3, 0.6], seeds = [1234
   } finally { CONFIG.moinenMaps.spritePx = was; }
   return rows;
 }
+
+/**
+ * CULL BENCH: what the GM's composite publish costs on the page (round 2): the bands' texels read back (readPixels), then the cull
+ * (the page, or the codec worker when `Composite.cullJob` exists). Returns { bands, tiles, mpx, readMs, cullMs, cleared, eff }; nothing is uploaded.
+ */
+export async function cullBench() {
+  const Comp = await import("../scripts/destruction/composite.mjs");
+  const d = D(), C = d.cache, R = canvas.app.renderer, gl = R.gl;
+  const bands = C.bands.filter((b) => b.ckey && b.tiles.length), all = [];
+  const t0 = performance.now();
+  for ( const b of bands ) for ( const t of b.tiles ) {
+    const bt = t.rt.baseTexture, w = bt.realWidth, h = bt.realHeight;
+    if ( t.shared && t.id && bt.resource?.data ) { all.push({ L: b.meta.L, x: t.x, y: t.y, w, h, data: bt.resource.data.slice(), fresh: true }); continue; }
+    const out = new Uint8Array(w * h * 4);
+    R.renderTexture.bind(t.rt); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out); R.renderTexture.bind(null);
+    all.push({ L: b.meta.L, x: t.x, y: t.y, w, h, data: out, fresh: true });
+  }
+  const readMs = performance.now() - t0, t1 = performance.now();
+  const effOne = bands.every((b) => b.meta.eff === 1);
+  const cleared = effOne ? Comp.cull(all) : -1;
+  return { bands: bands.length, tiles: all.length, mpx: +(all.reduce((a, q) => a + q.w * q.h, 0) / 1e6).toFixed(2), readMs: +readMs.toFixed(1), cullMs: +(performance.now() - t1).toFixed(1), cleared, effOne };
+}
+
+/**
+ * NET CHECK: the downloads of this session so far, by kind of chunk (d stroke, w water, k composite tile, x index, b bundle). `load`: the
+ * requests made until the background read-ahead of the strokes near the view starts (the reveal + 2.4 s; destruction.mjs prefetchNear), the
+ * ones a scene needs to be shown; `requests` / `kinds`: all of them. Open the scene with a cold IndexedDB first (see coldReload).
+ */
+export async function netCheck() {
+  const Net = await import("../scripts/net/stream.mjs");
+  const tr = game.modules.get("moinen-maps").api.destruction.net.trace();
+  const rv = tr.marks.find((m) => m.name === "reveal")?.t ?? null, cut = rv === null ? Infinity : tr.t0 + rv + 2400;
+  const by = (list) => { const kinds = {}; for ( const r of list ) { const k = r.id[0]; kinds[k] ??= { n: 0, kb: 0 }; kinds[k].n++; kinds[k].kb += r.bytes / 1024; } for ( const k of Object.values(kinds) ) k.kb = Math.round(k.kb); return kinds; };
+  const early = Net.reqLog.filter((r) => r.t <= cut);
+  return { requests: Net.stats.requests, bytesDown: Net.stats.bytesDown, idbHits: Net.stats.idbHits, memHits: Net.stats.memHits, kinds: by(Net.reqLog),
+    load: { requests: early.length, kb: Math.round(early.reduce((a, r) => a + r.bytes, 0) / 1024), kinds: by(early) }, revealMs: rv };
+}
+
+/** Forget the chunks IndexedDB holds and reload the page (a cold client). */
+export async function coldReload() {
+  await new Promise((res) => { const r = indexedDB.deleteDatabase("moinen-maps-chunks"); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+  setTimeout(() => location.reload(), 100);
+}
+
+/**
+ * PUBLISH BENCH (dry): the GM's composite publish up to the packed tiles, nothing uploaded or written: `pageMs` (the page: texel readback,
+ * the index, handing the texels to the codec worker - the part that holds the page), `jobMs` (the worker: cull + pack + deflate, off the page),
+ * `cleared` texels, and the longest long task the page saw meanwhile. Every tile is read back (`fresh`), as for a first publish.
+ */
+export async function publishBench() {
+  const Comp = await import("../scripts/destruction/composite.mjs"), d = D(), scene = canvas.scene;
+  let long = 0; const obs = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) long = Math.max(long, e.duration); });
+  try { obs.observe({ type: "longtask" }); } catch { /* none */ }
+  const r = await Comp.publish(d, { scene, dir: `worlds/${game.world.id}/moinen-maps/c/${scene.id}`, base: "bench", strokes: [], dry: true, fresh: true });
+  await new Promise((res) => setTimeout(res, 120)); obs.disconnect();
+  return typeof r === "object" ? { ...r, longTaskMs: Math.round(long) } : r;
+}
+
+/**
+ * LIGHTS A/B: synthetic town districts forced to night; the lights' cores and halos drawn alone at a frozen clock, at the whole-scene view
+ * and zoomed into a corner (where per-light culling skips lights), as an FNV hash + count of the screen pixels each. Run on two builds and
+ * compare the hashes. Also the build time of lightsSync (ms; the call returns before a sliced build is done) and how long the lights take
+ * to be all built. Returns { build: { callMs, doneMs, lights }, shots: { whole: [coreHash, haloHash], zoom: [...] } }.
+ */
+export async function lightsAB({ districts = 5, at = 123456, zoom = 2.6 } = {}) {
+  const L = await import("../scripts/lights.mjs"), Dm = await import("../scripts/districts.mjs");
+  const r = canvas.dimensions.sceneRect, views = new Map();
+  for ( let i = 0; i < districts; i++ ) {
+    const x0 = r.x + r.width * i / districts, x1 = r.x + r.width * (i + 1) / districts;
+    views.set(`bench${i}`, { data: { id: `bench${i}`, rings: [[x0, r.y, x1, r.y, x1, r.y + r.height, x0, r.y + r.height]],
+      lights: { on: "on", own: true, style: "town", density: 1, twinkle: 0.35, switching: 0.25, glow: 0.6, size: 1, warmth: "warm" } }, visible: true, baseAlpha: 1 });
+  }
+  const hash = (a) => { let h = 2166136261, nz = 0; for ( let i = 0; i < a.length; i++ ) { h = Math.imul(h ^ a[i], 16777619); if ( a[i] ) nz++; } return `${(h >>> 0).toString(16)}/${nz}`; };
+  const out = { build: null, shots: {} };
+  try {
+    const t0 = performance.now(); L.lightsSync(views); const callMs = performance.now() - t0;
+    L.setNightPreview("*", true);
+    await runFrames(Array(560).fill(null));                // the night fades in completely
+    const lights = L._stats().lights;
+    out.build = { callMs: +callMs.toFixed(1), lights };
+    const real = performance.now.bind(performance);
+    for ( const [name, scale, fx, fy] of [["whole", fit(), 0.5, 0.5], ["zoom", zoom, 0.22, 0.3]] ) {
+      canvas.pan({ x: r.x + r.width * fx, y: r.y + r.height * fy, scale: name === "whole" ? fit() : scale });
+      await runFrames(Array(30).fill(null));
+      performance.now = () => at;
+      try {
+        step(2);
+        const R = canvas.app.renderer, cores = canvas.primary.children.find((c) => c.sortLayer === 251);
+        const halos = canvas.effects.illumination.lights.children.find((c) => c.zIndex === 1e6 && c !== cores);
+        out.shots[name] = [cores, halos].map((o) => { if ( !o ) return null; const rt = PIXI.RenderTexture.create({ width: R.screen.width, height: R.screen.height });
+          R.render(o, { renderTexture: rt, transform: o.parent.worldTransform.clone(), clear: true }); const a = R.extract.pixels(rt); rt.destroy(true); return hash(a); });
+      } finally { performance.now = real; }
+    }
+  } finally {
+    L.setNightPreview("*", false); L.lightsSync(new Map()); Dm.refreshAllDistricts?.(); fit();
+  }
+  return out;
+}
+
+/**
+ * REBAKE BENCH: "Rebake all" over `ids` (default: the strokes in an older look) with a gap detector (a 4 ms timer: a gap over 30 ms is the
+ * page held by something), the JS heap sampled every 50 ms, and the bake pool's per-lane peak (Trace "prime-lanes": Mpx of plain looks
+ * a lane held at most, x4 bytes of RGBA). Waits for status.rebake to end. Returns { strokes, seconds, gaps: { n, max, over100, top },
+ * heapMB: { start, peak }, lanes, events }.
+ */
+export async function rebakeBench({ ids = null, maxS = 420 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, Trace = A.net.trace;
+  const list = ids ?? A.status().olderLook?.ids ?? [];
+  const gaps = []; let last = performance.now(), peak = 0;
+  const heap = () => (performance.memory?.usedJSHeapSize ?? 0) / 1048576;
+  const start = heap();
+  const gi = setInterval(() => { const n = performance.now(), g = n - last; if ( g > 30 ) gaps.push(Math.round(g)); last = n; }, 4);
+  const hi = setInterval(() => { peak = Math.max(peak, heap()); }, 50);
+  const evBefore = Trace().events.length, t0 = performance.now();
+  try {
+    A.rebakeAll(list);
+    while ( performance.now() - t0 < maxS * 1000 ) {
+      await new Promise((r) => setTimeout(r, 250));
+      const st = A.status();
+      if ( !st.rebake && performance.now() - t0 > 1500 ) break;
+    }
+  } finally { clearInterval(gi); clearInterval(hi); }
+  await new Promise((r) => setTimeout(r, 1500));
+  const ev = Trace().events.filter((e) => /rebake|prime-lanes|bake-lanes/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) }));
+  const top = [...gaps].sort((a, b) => b - a).slice(0, 12);
+  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: { n: gaps.length, max: top[0] ?? 0, over100: gaps.filter((g) => g > 100).length, top },
+    heapMB: { start: Math.round(start), peak: Math.round(peak), end: Math.round(heap()) }, events: ev.slice(-8) };
+}

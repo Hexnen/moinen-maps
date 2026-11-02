@@ -183,6 +183,15 @@ function junctionTrims(edges, nodes, g) {
  * `rect` is the scene rectangle (dead ends near its border are "portals": cars drive off the map there and come back in later).
  */
 export function buildNetwork(R, g, rect) {
+  const it = networkSteps(R, g, rect);
+  for ( ;; ) { const r = it.next(); if ( r.done ) return r.value; }
+}
+
+/**
+ * The same build as a generator: it yields after every edge's lanes and every node's connectors, so a driver can spread it over frames
+ * (cars.mjs TrafficView: ~2 ms a frame; the whole network took ~6 ms in one go after every road edit). buildNetwork runs it to the end.
+ */
+export function* networkSteps(R, g, rect) {
   const G = R.G, T = R.traffic, side = T.side === "left" ? -1 : 1;
   const v0 = T.speed * g * 1.4;
   const brake = g * 1.3;
@@ -205,6 +214,7 @@ export function buildNetwork(R, g, rect) {
     n.portal = n.deg === 1 && !!rect && (n.x <= rect.x + m || n.y <= rect.y + m || n.x >= rect.x + rect.width - m || n.y >= rect.y + rect.height - m);
   }
   const trims = junctionTrims(edges, nodes, g);
+  yield;
   let totalLen = 0;
   for ( const e of edges ) {
     const c = edgeCurve(e, g).p, A = nodes.get(e.a), B = nodes.get(e.b);
@@ -226,6 +236,7 @@ export function buildNetwork(R, g, rect) {
       from.out.push(lane); to.in.push(lane);
       totalLen += lane.L;
     }
+    yield;                                   // (an edge's lanes done)
   }
   // connectors
   for ( const n of nodes.values() ) {
@@ -268,6 +279,7 @@ export function buildNetwork(R, g, rect) {
       }
       if ( clash ) { A.conflicts.push(B.id); B.conflicts.push(A.id); }
     }
+    yield;                                   // (a node's connectors done: the build may pause here)
   }
   const lanes = pieces.filter((p) => p.type === LANE);
   const entries = lanes.filter((l) => nodes.get(l.from)?.portal);

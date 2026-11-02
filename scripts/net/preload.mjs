@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Net from "./stream.mjs";
+import "./bundle.mjs";
 import { chunkRecords } from "../water/publish.mjs";
 import * as Composite from "../destruction/composite.mjs";
 import { cacheEnabled } from "../destruction/static-cache.mjs";
@@ -47,8 +48,18 @@ export function chunksOf(scene, at = null) {
     }
   }
   for ( const r of chunkRecords(scene) ) {
-    for ( const id of r.ids ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: id.startsWith("w") ? 0 : 2000 }); }
+    for ( const id of r.ids ) if ( !seen.has(id) && !id.startsWith("b") ) { seen.add(id); out.push({ dir: r.dir, id, prio: id.startsWith("w") ? 0 : 2000 }); }   // (a bundle is read with its members)
   }
+  return out;
+}
+
+/** The chunk ids of the scene's flooded strokes (their water reads their pixels: every load fetches them after the reveal). */
+export function floodIds(scene) {
+  const F = scene?.flags?.[MODULE_ID], M = F?.destruction?.baked;
+  if ( !F || !M?.c ) return [];
+  const objs = F.destructionObjects && typeof F.destructionObjects === "object" ? F.destructionObjects : Object.fromEntries((F.destruction?.o ?? []).map((o) => [o?.id, o]));
+  const out = [];
+  for ( const [oid, v] of Object.entries(M.c) ) { const id = String(v).split(":")[1]; if ( id && Model.TYPES[objs[oid]?.t] === "flood" ) out.push(id); }
   return out;
 }
 
