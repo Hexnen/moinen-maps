@@ -20,6 +20,7 @@ export const PICK_MS = 140;        // the lift-off at the start of a carry
 export const LAND_MS = 260;        // the landing (a damped squash) after the path ends
 export const GLIDE_MS = 380;       // the glide from the path end to where the token really is (returning, or a late hand-over)
 export const HOLD_RETURN_MS = 380; // a returning token waits this long at the path end
+export const WAIT_MS = 1000;       // a token waits at most this long for its document to reach the real target (a hand-over that never comes must not hold it for ever)
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : a > b ? a : v;
 export const ease = (u) => { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); };
@@ -136,9 +137,37 @@ export function weightAt(el, D, mode, arrived, waited = 0) {
   const hold = mode === "return" ? HOLD_RETURN_MS : LAND_MS;
   if ( after < hold ) return { w: 1, done: false };
   if ( mode !== "return" && !arrived && waited < 1000 ) return { w: 1, done: false };
-  const g = (after - hold - (mode !== "return" ? waited : 0)) / GLIDE_MS;
+  const g = (after - hold - (mode !== "return" ? Math.min(waited, WAIT_MS) : 0)) / GLIDE_MS;       // (the wait is capped: a document that never arrives glides home after WAIT_MS, it never holds the token for ever)
   if ( g >= 1 ) return { w: 0, done: true };
   return { w: 1 - ease(g), done: false };
+}
+
+/**
+ * The offset of a carried (or pushed) token from where Foundry has it, at `o.now` / `o.el` (the carrier's clock), written into `out` { x, y, w, done }.
+ * `st` { waitFrom, arrivedAt } is the hand-over's state (kept by the caller). `o`: { now, el, D (the carrier's run), mode, bx, by (where Foundry has the
+ * token's centre now), tx, ty (where the document is going to be: the RECORDED final, snapped or not), c0x, c0y (the grab / contact centre), dx, dy
+ * (the displacement on the path at `el`) }.
+ *  - "arrived" is judged against the real target (tx, ty), never the raw path end (a snapped carry, a pushed token resolved off its path end).
+ *  - A document that is already at the target while the ride has not begun here (a remote client whose GM moved it first; a replay) holds the
+ *    token ON THE RIDE from the start: at the grab point until its own front starts, then along the path (no jump to the end and back).
+ *  - Past D + hold + WAIT_MS + GLIDE_MS the offset is gone whatever happened: a Carry cannot stay active for ever.
+ */
+export function offsetAt(st, o, out) {
+  const after = o.el - o.D, hold = o.mode === "return" ? HOLD_RETURN_MS : LAND_MS;
+  const arrived = Math.abs(o.bx - o.tx) < 3 && Math.abs(o.by - o.ty) < 3;
+  if ( o.mode !== "return" && after >= hold ) {
+    if ( !st.waitFrom ) st.waitFrom = o.now;
+    if ( arrived && !st.arrivedAt ) st.arrivedAt = o.now;
+  }
+  const waited = st.waitFrom ? (st.arrivedAt || o.now) - st.waitFrom : 0;
+  const w = weightAt(o.el, o.D, o.mode, arrived, waited);
+  const over = after > hold + WAIT_MS + GLIDE_MS + 400;
+  out.w = w.w; out.done = w.done || over;
+  const atTarget = o.mode !== "return" && arrived && Math.hypot(o.tx - o.c0x, o.ty - o.c0y) > 3 && after < hold;
+  const ws = atTarget ? 1 : startWeight(o.el);
+  out.x = ((o.c0x - o.bx) * ws + o.dx) * w.w;
+  out.y = ((o.c0y - o.by) * ws + o.dy) * w.w;
+  return out;
 }
 
 /** The share of the grab offset (where the token is vs where it was grabbed) that has been taken in `el` ms into the run: a lift-off blend. */

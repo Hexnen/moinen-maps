@@ -33,7 +33,16 @@ const FRONT_GRACE_MS = 300;    // the token stays in front at least this long af
 const ACTIVE = new Map();      // Token -> Carry
 const SEEN = new Map();        // stroke id -> the entry start already played (a stroke has several areas: one carry)
 const DUST = [0xd8ccb4, 0xb8a990, 0x8f816c, 0xc9bca2];
+const OFF_ = { x: 0, y: 0, w: 1, done: false };
 const D_ = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, P_ = { sx: 1, sy: 1, rot: 0, lift: 0, k: 0 };   // scratch (one carry steps at a time)
+/** Committed real carries that have not moved their documents yet (commit order): a stroke drawn meanwhile sees the tokens where they are going to be. */
+const PENDING = new Map();     // stroke id -> { tk, at }
+const PENDING_MS = 90000;
+const pendingList = () => { const now = performance.now(); for ( const [k, v] of PENDING ) if ( now - v.at > PENDING_MS ) PENDING.delete(k); return [...PENDING.values()]; };
+/** A real carry was committed (the GM, at the pointer-up): it is pending until its documents move, it is undone or the scene goes. */
+export function expect(objId, tk) { if ( tk && !tk.e ) PENDING.set(objId, { tk, at: performance.now() }); }
+/** Where a token is going to be (top-left) once the pending carries have moved it, or null. */
+export const predicted = (id) => X.pendingPosition(pendingList(), id);
 const stats = { played: 0, moved: 0, visual: 0, skipped: 0, unmoved: 0, pushed: 0 };
 let ticking = false;
 
@@ -74,7 +83,10 @@ class Carry {
     const n = o.tl.n;
     // a carried token starts at the grab point's token centre; a pushed one at its recorded first point (the contact), its timeline is absolute
     this.C0x = this.hit ? o.tl.X[0] : this.tk.x0 + width / 2; this.C0y = this.hit ? o.tl.Y[0] : this.tk.y0 + height / 2;
-    this.endX = this.hit ? o.tl.X[n - 1] : this.C0x + o.tl.dx; this.endY = this.hit ? o.tl.Y[n - 1] : this.C0y + o.tl.dy;
+    // where the document is going to be (the recorded final, snapped or not; a pushed token's own): the hand-over waits for the token to be THERE
+    const fin = this.hit ?? this.tk;
+    this.tx = fin.x1 + width / 2; this.ty = fin.y1 + height / 2;
+    this.st = { waitFrom: 0, arrivedAt: 0 };
     this.D = o.D ?? o.tl.D;                                 // the CARRIER's run (the hand-over clock of everyone)
     this.tOff = this.hit ? o.tl.tt[0] : 0;                  // the moment this body's own run begins
     this.Dl = o.tl.tt[n - 1] - this.tOff;                   // ... and how long it lasts
@@ -84,7 +96,7 @@ class Carry {
     this.mode = this.tk.e ? "return" : "real";
     if ( this.mode === "return" ) this.real = false;                          // (a returning token never moves for real)
     if ( this.hit ) this.real = false;                        // (only the carried token's Carry moves documents)
-    this.waitFrom = 0; this.arrivedAt = 0; this.lastEl = -1e9; this.lastDust = 0; this.started = false; this.landed = false;
+    this.lastEl = -1e9; this.lastDust = 0; this.started = false; this.landed = false;
     this.root = null; this.em = null;
     if ( this.visual ) {
       Hooks.callAll("moinenMapsTokenFxBusy", token);        // an idle pose of tokens/fx.mjs lets go first (restoreExact)
@@ -137,20 +149,15 @@ class Carry {
     C.displacementAt(tl, el, D_);                           // (a pushed token's timeline is on the carrier's clock: it holds before the contact)
     C.poseAt(le, this.Dl, D_, this.S, P_);
     if ( this.hit && P_.k ) { P_.rot = P_.rot * 1.35 + 0.05 * D_.sp * Math.sin(le * 0.04 + this.ph); P_.sx *= 1 + 0.03 * D_.sp * Math.sin(le * 0.05 + this.ph * 2); }   // knocked: leans harder, shivers
-    const after = el - D, hold = this.mode === "return" ? C.HOLD_RETURN_MS : C.LAND_MS;
-    const arrived = Math.abs(b.px - this.endX) < 3 && Math.abs(b.py - this.endY) < 3;
-    if ( this.mode !== "return" && after >= hold ) {
-      if ( !this.waitFrom ) this.waitFrom = now;
-      if ( arrived && !this.arrivedAt ) this.arrivedAt = now;
-    }
-    const waited = this.waitFrom ? (this.arrivedAt || now) - this.waitFrom : 0;
-    const w = C.weightAt(el, D, this.mode, arrived, waited);
-    if ( w.done ) return false;
     // the token is where the front is (the displacement), plus what lies between where it was grabbed and where it really is (blended in
-    // over the lift-off, glided out at the end); the displayed position is base + offset
-    const ws = C.startWeight(el);
-    this.off.x = ((this.C0x - b.px) * ws + D_.x) * w.w;
-    this.off.y = ((this.C0y - b.py) * ws + D_.y) * w.w;
+    // over the lift-off, glided out at the end); the displayed position is base + offset. The hand-over is judged against the RECORDED final
+    // (tx, ty: snapped, resolved off the path end), a document that is already there holds the token on the ride, and nothing outlasts a timeout
+    // (carry-core offsetAt)
+    const O = OFF_;
+    C.offsetAt(this.st, { now, el, D, mode: this.mode, bx: b.px, by: b.py, tx: this.tx, ty: this.ty, c0x: this.C0x, c0y: this.C0y, dx: D_.x, dy: D_.y }, O);
+    if ( O.done ) return false;
+    const w = O;
+    this.off.x = O.x; this.off.y = O.y;
     if ( w.w < 1 ) { const s = Math.max(0, 1 - (1 - w.w) * 3); P_.sx = 1 + (P_.sx - 1) * s; P_.sy = 1 + (P_.sy - 1) * s; P_.rot *= s; P_.lift *= s; }
     return true;
   }
@@ -200,7 +207,7 @@ class Carry {
     const ups = [{ _id: doc.id, x: this.tk.x1, y: this.tk.y1, action: "displace" }];
     for ( const h of this.hits ?? [] ) { if ( pushable(scene, h) ) ups.push({ _id: h.id, x: h.x1, y: h.y1, action: "displace" }); else stats.skipped++; }
     stats.moved++;
-    Promise.resolve(scene.updateEmbeddedDocuments("Token", ups, { animate: false, diff: false })).catch((err) => { stats.unmoved++; console.warn("moinen-maps | carry: the token did not move", err); });
+    Promise.resolve(scene.updateEmbeddedDocuments("Token", ups, { animate: false, diff: false })).catch((err) => { stats.unmoved++; console.warn("moinen-maps | carry: the token did not move", err); }).finally(() => PENDING.delete(this.objId));
   }
 
   /** `commit`: the carry ran its course (or the scene went away): a pending real move is made first. */
@@ -261,11 +268,11 @@ const canShow = (token) => tokenFxOn() && !reducedMotion() && !tokenBusy(token) 
 /** The stroke is gone (undo, clear): its carries stop where they are (no real move). */
 export function cancel(objId) {
   for ( const c of [...ACTIVE.values()] ) if ( c.objId === objId ) c.end(false);
-  SEEN.delete(objId);
+  SEEN.delete(objId); PENDING.delete(objId);
 }
 /** Has a carry of this stroke been started on this client? */
 export const started = (objId) => SEEN.has(objId);
-export function cancelAll() { for ( const c of [...ACTIVE.values()] ) c.end(false); SEEN.clear(); }
+export function cancelAll() { for ( const c of [...ACTIVE.values()] ) c.end(false); SEEN.clear(); PENDING.clear(); }
 
 /**
  * Undo of a stroke (GM): the carry stops and every token that is still where the stroke took it (the carried one and the ploughed ones)
@@ -292,7 +299,7 @@ function isRound(doc) {
   if ( g?.isGridless ) return doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_1 || doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_2;
   return !!g?.isHexagonal;
 }
-const rowOf = (doc) => { const { width, height } = doc.getSize(); return { id: doc.id, x: doc.x, y: doc.y, w: width, h: height, round: isRound(doc) }; };
+const rowOf = (doc) => { const { width, height } = doc.getSize(), p = predicted(doc.id); return { id: doc.id, x: p?.x ?? doc.x, y: p?.y ?? doc.y, w: width, h: height, round: isRound(doc) }; };
 
 /**
  * `tk.hit` for a carry record: the tokens of the scene as they are now, minus the locked ones and the ones hidden from the players (a
@@ -314,7 +321,7 @@ export function onRefreshToken(token, flags) { Front.onRefresh(token); ACTIVE.ge
 
 export function registerCarry() {
   Hooks.on("refreshToken", onRefreshToken);
-  Hooks.on("canvasTearDown", () => { for ( const c of [...ACTIVE.values()] ) c.end(true); SEEN.clear(); Front.clear(); });
+  Hooks.on("canvasTearDown", () => { for ( const c of [...ACTIVE.values()] ) c.end(true); SEEN.clear(); PENDING.clear(); Front.clear(); });
   Hooks.on("deleteToken", (doc) => { for ( const [t, c] of [...ACTIVE] ) if ( t.document === doc ) c.end(false); });
 }
 

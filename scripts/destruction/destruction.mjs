@@ -27,6 +27,7 @@ import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
 import * as Carry from "../tokens/carry.mjs";
 import { makeTk, validTk, unflatPath } from "../tokens/carry-core.mjs";
+import { frontPath } from "../tokens/plough-core.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
 
 /**
@@ -185,7 +186,10 @@ function onUpdateScene(scene, changed, _options, userId) {
     return;
   }
   Trace.event("remote-change", { keys: Object.keys(f), main: d && typeof d === "object" ? Object.keys(d) : null });
+  const had = S ? new Set((S.objects ?? []).map((o) => o.id)) : null;
   S = Store.attachPaths(Model.load(scene), scene);
+  // a carry the painting GM REDID (tk.rd: the redo's moment): it has no entry here (the stroke was entered before), so the carry plays on its own
+  if ( had && S ) for ( const o of S.objects ?? [] ) if ( !had.has(o.id) && o.tk?.rd && Date.now() - o.tk.rd < 300000 && carryOf(o.id) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: false });
   integrity(scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
@@ -224,8 +228,16 @@ let realCarry = null;                 // the stroke whose entry is being set up 
 const carryOf = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o && !o.k && validTk(o.tk) ? o : null; };
 const carryGeo = () => { const r = Model.sceneRect(); return { ap: S.ap, ox: r.x, oy: r.y }; };
 /** What display.enter asks (display.carry): the carried stroke's path (its entry runs along it) and the start of a carry. */
+const frontMemo = new WeakMap();      // tk -> { key, path }: the pile head's path (plough-core frontPath) of a stroke that ploughs tokens
 const carryHooks = {
   pathOf: (id) => { const o = carryOf(id); return o ? unflatPath(o.tk.p) : null; },
+  /** SUPERHERO: the entry's front runs along the head of the pile (the farthest pushed token), not the carrier; null (the carrier's path) when nobody is pushed. */
+  frontOf: (id) => {
+    const o = carryOf(id); if ( !o?.tk.hit?.length ) return null;
+    const geo = carryGeo(), key = `${geo.ap}|${geo.ox}|${geo.oy}`, m = frontMemo.get(o.tk);
+    if ( m?.key === key ) return m.path;
+    const path = frontPath(o.tk, geo); frontMemo.set(o.tk, { key, path }); return path;
+  },
   enter: (g, start, k) => { const o = carryOf(g.objId); if ( o ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id, live: () => !!display?.order?.some((q) => q.objId === o.id && q.anim) }); }
 };
 
@@ -1750,7 +1762,9 @@ export function edited(box, stroke = null) {
 /** The `tk` of a stroke that was dragged from a token: where the token starts and ends, the path in art px (thinned). */
 function carryRecord(stroke) {
   const pts = stroke.path?.length > 1 ? simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; })) : null;
-  const { snap, ends, grab, superhero } = stroke.carry, r = Model.sceneRect();
+  const { snap, ends, superhero } = stroke.carry, r = Model.sceneRect();
+  // a token an earlier stroke is still about to carry (its bake has not finished): it is grabbed (and ploughs, and is ploughed) where that stroke puts it
+  const pp = Carry.predicted(stroke.carry.grab.id), grab = pp ? { ...stroke.carry.grab, x0: pp.x, y0: pp.y } : stroke.carry.grab;
   const snapFn = snap ? (x, y, w, h) => { const c = canvas.grid.getSnappedPoint({ x: x + w / 2, y: y + h / 2 }, { mode: CONST.GRID_SNAPPING_MODES.CENTER }); return [c.x - w / 2, c.y - h / 2]; } : null;
   const tk = makeTk({ grab, a: stroke.a, b: stroke.b ?? stroke.a, path: pts, ends, rect: r, snap: snapFn });
   // SUPERHERO: the tokens it ploughs through, computed once from the scene as it is now (tokens/plough-core.mjs; part of `tk`, so it changes no pixel and no chunk id)
@@ -1764,6 +1778,7 @@ function carryRecord(stroke) {
 /** A stroke that carries a token should enter (and with it the carry); if its entry never does (nothing to show, a failed bake), the carry plays on its own. */
 function expectCarry(ob) {
   const id = ob.id, scene = canvas.scene;
+  Carry.expect(id, ob.tk);
   setTimeout(() => { if ( canvas.scene === scene && S?.objects?.some((q) => q.id === id) && !Carry.started(id) ) Carry.play({ objId: id, tk: ob.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true }); }, 12000);
 }
 
@@ -1860,8 +1875,9 @@ const redoStack = [];
 export function redoLast() {
   while ( redoStack.length && redoStack.at(-1).S !== S ) redoStack.pop();
   if ( !S || !redoStack.length ) return false;
-  const { o } = redoStack.pop();
+  let { o } = redoStack.pop();
   if ( S.objects.some((q) => q.id === o.id) ) return false;
+  if ( o.tk ) o = { ...o, tk: { ...o.tk, rd: Date.now() } };       // (a redone carry: the mark that makes every other client play the carry too)
   S.objects = [...S.objects, o];
   Model.compositeOver(S, o);
   const box = { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }, ab = artBox(box);

@@ -233,5 +233,51 @@ const rec = (tk, others, extra = {}) => X.ploughRecord({ tk, geo: GEO, carrier: 
   check(C.validTk(oldTk) && t1.D === t2.D && t1.dx === t2.dx, "format: an older carry reader plays the same carry without `hit`");
 }
 
+/* ---- 7. the pile head is the destruction's front */
+{
+  const EC = await imp("scripts/destruction/entry-clock.mjs");
+  const tk = tkOf([[50, 50, 0], [450, 50, 400], [900, 50, 900]], { x1: 850, y1: 0 });
+  check(X.frontPath(tk, GEO) === null && X.frontPath({ ...tk, hit: [] }, GEO) === null, "front: nobody pushed - no head path (the entry runs along tk.p, exactly as before)");
+  const hits = rec(tk, [tokenAt("A", 400, 50), tokenAt("B", 530, 50)]);
+  const tkh = { ...tk, hit: hits }, fp = X.frontPath(tkh, GEO);
+  check(fp && fp.length >= 3 && fp[0][2] === 0 && fp.at(-1)[2] === 900, "front: a head path from the carrier's start to the same last time");
+  check(fp.every((q, i) => i === 0 || q[2] > fp[i - 1][2]) && fp.every((q) => Number.isFinite(q[0] + q[1] + q[2])), "front: its times strictly increase");
+  for ( const k of [0.6, 1, 1.7] ) {
+    const Pc = EC.pathTimes(C.unflatPath(tk.p), k), Pf = EC.pathTimes(fp, k);
+    check(Pc && Pf && near(Pc.D, Pf.D, 1e-6), `front k ${k}: the head's run lasts exactly the carrier's (${Pf?.D.toFixed(1)} = ${Pc?.D.toFixed(1)})`);
+    let mono = true, lead = true, prev = -1e9, worst = Infinity, endLead = 0;
+    for ( let el = 0; el <= Pc.D; el += Pc.D / 211 ) {
+      const h = Pf.head(el), c = Pc.head(el); if ( !h || !c ) continue;
+      if ( h[0] < prev - 1e-6 ) mono = false;
+      prev = h[0]; worst = Math.min(worst, h[0] - c[0]); endLead = h[0] - c[0];
+      if ( h[0] < c[0] - 1e-6 ) lead = false;
+    }
+    check(mono, `front k ${k}: the head only ever moves forward`);
+    check(lead && worst > -1e-6, `front k ${k}: it is never behind the carrier`);
+    check(endLead > 150 && endLead < 260, `front k ${k}: at the end it leads by the pile (two tokens: ${endLead.toFixed(0)} px)`);
+  }
+  // before the first contact the head IS the carrier; right after it, it has not jumped
+  const Pc = EC.pathTimes(C.unflatPath(tk.p), 1), Pf = EC.pathTimes(fp, 1);
+  const early = Pf.head(hits[0].t0 * 0.5)[0] - Pc.head(hits[0].t0 * 0.5)[0], soon = Pf.head(hits[0].t0 + 15)[0] - Pc.head(hits[0].t0 + 15)[0];
+  check(Math.abs(early) < 1.5 && soon < 40, `front: equals the carrier until the contact (${early.toFixed(1)}) and ramps up after it (+15 ms: ${soon.toFixed(1)} px)`);
+  // the head tracks the farthest pushed token: its lead over the carrier at a few moments
+  let err = 0;
+  for ( const t of [500, 650, 800, 880] ) { const lead = Pf.head(t)[0] - Pc.head(t)[0], farB = along(hits[1], t)[0] - carrierAt(tk, t)[0]; err = Math.max(err, Math.abs(lead - farB)); }
+  check(err < 25, `front: it follows the farthest pushed token within ${err.toFixed(1)} px (rate limit)`);
+  check(JSON.stringify(X.frontPath(tkh, GEO)) === JSON.stringify(fp), "front: deterministic");
+  const g2 = { ap: 4, ox: 20, oy: 10 }, tk4 = { ...tk, p: tk.p.map((v, i) => i % 3 === 2 ? v : ((v - (i % 3 === 0 ? 20 : 10)) / 4)) }, hits4 = X.ploughRecord({ tk: tk4, geo: g2, carrier: { w: 100, h: 100, round: false }, others: [tokenAt("A", 400, 50)], rect: null });
+  const f4 = X.frontPath({ ...tk4, hit: hits4 }, g2);
+  check(hits4.length === 1 && f4 && f4.at(-1)[0] * 4 + 20 > (tk4.p.at(-3) * 4 + 20) + 60, "front: in art px at another scale (ap 4)");
+}
+
+/* ---- 8. positions of carries that are committed but not played yet */
+{
+  const a = { tk: { id: "c1", x0: 0, y0: 0, x1: 500, y1: 10, e: 0, hit: [{ id: "A", x0: 100, y0: 0, x1: 600, y1: 12, t0: 1, p: [1, 2, 3, 4, 5, 6] }] } };
+  const b = { tk: { id: "A", x0: 600, y0: 12, x1: 300, y1: 40, e: 0 } };
+  check(X.pendingPosition([a], "c1")?.x === 500 && X.pendingPosition([a], "A")?.x === 600 && X.pendingPosition([a], "zz") === null, "pending: the carried and the pushed tokens are where the carry puts them");
+  check(X.pendingPosition([a, b], "A")?.x === 300 && X.pendingPosition([b, a], "A")?.x === 600, "pending: the later stroke wins (commit order)");
+  check(X.pendingPosition([{ tk: { ...a.tk, e: 1 } }], "c1") === null && X.pendingPosition([], "c1") === null && X.pendingPosition(null, "c1") === null, "pending: a returning carry moves nobody");
+}
+
 console.log(failed ? `${failed} FAILED` : "plough: all ok");
 process.exit(failed ? 1 : 0);

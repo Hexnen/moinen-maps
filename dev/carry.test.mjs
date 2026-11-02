@@ -186,5 +186,47 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
   performance.now = realNow;
 }
 
+/* ---- 7. the hand-over: judged against the real target, never stuck, no pop on a remote client */
+{
+  const D = 655, out = { x: 0, y: 0, w: 1, done: false };
+  const base = { D, mode: "real", c0x: 100, c0y: 100, dx: 0, dy: 0 };
+  // (a) snapped: the document goes to the SNAPPED target (off the raw path end); the carry ends soon after it arrives
+  const run = (target, bAt) => {
+    const st = { waitFrom: 0, arrivedAt: 0 }; let doneAt = null;
+    for ( let el = -200; el < 6000; el += 16 ) {
+      const arrivedNow = el >= bAt;
+      C.offsetAt(st, { ...base, now: el + 1000, el, bx: arrivedNow ? target[0] : 100, by: arrivedNow ? target[1] : 100, tx: target[0], ty: target[1], dx: el > 0 ? Math.min(el / D, 1) * 400 : 0, dy: 0 }, out);
+      if ( out.done ) { doneAt = el; break; }
+    }
+    return doneAt;
+  };
+  const snapped = run([520, 114], D + 40);
+  check(snapped !== null && snapped < D + 40 + C.LAND_MS + C.GLIDE_MS + 300, `hand-over: a snapped carry (target off the raw path end) is over ${snapped} ms in (hand-over at ${D + 40})`);
+  const never = run([520, 114], 1e9);
+  check(never !== null && never <= D + C.LAND_MS + C.WAIT_MS + C.GLIDE_MS + 450, `hand-over: a document that never arrives lets go at ${never} ms (the cap is ${D + C.LAND_MS + C.WAIT_MS + C.GLIDE_MS + 450})`);
+  const plain = run([500, 100], D + 40);
+  check(plain !== null && plain < D + 40 + C.LAND_MS + C.GLIDE_MS + 300, "hand-over: an unsnapped carry is over soon after its hand-over");
+  // (b) no pop on a remote client: the document is already at the target before the ride begins here: the token waits at the grab point
+  const st = { waitFrom: 0, arrivedAt: 0 };
+  let maxJump = 0, prev = null, ok = true;
+  for ( let el = -600; el < D + 800; el += 8 ) {
+    const dx = el > 0 ? Math.min(el / D, 1) * 420 : 0;
+    C.offsetAt(st, { ...base, now: el + 5000, el, bx: 520, by: 100, tx: 520, ty: 100, dx, dy: 0 }, out);
+    const shown = 520 + out.x;                        // base + offset: where the token is drawn
+    if ( el < 0 && Math.abs(shown - 100) > 1e-6 ) ok = false;           // at the grab point until its own front starts
+    if ( prev !== null ) maxJump = Math.max(maxJump, Math.abs(shown - prev));
+    prev = shown;
+  }
+  check(ok && maxJump < 20, `hand-over: a remote token whose document is already at the end waits at the grab point, then rides (max step ${maxJump.toFixed(1)} px, no jump)`);
+  // (c) the GM's own live case is unchanged: the document is at the start until the hand-over
+  const st2 = { waitFrom: 0, arrivedAt: 0 }; C.offsetAt(st2, { ...base, now: 1, el: -50, bx: 100, by: 100, tx: 520, ty: 100, dx: 0, dy: 0 }, out);
+  check(out.x === 0 && out.y === 0, "hand-over: the carrier's own client before the front starts: no offset");
+  // (d) a returning carry never waits for a document
+  const st3 = { waitFrom: 0, arrivedAt: 0 }; let ret = null;
+  for ( let el = 0; el < 4000 && ret === null; el += 16 ) { C.offsetAt(st3, { ...base, mode: "return", now: el, el, bx: 100, by: 100, tx: 520, ty: 100, dx: 400, dy: 0 }, out); if ( out.done ) ret = el; }
+  check(ret !== null && ret < D + C.HOLD_RETURN_MS + C.GLIDE_MS + 50, "hand-over: a returning token holds, glides home and is done");
+  check(C.weightAt(D + 400000, D, "real", false, 400000).done, "weight: a huge wait (the old stuck state: waited grows as fast as the time) is done");
+}
+
 console.log(failed ? `${failed} FAILED` : "carry: all ok");
 process.exit(failed ? 1 : 0);

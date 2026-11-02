@@ -299,3 +299,68 @@ export function buildHitTimeline(h, { k = 1 } = {}) {
   for ( let i = 0; i < n; i++ ) { X[i] = h.p[3 * i]; Y[i] = h.p[3 * i + 1]; tt[i] = h.p[3 * i + 2] * k; }
   return { n, X, Y, tt, D: tt[n - 1], x0: X[0], y0: Y[0], dx: X[n - 1] - X[0], dy: Y[n - 1] - Y[0], i: 0 };
 }
+
+/* ------------------------------------------------------------------ the pile head is the destruction's front */
+
+export const FRONT_RATE = 1;       // px / ms: how fast the head's lead over the carrier may grow or shrink (a token joining does not make the front jump)
+export const MAX_FRONT_PTS = 400;
+
+/**
+ * THE PILE HEAD LEADS THE ENTRY. With tokens ploughed, the destruction's front is not the carrier but the head of the pile: at every moment the
+ * point on the carried token's heading that lies as far ahead as the farthest pushed token (its lead over the carrier along the heading, rate
+ * limited and never taking the head back). The result is the path the entry runs along instead of the carrier's: [[x, y, ms], ...] in ART px
+ * with ms on the stroke's own (hand) clock, so entry-clock pathTimes gives it the very same run D as the carrier's (first point 0, last point the
+ * same T) and a carrier's own pose is untouched (it keeps tk.p). Null when nobody is pushed (the entry then runs along tk.p exactly as before).
+ * Deterministic from the record: the same on every client, for a live entry and a replay.
+ */
+export function frontPath(tk, geo, { rate = FRONT_RATE } = {}) {
+  const hits = hitsOf(tk); if ( !hits.length ) return null;
+  const tl = buildTimeline(tk, { ...geo, k: 1 }); if ( !tl ) return null;
+  const T = tk.p[tk.p.length - 1] || 0, D1 = tl.D; if ( !(T > 0) || !(D1 > 0) ) return null;
+  const scale = T / D1, { ap = 1, ox = 0, oy = 0 } = geo;
+  // the moments: the carrier's own samples and every pushed token's
+  let ts = new Set([0, D1]); for ( let i = 0; i < tl.n; i++ ) ts.add(tl.tt[i]);
+  for ( const h of hits ) { for ( let i = 2; i < h.p.length; i += 3 ) ts.add(Math.min(D1, h.p[i])); ts.add(Math.max(0, h.p[2] - 1)); }    // (and just before a contact: the head stays on the carrier until then)
+  for ( let t = 25; t < D1; t += 25 ) ts.add(t);                                  // (a sample at least every 25 ms: the lead ramps, it does not interpolate across a gap)
+  ts = [...ts].filter((t) => t >= 0 && t <= D1).sort((a, b) => a - b);
+  if ( ts.length > MAX_FRONT_PTS ) { const s = (ts.length - 1) / (MAX_FRONT_PTS - 1); ts = Array.from({ length: MAX_FRONT_PTS }, (_, i) => ts[Math.round(i * s)]); }
+  const ht = hits.map((h) => ({ h, n: h.p.length / 3, i: 1 }));
+  const at = (e, t, out) => {       // a hit's centre at t (linear on its samples), false before its contact
+    const p = e.h.p; if ( t < p[2] ) return false;
+    while ( e.i < e.n - 1 && p[e.i * 3 + 2] < t ) e.i++;
+    while ( e.i > 1 && p[(e.i - 1) * 3 + 2] >= t ) e.i--;
+    const a = (e.i - 1) * 3, b = e.i * 3, f = p[b + 2] > p[a + 2] ? Math.min(1, (t - p[a + 2]) / (p[b + 2] - p[a + 2])) : 1;
+    out[0] = p[a] + (p[b] - p[a]) * f; out[1] = p[a + 1] + (p[b + 1] - p[a + 1]) * f; return true;
+  };
+  const o = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, q = [0, 0], out = [];
+  let ux = 1, uy = 0, eff = 0, pt = 0, ppx = tl.X[0], ppy = tl.Y[0];
+  for ( let j = 0; j < ts.length; j++ ) {
+    const t = ts[j];
+    displacementAt(tl, t, o);
+    const px = tl.X[0] + o.x, py = tl.Y[0] + o.y;
+    if ( o.ux || o.uy ) { ux = o.ux; uy = o.uy; }
+    let raw = 0;
+    for ( const e of ht ) if ( at(e, t, q) ) raw = Math.max(raw, (q[0] - px) * ux + (q[1] - py) * uy);
+    const dt = t - pt, step = Math.hypot(px - ppx, py - ppy);
+    eff = clamp(raw, Math.max(0, eff - step), eff + rate * dt);     // (never back: the head only falls behind as far as the carrier has moved)
+    pt = t; ppx = px; ppy = py;
+    const ms = j === 0 ? 0 : j === ts.length - 1 ? T : t * scale;
+    out.push([Math.round(((px + ux * eff - ox) / ap) * 100) / 100, Math.round(((py + uy * eff - oy) / ap) * 100) / 100, ms]);
+  }
+  return out;
+}
+
+/**
+ * Where tokens are once the carries that are COMMITTED BUT NOT YET PLAYED have moved them: a stroke drawn while an earlier one is still waiting
+ * for its bake must see (and grab, and plough) the tokens where that one is about to put them, not where their documents still are. `pending`
+ * the not yet applied real carries in commit order [{ tk }]; returns { x, y } (top-left) for the token or null (untouched).
+ */
+export function pendingPosition(pending, id) {
+  let pos = null;
+  for ( const p of pending ?? [] ) {
+    const tk = p?.tk; if ( !tk || tk.e ) continue;
+    if ( tk.id === id ) pos = { x: tk.x1, y: tk.y1 };
+    for ( const h of hitsOf(tk) ) if ( h.id === id ) pos = { x: h.x1, y: h.y1 };
+  }
+  return pos;
+}
