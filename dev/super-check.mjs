@@ -345,3 +345,78 @@ export async function superTeardown() {
   await canvas.scene.updateEmbeddedDocuments("Token", s.saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false });
   return true;
 }
+
+/* ================================================================== presence: what a pushed token must keep, and repeated ploughs */
+
+/** Everything a token keeps when nobody poses it: visible, drawn, interactive, its mesh and container on the document, no leftover hold. */
+async function presenceOf(t, base) {
+  const [{ tokenBusy }, F] = await Promise.all([import(`/modules/${MODULE}/scripts/token-drop.mjs`), import(`/modules/${MODULE}/scripts/tokens/carry-front.mjs`).catch(() => null)]);
+  const m = t.mesh, d = t.document, w = d.getSize();
+  const out = {
+    name: d.name, visible: !!t.visible, meshVisible: !!m?.visible, renderable: !!m?.renderable, alpha: +(m?.alpha ?? 0).toFixed(3), eventMode: t.eventMode,
+    dMesh: +Math.hypot(m.position.x - (d.x + w.width / 2), m.position.y - (d.y + w.height / 2)).toFixed(2), dCont: +Math.hypot(t.position.x - d.x, t.position.y - d.y).toFixed(2),
+    scale: [+m.scale.x.toFixed(3), +m.scale.y.toFixed(3)], rot: +m.rotation.toFixed(3), sortLayer: m.sortLayer, busy: tokenBusy(t),
+    held: F?._frontState ? F._frontState().holds.some(([id]) => id === d.id) : false, hit: !!t.hitArea?.contains(w.width / 2, w.height / 2),
+    light: t.light ? Math.hypot(t.light.x - (d.x + w.width / 2), t.light.y - (d.y + w.height / 2)) : null,
+  };
+  out.ok = out.visible && out.meshVisible && out.renderable && out.alpha === base.alpha && out.dMesh < 1.5 && out.dCont < 1.5 && out.scale[0] === base.scale[0] && out.scale[1] === base.scale[1]
+    && Math.abs(out.rot - base.rot) < 0.002 && !out.busy && !out.held && out.hit && out.eventMode === base.eventMode && out.sortLayer === base.sortLayer && (out.light === null || out.light < 1.5);
+  return out;
+}
+
+/**
+ * THREE consecutive ploughs over six tokens (right through the row; right again through the same pile; then the front token dragged back
+ * LEFT through all of them): after each, every token (pushed or not) has full presence (presenceOf), every pushed token of the stroke moved,
+ * the documents are at the recorded finals, no Carry or ticker listener is left, and each token can be selected. Returns { ok, rows, log }.
+ */
+export async function superRepeatCheck({ strokesN = 3, quick = false } = {}) {
+  const M = await mods(), { K } = M, d = D(), rows = [], made = [], log = [];
+  const tickBefore = canvas.app.ticker.count;
+  await ensureTokens(6, made);
+  const all = canvas.tokens.placeables.filter((t) => !t.document.locked), tokens = all.slice(0, 6);
+  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y }));
+  const G = canvas.grid.size, R = canvas.dimensions.sceneRect;
+  const rest = canvas.tokens.placeables.filter((t) => !tokens.includes(t));
+  for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
+  const upd = watchUpdates();
+  try {
+    await prep(); await layout(tokens[0], tokens.slice(1), G, R);
+    const base = tokens.map((t) => ({ alpha: +t.mesh.alpha.toFixed(3), scale: [+t.mesh.scale.x.toFixed(3), +t.mesh.scale.y.toFixed(3)], rot: +t.mesh.rotation.toFixed(3), eventMode: t.eventMode, sortLayer: t.mesh.sortLayer }));
+    let prevHits = [];
+    for ( let n = 1; n <= strokesN; n++ ) {
+      // stroke 1: the first token right; 2: the same token right again; 3: the front-most token left
+      const sorted = [...tokens].sort((a, b) => a.document.x - b.document.x);
+      const carrier = n < 3 ? tokens[0] : sorted.at(-1), dir = n < 3 ? 1 : -1;
+      const c = cen(carrier), len = (n === 1 ? 15 : 8) * G;
+      const before = tokens.map((t) => [t.document.x, t.document.y]);
+      upd.reset();
+      const r = await run(M, tokens, { pts: line(c, { x: c.x + dir * len, y: c.y }, 50), settle: quick ? 150 : 2200, waitPlay: !quick });
+      if ( quick && n === strokesN ) { await wait(() => K._carryStats().played >= 0 && K._carryStats().active === 0 && strokes().every((o) => !o.tk || K.started(o.id)), 40000); await sleep(2500); }
+      const tk = r.o?.tk, hits = tk?.hit ?? [];
+      const pres = []; for ( const [i, t] of tokens.entries() ) pres.push(await presenceOf(t, base[i]));
+      const moved = hits.map((h) => { const t = tokens.find((q) => q.document.id === h.id); return t && nearD(t.document.x, h.x1) && nearD(t.document.y, h.y1) && Math.hypot(h.x1 - h.x0, h.y1 - h.y0) > 3; });
+      // the pile in this stroke: how many tokens were collected / how many the geometry says it must (every token the carrier's path-end region reaches)
+      rows.push(row(`stroke ${n}: a carry with a plough record (${hits.length} pushed)`, !!tk && hits.length >= 3 && (n === 1 ? hits.length === 5 : true), { hits: hits.map((h) => h.id), t0: hits.map((h) => h.t0) }));
+      rows.push(row(`stroke ${n}: EVERY pushed token moved to its recorded final (document) in one batch`, hits.length > 0 && moved.every(Boolean) && upd.calls.length === 1 && upd.calls[0] === hits.length + 1, { moved, calls: [...upd.calls] }));
+      rows.push(row(`stroke ${n}: every token keeps full presence afterwards (visible, drawn, interactive, mesh and container on the document, no hold, no leftover)`, pres.every((p) => p.ok), { bad: pres.filter((p) => !p.ok) }));
+      rows.push(row(`stroke ${n}: nothing is left running (no Carry, no ticker listener of the carry)`, K._carryStats().active === 0 && !K._carryStats().ticking && canvas.app.ticker.count <= tickBefore + 1, { stats: K._carryStats(), ticker: canvas.app.ticker.count, before: tickBefore }));
+      // selectable
+      let sel = true; for ( const t of tokens ) { t.control({ releaseOthers: true }); if ( !t.controlled ) sel = false; }
+      canvas.tokens.releaseAll();
+      rows.push(row(`stroke ${n}: every token can be selected`, sel));
+      // each pushed token's displayed centre followed ahead of the carrier (first, second, third ... all moved)
+      const idx = hits.map((h) => tokens.findIndex((t) => t.document.id === h.id));
+      const mv = idx.map((i) => Math.max(...r.rows.map((q) => Math.hypot(q.p[i][0] - (before[i][0] + tokens[i].w / 2), q.p[i][1] - (before[i][1] + tokens[i].h / 2)) || 0)));
+      rows.push(row(`stroke ${n}: every pushed token was SEEN moving (max displacement of each: ${mv.map(Math.round)})`, mv.length > 0 && mv.every((v) => v > G * 1.2), { mv: mv.map(Math.round) }));
+      log.push({ n, hits: hits.length, pres: pres.map((p) => ({ name: p.name, ok: p.ok })), docs: tokens.map((t) => [t.document.x, t.document.y]) });
+      prevHits = hits;
+    }
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
+  finally {
+    upd.stop(); canvas.tokens.releaseAll();
+    try { await game.settings.set(MODULE, "destrSuper", false); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+    try { if ( made.length ) await canvas.scene.deleteEmbeddedDocuments("Token", made); await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false }); } catch { /* ignore */ }
+  }
+  return { ok: rows.every((r) => r.ok), rows, log };
+}
