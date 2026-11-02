@@ -89,7 +89,7 @@ const live = (f) => f.timers.filter((t) => !t.off).length;
   f.run(2600);
   eq([f.stage.position.x, f.stage.position.y], [500, 300], "shake decayed to the exact start");
   const p = fx.end(); let ended = false; p.then(() => { ended = true; });
-  f.run(900); await Promise.resolve();
+  f.run(900); await new Promise((r) => setTimeout(r, 0));
   ok(ended && !fx.active, "end resolves");
   ok(f.ticks.size === 0 && f.page.children.length === 0 && live(f) === 0, "nothing left: no ticker, no overlay, no timers");
   eq([f.stage.position.x, f.stage.position.y], [500, 300], "stage exact after end");
@@ -212,5 +212,22 @@ const live = (f) => f.timers.filter((t) => !t.off).length;
   const fr = L.planFrame({ x0: 0, y0: 0, x1: 100, y1: 100 }, { scale: 1, vw: 1600, vh: 900 }, r);
   ok(fr.scale <= 3 && fr.scale >= 1, "frame clamped to camZoomMax");
   eq(L.boxOf(strokes, null), { x0: 100, y0: 100, x1: 1300, y1: 700 }, "box of strokes");
+}
+
+// 13. a slow return move (animatePan runs on the ticker's clock, slower than the wall clock on a slow machine) is waited for, not cut off
+{
+  const f = fakeEnv(), fx = L.createFx(() => f.env); let release, returnCalls = 0;
+  f.env.pan = (v) => { f.pans.push(v); if ( v.x === 1000 && v.y === 800 ) { returnCalls++; return new Promise((res) => { release = res; }); } return Promise.resolve(true); };
+  fx.begin({ r: R() }, { strokes }); fx.impact({ x: 100, y: 100, size: 80 }); f.run(1800);
+  const p = fx.end(); let ended = false; p.then(() => { ended = true; });
+  f.run(2500); await new Promise((r) => setTimeout(r, 0));
+  ok(returnCalls === 1 && !ended && fx.active && f.stops === 0, "return move still running: the show waits, nothing is terminated");
+  release(true); await new Promise((r) => setTimeout(r, 0)); f.run(400); await new Promise((r) => setTimeout(r, 0));
+  ok(ended && !fx.active && f.page.children.length === 0 && f.ticks.size === 0 && f.stops === 0, "ends cleanly after the move finished");
+  // ...but never forever: the cap releases a move that never finishes
+  const g = fakeEnv(), fy = L.createFx(() => g.env); g.env.pan = () => new Promise(() => {});
+  fy.begin({ r: R() }, { strokes }); const q = fy.end(); let e2 = false; q.then(() => { e2 = true; });
+  for ( let i = 0; i < 40; i++ ) { g.run(250); await new Promise((r) => setTimeout(r, 0)); }
+  ok(e2 && g.page.children.length === 0, "a move that never finishes is capped");
 }
 console.log(`cinematic-fx: ${n} checks passed`);

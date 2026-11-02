@@ -178,7 +178,7 @@ export function createFx(getEnv) {
   function startCamera(s) {
     const v = s.env.view();
     s.prev = { x: v.x, y: v.y, scale: v.scale };
-    s.guard = new AbortGuard(s.env.canvasEl, s.env.win, () => abortCamera(s));
+    s.guard = new AbortGuard(s.env.canvasEl, s.env.win, (kind) => abortCamera(s, kind));
     s.guard.attach();
     s.cam = { on: true, view: v };
     if ( s.r.camMode === "frame" ) {
@@ -186,9 +186,9 @@ export function createFx(getEnv) {
       if ( box ) pan(s, planFrame(box, v, s.r));
     }
   }
-  function abortCamera(s) {
+  function abortCamera(s, kind) {
     if ( !s.cam?.on ) return;
-    s.cam.on = false; s.cam.aborted = true; s.prev = null;
+    s.cam.on = false; s.cam.aborted = kind || true; s.prev = null;
     try { s.env.stopPan?.(); } catch { /* nothing animating */ }
     s.guard?.detach();
   }
@@ -263,14 +263,18 @@ export function createFx(getEnv) {
     s.ending = new Promise((res) => { s.endRes = res; });
     const r = s.r, camBack = !!(s.cam?.on && s.prev), hold = camBack ? r.camHold : 0;
     later(s, () => {
-      let wait = s.ov?.bars || s.ov?.vignette ? r.lbOut : 0;
+      const outMs = s.ov?.bars || s.ov?.vignette ? r.lbOut : 0;
+      let back = Promise.resolve();
       if ( camBack ) {
+        // (the view goes back through animatePan, whose clock is the ticker's: on a slow machine it runs slower than the wall clock, so
+        // the end waits for the move itself - with a generous cap - instead of cutting it off)
         const dur = Cin.moveDuration(r.camReturn, frameMs(s));
-        try { Promise.resolve(s.env.pan({ ...s.prev, duration: dur, easing: camEasing(r.camEase) })).catch(() => {}); } catch ( err ) { console.error(err); }
-        wait = Math.max(wait, dur);
+        try { back = Promise.race([Promise.resolve(s.env.pan({ ...s.prev, duration: dur, easing: camEasing(r.camEase) })).catch(() => {}), new Promise((res) => later(s, res, dur * 4 + 1500))]); } catch ( err ) { console.error(err); }
       }
+      s.graceful = true;
       s.ov?.hide();
-      later(s, () => finish(s), wait + 60);
+      s.onDone.push(() => {});
+      Promise.all([back, new Promise((res) => later(s, res, outMs + 60))]).then(() => { if ( !s.done ) finish(s); });
     }, hold);
     return s.ending;
   }
@@ -286,7 +290,7 @@ export function createFx(getEnv) {
     step(() => s.env.ticker.remove(s.tick));
     step(() => s.shaker?.restore());
     step(() => s.guard?.detach());
-    step(() => { if ( s.cam?.on ) s.env.stopPan?.(); });
+    step(() => { if ( s.cam?.on && !s.graceful ) s.env.stopPan?.(); });          // (a graceful end lets the return move finish)
     step(() => endSlow(s));
     step(() => s.ov?.destroy());
     step(() => s.endRes?.());
@@ -319,7 +323,7 @@ export function createFx(getEnv) {
     /** The slow-motion factor in force now (1 = none). */
     get rate() { const w = S?.slow; return w?.set != null && w.base ? w.set / w.base : 1; },
     /** For checks: what is on screen and in effect. */
-    debug: () => S && ({ eff: S.eff, bars: !!S.ov?.bars, vignette: !!S.ov?.vignette, flash: !!S.ov?.flashEl, shake: S.shaker?.offset ?? null, shaking: !!S.shake, cameraOn: !!S.cam?.on, cameraAborted: !!S.cam?.aborted,
+    debug: () => S && ({ eff: S.eff, bars: !!S.ov?.bars, vignette: !!S.ov?.vignette, flash: !!S.ov?.flashEl, shake: S.shaker?.offset ?? null, shaking: !!S.shake, cameraOn: !!S.cam?.on, cameraAborted: !!S.cam?.aborted, abortedBy: S.cam?.aborted ?? null,
       slow: !!S.slow, ending: !!S.ending, preview: S.preview, impacts: S.n, root: S.ov?.root ?? null, timers: S.timers.size })
   };
 }
