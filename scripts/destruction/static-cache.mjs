@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
 import { cachedSetting } from "../setting-cache.mjs";
 import { bandKey as bandKeyOf } from "../net/chunks.mjs";
+import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
 
 /**
  * STATIC CACHE of the destruction layer (PERF). Every damage object (map patch + ruin + shards, an erase stroke, ...) is a container in
@@ -122,7 +123,10 @@ uniform float uSoft;
 uniform vec2 uSoftK;
 uniform float uAA;
 uniform float uAlpha;
+uniform float uMode;
+uniform float uK;
 out vec4 fragColor;
+${SHARP_SAMPLER_GLSL}
 // one filtered sample of the tile at uv (the resting sampler: crisp texel squares with a screen pixel of smoothing when magnified,
 // the mipmaps when minified)
 vec4 samp(vec2 uv) {
@@ -138,7 +142,15 @@ vec4 samp(vec2 uv) {
 }
 void main() {
   vec4 c;
-  if ( uAA > 0.0 ) {
+  if ( uMode > 0.5 ) {
+    // EDGE (default): the one sampler (sharp-sampler.mjs), scale-continuous at every zoom: texel edges get one screen pixel of
+    // anti-aliasing, minified it is bilinear + mips; below 1 screen px per texel four taps on a rotated grid (the footprint-wide filter)
+    if ( uAA > 0.0 ) {
+      vec2 dx = dFdx(vUV) * uAA, dy = dFdy(vUV) * uAA;
+      c = 0.25 * (sharpSample(uTex, vUV + dx * 0.125 + dy * 0.375, uSize, uK) + sharpSample(uTex, vUV + dx * 0.375 - dy * 0.125, uSize, uK)
+                + sharpSample(uTex, vUV - dx * 0.125 - dy * 0.375, uSize, uK) + sharpSample(uTex, vUV - dx * 0.375 + dy * 0.125, uSize, uK));
+    } else c = sharpSample(uTex, vUV, uSize, uK);
+  } else if ( uAA > 0.0 ) {
     // ZOOM AA (a fixed spatial filter of the SCALE, the same for every tile and every frame - no time-varying softening, so no tile
     // or band is ever blurred differently from its neighbour): four taps on a rotated grid inside the screen pixel's footprint,
     // each through the mipmaps (the footprint of one screen pixel is the derivative of the uv, so it is right at every scale)
@@ -197,7 +209,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1 });
     this.state = PIXI.State.for2d();
   }
 
@@ -225,7 +237,8 @@ export class SharpTile extends PIXI.Container {
     // cache was 5-11 % crisper than it at 2-3 ("map" at 200 % DPR, crispCheck 1.113 / 1.048 / 1.075 -> 0.99); wavingCheck unchanged)
     const r0 = globalThis.CONFIG?.moinenMaps?.sharpFrom ?? RAMP0;
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
-    const cm = globalThis.CONFIG?.moinenMaps, aaOn = cm?.zoomAA !== false;
+    const cm = globalThis.CONFIG?.moinenMaps, aaOn = cm?.zoomAA !== false, edge = aaOn && cm?.zoomAA !== "mips";
+    un.uMode = edge ? 1 : 0; un.uK = cm?.edgeK ?? 1;
     un.uSoft = aaOn || cm?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison; with zoomAA there is no time-varying softening at all)
     un.uAA = aaOn ? aaWeight(sc, cm?.aaK) : 0;
     const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;

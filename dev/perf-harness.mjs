@@ -2353,8 +2353,24 @@ export const CAMERA_MOVES = [
   { name: "in 1>3 1500ms", z0: 1, z1: 3, ms: 1500 }, { name: "out 3>1 1500ms", z0: 3, z1: 1, ms: 1500 },
   { name: "pan+zoom 1>2.2 800ms shake", z0: 1, z1: 2.2, ms: 800, pan: [200, 120], shake: 3 },
   { name: "shake only z2.6", z0: 2.6, z1: 2.6, ms: 600, shake: 4 },
+  { name: "in 2>8 600ms", z0: 2, z1: 8, ms: 600 }, { name: "out 6>1 500ms", z0: 6, z1: 1, ms: 500 },
+  { name: "pan+zoom 1.5>4 500ms shake", z0: 1.5, z1: 4, ms: 500, pan: [80, 50], shake: 2 },
 ];
-export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy = null } = {}) {
+/** The destruction layer drawn `f` times denser and box-averaged down to the screen's pixels: the ideal an anti-aliased frame should approach. */
+export function grabSS(f = 4) {
+  const R = canvas.app.renderer, w = R.screen.width, h = R.screen.height, k = R.resolution;
+  const rt = PIXI.RenderTexture.create({ width: w, height: h, resolution: k * f });
+  R.render(D().objs, { renderTexture: rt, transform: canvas.primary.worldTransform.clone(), clear: true });
+  const big = R.extract.pixels(rt); rt.destroy(true);
+  const PW = Math.round(w * k), PH = Math.round(h * k), BW = PW * f, out = new Uint8ClampedArray(PW * PH * 4), n = f * f;
+  for ( let y = 0; y < PH; y++ ) for ( let x = 0; x < PW; x++ ) for ( let c = 0; c < 4; c++ ) {
+    let sum = 0;
+    for ( let j = 0; j < f; j++ ) for ( let i = 0; i < f; i++ ) sum += big[(((y * f + j) * BW) + x * f + i) * 4 + c];
+    out[(y * PW + x) * 4 + c] = sum / n;
+  }
+  return out;
+}
+export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy = null, ss = 0, ref = 0 } = {}) {
   const R = canvas.app.renderer, d = D(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
   cx ??= sr.x + sr.width * 0.5; cy ??= sr.y + sr.height * 0.5;
   const PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
@@ -2399,15 +2415,16 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
       const tilesNow = tileRects();
       let boxSum = 0, boxN = 0, softSum = 0, beatSum = 0, beatN = 0, bp = null, bpp = null, lastSharp = NaN;
-      const cpu = [], inks = [], seam = new Map();
+      const cpu = [], inks = [], seam = new Map(), errs = [];
       const blocks = []; const rx = cx - 120, ry = cy - 80;
       for ( let y = ry; y < ry + 160; y += BLK ) for ( let x = rx; x < rx + 240; x += BLK ) blocks.push([x, y]);
       for ( let i = 0; i < n; i++ ) {
         const e = ease(i / (n - 1)), z = Math.exp(Math.log(z0) + (Math.log(z1) - Math.log(z0)) * e);
         setView(cx + pan[0] * e, cy + pan[1] * e, z, shake * rnd() * 2, shake * rnd() * 2);
         V += 1000 / fps; const t0 = real(); T.update(V); gl.finish(); cpu.push(real() - t0);
-        const px = grab(), M = canvas.primary.worldTransform;
-        { const v0 = V; V += 1000; T.update(V); V = v0; T.lastTime = v0; } const pr = grab();           // (the clock goes back: the next frame follows the move's own time) the same view at REST (the clock a second on, nothing moved): what the move must not differ from
+        const px = ss > 1 ? grabSS(ss) : grab(), M = canvas.primary.worldTransform;
+        { const v0 = V; V += 1000; T.update(V); V = v0; T.lastTime = v0; } const pr = ss > 1 ? grabSS(ss) : grab();           // (the clock goes back: the next frame follows the move's own time) the same view at REST (the clock a second on, nothing moved): what the move must not differ from
+        if ( ref ) { const rf = grabSS(ref); let e = 0, nn = 0; for ( let q = 0; q < px.length; q += 4 ) { if ( px[q + 3] < 8 && rf[q + 3] < 8 ) continue; e += Math.abs(px[q] - rf[q]) + Math.abs(px[q + 1] - rf[q + 1]) + Math.abs(px[q + 2] - rf[q + 2]) + Math.abs(px[q + 3] - rf[q + 3]); nn++; } errs.push(nn ? e / nn / 4 : 0); }
         const whole = stats(px, [0, 0, PW, PH]);
         // boxes: per 48 px cell with art, log(sharpness in the move / at rest); a softening that treats areas alike moves every cell the
         // same (the spread is 0), one that touches the bands and not the live runs, or each tile by its own sampling, spreads them
@@ -2445,7 +2462,8 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       const rest = stats(grab(), [0, 0, PW, PH]).sharp;
       const seams = [...seam.values()].map((v) => (v.dev / Math.max(1e-6, v.ctl)) / Math.max(0.2, v.dev2 / Math.max(1e-6, v.ctl2))).sort((a, b) => b - a);
       const cs = cpu.slice().sort((a, b) => a - b);
-      rows.push({ move: mv.name, frames: n, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
+      const es = errs.slice().sort((a, b) => a - b);
+      rows.push({ move: mv.name, frames: n, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
         pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
     }
   } finally {
