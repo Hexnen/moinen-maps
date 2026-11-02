@@ -3,6 +3,7 @@ import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION } from "./core.mjs";
 import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
+import { unpackLook } from "./look-pack.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
 import * as Trace from "../net/trace.mjs";
@@ -497,7 +498,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       };
       const take = (list, res, plain = false) => {
         const t0 = performance.now();
-        const parts = res.parts ? new Map(res.parts) : Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+        const parts = res.parts ? new Map([...res.parts, ...(res.packs ?? []).map(([i, pk]) => [i, unpackLook(pk)])]) : Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
         slow("take:split", t0, { n: list.length, plain });
         for ( const w of list ) {
           const sprites = parts.get(w.index) ?? [];
@@ -546,7 +547,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           // (a background Rebake: the plain looks its strokes read go to each lane ONCE, a look per message between frames (prime), and the
           // jobs only name them - copying them into every job held the page for up to 1.5 s per job)
           const tIn = performance.now();
-          let inputs = jobs.map((jb) => ({ ...inputOf(jb, plain), split: META_FIELDS })), prime = null;
+          let inputs = jobs.map((jb) => ({ ...inputOf(jb, plain), split: META_FIELDS, pack: !globalThis.CONFIG?.moinenMaps?.noLookPack })), prime = null;
           slow("inputs", tIn, { jobs: jobs.length, plain });
           if ( redoSet.size && !plain ) {
             const sent = new Map();
@@ -558,16 +559,19 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
                 const k = `${S.objects[j].id}|${FS[j].own}`;
                 underKeys[j] = k; if ( !sent.has(k) ) sent.set(k, pl);
               }
-              return { ...inputOf(jb, plain), under: {}, underKeys, split: META_FIELDS };
+              return { ...inputOf(jb, plain), under: {}, underKeys, split: META_FIELDS, pack: !globalThis.CONFIG?.moinenMaps?.noLookPack };
             });
             prime = [...sent].map(([key, sprites]) => ({ key, sprites }));
             slow("inputs+prime", tIn, { looks: prime.length });
             Trace.event("rebake-prime", { looks: prime.length, mpx: Math.round(prime.reduce((a, p) => a + p.sprites.reduce((q, s) => q + s.w * s.h, 0), 0) / 1e5) / 10 });
           }
           await runBakePool(inputs, getMap, { n: lanes, prime, onDone: (i, res) => {
+            // (a stroke's sprites are made from their packed buffers one stroke a step - a whole job at once was 240 ms of one task)
+            const made = new Map(res.parts ?? []);
+            for ( const pair of res.packs ?? [] ) queue.push(() => { if ( my === gen ) made.set(pair[0], unpackLook(pair[1], true)); pair[1] = null; });      // (the packed buffers go as soon as their sprites are made)
             queue.push(() => {
               if ( my !== gen ) return;
-              take(jobs[i], res, plain);
+              take(jobs[i], { ...res, parts: [...made], packs: null }, plain);
               const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
               status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal;
               if ( redoSet.size && status.rebake ) status.rebake.live = status.bakeDone;   // (the Rebake all line counts within a pass)
@@ -1326,7 +1330,7 @@ function pumpRebake(ms = REBAKE_EVERY) {
     if ( !S || !R || R.paused ) return;
     if ( !rebakeQueue.length ) { trimPlain(); status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
     if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
-    const batch = rebakeQueue.splice(0, REBAKE_BATCH);
+    const batch = rebakeQueue.splice(0, Number.isInteger(globalThis.CONFIG?.moinenMaps?.rebakeBatch) ? globalThis.CONFIG.moinenMaps.rebakeBatch : REBAKE_BATCH);
     await rebake({ awaitPublish: false, redo: batch });
     // a pass that failed (an error, a backoff) stops the Rebake all and says so: never "done" with strokes not baked
     if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }

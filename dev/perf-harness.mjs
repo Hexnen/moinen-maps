@@ -1517,7 +1517,11 @@ export async function rebakeBench({ ids = null, maxS = 420, tailS = 12 } = {}) {
   const gaps = [], tail = [], loaf = []; let last = performance.now(), peak = 0, inTail = false;
   const heap = () => (performance.memory?.usedJSHeapSize ?? 0) / 1048576;
   const start = heap();
-  const gi = setInterval(() => { const n = performance.now(), g = n - last; if ( g > 30 ) (inTail ? tail : gaps).push(Math.round(g)); last = n; }, 4);
+  // (a pane another agent fronts is hidden for a while: its timers are throttled to 1 s and its frames stop - gaps that overlap such a time are counted apart, not as gaps)
+  let hiddenAt = document.visibilityState === "hidden" ? performance.now() : -1, lastHidden = -1, hiddenGaps = 0;
+  const vc = () => { if ( document.visibilityState === "hidden" ) hiddenAt = performance.now(); else if ( hiddenAt >= 0 ) { lastHidden = performance.now(); hiddenAt = -1; } };
+  document.addEventListener("visibilitychange", vc);
+  const gi = setInterval(() => { const n = performance.now(), g = n - last; if ( g > 30 ) { if ( hiddenAt >= 0 || lastHidden >= last ) hiddenGaps++; else (inTail ? tail : gaps).push(Math.round(g)); } last = n; }, 4);
   const hi = setInterval(() => { peak = Math.max(peak, heap()); }, 50);
   // long animation frames name the scripts in them (needs the pane fronted: a hidden page has no frames)
   let po = null;
@@ -1532,10 +1536,10 @@ export async function rebakeBench({ ids = null, maxS = 420, tailS = 12 } = {}) {
     }
     // the publish, the composite and the early-stored strokes' last swaps follow the pass: gaps there count apart (`tail`)
     inTail = true; await new Promise((r) => setTimeout(r, tailS * 1000));
-  } finally { clearInterval(gi); clearInterval(hi); po?.disconnect(); }
+  } finally { clearInterval(gi); clearInterval(hi); po?.disconnect(); document.removeEventListener("visibilitychange", vc); }
   const ev = Trace().events.slice(evBefore).filter((e) => /rebake|prime-lanes|bake-lanes|publish|composite-published/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) }));
   const top = (a) => [...a].sort((x, y) => y - x).slice(0, 12), sum = (a) => ({ n: a.length, max: top(a)[0] ?? 0, over100: a.filter((g) => g > 100).length, top: top(a) });
-  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: sum(gaps), tail: sum(tail), loaf: loaf.slice(0, 10),
+  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, hiddenGaps, gaps: sum(gaps), tail: sum(tail), loaf: loaf.slice(0, 10),
     heapMB: { start: Math.round(start), peak: Math.round(peak), end: Math.round(heap()) }, events: ev.slice(-8) };
 }
 
