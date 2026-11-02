@@ -481,8 +481,10 @@ function sync() {
   if ( !canvas.ready || !disp ) { if ( entries.size ) clearAll(); return; }
   let changed = false, more = false;
   const t0 = performance.now();
+  const live = new Set(), dying = new Set(disp.dying);     // the hashes of the flood groups the display lists now; the groups fading out
   for ( const g of disp.order ) {
     if ( g.info?.type !== "flood" || g.dead ) continue;
+    live.add(g.hash);
     let e = entries.get(g.hash);
     // the same area (same hash) in a new group - a load swapping the composite's shells for their areas: the hole keeps what it
     // made (its prepared area, its loop and textures) and only moves into the new group; made again it cost ~240 ms per load
@@ -498,7 +500,10 @@ function sync() {
   }
   if ( more ) canvas.app.ticker.addOnce(() => sync());
   for ( const [h, e] of entries ) {
-    if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
+    // (also a hole whose group left the display's order and has finished fading out: it is stashed in the display's spare list, neither
+    // dead nor listed - a warm swap that replaced an area left one such entry, 27 holes for 26 groups, its sprite and textures kept until the
+    // stash was emptied, i.e. for ever. A fading group (dying) keeps its water until it is gone: the water fades with it)
+    if ( e.g.dead || e.g.cont?.destroyed || (!live.has(h) && !dying.has(e.g)) ) { freeEntry(e); entries.delete(h); changed = true; }
     // (its sprite went with something else while its area stays: made again at the next sync)
     else if ( e.state !== "none" && e.state !== "dry" && (!e.sprite || e.sprite.destroyed) ) { freeEntry(e); entries.delete(h); changed = true; scheduleSync(); }
   }
@@ -526,6 +531,8 @@ function tick() {
     // (its group gone: the next sync moves the hole into the area's new group - rebind - or lets it go)
     if ( (e.state === "none" || e.state === "dry") && !g.dead ) continue;    // (an area without water: nothing to draw)
     if ( g.dead || g.cont?.destroyed || !e.sprite || e.sprite.destroyed ) { gone = true; continue; }
+    // (its group finished fading out and was stashed, off the scene: the next sync lets the hole go - nothing else would, the group is not dead)
+    if ( !g.cont.parent && D.destructionApi.display?.()?.groups.get(e.hash) !== g ) { gone = true; continue; }
     if ( g.anim && g.anim !== e.anim && e.prep ) noteAnim(e, g.anim);      // a detonation replays the break: the water too
     if ( e.mix?.visible ) { e.mix.visible = false; e.sprite.visible = true; }    // (shown again below only at rest)
     if ( !e.tex.length || !g.cont.parent ) { if ( e.sprite ) e.sprite.texture = PIXI.Texture.EMPTY; continue; }

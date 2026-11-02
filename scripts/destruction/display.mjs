@@ -960,7 +960,8 @@ export class DestructionDisplay {
     lapE("clockJobs");
     // 2. the pieces' lives
     // (GPU pieces, piece-gpu.mjs: a plain entry's pieces move in the vertex shader - no pose is placed here or per frame)
-    const gmode = tear ? "tear" : coll ? "coll" : info.type !== "collapse" ? "plain" : null, gpu = !!gmode && this.gpuPieces(g, gmode !== "plain");
+    // (a cave-in without its cover frame has no clock of its own - coll null - and plays the generic entry: display.place's motion, which the plain shader knows for type "collapse" too)
+    const gmode = tear ? "tear" : coll ? "coll" : "plain", gpu = this.gpuPieces(g, gmode !== "plain");
     if ( !gpu ) this.downGpu(g);
     const list = [], byPiece = new Map();
     g.pieces.forEach((p, n) => {

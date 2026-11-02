@@ -29,6 +29,13 @@ uniform vec2 uOrg;
 uniform vec4 uScene;
 uniform vec3 uCT;
 float rnd(float x) { return floor(x + 0.5); }
+// Math.round(a + d) for a on the half-pixel grid (a rest or start position, exact in float32) and a small d: the sum a + d in float32 would
+// lose d, and Math.round's tie (n + 0.5 rounds UP, n + 0.5 - 1e-9 down) went the wrong way for a piece in the last / first ~1% of a flight
+// (a d below half an ulp of a in DOUBLE precision, ~1e-13 at a = 1500, is what the CPU's sum cannot see: x == a exactly, a tie, rounded up)
+float rndS(float a, float d) {
+  if (abs(d) < exp2(floor(log2(abs(a) + 1.0)) - 53.0)) d = 0.0;
+  float s = floor(a + 0.5); return s + floor(a + 0.5 - s + d);
+}
 float odd(float x) { return mod(floor(x), 2.0); }
 bool inScene(vec2 p) { return p.x >= uScene.x && p.y >= uScene.y && p.x < uScene.z && p.y < uScene.w; }
 `;
@@ -40,13 +47,13 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
   if (uRest > 0.5) { pos = uOrg + A.zw * uAp; return; }
   float tm = uNow - B.x, dur = B.y, t = tm / dur;
   tm = t * dur;
-  if (uType > 1.5) { if (t > 0.0) { float u = min(t, 1.0); tint = vec3(255.0, 160.0, 96.0) + (vec3(255.0) - vec3(255.0, 160.0, 96.0)) * u; tint = floor(tint + 0.5); } }
-  else if (uType > 0.5) { float u = clamp(t, 0.0, 1.0) * 0.7; tint = floor(vec3(255.0) + (vec3(184.0, 212.0, 255.0) - vec3(255.0)) * u + 0.5); }
+  if (uType > 1.5 && uType < 2.5) { if (t > 0.0) { float u = min(t, 1.0); tint = vec3(255.0, 160.0, 96.0) + (vec3(255.0) - vec3(255.0, 160.0, 96.0)) * u; tint = floor(tint + 0.5); } }
+  else if (uType > 0.5 && uType < 1.5) { float u = clamp(t, 0.0, 1.0) * 0.7; tint = floor(vec3(255.0) + (vec3(184.0, 212.0, 255.0) - vec3(255.0)) * u + 0.5); }
   if (uCT.x >= 0.0) { tint = (t <= 0.0 || t >= 1.5) ? vec3(255.0) : floor(uCT + (vec3(255.0) - uCT) * clamp(t / 1.5, 0.0, 1.0) + 0.5); }
   if (tm < 0.0) {
     if (tm < -B.z) { vis = 0.0; pos = vec2(0.0); return; }
     float f = 1.0 + tm / B.z;
-    float sh = f > 0.45 ? (odd(tm / 45.0 + C.z) > 0.5 ? 1.0 : -1.0) * 0.5 : 0.0;
+    float sh = f > 0.45 ? (odd(tm / 45.0 + C.z) > 0.5 ? 1.0 : -1.0) * (uType > 2.5 ? 1.0 : 0.5) : 0.0;
     pos = uOrg + vec2(rnd(A.x + sh) * uAp, A.y * uAp);
     return;
   }
@@ -55,13 +62,19 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
     if (st < 70.0) squash = 0.82 + 0.18 * (st / 70.0);
     float hi = floor(st / uHopMs);
     if (hi < C.w) { float ph = (st - hi * uHopMs) / uHopMs, h = min(2.5, B.w * 0.18) / (hi + 1.0); hop = sin(ph * PI) * h; }
-    pos = uOrg + vec2(A.z * uAp, rnd(A.w - hop) * uAp);
+    pos = uOrg + vec2(A.z * uAp, rndS(A.w, -hop) * uAp);
     scl = vec2(uAp, uAp * squash);
     return;
   }
   float u1 = 1.0 - t, e = 1.0 - u1 * u1 * u1;
-  float x = A.x + (A.z - A.x) * e, y = A.y + (A.w - A.y) * e - B.w * 4.0 * t * (1.0 - t);
-  pos = uOrg + vec2(rnd(x) * uAp, rnd(y) * uAp);
+  // x = sx + (fx - sx) * e, y = sy + (fy - sy) * e - arc * 4 * t * (1 - t), rounded as Math.round does: from the nearer end (sx / sy at the
+  // start, fx / fy at the end: fx - (fx - sx) * (1 - e) with 1 - e = u1^3, exact where e is near 1), so a tie is decided by the small part
+  float lift = B.w * 4.0 * t * (1.0 - t);
+  if (uType > 2.5) lift += 1.2 * sin(min(1.0, t * 2.0) * PI) * (t < 0.5 ? 1.0 : 0.0);     // a cave-in without its own clock: a small lift, then the drop
+  float rx, ry;
+  if (e < 0.5) { rx = rndS(A.x, (A.z - A.x) * e); ry = rndS(A.y, (A.w - A.y) * e - lift); }
+  else { float u = u1 * u1 * u1; rx = rndS(A.z, -(A.z - A.x) * u); ry = rndS(A.w, -(A.w - A.y) * u - lift); }
+  pos = uOrg + vec2(rx * uAp, ry * uAp);
   if (!(pos.x >= uScene.x && pos.y >= uScene.y && pos.x < uScene.z && pos.y < uScene.w)) vis = 0.0;
   rot = C.x * (1.0 - e) * C.y;
   float sc = 1.0 + 0.1 * sin(min(1.0, t) * PI);
@@ -129,8 +142,6 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
  * 2 * grey + hop (grey: its own tint, 0..255; hop: 1 = it hops on landing). uFade: it fades in where it lies (over the tremor patch).
  */
 const POSE_COLL = `
-// round(a + d) for a on a half pixel and a tiny d (the start of a drop: e = t * t): the sum a + d in float32 would lose d
-float rndS(float a, float d) { float s = floor(a + 0.5); return s + floor(a + 0.5 - s + d); }
 void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out float vis, out vec3 tint, out float al) {
   tint = vec3(255.0); rot = 0.0; scl = vec2(uAp); vis = 1.0; al = 1.0;
   if (uRest > 0.5) { pos = uOrg + A.zw * uAp; return; }
@@ -277,7 +288,7 @@ class StubPose {
 const STUB_POINT = { set() {} };
 export const STUB = new StubPose();
 
-const TYPE_CODE = { flood: 1, scorch: 2 };
+const TYPE_CODE = { flood: 1, scorch: 2, collapse: 3 };
 
 export class GpuPieceBatch extends PIXI.Container {
   constructor(n, tex, atlas, base = null, mode = "plain") {

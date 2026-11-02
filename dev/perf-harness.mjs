@@ -5,6 +5,7 @@
 //   H.fit(scale)       centre the scene at a zoom (default: fit the window)
 //   H.rebakeAndShare(name) + H.diffShared(name)   GM vs a COLD player after Detonate -> reload -> Rebake all (bar: shown.max <= 8); H.selfDiff()
 //                      the GM's own bands against its live areas (a stale band shows here); recipe at blockMeans below
+import { readPoses } from "../scripts/destruction/piece-gpu.mjs";
 const D = () => game.modules.get("moinen-maps").api.destruction.display();
 const med = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? +s[s.length >> 1].toFixed(2) : null; };
 
@@ -212,7 +213,7 @@ export async function detBench({ ms = 4500, label = "", only = null } = {}) {
  * Returns { areas, early (visible pieces before their time), mean, max, bad (pixels off by more than 8) }; all 0 is a pass.
  */
 export function entryCheck() {
-  const d = D(), A = game.modules.get("moinen-maps").api.destruction, T = canvas.app.ticker, real = performance.now.bind(performance);
+  const d = D(), R = canvas.app.renderer, A = game.modules.get("moinen-maps").api.destruction, T = canvas.app.ticker, real = performance.now.bind(performance);
   CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache; CONFIG.moinenMaps.noDestructionCache = true;
   const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
   const waters = [];
@@ -223,10 +224,19 @@ export function entryCheck() {
     A.replay();                                   // every area enters, start = now
     for ( let i = 0; i < 60; i++ ) { F += 0.01; T.update(F); }
     const now = F, entering = d.order.filter((g) => g.anim);
-    let early = 0;
-    for ( const g of entering ) for ( const it of g.anim.list ) {
-      if ( g.anim.tear || g.anim.gpu ) continue;  // a tear's pieces keep their own clock (tear-entry.mjs); GPU pieces have no sprites (the pixel check covers them)
-      if ( now < it.t0 - it.pre && it.p.spr?.visible && it.p.spr.alpha > 0 ) early++;
+    let early = 0, checked = 0, gpuAreas = 0;     // checked: pieces whose life had not begun (the ones that may not show)
+    for ( const g of entering ) {
+      if ( g.anim.gpu && g.batch?.gpu ) {
+        // GPU pieces have a stand-in (STUB: always visible, alpha 1) and their pose lives in the vertex shader: read what the shader computes
+        // for the batch at this moment (transform feedback of the same GLSL) - a piece whose life has not begun must come out not visible.
+        // (Before this the check skipped them, or read the stub and counted every piece.)
+        const pose = readPoses(R, g.batch), mode = g.batch.mode; if ( !pose ) { early++; continue; }
+        gpuAreas++;
+        g.anim.list.forEach((it, k) => { if ( now < it.t0 - (mode === "tear" ? 0 : it.pre) ) { checked++; if ( pose[k * 12 + 3] > 0.5 ) early++; } });
+        continue;
+      }
+      if ( g.anim.tear ) continue;  // a tear's pieces keep their own clock (tear-entry.mjs)
+      for ( const it of g.anim.list ) if ( now < it.t0 - it.pre ) { checked++; if ( it.p.spr?.visible && it.p.spr.alpha > 0 ) early++; }
     }
     // (a cave-in's tremor patch - the plain map over its pit, trembling from the start by design: collapse-entry.mjs - is map pixels,
     // not damage shown early: hidden in both pictures)
@@ -241,7 +251,7 @@ export function entryCheck() {
     for ( let i = 0; i < a.length; i++ ) { const v = Math.abs(a[i] - b[i]); sum += v; if ( v > max ) max = v; if ( v > 8 ) bad++; }
     for ( const g of entering ) d.endAnim(g);
     F += 10000; T.update(F);
-    return { areas: entering.length, early, mean: +(sum / (a.length / 4)).toFixed(3), max, bad, tremorPatches: tremor.length };
+    return { areas: entering.length, gpuAreas, checked, early, mean: +(sum / (a.length / 4)).toFixed(3), max, bad, tremorPatches: tremor.length };
   } finally {
     performance.now = real; waters.forEach((w) => { w.visible = true; });
     CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start();
@@ -1540,6 +1550,36 @@ export async function rebakeBench({ ids = null, maxS = 420, tailS = 12 } = {}) {
 }
 
 /**
+ * NO IDLE EFFECTS: the cause lights' pulse / flicker, embers and smoke (display.idle) move the layer's pixels from one frame to the next, so two
+ * `blockMeans()` of the SAME page differed by 19-31 (blocks over 8: 5-50) - read as "the warm player never converges" - while with them off the
+ * same page repeats to 1. Sets the display's idle off for good (display.setIdle, called by every param change, is replaced on this instance),
+ * steps frames and waits `ms` for the ones in the air to die. Call it (and again after a canvas.draw) before a GM-vs-player or before/after comparison.
+ */
+export async function quiet({ ms = 4000 } = {}) {
+  const d = D(); if ( !d ) return false;
+  d.setIdle = function() { this.idle = { on: false, who: "all" }; }; d.setIdle();
+  step(120); await new Promise((r) => setTimeout(r, ms)); step(60);
+  return true;
+}
+
+/**
+ * HIDDEN TAB, EMULATED: the browser pane keeps every tab "visible", so a background tab is imitated - the ticker stopped, requestAnimationFrame a
+ * no-op, document.visibilityState "hidden", timers clamped to >= 1 s (what a hidden tab gets). `hideTab()` returns `showTab()` (which undoes it and
+ * restarts the ticker); `sleep(ms)` waits on the real timer meanwhile. A warm player converged in this state (2026-11-02, lane test).
+ */
+export function hideTab() {
+  const real = { raf: window.requestAnimationFrame, st: window.setTimeout, si: window.setInterval };
+  canvas.app.ticker.stop(); window.requestAnimationFrame = () => 0;
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+  window.setTimeout = (f, ms = 0, ...a) => real.st.call(window, f, Math.max(1000, ms), ...a);
+  window.setInterval = (f, ms = 0, ...a) => real.si.call(window, f, Math.max(1000, ms), ...a);
+  const sleep = (ms) => new Promise((r) => real.st.call(window, r, ms));
+  const showTab = () => { window.requestAnimationFrame = real.raf; window.setTimeout = real.st; window.setInterval = real.si; delete document.visibilityState; delete document.hidden; canvas.app.ticker.start(); };
+  return { showTab, sleep };
+}
+
+/**
  * GM vs PLAYER PICTURE (the players must see exactly what the GM sees): run `blockMeans()` on the GM's page and on a COLD player's page
  * (another origin, e.g. 127.0.0.2 / 127.0.0.3, so another IndexedDB; both pages with the same window size) after `boot()`, then compare
  * the two lists with `blockDiff(a, b)`. The destruction layer is drawn live at the whole-scene view and read in `bw` x `bh` px blocks
@@ -1599,6 +1639,7 @@ export function divergeViews() {
 
 /** GM: `blockMeans()` of every view (divergeViews, drawn as shown and drawn live) uploaded to the world folder as `<name>.json` (the lane servers' test world), so another origin can compare. */
 export async function shareMeans(name = "diverge-gm", opts = {}) {
+  await quiet();
   const FP = foundry.applications.apps.FilePicker.implementation;
   const out = divergeViews().map((region) => ({ region, shown: blockMeans({ ...opts, region }), live: blockMeans({ ...opts, region, live: true }) }));
   await FP.upload("data", `worlds/${game.world.id}`, new File([JSON.stringify(out)], `${name}.json`, { type: "application/json" }), {}, { notify: false });
@@ -1615,6 +1656,7 @@ export async function diffShared(name = "diverge-gm", opts = {}) {
   const shells = D()?.shellCount ?? 0, res = { shown: { max: 0, blocksOver: 0 }, live: shells ? null : { max: 0, blocksOver: 0 }, shells, views: [] };
   gm.forEach((g, i) => {
     const sh = blockDiff(g.shown, blockMeans({ ...opts, region: g.region })), lv = shells ? null : blockDiff(g.live, blockMeans({ ...opts, region: g.region, live: true }));
+    if ( sh.error ) throw new Error(`diffShared: this page and the GM's differ in size (${JSON.stringify(sh)}): give both the same window size`);
     for ( const [k, d] of [["shown", sh], ["live", lv]] ) if ( d ) { res[k].max = Math.max(res[k].max, d.max); res[k].blocksOver += d.blocksOver; }
     res.views.push({ i, shown: [sh.max, sh.blocksOver], live: lv ? [lv.max, lv.blocksOver] : null });
   });
@@ -1766,13 +1808,18 @@ export async function floodDryLive({ stallMs = 40000, maxMs = 90000 } = {}) {
 /**
  * Flooded holes against the water on screen: every hole the flood engine calls ready must have its water sprites in its area's group
  * (a hole whose area was swapped for a new group - a warm refresh, a shell's pixels - and was not synced afterwards stood ready without
- * water: the warm player's picture short of the GM's until a reload). -> { holes, ready, water, readyWithoutWater: [area hash] }.
+ * water: the warm player's picture short of the GM's until a reload). -> { holes, ready, water, readyWithoutWater: [area hash], floodGroups, dying, staleHoles: [hole hashes
+ * whose area is not listed any more] } - a pass: readyWithoutWater and staleHoles empty once dying is 0.
  */
 export function floodWaterCheck() {
   const d = D(), F = game.modules.get("moinen-maps").api.destruction.flood.status();
   const wet = new Set(d.order.filter((g) => g.cont.children.some((c) => c !== g.patch && c !== g.baseCont && c !== g.shardCont)).map((g) => (g.hash >>> 0).toString(36)));
   const ready = F.holes.filter((h) => h.state === "ready");
-  return { holes: F.holes.length, ready: ready.length, water: wet.size, readyWithoutWater: ready.filter((h) => !wet.has(h.hash)).map((h) => h.hash) };
+  // (a hole whose area is no longer in the display's order - stashed after fading out - kept its entry: "holes 27 for 26 groups"; flood.mjs sync lets it go.
+  // Only meaningful once nothing is fading: display.dying empty)
+  const listed = new Set(d.order.filter((g) => g.info.type === "flood").map((g) => (g.hash >>> 0).toString(36)));
+  return { holes: F.holes.length, ready: ready.length, water: wet.size, readyWithoutWater: ready.filter((h) => !wet.has(h.hash)).map((h) => h.hash),
+    floodGroups: listed.size, dying: d.dying.length, staleHoles: F.holes.filter((h) => !listed.has(h.hash)).map((h) => h.hash) };
 }
 
 /**
@@ -1782,6 +1829,7 @@ export function floodWaterCheck() {
  * longTaskMs (the longest task the page saw) }.
  */
 export async function warmWatch(name = "diverge-gm", { maxS = 120, want = 8 } = {}) {
+  await quiet();
   const Net = await import("../scripts/net/stream.mjs"), T = game.modules.get("moinen-maps").api.destruction.net.trace;
   const r0 = Net.stats.requests, k0 = Net.reqLog.length, n0 = T().events.length, t0 = performance.now(), series = [];
   let long = 0; const obs = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) long = Math.max(long, e.duration); });
@@ -1807,7 +1855,7 @@ export async function warmWatch(name = "diverge-gm", { maxS = 120, want = 8 } = 
  * { areas, pieces, rows: [[ms, compared, posBad, rotBad, scaleBad, visBad, tintBad, worst position diff, worst rotation diff]] }; all 0 is a pass
  * (position within 0.002 px, rotation within 2e-5, scale within 1e-4: float32 against double).
  */
-export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450, 600, 800, 1000, 1300, 1600, 2000, 2400, 3000, 3600], only = null, max = 12, samples = 0, enterOpts = null } = {}) {
+export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450, 600, 800, 1000, 1300, 1600, 2000, 2400, 3000, 3600], only = null, max = 12, samples = 0, enterOpts = null, cause = null, noCover = false } = {}) {
   const SMP = [];
   const { readPoses } = await import("../scripts/destruction/piece-gpu.mjs");
   const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance), R = canvas.app.renderer;
@@ -1818,7 +1866,8 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
   const ws = [];
   for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
   let F = real(); performance.now = () => F;
-  const rows = []; let npieces = 0, nareas = 0, modes = null, spawn0 = null;
+  const rows = []; let npieces = 0, nareas = 0, modes = null, spawn0 = null, cpuAreas = 0, causes = null;
+  const undo = [];
   const sprite = () => ({ visible: true, alpha: 1, tint: 0xFFFFFF, rotation: 0, x: 0, y: 0, sx: 1, sy: 1,
     position: { set(x, y = x) { this.p.x = x; this.p.y = y; } }, scale: { set(x, y = x) { this.p.sx = x; this.p.sy = y; } } });
   try {
@@ -1826,9 +1875,17 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
     T.update(F);
     const start = F + 5;
     const groups = (only ? d.order.filter(only) : d.order.filter((g) => g.pieces.length > 100 && !g.shell && !g.atlasFree && d.onScreen(g, 0.5)).sort((a, b) => b.pieces.length - a.pieces.length)).slice(0, max);
+    // `cause(g)` -> a cause code (core.mjs CAUSES: 1 fire ...) set on the area's info for the entry; `noCover`: a cave-in plays without its cover frame (no clock of
+    // its own: the generic entry). Both put back afterwards. Without them: the areas as they are.
+    for ( const g of groups ) {
+      const c = cause?.(g); if ( c != null ) { undo.push([g.info, "cause", g.info.cause]); g.info.cause = c; }
+      if ( noCover && g.info.type === "collapse" && g.coverFrame ) { undo.push([g, "coverFrame", g.coverFrame]); g.coverFrame = null; }
+    }
     for ( const g of groups ) { d.enter(g, { start, ...(enterOpts?.(g) ?? {}) }); if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0); }
     const live = groups.filter((g) => g.anim?.gpu && g.batch?.gpu); nareas = live.length;
     modes = live.reduce((m, g) => { m[g.batch.mode] = (m[g.batch.mode] ?? 0) + 1; return m; }, {});
+    cpuAreas = groups.filter((g) => g.anim && !g.anim.gpu).length;       // (picked areas whose entry took the CPU path: nothing is compared there)
+    causes = groups.reduce((m, g) => { const k = `${g.info.type}/${g.info.cause | 0}/${g.anim ? (g.anim.gpu ? g.batch.mode : "CPU") : "no entry"}`; m[k] = (m[k] ?? 0) + 1; return m; }, {});
     spawn0 = d.spawn; d.spawn = () => {};       // (the CPU reference poses spawn a fibre's flecks: not here)
     const fake = sprite(); fake.position.p = fake.scale.p = fake;
     for ( const dt of times ) {
@@ -1850,7 +1907,7 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
           const dr = Math.abs(gpu[o + 2] - fake.rotation); if ( dr > wr ) wr = dr; if ( dr > 2e-5 ) rb++;
           if ( Math.abs(gpu[o + 4] - fake.sx) > 1e-4 || Math.abs(gpu[o + 5] - fake.sy) > 1e-4 ) sb++;
           const tr = (fake.tint >> 16) & 255, tg = (fake.tint >> 8) & 255;
-          if ( Math.abs(gpu[o + 6] - tr) > 0.5 || Math.abs(gpu[o + 7] - tg) > 0.5 || Math.abs(gpu[o + 9] - (fake.tint & 255)) > 0.5 ) tb++;
+          if ( Math.abs(gpu[o + 6] - tr) > 0.5 || Math.abs(gpu[o + 7] - tg) > 0.5 || Math.abs(gpu[o + 9] - (fake.tint & 255)) > 0.5 ) { tb++; if ( SMP.length < samples ) SMP.push({ tint: true, dt, k, type, t: +t.toFixed(4), cl: a.cl?.tint ?? null, cpu: [tr, tg, fake.tint & 255], gpu: [gpu[o + 6], gpu[o + 7], gpu[o + 9]] }); }
           if ( Math.abs(gpu[o + 8] - fake.alpha) > 1e-4 ) ab++;
         }
       }
@@ -1860,10 +1917,10 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
     for ( const g of groups ) d.endAnim(g);
     F += 10000; T.update(F);
   } finally {
-    performance.now = real; ws.forEach((w) => { w.visible = true; }); if ( spawn0 ) d.spawn = spawn0; d.snapQ = null; CONFIG.moinenMaps.noGpuTearColl = wasTC;
+    performance.now = real; ws.forEach((w) => { w.visible = true; }); for ( const [o, k, v] of undo ) o[k] = v; if ( spawn0 ) d.spawn = spawn0; d.snapQ = null; CONFIG.moinenMaps.noGpuTearColl = wasTC;
     [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget] = was; T.maxFPS = mf; if ( st ) T.start();
   }
-  return { areas: nareas, modes, pieces: npieces, rows, samples: SMP };
+  return { areas: nareas, modes, cpuAreas, byKind: causes, pieces: npieces, rows, samples: SMP };
 }
 
 /**
