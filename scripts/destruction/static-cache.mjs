@@ -125,6 +125,7 @@ uniform float uAA;
 uniform float uAlpha;
 uniform float uMode;
 uniform float uK;
+uniform float uTop;
 out vec4 fragColor;
 ${SHARP_SAMPLER_GLSL}
 // one filtered sample of the tile at uv (the resting sampler: crisp texel squares with a screen pixel of smoothing when magnified,
@@ -143,13 +144,9 @@ vec4 samp(vec2 uv) {
 void main() {
   vec4 c;
   if ( uMode > 0.5 ) {
-    // EDGE (default): the one sampler (sharp-sampler.mjs), scale-continuous at every zoom: texel edges get one screen pixel of
-    // anti-aliasing, minified it is bilinear + mips; below 1 screen px per texel four taps on a rotated grid (the footprint-wide filter)
-    if ( uAA > 0.0 ) {
-      vec2 dx = dFdx(vUV) * uAA, dy = dFdy(vUV) * uAA;
-      c = 0.25 * (sharpSample(uTex, vUV + dx * 0.125 + dy * 0.375, uSize, uK) + sharpSample(uTex, vUV + dx * 0.375 - dy * 0.125, uSize, uK)
-                + sharpSample(uTex, vUV - dx * 0.125 - dy * 0.375, uSize, uK) + sharpSample(uTex, vUV - dx * 0.375 + dy * 0.125, uSize, uK));
-    } else c = sharpSample(uTex, vUV, uSize, uK);
+    // EDGE (default): the one sampler (sharp-sampler.mjs), the exact box filter of the pixel's footprint at every scale: texel edges get
+    // one screen pixel of anti-aliasing when magnified, thin lines keep their ink when minified; no taps, no ramp, no per-tile state
+    c = sharpSampleT(uTex, vUV, dFdx(vUV), dFdy(vUV), uK, uTop);
   } else if ( uAA > 0.0 ) {
     // ZOOM AA (a fixed spatial filter of the SCALE, the same for every tile and every frame - no time-varying softening, so no tile
     // or band is ever blurred differently from its neighbour): four taps on a rotated grid inside the screen pixel's footprint,
@@ -209,7 +206,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1, uTop: 0 });
     this.state = PIXI.State.for2d();
   }
 
@@ -239,6 +236,7 @@ export class SharpTile extends PIXI.Container {
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
     const cm = globalThis.CONFIG?.moinenMaps, aaOn = cm?.zoomAA !== false, edge = aaOn && cm?.zoomAA !== "mips";
     un.uMode = edge ? 1 : 0; un.uK = cm?.edgeK ?? 1;
+    un.uTop = b.mipmap === PIXI.MIPMAP_MODES.OFF ? 0 : Math.floor(Math.log2(Math.max(b.realWidth, b.realHeight)));   // (mip levels there are only when the tile has them)
     un.uSoft = aaOn || cm?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison; with zoomAA there is no time-varying softening at all)
     un.uAA = aaOn ? aaWeight(sc, cm?.aaK) : 0;
     const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;

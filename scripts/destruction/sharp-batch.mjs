@@ -25,10 +25,7 @@ ${SHARP_SAMPLER_GLSL}
 vec2 gDx, gDy;
 vec4 sharpTex(sampler2D s, vec2 uv) {
   if ( uSharpMode < 0.5 ) return texture(s, uv);
-  vec2 size = vec2(textureSize(s, 0));
-  vec2 t = uv * size;
-  vec2 w = clamp((abs(gDx) + abs(gDy)) * size * uSharpK, vec2(${0.01}), vec2(1.0));
-  return textureGrad(s, sharpCoord(t, w) / size, gDx, gDy);
+  return sharpSampleG(s, uv, gDx, gDy, uSharpK);
 }
 #define texture2D(s, uv) sharpTex(s, uv)
 void main(void) {
