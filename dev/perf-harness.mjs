@@ -1594,3 +1594,24 @@ export async function profile(names, ms = 2600) {
   try { await fresh(); const t = await trace(ms, () => game.modules.get("moinen-maps").api.destruction.replay()); return { frames: t.animFrames, cpu: t.cpu, acc: Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, [Math.round(v.ms), v.n]])) }; }
   finally { for ( const n of names ) P[n] = orig[n]; }
 }
+
+/**
+ * COLD PLAYER flood check (a cold player's holes stuck in state 'none'): run after a COLD load as a player (fresh origin, e.g.
+ * http://127.0.0.N:PORT/join, new IndexedDB): waits until no hole is new / loading / dry / baking, then returns
+ * { ok, n, states, none: [hashes], dry: how many holes were first unreadable, recovered: by the retry, gaveUp }. `ok` = no hole left 'none'.
+ * Repeat >= 10 times on fresh origins; the retry is flood.mjs retryDry (flood-core dryDelay backoff).
+ */
+export async function floodCheck({ maxMs = 45000 } = {}) {
+  const F = game.modules.get("moinen-maps").api.destruction.flood, t0 = performance.now();
+  for ( let i = 0; i < 200 && !canvas?.ready; i++ ) await new Promise((r) => setTimeout(r, 250));
+  let s;
+  while ( true ) {
+    await new Promise((r) => setTimeout(r, 500));
+    s = F.status();
+    const busy = s.holes.some((h) => ["new", "loading", "dry", "baking", "stale"].includes(h.state));
+    if ( (!busy && s.holes.length && performance.now() - t0 > 8000) || performance.now() - t0 > maxMs ) break;
+  }
+  const states = s.holes.reduce((a, h) => (a[h.state] = (a[h.state] || 0) + 1, a), {});
+  const none = s.holes.filter((h) => h.state === "none").map((h) => h.hash);
+  return { ok: !none.length && s.holes.length > 0, n: s.holes.length, states, none, dry: s.dry ?? 0, recovered: s.dryRecovered ?? 0, gaveUp: s.dryGaveUp ?? 0, user: game.user.name, ms: Math.round(performance.now() - t0) };
+}

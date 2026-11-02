@@ -231,7 +231,48 @@ function makeEntry(g) {
   const t1 = performance.now();
   e.prep = A ? FC.prepareFlood(A) : null;
   stats.readMs = (stats.readMs ?? 0) + t1 - t0; stats.prepMs = (stats.prepMs ?? 0) + performance.now() - t1;
-  if ( !e.prep ) { e.state = "none"; return e; }
+  if ( !e.prep ) {
+    // the area's pixels are not there yet (a cold player: atlas freed, shell not hydrated): ask for them and read again later
+    // (sync / the timer), instead of leaving the hole dry for the whole session
+    e.state = "dry"; e.tries = 0; stats.dry = (stats.dry ?? 0) + 1;
+    askPixels(g); armDry(e);
+    return e;
+  }
+  attachPrep(e, g);
+  return e;
+}
+
+/** Asks the display for an area's pixels (its shell hydrated / atlas rebuilt: display.pixelsSlice). */
+function askPixels(g) {
+  const disp = D.destructionApi.display?.();
+  if ( !disp?.pixelSource || g.dead || !(g.shell || g.atlasFree) ) return;
+  (disp.pixelAsks ??= new Set()).add(g);
+}
+
+/** The next read of a dry hole: after the backoff, or earlier from sync (a hook of the destruction). */
+function armDry(e) {
+  clearTimeout(e.dryTimer);
+  const d = FC.dryDelay(e.tries);
+  if ( d === null ) { e.state = "none"; stats.dryGaveUp = (stats.dryGaveUp ?? 0) + 1; return; }
+  e.dryTimer = setTimeout(() => { if ( e.state === "dry" && !e.dead && entries.get(e.hash) === e ) retryDry(e); }, d);
+}
+
+function retryDry(e, soft = false) {
+  if ( e.state !== "dry" || e.dead ) return;
+  const g = e.g; clearTimeout(e.dryTimer);
+  if ( g.dead || g.cont?.destroyed ) return;     // (sync lets it go and makes the area again)
+  e.lastTry = performance.now();
+  const A = readArea(g);
+  if ( !A ) { if ( soft ) armDry(e); else { e.tries++; askPixels(g); armDry(e); } return; }
+  e.prep = FC.prepareFlood(A);
+  stats.dryRecovered = (stats.dryRecovered ?? 0) + 1;
+  e.state = "new";
+  attachPrep(e, g);
+  load(e);
+  wetChanged();
+}
+
+function attachPrep(e, g) {
   const sp = new PIXI.Sprite(PIXI.Texture.EMPTY);
   sp.eventMode = "none";
   const ap = D.destructionApi.display()?.ap ?? 1, o = D.destructionApi.display()?.origin ?? { x: 0, y: 0 };
@@ -245,7 +286,6 @@ function makeEntry(g) {
   keyOf(e);
   // the area is entering now: the water follows the break
   if ( g.anim ) noteAnim(e, g.anim);
-  return e;
 }
 
 /** A hole's entry moved into a new group of the same area (true), or false when it must be made again. */
@@ -344,7 +384,7 @@ async function show(e, res, my = life) {
   // for them in one frame; "ready" only then (the damage waits for its holes, destruction.mjs prepareReveal)
   if ( Reveal.holding() ) { await Reveal.upload(e.tex.map((q) => q.t.baseTexture), 8); if ( my !== life || e.dead ) return; }
   e.state = "ready"; e.readyAt = now();
-  if ( [...entries.values()].every((q) => q.state === "ready" || q.state === "none") ) markOnce("flood:ready", { holes: entries.size });
+  if ( [...entries.values()].every((q) => q.state === "ready" || q.state === "none" || q.state === "dry") ) markOnce("flood:ready", { holes: entries.size });
   // the water comes later than the break (a bake, a download): it still wells up if that is not long after
   if ( e.fillAt !== null ) {
     if ( e.readyAt - e.fillAt > ENTRY_WINDOW ) e.fillAt = null;
@@ -380,7 +420,7 @@ function freeTextures(e) {
 
 function freeEntry(e) {
   e.dead = true;
-  clearTimeout(e.waitTimer);
+  clearTimeout(e.waitTimer); clearTimeout(e.dryTimer);
   freeTextures(e);
   if ( e.sprite && !e.sprite.destroyed ) e.sprite.destroy();
   if ( e.mix && !e.mix.destroyed ) e.mix.destroy();
@@ -405,6 +445,7 @@ function sync() {
     // the same area (same hash) in a new group - a load swapping the composite's shells for their areas: the hole keeps what it
     // made (its prepared area, its loop and textures) and only moves into the new group; made again it cost ~240 ms per load
     if ( e && e.g !== g && !rebind(e, g) ) { freeEntry(e); entries.delete(g.hash); e = null; }
+    else if ( e?.state === "dry" && performance.now() - (e.lastTry ?? 0) >= 100 ) retryDry(e, true);     // (a destruction hook: the pixels may be in now)
     if ( !e ) {
       // a few holes per frame (reading the area and preparing it is ~2-10 ms a hole, 16-21 ms for a scene's holes at once and
       // over 100 ms under load): past SYNC_MS the rest are made at the next frames
@@ -417,7 +458,7 @@ function sync() {
   for ( const [h, e] of entries ) {
     if ( e.g.dead || e.g.cont?.destroyed ) { freeEntry(e); entries.delete(h); changed = true; }
     // (its sprite went with something else while its area stays: made again at the next sync)
-    else if ( e.state !== "none" && (!e.sprite || e.sprite.destroyed) ) { freeEntry(e); entries.delete(h); changed = true; scheduleSync(); }
+    else if ( e.state !== "none" && e.state !== "dry" && (!e.sprite || e.sprite.destroyed) ) { freeEntry(e); entries.delete(h); changed = true; scheduleSync(); }
   }
   stats.entries = entries.size;
   if ( entries.size ) markOnce("flood:listed", { holes: entries.size, ms: Math.round(performance.now() - t0) });
@@ -431,7 +472,7 @@ function tick() {
   for ( const [h, e] of entries ) {
     const g = e.g;
     // (its group gone: the next sync moves the hole into the area's new group - rebind - or lets it go)
-    if ( e.state === "none" && !g.dead ) continue;    // (an area without water: nothing to draw)
+    if ( (e.state === "none" || e.state === "dry") && !g.dead ) continue;    // (an area without water: nothing to draw)
     if ( g.dead || g.cont?.destroyed || !e.sprite || e.sprite.destroyed ) { gone = true; continue; }
     if ( g.anim && g.anim !== e.anim && e.prep ) noteAnim(e, g.anim);      // a detonation replays the break: the water too
     if ( e.mix?.visible ) { e.mix.visible = false; e.sprite.visible = true; }    // (shown again below only at rest)

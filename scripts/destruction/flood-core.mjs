@@ -13,6 +13,13 @@
  * The engine draws the shore foam where the water meets the rim, the waves, sparkles and its own deep zone.
  */
 export const FLOOD_VERSION = 1;
+
+/**
+ * Waiting for a hole's pixels (a cold player: the area's atlas is freed or its shell not hydrated yet, so the area cannot be read).
+ * The delay before try number `n` (0-based) in ms, or null when the tries are used up: 120 ms doubling, capped at 4 s, 12 tries (~30 s).
+ */
+export const DRY_TRIES = 12;
+export const dryDelay = (n) => n < 0 || n >= DRY_TRIES ? null : Math.min(4000, 120 * 2 ** n);
 /** Art pixels per water pixel: the engine bakes at half the destruction's resolution (16 per grid square), painted back at art px. */
 export const SCALE = 2;
 /** Art pixels of plain ground around the hole in the engine's window, so the shore is seen whole. */
