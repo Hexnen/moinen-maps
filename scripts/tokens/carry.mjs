@@ -131,8 +131,10 @@ class Carry {
       // a hovering token: its mesh stands raised by the vfx module's own tick. Take the base from Foundry's natural place (restoreExact) and add the live hover back in apply(),
       // so the base never contains the hover once and lacks it the next time (that was the jump)
       this.V = vfxVisual();
-      if ( this.V && hoverOf(token, this.V) > 0 ) restoreExact(token);
+      const hovering = !!this.V && hoverOf(token, this.V) > 0;
+      if ( hovering ) restoreExact(token);
       this.capture();
+      if ( hovering ) { this.step(performance.now()); this.apply(); }       // (the mesh is at Foundry's natural place right now: pose it with the hover back in THIS frame, before the render)
       this.root = new PIXI.Container(); this.root.eventMode = "none"; sortNextTo(this.root, token, 2);
       this.em = new Emitter(this.root);
     }

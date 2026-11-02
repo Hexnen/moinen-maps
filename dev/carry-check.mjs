@@ -61,6 +61,8 @@ function frontAt(objId, now) {
   return null;
 }
 
+const vfxHover = (t) => { try { return game.modules.get("moinen-pixel-vfx")?.api?.visual?.baseHeight?.(t) ?? null; } catch { return null; } };
+
 /** Sample the token's mesh centre every animation frame for `ms`, with where the entry's front says it should be. */
 function sampler(token, getObjId) {
   const rows = [], c0 = { x: token.document.x + token.w / 2, y: token.document.y + token.h / 2 };
@@ -68,7 +70,7 @@ function sampler(token, getObjId) {
   const loop = () => {
     if ( !on ) return;
     const now = performance.now(), id = getObjId(), f = id ? frontAt(id, now) : null, m = token.mesh;
-    rows.push({ t: now, x: m.position.x, y: m.position.y, f: f && { x: c0.x + f.x, y: c0.y + f.y, el: f.el, D: f.D } });
+    rows.push({ t: now, x: m.position.x, y: m.position.y, ty: token.position.y, h: vfxHover(token), f: f && { x: c0.x + f.x, y: c0.y + f.y, el: f.el, D: f.D } });
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
@@ -412,3 +414,58 @@ export async function carryFrontCheck({ steps = 60, legs = 6, dt = 14, negative 
   return { ok: rows.every((r) => r.ok), rows, report };
 }
 export const _front = { graphOrder, pixelFront, destructionRoots, zigzag };
+
+/**
+ * HEIGHT CONTINUITY OF THE PLAIN CARRY (user bug: a hovering token jumps in height). One token is carried by a real Ctrl+drag twice over the same path: grounded (control) and
+ * hovering (a moinen-pixel-vfx flight passive: a held transform lift, `preset`), then once more with a document elevation. Every animation frame the DISPLAYED height is measured:
+ * e(t) = mesh.y - (the front's y) = -(hover + pose lift). Checks: the rest height before the grab and after the landing equals the hover (no reset to the ground), the height never dips below
+ * the hover in the ride, and the largest per-frame step is the control's own plus a small allowance (the hover adds no step at the grab, the lift-off, the landing or the hand-over).
+ * With `ignoreHeight` it also runs the plough over a second, hovering token (Superhero + the "ignores height" setting) and checks that one's per-frame height step too.
+ * Returns { ok, rows, numbers }.   await (await import("/modules/moinen-maps/dev/carry-check.mjs")).carryHoverCheck()
+ */
+export async function carryHoverCheck({ preset = "invincible-flight-wings-passive-monstrous", allow = 2.5, ignoreHeight = true } = {}) {
+  const M = await mods(), { K } = M, d = D(), rows = [], numbers = {};
+  const API = game.modules.get("moinen-pixel-vfx")?.api;
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  if ( !token || !API?.ongoing ) return { ok: false, rows: [row("a token and moinen-pixel-vfx", false)] };
+  const doc = token.document, G = canvas.grid.size, R = canvas.dimensions.sceneRect;
+  const home = { x: Math.round(R.x + R.width * 0.15), y: Math.round(R.y + R.height * 0.45) };
+  const cen = () => ({ x: home.x + token.w / 2, y: home.y + token.h / 2 });
+  const origin = { x: doc.x, y: doc.y, elevation: doc.elevation };
+  const others = canvas.tokens.placeables.filter((t) => t !== token).map((t) => ({ doc: t.document, x: t.document.x, y: t.document.y }));
+  for ( const [i, o] of others.entries() ) await o.doc.update({ x: Math.round(R.x + R.width - 100), y: Math.round(R.y + 60 + i * 120) }, { animate: false, diff: false });
+  // the DISPLAYED height of a frame: how far the mesh stands above the token's ground position (the container, which the carry moves with the ride and the pose but never lifts by the hover)
+  const stats = (r) => {
+    const hs = r.rows.map((q) => ({ up: q.ty + token.h / 2 - q.y, f: q.f }));
+    let step = 0, at = 0; for ( let i = 1; i < hs.length; i++ ) { const s = Math.abs(hs[i].up - hs[i - 1].up); if ( s > step ) { step = s; at = i; } }
+    const first = hs.findIndex((q) => q.f && q.f.el > 0), last = hs.length - 1 - [...hs].reverse().findIndex((q) => q.f && q.f.el < q.f.D);
+    const ride = hs.filter((q) => q.f && q.f.el > 0 && q.f.el < q.f.D);
+    return { step, atFrame: at, n: hs.length, minUp: ride.length ? Math.min(...ride.map((q) => q.up)) : null, maxUp: ride.length ? Math.max(...ride.map((q) => q.up)) : null,
+      beforeUp: hs[Math.max(0, first - 3)]?.up, afterUp: hs.at(-1).up, hoverRead: Math.max(...r.rows.map((q) => q.h ?? 0)) };
+  };
+  const once = async (label) => { await prep(); await place(token, home.x, home.y); const r = await run(M, token, { ctrl: true, pts: line(cen(), { x: cen().x + 420, y: cen().y + 120 }, 44) }); const st = stats(r); numbers[label] = Object.fromEntries(Object.entries(st).map(([k, v]) => [k, typeof v === "number" ? +v.toFixed(2) : v])); return st; };
+  try {
+    const ctrl = await once("ground");
+    rows.push(row(`control (grounded): the pose alone steps ${ctrl.step.toFixed(2)} px per frame at most`, ctrl.n > 20 && ctrl.step < G * 0.2, numbers.ground));
+    await API.ongoing.start(token, preset); await sleep(1800);
+    const H = API.visual.baseHeight(token); numbers.hover = +H.toFixed(1);
+    rows.push(row(`the flight passive hovers the token at ${H.toFixed(1)} px`, H > 10));
+    const hv = await once("hover");
+    rows.push(row(`hovering: at rest before the grab the token stands ${hv.beforeUp?.toFixed(1)} px up (= its hover ${H.toFixed(1)})`, Math.abs(hv.beforeUp - H) < 2.5, numbers.hover));
+    rows.push(row(`hovering: after the landing and the hand-over it stands ${hv.afterUp.toFixed(1)} px up (no reset to the ground, no pop)`, Math.abs(hv.afterUp - H) < 2.5));
+    rows.push(row(`hovering: during the ride it never dips below its hover (lowest ${hv.minUp?.toFixed(1)} px >= ${(H - allow).toFixed(1)})`, hv.minUp != null && hv.minUp >= H - allow));
+    rows.push(row(`hovering: the largest per-frame height step is ${hv.step.toFixed(2)} px (control ${ctrl.step.toFixed(2)} + ${allow}), at frame ${hv.atFrame}`, hv.step <= ctrl.step + allow, { hv, ctrl }));
+    await API.ongoing.stop(token, preset); await sleep(1200);
+    await doc.update({ elevation: 5 }, { animate: false }); 
+    const el = await once("elevation");
+    rows.push(row(`elevation 5 (no vfx hover): the carry's per-frame step is the control's (${el.step.toFixed(2)} vs ${ctrl.step.toFixed(2)})`, el.step <= ctrl.step + 0.5, numbers.elevation));
+    await doc.update({ elevation: origin.elevation ?? 0 }, { animate: false });
+    rows.push(row("nothing is left running and the visual transform is cleared", K._carryStats().active === 0 && !API.visual.has(token), { has: API.visual.has(token) }));
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 400) })); }
+  finally {
+    try { await API.ongoing.stop(token, preset); await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "carryEnds", "real"); } catch { /* ignore */ }
+    try { await doc.update({ x: origin.x, y: origin.y, elevation: origin.elevation ?? 0 }, { animate: false, diff: false }); for ( const o of others ) await o.doc.update({ x: o.x, y: o.y }, { animate: false, diff: false }); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+  }
+  return { ok: rows.every((r) => r.ok), rows, numbers };
+}
