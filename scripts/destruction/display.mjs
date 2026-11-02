@@ -1186,6 +1186,17 @@ export class DestructionDisplay {
         n += to - from > 0 ? to - from : 0;
         continue;
       }
+      if ( !st && !(data.byteOffset & 3) && !(buf.byteOffset & 3) ) {
+        // (the settled colour: a pixel is one 32-bit copy)
+        const d32 = R.d32 ??= new Uint32Array(data.buffer, data.byteOffset, data.length >> 2), b32 = R.b32 ??= new Uint32Array(buf.buffer, buf.byteOffset, buf.length >> 2);
+        for ( let j = from; j < to; j++ ) {
+          const i = keys[j], cx = i % W;
+          if ( i < lo ) lo = i; if ( i > hi ) hi = i; if ( cx < cx0 ) cx0 = cx; if ( cx > cx1 ) cx1 = cx;
+          b32[i] = d32[i];
+        }
+        n += to - from > 0 ? to - from : 0;
+        continue;
+      }
       for ( let j = from; j < to; j++ ) {
         const i = keys[j], q = i * 4, cx = i % W;
         if ( i < lo ) lo = i; if ( i > hi ) hi = i; if ( cx < cx0 ) cx0 = cx; if ( cx > cx1 ) cx1 = cx;
