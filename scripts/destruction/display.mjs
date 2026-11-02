@@ -242,6 +242,7 @@ export class DestructionDisplay {
         // a shell's pixels came: the area itself takes its place at once (no entry, no fade: the same pixels)
         const full = this.build(r, rgba, w, meta);
         full.reused = true; full.info.water = g.info.water;
+        this.adoptRim(g, full);
         if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
         // (an entry waiting for these pixels, or queued by a Detonate, goes on with the area that replaces the shell)
         for ( const M of [this.pending, this.enterQueue] ) if ( M?.has(g) ) { const v = M.get(g); M.delete(g); M.set(full, v); }
@@ -401,6 +402,18 @@ export class DestructionDisplay {
       if ( g.flat ) this.afterFlatten?.(g);
     }
     Q.sorted = false;
+  }
+
+  /**
+   * A shell's dark rim (read in the codec worker, cause-fx setRim) goes on with the area that replaces it: not read again from the new
+   * atlas (and not dark for the frames between).
+   */
+  adoptRim(from, to) {
+    if ( !from.rim ) return;
+    const L = this.causeLights;
+    to.rim = from.rim; from.rim = null;
+    L?.groups.delete(from); L?.groups.add(to);
+    if ( to.rimArgs ) { to.rimArgs = null; const i = this.rimQueue?.indexOf(to) ?? -1; if ( i >= 0 ) this.rimQueue.splice(i, 1); }
   }
 
   /** The atlas again as a finished buffer (packed in the codec worker, chunks.mjs packAreaAtlases). */

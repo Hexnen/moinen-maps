@@ -18,6 +18,7 @@ import { sceneMap, backgroundInfo, forgetSceneMap } from "./source.mjs";
 import * as Store from "./store.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 import { DestructionDisplay } from "./display.mjs";
+import * as Cause from "./cause-fx.mjs";
 import * as Composite from "./composite.mjs";
 import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
@@ -975,7 +976,30 @@ function shellNeeds() {
   // them (canvasPan below)
   const vw = dark >= 0.45 ? display?.view?.() : null, m = 160;
   const inView = (a) => !!vw && !(a.rect[0] > vw.x1 + m || a.rect[1] > vw.y1 + m || a.rect[2] < vw.x0 - m || a.rect[3] < vw.y0 - m);
-  fill(list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || inView(a))), dark >= 0.45 ? "dark/view" : "flood/light");
+  // PERF: a shell in view only for its dark rim is not filled (chunk decoded on the page, area built, atlas kept until the rim was read: ~1.7 MB
+  // and ~25 ms a stroke, and every stroke in view at once): the rim is read from its chunk in the codec worker (rim-job.mjs) and set on the
+  // shell (shellRims). A stroke with a flooded hole or a light, or one whose chunk is not in IndexedDB, is filled as before.
+  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || inView(a)));
+  const rimOnly = [], full = [];
+  for ( const r of need ) (vw && r.id && r.dir && !r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l)) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
+  Trace.event("shell-needs", { dark: +dark.toFixed(2), of: list.length, need: need.length, rimOnly: rimOnly.length, full: full.length, noId: need.filter((r) => !r.id || !r.dir).length, view: !!vw });
+  if ( rimOnly.length ) shellRims(rimOnly, inView).then((left) => { if ( left.length ) fill(left, "dark/view"); });
+  fill(full, dark >= 0.45 ? "dark/view" : "flood/light");
+}
+/** The dark rims of the shells of these records that are in view and have none yet, from their chunks (worker); -> the records that could not (fill them). */
+async function shellRims(list, inView) {
+  const left = [];
+  await Net.preread(list.map((r) => r.id));
+  await Promise.all(list.map(async (r) => {
+    const todo = r.shell.filter((a) => inView(a)).map((a) => ({ a, g: display?.groups.get(a.h) })).filter(({ g }) => g?.shell && !g.rim && !g.rimAsked);
+    if ( !todo.length ) return;
+    for ( const { g } of todo ) g.rimAsked = true;
+    const got = await Net.rimsOf(r.dir, r.id, todo.map(({ a }) => ({ hash: a.h, cause: a.cause | 0, type: a.type }))).catch(() => null);
+    for ( const { g } of todo ) g.rimAsked = false;
+    if ( !got ) { left.push(r); return; }
+    for ( const x of got ) { const g = display?.groups.get(x.hash); if ( g?.shell && x.rim ) { Cause.setRim(display, g, x.rim); display.stats.rimJobs = (display.stats.rimJobs ?? 0) + 1; } }
+  }));
+  return left;
 }
 let darkTimer = 0;
 const darkCheck = () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); };

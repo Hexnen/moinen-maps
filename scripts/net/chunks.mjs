@@ -466,6 +466,7 @@ export function diffComposite(prev, next) {
  *   { kind: "water", box, frames, known }   -> [{ tx, ty, id (0: empty tile), bytes (PNG; null when `known` has the id) }]
  *   { kind: "objects", objs: [{ key, sprites }], F } -> [{ key, id, bytes }]
  *   { kind: "decode", bytes, cid }           -> the decoded payload (water tile, or { F, sprites }); its hash must match the chunk id
+ *   { kind: "rims", bytes, cid, areas }      -> a destruction chunk only: the dark rims of areas ([{ hash, cause, type }]), destruction/rim-job.mjs
  *   { kind: "decode", bytes, cid, pack }     -> a destruction chunk only: { atlases: packAreaAtlases(sprites, pack) } - the sprites stay here
  * (`id` is the worker's request number, never a chunk id)
  */
@@ -521,6 +522,14 @@ export async function work(m) {
     }
     for ( const s of o.sprites ) transfer.push(s.img.buffer);
     return { result: o, transfer };
+  }
+  if ( m.kind === "rims" ) {
+    const p = await unwrap(m.bytes);
+    if ( m.cid && String(m.cid).slice(1) !== hash64(p) ) throw new Error("chunk content does not match its name");
+    const { rimsOf } = await import("../destruction/rim-job.mjs");
+    const out = await rimsOf(unpackObject(p).sprites, m.areas);
+    for ( const r of out ) if ( r.rim ) transfer.push(r.rim.A8.buffer);
+    return { result: out, transfer };
   }
   if ( m.kind === "sigs" ) {
     // the strokes' full signatures (substrate.mjs fullSigs) off the page: { objs: [{ id, k, t, x0, y0, w, h, own, bytes }], P, K }

@@ -264,6 +264,21 @@ export async function atlasesOf(dir, id, pack, { prio = 0 } = {}) {
   } catch { return null; }
 }
 
+/**
+ * PERF (dark scenes): the dark rims of areas (display shells) out of ONE chunk, read in the codec worker (rim-job.mjs): the page gets
+ * the rims' strengths, no decoded sprites. `areas`: [{ hash, cause, type }]. -> [{ hash, rim }] or null (not in IndexedDB, or failed).
+ */
+export async function rimsOf(dir, id, areas) {
+  if ( !id ) return null;
+  let bytes = preloaded.get(id) ?? await idbGet(id);
+  preloaded.delete(id);
+  if ( !bytes ) return null;
+  try {
+    const b = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+    return await job({ kind: "rims", bytes: b, cid: id, areas }, [b.buffer]);
+  } catch ( err ) { console.warn(`${MODULE_ID} | chunk ${id}: rims could not be read (${err.message})`); return null; }
+}
+
 async function download(dir, id, reload = false, signal = null) {
   stats.requests++;
   const res = await fetch(foundry.utils.getRoute(fileOf(dir, id)), { cache: reload ? "reload" : "force-cache", signal });

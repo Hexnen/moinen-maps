@@ -490,3 +490,18 @@ export function disposeLights(d) {
   if ( !L.layer.destroyed ) L.layer.destroy({ children: true });
   d.causeLights = null;
 }
+
+/**
+ * The dark rim of an area that has no pixels here (a shell of the settled composite), read elsewhere (rim-job.mjs, the codec worker):
+ * its sprite as addRim leaves it. `r`: { A8, col, LW, LH, ox, oy }. -> true when it was set.
+ */
+export function setRim(d, g, r) {
+  if ( g.rim || !r?.A8 ) return false;
+  const L = ensureLights(d), ap = d.ap, o = d.origin, B = 1, pool = new PIXI.Sprite(PIXI.Texture.EMPTY);
+  pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
+  pool.position.set(o.x + (r.ox - B) * ap, o.y + (r.oy - B) * ap); pool.visible = false;
+  L.layer.addChild(pool);
+  g.rim = { pool, tex: null, A8: r.A8, col: r.col, LW: r.LW, LH: r.LH };
+  L.groups.add(g);
+  return true;
+}
