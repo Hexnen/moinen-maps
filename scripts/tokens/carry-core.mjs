@@ -173,12 +173,14 @@ export function makeTk({ grab, a, b, path, ends = "real", rect = null, snap = nu
  * and sortLayers below TOKEN_LAYER (display.mjs layers 247 and 249, the districts' 250, lights 251 ...); a token's mesh is at its own
  * elevation (>= 0 to be seen at all: the scene's background lies at 0) and sortLayer TOKEN_LAYER. `frontKeys` gives a carried token's mesh
  * the keys it must hold for the carry: its own elevation and `sort` (several tokens keep their order), never a sortLayer below the tokens'
- * own. The editor's overlay and cursor, which live on the interface above every mesh, sit just under the tokens while a carry runs (OVER_KEYS).
+ * own. `rank` (0 = a plain token) lifts the sortLayer by whole steps ABOVE every token's own, whatever its `sort`: a pushed token (RANK_PUSHED) draws over
+ * all other tokens and the carrier (RANK_CARRIER) over the pushed ones. The editor's overlay and cursor, which live on the interface above every mesh, sit just under the tokens while a carry runs (OVER_KEYS).
  */
 export const TOKEN_LAYER = 700;
 export const OVER_KEYS = { elevation: 0, sortLayer: TOKEN_LAYER - 1, sort: 0 };
-export function frontKeys(k) {
-  return { elevation: Number(k?.elevation) || 0, sortLayer: Math.max(Number(k?.sortLayer) || 0, TOKEN_LAYER), sort: Number(k?.sort) || 0 };
+export const RANK_PUSHED = 1, RANK_CARRIER = 2;   // a held token's rank: the tokens a carrier ploughs, the carrier itself (always above every one of them)
+export function frontKeys(k, rank = 0) {
+  return { elevation: Number(k?.elevation) || 0, sortLayer: Math.max(Number(k?.sortLayer) || 0, TOKEN_LAYER) + Math.max(0, Math.floor(Number(rank) || 0)), sort: Number(k?.sort) || 0 };
 }
 /** Does `a` draw over `b` (Foundry's primary order: elevation, then sortLayer, then sort)? */
 export function drawsOver(a, b) {

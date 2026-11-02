@@ -8,9 +8,10 @@
  *
  * Foundry resets a mesh's keys in its own refresh, so they are re-applied in the `refreshToken` hook (onRefresh). Nothing runs while no token is held (one Map lookup per token refresh).
  */
-import { frontKeys } from "./carry-core.mjs";
+import { frontKeys, RANK_CARRIER } from "./carry-core.mjs";
 
-const HOLDS = new Map();       // token id -> Set of tags
+const HOLDS = new Map();       // token id -> Map tag -> rank (the highest rank wins: the carrier above the tokens it pushes)
+const APPLIED = new WeakMap(); // mesh -> { base (Foundry's own sortLayer), layer (what we set) }: never compounds, restores exactly
 const PENDING = new Map();     // `${id}|${tag}` -> { id, tag, until } a release that waits (animation time: the carry's own clock, so a frozen test clock holds it too)
 let ticking = false;
 let underFn = () => {};
@@ -20,19 +21,30 @@ let isUnder = false;
 export function onUnder(fn) { underFn = typeof fn === "function" ? fn : () => {}; }
 function setUnder(on) { if ( on === isUnder ) return; isUnder = on; try { underFn(on); } catch ( err ) { console.warn("moinen-maps | carry front", err); } }
 
+const rankOf = (id) => { const s = HOLDS.get(id); let r = 0; if ( s ) for ( const v of s.values() ) r = Math.max(r, v); return r; };
+
 /** Give a token's mesh the keys it needs now (the document is never touched). */
 export function enforce(token) {
   const m = token?.mesh; if ( !m || m.destroyed ) return false;
-  const k = frontKeys(m);
+  const a = APPLIED.get(m), base = a && m.sortLayer === a.layer ? a.base : m.sortLayer;   // (Foundry's refresh put its own layer back: that is the base)
+  const k = frontKeys({ ...m, sortLayer: base }, rankOf(token.document?.id));
   if ( m.sortLayer !== k.sortLayer ) { m.sortLayer = k.sortLayer; if ( canvas.primary ) canvas.primary.sortDirty = true; }
+  APPLIED.set(m, { base, layer: k.sortLayer });
   return true;
 }
 
-/** Hold a token in front under `tag` (an id of whoever holds it). */
-export function hold(id, tag) {
+/** Put a token's own layer back (its hold is over). */
+function restore(id) {
+  const m = canvas?.tokens?.get(id)?.mesh; if ( !m || m.destroyed ) return;
+  const a = APPLIED.get(m); APPLIED.delete(m);
+  if ( a && m.sortLayer === a.layer ) { m.sortLayer = a.base; if ( canvas.primary ) canvas.primary.sortDirty = true; }
+}
+
+/** Hold a token in front under `tag` (an id of whoever holds it) at `rank` (RANK_CARRIER by default; a pushed token RANK_PUSHED). */
+export function hold(id, tag, rank = RANK_CARRIER) {
   if ( !id ) return;
-  let s = HOLDS.get(id); if ( !s ) HOLDS.set(id, s = new Set());
-  s.add(tag); PENDING.delete(`${id}|${tag}`);
+  let s = HOLDS.get(id); if ( !s ) HOLDS.set(id, s = new Map());
+  s.set(tag, rank); PENDING.delete(`${id}|${tag}`);
   enforce(canvas?.tokens?.get(id));
   setUnder(true);
 }
@@ -40,8 +52,8 @@ export function hold(id, tag) {
 function drop(id, tag) {
   const s = HOLDS.get(id); if ( !s ) return;
   s.delete(tag);
-  if ( s.size ) return;
-  HOLDS.delete(id);
+  if ( s.size ) { enforce(canvas?.tokens?.get(id)); return; }
+  HOLDS.delete(id); restore(id);
   if ( !HOLDS.size ) setUnder(false);
 }
 
@@ -77,4 +89,4 @@ export function clear() {
   setUnder(false);
 }
 
-export const _frontState = () => ({ holds: [...HOLDS].map(([id, s]) => [id, [...s]]), under: isUnder, pending: PENDING.size, ticking });
+export const _frontState = () => ({ holds: [...HOLDS].map(([id, s]) => [id, [...s.keys()]]), under: isUnder, pending: PENDING.size, ticking });
