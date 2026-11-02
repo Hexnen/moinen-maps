@@ -567,8 +567,8 @@ export class DestructionDisplay {
   reflatten(now) {
     const t0 = performance.now();
     for ( const g of this.order ) {
-      if ( performance.now() - t0 > 4 ) return;      // a few per frame (after a Detonate they all settle together)
       if ( !g.reflatAt || now < g.reflatAt ) continue;
+      if ( performance.now() - t0 > 4 ) return;      // a few per frame (after a Detonate they all settle together; the clock is read only for a group that is due: a read per group per frame was garbage)
       if ( g.anim || g.fade || g.made < g.pieces.length || g.cont.alpha < 1 ) { g.reflatAt = now + 300; continue; }
       g.reflatAt = 0;
       if ( this.dying.some((u) => u.heldBy === g) ) { g.reflatAt = now + 300; continue; }

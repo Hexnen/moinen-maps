@@ -1,4 +1,5 @@
 import * as Water from "./water.mjs";
+import { cfgMemo } from "./cfg-memo.mjs";
 import * as Model from "./model.mjs";
 import { wetAt, anyWet } from "./wet.mjs";
 
@@ -22,7 +23,9 @@ let bubbles = [];
 const ringTex = new Map();
 
 const S = () => Water.state();
-const cfg = () => ({ ...SUBMERGE_DEFAULTS, ...(S()?.params ?? {}) });
+const SEEN = new Set();   // (PERF: the tokens seen this frame, one set for ever)
+const cfgOf = cfgMemo(SUBMERGE_DEFAULTS);
+const cfg = () => cfgOf(S()?.params);   // (PERF: not a merged copy per frame)
 const hexRGB = (c) => { const n = parseInt(String(c).replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
 
@@ -142,7 +145,7 @@ function onTick() {
   const s = S(), P = cfg();
   const on = (s?.enabled || anyWet()) && P.submergeOn && !REDUCED?.matches && (P.submergeWho === "all" || game.user.isGM);
   if ( !on ) { if ( states.size || bubbles.length ) clear(); return; }
-  const now = performance.now(), seen = new Set();
+  const now = performance.now(), seen = SEEN; seen.clear();
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document, elev = doc.elevation ?? 0;
     if ( elev >= 0 || !t.visible || (doc.hidden && !game.user.isGM) ) continue;

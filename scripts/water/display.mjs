@@ -1,4 +1,5 @@
 import { buildLut, paintFrame } from "./paint.mjs";
+import { cachedSetting } from "../setting-cache.mjs";
 
 /**
  * Plays the baked water over the map: one sprite in the primary group (between the scene background and the districts, tiles and
@@ -63,7 +64,7 @@ export class LoopMix extends PIXI.Mesh {
   }
   _render(renderer) { this.shader.uniforms.uAlpha = this.worldAlpha; super._render(renderer); }
 }
-const smoothOn = () => { try { return game.settings.get("moinen-maps", "smoothWater") !== false; } catch { return true; } };
+const smoothOn = () => cachedSetting("smoothWater", true) !== false;
 
 export class WaterDisplay {
   constructor() {

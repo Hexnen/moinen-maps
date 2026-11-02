@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
+import { cachedSetting } from "../setting-cache.mjs";
 import { bandKey as bandKeyOf } from "../net/chunks.mjs";
 
 /**
@@ -36,8 +37,11 @@ const WATER_SLOT = { renderable: true, parent: null, destroyed: false };   // a 
 export const cacheEnabled = () => {
   if ( perfLow() ) return true;                                  // performance mode Low: always
   if ( globalThis.CONFIG?.moinenMaps?.noDestructionCache ) return false;
-  try { return game.settings.get(MODULE_ID, "destructionCache") !== false; } catch { return true; }
+  return cachedSetting("destructionCache", true) !== false;      // (PERF: not a settings read per frame)
 };
+
+let CID = 0;
+const cidOf = (o) => o._mmCid ?? (o._mmCid = ++CID);
 
 /**
  * Pure: the level of every unit (render order). `units[i]` = { r: {x0,y0,x1,y1}, live: bool, m: margin }. Statics get even levels,
@@ -223,6 +227,9 @@ export class StaticCache {
     display.objs.addChild(this.show);                   // over `live`, which is not drawn while this shows
     this.bands = [];                                     // [{ tiles: [{ rt, spr, x, y, w, h }] }]
     this.dirty = true; this.sig = ""; this.liveAll = true; this.mode = "live"; this.runs = [];
+    // REST (PERF): when nothing the units / levels / signature depend on changed since the last full pass (`fingerprint`), update() only
+    // keeps the tiles aligned; the full pass (units, O(n^2) levels, signature string) is ~0.6 ms of CPU and ~70 KB of garbage on 300 units
+    this.fast = false; this.fpA = 0; this.fpB = 0; this.fpA2 = 0; this.fpB2 = 0; this.kidsSnap = []; this.settleOn = false;
     this.ids = new WeakMap(); this.nextId = 1; this.sticky = new Set(); this.act = ""; this.changedAt = 0;
     this.stats = { bakes: 0, bakeMs: 0, units: 0, live: 0, bands: 0, mode: "live", res: 0, tiles: 0, mpx: 0 };
     this._ctx = { contextChange: () => { this.dirty = true; } };
@@ -260,6 +267,42 @@ export class StaticCache {
     return out;
   }
 
+  /**
+   * A fingerprint of everything units() / levels() / the signature read: the objects in the layer (identity and order), each area's
+   * moving flags (anim, fade, pieces still being made, cont alpha, queued to enter, cause glow, dying), its children (the water),
+   * each erase stroke's dissolve / leaving flags and the scene size. No allocation: two numbers (this.fpA2/fpB2) and a kids check.
+   */
+  fingerprint(kids, sr) {
+    const d = this.d, eq = d.enterQueue, lh = d.composite?.liveHashes;
+    let a = kids.length | 0, b = 0, v;
+    for ( const g of d.groups.values() ) {
+      const k = g.cont, bloom = g.light?.bloom;
+      v = Math.imul(cidOf(k), 0x9E3779B1) ^ ((g.anim ? 1 : 0) | (g.fade ? 2 : 0) | (g.made < g.pieces.length ? 4 : 0) | (k.alpha < 1 ? 8 : 0) | (eq?.has(g) ? 16 : 0)
+        | ((bloom && !bloom.destroyed && bloom.alpha > 0.003) || (g.shell && lh?.has(g.hash)) ? 32 : 0) | (g.info.water ? 64 : 0));
+      const ch = k.children;
+      for ( let i = 0; i < ch.length; i++ ) v = Math.imul(v ^ cidOf(ch[i]), 0x85EBCA6B);
+      a = (a + v) | 0; b ^= (v << 11) | (v >>> 21);
+    }
+    for ( const g of d.dying ) {
+      const k = g.cont, bloom = g.light?.bloom;
+      v = Math.imul(cidOf(k) + 0x1234567, 0x9E3779B1) ^ ((g.anim ? 1 : 0) | (g.fade ? 2 : 0) | (g.made < g.pieces.length ? 4 : 0) | (k.alpha < 1 ? 8 : 0) | (eq?.has(g) ? 16 : 0)
+        | ((bloom && !bloom.destroyed && bloom.alpha > 0.003) || (g.shell && lh?.has(g.hash)) ? 32 : 0) | (g.info.water ? 64 : 0) | 128);
+      const ch = k.children;
+      for ( let i = 0; i < ch.length; i++ ) v = Math.imul(v ^ cidOf(ch[i]), 0x85EBCA6B);
+      a = (a + v) | 0; b ^= (v << 11) | (v >>> 21);
+    }
+    for ( const e of d.erasers.values() ) {
+      v = Math.imul(cidOf(e.cont) + 0x7654321, 0x9E3779B1) ^ ((e.dis ? 1 : 0) | (e.leaving ? 2 : 0));
+      a = (a + v) | 0; b ^= (v << 11) | (v >>> 21);
+    }
+    a = (a + Math.imul((sr.width | 0) + 31 * (sr.height | 0) + 977 * ((globalThis.CONFIG?.moinenMaps?.destructionCacheRes * 100) | 0), 0x2545F491)) | 0;
+    this.fpA2 = a; this.fpB2 = b;
+    const snap = this.kidsSnap;
+    if ( snap.length !== kids.length ) return false;
+    for ( let i = 0; i < kids.length; i++ ) if ( snap[i] !== kids[i] ) return false;
+    return a === this.fpA && b === this.fpB;
+  }
+
   /** Once per frame, after the display's tick. */
   update() {
     // the zoom softening: is the scale moving?
@@ -269,6 +312,13 @@ export class StaticCache {
       zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / SOFT_MS) : 0; }
     const d = this.d, kids = d.live.children, sr = canvas.dimensions?.sceneRect, R = canvas.app?.renderer;
     if ( !cacheEnabled() || !kids.length || !sr || !R ) return this.allLive("off");
+    const same = this.fingerprint(kids, sr);
+    if ( same && this.fast && !this.dirty && !this.tilesLost() && !globalThis.CONFIG?.moinenMaps?.noFastRest ) {   // (noFastRest: dev knob, A/B)            // REST: nothing the bands / runs depend on changed
+      this.align(canvas.stage.scale.x * (R.resolution || 1));
+      d.live.visible = false; this.show.visible = true;
+      return;
+    }
+    this.fast = false;
     const U = this.units();
     const moving = U.reduce((a, u) => a + (u.live && !u.water ? 1 : 0), 0);
     if ( moving > kids.length * LIVE_SHARE ) { this.sticky.clear(); return this.allLive("busy"); }
@@ -302,7 +352,7 @@ export class StaticCache {
     // (no sampling flag: the bands are drawn one texel per scene pixel, where the live layer's NEAREST and LINEAR give the same texels
     // - measured equal on "map" - so a zoom across that switch re-draws nothing)
     const sig = `${U.length}|${res}|${W ? `${W.x0},${W.y0},${W.x1},${W.y1}` : "scene"}|${U.map((u, i) => (u.live ? "L" : "") + lv[i]).join(",")}`;
-    if ( this.dirty || sig !== this.sig || this.bands.some((b) => b.tiles.some((t) => !t.rt.valid || t.rt.baseTexture.destroyed)) ) {
+    if ( this.dirty || sig !== this.sig || this.tilesLost() ) {
       this.bake(U, lv, sr, res, !W, W);
       this.sig = sig; this.dirty = false;
       this.sticky = new Set(U.filter((u) => u.live && !u.water).map((u) => u.obj));
@@ -317,6 +367,15 @@ export class StaticCache {
     this.show.visible = true;
     this.liveAll = false; this.mode = this.stats.mode = (W ? "view" : "scene") + (moving || U.some((u) => u.water) ? "+live" : "");
     this.stats.units = U.length; this.stats.live = U.filter((u) => u.live).length;
+    // the fast path may take over once the units are not being held live by SETTLE_MS (the sticky set), nor in the dev view mode
+    this.fast = !(this.sticky.size && now - this.changedAt < SETTLE_MS) && !W && !globalThis.CONFIG?.moinenMaps?.cacheViewMode;
+    this.fpA = this.fpA2; this.fpB = this.fpB2; this.kidsSnap.length = 0; for ( const k of kids ) this.kidsSnap.push(k);
+  }
+
+  /** A band texture lost (context loss, destroyed): the bands are drawn again. */
+  tilesLost() {
+    for ( const b of this.bands ) for ( const t of b.tiles ) if ( !t.rt.valid || t.rt.baseTexture.destroyed ) return true;
+    return false;
   }
 
   /**
@@ -347,6 +406,7 @@ export class StaticCache {
   }
 
   allLive(why) {
+    this.fast = false;
     // drawn live, shells (areas shown from the settled composite only) would be missing: their pixels are asked for
     if ( this.d.shellCount ) this.d.needPixels?.([...this.d.groups.values()].filter((g) => g.shell));
     if ( !this.liveAll ) {
