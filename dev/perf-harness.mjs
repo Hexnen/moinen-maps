@@ -1542,9 +1542,32 @@ export async function diffShared(name = "diverge-gm", opts = {}) {
  * the settled composite (frames are stepped: a background tab has no ticker), then \`shareMeans(name)\`. Returns { strokes, seconds, publish, composite }.
  */
 export async function rebakeAndShare(name = "diverge-gm", { maxS = 420 } = {}) {
-  const A = game.modules.get("moinen-maps").api.destruction, T = A.net.trace, ids = A.state().o.filter((o) => !o.k).map((o) => o.id);
-  const at0 = canvas.scene.flags[MODULE]?.destructionComposite?.at ?? 0, n0 = T().events.length, t0 = performance.now();
-  A.rebakeAll(ids);
+  const run = await rebakeRun({ maxS });
+  await boot();
+  await shareMeans(name);
+  return { strokes: run.strokes, seconds: run.seconds, publish: run.publish, composite: run.composite };
+}
+
+/** The published manifest's chunk ids by stroke ({ strokeId: chunkId }), from the scene flag (what a player reads). */
+export function manifestIds(scene = canvas.scene) {
+  const c = scene.flags[MODULE]?.destruction?.baked?.c ?? {};
+  return Object.fromEntries(Object.entries(c).map(([k, v]) => [k, String(v).split(":")[1]]));
+}
+
+/** Two `manifestIds()` compared: { same, changed: [stroke ids whose chunk differs], only: [ids in one only] }. */
+export function idsDiff(a, b) {
+  const changed = Object.keys(a).filter((k) => k in b && a[k] !== b[k]), only = [...Object.keys(a).filter((k) => !(k in b)), ...Object.keys(b).filter((k) => !(k in a))];
+  return { same: Object.keys(a).length - changed.length - only.length, changed, only };
+}
+
+/**
+ * GM: Rebake all (every stroke, or `ids`) and wait for the pass, the publish and the settled composite (frames are stepped: a background
+ * tab has no ticker). Returns { strokes, seconds, publish, composite, ids (manifestIds after), manifests (how many times the manifest was written) }.
+ */
+export async function rebakeRun({ maxS = 420, ids = null } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, T = A.net.trace, list = ids ?? A.state().o.filter((o) => !o.k).map((o) => o.id);
+  const at0 = canvas.scene.flags[MODULE]?.destructionComposite?.at ?? 0, n0 = T().events.length, t0 = performance.now(), b0 = canvas.scene.flags[MODULE]?.destruction?.baked?.at ?? 0;
+  A.rebakeAll(list);
   const gone = (re) => T().events.slice(n0).filter((e) => re.test(e.reason));
   while ( performance.now() - t0 < maxS * 1000 ) {
     await new Promise((r) => setTimeout(r, 300)); step(20);
@@ -1558,10 +1581,8 @@ export async function rebakeAndShare(name = "diverge-gm", { maxS = 420 } = {}) {
     if ( gone(/^publish$/).length || !A.status().baking ) tPub ||= performance.now();
     if ( tPub && performance.now() - tPub > 15000 && !gone(/^composite-wait$/).length ) break;
   }
-  await boot();
   const pub = gone(/^publish$/).pop()?.data ?? null, comp = gone(/^composite-published$/).length;
-  await shareMeans(name);
-  return { strokes: ids.length, seconds: Math.round((performance.now() - t0) / 100) / 10, publish: pub, composite: comp };
+  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, publish: pub, composite: comp, ids: manifestIds(), manifestWritten: (canvas.scene.flags[MODULE]?.destruction?.baked?.at ?? 0) > b0 };
 }
 
 /** This page's own pictures per view: the areas as shown (cache bands) against the areas drawn live (without the cache): [[view, max, blocks over 8]] (a band that is not the areas' picture shows here). */
@@ -1618,4 +1639,65 @@ export async function floodCheck({ maxMs = 45000 } = {}) {
   const states = s.holes.reduce((a, h) => (a[h.state] = (a[h.state] || 0) + 1, a), {});
   const none = s.holes.filter((h) => h.state === "none").map((h) => h.hash);
   return { ok: !none.length && s.holes.length > 0, n: s.holes.length, states, none, dry: s.dry ?? 0, recovered: s.dryRecovered ?? 0, gaveUp: s.dryGaveUp ?? 0, user: game.user.name, ms: Math.round(performance.now() - t0) };
+}
+
+/**
+ * FLOOD DRY, LIVE (the retry path of flood.mjs retryDry, which a normal load never needs): the scene is drawn again with its strokes' chunks
+ * (and bundles) held back for `stallMs` - the composite's shells cannot get their pixels, so every flooded hole is dry - then let through.
+ * IndexedDB reads are refused meanwhile and the stream's memory is emptied first, so the chunks really come from the network. Returns
+ * { holes, during: states just before the release, gaveUp, recovered, afterMs: until no hole is dry / new / loading, final: states }.
+ * Before the fix a hole gave up after ~31 s (state 'none') and stayed without water; a stall of 40 s shows it.
+ */
+export async function floodDryLive({ stallMs = 40000, maxMs = 90000 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, F = A.flood, Net = await import("../scripts/net/stream.mjs");
+  const sc = canvas.scene, ids = [...Object.values(manifestIds(sc)), ...(sc.flags[MODULE]?.chunkBundle?.t ?? [])];
+  const realFetch = window.fetch, realTx = IDBDatabase.prototype.transaction;
+  let blocked = true, release; const gate = new Promise((r) => { release = r; });
+  window.fetch = function(input, init) {
+    const u = String(input?.url ?? input);
+    return /\/c\/[^/]+\/[bd][^/]*\.png/.test(u) ? gate.then(() => realFetch.call(this, input, init)) : realFetch.call(this, input, init);
+  };
+  IDBDatabase.prototype.transaction = function(...a) { if ( blocked ) throw new Error("held back (floodDryLive)"); return realTx.apply(this, a); };
+  const states = () => F.status().holes.reduce((o, h) => (o[h.state] = (o[h.state] || 0) + 1, o), {});
+  try {
+    for ( const id of ids ) Net.forget(id);
+    await canvas.draw();
+    const t0 = performance.now(), holes = F.status().holes.length;
+    while ( performance.now() - t0 < stallMs ) { await new Promise((r) => setTimeout(r, 500)); step(5); }
+    const during = states(), st = F.status(), gaveUp = st.dryGaveUp ?? 0;
+    blocked = false; release();
+    const t1 = performance.now();
+    while ( performance.now() - t1 < maxMs ) {
+      await new Promise((r) => setTimeout(r, 500)); step(5);
+      const s = F.status();
+      if ( s.holes.length && !s.holes.some((h) => ["new", "loading", "dry", "baking", "stale"].includes(h.state)) ) break;
+    }
+    const end = F.status();
+    return { holes, during, gaveUp, recovered: end.dryRecovered ?? 0, afterMs: Math.round(performance.now() - t1), final: states() };
+  } finally { blocked = false; release(); window.fetch = realFetch; IDBDatabase.prototype.transaction = realTx; }
+}
+
+/**
+ * WARM PLAYER (a player already on the scene while the GM runs Rebake all): the player's picture against the GM's `shareMeans(name)`
+ * (diffShared), polled until shown.max <= `want` or `maxS`. No reload: the page is the one that was on the scene. Returns { converged,
+ * seconds, series ([[s, shown.max, blocks over 8]]), requests (chunk requests since the call), warm (the warm-refresh trace events),
+ * longTaskMs (the longest task the page saw) }.
+ */
+export async function warmWatch(name = "diverge-gm", { maxS = 120, want = 8 } = {}) {
+  const Net = await import("../scripts/net/stream.mjs"), T = game.modules.get("moinen-maps").api.destruction.net.trace;
+  const r0 = Net.stats.requests, k0 = Net.reqLog.length, n0 = T().events.length, t0 = performance.now(), series = [];
+  let long = 0; const obs = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) long = Math.max(long, e.duration); });
+  try { obs.observe({ type: "longtask" }); } catch { /* none */ }
+  let converged = false;
+  while ( performance.now() - t0 < maxS * 1000 ) {
+    step(10);
+    const d = await diffShared(name);
+    series.push([Math.round((performance.now() - t0) / 100) / 10, d.shown.max, d.shown.blocksOver]);
+    if ( d.shown.max <= want ) { converged = true; break; }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  obs.disconnect();
+  return { converged, seconds: Math.round((performance.now() - t0) / 100) / 10, series: series.length > 8 ? [...series.slice(0, 3), ...series.slice(-3)] : series, requests: Net.stats.requests - r0,
+    kb: Math.round(Net.reqLog.slice(k0).reduce((a, r) => a + r.bytes, 0) / 1024), longTaskMs: Math.round(long),
+    warm: T().events.slice(n0).filter((e) => /^warm-/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) })) };
 }

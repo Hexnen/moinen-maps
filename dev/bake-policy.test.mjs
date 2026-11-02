@@ -4,7 +4,7 @@
  * Run: node dev/bake-policy.test.mjs
  */
 import assert from "node:assert/strict";
-import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS, strokeVersion, olderLook, parseEntry, entryString, rebakeOrder, entryChoice } from "../scripts/destruction/bake-policy.mjs";
+import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS, strokeVersion, olderLook, parseEntry, entryString, rebakeOrder, entryChoice, chunkChanged, plainCurrent } from "../scripts/destruction/bake-policy.mjs";
 
 let passed = 0;
 const test = (name, fn) => { try { fn(); passed++; console.log("ok  ", name); } catch ( err ) { console.error("FAIL", name, err); process.exitCode = 1; } };
@@ -232,6 +232,44 @@ test("a record read back from a chunk (not baked here) never replaces a newer en
   assert.deepEqual(entryChoice(e, "b", { id: null, ver: 10, baked: true }), { encode: null });
   assert.deepEqual(entryChoice(null, "a", { id: "d3", ver: 10 }, () => true), { use: { id: "d3", ver: 10 } });
   assert.deepEqual(entryChoice(null, "a", { id: null, ver: 10, baked: true }), { encode: null });
+});
+
+test("warm refresh: a record whose entry names another chunk under the same signature is refetched (never one baked here, never another signature)", () => {
+  const e = { sig: "a", id: "d2", ver: 10 };
+  assert.equal(chunkChanged({ id: "d1", ver: 10 }, e, "a"), true, "same signature, new chunk id");
+  assert.equal(chunkChanged({ id: "d2", ver: 10 }, e, "a"), false, "the chunk it shows");
+  assert.equal(chunkChanged({ id: "d1", ver: 10 }, e, "b"), false, "another signature: the remote-change path re-bakes or fetches it");
+  assert.equal(chunkChanged({ id: null, ver: 10 }, e, "a"), false, "no chunk of its own (a legacy sheet)");
+  assert.equal(chunkChanged({ id: "d1", ver: 10, baked: true }, e, "a"), false, "baked here (the GM publishes it)");
+  assert.equal(chunkChanged(undefined, e, "a"), false);
+  assert.equal(chunkChanged({ id: "d1" }, undefined, "a"), false, "no entry any more");
+});
+
+test("Rebake all is independent of the order of its batches: a plain look under a newer stroke is only ever one the current code baked", () => {
+  // strokes 0..N-1; stroke i reads the older strokes in deps[i]. A stroke's chunk = its own look + the plain looks it was baked over.
+  const N = 24, NOW = 5, deps = Array.from({ length: N }, (_, i) => [i - 1, i - 3, i - 7].filter((j) => j >= 0 && i % 3 !== 0));
+  const oldVer = (i) => (i % 4 === 0 ? NOW : 3);            // a few strokes were baked by the current code already
+  const rebake = (order, batch, rule) => {
+    const have = Array.from({ length: N }, (_, i) => ({ ver: oldVer(i), look: oldVer(i) === NOW ? `f${i}` : `o${i}` })), out = {};
+    for ( let b = 0; b < order.length; b += batch ) {
+      const part = order.slice(b, b + batch), plain = {};
+      // wave 0: the plain looks the batch reads (a stroke without a look to lend is baked plain, with the current code)
+      for ( const i of part ) for ( const j of deps[i] ) if ( !(plainCurrent(have[j].ver, rule === "new", NOW)) ) plain[j] = `f${j}`;
+      for ( const i of part ) {
+        const read = deps[i].map((j) => plain[j] ?? have[j].look);
+        out[i] = `f${i}|${read.join(",")}`;
+      }
+      for ( const i of part ) if ( !deps[i].length ) have[i] = { ver: NOW, look: `f${i}` };   // a stroke that reads nothing: its final look is its plain look
+    }
+    return JSON.stringify(out);
+  };
+  let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const orders = Array.from({ length: 12 }, () => [...Array(N).keys()].sort(() => rnd() - 0.5));
+  const oldRule = new Set(orders.map((o) => rebake(o, 5, "old"))), newRule = new Set(orders.map((o) => rebake(o, 5, "new")));
+  assert.ok(oldRule.size > 1, "the old rule lends older looks: different batches give different chunks");
+  assert.equal(newRule.size, 1, "the current-code rule gives the same chunks for any order");
+  assert.equal(new Set([3, 7, 24].map((n) => rebake(orders[0], n, "new"))).size, 1, "and any batch size");
+  assert.equal(plainCurrent(3, false, 5), true); assert.equal(plainCurrent(3, true, 5), false); assert.equal(plainCurrent(5, true, 5), true);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);

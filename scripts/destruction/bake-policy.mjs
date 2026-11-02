@@ -144,6 +144,19 @@ export function entryChoice(e, sig, r, known = () => false) {
 }
 
 /**
+ * A client on the scene: does a record it holds show another chunk than the manifest names now for the same stroke? (the GM's Rebake all
+ * can republish a stroke under the same signature and version with a new chunk id). `r`: the record { id, baked }, `e`: the manifest's
+ * entry { sig, id }, `sig`: the stroke's signature here. A record baked here has no chunk of its own to compare (the GM publishes it).
+ */
+export const chunkChanged = (r, e, sig) => !!(r && e && r.id && !r.baked && e.sig === sig && e.id !== r.id);
+
+/**
+ * Rebake all, the plain looks the strokes over them are baked on (substrate.mjs): `current` - only a look the current code baked (`ver` is
+ * its record's bake version), never one read back from a chunk of an older version that the stroke's own pass replaces in a later batch.
+ */
+export const plainCurrent = (ver, current, now) => !current || ver === now;
+
+/**
  * Rebake all: the order strokes are re-baked in - the older looks nearest the view first, each followed by the strokes that read it
  * (their substrate changes with it). `list`: [{ objId, index, dist, dependents: [objId] }]. -> [objId] without repeats.
  */

@@ -175,6 +175,7 @@ function onUpdateScene(scene, changed, _options, userId) {
     S.baked = F?.baked ?? S.baked; S.entries = Array.isArray(F?.entries) ? F.entries : S.entries;
     Trace.event("remote-manifest", { base: S.baked?.base ?? null });
     tell("status");
+    warmCheck(300);       // (a stroke whose chunk was republished under the same signature: the picture here follows)
     return;
   }
   Trace.event("remote-change", { keys: Object.keys(f), main: d && typeof d === "object" ? Object.keys(d) : null });
@@ -229,6 +230,7 @@ export async function rebake(opts = {}) {
     if ( gen === g0 && status.baking && !inflight ) { status.baking = false; tell("status"); }
   }
   if ( again && S ) { const o = again; again = null; rebake(o); }
+  else if ( S && gen === g0 ) warmCheck(100);          // (a pass that was on its way when the GM republished may have kept an older chunk)
 }
 
 async function bakeOnce({ awaitPublish = true, force = false, idle = false, all = false, redo = null } = {}) {
@@ -260,6 +262,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // Rebake (all or one stroke): these strokes are baked again with the current code; their pinned look stays on screen meanwhile
   const redoSet = new Set(redo ?? []);
   for ( const w of want ) if ( redoSet.has(w.objId) ) recs.delete(w.rk);
+  // (a Rebake bakes over the plain looks the CURRENT code gives the older strokes only - never over a look an older version baked, which
+  // the stroke's own pass may replace in a later batch: the result must not depend on the order of the batches, plainOf)
+  const plainFor = (j) => plainOf(j, base, FS, redoSet.size > 0);
   slow("pass:want", tStart);
   const src ={ mem: 0, chunk: 0, legacy: 0, baked: 0 };
   const firstLoad = !loaded;
@@ -465,7 +470,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       const shells = new Map();
       for ( const w of toBake ) for ( const j of w.deps ) {
         const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null;
-        if ( r?.shell ) shells.set(r, j); else if ( r?.sprites.lean ) dry.add(r);
+        if ( r?.shell ) { if ( Policy.plainCurrent(r.ver, redoSet.size > 0, CORE_VERSION) ) shells.set(r, j); } else if ( r?.sprites.lean ) dry.add(r);
       }
       // (a shell stays a shell on screen - filled in place, all of them were built again in ONE sync: 1.5 s at the start of a Rebake
       // all on "map"): its chunk only lends its plain look, when it is one)
@@ -484,7 +489,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       // `under`: the PLAIN looks of the older strokes these read, where this client has them (else the worker bakes them from data)
       const inputOf = (list, plain = false) => {
         const need = new Set(list.map((w) => w.index)), under = {};
-        if ( !plain ) for ( const w of list ) for ( const j of w.deps ) { if ( need.has(j) || objs[j].k || under[j] ) continue; const pl = plainOf(j, base, FS); if ( pl ) under[j] = pl; }
+        if ( !plain ) for ( const w of list ) for ( const j of w.deps ) { if ( need.has(j) || objs[j].k || under[j] ) continue; const pl = plainFor(j); if ( pl ) under[j] = pl; }
         return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, plain, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       };
       const take = (list, res, plain = false) => {
@@ -516,7 +521,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const byIndex = new Map(want.map((w) => [w.index, w])), plainNeed = new Map();
         for ( const w of toBake ) {
           if ( !w.deps.length ) plainNeed.set(w.index, w);
-          for ( const j of w.deps ) { const d = byIndex.get(j); if ( d && !plainOf(j, base, FS) ) plainNeed.set(j, d); }
+          for ( const j of w.deps ) { const d = byIndex.get(j); if ( d && !plainFor(j) ) plainNeed.set(j, d); }
         }
         let timer = 0;
         const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 80); };
@@ -546,7 +551,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
               const need = new Set(jb.map((w) => w.index)), underKeys = {};
               for ( const w of jb ) for ( const j of w.deps ) {
                 if ( need.has(j) || objs[j].k || underKeys[j] ) continue;
-                const pl = plainOf(j, base, FS); if ( !pl ) continue;
+                const pl = plainFor(j); if ( !pl ) continue;
                 const k = `${S.objects[j].id}|${FS[j].own}`;
                 underKeys[j] = k; if ( !sent.has(k) ) sent.set(k, pl);
               }
@@ -738,12 +743,16 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
  */
 /** Was a record baked over a substrate (a part's cover row carries field 7 = 1, core.mjs)? Else it is the stroke's plain look too. */
 const overSubstrate = (sprites) => sprites.some((s) => s.m[0] === 2 && s.m[7] === 1);
-/** Stroke j's plain look, when this client has it: kept from a plain bake, or its final record when that was not over a substrate. */
-function plainOf(j, base, FS) {
+/**
+ * Stroke j's plain look, when this client has it: kept from a plain bake, or its final record when that was not over a substrate.
+ * `current` (a Rebake): only a look the current code baked - a record read back from a chunk of an older version is not one (the stroke
+ * is baked plain again, in the first wave), so the same strokes always give the same chunks whichever batch a stroke falls in.
+ */
+function plainOf(j, base, FS, current = false) {
   const o = S?.objects?.[j]; if ( !o || o.k ) return null;
   const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p.lean ? null : p;
   const r = recs.get(`${base}|${o.id}|${FS[j].sig}`);
-  return r && !r.shell && !r.sprites.lean && !overSubstrate(r.sprites) ? r.sprites : null;
+  return r && !r.shell && !r.sprites.lean && !overSubstrate(r.sprites) && Policy.plainCurrent(r.ver, current, CORE_VERSION) ? r.sprites : null;
 }
 
 /* ---------------------------------------------------------------- records without their pixels (memory) */
@@ -907,6 +916,14 @@ async function pixelSource(groups, deliver = null) {
   // chunks decoded by the whole pool, nothing kept on the page but the atlas itself - the record's sprites are not filled in, so no
   // second copy of the pixels stays behind); the order of `groups` (on-screen, nearest first) is the order of the jobs. A chunk that
   // is not in IndexedDB, or whose areas do not match, takes the old way (hydrate the record, copy the sprites in display.restoreAtlas).
+  // a shell whose record has its pixels since (a fill that landed while no pass showed it): shown again from its records, once per round
+  // (the cache's asks do this in requestPixels; a hole asking through display.pixelAsks needs it too, or it waits for a swap nobody makes)
+  const orphans = groups.filter((g) => g.shell && recOf(g) && !recOf(g).shell && performance.now() - lastOrphans >= 500);
+  if ( orphans.length ) {
+    lastOrphans = performance.now();
+    Trace.event("shells-orphan", { n: orphans.length, from: "ask" });
+    Promise.all([...new Set(orphans.map(recOf))].filter((r) => r.sprites.lean).map(hydrate)).then(() => reshow?.());
+  }
   const free = groups.filter((g) => g.atlasFree), byRec = new Map(), slow = [];
   free.forEach((g, i) => {
     const r = recOf(g);
@@ -1179,6 +1196,78 @@ function pumpRebake(ms = REBAKE_EVERY) {
 export function rebakePause(paused = true) { if ( status.rebake ) { status.rebake.paused = paused; tell("status"); if ( !paused ) pumpRebake(50); } }
 export function rebakeCancel() { rebakeQueue = []; clearTimeout(rebakeTimer); if ( status.rebake ) { Trace.event("rebake-cancel", status.rebake); status.rebake = null; tell("status"); schedulePersist(0); } }
 
+/* ---------------------------------------------------------------- warm refresh (a client on the scene while the GM republishes) */
+
+/*
+ * A Rebake all can give a stroke the SAME signature (its inputs, and the INPUTS of the strokes under it) and the same bake version but other
+ * pixels, so the GM publishes a NEW chunk id under the entry. A client that is already on the scene took the new manifest over without
+ * fetching anything (manifest-only echo) and kept showing the old chunk until its next reload. warmCheck compares the records here with the
+ * manifest: a record whose entry names another chunk (same signature) is fetched - the nearest to the view first, a few at a time, at the
+ * pace the stream's download queue allows - and goes on screen as a silent swap (a new look under the same inputs: no entry, no fade), a
+ * few strokes per frame. Never baked here. After a long list (a Rebake all) it waits for the GM's bundles (the manifest is followed a few
+ * seconds later by the bundle flag: one request for ~100 chunks) for at most WARM_HOLD.
+ */
+const WARM_PARALLEL = 4, WARM_MANY = 24, WARM_HOLD = 10000, WARM_RETRY = 30000;
+const warmBad = new Map();           // chunk id -> when it could not be had (not asked again for WARM_RETRY)
+let warmRun = 0, warmTimer = 0, warmHold = 0, warmSince = 0;
+export function warmCheck(ms = 0) {
+  clearTimeout(warmTimer); clearTimeout(warmHold); warmHold = 0;
+  warmTimer = setTimeout(() => { warmTimer = 0; warmGo(false).catch((err) => console.warn(`${MODULE_ID} | destruction: warm refresh`, err)); }, ms);
+}
+/** The records whose stroke's manifest entry names another chunk now, nearest first: [{ r, e, rk, index, prio }]. */
+function warmStale() {
+  if ( !S || !S.enabled || !Store.hasSigs(S) || status.rebake ) return [];
+  const M = Store.manifestOf(S), scene = canvas.scene, bg = backgroundInfo()?.path ?? "";
+  const base = Store.baseKey(scene, S, bg);
+  if ( !M || !Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg)) ) return [];
+  const FS = Store.sigsOf(S), list = [], t = Date.now();
+  S.objects.forEach((o, index) => {
+    if ( o.k ) return;
+    const rk = `${base}|${o.id}|${FS[index].sig}`, r = recs.get(rk), e = Store.entryOf(M, o.id);
+    if ( Policy.chunkChanged(r, e, FS[index].sig) && !(t - (warmBad.get(e.id) ?? -1e9) < WARM_RETRY) ) list.push({ r, e, rk, index });
+  });
+  return list.length ? prioritise(list, objectsIn()) : list;
+}
+async function warmGo(force) {
+  const run = ++warmRun, list = warmStale();
+  if ( !list.length ) return;
+  const my = gen, S0 = S, M = Store.manifestOf(S);
+  if ( list.length > WARM_MANY && !force && !Net.bundlesFor(list.map((w) => w.e.id)).length && (!warmSince || Date.now() - warmSince < WARM_HOLD) ) {
+    warmSince ||= Date.now();
+    Trace.event("warm-hold", { n: list.length });
+    warmHold = setTimeout(() => { warmHold = 0; warmGo(true).catch(() => {}); }, Math.max(100, WARM_HOLD - (Date.now() - warmSince)));
+    return;
+  }
+  warmSince = 0;
+  Trace.event("warm-refresh", { n: list.length, bundles: Net.bundlesFor(list.map((w) => w.e.id)).length });
+  netAbort ??= new AbortController();
+  const live = () => run === warmRun && my === gen && S === S0;
+  let next = 0, landed = 0, pend = 0;
+  const flush = async () => { pend = 0; if ( my === gen && reshow ) await reshow(); await new Promise((r) => setTimeout(r, 16)); };
+  const worker = async () => {
+    while ( next < list.length && live() ) {
+      const w = list[next++];
+      if ( recs.get(w.rk) !== w.r ) continue;                       // replaced meanwhile
+      const got = await Net.getChunk(M.dir, w.e.id, { prio: w.prio, signal: netAbort?.signal }).catch(() => null);
+      if ( !live() ) return;
+      if ( !(got?.sprites && got.F === META_FIELDS) ) { warmBad.set(w.e.id, Date.now()); continue; }
+      if ( recs.get(w.rk) !== w.r ) continue;
+      recs.set(w.rk, { rk: w.rk, objId: w.r.objId, own: w.r.own, id: w.e.id, ver: w.e.ver, dir: M.dir, sprites: got.sprites });
+      landed++; pend += got.sprites.reduce((a, q) => a + (q.w * q.h || 0), 0);
+      if ( pend >= SHOW_PX ) await flush();                         // (a sync costs ~5-9 ms per Mpx of new looks: never more than SHOW_PX at once)
+    }
+  };
+  const tick = setInterval(() => { if ( pend && live() ) flush(); }, 120);
+  try { await Promise.all(Array.from({ length: Math.min(WARM_PARALLEL, list.length) }, worker)); }
+  finally { clearInterval(tick); }
+  if ( my === gen && landed ) { await flush(); Trace.event("warm-done", { n: landed, of: list.length, swaps: depStats.swaps }); }
+  if ( my === gen && S === S0 && run === warmRun && next >= list.length ) warmCheck(500);     // (what could not be had waits WARM_RETRY; a manifest that changed meanwhile is read again)
+}
+Hooks.on("updateScene", (scene, changed) => {
+  if ( scene.id !== canvas.scene?.id || !warmHold || !("chunkBundle" in (changed?.flags?.[MODULE_ID] ?? {})) ) return;
+  setTimeout(() => { if ( !warmHold ) return; clearTimeout(warmHold); warmHold = 0; warmGo(true).catch(() => {}); }, 50);     // (the bundles are registered by their own hook first)
+});
+
 /* ---------------------------------------------------------------- how many workers a big bake uses */
 
 /**
@@ -1294,6 +1383,14 @@ async function persistOnce() {
     }
     if ( my !== gen || !S ) return;
     await save();                                    // the strokes first, so the signatures mean the same to everyone
+    // every chunk this pass encoded is the one its entry names (a Rebake all of what nothing changed): the manifest is not written again
+    // (its `at` alone would reach every client as an echo; entries that played since still go out)
+    if ( same && !stale.length && M.key === key && Object.keys(M.c).length === Object.keys(c).length && Object.keys(c).every((id) => M.c[id] === c[id]) && ![...entryLog.values()].some((e) => !e.t) ) {
+      publishBackoff = 0; publishRetryAt = 0;
+      Trace.event("publish-same", { n: todo.length });
+      tell("status");
+      return;
+    }
     const baked = { v: 2, dir, base, key, at: now(), c, path: null, metaRows: null };
     // the entries that played since: everybody here plays them a moment after the upload, at the same server time
     const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
