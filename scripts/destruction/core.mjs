@@ -234,7 +234,7 @@ function causePalette(P, cz, cls) {
  *   C { cx, cy, axis, maxD, px, keep (Set), cracks }, haloR (the cause halo's radius)
  */
 export function causeKit(K) {
-  const { cz, pal, seed, W, H, mapAt, put, glow, isIn, inside, din, maxD, E0, Rr, C, haloR } = K;
+  const { cz, pal, seed, W, H, mapAt, put, glow, isIn, inside, din, maxD, E0, Rr, C, haloR } = K, turf = !!K.turf;   // (turf: the ground is turf or earth)
   // light only (no pixel drawn): what glows in the dark without changing the day look - the light sprite's own pixels
   const lightOnly = K.lightOnly ?? (() => {});
   const rp = pal.ramp, rune = {};
@@ -481,7 +481,7 @@ export function causeKit(K) {
         case "arc": if ( (k & 1) === 0 ) glow(x, y, pal.acc, 180); else put(x, y, mix(m, pal.accLo, 0.8)); break;
         case "ice": put(x, y, mix(pal.accHi, [255, 255, 255], 0.35)); if ( y + 1 < H && !inside[i + W] ) put(x, y + 1, mix(mapAt(i + W), pal.ink, 0.35)); break;
         case "root": put(x, y, mix(m, mix(pal.accLo, pal.ink, 0.5), 0.85)); break;
-        default: put(x, y, mix(m, pal.ink, C.cls.mat === M.grass || C.cls.mat === M.earth ? 0.6 : 0.85));   // (on turf and earth a hairline is soil-dark, not a black wire)
+        default: put(x, y, mix(m, pal.ink, turf ? 0.6 : 0.85));   // (on turf and earth a hairline is soil-dark, not a black wire)
       }
       if ( col === "ink" || col === "root" || col === "acc" ) { const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14)); }
     });
@@ -1742,7 +1742,7 @@ function bakeArea(A, P, seed, uid, jag) {
       const q = (y - r.y0) * bw + (x - r.x0); if ( a <= glowA[q] ) return;
       glowA[q] = a; glowC[q * 3] = col[0]; glowC[q * 3 + 1] = col[1]; glowC[q * 3 + 2] = col[2];
     };
-    const kit = cz ? causeKit({ cz, pal, seed, W, H, mapAt, put, glow, lightOnly, isIn, inside, din, maxD, E0, Rr, C, haloR: cHaloR }) : null;
+    const kit = cz ? causeKit({ cz, pal, seed, W, H, mapAt, put, glow, lightOnly, isIn, inside, din, maxD, E0, Rr, C, haloR: cHaloR, turf: C.cls.mat === M.grass || C.cls.mat === M.earth }) : null;
     // 1. the exposed layer
     for ( const i of C.px ) {
       if ( C.keep.has(i) ) continue;
