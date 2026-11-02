@@ -25,6 +25,8 @@ import * as Composite from "./composite.mjs";
 import * as RimStore from "./rim-store.mjs";
 import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
+import * as Carry from "../tokens/carry.mjs";
+import { makeTk, validTk, unflatPath } from "../tokens/carry-core.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
 
 /**
@@ -211,6 +213,17 @@ const pathOfObj = (id) => { const o = id && S?.objects?.find((q) => q.id === id)
 const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, pr: o.pr, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
   path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
+
+/* ---------------------------------------------------------------- a token carried by a stroke (tokens/carry.mjs) */
+
+let realCarry = null;                 // the stroke whose entry is being set up as a NEW one (painted or redone here): its token really moves
+const carryOf = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o && !o.k && validTk(o.tk) ? o : null; };
+const carryGeo = () => { const r = Model.sceneRect(); return { ap: S.ap, ox: r.x, oy: r.y }; };
+/** What display.enter asks (display.carry): the carried stroke's path (its entry runs along it) and the start of a carry. */
+const carryHooks = {
+  pathOf: (id) => { const o = carryOf(id); return o ? unflatPath(o.tk.p) : null; },
+  enter: (g, start, k) => { const o = carryOf(g.objId); if ( o ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id }); }
+};
 
 /* ---------------------------------------------------------------- baking */
 
@@ -731,6 +744,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   display ??= new DestructionDisplay();
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
+  display.carry ??= carryHooks;
   display.onGone ??= () => tell("gone");        // (an area finished fading out: the flooded holes that were kept for its water are let go)
   display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
@@ -1257,7 +1271,8 @@ function playEntries(added, removed, taken, mask, first) {
     const o = s0 && dirOn ? s0.a ?? null : null;
     const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
     const path = s0 && dirOn ? s0.path : null;
-    display.enter(g, { start: pNow, o, dir: d, under, path, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
+    realCarry = g.objId;                          // (painted just now: a carried token really moves at the end)
+    try { display.enter(g, { start: pNow, o, dir: d, under, path, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); } finally { realCarry = null; }
     if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
@@ -1711,15 +1726,33 @@ export function edited(box, stroke = null) {
     if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
     const id = foundry.utils.randomID(10);
     const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause || (S.params.pin ? S.params.cause : 0) || 0, pr: S.params.pin ? Pin.pinDiff(S.params) : null });
+    // a token carried by the stroke: its record (tokens/carry-core.mjs; not part of the signature, so nothing re-bakes)
+    const tk = stroke.carry && !stroke.erase ? carryRecord(stroke) : null;
+    if ( tk ) ob.tk = tk;
     ob.s = Model.nextSeq(S);                         // its place in the order (layout 3 stores the strokes key by key)
     S.objects = [...(S.objects ?? []), ob];
     redoStack.length = 0;
     Model.compositeOver(S, ob);       // (the mask holds the strokes before it; the live stroke already drew itself there)
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
+    if ( tk ) expectCarry(ob);
   }
   editedHere = true;
   scheduleBake(); scheduleSave();
   tell("edited");
+}
+
+/** The `tk` of a stroke that was dragged from a token: where the token starts and ends, the path in art px (thinned). */
+function carryRecord(stroke) {
+  const pts = stroke.path?.length > 1 ? simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; })) : null;
+  const { snap, ends, grab } = stroke.carry, r = Model.sceneRect();
+  const snapFn = snap ? (x, y, w, h) => { const c = canvas.grid.getSnappedPoint({ x: x + w / 2, y: y + h / 2 }, { mode: CONST.GRID_SNAPPING_MODES.CENTER }); return [c.x - w / 2, c.y - h / 2]; } : null;
+  return makeTk({ grab, a: stroke.a, b: stroke.b ?? stroke.a, path: pts, ends, rect: r, snap: snapFn });
+}
+
+/** A stroke that carries a token should enter (and with it the carry); if its entry never does (nothing to show, a failed bake), the carry plays on its own. */
+function expectCarry(ob) {
+  const id = ob.id, scene = canvas.scene;
+  setTimeout(() => { if ( canvas.scene === scene && S?.objects?.some((q) => q.id === id) && !Carry.started(id) ) Carry.play({ objId: id, tk: ob.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true }); }, 12000);
 }
 
 /**
@@ -1800,6 +1833,7 @@ export function clearAll() {
   redoStack.length = 0;
   for ( const o of S.objects ?? [] ) S.dropOk?.add(o.id);          // on purpose: the save may delete them all (no snapshot)
   S.objects = []; Model.composite(S);
+  Carry.cancelAll();
   edited(null);
   Editor.refreshOverlay();
 }
@@ -1820,6 +1854,7 @@ export function redoLast() {
   S.rev = Model.nextRev(); editedHere = true;
   scheduleBake(); scheduleSave(); tell("edited");
   Editor.refreshOverlay(box);
+  if ( carryOf(o.id) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true });   // (redone: the token is carried again)
   return true;
 }
 
@@ -1831,6 +1866,7 @@ export function undoLast() {
   redoStack.push({ S, o: gone });                                   // (Ctrl+Shift+Z / Ctrl+Y: redoLast; a new stroke empties it)
   if ( redoStack.length > 100 ) redoStack.shift();
   S.objects = S.objects.slice(0, -1);
+  if ( gone.tk ) Carry.undo(gone.tk, gone.id);                       // (a carried token goes back to where it was grabbed)
   Model.compositeBox(S, { x0: gone.x0, y0: gone.y0, x1: gone.x0 + gone.w - 1, y1: gone.y0 + gone.h - 1 });     // (only its box changes)
   edited(null);
   Editor.refreshOverlay({ x0: gone.x0, y0: gone.y0, x1: gone.x0 + gone.w - 1, y1: gone.y0 + gone.h - 1 });
@@ -1969,6 +2005,7 @@ export const rebakeAll = (ids = null) => destructionApi.rebakeAll(ids);
 
 export function registerDestruction() {
   moduleApi.destruction = destructionApi;
+  Carry.registerCarry();
   Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast, redo: redoLast });
   Hooks.once("init", () => Editor.registerEditorSettings(() => tell("brush")));
   Hooks.once("init", () => game.settings.register(MODULE_ID, "destrRebake", {

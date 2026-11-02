@@ -72,6 +72,8 @@ function bar(host, ctx) {
   const mode = TOOLS[ctx.tool];
   const P0 = () => D.state()?.params ?? Model.PARAM_DEFAULTS;
   const quick = (k, icon, label) => `<button type="button" class="mm-ws-toolbtn" data-quick="${k}" aria-pressed="${!!P0()[k]}" aria-label="${esc(T(label))}" data-tooltip="${esc(T(label))}"><i class="${icon}" inert></i></button>`;
+  const carryOn = () => !!game.settings.get(MODULE_ID, "destrCarry");
+  const carryBtn = `<button type="button" class="mm-ws-toolbtn" data-carry aria-pressed="${carryOn()}" aria-label="${esc(T("Destr.quickCarry"))}" data-tooltip="${esc(T("Destr.quickCarryHint"))}"><i class="fa-solid fa-people-carry-box" inert></i></button>`;
   if ( !mode ) { host.innerHTML = optHint(T("Destr.pickHint")); return; }
   const b = Editor.brush();
   const size = optRange({ name: "size", label: T("Destr.size"), value: b.size, min: 0.25, max: 10, step: 0.25, hint: T("Destr.sizeHint") });
@@ -90,10 +92,12 @@ function bar(host, ctx) {
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.causeLabel"))}</span><div class="mm-ws-tools mm-d-causes" role="group" aria-label="${esc(T("Destr.causeLabel"))}">${causes}</div></div>
-      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}</div></div>
+      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}</div></div>
+      <span class="mm-ws-hint mm-d-carryhint"${carryOn() ? "" : " hidden"}>${esc(T("Destr.carryArmedHint"))}</span>
       ${optHint(T("Destr.paintHint"))}`;
   }
   const onClick = (ev) => {
+    if ( ev.target.closest("[data-carry]") ) game.settings.set(MODULE_ID, "destrCarry", !carryOn());
     const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]"), cb = ev.target.closest("[data-cause]");
     if ( qb ) D.setParams({ [qb.dataset.quick]: !P0()[qb.dataset.quick] });
     if ( cb && Number(cb.dataset.cause) !== Editor.brush().cause ) game.settings.set(MODULE_ID, "destrCause", Number(cb.dataset.cause));
@@ -117,6 +121,8 @@ function bar(host, ctx) {
     }
     if ( kind !== "brush" ) return;
     const nb = Editor.brush();
+    host.querySelector("[data-carry]")?.setAttribute("aria-pressed", String(carryOn()));
+    const ch = host.querySelector(".mm-d-carryhint"); if ( ch ) ch.hidden = !carryOn();
     for ( const x of host.querySelectorAll("[data-level]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.level) === nb.level));
     for ( const x of host.querySelectorAll("[data-type]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.type) === nb.type));
     for ( const x of host.querySelectorAll("[data-cause]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.cause) === nb.cause));
@@ -226,6 +232,11 @@ function mountLook(host) {
     <div class="mm-d-jag"${P.jagged ? "" : " hidden"}>${range("jag")}</div>
     ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}
     <p class="mm-ws-hint">${esc(T("Destr.lookNewOnly"))}</p>
+    <div class="mm-d-carry">
+    ${optCheck({ name: "c.destrCarry", label: T("Destr.f.carry"), checked: game.settings.get(MODULE_ID, "destrCarry"), hint: T("Destr.h.carry") })}
+    ${optSelect({ name: "c.carryEnds", label: T("Destr.carryEnds"), value: game.settings.get(MODULE_ID, "carryEnds"), hint: T("Destr.carryEndsHint"), options: [["real", T("Destr.carryEndsReal")], ["return", T("Destr.carryEndsReturn")]] })}
+    ${optCheck({ name: "c.carrySnap", label: T("Destr.carrySnap"), checked: game.settings.get(MODULE_ID, "carrySnap"), hint: T("Destr.carrySnapHint") })}
+    </div>
     <button type="button" class="mm-ws-btn" data-act="applyLook" data-tooltip="${esc(T("Destr.applyLookHint"))}"><i class="fa-solid fa-paintbrush" inert></i> ${esc(T("Destr.applyLook"))}</button></div>`;
   const onApply = async (ev) => {
     const b = ev.target.closest?.("[data-act=applyLook]"); if ( !b || !game.user.isGM ) return;
@@ -233,13 +244,23 @@ function mountLook(host) {
     if ( ok ) ui.notifications.info(game.i18n.format("MOINENMAPS.Destr.applyLookDone", { n: D.applyParams() }));
   };
   host.addEventListener("click", onApply);
+  // the carry controls are the client's own settings (not the scene's): stored at once, updated when changed elsewhere (the bar's button)
+  const onCarry = (ev) => {
+    const c = ev.target.closest?.("[name^='c.']"); if ( !c ) return;
+    game.settings.set(MODULE_ID, c.name.slice(2), c.matches("input[type=checkbox]") ? c.checked : c.value);
+  };
+  host.addEventListener("change", onCarry);
+  const idC = Hooks.on("moinenMapsDestruction", (kind) => {
+    if ( kind !== "brush" ) return;
+    for ( const c of host.querySelectorAll("[name^='c.']") ) { if ( c.contains(document.activeElement) ) continue; writeControl(c, game.settings.get(MODULE_ID, c.name.slice(2))); }
+  });
   // the tearing slider only while torn borders are on
   const id = Hooks.on("moinenMapsDestruction", (kind) => {
     if ( kind !== "loaded" && kind !== "params" ) return;
     const j = host.querySelector(".mm-d-jag"); if ( j ) j.hidden = !(D.state()?.params ?? Model.PARAM_DEFAULTS).jagged;
   });
   const off = bindParams(host);
-  return () => { off(); host.removeEventListener("click", onApply); Hooks.off("moinenMapsDestruction", id); };
+  return () => { off(); host.removeEventListener("click", onApply); host.removeEventListener("change", onCarry); Hooks.off("moinenMapsDestruction", id); Hooks.off("moinenMapsDestruction", idC); };
 }
 
 function mountMotion(host) {

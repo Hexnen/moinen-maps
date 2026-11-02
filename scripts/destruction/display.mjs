@@ -923,6 +923,8 @@ export class DestructionDisplay {
     this.enterQueue?.delete(g);
     this.endAnim(g);
     const now = performance.now();
+    // a stroke that carries a token: its entry runs along the carried path, and the token's carry starts with it (tokens/carry.mjs)
+    if ( g.objId && this.carry && this.look.entry ) { path ??= this.carry.pathOf(g.objId); this.carry.enter(g, start, (1 / (this.look.speed || 1)) * (Cause.causeLook(g.info.cause)?.slow ?? 1)); }
     // an area shown from the composite or without its atlas has no pixels to play an entry with: they are asked for (pixelSource,
     // destruction.mjs) and the entry waits up to WAIT_MS for them (waitPixels); without a source it is shown as it lies
     if ( g.shell || g.atlasFree || under.some((u) => u.shell || u.atlasFree) ) {
