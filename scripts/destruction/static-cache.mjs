@@ -120,28 +120,42 @@ uniform float uScale;
 uniform float uSharp;
 uniform float uSoft;
 uniform vec2 uSoftK;
+uniform float uAA;
 uniform float uAlpha;
 out vec4 fragColor;
-void main() {
+// one filtered sample of the tile at uv (the resting sampler: crisp texel squares with a screen pixel of smoothing when magnified,
+// the mipmaps when minified)
+vec4 samp(vec2 uv) {
   if ( uScale > 1.0 ) {
-    vec2 p = vUV * uSize - 0.5;
+    vec2 p = uv * uSize - 0.5;
     vec2 i = floor(p), fr = p - i;
     // uSharp 0: plain bilinear (as the live layer below its NEAREST switch, and as the map); 1: crisp texels with one screen pixel
     // of smoothing at their edges
     vec2 f = mix(fr, clamp((fr - 0.5) * uScale + 0.5, 0.0, 1.0), uSharp);
-    vec4 c = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0);
-    if ( uSoft > 0.0 ) {
-      // while the zoom moves: four bilinear taps half a texel apart (a smooth kernel that looks the same at every phase of the
-      // texel grid, so no bands of sharp and blurred texels sweep over the art)
+    return textureLod(uTex, (i + 0.5 + f) / uSize, 0.0);
+  }
+  return texture(uTex, uv);
+}
+void main() {
+  vec4 c;
+  if ( uAA > 0.0 ) {
+    // ZOOM AA (a fixed spatial filter of the SCALE, the same for every tile and every frame - no time-varying softening, so no tile
+    // or band is ever blurred differently from its neighbour): four taps on a rotated grid inside the screen pixel's footprint,
+    // each through the mipmaps (the footprint of one screen pixel is the derivative of the uv, so it is right at every scale)
+    vec2 dx = dFdx(vUV) * uAA, dy = dFdy(vUV) * uAA;
+    c = 0.25 * (samp(vUV + dx * 0.125 + dy * 0.375) + samp(vUV + dx * 0.375 - dy * 0.125)
+              + samp(vUV - dx * 0.125 - dy * 0.375) + samp(vUV - dx * 0.375 + dy * 0.125));
+  } else if ( uSoft > 0.0 ) {
+    // (the old time-varying softening, CONFIG.moinenMaps.zoomAA = false) while the zoom moves: four bilinear taps half a texel apart
+    if ( uScale > 1.0 ) {
+      c = samp(vUV);
       vec2 h = uSoftK.x / uSize;
       vec4 s = 0.25 * (textureLod(uTex, vUV + vec2(-h.x, -h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, -h.y), 0.0)
                      + textureLod(uTex, vUV + vec2(-h.x, h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, h.y), 0.0));
       c = mix(c, s, uSoft);
-    }
-    fragColor = c * uAlpha;
-  }
-  // minified: the mipmaps, half a level softer while the zoom moves (the level blend no longer flips fine detail on and off)
-  else fragColor = texture(uTex, vUV, uSoft * uSoftK.y) * uAlpha;
+    } else c = texture(uTex, vUV, uSoft * uSoftK.y);
+  } else c = samp(vUV);
+  fragColor = c * uAlpha;
 }`;
 /**
  * ZOOM SOFTENING (0..1), shared by every tile: 1 while the canvas scale changes, back to 0 over SOFT_MS after it stops. Resampled at a
@@ -155,6 +169,20 @@ const SOFT_MS = 80;                                     // (was 220: the user fo
 // "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
 const SOFT_TAP = 0.35, SOFT_BIAS = 0.5;
 const RAMP0 = 2.0;                                       // screen px per texel where the crisp ramp starts (CONFIG.moinenMaps.sharpFrom: dev knob)
+/**
+ * Pure: the width (screen pixels x 2.67, 1 = taps +-0.375 px) of the zoom anti-aliasing filter at `scale` screen px per texel. A function
+ * of the scale ONLY (never of time or of the tile): full `a` up to `s0`, none from `s1` (smoothstep between, continuous and monotone), so
+ * a zoom glides through it without a pop. k = [a, s0, s1].
+ */
+export function aaWeight(scale, k = null) {
+  const a = k?.[0] ?? AA_K[0], s0 = k?.[1] ?? AA_K[1], s1 = k?.[2] ?? AA_K[2];
+  if ( !(scale > 0) || a <= 0 ) return 0;
+  if ( scale <= s0 ) return a;
+  if ( scale >= s1 ) return 0;
+  const t = (scale - s0) / (s1 - s0);
+  return a * (1 - t * t * (3 - 2 * t));
+}
+const AA_K = [1.5, 0.8, 1.0];
 let sharpProgram = null;
 
 export class SharpTile extends PIXI.Container {
@@ -169,7 +197,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAlpha: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1 });
     this.state = PIXI.State.for2d();
   }
 
@@ -185,7 +213,10 @@ export class SharpTile extends PIXI.Container {
     // screen pixels per texel (the canvas's own resolution included)
     // (`nearest`: the live layer samples NEAREST now - zoomed in past 3 screen px per art pixel - so the tile does too, a hard step at
     // every texel edge, the same pixels as the shards in an entry frame; else one screen pixel of smoothing at each texel edge)
-    un.uScale = this.nearest ? 1e4 : Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
+    // (the scale of the VIEW: the canvas's own transform - the same as M's when drawn to the screen, and right when the harness draws the layer
+    // into a texture with a transform of its own, where M is local)
+    const P = canvas.primary?.worldTransform, sc = (P ? Math.hypot(P.a, P.b) : Math.hypot(M.a, M.b)) * (renderer.resolution || 1) / this.res;
+    un.uScale = this.nearest ? 1e4 : sc; un.uAlpha = this.worldAlpha;
     // WAVING (v0.4.1, "zniszczenia falują" in the last phase of a zoom-out): sharpened at 1-2.5 screen px per texel, every texel was
     // drawn one or two pixels wide by turns and the pattern crawled with every step of a gliding zoom (the cache shimmered 1.7x the
     // live layer: dev/perf-harness wavingCheck) and the clamped edge of a tile showed as a line. So: plain bilinear up to 1.5 screen
@@ -194,7 +225,9 @@ export class SharpTile extends PIXI.Container {
     // cache was 5-11 % crisper than it at 2-3 ("map" at 200 % DPR, crispCheck 1.113 / 1.048 / 1.075 -> 0.99); wavingCheck unchanged)
     const r0 = globalThis.CONFIG?.moinenMaps?.sharpFrom ?? RAMP0;
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
-    un.uSoft = globalThis.CONFIG?.moinenMaps?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison)
+    const cm = globalThis.CONFIG?.moinenMaps, aaOn = cm?.zoomAA !== false;
+    un.uSoft = aaOn || cm?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison; with zoomAA there is no time-varying softening at all)
+    un.uAA = aaOn ? aaWeight(sc, cm?.aaK) : 0;
     const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
@@ -309,7 +342,8 @@ export class StaticCache {
   /** Once per frame, after the display's tick. */
   update() {
     // the zoom softening: is the scale moving?
-    { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
+    if ( globalThis.CONFIG?.moinenMaps?.zoomAA !== false ) zoomSoft = 0;
+    else { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
       // (the view eases into its final scale for a long, tiny tail: only a scale change that still moves the screen's farthest point by more
       // than `softRate` css px in a frame counts as moving, so the softening is gone as soon as the zoom is visibly slow; was any change > 1e-5)
       if ( this.lastScale ) {
