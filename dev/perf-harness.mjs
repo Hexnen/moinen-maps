@@ -1742,6 +1742,9 @@ export async function causeEditStable({ edits = null, gapMs = 600, maxS = 240 } 
   const n0 = T().events.length, a0 = manifestIds();
   for ( const [id, cause] of list ) { A.setCause(id, cause); if ( list.length > 1 ) await new Promise((r) => setTimeout(r, gapMs)); }
   const settled = await settleBake({ maxS });
+  // (the publish follows the bake by a moment: wait for it, and for the scene flag it writes)
+  for ( let i = 0; i < 200 && T().events.slice(n0).some((e) => e.reason === "bake") && !T().events.slice(n0).some((e) => /^publish/.test(e.reason)); i++ ) { await new Promise((r) => setTimeout(r, 300)); step(20); }
+  await new Promise((r) => setTimeout(r, 1500)); step(20);
   const a1 = manifestIds();
   const bakes = T().events.slice(n0).filter((e) => /^(bake|publish)$/.test(e.reason)).map((e) => `${e.reason} ${JSON.stringify(e.data).slice(0, 60)}`);
   const out = { edit: { ...settled, changed: idsDiff(a0, a1).changed.length, events: bakes } };
