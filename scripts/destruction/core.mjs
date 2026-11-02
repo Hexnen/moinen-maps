@@ -518,7 +518,7 @@ export function causeKit(K) {
 /* ================================================================ the bake */
 
 /** Settings that only change playback, not the picture (never part of a bake key). */
-export const LIVE_PARAMS = new Set(["anim", "idle", "fxWho", "entry", "entrySpeed", "entryPower", "pin"]);
+export const LIVE_PARAMS = new Set(["anim", "idle", "fxWho", "entry", "entrySpeed", "entryPower", "pin", "cinematic"]);
 function fnvInts(h, ...vals) { for ( const v of vals ) { h = Math.imul(h ^ (v & 0xffff), 16777619); h = Math.imul(h ^ ((v >>> 16) & 0xffff), 16777619); } return h; }
 function fnvStr(s, h = 2166136261) { for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h; }
 

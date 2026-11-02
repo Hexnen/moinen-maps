@@ -106,4 +106,83 @@ eq(C.shakeAt(-1, R), [0, 0], "no shake before the impact"); eq(sh(5000), [0, 0],
 let maxA = 0; for ( let t = 0; t < 2500; t += 4 ) { const [x, y] = C.shakeAt(t, R, [1, 0]); maxA = Math.max(maxA, Math.abs(x), Math.abs(y)); }
 ok(maxA <= R.shMax && maxA > 0, "amplitude within shMax"); ok(Number.isInteger(sh(30)[0]) && !Number.isInteger(C.shakeAt(30, R, [1, 0], false)[0]) || true, "whole pixels");
 eq(C.shakeAt(37, R, [1, 0]), C.shakeAt(37, R, [1, 0]), "deterministic"); eq(C.shakeAt(10, { ...R, shIntensity: 0 }), [0, 0], "zero intensity");
+
+/* ---------------------------------------------------------------- controller / state (pure parts of cinematic.mjs) */
+
+// 12. staging at paint time: scope, kill switch, queue place, stamp
+const toArt = ({ x, y }) => [x / 2, y / 2];
+eq(C.flatPath([[0, 0, 0], [40, 0, 100]], toArt), [0, 0, 0, 20, 0, 100], "flatPath maps scene px to art px");
+const dragO = { k: 0, p: C.flatPath([[0, 0, 0], [60, 0, 90]], toArt) }, tapO = { k: 0, p: C.flatPath([[5, 5, 0]], toArt) };
+ok(C.stagedNow({ mode: "drags" }, dragO) && !C.stagedNow({ mode: "drags" }, tapO) && C.stagedNow({ mode: "all" }, tapO) && !C.stagedNow({ mode: "off" }, dragO), "stagedNow by mode");
+ok(!C.stagedNow({ mode: "all" }, dragO, true), "the kill switch stages nothing");
+ok(!C.stagedNow({ mode: "all" }, { k: 1 }) && !C.stagedNow(undefined, dragO) && !C.stagedNow({ mode: "evil" }, dragO), "erase / missing / junk mode never stage");
+eq(C.nextQ([]), 0, "first place 0"); eq(C.nextQ([{ cin: { s: "p", q: 4, t: 0 } }, { cin: { s: "d", q: 9, t: 0 } }, {}]), 10, "next place after every cin, played ones too (never reused)");
+eq(C.stampOf([], 77, [10.4, 20.6], [3.456, -1]), { s: "p", q: 0, t: 77, o: [10, 21], d: [3.46, -1] }, "stamp keeps origin and heading");
+eq(C.stampOf([], 1), { s: "p", q: 0, t: 1 }, "stamp without an origin");
+eq(C.stagedCount([{ cin: { s: "p", q: 0, t: 0 } }, { cin: { s: "y", q: 1, t: 0 } }, { cin: { s: "p", q: 2, t: 0 } }, {}]), 2, "staged count = pending only");
+
+// 13. the hiding predicate: players, GM with and without preview, show, kill switch
+const pend = { id: "p1", cin: { s: "p", q: 0, t: 0 } }, play = { id: "y1", cin: { s: "y", q: 1, t: 0 } }, done = { id: "d1", cin: { s: "d", q: 2, t: 0 } }, plain = { id: "n1" };
+const H = (o, x = {}) => C.holdsStroke(o, x);
+ok(H(pend) && !H(play) && !H(done) && !H(plain) && !H(null), "pending hidden; playing / done / normal shown");
+ok(!H(pend, { gmPreview: true }), "GM preview shows pending");
+ok(!H(pend, { revealed: new Set(["p1"]) }) && H(pend, { revealed: new Set(["x"]) }), "revealed by the show here");
+ok(H(play, { scheduled: new Set(["y1"]) }) && !H(play, { scheduled: new Set(["y1"]), revealed: new Set(["y1"]) }), "a stroke the flag already says plays stays off until its own reveal");
+ok(H(pend, { scheduled: new Set(["p1"]), gmPreview: true }) && !H(pend, { killed: true }), "scheduled beats preview (the GM replays it); kill switch shows all");
+
+// 14. the show record: build, validate, end, window
+const stroke = (id, q, t, w = 10) => ({ id, k: 0, w, h: w, cin: { s: "p", q, t } });
+const objs2 = [stroke("a", 0, 1000, 5), stroke("b", 1, 1900, 60), stroke("c", 2, 2100, 5)];
+const show = C.makeShow({ id: "S1", by: "gm1", at: 100000, objs: objs2, c: { mode: "all", preset: "epic" } });
+ok(C.validShow(show) && show.snap.ids.join() === "a,b,c" && show.offs.length === 3, "makeShow: ids in queue order, offsets");
+ok(show.t0 === 100000 + C.START_SLACK, "t0 leaves time for the flag to arrive");
+ok(show.offs[0] === show.snap.r.pauseBefore && show.offs[1] === show.offs[0] + show.snap.r.gap && show.offs[2] === show.offs[1] + 2 * show.snap.r.gap, "dramatic pace; the big hit doubles the gap after it");
+eq(JSON.parse(JSON.stringify(show)), show, "a show record survives the flag (JSON)");
+ok(!C.validShow(null) && !C.validShow({}) && !C.validShow({ ...show, offs: [1] }) && !C.validShow({ ...show, t0: "x" }), "junk records are not shows");
+const end = C.showEnd(show);
+ok(end === show.t0 + show.offs[2] + C.ENTRY_GUESS + show.snap.r.pauseAfter, "show end = last start + entry + pause");
+ok(C.showLive(show, show.t0) && C.showLive(show, end + C.GRACE - 1) && !C.showLive(show, end + C.GRACE + 1), "live until end + grace");
+const painted = C.makeShow({ id: "P", by: "g", at: 0, objs: objs2, c: { preset: "subtle" } });
+ok(painted.offs[1] - painted.offs[0] === 900 && painted.offs[2] - painted.offs[1] === 200, "painted pace keeps the GM's own gaps");
+
+// 15. two GMs press Action: the first wins, everywhere the same; an old record loses to nothing
+const sA = C.makeShow({ id: "A", by: "gmA", at: 5000, objs: objs2, c: {} }), sB = C.makeShow({ id: "B", by: "gmB", at: 5000, objs: objs2, c: {} }), sC = C.makeShow({ id: "C", by: "gmC", at: 4000, objs: objs2, c: {} });
+eq(C.pickShow({ gmB: sB, gmA: sA }, 5100)?.id, "A", "same moment: the lower user id");
+eq(C.pickShow({ gmA: sA, gmC: sC }, 5100)?.id, "C", "the earlier Action wins");
+eq(C.pickShow({ gmA: sA, gmB: sB }, 5100)?.id, C.pickShow({ gmB: sB, gmA: sA }, 5100)?.id, "key order never decides");
+ok(C.pickShow({ gmA: sA }, C.showEnd(sA) + C.GRACE + 5) === null && C.pickShow(null, 0) === null && C.pickShow({ x: "junk" }, 0) === null, "expired / missing / junk: no show");
+eq(C.pickShow({ gmA: sA, gmC: sC }, C.showEnd(sC) + C.GRACE + 1)?.id, "A", "an expired earlier record does not block a live later one");
+
+// 16. the timeline a client plays (also a reload or a late join in the middle)
+let tl = C.timeline(show, show.t0 - 5000);
+eq(tl.map((q) => q.phase), ["later", "later", "later"], "before the show: all later");
+tl = C.timeline(show, show.t0 + show.offs[0] - C.LEAD + 1);
+eq(tl.map((q) => q.phase), ["lead", "later", "later"], "LEAD before a stroke it is put on screen (its start is still ahead)");
+ok(tl[0].revealAt === tl[0].startAt - C.LEAD, "reveal = start - LEAD");
+tl = C.timeline(show, show.t0 + show.offs[1] + 5);
+eq(tl.map((q) => q.phase), ["now", "now", "later"], "reload mid-show: started ones are settled, the rest still scheduled");
+eq(C.timeline(show, end).map((q) => q.phase), ["now", "now", "now"], "after the end everything has started");
+ok(C.timeline(show, 0).every((q, i) => q.startAt === show.t0 + show.offs[i]), "start times are shared-clock values from the record alone");
+
+// 17. who writes the flags: the show's GM while connected, else the active GM
+ok(C.ownerOf(show, (u) => u === "gm1", "gm2") === "gm1" && C.ownerOf(show, () => false, "gm2") === "gm2" && C.ownerOf(show, () => false, undefined) === null, "owner: show GM, else the active GM, else nobody");
+
+// 18. the state machine of a whole show (pure simulation of what the owner writes)
+{
+  let S = [stroke("a", 0, 1000), stroke("b", 1, 1900), stroke("c", 2, 2100)];
+  const late = stroke("z", 3, 9000), state = () => S.map((o) => o.cin.s).join("");
+  ok(C.stagedCount(S) === 3 && state() === "ppp", "three staged");
+  S = [...S, late];                                                  // painted while the show runs (after Action)
+  const ids = new Set(show.snap.ids);
+  const flip = (id, to) => { S = S.map((o) => o.id === id ? C.flipped(o, to) : o); };
+  flip("a", "y"); ok(state() === "yppp", "a starts");
+  flip("a", "d"); flip("b", "y"); ok(state() === "dypp", "b starts, a done");
+  flip("b", "d"); flip("c", "y"); flip("c", "d");
+  ok(state() === "dddp", "the show played its three; the stroke painted meanwhile still waits"); ok(C.stagedCount(S) === 1 && C.queue(S)[0].id === "z", "and is next in the queue");
+  ok(!ids.has("z"), "it is not in the running show");
+  ok(C.flipped(S[0], "p").cin.s === "d" && C.flipped({ id: "n" }, "y").cin === undefined, "no way back; a normal stroke is not touched");
+}
+// 19. a skip: p -> d directly is legal, y -> d too
+ok(C.advance(C.stage(0, 0), "d").s === "d" && C.advance({ s: "y", q: 0, t: 0 }, "d").s === "d", "Reveal now settles pending and playing");
+
 console.log(`cinematic: ${n} checks passed`);

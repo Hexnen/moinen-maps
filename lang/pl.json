@@ -1205,5 +1205,10 @@
   "MOINENMAPS.Destr.cin.noLetterbox": "Bez czarnych pasów u mnie",
   "MOINENMAPS.Destr.cin.noShake": "Bez wstrząsów ekranu u mnie",
   "MOINENMAPS.Destr.cin.noCamera": "Nie ruszaj mojej kamery",
-  "MOINENMAPS.Destr.cin.hintOptOut": "Twój własny wybór ponad ustawieniem sceny: efekt gra tylko, gdy scena go ma włączony, a ty go nie wyłączyłeś."
+  "MOINENMAPS.Destr.cin.hintOptOut": "Twój własny wybór ponad ustawieniem sceny: efekt gra tylko, gdy scena go ma włączony, a ty go nie wyłączyłeś.",
+  "MOINENMAPS.Destr.cin.modeHint": "Które nowe zniszczenia są wstrzymane: ukryte przed graczami (a bez podglądu także przed tobą), aż naciśniesz Akcja!",
+  "MOINENMAPS.Destr.cin.previewHint": "Ty widzisz wstrzymane zniszczenia od razu (z cienkim obrysem); gracze nie.",
+  "MOINENMAPS.Destr.cin.actionHint": "Odegraj wstrzymane zniszczenia dla wszystkich, po kolei, jako pokaz",
+  "MOINENMAPS.Destr.cin.killed": "Tryb kinowy jest wyłączony dla tego świata (CONFIG.moinenMaps.noCinematic): wszystko pokazuje się od razu.",
+  "MOINENMAPS.Destr.cin.offHint": "Wyłączony: nowe zniszczenia pokazują się zaraz po namalowaniu."
 }

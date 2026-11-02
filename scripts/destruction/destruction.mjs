@@ -26,6 +26,8 @@ import * as RimStore from "./rim-store.mjs";
 import { cacheEnabled } from "./static-cache.mjs";
 import * as Editor from "./editor.mjs";
 import * as Carry from "../tokens/carry.mjs";
+import * as Cine from "./cinematic.mjs";
+import * as Cin from "./cinematic-core.mjs";
 import { makeTk, validTk, unflatPath } from "../tokens/carry-core.mjs";
 import { frontPath } from "../tokens/plough-core.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
@@ -155,7 +157,7 @@ function teardown() {
   Editor.teardown();
   clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null; clearTimeout(settleTimer); settleTimer = 0; settleTries = 0;
   if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
-  compositeShown?.destroy(); compositeShown = null; reshow = null;
+  compositeShown?.destroy(); compositeShown = null; reshow = null; lastShow = null; cinePlays.clear(); Cine.reset();
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
   played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
@@ -189,13 +191,14 @@ function onUpdateScene(scene, changed, _options, userId) {
   const had = S ? new Set((S.objects ?? []).map((o) => o.id)) : null;
   S = Store.attachPaths(Model.load(scene), scene);
   // a carry the painting GM REDID (tk.rd: the redo's moment): it has no entry here (the stroke was entered before), so the carry plays on its own
-  if ( had && S ) for ( const o of S.objects ?? [] ) if ( !had.has(o.id) && o.tk?.rd && Date.now() - o.tk.rd < 300000 && carryOf(o.id) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: false });
+  if ( had && S ) for ( const o of S.objects ?? [] ) if ( !had.has(o.id) && o.tk?.rd && Date.now() - o.tk.rd < 300000 && carryOf(o.id) && !Cin.hidden(o) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: false });
   integrity(scene);
   if ( !S ) { gen++; display?.clear(); shownKey = ""; tell("loaded"); return; }
   display?.setLook(lookOf(S.params)); display?.setIdle(S.params.idle, S.params.fxWho);
   if ( S.enabled && Model.hasPaint(S) ) rebake(); else { gen++; display?.fadeAll(); shownKey = ""; }
   Editor.refreshOverlay();
   tell("loaded");
+  cineRefresh();                                           // (a staged stroke played, undone or cleared elsewhere)
 }
 
 const lookOf = (P) => ({ entry: P.entry && P.anim, speed: P.entrySpeed, power: P.entryPower });
@@ -224,6 +227,8 @@ const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, 
 
 /* ---------------------------------------------------------------- a token carried by a stroke (tokens/carry.mjs) */
 
+let cineNow = null, lastShow = null;   // cineNow: the staged stroke whose show entry is being set up (its carry plays); lastShow: what the last showRecs was given (cineShow)
+const cinePlays = new Map();           // stroke id -> { start, o, d, real, until }: a staged stroke that goes on screen with an entry (cinematic.mjs)
 let realCarry = null;                 // the stroke whose entry is being set up as a NEW one (painted or redone here): its token really moves
 const carryOf = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o && !o.k && validTk(o.tk) ? o : null; };
 const carryGeo = () => { const r = Model.sceneRect(); return { ap: S.ap, ox: r.x, oy: r.y }; };
@@ -238,7 +243,7 @@ const carryHooks = {
     if ( m?.key === key ) return m.path;
     const path = frontPath(o.tk, geo); frontMemo.set(o.tk, { key, path }); return path;
   },
-  enter: (g, start, k) => { const o = carryOf(g.objId); if ( o ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id, live: () => !!display?.order?.some((q) => q.objId === o.id && q.anim) }); }
+  enter: (g, start, k) => { const o = carryOf(g.objId); if ( o && (cineNow === o.id || !Cine.isPending(o.id)) ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id, live: () => !!display?.order?.some((q) => q.objId === o.id && q.anim) }); }
 };
 
 /* ---------------------------------------------------------------- baking */
@@ -336,7 +341,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         // what they show
         const best = (w) => recs.get(w.rk) ?? staleRecs.get(w.objId);
         // (the composite's shells all at once: its bands only match with every one of them in)
-        const near = prioritise(want.filter((w) => best(w) && !best(w).shell && shownRecs.get(w.objId) !== best(w)).map((w) => ({ ...w })), objs);
+        const near = prioritise(want.filter((w) => best(w) && !best(w).shell && shownRecs.get(w.objId) !== best(w) && !Cine.holds(S.objects[w.index])).map((w) => ({ ...w })), objs);
         const allow = new Set(want.filter((w) => best(w) && (best(w).shell || shownRecs.get(w.objId) === best(w))).map((w) => w.objId));
         // (a background Rebake swaps a few strokes per step: each sync stays short while the scene is in use)
         // (and at most SHOW_PX pixels of new looks per step: display.sync costs ~5-9 ms per Mpx of new pixels, so four big strokes at once
@@ -351,7 +356,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           if ( dry.length ) { await Promise.all(dry.map(hydrate)); if ( my !== gen || S !== S0 ) return; }
           showOnce(want, allow);
           // every stroke in view is on screen (hidden): the reveal can come now; the strokes off screen follow unseen
-          if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index])) ) prepping = prepareReveal(my);
+          if ( !prepping && Reveal.holding("destruction") && want.every((w) => shownRecs.has(w.objId) || !inView(objs[w.index]) || Cine.holds(S.objects[w.index])) ) prepping = prepareReveal(my);
           if ( i + n < near.length ) { await new Promise((r) => setTimeout(r, firstLoad ? 0 : 16)); if ( my !== gen || S !== S0 ) return; }
         }
       } while ( showAgain && my === gen && S === S0 );
@@ -364,7 +369,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   let earlyDone = false;
   const early = () => {
     if ( earlyDone || !firstLoad || !Reveal.holding("destruction") ) return;
-    if ( !want.every((w) => recs.has(w.rk) || staleRecs.has(w.objId) || shownRecs.has(w.objId) || !inView(objs[w.index])) ) return;
+    if ( !want.every((w) => recs.has(w.rk) || staleRecs.has(w.objId) || shownRecs.has(w.objId) || !inView(objs[w.index]) || Cine.holds(S.objects[w.index])) ) return;
     earlyDone = true; Trace.markOnce("damage:inView");
     show();
   };
@@ -741,7 +746,10 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   tShow0 = performance.now();
   const list = [], next = new Map(), shells = [];
   depOnly.clear();
+  const heldIds = [];
   for ( const w of want ) {
+    // CINEMATIC: a staged stroke is baked and fetched like any other but not put on screen until its show (cinematic.mjs)
+    if ( Cine.holds(S.objects[w.index]) ) { heldIds.push(w.objId); continue; }
     // (allow: the strokes that may take their new record - or their older look - in this step; the others keep what they show)
     const fresh = recs.get(w.rk);
     const r = (!allow || allow.has(w.objId) ? fresh ?? staleRecs.get(w.objId) : null) ?? shownRecs.get(w.objId);
@@ -757,6 +765,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
     next.set(w.objId, r);
   }
   shownRecs = next;
+  lastShow = { want, objs, mask, ids: want.map((w) => w.objId).join(), held: heldIds.join() };
   display ??= new DestructionDisplay();
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
@@ -1232,6 +1241,7 @@ function scheduleComposite(ms = 4000) {
   compositeTimer = setTimeout(async () => {
     compositeTimer = 0;
     if ( !S || !display || !canvas.scene || !game.users.activeGM?.isSelf || inflight || persisting ) return scheduleComposite(3000);
+    if ( Cine.blocksComposite() ) return;           // (the GM's preview shows staged strokes: a composite of it would show them to the players; it is booked again when they play)
     const scene = canvas.scene, bg = backgroundInfo()?.path ?? "", key = Store.makeKey(scene, S, bg);
     if ( shownKey !== key ) return;                 // not all on screen: the pass that completes it books a run
     const FS = Store.sigsOf(S), M = Store.manifestOf(S);
@@ -1267,6 +1277,9 @@ function playEntries(added, removed, taken, mask, first) {
     const h = g.hash;
     // the same stroke's older look (a setting changed) stays underneath until the new one is in (never a blank frame)
     const under = removed.filter((q) => q.objId && q.objId === g.objId);
+    // CINEMATIC: a staged stroke goes on screen in its show, with the entry the show gives it (cinematic.mjs)
+    const cp = cinePlays.get(g.objId);
+    if ( cp ) { played.add(h); cineEnter(g, cp); continue; }
     if ( depOnly.has(g.objId) && under.length ) { played.add(h); display.swap(g, under, 0); depStats.swaps++; continue; }
     // shown here before (a look toggle switched back, an undo), or a new look of existing damage: no entry, a cross-fade
     if ( g.reused || (played.has(h) && !all) ) { played.add(h); display.swap(g, under); continue; }
@@ -1289,9 +1302,9 @@ function playEntries(added, removed, taken, mask, first) {
     const o = s0 && dirOn ? s0.a ?? null : null;
     const d = dirOn && s0?.b ? [s0.b[0] - s0.a[0], s0.b[1] - s0.a[1]] : null;
     const path = s0 && dirOn ? s0.path : null;
-    realCarry = g.objId;                          // (painted just now: a carried token really moves at the end)
+    realCarry = Cine.isPending(g.objId) ? null : g.objId;      // (painted just now: a carried token really moves at the end; a staged stroke's carry waits for its show)
     try { display.enter(g, { start: pNow, o, dir: d, under, path, simul: !dirOn, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); } finally { realCarry = null; }
-    if ( game.user.isGM ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
+    if ( game.user.isGM && !Cine.isPending(g.objId) ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
 
@@ -1748,11 +1761,16 @@ export function edited(box, stroke = null) {
     const tk = stroke.carry && !stroke.erase ? carryRecord(stroke) : null;
     if ( tk ) ob.tk = tk;
     ob.s = Model.nextSeq(S);                         // its place in the order (layout 3 stores the strokes key by key)
+    // CINEMATIC: with the mode on (and the stroke in its scope) the stroke is STAGED: baked now, on screen at the show (cinematic.mjs); nothing about its pixels changes
+    if ( !ob.k && Cin.stagedNow(S.params.cinematic, { k: ob.k, tk: ob.tk, p: Cin.flatPath(stroke.path, toArt) }, Cine.killed()) ) {
+      const b = stroke.a && stroke.b ? toArt(stroke.b) : null;
+      ob.cin = Cin.stampOf(S.objects, now(), stroke.a ? a : null, b ? [b[0] - a[0], b[1] - a[1]] : null);
+    }
     S.objects = [...(S.objects ?? []), ob];
     redoStack.length = 0;
     Model.compositeOver(S, ob);       // (the mask holds the strokes before it; the live stroke already drew itself there)
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
-    if ( tk ) expectCarry(ob);
+    if ( tk ) expectCarry(ob, !!ob.cin);
   }
   editedHere = true;
   scheduleBake(); scheduleSave();
@@ -1776,9 +1794,10 @@ function carryRecord(stroke) {
 }
 
 /** A stroke that carries a token should enter (and with it the carry); if its entry never does (nothing to show, a failed bake), the carry plays on its own. */
-function expectCarry(ob) {
+function expectCarry(ob, staged = false) {
   const id = ob.id, scene = canvas.scene;
-  Carry.expect(id, ob.tk);
+  Carry.expect(id, ob.tk, staged);
+  if ( staged ) return;                               // (a staged stroke's carry plays in its show, cinematic.mjs)
   setTimeout(() => { if ( canvas.scene === scene && S?.objects?.some((q) => q.id === id) && !Carry.started(id) ) Carry.play({ objId: id, tk: ob.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true }); }, 12000);
 }
 
@@ -1816,6 +1835,7 @@ export function setParams(patch) {
   // (a scene that pins: the look settings are the strokes' own, a change reaches the strokes painted from now on - nothing bakes)
   const live = changed.every((k) => LIVE_PARAMS.has(k) || (S.params.pin && Pin.PIN_SET.has(k)));
   display?.setIdle(S.params.idle, S.params.fxWho); display?.setLook(lookOf(S.params));
+  if ( changed.includes("cinematic") ) { cineRefresh(); if ( game.user.isGM ) scheduleComposite(3000); }
   if ( !live ) { paramRev++; scheduleBake(250); }
   scheduleSave(); tell("params");
 }
@@ -1863,6 +1883,7 @@ export function clearAll() {
   redoStack.length = 0;
   for ( const o of S.objects ?? [] ) S.dropOk?.add(o.id);          // on purpose: the save may delete them all (no snapshot)
   S.objects = []; Model.composite(S);
+  Cine.reset();
   Carry.cancelAll();
   edited(null);
   Editor.refreshOverlay();
@@ -1885,7 +1906,8 @@ export function redoLast() {
   S.rev = Model.nextRev(); editedHere = true;
   scheduleBake(); scheduleSave(); tell("edited");
   Editor.refreshOverlay(box);
-  if ( carryOf(o.id) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true });   // (redone: the token is carried again)
+  if ( carryOf(o.id) && !Cine.isPending(o.id) ) Carry.play({ objId: o.id, tk: o.tk, start: performance.now(), k: 1, delay: 0, geo: carryGeo(), real: true });   // (redone: the token is carried again; a staged stroke waits for its show)
+  else if ( carryOf(o.id) ) Carry.expect(o.id, o.tk, true);
   return true;
 }
 
@@ -1970,7 +1992,50 @@ function backups(scene = canvas.scene) {
   return { v2: B2 ? { at: B2.at, n: B2.n, ids: (B2.o ?? []).map((o) => o?.id) } : null, v3: B3 ? { at: B3.at, n: B3.n, gone: B3.gone ?? [] } : null };
 }
 
+/* ---------------------------------------------------------------- CINEMATIC: putting a staged stroke on screen (cinematic.mjs decides when) */
+
+/** One area of a staged stroke enters: the entry the stroke would have had live (its origin and heading kept in `cin`), starting at `p.start` (performance.now ms, usually in the future). */
+function cineEnter(g, p) {
+  const dirOn = followsPath(g.objId);
+  cineNow = g.objId; realCarry = p.real ? g.objId : null;
+  try { display.enter(g, { start: p.start, o: dirOn ? p.o ?? null : null, dir: dirOn ? p.d ?? null : null, under: [], simul: !dirOn, path: dirOn ? pathOfObj(g.objId) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); }
+  finally { cineNow = null; realCarry = null; }
+}
+/** Pass 2 of the same sheet: what the last pass was given, shown again (a stroke that was held is shown now, one that is held now is taken off). */
+function cineShow() {
+  if ( !lastShow || !S || !display ) return;
+  const go = () => {
+    if ( !S || !lastShow || !display ) return;
+    showRecs(lastShow.want, lastShow.objs, [], shownMask ?? lastShow.mask, false, true);
+    const t = performance.now();
+    for ( const [id, p] of cinePlays ) if ( display.order.some((g) => g.objId === id) || p.until < t ) cinePlays.delete(id);
+    scheduleComposite(4000);
+  };
+  const dry = needPixels(lastShow.want);
+  if ( dry.length ) Promise.all(dry.map(hydrate)).then(go); else go();
+}
+/** Stroke `id` goes on screen with the entry `play` ({ start, o, d, real }); one already on screen (the GM's preview) plays it again. -> is it on screen. */
+function cineReveal(id, play) {
+  if ( !display || !S ) return false;
+  const have = display.order.filter((g) => g.objId === id);
+  if ( have.length ) { for ( const g of have ) cineEnter(g, play); return true; }
+  cinePlays.set(id, { ...play, until: performance.now() + 20000 });
+  cineShow();
+  return display.order.some((g) => g.objId === id);
+}
+/** What is held changed (preview, mode, a stroke played elsewhere, kill switch): the display follows, if the strokes are the same as at the last pass. */
+function cineRefresh() {
+  if ( !lastShow || !S || !display ) return;
+  const ids = S.objects.filter((o) => !o.k).map((o) => o.id).join();
+  if ( ids !== lastShow.ids ) return;                         // (another pass is on its way and shows them)
+  const held = S.objects.filter((o) => !o.k && Cine.holds(o)).map((o) => o.id).join();
+  if ( held !== lastShow.held ) cineShow();
+}
+
 export const destructionApi = {
+  cinematic: Cine._api,
+  /** The scene's cinematic block, changed by a partial ({ mode, preview, preset, over }); a live setting: nothing is baked. */
+  setCinematic: (patch) => setParams({ cinematic: { ...Cin.sanitize(S?.params?.cinematic), ...patch } }),
   /** Substrates (substrate.mjs): how many strokes were swapped in silently because older damage under them changed. */
   substrate: () => ({ ...depStats }),
   backup: () => backups(),
@@ -2038,6 +2103,10 @@ export function registerDestruction() {
   moduleApi.destruction = destructionApi;
   Carry.registerCarry();
   Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast, redo: redoLast });
+  Cine.bind({ state: () => S, display: () => display, save, now, tell, reveal: cineReveal, refresh: cineRefresh,
+    moved: () => { if ( S ) S.rev = Model.nextRev(); editedHere = true; },
+    geo: () => { const r = Model.sceneRect(); return { ap: S.ap, K: Model.K, ox: r.x, oy: r.y }; } });
+  Cine.register();
   Hooks.once("init", () => Editor.registerEditorSettings(() => tell("brush")));
   Hooks.once("init", () => game.settings.register(MODULE_ID, "destrRebake", {
     name: "MOINENMAPS.Destr.rebakeSetting", hint: "MOINENMAPS.Destr.rebakeSettingHint", scope: "client", config: true, type: String, default: "background",

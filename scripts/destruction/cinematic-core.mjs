@@ -235,3 +235,73 @@ export function shakeAt(t, r, dir = [0, 0], whole = true) {
   if ( !dir[0] && !dir[1] ) { x = amp * across; y = amp * along; }
   return whole ? [Math.round(x), Math.round(y)] : [x, y];
 }
+
+/* ---------------------------------------------------------------- the show controller's pure parts (cinematic.mjs) */
+
+export const LEAD = 450;                   // ms before a stroke's start that its areas are put on screen (built, entry set up with a start in the future)
+export const START_SLACK = 900;            // ms between the Action click and the show's shared t0 (the flag has to reach everyone)
+export const ENTRY_GUESS = 2000;           // the length of a stroke's entry as the schedule assumes (the show ends once the last entry has stopped, or a little after)
+export const GRACE = 12000;                // a show whose flag is older than its length + this is over for good (a GM who comes back settles it)
+/** The next place in the queue: after every stroke staged so far. */
+export const nextQ = (objs) => (objs ?? []).reduce((m, o) => { const c = cinOf(o); return c ? Math.max(m, c.q | 0) : m; }, -1) + 1;
+/** The art-px path of a brush stroke (scene points [x, y, ms]) as a flat [x, y, ms, ...] for isDrag; `toArt` maps a scene point to art px. */
+export const flatPath = (pts, toArt) => { const out = []; for ( const q of pts ?? [] ) { const [x, y] = toArt({ x: q[0], y: q[1] }); out.push(x, y, q[2] ?? 0); } return out; };
+/** Is a new stroke staged right now? `killed`: the kill switch (CONFIG.moinenMaps.noCinematic). */
+export const stagedNow = (c, o, killed = false) => !killed && staged(sanitize(c).mode, o);
+/** The `cin` of a freshly staged stroke: the queue place, the painting moment (shared clock ms), and where it started (art px, for the entry's origin) and its heading. */
+export function stampOf(objs, t, o = null, d = null) {
+  const c = stage(nextQ(objs), t);
+  if ( Array.isArray(o) && o.length === 2 ) c.o = [Math.round(o[0]), Math.round(o[1])];
+  if ( Array.isArray(d) && d.length === 2 ) c.d = [Math.round(d[0] * 100) / 100, Math.round(d[1] * 100) / 100];
+  return c;
+}
+/** How many strokes are staged (pending). */
+export const stagedCount = (objs) => (objs ?? []).reduce((n, o) => n + (hidden(o) ? 1 : 0), 0);
+
+/**
+ * A show record (the flag value): { id, by, at, t0, snap: { at, r, ids }, offs }. `offs[i]` = start of ids[i] in ms after t0.
+ * Built once, by the GM who clicked Action, so every client plays the same timeline whatever it knows about the strokes.
+ */
+export function makeShow({ id, by, at, objs, c, users = {} }) {
+  const q = queue(objs), snap = snapshot(c, users, q, at), r = snap.r;
+  const offs = schedule(q.map((o) => ({ cin: o.cin, big: isBig(o, r) })), r);
+  return { id, by, at, t0: at + START_SLACK, snap, offs };
+}
+export const validShow = (s) => !!s && typeof s === "object" && typeof s.id === "string" && typeof s.by === "string" && Number.isFinite(s.t0) && Array.isArray(s.offs) && Array.isArray(s.snap?.ids) && s.snap.ids.length === s.offs.length && !!s.snap.r;
+/** The shared-clock end of a show: the last start + ENTRY_GUESS + the pause after. */
+export const showEnd = (s) => s.t0 + showLength(s.offs, s.snap.r, ENTRY_GUESS);
+/** Is the show still on (or just about to start) at `now`? Past its end + GRACE it is over for good. */
+export const showLive = (s, now) => validShow(s) && now < showEnd(s) + GRACE;
+/** The winning show among the flag's map { userId: show }: live ones only, the first Action (firstWins). Null when none. */
+export function pickShow(map, now) {
+  let best = null;
+  for ( const [uid, s] of Object.entries(map && typeof map === "object" ? map : {}) ) {
+    if ( !validShow(s) || !showLive(s, now) ) continue;
+    const c = { ...s, by: s.by || uid };
+    if ( !best || firstWins({ at: c.at, by: c.by }, { at: best.at, by: best.by }) < 0 ) best = c;
+  }
+  return best;
+}
+/**
+ * Where each stroke of a show stands at `now` (shared ms): `startAt` its start, `revealAt` when it goes on screen (LEAD before),
+ * `phase` "later" | "lead" (on screen soon, hidden) | "now" (started) .
+ */
+export function timeline(s, now) {
+  return s.snap.ids.map((id, i) => {
+    const startAt = s.t0 + s.offs[i], revealAt = startAt - LEAD;
+    return { id, i, startAt, revealAt, phase: now >= startAt ? "now" : now >= revealAt ? "lead" : "later" };
+  });
+}
+/** The id of the user who writes the flags of a show: its GM while they are connected, else the active GM. `active(uid)` tells who is connected. */
+export const ownerOf = (s, active, activeGM) => (active(s.by) ? s.by : activeGM ?? null);
+/** Hidden from the display on this client: staged ("p") and not revealed here, or scheduled in a show and not revealed yet. Everything is shown when `killed`. */
+export function holdsStroke(o, { killed = false, revealed, scheduled, gmPreview = false } = {}) {
+  if ( killed ) return false;
+  const c = cinOf(o);
+  if ( !c ) return false;
+  if ( revealed?.has(o.id) ) return false;
+  if ( scheduled?.has(o.id) ) return true;
+  return c.s === "p" && !gmPreview;
+}
+/** The pending `cin` after the show moved a stroke on: p -> y at its start, y -> d once played (never backwards, see advance). */
+export const flipped = (o, to) => (o?.cin ? { ...o, cin: advance(o.cin, to) } : o);
