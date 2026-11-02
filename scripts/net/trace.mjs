@@ -99,6 +99,6 @@ export function event(reason, data = null) {
 export function report() {
   const lt = state.longtasks;
   const fr = state.frames ?? [];
-  return { events: events.slice(), frames: { n: fr.length, total: Math.round(fr.reduce((a, b) => a + b, 0)), max: Math.round(Math.max(0, ...fr)) }, marks: state.marks.map(({ once, ...m }) => m), longtasks: { count: lt.length, total: lt.reduce((a, e) => a + e.ms, 0), max: Math.max(0, ...lt.map((e) => e.ms)), list: lt },
+  return { t0: state.t0, events: events.slice(), frames: { n: fr.length, total: Math.round(fr.reduce((a, b) => a + b, 0)), max: Math.round(Math.max(0, ...fr)) }, marks: state.marks.map(({ once, ...m }) => m), longtasks: { count: lt.length, total: lt.reduce((a, e) => a + e.ms, 0), max: Math.max(0, ...lt.map((e) => e.ms)), list: lt },
     hitches: { count: state.hitches.length, max: Math.max(0, ...state.hitches.map((e) => e.ms)), list: state.hitches } };
 }

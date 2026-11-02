@@ -198,6 +198,7 @@ export async function publish(d, ctx) {
   const why = unsettled({ mode: C.mode, dirty: C.dirty, waiting: C.waiting, moving: U.filter((u) => u.live && !u.water).length, dying: d.dying.length,
     holes: (D.flood?.status?.()?.holes ?? []).map((h) => h.state), bands: bands.map((b) => ({ meta: !!b.meta, ok: b.tiles.every((t) => t.shared || (t.rt.valid && !t.rt.baseTexture.destroyed)) })) });
   if ( why ) return why;
+  const tStart = performance.now();
   const old = manifestOf(ctx.scene), oldBands = new Map((old?.dir === ctx.dir && old.base === ctx.base ? old.bands : []).map((b) => [b.key, b]));
   // the index: every area (its description and whether its hole has water), every stroke's areas, every band's members
   const areas = {}, byObj = new Map();
@@ -217,16 +218,20 @@ export async function publish(d, ctx) {
     out.push(ent);
     for ( const t of b.tiles ) {
       // (a tile drawn from the composite is the composite's own file)
-      if ( t.shared && t.id ) { ent.tiles.push([t.x, t.y, t.w, t.h, t.id]); const bt = t.rt.baseTexture; all.push({ L: b.meta.L, x: t.x, y: t.y, w: bt.realWidth, h: bt.realHeight, data: bt.resource?.data ?? null }); continue; }
+      if ( t.shared && t.id && !ctx.fresh ) { ent.tiles.push([t.x, t.y, t.w, t.h, t.id]); const bt = t.rt.baseTexture; all.push({ L: b.meta.L, x: t.x, y: t.y, w: bt.realWidth, h: bt.realHeight, data: bt.resource?.data ?? null }); continue; }
       const px = readTile(R, t.rt), row = [t.x, t.y, t.w, t.h, null];
       ent.tiles.push(row);
-      const tile = { x: t.x, y: t.y, w: px.w, h: px.h, res: b.meta.eff, data: px.data };
-      todo.push({ row, tile }); all.push({ L: b.meta.L, ...tile, fresh: true });
+      const tile = { L: b.meta.L, x: t.x, y: t.y, w: px.w, h: px.h, res: b.meta.eff, data: px.data };
+      todo.push({ row, tile }); all.push(tile);
     }
   }
-  if ( bands.every((b) => b.meta.eff === 1) && all.every((q) => q.data) ) cull(all);
+  // (the cull runs in the codec worker with the packing: the page only reads the texels back and hands them over)
+  const doCull = bands.every((b) => b.meta.eff === 1) && all.every((q) => q.data);
+  const hide = doCull ? all.filter((q) => !todo.some((u) => u.tile === q)) : [];
   const t0 = performance.now();
-  const res = await Net.job({ kind: "tiles", tiles: todo.map((q) => q.tile), index, known: [...Net.known(ctx.dir)] }, todo.map((q) => q.tile.data.buffer));
+  const pending = Net.job({ kind: "tiles", tiles: todo.map((q) => q.tile), hide, cull: doCull, index, known: [...Net.known(ctx.dir)] }, todo.map((q) => q.tile.data.buffer));
+  const posted = performance.now(), res = await pending;
+  if ( ctx.dry ) return { dry: true, pageMs: Math.round((posted - tStart) * 10) / 10, jobMs: Math.round((performance.now() - t0) * 10) / 10, cleared: res.cleared, tiles: todo.length, bands: bands.length };
   todo.forEach((q, k) => { q.row[4] = res.tiles[k].id; });
   const ids = [res.index.id, ...new Set(out.flatMap((b) => b.tiles.map((t) => t[4])))];
   const m = { v: 2, tv: TILE_VERSION, dir: ctx.dir, base: ctx.base, idx: res.index.id, t: ids, bands: out, at: Date.now() };
@@ -239,62 +244,8 @@ export async function publish(d, ctx) {
   return "published";
 }
 
-/** Texels of margin round a cleared one: the magnified edge smoothing (1) and the mip levels down to zoom 1/4 (2^2 blocks, bilinear). */
-export const MARGIN = 9;
-
-/** Chebyshev distance (capped at `cap`) of every texel of the box to the nearest texel that is not set (outside the box: not set). */
-function chebyshev(m, W, H, x0, y0, x1, y1, cap) {
-  const d = new Uint8Array(W * H);
-  const at = (x, y) => (x < x0 || y < y0 || x >= x1 || y >= y1 ? 0 : d[y * W + x]);
-  for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) {
-    const i = y * W + x;
-    d[i] = !m[i] ? 0 : Math.min(cap, 1 + Math.min(at(x - 1, y), at(x - 1, y - 1), at(x, y - 1), at(x + 1, y - 1)));
-  }
-  for ( let y = y1 - 1; y >= y0; y-- ) for ( let x = x1 - 1; x >= x0; x-- ) {
-    const i = y * W + x; if ( !d[i] ) continue;
-    d[i] = Math.min(d[i], 1 + Math.min(at(x + 1, y), at(x + 1, y + 1), at(x, y + 1), at(x - 1, y + 1)));
-  }
-  return d;
-}
-
-/**
- * CULLING (one texel per scene px only): a band's texels that the opaque texels of the bands ABOVE it hide - with a texel of margin all
- * round, so a magnified band's one pixel of edge smoothing never reaches a cleared texel - are cleared before they are published
- * (~half the bytes on a busy scene). A client uses such a band only while every band above it is still the composite's (Composite.plan).
- * Mip levels (zoomed out) of a cleared region differ where an upper band is not fully opaque at that level; at zoom >= 1 the picture is
- * the same. `all`: [{ L, x, y, w, h, data, fresh }] (fresh tiles are cleared in place; the others only hide).
- */
-export function cull(all, margin = MARGIN) {
-  const x0 = Math.min(...all.map((q) => q.x)), y0 = Math.min(...all.map((q) => q.y));
-  const W = Math.max(...all.map((q) => q.x + q.w)) - x0, H = Math.max(...all.map((q) => q.y + q.h)) - y0;
-  // HIDDEN: a texel whose 3x3 is opaque in ONE band above (two bands each covering a part do not: at their seams each is half
-  // transparent where it smooths its own edge, and the band under them shows)
-  const hide = new Uint8Array(W * H), cover = new Uint8Array(W * H);
-  const hidden = (X, Y) => hide[Y * W + X] === 1;
-  const levels = [...new Set(all.map((q) => q.L))].sort((a, b) => b - a);
-  let cleared = 0;
-  for ( const L of levels ) {
-    const here = all.filter((q) => q.L === L);
-    for ( const q of here ) if ( q.fresh ) {
-      const d = q.data, ox = q.x - x0, oy = q.y - y0;
-      for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) {
-        const i = (y * q.w + x) * 4; if ( !d[i + 3] || !hidden(ox + x, oy + y) ) continue;
-        d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; cleared++;
-      }
-    }
-    cover.fill(0);
-    let bx0 = W, by0 = H, bx1 = 0, by1 = 0;
-    for ( const q of here ) {
-      const d = q.data, ox = q.x - x0, oy = q.y - y0;
-      bx0 = Math.min(bx0, ox); by0 = Math.min(by0, oy); bx1 = Math.max(bx1, ox + q.w); by1 = Math.max(by1, oy + q.h);
-      for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) if ( d[(y * q.w + x) * 4 + 3] === 255 ) cover[(oy + y) * W + ox + x] = 1;
-    }
-    // (the square of `margin` texels round it opaque in this band: Chebyshev distance to its nearest non-opaque texel, two passes)
-    const dist = chebyshev(cover, W, H, bx0, by0, bx1, by1, margin + 1);
-    for ( let y = by0; y < by1; y++ ) for ( let x = bx0; x < bx1; x++ ) if ( dist[y * W + x] > margin ) hide[y * W + x] = 1;
-  }
-  return cleared;
-}
+// (the culling itself - cull, MARGIN - lives in net/chunks.mjs: it runs in the codec worker, see publish)
+export { cull, MARGIN } from "../net/chunks.mjs";
 
 /** The destruction module's API object (flood status), set by destruction.mjs (no import cycle). */
 export const D = { flood: null };

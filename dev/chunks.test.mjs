@@ -267,6 +267,74 @@ await test("composite: settled after a Rebake all (the frames of one, in order) 
   assert.equal(unsettled({ mode: "scene", bands: [] }), "bands");
 });
 
+/* ---------------------------------------------------------------- bundles and the worker's cull (round 2) */
+
+await test("bundle: small chunks of every kind in one file, each member verified against its own name, `only` decodes one", async () => {
+  const r = rnd(7), box = { x0: 0, y0: 0, w: 128, h: 100 }, frames = synthWater(box, 4, r);
+  const members = [];
+  for ( const t of C.waterTiles(box) ) { const p = C.packWaterTile(frames, box, t); if ( p ) members.push({ id: `w${C.hash64(p)}`, bytes: await C.wrap(p), p }); }
+  const spr = [{ m: Int16Array.from({ length: F }, (_, i) => (i === 3 ? 4 : i === 4 ? 3 : 0)), w: 4, h: 3, img: new Uint8Array(4 * 3 * 4).map((_, i) => (i * 7) & 255) }];
+  { const q = C.packObject(spr, F); members.push({ id: `d${C.hash64(q)}`, bytes: await C.wrap(q), p: q }); }
+  { const q = C.packIndex({ v: 1, areas: { a: 1 } }); members.push({ id: `x${C.hash64(q)}`, bytes: await C.wrap(q), p: q }); }
+  { const q = C.packTile({ x: 3, y: 4, w: 2, h: 2, res: 1, data: Uint8Array.from([1, 2, 3, 255, 0, 0, 0, 0, 9, 8, 7, 128, 4, 5, 6, 255]) }); members.push({ id: `k${C.hash64(q)}`, bytes: await C.wrap(q), p: q }); }
+  assert.ok(members.length >= 4);
+  const job = await C.work({ kind: "bundle", members: members.map((q) => ({ id: q.id, bytes: q.bytes })).reverse() });
+  const b = job.result;
+  assert.deepEqual(b.ids, [...members.map((q) => q.id)].sort(), "members sorted by id, whatever the order they came in");
+  const again = await C.work({ kind: "bundle", members: members.map((q) => ({ id: q.id, bytes: q.bytes })) });
+  assert.equal(again.result.id, b.id, "the same members make the same bundle (same id) on every client");
+  assert.equal(b.id, `b${C.hash64(await C.unwrap(b.bytes))}`);
+  // decode: every member, bit-exact against its own decoder
+  const all = (await C.work({ kind: "decode", bytes: b.bytes, cid: b.id })).result.bundle;
+  assert.equal(all.length, members.length);
+  for ( const q of members ) {
+    const got = all.find((x) => x.id === q.id).result, one = (await C.work({ kind: "decode", bytes: q.bytes, cid: q.id })).result;
+    assert.deepEqual(got, one, `member ${q.id} decodes as its single file does`);
+  }
+  const only = (await C.work({ kind: "decode", bytes: b.bytes, cid: b.id, only: [members[0].id] })).result.bundle;
+  assert.deepEqual(only.map((x) => x.id), [members[0].id]);
+  // a bundle under another name is refused; a damaged member is left out (its single file is used), the rest still decode
+  await assert.rejects(C.work({ kind: "decode", bytes: b.bytes, cid: `b${C.hash64(new Uint8Array(3))}` }));
+  const bad = members.map((q) => ({ id: q.id, bytes: q.bytes }));
+  bad[0] = { id: members[1].id, bytes: members[0].bytes };                   // a file under the wrong name never goes in
+  const part = (await C.work({ kind: "bundle", members: bad })).result;
+  assert.ok(!part.ids.includes(members[1].id) || part.ids.filter((x) => x === members[1].id).length === 1);
+  assert.equal(part.ids.length, members.length - 1 + (0), "the mismatched file is dropped, the duplicate name is kept once");
+  // container checks
+  const raw = C.packBundle([{ id: "wabc", payload: members[0].p }]);
+  assert.throws(() => C.unpackBundle(raw.subarray(0, raw.length - 3)));
+  assert.equal(C.unpackBundle(raw)[0].id, "wabc");
+});
+
+await test("bundle buckets: a changed chunk changes one bundle, the others keep their members", () => {
+  const ids = Array.from({ length: 200 }, (_, i) => `d${(i * 2654435761 >>> 0).toString(36).padStart(14, "0")}`);
+  const a = C.bundleBuckets(ids), b = C.bundleBuckets(ids.slice(1).concat("dnewchunk0000000"));
+  const nb = Math.ceil(200 / C.BUNDLE_PER.d);
+  assert.equal(a.size, nb);
+  assert.equal([...a.values()].reduce((s, l) => s + l.length, 0), 200);
+  let changed = 0; for ( const [k, l] of a ) if ( JSON.stringify(b.get(k)) !== JSON.stringify(l) ) changed++;
+  assert.ok(changed <= 2, `one removed + one added chunk touch at most two bundles (${changed})`);
+  assert.deepEqual([...C.bundleBuckets(["wa", "wb", "k1", "x1", "zzz", "d1"]).keys()].sort(), ["d0", "k0", "w0"], "x rides with k; unknown kinds are not bundled");
+  assert.deepEqual(C.bundleBuckets([]).size, 0);
+});
+
+await test("cull in the worker job: the same texels cleared as cull() on the page, tiles named by their culled content", async () => {
+  const tile = (L, x, y, w, h, fill) => { const data = new Uint8Array(w * h * 4); for ( let i = 0; i < w * h; i++ ) data.set(fill(i % w, (i / w) | 0), i * 4); return { L, x, y, w, h, res: 1, data }; };
+  const mk = () => [tile(0, 0, 0, 40, 40, () => [9, 9, 9, 255]), tile(2, 0, 0, 40, 40, () => [7, 7, 7, 255]), tile(1, 5, 5, 20, 20, (x) => [x, 1, 1, x ? 255 : 0])];
+  const a = mk(), b = mk();
+  const cleared = C.cull(a.map((q) => ({ ...q, fresh: true })));
+  // (one fresh tile, two only hiding: the middle and top bands as they are in the composite already)
+  const fresh = [b[0]], hide = [b[1], b[2]];
+  const r = (await C.work({ kind: "tiles", tiles: fresh, hide, cull: true, index: { v: 1 }, known: [] })).result;
+  assert.ok(r.cleared > 0 && r.cleared <= cleared);
+  const direct = a[0].data;
+  assert.equal(r.cleared, (() => { let n = 0; for ( let i = 3; i < direct.length; i += 4 ) if ( !direct[i] ) n++; return n; })(), "the worker cleared exactly the texels the page's cull clears");
+  const id = `k${C.hash64(C.packTile(a[0]))}`;
+  assert.equal(r.tiles[0].id, id, "the tile is named by its content after the cull");
+  const none = (await C.work({ kind: "tiles", tiles: [mk()[0]], hide: [], cull: false, index: { v: 1 }, known: [] })).result;
+  assert.equal(none.cleared, -1);
+});
+
 /* ---------------------------------------------------------------- the real bakes of the test world (when present) */
 
 const WORLD = new URL("../../../worlds/invincible/moinen-maps/", import.meta.url);

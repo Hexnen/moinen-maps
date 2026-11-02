@@ -431,6 +431,146 @@ export function diffComposite(prev, next) {
   return { upload: [...now].filter((id) => !old.has(id)), kept: [...now].filter((id) => old.has(id)), dropped: [...old].filter((id) => !now.has(id)) };
 }
 
+/* ---------------------------------------------------------------- bundles: many small chunks, one file */
+
+/**
+ * kind 5  BUNDLE  small chunks that a scene's load needs together (a hundred water tiles of 1-8 kB each, the composite's index and small
+ *                 tiles, small strokes) in ONE file, so a load makes a handful of requests instead of dozens. Body: count (u32), then per
+ *                 member: id length (u8), the id (ASCII, "w..." / "d..." / "k..." / "x..."), payload length (u32), the member's own payload
+ *                 (the bytes its single file holds inside the PNG, header and all). Every member is still checked against its own id
+ *                 (a hash of its payload) when it is decoded, and every member also stays on the server as a single file of its own:
+ *                 a bundle that cannot be had only costs the requests it saved. The bundle's id is a hash of its payload, members sorted by id.
+ */
+export const KIND_BUNDLE = 5;
+export function packBundle(parts) {
+  const enc = new TextEncoder();
+  let n = 4;
+  const ids = parts.map((q) => enc.encode(q.id));
+  parts.forEach((q, i) => { n += 1 + ids[i].length + 4 + q.payload.length; });
+  const p = header(KIND_BUNDLE, n), dv = new DataView(p.buffer);
+  dv.setUint32(8, parts.length, true);
+  let o = 12;
+  parts.forEach((q, i) => {
+    p[o++] = ids[i].length; p.set(ids[i], o); o += ids[i].length;
+    dv.setUint32(o, q.payload.length, true); o += 4;
+    p.set(q.payload, o); o += q.payload.length;
+  });
+  return p;
+}
+export function unpackBundle(p) {
+  if ( kindOf(p) !== KIND_BUNDLE ) throw new Error("not a bundle");
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength), dec = new TextDecoder(), out = [];
+  const n = dv.getUint32(8, true);
+  let o = 12;
+  for ( let i = 0; i < n; i++ ) {
+    if ( o + 1 > p.length ) throw new Error("bad bundle");
+    const il = p[o++];
+    if ( o + il + 4 > p.length ) throw new Error("bad bundle");
+    const id = dec.decode(p.subarray(o, o + il)); o += il;
+    const len = dv.getUint32(o, true); o += 4;
+    if ( o + len > p.length ) throw new Error("bad bundle");
+    out.push({ id, payload: p.subarray(o, o + len) }); o += len;
+  }
+  if ( o !== p.length ) throw new Error("bad bundle");
+  return out;
+}
+
+/** One payload decoded for the page (adds the buffers to move to `transfer`). */
+function decodePayload(p, transfer) {
+  const k = kindOf(p);
+  if ( k === KIND_TILE ) { const t = unpackTile(p); transfer.push(t.data.buffer); return { tile: t }; }
+  if ( k === KIND_INDEX ) return { index: unpackIndex(p) };
+  if ( k === KIND_WATER ) { const t = unpackWaterTile(p); transfer.push(...t.levels.map((l) => l.buffer)); return t; }
+  if ( k === KIND_OBJECT ) { const o = unpackObject(p); for ( const s of o.sprites ) transfer.push(s.img.buffer); return o; }
+  throw new Error("unknown chunk kind");
+}
+
+/**
+ * Which bundle a chunk belongs to: a chunk of kind `kind` ("w", "d", "k", "x" - the first letter of its id) goes into one of `ceil(n / per)`
+ * buckets by a hash of its id, so a changed chunk changes ONE bundle of its kind and the others keep their ids. Pure.
+ * -> Map(bucket label -> [ids sorted]).
+ */
+export const BUNDLE_PER = { w: 96, d: 24, k: 8, x: 8 };
+export function bundleBuckets(ids) {
+  const byKind = new Map();
+  for ( const id of new Set(ids) ) { if ( !id || !(id[0] in BUNDLE_PER) ) continue; if ( !byKind.has(id[0]) ) byKind.set(id[0], []); byKind.get(id[0]).push(id); }
+  const out = new Map();
+  for ( const [k, list] of byKind ) {
+    const nb = Math.max(1, Math.ceil(list.length / BUNDLE_PER[k]));
+    for ( const id of list ) {
+      // (composite index + tiles share their buckets: the index is one file, a tile or two ride with it)
+      const label = `${k === "x" ? "k" : k}${nb === 1 ? 0 : parseInt(hashStr(id), 36) % nb}`;
+      if ( !out.has(label) ) out.set(label, []);
+      out.get(label).push(id);
+    }
+  }
+  for ( const l of out.values() ) l.sort();
+  return out;
+}
+
+/* ---------------------------------------------------------------- composite culling (runs in the codec worker) */
+
+/** Texels of margin round a cleared one: the magnified edge smoothing (1) and the mip levels down to zoom 1/4 (2^2 blocks, bilinear). */
+export const MARGIN = 9;
+
+/** Chebyshev distance (capped at `cap`) of every texel of the box to the nearest texel that is not set (outside the box: not set). */
+function chebyshev(m, W, H, x0, y0, x1, y1, cap) {
+  const d = new Uint8Array(W * H);
+  const at = (x, y) => (x < x0 || y < y0 || x >= x1 || y >= y1 ? 0 : d[y * W + x]);
+  for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) {
+    const i = y * W + x;
+    d[i] = !m[i] ? 0 : Math.min(cap, 1 + Math.min(at(x - 1, y), at(x - 1, y - 1), at(x, y - 1), at(x + 1, y - 1)));
+  }
+  for ( let y = y1 - 1; y >= y0; y-- ) for ( let x = x1 - 1; x >= x0; x-- ) {
+    const i = y * W + x; if ( !d[i] ) continue;
+    d[i] = Math.min(d[i], 1 + Math.min(at(x + 1, y), at(x + 1, y + 1), at(x, y + 1), at(x - 1, y + 1)));
+  }
+  return d;
+}
+
+/**
+ * CULLING (one texel per scene px only): a band's texels that the opaque texels of the bands ABOVE it hide - with a texel of margin all
+ * round, so a magnified band's one pixel of edge smoothing never reaches a cleared texel - are cleared before they are published
+ * (~half the bytes on a busy scene). A client uses such a band only while every band above it is still the composite's (Composite.plan).
+ * Mip levels (zoomed out) of a cleared region differ where an upper band is not fully opaque at that level; at zoom >= 1 the picture is
+ * the same. `all`: [{ L, x, y, w, h, data, fresh }] (fresh tiles are cleared in place; the others only hide). Runs in the codec worker
+ * (composite.mjs publish): it held the page ~160 ms on a big scene.
+ */
+export function cull(all, margin = MARGIN) {
+  const x0 = Math.min(...all.map((q) => q.x)), y0 = Math.min(...all.map((q) => q.y));
+  const W = Math.max(...all.map((q) => q.x + q.w)) - x0, H = Math.max(...all.map((q) => q.y + q.h)) - y0;
+  // HIDDEN: a texel whose 3x3 is opaque in ONE band above (two bands each covering a part do not: at their seams each is half
+  // transparent where it smooths its own edge, and the band under them shows)
+  const hide = new Uint8Array(W * H), cover = new Uint8Array(W * H);
+  const levels = [...new Set(all.map((q) => q.L))].sort((a, b) => b - a);
+  let cleared = 0;
+  for ( const L of levels ) {
+    const here = all.filter((q) => q.L === L);
+    for ( const q of here ) if ( q.fresh ) {
+      const d = q.data, ox = q.x - x0, oy = q.y - y0;
+      for ( let y = 0; y < q.h; y++ ) {
+        const hrow = (oy + y) * W + ox, drow = y * q.w * 4;
+        for ( let x = 0; x < q.w; x++ ) {
+          const i = drow + x * 4;
+          if ( !d[i + 3] || hide[hrow + x] !== 1 ) continue;
+          d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; cleared++;
+        }
+      }
+    }
+    cover.fill(0);
+    let bx0 = W, by0 = H, bx1 = 0, by1 = 0;
+    for ( const q of here ) {
+      const d = q.data, ox = q.x - x0, oy = q.y - y0;
+      bx0 = Math.min(bx0, ox); by0 = Math.min(by0, oy); bx1 = Math.max(bx1, ox + q.w); by1 = Math.max(by1, oy + q.h);
+      for ( let y = 0; y < q.h; y++ ) for ( let x = 0; x < q.w; x++ ) if ( d[(y * q.w + x) * 4 + 3] === 255 ) cover[(oy + y) * W + ox + x] = 1;
+    }
+    // (the square of `margin` texels round it opaque in this band: Chebyshev distance to its nearest non-opaque texel, two passes)
+    const dist = chebyshev(cover, W, H, bx0, by0, bx1, by1, margin + 1);
+    for ( let y = by0; y < by1; y++ ) for ( let x = bx0; x < bx1; x++ ) if ( dist[y * W + x] > margin ) hide[y * W + x] = 1;
+  }
+  return cleared;
+}
+
 /* ---------------------------------------------------------------- the worker's jobs */
 
 /**
@@ -463,8 +603,12 @@ export async function work(m) {
     return { result: out, transfer };
   }
   if ( m.kind === "tiles" ) {
-    // composite tiles and the index: { tiles: [{ x, y, w, h, res, data }], index } -> { tiles: [{ id, bytes }], index: { id, bytes } }
+    // composite tiles and the index: { tiles: [{ x, y, w, h, res, data, L }], index, hide?: [{ L, x, y, w, h, data }] } -> { tiles: [{ id, bytes }],
+    // index: { id, bytes }, cleared }. `hide` (with `cull`): the bands' tiles the composite already holds - they only hide texels
+    // under the bands above (cull), they are not packed. The cull runs HERE, in the worker (it held the page ~160 ms on a big scene).
     const known = new Set(m.known ?? []), tiles = [];
+    let cleared = -1;
+    if ( m.cull ) cleared = cull([...(m.hide ?? []), ...m.tiles.map((t) => Object.assign(t, { fresh: true }))]);
     for ( const t of m.tiles ) {
       const p = packTile(t), id = `k${hash64(p)}`, bytes = known.has(id) ? null : await wrap(p);
       if ( bytes ) transfer.push(bytes.buffer);
@@ -472,21 +616,38 @@ export async function work(m) {
     }
     const ip = packIndex(m.index), iid = `x${hash64(ip)}`, ib = await wrap(ip);
     transfer.push(ib.buffer);
-    return { result: { tiles, index: { id: iid, bytes: ib } }, transfer };
+    return { result: { tiles, index: { id: iid, bytes: ib }, cleared }, transfer };
+  }
+  if ( m.kind === "bundle" ) {
+    // small chunks into one file: { members: [{ id, bytes (the chunk's PNG) }] } -> { id, bytes, ids (the members that went in) }
+    const parts = [];
+    for ( const q of m.members ) {
+      try {
+        const p = await unwrap(q.bytes);
+        if ( String(q.id).slice(1) !== hash64(p) ) continue;                  // a damaged or foreign file never goes into a bundle
+        parts.push({ id: q.id, payload: p });
+      } catch { /* not a chunk */ }
+    }
+    parts.sort((a, b) => (a.id < b.id ? -1 : 1));                                // the same members always make the same bundle
+    const bp = packBundle(parts), bytes = await wrap(bp);
+    transfer.push(bytes.buffer);
+    return { result: { id: `b${hash64(bp)}`, bytes, ids: parts.map((q) => q.id) }, transfer };
   }
   if ( m.kind === "decode" ) {
     const p = await unwrap(m.bytes);
     if ( m.cid && String(m.cid).slice(1) !== hash64(p) ) throw new Error("chunk content does not match its name");
-    if ( kindOf(p) === KIND_TILE ) { const t = unpackTile(p); transfer.push(t.data.buffer); return { result: { tile: t }, transfer }; }
-    if ( kindOf(p) === KIND_INDEX ) return { result: { index: unpackIndex(p) }, transfer };
-    if ( kindOf(p) === KIND_WATER ) {
-      const t = unpackWaterTile(p);
-      transfer.push(...t.levels.map((l) => l.buffer));
-      return { result: t, transfer };
+    if ( kindOf(p) === KIND_BUNDLE ) {
+      // a bundle: every member (or `only`) verified against its own name and decoded; -> { bundle: [{ id, result }] }
+      const only = m.only ? new Set(m.only) : null, out = [];
+      for ( const q of unpackBundle(p) ) {
+        if ( only && !only.has(q.id) ) continue;
+        if ( String(q.id).slice(1) !== hash64(q.payload) ) continue;          // (left out: the caller asks for it alone)
+        const d = decodePayload(q.payload, transfer);
+        out.push({ id: q.id, result: d });
+      }
+      return { result: { bundle: out }, transfer };
     }
-    const o = unpackObject(p);
-    for ( const s of o.sprites ) transfer.push(s.img.buffer);
-    return { result: o, transfer };
+    return { result: decodePayload(p, transfer), transfer };
   }
   if ( m.kind === "sigs" ) {
     // the strokes' full signatures (substrate.mjs fullSigs) off the page: { objs: [{ id, k, t, x0, y0, w, h, own, bytes }], P, K }

@@ -986,3 +986,60 @@ export function restCheck() {
   const avg = (a) => +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3);
   return { tickMed: med(fm), tickAvg: avg(fm), cacheMed: med(cm), switchMaxFrame: sw, fast: d.cache?.stats.fast ?? null, particles: d.particles.length };
 }
+
+/**
+ * CULL BENCH: what the GM's composite publish costs on the page (round 2): the bands' texels read back (readPixels), then the cull
+ * (the page, or the codec worker when `Composite.cullJob` exists). Returns { bands, tiles, mpx, readMs, cullMs, cleared, eff }; nothing is uploaded.
+ */
+export async function cullBench() {
+  const Comp = await import("../scripts/destruction/composite.mjs");
+  const d = D(), C = d.cache, R = canvas.app.renderer, gl = R.gl;
+  const bands = C.bands.filter((b) => b.ckey && b.tiles.length), all = [];
+  const t0 = performance.now();
+  for ( const b of bands ) for ( const t of b.tiles ) {
+    const bt = t.rt.baseTexture, w = bt.realWidth, h = bt.realHeight;
+    if ( t.shared && t.id && bt.resource?.data ) { all.push({ L: b.meta.L, x: t.x, y: t.y, w, h, data: bt.resource.data.slice(), fresh: true }); continue; }
+    const out = new Uint8Array(w * h * 4);
+    R.renderTexture.bind(t.rt); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out); R.renderTexture.bind(null);
+    all.push({ L: b.meta.L, x: t.x, y: t.y, w, h, data: out, fresh: true });
+  }
+  const readMs = performance.now() - t0, t1 = performance.now();
+  const effOne = bands.every((b) => b.meta.eff === 1);
+  const cleared = effOne ? Comp.cull(all) : -1;
+  return { bands: bands.length, tiles: all.length, mpx: +(all.reduce((a, q) => a + q.w * q.h, 0) / 1e6).toFixed(2), readMs: +readMs.toFixed(1), cullMs: +(performance.now() - t1).toFixed(1), cleared, effOne };
+}
+
+/**
+ * NET CHECK: the downloads of this session so far, by kind of chunk (d stroke, w water, k composite tile, x index, b bundle). `load`: the
+ * requests made until the background read-ahead of the strokes near the view starts (the reveal + 2.4 s; destruction.mjs prefetchNear), the
+ * ones a scene needs to be shown; `requests` / `kinds`: all of them. Open the scene with a cold IndexedDB first (see coldReload).
+ */
+export async function netCheck() {
+  const Net = await import("../scripts/net/stream.mjs");
+  const tr = game.modules.get("moinen-maps").api.destruction.net.trace();
+  const rv = tr.marks.find((m) => m.name === "reveal")?.t ?? null, cut = rv === null ? Infinity : tr.t0 + rv + 2400;
+  const by = (list) => { const kinds = {}; for ( const r of list ) { const k = r.id[0]; kinds[k] ??= { n: 0, kb: 0 }; kinds[k].n++; kinds[k].kb += r.bytes / 1024; } for ( const k of Object.values(kinds) ) k.kb = Math.round(k.kb); return kinds; };
+  const early = Net.reqLog.filter((r) => r.t <= cut);
+  return { requests: Net.stats.requests, bytesDown: Net.stats.bytesDown, idbHits: Net.stats.idbHits, memHits: Net.stats.memHits, kinds: by(Net.reqLog),
+    load: { requests: early.length, kb: Math.round(early.reduce((a, r) => a + r.bytes, 0) / 1024), kinds: by(early) }, revealMs: rv };
+}
+
+/** Forget the chunks IndexedDB holds and reload the page (a cold client). */
+export async function coldReload() {
+  await new Promise((res) => { const r = indexedDB.deleteDatabase("moinen-maps-chunks"); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+  setTimeout(() => location.reload(), 100);
+}
+
+/**
+ * PUBLISH BENCH (dry): the GM's composite publish up to the packed tiles, nothing uploaded or written: `pageMs` (the page: texel readback,
+ * the index, handing the texels to the codec worker - the part that holds the page), `jobMs` (the worker: cull + pack + deflate, off the page),
+ * `cleared` texels, and the longest long task the page saw meanwhile. Every tile is read back (`fresh`), as for a first publish.
+ */
+export async function publishBench() {
+  const Comp = await import("../scripts/destruction/composite.mjs"), d = D(), scene = canvas.scene;
+  let long = 0; const obs = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) long = Math.max(long, e.duration); });
+  try { obs.observe({ type: "longtask" }); } catch { /* none */ }
+  const r = await Comp.publish(d, { scene, dir: `worlds/${game.world.id}/moinen-maps/c/${scene.id}`, base: "bench", strokes: [], dry: true, fresh: true });
+  await new Promise((res) => setTimeout(res, 120)); obs.disconnect();
+  return typeof r === "object" ? { ...r, longTaskMs: Math.round(long) } : r;
+}

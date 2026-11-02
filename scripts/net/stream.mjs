@@ -16,7 +16,9 @@ import { work, gcPick } from "./chunks.mjs";
  */
 
 export const stats = { requests: 0, bytesDown: 0, idbHits: 0, memHits: 0, uploads: 0, bytesUp: 0, skippedUploads: 0, failed: 0, tombstones: 0, decodeMs: 0 };
-export const resetStats = () => { for ( const k of Object.keys(stats) ) stats[k] = 0; };
+export const resetStats = () => { for ( const k of Object.keys(stats) ) stats[k] = 0; reqLog.length = 0; };
+/** Every download of this session (id, bytes, time), for tests and the harness (bounded). */
+export const reqLog = [];
 
 const picker = () => foundry.applications.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
 const root = () => `worlds/${game.world.id}/${MODULE_ID}`;
@@ -229,7 +231,7 @@ const inflight = new Map();
 export async function prefetch(list) {
   const todo = list.filter((c) => c.id && !memo.has(c.id) && !inflight.has(c.id) && !preloaded.has(c.id));
   if ( !todo.length ) return;
-  const got = await idbGetMany(todo.map((c) => c.id));
+  const got = await idbGetMany([...todo.map((c) => c.id), ...bundlesFor(todo.map((c) => c.id)).filter((b) => !bundleLoaded.has(b))]);
   for ( const [id, b] of got ) preloaded.set(id, b);
   await Promise.all(todo.map((c) => getChunk(c.dir, c.id, { prio: c.prio ?? 0 })));
 }
@@ -240,12 +242,77 @@ async function download(dir, id, reload = false, signal = null) {
   if ( !res.ok ) return null;
   const b = new Uint8Array(await res.arrayBuffer());
   stats.bytesDown += b.length;
+  if ( reqLog.length < 2000 ) reqLog.push({ id, bytes: b.length, t: Math.round(performance.now()) });
   return b;
+}
+
+/* ---------------------------------------------------------------- bundles (chunks.mjs kind 5, bundle.mjs) */
+
+/**
+ * Small chunks travel together: a scene's flag `chunkBundle` names bundle files and the chunk ids each holds (bundle.mjs registers it
+ * here). A chunk in a registered bundle is taken from its bundle - memory, IndexedDB, else ONE download for all its members - and
+ * only when the bundle cannot be had (not on the server, damaged) from its own single file, which the GM keeps uploading as before.
+ */
+const memberOf = new Map();          // chunk id -> { dir, bid }
+const sceneBundles = new Map();      // scene id -> [{ dir, bid, ids }]
+const bundleInflight = new Map();    // bid (or bid:only) -> Promise<boolean>
+const bundleLoaded = new Set();      // bundles decoded whole this session
+const badBundles = new Map();       // bid -> when it failed (tried again after 30 s)
+
+/** The bundles a scene's flag names (`rec` = the flag: { dir, b: [[bid, [ids]]] }), or none. */
+export function setBundles(sceneId, rec) {
+  if ( rec?.dir && Array.isArray(rec.b) ) sceneBundles.set(sceneId, rec.b.filter((e) => Array.isArray(e) && typeof e[0] === "string" && Array.isArray(e[1])).map(([bid, ids]) => ({ dir: rec.dir, bid, ids })));
+  else sceneBundles.delete(sceneId);
+  memberOf.clear();
+  for ( const list of sceneBundles.values() ) for ( const b of list ) for ( const id of b.ids ) memberOf.set(id, { dir: b.dir, bid: b.bid });
+}
+export const bundleOf = (id) => memberOf.get(id) ?? null;
+/** The bundle ids a list of chunk ids falls into (their bytes are read from IndexedDB ahead, see prefetch). */
+export const bundlesFor = (ids) => [...new Set(ids.map((id) => memberOf.get(id)?.bid).filter(Boolean))];
+
+/** Bytes by id from IndexedDB (a GM building bundles). */
+export const rawMany = (ids) => idbGetMany(ids);
+/** A chunk's single file as it is on the server (bytes, not decoded). */
+export const fetchRaw = (dir, id) => download(dir, id, false);
+
+/**
+ * The bundle decoded into memory (every member, or `only` one that was let go since). -> true when its members are in memory now.
+ * Never queued behind the download slots (a member holds a slot while it waits here): it runs inside the slot of the first member.
+ */
+function ensureBundle(info, signal = null, only = null) {
+  const { dir, bid } = info;
+  if ( Date.now() - (badBundles.get(bid) ?? -1e9) < 30000 ) return Promise.resolve(false);
+  const key = only ? `${bid}:${only}` : bid;
+  if ( bundleInflight.has(key) ) return bundleInflight.get(key);
+  const p = (async () => {
+    let bytes = preloaded.get(bid) ?? await idbGet(bid), from = "idb", out = null;
+    preloaded.delete(bid);
+    if ( !bytes ) { bytes = await download(dir, bid, false, signal); from = "net"; }
+    if ( !bytes ) return false;
+    const msg = (b, own) => {
+      const t = performance.now(), c = own && b.byteOffset === 0 && b.byteLength === b.buffer.byteLength ? b : b.slice();
+      return job({ kind: "decode", bytes: c, cid: bid, only: only ? [only] : null }, [c.buffer]).finally(() => { stats.decodeMs += performance.now() - t; });
+    };
+    try { out = await msg(bytes, from === "idb"); }
+    catch ( err ) {
+      if ( from === "idb" ) tx(["chunks", "lru"], "readwrite", (s, l) => { s.delete(bid); l.delete(bid); return null; });
+      bytes = await download(dir, bid, true, signal).catch(() => null);
+      try { out = bytes ? await msg(bytes, false) : null; } catch { out = null; }
+      if ( !out ) { console.warn(`${MODULE_ID} | bundle ${bid} unusable (${err.message})`); return false; }
+      from = "net";
+    }
+    if ( from === "idb" ) stats.idbHits++; else idbPut(bid, bytes);
+    for ( const m of out.bundle ?? [] ) if ( !memo.has(m.id) ) remember(m.id, m.result);
+    if ( !only ) bundleLoaded.add(bid);
+    return true;
+  })().catch(() => false).then((ok) => { if ( !ok && !signal?.aborted ) badBundles.set(bid, Date.now()); return ok; }).finally(() => bundleInflight.delete(key));
+  bundleInflight.set(key, p);
+  return p;
 }
 
 /**
  * One chunk, decoded: memory, IndexedDB, else the server (once more past the browser cache when the cached file does not match:
- * a tombstone from the GC). -> the decoded payload, or null when it cannot be had.
+ * a tombstone from the GC). A chunk of a registered bundle comes with its bundle. -> the decoded payload, or null when it cannot be had.
  */
 export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
   if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id).v); }
@@ -253,6 +320,11 @@ export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
   const p = enqueue(prio, async () => {
     if ( memo.has(id) ) return memo.get(id).v;
     if ( signal?.aborted ) return null;
+    const info = memberOf.get(id);
+    if ( info && info.dir === dir && !preloaded.has(id) ) {       // (a chunk read ahead from IndexedDB as a file of its own needs no bundle)
+      await ensureBundle(info, signal, bundleLoaded.has(info.bid) ? id : null);
+      if ( memo.has(id) ) return memo.get(id).v;
+    }
     let bytes = preloaded.get(id) ?? await idbGet(id), from = "idb";
     preloaded.delete(id);
     if ( !bytes ) { bytes = await download(dir, id, false, signal); from = "net"; }
