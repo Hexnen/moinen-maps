@@ -1363,7 +1363,9 @@ async function warmGo(force) {
   netAbort ??= new AbortController();
   const live = () => run === warmRun && my === gen && S === S0;
   let next = 0, landed = 0, pend = 0;
-  const flush = async () => { pend = 0; if ( my === gen && reshow ) await reshow(); await new Promise((r) => setTimeout(r, 16)); };
+  // (the swapped areas are new groups: the flooded holes (flood.mjs sync, on this hook) move into them - else a hole whose area was swapped
+  // after its last sync kept no water here until a reload: "warm player stuck", the picture short of the GM's by the water and its wet look)
+  const flush = async () => { pend = 0; if ( my === gen && reshow ) { await reshow(); tell("status"); } await new Promise((r) => setTimeout(r, 16)); };
   const worker = async () => {
     while ( next < list.length && live() ) {
       const w = list[next++];

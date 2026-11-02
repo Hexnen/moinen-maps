@@ -372,6 +372,15 @@ export class StaticCache {
    * members and density are unchanged keeps its textures (a new stroke entering on top re-draws nothing underneath).
    */
   bake(U, lv, sr, res, mips, win = null) {
+    // A band is drawn ONCE and kept, so it must be drawn complete: a batched area whose atlas is not on the GPU yet (a warm refresh's
+    // swapped-in area, a re-opened one) defers its pieces to a later frame (piece-batch / piece-gpu atlasReady) and the band was drawn
+    // with the ruin only - and stayed so, nothing re-drew it when the pieces came: the warm player's cache short of the GM's by those
+    // areas' shards (shown.max 67-96 against live 1; "warm player stuck", 2026-11-02). Uploaded now, in the draw.
+    const cm = (globalThis.CONFIG.moinenMaps ??= {}), nowWas = cm.atlasNow; if ( !cm.noBandAtlasNow ) cm.atlasNow = true;   // (noBandAtlasNow: dev knob, A/B)
+    try { return this.bakeBands(U, lv, sr, res, mips, win); } finally { cm.atlasNow = nowWas; }
+  }
+
+  bakeBands(U, lv, sr, res, mips, win = null) {
     const t0 = performance.now(), R = canvas.app.renderer, d = this.d, ap = d.ap, o = d.origin, live = d.live;
     const force = this.dirty;
     this.waiting = false;              // (a band of shells without a composite for them: kept stale, re-drawn when their pixels come)

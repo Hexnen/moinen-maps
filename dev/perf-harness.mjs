@@ -66,6 +66,26 @@ export function cmp() {
   return { mode, zoom: +canvas.stage.scale.x.toFixed(3), mean: +(sum / n).toFixed(2), max, badPct: +(bad / n * 100).toFixed(3) };
 }
 
+/**
+ * BANDS DRAWN COMPLETE: the cache's picture is taken (block means, water hidden), the batched (not flattened) areas' atlases are taken
+ * off the GPU, the bands are drawn again and the picture is taken once more: it must be the same. A band drawn while an atlas was not on
+ * the GPU had the ruin only (piece-batch atlasReady defers the pieces) and stayed so: the warm player's cache short of the GM's by
+ * those areas' shards (max block difference 67-96 before the fix, <= 1 after). Pass: max <= 8. `CONFIG.moinenMaps.noBandAtlasNow = true`
+ * brings the old behaviour back (A/B). -> { areas, views: [[view, max, blocks over 8]], pass }.
+ */
+export function bandsCompleteCheck() {
+  const d = D(), nf = d.order.filter((g) => !g.flat && g.batch && !g.batch.destroyed), views = divergeViews(), comp = d.composite;
+  d.composite = null;                      // (the composite's tiles would stand in for every band: the bands must be drawn from the areas)
+  try {
+    d.cache.invalidate(); step(8);
+    const ref = views.map((region) => blockMeans({ region }));
+    for ( const g of nf ) g.tex.dispose();
+    d.cache.invalidate(); step(2);
+    const rows = views.map((region, i) => { const x = blockDiff(ref[i], blockMeans({ region })); return [i, x.max, x.blocksOver]; });
+    return { areas: nf.length, views: rows, pass: rows.every((r) => r[1] <= 8) };
+  } finally { d.composite = comp; d.cache.invalidate(); step(3); }
+}
+
 export function fit(scale) {
   const r = canvas.dimensions.sceneRect;
   const s = scale ?? Math.min(innerWidth / r.width, innerHeight / r.height);
@@ -868,20 +888,69 @@ export function crispCheck({ zooms = [1, 2, 3, 4, 6], region = null, shards = tr
       const row = { zoom: z, mode, px: n, cached: +(ga / Math.max(1, n)).toFixed(2), live: +(gb / Math.max(1, n)).toFixed(2), ratio: +(ga / Math.max(1e-6, gb)).toFixed(3) };
       if ( shards ) {
         // the flattened areas as shard sprites (as in an entry frame) against the flattened textures (live, cache off)
-        const flat = d.order.filter((g) => g.flat);
+        // (an area whose atlas was let go has no pixels to make shards of: un-flattening it - which the product only does after the
+        // pixels are back, display.waitPixels - left an EMPTY flattened texture behind, the damage gone from the live layer and the
+        // cache sharper than it from zoom 4 on: the "cached/live 1.29 / 1.46" of 2026-11-02. They are skipped (`restoreAtlases()`
+        // brings them back first: crispStates))
+        const flat = d.order.filter((g) => g.flat && !g.atlasFree);
         for ( const g of flat ) { d.unflatten(g); d.materialize(g, Infinity); }
         T.update(performance.now()); T.update(performance.now());
         const c = grab(), sc = sob(c, W, H); let gc = 0;
         for ( let y = 1; y < H - 1; y += 2 ) for ( let x = 1; x < W - 1; x += 2 ) { if ( sa.A(x, y) < 200 && sb.A(x, y) < 200 ) continue; gc += sc.at(x, y); }
         for ( const g of flat ) d.flatten(g);
         T.update(performance.now());
-        Object.assign(row, { shards: +(gc / Math.max(1, n)).toFixed(2), flatVsShards: +(gb / Math.max(1e-6, gc)).toFixed(3) });
+        Object.assign(row, { shardAreas: flat.length, shardsSkipped: d.order.filter((g) => g.flat && g.atlasFree).length });
+        if ( flat.length ) Object.assign(row, { shards: +(gc / Math.max(1, n)).toFixed(2), flatVsShards: +(gb / Math.max(1e-6, gc)).toFixed(3) });
       }
       rows.push(row);
     }
   } finally { CONFIG.moinenMaps.noDestructionCache = was; T.update(performance.now()); performance.now = clock.real; T.lastTime = clock.real(); T.maxFPS = mf; ws.forEach((w) => { w.visible = true; }); }
   // judged from zoom 3 up (where the live layer samples NEAREST); below it the cache is a little crisper than the live LINEAR drawing
   return { pass: rows.filter((r) => r.zoom >= 3).every((r) => Math.abs(r.ratio - 1) <= 0.1 && (r.flatVsShards === undefined || Math.abs(r.flatVsShards - 1) <= 0.1)), rows };
+}
+
+/**
+ * The areas whose atlas was let go (display.freeAtlas: a settled area keeps one flattened texture, not its pixels) get their pixels
+ * back, as an entry does (display.pixelsSlice): pixelSource -> restoreAtlasData / restoreAtlas. -> { asked, restored, left }.
+ */
+export async function restoreAtlases({ maxMs = 30000 } = {}) {
+  const d = D(), free = [...d.groups.values()].filter((g) => g.atlasFree && !g.dead), t0 = performance.now();
+  if ( !free.length || !d.pixelSource ) return { asked: free.length, restored: 0, left: free.length };
+  let restored = 0;
+  for ( let i = 0; i < free.length && performance.now() - t0 < maxMs; i += 24 ) {
+    const got = await d.pixelSource(free.slice(i, i + 24));
+    for ( const [g, px] of got ?? [] ) if ( !g.dead && g.atlasFree && px?.length && (ArrayBuffer.isView(px) ? d.restoreAtlasData(g, px) : d.restoreAtlas(g, px)) ) restored++;
+  }
+  return { asked: free.length, restored, left: [...d.groups.values()].filter((g) => g.atlasFree).length };
+}
+
+/**
+ * CRISPNESS in every state the damage can be in (cached = live must hold in all of them): 'loaded' (as the scene opened: the settled
+ * areas' atlases let go, the cache's bands from the composite or drawn here), 'restored' (the atlases back: every flattened area also
+ * tested against its own shard sprites), 'detonated' (after a Detonate has settled: areas entered, re-flattened, bands re-drawn) and,
+ * on request, 'rebaked' (after Rebake all, GM). Each row is crispCheck's. -> { pass, states: { name: crispCheck result } }.
+ */
+export async function crispStates({ states = ["loaded", "restored", "detonated"], zooms = [1, 2, 3, 4, 6], settleMs = 40000 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, out = {};
+  for ( const s of states ) {
+    if ( s === "restored" ) out.restoreInfo = await restoreAtlases();
+    else if ( s === "detonated" ) {
+      await A.replay(); await new Promise((r) => setTimeout(r, 1500));
+      const d = D(), t0 = performance.now();
+      // (every area entered and ended, nothing waiting for pixels, the cache drawn again: a quiet 3 s)
+      let quiet = 0;
+      while ( performance.now() - t0 < 120000 && quiet < 3000 ) {
+        step(20); await new Promise((r) => setTimeout(r, 250));
+        const busy = d.order.some((g) => g.anim || g.fade) || d.dying.length || d.pending?.size || d.enterQueue?.size || d.pixelAsks?.size || d.restoreQ?.length;
+        quiet = busy ? 0 : quiet + 250;
+      }
+      out.detonateInfo = { quietMs: quiet, seconds: Math.round((performance.now() - t0) / 100) / 10 };
+    }
+    else if ( s === "rebaked" ) { { const { ids, ...info } = await rebakeRun({}); out.rebakeInfo = info; } await settled(settleMs).catch(() => null); }
+    await settled(settleMs).catch(() => null);
+    out[s] = crispCheck({ zooms });
+  }
+  return { pass: states.every((s) => out[s]?.pass), states: out };
 }
 
 /**
@@ -1478,13 +1547,18 @@ export async function rebakeBench({ ids = null, maxS = 420, tailS = 12 } = {}) {
  * Sequence of the regression (diverge-fix): GM `api.destruction.detonate()` -> GM reload -> `rebakeAll(ids of every stroke)` -> a cold
  * player loads -> `blockDiff` max <= 8.
  */
-export function blockMeans({ bw = 32, bh = 24, live = false, region = null } = {}) {
+export function blockMeans({ bw = 32, bh = 24, live = false, region = null, water = false } = {}) {
   // the whole scene drawn with a transform of its own (the canvas's pan is not used: a player cannot zoom out as far as the GM, and
   // innerWidth / innerHeight of a background tab need not match the renderer)
   const R = canvas.app.renderer, sr = region ?? canvas.dimensions.sceneRect, W = Math.round(R.screen.width * R.resolution), H = Math.round(R.screen.height * R.resolution);
   const sc = Math.min(W / sr.width, H / sr.height), m = new PIXI.Matrix(sc, 0, 0, sc, Math.round((W - sr.width * sc) / 2 - sr.x * sc), Math.round((H - sr.height * sc) / 2 - sr.y * sc));
   const real = performance.now.bind(performance), at = real();
   performance.now = () => at;
+  // (a flooded hole's water loops with the PAGE'S clock: two pages never show the same frame of it, so a GM-vs-player comparison with water
+  // in it never converged - "warm player stuck", 2026-11-02: shown.max 95 against a picture that was in fact identical, 1 with the water
+  // hidden. Hidden here unless `water: true`.)
+  const hid = [];
+  if ( !water ) for ( const g of D()?.order ?? [] ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; hid.push(ch); }
   let px;
   try {
     step(3);
@@ -1493,7 +1567,7 @@ export function blockMeans({ bw = 32, bh = 24, live = false, region = null } = {
     const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1 });
     try { R.render(d.objs, { renderTexture: rt, transform: m, clear: true }); px = R.extract.pixels(rt); }
     finally { rt.destroy(true); if ( live ) { if ( sh ) sh.visible = sv; d.live.visible = lv; } }
-  } finally { performance.now = real; canvas.app.ticker.lastTime = real(); }
+  } finally { performance.now = real; canvas.app.ticker.lastTime = real(); for ( const ch of hid ) ch.visible = true; }
   const nx = Math.ceil(W / bw), ny = Math.ceil(H / bh), out = new Array(nx * ny * 4).fill(0), cnt = new Array(nx * ny).fill(0);
   for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
     const b = (Math.floor(y / bh) * nx + Math.floor(x / bw)), i = (y * W + x) * 4;
@@ -1690,6 +1764,18 @@ export async function floodDryLive({ stallMs = 40000, maxMs = 90000 } = {}) {
 }
 
 /**
+ * Flooded holes against the water on screen: every hole the flood engine calls ready must have its water sprites in its area's group
+ * (a hole whose area was swapped for a new group - a warm refresh, a shell's pixels - and was not synced afterwards stood ready without
+ * water: the warm player's picture short of the GM's until a reload). -> { holes, ready, water, readyWithoutWater: [area hash] }.
+ */
+export function floodWaterCheck() {
+  const d = D(), F = game.modules.get("moinen-maps").api.destruction.flood.status();
+  const wet = new Set(d.order.filter((g) => g.cont.children.some((c) => c !== g.patch && c !== g.baseCont && c !== g.shardCont)).map((g) => (g.hash >>> 0).toString(36)));
+  const ready = F.holes.filter((h) => h.state === "ready");
+  return { holes: F.holes.length, ready: ready.length, water: wet.size, readyWithoutWater: ready.filter((h) => !wet.has(h.hash)).map((h) => h.hash) };
+}
+
+/**
  * WARM PLAYER (a player already on the scene while the GM runs Rebake all): the player's picture against the GM's `shareMeans(name)`
  * (diffShared), polled until shown.max <= `want` or `maxS`. No reload: the page is the one that was on the scene. Returns { converged,
  * seconds, series ([[s, shown.max, blocks over 8]]), requests (chunk requests since the call), warm (the warm-refresh trace events),
@@ -1710,7 +1796,7 @@ export async function warmWatch(name = "diverge-gm", { maxS = 120, want = 8 } = 
   }
   obs.disconnect();
   return { converged, seconds: Math.round((performance.now() - t0) / 100) / 10, series: series.length > 8 ? [...series.slice(0, 3), ...series.slice(-3)] : series, requests: Net.stats.requests - r0,
-    kb: Math.round(Net.reqLog.slice(k0).reduce((a, r) => a + r.bytes, 0) / 1024), longTaskMs: Math.round(long),
+    kb: Math.round(Net.reqLog.slice(k0).reduce((a, r) => a + r.bytes, 0) / 1024), longTaskMs: Math.round(long), flood: floodWaterCheck(),
     warm: T().events.slice(n0).filter((e) => /^warm-/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) })) };
 }
 
