@@ -489,7 +489,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       };
       const take = (list, res, plain = false) => {
         const t0 = performance.now();
-        const parts = Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+        const parts = res.parts ? new Map(res.parts) : Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
         slow("take:split", t0, { n: list.length, plain });
         for ( const w of list ) {
           const sprites = parts.get(w.index) ?? [];
@@ -538,7 +538,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           // (a background Rebake: the plain looks its strokes read go to each lane ONCE, a look per message between frames (prime), and the
           // jobs only name them - copying them into every job held the page for up to 1.5 s per job)
           const tIn = performance.now();
-          let inputs = jobs.map((jb) => inputOf(jb, plain)), prime = null;
+          let inputs = jobs.map((jb) => ({ ...inputOf(jb, plain), split: META_FIELDS })), prime = null;
           slow("inputs", tIn, { jobs: jobs.length, plain });
           if ( redoSet.size && !plain ) {
             const sent = new Map();
@@ -550,7 +550,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
                 const k = `${S.objects[j].id}|${FS[j].own}`;
                 underKeys[j] = k; if ( !sent.has(k) ) sent.set(k, pl);
               }
-              return { ...inputOf(jb, plain), under: {}, underKeys };
+              return { ...inputOf(jb, plain), under: {}, underKeys, split: META_FIELDS };
             });
             prime = [...sent].map(([key, sprites]) => ({ key, sprites }));
             slow("inputs+prime", tIn, { looks: prime.length });
@@ -928,6 +928,7 @@ async function pixelSource(groups, deliver = null) {
  * stream's memory. `CONFIG.moinenMaps.noPrefetch = true`: none.
  */
 function prefetchNear() {
+  Net.setWide(true);      // (from here on a stroke's chunk comes with its large bundle: few requests for the rest of the scene)
   if ( !display || !canvas.ready || globalThis.CONFIG?.moinenMaps?.noPrefetch ) return;
   const vw = display.view(), mx = (vw.x1 - vw.x0) * 0.5, my = (vw.y1 - vw.y0) * 0.5;
   const near = (r) => !(r.x0 > vw.x1 + mx || r.y0 > vw.y1 + my || r.x1 < vw.x0 - mx || r.y1 < vw.y0 - my);
@@ -1255,7 +1256,11 @@ async function persistOnce() {
     const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
     if ( !r ) return;                                // should not happen once complete; a later run publishes
     const e = same ? Store.entryOf(M, o.id) : null;
-    if ( e?.sig === sig && !((r.ver ?? -1) > (e.ver ?? -1) && r.id !== e.id) ) c[o.id] = Policy.entryString(sig, e.id, e.ver);
+    if ( e?.sig === sig && !((r.ver ?? -1) > (e.ver ?? -1) && r.id !== e.id) ) {
+      c[o.id] = Policy.entryString(sig, e.id, e.ver);
+      // (a record baked here again - a Rebake all of the same look - is the stored chunk: it can let go of its pixels like a loaded one)
+      if ( !r.id && !r.shell && !r.sprites.lean && e.id && Net.known(dir).has(e.id) && onScreen(r) ) { r.id = e.id; r.dir = dir; dry(r); }
+    }
     else if ( r.id && Net.known(dir).has(r.id) ) c[o.id] = Policy.entryString(sig, r.id, r.ver ?? CORE_VERSION);
     else todo.push({ o, sig, r });
   }
@@ -1282,6 +1287,9 @@ async function persistOnce() {
       const t2 = performance.now();
       await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));
       status.perf.upload = Math.round(performance.now() - t2);
+      // the records just published (a Rebake all's: ~250 MB of RGBA on "map" kept for the whole session) let go of their pixels like the
+      // ones loaded from chunks (they come back with hydrate when an area has to be built again)
+      for ( const q of todo ) if ( !q.r.shell && !q.r.sprites.lean && q.r.id && q.r.dir && onScreen(q.r) ) dry(q.r);
     }
     if ( my !== gen || !S ) return;
     await save();                                    // the strokes first, so the signatures mean the same to everyone

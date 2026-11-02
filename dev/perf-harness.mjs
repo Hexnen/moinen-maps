@@ -1188,6 +1188,8 @@ export async function reflectHash({ blur = "none", reflect = {}, keep = false } 
       const c = spr.texture?.baseTexture?.resource?.source; if ( !(c instanceof HTMLCanvasElement) || c.width < 3 ) continue;
       per.push(`${c.width}x${c.height}:${fnv(c.getContext("2d").getImageData(0, 0, c.width, c.height).data).toString(16)}${spr.visible ? "" : "!"}`);
     }
+    // (sorted: the order of the canvases follows the tokens' order, which depends on their random ids - two makeTokens() runs gave the same canvases in another order)
+    per.sort();
     const out = { n: per.length, all: fnv(new TextEncoder().encode(per.join(","))).toString(16), per };
     if ( keep ) {      // the raw bytes of every reflection canvas (not the mask), as one string per canvas (latin-1) for a diff between builds
       out.raw = root.children.map((spr) => spr.texture?.baseTexture?.resource?.source).filter((c) => c instanceof HTMLCanvasElement && c.width < 1000)

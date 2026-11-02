@@ -318,6 +318,18 @@ await test("bundle buckets: a changed chunk changes one bundle, the others keep 
   assert.deepEqual(C.bundleBuckets([]).size, 0);
 });
 
+await test("large bundles: strokes of ~180 kB pack into files of about the cap, a changed one touches few bundles", () => {
+  const sizes = new Map(Array.from({ length: 143 }, (_, i) => [`d${(i * 2654435761 >>> 0).toString(36).padStart(14, "0")}`, 120000 + (i * 7919) % 120000]));
+  const a = C.largeBuckets(sizes, 655360), total = [...sizes.values()].reduce((x, y) => x + y, 0);
+  assert.equal(a.size, Math.ceil(total / 655360));
+  assert.equal([...a.values()].reduce((x, l) => x + l.length, 0), 143);
+  assert.ok(a.size < 45, `143 strokes in ${a.size} files`);
+  const b = new Map(sizes); b.delete([...sizes.keys()][0]); b.set("dnewchunk0000000", 150000);
+  let changed = 0; const bb = C.largeBuckets(b, 655360); for ( const [k, l] of a ) if ( JSON.stringify(bb.get(k)) !== JSON.stringify(l) ) changed++;
+  assert.ok(changed <= 2 || bb.size !== a.size, `one removed + one added chunk touch at most two bundles (${changed})`);
+  assert.equal(C.largeBuckets(new Map()).size, 0);
+});
+
 await test("cull in the worker job: the same texels cleared as cull() on the page, tiles named by their culled content", async () => {
   const tile = (L, x, y, w, h, fill) => { const data = new Uint8Array(w * h * 4); for ( let i = 0; i < w * h; i++ ) data.set(fill(i % w, (i / w) | 0), i * 4); return { L, x, y, w, h, res: 1, data }; };
   const mk = () => [tile(0, 0, 0, 40, 40, () => [9, 9, 9, 255]), tile(2, 0, 0, 40, 40, () => [7, 7, 7, 255]), tile(1, 5, 5, 20, 20, (x) => [x, 1, 1, x ? 255 : 0])];

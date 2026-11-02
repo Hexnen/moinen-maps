@@ -9,6 +9,7 @@
  */
 import { bake } from "./core.mjs";
 import { encodePng } from "./png.mjs";
+import { splitSheet } from "../net/chunks.mjs";
 
 let map = null, mapKey = "";
 const areas = new Map();
@@ -34,7 +35,13 @@ self.onmessage = async (ev) => {
       const under = { ...(m.input.under ?? {}) };
       for ( const [j, key] of Object.entries(m.input.underKeys ?? {}) ) { const s = plains.get(key); if ( s && !under[j] ) under[j] = s; }
       const res = bake({ ...m.input, under, map, onProgress: (p) => self.postMessage({ id: m.id, progress: p }) }, m.input.noCache ? null : areas);
-      self.postMessage({ id: m.id, ok: true, result: res }, [res.sheet.data.buffer, res.meta.buffer]);
+      if ( m.input.split ) {
+        // the lane splits the sheet into the strokes' sprites itself (input.split = the meta field count) and hands each one over (a
+        // transfer): the page took the whole sheet and copied every sprite out of it - twice the pixels as garbage until the next GC
+        const parts = [...splitSheet(res.sheet.data, res.sheet.w, res.meta, m.input.split)], moved = [];
+        for ( const [, list] of parts ) for ( const s of list ) moved.push(s.img.buffer, s.m.buffer);
+        self.postMessage({ id: m.id, ok: true, result: { parts, stats: res.stats } }, moved);
+      } else self.postMessage({ id: m.id, ok: true, result: res }, [res.sheet.data.buffer, res.meta.buffer]);
     } else if ( m.kind === "encode" ) {
       const png = await encodePng(m.w, m.h, m.data);
       self.postMessage({ id: m.id, ok: true, result: png }, [png.buffer]);

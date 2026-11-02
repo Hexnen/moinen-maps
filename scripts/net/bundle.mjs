@@ -1,6 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Net from "./stream.mjs";
-import { bundleBuckets } from "./chunks.mjs";
+import { bundleBuckets, largeBuckets } from "./chunks.mjs";
 import { chunkRecords } from "../water/publish.mjs";
 import { floodIds } from "./preload.mjs";
 
@@ -23,6 +23,8 @@ export const KEY = "chunkBundle";
 export const LIMIT = { w: 65536, d: 32768, k: 131072, x: 131072 };
 /** The flooded strokes' chunks (every load fetches them) go into one bundle of their own, whatever their size (up to this). */
 export const FLOOD_LIMIT = 262144;
+/** Strokes above LIMIT.d and up to this many bytes go into LARGE bundles (flag `L`), which a client takes only for the read-ahead after the reveal. */
+export const BIG_LIMIT = 1048576, BIG_CAP = 655360;
 
 const off = () => { try { if ( localStorage.getItem("mm-bundles") === "off" ) return true; } catch { /* blocked */ } return !!globalThis.CONFIG?.moinenMaps?.noBundles; };   // (localStorage "mm-bundles" = "off": before a reload)
 
@@ -54,13 +56,14 @@ export async function publish(scene) {
   // what each bucket holds: the chunks whose bytes this client has and that are small, plus the ones the scene's CURRENT bundles already
   // hold (a client that read them from a bundle never kept their single files: their size was judged when that bundle was made)
   const oldOf = new Map();
-  if ( old?.dir === dir ) for ( const [bid, m] of old.b ) for ( const id of m ) oldOf.set(id, bid);
+  const oldLarge = new Set();
+  if ( old?.dir === dir ) for ( const [bid, m] of old.b ) { for ( const id of m ) oldOf.set(id, bid); if ( old.L?.includes(bid) ) for ( const id of m ) oldLarge.add(id); }
   const next = [], fresh = [];
   const wet = new Set(floodIds(scene).filter((id) => ids.includes(id)));
   const buckets = [...bundleBuckets(ids.filter((id) => !wet.has(id))).values()];
   if ( wet.size ) buckets.push([...wet].sort());                 // (the flooded strokes: one bundle, read at every load)
   for ( const list of buckets ) {
-    const members = list.filter((id) => (raw.has(id) ? raw.get(id).length <= (wet.has(id) ? FLOOD_LIMIT : LIMIT[id[0]]) : oldOf.has(id)));
+    const members = list.filter((id) => (raw.has(id) ? raw.get(id).length <= (wet.has(id) ? FLOOD_LIMIT : LIMIT[id[0]]) : oldOf.has(id) && !oldLarge.has(id)));
     if ( members.length < 2 ) continue;
     const prev = old?.dir === dir ? old.b.find(([, m]) => sameSet(m, members)) : null;
     if ( prev ) { next.push([prev[0], prev[1]]); continue; }
@@ -75,9 +78,30 @@ export async function publish(scene) {
     if ( res.ids.length < 2 ) continue;
     next.push([res.id, res.ids]); fresh.push({ id: res.id, bytes: res.bytes });
   }
+  // LARGE bundles: the strokes above the small limit (the chunks the current bundles hold as large count too: their bytes may not be here)
+  const large = new Set(), sizes = new Map();
+  for ( const id of ids ) {
+    if ( id[0] !== "d" || wet.has(id) ) continue;
+    const n = raw.get(id)?.length;
+    if ( n === undefined ? oldLarge.has(id) : n > LIMIT.d && n <= BIG_LIMIT ) sizes.set(id, n ?? 180000);
+  }
+  for ( const list of largeBuckets(sizes, BIG_CAP).values() ) {
+    if ( list.length < 2 ) continue;
+    const prev = old?.dir === dir ? old.b.find(([bid, m]) => old.L?.includes(bid) && sameSet(m, list)) : null;
+    if ( prev ) { next.push([prev[0], prev[1]]); large.add(prev[0]); continue; }
+    const bytes = new Map();
+    for ( const id of list ) {
+      const b = raw.get(id) ?? await Net.fetchRaw(dir, id).catch(() => null);
+      if ( b ) bytes.set(id, b);
+    }
+    if ( bytes.size < 2 ) continue;
+    const res = await Net.job({ kind: "bundle", members: [...bytes].map(([id, b]) => ({ id, bytes: b })) });
+    if ( res.ids.length < 2 ) continue;
+    next.push([res.id, res.ids]); fresh.push({ id: res.id, bytes: res.bytes }); large.add(res.id);
+  }
   next.sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  const rec = { v: 2, dir, t: next.map((e) => e[0]), b: next, at: Date.now() };
-  if ( old && old.dir === dir && JSON.stringify(old.b) === JSON.stringify(rec.b) ) return "same";
+  const rec = { v: 2, dir, t: next.map((e) => e[0]), b: next, L: [...large].sort(), at: Date.now() };
+  if ( old && old.dir === dir && JSON.stringify(old.b) === JSON.stringify(rec.b) && JSON.stringify(old.L ?? []) === JSON.stringify(rec.L) ) return "same";
   if ( !next.length && !old ) return "nothing";
   if ( fresh.length ) {
     await Net.upload(dir, fresh);
