@@ -4,8 +4,9 @@ import { packLook } from "./look-pack.mjs";
 
 /**
  * Runs the bake in a module worker, never on the page: a big bake must not freeze the client. When the worker cannot start, the bake
- * fails with an error (shown in the Damage panel) instead of running inline. A bake that takes longer than WATCHDOG is abandoned and
- * the worker is replaced. The worker keeps the scene's map pixels and the baked areas, so it stays while a scene with damage is open
+ * fails with an error (shown in the Damage panel) instead of running inline. A bake that makes no progress for WATCHDOG (the worker
+ * reports after each stroke) is abandoned and the worker is replaced - the time is per stretch of work, not for the whole call (a re-cause
+ * of an old stroke bakes the 138 strokes over it in one call: ~40 s on one worker). The worker keeps the scene's map pixels and the baked areas, so it stays while a scene with damage is open
  * and is let go ten minutes after its last job (or when the scene closes: disposeBaker).
  */
 const WATCHDOG = 30000, IDLE = 600000;
@@ -24,7 +25,7 @@ function start() {
   workerMap = "";
   worker.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
-    if ( m.progress !== undefined ) return p.onProgress?.(m.progress);
+    if ( m.progress !== undefined ) { p.rearm?.(); return p.onProgress?.(m.progress); }
     pending.delete(m.id); clearTimeout(p.watchdog);
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
   };
@@ -43,8 +44,9 @@ function call(msg, transfer = [], onProgress = null) {
     let w;
     try { w = start(); } catch ( err ) { reject(err); return; }
     const id = nextId++;
-    const watchdog = setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
-    pending.set(id, { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog });
+    const arm = () => setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
+    const entry = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: arm(), rearm: () => { clearTimeout(entry.watchdog); entry.watchdog = arm(); } };
+    pending.set(id, entry);
     w.postMessage({ id, ...msg }, transfer);
   });
 }
@@ -145,8 +147,9 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     extra.push(w);
     let id = 0;
     const ask = (msg, transfer = []) => new Promise((resolve, reject) => {
-      const my = ++id, timer = setTimeout(() => reject(new Error("the destruction bake took too long")), WATCHDOG);
-      const on = (ev) => { const m = ev.data; if ( m.id !== my || m.progress !== undefined ) return; w.removeEventListener("message", on); clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      const my = ++id, arm = () => setTimeout(() => reject(new Error("the destruction bake took too long")), WATCHDOG);
+      let timer = arm();
+      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { clearTimeout(timer); timer = arm(); return; } w.removeEventListener("message", on); clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
       w.addEventListener("message", on);
       w.postMessage({ id: my, ...msg }, transfer);
     });

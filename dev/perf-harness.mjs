@@ -1716,6 +1716,45 @@ export async function rebakeRun({ maxS = 420, ids = null } = {}) {
   return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, publish: pub, composite: comp, ids: manifestIds(), manifestWritten: (canvas.scene.flags[MODULE]?.destruction?.baked?.at ?? 0) > b0 };
 }
 
+/** Wait until the damage layer has stopped baking and publishing (no bake, no error, nothing paused) for `quietS` seconds; frames are stepped (a hidden pane has no ticker). */
+export async function settleBake({ maxS = 240, quietS = 4 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, t0 = performance.now();
+  let quiet = 0;
+  while ( performance.now() - t0 < maxS * 1000 ) {
+    await new Promise((r) => setTimeout(r, 300)); step(20);
+    const s = A.status();
+    if ( s.error ) break;
+    quiet = (!s.baking && !s.rebake && performance.now() - t0 > 2500) ? quiet + 0.3 : 0;
+    if ( quiet >= quietS ) break;
+  }
+  return { seconds: Math.round((performance.now() - t0) / 100) / 10, error: A.status().error || "" };
+}
+
+/**
+ * STABLE CHUNK IDS AFTER A CAUSE EDIT (the bug: a re-caused stroke made every Rebake all republish 9-17 chunks until the breaker paused
+ * baking). `edits`: [[strokeId, cause], ...] at `gapMs` apart (default: the stroke with most readers, cause changed once). Then: the edits'
+ * own bake settles (once), and Rebake all runs twice. Bar: rebake1.changed 0 and rebake2.changed 0, no error, no breaker, edit.changed =
+ * the edited strokes + the strokes that read them, once. -> { edit, rebake1, rebake2, breaker }
+ */
+export async function causeEditStable({ edits = null, gapMs = 600, maxS = 240 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, T = A.net.trace;
+  const list = edits ?? [[A.state().o.filter((o) => !o.k)[0].id, 3]];
+  const n0 = T().events.length, a0 = manifestIds();
+  for ( const [id, cause] of list ) { A.setCause(id, cause); if ( list.length > 1 ) await new Promise((r) => setTimeout(r, gapMs)); }
+  const settled = await settleBake({ maxS });
+  const a1 = manifestIds();
+  const bakes = T().events.slice(n0).filter((e) => /^(bake|publish)$/.test(e.reason)).map((e) => `${e.reason} ${JSON.stringify(e.data).slice(0, 60)}`);
+  const out = { edit: { ...settled, changed: idsDiff(a0, a1).changed.length, events: bakes } };
+  let prev = a1;
+  for ( const k of [1, 2] ) {
+    const r = await rebakeRun({ maxS });
+    out["rebake" + k] = { seconds: r.seconds, changed: idsDiff(prev, r.ids).changed.length, error: A.status().error || "" };
+    prev = r.ids;
+  }
+  out.breaker = T().events.slice(n0).some((e) => e.reason === "breaker");
+  return out;
+}
+
 /** This page's own pictures per view: the areas as shown (cache bands) against the areas drawn live (without the cache): [[view, max, blocks over 8]] (a band that is not the areas' picture shows here). */
 export function selfDiff() {
   return divergeViews().map((region, i) => { const d = blockDiff(blockMeans({ region }), blockMeans({ region, live: true })); return [i, d.max, d.blocksOver]; });
