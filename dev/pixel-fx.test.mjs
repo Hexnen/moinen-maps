@@ -6,7 +6,7 @@
 import { pxRing, pxFlash, pxLine } from "../scripts/destruction/pixel-fx.mjs";
 let fails = 0;
 const ok = (c, m) => { console.log(`${c ? "ok  " : "FAIL"} ${m}`); if ( !c ) fails++; };
-const rec = () => { const r = []; return { r, beginFill() { return this; }, endFill() { return this; }, drawRect(x, y, w, h) { r.push([x, y, w, h]); return this; } }; };
+const rec = () => { const r = []; return { r, beginFill() { return this; }, endFill() { return this; }, drawRect(x, y, w, h) { for ( let k = 0; k < w; k += 3 ) r.push([x + k, y, Math.min(3, w - k), h]); return this; }   /* (a run of cells joined by pxCells: one entry per art pixel) */ }; };
 const v = { ap: 3, ox: 0, oy: 0 };
 let worstCV = 1, worstCov = 0, onGrid = true;
 for ( const r of [8, 16, 30, 50] ) for ( const t of [0.1, 0.4, 0.7] ) for ( const seed of [1, 7, 23] ) {

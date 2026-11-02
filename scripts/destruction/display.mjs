@@ -91,6 +91,54 @@ class RowResource extends PIXI.BufferResource {
   }
 }
 
+/**
+ * PERF: an area's atlas, uploaded in row bands. A plain BufferResource sends all of it in one texImage2D (3-9 ms for 1000x2000 px,
+ * which cannot be cut). uploadAhead (display) calls `pump`: the first call allocates the texture empty (the GPU copy counts as not
+ * current - atlasReady stays false, dirtyId is kept stale), each later call sends the next rows under a byte budget; the last one makes
+ * it current (and builds the mipmaps). Any other bind (a sprite drawing it, Reveal.upload) while it is part-sent just sends the rest in
+ * one go, so nothing is ever drawn half-uploaded. `CONFIG.moinenMaps.noSlicedUpload`: one upload as before (A/B).
+ */
+class SliceResource extends PIXI.BufferResource {
+  constructor(data, o) { super(data, o); this.row = -1; this.pumping = false; this.startId = -1; }
+  upload(renderer, bt, gt) {
+    if ( this.pumping ) return true;                      // (pump's own bind: the allocation and the bands are done by pump)
+    if ( this.row >= 0 && this.row < bt.realHeight && this.startId === bt.dirtyId && gt.width === bt.realWidth && gt.height === bt.realHeight ) {
+      this.band(renderer, bt, gt, this.row, bt.realHeight - 1); this.row = -1; return true;   // the rest, at once
+    }
+    this.row = -1;
+    return super.upload(renderer, bt, gt);
+  }
+  band(renderer, bt, gt, y0, y1) {
+    const gl = renderer.gl, w = bt.realWidth;
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, this.unpackAlignment);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, bt.alphaMode === PIXI.ALPHA_MODES.UNPACK);
+    gl.texSubImage2D(bt.target, 0, 0, y0, w, y1 - y0 + 1, bt.format, gt.type, this.data.subarray(y0 * w * 4, (y1 + 1) * w * 4));
+    if ( y1 >= bt.realHeight - 1 && bt.mipmap === PIXI.MIPMAP_MODES.ON ) gl.generateMipmap(bt.target);
+  }
+  /** Sends up to `rows` more rows; true when the GPU copy is whole and current. */
+  pump(renderer, bt, rows) {
+    const R = renderer.texture, h = bt.realHeight, w = bt.realWidth;
+    if ( !this.data || this.data.length < w * h * 4 ) { R.bind(bt, 0); return true; }
+    if ( this.row < 0 || this.startId !== bt.dirtyId ) {      // begin: the texture allocated empty
+      this.pumping = true;
+      try { R.bind(bt, 0); } finally { this.pumping = false; }
+      const gt = bt._glTextures[renderer.CONTEXT_UID]; if ( !gt ) return true;
+      gt.width = w; gt.height = h; gt.type = bt.type;
+      const gl = renderer.gl;
+      gl.texImage2D(bt.target, 0, gt.internalFormat, w, h, 0, bt.format, gt.type, null);
+      this.row = 0; this.startId = bt.dirtyId; gt.dirtyId = -1; return false;
+    }
+    this.pumping = true;
+    try { R.bind(bt, 0); } finally { this.pumping = false; }
+    const gt = bt._glTextures[renderer.CONTEXT_UID];
+    const y0 = this.row, y1 = Math.min(h - 1, y0 + Math.max(1, rows) - 1);
+    this.band(renderer, bt, gt, y0, y1);
+    this.row = y1 + 1;
+    if ( this.row >= h ) { this.row = -1; gt.dirtyId = bt.dirtyId; return true; }
+    gt.dirtyId = -1; return false;
+  }
+}
+
 /** The pieces' indices by the moment their life begins (t0 - pre), ties in list order (= a stable sort by that moment). */
 function startOrderOf(list) {
   const N = list.length, K = new Float64Array(N), o = new Array(N);
@@ -329,7 +377,7 @@ export class DestructionDisplay {
     // MEMORY: `rgba` (the whole assembled sheet) lives in this call's closure context (the copy above reads it from an arrow), which the
     // group's long-lived `frame` closure keeps: every area held on to its sheet (~330 MB on the 'map' scene). Not read below.
     rgba = null;
-    const tex = new PIXI.BaseTexture(new PIXI.BufferResource(buf, { width: pk.W, height: pk.H }), {
+    const tex = new PIXI.BaseTexture(new SliceResource(buf, { width: pk.W, height: pk.H }), {
       width: pk.W, height: pk.H, scaleMode: this.filter, mipmap: PIXI.MIPMAP_MODES.ON, alphaMode: PIXI.ALPHA_MODES.UNPACK,
       format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP
     });
@@ -1672,8 +1720,23 @@ export class DestructionDisplay {
     list.sort((a, b) => (on(b) - on(a)) || (first(a) - first(b)));
     const ts = performance.now(), rate = this._upRate ??= 0.9;     // (ms per MB of atlas, learned: one upload cannot be cut, so none is begun that would pass the budget)
     let n = 0;
+    const sliced = !globalThis.CONFIG?.moinenMaps?.noSlicedUpload;
     for ( const g of list ) {
-      const spent = performance.now() - ts, mb = g.tex.width * g.tex.height * 4 / 1048576;
+      const spent = performance.now() - ts, mb = g.tex.width * g.tex.height * 4 / 1048576, res = g.tex.resource;
+      if ( sliced && res instanceof SliceResource ) {
+        // row bands under what is left of the budget (at least 64 rows a call, so one atlas always moves on)
+        let left = 3 - spent; if ( left <= 0 ) break;
+        for ( let guard = 0; guard < 16 && left > 0; guard++ ) {
+          const t1 = performance.now(), W = g.tex.realWidth, MB = W * 4 / 1048576;
+          const rows = Math.max(64, Math.floor(left / this._upRate / MB));
+          const done = res.pump(R, g.tex, rows), dt = performance.now() - t1;
+          left -= dt; this.stats.atlasBands = (this.stats.atlasBands ?? 0) + 1;
+          if ( dt > 0.05 && res.row > 0 ) this._upRate = Math.max(0.2, Math.min(3, this._upRate * 0.8 + (dt / Math.max(0.05, Math.min(mb, rows * MB))) * 0.2));
+          if ( done ) { this.stats.atlasAhead = (this.stats.atlasAhead ?? 0) + 1; break; }
+        }
+        n++;
+        continue;
+      }
       if ( spent > 3 || (n && spent + mb * this._upRate > 3 && !globalThis.CONFIG?.moinenMaps?.noUploadModel) ) break;
       R.texture.bind(g.tex, 0); n++;
       const dt = performance.now() - ts - spent;
