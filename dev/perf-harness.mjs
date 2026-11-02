@@ -170,7 +170,7 @@ export function atlasBytes() {
  */
 export async function detBench({ ms = 4500, label = "" } = {}) {
   const A = game.modules.get("moinen-maps").api.destruction, d = D();
-  const keys = ["entries", "waits", "waitedIn", "noPixelEntries", "offscreenEntries", "restored"];
+  const keys = ["entries", "waits", "waitedIn", "noPixelEntries", "offscreenEntries", "restored", "lateSum", "lateN"];
   const s0 = Object.fromEntries(keys.map((k) => [k, d.stats[k] ?? 0]));
   const mem0 = { heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), atlas: atlasBytes() };
   let atlasPeak = 0; const iv = setInterval(() => { atlasPeak = Math.max(atlasPeak, atlasBytes().MB); }, 40);
@@ -1618,7 +1618,8 @@ export async function runCfg(tag, cfg = {}) {
   try {
     await fresh(); const r = await detBench({});
     return { tag, med: r.cpu.med, p95: r.cpu.p95, over33: r.over33, frames: r.animFrames, gpuMed: r.gpu.med, gpuP95: r.gpu.p95, worst: r.worst, draws: r.draws.med,
-      heapPeak: r.mem1.heapPeakMB, entries: r.entries.entries, noPix: r.entries.noPixelEntries, waitedIn: r.entries.waitedIn };
+      heapPeak: r.mem1.heapPeakMB, entries: r.entries.entries, noPix: r.entries.noPixelEntries, waitedIn: r.entries.waitedIn,
+      lateMean: r.entries.lateN ? Math.round(r.entries.lateSum / r.entries.lateN) : 0, lateMax: Math.round(D()?.stats.lateMax ?? 0) };
   } finally { for ( const k in saved ) CONFIG.moinenMaps[k] = saved[k]; }
 }
 
@@ -1772,4 +1773,39 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
     [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget] = was; T.maxFPS = mf; if ( st ) T.start();
   }
   return { areas: nareas, pieces: npieces, rows, samples: SMP };
+}
+
+/**
+ * WHERE A DETONATE'S FRAME GOES: a whole-scene Detonate stepped by hand for `ms`; per animated frame the ticker's listeners are timed
+ * (the destruction layer, the flood water's own tick, PIXI's render, anything else), plus the layer's parts (stats.parts). Returns
+ * the median / mean / p95 of each, the frames over 33 ms and the sum of each listener over those frames (what the spikes are made of).
+ * Start from fresh().
+ */
+export async function partsBench({ ms = 4500 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, d = D(), T = canvas.app.ticker;
+  const ls = []; for ( let n = T._head.next; n; n = n.next ) ls.push(n);
+  const names = ls.map((n, i) => n.fn === d._tick ? "layer" : n.fn?.name === "tickFn" ? "flood" : n.fn?.name === "render" ? "render" : `${n.fn?.name || "anon"}#${i}`);
+  const acc = new Array(ls.length).fill(0), orig = ls.map((n) => n.fn);
+  ls.forEach((n, i) => { n.fn = function(...a) { const t = performance.now(); try { return orig[i].apply(this, a); } finally { acc[i] += performance.now() - t; } }; });
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const rows = [];
+  try {
+    A.replay(); const t0 = performance.now();
+    while ( performance.now() - t0 < ms ) {
+      acc.fill(0); d._prof = { erode: 0, lives: 0, effects: 0, cause: 0 }; const t = performance.now(); T.update(t); const c = performance.now() - t;
+      const by = {}; names.forEach((nm, i) => { by[nm] = (by[nm] ?? 0) + acc[i]; });
+      const fs = A.flood.status(); rows.push({ t: Math.round(t - t0), cpu: c, fill: [fs.fillN, fs.fillMs, fs.frameMs], sub: d._prof, anim: [...d.groups.values()].filter((g) => g.anim).length, by, P: { ...(d.stats.parts ?? {}) } });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  } finally { ls.forEach((n, i) => { n.fn = orig[i]; }); d._prof = null; T.maxFPS = mf; if ( st ) T.start(); }
+  const live = rows.filter((r) => r.anim > 0);
+  const q = (arr, f) => { const s = [...arr].sort((x, y) => x - y); return s.length ? +s[Math.min(s.length - 1, Math.floor(s.length * f))].toFixed(2) : null; };
+  const keys = [...new Set(live.flatMap((r) => Object.keys(r.by)))], pk = [...new Set(live.flatMap((r) => Object.keys(r.P)))];
+  const spike = live.filter((r) => r.cpu > 33.3);
+  const sum = (rs, f) => +rs.reduce((a, r) => a + f(r), 0).toFixed(0);
+  return { frames: live.length, cpu: { med: q(live.map((r) => r.cpu), 0.5), p95: q(live.map((r) => r.cpu), 0.95) }, over33: spike.length,
+    listeners: Object.fromEntries(keys.map((k) => [k, { med: q(live.map((r) => r.by[k] ?? 0), 0.5), p95: q(live.map((r) => r.by[k] ?? 0), 0.95), sumAll: sum(live, (r) => r.by[k] ?? 0), sumSpikes: sum(spike, (r) => r.by[k] ?? 0) }])),
+    parts: Object.fromEntries(pk.map((k) => [k, { med: q(live.map((r) => r.P[k] ?? 0), 0.5), p95: q(live.map((r) => r.P[k] ?? 0), 0.95), sumAll: sum(live, (r) => r.P[k] ?? 0), sumSpikes: sum(spike, (r) => r.P[k] ?? 0) }])),
+    animate: Object.fromEntries(["erode", "lives", "effects", "cause", "e_unflat", "e_clockOf", "e_rev+crev", "e_clockJobs", "e_list", "e_gpuEnter", "e_debris"].map((k) => [k, { med: q(live.map((r) => r.sub?.[k] ?? 0), 0.5), p95: q(live.map((r) => r.sub?.[k] ?? 0), 0.95), sumAll: sum(live, (r) => r.sub?.[k] ?? 0), sumSpikes: sum(spike, (r) => r.sub?.[k] ?? 0) }])),
+    spikes: spike.map((r) => [r.t, +r.cpu.toFixed(0), Object.entries(r.by).filter(([, v]) => v > 3).map(([k, v]) => `${k}:${v.toFixed(0)}`).join(" ") + ` fill ${r.fill.join("/")}`]) };
 }

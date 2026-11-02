@@ -189,12 +189,18 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
   const fallbackA = Math.round(255 * master * 0.9);
   const coming = u < 1 + BAND;
   const rings = coming ? prep.springs.map(([sx, sy]) => [sx, sy, u * (prep.R * 1.6 + 6)]) : null;
+  // PERF: the noise fields below depend on the pixel only (not on the frame or the fill), so each is computed once, when first read, and kept
+  // with the hole's prep (a fill repaints the whole hole every step: the noises were most of that cost). The same numbers either way.
+  const S = prep._static ??= { wet: new Float64Array(N).fill(NaN), eat: new Float64Array(N).fill(NaN), dep: new Float64Array(N).fill(NaN), edge: new Float64Array(N).fill(NaN) };
+  const shL = [baseC[0] + (ringC[0] - baseC[0]) * 0.12, baseC[1] + (ringC[1] - baseC[1]) * 0.12, baseC[2] + (ringC[2] - baseC[2]) * 0.12];
+  const dpL = [baseC[0] + (shadow[0] - baseC[0]) * 0.62, baseC[1] + (shadow[1] - baseC[1]) * 0.62, baseC[2] + (shadow[2] - baseC[2]) * 0.62];
   for ( let y = 0; y < ch; y++ ) for ( let x = 0; x < cw; x++ ) {
     const i = y * cw + x, o = i * 4;
     if ( !water[i] ) {
       if ( damp[i] && (!coming || u >= fill[i]) ) {
         // damp ground: the shadow colour laid thin, with a few darker wet specks (no checkerboard)
-        const a = (h2(cx + x, cy + y, 31) < 0.12 ? 0.34 : 0.2) * master * (coming ? clamp((u - fill[i]) / 0.3, 0, 1) : 1);
+        let wv = S.wet[i]; if ( wv !== wv ) wv = S.wet[i] = h2(cx + x, cy + y, 31);
+        const a = (wv < 0.12 ? 0.34 : 0.2) * master * (coming ? clamp((u - fill[i]) / 0.3, 0, 1) : 1);
         px[o] = shadow[0]; px[o + 1] = shadow[1]; px[o + 2] = shadow[2]; px[o + 3] = Math.round(a * 255);
       } else P32[i] = 0;
       continue;
@@ -207,13 +213,19 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
     // band seams; the engine only adds its highlights, in a few drifting patches
     const ax = cx + x, ay = cy + y, dep = prep.depth[i], L = prep.level;
     const ev = b ? LB[b * 4 + 3] : 0;
-    if ( dep < 0.16 && vnoise(ax / 3, ay / 3, 57) * 0.7 + vnoise(ax / 1.4, ay / 1.4, 58) * 0.3 < 0.2 + dep * 1.6 - 0.05 ) { P32[i] = 0; continue; }   // (an organic, eaten edge: no facets)
-    const dw = dep + (vnoise(ax / 6, ay / 6, 45) - 0.5) * 0.14, seam = () => 0;
+    if ( dep < 0.16 ) {
+      let ev2 = S.eat[i]; if ( ev2 !== ev2 ) ev2 = S.eat[i] = vnoise(ax / 3, ay / 3, 57) * 0.7 + vnoise(ax / 1.4, ay / 1.4, 58) * 0.3;
+      if ( ev2 < 0.2 + dep * 1.6 - 0.05 ) { P32[i] = 0; continue; }   // (an organic, eaten edge: no facets)
+    }
+    let dn = S.dep[i]; if ( dn !== dn ) dn = S.dep[i] = vnoise(ax / 6, ay / 6, 45);
+    const dw = dep + (dn - 0.5) * 0.14;
     // a soft wet gradient (no contour bands): light shallows at the edge, the mid tone, a dark deep middle in a crater
-    const tt = L <= 1 ? 0.5 : clamp(dw / 0.55, 0, 1), lerp3 = (A, B, s) => [A[0] + (B[0] - A[0]) * s, A[1] + (B[1] - A[1]) * s, A[2] + (B[2] - A[2]) * s];
-    const sh = lerp3(baseC, ringC, 0.12), dp = lerp3(baseC, shadow, 0.62), C3 = tt < 0.4 ? lerp3(sh, baseC, tt / 0.4) : L >= 3 ? lerp3(baseC, dp, (tt - 0.4) / 0.6) : baseC;
+    const tt = L <= 1 ? 0.5 : clamp(dw / 0.55, 0, 1);
+    let r, g, bl;
+    if ( tt < 0.4 ) { const s = tt / 0.4; r = shL[0] + (baseC[0] - shL[0]) * s; g = shL[1] + (baseC[1] - shL[1]) * s; bl = shL[2] + (baseC[2] - shL[2]) * s; }
+    else if ( L >= 3 ) { const s = (tt - 0.4) / 0.6; r = baseC[0] + (dpL[0] - baseC[0]) * s; g = baseC[1] + (dpL[1] - baseC[1]) * s; bl = baseC[2] + (dpL[2] - baseC[2]) * s; }
+    else { r = baseC[0]; g = baseC[1]; bl = baseC[2]; }
     const band = tt > 0.7 && L >= 3 ? 2 : 1;
-    let r = C3[0], g = C3[1], bl = C3[2];
     let a = 255 * master * (band === 2 ? 1 : 0.92);
     // highlights: the engine's bright wave / sparkle cells in a few patches, and a few short light streaks of sky on the deeper water
     if ( b ) { const q = b * 4; if ( LB[q] + LB[q + 1] + LB[q + 2] > baseC[0] + baseC[1] + baseC[2] + 90 && vnoise(ax / 7, ay / 4.5, 47) > 0.72 && h2(ax, ay, 49) < 0.45 + 0.3 * vnoise(ax / 2, ay / 2, 48) - 0.25 ) { r += (LB[q] - r) * 0.65; g += (LB[q + 1] - g) * 0.65; bl += (LB[q + 2] - bl) * 0.65; } }
@@ -223,7 +235,8 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
       // a few irregular wet highlights near the edge (no outline)
       const dpx = dep * Math.max(2.5, prep.R);
       // the edge wet and dark, irregular (no light rim)
-      if ( dpx < 1.2 + 1.6 * vnoise(ax / 3, ay / 3, 54) ) { r += (shadow[0] - r) * 0.35; g += (shadow[1] - g) * 0.35; bl += (shadow[2] - bl) * 0.35; }
+      let eg = S.edge[i]; if ( eg !== eg ) eg = S.edge[i] = vnoise(ax / 3, ay / 3, 54);
+      if ( dpx < 1.2 + 1.6 * eg ) { r += (shadow[0] - r) * 0.35; g += (shadow[1] - g) * 0.35; bl += (shadow[2] - bl) * 0.35; }
     }
     if ( coming ) {
       // the rising front: a soft wet edge (the water there thin and dark, fading in) - no pale line

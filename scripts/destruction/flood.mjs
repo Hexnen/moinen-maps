@@ -470,9 +470,18 @@ function sync() {
   if ( changed ) wetChanged();
 }
 
+const FILL_MS = 4;                // per frame for repainting the filling holes (tick)
+/** Is the hole in the view (a hole out of it does not repaint its fill step)? */
+function fillSeen(e, v) {
+  const r = e.g.info?.rect;
+  return !v || !r || !(r.x0 > v.x1 || r.y0 > v.y1 || r.x1 < v.x0 || r.y1 < v.y0);
+}
+
 function tick() {
   const t0 = now();
   let gone = false;
+  const fill = { n: 0, ms: 0, on: !globalThis.CONFIG?.moinenMaps?.noFloodBudget, vw: null };
+  if ( fill.on ) fill.vw = D.destructionApi.display?.()?.view?.() ?? null;
   for ( const [h, e] of entries ) {
     const g = e.g;
     // (its group gone: the next sync moves the hole into the area's new group - rebind - or lets it go)
@@ -497,14 +506,18 @@ function tick() {
       if ( u >= 1 + FC.BAND ) { e.fillAt = null; }
       else {
         const step = Math.floor(el / STEP_MS);
-        if ( step !== e.step ) {
-          e.step = step;
+        // PERF: every hole of a Detonate repaints on the same step boundary (a whole-scene fill: ~25-40 ms in one frame, every STEP_MS).
+        // A frame repaints holes only up to FILL_MS (at least one); the rest keep the picture of their last step and repaint in the
+        // next frames (a step shown a frame or two late); a hole out of the view waits until it is seen again.
+        if ( step !== e.step && !(fill.on && ((fill.n && fill.ms >= FILL_MS) || !fillSeen(e, fill.vw))) ) {
           const P = e.prep;
           if ( !e.fillTex ) { e.fillBuf = new Uint8Array(P.cw * P.ch * 4); e.fillTex = texture(e.fillBuf, P.cw, P.ch); }
+          const tp = now();
           FC.paintFlood(P, e.res.frames[idx], e.res.box, kit(), Math.floor(el / STEP_MS) * STEP_MS / e.fillDur, new Uint8ClampedArray(e.fillBuf.buffer));
           e.fillTex.baseTexture.update();
+          e.step = step; fill.n++; fill.ms += now() - tp;
         }
-        e.sprite.texture = e.fillTex;
+        e.sprite.texture = e.fillTex ?? PIXI.Texture.EMPTY;
         continue;
       }
     }
@@ -522,6 +535,7 @@ function tick() {
   // the holes stayed dry until the next destruction change
   if ( gone ) { wetChanged(); scheduleSync(); }
   stats.frameMs = Math.round((now() - t0) * 1000) / 1000;
+  stats.fillN = fill.n; stats.fillMs = Math.round(fill.ms * 100) / 100;
 }
 
 function clearAll() {

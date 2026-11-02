@@ -45,6 +45,8 @@ function maskedMap(ms, mask) {
  */
 const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const ONCE_MS = 5;   // per frame, the entries' one-shot effects (effects)
+const enterMs = () => globalThis.CONFIG?.moinenMaps?.enterBudget ?? 4;   // per frame, setting up queued entries (drainEnters, pixelsSlice)
+const FX_DRAW_MS = 4;   // per frame, the effects' redraws (effects)
 const WAIT_MS = 150;   // how long an entry waits for its pixels (waitPixels) ...
 const WAIT_LATE_MS = 700;   // ... or this long past its own start (a Detonate's start lies ahead; the pixels of a whole scene take a while)
 const NEAREST = 0, LINEAR = 1;
@@ -843,12 +845,15 @@ export class DestructionDisplay {
     const perf = perfMode();
     if ( !this.onScreen(g, perf === "medium" ? 0 : 0.5) ) { for ( const u of under ) u.heldBy = null; this.stats.offscreenEntries = (this.stats.offscreenEntries ?? 0) + 1; return; }
     if ( reducedMotion() || perf === "low" ) { g.fade = { start, dur: 300 }; this.applyFade(g, now); return; }
+    const PE = this._prof, te0 = PE ? performance.now() : 0, lapE = (k) => { if ( PE ) { const t = performance.now(); PE["e_" + k] = (PE["e_" + k] ?? 0) + t - tl; tl = t; } };
+    let tl = te0;
     if ( g.flat ) this.unflatten(g);
     // an older look held under this one: its shards are caught by the front (tick), so they must exist
     for ( const u of under ) { if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); } else this.downGpu(u); }
     // the entry's clock (entry-clock.mjs, shared with the clock worker): the kind's, tuned by the cause (rot creeps, lightning
     // strikes, arcane spirals); a tear's and a cave-in's own
     const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (this.look.speed || 1)) * (Cause.causeLook(info.cause)?.slow ?? 1));
+    lapE("unflat");
     const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: this.look.speed, pathFront });
     const { CL, L, k, ox, oy, Rmax, tear, seed, noise } = C;
     const r = info.rect;
@@ -864,6 +869,7 @@ export class DestructionDisplay {
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
     // the start of an entry anyway)
+    lapE("clockOf");
     let rev = null;
     const clockJobs = [];
     const bd = this.baseOf(g);
@@ -912,6 +918,7 @@ export class DestructionDisplay {
         clockJobs.push({ g, R: crev, w: fr.width, h: fr.height, x0: g.coverFrame.x, y0: g.coverFrame.y, data: cd, timeOf: pixelTime, dark: 0, y: 0, c: 0, keys: null, gpu: !!crev.gpu });
       }
     }
+    lapE("rev+crev");
     // the clocks: made by the clock workers (clock-pool.mjs, the same code) or here, a slice per frame (clockSlice)
     if ( clockJobs.length ) {
       if ( coll ) {
@@ -924,6 +931,7 @@ export class DestructionDisplay {
       }
       this.clockJobs(clockJobs, spec, !!coll && !spec.coll);
     }
+    lapE("clockJobs");
     // 2. the pieces' lives
     // (GPU pieces, piece-gpu.mjs: a plain entry's pieces move in the vertex shader - no pose is placed here or per frame)
     const gpu = !tear && !coll && info.type !== "collapse" && this.gpuPieces(g);
@@ -943,19 +951,23 @@ export class DestructionDisplay {
       list.push(it); byPiece.set(p, it);
       if ( !gpu ) this.place(p, -9, it, info.type);
     });
+    lapE("list");
     g.anim = { start, delay, reveal, band, ox, oy, Rmax, wipe: pathFront || tear ? null : wipe, tear, list, byPiece, fx: [], rev, crev,
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
     if ( coll ) { g.anim.coll = coll; g.anim.end = Math.max(g.anim.end, coll.endBy + 200 * k); }
     if ( gpu ) this.gpuEnter(g, g.anim);
+    lapE("gpuEnter");
     // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
     this.debris.hideRest(g);
     this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k);
     // a flattened area has no shards yet: the ones due in its first 150 ms at once, the rest a slice per frame, earliest first (tick)
     if ( g.made < g.pieces.length && !tear && !gpu ) this.materialize(g, Infinity, start + 150);
+    lapE("debris");
     for ( const u of under ) u.heldBy = g;
     this.stats.entries++;
+    { const late = Math.max(0, now - start); this.stats.lateSum = (this.stats.lateSum ?? 0) + late; this.stats.lateN = (this.stats.lateN ?? 0) + 1; if ( late > (this.stats.lateMax ?? 0) ) this.stats.lateMax = late; }
   }
 
   /**
@@ -1021,7 +1033,7 @@ export class DestructionDisplay {
       // (an entry is set up in ~1 ms: the ones whose pixels arrived together go in over the next frames - with what drainEnters took, 8 ms of
       // the tick for all entry set-ups - not all at once; at least one a frame)
       if ( all.every((x) => !x.shell && !x.atlasFree) ) {
-        if ( entered && performance.now() - now > 8 ) continue;
+        if ( entered && performance.now() - now > enterMs() ) continue;
         entered++; P.delete(g); this.enter(g, { ...w.opts, noWait: true }); this.stats.waitedIn = (this.stats.waitedIn ?? 0) + 1; continue;
       }
       if ( now < w.deadline ) continue;
@@ -1151,6 +1163,7 @@ export class DestructionDisplay {
   /** Set up queued entries (detonate) for up to `budget` ms. */
   drainEnters(t0, budget) {
     const Q = this.enterQueue; if ( !Q?.size ) return;
+    budget = Math.min(budget, enterMs());      // (the per-frame budget for entry set-ups: CONFIG.moinenMaps.enterBudget, default 4)
     for ( const [g, o] of Q ) {
       if ( performance.now() - t0 > budget ) return;
       Q.delete(g);
@@ -1508,6 +1521,7 @@ export class DestructionDisplay {
     if ( !canvas.stage ) return;
     this._sr = this.sceneRect();
     this._fxSpent = 0;       // ms the entries' one-shot effects have taken in this frame (effects: once)
+    this._fxDrawn = 0; this._frameNo = (this._frameNo | 0) + 1;   // ms the effects' redraws have taken in this frame (effects: FX_DRAW_MS)
     // sampling: crisp when an art pixel covers 3+ screen pixels; below that NEAREST shimmers while zooming and panning (an art pixel
     // flips between 1 and 2 screen pixels), so it is LINEAR + mipmaps there
     // (SCREEN pixels: device pixels, the renderer's resolution included - the cache's tiles (static-cache.mjs) count them that way, and a
@@ -1629,10 +1643,14 @@ export class DestructionDisplay {
     const on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
     const first = (g) => { const a = g.anim, it = a.startOrder ? a.list[a.startOrder[0]] : null; return it ? it.t0 - it.pre : a.start; };
     list.sort((a, b) => (on(b) - on(a)) || (first(a) - first(b)));
-    const ts = performance.now();
+    const ts = performance.now(), rate = this._upRate ??= 0.9;     // (ms per MB of atlas, learned: one upload cannot be cut, so none is begun that would pass the budget)
+    let n = 0;
     for ( const g of list ) {
-      if ( performance.now() - ts > 3 ) break;
-      R.texture.bind(g.tex, 0);
+      const spent = performance.now() - ts, mb = g.tex.width * g.tex.height * 4 / 1048576;
+      if ( spent > 3 || (n && spent + mb * this._upRate > 3 && !globalThis.CONFIG?.moinenMaps?.noUploadModel) ) break;
+      R.texture.bind(g.tex, 0); n++;
+      const dt = performance.now() - ts - spent;
+      if ( mb > 0.5 ) this._upRate = Math.max(0.2, Math.min(3, this._upRate * 0.7 + (dt / mb) * 0.3));
       this.stats.atlasAhead = (this.stats.atlasAhead ?? 0) + 1;
     }
   }
@@ -1647,7 +1665,7 @@ export class DestructionDisplay {
     const a = g.anim, info = g.info, type = a.type, r = info.rect;
     const onScreen = !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0);
     if ( now > a.end ) { this.endAnim(g); return; }
-    const el = now - a.start, ap = this.ap;
+    const el = now - a.start, ap = this.ap, PR = this._prof, tq = PR ? performance.now() : 0;
     this._owner = g;
     if ( onScreen ) {
       this._erodeLeft = Math.max(0, this._erodeLeft - (this.erode(g, a, now, onScreen, Math.max(4000, this._erodeLeft)) ?? 0));
@@ -1659,9 +1677,13 @@ export class DestructionDisplay {
     }
     this._owner = g;    // what the entry spawns is its own (endAnim ends it)
     if ( a.gpu && g.batch?.gpu ) g.batch.setClock(now);
+    const t1 = PR ? performance.now() : 0;
     const busy = a.tear ? this.livesAll(a, now, onScreen, type) : a.gpu ? this.livesGpu(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
+    const t2 = PR ? performance.now() : 0;
     if ( onScreen ) this.effects(g, a, now, el);
+    const t3 = PR ? performance.now() : 0;
     if ( a.cl ) Cause.causeEffects(this, g, a, now, el);
+    if ( PR ) { const t4 = performance.now(); PR.erode += t1 - tq; PR.lives += t2 - t1; PR.effects += t3 - t2; PR.cause += t4 - t3; }
     this._owner = null;
     if ( !busy && (!a.rev || (a.rev.keys && a.rev.next >= a.rev.keys.length)) && (!a.crev || (a.crev.keys && a.crev.next >= a.crev.keys.length)) && !a.fx.length && !this.debris.busy(g) ) this.endAnim(g);
   }
@@ -1957,8 +1979,13 @@ export class DestructionDisplay {
       const f = a.fx[i], t = (now - f.t0) / f.dur;
       if ( t >= 1 ) { f.g.destroy(); a.fx.splice(i, 1); continue; }
       if ( t < 0 ) continue;
+      // PERF: every ring / flash / accent is redrawn each frame (its pixels worked out again: ~0.1-0.5 ms each; a Detonate has ~100 at
+      // once). Past FX_DRAW_MS of redraws in a frame, one that was drawn in the last frame keeps that picture for this one (a frame
+      // late, never two in a row). `noFxBudget`: always redrawn (A/B).
+      if ( this._fxDrawn > FX_DRAW_MS && f.drawnAt === this._frameNo - 1 && !globalThis.CONFIG?.moinenMaps?.noFxBudget ) continue;
+      f.drawnAt = this._frameNo; const tf = performance.now();
       f.g.clear();
-      if ( f.draw ) { f.draw(t); continue; }   // a cause's accent draws itself (cause-fx.mjs)
+      if ( f.draw ) { f.draw(t); this._fxDrawn += performance.now() - tf; continue; }   // a cause's accent draws itself (cause-fx.mjs)
       const v = { ap, ox: o.x, oy: o.y };
       if ( f.kind === "flash" ) {
         // a pixel-art flash: a ragged disc in three hard bands and a few rays, art pixels on the art grid
@@ -1967,6 +1994,7 @@ export class DestructionDisplay {
         // a pixel-art ring: broken arcs of art pixels that open up and drop out as the ring spreads (no vector ellipse)
         pxRing(f.g, v, a.ox, a.oy, f.maxR * easeOut(t), t, { core: f.color, outer: f.outer ?? lerpColor(f.color, 0x3a3028, 0.45), seed: a.seed + i * 7, thick: f.width > 1 ? 2 : 1, dash: f.dash ?? 9 });
       }
+      this._fxDrawn += performance.now() - tf;
     }
   }
 
