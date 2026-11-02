@@ -3,6 +3,7 @@ import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION } from "./core.mjs";
 import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
+import { unpackLook } from "./look-pack.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Chunks from "../net/chunks.mjs";
 import * as Trace from "../net/trace.mjs";
@@ -149,7 +150,7 @@ function teardown() {
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
-  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0;
+  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null;
   if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
   compositeShown?.destroy(); compositeShown = null; reshow = null;
   display?.destroy(); display = null;
@@ -497,7 +498,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       };
       const take = (list, res, plain = false) => {
         const t0 = performance.now();
-        const parts = res.parts ? new Map(res.parts) : Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
+        const parts = res.parts ? new Map([...res.parts, ...(res.packs ?? []).map(([i, pk]) => [i, unpackLook(pk)])]) : Chunks.splitSheet(res.sheet.data, res.sheet.w, res.meta, META_FIELDS);
         slow("take:split", t0, { n: list.length, plain });
         for ( const w of list ) {
           const sprites = parts.get(w.index) ?? [];
@@ -546,7 +547,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
           // (a background Rebake: the plain looks its strokes read go to each lane ONCE, a look per message between frames (prime), and the
           // jobs only name them - copying them into every job held the page for up to 1.5 s per job)
           const tIn = performance.now();
-          let inputs = jobs.map((jb) => ({ ...inputOf(jb, plain), split: META_FIELDS })), prime = null;
+          let inputs = jobs.map((jb) => ({ ...inputOf(jb, plain), split: META_FIELDS, pack: !globalThis.CONFIG?.moinenMaps?.noLookPack })), prime = null;
           slow("inputs", tIn, { jobs: jobs.length, plain });
           if ( redoSet.size && !plain ) {
             const sent = new Map();
@@ -558,16 +559,19 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
                 const k = `${S.objects[j].id}|${FS[j].own}`;
                 underKeys[j] = k; if ( !sent.has(k) ) sent.set(k, pl);
               }
-              return { ...inputOf(jb, plain), under: {}, underKeys, split: META_FIELDS };
+              return { ...inputOf(jb, plain), under: {}, underKeys, split: META_FIELDS, pack: !globalThis.CONFIG?.moinenMaps?.noLookPack };
             });
             prime = [...sent].map(([key, sprites]) => ({ key, sprites }));
             slow("inputs+prime", tIn, { looks: prime.length });
             Trace.event("rebake-prime", { looks: prime.length, mpx: Math.round(prime.reduce((a, p) => a + p.sprites.reduce((q, s) => q + s.w * s.h, 0), 0) / 1e5) / 10 });
           }
           await runBakePool(inputs, getMap, { n: lanes, prime, onDone: (i, res) => {
+            // (a stroke's sprites are made from their packed buffers one stroke a step - a whole job at once was 240 ms of one task)
+            const made = new Map(res.parts ?? []);
+            for ( const pair of res.packs ?? [] ) queue.push(() => { if ( my === gen ) made.set(pair[0], unpackLook(pair[1], true)); pair[1] = null; });      // (the packed buffers go as soon as their sprites are made)
             queue.push(() => {
               if ( my !== gen ) return;
-              take(jobs[i], res, plain);
+              take(jobs[i], { ...res, parts: [...made], packs: null }, plain);
               const done = jobs[i].filter((w) => toBake.includes(w) && (!plain || !w.deps.length)).length;
               status.bakeDone += done; status.progress = status.bakeDone / status.bakeTotal;
               if ( redoSet.size && status.rebake ) status.rebake.live = status.bakeDone;   // (the Rebake all line counts within a pass)
@@ -1100,11 +1104,23 @@ function shellNeeds() {
   // shell (shellRims). A stroke with a flooded hole or a light, or one whose chunk is not in IndexedDB, is filled as before.
   // (an area whose rim is there - from the store, or known to have none - is not asked about again)
   const settledRim = (a) => { const g = display?.groups.get(a.h); return !!g && (!g.shell || !!g.rim || !!g.rimDone); };
-  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l) || (inView(a) && !settledRim(a))));
-  const rimOnly = [], full = [];
-  for ( const r of need ) (vw && r.id && r.dir && !r.shell.some((a) => a.type === "flood" || (dark > 0.05 && a.l)) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
+  // (a glowing cause light is drawn live: its area needs its pixels - in a dark scene, and wherever the composite was made in the dark and drew it
+  // live, see Composite.liveHashes. Such an area is built in the codec worker like a Detonate's (fillFast); a flooded hole takes the page-side fill)
+  const lit = (a) => !!a.l && (dark > 0.05 || !!display?.composite?.liveHashes?.has(a.h));
+  const need = list.filter((r) => r.shell.some((a) => a.type === "flood" || lit(a) || (inView(a) && !settledRim(a))));
+  const rimOnly = [], full = [], litGroups = [], noJob = !!globalThis.CONFIG?.moinenMaps?.noShellJob;
+  for ( const r of need ) {
+    const flood = r.shell.some((a) => a.type === "flood");
+    if ( !flood && !noJob && r.id && r.dir && r.shell.some(lit) ) {
+      litGroups.push(...r.shell.filter(lit).map((a) => display?.groups.get(a.h)).filter((g) => g?.shell));
+      if ( vw && !globalThis.CONFIG?.moinenMaps?.noRimJob && r.shell.some((a) => !lit(a) && inView(a) && !settledRim(a)) ) rimOnly.push(r);
+      continue;
+    }
+    (vw && r.id && r.dir && !flood && !r.shell.some(lit) && !globalThis.CONFIG?.moinenMaps?.noRimJob ? rimOnly : full).push(r);
+  }
   Trace.event("shell-needs", { dark: +dark.toFixed(2), of: list.length, need: need.length, rimOnly: rimOnly.length, full: full.length, noId: need.filter((r) => !r.id || !r.dir).length, view: !!vw });
   if ( rimOnly.length ) shellRims(rimOnly, inView).then((left) => { if ( left.length ) fill(left, "dark/view"); });
+  if ( litGroups.length ) fillFast(litGroups, "lit");
   fill(full, dark >= 0.45 ? "dark/view" : "flood/light");
 }
 /** The dark rims of the shells of these records that are in view and have none yet, from their chunks (worker); -> the records that could not (fill them). */
@@ -1150,7 +1166,18 @@ function scheduleRims(ms) {
   }, ms);
 }
 let darkTimer = 0;
-const darkCheck = () => { clearTimeout(darkTimer); darkTimer = setTimeout(() => { if ( shellRecs().length && (canvas.environment?.darknessLevel ?? 0) > 0.05 ) shellNeeds(); }, 300); };
+// (the GM: the glowing cause lights are live units only in the dark, so the composite's bands differ by day and by night - a change of the scene's darkness
+// across the lights' threshold publishes it again, a moment after the lights settled)
+let lastDark = null;
+const darkCheck = () => {
+  clearTimeout(darkTimer);
+  darkTimer = setTimeout(() => {
+    const dk = canvas.environment?.darknessLevel ?? 0;
+    if ( lastDark !== null && game.user.isGM && display && (lastDark > 0.05) !== (dk > 0.05) ) scheduleComposite(9000);
+    lastDark = dk;
+    if ( shellRecs().length && dk > 0.05 ) shellNeeds();
+  }, 300);
+};
 Hooks.on("lightingRefresh", darkCheck);
 Hooks.on("canvasPan", darkCheck);
 
@@ -1303,7 +1330,7 @@ function pumpRebake(ms = REBAKE_EVERY) {
     if ( !S || !R || R.paused ) return;
     if ( !rebakeQueue.length ) { trimPlain(); status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
     if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
-    const batch = rebakeQueue.splice(0, REBAKE_BATCH);
+    const batch = rebakeQueue.splice(0, Number.isInteger(globalThis.CONFIG?.moinenMaps?.rebakeBatch) ? globalThis.CONFIG.moinenMaps.rebakeBatch : REBAKE_BATCH);
     await rebake({ awaitPublish: false, redo: batch });
     // a pass that failed (an error, a backoff) stops the Rebake all and says so: never "done" with strokes not baked
     if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }

@@ -119,6 +119,18 @@ export class Composite {
     };
   }
 
+  /**
+   * Areas the composite's bands do NOT hold although it describes them: they were drawn live when it was published (a glowing cause light).
+   * A shell of such an area is a live unit here too, or the bands of its level would not match the composite's (its hash would be among
+   * their members) and the cache would ask for the pixels of every shell of them. Lazily, a Set of hashes.
+   */
+  get liveHashes() {
+    if ( this._live ) return this._live;
+    const inBand = new Set(); for ( const b of this.list ) for ( const h of b.hashes ) inBand.add(h);
+    this._live = new Set(Object.keys(this.index.areas ?? {}).map(Number).filter((h) => !inBand.has(h)));
+    return this._live;
+  }
+
   restore() { for ( const bt of this.nearest ) bt.scaleMode = PIXI.SCALE_MODES.LINEAR; this.nearest.clear(); }
 
   /** The base textures of the composite (an upload ahead of the reveal). */
@@ -195,7 +207,8 @@ export async function publish(d, ctx) {
   // stops): one frame is driven here (fades and swaps run on the clock, the cache re-draws what changed), then it is checked
   if ( C.dirty || !String(C.mode).startsWith("scene") || document.visibilityState === "hidden" ) { try { d.tick(); } catch { /* torn down */ } }
   const U = C.units(), bands = C.bands.filter((b) => b.ckey && b.tiles.length);
-  const why = unsettled({ mode: C.mode, dirty: C.dirty, waiting: C.waiting, moving: U.filter((u) => u.live && !u.water).length, dying: d.dying.length,
+  const why = unsettled({ mode: C.mode, dirty: C.dirty, waiting: C.waiting, moving: U.filter((u) => u.live && !u.water && !u.gl).length,       // (a glowing cause light is live at rest: its area is drawn live over the bands, a client's shell of it is live too, see liveHashes)
+     dying: d.dying.length,
     holes: (D.flood?.status?.()?.holes ?? []).map((h) => h.state), bands: bands.map((b) => ({ meta: !!b.meta, ok: b.tiles.every((t) => t.shared || (t.rt.valid && !t.rt.baseTexture.destroyed)) })) });
   if ( why ) return why;
   const tStart = performance.now();

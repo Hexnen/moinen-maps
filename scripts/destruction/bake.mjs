@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Trace from "../net/trace.mjs";
+import { packLook } from "./look-pack.mjs";
 
 /**
  * Runs the bake in a module worker, never on the page: a big bake must not freeze the client. When the worker cannot start, the bake
@@ -88,19 +89,24 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
   // (~250 MB per lane on "map"), the main lane even after the Rebake.
   const looks = new Map((prime ?? []).map((p) => [p.key, p.sprites]));
   const keysOf = (i) => [...new Set(Object.values(jobs[i]?.underKeys ?? {}))].filter((k) => looks.has(k));
-  const refs = new Map();
+  const refs = new Map(), LANE_PX = Number.isFinite(globalThis.CONFIG?.moinenMaps?.lanePx) ? globalThis.CONFIG.moinenMaps.lanePx : 24e6;
   if ( looks.size ) for ( let i = 0; i < jobs.length; i++ ) for ( const k of keysOf(i) ) refs.set(k, (refs.get(k) ?? 0) + 1);
   const laneSets = [];               // { have: Set, send }
   const lane = (send) => { const l = { have: new Set(), send, px: 0, peak: 0, sent: 0 }; laneSets.push(l); allLanes.push(l); return l; };
   const allLanes = [], pxOf = (k) => (looks.get(k) ?? []).reduce((a, s) => a + s.w * s.h, 0), pxKey = new Map();
   const ensure = async (l, i) => {
-    // a lane holds only the looks of the job it runs: what this job does not read goes first (sent again if a later job of this
-    // lane reads it - a copy of ~1 MB, well under a millisecond, against holding the scene's every look in every lane)
-    const need = new Set(keysOf(i)), off = [...l.have].filter((k) => !need.has(k));
+    // a lane keeps the looks of the jobs it ran while they fit LANE_PX (the oldest not read by this job go first), not only those of the job it
+    // runs: a Rebake all of "map" sent 3665 looks (4.4 GB) to its four lanes, each one again whenever a later job of the lane read it
+    const need = new Set(keysOf(i)), off = [];
+    for ( const k of need ) if ( l.have.has(k) ) { l.have.delete(k); l.have.add(k); }          // (read again: the youngest)
+    let over = l.px + [...need].filter((k) => !l.have.has(k) && refs.get(k)).reduce((a, k) => a + pxOf(k), 0) - LANE_PX;
+    for ( const k of l.have ) { if ( over <= 0 ) break; if ( need.has(k) ) continue; off.push(k); over -= pxKey.get(k) ?? 0; }
     if ( off.length ) { for ( const k of off ) { l.have.delete(k); l.px -= pxKey.get(k) ?? 0; } l.send({ kind: "dropPlain", keys: off }).catch(() => {}); }
     for ( const k of need ) {
       if ( l.have.has(k) || !refs.get(k) ) continue;
-      const t0 = performance.now(), sent = l.send({ kind: "plain", key: k, sprites: looks.get(k) });
+      // (PERF: a look is thousands of small typed arrays - cloned one by one that held the page 60-400 ms a message; packed into three buffers
+      // it is one memcpy, and the lane unpacks it, see packLook / unpackLook)
+      const t0 = performance.now(), pk = packLook(looks.get(k)), sent = l.send(pk ? { kind: "plain", key: k, pack: pk } : { kind: "plain", key: k, sprites: looks.get(k) });
       const ms = performance.now() - t0; if ( ms > 20 ) Trace.event("slow", { name: "prime:post", ms: Math.round(ms) });
       l.have.add(k);
       const px = pxOf(k); pxKey.set(k, px); l.px += px; l.sent++; l.peak = Math.max(l.peak, l.px);

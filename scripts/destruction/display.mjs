@@ -48,7 +48,8 @@ const ONCE_MS = 5;   // per frame, the entries' one-shot effects (effects)
 const enterMs = () => globalThis.CONFIG?.moinenMaps?.enterBudget ?? 4;   // per frame, setting up queued entries (drainEnters, pixelsSlice)
 const FX_DRAW_MS = 4;   // per frame, the effects' redraws (effects)
 const WAIT_MS = 150;   // how long an entry waits for its pixels (waitPixels) ...
-const WAIT_LATE_MS = 700;   // ... or this long past its own start (a Detonate's start lies ahead; the pixels of a whole scene take a while)
+const WAIT_FAR_MS = 2500;   // ... and an area outside the view (only in the margin round it) may wait this much longer: nobody sees it start late
+const WAIT_LATE_MS = 1500;   // ... or this long past its own start (a Detonate's start lies ahead; the pixels of a whole scene take a while)
 const NEAREST = 0, LINEAR = 1;
 
 function layer(sortLayer) {
@@ -341,13 +342,16 @@ export class DestructionDisplay {
     if ( g.dead || !g.shell || this.groups.get(g.hash) !== g || !x?.data ) return false;
     const F = META_FIELDS, meta = x.meta, r = { hash: g.hash, base: 0, pieces: [], cover: -1, light: -1, index: g.objIndex };
     for ( let k = 1; k < x.sizes.length; k++ ) { const o = k * F; if ( meta[o] === 2 ) r.cover = o; else if ( meta[o] === 3 ) r.light = o; else r.pieces.push(o); }
-    const full = this.build(r, null, 0, meta, { pk: { W: x.W, H: x.H, pos: x.pos }, buf: x.data });
+    // (an entry waiting for it that starts now or has started: the area is built for it, not flattened - the flat texture was ~1.8 ms of GPU work an area, and the entry
+    // unflattened it at once; one that starts later keeps the settled look until then)
+    const w = this.pending?.get(g), entering = !!w && (w.opts.start ?? 0) <= performance.now() + 100 && !g.info.light;
+    const full = this.build(r, null, 0, meta, { pk: { W: x.W, H: x.H, pos: x.pos }, buf: x.data, entering });
     full.reused = true; full.info.water = g.info.water;
     if ( x.rim && !g.rim ) Cause.setRim(this, g, x.rim);
     this.adoptRim(g, full);
     if ( x.rim === false && full.rimArgs ) { full.rimArgs = null; const i = this.rimQueue?.indexOf(full) ?? -1; if ( i >= 0 ) this.rimQueue.splice(i, 1); }   // (the worker found no rim: nothing to read from the atlas)
     if ( x.late ) full.rimLate = true;       // (its rim is read later, off the page: lateRims; not "known without a rim" until then)
-    if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
+    if ( !entering && full.made < full.pieces.length ) this.materialize(full, Infinity);
     for ( const M of [this.pending, this.enterQueue] ) if ( M?.has(g) ) { const v = M.get(g); M.delete(g); M.set(full, v); }
     for ( const w of this.pending?.values() ?? [] ) if ( w.opts.under?.includes(g) ) w.opts.under = w.opts.under.map((u) => (u === g ? full : u));
     full.objIndex = g.objIndex; full.objId = g.objId;
@@ -428,7 +432,8 @@ export class DestructionDisplay {
     // (sprites at the end of its shard container: part of its settled look, the same on every client)
     this.debris.makeSet(g, buf, pk.W, [...rects.slice(1, 1 + r.pieces.length).map((q, i) => ({ x: pk.pos[i + 1].x, y: pk.pos[i + 1].y, w: q.w, h: q.h })), { x: pk.pos[0].x, y: pk.pos[0].y, w: rects[0].w, h: rects[0].h }]);
     this.debris.makeRest(g);
-    if ( !this.flatten(g) ) this.materialize(g, 300);
+    // (a shell's area that an entry is about to play - swapShell - is neither flattened nor given its shards: the entry would take both apart again)
+    if ( !packed?.entering && !this.flatten(g) ) this.materialize(g, 300);
     buf = null;     // MEMORY: (the closure context above keeps it otherwise) the atlas lives in its texture only: freeAtlas can let it go
     return g;
   }
@@ -1055,7 +1060,7 @@ export class DestructionDisplay {
   waitPixels(g, opts) {
     const P = this.pending ??= new Map();
     const now = performance.now();
-    if ( !P.has(g) ) P.set(g, { opts, deadline: Math.max(now + WAIT_MS, Math.min(opts.start ?? now, now + 800) + WAIT_LATE_MS) });
+    if ( !P.has(g) ) P.set(g, { opts, deadline: Math.max(now + WAIT_MS, Math.min(opts.start ?? now, now + 800) + WAIT_LATE_MS) + (this.onScreen(g, 0) ? 0 : WAIT_FAR_MS) });
     const ask = this.pixelAsks ??= new Set();
     for ( const x of [g, ...(opts.under ?? [])] ) if ( x.shell || x.atlasFree ) ask.add(x);
     this.stats.waits = (this.stats.waits ?? 0) + 1;
@@ -1075,11 +1080,26 @@ export class DestructionDisplay {
     this.stats.askedAhead = (this.stats.askedAhead ?? 0) + list.length;
   }
 
+  /** Groups nearest to the view's centre first (those in view before the rest). */
+  nearestFirst(list) {
+    if ( list.length < 2 ) return list;
+    const vw = this.view(), cx = (vw.x0 + vw.x1) / 2, cy = (vw.y0 + vw.y1) / 2;
+    const key = new Map(list.map((g) => { const r = g.info.rect; return [g, this.onScreen(g, 0) ? Math.hypot((r.x0 + r.x1) / 2 - cx, (r.y0 + r.y1) / 2 - cy) : 1e9 + Math.hypot((r.x0 + r.x1) / 2 - cx, (r.y0 + r.y1) / 2 - cy)]; }));
+    return list.sort((a, b) => key.get(a) - key.get(b));
+  }
+
+  /** The queued swaps: the areas an entry waits for first, in view before out of it, nearest to the view's centre first. */
+  sortSwaps(SQ) {
+    const vw = this.view(), cx = (vw.x0 + vw.x1) / 2, cy = (vw.y0 + vw.y1) / 2;
+    const key = new Map(SQ.map((q) => { const r = q.g.info.rect, on = this.onScreen(q.g, 0); return [q, (this.pending?.has(q.g) ? 0 : 4e9) + (on ? 0 : 1e9) + Math.hypot((r.x0 + r.x1) / 2 - cx, (r.y0 + r.y1) / 2 - cy)]; }));
+    SQ.sort((a, b) => key.get(a) - key.get(b));
+  }
+
   /** Asks for the pixels waited for (once per frame), rebuilds atlases (~`budget` ms), starts or gives up the waiting entries. */
   pixelsSlice(now, budget) {
     const A = this.pixelAsks;
     if ( A?.size && this.pixelSource ) {
-      const list = [...A].filter((x) => !x.dead && !x.asked); A.clear();
+      const list = this.nearestFirst([...A].filter((x) => !x.dead && !x.asked)); A.clear();
       for ( const x of list ) x.asked = true;
       const given = new Set(), give = (x, px) => {
         if ( given.has(x) || x.dead || !x.atlasFree || !px?.length ) return;
@@ -1092,8 +1112,15 @@ export class DestructionDisplay {
     // shells' areas from the worker: the ones an entry waits for first
     const SQ = this.swapQ, tS = performance.now();
     if ( SQ?.length ) {
-      if ( this.pending?.size && SQ.length > 1 ) SQ.sort((a, b) => (this.pending.has(b.g) ? 1 : 0) - (this.pending.has(a.g) ? 1 : 0));
-      while ( SQ.length && performance.now() - tS < (this.pending?.size ? budget * 3 : budget) ) { const { g, x } = SQ.shift(); g.swapAsked = false; this.swapShell(g, x); }
+      if ( SQ.length > 1 ) this.sortSwaps(SQ);
+      // (an area swapped for an entry that starts now is not flattened - swapShell - and shows no shards until the entry is set up, in the same
+      // slice below: no more of them a slice than the entries can take)
+      let ent = 0;
+      while ( SQ.length && performance.now() - tS < (this.pending?.size ? budget * 3 : budget) ) {
+        const w = this.pending?.get(SQ[0].g);
+        if ( w && (w.opts.start ?? 0) <= tS + 100 && ent++ >= 8 ) break;
+        const { g, x } = SQ.shift(); g.swapAsked = false; this.swapShell(g, x);
+      }
     }
     const Q = this.restoreQ, t0 = performance.now();
     while ( Q?.length && performance.now() - t0 < budget ) {

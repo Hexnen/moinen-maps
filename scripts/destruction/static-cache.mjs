@@ -247,12 +247,12 @@ export class StaticCache {
       if ( g.erase ) { const mv = !!(g.dis || g.leaving); out.push({ obj: k, cont: k, r: g.info.rect, live: mv, m: mv ? 4 : 0, g }); continue; }
       // (an area queued to enter - display.detonate sets them up a slice per frame - counts as moving already)
       const mv = dying.has(g) || !!g.anim || !!g.fade || g.made < g.pieces.length || k.alpha < 1 || !!d.enterQueue?.has(g);
-      const bloom = g.light?.bloom, glow = !!(bloom && !bloom.destroyed && bloom.alpha > 0.003);
+      const bloom = g.light?.bloom, glow = !!(bloom && !bloom.destroyed && bloom.alpha > 0.003) || (!!g.shell && !!d.composite?.liveHashes?.has(g.hash));
       let extras = k.children.filter((ch) => ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont);
       // (a flooded hole whose water had arrived when the settled composite was made - composite.mjs - keeps a water unit while its own
       // water is not here yet: the bands stay those of the composite instead of folding together for a moment)
       if ( !extras.length && g.info?.water ) extras = [WATER_SLOT];
-      const self = { obj: k, cont: k, r: g.info.rect, live: mv || glow, m: mv ? MOVE_MARGIN : 0, extras, g };
+      const self = { obj: k, cont: k, r: g.info.rect, live: mv || glow, m: mv ? MOVE_MARGIN : 0, extras, g, gl: glow && !mv };      // (gl: live only for its cause light's glow - at rest, so a composite can be published meanwhile)
       out.push(self);
       // the water of a flooded hole: its own live unit on top of its (static) object
       if ( !self.live ) for ( const w of extras ) out.push({ obj: w, cont: k, r: g.info.rect, live: true, m: 0, water: w, owner: self });

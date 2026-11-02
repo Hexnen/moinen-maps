@@ -10,6 +10,7 @@
 import { bake } from "./core.mjs";
 import { encodePng } from "./png.mjs";
 import { splitSheet } from "../net/chunks.mjs";
+import { packLook, unpackLook } from "./look-pack.mjs";
 
 let map = null, mapKey = "";
 const areas = new Map();
@@ -24,7 +25,7 @@ self.onmessage = async (ev) => {
       self.postMessage({ id: m.id, ok: true, result: true });
     } else if ( m.kind === "plain" ) {
       // a plain look sent ahead (a Rebake all): jobs name it in `underKeys`
-      plains.set(m.key, m.sprites);
+      plains.set(m.key, m.pack ? unpackLook(m.pack) : m.sprites);
       self.postMessage({ id: m.id, ok: true, result: true });
     } else if ( m.kind === "dropPlain" ) {
       // looks no job of the Rebake needs any more (`keys`), or all of them (`keys` null: the Rebake ended)
@@ -38,9 +39,15 @@ self.onmessage = async (ev) => {
       if ( m.input.split ) {
         // the lane splits the sheet into the strokes' sprites itself (input.split = the meta field count) and hands each one over (a
         // transfer): the page took the whole sheet and copied every sprite out of it - twice the pixels as garbage until the next GC
-        const parts = [...splitSheet(res.sheet.data, res.sheet.w, res.meta, m.input.split)], moved = [];
-        for ( const [, list] of parts ) for ( const s of list ) moved.push(s.img.buffer, s.m.buffer);
-        self.postMessage({ id: m.id, ok: true, result: { parts, stats: res.stats } }, moved);
+        const all = [...splitSheet(res.sheet.data, res.sheet.w, res.meta, m.input.split)], moved = [], parts = [], packs = [];
+        // (PERF, input.pack: a stroke's sprites go as three buffers - the page took thousands of small typed arrays apart in the message itself, up to
+        // 300 ms of one task; it makes the sprites in slices, look-pack.mjs)
+        for ( const [index, list] of all ) {
+          const pk = m.input.pack ? packLook(list) : null;
+          if ( pk ) { packs.push([index, pk]); moved.push(pk.metas.buffer, pk.dims.buffer, pk.px.buffer); }
+          else { parts.push([index, list]); for ( const s of list ) moved.push(s.img.buffer, s.m.buffer); }
+        }
+        self.postMessage({ id: m.id, ok: true, result: { parts, packs, stats: res.stats } }, moved);
       } else self.postMessage({ id: m.id, ok: true, result: res }, [res.sheet.data.buffer, res.meta.buffer]);
     } else if ( m.kind === "encode" ) {
       const png = await encodePng(m.w, m.h, m.data);
