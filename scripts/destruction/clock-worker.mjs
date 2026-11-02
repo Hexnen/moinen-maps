@@ -2,6 +2,8 @@
  * The entry clocks in a worker (display.mjs enter -> clock-pool.mjs): from an area's clock inputs (entry-clock.mjs spec) and the
  * pixel masks of its ruin and cover, the sorted per-pixel moments - the same keys the page made a slice per frame (clockSlice).
  * Message in: { id, spec, jobs: [{ mask | data, w, h, x0, y0, dark }] }; out: { id, keys: [{ ix, tm }] } (transferred) or { id, error }.
+ * Or { id, grid: { info, data, fw, fh, cx, cy } } (a cave-in's PIT GRID ahead of its entry, collapse-entry.mjs collapseGrid): out
+ * { id, keys: { mask, own, din, dout, maxD, deep, fw, fh, cx, cy } } (transferred).
  */
 // (the clock's modules import page modules for their pure parts: what they touch at load time is stubbed here)
 globalThis.Hooks ??= { on() {}, once() {}, off() {}, call() {}, callAll() {} };
@@ -12,9 +14,14 @@ let mods = null;
 const load = () => mods ??= Promise.all([import("./entry-clock.mjs"), import("./collapse-entry.mjs")]);
 
 self.onmessage = async (ev) => {
-  const { id, spec, jobs } = ev.data;
+  const { id, spec, jobs, grid } = ev.data;
   try {
     const [E, Cm] = await load();
+    if ( grid ) {
+      const G = Cm.collapseGrid(grid.info, Cm.coverMask(grid.data, grid.fw, grid.fh), grid.fw, grid.fh, grid.cx, grid.cy);
+      self.postMessage({ id, keys: G }, [G.mask.buffer, G.own.buffer, G.din.buffer, G.dout.buffer]);
+      return;
+    }
     const C = E.clockOf(spec);
     let timeOf = C.pixelTime;
     if ( spec.coll ) {

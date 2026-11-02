@@ -882,7 +882,7 @@ function afterFlatten(g) {
   atlasQueue.add(g);
   atlasTimer ||= setTimeout(() => {
     atlasTimer = 0;
-    for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir ) display?.freeAtlas(q); }
+    for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir ) { display?.prepCollapse?.(q); display?.freeAtlas(q); } }   // (a cave-in's pit grid and plate tones first, while its pixels are there: display.prepCollapse)
     atlasQueue.clear();
   }, 0);
 }

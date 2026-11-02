@@ -1,8 +1,8 @@
 import { META_FIELDS } from "./core.mjs";
 import { pack } from "./atlas-layout.mjs";
 import { reducedMotion } from "../config.mjs";
-import { tearClock, tearPiece, tearPlace, tearFx, tearEdge } from "./tear-entry.mjs";
-import { collapseClock, collapsePlace, collapseFx, collapseEnd } from "./collapse-entry.mjs";
+import { tearClock, tearPiece, tearPlace, tearSnap, tearFx, tearEdge } from "./tear-entry.mjs";
+import { collapseClock, collapsePlace, collapseFx, collapseEnd, collapseLum } from "./collapse-entry.mjs";
 import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas, pxArcs, tongueCells, pxTongue } from "./pixel-fx.mjs";
 import { StaticCache, mipmaps } from "./static-cache.mjs";
@@ -755,6 +755,38 @@ export class DestructionDisplay {
     });
   }
 
+  /** The cave-in's pit grid and plate tones, ready-made for its entry (see prepCollapse), or nothing. */
+  collPrep(g) {
+    if ( globalThis.CONFIG?.moinenMaps?.noCollPrep ) return {};
+    return { grid: g.collGrid ?? null, lum: g.collLum ?? null };
+  }
+
+  /**
+   * Ahead of any entry (PERF: the cave-in's clock is ~3.5 ms of page time per area, of which the chamfer distance over its grid is
+   * half): the clock worker makes the pit grid of a cave-in from its cover's pixels (g.collGrid; a copy goes over) and its plates' tones
+   * are read here (g.collLum), while the area still has its pixels - when it was built (prepSlice, a few per slice) or just before its
+   * atlas is let go (destruction.mjs, before it lets the atlas go). The entry then finds both. `CONFIG.moinenMaps.noCollPrep`: made at the entry, as before.
+   */
+  prepCollapse(g) {
+    if ( globalThis.CONFIG?.moinenMaps?.noCollPrep || g.info.type !== "collapse" || g.dead || g.shell || g.atlasFree || !g.coverFrame ) return false;
+    const fr = g.coverFrame.tex.frame, data = g.tex?.resource?.data, TW = g.tex?.width; if ( !data || !TW ) return false;
+    if ( !g.collLum ) g.collLum = collapseLum(g, data, TW);
+    if ( g.collGrid || g.prepBusy || !ClockPool.available() || this.clockPool?.broken ) return !!g.collGrid;
+    const cd = new Uint8Array(fr.width * fr.height * 4);
+    for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
+    g.prepBusy = true;
+    (this.clockPool ??= new ClockPool()).grid({ info: { x: g.info.x, y: g.info.y, w: g.info.w, h: g.info.h }, data: cd, fw: fr.width, fh: fr.height, cx: g.coverFrame.x, cy: g.coverFrame.y })
+      .then((grid) => { g.prepBusy = false; if ( !g.collGrid ) g.collGrid = grid; }, () => { g.prepBusy = false; });
+    return true;
+  }
+
+  prepSlice(now) {
+    if ( now < (this.prepAt ?? 0) ) return;
+    this.prepAt = now + 150;
+    let n = 0;
+    for ( const g of this.order ) if ( g.info.type === "collapse" && !(g.collGrid && g.collLum) && !g.prepBusy && this.prepCollapse(g) && ++n >= 2 ) break;
+  }
+
   /** Advance a dissolve to `rel` ms; true while it is not finished. */
   stepDissolve(D, rel) {
     if ( !D.keys ) return true;
@@ -858,7 +890,8 @@ export class DestructionDisplay {
     const { CL, L, k, ox, oy, Rmax, tear, seed, noise } = C;
     const r = info.rect;
     // a cave-in has its own clock too (collapse-entry.mjs): anticipation, then the rings slump from the rim inwards
-    const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront }) : null;
+    const coll = info.type === "collapse" && !tear ? collapseClock(this, g, { start, k, pathFront, ...this.collPrep(g) }) : null;
+    if ( coll && !globalThis.CONFIG?.moinenMaps?.noCollPrep ) { g.collGrid ??= coll.grid; g.collLum ??= coll.lum; }    // (the same pit again: nothing to make)
     const wipe = C.wipe;
     const delay = coll ? coll.delay : C.delay, reveal = coll ? coll.reveal : C.reveal, band = coll ? coll.band : C.band;
     const arrive = coll ? coll.arrive : C.arrive;
@@ -921,25 +954,18 @@ export class DestructionDisplay {
     lapE("rev+crev");
     // the clocks: made by the clock workers (clock-pool.mjs, the same code) or here, a slice per frame (clockSlice)
     if ( clockJobs.length ) {
-      if ( coll ) {
-        const cf = g.coverFrame, fr = cf?.tex?.frame, data = g.tex?.resource?.data, TW = g.tex?.width;
-        if ( fr && data && TW ) {
-          const mask = new Uint8Array(fr.width * fr.height);
-          for ( let y = 0; y < fr.height; y++ ) for ( let x = 0; x < fr.width; x++ ) if ( data[((fr.y + y) * TW + fr.x + x) * 4 + 3] ) mask[y * fr.width + x] = 1;
-          spec.coll = { mask, fw: fr.width, fh: fr.height, cx: cf.x, cy: cf.y };
-        }
-      }
+      if ( coll ) { const G = coll.grid; spec.coll = { mask: G.mask, fw: G.fw, fh: G.fh, cx: G.cx, cy: G.cy }; }
       this.clockJobs(clockJobs, spec, !!coll && !spec.coll);
     }
     lapE("clockJobs");
     // 2. the pieces' lives
     // (GPU pieces, piece-gpu.mjs: a plain entry's pieces move in the vertex shader - no pose is placed here or per frame)
-    const gpu = !tear && !coll && info.type !== "collapse" && this.gpuPieces(g);
+    const gmode = tear ? "tear" : coll ? "coll" : info.type !== "collapse" ? "plain" : null, gpu = !!gmode && this.gpuPieces(g, gmode !== "plain");
     if ( !gpu ) this.downGpu(g);
     const list = [], byPiece = new Map();
     g.pieces.forEach((p, n) => {
-      if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
-      if ( coll ) { const it = coll.piece(p, n); list.push(it); byPiece.set(p, it); this.place(p, -9, it, info.type); return; }
+      if ( tear ) { const it = tearPiece(p, n, seed, tear, start, k); list.push(it); byPiece.set(p, it); if ( !gpu ) this.place(p, -9, it, info.type); return; }
+      if ( coll ) { const it = coll.piece(p, n); list.push(it); byPiece.set(p, it); if ( !gpu ) this.place(p, -9, it, info.type); return; }
       const dx = p.fx - p.sx, dy = p.fy - p.sy, dd = Math.hypot(dx, dy);
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
@@ -957,7 +983,7 @@ export class DestructionDisplay {
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
     if ( coll ) { g.anim.coll = coll; g.anim.end = Math.max(g.anim.end, coll.endBy + 200 * k); }
-    if ( gpu ) this.gpuEnter(g, g.anim);
+    if ( gpu ) this.gpuEnter(g, g.anim, gmode);
     lapE("gpuEnter");
     // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
     this.debris.hideRest(g);
@@ -1601,6 +1627,7 @@ export class DestructionDisplay {
     lap("erase+dying");
     this.trimPixelPool();
     this.idleTick(t0, vw);
+    this.prepSlice(t0);
     lap("idle");
     Cause.tickLights(this, t0);
     lap("lights");
@@ -1678,7 +1705,7 @@ export class DestructionDisplay {
     this._owner = g;    // what the entry spawns is its own (endAnim ends it)
     if ( a.gpu && g.batch?.gpu ) g.batch.setClock(now);
     const t1 = PR ? performance.now() : 0;
-    const busy = a.tear ? this.livesAll(a, now, onScreen, type) : a.gpu ? this.livesGpu(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
+    const busy = a.gpu ? this.livesGpu(a, now, onScreen, type) : a.tear && globalThis.CONFIG?.moinenMaps?.noTearWindow ? this.livesAll(a, now, onScreen, type) : this.livesActive(a, now, onScreen, type);
     const t2 = PR ? performance.now() : 0;
     if ( onScreen ) this.effects(g, a, now, el);
     const t3 = PR ? performance.now() : 0;
@@ -1771,7 +1798,7 @@ export class DestructionDisplay {
     else if ( type === "cracks" && Math.random() < 0.3 ) this.spawn({ x: it.p.fx, y: it.p.fy, vx: (Math.random() - 0.5) * 4, vy: -1, rise: -3, life: 500, color: 0xc8beb0, alpha: 0.7 });
   }
 
-  /** Every piece, every frame (a tear: its own clock in tear-entry.mjs). True while some piece still moves. */
+  /** Every piece, every frame (the tear's former way: `CONFIG.moinenMaps.noTearWindow`). True while some piece still moves. */
   livesAll(a, now, onScreen, type) {
     let busy = false;
     for ( const it of a.list ) {
@@ -1780,21 +1807,30 @@ export class DestructionDisplay {
       if ( t < 1 + 400 / it.dur ) busy = true;
       if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
     }
+    if ( this.snapQ?.length ) this.flushSnaps();
     return busy;
   }
 
+  /** The flecks of the tear's fibres that snapped while the area was posed (tearPlace), spawned in the order of the pieces. */
+  flushSnaps() {
+    const Q = this.snapQ; this.snapQ = null;
+    if ( Q.length > 1 ) Q.sort((x, y) => x.seed - y.seed);
+    for ( const it of Q ) tearSnap(this, it.p, it);
+  }
+
   /** Can an entry's pieces move on the GPU (piece-gpu.mjs)? */
-  gpuPieces(g) {
+  gpuPieces(g, own = false) {
+    if ( own && globalThis.CONFIG?.moinenMaps?.noGpuTearColl ) return false;      // (a tear's and a cave-in's pieces: the CPU poses)
     return batchOn() && !globalThis.CONFIG?.moinenMaps?.noGpuPieces && !!g.atlas && !!g.tex && gpuPiecesSupported(canvas.app?.renderer);
   }
 
   /** The area's pieces become instances of a GPU batch (their numbers uploaded once); the entry's clock drives them. */
-  gpuEnter(g, a) {
+  gpuEnter(g, a, mode = "plain") {
     const N = g.pieces.length;
     let b = g.batch;
-    if ( b && !b.destroyed && !b.gpu ) { this.release(g); b = null; }
+    if ( b && !b.destroyed && (!b.gpu || b.mode !== mode) ) { this.release(g); b = null; }
     if ( !b || b.destroyed ) {
-      b = g.batch = new GpuPieceBatch(N, g.tex, g.atlas, g.baseSpr); g.bmode = "batch"; g.shardCont.addChildAt(b, 0);
+      b = g.batch = new GpuPieceBatch(N, g.tex, g.atlas, g.baseSpr, mode); g.bmode = "batch"; g.shardCont.addChildAt(b, 0);
       b.baseBlank = () => { const R = g.anim?.rev; return !!R && !R.shown && g.baseSpr?._texture?.baseTexture === R.tex; };
     }
     b.load(this, g, a);
@@ -1824,10 +1860,13 @@ export class DestructionDisplay {
       idx.sort((x, y) => (L[x].t0 + L[x].dur) - (L[y].t0 + L[y].dur));
       a.startOrder ??= startOrderOf(L);
       const rank = new Int32Array(L.length); a.startOrder.forEach((k, r) => { rank[k] = r; });
-      a.gl = { idx, ptr: 0, rank };
+      a.gl = { idx, ptr: 0, rank, snaps: null, sp: 0 };
+      // a tear's fibres snap at their moment (the pose code spawned the flecks as it posed them: here a time-sorted list)
+      if ( a.tear ) { const sn = []; for ( let k = 0; k < L.length; k++ ) if ( L[k].kind === 4 ) sn.push(k); sn.sort((x, y) => (L[x].t0 + L[x].hold) - (L[y].t0 + L[y].hold) || x - y); a.gl.snaps = sn; }
       a.busyUntil = L.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);
     }
     const G = a.gl, L = a.list;
+    if ( G.snaps && G.sp < G.snaps.length ) this.tearSnaps(a, G, now, onScreen);
     if ( onScreen && G.ptr < G.idx.length ) {
       const due = [];
       while ( G.ptr < G.idx.length ) {
@@ -1840,6 +1879,25 @@ export class DestructionDisplay {
       for ( const k of due ) this.dust(L[k], type);
     }
     return now < a.busyUntil;
+  }
+
+  /**
+   * A tear's fibres that snap now: the pose code's own rule (a fibre snaps in the first frame its time into its life is past its hold,
+   * when it is posed: on screen, or once it has landed), the flecks flicked in the order of the pieces.
+   */
+  tearSnaps(a, G, now, onScreen) {
+    const sn = G.snaps, L = a.list;
+    let due = null;
+    for ( let q = G.sp; q < sn.length; q++ ) {
+      const k = sn[q], it = L[k];
+      if ( it.snapped ) { if ( q === G.sp ) G.sp++; continue; }
+      if ( it.t0 + it.hold > now + 1 ) break;
+      const t = (now - it.t0) / it.dur;
+      if ( !(t * it.dur >= it.hold && (onScreen || t >= 1)) ) continue;
+      it.snapped = true; (due ??= []).push(k);
+      if ( q === G.sp ) G.sp++;
+    }
+    if ( due ) { if ( due.length > 1 ) due.sort((x, y) => x - y); for ( const k of due ) tearSnap(this, L[k].p, L[k]); }
   }
 
   /**
@@ -1860,12 +1918,14 @@ export class DestructionDisplay {
       if ( !it.fin ) {
         this.life(it, a, t, onScreen, type);
         // at rest: past the landing squash and hops (place), past the cause's tint (1.5), the scorch / flood colours constant from 1
-        if ( it.p.spr && t >= 1 && (t - 1) * it.dur >= Math.max(70, it.bounces * 150) && (!a.cl?.tint || t >= 1.5) ) it.fin = true;
+        // (a tear's piece: its own settle, tear-entry.mjs tearPiece)
+        if ( it.p.spr && t >= 1 && (t - 1) * it.dur >= (it.settle ?? Math.max(70, it.bounces * 150)) && (!a.cl?.tint || t >= 1.5) ) it.fin = true;
       }
       if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
       if ( !(it.fin && it.dusted) ) act[w++] = it;
     }
     act.length = w;
+    if ( this.snapQ?.length ) this.flushSnaps();
     return now < a.busyUntil;
   }
 

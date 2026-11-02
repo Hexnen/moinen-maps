@@ -85,7 +85,9 @@ export function tearClock(info, { pathFront, spine, k }) {
 export function tearPiece(p, n, seed, clock, start, k) {
   const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed), kind = p.tk | 0, q = p.tq | 0;
   const arr = start + clock.arrive(p.sx, p.sy);
-  const it = { p, pre: clock.band + 60 * k, arc: 0, seed: n, tear: true, k, kind, dusted: false };
+  // (`pre` 0: a tear's piece is not drawn before its t0, nothing to pose earlier; `settle`: ms after its landing until its pose is final -
+  // display.livesActive and the GPU pieces)
+  const it = { p, pre: 0, arc: 0, seed: n, tear: true, k, kind, dusted: false, settle: kind === 4 || kind === 2 || kind === 3 ? 0 : 55 * k };
   if ( kind === 4 ) {
     const snapAt = Math.floor(q / 1000) / 9, hold = (40 + 260 * (0.6 * snapAt + 0.4 * hA)) * k;
     return Object.assign(it, { t0: arr - 20 * k, dur: hold + 180 * k, hold, reach: Math.min(1.6, Math.max(1, (q % 1000) / 100)), snapped: false });
@@ -96,6 +98,12 @@ export function tearPiece(p, n, seed, clock, start, k) {
   const t0 = arr - clock.band * 0.1 + (hA - 0.5) * 30 * k + hC * 40 * k;
   const dur = (170 + Math.min(160, dd * 22) + lift * 35) * k * (0.85 + 0.35 * hB);
   return Object.assign(it, { t0, dur, lift, flut: hC < 0.4 ? 2 : 1 });
+}
+
+/** A fibre snaps: two pale flecks flicked off its far end (the pose code's, and the GPU pieces' list of them: display.tearSnaps). */
+export function tearSnap(display, p, it) {
+  const rx = p.tvx, ry = p.tvy, tx = p.fx + rx - rx * 2 * it.reach, ty = p.fy + ry - ry * 2 * it.reach;
+  for ( const sg of [-1, 1] ) display.spawn({ x: tx, y: ty, vx: sg * 10 - rx * 3, vy: -4 - ry * 3, fall: 22, life: 220, color: 0xd6c6a0, drag: 4 });
 }
 
 export function tearPlace(display, p, t, it) {
@@ -116,11 +124,9 @@ export function tearPlace(display, p, t, it) {
     let f = it.reach, sw = 0;
     if ( tm >= it.hold ) {
       const q = Math.min(1, (tm - it.hold) / (it.dur - it.hold));
-      if ( !it.snapped ) {
-        it.snapped = true;
-        const tx = p.fx + rx - rx * 2 * it.reach, ty = p.fy + ry - ry * 2 * it.reach;
-        for ( const sg of [-1, 1] ) display.spawn({ x: tx, y: ty, vx: sg * 10 - rx * 3, vy: -4 - ry * 3, fall: 22, life: 220, color: 0xd6c6a0, drag: 4 });
-      }
+      // (the flecks are spawned once the area's pieces have been posed, in the order of the pieces: display.flushSnaps - the order the
+      // pieces are visited in must not change which random numbers each fleck gets)
+      if ( !it.snapped ) { it.snapped = true; (display.snapQ ??= []).push(it); }
       f = t >= 1 ? 1 : Math.max(0.75, 1 + (it.reach - 1) * Math.exp(-5 * q) * Math.cos(9 * q));
       sw = t >= 1 ? 0 : Math.sin(14 * q) * Math.exp(-4 * q) * 1.2;
     }

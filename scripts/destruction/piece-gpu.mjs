@@ -1,7 +1,8 @@
 /**
  * GPU PIECES (PERF). The batched pieces of piece-batch.mjs still cost the CPU a pose (display.place), a few array writes and a vertex
- * write per moving piece per frame (~14 + ~8 ms of a busy frame on a whole-scene Detonate of 'map'). Here an entering area's PLAIN
- * pieces (blast / cracks / gash / scorch / flood: display.place's own motion; a tear's and a cave-in's stay on the CPU path) are
+ * write per moving piece per frame (~14 + ~8 ms of a busy frame on a whole-scene Detonate of 'map'). Here an entering area's
+ * pieces - PLAIN ones (blast / cracks / scorch / flood: display.place's own motion), a TEAR's (tear-entry.mjs tearPlace, mode "tear")
+ * and a CAVE-IN's (collapse-entry.mjs collapsePlace, mode "coll") - are
  * INSTANCES of one geometry whose per-piece numbers - source, rest, timing, spin, arc, size, frame - are uploaded ONCE when the area
  * enters; per frame only a few uniforms change (the time). The vertex shader does display.place's maths (same formulas and rounding,
  * float32): the pre-shiver, the flight (ease-out arc, spin back to rest, stretch), the landing squash and hops, the scorch / flood
@@ -9,26 +10,33 @@
  * batch shader's colour packing. The ruin's base quad is instance 0 (world-space parallelogram from the base sprite), as in the CPU path.
  *
  * Instance layout (18 floats): A = sx, sy, fx, fy | B = t0, dur, pre, arc | C = rot, spin, seed, bounces | D = w, h, u0, v0 | E = u1, v1.
+ * (a tear: B.zw = tvy, lift | reach; C = kind, tvx, seed, flut | hold. A cave-in: B.zw = pre, ovx; C = rot, ovy, seed, 2 * grey + hop.)
+ * What a pose spawns stays on the CPU (a snapping fibre's flecks: display.tearSnaps, a time-sorted list).
  * The base (instance 0): A = P0, E1 | B = E2, slot | C.w = -1 | D.zw = u0, v0 | E = u1, v1. Times are ms from the entry's start.
  *
- * `CONFIG.moinenMaps.noGpuPieces = true`: the CPU poses (A/B); WebGL 1: always the CPU path.
+ * `CONFIG.moinenMaps.noGpuPieces = true`: the CPU poses (A/B), `noGpuTearColl = true`: only a tear's and a cave-in's; WebGL 1: always the CPU path.
  */
 import { batchStats } from "./piece-batch.mjs";
 
 const IS = 18;
 let ROUND = null;
 
-/** display.place's maths (shared by the drawing and the read-back check). */
-const POSE = `
+/** The shared head of the pose code (shared by the drawing and the read-back check). */
+const HEAD = `
 const float PI = 3.14159265358979;
-uniform float uNow, uRest, uAp, uHopMs, uType;
+uniform float uNow, uRest, uAp, uHopMs, uType, uK, uFade;
 uniform vec2 uOrg;
 uniform vec4 uScene;
 uniform vec3 uCT;
 float rnd(float x) { return floor(x + 0.5); }
 float odd(float x) { return mod(floor(x), 2.0); }
-void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out float vis, out vec3 tint) {
-  tint = vec3(255.0); rot = 0.0; scl = vec2(uAp); vis = 1.0;
+bool inScene(vec2 p) { return p.x >= uScene.x && p.y >= uScene.y && p.x < uScene.z && p.y < uScene.w; }
+`;
+
+/** display.place's maths: a plain entry's piece. */
+const POSE_PLAIN = `
+void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out float vis, out vec3 tint, out float al) {
+  tint = vec3(255.0); rot = 0.0; scl = vec2(uAp); vis = 1.0; al = 1.0;
   if (uRest > 0.5) { pos = uOrg + A.zw * uAp; return; }
   float tm = uNow - B.x, dur = B.y, t = tm / dur;
   tm = t * dur;
@@ -62,7 +70,107 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
 }
 `;
 
-const VERT = `precision highp float;
+/**
+ * tear-entry.mjs tearPlace: a TEAR's piece. Per piece: A = sx, sy, fx, fy | B = t0, dur, tvy, lift (kinds 0) or reach (4) | C = kind,
+ * tvx, seed, flut (0) or hold (4). Offsets from the rest pose are whole art pixels; closed (before t0) the piece is not drawn.
+ */
+const POSE_TEAR = `
+float flick(float tm, float n, float per, float seed) { return (odd(tm / (per * uK) + seed) > 0.5 ? 1.0 : -1.0) * n; }
+void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out float vis, out vec3 tint, out float al) {
+  tint = vec3(255.0); rot = 0.0; scl = vec2(uAp); vis = 1.0; al = 1.0;
+  if (uRest > 0.5) { pos = uOrg + A.zw * uAp; return; }
+  float tm = uNow - B.x, dur = B.y, t = tm / dur;
+  tm = t * dur;
+  if (uCT.x >= 0.0) { tint = (t <= 0.0 || t >= 1.5) ? vec3(255.0) : floor(uCT + (vec3(255.0) - uCT) * clamp(t / 1.5, 0.0, 1.0) + 0.5); }
+  if (tm < 0.0) { vis = 0.0; pos = vec2(0.0); return; }
+  float kind = C.x, tvx = C.y, tvy = B.z, dx = A.x - A.z, dy = A.y - A.w;
+  float ox = 0.0, oy = 0.0, qx = 1.0, qy = 1.0;
+  if (kind > 3.5) {
+    float reach = B.w, hold = C.w, f = reach, sw = 0.0;
+    if (tm >= hold) {
+      float q = min(1.0, (tm - hold) / (dur - hold));
+      f = t >= 1.0 ? 1.0 : max(0.75, 1.0 + (reach - 1.0) * exp(-5.0 * q) * cos(9.0 * q));
+      sw = t >= 1.0 ? 0.0 : sin(14.0 * q) * exp(-4.0 * q) * 1.2;
+    }
+    float l = sqrt(tvx * tvx + tvy * tvy); if (l == 0.0) l = 1.0;
+    ox = tvx - tvx * f - tvy / l * sw; oy = tvy - tvy * f + tvx / l * sw; qx = qy = f;
+  } else if (kind > 1.5 && kind < 2.5) {
+    if (t < 1.0) {
+      float u1 = 1.0 - t, e = 1.0 - u1 * u1 * u1;
+      float sc = 0.3 + 0.7 * e + 0.14 * sin(PI * min(1.0, max(0.0, (t - 0.5) / 0.5)));
+      float fl = (t > 0.55 && t < 0.9) ? flick(tm, 1.0, 30.0, C.z) : 0.0;
+      float l = sqrt(tvx * tvx + tvy * tvy); if (l == 0.0) l = 1.0;
+      ox = tvx * (1.0 - e) + tvx / l * fl * 0.6; oy = tvy * (1.0 - e) + tvy / l * fl * 0.6; qx = qy = sc;
+    }
+  } else if (kind > 2.5) {
+    if (t < 1.0) {
+      if (t < 0.3) { float u1 = 1.0 - t / 0.3, e = 1.0 - u1 * u1 * u1; ox = dx + (tvx - dx) * e; oy = dy + (tvy - dy) * e - sin(PI * t / 0.3) * 1.5; qy = 0.92; }
+      else if (t < 0.55) { ox = tvx + flick(tm, 1.0, 28.0, C.z); oy = tvy - 1.0; qy = 0.9; }
+      else { float q = (t - 0.55) / 0.45; ox = tvx * (1.0 - q * q); oy = tvy * (1.0 - q * q) - sin(PI * q) * 1.5; qy = 0.9 + 0.1 * q; }
+    }
+  } else {
+    float l = sqrt(dx * dx + dy * dy); if (l == 0.0) l = 1.0;
+    float ux = -dx / l, uy = -dy / l;
+    if (t >= 1.0) { float snap = ((t - 1.0) * dur < 55.0 * uK) ? 1.0 : 0.0; ox = ux * snap; oy = uy * snap; }
+    else {
+      float u1 = 1.0 - t, e = 1.0 - u1 * u1 * u1 * u1, up = sin(PI * t) * B.w;
+      float fl = t < 0.55 ? flick(tm, C.w * (1.0 - t / 0.55), 28.0, C.z) : 0.0;
+      ox = dx * (1.0 - e) + ux * fl; oy = dy * (1.0 - e) + uy * fl - up; qy = 1.0 - 0.14 * sin(PI * t);
+    }
+  }
+  pos = uOrg + vec2(A.z + rnd(ox), A.w + rnd(oy)) * uAp;
+  scl = vec2(uAp * qx, uAp * qy);
+  if (!inScene(pos)) vis = 0.0;
+}
+`;
+
+/**
+ * collapse-entry.mjs collapsePlace: a CAVE-IN's plate. Per piece: A = sx, sy, fx, fy | B = t0, dur, pre, ovx | C = rot, ovy, seed,
+ * 2 * grey + hop (grey: its own tint, 0..255; hop: 1 = it hops on landing). uFade: it fades in where it lies (over the tremor patch).
+ */
+const POSE_COLL = `
+// round(a + d) for a on a half pixel and a tiny d (the start of a drop: e = t * t): the sum a + d in float32 would lose d
+float rndS(float a, float d) { float s = floor(a + 0.5); return s + floor(a + 0.5 - s + d); }
+void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out float vis, out vec3 tint, out float al) {
+  tint = vec3(255.0); rot = 0.0; scl = vec2(uAp); vis = 1.0; al = 1.0;
+  if (uRest > 0.5) { pos = uOrg + A.zw * uAp; return; }
+  float tm = uNow - B.x, dur = B.y, t = tm / dur;
+  tm = t * dur;
+  float g0 = floor(C.w * 0.5), hopf = C.w - 2.0 * g0;
+  pos = vec2(0.0);
+  if (tm < 0.0) {
+    if (tm < -B.z) { vis = 0.0; return; }
+    float f = 1.0 + tm / B.z;
+    al = uFade > 0.5 ? min(1.0, f * 1.4) : 1.0; tint = vec3(g0);
+    float sh = f > 0.35 ? (odd(tm / 40.0 + C.z) > 0.5 ? 1.0 : -1.0) : 0.0;
+    pos = uOrg + vec2(rnd(A.x + sh) * uAp, A.y * uAp);
+    scl = vec2(uAp, uAp * (f > 0.75 ? 0.95 : 1.0));
+  } else if (t >= 1.0) {
+    float st = tm - dur;
+    if (st >= 140.0 * uK) pos = uOrg + A.zw * uAp;
+    else {
+      float kk = exp(-st / 45.0) * cos(st / 28.0), hop = (hopf > 0.5 && st > 30.0 && st < 130.0) ? sin((st - 30.0) / 100.0 * PI) : 0.0;
+      pos = uOrg + vec2(rndS(A.z, B.w * kk) * uAp, rndS(A.w, C.y * kk - hop) * uAp);
+      float q = min(1.0, st / 80.0);
+      scl = vec2(uAp * (1.06 - 0.06 * q), uAp * (0.86 + 0.14 * q));
+    }
+  } else {
+    float e = t * t;
+    pos = uOrg + vec2(rndS(A.x, (A.z - A.x) * e + B.w * e) * uAp, rndS(A.y, (A.w - A.y) * e + C.y * e) * uAp);
+    rot = C.x * (1.0 - e);
+    float w = sin(t * PI);
+    scl = vec2(uAp * (1.0 + 0.03 * w), uAp * (0.95 - 0.07 * w));
+    float i1 = floor(g0 + (255.0 - g0) * e + 0.5);
+    float c = 0.16 * sin(t * PI);
+    tint = vec3(floor(i1 + (0.0 - i1) * c + 0.5));
+  }
+  if (uCT.x >= 0.0) { tint = (t <= 0.0 || t >= 1.5) ? vec3(255.0) : floor(uCT + (vec3(255.0) - uCT) * clamp(t / 1.5, 0.0, 1.0) + 0.5); }
+  if (!inScene(pos)) vis = 0.0;
+}
+`;
+const POSES = { plain: POSE_PLAIN, tear: POSE_TEAR, coll: POSE_COLL };
+
+const vert = (mode) => `precision highp float;
 attribute vec2 aCorner;
 attribute vec4 aA, aB, aC, aD;
 attribute vec2 aE;
@@ -74,7 +182,7 @@ uniform vec4 uBaseCol;
 varying vec2 vUv;
 varying vec4 vCol;
 varying float vSlot;
-${POSE}
+${HEAD}${POSES[mode]}
 void main() {
   vUv = mix(aD.zw, aE, aCorner);
   float X, Y;
@@ -83,9 +191,9 @@ void main() {
     vec2 P = aA.xy + aCorner.x * aA.zw + aCorner.y * aB.xy;
     X = P.x; Y = P.y; vCol = uBaseCol; vSlot = aB.z;
   } else {
-    vec2 pos, scl; float rot, vis; vec3 tint;
-    pose(aA, aB, aC, pos, rot, scl, vis, tint);
-    float ea = min(uAlpha, 1.0);
+    vec2 pos, scl; float rot, vis, pal; vec3 tint;
+    pose(aA, aB, aC, pos, rot, scl, vis, tint, pal);
+    float ea = min(uAlpha * pal, 1.0);
     if (vis < 0.5 || !(ea > 0.0)) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
     float cs = cos(rot), sn = sin(rot);
     float la = cs * scl.x, lb = sn * scl.x, lc = -sin(rot) * scl.y, ld = cos(rot) * scl.y;
@@ -111,13 +219,13 @@ void main() {
   gl_FragColor = (vSlot > 0.5 ? b : a) * vCol;
 }`;
 
-let SHADER = null;
+const SHADERS = {};
 const U = {
   uM: new Float32Array(4), uT: new Float32Array(2), uCT: new Float32Array(3), uOrg: new Float32Array(2), uScene: new Float32Array(4), uBaseCol: new Float32Array(4)
 };
-function shader() {
-  return SHADER ??= PIXI.Shader.from(VERT, FRAG, {
-    uAtlas: 0, uBase: 1, uNow: 0, uRest: 0, uAp: 1, uHopMs: 150, uType: 0, uAlpha: 1, uRound: 0,
+function shader(mode) {
+  return SHADERS[mode] ??= PIXI.Shader.from(vert(mode), FRAG, {
+    uAtlas: 0, uBase: 1, uNow: 0, uRest: 0, uAp: 1, uHopMs: 150, uType: 0, uK: 1, uFade: 0, uAlpha: 1, uRound: 0,
     uM: U.uM, uT: U.uT, uCT: U.uCT, uOrg: U.uOrg, uScene: U.uScene, uBaseCol: U.uBaseCol
   });
 }
@@ -172,16 +280,17 @@ export const STUB = new StubPose();
 const TYPE_CODE = { flood: 1, scorch: 2 };
 
 export class GpuPieceBatch extends PIXI.Container {
-  constructor(n, tex, atlas, base = null) {
+  constructor(n, tex, atlas, base = null, mode = "plain") {
     super();
     this.eventMode = "none";
     this.gpu = true;
+    this.mode = mode;        // "plain" | "tear" | "coll": which pose the vertex shader runs (and what the instance fields hold)
     this.n = n; this.tex = tex; this.atlas = atlas; this.base = base;
     this.G = takeGeometry(n + 1);
     this.baseBlank = null;
     this.baseTex = null; this.baseUpd = -1; this.folded = false; this.baseOn = false; this.baseSlot = 0; this.baseDirty = true;
     this.rest = true; this.now = 0; this.firstT = Infinity; this.full = true;
-    this.ap = 1; this.org = [0, 0]; this.hopMs = 150; this.typeCode = 0; this.causeTint = [-1, -1, -1];
+    this.ap = 1; this.k = 1; this.fade = 0; this.org = [0, 0]; this.hopMs = 150; this.typeCode = 0; this.causeTint = [-1, -1, -1];
     this.state = PIXI.State.for2d();
     this.bc = new Float32Array(4);
     this.bv = new Float64Array(8);
@@ -189,20 +298,31 @@ export class GpuPieceBatch extends PIXI.Container {
 
   /** Upload the area's pieces (display.enter's list) for an entry that starts at `a.start`; the clock starts at `now`. */
   load(display, g, a) {
-    const D = this.G.data, A = this.atlas, tw = this.tex.width, th = this.tex.height, list = a.list, P = g.pieces, n = P.length, t = a.start;
+    const D = this.G.data, A = this.atlas, tw = this.tex.width, th = this.tex.height, list = a.list, P = g.pieces, n = P.length, t = a.start, mode = this.mode;
     for ( let i = 0; i < n; i++ ) {
       const p = P[i], it = list[i], o = (i + 1) * IS, pos = A.pos[i + 1], sz = A.sizes[i + 1];
       D[o] = p.sx; D[o + 1] = p.sy; D[o + 2] = p.fx; D[o + 3] = p.fy;
-      D[o + 4] = it.t0 - t; D[o + 5] = it.dur; D[o + 6] = it.pre; D[o + 7] = it.arc;
-      D[o + 8] = p.rot; D[o + 9] = it.spin; D[o + 10] = it.seed; D[o + 11] = it.bounces;
+      D[o + 4] = it.t0 - t; D[o + 5] = it.dur;
+      if ( mode === "tear" ) {
+        // (see POSE_TEAR) kind 0: lift, flut | 4: reach, hold | 2, 3: tvx, tvy
+        const kind = it.kind | 0;
+        D[o + 6] = p.tvy ?? 0; D[o + 7] = kind === 0 ? it.lift : kind === 4 ? it.reach : 0;
+        D[o + 8] = kind; D[o + 9] = p.tvx ?? 0; D[o + 10] = it.seed; D[o + 11] = kind === 0 ? it.flut : kind === 4 ? it.hold : 0;
+      } else if ( mode === "coll" ) {
+        D[o + 6] = it.pre; D[o + 7] = it.ovx; D[o + 8] = p.rot; D[o + 9] = it.ovy; D[o + 10] = it.seed; D[o + 11] = (it.tint0 & 255) * 2 + (it.hop ? 1 : 0);
+      } else {
+        D[o + 6] = it.pre; D[o + 7] = it.arc;
+        D[o + 8] = p.rot; D[o + 9] = it.spin; D[o + 10] = it.seed; D[o + 11] = it.bounces;
+      }
       D[o + 12] = sz[0]; D[o + 13] = sz[1]; D[o + 14] = pos.x / tw; D[o + 15] = pos.y / th;
       D[o + 16] = (pos.x + sz[0]) / tw; D[o + 17] = (pos.y + sz[1]) / th;
     }
     D[11] = -1;                         // the base: instance 0
     this.ap = display.ap; this.org = [display.origin.x, display.origin.y];
+    this.k = mode === "coll" ? (a.coll?.k ?? 1) : (a.k ?? 1); this.fade = mode === "coll" && list[0]?.fadeIn ? 1 : 0;
     this.hopMs = 150;                 /* (place: `a.k ?? 1` with a = the piece's life, which has no k here) */ this.typeCode = TYPE_CODE[g.info.type] ?? 0;
     { const c = a.cl?.tint; this.causeTint = c ? [(c >> 16) & 255, (c >> 8) & 255, c & 255] : [-1, -1, -1]; }
-    this.start = t; this.firstT = a.list.reduce((m, it) => Math.min(m, it.t0 - it.pre), Infinity) - t;
+    this.start = t; this.firstT = a.list.reduce((m, it) => Math.min(m, it.t0 - (mode === "tear" ? 0 : it.pre)), Infinity) - t;
     this.rest = false; this.full = true; this.baseDirty = true;
     this.G.buf.update();
   }
@@ -263,7 +383,7 @@ export class GpuPieceBatch extends PIXI.Container {
     const M = this.worldTransform;
     ROUND ??= !!new PIXI.Sprite()._roundPixels;
     this.syncFold();
-    const sh = shader();
+    const sh = shader(this.mode);
     if ( !this.tex.valid ) return;
     if ( this.base ) this.writeBase();
     let pieces = this.rest || this.now >= this.firstT;
@@ -275,7 +395,7 @@ export class GpuPieceBatch extends PIXI.Container {
     else renderer.texture.bind(PIXI.Texture.WHITE.baseTexture, 1);
     if ( this.baseOn && this.baseSlot === 0 && !pieces ) renderer.texture.bind(this.tex, 0);
     const u = sh.uniforms;
-    u.uNow = this.now; u.uRest = this.rest ? 1 : 0; u.uAp = this.ap; u.uHopMs = this.hopMs; u.uType = this.typeCode;
+    u.uNow = this.now; u.uRest = this.rest ? 1 : 0; u.uAp = this.ap; u.uHopMs = this.hopMs; u.uType = this.typeCode; u.uK = this.k; u.uFade = this.fade;
     u.uAlpha = this.worldAlpha; u.uRound = ROUND ? PIXI.settings.RESOLUTION : 0;
     U.uCT.set(this.causeTint);
     U.uOrg[0] = this.org[0]; U.uOrg[1] = this.org[1];
@@ -318,20 +438,22 @@ export function readPoses(renderer, batch) {
 attribute vec4 aA, aB, aC;
 varying vec4 oP;
 varying vec4 oS;
-${POSE}
-void main() { vec2 pos, scl; float rot, vis; vec3 tint; pose(aA, aB, aC, pos, rot, scl, vis, tint); oP = vec4(pos, rot, vis); oS = vec4(scl, tint.r, tint.g); gl_Position = vec4(0.0); }`;
+varying vec4 oT;
+${HEAD}${POSES[batch.mode]}
+void main() { vec2 pos, scl; float rot, vis, al; vec3 tint; pose(aA, aB, aC, pos, rot, scl, vis, tint, al); oP = vec4(pos, rot, vis); oS = vec4(scl, tint.r, tint.g); oT = vec4(al, tint.b, 0.0, 0.0); gl_Position = vec4(0.0); }`;
   const fs = "precision highp float; void main() { gl_FragColor = vec4(0.0); }";
   const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if ( !gl.getShaderParameter(s, gl.COMPILE_STATUS) ) throw new Error(gl.getShaderInfoLog(s)); return s; };
   const pr = gl.createProgram();
   gl.attachShader(pr, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, fs));
-  gl.transformFeedbackVaryings(pr, ["oP", "oS"], gl.INTERLEAVED_ATTRIBS);
+  gl.transformFeedbackVaryings(pr, ["oP", "oS", "oT"], gl.INTERLEAVED_ATTRIBS);
   gl.linkProgram(pr); if ( !gl.getProgramParameter(pr, gl.LINK_STATUS) ) throw new Error(gl.getProgramInfoLog(pr));
-  const glb = batch.G.buf._glBuffers?.[renderer.CONTEXT_UID]?.buffer; if ( !glb ) return null;      // (not drawn yet: nothing on the GPU)
-  const out = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, out); gl.bufferData(gl.ARRAY_BUFFER, n * 8 * 4, gl.STATIC_READ);
+  renderer.buffer.update(batch.G.buf);       // (an area not drawn yet is not on the GPU - or a pooled geometry's old content is: upload what the shader would read)
+  const glb = batch.G.buf._glBuffers?.[renderer.CONTEXT_UID]?.buffer; if ( !glb ) return null;
+  const out = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, out); gl.bufferData(gl.ARRAY_BUFFER, n * 12 * 4, gl.STATIC_READ);
   const tf = gl.createTransformFeedback();
   gl.useProgram(pr);
   const set = (name, v) => { const l = gl.getUniformLocation(pr, name); if ( l ) { if ( v.length === 2 ) gl.uniform2fv(l, v); else if ( v.length === 4 ) gl.uniform4fv(l, v); else gl.uniform1f(l, v); } };
-  set("uNow", batch.now); set("uRest", batch.rest ? 1 : 0); set("uAp", batch.ap); set("uHopMs", batch.hopMs); set("uType", batch.typeCode);
+  set("uNow", batch.now); set("uRest", batch.rest ? 1 : 0); set("uAp", batch.ap); set("uHopMs", batch.hopMs); set("uType", batch.typeCode); set("uK", batch.k); set("uFade", batch.fade);
   set("uOrg", new Float32Array(batch.org));
   { const l = gl.getUniformLocation(pr, "uCT"); if ( l ) gl.uniform3fv(l, new Float32Array(batch.causeTint)); }
   const r = canvas.dimensions?.sceneRect;
@@ -352,7 +474,7 @@ void main() { vec2 pos, scl; float rot, vis; vec3 tint; pose(aA, aB, aC, pos, ro
   gl.disable(gl.RASTERIZER_DISCARD);
   gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
-  const res = new Float32Array(n * 8);
+  const res = new Float32Array(n * 12);
   gl.bindBuffer(gl.ARRAY_BUFFER, out); gl.getBufferSubData(gl.ARRAY_BUFFER, 0, res);
   for ( const name of ["aA", "aB", "aC"] ) gl.disableVertexAttribArray(gl.getAttribLocation(pr, name));
   gl.deleteBuffer(out); gl.deleteTransformFeedback(tf); gl.deleteProgram(pr);
