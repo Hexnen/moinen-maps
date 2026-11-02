@@ -58,6 +58,8 @@ let compositeShown = null;           // the settled composite the display draws 
 let compositeTimer = 0, compositeTries = 0;
 const AWAIT_CHUNK = 12000;
 /** Strokes to bake on a scene load from which on the bake is spread over several workers and shown as it comes. */
+/** Bytes of pixels one message to a worker carries at most when many go one after another (a copy of ~6 MB is ~5 ms on the page). */
+const POST_BYTES = 6 << 20;
 const BIG_BAKE = 6;
 /** Shells filled (their chunks' areas built) per step at first; the steps then adapt to what one cost (fill()). */
 const FILL_STEP = 2;
@@ -1173,6 +1175,7 @@ function pumpRebake(ms = REBAKE_EVERY) {
     if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }
     if ( status.rebake ) { status.rebake.done += batch.length; status.rebake.live = 0; tell("status"); }
     trimPlain();
+    await flushRebaked(batch);
     pumpRebake(REBAKE_EVERY);
   }, ms);
 }
@@ -1275,7 +1278,7 @@ async function persistOnce() {
       // (a record that let go of its pixels - a chunk of another folder, a copied scene - gets them back to be encoded here)
       const dryOnes = todo.filter((q) => q.r.sprites.lean || q.r.shell);
       if ( dryOnes.length && !(await Promise.all(dryOnes.map((q) => hydrate(q.r)))).every(Boolean) ) { schedulePersist(0); return; }
-      const out = await Net.job({ kind: "objects", F: META_FIELDS, objs: todo.map((q) => ({ key: q.o.id, sprites: q.r.sprites })) });
+      const out = await encodeBatched(todo.map((q) => ({ key: q.o.id, sprites: q.r.sprites })));
       status.perf.encode = Math.round(performance.now() - t);
       const byKey = new Map(out.map((e) => [e.key, e]));
       for ( const q of todo ) {
@@ -1319,6 +1322,47 @@ async function persistOnce() {
     console.warn(`${MODULE_ID} | could not publish the destruction (next try in ${publishBackoff / 1000} s)`, err);
     if ( my === gen ) schedulePersist(0);
   }
+}
+
+/**
+ * Encode strokes in the codec worker: their pixels are COPIED into it, so they go in messages of a few MB with a pause between (~250 MB at
+ * once on a Rebake all of "map" held the page 250-300 ms). `objs`: [{ key, sprites }] -> [{ key, id, bytes }].
+ */
+async function encodeBatched(objs) {
+  const out = [];
+  for ( let i = 0, bytes = 0, part = []; i < objs.length; i++ ) {
+    part.push(objs[i]); bytes += objs[i].sprites.reduce((a, s) => a + s.img.byteLength, 0);
+    if ( bytes < POST_BYTES && i < objs.length - 1 ) continue;
+    out.push(...await Net.job({ kind: "objects", F: META_FIELDS, objs: part }));
+    part = []; bytes = 0;
+    if ( i < objs.length - 1 ) await new Promise((r) => setTimeout(r, 0));
+  }
+  return out;
+}
+
+/**
+ * A pass of a Rebake all is done: its strokes' chunks are encoded and uploaded NOW (content addressed, the manifest still follows at the
+ * end) and their records let go of their pixels - all 259 strokes of "map" were held until the end (~600 MB of heap on top of the
+ * scene's, peak 1.3-1.5 GB). A record not drawn from its own pixels yet keeps them until the publish.
+ */
+async function flushRebaked(ids) {
+  if ( !S || !game.user.isGM || !ids.length ) return;
+  const my = gen, scene = canvas.scene, base = Store.baseKey(scene, S, backgroundInfo()?.path ?? ""), FS = Store.sigsOf(S), dir = Net.chunkDir(scene.id);
+  const at = new Map(S.objects.map((o, i) => [o.id, i])), todo = [];
+  for ( const id of ids ) {
+    const i = at.get(id), r = i === undefined ? null : recs.get(`${base}|${id}|${FS[i].sig}`);
+    if ( r && r.baked && !r.id && !r.shell && !r.sprites.lean && onScreen(r) ) todo.push({ id, r });
+  }
+  if ( !todo.length ) return;
+  try {
+    const out = await encodeBatched(todo.map((q) => ({ key: q.id, sprites: q.r.sprites })));
+    if ( my !== gen || !S ) return;
+    const byKey = new Map(out.map((e) => [e.key, e]));
+    for ( const q of todo ) { const e = byKey.get(q.id); if ( e ) { q.r.id = e.id; q.r.dir = dir; Net.keep(e.id, e.bytes, null); } }
+    await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));
+    // (a record is only dried once its chunk is on the server: the publish finds it there)
+    for ( const q of todo ) if ( my === gen && q.r.id && Net.known(dir).has(q.r.id) && !q.r.sprites.lean && onScreen(q.r) ) dry(q.r);
+  } catch ( err ) { console.warn(`${MODULE_ID} | destruction: a Rebake pass could not be stored early (the publish does it)`, err); for ( const q of todo ) if ( q.r.id && !Net.known(dir).has(q.r.id) ) q.r.id = null; }
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
@@ -1525,7 +1569,7 @@ export const destructionApi = {
   bakeNow: () => { breaker.reset(); bakeFail = null; Object.assign(status, { paused: false, error: "" }); shownKey = ""; Trace.event("bake-now"); return rebake({ awaitPublish: false }); },
   state: () => S ? Model.encode(S) : null,
   // (records that let go of their pixels count by their chunk id - a hash of the same pixels and rows)
-  status: () => { if ( lastRecs && !status.hash ) status.hash = lastRecs.some((r) => r.sprites.lean || r.shell) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean || r.shell ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
+  status: (o) => { if ( lastRecs && !status.hash && !o?.fast && !status.baking && !status.rebake ) status.hash = lastRecs.some((r) => r.sprites.lean || r.shell) ? `c${Chunks.hashStr(lastRecs.map((r) => r.sprites.lean || r.shell ? r.id : Chunks.recordsHash([r])).join(","))}` : Chunks.recordsHash(lastRecs); return { ...status, key: shownKey, baked: S?.baked ?? null, inflight }; },
   /** Streaming counters (requests, bytes, IndexedDB hits, uploads) and the chunk store's GC, for tests. */
   /** (bench) the pixels the records hold, in Mpx of RGBA (x4 bytes): by map, and the stream's memory. */
   memory: () => {

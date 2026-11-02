@@ -719,6 +719,10 @@ export const wheelNotch = (dir) => canvas._onMouseWheel({ delta: dir, deltaY: di
 export async function zoomBench({ hz = 165, quiet = false } = {}) {
   const r = canvas.dimensions.sceneRect, cx = r.x + r.width / 2, cy = r.y + r.height / 2;
   canvas.pan({ x: cx, y: cy, scale: 1 }); step(30);
+  // Foundry's own hit test under the pointer (PrimarySpriteMesh.containsCanvasPoint -> TextureLoader.getTextureAlphaData) makes ONE
+  // 384x256 render texture the first time it meets a texture, i.e. in the first zoom-in over the scene: a createTexture "during" the
+  // gesture that is core's, not this module's (traced 2026-11-02). Done here once, before the phases, so `during` shows only our own.
+  for ( const m of canvas.primary?.children ?? [] ) { try { m.containsCanvasPoint?.({ x: cx, y: cy }); } catch { /* not a mesh */ } }
   const gesture = (dir, n, ms) => {
     const nf = Math.ceil(ms / (1000 / hz)) + 1, f = Array(nf).fill(0);
     for ( let k = 0; k < n; k++ ) f[Math.min(nf - 1, Math.round((ms * (k / n) ** 1.6) / (1000 / hz)))]++;
@@ -1281,7 +1285,9 @@ export async function setDPR(r) {
   Object.defineProperty(window, "devicePixelRatio", { get: () => r, configurable: true });
   const R = canvas.app.renderer;
   R.resolution = r; R.resize(innerWidth, innerHeight); window.dispatchEvent(new Event("resize"));
-  await new Promise((res) => setTimeout(res, 800)); step(20);
+  // (the destruction cache draws its bands again at the new resolution a few frames later, and the first frames build the filters'
+  // textures: settled here, else they land in the first phase of whatever is measured next and read as a rest spike)
+  await new Promise((res) => setTimeout(res, 1500)); step(90); await new Promise((res) => setTimeout(res, 600));
   return { dpr: R.resolution, css: [R.screen.width, R.screen.height], backing: [R.view.width, R.view.height] };
 }
 
@@ -1431,27 +1437,31 @@ export async function lightsAB({ districts = 5, at = 123456, zoom = 2.6 } = {}) 
  * a lane held at most, x4 bytes of RGBA). Waits for status.rebake to end. Returns { strokes, seconds, gaps: { n, max, over100, top },
  * heapMB: { start, peak }, lanes, events }.
  */
-export async function rebakeBench({ ids = null, maxS = 420 } = {}) {
+export async function rebakeBench({ ids = null, maxS = 420, tailS = 12 } = {}) {
   const A = game.modules.get("moinen-maps").api.destruction, Trace = A.net.trace;
   const list = ids ?? A.status().olderLook?.ids ?? [];
-  const gaps = []; let last = performance.now(), peak = 0;
+  const gaps = [], tail = [], loaf = []; let last = performance.now(), peak = 0, inTail = false;
   const heap = () => (performance.memory?.usedJSHeapSize ?? 0) / 1048576;
   const start = heap();
-  const gi = setInterval(() => { const n = performance.now(), g = n - last; if ( g > 30 ) gaps.push(Math.round(g)); last = n; }, 4);
+  const gi = setInterval(() => { const n = performance.now(), g = n - last; if ( g > 30 ) (inTail ? tail : gaps).push(Math.round(g)); last = n; }, 4);
   const hi = setInterval(() => { peak = Math.max(peak, heap()); }, 50);
+  // long animation frames name the scripts in them (needs the pane fronted: a hidden page has no frames)
+  let po = null;
+  try { po = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) if ( e.duration >= 80 ) loaf.push({ ms: Math.round(e.duration), scripts: e.scripts.map((q) => `${(q.sourceURL || "").split("/").slice(-1)[0]}@${q.sourceCharPosition}:${Math.round(q.duration)}`).join(" | ").slice(0, 200) }); }); po.observe({ type: "long-animation-frame" }); } catch { /* not offered */ }
   const evBefore = Trace().events.length, t0 = performance.now();
   try {
     A.rebakeAll(list);
     while ( performance.now() - t0 < maxS * 1000 ) {
       await new Promise((r) => setTimeout(r, 250));
-      const st = A.status();
+      const st = A.status({ fast: true });   // (the full status hashes every record's pixels: ~300 ms, a gap of the bench's own making)
       if ( !st.rebake && performance.now() - t0 > 1500 ) break;
     }
-  } finally { clearInterval(gi); clearInterval(hi); }
-  await new Promise((r) => setTimeout(r, 1500));
-  const ev = Trace().events.filter((e) => /rebake|prime-lanes|bake-lanes/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) }));
-  const top = [...gaps].sort((a, b) => b - a).slice(0, 12);
-  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: { n: gaps.length, max: top[0] ?? 0, over100: gaps.filter((g) => g > 100).length, top },
+    // the publish, the composite and the early-stored strokes' last swaps follow the pass: gaps there count apart (`tail`)
+    inTail = true; await new Promise((r) => setTimeout(r, tailS * 1000));
+  } finally { clearInterval(gi); clearInterval(hi); po?.disconnect(); }
+  const ev = Trace().events.slice(evBefore).filter((e) => /rebake|prime-lanes|bake-lanes|publish|composite-published/.test(e.reason)).map((e) => ({ r: e.reason, ...(e.data ?? {}) }));
+  const top = (a) => [...a].sort((x, y) => y - x).slice(0, 12), sum = (a) => ({ n: a.length, max: top(a)[0] ?? 0, over100: a.filter((g) => g > 100).length, top: top(a) });
+  return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: sum(gaps), tail: sum(tail), loaf: loaf.slice(0, 10),
     heapMB: { start: Math.round(start), peak: Math.round(peak), end: Math.round(heap()) }, events: ev.slice(-8) };
 }
 
