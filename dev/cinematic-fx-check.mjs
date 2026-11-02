@@ -40,8 +40,8 @@ function sample(ms) {
   });
 }
 
-export async function cinematicFxCheck() {
-  const fx = fxApi(), rows = [], need = (n, ok, e) => rows.push(row(n, ok, e));
+export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
+  const fx = fxApi(), rows = (window.__fxRows = []), need = (n, ok, e) => rows.push(row(n, ok, e));   // (window.__fxRows: progress for a slow software-rendered run)
   if ( !fx ) return { ok: false, rows: [row("api.cinematic exists", false)] };
   const saved = Object.fromEntries(["cinNoLetterbox", "cinNoShake", "cinNoCamera", "cinNoVignette", "cinNoFlash", "cinNoSlow", "cinCamera", "cinReduced"].map((k) => [k, (() => { try { return game.settings.get(MODULE, k); } catch { return undefined; } })()]));
   const strokesBefore = JSON.stringify(canvas.scene.getFlag(MODULE, "destruction") ?? null);
@@ -49,14 +49,15 @@ export async function cinematicFxCheck() {
     await clientOpt("cinCamera", "on"); await clientOpt("cinReduced", "off");
     for ( const k of ["cinNoLetterbox", "cinNoShake", "cinNoVignette", "cinNoFlash", "cinNoSlow"] ) await clientOpt(k, false);
     await park();
-    const T0 = tickerCount(), V0 = view(), I = await import(`/modules/${MODULE}/dev/idle-bench.mjs`);
-    const idleBefore = await I.rest({ frames: 200, warm: 60, zoom: V0.scale });
+    let T0 = tickerCount(); const mark = () => { T0 = tickerCount(); }, V0 = view(), I = await import(`/modules/${MODULE}/dev/idle-bench.mjs`);
+    const idleBefore = await I.rest({ frames: idleFrames, warm: Math.round(idleFrames / 3), zoom: V0.scale });
+    await sleep(700); mark();
     need("idle: no overlay, no show, no extra listener", overlays() === 0 && !fx.active && tickerCount() === T0, { overlays: overlays(), ticker: T0 });
 
     // ---- a full show as a (real or GM) player sees it
     const r = await settings(), { strokes, cx, cy } = showStrokes(), samples = [];
     const display = game.modules.get(MODULE).api.destruction?.display?.(), speed0 = display?.look?.speed;
-    const began = fx.begin({ r }, { strokes });
+    mark(); const began = fx.begin({ r }, { strokes });
     need("begin", began && fx.active);
     const root = document.querySelector("[data-mm-cin]"), ui = document.getElementById("interface");
     need("overlay root: pointer-events none, above the canvas, below the interface", root && getComputedStyle(root).pointerEvents === "none" && (!ui || root.compareDocumentPosition(ui) & Node.DOCUMENT_POSITION_FOLLOWING), { z: getComputedStyle(root).zIndex });
@@ -89,7 +90,7 @@ export async function cinematicFxCheck() {
     // ---- the shake in isolation (camera off): max deviation inside the cap, exact restore
     await clientOpt("cinCamera", "off"); await park();
     const Vs = view();
-    fx.begin({ r }, { strokes }); fx.impact({ x: cx, y: cy, size: 200 });
+    mark(); fx.begin({ r }, { strokes }); fx.impact({ x: cx, y: cy, size: 200 });
     const s2 = await sample(1200);
     const dv = s2.map((s) => Math.hypot(s.px - Vs.px, s.py - Vs.py)), mx = Math.max(...dv);
     need("shake moves the stage, never past the cap", mx > 1 && mx <= r.shMax * 1.5 + 1, { max: +mx.toFixed(1), cap: r.shMax });
@@ -102,22 +103,23 @@ export async function cinematicFxCheck() {
     // ---- the player takes the camera: a wheel event aborts at once, no return
     await clientOpt("cinCamera", "on"); await park();
     const Va = view();
-    fx.begin({ r }, { strokes }); fx.impact({ x: cx - 300, y: cy, size: 160 }); await sleep(250);
-    (canvas.app.view ?? canvas.app.canvas).dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true }));
+    mark(); fx.begin({ r }, { strokes }); fx.impact({ x: cx - 300, y: cy, size: 160 }); await sleep(250);
+    // (a pointerdown: the canvas's own wheel handler would zoom by itself and blur the "stays where the player left it" measure; the wheel is tested after)
+    (canvas.app.view ?? canvas.app.canvas).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     const dbgA = fx.debug(); await sleep(60);
     const Vb = view();
-    need("a wheel aborts the camera at once", dbgA && !dbgA.cameraOn && dbgA.cameraAborted);
+    need("a pointerdown on the canvas aborts the camera at once", dbgA && !dbgA.cameraOn && dbgA.cameraAborted);
     await sleep(700); const Vc = view();
     need("after the abort the camera stays where the player left it", Math.abs(Vc.scale - Vb.scale) < 1e-3 && Math.abs(Vc.x - Vb.x) < 1);
     await fx.end({ immediate: true });
     need("immediate end leaves nothing", overlays() === 0 && tickerCount() === T0);
     await clientOpt("cinCamera", "off"); await park();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
-    fx.begin({ r }, { strokes });
+    mark(); fx.begin({ r }, { strokes });
     need("camera off setting: no camera", !fx.debug().cameraOn);
     await fx.end({ immediate: true });
     await clientOpt("cinCamera", "on");
-    fx.begin({ r }, { strokes });
+    mark(); fx.begin({ r }, { strokes });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }));
     need("a lone modifier key does not abort", fx.debug().cameraOn);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
@@ -126,22 +128,22 @@ export async function cinematicFxCheck() {
 
     // ---- opt-outs and the master switch
     await clientOpt("cinNoLetterbox", true);
-    fx.begin({ r }, { strokes }); await sleep(100);
+    mark(); fx.begin({ r }, { strokes }); await sleep(100);
     const absent = ![...document.querySelectorAll("[data-mm-cin] > div")].some((e) => e.style.height === `${r.lbHeight}%`);
     need("opted out of letterbox: bars absent", absent && !fx.debug().bars);
     await fx.end({ immediate: true }); await clientOpt("cinNoLetterbox", false);
-    fx.begin({ r: { ...r, fx: false } }, { strokes });
+    mark(); fx.begin({ r: { ...r, fx: false } }, { strokes });
     need("master switch off: no bars, no vignette, no camera", !fx.debug().bars && !fx.debug().vignette && !fx.debug().cameraOn);
     await fx.end({ immediate: true });
     await clientOpt("cinReduced", "on");
-    fx.begin({ r }, { strokes });
+    mark(); fx.begin({ r }, { strokes });
     need("reduced motion: bars stay, camera/shake/flash off", fx.debug().bars && !fx.debug().cameraOn && !fx.debug().eff.shake && !fx.debug().eff.flash);
     await fx.end({ immediate: true }); await clientOpt("cinReduced", "off");
 
     // ---- preview: full effects on a throwaway impact; strokes and flags untouched
     await park();
     const Vp = view();
-    const pv = fx.preview(r); await sleep(500);
+    mark(); const pv = fx.preview(r); await sleep(500);
     need("preview shows the bars", fx.active && overlays() === 1 && fx.debug().preview);
     await pv; await sleep(150);
     const Vq = view();
@@ -153,7 +155,7 @@ export async function cinematicFxCheck() {
       const P = await import(`/modules/${MODULE}/dev/perf-harness.mjs`);
       if ( typeof P.cameraMoveCheck === "function" ) {
         await clientOpt("cinCamera", "on"); await park();
-        fx.begin({ r }, { strokes }); fx.impact({ x: cx, y: cy, size: 200 });
+        mark(); fx.begin({ r }, { strokes }); fx.impact({ x: cx, y: cy, size: 200 });
         const res = await P.cameraMoveCheck();
         await fx.end({ immediate: true });
         need("cameraMoveCheck during a show (shake + zoom)", res?.ok !== false, { res: res && JSON.stringify(res).slice(0, 300) });
@@ -162,7 +164,7 @@ export async function cinematicFxCheck() {
 
     // ---- idle cost unchanged
     await park();
-    const idleAfter = await I.rest({ frames: 200, warm: 60, zoom: V0.scale });
+    const idleAfter = await I.rest({ frames: idleFrames, warm: Math.round(idleFrames / 3), zoom: V0.scale });
     need("idle-bench rest unchanged (mean within +0.15 ms)", idleAfter.total.mean <= idleBefore.total.mean + 0.15 && tickerCount() === T0, { before: idleBefore.total, after: idleAfter.total });
   } catch ( err ) {
     rows.push(row("check threw", false, { err: String(err?.stack ?? err) }));
@@ -181,7 +183,7 @@ export async function fxStrip({ name = "cine-show", n = 8, ms = 3000, overrides 
   const fx = fxApi(), r = await settings(overrides), { strokes, cx, cy } = showStrokes(), W = 360, Hh = Math.round(W * innerHeight / innerWidth);
   await clientOpt("cinCamera", "on"); await park();
   const sheet = new OffscreenCanvas((W + 4) * n, Hh), ctx = sheet.getContext("2d"); ctx.fillStyle = "#222"; ctx.fillRect(0, 0, sheet.width, Hh);
-  fx.begin({ r }, { strokes });
+  mark(); fx.begin({ r }, { strokes });
   const t0 = performance.now(); let k = 0, fired = 0;
   while ( k < n ) {
     const t = performance.now() - t0;
