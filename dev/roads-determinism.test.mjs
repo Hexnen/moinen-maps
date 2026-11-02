@@ -52,5 +52,19 @@ for ( const [k, v] of Object.entries(CHANGES) ) {
   else check(!changed, `${k} does not change the simulation (display only)`);
 }
 
+// 4. the network build in slices (cars.mjs spreads it over frames): the same network as the one-go build, and it really yields
+{
+  const grid = M.blank(), stg = { k: "asphalt", w: 0.9, l: 2, o: 0 };
+  for ( let i = 0; i < 7; i++ ) { G.addStroke(grid.G, [200, 300 + i * 400, 3800, 300 + i * 400], stg, g, 45); G.addStroke(grid.G, [300 + i * 560, 200, 300 + i * 560, 2800], stg, g, 45); }
+  const R = canon({ ...grid, traffic: M.cleanTraffic({ density: 1 }) });
+  const t0 = performance.now(); const whole = T.buildNetwork(R, g, rect); const wholeMs = performance.now() - t0;
+  const steps = []; let last = performance.now(), n = 0, net = null;
+  for ( const it = T.networkSteps(R, g, rect); ; ) { const r = it.next(); const now = performance.now(); steps.push(now - last); last = now; n++; if ( r.done ) { net = r.value; break; } }
+  const strip = (x) => JSON.stringify(x, (k, v) => (v instanceof Map ? [...v] : v));
+  check(strip(net) === strip(whole), "networkSteps built to the end = buildNetwork (the same pieces, lanes, conflicts)");
+  check(n > 20, "the build yields many times (" + n + " steps over " + whole.lanes.length + " lanes)");
+  console.log("      7x7 grid: one-go build " + wholeMs.toFixed(1) + " ms, as slices: longest step " + Math.max(...steps).toFixed(2) + " ms of " + steps.reduce((a, b) => a + b, 0).toFixed(1) + " ms");
+}
+
 console.log(failed ? `${failed} check(s) failed` : "all checks passed");
 process.exit(failed ? 1 : 0);

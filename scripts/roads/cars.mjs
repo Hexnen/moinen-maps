@@ -1,4 +1,4 @@
-import { TrafficSim, buildNetwork, catchUp, carPose, EPOCH, DT } from "./traffic.mjs";
+import { TrafficSim, networkSteps, catchUp, carPose, EPOCH, DT } from "./traffic.mjs";
 import { carTexture, shadowTexture, beamTexture, glowTexture } from "./art.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
@@ -64,6 +64,9 @@ class CarSprite extends PIXI.Container {
   destroy() { this.beam.destroy(); super.destroy({ children: true }); }
 }
 
+/** Milliseconds of a frame the network build may take (cars.mjs TrafficView). */
+const BUILD_MS = 2;
+
 export class TrafficView {
   constructor() {
     this.root = new PIXI.Container();
@@ -74,19 +77,38 @@ export class TrafficView {
     canvas.primary.addChild(this.root);
     this.pools = [[], []];         // current epoch, fading epoch
     this.sim = null; this.old = null; this.oldFade = 0;
-    this.net = null; this.T = null; this.key = "";
+    this.net = null; this.T = null; this.key = ""; this.build = null;
     this.shown = true;
     this.stats = { frameMs: 0, cars: 0, visible: 0 };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
   }
 
-  /** New roads or traffic settings: a new network, and a simulation that catches up from the start of the epoch. */
+  /**
+   * New roads or traffic settings: a new network, and a simulation that catches up from the start of the epoch. The network is built over
+   * a few frames (BUILD_MS of each; the whole build was ~6 ms in one frame after every road edit): the cars of the old roads keep driving
+   * meanwhile, and a second edit while it builds starts it again.
+   */
   configure(R, g, rect, sceneKey) {
     this.T = R.traffic;
     this.key = sceneKey;
-    this.net = buildNetwork(R, g, rect);
     this.g = g;
+    this.build = networkSteps(R, g, rect);
+    this.#advanceBuild(BUILD_MS * 0.5);       // (a part of it right now: a small network is done at once)
+  }
+
+  #advanceBuild(budget = BUILD_MS) {
+    const t0 = performance.now();
+    for ( ;; ) {
+      const r = this.build.next();
+      if ( r.done ) { this.build = null; this.#adopt(r.value); return; }
+      if ( performance.now() - t0 >= budget ) return;
+    }
+  }
+
+  /** The finished network replaces the old one. */
+  #adopt(net) {
+    this.net = net;
     // the cars of the old roads keep driving (on their own network) until the new simulation has caught up, then fade out
     if ( this.sim?.ready ) { this.old = this.sim; this.oldFade = Infinity; this.pools.reverse(); this.#hideAll(0); }
     else if ( this.old && this.oldFade === Infinity ) this.#hideAll(0);       // edited again while catching up: keep showing the old cars
