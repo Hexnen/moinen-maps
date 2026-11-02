@@ -1,4 +1,5 @@
 import * as Water from "./water.mjs";
+import { cfgMemo } from "./cfg-memo.mjs";
 import * as Model from "./model.mjs";
 import { chain, nearest } from "./rods.mjs";
 import { wetAt, anyWet } from "./wet.mjs";
@@ -26,7 +27,9 @@ let parts = [];               // droplets, wake puffs and splash rings in flight
 let texCache = new Map();
 let dotTex = null;
 
-const cfg = () => ({ ...FX_DEFAULTS, ...(Water.state()?.params ?? {}) });
+const SEEN = new Set();   // (PERF: the tokens seen this frame, one set for ever)
+const cfgOf = cfgMemo(FX_DEFAULTS);
+const cfg = () => cfgOf(Water.state()?.params);   // (PERF: not a merged copy per frame)
 
 /* ---------------------------------------------------------------- textures */
 
@@ -191,7 +194,7 @@ function onTick() {
   const s = S(), P = cfg();
   const on = (s?.enabled || anyWet()) && P.fxOn && !REDUCED?.matches && (P.fxWho === "all" || game.user.isGM);
   if ( !on ) { if ( states.size || parts.length ) clear(); return; }
-  const now = performance.now(), k = P.fxStrength / 5, seen = new Set();
+  const now = performance.now(), k = P.fxStrength / 5, seen = SEEN; seen.clear();
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document;
     if ( !t.visible || doc.hidden && !game.user.isGM || (doc.elevation ?? 0) > 0 || (doc.elevation ?? 0) < 0 ) continue;

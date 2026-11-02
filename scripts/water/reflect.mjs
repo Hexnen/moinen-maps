@@ -1,4 +1,5 @@
 import * as Water from "./water.mjs";
+import { cfgMemo } from "./cfg-memo.mjs";
 import * as Model from "./model.mjs";
 import { wetAt as wetWorld, wetRegions, anyWet } from "./wet.mjs";
 import { perfLow } from "../perf-mode.mjs";
@@ -42,7 +43,9 @@ let root = null, maskSprite = null, maskCanvas = null, maskTex = null, tick = nu
 const states = new Map();
 
 const S = () => Water.state();
-const cfg = () => ({ ...REFLECT_DEFAULTS, ...(S()?.params ?? {}) });
+const SEEN = new Set();   // (PERF: the tokens seen this frame, one set for ever)
+const cfgOf = cfgMemo(REFLECT_DEFAULTS);
+const cfg = () => cfgOf(S()?.params);   // (PERF: not a merged copy per frame)
 const hexRGB = (c) => { const n = parseInt(String(c).replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 
 /* ---------------------------------------------------------------- the water mask */
@@ -276,7 +279,8 @@ function onTick() {
   // not drawn at all
   root.visible = !!(maskTex?.valid && maskSprite?.texture === maskTex);
   if ( !root.visible ) return;
-  const seen = new Set(), dl = { t: performance.now() + (globalThis.CONFIG?.moinenMaps?.reflectBudgetMs ?? DRAW_BUDGET_MS) };
+  const seen = SEEN; seen.clear();
+  const dl = { t: performance.now() + (globalThis.CONFIG?.moinenMaps?.reflectBudgetMs ?? DRAW_BUDGET_MS) };
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document;
     if ( !t.visible || (doc.hidden && !game.user.isGM) ) continue;

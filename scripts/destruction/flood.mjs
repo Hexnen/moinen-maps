@@ -1,4 +1,5 @@
 import { MODULE_ID, reducedMotion } from "../config.mjs";
+import { cachedSetting } from "../setting-cache.mjs";
 import * as D from "./destruction.mjs";
 import * as Model from "./model.mjs";
 import * as FC from "./flood-core.mjs";
@@ -55,7 +56,7 @@ const stats = { bakes: 0, bakeMs: 0, fetched: 0, cached: 0, frameMs: 0, entries:
 const flagOf = () => canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? {};
 const hkey = (h) => (h >>> 0).toString(36);
 const now = () => performance.now();
-const smoothWater = () => { try { return game.settings.get(MODULE_ID, "smoothWater") !== false; } catch { return true; } };
+const smoothWater = () => cachedSetting("smoothWater", true) !== false;
 const SYNC_MS = 3;               // per frame for making new holes' entries (sync)
 
 /* ================================================================ the worker (a water engine of its own) */
@@ -390,7 +391,11 @@ async function bake(e) {
 async function show(e, res, my = life) {
   freeTextures(e);
   e.res = res;
-  paintAll(e);
+  // PERF: while the scene is being opened (its reveal held back) the frames are painted here at once, as ever; afterwards (a stroke's
+  // water bake coming back) a few ms a frame like a repaint (repaintStep): all frames of a hole at once was 100-700 ms in the one task
+  // of the worker's message, and a new look re-bakes every hole
+  if ( Reveal.holding() || !e.prep || globalThis.CONFIG?.moinenMaps?.noSlicedFloodPaint ) paintAll(e);
+  else { await new Promise((done) => { e.repaintDone = done; repaintLater(e); }); if ( my !== life || e.dead ) return; }
   // a scene being opened (its one reveal still held back): the frames go to the GPU now, a slice at a time, so the reveal never pays
   // for them in one frame; "ready" only then (the damage waits for its holes, destruction.mjs prepareReveal)
   if ( Reveal.holding() ) { await Reveal.upload(e.tex.map((q) => q.t.baseTexture), 8); if ( my !== life || e.dead ) return; }
@@ -430,14 +435,14 @@ function paintAll(e) {
 const repaintQ = new Map();
 let repaintFn = null;
 function repaintLater(e) {
-  if ( !e.res ) return;
+  if ( !e.res ) { e.repaintDone?.(); e.repaintDone = null; return; }
   repaintQ.set(e, 0);
   if ( !repaintFn && canvas.app?.ticker ) { repaintFn = () => repaintStep(); canvas.app.ticker.add(repaintFn); }
 }
 function repaintStep() {
   const t0 = performance.now(), k = kit();
   for ( const [e, i0] of repaintQ ) {
-    if ( e.dead || !e.res || !e.prep ) { repaintQ.delete(e); continue; }
+    if ( e.dead || !e.res || !e.prep ) { repaintQ.delete(e); e.repaintDone?.(); e.repaintDone = null; continue; }
     const P = e.prep, n = e.res.frames.length;
     if ( !e.tex.length ) e.tex = e.res.frames.map(() => { const b = new Uint8Array(P.cw * P.ch * 4); return { buf: b, t: texture(b, P.cw, P.ch) }; });
     let i = i0;
@@ -448,7 +453,7 @@ function repaintStep() {
       i++;
       if ( performance.now() - t0 >= FILL_MS ) break;
     }
-    if ( i >= n ) { e.step = -1; repaintQ.delete(e); } else repaintQ.set(e, i);
+    if ( i >= n ) { e.step = -1; repaintQ.delete(e); e.repaintDone?.(); e.repaintDone = null; } else repaintQ.set(e, i);
     if ( performance.now() - t0 >= FILL_MS ) break;
   }
   if ( !repaintQ.size && repaintFn ) { canvas.app?.ticker?.remove(repaintFn); repaintFn = null; }
@@ -525,8 +530,7 @@ function tick() {
   const t0 = now();
   let gone = false;
   const smooth = smoothWater();             // (a settings read builds a setting document: once a frame, not once a hole)
-  const fill = { n: 0, ms: 0, on: !globalThis.CONFIG?.moinenMaps?.noFloodBudget, vw: null };
-  if ( fill.on ) fill.vw = D.destructionApi.display?.()?.view?.() ?? null;
+  const fill = { n: 0, ms: 0, on: !globalThis.CONFIG?.moinenMaps?.noFloodBudget, vw: null, seen: false };
   for ( const [h, e] of entries ) {
     const g = e.g;
     // (its group gone: the next sync moves the hole into the area's new group - rebind - or lets it go)
@@ -541,6 +545,7 @@ function tick() {
     // the loop stands still exactly when the painted water's does (the OS setting), so the two never part
     const idx = n < 2 || REDUCED_OS?.matches ? 0 : Math.floor(t0 / ms) % n;
     if ( e.fillAt !== null ) {
+      if ( fill.on && !fill.seen ) { fill.seen = true; fill.vw = D.destructionApi.display?.()?.view?.() ?? null; }    // (the view only while a hole fills: not an object per frame at rest)
       const el = t0 - e.fillAt;
       if ( el < 0 ) { e.sprite.texture = PIXI.Texture.EMPTY; continue; }
       if ( reducedMotion() ) {
@@ -636,7 +641,7 @@ function onUpdateScene(scene, changed) {
   const f = changed.flags?.[MODULE_ID];
   if ( !f ) return;
   if ( FLAG in f || `-=${FLAG}` in f ) {
-    if ( f[FLAG]?.colors ) { look = null; for ( const e of entries.values() ) paintAll(e); }
+    if ( f[FLAG]?.colors ) { look = null; for ( const e of entries.values() ) repaintLater(e); }
     // a player waiting for the GM's upload: it is there now
     for ( const e of entries.values() ) if ( e.state === "stale" && e.waited && flagOf().baked?.[hkey(e.hash)]?.key === e.key ) { clearTimeout(e.waitTimer); load(e); }
   }
@@ -698,7 +703,7 @@ async function ensureMapColors(upd) {
     upd[`flags.${MODULE_ID}.${FLAG}.colors`] = cols;
     // shown here at once (the flag follows with the upload)
     mapColors = cols; look = null;
-    for ( const e of entries.values() ) paintAll(e);
+    for ( const e of entries.values() ) repaintLater(e);
   }
 }
 let mapColors = null;
