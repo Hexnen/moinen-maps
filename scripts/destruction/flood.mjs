@@ -518,6 +518,7 @@ function fillSeen(e, v) {
 function tick() {
   const t0 = now();
   let gone = false;
+  const smooth = smoothWater();             // (a settings read builds a setting document: once a frame, not once a hole)
   const fill = { n: 0, ms: 0, on: !globalThis.CONFIG?.moinenMaps?.noFloodBudget, vw: null };
   if ( fill.on ) fill.vw = D.destructionApi.display?.()?.view?.() ?? null;
   for ( const [h, e] of entries ) {
@@ -562,7 +563,7 @@ function tick() {
     e.sprite.alpha = 1;
     e.sprite.texture = e.tex[idx].t;
     // at rest: the loop cross-faded (the same frame time, frame index and mix as the painted water, so the two stay in step)
-    const tk = canvas.app.ticker, [i0, j0, m] = n < 2 || REDUCED_OS?.matches ? [idx, idx, 0] : loopMix(tk.lastTime ? tk.lastTime + (tk.elapsedMS || 0) : t0, ms, n, smoothWater());
+    const tk = canvas.app.ticker, [i0, j0, m] = n < 2 || REDUCED_OS?.matches ? [idx, idx, 0] : loopMix(tk.lastTime ? tk.lastTime + (tk.elapsedMS || 0) : t0, ms, n, smooth);
     const blend = m > 0.002 && e.mix;
     if ( blend ) { const a = e.tex[i0].t, b = e.tex[j0].t; e.sprite.texture = a; e.mix.set(a, b, m, a.width, a.height); }
     else if ( i0 !== idx ) e.sprite.texture = e.tex[i0].t;
