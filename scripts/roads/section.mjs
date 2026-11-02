@@ -1,5 +1,6 @@
 import * as Editor from "./editor.mjs";
 import { mountRoadControls } from "./panel.mjs";
+import { warmUp } from "./art.mjs";
 
 /**
  * Roads as a workspace section (scripts/workspace/registry.mjs: WorkspaceSection). Registered by scripts/roads/workspace.mjs, which
@@ -11,7 +12,7 @@ import { mountRoadControls } from "./panel.mjs";
 
 export const ROAD_TOOLS = { "mm-r-pick": null, "mm-r-draw": "draw", "mm-r-edit": "edit", "mm-r-erase": "erase" };
 
-let watching = false;
+let watching = false, warmedSoon = false;
 /** Whatever tool the workspace hands over next (another section's, or none): the pen goes down unless it is a road tool. */
 function watchTools() {
   if ( watching ) return;
@@ -32,6 +33,8 @@ export function roadsSection() {
     ],
     onToolChange: (tool, active) => { if ( tool in ROAD_TOOLS ) Editor.setMode(active ? ROAD_TOOLS[tool] : null); },
     bar: (host, ctx) => {
+      // PERF: the first road of a page load froze ~250 ms (GPU paths compiled at the first real bake): warm them when the section opens
+      if ( !warmedSoon ) { warmedSoon = true; const run = () => warmUp(); if ( globalThis.requestIdleCallback ) requestIdleCallback(run, { timeout: 3000 }); else setTimeout(run, 500); }
       if ( !ROAD_TOOLS[ctx?.tool] ) { host.innerHTML = `<span class="mm-ws-hint">${foundry.utils.escapeHTML(game.i18n.localize("MOINENMAPS.Roads.pickHint"))}</span>`; return; }
       const m = mountRoadControls(host, ["bar"], { status: false });
       return () => m.destroy();

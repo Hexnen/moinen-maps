@@ -479,6 +479,39 @@ export function kindSwatch(kind, w = 64, h = 22) {
   return c.toDataURL();
 }
 
+/**
+ * PRE-WARM (PERF): the first road of a page load cost ~200-300 ms spread over a few 60 ms frames with no script in them: the GPU
+ * process compiling the 2D canvas' blur / dash / stroke raster paths and PIXI's first upload of a mipmapped canvas. A tiny network
+ * of every kind (shadow blur, ink, kerbs, textures, markings, zebras) is baked on a small canvas and bound as a texture once, in an
+ * idle moment, so the real first road finds those paths compiled. Draws nothing on the scene; once per page.
+ */
+let warmed = false;
+export function warmUp() {
+  if ( warmed || !globalThis.canvas?.app?.renderer ) return false;
+  warmed = true;
+  try {
+    const g = 100, nodes = new Map(), edges = new Map();
+    const N = (id, x, y) => nodes.set(id, { id, x, y });
+    N(1, 60, 100); N(2, 460, 100); N(3, 260, 40); N(4, 260, 460); N(5, 60, 300); N(6, 460, 300);
+    let id = 10;
+    for ( const [a, b, k, w] of [[1, 2, "asphalt", 1], [3, 4, "asphalt", 0.9], [5, 6, "cobble", 0.8], [1, 5, "dirt", 0.7], [2, 6, "path", 0.4]] ) {
+      const A = nodes.get(a), B = nodes.get(b), mx = (A.x + B.x) / 2 + (k === "dirt" ? 30 : 0), my = (A.y + B.y) / 2;
+      edges.set(++id, { id, a, b, pts: [A.x, A.y, mx, my, B.x, B.y], k, w, l: 2, o: k === "path" ? 1 : 0 });
+    }
+    const R = { G: { nodes, edges, next: 100 }, look: { shadow: 0.6, ink: 1, marks: true, crossings: true, guides: "tool" } };
+    const tiles = bakeRoads(R, g, { budget: TILE * TILE * 0.2 });
+    const rd = canvas.app.renderer;
+    for ( const t of tiles ) {
+      if ( !t.canvas ) continue;
+      const base = PIXI.BaseTexture.from(t.canvas);
+      base.mipmap = PIXI.MIPMAP_MODES.ON;
+      rd.texture.bind(base, 0);                // uploads it now (the canvas is drawn by the GPU here)
+      base.destroy();
+    }
+    return true;
+  } catch { return false; }
+}
+
 export function destroyTextures() {
   for ( const t of TEX.values() ) if ( isLive(t) ) t.destroy(true);
   TEX.clear();
