@@ -6,7 +6,7 @@ import { trackMarkers } from "../workspace/markers.mjs";
  * Painting the damage (GM): a brush and an eraser on the mask grid, a ring cursor and a translucent overlay of the mask (amber =
  * cracked, orange = broken, red = crater) while a tool is in hand. Strokes edit the mask at once; the bake and the save follow a
  * moment after the last stroke. Shift while painting deepens what is there by one level per stroke (layered passes).
- * Keys: [ ] brush size, 1 2 3 level, Shift+0..9 cause (0: the scene default), , . previous / next cause, Ctrl+Z undo, Escape
+ * Keys: [ ] brush size, 1 2 3 level, Shift+0..9 cause (0: the scene default), , . previous / next cause, Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Escape
  * cancels the stroke.
  */
 const OVERLAY = [null, [242, 193, 78], [239, 138, 58], [224, 69, 58]];
@@ -206,6 +206,12 @@ function undoStroke() {
   host?.undo?.();                 // (it redraws the overlay inside the undone stroke's box)
 }
 
+/** Redo: the stroke the last undo took back comes again. */
+function redoStroke() {
+  if ( stroke ) return;
+  host?.redo?.();
+}
+
 const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)); };
 
 /* ---------------------------------------------------------------- lifecycle */
@@ -226,7 +232,8 @@ export function onCanvasReady() {
     key: (e) => {
       if ( typing(e) ) return;
       const ours = e.target instanceof Element && !!e.target.closest?.(".mm-d-actions, [data-tool^='mm-d'], [data-act='detonate']");
-      if ( (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && (mode || ours) ) { e.preventDefault(); e.stopPropagation(); undoStroke(); return; }
+      const k = e.key.toLowerCase();
+      if ( (e.ctrlKey || e.metaKey) && !e.altKey && (k === "z" || k === "y") && (mode || ours) ) { e.preventDefault(); e.stopPropagation(); if ( k === "y" || e.shiftKey ) redoStroke(); else undoStroke(); return; }
       if ( !mode ) return;
       if ( e.key === "Escape" && stroke ) { e.preventDefault(); e.stopPropagation(); endStroke(); }
       else if ( !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "[" || e.key === "]") ) {

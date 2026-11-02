@@ -11,6 +11,7 @@
  */
 import { MODULE_ID, sceneConfig } from "./config.mjs";
 import { addDeletion } from "./flag-diff.mjs";
+import { listOf, patchFor } from "./districts-store.mjs";
 import { labelCfg } from "./labels.mjs";
 
 const FLAG = "districts";
@@ -64,7 +65,7 @@ export function attrsOf(d) {
   }
   return (d.attrs ?? []).map((a) => ({ players: true, ...a }));
 }
-const sceneList = () => canvas.scene?.flags?.[MODULE_ID]?.[FLAG] ?? [];
+const sceneList = () => listOf(canvas.scene?.flags?.[MODULE_ID]);
 const districtById = (id) => sceneList().find((d) => d.id === id);
 
 /** The two attributes most districts want, localised. They always head the suggestion list. */
@@ -106,10 +107,11 @@ export function writeAttrs(districtId, attrs) {
     if ( JSON.stringify(before) === JSON.stringify(clean) ) return true;
     const store = await ensureStore();
     await store.update({ [`flags.${MODULE_ID}.store.${scene.id}.${districtId}`]: clean });
-    const list = foundry.utils.deepClone(sceneList()), cur = list.find((x) => x.id === districtId);
+    const cur = sceneList().find((x) => x.id === districtId);
     if ( cur ) {
       const pub = clean.filter((a) => a.players).map(({ id, name, value }) => ({ id, name, value }));
-      if ( !foundry.utils.objectsEqual(cur.attrs ?? [], pub) ) { cur.attrs = pub; await scene.update({ [`flags.${MODULE_ID}.${FLAG}`]: list }); }
+      // (only this district's `attrs` key: another GM's edits of other districts are not touched)
+      if ( !foundry.utils.objectsEqual(cur.attrs ?? [], pub) ) await scene.update(patchFor(scene.flags?.[MODULE_ID], districtId, { attrs: pub }, `flags.${MODULE_ID}`));
     }
     diffAndFire(districtId, before, clean);
     return true;

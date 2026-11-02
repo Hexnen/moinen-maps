@@ -224,14 +224,22 @@ function mountLook(host) {
     ${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}${range("edge")}
     ${optCheck({ name: "p.jagged", label: T("Destr.f.jagged"), checked: P.jagged, hint: T("Destr.h.jagged") })}
     <div class="mm-d-jag"${P.jagged ? "" : " hidden"}>${range("jag")}</div>
-    ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}</div>`;
+    ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}
+    <p class="mm-ws-hint">${esc(T("Destr.lookNewOnly"))}</p>
+    <button type="button" class="mm-ws-btn" data-act="applyLook" data-tooltip="${esc(T("Destr.applyLookHint"))}"><i class="fa-solid fa-paintbrush" inert></i> ${esc(T("Destr.applyLook"))}</button></div>`;
+  const onApply = async (ev) => {
+    const b = ev.target.closest?.("[data-act=applyLook]"); if ( !b || !game.user.isGM ) return;
+    const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.applyLook") }, content: `<p>${esc(T("Destr.applyLookConfirm"))}</p>`, rejectClose: false, modal: true });
+    if ( ok ) ui.notifications.info(game.i18n.format("MOINENMAPS.Destr.applyLookDone", { n: D.applyParams() }));
+  };
+  host.addEventListener("click", onApply);
   // the tearing slider only while torn borders are on
   const id = Hooks.on("moinenMapsDestruction", (kind) => {
     if ( kind !== "loaded" && kind !== "params" ) return;
     const j = host.querySelector(".mm-d-jag"); if ( j ) j.hidden = !(D.state()?.params ?? Model.PARAM_DEFAULTS).jagged;
   });
   const off = bindParams(host);
-  return () => { off(); Hooks.off("moinenMapsDestruction", id); };
+  return () => { off(); host.removeEventListener("click", onApply); Hooks.off("moinenMapsDestruction", id); };
 }
 
 function mountMotion(host) {

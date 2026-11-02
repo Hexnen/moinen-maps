@@ -58,7 +58,7 @@ const v2 = { v: 2, ap: S0.ap, seed: 4242, enabled: true, params: { ...Model.PARA
 const scene = { id: "SCN", width: 1200, height: 800, flags: { [MID]: { destruction: v2, destructionPaths: { obj2x: [5, 5, 0, 20, 20, 30] } } } };
 const load = (sc) => Store.attachPaths(Model.load(sc), sc);
 const sig = (S, sc) => ({ key: Store.makeKey(sc, S, "bg.webp"), sigs: S.objects.map((o) => `${o.id}:${Store.objSig(S, o)}`).join(" ") });
-const view = (S) => J(S.objects.map(({ s, ...o }) => o));
+const view = (S) => J(S.objects.map(({ s, ...o }) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a < b ? -1 : 1))));
 
 const A = load(scene), A2 = load(structuredClone(scene));
 check(view(A) === view(A2) && J(A.objects.map((o) => o.s)) === J(A2.objects.map((o) => o.s)), "layout 2 loads the same objects and places twice (deterministic)");

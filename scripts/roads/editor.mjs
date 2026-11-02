@@ -7,7 +7,8 @@ import { trackMarkers } from "../workspace/markers.mjs";
 
 /**
  * Painting roads (GM). Two tools:
- *  - draw: drag to paint a road freehand, or click point after point and finish with a double-click, Enter, a click on the last
+ *  - draw: drag to paint a road freehand (a drag during point-by-point ends that road and draws its own; a lone first click expires after 3 s),
+ *    or click point after point and finish with a double-click, Enter, a click on the last
  *    point or a right-click. Ends snap to a nearby road or junction; crossings become junctions. Alt-click a road to give it the
  *    current brush (kind, width, lanes, one-way); Alt+Shift-click turns a one-way road around; right-click a road to delete it.
  *  - erase: drag a brush over roads to cut them.
@@ -219,7 +220,16 @@ function addRoad(ctrl) {
   Roads.edit((G) => Graph.addStroke(G, ctrl, { k: b.k, w: b.w, l: b.l, o: b.o }, g(), snapR()).length > 0);
 }
 
+/** A lone first point (a click that was not meant to start a road) goes by itself, back to freehand. */
+const POLY_LONE_MS = 3000;
+let polyTimer = 0;
+const armLone = () => {
+  clearTimeout(polyTimer); polyTimer = 0;
+  if ( poly && poly.length <= 2 ) polyTimer = setTimeout(() => { polyTimer = 0; if ( poly && poly.length <= 2 ) { poly = null; polyStraight = []; redraw(); } }, POLY_LONE_MS);
+};
+
 function finishPoly() {
+  clearTimeout(polyTimer); polyTimer = 0;
   const p = poly ? polyPoints(false) : null; poly = null; polyStraight = [];
   if ( p && p.length >= 4 ) addRoad(p);
   redraw();
@@ -262,7 +272,9 @@ function onMove(ev) {
     const lx = eraseTrail[eraseTrail.length - 2], ly = eraseTrail[eraseTrail.length - 1];
     if ( Math.hypot(p.x - lx, p.y - ly) > 2 / zoom() ) eraseTrail.push(p.x, p.y);
   } else if ( press && !press.right ) {
-    if ( !press.drag && Math.hypot(ev.clientX - press.sx, ev.clientY - press.sy) > 6 && !poly ) press.drag = true;
+    // a drag is a freehand stroke even while a road is being clicked point by point: that road ends where it is (a lone first point
+    // is dropped) and the drag draws its own - drags never turn into clicks
+    if ( !press.drag && Math.hypot(ev.clientX - press.sx, ev.clientY - press.sy) > 6 ) { if ( poly ) finishPoly(); press.drag = true; }
     if ( press.drag ) {
       const lx = press.raw[press.raw.length - 2], ly = press.raw[press.raw.length - 1];
       if ( Math.hypot(p.x - lx, p.y - ly) > 3 / zoom() ) press.raw.push(p.x, p.y);
@@ -308,20 +320,20 @@ function onUp(ev) {
   if ( !poly ) {
     const R = Roads.state(), s = R ? Graph.snapTarget(R.G, q.x, q.y, snapR(), g()) : null;
     if ( s ) q = { x: s.x, y: s.y };
-    poly = [q.x, q.y]; polyStraight = [];
+    poly = [q.x, q.y]; polyStraight = []; armLone();
   } else {
     const lx = poly[poly.length - 2], ly = poly[poly.length - 1];
     const onLast = Math.hypot(q.x - lx, q.y - ly) < 10 / zoom();
     if ( dbl || onLast ) { finishPoly(); return; }
     // Shift: a straight span at a multiple of 15 degrees (roads drawn on a grid)
     if ( ev.shiftKey ) q = Graph.snapAngle(lx, ly, q.x, q.y);
-    poly.push(q.x, q.y); polyStraight.push(ev.shiftKey);
+    poly.push(q.x, q.y); polyStraight.push(ev.shiftKey); armLone();
   }
   redraw();
 }
 
 /** Drop whatever gesture is under way (also a shape drag of the edit tool: the real roads come back on screen). */
-function cancel() { press = null; poly = null; polyStraight = []; eraseTrail = null; Shape.cancel(); redraw(); }
+function cancel() { clearTimeout(polyTimer); polyTimer = 0; press = null; poly = null; polyStraight = []; eraseTrail = null; Shape.cancel(); redraw(); }
 
 /** G: switch the brush between a guide line and the last painted kind. */
 function toggleGuide() {

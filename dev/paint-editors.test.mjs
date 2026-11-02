@@ -34,4 +34,10 @@ ok(/if \( s\.changed \) \{ redo\.length = 0; Water\.edited\(\); \}/.test(src), "
 ok(/undo\.length = 0; redo\.length = 0;/.test(src), "teardown empties both stacks");
 const step = src.slice(src.indexOf("function step("), src.indexOf("const undoStroke"));
 ok(step.indexOf("other.push(snapshotOf(S, u.layers))") > 0 && step.indexOf("other.push(") < step.indexOf("S.masks[n].set(data)"), "the masks an undo replaces are kept (on the other stack) before they are overwritten");
+
+// 3. roads: a drag while clicking point by point is a freehand stroke (it ends the clicked road); a lone first click expires
+const rsrc = fs.readFileSync(path.join(root, "scripts/roads/editor.mjs"), "utf8");
+ok(/> 6 \) \{ if \( poly \) finishPoly\(\); press\.drag = true; \}/.test(rsrc), "a drag during point-by-point ends that road and starts a freehand stroke");
+ok(!/> 6 && !poly \) press\.drag/.test(rsrc), "a drag is no longer ignored while a road is clicked");
+ok(/POLY_LONE_MS = 3000/.test(rsrc) && /poly\.length <= 2/.test(rsrc) && /armLone\(\)/.test(rsrc), "a lone first click expires after 3 s");
 console.log(`paint-editors: ${n} checks ok${pub ? "" : " (Foundry install not found: icon files not checked on disk)"}`);

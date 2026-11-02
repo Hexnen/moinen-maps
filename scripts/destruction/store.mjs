@@ -3,6 +3,7 @@ import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
 import { fullSigs, SUBSTRATE_VERSION } from "./substrate.mjs";
 import * as Model from "./model.mjs";
+import { PIN_DEFAULTS } from "./stroke-params.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
 
 /**
@@ -25,9 +26,13 @@ const fnv = (a, h = 2166136261) => { for ( let i = 0; i < a.length; i++ ) h = Ma
 const enc = (s) => new TextEncoder().encode(s);
 
 /** The settings that change a bake (the scene's default cause only when it is set: a scene from before causes keeps its keys). */
-const paramStr = (S) => Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !S.params.cause)).sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
+/** The scene's settings as the keys see them: a scene that pins (stroke-params.mjs) has its look settings in its strokes, so the scene's current ones are not part of any key. */
+const keyParams = (S) => S.params.pin ? { ...S.params, ...PIN_DEFAULTS } : S.params;
+const pjOf = (S) => JSON.stringify(keyParams(S));
+const paramStr = (S) => { const P = keyParams(S); return Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !P.cause)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|"); };
 /** One stroke's own inputs (its path when the damage follows the stroke, or when it is a tear: the path is its spine). */
-const objStr = (S, o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${(S.params.directional || Model.TYPES[o.t] === "gash") && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}${o.c ? ",c" + o.c : ""}`;
+const objStr = (S, o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${((S.params.pin ? o.pr?.directional : S.params.directional) || Model.TYPES[o.t] === "gash") && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}${o.c ? ",c" + o.c : ""}${o.pr ? ",r" + prStr(o.pr) : ""}`;
+const prStr = (pr) => Object.keys(pr).sort().map((k) => `${k}=${JSON.stringify(pr[k])}`).join("&");
 
 export function makeKey(scene, S, bgPath) {
   // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke; their cause when they have one)
@@ -43,8 +48,9 @@ export function makeKey(scene, S, bgPath) {
  */
 export function baseKey(scene, S, bgPath) {
   const defs = Model.PARAM_DEFAULTS ?? {};
-  const ps = Object.keys(S.params).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !S.params.cause) && !(k in defs && JSON.stringify(S.params[k]) === JSON.stringify(defs[k])))
-    .sort().map((k) => `${k}=${JSON.stringify(S.params[k])}`).join("|");
+  const P = keyParams(S);
+  const ps = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !(k === "cause" && !P.cause) && !(k in defs && JSON.stringify(P[k]) === JSON.stringify(defs[k])))
+    .sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
   return `p:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(`${ps}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`)).toString(36)}`;
 }
 
@@ -92,7 +98,7 @@ export const objSig = (S, o) => fnv(enc(objStr(S, o))).toString(36);
 export function sigsOf(S) {
   // (kept per state: the same strokes and settings give the same signatures; computing them for 250 strokes holds the page ~55 ms
   // with warm caches, ~660 ms on a scene's first load - so they are also kept by their inputs' digest, and in IndexedDB across loads)
-  const memo = sigMemo.get(S), pj = JSON.stringify(S.params);
+  const memo = sigMemo.get(S), pj = pjOf(S);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return memo.out;
   const key = sigsKey(S, pj);
   let out = sigStore.get(key);
@@ -110,7 +116,7 @@ const sigMemo = new WeakMap();
 /** Signatures by the digest of everything they are made of (the strokes' own inputs, their order, the settings, the grid). */
 const sigStore = new Map();
 const rememberSigs = (key, out) => { sigStore.delete(key); sigStore.set(key, out); while ( sigStore.size > 6 ) sigStore.delete(sigStore.keys().next().value); };
-export function sigsKey(S, pj = JSON.stringify(S.params)) {
+export function sigsKey(S, pj = pjOf(S)) {
   const b = enc(`${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|${(S.objects ?? []).map((o) => objStr(S, o)).join(";")}`);
   return `sg1:${S.mw}x${S.mh}:${fnv(b).toString(36)}${fnv(b, 0x9747b28c).toString(36)}:${(S.objects ?? []).length}`;
 }
@@ -118,9 +124,9 @@ export function sigsKey(S, pj = JSON.stringify(S.params)) {
  * Read the state's signatures ahead from a store (`get(key)` -> the array or null; IndexedDB in the page) so `sigsOf` finds them
  * instead of computing them. Only an array of the right length with every field is taken (a damaged entry is computed again).
  */
-export const hasSigs = (S) => { const m = sigMemo.get(S); return !!m && m.objects === S.objects && m.pj === JSON.stringify(S.params); };
+export const hasSigs = (S) => { const m = sigMemo.get(S); return !!m && m.objects === S.objects && m.pj === pjOf(S); };
 export async function warmSigs(S, get, compute = null) {
-  const memo = sigMemo.get(S), pj = JSON.stringify(S.params);
+  const memo = sigMemo.get(S), pj = pjOf(S);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return true;
   const key = sigsKey(S, pj);
   if ( sigStore.has(key) ) return true;
@@ -139,7 +145,7 @@ async function readSigs(S, key, get, compute) {
   // not kept (a client's first load of this state): computed off the page (`compute(msg)`: the codec worker's "sigs" job) - the
   // dependency test over every pair of strokes held the page 220-650 ms
   if ( !compute ) return false;
-  const objs = (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, own: objSig(S, o), bytes: o.k ? null : Model.objBytes(o) }));
+  const objs = (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, pr: o.pr, own: objSig(S, o), bytes: o.k ? null : Model.objBytes(o) }));
   try { out = await compute({ kind: "sigs", objs, P: S.params, K: Model.K }); } catch { out = null; }
   if ( !whole(out) ) return false;
   rememberSigs(key, out);

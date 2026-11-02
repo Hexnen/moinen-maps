@@ -20,6 +20,7 @@
 
 import { bakeTear } from "./tear.mjs";
 import { SubstrateSource, finishOverSubstrate } from "./substrate.mjs";
+import { effP } from "./stroke-params.mjs";
 import { collapseOutline, collapseSeeds, collapseFate, collapseShade, collapseLip, slabFace } from "./collapse.mjs";
 import { boltTree, lineCells, sigilCells } from "./pixel-fx.mjs";
 import { boltTree as boltTreeK, lineCells as lineCellsK } from "./pixel-fx.mjs";   // (crack strokes: kind code, not cause code)
@@ -517,7 +518,7 @@ export function causeKit(K) {
 /* ================================================================ the bake */
 
 /** Settings that only change playback, not the picture (never part of a bake key). */
-export const LIVE_PARAMS = new Set(["anim", "idle", "fxWho", "entry", "entrySpeed", "entryPower"]);
+export const LIVE_PARAMS = new Set(["anim", "idle", "fxWho", "entry", "entrySpeed", "entryPower", "pin"]);
 function fnvInts(h, ...vals) { for ( const v of vals ) { h = Math.imul(h ^ (v & 0xffff), 16777619); h = Math.imul(h ^ ((v >>> 16) & 0xffff), 16777619); } return h; }
 function fnvStr(s, h = 2166136261) { for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h; }
 
@@ -536,15 +537,24 @@ function fnvStr(s, h = 2166136261) { for ( let i = 0; i < s.length; i++ ) h = Ma
  */
 export function bake(I, cache = null) {
   const t0 = Date.now();
-  const P = I.params, seed = I.seed | 0, K = I.K, AW = I.aw, AH = I.ah;
+  const PG = I.params, seed = I.seed | 0, K = I.K, AW = I.aw, AH = I.ah;
   const progress = I.onProgress ?? (() => {});
-  const jag = P.jagged ? clamp(P.jag ?? 0.6, 0, 1) : 0;
+  // the look settings are each STROKE's own (stroke-params.mjs: `ob.pr`, its cause `ob.c`); PG is only the scene's, for a scene that does not pin
+  const jagOf = (P) => P.jagged ? clamp(P.jag ?? 0.6, 0, 1) : 0;
   // an area's hash holds only the settings that change it: the torn-border amount only when torn borders are on (below), "follows
   // the stroke" only through the brush paths that cross the area's window. Toggling a setting an area does not use is a cache hit.
   // the scene's default cause too: it only counts for strokes without a cause of their own (below, per stroke)
   const OWN = new Set(["jagged", "jag", "directional", "cause"]);
-  const paramStr = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !OWN.has(k)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
-  const head = fnvInts(fnvStr(`${CORE_VERSION}|${seed}|${paramStr}|${I.mapKey ?? ""}|${AW}x${AH}`), jag ? Math.round(jag * 1000) + 1 : 0);
+  const heads = new Map();
+  const headOf = (P) => {
+    let h = heads.get(P);
+    if ( h === undefined ) {
+      const jag = jagOf(P), paramStr = Object.keys(P).filter((k) => !LIVE_PARAMS.has(k) && !OWN.has(k)).sort().map((k) => `${k}=${JSON.stringify(P[k])}`).join("|");
+      h = fnvInts(fnvStr(`${CORE_VERSION}|${seed}|${paramStr}|${I.mapKey ?? ""}|${AW}x${AH}`), jag ? Math.round(jag * 1000) + 1 : 0);
+      heads.set(P, h);
+    }
+    return h;
+  };
 
   /* ---------------------------------------------------------------- 1. damage objects: one per brush stroke */
   // Every stroke is an object of its own (I.objects, in creation order): its field is read from its own pixels only, so it looks the
@@ -552,7 +562,6 @@ export function bake(I, cache = null) {
   // here ever reads another object. An object's connected parts are baked separately; their random streams come from the stroke's id
   // and their first pixel.
   const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [], baked: 0, reused: 0 };
-  const edge = clamp(P.edge ?? 0.7, 0, 1);
   const comps = [];
   // (`skip`: a stroke the caller does not want baked this time - its record is elsewhere; `k`: an erase stroke)
   (I.objects ?? []).forEach((ob, index) => { if ( !ob.k && !ob.skip ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
@@ -560,6 +569,7 @@ export function bake(I, cache = null) {
   progress(0.2);
 
   function partsOf(ob) {
+    const P = effP(ob, PG), jag = jagOf(P), edge = clamp(P.edge ?? 0.7, 0, 1);
     const T = ob.t & 7, bytes = ob.bytes;
     // this stroke's mask alone
     const lvT = (mx, my) => { const x = mx - ob.x0, y = my - ob.y0; return (x < 0 || y < 0 || x >= ob.w || y >= ob.h) ? 0 : bytes[y * ob.w + x] & 3; };
@@ -686,14 +696,13 @@ export function bake(I, cache = null) {
   }
 
   /* ---------------------------------------------------------------- 2. per part: window, hash, cache or bake */
-  const scatter = clamp(P.scatter ?? 1, 0.2, 3);
   const results = [];
   // THE SUBSTRATE (substrate.mjs): an area reads, inside its own pixels only, the PLAIN look (baked from its own data alone) of the
   // older strokes in its read set; with nothing older there it bakes exactly as before. Older strokes never read newer ones, and no
   // stroke waits for another's bake: the plain looks are baked here as needed (cached), so every stroke can be baked in any order.
   const plainOf = new Map();
   // (I.under: index -> sprites of plain looks the caller already has; I.plain: bake the requested strokes' plain looks only)
-  const src = new SubstrateSource(I.objects, I.under, P, K, (j) => {
+  const src = new SubstrateSource(I.objects, I.under, PG, K, (j) => {
     if ( !plainOf.has(j) ) { const ob = I.objects[j], out = []; for ( const c of partsOf(ob) ) { const r = areaOf({ ...c, index: j, ob }, false); if ( r ) out.push(r); } plainOf.set(j, out); }
     return plainOf.get(j);
   });
@@ -713,7 +722,7 @@ export function bake(I, cache = null) {
     // room for everything that leaves the part at the current settings: thrown chips (throw), the halo, hairline cracks. What would
     // still reach the edge of a capped window is shortened smoothly in bakeArea (never clamped: that piled chips in straight lines and
     // cut halos and cracks along the window's edge)
-    const halo = clamp(P.halo ?? 0.6, 0, 1);
+    const P = effP(c.ob, PG), jag = jagOf(P), head = headOf(P), halo = clamp(P.halo ?? 0.6, 0, 1), scatter = clamp(P.scatter ?? 1, 0.2, 3);
     const reach = Math.max(span * 0.6 * scatter + 3 * scatter + 14, span * 0.7 * halo + 10, span * 0.55 + 12);
     const margin = Math.round(Math.min(256, Math.max(14, reach)));
     const RX = Math.max(0, FX + x0 - margin), RY = Math.max(0, FY + y0 - margin);
