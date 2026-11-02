@@ -254,13 +254,16 @@ function armDry(e) {
   clearTimeout(e.dryTimer);
   const d = FC.dryDelay(e.tries);
   if ( d === null ) { e.state = "none"; stats.dryGaveUp = (stats.dryGaveUp ?? 0) + 1; return; }
+  if ( e.tries === FC.DRY_TRIES ) stats.drySlow = (stats.drySlow ?? 0) + 1;     // (past the quick tries: one every DRY_SLOW ms, never given up)
   e.dryTimer = setTimeout(() => { if ( e.state === "dry" && !e.dead && entries.get(e.hash) === e ) retryDry(e); }, d);
 }
 
 function retryDry(e, soft = false) {
   if ( e.state !== "dry" || e.dead ) return;
   const g = e.g; clearTimeout(e.dryTimer);
-  if ( g.dead || g.cont?.destroyed ) return;     // (sync lets it go and makes the area again)
+  // (the shell was swapped for its area - a new group of the same hash: sync lets this entry go and makes the hole again; nothing else may
+  // call sync once a fill has put the area in, so ask for it here, or the hole stays dry for ever)
+  if ( g.dead || g.cont?.destroyed ) { scheduleSync(); return; }
   e.lastTry = performance.now();
   const A = readArea(g);
   if ( !A ) { if ( soft ) armDry(e); else { e.tries++; askPixels(g); armDry(e); } return; }

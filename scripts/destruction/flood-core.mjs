@@ -16,10 +16,12 @@ export const FLOOD_VERSION = 1;
 
 /**
  * Waiting for a hole's pixels (a cold player: the area's atlas is freed or its shell not hydrated yet, so the area cannot be read).
- * The delay before try number `n` (0-based) in ms, or null when the tries are used up: 120 ms doubling, capped at 4 s, 12 tries (~30 s).
+ * The delay before try number `n` (0-based) in ms: 120 ms doubling, capped at 4 s, for DRY_TRIES tries (~30 s), then one try every DRY_SLOW ms
+ * for as long as the hole's area lives and still has no pixels (a slow line or a busy page can keep a shell unswapped far longer than that:
+ * giving up left the hole without water for the session). null only for a negative `n`.
  */
-export const DRY_TRIES = 12;
-export const dryDelay = (n) => n < 0 || n >= DRY_TRIES ? null : Math.min(4000, 120 * 2 ** n);
+export const DRY_TRIES = 12, DRY_SLOW = 6000;
+export const dryDelay = (n) => n < 0 ? null : n >= DRY_TRIES ? DRY_SLOW : Math.min(4000, 120 * 2 ** n);
 /** Art pixels per water pixel: the engine bakes at half the destruction's resolution (16 per grid square), painted back at art px. */
 export const SCALE = 2;
 /** Art pixels of plain ground around the hole in the engine's window, so the shore is seen whole. */
