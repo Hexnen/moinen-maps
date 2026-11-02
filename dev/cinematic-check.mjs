@@ -135,3 +135,30 @@ export async function inkWatch(id, { ms = 7000, every = 40 } = {}) {
   while ( performance.now() - t0 < ms ) { out.push({ shared: Math.round(CIN().now()), ink: ink(b), groups: (D().display()?.order ?? []).filter((g) => g.objId === id).length }); await sleep(every); }
   return out;
 }
+
+/** A frame strip of one stroke's area (the whole stage under it: map, damage, tokens) every `every` ms: one JPEG data URL, the frames side by side, each labelled with the ms after the first frame and the shared-clock time of the show's start when known. */
+export async function strip({ id, n = 8, every = 450, w = 240, pad = 60, cols = n } = {}) {
+  const o = objs().find((q) => q.id === id) ?? objs().find((q) => q.cin?.s === "p"); if ( !o ) return null;
+  const b = await geoBox(o);
+  const rect = new PIXI.Rectangle(b.x0 - pad, b.y0 - pad, b.x1 - b.x0 + 2 * pad, b.y1 - b.y0 + 2 * pad), h = Math.round(w * rect.height / rect.width);
+  const out = document.createElement("canvas"); const rowsN = Math.ceil(n / cols); out.width = w * cols; out.height = (h + 14) * rowsN; const g = out.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, out.width, out.height);
+  const t0 = performance.now(), cap = [];
+  for ( let i = 0; i < n; i++ ) {
+    await new Promise((res) => requestAnimationFrame(res));
+    const cv = canvas.app.renderer.extract.canvas(canvas.stage, rect), t = performance.now() - t0;
+    const cx = (i % cols) * w, cy = Math.floor(i / cols) * (h + 14); g.drawImage(cv, cx, cy + 14, w, h); g.fillStyle = "#ffd36e"; g.font = "11px monospace";
+    const run = CIN().runInfo(), st = run?.starts?.[o.id]; const rel = st ? Math.round(performance.now() - st.perf) : null;
+    g.fillText(`${Math.round(t)} ms${rel != null ? ` (start ${rel >= 0 ? "+" : ""}${rel})` : ""} ${game.user.isGM ? "GM" : "player"}`, cx + 4, cy + 11);
+    cap.push({ t: Math.round(t), rel });
+    await sleep(every);
+  }
+  return { url: out.toDataURL("image/jpeg", 0.72), cap, w: out.width, h: out.height };
+}
+
+/** Upload a strip (the data URL strip() returned) to worlds/<world>/popout/<name>.jpg. */
+export async function saveStrip(name, url) {
+  const blob = await (await fetch(url)).blob(), file = new File([blob], `${name}.jpg`, { type: "image/jpeg" }), fp = foundry.applications.apps.FilePicker.implementation;
+  try { await fp.createDirectory("data", `worlds/${game.world.id}/popout`); } catch { /* exists */ }
+  const r = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
+  return r?.path ?? null;
+}

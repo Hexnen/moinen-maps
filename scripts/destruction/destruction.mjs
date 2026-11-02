@@ -1245,7 +1245,8 @@ function scheduleComposite(ms = 4000) {
     const scene = canvas.scene, bg = backgroundInfo()?.path ?? "", key = Store.makeKey(scene, S, bg);
     if ( shownKey !== key ) return;                 // not all on screen: the pass that completes it books a run
     const FS = Store.sigsOf(S), M = Store.manifestOf(S);
-    const strokes = S.objects.map((o, i) => { if ( o.k ) return null; const e = M ? Store.entryOf(M, o.id) : null; return { id: o.id, sig: FS[i].sig, cid: e?.sig === FS[i].sig ? e.id : null }; }).filter(Boolean);
+    // (a staged stroke the GM's display holds back is not in the composite - not even as an empty entry: a client that loads it would show that stroke empty for good)
+    const strokes = S.objects.map((o, i) => { if ( o.k || Cine.holds(o) ) return null; const e = M ? Store.entryOf(M, o.id) : null; return { id: o.id, sig: FS[i].sig, cid: e?.sig === FS[i].sig ? e.id : null }; }).filter(Boolean);
     // a composite can only be made of real areas: shells left (their bands waiting) get their pixels first, then the next try publishes
     if ( display.shellCount && display.cache?.waiting ) { Trace.event("composite-fill", { shells: display.shellCount }); await hydrateShells("publish"); return scheduleComposite(1500); }
     let why;
