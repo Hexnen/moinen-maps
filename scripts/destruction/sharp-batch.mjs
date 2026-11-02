@@ -1,4 +1,4 @@
-import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
+import { SHARP_SAMPLER_GLSL, BLEND0 } from "./sharp-sampler.mjs";
 
 /**
  * The live layer's sprites (ruin, flattened areas, CPU shards) and batched pieces drawn with THE ONE SAMPLER (sharp-sampler.mjs), the
@@ -9,7 +9,7 @@ import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
  *
  * The textures must be LINEAR for the fetch (display.tick holds them so while this is active).
  */
-export const sharpBatch = { on: false, name: "moinenSharp", k: 1 };
+export const sharpBatch = { on: false, name: "moinenSharp", k: 1, b: BLEND0 };
 
 const FRAG_HEAD = `#version 300 es
 precision highp float;
@@ -45,7 +45,7 @@ export function installSharpBatch(renderer) {
   if ( !vertex ) return null;
   const Cls = class SharpBatchRenderer extends PIXI.BatchRenderer {
     flush() {
-      if ( this._shader?.uniforms ) { this._shader.uniforms.uSharpMode = sharpBatch.on ? 1 : 0; this._shader.uniforms.uSharpK = sharpBatch.k; }
+      if ( this._shader?.uniforms ) { this._shader.uniforms.uSharpMode = sharpBatch.on ? 1 : 0; this._shader.uniforms.uSharpK = sharpBatch.k; this._shader.uniforms.uSharpB = sharpBatch.b; }
       super.flush();
     }
   };
@@ -55,7 +55,7 @@ export function installSharpBatch(renderer) {
     p.setShaderGenerator({ vertex, fragment: FRAG_HEAD });
     p.contextChange();
     if ( !p._shader ) return null;
-    p._shader.uniforms.uSharpMode = 0; p._shader.uniforms.uSharpK = 1;
+    p._shader.uniforms.uSharpMode = 0; p._shader.uniforms.uSharpK = 1; p._shader.uniforms.uSharpB = BLEND0;
   } catch(err) { console.warn("moinen-maps | sharp batch plugin unavailable", err); return null; }
   renderer.plugins[sharpBatch.name] = p;
   return p;
@@ -75,7 +75,7 @@ export function sharpRender(container, enabled = () => true) {
   container.render = function(renderer) {
     if ( !enabled() ) return orig.call(this, renderer);
     renderer.batch.flush();
-    const was = sharpBatch.on; sharpBatch.on = true;
+    const was = sharpBatch.on, cm = globalThis.CONFIG?.moinenMaps; sharpBatch.on = true; sharpBatch.k = cm?.edgeK ?? 1; sharpBatch.b = cm?.edgeBlend ?? BLEND0;
     try { return orig.call(this, renderer); } finally { renderer.batch.flush(); sharpBatch.on = was; }
   };
 }
@@ -83,6 +83,6 @@ export function sharpRender(container, enabled = () => true) {
 /** The batch shader a batched piece draw binds: the sharp one while the display draws to the screen, PIXI's own otherwise. */
 export function batchShader(renderer) {
   const S = sharpBatch.on ? renderer.plugins?.[sharpBatch.name] : null;
-  if ( S?._shader ) { S._shader.uniforms.uSharpMode = 1; S._shader.uniforms.uSharpK = sharpBatch.k; return S._shader; }
+  if ( S?._shader ) { S._shader.uniforms.uSharpMode = 1; S._shader.uniforms.uSharpK = sharpBatch.k; S._shader.uniforms.uSharpB = sharpBatch.b; return S._shader; }
   return renderer.plugins?.batch?._shader;
 }

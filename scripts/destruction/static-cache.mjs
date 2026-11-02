@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
 import { cachedSetting } from "../setting-cache.mjs";
 import { bandKey as bandKeyOf } from "../net/chunks.mjs";
-import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
+import { SHARP_SAMPLER_GLSL, BLEND0 } from "./sharp-sampler.mjs";
 
 /**
  * STATIC CACHE of the destruction layer (PERF). Every damage object (map patch + ruin + shards, an erase stroke, ...) is a container in
@@ -206,7 +206,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1, uTop: 0 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1, uTop: 0, uSharpB: 0 });
     this.state = PIXI.State.for2d();
   }
 
@@ -235,7 +235,7 @@ export class SharpTile extends PIXI.Container {
     const r0 = globalThis.CONFIG?.moinenMaps?.sharpFrom ?? RAMP0;
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
     const cm = globalThis.CONFIG?.moinenMaps, aaOn = cm?.zoomAA !== false, edge = aaOn && cm?.zoomAA !== "mips";
-    un.uMode = edge ? 1 : 0; un.uK = cm?.edgeK ?? 1;
+    un.uMode = edge ? 1 : 0; un.uK = cm?.edgeK ?? 1; un.uSharpB = cm?.edgeBlend ?? BLEND0;
     un.uTop = b.mipmap === PIXI.MIPMAP_MODES.OFF ? 0 : Math.floor(Math.log2(Math.max(b.realWidth, b.realHeight)));   // (mip levels there are only when the tile has them)
     un.uSoft = aaOn || cm?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison; with zoomAA there is no time-varying softening at all)
     un.uAA = aaOn ? aaWeight(sc, cm?.aaK) : 0;

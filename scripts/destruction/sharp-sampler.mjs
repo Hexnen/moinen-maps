@@ -23,6 +23,8 @@
  * alpha is preserved (bilinear taps of a premultiplied texture) and the output is a convex combination of texels.
  */
 export const W_MIN = 0.01;
+/** Where in an octave of the footprint the blend to the next mip level starts (0 = linear over the whole octave = trilinear's fractions; 1 = no blend). */
+export const BLEND0 = 0.75;
 
 /**
  * GLSL (ES 3.00): `vec4 sharpSample(sampler2D tex, vec2 uv, float k)` (derivatives of the uv taken inside: call it from uniform control
@@ -30,6 +32,7 @@ export const W_MIN = 0.01;
  * (the texture's highest mip level given: 0 for a texture without mips). k scales the footprint (1 = exact; 0 = NEAREST).
  */
 export const SHARP_SAMPLER_GLSL = `
+uniform float uSharpB;   // where in the octave the blend to the next level starts (0..1)
 // one axis of the box [t - w/2, t + w/2] (level texels, w <= 2): (x of the tap over the first two cells, its weight, x of the third cell, its weight)
 vec4 sharpAxis(float t, float w) {
   float a = t - 0.5 * w, b = t + 0.5 * w, i0 = floor(a);
@@ -59,7 +62,7 @@ vec4 sharpSampleT(sampler2D tex, vec2 uv, vec2 gx, vec2 gy, float k, float top) 
   if ( L <= 0.0 || top < 1.0 ) return sharpBox(tex, uv, w, 0.0);
   // minified: the level a below the footprint (a box of 1..2 cells there) and the next one (1 cell or less), blended by the fraction of
   // the footprint's log - continuous across the level switches (as trilinear is) while each level is read as a true box, not a bilinear tap
-  float a = min(floor(L), top), f = a >= top ? 0.0 : L - a;
+  float a = min(floor(L), top), f = a >= top ? 0.0 : clamp((L - a - uSharpB) / (1.0 - uSharpB), 0.0, 1.0);
   vec4 c = sharpBox(tex, uv, w, a);
   return f > 0.0 ? mix(c, sharpBox(tex, uv, w, a + 1.0), f) : c;
 }
@@ -100,11 +103,11 @@ export function boxAt(pyr, t, w, m) {
 }
 
 /** JS mirror of sharpSample on one axis: texel coordinate t (level 0), footprint w (level-0 texels per pixel). */
-export function sharpSample1(pyr, t, w) {
+export function sharpSample1(pyr, t, w, b = BLEND0) {
   w = Math.max(W_MIN, w);
   const L = Math.log2(w), top = pyr.length - 1;
   if ( L <= 0 || top < 1 ) return boxAt(pyr, t, w, 0);
-  const a = Math.min(Math.floor(L), top), f = a >= top ? 0 : L - a, c = boxAt(pyr, t, w, a);
+  const a = Math.min(Math.floor(L), top), f = a >= top ? 0 : Math.min(1, Math.max(0, (L - a - b) / (1 - b))), c = boxAt(pyr, t, w, a);
   return f > 0 ? c + (boxAt(pyr, t, w, a + 1) - c) * f : c;
 }
 
