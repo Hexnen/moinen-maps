@@ -1,7 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import { trackMarkers } from "../workspace/markers.mjs";
-import { pickToken, classifyPress } from "../tokens/carry-core.mjs";
+import { pickToken, classifyPress, OVER_KEYS } from "../tokens/carry-core.mjs";
+import * as Front from "../tokens/carry-front.mjs";
 
 /**
  * Painting the damage (GM): a brush and an eraser on the mask grid, a ring cursor and a translucent overlay of the mask (amber =
@@ -112,6 +113,21 @@ function drawCursor(p) {
   }
 }
 
+/**
+ * Where the overlay and the brush cursor live: on the interface above everything (zIndex `z`), or - while a carried token is in front
+ * (underTokens) - in the primary group just under the tokens (carry-core OVER_KEYS), so the token is never covered by the hatch or the ring.
+ */
+let under = false;
+function seat(o, z) {
+  if ( !o || o.destroyed ) return;
+  if ( under && canvas.primary ) { Object.assign(o, { ...OVER_KEYS, _lastSortedIndex: 0 }); canvas.primary.addChild(o); canvas.primary.sortDirty = true; }
+  else { o.zIndex = z; canvas.interface.sortableChildren = true; canvas.interface.addChild(o); }
+}
+/** A carry is running (or about to): the overlay and the cursor go under the tokens; false puts them back on top. */
+export function underTokens(on) { on = !!on; if ( on === under ) return; under = on; seat(overlay, 800); seat(cursor, 900); }
+Front.onUnder(underTokens);
+export const _overlays = () => [overlay, cursor].filter((o) => o && !o.destroyed);
+
 function buildOverlay() {
   destroyOverlay();
   const S = host?.state(); if ( !S || !canvas.interface ) return;
@@ -121,11 +137,10 @@ function buildOverlay() {
   // mipmapped: the one-pixel hatch would shimmer when zoomed out (sampling follows the zoom, see overlayFilter)
   overlayTex = PIXI.Texture.from(c, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.ON });
   overlay = new PIXI.Sprite(overlayTex);
-  overlay.eventMode = "none"; overlay.zIndex = 800;
+  overlay.eventMode = "none";
   const r = Model.sceneRect();
   overlay.position.set(r.x, r.y); overlay.scale.set(S.mpx);
-  canvas.interface.sortableChildren = true;
-  canvas.interface.addChild(overlay);
+  seat(overlay, 800);
   trackMarkers(overlay);
   overlayFilter();
   paintOverlay(null);
@@ -201,7 +216,7 @@ function onDown(ev) {
   // armed (Ctrl held at the pointer-down XOR the latch) and a token under the brush: remember it (a drag will carry it)
   if ( carryArmed(ev.ctrlKey) ) {
     const t = tokenAt(p);
-    if ( t ) stroke.grab = { id: t.document.id, x0: t.document.x, y0: t.document.y, w: t.w, h: t.h };
+    if ( t ) { stroke.grab = { id: t.document.id, x0: t.document.x, y0: t.document.y, w: t.w, h: t.h }; Front.hold(t.document.id, "grab"); }   // in front from the press on
   }
   paint(p, p);
 }
@@ -252,6 +267,9 @@ function onUp(ev) { if ( ev.button === 0 ) endStroke(); }
 function endStroke() {
   if ( !stroke ) return;
   const s = stroke; stroke = null;
+  // the grabbed token stays in front: a carry takes the hold over when its entry starts (a bake may wait a while), else it is let go
+  const carries = !!s.grab && s.changed && mode === "paint" && classifyPress(s.maxD, performance.now() - s.t0) === "drag";
+  if ( s.grab ) Front.release(s.grab.id, "grab", carries ? 8000 : 0);
   if ( !s.changed ) return;
   const end = s.path[s.path.length - 1];
   if ( end[0] !== s.last.x || end[1] !== s.last.y ) s.path.push([s.last.x, s.last.y, Math.round(performance.now() - s.t0)]);
@@ -280,9 +298,8 @@ const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement &&
 export function onCanvasReady() {
   teardown();
   if ( !game.user.isGM ) return;
-  cursor = new PIXI.Graphics(); cursor.eventMode = "none"; cursor.zIndex = 900;
-  canvas.interface.sortableChildren = true;
-  canvas.interface.addChild(cursor);
+  cursor = new PIXI.Graphics(); cursor.eventMode = "none";
+  seat(cursor, 900);
   trackMarkers(cursor, { ring: true });
   const view = canvas.app.view;
   listeners = {

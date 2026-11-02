@@ -11,6 +11,8 @@
 //   5 "returns": the token rides the path and is back at its start, the document never changed;
 //   6 a Detonate replay: the token rides again, visually only (the document does not change);
 //   7 nothing runs when idle (no carry, no ticker listener of the carry).
+//   await C.carryFrontCheck();   // THE TOKEN IS ALWAYS IN FRONT (slow zigzag, graph order + pixels every step, draw / replay / returns, elevation 0 and 5);
+//                                // { negative: true } raises the destruction over the tokens on purpose: both tests must then fail
 const MODULE = "moinen-maps";
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 const D = () => game.modules.get(MODULE).api.destruction;
@@ -234,3 +236,177 @@ export async function carryStrip({ name = "carry", n = 10, scale = 1, dist = [42
   d.clear(); d.deactivate();
   return { path: r?.path, frames: frames.map((f) => f.el), D: Math.round(D_) };
 }
+
+/* ================================================================== the token is always in front */
+
+/** Every destruction DisplayObject root a frame may hold in the primary group. */
+function destructionRoots() {
+  const d = D().display(), r = [];
+  if ( d?.objs && !d.objs.destroyed ) r.push(d.objs);
+  if ( d?.fx && !d.fx.destroyed ) r.push(d.fx);
+  return r;
+}
+const overlays = async () => {
+  const E = await import(`/modules/${MODULE}/scripts/destruction/editor.mjs`);
+  // (a build without the hook: the overlay and the cursor are the interface's zIndex 800 / 900 objects that listen to nothing)
+  return E._overlays ? E._overlays() : canvas.interface.children.filter((c) => (c.zIndex === 800 || c.zIndex === 900) && c.eventMode === "none" && (c instanceof PIXI.Sprite || c instanceof PIXI.Graphics));
+};
+
+/**
+ * Scene-graph order test (one frame): the primary group sorted as Foundry sorts it, the carried mesh against everything else; the editor's
+ * overlay and cursor (`ui`) must lie in the primary group before the mesh while the token is held (not on the interface above it).
+ */
+function graphOrder(token, ui = []) {
+  const P = canvas.primary, m = token.mesh;
+  if ( P.sortDirty ) P.sortChildren();
+  const ch = P.children, im = ch.indexOf(m), bad = [];
+  const key = (o) => [o.elevation ?? 0, o.sortLayer ?? 0, o.sort ?? 0];
+  const less = (a, b) => { const x = key(a), y = key(b); for ( let i = 0; i < 3; i++ ) if ( x[i] !== y[i] ) return x[i] < y[i]; return false; };
+  if ( im < 0 ) bad.push(["the mesh is not in the primary group"]);
+  for ( const r of destructionRoots() ) { const i = ch.indexOf(r); if ( i < 0 || i > im ) bad.push(["destruction root above/out of the group", r.sortLayer, i, im]); }
+  for ( const o of ui ) { const i = ch.indexOf(o); if ( i < 0 || i > im ) bad.push(["editor overlay/cursor above the token", o.constructor.name, i, im]); }
+  // everything that sorts below the mesh by its keys must also draw before it (a stale sort order would break this)
+  ch.forEach((c, i) => { if ( c !== m && i > im && less(c, m) ) bad.push(["sorted below, drawn above", c.constructor.name, c.sortLayer, i, im]); });
+  return { im, n: ch.length, bad };
+}
+
+/**
+ * A frame's pixel test: the pixels the carried token's mesh covers are the same with the destruction (and the editor's overlay and cursor,
+ * `ui`) hidden as with them shown - nothing of the destruction (pieces, debris, dust, accents, water, cache bands, composite, glow, tremor)
+ * lies over the token. The token's pixels are those that change when its mesh is hidden too, eroded by a pixel (its soft edge blends with
+ * whatever lies under it). Returns { covered (all), coveredRoots (the primary roots only), mask }.
+ */
+function pixelFront(token, roots, ui = [], rectIn = null) {
+  const m = token.mesh, ex = canvas.app.renderer.extract;
+  const sc = Math.max(token.w, token.h), rect = rectIn ?? new PIXI.Rectangle(Math.round(m.position.x - sc * 1.2), Math.round(m.position.y - sc * 1.5), Math.round(sc * 2.4), Math.round(sc * 2.6));
+  const read = () => { const cv = ex.canvas(canvas.stage, rect); return cv.getContext("2d").getImageData(0, 0, cv.width, cv.height); };
+  const full = read();
+  const hidden = [];
+  const hide = (o) => { if ( o && o.visible ) { o.visible = false; hidden.push(o); } };
+  for ( const o of roots ) hide(o);
+  const noRoots = read();
+  for ( const o of ui ) hide(o);
+  const noDestr = read();
+  m.visible = false; const noMesh = read(); m.visible = true;
+  for ( const o of hidden ) o.visible = true;
+  let mask = 0, covered = 0, coveredRoots = 0;
+  const a = full.data, b = noDestr.data, t = noMesh.data, q = noRoots.data, thr = 24, W = full.width, H = full.height;
+  const dif = (u, v, i) => Math.abs(u[i] - v[i]) > thr || Math.abs(u[i + 1] - v[i + 1]) > thr || Math.abs(u[i + 2] - v[i + 2]) > thr;
+  const inMesh = (x, y) => { if ( x < 0 || y < 0 || x >= W || y >= H ) return false; const i = (y * W + x) * 4; return Math.abs(b[i] - t[i]) > 12 || Math.abs(b[i + 1] - t[i + 1]) > 12 || Math.abs(b[i + 2] - t[i + 2]) > 12; };
+  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
+    if ( !(inMesh(x, y) && inMesh(x - 1, y) && inMesh(x + 1, y) && inMesh(x, y - 1) && inMesh(x, y + 1)) ) continue;
+    const i = (y * W + x) * 4;
+    mask++;
+    if ( dif(a, b, i) ) covered++;
+    if ( dif(a, q, i) ) coveredRoots++;
+  }
+  return { covered, coveredRoots, mask, w: W, h: H };
+}
+
+const zigzag = (c, legs = 6, dx = 90, up = 120, down = 170, per = 60) => {
+  const k = [c, ...Array.from({ length: legs + 1 }, (_, i) => ({ x: c.x + i * dx, y: c.y + (i % 2 ? down : -up) }))], o = [];
+  for ( let i = 0; i < k.length - 1; i++ ) for ( let j = 0; j < per; j++ ) { const u = j / per; o.push({ x: k[i].x + (k[i + 1].x - k[i].x) * u, y: k[i].y + (k[i + 1].y - k[i].y) * u }); }
+  o.push(k.at(-1)); return o;
+};
+
+/**
+ * THE CARRIED TOKEN IS ALWAYS IN FRONT: a slow zigzag Ctrl-drag (the path doubles back over places the front has already passed), once
+ * with the token at elevation 0 and once at elevation 5. Three views:
+ *   - while the stroke is drawn (live): the overlay and the cursor are already under the token;
+ *   - the clock frozen and stepped through the whole entry and a while after it: in every step the scene-graph order (graphOrder) and the
+ *     pixels (pixelFront) say that nothing of the destruction, the overlay or the cursor draws over the token, and the other tokens keep their keys;
+ *   - afterwards: the token has Foundry's own keys again, the overlay and the cursor are on the interface, no hold or wait is left.
+ * `negative: true` raises the destruction above the tokens on purpose: both tests must then FAIL (the check can see a break).
+ */
+export async function carryFrontCheck({ steps = 60, legs = 6, dt = 14, negative = false, elevations = [0, 5] } = {}) {
+  const M = await mods(), { B, K } = M, d = D();
+  const F = await import(`/modules/${MODULE}/scripts/tokens/carry-front.mjs`);
+  const rows = [];
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  if ( !token ) return { ok: false, rows: [row("a token to carry", false)] };
+  const doc = token.document, R = canvas.dimensions.sceneRect;
+  const home = { x: Math.round(R.x + R.width * 0.1), y: Math.round(R.y + R.height * 0.45) };
+  const others = canvas.tokens.placeables.filter((t) => t !== token).map((t) => ({ t, doc: t.document, x: t.document.x, y: t.document.y }));
+  const origin = { x: doc.x, y: doc.y, elevation: doc.elevation };
+  const keysOf = (t) => ({ e: t.mesh.elevation, l: t.mesh.sortLayer, s: t.mesh.sort });
+  const same = (a, b) => a.e === b.e && a.l === b.l && a.s === b.s;
+  const T = canvas.app.ticker, real = performance.now.bind(performance), mf = T.maxFPS, was = T.started;
+  const saved = [], report = {};
+  try {
+    for ( const [i, o] of others.entries() ) await o.doc.update({ x: Math.round(R.x + R.width - 100), y: Math.round(R.y + 60 + i * 120) }, { animate: false, diff: false });
+    // the clock frozen and stepped through the entry of `o` (its running area `a`) and a while after it
+    const observe = async (tag, a, o, ko, key) => {
+      const t0 = a.start + a.delay, D_ = a.path.D, bad = [], px = [], moved = [];
+      // negative control: the destruction layers raised above the tokens must be caught by both tests
+      if ( negative ) { for ( const r of destructionRoots() ) { saved.push([r, r.sortLayer]); r.sortLayer = 800; } canvas.primary.sortDirty = true; }
+      let worst = 0, worstRoots = 0, frames = 0, maskMax = 0, entryEnd = null, holdEnd = null;
+      const live = () => !!d.display()?.order.some((q) => q.objId === o.id && q.anim);
+      T.maxFPS = 0; T.stop();
+      try {
+        for ( let i = 0; i < steps; i++ ) {
+          const el = Math.round(-200 + (D_ + 2200) * i / (steps - 1)), Ft = t0 + el;
+          performance.now = () => Ft; T.update(Ft); await sleep(25);
+          if ( !token.mesh || token.mesh.destroyed ) continue;
+          const inEntry = live(), held = F._frontState().holds.length > 0;
+          if ( !inEntry && entryEnd === null && el > 0 ) entryEnd = el;
+          if ( !held && holdEnd === null && el > 0 ) holdEnd = el;
+          if ( !inEntry && !held ) continue;               // (the entry is over and the token let go: nothing left to hold)
+          frames++;
+          const ui = await overlays();
+          const g = graphOrder(token, ui); if ( g.bad.length ) bad.push({ el, ...g.bad[0] });
+          const p = pixelFront(token, destructionRoots(), ui); worst = Math.max(worst, p.covered); worstRoots = Math.max(worstRoots, p.coveredRoots); maskMax = Math.max(maskMax, p.mask);
+          if ( p.covered > Math.max(8, p.mask * 0.01) ) px.push({ el, covered: p.covered, roots: p.coveredRoots, mask: p.mask });
+          others.forEach((q, j) => { if ( !same(keysOf(q.t), ko[j]) ) moved.push(q.t.name); });
+        }
+        const Fe = t0 + D_ + 9000; performance.now = () => Fe; T.update(Fe);
+      } finally { performance.now = real; T.maxFPS = mf; if ( was ) T.start(); }
+      report[key] = { frames, worst, worstRoots, maskMax, D: Math.round(D_), entryEnd, holdEnd };
+      rows.push(row(tag + "the token is held until the entry has ended", entryEnd !== null && (holdEnd === null || holdEnd >= entryEnd), { entryEnd, holdEnd }));
+      rows.push(row(tag + `scene graph: nothing of the destruction, the overlay or the cursor sorts over the token (${frames} steps)`, frames > steps * 0.5 && bad.length === 0, { bad: bad.slice(0, 3) }));
+      rows.push(row(tag + "pixels: nothing of the destruction, the overlay or the cursor covers the token's pixels", frames > steps * 0.5 && maskMax > 400 && px.length === 0, { worst, worstRoots, maskMax, px: px.slice(0, 4) }));
+      rows.push(row(tag + "the other tokens keep their keys", moved.length === 0, { moved: [...new Set(moved)] }));
+    };
+    const scenarios = [...elevations.map((e) => ({ elev: e, ends: "real" })), { elev: elevations[0], ends: "return" }];
+    for ( const [si, sc] of scenarios.entries() ) {
+      const elev = sc.elev, tag = sc.ends === "return" ? `returns, elevation ${elev}: ` : `elevation ${elev}: `;
+      await prep({ ends: sc.ends }); await doc.update({ elevation: elev }, { animate: false, diff: false }); await place(token, home.x, home.y);
+      const k0 = keysOf(token), ko = others.map((o) => keysOf(o.t)), c = { x: home.x + token.w / 2, y: home.y + token.h / 2 };
+      const before = new Set(strokes().map((o) => o.id));
+      // the stroke is being drawn (live): at about 60% of the way the overlay and the cursor must be under the token already
+      const pts = zigzag(c, legs), drive = B.drive(pts, { dt, ctrl: true });
+      await sleep(pts.length * dt * 0.6);
+      const ui0 = await overlays(), gDraw = graphOrder(token, ui0), heldDraw = F._frontState().holds.length;
+      await drive;
+      rows.push(row(tag + "while the stroke is drawn the grabbed token is held and the overlay and the cursor lie under it", heldDraw === 1 && ui0.length >= 1 && gDraw.bad.length === 0, { held: heldDraw, ui: ui0.length, bad: gDraw.bad.slice(0, 2) }));
+      await wait(() => strokes().some((o) => !before.has(o.id)), 4000);
+      const o = strokes().find((q) => !before.has(q.id));
+      let a = null; await wait(() => { const g = d.display()?.order.find((q) => q.objId === o?.id && q.anim?.path); a = g?.anim ?? null; return !!a; }, 12000, 10);
+      rows.push(row(tag + "a slow zigzag Ctrl+drag carries the token", !!o?.tk && !!a, { n: o?.tk?.p?.length, D: a && Math.round(a.path.D) }));
+      if ( !a ) continue;
+      await observe(tag, a, o, ko, si);
+      if ( si === 0 ) {      // a Detonate replay of the same stroke (every other client and a late joiner play it so): the token rides again, in front
+        await wait(() => K._carryStats().active === 0, 8000); await sleep(500);
+        const pr = K._carryStats().played, old = a.start;
+        await d.replay(); await wait(() => K._carryStats().played > pr, 8000);
+        let a2 = null; await wait(() => { const g = d.display()?.order.find((q) => q.objId === o.id && q.anim?.path && q.anim.start > old); a2 = g?.anim ?? null; return !!a2; }, 12000, 10);
+        if ( a2 ) await observe("replay, " + tag, a2, o, ko, "replay"); else rows.push(row("replay, " + tag + "the replay's entry runs", false));
+      }
+      await wait(() => K._carryStats().active === 0, 8000); await sleep(1100);
+      const st = F._frontState(), ui = await overlays();
+      rows.push(row(tag + "afterwards: the token has Foundry's own keys, the overlay and the cursor are on the interface again, no hold or timer is left",
+        same(keysOf(token), { e: elev, l: k0.l, s: k0.s }) && st.holds.length === 0 && !st.under && st.pending === 0 && !st.ticking && ui.every((u) => u.parent === canvas.interface), { keys: keysOf(token), k0, st }));
+      for ( const [r, l] of saved.splice(0) ) r.sortLayer = l;
+      canvas.primary.sortDirty = true;
+    }
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 400) })); }
+  finally {
+    performance.now = real; T.maxFPS = mf; if ( was ) T.start();
+    for ( const [r, l] of saved ) r.sortLayer = l;
+    canvas.primary.sortDirty = true;
+    try { await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "carryEnds", "real"); } catch { /* ignore */ }
+    try { await doc.update({ x: origin.x, y: origin.y, elevation: origin.elevation }, { animate: false, diff: false }); for ( const o of others ) await o.doc.update({ x: o.x, y: o.y }, { animate: false, diff: false }); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+  }
+  return { ok: rows.every((r) => r.ok), rows, report };
+}
+export const _front = { graphOrder, pixelFront, destructionRoots, zigzag };

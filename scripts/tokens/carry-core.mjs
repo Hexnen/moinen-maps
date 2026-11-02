@@ -165,3 +165,24 @@ export function makeTk({ grab, a, b, path, ends = "real", rect = null, snap = nu
   const p = []; for ( const q of path ) p.push(q[0], q[1], q[2] | 0);
   return { id: grab.id, x0: Math.round(grab.x0), y0: Math.round(grab.y0), x1: Math.round(x1), y1: Math.round(y1), e: ends === "return" ? 1 : 0, p };
 }
+
+/* ---------------------------------------------------------------- the carried token is always in front */
+
+/**
+ * Foundry draws the primary group's objects by (elevation, sortLayer, sort). Everything the destruction shows there lives at elevation 0
+ * and sortLayers below TOKEN_LAYER (display.mjs layers 247 and 249, the districts' 250, lights 251 ...); a token's mesh is at its own
+ * elevation (>= 0 to be seen at all: the scene's background lies at 0) and sortLayer TOKEN_LAYER. `frontKeys` gives a carried token's mesh
+ * the keys it must hold for the carry: its own elevation and `sort` (several tokens keep their order), never a sortLayer below the tokens'
+ * own. The editor's overlay and cursor, which live on the interface above every mesh, sit just under the tokens while a carry runs (OVER_KEYS).
+ */
+export const TOKEN_LAYER = 700;
+export const OVER_KEYS = { elevation: 0, sortLayer: TOKEN_LAYER - 1, sort: 0 };
+export function frontKeys(k) {
+  return { elevation: Number(k?.elevation) || 0, sortLayer: Math.max(Number(k?.sortLayer) || 0, TOKEN_LAYER), sort: Number(k?.sort) || 0 };
+}
+/** Does `a` draw over `b` (Foundry's primary order: elevation, then sortLayer, then sort)? */
+export function drawsOver(a, b) {
+  const x = a.elevation ?? 0, y = b.elevation ?? 0; if ( x !== y ) return x > y;
+  const l = a.sortLayer ?? 0, m = b.sortLayer ?? 0; if ( l !== m ) return l > m;
+  return (a.sort ?? 0) > (b.sort ?? 0);
+}
