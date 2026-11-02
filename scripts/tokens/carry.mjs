@@ -48,8 +48,11 @@ const D_ = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, P_ = { sx: 1, sy: 1, rot: 0, lif
 const PENDING = new Map();     // stroke id -> { tk, at }
 const PENDING_MS = 90000;
 const pendingList = () => { const now = performance.now(); for ( const [k, v] of PENDING ) if ( now - v.at > PENDING_MS ) PENDING.delete(k); return [...PENDING.values()]; };
-/** A real carry was committed (the GM, at the pointer-up): it is pending until its documents move, it is undone or the scene goes. */
-export function expect(objId, tk) { if ( tk && !tk.e ) PENDING.set(objId, { tk, at: performance.now() }); }
+/**
+ * A real carry was committed (the GM, at the pointer-up): it is pending until its documents move, it is undone or the scene goes.
+ * `staged` (cinematic mode): the stroke waits for its show, which can be long after: its pending carry does not expire (cancel / undo / the move end it).
+ */
+export function expect(objId, tk, staged = false) { if ( tk && !tk.e ) PENDING.set(objId, { tk, at: staged ? Infinity : performance.now() }); }
 /** Where a token is going to be (top-left) once the pending carries have moved it, or null. */
 export const predicted = (id) => X.pendingPosition(pendingList(), id);
 const stats = { played: 0, moved: 0, visual: 0, skipped: 0, unmoved: 0, pushed: 0 };

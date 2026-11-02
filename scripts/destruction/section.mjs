@@ -4,6 +4,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import * as Editor from "./editor.mjs";
 import * as D from "./destruction.mjs";
+import * as Cui from "./cinematic-ui.mjs";
 
 /**
  * Destruction as a workspace section (takes over the "destruction" placeholder of workspace/soon.mjs).
@@ -96,13 +97,14 @@ function bar(host, ctx) {
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.causeLabel"))}</span><div class="mm-ws-tools mm-d-causes" role="group" aria-label="${esc(T("Destr.causeLabel"))}">${causes}</div></div>
-      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}${freeBtn}</div></div>
+      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}${freeBtn}${Cui.barButtons()}</div></div>
       <span class="mm-ws-hint mm-d-carryhint"${carryOn() ? "" : " hidden"}>${esc(T("Destr.carryArmedHint"))}</span>
       ${optHint(T("Destr.paintHint"))}`;
   }
   const onClick = (ev) => {
     if ( ev.target.closest("[data-carry]") ) game.settings.set(MODULE_ID, "destrCarry", !carryOn());
     if ( ev.target.closest("[data-free]") ) game.settings.set(MODULE_ID, "carryFree", !freeOn());
+    if ( Cui.barClick(ev) ) return;
     if ( ev.target.closest("[data-super]") ) game.settings.set(MODULE_ID, "destrSuper", !superOn());
     const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]"), cb = ev.target.closest("[data-cause]");
     if ( qb ) D.setParams({ [qb.dataset.quick]: !P0()[qb.dataset.quick] });
@@ -118,6 +120,7 @@ function bar(host, ctx) {
   };
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   const id = Hooks.on("moinenMapsDestruction", (kind) => {
+    if ( kind === "params" || kind === "loaded" || kind === "edited" || kind === "cin" ) Cui.barSync(host);
     if ( kind === "params" || kind === "loaded" ) {
       for ( const x of host.querySelectorAll("[data-quick]") ) x.setAttribute("aria-pressed", String(!!P0()[x.dataset.quick]));
       // the "scene default" button names the scene's cause
@@ -201,6 +204,7 @@ function mountDamage(host) {
         ${gm && st.rebake ? `<button type="button" class="mm-ws-btn" data-act="rebakePause"><i class="fa-solid ${st.rebake.paused ? "fa-play" : "fa-pause"}" inert></i> ${esc(T(st.rebake.paused ? "Destr.rebakeResume" : "Destr.rebakePause"))}</button>
           <button type="button" class="mm-ws-btn" data-act="rebakeCancel"><i class="fa-solid fa-xmark" inert></i> ${esc(T("Destr.rebakeCancel"))}</button>` : ""}
       </div>
+      ${Cui.block()}
       ${optCheck({ name: "enabled", label: T("Destr.enabled"), checked: S ? S.enabled : true, hint: T("Destr.enabledHint") })}`;
   };
   render();
@@ -214,18 +218,20 @@ function mountDamage(host) {
     else if ( b.dataset.act === "rebakePause" ) D.rebakePause(!D.getStatus().rebake?.paused);
     else if ( b.dataset.act === "rebakeCancel" ) D.rebakeCancel();
     else if ( b.dataset.act === "rebakeOne" ) D.rebakeAll([b.dataset.obj]);
+    else if ( Cui.click(b.dataset.act) ) { /* cinematic.mjs */ }
     else if ( b.dataset.act === "clear" ) {
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.clear") }, content: `<p>${esc(T("Destr.clearConfirm"))}</p>` });
       if ( ok ) D.clearAll();
     }
   };
   const onChange = (ev) => {
+    if ( Cui.change(ev) ) return;
     if ( ev.target.name === "enabled" && ev.target.checked !== (D.state()?.enabled ?? true) ) D.setEnabled(ev.target.checked);
     if ( ev.target.dataset?.causeOf ) { D.setObjectCause(ev.target.dataset.causeOf, Number(ev.target.value)); ev.target.blur(); }
   };
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   let frame = 0;
-  const id = Hooks.on("moinenMapsDestruction", () => { if ( frame ) return; frame = requestAnimationFrame(() => { frame = 0; if ( !host.contains(document.activeElement) || document.activeElement === document.body ) render(); else host.querySelector(".mm-d-status").textContent = statusLine(); }); });
+  const id = Hooks.on("moinenMapsDestruction", () => { if ( frame ) return; frame = requestAnimationFrame(() => { frame = 0; if ( !host.contains(document.activeElement) || document.activeElement === document.body ) render(); else host.querySelector(".mm-d-status").textContent = statusLine(); Cui.sync(host); }); });
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off("moinenMapsDestruction", id); cancelAnimationFrame(frame); };
 }
 

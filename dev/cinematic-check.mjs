@@ -1,0 +1,229 @@
+// Browser-side check of CINEMATIC MODE staging / hiding / the show (destruction/cinematic.mjs). Lane server (a test world), a GM page AND a
+// REAL PLAYER page (login "Test Gracz 1", ANOTHER origin, e.g. http://127.0.0.4:30004 and http://127.0.0.41:30004), both tabs FRONTED.
+//   const C = await import("/modules/moinen-maps/dev/cinematic-check.mjs");
+//   GM page:     await C.gmSetup({ mode: "drags", preview: false })      the scene empty, the brush in hand, the mode set
+//                await C.gmPaint({ from: [.2, .3], to: [.4, .3] })        a REAL pointer drag (fractions of the scene); { tap: true } a click; { ctrl: true } carries the token under the start
+//                await C.gmAction()  /  C.gmSkip()  /  C.gmUndo()  /  C.gmRedo()  /  C.gmClear()
+//   either page: await C.probe()      every stroke: its state, whether it is on the display, the PIXELS of the destruction layer in its box,
+//                                     the tokens' positions, the show; C.watch() / await C.watchReport()   per-frame: when each stroke's entry
+//                                     started (mapped to the shared clock) and every token's mesh
+//   await C.cinematicCheck()          (GM page) the whole GM-side scenario, one row per claim; the player page is asked through probe() by the
+//                                     runner (see dev/cinematic-check notes in the status file): rows say which page must show what
+//   await C.idleRest()                the idle ticker cost with no staged strokes (idle-bench rest)
+const MODULE = "moinen-maps";
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const D = () => game.modules.get(MODULE).api.destruction;
+const CIN = () => D().cinematic;
+const row = (name, ok, extra = {}) => ({ name, ok: !!ok, ...extra });
+const wait = async (fn, ms = 12000, step = 80) => { const t = performance.now(); while ( performance.now() - t < ms ) { if ( fn() ) return true; await sleep(step); } return false; };
+const objs = () => D().state()?.o ?? [];
+const R = () => canvas.dimensions.sceneRect;
+const at = (f) => ({ x: R().x + R().width * f[0], y: R().y + R().height * f[1] });
+
+/* ------------------------------------------------------------------ pixels */
+
+/** Pixels (alpha > 8) of the destruction layer inside a scene box, drawn on their own (the map and tokens are not in it). */
+export function ink(box) {
+  const d = D().display(); if ( !d?.objs ) return 0;
+  const r = canvas.app.renderer, W = Math.round(r.screen.width), H = Math.round(r.screen.height);
+  const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1 });
+  try {
+    r.render(d.objs, { renderTexture: rt, transform: d.objs.parent.worldTransform.clone(), clear: true });
+    const px = r.extract.pixels(rt), wt = canvas.stage.worldTransform, a = wt.apply({ x: box.x0, y: box.y0 }), b = wt.apply({ x: box.x1, y: box.y1 });
+    const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x))), x1 = Math.min(W - 1, Math.ceil(Math.max(a.x, b.x))), y0 = Math.max(0, Math.floor(Math.min(a.y, b.y))), y1 = Math.min(H - 1, Math.ceil(Math.max(a.y, b.y)));
+    let n = 0;
+    for ( let y = y0; y <= y1; y++ ) for ( let x = x0; x <= x1; x++ ) if ( px[(y * W + x) * 4 + 3] > 8 ) n++;
+    return n;
+  } finally { rt.destroy(true); }
+}
+/** A stroke's box in scene px (mask px x the art pixel size x K). */
+async function geoBox(o) {
+  const Model = await import(`/modules/${MODULE}/scripts/destruction/model.mjs`), S = D().state(), r = Model.sceneRect(), mpx = S.ap * Model.K;
+  return { x0: r.x + o.x0 * mpx, y0: r.y + o.y0 * mpx, x1: r.x + (o.x0 + o.w) * mpx, y1: r.y + (o.y0 + o.h) * mpx };
+}
+
+/* ------------------------------------------------------------------ both pages */
+
+/** What this page knows right now. */
+export async function probe() {
+  const d = D(), S = d.state(), disp = d.display(), now = performance.now(), shared = CIN().now();
+  const strokes = [];
+  for ( const o of S?.o ?? [] ) {
+    if ( o.k ) continue;
+    const groups = (disp?.order ?? []).filter((g) => g.objId === o.id);
+    const b = await geoBox(o);
+    strokes.push({ id: o.id, cin: o.cin ?? null, tk: !!o.tk, groups: groups.length, anim: groups.filter((g) => g.anim).length, ink: ink(b),
+      entry: groups.filter((g) => g.anim).map((g) => Math.round(g.anim.start - now + shared)) });
+  }
+  const tokens = canvas.tokens.placeables.map((t) => ({ id: t.document.id, doc: [t.document.x, t.document.y], mesh: [Math.round(t.mesh.position.x), Math.round(t.mesh.position.y)] }));
+  return { user: game.user.name, gm: game.user.isGM, status: CIN().status(), run: CIN().runInfo(), strokes, tokens, flag: canvas.scene.flags?.[MODULE]?.cinShows ?? null, groups: disp?.order?.length ?? 0 };
+}
+
+/** Per frame: the strokes' entry starts on the shared clock (first seen) and every token's mesh. Call before the show, read with watchReport(). */
+export function watch() {
+  const w = window.__cinW = { on: true, entries: {}, tok: [], first: {}, t0: performance.now() };
+  const loop = () => {
+    if ( !w.on ) return;
+    const d = D().display(), now = performance.now(), shared = CIN().now();
+    for ( const g of d?.order ?? [] ) {
+      if ( !g.objId ) continue;
+      w.first[g.objId] ??= { frame: Math.round(now - w.t0), shared };
+      if ( g.anim && !(g.objId in w.entries) ) w.entries[g.objId] = { start: Math.round(g.anim.start - now + shared), seen: Math.round(now - w.t0) };
+    }
+    w.tok.push({ t: Math.round(now - w.t0), p: canvas.tokens.placeables.map((t) => [Math.round(t.mesh.position.x), Math.round(t.mesh.position.y)]) });
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+  return { watching: true, user: game.user.name };
+}
+export function watchReport() {
+  const w = window.__cinW; if ( !w ) return null;
+  w.on = false;
+  const ids = canvas.tokens.placeables.map((t) => t.document.id);
+  const moved = ids.map((id, i) => { const a = w.tok[0]?.p[i], m = w.tok.reduce((s, r) => Math.max(s, a ? Math.hypot(r.p[i][0] - a[0], r.p[i][1] - a[1]) : 0), 0); return Math.round(m); });
+  return { user: game.user.name, entries: w.entries, first: w.first, tokenMaxMove: moved, frames: w.tok.length };
+}
+
+/* ------------------------------------------------------------------ the GM page */
+
+export async function gmSetup({ mode = "drags", preview = false } = {}) {
+  const d = D();
+  d.setCinematic({ mode: "off" }); d.clear(); await sleep(1500);
+  d.setCinematic({ mode, preview });
+  d.activate("paint"); await d.setBrush({ size: 1.3, level: 3, type: "blast" });
+  await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "carryEnds", "real");
+  window.__cinCfg = CONFIG.moinenMaps ??= {}; CONFIG.moinenMaps.noCinematic = false;
+  canvas.pan({ x: R().x + R().width / 2, y: R().y + R().height / 2, scale: Math.min(innerWidth / R().width, innerHeight / R().height) * 1.1 });
+  await sleep(900);
+  return { scene: canvas.scene.name, cin: CIN().status(), tokens: canvas.tokens.placeables.length };
+}
+
+const line = (a, b, n) => Array.from({ length: n }, (_, i) => ({ x: a.x + (b.x - a.x) * i / (n - 1), y: a.y + (b.y - a.y) * i / (n - 1) + Math.sin(i / (n - 1) * Math.PI * 2) * 30 }));
+/** One stroke with real pointer events. `tap`: a click. `ctrl`: the carry modifier (a token under the start is carried). */
+export async function gmPaint({ from = [0.3, 0.4], to = [0.5, 0.4], tap = false, ctrl = false, n = 36, dt = 14, wait: w = true } = {}) {
+  const B = await import(`/modules/${MODULE}/dev/daily-bench.mjs`), before = new Set(objs().map((o) => o.id));
+  const a = at(from), b = at(to), pts = tap ? [a, a] : line(a, b, n);
+  { const v = canvas.app.view, r = v.getBoundingClientRect(), s = canvas.stage.worldTransform.apply(pts[0]);
+    v.dispatchEvent(new PointerEvent("pointermove", { clientX: r.left + s.x, clientY: r.top + s.y, pointerId: 1, isPrimary: true, bubbles: true, ctrlKey: ctrl })); await sleep(120); }
+  await B.drive(pts, { dt, ctrl });
+  await wait(() => objs().some((o) => !before.has(o.id)), 3000);
+  const o = objs().find((q) => !before.has(q.id)) ?? null;
+  if ( w ) await sleep(1200);
+  return o && { id: o.id, cin: o.cin ?? null, tk: !!o.tk, count: CIN().status().staged };
+}
+export const gmUndo = async () => { const key = (t, o = {}) => window.dispatchEvent(new KeyboardEvent(t, { bubbles: true, cancelable: true, ...o })); key("keydown", { key: "z", code: "KeyZ", ctrlKey: true }); await sleep(900); return { staged: CIN().status().staged, n: objs().length }; };
+export const gmRedo = async () => { const key = (t, o = {}) => window.dispatchEvent(new KeyboardEvent(t, { bubbles: true, cancelable: true, ...o })); key("keydown", { key: "y", code: "KeyY", ctrlKey: true }); await sleep(900); return { staged: CIN().status().staged, n: objs().length }; };
+export const gmClear = async () => { D().clear(); await sleep(1200); return { staged: CIN().status().staged, n: objs().length }; };
+export const gmAction = async () => { const s = await CIN().action(); return s && { id: s.id, t0: s.t0, offs: s.offs, ids: s.snap.ids, at: s.at, now: CIN().now() }; };
+export const gmSkip = async () => ({ n: await CIN().skip(), staged: CIN().status().staged });
+export async function gmEnd() { const d = D(); d.setCinematic({ mode: "off" }); d.clear(); d.deactivate(); await sleep(800); if ( CONFIG.moinenMaps ) CONFIG.moinenMaps.noCinematic = false; return true; }
+
+/** Wait until the running show is over on this page (the controller has no show and no stroke is held). */
+export const waitShow = (ms = 40000) => wait(() => !CIN().status().showing && CIN().status().scheduled.length === 0, ms, 150);
+
+/** The idle ticker cost (nothing staged): idle-bench rest. */
+export async function idleRest({ frames = 400 } = {}) {
+  const I = await import(`/modules/${MODULE}/dev/idle-bench.mjs`);
+  const r = await I.rest({ frames });
+  return { total: r.total, top: r.listeners.slice(0, 5), mem: r.mem, cinListeners: r.listeners.filter((x) => /cin/i.test(x.nm)).length };
+}
+
+/** Sample the destruction layer's ink inside stroke `id`'s box every `every` ms for `ms`: [{ shared, ink }] (the flash test: nothing may show before the entry starts). */
+export async function inkWatch(id, { ms = 7000, every = 40 } = {}) {
+  const o = objs().find((q) => q.id === id); if ( !o ) return null;
+  const b = await geoBox(o), out = [], t0 = performance.now();
+  while ( performance.now() - t0 < ms ) { out.push({ shared: Math.round(CIN().now()), ink: ink(b), groups: (D().display()?.order ?? []).filter((g) => g.objId === id).length }); await sleep(every); }
+  return out;
+}
+
+/** A frame strip of one stroke's area (the whole stage under it: map, damage, tokens) every `every` ms: one JPEG data URL, the frames side by side, each labelled with the ms after the first frame and the shared-clock time of the show's start when known. */
+export async function strip({ id, n = 8, every = 450, w = 240, pad = 60, cols = n } = {}) {
+  const o = objs().find((q) => q.id === id) ?? objs().find((q) => q.cin?.s === "p"); if ( !o ) return null;
+  const b = await geoBox(o);
+  const rect = new PIXI.Rectangle(b.x0 - pad, b.y0 - pad, b.x1 - b.x0 + 2 * pad, b.y1 - b.y0 + 2 * pad), h = Math.round(w * rect.height / rect.width);
+  const out = document.createElement("canvas"); const rowsN = Math.ceil(n / cols); out.width = w * cols; out.height = (h + 14) * rowsN; const g = out.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, out.width, out.height);
+  const t0 = performance.now(), cap = [];
+  for ( let i = 0; i < n; i++ ) {
+    await new Promise((res) => requestAnimationFrame(res));
+    const cv = canvas.app.renderer.extract.canvas(canvas.stage, rect), t = performance.now() - t0;
+    const cx = (i % cols) * w, cy = Math.floor(i / cols) * (h + 14); g.drawImage(cv, cx, cy + 14, w, h); g.fillStyle = "#ffd36e"; g.font = "11px monospace";
+    const run = CIN().runInfo(), st = run?.starts?.[o.id]; const rel = st ? Math.round(performance.now() - st.perf) : null;
+    g.fillText(`${Math.round(t)} ms${rel != null ? ` (start ${rel >= 0 ? "+" : ""}${rel})` : ""} ${game.user.isGM ? "GM" : "player"}`, cx + 4, cy + 11);
+    cap.push({ t: Math.round(t), rel });
+    await sleep(every);
+  }
+  return { url: out.toDataURL("image/jpeg", 0.72), cap, w: out.width, h: out.height };
+}
+
+/** Upload a strip (the data URL strip() returned) to worlds/<world>/popout/<name>.jpg. */
+export async function saveStrip(name, url) {
+  const blob = await (await fetch(url)).blob(), file = new File([blob], `${name}.jpg`, { type: "image/jpeg" }), fp = foundry.applications.apps.FilePicker.implementation;
+  try { await fp.createDirectory("data", `worlds/${game.world.id}/popout`); } catch { /* exists */ }
+  const r = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
+  return r?.path ?? null;
+}
+
+/* ================================================================== the whole check */
+
+/**
+ * GM page: the GM-side scenario, one row per claim (real pointer events). `player` (optional): an async () => probe() of the PLAYER page,
+ * wired by the runner (two tabs, two origins; there is no channel between them) - without it the player rows are skipped and say so.
+ * Steps: staging by mode (drag staged, tap not), hidden on the GM without preview / visible with it (pixels), the counter, undo / redo,
+ * a staged carry does not move the token, Action plays, flags p -> y -> d, Clear takes staged ones, the kill switch.
+ *   await C.cinematicCheck();   playerRows(beforeAction, afterShow) judges the two player probes
+ */
+export async function cinematicCheck({ player = null } = {}) {
+  const rows = [], d = D();
+  const P = async () => (player ? await player() : null);
+  try {
+    await gmSetup({ mode: "drags", preview: false });
+    d.setCinematic({ over: { pauseBefore: 600, gap: 400 } });
+    const a = await gmPaint({ from: [0.25, 0.3], to: [0.45, 0.3] }), b = await gmPaint({ tap: true, from: [0.7, 0.6] });
+    rows.push(row("a drag is staged in 'drags' mode (cin p, queue place, origin kept), a tap is not", a?.cin?.s === "p" && a.cin.q === 0 && Array.isArray(a.cin.o) && b && !b.cin));
+    await sleep(2500);
+    let p = await probe(), sa = p.strokes.find((s) => s.id === a.id), sb = p.strokes.find((s) => s.id === b.id);
+    rows.push(row("GM without preview: the staged stroke is not on the display (0 groups, 0 pixels), the tap is", sa.groups === 0 && sa.ink === 0 && sb.groups > 0 && sb.ink > 0, { sa: [sa.groups, sa.ink], sb: [sb.groups, sb.ink] }));
+    rows.push(row("the counter says 1 staged", p.status.staged === 1));
+    let q = await P(); if ( q ) { const x = q.strokes.find((s) => s.id === a.id); rows.push(row("PLAYER: the staged stroke is not on the display (0 groups, 0 pixels)", x && x.groups === 0 && x.ink === 0, { x: x && [x.groups, x.ink] })); }
+    d.setCinematic({ preview: true }); await sleep(2500);
+    p = await probe(); sa = p.strokes.find((s) => s.id === a.id);
+    rows.push(row("GM preview ON: the GM sees it at once (pixels)", sa.groups > 0 && sa.ink > 0, { ink: sa.ink }));
+    q = await P(); if ( q ) { const x = q.strokes.find((s) => s.id === a.id); rows.push(row("PLAYER: still nothing with the GM's preview on", x && x.groups === 0 && x.ink === 0)); }
+    d.setCinematic({ preview: false }); await sleep(1500);
+    // undo / redo of a staged stroke
+    const a2 = await gmPaint({ from: [0.25, 0.8], to: [0.4, 0.82] }), n0 = CIN().status().staged;
+    const u = await gmUndo(); rows.push(row("undo removes the last staged stroke (the counter drops by one)", n0 === 2 && u.staged === 1 && !objs().some((o) => o.id === a2.id)));
+    const rd = await gmRedo(); p = await probe();
+    rows.push(row("redo brings it back still staged (cin p, hidden)", rd.staged === 2 && p.strokes.find((s) => s.id === a2.id)?.cin?.s === "p" && p.strokes.find((s) => s.id === a2.id)?.groups === 0));
+    // a staged carry: the token does not move
+    const tok = canvas.tokens.placeables.find((t) => !t.document.locked), R0 = R();
+    await tok.document.update({ x: 300, y: 700 }, { animate: false }); await sleep(500);
+    const c0 = [(300 + tok.w / 2) / R0.width, (700 + tok.h / 2) / R0.height];
+    const cs = await gmPaint({ ctrl: true, from: c0, to: [c0[0] + 0.2, c0[1] - 0.05], wait: false }); await sleep(3500);
+    const tk0 = objs().find((o) => o.id === cs?.id)?.tk, t0 = tk0 && canvas.tokens.get(tk0.id);
+    rows.push(row("a staged carry: tk kept, the token has NOT moved (document) after 3.5 s", !!(cs?.tk && cs.cin?.s === "p" && t0 && t0.document.x === tk0.x0 && t0.document.y === tk0.y0)));
+    // Action
+    window.__cinCheckStart = CIN().now(); watch();
+    const show = await gmAction();
+    rows.push(row("Action: a show record with both staged strokes in queue order", show?.ids?.length === 3, { ids: show?.ids }));
+    await waitShow(40000); await sleep(1500);
+    const w = watchReport(); p = await probe();
+    const starts = Object.values(w.entries).map((e) => e.start);
+    rows.push(row("the show played: every staged stroke settled as d, flags gone, counter 0", p.strokes.filter((s) => s.cin).every((s) => s.cin.s === "d") && Object.keys(p.flag ?? {}).length === 0, { cin: p.strokes.map((s) => s.cin?.s) }));
+    rows.push(row("entries started exactly on the shared schedule", show.offs.every((o, i) => starts.some((s) => Math.abs(s - (show.t0 + o)) <= 60)), { starts: starts.map((s) => s - show.t0), offs: show.offs }));
+    const ct = objs().find((o) => o.id === cs.id)?.tk, ctok = ct && canvas.tokens.get(ct.id);
+    rows.push(row("the carried token moved for real at the end of its stroke's play", ct && Math.abs(ctok.document.x - ct.x1) <= 2 && Math.abs(ctok.document.y - ct.y1) <= 2));
+    q = await P(); if ( q ) rows.push(row("PLAYER: every staged stroke is on the display and settled d", q.strokes.filter((s) => s.cin).every((s) => s.cin.s === "d" && s.groups > 0)));
+    // Clear takes staged strokes too
+    await gmPaint({ from: [0.2, 0.8], to: [0.4, 0.8] }); const before = CIN().status().staged; const cl = await gmClear();
+    rows.push(row("Clear removes staged strokes too", before === 1 && cl.staged === 0 && cl.n === 0));
+    // kill switch
+    await gmPaint({ from: [0.2, 0.2], to: [0.4, 0.2] });
+    CONFIG.moinenMaps.noCinematic = true; CIN().refresh(); await sleep(2000);
+    const kp = await probe(); const k2 = await gmPaint({ from: [0.5, 0.2], to: [0.7, 0.2] });
+    rows.push(row("kill switch: the staged stroke shows at once, the counter is 0, a new drag is not staged", kp.strokes[0].groups > 0 && kp.status.staged === 0 && kp.status.mode === "off" && k2 && !k2.cin));
+    CONFIG.moinenMaps.noCinematic = false;
+  } catch ( err ) { rows.push(row(`exception: ${err?.message ?? err}`, false)); }
+  finally { try { await gmEnd(); } catch { /* leave */ } }
+  return { ok: rows.every((r) => r.ok), rows };
+}
