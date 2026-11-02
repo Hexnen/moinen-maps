@@ -928,6 +928,7 @@ async function pixelSource(groups, deliver = null) {
  * stream's memory. `CONFIG.moinenMaps.noPrefetch = true`: none.
  */
 function prefetchNear() {
+  Net.setWide(true);      // (from here on a stroke's chunk comes with its large bundle: few requests for the rest of the scene)
   if ( !display || !canvas.ready || globalThis.CONFIG?.moinenMaps?.noPrefetch ) return;
   const vw = display.view(), mx = (vw.x1 - vw.x0) * 0.5, my = (vw.y1 - vw.y0) * 0.5;
   const near = (r) => !(r.x0 > vw.x1 + mx || r.y0 > vw.y1 + my || r.x1 < vw.x0 - mx || r.y1 < vw.y0 - my);

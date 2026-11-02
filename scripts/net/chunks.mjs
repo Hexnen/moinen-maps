@@ -536,6 +536,24 @@ export function bundleBuckets(ids) {
   return out;
 }
 
+/**
+ * LARGE bundles (round 3): strokes above the small-bundle limit (a Rebake'd look is ~180 kB on average) ride together too, so the
+ * read-ahead after the reveal is a few files of ~`cap` bytes instead of one request a stroke. `sizes`: Map id -> bytes. A chunk goes to
+ * one of `ceil(total / cap)` buckets by a hash of its id (a changed chunk changes ONE bundle). Pure.
+ */
+export function largeBuckets(sizes, cap = 655360) {
+  let total = 0;
+  for ( const n of sizes.values() ) total += n;
+  const nb = Math.max(1, Math.ceil(total / cap)), out = new Map();
+  for ( const id of sizes.keys() ) {
+    const label = `L${nb === 1 ? 0 : parseInt(hashStr(id), 36) % nb}`;
+    if ( !out.has(label) ) out.set(label, []);
+    out.get(label).push(id);
+  }
+  for ( const l of out.values() ) l.sort();
+  return out;
+}
+
 /* ---------------------------------------------------------------- composite culling (runs in the codec worker) */
 
 /** Texels of margin round a cleared one: the magnified edge smoothing (1) and the mip levels down to zoom 1/4 (2^2 blocks, bilinear). */

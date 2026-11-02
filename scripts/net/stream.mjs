@@ -298,7 +298,9 @@ async function download(dir, id, reload = false, signal = null) {
  * here). A chunk in a registered bundle is taken from its bundle - memory, IndexedDB, else ONE download for all its members - and
  * only when the bundle cannot be had (not on the server, damaged) from its own single file, which the GM keeps uploading as before.
  */
-const memberOf = new Map();          // chunk id -> { dir, bid }
+const memberOf = new Map();          // chunk id -> { dir, bid, large }
+let wide = false;                    // the read-ahead after the reveal is on: a chunk of a LARGE bundle (bundle.mjs, rec.L) comes with its bundle
+export const setWide = (v) => { wide = !!v; };
 const sceneBundles = new Map();      // scene id -> [{ dir, bid, ids }]
 const bundleInflight = new Map();    // bid (or bid:only) -> Promise<boolean>
 const bundleLoaded = new Set();      // bundles decoded whole this session
@@ -308,8 +310,10 @@ const badBundles = new Map();       // bid -> when it failed (tried again after 
 export function setBundles(sceneId, rec) {
   if ( rec?.dir && Array.isArray(rec.b) ) sceneBundles.set(sceneId, rec.b.filter((e) => Array.isArray(e) && typeof e[0] === "string" && Array.isArray(e[1])).map(([bid, ids]) => ({ dir: rec.dir, bid, ids })));
   else sceneBundles.delete(sceneId);
+  const L = new Set(Array.isArray(rec?.L) ? rec.L : []);
+  if ( sceneId === globalThis.canvas?.scene?.id ) wide = false;
   memberOf.clear();
-  for ( const list of sceneBundles.values() ) for ( const b of list ) for ( const id of b.ids ) memberOf.set(id, { dir: b.dir, bid: b.bid });
+  for ( const list of sceneBundles.values() ) for ( const b of list ) for ( const id of b.ids ) memberOf.set(id, { dir: b.dir, bid: b.bid, large: L.has(b.bid) });
 }
 export const bundleOf = (id) => memberOf.get(id) ?? null;
 /** The bundle ids a list of chunk ids falls into (their bytes are read from IndexedDB ahead, see prefetch). */
@@ -366,7 +370,7 @@ export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
     if ( memo.has(id) ) return memo.get(id).v;
     if ( signal?.aborted ) return null;
     const info = memberOf.get(id);
-    if ( info && info.dir === dir && !preloaded.has(id) ) {       // (a chunk read ahead from IndexedDB as a file of its own needs no bundle)
+    if ( info && info.dir === dir && !preloaded.has(id) && (!info.large || wide || bundleLoaded.has(info.bid) || bundleInflight.has(info.bid)) ) {       // (a chunk read ahead from IndexedDB as a file of its own needs no bundle)
       await ensureBundle(info, signal, bundleLoaded.has(info.bid) ? id : null);
       if ( memo.has(id) ) return memo.get(id).v;
     }
