@@ -2,7 +2,6 @@ import { MODULE_ID } from "../config.mjs";
 import { perfLow } from "../perf-mode.mjs";
 import { cachedSetting } from "../setting-cache.mjs";
 import { bandKey as bandKeyOf } from "../net/chunks.mjs";
-import { softConfig, softKernel, softLevel } from "./soft-kernel.mjs";
 
 /**
  * STATIC CACHE of the destruction layer (PERF). Every damage object (map patch + ruin + shards, an erase stroke, ...) is a container in
@@ -118,58 +117,42 @@ in vec2 vUV;
 uniform sampler2D uTex;
 uniform vec2 uSize;
 uniform float uScale;
-uniform float uPx;      // screen px per texel (uScale is 1e4 when the tile samples NEAREST)
 uniform float uSharp;
 uniform float uSoft;
-uniform vec4 uSoftK;    // x: the taps' distance (texels, magnified; already scaled by the softening level), y: mip bias (minified), z: detail given back (minified), w: the taps' texel-edge ramp (screen px per texel)
-uniform float uTapSh;   // the taps' sharpness (0 bilinear .. 1 crisp texels)
-uniform float uLook;    // 1: the taps are the resting look; 0: plain bilinear taps (CONFIG.moinenMaps.zoomSoftLegacy: the old kernel)
+uniform vec2 uSoftK;
 uniform float uAlpha;
 out vec4 fragColor;
-// the look at a texel position p (texel units) at sc screen px per texel: plain bilinear (sh 0) .. crisp texels with one screen pixel
-// of smoothing at their edges (sh 1)
-vec4 look(vec2 p, float sc, float sh) {
-  vec2 i = floor(p), fr = p - i;
-  vec2 f = mix(fr, clamp((fr - 0.5) * sc + 0.5, 0.0, 1.0), sh);
-  return textureLod(uTex, (i + 0.5 + f) / uSize, 0.0);
-}
 void main() {
   if ( uScale > 1.0 ) {
     vec2 p = vUV * uSize - 0.5;
-    vec4 c = look(p, uScale, uSharp);
+    vec2 i = floor(p), fr = p - i;
+    // uSharp 0: plain bilinear (as the live layer below its NEAREST switch, and as the map); 1: crisp texels with one screen pixel
+    // of smoothing at their edges
+    vec2 f = mix(fr, clamp((fr - 0.5) * uScale + 0.5, 0.0, 1.0), uSharp);
+    vec4 c = textureLod(uTex, (i + 0.5 + f) / uSize, 0.0);
     if ( uSoft > 0.0 ) {
-      // while the zoom moves: the look averaged over four taps a fraction of a texel apart (a smooth kernel that looks the same at every
-      // phase of the texel grid, so no bands of sharp and blurred texels sweep over the art). Their distance is set in device pixels
-      // (soft-kernel.mjs: a texel many screen pixels wide keeps its body, one of 1-2 px is filtered by a screen pixel) and goes to
-      // nothing with uSoft, so the end of the soft phase is a continuous change of the kernel; each tap is the resting look at the true
-      // screen size (also where the resting look is NEAREST: texel edges anti-aliased, no stepping of 1 / 2 px wide texels)
-      float t = uSoftK.x;
-      vec4 s;
-      if ( uLook > 0.5 ) s = 0.25 * (look(p + vec2(-t, -t), uSoftK.w, uTapSh) + look(p + vec2(t, -t), uSoftK.w, uTapSh) + look(p + vec2(-t, t), uSoftK.w, uTapSh) + look(p + vec2(t, t), uSoftK.w, uTapSh));
-      else { vec2 h = vec2(t) / uSize; s = 0.25 * (textureLod(uTex, vUV + vec2(-h.x, -h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, -h.y), 0.0) + textureLod(uTex, vUV + vec2(-h.x, h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, h.y), 0.0)); }
-      c = mix(c, s, uLook > 0.5 ? 1.0 : uSoft);
+      // while the zoom moves: four bilinear taps half a texel apart (a smooth kernel that looks the same at every phase of the
+      // texel grid, so no bands of sharp and blurred texels sweep over the art)
+      vec2 h = uSoftK.x / uSize;
+      vec4 s = 0.25 * (textureLod(uTex, vUV + vec2(-h.x, -h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, -h.y), 0.0)
+                     + textureLod(uTex, vUV + vec2(-h.x, h.y), 0.0) + textureLod(uTex, vUV + vec2(h.x, h.y), 0.0));
+      c = mix(c, s, uSoft);
     }
     fragColor = c * uAlpha;
   }
-  // minified: the mipmaps, softer while the zoom moves (the level blend no longer flips fine detail on and off)
-  else {
-    vec4 c = texture(uTex, vUV, uSoftK.y);
-    if ( uSoftK.z > 0.0 ) {
-      // the detail the softer level took out, partly given back (unsharp against a coarser level)
-      c = c + uSoftK.z * (c - texture(uTex, vUV, uSoftK.y + 1.5));
-      c.a = clamp(c.a, 0.0, 1.0); c.rgb = clamp(c.rgb, 0.0, c.a);
-    }
-    fragColor = c * uAlpha;
-  }
+  // minified: the mipmaps, half a level softer while the zoom moves (the level blend no longer flips fine detail on and off)
+  else fragColor = texture(uTex, vUV, uSoft * uSoftK.y) * uAlpha;
 }`;
 /**
- * ZOOM SOFTENING (0..1), shared by every tile: rises over a few frames while the canvas scale changes, back to 0 over SOFT_MS (a smooth
- * ease) after it stops. Resampled at a scale that drifts, fine pixel art beats against the screen grid - bands of sharp and blurred
- * texels sweep across it (the "waving" in the last phase of a zoom-out); a phase-independent kernel while it moves, crisp again when it
- * stands still. The kernel (soft-kernel.mjs) is a function of device pixels, so it reads the same on every screen.
+ * ZOOM SOFTENING (0..1), shared by every tile: 1 while the canvas scale changes, back to 0 over SOFT_MS after it stops. Resampled at a
+ * scale that drifts, fine pixel art beats against the screen grid - bands of sharp and blurred texels sweep across it (the "waving"
+ * in the last phase of a zoom-out); a phase-independent kernel while it moves, crisp again when it stands still.
  */
 let zoomSoft = 0;
 const SOFT_MS = 220;
+// the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
+// "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
+const SOFT_TAP = 0.35, SOFT_BIAS = 0.5;
 const RAMP0 = 2.0;                                       // screen px per texel where the crisp ramp starts (CONFIG.moinenMaps.sharpFrom: dev knob)
 let sharpProgram = null;
 
@@ -185,7 +168,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
     sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uPx: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array(4), uTapSh: 0, uLook: 1, uAlpha: 1 });
+    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAlpha: 1 });
     this.state = PIXI.State.for2d();
   }
 
@@ -201,10 +184,7 @@ export class SharpTile extends PIXI.Container {
     // screen pixels per texel (the canvas's own resolution included)
     // (`nearest`: the live layer samples NEAREST now - zoomed in past 3 screen px per art pixel - so the tile does too, a hard step at
     // every texel edge, the same pixels as the shards in an entry frame; else one screen pixel of smoothing at each texel edge)
-    // (a render with its own projection transform - the harness's grab(), a snapshot - draws the stage's scale through that transform,
-    // not through the tile's world transform)
-    un.uPx = Math.hypot(M.a, M.b) * (renderer.projection?.transform ? Math.hypot(renderer.projection.transform.a, renderer.projection.transform.b) : 1) * (renderer.resolution || 1) / this.res;
-    un.uScale = this.nearest ? 1e4 : un.uPx; un.uAlpha = this.worldAlpha;
+    un.uScale = this.nearest ? 1e4 : Math.hypot(M.a, M.b) * (renderer.resolution || 1) / this.res; un.uAlpha = this.worldAlpha;
     // WAVING (v0.4.1, "zniszczenia falują" in the last phase of a zoom-out): sharpened at 1-2.5 screen px per texel, every texel was
     // drawn one or two pixels wide by turns and the pattern crawled with every step of a gliding zoom (the cache shimmered 1.7x the
     // live layer: dev/perf-harness wavingCheck) and the clamped edge of a tile showed as a line. So: plain bilinear up to 1.5 screen
@@ -214,10 +194,7 @@ export class SharpTile extends PIXI.Container {
     const r0 = globalThis.CONFIG?.moinenMaps?.sharpFrom ?? RAMP0;
     un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
     un.uSoft = globalThis.CONFIG?.moinenMaps?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison)
-    // the kernel in device pixels (soft-kernel.mjs); zoomSoftLegacy: the old texel-fixed kernel (dev knob, A/B)
-    const cfgM = globalThis.CONFIG?.moinenMaps, cfg = softConfig(cfgM?.zoomSoftK), k = softKernel(un.uPx, renderer.resolution || 1, un.uSoft, cfg, un.uSharp, un.uScale), U = un.uSoftK;
-    if ( cfgM?.zoomSoftLegacy ) { un.uLook = 0; U[0] = cfg.tap; U[1] = cfg.bias * un.uSoft; U[2] = 0; U[3] = 1; un.uTapSh = 0; }
-    else { un.uLook = 1; U[0] = k.tap; U[1] = k.bias; U[2] = k.mgain; U[3] = k.edge; un.uTapSh = k.sharp; }
+    const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
     renderer.state.set(this.state);
@@ -334,8 +311,7 @@ export class StaticCache {
     { const sc = canvas.stage?.scale?.x ?? 0, t = performance.now();
       if ( this.lastScale && Math.abs(sc / this.lastScale - 1) > 1e-5 ) this.movedAt = t;
       this.lastScale = sc;
-      zoomSoft = globalThis.CONFIG?.moinenMaps?.zoomSoftLegacy ? (this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / SOFT_MS) : 0)
-        : softLevel(zoomSoft, this.movedAt === t ? 0 : this.movedAt ? Math.max(1e-6, t - this.movedAt) : 1e9, SOFT_MS); }
+      zoomSoft = this.movedAt ? Math.max(0, 1 - (t - this.movedAt) / SOFT_MS) : 0; }
     const d = this.d, kids = d.live.children, sr = canvas.dimensions?.sceneRect, R = canvas.app?.renderer;
     if ( !cacheEnabled() || !kids.length || !sr || !R ) return this.allLive("off");
     const same = this.fingerprint(kids, sr);
