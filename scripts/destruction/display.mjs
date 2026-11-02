@@ -51,6 +51,12 @@ const WAIT_MS = 150;   // how long an entry waits for its pixels (waitPixels) ..
 const WAIT_FAR_MS = 2500;   // ... and an area outside the view (only in the margin round it) may wait this much longer: nobody sees it start late
 const WAIT_LATE_MS = 1500;   // ... or this long past its own start (a Detonate's start lies ahead; the pixels of a whole scene take a while)
 const NEAREST = 0, LINEAR = 1;
+// END POP (endPopCheck): what an entry holds on a piece after it lands must be gone before the entry ends, or the last frame jumps to the rest look:
+// a flood's plates are tinted blue at the landing and dry back to their own colour over FLOOD_DRY_MS; a cause's tint lasts until t = 1.5
+const FLOOD_DRY_MS = 300;
+const floodDry = (t, dur) => 1 - clamp01((t - 1) * dur / FLOOD_DRY_MS);
+/** Ms from a piece's start until the entry may end for it: 400 ms after the landing (the hops, the dust), and past a cause's tint (t = 1.5). */
+const settleEnd = (a, it) => (a.cl?.tint ? Math.max(it.dur + 400, it.dur * 1.5) : it.dur + 400);
 
 function layer(sortLayer) {
   const c = new PIXI.Container();
@@ -723,11 +729,11 @@ export class DestructionDisplay {
    * the moment of each pixel (ms after the start). The covers of strokes painted over older damage and the erase strokes use it, with
    * the same per-pixel clock as the ruin they belong to, so at every pixel the old look turns into the new one directly.
    */
-  makeDissolve(data, w, h, x0, y0, timeOf, out = false, lazy = false) {
+  makeDissolve(data, w, h, x0, y0, timeOf, out = false, lazy = false, filter = PIXI.SCALE_MODES.NEAREST) {
     if ( lazy ) {   // the clock comes later (clockSlice); nothing shows until then
       const buf = new Uint8Array(w * h * 4);
       const tex = new PIXI.BaseTexture(new RowResource(buf, { width: w, height: h, blank: true }), {
-        width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+        width: w, height: h, scaleMode: filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
         format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
       return { keys: null, next: 0, buf, data, tex, out, end: 0 };
     }
@@ -740,7 +746,7 @@ export class DestructionDisplay {
     const sorted = countSort(tm, ix, c, tmax);
     const buf = out ? new Uint8Array(data) : new Uint8Array(w * h * 4);
     const tex = new PIXI.BaseTexture(new RowResource(buf, { width: w, height: h, blank: !out }), {
-      width: w, height: h, scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
+      width: w, height: h, scaleMode: filter, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.UNPACK,
       format: PIXI.FORMATS.RGBA, type: PIXI.TYPES.UNSIGNED_BYTE, wrapMode: PIXI.WRAP_MODES.CLAMP });
     return { keys: sorted.ix, tms: sorted.tm, next: 0, buf, data, tex, out, end: c ? sorted.tm[c - 1] : 0 };
   }
@@ -993,11 +999,11 @@ export class DestructionDisplay {
         for ( let y = 0; y < fr.height; y++ ) cd.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
         const gs = this.gpuStages([{ dt: 0 }]);
         if ( gs ) {
-          const T = this.gpuErode.makeTarget(fr.width, fr.height, PIXI.SCALE_MODES.NEAREST);
+          const T = this.gpuErode.makeTarget(fr.width, fr.height, this.filter);   // (sampled like the cover it turns into: it was NEAREST, and the cover popped to LINEAR when the entry ended)
           crev = { keys: null, next: 0, buf: null, data: cd, tex: T.base, rt: T.tex, gpu: gs, out: false, end: 0, w: fr.width, h: fr.height, stages: [{ dt: 0 }], cur: new Int32Array(1), fr };
           crev.frame = pm.texture; pm.texture = T.tex;
         } else {
-          crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true);
+          crev = this.makeDissolve(cd, fr.width, fr.height, g.coverFrame.x, g.coverFrame.y, pixelTime, false, true, this.filter);
           crev.frame = pm.texture; pm.texture = new PIXI.Texture(crev.tex);
         }
         g.patch.renderable = false;      // (blank: nothing to draw until its first pixel, see erode)
@@ -1510,7 +1516,9 @@ export class DestructionDisplay {
       if ( st < 70 ) squash = 0.82 + 0.18 * (st / 70);
       const hi = Math.floor(st / hopMs);
       if ( hi < hops ) { const ph = (st % hopMs) / hopMs, h = Math.min(2.5, a.arc * 0.18) / (hi + 1); hop = Math.sin(ph * Math.PI) * h; }
-      s.position.set(o.x + p.fx * ap, o.y + Math.round(p.fy - hop) * ap);
+      // (whole art pixels from the REST position, which sits on the half-pixel grid for an odd-sized piece: Math.round(p.fy - hop) put half of the
+      // pieces half an art pixel off it, and they jumped to it when the entry ended)
+      s.position.set(o.x + p.fx * ap, o.y + (p.fy - Math.round(hop)) * ap);
       s.rotation = 0;
       s.scale.set(ap, ap * squash);
       return;
@@ -1630,7 +1638,7 @@ export class DestructionDisplay {
     // live layer that counted CSS pixels stayed LINEAR-blurred where the cache already drew crisp texels: 6-11 % crisper at 125-200 % DPR)
     const z = canvas.stage.scale.x * this.ap * (canvas.app.renderer.resolution || 1);
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
-    if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
+    if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; for ( const X of [g.anim?.rev, g.anim?.crev] ) if ( X?.tex && !X.tex.destroyed ) X.tex.scaleMode = want; } }   // (the ruin's and the cover's erode textures follow: the entry's end swaps them for the atlas's)
     const vw = this.view();
     if ( this.swapQ?.length && !(this.pending?.size || this.pixelAsks?.size || this.restoreQ?.length) ) this.pixelsSlice(t0, 4);   // (shells' areas from the worker, swapShell)
     const T = this.stats.parts ??= {}; let tp = performance.now();
@@ -1812,7 +1820,7 @@ export class DestructionDisplay {
     if ( it.p.spr ) {
       // a burning plate glows as it curls, then cools back to the map's colours
       if ( type === "scorch" ) it.p.spr.tint = t <= 0 ? 0xFFFFFF : lerpColor(0xffa060, 0xffffff, clamp01(t));
-      else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7);
+      else if ( type === "flood" ) it.p.spr.tint = lerpColor(0xffffff, 0xb8d4ff, clamp01(t) * 0.7 * floodDry(t, it.dur));
       if ( a.cl?.tint ) it.p.spr.tint = t <= 0 || t >= 1.5 ? 0xFFFFFF : lerpColor(a.cl.tint, 0xffffff, clamp01(t / 1.5));   // the cause's tint while it moves
     }
   }
@@ -1954,7 +1962,7 @@ export class DestructionDisplay {
       a.gl = { idx, ptr: 0, rank, snaps: null, sp: 0 };
       // a tear's fibres snap at their moment (the pose code spawned the flecks as it posed them: here a time-sorted list)
       if ( a.tear ) { const sn = []; for ( let k = 0; k < L.length; k++ ) if ( L[k].kind === 4 ) sn.push(k); sn.sort((x, y) => (L[x].t0 + L[x].hold) - (L[y].t0 + L[y].hold) || x - y); a.gl.snaps = sn; }
-      a.busyUntil = L.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);
+      a.busyUntil = L.reduce((m, it) => Math.max(m, it.t0 + settleEnd(a, it)), -Infinity);
     }
     const G = a.gl, L = a.list;
     if ( G.snaps && G.sp < G.snaps.length ) this.tearSnaps(a, G, now, onScreen);
@@ -1999,7 +2007,7 @@ export class DestructionDisplay {
     if ( !a.byStart ) {
       a.startOrder ??= startOrderOf(a.list);
       a.byStart = a.startOrder.map((k) => a.list[k]); a.nextStart = 0; a.act = [];
-      a.busyUntil = a.list.reduce((m, it) => Math.max(m, it.t0 + it.dur + 400), -Infinity);   // = some piece has t < 1 + 400 / dur
+      a.busyUntil = a.list.reduce((m, it) => Math.max(m, it.t0 + settleEnd(a, it)), -Infinity);   // = some piece has t < 1 + 400 / dur (1.5 with a cause tint: it lasts until then)
     }
     const B = a.byStart, act = a.act;
     while ( a.nextStart < B.length && B[a.nextStart].t0 - B[a.nextStart].pre <= now ) act.push(B[a.nextStart++]);
@@ -2010,7 +2018,7 @@ export class DestructionDisplay {
         this.life(it, a, t, onScreen, type);
         // at rest: past the landing squash and hops (place), past the cause's tint (1.5), the scorch / flood colours constant from 1
         // (a tear's piece: its own settle, tear-entry.mjs tearPiece)
-        if ( it.p.spr && t >= 1 && (t - 1) * it.dur >= (it.settle ?? Math.max(70, it.bounces * 150)) && (!a.cl?.tint || t >= 1.5) ) it.fin = true;
+        if ( it.p.spr && t >= 1 && (t - 1) * it.dur >= (it.settle ?? Math.max(70, it.bounces * 150)) && (!a.cl?.tint || t >= 1.5) && (type !== "flood" || (t - 1) * it.dur >= FLOOD_DRY_MS) ) it.fin = true;
       }
       if ( onScreen && t >= 1 && !it.dusted ) this.dust(it, type);
       if ( !(it.fin && it.dusted) ) act[w++] = it;

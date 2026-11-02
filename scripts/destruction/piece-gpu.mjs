@@ -48,7 +48,7 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
   float tm = uNow - B.x, dur = B.y, t = tm / dur;
   tm = t * dur;
   if (uType > 1.5 && uType < 2.5) { if (t > 0.0) { float u = min(t, 1.0); tint = vec3(255.0, 160.0, 96.0) + (vec3(255.0) - vec3(255.0, 160.0, 96.0)) * u; tint = floor(tint + 0.5); } }
-  else if (uType > 0.5 && uType < 1.5) { float u = clamp(t, 0.0, 1.0) * 0.7; tint = floor(vec3(255.0) + (vec3(184.0, 212.0, 255.0) - vec3(255.0)) * u + 0.5); }
+  else if (uType > 0.5 && uType < 1.5) { float u = clamp(t, 0.0, 1.0) * 0.7 * (1.0 - clamp((t - 1.0) * dur / 300.0, 0.0, 1.0)); tint = floor(vec3(255.0) + (vec3(184.0, 212.0, 255.0) - vec3(255.0)) * u + 0.5); }
   if (uCT.x >= 0.0) { tint = (t <= 0.0 || t >= 1.5) ? vec3(255.0) : floor(uCT + (vec3(255.0) - uCT) * clamp(t / 1.5, 0.0, 1.0) + 0.5); }
   if (tm < 0.0) {
     if (tm < -B.z) { vis = 0.0; pos = vec2(0.0); return; }
@@ -62,7 +62,7 @@ void pose(vec4 A, vec4 B, vec4 C, out vec2 pos, out float rot, out vec2 scl, out
     if (st < 70.0) squash = 0.82 + 0.18 * (st / 70.0);
     float hi = floor(st / uHopMs);
     if (hi < C.w) { float ph = (st - hi * uHopMs) / uHopMs, h = min(2.5, B.w * 0.18) / (hi + 1.0); hop = sin(ph * PI) * h; }
-    pos = uOrg + vec2(A.z * uAp, rndS(A.w, -hop) * uAp);
+    pos = uOrg + vec2(A.z * uAp, (A.w - rnd(hop)) * uAp);     // (whole art pixels from the rest position: display.place)
     scl = vec2(uAp, uAp * squash);
     return;
   }
