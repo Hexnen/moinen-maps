@@ -246,7 +246,7 @@ const U = {
   uM: new Float32Array(4), uT: new Float32Array(2), uCT: new Float32Array(3), uOrg: new Float32Array(2), uScene: new Float32Array(4), uBaseCol: new Float32Array(4)
 };
 function shader(mode) {
-  return SHADERS[mode] ??= PIXI.Shader.from("#version 300 es\n" + vert(mode).replace(/attribute/g, "in").replace(/varying/g, "out"), FRAG, {
+  return SHADERS[mode] ??= PIXI.Shader.from("#version 300 es\n" + vert(mode).replaceAll("attribute ", "in ").replaceAll("varying ", "out "), FRAG, {
     uSharpMode: 0, uSharpK: 1, uSharpB: 0, uAtlas: 0, uBase: 1, uNow: 0, uRest: 0, uAp: 1, uHopMs: 150, uType: 0, uK: 1, uFade: 0, uAlpha: 1, uRound: 0,
     uM: U.uM, uT: U.uT, uCT: U.uCT, uOrg: U.uOrg, uScene: U.uScene, uBaseCol: U.uBaseCol
   });

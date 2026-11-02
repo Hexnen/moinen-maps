@@ -32,7 +32,7 @@ in vec2 vMap;
 uniform sampler2D uMask;
 uniform sampler2D uMap;
 uniform float uAlpha;
-uniform float uSharpMode, uSharpK, uSharpB, uMaskTop;
+uniform float uSharpMode, uSharpK, uMaskTop;
 out vec4 fragColor;
 ${SHARP_SAMPLER_GLSL}
 void main() {
