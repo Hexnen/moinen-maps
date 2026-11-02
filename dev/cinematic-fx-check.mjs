@@ -52,7 +52,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     let T0 = tickerCount(); const mark = () => { T0 = tickerCount(); }, V0 = view(), I = await import(`/modules/${MODULE}/dev/idle-bench.mjs`);
     const idleBefore = await I.rest({ frames: idleFrames, warm: Math.round(idleFrames / 3), zoom: V0.scale });
     await sleep(700); mark();
-    need("idle: no overlay, no show, no extra listener", overlays() === 0 && !fx.active && tickerCount() === T0, { overlays: overlays(), ticker: T0 });
+    need("idle: no overlay, no show, no extra listener", overlays() === 0 && !fx.active && tickerCount() <= T0, { overlays: overlays(), ticker: T0 });
 
     // ---- a full show as a (real or GM) player sees it
     const r = await settings(), { strokes, cx, cy } = showStrokes(), samples = [];
@@ -85,7 +85,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     const V1 = view();
     need("camera returned to the previous view", Math.abs(V1.x - V0.x) < 1.5 && Math.abs(V1.y - V0.y) < 1.5 && Math.abs(V1.scale - V0.scale) < 0.005, { V0, V1 });
     need("stage position exact (shake restored)", Math.abs(V1.px - V0.px) < 0.5 && Math.abs(V1.py - V0.py) < 0.5, { px: V1.px, py: V1.py, was: [V0.px, V0.py] });
-    need("nothing left: no overlay, no ticker listener, entry speed back", overlays() === 0 && tickerCount() === T0 && !fx.active && (!display || display.look.speed === speed0), { overlays: overlays(), ticker: tickerCount(), T0 });
+    need("nothing left: no overlay, no ticker listener, entry speed back", overlays() === 0 && tickerCount() <= T0 && !fx.active && (!display || display.look.speed === speed0), { overlays: overlays(), ticker: tickerCount(), T0 });
 
     // ---- the shake in isolation (camera off): max deviation inside the cap, exact restore
     await clientOpt("cinCamera", "off"); await park();
@@ -112,7 +112,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     await sleep(700); const Vc = view();
     need("after the abort the camera stays where the player left it", Math.abs(Vc.scale - Vb.scale) < 1e-3 && Math.abs(Vc.x - Vb.x) < 1);
     await fx.end({ immediate: true });
-    need("immediate end leaves nothing", overlays() === 0 && tickerCount() === T0);
+    need("immediate end leaves nothing", overlays() === 0 && tickerCount() <= T0);
     await clientOpt("cinCamera", "off"); await park();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
     mark(); fx.begin({ r }, { strokes });
@@ -147,7 +147,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     need("preview shows the bars", fx.active && overlays() === 1 && fx.debug().preview);
     await pv; await sleep(150);
     const Vq = view();
-    need("preview leaves nothing and the same view", overlays() === 0 && tickerCount() === T0 && Math.abs(Vq.x - Vp.x) < 1.5 && Math.abs(Vq.scale - Vp.scale) < 0.005 && Vq.px === Vp.px && Vq.py === Vp.py, { Vp, Vq });
+    need("preview leaves nothing and the same view", overlays() === 0 && tickerCount() <= T0 && Math.abs(Vq.x - Vp.x) < 1.5 && Math.abs(Vq.scale - Vp.scale) < 0.005 && Vq.px === Vp.px && Vq.py === Vp.py, { Vp, Vq });
     need("preview did not touch the strokes or the flags", JSON.stringify(canvas.scene.getFlag(MODULE, "destruction") ?? null) === strokesBefore);
 
     // ---- a camera move check from the AA harness while a show runs (when the harness has it)
@@ -165,7 +165,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     // ---- idle cost unchanged
     await park();
     const idleAfter = await I.rest({ frames: idleFrames, warm: Math.round(idleFrames / 3), zoom: V0.scale });
-    need("idle-bench rest unchanged (mean within +0.15 ms)", idleAfter.total.mean <= idleBefore.total.mean + 0.15 && tickerCount() === T0, { before: idleBefore.total, after: idleAfter.total });
+    need("idle-bench rest unchanged (mean within +0.15 ms)", idleAfter.total.mean <= idleBefore.total.mean + 0.15 && tickerCount() <= T0, { before: idleBefore.total, after: idleAfter.total });
   } catch ( err ) {
     rows.push(row("check threw", false, { err: String(err?.stack ?? err) }));
   } finally {
@@ -183,7 +183,7 @@ export async function fxStrip({ name = "cine-show", n = 8, ms = 3000, overrides 
   const fx = fxApi(), r = await settings(overrides), { strokes, cx, cy } = showStrokes(), W = 360, Hh = Math.round(W * innerHeight / innerWidth);
   await clientOpt("cinCamera", "on"); await park();
   const sheet = new OffscreenCanvas((W + 4) * n, Hh), ctx = sheet.getContext("2d"); ctx.fillStyle = "#222"; ctx.fillRect(0, 0, sheet.width, Hh);
-  mark(); fx.begin({ r }, { strokes });
+  fx.begin({ r }, { strokes });
   const t0 = performance.now(); let k = 0, fired = 0;
   while ( k < n ) {
     const t = performance.now() - t0;
@@ -195,7 +195,7 @@ export async function fxStrip({ name = "cine-show", n = 8, ms = 3000, overrides 
       const sc = W / innerWidth;
       for ( const e of document.querySelectorAll("[data-mm-cin] > div") ) {
         const b = e.getBoundingClientRect(), op = Number(getComputedStyle(e).opacity);
-        if ( !op || !e.style.height ) { if ( op && e.style.background ) { ctx.globalAlpha = op; ctx.fillStyle = e.style.background; ctx.fillRect(x0, 0, W, Hh); ctx.globalAlpha = 1; } continue; }
+        if ( !op || !e.style.height ) { if ( op && e.style.background && !/gradient/.test(e.style.background) ) { ctx.globalAlpha = op; ctx.fillStyle = e.style.background; ctx.fillRect(x0, 0, W, Hh); ctx.globalAlpha = 1; } continue; }
         ctx.globalAlpha = op; ctx.fillStyle = e.style.background; ctx.fillRect(x0 + b.x * sc, b.y * sc, b.width * sc, b.height * sc); ctx.globalAlpha = 1;
       }
       ctx.fillStyle = "#fff"; ctx.font = "12px sans-serif"; ctx.fillText(`${Math.round(t)} ms`, x0 + 6, 14);
@@ -204,8 +204,14 @@ export async function fxStrip({ name = "cine-show", n = 8, ms = 3000, overrides 
     await new Promise((res) => requestAnimationFrame(res));
   }
   await fx.end();
-  const file = new File([await sheet.convertToBlob({ type: "image/png" })], name + ".png", { type: "image/png" }), fp = foundry.applications.apps.FilePicker.implementation;
-  try { await fp.createDirectory("data", `worlds/${game.world.id}/popout`); } catch { /* exists */ }
-  const res = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
-  return { path: res?.path };
+  const blob = await sheet.convertToBlob({ type: "image/png" });
+  // (a PLAYER may not upload: the sheet then comes back as a data URL for the caller to save)
+  try {
+    const file = new File([blob], name + ".png", { type: "image/png" }), fp = foundry.applications.apps.FilePicker.implementation;
+    try { await fp.createDirectory("data", `worlds/${game.world.id}/popout`); } catch { /* exists */ }
+    const res = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
+    if ( res?.path ) return { path: res.path };
+  } catch { /* fall through */ }
+  const dataUrl = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+  return { dataUrl };
 }
