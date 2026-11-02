@@ -19,6 +19,8 @@
  *                        stroke index are zeroed: a chunk does not change when other strokes change.
  */
 
+import { pack as shellPack } from "../destruction/atlas-layout.mjs";
+
 export const KIND_WATER = 1, KIND_OBJECT = 2;
 const VERSION = 1, ROW = 4096;
 /** Water tiles: art pixels per side. */
@@ -325,6 +327,38 @@ export function packAreaAtlases(sprites, specs) {
       for ( let y = 0; y < h; y++ ) buf.set(s.img.subarray(y * w * 4, (y + 1) * w * 4), ((p.y + y) * sp.W + p.x) * 4);
     }
     return { hash: sp.hash, data: buf };
+  });
+}
+
+/**
+ * PERF (a shell's area, Detonate): the area a composite shell stands for, built in the codec worker - laid out with the display's own
+ * layout (atlas-layout.mjs pack) and its atlas packed, straight from a decoded chunk's sprites; the page only makes the area's sprites from
+ * it (display.build `packed`, swapShell). `specs`: [{ hash, index (the stroke's index in the scene) }]; `square`: CONFIG.moinenMaps.squareAtlas.
+ * -> [{ hash, data (the atlas), W, H, pos, sizes, meta (the area's rows, Int16Array of F fields each: sheet position = the layout) }]
+ * (data null: the area is not in the chunk).
+ */
+export function packShellAreas(sprites, specs, square = false) {
+  const areas = new Map();
+  let cur = null;
+  for ( const s of sprites ) {
+    if ( s.m[0] === 0 ) { cur = { base: s, pieces: [], cover: null, light: null }; areas.set(((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0, cur); continue; }
+    if ( !cur ) continue;
+    if ( s.m[0] === 2 ) cur.cover = s; else if ( s.m[0] === 3 ) cur.light = s; else cur.pieces.push(s);
+  }
+  return specs.map((sp) => {
+    const a = areas.get(sp.hash);
+    if ( !a ) return { hash: sp.hash, data: null };
+    const list = [a.base, ...a.pieces, ...(a.cover ? [a.cover] : []), ...(a.light ? [a.light] : [])];
+    if ( list.some((s) => !s.img) ) return { hash: sp.hash, data: null };
+    const pk = shellPack(list.map((s) => ({ w: s.w, h: s.h })), square), F = a.base.m.length;
+    const data = new Uint8Array(pk.W * pk.H * 4), meta = new Int16Array(list.length * F);
+    list.forEach((s, i) => {
+      const p = pk.pos[i];
+      for ( let y = 0; y < s.h; y++ ) data.set(s.img.subarray(y * s.w * 4, (y + 1) * s.w * 4), ((p.y + y) * pk.W + p.x) * 4);
+      meta.set(s.m, i * F); meta[i * F + 1] = p.x; meta[i * F + 2] = p.y;
+    });
+    meta[16] = Math.min(32767, sp.index | 0);
+    return { hash: sp.hash, data, W: pk.W, H: pk.H, pos: pk.pos, sizes: list.map((s) => [s.w, s.h]), meta };
   });
 }
 
@@ -700,6 +734,18 @@ export async function work(m) {
       const atlases = packAreaAtlases(o.sprites, m.pack);
       for ( const a of atlases ) if ( a.data ) transfer.push(a.data.buffer);
       return { result: { atlases }, transfer };
+    }
+    if ( m.shells ) {
+      // a shell's areas (packShellAreas) and, in a dark scene, their rims in the same pass (rim-job.mjs)
+      const o = unpackObject(p), shells = packShellAreas(o.sprites, m.shells, !!m.square);
+      for ( const a of shells ) if ( a.data ) transfer.push(a.data.buffer, a.meta.buffer);
+      let rims = null;
+      if ( m.rims?.length ) {
+        const { rimsOf } = await import("../destruction/rim-job.mjs");
+        rims = await rimsOf(o.sprites, m.rims);
+        for ( const r of rims ) if ( r.rim ) transfer.push(r.rim.A8.buffer);
+      }
+      return { result: { shells, rims }, transfer };
     }
     return { result: decodePayload(p, transfer), transfer };
   }

@@ -1,5 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
-import { work, gcPick, packAreaAtlases } from "./chunks.mjs";
+import { work, gcPick, packAreaAtlases, packShellAreas } from "./chunks.mjs";
 
 /**
  * Streaming baked chunks between the GM and the players (the Foundry side of chunks.mjs).
@@ -280,6 +280,28 @@ export async function rimsOf(dir, id, areas) {
     return await job({ kind: "rims", bytes: b, cid: id, areas }, [b.buffer]);
   } catch ( err ) { console.warn(`${MODULE_ID} | chunk ${id}: rims could not be read (${err.message})`); return null; }
 }
+
+/**
+ * PERF (Detonate): the areas of display shells (composite.mjs) out of ONE chunk, built in the codec worker - laid out and their atlases packed
+ * (chunks.mjs packShellAreas), in a dark scene their rims too (rim-job.mjs): the page only makes the area's sprites from them (display.swapShell)
+ * and keeps no decoded sprites. `specs`: [{ hash, index }], `rims`: [{ hash, cause, type }] or null. -> { shells, rims } or null (not in IndexedDB,
+ * or failed: the caller takes the page-side path).
+ */
+export async function shellsOf(dir, id, specs, rims = null, square = false) {
+  if ( !id ) return null;
+  if ( memo.has(id) ) { stats.memHits++; const sp = memo.get(id).v.sprites ?? []; return { shells: packShellAreas(sp, specs, square), rims: rims?.length ? await rimsHere(sp, rims) : null }; }
+  let bytes = preloaded.get(id) ?? await idbGet(id);
+  preloaded.delete(id);
+  if ( !bytes ) return null;
+  try {
+    const b = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+    const t = performance.now();
+    const r = await job({ kind: "decode", bytes: b, cid: id, shells: specs, rims, square }, [b.buffer]);
+    stats.decodeMs += performance.now() - t; stats.idbHits++;
+    return r;
+  } catch ( err ) { console.warn(`${MODULE_ID} | chunk ${id}: shell areas could not be built (${err.message})`); return null; }
+}
+async function rimsHere(sprites, areas) { const { rimsOf } = await import("../destruction/rim-job.mjs"); return rimsOf(sprites, areas); }
 
 async function download(dir, id, reload = false, signal = null) {
   stats.requests++;
