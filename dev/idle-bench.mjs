@@ -95,3 +95,36 @@ export async function roadStroke({ at = [0.4, 0.5], r = 140, n = 40, ms = 3000, 
   const pts = B.circle(R.x + R.width * at[0], R.y + R.height * at[1], r, n);
   return frames(async () => { const d = await B.drive(pts); return { upCost: +d.upCost.toFixed(1) }; }, { ms });
 }
+
+/**
+ * GPU vs CPU per frame around a destruction stroke: the ticker is stepped by hand (a frame every 16 ms of real time) for `ms` after the
+ * stroke, each frame measured with a GPU timer query (our own GPU time, not the queue wait of other processes) and wall time with
+ * gl.finish. Frames over `min` ms (cpu, gpu or wall) are listed with the gl counters and what changed (groups, bakes).
+ */
+export async function gpuFrames({ at = [0.5, 0.5], r = 90, n = 50, ms = 9000, min = 20, tool = "mm-d-paint", section = "destruction" } = {}) {
+  const B = await import(`/modules/${MODULE}/dev/daily-bench.mjs`), SH = await import(`/modules/${MODULE}/scripts/workspace/shell.mjs`), H = await import(`/modules/${MODULE}/dev/perf-harness.mjs`);
+  const R = canvas.app.renderer, gl = R.gl, ext = gl.getExtension("EXT_disjoint_timer_query_webgl2"), T = canvas.app.ticker, d = game.modules.get(MODULE).api.destruction.display();
+  await SH.useTool(section, tool); await new Promise((res) => setTimeout(res, 400));
+  const sr = canvas.dimensions.sceneRect, pts = B.circle(sr.x + sr.width * at[0], sr.y + sr.height * at[1], r, n);
+  const ins = H.instrument(), rows = [], qs = [];
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  let t = performance.now(), stop = false;
+  const step = async () => {
+    while ( !stop ) {
+      await new Promise((res) => setTimeout(res, 12));
+      t = performance.now(); const q = ext ? gl.createQuery() : null; if ( q ) gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
+      const a = performance.now(); T.update(t); const cpu = performance.now() - a; if ( q ) gl.endQuery(ext.TIME_ELAPSED_EXT);
+      gl.finish(); const wall = performance.now() - a;
+      rows.push({ at: Math.round(t - t00), cpu: +cpu.toFixed(1), wall: +wall.toFixed(1), q, g: ins.frame(), groups: d.groups.size, bakes: d.cache.stats.bakes, anim: [...d.groups.values()].filter((x) => x.anim).length }); if ( q ) qs.push(q);
+    }
+  };
+  const t00 = performance.now(); const loop = step();
+  try {
+    await B.drive(pts); const up = Math.round(performance.now() - t00);
+    await new Promise((res) => setTimeout(res, ms)); stop = true; await loop;
+    await new Promise((res) => setTimeout(res, 300));
+    for ( const x of rows ) { if ( x.q ) { x.gpu = gl.getQueryParameter(x.q, gl.QUERY_RESULT_AVAILABLE) ? +(gl.getQueryParameter(x.q, gl.QUERY_RESULT) / 1e6).toFixed(1) : null; gl.deleteQuery(x.q); delete x.q; } }
+    const pick = (f) => Object.fromEntries(Object.entries(f).filter(([k]) => /texImage|texSub|createTexture|RenderTexture|generateMipmap|createFramebuffer|Texture.from|drawElements|bindFramebuffer|tick|render/.test(k)).map(([k, v]) => [k.slice(0, 28), typeof v === "number" ? +v.toFixed(1) : v]));
+    return { up, frames: rows.length, over: rows.filter((x) => x.cpu > min || x.gpu > min || x.wall > min * 2).map((x) => ({ ...x, g: pick(x.g) })) };
+  } finally { stop = true; ins.restore(); T.maxFPS = mf; if ( st ) T.start(); }
+}

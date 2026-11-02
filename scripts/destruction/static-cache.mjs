@@ -86,11 +86,13 @@ export function mipmaps(R, rt) {
 }
 
 /** The sampling of every texture of the display's areas (atlases, flattened areas, covers): NEAREST 0 / LINEAR 1. */
-export function setSampling(d, mode) {
-  for ( const g of d.groups.values() ) {
-    if ( g.tex ) g.tex.scaleMode = mode;
-    if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = mode;
-    if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = mode;
+export function setSampling(d, mode, groups = null) {
+  // (PERF: a texture whose sampling changes has its mip levels rebuilt at its next bind - generateMipmap on a whole atlas: a bake that
+  // flipped all ~270 areas for a band of one stroke rebuilt ~80 atlases' mips in one frame, ~40 ms of driver time. `groups`: only those)
+  for ( const g of groups ?? d.groups.values() ) {
+    if ( g.tex && g.tex.scaleMode !== mode ) g.tex.scaleMode = mode;
+    if ( g.flatTex && g.flatTex.baseTexture.scaleMode !== mode ) g.flatTex.baseTexture.scaleMode = mode;
+    if ( g.coverTex && g.coverTex.baseTexture.scaleMode !== mode ) g.coverTex.baseTexture.scaleMode = mode;
   }
 }
 
@@ -481,6 +483,7 @@ export class StaticCache {
     const smp = eff * ap >= 0.999 ? 0 : 1, liveSmp = d.filter;
     const bands = [], runs = [];
     const waters = U.filter((u) => u.water);
+    const flipped = new Set();
     const wasVis = live.visible;
     let drawn = 0, px = 0;
     // (the composite learns every band of this drawing first: a band of it may be used only while the bands above it still are)
@@ -526,7 +529,7 @@ export class StaticCache {
         else {
           const delta = shells.length && ckey ? comp?.prefix(p.L, eff, smp, mips, hashes, shells) : null;
           band = { key, level: p.L, tiles: [] };
-          if ( d.filter !== smp ) { setSampling(d, smp); d.filter = smp; }
+          if ( smp !== liveSmp ) { const gs = globalThis.CONFIG?.moinenMaps?.flipAllSampling ? null : p.groups.filter(Boolean); setSampling(d, smp, gs); if ( gs ) for ( const g of gs ) flipped.add(g); else flipped.all = true; d.filter = smp; }   // (only this band's areas: the rest are not drawn now; CONFIG.moinenMaps.flipAllSampling: all, as before)
           live.visible = true;
           // (a band that only GREW past a composite of its first members: the composite's texels first, then only the newer members)
           const set = new Set(delta ? p.members.slice(delta.n) : p.members);
@@ -556,7 +559,7 @@ export class StaticCache {
     for ( const c of live.children ) c.renderable = true;
     for ( const u of waters ) u.water.renderable = true;
     live.visible = wasVis;
-    if ( d.filter !== liveSmp ) { setSampling(d, liveSmp); d.filter = liveSmp; }
+    if ( d.filter !== liveSmp ) { setSampling(d, liveSmp, flipped.all ? null : flipped); d.filter = liveSmp; }
     this.freeBands(this.bands.filter((b) => !keep.has(b)));
     this.bands = bands; this.runs = runs;
     d.composite?.restore?.();
