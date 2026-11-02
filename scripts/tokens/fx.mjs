@@ -195,10 +195,22 @@ function drawSkull(box, x, y, ap) {
     addPx(box, x + i * ap, y + j * ap, ap, v === "2" ? INK : BONE, 1);
   }
 }
+/**
+ * One art pixel of a badge (skull, cracks). PERF: every pixel used to be a Sprite of its own (a petrified corpse: ~190 of them, each
+ * with its transform and bounds worked out every frame - 0.1 ms CPU a corpse, 22 000 getBounds a frame with 120 corpses); now the
+ * pixels of a badge are rectangles of one Graphics (one object, one batch, the same quads in the same order: the same pixels).
+ * `CONFIG.moinenMaps.spritePx = true` brings the sprites back (for comparison).
+ */
 function addPx(box, x, y, ap, color, alpha) {
-  const s = box.addChild(new PIXI.Sprite(PIXI.Texture.WHITE));
-  s.tint = color; s.alpha = alpha; s.position.set(x, y); s.width = s.height = ap; s.eventMode = "none";
-  return s;
+  if ( globalThis.CONFIG?.moinenMaps?.spritePx ) {
+    const s = box.addChild(new PIXI.Sprite(PIXI.Texture.WHITE));
+    s.tint = color; s.alpha = alpha; s.position.set(x, y); s.width = s.height = ap; s.eventMode = "none";
+    return s;
+  }
+  let g = box._px;
+  if ( !g || g.destroyed ) { g = box._px = box.addChild(new PIXI.Graphics()); g.eventMode = "none"; }
+  g.beginFill(color, alpha); g.drawRect(x, y, ap, ap); g.endFill();
+  return g;
 }
 function drawCracks(box, W, H, seed, ap, upto = 1) {
   const lines = St.crackLines(seed, 5);
@@ -897,3 +909,5 @@ export const _tokenFx = () => ({ rigs: RIGS.size, extras: EXTRAS.size, ticking, 
 /** Test helper: step the effects by `n` ticks of `frames` frames (a hidden tab pauses the ticker). */
 export const _stepTokenFx = (n = 1, frames = 3) => { for ( let i = 0; i < n; i++ ) tick(frames); };
 export const _rigOf = (token) => RIGS.get(token) ?? null;
+/** Test helper: the badge painters (dev/perf-harness.mjs badgeCheck). */
+export const _badges = { drawSkull, drawCracks };

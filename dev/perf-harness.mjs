@@ -38,7 +38,8 @@ export async function perf(n = 60, label = "") {
 
 export function grab() {
   const R = canvas.app.renderer, w = R.screen.width, h = R.screen.height;
-  const rt = PIXI.RenderTexture.create({ width: w, height: h });
+  // (at the renderer's own resolution: screen size x resolution pixels, as the checks that index it expect)
+  const rt = PIXI.RenderTexture.create({ width: w, height: h, resolution: R.resolution });
   R.render(D().objs, { renderTexture: rt, transform: canvas.primary.worldTransform.clone(), clear: true });
   const px = R.extract.pixels(rt); rt.destroy(true); return px;
 }
@@ -925,12 +926,12 @@ export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = nu
       // neighbours|): resampled at a scale that drifts, that energy swells and sinks in bands that sweep over the picture (the
       // waving); its second difference over steps, relative to its level
       if ( beat ) {
-        const g = grab(), Mb = canvas.primary.worldTransform, BW = Math.round(R.screen.width), BH = Math.round(R.screen.height);
+        const g = grab(), Mb = canvas.primary.worldTransform, BW = PW, BH = PH;
         const Lb = (x, y) => { const q = (y * BW + x) * 4; return g[q] + g[q + 1] + g[q + 2]; };
         const e = new Float32Array(blocks.length);
         blocks.forEach(([bx, by], bi) => {
-          const x0 = Math.max(1, Math.round(Mb.a * bx + Mb.tx)), y0 = Math.max(1, Math.round(Mb.d * by + Mb.ty));
-          const x1 = Math.min(BW - 1, Math.round(Mb.a * (bx + BLK) + Mb.tx)), y1 = Math.min(BH - 1, Math.round(Mb.d * (by + BLK) + Mb.ty));
+          const x0 = Math.max(1, Math.round((Mb.a * bx + Mb.tx) * k)), y0 = Math.max(1, Math.round((Mb.d * by + Mb.ty) * k));
+          const x1 = Math.min(BW - 1, Math.round((Mb.a * (bx + BLK) + Mb.tx) * k)), y1 = Math.min(BH - 1, Math.round((Mb.d * (by + BLK) + Mb.ty) * k));
           let s2 = 0, n2 = 0;
           for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) { s2 += Math.abs(Lb(x, y) - (Lb(x - 1, y) + Lb(x + 1, y) + Lb(x, y - 1) + Lb(x, y + 1)) / 4); n2++; }
           e[bi] = n2 ? s2 / n2 : 0;
@@ -960,7 +961,7 @@ export function wavingCheck({ from = 1, to = null, stepSize = 0.005, region = nu
   } finally { d.objs.visible = true; d.fx.visible = fxWas; performance.now = real; }
   const seams = [...seam].map(([k2, v]) => [k2, +(v.dev / Math.max(1e-6, v.ctl)).toFixed(2)]).sort((a, b) => b[1] - a[1]).slice(0, 8);
   return { from, to: +to.toFixed(4), steps, points: nD, damageChange: +(eD / Math.max(1, nD)).toFixed(3), mapChange: +(eM / Math.max(1, nD)).toFixed(3),
-    ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), swim: +(jD / Math.max(1, nJ)).toFixed(3), beat: +(bSum / Math.max(1, bN)).toFixed(4), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
+    ratio: +(eD / Math.max(1e-6, eM)).toFixed(3), jitter: +(jD / Math.max(1e-6, jM)).toFixed(3), swim: +(jD / Math.max(1, nJ)).toFixed(3), mapSwim: +(jM / Math.max(1, nJ)).toFixed(3), dpr: k, beat: +(bSum / Math.max(1, bN)).toFixed(4), seams, mode: d.cache?.stats.mode, tiles: tiles.length };
 }
 
 /**
@@ -1137,4 +1138,59 @@ export async function reflectHash({ blur = "none", reflect = {}, keep = false } 
     for ( const k of Object.keys(s.params) ) if ( !(k in was.p) ) delete s.params[k];
     Object.assign(s.params, was.p); Hooks.callAll("moinenMapsWater", "edited"); s.params.reflectOn = false; T.update(real()); Object.assign(s.params, was.p); T.maxFPS = mf; if ( st ) T.start();
   }
+}
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * DISPLAY SCALE and WINDOW SIZE (the built-in pane: resize_window sets the window, this sets the pixel ratio).
+ * --------------------------------------------------------------------------------------------------------------------------------- */
+
+/** Emulate a display's pixel ratio: window.devicePixelRatio and the renderer's resolution (what Foundry reads at start-up), then a resize. */
+export async function setDPR(r) {
+  Object.defineProperty(window, "devicePixelRatio", { get: () => r, configurable: true });
+  const R = canvas.app.renderer;
+  R.resolution = r; R.resize(innerWidth, innerHeight); window.dispatchEvent(new Event("resize"));
+  await new Promise((res) => setTimeout(res, 800)); step(20);
+  return { dpr: R.resolution, css: [R.screen.width, R.screen.height], backing: [R.view.width, R.view.height] };
+}
+
+/**
+ * GPU MEMORY (an estimate): every texture PIXI keeps on the GPU (renderer.texture.managedTextures), in MB at 4 bytes a texel (+1/3 when
+ * mipmapped), split into render textures (the static cache's bands, flattened areas, composite tiles, the primary group and filters'
+ * pools) and the rest; plus the biggest ten. `cache` = the destruction cache's own count (mpx).
+ */
+export function texMem(top = 8) {
+  const R = canvas.app.renderer, list = [];
+  for ( const bt of R.texture.managedTextures ) {
+    const px = bt.realWidth * bt.realHeight, mb = px * 4 * (bt.mipmap === PIXI.MIPMAP_MODES.ON && PIXI.utils.isPow2(bt.width) ? 4 / 3 : bt.mipmap === PIXI.MIPMAP_MODES.ON ? 4 / 3 : 1) / 1048576;
+    list.push({ mb, w: bt.realWidth, h: bt.realHeight, rt: !!bt.framebuffer || bt.resource === null && bt.valid && !bt.resource, res: bt.resolution });
+  }
+  const sum = (a) => +a.reduce((s, x) => s + x.mb, 0).toFixed(1);
+  const d = D();
+  return { total: sum(list), rt: sum(list.filter((x) => x.rt)), plain: sum(list.filter((x) => !x.rt)), n: list.length,
+    top: list.sort((a, b) => b.mb - a.mb).slice(0, top).map((x) => `${x.w}x${x.h}${x.rt ? " rt" : ""} ${x.mb.toFixed(1)}MB`), cache: { ...d?.cache?.stats }, heapMB: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1048576) };
+}
+
+/**
+ * BADGE CHECK (tokens/fx.mjs corpse badges): the cracks and the skull drawn as one Graphics (now) and as a Sprite per pixel
+ * (CONFIG.moinenMaps.spritePx = true, the old way), each into a texture at several zooms (and a half-way crack for the petrify
+ * animation); per zoom [mean |d| per channel, max, channels off by more than 2]. All 0 is a pass.
+ */
+export async function badgeCheck({ zooms = [1, 1.37, 2, 3.3, 0.6], seeds = [12345, 777] } = {}) {
+  const F = await import("../scripts/tokens/fx.mjs"), R = canvas.app.renderer; CONFIG.moinenMaps ??= {};
+  const g = canvas.grid.size, ap = Math.max(2, Math.round(g / 32)), W = g * 2, H = g * 2, was = CONFIG.moinenMaps.spritePx, rows = [];
+  const draw = (sprites, z, seed, upto) => {
+    CONFIG.moinenMaps.spritePx = sprites;
+    const box = new PIXI.Container(); F._badges.drawCracks(box, W, H, seed, ap, upto); F._badges.drawSkull(box, Math.round((W - 9 * ap) / ap) * ap, ap * 2, ap);
+    box.scale.set(z);
+    const rt = PIXI.RenderTexture.create({ width: Math.ceil(W * z) + 2, height: Math.ceil(H * z) + 2 });
+    R.render(box, { renderTexture: rt, clear: true }); const px = R.extract.pixels(rt); rt.destroy(true); box.destroy({ children: true }); return px;
+  };
+  try {
+    for ( const seed of seeds ) for ( const upto of [1, 0.6] ) for ( const z of zooms ) {
+      const a = draw(true, z, seed, upto), b = draw(false, z, seed, upto); let s = 0, m = 0, bad = 0, ink = 0;
+      for ( let i = 0; i < a.length; i++ ) { const d = Math.abs(a[i] - b[i]); s += d; if ( d > m ) m = d; if ( d > 2 ) bad++; if ( i % 4 === 3 && a[i] ) ink++; }
+      rows.push([seed, upto, z, +(s / a.length).toFixed(4), m, bad, ink]);
+    }
+  } finally { CONFIG.moinenMaps.spritePx = was; }
+  return rows;
 }
