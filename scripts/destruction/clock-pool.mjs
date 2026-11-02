@@ -31,5 +31,15 @@ export class ClockPool {
     });
   }
 
+  /** A cave-in's pit grid (clock-worker.mjs): `grid` = { info, data (the cover's RGBA, transferred), fw, fh, cx, cy } -> Promise of collapseGrid's result. */
+  grid(grid) {
+    const w = this.worker(), id = ++this.id;
+    w.pending++;
+    return new Promise((resolve, reject) => {
+      this.wait.set(id, { resolve, reject, w });
+      w.postMessage({ id, grid }, [grid.data.buffer]);
+    });
+  }
+
   destroy() { for ( const w of this.ws ) w.terminate(); this.ws = []; for ( const q of this.wait.values() ) q.reject(new Error("closed")); this.wait.clear(); }
 }

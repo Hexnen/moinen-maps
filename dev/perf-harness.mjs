@@ -168,13 +168,14 @@ export function atlasBytes() {
  * draws, the frames over 33 / 16.7 ms, how the entries went (played after a wait, faded instead, offscreen), the heap and the atlases
  * held before and after. Start from a fresh state (canvas.draw() + boot()) for each run.
  */
-export async function detBench({ ms = 4500, label = "" } = {}) {
+export async function detBench({ ms = 4500, label = "", only = null } = {}) {
   const A = game.modules.get("moinen-maps").api.destruction, d = D();
   const keys = ["entries", "waits", "waitedIn", "noPixelEntries", "offscreenEntries", "restored"];
   const s0 = Object.fromEntries(keys.map((k) => [k, d.stats[k] ?? 0]));
   const mem0 = { heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), atlas: atlasBytes() };
   let atlasPeak = 0; const iv = setInterval(() => { atlasPeak = Math.max(atlasPeak, atlasBytes().MB); }, 40);
-  const t = await trace(ms, () => A.replay());
+  // (`only`: a filter over the groups - e.g. (g) => g.info.type === "gash" || g.info.type === "collapse" - a Detonate of those alone)
+  const t = await trace(ms, only ? () => { const dd = D(), start = performance.now(); dd.enterQueue = new Map(dd.order.filter(only).map((g) => [g, { start }])); dd.drainEnters(performance.now(), 8); } : () => A.replay());
   clearInterval(iv);
   const rows = t.rows.filter((r) => r[5] > 0), cpu = rows.map((r) => r[1]);
   const mem1 = { heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), heapPeakMB: Math.max(...t.rows.map((r) => r[11] ?? 0)), atlas: atlasBytes(), atlasPeakMB: atlasPeak };
@@ -204,7 +205,7 @@ export function entryCheck() {
     const now = F, entering = d.order.filter((g) => g.anim);
     let early = 0;
     for ( const g of entering ) for ( const it of g.anim.list ) {
-      if ( g.anim.tear ) continue;                // a tear's pieces keep their own clock (tear-entry.mjs)
+      if ( g.anim.tear || g.anim.gpu ) continue;  // a tear's pieces keep their own clock (tear-entry.mjs); GPU pieces have no sprites (the pixel check covers them)
       if ( now < it.t0 - it.pre && it.p.spr?.visible && it.p.spr.alpha > 0 ) early++;
     }
     // (a cave-in's tremor patch - the plain map over its pit, trembling from the start by design: collapse-entry.mjs - is map pixels,
@@ -1719,17 +1720,18 @@ export async function warmWatch(name = "diverge-gm", { maxS = 120, want = 8 } = 
  * { areas, pieces, rows: [[ms, compared, posBad, rotBad, scaleBad, visBad, tintBad, worst position diff, worst rotation diff]] }; all 0 is a pass
  * (position within 0.002 px, rotation within 2e-5, scale within 1e-4: float32 against double).
  */
-export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450, 600, 800, 1000, 1300, 1600, 2000, 2400, 3000, 3600], only = null, max = 12, samples = 0 } = {}) {
+export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450, 600, 800, 1000, 1300, 1600, 2000, 2400, 3000, 3600], only = null, max = 12, samples = 0, enterOpts = null } = {}) {
   const SMP = [];
   const { readPoses } = await import("../scripts/destruction/piece-gpu.mjs");
   const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance), R = canvas.app.renderer;
   CONFIG.moinenMaps ??= {}; const was = [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget];
   CONFIG.moinenMaps.noDestructionCache = true; CONFIG.moinenMaps.noClockWorker = true; CONFIG.moinenMaps.noGpuPieces = false; CONFIG.moinenMaps.erodeBudget = 1e9;
+  const wasTC = CONFIG.moinenMaps.noGpuTearColl; CONFIG.moinenMaps.noGpuTearColl = false;
   const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
   const ws = [];
   for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
   let F = real(); performance.now = () => F;
-  const rows = []; let npieces = 0, nareas = 0;
+  const rows = []; let npieces = 0, nareas = 0, modes = null, spawn0 = null;
   const sprite = () => ({ visible: true, alpha: 1, tint: 0xFFFFFF, rotation: 0, x: 0, y: 0, sx: 1, sy: 1,
     position: { set(x, y = x) { this.p.x = x; this.p.y = y; } }, scale: { set(x, y = x) { this.p.sx = x; this.p.sy = y; } } });
   try {
@@ -1737,12 +1739,14 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
     T.update(F);
     const start = F + 5;
     const groups = (only ? d.order.filter(only) : d.order.filter((g) => g.pieces.length > 100 && !g.shell && !g.atlasFree && d.onScreen(g, 0.5)).sort((a, b) => b.pieces.length - a.pieces.length)).slice(0, max);
-    for ( const g of groups ) { d.enter(g, { start }); if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0); }
+    for ( const g of groups ) { d.enter(g, { start, ...(enterOpts?.(g) ?? {}) }); if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0); }
     const live = groups.filter((g) => g.anim?.gpu && g.batch?.gpu); nareas = live.length;
+    modes = live.reduce((m, g) => { m[g.batch.mode] = (m[g.batch.mode] ?? 0) + 1; return m; }, {});
+    spawn0 = d.spawn; d.spawn = () => {};       // (the CPU reference poses spawn a fibre's flecks: not here)
     const fake = sprite(); fake.position.p = fake.scale.p = fake;
     for ( const dt of times ) {
       F = start + dt; T.update(F);
-      let cmp = 0, pb = 0, rb = 0, sb = 0, vb = 0, tb = 0, wp = 0, wr = 0;
+      let cmp = 0, pb = 0, rb = 0, sb = 0, vb = 0, tb = 0, wp = 0, wr = 0, ab = 0;
       for ( const g of live ) {
         const a = g.anim; if ( !a ) continue;
         const gpu = readPoses(R, g.batch), type = g.info.type; if ( !gpu ) continue;
@@ -1751,7 +1755,7 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
           fake.visible = true; fake.alpha = 1; fake.tint = 0xFFFFFF; fake.rotation = 0; fake.x = fake.y = 0; fake.sx = fake.sy = 1;
           const t = (F - it.t0) / it.dur;
           d.life({ ...it, p }, a, t, true, type);
-          const o = k * 8, vis = fake.visible ? 1 : 0, gv = gpu[o + 3] > 0.5 ? 1 : 0;
+          const o = k * 12, vis = fake.visible ? 1 : 0, gv = gpu[o + 3] > 0.5 ? 1 : 0;
           cmp++;
           if ( vis !== gv ) { vb++; continue; }
           if ( !vis ) continue;
@@ -1759,17 +1763,44 @@ export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450
           const dr = Math.abs(gpu[o + 2] - fake.rotation); if ( dr > wr ) wr = dr; if ( dr > 2e-5 ) rb++;
           if ( Math.abs(gpu[o + 4] - fake.sx) > 1e-4 || Math.abs(gpu[o + 5] - fake.sy) > 1e-4 ) sb++;
           const tr = (fake.tint >> 16) & 255, tg = (fake.tint >> 8) & 255;
-          if ( Math.abs(gpu[o + 6] - tr) > 0.5 || Math.abs(gpu[o + 7] - tg) > 0.5 ) tb++;
+          if ( Math.abs(gpu[o + 6] - tr) > 0.5 || Math.abs(gpu[o + 7] - tg) > 0.5 || Math.abs(gpu[o + 9] - (fake.tint & 255)) > 0.5 ) tb++;
+          if ( Math.abs(gpu[o + 8] - fake.alpha) > 1e-4 ) ab++;
         }
       }
       npieces = cmp;
-      rows.push([dt, cmp, pb, rb, sb, vb, tb, +wp.toFixed(5), +wr.toExponential(2)]);
+      rows.push([dt, cmp, pb, rb, sb, vb, tb, +wp.toFixed(5), +wr.toExponential(2), ab]);
     }
     for ( const g of groups ) d.endAnim(g);
     F += 10000; T.update(F);
   } finally {
-    performance.now = real; ws.forEach((w) => { w.visible = true; });
+    performance.now = real; ws.forEach((w) => { w.visible = true; }); if ( spawn0 ) d.spawn = spawn0; d.snapQ = null; CONFIG.moinenMaps.noGpuTearColl = wasTC;
     [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget] = was; T.maxFPS = mf; if ( st ) T.start();
   }
-  return { areas: nareas, pieces: npieces, rows, samples: SMP };
+  return { areas: nareas, modes, pieces: npieces, rows, samples: SMP };
+}
+
+/**
+ * CAVE-IN PREP CHECK: the pit grid the clock worker made ahead of an entry (display.prepCollapse -> g.collGrid) against the page's own
+ * (collapseGrid from the atlas pixels), and the plate tones from the atlas rectangles (collapseLum) against the texture-per-plate way
+ * (`atlas: null`), for every cave-in that has its pixels. Returns { areas, withGrid, gridBad, lumBad } - every bad count 0 is a pass.
+ */
+export async function collPrepCheck() {
+  const { collapseGrid, coverMask, collapseLum } = await import("../scripts/destruction/collapse-entry.mjs");
+  const d = D(); let areas = 0, withGrid = 0, gridBad = 0, lumBad = 0, notes = [];
+  for ( const g of d.order ) {
+    if ( g.info.type !== "collapse" || g.atlasFree || g.shell || !g.coverFrame ) continue;
+    areas++;
+    const fr = g.coverFrame.tex.frame, data = g.tex.resource.data, TW = g.tex.width;
+    const rgba = new Uint8Array(fr.width * fr.height * 4);
+    for ( let y = 0; y < fr.height; y++ ) rgba.set(data.subarray(((fr.y + y) * TW + fr.x) * 4, ((fr.y + y) * TW + fr.x + fr.width) * 4), y * fr.width * 4);
+    const L = collapseGrid(g.info, coverMask(rgba, fr.width, fr.height), fr.width, fr.height, g.coverFrame.x, g.coverFrame.y);
+    if ( g.collGrid ) {
+      withGrid++; const W = g.collGrid;
+      const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+      if ( !(same(L.own, W.own) && same(L.din, W.din) && same(L.dout, W.dout) && same(L.mask, W.mask) && L.maxD === W.maxD && L.deep === W.deep) ) { gridBad++; notes.push(["grid", g.hash]); }
+    }
+    const a = collapseLum(g, data, TW), b = collapseLum({ ...g, atlas: null }, data, TW);
+    if ( a.G !== b.G || a.lumG !== b.lumG || !a.lumP.every((v, i) => v === b.lumP[i]) ) { lumBad++; notes.push(["lum", g.hash]); }
+  }
+  return { areas, withGrid, gridBad, lumBad, notes };
 }

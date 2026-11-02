@@ -47,20 +47,25 @@ function chamfer(d, W, H) {
 }
 
 /**
- * The cave-in's clock, or null (then the display's generic entry runs). disp: the display; g: the group; start (ms), k (1 / speed),
- * pathFront: the followed stroke's front (display.pathFront) or null; seed; noise(x, y) 0..1 smooth.
- * Returns { delay, reveal, band, arrive, pixelTime, stages, piece(p, n, it), end, ... } (absolute art px everywhere).
+ * The pit's own pixels as a mask over the cover frame (RGBA of the cover frame -> 1 where it is opaque).
  */
-export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 9973, noise = null }) {
-  noise ??= (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;
-  const info = g.info, cf = g.coverFrame, data = g.tex?.resource?.data, TW = g.tex?.width;
-  if ( !cf || !data || !TW ) return null;
-  // the pit's own pixels on a grid over the base's rectangle (the base frame is that rectangle)
+export function coverMask(rgba, fw, fh) {
+  const m = new Uint8Array(fw * fh);
+  for ( let i = 0, p = 3; i < fw * fh; i++, p += 4 ) if ( rgba[p] ) m[i] = 1;
+  return m;
+}
+
+/**
+ * The cave-in's PIT GRID (pure, no PIXI: the clock worker makes it ahead of the entry, clock-worker.mjs): the pit's own pixels on a
+ * grid over the base's rectangle (the base frame is that rectangle), the chamfer distance inside it (din: to the outside, the frame's
+ * border counts as outside) and outside it (dout), the deepest point. `mask`: the cover frame's opaque pixels (fw x fh) at (cx, cy).
+ */
+export function collapseGrid(info, mask, fw, fh, cx, cy) {
   const GX = info.x, GY = info.y, GW = info.w, GH = info.h, N = GW * GH;
-  const own = new Uint8Array(N), fr = cf.tex.frame;
-  for ( let y = 0; y < fr.height; y++ ) for ( let x = 0; x < fr.width; x++ ) {
-    if ( !data[((fr.y + y) * TW + fr.x + x) * 4 + 3] ) continue;
-    const X = cf.x + x - GX, Y = cf.y + y - GY; if ( X >= 0 && Y >= 0 && X < GW && Y < GH ) own[Y * GW + X] = 1;
+  const own = new Uint8Array(N);
+  for ( let y = 0; y < fh; y++ ) for ( let x = 0; x < fw; x++ ) {
+    if ( !mask[y * fw + x] ) continue;
+    const X = cx + x - GX, Y = cy + y - GY; if ( X >= 0 && Y >= 0 && X < GW && Y < GH ) own[Y * GW + X] = 1;
   }
   const din = new Float32Array(N), dout = new Float32Array(N);
   for ( let i = 0; i < N; i++ ) { din[i] = own[i] ? 1e6 : 0; dout[i] = own[i] ? 0 : 1e6; }
@@ -69,26 +74,60 @@ export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 99
   chamfer(din, GW, GH); chamfer(dout, GW, GH);
   let maxD = 1, deep = 0;
   for ( let i = 0; i < N; i++ ) if ( own[i] && din[i] > maxD ) { maxD = din[i]; deep = i; }
+  return { mask, fw, fh, cx, cy, own, din, dout, maxD, deep };
+}
+
+/**
+ * Each plate's own brightness and the ground's colour: the plates are cuts of the map, so what the sagging floor darkens from is their
+ * mean (the first 64 plates' mean tone, x 0.8), and a plate tipped towards the light starts at the ground's tone and brightens as it tips.
+ * From the atlas rectangles (no texture made per plate).
+ */
+export function collapseLum(g, data, TW) {
+  const A = g.atlas, lumP = new Float32Array(g.pieces.length);
+  let gr = 0, gg = 0, gb = 0, gn = 0;
+  for ( let q = 0; q < g.pieces.length; q++ ) {
+    let fx, fy, fw, fh;
+    if ( A ) { const i = g.pieces[q].frame, p = A.pos[i], z = A.sizes[i]; fx = p.x; fy = p.y; fw = z[0]; fh = z[1]; }
+    else { const t = g.frame(g.pieces[q].frame), f = t.frame; fx = f.x; fy = f.y; fw = f.width; fh = f.height; t.destroy(false); }
+    const st = Math.max(1, Math.round(Math.sqrt(fw * fh) / 6));
+    let l = 0, n = 0;
+    for ( let y = 1; y < fh - 1; y += st ) for ( let x = 1; x < fw - 1; x += st ) {
+      const o = ((fy + y) * TW + fx + x) * 4; if ( data[o + 3] < 255 ) continue;
+      l += 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]; n++;
+      if ( q < 64 ) { gr += data[o]; gg += data[o + 1]; gb += data[o + 2]; gn++; }
+    }
+    lumP[q] = n ? l / n : 0;
+  }
+  const lumG = gn ? 0.299 * gr / gn + 0.587 * gg / gn + 0.114 * gb / gn : 128;
+  const G = gn ? ((Math.round(gr / gn * 0.8) << 16) | (Math.round(gg / gn * 0.8) << 8) | Math.round(gb / gn * 0.8)) : 0x6e665c;
+  return { lumP, lumG, G };
+}
+
+/**
+ * The cave-in's clock, or null (then the display's generic entry runs). disp: the display; g: the group; start (ms), k (1 / speed),
+ * pathFront: the followed stroke's front (display.pathFront) or null; seed; noise(x, y) 0..1 smooth. `grid` (collapseGrid) and `lum`
+ * (collapseLum): ready-made (the worker's, a cached one), else made here from the cover's pixels and the atlas.
+ * Returns { delay, reveal, band, arrive, pixelTime, stages, piece(p, n, it), end, ... } (absolute art px everywhere).
+ */
+export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 9973, noise = null, grid = null, lum = null }) {
+  noise ??= (x, y) => vnoise(x / 7, y / 7, seed) * 0.65 + vnoise(x / 2.6, y / 2.6, seed + 17) * 0.35;
+  const info = g.info, cf = g.coverFrame, data = g.tex?.resource?.data, TW = g.tex?.width;
+  if ( !cf || !data || !TW ) return null;
+  // the pit's own pixels on a grid over the base's rectangle (the base frame is that rectangle)
+  const GX = info.x, GY = info.y, GW = info.w, GH = info.h, N = GW * GH, fr = cf.tex.frame;
+  if ( !grid ) {
+    const mask = new Uint8Array(fr.width * fr.height);
+    for ( let y = 0; y < fr.height; y++ ) { const row = ((fr.y + y) * TW + fr.x) * 4 + 3; for ( let x = 0; x < fr.width; x++ ) if ( data[row + x * 4] ) mask[y * fr.width + x] = 1; }
+    grid = collapseGrid(info, mask, fr.width, fr.height, cf.x, cf.y);
+  }
+  const { own, din, dout, maxD, deep } = grid;
   const at = (ax, ay) => { const x = Math.round(ax) - GX, y = Math.round(ay) - GY; return x < 0 || y < 0 || x >= GW || y >= GH ? -1 : y * GW + x; };
   const fOf = (i) => (i < 0 ? 0 : clamp01(din[i] / maxD));
   // the ground's own colour (the plates are cuts of the map): what the sagging floor darkens from
   // and each plate's own brightness: a plate tipped towards the light is brighter than the ground - it starts at the ground's tone
   // and brightens as it tips (tint), instead of popping in lit
-  let gr = 0, gg = 0, gb = 0, gn = 0;
-  const lumP = new Float32Array(g.pieces.length);
-  for ( let q = 0; q < g.pieces.length; q++ ) {
-    const t = g.frame(g.pieces[q].frame), f = t.frame, st = Math.max(1, Math.round(Math.sqrt(f.width * f.height) / 6));
-    let l = 0, n = 0;
-    for ( let y = 1; y < f.height - 1; y += st ) for ( let x = 1; x < f.width - 1; x += st ) {
-      const o = ((f.y + y) * TW + f.x + x) * 4; if ( data[o + 3] < 255 ) continue;
-      l += 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]; n++;
-      if ( q < 64 ) { gr += data[o]; gg += data[o + 1]; gb += data[o + 2]; gn++; }
-    }
-    lumP[q] = n ? l / n : 0;
-    t.destroy(false);
-  }
-  const lumG = gn ? 0.299 * gr / gn + 0.587 * gg / gn + 0.114 * gb / gn : 128;
-  const G = gn ? ((Math.round(gr / gn * 0.8) << 16) | (Math.round(gg / gn * 0.8) << 8) | Math.round(gb / gn * 0.8)) : 0x6e665c;
+  lum ??= collapseLum(g, data, TW);
+  const { lumP, lumG, G } = lum;
   const P = pathFront, trench = !!P;
   // (the cave-in keeps its own budget: a slow cause - rot - does not stretch it past ~2 s; the rot creeps inside it instead)
   k = 1 / (disp.look?.speed || 1);
@@ -161,7 +200,7 @@ export function collapseClock(disp, g, { start, k, pathFront, seed = g.hash % 99
   const stages = [{ dt: 0, col: stg(0.3) }, { dt: 0.1 * D, col: stg(0.12) }, { dt: 0.2 * D, col: null }];
   const reveal = (trench ? P.D : 0) + D * 0.9;
   const C = {
-    delay, reveal, band: 120 * k, pixelTime, stages, own, din, maxD, E, G, cracks, trench, A, D, k, seed, GX, GY, GW, GH, at, fOf,
+    delay, reveal, band: 120 * k, pixelTime, stages, own, din, maxD, E, G, cracks, trench, A, D, k, seed, GX, GY, GW, GH, at, fOf, grid, lum,
     arrive: (x, y) => along(x, y) + ringAt(fOf(at(x, y)), x, y),
     // (nothing of it outlives ~2 s at entry speed 1, plus a trench's run)
     endBy: start + (trench ? P.D : 0) + Math.min(delay + D + 750 * k, 1900 * k),
