@@ -1,5 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
-import { work, gcPick } from "./chunks.mjs";
+import { work, gcPick, packAreaAtlases } from "./chunks.mjs";
 
 /**
  * Streaming baked chunks between the GM and the players (the Foundry side of chunks.mjs).
@@ -27,12 +27,13 @@ const fileOf = (dir, id) => `${dir}/${id}.png`;
 /* ---------------------------------------------------------------- the codec worker */
 
 /*
- * A small pool of codec workers (up to 3, never more than the cores minus one): a load decodes dozens of chunks, one worker made them
+ * A small pool of codec workers (up to 5, never more than the cores minus one): a load decodes dozens of chunks, one worker made them
  * wait in line. Each job goes to the worker with the fewest jobs; the pool is let go after IDLE without work, and started ahead of
  * time (warm) when the game is ready, so the first chunk does not pay for starting a worker.
  */
 const IDLE = 30000, WATCHDOG = 30000;
-const POOL = Math.max(1, Math.min(3, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
+// (up to 5 on a machine with the cores: a Detonate over atlases let go of asks for ~200 chunks at once, and the entries wait for them)
+const POOL = Math.max(1, Math.min(5, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
 const workers = [];                  // { w, busy }
 let broken = false, nextId = 1, idleTimer = 0;
 const pending = new Map();           // id -> { resolve, reject, watchdog, slot }
@@ -232,6 +233,50 @@ export async function prefetch(list) {
   const got = await idbGetMany(todo.map((c) => c.id));
   for ( const [id, b] of got ) preloaded.set(id, b);
   await Promise.all(todo.map((c) => getChunk(c.dir, c.id, { prio: c.prio ?? 0 })));
+}
+
+/** Chunk bytes read ahead (ONE IndexedDB transaction) for the ids not in memory yet: atlasesOf / getChunk take them from here. */
+export async function preread(ids) {
+  const todo = [...new Set(ids)].filter((id) => id && !memo.has(id) && !inflight.has(id) && !preloaded.has(id));
+  if ( !todo.length ) return;
+  for ( const [id, b] of await idbGetMany(todo) ) preloaded.set(id, b);
+}
+
+/**
+ * PERF: the atlases of areas (destruction display, display.restoreAtlas) out of ONE chunk, packed in the codec worker as the display
+ * laid them out: the page gets finished buffers, no decoded sprites are kept anywhere (the chunk's sprites live in the worker for the
+ * job only). `pack`: [{ hash, W, H, pos, sizes }] (chunks.mjs packAreaAtlases). A chunk already decoded in memory is packed here.
+ * -> [{ hash, data }] (data null: not in the chunk), or null when the chunk cannot be had.
+ */
+export async function atlasesOf(dir, id, pack, { prio = 0 } = {}) {
+  if ( memo.has(id) ) { stats.memHits++; return packAreaAtlases(memo.get(id).v.sprites ?? [], pack); }
+  // (not through the download queue: a Detonate asks for ~200 at once and the pool takes them in order; the queue's 6 at a time were
+  // 6 per gap between two heavy frames, ~1.7 s for the lot)
+  let bytes = preloaded.get(id) ?? await idbGet(id);
+  preloaded.delete(id);
+  if ( !bytes ) return null;                                    // (not in IndexedDB: the caller takes the full path - download, check, keep)
+  try {
+    const b = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+    const t = performance.now();
+    const r = await job({ kind: "decode", bytes: b, cid: id, pack }, [b.buffer]);
+    stats.decodeMs += performance.now() - t; stats.idbHits++;
+    return r.atlases ?? null;
+  } catch { return null; }
+}
+
+/**
+ * PERF (dark scenes): the dark rims of areas (display shells) out of ONE chunk, read in the codec worker (rim-job.mjs): the page gets
+ * the rims' strengths, no decoded sprites. `areas`: [{ hash, cause, type }]. -> [{ hash, rim }] or null (not in IndexedDB, or failed).
+ */
+export async function rimsOf(dir, id, areas) {
+  if ( !id ) return null;
+  let bytes = preloaded.get(id) ?? await idbGet(id);
+  preloaded.delete(id);
+  if ( !bytes ) return null;
+  try {
+    const b = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+    return await job({ kind: "rims", bytes: b, cid: id, areas }, [b.buffer]);
+  } catch ( err ) { console.warn(`${MODULE_ID} | chunk ${id}: rims could not be read (${err.message})`); return null; }
 }
 
 async function download(dir, id, reload = false, signal = null) {

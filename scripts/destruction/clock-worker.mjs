@@ -1,7 +1,7 @@
 /**
  * The entry clocks in a worker (display.mjs enter -> clock-pool.mjs): from an area's clock inputs (entry-clock.mjs spec) and the
  * pixel masks of its ruin and cover, the sorted per-pixel moments - the same keys the page made a slice per frame (clockSlice).
- * Message in: { id, spec, jobs: [{ mask, w, h, x0, y0, dark }] }; out: { id, keys: [{ ix, tm }] } (transferred) or { id, error }.
+ * Message in: { id, spec, jobs: [{ mask | data, w, h, x0, y0, dark }] }; out: { id, keys: [{ ix, tm }] } (transferred) or { id, error }.
  */
 // (the clock's modules import page modules for their pure parts: what they touch at load time is stubbed here)
 globalThis.Hooks ??= { on() {}, once() {}, off() {}, call() {}, callAll() {} };
@@ -25,7 +25,8 @@ self.onmessage = async (ev) => {
       const coll = Cm.collapseClock({ look: { speed: spec.speed } }, g, { start: 0, k: C.k, pathFront: C.pathFront });
       if ( coll ) timeOf = coll.pixelTime;
     }
-    const keys = jobs.map((j) => E.clockKeys(timeOf, j.mask, j.w, j.h, j.x0, j.y0, j.dark));
+    // (a job carries the pixel mask, or the pixels themselves - a copy: the page's loop over them is the worker's now)
+    const keys = jobs.map((j) => E.clockKeys(timeOf, j.mask ?? E.clockMask(j.data, j.w, j.h, j.dark > 0), j.w, j.h, j.x0, j.y0, j.dark));
     self.postMessage({ id, keys }, keys.flatMap((k) => [k.ix.buffer, k.tm.buffer]));
   } catch ( err ) { self.postMessage({ id, error: String(err?.stack ?? err) }); }
 };
