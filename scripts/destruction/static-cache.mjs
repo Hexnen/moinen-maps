@@ -146,7 +146,7 @@ let zoomSoft = 0;
 const SOFT_MS = 220;
 // the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
 // "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
-const SOFT_TAP = 0.75, SOFT_BIAS = 1.0;
+const SOFT_TAP = 0.35, SOFT_BIAS = 0.5;
 const RAMP0 = 2.0;                                       // screen px per texel where the crisp ramp starts (CONFIG.moinenMaps.sharpFrom: dev knob)
 let sharpProgram = null;
 
