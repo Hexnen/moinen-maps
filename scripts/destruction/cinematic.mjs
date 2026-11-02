@@ -312,4 +312,8 @@ function drawOutlines() {
   for ( const o of pending() ) { const b = geom(o).box; outlines.drawRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0); }
 }
 
-export const _api = { pending, status, holds, isPending, action, skip, consider, modeOf, killed };
+/** For the checks (dev/cinematic-check.mjs): the shared clock, the running show's per-stroke start moments (shared and this page's performance.now()). */
+const runInfo = () => run ? { id: run.show.id, by: run.show.by, t0: run.show.t0, ids: run.show.snap.ids, offs: run.show.offs, fired: [...run.fired], starts: Object.fromEntries(run.startAt), started: run.started, owner: owner() } : null;
+/** After CONFIG.moinenMaps.noCinematic changed at run time (it is meant to be set before the world loads): the display follows. */
+const refreshNow = () => host?.refresh("kill");
+export const _api = { refresh: refreshNow, pending, status, holds, isPending, action, skip, consider, modeOf, killed, now: () => host?.now(), runInfo };
