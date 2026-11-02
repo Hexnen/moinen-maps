@@ -1987,3 +1987,134 @@ export async function partsBench({ ms = 4500 } = {}) {
     animate: Object.fromEntries(["erode", "lives", "effects", "cause", "e_unflat", "e_clockOf", "e_rev+crev", "e_clockJobs", "e_list", "e_gpuEnter", "e_debris"].map((k) => [k, { med: q(live.map((r) => r.sub?.[k] ?? 0), 0.5), p95: q(live.map((r) => r.sub?.[k] ?? 0), 0.95), sumAll: sum(live, (r) => r.sub?.[k] ?? 0), sumSpikes: sum(spike, (r) => r.sub?.[k] ?? 0) }])),
     spikes: spike.map((r) => [r.t, +r.cpu.toFixed(0), Object.entries(r.by).filter(([, v]) => v > 3).map(([k, v]) => `${k}:${v.toFixed(0)}`).join(" ") + ` fill ${r.fill.join("/")}`]) };
 }
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * END POP CHECK: the last animated frame of an entry must equal the first settled frame.
+ * --------------------------------------------------------------------------------------------------------------------------------- */
+
+/** The destruction layer (areas + the fx layer: dust, chunks, embers) as RGBA, region = screen px (renderer resolution applied). */
+function grabAll(withFx = true) {
+  const R = canvas.app.renderer, d = D(), w = R.screen.width, h = R.screen.height;
+  const rt = PIXI.RenderTexture.create({ width: w, height: h, resolution: R.resolution });
+  const M = canvas.primary.worldTransform.clone();
+  R.render(d.objs, { renderTexture: rt, transform: M, clear: true });
+  if ( withFx && d.fx?.visible ) R.render(d.fx, { renderTexture: rt, transform: M, clear: false });
+  const px = R.extract.pixels(rt); rt.destroy(true); return px;
+}
+
+/**
+ * ENTRY END POP CHECK (virtual 16 ms clock, the static cache ON, real frames: every frame of the ticker runs). For each picked area
+ * (per kind: blast / collapse / scorch / flood / cracks / gash(tear)) the entry is played from `start` on a virtual clock stepped
+ * `dt` ms at a time; each frame the destruction layer is drawn (areas, and with `fx` the dust and chunks) and compared with the
+ * previous frame inside the area's rectangle. t_end = the frame in which the entry ended (g.anim null). Reported per area: the
+ * consecutive-frame differences from t_end - preMs to t_end + postMs (n24 = pixels off by more than 24 summed over RGB, mean = mean |d|
+ * per pixel), the events of each frame (g.anim, g.flat, cache mode + bakes, who was drawn live), and `pop`: the largest n24 at or after
+ * t_end - 100 ms (the last hops are small; the jump that is no motion at all shows there). `fail` when it passes `maxN24`.
+ * opts: CONFIG.moinenMaps switches for the run (noGpuPieces, noGpuTearColl, noGpuErode, noBatchRender, ...). keep: the window's
+ * frames are kept (RGBA of the crop) in `frames` for strips.
+ */
+export async function endPopCheck({ per = 1, types = ["blast", "collapse", "scorch", "flood", "cracks", "gash"], pick = null, preMs = 300, postMs = 1500, dt = 16,
+    maxN24 = 12, opts = null, fx = false, keep = false, zoom = null, cap = 20000, probe = null, atEnd = null, hooks = null } = {}) {
+  const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance), rnd = Math.random;
+  CONFIG.moinenMaps ??= {}; opts = { noClockWorker: true, ...opts }; const was = {}; for ( const k of Object.keys(opts ?? {}) ) { was[k] = CONFIG.moinenMaps[k]; CONFIG.moinenMaps[k] = opts[k]; }
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const out = [], waters = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; waters.push(ch); }   // (a flooded hole's water loops on its own clock)
+  try {
+    let chosen = [];
+    if ( pick ) chosen = d.order.filter(pick);
+    else for ( const t of types ) {
+      // spread over the causes; skip areas with water (their loop moves on its own clock)
+      const all = d.order.filter((g) => g.info.type === t && !g.dead && (g.info.rect.x1 - g.info.rect.x0) * (g.info.rect.y1 - g.info.rect.y0) > 4000);
+      const seen = new Set(); const sel = [];
+      for ( const g of all ) { if ( sel.length >= per ) break; if ( !seen.has(g.info.cause) ) { seen.add(g.info.cause); sel.push(g); } }
+      for ( const g of all ) { if ( sel.length >= per ) break; if ( !sel.includes(g) ) sel.push(g); }
+      chosen.push(...sel);
+    }
+    for ( let gi = 0; gi < chosen.length; gi++ ) {
+      let g = chosen[gi]; const hash = g.hash;
+      const r = g.info.rect, cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
+      // the view: centred on the area (the current zoom unless asked)
+      canvas.pan({ x: cx, y: cy, scale: zoom ?? canvas.stage.scale.x }); step(4);
+      const R = canvas.app.renderer, k = R.resolution, M = canvas.primary.worldTransform;
+      const PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
+      const m = 40;
+      const sx0 = Math.max(0, Math.floor((r.x0 * M.a + M.tx - m) * k)), sy0 = Math.max(0, Math.floor((r.y0 * M.d + M.ty - m) * k));
+      const sx1 = Math.min(PW, Math.ceil((r.x1 * M.a + M.tx + m) * k)), sy1 = Math.min(PH, Math.ceil((r.y1 * M.d + M.ty + m) * k));
+      const crop = (px) => { const w = sx1 - sx0, o = new Uint8Array(w * (sy1 - sy0) * 4); for ( let y = sy0; y < sy1; y++ ) o.set(px.subarray((y * PW + sx0) * 4, (y * PW + sx1) * 4), (y - sy0) * w * 4); return o; };
+      // an area without its pixels (a shell, a freed atlas) waits for them on the REAL clock (a normal entry does), then ends; the virtual run follows at once
+      if ( g.shell || g.atlasFree ) {
+        T.maxFPS = 0; d.enter(g, { start: real() });
+        for ( let w = 0; w < 200; w++ ) { T.update(real()); g = d.groups.get(hash) ?? g; if ( g.anim || !(g.shell || g.atlasFree) ) break; await new Promise((res) => setTimeout(res, 40)); }
+        T.update(real()); g = d.groups.get(hash) ?? g; d.endAnim(g); step(2);
+        if ( g.shell || g.atlasFree ) { out.push({ type: g.info.type, cause: g.info.cause, skipped: "no pixels" }); continue; }
+      }
+      let seed = 777; Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+      let F = real(); performance.now = () => F; T.update(F);
+      for ( let i = 0; i < 4; i++ ) { F += dt; T.update(F); }
+      const start = F + 5;
+      d.enter(g, { start });
+      d.clockSlice(1e9, { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 });
+      d.materialize(g, Infinity);
+      if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0);
+      let lastProbe = null, endRes = null; const hookRes = {}; const rows = [], frames = []; let prev = null, endIdx = -1, endT = 0, i = 0;
+      const ring = []; const keepN = Math.ceil(preMs / dt) + 3;
+      while ( F - start < cap ) {
+        F += dt; T.update(F);
+        if ( probe && g.anim ) lastProbe = probe(g, d); const px = crop(grabAll(fx));
+        let n24 = 0, sum = 0, mx = 0;
+        if ( prev ) for ( let j = 0; j < px.length; j += 4 ) {
+          const a = Math.abs(px[j] - prev[j]), b = Math.abs(px[j + 1] - prev[j + 1]), c = Math.abs(px[j + 2] - prev[j + 2]), e = Math.abs(px[j + 3] - prev[j + 3]), s = a + b + c;
+          sum += s; if ( s > 24 || e > 24 ) n24++; const q = Math.max(a, b, c, e); if ( q > mx ) mx = q;
+        }
+        const row = { t: Math.round(F - start), n24, mean: +(sum / (px.length / 4)).toFixed(4), max: mx, anim: !!g.anim, flat: !!g.flat, mode: d.cache?.stats.mode, bakes: d.cache?.stats.bakes, live: d.cache?.stats.live, parts: d.particles.length, soft: 0 };
+        rows.push(row); prev = px;
+        if ( keep ) { ring.push([row.t, px]); if ( ring.length > keepN + Math.ceil(postMs / dt) + 4 ) ring.shift(); }
+        if ( endIdx < 0 && !g.anim && i > 2 ) { endIdx = rows.length - 1; endT = row.t; }
+        if ( atEnd && endIdx >= 0 && rows.length - 1 === endIdx + 3 ) endRes = atEnd(g, d);
+        if ( hooks && endIdx >= 0 ) for ( const [ms, fn] of Object.entries(hooks) ) if ( !hookRes[ms] && row.t - endT >= +ms ) hookRes[ms] = fn(g, d) ?? true;
+        i++;
+        if ( endIdx >= 0 && row.t - endT > postMs ) break;
+      }
+      const win = rows.filter((q) => q.t >= endT - preMs && q.t <= endT + postMs);
+      const after = rows.filter((q) => q.t >= endT - 100);
+      const popRow = after.reduce((a, q) => (q.n24 > (a?.n24 ?? -1) ? q : a), null);
+      out.push({ type: g.info.type, cause: g.info.cause, hash: g.hash?.slice?.(0, 6), size: [r.x1 - r.x0, r.y1 - r.y0], zoom: +canvas.stage.scale.x.toFixed(2), dpr: k, gpu: !!g.batch?.gpu || undefined,
+        endT, pop: popRow ? { n24: popRow.n24, mean: popRow.mean, max: popRow.max, atMs: popRow.t - endT, flat: popRow.flat, mode: popRow.mode } : null,
+        fail: !!popRow && popRow.n24 > maxN24, probe: lastProbe, atEnd: endRes, hooks: hookRes, win: win.map((q) => [q.t - endT, q.n24, q.mean, q.max, q.anim ? "A" : "-", q.flat ? "F" : "-", q.mode, q.bakes, q.parts]), frames: keep ? ring.map((q) => q[1]) : undefined, frameT: keep ? ring.map((q) => q[0] - endT) : undefined, crop: keep ? [sx1 - sx0, sy1 - sy0] : undefined });
+      performance.now = real; Math.random = rnd;
+      for ( const o of d.order ) if ( o.anim ) d.endAnim(o);
+      F += 10000; performance.now = () => F; T.update(F); performance.now = real; T.lastTime = real();
+    }
+  } finally {
+    performance.now = real; Math.random = rnd; for ( const w of waters ) w.visible = true; for ( const k of Object.keys(was) ) CONFIG.moinenMaps[k] = was[k];
+    T.maxFPS = mf; if ( st ) T.start();
+  }
+  return { worst: out.reduce((a, q) => Math.max(a, q.pop?.n24 ?? 0), 0), fail: out.some((q) => q.fail), areas: out };
+}
+
+/**
+ * A frame strip PNG of an endPopCheck area (run with `keep: true`): the frames at the relative times `times` (ms from the entry's end), cut to the
+ * `win` x `win` px window where the consecutive frames differ most, `scale` x enlarged over a checker; the second row is the difference to the
+ * previous frame, x8. Uploaded to worlds/<world>/popout/<name>.png of the lane server (a page cannot post to the host). Returns { box, path }.
+ */
+export async function stripPng(a, times, { name = "strip", win = 150, scale = 3, box = null } = {}) {
+  const [W, Hh] = a.crop, idx = times.map((t) => { let b = 0; a.frameT.forEach((x, i) => { if ( Math.abs(x - t) < Math.abs(a.frameT[b] - t) ) b = i; }); return b; });
+  const fr = idx.map((i) => a.frames[i]), pv = idx.map((i) => a.frames[Math.max(0, i - 1)]), G = 16, gx = Math.ceil(W / G), gy = Math.ceil(Hh / G), cell = new Int32Array(gx * gy);
+  const dlt = (A, B, j) => Math.abs(A[j] - B[j]) + Math.abs(A[j + 1] - B[j + 1]) + Math.abs(A[j + 2] - B[j + 2]) + Math.abs(A[j + 3] - B[j + 3]);
+  for ( let q = 1; q < fr.length; q++ ) for ( let y = 0; y < Hh; y++ ) for ( let x = 0; x < W; x++ ) if ( dlt(fr[q], pv[q], (y * W + x) * 4) > 24 ) cell[(y >> 4) * gx + (x >> 4)]++;
+  const wc = Math.ceil(win / G); let best = -1, bx = 0, by = 0;
+  if ( box ) { bx = box[0]; by = box[1]; } else for ( let cy = 0; cy + wc <= gy; cy++ ) for ( let cx = 0; cx + wc <= gx; cx++ ) { let s = 0; for ( let yy = 0; yy < wc; yy++ ) for ( let xx = 0; xx < wc; xx++ ) s += cell[(cy + yy) * gx + cx + xx]; if ( s > best ) { best = s; bx = cx * G; by = cy * G; } }
+  const w3 = win * scale, n = fr.length, outW = (w3 + 4) * n, outH = w3 * 2 + 4, out = new Uint8Array(outW * outH * 4);
+  for ( let q = 0; q < n; q++ ) for ( let y = 0; y < w3; y++ ) for ( let x = 0; x < w3; x++ ) {
+    const sx = bx + ((x / scale) | 0), sy = by + ((y / scale) | 0); if ( sx >= W || sy >= Hh ) continue;
+    const j = (sy * W + sx) * 4, g = ((x >> 3) + (y >> 3)) & 1 ? 150 : 110, o = (y * outW + q * (w3 + 4) + x) * 4, o2 = ((y + w3 + 4) * outW + q * (w3 + 4) + x) * 4, al = fr[q][j + 3] / 255;
+    for ( let p = 0; p < 3; p++ ) { out[o + p] = fr[q][j + p] * al + g * (1 - al); out[o2 + p] = q ? Math.min(255, Math.abs(fr[q][j + p] - pv[q][j + p]) * 8) : 0; }
+    out[o + 3] = 255; out[o2 + 3] = 255;
+  }
+  const c = new OffscreenCanvas(outW, outH); c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(out.buffer), outW, outH), 0, 0);
+  const file = new File([await c.convertToBlob({ type: "image/png" })], name + ".png", { type: "image/png" }), fp = foundry.applications.apps.FilePicker.implementation;
+  try { await fp.createDirectory("data", `worlds/${game.world.id}/popout`); } catch { /* exists */ }
+  const r = await fp.upload("data", `worlds/${game.world.id}/popout`, file, {}, { notify: false });
+  return { box: [bx, by, win], times: idx.map((i) => a.frameT[i]), path: r?.path };
+}
