@@ -79,6 +79,7 @@ function teardown() {
   clearTimeout(saveTimer); saveTimer = 0;
   Editor.teardown();
   display?.destroy(); traffic?.destroy();
+  destroyTextures();                // after the cars that used them (the next scene makes them again when it needs them)
   display = traffic = null; R = null;
   undo.length = redo.length = 0;
 }
@@ -286,7 +287,9 @@ export function registerRoads() {
   Hooks.on("updateScene", onUpdateScene);
   Hooks.on("canvasPan", () => Editor.onPan());
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.roads ??= roadsApi; } });
-  // textures of the cars belong to the renderer: free them when the page goes
-  window.addEventListener("beforeunload", () => { flushSave(); destroyTextures(); });
+  // (the cars' shared textures are NOT destroyed on beforeunload: the canvas keeps drawing until the page is really gone - and a
+  // "leave the page?" prompt can keep it - so every car sprite then rendered a destroyed texture: "calculateVertices" on a null
+  // texture, every frame. The page's GPU context goes with the page; a scene change frees them in teardown, after the cars.)
+  window.addEventListener("beforeunload", () => { flushSave(); });
   document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
 }
