@@ -2415,7 +2415,7 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
       const tilesNow = tileRects();
       let boxSum = 0, boxN = 0, softSum = 0, beatSum = 0, beatN = 0, bp = null, bpp = null, lastSharp = NaN;
-      const cpu = [], inks = [], seam = new Map(), errs = [];
+      const cpu = [], inks = [], seam = new Map(), errs = []; let rp = null, rpp = null, bxSum = 0, bxN = 0;
       const blocks = []; const rx = cx - 120, ry = cy - 80;
       for ( let y = ry; y < ry + 160; y += BLK ) for ( let x = rx; x < rx + 240; x += BLK ) blocks.push([x, y]);
       for ( let i = 0; i < n; i++ ) {
@@ -2424,7 +2424,7 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
         V += 1000 / fps; const t0 = real(); T.update(V); gl.finish(); cpu.push(real() - t0);
         const px = ss > 1 ? grabSS(ss) : grab(), M = canvas.primary.worldTransform;
         { const v0 = V; V += 1000; T.update(V); V = v0; T.lastTime = v0; } const pr = ss > 1 ? grabSS(ss) : grab();           // (the clock goes back: the next frame follows the move's own time) the same view at REST (the clock a second on, nothing moved): what the move must not differ from
-        if ( ref ) { const rf = grabSS(ref); let e = 0, nn = 0; for ( let q = 0; q < px.length; q += 4 ) { if ( px[q + 3] < 8 && rf[q + 3] < 8 ) continue; e += Math.abs(px[q] - rf[q]) + Math.abs(px[q + 1] - rf[q + 1]) + Math.abs(px[q + 2] - rf[q + 2]) + Math.abs(px[q + 3] - rf[q + 3]); nn++; } errs.push(nn ? e / nn / 4 : 0); }
+        let rfCur = null; if ( ref ) { const rf = rfCur = grabSS(ref); let e = 0, nn = 0; for ( let q = 0; q < px.length; q += 4 ) { if ( px[q + 3] < 8 && rf[q + 3] < 8 ) continue; e += Math.abs(px[q] - rf[q]) + Math.abs(px[q + 1] - rf[q + 1]) + Math.abs(px[q + 2] - rf[q + 2]) + Math.abs(px[q + 3] - rf[q + 3]); nn++; } errs.push(nn ? e / nn / 4 : 0); }
         const whole = stats(px, [0, 0, PW, PH]);
         // boxes: per 48 px cell with art, log(sharpness in the move / at rest); a softening that treats areas alike moves every cell the
         // same (the spread is 0), one that touches the bands and not the live runs, or each tile by its own sampling, spreads them
@@ -2444,13 +2444,16 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
           }
         });
         inks.push(whole.ink / (M.a * k) ** 2);
-        const e2 = new Float32Array(blocks.length);
+        const energy = (pxx) => { const out = new Float32Array(blocks.length);
         blocks.forEach(([bx, by], bi) => {
           const x0 = Math.max(1, Math.round((M.a * bx + M.tx) * k)), y0 = Math.max(1, Math.round((M.d * by + M.ty) * k)), x1 = Math.min(PW - 1, Math.round((M.a * (bx + BLK) + M.tx) * k)), y1 = Math.min(PH - 1, Math.round((M.d * (by + BLK) + M.ty) * k));
           let s2 = 0, n2 = 0;
-          for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) { s2 += Math.abs(lum(px, x, y) - (lum(px, x - 1, y) + lum(px, x + 1, y) + lum(px, x, y - 1) + lum(px, x, y + 1)) / 4); n2++; }
-          e2[bi] = n2 ? s2 / n2 : 0;
-        });
+          for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) { s2 += Math.abs(lum(pxx, x, y) - (lum(pxx, x - 1, y) + lum(pxx, x + 1, y) + lum(pxx, x, y - 1) + lum(pxx, x, y + 1)) / 4); n2++; }
+          out[bi] = n2 ? s2 / n2 : 0;
+        }); return out; };
+        const e2 = energy(px), r2 = rfCur ? energy(rfCur) : null;
+        if ( r2 && rp && rpp ) for ( let bi = 0; bi < e2.length; bi++ ) { const lvl = (e2[bi] + bp[bi] + bpp[bi]) / 3; if ( lvl > 2 ) { bxSum += Math.abs((e2[bi] - 2 * bp[bi] + bpp[bi]) - (r2[bi] - 2 * rp[bi] + rpp[bi])) / lvl; bxN++; } }
+        rpp = rp; rp = r2;
         if ( bp && bpp ) for ( let bi = 0; bi < e2.length; bi++ ) { const lvl = (e2[bi] + bp[bi] + bpp[bi]) / 3; if ( lvl > 2 ) { beatSum += Math.abs(e2[bi] - 2 * bp[bi] + bpp[bi]) / lvl; beatN++; } }
         bpp = bp; bp = e2; lastSharp = whole.sharp;
       }
@@ -2463,7 +2466,7 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       const seams = [...seam.values()].map((v) => (v.dev / Math.max(1e-6, v.ctl)) / Math.max(0.2, v.dev2 / Math.max(1e-6, v.ctl2))).sort((a, b) => b - a);
       const cs = cpu.slice().sort((a, b) => a - b);
       const es = errs.slice().sort((a, b) => a - b);
-      rows.push({ move: mv.name, frames: n, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
+      rows.push({ move: mv.name, frames: n, beatX: ref ? +(bxSum / Math.max(1, bxN)).toFixed(4) : undefined, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
         pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
     }
   } finally {

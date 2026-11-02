@@ -7,6 +7,7 @@ import * as Cause from "./cause-fx.mjs";
 import { pxRing, pxFlash, PixelCanvas, pxArcs, tongueCells, pxTongue } from "./pixel-fx.mjs";
 import { StaticCache, mipmaps } from "./static-cache.mjs";
 import { MaskedPatch } from "./masked-map.mjs";
+import { installSharpBatch, sharpRender, sharpSprite, sharpBatch } from "./sharp-batch.mjs";
 import { perfMode, particleCap } from "../perf-mode.mjs";
 import { Debris } from "./debris.mjs";
 import { buildShell } from "./composite.mjs";
@@ -246,6 +247,9 @@ export class DestructionDisplay {
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
     this.cache = new StaticCache(this);
+    // THE ONE SAMPLER for the live layer too (sharp-sampler.mjs, CONFIG.moinenMaps.zoomAA 'edge', default): installed once, used while the frame is drawn
+    installSharpBatch(canvas.app?.renderer);
+    sharpRender(this.objs, () => this.sharpLive());
   }
 
   /** Every area shown, in order: { type, mat, hash, ... }. */
@@ -410,7 +414,7 @@ export class DestructionDisplay {
     cont.eventMode = baseCont.eventMode = shardCont.eventMode = "none";
     cont.cullable = true;   // off-screen objects are not drawn at all
     cont.addChild(baseCont, shardCont);
-    const baseSpr = new PIXI.Sprite(frame(0));
+    const baseSpr = sharpSprite(new PIXI.Sprite(frame(0)));
     baseSpr.eventMode = "none"; baseSpr.scale.set(ap);
     baseSpr.position.set(org.x + info.x * ap, org.y + info.y * ap);
     baseCont.addChild(baseSpr);
@@ -647,7 +651,7 @@ export class DestructionDisplay {
       return;
     }
     // pooled: an area flattened again after its entry gives its shard sprites back (flatten / release)
-    const spr = p.spr = this.spritePool.pop() ?? new PIXI.Sprite();
+    const spr = p.spr = this.spritePool.pop() ?? sharpSprite(new PIXI.Sprite());
     spr.texture = g.frame(p.frame); spr.visible = true; spr.alpha = 1; spr.tint = 0xFFFFFF; spr.rotation = 0;
     spr.eventMode = "none"; spr.anchor.set(0.5); spr.scale.set(ap);
     spr.position.set(org.x + p.fx * ap, org.y + p.fy * ap);
@@ -1637,6 +1641,12 @@ export class DestructionDisplay {
     return { x0: (tl.x - o.x) / ap - m, y0: (tl.y - o.y) / ap - m, x1: (br.x - o.x) / ap + m, y1: (br.y - o.y) / ap + m };
   }
 
+  /** Is the live layer sampled by the one sampler (edge mode and the plugin installed)? */
+  sharpLive() {
+    const m = globalThis.CONFIG?.moinenMaps?.zoomAA;
+    return m !== false && m !== "mips" && !globalThis.CONFIG?.moinenMaps?.noSharpLive && !!canvas.app?.renderer?.plugins?.[sharpBatch.name];
+  }
+
   tick() {
     const t0 = performance.now();
     if ( !canvas.stage ) return;
@@ -1648,7 +1658,8 @@ export class DestructionDisplay {
     // (SCREEN pixels: device pixels, the renderer's resolution included - the cache's tiles (static-cache.mjs) count them that way, and a
     // live layer that counted CSS pixels stayed LINEAR-blurred where the cache already drew crisp texels: 6-11 % crisper at 125-200 % DPR)
     const z = canvas.stage.scale.x * this.ap * (canvas.app.renderer.resolution || 1);
-    const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
+    // (the one sampler does its own sharpening from LINEAR textures at any scale: no NEAREST / LINEAR switch, nothing to flip with the zoom)
+    const want = this.sharpLive() ? LINEAR : this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; for ( const X of [g.anim?.rev, g.anim?.crev] ) if ( X?.tex && !X.tex.destroyed ) X.tex.scaleMode = want; } }   // (the ruin's and the cover's erode textures follow: the entry's end swaps them for the atlas's)
     const vw = this.view();
     if ( this.swapQ?.length && !(this.pending?.size || this.pixelAsks?.size || this.restoreQ?.length) ) this.pixelsSlice(t0, 4);   // (shells' areas from the worker, swapShell)
