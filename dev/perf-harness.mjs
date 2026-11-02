@@ -88,11 +88,36 @@ export function step(n = 1) {
   try { for ( let i = 0; i < n; i++ ) T.update(performance.now()); } finally { T.maxFPS = mf; }
 }
 
+/**
+ * RESTING FRAMES. The static cache softens its tiles while the canvas scale moves and for SOFT_MS (220 ms) after the last change
+ * (static-cache.mjs zoomSoft: the waving fix), and a check that pans / zooms and reads the very next frame measures that softening
+ * (thin outlines at half their alpha: ~780 "gap" pixels on a 1366x800 frame, more with the pixel density) instead of the look at
+ * rest. `restClock()` skews performance.now so that `rest()` draws the frame as if a second had passed since the pan; `done()` gives
+ * the clock back.
+ */
+export function restClock() {
+  const real = performance.now.bind(performance), T = canvas.app.ticker, c = { skew: 0 };
+  performance.now = () => real() + c.skew;
+  c.rest = (n = 2) => { step(1); c.skew += 1000; step(n); };
+  c.done = () => { performance.now = real; T.lastTime = real(); };
+  return c;
+}
+
+/** The destruction layer drawn live (every unit of `live`, no cache bands), without freeing the bands: the cache's own frame is still there. */
+export function liveGrab() {
+  const d = D(), sh = d.cache?.show, sv = sh?.visible, lv = d.live.visible;
+  if ( sh ) sh.visible = false;
+  d.live.visible = true;
+  try { return grab(); } finally { if ( sh ) sh.visible = sv; d.live.visible = lv; }
+}
+
 /** After a reload: wait for the layer, make every shard, let the flooded holes load. */
 export async function boot() {
   await settled(40000); step(400);
   await new Promise((r) => setTimeout(r, 4000)); step(30);
-  return { ...D()?.cache?.stats };
+  // (areas shown as shells get their pixels asynchronously; a band waiting for them is stale and a check would measure that)
+  for ( let i = 0; i < 60 && (D()?.cache?.waiting || D()?.shellCount); i++ ) { await new Promise((r) => setTimeout(r, 500)); step(5); }
+  return { ...D()?.cache?.stats, waiting: !!D()?.cache?.waiting };
 }
 
 /**
@@ -394,11 +419,12 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
   const W = R.screen.width, H = R.screen.height;
   const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: R.resolution });
   const PW = Math.round(W * R.resolution), PH = Math.round(H * R.resolution);
+  const clock = restClock();                 // (the resting look: not the cache's softening while the scale moves)
   try {
     for ( const z of zooms ) for ( const off of offsets ) {
       const r = canvas.dimensions.sceneRect;
       canvas.pan({ x: r.x + r.width / 2 + off, y: r.y + r.height / 2 + off * 0.5, scale: z });
-      step(2);
+      clock.rest(2);
       // what reached the screen: the frame just drawn, read from the default framebuffer (the primary group draws through its own
       // render texture, so drawing the stage again into a texture is not the same picture); `target`: that object alone
       let px;
@@ -432,7 +458,7 @@ export function seamCheck({ zooms = null, offsets = [0, 0.37, 0.71], thr = 36, m
       }
       per[`${z}/${off}`] = n;
     }
-  } finally { rt.destroy(true); }
+  } finally { rt.destroy(true); clock.done(); }
   return { found, per };
 }
 
@@ -453,7 +479,7 @@ export function outlineCheck({ zooms = [0.5, 0.725, 1, 1.25, 2, 3.5, 6], cell = 
   const GW = Math.floor(region.w / cell), GH = Math.floor(region.h / cell);
   const grabGrid = (z) => {
     canvas.pan({ x: region.x + region.w / 2, y: region.y + region.h / 2, scale: z });
-    step(3);
+    clock.rest(3);
     const W = R.screen.width, H = R.screen.height, rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: R.resolution });
     R.render(d.objs, { renderTexture: rt, transform: canvas.primary.worldTransform.clone(), clear: true });
     const px = R.extract.pixels(rt), PW = Math.round(W * R.resolution), PH = Math.round(H * R.resolution); rt.destroy(true);
@@ -480,7 +506,7 @@ export function outlineCheck({ zooms = [0.5, 0.725, 1, 1.25, 2, 3.5, 6], cell = 
   const corr = (a, b) => { let sa = 0, sb = 0, n = a.length; for ( let i = 0; i < n; i++ ) { sa += a[i]; sb += b[i]; } const ma = sa / n, mb = sb / n;
     let num = 0, da = 0, db = 0; for ( let i = 0; i < n; i++ ) { const x = a[i] - ma, y = b[i] - mb; num += x * y; da += x * x; db += y * y; } return num / Math.sqrt(da * db || 1); };
   // the flooded holes' water loops on its own clock: hidden while measuring (restored at the end)
-  const ws = [];
+  const ws = [], clock = restClock();      // (the resting look: not the cache's softening while the scale moves)
   for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
   try {
   const ref = grabGrid(1), refE = sobel(ref.L), refDark = dark(ref);
@@ -498,7 +524,7 @@ export function outlineCheck({ zooms = [0.5, 0.725, 1, 1.25, 2, 3.5, 6], cell = 
     sw = { jump, curve: pts.filter((_, i) => i % 5 === 0).map((p) => [p.z, +p.dark.toFixed(2), +p.corr.toFixed(2)]) };
   }
   return { region, refDark, rows, sweep: sw };
-  } finally { ws.forEach((w) => { w.visible = true; }); }
+  } finally { clock.done(); ws.forEach((w) => { w.visible = true; }); }
 }
 
 /* ---------------------------------------------------------------------------------------------------------------------------------
@@ -861,23 +887,27 @@ export const table = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 /**
  * GAP CHECK: the destruction layer with its cache against the same layer drawn live, over a zoom sweep (mouse-wheel steps from the
  * fit zoom, x1.1 .. x1.25 per step, both ways) and pan offsets. A GAP pixel is one where the cached frame is (nearly) transparent but
- * the live frame shows damage: a crack between cache tiles or bands. Must be 0. Returns per frame the gap count and where they sit
+ * the live frame shows damage: a crack between cache tiles or bands. Both frames are the RESTING look (restClock: the cache's zoom
+ * softening is over) and the live one is `liveGrab` (bands untouched). Measured on "map" 1366x800: 0 at zoom > 1.2, a few dozen scattered
+ * rim pixels below 1 (the live layer's NEAREST mask edge against the cache's mipmapped one), 54 / 68 / 125 / 217 worst frame at DPR 1 / 1.25 / 1.5 / 2. Returns per frame the gap count and where they sit
  * (scene x / y histogram peaks), plus the cache's tile rectangles.
  */
 export function gapCheck({ steps = [1.1, 1.25], n = 8, offsets = [0, 0.37, 0.71], minAlpha = 96 } = {}) {
-  const R = canvas.app.renderer, d = D(); CONFIG.moinenMaps ??= {};
-  const was = CONFIG.moinenMaps.noDestructionCache, r = canvas.dimensions.sceneRect;
+  const R = canvas.app.renderer, d = D(), r = canvas.dimensions.sceneRect;
   const fitZ = Math.min(R.screen.width / r.width, R.screen.height / r.height);
   const zooms = new Set([fitZ]);
   for ( const f of steps ) for ( let k = -n; k <= n; k++ ) zooms.add(+(fitZ * f ** k).toFixed(4));
   const ws = [];
   for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
-  const rows = [];
+  const rows = [], clock = restClock();
+  // (the live frame is the same layer drawn from `live` with the cache's bands left alone: switching the cache off freed them, and a
+  // shell's pixels come back asynchronously - the first frames after switching it on again lacked areas, hundreds of thousands of "gaps")
+  const waiting0 = !!d.cache?.waiting;
   try {
     for ( const z of [...zooms].sort((a, b) => a - b) ) for ( const off of offsets ) {
       canvas.pan({ x: r.x + r.width / 2 + off * 13, y: r.y + r.height / 2 + off * 7, scale: z });
-      CONFIG.moinenMaps.noDestructionCache = false; step(2); const a = grab();
-      CONFIG.moinenMaps.noDestructionCache = true; step(1); const b = grab();
+      clock.rest(2); const a = grab();
+      const b = liveGrab();
       const M = canvas.primary.worldTransform, k = R.resolution, PW = Math.round(R.screen.width * k);
       let gaps = 0; const hx = new Map(), hy = new Map();
       for ( let i = 0; i < a.length; i += 4 ) {
@@ -890,9 +920,10 @@ export function gapCheck({ steps = [1.1, 1.25], n = 8, offsets = [0, 0.37, 0.71]
       const top = (h) => [...h].sort((p, q) => q[1] - p[1]).slice(0, 3);
       rows.push({ zoom: +canvas.stage.scale.x.toFixed(4), off, gaps, x: top(hx), y: top(hy) });
     }
-  } finally { CONFIG.moinenMaps.noDestructionCache = was; ws.forEach((w) => { w.visible = true; }); step(1); }
+  } finally { clock.done(); ws.forEach((w) => { w.visible = true; }); step(1); }
   const tiles = (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => [b.level, +t.x.toFixed(2), +t.y.toFixed(2), +t.w.toFixed(2), +t.h.toFixed(2)]));
-  return { frames: rows.length, withGaps: rows.filter((q) => q.gaps).length, worst: rows.sort((p, q) => q.gaps - p.gaps).slice(0, 6), tiles };
+  return { frames: rows.length, withGaps: rows.filter((q) => q.gaps).length, total: rows.reduce((a, q) => a + q.gaps, 0), dpr: R.resolution, waiting: waiting0 || !!d.cache?.waiting,
+    worst: rows.sort((p, q) => q.gaps - p.gaps).slice(0, 6), tiles };
 }
 
 /**

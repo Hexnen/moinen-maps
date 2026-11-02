@@ -147,6 +147,7 @@ const SOFT_MS = 220;
 // the taps' distance (texels) when magnified and the mip bias when minified (CONFIG.moinenMaps.zoomSoftK to try others): measured on
 // "map" (wavingCheck beat, 1.3 -> 0.98 / 1.0 -> 0.3): none 0.118 / 0.142, 0.5 & 0.5 0.095 / 0.096, 0.75 & 1 0.038 / 0.061, 1 & 1.5 0.035 / 0.058
 const SOFT_TAP = 0.75, SOFT_BIAS = 1.0;
+const RAMP0 = 2.0;                                       // screen px per texel where the crisp ramp starts (CONFIG.moinenMaps.sharpFrom: dev knob)
 let sharpProgram = null;
 
 export class SharpTile extends PIXI.Container {
@@ -182,7 +183,10 @@ export class SharpTile extends PIXI.Container {
     // drawn one or two pixels wide by turns and the pattern crawled with every step of a gliding zoom (the cache shimmered 1.7x the
     // live layer: dev/perf-harness wavingCheck) and the clamped edge of a tile showed as a line. So: plain bilinear up to 1.5 screen
     // px per texel (like the live layer and the map), crisp from 3 (where the live layer turns NEAREST), a smooth ramp between
-    un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - 1.5) / 1.5));
+    // (the ramp starts at 2.0, not 1.5: the live layer is plain LINEAR until it turns NEAREST at 3 screen px per texel - the resting
+    // cache was 5-11 % crisper than it at 2-3 ("map" at 200 % DPR, crispCheck 1.113 / 1.048 / 1.075 -> 0.99); wavingCheck unchanged)
+    const r0 = globalThis.CONFIG?.moinenMaps?.sharpFrom ?? RAMP0;
+    un.uSharp = this.nearest ? 1 : Math.min(1, Math.max(0, (un.uScale - r0) / (3 - r0)));
     un.uSoft = globalThis.CONFIG?.moinenMaps?.noZoomSoft ? 0 : zoomSoft;   // (dev knob for comparison)
     const sk = globalThis.CONFIG?.moinenMaps?.zoomSoftK; un.uSoftK[0] = sk?.[0] ?? SOFT_TAP; un.uSoftK[1] = sk?.[1] ?? SOFT_BIAS;
     renderer.batch.flush();
@@ -325,7 +329,9 @@ export class StaticCache {
     const one = Math.abs(z / res - 1) < 0.01, a = M.a, dpr = canvas.app.renderer.resolution || 1, nearest = this.d.filter === 0;
     for ( const b of this.bands ) for ( const t of b.tiles ) {
       t.spr.nearest = nearest && z / res > 1.5;            // magnified: the live layer's sampling (an entry frame and the rest look alike)
-      if ( !one ) { t.spr.position.set(t.x, t.y); continue; }
+      // (pixel-aligned tiles are crisper than the live layer, which sits at the pan's fractional offset like the map: 1.3x the gradient at
+      // zoom 1 on "map" - off unless `CONFIG.moinenMaps.cacheAlign` is set; the resting look is the live look)
+      if ( !one || !globalThis.CONFIG?.moinenMaps?.cacheAlign ) { t.spr.position.set(t.x, t.y); continue; }
       const sx = (a * t.x + M.tx) * dpr, sy = (M.d * t.y + M.ty) * dpr;
       t.spr.position.set(t.x + (Math.round(sx) - sx) / (a * dpr), t.y + (Math.round(sy) - sy) / (M.d * dpr));
     }

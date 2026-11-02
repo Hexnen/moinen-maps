@@ -1380,7 +1380,9 @@ export class DestructionDisplay {
     this._fxSpent = 0;       // ms the entries' one-shot effects have taken in this frame (effects: once)
     // sampling: crisp when an art pixel covers 3+ screen pixels; below that NEAREST shimmers while zooming and panning (an art pixel
     // flips between 1 and 2 screen pixels), so it is LINEAR + mipmaps there
-    const z = canvas.stage.scale.x * this.ap;
+    // (SCREEN pixels: device pixels, the renderer's resolution included - the cache's tiles (static-cache.mjs) count them that way, and a
+    // live layer that counted CSS pixels stayed LINEAR-blurred where the cache already drew crisp texels: 6-11 % crisper at 125-200 % DPR)
+    const z = canvas.stage.scale.x * this.ap * (canvas.app.renderer.resolution || 1);
     const want = this.filter === NEAREST ? (z < 2.6 ? LINEAR : NEAREST) : (z > 3 ? NEAREST : LINEAR);
     if ( want !== this.filter ) { this.filter = want; for ( const g of this.groups.values() ) { g.tex.scaleMode = want; if ( g.flatTex ) g.flatTex.baseTexture.scaleMode = want; if ( g.coverTex ) g.coverTex.baseTexture.scaleMode = want; } }
     const vw = this.view();
