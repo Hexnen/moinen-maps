@@ -226,7 +226,7 @@ const carryGeo = () => { const r = Model.sceneRect(); return { ap: S.ap, ox: r.x
 /** What display.enter asks (display.carry): the carried stroke's path (its entry runs along it) and the start of a carry. */
 const carryHooks = {
   pathOf: (id) => { const o = carryOf(id); return o ? unflatPath(o.tk.p) : null; },
-  enter: (g, start, k) => { const o = carryOf(g.objId); if ( o ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id }); }
+  enter: (g, start, k) => { const o = carryOf(g.objId); if ( o ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id, live: () => !!display?.order?.some((q) => q.objId === o.id && q.anim) }); }
 };
 
 /* ---------------------------------------------------------------- baking */

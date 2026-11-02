@@ -7,6 +7,7 @@
 //   5. makeTk (the record): a tap carries nothing, the end is the grab + the stroke's displacement (clamped, snapped), flat path;
 //   6. flag format: `tk` is in no signature (baked pixels and chunk ids cannot change), survives a save / load, and an older reader that
 //      knows nothing of it loads the same strokes.
+//   7. the carried token is always in front (carry-core frontKeys / OVER_KEYS / drawsOver, carry-front.mjs hold / release with a stubbed canvas and clock);
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -137,6 +138,52 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
   check(back.length === 1 && back[0].tk?.id === "tok" && C.validTk(back[0].tk), "format: a load keeps `tk`");
   const cp = Model.withCause(back[0], 2), pp = Model.withPin(back[0], { debris: 0.2 }, 1);
   check(cp.tk?.id === "tok" && pp.tk?.id === "tok", "format: a cause or a pinned setting changed on the stroke keeps `tk`");
+}
+
+/* ---- 7. the carried token is always in front: the order rule and the hold (carry-front.mjs, with a stubbed canvas) */
+{
+  const T = { elevation: 0, sortLayer: C.TOKEN_LAYER, sort: 3 };
+  const layers = [247, 249, 250, 251, 255, 500, 650].map((l) => ({ elevation: 0, sortLayer: l, sort: 0 }));   // the destruction, districts, lights, tiles, drawings
+  check(layers.every((l) => C.drawsOver(C.frontKeys(T), l)), "front: a carried token draws over every layer of the destruction and the scene (247 ... 650, elevation 0)");
+  const low = C.frontKeys({ elevation: 0, sortLayer: 100, sort: 1 });
+  check(low.sortLayer === C.TOKEN_LAYER && low.sort === 1 && low.elevation === 0, "front: a mesh that lost its layer gets the tokens' own; its own sort and elevation are kept");
+  check(C.frontKeys({ elevation: 5, sortLayer: 700, sort: 0 }).elevation === 5 && C.frontKeys({}).sortLayer === C.TOKEN_LAYER, "front: an elevated token keeps its elevation; missing keys default");
+  const under = C.OVER_KEYS;
+  check(layers.every((l) => C.drawsOver(under, l)) && C.drawsOver(C.frontKeys(T), under) && C.drawsOver(C.frontKeys({ elevation: 5, sortLayer: 700, sort: 0 }), under),
+    "front: the editor's overlay and cursor lie over the destruction and under every token (elevation 0 and above)");
+  check(!C.drawsOver(T, T) && C.drawsOver({ elevation: 1 }, { elevation: 0, sortLayer: 9999 }) && C.drawsOver({ sortLayer: 2 }, { sortLayer: 1, sort: 9 }), "front: the comparator is Foundry's (elevation, then sortLayer, then sort)");
+
+  // the hold, with a stubbed canvas and clock
+  let now = 1000;
+  const realNow = performance.now.bind(performance); performance.now = () => now;
+  const listeners = new Set(), meshes = new Map(), unders = [];
+  const mk = (id, sl = 100) => { const t = { document: { id }, mesh: { elevation: 0, sortLayer: sl, sort: 0, destroyed: false } }; meshes.set(id, t); return t; };
+  globalThis.canvas = { tokens: { get: (id) => meshes.get(id) }, primary: { sortDirty: false }, app: { ticker: { add: (f) => listeners.add(f), remove: (f) => listeners.delete(f) } } };
+  const F = await imp("scripts/tokens/carry-front.mjs");
+  F.onUnder((on) => unders.push(on));
+  const a = mk("a"), b = mk("b", 700);
+  const step = (ms) => { now += ms; for ( const f of [...listeners] ) f(); };
+  F.hold("a", "grab");
+  check(a.mesh.sortLayer === 700 && canvas.primary.sortDirty && unders.at(-1) === true, "front: a hold gives the mesh the tokens' layer and puts the overlay under the tokens");
+  F.hold("a", "carry:1"); F.release("a", "grab");
+  check(F._frontState().holds.length === 1 && unders.at(-1) === true, "front: the carry takes the hold over from the grab with no gap");
+  a.mesh.sortLayer = 100; F.onRefresh(a); check(a.mesh.sortLayer === 700, "front: Foundry's refresh resets the mesh, the refresh hook gives the keys back");
+  b.mesh.sortLayer = 650; F.onRefresh(b); check(b.mesh.sortLayer === 650, "front: a token that is not held is never touched");
+  let live = true;
+  F.release("a", "carry:1", 300, () => live);
+  check(F._frontState().pending === 1 && listeners.size === 1, "front: a release that waits runs on one ticker listener");
+  step(200); check(F._frontState().holds.length === 1, "front: it waits at least its grace");
+  step(200); check(F._frontState().holds.length === 1, "front: and while the entry still runs");
+  live = false; step(16);
+  check(F._frontState().holds.length === 0 && unders.at(-1) === false && listeners.size === 0 && !F._frontState().ticking, "front: it lets go when the entry has ended: the overlay is back on top, the ticker listener is gone");
+  F.hold("a", "grab"); F.release("a", "grab", 8000); F.hold("a", "grab"); step(9000);
+  check(F._frontState().holds.length === 1, "front: a new hold of the same tag cancels a waiting release (a stale timer must not drop it)");
+  F.release("a", "grab", 100, () => true); step(100 + F.MAX_WAIT_MS + 20);
+  check(F._frontState().holds.length === 0, "front: a release never waits longer than MAX_WAIT_MS for an entry that does not end");
+  F.hold("a", "x"); F.release("a", "x", 500); F.clear();
+  check(F._frontState().holds.length === 0 && F._frontState().pending === 0 && listeners.size === 0 && unders.at(-1) === false, "front: clear (the scene goes away) lets go of everything");
+  const idle = JSON.stringify(F._frontState()); F.onRefresh(a); check(JSON.stringify(F._frontState()) === idle && listeners.size === 0, "front: idle - nothing held, no listener, a token refresh costs one lookup");
+  performance.now = realNow;
 }
 
 console.log(failed ? `${failed} FAILED` : "carry: all ok");

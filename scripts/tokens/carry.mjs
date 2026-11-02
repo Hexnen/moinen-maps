@@ -21,6 +21,8 @@ import { restoreExact, tokenBusy, claimToken, releaseToken } from "../token-drop
 import { Emitter, artPx } from "./pixels.mjs";
 import { tokenFxOn } from "./settings.mjs";
 import * as C from "./carry-core.mjs";
+import * as Front from "./carry-front.mjs";
+const FRONT_GRACE_MS = 300;    // the token stays in front at least this long after its carry ends, and until the stroke's entry has ended (Front.release)
 
 const ACTIVE = new Map();      // Token -> Carry
 const SEEN = new Map();        // stroke id -> the entry start already played (a stroke has several areas: one carry)
@@ -43,7 +45,7 @@ function sortNextTo(obj, token, step) {
 }
 
 class Carry {
-  /** `o`: { objId, tk, tl, t0 (when the path's clock starts, performance.now ms), real, visual } */
+  /** `o`: { objId, tk, tl, t0 (when the path's clock starts, performance.now ms), real, visual, live (is the stroke's entry still running? the front is held till it is not) } */
   constructor(token, o) {
     Object.assign(this, o);
     this.token = token; this.doc = token.document; this.dead = false; this.moved = false;
@@ -63,6 +65,9 @@ class Carry {
       this.root = new PIXI.Container(); this.root.eventMode = "none"; sortNextTo(this.root, token, 2);
       this.em = new Emitter(this.root);
     }
+    this.tag = `carry:${this.objId}`;
+    Front.hold(this.doc.id, this.tag);                      // above every layer of the destruction (and the editor's overlay) for the whole carry
+    Front.release(this.doc.id, "grab");                     // (the editor held it from the press)
     ACTIVE.set(token, this);
     startTicker();
   }
@@ -170,6 +175,7 @@ class Carry {
     this.dead = true;
     if ( commit && this.real && !this.moved ) this.move();
     ACTIVE.delete(this.token);
+    Front.release(this.doc.id, this.tag, FRONT_GRACE_MS, this.live);
     if ( this.visual ) {
       releaseToken(this.token);
       this.em?.clear();
@@ -187,7 +193,7 @@ class Carry {
  * counts). `geo` { ap, ox, oy } the art grid; `k` the entry clock's factor; `delay` the front's delay (ms); `real`: this client painted
  * the stroke just now (or redid it): the token document really moves at the end.
  */
-export function play({ objId, tk, start, k = 1, delay = 40, geo, real = false }) {
+export function play({ objId, tk, start, k = 1, delay = 40, geo, real = false, live = null }) {
   if ( !C.validTk(tk) || !canvas?.ready ) return false;
   const seen = SEEN.get(objId);
   if ( seen !== undefined && Math.abs(seen - start) < 1500 ) return false;
@@ -199,7 +205,7 @@ export function play({ objId, tk, start, k = 1, delay = 40, geo, real = false })
   ACTIVE.get(token)?.end(true);                                        // two strokes on one token: the first lands where it was going
   const visual = tokenFxOn() && !reducedMotion() && !tokenBusy(token) && !!token.mesh && !token.mesh.destroyed;
   stats.played++; if ( visual ) stats.visual++;
-  new Carry(token, { objId, tk, tl, t0: start + delay, real: !!real && game.user.isGM, visual });
+  new Carry(token, { objId, tk, tl, t0: start + delay, real: !!real && game.user.isGM, visual, live });
   return true;
 }
 
@@ -223,11 +229,11 @@ export function undo(tk, objId) {
 }
 
 /** Foundry refreshed a token. */
-export function onRefreshToken(token, flags) { ACTIVE.get(token)?.refreshed(flags); }
+export function onRefreshToken(token, flags) { Front.onRefresh(token); ACTIVE.get(token)?.refreshed(flags); }
 
 export function registerCarry() {
   Hooks.on("refreshToken", onRefreshToken);
-  Hooks.on("canvasTearDown", () => { for ( const c of [...ACTIVE.values()] ) c.end(true); SEEN.clear(); });
+  Hooks.on("canvasTearDown", () => { for ( const c of [...ACTIVE.values()] ) c.end(true); SEEN.clear(); Front.clear(); });
   Hooks.on("deleteToken", (doc) => { for ( const [t, c] of [...ACTIVE] ) if ( t.document === doc ) c.end(false); });
 }
 
