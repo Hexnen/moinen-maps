@@ -73,12 +73,12 @@ export const GLYPHS = {
   book:     { icon: "icons/svg/book.svg",        fa: "fa-book" },
   house:    { icon: "icons/svg/windmill.svg",    fa: "fa-house" },
   shop:     { icon: "icons/svg/coins.svg",       fa: "fa-shop" },
-  cross:    { icon: "icons/svg/first-aid.svg",   fa: "fa-suitcase-medical" },
+  cross:    { icon: "icons/svg/heal.svg",   fa: "fa-suitcase-medical" },
   badge:    { icon: "icons/svg/shield.svg",      fa: "fa-shield-halved" },
   car:      { icon: "icons/svg/clockwork.svg",   fa: "fa-car" },
   camera:   { icon: "icons/svg/eye.svg",         fa: "fa-camera" },
   triangle: { icon: "icons/svg/hazard.svg",      fa: "fa-triangle-exclamation" },
-  cup:      { icon: "icons/svg/small-fire.svg",  fa: "fa-mug-hot" }
+  cup:      { icon: "icons/svg/tankard.svg",  fa: "fa-mug-hot" }
 };
 
 /**

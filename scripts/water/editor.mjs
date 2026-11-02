@@ -23,6 +23,8 @@ let stroke = null, lastPoint = null;
 /** A stroke waiting for the engine to start: where the pointer went meanwhile and whether the button was let go. */
 let starting = null;
 const undo = [];
+/** Strokes taken back with Ctrl+Z, for Ctrl+Shift+Z / Ctrl+Y (same snapshot shape as `undo`; a new stroke empties it). */
+const redo = [];
 
 export function registerWaterEditorSettings() {
   game.settings.register(MODULE_ID, "waterBrush", { scope: "client", config: false, type: Number, default: 1.5, onChange: () => { if ( lastPoint && active() ) drawCursor(lastPoint); } });
@@ -169,19 +171,28 @@ function onUp(ev) {
 function endStroke() {
   if ( !stroke ) return;
   const s = stroke; stroke = null;
-  if ( s.changed ) Water.edited(); else undo.pop();
+  if ( s.changed ) { redo.length = 0; Water.edited(); } else undo.pop();
 }
 
 function cancelStroke() { if ( starting ) starting.up = true; if ( stroke ) { stroke = null; Water.edited(); } }
 
-/** Ctrl+Z while a water tool is active: back one stroke. */
-function undoStroke() {
-  const S = Water.state(), u = undo.pop();
+/** The masks of `layers` as they are now (what the other side of an undo / redo step restores). */
+const snapshotOf = (S, layers) => ({ rev: S.rev, px: S.px, layers: Object.fromEntries(Object.keys(layers).map((n) => [n, S.masks[n].slice()])) });
+
+/** Put a snapshot back; what it replaces goes on `other` (the redo stack for an undo, the undo stack for a redo). */
+function step(from, other) {
+  const S = Water.state(), u = from.pop();
   if ( !S || !u || u.px !== S.px ) return;
+  other.push(snapshotOf(S, u.layers)); if ( other.length > UNDO_MAX ) other.shift();
   for ( const [n, data] of Object.entries(u.layers) ) S.masks[n].set(data);
   paintOverlay(null);
   Water.edited();
 }
+
+/** Ctrl+Z while a water tool is active: back one stroke. */
+const undoStroke = () => step(undo, redo);
+/** Ctrl+Shift+Z / Ctrl+Y: the stroke Ctrl+Z took back, again (before this, Ctrl+Shift+Z undid one more stroke). */
+const redoStroke = () => step(redo, undo);
 
 const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)); };
 
@@ -200,7 +211,8 @@ export function onCanvasReady() {
     leave: () => { cursor?.clear(); lastPoint = null; },
     key: (e) => {
       if ( !active() || typing(e) ) return;
-      if ( (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" ) { e.preventDefault(); e.stopPropagation(); undoStroke(); }
+      const k = e.key.toLowerCase();
+      if ( (e.ctrlKey || e.metaKey) && (k === "z" || k === "y") ) { e.preventDefault(); e.stopPropagation(); if ( k === "y" || e.shiftKey ) redoStroke(); else undoStroke(); }
       else if ( e.key === "Escape" && stroke ) { cancelStroke(); e.preventDefault(); e.stopPropagation(); }
       else if ( !e.ctrlKey && !e.metaKey && (e.key === "[" || e.key === "]") ) {
         const v = clamp(opt("waterBrush") + (e.key === "]" ? 0.25 : -0.25), 0.25, 8);
@@ -235,6 +247,6 @@ export function teardown() {
   }
   destroyOverlay();
   if ( cursor && !cursor.destroyed ) cursor.destroy({ children: true });
-  cursor = null; stroke = null; starting = null; lastPoint = null; undo.length = 0;
+  cursor = null; stroke = null; starting = null; lastPoint = null; undo.length = 0; redo.length = 0;
   document.body.classList.remove("mm-painting-water");
 }
