@@ -711,10 +711,15 @@ export function crispCheck({ zooms = [1, 2, 3, 4, 6], region = null, shards = tr
     return { at: (x, y) => { const gx = L(x + 1, y - 1) + 2 * L(x + 1, y) + L(x + 1, y + 1) - L(x - 1, y - 1) - 2 * L(x - 1, y) - L(x - 1, y + 1);
       const gy = L(x - 1, y + 1) + 2 * L(x, y + 1) + L(x + 1, y + 1) - L(x - 1, y - 1) - 2 * L(x, y - 1) - L(x + 1, y - 1); return Math.hypot(gx, gy); }, A }; };
   const rows = [];
+  const clock = { real: performance.now.bind(performance), skew: 0 };
+  performance.now = () => clock.real() + clock.skew;
   try {
     for ( const z of zooms ) {
       canvas.pan({ x: region.x, y: region.y, scale: z });
-      CONFIG.moinenMaps.noDestructionCache = false; T.update(performance.now()); T.update(performance.now());
+      // RESTING: the cache softens its tiles while the scale moves (static-cache.mjs zoomSoft, back to crisp 220 ms after the last
+      // change) - the frames are drawn as if a second had passed since the pan, or the softening window would be measured
+      CONFIG.moinenMaps.noDestructionCache = false; T.update(performance.now());
+      clock.skew += 1000; T.update(performance.now()); T.update(performance.now());
       const mode = d.cache?.stats.mode, a = grab();
       CONFIG.moinenMaps.noDestructionCache = true; T.update(performance.now()); T.update(performance.now());
       const b = grab();
@@ -739,7 +744,7 @@ export function crispCheck({ zooms = [1, 2, 3, 4, 6], region = null, shards = tr
       }
       rows.push(row);
     }
-  } finally { CONFIG.moinenMaps.noDestructionCache = was; T.update(performance.now()); T.maxFPS = mf; ws.forEach((w) => { w.visible = true; }); }
+  } finally { CONFIG.moinenMaps.noDestructionCache = was; T.update(performance.now()); performance.now = clock.real; T.lastTime = clock.real(); T.maxFPS = mf; ws.forEach((w) => { w.visible = true; }); }
   // judged from zoom 3 up (where the live layer samples NEAREST); below it the cache is a little crisper than the live LINEAR drawing
   return { pass: rows.filter((r) => r.zoom >= 3).every((r) => Math.abs(r.ratio - 1) <= 0.1 && (r.flatVsShards === undefined || Math.abs(r.flatVsShards - 1) <= 0.1)), rows };
 }
