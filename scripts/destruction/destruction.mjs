@@ -1858,6 +1858,8 @@ export const destructionApi = {
   setCause: (id, cause) => setObjectCause(id, cause),
   /** Pin the current Look settings on strokes (ids; null: all): the one way existing strokes take a new setting. */
   applyParams: (ids = null) => applyParams(ids),
+  /** Undo / redo the last stroke (the editor's Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y). */
+  undo: () => undoLast(), redo: () => redoLast(),
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
