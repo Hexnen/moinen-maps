@@ -423,6 +423,37 @@ function paintAll(e) {
   e.step = -1;
 }
 
+/**
+ * PERF: a new look (colours, opacities) repaints every hole; all at once that was ~250-480 ms in one frame, again every 120 ms while a
+ * slider is dragged. Queued instead: the holes repaint a few ms a frame (FILL_MS), a hole restarts when it is asked again.
+ */
+const repaintQ = new Map();
+let repaintFn = null;
+function repaintLater(e) {
+  if ( !e.res ) return;
+  repaintQ.set(e, 0);
+  if ( !repaintFn && canvas.app?.ticker ) { repaintFn = () => repaintStep(); canvas.app.ticker.add(repaintFn); }
+}
+function repaintStep() {
+  const t0 = performance.now(), k = kit();
+  for ( const [e, i0] of repaintQ ) {
+    if ( e.dead || !e.res || !e.prep ) { repaintQ.delete(e); continue; }
+    const P = e.prep, n = e.res.frames.length;
+    if ( !e.tex.length ) e.tex = e.res.frames.map(() => { const b = new Uint8Array(P.cw * P.ch * 4); return { buf: b, t: texture(b, P.cw, P.ch) }; });
+    let i = i0;
+    for ( ; i < n; ) {
+      const q = e.tex[i];
+      FC.paintFlood(P, e.res.frames[i], e.res.box, k, 2, new Uint8ClampedArray(q.buf.buffer));
+      q.t.baseTexture.update();
+      i++;
+      if ( performance.now() - t0 >= FILL_MS ) break;
+    }
+    if ( i >= n ) { e.step = -1; repaintQ.delete(e); } else repaintQ.set(e, i);
+    if ( performance.now() - t0 >= FILL_MS ) break;
+  }
+  if ( !repaintQ.size && repaintFn ) { canvas.app?.ticker?.remove(repaintFn); repaintFn = null; }
+}
+
 function freeTextures(e) {
   for ( const q of e.tex ) q.t.destroy(true);
   e.tex = [];
@@ -547,7 +578,8 @@ function tick() {
 
 function clearAll() {
   for ( const e of entries.values() ) freeEntry(e);
-  entries.clear();
+  entries.clear(); repaintQ.clear();
+  if ( repaintFn ) { canvas.app?.ticker?.remove(repaintFn); repaintFn = null; }
   if ( tickFn ) canvas.app?.ticker?.remove(tickFn);
   tickFn = null;
   wetChanged();
@@ -574,7 +606,7 @@ function onWater(kind) {
       if ( !e.prep || e.dead ) continue;
       const before = e.key;
       if ( keyOf(e) !== before ) { e.state = "stale"; e.waited = false; load(e); }
-      else if ( !lookSame ) paintAll(e);
+      else if ( !lookSame ) repaintLater(e);
     }
   }, 120);
 }
