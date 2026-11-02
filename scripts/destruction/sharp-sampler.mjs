@@ -45,6 +45,7 @@ vec4 sharpAxis(float t, float w) {
 // the box of footprint w (level-0 texels per pixel, per axis) read from mip level m (a footprint of at most 2 cells there)
 vec4 sharpBox(sampler2D tex, vec2 uv, vec2 w, float m) {
   vec2 sz = vec2(textureSize(tex, int(m)));
+  if ( sz.x < 1.0 || sz.y < 1.0 ) { m = 0.0; sz = vec2(textureSize(tex, 0)); }   // (a texture without that mip level: the base)
   vec2 t = uv * sz, wl = min(w * exp2(-m), vec2(2.0));
   vec4 X = sharpAxis(t.x, wl.x), Y = sharpAxis(t.y, wl.y);
   vec4 c = X.y * Y.y * textureLod(tex, vec2(X.x, Y.x) / sz, m);

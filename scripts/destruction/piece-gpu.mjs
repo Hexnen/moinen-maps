@@ -17,6 +17,8 @@
  * `CONFIG.moinenMaps.noGpuPieces = true`: the CPU poses (A/B), `noGpuTearColl = true`: only a tear's and a cave-in's; WebGL 1: always the CPU path.
  */
 import { batchStats } from "./piece-batch.mjs";
+import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
+import { sharpBatch } from "./sharp-batch.mjs";
 
 const IS = 18;
 let ROUND = null;
@@ -220,14 +222,23 @@ void main() {
   gl_Position = vec4((projectionMatrix * vec3(X, Y, 1.0)).xy, 0.0, 1.0);
 }`;
 
-const FRAG = `precision highp float;
-varying vec2 vUv;
-varying vec4 vCol;
-varying float vSlot;
+const FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+in vec4 vCol;
+in float vSlot;
 uniform sampler2D uAtlas, uBase;
+uniform float uSharpMode, uSharpK;
+out vec4 fragColor;
+${SHARP_SAMPLER_GLSL}
 void main() {
-  vec4 a = texture2D(uAtlas, vUv), b = texture2D(uBase, vUv);
-  gl_FragColor = (vSlot > 0.5 ? b : a) * vCol;
+  // (the derivatives once, outside the branch; one texture is read - the atlas's piece or the base's pixel - through the one sampler
+  // while the display draws to the screen (uSharpMode), the hardware filter otherwise)
+  vec2 gx = dFdx(vUv), gy = dFdy(vUv);
+  vec4 s;
+  if (uSharpMode > 0.5) s = vSlot > 0.5 ? sharpSampleG(uBase, vUv, gx, gy, uSharpK) : sharpSampleG(uAtlas, vUv, gx, gy, uSharpK);
+  else s = vSlot > 0.5 ? texture(uBase, vUv) : texture(uAtlas, vUv);
+  fragColor = s * vCol;
 }`;
 
 const SHADERS = {};
@@ -235,8 +246,8 @@ const U = {
   uM: new Float32Array(4), uT: new Float32Array(2), uCT: new Float32Array(3), uOrg: new Float32Array(2), uScene: new Float32Array(4), uBaseCol: new Float32Array(4)
 };
 function shader(mode) {
-  return SHADERS[mode] ??= PIXI.Shader.from(vert(mode), FRAG, {
-    uAtlas: 0, uBase: 1, uNow: 0, uRest: 0, uAp: 1, uHopMs: 150, uType: 0, uK: 1, uFade: 0, uAlpha: 1, uRound: 0,
+  return SHADERS[mode] ??= PIXI.Shader.from("#version 300 es\n" + vert(mode).replace(/attribute/g, "in").replace(/varying/g, "out"), FRAG, {
+    uSharpMode: 0, uSharpK: 1, uSharpB: 0, uAtlas: 0, uBase: 1, uNow: 0, uRest: 0, uAp: 1, uHopMs: 150, uType: 0, uK: 1, uFade: 0, uAlpha: 1, uRound: 0,
     uM: U.uM, uT: U.uT, uCT: U.uCT, uOrg: U.uOrg, uScene: U.uScene, uBaseCol: U.uBaseCol
   });
 }
@@ -407,7 +418,7 @@ export class GpuPieceBatch extends PIXI.Container {
     if ( this.baseOn && this.baseSlot === 0 && !pieces ) renderer.texture.bind(this.tex, 0);
     const u = sh.uniforms;
     u.uNow = this.now; u.uRest = this.rest ? 1 : 0; u.uAp = this.ap; u.uHopMs = this.hopMs; u.uType = this.typeCode; u.uK = this.k; u.uFade = this.fade;
-    u.uAlpha = this.worldAlpha; u.uRound = ROUND ? PIXI.settings.RESOLUTION : 0;
+    u.uAlpha = this.worldAlpha; u.uRound = ROUND ? PIXI.settings.RESOLUTION : 0; u.uSharpMode = sharpBatch.on ? 1 : 0; u.uSharpK = sharpBatch.k; u.uSharpB = sharpBatch.b;
     U.uCT.set(this.causeTint);
     U.uOrg[0] = this.org[0]; U.uOrg[1] = this.org[1];
     U.uM[0] = M.a; U.uM[1] = M.b; U.uM[2] = M.c; U.uM[3] = M.d; U.uT[0] = M.tx; U.uT[1] = M.ty;
