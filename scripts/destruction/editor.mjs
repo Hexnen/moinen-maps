@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import { trackMarkers } from "../workspace/markers.mjs";
+import { pickToken, classifyPress } from "../tokens/carry-core.mjs";
 
 /**
  * Painting the damage (GM): a brush and an eraser on the mask grid, a ring cursor and a translucent overlay of the mask (amber =
@@ -8,6 +9,9 @@ import { trackMarkers } from "../workspace/markers.mjs";
  * moment after the last stroke. Shift while painting deepens what is there by one level per stroke (layered passes).
  * Keys: [ ] brush size, 1 2 3 level, Shift+0..9 cause (0: the scene default), , . previous / next cause, Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Escape
  * cancels the stroke.
+ * CARRY A TOKEN: a stroke whose first pointer-down lands on a token and that is then DRAGGED carries the token along its path (the
+ * stroke keeps the token and the path: tokens/carry-core.mjs, destruction.mjs edited). Armed by Ctrl held at the pointer-down (left
+ * button), or by the "carry token" latch (setting destrCarry) where Ctrl then does the opposite. A click does nothing special.
  */
 const OVERLAY = [null, [242, 193, 78], [239, 138, 58], [224, 69, 58]];
 let mode = null;               // "paint" | "erase" | null
@@ -15,6 +19,7 @@ let host = null;               // the engine: { state(), ensureState(), edited(b
 let cursor = null, overlay = null, overlayCtx = null, overlayImg = null, overlayTex = null, listeners = null;
 let dirty = null, flushing = false;   // overlay pixels changed since the last upload (mask px box), uploaded once per frame
 let stroke = null, lastPoint = null;
+let ctrlDown = false, cueToken = null;          // Ctrl is held (read from pointer and key events), the token under the brush while armed
 const undo = [];
 
 const opt = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
@@ -27,6 +32,31 @@ export function registerEditorSettings(onChange) {
   game.settings.register(MODULE_ID, "destrType", { scope: "client", config: false, type: Number, default: 0, onChange: f });
   // the brush's cause: 0 = the scene's default (the stroke stores none)
   game.settings.register(MODULE_ID, "destrCause", { scope: "client", config: false, type: Number, default: 0, onChange: f });
+  // carry a token with the stroke: the latch (Ctrl at the pointer-down does the opposite), where the token ends, grid snapping of the end
+  game.settings.register(MODULE_ID, "destrCarry", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
+  game.settings.register(MODULE_ID, "carryEnds", { name: "MOINENMAPS.Destr.carryEnds", hint: "MOINENMAPS.Destr.carryEndsHint", scope: "client", config: true, type: String, default: "real",
+    choices: { real: "MOINENMAPS.Destr.carryEndsReal", return: "MOINENMAPS.Destr.carryEndsReturn" }, onChange: f });
+  game.settings.register(MODULE_ID, "carrySnap", { name: "MOINENMAPS.Destr.carrySnap", hint: "MOINENMAPS.Destr.carrySnapHint", scope: "client", config: true, type: Boolean, default: false, onChange: f });
+}
+
+/** Is carrying armed for a stroke that begins with Ctrl `ctrl`? The latch XOR Ctrl; only in the paint tool. */
+export const carryArmed = (ctrl, m = mode) => m === "paint" && (!!opt("destrCarry", false) !== !!ctrl);
+export const carryOptions = () => ({ ends: opt("carryEnds", "real") === "return" ? "return" : "real", snap: !!opt("carrySnap", false) });
+
+/** The token under a scene point (the topmost one this client sees and that is not locked), or null. Reuses its rows. */
+const rows = [];
+export function tokenAt(p) {
+  const list = canvas.tokens?.placeables; if ( !list?.length ) return null;
+  let n = 0;
+  for ( const t of list ) {
+    const d = t.document; if ( !d || t.destroyed ) continue;
+    const r = rows[n] ??= {};
+    r.id = d.id; r.x = t.x; r.y = t.y; r.w = t.w; r.h = t.h; r.elevation = d.elevation ?? 0; r.sort = d.sort ?? 0; r.locked = !!d.locked; r.visible = !!t.visible && t.renderable !== false;
+    n++;
+  }
+  rows.length = n;
+  const id = pickToken(rows, p);
+  return id ? canvas.tokens.get(id) : null;
 }
 
 export const brush = () => ({
@@ -62,6 +92,20 @@ function drawCursor(p) {
   cursor.lineStyle(Math.max(1.5, 2 / z), color, 0.95).drawCircle(p.x, p.y, r);
   cursor.lineStyle(Math.max(1, 1 / z), 0x15110F, 0.6).drawCircle(p.x, p.y, r + 2 / z);
   if ( erase ) cursor.lineStyle(0).beginFill(0xFFFFFF, 0.12).drawCircle(p.x, p.y, r).endFill();
+  // armed to carry a token: a cyan ring around the token under the brush, or a small token glyph at the brush when none is
+  if ( !erase && !stroke && carryArmed(ctrlDown) ) {
+    const t = cueToken && !cueToken.destroyed ? cueToken : null, u = 1 / z;
+    if ( t ) {
+      cursor.lineStyle(Math.max(2, 3 * u), 0x6FE0FF, 0.95).drawCircle(t.center.x, t.center.y, Math.max(t.w, t.h) / 2 + 3 * u);
+      cursor.lineStyle(Math.max(1, u), 0x15110F, 0.6).drawCircle(t.center.x, t.center.y, Math.max(t.w, t.h) / 2 + 5 * u);
+    }
+    const gx = p.x + r + 10 * u, gy = p.y - r - 10 * u;
+    cursor.lineStyle(Math.max(1.5, 2 * u), 0x6FE0FF, t ? 1 : 0.55).beginFill(0x6FE0FF, t ? 0.45 : 0.12).drawCircle(gx, gy, 6 * u).endFill();
+    cursor.lineStyle(Math.max(1.5, 2 * u), 0x6FE0FF, t ? 1 : 0.55).moveTo(gx + 9 * u, gy).lineTo(gx + 17 * u, gy).lineTo(gx + 13 * u, gy - 3 * u).moveTo(gx + 17 * u, gy).lineTo(gx + 13 * u, gy + 3 * u);
+  } else if ( stroke?.grab ) {
+    const t = canvas.tokens?.get(stroke.grab.id);
+    if ( t && !t.destroyed ) cursor.lineStyle(Math.max(2, 3 / z), 0x6FE0FF, 0.6).drawCircle(t.center.x, t.center.y, Math.max(t.w, t.h) / 2 + 3 / z);
+  }
 }
 
 function buildOverlay() {
@@ -139,14 +183,22 @@ export function refreshOverlay(box = null) {
 /* ---------------------------------------------------------------- strokes */
 
 function onDown(ev) {
-  if ( ev.button !== 0 || !mode || stroke ) return;
+  // (heard on the window in the capture phase, BEFORE the canvas's own listeners: PIXI's event system sits on the canvas element, and
+  // a press that began a stroke must not also select or drag the token under it - least of all a token that is being carried)
+  if ( ev.button !== 0 || !mode || stroke || ev.target !== canvas.app?.view ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
   const S = host.ensureState();
   if ( !overlay ) buildOverlay();
   const p = worldPoint(ev);
   // the stroke is painted into a buffer of its own (it becomes a stroke object at the end); the overlay shows it on the composite
   stroke = { last: p, first: p, changed: false, box: null, deepen: ev.shiftKey, touched: new Set(), t0: performance.now(), path: [[p.x, p.y, 0]],
-    buf: { mask: new Uint8Array(S.mw * S.mh), mw: S.mw, mh: S.mh, mpx: S.mpx }, before: S.mask.slice() };
+    buf: { mask: new Uint8Array(S.mw * S.mh), mw: S.mw, mh: S.mh, mpx: S.mpx }, before: S.mask.slice(),
+    down: { x: ev.clientX, y: ev.clientY }, maxD: 0, grab: null };
+  // armed (Ctrl held at the pointer-down XOR the latch) and a token under the brush: remember it (a drag will carry it)
+  if ( carryArmed(ev.ctrlKey) ) {
+    const t = tokenAt(p);
+    if ( t ) stroke.grab = { id: t.document.id, x0: t.document.x, y0: t.document.y, w: t.w, h: t.h };
+  }
   paint(p, p);
 }
 
@@ -179,8 +231,11 @@ function paint(a, b) {
 function onMove(ev) {
   if ( !mode ) { cursor?.clear(); return; }
   const p = worldPoint(ev);
+  ctrlDown = ev.ctrlKey;
+  cueToken = !stroke && carryArmed(ctrlDown) ? tokenAt(p) : null;
   drawCursor(p);
   if ( stroke ) {
+    stroke.maxD = Math.max(stroke.maxD, Math.hypot(ev.clientX - stroke.down.x, ev.clientY - stroke.down.y));
     paint(stroke.last, p); stroke.last = p;
     // the stroke's path (scene px, ms since the start), thinned to a point every few pixels
     const q = stroke.path[stroke.path.length - 1];
@@ -197,7 +252,9 @@ function endStroke() {
   const end = s.path[s.path.length - 1];
   if ( end[0] !== s.last.x || end[1] !== s.last.y ) s.path.push([s.last.x, s.last.y, Math.round(performance.now() - s.t0)]);
   const buf = s.buf.mask; for ( let i = 0; i < buf.length; i++ ) if ( buf[i] ) buf[i] = Model.levelOf(buf[i]);
-  host.edited(s.box, { buf, a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type, cause: brush().cause });
+  // a press that began on a token and was dragged carries it (a click is a plain stroke)
+  const carry = s.grab && mode === "paint" && classifyPress(s.maxD, performance.now() - s.t0) === "drag" ? { grab: s.grab, ...carryOptions() } : null;
+  host.edited(s.box, { buf, a: s.first, b: s.last, path: s.path, erase: mode === "erase", type: brush().type, cause: brush().cause, carry });
 }
 
 /** Undo: the last stroke object goes, nothing else changes. */
@@ -227,6 +284,11 @@ export function onCanvasReady() {
   listeners = {
     down: onDown, move: onMove, up: onUp,
     cancel: () => endStroke(),
+    ctl: (e) => {      // Ctrl pressed or let go over the canvas: the carry cue follows (only the cursor; nothing else reads it)
+      if ( e.key !== "Control" || !mode || stroke || ctrlDown === (e.type === "keydown") ) return;
+      ctrlDown = e.type === "keydown";
+      if ( lastPoint ) { cueToken = carryArmed(ctrlDown) ? tokenAt(lastPoint) : null; drawCursor(lastPoint); }
+    },
     pan: () => overlayFilter(),
     leave: () => { cursor?.clear(); lastPoint = null; },
     key: (e) => {
@@ -254,13 +316,14 @@ export function onCanvasReady() {
       }
     }
   };
-  view.addEventListener("pointerdown", listeners.down, true);
+  window.addEventListener("pointerdown", listeners.down, true);
   view.addEventListener("pointermove", listeners.move);
   view.addEventListener("pointerleave", listeners.leave);
   window.addEventListener("pointerup", listeners.up);
   window.addEventListener("pointercancel", listeners.cancel);
   window.addEventListener("blur", listeners.cancel);
   window.addEventListener("keydown", listeners.key, true);
+  window.addEventListener("keydown", listeners.ctl); window.addEventListener("keyup", listeners.ctl);
   listeners.panId = Hooks.on("canvasPan", listeners.pan);
   if ( mode ) buildOverlay();
 }
@@ -268,14 +331,15 @@ export function onCanvasReady() {
 export function teardown() {
   if ( listeners ) {
     const v = canvas.app?.view;
-    v?.removeEventListener("pointerdown", listeners.down, true); v?.removeEventListener("pointermove", listeners.move);
+    window.removeEventListener("pointerdown", listeners.down, true); v?.removeEventListener("pointermove", listeners.move);
     v?.removeEventListener("pointerleave", listeners.leave);
     window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel);
     window.removeEventListener("blur", listeners.cancel); window.removeEventListener("keydown", listeners.key, true);
+    window.removeEventListener("keydown", listeners.ctl); window.removeEventListener("keyup", listeners.ctl);
     Hooks.off("canvasPan", listeners.panId);
     listeners = null;
   }
   destroyOverlay();
   if ( cursor && !cursor.destroyed ) cursor.destroy({ children: true });
-  cursor = null; stroke = null; lastPoint = null; undo.length = 0;
+  cursor = null; stroke = null; lastPoint = null; undo.length = 0; cueToken = null; ctrlDown = false;
 }

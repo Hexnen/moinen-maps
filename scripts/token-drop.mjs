@@ -484,7 +484,10 @@ function startFx(token, kind, c, delay = 0, ready = false, extra = {}) {
 }
 
 /** Is an effect of this file posing the token's mesh right now? (tokens/fx.mjs yields while it is) */
-export const tokenBusy = (token) => BY_TOKEN.has(token);
+const CLAIMED = new Set();         // tokens posed by another file (tokens/carry.mjs): the older effects and the idle rigs leave them alone
+export const claimToken = (token) => CLAIMED.add(token);
+export const releaseToken = (token) => CLAIMED.delete(token);
+export const tokenBusy = (token) => BY_TOKEN.has(token) || CLAIMED.has(token);
 
 function startDrop(token, ready = false) {
   const c = tokenCfg(token.document);
@@ -526,7 +529,7 @@ export function onUpdateToken(doc, changes) {
   const t = doc.object; if ( !t ) return;
   if ( "hidden" in changes && doc.parent?.id === canvas.scene?.id ) return onHiddenChanged(t, doc.hidden);
   const moved = "x" in changes || "y" in changes || "elevation" in changes;
-  if ( !moved ) return;
+  if ( !moved || CLAIMED.has(t) ) return;       // (a carried token's hand-over is not a hop)
   const d = BY_TOKEN.get(t);
   if ( d ) { if ( d.kind === "drop" ) d.end(); return; }        // dragged away while falling: the movement animation takes over
   const c = tokenCfg(doc);

@@ -9,10 +9,10 @@ const MODULE = "moinen-maps";
 export const circle = (cx, cy, r, n) => Array.from({ length: n }, (_, i) => ({ x: cx + r * Math.cos(i / n * 6.283), y: cy + r * Math.sin(i / n * 6.283) }));
 
 /** A stroke through `pts` (scene points) as pointer events on the canvas: down, moves every `dt` ms, up on the window. */
-export async function drive(pts, { dt = 8, button = 0, shift = false } = {}) {
+export async function drive(pts, { dt = 8, button = 0, shift = false, ctrl = false } = {}) {
   const v = canvas.app.view, r = v.getBoundingClientRect();
   const toC = (p) => { const s = canvas.stage.worldTransform.apply(p); return { clientX: r.left + s.x, clientY: r.top + s.y }; };
-  const ev = (t, p) => new PointerEvent(t, { ...toC(p), button, buttons: t === "pointerup" ? 0 : 1, pointerId: 1, isPrimary: true, bubbles: true, cancelable: true, shiftKey: shift });
+  const ev = (t, p) => new PointerEvent(t, { ...toC(p), button, buttons: t === "pointerup" ? 0 : 1, pointerId: 1, isPrimary: true, bubbles: true, cancelable: true, shiftKey: shift, ctrlKey: ctrl });
   const cost = [];
   let t0 = performance.now(); v.dispatchEvent(ev("pointerdown", pts[0])); cost.push(performance.now() - t0);
   for ( const p of pts.slice(1) ) {
