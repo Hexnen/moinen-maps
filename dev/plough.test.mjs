@@ -279,5 +279,58 @@ const rec = (tk, others, extra = {}) => X.ploughRecord({ tk, geo: GEO, carrier: 
   check(X.pendingPosition([{ tk: { ...a.tk, e: 1 } }], "c1") === null && X.pendingPosition([], "c1") === null && X.pendingPosition(null, "c1") === null, "pending: a returning carry moves nobody");
 }
 
+/* ---- 9. the landing warp: the ride ends ON the final, no pop, no glide */
+{
+  const W = C.warpWeight;
+  check(W(-50, 600) === 0 && W(0, 600) === 0 && W(600 * C.WARP_FROM, 600) === 0 && W(600, 600) === 1 && W(5000, 600) === 1, "warp: 0 until it begins, exactly 1 at the end of the run");
+  let mono = true, prev = -1, smooth = true;
+  for ( let el = 0; el <= 600; el += 3 ) { const w = W(el, 600); if ( w < prev - 1e-12 ) mono = false; if ( Math.abs(w - prev) > 0.03 && prev >= 0 ) smooth = false; prev = w; }
+  const e = 1e-3, dEnd = (W(600, 600) - W(600 - e * 600, 600)) / (e * 600), dStart = (W(600 * C.WARP_FROM + e * 600, 600) - W(600 * C.WARP_FROM, 600)) / (e * 600);
+  check(mono && smooth && dEnd < 0.001 && dStart < 0.001, `warp: monotone, smooth, with zero slope at both ends (end ${dEnd.toExponential(1)}, start ${dStart.toExponential(1)} per ms)`);
+  // the ride: raw(t) + w * (final - rawEnd)
+  for ( const delta of [-18, -7, 0, 9, 20] ) {
+    const D = 655, v = 0.6, raw = (t) => 100 + v * Math.min(t, D), fin = raw(D) + delta;
+    const pos = (t) => raw(t) + W(t, D) * delta;
+    let over = true, vmax = 0, jump = 0, p0 = pos(0);
+    for ( let t = 1; t <= D; t++ ) { vmax = Math.max(vmax, Math.abs(pos(t) - pos(t - 1))); if ( pos(t) - fin > 1e-9 ) over = false; }
+    const vEnd = pos(D) - pos(D - 1);
+    check(pos(0) === 100 && Math.abs(pos(D) - fin) < 1e-9 && over && vmax < v * 1.45 && Math.abs(vEnd - v) < 0.02, `warp (final ${delta >= 0 ? "+" : ""}${delta} px from the raw end): starts at the raw start, ends exactly on the final, never overshoots, speed within ${(vmax / v).toFixed(2)}x, end speed ${vEnd.toFixed(3)} = raw ${v}`);
+  }
+  // the pile keeps its order and does not overlap while it is bent toward snapped finals
+  const snap = { grid: 100, gx: 0, gy: 0 };
+  const tk = tkOf([[50, 50, 0], [450, 55, 400], [750, 60, 800]], { x1: 700, y1: 10 });
+  const hits = rec(tk, [tokenAt("A", 400, 55), tokenAt("B", 530, 60), tokenAt("C", 660, 55)], { snap });
+  const tl = tlOf(tk, 1.3), cx0 = tk.x0 + 50, cy0 = tk.y0 + 50, o = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, q = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 };
+  C.displacementAt(tl, 1e9, o);
+  const carrierEnd = [tk.x1 + 50, tk.y1 + 50], rawEnd = [cx0 + o.x, cy0 + o.y];
+  let orderOk = true, clash = false, worst = Infinity;
+  const body_ = (x, y) => B(x, y, 100, 100);
+  const htl = hits.map((h) => ({ h, tl: X.buildHitTimeline(h, { k: 1.3 }) }));
+  for ( let el = 0; el <= tl.D; el += tl.D / 140 ) {
+    const w = C.warpWeight(el, tl.D);
+    C.displacementAt(tl, el, o);
+    const pc = [cx0 + o.x + w * (carrierEnd[0] - rawEnd[0]), cy0 + o.y + w * (carrierEnd[1] - rawEnd[1])];
+    const ps = htl.map(({ h, tl: t }) => { C.displacementAt(t, el, q); return [t.X[0] + q.x + w * ((h.x1 + 50) - t.X[t.n - 1]), t.Y[0] + q.y + w * ((h.y1 + 50) - t.Y[t.n - 1]), el >= t.tt[0]]; });
+    let last = pc[0];
+    for ( const p of ps ) { if ( !p[2] ) continue; if ( p[0] < last - 100 + 22 ) orderOk = false; worst = Math.min(worst, p[0] - last); last = p[0]; }
+    const act = ps.filter((p) => p[2]);
+    for ( let i = 0; i < act.length; i++ ) { if ( X.overlaps(body_(...pc), pc[0], pc[1], body_(act[i][0], act[i][1]), act[i][0], act[i][1], 30) ) clash = true; for ( let j = i + 1; j < act.length; j++ ) if ( X.overlaps(body_(...act[i]), act[i][0], act[i][1], body_(...act[j]), act[j][0], act[j][1], 30) ) clash = true; }
+  }
+  check(hits.length === 3 && orderOk && !clash, `warp: three pushed tokens bent toward snapped finals keep their order and never sink into each other (closest gap ${worst.toFixed(1)}; the bodies are 100 wide)`);
+  const endPos = htl.map(({ h, tl: t }) => { C.displacementAt(t, 1e9, q); return [t.X[0] + q.x + 1 * ((h.x1 + 50) - t.X[t.n - 1]), t.Y[0] + q.y + 1 * ((h.y1 + 50) - t.Y[t.n - 1])]; });
+  check(endPos.every((p, i) => near(p[0], hits[i].x1 + 50, 1e-6) && near(p[1], hits[i].y1 + 50, 1e-6)), "warp: every pushed token's displayed centre at the end IS its document's centre (hand-over changes nothing)");
+}
+
+/* ---- 10. free mode: the raw end */
+{
+  const tk = tkOf([[50, 50, 0], [450, 57, 400], [803, 91, 800]], { x1: 753, y1: 41 });
+  const free = rec(tk, [tokenAt("A", 400, 55), tokenAt("B", 530, 60)]);
+  const t1 = free.map((h) => [h.x1 + 50, h.y1 + 50]), last = free.map((h) => h.p.slice(-3));
+  check(free.length === 2 && free.every((h, i) => Math.abs(t1[i][0] - last[i][0]) <= 1 && Math.abs(t1[i][1] - last[i][1]) <= 1), `free: pushed tokens end at their raw pushed positions (${t1.map((p, i) => Math.round(p[0] - last[i][0]) + "," + Math.round(p[1] - last[i][1]))}), integers`);
+  check(free.every((h) => Number.isInteger(h.x1) && Number.isInteger(h.y1)) && (free[0].x1 % 100 !== 0 || free[0].y1 % 100 !== 0), "free: off the grid");
+  const m = C.makeTk({ grab: { id: "c", x0: 200, y0: 300, w: 100, h: 100 }, a: { x: 500, y: 500 }, b: { x: 683.4, y: 531.7 }, path: [[1, 1, 0], [30, 1, 100], [90, 1, 400]], snap: null });
+  check(m.x1 === 383 && m.y1 === 332, "free: the carried token's final is the raw end rounded to whole pixels (no cell logic)");
+}
+
 console.log(failed ? `${failed} FAILED` : "plough: all ok");
 process.exit(failed ? 1 : 0);

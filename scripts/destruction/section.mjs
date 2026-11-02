@@ -74,6 +74,8 @@ function bar(host, ctx) {
   const quick = (k, icon, label) => `<button type="button" class="mm-ws-toolbtn" data-quick="${k}" aria-pressed="${!!P0()[k]}" aria-label="${esc(T(label))}" data-tooltip="${esc(T(label))}"><i class="${icon}" inert></i></button>`;
   const carryOn = () => !!game.settings.get(MODULE_ID, "destrCarry");
   const carryBtn = `<button type="button" class="mm-ws-toolbtn" data-carry aria-pressed="${carryOn()}" aria-label="${esc(T("Destr.quickCarry"))}" data-tooltip="${esc(T("Destr.quickCarryHint"))}"><i class="fa-solid fa-people-carry-box" inert></i></button>`;
+  const freeOn = () => !!game.settings.get(MODULE_ID, "carryFree");
+  const freeBtn = `<button type="button" class="mm-ws-toolbtn" data-free aria-pressed="${freeOn()}" aria-label="${esc(T("Destr.quickFree"))}" data-tooltip="${esc(T("Destr.quickFreeHint"))}"><i class="fa-solid fa-up-down-left-right" inert></i></button>`;
   const superOn = () => !!game.settings.get(MODULE_ID, "destrSuper");
   const superBtn = `<button type="button" class="mm-ws-toolbtn" data-super aria-pressed="${superOn()}" aria-label="${esc(T("Destr.quickSuper"))}" data-tooltip="${esc(T("Destr.quickSuperHint"))}"><i class="fa-solid fa-mask" inert></i></button>`;
   if ( !mode ) { host.innerHTML = optHint(T("Destr.pickHint")); return; }
@@ -94,12 +96,13 @@ function bar(host, ctx) {
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.causeLabel"))}</span><div class="mm-ws-tools mm-d-causes" role="group" aria-label="${esc(T("Destr.causeLabel"))}">${causes}</div></div>
-      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}</div></div>
+      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}${freeBtn}</div></div>
       <span class="mm-ws-hint mm-d-carryhint"${carryOn() ? "" : " hidden"}>${esc(T("Destr.carryArmedHint"))}</span>
       ${optHint(T("Destr.paintHint"))}`;
   }
   const onClick = (ev) => {
     if ( ev.target.closest("[data-carry]") ) game.settings.set(MODULE_ID, "destrCarry", !carryOn());
+    if ( ev.target.closest("[data-free]") ) game.settings.set(MODULE_ID, "carryFree", !freeOn());
     if ( ev.target.closest("[data-super]") ) game.settings.set(MODULE_ID, "destrSuper", !superOn());
     const lb = ev.target.closest("[data-level]"), tb = ev.target.closest("[data-type]"), qb = ev.target.closest("[data-quick]"), cb = ev.target.closest("[data-cause]");
     if ( qb ) D.setParams({ [qb.dataset.quick]: !P0()[qb.dataset.quick] });
@@ -126,6 +129,7 @@ function bar(host, ctx) {
     const nb = Editor.brush();
     host.querySelector("[data-carry]")?.setAttribute("aria-pressed", String(carryOn()));
     host.querySelector("[data-super]")?.setAttribute("aria-pressed", String(superOn()));
+    host.querySelector("[data-free]")?.setAttribute("aria-pressed", String(freeOn()));
     const ch = host.querySelector(".mm-d-carryhint"); if ( ch ) ch.hidden = !carryOn();
     for ( const x of host.querySelectorAll("[data-level]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.level) === nb.level));
     for ( const x of host.querySelectorAll("[data-type]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.type) === nb.type));
@@ -240,6 +244,7 @@ function mountLook(host) {
     ${optCheck({ name: "c.destrCarry", label: T("Destr.f.carry"), checked: game.settings.get(MODULE_ID, "destrCarry"), hint: T("Destr.h.carry") })}
     ${optCheck({ name: "c.destrSuper", label: T("Destr.f.super"), checked: game.settings.get(MODULE_ID, "destrSuper"), hint: T("Destr.h.super") })}
     ${optSelect({ name: "c.carryEnds", label: T("Destr.carryEnds"), value: game.settings.get(MODULE_ID, "carryEnds"), hint: T("Destr.carryEndsHint"), options: [["real", T("Destr.carryEndsReal")], ["return", T("Destr.carryEndsReturn")]] })}
+    ${optCheck({ name: "c.carryFree", label: T("Destr.f.free"), checked: game.settings.get(MODULE_ID, "carryFree"), hint: T("Destr.h.free") })}
     ${optCheck({ name: "c.carrySnap", label: T("Destr.carrySnap"), checked: game.settings.get(MODULE_ID, "carrySnap"), hint: T("Destr.carrySnapHint") })}
     </div>
     <button type="button" class="mm-ws-btn" data-act="applyLook" data-tooltip="${esc(T("Destr.applyLookHint"))}"><i class="fa-solid fa-paintbrush" inert></i> ${esc(T("Destr.applyLook"))}</button></div>`;

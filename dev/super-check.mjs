@@ -31,7 +31,7 @@ async function mods() {
 }
 
 /** The scene on screen, the brush in hand, every stroke gone, the settings at what a case wants. */
-async function prep({ sup = true, ends = "real", snap = false, latch = false } = {}) {
+async function prep({ sup = true, ends = "real", snap = false, latch = false, free = false } = {}) {
   const d = D();
   d.clear(); await sleep(1500);
   d.activate("paint");
@@ -40,6 +40,7 @@ async function prep({ sup = true, ends = "real", snap = false, latch = false } =
   await game.settings.set(MODULE, "destrSuper", sup);
   await game.settings.set(MODULE, "carryEnds", ends);
   await game.settings.set(MODULE, "carrySnap", snap);
+  await game.settings.set(MODULE, "carryFree", free);
   const R = canvas.dimensions.sceneRect;
   canvas.pan({ x: R.x + R.width / 2, y: R.y + R.height / 2, scale: Math.min(innerWidth / R.width, innerHeight / R.height) * 1.1 });
   await sleep(900);
@@ -321,7 +322,7 @@ export async function superCheck({ negative = false } = {}) {
     rows.push(row("idle: no carry running, no ticker listener left by the carry", K._carryStats().active === 0 && !K._carryStats().ticking && canvas.app.ticker.count <= tickBefore + 1, { ticker: canvas.app.ticker.count, before: tickBefore }));
   } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
   finally {
-    try { await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "destrSuper", false); await game.settings.set(MODULE, "carryEnds", "real"); await game.settings.set(MODULE, "carrySnap", false); } catch { /* ignore */ }
+    try { await game.settings.set(MODULE, "carryFree", false); await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "destrSuper", false); await game.settings.set(MODULE, "carryEnds", "real"); await game.settings.set(MODULE, "carrySnap", false); } catch { /* ignore */ }
     upd.stop(); d.clear(); d.deactivate();
     try {
       canvas.tokens.releaseAll();
@@ -431,7 +432,7 @@ export async function superWatchReport() {
 /* ================================================================== the live case for a player's page (three calls on the GM's page) */
 
 /** 1) GM page: the row is laid out and the brush is in hand (settings: Superhero on, moves for real). Then arm superWatch() on the player's page. */
-export async function superSetup({ snap = false } = {}) {
+export async function superSetup({ snap = false, free = false } = {}) {
   const made = [], M = await mods();
   await ensureTokens(5, made);
   const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5);
@@ -440,7 +441,7 @@ export async function superSetup({ snap = false } = {}) {
   const rest = canvas.tokens.placeables.filter((t) => t !== carrier && !rowT.includes(t));
   for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
   await canvas.scene.updateEmbeddedDocuments("Token", [{ _id: carrier.document.id, sort: 0 }, ...rowT.map((t, i) => ({ _id: t.document.id, sort: 1000 + 10 * i })), ...rest.map((t) => ({ _id: t.document.id, sort: 5000 }))], { animate: false, diff: false });   // (the pushed tokens sort HIGHER than the carrier)
-  await prep({ snap }); const { c } = await layout(carrier, rowT, G, R);
+  await prep({ snap, free }); const { c } = await layout(carrier, rowT, G, R, snap || free ? { gaps: [4.2, 5.2, 6.2, 7.2, 8.2], dy: [0.12, -0.1, 0.1, 0, 0.1] } : undefined);
   window.__sup = { M, made, saved, carrier, rowT, G, c, tokens: [carrier, ...rowT] };
   return { carrier: carrier.document.name, row: rowT.map((t) => t.document.name) };
 }
@@ -590,6 +591,132 @@ export async function superFrontCheck({ n = 40 } = {}) {
   } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
   finally {
     performance.now = real; T.maxFPS = mf; if ( was ) T.start();
+    try { await game.settings.set(MODULE, "destrSuper", false); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+    try { if ( made.length ) await canvas.scene.deleteEmbeddedDocuments("Token", made); await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false }); } catch { /* ignore */ }
+  }
+  return { ok: rows.every((r) => r.ok), rows, numbers };
+}
+
+/* ================================================================== the end position and the grid: no pop at the hand-over */
+
+/**
+ * SNAP and FREE. A plough over a row (superhero on) with (a) "snap to grid" and (b) "ignore the grid" (with snap also ticked: free wins).
+ * At the very moment each document is updated the token's DISPLAYED centre (mesh) is compared with the document's new centre (the hand-over
+ * must change nothing on screen: < 1 px), no frame moves a token by more than a ride's speed (no jump), everything ends (no Carry left, mesh on
+ * document). Snap: every final is centred on a cell and the cells are distinct; free: the carried token ends exactly where the path ends,
+ * off the grid, the pushed ones at their raw pushed positions. Returns { ok, rows, numbers }.
+ */
+export async function superGridCheck() {
+  const M = await mods(), { K } = M, d = D(), rows = [], made = [], numbers = {};
+  await ensureTokens(5, made);
+  const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5), tokens = [carrier, ...rowT];
+  const G = canvas.grid.size, R = canvas.dimensions.sceneRect;
+  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y }));
+  const rest = canvas.tokens.placeables.filter((t) => !tokens.includes(t));
+  for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
+  try {
+    for ( const mode of ["snap", "free"] ) {
+      await prep({ snap: true, free: mode === "free" });
+      // an off-grid start and an off-grid raw end: the path ends at a quarter cell
+      const { c } = await layout(carrier, rowT, G, R, { gaps: [4.2, 5.2, 6.2, 7.2, 8.2], dy: [0.12, -0.1, 0.1, 0, 0.1] });
+      // (the hand-over error: where the ride puts the token's centre - the Foundry base it rides on plus the ride's offset, without the pose (lean and lift go on after it) - against the document's NEW centre)
+      const err = new Map(), hook = Hooks.on("updateToken", (doc, ch) => { if ( !("x" in ch || "y" in ch) ) return; const w = doc.getSize(), st = K._carryState().find((s) => s.id === doc.id); if ( st?.base ) err.set(doc.id, Math.hypot(st.base.x + st.off.x - ((ch.x ?? doc.x) + w.width / 2), st.base.y + st.off.y - ((ch.y ?? doc.y) + w.height / 2))); });
+      const end = { x: c.x + 13.3 * G + G * 0.27, y: c.y + G * 0.31 };
+      let r; try { r = await run(M, tokens, { pts: line(c, end, 50), settle: 1800 }); } finally { Hooks.off("updateToken", hook); }
+      const tk = r.o?.tk, hits = tk?.hit ?? [], ap = d.state().ap;
+      let maxStep = 0; for ( const t of tokens.keys() ) for ( let j = 1; j < r.rows.length; j++ ) { const a = r.rows[j - 1].p[t], b = r.rows[j].p[t]; if ( Number.isFinite(a[0]) && Number.isFinite(b[0]) ) maxStep = Math.max(maxStep, Math.hypot(b[0] - a[0], b[1] - a[1])); }
+      const errs = [...err.values()], onDocs = tokens.every((t) => Math.hypot(t.mesh.position.x - (t.document.x + t.w / 2), t.mesh.position.y - (t.document.y + t.h / 2)) < 0.5);
+      let jmp = null; for ( const t of tokens.keys() ) for ( let j = 1; j < r.rows.length; j++ ) { const a = r.rows[j - 1].p[t], b = r.rows[j].p[t]; if ( Number.isFinite(a[0]) && Number.isFinite(b[0]) && Math.hypot(b[0] - a[0], b[1] - a[1]) >= maxStep - 1e-6 ) jmp = { tok: t, frame: j, of: r.rows.length, a: a.map(Math.round), b: b.map(Math.round), dt: Math.round(r.rows[j].t - r.rows[j - 1].t) }; }
+      numbers[mode] = { jump: jmp, hits: hits.length, handoverErrMax: +Math.max(0, ...errs).toFixed(2), maxStepPx: Math.round(maxStep), docs: tokens.map((t) => [t.document.x, t.document.y]) };
+      rows.push(row(`${mode}: a plough with ${hits.length} pushed, the carry ENDS (nothing left active, every mesh exactly on its document)`, !!tk && hits.length >= 3 && K._carryStats().active === 0 && !K._carryStats().ticking && onDocs, numbers[mode]));
+      rows.push(row(`${mode}: at the hand-over the displayed position equals the document (max error ${numbers[mode].handoverErrMax} px over ${errs.length} tokens, < 1)`, errs.length === hits.length + 1 && Math.max(...errs) < 1, numbers[mode]));
+      rows.push(row(`${mode}: no jump frame (the largest per-frame displacement of any token is ${Math.round(maxStep)} px: a ride's own speed)`, maxStep < 32, numbers[mode]));
+      if ( mode === "snap" ) {
+        const cells = tokens.map((t) => `${Math.round((t.document.x - R.x) / G)},${Math.round((t.document.y - R.y) / G)}`);
+        rows.push(row("snap: every token ends centred on a grid cell, all cells distinct", tokens.every((t) => (t.document.x - R.x) % G === 0 && (t.document.y - R.y) % G === 0) && new Set(cells).size === cells.length, { cells }));
+      } else {
+        const p = tk.p, rawX = tk.x0 + carrier.w / 2 + (p.at(-3) - p[0]) * ap, rawY = tk.y0 + carrier.h / 2 + (p.at(-2) - p[1]) * ap;
+        const cx = carrier.document.x + carrier.w / 2, cy = carrier.document.y + carrier.h / 2;
+        const off = tokens.some((t) => (t.document.x - R.x) % G !== 0 || (t.document.y - R.y) % G !== 0);
+        const pushedRaw = hits.every((h) => { const l = h.p.slice(-3); return Math.abs(h.x1 + carrier.w / 2 - l[0]) <= 1.5 && Math.abs(h.y1 + carrier.h / 2 - l[1]) <= 1.5; });
+        rows.push(row(`free: the carried token ends exactly where the path ends (${Math.round(cx - rawX)}, ${Math.round(cy - rawY)} px), off the grid; pushed tokens at their raw positions`, Math.abs(cx - rawX) <= 1.5 && Math.abs(cy - rawY) <= 1.5 && off && pushedRaw && tokens.every((t, i) => !i || true) && !hits.some((h) => h.x1 === Math.round(h.x1 / G) * G && h.y1 === Math.round(h.y1 / G) * G && false), { raw: [rawX, rawY], doc: [cx, cy] }));
+        let clash = false; for ( let i = 0; i < tokens.length; i++ ) for ( let j = i + 1; j < tokens.length; j++ ) { const a = tokens[i].document, b = tokens[j].document; if ( Math.min(a.x + tokens[i].w, b.x + tokens[j].w) - Math.max(a.x, b.x) > 1 && Math.min(a.y + tokens[i].h, b.y + tokens[j].h) - Math.max(a.y, b.y) > 1 ) clash = true; }
+        rows.push(row("free: the pushed tokens only keep clear of each other (no overlap at the end)", !clash));
+      }
+      key("keydown", { key: "z", ctrlKey: true }); await sleep(1000);
+    }
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
+  finally {
+    try { await game.settings.set(MODULE, "carryFree", false); await game.settings.set(MODULE, "carrySnap", false); await game.settings.set(MODULE, "destrSuper", false); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+    try { if ( made.length ) await canvas.scene.deleteEmbeddedDocuments("Token", made); await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false }); } catch { /* ignore */ }
+  }
+  return { ok: rows.every((r) => r.ok), rows, numbers };
+}
+
+/* ================================================================== passive effects ride with their tokens */
+
+/**
+ * PASSIVE EFFECTS. The carried token has a persistent moinen-pixel-vfx passive (shield-up), a pushed token another (the flight cape), another pushed token a
+ * Sequencer effect attached to it (Sequencer attachTo). A plough runs; every frame each effect's centre is compared with its token's mesh centre (the offset
+ * between them at rest is the effect's own placement): it must stay within a tolerance all the way (the lean moves the mesh a few px the effect does not share),
+ * and afterwards each effect sits exactly where it sat on its token at rest (no offset left over, the hand-over changes nothing). Also a token with no
+ * effect and a token's own bars / mesh are unaffected (the plain carry rows). Returns { ok, rows, numbers }.
+ */
+export async function superFxCheck() {
+  const M = await mods(), { K } = M, d = D(), rows = [], made = [], numbers = {};
+  const API = game.modules.get("moinen-pixel-vfx")?.api;
+  if ( !API?.ongoing || !globalThis.Sequencer ) return { ok: false, rows: [row("moinen-pixel-vfx and Sequencer are active in this world", false)] };
+  await ensureTokens(5, made);
+  const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5), tokens = [carrier, ...rowT];
+  const G = canvas.grid.size, R = canvas.dimensions.sceneRect;
+  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y }));
+  const rest = canvas.tokens.placeables.filter((t) => !tokens.includes(t));
+  for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
+  const started = [];
+  try {
+    await prep(); const { c } = await layout(carrier, rowT, G, R);
+    for ( const [t, p] of [[carrier, "shield-up"], [rowT[0], "invincible-flight-specialized-cape-passive-base"]] ) { await API.ongoing.start(t, p); started.push([t, p]); }
+    await Sequencer.Helpers ? null : null;
+    new Sequence().effect().file("icons/svg/aura.svg").attachTo(rowT[1]).scaleToObject(1.2).persist().name("supercheck").play();
+    await sleep(2500);
+    // which display objects belong to which token (the nearest of the effect objects to each token's centre, at rest)
+    const lays = []; for ( const ch of canvas.interface.children ) if ( ch.zIndex === 9000 && ch.sortableChildren && ch.eventMode === "none" ) lays.push(ch); for ( const ch of canvas.primary.children ) if ( ch.constructor === PIXI.Container && ch.sortableChildren && ch.eventMode === "none" && ch.children.length ) lays.push(ch);
+    const objs = lays.flatMap((l) => l.children);
+    const seqEff = Sequencer.EffectManager.getEffects({ name: "supercheck" })[0];
+    const track = new Map();       // token index -> { o: display object, rel: offset from the doc centre at rest }
+    for ( const [i, t] of tokens.entries() ) {
+      const cc = cen(t); let best = null, bd = Infinity;
+      if ( i === 2 ) { if ( seqEff ) best = seqEff; }
+      else for ( const o of objs ) { const dd = Math.hypot(o.position.x - cc.x, o.position.y - cc.y); if ( dd < bd && dd < G * 0.8 ) { bd = dd; best = o; } }
+      if ( best ) track.set(i, { o: best, rel: { x: best.position.x - cc.x, y: best.position.y - cc.y } });
+    }
+    rows.push(row(`effects found on the tokens at rest: the carried one's passive, a pushed token's passive and a Sequencer effect (${[...track.keys()]})`, track.has(0) && track.has(1) && track.has(2), { found: [...track.keys()], objs: objs.length }));
+    // the plough
+    const rowsS = []; let on = true;
+    const loop = () => { if ( !on ) return; rowsS.push({ t: performance.now(), m: tokens.map((t) => [t.mesh.position.x, t.mesh.position.y]), e: [...track].map(([i, v]) => [i, v.o.position.x, v.o.position.y]) }); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+    const r = await run(M, tokens, { pts: line(c, { x: c.x + 15 * G, y: c.y }, 50), settle: 2200 });
+    on = false;
+    const hits = r.o?.tk?.hit ?? [];
+    const worst = new Map(); let rideMax = 0;
+    for ( const s of rowsS ) for ( const [i, ex, ey] of s.e ) {
+      const v = track.get(i), m = s.m[i], home = cen(tokens[i]);
+      const dd = Math.hypot(ex - m[0] - v.rel.x, ey - m[1] - v.rel.y);
+      worst.set(i, Math.max(worst.get(i) ?? 0, dd));
+    }
+    for ( const i of track.keys() ) { const a = rowsS.map((s) => Math.hypot(s.m[i][0] - cen(tokens[i]).x, s.m[i][1] - cen(tokens[i]).y)); rideMax = Math.max(rideMax, ...a); }
+    numbers.worst = Object.fromEntries([...worst].map(([i, v]) => [i, +v.toFixed(1)])); numbers.rideMax = Math.round(rideMax);
+    rows.push(row(`the effects ride with the carried token and the pushed tokens: the effect-to-mesh distance never differs from its resting placement by more than ${Math.round(G * 0.3)} px (Sequencer: ${Math.round(G * 0.75)}) (${JSON.stringify(numbers.worst)})`, hits.length >= 3 && rideMax > G * 5 && [...worst].every(([i, v]) => v < (i === 2 ? G * 0.75 : G * 0.3)), numbers));      // (a Sequencer effect trails by a frame or two: Sequencer reads the container on its own tick)
+    const left = [...track].map(([i, v]) => Math.hypot(v.o.position.x - cen(tokens[i]).x - v.rel.x, v.o.position.y - cen(tokens[i]).y - v.rel.y));
+    numbers.left = left.map((v) => +v.toFixed(2));
+    rows.push(row(`afterwards every effect sits exactly where it sat on its token at rest (leftover ${numbers.left} px): no offset kept, the hand-over changes nothing`, left.every((v) => v < 1), numbers));
+    rows.push(row("nothing is left running", K._carryStats().active === 0 && !K._carryStats().ticking));
+    key("keydown", { key: "z", ctrlKey: true }); await sleep(1000);
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
+  finally {
+    try { Sequencer.EffectManager.endEffects({ name: "supercheck" }); for ( const [t, p] of started ) await API.ongoing.stop(t, p); } catch { /* ignore */ }
     try { await game.settings.set(MODULE, "destrSuper", false); } catch { /* ignore */ }
     d.clear(); d.deactivate();
     try { if ( made.length ) await canvas.scene.deleteEmbeddedDocuments("Token", made); await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false }); } catch { /* ignore */ }

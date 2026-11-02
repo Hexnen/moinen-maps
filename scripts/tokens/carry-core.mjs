@@ -143,6 +143,17 @@ export function weightAt(el, D, mode, arrived, waited = 0) {
 }
 
 /**
+ * THE LANDING WARP: the recorded final (snapped to a cell, resolved off a neighbour, or simply the raw end rounded) generally lies a little off the
+ * raw path end. Instead of gliding there after the ride (and so popping or crawling at the hand-over), the whole ride is bent toward it: the displayed
+ * centre is the path's own position plus `warpWeight` of (final - raw end), a smooth ease over the last 40 % of the run that is 0 (with 0 slope)
+ * before it and exactly 1 (with 0 slope) at the end. So the ride ends ON the final with the path's own velocity (the warp adds none at its ends),
+ * the document's hand-over changes nothing on screen, and the same warp applies to the carrier and to every pushed token (their shifts are under half
+ * a cell, so the pile keeps its order). Applied at playback from (raw path, recorded final): every client computes the same, nothing is stored.
+ */
+export const WARP_FROM = 0.6;
+export const warpWeight = (el, D) => D > 0 ? ease((el / D - WARP_FROM) / (1 - WARP_FROM)) : 1;
+
+/**
  * The offset of a carried (or pushed) token from where Foundry has it, at `o.now` / `o.el` (the carrier's clock), written into `out` { x, y, w, done }.
  * `st` { waitFrom, arrivedAt } is the hand-over's state (kept by the caller). `o`: { now, el, D (the carrier's run), mode, bx, by (where Foundry has the
  * token's centre now), tx, ty (where the document is going to be: the RECORDED final, snapped or not), c0x, c0y (the grab / contact centre), dx, dy

@@ -39,6 +39,8 @@ export function registerEditorSettings(onChange) {
   game.settings.register(MODULE_ID, "destrCarry", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
   // SUPERHERO: the carried token ploughs through the tokens on its way (tokens/plough-core.mjs); only together with a carry
   game.settings.register(MODULE_ID, "destrSuper", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
+  // ignore the grid altogether: the token ends exactly where the path ends (beats "snap to grid")
+  game.settings.register(MODULE_ID, "carryFree", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
   game.settings.register(MODULE_ID, "carryEnds", { name: "MOINENMAPS.Destr.carryEnds", hint: "MOINENMAPS.Destr.carryEndsHint", scope: "client", config: true, type: String, default: "real",
     choices: { real: "MOINENMAPS.Destr.carryEndsReal", return: "MOINENMAPS.Destr.carryEndsReturn" }, onChange: f });
   game.settings.register(MODULE_ID, "carrySnap", { name: "MOINENMAPS.Destr.carrySnap", hint: "MOINENMAPS.Destr.carrySnapHint", scope: "client", config: true, type: Boolean, default: false, onChange: f });
@@ -46,7 +48,7 @@ export function registerEditorSettings(onChange) {
 
 /** Is carrying armed for a stroke that begins with Ctrl `ctrl`? The latch XOR Ctrl; only in the paint tool. */
 export const carryArmed = (ctrl, m = mode) => m === "paint" && (!!opt("destrCarry", false) !== !!ctrl);
-export const carryOptions = () => ({ ends: opt("carryEnds", "real") === "return" ? "return" : "real", snap: !!opt("carrySnap", false), superhero: !!opt("destrSuper", false) });
+export const carryOptions = () => ({ ends: opt("carryEnds", "real") === "return" ? "return" : "real", snap: !!opt("carrySnap", false) && !opt("carryFree", false), free: !!opt("carryFree", false), superhero: !!opt("destrSuper", false) });
 
 /** The token under a scene point (the topmost one this client sees and that is not locked), or null. Reuses its rows. */
 const rows = [];

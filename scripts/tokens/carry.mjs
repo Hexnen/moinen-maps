@@ -27,6 +27,7 @@ import { Emitter, artPx } from "./pixels.mjs";
 import { tokenFxOn } from "./settings.mjs";
 import * as C from "./carry-core.mjs";
 import * as X from "./plough-core.mjs";
+import * as Fx from "./carry-fx.mjs";
 import * as Front from "./carry-front.mjs";
 const FRONT_GRACE_MS = 300;    // the token stays in front at least this long after its carry ends, and until the stroke's entry has ended (Front.release)
 
@@ -46,12 +47,25 @@ export const predicted = (id) => X.pendingPosition(pendingList(), id);
 const stats = { played: 0, moved: 0, visual: 0, skipped: 0, unmoved: 0, pushed: 0 };
 let ticking = false;
 
+let others = [], othersAt = 0;
+/** The passive effects of the tokens that ride go with them (carry-fx.mjs): after every other listener of the frame (this one runs late), once the offsets are fresh. */
+function followFx() {
+  const riders = [];
+  for ( const c of ACTIVE.values() ) if ( c.visual && !c.dead && c.base ) { const d = c.doc; riders.push({ id: d.id, cx: d.x + c.W / 2, cy: d.y + c.H / 2, r: Math.max(c.W, c.H), ox: c.off.x, oy: c.off.y, lift: c.lift ?? 0 }); }
+  if ( !riders.length ) return;
+  if ( !others.length || (othersAt++ % 15) === 0 ) {
+    others = []; for ( const t of canvas.tokens?.placeables ?? [] ) { const d = t.document; if ( d && !t.destroyed ) others.push({ id: d.id, cx: d.x + t.w / 2, cy: d.y + t.h / 2, r: Math.max(t.w, t.h) }); }
+  }
+  const ids = new Set(riders.map((r) => r.id));
+  Fx.follow(riders.map((r) => ({ ...r, x: r.cx, y: r.cy })), others.filter((o) => !ids.has(o.id)).map((o) => ({ ...o, x: o.cx, y: o.cy })));
+}
 function tick(frames) {
   const dt = Math.min(frames / 60, 0.05), now = performance.now();
   for ( const c of ACTIVE.values() ) c.update(dt, now);          // (a carry that ends deletes itself: safe while iterating a Map)
+  try { followFx(); } catch ( err ) { dbg("carry fx", err); }
   if ( !ACTIVE.size ) { canvas.app?.ticker?.remove(tick); ticking = false; }
 }
-function startTicker() { if ( !ticking && canvas.app?.ticker ) { canvas.app.ticker.add(tick); ticking = true; } }
+function startTicker() { if ( !ticking && canvas.app?.ticker ) { canvas.app.ticker.add(tick, undefined, -10); ticking = true; } }       // (late: after the effects' own listeners, before the render at -25)
 
 function sortNextTo(obj, token, step) {
   const m = token.mesh;
@@ -87,6 +101,8 @@ class Carry {
     const fin = this.hit ?? this.tk;
     this.tx = fin.x1 + width / 2; this.ty = fin.y1 + height / 2;
     this.st = { waitFrom: 0, arrivedAt: 0 };
+    // the landing warp (carry-core warpWeight): the ride is bent so that it ends exactly on the recorded final (a returning token never goes there)
+    this.wx = this.tk.e ? 0 : this.tx - (this.C0x + o.tl.dx); this.wy = this.tk.e ? 0 : this.ty - (this.C0y + o.tl.dy);
     this.D = o.D ?? o.tl.D;                                 // the CARRIER's run (the hand-over clock of everyone)
     this.tOff = this.hit ? o.tl.tt[0] : 0;                  // the moment this body's own run begins
     this.Dl = o.tl.tt[n - 1] - this.tOff;                   // ... and how long it lasts
@@ -147,6 +163,7 @@ class Carry {
     if ( !this.visual ) return el < D + 400;
     const b = this.base; if ( !b ) return true;
     C.displacementAt(tl, el, D_);                           // (a pushed token's timeline is on the carrier's clock: it holds before the contact)
+    const ww = C.warpWeight(el, D); D_.x += ww * this.wx; D_.y += ww * this.wy;
     C.poseAt(le, this.Dl, D_, this.S, P_);
     if ( this.hit && P_.k ) { P_.rot = P_.rot * 1.35 + 0.05 * D_.sp * Math.sin(le * 0.04 + this.ph); P_.sx *= 1 + 0.03 * D_.sp * Math.sin(le * 0.05 + this.ph * 2); }   // knocked: leans harder, shivers
     // the token is where the front is (the displacement), plus what lies between where it was grabbed and where it really is (blended in
@@ -172,6 +189,7 @@ class Carry {
     m.scale.set(b.sx * sx, b.sy * sy);
     m.rotation = b.rot + p.rot;
     t.position.set(b.cx + o.x, b.cy + o.y + p.lift);
+    this.lift = p.lift;
   }
 
   /** Puffs at lift-off and landing, dust behind it while it flies (not in performance mode Low, not for a token this client cannot see). */
@@ -326,4 +344,4 @@ export function registerCarry() {
 }
 
 export const _carryStats = () => ({ ...stats, active: ACTIVE.size, ticking });
-export const _carryState = () => [...ACTIVE.values()].map((c) => ({ id: c.doc.id, objId: c.objId, el: Math.round(c.lastEl), off: { ...c.off }, moved: c.moved, real: c.real, visual: c.visual, mode: c.mode, D: Math.round(c.D), hit: !!c.hit, pushed: c.pushed.length }));
+export const _carryState = () => [...ACTIVE.values()].map((c) => ({ id: c.doc.id, objId: c.objId, el: Math.round(c.lastEl), off: { ...c.off }, base: c.base ? { x: c.base.px, y: c.base.py } : null, moved: c.moved, real: c.real, visual: c.visual, mode: c.mode, D: Math.round(c.D), hit: !!c.hit, pushed: c.pushed.length }));

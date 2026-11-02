@@ -263,5 +263,16 @@ check(C.buildTimeline(null) === null, "timeline: no record, no timeline");
   check(C.weightAt(D + 400000, D, "real", false, 400000).done, "weight: a huge wait (the old stuck state: waited grows as fast as the time) is done");
 }
 
+/* ---- 8. the passive effects that ride (carry-fx.mjs: the probe and the owner) */
+{
+  const F = await imp("scripts/tokens/carry-fx.mjs");
+  const p0 = { x: 100, y: 50 };
+  check(F.wasReset(p0, { x: 100, y: 50 }) === true && F.wasReset(p0, { x: 100 + F.PROBE, y: 50 }) === false && F.wasReset(p0, { x: 100 + F.PROBE + 0.01, y: 50 }) === false && F.wasReset(p0, { x: 103, y: 52 }) === true, "fx probe: a sprite its owner put back (or moved) is attached; one still where the nudge left it is static");
+  const cs = [{ x: 100, y: 100, r: 100 }, { x: 200, y: 100, r: 100 }];
+  check(F.ownerOf(110, 100, cs) === 0 && F.ownerOf(190, 105, cs) === 1 && F.ownerOf(150, 100, cs) >= 0 && F.ownerOf(900, 900, cs) === -1 && F.ownerOf(1, 1, []) === -1, "fx owner: the nearest token within reach, none far away");
+  check(F.ownerOf(160, 100, [{ x: 100, y: 100, r: 100 }]) === 0 && F.ownerOf(300, 100, [{ x: 100, y: 100, r: 100 }]) === -1, "fx owner: the reach is in token sizes");
+  check(F.follow([], []) === 0, "fx: no riders, no work (and no layers needed)");
+}
+
 console.log(failed ? `${failed} FAILED` : "carry: all ok");
 process.exit(failed ? 1 : 0);

@@ -1762,7 +1762,7 @@ export function edited(box, stroke = null) {
 /** The `tk` of a stroke that was dragged from a token: where the token starts and ends, the path in art px (thinned). */
 function carryRecord(stroke) {
   const pts = stroke.path?.length > 1 ? simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; })) : null;
-  const { snap, ends, superhero } = stroke.carry, r = Model.sceneRect();
+  const { ends, superhero } = stroke.carry, snap = stroke.carry.snap && !stroke.carry.free, r = Model.sceneRect();      // ("ignore the grid" beats snapping)
   // a token an earlier stroke is still about to carry (its bake has not finished): it is grabbed (and ploughs, and is ploughed) where that stroke puts it
   const pp = Carry.predicted(stroke.carry.grab.id), grab = pp ? { ...stroke.carry.grab, x0: pp.x, y0: pp.y } : stroke.carry.grab;
   const snapFn = snap ? (x, y, w, h) => { const c = canvas.grid.getSnappedPoint({ x: x + w / 2, y: y + h / 2 }, { mode: CONST.GRID_SNAPPING_MODES.CENTER }); return [c.x - w / 2, c.y - h / 2]; } : null;
