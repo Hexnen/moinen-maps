@@ -269,14 +269,14 @@ export async function abOld(oldUrl, times = [0, 60, 120, 300, 600, 1000, 1600, 2
  * (CONFIG.moinenMaps.noBatchRender = true) and then batched (piece-batch.mjs); the destruction layer grabbed at each time (ms after
  * the start). `only(g)` picks the areas that enter (default: all, a whole-scene Detonate); `preMat` makes every piece at once in both
  * runs (the sprite path makes 2500 per frame: without it the comparison would include that lag); `opts(g)` entry options per area.
- * `pair` the two modes (true = sprites). Math.random is seeded alike in both runs (without it two sprite runs differ by a few hundred
+ * `pair` the two modes (true = the flag set; `key` the CONFIG.moinenMaps flag, default noBatchRender: true = sprites; noGpuErode: true = CPU erode). Math.random is seeded alike in both runs (without it two sprite runs differ by a few hundred
  * pixels: random debris and rubble).
  * Flood water hidden (it loops on its own clock). Returns per time [ms, mean |d| per channel... per pixel, max, channels off by more
  * than 8, pixels that differ at all] and `shots` (the two frames per time, RGBA) when `keep`.
  */
-export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400, 3600], only = null, preMat = true, opts = null, keep = false, pair = [true, false] } = {}) {
+export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400, 3600], only = null, preMat = true, opts = null, keep = false, pair = [true, false], key = "noBatchRender" } = {}) {
   const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance);
-  CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache, wasB = CONFIG.moinenMaps.noBatchRender, wasW = CONFIG.moinenMaps.noClockWorker;
+  CONFIG.moinenMaps ??= {}; const was = CONFIG.moinenMaps.noDestructionCache, wasB = CONFIG.moinenMaps[key], wasE = CONFIG.moinenMaps.erodeBudget, wasW = CONFIG.moinenMaps.noClockWorker;
   CONFIG.moinenMaps.noDestructionCache = true; const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
   // (the clocks made on the page: a frozen clock never lets the workers' answers in; clockCheck() compares the two)
   CONFIG.moinenMaps.noClockWorker = true;
@@ -286,7 +286,7 @@ export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400,
   // every area back to its resting state with no pieces made (the next run makes them in its own mode)
   const reset = () => { for ( const g of d.order ) { if ( g.anim ) d.endAnim(g); if ( !g.flat && !d.flatten(g) ) { d.release(g); g.made = 0; } } };
   const run = (sprites) => {
-    CONFIG.moinenMaps.noBatchRender = sprites;
+    CONFIG.moinenMaps[key] = sprites; CONFIG.moinenMaps.erodeBudget = 1e9;   // (no catching-up lag in the CPU erode)
     // Math.random seeded the same in both runs (particles, debris, rubble): the two runs differ only by the renderer
     let seed = 12345; Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     let F = real(); performance.now = () => F;
@@ -306,7 +306,7 @@ export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400,
   };
   let a, b; const rnd = Math.random;
   try { a = run(pair[0]); b = run(pair[1]); reset(); }
-  finally { Math.random = rnd; performance.now = real; CONFIG.moinenMaps.noBatchRender = wasB; CONFIG.moinenMaps.noClockWorker = wasW; ws.forEach((w) => { w.visible = true; }); CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start(); }
+  finally { Math.random = rnd; performance.now = real; CONFIG.moinenMaps[key] = wasB; CONFIG.moinenMaps.erodeBudget = wasE; CONFIG.moinenMaps.noClockWorker = wasW; ws.forEach((w) => { w.visible = true; }); CONFIG.moinenMaps.noDestructionCache = was; T.maxFPS = mf; if ( st ) T.start(); }
   const rows = times.map((dt, k) => {
     const x = a.shots[k], y = b.shots[k]; let s = 0, m = 0, bad = 0, px = 0;
     for ( let i = 0; i < x.length; i += 4 ) {
@@ -317,6 +317,72 @@ export async function abBatch({ times = [0, 60, 120, 300, 600, 1000, 1600, 2400,
     return [dt, +(s / (x.length / 4)).toFixed(3), m, bad, px];
   });
   return { areas: groups.length, sprite: a.info, batch: b.info, rows, shots: keep ? { a: a.shots, b: b.shots } : undefined };
+}
+
+/**
+ * GPU ERODE CHECK (frozen clock): every area enters (a local Detonate, clocks made on the page); at each time (ms after the start) the
+ * ruin's render texture (the GPU erode, erode-gpu.mjs) is read back and compared, pixel by pixel, with the CPU erode run on a shadow
+ * buffer over the very same clock (display.erode on a stand-in group, unlimited pixel budget, no particles). A pixel is a mismatch
+ * when an opaque pixel's rgba differs at all, or a translucent one's differs by more than 1 (the browser premultiplied it on upload).
+ * Returns { areas, rows: [[ms, areas compared, pixels compared, mismatches, worst area's mismatches]] }; all 0 is a pass.
+ */
+export async function erodeGpuCheck({ times = [0, 40, 90, 150, 250, 400, 600, 900, 1300, 2000, 3000], only = null, samples = 0 } = {}) {
+  const SM = [];
+  const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance), R = canvas.app.renderer;
+  CONFIG.moinenMaps ??= {}; const was = [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuErode];
+  CONFIG.moinenMaps.noDestructionCache = true; CONFIG.moinenMaps.noClockWorker = true; CONFIG.moinenMaps.noGpuErode = false;
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  let F = real(); performance.now = () => F;
+  const rows = [];
+  try {
+    for ( const g of d.order ) { if ( g.anim ) d.endAnim(g); if ( !g.flat && !d.flatten(g) ) { d.release(g); g.made = 0; } }
+    T.update(F);
+    const start = F + 5, groups = only ? d.order.filter(only) : [...d.order];
+    for ( const g of groups ) d.enter(g, { start });
+    for ( const g of d.order ) d.materialize(g, Infinity);
+    for ( const g of groups ) if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0);
+    for ( let i = 0; i < 400 && d.clocks.length; i++ ) { F += 0.01; T.update(F); }
+    const live = groups.filter((g) => g.anim?.rev?.gpu && g.anim.rev.keys);
+    // the shadow CPU buffers
+    const sh = new Map();
+    for ( const g of live ) {
+      const r = g.anim.rev, w = r.w, h = r.h;
+      sh.set(g, { rev: { keys: r.keys, tms: r.tms, next: 0, buf: new Uint8Array(w * h * 4), data: r.data, w, stages: r.stages, cur: new Int32Array(r.stages.length), tex: { resource: { mark() {} }, update() {} } }, start: g.anim.start });
+    }
+    const fake = { info: null, baseSpr: null, batch: null };
+    for ( const dt of times ) {
+      F = start + dt; T.update(F);
+      let areas = 0, px = 0, bad = 0, worst = 0;
+      for ( const g of live ) {
+        const r = g.anim?.rev; if ( !r?.gpu || !r.rt ) continue;
+        const s = sh.get(g);
+        fake.info = g.info;
+        d.erode.call(d, fake, { start: s.start, type: g.anim.type, rev: s.rev, cl: null, k: g.anim.k }, F, false, Infinity);
+        const gpu = R.extract.pixels(r.rt), cpu = s.rev.buf; let b = 0;
+        for ( let i = 0; i < cpu.length; i += 4 ) {
+          const a = cpu[i + 3];
+          if ( a === 255 || a === 0 ) { if ( gpu[i] !== cpu[i] || gpu[i + 1] !== cpu[i + 1] || gpu[i + 2] !== cpu[i + 2] || gpu[i + 3] !== a ) { if ( !(a === 0 && gpu[i + 3] === 0) ) { b++; if ( SM.length < samples ) SM.push({ dt, hash: g.hash, type: g.anim.type, px: i / 4, cpu: [...cpu.subarray(i, i + 4)], gpu: [...gpu.subarray(i, i + 4)], data: [...s.rev.data.subarray(i, i + 4)], tm: (() => { const j = s.rev.keys.indexOf(i / 4); return j < 0 ? null : s.rev.tms[j]; })() }); } } }
+          else {
+            // (the browser truncates when it premultiplies on upload, and Extract.pixels may un-premultiply what it reads: either way within one premultiplied byte)
+            const k = a / 255, tol = 255 / a + 1.01;
+            let ok = gpu[i + 3] === a;
+            for ( let c = 0; c < 3 && ok; c++ ) if ( Math.abs(gpu[i + c] - cpu[i + c] * k) > 1.01 && Math.abs(gpu[i + c] - cpu[i + c]) > tol ) ok = false;
+            if ( !ok ) { b++; if ( SM.length < samples ) SM.push({ dt, hash: g.hash, type: g.anim.type, px: i / 4, cpu: [...cpu.subarray(i, i + 4)], gpu: [...gpu.subarray(i, i + 4)], data: [...s.rev.data.subarray(i, i + 4)] }); }
+          }
+        }
+        areas++; px += cpu.length / 4; bad += b; if ( b > worst ) worst = b;
+      }
+      rows.push([dt, areas, px, bad, worst]);
+    }
+    for ( const g of groups ) d.endAnim(g);
+    F += 10000; T.update(F);
+  } finally {
+    performance.now = real; ws.forEach((w) => { w.visible = true; });
+    [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuErode] = was; T.maxFPS = mf; if ( st ) T.start();
+  }
+  return { areas: d.order.length, rows, samples: SM };
 }
 
 /**
@@ -1383,4 +1449,34 @@ export async function rebakeBench({ ids = null, maxS = 420 } = {}) {
   const top = [...gaps].sort((a, b) => b - a).slice(0, 12);
   return { strokes: list.length, seconds: Math.round((performance.now() - t0) / 100) / 10, gaps: { n: gaps.length, max: top[0] ?? 0, over100: gaps.filter((g) => g > 100).length, top },
     heapMB: { start: Math.round(start), peak: Math.round(peak), end: Math.round(heap()) }, events: ev.slice(-8) };
+}
+
+/**
+ * A FRESH STATE for a Detonate bench: the scene drawn again, fitted, every shard made, and the rim lights / clocks left over from the
+ * draw done (a bench started while they run measures them: ~12 ms of every frame in a dark-scene-like queue). -> { rimQ, dark, shells }
+ */
+export async function fresh() {
+  await canvas.draw(); fit(); await boot();
+  for ( let i = 0; i < 400 && (D()?.rimQueue?.length || D()?.clocks?.length); i++ ) { step(5); await new Promise((r) => setTimeout(r, 30)); }
+  await new Promise((r) => setTimeout(r, 2500)); step(30);
+  return { rimQ: D()?.rimQueue?.length, dark: canvas.environment?.darknessLevel, shells: D()?.shellCount };
+}
+
+/** fresh() + detBench() with CONFIG.moinenMaps flags set for the run (and put back): the headline numbers of one Detonate. */
+export async function runCfg(tag, cfg = {}) {
+  CONFIG.moinenMaps ??= {}; const saved = {};
+  for ( const k in cfg ) { saved[k] = CONFIG.moinenMaps[k]; CONFIG.moinenMaps[k] = cfg[k]; }
+  try {
+    await fresh(); const r = await detBench({});
+    return { tag, med: r.cpu.med, p95: r.cpu.p95, over33: r.over33, frames: r.animFrames, gpuMed: r.gpu.med, gpuP95: r.gpu.p95, worst: r.worst, draws: r.draws.med,
+      heapPeak: r.mem1.heapPeakMB, entries: r.entries.entries, noPix: r.entries.noPixelEntries, waitedIn: r.entries.waitedIn };
+  } finally { for ( const k in saved ) CONFIG.moinenMaps[k] = saved[k]; }
+}
+
+/** The display's methods timed over a Detonate (ms, calls): `await profile(["erodeGpu", "effects", ...])`. */
+export async function profile(names, ms = 2600) {
+  const P = D().constructor.prototype, acc = {}, orig = {};
+  for ( const n of names ) { orig[n] = P[n]; acc[n] = { ms: 0, n: 0 }; P[n] = function(...a) { const t = performance.now(); try { return orig[n].apply(this, a); } finally { acc[n].ms += performance.now() - t; acc[n].n++; } }; }
+  try { await fresh(); const t = await trace(ms, () => game.modules.get("moinen-maps").api.destruction.replay()); return { frames: t.animFrames, cpu: t.cpu, acc: Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, [Math.round(v.ms), v.n]])) }; }
+  finally { for ( const n of names ) P[n] = orig[n]; }
 }

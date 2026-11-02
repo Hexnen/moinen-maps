@@ -27,6 +27,8 @@ self.onmessage = async (ev) => {
     }
     // (a job carries the pixel mask, or the pixels themselves - a copy: the page's loop over them is the worker's now)
     const keys = jobs.map((j) => E.clockKeys(timeOf, j.mask ?? E.clockMask(j.data, j.w, j.h, j.dark > 0), j.w, j.h, j.x0, j.y0, j.dark));
-    self.postMessage({ id, keys }, keys.flatMap((k) => [k.ix.buffer, k.tm.buffer]));
+    // (the GPU erode's texture bytes, erode-gpu.mjs: made here, not on the page)
+    jobs.forEach((j, n) => { if ( j.gpu ) keys[n].tx = E.timeBytes(keys[n].ix, keys[n].tm, j.w, j.h); });
+    self.postMessage({ id, keys }, keys.flatMap((k) => [k.ix.buffer, k.tm.buffer, ...(k.tx ? [k.tx.buffer] : [])]));
   } catch ( err ) { self.postMessage({ id, error: String(err?.stack ?? err) }); }
 };
