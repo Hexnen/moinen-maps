@@ -12,6 +12,8 @@ import { pickToken, classifyPress } from "../tokens/carry-core.mjs";
  * CARRY A TOKEN: a stroke whose first pointer-down lands on a token and that is then DRAGGED carries the token along its path (the
  * stroke keeps the token and the path: tokens/carry-core.mjs, destruction.mjs edited). Armed by Ctrl held at the pointer-down (left
  * button), or by the "carry token" latch (setting destrCarry) where Ctrl then does the opposite. A click does nothing special.
+ * SUPERHERO (setting destrSuper, only together with a carry): the carry also stores the tokens it ploughs through (tk.hit, computed once at the
+ * pointer-up: tokens/plough-core.mjs, carry.mjs ploughOf).
  */
 const OVERLAY = [null, [242, 193, 78], [239, 138, 58], [224, 69, 58]];
 let mode = null;               // "paint" | "erase" | null
@@ -34,6 +36,8 @@ export function registerEditorSettings(onChange) {
   game.settings.register(MODULE_ID, "destrCause", { scope: "client", config: false, type: Number, default: 0, onChange: f });
   // carry a token with the stroke: the latch (Ctrl at the pointer-down does the opposite), where the token ends, grid snapping of the end
   game.settings.register(MODULE_ID, "destrCarry", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
+  // SUPERHERO: the carried token ploughs through the tokens on its way (tokens/plough-core.mjs); only together with a carry
+  game.settings.register(MODULE_ID, "destrSuper", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
   game.settings.register(MODULE_ID, "carryEnds", { name: "MOINENMAPS.Destr.carryEnds", hint: "MOINENMAPS.Destr.carryEndsHint", scope: "client", config: true, type: String, default: "real",
     choices: { real: "MOINENMAPS.Destr.carryEndsReal", return: "MOINENMAPS.Destr.carryEndsReturn" }, onChange: f });
   game.settings.register(MODULE_ID, "carrySnap", { name: "MOINENMAPS.Destr.carrySnap", hint: "MOINENMAPS.Destr.carrySnapHint", scope: "client", config: true, type: Boolean, default: false, onChange: f });
@@ -41,7 +45,7 @@ export function registerEditorSettings(onChange) {
 
 /** Is carrying armed for a stroke that begins with Ctrl `ctrl`? The latch XOR Ctrl; only in the paint tool. */
 export const carryArmed = (ctrl, m = mode) => m === "paint" && (!!opt("destrCarry", false) !== !!ctrl);
-export const carryOptions = () => ({ ends: opt("carryEnds", "real") === "return" ? "return" : "real", snap: !!opt("carrySnap", false) });
+export const carryOptions = () => ({ ends: opt("carryEnds", "real") === "return" ? "return" : "real", snap: !!opt("carrySnap", false), superhero: !!opt("destrSuper", false) });
 
 /** The token under a scene point (the topmost one this client sees and that is not locked), or null. Reuses its rows. */
 const rows = [];

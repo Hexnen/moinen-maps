@@ -1750,9 +1750,15 @@ export function edited(box, stroke = null) {
 /** The `tk` of a stroke that was dragged from a token: where the token starts and ends, the path in art px (thinned). */
 function carryRecord(stroke) {
   const pts = stroke.path?.length > 1 ? simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; })) : null;
-  const { snap, ends, grab } = stroke.carry, r = Model.sceneRect();
+  const { snap, ends, grab, superhero } = stroke.carry, r = Model.sceneRect();
   const snapFn = snap ? (x, y, w, h) => { const c = canvas.grid.getSnappedPoint({ x: x + w / 2, y: y + h / 2 }, { mode: CONST.GRID_SNAPPING_MODES.CENTER }); return [c.x - w / 2, c.y - h / 2]; } : null;
-  return makeTk({ grab, a: stroke.a, b: stroke.b ?? stroke.a, path: pts, ends, rect: r, snap: snapFn });
+  const tk = makeTk({ grab, a: stroke.a, b: stroke.b ?? stroke.a, path: pts, ends, rect: r, snap: snapFn });
+  // SUPERHERO: the tokens it ploughs through, computed once from the scene as it is now (tokens/plough-core.mjs; part of `tk`, so it changes no pixel and no chunk id)
+  if ( tk && superhero && game.user.isGM ) {
+    try { const hit = Carry.ploughOf(tk, { geo: carryGeo(), snap: snapFn ? { grid: canvas.grid.size, fn: snapFn } : null, rect: r }); if ( hit.length ) tk.hit = hit; }
+    catch ( err ) { console.warn("moinen-maps | superhero: the plough failed (the token is carried alone)", err); }
+  }
+  return tk;
 }
 
 /** A stroke that carries a token should enter (and with it the carry); if its entry never does (nothing to show, a failed bake), the carry plays on its own. */

@@ -14,6 +14,11 @@
  * or redone; replays are visual only) updates the token document to tk.x1, tk.y1 when the path ends; every client keeps the token on the
  * path end until its document is there, then glides the little that is left. "returns": the token glides back to where it really is.
  * One ticker listener, only while a carry runs; nothing is allocated per frame.
+ *
+ * SUPERHERO (the "plough"): a carry stroke may also hold `tk.hit`, the tokens the carried one ploughs through (plough-core.mjs computes it once,
+ * when the stroke is committed; every client plays the record). Each pushed token is one more Carry of the same class (so it shares the
+ * pose, the dust, the hand-over and the z-order treatment of the carried one) whose timeline is its recorded centre path, starting at the
+ * moment of contact; it has no real move of its own: the carried token's Carry moves every document in ONE batched update.
  */
 import { reducedMotion, dbg } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
@@ -21,12 +26,13 @@ import { restoreExact, tokenBusy, claimToken, releaseToken } from "../token-drop
 import { Emitter, artPx } from "./pixels.mjs";
 import { tokenFxOn } from "./settings.mjs";
 import * as C from "./carry-core.mjs";
+import * as X from "./plough-core.mjs";
 
 const ACTIVE = new Map();      // Token -> Carry
 const SEEN = new Map();        // stroke id -> the entry start already played (a stroke has several areas: one carry)
 const DUST = [0xd8ccb4, 0xb8a990, 0x8f816c, 0xc9bca2];
 const D_ = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, P_ = { sx: 1, sy: 1, rot: 0, lift: 0, k: 0 };   // scratch (one carry steps at a time)
-const stats = { played: 0, moved: 0, visual: 0, skipped: 0, unmoved: 0 };
+const stats = { played: 0, moved: 0, visual: 0, skipped: 0, unmoved: 0, pushed: 0 };
 let ticking = false;
 
 function tick(frames) {
@@ -42,6 +48,20 @@ function sortNextTo(obj, token, step) {
   canvas.primary.addChild(obj);
 }
 
+/** A deterministic phase (0..2pi) from an id: the same wobble on every client. */
+function phaseOf(id) { let h = 2166136261; for ( let i = 0; i < id.length; i++ ) h = Math.imul(h ^ id.charCodeAt(i), 16777619); return ((h >>> 0) % 6283) / 1000; }
+
+/** Is this token being dragged by a user right now? (Foundry's own drag: we do not fight it.) */
+const dragged = (token) => { try { return !!token?.isDragged; } catch { return false; } };
+
+/** May the pushed token's document be moved to its recorded end? It is there, still where the plough found it, not locked and not being dragged. */
+function pushable(scene, h) {
+  const d = scene.tokens.get(h.id);
+  if ( !d || d.locked ) return false;
+  if ( Math.abs(d.x - h.x0) > 2 || Math.abs(d.y - h.y0) > 2 ) return false;
+  return !dragged(d.object);
+}
+
 class Carry {
   /** `o`: { objId, tk, tl, t0 (when the path's clock starts, performance.now ms), real, visual } */
   constructor(token, o) {
@@ -49,11 +69,19 @@ class Carry {
     this.token = token; this.doc = token.document; this.dead = false; this.moved = false;
     const { width, height } = this.doc.getSize();
     this.W = width; this.H = height; this.S = height;
-    this.C0x = this.tk.x0 + width / 2; this.C0y = this.tk.y0 + height / 2;      // the grab point's token centre
-    this.endX = this.C0x + o.tl.dx; this.endY = this.C0y + o.tl.dy;
+    const n = o.tl.n;
+    // a carried token starts at the grab point's token centre; a pushed one at its recorded first point (the contact), its timeline is absolute
+    this.C0x = this.hit ? o.tl.X[0] : this.tk.x0 + width / 2; this.C0y = this.hit ? o.tl.Y[0] : this.tk.y0 + height / 2;
+    this.endX = this.hit ? o.tl.X[n - 1] : this.C0x + o.tl.dx; this.endY = this.hit ? o.tl.Y[n - 1] : this.C0y + o.tl.dy;
+    this.D = o.D ?? o.tl.D;                                 // the CARRIER's run (the hand-over clock of everyone)
+    this.tOff = this.hit ? o.tl.tt[0] : 0;                  // the moment this body's own run begins
+    this.Dl = o.tl.tt[n - 1] - this.tOff;                   // ... and how long it lasts
+    this.ph = this.hit ? phaseOf(this.doc.id) : 0;          // a pushed token's jitter (the same on every client)
+    this.pushed = [];                                       // the Carries of the tokens this one ploughs
     this.base = null; this.off = { x: 0, y: 0 };
     this.mode = this.tk.e ? "return" : "real";
     if ( this.mode === "return" ) this.real = false;                          // (a returning token never moves for real)
+    if ( this.hit ) this.real = false;                        // (only the carried token's Carry moves documents)
     this.waitFrom = 0; this.arrivedAt = 0; this.lastEl = -1e9; this.lastDust = 0; this.started = false; this.landed = false;
     this.root = null; this.em = null;
     if ( this.visual ) {
@@ -95,14 +123,15 @@ class Carry {
 
   /** The offset and the pose at `now`. False when the carry is over. */
   step(now) {
-    const el = now - this.t0, tl = this.tl, D = tl.D;
-    this.lastEl = el;
+    const el = now - this.t0, tl = this.tl, D = this.D, le = el - this.tOff;
+    this.lastEl = le;                                       // (this body's own clock: 0 at its lift-off / contact)
     // the real move: when the path ends, once, by the GM that painted it
     if ( this.real && !this.moved && el >= D + 40 ) this.move();
     if ( !this.visual ) return el < D + 400;
     const b = this.base; if ( !b ) return true;
-    C.displacementAt(tl, el, D_);
-    C.poseAt(el, D, D_, this.S, P_);
+    C.displacementAt(tl, el, D_);                           // (a pushed token's timeline is on the carrier's clock: it holds before the contact)
+    C.poseAt(le, this.Dl, D_, this.S, P_);
+    if ( this.hit && P_.k ) { P_.rot = P_.rot * 1.35 + 0.05 * D_.sp * Math.sin(le * 0.04 + this.ph); P_.sx *= 1 + 0.03 * D_.sp * Math.sin(le * 0.05 + this.ph * 2); }   // knocked: leans harder, shivers
     const after = el - D, hold = this.mode === "return" ? C.HOLD_RETURN_MS : C.LAND_MS;
     const arrived = Math.abs(b.px - this.endX) < 3 && Math.abs(b.py - this.endY) < 3;
     if ( this.mode !== "return" && after >= hold ) {
@@ -138,13 +167,13 @@ class Carry {
     const el = this.lastEl, em = this.em, t = this.token;
     if ( perfMode() === "low" || !t.visible ) return;
     const ap = em.ap, gx = this.C0x + D_.x, gy = this.C0y + D_.y + this.H * 0.42, W = this.W;
-    if ( !this.started && el >= 0 ) { this.started = true; this.puff(gx, gy, 8, W, ap); }
-    if ( el >= 0 && el < this.tl.D && now - this.lastDust > 38 ) {
+    if ( !this.started && el >= 0 ) { this.started = true; this.puff(gx, gy, this.hit ? 10 : 8, W, ap); }      // (a pushed token: the impact)
+    if ( el >= 0 && el < this.Dl && now - this.lastDust > 38 ) {
       this.lastDust = now;
       for ( let i = 0; i < 2; i++ ) em.add(gx + (Math.random() - 0.5) * W * 0.3, gy + (Math.random() - 0.5) * W * 0.08, -D_.ux * ap * (6 + 10 * Math.random()) + (Math.random() - 0.5) * ap * 8, -D_.uy * ap * 6 - ap * (2 + 6 * Math.random()),
         { life: 0.35 + 0.3 * Math.random(), drag: 3, g: -ap * 3, color: DUST[(Math.random() * 4) | 0], size: Math.random() < 0.3 ? 2 : 1 });
     }
-    if ( !this.landed && el >= this.tl.D ) { this.landed = true; this.puff(gx, gy, 12, W, ap); }
+    if ( !this.landed && el >= this.Dl ) { this.landed = true; this.puff(gx, gy, 12, W, ap); }
   }
 
   puff(gx, gy, n, W, ap) {
@@ -155,13 +184,18 @@ class Carry {
     }
   }
 
-  /** The token document at the path's end (the painting GM only). */
+  /**
+   * The token documents at the path's end (the painting GM only): the carried token and every token it ploughed, in ONE batched update.
+   * A pushed token that is gone, that someone moved meanwhile or that a user is dragging right now stays where it is.
+   */
   move() {
     this.moved = true;
-    const doc = this.doc;
-    if ( !game.user.isGM || !doc?.parent?.tokens?.has(doc.id) ) return;
+    const doc = this.doc, scene = doc?.parent;
+    if ( !game.user.isGM || !scene?.tokens?.has(doc.id) ) return;
+    const ups = [{ _id: doc.id, x: this.tk.x1, y: this.tk.y1, action: "displace" }];
+    for ( const h of this.hits ?? [] ) { if ( pushable(scene, h) ) ups.push({ _id: h.id, x: h.x1, y: h.y1, action: "displace" }); else stats.skipped++; }
     stats.moved++;
-    Promise.resolve(doc.update({ x: this.tk.x1, y: this.tk.y1, action: "displace" }, { animate: false, diff: false })).catch((err) => { stats.unmoved++; console.warn("moinen-maps | carry: the token did not move", err); });
+    Promise.resolve(scene.updateEmbeddedDocuments("Token", ups, { animate: false, diff: false })).catch((err) => { stats.unmoved++; console.warn("moinen-maps | carry: the token did not move", err); });
   }
 
   /** `commit`: the carry ran its course (or the scene went away): a pending real move is made first. */
@@ -197,11 +231,26 @@ export function play({ objId, tk, start, k = 1, delay = 40, geo, real = false })
   const tl = C.buildTimeline(tk, { ...geo, k });
   if ( !token || !tl ) { stats.skipped++; return false; }
   ACTIVE.get(token)?.end(true);                                        // two strokes on one token: the first lands where it was going
-  const visual = tokenFxOn() && !reducedMotion() && !tokenBusy(token) && !!token.mesh && !token.mesh.destroyed;
+  const visual = canShow(token);
   stats.played++; if ( visual ) stats.visual++;
-  new Carry(token, { objId, tk, tl, t0: start + delay, real: !!real && game.user.isGM, visual });
+  const lead = new Carry(token, { objId, tk, tl, t0: start + delay, real: !!real && game.user.isGM, visual });
+  // SUPERHERO: the tokens it ploughs ride ahead of it (each is a Carry of its own; the lead moves all the documents)
+  const hits = X.hitsOf(tk);
+  if ( hits.length ) {
+    lead.hits = hits;
+    for ( const h of hits ) {
+      const pt = canvas.tokens?.get(h.id), htl = X.buildHitTimeline(h, { k });
+      if ( !pt || !htl || pt === token || !canShow(pt) || dragged(pt) ) continue;
+      ACTIVE.get(pt)?.end(true);
+      lead.pushed.push(new Carry(pt, { objId, tk, tl: htl, t0: start + delay, real: false, visual: true, hit: h, D: tl.D }));
+      stats.pushed++;
+    }
+  }
   return true;
 }
+
+/** May this client pose the token's mesh (the effects are on, no other effect holds it)? */
+const canShow = (token) => tokenFxOn() && !reducedMotion() && !tokenBusy(token) && !!token.mesh && !token.mesh.destroyed;
 
 /** The stroke is gone (undo, clear): its carries stop where they are (no real move). */
 export function cancel(objId) {
@@ -212,14 +261,46 @@ export function cancel(objId) {
 export const started = (objId) => SEEN.has(objId);
 export function cancelAll() { for ( const c of [...ACTIVE.values()] ) c.end(false); SEEN.clear(); }
 
-/** Undo of a stroke (GM): the carry stops and a token that is still where the stroke took it goes back to its start. */
+/**
+ * Undo of a stroke (GM): the carry stops and every token that is still where the stroke took it (the carried one and the ploughed ones)
+ * goes back to its start, in one batched update. A token the GM moved meanwhile, or that is gone, stays.
+ */
 export function undo(tk, objId) {
   cancel(objId);
   if ( !game.user.isGM || !C.validTk(tk) || tk.e ) return false;
-  const doc = canvas.scene?.tokens?.get(tk.id); if ( !doc ) return false;
-  if ( Math.abs(doc.x - tk.x1) > 2 || Math.abs(doc.y - tk.y1) > 2 ) return false;     // the GM moved it meanwhile: it stays
-  doc.update({ x: tk.x0, y: tk.y0, action: "displace" }, { animate: false, diff: false }).catch((err) => console.warn("moinen-maps | carry: undo", err));
+  const scene = canvas.scene; if ( !scene ) return false;
+  const ups = [], at = (d, x, y) => Math.abs(d.x - x) <= 2 && Math.abs(d.y - y) <= 2;
+  const doc = scene.tokens.get(tk.id);
+  if ( doc && at(doc, tk.x1, tk.y1) ) ups.push({ _id: doc.id, x: tk.x0, y: tk.y0, action: "displace" });
+  for ( const h of X.hitsOf(tk) ) { const d = scene.tokens.get(h.id); if ( d && !d.locked && at(d, h.x1, h.y1) && !dragged(d.object) ) ups.push({ _id: d.id, x: h.x0, y: h.y0, action: "displace" }); }
+  if ( !ups.length ) return false;
+  scene.updateEmbeddedDocuments("Token", ups, { animate: false, diff: false }).catch((err) => console.warn("moinen-maps | carry: undo", err));
   return true;
+}
+
+/* ================================================================== the plough's input (the painting GM, once, when the stroke is committed) */
+
+/** Is the token a disc for the plough (gridless ellipse, hex) or a square (the grid cell, a rectangle)? */
+function isRound(doc) {
+  const g = doc.parent?.grid ?? canvas.grid;
+  if ( g?.isGridless ) return doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_1 || doc.shape === CONST.TOKEN_SHAPES?.ELLIPSE_2;
+  return !!g?.isHexagonal;
+}
+const rowOf = (doc) => { const { width, height } = doc.getSize(); return { id: doc.id, x: doc.x, y: doc.y, w: width, h: height, round: isRound(doc) }; };
+
+/**
+ * `tk.hit` for a carry record: the tokens of the scene as they are now, minus the locked ones and the ones hidden from the players (a
+ * hidden token that flew would give itself away), against the carried token's path. `snap` { grid, fn } | null, `rect` the scene rect.
+ * Returns the array (empty when nothing is in the way).
+ */
+export function ploughOf(tk, { geo, snap = null, rect = null }) {
+  const doc = canvas.scene?.tokens?.get(tk.id); if ( !doc || !canvas.tokens?.placeables ) return [];
+  const others = [];
+  for ( const t of canvas.tokens.placeables ) {
+    const d = t.document; if ( !d || t.destroyed || d.id === tk.id || d.locked || d.hidden ) continue;
+    others.push(rowOf(d));
+  }
+  return X.ploughRecord({ tk, geo, carrier: rowOf(doc), others, rect, snap: snap ? { grid: snap.grid ?? canvas.grid.size, fn: snap.fn, gx: 0, gy: 0 } : null });
 }
 
 /** Foundry refreshed a token. */
@@ -232,4 +313,4 @@ export function registerCarry() {
 }
 
 export const _carryStats = () => ({ ...stats, active: ACTIVE.size, ticking });
-export const _carryState = () => [...ACTIVE.values()].map((c) => ({ id: c.doc.id, objId: c.objId, el: Math.round(c.lastEl), off: { ...c.off }, moved: c.moved, real: c.real, visual: c.visual, mode: c.mode, D: Math.round(c.tl.D) }));
+export const _carryState = () => [...ACTIVE.values()].map((c) => ({ id: c.doc.id, objId: c.objId, el: Math.round(c.lastEl), off: { ...c.off }, moved: c.moved, real: c.real, visual: c.visual, mode: c.mode, D: Math.round(c.D), hit: !!c.hit, pushed: c.pushed.length }));
