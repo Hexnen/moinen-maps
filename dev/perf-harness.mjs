@@ -986,3 +986,155 @@ export function restCheck() {
   const avg = (a) => +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3);
   return { tickMed: med(fm), tickAvg: avg(fm), cacheMed: med(cm), switchMaxFrame: sw, fast: d.cache?.stats.fast ?? null, particles: d.particles.length };
 }
+
+/* ---------------------------------------------------------------------------------------------------------------------------------
+ * TOKEN EFFECTS and WATER REFLECTIONS benchmarks (many tokens at once).
+ * --------------------------------------------------------------------------------------------------------------------------------- */
+
+const TEST_FLAG = "perfBenchToken";
+
+/** `n` throw-away tokens (flag perfBenchToken) in a grid over the scene, each with its own picture when `distinct` (core icons). */
+export async function makeTokens(n = 48, { size = 1, distinct = true, rect = null } = {}) {
+  const sc = canvas.scene, g = canvas.grid.size, r = rect ?? canvas.dimensions.sceneRect;
+  let srcs = [canvas.tokens.placeables.find((t) => t.document.texture.src)?.document.texture.src ?? "icons/svg/mystery-man.svg"];
+  if ( distinct ) {
+    try { const b = await FilePicker.browse("public", "icons/svg"); srcs = b.files.filter((f) => f.endsWith(".svg")); } catch { /* keep the one */ }
+  }
+  const cols = Math.max(1, Math.floor(r.width / (g * (size + 0.5)))), data = [];
+  for ( let i = 0; i < n; i++ ) {
+    const cx = i % cols, cy = Math.floor(i / cols);
+    data.push({ name: `bench${i}`, x: Math.round(r.x + (cx + 0.25) * g * (size + 0.5)), y: Math.round(r.y + (cy + 0.25) * g * (size + 0.5)), width: size, height: size,
+      texture: { src: srcs[i % srcs.length] }, disposition: 0, flags: { [MODULE]: { [TEST_FLAG]: true, fx: { enterStyle: "none", leaveStyle: "none", deathStyle: "none", idleStyle: "none" } } } });
+  }
+  const docs = await sc.createEmbeddedDocuments("Token", data, { animate: false });
+  await new Promise((res) => setTimeout(res, 1500)); step(30);
+  return docs.length;
+}
+const MODULE = "moinen-maps";
+
+export async function dropTokens() {
+  const ids = canvas.scene.tokens.filter((t) => t.getFlag(MODULE, TEST_FLAG)).map((t) => t.id);
+  if ( ids.length ) await canvas.scene.deleteEmbeddedDocuments("Token", ids, { animate: false });
+  await new Promise((res) => setTimeout(res, 500)); step(10);
+  return ids.length;
+}
+const benchTokens = () => canvas.tokens.placeables.filter((t) => t.document.getFlag(MODULE, TEST_FLAG));
+
+/**
+ * TOKEN EFFECTS BENCH: all bench tokens play the same effect at once (the worst case: a burst of 25+ is staggered by the module in
+ * play, here every token starts together through the preview API). Per case: frame cost (cpu = ticker + gl.finish, gap = tasks between
+ * frames), GPU, draw calls per frame, live particles (peak), heap growth (sum of the frames' positive heap steps, MB per second: a
+ * lower bound of allocation), GCs seen. `cases`: [["enter","fade"], ...] (default: every style of every kind + idle styles + rest).
+ */
+export async function tokenFxBench({ hz = 60, cases = null, ms = 1600 } = {}) {
+  const Fx = await import("../scripts/tokens/fx.mjs"), Px = await import("../scripts/tokens/pixels.mjs"), St = await import("../scripts/tokens/styles.mjs");
+  const toks = benchTokens(); if ( !toks.length ) throw new Error("makeTokens() first");
+  cases ??= [["rest", "-"],
+    ...Object.keys(St.ENTER_STYLES).filter((s) => !St.ENTER_STYLES[s].legacy && s !== "none").map((s) => ["enter", s]),
+    ...Object.keys(St.LEAVE_STYLES).filter((s) => !St.LEAVE_STYLES[s].legacy && s !== "none").map((s) => ["leave", s]),
+    ...Object.keys(St.DEATH_STYLES).filter((s) => s !== "none").map((s) => ["death", s]),
+    ...Object.keys(St.IDLE_STYLES).filter((s) => s !== "none").map((s) => ["idle", s])];
+  const out = [], inst = instrument();
+  const settle = async () => { for ( let k = 0; k < 400; k++ ) { const s = Fx._tokenFx(); if ( !s.rigs && !s.extras ) break; await runFrames(Array(6).fill(null), { hz }); } };
+  try {
+    for ( const [kind, style] of cases ) {
+      await settle(); await runFrames(Array(20).fill(null), { hz });
+      // cells of the pictures are sampled on first use (a readback): a first pass warms them, not measured
+      const start = () => { if ( kind === "rest" ) return; for ( const t of toks ) { if ( kind === "leave" ) { Fx.preview(t, "leave", style); } else Fx.preview(t, kind, style); } };
+      let peak = 0, gcs = 0, grow = 0, prevH = performance.memory?.usedJSHeapSize ?? 0; const fl = [];
+      inst.snap();
+      const nf = Math.round(ms / (1000 / hz));
+      const frames = Array.from({ length: nf }, (_, i) => (i === 2 ? start : null));
+      const rows = await runFrames(frames, { hz, cb: (i) => {
+        peak = Math.max(peak, Px.liveParticles()); const h = performance.memory?.usedJSHeapSize ?? 0; if ( h > prevH ) grow += h - prevH; prevH = h; fl[i] = inst.frame(); } });
+      const s = inst.snap();
+      for ( const r of rows ) if ( r.gc ) gcs++;
+      const meas = rows.slice(3), dr = fl.slice(3).map((f) => (f.drawElements ?? 0) + (f.drawArrays ?? 0));
+      const worst = meas.map((r, i) => [i + 3, r.cpu + Math.max(0, r.gap - 0.2), fl[i + 3]]).sort((a, b) => b[1] - a[1])[0];
+      out.push({ kind, style, cost: dist(meas.map((r) => r.cpu + Math.max(0, r.gap - 0.2))), cpu: dist(meas.map((r) => r.cpu)), gpu: dist(meas.filter((r) => r.gpu !== undefined).map((r) => r.gpu)),
+        draws: pct(dr, 0.5), drawsMax: Math.max(...dr), peakParticles: peak, heapMBps: +(grow / 1048576 / (ms / 1000)).toFixed(2), gcs,
+        tick: Object.fromEntries(Object.entries(s.tick).filter(([k]) => /tick@/.test(k) || /fx|Rig|Emitter/.test(k)).slice(0, 3).map(([k, v]) => [k.slice(0, 40), +(v / nf).toFixed(3)])),
+        glWorst: worst ? Object.fromEntries(Object.entries(worst[2]).filter(([, v]) => v >= 1).map(([k, v]) => [k.slice(0, 24), +v.toFixed(1)])) : null });
+    }
+  } finally { inst.restore(); await settle(); }
+  return out;
+}
+
+/** A compact table of tokenFxBench rows: [kind/style, p50, p95, max cost ms, gpu p50, draws, peak particles, MB/s, GCs]. */
+export const fxTable = (rows) => rows.map((r) => [`${r.kind}/${r.style}`, r.cost.p50, r.cost.p95, r.cost.max, r.gpu.p50, r.draws, r.peakParticles, r.heapMBps, r.gcs].join("\t")).join("\n");
+
+/**
+ * REFLECTION BENCH (scripts/water/reflect.mjs): the painted water's masks are filled with water (in memory only: nothing is saved) so
+ * every bench token (makeTokens(n, { size }) first) stands in water; per blur type the same frames with reflections off and on:
+ * frame cost (cpu = ticker + gl.finish + the tasks between frames), the reflection ticker's own time per frame (mean and worst frame:
+ * every token redraws its canvases every 90 ms, staggered), texture uploads per frame. `reflect`: the params laid over the scene's.
+ */
+export async function reflectBench({ hz = 60, ms = 3000, blurs = ["none", "3x3", "9x9", "17x17"], reflect = {} } = {}) {
+  const W = await import("../scripts/water/water.mjs"), s = W.state(); if ( !s ) throw new Error("no water on this scene");
+  const toks = benchTokens(); if ( !toks.length ) throw new Error("makeTokens() first");
+  const was = { water: Uint8Array.from(s.masks.water), fall: Uint8Array.from(s.masks.fall), p: { ...s.params } };
+  s.masks.water.fill(1); s.masks.fall.fill(0);
+  Hooks.callAll("moinenMapsWater", "edited");
+  const inst = instrument(), out = [];
+  const run = async (label, over) => {
+    Object.assign(s.params, { reflectOn: false }, over);
+    Hooks.callAll("moinenMapsWater", "edited");
+    await runFrames(Array(40).fill(null), { hz });
+    inst.snap();
+    const nf = Math.round(ms / (1000 / hz)), fl = [];
+    const rows = await runFrames(Array(nf).fill(null), { hz, cb: (i) => { fl[i] = inst.frame(); } });
+    const sn = inst.snap();
+    const rt = Object.entries(sn.tick).find(([k]) => /\(\) => onTick\(\)/.test(k) && !/@-/.test(k))?.[1] ?? 0;
+    const cost = rows.map((r) => r.cpu + Math.max(0, r.gap - 0.2));
+    out.push({ label, cost: dist(cost), gpu: dist(rows.filter((r) => r.gpu !== undefined).map((r) => r.gpu)), uploads: +((sn.gl.texImage2D ?? 0) + (sn.gl.texSubImage2D ?? 0)) / nf,
+      tickMsPerFrame: +(rt / nf).toFixed(3), draws: pct(fl.map((f) => f.drawElements ?? 0), 0.5) });
+  };
+  try {
+    await run("off", { reflectOn: false });
+    for ( const b of blurs ) await run(`on blur=${b}`, { reflectOn: true, reflectBlurType: b, ...reflect });
+  } finally {
+    inst.restore();
+    s.masks.water.set(was.water); s.masks.fall.set(was.fall);
+    for ( const k of Object.keys(s.params) ) if ( !(k in was.p) ) delete s.params[k];
+    Object.assign(s.params, was.p);
+    Hooks.callAll("moinenMapsWater", "edited"); step(5);
+  }
+  return out;
+}
+
+/**
+ * REFLECTION PIXELS: the reflections' canvases (every bench token and the scene's own, water everywhere, `blur`, `reflect` params) at a
+ * frozen clock, as a hash per token and a hash of all: run it on two builds of reflect.mjs and compare (the output must be equal).
+ * Returns { n, all, per: [hash...] } (FNV-1a over the canvas bytes).
+ */
+export async function reflectHash({ blur = "none", reflect = {}, keep = false } = {}) {
+  const W = await import("../scripts/water/water.mjs"), s = W.state(); if ( !s ) throw new Error("no water on this scene");
+  const T = canvas.app.ticker, mf = T.maxFPS, st = T.started, real = performance.now.bind(performance); CONFIG.moinenMaps ??= {};
+  const wasB = CONFIG.moinenMaps.reflectBudgetMs, was = { water: Uint8Array.from(s.masks.water), fall: Uint8Array.from(s.masks.fall), p: { ...s.params } };
+  T.maxFPS = 0; T.stop(); CONFIG.moinenMaps.reflectBudgetMs = 1e9;
+  s.masks.water.fill(1); s.masks.fall.fill(0);
+  s.params.reflectOn = false; T.update(real());          // the layer's canvases of a run before are dropped
+  Object.assign(s.params, { reflectOn: true, reflectBlurType: blur, ...reflect }); Hooks.callAll("moinenMapsWater", "edited");
+  let F = Math.ceil((real() + 1000) / 1440) * 1440; performance.now = () => F;
+  const rnd = Math.random; let seed = 424242; Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };   // (scan jumps, token phases)      // (a multiple of the water loop: the same ripple phase in every run)
+  try {
+    for ( let i = 0; i < 4; i++ ) { F += 200; T.update(F); }
+    const root = canvas.primary.children.find((c) => c.sortLayer === 248), per = [];
+    const fnv = (b) => { let h = 2166136261; for ( let i = 0; i < b.length; i++ ) { h ^= b[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
+    for ( const spr of root.children ) {
+      const c = spr.texture?.baseTexture?.resource?.source; if ( !(c instanceof HTMLCanvasElement) || c.width < 3 ) continue;
+      per.push(`${c.width}x${c.height}:${fnv(c.getContext("2d").getImageData(0, 0, c.width, c.height).data).toString(16)}${spr.visible ? "" : "!"}`);
+    }
+    const out = { n: per.length, all: fnv(new TextEncoder().encode(per.join(","))).toString(16), per };
+    if ( keep ) {      // the raw bytes of every reflection canvas (not the mask), as one string per canvas (latin-1) for a diff between builds
+      out.raw = root.children.map((spr) => spr.texture?.baseTexture?.resource?.source).filter((c) => c instanceof HTMLCanvasElement && c.width < 1000)
+        .map((c) => String.fromCharCode.apply(null, c.getContext("2d").getImageData(0, 0, c.width, c.height).data));
+    }
+    return out;
+  } finally {
+    performance.now = real; Math.random = rnd; CONFIG.moinenMaps.reflectBudgetMs = wasB;
+    s.masks.water.set(was.water); s.masks.fall.set(was.fall);
+    for ( const k of Object.keys(s.params) ) if ( !(k in was.p) ) delete s.params[k];
+    Object.assign(s.params, was.p); Hooks.callAll("moinenMapsWater", "edited"); s.params.reflectOn = false; T.update(real()); Object.assign(s.params, was.p); T.maxFPS = mf; if ( st ) T.start();
+  }
+}

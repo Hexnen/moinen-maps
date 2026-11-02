@@ -2,6 +2,7 @@ import * as Water from "./water.mjs";
 import * as Model from "./model.mjs";
 import { wetAt as wetWorld, wetRegions, anyWet } from "./wet.mjs";
 import { perfLow } from "../perf-mode.mjs";
+import { kernelOf, blurPixels } from "./blur.mjs";
 
 /**
  * Reflections of tokens in the water: a vertical mirror image under every token, drawn only where there is water, on the water's pixel
@@ -20,54 +21,21 @@ export const REFLECT_DEFAULTS = {
 export const REFLECT_KEYS = Object.keys(REFLECT_DEFAULTS);
 export const BLUR_TYPES = ["none", "3x3", "3x3hard", "5x5", "7x7", "9x9", "17x17", "5x3left", "17x3left", "3x17top", "5x5diagback", "5x5diagfwd"];
 
-/**
- * Blur shapes as sampling windows: width, height, the anchor (which window cell sits on the output pixel) and which cells count.
- * "left" shapes smear toward the left, "top" toward the top, the diagonals along a diagonal; "hard" weighs the centre more.
- */
-function kernel(name) {
-  const box = (w, h, ax = (w - 1) >> 1, ay = (h - 1) >> 1) => ({ w, h, ax, ay, k: new Float32Array(w * h).fill(1) });
-  switch ( name ) {
-    case "3x3": return box(3, 3);
-    case "3x3hard": { const o = box(3, 3); o.k.set([0, 1, 0, 1, 3, 1, 0, 1, 0]); return o; }
-    case "5x5": return box(5, 5);
-    case "7x7": return box(7, 7);
-    case "9x9": return box(9, 9);
-    case "17x17": return box(17, 17);
-    case "5x3left": return box(5, 3, 4, 1);
-    case "17x3left": return box(17, 3, 16, 1);
-    case "3x17top": return box(3, 17, 1, 16);
-    case "5x5diagback": { const o = box(5, 5); o.k.fill(0); for ( let i = 0; i < 5; i++ ) o.k[i * 5 + i] = 1; return o; }
-    case "5x5diagfwd": { const o = box(5, 5); o.k.fill(0); for ( let i = 0; i < 5; i++ ) o.k[i * 5 + (4 - i)] = 1; return o; }
-    default: return null;
-  }
-}
-const kernelCache = new Map();
-const kernelOf = (name) => { if ( !kernelCache.has(name) ) kernelCache.set(name, kernel(name)); return kernelCache.get(name); };
-
 /** Convolve a canvas in place (premultiplied alpha, so soft edges do not darken). Returns false when the canvas cannot be read. */
+let blurOut = null;
 function blurCanvas(ctx, W, H, kn) {
   let img;
   try { img = ctx.getImageData(0, 0, W, H); } catch { return false; }
-  const src = img.data, out = new Uint8ClampedArray(src.length), total = kn.k.reduce((a, b) => a + b, 0) || 1;
-  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
-    let r = 0, g = 0, b = 0, a = 0;
-    for ( let j = 0; j < kn.h; j++ ) {
-      const yy = y + j - kn.ay; if ( yy < 0 || yy >= H ) continue;
-      for ( let i = 0; i < kn.w; i++ ) {
-        const wgt = kn.k[j * kn.w + i]; if ( !wgt ) continue;
-        const xx = x + i - kn.ax; if ( xx < 0 || xx >= W ) continue;
-        const o = (yy * W + xx) * 4, al = src[o + 3] * wgt;
-        r += src[o] * al; g += src[o + 1] * al; b += src[o + 2] * al; a += al;
-      }
-    }
-    const o = (y * W + x) * 4;
-    if ( a > 0 ) { out[o] = r / a; out[o + 1] = g / a; out[o + 2] = b / a; out[o + 3] = a / (total * 255) * 255 / 1; }
-  }
-  ctx.putImageData(new ImageData(out, W, H), 0, 0);
+  if ( !blurOut || blurOut.length < img.data.length ) blurOut = new Uint8ClampedArray(img.data.length);
+  const out = blurOut.length === img.data.length ? blurOut : blurOut.subarray(0, img.data.length);
+  blurPixels(img.data, out, W, H, kn);
+  img.data.set(out);
+  ctx.putImageData(img, 0, 0);
   return true;
 }
 
 const STEP_MS = 90;
+const DRAW_BUDGET_MS = 3;      // the redraws of one frame (a reflection takes 0.03-0.5 ms)
 const REDUCED = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
 
 let root = null, maskSprite = null, maskCanvas = null, maskTex = null, tick = null, dirty = true, hook = null, lastMask = 0;
@@ -151,7 +119,50 @@ function make(t) {
 
 function destroyState(st) { st.sprite.destroy(); st.tex.destroy(true); }
 
-function draw(t, st, P, now) {
+/**
+ * Steps 2-5 for a blurred reflection on typed arrays instead of canvases (the blur needs the pixels on the CPU anyway: reading a GPU
+ * canvas back after its 30 draw calls cost ~1 ms per reflection, ten times the blur). The downscaled token is read back once per
+ * picture (st.tdata); rows slide, jump (scan), the shadow blackens and the blur runs in straight-alpha bytes - the same numbers as
+ * the canvas path (dev/perf-harness.mjs reflectHash, run on both builds: 0 bytes differ). Returns false when the picture cannot be read.
+ */
+function cpuReflect(st, fctx, kn, P, tw, th, W, H, mx, amp, freq, turn, scan) {
+  let src = st.tdata;
+  if ( !src || src.key !== st.tkey ) {
+    try { src = st.tdata = st.tmp.getContext("2d").getImageData(0, 0, tw, th); } catch { return false; }
+    src.key = st.tkey;
+  }
+  const n = W * H * 4;
+  if ( st.bufDims !== `${W}x${H}` ) { st.bufDims = `${W}x${H}`; st.bufA = new Uint8ClampedArray(n); st.bufB = new Uint8ClampedArray(n); st.bufC = new Uint8ClampedArray(n); st.img = new ImageData(st.bufC, W, H); }
+  const S = src.data;
+  let cur = st.bufA; cur.fill(0);
+  // 2. ripple (rows that slide by the same amount are copied together)
+  for ( let y = 0, rows = Math.min(th, H); y < rows; ) {
+    const dx = Math.round(amp * (y / th) * Math.sin(turn - y * freq));
+    let y1 = y + 1;
+    while ( y1 < rows && Math.round(amp * (y1 / th) * Math.sin(turn - y1 * freq)) === dx ) y1++;
+    const x0 = mx + dx, i0 = Math.max(0, -x0), i1 = Math.min(tw, W - x0);
+    if ( i1 > i0 ) for ( let r = y; r < y1; r++ ) cur.set(S.subarray((r * tw + i0) * 4, (r * tw + i1) * 4), (r * W + x0 + i0) * 4);
+    y = y1;
+  }
+  // 3. scanline shift
+  if ( scan > 0 ) {
+    const out = st.bufB; out.fill(0);
+    for ( let y = 0; y < H; y++ ) {
+      const dx = Math.floor(Math.random() * (scan * 2 + 1)) - scan, i0 = Math.max(0, -dx), i1 = Math.min(W, W - dx);
+      if ( i1 > i0 ) out.set(cur.subarray((y * W + i0) * 4, (y * W + i1) * 4), (y * W + dx + i0) * 4);
+    }
+    cur = out;
+  }
+  // 4. shadow: the silhouette in black
+  if ( P.reflectType === "shadow" ) for ( let i = 0; i < n; i += 4 ) cur[i] = cur[i + 1] = cur[i + 2] = 0;
+  // 5. blur
+  blurPixels(cur, st.bufC, W, H, kn);
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.putImageData(st.img, 0, 0);
+  return true;
+}
+
+function draw(t, st, P, now, dl) {
   const s = S(), px = s.px, rect = Model.sceneRect();
   const tw = Math.max(2, Math.round(t.w / px)), th = Math.max(2, Math.round(t.h / px));
   const amp = P.reflectRipple ? P.reflectAmp / 10 : 0, scan = P.reflectScan ? Math.round(P.reflectScanValue) : 0;
@@ -169,6 +180,9 @@ function draw(t, st, P, now) {
   if ( !wet ) return;
   st.sprite.position.set(rect.x + ax0 * px, rect.y + ay0 * px); st.sprite.scale.set(px);
   if ( now - st.last < STEP_MS ) return;
+  // the time budget of this frame is spent: this one stays due and is the first to draw in the next frame (after a stall of more than
+  // one step every reflection was due at once, drew in one frame - 48 of them took 25-30 ms - and stayed in step ever after)
+  if ( performance.now() > dl.t ) return;
   st.last = now;
 
   const tex = t.mesh?.texture ?? t.texture, src = tex?.baseTexture?.resource?.source, fr = tex?.frame;
@@ -177,48 +191,62 @@ function draw(t, st, P, now) {
   if ( dims !== st.dims ) {
     st.dims = dims;
     for ( const c of [st.out, st.mid, st.fin] ) { c.width = W; c.height = H; }
-    st.tmp.width = tw; st.tmp.height = th;
+    st.tmp.width = tw; st.tmp.height = th; st.tkey = null;
     // a canvas that changed size needs a texture of its own
     st.tex.destroy(true);
     st.tex = PIXI.Texture.from(st.fin, { scaleMode: PIXI.SCALE_MODES.NEAREST });
     st.tex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     st.sprite.texture = st.tex;
   }
-  const tctx = st.tmp.getContext("2d"), octx = st.out.getContext("2d"), mctx = st.mid.getContext("2d"), fctx = st.fin.getContext("2d");
-  // 1. the token upside down, on the water's pixel grid (the downscale is what makes it pixel art)
-  tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, tw, th);
-  tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = "high";
-  tctx.save(); tctx.translate(0, th); tctx.scale(1, -1);
-  try { tctx.drawImage(src, fr.x, fr.y, fr.width, fr.height, 0, 0, tw, th); } catch { tctx.restore(); return; }
-  tctx.restore();
+  const octx = st.out.getContext("2d"), mctx = st.mid.getContext("2d"), fctx = st.fin.getContext("2d");
+  // 1. the token upside down, on the water's pixel grid (the downscale is what makes it pixel art). It only changes with the picture
+  //    (a video token: every step): the downscaled copy is kept - reading the token's picture (an ImageBitmap or a canvas on the GPU)
+  //    into this CPU canvas was most of a step's cost (~1 ms)
+  const tkey = `${tex.baseTexture.uid}|${fr.x},${fr.y},${fr.width},${fr.height}|${tw}x${th}`;
+  if ( st.tkey !== tkey || st.tsrc !== src || src instanceof HTMLVideoElement ) {
+    const tctx = st.tmp.getContext("2d");
+    tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, tw, th);
+    tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = "high";
+    tctx.save(); tctx.translate(0, th); tctx.scale(1, -1);
+    try { tctx.drawImage(src, fr.x, fr.y, fr.width, fr.height, 0, 0, tw, th); } catch { tctx.restore(); st.tkey = null; return; }
+    tctx.restore();
+    st.tkey = tkey; st.tsrc = src;
+  }
   // 2. ripple: every row slides sideways on a travelling wave that grows toward the bottom; the wave comes back to where it
   //    started once per loop of the water, `speed` times over
   const loop = Math.max(400, (s.params.frames ?? 16) * (s.params.ms ?? 90)), turn = ((now % loop) / loop) * P.reflectSpeed * Math.PI * 2;
   const freq = P.reflectFreq / 100;
-  octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, W, H);
-  for ( let y = 0; y < th && y < H; y++ ) {
-    const dx = Math.round(amp * (y / th) * Math.sin(turn - y * freq));
-    octx.drawImage(st.tmp, 0, y, tw, 1, mx + dx, y, tw, 1);
-  }
-  // 3. scanline shift: every row jumps by its own random amount (a new throw every step)
-  let cur = st.out;
-  if ( scan > 0 ) {
-    mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H);
-    for ( let y = 0; y < H; y++ ) {
-      const dx = Math.floor(Math.random() * (scan * 2 + 1)) - scan;
-      mctx.drawImage(st.out, 0, y, W, 1, dx, y, W, 1);
+  if ( !(kn && !st.noCpu && !globalThis.CONFIG?.moinenMaps?.noCpuReflect && cpuReflect(st, fctx, kn, P, tw, th, W, H, mx, amp, freq, turn, scan)) ) {
+    if ( kn && !globalThis.CONFIG?.moinenMaps?.noCpuReflect ) st.noCpu = true;   // (a picture that cannot be read: the canvas path from now on)
+    octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, W, H);
+    // (rows that slide by the same amount are copied together: the same pixels in a third of the drawImage calls)
+    for ( let y = 0, rows = Math.min(th, H); y < rows; ) {
+      const dx = Math.round(amp * (y / th) * Math.sin(turn - y * freq));
+      let y1 = y + 1;
+      while ( y1 < rows && Math.round(amp * (y1 / th) * Math.sin(turn - y1 * freq)) === dx ) y1++;
+      octx.drawImage(st.tmp, 0, y, tw, y1 - y, mx + dx, y, tw, y1 - y);
+      y = y1;
     }
-    cur = st.mid;
-  }
-  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.clearRect(0, 0, W, H);
-  fctx.drawImage(cur, 0, 0);
-  // 4. shadow: the silhouette in black
-  if ( P.reflectType === "shadow" ) { fctx.globalCompositeOperation = "source-in"; fctx.fillStyle = "#000"; fctx.fillRect(0, 0, W, H); fctx.globalCompositeOperation = "source-over"; }
-  // 5. blur
-  if ( kn && !blurCanvas(fctx, W, H, kn) ) {
-    // a picture the browser will not let us read: a smooth blur of about the same reach
-    mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H); mctx.drawImage(st.fin, 0, 0);
-    fctx.clearRect(0, 0, W, H); fctx.filter = `blur(${Math.max(kn.w, kn.h) / 6}px)`; fctx.drawImage(st.mid, 0, 0); fctx.filter = "none";
+    // 3. scanline shift: every row jumps by its own random amount (a new throw every step)
+    let cur = st.out;
+    if ( scan > 0 ) {
+      mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H);
+      for ( let y = 0; y < H; y++ ) {
+        const dx = Math.floor(Math.random() * (scan * 2 + 1)) - scan;
+        mctx.drawImage(st.out, 0, y, W, 1, dx, y, W, 1);
+      }
+      cur = st.mid;
+    }
+    fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.clearRect(0, 0, W, H);
+    fctx.drawImage(cur, 0, 0);
+    // 4. shadow: the silhouette in black
+    if ( P.reflectType === "shadow" ) { fctx.globalCompositeOperation = "source-in"; fctx.fillStyle = "#000"; fctx.fillRect(0, 0, W, H); fctx.globalCompositeOperation = "source-over"; }
+    // 5. blur
+    if ( kn && !blurCanvas(fctx, W, H, kn) ) {
+      // a picture the browser will not let us read: a smooth blur of about the same reach
+      mctx.setTransform(1, 0, 0, 1, 0, 0); mctx.clearRect(0, 0, W, H); mctx.drawImage(st.fin, 0, 0);
+      fctx.clearRect(0, 0, W, H); fctx.filter = `blur(${Math.max(kn.w, kn.h) / 6}px)`; fctx.drawImage(st.mid, 0, 0); fctx.filter = "none";
+    }
   }
   // 6. fade with distance from the token
   if ( P.reflectFade > 0 ) {
@@ -248,14 +276,14 @@ function onTick() {
   // not drawn at all
   root.visible = !!(maskTex?.valid && maskSprite?.texture === maskTex);
   if ( !root.visible ) return;
-  const seen = new Set();
+  const seen = new Set(), dl = { t: performance.now() + (globalThis.CONFIG?.moinenMaps?.reflectBudgetMs ?? DRAW_BUDGET_MS) };
   for ( const t of canvas.tokens?.placeables ?? [] ) {
     const doc = t.document;
     if ( !t.visible || (doc.hidden && !game.user.isGM) ) continue;
     seen.add(t.id);
     let st = states.get(t.id);
     if ( !st ) { st = make(t); states.set(t.id, st); }
-    draw(t, st, P, now);
+    draw(t, st, P, now, dl);
   }
   for ( const [id, st] of states ) if ( !seen.has(id) ) { destroyState(st); states.delete(id); }
 }
