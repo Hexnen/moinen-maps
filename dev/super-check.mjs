@@ -725,3 +725,82 @@ export async function superFxCheck() {
   }
   return { ok: rows.every((r) => r.ok), rows, numbers };
 }
+
+/**
+ * HEIGHT in the plough + the official visual-transform API (moinen-pixel-vfx api.visual), on a lane with both modules:
+ *   1 api.visual: a declared offset / lift / rot / scale moves the passives (a shield loop, the flight cape = an adaptive body, the wings) and the ground shadow stays on the floor;
+ *     clearing restores every sprite exactly;
+ *   2 default ("Superhero ignores height" off): a token with document elevation 10 (2 cells) is passed UNDER, the others are ploughed;
+ *   3 option ON: the elevated + flying token is ploughed too and its displayed height (mesh above its ground position) never steps more than the pose's own step
+ *     (no snap to the carrier's height, none at contact, during the push or at the hand-over) and ends at its own hover.
+ * Returns { ok, rows, numbers }.   await (await import("/modules/moinen-maps/dev/super-check.mjs")).superHeightCheck()
+ */
+export async function superHeightCheck({ flight = "invincible-flight-wings-passive-monstrous", allow = 2.5 } = {}) {
+  const M = await mods(), { K } = M, d = D(), rows = [], made = [], numbers = {};
+  const API = game.modules.get("moinen-pixel-vfx")?.api, V = API?.visual;
+  if ( !V?.version || !globalThis.Sequencer ) return { ok: false, rows: [row("moinen-pixel-vfx (api.visual) and Sequencer are active in this world", false)] };
+  await ensureTokens(5, made);
+  const all = canvas.tokens.placeables.filter((t) => !t.document.locked), carrier = all[0], rowT = all.slice(1, 5), tokens = [carrier, ...rowT];
+  const G = canvas.grid.size, R = canvas.dimensions.sceneRect, hoverTok = rowT[1];
+  const saved = canvas.tokens.placeables.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y, elevation: t.document.elevation }));
+  const rest = canvas.tokens.placeables.filter((t) => !tokens.includes(t));
+  for ( const [i, t] of rest.entries() ) await t.document.update({ x: Math.round(R.x + R.width - 2 * G), y: Math.round(R.y + 2 * G + i * 2 * G) }, { animate: false, diff: false });
+  const started = [], raf = () => new Promise((r) => requestAnimationFrame(r));
+  try {
+    /* 1 the API on the passives */
+    await prep(); await layout(carrier, rowT, G, R);
+    for ( const [t, p] of [[carrier, "shield-up"], [carrier, "invincible-flight-specialized-cape-passive-base"], [carrier, flight]] ) { await API.ongoing.start(t, p); started.push([t, p]); }
+    await sleep(2500);
+    const lays = []; for ( const ch of canvas.interface.children ) if ( ch.zIndex === 9000 && ch.sortableChildren && ch.eventMode === "none" ) lays.push(ch); for ( const ch of canvas.primary.children ) if ( ch.constructor === PIXI.Container && ch.sortableChildren && ch.eventMode === "none" && ch.children.length ) lays.push(ch);
+    const near = () => lays.flatMap((l) => l.children).filter((o) => !o.destroyed && Math.hypot(o.position.x - carrier.center.x, o.position.y - carrier.center.y) < 3 * G);
+    const snap = () => near().map((o) => [o.position.x, o.position.y, o.rotation, o.scale.x]);
+    await raf(); await raf(); const a = snap(), mesh0 = [carrier.mesh.position.x, carrier.mesh.position.y];
+    V.set(carrier, { dx: 2 * G, dy: G, lift: G * 0.75, rot: 20, scale: 1.5, source: "supercheck" }); await raf(); await raf(); await raf();
+    const b = snap(), mesh1 = [carrier.mesh.position.x, carrier.mesh.position.y];
+    const moved = a.map((s, i) => b[i] ? [b[i][0] - s[0], b[i][1] - s[1], b[i][2] - s[2], b[i][3] / s[3]] : null);
+    numbers.moved = moved.map((m) => m && m.map((v) => +v.toFixed(2)));
+    const sprites = moved.filter((m) => m && Math.abs(m[0] - 2 * G) < 1.5 && Math.abs(m[1] - G * 0.25) < 1.5), shadows = moved.filter((m) => m && Math.abs(m[0] - 2 * G) < 1.5 && Math.abs(m[1] - G) < 1.5);
+    rows.push(row(`api.visual: ${sprites.length} token-bound sprite(s) move by the offset and the lift (adaptive cape / wings / shield loop), rotated and scaled`, sprites.length >= 2 && sprites.every((m) => Math.abs(m[2] - 20 * Math.PI / 180) < 0.01 && Math.abs(m[3] - 1.5) < 0.01), numbers));
+    rows.push(row(`api.visual: the ground shadow (${shadows.length}) moves with the offset but NOT with the lift (it stays on the floor)`, shadows.length >= 1, numbers));
+    rows.push(row("api.visual: the mesh follows the offset too (the module's own motion table composes with it)", Math.abs(mesh1[0] - mesh0[0] - 2 * G) < 1.5 && Math.abs(mesh1[1] - mesh0[1] - G * 0.25) < 1.5, { mesh0, mesh1 }));
+    V.clear(carrier, "supercheck"); await raf(); await raf(); await raf();
+    const c2 = snap(), diff = Math.max(0, ...a.map((s, i) => c2[i] ? Math.hypot(c2[i][0] - s[0], c2[i][1] - s[1], (c2[i][2] - s[2]) * 100, (c2[i][3] - s[3]) * 100) : 99));
+    rows.push(row(`api.visual: clearing restores every sprite exactly (max diff ${diff.toFixed(3)})`, diff < 0.01 && !V.has(carrier)));
+    for ( const [t, p] of started.splice(0) ) await API.ongoing.stop(t, p);
+    await sleep(1500);
+
+    /* 2 / 3 the plough and the height */
+    const pathRun = async () => {
+      await prep(); const { c } = await layout(carrier, rowT, G, R);
+      const samples = []; let on = true;
+      const loop = () => { if ( !on ) return; samples.push(hoverTok.position.y + hoverTok.h / 2 - hoverTok.mesh.position.y); requestAnimationFrame(loop); };
+      requestAnimationFrame(loop);
+      const r = await run(M, tokens, { pts: line(c, { x: c.x + 15 * G, y: c.y }, 50), settle: 2200 });
+      on = false; return { r, samples, ids: (r.o?.tk?.hit ?? []).map((h) => h.id) };
+    };
+    await hoverTok.document.update({ elevation: 10 }, { animate: false });
+    await API.ongoing.start(hoverTok, flight); started.push([hoverTok, flight]); await sleep(1800);
+    const H = V.baseHeight(hoverTok); numbers.hover = +H.toFixed(1);
+    await game.settings.set(MODULE, "superIgnoreHeight", false);
+    const p2 = await pathRun();
+    numbers.defaultHits = p2.ids.length;
+    rows.push(row(`default: the elevated / flying token is passed under (not collected), the other ${p2.ids.length} are ploughed`, !p2.ids.includes(hoverTok.document.id) && p2.ids.length >= 2, { ids: p2.ids }));
+    key("keydown", { key: "z", ctrlKey: true }); await sleep(1000);
+    await game.settings.set(MODULE, "superIgnoreHeight", true);
+    const p3 = await pathRun();
+    const S = p3.samples; let step = 0; for ( let i = 1; i < S.length; i++ ) step = Math.max(step, Math.abs(S[i] - S[i - 1]));
+    numbers.ignoreStep = +step.toFixed(2); numbers.ignoreEnd = +S.at(-1).toFixed(2); numbers.ignoreMin = +Math.min(...S).toFixed(2);
+    rows.push(row("ignore height ON: the elevated / flying token is ploughed too", p3.ids.includes(hoverTok.document.id), { ids: p3.ids }));
+    rows.push(row(`ignore height ON: its displayed height steps at most ${step.toFixed(2)} px per frame (limit ${(allow + 0.06 * G).toFixed(1)}) and never drops below its hover ${H.toFixed(1)} px (lowest ${Math.min(...S).toFixed(1)})`, step <= allow + 0.06 * G && Math.min(...S) >= H - allow, numbers));
+    rows.push(row(`ignore height ON: it ends at its own hover (${S.at(-1).toFixed(1)} px, no pop at the hand-over)`, Math.abs(S.at(-1) - H) < allow));
+    key("keydown", { key: "z", ctrlKey: true }); await sleep(1000);
+    rows.push(row("nothing is left running and the visual transform is cleared", K._carryStats().active === 0 && !V.has(hoverTok) && !V.has(carrier)));
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
+  finally {
+    try { for ( const [t, p] of started ) await API.ongoing.stop(t, p); Sequencer.EffectManager.endEffects({ name: "supercheck" }); } catch { /* ignore */ }
+    try { await game.settings.set(MODULE, "destrSuper", false); await game.settings.set(MODULE, "superIgnoreHeight", false); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+    try { if ( made.length ) await canvas.scene.deleteEmbeddedDocuments("Token", made); await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)), { animate: false, diff: false }); } catch { /* ignore */ }
+  }
+  return { ok: rows.every((r) => r.ok), rows, numbers };
+}

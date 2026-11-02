@@ -99,6 +99,14 @@ export function displacementAt(tl, el, out, ref = 800) {
 }
 
 /**
+ * HEIGHT CONTINUITY. A hovering / flying token (moinen-pixel-vfx flight or levitation passive: its mesh stands `hover` px above its ground position) that is carried keeps that height
+ * ALL THE WAY: the displayed mesh y is the ground-based position + the ride's offset + the pose lift (negative = up, poseAt) MINUS the base hover. The pose lift is added on top of
+ * the hover, never replaces it; the hover is read live every frame (the owner's own ease in / out / bob stays smooth), so nothing steps at the grab, the lift-off, the landing or the
+ * hand-over. `y` the ground-based mesh y (offset included), `poseLift` as poseAt writes it, `hover` >= 0 px.
+ */
+export const liftedY = (y, poseLift, hover = 0) => y + poseLift - (hover > 0 ? hover : 0);
+
+/**
  * The token's pose at `el` ms (after the front starts; the run lasts `D`): written into `out` { sx, sy, rot, lift, k }.
  *  lift-off (anticipation: a quick squash, then up), flight (leaning and stretched along the travel, a little arc), landing (a damped
  *  squash and wobble). `S` the token's footprint height (scene px), `d` the displacement { ux, uy, sp }.

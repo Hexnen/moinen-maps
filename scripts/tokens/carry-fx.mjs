@@ -10,6 +10,8 @@
  * offset (and lift); the owner puts it back from the document the next frame, so nothing needs restoring and nothing is left over at the hand-over.
  * A sprite is told apart from a static one (a ground effect that nobody resets) by a probe: it is nudged by PROBE px and checked on the next frame (the owner
  * has set it back: attached; still nudged: static, nudged back). Its token is the one whose document centre is nearest to where the owner puts it.
+ * THIS IS NOW ONLY THE FALLBACK: with moinen-pixel-vfx >= 0.2.0 (api.visual.version) carry.mjs declares the ride through the official visual-transform API and never calls follow()
+ * (see README, "Carry, hovering tokens and moinen-pixel-vfx"); the probe stays for older / absent versions so nothing regresses.
  * Pure parts (the probe, the owner) are exported for node tests. Without moinen-pixel-vfx (or without its layers) this does nothing, with no error.
  */
 export const PROBE = 0.4;            // px: far under what is visible, far over a float error

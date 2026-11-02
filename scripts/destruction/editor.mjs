@@ -43,6 +43,7 @@ export function registerEditorSettings(onChange) {
   game.settings.register(MODULE_ID, "carryFree", { scope: "client", config: false, type: Boolean, default: false, onChange: f });
   game.settings.register(MODULE_ID, "carryEnds", { name: "MOINENMAPS.Destr.carryEnds", hint: "MOINENMAPS.Destr.carryEndsHint", scope: "client", config: true, type: String, default: "real",
     choices: { real: "MOINENMAPS.Destr.carryEndsReal", return: "MOINENMAPS.Destr.carryEndsReturn" }, onChange: f });
+  game.settings.register(MODULE_ID, "superIgnoreHeight", { name: "MOINENMAPS.Destr.superIgnoreHeight", hint: "MOINENMAPS.Destr.superIgnoreHeightHint", scope: "client", config: true, type: Boolean, default: false });
   game.settings.register(MODULE_ID, "carrySnap", { name: "MOINENMAPS.Destr.carrySnap", hint: "MOINENMAPS.Destr.carrySnapHint", scope: "client", config: true, type: Boolean, default: false, onChange: f });
 }
 

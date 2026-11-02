@@ -969,6 +969,8 @@
   "MOINENMAPS.Destr.h.free": "On: no snapping at all. The token ends exactly where the stroke ends (free position, between cells) and so do the tokens it pushes, apart from the little room they need not to overlap. Beats 'Snap the carried token to the grid'. Off: the snap setting below decides.",
   "MOINENMAPS.Destr.quickSuper": "Superhero (on/off)",
   "MOINENMAPS.Destr.quickSuperHint": "Superhero: a carried token ploughs through every token in its way. The first one it touches is picked up and pushed ahead of it, and what that one hits is pushed too (up to 12). Only works together with Carry token; with no carried token nothing happens. With 'Moves for real', Ctrl+Z puts them all back.",
+  "MOINENMAPS.Destr.superIgnoreHeight": "Superhero ignores height",
+  "MOINENMAPS.Destr.superIgnoreHeightHint": "Off (default): the plough only meets tokens at its own height; a token that hovers or flies (document elevation, a flying status or a moinen-pixel-vfx flight / levitation passive) is passed under or over. On: it ploughs hovering tokens too; they keep their own height all the way.",
   "MOINENMAPS.Destr.f.super": "Superhero (plough through tokens)",
   "MOINENMAPS.Destr.h.super": "On: the token you carry ploughs through the tokens on its path: each one it touches is pushed ahead of it like by a bulldozer, and passes the push on to the next. Locked and hidden tokens are left alone. With 'Moves for real' every pushed token ends where it was pushed (never two on one cell) and Ctrl+Z puts them all back; 'Returns' moves nobody. Needs Carry token; without a carried token nothing happens.",
   "MOINENMAPS.Destr.bakingCount": "{done}/{total} strokes, about {eta} s left",
