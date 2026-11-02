@@ -53,12 +53,11 @@ const depOnly = new Set();           // strokes whose new record differs only by
 const depStats = { swaps: 0 };
 let shownRecs = new Map();           // stroke id -> record on screen (its older look stays until the new one is here)
 const staleRecs = new Map();         // stroke id -> its look from an older bake version (shown until its new record is in)
-const waitingSince = new Map();      // player: record key -> when its chunk was first missed (bake it here after AWAIT_CHUNK)
+const waitingSince = new Map();      // player: record key -> { t: when its chunk was first missed, wait } (bake it here after Policy.awaitChunk)
 let netAbort = null, persisting = null, persistAgain = false;
 let reshow = null;                   // the latest pass's show(): records that got their pixels go on screen through it
 let compositeShown = null;           // the settled composite the display draws its shells' bands from (composite.mjs)
 let compositeTimer = 0, compositeTries = 0;
-const AWAIT_CHUNK = 12000;
 /** Strokes to bake on a scene load from which on the bake is spread over several workers and shown as it comes. */
 /** Bytes of pixels one message to a worker carries at most when many go one after another (a copy of ~6 MB is ~5 ms on the page). */
 const POST_BYTES = 6 << 20;
@@ -150,7 +149,7 @@ function teardown() {
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
   Editor.teardown();
-  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null;
+  clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null; clearTimeout(settleTimer); settleTimer = 0; settleTries = 0;
   if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
   compositeShown?.destroy(); compositeShown = null; reshow = null;
   display?.destroy(); display = null;
@@ -416,7 +415,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   if ( S !== S0 ) return;   // a newer state arrived meanwhile: the next pass (queued) shows it, with what landed here kept
 
   // 2. strokes nobody has published (yet): a player waits for the GM's chunk, per stroke, and bakes only what is still missing after
-  // AWAIT_CHUNK; a chunk that was named but could not be had (gone, broken) is baked at once
+  // Policy.awaitChunk; a chunk that was named but could not be had (gone, broken) is baked at once
   let toBake = missing();
   // a COMPATIBLE older bake version's look (bake-policy.mjs BAKE_VERSIONS: only details changed) stands as final: those strokes are
   // re-baked later - in the background when this tab is idle, on "Rebake all", or at once (client setting). Players never bake them.
@@ -433,15 +432,18 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   status.compat = deferred.size ? { from: Policy.verOf(M.base), to: Policy.verOf(base), left: deferred.size, of: want.length, mode } : null;
   const broken = new Set(failed.map((w) => w.rk));
   // the GM's chunk is only expected when a GM is here AND the manifest is of this bake version (or there is none yet): a manifest
-  // of another bake version means the GM's client runs other code - waiting would only delay the scene by AWAIT_CHUNK
+  // of another bake version means the GM's client runs other code - waiting would only delay the scene by the wait
   // (with the older look on screen meanwhile, waiting costs nothing: the GM's client publishes the new version for everyone)
   const sameVersion = !M || String(M.base).split(":")[0] === String(base).split(":")[0] || !!src.stale;
   if ( toBake.length && !force && awaitPublish && !game.user.isGM && game.users.activeGM && sameVersion ) {
     const t = Date.now();
-    for ( const w of toBake ) if ( !waitingSince.has(w.rk) ) waitingSince.set(w.rk, t);
-    const late = toBake.filter((w) => broken.has(w.rk) || t - waitingSince.get(w.rk) >= AWAIT_CHUNK);
+    // (a client already on the scene waits longer than a scene load: the GM is baking what he just painted, bake-policy.mjs awaitChunk;
+    // the wait is fixed by the pass that first missed the chunk - the pass that ends the wait is no longer a scene load)
+    for ( const w of toBake ) if ( !waitingSince.has(w.rk) ) waitingSince.set(w.rk, { t, wait: Policy.awaitChunk(firstLoad) });
+    const due = (w) => waitingSince.get(w.rk).t + waitingSince.get(w.rk).wait;
+    const late = toBake.filter((w) => broken.has(w.rk) || t >= due(w));
     if ( late.length < toBake.length ) {
-      const next = Math.min(...toBake.filter((w) => !late.includes(w)).map((w) => waitingSince.get(w.rk) + AWAIT_CHUNK)) - t;
+      const next = Math.min(...toBake.filter((w) => !late.includes(w)).map(due)) - t;
       clearTimeout(bakeTimer);
       bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, Math.max(50, next));
     }
@@ -636,6 +638,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   // (during a Rebake all the manifest is written once, at its end)
   if ( game.user.isGM && complete && !status.rebake ) schedulePersist(src.baked + src.legacy);
   maybeBlast(firstLoad);
+  if ( !firstLoad && (src.chunk || src.baked || src.legacy) ) scheduleSettleRedraw();
 }
 
 /**
@@ -723,6 +726,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   display ??= new DestructionDisplay();
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
+  display.onGone ??= () => tell("gone");        // (an area finished fading out: the flooded holes that were kept for its water are let go)
   display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
   // the areas already on screen need no pixels (the display keeps them by hash; a shell's pixels replace it)
@@ -1345,6 +1349,36 @@ function pumpRebake(ms = REBAKE_EVERY) {
 export function rebakePause(paused = true) { if ( status.rebake ) { status.rebake.paused = paused; tell("status"); if ( !paused ) pumpRebake(50); } }
 export function rebakeCancel() { rebakeQueue = []; clearTimeout(rebakeTimer); if ( status.rebake ) { Trace.event("rebake-cancel", status.rebake); status.rebake = null; tell("status"); schedulePersist(0); } }
 
+/* ---------------------------------------------------------------- the player's bands once a warm update has settled */
+
+/*
+ * The static cache draws a band when its members change and keeps it while they stay the same (static-cache.mjs). On a client already on
+ * the scene the members came in over a few seconds - new strokes, swapped looks, entries that ended, hydrated shells - and a band drawn in
+ * the middle of that kept what it saw then, until something else touched it: the picture here stayed short of the GM's by a block or a
+ * stroke (shown.max 14-44, 0 requests, no warm event; one full redraw of the bands cured it every time). The GM's client draws its bands
+ * afresh when it publishes the composite; a player never did. So: once a warm update's looks are all on screen and nothing moves any
+ * more, the player draws its bands once more (one frame, ~0.1 s, the same pixels where they were right). Never on the GM, never on a scene
+ * load. `CONFIG.moinenMaps.noSettleRedraw = true`: off (A/B).
+ */
+let settleTimer = 0, settleTries = 0;
+function scheduleSettleRedraw(ms = 2500) {
+  if ( game.user.isGM || globalThis.CONFIG?.moinenMaps?.noSettleRedraw ) return;
+  clearTimeout(settleTimer);
+  const my = gen;
+  settleTimer = setTimeout(() => {
+    settleTimer = 0;
+    const C = display?.cache;
+    if ( my !== gen || !S || !C ) return;
+    // (not while anything is on its way: a pass, a wait for a chunk, an entry, a fade, a warm swap - the end of each asks again)
+    const busy = inflight || status.baking || status.waiting || warmTimer || warmHold || display.dying.length || display.enterQueue?.size || display.pending?.size
+      || [...display.groups.values()].some((g) => g.anim || g.fade || g.made < g.pieces.length);
+    if ( busy && ++settleTries < 15 ) return scheduleSettleRedraw(2000);
+    settleTries = 0;
+    C.invalidate();
+    Trace.event("settle-redraw", { groups: display.groups.size, bands: C.bands?.length ?? 0 });
+  }, ms);
+}
+
 /* ---------------------------------------------------------------- warm refresh (a client on the scene while the GM republishes) */
 
 /*
@@ -1373,12 +1407,51 @@ function warmStale() {
   S.objects.forEach((o, index) => {
     if ( o.k ) return;
     const rk = `${base}|${o.id}|${FS[index].sig}`, r = recs.get(rk), e = Store.entryOf(M, o.id);
-    if ( Policy.chunkChanged(r, e, FS[index].sig) && !(t - (warmBad.get(e.id) ?? -1e9) < WARM_RETRY) ) list.push({ r, e, rk, index });
+    // (a record baked here that the verification found other than the GM's chunk: `r.mismatch` names the chunk it differs from)
+    const changed = Policy.chunkChanged(r, e, FS[index].sig) || !!(r && e && r.mismatch && r.mismatch === e.id && e.sig === FS[index].sig);
+    if ( changed && !(t - (warmBad.get(e.id) ?? -1e9) < WARM_RETRY) ) list.push({ r, e, rk, index });
   });
   return list.length ? prioritise(list, objectsIn()) : list;
 }
+/**
+ * Player: the records baked HERE (the GM's chunk had not come within the wait) of strokes the manifest now names a chunk for under the same
+ * signature. They were never compared with the GM's chunk, so a bake that came out other than his stayed on this screen for good (no fetch,
+ * no warm event: "warm player stuck", 0 requests). [{ r, e, rk, index }].
+ */
+function warmLocal() {
+  if ( game.user.isGM || !S || !S.enabled || !Store.hasSigs(S) || status.rebake || status.baking ) return [];
+  const M = Store.manifestOf(S), scene = canvas.scene, bg = backgroundInfo()?.path ?? "", base = Store.baseKey(scene, S, bg);
+  if ( !M || !Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg)) ) return [];
+  const FS = Store.sigsOf(S), list = [];
+  S.objects.forEach((o, index) => {
+    if ( o.k ) return;
+    const rk = `${base}|${o.id}|${FS[index].sig}`, r = recs.get(rk), e = Store.entryOf(M, o.id);
+    if ( Policy.localUnverified(r, e, FS[index].sig) && r.checked !== e.id ) list.push({ r, e, rk, index });
+  });
+  return list;
+}
+/** Encode the local bakes (in the codec worker): those that came out as the GM's chunk adopt its id; the others are marked `mismatch` (warmStale then fetches the GM's chunk). */
+async function warmVerify(local, M) {
+  const my = gen, S0 = S;
+  const out = await encodeBatched(local.map((w) => ({ key: w.rk, sprites: w.r.sprites })));
+  if ( my !== gen || S !== S0 ) return;
+  const byKey = new Map(out.map((o) => [o.key, o])); let swap = 0;
+  for ( const w of local ) {
+    if ( recs.get(w.rk) !== w.r ) continue;
+    w.r.checked = w.e.id;
+    if ( Policy.verifyVerdict(byKey.get(w.rk)?.id, w.e) === "same" ) { w.r.id = w.e.id; w.r.dir = M.dir; w.r.baked = false; w.r.ver = w.e.ver ?? w.r.ver; }
+    else { w.r.mismatch = w.e.id; swap++; }
+  }
+  Trace.event("warm-verify", { n: local.length, swap });
+}
 async function warmGo(force) {
-  const run = ++warmRun, list = warmStale();
+  const run = ++warmRun, local = warmLocal();
+  if ( local.length ) {
+    const my0 = gen, S1 = S;
+    try { await warmVerify(local, Store.manifestOf(S)); } catch ( err ) { console.warn(`${MODULE_ID} | destruction: warm verify`, err); }
+    if ( my0 !== gen || S !== S1 || run !== warmRun ) return;
+  }
+  const list = warmStale();
   if ( !list.length ) return;
   const my = gen, S0 = S, M = Store.manifestOf(S);
   if ( list.length > WARM_MANY && !force && !Net.bundlesFor(list.map((w) => w.e.id)).length && (!warmSince || Date.now() - warmSince < WARM_HOLD) ) {
@@ -1411,7 +1484,7 @@ async function warmGo(force) {
   const tick = setInterval(() => { if ( pend && live() ) flush(); }, 120);
   try { await Promise.all(Array.from({ length: Math.min(WARM_PARALLEL, list.length) }, worker)); }
   finally { clearInterval(tick); }
-  if ( my === gen && landed ) { await flush(); Trace.event("warm-done", { n: landed, of: list.length, swaps: depStats.swaps }); }
+  if ( my === gen && landed ) { await flush(); Trace.event("warm-done", { n: landed, of: list.length, swaps: depStats.swaps }); scheduleSettleRedraw(); }
   if ( my === gen && S === S0 && run === warmRun && next >= list.length ) warmCheck(500);     // (what could not be had waits WARM_RETRY; a manifest that changed meanwhile is read again)
 }
 Hooks.on("updateScene", (scene, changed) => {

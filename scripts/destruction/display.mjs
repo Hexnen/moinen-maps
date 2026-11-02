@@ -1698,7 +1698,7 @@ export class DestructionDisplay {
       }
       const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / 260);
       g.cont.alpha = 1 - f;
-      if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); }
+      if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); this.onGone?.(g); }     // (the flooded holes let go of the water of an area that has faded out: flood.mjs sync)
     }
     lap("erase+dying");
     this.trimPixelPool();

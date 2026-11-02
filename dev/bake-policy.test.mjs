@@ -4,7 +4,7 @@
  * Run: node dev/bake-policy.test.mjs
  */
 import assert from "node:assert/strict";
-import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS, strokeVersion, olderLook, parseEntry, entryString, rebakeOrder, entryChoice, chunkChanged, plainCurrent } from "../scripts/destruction/bake-policy.mjs";
+import { manifestRule, mayPublish, Breaker, verOf, compatible, BAKE_VERSIONS, strokeVersion, olderLook, parseEntry, entryString, rebakeOrder, entryChoice, chunkChanged, plainCurrent, awaitChunk, AWAIT_LOAD, AWAIT_WARM, localUnverified, verifyVerdict } from "../scripts/destruction/bake-policy.mjs";
 
 let passed = 0;
 const test = (name, fn) => { try { fn(); passed++; console.log("ok  ", name); } catch ( err ) { console.error("FAIL", name, err); process.exitCode = 1; } };
@@ -270,6 +270,39 @@ test("Rebake all is independent of the order of its batches: a plain look under 
   assert.equal(newRule.size, 1, "the current-code rule gives the same chunks for any order");
   assert.equal(new Set([3, 7, 24].map((n) => rebake(orders[0], n, "new"))).size, 1, "and any batch size");
   assert.equal(plainCurrent(3, false, 5), true); assert.equal(plainCurrent(3, true, 5), false); assert.equal(plainCurrent(5, true, 5), true);
+});
+
+test("warm player: waits for the GM's chunk of a freshly painted stroke, bakes only as a last resort, and checks a local bake against the GM's chunk", () => {
+  // the player's decision at time t: the stroke has no entry in the manifest until the GM publishes (at `publishAt`)
+  const timeline = (firstLoad, publishAt, localId) => {
+    const wait = awaitChunk(firstLoad), seen = 0, log = { bakedAt: null, tookChunk: false, swap: false };
+    if ( publishAt <= seen + wait ) { log.tookChunk = true; return log; }                 // the manifest arrives while waiting: fetched, no bake
+    log.bakedAt = seen + wait;                                                           // last resort: baked here, the record has no chunk of its own
+    const r = { id: null, baked: true, sprites: [{}] }, e = { sig: "s", id: "dGM" };
+    assert.equal(chunkChanged(r, e, "s"), false, "chunkChanged alone never replaces a local bake");
+    assert.equal(localUnverified(r, e, "s"), true, "but the manifest arriving later makes it checked");
+    log.swap = verifyVerdict(localId, e) === "swap";
+    return log;
+  };
+  assert.deepEqual(timeline(false, 25000, "x"), { bakedAt: null, tookChunk: true, swap: false }, "a GM that needs 25 s: no bake on a warm player");
+  assert.deepEqual(timeline(false, 55000, "x"), { bakedAt: null, tookChunk: true, swap: false });
+  assert.equal(timeline(false, 90000, "dGM").bakedAt, AWAIT_WARM, "a GM that never comes: the last resort after the warm wait");
+  assert.equal(timeline(true, 25000, "x").bakedAt, AWAIT_LOAD, "a scene load keeps its short wait");
+  assert.equal(timeline(false, 90000, "dGM").swap, false, "a local bake equal to the GM's chunk adopts its id");
+  assert.equal(timeline(false, 90000, "dOther").swap, true, "a local bake that differs is replaced by the GM's chunk");
+  assert.ok(AWAIT_WARM > 30000 && AWAIT_LOAD < AWAIT_WARM);
+});
+
+test("localUnverified: only a record baked here with pixels, for the entry's own signature", () => {
+  const e = { sig: "a", id: "d1" }, r = { id: null, baked: true, sprites: [{ img: 1 }] };
+  assert.equal(localUnverified(r, e, "a"), true);
+  assert.equal(localUnverified({ ...r, id: "d1" }, e, "a"), false, "it has a chunk already (chunkChanged covers it)");
+  assert.equal(localUnverified({ ...r, baked: false }, e, "a"), false, "loaded from a chunk");
+  assert.equal(localUnverified({ ...r, shell: true }, e, "a"), false, "a shell has no pixels here");
+  assert.equal(localUnverified({ ...r, sprites: Object.assign([], { lean: true }) }, e, "a"), false, "let go of its pixels");
+  assert.equal(localUnverified(r, e, "b"), false, "another signature");
+  assert.equal(localUnverified(r, undefined, "a"), false, "no entry yet");
+  assert.equal(verifyVerdict(null, e), "swap", "nothing encoded: take the GM's chunk");
 });
 
 console.log(`${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);
