@@ -68,13 +68,22 @@ function followFx() {
   const ids = new Set(riders.map((r) => r.id));
   Fx.follow(riders.map((r) => ({ ...r, x: r.cx, y: r.cy })), others.filter((o) => !ids.has(o.id)).map((o) => ({ ...o, x: o.cx, y: o.cy })));
 }
+/**
+ * EARLY pass (before moinen-pixel-vfx's own tickers): with the official API the sprites read the declared transform in THEIR tick, so it has to be declared before it: the offset of this
+ * frame is computed here (the late tick below reuses the same `now`, so the mesh and the sprites agree to the pixel). Without this the sprites would trail the mesh by one frame.
+ */
+function early() {
+  const now = performance.now();
+  for ( const c of ACTIVE.values() ) if ( c.V && c.visual && !c.dead && c.base ) { c.fnow = now; try { if ( c.step(now) ) { c.lift = P_.lift; c.declare(); } } catch ( err ) { dbg("carry early", err); } }
+}
 function tick(frames) {
   const dt = Math.min(frames / 60, 0.05), now = performance.now();
-  for ( const c of ACTIVE.values() ) c.update(dt, now);          // (a carry that ends deletes itself: safe while iterating a Map)
+  for ( const c of ACTIVE.values() ) c.update(dt, c.fnow ?? now);          // (a carry that ends deletes itself: safe while iterating a Map)
   try { followFx(); } catch ( err ) { dbg("carry fx", err); }
-  if ( !ACTIVE.size ) { canvas.app?.ticker?.remove(tick); ticking = false; }
+  for ( const c of ACTIVE.values() ) c.fnow = null;
+  if ( !ACTIVE.size ) { canvas.app?.ticker?.remove(tick); canvas.app?.ticker?.remove(early); ticking = false; }
 }
-function startTicker() { if ( !ticking && canvas.app?.ticker ) { canvas.app.ticker.add(tick, undefined, -10); ticking = true; } }       // (late: after the effects' own listeners, before the render at -25)
+function startTicker() { if ( !ticking && canvas.app?.ticker ) { canvas.app.ticker.add(early, undefined, 100); canvas.app.ticker.add(tick, undefined, -10); ticking = true; } }       // (late: after the effects' own listeners, before the render at -25)
 
 function sortNextTo(obj, token, step) {
   const m = token.mesh;
@@ -268,7 +277,7 @@ class Carry {
       // the hover is not ours to drop: Foundry's natural place lacks it, the vfx tick adds it next frame; do it now so the hand-over does not blink one frame at ground level
       const h = hoverOf(this.token, this.V); if ( h > 0 && this.token.mesh && !this.token.mesh.destroyed ) this.token.mesh.position.y -= h;
     }
-    if ( !ACTIVE.size && ticking ) { canvas.app?.ticker?.remove(tick); ticking = false; }
+    if ( !ACTIVE.size && ticking ) { canvas.app?.ticker?.remove(tick); canvas.app?.ticker?.remove(early); ticking = false; }
   }
 }
 
