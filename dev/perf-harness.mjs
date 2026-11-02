@@ -1987,3 +1987,77 @@ export async function partsBench({ ms = 4500 } = {}) {
     animate: Object.fromEntries(["erode", "lives", "effects", "cause", "e_unflat", "e_clockOf", "e_rev+crev", "e_clockJobs", "e_list", "e_gpuEnter", "e_debris"].map((k) => [k, { med: q(live.map((r) => r.sub?.[k] ?? 0), 0.5), p95: q(live.map((r) => r.sub?.[k] ?? 0), 0.95), sumAll: sum(live, (r) => r.sub?.[k] ?? 0), sumSpikes: sum(spike, (r) => r.sub?.[k] ?? 0) }])),
     spikes: spike.map((r) => [r.t, +r.cpu.toFixed(0), Object.entries(r.by).filter(([, v]) => v > 3).map(([k, v]) => `${k}:${v.toFixed(0)}`).join(" ") + ` fill ${r.fill.join("/")}`]) };
 }
+
+/**
+ * PAINT -> WARM PLAYER (the everyday case: a player already on the scene while the GM paints new strokes). Two pages, two origins, the same
+ * window size. 1. PLAYER: `markWarm()` (remembers the trace and the request count). 2. GM: `paintRun({ n: 18 })` paints n strokes of every type / level /
+ * cause (positions spread over the scene, a few overlapping), waits for the bake, the publish and the settled composite, then `shareMeans(name)`.
+ * 3. PLAYER: `warmPaintCheck(name)`: polls `diffShared` until shown.max <= 8 (bar: within `maxS` = 20 s of the call) and reports the player's local bakes
+ * since `markWarm` (bar: 0 - the GM's chunk is fetched, never baked here when the GM publishes within the wait), the warm-verify results, the stale
+ * flood holes and the hole water. Returns { pass, converged, seconds, bakes, ... }.
+ */
+export function markWarm() {
+  const A = game.modules.get("moinen-maps").api.destruction;
+  window.__warmMark = { ev: A.net.trace().events.length, req: A.net.stats().requests, o: A.state()?.o?.length ?? 0 };
+  return window.__warmMark;
+}
+export async function paintRun({ n = 18, name = "paint-gm", maxS = 90, seed = 1 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, T = A.net.trace, n0 = T().events.length, t0 = performance.now();
+  const types = ["blast", "cracks", "gash", "collapse", "scorch", "flood"], causes = [0, 1, 2, 3, 5, 9], r = canvas.dimensions.sceneRect;
+  let rs = seed * 9301 + 49297; const rnd = () => (rs = (rs * 9301 + 49297) % 233280) / 233280;
+  const at0 = canvas.scene.flags[MODULE]?.destruction?.baked?.at ?? 0, c0 = canvas.scene.flags[MODULE]?.destructionComposite?.at ?? 0;
+  for ( let i = 0; i < n; i++ ) {
+    A.paint(r.x + 80 + rnd() * (r.width - 160), r.y + 80 + rnd() * (r.height - 160), 35 + Math.round(rnd() * 30), { type: types[i % types.length], level: 1 + (i % 3), cause: causes[(i * 5) % causes.length] });
+    await new Promise((res) => setTimeout(res, 400));
+  }
+  // (the GM's own pass: bake, publish, then the settled composite - frames are not stepped here, the ticker runs on a fronted page)
+  while ( performance.now() - t0 < maxS * 1000 ) {
+    await new Promise((res) => setTimeout(res, 500));
+    const st = A.status({ fast: true }), F = canvas.scene.flags[MODULE];
+    if ( (F?.destruction?.baked?.at ?? 0) !== at0 && !st.baking && !st.waiting && (F?.destructionComposite?.at ?? 0) !== c0 ) break;
+  }
+  await new Promise((res) => setTimeout(res, 3000));
+  const share = await shareMeans(name);
+  return { painted: n, seconds: Math.round((performance.now() - t0) / 100) / 10, share, events: T().events.slice(n0).map((e) => e.reason).filter((x) => /^(bake|publish|composite-published)$/.test(x)) };
+}
+export async function warmPaintCheck(name = "paint-gm", { maxS = 20, want = 8 } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, mark = window.__warmMark ?? { ev: 0, req: 0, o: 0 };
+  const w = await warmWatch(name, { maxS, want }), ev = A.net.trace().events.slice(mark.ev);
+  const bakes = ev.filter((e) => e.reason === "bake").map((e) => ({ why: e.data?.why, n: e.data?.n }));
+  const verify = ev.filter((e) => e.reason === "warm-verify").map((e) => e.data);
+  const f = w.flood, settle = ev.filter((e) => e.reason === "settle-redraw").length, stale = bandsStaleCheck();
+  return { settle, stale, pass: w.converged && stale.pass && !bakes.length && !f.readyWithoutWater.length && !f.staleHoles.length, converged: w.converged, seconds: w.seconds, series: w.series, bakes, verify,
+    newStrokes: (A.state()?.o?.length ?? 0) - mark.o, requests: w.requests, flood: f, warm: w.warm };
+}
+
+/**
+ * WHICH BAND IS STALE (a warm player whose picture differs from the GM's `shareMeans(name)` and `cache.invalidate()` cures it): each band of the
+ * static cache is dropped in turn (the others keep their textures) and drawn again; the diff after it says whether that band was the stale
+ * one. -> [{ L, members, shared, newest (members not in the composite), before, after }] for the bands whose redraw lowered shown.max.
+ */
+export async function bandBisect(name = "paint-gm", { over = 8 } = {}) {
+  const d = D(), C = d.cache, out = [], base = (await diffShared(name)).shown.max;
+  const comp = d.composite;
+  for ( const b of [...C.bands] ) {
+    if ( !b.tiles.length ) continue;
+    C.bands = C.bands.filter((q) => q !== b); C.sig = ""; step(5); await new Promise((r) => setTimeout(r, 50)); step(5);
+    const after = (await diffShared(name)).shown.max;
+    if ( after + 3 < base ) out.push({ L: b.meta.L, members: b.hashes.length, shared: b.tiles.some((t) => t.shared), newest: b.hashes.filter((h) => !comp?.index?.areas?.[h]).length, rect: b.meta.rect, before: base, after });
+    if ( after <= over ) break;
+  }
+  return out;
+}
+
+/**
+ * STALE BANDS (one page, no GM needed): the cache's picture is taken, every band is drawn again (cache.invalidate; the composite stays), and
+ * the picture once more. A band that was drawn while its members were still arriving (a warm player, the first minutes after the GM painted)
+ * differs here: shown.max 14-15 before the player's settle redraw (destruction.mjs scheduleSettleRedraw). -> { views: [[view, max, blocks over 8]], pass }.
+ */
+export function bandsStaleCheck() {
+  const d = D(), views = divergeViews();
+  step(10);
+  const ref = views.map((region) => blockMeans({ region }));
+  d.cache.invalidate(); step(4);
+  const rows = views.map((region, i) => { const x = blockDiff(ref[i], blockMeans({ region })); return [i, x.max, x.blocksOver]; });
+  return { views: rows, pass: rows.every((r) => r[1] <= 8) };
+}

@@ -151,6 +151,24 @@ export function entryChoice(e, sig, r, known = () => false) {
 export const chunkChanged = (r, e, sig) => !!(r && e && r.id && !r.baked && e.sig === sig && e.id !== r.id);
 
 /**
+ * A player waits for the GM's chunk of a stroke nobody published yet and bakes it here only as a last resort. A scene load waits
+ * AWAIT_LOAD (the reveal never waits for it, and a GM that does not publish is noticed soon); a client already on the scene waits
+ * AWAIT_WARM: the GM bakes what he painted (a burst of 18 strokes on a loaded machine took 25-30 s of bake, upload and manifest), so a
+ * player that baked after 12 s did the same work twice in the middle of the session and kept its own copy.
+ */
+export const AWAIT_LOAD = 12000, AWAIT_WARM = 60000;
+export const awaitChunk = (firstLoad) => (firstLoad ? AWAIT_LOAD : AWAIT_WARM);
+
+/**
+ * A record baked HERE (no chunk of its own) of a stroke the manifest now names a chunk for under the same signature: the GM's chunk is
+ * the picture everybody shares, so this client checks its own bake against it (the id its pixels encode to) and takes the GM's chunk
+ * when they differ. No pixels here (`lean`, a shell): nothing to encode.
+ */
+export const localUnverified = (r, e, sig) => !!(r && e && r.baked && !r.id && !r.shell && r.sprites && !r.sprites.lean && e.sig === sig && e.id);
+/** The id the local pixels encode to against the manifest's chunk: "same" (the record adopts the chunk's id) or "swap" (the GM's chunk is fetched). */
+export const verifyVerdict = (localId, e) => (localId && e && localId === e.id ? "same" : "swap");
+
+/**
  * Rebake all, the plain looks the strokes over them are baked on (substrate.mjs): `current` - only a look the current code baked (`ver` is
  * its record's bake version), never one read back from a chunk of an older version that the stroke's own pass replaces in a later batch.
  */
