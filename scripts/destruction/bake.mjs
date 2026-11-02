@@ -24,7 +24,7 @@ function start() {
   workerMap = "";
   worker.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
-    if ( m.progress !== undefined ) return p.onProgress?.(m.progress);
+    if ( m.progress !== undefined ) { p.arm?.(); return p.onProgress?.(m.progress); }     // (a bake that keeps reporting progress is not stuck: the watchdog starts again)
     pending.delete(m.id); clearTimeout(p.watchdog);
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
   };
@@ -43,8 +43,10 @@ function call(msg, transfer = [], onProgress = null) {
     let w;
     try { w = start(); } catch ( err ) { reject(err); return; }
     const id = nextId++;
-    const watchdog = setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
-    pending.set(id, { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog });
+    const rec = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: 0 };
+    rec.arm = () => { clearTimeout(rec.watchdog); rec.watchdog = setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG); };
+    rec.arm();
+    pending.set(id, rec);
     w.postMessage({ id, ...msg }, transfer);
   });
 }
@@ -145,8 +147,11 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     extra.push(w);
     let id = 0;
     const ask = (msg, transfer = []) => new Promise((resolve, reject) => {
-      const my = ++id, timer = setTimeout(() => reject(new Error("the destruction bake took too long")), WATCHDOG);
-      const on = (ev) => { const m = ev.data; if ( m.id !== my || m.progress !== undefined ) return; w.removeEventListener("message", on); clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      const my = ++id;
+      let timer = 0;
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => { w.removeEventListener("message", on); reject(new Error("the destruction bake took too long")); }, WATCHDOG); };
+      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) return arm(); w.removeEventListener("message", on); clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      arm();
       w.addEventListener("message", on);
       w.postMessage({ id: my, ...msg }, transfer);
     });

@@ -8,6 +8,7 @@ import { MODULE_ID } from "../config.mjs";
  * The pixel art is drawn on a grid twice as fine as the mask ("art pixels", AP scene pixels each, about 32 per grid square: the
  * pixel-art standard of moinen-pixel-vfx), so the torn outline can be ragged at art-pixel scale while the mask stays small.
  */
+import { pinDiff, samePr } from "./stroke-params.mjs";
 export const FLAG = "destruction";
 /** The stroke objects of layout 3, one flag key per stroke: `destructionObjects.<id>` = the object (with its path), `s` its place. */
 export const OBJS = "destructionObjects";
@@ -26,7 +27,7 @@ export const K = 2;
 const MAX_ART = 4e6;          // art pixels of the whole scene (2000 x 2000): above that the art pixel grows, so a bake never exceeds ~100 MB
 
 export const PARAM_DEFAULTS = { debris: 0.7, scatter: 1, lift: 1, rubble: 0.6, halo: 0.6, edge: 0.7, material: "auto", jagged: false, jag: 0.6, directional: false,
-  anim: true, idle: true, fxWho: "all", entry: true, entrySpeed: 1, entryPower: 1, cause: 0 };
+  anim: true, idle: true, fxWho: "all", entry: true, entrySpeed: 1, entryPower: 1, cause: 0, pin: false };
 export const LIMITS = { debris: [0, 1], scatter: [0.3, 2], lift: [0, 1.6], rubble: [0, 1], halo: [0, 1], edge: [0, 1], jag: [0.1, 1], entrySpeed: [0.4, 2.5], entryPower: [0.3, 1.6] };
 
 let REV = 0;
@@ -113,13 +114,14 @@ export function objBytes(o) {
 }
 
 /** A new object from a full-grid buffer of levels (0 = not painted) inside `box` (mask px). */
-export function makeObject(buf, mw, box, { id, erase = false, type = 0, path = null, cause = 0 } = {}) {
+export function makeObject(buf, mw, box, { id, erase = false, type = 0, path = null, cause = 0, pr = null } = {}) {
   const w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1, b = new Uint8Array(w * h);
   for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) b[y * w + x] = buf[(box.y0 + y) * mw + box.x0 + x] & 3;
   const o = { id, k: erase ? 1 : 0, t: type & 7, x0: box.x0, y0: box.y0, w, h, m: rleEncode(b) };
   // its cause, only when it has one (an unspecified stroke stays as it was stored before causes existed)
   const c = causeOf(cause);
   if ( c && !erase ) o.c = c;
+  if ( pr && !erase && Object.keys(pr).length ) o.pr = { ...pr };
   if ( path?.length ) o.p = path;
   boxBytes.set(o, b);
   return o;
@@ -132,6 +134,30 @@ export function withCause(o, cause) {
   if ( c && !o.k ) n.c = c;
   const b = boxBytes.get(o); if ( b ) boxBytes.set(n, b);
   return n;
+}
+
+/** A copy of a stroke object with its look settings pinned to `pr` (undefined: none, the defaults) and, with `cause` given, that cause. */
+export function withPin(o, pr, cause) {
+  const n = { ...o };
+  delete n.pr;
+  if ( pr && Object.keys(pr).length && !o.k ) n.pr = { ...pr };
+  if ( cause !== undefined ) { delete n.c; const c = causeOf(cause); if ( c && !o.k ) n.c = c; }
+  const b = boxBytes.get(o); if ( b ) boxBytes.set(n, b);
+  const was = formerId.get(o); if ( was ) formerId.set(n, was);       // (its path is filed under the id it had before it was renamed)
+  return n;
+}
+
+/**
+ * A scene from before pinning (`params.pin` not set): its look settings become its strokes' own (the settings it was baked with:
+ * `pr` for what differs from the defaults, `c` the scene's default cause for a stroke without one), so the bakes are the same and
+ * a later change of a setting only reaches new strokes. The same on every client; a scene at the defaults changes nothing but the flag.
+ */
+export function pinStrokes(S) {
+  if ( S.params.pin ) return S;
+  const pr = pinDiff(S.params), cause = causeOf(S.params.cause);
+  if ( pr || cause ) S.objects = (S.objects ?? []).map((o) => o.k || o.pr || ((o.c | 0) && !pr) ? o : withPin(o, pr, (o.c | 0) || cause));
+  S.params = { ...S.params, pin: true };
+  return S;
 }
 
 /** The composite mask: objects in order, a later one wins where it is painted, an erase clears. */
@@ -222,7 +248,7 @@ export function objectsFromMask(mask, mw, mh) {
 
 export function blank(scene = canvas.scene) {
   const ap = artPx(scene), g = grids(ap);
-  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), objects: [], seen: new Set(), dropOk: new Set(), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [] };
+  return { ap, ...g, mask: new Uint8Array(g.mw * g.mh), objects: [], seen: new Set(), dropOk: new Set(), seed: 1 + Math.floor(Math.random() * 99998), params: { ...PARAM_DEFAULTS, pin: true }, enabled: true, blast: null, baked: null, rev: nextRev(), entries: [] };
 }
 
 export function load(scene = canvas.scene) {
@@ -238,6 +264,7 @@ export function load(scene = canvas.scene) {
   // the stroke ids this client has seen stored: a save deletes only those (never a stroke another client added meanwhile)
   S.seen = new Set(S.objects.map((o) => o.id));
   S.dropOk = new Set();                                // strokes undone / cleared here on purpose (a save may delete them)
+  pinStrokes(S);
   composite(S);
   return S;
 }
@@ -312,7 +339,7 @@ export function cleanParams(p = {}) {
   const out = { ...PARAM_DEFAULTS };
   for ( const [k, [lo, hi]] of Object.entries(LIMITS) ) if ( Number.isFinite(Number(p[k])) ) out[k] = Math.min(hi, Math.max(lo, Number(p[k])));
   if ( MATERIALS.includes(p.material) ) out.material = p.material;
-  for ( const k of ["anim", "idle", "entry", "jagged", "directional"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
+  for ( const k of ["anim", "idle", "entry", "jagged", "directional", "pin"] ) if ( typeof p[k] === "boolean" ) out[k] = p[k];
   if ( p.fxWho === "gm" || p.fxWho === "all" ) out.fxWho = p.fxWho;
   out.cause = causeOf(p.cause);
   return out;

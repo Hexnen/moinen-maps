@@ -35,6 +35,7 @@ export const INTERACT = {
 /** The rule of newer kind `t` (index) over older kind `k` (index). */
 export const ruleOf = (t, k) => { const row = INTERACT[TYPES[t]] ?? INTERACT.blast; return row[TYPES[k]] ?? row["*"]; };
 
+import { effP } from "./stroke-params.mjs";
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
 const fnvStr = (s, h = 2166136261) => { for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
@@ -45,7 +46,8 @@ const fnvStr = (s, h = 2166136261) => { for ( let i = 0; i < s.length; i++ ) h =
  * The margin the bake's organic / torn outline may add round a stroke's mask box (core.mjs partsOf: FM = 4 + ceil(OA x 1.3) + 22 when
  * torn, OA = clamp(Rb x 0.27, 1.2, 12) for every kind but a tear, Rb the deepest inner distance: at most half the box's short side).
  */
-const outlineMargin = (o, P, K) => {
+const outlineMargin = (o, P0, K) => {
+  const P = effP(o, P0);
   const Rb = (Math.floor(Math.min(o.w, o.h) / 2) + 1) * K, org = (o.t & 7) !== 5 && Rb >= 3;
   const OA = org ? clamp(Rb * 0.27, 1.2, 12) : 0, jag = P?.jagged && (P.jag ?? 0.6) > 0;
   return 4 + Math.ceil(OA * 1.3) + (jag ? 22 : 0) + 1;
@@ -60,6 +62,7 @@ export function ownBox(o, P, K = 2) {
 export function spriteBox(o, P, K = 2) {
   const b = ownBox(o, P, K);
   if ( o.k ) return b;
+  P = effP(o, P);
   const span = Math.max(b.x1 - b.x0, b.y1 - b.y0), sc = clamp(P?.scatter ?? 1, 0.2, 3), halo = clamp(P?.halo ?? 0.6, 0, 1);
   const reach = Math.max(span * 0.6 * sc + 3 * sc + 14, span * 0.7 * halo + 10, span * 0.55 + 12);
   const m = Math.round(Math.min(256, Math.max(14, reach))) + 2;

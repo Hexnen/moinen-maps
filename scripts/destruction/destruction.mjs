@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION } from "./core.mjs";
+import * as Pin from "./stroke-params.mjs";
 import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
 import { unpackLook } from "./look-pack.mjs";
 import * as Net from "../net/stream.mjs";
@@ -208,7 +209,7 @@ function simplify(pts) {
 const unflat = (p) => { const out = []; for ( let i = 0; p && i + 2 < p.length; i += 3 ) out.push([p[i], p[i + 1], p[i + 2]]); return out; };
 const pathOfObj = (id) => { const o = id && S?.objects?.find((q) => q.id === id); return o?.p ? unflat(o.p) : null; };
 /** The stroke objects as the bake and the display take them (their level bytes decoded, their paths as pairs). */
-const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
+const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, pr: o.pr, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
   path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
@@ -251,7 +252,11 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const bg = backgroundInfo()?.path ?? "";
   const key = Store.makeKey(scene, S, bg);
   const taken = strokes.splice(0), mask = S.mask.slice();
-  if ( key === shownKey && display && !force && !idle && !all && !redo?.length ) { maybeBlast(); return; }
+  if ( key === shownKey && display && !force && !idle && !all && !redo?.length ) {
+    // (back to what is on screen - a setting toggled back after a failed bake: nothing is wrong any more)
+    if ( (status.error || bakeFail) && !status.paused ) { bakeFail = null; status.error = ""; tell("status"); }
+    maybeBlast(); return;
+  }
   // (the base has no bake version: a published stroke stays valid whatever the code's version is - bake-policy.mjs, version pinning)
   const tStart = performance.now();
   const S0 = S, base = Store.baseKey(scene, S, bg), legacy = Store.legacyBaseKey(scene, S, bg), objs = objectsIn();
@@ -1280,7 +1285,7 @@ function olderLooks(want) {
     const r = recs.get(w.rk) ?? shownRecs.get(w.objId), o = S.objects[w.index];
     if ( !r || !o ) continue;
     const ver = Number.isFinite(r.ver) ? r.ver : CORE_VERSION;
-    if ( Policy.olderLook(ver, Model.TYPES[o.t], !!(o.c || S.params.cause), CORE_VERSION) ) { ids.push(w.objId); from = Math.min(from, ver); }
+    if ( Policy.olderLook(ver, Model.TYPES[o.t], !!(o.c || (!S.params.pin && S.params.cause)), CORE_VERSION) ) { ids.push(w.objId); from = Math.min(from, ver); }
   }
   return ids.length ? { n: ids.length, from, to: CORE_VERSION, ids } : null;
 }
@@ -1630,9 +1635,10 @@ export function edited(box, stroke = null) {
     // (a tear keeps it always: its brush path is the tear's spine)
     if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
     const id = foundry.utils.randomID(10);
-    const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause ?? 0 });
+    const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause || (S.params.pin ? S.params.cause : 0) || 0, pr: S.params.pin ? Pin.pinDiff(S.params) : null });
     ob.s = Model.nextSeq(S);                         // its place in the order (layout 3 stores the strokes key by key)
     S.objects = [...(S.objects ?? []), ob];
+    redoStack.length = 0;
     Model.compositeOver(S, ob);       // (the mask holds the strokes before it; the live stroke already drew itself there)
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
   }
@@ -1669,10 +1675,34 @@ export function setParams(patch) {
   if ( !changed.length ) return;
   if ( !S ) ensureState();
   S.params = next;
-  const live = changed.every((k) => LIVE_PARAMS.has(k));
+  // (a scene that pins: the look settings are the strokes' own, a change reaches the strokes painted from now on - nothing bakes)
+  const live = changed.every((k) => LIVE_PARAMS.has(k) || (S.params.pin && Pin.PIN_SET.has(k)));
   display?.setIdle(S.params.idle, S.params.fxWho); display?.setLook(lookOf(S.params));
   if ( !live ) { paramRev++; scheduleBake(250); }
   scheduleSave(); tell("params");
+}
+
+/**
+ * "Apply to existing strokes": the Look settings as they are now become those of the given strokes (`ids`; null: every stroke, or the
+ * ones in `scope`). Only a stroke whose settings really change is baked again - the one explicit way an old stroke takes a new setting.
+ * Returns how many strokes changed.
+ */
+export function applyParams(ids = null) {
+  if ( !S || !game.user.isGM ) return 0;
+  if ( !S.params.pin ) Model.pinStrokes(S);
+  const pr = Pin.pinDiff(S.params), cause = Model.causeOf(S.params.cause), want = ids ? new Set(ids) : null;
+  let n = 0;
+  S.objects = (S.objects ?? []).map((o) => {
+    if ( o.k || (want && !want.has(o.id)) ) return o;
+    if ( Pin.samePr(o.pr, pr) && (o.c | 0) === cause ) return o;
+    n++; return Model.withPin(o, pr, cause);
+  });
+  if ( !n ) return 0;
+  Model.composite(S);
+  S.rev = Model.nextRev(); editedHere = true;
+  paramRev++; scheduleBake(60); scheduleSave(); tell("edited"); tell("params");
+  Trace.event("apply-params", { n });
+  return n;
 }
 
 export function newVariation() {
@@ -1692,10 +1722,30 @@ export function setEnabled(on) {
 
 export function clearAll() {
   if ( !S ) return;
+  redoStack.length = 0;
   for ( const o of S.objects ?? [] ) S.dropOk?.add(o.id);          // on purpose: the save may delete them all (no snapshot)
   S.objects = []; Model.composite(S);
   edited(null);
   Editor.refreshOverlay();
+}
+
+/** Strokes taken back with undo, newest last ({ S, o }: the state they belong to). A new stroke, Clear all or another scene empties it. */
+const redoStack = [];
+
+/** Redo: the stroke the last undo took back comes again (as it was stored: same id, place and settings), and enters like a new one. */
+export function redoLast() {
+  while ( redoStack.length && redoStack.at(-1).S !== S ) redoStack.pop();
+  if ( !S || !redoStack.length ) return false;
+  const { o } = redoStack.pop();
+  if ( S.objects.some((q) => q.id === o.id) ) return false;
+  S.objects = [...S.objects, o];
+  Model.compositeOver(S, o);
+  const box = { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }, ab = artBox(box);
+  if ( !o.k ) strokes.push({ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null, path: null, id: o.id });
+  S.rev = Model.nextRev(); editedHere = true;
+  scheduleBake(); scheduleSave(); tell("edited");
+  Editor.refreshOverlay(box);
+  return true;
 }
 
 /** Undo: the last stroke object goes; everything painted before it stays exactly as it was. */
@@ -1703,6 +1753,8 @@ export function undoLast() {
   if ( !S?.objects?.length ) return false;
   S.dropOk?.add(S.objects.at(-1).id);                               // on purpose (several undos within one save pause: each one)
   const gone = S.objects.at(-1);
+  redoStack.push({ S, o: gone });                                   // (Ctrl+Shift+Z / Ctrl+Y: redoLast; a new stroke empties it)
+  if ( redoStack.length > 100 ) redoStack.shift();
   S.objects = S.objects.slice(0, -1);
   Model.compositeBox(S, { x0: gone.x0, y0: gone.y0, x1: gone.x0 + gone.w - 1, y1: gone.y0 + gone.h - 1 });     // (only its box changes)
   edited(null);
@@ -1804,6 +1856,8 @@ export const destructionApi = {
   },
   /** The cause of a painted stroke (by its id; see state().o); only that stroke bakes again. */
   setCause: (id, cause) => setObjectCause(id, cause),
+  /** Pin the current Look settings on strokes (ids; null: all): the one way existing strokes take a new setting. */
+  applyParams: (ids = null) => applyParams(ids),
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),
@@ -1838,7 +1892,7 @@ export const rebakeAll = (ids = null) => destructionApi.rebakeAll(ids);
 
 export function registerDestruction() {
   moduleApi.destruction = destructionApi;
-  Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast });
+  Editor.bindHost({ state: () => S, ensureState, edited, undo: undoLast, redo: redoLast });
   Hooks.once("init", () => Editor.registerEditorSettings(() => tell("brush")));
   Hooks.once("init", () => game.settings.register(MODULE_ID, "destrRebake", {
     name: "MOINENMAPS.Destr.rebakeSetting", hint: "MOINENMAPS.Destr.rebakeSettingHint", scope: "client", config: true, type: String, default: "background",
