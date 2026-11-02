@@ -333,7 +333,7 @@ function noteAnim(e, a) {
   e.anim = a;
   e.fillAt = a.start + (a.delay ?? 0) + (a.reveal ?? 600) * 0.45;
   e.fillDur = Math.min(2600, 1000 + (e.prep?.R ?? 0) * 18) * (a.k ?? 1);
-  e.step = -1;
+  e.step = -1; e.job = null;
 }
 
 /* ================================================================ loading, baking */
@@ -420,7 +420,7 @@ function paintAll(e) {
     FC.paintFlood(P, f, e.res.box, k, 2, new Uint8ClampedArray(q.buf.buffer));
     q.t.baseTexture.update();
   });
-  e.step = -1;
+  e.step = -1; e.job = null;
 }
 
 /**
@@ -457,7 +457,7 @@ function repaintStep() {
 function freeTextures(e) {
   for ( const q of e.tex ) q.t.destroy(true);
   e.tex = [];
-  e.fillTex?.destroy(true); e.fillTex = null; e.fillBuf = null;
+  e.fillTex?.destroy(true); e.fillTex = null; e.fillBuf = null; e.stage = null; e.job = null;
 }
 
 function freeEntry(e) {
@@ -513,6 +513,7 @@ function sync() {
   if ( changed ) wetChanged();
 }
 
+const SLICE_PX = 16000;          // a hole of at least this many art pixels is painted in bands of rows (tick)
 const FILL_MS = 4;                // per frame for repainting the filling holes (tick)
 /** Is the hole in the view (a hole out of it does not repaint its fill step)? */
 function fillSeen(e, v) {
@@ -555,8 +556,19 @@ function tick() {
         // PERF: every hole of a Detonate repaints on the same step boundary (a whole-scene fill: ~25-40 ms in one frame, every STEP_MS).
         // A frame repaints holes only up to FILL_MS (at least one); the rest keep the picture of their last step and repaint in the
         // next frames (a step shown a frame or two late); a hole out of the view waits until it is seen again.
-        if ( step !== e.step && !(fill.on && ((fill.n && fill.ms >= FILL_MS) || !fillSeen(e, fill.vw))) ) {
-          const P = e.prep;
+        const P = e.prep, big = fill.on && P.cw * P.ch >= SLICE_PX && !globalThis.CONFIG?.moinenMaps?.noFloodSlice;
+        if ( big && (e.job || step !== e.step) && !((fill.n && fill.ms >= FILL_MS) || (!e.job && !fillSeen(e, fill.vw))) ) {
+          // PERF: a big hole (28k-82k px: 10-14 ms in one frame) is painted a band of rows at a time into a staging buffer, within what is
+          // left of the frame's FILL_MS, and shown whole when the last band is in (the picture of one step, a few frames late; the same pixels)
+          if ( !e.fillTex ) { e.fillBuf = new Uint8Array(P.cw * P.ch * 4); e.fillTex = texture(e.fillBuf, P.cw, P.ch); }
+          const tp = now();
+          const J = e.job ??= { step, idx, u: Math.floor(el / STEP_MS) * STEP_MS / e.fillDur, y: 0, buf: (e.stage ??= new Uint8Array(P.cw * P.ch * 4)) };
+          const out = new Uint8ClampedArray(J.buf.buffer), rows = Math.max(4, Math.round(SLICE_PX / P.cw / 8));
+          do { const y1 = Math.min(P.ch, J.y + rows); FC.paintFlood(P, e.res.frames[J.idx], e.res.box, kit(), J.u, out, J.y, y1); J.y = y1; }
+          while ( J.y < P.ch && fill.ms + now() - tp < FILL_MS );
+          if ( J.y >= P.ch ) { e.fillBuf.set(J.buf); e.fillTex.baseTexture.update(); e.step = J.step; e.job = null; }
+          fill.n++; fill.ms += now() - tp;
+        } else if ( !big && step !== e.step && !(fill.on && ((fill.n && fill.ms >= FILL_MS) || !fillSeen(e, fill.vw))) ) {
           if ( !e.fillTex ) { e.fillBuf = new Uint8Array(P.cw * P.ch * 4); e.fillTex = texture(e.fillBuf, P.cw, P.ch); }
           const tp = now();
           FC.paintFlood(P, e.res.frames[idx], e.res.box, kit(), Math.floor(el / STEP_MS) * STEP_MS / e.fillDur, new Uint8ClampedArray(e.fillBuf.buffer));
@@ -759,7 +771,7 @@ export const floodApi = {
   /** Bake every hole here again (ignores the browser cache and the published files). */
   rebake: async () => { for ( const e of entries.values() ) if ( e.prep ) { e.state = "baking"; const res = await bake(e); if ( res ) show(e, res); } },
   /** Let the water well up again in every hole. */
-  replay: () => { for ( const e of entries.values() ) if ( e.prep ) { e.fillAt = now(); e.fillDur = Math.min(2600, 1000 + e.prep.R * 18); e.step = -1; } },
+  replay: () => { for ( const e of entries.values() ) if ( e.prep ) { e.fillAt = now(); e.fillDur = Math.min(2600, 1000 + e.prep.R * 18); e.step = -1; e.job = null; } },
   /** The pixels of one frame of a hole (debugging, filmstrips). */
   frame: (hash, i = 0, u = 2) => { const e = [...entries.values()].find((q) => hkey(q.hash) === hash) ?? [...entries.values()][0]; if ( !e?.res ) return null;
     return { w: e.prep.cw, h: e.prep.ch, x: e.prep.cx, y: e.prep.cy, rgba: FC.paintFlood(e.prep, e.res.frames[i % e.res.frames.length], e.res.box, kit(), u) }; },

@@ -89,4 +89,11 @@ for ( let y = 0; y < G.ch; y++ ) for ( let x = 1; x < G.cw; x++ ) {
 }
 assert.equal(bad, 0, "one colour per painted-water pixel (outside the depth bands)");
 console.log("ok 5 painted-water grid", `${G.eng.w}x${G.eng.h}`);
+// 6. a fill painted in bands of rows (flood.mjs tick, big holes) is the whole-hole picture, pixel for pixel, at the same step u
+for ( const u of [0.3, 0.8, 1.05, 2] ) {
+  const full = FC.paintFlood(L3, r3.frames[0], r3.box, kit, u), out = new Uint8ClampedArray(full.length);
+  for ( let y = 0; y < L3.ch; y += 5 ) FC.paintFlood(L3, r3.frames[0], r3.box, kit, u, out, y, Math.min(L3.ch, y + 5));
+  assert.ok(Buffer.from(full.buffer).equals(Buffer.from(out.buffer)), `bands of rows = the whole picture at u ${u}`);
+}
+console.log("ok 6 row bands");
 console.log("all flood tests passed");

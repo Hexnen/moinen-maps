@@ -179,7 +179,7 @@ export function paintKit(lut, colors, master) {
  * water has reached show, a line of foam rides the rising edge and rings spread from the springs.
  */
 export const BAND = 0.07;
-export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
+export function paintFlood(prep, frame, box, kit, u = 2, out = null, y0 = 0, y1 = prep.ch) {   // (rows y0..y1 - 1 only: a big hole's fill is painted a band of rows at a time, flood.mjs tick)
   const { cx, cy, cw, ch, water, damp, op, shade, fill, eng } = prep, N = cw * ch;
   const px = out ?? new Uint8ClampedArray(N * 4);
   const P32 = new Uint32Array(px.buffer, px.byteOffset, N);
@@ -194,7 +194,7 @@ export function paintFlood(prep, frame, box, kit, u = 2, out = null) {
   const S = prep._static ??= { wet: new Float64Array(N).fill(NaN), eat: new Float64Array(N).fill(NaN), dep: new Float64Array(N).fill(NaN), edge: new Float64Array(N).fill(NaN) };
   const shL = [baseC[0] + (ringC[0] - baseC[0]) * 0.12, baseC[1] + (ringC[1] - baseC[1]) * 0.12, baseC[2] + (ringC[2] - baseC[2]) * 0.12];
   const dpL = [baseC[0] + (shadow[0] - baseC[0]) * 0.62, baseC[1] + (shadow[1] - baseC[1]) * 0.62, baseC[2] + (shadow[2] - baseC[2]) * 0.62];
-  for ( let y = 0; y < ch; y++ ) for ( let x = 0; x < cw; x++ ) {
+  for ( let y = y0; y < y1; y++ ) for ( let x = 0; x < cw; x++ ) {
     const i = y * cw + x, o = i * 4;
     if ( !water[i] ) {
       if ( damp[i] && (!coming || u >= fill[i]) ) {

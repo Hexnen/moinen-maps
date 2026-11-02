@@ -42,6 +42,18 @@ export function hashU(x, y, s) {
   return (h >>> 0) / 4294967296;
 }
 const px = (gr, v, x, y, w = 1, h = 1) => gr.drawRect(v.ox + x * v.ap, v.oy + y * v.ap, v.ap * w, v.ap * h);
+/**
+ * PERF: the cells [x, y, x, y ...] as rectangles, neighbours along a row (x + 1, same y, in list order) joined into one rect - the same
+ * pixels with a fraction of the shapes Graphics has to build and tessellate each frame. `CONFIG.moinenMaps.noFxMerge`: one rect a cell (A/B).
+ */
+function pxCells(gr, v, c) {
+  if ( globalThis.CONFIG?.moinenMaps?.noFxMerge ) { for ( let k = 0; k < c.length; k += 2 ) px(gr, v, c[k], c[k + 1]); return; }
+  for ( let k = 0; k < c.length; ) {
+    const x = c[k], y = c[k + 1]; let n = 1;
+    while ( k + 2 * n < c.length && c[k + 2 * n + 1] === y && c[k + 2 * n] === x + n ) n++;
+    px(gr, v, x, y, n, 1); k += 2 * n;
+  }
+}
 
 /**
  * A ring of radius r (art px; the y radius is 0.8 r, the oblique camera) at t (0..1 of its life): dashed arcs (about 6-10 of them,
@@ -67,18 +79,19 @@ export function pxRing(gr, v, cx, cy, r, t, { core = 0xf3e6cc, outer = 0x9c8f7c,
       cells[k < thick ? 0 : 1].push(x, y);
     }
   }
-  gr.beginFill(core, alpha); for ( let i = 0; i < cells[0].length; i += 2 ) px(gr, v, cells[0][i], cells[0][i + 1]); gr.endFill();
-  gr.beginFill(outer, alpha * 0.85); for ( let i = 0; i < cells[1].length; i += 2 ) px(gr, v, cells[1][i], cells[1][i + 1]); gr.endFill();
+  gr.beginFill(core, alpha); pxCells(gr, v, cells[0]); gr.endFill();
+  gr.beginFill(outer, alpha * 0.85); pxCells(gr, v, cells[1]); gr.endFill();
 }
 
 /** A flash of radius r at t (0..1): a ragged disc in three bands (white core, warm, hot rim), a few rays, shrinking and dropping out. */
 export function pxFlash(gr, v, cx, cy, r, t, { colors = [0xfffbe8, 0xffe08a, 0xff9a3c], seed = 1, rays = 6 } = {}) {
   const R = r * (t < 0.25 ? 0.6 + 1.6 * t : 1 - 0.55 * (t - 0.25) / 0.75);
   if ( R < 0.6 ) return;
-  const R2 = Math.ceil(R + 2), bands = [[], [], []];
+  const R2 = Math.ceil(R + 2), bands = [[], [], []], R2lim = (R * 1.34) * (R * 1.34) + 1e-6;
   for ( let y = -R2; y <= R2; y++ ) for ( let x = -R2; x <= R2; x++ ) {
+    const yy = y / 0.8; if ( x * x + yy * yy > R2lim ) continue;   // (the ragged edge reaches 1.34 R at most: nothing farther is in)
     const a = Math.atan2(y, x), lob = 1 + 0.22 * Math.sin(a * 3 + seed) + 0.12 * Math.sin(a * 7 + seed * 2.1);
-    const d = Math.hypot(x, y / 0.8) / (R * lob);
+    const d = Math.hypot(x, yy) / (R * lob);
     if ( d > 1 ) continue;
     const X = Math.round(cx) + x, Y = Math.round(cy) + y;
     if ( hashU(X, Y, seed + 5) < t * t * 0.8 ) continue;
@@ -89,7 +102,7 @@ export function pxFlash(gr, v, cx, cy, r, t, { colors = [0xfffbe8, 0xffe08a, 0xf
     const a = (k / rays) * Math.PI * 2 + hashU(k, seed, 9) * 0.6, L = R * (1.3 + 0.6 * hashU(k, seed, 10)) * (1 - t);
     for ( let s = Math.floor(R * 0.8); s < L; s++ ) bands[s < R * 1.1 ? 1 : 2].push(Math.round(cx + Math.cos(a) * s), Math.round(cy + Math.sin(a) * s * 0.8));
   }
-  bands.forEach((b, i) => { gr.beginFill(colors[i], 1); for ( let k = 0; k < b.length; k += 2 ) px(gr, v, b[k], b[k + 1]); gr.endFill(); });
+  bands.forEach((b, i) => { gr.beginFill(colors[i], 1); pxCells(gr, v, b); gr.endFill(); });
 }
 
 /* ================================================================ pure geometry (node-tested: dev/lightning.test.mjs, dev/pixel-fx.test.mjs) */
