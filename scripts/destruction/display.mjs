@@ -106,9 +106,18 @@ class RowResource extends PIXI.BufferResource {
  * one go, so nothing is ever drawn half-uploaded. `CONFIG.moinenMaps.noSlicedUpload`: one upload as before (A/B).
  */
 class SliceResource extends PIXI.BufferResource {
-  constructor(data, o) { super(data, o); this.row = -1; this.pumping = false; this.startId = -1; }
+  constructor(data, o) { super(data, o); this.row = -1; this.pumping = false; this.alloc = false; this.startId = -1; }
   upload(renderer, bt, gt) {
-    if ( this.pumping ) return true;                      // (pump's own bind: the allocation and the bands are done by pump)
+    if ( this.pumping ) {                                 // (pump's own bind: the bands are sent by pump)
+      if ( this.alloc ) {
+        // the storage is allocated HERE, inside the bind: PIXI updates the texture style right after upload(), which calls generateMipmap
+        // on a texture that has no storage yet (GL INVALID_OPERATION on every first bind)
+        this.alloc = false;
+        gt.width = bt.realWidth; gt.height = bt.realHeight;
+        renderer.gl.texImage2D(bt.target, 0, gt.internalFormat, gt.width, gt.height, 0, bt.format, gt.type, null);
+      }
+      return true;
+    }
     if ( this.row >= 0 && this.row < bt.realHeight && this.startId === bt.dirtyId && gt.width === bt.realWidth && gt.height === bt.realHeight ) {
       this.band(renderer, bt, gt, this.row, bt.realHeight - 1); this.row = -1; return true;   // the rest, at once
     }
@@ -127,12 +136,12 @@ class SliceResource extends PIXI.BufferResource {
     const R = renderer.texture, h = bt.realHeight, w = bt.realWidth;
     if ( !this.data || this.data.length < w * h * 4 ) { R.bind(bt, 0); return true; }
     if ( this.row < 0 || this.startId !== bt.dirtyId ) {      // begin: the texture allocated empty
-      this.pumping = true;
-      try { R.bind(bt, 0); } finally { this.pumping = false; }
+      // (the storage is allocated empty inside this bind - upload() - and the style update must not build mipmaps of nothing: the
+      // mode is ON_MANUAL for this bind, the mipmaps are built once, after the last band)
+      const mm = bt.mipmap; this.pumping = true; this.alloc = true;
+      if ( mm === PIXI.MIPMAP_MODES.ON ) bt.mipmap = PIXI.MIPMAP_MODES.ON_MANUAL;
+      try { R.bind(bt, 0); } finally { this.pumping = false; this.alloc = false; bt.mipmap = mm; }
       const gt = bt._glTextures[renderer.CONTEXT_UID]; if ( !gt ) return true;
-      gt.width = w; gt.height = h; gt.type = bt.type;
-      const gl = renderer.gl;
-      gl.texImage2D(bt.target, 0, gt.internalFormat, w, h, 0, bt.format, gt.type, null);
       this.row = 0; this.startId = bt.dirtyId; gt.dirtyId = -1; return false;
     }
     this.pumping = true;

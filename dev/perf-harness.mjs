@@ -2395,7 +2395,7 @@ export async function stripPng(a, times, { name = "strip", win = 150, scale = 3,
  * follow its path (simul: true, the toggle OFF) and once with a painted path through the area, left->right and right->left (ON) - and
  * measures the spread of the pieces' start times (g.anim.list t0, the CPU and GPU piece paths both read it). OFF must be small (all at
  * once), ON large and ordered along the path (correlation of t0 with the piece's x: positive left->right, negative reversed).
- * Returns { rows: [{ type, hash, pieces, off: {spread, corr}, ltr: {...}, rtl: {...} }], ok }. NOT yet run in a lane (see the commit).
+ * Returns { rows: [{ type, hash, pieces, off: {spread, corr}, ltr: {...}, rtl: {...} }], ok }. Run on a lane (map): see direction-live.mjs for real strokes.
  */
 export function directionCheck({ types = ["blast", "scorch", "flood", "cracks"], per = 2, maxOff = 90, minOn = 250 } = {}) {
   const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance);
@@ -2416,10 +2416,74 @@ export function directionCheck({ types = ["blast", "scorch", "flood", "cracks"],
         };
         const off = run({ simul: true }), ltr = run({ path: line(false) }), rtl = run({ path: line(true) });
         performance.now = real;
-        rows.push({ type, hash: g.hash?.slice?.(0, 6), pieces: off.pieces, off, ltr, rtl,
-          ok: off.spread <= maxOff && ltr.spread >= minOn && rtl.spread >= minOn && ltr.corr > 0.5 && rtl.corr < -0.5 });
+        // (a kind with a clock of its own - a cave-in's rings, a tear's two-way rip - never goes off at once: OFF is only reported there; a
+        // kind whose entry is the ruin alone, cracks, has no pieces: ok null, judged by direction-live.mjs's pixel front instead)
+        const own = type === "collapse" || type === "gash", none = !off.pieces;
+        rows.push({ type, hash: String(g.hash).slice(0, 6), pieces: off.pieces, off, ltr, rtl,
+          ok: none ? null : (own || off.spread <= maxOff) && ltr.spread >= minOn && rtl.spread >= minOn && ltr.corr > (own ? 0.4 : 0.5) && rtl.corr < (own ? -0.4 : -0.5) });
       }
     }
   } finally { performance.now = real; T.maxFPS = mf; if ( st ) T.start(); }
-  return { rows, ok: rows.length > 0 && rows.every((q) => q.ok) };
+  return { rows, ok: rows.some((q) => q.ok !== null) && rows.every((q) => q.ok !== false) };
+}
+
+/**
+ * GL CLEAN CHECK: gl.getError() drained after every stepped frame of a whole-scene Detonate (api.destruction.replay), once per `cases`
+ * entry (a CONFIG.moinenMaps flag set for that run; null = the defaults). Before each run every area's GPU atlas is disposed, so the
+ * Detonate has to upload them again (the sliced upload, SliceResource.pump, or the single one with noSlicedUpload). Errors from before
+ * the run are drained first. Returns per case { errors: {code: count}, frames, bands (atlas band calls), ahead (atlases sent) };
+ * ok = no error in any case (1282 INVALID_OPERATION was the generateMipmap on a not-yet-allocated texture, once per first bind).
+ */
+export async function glCleanCheck({ ms = 3500, cases = [null, "noSlicedUpload", "noGpuPieces", "noGpuErode", "noBatchRender", "noShellJob"] } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, d = D(), gl = canvas.app.renderer.gl;
+  CONFIG.moinenMaps ??= {};
+  const drain = () => { const out = []; for ( let i = 0; i < 64; i++ ) { const e = gl.getError(); if ( !e ) break; out.push(e); } return out; };
+  const rows = [];
+  for ( const flag of cases ) {
+    const was = flag ? CONFIG.moinenMaps[flag] : undefined;
+    if ( flag ) CONFIG.moinenMaps[flag] = true;
+    try {
+      for ( const g of d.order ) { if ( g.anim ) d.endAnim(g); if ( g.tex && !g.tex.destroyed ) g.tex.dispose(); }
+      step(3); drain();
+      const s0 = { bands: d.stats.atlasBands ?? 0, ahead: d.stats.atlasAhead ?? 0 }, errors = {}; let frames = 0, bad = 0;
+      A.replay();
+      const end = performance.now() + ms;
+      while ( performance.now() < end ) {
+        step(1); frames++;
+        const e = drain(); if ( e.length ) bad++;
+        for ( const c of e ) errors[c] = (errors[c] ?? 0) + 1;
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      rows.push({ flag: flag ?? "default", frames, badFrames: bad, errors, bands: (d.stats.atlasBands ?? 0) - s0.bands, ahead: (d.stats.atlasAhead ?? 0) - s0.ahead });
+    } finally { if ( flag ) CONFIG.moinenMaps[flag] = was; }
+    for ( const g of d.order ) if ( g.anim ) d.endAnim(g);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return { rows, ok: rows.every((r) => r.badFrames === 0) };
+}
+
+/**
+ * SLICED vs WHOLE UPLOAD PIXELS: every area's atlas uploaded once sliced (SliceResource.pump to the end) and once in a single upload
+ * (noSlicedUpload), each read back from the GPU (framebuffer over the texture) and compared byte for byte. Returns { areas, diff }; diff 0 is a pass.
+ */
+export function slicedPixelCheck({ max = 6 } = {}) {
+  const d = D(), R = canvas.app.renderer, gl = R.gl, rows = [];
+  const read = (bt) => {
+    const gt = bt._glTextures[R.CONTEXT_UID]; if ( !gt ) return null;
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, gt.texture, 0);
+    const out = new Uint8Array(bt.realWidth * bt.realHeight * 4); gl.readPixels(0, 0, bt.realWidth, bt.realHeight, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(fb); R.framebuffer.reset?.(); return out;
+  };
+  const gs = d.order.filter((g) => g.tex && !g.tex.destroyed && g.tex.resource?.pump && g.tex.resource.data).slice(0, max);
+  for ( const g of gs ) {
+    const bt = g.tex, res = bt.resource; bt.dispose();
+    let guard = 0; while ( !res.pump(R, bt, 200) && guard++ < 1e4 ); const a = read(bt);
+    bt.dispose(); R.texture.bind(bt, 0); const b = read(bt);
+    // mip levels: the sliced one's mip chain is built at the end; level 0 is what is compared
+    let diff = 0; if ( a && b ) for ( let i = 0; i < a.length; i++ ) if ( a[i] !== b[i] ) diff++;
+    rows.push({ w: bt.realWidth, h: bt.realHeight, diff: a && b ? diff : -1 });
+  }
+  R.state?.reset?.(); R.texture.reset?.();
+  return { areas: rows.length, rows, diff: rows.reduce((s, r) => s + (r.diff < 0 ? 1e9 : r.diff), 0) };
 }
