@@ -102,26 +102,57 @@ export async function trace(ms = 4500, fn = null) {
   const R = canvas.app.renderer, gl = R.gl, ext = gl.getExtension("EXT_disjoint_timer_query_webgl2"), T = canvas.app.ticker, d = D();
   const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
   const rows = [], qs = [];
+  let nDraw = 0, upMs = 0, upN = 0; const od = gl.drawElements, oa = gl.drawArrays, ot = gl.texSubImage2D, oi = gl.texImage2D, obs = gl.bufferSubData;
+  gl.drawElements = function(...a) { nDraw++; return od.apply(gl, a); }; gl.drawArrays = function(...a) { nDraw++; return oa.apply(gl, a); };
+  const timed = (f) => function(...a) { const t = performance.now(); try { return f.apply(gl, a); } finally { upMs += performance.now() - t; upN++; } };
+  gl.texSubImage2D = timed(ot); gl.texImage2D = timed(oi); gl.bufferSubData = timed(obs);
   const a = performance.now(); fn?.(); const fnMs = performance.now() - a;
   const t0 = performance.now();
   try {
     while ( performance.now() - t0 < ms ) {
-      const t = performance.now(); let q = null;
+      const t = performance.now(); let q = null; nDraw = 0; upMs = 0; upN = 0;
       if ( ext ) { q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
       T.update(t);
       if ( ext ) gl.endQuery(ext.TIME_ELAPSED_EXT);
       gl.finish();
       rows.push({ t: Math.round(t - t0), cpu: performance.now() - t, layer: d.stats.frameMs, mode: d.cache?.stats.mode, anim: [...d.groups.values()].filter((g) => g.anim).length,
-        parts: d.particles.length, q });
+        parts: d.particles.length, draws: nDraw, up: +upMs.toFixed(1), upN, heap: performance.memory ? performance.memory.usedJSHeapSize / 1048576 : 0, P: Object.fromEntries(Object.entries(d.stats.parts ?? {}).map(([k, v]) => [k, +v.toFixed(1)])), q });
       await new Promise((r) => setTimeout(r, 0));
     }
-  } finally { T.maxFPS = mf; if ( st ) T.start(); }
+  } finally { T.maxFPS = mf; if ( st ) T.start(); gl.drawElements = od; gl.drawArrays = oa; gl.texSubImage2D = ot; gl.texImage2D = oi; gl.bufferSubData = obs; }
   await new Promise((r) => setTimeout(r, 300));
   for ( const r of rows ) { if ( r.q && gl.getQueryParameter(r.q, gl.QUERY_RESULT_AVAILABLE) ) r.gpu = gl.getQueryParameter(r.q, gl.QUERY_RESULT) / 1e6; if ( r.q ) gl.deleteQuery(r.q); delete r.q; }
   const stat = (k, rs = rows) => { const v = rs.map((r) => r[k]).filter((x) => x !== undefined).sort((x, y) => x - y); return v.length ? { med: +v[v.length >> 1].toFixed(2), p95: +v[Math.floor(v.length * 0.95)].toFixed(2), max: +v[v.length - 1].toFixed(1) } : null; };
   const animRows = rows.filter((r) => r.anim > 0);
   return { fnMs: Math.round(fnMs), frames: rows.length, animFrames: animRows.length, cpu: stat("cpu", animRows), gpu: stat("gpu", animRows), layer: stat("layer", animRows),
-    rows: rows.map((r) => [r.t, +r.cpu.toFixed(1), r.gpu === undefined ? null : +r.gpu.toFixed(1), +r.layer.toFixed(1), r.mode, r.anim, r.parts]) };
+    draws: stat("draws", animRows), rows: rows.map((r) => [r.t, +r.cpu.toFixed(1), r.gpu === undefined ? null : +r.gpu.toFixed(1), +r.layer.toFixed(1), r.mode, r.anim, r.parts, r.draws, r.up, r.upN, r.P, Math.round(r.heap)]) };
+}
+
+/** Bytes of CPU-side atlas the groups hold now (a freed atlas holds none). */
+export function atlasBytes() {
+  let n = 0, held = 0, freed = 0;
+  for ( const g of D().groups.values() ) { const b = g.tex?.resource?.data?.byteLength ?? 0; n += b; if ( b ) held++; else if ( g.atlasFree ) freed++; }
+  return { MB: Math.round(n / 1048576), held, freed };
+}
+
+/**
+ * DETONATE BENCH: a whole-scene Detonate (api.destruction.replay) and `ms` of stepped frames. Returns the animated frames' CPU / GPU /
+ * draws, the frames over 33 / 16.7 ms, how the entries went (played after a wait, faded instead, offscreen), the heap and the atlases
+ * held before and after. Start from a fresh state (canvas.draw() + boot()) for each run.
+ */
+export async function detBench({ ms = 4500, label = "" } = {}) {
+  const A = game.modules.get("moinen-maps").api.destruction, d = D();
+  const keys = ["entries", "waits", "waitedIn", "noPixelEntries", "offscreenEntries", "restored"];
+  const s0 = Object.fromEntries(keys.map((k) => [k, d.stats[k] ?? 0]));
+  const mem0 = { heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), atlas: atlasBytes() };
+  let atlasPeak = 0; const iv = setInterval(() => { atlasPeak = Math.max(atlasPeak, atlasBytes().MB); }, 40);
+  const t = await trace(ms, () => A.replay());
+  clearInterval(iv);
+  const rows = t.rows.filter((r) => r[5] > 0), cpu = rows.map((r) => r[1]);
+  const mem1 = { heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), heapPeakMB: Math.max(...t.rows.map((r) => r[11] ?? 0)), atlas: atlasBytes(), atlasPeakMB: atlasPeak };
+  return { label, fnMs: t.fnMs, animFrames: t.animFrames, cpu: t.cpu, gpu: t.gpu, draws: t.draws, over16: cpu.filter((x) => x > 16.7).length, over33: cpu.filter((x) => x > 33.3).length,
+    worst: cpu.length ? +Math.max(...cpu).toFixed(0) : 0, first: t.rows[0]?.[1], entries: Object.fromEntries(keys.map((k) => [k, (d.stats[k] ?? 0) - s0[k]])), mem0, mem1,
+    worstRows: rows.filter((r) => r[1] > 33.3).slice(0, 40) };
 }
 
 /**

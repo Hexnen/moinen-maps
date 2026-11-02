@@ -301,6 +301,34 @@ export function unpackObject(p) {
 }
 
 /**
+ * PERF (hydrating an area's atlas): the display's atlas of an area, laid out as display.build laid it (its sprites: [base, its shards
+ * in order, cover?, light?] at `pos` in a W x H sheet), straight from a decoded chunk's sprites - in the codec worker, so the page
+ * receives the finished buffer and copies nothing. `specs`: [{ hash, W, H, pos: [{x, y}], sizes: [[w, h]] }]. -> [{ hash, data }]
+ * (data null: the area is not in the chunk, or its sprites are not the ones the layout was made for).
+ */
+export function packAreaAtlases(sprites, specs) {
+  const areas = new Map();
+  let cur = null;
+  for ( const s of sprites ) {
+    if ( s.m[0] === 0 ) { cur = { base: s, pieces: [], cover: null, light: null }; areas.set(((s.m[12] & 0xffff) | ((s.m[13] & 0xffff) << 16)) >>> 0, cur); continue; }
+    if ( !cur ) continue;
+    if ( s.m[0] === 2 ) cur.cover = s; else if ( s.m[0] === 3 ) cur.light = s; else cur.pieces.push(s);
+  }
+  return specs.map((sp) => {
+    const a = areas.get(sp.hash);
+    const list = a ? [a.base, ...a.pieces, ...(a.cover ? [a.cover] : []), ...(a.light ? [a.light] : [])] : [];
+    if ( !list.length || list.length !== sp.sizes.length ) return { hash: sp.hash, data: null };
+    const buf = new Uint8Array(sp.W * sp.H * 4);
+    for ( let i = 0; i < list.length; i++ ) {
+      const s = list[i], [w, h] = sp.sizes[i], p = sp.pos[i];
+      if ( !s.img || s.w !== w || s.h !== h ) return { hash: sp.hash, data: null };
+      for ( let y = 0; y < h; y++ ) buf.set(s.img.subarray(y * w * 4, (y + 1) * w * 4), ((p.y + y) * sp.W + p.x) * 4);
+    }
+    return { hash: sp.hash, data: buf };
+  });
+}
+
+/**
  * Strokes -> one sheet as the display takes it: `recs` [{ index (stroke index), sprites }] in stroke order. The placement rows get
  * their sheet position, the stroke index (base rows) and the area index (shards: a stagger hint, counted over the areas in order,
  * as the bake does). `skip(hash)`: an area whose pixels are not needed (the display holds it already): its rows are kept, its
@@ -438,6 +466,7 @@ export function diffComposite(prev, next) {
  *   { kind: "water", box, frames, known }   -> [{ tx, ty, id (0: empty tile), bytes (PNG; null when `known` has the id) }]
  *   { kind: "objects", objs: [{ key, sprites }], F } -> [{ key, id, bytes }]
  *   { kind: "decode", bytes, cid }           -> the decoded payload (water tile, or { F, sprites }); its hash must match the chunk id
+ *   { kind: "decode", bytes, cid, pack }     -> a destruction chunk only: { atlases: packAreaAtlases(sprites, pack) } - the sprites stay here
  * (`id` is the worker's request number, never a chunk id)
  */
 export async function work(m) {
@@ -485,6 +514,11 @@ export async function work(m) {
       return { result: t, transfer };
     }
     const o = unpackObject(p);
+    if ( m.pack ) {
+      const atlases = packAreaAtlases(o.sprites, m.pack);
+      for ( const a of atlases ) if ( a.data ) transfer.push(a.data.buffer);
+      return { result: { atlases }, transfer };
+    }
     for ( const s of o.sprites ) transfer.push(s.img.buffer);
     return { result: o, transfer };
   }

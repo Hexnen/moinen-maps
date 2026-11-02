@@ -27,7 +27,7 @@ export class ClockPool {
     w.pending++;
     return new Promise((resolve, reject) => {
       this.wait.set(id, { resolve, reject, w });
-      w.postMessage({ id, spec, jobs }, jobs.map((j) => j.mask.buffer));
+      w.postMessage({ id, spec, jobs }, jobs.map((j) => j.mask?.buffer).filter(Boolean));
     });
   }
 

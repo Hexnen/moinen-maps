@@ -887,11 +887,26 @@ async function pixelsForEntries() {
  * The display's entries ask for the pixels of areas that have none (display.waitPixels): the shells among them are refilled (fill,
  * in steps: each replaced in place as its step lands), the freed atlases' records hydrated -> Map(group -> its sprites).
  */
-async function pixelSource(groups) {
-  const out = new Map(), recOf = (g) => shownRecs.get(g.objId);
+async function pixelSource(groups, deliver = null) {
+  const out = new Map(), recOf = (g) => shownRecs.get(g.objId), put = (g, px) => { out.set(g, px); deliver?.(g, px); };   // (deliver: each area as soon as it is there)
   const shells = [...new Set(groups.filter((g) => g.shell).map(recOf).filter((r) => r?.shell))];
   if ( shells.length ) fill(shells, "entries");
-  await Promise.all(groups.filter((g) => g.atlasFree).map(async (g) => { const r = recOf(g); if ( r && (await hydrate(r)) && !r.sprites.lean ) out.set(g, areaSprites(r, g.hash)); }));
+  // PERF: a freed atlas comes back as a FINISHED buffer packed in the codec worker (Net.atlasesOf: one IndexedDB read for all, the
+  // chunks decoded by the whole pool, nothing kept on the page but the atlas itself - the record's sprites are not filled in, so no
+  // second copy of the pixels stays behind); the order of `groups` (on-screen, nearest first) is the order of the jobs. A chunk that
+  // is not in IndexedDB, or whose areas do not match, takes the old way (hydrate the record, copy the sprites in display.restoreAtlas).
+  const free = groups.filter((g) => g.atlasFree), byRec = new Map(), slow = [];
+  free.forEach((g, i) => {
+    const r = recOf(g);
+    if ( r?.id && r.dir && g.atlas && !r.shell ) { if ( !byRec.has(r) ) byRec.set(r, []); byRec.get(r).push({ g, i }); } else slow.push(g);
+  });
+  await Net.preread([...byRec.keys()].map((r) => r.id));
+  await Promise.all([...byRec].map(async ([r, items]) => {
+    const pack = items.map(({ g }) => ({ hash: g.hash, W: g.atlas.W, H: g.atlas.H, pos: g.atlas.pos, sizes: g.atlas.sizes }));
+    const got = await Net.atlasesOf(r.dir, r.id, pack, { prio: items[0].i }).catch(() => null);
+    items.forEach(({ g }, k) => { if ( got?.[k]?.data ) put(g, got[k].data); else slow.push(g); });
+  }));
+  await Promise.all(slow.map(async (g) => { const r = recOf(g); if ( r && (await hydrate(r)) && !r.sprites.lean ) put(g, areaSprites(r, g.hash)); }));
   return out;
 }
 
@@ -908,7 +923,9 @@ function prefetchNear() {
   const shells = [...new Set(groups.filter((g) => g.shell).map((g) => shownRecs.get(g.objId)).filter((r) => r?.shell))];
   Trace.event("prefetch", { shells: shells.length, atlases: groups.filter((g) => g.atlasFree).length });
   if ( shells.length ) fill(shells, "prefetch");
-  for ( const g of groups ) if ( g.atlasFree ) { const r = shownRecs.get(g.objId); if ( r?.id && r.dir ) Net.getChunk(r.dir, r.id).catch(() => null); }
+  // (the chunks' compressed bytes only - read out of IndexedDB in one go; the decode and the packing are done when an entry asks, in the
+  // pool: decoded here they sat in the stream's memory, up to its cap, as a second copy of the atlases)
+  Net.preread(groups.filter((g) => g.atlasFree).map((g) => shownRecs.get(g.objId)).filter((r) => r?.id && r.dir && !r.shell).map((r) => r.id)).catch(() => null);
 }
 
 /** Every shell gets its pixels (a change that is not a new stroke on top, Detonate, a dark scene). */
@@ -1043,7 +1060,7 @@ function maybeBlast(first = false) {
   playedBlast = b.id;
   const late = ageOf(b.t, now());                  // Infinity: a legacy (uptime) or far-future moment, never played
   // (every area enters: the shells get their pixels first)
-  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( !display.pixelSource && (display.shellCount || display.stats.atlasFreed) ) pixelsForEntries().then(() => display?.detonate(t)); else display.detonate(t); }   // the shared moment (in the future, or already running)
+  if ( S.params.anim && late < (first ? 4000 : 15000) ) { const t = performance.now() - late; if ( !display.pixelSource && (display.shellCount || display.stats.atlasFreed) ) pixelsForEntries().then(() => display?.detonate(t)); else { display.askPixelsAhead?.(); display.detonate(t); } }   // the shared moment (in the future, or already running)
 }
 
 /* ---------------------------------------------------------------- publishing the chunks (GM) */
@@ -1460,7 +1477,7 @@ export const destructionApi = {
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
   // (the display asks for the pixels it lacks itself: an entry waits up to 150 ms for them - display.waitPixels)
-  replay: () => (display?.pixelSource ? Promise.resolve(display.detonate(performance.now())) : pixelsForEntries().then(() => display?.detonate(performance.now()))),
+  replay: () => (display?.pixelSource ? Promise.resolve((display.askPixelsAhead?.(), display.detonate(performance.now()))) : pixelsForEntries().then(() => display?.detonate(performance.now()))),
   display: () => display,
   /** Tests: every area shown as a shell and the record behind it (composite.mjs; the composite harness). */
   shells: () => [...(display?.groups.values() ?? [])].filter((g) => g.shell).map((g) => { const r = shownRecs.get(g.objId);
