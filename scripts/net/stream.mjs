@@ -189,6 +189,7 @@ const sizeOf = (v) => {
   let n = 0;
   for ( const s of v?.sprites ?? [] ) n += s.img?.byteLength ?? 0;
   for ( const l of v?.levels ?? [] ) n += l?.byteLength ?? 0;
+  for ( const r of v?.rims ?? [] ) n += r.A8?.byteLength ?? 0;
   return n + (v?.tile?.data?.byteLength ?? 0);
 };
 const drop = (id) => { if ( !memo.has(id) ) return false; memoBytes -= memo.get(id).size; memo.delete(id); return true; };

@@ -477,6 +477,47 @@ export function unpackIndex(p) {
 }
 
 /**
+ * kind 6  RIMS  the dark rims of areas (rim-store.mjs): what cause-fx addRim makes from an area's cover and base - a pure function of the
+ *                 pixels - kept next to the composite so a dark scene lights the lips of its damage without fetching the strokes' chunks.
+ *                 Body: rim count (u32), none count (u32), then per rim (sorted by hash): hash (u32), cause (u8), type (u8, RIM_TYPES), LW, LH (u16),
+ *                 place x, y (i32), colour (3 x f32), the strengths (LW x LH bytes); then the hashes (u32) of areas that have no rim at all.
+ */
+export const KIND_RIMS = 6;
+export const RIM_TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
+export function packRims(rims, none = []) {
+  const list = [...rims].sort((a, b) => a.hash - b.hash), nn = [...new Set(none)].sort((a, b) => a - b);
+  let n = 8 + nn.length * 4;
+  for ( const r of list ) n += 4 + 2 + 4 + 8 + 12 + r.A8.length;
+  const p = header(KIND_RIMS, n), dv = new DataView(p.buffer);
+  dv.setUint32(8, list.length, true); dv.setUint32(12, nn.length, true);
+  let o = 16;
+  for ( const r of list ) {
+    dv.setUint32(o, r.hash >>> 0, true); p[o + 4] = r.cause & 255; p[o + 5] = Math.max(0, RIM_TYPES.indexOf(r.type)); dv.setUint16(o + 6, r.LW, true); dv.setUint16(o + 8, r.LH, true);
+    dv.setInt32(o + 10, r.ox | 0, true); dv.setInt32(o + 14, r.oy | 0, true);
+    for ( let k = 0; k < 3; k++ ) dv.setFloat32(o + 18 + k * 4, r.col[k], true);
+    p.set(r.A8, o + 30); o += 30 + r.A8.length;
+  }
+  for ( const h of nn ) { dv.setUint32(o, h >>> 0, true); o += 4; }
+  return p;
+}
+export function unpackRims(p) {
+  if ( kindOf(p) !== KIND_RIMS ) throw new Error("not a rims chunk");
+  const dv = new DataView(p.buffer, p.byteOffset, p.byteLength), n = dv.getUint32(8, true), nn = dv.getUint32(12, true), rims = [], none = [];
+  let o = 16;
+  for ( let i = 0; i < n; i++ ) {
+    if ( o + 30 > p.length ) throw new Error("bad rims chunk");
+    const LW = dv.getUint16(o + 6, true), LH = dv.getUint16(o + 8, true);
+    if ( o + 30 + LW * LH > p.length ) throw new Error("bad rims chunk");
+    rims.push({ hash: dv.getUint32(o, true), cause: p[o + 4], type: RIM_TYPES[p[o + 5]] ?? "blast", LW, LH, ox: dv.getInt32(o + 10, true), oy: dv.getInt32(o + 14, true),
+      col: [0, 1, 2].map((k) => dv.getFloat32(o + 18 + k * 4, true)), A8: p.slice(o + 30, o + 30 + LW * LH) });
+    o += 30 + LW * LH;
+  }
+  for ( let i = 0; i < nn; i++ ) { none.push(dv.getUint32(o, true)); o += 4; }
+  if ( o !== p.length ) throw new Error("bad rims chunk");
+  return { rims, none };
+}
+
+/**
  * A band's key across clients: its level, density, sampling, mipmaps and its members' area hashes in order (the runtime key of the
  * cache names containers instead). Pure.
  */
@@ -542,6 +583,7 @@ function decodePayload(p, transfer) {
   const k = kindOf(p);
   if ( k === KIND_TILE ) { const t = unpackTile(p); transfer.push(t.data.buffer); return { tile: t }; }
   if ( k === KIND_INDEX ) return { index: unpackIndex(p) };
+  if ( k === KIND_RIMS ) { const o = unpackRims(p); for ( const r of o.rims ) transfer.push(r.A8.buffer); return o; }
   if ( k === KIND_WATER ) { const t = unpackWaterTile(p); transfer.push(...t.levels.map((l) => l.buffer)); return t; }
   if ( k === KIND_OBJECT ) { const o = unpackObject(p); for ( const s of o.sprites ) transfer.push(s.img.buffer); return o; }
   throw new Error("unknown chunk kind");
@@ -699,6 +741,12 @@ export async function work(m) {
     const ip = packIndex(m.index), iid = `x${hash64(ip)}`, ib = await wrap(ip);
     transfer.push(ib.buffer);
     return { result: { tiles, index: { id: iid, bytes: ib }, cleared }, transfer };
+  }
+  if ( m.kind === "rimpack" ) {
+    // the rims of the areas on screen (rim-store.mjs publish) into one chunk: { rims: [{ hash, cause, type, col, LW, LH, ox, oy, A8 }], none: [hash] } -> { id, bytes }
+    const p = packRims(m.rims, m.none ?? []), bytes = await wrap(p);
+    transfer.push(bytes.buffer);
+    return { result: { id: `r${hash64(p)}`, bytes }, transfer };
   }
   if ( m.kind === "bundle" ) {
     // small chunks into one file: { members: [{ id, bytes (the chunk's PNG) }] } -> { id, bytes, ids (the members that went in) }

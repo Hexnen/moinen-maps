@@ -501,7 +501,7 @@ export function setRim(d, g, r) {
   pool.eventMode = "none"; pool.blendMode = PIXI.BLEND_MODES.MAX_COLOR ?? PIXI.BLEND_MODES.ADD; pool.scale.set(ap);
   pool.position.set(o.x + (r.ox - B) * ap, o.y + (r.oy - B) * ap); pool.visible = false;
   L.layer.addChild(pool);
-  g.rim = { pool, tex: null, A8: r.A8, col: r.col, LW: r.LW, LH: r.LH };
+  g.rim = { pool, tex: null, A8: r.A8, col: r.col, LW: r.LW, LH: r.LH, at: performance.now() };
   L.groups.add(g);
   return true;
 }

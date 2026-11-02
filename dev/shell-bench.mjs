@@ -52,3 +52,20 @@ export async function lit({ ms = 20000 } = {}) {
   }
   return { state: s, tLit90: t, atlasPeakMB: peak, atlas: H.atlasBytes(), heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576), requests: Net.stats.requests - r0, idb: Net.stats.idbHits - i0 };
 }
+
+/**
+ * A DARK scene after a load (nothing else done since): how it was lit and what it cost. Rims are stamped when made (rim.at); the reveal is the
+ * trace's mark. -> { lit: { n, withRim, t50, t90, tMax (ms after the reveal) }, net: { requests, kb, kinds, idb }, rimsFrom: { store, job, page }, shells, atlasMB, heapMB }
+ */
+export async function dark() {
+  const d = API().display(), tr = API().net.trace(), Net = await import("../scripts/net/stream.mjs");
+  const rv = tr.marks.find((m) => m.name === "reveal")?.t ?? 0, t0 = tr.t0 + rv, vw = d.view();
+  const inV = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
+  const list = d.order.filter(inV), at = list.filter((g) => g.rim?.at).map((g) => Math.round(g.rim.at - t0)).sort((a, b) => a - b);
+  const kinds = {}; for ( const r of Net.reqLog ) { const k = r.id[0]; kinds[k] ??= { n: 0, kb: 0 }; kinds[k].n++; kinds[k].kb += Math.round(r.bytes / 1024); }
+  return { dark: +(canvas.environment?.darknessLevel ?? 0).toFixed(2), lit: { n: list.length, withRim: at.length, t50: at[at.length >> 1] ?? null, t90: at[Math.floor(at.length * 0.9)] ?? null, tMax: at[at.length - 1] ?? null },
+    net: { requests: Net.stats.requests, kb: Math.round(Net.stats.bytesDown / 1024), idb: Net.stats.idbHits, kinds, decodeMs: Math.round(Net.stats.decodeMs) },
+    rimsFrom: { store: d.stats.rimStore ?? 0, job: d.stats.rimJobs ?? 0, page: d.stats.rims ?? 0 }, shells: d.shellCount, swapped: d.stats.swapped ?? 0,
+    atlasMB: H.atlasBytes().MB, heapMB: Math.round(performance.memory.usedJSHeapSize / 1048576),
+    events: tr.events.filter((e) => /rims|shell-needs|prefetch|shells-built/.test(e.reason)).map((e) => [e.at, e.reason, e.data]) };
+}

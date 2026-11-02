@@ -295,6 +295,7 @@ export class DestructionDisplay {
     if ( x.rim && !g.rim ) Cause.setRim(this, g, x.rim);
     this.adoptRim(g, full);
     if ( x.rim === false && full.rimArgs ) { full.rimArgs = null; const i = this.rimQueue?.indexOf(full) ?? -1; if ( i >= 0 ) this.rimQueue.splice(i, 1); }   // (the worker found no rim: nothing to read from the atlas)
+    if ( x.late ) full.rimLate = true;       // (its rim is read later, off the page: lateRims; not "known without a rim" until then)
     if ( full.made < full.pieces.length ) this.materialize(full, Infinity);
     for ( const M of [this.pending, this.enterQueue] ) if ( M?.has(g) ) { const v = M.get(g); M.delete(g); M.set(full, v); }
     for ( const w of this.pending?.values() ?? [] ) if ( w.opts.under?.includes(g) ) w.opts.under = w.opts.under.map((u) => (u === g ? full : u));
