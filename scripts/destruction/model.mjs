@@ -153,6 +153,49 @@ export function composite(S) {
   return m;
 }
 
+/**
+ * One more object on top of a mask that already is the composite of the objects before it (a stroke just ended): the same result as
+ * composite(S) after pushing it, for the cost of its own box instead of every object of the scene (a full composite was 40-130 ms in
+ * the frame of every pointer-up on a scene with 270 strokes, and grows with each stroke).
+ */
+export function compositeOver(S, o) {
+  const m = S.mask;
+  if ( !m ) return composite(S);
+  const b = objBytes(o);
+  for ( let y = 0; y < o.h; y++ ) {
+    const Y = o.y0 + y; if ( Y < 0 || Y >= S.mh ) continue;
+    for ( let x = 0; x < o.w; x++ ) {
+      const l = b[y * o.w + x]; if ( !l ) continue;
+      const X = o.x0 + x; if ( X < 0 || X >= S.mw ) continue;
+      m[Y * S.mw + X] = o.k ? 0 : byteOf(l, o.t);
+    }
+  }
+  return m;
+}
+
+/**
+ * The composite again inside one box of mask pixels only (an object just went: its box is all that changes): the objects that touch the
+ * box are drawn into it in order. The same mask as composite(S), for the cost of the box (undo was a full composite, ~80 ms).
+ */
+export function compositeBox(S, box) {
+  const m = S.mask;
+  if ( !m ) return composite(S);
+  const x0 = Math.max(0, box.x0), y0 = Math.max(0, box.y0), x1 = Math.min(S.mw - 1, box.x1), y1 = Math.min(S.mh - 1, box.y1);
+  if ( x1 < x0 || y1 < y0 ) return m;
+  for ( let y = y0; y <= y1; y++ ) m.fill(0, y * S.mw + x0, y * S.mw + x1 + 1);
+  for ( const o of S.objects ?? [] ) {
+    if ( o.x0 > x1 || o.y0 > y1 || o.x0 + o.w - 1 < x0 || o.y0 + o.h - 1 < y0 ) continue;
+    const b = objBytes(o);
+    for ( let Y = Math.max(y0, o.y0); Y <= Math.min(y1, o.y0 + o.h - 1); Y++ ) {
+      for ( let X = Math.max(x0, o.x0); X <= Math.min(x1, o.x0 + o.w - 1); X++ ) {
+        const l = b[(Y - o.y0) * o.w + X - o.x0]; if ( !l ) continue;
+        m[Y * S.mw + X] = o.k ? 0 : byteOf(l, o.t);
+      }
+    }
+  }
+  return m;
+}
+
 /** First-format mask -> objects: each connected region of one type (8-connected, scan order) is one object. */
 export function objectsFromMask(mask, mw, mh) {
   const seen = new Uint8Array(mask.length), out = [], stack = [];

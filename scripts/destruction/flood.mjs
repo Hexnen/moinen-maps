@@ -164,9 +164,16 @@ function paintLook() {
   const S = Water.state(), wp = S?.enabled ? S.params : null;
   const colors = wp?.colors?.length === 6 ? wp.colors : flagOf().colors?.length === 6 ? flagOf().colors : mapColors ?? FALLBACK;
   const alpha = wp?.alpha ?? {};
+  lookSig = lookSigOf(colors, alpha);
   return { colors, alpha, kit: FC.paintKit(buildLut(winfo?.codes ?? CODES, colors, alpha), colors, overall(alpha)) };
 }
-let look = null;
+let look = null, lookSig = "";
+/** What the painted look is made from (colours, opacities, code table): tells a water change that repaints the holes from one that does not. */
+const lookSigOf = (colors, alpha) => JSON.stringify([colors, alpha, winfo?.codes?.length ?? 0]);
+const wantedLookSig = () => {
+  const S = Water.state(), wp = S?.enabled ? S.params : null;
+  return lookSigOf(wp?.colors?.length === 6 ? wp.colors : flagOf().colors?.length === 6 ? flagOf().colors : mapColors ?? FALLBACK, wp?.alpha ?? {});
+};
 const kit = () => (look ??= paintLook()).kit;
 
 /* ================================================================ one area */
@@ -551,7 +558,10 @@ function onWater(kind) {
   if ( kind !== "params" && kind !== "loaded" ) return;
   clearTimeout(repaintTimer);
   repaintTimer = setTimeout(() => {
-    look = null;
+    // PERF: every water save and upload (a flag update) lands here; the holes are repainted (~250 ms, a freeze after every stroke of
+    // the GM's water) only when the colours or opacities really changed
+    const lookSame = look !== null && wantedLookSig() === lookSig;
+    if ( !lookSame ) look = null;
     const ratio = gridRatio();
     let regrid = false;
     for ( const [h, e] of entries ) {
@@ -564,7 +574,7 @@ function onWater(kind) {
       if ( !e.prep || e.dead ) continue;
       const before = e.key;
       if ( keyOf(e) !== before ) { e.state = "stale"; e.waited = false; load(e); }
-      else paintAll(e);
+      else if ( !lookSame ) paintAll(e);
     }
   }, 120);
 }

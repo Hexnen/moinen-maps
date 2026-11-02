@@ -1606,7 +1606,7 @@ export function edited(box, stroke = null) {
     const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause ?? 0 });
     ob.s = Model.nextSeq(S);                         // its place in the order (layout 3 stores the strokes key by key)
     S.objects = [...(S.objects ?? []), ob];
-    Model.composite(S);
+    Model.compositeOver(S, ob);       // (the mask holds the strokes before it; the live stroke already drew itself there)
     strokes.push({ box: ab, a, b: stroke.b ? toArt(stroke.b) : null, path, id });
   }
   editedHere = true;
@@ -1675,9 +1675,11 @@ export function clearAll() {
 export function undoLast() {
   if ( !S?.objects?.length ) return false;
   S.dropOk?.add(S.objects.at(-1).id);                               // on purpose (several undos within one save pause: each one)
-  S.objects = S.objects.slice(0, -1); Model.composite(S);
+  const gone = S.objects.at(-1);
+  S.objects = S.objects.slice(0, -1);
+  Model.compositeBox(S, { x0: gone.x0, y0: gone.y0, x1: gone.x0 + gone.w - 1, y1: gone.y0 + gone.h - 1 });     // (only its box changes)
   edited(null);
-  Editor.refreshOverlay();
+  Editor.refreshOverlay({ x0: gone.x0, y0: gone.y0, x1: gone.x0 + gone.w - 1, y1: gone.y0 + gone.h - 1 });
   return true;
 }
 

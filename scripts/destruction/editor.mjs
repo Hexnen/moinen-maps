@@ -129,10 +129,11 @@ function paintOverlay(box) {
   scheduleFlush();
 }
 
-export function refreshOverlay() {
+/** Draw the overlay again after a change outside a stroke (undo, load): inside `box` (mask px) when only that changed, else all of it. */
+export function refreshOverlay(box = null) {
   const S = host?.state();
   if ( !mode ) return;
-  if ( !S || !overlayImg || overlayImg.width !== S.mw || overlayImg.height !== S.mh ) buildOverlay(); else paintOverlay(null);
+  if ( !S || !overlayImg || overlayImg.width !== S.mw || overlayImg.height !== S.mh ) buildOverlay(); else paintOverlay(box);
 }
 
 /* ---------------------------------------------------------------- strokes */
@@ -202,8 +203,7 @@ function endStroke() {
 /** Undo: the last stroke object goes, nothing else changes. */
 function undoStroke() {
   if ( stroke ) return;
-  host?.undo?.();
-  paintOverlay(null);
+  host?.undo?.();                 // (it redraws the overlay inside the undone stroke's box)
 }
 
 const typing = (ev) => { const t = ev.target; return t instanceof HTMLElement && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName)); };
