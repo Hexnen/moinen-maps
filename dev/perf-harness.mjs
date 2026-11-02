@@ -1615,3 +1615,65 @@ export async function floodCheck({ maxMs = 45000 } = {}) {
   const none = s.holes.filter((h) => h.state === "none").map((h) => h.hash);
   return { ok: !none.length && s.holes.length > 0, n: s.holes.length, states, none, dry: s.dry ?? 0, recovered: s.dryRecovered ?? 0, gaveUp: s.dryGaveUp ?? 0, user: game.user.name, ms: Math.round(performance.now() - t0) };
 }
+
+/**
+ * GPU PIECES CHECK (frozen clock): every picked area enters (GPU pieces, piece-gpu.mjs); at each time (ms after the start) the pose the
+ * vertex shader computes for every piece (transform feedback of the same GLSL) is compared with what display.place / life leave on a
+ * stand-in sprite for the very same piece and moment: position (canvas px), rotation, scale, visible, tint (scorch / flood). Returns
+ * { areas, pieces, rows: [[ms, compared, posBad, rotBad, scaleBad, visBad, tintBad, worst position diff, worst rotation diff]] }; all 0 is a pass
+ * (position within 0.002 px, rotation within 2e-5, scale within 1e-4: float32 against double).
+ */
+export async function pieceGpuCheck({ times = [0, 30, 60, 90, 120, 200, 300, 450, 600, 800, 1000, 1300, 1600, 2000, 2400, 3000, 3600], only = null, max = 12, samples = 0 } = {}) {
+  const SMP = [];
+  const { readPoses } = await import("../scripts/destruction/piece-gpu.mjs");
+  const d = D(), T = canvas.app.ticker, real = performance.now.bind(performance), R = canvas.app.renderer;
+  CONFIG.moinenMaps ??= {}; const was = [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget];
+  CONFIG.moinenMaps.noDestructionCache = true; CONFIG.moinenMaps.noClockWorker = true; CONFIG.moinenMaps.noGpuPieces = false; CONFIG.moinenMaps.erodeBudget = 1e9;
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const ws = [];
+  for ( const g of d.order ) for ( const ch of g.cont.children ) if ( ch !== g.patch && ch !== g.baseCont && ch !== g.shardCont && ch.visible ) { ch.visible = false; ws.push(ch); }
+  let F = real(); performance.now = () => F;
+  const rows = []; let npieces = 0, nareas = 0;
+  const sprite = () => ({ visible: true, alpha: 1, tint: 0xFFFFFF, rotation: 0, x: 0, y: 0, sx: 1, sy: 1,
+    position: { set(x, y = x) { this.p.x = x; this.p.y = y; } }, scale: { set(x, y = x) { this.p.sx = x; this.p.sy = y; } } });
+  try {
+    for ( const g of d.order ) { if ( g.anim ) d.endAnim(g); if ( !g.flat && !d.flatten(g) ) { d.release(g); g.made = 0; } }
+    T.update(F);
+    const start = F + 5;
+    const groups = (only ? d.order.filter(only) : d.order.filter((g) => g.pieces.length > 100 && !g.shell && !g.atlasFree && d.onScreen(g, 0.5)).sort((a, b) => b.pieces.length - a.pieces.length)).slice(0, max);
+    for ( const g of groups ) { d.enter(g, { start }); if ( g.tex && !g.tex.destroyed ) R.texture.bind(g.tex, 0); }
+    const live = groups.filter((g) => g.anim?.gpu && g.batch?.gpu); nareas = live.length;
+    const fake = sprite(); fake.position.p = fake.scale.p = fake;
+    for ( const dt of times ) {
+      F = start + dt; T.update(F);
+      let cmp = 0, pb = 0, rb = 0, sb = 0, vb = 0, tb = 0, wp = 0, wr = 0;
+      for ( const g of live ) {
+        const a = g.anim; if ( !a ) continue;
+        const gpu = readPoses(R, g.batch), type = g.info.type; if ( !gpu ) continue;
+        for ( let k = 0; k < g.pieces.length; k++ ) {
+          const it = a.list[k], p = { ...g.pieces[k], spr: fake };
+          fake.visible = true; fake.alpha = 1; fake.tint = 0xFFFFFF; fake.rotation = 0; fake.x = fake.y = 0; fake.sx = fake.sy = 1;
+          const t = (F - it.t0) / it.dur;
+          d.life({ ...it, p }, a, t, true, type);
+          const o = k * 8, vis = fake.visible ? 1 : 0, gv = gpu[o + 3] > 0.5 ? 1 : 0;
+          cmp++;
+          if ( vis !== gv ) { vb++; continue; }
+          if ( !vis ) continue;
+          const dp = Math.max(Math.abs(gpu[o] - fake.x), Math.abs(gpu[o + 1] - fake.y)); if ( dp > wp ) wp = dp; if ( dp > 0.002 ) { pb++; if ( SMP.length < samples ) SMP.push({ dt, k, t: +t.toFixed(4), cpu: [fake.x, fake.y], gpu: [gpu[o], gpu[o + 1]], fy: p.fy, sy: p.sy, arc: it.arc, dur: it.dur, b: it.bounces }); }
+          const dr = Math.abs(gpu[o + 2] - fake.rotation); if ( dr > wr ) wr = dr; if ( dr > 2e-5 ) rb++;
+          if ( Math.abs(gpu[o + 4] - fake.sx) > 1e-4 || Math.abs(gpu[o + 5] - fake.sy) > 1e-4 ) sb++;
+          const tr = (fake.tint >> 16) & 255, tg = (fake.tint >> 8) & 255;
+          if ( Math.abs(gpu[o + 6] - tr) > 0.5 || Math.abs(gpu[o + 7] - tg) > 0.5 ) tb++;
+        }
+      }
+      npieces = cmp;
+      rows.push([dt, cmp, pb, rb, sb, vb, tb, +wp.toFixed(5), +wr.toExponential(2)]);
+    }
+    for ( const g of groups ) d.endAnim(g);
+    F += 10000; T.update(F);
+  } finally {
+    performance.now = real; ws.forEach((w) => { w.visible = true; });
+    [CONFIG.moinenMaps.noDestructionCache, CONFIG.moinenMaps.noClockWorker, CONFIG.moinenMaps.noGpuPieces, CONFIG.moinenMaps.erodeBudget] = was; T.maxFPS = mf; if ( st ) T.start();
+  }
+  return { areas: nareas, pieces: npieces, rows, samples: SMP };
+}
