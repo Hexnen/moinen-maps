@@ -473,7 +473,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       const dry = new Set();
       const shells = new Map();
       for ( const w of toBake ) for ( const j of w.deps ) {
-        const o = S.objects[j]; const r = o && !o.k ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null;
+        const o = S.objects[j]; const r = o && !o.k && Policy.finalIsPlain(FS[j].deps.length) ? recs.get(`${base}|${o.id}|${FS[j].sig}`) : null;   // (only a stroke that reads nothing lends its final look as its plain one)
         if ( r?.shell ) { if ( Policy.plainCurrent(r.ver, redoSet.size > 0, CORE_VERSION) ) shells.set(r, j); } else if ( r?.sprites.lean ) dry.add(r);
       }
       // (a shell stays a shell on screen - filled in place, all of them were built again in ONE sync: 1.5 s at the start of a Rebake
@@ -502,7 +502,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         slow("take:split", t0, { n: list.length, plain });
         for ( const w of list ) {
           const sprites = parts.get(w.index) ?? [];
-          if ( plain || !overSubstrate(sprites) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
+          if ( plain || (Policy.finalIsPlain(w.deps.length) && !overSubstrate(sprites)) ) plainRecs.set(`${base}|${w.objId}|${w.own}`, sprites);
           // a plain look is the stroke's final look when it reads nothing
           if ( plain && w.deps.length ) continue;
           recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: null, ver: CORE_VERSION, sprites, baked: true }); waitingSince.delete(w.rk);
@@ -756,12 +756,14 @@ const overSubstrate = (sprites) => sprites.some((s) => s.m[0] === 2 && s.m[7] ==
  * Stroke j's plain look, when this client has it: kept from a plain bake, or its final record when that was not over a substrate.
  * `current` (a Rebake): only a look the current code baked - a record read back from a chunk of an older version is not one (the stroke
  * is baked plain again, in the first wave), so the same strokes always give the same chunks whichever batch a stroke falls in.
+ * A stroke that reads others never lends its FINAL record (Policy.finalIsPlain): over a substrate it may be empty (cut off wholly inside
+ * higher damage - no cover row to carry the over-a-substrate flag) or partly cut off, and that is not its plain look.
  */
 function plainOf(j, base, FS, current = false) {
   const o = S?.objects?.[j]; if ( !o || o.k ) return null;
   const p = plainRecs.get(`${base}|${o.id}|${FS[j].own}`); if ( p ) return p.lean ? null : p;
   const r = recs.get(`${base}|${o.id}|${FS[j].sig}`);
-  return r && !r.shell && !r.sprites.lean && !overSubstrate(r.sprites) && Policy.plainCurrent(r.ver, current, CORE_VERSION) ? r.sprites : null;
+  return r && Policy.finalIsPlain(FS[j].deps.length) && !r.shell && !r.sprites.lean && !overSubstrate(r.sprites) && Policy.plainCurrent(r.ver, current, CORE_VERSION) ? r.sprites : null;
 }
 
 /* ---------------------------------------------------------------- records without their pixels (memory) */

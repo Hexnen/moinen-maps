@@ -157,6 +157,16 @@ export const chunkChanged = (r, e, sig) => !!(r && e && r.id && !r.baked && e.si
 export const plainCurrent = (ver, current, now) => !current || ver === now;
 
 /**
+ * May a stroke's FINAL record (or the chunk of it) stand in as its PLAIN look - the bake from its own data alone, which the strokes over
+ * it are baked on (substrate.mjs)? Only a stroke that reads nothing (`nDeps` 0): its final look IS its plain look. A stroke that reads
+ * older ones is baked over their looks, and its final record is not its plain look even when nothing marks it so: cut off wholly inside
+ * higher damage it has NO sprites (not even a cover row carrying the over-a-substrate flag), and an empty "plain look" made the strokes
+ * over it read nothing there - baked in one batch (the worker bakes the plain look itself) or the next (the record), they came out with
+ * other pixels and other chunk ids, and a Rebake all republished them every time, back and forth, until the breaker paused baking.
+ */
+export const finalIsPlain = (nDeps) => nDeps === 0;
+
+/**
  * Rebake all: the order strokes are re-baked in - the older looks nearest the view first, each followed by the strokes that read it
  * (their substrate changes with it). `list`: [{ objId, index, dist, dependents: [objId] }]. -> [objId] without repeats.
  */
