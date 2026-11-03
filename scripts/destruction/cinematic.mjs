@@ -48,8 +48,6 @@ export const holds = (o) => Cin.holdsStroke(o, { killed: killed(), revealed, sch
 /** The staged strokes the GM's display shows (preview): the composite must not be published with them. */
 export const blocksComposite = () => gm() && !killed() && previewOn() && stagedCount() > 0;
 export const showing = () => !!run && !run.ended;
-/** A show is on screen here (its strokes, or the effects' hold, camera return and bars out): work that can wait (a rim light by day) waits. */
-export const onScreen = () => showing() || !!Fx?.active;
 export const currentShow = () => run?.show ?? null;
 export const status = () => ({ mode: modeOf(), preview: P().preview, staged: stagedCount(), showing: showing(), showId: run?.show?.id ?? null, killed: killed(),
   scheduled: [...scheduled], revealed: [...revealed], fx: !!Fx });

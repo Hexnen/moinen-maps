@@ -303,9 +303,7 @@ export class DestructionDisplay {
       } else if ( !g ) {
         const i = this.dying.findIndex((q) => q.hash === r.hash);
         if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); g.heldBy = null; g.cont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
-        // (an area that enters at once - a staged stroke put on screen by its show, entersNow - is not flattened: the entry took the flat
-        // texture apart again at once, ~1.8 ms of GPU work an area in the show; see settleIdle when the entry does not happen)
-        else { g = this.build(r, rgba, w, meta, null, !!this.entersNow?.(objects[r.index]?.id)); g.reused = false; }
+        else { g = this.build(r, rgba, w, meta); g.reused = false; }
         this.groups.set(r.hash, g); added.push(g);
       }
       g.objIndex = r.index; g.objId = objects[r.index]?.id ?? null;
@@ -389,7 +387,7 @@ export class DestructionDisplay {
   }
 
   /** One area: its own atlas texture, base sprite and shard sprites. */
-  build(r, rgba, sw, meta, packed = null, entering = false) {
+  build(r, rgba, sw, meta, packed = null) {
     const rects = [r.base, ...r.pieces, ...(r.cover >= 0 ? [r.cover] : []), ...(r.light >= 0 ? [r.light] : [])].map((o) => ({ sx: meta[o + 1], sy: meta[o + 2], w: meta[o + 3], h: meta[o + 4] }));
     const coverIdx = 1 + r.pieces.length, lightIdx = r.light >= 0 ? coverIdx + (r.cover >= 0 ? 1 : 0) : -1;
     // (`packed`: the atlas and its layout, made in the codec worker - a shell's area, swapShell)
@@ -454,7 +452,7 @@ export class DestructionDisplay {
     this.debris.makeSet(g, buf, pk.W, [...rects.slice(1, 1 + r.pieces.length).map((q, i) => ({ x: pk.pos[i + 1].x, y: pk.pos[i + 1].y, w: q.w, h: q.h })), { x: pk.pos[0].x, y: pk.pos[0].y, w: rects[0].w, h: rects[0].h }]);
     this.debris.makeRest(g);
     // (a shell's area that an entry is about to play - swapShell - is neither flattened nor given its shards: the entry would take both apart again)
-    if ( !packed?.entering && !entering && !this.flatten(g) ) this.materialize(g, 300);
+    if ( !packed?.entering && !this.flatten(g) ) this.materialize(g, 300);
     buf = null;     // MEMORY: (the closure context above keeps it otherwise) the atlas lives in its texture only: freeAtlas can let it go
     return g;
   }
@@ -609,12 +607,6 @@ export class DestructionDisplay {
     g.baseSpr.texture = g.baseTex; g.baseSpr.scale.set(ap); g.baseSpr.position.set(o.x + g.info.x * ap, o.y + g.info.y * ap);
     g.flatTex?.destroy(true); g.flatTex = null; g.flat = false; g.made = 0; g.madeIdx = []; g.sheetCur = 0; g.cont._mmv = (g.cont._mmv | 0) + 1;
     this.stats.unflat = (this.stats.unflat ?? 0) + 1;
-  }
-
-  /** An area built for an entry (build `entering`) whose entry did not happen (off screen, entries off): flattened as build would have, else its shards made. */
-  settleIdle(g) {
-    if ( g.dead || g.anim || g.flat || g.shell || this.pending?.has(g) ) return;
-    if ( !this.flatten(g) && g.made < g.pieces.length ) this.materialize(g, 300);
   }
 
   /**
