@@ -2467,10 +2467,54 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       const cs = cpu.slice().sort((a, b) => a - b);
       const es = errs.slice().sort((a, b) => a - b);
       rows.push({ move: mv.name, frames: n, beatX: ref ? +(bxSum / Math.max(1, bxN)).toFixed(4) : undefined, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
-        pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
+        pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), sharpEnd: +lastSharp.toFixed(2), sharpRest: +rest.toFixed(2), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
     }
   } finally {
     gl.createTexture = oct; PIXI.RenderTexture.create = orc; d.fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start();
   }
   return { dpr: k, cfg: { zoomAA: globalThis.CONFIG.moinenMaps?.zoomAA !== false, aaK: globalThis.CONFIG.moinenMaps?.aaK ?? null }, rows };
+}
+
+/**
+ * WAVING, BLUR-NEUTRAL (damage layer alone, scene points): like wavingCheck's damageChange / jitter but without the map and on the layer
+ * alone, and with a REFERENCE: `ss` > 1 reads every step from the supersampled ideal (grabSS), so the same numbers can be taken for the
+ * ideal image (a crisp edge moving past a fixed point changes its value a lot - that is the picture, not waving: the floor to compare
+ * against). Per step the scene points (grid px apart, region of the scene) with damage (alpha > 128 at either of three consecutive steps)
+ * give mean |value change| (change) and mean |second difference| (jitter); `excess` = jitter above the ideal's own (run with ss to get it).
+ * -> { change, jitter, steps, n }.
+ */
+export function wavingDamage({ from = 3, to = 1.5, stepSize = 0.01, region = null, grid = 3, ss = 0 } = {}) {
+  const R = canvas.app.renderer, T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
+  region ??= { x: sr.x + sr.width * 0.3, y: sr.y + sr.height * 0.3, w: sr.width * 0.4, h: sr.height * 0.4 };
+  const cx = region.x + region.w / 2, cy = region.y + region.h / 2, PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
+  const pts = []; for ( let y = region.y; y < region.y + region.h; y += grid ) for ( let x = region.x; x < region.x + region.w; x += grid ) pts.push([x, y]);
+  const setZoom = (z) => { canvas.pan({ x: cx, y: cy, scale: z }); if ( Math.abs(canvas.stage.scale.x - z) > 1e-6 ) { canvas.stage.scale.set(z, z); canvas.stage.pivot.set(cx, cy); canvas.stage.position.set(R.screen.width / 2, R.screen.height / 2); } };
+  const sample = (px) => {
+    const M = canvas.stage.worldTransform, v = new Float32Array(pts.length), a = new Float32Array(pts.length);
+    for ( let i = 0; i < pts.length; i++ ) {
+      const X = (M.a * pts[i][0] + M.tx) * k - 0.5, Y = (M.d * pts[i][1] + M.ty) * k - 0.5, x0 = Math.floor(X), y0 = Math.floor(Y), fx = X - x0, fy = Y - y0;
+      if ( x0 < 0 || y0 < 0 || x0 + 1 >= PW || y0 + 1 >= PH ) { v[i] = a[i] = NaN; continue; }
+      const L = (x, y, o) => { const q = (y * PW + x) * 4; return o ? px[q + 3] : 0.299 * px[q] + 0.587 * px[q + 1] + 0.114 * px[q + 2]; };
+      for ( const o of [0, 1] ) { const r = (L(x0, y0, o) * (1 - fx) + L(x0 + 1, y0, o) * fx) * (1 - fy) + (L(x0, y0 + 1, o) * (1 - fx) + L(x0 + 1, y0 + 1, o) * fx) * fy; if ( o ) a[i] = r; else v[i] = r; }
+    }
+    return { v, a };
+  };
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const real = performance.now.bind(performance); let F = real(); performance.now = () => (F += 0.001);
+  const fxWas = D().fx.visible; D().fx.visible = false;
+  let p1 = null, p2 = null, ch = 0, jt = 0, nC = 0, nJ = 0, steps = 0;
+  try {
+    for ( let z = from; z >= to - 1e-9 && steps < 400; z -= stepSize, steps++ ) {
+      setZoom(z); T.update(F); T.update(F);
+      const s = sample(ss > 1 ? grabSS(ss) : grab());
+      if ( p1 ) for ( let i = 0; i < pts.length; i++ ) {
+        if ( Number.isNaN(s.v[i]) || Number.isNaN(p1.v[i]) ) continue;
+        if ( s.a[i] < 128 && p1.a[i] < 128 ) continue;
+        ch += Math.abs(s.v[i] - p1.v[i]); nC++;
+        if ( p2 && !Number.isNaN(p2.v[i]) ) { jt += Math.abs(s.v[i] - 2 * p1.v[i] + p2.v[i]); nJ++; }
+      }
+      p2 = p1; p1 = s;
+    }
+  } finally { D().fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start(); }
+  return { change: +(ch / Math.max(1, nC)).toFixed(3), jitter: +(jt / Math.max(1, nJ)).toFixed(3), steps, n: nC, dpr: k, zoomAA: globalThis.CONFIG.moinenMaps?.zoomAA };
 }
