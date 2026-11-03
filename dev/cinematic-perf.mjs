@@ -179,11 +179,41 @@ export async function showBench({ strokes = 4, base = 0, preset = "epic", over =
     await C.waitShow(60000);
     await sleep(1500);
     p.rec(false);
-    const res = { label, staged: ids.length, show: summarize(p.rows, p.marks), dpr: canvas.app.renderer.resolution, screen: [innerWidth, innerHeight] };
+    const res = { label, staged: ids.length, show: summarize(p.rows, p.marks), anim: animStats(p.rows.filter((r) => r.t >= (p.marks.find((m) => m.kind === "start")?.t ?? 0))), dpr: canvas.app.renderer.resolution, screen: [innerWidth, innerHeight] };
     if ( keepRows ) res.rows = p.rows;
     window.__cinPerf = { rows: p.rows, marks: p.marks };
     return res;
   } finally {
     for ( const [k, v] of Object.entries(saved) ) await game.settings.set(MODULE, k, v).catch(() => {});
   }
+}
+
+/* ------------------------------------------------------------------ the same strokes without a show */
+
+/** Cost of the frames in which an entry runs (anim > 0), and of the frames of the whole window: the number to compare a show with the same strokes painted live. */
+export function animStats(rows) {
+  const a = rows.filter((r) => r.anim > 0), c = (g) => dist(g.map((r) => r.cpu + r.tasks));
+  return { window: c(rows), anim: c(a), animFrames: a.length, bakes: rows.reduce((s, r) => s + r.bakes, 0), spikes: rows.map((r) => ({ t: Math.round(r.t), ms: +(r.cpu + r.tasks).toFixed(1), anim: r.anim, dp: r.dp,
+    by: Object.entries(r.l).filter(([, v]) => v > 1).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([n, v]) => `${n.slice(0, 40)}=${v.toFixed(1)}`) })).sort((x, y) => y.ms - x.ms).slice(0, 6) };
+}
+
+/**
+ * The SAME strokes painted live (cinematic mode off, no show, no effects): recorded from before the first stroke until `tail` ms after the
+ * last one. The strokes bake and enter as they are painted. -> { label, ...animStats }.
+ */
+export async function liveBench({ strokes = 4, base = 3, tail = 6000, label = "live", hz = 60 } = {}) {
+  const C = await import(`/modules/${MODULE}/dev/cinematic-check.mjs`), p = pump({ hz });
+  await C.gmSetup({ mode: "off", preview: false });
+  for ( let i = 0; i < base; i++ ) await C.gmPaint({ from: [0.1 + 0.8 * ((i * 0.29) % 1), 0.1 + 0.8 * ((i * 0.53) % 1)], to: [0.1 + 0.8 * ((i * 0.29) % 1) + 0.12, 0.12 + 0.8 * ((i * 0.53) % 1)], wait: false });
+  await sleep(4000);
+  p.rec(true);
+  for ( let i = 0; i < strokes; i++ ) {
+    const y = 0.2 + 0.6 * ((i * 0.37) % 1), x0 = 0.15 + 0.5 * ((i * 0.61) % 1);
+    await C.gmPaint({ from: [x0, y], to: [x0 + 0.22, y + 0.05], wait: false });
+    await sleep(500);
+  }
+  await sleep(tail);
+  p.rec(false);
+  window.__cinPerf = { rows: p.rows, marks: p.marks };
+  return { label, ...animStats(p.rows) };
 }

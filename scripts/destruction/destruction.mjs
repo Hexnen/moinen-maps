@@ -770,6 +770,12 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
   display.carry ??= carryHooks;
+  if ( !display.rimWrapped ) {                                  // (CINEMATIC: by day a rim shows nothing - cause-fx tickLights: from a darkness of 0.5 - so while a show is on screen the ~10 ms an area wait for its end instead of landing in the frame after each stroke goes on screen)
+    display.rimWrapped = true;
+    const rimSlice = display.rimSlice.bind(display);
+    display.rimSlice = (budget, vw) => { if ( (canvas.environment?.darknessLevel ?? 0) < 0.45 && Cine.onScreen() ) return; rimSlice(budget, vw); };
+  }
+  display.entersNow ??= (id) => !!id && cinePlays.has(id);       // (CINEMATIC: a staged stroke's areas built to enter at once, not flattened first)
   display.onGone ??= () => tell("gone");        // (an area finished fading out: the flooded holes that were kept for its water are let go)
   display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));
@@ -1999,7 +2005,7 @@ function backups(scene = canvas.scene) {
 function cineEnter(g, p) {
   const dirOn = followsPath(g.objId);
   cineNow = g.objId; realCarry = p.real ? g.objId : null;
-  try { display.enter(g, { start: p.start, o: dirOn ? p.o ?? null : null, dir: dirOn ? p.d ?? null : null, under: [], simul: !dirOn, path: dirOn ? pathOfObj(g.objId) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); }
+  try { display.enter(g, { start: p.start, o: dirOn ? p.o ?? null : null, dir: dirOn ? p.d ?? null : null, under: [], simul: !dirOn, path: dirOn ? pathOfObj(g.objId) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); display.settleIdle(g); }
   finally { cineNow = null; realCarry = null; }
 }
 /** Pass 2 of the same sheet: what the last pass was given, shown again (a stroke that was held is shown now, one that is held now is taken off). */
