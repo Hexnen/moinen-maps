@@ -289,7 +289,8 @@ function stopRun(clean = true, only = null) {
     lastEnded = r.show.id;
     try { fx().end(); } catch ( err ) { console.warn(`${MODULE_ID} | cinematic: fx.end`, err); }
     Hooks.callAll(HOOK, "end", { id: r.show.id, reveals: r.stats.reveals });
-    if ( gm() && canvas.scene && (r.show.by === game.user.id || !game.users.get(r.show.by)?.active) && game.users.activeGM?.isSelf ) {
+    // (the show's own GM while they are here, else the active GM: with two GMs online the one who pressed Action may not be the active one, and then nobody removed the record)
+    if ( gm() && canvas.scene && owner(r.show) ) {
       const set = new Set(ids); settleIds(set);
       canvas.scene.update({ [`flags.${MODULE_ID}.${FLAG}.-=${r.show.by}`]: null }).catch(() => {});
     }
