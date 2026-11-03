@@ -19,6 +19,7 @@
  * State (per piece, Float64 like PIXI's ObservablePoints): px, py, sx, sy, rot, alpha; Uint32 tint; flags (made, visible).
  */
 
+import { batchShader } from "./sharp-batch.mjs";
 let ROUND = null;
 const RK = [0, 1, 3, 4, 6, 7, 9, 10];
 const F_MADE = 1, F_VIS = 2, F_DIRTY = 4, F_ON = 8, F_COL = 16;   // F_ON: its quad is drawn (not empty)
@@ -221,7 +222,7 @@ export class PieceBatch extends PIXI.Container {
       this.nd = 0;
     }
     if ( this.base ) this.writeBase();
-    const B = renderer.plugins.batch, sh = B?._shader;
+    const sh = batchShader(renderer);
     if ( !sh || !this.tex.valid ) return;
     // nothing to draw yet (no piece shown, no base pixel): no draw, no upload of the atlas (an area's atlas goes to the GPU when its
     // first piece shows or the display's uploader gets to it - not all of a Detonate's atlases in its first frame)

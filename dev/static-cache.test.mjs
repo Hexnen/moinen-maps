@@ -39,4 +39,25 @@ ok(last.join() === "0,0,1", "a new stroke entering on top: one band under one ru
 const water = C.levels([{ r: R(0, 0, 30, 30) }, { r: R(0, 0, 30, 30), live: true }, { r: R(100, 100, 120, 120) }, { r: R(20, 20, 40, 40) }]);
 ok(water.join() === "0,1,0,2", "water: a later stroke away from it stays in band 0, one over it goes to band 1");
 ok(C.cacheRes(1536, 1024) === 1 && C.cacheRes(8000, 8000) < 1 && C.cacheRes(8000, 8000) >= 0.25, "cacheRes: 1, capped on huge scenes");
+// zoom AA weight: a function of the scale only; bounded, continuous, monotone non-increasing; full below s0, none from s1; same for any tile
+{
+  const K = [[1.5, 0.8, 1.0], [1, 0.7, 1.2], [2, 0.5, 2.5], undefined];
+  for ( const k of K ) {
+    const a = k?.[0] ?? 1.5, s0 = k?.[1] ?? 0.8, s1 = k?.[2] ?? 1.0;
+    let prev = Infinity;
+    for ( let s = 0.05; s < 10; s += 0.001 ) {
+      const w = C.aaWeight(s, k);
+      ok(w >= 0 && w <= a + 1e-12, `aaWeight bounded (${s})`);
+      ok(w <= prev + 1e-12, `aaWeight monotone non-increasing (${s})`);
+      ok(prev === Infinity || Math.abs(w - prev) < a * 0.06, `aaWeight continuous: no pop between scale steps of 0.001 (${s}: ${prev} -> ${w})`);
+      if ( s <= s0 ) ok(w === a, "aaWeight full below s0");
+      if ( s >= s1 ) ok(w === 0, "aaWeight zero from s1: the resting look at and above it is untouched");
+      prev = w;
+    }
+  }
+  ok(C.aaWeight(0, null) === 0 && C.aaWeight(NaN, null) === 0 && C.aaWeight(-1, null) === 0, "aaWeight: no scale, no filter");
+  ok(C.aaWeight(1.0, null) === 0 && C.aaWeight(3.4, null) === 0 && C.aaWeight(6, null) === 0, "default: zoom 1 and above is the resting sampler exactly");
+  // DPR: the weight is asked with screen px per texel (css scale x dpr / texel density) - the same scene zoom at a higher DPR is just a larger scale
+  for ( const dpr of [1, 1.25, 1.5, 2] ) ok(C.aaWeight(0.6 * dpr) >= C.aaWeight(0.6 * dpr * 1.1), "aaWeight monotone across DPR");
+}
 console.log(`static-cache: ${n} checks ok`);

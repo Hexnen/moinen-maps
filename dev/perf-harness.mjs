@@ -2332,3 +2332,189 @@ export function slicedPixelCheck({ max = 6 } = {}) {
   R.state?.reset?.(); R.texture.reset?.();
   return { areas: rows.length, rows, diff: rows.reduce((s, r) => s + (r.diff < 0 ? 1e9 : r.diff), 0) };
 }
+
+/**
+ * CAMERA MOVE CHECK (cinematic camera, a wheel glide, animatePan): drives eased zoom / pan moves with REAL frames (the ticker is stepped
+ * on a virtual 60 fps clock, every frame is drawn with the move's transform, shake offsets included) and reads the destruction layer
+ * alone (`grab`, at the view's own scale) every frame. Per move:
+ *  - boxes: the cache's tiles each have a mean gradient (sharpness) over their own screen rectangle; a tile that is softened or sharpened
+ *    differently from the frame as a whole shows as a box. boxes = mean over frames of |change of log(tile sharpness / frame sharpness)|
+ *    (all tiles treated alike -> the noise floor; a window of softening that touches the bands and not the live runs -> large);
+ *  - seam: worst tile edge: mean deviation of the screen column / row at the edge from its neighbours against a column 5 px away (> 1.5 is a seam);
+ *  - weight: the ink (sum of alpha) per scene px^2, second difference over frames relative to its level (an outline that swells and sinks);
+ *  - beat: wavingCheck's fine-detail energy per fixed scene block, second difference relative to its level (the waving);
+ *  - pop: the relative jump in sharpness between the last frame of the move and the frame 300 ms later at the same view (a softening
+ *    that ends shows here);
+ *  - cost: band re-draws (cache stats.bakes), render textures made and GL texture creates during the move; ms per frame (CPU, gl.finish).
+ * moves: [{ name, z0, z1, ms, pan: [dx, dy] (scene px), shake: px }]; default = the cinematic set.
+ */
+export const CAMERA_MOVES = [
+  { name: "in 0.5>3 400ms", z0: 0.5, z1: 3, ms: 400 }, { name: "out 3>0.8 800ms", z0: 3, z1: 0.8, ms: 800 }, { name: "in 1>6 400ms", z0: 1, z1: 6, ms: 400 },
+  { name: "in 1>3 1500ms", z0: 1, z1: 3, ms: 1500 }, { name: "out 3>1 1500ms", z0: 3, z1: 1, ms: 1500 },
+  { name: "pan+zoom 1>2.2 800ms shake", z0: 1, z1: 2.2, ms: 800, pan: [200, 120], shake: 3 },
+  { name: "shake only z2.6", z0: 2.6, z1: 2.6, ms: 600, shake: 4 },
+  { name: "in 2>8 600ms", z0: 2, z1: 8, ms: 600 }, { name: "out 6>1 500ms", z0: 6, z1: 1, ms: 500 },
+  { name: "pan+zoom 1.5>4 500ms shake", z0: 1.5, z1: 4, ms: 500, pan: [80, 50], shake: 2 },
+];
+/** The destruction layer drawn `f` times denser and box-averaged down to the screen's pixels: the ideal an anti-aliased frame should approach. */
+export function grabSS(f = 4) {
+  const R = canvas.app.renderer, w = R.screen.width, h = R.screen.height, k = R.resolution;
+  const rt = PIXI.RenderTexture.create({ width: w, height: h, resolution: k * f });
+  R.render(D().objs, { renderTexture: rt, transform: canvas.primary.worldTransform.clone(), clear: true });
+  const big = R.extract.pixels(rt); rt.destroy(true);
+  const PW = Math.round(w * k), PH = Math.round(h * k), BW = PW * f, out = new Uint8ClampedArray(PW * PH * 4), n = f * f;
+  for ( let y = 0; y < PH; y++ ) for ( let x = 0; x < PW; x++ ) for ( let c = 0; c < 4; c++ ) {
+    let sum = 0;
+    for ( let j = 0; j < f; j++ ) for ( let i = 0; i < f; i++ ) sum += big[(((y * f + j) * BW) + x * f + i) * 4 + c];
+    out[(y * PW + x) * 4 + c] = sum / n;
+  }
+  return out;
+}
+export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy = null, ss = 0, ref = 0 } = {}) {
+  const R = canvas.app.renderer, d = D(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
+  cx ??= sr.x + sr.width * 0.5; cy ??= sr.y + sr.height * 0.5;
+  const PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+  const setView = (x, y, z, jx, jy) => {
+    canvas.pan({ x, y, scale: z });
+    if ( Math.abs(canvas.stage.scale.x - z) > 1e-6 ) { canvas.stage.scale.set(z, z); canvas.stage.pivot.set(x, y); canvas.stage.position.set(R.screen.width / 2, R.screen.height / 2); }
+    canvas.stage.position.set(canvas.stage.position.x + jx, canvas.stage.position.y + jy);
+  };
+  const lum = (px, x, y) => { const q = (y * PW + x) * 4; return px[q] + px[q + 1] + px[q + 2]; };
+  const tileRects = () => (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => ({ x: t.x, y: t.y, w: t.w, h: t.h })));
+  const stats = (px, rect) => {            // mean gradient over alpha > 200 pixels and the ink, in a screen rectangle
+    let s = 0, n = 0, ink = 0;
+    for ( let y = Math.max(1, rect[1]); y < Math.min(PH - 1, rect[3]); y++ ) for ( let x = Math.max(1, rect[0]); x < Math.min(PW - 1, rect[2]); x++ ) {
+      const q = (y * PW + x) * 4; ink += px[q + 3];
+      if ( px[q + 3] < 200 ) continue;
+      s += Math.abs(lum(px, x + 1, y) - lum(px, x - 1, y)) + Math.abs(lum(px, x, y + 1) - lum(px, x, y - 1)); n++;
+    }
+    return { sharp: n > 40 ? s / n : NaN, ink: ink / 255, n };
+  };
+  const edgeDev = (px, sx, a0, a1, horiz) => {
+    let s = 0, n = 0;
+    for ( let t = Math.max(1, a0); t < Math.min(horiz ? PW : PH, a1) - 1; t += 2 ) {
+      if ( sx < 1 || sx >= (horiz ? PH : PW) - 1 ) continue;
+      const at = (a, b) => { const q = ((horiz ? a : b) * PW + (horiz ? b : a)) * 4; return px[q] + px[q + 1] + px[q + 2]; };
+      s += Math.abs(at(sx, t) - (at(sx - 1, t) + at(sx + 1, t)) / 2); n++;
+    }
+    return n ? s / n : 0;
+  };
+  const real = performance.now.bind(performance); let V = real(); performance.now = () => V;
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const gl = R.gl; let glTex = 0; const oct = gl.createTexture; gl.createTexture = function(...a) { glTex++; return oct.apply(gl, a); };
+  let rtMade = 0; const orc = PIXI.RenderTexture.create; PIXI.RenderTexture.create = function(...a) { rtMade++; return orc.apply(this, a); };
+  const fxWas = d.fx.visible; d.fx.visible = false;
+  const rows = [];
+  try {
+    const BLK = 24;
+    for ( const mv of moves ) {
+      const { z0, z1, ms, pan = [0, 0], shake = 0 } = mv, n = Math.max(3, Math.round(ms / (1000 / fps)));
+      setView(cx, cy, z0, 0, 0); V += 1000; T.update(V); V += 1000; T.update(V);
+      const bakes0 = d.cache?.stats.bakes ?? 0; glTex = 0; rtMade = 0;
+      let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
+      const tilesNow = tileRects();
+      let boxSum = 0, boxN = 0, softSum = 0, beatSum = 0, beatN = 0, bp = null, bpp = null, lastSharp = NaN;
+      const cpu = [], inks = [], seam = new Map(), errs = []; let rp = null, rpp = null, bxSum = 0, bxN = 0;
+      const blocks = []; const rx = cx - 120, ry = cy - 80;
+      for ( let y = ry; y < ry + 160; y += BLK ) for ( let x = rx; x < rx + 240; x += BLK ) blocks.push([x, y]);
+      for ( let i = 0; i < n; i++ ) {
+        const e = ease(i / (n - 1)), z = Math.exp(Math.log(z0) + (Math.log(z1) - Math.log(z0)) * e);
+        setView(cx + pan[0] * e, cy + pan[1] * e, z, shake * rnd() * 2, shake * rnd() * 2);
+        V += 1000 / fps; const t0 = real(); T.update(V); gl.finish(); cpu.push(real() - t0);
+        const px = ss > 1 ? grabSS(ss) : grab(), M = canvas.primary.worldTransform;
+        { const v0 = V; V += 1000; T.update(V); V = v0; T.lastTime = v0; } const pr = ss > 1 ? grabSS(ss) : grab();           // (the clock goes back: the next frame follows the move's own time) the same view at REST (the clock a second on, nothing moved): what the move must not differ from
+        let rfCur = null; if ( ref ) { const rf = rfCur = grabSS(ref); let e = 0, nn = 0; for ( let q = 0; q < px.length; q += 4 ) { if ( px[q + 3] < 8 && rf[q + 3] < 8 ) continue; e += Math.abs(px[q] - rf[q]) + Math.abs(px[q + 1] - rf[q + 1]) + Math.abs(px[q + 2] - rf[q + 2]) + Math.abs(px[q + 3] - rf[q + 3]); nn++; } errs.push(nn ? e / nn / 4 : 0); }
+        const whole = stats(px, [0, 0, PW, PH]);
+        // boxes: per 48 px cell with art, log(sharpness in the move / at rest); a softening that treats areas alike moves every cell the
+        // same (the spread is 0), one that touches the bands and not the live runs, or each tile by its own sampling, spreads them
+        { const C = 48, lr = []; let mean = 0;
+          for ( let cy0 = 0; cy0 + C <= PH; cy0 += C ) for ( let cx0 = 0; cx0 + C <= PW; cx0 += C ) {
+            const a = stats(px, [cx0, cy0, cx0 + C, cy0 + C]), b = stats(pr, [cx0, cy0, cx0 + C, cy0 + C]);
+            if ( a.n > 200 && b.n > 200 && Number.isFinite(a.sharp) && Number.isFinite(b.sharp) ) { const v = Math.log(a.sharp / b.sharp); lr.push(v); mean += v; }
+          }
+          if ( lr.length > 3 ) { mean /= lr.length; boxSum += Math.sqrt(lr.reduce((q, v) => q + (v - mean) ** 2, 0) / lr.length); boxN++; softSum += Math.abs(mean); } }
+        tilesNow.forEach((t, ti) => {
+          const rc = [Math.round((M.a * t.x + M.tx) * k), Math.round((M.d * t.y + M.ty) * k), Math.round((M.a * (t.x + t.w) + M.tx) * k), Math.round((M.d * (t.y + t.h) + M.ty) * k)];
+          if ( i % 3 === 0 ) for ( const [ex, horiz] of [[t.x, false], [t.x + t.w, false], [t.y, true], [t.y + t.h, true]] ) {
+            const s0 = Math.round(horiz ? (M.d * ex + M.ty) * k : (M.a * ex + M.tx) * k), a0 = horiz ? rc[0] : rc[1], a1 = horiz ? rc[2] : rc[3];
+            const dev = edgeDev(px, s0, a0, a1, horiz), ctl = (edgeDev(px, s0 + 5, a0, a1, horiz) + edgeDev(px, s0 - 5, a0, a1, horiz)) / 2;
+            const dev2 = edgeDev(pr, s0, a0, a1, horiz), ctl2 = (edgeDev(pr, s0 + 5, a0, a1, horiz) + edgeDev(pr, s0 - 5, a0, a1, horiz)) / 2;
+            const key = `${horiz ? "y" : "x"}${ti}.${ex}`, cur = seam.get(key) ?? { dev: 0, ctl: 0, dev2: 0, ctl2: 0 }; cur.dev += dev; cur.ctl += ctl; cur.dev2 += dev2; cur.ctl2 += ctl2; seam.set(key, cur);
+          }
+        });
+        inks.push(whole.ink / (M.a * k) ** 2);
+        const energy = (pxx) => { const out = new Float32Array(blocks.length);
+        blocks.forEach(([bx, by], bi) => {
+          const x0 = Math.max(1, Math.round((M.a * bx + M.tx) * k)), y0 = Math.max(1, Math.round((M.d * by + M.ty) * k)), x1 = Math.min(PW - 1, Math.round((M.a * (bx + BLK) + M.tx) * k)), y1 = Math.min(PH - 1, Math.round((M.d * (by + BLK) + M.ty) * k));
+          let s2 = 0, n2 = 0;
+          for ( let y = y0; y < y1; y++ ) for ( let x = x0; x < x1; x++ ) { s2 += Math.abs(lum(pxx, x, y) - (lum(pxx, x - 1, y) + lum(pxx, x + 1, y) + lum(pxx, x, y - 1) + lum(pxx, x, y + 1)) / 4); n2++; }
+          out[bi] = n2 ? s2 / n2 : 0;
+        }); return out; };
+        const e2 = energy(px), r2 = rfCur ? energy(rfCur) : null;
+        if ( r2 && rp && rpp ) for ( let bi = 0; bi < e2.length; bi++ ) { const lvl = (e2[bi] + bp[bi] + bpp[bi]) / 3; if ( lvl > 2 ) { bxSum += Math.abs((e2[bi] - 2 * bp[bi] + bpp[bi]) - (r2[bi] - 2 * rp[bi] + rpp[bi])) / lvl; bxN++; } }
+        rpp = rp; rp = r2;
+        if ( bp && bpp ) for ( let bi = 0; bi < e2.length; bi++ ) { const lvl = (e2[bi] + bp[bi] + bpp[bi]) / 3; if ( lvl > 2 ) { beatSum += Math.abs(e2[bi] - 2 * bp[bi] + bpp[bi]) / lvl; beatN++; } }
+        bpp = bp; bp = e2; lastSharp = whole.sharp;
+      }
+      let wSum = 0, wN = 0;
+      for ( let i = 2; i < inks.length; i++ ) { const l = (inks[i] + inks[i - 1] + inks[i - 2]) / 3; if ( l > 1e-9 ) { wSum += Math.abs(inks[i] - 2 * inks[i - 1] + inks[i - 2]) / l; wN++; } }
+      // pop: 300 ms later at the same view (the shake ends, the clock runs on)
+      setView(cx + pan[0], cy + pan[1], z1, 0, 0);
+      for ( let j = 0; j < 18; j++ ) { V += 1000 / fps; T.update(V); }
+      const rest = stats(grab(), [0, 0, PW, PH]).sharp;
+      const seams = [...seam.values()].map((v) => (v.dev / Math.max(1e-6, v.ctl)) / Math.max(0.2, v.dev2 / Math.max(1e-6, v.ctl2))).sort((a, b) => b - a);
+      const cs = cpu.slice().sort((a, b) => a - b);
+      const es = errs.slice().sort((a, b) => a - b);
+      rows.push({ move: mv.name, frames: n, beatX: ref ? +(bxSum / Math.max(1, bxN)).toFixed(4) : undefined, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
+        pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), sharpEnd: +lastSharp.toFixed(2), sharpRest: +rest.toFixed(2), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
+    }
+  } finally {
+    gl.createTexture = oct; PIXI.RenderTexture.create = orc; d.fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start();
+  }
+  return { dpr: k, cfg: { zoomAA: globalThis.CONFIG.moinenMaps?.zoomAA !== false, aaK: globalThis.CONFIG.moinenMaps?.aaK ?? null }, rows };
+}
+
+/**
+ * WAVING, BLUR-NEUTRAL (damage layer alone, scene points): like wavingCheck's damageChange / jitter but without the map and on the layer
+ * alone, and with a REFERENCE: `ss` > 1 reads every step from the supersampled ideal (grabSS), so the same numbers can be taken for the
+ * ideal image (a crisp edge moving past a fixed point changes its value a lot - that is the picture, not waving: the floor to compare
+ * against). Per step the scene points (grid px apart, region of the scene) with damage (alpha > 128 at either of three consecutive steps)
+ * give mean |value change| (change) and mean |second difference| (jitter); `excess` = jitter above the ideal's own (run with ss to get it).
+ * -> { change, jitter, steps, n }.
+ */
+export function wavingDamage({ from = 3, to = 1.5, stepSize = 0.01, region = null, grid = 3, ss = 0 } = {}) {
+  const R = canvas.app.renderer, T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
+  region ??= { x: sr.x + sr.width * 0.3, y: sr.y + sr.height * 0.3, w: sr.width * 0.4, h: sr.height * 0.4 };
+  const cx = region.x + region.w / 2, cy = region.y + region.h / 2, PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
+  const pts = []; for ( let y = region.y; y < region.y + region.h; y += grid ) for ( let x = region.x; x < region.x + region.w; x += grid ) pts.push([x, y]);
+  const setZoom = (z) => { canvas.pan({ x: cx, y: cy, scale: z }); if ( Math.abs(canvas.stage.scale.x - z) > 1e-6 ) { canvas.stage.scale.set(z, z); canvas.stage.pivot.set(cx, cy); canvas.stage.position.set(R.screen.width / 2, R.screen.height / 2); } };
+  const sample = (px) => {
+    const M = canvas.stage.worldTransform, v = new Float32Array(pts.length), a = new Float32Array(pts.length);
+    for ( let i = 0; i < pts.length; i++ ) {
+      const X = (M.a * pts[i][0] + M.tx) * k - 0.5, Y = (M.d * pts[i][1] + M.ty) * k - 0.5, x0 = Math.floor(X), y0 = Math.floor(Y), fx = X - x0, fy = Y - y0;
+      if ( x0 < 0 || y0 < 0 || x0 + 1 >= PW || y0 + 1 >= PH ) { v[i] = a[i] = NaN; continue; }
+      const L = (x, y, o) => { const q = (y * PW + x) * 4; return o ? px[q + 3] : 0.299 * px[q] + 0.587 * px[q + 1] + 0.114 * px[q + 2]; };
+      for ( const o of [0, 1] ) { const r = (L(x0, y0, o) * (1 - fx) + L(x0 + 1, y0, o) * fx) * (1 - fy) + (L(x0, y0 + 1, o) * (1 - fx) + L(x0 + 1, y0 + 1, o) * fx) * fy; if ( o ) a[i] = r; else v[i] = r; }
+    }
+    return { v, a };
+  };
+  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
+  const real = performance.now.bind(performance); let F = real(); performance.now = () => (F += 0.001);
+  const fxWas = D().fx.visible; D().fx.visible = false;
+  let p1 = null, p2 = null, ch = 0, jt = 0, nC = 0, nJ = 0, steps = 0;
+  try {
+    for ( let z = from; z >= to - 1e-9 && steps < 400; z -= stepSize, steps++ ) {
+      setZoom(z); T.update(F); T.update(F);
+      const s = sample(ss > 1 ? grabSS(ss) : grab());
+      if ( p1 ) for ( let i = 0; i < pts.length; i++ ) {
+        if ( Number.isNaN(s.v[i]) || Number.isNaN(p1.v[i]) ) continue;
+        if ( s.a[i] < 128 && p1.a[i] < 128 ) continue;
+        ch += Math.abs(s.v[i] - p1.v[i]); nC++;
+        if ( p2 && !Number.isNaN(p2.v[i]) ) { jt += Math.abs(s.v[i] - 2 * p1.v[i] + p2.v[i]); nJ++; }
+      }
+      p2 = p1; p1 = s;
+    }
+  } finally { D().fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start(); }
+  return { change: +(ch / Math.max(1, nC)).toFixed(3), jitter: +(jt / Math.max(1, nJ)).toFixed(3), steps, n: nC, dpr: k, zoomAA: globalThis.CONFIG.moinenMaps?.zoomAA };
+}

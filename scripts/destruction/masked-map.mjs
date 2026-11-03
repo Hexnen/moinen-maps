@@ -9,32 +9,40 @@
  * The container keeps the old shape [map sprite, mask sprite] (callers swap the mask's texture for a dissolve: entries, erase strokes);
  * neither child is drawn itself, `render` reads their current texture and transform each frame.
  */
-const VERT = `
+import { SHARP_SAMPLER_GLSL } from "./sharp-sampler.mjs";
+import { sharpBatch } from "./sharp-batch.mjs";
+
+const VERT = `#version 300 es
 precision highp float;
-attribute vec2 aVertexPosition;
-attribute vec2 aMaskCoord;
-attribute vec2 aMapCoord;
+in vec2 aVertexPosition;
+in vec2 aMaskCoord;
+in vec2 aMapCoord;
 uniform mat3 projectionMatrix;
-varying vec2 vMask;
-varying vec2 vMap;
+out vec2 vMask;
+out vec2 vMap;
 void main() {
   gl_Position = vec4((projectionMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);
   vMask = aMaskCoord;
   vMap = aMapCoord;
 }`;
-const FRAG = `
+const FRAG = `#version 300 es
 precision highp float;
-varying vec2 vMask;
-varying vec2 vMap;
+in vec2 vMask;
+in vec2 vMap;
 uniform sampler2D uMask;
 uniform sampler2D uMap;
 uniform float uAlpha;
+uniform float uSharpMode, uSharpK, uMaskTop;
+out vec4 fragColor;
+${SHARP_SAMPLER_GLSL}
 void main() {
-  vec4 m = texture2D(uMask, vMask);
-  gl_FragColor = texture2D(uMap, vMap) * (m.r * uAlpha);
+  // (the cover's edge through the one sampler while the display draws to the screen: a texel edge of the rim gets one pixel of anti-aliasing at
+  // any scale, as in the bands; the map itself keeps its own filter, like the map around it)
+  vec4 m = uSharpMode > 0.5 ? sharpSampleT(uMask, vMask, dFdx(vMask), dFdy(vMask), uSharpK, uMaskTop) : texture(uMask, vMask);
+  fragColor = texture(uMap, vMap) * (m.r * uAlpha);
 }`;
 
-const shaderFor = () => PIXI.Shader.from(VERT, FRAG, { uMask: PIXI.Texture.EMPTY, uMap: PIXI.Texture.EMPTY, uAlpha: 1 });
+const shaderFor = () => PIXI.Shader.from(VERT, FRAG, { uMask: PIXI.Texture.EMPTY, uMap: PIXI.Texture.EMPTY, uAlpha: 1, uSharpMode: 0, uSharpK: 1, uSharpB: 0, uMaskTop: 0 });
 
 export class MaskedPatch extends PIXI.Container {
   /** `map`: the plain map sprite; `mask`: the cover sprite (its red channel, premultiplied, is the coverage). */
@@ -74,7 +82,9 @@ export class MaskedPatch extends PIXI.Container {
     mUV[0] = mu.x0; mUV[1] = mu.y0; mUV[2] = mu.x1; mUV[3] = mu.y1; mUV[4] = mu.x2; mUV[5] = mu.y2; mUV[6] = mu.x3; mUV[7] = mu.y3;
     this.geom.getBuffer("aVertexPosition").update(); this.geom.getBuffer("aMaskCoord").update(); this.geom.getBuffer("aMapCoord").update();
     const u = this.shader.uniforms;
-    u.uMask = mt; u.uMap = pt; u.uAlpha = map.worldAlpha * mask.worldAlpha;   // the sprite's own alpha x the filter's (mask) alpha
+    u.uMask = mt; u.uMap = pt; u.uAlpha = map.worldAlpha * mask.worldAlpha;
+    const mb = mt.baseTexture; u.uSharpMode = sharpBatch.on ? 1 : 0; u.uSharpK = sharpBatch.k; u.uSharpB = sharpBatch.b;
+    u.uMaskTop = mb.mipmap === PIXI.MIPMAP_MODES.OFF ? 0 : Math.floor(Math.log2(Math.max(mb.realWidth, mb.realHeight)));   // the sprite's own alpha x the filter's (mask) alpha
     renderer.batch.flush();
     renderer.shader.bind(this.shader);
     renderer.state.set(this.state);
