@@ -26,6 +26,11 @@ import { SHARP_SAMPLER_GLSL, BLEND0 } from "./sharp-sampler.mjs";
  *    16 MPx (big scenes get less). VIEW mode, zoomed in past 1.4 screen px per texel: the bands only around the view at 1 texel per
  *    screen pixel (the same pixels as live); re-drawn when the view leaves its window or the zoom changes by 15%.
  *  - Off: `CONFIG.moinenMaps.noDestructionCache = true` or the client setting "destructionCache".
+ * - Zoom sampling, `CONFIG.moinenMaps.zoomAA`: 'edge' (default; true too) = THE ONE SAMPLER (sharp-sampler.mjs: the exact box filter of the pixel's
+ *   footprint, no NEAREST / LINEAR switch, no ramp, no taps) for the band tiles AND the live layer (sharp-batch.mjs: sprites, batched and GPU
+ *   pieces, the map patch's cover) so a zoom, a pan or a shaking camera never makes texel edges snap or shimmer; 'mips' = the previous
+ *   scale-only 4-tap mip filter + the old resting sampler, `false` = the original time-varying softening. Knobs: `edgeK` (footprint
+ *   scale, 1 exact), `edgeBlend` (where in an octave the minified levels start to blend, 0.75).
  * Passes hide objects with `renderable` (never `visible`: the cause lights read `visible`). While the cache shows, `live` itself is not
  * visible (its sprites are not even transformed) and RUN objects update and draw the live units from it, in order.
  */
