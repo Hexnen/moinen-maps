@@ -1313,6 +1313,8 @@
   "MOINENMAPS.Destr.cin.h.camZoomMax": "Nigdy więcej niż 4 razy ani mniej niż połowa zoomu początkowego.",
   "MOINENMAPS.Destr.cin.p.camLead": "Wyprzedzenie",
   "MOINENMAPS.Destr.cin.h.camLead": "Jak daleko przed frontem celuje kamera.",
+  "MOINENMAPS.Destr.cin.p.camAhead": "Start przed uderzeniem",
+  "MOINENMAPS.Destr.cin.h.camAhead": "O ile wcześniej niż uderzenie kamera rusza do kreski, żeby być na miejscu w chwili uderzenia (0 = rusza dopiero z uderzeniem).",
   "MOINENMAPS.Destr.cin.p.camHold": "Przytrzymanie na końcu",
   "MOINENMAPS.Destr.cin.h.camHold": "Jak długo kamera zostaje po ostatnim uderzeniu.",
   "MOINENMAPS.Destr.cin.p.camReturn": "Powrót",

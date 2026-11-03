@@ -1313,6 +1313,8 @@
   "MOINENMAPS.Destr.cin.h.camZoomMax": "Never more than 4 times or less than half of the start zoom.",
   "MOINENMAPS.Destr.cin.p.camLead": "Lead",
   "MOINENMAPS.Destr.cin.h.camLead": "How far ahead of the front the camera aims.",
+  "MOINENMAPS.Destr.cin.p.camAhead": "Start before the hit",
+  "MOINENMAPS.Destr.cin.h.camAhead": "How much earlier than the impact the camera sets off for the stroke, so it is there when the hit lands (0 = it moves only with the impact).",
   "MOINENMAPS.Destr.cin.p.camHold": "Hold at the end",
   "MOINENMAPS.Destr.cin.h.camHold": "How long the camera stays after the last impact.",
   "MOINENMAPS.Destr.cin.p.camReturn": "Return",

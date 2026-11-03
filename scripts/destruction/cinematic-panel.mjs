@@ -29,7 +29,7 @@ export const GROUPS = [
   { id: "flash", toggle: "flOn", keys: ["flIntensity", "flDur", "flColor"] },
   { id: "shake", toggle: "shOn", keys: ["shIntensity", "shFreq", "shDecay", "shBias", "shMax"] },
   { id: "slowmo", toggle: "smOn", keys: ["smFactor", "smIn", "smOut", "smThreshold"] },
-  { id: "camera", toggle: "camOn", keys: ["camMode", "camZoomMin", "camZoomMax", "camLead", "camHold", "camReturn", "camEase"] },
+  { id: "camera", toggle: "camOn", keys: ["camMode", "camZoomMin", "camZoomMax", "camLead", "camAhead", "camHold", "camReturn", "camEase"] },
   { id: "pace", toggle: null, keys: ["pace", "timeScale", "gap", "pauseBefore", "pauseAfter"] }
 ];
 const OPTS = ["cinNoLetterbox", "cinNoVignette", "cinNoShake", "cinNoFlash", "cinNoSlow"];

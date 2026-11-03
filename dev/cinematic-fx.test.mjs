@@ -231,4 +231,34 @@ const live = (f) => f.timers.filter((t) => !t.off).length;
   for ( let i = 0; i < 40; i++ ) { g.run(250); await new Promise((r) => setTimeout(r, 0)); }
   ok(e2 && g.page.children.length === 0, "a move that never finishes is capped");
 }
+// camera ahead: the camera sets off for a stroke before its impact, the impact does not repeat the first leg, a stale leg of the stroke before is dropped
+{
+  const f = fakeEnv(), fx = L.createFx(() => f.env), r = R({ camAhead: 300, camMode: "follow" });
+  fx.begin({ r }, { strokes });
+  const n0 = f.pans.length;
+  fx.anticipate({ x: 100, y: 100, size: 200, id: "s1" });
+  eq(f.pans.length, n0 + 1, "anticipate: the first leg goes at once");
+  ok(f.pans.at(-1).duration <= r.camAhead + 150, "anticipate: the leg is shortened to arrive about at the impact");
+  const first = f.pans.at(-1);
+  fx.impact({ x: 100, y: 100, size: 200, id: "s1" });
+  eq(f.pans.length, n0 + 1, "the impact does not repeat the first leg");
+  f.run(2500);
+  ok(f.pans.length > n0 + 1 && f.pans.slice(n0 + 1).every((p) => p !== first), "the later legs of the stroke still play");
+  // the next stroke: its anticipation drops the legs of s1 that have not run
+  const f2 = fakeEnv(), fx2 = L.createFx(() => f2.env); fx2.begin({ r }, { strokes });
+  fx2.impact({ x: 100, y: 100, size: 200, id: "s1" });
+  const m = f2.pans.length;
+  fx2.anticipate({ x: 1200, y: 500, size: 200, id: "s2" });
+  const after = f2.pans.length; f2.run(300);
+  eq(f2.pans.length, after, "legs of the previous stroke that were due later do not fire after the camera set off for the next one");
+  fx2.impact({ x: 1200, y: 500, size: 200, id: "s2" });
+  eq(f2.pans.length, after, "second stroke: its impact does not repeat the first leg either");
+  // not follow / ahead 0 / no camera: anticipate does nothing
+  const f3 = fakeEnv(), fx3 = L.createFx(() => f3.env); fx3.begin({ r: R({ camAhead: 0 }) }, { strokes });
+  const k = f3.pans.length; fx3.anticipate({ x: 100, y: 100, size: 200, id: "s1" }); eq(f3.pans.length, k, "camAhead 0: nothing");
+  const f4 = fakeEnv({ noCamera: true }), fx4 = L.createFx(() => f4.env); fx4.begin({ r }, { strokes }); fx4.anticipate({ x: 1, y: 1, size: 9, id: "s1" }); eq(f4.pans.length, 0, "camera off: nothing");
+  const f5 = fakeEnv(), fx5 = L.createFx(() => f5.env); fx5.begin({ r: R({ camAhead: 300, camMode: "frame" }) }, { strokes });
+  const k5 = f5.pans.length; fx5.anticipate({ x: 100, y: 100, size: 200, id: "s1" }); eq(f5.pans.length, k5, "frame mode: nothing");
+  ok(C.NUM.camAhead[0] === 300 && C.NUM.camAhead[2] <= 450, "camAhead: default 300, never more than the reveal lead (450)");
+}
 console.log(`cinematic-fx: ${n} checks passed`);

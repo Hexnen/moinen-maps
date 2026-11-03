@@ -20,7 +20,7 @@ export const NUM = {
   vgStrength: [0.45, 0, 1, ""], vgRadius: [0.65, 0.2, 1, ""],
   smFactor: [0.45, 0.1, 1, "x"], smIn: [250, 0, 2000, "ms"], smOut: [500, 0, 3000, "ms"], smThreshold: [40, 0, 400, "art px"],
   flIntensity: [0.5, 0, 1, ""], flDur: [180, 40, 1500, "ms"],
-  camZoomMin: [1, 0.3, 3, "x"], camZoomMax: [1.6, 0.3, 3, "x"], camLead: [0.35, 0, 1, ""], camHold: [600, 0, 5000, "ms"], camReturn: [900, 0, 5000, "ms"], camEase: [0.5, 0, 1, ""],
+  camZoomMin: [1, 0.3, 3, "x"], camZoomMax: [1.6, 0.3, 3, "x"], camLead: [0.35, 0, 1, ""], camAhead: [300, 0, 450, "ms"], camHold: [600, 0, 5000, "ms"], camReturn: [900, 0, 5000, "ms"], camEase: [0.5, 0, 1, ""],
   timeScale: [1, 0.25, 4, "x"], gap: [350, 0, 5000, "ms"], pauseBefore: [500, 0, 5000, "ms"], pauseAfter: [800, 0, 8000, "ms"]
 };
 export const ENUMS = { lbEase: EASES, pace: PACES, camMode: CAM_MODES };

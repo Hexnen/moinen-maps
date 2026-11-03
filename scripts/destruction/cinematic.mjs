@@ -193,6 +193,8 @@ function startRun(show) {
     if ( q.phase === "now" ) continue;
     run.timers.push(setTimeout(() => reveal(q), ms(q.revealAt)));
     run.timers.push(setTimeout(() => impact(q), ms(q.startAt)));
+    const ahead = show.snap.r.camAhead ?? 0;              // the camera sets off for the stroke this much before its impact (every client: the setting is in the snapshot)
+    if ( ahead > 0 ) run.timers.push(setTimeout(() => lead(q), ms(q.startAt - ahead)));
   }
   // 3. the end: once the last stroke has stopped moving (or at the schedule's end)
   const last = tl.at(-1);
@@ -235,6 +237,12 @@ function reveal(q) {
   const ok = host.reveal(q.id, { start, o: c.o ?? null, d: c.d ?? null, real: mine });
   Hooks.callAll(HOOK, "stroke", { id: q.id, index: q.i, start: q.startAt, shown: ok });
   if ( mine ) flip(q.id, "y");
+}
+function lead(q) {
+  if ( !run || run.show.id !== currentId() ) return;
+  const o = S()?.objects.find((p) => p.id === q.id); if ( !o ) return;
+  const g = geom(o);
+  try { fx().anticipate?.({ x: g.x, y: g.y, size: g.size, id: q.id }); } catch ( err ) { console.warn(`${MODULE_ID} | cinematic: fx.anticipate`, err); }
 }
 function impact(q) {
   if ( !run || run.show.id !== currentId() ) return;

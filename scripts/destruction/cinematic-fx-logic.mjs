@@ -198,10 +198,26 @@ export function createFx(getEnv) {
     try { Promise.resolve(s.env.pan({ x: leg.x, y: leg.y, scale: leg.scale, duration: dur, easing: camEasing(s.r.camEase) })).catch(() => {}); } catch ( err ) { console.error(err); }
   }
   const later = (s, fn, ms) => {
-    if ( ms <= 0 ) { fn(); return; }
+    if ( ms <= 0 ) { fn(); return null; }
     const c = s.env.timer(() => { s.timers.delete(c); if ( !s.done ) { try { fn(); } catch ( err ) { console.error("moinen-maps | cinematic fx", err); finish(s); } } }, ms);
     s.timers.add(c);
+    return c;
   };
+  /** The legs of the stroke before that have not run yet are dropped when the camera sets off for the next one (they would pull it back). */
+  const dropLegs = (s) => { for ( const c of s.legTimers ?? [] ) { s.timers.delete(c); try { c(); } catch { /* already fired */ } } s.legTimers = []; };
+
+  /**
+   * The camera sets off for a stroke `camAhead` ms before its impact (cinematic.mjs calls this then), so it is there when the hit lands:
+   * the first leg only, shortened to fit; impact() plays the rest. Follow mode only; the impact alone behaves as before when this is not called.
+   */
+  function anticipate({ x, y, size = 0, id } = {}) {
+    const s = S; if ( !s || s.ending || !id || !s.cam?.on || s.r.camMode !== "follow" || !(s.r.camAhead > 0) ) return;
+    const stroke = s.strokes.find((o) => o.id === id), leg = planLegs(stroke, { x, y, size }, s.r, s.cam.view)[0];
+    if ( !leg ) return;
+    dropLegs(s);
+    (s.ahead ??= new Set()).add(id);
+    pan(s, { ...leg, duration: Math.min(leg.duration, s.r.camAhead + 150) });
+  }
 
   /** One impact (art px; size = the hit's extent): flash, shake, slow motion and the camera legs of the stroke. */
   function impact({ x, y, size = 0, t, id, dir } = {}) {
@@ -223,8 +239,13 @@ export function createFx(getEnv) {
       }
     }
     if ( s.cam?.on && r.camMode === "follow" ) {
-      const v = s.cam.view;
-      for ( const leg of planLegs(stroke, { x, y, size }, r, v) ) later(s, () => pan(s, leg), leg.at);
+      const early = !!id && !!s.ahead?.delete(id);
+      if ( !early ) dropLegs(s);
+      (s.legTimers ??= []);
+      for ( const [i, leg] of planLegs(stroke, { x, y, size }, r, s.cam.view).entries() ) {
+        if ( early && i === 0 ) continue;                  // (already under way: anticipate)
+        const c = later(s, () => pan(s, leg), leg.at); if ( c ) s.legTimers.push(c);
+      }
     }
   }
 
@@ -316,7 +337,7 @@ export function createFx(getEnv) {
   }
 
   return {
-    begin, impact, end, preview,
+    begin, impact, anticipate, end, preview,
     /** Everything gone at once (scene change, error, an explicit stop). */
     abort: () => { if ( S ) finish(S); },
     get active() { return !!S; },

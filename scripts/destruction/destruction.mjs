@@ -770,7 +770,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   if ( compositeShown && display.composite !== compositeShown ) { display.composite = compositeShown; display.needPixels = requestPixels; }
   display.afterFlatten ??= afterFlatten;
   display.carry ??= carryHooks;
-  if ( !display.rimWrapped ) {                                  // (CINEMATIC: by day a rim shows nothing - cause-fx tickLights: from a darkness of 0.5 - so while a show is on screen the ~10 ms an area wait for its end instead of landing in the frame after each stroke goes on screen)
+  if ( !display.rimWrapped && display.rimSlice ) {                                  // (CINEMATIC: by day a rim shows nothing - cause-fx tickLights: from a darkness of 0.5 - so while a show is on screen the ~10 ms an area wait for its end instead of landing in the frame after each stroke goes on screen)
     display.rimWrapped = true;
     const rimSlice = display.rimSlice.bind(display);
     display.rimSlice = (budget, vw) => { if ( (canvas.environment?.darknessLevel ?? 0) < 0.45 && Cine.onScreen() ) return; rimSlice(budget, vw); };
