@@ -60,7 +60,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     mark(); const began = fx.begin({ r }, { strokes });
     need("begin", began && fx.active);
     const root = document.querySelector("[data-mm-cin]"), ui = document.getElementById("interface");
-    need("overlay root: pointer-events none, above the canvas, below the interface", root && getComputedStyle(root).pointerEvents === "none" && (!ui || root.compareDocumentPosition(ui) & Node.DOCUMENT_POSITION_FOLLOWING), { z: getComputedStyle(root).zIndex });
+    need("overlay root: pointer-events none, above the canvas, below the interface", root && getComputedStyle(root).pointerEvents === "none" && (!ui || root.compareDocumentPosition(ui) & Node.DOCUMENT_POSITION_FOLLOWING) && (Number(getComputedStyle(root).zIndex) || 0) > (Number(getComputedStyle(document.getElementById("board") ?? document.body).zIndex) || 0), { z: getComputedStyle(root).zIndex });
     need("one extra ticker listener while active", tickerCount() === T0 + 1, { ticker: tickerCount() });
     await sleep(r.lbIn + 80);
     const bars = [...root.children].filter((e) => e.style.height === `${r.lbHeight}%`);

@@ -47,7 +47,7 @@ export class StageShaker {
  */
 export function createOverlays(doc, r, eff, { insert, timer }) {
   const mk = (css) => { const el = doc.createElement("div"); Object.assign(el.style, css); return el; };
-  const root = mk({ position: "fixed", inset: "0", pointerEvents: "none", overflow: "hidden" });
+  const root = mk({ position: "fixed", inset: "0", pointerEvents: "none", overflow: "hidden", zIndex: "1" });   // (z-index 1: Foundry's #board canvas is positioned with z-index 0 and LATER in the DOM, so an auto-z root sat BEHIND it; the interface regions are z-index 30)
   root.className = "mm-cin"; root.setAttribute?.("data-mm-cin", "");
   const ease = EASE_CSS[r.lbEase] ?? EASE_CSS.inout;
   const o = { root, bars: null, vignette: null, flashEl: null, timers: [], hidden: false };

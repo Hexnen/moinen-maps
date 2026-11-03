@@ -95,7 +95,7 @@ export function renderCinematicPanel(container, { scene = null, readOnly = false
     <div class="mm-cin-row"><button type="button" data-act="preview">${esc(T("Destr.cin.test"))}</button></div>
     <div class="mm-cin-summary"></div>
     <fieldset class="mm-cin-client"><legend>${esc(T("Destr.cin.myOptions"))}</legend>
-      ${OPTS.map((k) => optCheck({ name: k, label: T(`Destr.cin.${k.replace(/^cin/, "no")}`), checked: !!game.settings.get(MODULE_ID, k) })).join("")}
+      ${OPTS.map((k) => optCheck({ name: k, label: T(`Destr.cin.${k.replace(/^cinNo/, "no")}`), checked: !!game.settings.get(MODULE_ID, k) })).join("")}
       ${optSelect({ name: "cinCamera", label: T("Destr.cin.cameraSetting"), value: game.settings.get(MODULE_ID, "cinCamera"), options: [["auto", T("Destr.cin.camAuto")], ["on", T("Destr.cin.camOn")], ["off", T("Destr.cin.noCamera")]] })}
       ${optSelect({ name: "cinReduced", label: T("Destr.cin.reducedSetting"), value: game.settings.get(MODULE_ID, "cinReduced"), options: [["auto", T("Destr.cin.redAuto")], ["on", T("Destr.cin.redOn")], ["off", T("Destr.cin.redOff")]], hint: T("Destr.cin.reducedHint") })}
       ${optHint(T("Destr.cin.hintOptOut"))}

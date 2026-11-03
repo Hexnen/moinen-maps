@@ -67,6 +67,7 @@ const live = (f) => f.timers.filter((t) => !t.off).length;
   ok(o.bars[0].style.background === "#112233" && o.bars[0].style.opacity === "0.9", "bars colour and alpha");
   ok(o.bars[0].style.transform.includes("-100%") && o.bars[1].style.transform.includes("100%"), "bars start hidden");
   ok(o.root.style.pointerEvents === "none", "pointer-events none");
+  ok(Number(o.root.style.zIndex) >= 1, "root z-index >= 1 (above Foundry's #board canvas, which is positioned at z-index 0 and later in the DOM)");
   o.show(); ok(o.bars.every((b) => b.style.transform === "translateY(0)"), "bars in");
   o.flash(1); ok(o.flashEl.style.opacity === "0" && o.flashEl.style.transition.includes(`${r.flDur}ms`), "flash fades");
   o.hide(); ok(o.bars[0].style.transform.includes("-100%"), "bars out");
