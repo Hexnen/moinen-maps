@@ -726,6 +726,165 @@ export async function superFxCheck() {
   return { ok: rows.every((r) => r.ok), rows, numbers };
 }
 
+/* ================================================================== hovering tokens in a plough: no height jump, no pop at the end */
+
+/**
+ * THE FLIGHT HEIGHT AND THE END OF A PLOUGH, on the scene on screen (e.g. a copy of "street"), with whatever moinen-pixel-vfx version is installed
+ * (api.visual or not: the user's live build has none, so the carry's fallback path is the one that matters). `carrier` / `pushed` token names; the
+ * carrier is put `gap` cells left of the first pushed token and drags `len` cells right through them (real pointer events). `hover` names tokens that get
+ * `flight` started first (a held lift passive) unless they already float. Sampled in a ticker listener just before the render (what is drawn), every frame:
+ *   rel  = the mesh's height above its own container (container y + h/2 - mesh y): the hover plus the pose's few px; a token that loses its hover for a frame steps by it;
+ *   the mesh's screen position; after the ride it must glide, never jump; afterwards mesh = document centre - its resting hover exactly, the container on the document.
+ * Rows: per token, the largest frame-to-frame change of rel (limit `allow` + the pose's own step), rel at the end vs at rest, the largest mesh step during
+ * the landing / hand-over / afterwards (`endAllow` px), and the token-bound vfx sprites (wash, shadow) never jump relative to the mesh.
+ * Returns { ok, rows, numbers }.   await (await import("/modules/moinen-maps/dev/super-check.mjs")).superHoverCheck({ carrier: "Battle Beast", pushed: ["Atom Eve"] })
+ */
+export async function superHoverCheck({ carrier: cName = "Battle Beast", pushed: pNames = ["Atom Eve"], hover = [], flight = "invincible-flight-jet-pack-passive-major", ignoreHeight = false, gap = 2.6, len = 8, allow = 4, endAllow = 6, rotAllow = 8, keep = false, pauseMs = 0, armMs = 0 } = {}) {
+  const stopPump = pumpFrames();
+  try { return await hoverCase({ cName, pNames, hover, flight, ignoreHeight, gap, len, allow, endAllow, rotAllow, keep, pauseMs, armMs }); } finally { stopPump(); }
+}
+
+/**
+ * A HIDDEN Browser pane gets no animation frames (0 Hz). While it runs, requestAnimationFrame is served by a ~60 Hz timer instead (the callbacks queued since the
+ * last "frame" are called with its time), and Foundry's ticker is restarted on it: the ticker, every rAF sampler of the checks (carry-check, super-check) and the
+ * render all run at real time, in the usual order, so a check that drives real pointer events sees every frame. stop() gives the pending callbacks back to the
+ * browser's own rAF. One per page (a nested call returns a no-op stop). Returns stop().
+ */
+export function pumpFrames(ms = 1000 / 60) {
+  if ( window.__mmPump ) return () => {};                  // (nested: the outer pump keeps running, its owner stops it)
+  const nativeR = window.requestAnimationFrame.bind(window), nativeC = window.cancelAnimationFrame.bind(window);
+  let q = new Map(), n = 1e9;
+  window.requestAnimationFrame = (cb) => { const k = n++; q.set(k, cb); return k; };
+  window.cancelAnimationFrame = (k) => { if ( q.has(k) ) q.delete(k); else nativeC(k); };
+  const T = canvas.app.ticker, was = T.started; if ( was ) { T.stop(); T.start(); }      // (its pending native request is cancelled, the next one is ours)
+  const id = setInterval(() => { const run = q; q = new Map(); const now = performance.now(); for ( const cb of run.values() ) { try { cb(now); } catch ( err ) { console.error(err); } } }, ms);
+  const stop = () => {
+    clearInterval(id); window.requestAnimationFrame = nativeR; window.cancelAnimationFrame = nativeC; delete window.__mmPump;
+    const left = q; q = new Map(); for ( const cb of left.values() ) nativeR(cb);
+    if ( T.started ) { T.stop(); T.start(); }
+  };
+  window.__mmPump = { stop };
+  return stop;
+}
+
+const relOfT = (t) => t.position.y + t.h / 2 - t.mesh.position.y;
+/** The token-bound vfx sprites at rest (the owner's layers: interface zIndex 9000, a container in the primary group), the ones within 0.6 token sizes of each token's mesh. */
+function hoverSprites(tokens) {
+  const lays = []; for ( const ch of canvas.interface.children ) if ( ch.zIndex === 9000 && ch.sortableChildren && ch.eventMode === "none" ) lays.push(ch); for ( const ch of canvas.primary.children ) if ( ch.constructor === PIXI.Container && ch.sortableChildren && ch.eventMode === "none" && ch.children.length ) lays.push(ch);
+  return tokens.map((t) => lays.flatMap((l) => l.children).filter((o) => !o.destroyed && Math.hypot(o.position.x - t.mesh.position.x, o.position.y - t.mesh.position.y) < t.w * 0.6));
+}
+/** Every frame, in a ticker listener just before the render (after every writer: what is drawn): per token [rel, mesh x, y, container x, y, rotation, scale x, y] and its sprites against the container. */
+function hoverProbe(tokens, sprites) {
+  const S = []; let on = true;
+  const probe = () => { if ( !on ) return; S.push({ t: performance.now(), r: tokens.map((t) => (t.mesh && !t.mesh.destroyed ? [relOfT(t), t.mesh.position.x, t.mesh.position.y, t.position.x, t.position.y, t.mesh.rotation, t.mesh.scale.x, t.mesh.scale.y] : null)),
+    s: sprites.map((list, i) => list.map((o) => (o.destroyed ? null : [o.position.x - tokens[i].position.x - tokens[i].w / 2, o.position.y - tokens[i].position.y - tokens[i].h / 2]))) }); };   // (against the CONTAINER: the mesh leans about its feet, a sprite does not)
+  canvas.app.ticker.add(probe, undefined, -20);
+  return { S, stop() { on = false; canvas.app.ticker.remove(probe); } };
+}
+/** The rows of superHoverCheck for the samples `S` (hoverProbe) of `tokens` (`rest` their resting rel), into `rows` / `numbers`. */
+function hoverRows(S, tokens, rest, sprites, { allow = 4, endAllow = 6, rotAllow = 8 } = {}, rows = [], numbers = {}) {
+    tokens.forEach((t, i) => {
+      const fr = S.filter((s) => s.r[i]);
+      let dRel = 0, at = -1; for ( let j = 1; j < fr.length; j++ ) { const v = Math.abs(fr[j].r[i][0] - fr[j - 1].r[i][0]); if ( v > dRel ) { dRel = v; at = j; } }
+      let mx = 0, mAt = -1; const steps = []; for ( let j = 1; j < fr.length; j++ ) { const v = Math.hypot(fr[j].r[i][1] - fr[j - 1].r[i][1], fr[j].r[i][2] - fr[j - 1].r[i][2]); steps.push(v); }
+      // the landing + hand-over + afterwards: from the frame where the ride's speed fell under 1/3 of its peak (after the peak) to the end
+      // (the ride itself may stop hard at the path's end: that is the stroke's own speed, not a pop; the window starts after the LAST fast frame)
+      const sx = []; for ( let j = 1; j < fr.length; j++ ) sx.push(Math.abs(fr[j].r[i][1] - fr[j - 1].r[i][1]));      // (judged on the ride's axis, x: a height pop is a y step and must not hide itself)
+      const peak = Math.max(...sx); let k0 = 0; for ( let j = 0; j < sx.length; j++ ) if ( sx[j] > peak / 3 ) k0 = j + 1;
+      for ( let j = k0 + 1; j < steps.length; j++ ) if ( steps[j] > mx ) { mx = steps[j]; mAt = j; }
+      const last = fr.at(-1)?.r[i], dd = t.document, w = dd.getSize();
+      const meshOn = last ? Math.hypot(t.mesh.position.x - (dd.x + w.width / 2), t.mesh.position.y + rest[i] - (dd.y + w.height / 2)) : 99;
+      const cont = Math.hypot(t.position.x - dd.x, t.position.y - dd.y);
+      // the sprites: their offset from the mesh, frame to frame
+      let sp = 0; for ( let j = 1; j < fr.length; j++ ) { const a = fr[j - 1].s[i], b = fr[j].s[i]; for ( let q = 0; q < a.length; q++ ) if ( a[q] && b[q] ) sp = Math.max(sp, Math.hypot(b[q][0] - a[q][0], b[q][1] - a[q][1])); }
+      // the lean: the mesh's rotation, frame to frame, over the whole run (a lean that snaps upright in one frame at the path's end is a pop too: it was 15-18 deg; the
+      // pushed token's knock at the contact, its lean onset plus the shiver, turns up to ~6 deg a frame by design: hence the limit 8)
+      let dRot = 0, rAt = -1; for ( let j = 1; j < fr.length; j++ ) { const v = Math.abs(fr[j].r[i][5] - fr[j - 1].r[i][5]); if ( v > dRot ) { dRot = v; rAt = j; } }
+      const n = t.document.name;
+      rows.push(row(`${n}: its lean never snaps (largest rotation change ${(dRot * 180 / Math.PI).toFixed(1)} deg a frame at ${rAt}/${fr.length}, limit ${rotAllow} deg)`, dRot * 180 / Math.PI <= rotAllow, { dRotDeg: +(dRot * 180 / Math.PI).toFixed(2), at: rAt }));
+      numbers[n + " rot"] = +(dRot * 180 / Math.PI).toFixed(2);
+      numbers[n] = { rest: rest[i], dRelMax: +dRel.toFixed(2), dRelAt: `${at}/${fr.length}`, relEnd: +(last?.[0] ?? NaN).toFixed(2), relMin: +Math.min(...fr.map((f) => f.r[i][0])).toFixed(2), endStepMax: +mx.toFixed(2), endStepAt: `${mAt}/${steps.length} (from ${k0})`, meshOn: +meshOn.toFixed(2), cont: +cont.toFixed(2), spriteJump: +sp.toFixed(2) };
+      const hov = rest[i] > 2;
+      rows.push(row(`${n}${hov ? ` (hovering ${rest[i]} px)` : ""}: its height above its container never steps more than ${allow} px a frame (max ${dRel.toFixed(1)} at frame ${at})`, dRel <= allow, numbers[n]));
+      if ( hov ) rows.push(row(`${n}: it never drops under its hover by more than the pose's squash (lowest ${Math.min(...fr.map((f) => f.r[i][0])).toFixed(1)} vs ${rest[i]})`, Math.min(...fr.map((f) => f.r[i][0])) >= rest[i] - 12, numbers[n]));
+      rows.push(row(`${n}: no jump in the landing / hand-over / afterwards (largest mesh step ${mx.toFixed(1)} px, limit ${endAllow})`, mx <= endAllow, numbers[n]));
+      rows.push(row(`${n}: afterwards the mesh is on the document at its own hover and the container on the document (${meshOn.toFixed(2)}, ${cont.toFixed(2)} px)`, meshOn < 1 && cont < 1 && Math.abs((last?.[0] ?? 0) - rest[i]) < 1, numbers[n]));
+      if ( sprites[i].length ) rows.push(row(`${n}: its ${sprites[i].length} vfx sprite(s) never jump against the mesh (max ${sp.toFixed(1)} px a frame)`, sp <= allow + 2, numbers[n]));
+    });
+  return { rows, numbers };
+}
+
+/**
+ * The same on a REAL PLAYER's page (another origin, logged in as a player): `superHoverWatch({ names })` BEFORE the GM runs superHoverCheck({ ..., pauseMs: 9000 }), then
+ * `superHoverWatchReport()` while the GM pauses: the player's own carry (this client plays the record from its own entry clock) is sampled every frame and judged by the same rows.
+ */
+export function superHoverWatch({ names = ["Battle Beast", "Atom Eve"], pump = true } = {}) {
+  const tokens = names.map((n) => canvas.tokens.placeables.find((t) => t.document.name === n));
+  if ( tokens.some((t) => !t) ) return { ok: false, why: `this client does not see ${names}` };
+  const rest = tokens.map((t) => +relOfT(t).toFixed(2)), sprites = hoverSprites(tokens);
+  const w = window.__hoverWatch = { tokens, rest, sprites, P: hoverProbe(tokens, sprites), stopPump: pump ? pumpFrames() : null, K: import(`/modules/${MODULE}/scripts/tokens/carry.mjs`), p0: null };
+  w.K.then((K) => { w.p0 = K._carryStats().played; });
+  return { watching: names, rest, sprites: sprites.map((s) => s.length), user: game.user.name, gm: game.user.isGM };
+}
+export async function superHoverWatchReport(opts = {}) {
+  const w = window.__hoverWatch, K = await w.K;
+  await wait(() => K._carryStats().played > (w.p0 ?? 0), 20000); await wait(() => K._carryStats().active === 0, 20000); await sleep(1500);
+  w.P.stop(); w.stopPump?.();
+  const rows = [], numbers = {};
+  // the frames from the first one where any token moved (the samples before are the same, and the GM's layout moves came before the arm)
+  hoverRows(w.P.S, w.tokens, w.rest, w.sprites, opts, rows, numbers);
+  rows.push(row("this client played the plough visually and nothing is left running", K._carryStats().played > (w.p0 ?? 0) && K._carryStats().active === 0, { stats: K._carryStats() }));
+  numbers.frames = w.P.S.length;
+  return { ok: rows.every((r) => r.ok), user: game.user.name, gm: game.user.isGM, rows, numbers };
+}
+
+async function hoverCase({ cName, pNames, hover, flight, ignoreHeight, gap, len, allow, endAllow, rotAllow, keep, pauseMs, armMs }) {
+  const M = await mods(), { K } = M, d = D(), rows = [], numbers = {};
+  const API = game.modules.get("moinen-pixel-vfx")?.api;
+  const byName = (n) => canvas.tokens.placeables.find((t) => t.document.name === n);
+  const carrier = byName(cName), pushedT = pNames.map(byName);
+  if ( !carrier || pushedT.some((t) => !t) ) return { ok: false, rows: [row(`tokens ${cName}, ${pNames} are on the scene`, false)] };
+  const tokens = [carrier, ...pushedT], G = canvas.grid.size;
+  const saved = tokens.map((t) => ({ _id: t.document.id, x: t.document.x, y: t.document.y }));
+  const started = [];
+  const relOf = (t) => t.position.y + t.h / 2 - t.mesh.position.y;
+  try {
+    for ( const n of hover ) { const t = byName(n); if ( t && API?.ongoing && !(relOf(t) > 2) ) { await API.ongoing.start(t, flight); started.push([t, flight]); } }
+    await prep({ sup: true });
+    await game.settings.set(MODULE, "superIgnoreHeight", !!ignoreHeight);
+    // the layout: the carrier left of the first pushed token, the others in a row behind it, all on one line
+    const c0 = { x: carrier.document.x + carrier.w / 2, y: carrier.document.y + carrier.h / 2 };
+    const ups = pushedT.map((t, i) => ({ _id: t.document.id, x: Math.round(c0.x + (gap + 1.3 * i) * G - t.w / 2), y: Math.round(c0.y - t.h / 2), action: "displace" }));
+    await canvas.scene.updateEmbeddedDocuments("Token", ups, { animate: false, diff: false });
+    canvas.pan({ x: c0.x + len * G / 2, y: c0.y, scale: Math.min(1, innerWidth / ((len + 4) * G)) });
+    await sleep(1800); if ( armMs ) await sleep(armMs);        // (time to arm superHoverWatch on a player's page after the layout moved the tokens)
+    const rest = tokens.map((t) => +relOf(t).toFixed(2));
+    numbers.restRel = rest; numbers.vfxApi = !!API?.visual;
+    const sprites = hoverSprites(tokens); numbers.sprites = sprites.map((s) => s.length);
+    const P = hoverProbe(tokens, sprites);
+    let r;
+    try { r = await run(M, tokens, { pts: line(c0, { x: c0.x + len * G, y: c0.y }, 40), settle: 1800 }); }
+    finally { P.stop(); }
+    const tk = r.o?.tk, hits = tk?.hit ?? [];
+    rows.push(row(`a plough: ${cName} pushes ${hits.length} of ${pNames.length} (${pNames})`, !!tk && hits.length === pNames.length, { hits: hits.length }));
+    // the end of the ride on this client: the carrier's D from the record's timeline is not needed: the landing window is "the frames after the last pushed token stopped moving along x"
+    const S = P.S;
+    hoverRows(S, tokens, rest, sprites, { allow, endAllow, rotAllow }, rows, numbers);
+    rows.push(row("nothing is left running", K._carryStats().active === 0 && !K._carryStats().ticking));
+    numbers.frames = S.length;
+    if ( keep ) window.__hoverS = S;
+    if ( pauseMs ) await sleep(pauseMs);                                      // (a player's page is still reporting: no undo / restore jump in its samples yet)
+    key("keydown", { key: "z", ctrlKey: true }); await sleep(1000);
+  } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 500) })); }
+  finally {
+    try { for ( const [t, p] of started ) await API.ongoing.stop(t, p); } catch { /* ignore */ }
+    try { await game.settings.set(MODULE, "destrSuper", false); await game.settings.set(MODULE, "superIgnoreHeight", false); } catch { /* ignore */ }
+    d.clear(); d.deactivate();
+    try { await canvas.scene.updateEmbeddedDocuments("Token", saved.filter((o) => canvas.scene.tokens.has(o._id)).map((o) => ({ ...o, action: "displace" })), { animate: false, diff: false }); } catch { /* ignore */ }
+  }
+  return { ok: rows.every((r) => r.ok), rows, numbers };
+}
+
 /**
  * HEIGHT in the plough + the official visual-transform API (moinen-pixel-vfx api.visual), on a lane with both modules:
  *   1 api.visual: a declared offset / lift / rot / scale moves the passives (a shield loop, the flight cape = an adaptive body, the wings) and the ground shadow stays on the floor;

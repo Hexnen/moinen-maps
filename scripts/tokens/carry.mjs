@@ -37,12 +37,13 @@ export function vfxVisual() {
 }
 /** The base hover height (flight / levitation passive, canvas px) a token floats at right now, without anything the carry adds. 0 without the API. */
 const hoverOf = (token, V = vfxVisual()) => { try { return V ? Math.max(0, V.baseHeight(token) || 0) : 0; } catch { return 0; } };
+const extMax = () => 4 * (canvas.grid?.size || 100);       // (carry-core extOf: a bigger "displacement" is a mesh Foundry has not placed yet)
 const FRONT_GRACE_MS = 300;    // the token stays in front at least this long after its carry ends, and until the stroke's entry has ended (Front.release)
 
 const ACTIVE = new Map();      // Token -> Carry
 const SEEN = new Map();        // stroke id -> the entry start already played (a stroke has several areas: one carry)
 const DUST = [0xd8ccb4, 0xb8a990, 0x8f816c, 0xc9bca2];
-const OFF_ = { x: 0, y: 0, w: 1, done: false };
+const OFF_ = { x: 0, y: 0, w: 1, done: false }, ZERO_ = Object.freeze({ x: 0, y: 0 });
 const D_ = { x: 0, y: 0, ux: 0, uy: 0, sp: 0 }, P_ = { sx: 1, sy: 1, rot: 0, lift: 0, k: 0 };   // scratch (one carry steps at a time)
 /** Committed real carries that have not moved their documents yet (commit order): a stroke drawn meanwhile sees the tokens where they are going to be. */
 const PENDING = new Map();     // stroke id -> { tk, at }
@@ -78,6 +79,7 @@ function followFx() {
 function early() {
   const now = performance.now();
   for ( const c of ACTIVE.values() ) if ( c.V && c.visual && !c.dead && c.base ) { c.fnow = now; try { if ( c.step(now) ) { c.lift = P_.lift; c.declare(); } } catch ( err ) { dbg("carry early", err); } }
+    else if ( c.visual && !c.dead ) { try { c.nudge(); } catch ( err ) { dbg("carry nudge", err); } }
 }
 function tick(frames) {
   const dt = Math.min(frames / 60, 0.05), now = performance.now();
@@ -138,6 +140,9 @@ class Carry {
     this.tag = `carry:${this.objId}`;
     Front.hold(this.doc.id, this.tag, this.hit ? C.RANK_PUSHED : C.RANK_CARRIER);   // above every layer of the destruction (and the editor's overlay) for the whole carry; the carrier above the tokens it pushes, those above all others
     if ( this.visual ) {
+      // (the fallback below: what the vfx module's motion tick displaces the mesh by, read BEFORE anything here puts the mesh back to Foundry's natural place)
+      this.ext = { x: 0, y: 0 }; this.wrote = null;
+      if ( token.mesh && !token.mesh.destroyed ) C.extOf(token.mesh.position, token.center, this.ext, extMax());
       Hooks.callAll("moinenMapsTokenFxBusy", token);        // an idle pose of tokens/fx.mjs lets go first (restoreExact)
       claimToken(token);
       // a hovering token: its mesh stands raised by the vfx module's own tick. Take the base from Foundry's natural place (restoreExact) and add the live hover back in apply(),
@@ -146,6 +151,12 @@ class Carry {
       const hovering = !!this.V && hoverOf(token, this.V) > 0;
       if ( hovering ) restoreExact(token);
       this.capture();
+      // WITHOUT the API (moinen-pixel-vfx without api.visual, the fallback): the vfx module's own motion tick writes the mesh every frame at the document's centre plus its
+      // displacement (the hover of a flight / levitation passive, -22 px for a jet pack). That displacement is measured (C.extOf) and carried on top of the ride, every frame:
+      // the base is Foundry's natural place (the displacement taken out of what was captured), so the hover is never in the base once and missing from it the next time.
+      // (the captured mesh may hold the displacement or not, whatever reset it meanwhile: the base is the captured place minus its own displacement, i.e. the natural place)
+      if ( this.V ) { this.ext.x = 0; this.ext.y = 0; }
+      else if ( this.base ) { const q = C.extOf({ x: this.base.px, y: this.base.py }, token.center, { x: 0, y: 0 }, extMax()); this.base.px -= q.x; this.base.py -= q.y; }
       if ( hovering ) { this.step(performance.now()); this.apply(); }       // (the mesh is at Foundry's natural place right now: pose it with the hover back in THIS frame, before the render)
       this.root = new PIXI.Container(); this.root.eventMode = "none"; sortNextTo(this.root, token, 2);
       this.em = new Emitter(this.root);
@@ -171,14 +182,40 @@ class Carry {
     this.capture({ pos: all || f.refreshPosition, scale: all || f.refreshMesh || f.refreshSize, rot: all || f.refreshRotation });
     this.step(performance.now());
     this.apply();
+    this.nudge();                                           // (the fallback: the vfx tick that follows in this frame may write exactly what apply() just did; the late pass writes the mesh again anyway)
   }
 
   update(dt, now) {
     const t = this.token;
     if ( this.dead ) return;
     if ( t.destroyed || !t.mesh || t.mesh.destroyed || !canvas.tokens?.get(this.doc.id) ) return this.end(false);
+    if ( this.visual ) this.measure();
     if ( !this.step(now) ) return this.end(true);
     if ( this.visual ) { this.apply(); this.emit(dt, now); this.em.update(dt); }
+  }
+
+  /**
+   * The fallback's per-frame reading of the vfx module's displacement (this runs late in the frame, after its motion tick): the mesh is not where this
+   * carry left it, so somebody rewrote it this frame from the document's centre (the vfx motion table does that every frame while it holds the token):
+   * the displacement is what it put on top of that centre. Left alone (no motion holds the token, or it let go): none. With the API nothing writes the mesh.
+   */
+  measure() {
+    if ( this.V ) return;
+    const p = this.token.mesh?.position; if ( !p ) return;
+    if ( !this.wrote ) { if ( C.rewritten(p, this.token.center) ) C.extOf(p, this.token.center, this.ext, extMax()); return; }    // (the first frame: keep what the constructor read unless the mesh is displaced now)
+    if ( C.rewritten(p, this.wrote) ) C.extOf(p, this.token.center, this.ext, extMax());
+    else { this.ext.x = 0; this.ext.y = 0; }
+  }
+
+  /**
+   * The fallback, EARLY in the frame (before Foundry's refreshes and the vfx motion tick): the mesh is nudged by C.NUDGE px off where this carry left it, so the late
+   * measure() tells "rewritten this frame" from "left alone" even when the motion table happens to write exactly the value this carry wrote (a ride at rest: the
+   * same place). Never seen: the late pass writes the mesh again before the render.
+   */
+  nudge() {
+    if ( this.V || !this.wrote ) return;
+    const m = this.token.mesh; if ( !m || m.destroyed ) return;
+    m.position.x = this.wrote.x + C.NUDGE; this.wrote.x = m.position.x;
   }
 
   /** The offset and the pose at `now`. False when the carry is over. */
@@ -193,6 +230,7 @@ class Carry {
     const ww = C.warpWeight(el, D); D_.x += ww * this.wx; D_.y += ww * this.wy;
     C.poseAt(le, this.Dl, D_, this.S, P_);
     if ( this.hit && P_.k ) { P_.rot = P_.rot * 1.35 + 0.05 * D_.sp * Math.sin(le * 0.04 + this.ph); P_.sx *= 1 + 0.03 * D_.sp * Math.sin(le * 0.05 + this.ph * 2); }   // knocked: leans harder, shivers
+    C.blendLanding(this.land ??= {}, le, this.Dl, P_);         // (the touch-down continues the flight's last pose: no snap upright at the path's end)
     // the token is where the front is (the displacement), plus what lies between where it was grabbed and where it really is (blended in
     // over the lift-off, glided out at the end); the displayed position is base + offset. The hand-over is judged against the RECORDED final
     // (tx, ty: snapped, resolved off the path end), a document that is already there holds the token on the ride, and nothing outlasts a timeout
@@ -212,8 +250,9 @@ class Carry {
     // the squash is along the screen's axes: a rotated mesh squashes uniformly
     const rotated = Math.abs(b.rot) > 0.001, u = Math.sqrt(p.sx * p.sy), sx = rotated ? u : p.sx, sy = rotated ? u : p.sy;
     const ry = -this.H / 2 * sy, c = Math.cos(p.rot), s = Math.sin(p.rot);
-    const hover = hoverOf(t, this.V);
-    m.position.set(b.px - ry * s + o.x, C.liftedY(b.py + this.H / 2 + ry * c + o.y, p.lift, hover));
+    const hover = hoverOf(t, this.V), e = this.ext ?? ZERO_;
+    m.position.set(b.px - ry * s + o.x + e.x, C.liftedY(b.py + this.H / 2 + ry * c + o.y, p.lift, hover) + e.y);
+    (this.wrote ??= { x: 0, y: 0 }).x = m.position.x; this.wrote.y = m.position.y;
     m.scale.set(b.sx * sx, b.sy * sy);
     m.rotation = b.rot + p.rot;
     t.position.set(b.cx + o.x, b.cy + o.y + p.lift);
@@ -279,6 +318,8 @@ class Carry {
       restoreExact(this.token);
       // the hover is not ours to drop: Foundry's natural place lacks it, the vfx tick adds it next frame; do it now so the hand-over does not blink one frame at ground level
       const h = hoverOf(this.token, this.V); if ( h > 0 && this.token.mesh && !this.token.mesh.destroyed ) this.token.mesh.position.y -= h;
+      // (the fallback: the same with the measured displacement; the vfx tick writes it itself from the next frame on)
+      const e = this.ext; if ( !this.V && e && (e.x || e.y) && this.token.mesh && !this.token.mesh.destroyed ) { this.token.mesh.position.x += e.x; this.token.mesh.position.y += e.y; }
     }
     if ( !ACTIVE.size && ticking ) { canvas.app?.ticker?.remove(tick); canvas.app?.ticker?.remove(early); ticking = false; }
   }

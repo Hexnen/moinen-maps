@@ -107,6 +107,22 @@ export function displacementAt(tl, el, out, ref = 800) {
 export const liftedY = (y, poseLift, hover = 0) => y + poseLift - (hover > 0 ? hover : 0);
 
 /**
+ * THE SAME WITHOUT THE API (moinen-pixel-vfx without api.visual: the fallback). Its motion table writes a held token's mesh every frame, absolutely: the document's centre plus
+ * its own displacement (the hover is a negative y). Nobody tells the carry how high that is, so it is READ: late in the frame (after that tick) a mesh that is not where the carry
+ * left it (`rewritten`) was set again by the motion table this frame, and what it put on top of the centre (`extOf`, into `out`) is carried on top of the ride (and in the frame
+ * the carry ends). A mesh the carry finds as it left it: no motion holds the token (none, or it let go): no displacement. Pure.
+ */
+export const rewritten = (p, wrote, eps = 1e-3) => !!wrote && (Math.abs(p.x - wrote.x) > eps || Math.abs(p.y - wrote.y) > eps);
+export function extOf(p, centre, out = { x: 0, y: 0 }, max = EXT_MAX) {
+  const x = p.x - centre.x, y = p.y - centre.y;
+  // (a displacement bigger than a few cells is not a hover or a motion of the token in place: a mesh Foundry has not placed yet; ignore it)
+  if ( !Number.isFinite(x) || !Number.isFinite(y) || Math.hypot(x, y) > max ) { out.x = 0; out.y = 0; return out; }
+  out.x = x; out.y = y; return out;
+}
+export const EXT_MAX = 400;           // px (carry.mjs passes 4 grid cells)
+export const NUDGE = 0.25;            // px: the early nudge that makes "rewritten this frame" visible (far over rewritten's eps, never rendered)
+
+/**
  * The token's pose at `el` ms (after the front starts; the run lasts `D`): written into `out` { sx, sy, rot, lift, k }.
  *  lift-off (anticipation: a quick squash, then up), flight (leaning and stretched along the travel, a little arc), landing (a damped
  *  squash and wobble). `S` the token's footprint height (scene px), `d` the displacement { ux, uy, sp }.
@@ -132,6 +148,24 @@ export function poseAt(el, D, d, S, out) {
   out.lift = -S * 0.1 * Math.exp(-28 * u);
   out.k = e > 0.02 ? 1 : 0;
   return out;
+}
+
+/**
+ * THE TOUCH-DOWN IS CONTINUOUS. poseAt switches from the flight pose (leaning up to ~18 deg along the travel, stretched, lifted) to the landing pose (upright, squashed)
+ * at the path's end, where the ride stops: in ONE frame the lean snapped upright and the size jumped ~10 % (a pop, on every carry, the carrier's and the pushed tokens').
+ * `blendLanding` keeps the last flight pose (`st.last`, recorded every frame of the flight) and, from the first landing frame on, adds what the landing lacks of it,
+ * fading out (a smoothstep) over LAND_BLEND_MS: the first landing frame shows the flight's own last pose, the squash and the upright lean arrive over ~12 frames (a lean
+ * of 25 deg then straightens by at most ~3 deg a frame at 60 Hz). `st` per body (kept by the caller), `le` this body's clock, `Dl` its run, `P` the pose (poseAt's out,
+ * after any extra the caller adds), changed in place. Pure.
+ */
+export const LAND_BLEND_MS = 200;
+export function blendLanding(st, le, Dl, P) {
+  if ( le < Dl ) { const l = st.last ??= { sx: 1, sy: 1, rot: 0, lift: 0 }; l.sx = P.sx; l.sy = P.sy; l.rot = P.rot; l.lift = P.lift; st.d = null; return P; }
+  if ( !st.last ) return P;                                  // (no flight frame was seen here: a late start, nothing to continue)
+  if ( !st.d ) st.d = { at: le, sx: st.last.sx - P.sx, sy: st.last.sy - P.sy, rot: st.last.rot - P.rot, lift: st.last.lift - P.lift };
+  const k = 1 - ease((le - st.d.at) / LAND_BLEND_MS);         // (smoothstep: no kink where the flight ends nor where the plain landing takes over)
+  P.sx += st.d.sx * k; P.sy += st.d.sy * k; P.rot += st.d.rot * k; P.lift += st.d.lift * k;
+  return P;
 }
 
 /**

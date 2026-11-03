@@ -115,7 +115,7 @@ function follow(rows) {
 export async function carryCheck() {
   const M = await mods(), { K } = M, d = D();
   const rows = [];
-  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible && (!name || t.document.name === name));
   if ( !token ) return { ok: false, rows: [row("a token to carry", false)] };
   const doc = token.document, G = canvas.grid.size, R = canvas.dimensions.sceneRect;
   const home = { x: Math.round(R.x + R.width * 0.15), y: Math.round(R.y + R.height * 0.45) };
@@ -202,7 +202,7 @@ export async function carryCheck() {
  */
 export async function carryStrip({ name = "carry", n = 10, scale = 1, dist = [420, 120], size = 0.6 } = {}) {
   const M = await mods(), { B, K } = M, d = D();
-  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible && (!name || t.document.name === name));
   const R = canvas.dimensions.sceneRect, home = { x: Math.round(R.x + R.width * 0.15), y: Math.round(R.y + R.height * 0.45) };
   await prep(); await place(token, home.x, home.y);
   const c = { x: home.x + token.w / 2, y: home.y + token.h / 2 };
@@ -326,7 +326,7 @@ export async function carryFrontCheck({ steps = 60, legs = 6, dt = 14, negative 
   const M = await mods(), { B, K } = M, d = D();
   const F = await import(`/modules/${MODULE}/scripts/tokens/carry-front.mjs`);
   const rows = [];
-  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible && (!name || t.document.name === name));
   if ( !token ) return { ok: false, rows: [row("a token to carry", false)] };
   const doc = token.document, R = canvas.dimensions.sceneRect;
   const home = { x: Math.round(R.x + R.width * 0.1), y: Math.round(R.y + R.height * 0.45) };
@@ -423,10 +423,10 @@ export const _front = { graphOrder, pixelFront, destructionRoots, zigzag };
  * With `ignoreHeight` it also runs the plough over a second, hovering token (Superhero + the "ignores height" setting) and checks that one's per-frame height step too.
  * Returns { ok, rows, numbers }.   await (await import("/modules/moinen-maps/dev/carry-check.mjs")).carryHoverCheck()
  */
-export async function carryHoverCheck({ preset = "invincible-flight-wings-passive-monstrous", allow = 2.5, ignoreHeight = true } = {}) {
+export async function carryHoverCheck({ preset = "invincible-flight-wings-passive-monstrous", allow = 2.5, ignoreHeight = true, name = null } = {}) {
   const M = await mods(), { K } = M, d = D(), rows = [], numbers = {};
   const API = game.modules.get("moinen-pixel-vfx")?.api;
-  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible);
+  const token = canvas.tokens.placeables.find((t) => !t.document.locked && t.visible && (!name || t.document.name === name));
   if ( !token || !API?.ongoing ) return { ok: false, rows: [row("a token and moinen-pixel-vfx", false)] };
   const doc = token.document, G = canvas.grid.size, R = canvas.dimensions.sceneRect;
   const home = { x: Math.round(R.x + R.width * 0.15), y: Math.round(R.y + R.height * 0.45) };
@@ -448,7 +448,7 @@ export async function carryHoverCheck({ preset = "invincible-flight-wings-passiv
     const ctrl = await once("ground");
     rows.push(row(`control (grounded): the pose alone steps ${ctrl.step.toFixed(2)} px per frame at most`, ctrl.n > 20 && ctrl.step < G * 0.2, numbers.ground));
     await API.ongoing.start(token, preset); await sleep(1800);
-    const H = API.visual.baseHeight(token); numbers.hover = +H.toFixed(1);
+    const H = API.visual ? API.visual.baseHeight(token) : token.center.y - token.mesh.position.y; numbers.hover = +H.toFixed(1); numbers.api = !!API.visual;     // (without api.visual: the hover the vfx motion table holds the mesh at, read off the mesh at rest)
     rows.push(row(`the flight passive hovers the token at ${H.toFixed(1)} px`, H > 10));
     const hv = await once("hover");
     rows.push(row(`hovering: at rest before the grab the token stands ${hv.beforeUp?.toFixed(1)} px up (= its hover ${H.toFixed(1)})`, Math.abs(hv.beforeUp - H) < 2.5, numbers.hover));
@@ -460,7 +460,7 @@ export async function carryHoverCheck({ preset = "invincible-flight-wings-passiv
     const el = await once("elevation");
     rows.push(row(`elevation 5 (no vfx hover): the carry's per-frame step is the control's (${el.step.toFixed(2)} vs ${ctrl.step.toFixed(2)})`, el.step <= ctrl.step + 0.5, numbers.elevation));
     await doc.update({ elevation: origin.elevation ?? 0 }, { animate: false });
-    rows.push(row("nothing is left running and the visual transform is cleared", K._carryStats().active === 0 && !API.visual.has(token), { has: API.visual.has(token) }));
+    rows.push(row("nothing is left running and the visual transform is cleared", K._carryStats().active === 0 && !API.visual?.has(token), { has: API.visual?.has(token) }));
   } catch ( err ) { rows.push(row(`error: ${err.message}`, false, { stack: String(err.stack).slice(0, 400) })); }
   finally {
     try { await API.ongoing.stop(token, preset); await game.settings.set(MODULE, "destrCarry", false); await game.settings.set(MODULE, "carryEnds", "real"); } catch { /* ignore */ }
