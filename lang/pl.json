@@ -1438,6 +1438,13 @@
   "MOINENMAPS.Fire.h.fireColor": "Kolor pociągnięć malowanych kolorem pędzla 'Scena' (i starszych pociągnięć). Cała paleta jest z niego wyprowadzana.",
   "MOINENMAPS.Fire.f.smokeTint": "Zabarwienie dymu",
   "MOINENMAPS.Fire.h.smokeTint": "0: neutralny szary dym. Więcej: dym przybiera kolor swojego ognia.",
+  "MOINENMAPS.Fire.f.torn": "Poszarpane krawędzie",
+  "MOINENMAPS.Fire.h.torn": "Nowe pociągnięcia ognia i dymu dostają poszarpany, nieregularny obrys: płaty, zatoczki, wyszczerbienia i kilka oderwanych wysepek przy krawędzi (jak poszarpane brzegi zniszczeń). Każde pociągnięcie zachowuje ustawienie, z którym je namalowano.",
+  "MOINENMAPS.Fire.f.tear": "Poszarpanie",
+  "MOINENMAPS.Fire.h.tear": "Jak bardzo poszarpane są krawędzie nowych pociągnięć.",
+  "MOINENMAPS.Fire.quickTorn": "Poszarpane krawędzie (wł./wył.) - tylko dla nowych pociągnięć",
+  "MOINENMAPS.Fire.tornOn": "Poszarpane krawędzie: wł. (kliknij, by wyłączyć dla tego pociągnięcia)",
+  "MOINENMAPS.Fire.tornOff": "Poszarpane krawędzie: wył. (kliknij, by włączyć dla tego pociągnięcia)",
   "MOINENMAPS.Fire.f.lightFollow": "Światło w kolorze ognia",
   "MOINENMAPS.Fire.h.lightFollow": "Każdy ogień świeci własnym kolorem. Wyłączone: wszystkie ognie używają koloru światła poniżej."
 }

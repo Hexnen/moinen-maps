@@ -1438,6 +1438,13 @@
   "MOINENMAPS.Fire.h.fireColor": "The colour of strokes painted with the brush colour 'Scene' (and of older strokes). The whole palette is derived from it.",
   "MOINENMAPS.Fire.f.smokeTint": "Smoke tint",
   "MOINENMAPS.Fire.h.smokeTint": "0: neutral grey smoke. Higher: the smoke takes on its fire's colour.",
+  "MOINENMAPS.Fire.f.torn": "Torn edges",
+  "MOINENMAPS.Fire.h.torn": "New fire and smoke strokes get a torn, ragged footprint: lobes, inlets, chipped bites and a few detached islands near the edge (as destruction's torn borders). Each stroke keeps the setting it was painted with.",
+  "MOINENMAPS.Fire.f.tear": "Tearing",
+  "MOINENMAPS.Fire.h.tear": "How torn the edges of new strokes are.",
+  "MOINENMAPS.Fire.quickTorn": "Torn edges (on/off) - applies to new strokes only",
+  "MOINENMAPS.Fire.tornOn": "Torn edges: on (click to turn off for this stroke)",
+  "MOINENMAPS.Fire.tornOff": "Torn edges: off (click to turn on for this stroke)",
   "MOINENMAPS.Fire.f.lightFollow": "Light in the fire's colour",
   "MOINENMAPS.Fire.h.lightFollow": "Each fire lights in its own colour. Off: every fire uses the light colour below."
 }

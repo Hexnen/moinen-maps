@@ -12,6 +12,8 @@ import { reducedMotion } from "../config.mjs";
  * FIRE AND SMOKE, the engine: the strokes of the open scene (scene flags, model.mjs), the display (display.mjs), the GM's edits
  * (each stroke one flag key; undo / redo of whole strokes; a clear), other clients' saves followed. Nothing is baked, published or
  * uploaded: every client computes the same areas and fields from the same strokes, and the same frame from the shared clock.
+ * The fields are computed in a worker (raster-worker.mjs; the main thread only lays out the areas): an area whose new field is not
+ * ready yet keeps showing the previous one of the same place, so painting, releasing, undo / redo and remote strokes never stall.
  * Public API: `game.modules.get("moinen-maps").api.fire`. Hook fired: "moinenMapsFire" ("loaded" | "edited" | "params" | "brush").
  */
 let strokes = new Map();            // id -> stroke (stored)
@@ -20,6 +22,7 @@ let draft = null;                   // the stroke being painted (not stored yet)
 let display = null;
 let fields = new Map();             // area key -> field (cache: an unchanged area is not rasterized again)
 let lastAreas = [];
+let lastItems = [];                 // what the display shows now: { area, field } (a new area waits on one of these: no blank frame)
 let drawFrame = 0;
 const undoStack = [], redoStack = [];
 const UNDO_MAX = 100;
@@ -60,7 +63,7 @@ function teardown() {
   cancelAnimationFrame(drawFrame); drawFrame = 0;
   clearTimeout(phaseTimer); phaseTimer = 0;
   display?.destroy(); display = null;
-  fields.clear(); lastAreas = []; draft = null;
+  fields.clear(); lastAreas = []; lastItems = []; draft = null; ready.clear(); queued.clear(); inflight.clear();
   undoStack.length = redoStack.length = 0;
 }
 
@@ -72,6 +75,46 @@ function onUpdateScene(scene, changed) {
   scheduleDraw();
   tell(M.FLAG in f ? "params" : "edited");
 }
+
+/* ---------------------------------------------------------------- the field worker */
+
+// An area's field is computed in a worker (raster-worker.mjs; ~20-150 ms for a big area, more with torn edges): at most one job per
+// area in flight, a newer request for the same area replaces the queued one (painting asks ~12 times a second), and a finished field
+// waits in `ready` until the next draw adopts it. Without a worker (it failed to start) the field is computed here, as before.
+// (localStorage "mm-fire-worker" = "off": fields on the main thread, for comparing / debugging)
+let worker = null, workerOff = (() => { try { return globalThis.localStorage?.getItem("mm-fire-worker") === "off"; } catch { return false; } })();
+const ready = new Map(), queued = new Map(), inflight = new Map();   // key -> field; area id -> job; area id -> key
+const failed = new Set();           // keys the worker could not do (computed here then)
+const route = () => new URL("./raster-worker.mjs", import.meta.url);
+function startWorker() {
+  if ( worker || workerOff ) return !!worker;
+  try {
+    worker = new Worker(route(), { type: "module" });
+    worker.onmessage = (ev) => {
+      const { key, field, err } = ev.data;
+      for ( const [id, k] of inflight ) if ( k === key ) { inflight.delete(id); next(id); }
+      if ( field ) ready.set(key, field); else { failed.add(key); console.warn(`${MODULE_ID} | fire: field worker`, err); }
+      scheduleDraw();
+    };
+    worker.onerror = (e) => { console.warn(`${MODULE_ID} | fire: field worker off, fields on the main thread`, e?.message ?? e); stopWorker(true); scheduleDraw(); };
+  } catch { workerOff = true; worker = null; }
+  return !!worker;
+}
+function stopWorker(off = false) { worker?.terminate(); worker = null; workerOff ||= off; queued.clear(); inflight.clear(); }
+function next(id) {
+  const job = queued.get(id); if ( !job ) return;
+  queued.delete(id); inflight.set(id, job.key);
+  worker.postMessage(job);
+}
+/** Ask for an area's field; false when there is no worker (the caller rasterizes it itself). */
+function request(a, g) {
+  if ( !startWorker() ) return false;
+  if ( [...inflight.values()].includes(a.key) ) return true;
+  queued.set(a.id, { key: a.key, area: a, geo: g, P: params });
+  if ( !inflight.has(a.id) ) next(a.id);
+  return true;
+}
+const overlap = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 
 /* ---------------------------------------------------------------- drawing */
 
@@ -95,12 +138,28 @@ export function draw() {
   purge(now, g);
   const areas = shown() ? M.areasOf(all.sort(M.byOrder), g, params, now, still) : [];
   const has = areas.length > 0 || (shown() && extra.size > 0);
-  if ( !has ) { if ( display ) { display.destroy(); display = null; } lastAreas = []; fields.clear(); return; }
-  const keep = new Map(), items = [];
+  if ( !has ) { if ( display ) { display.destroy(); display = null; } lastAreas = []; lastItems = []; fields.clear(); ready.clear(); return; }
+  const keep = new Map(), items = [], used = new Set();
+  const waiting = [];
   for ( const a of areas ) {
-    const f = fields.get(a.key) ?? M.raster(a, g, params);
-    keep.set(a.key, f); items.push({ area: a, field: f });
+    let f = fields.get(a.key) ?? ready.get(a.key);
+    if ( !f && (failed.has(a.key) || !request(a, g)) ) f = M.raster(a, g, params);
+    if ( f ) { keep.set(a.key, f); items.push({ area: a, field: f }); } else waiting.push(a);
   }
+  // an area whose field is still being computed shows what was there before (the previous field of the same place) meanwhile
+  const shownIds = new Set(items.map((it) => it.area.id));
+  for ( const a of waiting ) {
+    let best = null, bo = 0;
+    for ( const it of lastItems ) {
+      if ( used.has(it) || shownIds.has(it.area.id) || it.area.id?.startsWith?.("x:") ) continue;
+      const o = it.area.id === a.id ? Infinity : overlap(it.area.rect, a.rect);
+      if ( o > bo ) { bo = o; best = it; }
+    }
+    if ( best ) { used.add(best); shownIds.add(best.area.id); items.push(best); }
+  }
+  for ( const k of ready.keys() ) if ( !keep.has(k) ) ready.delete(k);
+  for ( const k of keep.keys() ) ready.delete(k);
+  lastItems = items.slice();
   for ( const it of extra.values() ) items.push(it);
   fields = keep; lastAreas = areas;
   display ??= new FireDisplay();
@@ -118,10 +177,22 @@ async function write(upd) {
 /** A new stroke id: short, unique enough (time + random). */
 export const newId = () => `f${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 
+/**
+ * A NEW stroke's footprint: an organic edge (e = 1) and, while the scene's torn edges are on, its tearing (tn) - pinned on the stroke
+ * when it is painted (changing the scene's setting later changes only the strokes painted from then on, as destruction's torn borders).
+ * `raw.tn` given (a macro): that, 0 = not torn.
+ */
+function fresh(raw) {
+  if ( raw.k === "erase" ) return raw;
+  const tn = raw.tn !== undefined ? Number(raw.tn) || 0 : params.torn ? params.tear : 0;
+  const { tn: _t, ...rest } = raw;
+  return { e: 1, ...rest, ...(tn > 0 ? { tn } : {}) };
+}
+
 /** The stroke being painted (the editor): shown at once, stored on `commit`. null clears it. */
 let draftAt = 0, draftTimer = 0;
 export function setDraft(st) {
-  draft = st ? M.cleanStroke({ ...st, id: "draft", q: st.q ?? sharedNow() }) : null;
+  draft = st ? M.cleanStroke({ ...fresh(st), id: "draft", q: st.q ?? sharedNow() }) : null;
   // (a big area takes ~25 ms to rasterize: while painting, at most ~12 redraws a second)
   clearTimeout(draftTimer);
   const wait = 80 - (performance.now() - draftAt);
@@ -141,7 +212,7 @@ function purge(now, g) {
 
 /** Store a stroke (one flag key). */
 export function add(raw, { undoable = true } = {}) {
-  const st = M.cleanStroke({ ...raw, q: raw.q ?? sharedNow(), id: raw.id && raw.id !== "draft" ? raw.id : newId() });
+  const st = M.cleanStroke({ ...fresh(raw), q: raw.q ?? sharedNow(), id: raw.id && raw.id !== "draft" ? raw.id : newId() });
   if ( !st || !game.user.isGM ) return null;
   strokes.set(st.id, st); draft = null;
   if ( undoable ) { undoStack.push({ add: [st] }); if ( undoStack.length > UNDO_MAX ) undoStack.shift(); redoStack.length = 0; }
@@ -182,6 +253,17 @@ export function setLevels(id, { lv, sm } = {}) {
   const st = M.cleanStroke({ ...s, ...(lv !== undefined ? { lv } : {}), ...(sm !== undefined ? { sm } : {}) });
   strokes.set(id, st); draw(); tell("edited");
   write({ [sKey(id)]: st });
+  return st;
+}
+
+/** Torn edges on (amount 0.1..1; true = the scene's tearing) or off (0 / false) for one stroke afterwards: one write, drawn again. */
+export function setTorn(id, amount) {
+  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || s.o !== undefined ) return null;
+  const tn = amount === true ? params.tear : Number(amount) || 0;
+  const { tn: _t, ...rest } = s;
+  const st = M.cleanStroke(tn > 0 ? { ...rest, tn } : rest);
+  strokes.set(id, st); draw(); tell("edited");
+  write({ [sKey(id)]: st, ...(st.tn ? {} : { [`${sKey(id)}.-=tn`]: null }) });
   return st;
 }
 
@@ -232,13 +314,16 @@ export const fireApi = {
    * Paint a stroke from a macro: `points` = [[x, y], ...] or { x, y } (scene px); `kind` "fire" | "smoke" | "erase"; `radius` scene
    * px; `strength` 0.1..1; `wind` { dir (degrees, 0 = right, 90 = down), speed 0..1 }; `level` 1..3 (fire), `smoke` 0..3 (fire) /
    * 1..3 (smoke); `style` "fire" | "fireball"; `color` "#rrggbb" or a preset name (look.PRESETS; omitted: the scene's fire colour).
-   * Returns the stored stroke (or null).
+   * `torn`: true / an amount 0.1..1 / false (omitted: the scene's torn edges). Returns the stored stroke (or null).
    */
-  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null } = {}) {
+  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null, torn = undefined } = {}) {
     const pts = Array.isArray(points) ? points : [[points.x, points.y]];
     const w = wind ?? { dir: game.settings.get(MODULE_ID, "fireWindDir"), speed: game.settings.get(MODULE_ID, "fireWind") };
-    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}) });
+    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}),
+      ...(torn === undefined ? {} : { tn: torn === true ? params.tear : Number(torn) || 0 }) });
   },
+  /** Torn edges for one stroke afterwards: true (the scene's tearing), an amount 0.1..1, or false. */
+  setTorn: (id, amount) => setTorn(id, amount),
   /** Change a stroke's levels afterwards: `{ level, smoke }`. */
   setLevels: (id, { level, smoke } = {}) => setLevels(id, { lv: level, sm: smoke }),
   /** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null = the scene's). */
@@ -250,7 +335,7 @@ export const fireApi = {
   list: () => list().map((s) => ({ ...s, p: [...s.p] })),
   params: () => ({ ...params }), setParams,
   /** How it stands: strokes, areas, what is drawn, particles, lights, the last tick's ms. */
-  status: () => ({ strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
+  status: () => ({ pending: inflight.size + queued.size, strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
   display: () => display,
   geo, setExtra, model: M
 };

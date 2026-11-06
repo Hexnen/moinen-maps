@@ -16,19 +16,20 @@
  *         row behind shows only where the front is thin. Bands on the merged field: a hot core low (the fused roots), cooling
  *         upwards with each blob's age, broken by rising lick streaks (no slabs, no per-tongue nesting); an erosion noise drifts up
  *         inside. A few emitters are leaders (taller tongues).
- *         Bands: heat + a fused-core term + base, so the merged middle keeps clear value breaks (no mid-dark blotches); blobs are
- *         narrow and tall (tongues, not cauliflower).
+ *         Bands: heat + a fused-core term (from the body's own field: the erosion frays only the silhouette) + base, broken by broad
+ *         slow licks, so the inside reads as a few large clean planes with clear value breaks; blobs are narrow and tall.
  *       - BED: embers that boil in place (3 fps cross-faded), only on the burning ground, in 2x2 blue-noise clusters towards its edge.
  *       - COALS: loose 1-2 px coals between the tongues and a little past the bed's edge (fading into the map), share by level;
  *         they pulse slowly, some flicker out for a while, the hottest flash white-yellow; they outlast the flames on go-out.
  *       - SPARKS: 4 rising-frame layers (each spark owns one cell of a grid that moves up with it: O(1) per cell, no state): born
  *         over burning ground (denser over its heart, by level, in gusts, x Performance births), ride up with the wind and a little
  *         swirl, flare and cool through the ramp (white / yellow, orange, red, dark), 1 px with a few 2 px. Time 0 (reduced
- *         motion): none. The pooled sprite particles (display.mjs, capped per Performance mode) stay for the few bigger sparks.
+ *         motion): none. Near the area's top each spark burns out at its own height (never cut off by the edge). The pooled sprite particles (display.mjs, capped per Performance mode) stay for the few bigger sparks.
  *       - SMOKE: puffs born at the smoke sources (aux B), 3-4 lobes, fast while hot and slowing as they cool, shear with the wind
  *         and the gust, the last lobe torn off; metaball union, each cell shaded from its OWN lobe's sphere normal (lit top-left,
  *         shadow bottom-right: billows inside the mass, not flat blocks), warm underside low over the fire; edges thin by the rim
- *         dropping out in 2x2 clusters as the puff ages, shapes shrink - never cut by a field or the area.
+ *         dropping out in 2x2 clusters as the puff ages, shapes shrink - never cut by a field or the area. Old smoke dissolves (wider dropping rim, faster shrinking lobes, never the
+ *         darkest band; the torn-off last lobe stays close and small), so the column's top never grows dark round balloons.
  *         The puffs start above the flame tops; where smoke still lies over a flame it is only a thin warm veil (the flames stay
  *         readable through it), and sparks and coals glow through it. The plume gate also probes upwind, so sheared puffs are
  *         never cut off straight.
@@ -270,10 +271,11 @@ void main() {
       float heat = HT / max(WS, 1e-4), base = clamp(BASE / max(WS, 1e-4), 0.0, 1.0);
       // (core: how deep inside the merged body - the tongues' own cores and the fused base are hot, the silhouette cools: the
       // value breaks follow the tongue shapes, without outlines)
-      float core = clamp((Fe - 0.34) / 0.85, 0.0, 1.0);
+      // (from the body's own field, not the eroded one: the erosion only frays the silhouette, the inside stays in clean planes)
+      float core = clamp((F - 0.34) / 0.85, 0.0, 1.0);
       float v = 0.5 * heat + 0.34 * core + 0.18 * base;
-      float st = vn(vec2(c.x / (3.0 * u), (c.y + t * 22.0 * u) / (8.0 * u)), 41 + (int(t * 4.0) & 7));
-      v += (st - 0.5) * 0.14;
+      float st = vn(vec2(c.x / (5.0 * u), (c.y + t * 20.0 * u) / (13.0 * u)), 41 + (int(t * 3.0) & 7));
+      v += (st - 0.5) * 0.1;
       int nb = lvL == 3 ? 7 : 6;
       int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
       if ( band == 6 && st < 0.4 ) band = 5;                           // the cream core only in licks, never a slab
@@ -355,6 +357,9 @@ void main() {
       vec4 J = hb(g.x + int(k) * 7919, g.y, 310 + L);
       float life = life0 * (0.6 + 0.8 * J.z);
       if ( age > life ) continue;
+      // (near the area's top each spark burns out at its own height, 2-16 art px below it: sparks die at scattered heights, never
+      // cut off by the area's edge - no bigger area, no extra cost)
+      if ( c.y < (2.0 + 14.0 * H.z) * max(1.0, u) ) continue;
       vec2 q = (vec2(g) + 0.15 + 0.7 * J.xy) * S;
       float hs = (L == 2 || (L == 0 && J.z > 0.8)) ? 1.0 : 0.5;                          // (a few 2 px sparks)
       if ( abs(xq - q.x) > hs || abs(yq - q.y) > hs ) continue;
@@ -452,9 +457,10 @@ void main() {
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
             float ang = P3[k] * 6.2832 + a * (1.5 + p75);
-            float tear = k == nl - 1 ? 1.0 + 1.8 * max(0.0, a - 0.5) * (0.5 + g) : 1.0;
+            // (the last lobe tears off a little and shrinks as it goes: never a round balloon floating off the column)
+            float tear = k == nl - 1 ? 1.0 + 1.0 * max(0.0, a - 0.5) * (0.5 + g) : 1.0;
             vec2 l = vec2(x + cos(ang) * r * 0.6 * tear, y + sin(ang) * r * 0.42 * tear - (k == 3 ? r * 0.45 : 0.0));
-            float lr = r * (0.82 - 0.12 * float(k)) * (1.0 - 0.5 * max(0.0, a - 0.6) / 0.4);
+            float lr = r * (0.82 - 0.12 * float(k)) * (1.0 - 0.7 * max(0.0, a - 0.6) / 0.4) * (1.0 - 0.3 * (tear - 1.0));
             if ( lr < 0.8 * u ) continue;
             vec2 dd = (c - floor(l) - 0.5) / lr;
             float q = 1.0 - dot(dd, dd) / 1.6;
@@ -468,8 +474,10 @@ void main() {
     }
     if ( F > 0.22 ) {
       float age = AG / F;
-      bool rim = F < 0.42;
       float fade = clamp((age - 0.55) / 0.45, 0.0, 1.0);
+      // old smoke DISSOLVES (the column's top): the rim widens and drops out in 2 x 2 clusters and the lobes shrink faster - it
+      // never lingers as dark round lobes
+      bool rim = F < 0.42 + 0.35 * fade;
       if ( !(rim && rk < fade * 1.1) ) {
         // the cell's OWN lobe is a sphere lit from the top-left: billows with a lit crescent and a shadow side inside the mass
         // (mixed with the whole mass's outward normal - its density gradient - so the billows also shade as one rolling cloud)
@@ -478,7 +486,7 @@ void main() {
         vec3 n3 = vec3(nM, sqrt(max(0.0, 1.0 - dot(nM, nM))));
         float lit = dot(n3, normalize(vec3(-0.6, -0.72, 0.3)));   // (a low light: flat interiors are mid, the top-left faces lit)
         int band = lit > 0.42 ? 1 : lit > -0.1 ? 2 : 3;
-        if ( F > 1.2 && band == 3 ) band = 2;                            // dense cores are never in the darkest band
+        if ( (F > 1.2 || fade > 0.3) && band == 3 ) band = 2;           // dense cores and thinning old smoke are never in the darkest band
         if ( lowB && band == 3 ) band = 4;                               // lit from below by the fire
         B = band + (rim ? 8 : 0) + 16 * lsB;
       }

@@ -12,6 +12,8 @@
 //   J. colour: the palette ramp is derived deterministically, the natural default is the old palette exactly, colours keep their
 //      areas and lights apart, particles and lights follow the colour, the smoke is neutral unless tinted
 //   K. the fire style's art inputs: chamfer distances, the aux texture (bed in/out, smoke sources), the smoke tail
+//   L. the footprint: e / tn kept by cleaning, torn / tear settings; old strokes keep the round brush; an organic / torn outline is
+//      deterministic, the same in any area rectangle (scene-absolute), not a capsule, torn reaches past it with detached islands
 import * as M from "../scripts/fire/model.mjs";
 import * as Look from "../scripts/fire/look.mjs";
 import { readFileSync } from "node:fs";
@@ -282,6 +284,43 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
   // the smoke tail: a put-out fire's area lives on SMOKE_TAIL ms past the flames, so its last puffs finish their lives
   const T = M.timing(geo, P);
   ok(T.outSpan >= 1.6 * P.out * 1000 + M.SMOKE_TAIL && M.SMOKE_TAIL >= 4.6 * 1.3 * 1000, "outSpan includes the smoke tail (the longest puff life)");
+}
+
+/* L */
+{
+  const P2 = M.cleanParams({ torn: true, tear: 5 });
+  ok(P2.torn === true && P2.tear === 1 && M.cleanParams().torn === false && M.cleanParams().tear === 0.6, "torn / tear settings cleaned");
+  const c = M.cleanStroke({ id: "t1", k: "fire", p: [1, 2], e: 1, tn: 3 });
+  ok(c.e === 1 && c.tn === 1, "e and tn kept (tn clamped)");
+  ok(!("e" in M.cleanStroke({ id: "t2", k: "erase", p: [1, 2], e: 1, tn: 0.5 })) && !("tn" in M.cleanStroke({ id: "t3", k: "fire", p: [1, 2], tn: 0 })), "no outline on erasers, tn 0 = off");
+  const g2 = { ap: 1.25, ox: 0, oy: 0, grid: 40 }, path = [];
+  for ( let i = 0; i <= 16; i++ ) { const t = i / 16; path.push(Math.round(300 + 400 * t), Math.round(400 + 60 * Math.sin(t * 6))); }
+  const mk = (extra) => M.cleanStroke({ id: "fp", k: "fire", s: 0.9, r: 34, p: path, lv: 2, sm: 0, q: 0, ...extra });
+  const bedOf = (stk, others = []) => {
+    const a = M.areasOf([stk, ...others], g2, P).find((x) => x.strokes.some((s) => s.id === "fp")), f = M.raster(a, g2, P), set = new Set();
+    for ( let y = 0; y < f.h; y++ ) for ( let x = 0; x < f.w; x++ ) if ( f.aux[(y * f.w + x) * 4] ) set.add(`${x + a.rect.x0},${y + a.rect.y0}`);
+    return { set, bytes: f.data };
+  };
+  const plain = bedOf(mk({})), org = bedOf(mk({ e: 1 })), torn = bedOf(mk({ e: 1, tn: 0.8 }));
+  const plainOld = bedOf(M.cleanStroke({ id: "fp", k: "fire", s: 0.9, r: 34, p: path, lv: 2, sm: 0, q: 0 }));
+  ok(Buffer.compare(Buffer.from(plain.bytes), Buffer.from(plainOld.bytes)) === 0, "an old stroke (no e / tn) keeps its footprint");
+  const diff = (A, B) => { let d = 0; for ( const k of A ) if ( !B.has(k) ) d++; for ( const k of B ) if ( !A.has(k) ) d++; return d; };
+  ok(diff(plain.set, org.set) > 0.04 * plain.set.size, "organic edge differs from the round brush");
+  ok(diff(org.set, torn.set) > 0.04 * org.set.size, "torn differs from the organic edge");
+  ok(diff(bedOf(mk({ e: 1, tn: 0.8 })).set, torn.set) === 0, "torn footprint deterministic");
+  // the same footprint when its area's rectangle is bigger (another stroke of the same area far along it)
+  const other = M.cleanStroke({ id: "zz", k: "fire", s: 0.9, r: 34, p: [700, 330, 780, 330], lv: 2, sm: 0, q: 0 });
+  const big = bedOf(mk({ e: 1, tn: 0.8 }), [other]);
+  let miss = 0; for ( const k of torn.set ) if ( !big.set.has(k) ) miss++;
+  ok(miss === 0, "torn footprint is scene-absolute (the same in a bigger area)");
+  // detached islands: bed cells not connected to the main body
+  const cells = [...torn.set].map((k) => k.split(",").map(Number)), seen = new Set(); let comps = 0;
+  for ( const [x, y] of cells ) {
+    const k0 = `${x},${y}`; if ( seen.has(k0) ) continue; comps++;
+    const st2 = [[x, y]]; seen.add(k0);
+    while ( st2.length ) { const [a, b] = st2.pop(); for ( const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] ) { const k = `${a + dx},${b + dy}`; if ( torn.set.has(k) && !seen.has(k) ) { seen.add(k); st2.push([a + dx, b + dy]); } } }
+  }
+  ok(comps > 1, `torn has detached islands (${comps} parts)`);
 }
 
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);

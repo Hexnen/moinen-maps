@@ -12,11 +12,12 @@ import { PRESETS } from "./look.mjs";
  *  - bar: size, strength and wind (direction + strength) of the brush in hand; the fire brush's FIRE LEVEL and its own SMOKE LEVEL
  *    side by side (smoke with "off"), its style (fire / fireball) and its COLOUR (the scene's, seven presets, a custom colour);
  *    the smoke brush's smoke level - the same level buttons as
- *    destruction's (client settings, each remembered; pinned on each stroke);
+ *    destruction's (client settings, each remembered; pinned on each stroke); TORN EDGES on / off (the scene's setting, as
+ *    destruction's quick torn-borders button: new strokes pin it);
  *  - dock panel "Fire and smoke": the layer on/off, who sees it, flame height, plume length, smoke from fire, speed, how fast fire
  *    catches, grows and goes out, the scene's fire colour, the smoke tint, the light (on, radius, intensity, colour follows the
- *    fire or an override, flicker) and the list of strokes (newest first, its
- *    levels - click to change them - and delete one), Clear.
+ *    fire or an override, flicker), torn edges + tearing, and the list of strokes (newest first, its
+ *    levels - click to change them -, torn on / off for that stroke, and delete one), Clear.
  */
 const TOOLS = { "mm-fire-paint": "fire", "mm-fire-smoke": "smoke", "mm-fire-erase": "erase" };
 const KIND_ICON = { fire: "fa-solid fa-fire", smoke: "fa-solid fa-smog", erase: "fa-solid fa-eraser" };
@@ -61,12 +62,14 @@ function bar(host, ctx) {
       ${optRange({ name: "fireStrength", label: T("Fire.strength"), value: b.strength, min: 0.1, max: 1, step: 0.05, hint: T("Fire.strengthHint") })}
       ${optRange({ name: "fireWind", label: T("Fire.wind"), value: b.wind, min: 0, max: 1, step: 0.05, hint: T("Fire.windHint") })}
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Fire.windDir"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Fire.windDir"))}">${dirs}</div></div>
+      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group"><button type="button" class="mm-ws-toolbtn" data-fire-torn aria-pressed="${!!Fire.params0().torn}" aria-label="${esc(T("Fire.quickTorn"))}" data-tooltip="${esc(T("Fire.quickTorn"))}"${game.user.isGM ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button></div></div>
       ${optHint(mode === "smoke" ? T("Fire.smokeHint") : T("Fire.paintHint"))}`;
   }
   const off = bindSettings(host, { fireBrush: "fireBrush", fireStrength: "fireStrength", fireWind: "fireWind" });
   const PICK = { windDir: "fireWindDir", fireLevel: "fireLevel", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle", fireColor: "fireBrushColor" };
   const STR = new Set(["fireStyle", "fireColor"]);
   const onClick = (ev) => {
+    if ( ev.target.closest?.("[data-fire-torn]") ) { Fire.setParams({ torn: !Fire.params0().torn }); return; }
     for ( const k of Object.keys(PICK) ) {
       const d = ev.target.closest?.(`[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`); if ( !d ) continue;
       const v = d.dataset[k]; game.settings.set(MODULE_ID, PICK[k], STR.has(k) ? v : Number(v)); return;
@@ -84,7 +87,8 @@ function bar(host, ctx) {
     if ( cu ) { const own = !!nb.color && !Object.values(PRESETS).includes(nb.color); cu.setAttribute("aria-pressed", String(own)); if ( own ) cu.querySelector("input").value = nb.color; }
   };
   const offDir = onSetting(Object.values(PICK), sync);
-  return () => { off(); offDir(); host.removeEventListener("click", onClick); host.removeEventListener("change", onInput); };
+  const idT = Hooks.on("moinenMapsFire", (kind) => { if ( kind === "params" || kind === "loaded" ) host.querySelector("[data-fire-torn]")?.setAttribute("aria-pressed", String(!!Fire.params0().torn)); });
+  return () => { off(); offDir(); Hooks.off("moinenMapsFire", idT); host.removeEventListener("click", onClick); host.removeEventListener("change", onInput); };
 }
 
 /* ---------------------------------------------------------------- the dock */
@@ -100,7 +104,8 @@ function mountPanel(host) {
       // the levels: click to step them (fire 1..3, smoke 0..3 / 1..3)
       const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${LEVEL_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.level")}: ${T(`Fire.lvl${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>` : "";
       const smk = s.k !== "erase" ? `<button type="button" class="mm-fire-lv" data-act="sm" data-id="${esc(s.id)}" style="--mm-tool:${SMOKE_COLOR[s.sm]}" data-tooltip="${esc(`${T("Fire.smokeLevel")}: ${T(`Fire.smk${s.sm}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.smkShort"))}${s.sm}</button>` : "";
-      return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${s.k === "fire" ? esc(s.c ?? P.fireColor) : KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}</span>
+      const torn = s.k !== "erase" && s.st !== "fireball" ? `<button type="button" class="mm-fire-lv" data-act="torn" data-id="${esc(s.id)}" aria-pressed="${!!s.tn}" style="--mm-tool:${s.tn ? "#ef8a3a" : "#8c8c8c"}" data-tooltip="${esc(T(s.tn ? "Fire.tornOn" : "Fire.tornOff"))}"${gm ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button>` : "";
+      return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${s.k === "fire" ? esc(s.c ?? P.fireColor) : KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}${torn}</span>
         ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>`;
     }).join("");
     host.innerHTML = `<div class="mm-d-form mm-fire-panel">
@@ -111,6 +116,8 @@ function mountPanel(host) {
       ${optSelect({ name: "p.who", label: T("Fire.f.who"), value: P.who, options: [["all", T("Fire.o.all")], ["gm", T("Fire.o.gm")]] })}
       ${range("flame")}${range("plume", 0.25)}${range("smoke")}${range("speed")}
       ${range("spread", 0.5)}${range("grow", 0.1)}${range("out", 0.1)}
+      ${optCheck({ name: "p.torn", label: T("Fire.f.torn"), checked: P.torn, hint: T("Fire.h.torn") })}
+      <div class="mm-fire-tear"${P.torn ? "" : " hidden"}>${range("tear")}</div>
       <div class="mm-ws-opt"><label data-tooltip="${esc(T("Fire.h.fireColor"))}">${esc(T("Fire.f.fireColor"))}</label><input type="color" name="p.fireColor" value="${esc(P.fireColor)}"></div>
       ${range("smokeTint")}
       <fieldset class="mm-fire-light"><legend>${esc(T("Fire.light"))}</legend>
@@ -133,6 +140,7 @@ function mountPanel(host) {
     const b = ev.target.closest?.("[data-act]"); if ( !b || !gm ) return;
     b.blur();
     if ( b.dataset.act === "del" ) Fire.remove(b.dataset.id);
+    else if ( b.dataset.act === "torn" ) { const st = Fire.list().find((x) => x.id === b.dataset.id); if ( st ) Fire.setTorn(st.id, st.tn ? 0 : true); }
     else if ( b.dataset.act === "lv" || b.dataset.act === "sm" ) {
       const st = Fire.list().find((x) => x.id === b.dataset.id); if ( !st ) return;
       if ( b.dataset.act === "lv" ) Fire.setLevels(st.id, { lv: st.lv % 3 + 1 });
@@ -152,6 +160,7 @@ function mountPanel(host) {
       if ( !host.contains(document.activeElement) || document.activeElement === document.body ) { render(); return; }
       const P = Fire.params0();
       for ( const c of host.querySelectorAll("[name^='p.']") ) if ( !c.contains(document.activeElement) ) writeControl(c, P[c.name.slice(2)]);
+      const tr = host.querySelector(".mm-fire-tear"); if ( tr ) tr.hidden = !P.torn;
     });
   });
   return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); Hooks.off("moinenMapsFire", id); cancelAnimationFrame(frame); };

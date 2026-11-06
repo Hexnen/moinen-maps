@@ -3,7 +3,8 @@
  * destruction layer. What is stored, in two scene flags (written by the GM, read by every client, nothing is ever uploaded or baked):
  *
  *   flags.moinen-maps.fire          the layer's settings (PARAM_DEFAULTS): { v, on, who, smoke, flame, plume, speed, grow, spread, out,
- *                                   fireColor, smokeTint, light, lightRadius, lightIntensity, lightFollow, lightColor, lightFlicker }
+ *                                   fireColor, smokeTint, light, lightRadius, lightIntensity, lightFollow, lightColor, lightFlicker,
+ *                                   torn, tear (the torn edges new strokes pin) }
  *   flags.moinen-maps.fireStrokes   { [id]: stroke }: every brush stroke an object of its own (an add or a delete touches one key, so
  *                                   two edits never overwrite each other)
  *     stroke = { id, k: "fire" | "smoke" | "erase", s: strength 0.1..1, r: radius (scene px), p: [x0, y0, x1, y1, ...] (scene px,
@@ -13,7 +14,9 @@
  *                (fire: 0..3, 0 = no smoke; smoke: 1..3: wisps, a plume, a thick dark column), st: "fireball" (the old rolling look)
  *                or absent (fire burning in place), c: the fire's COLOUR "#rrggbb" (absent: the scene's fireColor - the natural
                 orange unless the GM changes it; look.mjs derives the whole palette from it), o: the time it was PUT OUT (absent while it burns), g: the time it was lit
- *                again (an undo / redo brings a stroke back: it grows again from g, but keeps its place q in the paint order) }
+ *                again (an undo / redo brings a stroke back: it grows again from g, but keeps its place q in the paint order),
+ *                e: 1 an ORGANIC footprint edge (every stroke painted since outlines exist; absent: the old round brush), tn: TORN
+ *                0.1..1 (absent: not torn) - see outlineOf }
  *   LEVELS and STRENGTH: the level is the look (a real gradation: tongue height and density, the bed, sparks, the light; the smoke's
  *   density, colour and billow size); the strength stays a fine-tuning within the level. Old strokes without levels read as fire 2 /
  *   smoke 2, exactly the look they had.
@@ -69,10 +72,12 @@ export const PARAM_DEFAULTS = Object.freeze({
   lightIntensity: 0.6,   // 0..1
   lightFollow: true,     // the light takes its fire's colour (look.mjs rampOf().light); false: lightColor for every fire
   lightColor: "#ff8a3c",
-  lightFlicker: 0.5      // 0 = steady
+  lightFlicker: 0.5,     // 0 = steady
+  torn: false,           // new strokes get TORN edges (as destruction's torn borders; each stroke stores its own: `tn`)
+  tear: 0.6              // how torn (0.1..1)
 });
 export const LIMITS = { s: [0.1, 1], r: [4, 4000], ws: [0, 1], smoke: [0, 1], flame: [0.3, 2.5], plume: [0, 8], speed: [0.2, 3],
-  grow: [0, 10], spread: [0.5, 40], out: [0, 10], smokeTint: [0, 1], lightRadius: [0.5, 4], lightIntensity: [0, 1], lightFlicker: [0, 1] };
+  grow: [0, 10], spread: [0.5, 40], out: [0, 10], smokeTint: [0, 1], lightRadius: [0.5, 4], lightIntensity: [0, 1], lightFlicker: [0, 1], tear: [0.1, 1] };
 export const MAX_POINTS = 2000;
 /** Largest field side (cells); the art grid of a scene is at most ~2000 x 2000 (destruction MAX_ART), so this never cuts a real area. */
 export const MAX_SIDE = 4096;
@@ -103,7 +108,8 @@ export function cleanParams(p = {}) {
     light: o.light !== false,
     lightRadius: num(o.lightRadius, D.lightRadius, ...L.lightRadius), lightIntensity: num(o.lightIntensity, D.lightIntensity, ...L.lightIntensity),
     lightColor: COLOR.test(String(o.lightColor)) ? String(o.lightColor).toLowerCase() : D.lightColor,
-    lightFlicker: num(o.lightFlicker, D.lightFlicker, ...L.lightFlicker)
+    lightFlicker: num(o.lightFlicker, D.lightFlicker, ...L.lightFlicker),
+    torn: o.torn === true, tear: num(o.tear, D.tear, ...L.tear)
   };
 }
 
@@ -125,6 +131,9 @@ export function cleanStroke(o) {
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
   if ( k !== "erase" && o.st === "fireball" ) out.st = "fireball";
   if ( k !== "erase" ) { const c = cleanColor(o.c); if ( c ) out.c = c; }
+  // the footprint: e = 1 an organic edge (every stroke painted since; older ones keep their round brush), tn = torn (0.1..1)
+  if ( k !== "erase" && o.e === 1 ) out.e = 1;
+  if ( k !== "erase" && Number(o.tn) > 0 ) out.tn = Math.round(num(o.tn, 0.6, ...LIMITS.tear) * 100) / 100;
   if ( o.o !== undefined && o.o !== null && Number.isFinite(Number(o.o)) ) out.o = Math.round(Number(o.o));
   if ( o.g !== undefined && o.g !== null && Number.isFinite(Number(o.g)) ) out.g = Math.round(Number(o.g));
   return out;
@@ -191,7 +200,7 @@ export const smokeOf = (st, P) => (st.k === "smoke" ? st.sm ?? 2 : st.k === "fir
 const flameOf = (st, Z) => Z.flameH * FIRE_LV.height[st.lv ?? 2] * st.s * (st.st === "fireball" ? 1 : 1.3);
 
 function pathBox(st, geo) {
-  const { pts, R } = cellPath(st, geo);
+  const { pts, R: R0 } = cellPath(st, geo), R = R0 + (st.st === "fireball" ? 0 : outlineMargin(st, R0));
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for ( const [x, y] of pts ) { x0 = Math.min(x0, x - R); y0 = Math.min(y0, y - R); x1 = Math.max(x1, x + R); y1 = Math.max(y1, y + R); }
   return { x0, y0, x1, y1 };
@@ -325,13 +334,67 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     wx /= wsum || 1; wy /= wsum || 1;
     const id = members.map((s) => s.id).sort()[0], ph = {};
     for ( const s of all ) ph[s.id] = phases[s.id];
-    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", color(s), ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
+    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
     out.push({ id, key, rect, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
 /* ---------------------------------------------------------------- the field */
+
+/* ---------------------------------------------------------------- the footprint's outline */
+
+const fade = (t) => t * t * (3 - 2 * t);
+/** Value noise (smooth, 0..1) on integer lattice points hashed with seed `s`. Pure. */
+export function vnoise(x, y, s) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = fade(x - ix), fy = fade(y - iy);
+  const a = hash4(ix, iy, s), b = hash4(ix + 1, iy, s), c = hash4(ix, iy + 1, s), d = hash4(ix + 1, iy + 1, s);
+  return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+}
+/**
+ * A stroke's OUTLINE (cells; null: the plain round brush of the strokes painted before outlines existed, the fireball, an eraser).
+ * As destruction's organic / torn outline (destruction/core.mjs partsOf), at art-pixel scale: the footprint is read through a domain
+ * warp scaled to the brush (lobes and inlets a brush radius apart, a finer octave), its width varies along the path, the rim gets
+ * a little roughness and bites; TORN (st.tn) adds a stronger warp, three octaves of rim roughness, chipped 2 x 2 bites and teeth, and
+ * a few detached islands just outside the rim. Seeded by the stroke (sd), in scene-absolute cells: the same on every client and in
+ * every area the stroke lands in.
+ */
+function outlineOf(st, R) {
+  if ( st.k === "erase" || st.st === "fireball" || (!st.e && !st.tn) ) return null;
+  const tn = st.tn ?? 0;
+  return { tn, sd: (st.sd | 0) & 0x3fffffff, OA: Math.min(9, Math.max(0.8, R * 0.2)) * (1 + 1.1 * tn), OL: Math.max(5, R * 0.9), OL2: Math.max(2.5, R * 0.38),
+    WV: 0.22 + 0.4 * tn, WL: Math.max(6, R * 1.7), RG: tn * (0.8 + 0.09 * R), ISL: tn ? R * (0.16 + 0.2 * tn) + 2 : 0, IS: Math.max(2.5, R * 0.22) };
+}
+/** How far a stroke's outline can reach past its brush radius (cells). */
+function outlineMargin(st, R) {
+  const O = outlineOf(st, R);
+  return O ? Math.ceil(O.OA * 1.75 + R * O.WV * 0.8 + O.RG * 1.6 + O.ISL + 2) : 0;
+}
+/** The outline's smooth part at scene-absolute cell (ax, ay): the warp and the island noise (sampled on a 2-cell lattice, interpolated). */
+function outlineWarp(O, ax, ay, out, o) {
+  const s = O.sd;
+  out[o] = (vnoise(ax / O.OL, ay / O.OL, s + 1) - 0.5) * 2.4 * O.OA + (vnoise(ax / O.OL2, ay / O.OL2, s + 3) - 0.5) * 0.9 * O.OA;
+  out[o + 1] = (vnoise(ax / O.OL, ay / O.OL, s + 2) - 0.5) * 2.4 * O.OA + (vnoise(ax / O.OL2, ay / O.OL2, s + 4) - 0.5) * 0.9 * O.OA;
+  // islands: blobs of a noise that only count in a ring just outside the rim (torn only)
+  out[o + 2] = O.tn ? vnoise(ax / O.IS, ay / O.IS, s + 31) : 0;
+}
+/** The rim's noise at scene-absolute cell (ax, ay) (cells; only asked near the rim): roughness, bites (inlets), torn lobes and chips. */
+function outlineRim(O, ax, ay) {
+  const s = O.sd;
+  let n = (vnoise(ax / 2.6, ay / 2.6, s + 11) - 0.5) * 1.3;
+  const b = vnoise(ax / (O.OL2 * 0.55), ay / (O.OL2 * 0.55), s + 5);
+  if ( b > 0.68 ) n -= (b - 0.68) * O.OL2 * 1.6;
+  if ( O.tn ) {
+    // (coarse to fine, the finest kept small: torn lobes and chipped steps, never salt-and-pepper)
+    n += O.RG * ((vnoise(ax / 3.2, ay / 3.2, s + 21) - 0.5) * 0.5 + (vnoise(ax / 7.5, ay / 7.5, s + 22) - 0.5) * 1.4 + (vnoise(ax / 16, ay / 16, s + 23) - 0.5) * 1.6);
+    // chipped bites: 3 x 3 steps bitten in where a mid noise is low
+    const cb = vnoise((ax / 3 | 0) / 1.6, (ay / 3 | 0) / 1.6, s + 24);
+    if ( cb < 0.2 * O.tn ) n -= 1.5 + O.RG * 0.5;
+  }
+  return n;
+}
+/** The largest the rim noise can be either way (cells): farther inside the rim than this (plus the soft edge), it changes nothing. */
+const rimMax = (O) => 0.7 + 0.52 * O.OL2 + (O.tn ? 2.3 * O.RG + 1.5 : 0);
 
 /** The per-cell buffers of `raster` (N cells). */
 function buffers(N) {
@@ -343,6 +406,7 @@ function buffers(N) {
 /** Stamp a stroke into the buffers (W x H, area origin x0, y0 in cells), in paint order. */
 function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
   const { pts, R } = cellPath(st, geo), soft = Math.max(1, R * 0.35);
+  const O = ball ? null : outlineOf(st, R);
   const segs = pts.length === 1 ? [[pts[0], pts[0]]] : pts.slice(1).map((b, i) => [pts[i], b]);
   const cm = catchMs(st, geo, P);
   let total = 0; const lens = segs.map(([a, b]) => { const l = Math.hypot(b[0] - a[0], b[1] - a[1]); total += l; return l; });
@@ -350,54 +414,128 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
   // ignite times are encoded only while they matter: a stroke still growing, or one put out before it had finished growing
   const lt = litTime(st), timed = phase === "grow" || (phase === "out" && st.o < lt + cm + T.growSpan);
   const fire = st.k === "fire";
+  /** One cell under the stroke: `d` its distance from the path, `Re` the radius there, `la` how far along the path it lies. */
+  const put = (i, d, Re, la) => {
+    if ( st.k === "erase" ) {
+      if ( phase === "on" ) { buf.F[i] = 0; buf.S[i] = 0; buf.FA[i] = 0; buf.I[i] = buf.SI[i] = NaN; buf.O[i] = buf.SO[i] = Infinity; }
+      else if ( phase === "out" ) {
+        if ( buf.F[i] > 0 ) { buf.O[i] = Math.min(buf.O[i], lt); buf.FA[i] = 0; }
+        if ( buf.S[i] > 0 ) buf.SO[i] = Math.min(buf.SO[i], lt);
+      } else if ( phase === "regrow" ) {
+        if ( buf.F[i] > 0 ) buf.I[i] = Number.isNaN(buf.I[i]) ? st.o : Math.max(buf.I[i], st.o);
+        if ( buf.S[i] > 0 ) buf.SI[i] = Number.isNaN(buf.SI[i]) ? st.o : Math.max(buf.SI[i], st.o);
+      }
+      return;
+    }
+    // where along the stroke this cell lies (0 at its start, 1 at its end, plus its distance from the path): when it catches
+    const along = total ? (la + d) / (total + R) : Math.min(1, d / R) * 0.5;
+    const ign = timed ? lt + along * cm : NaN, outT = phase === "out" ? st.o : Infinity;
+    // (the fire style's smoke strokes fade out over their whole radius: a soft source, no cut-out silhouette)
+    const e = Math.min(1, (Re - d) / soft), u = Math.min(1, d / Re), v = !fire && !ball ? st.s * (1 - u * u) * (1 - u * u) : st.s * (0.35 + 0.65 * e) * (fire ? heat : 1);
+    if ( fire ) {
+      const dying = buf.O[i] < Infinity;           // (what is going out under a new stroke is replaced by it)
+      if ( v > buf.F[i] || (dying && phase !== "out") ) {
+        const lit = buf.F[i] > 0.02 && !dying;
+        buf.F[i] = v; buf.LF[i] = lv; buf.SMF[i] = st.sm ?? 2; buf.FH[i] = fh;
+        if ( !lit ) buf.I[i] = ign;
+        buf.O[i] = outT;
+      }
+      if ( phase !== "out" && v > buf.FA[i] ) buf.FA[i] = v;
+    } else {
+      const dying = buf.SO[i] < Infinity;
+      if ( v > buf.S[i] || (dying && phase !== "out") ) {
+        const lit = buf.S[i] > 0.02 && !dying;
+        buf.S[i] = v; buf.LS[i] = st.sm ?? 2;
+        if ( !lit ) buf.SI[i] = ign;
+        buf.SO[i] = outT;
+      }
+    }
+  };
+
+  if ( !O ) {
+    // the round brush (strokes from before outlines, the fireball, an eraser): capsules along the path
+    let acc = 0;
+    for ( let s = 0; s < segs.length; s++ ) {
+      const [a, b] = segs[s];
+      const ax = a[0] - x0, ay = a[1] - y0, bx = b[0] - x0, by = b[1] - y0, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      const cx0 = Math.max(0, Math.floor(Math.min(ax, bx) - R)), cx1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx) + R));
+      const cy0 = Math.max(0, Math.floor(Math.min(ay, by) - R)), cy1 = Math.min(H - 1, Math.ceil(Math.max(ay, by) + R));
+      for ( let y = cy0; y <= cy1; y++ ) for ( let x = cx0; x <= cx1; x++ ) {
+        const px = x + 0.5 - ax, py = y + 0.5 - ay;
+        const t = L2 ? Math.max(0, Math.min(1, (px * dx + py * dy) / L2)) : 0;
+        const d = Math.hypot(px - dx * t, py - dy * t);
+        if ( d > R ) continue;
+        put(y * W + x, d, R, acc + lens[s] * t);
+      }
+      acc += lens[s];
+    }
+    return;
+  }
+
+  // THE OUTLINE (outlineOf): 1. the distance from the path and how far along it, for every cell of the stroke's box (plain
+  // capsules, cheap); 2. per cell once: that field read through the warp, the width along the path, the rim noise near the rim
+  // (only there), the islands - so the cost is per cell, not per cell and segment.
+  const OM = outlineMargin(st, R);
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for ( const [px, py] of pts ) { bx0 = Math.min(bx0, px - x0); by0 = Math.min(by0, py - y0); bx1 = Math.max(bx1, px - x0); by1 = Math.max(by1, py - y0); }
+  const X0 = Math.max(0, Math.floor(bx0 - R - OM)), Y0 = Math.max(0, Math.floor(by0 - R - OM));
+  const BW = Math.min(W - 1, Math.ceil(bx1 + R + OM)) - X0 + 1, BH = Math.min(H - 1, Math.ceil(by1 + R + OM)) - Y0 + 1;
+  if ( BW <= 1 || BH <= 1 ) return;
+  const BN = BW * BH, Dd = new Float32Array(BN).fill(1e9), Al = new Float32Array(BN);
   let acc = 0;
   for ( let s = 0; s < segs.length; s++ ) {
     const [a, b] = segs[s];
-    const ax = a[0] - x0, ay = a[1] - y0, bx = b[0] - x0, by = b[1] - y0, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
-    const cx0 = Math.max(0, Math.floor(Math.min(ax, bx) - R)), cx1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx) + R));
-    const cy0 = Math.max(0, Math.floor(Math.min(ay, by) - R)), cy1 = Math.min(H - 1, Math.ceil(Math.max(ay, by) + R));
-    for ( let y = cy0; y <= cy1; y++ ) for ( let x = cx0; x <= cx1; x++ ) {
-      const px = x + 0.5 - ax, py = y + 0.5 - ay;
-      const t = L2 ? Math.max(0, Math.min(1, (px * dx + py * dy) / L2)) : 0;
-      const d = Math.hypot(px - dx * t, py - dy * t);
-      if ( d > R ) continue;
-      const i = y * W + x;
-      if ( st.k === "erase" ) {
-        if ( phase === "on" ) { buf.F[i] = 0; buf.S[i] = 0; buf.FA[i] = 0; buf.I[i] = buf.SI[i] = NaN; buf.O[i] = buf.SO[i] = Infinity; }
-        else if ( phase === "out" ) {
-          if ( buf.F[i] > 0 ) { buf.O[i] = Math.min(buf.O[i], lt); buf.FA[i] = 0; }
-          if ( buf.S[i] > 0 ) buf.SO[i] = Math.min(buf.SO[i], lt);
-        } else if ( phase === "regrow" ) {
-          if ( buf.F[i] > 0 ) buf.I[i] = Number.isNaN(buf.I[i]) ? st.o : Math.max(buf.I[i], st.o);
-          if ( buf.S[i] > 0 ) buf.SI[i] = Number.isNaN(buf.SI[i]) ? st.o : Math.max(buf.SI[i], st.o);
-        }
-        continue;
-      }
-      // where along the stroke this cell lies (0 at its start, 1 at its end, plus its distance from the path): when it catches
-      const along = total ? (acc + lens[s] * t + d) / (total + R) : d / R * 0.5;
-      const ign = timed ? lt + along * cm : NaN, outT = phase === "out" ? st.o : Infinity;
-      // (the fire style's smoke strokes fade out over their whole radius: a soft source, no cut-out silhouette)
-      const e = Math.min(1, (R - d) / soft), u = d / R, v = !fire && !ball ? st.s * (1 - u * u) * (1 - u * u) : st.s * (0.35 + 0.65 * e) * (fire ? heat : 1);
-      if ( fire ) {
-        const dying = buf.O[i] < Infinity;           // (what is going out under a new stroke is replaced by it)
-        if ( v > buf.F[i] || (dying && phase !== "out") ) {
-          const lit = buf.F[i] > 0.02 && !dying;
-          buf.F[i] = v; buf.LF[i] = lv; buf.SMF[i] = st.sm ?? 2; buf.FH[i] = fh;
-          if ( !lit ) buf.I[i] = ign;
-          buf.O[i] = outT;
-        }
-        if ( phase !== "out" && v > buf.FA[i] ) buf.FA[i] = v;
-      } else {
-        const dying = buf.SO[i] < Infinity;
-        if ( v > buf.S[i] || (dying && phase !== "out") ) {
-          const lit = buf.S[i] > 0.02 && !dying;
-          buf.S[i] = v; buf.LS[i] = st.sm ?? 2;
-          if ( !lit ) buf.SI[i] = ign;
-          buf.SO[i] = outT;
-        }
+    const ax = a[0] - x0, ay = a[1] - y0, bx = b[0] - x0, by = b[1] - y0, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy, RM = R + OM;
+    const cx0 = Math.max(X0, Math.floor(Math.min(ax, bx) - RM)), cx1 = Math.min(X0 + BW - 1, Math.ceil(Math.max(ax, bx) + RM));
+    const cy0 = Math.max(Y0, Math.floor(Math.min(ay, by) - RM)), cy1 = Math.min(Y0 + BH - 1, Math.ceil(Math.max(ay, by) + RM));
+    for ( let y = cy0; y <= cy1; y++ ) {
+      let j = (y - Y0) * BW + (cx0 - X0);
+      for ( let x = cx0; x <= cx1; x++, j++ ) {
+        const px = x + 0.5 - ax, py = y + 0.5 - ay;
+        const t = L2 ? Math.max(0, Math.min(1, (px * dx + py * dy) / L2)) : 0;
+        const ex = px - dx * t, ey = py - dy * t, d2 = ex * ex + ey * ey;
+        if ( d2 < Dd[j] ) { Dd[j] = d2; Al[j] = acc + lens[s] * t; }
       }
     }
     acc += lens[s];
+  }
+  for ( let j = 0; j < BN; j++ ) Dd[j] = Math.sqrt(Dd[j]);
+  // (the width along the path, one sample per cell of length)
+  const wtab = new Float32Array(Math.ceil(total) + 2);
+  for ( let i = 0; i < wtab.length; i++ ) wtab[i] = R * (1 + O.WV * (vnoise(i / O.WL, 3.7, O.sd + 7) - 0.5) * 1.6);
+  // the smooth part (warp, islands) on a lattice of every second scene-absolute cell: the same lattice in every area
+  const lX = Math.floor((X0 + x0) / 2), lY = Math.floor((Y0 + y0) / 2), lW = Math.ceil(BW / 2) + 2, lH = Math.ceil(BH / 2) + 2;
+  const lat = new Float32Array(lW * lH * 3);
+  for ( let gy = 0; gy < lH; gy++ ) for ( let gx = 0; gx < lW; gx++ ) outlineWarp(O, (lX + gx) * 2, (lY + gy) * 2, lat, (gy * lW + gx) * 3);
+  const RMX = rimMax(O) + soft, ISL = O.tn ? O.ISL : 0, thr = 0.8 - 0.08 * O.tn, far = R * (1 + O.WV) + RMX + ISL;
+  const sample = (F, sx, sy) => {
+    sx = Math.max(0, Math.min(BW - 1.001, sx)); sy = Math.max(0, Math.min(BH - 1.001, sy));
+    const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy, j = iy * BW + ix;
+    const u0 = F[j] + (F[j + 1] - F[j]) * fx, u1 = F[j + BW] + (F[j + BW + 1] - F[j + BW]) * fx;
+    return u0 + (u1 - u0) * fy;
+  };
+  for ( let y = Y0; y < Y0 + BH; y++ ) for ( let x = X0; x < X0 + BW; x++ ) {
+    const cx = x + x0, cy = y + y0, gx = (cx >> 1) - lX, gy = (cy >> 1) - lY, fx = (cx & 1) / 2, fy = (cy & 1) / 2;
+    const ka = (gy * lW + gx) * 3, kb = ka + 3, kc = ka + lW * 3, kd = kc + 3;
+    const wx = lat[ka] + (lat[kb] - lat[ka]) * fx, wx1 = lat[kc] + (lat[kd] - lat[kc]) * fx;
+    const wy = lat[ka + 1] + (lat[kb + 1] - lat[ka + 1]) * fx, wy1 = lat[kc + 1] + (lat[kd + 1] - lat[kc + 1]) * fx;
+    const sx = x - X0 + wx + (wx1 - wx) * fy, sy = y - Y0 + wy + (wy1 - wy) * fy, D = sample(Dd, sx, sy);
+    if ( D > far ) continue;
+    const la = sample(Al, sx, sy), li = Math.max(0, Math.min(wtab.length - 2, la | 0));
+    const Re = wtab[li] + (wtab[li + 1] - wtab[li]) * (la - li);                                    // (the width varies along the path)
+    let dE = Re - D;
+    if ( dE < RMX ) {
+      if ( dE < -RMX - ISL ) continue;
+      dE += outlineRim(O, cx, cy);
+    }
+    if ( dE <= 0 ) {
+      // a detached island just outside the rim (torn): where the island noise peaks, a small blob of its own
+      if ( !O.tn || -dE < 1.5 || -dE > ISL ) continue;
+      const i0 = lat[ka + 2] + (lat[kb + 2] - lat[ka + 2]) * fx, i1 = lat[kc + 2] + (lat[kd + 2] - lat[kc + 2]) * fx, isl = i0 + (i1 - i0) * fy;
+      if ( isl <= thr ) continue;
+      dE = (isl - thr) * R * 2;
+    }
+    put(y * W + x, Math.max(0, Re - dE), Re, la);
   }
 }
 
