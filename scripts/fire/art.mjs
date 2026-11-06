@@ -856,6 +856,14 @@ export class FireArt extends PIXI.Container {
       m._render = (renderer) => { const u = m.shader.uniforms; u.uAlpha = this.worldAlpha; u.uK = footprintK(); r0(renderer); };
     }
     this.addChild(this.ground, this.show);
+    // KNOWN RISKS for "the area's rectangle shows" (each quad covers the whole area rect; checked by diffing frames with each pass
+    // hidden, dev/out bbox probe: clean at zoom 1-3, day and dark, DPR 1 - the one real case was the outside distance, model.chamfer):
+    //   - the ground pass is a MULTIPLY quad writing alpha 1 over the whole rect (exact 1.0 colour outside the marks: invisible on an
+    //     opaque primary texture; a transparent one would show the rect);
+    //   - the glow quad is drawn into Foundry's illumination, which renders at HALF resolution below Performance MAX and is upscaled
+    //     bilinearly (a soft halo around emissive cells, never past the cells' own neighbourhood);
+    //   - the box-filter footprint reads past the art texture at the quad's edge: art() returns 0 there (bounds-checked, no undefined
+    //     texelFetch).
     // the emission lives in the illumination layer (not in this container): it follows this area's visibility and alpha
     this.glow = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.emit, common()));
     this.glow.state.blendMode = PIXI.BLEND_MODES.MAX_COLOR; this.glow.eventMode = "none";

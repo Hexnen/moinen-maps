@@ -562,25 +562,27 @@ export const RY = 0.8;
 
 /**
  * Two-pass chamfer distance (cells, in the ground plane: y / RY) to the nearest cell where `inside(i)` differs: 0 on the far side.
- * Pure. Used for the bed's coverage ramps (inside) and the heat-tint ring (outside).
+ * Pure. Used for the bed's coverage ramps (inside) and the heat-tint ring (outside). `edge`: whether beyond the grid counts as the far
+ * side (true: the bed's inside distance; false for the OUTSIDE distance - beyond the area's rectangle is outside too, never a bed: else
+ * the ring and coals would trace the rectangle, the area's bounding box showing on the map).
  */
-export function chamfer(inside, W, H) {
+export function chamfer(inside, W, H, edge = true) {
   const N = W * H, D = new Float32Array(N), BIG = 1e6, a = 1, b = 1 / RY, c = Math.hypot(1, 1 / RY);
   for ( let i = 0; i < N; i++ ) D[i] = inside[i] ? BIG : 0;
   for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
     const i = y * W + x; if ( !D[i] ) continue;
     let d = D[i];
-    if ( x > 0 ) d = Math.min(d, D[i - 1] + a); else d = Math.min(d, 0.5);
+    if ( x > 0 ) d = Math.min(d, D[i - 1] + a); else if ( edge ) d = Math.min(d, 0.5);
     if ( y > 0 ) { d = Math.min(d, D[i - W] + b); if ( x > 0 ) d = Math.min(d, D[i - W - 1] + c); if ( x < W - 1 ) d = Math.min(d, D[i - W + 1] + c); }
-    else d = Math.min(d, 0.5 * b);
+    else if ( edge ) d = Math.min(d, 0.5 * b);
     D[i] = d;
   }
   for ( let y = H - 1; y >= 0; y-- ) for ( let x = W - 1; x >= 0; x-- ) {
     const i = y * W + x; if ( !D[i] ) continue;
     let d = D[i];
-    if ( x < W - 1 ) d = Math.min(d, D[i + 1] + a); else d = Math.min(d, 0.5);
+    if ( x < W - 1 ) d = Math.min(d, D[i + 1] + a); else if ( edge ) d = Math.min(d, 0.5);
     if ( y < H - 1 ) { d = Math.min(d, D[i + W] + b); if ( x < W - 1 ) d = Math.min(d, D[i + W + 1] + c); if ( x > 0 ) d = Math.min(d, D[i + W - 1] + c); }
-    else d = Math.min(d, 0.5 * b);
+    else if ( edge ) d = Math.min(d, 0.5 * b);
     D[i] = d;
   }
   return D;
@@ -613,7 +615,7 @@ function auxOldOf(buf, W, H) {
 function auxOf(buf, W, H, P) {
   const N = W * H, bed = new Uint8Array(N), out = new Uint8Array(N);
   for ( let i = 0; i < N; i++ ) { bed[i] = buf.F[i] > 0.05 ? 1 : 0; out[i] = 1 - bed[i]; }
-  const Din = chamfer(bed, W, H), Dout = chamfer(out, W, H), aux = new Uint8Array(N * 4);
+  const Din = chamfer(bed, W, H), Dout = chamfer(out, W, H, false), aux = new Uint8Array(N * 4);
   for ( let i = 0; i < N; i++ ) {
     const o = i * 4;
     aux[o] = bed[i] ? Math.min(255, Math.max(1, Math.round(Din[i]))) : 0;

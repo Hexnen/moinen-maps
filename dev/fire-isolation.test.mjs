@@ -53,6 +53,18 @@ for ( const [name, list] of Object.entries(cases) ) {
   }
 }
 
+// the area's RECTANGLE never shows: beyond the rectangle is outside too (not a bed), so the outside distance at its border is the
+// real distance to the bed - else the heat ring and coals traced the rectangle (the bounding box seen with a small brush)
+for ( const r of [6, 12, 40] ) {
+  const a = M.areasOf([st("t1", 400, 400, { r, p: [400, 400] })], geo, P, undefined, true)[0], f = M.raster(a, geo, P);
+  let minEdge = 255;
+  for ( let y = 0; y < f.h; y++ ) for ( let x = 0; x < f.w; x++ ) {
+    if ( x > 0 && y > 0 && x < f.w - 1 && y < f.h - 1 ) continue;
+    const o = (y * f.w + x) * 4; if ( f.aux[o] === 0 ) minEdge = Math.min(minEdge, f.aux[o + 1]);
+  }
+  ok(minEdge >= 8, `rect border: the outside distance is the real one (r ${r}: min ${minEdge} cells at the border)`);
+}
+
 /* B */
 globalThis.Hooks = { on: () => 0, off: () => 0 };
 let refreshes = 0;
