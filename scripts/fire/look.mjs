@@ -32,6 +32,17 @@ export const REF = Object.freeze({
 export const REF_EMBERS = Object.freeze([0xfff0a0, 0xffb030, 0xe0501c, 0x7a2a14]);
 export const REF_PUFFS = Object.freeze([0x4a4541, 0x5d5853, 0x77716b]);
 export const REF_LIGHT = "#ff8a3c";
+/**
+ * The FIRE STYLE's ramp (research recipe 4.5, natural): 7 flame steps (0 plum rim of cool tips .. 6 cream-white core, level 3 only),
+ * 3 bed embers (dark, mid, hot), 2 fire-lit smoke undersides (light, shadow). The fireball keeps REF above.
+ */
+export const REF7 = Object.freeze(["#3d0f24", "#7e1717", "#c22e10", "#ee6514", "#ffa529", "#ffe073", "#fffbea",
+  "#6a1a14", "#b5340f", "#f2781e", "#c4673a", "#7c3a28"]);
+/** The fire style's sparks over their life: ramp steps 5 -> 3 -> 2 (-> 1). */
+const SPARK_STEPS = [5, 3, 2, 1];
+/** A 16 x 16 void-and-cluster rank tile (Ulichney; sigma 1.9): thresholding it at any level spreads the points evenly (blue noise). */
+export const VC16 = Object.freeze([87,173,104,159,77,187,1,153,59,198,81,134,66,170,99,45,70,222,12,42,233,212,85,178,20,120,105,36,16,206,123,254,24,130,146,201,119,26,139,253,220,168,232,157,245,143,2,196,110,237,54,92,164,63,101,47,72,10,203,55,93,75,181,161,33,210,185,14,244,174,194,126,150,89,28,189,118,43,227,61,84,154,73,107,226,35,7,234,209,109,172,132,214,239,100,138,8,252,127,46,140,80,156,57,182,38,250,65,6,23,175,202,223,169,21,218,199,114,246,95,15,141,224,83,162,149,122,40,112,192,60,90,177,30,131,217,74,124,48,195,97,242,53,76,96,145,11,240,160,51,3,191,167,236,19,113,32,205,184,231,29,213,133,69,106,228,204,62,102,148,179,211,137,68,0,155,49,247,186,39,121,151,86,34,255,9,82,58,166,251,88,125,108,163,79,207,13,243,183,136,116,221,41,235,103,17,219,176,64,22,230,94,171,50,18,165,71,190,158,128,193,147,37,200,135,5,117,142,197,67,225,98,208,25,91,4,52,115,78,241,188,215,56,249,31,129,111,238,44,144,248,180,216,229,27,152]);
+
 /** The shader's palette slots, in uniform order (uPal[i]). */
 export const SLOTS = ["core", "yellow", "orange", "red", "tip", "glow", "ember", "char", "under"];
 
@@ -90,7 +101,8 @@ export function tintSmoke(c, tint, amount) {
 const cache = new Map();
 /**
  * The whole palette of base colour `base` (hex; anything else = natural): { base, natural, pal: { core, ... } (0..1 rgb), uniforms
- * (Float32Array 36: uPal), embers [4 x 0xrrggbb], light "#rrggbb", tint (0..1 rgb: the smoke's tint hue) }.
+ * (Float32Array 36: uPal), embers [4 x 0xrrggbb], light "#rrggbb", tint (0..1 rgb: the smoke's tint hue), and the fire style's
+ * ramp (REF7 derived: ramp [12 x rgb], ramp7 Float32Array 48: uRamp) and its sparks [4 x 0xrrggbb] }.
  */
 export function rampOf(base) {
   const hex = cleanColor(base) ?? NATURAL;
@@ -100,7 +112,10 @@ export function rampOf(base) {
   for ( const k of SLOTS ) pal[k] = natural ? [...REF[k]] : derive(REF[k], B);
   const uniforms = new Float32Array(SLOTS.length * 4);
   SLOTS.forEach((k, i) => { uniforms.set(pal[k], i * 4); uniforms[i * 4 + 3] = 1; });
-  r = Object.freeze({ base: hex, natural, pal, uniforms,
+  const ramp = REF7.map((c) => (natural ? hexToRgb(c) : derive(hexToRgb(c), B)));
+  const ramp7 = new Float32Array(REF7.length * 4);
+  ramp.forEach((c, i) => { ramp7.set(c, i * 4); ramp7[i * 4 + 3] = 1; });
+  r = Object.freeze({ base: hex, natural, pal, uniforms, ramp, ramp7, sparks: SPARK_STEPS.map((k) => rgbToInt(ramp[k])),
     embers: natural ? [...REF_EMBERS] : REF_EMBERS.map((e) => rgbToInt(derive(intToRgb(e), B))),
     light: natural ? REF_LIGHT : rgbToHex(derive(hexToRgb(REF_LIGHT), B)),
     tint: pal.orange });

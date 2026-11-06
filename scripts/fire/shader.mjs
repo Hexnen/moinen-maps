@@ -4,20 +4,12 @@
  * a function of (cell, field, time) only - procedural noise quantised to a small palette (flat bands, no gradients), so it is real
  * pixel art on the same art grid as the destruction layer (display.ap / display.origin).
  *
- * TWO STYLES (per area, `uStyle`):
- *  - FIRE (0, the default): fire burning IN PLACE. A fixed BASE on the ground (the painted bed: char, embers and a glow that boils in
- *    place and never moves); flame TONGUES grow up from it, screen-up, leaning with the wind. Each column of tongues has a height that
- *    licks up and down over time and a ragged edge that boils in place (two noise frames cross-faded: nothing scrolls or travels
- *    across the area); pieces split off above the tips and vanish. Hot (white-yellow) at the base and the core, orange, red and dark
- *    red towards the tips. The fire level is a gradation: 1 smouldering (a glowing bed, low sparse tongues), 2 a steady fire, 3 a
- *    blaze (tall, dense, hot). SMOKE rises from the tips: billows (a few octaves of noise carried along the plume) with a lit side and
- *    a shadow side (the billow compared one step towards the light, up-left), flat see-through bands (the map shows through), thinning
- *    with height and distance into separate clumps (the billows' cores) - never a dither ring. Smoke level 1 thin light wisps, 2 a
- *    plume, 3 a thick dark billowing column. Over the flames the smoke is much thinner, so the fire stays readable.
- *  - FIREBALL (1): the layer's first look (a rolling ball of fire, its smoke), kept bit for bit (`cellFireball` is the v1 code).
+ * THE FIREBALL STYLE: the layer's first look (a rolling ball of fire, its smoke), kept bit for bit (`cellFireball` is the v1 code).
+ * The default FIRE style moved to its own art-resolution renderer (art.mjs, research recipe phase A); this file keeps the fireball,
+ * the footprint sampler and the shared helpers.
  *
  * COLOUR: the palette (CORE .. CHAR, the smoke's lit underside) is the uniform array uPal, derived per area from its fire's base colour
- * on the CPU by look.mjs (rampOf: the swappable rule; the natural orange gives the old constants exactly, so both styles' default
+ * on the CPU by look.mjs (rampOf: the swappable rule; the natural orange gives the old constants exactly, so the fireball's default
  * output is unchanged). The smoke stays neutral unless the scene's smoke tint (uSmokeTint) mixes it towards the fire's hue.
  *
  * GROWING AND GOING OUT (while the area animates: `uAnim` 1 and the times texture, model.raster): per cell its flames' and its smoke's
@@ -156,136 +148,7 @@ float boil(vec2 p, float rate, float salt) {
   return mix(vnoise(p + o0), vnoise(p + o1), kf * kf * (3.0 - 2.0 * kf));
 }
 
-/* ======== FIRE STYLE: the look, in one place (swap this block for another look; the mechanics above / below stay) ========
- * LOOK PARAMETERS (per level: x = level 1, y = level 2, z = level 3) */
-const float F_ROW = 0.16;                          // root rows, grid squares
-const float F_COL = 0.22;                          // root columns, grid squares (~4.5 tongues a square)
-const float F_RATE = 2.6;                          // licks a second
-const vec3  F_SKIP = vec3(0.6, 0.12, 0.0);         // share of roots without a tongue (smouldering is sparse)
-const vec3  F_WIDTH = vec3(0.4, 0.55, 0.72);       // tongue half-width, x a root column
-const vec3  F_LEN = vec3(0.5, 1.0, 1.6);           // tongue length, x uFlameH
-const vec3  F_HOT = vec3(-0.1, 0.0, 0.1);          // colour shift towards the core
-const vec4  F_BANDS = vec4(0.2, 0.42, 0.66, 0.88); // core | yellow | orange | red | tip, by height + distance from the axis
-const vec3  F_BED = vec3(0.82, 0.62, 0.44);        // bed glow thresholds: orange, red, ember (else char)
-const vec3  F_ALPHA = vec3(0.7, 0.92, 1.0);        // flame opacity (level 1 delicate: the ground shows through)
-const vec3  F_BED_ALPHA = vec3(0.45, 0.7, 0.88);   // bed (char, embers) opacity
-const vec3  F_EDGE = vec3(0.35, 0.25, 0.2);        // bed edge ramp: where the bed is thinner than this, no char (a soft rim)
-const vec3  S_EDGE = vec3(1.0, 0.8, 0.6);          // smoke edge ramp at the area's rectangle (grid squares)
-const vec3  S_COVER = vec3(0.7, 0.66, 0.6);        // smoke coverage threshold (higher = sparser clumps, more map showing)
-// smoke (x wisps, y plume, z column)
-const vec3  S_SIZE = vec3(1.8, 1.3, 0.95);         // billow frequency (1 / squares)
-const vec3  S_DENS = vec3(0.6, 0.8, 1.05);
-const vec3  S_ALPHA_CORE = vec3(0.46, 0.68, 0.88), S_ALPHA_MID = vec3(0.34, 0.54, 0.76), S_ALPHA_EDGE = vec3(0.22, 0.4, 0.6);
-const vec3  S_LIT1 = vec3(0.74, 0.73, 0.70), S_LIT2 = vec3(0.60, 0.58, 0.55), S_LIT3 = vec3(0.38, 0.36, 0.35);
-const vec3  S_MID1 = vec3(0.60, 0.59, 0.57), S_MID2 = vec3(0.42, 0.41, 0.40), S_MID3 = vec3(0.22, 0.21, 0.21);
-const vec3  S_SHD1 = vec3(0.46, 0.45, 0.44), S_SHD2 = vec3(0.25, 0.24, 0.24), S_SHD3 = vec3(0.10, 0.09, 0.09);
-float lv3(vec3 v, int l) { return l == 1 ? v.x : l == 3 ? v.z : v.y; }
-vec3 lvC(vec3 a, vec3 b, vec3 c, int l) { return l == 1 ? a : l == 3 ? c : b; }
-
-// the growth of the flames rooted at cell b (1 at rest): grown in, or sinking back into the base
-float flameAt(ivec2 b) {
-  if ( uAnim == 0 ) return 1.0;
-  vec4 T = texelFetch(uTimes, b, 0) * 255.0;
-  float g = 1.0, o = 1.0;
-  if ( T.r > 0.5 ) { float a = uI.x - (T.r - 1.0) / 254.0 * uI.y; g = clamp(a / max(uDur.x, 0.01), 0.0, 1.0); g *= 2.0 - g; }
-  if ( T.g < 254.5 ) { float a = uO.x - T.g / 254.0 * uO.y; o = 1.0 - clamp(a / max(uDur.y, 0.01), 0.0, 1.0); o *= o; }
-  return g * o;
-}
-
-// FIRE: burning in place. Tongues are ROOTED on the burning ground: a fixed lattice of roots (rows and columns, each row shifted,
-// each root jittered - hashes of its index: the roots never move). A root on the bed grows a tongue screen-up (leaning with the
-// wind): its length licks up and down in place (two noise frames cross-faded), its width tapers to the tip, its edge wobbles, pieces
-// split off above the tip and vanish. Nearer roots (lower on the screen) are drawn over farther ones. Under the tongues: the bed
-// (f.b), char with embers that glow and boil in place. lvS the smoke level; bedA the char's opacity (going out); bed0 the bed before
-// the going-out glow.
-vec4 cellFire(vec2 c, vec4 f, int lvS, float bedA, float bed0) {
-  vec4 col = vec4(0.0);
-  int band = 0;
-  float TH = max(2.0, floor(uGrid * F_ROW)), TW = max(2.0, floor(uGrid * F_COL));
-  int K = min(14, int(ceil(uFlameH * F_LEN.z * 1.3 / TH)) + 1);
-  bool hit = false;
-  for ( int k = 14; k >= 0; k-- ) {
-    if ( k > K || hit ) continue;
-    float r = floor(c.y / TH) + float(k);
-    float ro = h21(vec2(r, uSeed));
-    float j0 = floor(c.x / TW + ro);
-    for ( int dj = -1; dj <= 1; dj++ ) {
-      float j = j0 + float(dj);
-      float h1 = h21(vec2(j, r) + uSeed * 0.13), h2 = h21(vec2(r, j) + 7.1), h3 = h21(vec2(j * 1.7, r * 0.3) + 3.3);
-      vec2 b = vec2((j - ro + 0.5 + (h1 - 0.5) * 0.7) * TW, (r + 0.15 + h2 * 0.7) * TH);
-      float t = b.y - c.y;                                     // cells above the root
-      if ( t < -1.5 ) continue;
-      ivec2 bi = ivec2(floor(b));
-      if ( bi.x < 0 || bi.y < 0 || bi.x >= int(uSize.x) || bi.y >= int(uSize.y) ) continue;
-      vec4 fb = texelFetch(uField, bi, 0);
-      if ( fb.b < 0.12 ) continue;
-      int lv = (int(fb.a * 255.0 + 0.5) - 1) / 4 + 1;
-      if ( h3 < lv3(F_SKIP, lv) ) continue;
-      float heat = min(1.0, fb.b / (lv == 1 ? 0.74 : 1.0));
-      float w = TW * lv3(F_WIDTH, lv) * (0.75 + 0.5 * h2);
-      float dx0 = c.x - (b.x + uLean * max(t, 0.0));
-      if ( abs(dx0) > w + TW * 0.6 ) continue;
-      float lick = boil(vec2(j * 1.31 + r * 0.71, 0.5), F_RATE, 1.0);
-      float len = uFlameH * lv3(F_LEN, lv) * heat * (0.45 + 0.8 * lick) * flameAt(bi);
-      if ( len < 1.5 ) continue;
-      float tt = t / len;
-      if ( tt > 1.35 ) continue;
-      float wob = (boil(vec2(j * 2.1 + r, tt * 2.2), F_RATE * 1.4, 2.0) - 0.5) * TW * 0.55 * max(tt, 0.0);
-      float dx = abs(dx0 - wob);
-      if ( tt <= 1.0 ) {
-        float half_ = t < 0.0 ? w * 0.85 : w * pow(1.0 - tt, 0.65);
-        if ( dx <= half_ ) {
-          float e = max(tt, 0.0) + 0.45 * dx / max(half_, 0.5) - lv3(F_HOT, lv);
-          if ( e < F_BANDS.x && lv > 1 ) { col = CORE; band = 5; }
-          else if ( e < F_BANDS.y ) { col = YELLOW; band = 4; }
-          else if ( e < F_BANDS.z ) { col = ORANGE; band = 3; }
-          else if ( e < F_BANDS.w ) { col = RED; band = 2; }
-          else { col = TIP; band = 1; }
-          col *= lv3(F_ALPHA, lv);
-          hit = true; break;
-        }
-      } else {
-        // a piece split off above the tip: it shows for a frame or two and is gone
-        float bit = h21(vec2(j, r) + floor(uTime * F_RATE * 1.5) * 1.7), at = 1.06 + 0.18 * bit;
-        if ( bit > 0.45 && dx < max(0.8, w * 0.3) && abs(tt - at) < 0.05 ) { col = tt < 1.15 ? RED : TIP; band = 1; hit = true; break; }
-      }
-    }
-  }
-  // the BASE: the burning ground itself - char, dull embers and a glow that boils in place (it never moves)
-  if ( band < 2 && bed0 > 0.02 ) {
-    int lvB = (int(f.a * 255.0 + 0.5) - 1) / 4 + 1;
-    float ba = lv3(F_BED_ALPHA, lvB);
-    float eb = boil(c / uGrid * 5.0, 0.8, 4.0);
-    float glow = f.b * (0.2 + 0.9 * eb);
-    if ( glow > F_BED.x ) { col = ORANGE * ba; band = 2; }
-    else if ( glow > F_BED.y ) { col = RED * ba; band = 2; }
-    else if ( glow > F_BED.z && band == 0 ) col = vec4(EMBER, 1.0) * ba;
-    else if ( band == 0 && bedA > 0.0 && bed0 > lv3(F_EDGE, lvB) ) col = vec4(CHAR, 1.0) * (ba * bedA);
-  }
-  // SMOKE: billows with a lit and a shadow side, see-through, thinning into clumps
-  if ( f.g > 0.0 && band < 3 ) {
-    float sc = lv3(S_SIZE, lvS);
-    vec2 q = (c - uFlow * uTime) / uGrid + vec2(uSeed * 0.37, 0.0);
-    vec2 q2 = (c - uFlow * uTime * 1.3) / uGrid + vec2(5.2, uSeed * 0.11);   // inner billows rise a little faster: they roll
-    float lo = vnoise(q * sc), mi = vnoise(q2 * sc * 2.2 + 3.0), hi = vnoise(q2 * sc * 4.8 + 11.0);
-    float bb = lo * 0.55 + mi * 0.3 + hi * 0.15;
-    // (the field ends at the area's rectangle: the smoke thins to nothing over its last square, never a cut edge)
-    float edge = clamp(edgeIn(c) / lv3(S_EDGE, lvS), 0.0, 1.0);
-    float cover = bb + f.g * edge * lv3(S_DENS, lvS) * 0.8 - lv3(S_COVER, lvS);
-    if ( cover > 0.0 && (band == 0 || cover > 0.2) ) {
-      vec2 Ld = vec2(-0.12, -0.16) / sc;
-      float sh = (vnoise((q + Ld) * sc) * 0.55 + vnoise((q2 + Ld) * sc * 2.2 + 3.0) * 0.3) - (lo * 0.55 + mi * 0.3);
-      vec3 rgb = sh > 0.018 ? lvC(S_LIT1, S_LIT2, S_LIT3, lvS) : sh < -0.018 ? lvC(S_SHD1, S_SHD2, S_SHD3, lvS) : lvC(S_MID1, S_MID2, S_MID3, lvS);
-      rgb = tintSmoke(rgb);
-      if ( sh < 0.0 && f.r > 0.05 ) rgb = mix(rgb, S_UNDER, 0.5);   // (lit by its fire's colour)
-      float a = cover > 0.2 ? lv3(S_ALPHA_CORE, lvS) : cover > 0.09 ? lv3(S_ALPHA_MID, lvS) : lv3(S_ALPHA_EDGE, lvS);
-      if ( band > 0 ) a *= 0.45;                                // over the flames: thin, the fire stays readable
-      col = vec4(rgb * a, a) + col * (1.0 - a);
-    }
-  }
-  return col;
-}
-/* ======== end of the FIRE STYLE block ======== */
+/* (the FIRE style's look lives in art.mjs: this shader draws only the fireball) */
 
 // one art cell's colour (premultiplied): the field, grown / going out, then the style
 vec4 cellColor(vec2 c) {
@@ -308,9 +171,7 @@ vec4 cellColor(vec2 c) {
     f.r *= gF * fo; f.b *= glow; f.g *= gS * so;
     if ( f.r <= 0.0 && f.g <= 0.004 && bedA <= 0.0 ) return vec4(0.0);
   }
-  if ( uStyle == 1 ) return cellFireball(c, f);
-  int code = int(f.a * 255.0 + 0.5) - 1;
-  return cellFire(c, f, code - (code / 4) * 4, bedA, bed0);
+  return cellFireball(c, f);
 }
 
 // the cells under the pixel's footprint, box-weighted (as sharpAxis of sharp-sampler.mjs, but each "texel" is a computed cell)

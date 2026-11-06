@@ -227,11 +227,15 @@ const union = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x
 
 /* ---------------------------------------------------------------- time: catching, growing, going out */
 
+/** How long the last smoke puffs of a put-out fire live on (ms): the longest puff life (art.mjs: level 3, 4.6 s x 1.3). */
+export const SMOKE_TAIL = 6000;
+
 /** The timing (ms) of the settings: grow, the smoke's lag, out, the smoke's travel up the plume (per cell and at most), the spans. */
 export function timing(geo, P) {
   const g = geo.grid / geo.ap, Z = sizes(geo, P), perCell = 1000 / (2 * g);   // (the smoke fills its plume at 2 squares a second)
   const G = P.grow * 1000, O = P.out * 1000, travel = (Z.plumeL * 2.4 + Z.flameH * 1.6) * perCell;
-  return { G, O, lag: 0.35 * G, perCell, travel, growSpan: 1.35 * G + travel, outSpan: 1.6 * O + travel };
+  // (outSpan includes SMOKE_TAIL: the fire style's last smoke puffs finish their lives after the flames are out)
+  return { G, O, lag: 0.35 * G, perCell, travel, growSpan: 1.35 * G + travel, outSpan: 1.6 * O + travel + SMOKE_TAIL };
 }
 
 /** How long a stroke takes to catch along its whole path (ms): its length (plus half its radius) at P.spread squares a second. */
@@ -410,13 +414,64 @@ export function raster(area, geo, P) {
   for ( let i = 0; i < N; i++ ) if ( buf.O[i] < Infinity && buf.FA[i] > 0 && buf.FA[i] >= 0.25 * buf.F[i] ) { buf.F[i] = buf.FA[i]; buf.O[i] = Infinity; }
   const sMax = Math.max(0.1, ...area.strokes.filter((s) => s.k !== "erase").map((s) => s.s));
   const f = fieldFrom(buf.F, buf.S, W, H, area.wind, geo, P, area.seed, { style: area.style, buf, reach: plumeReach(sMax, Z) });
+  if ( area.style !== "fireball" ) f.aux = auxOf(buf, W, H, P);
   return withColor(f, area.color, P);
+}
+
+/** Ground-plane foreshortening of the oblique view (research 2f: ground ellipses ry = 0.8 r). */
+export const RY = 0.8;
+
+/**
+ * Two-pass chamfer distance (cells, in the ground plane: y / RY) to the nearest cell where `inside(i)` differs: 0 on the far side.
+ * Pure. Used for the bed's coverage ramps (inside) and the heat-tint ring (outside).
+ */
+export function chamfer(inside, W, H) {
+  const N = W * H, D = new Float32Array(N), BIG = 1e6, a = 1, b = 1 / RY, c = Math.hypot(1, 1 / RY);
+  for ( let i = 0; i < N; i++ ) D[i] = inside[i] ? BIG : 0;
+  for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
+    const i = y * W + x; if ( !D[i] ) continue;
+    let d = D[i];
+    if ( x > 0 ) d = Math.min(d, D[i - 1] + a); else d = Math.min(d, 0.5);
+    if ( y > 0 ) { d = Math.min(d, D[i - W] + b); if ( x > 0 ) d = Math.min(d, D[i - W - 1] + c); if ( x < W - 1 ) d = Math.min(d, D[i - W + 1] + c); }
+    else d = Math.min(d, 0.5 * b);
+    D[i] = d;
+  }
+  for ( let y = H - 1; y >= 0; y-- ) for ( let x = W - 1; x >= 0; x-- ) {
+    const i = y * W + x; if ( !D[i] ) continue;
+    let d = D[i];
+    if ( x < W - 1 ) d = Math.min(d, D[i + 1] + a); else d = Math.min(d, 0.5);
+    if ( y < H - 1 ) { d = Math.min(d, D[i + W] + b); if ( x < W - 1 ) d = Math.min(d, D[i + W + 1] + c); if ( x > 0 ) d = Math.min(d, D[i + W - 1] + c); }
+    else d = Math.min(d, 0.5 * b);
+    D[i] = d;
+  }
+  return D;
+}
+
+/**
+ * The fire style's AUX texture (RGBA8, one texel per cell; art.mjs): R = distance inside the burning ground (cells, ground plane,
+ * capped 255), G = distance outside it (0 inside), B = smoke SOURCE strength (where puffs are born: a smoking fire's bed, a smoke
+ * stroke), A = the source's smoke level (1..3) + 4 if it is a fire's smoke. The plume field (G of the field) never gates the drawing.
+ */
+function auxOf(buf, W, H, P) {
+  const N = W * H, bed = new Uint8Array(N), out = new Uint8Array(N);
+  for ( let i = 0; i < N; i++ ) { bed[i] = buf.F[i] > 0.05 ? 1 : 0; out[i] = 1 - bed[i]; }
+  const Din = chamfer(bed, W, H), Dout = chamfer(out, W, H), aux = new Uint8Array(N * 4);
+  for ( let i = 0; i < N; i++ ) {
+    const o = i * 4;
+    aux[o] = bed[i] ? Math.min(255, Math.max(1, Math.round(Din[i]))) : 0;
+    aux[o + 1] = bed[i] ? 0 : Math.min(255, Math.round(Dout[i]));
+    const fireS = bed[i] && P.smoke > 0 && buf.SMF[i] > 0 ? Math.min(1, buf.F[i] * Math.min(1, P.smoke * 2)) : 0;
+    const ss = buf.S[i];
+    if ( ss >= fireS && ss > 0.02 ) { aux[o + 2] = Math.round(Math.min(1, ss) * 255); aux[o + 3] = buf.LS[i]; }
+    else if ( fireS > 0.02 ) { aux[o + 2] = Math.round(fireS * 255); aux[o + 3] = buf.SMF[i] + 4; }
+  }
+  return aux;
 }
 
 /** A field with its fire colour: { color, embers, puffs } (look.rampOf; the natural fire's are the old constants). */
 export function withColor(f, color, P) {
   const R = rampOf(color ?? NATURAL);
-  f.color = R.base; f.embers = R.embers; f.puffs = puffsOf(R, P?.smokeTint ?? 0);
+  f.color = R.base; f.embers = R.embers; f.sparks = R.sparks; f.puffs = puffsOf(R, P?.smokeTint ?? 0);
   return f;
 }
 
@@ -528,7 +583,8 @@ export function fieldFrom(F, S0, W, H, wind, geo, P, seed = 1, { style = "fire",
       if ( PO[i] < Infinity ) { oMin = Math.min(oMin, PO[i]); oMax = Math.max(oMax, PO[i]); }
     }
     refs = { iRef: Number.isFinite(iMin) ? iMin : 0, iSpan: Number.isFinite(iMin) ? Math.max(1, iMax - iMin) : 1,
-      oRef: Number.isFinite(oMin) ? oMin : 0, oSpan: Number.isFinite(oMin) ? Math.max(1, oMax - oMin) : 1 };
+      oRef: Number.isFinite(oMin) ? oMin : 0, oSpan: Number.isFinite(oMin) ? Math.max(1, oMax - oMin) : 1,
+      hasIgnite: Number.isFinite(iMin), hasOut: Number.isFinite(oMin) };
     const enI = (t) => (Number.isNaN(t) ? 0 : 1 + Math.round((t - refs.iRef) / refs.iSpan * 254));
     const enO = (t) => (t < Infinity ? Math.round((t - refs.oRef) / refs.oSpan * 254) : 255);
     times = new Uint8Array(N * 4);
@@ -652,7 +708,7 @@ export const PUFF = [0x4a4541, 0x5d5853, 0x77716b];
  */
 export function particleAt(field, seed, k, now, speed = 1, wind = [0, 0], g = 32) {
   const u = g / 32;   // (speeds below are for 32 cells per grid square: the module's art grid)
-  const em = field.emit, puff = em.smoke.length && (k % 4 === 3 || !em.fire.length);
+  const em = field.emit, puff = field.style !== "fire" && em.smoke.length && (k % 4 === 3 || !em.fire.length);   // (the fire style's smoke is all in the shader)
   const list = puff ? em.smoke : em.fire; if ( !list.length ) return null;
   const life = puff ? 1500 + hash4(seed, k, 1) * 1100 : 600 + hash4(seed, k, 1) * 800, period = life + hash4(seed, k, 2) * 900;
   const tt = now * speed + hash4(seed, k, 3) * period, cyc = Math.floor(tt / period), age = tt - cyc * period;
@@ -665,7 +721,7 @@ export function particleAt(field, seed, k, now, speed = 1, wind = [0, 0], g = 32
     return { x: Math.round(src[0] + ux * sec + Math.sin(sec * 1.7 + j * 6) * 1.2 * u), y: Math.round(src[1] - rise * sec + uy * sec), color: (field.puffs ?? PUFF)[Math.min(2, Math.floor(f * 3))], size: 2, kind: "puff" };
   }
   const rise = (12 + j * 16) * u, sway = (0.8 + hash4(seed, k, cyc, 6) * 2) * u;
-  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: (field.embers ?? EMBER)[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember" };
+  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: (field.style === "fire" ? field.sparks ?? field.embers ?? EMBER : field.embers ?? EMBER)[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember" };
 }
 
 /** Particle slots an area gets out of `cap` shared by the visible areas (by their emitters), at least 2 when it has any. */

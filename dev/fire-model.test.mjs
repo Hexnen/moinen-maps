@@ -11,6 +11,7 @@
 //   H. levels: fire and smoke independent, old strokes, lights per level, plumes do not merge fires, styles
 //   J. colour: the palette ramp is derived deterministically, the natural default is the old palette exactly, colours keep their
 //      areas and lights apart, particles and lights follow the colour, the smoke is neutral unless tinted
+//   K. the fire style's art inputs: chamfer distances, the aux texture (bed in/out, smoke sources), the smoke tail
 import * as M from "../scripts/fire/model.mjs";
 import * as Look from "../scripts/fire/look.mjs";
 import { readFileSync } from "node:fs";
@@ -247,7 +248,7 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
   const FB = M.raster(M.areasOf([blue], geo, P)[0], geo, P);
   let em = null;
   for ( let k = 0; k < 64 && !em; k++ ) for ( let t = 0; t < 4000 && !em; t += 97 ) { const p = M.particleAt(FB, 7, k, 100000 + t); if ( p?.kind === "ember" ) em = p; }
-  ok(em && FB.embers.includes(em.color) && !M.EMBER.includes(em.color), "embers in the fire's colour");
+  ok(em && FB.sparks.includes(em.color) && !M.EMBER.includes(em.color), "sparks in the fire's colour (the fire style: its ramp's steps 5 > 3 > 2 > 1)");
   ok(JSON.stringify(FB.puffs) === JSON.stringify(M.PUFF), "smoke particles neutral by default");
   const FT = M.raster(M.areasOf([blue], geo, { ...P, smokeTint: 1 })[0], geo, { ...P, smokeTint: 1 });
   ok(JSON.stringify(FT.puffs) !== JSON.stringify(M.PUFF) && Look.hsv([(FT.puffs[0] >> 16 & 255) / 255, (FT.puffs[0] >> 8 & 255) / 255, (FT.puffs[0] & 255) / 255])[0] > 150, "smoke tint takes the fire's hue");
@@ -255,6 +256,32 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
   // the fireball takes the colour too, its field bytes do not depend on it
   const fb = M.cleanStroke({ id: "f1", k: "fire", p: [400, 400], ...base, st: "fireball" });
   ok(Buffer.from(M.raster(M.areasOf([fb], geo, P)[0], geo, P).data).equals(Buffer.from(M.raster(M.areasOf([M.cleanStroke({ ...fb, c: "purple" })], geo, P)[0], geo, P).data)), "fireball: colour does not touch the field");
+}
+
+/* K: the fire style's art inputs (art.mjs): the chamfer distance, the aux texture, the smoke tail */
+{
+  // chamfer: a 5 x 5 block inside a 9 x 9 grid -> 0 outside, growing inwards; rows count 1 / RY
+  const W = 9, H = 9, ins = new Uint8Array(W * H);
+  for ( let y = 2; y < 7; y++ ) for ( let x = 2; x < 7; x++ ) ins[y * W + x] = 1;
+  const D = M.chamfer(ins, W, H);
+  ok(D[0] === 0 && D[2 * W + 2] === 1 && Math.abs(D[4 * W + 4] - 3) < 1e-6 && D[4 * W + 2] === 1, "chamfer: inside distances grow inwards (x steps 1)");
+  ok(Math.abs(D[2 * W + 4] - 1 / M.RY) < 1e-6, "chamfer: a row step counts 1 / RY (the ground plane is foreshortened)");
+  // aux: the bed's inside / outside distances and the smoke sources, only for the fire style; deterministic
+  const a = M.cleanStroke({ id: "x1", k: "fire", s: 0.9, r: 60, p: [400, 400, 520, 410], wd: 0, ws: 0, q: 1, lv: 2, sm: 2 });
+  const F1 = M.raster(M.areasOf([a], geo, P)[0], geo, P), F2 = M.raster(M.areasOf([a], geo, P)[0], geo, P);
+  ok(F1.aux && F1.aux.length === F1.w * F1.h * 4 && Buffer.from(F1.aux).equals(Buffer.from(F2.aux)), "aux: present, RGBA per cell, deterministic");
+  let inB = 0, outB = 0, both = 0, src = 0, fireSrc = 0;
+  for ( let i = 0; i < F1.w * F1.h; i++ ) { const r = F1.aux[i * 4], g = F1.aux[i * 4 + 1]; if ( r ) inB++; if ( g ) outB++; if ( r && g ) both++; if ( F1.aux[i * 4 + 2] >= 5 ) { src++; if ( F1.aux[i * 4 + 3] >= 4 ) fireSrc++; } }
+  ok(inB > 0 && outB > 0 && both === 0, "aux: inside and outside distances are disjoint");
+  ok(src > 0 && fireSrc > 0, "aux: the fire's smoke sources are marked (level + 4)");
+  const fb = M.cleanStroke({ ...a, id: "x2", st: "fireball" });
+  ok(!M.raster(M.areasOf([fb], geo, P)[0], geo, P).aux, "aux: the fireball has none (its v1 field only)");
+  const a0 = M.cleanStroke({ ...a, id: "x3", sm: 0 }), A0 = M.raster(M.areasOf([a0], geo, P)[0], geo, P);
+  let s0 = 0; for ( let i = 0; i < A0.w * A0.h; i++ ) if ( A0.aux[i * 4 + 2] >= 5 ) s0++;
+  ok(s0 === 0, "aux: smoke level 0 -> no smoke sources");
+  // the smoke tail: a put-out fire's area lives on SMOKE_TAIL ms past the flames, so its last puffs finish their lives
+  const T = M.timing(geo, P);
+  ok(T.outSpan >= 1.6 * P.out * 1000 + M.SMOKE_TAIL && M.SMOKE_TAIL >= 4.6 * 1.3 * 1000, "outSpan includes the smoke tail (the longest puff life)");
 }
 
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);

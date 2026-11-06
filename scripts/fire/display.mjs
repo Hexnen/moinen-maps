@@ -1,5 +1,6 @@
 import * as M from "./model.mjs";
 import { FireMesh } from "./shader.mjs";
+import { FireArt, BIRTHS } from "./art.mjs";
 import { FireLights } from "./lights.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
@@ -42,7 +43,7 @@ export class FireDisplay {
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
     this.geo = null; this.P = M.cleanParams();
-    this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0 };
+    this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0, artPasses: 0 };
     this._tick = () => this.tick();
     this.ticking = false;
     this.lastT = -1;
@@ -66,7 +67,12 @@ export class FireDisplay {
       const { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
       // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
       const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
-      const mesh = new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
+      // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
+      const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
+      const mesh = field.style === "fire"
+        ? new FireArt(field, area.rect, geo, { seed: area.seed, grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
+          plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
+        : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
       this.meshes.addChild(mesh);
       this.areas.set(id, { key: area.key, area, field, mesh });
       changed = true;
@@ -98,12 +104,16 @@ export class FireDisplay {
     if ( !canvas.stage || !this.geo ) return;
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
     const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
-    const vw = this.view(), m = geo.grid;
+    const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
     const vis = [];
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
-      if ( on ) { vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0); }
+      if ( on ) {
+        vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
+        // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
+        if ( a.mesh.isArt ) { a.mesh.setDark(dark); if ( a.mesh.artT !== T || force ) { a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; } }
+      }
     }
     this.lastT = T;
     this.stats.visible = vis.length;
@@ -146,7 +156,10 @@ export class FireDisplay {
   }
 
   /** Performance mode or reduced motion changed: re-arm, redraw once. */
-  refresh() { this.arm(); this.lastT = -1; this.tick(true); }
+  refresh() {
+    for ( const a of this.areas.values() ) a.mesh.setBirths?.(BIRTHS[perfMode()] ?? 8);
+    this.arm(); this.lastT = -1; this.tick(true);
+  }
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick); this.ticking = false;

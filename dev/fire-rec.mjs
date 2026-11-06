@@ -53,3 +53,13 @@ export async function rec(name, ms, during = []) {
   const r = await FP().upload("data", "mm-rec", file, {}, { notify: false });
   return [file.size, r?.path, n];
 }
+/** A still of the canvas as it is now (full resolution), uploaded as `name` (png) next to the recordings. */
+export async function snap(name) {
+  const T = canvas.app.ticker; T.update(performance.now());
+  canvas.app.renderer.render(canvas.app.stage);
+  const blob = await new Promise((r) => canvas.app.view.toBlob(r, "image/png"));
+  const file = new File([blob], name, { type: "image/png" });
+  try { await FP().createDirectory("data", "mm-rec"); } catch { /* there */ }
+  const r = await FP().upload("data", "mm-rec", file, {}, { notify: false });
+  return [file.size, r?.path];
+}
