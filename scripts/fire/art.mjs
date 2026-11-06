@@ -5,7 +5,7 @@
  * Per area, three draws on the destruction layer's art grid:
  *  1. ART PASS (12 fps, only when the shared-clock frame changes and the area is on screen): one fragment per ART CELL into a small
  *     RGBA8 render texture (W x H cells): R = flame (7; 0 none), G = flame band + 8 (level - 1) (1..23)
- *     or a bed ember (24..26), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
+ *     or a bed ember (24..26) or a spark / hot coal (32 + ramp step 1..6), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
  *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2).
  *       - FLAMES: emitters on a jittered lattice over the burning ground (rows foreshortened, RY 0.8), kept whole or dropped by a
  *         coverage ramp at the bed's edge x a clumping noise; each emitter has 2 breathing roots and blobs born every life / 5 / rate
@@ -16,11 +16,22 @@
  *         row behind shows only where the front is thin. Bands on the merged field: a hot core low (the fused roots), cooling
  *         upwards with each blob's age, broken by rising lick streaks (no slabs, no per-tongue nesting); an erosion noise drifts up
  *         inside. A few emitters are leaders (taller tongues).
+ *         Bands: heat + a fused-core term + base, so the merged middle keeps clear value breaks (no mid-dark blotches); blobs are
+ *         narrow and tall (tongues, not cauliflower).
  *       - BED: embers that boil in place (3 fps cross-faded), only on the burning ground, in 2x2 blue-noise clusters towards its edge.
+ *       - COALS: loose 1-2 px coals between the tongues and a little past the bed's edge (fading into the map), share by level;
+ *         they pulse slowly, some flicker out for a while, the hottest flash white-yellow; they outlast the flames on go-out.
+ *       - SPARKS: 4 rising-frame layers (each spark owns one cell of a grid that moves up with it: O(1) per cell, no state): born
+ *         over burning ground (denser over its heart, by level, in gusts, x Performance births), ride up with the wind and a little
+ *         swirl, flare and cool through the ramp (white / yellow, orange, red, dark), 1 px with a few 2 px. Time 0 (reduced
+ *         motion): none. The pooled sprite particles (display.mjs, capped per Performance mode) stay for the few bigger sparks.
  *       - SMOKE: puffs born at the smoke sources (aux B), 3-4 lobes, fast while hot and slowing as they cool, shear with the wind
  *         and the gust, the last lobe torn off; metaball union, each cell shaded from its OWN lobe's sphere normal (lit top-left,
  *         shadow bottom-right: billows inside the mass, not flat blocks), warm underside low over the fire; edges thin by the rim
  *         dropping out in 2x2 clusters as the puff ages, shapes shrink - never cut by a field or the area.
+ *         The puffs start above the flame tops; where smoke still lies over a flame it is only a thin warm veil (the flames stay
+ *         readable through it), and sparks and coals glow through it. The plume gate also probes upwind, so sheared puffs are
+ *         never cut off straight.
  *       - GROUND: char inside the bed (clustered ragged edge), a heat-tint ring outside it, the smoke's shadow on the ground.
  *  2. GROUND (every frame): a MULTIPLY quad - the map's own colours darkened / warmed (never an opaque ground colour).
  *  3. ART (every frame): flames, embers, smoke from the render texture: a rim on the merged body's OUTER silhouette only (selective: 2 steps
@@ -28,6 +39,8 @@
  *     flat per-band alpha; the module's exact box-footprint sampler at any zoom.
  *  4. EMISSION (every frame): the flame and ember cells drawn white into Foundry's illumination (canvas.effects.illumination.lights,
  *     MAX blend), so the scene's darkness never dims the flame body; the smoke is not emissive and dims with the scene.
+ * Cost: every per-cell random comes from one 32-bit hash split into 4 bytes (hb), and emitters out of reach of the cell are culled
+ * before any blob work.
  * Colour: the ramp (uRamp) is derived per area from the fire's base colour (look.mjs rampOf().ramp7). Everything is a function of
  * (cell, area seed, shared clock, field): every client draws the same frames.
  */
@@ -76,7 +89,15 @@ const float L_DENS[4] = float[4](0.0, 2.5, 6.0, 11.0);     // emitters per squar
 const float L_R[4]    = float[4](0.0, 3.6, 5.0, 6.4);      // blob radius (art px)
 const float L_RISE[4] = float[4](0.0, 10.0, 22.0, 40.0);   // tongue height (art px)
 const float L_LIFE[4] = float[4](0.0, 0.9, 0.85, 0.8);     // blob life (s)
-const float L_EMB[4]  = float[4](0.0, 0.22, 0.35, 0.5);    // bed embers (share)
+const float L_EMB[4]  = float[4](0.0, 0.28, 0.45, 0.6);    // bed embers (share)
+const float L_COAL[4] = float[4](0.0, 0.3, 0.5, 0.7);   // loose coals between the flames and past the bed's edge (share of 4 px cells)
+// SPARK layers (research: binding the fire): 0 small fast specks from inside the flames, 1 slower long-lived specks, 2 a few 2 px
+// sparks, 3 pops from the coals (short, low); spacing (art px), rise (art px / s), life (s), birth height (x the level's rise)
+const float SPK_S[4]  = float[4](7.0, 10.0, 18.0, 11.0);
+const float SPK_V[4]  = float[4](34.0, 20.0, 15.0, 10.0);
+const float SPK_L[4]  = float[4](1.0, 1.8, 1.4, 0.45);
+const float SPK_H[4]  = float[4](0.7, 0.4, 0.3, 0.0);
+const float SPK_D[16] = float[16](0.0, 0.08, 0.34, 0.7,  0.0, 0.07, 0.28, 0.55,  0.0, 0.04, 0.16, 0.34,  0.0, 0.08, 0.18, 0.3);
 const float L_TINT[4] = float[4](0.0, 0.2, 0.3, 0.4);      // heat-tint ring (squares)
 const float S_RATE[4] = float[4](0.0, 6.0, 6.0, 9.0);      // puffs a second per 3.6 squares of source
 const float S_R0[4]   = float[4](0.0, 4.0, 6.0, 8.0);      // puff radius at birth (art px)
@@ -88,13 +109,22 @@ const int VC[256] = int[256](${VC16.join(",")});
 
 uint hu(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
 float hf(int a, int b, int c) {
-  uint h = hu(uint(a) * 0x9E3779B1u ^ hu(uint(b) * 0x85EBCA77u ^ hu(uint(c) + uint(uSeed) * 0x27d4eb2fu)));
+  uint h = hu(uint(a) * 0x9E3779B1u ^ hu(uint(b) * 0x85EBCA77u ^ (uint(c) * 0x2545F491u + uint(uSeed) * 0x27d4eb2fu)));
   return float(h >> 8) / 16777216.0;
+}
+// one round: the value-noise lattice (smooth noise hides the weaker mixing)
+float h1(int a, int b, int c) {
+  return float(hu(uint(a) * 0x9E3779B1u ^ uint(b) * 0x85EBCA77u ^ (uint(c) * 0x2545F491u + uint(uSeed) * 0x27d4eb2fu)) >> 8) / 16777216.0;
+}
+// four uniform values (8 bits each) from ONE hash (2 rounds instead of 3 per value): the hot loops' randoms
+vec4 hb(int a, int b, int c) {
+  uint h = hu(uint(a) * 0x9E3779B1u ^ hu(uint(b) * 0x85EBCA77u ^ (uint(c) * 0x2545F491u + uint(uSeed) * 0x27d4eb2fu)));
+  return (vec4(float(h & 255u), float((h >> 8) & 255u), float((h >> 16) & 255u), float(h >> 24)) + 0.5) / 256.0;
 }
 float vn(vec2 p, int k) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   int x = int(i.x), y = int(i.y);
-  return mix(mix(hf(x, y, k), hf(x + 1, y, k), f.x), mix(hf(x, y + 1, k), hf(x + 1, y + 1, k), f.x), f.y);
+  return mix(mix(h1(x, y, k), h1(x + 1, y, k), f.x), mix(h1(x, y + 1, k), h1(x + 1, y + 1, k), f.x), f.y);
 }
 // a 2x2-cell blue-noise threshold (0..1)
 float rank(vec2 c) { ivec2 q = ivec2(floor(c * 0.5)) & 15; return (float(VC[q.y * 16 + q.x]) + 0.5) / 256.0; }
@@ -104,7 +134,7 @@ float breath(float t, int s) {
   float b = 0.9 + 0.12 * sin(t * 1.6982 + fs) + 0.08 * sin(t * 1.0650 + 2.0 * fs) + 0.05 * sin(t * 2.7318);
   float k = floor(t / 0.7), f = t / 0.7 - k; f = f * f * (3.0 - 2.0 * f);
   int ki = int(k);
-  return b + 0.16 * ((1.0 - f) * (hf(s, ki, 91) - 0.5) + f * (hf(s, ki + 1, 91) - 0.5));
+  return b + 0.16 * ((1.0 - f) * (h1(s, ki, 91) - 0.5) + f * (h1(s, ki + 1, 91) - 0.5));
 }
 // a GUST travels across the area along the wind every ~4.5 s: lean per cell of height (0.06 .. 0.38)
 float gust(float t, float x) {
@@ -159,27 +189,32 @@ void main() {
       float rF = 0.0, rH = 0.0, rB = 0.0;
       for ( int ii = 0; ii < 12; ii++ ) {
         int i = i0 + ii; if ( i > i1 ) break;
-        vec2 e = vec2((float(i) + hf(i, j, 1)) * sp, (float(j) + hf(i, j, 2)) * spy);
+        vec4 E1 = hb(i, j, 1);
+        vec2 e = vec2((float(i) + E1.x) * sp, (float(j) + E1.y) * spy);
         ivec2 ei = ivec2(floor(e));
         if ( !inArea(ei) ) continue;
         float d = texelFetch(uAux, ei, 0).r * 255.0;
         if ( d < 0.5 ) continue;                                       // not on the burning ground
+        vec4 E2 = hb(i, j, 2);
         int lv = levelAt(ei);
         float ramp = clamp(d / (0.35 * 32.0 * u), 0.0, 1.0);            // the coverage ramp at the bed's edge (0.35 square)
-        float clump = vn(e / (80.0 * u), 3);                            // tongues gather in irregular groups
-        if ( hf(i, j, 3) > L_DENS[lv] / L_DENS[lvMax] * (0.25 + 0.75 * ramp) * (0.55 + 0.6 * clump) ) continue;
-        float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * hf(i, j, 4)), rate = 0.8 + 0.5 * hf(i, j, 5);
+        float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z);
         // tongue heights vary: taller towards the heart of the fire, a few tall leaders, many short ones (never a picket fence)
-        float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0), eh = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(hf(i, j, 6), 1.6)) * (hf(i, j, 9) < 0.12 ? 1.25 : 1.0);
+        float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0), eh = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(E1.w, 1.6)) * (E2.x < 0.12 ? 1.25 : 1.0);
+        // (cheap cull first: this emitter's tallest possible tongue and its roots must reach the cell)
+        float r0 = L_R[lv] * u;
+        if ( c.y < e.y - (L_RISE[lv] * u * 2.1 * es * eh + 6.6 * r0 * es) - 1.0 || c.y > e.y + 4.5 * r0 * es + 2.0 * u ) continue;
+        float clump = vn(e / (80.0 * u), 3);                            // tongues gather in irregular groups
+        if ( E2.y > L_DENS[lv] / L_DENS[lvMax] * (0.25 + 0.75 * ramp) * (0.55 + 0.6 * clump) ) continue;
+        float rate = 0.8 + 0.5 * E2.z;
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
         float ageI = ag.x, ageO = ag.y;
-        if ( ageO > -1e3 ) ageO -= (ramp * 0.6 + 0.2 * hf(i, j, 8)) * uDur.y;   // going out: the edge first, the heart up to 0.8 x P.out later (never retroactive: no pop)
+        if ( ageO > -1e3 ) ageO -= (ramp * 0.6 + 0.2 * E2.w) * uDur.y;   // going out: the edge first, the heart up to 0.8 x P.out later (never retroactive: no pop)
         if ( ageI <= 0.0 ) continue;                                    // not caught yet
         float gE = clamp(ageI / max(uDur.x, 0.01), 0.0, 1.0); gE *= 2.0 - gE;
         int cl = int(floor(e.x / (96.0 * u))) * 7 + int(floor(e.y / (96.0 * u))) * 13 + uSeed;
         float br = breath(t, cl);
-        float r0 = L_R[lv] * u;
         // the ROOTS: two wide, foreshortened blobs that never leave the bed (they sink when the fire goes out)
         float rootK = ageO > -1e3 ? 1.0 - clamp(ageO / max(0.5 * uDur.y, 0.01), 0.0, 1.0) : 1.0;
         float rb = r0 * es * (0.9 + 0.25 * br + 0.15 * sin(t * 2.1 + float(id))) * rootK * (0.45 + 0.55 * gE);
@@ -196,21 +231,23 @@ void main() {
         for ( int k = 0; k < 8; k++ ) {
           if ( k >= uBirths ) break;
           int n = n0 - k;
-          float tb = (float(n) + 0.6 * hf(id, n, 11)) * iv;
+          vec4 B1 = hb(id, n, 11);
+          float tb = (float(n) + 0.6 * B1.x) * iv;
           if ( tb < t - ageI ) continue;                                  // born before the emitter caught
           if ( ageO > -1e3 && tb > t - ageO ) continue;                   // born after it went out: the last ones finish their lives
-          float life = life0 * (0.6 + 0.8 * hf(id, n, 12)) * (0.8 + 0.4 * br);
+          float life = life0 * (0.6 + 0.8 * B1.y) * (0.8 + 0.4 * br);
           float a = (t - tb) / life;
           if ( a < 0.0 || a >= 1.0 ) continue;
-          float size = es * (0.7 + 0.6 * hf(id, n, 13)) * (0.75 + 0.35 * br) * (0.4 + 0.6 * gE);
-          float z = L_RISE[lv] * u * size * eh * (0.6 + 0.8 * hf(id, n, 14)) * (0.3 + 0.7 * gE) * pow(a, 1.35);
+          float size = es * (0.7 + 0.6 * B1.z) * (0.75 + 0.35 * br) * (0.4 + 0.6 * gE);
+          float z = L_RISE[lv] * u * size * eh * (0.6 + 0.8 * B1.w) * (0.3 + 0.7 * gE) * pow(a, 1.35);
           float r = r0 * size * (a < 0.15 ? 0.55 + 3.0 * a : pow(1.0 - (a - 0.15) / 0.85, 0.8));
           if ( r < 0.6 ) continue;
-          float y = e.y - z, sy = r * (1.2 + 1.3 * a);
+          float y = e.y - z, sy = r * (1.4 + 1.5 * a);
           if ( c.y < y - 1.5 * sy || c.y > y + sy ) continue;
-          float lean = uLean + gdir * gust(t, e.x) * (0.6 + 0.4 * hf(id, n, 16));
-          float x = e.x + (hf(id, n, 15) - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + hf(id, n, 17)));
-          float dx = (c.x - x) / (r * (1.2 - 0.5 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;   // (wide low, thin tips)
+          vec4 B2 = hb(id, n, 12);
+          float lean = uLean + gdir * gust(t, e.x) * (0.6 + 0.4 * B2.x);
+          float x = e.x + (B2.y - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + B2.z));
+          float dx = (c.x - x) / (r * (1.05 - 0.45 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;   // (wide low, thin tips)
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
           if ( q > 0.0 ) { q *= q; rF += q; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
         }
@@ -231,14 +268,16 @@ void main() {
       // BANDS on the merged field: the hot core is a continuous band low in the body (the fused roots: BASE), cooling upwards (the
       // blobs' heat falls with age = height); rising lick streaks break the values so no band is a smooth slab
       float heat = HT / max(WS, 1e-4), base = clamp(BASE / max(WS, 1e-4), 0.0, 1.0);
-      float dens = clamp((Fe - 0.34) / 2.4, 0.0, 1.0);
-      float v = 0.76 * heat + 0.22 * base + 0.14 * pow(dens, 0.6);
+      // (core: how deep inside the merged body - the tongues' own cores and the fused base are hot, the silhouette cools: the
+      // value breaks follow the tongue shapes, without outlines)
+      float core = clamp((Fe - 0.34) / 0.85, 0.0, 1.0);
+      float v = 0.5 * heat + 0.34 * core + 0.18 * base;
       float st = vn(vec2(c.x / (3.0 * u), (c.y + t * 22.0 * u) / (8.0 * u)), 41 + (int(t * 4.0) & 7));
-      v += (st - 0.5) * 0.2;
+      v += (st - 0.5) * 0.14;
       int nb = lvL == 3 ? 7 : 6;
       int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
       if ( band == 6 && st < 0.4 ) band = 5;                           // the cream core only in licks, never a slab
-      if ( dens > 0.35 && band < 2 ) band = 2;                         // (deep inside the body: never the tips' darkest red)
+      if ( core > 0.5 && band < 3 ) band = 3;                          // (deep inside the body: no dark-red mottling)
       R = 7; G = band + 1 + 8 * (lvL - 1);                             // (one layer: the outline is the merged silhouette only)
     }
   }
@@ -272,19 +311,86 @@ void main() {
     float tk = uArea.x * (uArea.y >= 0.0 ? 1.0 - clamp((uArea.y - 0.7 * uDur.z) / (0.3 * uDur.z), 0.0, 1.0) : 1.0);
     if ( dOut < wT && rk < (0.9 - dOut / wT) * tk ) A += 4;
   }
+  // COALS: loose glowing coals between the flames and a little past the bed's edge (fading out into the map); they pulse slowly,
+  // some flicker out for a while, and they outlast the flames when the fire goes out
+  float wC = 0.45 * 32.0 * u;
+  if ( G == 0 && (dIn > 0.5 || (dOut > 0.5 && dOut < wC)) ) {
+    float Sc = 4.0 * u;
+    ivec2 gc = ivec2(floor(c / Sc));
+    vec4 C1 = hb(gc.x, gc.y, 400);
+    vec2 cp = (vec2(gc) + 0.2 + 0.6 * C1.xy) * Sc;
+    bool big = C1.z < 0.22;
+    if ( abs(c.x - cp.x) <= (big ? 1.0 : 0.5) && abs(c.y - cp.y) <= 0.5 ) {
+      int lvC = dIn > 0.5 ? levelAt(ic) : lvMax;
+      float pC = L_COAL[lvC] * (dIn > 0.5 ? 1.0 : 1.0 - dOut / wC) * (dIn > 0.5 ? clamp(ag.x / max(0.6 * uDur.x, 0.01), 0.0, 1.0) : uArea.x);
+      vec4 C2 = hb(gc.x, gc.y, 401);
+      float outC = dIn > 0.5 ? ag.y : (uArea.y >= -0.5 ? uArea.y + uDur.y : -1e4);
+      bool alive = C1.w < pC && fract(t * 0.07 + C2.w) < 0.86;                       // (some flicker out for a while)
+      if ( outC > -1e3 && outC > uDur.y + 1.5 + 3.5 * C2.x ) alive = false;           // (they outlast the flames, then go one by one)
+      if ( alive ) {
+        float pulse = 0.5 + 0.5 * sin(t * (0.9 + 1.6 * C2.y) + C2.z * 6.2832);
+        bool hot = dIn > 2.0 && outC < -1e3;
+        G = hot && pulse > 0.82 ? 37 : pulse > 0.55 ? 26 : pulse > 0.2 ? 25 : 24;
+      }
+    }
+  }
+
+  /* ---------------- SPARKS in the air: specks that ride the heat up, drift and swirl, and cool through the ramp ---------------- */
+  // (a rising frame per layer: each spark sits in one cell of a grid that moves up with it, so a cell finds its spark in O(1); its
+  // birth place, below along its path, must be burning ground - denser over the heart of the fire and in gusts)
+  bool nearSp = nearBed || dIn > 0.5;
+  for ( int s = 1; s <= 3 && !nearSp && t > 0.0; s++ ) {                     // (sparks rise higher than the flames reach)
+    ivec2 p = ivec2(floor(c + vec2(-(uLean + 0.6 * uWind.x), 1.0) * float(s) * 22.0 * u));
+    if ( inArea(p) ) nearSp = texelFetch(uAux, p, 0).r > 0.0;
+  }
+  if ( t > 0.0 && (G == 0 || (R > 0 && ((G - 1) & 7) <= 2)) && nearSp ) {
+    float Wd = uLean + 0.6 * uWind.x;
+    for ( int L = 0; L < 4; L++ ) {
+      float S = SPK_S[L] * u, V = SPK_V[L] * u, life0 = SPK_L[L], P = life0 * 1.7;
+      float yq = c.y + V * t, xq = c.x - Wd * V * t;
+      xq -= 1.6 * u * sin(yq / (9.0 * u) + t * 1.3 + floor(xq / (40.0 * u)) * 1.7);       // (a little swirl)
+      ivec2 g = ivec2(floor(vec2(xq, yq) / S));
+      vec4 H = hb(g.x, g.y, 300 + L);
+      float ph = H.x * P, k = floor((t + ph) / P), age = t + ph - k * P;
+      vec4 J = hb(g.x + int(k) * 7919, g.y, 310 + L);
+      float life = life0 * (0.6 + 0.8 * J.z);
+      if ( age > life ) continue;
+      vec2 q = (vec2(g) + 0.15 + 0.7 * J.xy) * S;
+      float hs = (L == 2 || (L == 0 && J.z > 0.8)) ? 1.0 : 0.5;                          // (a few 2 px sparks)
+      if ( abs(xq - q.x) > hs || abs(yq - q.y) > hs ) continue;
+      ivec2 sb = ivec2(floor(vec2(c.x - Wd * V * age, c.y + V * age + SPK_H[L] * L_RISE[lvMax] * u)));
+      if ( !inArea(sb) ) continue;
+      float dB = texelFetch(uAux, sb, 0).r * 255.0;
+      if ( dB < 0.5 ) continue;
+      int lvS = levelAt(sb);
+      vec4 agS = ages(sb);
+      if ( agS.x < age + 0.3 || (agS.y > -1e3 && agS.y > age) ) continue;             // (born while that ground burned)
+      float heatK = 0.35 + 0.65 * clamp(dB / (0.6 * 32.0 * u), 0.0, 1.0);
+      float gustK = 0.7 + 1.6 * gust(t - age, c.x);
+      if ( J.w > SPK_D[L * 4 + lvS] * heatK * gustK * float(uBirths) / 8.0 ) continue;
+      float a = age / life, s0 = H.y < 0.25 ? 6.0 : H.y < 0.7 ? 5.0 : 4.0;
+      int step = int(floor((s0 + 0.99) * (1.0 - a * a * 0.55 - a * 0.15)));              // (white / yellow, orange, red, dark, gone)
+      if ( a < 0.06 ) step = int(s0);
+      if ( step < 1 ) continue;
+      G = 32 + step;
+      break;
+    }
+  }
 
   /* ---------------- SMOKE: lit puffs from the sources ---------------- */
   // (only near the plume: the model's plume field says where smoke can be, never what its silhouette is)
   float R1m = S_R1[3] * u * 1.25;
   bool smk = fld.g > 0.0;
-  for ( int s = 0; s < 8 && !smk; s++ ) {
-    vec2 o = vec2(cos(float(s) * 0.7854), sin(float(s) * 0.7854)) * R1m * 1.6;
+  // (the puffs shear downwind and the gust bends them further than the model's plume: the upwind probes reach their sources)
+  for ( int s = 0; s < 14 && !smk; s++ ) {
+    vec2 o = s < 8 ? vec2(cos(float(s) * 0.7854), sin(float(s) * 0.7854)) * R1m * 1.6
+                   : vec2(-gdir * R1m * (s < 11 ? 2.8 : 4.0), float((s - 8) % 3 - 1) * R1m * 1.3);
     ivec2 p = ivec2(floor(c + o));
     if ( inArea(p) ) smk = texelFetch(uField, p, 0).g > 0.0;
   }
   if ( smk ) {
     float sps = 22.0 * u, spys = sps * RY, Hk = uPlume / 2.5;
-    float zTop = 0.7 * L_RISE[3] * u + S_V0[3] * u * Hk * 1.5 * 1.35 * TAU + R1m;
+    float zTop = 1.0 * L_RISE[3] * u + S_V0[3] * u * Hk * 1.5 * 1.35 * TAU + R1m;
     float rA = 0.6 * uWind.x + 0.12 * gdir, rB = 0.6 * uWind.x + 0.216 * gdir, rMin = min(rA, rB), rMax = max(rA, rB);
     float pad = R1m * 2.2 + sps * 0.5 + 2.5 * u;
     int jHi = int(floor((c.y + zTop * (1.0 + max(0.0, -0.5 * uWind.y)) + R1m) / spys)) + 1, jLo = int(floor((c.y - R1m - max(0.0, 0.5 * uWind.y) * zTop) / spys)) - 1;
@@ -305,7 +411,7 @@ void main() {
         bool fromFire = code >= 4;
         float src = sa.b / 255.0;
         float rate = S_RATE[ls] / 3.6 * (sps * spys) / (1024.0 * u * u), iv = 1.0 / max(rate, 0.05);
-        float z0 = fromFire ? 0.7 * L_RISE[levelAt(ei)] * u : 2.0 * u;
+        float z0 = fromFire ? 1.0 * L_RISE[levelAt(ei)] * u : 2.0 * u;
         float lifeS = S_LIFE[ls];
         float v0 = S_V0[ls] * u * Hk * 1.5;
         vec4 ag2 = ages(ei);
@@ -322,27 +428,30 @@ void main() {
         int eid = i * 977 + j * 3163;
         for ( int kk2 = 0; kk2 < 8; kk2++ ) {
           int n = nHi - kk2; if ( n < nLo ) break;
-          if ( hf(eid, n, 59) > src ) continue;                          // a weak source: fewer puffs (whole shapes, never holes)
-          float tb = (float(n) + 0.7 * hf(eid, n, 60)) * iv, age = t - tb;
+          vec4 P1 = hb(eid, n, 59);
+          if ( P1.x > src ) continue;                                    // a weak source: fewer puffs (whole shapes, never holes)
+          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
           if ( age < 0.0 ) continue;
           if ( tb < t - ag2.z ) continue;                                 // before the smoke started
           if ( ag2.w > -1e3 && tb > t - ag2.w ) continue;                // after it stopped: the last puffs drift off
-          float life = lifeS * (0.7 + 0.6 * hf(eid, n, 61)), a = age / life;
+          float life = lifeS * (0.7 + 0.6 * P1.z), a = age / life;
           if ( a >= 1.0 ) continue;
           float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);            // the first puffs are wisps, building up over ~2 s
-          float vj = v0 * (0.65 + 0.7 * hf(eid, n, 66));                // every puff its own speed: no flat ceiling
+          float vj = v0 * (0.65 + 0.7 * P1.w);                // every puff its own speed: no flat ceiling
           float z = z0 + vj * TAU * (1.0 - exp(-age / TAU));
-          vec2 o0 = e + (vec2(hf(eid, n, 62), hf(eid, n, 63)) - 0.5) * vec2(sps, spys);
+          vec4 P2 = hb(eid, n, 62);
+          vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
           float g = gust(t, o0.x);
-          float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)) + 2.5 * u * sin(6.2832 * (0.35 * age + hf(eid, n, 64)));
+          float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)) + 2.5 * u * sin(6.2832 * (0.35 * age + P2.z));
           float y = o0.y - z + 0.5 * uWind.y * z;
-          float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * hf(eid, n, 65));
+          float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * P2.w);
           if ( abs(c.x - x) > r * 2.2 + 2.0 || abs(c.y - y) > r * 2.0 + 2.0 ) continue;
           int nl = ls == 3 ? 4 : 3;
+          vec4 P3 = hb(eid, n, 70); float p75 = hb(eid, n, 75).x;
           bool low = fromFire && z < 1.6 * L_RISE[2] * u && a < 0.5;
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
-            float ang = hf(eid, n, 70 + k) * 6.2832 + a * (1.5 + hf(eid, n, 75));
+            float ang = P3[k] * 6.2832 + a * (1.5 + p75);
             float tear = k == nl - 1 ? 1.0 + 1.8 * max(0.0, a - 0.5) * (0.5 + g) : 1.0;
             vec2 l = vec2(x + cos(ang) * r * 0.6 * tear, y + sin(ang) * r * 0.42 * tear - (k == 3 ? r * 0.45 : 0.0));
             float lr = r * (0.82 - 0.12 * float(k)) * (1.0 - 0.5 * max(0.0, a - 0.6) / 0.4);
@@ -392,17 +501,19 @@ void main() {
         int eid = i * 977 + j * 3163, nH = int(floor(t / iv));
         vec4 ag2 = ages(ei);
         bool fromFire = int(sa.a + 0.5) >= 4;
-        float z0 = fromFire ? 0.7 * L_RISE[levelAt(ei)] * u : 2.0 * u;
+        float z0 = fromFire ? 1.0 * L_RISE[levelAt(ei)] * u : 2.0 * u;
         float v0 = S_V0[ls] * u * Hk * 1.5;
         for ( int k = 0; k < 6; k++ ) {
           int n = nH - k;
-          if ( hf(eid, n, 59) > src ) continue;
-          float tb = (float(n) + 0.7 * hf(eid, n, 60)) * iv, age = t - tb;
+          vec4 P1 = hb(eid, n, 59);
+          if ( P1.x > src ) continue;
+          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
           if ( age < 0.0 || tb < t - ag2.z || (ag2.w > -1e3 && tb > t - ag2.w) ) continue;
-          float life = S_LIFE[ls] * (0.7 + 0.6 * hf(eid, n, 61)), a = age / life;
+          float life = S_LIFE[ls] * (0.7 + 0.6 * P1.z), a = age / life;
           if ( a >= 1.0 ) continue;
-          float z = z0 + v0 * (0.65 + 0.7 * hf(eid, n, 66)) * TAU * (1.0 - exp(-age / TAU));
-          vec2 o0 = e + (vec2(hf(eid, n, 62), hf(eid, n, 63)) - 0.5) * vec2(sps, spys);
+          float z = z0 + v0 * (0.65 + 0.7 * P1.w) * TAU * (1.0 - exp(-age / TAU));
+          vec4 P2 = hb(eid, n, 62);
+          vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir) + z * 0.25;
           float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * 0.9;
           vec2 dd = vec2((c.x - x) / r, (c.y - o0.y - 2.0 * u) / (r * RY));
@@ -484,14 +595,15 @@ vec4 cellColor(vec2 cf) {
     else if ( lf < a.r ) band = max(band - 1, 1);
     float al = band <= 1 ? OUTER[lv] : 1.0;
     col = vec4(uRamp[band].rgb * al, al);
-  } else if ( a.g >= 24 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
+  } else if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
   if ( a.b > 0 ) {
     int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp(a.b >> 4, 1, 3);
     vec3 rgb = band == 4 ? uRamp[11].rgb * (1.0 - 0.3 * uDark) : tintSmoke(SMK[(ls - 1) * 3 + band - 1]) * (1.0 - 0.62 * uDark);
     float al = rim == 1 ? S_RIM[ls] : S_A[ls][min(band, 3) - 1];
-    if ( a.r > 0 ) al *= 0.3;                                      // over the flames: thin, the fire stays readable
+    if ( a.r > 0 ) { al *= 0.16; rgb = uRamp[10].rgb; }            // over the flames: a thin veil lit from below, the fire stays readable
     col = vec4(rgb * al, al) + col * (1.0 - al);
   }
+  if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);   // sparks and hot coals glow through the smoke
   return col;
 }
 #define OUT(c) ((c) * uAlpha)
