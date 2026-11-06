@@ -85,7 +85,9 @@ export function shelterShapes(scene = canvas.scene) {
   const roofs = [], regions = [];
   for ( const t of scene?.tiles ?? [] ) {
     if ( !t.restrictions?.weather || t.hidden && !game.user.isGM ) continue;
-    const { x, y, width: w, height: h } = t, a = (t.rotation || 0) * Math.PI / 180, cx = x + w / 2, cy = y + h / 2;
+    // (v12+: the document's x, y is the tile's centre; the drawn tile's bounds say where it is, rotated or not)
+    const { width: w, height: h } = t, a = (t.rotation || 0) * Math.PI / 180, b = t.object?.bounds;
+    const cx = b ? b.x + b.width / 2 : t.x, cy = b ? b.y + b.height / 2 : t.y;
     const c = Math.cos(a), s = Math.sin(a);
     roofs.push([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].flatMap(([u, v]) => [cx + u * c - v * s, cy + u * s + v * c]));
   }
