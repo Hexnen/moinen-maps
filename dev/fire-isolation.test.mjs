@@ -80,8 +80,10 @@ if ( L ) {
 }
 
 /* C */
-const art = readFileSync(new URL("../scripts/fire/art.mjs", import.meta.url), "utf8");
-const disp = readFileSync(new URL("../scripts/fire/display.mjs", import.meta.url), "utf8");
+// (normalised to LF: the files may be checked out with CRLF)
+const src = (p) => readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const art = src("../scripts/fire/art.mjs");
+const disp = src("../scripts/fire/display.mjs");
 const block = (name) => art.slice(art.indexOf(`const ${name} = \``), art.indexOf("`;", art.indexOf(`const ${name} = \``)));
 ok(/uniform vec2 uOrg;/.test(block("ART")) && /vCell \+ uOrg/.test(block("ART")), "ART samples world cells (uOrg)");
 ok(/uniform vec2 uOrg;/.test(block("FUEL")) && /\+ uOrg/.test(block("FUEL")), "FUEL samples world cells (uOrg)");
