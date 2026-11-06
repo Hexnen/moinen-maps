@@ -79,6 +79,7 @@ uniform float uTime;
 uniform int uSeed;
 uniform float uU;
 uniform vec2 uWind;
+uniform vec2 uOrg;
 out vec4 oFuel;
 uint hu(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
 float h1(int a, int b, int c) {
@@ -107,7 +108,7 @@ vec2 fuel(vec2 c, float t) {
 }
 // two keyframes 1/4 s apart (the art pass blends them: the fuel never steps)
 void main() {
-  vec2 c = (vCell - 0.5) * ${FUEL_K}.0;                  // the texel's art cell (its lower corner: texel centres hold the samples)
+  vec2 c = (vCell - 0.5) * ${FUEL_K}.0 + uOrg;           // the texel's art cell, WORLD cells (texel centres hold the samples)
   vec2 a = fuel(c, uTime), b = fuel(c, uTime + 0.25);
   oFuel = vec4(a.x, b.x, a.y, b.y);
 }`;
@@ -119,13 +120,16 @@ precision highp int;
 in vec2 vCell;
 uniform sampler2D uField;   // model.raster: R heat, G plume, B burning ground, A 1 + (fire level - 1) * 4 + smoke level
 uniform sampler2D uAux;     // R distance inside the bed, G outside, B smoke source, A source smoke level (+4: a fire's)
+uniform sampler2D uAuxOld;  // the long-burning bed's own inside distance while new ground catches next to it (R; model.auxOldOf)
+uniform int uHasOld;
 uniform sampler2D uTimes;   // per cell: flame ignite / out, smoke ignite / out (model.raster), only while uAnim
 uniform int uAnim;
 uniform vec2 uI;            // seconds since the ignite ref, its span
 uniform vec2 uO;            // seconds since the out ref, its span
 uniform vec3 uDur;          // grow, out, the whole out span (s)
-uniform vec4 uArea;         // area: growing (0..1), seconds since the last out (or -1), -, -
 uniform vec2 uSize;
+uniform vec2 uOrg;           // the area's origin in WORLD cells: every lattice, hash and noise is world-anchored, so an area that is
+                             // rebuilt with another rect (a stroke added, merged, erased) draws the same fire where nothing changed
 uniform float uTime;        // shared clock, 12 fps steps (s)
 uniform int uSeed;
 uniform float uU;           // art px scale: cells per grid square / 32
@@ -200,21 +204,33 @@ float breath(float t, int s) {
 }
 // a GUST travels across the area along the wind every ~4.5 s: lean per cell of height (0.06 .. 0.38)
 float gust(float t, float x) {
-  float f = fract(t * 0.22 - x / (1.4 * uSize.x) + float(uSeed & 255) * 0.0137);
+  float f = fract(t * 0.22 - x / (160.0 * uU) + float(uSeed & 255) * 0.0137);
   return 0.06 + 0.32 * clamp(sin(3.14159 * clamp((f - 0.55) / 0.3, 0.0, 1.0)), 0.0, 1.0);
 }
 // the FUEL here (0..1, contrast-shaped: hot patches, weak patches, gaps) and the beds' variety
 vec2 fuelAt(vec2 p) {
-  vec4 k = texture(uFuel, (p / ${FUEL_K}.0 + 0.5) / uFuelSize); float w = fract(uTime * 4.0);
+  vec4 k = texture(uFuel, ((p - uOrg) / ${FUEL_K}.0 + 0.5) / uFuelSize); float w = fract(uTime * 4.0);
   return vec2(smoothstep(0.34, 0.66, mix(k.r, k.g, w)), mix(k.b, k.a, w));
 }
-int levelAt(ivec2 p) { int code = int(texelFetch(uField, p, 0).a * 255.0 + 0.5) - 1; return code < 0 ? 2 : clamp(code / 4 + 1, 1, 3); }
-bool inArea(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(uSize.x) && p.y < int(uSize.y); }
+ivec2 Lc(ivec2 p) { return p - ivec2(uOrg); }
+vec4 fA(ivec2 p) { return texelFetch(uAux, Lc(p), 0); }
+vec4 fF(ivec2 p) { return texelFetch(uField, Lc(p), 0); }
+// the bed's inside distance at p (d = the new one): a long-burning cell moves from its old distance to the new one while the added
+// ground catches (the area's first new ignite + the grow time), so its tongues, char and sparks never jump when a stroke is added
+float dBed(ivec2 p, float d) {
+  if ( uHasOld == 0 ) return d;
+  float dO = texelFetch(uAuxOld, Lc(p), 0).r * 255.0;
+  if ( dO < 0.5 || dO >= d ) return d;
+  float g = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0);
+  return mix(dO, d, g * g * (3.0 - 2.0 * g));
+}
+int levelAt(ivec2 p) { int code = int(fF(p).a * 255.0 + 0.5) - 1; return code < 0 ? 2 : clamp(code / 4 + 1, 1, 3); }
+bool inArea(ivec2 p) { p = Lc(p); return p.x >= 0 && p.y >= 0 && p.x < int(uSize.x) && p.y < int(uSize.y); }
 // a cell's ignite / out ages (s): flames (x, y), smoke (z, w); 1e4 = long lit, -1e4 = not out
 vec4 ages(ivec2 p) {
   vec4 a = vec4(1e4, -1e4, 1e4, -1e4);
   if ( uAnim == 0 ) return a;
-  vec4 T = texelFetch(uTimes, p, 0) * 255.0;
+  vec4 T = texelFetch(uTimes, Lc(p), 0) * 255.0;
   if ( T.r > 0.5 ) a.x = uI.x - (T.r - 1.0) / 254.0 * uI.y;
   if ( T.g < 254.5 ) a.y = uO.x - T.g / 254.0 * uO.y;
   if ( T.b > 0.5 ) a.z = uI.x - (T.b - 1.0) / 254.0 * uI.y;
@@ -223,17 +239,17 @@ vec4 ages(ivec2 p) {
 }
 
 void main() {
-  vec2 c = vCell;                                   // the cell's centre (area cells)
+  vec2 c = vCell + uOrg;                            // the cell's centre (WORLD cells)
   ivec2 ic = ivec2(floor(c));
   float u = uU, t = uTime, gdir = uWind.x < -0.05 ? -1.0 : 1.0;
-  vec4 aux = texelFetch(uAux, ic, 0) * 255.0;
-  vec4 fld = texelFetch(uField, ic, 0);
+  vec4 aux = fA(ic) * 255.0;
+  vec4 fld = fF(ic);
   float rk = rank(c);
   int lvMax = clamp(uLvMax, 1, 3);
   int R = 0, G = 0, B = 0, A = 0;
 
   /* ---------------- FLAMES: blob chains per emitter, merged into one body (colour seen front rows first) ---------------- */
-  float sp = 32.0 * u / sqrt(L_DENS[lvMax]), spy = sp * RY;
+  float sp = 32.0 * u / sqrt(L_DENS[3]), spy = sp * RY;   // (one lattice for every level: a stronger stroke added never reshuffles it)
   float Rm = L_R[lvMax] * u, reachUp = L_RISE[lvMax] * u * 2.8 + Rm * 2.2, reachDn = Rm * 2.2;
   float lo0 = uLean + min(gdir * 0.036, gdir * 0.38), hi0 = uLean + max(gdir * 0.036, gdir * 0.38);
   float W2 = 2.6 * Rm * 1.3 + 3.2 * u;
@@ -241,7 +257,7 @@ void main() {
   bool nearBed = aux.r > 0.5 || aux.g < (W2 + abs(hi0) * reachUp) / RY + 2.0;
   for ( int s = 1; s <= 3 && !nearBed; s++ ) {
     ivec2 p = ivec2(ic.x, ic.y + int(reachUp * float(s) / 3.0));
-    if ( p.y < int(uSize.y) ) { float g = texelFetch(uAux, p, 0).g * 255.0; nearBed = texelFetch(uAux, p, 0).r > 0.0 || g < (W2 + abs(hi0) * reachUp) / RY + 2.0; }
+    if ( Lc(p).y < int(uSize.y) ) { float g = fA(p).g * 255.0; nearBed = fA(p).r > 0.0 || g < (W2 + abs(hi0) * reachUp) / RY + 2.0; }
   }
   // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
   // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
@@ -260,27 +276,37 @@ void main() {
         vec2 e = vec2((float(i) + E1.x) * sp, (float(j) + E1.y) * spy);
         ivec2 ei = ivec2(floor(e));
         if ( !inArea(ei) ) continue;
-        float d = texelFetch(uAux, ei, 0).r * 255.0;
-        if ( d < 0.5 ) continue;                                       // not on the burning ground
+        float d = fA(ei).r * 255.0;
+        if ( d < 0.5 ) continue;
+        d = dBed(ei, d);                                       // not on the burning ground
         vec4 E2 = hb(i, j, 2);
-        int lv = levelAt(ei);
+        int lv = levelAt(ei), lvO = lv;
+        // (a long-burning cell raised to a higher level by a stroke added onto it: its tongues move to the new size while the new
+        // ground catches, never at once - model.auxOldOf G = its old level)
+        float kL = 1.0;
+        if ( uHasOld == 1 ) {
+          int o = int(texelFetch(uAuxOld, Lc(ei), 0).g * 255.0 + 0.5);
+          if ( o > 0 && o != lv ) { lvO = o; kL = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0); kL *= kL * (3.0 - 2.0 * kL); }
+        }
+        if ( E2.y >= max(L_DENS[lv], L_DENS[lvO]) / L_DENS[3] * 1.44 ) continue;   // (cheap: this level's density never reaches it)
+        float LD = mix(L_DENS[lvO], L_DENS[lv], kL), LR = mix(L_R[lvO], L_R[lv], kL), LRI = mix(L_RISE[lvO], L_RISE[lv], kL);
         float ramp = clamp(d / (0.35 * 32.0 * u), 0.0, 1.0);            // the coverage ramp at the bed's edge (0.35 square)
         // the FUEL here decides how hard this stretch burns: big merged masses in hot patches, single tongues in weak ones, gaps
         // with only embers between; it wanders and evolves, so the clumps swell, die back, creep and merge over seconds
-        float r0 = L_R[lv] * u;
+        float r0 = LR * u;
         // (cheap cull before the fuel fetch: even at full fuel this emitter's tallest tongue and its roots must reach the cell)
         float es1 = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * 1.3 * 1.25, hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0);
         float eh0 = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(E1.w, 1.6)) * (E2.x < 0.12 ? 1.25 : 1.0);
-        if ( c.y < e.y - (L_RISE[lv] * u * 2.1 * es1 * eh0 * 1.38 + 6.6 * r0 * es1) - 1.0 || c.y > e.y + 4.5 * r0 * es1 + 2.0 * u ) continue;
+        if ( c.y < e.y - (LRI * u * 2.1 * es1 * eh0 * 1.38 + 6.6 * r0 * es1) - 1.0 || c.y > e.y + 4.5 * r0 * es1 + 2.0 * u ) continue;
         float fz = max(fuelAt(e).x, 0.07 * float(lv - 1));   // (higher levels: fewer fully dead patches)
-        float thr = L_DENS[lv] / L_DENS[lvMax] * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
+        float thr = LD / L_DENS[3] * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
         float on = clamp((thr - E2.y) / 0.14, 0.0, 1.0);               // (an emitter fading in or out shrinks: it never pops)
         if ( on <= 0.0 ) continue;
         float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.55 + 0.75 * fz) * (0.3 + 0.7 * on) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
         // tongue heights vary: taller towards the heart of the fire, a few tall leaders, many short ones (never a picket fence)
         float eh = eh0 * (0.38 + 1.0 * fz) * (0.55 + 0.45 * on);
         // (exact cull: this emitter's tongue and its roots must reach the cell)
-        if ( c.y < e.y - (L_RISE[lv] * u * 2.1 * es * eh + 6.6 * r0 * es) - 1.0 || c.y > e.y + 4.5 * r0 * es + 2.0 * u ) continue;
+        if ( c.y < e.y - (LRI * u * 2.1 * es * eh + 6.6 * r0 * es) - 1.0 || c.y > e.y + 4.5 * r0 * es + 2.0 * u ) continue;
         float rate = 0.8 + 0.5 * E2.z;
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
@@ -321,7 +347,7 @@ void main() {
           float a = (t - tb) / life;
           if ( a < 0.0 || a >= 1.0 ) continue;
           float size = es * (0.7 + 0.6 * B1.z) * (0.75 + 0.35 * br) * (0.15 + 0.85 * gE) * outS;
-          float z = L_RISE[lv] * u * size * eh * (0.6 + 0.8 * B1.w) * (0.3 + 0.7 * gE) * pow(a, 1.35);
+          float z = LRI * u * size * eh * (0.6 + 0.8 * B1.w) * (0.3 + 0.7 * gE) * pow(a, 1.35);
           float r = r0 * size * (a < 0.15 ? 0.3 + 4.667 * a : pow(1.0 - (a - 0.15) / 0.85, 0.8));   // (born small at the bed, swelling)
           if ( r < 0.6 ) continue;
           float y = e.y - z, sy = r * (1.4 + 1.5 * a);
@@ -367,7 +393,19 @@ void main() {
 
   /* ---------------- BED: embers boiling in place; GROUND: char, heat tint ---------------- */
   vec4 ag = ages(ic);
-  float dIn = aux.r, dOut = aux.g;
+  float dIn = aux.r > 0.5 ? dBed(ic, aux.r) : aux.r, dOut = aux.g;
+  // (outside the bed: the clock and level of the NEAREST bed, probed across the gap - never the whole area's, which restarts when
+  // any stroke of the area changes)
+  vec4 agN = vec4(1e4, -1e4, 1e4, -1e4); int lvN = lvMax;
+  if ( dIn <= 0.5 && dOut > 0.5 && dOut < 0.8 * 32.0 * u ) {
+    bool any = false; int dd = int(dOut + 1.5);
+    for ( int k = 0; k < 8; k++ ) {
+      float an = float(k) * 0.7854; ivec2 q = ic + ivec2(round(vec2(cos(an), sin(an)) * float(dd) * (k % 2 == 1 ? 1.42 : 1.0)));
+      if ( !inArea(q) || fA(q).r <= 0.0 ) continue;
+      vec4 aq = ages(q); int lq = levelAt(q);
+      if ( !any ) { agN = aq; lvN = lq; any = true; } else { agN.x = max(agN.x, aq.x); agN.y = max(agN.y, aq.y); lvN = max(lvN, lq); }
+    }
+  }
   // (the beds differ: brighter and fuller in hot patches, broken in weak ones, some spilling wider - the fuel map and its G)
   vec2 fc = dIn > 0.5 || dOut < 0.75 * 32.0 * u ? fuelAt(c) : vec2(0.5);
   if ( dIn > 0.5 ) {
@@ -392,8 +430,8 @@ void main() {
       if ( dIn > 1.0 && share > 0.0 && ev > 1.0 - share * 0.9 && rk < rampC * (0.7 + fc.y) + 0.1 ) G = ev > 1.0 - share * 0.4 ? 26 : ev > 1.0 - share * 0.7 ? 25 : 24;
     }
   } else if ( dOut > 0.5 ) {
-    float wT = L_TINT[lvMax] * 32.0 * u;
-    float tk = uArea.x * (uArea.y >= 0.0 ? 1.0 - clamp((uArea.y - 0.7 * uDur.z) / (0.3 * uDur.z), 0.0, 1.0) : 1.0);
+    float wT = L_TINT[lvN] * 32.0 * u;
+    float tk = clamp(agN.x / max(uDur.x, 0.01), 0.0, 1.0) * (agN.y > -1e3 ? 1.0 - clamp((agN.y - 0.7 * uDur.z) / (0.3 * uDur.z), 0.0, 1.0) : 1.0);
     if ( dOut < wT && rk < (0.9 - dOut / wT) * tk ) A += 4;
   }
   // COALS: loose glowing coals between the flames and a little past the bed's edge (fading out into the map); they pulse slowly,
@@ -406,10 +444,10 @@ void main() {
     vec2 cp = (vec2(gc) + 0.2 + 0.6 * C1.xy) * Sc;
     bool big = C1.z < 0.22;
     if ( abs(c.x - cp.x) <= (big ? 1.0 : 0.5) && abs(c.y - cp.y) <= 0.5 ) {
-      int lvC = dIn > 0.5 ? levelAt(ic) : lvMax;
-      float pC = L_COAL[lvC] * (dIn > 0.5 ? 1.5 - 0.9 * fc.x : 1.0 - dOut / wC) * (dIn > 0.5 ? clamp(ag.x / max(0.6 * uDur.x, 0.01), 0.0, 1.0) : uArea.x);
+      int lvC = dIn > 0.5 ? levelAt(ic) : lvN;
+      float pC = L_COAL[lvC] * (dIn > 0.5 ? 1.5 - 0.9 * fc.x : 1.0 - dOut / wC) * clamp((dIn > 0.5 ? ag.x : agN.x) / max(0.6 * uDur.x, 0.01), 0.0, 1.0);
       vec4 C2 = hb(gc.x, gc.y, 401);
-      float outC = dIn > 0.5 ? ag.y : (uArea.y >= -0.5 ? uArea.y + uDur.y : -1e4);
+      float outC = dIn > 0.5 ? ag.y : agN.y;
       bool alive = C1.w < pC && fract(t * 0.07 + C2.w) < 0.86;                       // (some flicker out for a while)
       if ( outC > -1e3 && outC > uDur.y + 1.5 + 3.5 * C2.x ) alive = false;           // (they outlast the flames, then go one by one)
       if ( alive ) {
@@ -429,7 +467,7 @@ void main() {
   bool nearSp = nearBed || dIn > 0.5;
   for ( int s = 1; s <= 3 && !nearSp && t > 0.0; s++ ) {                     // (sparks rise higher than the flames reach)
     ivec2 p = ivec2(floor(c + vec2(-(uLean + 0.6 * uWind.x), 1.0) * float(s) * 22.0 * u));
-    if ( inArea(p) ) nearSp = texelFetch(uAux, p, 0).r > 0.0;
+    if ( inArea(p) ) nearSp = fA(p).r > 0.0;
   }
   if ( t > 0.0 && (G == 0 || (R > 0 && ((G - 1) & 7) <= 2)) && nearSp ) {
     float Wd = uLean + 0.6 * uWind.x;
@@ -445,14 +483,15 @@ void main() {
       if ( age > life ) continue;
       // (near the area's top each spark burns out at its own height, 2-16 art px below it: sparks die at scattered heights, never
       // cut off by the area's edge - no bigger area, no extra cost)
-      if ( c.y < (2.0 + 14.0 * H.z) * max(1.0, u) ) continue;
+      if ( c.y - uOrg.y < (2.0 + 14.0 * H.z) * max(1.0, u) ) continue;
       vec2 q = (vec2(g) + 0.15 + 0.7 * J.xy) * S;
       float hs = (L == 2 || (L == 0 && J.z > 0.8)) ? 1.0 : 0.5;                          // (a few 2 px sparks)
       if ( abs(xq - q.x) > hs || abs(yq - q.y) > hs ) continue;
       ivec2 sb = ivec2(floor(vec2(c.x - Wd * V * age, c.y + V * age + SPK_H[L] * L_RISE[lvMax] * u)));
       if ( !inArea(sb) ) continue;
-      float dB = texelFetch(uAux, sb, 0).r * 255.0;
+      float dB = fA(sb).r * 255.0;
       if ( dB < 0.5 ) continue;
+      dB = dBed(sb, dB);
       int lvS = levelAt(sb);
       vec4 agS = ages(sb);
       if ( agS.x < age + 0.3 || (agS.y > -1e3 && agS.y > age) ) continue;             // (born while that ground burned)
@@ -477,7 +516,7 @@ void main() {
     vec2 o = s < 8 ? vec2(cos(float(s) * 0.7854), sin(float(s) * 0.7854)) * R1m * 1.6
                    : vec2(-gdir * R1m * (s < 11 ? 2.8 : 4.0), float((s - 8) % 3 - 1) * R1m * 1.3);
     ivec2 p = ivec2(floor(c + o));
-    if ( inArea(p) ) smk = texelFetch(uField, p, 0).g > 0.0;
+    if ( inArea(p) ) smk = fF(p).g > 0.0;
   }
   if ( smk ) {
     float sps = 22.0 * u, spys = sps * RY, Hk = uPlume / 2.5;
@@ -503,7 +542,7 @@ void main() {
         vec2 e = vec2((float(i) + 0.5) * sps, (float(j) + 0.5) * spys);
         ivec2 ei = ivec2(floor(e));
         if ( !inArea(ei) ) continue;
-        vec4 sa = texelFetch(uAux, ei, 0) * 255.0;
+        vec4 sa = fA(ei) * 255.0;
         if ( sa.b < 5.0 ) continue;
         int code = int(sa.a + 0.5), ls = clamp(code & 3, 1, 3);
         bool fromFire = code >= 4;
@@ -608,7 +647,7 @@ void main() {
         vec2 e = vec2((float(i) + 0.5) * sps, (float(j) + 0.5) * spys);
         ivec2 ei = ivec2(floor(e));
         if ( !inArea(ei) ) continue;
-        vec4 sa = texelFetch(uAux, ei, 0) * 255.0;
+        vec4 sa = fA(ei) * 255.0;
         int ls = clamp(int(sa.a + 0.5) & 3, 1, 3);
         if ( sa.b < 5.0 || ls < 2 ) continue;
         float src = sa.b / 255.0, rate = S_RATE[ls] / 3.6 * (sps * spys) / (1024.0 * u * u), iv = 1.0 / max(rate, 0.05);
@@ -758,8 +797,8 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v3"),
-  fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v2"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v4"),
+  fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
   show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v2"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
@@ -787,6 +826,7 @@ export class FireArt extends PIXI.Container {
     this.fieldTex = texOf(field.data, W, H);
     this.auxTex = texOf(field.aux ?? new Uint8Array(W * H * 4), W, H);
     this.timesTex = field.times ? texOf(field.times, W, H) : null;
+    this.auxOldTex = field.auxOld && field.times ? texOf(field.auxOld, W, H) : null;
     this.rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
     this.rt.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     this.anim = field.anim; this.W = W; this.H = H;
@@ -795,14 +835,14 @@ export class FireArt extends PIXI.Container {
     this.fuelRt = PIXI.RenderTexture.create({ width: FW, height: FH, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
     this.fuelRt.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     this.fuelPass = new PIXI.Mesh(quad(0, 0, FW, FH, FW, FH), new PIXI.Shader(P.fuel, { uTime: 0, uSeed: seed % 65536, uU: grid / 32,
-      uWind: new Float32Array(wind), translationMatrix: new PIXI.Matrix().toArray(true) }));
+      uWind: new Float32Array(wind), uOrg: new Float32Array([rect.x0, rect.y0]), translationMatrix: new PIXI.Matrix().toArray(true) }));
     this.artT = null;
     const ramp = rampOf(field.color ?? NATURAL);
     this.pass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
-      uField: this.fieldTex, uAux: this.auxTex, uTimes: this.timesTex ?? this.fieldTex, uAnim: this.timesTex ? 1 : 0,
-      uI: new Float32Array([0, 1]), uO: new Float32Array([0, 1]), uDur: new Float32Array(dur), uArea: new Float32Array([1, -1, 0, 0]),
+      uField: this.fieldTex, uAux: this.auxTex, uAuxOld: this.auxOldTex ?? this.auxTex, uHasOld: this.auxOldTex ? 1 : 0, uTimes: this.timesTex ?? this.fieldTex, uAnim: this.timesTex ? 1 : 0,
+      uI: new Float32Array([0, 1]), uO: new Float32Array([0, 1]), uDur: new Float32Array(dur),
       uSize: new Float32Array([W, H]), uTime: 0, uSeed: seed % 65536, uU: grid / 32, uLvMax: lvMax, uLean: lean,
-      uWind: new Float32Array(wind), uPlume: plume, uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]),
+      uWind: new Float32Array(wind), uPlume: plume, uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
       translationMatrix: new PIXI.Matrix().toArray(true) }));
     const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0,
       uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
@@ -837,8 +877,6 @@ export class FireArt extends PIXI.Container {
     const a = this.anim; if ( !a ) return;
     const u = this.pass.shader.uniforms;
     u.uI[0] = (now - a.iRef) / 1000; u.uI[1] = a.iSpan / 1000; u.uO[0] = (now - a.oRef) / 1000; u.uO[1] = a.oSpan / 1000;
-    u.uArea[0] = a.hasIgnite ? Math.max(0, Math.min(1, (now - a.iRef) / 1000 / Math.max(0.01, u.uDur[0]))) : 1;
-    u.uArea[1] = a.hasOut ? (now - (a.oRef + a.oSpan)) / 1000 : -1;
   }
   /** Draw the art cells for the current time (the 12 fps pass). */
   renderArt(renderer) {
@@ -848,8 +886,8 @@ export class FireArt extends PIXI.Container {
     this.artT = this.pass.shader.uniforms.uTime;
   }
   destroy() {
-    const tx = [this.fieldTex, this.auxTex, this.timesTex];
-    this.fieldTex = this.auxTex = this.timesTex = null;
+    const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex];
+    this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = null;
     this.glow.parent?.removeChild(this.glow);
     for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow] ) m.geometry?.destroy();
     this.pass.destroy(); this.fuelPass.destroy(); this.glow.destroy();

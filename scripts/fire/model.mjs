@@ -400,7 +400,7 @@ const rimMax = (O) => 0.7 + 0.52 * O.OL2 + (O.tn ? 2.3 * O.RG + 1.5 : 0);
 function buffers(N) {
   return { F: new Float32Array(N), S: new Float32Array(N), FA: new Float32Array(N), I: new Float64Array(N).fill(NaN), O: new Float64Array(N).fill(Infinity),
     SI: new Float64Array(N).fill(NaN), SO: new Float64Array(N).fill(Infinity),
-    LF: new Uint8Array(N).fill(2), SMF: new Uint8Array(N).fill(2), LS: new Uint8Array(N).fill(2), FH: new Float32Array(N) };
+    LF: new Uint8Array(N).fill(2), LO: new Uint8Array(N), SMF: new Uint8Array(N).fill(2), LS: new Uint8Array(N).fill(2), FH: new Float32Array(N) };
 }
 
 /** Stamp a stroke into the buffers (W x H, area origin x0, y0 in cells), in paint order. */
@@ -436,6 +436,7 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
       const dying = buf.O[i] < Infinity;           // (what is going out under a new stroke is replaced by it)
       if ( v > buf.F[i] || (dying && phase !== "out") ) {
         const lit = buf.F[i] > 0.02 && !dying;
+        if ( lit && timed && Number.isNaN(buf.I[i]) && !buf.LO[i] && buf.LF[i] !== lv ) buf.LO[i] = buf.LF[i];   // (a burning cell raised: its old level)
         buf.F[i] = v; buf.LF[i] = lv; buf.SMF[i] = st.sm ?? 2; buf.FH[i] = fh;
         if ( !lit ) buf.I[i] = ign;
         buf.O[i] = outT;
@@ -552,7 +553,7 @@ export function raster(area, geo, P) {
   for ( let i = 0; i < N; i++ ) if ( buf.O[i] < Infinity && buf.FA[i] > 0 && buf.FA[i] >= 0.25 * buf.F[i] ) { buf.F[i] = buf.FA[i]; buf.O[i] = Infinity; }
   const sMax = Math.max(0.1, ...area.strokes.filter((s) => s.k !== "erase").map((s) => s.s));
   const f = fieldFrom(buf.F, buf.S, W, H, area.wind, geo, P, area.seed, { style: area.style, buf, reach: plumeReach(sMax, Z) });
-  if ( area.style !== "fireball" ) f.aux = auxOf(buf, W, H, P);
+  if ( area.style !== "fireball" ) { f.aux = auxOf(buf, W, H, P); f.auxOld = auxOldOf(buf, W, H); }
   return withColor(f, area.color, P);
 }
 
@@ -590,6 +591,25 @@ export function chamfer(inside, W, H) {
  * capped 255), G = distance outside it (0 inside), B = smoke SOURCE strength (where puffs are born: a smoking fire's bed, a smoke
  * stroke), A = the source's smoke level (1..3) + 4 if it is a fire's smoke. The plume field (G of the field) never gates the drawing.
  */
+/**
+ * The OLD bed's inside distance (RGBA8, R; G = the old level of a burning cell a new stroke raised, 0 = unchanged; null when nothing is catching next to a long-burning bed): a stroke added onto a
+ * burning fire makes the old edge cells interior at once (their coverage ramp would jump: the old tongues there would pop taller);
+ * art.mjs blends each cell from this distance to the new one while the new ground catches, so the burning part changes gently.
+ */
+function auxOldOf(buf, W, H) {
+  const N = W * H, old = new Uint8Array(N);
+  let fresh = false, any = false;
+  for ( let i = 0; i < N; i++ ) {
+    if ( buf.F[i] <= 0.05 ) continue;
+    if ( Number.isNaN(buf.I[i]) ) { old[i] = 1; any = true; } else fresh = true;
+    if ( buf.LO[i] ) fresh = true;
+  }
+  if ( !fresh || !any ) return null;
+  const D = chamfer(old, W, H), out = new Uint8Array(N * 4);
+  for ( let i = 0; i < N; i++ ) if ( old[i] ) { out[i * 4] = Math.min(255, Math.max(1, Math.round(D[i]))); out[i * 4 + 1] = buf.LO[i]; }
+  return out;
+}
+
 function auxOf(buf, W, H, P) {
   const N = W * H, bed = new Uint8Array(N), out = new Uint8Array(N);
   for ( let i = 0; i < N; i++ ) { bed[i] = buf.F[i] > 0.05 ? 1 : 0; out[i] = 1 - bed[i]; }

@@ -12,6 +12,6 @@ self.onmessage = (ev) => {
   try { field = M.raster(area, geo, P); }
   catch ( err ) { self.postMessage({ key, err: String(err?.message ?? err) }); return; }
   const tr = [];
-  for ( const v of [field.data, field.times, field.aux] ) if ( v?.buffer && !tr.includes(v.buffer) ) tr.push(v.buffer);
+  for ( const v of [field.data, field.times, field.aux, field.auxOld] ) if ( v?.buffer && !tr.includes(v.buffer) ) tr.push(v.buffer);
   self.postMessage({ key, field }, tr);
 };
