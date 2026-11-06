@@ -16,6 +16,10 @@
  *    plume, 3 a thick dark billowing column. Over the flames the smoke is much thinner, so the fire stays readable.
  *  - FIREBALL (1): the layer's first look (a rolling ball of fire, its smoke), kept bit for bit (`cellFireball` is the v1 code).
  *
+ * COLOUR: the palette (CORE .. CHAR, the smoke's lit underside) is the uniform array uPal, derived per area from its fire's base colour
+ * on the CPU by look.mjs (rampOf: the swappable rule; the natural orange gives the old constants exactly, so both styles' default
+ * output is unchanged). The smoke stays neutral unless the scene's smoke tint (uSmokeTint) mixes it towards the fire's hue.
+ *
  * GROWING AND GOING OUT (while the area animates: `uAnim` 1 and the times texture, model.raster): per cell its flames' and its smoke's
  * ignite / out times; the flames grow to full height (the heat scales up), the smoke builds after them; going out the flames sink back
  * into the base, the bed glows on and darkens, the smoke lingers and thins. Only the uniforms uI / uO change per frame. At rest
@@ -26,6 +30,8 @@
  *
  * Time is the SHARED clock stepped at 12 frames a second (model.shaderTime): every client shows the same frame.
  */
+
+import { rampOf, NATURAL } from "./look.mjs";
 
 const VERT = `#version 300 es
 precision highp float;
@@ -62,6 +68,9 @@ uniform sampler2D uMap;  // the scene's background map (already on the GPU), for
 uniform vec4 uMapRect;   // its scene rectangle (x, y, w, h)
 uniform int uHasMap;     // 0 when the scene has no background image
 uniform vec3 uCellGeo;   // the area's cell (0, 0) in scene px (x, y) and the art pixel (z)
+uniform vec4 uPal[9];    // THE FIRE'S PALETTE, derived on the CPU from its base colour (look.mjs rampOf: core, yellow, orange, red,
+                         // tip, glow, ember, char, smoke underside); the natural fire's are the old constants exactly
+uniform vec4 uSmokeTint; // rgb: the fire's hue for the smoke, a: how much (0 = neutral smoke, bit for bit)
 out vec4 fragColor;
 
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -77,17 +86,27 @@ float bayer4(vec2 c) {
   return (float(m[i]) + 0.5) / 16.0;
 }
 
-const vec4 CORE   = vec4(1.000, 0.957, 0.722, 1.0);
-const vec4 YELLOW = vec4(1.000, 0.816, 0.251, 1.0);
-const vec4 ORANGE = vec4(1.000, 0.541, 0.141, 1.0);
-const vec4 RED    = vec4(0.824, 0.251, 0.110, 1.0);
-const vec4 TIP    = vec4(0.353, 0.118, 0.078, 1.0);
-const vec4 GLOW   = vec4(1.000, 0.416, 0.102, 1.0);
-const vec4 SMOKE0 = vec4(0.180, 0.169, 0.165, 1.0) * 0.96;   // (fireball) premultiplied: dense, mid, thin (one flat alpha per band)
-const vec4 SMOKE1 = vec4(0.290, 0.278, 0.267, 1.0) * 0.92;
-const vec4 SMOKE2 = vec4(0.420, 0.408, 0.396, 1.0) * 0.86;
-const vec3 EMBER  = vec3(0.520, 0.140, 0.070);
-const vec3 CHAR   = vec3(0.150, 0.085, 0.065);
+// the palette (uPal: natural = 1.000 0.957 0.722 | 1.000 0.816 0.251 | 1.000 0.541 0.141 | 0.824 0.251 0.110 | 0.353 0.118 0.078 |
+// 1.000 0.416 0.102 | 0.520 0.140 0.070 | 0.150 0.085 0.065)
+#define CORE   uPal[0]
+#define YELLOW uPal[1]
+#define ORANGE uPal[2]
+#define RED    uPal[3]
+#define TIP    uPal[4]
+#define GLOW   uPal[5]
+#define EMBER  uPal[6].rgb
+#define CHAR   uPal[7].rgb
+#define S_UNDER uPal[8].rgb   // a billow's underside lit by the fire (natural 0.62 0.27 0.12)
+// smoke tinted towards the fire's hue (its luminance kept); amount 0 returns the colour untouched
+vec3 tintSmoke(vec3 c) {
+  if ( uSmokeTint.a <= 0.0 ) return c;
+  float L = dot(c, vec3(0.3, 0.59, 0.11)), tl = max(0.05, dot(uSmokeTint.rgb, vec3(0.3, 0.59, 0.11)));
+  return mix(c, min(vec3(1.0), L * uSmokeTint.rgb / tl), uSmokeTint.a);
+}
+vec4 tintSmokeP(vec4 p) { return uSmokeTint.a <= 0.0 ? p : vec4(tintSmoke(p.rgb / p.a) * p.a, p.a); }   // (premultiplied)
+#define SMOKE0 tintSmokeP(vec4(0.180, 0.169, 0.165, 1.0) * 0.96)   // (fireball) premultiplied: dense, mid, thin (one flat alpha per band)
+#define SMOKE1 tintSmokeP(vec4(0.290, 0.278, 0.267, 1.0) * 0.92)
+#define SMOKE2 tintSmokeP(vec4(0.420, 0.408, 0.396, 1.0) * 0.86)
 
 // FIREBALL: the v1 look, bit for bit (one art cell's colour, premultiplied)
 vec4 cellFireball(vec2 c, vec4 f) {
@@ -160,7 +179,6 @@ const vec3  S_ALPHA_CORE = vec3(0.46, 0.68, 0.88), S_ALPHA_MID = vec3(0.34, 0.54
 const vec3  S_LIT1 = vec3(0.74, 0.73, 0.70), S_LIT2 = vec3(0.60, 0.58, 0.55), S_LIT3 = vec3(0.38, 0.36, 0.35);
 const vec3  S_MID1 = vec3(0.60, 0.59, 0.57), S_MID2 = vec3(0.42, 0.41, 0.40), S_MID3 = vec3(0.22, 0.21, 0.21);
 const vec3  S_SHD1 = vec3(0.46, 0.45, 0.44), S_SHD2 = vec3(0.25, 0.24, 0.24), S_SHD3 = vec3(0.10, 0.09, 0.09);
-const vec3  S_UNDER = vec3(0.62, 0.27, 0.12);      // a billow's underside lit by the fire
 float lv3(vec3 v, int l) { return l == 1 ? v.x : l == 3 ? v.z : v.y; }
 vec3 lvC(vec3 a, vec3 b, vec3 c, int l) { return l == 1 ? a : l == 3 ? c : b; }
 
@@ -258,7 +276,8 @@ vec4 cellFire(vec2 c, vec4 f, int lvS, float bedA, float bed0) {
       vec2 Ld = vec2(-0.12, -0.16) / sc;
       float sh = (vnoise((q + Ld) * sc) * 0.55 + vnoise((q2 + Ld) * sc * 2.2 + 3.0) * 0.3) - (lo * 0.55 + mi * 0.3);
       vec3 rgb = sh > 0.018 ? lvC(S_LIT1, S_LIT2, S_LIT3, lvS) : sh < -0.018 ? lvC(S_SHD1, S_SHD2, S_SHD3, lvS) : lvC(S_MID1, S_MID2, S_MID3, lvS);
-      if ( sh < 0.0 && f.r > 0.05 ) rgb = mix(rgb, S_UNDER, 0.5);
+      rgb = tintSmoke(rgb);
+      if ( sh < 0.0 && f.r > 0.05 ) rgb = mix(rgb, S_UNDER, 0.5);   // (lit by its fire's colour)
       float a = cover > 0.2 ? lv3(S_ALPHA_CORE, lvS) : cover > 0.09 ? lv3(S_ALPHA_MID, lvS) : lv3(S_ALPHA_EDGE, lvS);
       if ( band > 0 ) a *= 0.45;                                // over the flames: thin, the fire stays readable
       col = vec4(rgb * a, a) + col * (1.0 - a);
@@ -338,7 +357,7 @@ const texOf = (data, W, H) => PIXI.Texture.fromBuffer(data, W, H, { scaleMode: P
  * uniforms); nothing else changes until the area does (then the owner makes a new one).
  */
 export class FireMesh extends PIXI.Mesh {
-  constructor(field, rect, geo, { flow = [0, -4], seed = 1, grid = 32, lean = 0, flameH = 25, dur = [1.6, 2.2], map = null } = {}) {
+  constructor(field, rect, geo, { flow = [0, -4], seed = 1, grid = 32, lean = 0, flameH = 25, dur = [1.6, 2.2], map = null, smokeTint = 0 } = {}) {
     const { ap, ox, oy } = geo, W = field.w, H = field.h;
     const x0 = ox + rect.x0 * ap, y0 = oy + rect.y0 * ap, x1 = x0 + W * ap, y1 = y0 + H * ap;
     const geom = new PIXI.Geometry()
@@ -349,6 +368,7 @@ export class FireMesh extends PIXI.Mesh {
     const shader = new PIXI.Shader(programOf(), { uField: tex, uTimes: times ?? tex, uSize: new Float32Array([W, H]), uTime: 0, uFlow: new Float32Array(flow),
       uSeed: (seed % 997) + 0.5, uGrid: grid, uK: footprintK(), uAlpha: 1, uStyle: field.style === "fireball" ? 1 : 0, uLean: lean, uFlameH: flameH,
       uMap: map?.texture ?? tex, uMapRect: new Float32Array(map?.rect ?? [0, 0, 1, 1]), uHasMap: map ? 1 : 0, uCellGeo: new Float32Array([x0, y0, ap]),
+      uPal: new Float32Array(rampOf(field.color ?? NATURAL).uniforms), uSmokeTint: new Float32Array([...rampOf(field.color ?? NATURAL).tint, smokeTint]),
       uAnim: times ? 1 : 0, uI: new Float32Array([0, 1]), uO: new Float32Array([0, 1]), uDur: new Float32Array(dur),
       translationMatrix: new PIXI.Matrix().toArray(true) });
     super(geom, shader);

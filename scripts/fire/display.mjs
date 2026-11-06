@@ -66,7 +66,7 @@ export class FireDisplay {
       const { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
       // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
       const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
-      const mesh = new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf() });
+      const mesh = new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
       this.meshes.addChild(mesh);
       this.areas.set(id, { key: area.key, area, field, mesh });
       changed = true;

@@ -3,7 +3,7 @@
  * destruction layer. What is stored, in two scene flags (written by the GM, read by every client, nothing is ever uploaded or baked):
  *
  *   flags.moinen-maps.fire          the layer's settings (PARAM_DEFAULTS): { v, on, who, smoke, flame, plume, speed, grow, spread, out,
- *                                   light, lightRadius, lightIntensity, lightColor, lightFlicker }
+ *                                   fireColor, smokeTint, light, lightRadius, lightIntensity, lightFollow, lightColor, lightFlicker }
  *   flags.moinen-maps.fireStrokes   { [id]: stroke }: every brush stroke an object of its own (an add or a delete touches one key, so
  *                                   two edits never overwrite each other)
  *     stroke = { id, k: "fire" | "smoke" | "erase", s: strength 0.1..1, r: radius (scene px), p: [x0, y0, x1, y1, ...] (scene px,
@@ -11,7 +11,8 @@
  *                shared clock: the stroke catches fire from then), sd: seed,
  *                lv: FIRE LEVEL 1..3 (fire only: smouldering, a steady fire, a blaze), sm: SMOKE LEVEL, independent of the fire level
  *                (fire: 0..3, 0 = no smoke; smoke: 1..3: wisps, a plume, a thick dark column), st: "fireball" (the old rolling look)
- *                or absent (fire burning in place), o: the time it was PUT OUT (absent while it burns), g: the time it was lit
+ *                or absent (fire burning in place), c: the fire's COLOUR "#rrggbb" (absent: the scene's fireColor - the natural
+                orange unless the GM changes it; look.mjs derives the whole palette from it), o: the time it was PUT OUT (absent while it burns), g: the time it was lit
  *                again (an undo / redo brings a stroke back: it grows again from g, but keeps its place q in the paint order) }
  *   LEVELS and STRENGTH: the level is the look (a real gradation: tongue height and density, the bed, sparks, the light; the smoke's
  *   density, colour and billow size); the strength stays a fine-tuning within the level. Old strokes without levels read as fire 2 /
@@ -61,14 +62,17 @@ export const PARAM_DEFAULTS = Object.freeze({
   grow: 1.6,             // seconds a cell takes to grow to full height
   spread: 3,             // grid squares a second the fire runs along a new stroke
   out: 2.2,              // seconds the flames take to go out (embers and smoke linger after)
+  fireColor: NATURAL,    // the colour of strokes without one of their own (look.mjs derives the palette from it)
+  smokeTint: 0,          // 0 = neutral smoke; up to 1 = the smoke takes on its fire's hue
   light: true,           // fire lights the scene (Foundry's own lighting)
   lightRadius: 1.5,      // the light's reach, a multiple of the burning area's size
   lightIntensity: 0.6,   // 0..1
+  lightFollow: true,     // the light takes its fire's colour (look.mjs rampOf().light); false: lightColor for every fire
   lightColor: "#ff8a3c",
   lightFlicker: 0.5      // 0 = steady
 });
 export const LIMITS = { s: [0.1, 1], r: [4, 4000], ws: [0, 1], smoke: [0, 1], flame: [0.3, 2.5], plume: [0, 8], speed: [0.2, 3],
-  grow: [0, 10], spread: [0.5, 40], out: [0, 10], lightRadius: [0.5, 4], lightIntensity: [0, 1], lightFlicker: [0, 1] };
+  grow: [0, 10], spread: [0.5, 40], out: [0, 10], smokeTint: [0, 1], lightRadius: [0.5, 4], lightIntensity: [0, 1], lightFlicker: [0, 1] };
 export const MAX_POINTS = 2000;
 /** Largest field side (cells); the art grid of a scene is at most ~2000 x 2000 (destruction MAX_ART), so this never cuts a real area. */
 export const MAX_SIDE = 4096;
@@ -79,6 +83,9 @@ export const FIRE_LV = {
 };
 /** Per SMOKE LEVEL (index 0..3): how much smoke (x the layer's `smoke`), 0 = none. Level 2 = the old amount. */
 export const SMOKE_LV = [0, 0.55, 1, 1.45];
+
+import { NATURAL, cleanColor, rampOf, puffsOf } from "./look.mjs";
+export { NATURAL, rampOf };
 
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const int = (v, d, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -92,6 +99,7 @@ export function cleanParams(p = {}) {
     smoke: num(o.smoke, D.smoke, ...L.smoke), flame: num(o.flame, D.flame, ...L.flame), plume: num(o.plume, D.plume, ...L.plume),
     speed: num(o.speed, D.speed, ...L.speed),
     grow: num(o.grow, D.grow, ...L.grow), spread: num(o.spread, D.spread, ...L.spread), out: num(o.out, D.out, ...L.out),
+    fireColor: cleanColor(o.fireColor) ?? D.fireColor, smokeTint: num(o.smokeTint, D.smokeTint, ...L.smokeTint), lightFollow: o.lightFollow !== false,
     light: o.light !== false,
     lightRadius: num(o.lightRadius, D.lightRadius, ...L.lightRadius), lightIntensity: num(o.lightIntensity, D.lightIntensity, ...L.lightIntensity),
     lightColor: COLOR.test(String(o.lightColor)) ? String(o.lightColor).toLowerCase() : D.lightColor,
@@ -116,6 +124,7 @@ export function cleanStroke(o) {
   if ( k === "fire" ) { out.lv = int(o.lv, 2, 1, 3); out.sm = int(o.sm, 2, 0, 3); }
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
   if ( k !== "erase" && o.st === "fireball" ) out.st = "fireball";
+  if ( k !== "erase" ) { const c = cleanColor(o.c); if ( c ) out.c = c; }
   if ( o.o !== undefined && o.o !== null && Number.isFinite(Number(o.o)) ) out.o = Math.round(Number(o.o));
   if ( o.g !== undefined && o.g !== null && Number.isFinite(Number(o.g)) ) out.g = Math.round(Number(o.g));
   return out;
@@ -266,6 +275,9 @@ export function nextChange(strokes, now, geo, P, still = false) {
 /** The strokes whose put-out animation is over at `now` (the GM removes their records). */
 export const goneAt = (strokes, now, geo, P) => strokes.filter((s) => s.o !== undefined && phaseOf(s, now, geo, P) === "gone");
 
+/** A stroke's fire colour: its own, else the scene's (P.fireColor), else the natural orange. */
+export const colorOf = (st, P) => st.c ?? P?.fireColor ?? NATURAL;
+
 /**
  * The AREAS of a set of strokes at time `now`: [{ id, key, rect (cells), strokes (in order, erasers included), phases { id: phase },
  * wind: [wx, wy], seed, style }]. Strokes "gone" are left out. Strokes of one style whose CORES overlap share an area (the plume does
@@ -276,7 +288,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   for ( const s of strokes ) phases[s.id] = phaseOf(s, now, geo, P, still);
   const live = strokes.filter((s) => phases[s.id] !== "gone");
   const list = live.filter((s) => s.k !== "erase"), erasers = live.filter((s) => s.k === "erase");
-  const style = (s) => (s.st === "fireball" ? "fireball" : "fire");
+  const style = (s) => (s.st === "fireball" ? "fireball" : "fire"), color = (s) => colorOf(s, P);
   const reach = list.map((s) => reachOf(s, geo, P)), rects = list.map((s) => coreOf(s, geo, P));
   const parent = list.map((_, i) => i);
   const find = (i) => { while ( parent[i] !== i ) i = parent[i] = parent[parent[i]]; return i; };
@@ -285,7 +297,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   while ( changed ) {
     changed = false;
     for ( let i = 0; i < list.length; i++ ) for ( let j = i + 1; j < list.length; j++ ) {
-      const a = find(i), b = find(j); if ( a === b || style(list[a]) !== style(list[b]) ) continue;
+      const a = find(i), b = find(j); if ( a === b || style(list[a]) !== style(list[b]) || color(list[a]) !== color(list[b]) ) continue;
       if ( overlaps(rects[a], rects[b]) ) {
         const lo = Math.min(a, b), hi = Math.max(a, b);
         parent[hi] = lo; rects[lo] = union(rects[a], rects[b]);
@@ -295,7 +307,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   }
   const groups = new Map();
   for ( let i = 0; i < list.length; i++ ) { const g = find(i); if ( !groups.has(g) ) groups.set(g, []); groups.get(g).push(i); }
-  const pkey = JSON.stringify([P.smoke, P.flame, P.plume, P.grow, P.spread, P.out, geo.ap, geo.ox, geo.oy, geo.grid]);
+  const pkey = JSON.stringify([P.smoke, P.flame, P.plume, P.grow, P.spread, P.out, P.smokeTint, geo.ap, geo.ox, geo.oy, geo.grid]);
   const out = [];
   for ( const [, idx] of groups ) {
     const members = idx.map((i) => list[i]);
@@ -309,8 +321,8 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     wx /= wsum || 1; wy /= wsum || 1;
     const id = members.map((s) => s.id).sort()[0], ph = {};
     for ( const s of all ) ph[s.id] = phases[s.id];
-    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
-    out.push({ id, key, rect, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]) });
+    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", color(s), ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
+    out.push({ id, key, rect, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -397,7 +409,15 @@ export function raster(area, geo, P) {
   // a cell going out under a stroke that still burns there (one deleted over an older fire) keeps the burning one's heat, no anim
   for ( let i = 0; i < N; i++ ) if ( buf.O[i] < Infinity && buf.FA[i] > 0 && buf.FA[i] >= 0.25 * buf.F[i] ) { buf.F[i] = buf.FA[i]; buf.O[i] = Infinity; }
   const sMax = Math.max(0.1, ...area.strokes.filter((s) => s.k !== "erase").map((s) => s.s));
-  return fieldFrom(buf.F, buf.S, W, H, area.wind, geo, P, area.seed, { style: area.style, buf, reach: plumeReach(sMax, Z) });
+  const f = fieldFrom(buf.F, buf.S, W, H, area.wind, geo, P, area.seed, { style: area.style, buf, reach: plumeReach(sMax, Z) });
+  return withColor(f, area.color, P);
+}
+
+/** A field with its fire colour: { color, embers, puffs } (look.rampOf; the natural fire's are the old constants). */
+export function withColor(f, color, P) {
+  const R = rampOf(color ?? NATURAL);
+  f.color = R.base; f.embers = R.embers; f.puffs = puffsOf(R, P?.smokeTint ?? 0);
+  return f;
 }
 
 /**
@@ -538,10 +558,10 @@ export function fieldFrom(F, S0, W, H, wind, geo, P, seed = 1, { style = "fire",
  * A field from a MASK of burning ground (any source, e.g. a destruction stroke later on): `mask` W x H bytes (0 = not burning, 255 =
  * full strength), optional smoke mask. The hook for "a destruction stroke carries fire": no strokes of this layer needed.
  */
-export function fieldFromMask(mask, W, H, { smoke = null, wind = [0, 0], geo, P, seed = 1, style = "fire" } = {}) {
-  const N = W * H, F = new Float32Array(N), S = new Float32Array(N);
+export function fieldFromMask(mask, W, H, { smoke = null, wind = [0, 0], geo, P, seed = 1, style = "fire", color = null } = {}) {
+  const N = W * H, F = new Float32Array(N), S = new Float32Array(N), Pc = cleanParams(P);
   for ( let i = 0; i < N; i++ ) { F[i] = mask[i] / 255; if ( smoke ) S[i] = smoke[i] / 255; }
-  return fieldFrom(F, S, W, H, wind, geo, cleanParams(P), seed, { style });
+  return withColor(fieldFrom(F, S, W, H, wind, geo, Pc, seed, { style }), color ?? Pc.fireColor, Pc);
 }
 
 /* ---------------------------------------------------------------- lights */
@@ -551,7 +571,7 @@ export function fieldFromMask(mask, W, H, { smoke = null, wind = [0, 0], geo, P,
  * (closest first) while they lie within `gap` grid squares of each other and the merged light stays compact; over `max` the closest
  * merge anyway. So one fire is one or a few lights and two fires more than a square apart never share one. One light per cluster:
  * { x, y (scene px), radius (scene px: lightRadius x the cluster's half-diagonal + half a square, x its fire level), strength 0..1,
- * level 1..3, ignite / out (ms or null: the light grows and fades with its fire), seed }. `items`: [{ area, field }]. Deterministic.
+ * level 1..3, ignite / out (ms or null: the light grows and fades with its fire), seed, fire (its base colour), color (the light colour, look.rampOf) }; clusters of different colours never merge (except over the cap). `items`: [{ area, field }]. Deterministic.
  */
 export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
   const B = Math.max(2, Math.round(bin * geo.grid / geo.ap)), G = gap * geo.grid / geo.ap, cl = [];
@@ -569,13 +589,13 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
       if ( x < c.x0 ) c.x0 = x; if ( x > c.x1 ) c.x1 = x; if ( y < c.y0 ) c.y0 = y; if ( y > c.y1 ) c.y1 = y;
     }
     for ( const c of [...bins.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]) ) {
-      cl.push({ ...c, cx: area.rect.x0 + c.sx / c.m, cy: area.rect.y0 + c.sy / c.m,
+      cl.push({ ...c, col: area.color ?? field.color ?? NATURAL, cx: area.rect.x0 + c.sx / c.m, cy: area.rect.y0 + c.sy / c.m,
         x0: area.rect.x0 + c.x0, y0: area.rect.y0 + c.y0, x1: area.rect.x0 + c.x1 + 1, y1: area.rect.y0 + c.y1 + 1, seed: area.seed });
     }
   }
   const merge = (a, b) => {
     const m = a.m + b.m;
-    return { m, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
+    return { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
       im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow,
       x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), seed: (a.seed ^ b.seed) >>> 0 };
   };
@@ -586,7 +606,7 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
     for ( let i = 0; i < cl.length; i++ ) for ( let j = i + 1; j < cl.length; j++ ) {
       const d = Math.hypot(cl[i].cx - cl[j].cx, cl[i].cy - cl[j].cy);
       if ( d < fd ) { fd = d; fi = i; fj = j; }
-      if ( d < bd && gapOf(cl[i], cl[j]) <= G && compact(cl[i], cl[j]) ) { bd = d; bi = i; bj = j; }
+      if ( d < bd && cl[i].col === cl[j].col && gapOf(cl[i], cl[j]) <= G && compact(cl[i], cl[j]) ) { bd = d; bi = i; bj = j; }
     }
     if ( cl.length > max && fi >= 0 ) { cl[fi] = merge(cl[fi], cl[fj]); cl.splice(fj, 1); continue; }
     if ( bi < 0 ) break;
@@ -596,7 +616,7 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
     const half = Math.hypot(c.x1 - c.x0, c.y1 - c.y0) / 2 * geo.ap, level = Math.max(1, Math.min(3, Math.round(c.lv / c.m)));
     return { x: geo.ox + c.cx * geo.ap, y: geo.oy + c.cy * geo.ap, radius: Math.round(P.lightRadius * (half + geo.grid / 2) * FIRE_LV.lightR[level]),
       strength: Math.min(1, c.m / c.n / FIRE_LV.heat[level]), level, ignite: c.iw > c.m * 0.25 ? Math.round(c.im / c.iw) : null,
-      out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0 };
+      out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0, fire: c.col, color: rampOf(c.col).light };
   });
 }
 
@@ -642,10 +662,10 @@ export function particleAt(field, seed, k, now, speed = 1, wind = [0, 0], g = 32
   if ( puff ) {
     if ( f > 0.8 && hash4(seed, k, cyc, Math.floor(age / 120)) < (f - 0.8) * 4 ) return null;     // dissolving: pixel dropout, no fade
     const rise = (5 + j * 4) * u, ux = wind[0] * 9 * u, uy = wind[1] * 9 * u;
-    return { x: Math.round(src[0] + ux * sec + Math.sin(sec * 1.7 + j * 6) * 1.2 * u), y: Math.round(src[1] - rise * sec + uy * sec), color: PUFF[Math.min(2, Math.floor(f * 3))], size: 2, kind: "puff" };
+    return { x: Math.round(src[0] + ux * sec + Math.sin(sec * 1.7 + j * 6) * 1.2 * u), y: Math.round(src[1] - rise * sec + uy * sec), color: (field.puffs ?? PUFF)[Math.min(2, Math.floor(f * 3))], size: 2, kind: "puff" };
   }
   const rise = (12 + j * 16) * u, sway = (0.8 + hash4(seed, k, cyc, 6) * 2) * u;
-  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: EMBER[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember" };
+  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: (field.embers ?? EMBER)[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember" };
 }
 
 /** Particle slots an area gets out of `cap` shared by the visible areas (by their emitters), at least 2 when it has any. */

@@ -17,17 +17,17 @@ export async function wipe() {
   if ( keys.length ) await canvas.scene.update(Object.fromEntries(keys.map((k) => [`flags.moinen-maps.fireStrokes.-=${k}`, null])));
   await wait(800);
 }
-/** Strokes painted long ago (at rest): [{ x, y, k, lv, sm, st, r, s, len, wd, ws }]. */
+/** Strokes painted long ago (at rest): [{ x, y, k, lv, sm, st, c, r, s, len, wd, ws }]. */
 export async function place(list) {
   const upd = {};
   list.forEach((o, i) => {
     const id = `r${i}${Math.random().toString(36).slice(2, 6)}`, len = o.len ?? 60;
-    upd[`flags.moinen-maps.fireStrokes.${id}`] = { id, k: o.k ?? "fire", s: o.s ?? 0.9, r: o.r ?? 28, p: [o.x - len / 2, o.y, o.x + len / 2, o.y + 4], wd: o.wd ?? 0, ws: o.ws ?? 0, q: 1000 + i, lv: o.lv, sm: o.sm, st: o.st };
+    upd[`flags.moinen-maps.fireStrokes.${id}`] = { id, k: o.k ?? "fire", s: o.s ?? 0.9, r: o.r ?? 28, p: [o.x - len / 2, o.y, o.x + len / 2, o.y + 4], wd: o.wd ?? 0, ws: o.ws ?? 0, q: 1000 + i, lv: o.lv, sm: o.sm, st: o.st, c: o.c };
   });
   await canvas.scene.update(upd); await wait(2500);
 }
 /** Paint now through the API (it catches and grows): returns the stroke. */
-export const paint = (o) => api().paint(o.pts ?? [[o.x - (o.len ?? 60) / 2, o.y], [o.x + (o.len ?? 60) / 2, o.y + 4]], { kind: o.k ?? "fire", radius: o.r ?? 28, strength: o.s ?? 0.9, level: o.lv ?? 2, smoke: o.sm ?? 2, style: o.st ?? "fire", wind: { dir: o.wd ?? 0, speed: o.ws ?? 0 } });
+export const paint = (o) => api().paint(o.pts ?? [[o.x - (o.len ?? 60) / 2, o.y], [o.x + (o.len ?? 60) / 2, o.y + 4]], { kind: o.k ?? "fire", radius: o.r ?? 28, strength: o.s ?? 0.9, level: o.lv ?? 2, smoke: o.sm ?? 2, style: o.st ?? "fire", color: o.c, wind: { dir: o.wd ?? 0, speed: o.ws ?? 0 } });
 export async function dark(d) {
   await canvas.scene.update({ "environment.darknessLevel": d }, { animateDarkness: 0 }); await wait(1500);
   for ( let i = 0; i < 5; i++ ) canvas.app.ticker.update(performance.now());

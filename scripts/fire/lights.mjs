@@ -25,6 +25,8 @@ import { reducedMotion } from "../config.mjs";
  * (the same uniforms Foundry set in its last refresh, saved by the `_update...Uniforms` overrides), so the light grows with the flames
  * and fades with them - again uniforms only, no lighting refresh. A light at rest and steady (flicker 0) is not animated at all.
  * LEVELS: the radius comes from model.lightsOf (x the fire level), the intensity is scaled here by the level.
+ * COLOUR: each light takes its fire's colour (model.lightsOf -> look.rampOf().light; the natural fire's is the old #ff8a3c); the scene's
+ * lightColor is an override, used when lightFollow is off.
  */
 let Cls = null;
 /** Darkness level below which the fire light is suppressed (by day it only tinted the map brown); Foundry re-checks on every lighting refresh. */
@@ -90,11 +92,11 @@ export class FireLights {
     if ( this.sources.length && !force ) canvas.perception?.update({ refreshLighting: true, refreshVision: true });
   }
   get count() { return this.sources.length; }
-  dirtyParams(P) { return JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightColor, P.lightFlicker]) !== this.params; }
+  dirtyParams(P) { return JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightFollow, P.lightColor, P.lightFlicker]) !== this.params; }
 
   /** Make the lights `list` (model.lightsOf) with the settings `P`; the old ones go. */
   sync(list, P) {
-    this.params = JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightColor, P.lightFlicker]);
+    this.params = JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightFollow, P.lightColor, P.lightFlicker]);
     const had = this.sources.length;
     this.clear(false);
     if ( P.light && list.length && canvas.effects?.lightSources && foundry.canvas?.sources?.PointLightSource ) {
@@ -106,7 +108,7 @@ export class FireLights {
           s.mmTime = !still && (L.ignite !== null || L.out !== null) ? { ignite: L.ignite, out: L.out, G: P.grow * 1000, O: P.out * 1000 } : null;
           const alpha = Math.min(1, P.lightIntensity * (0.55 + 0.45 * L.strength) * FIRE_LV.lightI[L.level ?? 2]);
           s.initialize({ x: L.x, y: L.y, elevation: 0, level, walls: true, vision: false, dim: L.radius, bright: Math.round(L.radius * 0.45),
-            color: hexColor(P.lightColor), alpha: alpha * 0.75, luminosity: 0.5 + 0.2 * P.lightIntensity, attenuation: 0.6, coloration: 1,
+            color: hexColor(P.lightFollow && L.color ? L.color : P.lightColor), alpha: alpha * 0.75, luminosity: 0.5 + 0.2 * P.lightIntensity, attenuation: 0.6, coloration: 1,
             animation: s.mmFlicker > 0 || s.mmTime ? { type: "torch", speed: 5, intensity: 5, reverse: false } : { type: null }, seed: L.seed % 10000 });
           s.suppression.mmDaylight = isDay();
           s.add();

@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as M from "./model.mjs";
+import * as Look from "./look.mjs";
 import { FireDisplay } from "./display.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import * as DModel from "../destruction/model.mjs";
@@ -169,7 +170,8 @@ function putOut(list) {
 /** Bring strokes back (undo of a delete, redo of a paint): they keep their place in the paint order and grow again from now. */
 function relight(list) {
   const now = Math.round(sharedNow()), upd = {};
-  for ( const s of list ) { const { o, ...rest } = s; const st = M.cleanStroke({ ...rest, g: now }); strokes.set(st.id, st); upd[sKey(st.id)] = st; }
+  // (a scene update MERGES the stored object: the out time is deleted explicitly, or every other client would still see it out)
+  for ( const s of list ) { const { o, ...rest } = s; const st = M.cleanStroke({ ...rest, g: now }); strokes.set(st.id, st); upd[sKey(st.id)] = st; upd[`${sKey(st.id)}.-=o`] = null; }
   draw(); tell("edited");
   write(upd);
 }
@@ -180,6 +182,16 @@ export function setLevels(id, { lv, sm } = {}) {
   const st = M.cleanStroke({ ...s, ...(lv !== undefined ? { lv } : {}), ...(sm !== undefined ? { sm } : {}) });
   strokes.set(id, st); draw(); tell("edited");
   write({ [sKey(id)]: st });
+  return st;
+}
+
+/** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null / "" = the scene's): one write, drawn again. */
+export function setColor(id, color) {
+  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || s.o !== undefined ) return null;
+  const { c, ...rest } = s;
+  const st = M.cleanStroke(color ? { ...rest, c: color } : rest);
+  strokes.set(id, st); draw(); tell("edited");
+  write({ [sKey(id)]: st, ...(st.c ? {} : { [`${sKey(id)}.-=c`]: null }) });   // (an update merges: back to the scene's colour = delete c)
   return st;
 }
 
@@ -218,15 +230,21 @@ export function setExtra(id, area, field) {
 export const fireApi = {
   /**
    * Paint a stroke from a macro: `points` = [[x, y], ...] or { x, y } (scene px); `kind` "fire" | "smoke" | "erase"; `radius` scene
-   * px; `strength` 0.1..1; `wind` { dir (degrees, 0 = right, 90 = down), speed 0..1 }. Returns the stored stroke (or null).
+   * px; `strength` 0.1..1; `wind` { dir (degrees, 0 = right, 90 = down), speed 0..1 }; `level` 1..3 (fire), `smoke` 0..3 (fire) /
+   * 1..3 (smoke); `style` "fire" | "fireball"; `color` "#rrggbb" or a preset name (look.PRESETS; omitted: the scene's fire colour).
+   * Returns the stored stroke (or null).
    */
-  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire" } = {}) {
+  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null } = {}) {
     const pts = Array.isArray(points) ? points : [[points.x, points.y]];
     const w = wind ?? { dir: game.settings.get(MODULE_ID, "fireWindDir"), speed: game.settings.get(MODULE_ID, "fireWind") };
-    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style });
+    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}) });
   },
   /** Change a stroke's levels afterwards: `{ level, smoke }`. */
   setLevels: (id, { level, smoke } = {}) => setLevels(id, { lv: level, sm: smoke }),
+  /** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null = the scene's). */
+  setColor: (id, color) => setColor(id, color),
+  /** The colour presets and the palette rule (look.mjs). */
+  colors: () => ({ ...Look.PRESETS }), rampOf: (c) => Look.rampOf(c),
   erase(x, y, radius = 50) { return add({ k: "erase", r: radius, s: 1, p: [x, y] }); },
   remove: (id) => remove(id), clear, undo, redo,
   list: () => list().map((s) => ({ ...s, p: [...s.p] })),

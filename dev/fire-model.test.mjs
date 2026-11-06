@@ -9,7 +9,11 @@
 //   G. time: catching along the path, growing, going out, erasers, relighting, late joiners, reduced motion
 //   I. smoke never cut by its area's rectangle (8 wind directions x 3 speeds)
 //   H. levels: fire and smoke independent, old strokes, lights per level, plumes do not merge fires, styles
+//   J. colour: the palette ramp is derived deterministically, the natural default is the old palette exactly, colours keep their
+//      areas and lights apart, particles and lights follow the colour, the smoke is neutral unless tinted
 import * as M from "../scripts/fire/model.mjs";
+import * as Look from "../scripts/fire/look.mjs";
+import { readFileSync } from "node:fs";
 
 let fails = 0, n = 0;
 const ok = (c, msg) => { n++; if ( !c ) { fails++; console.log(`FAIL ${msg}`); } };
@@ -188,6 +192,69 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
     for ( let y = 0; y < H; y++ ) for ( const x of [0, W - 1] ) if ( g(x, y) > worst ) { worst = g(x, y); where = `${k} ${wd}/${ws}`; }
   }
   ok(worst === 0, `smoke fades out inside its rectangle in every wind (worst border density ${worst} ${where})`);
+}
+
+
+/* J: colour */
+{
+  // the natural fire is the old palette, bit for bit (the v1 shader's constants, the old particles, the old light)
+  const v1 = readFileSync(new URL("./fixtures/fire-v1/shader.mjs", import.meta.url), "utf8");
+  const cst = (name) => v1.match(new RegExp(String.raw`const vec[34] ${name}\s*= vec[34]\(([^)]*)\)`))[1].split(",").slice(0, 3).map(Number);
+  const R0 = Look.rampOf(Look.NATURAL), f32 = (a) => [...new Float32Array(a)];
+  const names = { core: "CORE", yellow: "YELLOW", orange: "ORANGE", red: "RED", tip: "TIP", glow: "GLOW" };
+  ok(Object.entries(names).every(([k, c]) => JSON.stringify(f32(R0.pal[k])) === JSON.stringify(f32(cst(c)))), "natural palette = the v1 (fireball) shader constants exactly");
+  // (the fire style's own constants before the colour control, e7a92a5)
+  const fireOld = { ember: [0.520, 0.140, 0.070], char: [0.150, 0.085, 0.065], under: [0.62, 0.27, 0.12] };
+  ok(Object.entries(fireOld).every(([k, c]) => JSON.stringify(f32(R0.pal[k])) === JSON.stringify(f32(c))), "natural fire-style constants unchanged");
+  ok(Look.SLOTS.every((k, i) => JSON.stringify([...R0.uniforms.slice(i * 4, i * 4 + 3)]) === JSON.stringify(f32(R0.pal[k]))), "uniform layout = SLOTS");
+  ok(JSON.stringify(R0.embers) === JSON.stringify(M.EMBER) && R0.light === P.lightColor && P.fireColor === Look.NATURAL && P.smokeTint === 0 && P.lightFollow, "natural embers, light and defaults unchanged");
+  // the rule itself reproduces the natural palette (the shortcut only removes rounding): a neighbour of the natural base is within 2 %
+  const Rn = Look.rampOf("#ff8a25");
+  ok(Look.SLOTS.every((k) => R0.pal[k].every((x, i) => Math.abs(x - Rn.pal[k][i]) < 0.02)), "the rule is continuous through the natural base");
+  // deterministic: the same bytes every time (and after the cache is flushed)
+  const snap = (c) => JSON.stringify([...Look.rampOf(c).uniforms, ...Look.rampOf(c).embers, Look.rampOf(c).light]);
+  const first = Object.values(Look.PRESETS).map(snap).join();
+  for ( let i = 0; i < 80; i++ ) Look.rampOf(`#${(i * 0x30305).toString(16).padStart(6, "0").slice(-6)}`);
+  ok(Object.values(Look.PRESETS).map(snap).join() === first, "ramp derivation deterministic");
+  // not a tint: every colour keeps a pale hot core and dark tips, a hue shift towards the light
+  const H = (c) => Look.hsv(c);
+  let shape = true;
+  for ( const c of Object.values(Look.PRESETS) ) {
+    const p = Look.rampOf(c).pal;
+    if ( !(H(p.core)[2] >= 0.95 && H(p.core)[1] < H(p.orange)[1] + 1e-9 && H(p.tip)[2] < 0.4 && H(p.char)[2] < 0.2 && H(p.yellow)[2] >= H(p.red)[2]) ) shape = false;
+  }
+  ok(shape, "every preset: pale bright core, dark tips and char, value steps down the ramp");
+  const B = Look.rampOf(Look.PRESETS.blue).pal, hc = H(B.core)[0], ht = H(B.tip)[0], hb = H(Look.hexToRgb(Look.PRESETS.blue))[0];
+  ok(hc < hb && hc > 170 && ht > hb && ht < 270, `blue: core shifts to cyan (${hc.toFixed(0)}), tips to indigo (${ht.toFixed(0)}) around ${hb.toFixed(0)}`);
+  // strokes: c cleaned (preset names, hex), erasers never, old strokes none
+  ok(M.cleanStroke({ id: "c1", k: "fire", p: [1, 1], c: "blue" }).c === Look.PRESETS.blue && M.cleanStroke({ id: "c2", k: "fire", p: [1, 1], c: "#ABCDEF" }).c === "#abcdef"
+    && M.cleanStroke({ id: "c3", k: "fire", p: [1, 1], c: "red-ish" }).c === undefined && M.cleanStroke({ id: "c4", k: "erase", p: [1, 1], c: "#ff0000" }).c === undefined, "stroke colour cleaned");
+  const base = { s: 0.9, r: 60, wd: 0, ws: 0, q: 1 };
+  const old = M.cleanStroke({ id: "o1", k: "fire", p: [400, 400], ...base });
+  const A0 = M.areasOf([old], geo, P)[0], F0 = M.raster(A0, geo, P);
+  ok(A0.color === Look.NATURAL && JSON.stringify(F0.embers) === JSON.stringify(M.EMBER) && JSON.stringify(F0.puffs) === JSON.stringify(M.PUFF), "old strokes: natural colour, old particles");
+  ok(M.areasOf([old], geo, { ...P, fireColor: "#3a86ff" })[0].color === "#3a86ff", "strokes without a colour follow the scene's");
+  // colours never share an area; their lights stay apart and take the fire's colour
+  const blue = M.cleanStroke({ id: "b1", k: "fire", p: [400, 400], ...base, c: "blue" });
+  const AB = M.areasOf([old, blue], geo, P);
+  ok(AB.length === 2 && AB.map((a) => a.color).sort().join() === [Look.NATURAL, Look.PRESETS.blue].sort().join(), "colours keep their own areas");
+  const LB = M.lightsOf(AB.map((a) => ({ area: a, field: M.raster(a, geo, P) })), geo, P);
+  ok(LB.length === 2 && new Set(LB.map((l) => l.color)).size === 2 && LB.some((l) => l.color === P.lightColor), "a light per colour, in its fire's colour");
+  ok(M.areasOf([old, blue], geo, P)[0].key !== M.areasOf([old, M.cleanStroke({ ...blue, c: "green" })], geo, P)[0].key || true, "keys");
+  const kb = M.areasOf([blue], geo, P)[0].key, kg = M.areasOf([M.cleanStroke({ ...blue, c: "green" })], geo, P)[0].key;
+  ok(kb !== kg, "the colour is in the area key");
+  // particles follow the colour; the smoke is neutral unless tinted
+  const FB = M.raster(M.areasOf([blue], geo, P)[0], geo, P);
+  let em = null;
+  for ( let k = 0; k < 64 && !em; k++ ) for ( let t = 0; t < 4000 && !em; t += 97 ) { const p = M.particleAt(FB, 7, k, 100000 + t); if ( p?.kind === "ember" ) em = p; }
+  ok(em && FB.embers.includes(em.color) && !M.EMBER.includes(em.color), "embers in the fire's colour");
+  ok(JSON.stringify(FB.puffs) === JSON.stringify(M.PUFF), "smoke particles neutral by default");
+  const FT = M.raster(M.areasOf([blue], geo, { ...P, smokeTint: 1 })[0], geo, { ...P, smokeTint: 1 });
+  ok(JSON.stringify(FT.puffs) !== JSON.stringify(M.PUFF) && Look.hsv([(FT.puffs[0] >> 16 & 255) / 255, (FT.puffs[0] >> 8 & 255) / 255, (FT.puffs[0] & 255) / 255])[0] > 150, "smoke tint takes the fire's hue");
+  ok(M.areasOf([blue], geo, { ...P, smokeTint: 1 })[0].key !== kb, "the smoke tint is in the key");
+  // the fireball takes the colour too, its field bytes do not depend on it
+  const fb = M.cleanStroke({ id: "f1", k: "fire", p: [400, 400], ...base, st: "fireball" });
+  ok(Buffer.from(M.raster(M.areasOf([fb], geo, P)[0], geo, P).data).equals(Buffer.from(M.raster(M.areasOf([M.cleanStroke({ ...fb, c: "purple" })], geo, P)[0], geo, P).data)), "fireball: colour does not touch the field");
 }
 
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);

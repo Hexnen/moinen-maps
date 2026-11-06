@@ -9,7 +9,8 @@ import { sharedNow } from "../shared-clock.mjs";
  * size, 1 2 3 the level (fire brush: the fire level; smoke brush: the smoke level - as destruction's 1 2 3), Shift+0..3 the fire
  * brush's own smoke level (0 = no smoke; by key position), Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Escape ends the stroke.
  * Client settings: fireBrush (grid squares), fireStrength, fireWind, fireWindDir, fireLevel, fireSmoke (the fire brush's smoke
- * level), smokeLevel (the smoke brush's), fireStyle ("fire" | "fireball"); each control remembers its own last value.
+ * level), smokeLevel (the smoke brush's), fireStyle ("fire" | "fireball"), fireBrushColor (the fire brush's colour "#rrggbb", "" = the
+ * scene's fire colour: the stroke stores none); each control remembers its own last value.
  */
 const RING = { fire: 0xff8a24, smoke: 0x9a948c, erase: 0xffffff };
 let mode = null;            // "fire" | "smoke" | "erase" | null
@@ -28,6 +29,7 @@ export function registerFireSettings(onChange) {
   game.settings.register(MODULE_ID, "fireSmoke", { scope: "client", config: false, type: Number, default: 2, onChange: f });
   game.settings.register(MODULE_ID, "smokeLevel", { scope: "client", config: false, type: Number, default: 2, onChange: f });
   game.settings.register(MODULE_ID, "fireStyle", { scope: "client", config: false, type: String, default: "fire", onChange: f });
+  game.settings.register(MODULE_ID, "fireBrushColor", { scope: "client", config: false, type: String, default: "", onChange: f });
 }
 
 export const brush = () => ({
@@ -38,7 +40,8 @@ export const brush = () => ({
   level: clamp(Math.round(Number(opt("fireLevel", 2)) || 2), 1, 3),
   fireSmoke: clamp(Math.round(Number(opt("fireSmoke", 2)) ?? 2), 0, 3),
   smokeLevel: clamp(Math.round(Number(opt("smokeLevel", 2)) || 2), 1, 3),
-  style: opt("fireStyle", "fire") === "fireball" ? "fireball" : "fire"
+  style: opt("fireStyle", "fire") === "fireball" ? "fireball" : "fire",
+  color: /^#[0-9a-f]{6}$/i.test(String(opt("fireBrushColor", ""))) ? String(opt("fireBrushColor", "")).toLowerCase() : ""
 });
 const radius = () => canvas.grid.size * brush().size / 2;
 const worldPoint = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
@@ -55,7 +58,7 @@ export function setMode(m) {
 function drawCursor(p) {
   if ( !cursor ) return;
   lastPoint = p;
-  const r = radius(), z = canvas.stage.scale.x, c = RING[mode] ?? 0xffffff;
+  const r = radius(), z = canvas.stage.scale.x, c = mode === "fire" && brush().color ? Number.parseInt(brush().color.slice(1), 16) : RING[mode] ?? 0xffffff;
   cursor.clear();
   cursor.lineStyle(Math.max(1.5, 2 / z), c, 0.95).drawCircle(p.x, p.y, r);
   cursor.lineStyle(Math.max(1, 1 / z), 0x15110F, 0.6).drawCircle(p.x, p.y, r + 2 / z);
@@ -71,7 +74,7 @@ function drawCursor(p) {
 function strokeOf(s) {
   const b = brush();
   return { k: mode, r: Math.round(radius()), s: mode === "erase" ? 1 : b.strength, wd: b.windDir, ws: mode === "erase" ? 0 : b.wind, p: s.pts.flat(), q: s.q,
-    lv: b.level, sm: mode === "smoke" ? b.smokeLevel : b.fireSmoke, st: b.style };
+    lv: b.level, sm: mode === "smoke" ? b.smokeLevel : b.fireSmoke, st: b.style, ...(mode === "fire" && b.color ? { c: b.color } : {}) };
 }
 
 function onDown(ev) {
