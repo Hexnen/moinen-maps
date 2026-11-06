@@ -116,7 +116,7 @@ export function setDraft(st) {
 
 /** Store a stroke (one flag key). */
 export function add(raw, { undoable = true } = {}) {
-  const st = M.cleanStroke({ q: sharedNow(), ...raw, id: raw.id && raw.id !== "draft" ? raw.id : newId() });
+  const st = M.cleanStroke({ ...raw, q: raw.q ?? sharedNow(), id: raw.id && raw.id !== "draft" ? raw.id : newId() });
   if ( !st || !game.user.isGM ) return null;
   strokes.set(st.id, st); draft = null;
   if ( undoable ) { undoStack.push({ add: [st] }); if ( undoStack.length > UNDO_MAX ) undoStack.shift(); redoStack.length = 0; }
