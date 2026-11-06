@@ -4,15 +4,18 @@
  *
  * Per area, three draws on the destruction layer's art grid:
  *  1. ART PASS (12 fps, only when the shared-clock frame changes and the area is on screen): one fragment per ART CELL into a small
- *     RGBA8 render texture (W x H cells): R = flame depth layer (1.. front = larger; 0 none), G = flame band + 8 (level - 1) (1..23)
+ *     RGBA8 render texture (W x H cells): R = flame (7; 0 none), G = flame band + 8 (level - 1) (1..23)
  *     or a bed ember (24..26), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
  *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2).
  *       - FLAMES: emitters on a jittered lattice over the burning ground (rows foreshortened, RY 0.8), kept whole or dropped by a
  *         coverage ramp at the bed's edge x a clumping noise; each emitter has 2 breathing roots and blobs born every life / 5 / rate
  *         seconds (every birth number hashed: no loop) that swell, rise accelerating (pinch-off), lean with the wind and the
- *         travelling gust, shrink and die; a metaball union per emitter row = depth layer, front (south) rows first; an erosion noise
- *         drifts up inside the stationary tongues. Bands nest inside each mass (heat, density and each blob's own core, broken by
- *         rising lick streaks): no smooth slabs.
+ *         travelling gust, shrink and die. ONE BODY: every emitter's roots (wide, fused into a continuous base along the bed) and
+ *         blobs add into one field (a metaball union across all rows) - tongues fuse at their bases and mid-height and fork at the
+ *         top; the colour is composited front (south) rows first with an opacity per row, so the bands flow across the body and a
+ *         row behind shows only where the front is thin. Bands on the merged field: a hot core low (the fused roots), cooling
+ *         upwards with each blob's age, broken by rising lick streaks (no slabs, no per-tongue nesting); an erosion noise drifts up
+ *         inside. A few emitters are leaders (taller tongues).
  *       - BED: embers that boil in place (3 fps cross-faded), only on the burning ground, in 2x2 blue-noise clusters towards its edge.
  *       - SMOKE: puffs born at the smoke sources (aux B), 3-4 lobes, fast while hot and slowing as they cool, shear with the wind
  *         and the gust, the last lobe torn off; metaball union, each cell shaded from its OWN lobe's sphere normal (lit top-left,
@@ -20,7 +23,7 @@
  *         dropping out in 2x2 clusters as the puff ages, shapes shrink - never cut by a field or the area.
  *       - GROUND: char inside the bed (clustered ragged edge), a heat-tint ring outside it, the smoke's shadow on the ground.
  *  2. GROUND (every frame): a MULTIPLY quad - the map's own colours darkened / warmed (never an opaque ground colour).
- *  3. ART (every frame): flames, embers, smoke from the render texture: rims derived from the depth layers (selective: 2 steps
+ *  3. ART (every frame): flames, embers, smoke from the render texture: a rim on the merged body's OUTER silhouette only (selective: 2 steps
  *     darker on top and on the shadow side, 1 on the lit left side, red not plum on hot flanks, none at the bottom), palette lookup,
  *     flat per-band alpha; the module's exact box-footprint sampler at any zoom.
  *  4. EMISSION (every frame): the flame and ember cells drawn white into Foundry's illumination (canvas.effects.illumination.lights,
@@ -132,7 +135,7 @@ void main() {
   int lvMax = clamp(uLvMax, 1, 3);
   int R = 0, G = 0, B = 0, A = 0;
 
-  /* ---------------- FLAMES: blob chains per emitter, depth layers front (south) first ---------------- */
+  /* ---------------- FLAMES: blob chains per emitter, merged into one body (colour seen front rows first) ---------------- */
   float sp = 32.0 * u / sqrt(L_DENS[lvMax]), spy = sp * RY;
   float Rm = L_R[lvMax] * u, reachUp = L_RISE[lvMax] * u * 2.6 + Rm * 2.2, reachDn = Rm * 2.2;
   float lo0 = uLean + min(gdir * 0.036, gdir * 0.38), hi0 = uLean + max(gdir * 0.036, gdir * 0.38);
@@ -143,6 +146,9 @@ void main() {
     ivec2 p = ivec2(ic.x, ic.y + int(reachUp * float(s) / 3.0));
     if ( p.y < int(uSize.y) ) { float g = texelFetch(uAux, p, 0).g * 255.0; nearBed = texelFetch(uAux, p, 0).r > 0.0 || g < (W2 + abs(hi0) * reachUp) / RY + 2.0; }
   }
+  // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
+  // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
+  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0; int lvL = 1;
   if ( nearBed ) {
     int jHi = int(floor((c.y + reachUp) / spy)), jLo = int(floor((c.y - reachDn) / spy)) - 1;
     for ( int jj = 0; jj < 32; jj++ ) {
@@ -150,7 +156,7 @@ void main() {
       float dyc = max(0.0, (float(j) + 0.5) * spy - c.y);
       float xlo = c.x - max(0.0, dyc * hi0) - W2, xhi = c.x - min(0.0, dyc * lo0) + W2;
       int i0 = int(floor(xlo / sp)) - 1, i1 = int(floor(xhi / sp));
-      float F = 0.0, HT = 0.0, QM = 0.0, QH = 0.0; int lvL = 2;
+      float rF = 0.0, rH = 0.0, rB = 0.0;
       for ( int ii = 0; ii < 12; ii++ ) {
         int i = i0 + ii; if ( i > i1 ) break;
         vec2 e = vec2((float(i) + hf(i, j, 1)) * sp, (float(j) + hf(i, j, 2)) * spy);
@@ -164,7 +170,7 @@ void main() {
         if ( hf(i, j, 3) > L_DENS[lv] / L_DENS[lvMax] * (0.25 + 0.75 * ramp) * (0.55 + 0.6 * clump) ) continue;
         float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * hf(i, j, 4)), rate = 0.8 + 0.5 * hf(i, j, 5);
         // tongue heights vary: taller towards the heart of the fire, a few tall leaders, many short ones (never a picket fence)
-        float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0), eh = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(hf(i, j, 6), 1.6));
+        float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0), eh = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(hf(i, j, 6), 1.6)) * (hf(i, j, 9) < 0.12 ? 1.25 : 1.0);
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
         float ageI = ag.x, ageO = ag.y;
@@ -180,9 +186,9 @@ void main() {
         for ( int k = 0; k < 2; k++ ) {
           float rr = rb * (0.75 - 0.15 * float(k)); if ( rr < 0.6 ) continue;
           vec2 p = vec2(e.x + (float(k) - 0.5) * rb * 0.9 + 0.8 * u * sin(t * (1.3 + float(k)) + float(id) * 0.7), e.y - rb * 0.1 - float(k) * 1.5 * u);
-          float dx = (c.x - p.x) / (1.3 * rr), dy = (c.y - p.y) / (0.9 * rr); if ( dy > 0.0 ) dy *= 1.5;
+          float dx = (c.x - p.x) / (1.5 * rr), dy = (c.y - p.y) / (1.0 * rr); if ( dy > 0.0 ) dy *= 1.5;
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; F += q; HT += q * 0.92; if ( q > QM ) { QM = q; QH = 0.92; lvL = lv; } }
+          if ( q > 0.0 ) { q *= q; rF += q; rH += q * 0.95 * (0.5 + 0.5 * q); rB += q; lvL = max(lvL, lv); }
         }
         // the BLOBS: born every life / 5 / rate s (jittered), uneven lives, accelerating up, leaning, swaying, swelling then shrinking
         float life0 = L_LIFE[lv], iv = life0 / 5.0 / rate;
@@ -204,29 +210,36 @@ void main() {
           if ( c.y < y - 1.5 * sy || c.y > y + sy ) continue;
           float lean = uLean + gdir * gust(t, e.x) * (0.6 + 0.4 * hf(id, n, 16));
           float x = e.x + (hf(id, n, 15) - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + hf(id, n, 17)));
-          float dx = (c.x - x) / (r * (1.05 - 0.35 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;
+          float dx = (c.x - x) / (r * (1.2 - 0.5 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;   // (wide low, thin tips)
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; F += q; HT += q * (1.0 - a); if ( q > QM ) { QM = q; QH = 1.0 - a; lvL = lv; } }
+          if ( q > 0.0 ) { q *= q; rF += q; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
         }
       }
-      if ( F <= 0.0 ) continue;
-      // erosion: a fine noise that boils in place and drifts up INSIDE the stationary tongues (their edges flicker and tear)
-      float kk = t * 6.0, k0 = floor(kk), w = kk - k0;
-      vec2 np = vec2(c.x / (2.2 * u), (c.y + t * 14.0 * u) / (3.0 * u));
-      float nz = mix(vn(np, int(k0) & 1023), vn(np, (int(k0) + 1) & 1023), w);
-      F *= 0.7 + 0.6 * nz;
-      if ( F > 0.34 ) {
-        // BANDS nest inside each mass: the blobs' heat, the density, each blob's own core; rising lick streaks break the values
-        float heat = HT / F;
-        float v = 0.34 * pow(heat, 1.4) + 0.33 * pow(clamp((F - 0.34) / 2.2, 0.0, 1.0), 0.7) + 0.33 * QM * QH;
-        float st = vn(vec2(c.x / (1.6 * u), (c.y + t * 22.0 * u) / (6.5 * u)), 41 + (int(t * 4.0) & 7));
-        v += (st - 0.5) * 0.3;
-        int nb = lvL == 3 ? 7 : 6;
-        int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
-        if ( band == 6 && st < 0.42 ) band = 5;                         // the cream core only in licks, never a slab
-        R = clamp(j + 6, 1, 255); G = band + 1 + 8 * (lvL - 1);
-        break;
-      }
+      // the union (silhouette) is the plain sum; the COLOUR is seen front first: a row further back shows through where the rows in
+      // front are thin (between and above their tongues), so the bands flow across the body without per-tongue outlines
+      F += rF; HT += TR * rH; BASE += TR * rB; WS += TR * rF; TR *= exp(-2.2 * rF);
+      if ( TR < 0.25 ) break;                                         // (opaque: the rows further back change nothing)
+    }
+  }
+  if ( F > 0.0 ) {
+    // erosion: a fine noise that boils in place and drifts up INSIDE the body (edges flicker and tear, tips break off)
+    float kk = t * 6.0, k0 = floor(kk), w = kk - k0;
+    vec2 np = vec2(c.x / (2.2 * u), (c.y + t * 14.0 * u) / (3.0 * u));
+    float nz = mix(vn(np, int(k0) & 1023), vn(np, (int(k0) + 1) & 1023), w);
+    float Fe = F * (0.7 + 0.6 * nz);
+    if ( Fe > 0.34 ) {
+      // BANDS on the merged field: the hot core is a continuous band low in the body (the fused roots: BASE), cooling upwards (the
+      // blobs' heat falls with age = height); rising lick streaks break the values so no band is a smooth slab
+      float heat = HT / max(WS, 1e-4), base = clamp(BASE / max(WS, 1e-4), 0.0, 1.0);
+      float dens = clamp((Fe - 0.34) / 2.4, 0.0, 1.0);
+      float v = 0.76 * heat + 0.22 * base + 0.14 * pow(dens, 0.6);
+      float st = vn(vec2(c.x / (3.0 * u), (c.y + t * 22.0 * u) / (8.0 * u)), 41 + (int(t * 4.0) & 7));
+      v += (st - 0.5) * 0.2;
+      int nb = lvL == 3 ? 7 : 6;
+      int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
+      if ( band == 6 && st < 0.4 ) band = 5;                           // the cream core only in licks, never a slab
+      if ( dens > 0.35 && band < 2 ) band = 2;                         // (deep inside the body: never the tips' darkest red)
+      R = 7; G = band + 1 + 8 * (lvL - 1);                             // (one layer: the outline is the merged silhouette only)
     }
   }
 
@@ -463,8 +476,8 @@ vec4 cellColor(vec2 cf) {
   vec4 col = vec4(0.0);
   if ( a.r > 0 && a.g > 0 && a.g < 24 ) {
     int band = (a.g - 1) & 7, lv = clamp((a.g - 1) / 8 + 1, 1, 3);
-    // the RIM, selective: a neighbour of a layer further back (or none) above / on the shadow side -> 2 steps darker, the lit left
-    // side -> 1 step; hot flanks get red, never plum; an inner edge against a back tongue is lighter than an outer one
+    // the RIM on the merged body's outer silhouette only (the flames are one layer), selective: nothing above / on the shadow side
+    // -> 2 steps darker, the lit left side -> 1 step; hot flanks get red, never plum; none at the bottom
     int up = art(p + ivec2(0, -1)).r, lf = art(p + ivec2(-1, 0)).r, rt = art(p + ivec2(1, 0)).r;
     bool outer = up == 0 || rt == 0 || lf == 0;
     if ( up < a.r || rt < a.r ) band = max(band - (outer ? 2 : 1), band >= 4 ? 1 : 0);
