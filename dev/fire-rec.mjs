@@ -51,7 +51,15 @@ export async function rec(name, ms, during = [], { fps = 60, pace = 34 } = {}) {
   const base = Math.ceil(realNow() / 1000) * 1000 + 1, perf0 = performance.now(), fired = new Set();
   let vt = base;
   Date.now = () => Math.floor(vt);
-  const settle = async () => { for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10); };
+  // (each frame: wait for the field worker, then redraw at once - the layer's own redraw waits for a requestAnimationFrame and its
+  // phase timer for real time, both late against the virtual clock: a stroke would show up seconds into its grow, a pop)
+  const FM = await import("/modules/moinen-maps/scripts/fire/fire.mjs");
+  const settle = async () => {
+    for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
+    FM.draw();
+    for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
+    FM.draw();
+  };
   rc.start();
   try {
     for ( let i = 0; i < n; i++ ) {

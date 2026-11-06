@@ -92,19 +92,24 @@ float vn(vec2 p, int k) {
 // a noise that cross-fades to a new pattern every \`per\` s (contrast kept through the fade)
 float morph(vec2 p, float t, float per, int k) {
   float kk = t / per, k0 = floor(kk), w = kk - k0; w = w * w * (3.0 - 2.0 * w);
-  float a = vn(p, k + int(k0) * 17), b = vn(p + 7.31, k + int(k0 + 1.0) * 17);
+  float a = vn(p, k + int(k0) * 17), b = vn(p, k + int(k0 + 1.0) * 17);   // (the same point: keyframe n+1 here = keyframe n of the next span, no jump)
   return 0.5 + (mix(a, b, w) - 0.5) / sqrt((1.0 - w) * (1.0 - w) + w * w);
 }
-void main() {
-  vec2 c = (vCell - 0.5) * ${FUEL_K}.0;                  // the texel's art cell (its lower corner: texel centres hold the samples)
-  float t = uTime, S = 32.0 * uU, fs = float(uSeed & 1023);
+vec2 fuel(vec2 c, float t) {
+  float S = 32.0 * uU, fs = float(uSeed & 1023);
   // the sampling point wanders (the patches drift and come back, never in step) and creeps a little downwind
   vec2 w1 = S * vec2(1.4 * sin(t * 0.083 + fs) + 0.6 * sin(t * 0.191 + 2.0 * fs), 0.7 * sin(t * 0.067 + 0.5 * fs)) + vec2(uWind.x, 0.0) * S * 0.12 * t;
   vec2 w2 = S * vec2(0.9 * sin(t * 0.137 + 3.0 * fs), 0.5 * sin(t * 0.113 + fs)) - vec2(0.0, 0.05) * S * t;
   float big = morph((c + w1) / (2.1 * S), t, 10.3, 501), mid = morph((c + w2) / (0.85 * S), t, 7.1, 503);
   float f = 0.62 * big + 0.38 * mid;
   float bed = morph((c - w2) / (0.55 * S), t, 6.1, 505);
-  oFuel = vec4(clamp(f, 0.0, 1.0), clamp(bed, 0.0, 1.0), 0.0, 1.0);
+  return clamp(vec2(f, bed), 0.0, 1.0);
+}
+// two keyframes 1/4 s apart (the art pass blends them: the fuel never steps)
+void main() {
+  vec2 c = (vCell - 0.5) * ${FUEL_K}.0;                  // the texel's art cell (its lower corner: texel centres hold the samples)
+  vec2 a = fuel(c, uTime), b = fuel(c, uTime + 0.25);
+  oFuel = vec4(a.x, b.x, a.y, b.y);
 }`;
 
 /* ======================================================================== pass 1: the art cells */
@@ -176,6 +181,13 @@ float vn(vec2 p, int k) {
   int x = int(i.x), y = int(i.y);
   return mix(mix(h1(x, y, k), h1(x + 1, y, k), f.x), mix(h1(x, y + 1, k), h1(x + 1, y + 1, k), f.x), f.y);
 }
+// value noise with its gradient (d/dp): the smoke's billows are shaded from it
+vec3 vnd(vec2 p, int k) {
+  vec2 i = floor(p), f = fract(p), s = f * f * (3.0 - 2.0 * f), ds = 6.0 * f * (1.0 - f);
+  int x = int(i.x), y = int(i.y);
+  float a = h1(x, y, k), b = h1(x + 1, y, k), c = h1(x, y + 1, k), d = h1(x + 1, y + 1, k);
+  return vec3(mix(mix(a, b, s.x), mix(c, d, s.x), s.y), ds.x * mix(b - a, d - c, s.y), ds.y * mix(c - a, d - b, s.x));
+}
 // a 2x2-cell blue-noise threshold (0..1)
 float rank(vec2 c) { ivec2 q = ivec2(floor(c * 0.5)) & 15; return (float(VC[q.y * 16 + q.x]) + 0.5) / 256.0; }
 // the fire BREATHES: three incommensurate slow waves and a stepped random walk (0.65..1.15, no visible period); s = the cluster
@@ -192,7 +204,10 @@ float gust(float t, float x) {
   return 0.06 + 0.32 * clamp(sin(3.14159 * clamp((f - 0.55) / 0.3, 0.0, 1.0)), 0.0, 1.0);
 }
 // the FUEL here (0..1, contrast-shaped: hot patches, weak patches, gaps) and the beds' variety
-vec2 fuelAt(vec2 p) { vec2 f = texture(uFuel, (p / ${FUEL_K}.0 + 0.5) / uFuelSize).rg; return vec2(smoothstep(0.34, 0.66, f.r), f.g); }
+vec2 fuelAt(vec2 p) {
+  vec4 k = texture(uFuel, (p / ${FUEL_K}.0 + 0.5) / uFuelSize); float w = fract(uTime * 4.0);
+  return vec2(smoothstep(0.34, 0.66, mix(k.r, k.g, w)), mix(k.b, k.a, w));
+}
 int levelAt(ivec2 p) { int code = int(texelFetch(uField, p, 0).a * 255.0 + 0.5) - 1; return code < 0 ? 2 : clamp(code / 4 + 1, 1, 3); }
 bool inArea(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(uSize.x) && p.y < int(uSize.y); }
 // a cell's ignite / out ages (s): flames (x, y), smoke (z, w); 1e4 = long lit, -1e4 = not out
@@ -270,21 +285,27 @@ void main() {
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
         float ageI = ag.x, ageO = ag.y;
-        if ( ageO > -1e3 ) ageO -= (ramp * 0.6 + 0.2 * E2.w) * uDur.y;   // going out: the edge first, the heart up to 0.8 x P.out later (never retroactive: no pop)
+        float outS = 1.0;
+        if ( ageO > -1e3 ) {
+          float stg = (ramp * 0.6 + 0.2 * E2.w) * uDur.y;
+          // (going out, the new tongues come smaller and smaller until this emitter stops: the flames SINK, they are never cut)
+          outS = 1.0 - 0.7 * clamp(ageO / max(stg, 0.25 * uDur.y), 0.0, 1.0);
+          ageO -= stg;                                                  // going out: the edge first, the heart up to 0.8 x P.out later (never retroactive: no pop)
+        }
         if ( ageI <= 0.0 ) continue;                                    // not caught yet
         float gE = clamp(ageI / max(uDur.x, 0.01), 0.0, 1.0); gE *= 2.0 - gE;
         int cl = int(floor(e.x / (96.0 * u))) * 7 + int(floor(e.y / (96.0 * u))) * 13 + uSeed;
         float br = breath(t, cl);
         // the ROOTS: two wide, foreshortened blobs that never leave the bed (they sink when the fire goes out)
         float rootK = ageO > -1e3 ? 1.0 - clamp(ageO / max(0.5 * uDur.y, 0.01), 0.0, 1.0) : 1.0;
-        float rb = r0 * es * (0.9 + 0.25 * br + 0.15 * sin(t * 2.1 + float(id))) * rootK * (0.45 + 0.55 * gE);
+        float rb = r0 * es * (0.9 + 0.25 * br + 0.15 * sin(t * 2.1 + float(id))) * rootK * gE;                    // (a catching emitter's roots grow from nothing)
         for ( int k = 0; k < 2; k++ ) {
           // (every base its own: wider or narrower, offset, hotter in hot patches - no two alike)
           float rr = rb * (0.75 - 0.15 * float(k)); if ( rr < 0.6 ) continue;
           vec2 p = vec2(e.x + (float(k) - 0.5 + (E2.w - 0.5) * 0.8) * rb * 0.9 + 0.8 * u * sin(t * (1.3 + float(k)) + float(id) * 0.7), e.y - rb * 0.1 - float(k) * 1.5 * u);
           float dx = (c.x - p.x) / ((1.1 + 0.9 * E1.z) * rr), dy = (c.y - p.y) / (1.0 * rr); if ( dy > 0.0 ) dy *= 1.5;
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; rF += q; rH += q * (0.6 + 0.5 * fz) * (0.5 + 0.5 * q); rB += q * (0.5 + 0.7 * fz); lvL = max(lvL, lv); }
+          if ( q > 0.0 ) { q *= q; rF += q; rH += q * (0.6 + 0.5 * fz) * (0.5 + 0.5 * q) * (0.3 + 0.7 * outS); rB += q * (0.5 + 0.7 * fz) * outS; lvL = max(lvL, lv); }   // (sinking roots cool)
         }
         // the BLOBS: born every life / 5 / rate s (jittered), uneven lives, accelerating up, leaning, swaying, swelling then shrinking
         float life0 = L_LIFE[lv], iv = life0 / 5.0 / rate;
@@ -299,9 +320,9 @@ void main() {
           float life = life0 * (0.6 + 0.8 * B1.y) * (0.8 + 0.4 * br);
           float a = (t - tb) / life;
           if ( a < 0.0 || a >= 1.0 ) continue;
-          float size = es * (0.7 + 0.6 * B1.z) * (0.75 + 0.35 * br) * (0.4 + 0.6 * gE);
+          float size = es * (0.7 + 0.6 * B1.z) * (0.75 + 0.35 * br) * (0.15 + 0.85 * gE) * outS;
           float z = L_RISE[lv] * u * size * eh * (0.6 + 0.8 * B1.w) * (0.3 + 0.7 * gE) * pow(a, 1.35);
-          float r = r0 * size * (a < 0.15 ? 0.55 + 3.0 * a : pow(1.0 - (a - 0.15) / 0.85, 0.8));
+          float r = r0 * size * (a < 0.15 ? 0.3 + 4.667 * a : pow(1.0 - (a - 0.15) / 0.85, 0.8));   // (born small at the bed, swelling)
           if ( r < 0.6 ) continue;
           float y = e.y - z, sy = r * (1.4 + 1.5 * a);
           if ( c.y < y - 1.5 * sy || c.y > y + sy ) continue;
@@ -395,6 +416,9 @@ void main() {
         float pulse = 0.5 + 0.5 * sin(t * (0.9 + 1.6 * C2.y) + C2.z * 6.2832);
         bool hot = dIn > 2.0 && outC < -1e3;
         G = hot && pulse > 0.82 ? 37 : pulse > 0.55 ? 26 : pulse > 0.2 ? 25 : 24;
+        // (a coal never pops: it glows up from its darkest step as it catches and dims to it before it goes out or flickers off)
+        float fl = fract(t * 0.07 + C2.w);
+        if ( C1.w > pC - 0.06 || fl > 0.8 || fl < 0.03 || (outC > -1e3 && outC > uDur.y + 0.9 + 3.5 * C2.x) ) G = 24;
       }
     }
   }
@@ -437,7 +461,7 @@ void main() {
       if ( J.w > SPK_D[L * 4 + lvS] * heatK * gustK * float(uBirths) / 8.0 ) continue;
       float a = age / life, s0 = H.y < 0.25 ? 6.0 : H.y < 0.7 ? 5.0 : 4.0;
       int step = int(floor((s0 + 0.99) * (1.0 - a * a * 0.55 - a * 0.15)));              // (white / yellow, orange, red, dark, gone)
-      if ( a < 0.06 ) step = int(s0);
+      if ( a < 0.12 ) step = min(step, 1 + int(floor(s0 * a / 0.12)));                    // (it IGNITES: dark red up to its flare)
       if ( step < 1 ) continue;
       G = 32 + step;
       break;
@@ -459,9 +483,16 @@ void main() {
     float sps = 22.0 * u, spys = sps * RY, Hk = uPlume / 2.5;
     float zTop = 1.0 * L_RISE[3] * u + S_V0[3] * u * Hk * 1.5 * 1.35 * TAU + R1m;
     float rA = 0.6 * uWind.x + 0.12 * gdir, rB = 0.6 * uWind.x + 0.216 * gdir, rMin = min(rA, rB), rMax = max(rA, rB);
-    float pad = R1m * 2.2 + sps * 0.5 + 2.5 * u;
-    int jHi = int(floor((c.y + zTop * (1.0 + max(0.0, -0.5 * uWind.y)) + R1m) / spys)) + 1, jLo = int(floor((c.y - R1m - max(0.0, 0.5 * uWind.y) * zTop) / spys)) - 1;
-    float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false;
+    float strM = 1.0 + 0.55 * (0.3 + 2.0 * (abs(0.6 * uWind.x) + 0.216));   // (the widest shear stretch; + the flow warp below)
+    float pad = R1m * (0.83 + 1.15 * strM) + sps * 0.5 + 2.5 * u + 4.0 * u;
+    int jHi = int(floor((c.y + zTop * (1.0 + max(0.0, -0.5 * uWind.y)) + R1m + 4.5 * u) / spys)) + 1, jLo = int(floor((c.y - R1m - 4.5 * u - max(0.0, 0.5 * uWind.y) * zTop) / spys)) - 1;
+    float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false;
+    // the FLOW: a smooth warp field that rises and drifts with the smoke - every edge rolls and curls over itself, no lobe stays a
+    // circle; the same field turns the shading (the rolls inside the mass follow the curls of its silhouette)
+    vec2 fp = vec2(c.x - (0.6 * uWind.x + 0.12 * gdir) * 10.0 * u * t, c.y + 10.0 * u * t) / (11.0 * u);
+    vec3 fg = vnd(fp, 611);
+    vec2 wv = clamp(vec2(fg.z, -fg.y) * 0.33, -0.5, 0.5);           // (CURL of a noise: it swirls, it never bunches up)
+    vec2 cw = c + wv * 8.0 * u;
     for ( int jj = 0; jj < 40; jj++ ) {
       int j = jHi - jj; if ( j < jLo ) break;
       float dyc = max(0.0, float(j) * spys - c.y);
@@ -483,13 +514,15 @@ void main() {
         float v0 = S_V0[ls] * u * Hk * 1.5;
         vec4 ag2 = ages(ei);
         // which births can be at this height now: invert z(age) (the rise only depends on the age)
-        float rr1 = S_R1[ls] * u * 1.25, dz = e.y - c.y;
-        float zl = max(z0, dz - rr1 - spys), zh = dz + rr1 + spys;
+        float rr1 = S_R1[ls] * u * 1.35 + 4.5 * u, dz = e.y - c.y;
+        // (a fire's smoke is not only above its flames: some puffs rise from BETWEEN the tongues, from low over the bed)
+        float z0lo = fromFire ? 0.2 * z0 : z0;
+        float zl = max(z0lo, dz - rr1 - spys), zh = dz + rr1 + spys;
         float zMax = z0 + v0 * 1.35 * TAU * 0.999;
         if ( zl > zMax ) continue;
         // (the fastest puffs, x 1.35, reach a height soonest; the slowest, x 0.65, latest)
-        float aLo = -TAU * log(max(1e-4, 1.0 - (zl - z0) / (1.35 * v0 * TAU)));
-        float aHi = zh >= z0 + 0.65 * v0 * TAU * 0.999 ? lifeS * 1.3 : -TAU * log(max(1e-4, 1.0 - (zh - z0) / (0.65 * v0 * TAU)));
+        float aLo = -TAU * log(max(1e-4, 1.0 - max(0.0, zl - z0) / (1.35 * v0 * TAU)));
+        float aHi = zh >= z0lo + 0.65 * v0 * TAU * 0.999 ? lifeS * 1.3 : -TAU * log(max(1e-4, 1.0 - (zh - z0lo) / (0.65 * v0 * TAU)));
         aHi = min(aHi, lifeS * 1.3);
         int nLo = int(floor((t - aHi) / iv)) - 1, nHi = int(floor((t - aLo) / iv));
         int eid = i * 977 + j * 3163;
@@ -505,52 +538,63 @@ void main() {
           if ( a >= 1.0 ) continue;
           float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);            // the first puffs are wisps, building up over ~2 s
           float vj = v0 * (0.65 + 0.7 * P1.w);                // every puff its own speed: no flat ceiling
-          float z = z0 + vj * TAU * (1.0 - exp(-age / TAU));
+          float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0 * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0;   // (low puffs: among the tongues)
+          bool front = fract(P1.z * 11.1) < 0.45;                         // (some smoke curls in front of the flames, some behind)
+          float z = zb + vj * TAU * (1.0 - exp(-age / TAU));
           vec4 P2 = hb(eid, n, 62);
           vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
           float g = gust(t, o0.x);
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)) + 2.5 * u * sin(6.2832 * (0.35 * age + P2.z));
           float y = o0.y - z + 0.5 * uWind.y * z;
           float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * P2.w);
-          if ( abs(c.x - x) > r * 2.2 + 2.0 || abs(c.y - y) > r * 2.0 + 2.0 ) continue;
-          int nl = ls == 3 ? 4 : 3;
-          vec4 P3 = hb(eid, n, 70); float p75 = hb(eid, n, 75).x;
-          bool low = fromFire && z < 1.6 * L_RISE[2] * u && a < 0.5;
+          // (wisps stretch along the wind and the gust as they age: shear, not round puffs)
+          float strx = 1.0 + (0.1 + 0.45 * a) * (0.3 + 2.0 * abs(0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)));
+          if ( abs(cw.x - x) > r * (0.8 + 1.3 * strx) + 2.0 || abs(cw.y - y) > r * 2.5 + 2.0 ) continue;
+          int nl = 3;
+          vec4 P3 = hb(eid, n, 70), P4 = hb(eid, n, 75); float p75 = P4.w;
+          // every puff CONDENSES from nothing (thin first, then dense) and DISSIPATES by thinning: no puff ever pops in or out
+          float env = smoothstep(0.0, 0.24, a) * (1.0 - smoothstep(0.55, 1.0, a));
+          // (wisps stretch along the wind and the gust as they age: shear, not round puffs)
+
+          bool low = fromFire && z < z0 + 0.8 * L_RISE[2] * u && a < 0.5;
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
             float ang = P3[k] * 6.2832 + a * (1.5 + p75);
             // (the last lobe tears off a little and shrinks as it goes: never a round balloon floating off the column)
             float tear = k == nl - 1 ? 1.0 + 1.0 * max(0.0, a - 0.5) * (0.5 + g) : 1.0;
             vec2 l = vec2(x + cos(ang) * r * 0.6 * tear, y + sin(ang) * r * 0.42 * tear - (k == 3 ? r * 0.45 : 0.0));
-            float lr = r * (0.82 - 0.12 * float(k)) * (1.0 - 0.7 * max(0.0, a - 0.6) / 0.4) * (1.0 - 0.3 * (tear - 1.0));
+            float lr = r * (0.45 + 0.5 * P4[k]) * (1.0 - 0.7 * max(0.0, a - 0.6) / 0.4) * (1.0 - 0.3 * (tear - 1.0));   // (uneven lobes)
             if ( lr < 0.8 * u ) continue;
-            vec2 dd = (c - floor(l) - 0.5) / lr;
+            vec2 dd = (cw - l) / lr; dd.x /= strx;
             float q = 1.0 - dot(dd, dd) / 1.6;
             // the cell's billow is the NEAREST lobe whose sphere covers it (oblique depth: further south and higher = nearer)
             float d2 = dot(dd, dd), dep = o0.y + 0.5 * z + float(k) * 0.7;
-            if ( d2 < 1.0 && dep > QB ) { QB = dep; nB = dd; lsB = ls; lowB = low; own = true; }
-            if ( q > 0.0 ) { GR += sqrt(q) * dd / lr; q *= q; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; } }
+            if ( d2 < min(1.0, 1.5 * env) && dep > QB ) { QB = dep; nB = dd / sqrt(max(min(1.0, 1.5 * env), 0.05)); lsB = ls; lowB = low; frB = front; own = true; }
+            if ( q > 0.0 ) { GR += env * sqrt(q) * dd / lr; q *= q * env; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; frB = front; } }
           }
         }
       }
     }
-    if ( F > 0.22 ) {
+    if ( F > 0.12 ) {
       float age = AG / F;
-      float fade = clamp((age - 0.55) / 0.45, 0.0, 1.0);
-      // old smoke DISSOLVES (the column's top): the rim widens and drops out in 2 x 2 clusters and the lobes shrink faster - it
-      // never lingers as dark round lobes
-      bool rim = F < 0.42 + 0.35 * fade;
-      if ( !(rim && rk < fade * 1.1) ) {
-        // the cell's OWN lobe is a sphere lit from the top-left: billows with a lit crescent and a shadow side inside the mass
-        // (mixed with the whole mass's outward normal - its density gradient - so the billows also shade as one rolling cloud)
+      float fade = clamp((age - 0.5) / 0.5, 0.0, 1.0);
+      // TATTERS: a finer noise riding up with the smoke erodes the density - the dense rolls hold, the thin parts tear into wisps,
+      // and old smoke (the column's top) thins and tears apart instead of lingering as round lobes
+      vec3 bl = vnd(vec2(cw.x / (6.0 * u), (cw.y + 12.0 * u * t) / (5.0 * u)), 617);   // (the billows: they ride up with the smoke)
+      float er = bl.x;
+      float D = F * (0.6 + 0.8 * er) - fade * (0.55 - 0.45 * er);
+      if ( D > 0.22 ) {
+        // VEILS: thin smoke between the rolls lets the map through (the rim alpha); the dense rolls are shaded as one volume
+        bool rim = D < 0.36;
         vec2 nU = GR / (length(GR) + 0.35 / (R1m * 0.5));
-        vec2 nM = own ? nB * 0.85 + nU * 0.2 : nU; if ( length(nM) > 0.98 ) nM *= 0.98 / length(nM);
+        // (the whole mass's gradient: lit top, shadowed underside; + the billows' own: each roll gets its lit crescent and shadow)
+        vec2 nM = (own ? nB * 0.9 + nU * 0.25 : nU) - vec2(bl.y, bl.z) * 0.12; if ( length(nM) > 0.98 ) nM *= 0.98 / length(nM);
         vec3 n3 = vec3(nM, sqrt(max(0.0, 1.0 - dot(nM, nM))));
-        float lit = dot(n3, normalize(vec3(-0.6, -0.72, 0.3)));   // (a low light: flat interiors are mid, the top-left faces lit)
-        int band = lit > 0.42 ? 1 : lit > -0.1 ? 2 : 3;
-        if ( (F > 1.2 || fade > 0.3) && band == 3 ) band = 2;           // dense cores and thinning old smoke are never in the darkest band
-        if ( lowB && band == 3 ) band = 4;                               // lit from below by the fire
-        B = band + (rim ? 8 : 0) + 16 * lsB;
+        float lit = dot(n3, normalize(vec3(-0.6, -0.72, 0.3)));   // (a low light from the top-left: lit tops, shadowed undersides)
+        int band = lit > 0.4 ? 1 : lit > -0.12 ? 2 : 3;
+        if ( fade > 0.45 && band == 3 ) band = 2;                       // thinning old smoke is never in the darkest band
+        if ( lowB && band == 3 ) band = 4;                             // the underside low over the fire is lit warm from below
+        B = band + (rim ? 8 : 0) + 16 * lsB + (frB ? 64 : 0);
       }
     }
   }
@@ -587,7 +631,7 @@ void main() {
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir) + z * 0.25;
           float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * 0.9;
           vec2 dd = vec2((c.x - x) / r, (c.y - o0.y - 2.0 * u) / (r * RY));
-          if ( dot(dd, dd) < 0.8 && rk < (a < 0.6 ? 0.55 : 0.25) ) { A = (A & 7) + 8 * (ls == 3 ? 2 : 1); }
+          if ( dot(dd, dd) < 0.8 && rk < 0.55 * smoothstep(0.0, 0.24, a) * (1.0 - 0.55 * smoothstep(0.45, 0.8, a)) * (1.0 - smoothstep(0.8, 1.0, a)) ) { A = (A & 7) + 8 * (ls == 3 ? 2 : 1); }
         }
       }
     }
@@ -667,11 +711,15 @@ vec4 cellColor(vec2 cf) {
     col = vec4(uRamp[band].rgb * al, al);
   } else if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
   if ( a.b > 0 ) {
-    int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp(a.b >> 4, 1, 3);
+    int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp((a.b >> 4) & 3, 1, 3);
+    bool front = (a.b & 64) != 0;
     vec3 rgb = band == 4 ? uRamp[11].rgb * (1.0 - 0.3 * uDark) : tintSmoke(SMK[(ls - 1) * 3 + band - 1]) * (1.0 - 0.62 * uDark);
     float al = rim == 1 ? S_RIM[ls] : S_A[ls][min(band, 3) - 1];
-    if ( a.r > 0 ) { al *= 0.16; rgb = uRamp[10].rgb; }            // over the flames: a thin veil lit from below, the fire stays readable
-    col = vec4(rgb * al, al) + col * (1.0 - al);
+    // SMOKE AND FLAMES INTERLEAVE: smoke behind a tongue is hidden by it; smoke in front of it is a thin veil lit warm from below
+    // (the fire stays readable and bright); smoke just above a flame glows where the tongue pokes into it
+    if ( a.r > 0 ) { if ( front ) { al *= 0.3; rgb = mix(rgb, uRamp[10].rgb, 0.6); } else al = 0.0; }
+    else if ( band != 1 && (art(p + ivec2(0, 1)).r > 0 || art(p + ivec2(0, 2)).r > 0) ) rgb = mix(rgb, uRamp[10].rgb, 0.55);
+    if ( al > 0.0 ) col = vec4(rgb * al, al) + col * (1.0 - al);
   }
   if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);   // sparks and hot coals glow through the smoke
   return col;
@@ -710,9 +758,9 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v2"),
-  fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v1"),
-  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v1"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v3"),
+  fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v2"),
+  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v2"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
 };
