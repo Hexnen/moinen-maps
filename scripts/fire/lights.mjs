@@ -1,4 +1,4 @@
-import { flickerAt } from "./model.mjs";
+import { flickerAt, litAt, FIRE_LV } from "./model.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 
@@ -19,6 +19,12 @@ import { reducedMotion } from "../config.mjs";
  * shaders and our `animate()` only writes their two uniforms (brightnessPulse, ratio) from the shared clock (model.flickerAt, 12 Hz
  * steps): the same flicker on every client, a few float writes per light per frame. Flicker 0 or reduced motion: no animation at all.
  * Adding or removing lights asks Foundry for one perception update (refreshLighting + refreshVision).
+ *
+ * GROWING AND GOING OUT: a light made for a fire that is still catching (or going out) carries its ignite / out time; `animate()`
+ * scales its coloration alpha and lerps its illumination colours from the scene's darkness towards their full values by model.litAt
+ * (the same uniforms Foundry set in its last refresh, saved by the `_update...Uniforms` overrides), so the light grows with the flames
+ * and fades with them - again uniforms only, no lighting refresh. A light at rest and steady (flicker 0) is not animated at all.
+ * LEVELS: the radius comes from model.lightsOf (x the fire level), the intensity is scaled here by the level.
  */
 let Cls = null;
 /** Darkness level below which the fire light is suppressed (by day it only tinted the map brown); Foundry re-checks on every lighting refresh. */
@@ -29,13 +35,38 @@ function sourceClass() {
   Cls = class FireLightSource extends Base {
     /** @override  the "torch" look driven by the shared clock instead of the client's ticker */
     animate(dt) {
-      if ( !this.isAnimated || this.mmFlicker <= 0 ) return;
-      const n = 1 - flickerAt(sharedNow(), this.mmSeed, this.mmFlicker);    // 0 .. 0.45 * flicker
-      const co = this.layers.coloration.shader, il = this.layers.illumination.shader;
-      co.uniforms.brightnessPulse = il.uniforms.brightnessPulse = 1 - n;
-      co.uniforms.ratio = il.uniforms.ratio = this.ratio * (1 - n * 0.4);
-      const t = (sharedNow() % 1e6) / 1000;
-      for ( const l of Object.values(this.layers) ) { const u = l.mesh?.uniforms; if ( u ) { u.time = t; u.intensity = 5; } }
+      if ( !this.isAnimated ) return;
+      const now = sharedNow(), co = this.layers.coloration.shader, il = this.layers.illumination.shader;
+      if ( this.mmFlicker > 0 ) {
+        const n = 1 - flickerAt(now, this.mmSeed, this.mmFlicker);    // 0 .. 0.45 * flicker
+        co.uniforms.brightnessPulse = il.uniforms.brightnessPulse = 1 - n;
+        co.uniforms.ratio = il.uniforms.ratio = this.ratio * (1 - n * 0.4);
+        const t = (now % 1e6) / 1000;
+        for ( const l of Object.values(this.layers) ) { const u = l.mesh?.uniforms; if ( u ) { u.time = t; u.intensity = 5; } }
+      }
+      const T = this.mmTime;
+      if ( T && this.mmBase ) {
+        // growing with the flames / fading with them: the saved full values scaled (uniforms only)
+        const k = litAt(now, T.ignite, T.out, T.G, T.O), B = this.mmBase, cu = co.uniforms, iu = il.uniforms;
+        cu.colorationAlpha = B.alpha * k;
+        const dark = iu.ambientDarkness ?? [0, 0, 0];
+        for ( const [key, base] of [["colorDim", B.dim], ["colorBright", B.bright]] ) {
+          const u = iu[key]; if ( !u || !base ) continue;
+          for ( let c = 0; c < 3; c++ ) u[c] = dark[c] + (base[c] - dark[c]) * k;
+        }
+        if ( k >= 1 && T.out === null && now > (T.ignite ?? 0) + T.G ) this.mmTime = null;   // (grown: plain again)
+      }
+    }
+    /** @override  keep the full values Foundry computed (the grow / out animation scales from them) */
+    _updateColorationUniforms() {
+      super._updateColorationUniforms();
+      (this.mmBase ??= {}).alpha = this.layers.coloration.shader.uniforms.colorationAlpha;
+    }
+    /** @override */
+    _updateIlluminationUniforms() {
+      super._updateIlluminationUniforms();
+      const u = this.layers.illumination.shader.uniforms;
+      (this.mmBase ??= {}).dim = u.colorDim ? [...u.colorDim] : null; this.mmBase.bright = u.colorBright ? [...u.colorBright] : null;
     }
   };
   return Cls;
@@ -72,10 +103,11 @@ export class FireLights {
         try {
           const s = new C({ sourceId: `moinenMapsFire.${i}` });
           s.mmSeed = L.seed; s.mmFlicker = still ? 0 : P.lightFlicker;
-          const alpha = Math.min(1, P.lightIntensity * (0.55 + 0.45 * L.strength));
+          s.mmTime = !still && (L.ignite !== null || L.out !== null) ? { ignite: L.ignite, out: L.out, G: P.grow * 1000, O: P.out * 1000 } : null;
+          const alpha = Math.min(1, P.lightIntensity * (0.55 + 0.45 * L.strength) * FIRE_LV.lightI[L.level ?? 2]);
           s.initialize({ x: L.x, y: L.y, elevation: 0, level, walls: true, vision: false, dim: L.radius, bright: Math.round(L.radius * 0.45),
             color: hexColor(P.lightColor), alpha: alpha * 0.75, luminosity: 0.5 + 0.2 * P.lightIntensity, attenuation: 0.6, coloration: 1,
-            animation: s.mmFlicker > 0 ? { type: "torch", speed: 5, intensity: 5, reverse: false } : { type: null }, seed: L.seed % 10000 });
+            animation: s.mmFlicker > 0 || s.mmTime ? { type: "torch", speed: 5, intensity: 5, reverse: false } : { type: null }, seed: L.seed % 10000 });
           s.suppression.mmDaylight = isDay();
           s.add();
           this.sources.push(s);

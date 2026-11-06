@@ -17,10 +17,18 @@ import { perfMode } from "../perf-mode.mjs";
  *
  * COST: nothing painted -> no container, no ticker, no draw (the display is not even made). With fire: one ticker listener that culls
  * the areas against the view (an area off screen is `visible = false`: no draw), writes one uniform per visible area when the 12 fps
- * frame changes, and places the particles of the visible areas. Reduced motion: a still frame (time 0), no particles, a steady light -
- * the ticker is not registered at all.
+ * frame changes, and places the particles of the visible areas; an area that grows or goes out also gets its two clock uniforms
+ * (model.raster's times texture does the rest on the GPU). Reduced motion: a still frame (time 0), no particles, a steady light, no
+ * growing / going out (fire.mjs leaves the phases out) - the ticker is not registered at all.
  */
 const CAP = { high: 48, medium: 24, low: 0 };
+
+/** The scene's background map as the shader samples it (the texture Foundry already has on the GPU), or null. */
+function mapOf() {
+  const b = canvas.primary?.background, t = b?.texture;
+  if ( !t?.valid || !b.width || !b.height ) return null;
+  return { texture: t, rect: [b.x - b.width * (b.anchor?.x ?? 0), b.y - b.height * (b.anchor?.y ?? 0), b.width, b.height] };
+}
 
 export class FireDisplay {
   constructor() {
@@ -56,7 +64,9 @@ export class FireDisplay {
     for ( const [id, it] of want ) {
       if ( this.areas.has(id) ) continue;
       const { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
-      const mesh = new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g });
+      // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
+      const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
+      const mesh = new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf() });
       this.meshes.addChild(mesh);
       this.areas.set(id, { key: area.key, area, field, mesh });
       changed = true;
@@ -87,13 +97,13 @@ export class FireDisplay {
   tick(force = false) {
     if ( !canvas.stage || !this.geo ) return;
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
-    const now = still ? 0 : sharedNow(), T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
+    const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
     const vw = this.view(), m = geo.grid;
     const vis = [];
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
-      if ( on ) { vis.push(a); if ( newFrame ) a.mesh.setTime(T); }
+      if ( on ) { vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0); }
     }
     this.lastT = T;
     this.stats.visible = vis.length;

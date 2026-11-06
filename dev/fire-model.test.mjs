@@ -6,6 +6,9 @@
 //   D. particles: a pure function of the shared clock (same inputs -> same output; frame rate independent; on the art grid), capped
 //   E. lights: merged into few clusters, capped, deterministic; flicker deterministic, stepped, in range
 //   F. culling: in / out of view
+//   G. time: catching along the path, growing, going out, erasers, relighting, late joiners, reduced motion
+//   I. smoke never cut by its area's rectangle (8 wind directions x 3 speeds)
+//   H. levels: fire and smoke independent, old strokes, lights per level, plumes do not merge fires, styles
 import * as M from "../scripts/fire/model.mjs";
 
 let fails = 0, n = 0;
@@ -105,6 +108,87 @@ ok(M.inView(one.rect, geo, { x0: 0, y0: 0, x1: 1000, y1: 1000 }), "in view");
 ok(!M.inView(one.rect, geo, { x0: 5000, y0: 5000, x1: 6000, y1: 6000 }), "off screen culled");
 ok(M.inView(one.rect, geo, { x0: geo.ox + one.rect.x1 * geo.ap + 50, y0: 0, x1: 9000, y1: 9000 }, 60), "margin keeps an area just outside");
 ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
+
+/* G: time - catching, growing, going out (all from q / g / o and the clock) */
+{
+  const T = M.timing(geo, P), q = 1_000_000;
+  const f = M.cleanStroke({ id: "g1", k: "fire", s: 1, r: 60, p: [400, 400, 700, 400], wd: 0, ws: 0, q });
+  const cm = M.catchMs(f, geo, P);
+  ok(cm > 0 && cm < 8000, `catches along its path in ${Math.round(cm)} ms`);
+  ok(M.phaseOf(f, q + 10, geo, P) === "grow" && M.phaseOf(f, q + cm + T.growSpan + 1, geo, P) === "on", "grow, then on");
+  ok(M.phaseOf(f, q + 10, geo, P, true) === "on" && M.phaseOf(f, undefined, geo, P) === "on", "reduced motion / no clock: no phases");
+  const o = { ...f, o: q + 60000 };
+  ok(M.phaseOf(o, q + 60001, geo, P) === "out" && M.phaseOf(o, q + 60000 + T.outSpan + 1, geo, P) === "gone", "put out: out, then gone");
+  ok(M.phaseOf(o, q + 60001, geo, P, true) === "gone", "reduced motion: put out = gone at once");
+  ok(M.nextChange([f], q + 10, geo, P) === q + cm + T.growSpan && M.nextChange([f], q + cm + T.growSpan + 5, geo, P) === Infinity, "next phase change (one timer)");
+  ok(M.goneAt([o, f], q + 60000 + T.outSpan + 1, geo, P).map((s) => s.id).join() === "g1", "gone records found for the GM's purge");
+  // a client that loads later sees the same phase as one that was there all along (a function of the stored times and the clock)
+  const A1 = M.areasOf([f], geo, P, q + 500), A2 = M.areasOf([JSON.parse(JSON.stringify(f))], geo, P, q + 500);
+  ok(A1[0].key === A2[0].key, "same phase and key for a late joiner");
+  ok(M.areasOf([o], geo, P, q + 60000 + T.outSpan + 1).length === 0, "after going out: nothing (no replay)");
+  // the field while growing: ignite times rise along the path (drawing order) and the times texture exists; at rest it does not
+  const fg = M.raster(M.areasOf([f], geo, P, q + 10)[0], geo, P);
+  ok(fg.times && fg.anim, "growing: a times texture");
+  const W = fg.w, ign = (x) => { let best = 255; for ( let y = 0; y < fg.h; y++ ) { const v = fg.times[(y * W + x) * 4]; if ( v ) best = Math.min(best, v); } return best; };
+  const xs = [Math.floor(W * 0.2), Math.floor(W * 0.5), Math.floor(W * 0.8)].map(ign);
+  ok(xs[0] < xs[1] && xs[1] < xs[2], `it catches from where the stroke began (${xs})`);
+  ok(M.raster(M.areasOf([f], geo, P, q + cm + T.growSpan + 1)[0], geo, P).times === null, "at rest: no times texture");
+  // going out: out times written, smoke later than flames (it lingers)
+  const fo = M.raster(M.areasOf([o], geo, P, q + 60001)[0], geo, P);
+  let outF = 0, smokeLater = 0, flames = 0;
+  for ( let i = 0; i < fo.w * fo.h; i++ ) { const t = fo.times[i * 4 + 1], ts = fo.times[i * 4 + 3]; if ( fo.data[i * 4] ) { flames++; if ( t < 255 ) outF++; } if ( ts < 255 && fo.data[i * 4] && ts > t ) smokeLater++; }
+  ok(outF === flames && flames > 0, `every flame cell goes out (${outF}/${flames})`);
+  ok(smokeLater > 0, "the smoke goes out after the flames");
+  // an eraser puts out (anim) and becomes a cut once done; an undone eraser lets the fire grow back
+  const er = M.cleanStroke({ id: "g2", k: "erase", s: 1, r: 50, p: [550, 400], q: q + 100000 });
+  const done = q + cm + T.growSpan + 200000;
+  const fe = M.raster(M.areasOf([f, er], geo, P, q + 100001)[0], geo, P), fc = M.raster(M.areasOf([f, er], geo, P, done)[0], geo, P);
+  ok(fe.times && fe.mass > fc.mass && !fc.times, "eraser: going out, then a plain cut");
+  const fr = M.raster(M.areasOf([f, { ...er, o: done }], geo, P, done + 1)[0], geo, P);
+  ok(fr.times && fr.mass > fc.mass, "undone eraser: the fire grows back");
+  // relit (redo / undo of a delete): grows again from g, keeps its place q
+  const rl = M.cleanStroke({ ...f, g: done });
+  ok(M.phaseOf(rl, done + 1, geo, P) === "grow" && rl.q === q, "relit: grows again, same paint order");
+}
+
+/* H: levels (fire and smoke independent), styles */
+{
+  const base = { s: 1, r: 60, wd: 0, ws: 0, q: 1 };
+  const old = M.cleanStroke({ id: "h0", k: "fire", p: [400, 400], ...base });
+  ok(old.lv === 2 && old.sm === 2, "old strokes read as fire 2 / smoke 2");
+  ok(M.cleanStroke({ id: "h1", k: "smoke", p: [1, 1], sm: 0 }).sm === 1 && M.cleanStroke({ id: "h1", k: "fire", p: [1, 1], sm: 0 }).sm === 0, "smoke brush 1..3, fire smoke 0..3");
+  const F = (lv, sm) => M.raster(M.areasOf([M.cleanStroke({ id: "h", k: "fire", p: [400, 400], lv, sm, ...base })], geo, P)[0], geo, P);
+  const rowsUp = (fl) => { let top = fl.h; for ( let y = 0; y < fl.h; y++ ) for ( let x = 0; x < fl.w; x++ ) if ( fl.data[(y * fl.w + x) * 4] > 20 ) { top = Math.min(top, y); } return fl.h - top; };
+  const smokeSum = (fl) => { let t = 0; for ( let i = 0; i < fl.w * fl.h; i++ ) t += fl.data[i * 4 + 1]; return t; };
+  const f1 = F(1, 2), f2 = F(2, 2), f3 = F(3, 2);
+  ok(rowsUp(f1) < rowsUp(f2) && rowsUp(f2) < rowsUp(f3), `fire levels: taller tongues (${rowsUp(f1)} < ${rowsUp(f2)} < ${rowsUp(f3)})`);
+  const sm = (lv) => M.raster(M.areasOf([M.cleanStroke({ id: "h", k: "fire", p: [400, 400], lv, sm: 2, ...base, r: 20 })], geo, P)[0], geo, P).emit.fire.length;
+  ok(sm(1) < sm(2) && sm(2) < sm(3), `fire levels: more sparks (${sm(1)}, ${sm(2)}, ${sm(3)})`);
+  ok(smokeSum(F(3, 0)) === 0 && smokeSum(F(1, 3)) > smokeSum(F(1, 1)) && smokeSum(F(2, 1)) > 0, "smoke independent of fire: off / wisps / column");
+  const code = (fl) => { for ( let i = 0; i < fl.w * fl.h; i++ ) if ( fl.data[i * 4 + 1] && fl.data[i * 4] ) return fl.data[i * 4 + 3]; return 0; };
+  ok(code(F(3, 1)) === 1 + 2 * 4 + 1 && code(F(1, 3)) === 1 + 0 + 3, "levels encoded per cell (A)");
+  const L = (lv) => M.lightsOf([{ area: M.areasOf([M.cleanStroke({ id: "h", k: "fire", p: [400, 400], lv, sm: 0, ...base })], geo, P)[0], field: F(lv, 0) }], geo, P)[0];
+  ok(L(1).radius < L(2).radius && L(2).radius < L(3).radius && L(3).level === 3, "lights scale with the fire level");
+  // two fires whose plumes overlap stay two areas and two lights
+  const a = M.cleanStroke({ id: "p1", k: "fire", p: [300, 600], ...base }), b = M.cleanStroke({ id: "p2", k: "fire", p: [300 + 4 * geo.grid, 600], ...base, wd: 180, ws: 1 });
+  const PA = M.areasOf([a, b], geo, P);
+  ok(PA.length === 2, `plumes do not merge fires (${PA.length} areas)`);
+  ok(M.lightsOf(PA.map((x) => ({ area: x, field: M.raster(x, geo, P) })), geo, P).length === 2, "distinct fires keep distinct lights");
+  ok(M.areasOf([a, M.cleanStroke({ ...b, id: "p3", st: "fireball", p: [300, 600] })], geo, P).length === 2, "styles never share an area");
+  ok(M.areasOf([M.cleanStroke({ ...b, id: "p4", st: "fireball" })], geo, P)[0].style === "fireball", "fireball style per stroke");
+}
+
+/* I: the smoke is never cut by its area's rectangle (fire style), wind from all 8 directions, three speeds, fire and smoke strokes */
+{
+  let worst = 0, where = "";
+  for ( const k of ["fire", "smoke"] ) for ( const ws of [0, 0.5, 1] ) for ( const wd of [0, 45, 90, 135, 180, 225, 270, 315] ) {
+    const st = M.cleanStroke({ id: "c", k, s: 1, r: 60, p: [520, 600, 640, 610], wd, ws, q: 1, lv: 3, sm: 3 });
+    const f = M.raster(M.areasOf([st], geo, P)[0], geo, P), W = f.w, H = f.h, g = (x, y) => f.data[(y * W + x) * 4 + 1];
+    for ( let x = 0; x < W; x++ ) for ( const y of [0, H - 1] ) if ( g(x, y) > worst ) { worst = g(x, y); where = `${k} ${wd}/${ws}`; }
+    for ( let y = 0; y < H; y++ ) for ( const x of [0, W - 1] ) if ( g(x, y) > worst ) { worst = g(x, y); where = `${k} ${wd}/${ws}`; }
+  }
+  ok(worst === 0, `smoke fades out inside its rectangle in every wind (worst border density ${worst} ${where})`);
+}
 
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);
 process.exit(fails ? 1 : 0);

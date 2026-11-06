@@ -8,15 +8,28 @@ import * as Editor from "./editor.mjs";
 /**
  * FIRE AND SMOKE in the Destruction workspace (added with extendSection: section.mjs is unchanged):
  *  - tools: a fire brush, a smoke brush, an eraser of this layer;
- *  - bar: size, strength and wind (direction + strength) of the brush in hand (client settings; pinned on each stroke);
- *  - dock panel "Fire and smoke": the layer on/off, who sees it, flame height, plume length, smoke from fire, speed, the light
- *    (on, radius, intensity, colour, flicker) and the list of strokes (newest first, delete one), Clear.
+ *  - bar: size, strength and wind (direction + strength) of the brush in hand; the fire brush's FIRE LEVEL and its own SMOKE LEVEL
+ *    side by side (smoke with "off"), and its style (fire / fireball); the smoke brush's smoke level - the same level buttons as
+ *    destruction's (client settings, each remembered; pinned on each stroke);
+ *  - dock panel "Fire and smoke": the layer on/off, who sees it, flame height, plume length, smoke from fire, speed, how fast fire
+ *    catches, grows and goes out, the light (on, radius, intensity, colour, flicker) and the list of strokes (newest first, its
+ *    levels - click to change them - and delete one), Clear.
  */
 const TOOLS = { "mm-fire-paint": "fire", "mm-fire-smoke": "smoke", "mm-fire-erase": "erase" };
 const KIND_ICON = { fire: "fa-solid fa-fire", smoke: "fa-solid fa-smog", erase: "fa-solid fa-eraser" };
 const KIND_INK = { fire: "#ff8a24", smoke: "#a8a29a", erase: "#ffffff" };
 /** The eight wind directions (degrees, screen: 0 = right, 90 = down), drawn as one arrow turned. */
 const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
+/** Level colours, as destruction's level buttons (0: smoke off). */
+const LEVEL_COLOR = ["#8c8c8c", "#f2c14e", "#ef8a3a", "#e0453a"];
+const SMK = (l) => T(`Fire.smk${l}`), SMKH = (l) => T(`Fire.smkHint${l}`);
+const SMOKE_COLOR = ["#5a5a5a", "#c9c5bf", "#8f8a84", "#4a4541"];
+
+/** One row of level buttons (destruction's control style): `attr` the data attribute, `vals`, the current value. */
+function levelRow(label, attr, vals, cur, name, hint, colors) {   // name / hint: (value) -> text
+  const btn = (l) => `<button type="button" class="mm-ws-toolbtn mm-d-level" data-${attr}="${l}" aria-pressed="${l === cur}" style="--mm-tool:${colors[l]}" data-tooltip="${esc(hint(l))}"><span class="mm-d-dot" inert></span><span>${esc(name(l))}</span></button>`;
+  return `<div class="mm-ws-opt"><span class="mm-ws-label">${esc(T(label))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T(label))}">${vals.map(btn).join("")}</div></div>`;
+}
 
 /* ---------------------------------------------------------------- the bar */
 
@@ -26,16 +39,33 @@ function bar(host, ctx) {
   if ( mode === "erase" ) host.innerHTML = `${size}${optHint(T("Fire.eraseHint"))}`;
   else {
     const dirs = DIRS.map((d) => `<button type="button" class="mm-ws-toolbtn" data-wind-dir="${d}" aria-pressed="${d === b.windDir}" aria-label="${esc(T(`Fire.dir.${d}`))}" data-tooltip="${esc(T(`Fire.dir.${d}`))}"><i class="fa-solid fa-arrow-right fa-rotate-by" style="--fa-rotate-angle:${d}deg" inert></i></button>`).join("");
-    host.innerHTML = `${size}
+    const levels = mode === "smoke"
+      ? levelRow("Fire.smokeLevel", "smoke-level", [1, 2, 3], b.smokeLevel, SMK, SMKH, SMOKE_COLOR)
+      : `${levelRow("Fire.level", "fire-level", [1, 2, 3], b.level, (l) => T(`Fire.lvl${l}`), (l) => T(`Fire.lvlHint${l}`), LEVEL_COLOR)}
+         ${levelRow("Fire.smokeLevel", "fire-smoke", [0, 1, 2, 3], b.fireSmoke, SMK, SMKH, SMOKE_COLOR)}
+         ${levelRow("Fire.style", "fire-style", ["fire", "fireball"], b.style, (l) => T(`Fire.sty.${l}`), (l) => T(`Fire.styHint.${l}`), { fire: "#ff8a24", fireball: "#ffb030" })}`;
+    host.innerHTML = `${size}${levels}
       ${optRange({ name: "fireStrength", label: T("Fire.strength"), value: b.strength, min: 0.1, max: 1, step: 0.05, hint: T("Fire.strengthHint") })}
       ${optRange({ name: "fireWind", label: T("Fire.wind"), value: b.wind, min: 0, max: 1, step: 0.05, hint: T("Fire.windHint") })}
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Fire.windDir"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Fire.windDir"))}">${dirs}</div></div>
       ${optHint(mode === "smoke" ? T("Fire.smokeHint") : T("Fire.paintHint"))}`;
   }
   const off = bindSettings(host, { fireBrush: "fireBrush", fireStrength: "fireStrength", fireWind: "fireWind" });
-  const onClick = (ev) => { const d = ev.target.closest?.("[data-wind-dir]"); if ( d ) game.settings.set(MODULE_ID, "fireWindDir", Number(d.dataset.windDir)); };
+  const PICK = { windDir: "fireWindDir", fireLevel: "fireLevel", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle" };
+  const onClick = (ev) => {
+    for ( const k of Object.keys(PICK) ) {
+      const d = ev.target.closest?.(`[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`); if ( !d ) continue;
+      const v = d.dataset[k]; game.settings.set(MODULE_ID, PICK[k], k === "fireStyle" ? v : Number(v)); return;
+    }
+  };
   host.addEventListener("click", onClick);
-  const offDir = onSetting(["fireWindDir"], () => { for ( const x of host.querySelectorAll("[data-wind-dir]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.windDir) === Editor.brush().windDir)); });
+  const sync = () => {
+    const nb = Editor.brush(), cur = { windDir: nb.windDir, fireLevel: nb.level, fireSmoke: nb.fireSmoke, smokeLevel: nb.smokeLevel, fireStyle: nb.style };
+    for ( const k of Object.keys(PICK) ) for ( const x of host.querySelectorAll(`[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`) ) {
+      x.setAttribute("aria-pressed", String((k === "fireStyle" ? x.dataset[k] : Number(x.dataset[k])) === cur[k]));
+    }
+  };
+  const offDir = onSetting(Object.values(PICK), sync);
   return () => { off(); offDir(); host.removeEventListener("click", onClick); };
 }
 
@@ -47,8 +77,12 @@ function mountPanel(host) {
     const P = Fire.params0(), L = M.LIMITS, st = Fire.fireApi.status();
     const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Fire.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Fire.h.${k}`) });
     const rows = Fire.list().reverse().map((s) => {
-      const name = T(`Fire.kind.${s.k}`), tip = s.k === "erase" ? name : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
-      return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span>
+      const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : "");
+      const tip = s.k === "erase" ? name : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
+      // the levels: click to step them (fire 1..3, smoke 0..3 / 1..3)
+      const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${LEVEL_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.level")}: ${T(`Fire.lvl${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>` : "";
+      const smk = s.k !== "erase" ? `<button type="button" class="mm-fire-lv" data-act="sm" data-id="${esc(s.id)}" style="--mm-tool:${SMOKE_COLOR[s.sm]}" data-tooltip="${esc(`${T("Fire.smokeLevel")}: ${T(`Fire.smk${s.sm}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.smkShort"))}${s.sm}</button>` : "";
+      return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}</span>
         ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>`;
     }).join("");
     host.innerHTML = `<div class="mm-d-form mm-fire-panel">
@@ -58,6 +92,7 @@ function mountPanel(host) {
       ${optCheck({ name: "p.on", label: T("Fire.f.on"), checked: P.on, hint: T("Fire.h.on") })}
       ${optSelect({ name: "p.who", label: T("Fire.f.who"), value: P.who, options: [["all", T("Fire.o.all")], ["gm", T("Fire.o.gm")]] })}
       ${range("flame")}${range("plume", 0.25)}${range("smoke")}${range("speed")}
+      ${range("spread", 0.5)}${range("grow", 0.1)}${range("out", 0.1)}
       <fieldset class="mm-fire-light"><legend>${esc(T("Fire.light"))}</legend>
         ${optCheck({ name: "p.light", label: T("Fire.f.light"), checked: P.light, hint: T("Fire.h.light") })}
         ${range("lightRadius", 0.1)}${range("lightIntensity")}${range("lightFlicker")}
@@ -77,6 +112,11 @@ function mountPanel(host) {
     const b = ev.target.closest?.("[data-act]"); if ( !b || !gm ) return;
     b.blur();
     if ( b.dataset.act === "del" ) Fire.remove(b.dataset.id);
+    else if ( b.dataset.act === "lv" || b.dataset.act === "sm" ) {
+      const st = Fire.list().find((x) => x.id === b.dataset.id); if ( !st ) return;
+      if ( b.dataset.act === "lv" ) Fire.setLevels(st.id, { lv: st.lv % 3 + 1 });
+      else Fire.setLevels(st.id, { sm: st.k === "smoke" ? st.sm % 3 + 1 : (st.sm + 1) % 4 });
+    }
     else if ( b.dataset.act === "clear" ) {
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Fire.clear") }, content: `<p>${esc(T("Fire.clearConfirm"))}</p>` }).catch(() => false);
       if ( ok ) Fire.clear();

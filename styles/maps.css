@@ -772,3 +772,5 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-fire-light { border: 1px solid var(--color-border-light-2, #8884); border-radius: 4px; margin: 0.4rem 0 0; padding: 0.25rem 0.5rem 0.4rem; display: grid; gap: 0.25rem; }
 .mm-fire-light legend { padding: 0 0.25rem; font-weight: bold; }
 .mm-fire-light input[type=color] { width: 3rem; height: 1.4rem; padding: 0; }
+.mm-fire-lvs { display: inline-flex; gap: 2px; margin-left: auto; }
+.mm-fire-lv { width: auto; flex: 0 0 auto; min-width: 1.9em; padding: 0 0.3rem; line-height: 1.5; font-size: var(--font-size-11, 11px); border-left: 3px solid var(--mm-tool, #888); }
