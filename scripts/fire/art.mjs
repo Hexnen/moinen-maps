@@ -35,12 +35,14 @@
  *         shadow bottom-right: billows inside the mass, not flat blocks), warm underside low over the fire; edges thin by the rim
  *         dropping out in 2x2 clusters as the puff ages, shapes shrink - never cut by a field or the area. Old smoke dissolves (wider dropping rim, faster shrinking lobes, never the
  *         darkest band; the torn-off last lobe stays close and small), so the column's top never grows dark round balloons.
- *         The puffs start above the flame tops; where smoke still lies over a flame it is only a thin warm veil (the flames stay
- *         readable through it), and sparks and coals glow through it. The plume gate also probes upwind, so sheared puffs are
+ *         SMOKE AND FLAMES MIX: 40 % of a fire's puffs are born low, between the tongues; 45 % curl IN FRONT of the flames (a thin
+ *         warm veil lit from below), the rest pass behind them (hidden by the tongues); 40 % of the front ones are DENSE DRIFTS that
+ *         really cover part of the flames for a moment (lit from below, the flame's colour glowing through). Sparks glow through. The plume gate also probes upwind, so sheared puffs are
  *         never cut off straight.
  *       - GROUND: char inside the bed (clustered ragged edge), a heat-tint ring outside it, the smoke's shadow on the ground.
  *  2. GROUND (every frame): a MULTIPLY quad - the map's own colours darkened / warmed (never an opaque ground colour).
- *  3. ART (every frame): flames, embers, smoke from the render texture: a rim on the merged body's OUTER silhouette only (selective: 2 steps
+ *  3. ART (every frame): flames, embers and sparks (the FIRE layer, under the tokens), and the SMOKE layer (a second quad in the
+ *     display's `above` container, sortLayer 800: over the tokens, so smoke drifting over a token veils it), from the render texture: a rim on the merged body's OUTER silhouette only (selective: 2 steps
  *     darker on top and on the shadow side, 1 on the lit left side, red not plum on hot flanks, none at the bottom), palette lookup,
  *     flat per-band alpha; the module's exact box-footprint sampler at any zoom.
  *  4. EMISSION (every frame): the flame and ember cells drawn white into Foundry's illumination (canvas.effects.illumination.lights,
@@ -302,9 +304,9 @@ void main() {
         float thr = LD / L_DENS[3] * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
         float on = clamp((thr - E2.y) / 0.14, 0.0, 1.0);               // (an emitter fading in or out shrinks: it never pops)
         if ( on <= 0.0 ) continue;
-        float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.55 + 0.75 * fz) * (0.3 + 0.7 * on) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
+        float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.55 + 0.75 * fz) * (on * (2.0 - on)) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
         // tongue heights vary: taller towards the heart of the fire, a few tall leaders, many short ones (never a picket fence)
-        float eh = eh0 * (0.38 + 1.0 * fz) * (0.55 + 0.45 * on);
+        float eh = eh0 * (0.38 + 1.0 * fz) * (0.15 + 0.85 * on);   // (a dying patch's tongues SINK into the bed and thin out, never cut)
         // (exact cull: this emitter's tongue and its roots must reach the cell)
         if ( c.y < e.y - (LRI * u * 2.1 * es * eh + 6.6 * r0 * es) - 1.0 || c.y > e.y + 4.5 * r0 * es + 2.0 * u ) continue;
         float rate = 0.8 + 0.5 * E2.z;
@@ -525,7 +527,7 @@ void main() {
     float strM = 1.0 + 0.55 * (0.3 + 2.0 * (abs(0.6 * uWind.x) + 0.216));   // (the widest shear stretch; + the flow warp below)
     float pad = R1m * (0.83 + 1.15 * strM) + sps * 0.5 + 2.5 * u + 4.0 * u;
     int jHi = int(floor((c.y + zTop * (1.0 + max(0.0, -0.5 * uWind.y)) + R1m + 4.5 * u) / spys)) + 1, jLo = int(floor((c.y - R1m - 4.5 * u - max(0.0, 0.5 * uWind.y) * zTop) / spys)) - 1;
-    float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false;
+    float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false, drB = false;
     // the FLOW: a smooth warp field that rises and drifts with the smoke - every edge rolls and curls over itself, no lobe stays a
     // circle; the same field turns the shading (the rolls inside the mass follow the curls of its silhouette)
     vec2 fp = vec2(c.x - (0.6 * uWind.x + 0.12 * gdir) * 10.0 * u * t, c.y + 10.0 * u * t) / (11.0 * u);
@@ -579,6 +581,8 @@ void main() {
           float vj = v0 * (0.65 + 0.7 * P1.w);                // every puff its own speed: no flat ceiling
           float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0 * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0;   // (low puffs: among the tongues)
           bool front = fract(P1.z * 11.1) < 0.45;                         // (some smoke curls in front of the flames, some behind)
+          // (a few of the front puffs are DENSE DRIFTS: they really cover the flames for a moment as they pass, lit from below)
+          bool drift = front && fract(P1.w * 17.3) < 0.4;
           float z = zb + vj * TAU * (1.0 - exp(-age / TAU));
           vec4 P2 = hb(eid, n, 62);
           vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
@@ -608,8 +612,8 @@ void main() {
             float q = 1.0 - dot(dd, dd) / 1.6;
             // the cell's billow is the NEAREST lobe whose sphere covers it (oblique depth: further south and higher = nearer)
             float d2 = dot(dd, dd), dep = o0.y + 0.5 * z + float(k) * 0.7;
-            if ( d2 < min(1.0, 1.5 * env) && dep > QB ) { QB = dep; nB = dd / sqrt(max(min(1.0, 1.5 * env), 0.05)); lsB = ls; lowB = low; frB = front; own = true; }
-            if ( q > 0.0 ) { GR += env * sqrt(q) * dd / lr; q *= q * env; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; frB = front; } }
+            if ( d2 < min(1.0, 1.5 * env) && dep > QB ) { QB = dep; nB = dd / sqrt(max(min(1.0, 1.5 * env), 0.05)); lsB = ls; lowB = low; frB = front; drB = drift; own = true; }
+            if ( q > 0.0 ) { GR += env * sqrt(q) * dd / lr; q *= q * env; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; frB = front; drB = drift; } }
           }
         }
       }
@@ -633,7 +637,7 @@ void main() {
         int band = lit > 0.4 ? 1 : lit > -0.12 ? 2 : 3;
         if ( fade > 0.45 && band == 3 ) band = 2;                       // thinning old smoke is never in the darkest band
         if ( lowB && band == 3 ) band = 4;                             // the underside low over the fire is lit warm from below
-        B = band + (rim ? 8 : 0) + 16 * lsB + (frB ? 64 : 0);
+        B = band + (rim ? 8 : 0) + 16 * lsB + (frB ? 64 : 0) + (frB && drB ? 128 : 0);
       }
     }
   }
@@ -722,8 +726,8 @@ void main() {
   fragColor = OUT(c);
 }`;
 
-const SHOW = `${SHOW_COMMON}
-const float OUTER[4] = float[4](0.0, 0.55, 0.85, 1.0);                 // outer bands' alpha per fire level (flat)
+// the smoke's palette (the smoke layer)
+const SMOKE_PAL = `
 const vec3 SMK[9] = vec3[9](vec3(0.741, 0.718, 0.678), vec3(0.557, 0.537, 0.506), vec3(0.384, 0.369, 0.408),
                             vec3(0.788, 0.765, 0.722), vec3(0.545, 0.525, 0.494), vec3(0.310, 0.294, 0.341),
                             vec3(0.561, 0.537, 0.498), vec3(0.349, 0.333, 0.369), vec3(0.173, 0.165, 0.196));   // wisps / plume / column: light, mid, shadow
@@ -733,11 +737,11 @@ vec3 tintSmoke(vec3 c) {
   if ( uSmokeTint.a <= 0.0 ) return c;
   float L = dot(c, vec3(0.3, 0.59, 0.11)), tl = max(0.05, dot(uSmokeTint.rgb, vec3(0.3, 0.59, 0.11)));
   return mix(c, min(vec3(1.0), L * uSmokeTint.rgb / tl), uSmokeTint.a);
-}
-vec4 cellColor(vec2 cf) {
-  ivec2 p = ivec2(cf);
-  ivec4 a = art(p);
-  vec4 col = vec4(0.0);
+}`;
+const FLAME_COLOR = `
+const float OUTER[4] = float[4](0.0, 0.55, 0.85, 1.0);                 // outer bands' alpha per fire level (flat)
+// a flame cell's colour, premultiplied (0 = no flame)
+vec4 flameColor(ivec2 p, ivec4 a) {
   if ( a.r > 0 && a.g > 0 && a.g < 24 ) {
     int band = (a.g - 1) & 7, lv = clamp((a.g - 1) / 8 + 1, 1, 3);
     // the RIM on the merged body's outer silhouette only (the flames are one layer), selective: nothing above / on the shadow side
@@ -747,21 +751,50 @@ vec4 cellColor(vec2 cf) {
     if ( up < a.r || rt < a.r ) band = max(band - (outer ? 2 : 1), band >= 4 ? 1 : 0);
     else if ( lf < a.r ) band = max(band - 1, 1);
     float al = band <= 1 ? OUTER[lv] : 1.0;
-    col = vec4(uRamp[band].rgb * al, al);
-  } else if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
-  if ( a.b > 0 ) {
-    int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp((a.b >> 4) & 3, 1, 3);
-    bool front = (a.b & 64) != 0;
-    vec3 rgb = band == 4 ? uRamp[11].rgb * (1.0 - 0.3 * uDark) : tintSmoke(SMK[(ls - 1) * 3 + band - 1]) * (1.0 - 0.62 * uDark);
-    float al = rim == 1 ? S_RIM[ls] : S_A[ls][min(band, 3) - 1];
-    // SMOKE AND FLAMES INTERLEAVE: smoke behind a tongue is hidden by it; smoke in front of it is a thin veil lit warm from below
-    // (the fire stays readable and bright); smoke just above a flame glows where the tongue pokes into it
-    if ( a.r > 0 ) { if ( front ) { al *= 0.3; rgb = mix(rgb, uRamp[10].rgb, 0.6); } else al = 0.0; }
-    else if ( band != 1 && (art(p + ivec2(0, 1)).r > 0 || art(p + ivec2(0, 2)).r > 0) ) rgb = mix(rgb, uRamp[10].rgb, 0.55);
-    if ( al > 0.0 ) col = vec4(rgb * al, al) + col * (1.0 - al);
+    return vec4(uRamp[band].rgb * al, al);
   }
-  if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);   // sparks and hot coals glow through the smoke
+  return vec4(0.0);
+}`;
+// the FIRE layer (under the tokens): flames, bed embers, coals and sparks
+const SHOW = `${SHOW_COMMON}
+${FLAME_COLOR}
+vec4 cellColor(vec2 cf) {
+  ivec2 p = ivec2(cf);
+  ivec4 a = art(p);
+  vec4 col = flameColor(p, a);
+  if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
+  if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);   // sparks and hot coals
   return col;
+}
+#define OUT(c) ((c) * uAlpha)
+${FOOTPRINT}`;
+
+// the SMOKE layer (ABOVE the tokens: smoke drifting over a token veils it, thinly at level 1, more at 3). It is composited over the
+// fire layer, so the interleave is decided here: smoke behind a tongue is hidden by it (nothing drawn on a flame cell); smoke in front
+// of it is a thin veil lit warm from below - and a DENSE DRIFT (a few of the front puffs) really covers the flames for a moment, lit
+// from below with the flame's own colour glowing through; smoke just above a flame glows where the tongue pokes into it; a spark in
+// the smoke glows through it (drawn here again, on top)
+const SMOKE = `${SHOW_COMMON}
+${SMOKE_PAL}
+${FLAME_COLOR}
+vec4 cellColor(vec2 cf) {
+  ivec2 p = ivec2(cf);
+  ivec4 a = art(p);
+  if ( a.b == 0 ) return vec4(0.0);
+  if ( a.g >= 32 ) return vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);
+  int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp((a.b >> 4) & 3, 1, 3);
+  bool front = (a.b & 64) != 0, drift = (a.b & 128) != 0;
+  vec3 rgb = band == 4 ? uRamp[11].rgb * (1.0 - 0.3 * uDark) : tintSmoke(SMK[(ls - 1) * 3 + band - 1]) * (1.0 - 0.62 * uDark);
+  float al = rim == 1 ? S_RIM[ls] : S_A[ls][min(band, 3) - 1];
+  vec4 fl = flameColor(p, a);
+  if ( fl.a > 0.0 ) {
+    if ( !front ) return vec4(0.0);
+    if ( drift ) {
+      al = min(0.82, al) * (rim == 1 ? 0.7 : 1.0);
+      rgb = mix(mix(rgb, uRamp[10].rgb, 0.4), fl.rgb / max(fl.a, 0.01), 0.22);
+    } else { al *= 0.3; rgb = mix(rgb, uRamp[10].rgb, 0.6); }
+  } else if ( band != 1 && (art(p + ivec2(0, 1)).r > 0 || art(p + ivec2(0, 2)).r > 0) ) rgb = mix(rgb, uRamp[10].rgb, 0.55);
+  return vec4(rgb * al, al);
 }
 #define OUT(c) ((c) * uAlpha)
 ${FOOTPRINT}`;
@@ -799,7 +832,8 @@ let progs = null;
 const programs = () => progs ??= {
   art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v4"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
-  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v2"),
+  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v3"),
+  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v1"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
 };
@@ -818,7 +852,7 @@ export const BIRTHS = { high: 8, medium: 6, low: 4 };
  * frame. Same contract as shader.mjs FireMesh for the display (anim, visible, destroy).
  */
 export class FireArt extends PIXI.Container {
-  constructor(field, rect, geo, { seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
+  constructor(field, rect, geo, { above = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
     super();
     this.eventMode = "none"; this.interactiveChildren = false;
     const { ap, ox, oy } = geo, W = field.w, H = field.h, P = programs();
@@ -856,6 +890,16 @@ export class FireArt extends PIXI.Container {
       m._render = (renderer) => { const u = m.shader.uniforms; u.uAlpha = this.worldAlpha; u.uK = footprintK(); r0(renderer); };
     }
     this.addChild(this.ground, this.show);
+    // the SMOKE lives in a layer above the tokens (`above`, the display's; else on top of this container): it follows this area's
+    // visibility and alpha
+    this.smoke = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.smoke, common()));
+    this.smoke.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.smoke.eventMode = "none";
+    const s0 = this.smoke._render.bind(this.smoke);
+    this.smoke._render = (renderer) => {
+      if ( !this.worldVisible || !this.parent ) return;
+      const u = this.smoke.shader.uniforms; u.uAlpha = this.worldAlpha; u.uK = footprintK(); s0(renderer);
+    };
+    (above ?? this).addChild(this.smoke);
     // KNOWN RISKS for "the area's rectangle shows" (each quad covers the whole area rect; checked by diffing frames with each pass
     // hidden, dev/out bbox probe: clean at zoom 1-3, day and dark, DPR 1 - the one real case was the outside distance, model.chamfer):
     //   - the ground pass is a MULTIPLY quad writing alpha 1 over the whole rect (exact 1.0 colour outside the marks: invisible on an
@@ -878,7 +922,7 @@ export class FireArt extends PIXI.Container {
   // (the fuel map evolves over seconds: it is re-rendered at 4 fps on a quantised clock - deterministic, and its pass costs a
   // render-target switch per area, so it must not run with every 12 fps art frame)
   setTime(t) { this.pass.shader.uniforms.uTime = t; this.fuelPass.shader.uniforms.uTime = Math.floor(t * 4) / 4; }
-  setDark(d) { this.show.shader.uniforms.uDark = d; this.ground.shader.uniforms.uDark = d; }
+  setDark(d) { this.show.shader.uniforms.uDark = d; this.ground.shader.uniforms.uDark = d; this.smoke.shader.uniforms.uDark = d; }
   setBirths(n) { this.pass.shader.uniforms.uBirths = n; }
   /** The area's grow / out clocks at shared time `now` (ms). */
   setPhase(now) {
@@ -897,8 +941,11 @@ export class FireArt extends PIXI.Container {
     const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex];
     this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = null;
     this.glow.parent?.removeChild(this.glow);
-    for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow] ) m.geometry?.destroy();
+    const own = this.smoke.parent === this;
+    if ( !own ) this.smoke.parent?.removeChild(this.smoke);
+    for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow, this.smoke] ) m.geometry?.destroy();
     this.pass.destroy(); this.fuelPass.destroy(); this.glow.destroy();
+    if ( !own ) this.smoke.destroy();
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
     this.rt.destroy(true); this.fuelRt.destroy(true);

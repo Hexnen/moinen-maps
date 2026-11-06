@@ -40,15 +40,16 @@ export function view(x, y, scale) { canvas.pan({ x, y, scale }); for ( let i = 0
  * (fire.status().pending) and is captured once (track.requestFrame), paced in real time so the encoder never drops one. The webm's
  * own timestamps are wall-clock, so re-time it to a fixed rate with `node dev/fire-retime.mjs <file.webm>` (setpts = N / fps; it
  * checks the frame count and the deltas). fps 60: each 12 fps art frame is held exactly 5 video frames (the virtual clock starts
- * 1 ms after a whole art frame, so the art steps fall on frame boundaries). `during` = [[atMs, fn], ...] in effect time.
+ * 1 ms after a whole art frame, so the art steps fall on frame boundaries). `during` = [[atMs, fn], ...] in effect time. `base`: the
+ * virtual clock's start (ms; a whole second + 1), to record the same moment of a fire again (A/B).
  * Returns [bytes, path, frames, fps].
  */
-export async function rec(name, ms, during = [], { fps = 60, pace = 34 } = {}) {
+export async function rec(name, ms, during = [], { fps = 60, pace = 34, base: base0 = null } = {}) {
   const st = canvas.app.view.captureStream(0), tr = st.getVideoTracks()[0], T = canvas.app.ticker, mf = T.maxFPS; T.maxFPS = 0;
   const rc = new MediaRecorder(st, { mimeType: "video/webm;codecs=vp9", videoBitsPerSecond: 12e6 }), parts = [];
   rc.ondataavailable = (e) => parts.push(e.data);
   const realNow = Date.now, dt = 1000 / fps, n = Math.round(ms / dt);
-  const base = Math.ceil(realNow() / 1000) * 1000 + 1, perf0 = performance.now(), fired = new Set();
+  const base = base0 ?? Math.ceil(realNow() / 1000) * 1000 + 1, perf0 = performance.now(), fired = new Set();
   let vt = base;
   Date.now = () => Math.floor(vt);
   // (each frame: wait for the field worker, then redraw at once - the layer's own redraw waits for a requestAnimationFrame and its
