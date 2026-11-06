@@ -75,9 +75,9 @@ const float L_RISE[4] = float[4](0.0, 10.0, 22.0, 40.0);   // tongue height (art
 const float L_LIFE[4] = float[4](0.0, 0.9, 0.85, 0.8);     // blob life (s)
 const float L_EMB[4]  = float[4](0.0, 0.22, 0.35, 0.5);    // bed embers (share)
 const float L_TINT[4] = float[4](0.0, 0.2, 0.3, 0.4);      // heat-tint ring (squares)
-const float S_RATE[4] = float[4](0.0, 4.5, 6.0, 9.0);      // puffs a second per 3.6 squares of source
-const float S_R0[4]   = float[4](0.0, 3.0, 6.0, 8.0);      // puff radius at birth (art px)
-const float S_R1[4]   = float[4](0.0, 8.0, 17.0, 21.0);    // ... at its largest
+const float S_RATE[4] = float[4](0.0, 6.0, 6.0, 9.0);      // puffs a second per 3.6 squares of source
+const float S_R0[4]   = float[4](0.0, 4.0, 6.0, 8.0);      // puff radius at birth (art px)
+const float S_R1[4]   = float[4](0.0, 11.0, 17.0, 21.0);    // ... at its largest
 const float S_LIFE[4] = float[4](0.0, 2.4, 3.6, 4.6);      // puff life (s)
 const float S_V0[4]   = float[4](0.0, 16.0, 20.0, 24.0);   // rise speed at birth (art px / s, x plume / 2.5 x 1.5)
 const float TAU = 1.3;                                     // the smoke cools: rise speed v0 e^(-age / tau)
@@ -168,7 +168,7 @@ void main() {
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
         float ageI = ag.x, ageO = ag.y;
-        if ( ageO > -1e3 ) ageO += (1.0 - ramp) * 0.35 * uDur.y;      // going out: from the edge inwards
+        if ( ageO > -1e3 ) ageO -= (ramp * 0.6 + 0.2 * hf(i, j, 8)) * uDur.y;   // going out: the edge first, the heart up to 0.8 x P.out later (never retroactive: no pop)
         if ( ageI <= 0.0 ) continue;                                    // not caught yet
         float gE = clamp(ageI / max(uDur.x, 0.01), 0.0, 1.0); gE *= 2.0 - gE;
         int cl = int(floor(e.x / (96.0 * u))) * 7 + int(floor(e.y / (96.0 * u))) * 13 + uSeed;
@@ -447,11 +447,11 @@ void main() {
 
 const SHOW = `${SHOW_COMMON}
 const float OUTER[4] = float[4](0.0, 0.55, 0.85, 1.0);                 // outer bands' alpha per fire level (flat)
-const vec3 SMK[9] = vec3[9](vec3(0.867, 0.843, 0.800), vec3(0.667, 0.643, 0.608), vec3(0.498, 0.478, 0.514),
+const vec3 SMK[9] = vec3[9](vec3(0.741, 0.718, 0.678), vec3(0.557, 0.537, 0.506), vec3(0.384, 0.369, 0.408),
                             vec3(0.788, 0.765, 0.722), vec3(0.545, 0.525, 0.494), vec3(0.310, 0.294, 0.341),
                             vec3(0.561, 0.537, 0.498), vec3(0.349, 0.333, 0.369), vec3(0.173, 0.165, 0.196));   // wisps / plume / column: light, mid, shadow
-const vec3 S_A[4] = vec3[4](vec3(0.0), vec3(0.30, 0.38, 0.46), vec3(0.62, 0.74, 0.86), vec3(0.82, 0.90, 0.96));    // their alphas (flat)
-const float S_RIM[4] = float[4](0.0, 0.16, 0.32, 0.45);
+const vec3 S_A[4] = vec3[4](vec3(0.0), vec3(0.50, 0.60, 0.68), vec3(0.62, 0.74, 0.86), vec3(0.82, 0.90, 0.96));    // their alphas (flat)
+const float S_RIM[4] = float[4](0.0, 0.24, 0.32, 0.45);
 vec3 tintSmoke(vec3 c) {
   if ( uSmokeTint.a <= 0.0 ) return c;
   float L = dot(c, vec3(0.3, 0.59, 0.11)), tl = max(0.05, dot(uSmokeTint.rgb, vec3(0.3, 0.59, 0.11)));

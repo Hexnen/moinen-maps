@@ -31,6 +31,9 @@ function mapOf() {
   return { texture: t, rect: [b.x - b.width * (b.anchor?.x ?? 0), b.y - b.height * (b.anchor?.y ?? 0), b.width, b.height] };
 }
 
+/** Art cells the fire style may draw per display frame (~2 ms on a mid GPU; research 13: the art pass is the layer's main cost). */
+const ART_BUDGET = 600000;
+
 export class FireDisplay {
   constructor() {
     this.root = new PIXI.Container();
@@ -105,15 +108,24 @@ export class FireDisplay {
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
     const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
-    const vis = [];
+    const vis = [], stale = [];
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
       if ( on ) {
         vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
         // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
-        if ( a.mesh.isArt ) { a.mesh.setDark(dark); if ( a.mesh.artT !== T || force ) { a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; } }
+        if ( a.mesh.isArt ) { a.mesh.setDark(dark); if ( a.mesh.artT !== T || force ) stale.push(a); }
       }
+    }
+    // (spread over the display frames of one 12 fps frame: at most ART_BUDGET cells a frame, the longest-waiting first; an area never
+    // drawn yet, or a forced redraw, always goes now - so many areas do not all land on one frame as a spike)
+    stale.sort((x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1));
+    let cells = 0;
+    for ( const a of stale ) {
+      const c = a.mesh.W * a.mesh.H;
+      if ( cells > 0 && cells + c > ART_BUDGET && !force && a.mesh.artT !== null ) continue;
+      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; cells += c;
     }
     this.lastT = T;
     this.stats.visible = vis.length;
