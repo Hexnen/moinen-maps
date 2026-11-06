@@ -59,11 +59,15 @@ export function registerSection(def) {
  * Add tools and dock panels to a section that exists (a feature that belongs to it, e.g. the districts' night lights as a panel of
  * the Districts dock). Panels with an id the section already has replace it. Call before the section is shown.
  * @param {string} id
- * @param {{tools?: () => WorkspaceTool[], panels?: WorkspacePanel[]}} more
+ * `bars` = { toolName: bar(host, ctx) }: the options bar of the added tools (the section's own bar keeps every other tool);
+ * `onToolChange(tool, active)` runs after the section's own.
+ * @param {{tools?: () => WorkspaceTool[], panels?: WorkspacePanel[], bars?: Object<string, Function>, onToolChange?: Function}} more
  */
-export function extendSection(id, { tools, panels = [] } = {}) {
+export function extendSection(id, { tools, panels = [], bars = null, onToolChange = null } = {}) {
   const s = SECTIONS.get(id); if ( !s ) return;
   if ( tools ) { const own = s.tools; s.tools = () => [...(own?.() ?? []), ...tools()]; }
+  if ( bars ) { const own = s.bar; s.bar = (host, ctx) => bars[ctx?.tool] ? bars[ctx.tool](host, ctx) : own?.(host, ctx); }
+  if ( onToolChange ) { const own = s.onToolChange; s.onToolChange = (tool, active) => { own?.(tool, active); onToolChange(tool, active); }; }
   const ids = new Set(panels.map((p) => p.id));
   s.panels = [...s.panels.filter((p) => !ids.has(p.id)), ...panels];
 }

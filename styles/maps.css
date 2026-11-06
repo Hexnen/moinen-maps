@@ -765,3 +765,10 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-d-actbtn:not(:disabled) { color: #ffd36e; }
 .mm-d-cinbadge { position: absolute; top: 1px; right: 2px; min-width: 1.1em; padding: 0 0.25em; border-radius: 0.7em; background: #ffd36e; color: #1a1408; font-size: 0.62rem; line-height: 1.2em; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
 .mm-d-cinbadge:empty { display: none; }
+
+/* Fire and smoke (scripts/fire/section.mjs): the strokes list, the light group */
+.mm-fire-list li { grid-template-columns: 1.2rem minmax(3rem, 1fr) auto; }
+.mm-fire-del { width: auto; flex: 0 0 auto; padding: 0 0.4rem; line-height: 1.5; }
+.mm-fire-light { border: 1px solid var(--color-border-light-2, #8884); border-radius: 4px; margin: 0.4rem 0 0; padding: 0.25rem 0.5rem 0.4rem; display: grid; gap: 0.25rem; }
+.mm-fire-light legend { padding: 0 0.25rem; font-weight: bold; }
+.mm-fire-light input[type=color] { width: 3rem; height: 1.4rem; padding: 0; }
