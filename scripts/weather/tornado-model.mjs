@@ -234,13 +234,13 @@ export const TABLE = {
   puffR: [3, 4.5, 6],               // their radius
   puffH: [10, 20, 30],              // how high the debris cloud billows
   specks: [24, 80, 150],            // fine debris orbiting the funnel
-  frags: [0, 14, 30],               // map fragments torn out (slots)
+  frags: [0, 18, 40],               // map fragments torn out (slots)
   fragSz: [4, 7, 10],               // their size (art px, before the size x)
   planks: [0, 4, 10],
   clumps: [10, 36, 70],             // sprayed dust clumps
   inflow: [24, 70, 120],            // ground streaks dragged in
   wisps: [6, 20, 34],               // torn wisps peeling off the funnel
-  curtain: [0, 0.35, 1],            // rain curtain behind
+  curtain: [0, 0.6, 1],            // rain curtain behind
   flash: [0, 0, 1],                 // lightning in the deck
   storm: [0.93, 0.8, 0.66],         // storm light on the ground (multiply)
   swirlR: [2.5, 4.5, 7],            // the vortex wind reaches this far (squares)
