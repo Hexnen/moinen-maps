@@ -727,6 +727,8 @@
   "MOINENMAPS.WS.pFilter": "Filtr",
   "MOINENMAPS.WS.pPresets": "Presety pinezek",
   "MOINENMAPS.WS.pBrush": "Pędzel",
+  "MOINENMAPS.WS.pDistrictScene": "Dzielnice na tej scenie",
+  "MOINENMAPS.Night.lookFold": "Wygląd świateł (podgląd nocy)",
   "MOINENMAPS.WS.pList": "Lista dzielnic",
   "MOINENMAPS.WS.pWater": "Ustawienia wody",
   "MOINENMAPS.WS.color": "Kolor",

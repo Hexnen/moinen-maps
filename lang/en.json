@@ -727,6 +727,8 @@
   "MOINENMAPS.WS.pFilter": "Filter",
   "MOINENMAPS.WS.pPresets": "Pin presets",
   "MOINENMAPS.WS.pBrush": "Brush",
+  "MOINENMAPS.WS.pDistrictScene": "Districts on this scene",
+  "MOINENMAPS.Night.lookFold": "Light look (night preview)",
   "MOINENMAPS.WS.pList": "Districts list",
   "MOINENMAPS.WS.pWater": "Water settings",
   "MOINENMAPS.WS.color": "Colour",

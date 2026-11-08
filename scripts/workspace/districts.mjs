@@ -3,7 +3,9 @@ import { esc, T, setting, store, onSetting, optRange, optSelect, optCheck, optHi
 import { previewBrush, clearDistricts, readForm } from "../districts.mjs";
 import { DistrictsList } from "../panel.mjs";
 import { swatchesHtml, wireSwatches } from "../tools.mjs";
-import { fg, fgGroup } from "../labels.mjs";
+import { fg, fgGroup, labelFieldsHtml, wireFontPreview } from "../labels.mjs";
+import { lightsCfg, lightFieldsHtml, wireLightFields, previewWhileOpen } from "../lights.mjs";
+import { sceneForm, sf, N } from "./scene-form.mjs";
 import { dotsCfg, dotsFieldsHtml, readDotsValues, wireDotsFields } from "../dots.mjs";
 
 /**
@@ -97,6 +99,57 @@ function brushPanel(host) {
   return () => { offs.forEach((f) => f()); offFolds(); host.removeEventListener("change", onDots); previewBrush(null); };
 }
 
+// which folds of the scene panels are open (kept while they are drawn again)
+const sceneFolds = new Set();
+
+/**
+ * How the districts of the viewed scene behave and look by default (the scene's own config, GM only): hover, attributes and the
+ * player list first; the default look, halftone dots and label typography folded. Districts with their own values keep them.
+ */
+function scenePanel(host) {
+  return sceneForm(host, {
+    folds: sceneFolds,
+    deps: [
+      ['[data-dep="hoverColor"]', (v) => v("hoverMode") === "highlight"],   // only the highlight effect uses a colour
+      ['[data-dep="hoverStrength"]', (v) => v("hoverMode") !== "none"],
+      ['[data-dep="inkColor"]', (v) => v("districtInk") === "custom"]
+    ],
+    html: (c) => `${sf.select(c, "hoverMode", "Hover.mode", [["none", T("Hover.none")], ["saturate", T("Hover.saturate")], ["highlight", T("Hover.highlight")], ["map", T("Hover.map")]], "Hover.hint")}
+      <div data-dep="hoverColor">${sf.color(c, "hoverColor", "Hover.color", "#ffd36b", "Hover.colorHint")}</div>
+      <div data-dep="hoverStrength">${sf.range(c, "hoverStrength", "Hover.strength", 0, 1, 0.05, "Hover.strengthHint")}</div>
+      ${sf.select(c, "attrDisplay", "Attr.mode", [["off", T("Attr.modeOff")], ["hover", T("Attr.modeHover")], ["always", T("Attr.modeAlways")]], "Attr.modeHint")}
+      ${sf.check(c, "districtListForPlayers", "Panel.players", "Panel.playersHint")}
+      ${optFold({ id: "look", title: T("Scene.DistrictLook"), icon: "fa-solid fa-pen-nib", open: sceneFolds, body: `
+        ${sf.range(c, "districtOpacity", "District.opacityDefault", 0, 1, 0.05, "District.opacityHint")}
+        ${sf.select(c, "districtInk", "District.ink", [["ink", T("District.inkDark")], ["match", T("District.inkMatch")], ["custom", T("District.inkCustom")]])}
+        <div data-dep="inkColor">${sf.color(c, "districtInkColor", "District.inkCustomColor", "#15110f")}</div>
+        ${sf.range(c, "districtInkOpacity", "District.inkOpacity", 0, 1, 0.05)}
+        ${sf.range(c, "districtInkWidth", "District.inkWidth", 0.2, 4, 0.1)}
+        ${sf.check(c, "districtNoBorder", "District.noOutline", "District.noOutlineHint")}
+        ${sf.check(c, "districtNoColor", "District.noColor", "District.noColorHint")}` })}
+      ${optFold({ id: "dots", title: T("Scene.Dots"), icon: "fa-solid fa-braille", open: sceneFolds, body: dotsFieldsHtml(`${N}.dots.`, c.dots) })}
+      ${optFold({ id: "labels", title: T("Label.sceneSection"), icon: "fa-solid fa-font", open: sceneFolds, body: labelFieldsHtml(`${N}.label.`, c.label) })}`,
+    wire: (form) => { wireDotsFields(form, `${N}.dots.`); wireFontPreview(form, `${N}.label.`); }
+  });
+}
+
+/**
+ * Night lights of the viewed scene (GM only): whether districts light up, when the night comes, and the default look of the lights.
+ * While the look fold is open the scene shows its lights as at night, as the Scene Config fold did.
+ */
+function nightPanel(host) {
+  return sceneForm(host, {
+    folds: sceneFolds,
+    deps: [['[data-dep="nightAuto"]', (v) => v("nightMode") === "auto"]],   // thresholds only matter when following the darkness
+    html: (c, scene) => `${sf.check(c, "lights.on", "Night.sceneOn", "Night.sceneOnHint")}
+      ${sf.select(c, "nightMode", "Night.mode", [["auto", T("Night.modeAuto")], ["on", T("Night.modeOn")], ["off", T("Night.modeOff")]], "Night.modeHint")}
+      <div data-dep="nightAuto">${sf.range(c, "nightStart", "Night.start", 0, 1, 0.05, "Night.startHint")}${sf.range(c, "nightFull", "Night.full", 0, 1, 0.05, "Night.fullHint")}</div>
+      ${optFold({ id: "nightlook", title: T("Night.lookFold"), icon: "fa-solid fa-lightbulb", open: sceneFolds, cls: "mm-nightlook", attrs: `data-tooltip="${esc(T("Night.scenePreviewHint"))}"`,
+        body: lightFieldsHtml(`${N}.lights.`, lightsCfg({}, scene)) })}`,
+    wire: (form) => { wireLightFields(form, `${N}.lights.`); return previewWhileOpen(form.querySelector(".mm-nightlook"), "*"); }
+  });
+}
+
 registerSection({
   id: "districts", order: 2, title: "MOINENMAPS.WS.districts", icon: "fa-solid fa-draw-polygon", color: "#e0a21a",
   activeTool: PICK,
@@ -109,6 +162,8 @@ registerSection({
   bar: districtsBar,
   panels: [
     { id: "brush", title: "MOINENMAPS.WS.pBrush", icon: "fa-solid fa-paintbrush", mount: (host) => brushPanel(host) },
-    { id: "list", title: "MOINENMAPS.WS.pList", icon: "fa-solid fa-list-ul", mount: (host) => new DistrictsList().mount(host) }
+    { id: "list", title: "MOINENMAPS.WS.pList", icon: "fa-solid fa-list-ul", mount: (host) => new DistrictsList().mount(host) },
+    { id: "scene", title: "MOINENMAPS.WS.pDistrictScene", icon: "fa-solid fa-map", open: false, mount: (host) => scenePanel(host) },
+    { id: "night", title: "MOINENMAPS.Scene.Night", icon: "fa-solid fa-moon", open: false, mount: (host) => nightPanel(host) }
   ]
 });

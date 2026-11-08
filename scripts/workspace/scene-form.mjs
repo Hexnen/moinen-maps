@@ -63,7 +63,8 @@ export function sceneForm(host, { html, deps = [], folds = null, wire = null }) 
     if ( isEcho() || !game.user.isGM ) return;
     const s = canvas?.scene; if ( !s ) return;
     const v = readValue(el);
-    if ( v === undefined || getP(sceneConfig(s), name.slice(N.length + 1)) === v ) return;
+    // always written: a "same as stored" skip would drop a quick second toggle made before the first write came back
+    if ( v === undefined ) return;
     s.update({ [name]: v });
   };
   // the scene changed (here, in another window or by another GM): the controls take the stored values in place
