@@ -40,3 +40,51 @@ Each agent appends: date, branch, what was done, verified vs not.
 - The camera now ignores EZGlide's easing for director and cinematic moves (uses the look's own `camEase`). The cinematic show's camera feels different from before (smoother start).
 - Picture-in-picture inset not built: an inset would need a second render of the map where the fog/vision filter must be re-applied per player (leak risk); the soft form is the marker + caption instead.
 - Wheel during a take = the player takes the camera (no return); Esc/click = cut with return.
+
+## 2026-11-08 - phase B, rolls and damage (agent director-rolls), branch `director-rolls`
+
+### What it does
+- `scripts/director/source-rolls.mjs` (runtime) + `scripts/director/rolls-core.mjs` (pure, `dev/director-rolls.test.mjs`, 48 checks). Invincible system only (`game.system.id === "invincible"`).
+- The ROLLER's client (`preCreateChatMessage`) writes `flags.moinen-maps.dr = { a: attacker token, t: targeted tokens, s: scene }` into every Year Zero roll message (targets exist only on the roller's client; a pushed roll, which is a NEW message, keeps the last targets of that speaker when nothing is targeted).
+- The LEADER (`createChatMessage`) makes one event per roll:
+  - ATTACK (the roll has damage or an attack type): the box frames attacker and target(s), focus = the target. Weight 0.68 (+ extra targets, + 3 or more successes) -> a take-over; without a target 0.42 (soft at the attacker). Setup caption "Attacker -> Target" while the dice roll; result caption (kick = the names, title = "Hit! Damage 4 · stunts: 2" / "Hit! Successes: n" / "Miss!"); the hit (flash, shake) only on a hit. Pushed roll: kick "Push".
+  - ROLL (anything else): weight 0.18 (soft; the calm preset's softAt 0.2 hides them): "Name: Agility" -> "... · Successes: 3 / No successes".
+  - DAMAGE: the system's "Damage Taken" card (GM's Apply damage). Damage from the card (and from Invincible Plus Ultra's `dmg` flags when present: from/to/max -> Broken at 0); a second paragraph = critical injury. "Kid Omni-Man: -3 Health · Broken! / · critical injury". Weight 0.5..1 by the share of max Health.
+- Every roll event is CUED ("dice"): the shot starts as planned on every client, but on each client the hit and the result caption wait until THAT client's Dice So Nice dice have landed (`waitFor3DAnimationByMessageID`, at most 9 s; at once without DSN), never before the camera is there; then the camera holds 2.2 s on the result (the Plus Ultra comic splash pops at the token, which is now on screen) and returns. Nobody reads the result before the dice show it.
+- Privacy: the event follows the MESSAGE: public -> all; whispered to a GM or blind -> `who: "gm"` (never sent to a player); self roll / whispered to players only -> nothing. Hidden tokens never enter a public event (hidden attacker = "Someone", hidden target left out); names only via `publicName`. Every roll/damage shot is STRICT: a player gets it only when the focus token is visible to them (Token#visible: vision, detection, invisible status); when another listed token (the attacker in the dark) is not visible, the soft form at the focus.
+- Settings: source toggles "Attacks and damage (Invincible rolls)" (`src_attacks`) and "Other rolls (Invincible)" (`src_rolls`) in the Director section. en + pl.
+
+### Shared engine files touched (minimal, generic)
+- `core.mjs`: KINDS `attack`, `damage`, `roll` (+ a `fresh` flag), GROUPS/BOOLS `attacks`, `rolls`; `normEvent`/`merged`/`plan` carry `cue`, `after` (a second caption), `strict`; captions may have a `kick` key. Queue: a `fresh` kind (damage, attack, roll: news at a place just shown, e.g. damage or a push right after the attack shot) is not dropped as "just shown" (soft at least; other kinds unchanged). `frameShot`: the whole box stays in the frame (clear of the letterbox) when it fits, zooming out down to half the player's zoom if that is what it takes (before: the frame leaned to the focus and cut the attacker off).
+- `director.mjs`: `registerCue(name, fn)` (also in `api.director`), cued take-over (hit + result caption at the cue, early end CUE_AFTER after it, waits for a late cue up to the EXTRA cap) and cued soft shot (label turns into the result), `seeTokens` + strict check in `canSee`/ctx (partial visibility = soft), `captionText(shot, caption)` resolves `target`/`tname` and a caption's `kick` key; soft label "kick · title" when the caption has its own kick.
+- `overlay.mjs`: `marker().setText()`.
+- `index.mjs` (register), `section.mjs` (two source labels), `lang/en.json`, `lang/pl.json` (20 keys each).
+
+### Verified (lane 5 serving the worktree, headless Chrome on CDP: GM page 127.0.0.55 = Gamemaster, PLAYER page 127.0.0.56 = Test Gracz 1 owning Kid Omni-Man; scene copy `ZZ-dir-rolls`, token vision on)
+- Rolls made with the system's own code path (`YearZeroRoll(...).roll().toMessage(..., { rollMode })`, as in the roll dialog), the system's own chat-card Push button and `applyTargetDamage` (Apply damage). The roll dialog UI itself was not clicked.
+- GM public attack turret -> Kid: player take-over, setup caption, dice land (DSN) -> result caption + hit, return exactly to the player's view, overlays/timers cleaned. Attacker and target both in frame (screen y 163 and 644 of 805 at zoom 0.189 from 0.35).
+- The player's own attack (Kid -> turret): flags written on the player's client, take-over on the player.
+- GM private roll and blind roll: NO socket packet reached the player at all (raw socket log on the player page). Player self roll: nothing.
+- Hidden attacker: the shot's tokens = the target only, caption "Someone -> Kid Omni-Man".
+- Invisible (status) attacker: the player got the SOFT form at its own token, "Someone -> Kid Omni-Man · Hit! Damage 2". Invisible target (the focus): nothing on the player.
+- Damage after the attack shot (Apply damage ~3 s after it ended): soft "Kid Omni-Man: -3 Health" (before the `fresh` rule it was dropped). Push via the chat button: soft "Push · Kid Omni-Man -> Concussion Turret" -> "... · Miss!".
+- Plain roll: soft edge arrow + label, result swapped in when the dice landed.
+- Esc mid cued shot: cut, camera back exactly. `director-check watchShot` none / esc / busy all OK after the engine changes.
+- Idle: no director/roll listener on the ticker at rest (idle-bench on the player: on 3.79 / killed 3.61 / on 3.89 ms per frame, noise).
+- `node dev/run-all.mjs` 57/57, `node dev/lang-audit.mjs` clean.
+
+### Not verified
+- The real roll dialog / sheet buttons (only the dialog's roll code path), the stunts dialog during a shot (its Esc would be eaten by the director's Esc = cut), a damage TAKE-over (damage more than the cooldown after the attack: the ordinary take path), a critical injury card live, two GMs, DPR 2 for the new label text; cinematic-check / cinematic-fx-check not re-run (nothing changed in the show path; frameShot is director-only).
+
+### Videos (PLAYER page, Test Gracz 1)
+- `dev/director-rolls-attack.webm` - GM attack turret -> Kid: camera, setup caption, dice, "Hit! Damage 4", splash at the token, return.
+- `dev/director-rolls-hit-damage.webm` - attack hit, then Apply damage: soft "-3 Health" arrow.
+- `dev/director-rolls-push.webm` - the player's own attack (miss), then Push from the chat card: soft "Push · ..." with the new result.
+- `dev/director-rolls-soft-roll.webm` - a plain Agility roll: soft arrow, result swapped in.
+- Drive scripts: `dev/rolls-js/*.js` (watch, socket log, attack, hit, damage, push, Esc).
+
+### Open decisions for the user
+- Damage within the cooldown of its attack is a soft caption, not a second take-over. Should damage always take the camera (the climax), e.g. merged into the attack shot when it comes within a few seconds?
+- Plain (non-attack) rolls: soft in standard/dramatic, hidden in calm. Keep, or off by default?
+- A roll a player whispers to the GM gives that player (its author) no shot either (the engine has only "all" / "gm"). Add per-user recipients?
+- Long-range attacks that do not fit even at half zoom lean to the target; a pan from attacker to target during the dice would need an explicit path start in the engine.
