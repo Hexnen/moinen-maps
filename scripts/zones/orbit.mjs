@@ -13,6 +13,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { paintSpace, enlarge } from "./space.mjs";
+import { startAmbience, stopAmbience } from "./orbit-ambience.mjs";
 
 const ART = 6;            // scene pixels per art pixel
 const GRID = 100, COLS = 30, ROWS = 18;
@@ -315,8 +316,8 @@ export function registerOrbit() {
     game.settings.register(MODULE_ID, "orbitFollow", { name: "MOINENMAPS.Orbit.follow", hint: "MOINENMAPS.Orbit.followHint", scope: "client", config: true, type: Boolean, default: true });
   });
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } });
-  Hooks.on("canvasReady", () => strip.refresh());
-  Hooks.on("canvasTearDown", () => strip.remove());
+  Hooks.on("canvasReady", () => { strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1); });
+  Hooks.on("canvasTearDown", () => { strip.remove(); stopAmbience(); });
   Hooks.on("canvasPan", () => strip.place());
   window.addEventListener("resize", () => strip.place());
   Hooks.on("createToken", onCreateToken);

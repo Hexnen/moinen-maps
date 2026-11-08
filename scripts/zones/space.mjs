@@ -102,7 +102,17 @@ export function paintSpace(seed, w, h) {
     const P = PALETTES[which[y * w + x] ? f2 : f1];
     // dither into the palette, but let the thin edges fall away in a checker so the cloud fades instead of ending in a line
     if ( d < 0.18 && bayer(x, y) > d / 0.18 ) continue;
-    put(x, y, pick(P, d * 0.95, x, y));
+    // dark dust lanes: thin ridged filaments of noise that eat into the glow
+    const ridge = 1 - Math.abs(fbm(x * sc * 3.1 + 71, y * sc * 3.1 + 13, 4) * 2 - 1);
+    const lane = Math.max(0, (ridge - 0.88) * 8.3);
+    put(x, y, pick(P, Math.max(0, d * 0.95 - lane * 0.3), x, y));
+  }
+  // young stars inside the bright cores of the clouds
+  for ( let i = 0, n = Math.round((w * h) / 700); i < n; i++ ) {
+    const x = Math.floor(rand() * w), y = Math.floor(rand() * h), d = nebula[y * w + x];
+    if ( d < 0.55 ) continue;
+    put(x, y, PALETTES.star[4]);
+    if ( rand() < 0.3 ) for ( const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] ) put(x + dx, y + dy, PALETTES.star[3], 0.6);
   }
 
   // 3. a faint distant spiral galaxy
@@ -132,6 +142,10 @@ export function paintSpace(seed, w, h) {
   }
   for ( let i = 0, n = Math.max(3, Math.round(area / 16000)); i < n; i++ ) {
     const x = Math.floor(rand() * w), y = Math.floor(rand() * h * 0.7), P = tint(), top = P.length - 1, L = 2 + Math.floor(rand() * 3);
+    for ( let yy = -3; yy <= 3; yy++ ) for ( let xx = -3; xx <= 3; xx++ ) {
+      const r = Math.hypot(xx, yy); if ( r > 3.2 || r < 1 ) continue;
+      if ( (1 - r / 3.2) * 0.9 > bayer(x + xx, y + yy) ) put(x + xx, y + yy, P[Math.max(0, top - 3)], 0.45);
+    }
     starAt(x, y, P, top);
     for ( let k = 1; k <= L; k++ ) { const b = Math.max(0, top - k); for ( const [dx, dy] of [[k, 0], [-k, 0], [0, k], [0, -k]] ) starAt(x + dx, y + dy, P, b); }
     for ( const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]] ) starAt(x + dx, y + dy, P, Math.max(0, top - 3));
@@ -169,11 +183,12 @@ export function paintSpace(seed, w, h) {
     sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
       // the atmosphere: a thin glowing rim just outside the disc, brightest on the lit side
       if ( rr > 1 ) {
-        const out = (Math.sqrt(rr) - 1) * R;
-        if ( out < 3.2 ) {
-          const side = Math.max(0, -(nx * 0.7 + ny * 0.3) * 0.5 + 0.6);
-          const v = (1 - out / 3.2) * (0.4 + 0.6 * side);
-          if ( v > bayer(x, y) * 0.9 ) put(x, y, PALETTES.rim[Math.min(2, Math.floor(v * 3))], 0.85);
+        const out = (Math.sqrt(rr) - 1) * R, HALO = 7;
+        if ( out < HALO ) {
+          // the halo is brightest where the sun sits behind the limb, fading out over a few art pixels, dithered
+          const side = Math.max(0, Math.min(1, -(nx * LP[0] + ny * LP[1]) * 0.9 + 0.25));
+          const v = (1 - out / HALO) ** 1.6 * (0.25 + 0.75 * side);
+          if ( v > bayer(x, y) * 0.75 ) put(x, y, PALETTES.rim[Math.min(2, Math.floor(v * 3.2))], 0.35 + 0.5 * v);
         }
         return;
       }
@@ -185,11 +200,23 @@ export function paintSpace(seed, w, h) {
       const day = Math.max(0, Math.min(1, lit * 1.8 + 0.3)), limb = 0.7 + 0.3 * Math.sqrt(nz);
       const isLand = landN > 0.5, isCloud = cloudN > 0.62;
       const clamp = (t) => Math.max(0, Math.min(0.999, t));
+      // polar ice near the top of the disc; cloud shadows a little down-sun of each cloud
+      const ice = v < -2.38 - 0.25 * (landN - 0.5) * 4;
+      const shade = fbm((u + 0.06) * 3.2 + 11, (v + 0.03) * 7 + 2, 4) > 0.62 && !isCloud ? 0.72 : 1;
       let c;
       if ( isCloud ) c = pick(PALETTES.cloud, clamp((0.45 + (cloudN - 0.62) * 2.5) * (0.15 + 0.85 * day) * limb + 0.05), x, y);
-      else if ( isLand ) c = pick(PALETTES.land, clamp((0.35 + (landN - 0.5) * 3.2) * (0.12 + 0.88 * day) * limb), x, y);
-      else c = pick(PALETTES.ocean, clamp((0.55 + 0.6 * (landN - 0.42)) * (0.1 + 0.9 * day) * limb), x, y);
+      else if ( ice ) c = pick(PALETTES.cloud, clamp((0.55 + (landN - 0.5)) * (0.12 + 0.88 * day) * limb), x, y);
+      else if ( isLand ) c = pick(PALETTES.land, clamp((0.35 + (landN - 0.5) * 3.2) * (0.12 + 0.88 * day) * limb * shade), x, y);
+      else {
+        c = pick(PALETTES.ocean, clamp((0.55 + 0.6 * (landN - 0.42)) * (0.1 + 0.9 * day) * limb * shade), x, y);
+        // the sun's glint on the sea
+        const hx = LP[0], hy = LP[1], hz = LP[2] + 1, hn = Math.hypot(hx, hy, hz);
+        const spec = Math.max(0, (nx * hx + ny * hy + nz * hz) / hn) ** 40;
+        if ( spec > bayer(x, y) * 0.8 ) c = PALETTES.rim[spec > 0.6 ? 2 : 1];
+      }
       put(x, y, c);
+      // a blue haze over the limb on the day side
+      if ( nz < 0.35 && day > 0.15 ) { const hz2 = (1 - nz / 0.35) * day; if ( hz2 > bayer(x, y) ) put(x, y, PALETTES.rim[0], 0.35); }
       // night side: scattered city lights on the land
       if ( isLand && !isCloud && day < 0.1 && noise(u * 30, v * 30) > 0.8 && bayer(x, y) > 0.55 ) put(x, y, PALETTES.city[noise(u * 60, v * 60) > 0.5 ? 1 : 0]);
       // the limb: a bright line of atmosphere just inside the edge on the day side
