@@ -41,17 +41,21 @@ function bar(host, ctx) {
     const size = mode === "erase"
       ? optRange({ name: "eraser", label: Z("f.eraser"), value: setting("zonesEraser") ?? 0.5, min: 0.1, max: 4, step: 0.1, hint: Z("h.eraser") })
       : mode === "draw" ? optRange({ name: "snap", label: Z("f.snap"), value: S?.snap ?? 0.25, min: 0, max: 1, step: 0.05, hint: Z("h.snap") }) : "";
+    const zs = [...(Zones.marks()?.zones.values() ?? [])];
+    const fire = zs.some((p) => p.fire), states = zs.some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
     const smooth = optRange({ name: "smooth", label: Z("f.smooth"), value: S?.smooth ?? 0.3, min: 0, max: 1, step: 0.05, hint: Z("h.smooth") });
     host.innerHTML = `${btn("undo", "fa-solid fa-rotate-left", "undo", !Zones.canUndo())}${btn("redo", "fa-solid fa-rotate-right", "redo", !Zones.canRedo())}
       ${btn("trim", "fa-solid fa-scissors", "trimHint", !Zones.zones(), Z("trim"))}
+      ${fire ? btn("fireRound", "fa-solid fa-fire", "act.fireRound") : ""}${states ? btn("endScene", "fa-solid fa-broom", "act.endScene") : ""}
       ${smooth}${size}<span class="mm-ws-hint mm-z-status">${esc(statusText())}</span>
-      ${optHint(Z(mode === "erase" ? "hintErase" : mode === "draw" ? "hintDraw" : "hintPick"))}`;
+      ${optHint(`${Z(mode === "erase" ? "hintErase" : mode === "draw" ? "hintDraw" : "hintPick")} ${Z("h.rclick")}`)}`;
   };
   render();
   const onClick = (ev) => {
     const b = ev.target.closest("[data-act]"); if ( !b ) return;
     const a = b.dataset.act;
     if ( a === "undo" ) Zones.undoEdit(); else if ( a === "redo" ) Zones.redoEdit(); else if ( a === "trim" ) Zones.trim();
+    else if ( a === "fireRound" ) Zones.fireRound(); else if ( a === "endScene" ) Zones.clearStates();
   };
   const onChange = (ev) => {
     // only the control's own event: a range-picker's inner inputs fire "change" first, unnamed (and with the old value)

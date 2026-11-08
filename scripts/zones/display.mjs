@@ -7,6 +7,27 @@
  */
 
 import { cornerPoint } from "./geometry.mjs";
+import { pairKey } from "./marks.mjs";
+
+/** Zone states as a tint over the zone (colour, alpha). */
+const STATE_TINT = { fire: [0xff5a1f, 0.3], dark: [0x05050a, 0.45], ice: [0xbfe8ff, 0.3], flooded: [0x2f7fd6, 0.32], wrecked: [0x6b5b4b, 0.32], lowgrav: [0xb48cff, 0.2], water: [0x2f7fd6, 0.18] };
+/** Icons under a zone's number: Font Awesome glyphs when that font is loaded, emoji otherwise. */
+const ICONS = [
+  ["building", "\uf1ad", "🏢"], ["tall", "\uf1bb", "🌲"], ["water", "\uf773", "🌊"],
+  ["wrecked", "\ue3b1", "🏚"], ["fire", "\uf06d", "🔥"], ["dark", "\uf186", "🌑"], ["ice", "\uf2dc", "❄"], ["flooded", "\ue50e", "🌊"], ["lowgrav", "\uf56b", "🪶"]
+];
+const ICON_COLOR = { fire: 0xffa25a, dark: 0xb9b3d6, ice: 0xbfe8ff, flooded: 0x8cc4ff, water: 0x8cc4ff, wrecked: 0xc9b69a, lowgrav: 0xd2b8ff };
+let faFamily;
+function iconFont() {
+  if ( faFamily !== undefined ) return faFamily;
+  faFamily = null;
+  for ( const f of ["Font Awesome 6 Pro", "Font Awesome 6 Free", "Font Awesome 7 Pro", "Font Awesome 7 Free"] ) {
+    try { if ( document.fonts.check(`900 16px "${f}"`) && [...document.fonts].some((ff) => ff.family.replace(/"/g, "") === f && ff.status === "loaded") ) { faFamily = f; break; } } catch {}
+  }
+  return faFamily;
+}
+/** Wall kinds: [under-line width, light line width, dark core width] in multiples of the border width. */
+const WALL = { door: [1.7, 1.0, 0], locked: [1.7, 1.0, 0], wall: [1.7, 1.0, 0], outer: [2.3, 1.5, 0], reinforced: [2.7, 1.7, 0.55] };
 
 /** A badge's radius on screen (CSS pixels): drawn once at this size, scaled by 1 / zoom. */
 const BADGE_R = 19;
@@ -109,6 +130,7 @@ export class ZoneDisplay {
     this.root.interactiveChildren = false;
     Object.assign(this.root, { elevation: 0, sortLayer: 258, sort: 0, _lastSortedIndex: 0 });
     this.fill = new PIXI.Graphics();
+    this.states = new PIXI.Graphics();
     this.lines = new PIXI.Graphics();
     this.badges = new PIXI.Container();
     // the zone under the cursor: an effect inside it (masked to the zone) and its bright border
@@ -120,7 +142,7 @@ export class ZoneDisplay {
     this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
     this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
-    this.root.addChild(this.fill, this.hi, this.lines, this.badges);
+    this.root.addChild(this.fill, this.states, this.hi, this.lines, this.badges);
     this.hoverId = -1;
     canvas.primary.addChild(this.root);
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
@@ -138,10 +160,12 @@ export class ZoneDisplay {
    * @param {number} [o.here]                  the selected token's zone
    * @param {number} [o.hover]                the zone under the cursor (numbers "hover")
    * @param {boolean} [o.editing]              the GM is drawing: stronger tints so new zones show at once
+   * @param {object} [o.marks]                 Marks.resolve(): borders (walls, doors) and zone features / states
    */
-  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1 } = {}) {
+  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null } = {}) {
     const F = this.fill;
-    F.clear(); this.lines.clear();
+    F.clear(); this.lines.clear(); this.states.clear();
+    this.M = marks; this.editing = editing;
     for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
     this.items = [];
     this.g = g;
@@ -165,31 +189,47 @@ export class ZoneDisplay {
         F.endFill();
       }
     }
+    // zone states (and water) as a tint of their own over the zone
+    for ( const z of Z.zones ) {
+      const p = marks?.zones.get(z.id);
+      if ( !p ) continue;
+      for ( const k of ["water", "flooded", "wrecked", "ice", "lowgrav", "fire", "dark"] ) {
+        if ( !p[k] ) continue;
+        const [c, a] = STATE_TINT[k];
+        for ( const part of z.parts ) {
+          this.states.beginFill(c, k === "fire" ? Math.min(0.55, a + 0.02 * (p.fire - 6)) : a);
+          ring(this.states, part[0]);
+          for ( const h of part.slice(1) ) { this.states.beginHole(); ring(this.states, h); this.states.endHole(); }
+          this.states.endFill();
+        }
+      }
+    }
     this.drawLines(zoom);
 
     // badges: the zone's number, or its distance from the selected token. Each badge is drawn once at its size ON SCREEN and scaled
     // by 1 / zoom every frame (follow), so it keeps its size smoothly while zooming, on a spot that stays put.
     const numbered = (id) => look.numbers === "always" || (look.numbers === "hover" && id === hover);
-    if ( look.numbers === "never" && !dist ) return;
     const res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
+    this.#icons(Z, marks, res, (id) => (dist ? dist.has(id) || bands?.get(id)?.key === "blocked" : numbered(id)));
+    if ( look.numbers === "never" && !dist ) { this.follow(zoom, true); return; }
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
-      if ( d == null && !numbered(z.id) ) continue;
-      const band = bands?.get(z.id);
-      const text = d != null ? String(d) : numeral(z.id + 1, look.numFormat);
+      const band = bands?.get(z.id), blocked = band?.key === "blocked";
+      if ( d == null && !blocked && !numbered(z.id) ) continue;
+      const text = blocked ? "×" : d != null ? String(d) : numeral(z.id + 1, look.numFormat);
       const b = new PIXI.Container();
       const G = new PIXI.Graphics();
       const numCol = look.numColor ? hex(look.numColor) : light, ringBase = look.ringColor ? hex(look.ringColor) : light;
       const ringCol = band ? band.color : ringBase, shape = look.numShape ?? "circle";
-      badgeShape(G, shape, ringCol, d != null ? 0.85 : 0.6);
+      badgeShape(G, shape, ringCol, d != null || blocked ? 0.85 : 0.6);
       b.addChild(G);
       // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
       const size = BADGE_R * (text.length > 3 ? 0.62 : text.length > 2 ? 0.78 : text.length > 1 ? 1.0 : 1.2) * (shape === "plain" ? 1.25 : 1);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: d != null ? ringCol : numCol, align: "center",
+      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: d != null || blocked ? ringCol : numCol, align: "center",
         ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
       t.resolution = res; t.anchor.set(0.5, 0.52);
       b.addChild(t);
-      b.alpha = d == null && dist ? 0.45 : 1;
+      b.alpha = d == null && dist && !blocked ? 0.45 : 1;
       this.badges.addChild(b);
       this.items.push({ b, z, at: null });
     }
@@ -218,6 +258,78 @@ export class ZoneDisplay {
       // hand-drawn: two thin, slightly wandering passes
       case "sketch": under(0.7); stroke(w * 0.3, col, 0.8 * a, (p) => trace(Ln, wobble(p, 1.8 * px, 1, px))); stroke(w * 0.25, col, 0.65 * a, (p) => trace(Ln, wobble(p, 2.2 * px, 2, px))); break;
       default: under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [11 * px, 7 * px]));
+    }
+    this.#walls(Ln, px, w, col);
+  }
+
+  /** Walls over the borders the GM marked (thicker, solid), and a door symbol across a door; sizes on screen like the lines. */
+  #walls(Ln, px, w, col) {
+    const M = this.M, Z = this.Z;
+    if ( !M?.borders.size ) return;
+    const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
+    const segs = new Map();
+    for ( const br of Z.borders ) {
+      if ( br.edge || br.b < 0 ) continue;
+      const m = M.borders.get(pairKey(br.a, br.b));
+      if ( m ) (segs.get(m) ?? segs.set(m, []).get(m)).push(br.pts);
+    }
+    const bw = Math.max(w, 4 * px);
+    for ( const pass of [0, 1, 2] ) {
+      for ( const [m, list] of segs ) {
+        const k = WALL[m.kind][pass];
+        if ( !k ) continue;
+        Ln.lineStyle({ width: bw * k, color: pass === 1 ? (m.kind === "reinforced" ? 0xcfd6dc : col) : 0x15110f, alpha: pass === 0 ? 0.8 : 1, ...R });
+        for ( const s of list ) { Ln.moveTo(s[0], s[1]); Ln.lineTo(s[2], s[3]); }
+      }
+    }
+    // doors: a short plank across the wall where the mark sits, a locked one red with a keyhole
+    for ( const [m, list] of segs ) {
+      if ( m.kind !== "door" && m.kind !== "locked" ) continue;
+      let best = list[0], bd = Infinity;
+      for ( const s of list ) { const d = Math.hypot((s[0] + s[2]) / 2 - m.x, (s[1] + s[3]) / 2 - m.y); if ( d < bd ) { bd = d; best = s; } }
+      const ux0 = best[2] - best[0], uy0 = best[3] - best[1], L = Math.hypot(ux0, uy0) || 1, ux = ux0 / L, uy = uy0 / L;
+      const hl = 9 * px, hw = 4.5 * px, x = m.x, y = m.y;
+      const quad = [x - ux * hl - uy * hw, y - uy * hl + ux * hw, x + ux * hl - uy * hw, y + uy * hl + ux * hw, x + ux * hl + uy * hw, y + uy * hl - ux * hw, x - ux * hl + uy * hw, y - uy * hl - ux * hw];
+      Ln.lineStyle({ width: 2 * px, color: 0x15110f, alpha: 1, ...R });
+      Ln.beginFill(m.kind === "locked" ? 0xb8402e : 0x9a6a3a, 1).drawPolygon(quad).endFill();
+      if ( m.kind === "locked" ) { Ln.lineStyle(0); Ln.beginFill(0xf3e7c9, 1).drawCircle(x, y, 1.8 * px).endFill(); }
+    }
+  }
+
+  /** A row of small icons under a zone's number: its features and states (the terrain only for the GM while editing). */
+  #icons(Z, M, res, hasBadge) {
+    if ( !M?.zones.size ) return;
+    const fa = iconFont();
+    for ( const z of Z.zones ) {
+      const p = M.zones.get(z.id);
+      if ( !p ) continue;
+      const parts = ICONS.filter(([k]) => p[k]).map(([k, g, e]) => ({ k, s: fa ? g : e }));
+      const terrain = this.editing && p.terrain ? p.terrain : null;
+      if ( !parts.length && !terrain ) continue;
+      const row = new PIXI.Container();
+      const size = 15, gap = 4;
+      let x = 0;
+      const back = new PIXI.Graphics();
+      row.addChild(back);
+      for ( const it of parts ) {
+        const t = new PIXI.Text(it.s, { fontFamily: fa ? `"${fa}"` : "sans-serif", fontWeight: "900", fontSize: size, fill: ICON_COLOR[it.k] ?? 0xf3e7c9 });
+        t.resolution = res; t.anchor.set(0, 0.5); t.position.set(x, 0);
+        row.addChild(t); x += t.width + gap;
+        if ( it.k === "fire" ) {
+          const n = new PIXI.Text(String(p.fire), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 12, fill: 0xffa25a });
+          n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x - 2, 1); row.addChild(n); x += n.width + gap;
+        }
+      }
+      if ( terrain ) {
+        const n = new PIXI.Text(game.i18n.localize(`MOINENMAPS.Zones.terrainShort.${terrain}`), { fontFamily: "Signika, sans-serif", fontWeight: "600", fontSize: 11, fill: 0xd8ccb0 });
+        n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x, 0); row.addChild(n); x += n.width + gap;
+      }
+      x -= gap;
+      back.beginFill(0x15110f, 0.7).drawRoundedRect(-5, -11, x + 10, 22, 8).endFill();
+      for ( const c of row.children ) c.x -= x / 2;
+      this.badges.addChild(row);
+      // under the badge when there is one, else on the zone's spot
+      this.items.push({ b: row, z, at: null, dy: hasBadge(z.id) ? BADGE_R + 15 : 0 });
     }
   }
 
@@ -372,11 +484,10 @@ export class ZoneDisplay {
     const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner", g = this.g ?? 100;
     for ( const it of this.items ?? [] ) {
       const rw = Math.min(BADGE_R * px, Math.max(8 * px, it.z.label.r * 0.8));     // the badge's radius in scene pixels
-      it.b.scale.set(rw / BADGE_R);
-      if ( snap || !it.at ) {
-        it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
-        it.b.position.set(it.at.x, it.at.y);
-      }
+      const s = rw / BADGE_R;
+      it.b.scale.set(s);
+      if ( snap || !it.at ) it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
+      it.b.position.set(it.at.x, it.at.y + (it.dy ?? 0) * s);
     }
   }
 

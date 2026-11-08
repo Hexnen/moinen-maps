@@ -6,6 +6,7 @@ import { ZoneDisplay } from "./display.mjs";
 import { preset, presets, zonesText } from "./presets.mjs";
 import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
+import * as Marks from "./marks.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -17,7 +18,7 @@ import * as Styles from "./styles.mjs";
  * Public API: `game.modules.get("moinen-maps").api.zones`. Hook "moinenMapsZones" with ("loaded" | "edited" | "params" | "section").
  */
 
-let S = null, Z = null, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
+let S = null, Z = null, M = null, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
 let saveSceneId = null, lastSaved = "";
 const undo = [], redo = [];
 const UNDO_MAX = 60;
@@ -25,6 +26,8 @@ const UNDO_MAX = 60;
 export const tell = (kind) => Hooks.callAll("moinenMapsZones", kind);
 export const state = () => S;
 export const zones = () => Z;
+/** The marks laid onto the zones now: { borders: Map pair -> {kind, x, y, a, b}, zones: Map id -> props }. */
+export const marks = () => M;
 export const editing = () => inSection && !!game.user?.isGM;
 export const gridSize = () => canvas.dimensions?.size ?? canvas.grid?.size ?? 100;
 const sceneRect = () => { const r = canvas.dimensions?.sceneRect; return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null; };
@@ -67,7 +70,10 @@ function rebuild() {
   const lines = S ? [...S.strokes.values()].map((p) => Geo.smoothLine(p, S.smooth, step)) : [];
   // a zone is at least one grid square; the scene's edge closes zones where lines reach it
   Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: g * g, edge: sceneRect() }) : null;
+  // walls and zone marks keep to the border / zone their point lies on, whatever the zones are numbered now
+  M = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
 }
+const markTol = () => gridSize() * 0.35;
 
 /** Who sees the finished zones: always the GM drawing them, else as the scene says. */
 export function visibleToMe() {
@@ -90,7 +96,7 @@ export function tokenCenter(t) {
 }
 
 export function movesOf(actor) {
-  const p = preset(S?.preset);
+  const p = preset(movePreset());
   try { return p?.moves(actor) ?? []; } catch { return []; }
 }
 
@@ -101,17 +107,23 @@ export function refresh() {
   if ( !display.root.visible ) return;
   let dist = null, bands = null, here = -1;
   const t = setting("zonesDistances", true) ? selectedToken() : null;
-  if ( t && Z ) {
+  // Sky High and Orbit are off the map (one zone of their own): no distances on the map from there
+  if ( t && Z && !OFF_MAP.has(altOf(t.document)) ) {
     const c = tokenCenter(t);
     here = Geo.zoneAt(Z, c.x, c.y);
     if ( here >= 0 ) {
-      dist = Geo.distances(Z, here);
-      const p = preset(movePreset()), moves = movesOf(t.actor);
-      if ( p ) { bands = new Map(); for ( const [id, d] of dist ) { const b = p.band(d, moves); if ( b ) bands.set(id, b); } }
+      // each way of moving counts its own route past the walls (marks.mjs); the preset picks the cheapest and says what it costs
+      const D = Marks.moveDistances(Z, here, M), p = preset(movePreset()), moves = movesOf(t.actor);
+      dist = new Map(); bands = p ? new Map() : null;
+      for ( const z of Z.zones ) {
+        const dd = Marks.distancesTo(D, z.id), b = p?.band(dd, moves);
+        if ( b ) { bands.set(z.id, b); if ( b.d != null ) dist.set(z.id, b.d); }
+        else if ( dd.walk != null ) dist.set(z.id, dd.walk);
+      }
     }
   }
   display.hoverId = hover;
-  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x });
+  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M });
 }
 
 /* ---------------------------------------------------------------- numbers on hover */
@@ -157,7 +169,7 @@ function teardown() {
   canvas.app?.view?.removeEventListener("pointerleave", onHoverLeave);
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
-  S = Z = null;
+  S = Z = M = null;
   undo.length = redo.length = 0;
 }
 
@@ -328,13 +340,14 @@ export function setInSection(on) {
 function legsInZones(waypoint) {
   const pts = [];
   for ( let w = waypoint; w; w = w.previous ) if ( w === waypoint || w.explicit || !w.previous ) pts.unshift(w.center);
-  let n = 0;
+  const tot = { walk: 0, air: 0, through: 0, swim: 0, swing: 0 };
   for ( let i = 1; i < pts.length; i++ ) {
-    const d = Geo.zoneDistance(Z, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
-    if ( d == null ) return null;
-    n += d;
+    const a = Geo.zoneAt(Z, pts[i - 1].x, pts[i - 1].y), b = Geo.zoneAt(Z, pts[i].x, pts[i].y);
+    if ( a < 0 || b < 0 ) return null;
+    const dd = Marks.distancesTo(Marks.moveDistances(Z, a, M), b);
+    for ( const k in tot ) tot[k] = tot[k] == null || dd[k] == null ? undefined : tot[k] + dd[k];
   }
-  return n;
+  return tot;
 }
 
 function patchRuler() {
@@ -347,15 +360,152 @@ function patchRuler() {
     const ctx = orig.call(this, waypoint, state);
     try {
       if ( !ctx || !Z || !setting("zonesRuler", true) || !visibleToMe() || !waypoint.previous ) return ctx;
-      const n = legsInZones(waypoint);
-      if ( n == null ) return ctx;
-      const band = preset(movePreset())?.band(n, movesOf(this.token?.actor));
-      ctx.cost = { total: zonesText(n), units: band?.cost ? `· ${band.cost}` : "" };
-      ctx.distance = { total: zonesText(n) };
+      const dd = legsInZones(waypoint);
+      if ( dd == null ) return ctx;
+      const band = preset(movePreset())?.band(dd, movesOf(this.token?.actor));
+      const n = band ? band.d : dd.walk;
+      const total = n == null ? game.i18n.localize("MOINENMAPS.Zones.noWay") : zonesText(n);
+      ctx.cost = { total, units: band?.cost && n != null ? `· ${band.cost}` : "" };
+      ctx.distance = { total };
       ctx.cssClass = `${ctx.cssClass ?? ""} mm-zones-label`;
     } catch ( err ) { console.warn(`${MODULE_ID} | zones ruler label`, err); }
     return ctx;
   };
+}
+
+/* ---------------------------------------------------------------- marks: walls, zone features and states (GM) */
+
+const pairAt = (x, y) => { const nb = Marks.nearestBorder(Z, x, y, markTol()); return nb ? Marks.pairKey(nb.a, nb.b) : null; };
+
+/** The border between two zones near a scene point (`tol` scene px), with its kind: { a, b, x, y, kind } or null. */
+export function borderAt(x, y, tol = markTol()) {
+  const nb = Marks.nearestBorder(Z, x, y, tol);
+  return nb ? { ...nb, kind: M?.borders.get(Marks.pairKey(nb.a, nb.b))?.kind ?? "open" } : null;
+}
+
+/** Mark the border nearest to a scene point: open, door, locked, wall, outer, reinforced. One undo step. */
+export function setBorder(x, y, kind) {
+  if ( !Z || !Marks.BORDER_KINDS.includes(kind) ) return false;
+  const nb = Marks.nearestBorder(Z, x, y, markTol());
+  if ( !nb ) return false;
+  const key = Marks.pairKey(nb.a, nb.b);
+  return edit((_st, s) => {
+    const before = JSON.stringify(s.walls);
+    s.walls = s.walls.filter(([wx, wy]) => pairAt(wx, wy) !== key);
+    if ( kind !== "open" ) s.walls.push([nb.x, nb.y, kind]);
+    return JSON.stringify(s.walls) !== before;
+  });
+}
+
+/** A point inside a zone to keep its mark on: where its mark is now, else `prefer` when it lies in the zone, else the label spot. */
+function zonePoint(id, prefer) {
+  for ( const [x, y] of S.marks ) if ( Geo.zoneAt(Z, x, y) === id ) return [x, y];
+  if ( prefer && Geo.zoneAt(Z, prefer.x, prefer.y) === id ) return [prefer.x, prefer.y];
+  const z = Z.zones.find((q) => q.id === id);
+  return z ? [z.label.x, z.label.y] : null;
+}
+
+/** Write the props of some zones (id -> props; empty props drop the mark). One undo step. */
+function writeZones(map, prefer) {
+  if ( !Z || !map.size ) return false;
+  const at = new Map([...map.keys()].map((id) => [id, zonePoint(id, prefer)]));
+  return edit((_st, s) => {
+    const before = JSON.stringify(s.marks);
+    s.marks = s.marks.filter(([x, y]) => !map.has(Geo.zoneAt(Z, x, y)));
+    for ( const [id, p] of map ) { const c = Marks.cleanProps(p); if ( Object.keys(c).length && at.get(id) ) s.marks.push([...at.get(id), c]); }
+    return JSON.stringify(s.marks) !== before;
+  });
+}
+
+/** Change a zone's features / states: { building, tall, water, terrain, wrecked, fire (0..12), dark, ice, flooded, lowgrav }. */
+export function setZone(id, patch, at = null) {
+  if ( !Z || id < 0 ) return false;
+  return writeZones(new Map([[id, { ...(M?.zones.get(id) ?? {}), ...patch }]]), at);
+}
+
+/** Clear the states (not the features) of one zone, or of every zone (end of the scene). */
+export function clearStates(id = null) {
+  const map = new Map();
+  for ( const [zid, p] of M?.zones ?? [] ) if ( (id == null || zid === id) && Marks.hasStates(p) ) map.set(zid, Marks.withoutStates(p));
+  return writeZones(map);
+}
+
+/** One round of fire (book: Fire Spreading): a D6 for every burning zone, the result written and told in the chat. */
+export async function fireRound() {
+  if ( !game.user.isGM || !Z || !M ) return null;
+  const { next, log } = Marks.fireRound(Z, M);
+  const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.fire.${k}`, d ?? {});
+  if ( !log.length ) { ui.notifications.info(L("none")); return log; }
+  writeZones(new Map([...next].map(([id, p]) => [id, p])));
+  const num = (id) => id + 1;
+  const rows = log.map((r) => {
+    const d = { n: num(r.id), r: r.roll, to: r.to != null ? num(r.to) : "" };
+    return `<li>${r.out ? L("out", d) : r.to != null ? L("spread", d) : r.roll >= 5 ? L("blocked", d) : L("stays", d)}</li>`;
+  });
+  await ChatMessage.create({ speaker: { alias: game.i18n.localize("MOINENMAPS.Zones.fire.title") }, content: `<ul class="mm-z-fire">${rows.join("")}</ul>` });
+  return log;
+}
+
+/* ---------------------------------------------------------------- token altitude (Invincible: ground, elevated, Sky High, Orbit) */
+
+export const ALTS = ["ground", "elevated", "sky", "orbit"];
+const OFF_MAP = new Set(["sky", "orbit"]);
+/** A token's altitude (its flag; "ground" when unset). */
+export const altOf = (doc) => { const a = doc?.getFlag?.(MODULE_ID, "alt"); return ALTS.includes(a) ? a : "ground"; };
+export async function setAltitude(token, alt) {
+  const doc = token?.document ?? token;
+  if ( !doc?.isOwner || !ALTS.includes(alt) ) return;
+  return alt === "ground" ? doc.unsetFlag(MODULE_ID, "alt") : doc.setFlag(MODULE_ID, "alt", alt);
+}
+
+/** A small tag on a token that is not on the ground (only where the zones show). */
+function altBadge(t) {
+  if ( !t || t.destroyed ) return;
+  const alt = altOf(t.document), show = alt !== "ground" && !!Z && visibleToMe();
+  if ( !show ) { if ( t._mmAlt ) { t._mmAlt.destroy({ children: true }); t._mmAlt = null; } return; }
+  const text = `▲ ${game.i18n.localize(`MOINENMAPS.Zones.altShort.${alt}`)}`;
+  if ( t._mmAlt?.destroyed ) t._mmAlt = null;
+  if ( !t._mmAlt ) {
+    const c = new PIXI.Container(); c.eventMode = "none";
+    c.addChild(new PIXI.Graphics(), new PIXI.Text("", { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 13, fill: 0xf3e7c9 }));
+    c.children[1].anchor.set(0.5); c.children[1].resolution = 3;
+    t._mmAlt = t.addChild(c);
+  }
+  const [G, T] = t._mmAlt.children;
+  T.text = text;
+  const w = T.width + 12, col = alt === "elevated" ? 0x5cc8ff : alt === "sky" ? 0xc38bff : 0xe06666;
+  G.clear().lineStyle({ width: 1.5, color: col }).beginFill(0x15110f, 0.85).drawRoundedRect(-w / 2, -10, w, 20, 9).endFill();
+  const s = Math.max(0.6, Math.min(2, t.w / 100));
+  t._mmAlt.scale.set(s);
+  t._mmAlt.position.set(t.w / 2, -4 * s);
+}
+const altBadges = () => { for ( const t of canvas.tokens?.placeables ?? [] ) altBadge(t); };
+
+/** Token HUD: a button that cycles the altitude (only where the zones show). */
+function onTokenHUD(hud, html) {
+  const root = html instanceof HTMLElement ? html : html?.[0];
+  const t = hud.object;
+  if ( !root || !t?.document?.isOwner || !Z || !visibleToMe() ) return;
+  const col = root.querySelector(".col.right") ?? root.querySelector(".right");
+  if ( !col ) return;
+  const icon = { ground: "fa-person", elevated: "fa-building-user", sky: "fa-cloud", orbit: "fa-earth-americas" };
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "control-icon mm-z-alt";
+  const show = () => {
+    const a = altOf(t.document);
+    btn.innerHTML = `<i class="fa-solid ${icon[a]}"></i>`;
+    btn.dataset.tooltip = game.i18n.format("MOINENMAPS.Zones.altHud", { a: game.i18n.localize(`MOINENMAPS.Zones.alt.${a}`) });
+    btn.classList.toggle("active", a !== "ground");
+  };
+  show();
+  btn.addEventListener("click", async (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const a = altOf(t.document), i = ALTS.indexOf(a);
+    await setAltitude(t, ALTS[(i + (ev.shiftKey ? ALTS.length - 1 : 1)) % ALTS.length]);
+    show();
+  });
+  btn.addEventListener("contextmenu", async (ev) => { ev.preventDefault(); ev.stopPropagation(); await setAltitude(t, "ground"); show(); });
+  col.append(btn);
 }
 
 /* ---------------------------------------------------------------- public API */
@@ -372,10 +522,12 @@ export const zonesApi = {
   /** Zones between two tokens. */
   tokenDistance(a, b) { const p = tokenCenter(a), q = tokenCenter(b); return Geo.zoneDistance(Z, p.x, p.y, q.x, q.y); },
   /** What a move of `d` zones costs this actor under the scene's preset. */
-  band: (d, actor) => preset(S?.preset)?.band(d, movesOf(actor)) ?? null,
+  band: (d, actor) => preset(movePreset())?.band(d, movesOf(actor)) ?? null,
   moves: (actor) => movesOf(actor),
   presets: () => presets().map((p) => ({ id: p.id, title: game.i18n.localize(p.title) })),
   addStroke, erase: eraseAlong, trim, clear: clearAll, undo: undoEdit, redo: redoEdit, setParams,
+  /** Walls and doors, zone features and states (marks.mjs), fire, token altitude. */
+  marks: () => M, borderAt, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
   geometry: Geo
@@ -392,7 +544,15 @@ export function registerZones() {
   Hooks.on("controlToken", () => refresh());
   // badges and lines keep their size on screen: badges follow every zoom step, lines are drawn again after ~8 %
   Hooks.on("canvasPan", () => { if ( display?.root.visible ) display.onZoom(canvas.stage?.scale.x ?? 1); });
-  Hooks.on("updateToken", (doc, changed) => { if ( ("x" in changed || "y" in changed) && doc.object?.controlled ) refresh(); });
+  Hooks.on("updateToken", (doc, changed) => {
+    const alt = changed.flags?.[MODULE_ID] && ("alt" in changed.flags[MODULE_ID] || "-=alt" in changed.flags[MODULE_ID]);
+    if ( alt ) altBadge(doc.object);
+    if ( ("x" in changed || "y" in changed || alt) && doc.object?.controlled ) refresh();
+  });
+  Hooks.on("drawToken", (t) => altBadge(t));
+  Hooks.on("refreshToken", (t) => { if ( t._mmAlt || altOf(t.document) !== "ground" ) altBadge(t); });
+  Hooks.on("moinenMapsZones", (kind) => { if ( kind !== "section" ) altBadges(); });
+  Hooks.on("renderTokenHUD", onTokenHUD);
   Hooks.on("updateItem", (item) => { if ( item.parent && canvas.tokens?.controlled.some((t) => t.actor === item.parent) ) refresh(); });
   window.addEventListener("beforeunload", () => flushSave());
   document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });

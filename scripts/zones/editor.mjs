@@ -1,6 +1,7 @@
 import { smoothStroke } from "../roads/graph.mjs";
 import { trackMarkers } from "../workspace/markers.mjs";
 import * as Zones from "./zones.mjs";
+import * as Menu from "./menu.mjs";
 
 /**
  * Drawing zones (GM): a pencil and an eraser.
@@ -17,6 +18,7 @@ let gfx = null, lines = null, listeners = null;
 let press = null;          // { sx, sy, raw: [...], drag }
 let trail = null;          // eraser trail
 let cursorAt = null, shiftDown = false;
+let rdown = null;          // a right press: a click without a drag opens the zone / border menu (a drag still pans)
 
 const g = () => Zones.gridSize();
 const zoom = () => canvas.stage.scale.x;
@@ -88,6 +90,7 @@ export function redraw() {
 /* ---------------------------------------------------------------- pointer handling */
 
 function onDown(ev) {
+  if ( ev.button === 2 && Zones.editing() ) { rdown = { x: ev.clientX, y: ev.clientY }; return; }
   if ( !mode || !Zones.editing() ) return;
   if ( ev.button !== 0 ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
@@ -115,6 +118,14 @@ function onMove(ev) {
 }
 
 function onUp(ev) {
+  if ( ev.button === 2 ) {
+    const r = rdown; rdown = null;
+    if ( r && Zones.editing() && Math.hypot(ev.clientX - r.x, ev.clientY - r.y) < 5 && ev.target === canvas.app.view ) {
+      press = null; trail = null; redraw();
+      Menu.open({ x: ev.clientX, y: ev.clientY }, worldPoint(ev));
+    }
+    return;
+  }
   if ( !mode || ev.button !== 0 ) return;
   const p = worldPoint(ev);
   if ( mode === "erase" ) {
@@ -162,11 +173,13 @@ export function onCanvasReady() {
     keyup: (e) => { if ( e.key === "Shift" ) { shiftDown = false; redraw(); } },
     blur: cancel,
     leave: () => { cursorAt = null; redraw(); },
-    pan: () => redraw()
+    pan: () => redraw(),
+    ctx: (e) => { if ( Zones.editing() ) e.preventDefault(); }
   };
   view.addEventListener("pointerdown", listeners.down, true);
   view.addEventListener("pointermove", listeners.move);
   view.addEventListener("pointerleave", listeners.leave);
+  view.addEventListener("contextmenu", listeners.ctx);
   window.addEventListener("pointerup", listeners.up);
   window.addEventListener("pointercancel", listeners.cancel);
   window.addEventListener("blur", listeners.blur);
@@ -180,7 +193,7 @@ export function onCanvasReady() {
 function teardownListeners() {
   if ( !listeners ) return;
   const v = canvas.app?.view;
-  v?.removeEventListener("pointerdown", listeners.down, true); v?.removeEventListener("pointermove", listeners.move); v?.removeEventListener("pointerleave", listeners.leave);
+  v?.removeEventListener("pointerdown", listeners.down, true); v?.removeEventListener("pointermove", listeners.move); v?.removeEventListener("pointerleave", listeners.leave); v?.removeEventListener("contextmenu", listeners.ctx);
   window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel); window.removeEventListener("blur", listeners.blur);
   window.removeEventListener("keydown", listeners.key, true); window.removeEventListener("keyup", listeners.keyup, true);
   Hooks.off("canvasPan", listeners.panHook); Hooks.off("moinenMapsZones", listeners.zHook);
@@ -189,6 +202,7 @@ function teardownListeners() {
 
 export function teardown() {
   teardownListeners();
+  Menu.close();
   for ( const o of [gfx, lines] ) if ( o && !o.destroyed ) o.destroy();
   gfx = lines = null; press = trail = cursorAt = null;
 }

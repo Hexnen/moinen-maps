@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { BORDER_KINDS, cleanProps } from "./marks.mjs";
 
 /**
  * The zones of a scene, stored in one scene flag `flags.moinen-maps.zones` (written by the GM, read by everyone):
@@ -9,6 +10,8 @@ import { MODULE_ID } from "../config.mjs";
  *     preset: "invincible" | "none",    the movement rules counted in zones (scripts/zones/presets.mjs)
  *     smooth: 0.3,                      how much the lines are smoothed before the zones are worked out (0..1; the lines stay as drawn)
  *     snap: 0.25,                       an end of a line this close to another line (in grid squares) is joined to it
+ *     w: [[x, y, kind], ...]           border marks (a point on the border: door, locked, wall, outer, reinforced; scripts/zones/marks.mjs)
+ *     m: [[x, y, props], ...]          zone marks (a point inside the zone: features building/tall/water/terrain, states wrecked/fire/...)
  *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"; place: "center" | "corner" (top left);
  *                                       hoverHi: the zone under the cursor lights its border; hoverFx: none | glow | hatch | crosshatch | dots inside it
  *
@@ -58,7 +61,7 @@ export function cleanLook(l = {}) {
 }
 
 // preset null = the world's default movement preset; lookFrom null = the world's default look preset, "custom" = this scene's own look
-export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook() });
+export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook(), walls: [], marks: [] });
 
 /** The scene's stored zones, decoded (an empty set when nothing is stored). */
 export function load(scene) {
@@ -77,6 +80,11 @@ export function load(scene) {
   S.snap = num(f.snap, 0.25, ...LIMITS.snap);
   S.smooth = num(f.smooth, 0.3, ...LIMITS.smooth);
   S.look = cleanLook(f.look);
+  for ( const [x, y, k] of Array.isArray(f.w) ? f.w.filter(Array.isArray) : [] ) if ( Number.isFinite(x) && Number.isFinite(y) && BORDER_KINDS.includes(k) && k !== "open" ) S.walls.push([x, y, k]);
+  for ( const [x, y, p] of Array.isArray(f.m) ? f.m.filter(Array.isArray) : [] ) {
+    const c = cleanProps(p && typeof p === "object" ? p : {});
+    if ( Number.isFinite(x) && Number.isFinite(y) && Object.keys(c).length ) S.marks.push([x, y, c]);
+  }
   S.next = Math.max(Number(f.next) || 1, ...[...S.strokes.keys()].map((k) => k + 1), 1);
   return S;
 }
@@ -86,7 +94,9 @@ export function encode(S) {
     v: VERSION,
     s: [...S.strokes].map(([id, p]) => [id, p.map(r1)]),
     next: S.next, preset: S.preset, lookFrom: S.lookFrom, snap: S.snap, smooth: S.smooth,
-    look: { ...S.look }
+    look: { ...S.look },
+    w: S.walls.map(([x, y, k]) => [r1(x), r1(y), k]),
+    m: S.marks.map(([x, y, p]) => [r1(x), r1(y), { ...p }])
   };
 }
 
