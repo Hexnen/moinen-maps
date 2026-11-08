@@ -1512,5 +1512,7 @@
   "MOINENMAPS.Zones.hoverFx.glow": "Poświata do środka",
   "MOINENMAPS.Zones.hoverFx.hatch": "Kreskowanie",
   "MOINENMAPS.Zones.hoverFx.crosshatch": "Kratka (crosshatch)",
-  "MOINENMAPS.Zones.hoverFx.dots": "Kropki"
+  "MOINENMAPS.Zones.hoverFx.dots": "Kropki",
+  "MOINENMAPS.Zones.f.lineAlpha": "Krycie linii",
+  "MOINENMAPS.Zones.f.hoverAlpha": "Krycie podświetlenia"
 }

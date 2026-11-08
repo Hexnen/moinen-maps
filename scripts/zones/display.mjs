@@ -47,6 +47,20 @@ function tints(Z) {
 
 const hex = (css) => Number.parseInt(String(css).slice(1), 16) || 0xf3e7c9;
 
+/** A closed ring [x, y, ...] walked at an even step: [[x, y], ...]. */
+function resample(r, step) {
+  const out = [], n = r.length;
+  let carry = 0;
+  for ( let i = 0; i < n; i += 2 ) {
+    const ax = r[i], ay = r[i + 1], bx = r[(i + 2) % n], by = r[(i + 3) % n];
+    const L = Math.hypot(bx - ax, by - ay);
+    let d = carry;
+    while ( d < L ) { out.push([ax + ((bx - ax) * d) / L, ay + ((by - ay) * d) / L]); d += step; }
+    carry = d - L;
+  }
+  return out;
+}
+
 export class ZoneDisplay {
   constructor() {
     this.root = new PIXI.Container();
@@ -61,7 +75,9 @@ export class ZoneDisplay {
     this.hiFx = new PIXI.Graphics();
     this.hiMask = new PIXI.Graphics();
     this.hiLine = new PIXI.Graphics();
-    this.hi.addChild(this.hiFx, this.hiMask, this.hiLine);
+    // patterns (hatch, dots) fade in from the border, strongest in the corners: baked on a canvas (see edgePattern)
+    this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
+    this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
     this.root.addChild(this.fill, this.hi, this.lines, this.badges);
     this.hoverId = -1;
@@ -142,6 +158,7 @@ export class ZoneDisplay {
     Ln.clear();
     this.lineZoom = zoom;
     if ( !Z || !look || look.ink <= 0 ) return;
+    Ln.alpha = look.lineAlpha ?? 1;
     const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink;
     Ln.lineStyle({ width: w, color: 0x15110f, alpha: Math.min(1, 0.55 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
     for ( const p of Z.core ) trace(Ln, p);
@@ -165,7 +182,8 @@ export class ZoneDisplay {
     const F = this.hiFx, M = this.hiMask, L = this.hiLine;
     F.clear(); M.clear(); L.clear();
     const look = this.look, z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null;
-    if ( !look?.hoverHi || !z ) return;
+    if ( !look?.hoverHi || !z ) { this.#softTex(); return; }
+    this.hi.alpha = look.hoverAlpha ?? 1;
     const px = 1 / Math.max(0.05, zoom), light = hex(look.color);
     const rings = z.parts.flatMap((part) => part);
     // the mask: the zone itself (holes cut out)
@@ -185,21 +203,16 @@ export class ZoneDisplay {
         F.lineStyle({ width: w * px, color: c, alpha: a, join: PIXI.LINE_JOIN.ROUND });
         for ( const r of rings ) { ring(F, r); }
       }
-    } else if ( fx === "hatch" || fx === "crosshatch" ) {
-      const gap = 11 * px, len = (x1 - x0) + (y1 - y0);
-      // two-tone: a dark line under a light one, so the hatching reads on light and dark maps alike
-      const hatch = () => {
-        for ( let s = -len; s <= len; s += gap ) { F.moveTo(x0 + s, y0); F.lineTo(x0 + s + len, y0 + len); }
-        if ( fx === "crosshatch" ) for ( let s = 0; s <= 2 * len; s += gap ) { F.moveTo(x0 + s, y0); F.lineTo(x0 + s - len, y0 + len); }
-      };
-      F.lineStyle({ width: 2.8 * px, color: 0x15110f, alpha: 0.32 }); hatch();
-      F.lineStyle({ width: 1.2 * px, color: light, alpha: 0.7 }); hatch();
-    } else if ( fx === "dots" ) {
-      const gap = 12 * px, r = 1.7 * px;
-      const dots = (rad) => { for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) F.drawCircle(x, y, rad); };
-      F.beginFill(0x15110f, 0.35); dots(r + 1.1 * px); F.endFill();
-      F.beginFill(light, 0.8); dots(r); F.endFill();
     }
+    if ( fx === "hatch" || fx === "crosshatch" || fx === "dots" ) {
+      // fixed on the map (grid units), baked once per zone and look: zooming only scales it, nothing is redrawn or jumps
+      const key = `${id}|${fx}|${look.color}`;
+      if ( key !== this.#patKey || this.Z !== this.#patZ ) {
+        this.#softTex();
+        this.#edgePattern(z, rings, (this.g ?? 100) / 50, [x0, y0, x1, y1], fx, light);
+        this.#patKey = key; this.#patZ = this.Z;
+      } else this.hiSoft.visible = true;
+    } else this.#softTex();
     // the border: a soft halo and a bright line
     L.lineStyle({ width: 7 * px, color: 0x15110f, alpha: 0.45, join: PIXI.LINE_JOIN.ROUND });
     for ( const r of rings ) ring(L, r);
@@ -207,6 +220,90 @@ export class ZoneDisplay {
     for ( const r of rings ) ring(L, r);
     L.lineStyle({ width: 3 * px, color: light, alpha: 0.95, join: PIXI.LINE_JOIN.ROUND });
     for ( const r of rings ) ring(L, r);
+  }
+
+  /**
+   * Hatch / crosshatch / dots, baked on a small 2D canvas at screen resolution: the pattern (two-tone, so it reads on light and dark
+   * maps) is kept only inside the zone, as a light band along the whole border and a strong patch in every corner (where the border
+   * turns sharply), fading to nothing towards the middle. Shown as a plain sprite (a sprite MASK turned the zone white in Foundry's
+   * primary group).
+   */
+  #edgePattern(z, rings, u, [x0, y0, x1, y1], fx, light) {
+    const band = 40 * u, cornerR = Math.min(90 * u, z.label.r * 1.6);
+    const w = x1 - x0, h = y1 - y0;
+    const k = Math.min(3, 2048 / Math.max(1, w, h));               // canvas pixels per scene pixel (sharp up to ~3x zoom)
+    const W = Math.max(2, Math.ceil(w * k) + 2), H = Math.max(2, Math.ceil(h * k) + 2);
+    const mk = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d"); x.setTransform(k, 0, 0, k, 1 - x0 * k, 1 - y0 * k); return [c, x]; };
+    const path = new Path2D();
+    for ( const r of rings ) { path.moveTo(r[0], r[1]); for ( let i = 2; i < r.length; i += 2 ) path.lineTo(r[i], r[i + 1]); path.closePath(); }
+
+    // 1. the strength: light band + corner patches, inside the zone only
+    const [mc, m] = mk();
+    m.clip(path, "evenodd");
+    m.globalCompositeOperation = "lighter";
+    m.strokeStyle = "#fff"; m.lineJoin = "round";
+    for ( const [bw, a] of [[2, 0.1], [1.3, 0.1], [0.7, 0.12]] ) { m.globalAlpha = a; m.lineWidth = band * bw; m.stroke(path); }
+    const step = 6 * u, reach = Math.max(2, Math.round(30 * u / step));
+    for ( const r of rings ) {
+      const P = resample(r, step), n = P.length;
+      if ( n < 2 * reach + 3 ) continue;
+      const turn = new Float32Array(n);
+      for ( let i = 0; i < n; i++ ) {
+        const A = P[(i - reach + n) % n], B = P[i], C = P[(i + reach) % n];
+        let t = Math.abs(Math.atan2(C[1] - B[1], C[0] - B[0]) - Math.atan2(B[1] - A[1], B[0] - A[0]));
+        if ( t > Math.PI ) t = 2 * Math.PI - t;
+        turn[i] = t;
+      }
+      for ( let i = 0; i < n; i++ ) {
+        const t = turn[i];
+        if ( t < 0.5 ) continue;                                     // under ~30 degrees: a bend, not a corner
+        let peak = true;
+        for ( let j = 1; j <= reach && peak; j++ ) if ( turn[(i + j) % n] > t || turn[(i - j + n) % n] >= t ) peak = false;
+        if ( !peak ) continue;
+        const [x, y] = P[i], g = m.createRadialGradient(x, y, 0, x, y, cornerR);
+        g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.45, "rgba(255,255,255,0.45)"); g.addColorStop(1, "rgba(255,255,255,0)");
+        m.globalAlpha = Math.min(1, 0.35 + (t - 0.5) * 0.9);
+        m.fillStyle = g; m.fillRect(x - cornerR, y - cornerR, 2 * cornerR, 2 * cornerR);
+      }
+    }
+
+    // 2. the pattern, then kept by the strength (destination-in)
+    const [pc, c] = mk();
+    const css = (n, a) => `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+    const len = w + h;
+    if ( fx === "dots" ) {
+      const gap = 12 * u, r = 1.7 * u;
+      const dots = (rad) => { c.beginPath(); for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) { c.moveTo(x + rad, y); c.arc(x, y, rad, 0, 2 * Math.PI); } c.fill(); };
+      c.fillStyle = css(0x15110f, 0.42); dots(r + 1.1 * u);
+      c.fillStyle = css(light, 0.9); dots(r);
+    } else {
+      const gap = 11 * u;
+      const hatch = () => {
+        c.beginPath();
+        for ( let s = -len; s <= len; s += gap ) { c.moveTo(x0 + s, y0); c.lineTo(x0 + s + len, y0 + len); }
+        if ( fx === "crosshatch" ) for ( let s = 0; s <= 2 * len; s += gap ) { c.moveTo(x0 + s, y0); c.lineTo(x0 + s - len, y0 + len); }
+        c.stroke();
+      };
+      c.strokeStyle = css(0x15110f, 0.4); c.lineWidth = 2.8 * u; hatch();
+      c.strokeStyle = css(light, 0.85); c.lineWidth = 1.2 * u; hatch();
+    }
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalCompositeOperation = "destination-in";
+    c.drawImage(mc, 0, 0);
+
+    const S = this.hiSoft;
+    S.texture = PIXI.Texture.from(pc);
+    S.position.set(x0 - 1 / k, y0 - 1 / k); S.scale.set(1 / k);
+    S.visible = true;
+  }
+
+  /** Drop the soft mask's texture (a new one is drawn per hovered zone and zoom step). */
+  #patKey = null; #patZ = null;
+  #softTex() {
+    this.#patKey = null;
+    const S = this.hiSoft;
+    if ( S.texture !== PIXI.Texture.EMPTY ) { S.texture.destroy(true); S.texture = PIXI.Texture.EMPTY; }
+    S.visible = false;
   }
 
   /**
@@ -228,5 +325,5 @@ export class ZoneDisplay {
 
   set visible(v) { this.root.visible = v; }
 
-  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) this.root.destroy({ children: true }); }
+  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) { this.#softTex(); this.root.destroy({ children: true }); } }
 }

@@ -1512,5 +1512,7 @@
   "MOINENMAPS.Zones.hoverFx.glow": "Inner glow",
   "MOINENMAPS.Zones.hoverFx.hatch": "Hatching",
   "MOINENMAPS.Zones.hoverFx.crosshatch": "Crosshatch",
-  "MOINENMAPS.Zones.hoverFx.dots": "Dots"
+  "MOINENMAPS.Zones.hoverFx.dots": "Dots",
+  "MOINENMAPS.Zones.f.lineAlpha": "Line opacity",
+  "MOINENMAPS.Zones.f.hoverAlpha": "Highlight opacity"
 }
