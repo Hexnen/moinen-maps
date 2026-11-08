@@ -8,12 +8,11 @@ import { GLSL_WIND, gustEnv, dirVec } from "../wind.mjs";
  * GRID: a pixel grid of its own, fixed in screen space: one lens px = round(3 x DPR) device px (about 3 CSS px), whatever the zoom
  * (drops are on the glass, not on the map).
  *
- * RENDER: one low-res pass into a lens-size RenderTexture, only when its 12 Hz step changes (or the view moves: the drops refract
- * the map under them); every frame one NEAREST-upscaled sprite, a child of the stage drawn last, in screen space (its world transform
- * ignores the stage's). Both use the weather's blend (dst x k + add): wet film, streaks, mist and rims are the frame under them
- * scaled (no capture); only a drop's body fetches an image: a clear water lens over what lies under it, slightly magnified and
- * pulled at the edge, with a thin rim and highlight. The image is way (b), a lens-size copy of the frame drawn so far (LensGrab:
- * map, tokens, fire, weather), or way (a), the scene background at the world point, when that copy is not possible.
+ * RENDER: one low-res pass into a lens-size RenderTexture, only when its 12 Hz step changes; every frame one NEAREST-upscaled
+ * sprite, a child of the stage drawn last, in screen space (its world transform ignores the stage's). Both use the weather's blend
+ * (dst x k + add): everything on the glass is the frame under it scaled and lifted, NOTHING IS COPIED: a drop is clear water over the
+ * full-resolution frame (a lift, a lit top edge, a thin darker lower rim, a highlight). A refracted copy at lens resolution was tried
+ * and dropped: it turned every drop into a mosaic of 3 x 3 squares, and small drops into dark squares at night (2026-11-08).
  *
  * RAIN (4.3): static beads (one per jittered 8-px cell, lobed, born with a splat, sag, evaporate), runners in two column grids (grow
  * in place, then stick-slip down a wobbly path slanted by the wind, leave a wet streak that beads up and clears the misty film),
@@ -40,7 +39,8 @@ const LENS_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
 in vec2 vP;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 dispColor;   // a big drop's refraction: (its centre - this px) / 32 + 0.5, radius / 16, image share
 uniform vec2 uLens;          // lens size in lens px
 uniform float uT;            // the step time (s, mod 1 h)
 uniform int uSeed;
@@ -54,15 +54,9 @@ uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, p
 uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts
 uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
 uniform vec4 uHeatL;         // glow, flecks per area, presence, -
-uniform sampler2D uBg;
-uniform vec4 uMap;           // lens px -> scene background uv: uv = p * uMap.xy + uMap.zw
-uniform float uHasBg;
-uniform sampler2D uGrab;     // way (b): a lens-size copy of the frame drawn under the glass (tokens, fire, weather and all)
-uniform float uHasGrab;
 uniform float uLight;        // 1 by day, darker at night
-uniform float uWet;          // the wet ground under the glass (the map sample is the dry map)
 ${GLSL_WIND}
-const float PERIOD = 10.0, G = 8.0, PI2 = 6.2831853;
+const float PERIOD = 10.0, G = 8.0, PI2 = 6.2831853, SMALL = 2.6;
 float vnoise(vec2 p, int s) {
   vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
   int x = int(i.x), y = int(i.y);
@@ -176,8 +170,8 @@ void put(float s, float R, vec2 c) {
 }
 
 // ---------------------------------------------------------------- composing on the glass: the frame becomes dst x K + A
-vec3 A_ = vec3(0.0); float K_ = 1.0;
-void over(float k, vec3 a) { A_ = A_ * k + a; K_ *= k; }
+vec3 A_ = vec3(0.0); float K_ = 1.0, S_ = 0.0;   // (S_: the share of the refracted frame added by the lens sprite)
+void over(float k, vec3 a) { A_ = A_ * k + a; K_ *= k; S_ *= k; }
 // items scattered by cells of C lens px (count per reference lens area 427 x 240: the same density on any screen and DPR)
 const float REF = 102480.0;
 float slotsOf(float perRef, float C) { return perRef * C * C / REF; }
@@ -257,7 +251,7 @@ void crystals(vec2 p) {
     // lands: grows from a speck over 0.3 s (a little overshoot), then holds; melts or fades by shrinking
     float land = ss(0.0, 0.3, tau) * (1.0 + 0.15 * (1.0 - ss(0.3, 0.6, tau)));
     float R = R0 * land * (1.0 - melt) * (1.0 - gone);
-    if ( R > 0.4 && floor(p) - floor(x) == clamp(floor(p) - floor(x), 0.0, 1.0) ) { starHit = 3; continue; }
+    if ( R > 0.4 && floor(p) == floor(x) ) { starHit = 3; continue; }   // (the core: one lens px; 2 x 2 read as a white square)
     if ( R > 0.8 ) {
       float m = 9.0;
       for ( int a = 0; a < 6; a++ ) {
@@ -320,7 +314,7 @@ void sandLens(vec2 p) {
       if ( tau < 1.0 / 12.0 ) { if ( (d.x == 0.0 && abs(d.y) <= 1.0) || (d.y == 0.0 && abs(d.x) <= 1.0) ) over(0.0, vec3(1.0, 0.98, 0.88) * uLight); }
       else if ( tau < 2.0 / 12.0 ) { if ( d == vec2(0.0) ) over(0.0, vec3(1.0, 0.92, 0.70) * uLight); }
       else if ( tau < L - 0.4 && hu(kc, 4, 524) < 0.6 ) {
-        if ( d == vec2(0.0) ) over(0.5, vec3(0.0));
+        if ( d == vec2(0.0) ) over(0.8, 0.2 * vec3(1.0, 0.95, 0.80) * uLight);   // (the pit catches the light: a dark one read as a square)
         else if ( d == vec2(1.0, -1.0) ) over(0.4, 0.6 * vec3(1.0, 0.95, 0.80) * uLight);
       }
     }
@@ -365,7 +359,7 @@ void dustLens(vec2 p) {
   if ( hu(ix, iy, 604) < 0.004 && hu(ix, iy, 609) < uDustL.x * pr ) {
     float lit = clamp(1.0 - length(p - sun) / (420.0 * sc), 0.0, 1.0) * glare;
     if ( hu(ix, iy, 900 + int(floor(uT * 3.0 + hu(ix, iy, 608) * 3.0))) < lit * 0.8 ) over(0.0, vec3(1.0, 0.97, 0.86) * uLight);
-    else over(0.7, vec3(0.08) * uLight);
+    else over(0.9, vec3(0.1) * uLight);   // (a dull speck: lighter, never a dark square)
   }
   // a smudge (fingerprint): only where the glare falls on it, ridges light up
   if ( uDustL2.y > 0.0 && length(vec2(p.x - 0.70 * uLens.x, (p.y - 0.29 * uLens.y) * 1.4)) < 70.0 * sc && fbm3(vec2(p.x / 22.0, p.y / 16.0), 605) > 0.6
@@ -390,7 +384,7 @@ void heatLens(vec2 p) {
   vec2 x = vec2(ce) * 48.0 + 4.0 + floor(36.0 * vec2(hu(kc, 1, 722), hu(kc, 1, 723)));
   vec2 d = floor(p) - x;
   if ( tau < 1.0 / 12.0 ) { if ( abs(d.x + 0.5) < 2.0 && abs(d.y + 0.5) < 2.0 ) over(0.0, vec3(1.0, 0.97, 0.80) * uLight); return; }
-  float ci = 1.0 + min(3.0, floor(tau / 0.5)), sz = ci < 4.0 ? 2.0 : 1.0;
+  float ci = 1.0 + min(3.0, floor(tau / 0.5)), sz = 1.0;   // (one lens px: a 2 x 2 fleck read as a square)
   float sl = hu(kc, 1, 725) > 0.6 && ci < 3.0 ? min(3.0, floor(tau * 2.0)) : 0.0;
   vec2 e = d - vec2(0.0, sl);
   vec3 E = ci < 1.5 ? vec3(1.0, 0.82, 0.30) : ci < 2.5 ? vec3(1.0, 0.54, 0.14) : ci < 3.5 ? vec3(0.80, 0.26, 0.10) : vec3(0.30, 0.22, 0.20);
@@ -468,7 +462,8 @@ void main() {
       streak = streak || here;
       lit = lit || (right && !here);
     }
-    if ( fresh && abs(dxp) < r0 * 0.9 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade);
+    // (the cleared path fades out to its sides, in steps, so it never shows a straight-edged band)
+    if ( fresh && abs(dxp) < r0 * 0.9 + 1.0 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade * (1.0 - ss(r0 * 0.3, r0 * 0.9 + 1.0, abs(dxp))));
     // trail beads at jittered spacing (4.5-9 px) behind the head
     float j0 = floor((p.y - q.a.y) / 6.75);
     for ( int dj = -1; dj <= 1; dj++ ) {
@@ -503,93 +498,136 @@ void main() {
   float film = (0.09 + 0.13 * (1.0 - clamp(min(ex, ey), 0.0, 1.0))) * (1.0 - clear) * uFilm;
   vec3 add = film * vec3(0.78, 0.82, 0.88) * uLight; float k = 1.0 - film;
   bool inside = sdf < 0.0;
-  if ( streak && !inside ) { add = vec3(0.04) * uLight; k = 0.6; }
-  if ( lit && !inside && hu(int(floor(p.x)), int(floor(p.y / 3.0)), 345) < 0.6 ) { add = vec3(0.2) * uLight; k = 0.85; }
+  if ( streak && !inside ) { add = vec3(0.03) * uLight; k = 0.86; }   // (a faint wet trail: darker, it reads as a dark bar)
+  if ( lit && !inside && hu(int(floor(p.x)), int(floor(p.y / 3.0)), 345) < 0.6 ) { add = vec3(0.12) * uLight; k = 0.92; }
   if ( mist && !inside ) { add = vec3(0.12) * uLight; k = 1.0; }
   if ( sat && !inside ) { add = vec3(0.16) * uLight; k = 0.9; }
-  if ( !inside && sdf < 1.0 && p.y - dc.y > 0.45 * dR ) { add = vec3(0.0); k = 0.86; }     // a faint contact shadow under the drop
+  // A DROP is clear water over the frame: a BIG drop shows the frame under it magnified a little at the centre and pulled at the
+  // edge (barrel-like), nudged up, with a thin darker rim on the lower / side edge, a faint lit top edge and a highlight. The image
+  // is not made here: this pass writes where it samples (dispColor) and the lens sprite fetches the FULL-RESOLUTION frame there, so
+  // a drop never turns into a mosaic of 3 x 3 lens-px squares. A SMALL drop (radius under SMALL lens px) is only a faint lift and a
+  // glint over the frame: an image, a rim or a shadow in a few whole lens px reads as a square (worst at night: dark squares).
+  bool small = dR < SMALL;
+  float srcK = 0.0;
+  // (no contact shadow under a drop: in whole lens px it was a dark block)
   if ( inside ) {
-    // a clear water lens: it shows what lies under it, magnified a little at the centre and pulled at the edge (barrel-like), with
-    // the image nudged up; no fill or tint, only a thin dark rim on the lower / side edge, a faint lit top edge and a highlight
-    vec2 n = (p - dc) / max(dR, 0.5);
-    float l2 = min(dot(n, n), 1.0), m = 0.68 + 0.22 * l2;
-    vec2 sp = dc + (p - dc) * m - vec2(0.0, 0.18 * dR);
-    vec3 src; bool have = true;
-    if ( uHasGrab > 0.5 ) src = texture(uGrab, clamp(sp, vec2(0.5), uLens - 0.5) / uLens).rgb;     // way (b): the frame itself
-    else {
-      vec2 uv = floor(sp) * uMap.xy + uMap.zw + 0.5 * uMap.xy;                                     // way (a): the map only
-      have = uHasBg > 0.5 && all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
-      src = have ? (texture(uBg, uv).rgb * (1.0 - 0.29 * uWet) + vec3(0.0, 0.012, 0.035) * uWet) * uLight : vec3(0.0);
-    }
-    // body: the refracted image, a touch brighter where the drop gathers light (lower half), never a flat fill
-    vec3 bAdd = have ? src * (0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR)) : vec3(0.0); float bK = have ? 0.0 : 1.0;
-    bool rim = sdf > -1.0, low = rim && n.y > -0.2;
-    if ( low ) { bAdd = have ? src * 0.58 : vec3(0.0); bK = have ? 0.0 : 0.6; }
-    else if ( rim ) { bAdd = (have ? src * 0.9 : vec3(0.0)) + 0.05 * uLight; bK = have ? 0.0 : 0.95; }
+    vec2 n = (p - dc) / max(dR, 0.5), hl = dc - vec2(0.38, 0.42) * dR;
+    vec3 bAdd = vec3(0.0); float bK = 0.0;
     if ( dR < 1.25 ) { bAdd = vec3(0.07) * uLight; bK = 0.97; }                                  // tiny: one barely lighter px
-    else if ( length(p - (dc - vec2(0.38, 0.42) * dR)) < max(0.6, 0.2 * dR) ) { bAdd = vec3(0.92, 0.95, 1.0) * uLight; bK = 0.0; }
+    else if ( small ) {
+      bAdd = vec3(0.04) * uLight; bK = 1.0;
+      if ( floor(p) == floor(hl) ) { bAdd = vec3(0.6, 0.63, 0.66) * uLight; bK = 0.35; }
+    } else {
+      bool rim = sdf > -1.0;
+      srcK = 0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR);                                   // a touch brighter low in the drop
+      if ( rim && n.y > 0.3 ) srcK = 0.86;                                                       // the thin darker lower rim (a crescent)
+      else if ( rim ) { srcK = 0.9; bAdd = vec3(0.05) * uLight; }                               // the faint lit top edge
+      if ( floor(p) == floor(hl) ) { srcK *= 0.3; bAdd = vec3(0.62, 0.65, 0.68) * uLight; }   // the highlight: one lens px, never a block
+    }
     add = bAdd; k = bK;
   }
-  A_ = A0 * k + add; K_ = K0 * k;
-  if ( starHit == 1 ) over(0.72, vec3(0.0));
-  else if ( starHit == 2 ) over(0.0, vec3(0.93, 0.97, 1.0) * uLight);
-  else if ( starHit == 3 ) over(0.0, vec3(uLight));
+  A_ = A0 * k + add; K_ = K0 * k; S_ = srcK;
+  // a crystal: light arms with a faint frosty glow around them (a dark halo read as dark squares between the arms)
+  if ( starHit == 1 ) over(0.94, vec3(0.05, 0.055, 0.06) * uLight);
+  else if ( starHit == 2 ) over(0.25, 0.7 * vec3(0.93, 0.97, 1.0) * uLight);
+  else if ( starHit == 3 ) over(0.15, 0.85 * vec3(uLight));
   sandLens(p);
   dustLens(p);
   heatLens(p);
   fragColor = vec4(clamp(A_, 0.0, 1.0), clamp(K_, 0.0, 1.0));
+  dispColor = S_ > 0.0 ? vec4(clamp((dc - p) / 32.0 + 0.5, 0.0, 1.0), min(dR, 16.0) / 16.0, clamp(S_, 0.0, 1.0)) : vec4(0.5, 0.5, 0.0, 0.0);
 }`;
 
 let lensProg = null;
 
-/** A sprite drawn in screen space whatever its parent's transform (the stage pans and zooms; the glass does not). */
-class ScreenSprite extends PIXI.Sprite {
+const SHOW_VERT = `#version 300 es
+precision highp float;
+in vec2 aVertexPosition;
+uniform mat3 projectionMatrix;
+uniform mat3 translationMatrix;
+out vec2 vP;
+void main() {
+  gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);
+  vP = aVertexPosition;
+}`;
+
+/** The glass on screen: the lens pass's (add, k), NEAREST; a big drop adds the full-resolution frame copy, refracted per screen px. */
+const SHOW_FRAG = `#version 300 es
+precision highp float;
+in vec2 vP;                  // lens px (continuous)
+out vec4 fragColor;
+uniform sampler2D uShade;    // the lens pass: (add, k)
+uniform sampler2D uDisp;     // the lens pass: a big drop's centre offset, radius, image share
+uniform sampler2D uFrame;    // the frame drawn under the glass, full resolution, top row first
+uniform vec2 uLens;          // lens px
+uniform vec2 uFrameK;        // frame uv per lens px
+uniform float uHasFrame;
+void main() {
+  vec2 q = (floor(vP) + 0.5) / uLens;
+  vec4 c = texture(uShade, q), d = texture(uDisp, q);
+  vec3 add = c.rgb; float k = c.a;
+  if ( d.a > 0.0 ) {
+    if ( uHasFrame > 0.5 ) {
+      vec2 dc = floor(vP) + 0.5 + (d.xy - 0.5) * 32.0;
+      float dR = d.z * 16.0;
+      vec2 n = (vP - dc) / max(dR, 0.5);
+      float m = 0.68 + 0.22 * min(dot(n, n), 1.0);
+      vec2 sp = dc + (vP - dc) * m - vec2(0.0, 0.18 * dR);
+      add += texture(uFrame, clamp(sp * uFrameK, vec2(0.0), vec2(1.0))).rgb * d.a;
+    } else k = 1.0;   // (no copy of the frame: the drop is clear, the frame shows as it is)
+  }
+  fragColor = vec4(add, k);
+}`;
+let showProg = null;
+
+/**
+ * The lens on screen: a quad over the screen in screen space whatever its parent's transform (the stage pans and zooms; the glass
+ * does not). Before it draws it copies the frame drawn so far (everything under the glass: map, tokens, fire, weather) into a
+ * full-resolution texture with one blit, while lens drops exist, so a big drop refracts the frame itself at full resolution.
+ */
+class LensShow extends PIXI.Mesh {
   updateTransform() {
     const t = this.transform;
     t.worldTransform.set(this.px, 0, 0, this.px, 0, 0);
     t._worldID++;
     this.worldAlpha = this.alpha;
   }
-}
 
-/**
- * Way (b) of the refraction (doc 4.2): drawn just before the lens sprite, it copies the frame drawn so far (everything under the
- * glass: map, tokens, fire, weather) into a lens-size texture with one downscaling blit, on every frame while lens drops exist (a lens-size blit), so each 12 Hz step refracts the frame just before it. No redraw, no
- * full-res capture.
- */
-class LensGrab extends PIXI.Container {
   render(r) {
-    const L = this.lens;
-    if ( !L?.grabWanted || !L.grabRT ) return;
-    L.grabWanted = false;
-    const gl = r.gl, cur = r.renderTexture.current, ctx = r.CONTEXT_UID;
-    try {
-      r.batch.flush();
-      const srcFB = cur ? cur.framebuffer?.glFramebuffers?.[ctx]?.framebuffer ?? null : null;
-      if ( cur && (!srcFB || cur.framebuffer.multisample > 1) ) { L.grabOk = false; return; }
-      if ( !cur && gl.getContextAttributes()?.antialias ) { L.grabOk = false; return; }
-      const res = cur ? cur.baseTexture.resolution : r.resolution, sf = r.renderTexture.sourceFrame, df = r.renderTexture.destinationFrame;
-      const sf0 = sf.clone(), df0 = df.clone();
-      const W = Math.floor((cur ? cur.width : r.screen.width) * res), H = Math.floor((cur ? cur.height : r.screen.height) * res);
-      const { lw, lh, lpx } = L.stats, dw = Math.min(lw, Math.floor(W / lpx)), dh = Math.min(lh, Math.floor(H / lpx));
-      r.renderTexture.bind(L.grabRT);
-      const dstFB = L.grabRT.framebuffer.glFramebuffers[ctx].framebuffer;
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, srcFB);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dstFB);
-      // a render texture holds its top row first, the screen its bottom row: flip only from the screen
-      if ( cur ) gl.blitFramebuffer(0, 0, dw * lpx, dh * lpx, 0, 0, dw, dh, gl.COLOR_BUFFER_BIT, gl.LINEAR);
-      else gl.blitFramebuffer(0, H - dh * lpx, dw * lpx, H, 0, dh, dw, 0, gl.COLOR_BUFFER_BIT, gl.LINEAR);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFB);
-      r.renderTexture.bind(cur, sf0, df0);
-      L.grabOk = true; L.stats.grabs++;
-    } catch ( err ) { L.grabOk = false; try { r.renderTexture.bind(cur); } catch {} }
+    const L = this.lens, u = this.shader.uniforms;
+    u.uHasFrame = 0;
+    if ( L?.copyWanted && L.frameRT ) {
+      const gl = r.gl, cur = r.renderTexture.current, ctx = r.CONTEXT_UID;
+      try {
+        r.batch.flush();
+        const srcFB = cur ? cur.framebuffer?.glFramebuffers?.[ctx]?.framebuffer ?? null : null;
+        const ok = cur ? !!srcFB && !(cur.framebuffer.multisample > 1) : !gl.getContextAttributes()?.antialias;
+        if ( ok ) {
+          const sf0 = r.renderTexture.sourceFrame.clone(), df0 = r.renderTexture.destinationFrame.clone();
+          const res = cur ? cur.baseTexture.resolution : r.resolution;
+          const H = Math.floor((cur ? cur.height : r.screen.height) * res);
+          const w = L.frameRT.width, h = L.frameRT.height;
+          r.renderTexture.bind(L.frameRT);
+          const dstFB = L.frameRT.framebuffer.glFramebuffers[ctx].framebuffer;
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, srcFB);
+          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dstFB);
+          // a render texture holds its top row first, the screen its bottom row: flip only from the screen
+          if ( cur ) gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+          else gl.blitFramebuffer(0, H - h, w, H, 0, h, w, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, dstFB);
+          r.renderTexture.bind(cur, sf0, df0);
+          u.uHasFrame = 1; L.stats.copies++;
+        }
+      } catch ( err ) { u.uHasFrame = 0; try { r.renderTexture.bind(r.renderTexture.current); } catch {} }
+    }
+    super.render(r);
   }
 }
 
 export class WeatherLens {
   constructor() {
-    this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, grabs: 0, way: "a" };
-    this.grabWanted = false; this.grabOk = false;
+    this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, copies: 0 };
+    this.copyWanted = false;
     this.now = null; this.state = null; this.P = null;
     this.key = ""; this.int = new Float32Array(121);
     this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
@@ -624,41 +662,48 @@ export class WeatherLens {
     this.free();
     this.stats.lw = lw; this.stats.lh = lh; this.stats.lpx = lpx;
     this.rt = PIXI.RenderTexture.create({ width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
-    this.grabRT = PIXI.RenderTexture.create({ width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
-    this.grab = new LensGrab(); this.grab.lens = this; this.grab.eventMode = "none";
+    // the second target of the lens pass (drawBuffers 1): where a big drop samples the frame
+    this.disp = new PIXI.BaseTexture(null, { width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+    this.rt.framebuffer.addColorTexture(1, this.disp);
+    // the full-resolution copy of the frame under the glass (device px)
+    const fw = Math.floor(r.screen.width * dpr), fh = Math.floor(r.screen.height * dpr);
+    this.frameRT = PIXI.RenderTexture.create({ width: fw, height: fh, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
     lensProg ??= PIXI.Program.from(LENS_VERT, LENS_FRAG, "moinen-maps-weather-lens");
     const g = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
     const state = PIXI.State.for2d(); state.blend = false;
     this.pass = new PIXI.Mesh(g, new PIXI.Shader(lensProg, {
       uLens: new Float32Array([lw, lh]), uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
       uG: this.int, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
-      uBg: PIXI.Texture.WHITE, uMap: new Float32Array(4), uHasBg: 0, uGrab: PIXI.Texture.WHITE, uHasGrab: 0, uLight: 1, uWet: 0, translationMatrix: new PIXI.Matrix().toArray(true)
+      uLight: 1, translationMatrix: new PIXI.Matrix().toArray(true)
     }), state);
-    this.sprite = new ScreenSprite(this.rt);
-    this.sprite.px = css;
-    this.sprite.blendMode = blendMode();
+    showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
+    const sg = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
+    this.sprite = new LensShow(sg, new PIXI.Shader(showProg, {
+      uShade: this.rt, uDisp: new PIXI.Texture(this.disp), uFrame: this.frameRT, uLens: new Float32Array([lw, lh]),
+      uFrameK: new Float32Array([css * dpr / fw, css * dpr / fh]), uHasFrame: 0, translationMatrix: new PIXI.Matrix().toArray(true)
+    }));
+    this.sprite.lens = this; this.sprite.px = css;
+    this.sprite.state.blendMode = blendMode(); this.sprite.state.depthTest = false; this.sprite.state.culling = false;
     this.sprite.eventMode = "none";
-    canvas.stage.addChild(this.grab, this.sprite);
+    canvas.stage.addChild(this.sprite);
   }
 
-  /** Every frame: re-render the lens when its step, the view or the state changed (a compare otherwise). */
+  /** Every frame: re-render the lens when its 12 Hz step changed (a compare otherwise; setState clears the key). */
   tick() {
     const st = this.state; if ( !st || !canvas.stage ) return;
     this.ensure();
     const ch = canvas.stage.children;
-    if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite || ch.at(-2) !== this.grab ) canvas.stage.addChild(this.grab, this.sprite);   // (drawn last)
-    const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12), wt = canvas.stage.worldTransform;
-    const key = `${q}|${wt.a}|${wt.d}|${wt.tx}|${wt.ty}`;
-    // copy every frame while drops exist (one small blit), so a step always refracts the frame just before it
-    this.grabWanted = (this.gates?.[0] ?? 0) > 0;
+    if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite ) canvas.stage.addChild(this.sprite);   // (drawn last)
+    const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12);
+    const key = `${q}`;
+    this.copyWanted = (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0;   // (big drops: rain beads and runners, melted crystals)
     if ( key === this.key ) return;
     this.key = key;
-    this.render(q / 12, wt);
+    this.render(q / 12);
   }
 
-  render(t, wt) {
+  render(t) {
     const t0 = performance.now(), u = this.pass.shader.uniforms, [bead, big, run, mist, film] = this.gates ?? [0, 0, 0, 0, 0];
-    const css = this.sprite.px;
     u.uT = t; u.uSeed = this.seed | 0;
     u.uRainA[0] = bead; u.uRainA[1] = big; u.uRainA[2] = run; u.uRainA[3] = mist; u.uFilm = film;
     const w = this.wind, [dx, dy] = dirVec(w?.dir ?? 0), ws = Math.min(1, Math.max(0, (w?.str ?? 0) * 2));
@@ -667,25 +712,15 @@ export class WeatherLens {
     // the gust envelope over the last 10 s on the 12 Hz grid (the same on every client)
     for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, this.seed | 0);
     u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
-    // refraction-lite: lens px -> scene background uv
-    const bg = canvas.primary?.background, tex = bg?.texture, R = canvas.dimensions?.sceneRect;
-    if ( tex?.valid && R && wt.a ) {
-      u.uBg = tex; u.uHasBg = 1;
-      u.uMap[0] = css / wt.a / R.width; u.uMap[1] = css / wt.d / R.height;
-      u.uMap[2] = (-wt.tx / wt.a - R.x) / R.width; u.uMap[3] = (-wt.ty / wt.d - R.y) / R.height;
-    } else u.uHasBg = 0;
-    // way (b) when the last copy worked (the frame under the glass, one frame late); else way (a), the map
-    u.uGrab = this.grabRT; u.uHasGrab = this.grabOk ? 1 : 0; this.stats.way = this.grabOk ? "b" : "a";
-    u.uWet = Math.min(1, this.state?.wet ?? 0);
     u.uLight = 1 - 0.7 * Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
     canvas.app.renderer.render(this.pass, { renderTexture: this.rt, clear: true });
     this.stats.renders++; this.stats.passMs = performance.now() - t0;
   }
 
   free() {
-    this.sprite?.parent?.removeChild(this.sprite); this.sprite?.destroy(); this.sprite = null;
-    this.grab?.parent?.removeChild(this.grab); this.grab?.destroy(); this.grab = null;
-    this.grabRT?.destroy(true); this.grabRT = null; this.grabOk = false;
+    this.sprite?.parent?.removeChild(this.sprite); this.sprite?.geometry?.destroy(); this.sprite?.destroy(); this.sprite = null;
+    this.frameRT?.destroy(true); this.frameRT = null;
+    this.disp?.destroy(); this.disp = null;
     this.pass?.geometry?.destroy(); this.pass?.destroy(); this.pass = null;
     this.rt?.destroy(true); this.rt = null;
   }
