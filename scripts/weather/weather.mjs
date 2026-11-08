@@ -8,9 +8,10 @@ import { perfMode } from "../perf-mode.mjs";
 import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import { view as viewOf, VIEW_FLAG, cleanView } from "../view-angle.mjs";
-import { setWindProvider, setVortexProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
+import { setWindProvider, setVortexProvider, setFireWetProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
 import * as TM from "./tornado-model.mjs";
 import { TornadoDisplay } from "./tornado.mjs";
+import { SteamLayer } from "./steam.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -20,7 +21,7 @@ import { TornadoDisplay } from "./tornado.mjs";
  * COST WHEN OFF: no display object, no ticker, no texture: only these hooks. A future key (a change scheduled ahead) is one timer.
  */
 let P = M.cleanParams();
-let display = null, lens = null, tornado = null, tornadoTimer = 0;
+let display = null, lens = null, tornado = null, tornadoTimer = 0, steam = null;
 let info = null, shelter = null, infoKey = "", shelterKey = "", infoJob = 0;
 let timer = 0, shelterTimer = 0;
 let lastState = null;
@@ -80,10 +81,12 @@ export function teardown() {
   tornado?.destroy(); tornado = null;
   cancelIdle();
   display?.destroy(); display = null;
+  steam?.destroy(); steam = null;
   lens?.destroy?.(); lens = null;
   info?.texture?.destroy(true); info = null; infoKey = "";
   shelter?.texture?.destroy(true); shelter = null; shelterKey = "";
   lastState = null;
+  wetCache = { t: -1, v: null }; wetSince = null;
 }
 
 function onUpdateScene(scene, changed) {
@@ -109,6 +112,7 @@ export function refresh() {
   if ( !live ) {
     if ( display ) { display.destroy(); display = null; }
     if ( lens ) { lens.destroy(); lens = null; }
+    if ( steam ) { steam.destroy(); steam = null; }
     const next = P.keys.find((k) => k.t > now);
     if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t - now + 20)));
     return;
@@ -122,6 +126,21 @@ export function refresh() {
   display.onStep = () => step();
   display.setState(st);
   syncLens(st);
+  syncSteam();
+}
+
+/** Steam over fire (steam.mjs): while the weather is live; its ticker returns at once when no fire is under rain or snow. */
+function syncSteam() {
+  try {
+    steam ??= new SteamLayer();
+    steam.now = sharedNow; steam.view = viewOf;
+    steam.wind = () => {
+      const w = lastState?.wind, g = geo(); if ( !w || !(w.str > 0) ) return [0, 0];
+      const a = (w.dir ?? 0) * Math.PI / 180, v = w.str * SPEED_SQ * (g.grid / g.ap) * 0.5;
+      return [Math.cos(a) * v, Math.sin(a) * v];
+    };
+    steam.arm(!reducedMotion());
+  } catch ( err ) { console.warn(`${MODULE_ID} | weather: steam`, err); steam?.destroy(); steam = null; }
 }
 
 /* ---------------------------------------------------------------- tornadoes (their own display: tornado.mjs) */
@@ -215,6 +234,40 @@ export const tornadoApi = {
   model: TM
 };
 
+/* ---------------------------------------------------------------- rain and snow over fire (research D9) */
+
+/**
+ * What the weather does to fire now, for the fire layer (wind.mjs fireWet): the WORLD state (no client caps: every client that sees
+ * the weather dims the fire the same), cached for 50 ms. null = nothing (weather off, hidden from this player, or no keys).
+ */
+let wetCache = { t: -1, v: null };
+function fireWetNow() {
+  if ( !P.on || !canvas.scene || (P.who === "gm" && !game.user.isGM) || (!P.keys.length && !P.base) ) return null;
+  const now = sharedNow(), t = Math.floor(now / 50);
+  if ( t !== wetCache.t ) { const w = M.fireWet(M.resolve(P, now)); wetCache = { t, v: w.dim > 0 || w.steam > 0 ? w : null }; }
+  return wetCache.v;
+}
+
+/**
+ * RAIN PUTS FIRE OUT (opt-in per scene, P.fire.out): once it has rained hard enough for long enough (rain table fireOut: 90 / 45 / 20 s
+ * at levels 1 / 2 / 3, presence at least 0.5), the active GM puts every burning fire stroke out through the fire API (one write; the
+ * fire goes out on every client with its own out animation; undoable). Checked at most once a second; one writer, idempotent.
+ */
+let wetSince = null, outChecked = 0;
+function fireOutCheck(now = sharedNow()) {
+  if ( now - outChecked < 1000 ) return;
+  outChecked = now;
+  if ( !P.fire.out || !P.on || game.users?.activeGM !== game.user ) { wetSince = null; return; }
+  const w = M.fireWet(M.resolve(P, now));
+  if ( !Number.isFinite(w.outAfter) ) { wetSince = null; return; }
+  wetSince ??= now;
+  if ( now - wetSince < w.outAfter * 1000 ) return;
+  wetSince = null;
+  const F = moduleApi.fire; if ( !F?.list ) return;
+  const ids = F.list().filter((x) => x.k === "fire" && x.o === undefined).map((x) => x.id);
+  if ( ids.length ) F.remove(ids);
+}
+
 /** At most 12 times a second (the display's ticker): the state moves along the timeline. */
 function step() {
   if ( !display ) return;
@@ -223,6 +276,7 @@ function step() {
   if ( !Object.keys(st.fx).length && st.wet <= 0.002 && st.cover <= 0.002 && st.steady ) { refresh(); return; }
   display.setState(st);
   syncLens(st);
+  fireOutCheck();
   const s1 = Math.floor(Date.now() / 1000);
   if ( s1 !== stateTold ) { stateTold = s1; tell("state"); }   // (the dock's status line, once a second)
 }
@@ -314,7 +368,7 @@ export function dryNow() {
 /** Layer settings (GM): { on, who, ground: {...}, lens: {...}, seed }. */
 export function setParams(patch) {
   if ( !game.user.isGM ) return;
-  P = M.cleanParams({ ...P, ...patch, ground: { ...P.ground, ...(patch.ground ?? {}) }, lens: { ...P.lens, ...(patch.lens ?? {}) } });
+  P = M.cleanParams({ ...P, ...patch, ground: { ...P.ground, ...(patch.ground ?? {}) }, lens: { ...P.lens, ...(patch.lens ?? {}) }, fire: { ...P.fire, ...(patch.fire ?? {}) } });
   refresh(); tell("params");
   save();
 }
@@ -360,7 +414,7 @@ export const weatherApi = {
   rainAt() { const r = M.resolve(P, sharedNow()).fx.rain; return r ? r.p * M.gate([0.35, 0.7, 1], r.s) : 0; },
   /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
-    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, state: lastState }),
+    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, fireWet: fireWetNow(), state: lastState }),
   display: () => display, lensDisplay: () => lens, refresh, model: M, geo,
   tornado: tornadoApi
 };
@@ -379,6 +433,7 @@ export function registerWeather() {
   moduleApi.weather = weatherApi;
   setWindProvider(() => (P.on && canvas.scene ? M.resolve(P, sharedNow()).wind : null));
   setVortexProvider(() => (P.on && canvas.scene && P.tornadoes.length ? TM.vortices(P.tornadoes, sharedNow(), canvas.grid?.size ?? 100) : []));
+  setFireWetProvider(fireWetNow);
   Hooks.once("init", registerWeatherSettings);
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);

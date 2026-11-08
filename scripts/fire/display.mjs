@@ -6,7 +6,8 @@ import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
 import { carrying } from "../tokens/carry.mjs";
-import { vortices, vortexWindAt, SPEED_SQ } from "../wind.mjs";
+import { vortices, vortexWindAt, SPEED_SQ, fireWet } from "../wind.mjs";
+import { dampArea, dampLights } from "./rain-damp.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -165,14 +166,14 @@ export class FireDisplay {
     const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
     if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
-    const vis = [], stale = [], vort = vortices().length > 0;
+    const vis = [], stale = [], vort = vortices().length > 0, wet = fireWet();
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
       if ( on ) {
         vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
         // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
-        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort); if ( a.mesh.artT !== T || force ) stale.push(a); }
+        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
       }
     }
     // (spread over the display frames of one 12 fps frame: at most ART_BUDGET cells a frame, the longest-waiting first; an area never
@@ -185,7 +186,9 @@ export class FireDisplay {
       a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; cells += c;
     }
     this.lastT = T;
+    const lu = this.lights.stats.updates;
     this.lights.update(now0);                                         // (the lights' uniforms: only on a new 12 fps frame)
+    dampLights(this.lights, wet, this.lights.stats.updates !== lu);   // (rain / snow over fire: rain-damp.mjs)
     this.stats.visible = vis.length;
     // particles: only on a new 12 fps frame (they move on the art grid, in whole cells)
     if ( newFrame ) this.placeParticles(still ? [] : vis, now);

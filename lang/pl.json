@@ -1470,6 +1470,8 @@
   "MOINENMAPS.Weather.lensHeatHint": "Iskry: poświata żaru od strony ognia i gorące drobiny uderzające w szkło. Domyślnie wyłączone.",
   "MOINENMAPS.Weather.lensHeat": "Żar na obiektywie (iskry)",
   "MOINENMAPS.Weather.meltRateHint": "Sekundy, w których pokrywa śnieżna topnieje w dwóch trzecich, gdy śnieg ustaje lub słabnie.",
+  "MOINENMAPS.Weather.fireOut": "Deszcz gasi ogień",
+  "MOINENMAPS.Weather.fireOutHint": "Wyłączone: deszcz i śnieg tylko przygaszają ogień (niższe płomienie, para, słabsze światło). Włączone: równy deszcz po chwili gasi ogień na scenie (90 s na poziomie 1, 45 s na poziomie 2, 20 s na poziomie 3). Cofnij przywraca ogień.",
   "MOINENMAPS.Weather.meltRate": "Śnieg topnieje w (s)",
   "MOINENMAPS.Weather.snowRateHint": "Sekundy, w których pokrywa śnieżna dochodzi w ok. dwóch trzecich do swojej części lądu dla poziomu.",
   "MOINENMAPS.Weather.snowRate": "Śnieg osiada w (s)",

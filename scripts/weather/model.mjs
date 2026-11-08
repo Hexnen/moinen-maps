@@ -7,7 +7,8 @@
  *     base: { t, fx: { eff: { p, s } }, wind, wet },     (the state the oldest kept key starts from: older keys are folded into it)
  *     ground: { wetRate, dryRate, puddles },             (seconds to wet / dry the ground; puddles on / off)
  *     lens: { on, level: "auto" | 1 | 2 | 3, strength },
- *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] }   (weather OBJECTS on their own paths: tornado-model.mjs)
+ *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] },  (weather OBJECTS on their own paths: tornado-model.mjs)
+ *     fire: { out } }                                    (rain puts fire areas out: off by default, research D9)
  *
  * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key cross-fades from the state at its
  * start to its target along a smoothstep over its `dur`, so a change of preset, level or wind is a smooth ramp, never a cut, and a
@@ -100,7 +101,8 @@ export function cleanParams(raw) {
     ground: { wetRate: num(g.wetRate, ...LIMITS.wetRate, GROUND_DEFAULT.wetRate), dryRate: num(g.dryRate, ...LIMITS.dryRate, GROUND_DEFAULT.dryRate), puddles: g.puddles !== false,
       snowRate: num(g.snowRate, ...LIMITS.snowRate, GROUND_DEFAULT.snowRate), meltRate: num(g.meltRate, ...LIMITS.meltRate, GROUND_DEFAULT.meltRate) },
     lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
-    tornadoes: cleanTornadoes(r.tornadoes)
+    tornadoes: cleanTornadoes(r.tornadoes),
+    fire: { out: r.fire?.out === true }
   };
 }
 
@@ -114,7 +116,8 @@ export const TABLES = {
     exp: [0.55, 1, 1],                                                          // streak length (exposure) factor
     crown: [0, 1, 1], ripple: [0.12, 0.4, 0.5],                                 // splash crowns on / ripples on water hits
     wet: [0.3, 0.65, 1.0], puddle: [1.4, 0.68, 0.6], sheen: [0.0022, 0.003, 0.004],
-    lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0.2, 0.65, 1.25], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] }
+    lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0.2, 0.65, 1.25], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] },
+    fireDim: [0.3, 0.55, 0.8], steam: [0.4, 0.7, 1], fireOut: [90, 45, 20]          // fire under it: damping, steam, s to put out (opt-in)
   },
   snow: {
     mid: [5, 20, 40], far: [4, 16, 34], near: [0, 0, 2],                        // flakes per 64 x 64 art px
@@ -122,7 +125,8 @@ export const TABLES = {
     cover: [0, 0.10, 0.42],                                                     // the share of the land snow settles on (accumulated)
     thick: [0, 0, 1],                                                           // 0 a thin dusting (the map shows through), 1 the full ramp
     cold: [0.12, 0.55, 1], drift: [0, 0, 1],                                    // cold overcast tint; spindrift runs in gusts
-    lens: { frost: [0.075, 0.13, 0.20], wob: [0.012, 0.02, 0.03], crystals: [6, 16, 34] }
+    lens: { frost: [0.075, 0.13, 0.20], wob: [0.012, 0.02, 0.03], crystals: [6, 16, 34] },
+    fireDim: [0.12, 0.25, 0.4], steam: [0.2, 0.4, 0.6]                             // fire under it: damping, steam (it never puts fire out)
   },
   sand: {
     grit: [16, 34, 60], hop: [3.5, 3.5, 7], len: [1.5, 1.5, 3],                 // grit per 64 x 64; saltation hop; streak growth in a wave
@@ -160,6 +164,21 @@ export function gate(table, s, dens = false) {
   if ( s <= 0 ) return dens ? Math.max(0, a * (1 + s)) : a;
   if ( s >= 2 ) return dens ? c * (1 + (s - 2)) : c;
   return s < 1 ? a + (b - a) * s : b + (c - b) * (s - 1);
+}
+/**
+ * RAIN AND SNOW OVER FIRE (research D9, visual by default): { dim 0..1 (lower, fewer tongues, weaker light), steam 0..1, outAfter
+ * (s of this rain that put a fire out; Infinity when it never does) } for a resolved state - the strongest of rain and snow, by
+ * their presence and level, so it follows every transition smoothly.
+ */
+export function fireWet(st) {
+  let dim = 0, steam = 0, outAfter = Infinity;
+  for ( const e of ["rain", "snow"] ) {
+    const f = st?.fx?.[e]; if ( !f || !(f.p > 0) ) continue;
+    const T = TABLES[e], s = Math.max(0, Math.min(2, f.s));
+    dim = Math.max(dim, f.p * gate(T.fireDim, s)); steam = Math.max(steam, f.p * gate(T.steam, s));
+    if ( T.fireOut && f.p >= 0.5 ) outAfter = Math.min(outAfter, gate(T.fireOut, s));
+  }
+  return { dim, steam, outAfter };
 }
 /** All gates of an effect at s: { name: value }. */
 export function gates(effect, s) {
