@@ -893,30 +893,43 @@ export function fieldFromMask(mask, W, H, { smoke = null, wind = [0, 0], geo, P,
  * { x, y (scene px), radius (scene px: lightRadius x the cluster's half-diagonal + half a square, x its fire level), strength 0..1,
  * level 1..3, ignite / out (ms or null: the light grows and fades with its fire), seed, fire (its base colour), color (the light colour, look.rampOf) }; clusters of different colours never merge (except over the cap). `items`: [{ area, field }]. Deterministic.
  */
-export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
+export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1, samples = 24 } = {}) {
   const B = Math.max(2, Math.round(bin * geo.grid / geo.ap)), G = gap * geo.grid / geo.ap, cl = [];
+  // (the light's SAMPLES: the burning ground in one-square cells, each with its own ignite / out, level and the area's fuel seed and
+  // wind - model.lightDrive reads the fire's live strength there: grow-in, go-out, the fuel map, the breathing)
+  const SB = Math.max(1, Math.round(geo.grid / geo.ap));
   for ( const { area, field } of items ) {
     const F = field.burn, W = field.w, H = field.h, bins = new Map();
     if ( !F ) continue;
+    const fuel = field.style === "fire", fs = hashStr("art:" + (area.color ?? "")) % 65536, wx = area.wind?.[0] ?? 0;
     for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
       const i = y * W + x, v = F[i]; if ( v < 0.05 ) continue;
       const k = Math.floor(x / B) + Math.floor(y / B) * 65536;
-      let c = bins.get(k); if ( !c ) bins.set(k, c = { m: 0, sx: 0, sy: 0, x0: x, y0: y, x1: x, y1: y, n: 0, lv: 0, im: 0, iw: 0, om: 0, ow: 0 });
+      let c = bins.get(k); if ( !c ) bins.set(k, c = { m: 0, sx: 0, sy: 0, x0: x, y0: y, x1: x, y1: y, n: 0, lv: 0, im: 0, iw: 0, om: 0, ow: 0, subs: new Map() });
       c.m += v; c.sx += x * v; c.sy += y * v; c.n++; c.lv += (field.lv?.[i] ?? 2) * v;
       const I = field.I?.[i], O = field.O?.[i];
       if ( I !== undefined && !Number.isNaN(I) ) { c.im += I * v; c.iw += v; }
       if ( O !== undefined && O < Infinity ) { c.om += O * v; c.ow += v; }
       if ( x < c.x0 ) c.x0 = x; if ( x > c.x1 ) c.x1 = x; if ( y < c.y0 ) c.y0 = y; if ( y > c.y1 ) c.y1 = y;
+      const sk = Math.floor(x / SB) + Math.floor(y / SB) * 65536;
+      let sb = c.subs.get(sk); if ( !sb ) c.subs.set(sk, sb = { m: 0, sx: 0, sy: 0, lv: 0, im: 0, iw: 0, om: 0, ow: 0 });
+      sb.m += v; sb.sx += x * v; sb.sy += y * v; sb.lv += (field.lv?.[i] ?? 2) * v;
+      if ( I !== undefined && !Number.isNaN(I) ) { sb.im += I * v; sb.iw += v; }
+      if ( O !== undefined && O < Infinity ) { sb.om += O * v; sb.ow += v; }
     }
     for ( const c of [...bins.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]) ) {
-      cl.push({ ...c, col: area.color ?? field.color ?? NATURAL, cx: area.rect.x0 + c.sx / c.m, cy: area.rect.y0 + c.sy / c.m,
+      const subs = [...c.subs.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => ({ w: b.m, cx: area.rect.x0 + b.sx / b.m, cy: area.rect.y0 + b.sy / b.m,
+        lv: Math.max(1, Math.min(3, Math.round(b.lv / b.m))), I: b.iw > b.m * 0.25 ? Math.round(b.im / b.iw) : null, O: b.ow > b.m * 0.5 ? Math.round(b.om / b.ow) : null,
+        fs: fuel ? fs : -1, wx }));
+      delete c.subs;
+      cl.push({ ...c, subs, col: area.color ?? field.color ?? NATURAL, cx: area.rect.x0 + c.sx / c.m, cy: area.rect.y0 + c.sy / c.m,
         x0: area.rect.x0 + c.x0, y0: area.rect.y0 + c.y0, x1: area.rect.x0 + c.x1 + 1, y1: area.rect.y0 + c.y1 + 1, seed: area.seed });
     }
   }
   const merge = (a, b) => {
     const m = a.m + b.m;
     return { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
-      im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow,
+      im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow, subs: [...a.subs, ...b.subs],
       x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), seed: (a.seed ^ b.seed) >>> 0 };
   };
   const gapOf = (a, b) => Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1), Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
@@ -936,7 +949,10 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1 } = {}) {
     const half = Math.hypot(c.x1 - c.x0, c.y1 - c.y0) / 2 * geo.ap, level = Math.max(1, Math.min(3, Math.round(c.lv / c.m)));
     return { x: geo.ox + c.cx * geo.ap, y: geo.oy + c.cy * geo.ap, radius: Math.round(P.lightRadius * (half + geo.grid / 2) * FIRE_LV.lightR[level]),
       strength: Math.min(1, c.m / c.n / FIRE_LV.heat[level]), level, ignite: c.iw > c.m * 0.25 ? Math.round(c.im / c.iw) : null,
-      out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0, fire: c.col, color: rampOf(c.col).light };
+      out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0, fire: c.col, color: rampOf(c.col).light,
+      // (the heaviest one-square samples, at most `samples`, in scene px and world art cells)
+      samples: [...c.subs].sort((a, b) => b.w - a.w || a.cy - b.cy || a.cx - b.cx).slice(0, samples)
+        .map((s) => ({ ...s, x: geo.ox + s.cx * geo.ap, y: geo.oy + s.cy * geo.ap })) };
   });
 }
 
@@ -957,6 +973,94 @@ export function litAt(now, ignite, out, G, O) {
   if ( ignite !== null && ignite !== undefined ) { const g = G > 0 ? Math.max(0, Math.min(1, (now - ignite) / G)) : now >= ignite ? 1 : 0; k *= g * (2 - g); }
   if ( out !== null && out !== undefined ) { const f = O > 0 ? Math.max(0, Math.min(1, (now - out) / O)) : now >= out ? 1 : 0; k *= 1 - f; }
   return k;
+}
+
+/* ---------------------------------------------------------------- the light's drive (pure: the flames' own signals on the CPU) */
+
+// art.mjs's GLSL hash and noises, bit for bit in 32-bit integer maths (the shader's uints), so a light reads the SAME fuel map, breathing
+// and gust its flames are drawn from (floats differ only in the last bits: nothing a light can show)
+const hu = (x) => { x ^= x >>> 16; x = Math.imul(x, 0x7feb352d); x ^= x >>> 15; x = Math.imul(x, 0x846ca68b); x ^= x >>> 16; return x >>> 0; };
+/** art.mjs h1(a, b, c) with the area's uSeed: [0, 1). */
+export function artHash(a, b, c, seed) {
+  return (hu((Math.imul(a, 0x9E3779B1) ^ Math.imul(b, 0x85EBCA77) ^ ((Math.imul(c, 0x2545F491) + Math.imul(seed, 0x27d4eb2f)) | 0)) >>> 0) >>> 8) / 16777216;
+}
+const sstep = (f) => f * f * (3 - 2 * f);
+function artNoise(px, py, k, seed) {
+  const ix = Math.floor(px), iy = Math.floor(py), fx = sstep(px - ix), fy = sstep(py - iy);
+  const a = artHash(ix, iy, k, seed), b = artHash(ix + 1, iy, k, seed), c = artHash(ix, iy + 1, k, seed), d = artHash(ix + 1, iy + 1, k, seed);
+  return a + (b - a) * fx + (c + (d - c) * fx - a - (b - a) * fx) * fy;
+}
+function artMorph(px, py, t, per, k, seed) {
+  const kk = t / per, k0 = Math.floor(kk); let w = kk - k0; w = sstep(w);
+  const a = artNoise(px, py, k + k0 * 17, seed), b = artNoise(px, py, k + (k0 + 1) * 17, seed);
+  return 0.5 + (a + (b - a) * w - 0.5) / Math.sqrt((1 - w) * (1 - w) + w * w);
+}
+/**
+ * The FUEL map at world art cell (cx, cy), shader time t (s): art.mjs FUEL + fuelAt's contrast shaping (0 dead .. 1 hot). `seed` the
+ * area's art seed (uSeed), `u` art px scale (grid / 32), `wx` the area's wind x.
+ */
+export function fuelAt(cx, cy, t, seed, u, wx = 0) {
+  const S = 32 * u, fs = seed & 1023;
+  const w1x = S * (1.4 * Math.sin(t * 0.083 + fs) + 0.6 * Math.sin(t * 0.191 + 2 * fs)) + wx * S * 0.12 * t, w1y = S * 0.7 * Math.sin(t * 0.067 + 0.5 * fs);
+  const w2x = S * 0.9 * Math.sin(t * 0.137 + 3 * fs), w2y = S * 0.5 * Math.sin(t * 0.113 + fs) - 0.05 * S * t;
+  const big = artMorph((cx + w1x) / (2.1 * S), (cy + w1y) / (2.1 * S), t, 10.3, 501, seed), mid = artMorph((cx + w2x) / (0.85 * S), (cy + w2y) / (0.85 * S), t, 7.1, 503, seed);
+  const f = Math.max(0, Math.min(1, 0.62 * big + 0.38 * mid)), g = Math.max(0, Math.min(1, (f - 0.34) / 0.32));
+  return sstep(g);
+}
+/** art.mjs breath(t, s): the flames' slow breathing of cluster s (0.65 .. 1.15, no period). */
+export function breathAt(t, s, seed) {
+  const fs = (s & 1023) * 0.731;
+  const b = 0.9 + 0.12 * Math.sin(t * 1.6982 + fs) + 0.08 * Math.sin(t * 1.065 + 2 * fs) + 0.05 * Math.sin(t * 2.7318);
+  const k = Math.floor(t / 0.7), f = sstep(t / 0.7 - k);
+  return b + 0.16 * ((1 - f) * (artHash(s, k, 91, seed) - 0.5) + f * (artHash(s, k + 1, 91, seed) - 0.5));
+}
+/** art.mjs's breathing cluster of a world art cell. */
+export const breathCluster = (cx, cy, u, seed) => Math.floor(cx / (96 * u)) * 7 + Math.floor(cy / (96 * u)) * 13 + seed;
+/** art.mjs gust(t, x): the gust travelling along the wind, 0 calm .. 1 its peak at world art column x. */
+export function gustAt(t, x, u, seed) {
+  const v = t * 0.22 - x / (160 * u) + (seed & 255) * 0.0137, f = v - Math.floor(v);
+  return Math.max(0, Math.sin(Math.PI * Math.max(0, Math.min(1, (f - 0.55) / 0.3))));
+}
+const vn1 = (t, seed, k) => { const i = Math.floor(t), f = sstep(t - i), a = hash4(seed, i, k, 77), b = hash4(seed, i + 1, k, 77); return a + (b - a) * f; };
+/**
+ * A light's own FLICKER at shader time t (s), seeded per light (neighbours never in step): a slow swell, a tremor and rare short
+ * dips and flares, every one hashed value noise (no sinusoid, no strobe). 1 = steady; `strength` the flicker setting.
+ */
+export function fireFlicker(t, seed, strength) {
+  if ( !(strength > 0) ) return 1;
+  seed = Math.floor(hash4(seed, 991) * 2147483647);                  // (scrambled: lights with near seeds share nothing)
+  const swell = vn1(t * 0.9 + (seed % 97), seed, 1) - 0.5, trem = vn1(t * 3.1, seed, 2) - 0.5;
+  const sl = t * 2.5, si = Math.floor(sl), h = hash4(seed, si, 3, 77), env = Math.sin(Math.PI * (sl - si));
+  const ev = h < 0.08 ? -env * (0.6 + 4 * h) : h > 0.95 ? env * 0.7 : 0;
+  return 1 + strength * (0.2 * swell + 0.1 * trem + 0.2 * ev);
+}
+
+/**
+ * THE LIGHT'S DRIVE at shared time `now` (ms), shader time `T` (s): how strong the fire under light `L` (model.lightsOf, with samples)
+ * burns right now, from the same signals as its flames - each sample's grow-in / go-out (litAt), the FUEL map there (a flaring patch
+ * brightens the light near it, a dying one dims it), the breathing of its cluster - plus the gust passing it and the light's own
+ * flicker. Returns { gain (0 dark .. ~1 normal .. ~1.6 flaring), heat (0 weak .. 1 flaring: the colour), x, y (where the fire is
+ * hottest now, scene px), mass (the samples' weight) }. `u` art px scale, `G` / `O` grow / out ms, `flicker` the setting (0 = steady). Pure, deterministic.
+ */
+export function lightDrive(L, now, T, { u = 1, G = 0, O = 0, flicker = 0, ref = 0 } = {}) {
+  const S = L.samples?.length ? L.samples : [{ w: 1, cx: 0, cy: 0, x: L.x, y: L.y, lv: L.level ?? 2, I: L.ignite, O: L.out, fs: -1, wx: 0 }];
+  let sw = 0, sh = 0, mx = 0, my = 0, gx = 0;
+  for ( const s of S ) {
+    const k = litAt(now, s.I, s.O, G, O); if ( s.w <= 0 ) continue;
+    sw += s.w; gx += s.w * s.cx;
+    if ( k <= 0 ) continue;
+    const fz = s.fs >= 0 ? Math.max(fuelAt(s.cx, s.cy, T, s.fs, u, s.wx), 0.07 * (s.lv - 1)) : 0.55;
+    const b = s.fs >= 0 ? breathAt(T, breathCluster(s.cx, s.cy, u, s.fs), s.fs) : 1;
+    const h = k * (0.3 + 0.7 * fz) * b, wh = s.w * h;
+    sh += wh; mx += wh * s.x; my += wh * s.y;
+  }
+  if ( !(sw > 0) ) return { gain: 0, heat: 0, x: L.x, y: L.y, mass: 0 };
+  // (0.65: a sample at average fuel, mid breath; `ref` a fixed reference mass - the light's own, so ground added to its fire and still
+  // catching brightens it as it catches instead of first diluting it)
+  const base = sh / (ref > 0 ? ref : sw) / 0.65;
+  const fs = S[0].fs >= 0 ? S[0].fs : 0, gust = S[0].fs >= 0 ? gustAt(T, gx / sw, u, fs) : 0;
+  const gain = base * (1 + 0.25 * gust) * fireFlicker(T, L.seed ?? 0, flicker);
+  return { gain, heat: Math.max(0, Math.min(1, (gain - 0.45) / 1.0)), x: sh > 0 ? mx / sh : L.x, y: sh > 0 ? my / sh : L.y, mass: sw };
 }
 
 /* ---------------------------------------------------------------- particles (pure) */

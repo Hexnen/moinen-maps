@@ -61,6 +61,9 @@ export class FireDisplay {
     this.areas = new Map();          // area id -> { key, area, field, mesh, slots }
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
+    // the flames' EMISSION meshes live in Foundry's illumination container, which every lighting refresh empties and refills with the
+    // light sources' meshes only: put them back after each (a refresh by a wall, a door, the darkness - never one of ours)
+    this.hookL = Hooks.on("lightingRefresh", () => this.attachGlows());
     this.geo = null; this.P = M.cleanParams();
     this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0, artPasses: 0, built: 0, destroyed: 0, lightsMade: 0 };
     this._tick = () => this.tick();
@@ -102,12 +105,19 @@ export class FireDisplay {
     this.stats.areas = this.areas.size;
     // (lights per area: an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones)
     const lightKeys = [...this.areas].map(([id, a]) => ({ id, key: a.key, a }));
-    const r = this.lights.syncAreas(lightKeys.map((e) => ({ id: e.id, key: e.key, get list() { return M.lightsOf([e.a], geo, P); } })), P);
+    const r = this.lights.syncAreas(lightKeys.map((e) => ({ id: e.id, key: e.key, listOf: (max) => M.lightsOf([e.a], geo, P, { max }) })), P, sharedNow(), geo);
+    this.attachGlows();
     this.stats.lightsMade += r.made;
     this.stats.lights = this.lights.count;
     this.arm();
     // (no forced redraw of every area: the new ones have never been drawn and go first in this tick, the others keep their frame)
     this.tick(geoChanged);
+  }
+
+  /** Every area's emission mesh in the illumination container (after a lighting refresh emptied it). */
+  attachGlows() {
+    const box = canvas.effects?.illumination?.lights; if ( !box ) return;
+    for ( const a of this.areas.values() ) { const g = a.mesh.glow; if ( g && !g.destroyed && g.parent !== box ) box.addChild(g); }
   }
 
   /** The ticker runs only while there is something that moves on screen (areas, motion allowed). */
@@ -151,6 +161,7 @@ export class FireDisplay {
       a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; cells += c;
     }
     this.lastT = T;
+    this.lights.update(now0);                                         // (the lights' uniforms: only on a new 12 fps frame)
     this.stats.visible = vis.length;
     // particles: only on a new 12 fps frame (they move on the art grid, in whole cells)
     if ( newFrame ) this.placeParticles(still ? [] : vis, now);
@@ -232,7 +243,7 @@ export class FireDisplay {
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick); this.ticking = false;
-    this.lights.destroy();
+    Hooks.off("lightingRefresh", this.hookL); this.lights.destroy();
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();
     if ( !this.root.destroyed ) this.root.destroy({ children: true });

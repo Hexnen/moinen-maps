@@ -35,7 +35,9 @@ export function refine(samples, serverMs, clientMs, keep = 8) {
   return Math.max(...samples);
 }
 
-let skew = 0, coarse = null, wired = false;
+let skew = 0, coarse = null, wired = false, held = false;
+/** Hold the skew as it is (dev/fire-rec.mjs: a recording runs Date.now on a virtual clock, which would read as a drifting client). */
+export function holdClock(on) { held = !!on; }
 const samples = [];
 
 /** Now on the shared clock (ms since 1970, server time). The first call wires the calibration. */
@@ -45,7 +47,7 @@ export const clockInfo = () => ({ skew, coarse, samples: [...samples] });
 /** A modifiedTime stamped by the server just now (an update hook): refine the skew. Ignored when it disagrees with the coarse
  * estimate by more than the Date header's resolution plus a generous latency (an old stamp, a document not just written). */
 export function sample(serverMs) {
-  if ( !Number.isFinite(serverMs) ) return;
+  if ( !Number.isFinite(serverMs) || held ) return;
   const s = serverMs - Date.now();
   if ( coarse !== null && Math.abs(s - coarse) > 3000 ) return;
   const v = refine(samples, serverMs, Date.now());
