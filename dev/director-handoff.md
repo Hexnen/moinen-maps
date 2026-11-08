@@ -399,3 +399,85 @@ Test scene: ZZ-dir-rolls, token vision on.
 - Sketch flag off; Hot Pan off; active scene ZZ-dir-rolls.
 - Test attack chat messages remain in the world.
 - Junction back to `C:\mmwt-dir-rolls`; lease released; headless Chrome closed.
+
+## Combat stage mode (branch `director-stage`, 2026-11-08)
+
+The user's choice: in combat the camera stays on the active combatant for its whole turn (turn, move, attack and result are one piece of staging), then carries straight on to the next combatant. It goes home only when combat ends or on the player's own turn. The letterbox is only for the big beats (hits).
+
+### What it does (client-side, per player; `scripts/director/stage-core.mjs` pure + `source-stage.mjs`)
+- A stager restyles the take-overs of the combat lane `cbt-<id>` (registered via `registerStager` in `director.mjs`).
+  - A turn is a calm glide with no bars. If the combatant is already comfortable on screen (the safe rect less 16%, at the stage zoom), nothing moves.
+  - A move is followed.
+  - An attack plays in place when both tokens are comfortable. Otherwise it is framed, with the push-in capped at 1.25 x home.
+- Bars: setting `hits` (default) shows them only on a hit; `attacks` or `never` are the alternatives.
+- After a beat the camera stays parked with the action. The next combatant's turn carries on from there. Home is not overwritten on a relay.
+- Home is restored:
+  - on the player's own turn (deferred until a beat ends; home shifts to bring the player's own token on screen);
+  - when combat ends;
+  - when the director is switched off;
+  - on Esc, or on the "My view" chip shown while parked.
+- Esc is ignored in text fields and while a framed window is open (the window gets it first).
+- Player control:
+  - Any own pan or zoom (wheel, drag, Esc during a beat) makes the camera the player's.
+  - The rest of that turn, and at least `back` s (default 5), stay soft (markers only).
+  - Canvas.pan calls that do not change the view do not count as own pans; some code on this world makes them.
+  - Own beats (own turn, move, attack) never move the player's camera. An own attack whose tokens are off screen is soft.
+- Hidden or unseen combatants never move the camera (`seenTok`).
+- World setting `dirStage` {on, bars, back}, panel "Combat stage" in the director section. Status, debug and trace are at `api.directorStage`.
+- Shared files: small edits in `director.mjs` (stager hook in start/playTake, `taken` on the end hook) and `screen.mjs` (`barsLater` + `revealBars`). `index.mjs` has one import line, and the lang files gained the `DirStage.*` keys. `core.mjs` is untouched.
+
+### Numbers (lane 4, adversaries' scenario: 5 combatants, normal GM pace, ~47 s; real players Test Gracz 1 = P1 owning Atom Eve, Test Gracz 2 = P2 owning nothing)
+| run | P1 moves / away / bars / trips | P2 moves / away / bars / trips |
+|---|---|---|
+| before (main b4f7cf5) | 13 / 28.2 s / 23.4 s / 6 | 15 / 32.4 s / 26.8 s / 8 |
+| stage off | 13 / 27.7 s / 23.0 s / 6 | 15 / 32.2 s / 26.1 s / 7 |
+| stage on, final | 8 / 30.6 s / 0 s / 2 | 9 / 42.3 s / 0 s / 1 |
+
+- Time away from home rises by design, because the camera stays with the action.
+- Camera moves and round trips to home drop: P1's 2 trips are its own turn and the combat end.
+- All final attacks missed, so there were no bars. An earlier "after" run with hits showed 2.2 s (P1) and 4.4 s (P2) of bars.
+
+### Verified (headless Chrome CDP 9377; GM 127.0.0.81 Gamemaster, P1 127.0.0.82 Test Gracz 1, P2 127.0.0.83 Test Gracz 2)
+- `node dev/run-all.mjs` 62/62 (`dev/director-stage.test.mjs`, 40 checks). `node dev/lang-audit.mjs` is clean.
+- `dev/stage-js/control.mjs`: 16/16 with real CDP key, click and wheel input on P2 (`out/control.txt`):
+  - Esc while parked: home, and out for the turn.
+  - The chip click: home.
+  - Esc with a window open: the window closes first.
+  - Wheel during a beat: the camera is the player's, the same turn's move does not move it, and a later turn is on stage again.
+  - Wheel while parked: the player's view.
+  - GM skip and director off: home.
+  - Combat end: home.
+  - Nothing is left on screen afterwards.
+- `dev/stage-js/vision.mjs` on `director-vision` (P1): the turns and moves of the unseen Daleki and the hidden Ukryty left the camera unmoved, with no take. Daleki walking into the light produced no shot (the move source's rule).
+- `director-check watchShot` none/esc/click/wheel/busy OK on P1. `cinematicCheck` GM 13/13.
+- The final trace on P1 shows: own turn -> none, own move -> none, own attack -> soft (offscreen).
+
+### Not verified
+- DPR 2 or touch.
+- Two GMs at once.
+- Pixel-vfx effects during beats.
+- A full `idle-bench rest` (only the ticker count, 23, unchanged after a combat).
+- `cinematic-fx-check` on a player.
+- Reduced motion.
+- A long session.
+- Bars on a hit in the final recording (only seen in an earlier run).
+
+### Videos
+- `dev/director-stage-before-p1.webm`, `dev/director-stage-before-p2.webm` (main)
+- `dev/director-stage-after-p1.webm`, `dev/director-stage-after-p2.webm` (stage on)
+- Evidence is in `dev/stage-js/out/`. Re-run with `dev/stage-js/rec.sh <label>` (setup.js, scenario.mjs, home.js, dump.js).
+
+### Open decisions for the user
+- Stage on by default (`dirStage.on`, inside the director that is off by default)?
+- Are `hits` the right default for the bars?
+- Keep the "My view" chip and Esc while parked?
+- Is `back` = 5 s right?
+- Should the own-turn home shift to bring the own token on screen?
+- A token walking into vision is not followed (the move source's rule).
+- The move source's own-stay rule is superseded while the stage is on.
+
+### Lane 4 state
+- The junction is set back to `C:\mmwt-director`.
+- The director is OFF.
+- Test combats are deleted and token positions restored by setup.js.
+- The scene is `director-test`.

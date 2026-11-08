@@ -1,0 +1,7 @@
+OK   player on the vision scene: own token visible, Daleki and Ukryty not   {"scene":"director-vision","tv":true,"daleki":false,"ukryty":false,"pc":true}
+OK   turn of Daleki (not visible to the player) + its move: the camera did not move   {"before":[634,322,1.25,"director-vision"],"after":[634,322,1.25,"director-vision"]}
+OK   turn of Ukryty (not visible to the player) + its move: the camera did not move   {"before":[634,322,1.25,"director-vision"],"after":[634,322,1.25,"director-vision"]}
+OK   no take-over on the player during the unseen combatants' turns   []
+trace [[478909,"turn","take","glide"],[485090,"turn","take","glide"],[487514,"turn","take","glide"],[493067,"turn","none","on screen"],[499906,"turn","none","own turn"],[576987,"turn","none","own turn"]]
+after Daleki walks into the light: [] [634,322,1.25,"director-vision"]
+{"fails":0,"turns":[{"who":"Daleki","before":[634,322,1.25,"director-vision"],"after":[634,322,1.25,"director-vision"]},{"who":"dir-vis-pc","before":[634,322,1.25,"director-vision"],"after":[634,322,1.25,"director-vision"]},{"who":"Ukryty","before":[634,322,1.25,"director-vision"],"after":[634,322,1.25,"director-vision"]}],"c0":[634,322,1.25,"director-vision"]}

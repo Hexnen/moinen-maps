@@ -1,0 +1,294 @@
+{
+ "user": "Test Gracz 2",
+ "spanS": 47.3,
+ "moves": 15,
+ "awayS": 32.4,
+ "barsS": 26.8,
+ "outs": 8,
+ "returns": 8,
+ "endAway": false,
+ "last": [
+  47402,
+  400,
+  500,
+  2.2,
+  0
+ ],
+ "home": [
+  400,
+  500,
+  2.2
+ ],
+ "moveList": [
+  [
+   1810,
+   2707,
+   [
+    1111,
+    420,
+    1.863
+   ]
+  ],
+  [
+   4210,
+   6111,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   7701,
+   8615,
+   [
+    825,
+    639,
+    1.72
+   ]
+  ],
+  [
+   11711,
+   12708,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   13808,
+   14703,
+   [
+    425,
+    320,
+    1.863
+   ]
+  ],
+  [
+   16310,
+   17207,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   17905,
+   18807,
+   [
+    720,
+    720,
+    1.863
+   ]
+  ],
+  [
+   20411,
+   23003,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   24305,
+   25303,
+   [
+    1110,
+    515,
+    3
+   ]
+  ],
+  [
+   28903,
+   29903,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   30506,
+   31410,
+   [
+    627,
+    669,
+    1.863
+   ]
+  ],
+  [
+   32901,
+   33902,
+   [
+    1012,
+    542,
+    1.591
+   ]
+  ],
+  [
+   36410,
+   37405,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   38605,
+   39503,
+   [
+    425,
+    720,
+    1.863
+   ]
+  ],
+  [
+   41102,
+   42103,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ]
+ ],
+ "log": [
+  {
+   "t": 1797,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 4297,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn"
+  },
+  {
+   "t": 4371,
+   "k": "shot",
+   "form": "take",
+   "kind": "move",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 5201,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "move"
+  },
+  {
+   "t": 7709,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 11756,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack"
+  },
+  {
+   "t": 13840,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 16346,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn"
+  },
+  {
+   "t": 17966,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 20464,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn"
+  },
+  {
+   "t": 20551,
+   "k": "shot",
+   "form": "take",
+   "kind": "move",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 22085,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "move"
+  },
+  {
+   "t": 24371,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 28956,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack"
+  },
+  {
+   "t": 30551,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 32944,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 36411,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack"
+  },
+  {
+   "t": 38622,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-pk97gMTJbHEENW4x"
+  },
+  {
+   "t": 41129,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn"
+  }
+ ]
+}
