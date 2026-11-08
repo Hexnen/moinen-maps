@@ -54,8 +54,10 @@ function bar(host, ctx) {
     if ( a === "undo" ) Zones.undoEdit(); else if ( a === "redo" ) Zones.redoEdit(); else if ( a === "trim" ) Zones.trim();
   };
   const onChange = (ev) => {
-    const c = ev.target.closest?.("[name=snap], [name=smooth]"); if ( !c ) return;
-    Zones.setParams({ [c.name]: Number(c.value) });
+    // only the control's own event (its name ATTRIBUTE: a range-picker has no name property); its inner inputs carry no name
+    const name = ev.target?.getAttribute?.("name");
+    if ( name !== "snap" && name !== "smooth" ) return;
+    Zones.setParams({ [name]: Number(ev.target.value) });
   };
   host.addEventListener("click", onClick);
   host.addEventListener("change", onChange);
@@ -120,16 +122,21 @@ function settingsPanel(host) {
   };
   render();
   const onChange = (ev) => {
-    const c = ev.target.closest?.("[name]"); if ( !c ) return;
+    // only the control's own event, found by its name ATTRIBUTE (a range-picker has no name property). A range-picker's inner
+    // inputs fire "change" first, unnamed and while the picker still holds the old value: they are skipped.
+    const c = ev.target, name = c?.getAttribute?.("name");
+    if ( !name ) return;
     const v = c.matches("input[type=checkbox]") ? c.checked : c.value;
-    if ( c.name === "preset" ) Zones.setParams({ preset: v || null });
-    else if ( c.name === "lookFrom" ) Zones.setParams({ lookFrom: v || null });
-    else if ( c.name === "worldPreset" ) Styles.setWorldPreset(v);
-    else if ( c.name === "worldStyle" ) Styles.setWorldStyle(v);
-    else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx", "lineStyle", "numColor", "ringColor", "numShape", "numFormat"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
-    // these show or hide other rows, or switch the look preset to "own": draw the panel again now (focus is still in it)
-    if ( ["lookFrom", "numbers", "hoverHi", "hoverFx", "preset"].includes(c.name) || c.closest(".mm-z-fold[data-fold=look], .mm-z-fold[data-fold=hover], .mm-z-fold[data-fold=numbers]") ) queueMicrotask(render);
-    else if ( ["fill", "ink", "lineAlpha", "hoverAlpha", "hoverLineAlpha"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
+    if ( name === "preset" ) Zones.setParams({ preset: v || null });
+    else if ( name === "lookFrom" ) Zones.setParams({ lookFrom: v || null });
+    else if ( name === "worldPreset" ) Styles.setWorldPreset(v);
+    else if ( name === "worldStyle" ) Styles.setWorldStyle(v);
+    else if ( ["fill", "ink", "lineAlpha", "hoverAlpha", "hoverLineAlpha"].includes(name) ) Zones.setParams({ look: { [name]: Number(v) } });
+    else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx", "lineStyle", "numColor", "ringColor", "numShape", "numFormat"].includes(name) ) Zones.setParams({ look: { [name]: v } });
+    else return;
+    // a choice that shows or hides other rows, or a look change that turned the look preset into "own": draw the panel again
+    // (the "params" hook skips it while focus is in the panel)
+    if ( ["lookFrom", "numbers", "hoverHi", "hoverFx", "preset"].includes(name) || c.closest(".mm-z-fold[data-fold=look], .mm-z-fold[data-fold=hover], .mm-z-fold[data-fold=numbers]") ) queueMicrotask(render);
   };
   const onClick = async (ev) => {
     const act = ev.target.closest("[data-act]")?.dataset.act;
