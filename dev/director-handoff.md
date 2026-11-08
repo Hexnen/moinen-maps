@@ -481,3 +481,119 @@ The user's choice: in combat the camera stays on the active combatant for its wh
 - The director is OFF.
 - Test combats are deleted and token positions restored by setup.js.
 - The scene is `director-test`.
+
+
+## 2026-11-08 - cost pass (agent director-perf), branch `director-perf` (from main cdae76d)
+
+### Measuring first (`dev/director-perf.mjs`, new)
+- This is a Node driver over CDP. It runs a GM page and REAL player pages (Test Gracz 1 and 2, each on its own origin) in headless Chrome on the GPU.
+- Per scenario, on all pages at once, it records:
+  - rAF intervals, PIXI ticker ms, and long animation frames;
+  - a CPU profile: Director JS self, Director INCLUSIVE (every sample with a `scripts/director/` frame on the stack), the longest unbroken Director task and its parts;
+  - layouts and style recalcs, GC, heap, module socket frames and bytes, and scene load (tearDown -> canvasReady).
+- Flags: `--throttle 4` (slow client), `--dpr 2`.
+- Scenarios: rest, pan, take, soft, follow, attack, combat, busy, arrival / arrivalOff.
+- Where the Director cost was, before this pass:
+  1. **Caption placement** (`overlay.clearOfUi`). It ran 21-63 `elementsFromPoint` hit tests in ONE task. On this world each hit test costs ~0.3 ms because of the long chat log; with the sidebar hidden it is ~35 us. So every take-over's lower third was a 15-25 ms task in the middle of the camera move. On a 4x throttled client the frame grew to 115-160 ms.
+  2. **Turn banner placement** (`source-move.bannerTop`). 24+ `elementFromPoint` calls in one task, on every client, at every turn: 8-37 ms, and 60-90 ms frames at 4x.
+  3. **Soft marker following a pan** (`overlay.marker.place` on every canvasPan). `safeRect` (3 rects) plus reading the label width after the writes forced two style/layout passes per marker per frame. That was ~100 ms of Director JS per 4 s of panning, ~340 ms at 4x.
+  4. Smaller items:
+     - `safeRect` layouts in the stage and move checks.
+     - Client settings were read through `game.settings.get`, which builds a Setting document on every read (~35 us). A shot start makes ~20 such reads.
+- Costs that are not the Director's:
+  - The camera itself (`canvas.pan` every frame) and other canvasPan listeners. Among them are moinen-maps `orbit.mjs place` (~0.05-0.1 ms per pan) and fxbus `emitViewbox`.
+  - Dice So Nice: a ~400-2300 ms ticker stall on a roll.
+  - The forced layout when the overlays are inserted. This is the page's own layout cost and would land in the next frame anyway.
+- Fine as it was:
+  - At rest: 0 ms and no ticker listener.
+  - Pan at rest: 0-0.5 ms per 6 s.
+  - Busy events (20 all-token flag updates + 30 chat messages + 20 combatant updates): 0.3-3 ms on any client.
+  - Socket: one message per shot to each client. Take ~560 B, follow ~800 B, attack ~990 B, a whole combat ~6 messages / ~4.2 KB. Nothing at rest or on busy events.
+  - Heap: deltas within noise.
+  - Arrival: does not slow the scene load (below).
+
+### What changed (look and behaviour are the same)
+- `overlay.mjs`:
+  - `caption()`: the same probes run in slices of at most 4 ms, one slice per drawn frame. `later` uses rAF and then a timeout, with a 120 ms fallback for a hidden tab. The caption gets `is-in` once its place is known; it is fully transparent before that. Same passes, same result. The caption shows ~1-3 frames later (~25 ms at 165 Hz).
+  - `marker.place()`: writes only the values that changed. The label width is measured once per text and reset on `setText` or on a ping <-> arrow switch. Nothing reads layout after a write any more.
+  - `safeRect()`: the measured rect is kept for 200 ms (`SAFE_MS`) and dropped on window resize.
+- `source-move.mjs` `showBanner` / `bannerTop`: the same probes, sliced one per frame. The banner goes into the page with its place already set and then slides in (~10 ms later). Its hide timer starts at the slide-in, so it stays on screen as long as before.
+- `stage.mjs`: new `clientGet(k)` reads a client setting through a cache keyed by its raw localStorage text. Foundry writes storage BEFORE onChange and the hooks, so the cache is never stale. `clientOpts` uses it.
+- `director.mjs`: `setting()` uses `clientGet` (2 lines). World settings are unchanged and still use a plain get.
+
+### Numbers
+Lane 5, 165 Hz, interleaved A/B: the same pages, with the junction flipped between main cdae76d and this branch, plus a reload.
+
+**Bench, player TG1** (`F-*` runs):
+- Whole-frame rAF stays at the 6.1 ms vsync median and 6.2-24 ms p95 in both builds; it moves with machine load.
+- incl = Director JS inclusive. run = the longest Director task.
+
+| scenario | rAF p50/p95 | over 33 ms | incl | run | layouts | style recalcs |
+|---|---|---|---|---|---|---|
+| soft + 4 s pan | 6.1/6.2 -> 6.1/6.2 | 0 -> 0 | 97.7 -> 21.3 ms | 12 -> 19.7 (*) | 316 -> 190 | 1180 -> 911 |
+| soft, 4x CPU | 6.1/24.2 -> 6.1/12.1 | 3 -> 0 | 342.9 -> 32.9 | 24.3 -> 12.5 | 307 -> 192 | 789 -> 845 |
+| soft, DPR 2 | 6.1/6.2 -> 6.1/6.2 | 0 -> 1 | 113.6 -> 8.7 | 14.3 -> 1.5 | 316 -> 188 | 1178 -> 989 |
+| take (letterbox/flash/caption) | 6.1/6.2 -> 6.1/6.8 | 0 -> 0 | 79.7 -> 89.6 | 23.5 -> 26.5 (*) | 374 -> 370 | 740 -> 740 |
+| take, 4x CPU | 6.1/12.2 -> 6.1/18.2 | 8 -> 15 (**) | 244 -> 295 | **156.6 -> 13** | 300 -> 296 | 592 -> 676 |
+| take, DPR 2 | 6.1/6.2 -> 6.1/6.2 | 2 -> 3 | 64.9 -> 74.1 | 17.1 -> 14 | 347 -> 355 | 789 -> 801 |
+| follow | 6.1/6.2 -> 6.1/6.2 | 0 -> 1 | 76 -> 108 (P2 88 -> 84) | 3.6 -> 36.5 (P2 8.3 -> 8.3) | 276 -> 273 | 529 -> 525 |
+| follow, 4x CPU | 6.1/18.1 -> 6.1/24.2 | 5 -> 9 (**) | 264 -> 271 | 34 -> 8 | 273 -> 246 | 528 -> 390 |
+| attack with dice | 6.1/6.1 -> 6.1/6.2 | 3 -> 12 (**) | 80.4 -> 81.3 | 17.5 -> 11 | 414 -> 423 | 1336 -> 1511 |
+| combat (~46 s, banners) | 6.1/6.2 -> 6.1/6.8 | 9 -> 43 (**) | 298.8 -> 206.1 (P2 333 -> 246) | 15 -> 29.5 (*) | 1098 -> 849 | 3541 -> 3127 |
+| busy events | 6.1/6.2 -> 6.1/7.1 | 1 -> 7 (**) | 0.55 -> 0.55 | 0.6 -> 0.6 | 491 -> 488 | 1643 -> 1616 |
+| rest | 6.1/6.1 -> 6.1/8.0 | 2 -> 2 | 0 -> 0 | 0 | 27 -> 27 | 77 -> 77 |
+
+- (*) At 1x, the longest Director "task" is now the forced layout of inserting the overlay or banner (17-50 ms on this page). It was there before too, and the next frame would do it anyway. It is no longer the hit tests.
+- (**) The whole-frame counts went up on the GM page and on every player page at the same time, including rest and busy, where the Director does nothing. That is machine load from other agents on the GPU, not this change. One run each.
+- The in-page spike test below is the frame-level proof.
+
+**Worst frame around one caption or one banner** (in-page test, median of 5; frame base 6 ms at 165 Hz, 12-18 ms at 4x):
+
+| | before | after |
+|---|---|---|
+| caption, idle / during a pan | 12 / 12 ms (1 dropped frame) | 6 / 6 ms |
+| banner, idle / during a pan | 12 / 12 ms | 6 / 6 ms |
+| caption at 4x CPU, idle / pan | 133 / 115 ms | 18 / 24 ms |
+| banner at 4x CPU, idle / pan | 61 / 67 ms | 18 / 24 ms |
+
+**Other numbers:**
+- Socket (both builds the same): take 1 message 539 B sent -> 558 B to each player; follow 777/796 B; attack ~975/995 B; combat 6 / ~4.2 KB. Nothing at rest or on busy events.
+- Scene arrival vs arrival off (perf build), load from tearDown to ready: P1 148 vs 156 ms, P2 166 vs 149 ms, GM 154 vs 178 ms. The arrival's longest Director task is 2-7 ms, so the arrival does not slow the load.
+
+### Look A/B
+- The take-over camera code is untouched.
+- Recordings of the same take: `dev/director-perf-take-before.webm` / `-after.webm` (player TG1). The caption, letterbox and flash land the same.
+- Placement was compared numerically on the same page state and is identical:
+  - caption, 3 texts: left 792 px, bottom 185 px, `is-low`;
+  - banner top: 38 px;
+  - edge marker: translate(953 px, 58 px).
+
+### Verified
+- `node dev/run-all.mjs`: 63/63. `node dev/lang-audit.mjs`: clean.
+- `director-check watchShot` none / esc / busy on TG1 with the new code: all OK.
+- Everything above ran on the real player pages (TG1, TG2) and on the GM page, at 4x CPU and at DPR 2 (device scale 2 + renderer resolution 2).
+
+### Not verified
+- A real slow machine or a touch device (only CDP CPU throttling). Headless Chrome only; no Firefox.
+- Two GMs.
+- An Esc cut while a caption is still being placed on a slow client. The code handles it (`gone` stops the slices), but esc was only exercised at full speed.
+- A banner-only recording of a real combat as video. Combat placement was checked by numbers only.
+- `cinematic-check` / `cinematic-fx-check` were not re-run.
+- Long sessions (memory over hours).
+
+### Shared files touched (for the merge with the bugfix branch)
+- `scripts/director/overlay.mjs`: `safeRect` (+ `measureSafe`), `caption`, `clearOfUi`, `marker` place / setText.
+- `scripts/director/source-move.mjs`: `bannerTop` and `showBanner` only.
+- `scripts/director/stage.mjs`: new `clientGet`, and the first line of `clientOpts`.
+- `scripts/director/director.mjs`: the import line and the `setting` line.
+- New files: `dev/director-perf.mjs`, `dev/director-perf-take-before.webm`, `dev/director-perf-take-after.webm`.
+
+### Findings outside the Director (not changed)
+- `elementFromPoint` costs ~0.3 ms per call on a world with a long chat log. Anything that probes the page every frame pays that.
+- `scripts/orbit/orbit.mjs` `place` runs on every canvasPan (~0.05-0.1 ms), even with no orbit on screen.
+- fxbus `emitViewbox` runs on every pan.
+
+### Lane 5 state
+- Junction back to `C:\mmwt-dir-rolls`. Director OFF.
+- ZZ-dir-rolls: token vision on, combats deleted, test tokens back in place, bench chat messages deleted.
+- Lease released.
