@@ -23,10 +23,18 @@ const CSS = `
 #mm-dir-bar[data-st=soft] .mm-dir-dot, #mm-dir-bar[data-st=show] .mm-dir-dot { background: #e9c46a; box-shadow: 0 0 8px #e9c46a; }
 #mm-dir-bar[data-st=paused] .mm-dir-dot { background: #8aa4c8; }
 #mm-dir-bar .mm-dir-sep { width: 1px; height: 18px; background: rgba(255,255,255,0.14); margin: 0 3px; }
-#mm-dir-bar input[type=range] { width: 64px; margin: 0 4px; accent-color: #e9c46a; height: 4px; }
+#mm-dir-bar button:disabled { opacity: 0.32; background: transparent; cursor: default; }
+#mm-dir-bar input[type=range] { -webkit-appearance: none; appearance: none; width: 64px; height: 4px; margin: 0 4px; padding: 0; border: 0; border-radius: 2px; box-shadow: none; outline: none;
+  background: linear-gradient(to right, #e9c46a var(--p, 100%), rgba(255,255,255,0.22) var(--p, 100%)); }
+#mm-dir-bar input[type=range]::-webkit-slider-runnable-track { background: transparent; border: 0; box-shadow: none; height: 4px; }
+#mm-dir-bar input[type=range]::-moz-range-track { background: transparent; border: 0; height: 4px; }
+#mm-dir-bar input[type=range]::-webkit-slider-thumb { margin-top: -4px;  -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #1a1612; background: #e9c46a; box-shadow: 0 0 0 1px rgba(233,196,106,0.5); }
+#mm-dir-bar input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #1a1612; background: #e9c46a; }
+#mm-dir-bar input[type=range]:focus-visible { box-shadow: 0 0 0 2px rgba(233,196,106,0.45); }
+#mm-dir-bar .mm-dir-k { min-width: 2.4em; padding-right: 6px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.8; }
 #mm-dir-bar.is-folded > :not(.mm-dir-keep) { display: none; }
 `;
-let el = null, picking = null, hookId = null, folded = false;
+let el = null, picking = null, hookId = null, hotHook = null, folded = false;
 
 function ensureStyle() { if ( document.querySelector("style[data-mm-dir-bar]") ) return; const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmDirBar = ""; document.head.appendChild(s); }
 const btn = (act, icon, key, extra = "") => `<button type="button" data-act="${act}" aria-label="${esc(T(key))}" data-tooltip="${esc(T(key))}"${extra}><i class="${icon}" inert></i></button>`;
@@ -51,13 +59,16 @@ function build() {
     <span class="mm-dir-sep"></span>
     ${btn("cutToken", "fa-solid fa-user-large", "Dir.bar.cutToken")}${btn("cutSpot", "fa-solid fa-crosshairs", "Dir.bar.cutSpot")}${btn("cutLast", "fa-solid fa-clock-rotate-left", "Dir.bar.cutLast")}
     <span class="mm-dir-sep"></span>
-    <i class="fa-solid fa-sun" inert style="opacity:.6;margin-left:4px"></i><input type="range" min="0" max="1" step="0.05" name="k" aria-label="${esc(T("Dir.bar.intensity"))}" data-tooltip="${esc(T("Dir.bar.intensity"))}">`;
+    <i class="fa-solid fa-sun" inert style="opacity:.6;margin-left:4px"></i><input type="range" min="0" max="1" step="0.05" name="k" aria-label="${esc(T("Dir.bar.intensity"))}" data-tooltip="${esc(T("Dir.bar.intensity"))}"><span class="mm-dir-k" aria-hidden="true"></span>`;
   el.classList.toggle("is-folded", folded);
   el.addEventListener("click", onClick);
-  el.querySelector("[name=k]").addEventListener("change", (ev) => D.setGmIntensity(Number(ev.target.value)));
+  const kIn = el.querySelector("[name=k]");
+  kIn.addEventListener("input", () => showK(Number(kIn.value)));
+  kIn.addEventListener("change", (ev) => D.setGmIntensity(Number(ev.target.value)));
   (document.getElementById("interface") ?? document.body).appendChild(el);
   hookId = Hooks.on(D.HOOK, (kind) => { if ( kind !== "event" ) update(); });
   window.addEventListener("resize", place);
+  hotHook = [["renderHotbar", Hooks.on("renderHotbar", () => requestAnimationFrame(place))], ["collapseSidebar", Hooks.on("collapseSidebar", () => setTimeout(place, 300))]];
 }
 export function removeBar() {
   if ( !el ) return;
@@ -65,14 +76,23 @@ export function removeBar() {
   el.remove(); el = null;
   if ( hookId !== null ) Hooks.off(D.HOOK, hookId); hookId = null;
   window.removeEventListener("resize", place);
+  for ( const [n, id] of hotHook ?? [] ) Hooks.off(n, id); hotHook = null;
 }
-/** Next to the left column of Foundry's interface (scene controls, players), above the bottom edge. */
+/** Bottom left, next to Foundry's left column (scene controls, players); lifted above the hotbar when it would sit on it, and kept
+ * left of the right column (chat notifications, sidebar). */
 function place() {
   if ( !el ) return;
-  const left = document.getElementById("ui-left") ?? document.getElementById("scene-controls");
-  const r = left?.getBoundingClientRect?.();
-  const x = r && r.width ? Math.round(r.right + 12) : 330;
-  el.style.left = `${Math.min(x, Math.max(8, innerWidth - el.offsetWidth - 330))}px`;
+  const rect = (id) => { const r = document.getElementById(id)?.getBoundingClientRect?.(); return r && r.width > 0 && r.height > 0 ? r : null; };
+  const col = rect("ui-left-column-1") ?? rect("scene-controls"), right = rect("ui-right"), hot = rect("hotbar");
+  const w = el.offsetWidth || 400, h = el.offsetHeight || 32;
+  let x = col ? Math.round(col.right + 12) : 100, bottom = 10;
+  if ( right ) x = Math.max(8, Math.min(x, Math.round(right.left) - w - 12));
+  if ( hot && x < hot.right && x + w > hot.left && innerHeight - bottom - h < hot.bottom ) {
+    bottom = Math.round(innerHeight - hot.top + 8);
+    x = Math.max(8, Math.round(hot.left));
+    if ( right ) x = Math.min(x, Math.round(right.left) - w - 12);
+  }
+  el.style.left = `${x}px`; el.style.bottom = `${bottom}px`;
 }
 
 function update() {
@@ -88,7 +108,14 @@ function update() {
   p.querySelector("i").className = s.paused ? "fa-solid fa-play" : "fa-solid fa-pause";
   const pl = T(s.paused ? "Dir.bar.resume" : "Dir.bar.pause"); p.setAttribute("aria-label", pl); p.dataset.tooltip = pl;
   el.querySelector("[data-act=skip]").disabled = !(s.take || s.soft.length || s.show || s.queued);
-  const k = el.querySelector("[name=k]"); if ( document.activeElement !== k ) k.value = String(s.k ?? 1);
+  const k = el.querySelector("[name=k]"); if ( document.activeElement !== k ) { k.value = String(s.k ?? 1); showK(Number(k.value)); }
+}
+/** The intensity slider's fill and its percent. */
+function showK(v) {
+  if ( !el ) return;
+  const k = el.querySelector("[name=k]"), p = `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
+  k.style.setProperty("--p", p); k.setAttribute("aria-valuetext", p);
+  const lab = el.querySelector(".mm-dir-k"); if ( lab.textContent !== p ) lab.textContent = p;
 }
 
 function onClick(ev) {
