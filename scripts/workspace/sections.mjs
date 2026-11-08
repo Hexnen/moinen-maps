@@ -5,6 +5,7 @@
 import "./pins.mjs";
 import "./districts.mjs";
 import "./water.mjs";
+import "../weather/section.mjs";   // Weather: rain (+ more), wind, the lens (scripts/weather)
 import "./soon.mjs";
 import "../destruction/section.mjs";   // Destruction takes over its placeholder (localStorage "mm-destruction" = "off" leaves it out)
 import "../fire/section.mjs";          // Fire and smoke: tools and a dock panel of the Destruction section (scripts/fire)
