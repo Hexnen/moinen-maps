@@ -1455,6 +1455,8 @@ const programs = () => progs ??= {
   emit: PIXI.Program.from(VERT_B(3), EMIT, "moinen-maps-fire-emit-v5"),
   occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-fire-occ-v1")
 };
+/** A small pass into its target, cleared: bound and drawn directly (A12: renderer.render's per-call overhead is most of a tiny pass's CPU). */
+function renderPass(renderer, mesh, rt) { renderer.renderTexture.bind(rt); renderer.renderTexture.clear(); mesh.render(renderer); renderer.batch.flush(); }
 const texOf = (data, W, H) => PIXI.Texture.fromBuffer(data, W, H, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });
 /** The every-frame layers' geometry: one quad per BLK x BLK cells (aBlk = its block), corners as the whole quad's would be. */
 const blocks = (x0, ap, y0, W, H) => {
@@ -1623,10 +1625,10 @@ export class FireArt extends PIXI.Container {
    */
   renderArt(renderer, win = null) {
     const u = this.pass.shader.uniforms, tf = this.fuelPass.shader.uniforms.uTime, W = this.W, H = this.H;
-    this.job = null;                       // (a frame drawn now supersedes one being drawn in steps)
-    if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
-    renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
-    if ( u.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
+    if ( !(this.job?.pre && this.job.t !== u.uTime) ) this.job = null;   // (a frame drawn now supersedes one being drawn in steps; A12: not the next one drawn ahead)
+    if ( tf !== this.fuelT ) { this.fuelT = tf; renderPass(renderer, this.fuelPass, this.fuelRt); }
+    renderPass(renderer, this.embPass, this.embRt);
+    if ( u.uTileOn ) renderPass(renderer, this.tilePass, this.tileRt);
     const aw = this._win ??= [0, 0, 0, 0];   // (one array per area, rewritten: no garbage per pass)
     if ( !win || (win[0] <= 0 && win[1] <= 0 && win[2] >= W && win[3] >= H) ) {
       renderer.render(this.pass, { renderTexture: this.rt, clear: true });
@@ -1637,7 +1639,7 @@ export class FireArt extends PIXI.Container {
       this.scissorPass(renderer, x0, y0, x1, y1);
       aw[0] = x0; aw[1] = y0; aw[2] = x1; aw[3] = y1;
     }
-    renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
+    renderPass(renderer, this.occPass, this.occRt);
     this.artT = u.uTime;
     this.artWin = aw;
     // (the art pass's other per-frame uniforms at this frame - the grow / go-out clocks and the lean: extendArt draws more cells of it)
@@ -1670,7 +1672,7 @@ export class FireArt extends PIXI.Container {
       this.scissorPass(renderer, x0, o[3], x1, y1);          // (below it)
       this.scissorPass(renderer, x0, o[1], o[0], o[3]);      // (left of it)
       this.scissorPass(renderer, o[2], o[1], x1, o[3]);      // (right of it)
-      renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
+      renderPass(renderer, this.occPass, this.occRt);
     } finally { this.frameOff(k); }
     o[0] = x0; o[1] = y0; o[2] = x1; o[3] = y1;
     return cells;
@@ -1685,9 +1687,9 @@ export class FireArt extends PIXI.Container {
     k[0] = u.uTime; k[1] = u.uI[0]; k[2] = u.uI[1]; k[3] = u.uO[0]; k[4] = u.uO[1]; k[5] = u.uLean;
     this.setTime(t); u.uI[0] = s[0]; u.uI[1] = s[1]; u.uO[0] = s[2]; u.uO[1] = s[3]; u.uLean = s[4];
     const tf = this.fuelPass.shader.uniforms.uTime;
-    if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
-    renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
-    if ( u.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
+    if ( tf !== this.fuelT ) { this.fuelT = tf; renderPass(renderer, this.fuelPass, this.fuelRt); }
+    renderPass(renderer, this.embPass, this.embRt);
+    if ( u.uTileOn ) renderPass(renderer, this.tilePass, this.tileRt);
     return k;
   }
   frameOff(k) { const u = this.pass.shader.uniforms; this.setTime(k[0]); u.uI[0] = k[1]; u.uI[1] = k[2]; u.uO[0] = k[3]; u.uO[1] = k[4]; u.uLean = k[5]; }
@@ -1703,23 +1705,76 @@ export class FireArt extends PIXI.Container {
     j.y = j.y0; j.s[0] = u.uI[0]; j.s[1] = u.uI[1]; j.s[2] = u.uO[0]; j.s[3] = u.uO[1]; j.s[4] = u.uLean;
     return j;
   }
-  stepJob(renderer, maxCells) {
-    const j = this.job; if ( !j ) return 0;
+  /**
+   * A12 - THE NEXT FRAME DRAWN AHEAD: the art frame `t` that is not due yet (the shared clock reaches it later), with the grow / go-out
+   * clocks and lean `s` it will have then, drawn in steps into the back texture over the display frames before it is due - so a new
+   * 12 fps frame no longer lands as one burst of art passes in one display frame. Its small maps (fuel, emitter boxes, tiles) are drawn
+   * once now into the job's own textures (no redraw per step); the steps change nothing the area shows; when the last rows are in the
+   * job waits (done) until the clock reaches `t`, then `swapJob` shows it - the very cells the frame drawn at `t` would have.
+   */
+  startPre(renderer, win, t, s) {
+    const u = this.pass.shader.uniforms, W = this.W, H = this.H;
+    const j = this.job = { t, x0: Math.max(0, win[0]), y0: Math.max(0, win[1]), x1: Math.min(W, win[2]), y1: Math.min(H, win[3]), y: 0, s: this._preS ??= new Float64Array(5), pre: true, done: false };
+    j.y = j.y0; j.s.set(s);
+    const mk = (src, lin) => { const r = PIXI.RenderTexture.create({ width: src.width, height: src.height, resolution: 1, scaleMode: lin ? PIXI.SCALE_MODES.LINEAR : PIXI.SCALE_MODES.NEAREST }); r.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF; return r; };
+    this.preFuel ??= mk(this.fuelRt, true); this.preEmb ??= mk(this.embRt, false); this.preTile ??= mk(this.tileRt, false);
+    const k = this.preOn(t, s);
+    try {
+      renderPass(renderer, this.fuelPass, this.preFuel);
+      u.uFuel = this.preFuel; renderPass(renderer, this.embPass, this.preEmb);
+      u.uEmb = this.preEmb; if ( u.uTileOn ) renderPass(renderer, this.tilePass, this.preTile);
+    } finally { this.preOff(k); }
+    return j;
+  }
+  /** The art pass's uniforms set to frame `t`, clocks / lean `s` (the main small maps untouched); preOff puts them back. */
+  preOn(t, s) {
+    const u = this.pass.shader.uniforms, k = this._saved ??= new Float64Array(6);
+    k[0] = u.uTime; k[1] = u.uI[0]; k[2] = u.uI[1]; k[3] = u.uO[0]; k[4] = u.uO[1]; k[5] = u.uLean;
+    u.uTime = t; this.fuelPass.shader.uniforms.uTime = Math.floor(t * 4) / 4;
+    u.uI[0] = s[0]; u.uI[1] = s[1]; u.uO[0] = s[2]; u.uO[1] = s[3]; u.uLean = s[4];
+    return k;
+  }
+  preOff(k) {
+    const u = this.pass.shader.uniforms;
+    u.uTime = k[0]; u.uI[0] = k[1]; u.uI[1] = k[2]; u.uO[0] = k[3]; u.uO[1] = k[4]; u.uLean = k[5];
+    this.fuelPass.shader.uniforms.uTime = Math.floor(k[0] * 4) / 4;   // (as setTime keeps it)
+    u.uFuel = this.fuelRt; u.uEmb = this.embRt; u.uTile = this.tileRt;
+  }
+  /** The grow / go-out clocks and lean this area's art pass would get at shared time `now` (ms), into `out` (5). */
+  clocksAt(now, out) {
+    const u = this.pass.shader.uniforms, a = this.anim;
+    out[0] = a ? (now - a.iRef) / 1000 : u.uI[0]; out[1] = a ? a.iSpan / 1000 : u.uI[1];
+    out[2] = a ? (now - a.oRef) / 1000 : u.uO[0]; out[3] = a ? a.oSpan / 1000 : u.uO[1]; out[4] = u.uLean;
+    return out;
+  }
+  /** Cells still to draw of the job (0: none, or done). */
+  get jobLeft() { const j = this.job; return !j || j.done ? 0 : Math.max(0, (j.x1 - j.x0) * (j.y1 - j.y)); }
+  stepJob(renderer, maxCells, tNow = Infinity) {
+    const j = this.job; if ( !j || j.done ) return 0;
     const w = j.x1 - j.x0; if ( w <= 0 || j.y >= j.y1 ) { this.job = null; return 0; }
     const rows = Math.max(1, Math.min(j.y1 - j.y, Math.floor(maxCells / w)));
     if ( !this.back ) { this.back = PIXI.RenderTexture.create({ width: this.W, height: this.H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST }); this.back.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF; }
-    const k = this.frameOn(renderer, j.t, j.s);
-    try { renderer.renderTexture.bind(this.back); this.scissorPass(renderer, j.x0, j.y, j.x1, j.y + rows); } finally { this.frameOff(k); }
-    j.y += rows;
-    if ( j.y >= j.y1 ) {
-      const f = this.rt; this.rt = this.back; this.back = f;
-      for ( const m of [this.occPass, this.ground, this.show, this.smoke, this.front, this.glow] ) m.shader.uniforms.uArt = this.rt;
-      renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
-      const aw = this._win ??= [0, 0, 0, 0]; aw[0] = j.x0; aw[1] = j.y0; aw[2] = j.x1; aw[3] = j.y1;
-      this.artT = j.t; this.artWin = aw; (this.artU ??= new Float64Array(5)).set(j.s);
-      this.job = null;
+    if ( j.pre ) {
+      const u = this.pass.shader.uniforms, k = this.preOn(j.t, j.s);
+      u.uFuel = this.preFuel; u.uEmb = this.preEmb; u.uTile = this.preTile;
+      try { renderer.renderTexture.bind(this.back); this.scissorPass(renderer, j.x0, j.y, j.x1, j.y + rows); } finally { this.preOff(k); }
+    } else {
+      const k = this.frameOn(renderer, j.t, j.s);
+      try { renderer.renderTexture.bind(this.back); this.scissorPass(renderer, j.x0, j.y, j.x1, j.y + rows); } finally { this.frameOff(k); }
     }
+    j.y += rows;
+    if ( j.y >= j.y1 ) { if ( j.pre && j.t > tNow ) j.done = true; else this.swapJob(renderer); }
     return rows * w;
+  }
+  /** The job's frame, whole in the back texture, shown: the two textures swap (and the area's OCC tiles follow). */
+  swapJob(renderer) {
+    const j = this.job; if ( !j ) return;
+    const f = this.rt; this.rt = this.back; this.back = f;
+    for ( const m of [this.occPass, this.ground, this.show, this.smoke, this.front, this.glow] ) m.shader.uniforms.uArt = this.rt;
+    renderPass(renderer, this.occPass, this.occRt);
+    const aw = this._win ??= [0, 0, 0, 0]; aw[0] = j.x0; aw[1] = j.y0; aw[2] = j.x1; aw[3] = j.y1;
+    this.artT = j.t; this.artWin = aw; (this.artU ??= new Float64Array(5)).set(j.s);
+    this.job = null;
   }
   /** Do the drawn cells (this art frame) hold the window `w` (cells)? */
   covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
@@ -1737,6 +1792,8 @@ export class FireArt extends PIXI.Container {
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
     this.back?.destroy(true); this.back = null; this.job = null;
+    for ( const t of [this.preFuel, this.preEmb, this.preTile] ) t?.destroy(true);
+    this.preFuel = this.preEmb = this.preTile = null;
     this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true); this.occRt.destroy(true);
   }
 }

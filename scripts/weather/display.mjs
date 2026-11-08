@@ -58,6 +58,13 @@ let progs = {};
 const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-weather-${k}`);
 const WHITE = () => PIXI.Texture.WHITE;
 
+/** The display's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
+export function displayPrograms() {
+  return [prog("ground", GROUND_VERT, GROUND_FRAG), prog("rain", RAIN_VERT, RAIN_FRAG), prog("part", PART_VERT, PART_FRAG), prog("haze", GROUND_VERT, HAZE_FRAG),
+    prog("cellShow", GROUND_VERT, CELL_SHOW_FRAG), prog("groundCell", CELL_VERT, cellFrag(GROUND_FRAG, "groundFields", "cellGround")),
+    prog("hazeCell", CELL_VERT, cellFrag(HAZE_FRAG, "smoothFields", "cellHaze"))];
+}
+
 function place(obj, sortLayer, elevation = 0) {
   obj.eventMode = "none";
   Object.assign(obj, { elevation, sortLayer, sort: 0, _lastSortedIndex: 0 });
@@ -364,8 +371,9 @@ export class WeatherDisplay {
     const k = g.grid / g.ap;
     for ( let i = 0; i < n; i++ ) {
       const v = list[i];
-      this.vortA.set([(v.x * g.grid - g.ox) / g.ap, (v.y * g.grid - g.oy) / g.ap, v.R * k, v.r0 * k], i * 4);
-      this.vortB.set([v.w * k, v.inflow * k, v.p, 0], i * 4);
+      const A = this.vortA, B = this.vortB, o = i * 4;
+      A[o] = (v.x * g.grid - g.ox) / g.ap; A[o + 1] = (v.y * g.grid - g.oy) / g.ap; A[o + 2] = v.R * k; A[o + 3] = v.r0 * k;
+      B[o] = v.w * k; B[o + 1] = v.inflow * k; B[o + 2] = v.p; B[o + 3] = 0;
     }
     this.vortN = n;
     for ( const m of [this.splash, this.air, ...Object.values(this.parts)] ) m.shader.uniforms.uVortN = n;

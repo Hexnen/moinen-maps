@@ -169,7 +169,24 @@ export async function heavyCases() {
  * The whole matrix in the background (a javascript call would time out): `start(label, opts)` returns at once; `window.__mm`
  * = { done, i, rows, err }. Rows: { case, dpr, dark, rep, on, ...summary }. Saved to mm-rec/move-<label>.json at the end.
  */
-export function start(label, { cases = null, kinds = ["drag", "wheel", "animate"], reps = 2, dprs = [1, 2], darks = [0, 1], ...o } = {}) {
+/**
+ * CPU THROTTLE EMULATION (no CDP from the page): every ticker step (Foundry's own listeners, the weather's, the render submit) is
+ * stretched to `rate` x its time by a busy wait after it, so the frame's main-thread work costs what it would on a CPU `rate` x
+ * slower. Input handlers and GC are not stretched. Returns the undo.
+ */
+export function throttle(rate) {
+  if ( !(rate > 1) ) return () => {};
+  const T = canvas.app.ticker, f = T.update;
+  T.update = function(...a) {
+    const t = performance.now(); const r = f.apply(this, a);
+    const end = performance.now() + (performance.now() - t) * (rate - 1);
+    while ( performance.now() < end ) { /* the slower CPU */ }
+    return r;
+  };
+  return () => { delete T.update; if ( T.update !== f ) T.update = f; };
+}
+
+export function start(label, { cases = null, kinds = ["drag", "wheel", "animate"], reps = 2, dprs = [1, 2], darks = [0, 1], cpus = [1], ...o } = {}) {
   const S = window.__mm = { done: false, i: 0, rows: [], err: null, label };
   (async () => {
     const H = await import("./perf-harness.mjs"), list = await heavyCases(), dpr0 = canvas.app.renderer.resolution, dk0 = canvas.scene.environment.darknessLevel;
@@ -180,9 +197,10 @@ export function start(label, { cases = null, kinds = ["drag", "wheel", "animate"
           await H.setDPR(dpr);
           for ( const [name, setup] of list ) {
             if ( cases && !cases.includes(name) ) continue;
-            for ( let r = 0; r < reps; r++ ) for ( const on of [false, true] ) {
+            for ( const cpu of cpus ) for ( let r = 0; r < reps; r++ ) for ( const on of [false, true] ) {
               await setup(on);
-              for ( const k of kinds ) { S.rows.push({ case: name, dpr, dark, rep: r, on, ...(await move(k, o)) }); S.i++; }
+              const un = throttle(cpu);
+              try { for ( const k of kinds ) { S.rows.push({ case: name, dpr, dark, rep: r, on, cpu, ...(await move(k, o)) }); S.i++; } } finally { un(); }
             }
           }
         }
@@ -296,4 +314,19 @@ export async function stepMoveRow(kind, o = {}) {
     cpu: { p50: r2(q(cpu, 0.5)), p95: r2(q(cpu, 0.95)), max: r2(Math.max(...cpu)) }, gpu: { p50: r2(q(gpu, 0.5)), p95: r2(q(gpu, 0.95)), max: r2(Math.max(...gpu)) },
     work: { p95: r2(q(work, 0.95)), max: r2(Math.max(...work)), long: work.filter((w) => w > 16.7).length }, wx: { p95: r2(q(wx, 0.95)), max: r2(Math.max(...wx)) },
     stalls: { rtMade: sum("rtMade"), glTex: sum("glTex"), compile: sum("compile"), link: sum("link"), readback: sum("readback"), texUpload: sum("texUpload") } };
+}
+
+/**
+ * COLD START: the frames while a weather case starts (the scene flag written, the display built, its passes compiled and its
+ * targets made on their first draws), in real time (the pane shown). Run it first on a fresh page load for the cold numbers, again
+ * for the warm ones. Returns the summary (longs: the frames over 16.7 ms and what they did).
+ */
+export async function coldStart(e, l = 3, { ms = 2000, at = null } = {}) {
+  const C = await import("./weather-cost.mjs"), rec = recorder();
+  rec.on = true; rec.t0 = performance.now();
+  try { await C.setCase(e, l, { at }); await sleep(ms); } finally { await rec.stop(); }
+  const s = summarize("cold", rec), F = rec.frames;
+  const top = F.map((f, i) => [i, f]).sort((a, b) => (b[1].cpu + (b[1].gpu ?? 0)) - (a[1].cpu + (a[1].gpu ?? 0))).slice(0, 4)
+    .map(([i, f]) => `#${i} cpu ${r2(f.cpu)} gpu ${r2(f.gpu ?? -1)}${["rtMade", "glTex", "compile", "link", "readback", "texUpload", "progQuery"].map((k) => f[k] ? ` ${k}${f[k]}` : "").join("")}`);
+  return { e, l, frames: s.frames, work: s.work, cpu: s.cpu, stalls: s.stalls, late: s.late, ivMax: s.iv.max, top };
 }

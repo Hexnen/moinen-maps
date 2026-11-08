@@ -388,21 +388,23 @@ void main() {
   float h1 = hu(key, ty * 977 + ci, sd + 2), h2 = hu(key, ty * 977 + ci, sd + 3), h3 = hu(key, ty * 977 + ci, sd + 4), h4 = hu(key, ty * 977 + ci, sd + 5);
   vec2 g = vec2(float(tx) + h1, float(ty) + h2) * 64.0;        // the ground point (art cells from the scene origin)
   if ( g.x < 0.0 || g.y < 0.0 || g.x >= uArtSize.x || g.y >= uArtSize.y ) { hide(); return; }
+  // the phase first (a few hashes): the air draws a drop only while it falls, the ground only in the 0.62 s after it lands (every
+  // splash, dash and ripple is over by then), so most slots are hidden before the intensity and gust fields are evaluated
+  vec2 zr = layer == 0 ? vec2(34.0, 62.0) : layer == 1 ? vec2(18.0, 34.0) : vec2(70.0, 110.0);
+  float z0 = zr.x + h3 * (zr.y - zr.x), vf = (layer == 0 ? uVF.x : layer == 1 ? uVF.y : uVF.z) * (0.88 + 0.24 * h4), Df = z0 / vf;
+  if ( uMode == 0 ? tau >= Df : (layer == 2 || tau < Df || tau - Df >= 0.62) ) { hide(); return; }
   // the slot is on for this life when its hash is under the intensity at its birth (and the density keeps this slot)
   float birth = uTime - tau;
   float gateD = float(j) < floor(dens) ? 1.0 : fract(dens);
   float on = hu(key, ty * 31 + ci, sd + 6);
-  if ( on >= intensityAt(g, birth) * uI * (layer == 2 ? 1.0 : 0.8) || hu(key, ty * 53 + ci, sd + 8) >= gateD ) { hide(); return; }
-  vec2 zr = layer == 0 ? vec2(34.0, 62.0) : layer == 1 ? vec2(18.0, 34.0) : vec2(70.0, 110.0);
-  float z0 = zr.x + h3 * (zr.y - zr.x), vf = (layer == 0 ? uVF.x : layer == 1 ? uVF.y : uVF.z) * (0.88 + 0.24 * h4), Df = z0 / vf;
-  float G = gustAt(g / uOrigin.w, uWindDir, uTime, uSeed);
-  vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) * (0.85 + 0.3 * hu(j, ci, sd + 7))
-    + 0.6 * vortexAt(g);
+  if ( hu(key, ty * 53 + ci, sd + 8) >= gateD || on >= intensityAt(g, birth) * uI * (layer == 2 ? 1.0 : 0.8) ) { hide(); return; }
   vH = hu(key, ty * 13 + ci, sd + 9);
   vec2 lo, hi;
   if ( uMode == 0 ) {
-    if ( tau >= Df ) { hide(); return; }
     if ( openAt(g, false) < 0.5 ) { hide(); return; }
+    float G = gustAt(g / uOrigin.w, uWindDir, uTime, uSeed);   // (the wind moves a drop in the air only)
+    vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) * (0.85 + 0.3 * hu(j, ci, sd + 7))
+      + 0.6 * vortexAt(g);
     float ex = (layer == 0 ? 0.06 : layer == 1 ? 0.045 : 0.07) * uExpK;
     float t1 = tau, t0 = max(tau - ex, 0.0);
     vec2 p1 = g - W * (Df - t1) - vec2(0.0, uView.x * z0 * (1.0 - t1 / Df));
