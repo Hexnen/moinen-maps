@@ -982,10 +982,10 @@ export function particleAt(field, seed, k, now, speed = 1, wind = [0, 0], g = 32
   if ( puff ) {
     if ( f > 0.8 && hash4(seed, k, cyc, Math.floor(age / 120)) < (f - 0.8) * 4 ) return null;     // dissolving: pixel dropout, no fade
     const rise = (5 + j * 4) * u, ux = wind[0] * 9 * u, uy = wind[1] * 9 * u;
-    return { x: Math.round(src[0] + ux * sec + Math.sin(sec * 1.7 + j * 6) * 1.2 * u), y: Math.round(src[1] - rise * sec + uy * sec), color: (field.puffs ?? PUFF)[Math.min(2, Math.floor(f * 3))], size: 2, kind: "puff" };
+    return { x: Math.round(src[0] + ux * sec + Math.sin(sec * 1.7 + j * 6) * 1.2 * u), y: Math.round(src[1] - rise * sec + uy * sec), color: (field.puffs ?? PUFF)[Math.min(2, Math.floor(f * 3))], size: 2, kind: "puff", by: src[1] };
   }
   const rise = (12 + j * 16) * u, sway = (0.8 + hash4(seed, k, cyc, 6) * 2) * u;
-  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: (field.style === "fire" ? field.sparks ?? field.embers ?? EMBER : field.embers ?? EMBER)[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember" };
+  return { x: Math.round(src[0] + wind[0] * 8 * u * sec + Math.sin(sec * 5 + j * 9) * sway), y: Math.round(src[1] - rise * sec), color: (field.style === "fire" ? field.sparks ?? field.embers ?? EMBER : field.embers ?? EMBER)[Math.min(3, Math.floor(f * 4))], size: 1, kind: "ember", by: src[1] };
 }
 
 /** Particle slots an area gets out of `cap` shared by the visible areas (by their emitters), at least 2 when it has any. */

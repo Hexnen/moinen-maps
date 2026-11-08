@@ -111,7 +111,7 @@ function settingsPanel(host) {
           ${row(Z("f.ringColor"), `<input type="color" name="ringColor" value="${esc(L.ringColor || L.color)}">`, Z("h.numColor"))}` : ""}`)}
       ${fold("hover", Z("grp.hover"), "fa-solid fa-hand-pointer", `
         ${optCheck({ name: "hoverHi", label: Z("f.hoverHi"), checked: L.hoverHi, hint: Z("h.hoverHi") })}
-        ${L.hoverHi ? `${row(Z("f.hoverFx"), opts("hoverFx", ["none", "glow", "hatch", "crosshatch", "dots"], L.hoverFx))}
+        ${L.hoverHi ? `${row(Z("f.hoverFx"), opts("hoverFx", Model.HOVER_FX, L.hoverFx))}
           ${L.hoverFx !== "none" ? row(Z("f.hoverAlpha"), range("hoverAlpha", 0, 1)) : ""}
           ${row(Z("f.hoverLineAlpha"), range("hoverLineAlpha", 0, 1))}` : ""}`)}
       </section>

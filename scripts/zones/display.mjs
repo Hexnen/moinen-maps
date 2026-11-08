@@ -8,6 +8,7 @@
 
 import { cornerPoint } from "./geometry.mjs";
 import { pairKey } from "./marks.mjs";
+import { THEMES, BADGES, BADGE_SCALE, bakeWash } from "./themes.mjs";
 
 /** Zone states as a tint over the zone (colour, alpha). */
 const STATE_TINT = { fire: [0xff5a1f, 0.3], dark: [0x05050a, 0.45], ice: [0xbfe8ff, 0.3], flooded: [0x2f7fd6, 0.32], wrecked: [0x6b5b4b, 0.32], lowgrav: [0xb48cff, 0.2], water: [0x2f7fd6, 0.18] };
@@ -134,6 +135,7 @@ function tints(Z) {
   return out;
 }
 
+const lumaOf = (n) => (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
 const hex = (css) => Number.parseInt(String(css).slice(1), 16) || 0xf3e7c9;
 
 /** A closed ring [x, y, ...] walked at an even step: [[x, y], ...]. */
@@ -157,7 +159,12 @@ export class ZoneDisplay {
     this.root.interactiveChildren = false;
     Object.assign(this.root, { elevation: 0, sortLayer: 258, sort: 0, _lastSortedIndex: 0 });
     this.fill = new PIXI.Graphics();
+    // the style's wash (themes.mjs): one baked sprite over the zones, drawn again only when the zones or the look change
+    this.wash = new PIXI.Container();
     this.states = new PIXI.Graphics();
+    // light added on top of the map (neon glow): a Graphics of its own with additive blending
+    this.glow = new PIXI.Graphics();
+    this.glow.blendMode = PIXI.BLEND_MODES.ADD;
     this.lines = new PIXI.Graphics();
     this.badges = new PIXI.Container();
     // the zone under the cursor: an effect inside it (masked to the zone) and its bright border
@@ -169,7 +176,7 @@ export class ZoneDisplay {
     this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
     this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
-    this.root.addChild(this.fill, this.states, this.hi, this.lines, this.badges);
+    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.badges);
     this.hoverId = -1;
     canvas.primary.addChild(this.root);
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
@@ -195,19 +202,22 @@ export class ZoneDisplay {
     this.M = marks; this.editing = editing;
     for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
     this.items = [];
+    this.half = new Map();
     this.g = g;
     this.Z = Z; this.look = look;
     this.drawHover(this.hoverId, zoom);
-    if ( !Z || !Z.zones.length ) return;
-    const tint = tints(Z), light = hex(look.color);
-    this.tintOf = (id) => TINTS[tint.get(id) ?? 0];
-    const fillA = Math.min(1, look.fill * (editing ? 0.75 : 0.6));
+    if ( !Z || !Z.zones.length ) { this.#dropWash(); return; }
+    const tint = tints(Z), light = hex(look.color), theme = THEMES[look.lineStyle] ?? null, pal = theme?.palette ?? TINTS;
+    this.tintOf = (id) => pal[(tint.get(id) ?? 0) % pal.length];
+    // a style with a wash of its own shows its zones through it: the flat tint stays for distances, the token's zone and editing
+    const washed = this.#washFor(Z, look, theme, g);
+    const fillA = washed && !editing && !theme.keepFill ? 0 : Math.min(1, look.fill * (editing ? 0.75 : 0.6));
 
     // tints (holes cut out), and the reach of the selected token
     for ( const z of Z.zones ) {
       const band = bands?.get(z.id);
-      const color = band ? band.color : TINTS[tint.get(z.id)];
-      const a = band ? Math.max(fillA, 0.12) * (band.key === "far" ? 0.5 : 1) : fillA;
+      const color = band ? band.color : this.tintOf(z.id);
+      const a = band ? Math.max(fillA, washed ? 0.16 : 0.12) * (band.key === "far" ? 0.5 : 1) : z.id === here && washed ? 0.14 : fillA;
       if ( a <= 0 ) continue;
       for ( const part of z.parts ) {
         F.beginFill(color, z.id === here ? Math.min(1, a * 1.8) : a);
@@ -248,37 +258,62 @@ export class ZoneDisplay {
       const text = blocked ? "×" : d != null ? String(d) : numeral(z.id + 1, look.numFormat);
       const b = new PIXI.Container();
       const G = new PIXI.Graphics();
+      b.addChild(G);
       const numCol = look.numColor ? hex(look.numColor) : light, ringBase = look.ringColor ? hex(look.ringColor) : light;
       const ringCol = band ? band.color : ringBase, shape = look.numShape ?? "circle";
-      badgeShape(G, shape, ringCol, d != null || blocked ? 0.85 : 0.6, band ? band.color : null);
-      b.addChild(G);
-      // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
-      const size = BADGE_R * (text.length > 3 ? 0.62 : text.length > 2 ? 0.78 : text.length > 1 ? 1.0 : 1.2) * (shape === "plain" ? 1.25 : 1);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: shape === "caption" ? 0x15110f : shape === "shield" || shape === "blossom" ? (look.numColor ? hex(look.numColor) : 0x3b2414) : d != null || blocked ? ringCol : numCol, align: "center", ...(shape === "caption" ? { fontFamily: "'Bangers', 'Comic Sans MS', Signika, sans-serif", fontWeight: "700", letterSpacing: 1 } : {}),
-        ...(shape === "shield" ? { fontFamily: "'Modesto Condensed', 'Cinzel', Georgia, serif", fontWeight: "700" } : {}),
-        ...(shape === "seal" ? { fill: band ? 0x141010 : look.numColor ? hex(look.numColor) : 0xfbf1dc, fontFamily: "'Yu Mincho', 'MS Mincho', 'Noto Serif JP', serif", fontWeight: "700" } : {}),
-        ...(look.lineStyle === "neon" && shape !== "caption" && shape !== "shield" ? { dropShadow: true, dropShadowColor: ringCol, dropShadowBlur: 6, dropShadowDistance: 0, dropShadowAlpha: 0.9 } : {}),
-        ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
-      t.resolution = res; t.anchor.set(0.5, 0.52);
-      b.addChild(t);
+      const fitK = (s) => (s.length > 3 ? 0.62 : s.length > 2 ? 0.78 : s.length > 1 ? 1.0 : 1.2);
+      let half = 1;
+      const own = BADGES[shape];
+      if ( own ) {
+        // a badge with a character of its own (themes.mjs)
+        const B = { G, b, r: BADGE_R * (BADGE_SCALE[shape] ?? 1), id: z.id, label: text, arabic: d != null ? text : String(z.id + 1), kanji: d == null && !blocked ? numeral(z.id + 1, "kanji") : "",
+          band: band ?? null, blocked, dist: d != null, tint: this.tintOf(z.id),
+          add: (str, o = {}) => {
+            const { size = 1, dx = 0, dy = 0, x, y, rot = 0, ...st } = o;
+            const t = new PIXI.Text(str, { align: "center", ...st, fontSize: Math.max(6, Math.round(BADGE_R * fitK(str) * size)) });
+            t.resolution = res; t.anchor.set(0.5, 0.52); t.position.set(x ?? dx * BADGE_R, y ?? dy * BADGE_R); t.rotation = rot;
+            b.addChild(t); return t;
+          } };
+        half = (own(B) ?? 1) * (BADGE_SCALE[shape] ?? 1);
+      } else {
+        badgeShape(G, shape, ringCol, d != null || blocked ? 0.85 : 0.6, band ? band.color : null);
+        // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
+        const size = BADGE_R * fitK(text) * (shape === "plain" ? 1.25 : 1);
+        const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: shape === "caption" ? 0x15110f : d != null || blocked ? ringCol : numCol, align: "center", ...(shape === "caption" ? { fontFamily: "'Bangers', 'Comic Sans MS', Signika, sans-serif", fontWeight: "700", letterSpacing: 1 } : {}),
+          ...(shape === "seal" ? { fill: band ? 0x141010 : look.numColor ? hex(look.numColor) : 0xfbf1dc, fontFamily: "'Yu Mincho', 'MS Mincho', 'Noto Serif JP', serif", fontWeight: "700" } : {}),
+          ...(look.lineStyle === "neon" && shape !== "caption" ? { dropShadow: true, dropShadowColor: ringCol, dropShadowBlur: 6, dropShadowDistance: 0, dropShadowAlpha: 0.9 } : {}),
+          ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
+        t.resolution = res; t.anchor.set(0.5, 0.52);
+        b.addChild(t);
+      }
       b.alpha = d == null && dist && !blocked ? 0.45 : 1;
       this.badges.addChild(b);
+      this.half.set(z.id, half);
       this.items.push({ b, z, at: null });
     }
+    // icons sit under the badge, whatever its height
+    const hd = this.half.values().next().value ?? 1;
+    for ( const it of this.items ) if ( it.icons && it.dy ) it.dy = BADGE_R * (this.half.get(it.z.id) ?? hd) + 15;
     this.follow(zoom, true);
   }
 
   /** Borders: dark under-line, light dots on top; widths in screen pixels (drawn again when the zoom moved, see onZoom). */
   drawLines(zoom) {
-    const Ln = this.lines, Z = this.Z, look = this.look;
-    Ln.clear();
+    const Ln = this.lines, Z = this.Z, look = this.look, Gw = this.glow;
+    Ln.clear(); Gw.clear();
     this.lineZoom = zoom;
     if ( !Z || !look || look.ink <= 0 ) return;
-    Ln.alpha = look.lineAlpha ?? 1;
+    Ln.alpha = Gw.alpha = look.lineAlpha ?? 1;
     const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink, col = hex(look.color), a = Math.min(1, 0.95 * ink);
     const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
     const stroke = (width, color, alpha, draw) => { Ln.lineStyle({ width, color, alpha, ...R }); for ( const p of Z.core ) draw(p); };
     const under = (k = 1) => stroke(w * k, 0x15110f, Math.min(1, 0.55 * ink), (p) => trace(Ln, p));
+    const theme = THEMES[look.lineStyle];
+    if ( theme?.lines ) {
+      theme.lines({ Ln, Gw, Z, px, w, ink, a, col, look, g: this.g ?? 100, zoom, stroke, trace, pattern, wobble, hex });
+      this.#walls(Ln, px, w, col);
+      return;
+    }
     switch ( look.lineStyle ) {
       case "solid": under(); stroke(w * 0.45, col, a, (p) => trace(Ln, p)); break;
       case "dotted": under(0.8); stroke(w * 0.5, col, a, (p) => pattern(Ln, p, [0.01 * px, 7 * px])); break;
@@ -290,7 +325,7 @@ export class ZoneDisplay {
       // hand-drawn: two thin, slightly wandering passes
       case "sketch": under(0.7); stroke(w * 0.3, col, 0.8 * a, (p) => trace(Ln, wobble(p, 1.8 * px, 1, px))); stroke(w * 0.25, col, 0.65 * a, (p) => trace(Ln, wobble(p, 2.2 * px, 2, px))); break;
       // comic panels: every border is a gutter of paper between two black panel frames; the zones' outer edges are a frame alone
-      case "comic": {
+      case "comic": case "halftone": {
         const gw = Math.max(11, 17 * ink) * px, fw = Math.max(2, 3.5 * ink) * px;
         const outer = (width, color) => { Ln.lineStyle({ width, color, alpha: 1, ...R }); for ( const br of Z.borders ) if ( br.b < 0 || br.edge ) { Ln.moveTo(br.pts[0], br.pts[1]); Ln.lineTo(br.pts[2], br.pts[3]); } };
         outer(fw * 2.2, 0x15110f);
@@ -442,7 +477,8 @@ export class ZoneDisplay {
     // the effect inside and the bright border have their own opacity
     this.hiFx.alpha = this.hiSoft.alpha = look.hoverAlpha ?? 1;
     this.hiLine.alpha = look.hoverLineAlpha ?? 1;
-    const px = 1 / Math.max(0.05, zoom), light = hex(look.color);
+    const theme = THEMES[look.lineStyle] ?? null;
+    const px = 1 / Math.max(0.05, zoom), light = theme?.hoverColor ?? hex(look.color);
     const rings = z.parts.flatMap((part) => part);
     // the mask: the zone itself (holes cut out)
     for ( const part of z.parts ) {
@@ -456,15 +492,15 @@ export class ZoneDisplay {
     if ( fx === "glow" ) {
       // strokes along the border, wide and faint to narrow and bright; the mask keeps their inner half: a glow from the edge inward
       // in the zone's own tint (a light glow vanished on light maps), brightest at the edge
-      const c = this.tintOf?.(id) ?? light;
+      const c = theme?.hoverTint ?? this.tintOf?.(id) ?? light;
       for ( const [w, a] of [[64, 0.1], [44, 0.13], [28, 0.17], [14, 0.24], [6, 0.32]] ) {
         F.lineStyle({ width: w * px, color: c, alpha: a, join: PIXI.LINE_JOIN.ROUND });
         for ( const r of rings ) { ring(F, r); }
       }
     }
-    if ( fx === "hatch" || fx === "crosshatch" || fx === "dots" ) {
+    if ( ["hatch", "crosshatch", "dots", "scan", "blinds", "petals"].includes(fx) ) {
       // fixed on the map (grid units), baked once per zone and look: zooming only scales it, nothing is redrawn or jumps
-      const key = `${id}|${fx}|${look.color}`;
+      const key = `${id}|${fx}|${light}`;
       if ( key !== this.#patKey || this.Z !== this.#patZ ) {
         this.#softTex();
         this.#edgePattern(z, rings, (this.g ?? 100) / 50, [x0, y0, x1, y1], fx, light);
@@ -478,6 +514,34 @@ export class ZoneDisplay {
     for ( const r of rings ) ring(L, r);
     L.lineStyle({ width: 3 * px, color: light, alpha: 0.95, join: PIXI.LINE_JOIN.ROUND });
     for ( const r of rings ) ring(L, r);
+    theme?.hover?.({ L, F, px, rings, light, bbox: [x0, y0, x1, y1], z, look });
+  }
+
+  /** The style's wash for these zones (themes.mjs): baked again only when the zones or what the wash depends on changed. */
+  #washKey = null;
+  #washZ = null;
+  #washFor(Z, look, theme, g) {
+    const W = theme?.wash;
+    const key = W ? `${look.lineStyle}|${look.fill}|${look.ink}|${look.color}|${look.ringColor}|${g}` : null;
+    if ( key && key === this.#washKey && this.#washZ === Z ) return this.wash.children.length > 0;
+    this.#dropWash();
+    if ( !key ) return false;
+    this.#washKey = key; this.#washZ = Z;
+    let any = false;
+    for ( const layer of [W].flat() ) {
+      let out = null;
+      try { out = bakeWash(Z, layer, (id) => this.tintOf(id), look, g); } catch ( err ) { console.warn("moinen-maps | zones: style wash", err); }
+      if ( !out ) continue;
+      const S = new PIXI.Sprite(PIXI.Texture.from(out.canvas));
+      S.position.set(out.x, out.y); S.scale.set(out.scale);
+      S.blendMode = layer.blend === "multiply" ? PIXI.BLEND_MODES.MULTIPLY : layer.blend === "add" ? PIXI.BLEND_MODES.ADD : PIXI.BLEND_MODES.NORMAL;
+      this.wash.addChild(S); any = true;
+    }
+    return any;
+  }
+  #dropWash() {
+    this.#washKey = null; this.#washZ = null;
+    for ( const c of this.wash.removeChildren() ) c.destroy({ children: true, texture: true, baseTexture: true });
   }
 
   /**
@@ -501,6 +565,8 @@ export class ZoneDisplay {
     m.globalCompositeOperation = "lighter";
     m.strokeStyle = "#fff"; m.lineJoin = "round";
     for ( const [bw, a] of [[2, 0.1], [1.3, 0.1], [0.7, 0.12]] ) { m.globalAlpha = a; m.lineWidth = band * bw; m.stroke(path); }
+    // light through blinds falls on the whole zone, petals drift all over it
+    if ( fx === "blinds" || fx === "petals" ) { m.globalAlpha = fx === "blinds" ? 0.85 : 0.55; m.fillStyle = "#fff"; m.fill(path, "evenodd"); }
     const step = 6 * u, reach = Math.max(2, Math.round(30 * u / step));
     for ( const r of rings ) {
       const P = resample(r, step), n = P.length;
@@ -534,6 +600,32 @@ export class ZoneDisplay {
       const dots = (rad) => { c.beginPath(); for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) { c.moveTo(x + rad, y); c.arc(x, y, rad, 0, 2 * Math.PI); } c.fill(); };
       c.fillStyle = css(0x15110f, 0.42); dots(r + 1.1 * u);
       c.fillStyle = css(light, 0.9); dots(r);
+    } else if ( fx === "scan" ) {
+      // scan lines: fine horizontal rules, a brighter one every fourth
+      const gap = 4.5 * u;
+      c.beginPath(); for ( let y = y0, i = 0; y <= y1; y += gap, i++ ) if ( i % 4 ) { c.moveTo(x0, y); c.lineTo(x1, y); }
+      c.strokeStyle = css(light, 0.55); c.lineWidth = 1.1 * u; c.stroke();
+      c.beginPath(); for ( let y = y0; y <= y1; y += gap * 4 ) { c.moveTo(x0, y); c.lineTo(x1, y); }
+      c.strokeStyle = css(light, 0.95); c.lineWidth = 1.8 * u; c.stroke();
+    } else if ( fx === "blinds" ) {
+      // venetian blinds: broad bars of light slanting across the zone, soft at their edges
+      const gap = 30 * u;
+      const bars = (lw, a) => { c.beginPath(); for ( let s = -len; s <= len; s += gap ) { c.moveTo(x0 + s, y0); c.lineTo(x0 + s + len * 0.55, y0 + len); } c.strokeStyle = css(light, a); c.lineWidth = lw; c.stroke(); };
+      bars(17 * u, 0.13); bars(12 * u, 0.2); bars(8 * u, 0.28);
+    } else if ( fx === "petals" ) {
+      // falling petals: notched cherry petals at random turns, two pinks
+      const gap = 16 * u;
+      for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) {
+        const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453, r1 = h - Math.floor(h), r2 = (h * 7.13) - Math.floor(h * 7.13);
+        if ( r1 < 0.35 ) continue;
+        const px = x + (r2 - 0.5) * gap * 0.8, py = y + (r1 - 0.5) * gap * 0.8, sz = (3 + 2.5 * r2) * u;
+        c.save(); c.translate(px, py); c.rotate(r1 * 6.28);
+        c.beginPath(); c.moveTo(0, sz); c.bezierCurveTo(sz * 0.9, sz * 0.4, sz * 0.7, -sz * 0.8, sz * 0.15, -sz); c.lineTo(0, -sz * 0.75); c.lineTo(-sz * 0.15, -sz);
+        c.bezierCurveTo(-sz * 0.7, -sz * 0.8, -sz * 0.9, sz * 0.4, 0, sz); c.closePath();
+        c.fillStyle = r2 > 0.5 ? "rgba(255,228,238,0.95)" : "rgba(247,168,196,0.95)"; c.fill();
+        c.strokeStyle = "rgba(205,90,135,0.7)"; c.lineWidth = 0.6 * u; c.stroke();
+        c.restore();
+      }
     } else {
       const gap = 11 * u;
       const hatch = () => {
@@ -542,7 +634,7 @@ export class ZoneDisplay {
         if ( fx === "crosshatch" ) for ( let s = 0; s <= 2 * len; s += gap ) { c.moveTo(x0 + s, y0); c.lineTo(x0 + s - len, y0 + len); }
         c.stroke();
       };
-      c.strokeStyle = css(0x15110f, 0.4); c.lineWidth = 2.8 * u; hatch();
+      c.strokeStyle = css(lumaOf(light) < 0.45 ? 0xfffdf6 : 0x15110f, 0.4); c.lineWidth = 2.8 * u; hatch();
       c.strokeStyle = css(light, 0.85); c.lineWidth = 1.2 * u; hatch();
     }
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -596,5 +688,5 @@ export class ZoneDisplay {
 
   set visible(v) { this.root.visible = v; }
 
-  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) { this.#softTex(); this.root.destroy({ children: true }); } }
+  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) { this.#softTex(); this.#dropWash(); this.root.destroy({ children: true }); } }
 }
