@@ -5,28 +5,34 @@
  * - an aurora shimmering in curtains just above the planet's night-side limb;
  * - two satellites on orbits that follow the planet's curve (a high slow one, a low fast one the other way), turning slowly;
  * - a few bits of debris tumbling along their own orbits.
+ * - the planet's clouds drifting very slowly round its curve (orbit-clouds.mjs: one small texture, repainted about twice a second).
  * One Graphics under the tokens, redrawn each frame (about a hundred rectangles); nothing runs on any other scene or in a hidden tab.
  */
 import { rng, paintSpace, lastLayout } from "./space.mjs";
+import { startClouds } from "./orbit-clouds.mjs";
 
 const ART = 6;
-let G = null, tick = null;
+let G = null, tick = null, clouds = null;
+/** The drifting clouds of the open Orbit scene (dev: stats, layer). */
+export const orbitClouds = () => clouds;
 
 export function stopAmbience() {
   if ( tick ) canvas.app?.ticker?.remove(tick);
   tick = null;
+  try { clouds?.destroy(); } catch { /* gone with the canvas */ }
+  clouds = null;
   if ( G && !G.destroyed ) G.destroy();
   G = null;
 }
 
-export function startAmbience(scene, seed = 1, layout = null) {
+export function startAmbience(scene, seed = 1, layout = null, flag = null) {
   stopAmbience();
   if ( !canvas?.ready || !canvas.primary ) return;
   const W = scene.width, H = scene.height, aw = Math.round(W / ART), ah = Math.round(H / ART);
   // where the picture's planet is (art px -> scene px)
   let planet = { cx: aw * 0.5, cy: ah * 1.6, R: aw * 0.68, light: [-0.92, -0.18, 0.34] };
   if ( layout?.planet ) planet = layout.planet;
-  else try { paintSpace(seed, aw, ah); if ( lastLayout.planet ) planet = lastLayout.planet; } catch { /* the fallback above */ }
+  else try { paintSpace(seed, aw, ah, { layoutOnly: true }); if ( lastLayout.planet ) planet = lastLayout.planet; } catch { /* the fallback above */ }
   const PCX = planet.cx * ART, PCY = planet.cy * ART, PR = planet.R * ART;
   const rand = rng((seed ^ 0x9e3779b9) >>> 0);
   const snap = (v) => Math.round(v / ART) * ART;
@@ -34,6 +40,7 @@ export function startAmbience(scene, seed = 1, layout = null) {
   G.eventMode = "none";
   Object.assign(G, { elevation: 0, sortLayer: 100, sort: 0, _lastSortedIndex: 0 });
   canvas.primary.addChild(G);
+  try { clouds = startClouds(scene, flag ?? { seed, v: 1, layout }, ART); } catch ( err ) { console.warn("moinen-maps | orbit clouds", err); clouds = null; }
   const px = (x, y, c, a = 1, k = 1) => { if ( a > 0.02 ) G.beginFill(c, Math.min(1, a)).drawRect(snap(x), snap(y), ART * k, ART * k).endFill(); };
   const onScreen = (x, y) => x > -ART * 8 && x < W + ART * 8 && y > -ART * 8 && y < H + ART * 8;
   // a point on a circle around the planet's centre: angle a (0 = right, -PI/2 = straight up)
@@ -86,6 +93,7 @@ export function startAmbience(scene, seed = 1, layout = null) {
     if ( !G || G.destroyed || document.hidden ) return;
     const now = performance.now(), t = now / 1000, dt = Math.min(0.1, (now - last) / 1000);
     last = now;
+    clouds?.tick();
     G.clear();
 
     // dust drifting slowly left, fading in and out

@@ -43,8 +43,8 @@ export const PALETTES = {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
 const bayer = (x, y) => BAYER[(y & 3) * 4 + (x & 3)];
 
-/** Seeded 2D value noise with smooth interpolation, and fractal sums of it. */
-function makeNoise(rand) {
+/** Seeded 2D value noise with smooth interpolation, and fractal sums of it (the noise of a picture: `makeNoise(rng(seed))`). */
+export function makeNoise(rand) {
   const N = 256, perm = new Uint8Array(N * 2), val = new Float32Array(N);
   for ( let i = 0; i < N; i++ ) { perm[i] = i; val[i] = rand(); }
   for ( let i = N - 1; i > 0; i-- ) { const j = Math.floor(rand() * (i + 1)); [perm[i], perm[j]] = [perm[j], perm[i]]; }
@@ -68,10 +68,10 @@ function makeNoise(rand) {
  * @returns {Uint8ClampedArray} RGBA, w*h*4
  */
 export const lastLayout = { planet: null, moon: null };
-export function paintSpace(seed, w, h) {
-  const rand = rng(seed), { fbm, noise } = makeNoise(rand), out = new Uint8ClampedArray(w * h * 4);
+export function paintSpace(seed, w, h, { layoutOnly = false } = {}) {
+  const rand = rng(seed), { fbm, noise } = makeNoise(rand), out = layoutOnly ? null : new Uint8ClampedArray(w * h * 4);
   const put = (x, y, c, a = 1) => {
-    if ( x < 0 || y < 0 || x >= w || y >= h ) return;
+    if ( layoutOnly || x < 0 || y < 0 || x >= w || y >= h ) return;
     const i = (y * w + x) * 4;
     if ( a >= 1 ) { out[i] = c[0]; out[i + 1] = c[1]; out[i + 2] = c[2]; }
     else { out[i] += (c[0] - out[i]) * a; out[i + 1] += (c[1] - out[i + 1]) * a; out[i + 2] += (c[2] - out[i + 2]) * a; }
@@ -80,25 +80,29 @@ export function paintSpace(seed, w, h) {
   const pick = (P, t, x, y) => P[Math.max(0, Math.min(P.length - 1, Math.floor(t * P.length + bayer(x, y) - 0.5)))];
 
   // 1. the deep background: a slow vertical gradient, dithered
-  for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) put(x, y, pick(PALETTES.sky, 0.15 + 0.6 * (y / h) * (0.6 + 0.4 * noise(x / 90, y / 90)), x, y));
+  if ( !layoutOnly ) for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) put(x, y, pick(PALETTES.sky, 0.15 + 0.6 * (y / h) * (0.6 + 0.4 * noise(x / 90, y / 90)), x, y));
 
   // 2. two nebula clouds, each warped noise in its own palette, mixed by a mask so they sit in different parts of the sky
   const families = ["violet", "teal", "ember"];
   const f1 = families[Math.floor(rand() * 3)], f2 = families.filter((f) => f !== f1)[Math.floor(rand() * 2)];
   const sc = 1 / (Math.max(w, h) * 0.32), ox = rand() * 100, oy = rand() * 100;
-  const nebula = new Float32Array(w * h), which = new Uint8Array(w * h);
-  for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
+  const nebulaAt = (x, y) => {
     const qx = fbm(x * sc + ox, y * sc + oy, 3), qy = fbm(x * sc + ox + 5.2, y * sc + oy + 1.3, 3);
     let d = fbm(x * sc * 1.6 + 3 * qx + ox, y * sc * 1.6 + 3 * qy + oy, 5);
     // a band across the sky, so the cloud has a shape instead of covering everything
     const band = Math.exp(-(((y / h) - (0.25 + 0.35 * qx)) ** 2) / 0.06);
     d = Math.max(0, (d - 0.42) * 2.4) * (0.35 + 0.9 * band);
+    return Math.min(1, d);
+  };
+  // (layoutOnly: only the random draws are replayed - the few nebula values they depend on are computed where they are read)
+  const nebula = layoutOnly ? null : new Float32Array(w * h), which = layoutOnly ? null : new Uint8Array(w * h);
+  if ( !layoutOnly ) for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
     const m = fbm(x * sc * 0.6 + 40, y * sc * 0.6 + 17, 2);
-    nebula[y * w + x] = Math.min(1, d);
+    nebula[y * w + x] = nebulaAt(x, y);
     // which cloud: a wide dithered hand-over between the two palettes, never a hard seam
     which[y * w + x] = m + (bayer(x, y) - 0.5) * 0.22 > 0.5 ? 1 : 0;
   }
-  for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
+  if ( !layoutOnly ) for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
     const d = nebula[y * w + x]; if ( d < 0.04 ) continue;
     const P = PALETTES[which[y * w + x] ? f2 : f1];
     // dither into the palette, but let the thin edges fall away in a checker so the cloud fades instead of ending in a line
@@ -110,7 +114,7 @@ export function paintSpace(seed, w, h) {
   }
   // young stars inside the bright cores of the clouds
   for ( let i = 0, n = Math.round((w * h) / 700); i < n; i++ ) {
-    const x = Math.floor(rand() * w), y = Math.floor(rand() * h), d = nebula[y * w + x];
+    const x = Math.floor(rand() * w), y = Math.floor(rand() * h), d = layoutOnly ? nebulaAt(x, y) : nebula[y * w + x];
     if ( d < 0.55 ) continue;
     put(x, y, PALETTES.star[4]);
     if ( rand() < 0.3 ) for ( const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] ) put(x + dx, y + dy, PALETTES.star[3], 0.6);
@@ -119,7 +123,7 @@ export function paintSpace(seed, w, h) {
   // 3. a faint distant spiral galaxy
   {
     const gx = w * (0.15 + 0.7 * rand()), gy = h * (0.1 + 0.3 * rand()), gr = Math.max(6, Math.min(w, h) * 0.05), tilt = 0.45, rot = rand() * Math.PI;
-    for ( let y = Math.floor(gy - gr * 2); y < gy + gr * 2; y++ ) for ( let x = Math.floor(gx - gr * 2); x < gx + gr * 2; x++ ) {
+    if ( !layoutOnly ) for ( let y = Math.floor(gy - gr * 2); y < gy + gr * 2; y++ ) for ( let x = Math.floor(gx - gr * 2); x < gx + gr * 2; x++ ) {
       let dx = x - gx, dy = y - gy;
       const cx = dx * Math.cos(rot) + dy * Math.sin(rot), cy = (-dx * Math.sin(rot) + dy * Math.cos(rot)) / tilt;
       const r = Math.hypot(cx, cy) / gr, an = Math.atan2(cy, cx);
@@ -154,8 +158,7 @@ export function paintSpace(seed, w, h) {
 
   // a lit sphere: normal from the disc position, light from the upper left, dithered bands
   const L = (() => { const v = [-0.62, -0.5, 0.6], n = Math.hypot(...v); return v.map((c) => c / n); })();
-  // the planet's sun comes from the side, so a terminator crosses the visible cap and the night side shows its cities
-  const LP = (() => { const v = [-0.92, -0.18, 0.34], n = Math.hypot(...v); return v.map((c) => c / n); })();
+  const LP = PLANET_LIGHT;
   const sphere = (cx, cy, R, paint) => {
     for ( let y = Math.max(0, Math.floor(cy - R - 3)); y < Math.min(h, cy + R + 3); y++ ) for ( let x = Math.max(0, Math.floor(cx - R - 3)); x < Math.min(w, cx + R + 3); x++ ) {
       const nx = (x + 0.5 - cx) / R, ny = (y + 0.5 - cy) / R, rr = nx * nx + ny * ny;
@@ -169,7 +172,7 @@ export function paintSpace(seed, w, h) {
     const cx = left ? w * (0.1 + 0.1 * rand()) : w * (0.78 + 0.1 * rand()), cy = h * (0.14 + 0.12 * rand());
     lastLayout.moon = { cx, cy, R };
     const craters = Array.from({ length: 7 + Math.floor(rand() * 5) }, () => [rand() * 1.6 - 0.8, rand() * 1.6 - 0.8, 0.08 + rand() * 0.2]);
-    sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
+    if ( !layoutOnly ) sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
       if ( rr > 1 ) return;
       let lit = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
       let t = 0.15 + 0.85 * lit + 0.12 * (fbm(nx * 3 + 9, ny * 3 + 4, 3) - 0.5);
@@ -181,9 +184,11 @@ export function paintSpace(seed, w, h) {
   // 6. the planet: a big disc whose limb arcs across the bottom of the picture
   {
     const R = Math.max(w, h) * (0.62 + 0.12 * rand()), cx = w * (0.35 + 0.3 * rand()), cy = h + R * (0.62 + 0.08 * rand());
-    lastLayout.planet = { cx, cy, R, light: LP };
     const lo = rand() * 50;
-    sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
+    lastLayout.planet = { cx, cy, R, light: LP, lo };
+    if ( layoutOnly ) return null;
+    const P = planetSurface({ fbm, noise, cx, cy, R, lo }), px = {}, rgb = new Uint8ClampedArray(3);
+    sphere(cx, cy, R, (x, y, nx, ny, rr) => {
       // the atmosphere: a thin glowing rim just outside the disc, brightest on the lit side
       if ( rr > 1 ) {
         const out = (Math.sqrt(rr) - 1) * R, HALO = 7;
@@ -195,39 +200,80 @@ export function paintSpace(seed, w, h) {
         }
         return;
       }
-      // the surface pattern: sample noise on the sphere (u,v from the normal) so continents bend with the curvature
-      const u = Math.atan2(nx, nz) * 1.6 + lo, v = Math.asin(Math.max(-1, Math.min(1, ny))) * 1.6;
-      const landN = fbm(u * 1.7 + 3, v * 1.7 + 7, 5), cloudN = fbm(u * 3.2 + 11, v * 7 + 2, 4);
-      const lit = nx * LP[0] + ny * LP[1] + nz * LP[2];
-      // day 0..1 with a soft, dithered terminator; the limb darkens a little
-      const day = Math.max(0, Math.min(1, lit * 1.8 + 0.3)), limb = 0.7 + 0.3 * Math.sqrt(nz);
-      const isLand = landN > 0.5, isCloud = cloudN > 0.62;
-      const clamp = (t) => Math.max(0, Math.min(0.999, t));
-      // polar ice near the top of the disc; cloud shadows a little down-sun of each cloud
-      const ice = v < -2.38 - 0.25 * (landN - 0.5) * 4;
-      const shade = fbm((u + 0.06) * 3.2 + 11, (v + 0.03) * 7 + 2, 4) > 0.62 && !isCloud ? 0.72 : 1;
-      let c;
-      if ( isCloud ) c = pick(PALETTES.cloud, clamp((0.45 + (cloudN - 0.62) * 2.5) * (0.15 + 0.85 * day) * limb + 0.05), x, y);
-      else if ( ice ) c = pick(PALETTES.cloud, clamp((0.55 + (landN - 0.5)) * (0.12 + 0.88 * day) * limb), x, y);
-      else if ( isLand ) c = pick(PALETTES.land, clamp((0.35 + (landN - 0.5) * 3.2) * (0.12 + 0.88 * day) * limb * shade), x, y);
-      else {
-        c = pick(PALETTES.ocean, clamp((0.55 + 0.6 * (landN - 0.42)) * (0.1 + 0.9 * day) * limb * shade), x, y);
-        // the sun's glint on the sea
-        const hx = LP[0], hy = LP[1], hz = LP[2] + 1, hn = Math.hypot(hx, hy, hz);
-        const spec = Math.max(0, (nx * hx + ny * hy + nz * hz) / hn) ** 40;
-        if ( spec > bayer(x, y) * 0.8 ) c = PALETTES.rim[spec > 0.6 ? 2 : 1];
-      }
-      put(x, y, c);
-      // a blue haze over the limb on the day side
-      if ( nz < 0.35 && day > 0.15 ) { const hz2 = (1 - nz / 0.35) * day; if ( hz2 > bayer(x, y) ) put(x, y, PALETTES.rim[0], 0.35); }
-      // night side: scattered city lights on the land
-      if ( isLand && !isCloud && day < 0.1 && noise(u * 30, v * 30) > 0.8 && bayer(x, y) > 0.55 ) put(x, y, PALETTES.city[noise(u * 60, v * 60) > 0.5 ? 1 : 0]);
-      // the limb: a bright line of atmosphere just inside the edge on the day side
-      const edge = (1 - Math.sqrt(rr)) * R;
-      if ( edge < 1.6 && day > 0.2 ) put(x, y, PALETTES.rim[edge < 0.8 ? 2 : 1], 0.7);
+      P.at(x, y, px);
+      P.color(px, P.cloudN(px.u, px.v), P.cloudN(px.u + SHADOW_DU, px.v + SHADOW_DV), rgb);
+      put(x, y, rgb);
     });
   }
   return out;
+}
+
+/** The planet's sun comes from the side, so a terminator crosses the visible cap and the night side shows its cities. */
+export const PLANET_LIGHT = (() => { const v = [-0.92, -0.18, 0.34], n = Math.hypot(...v); return v.map((c) => c / n); })();
+/** Cloud shadows: the cloud field read a little down-sun of each pixel (in the sphere's u, v). */
+export const SHADOW_DU = 0.06, SHADOW_DV = 0.03;
+/** Where the cloud field makes a cloud. */
+export const CLOUD_T = 0.62;
+
+/**
+ * The planet's surface, pixel by pixel - shared by the picture (paintSpace) and the live drifting clouds (orbit-clouds.mjs), so both
+ * paint exactly the same colours. Split in three so the live layer can keep what never changes and redo only what the clouds touch:
+ * - `at(x, y, px)`: everything fixed at an art pixel (its normal, sphere u/v, land, light, limb, overlays); false outside the disc;
+ * - `cloudN(u, v)`: the cloud field (a cloud where > CLOUD_T; its shadow where the field at u + SHADOW_DU, v + SHADOW_DV is);
+ * - `color(px, cloudN, shadowN, rgb)`: the pixel's final colour, all overlays applied as the picture's `put` blends them.
+ * The live layer also uses the pieces: `cloudIndex` (which cloud colour), `finish` (the overlays), `cloudPalette`.
+ */
+export function planetSurface({ fbm, noise, cx, cy, R, lo }) {
+  const LP = PLANET_LIGHT, clamp = (t) => Math.max(0, Math.min(0.999, t));
+  const pick = (P, t, bay) => P[Math.max(0, Math.min(P.length - 1, Math.floor(t * P.length + bay - 0.5)))];
+  const hx = LP[0], hy = LP[1], hz = LP[2] + 1, hn = Math.hypot(hx, hy, hz);
+  const at = (x, y, px) => {
+    const nx = (x + 0.5 - cx) / R, ny = (y + 0.5 - cy) / R, rr = nx * nx + ny * ny;
+    if ( rr > 1 ) return false;
+    const nz = Math.sqrt(1 - rr), bay = bayer(x, y);
+    // the surface pattern: sample noise on the sphere (u,v from the normal) so continents bend with the curvature
+    const u = Math.atan2(nx, nz) * 1.6 + lo, v = Math.asin(Math.max(-1, Math.min(1, ny))) * 1.6;
+    const landN = fbm(u * 1.7 + 3, v * 1.7 + 7, 5);
+    const lit = nx * LP[0] + ny * LP[1] + nz * LP[2];
+    // day 0..1 with a soft, dithered terminator; the limb darkens a little
+    const day = Math.max(0, Math.min(1, lit * 1.8 + 0.3)), limb = 0.7 + 0.3 * Math.sqrt(nz);
+    // polar ice near the top of the disc
+    const ice = v < -2.38 - 0.25 * (landN - 0.5) * 4, isLand = landN > 0.5;
+    // the sun's glint on the sea
+    const spec = Math.max(0, (nx * hx + ny * hy + nz * hz) / hn) ** 40;
+    // a blue haze over the limb on the day side
+    const haze = nz < 0.35 && day > 0.15 && (1 - nz / 0.35) * day > bay;
+    // night side: scattered city lights on the land (hidden under clouds)
+    const city = isLand && day < 0.1 && noise(u * 30, v * 30) > 0.8 && bay > 0.55 ? PALETTES.city[noise(u * 60, v * 60) > 0.5 ? 1 : 0] : null;
+    // the limb: a bright line of atmosphere just inside the edge on the day side
+    const edge = (1 - Math.sqrt(rr)) * R, rim = edge < 1.6 && day > 0.2 ? (edge < 0.8 ? 2 : 1) : 0;
+    Object.assign(px, { x, y, nx, ny, nz, u, v, bay, landN, day, limb, ice, isLand, spec, haze, city, rim, cloudK: (0.15 + 0.85 * day) * limb });
+    return true;
+  };
+  const cloudN = (u, v) => fbm(u * 3.2 + 11, v * 7 + 2, 4);
+  /** Which cloud colour (an index into PALETTES.cloud) for a cloud pixel with light factor k. */
+  const cloudIndex = (k, cN, bay) => Math.max(0, Math.min(4, Math.floor(clamp((0.45 + (cN - CLOUD_T) * 2.5) * k + 0.05) * 5 + bay - 0.5)));
+  /** The overlays (haze, city lights where no cloud, the limb line) over a base colour, blended as the picture's `put` does. */
+  const finish = (c, haze, city, rim, rgb) => {
+    rgb[0] = c[0]; rgb[1] = c[1]; rgb[2] = c[2];
+    if ( haze ) { const r = PALETTES.rim[0]; for ( let i = 0; i < 3; i++ ) rgb[i] += (r[i] - rgb[i]) * 0.35; }
+    if ( city ) { rgb[0] = city[0]; rgb[1] = city[1]; rgb[2] = city[2]; }
+    if ( rim ) { const r = PALETTES.rim[rim]; for ( let i = 0; i < 3; i++ ) rgb[i] += (r[i] - rgb[i]) * 0.7; }
+    return rgb;
+  };
+  const color = (px, cN, sN, rgb) => {
+    const isCloud = cN > CLOUD_T, shade = sN > CLOUD_T && !isCloud ? 0.72 : 1, { landN, day, limb, bay } = px;
+    let c;
+    if ( isCloud ) c = PALETTES.cloud[cloudIndex(px.cloudK, cN, bay)];
+    else if ( px.ice ) c = pick(PALETTES.cloud, clamp((0.55 + (landN - 0.5)) * (0.12 + 0.88 * day) * limb), bay);
+    else if ( px.isLand ) c = pick(PALETTES.land, clamp((0.35 + (landN - 0.5) * 3.2) * (0.12 + 0.88 * day) * limb * shade), bay);
+    else {
+      c = pick(PALETTES.ocean, clamp((0.55 + 0.6 * (landN - 0.42)) * (0.1 + 0.9 * day) * limb * shade), bay);
+      if ( px.spec > bay * 0.8 ) c = PALETTES.rim[px.spec > 0.6 ? 2 : 1];
+    }
+    return finish(c, px.haze, isCloud ? null : px.city, px.rim, rgb);
+  };
+  return { at, cloudN, color, cloudIndex, finish };
 }
 
 /** Enlarge an RGBA art buffer by an integer factor with hard (nearest) edges. */
