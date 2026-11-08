@@ -1,5 +1,5 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, setting, store, onSetting, optRange, optSelect, optCheck, optHint, bindSettings } from "./ui.mjs";
+import { esc, T, setting, store, onSetting, optRange, optSelect, optCheck, optHint, bindSettings, optFold, keepFolds, tipHints } from "./ui.mjs";
 import { previewBrush, clearDistricts, readForm } from "../districts.mjs";
 import { DistrictsList } from "../panel.mjs";
 import { swatchesHtml, wireSwatches } from "../tools.mjs";
@@ -50,30 +50,34 @@ function districtsBar(host, ctx) {
   return () => { offs.forEach((f) => f()); previewBrush(null); };
 }
 
+// which folding groups of the brush panel are open (kept while the panel is mounted again)
+const brushFolds = new Set();
+
 /** The dock's brush panel: everything the old brush dialog had, applied as it changes. */
 function brushPanel(host) {
   const sel = (name, val, opts) => `<select name="${name}">${opts.map(([v, l]) => `<option value="${v}"${v === val ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   const o = setting;
-  host.innerHTML = `${fg(T("District.size"), `<range-picker name="size" value="${o("districtSize")}" min="0.2" max="4" step="0.1"></range-picker>`, T("District.sizeHint"))}
+  if ( o("districtFill") === "dots" ) brushFolds.add("dots");
+  host.innerHTML = `<div class="mm-ws-form">
+    ${fg(T("District.size"), `<range-picker name="size" value="${o("districtSize")}" min="0.2" max="4" step="0.1"></range-picker>`, T("District.sizeHint"))}
     ${fgGroup(T("Editor.color"), swatchesHtml(o("districtColor"), false, true))}
-    ${fg(T("District.border"), sel("border", o("districtBorder"), borders()))}
     ${fg(T("District.fill"), sel("fill", o("districtFill"), fills()))}
-    <details class="mm-fold mm-dotsfold"${o("districtFill") === "dots" ? " open" : ""}><summary>${esc(T("Dots.section"))}</summary><div class="mm-fold-body">${dotsFieldsHtml("bd_", dotsCfg({ dots: o("districtDots") }))}</div></details>
+    ${fg(T("District.border"), sel("border", o("districtBorder"), borders()))}
     ${fg(T("District.opacity"), `<range-picker name="opacity" value="${o("districtOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-    <details class="mm-fold"><summary>${esc(T("District.inkSection"))}</summary><div class="mm-fold-body">
+    ${fg(T("WS.merge"), `<input type="checkbox" name="merge"${o("districtMerge") ? " checked" : ""}>`, T("Tool.districtMerge"))}
+    ${optFold({ id: "dots", title: T("Dots.section"), icon: "fa-solid fa-braille", open: brushFolds, cls: "mm-dotsfold", body: dotsFieldsHtml("bd_", dotsCfg({ dots: o("districtDots") })) })}
+    ${optFold({ id: "ink", title: T("District.inkSection"), icon: "fa-solid fa-pen-nib", open: brushFolds, body: `
       ${fg(T("District.ink"), `${sel("ink", o("districtInk"), [["ink", T("District.inkDark")], ["match", T("District.inkMatch")], ["custom", T("District.inkCustom")]])}<color-picker name="inkColor" value="${esc(o("districtInkColor"))}"></color-picker>`)}
       ${fg(T("District.inkOpacity"), `<range-picker name="inkOpacity" value="${o("districtInkOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-      ${fg(T("District.inkWidth"), `<range-picker name="inkWidth" value="${o("districtInkWidth")}" min="0.2" max="4" step="0.1"></range-picker>`)}
-    </div></details>
-    ${fg(T("WS.merge"), `<input type="checkbox" name="merge"${o("districtMerge") ? " checked" : ""}>`, T("Tool.districtMerge"))}
-    <input type="hidden" name="pick" value="${esc(o("districtColor"))}">`;
+      ${fg(T("District.inkWidth"), `<range-picker name="inkWidth" value="${o("districtInkWidth")}" min="0.2" max="4" step="0.1"></range-picker>`)}` })}
+    <input type="hidden" name="pick" value="${esc(o("districtColor"))}"></div>`;
+  tipHints(host);
+  const offFolds = keepFolds(host, brushFolds);
   wireDotsFields(host, "bd_");
   // the custom outline colour only matters with "custom" ink; the dot options only with the dots fill
   const dep = () => {
-    const ink = host.querySelector('[name="inkColor"]'), custom = host.querySelector('[name="ink"]').value === "custom";
-    ink.inert = !custom; ink.classList.toggle("is-off", !custom);
-    const fold = host.querySelector(".mm-dotsfold"), dots = host.querySelector('[name="fill"]').value === "dots";
-    fold.classList.toggle("is-off", !dots); fold.querySelector(".mm-fold-body").inert = !dots;
+    host.querySelector('[name="inkColor"]').hidden = host.querySelector('[name="ink"]').value !== "custom";
+    host.querySelector(".mm-dotsfold").hidden = host.querySelector('[name="fill"]').value !== "dots";
   };
   const onDots = (ev) => {
     if ( ev.target.name === "fill" && ev.target.value === "dots" ) host.querySelector(".mm-dotsfold").open = true;
@@ -86,9 +90,11 @@ function brushPanel(host) {
   const offs = [
     bindSettings(host, { size: sizeSpec, border: "districtBorder", fill: "districtFill", opacity: num("districtOpacity", 0, 1), ink: "districtInk", inkColor: "districtInkColor",
       inkOpacity: num("districtInkOpacity", 0, 1), inkWidth: num("districtInkWidth", 0.2, 4), merge: "districtMerge" }, { onInput: ringPreview }),
-    colorGroup(host)
+    colorGroup(host),
+    // the fill or the outline changed elsewhere (the bar, the [ ] keys): the rows that depend on them follow
+    onSetting(["districtFill", "districtInk"], () => queueMicrotask(dep))
   ];
-  return () => { offs.forEach((f) => f()); host.removeEventListener("change", onDots); previewBrush(null); };
+  return () => { offs.forEach((f) => f()); offFolds(); host.removeEventListener("change", onDots); previewBrush(null); };
 }
 
 registerSection({
