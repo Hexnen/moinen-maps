@@ -724,3 +724,4 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 #token-hud .mm-z-alt.active { color: #5cc8ff; }
 .mm-z-fire { margin: 0; padding-left: 1.1rem; }
 .mm-z-tip { position: fixed; z-index: 1001; pointer-events: none; padding: 0.2rem 0.5rem; border-radius: 6px; background: #1d1916f0; border: 1px solid #5a4c3c; color: #eadfc8; font-size: 0.8rem; white-space: nowrap; box-shadow: 0 3px 10px #0008; }
+.mm-z-menu .mm-z-map { margin-left: auto; font-style: normal; font-size: 0.68rem; padding: 0 0.3rem; border-radius: 4px; background: #5cc8ff26; color: #9fdcff; }

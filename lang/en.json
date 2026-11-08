@@ -1616,5 +1616,9 @@
   "MOINENMAPS.Zones.altShort.sky": "Sky High",
   "MOINENMAPS.Zones.altShort.orbit": "Orbit",
   "MOINENMAPS.Zones.altHud": "Altitude: {a}. Click: higher, Shift+click: lower, right-click: ground.",
-  "MOINENMAPS.Zones.h.rclick": "Right-click a border or a zone for its options."
+  "MOINENMAPS.Zones.h.rclick": "Right-click a border or a zone for its options.",
+  "MOINENMAPS.Zones.f.link": "States from the map's layers",
+  "MOINENMAPS.Zones.h.link": "Fire painted on the fire layer makes a zone burn (and fires of the zones are painted there); a quarter of a zone broken on the destruction layer makes it wrecked (flood damage: flooded); a quarter under water gives it water.",
+  "MOINENMAPS.Zones.fromMap": "map",
+  "MOINENMAPS.Zones.fromMapHint": "Read from the map's layers (fire, destruction, water): it changes with the painting."
 }

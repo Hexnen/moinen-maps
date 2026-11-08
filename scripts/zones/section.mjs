@@ -67,7 +67,7 @@ function bar(host, ctx) {
   host.addEventListener("change", onChange);
   const off = bindSettings(host, { eraser: { key: "zonesEraser", read: (c) => Math.min(4, Math.max(0.1, Number(c.value) || 0.5)) } });
   // the counts and undo buttons follow every edit (re-rendered unless a slider is in hand)
-  const hook = Hooks.on("moinenMapsZones", (kind) => { if ( kind === "edited" || kind === "loaded" ) { if ( !host.contains(document.activeElement) ) render(); else host.querySelector(".mm-z-status")?.replaceChildren(statusText()); } });
+  const hook = Hooks.on("moinenMapsZones", (kind) => { if ( kind === "edited" || kind === "loaded" || kind === "linked" ) { if ( !host.contains(document.activeElement) ) render(); else host.querySelector(".mm-z-status")?.replaceChildren(statusText()); } });
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); off(); Hooks.off("moinenMapsZones", hook); };
 }
 
@@ -120,6 +120,7 @@ function settingsPanel(host) {
       ${fold("world", Z("sec.world"), "fa-solid fa-earth-europe", `
         <p class="mm-ws-hint">${esc(Z("h.world"))}</p>
         ${row(Z("f.preset"), sel("worldPreset", moves, wPreset), Z("h.worldPreset"))}
+        ${optCheck({ name: "link", label: Z("f.link"), checked: setting("zonesLink") !== false, hint: Z("h.link") })}
         ${row(Z("f.style"), sel("worldStyle", styles.map((x) => [x.id, x.name]), world), Z("h.worldStyle"))}`)}
       </section>
       <section class="mm-wp-sec mm-z-panel mm-z-danger"><button type="button" class="mm-ws-btn mm-danger" data-act="clear"><i class="fa-solid fa-trash" inert></i> ${esc(Z("clear"))}</button></section>`;
@@ -134,6 +135,7 @@ function settingsPanel(host) {
     if ( name === "preset" ) Zones.setParams({ preset: v || null });
     else if ( name === "lookFrom" ) Zones.setParams({ lookFrom: v || null });
     else if ( name === "worldPreset" ) Styles.setWorldPreset(v);
+    else if ( name === "link" ) game.settings.set("moinen-maps", "zonesLink", !!v);
     else if ( name === "worldStyle" ) Styles.setWorldStyle(v);
     else if ( ["fill", "ink", "lineAlpha", "hoverAlpha", "hoverLineAlpha"].includes(name) ) Zones.setParams({ look: { [name]: Number(v) } });
     else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx", "lineStyle", "numColor", "ringColor", "numShape", "numFormat"].includes(name) ) Zones.setParams({ look: { [name]: v } });

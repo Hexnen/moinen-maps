@@ -71,5 +71,23 @@ check(b.key === "walk1" && b.d === 1, "a plain number still works (the old call)
 b = inv.band({ walk: 7, air: 7, through: 7, swim: undefined, swing: undefined }, []);
 check(b.key === "far" && b.d === 7, "far: shows the walking distance");
 
+
+// states from the map's layers (link.mjs)
+const Lk = await imp("scripts/zones/link.mjs");
+const LS = Lk.samplesOf(Z, zoneAt, 25);
+check([...LS.values()].every((p) => p.length >= 8), "every zone gets sample points");
+const rect = { x: 0, y: 0 };
+let D2 = Lk.derive(LS, { fire: [{ id: "a", k: "fire", p: [150, 50], r: 40, lv: 3 }, { id: "b", k: "fire", p: [350, 50], r: 40, lv: 1, o: 5 }] });
+check(D2.get(1)?.fire === 10 && !D2.get(3), "a burning blaze makes its zone burn at Intensity 10; a fire put out does not count");
+const W = 400, H = 100, wm = new Uint8Array(W * H); for ( let y = 0; y < H; y++ ) for ( let x = 200; x < 300; x++ ) wm[y * W + x] = 1;
+D2 = Lk.derive(LS, { water: { px: 1, w: W, h: H, masks: { water: wm }, rect } });
+check(D2.get(2)?.water && !D2.get(1), "water painted over a zone gives it water");
+const dm = new Uint8Array(W * H); for ( let y = 0; y < H; y++ ) for ( let x = 0; x < 60; x++ ) dm[y * W + x] = 2; for ( let y = 0; y < H; y++ ) for ( let x = 300; x < 400; x++ ) dm[y * W + x] = 1 | (3 << 2);
+D2 = Lk.derive(LS, { dest: { mask: dm, mw: W, mh: H, mpx: 1, rect } });
+check(D2.get(0)?.wrecked && !D2.get(0)?.flooded && D2.get(3)?.flooded && !D2.get(3)?.wrecked, "broken ground wrecks a zone, flood damage floods it");
+const sm = new Uint8Array(W * H); for ( let y = 0; y < 10; y++ ) for ( let x = 100; x < 200; x++ ) sm[y * W + x] = 2;
+check(!Lk.derive(LS, { dest: { mask: sm, mw: W, mh: H, mpx: 1, rect } }).get(1), "a little damage at a zone's edge does not wreck it");
+check(JSON.stringify(Lk.merge({ fire: 6, dark: true }, { fire: 8, water: true })) === JSON.stringify({ fire: 8, dark: true, water: true }), "own marks and the map's states merge (fire: the higher)");
+
 console.log(failed ? `${failed} check(s) failed` : "all zones marks checks passed");
 process.exit(failed ? 1 : 0);

@@ -89,8 +89,10 @@ function borderHtml(b, hasZone) {
 }
 
 function zoneHtml(id, hasBorder) {
-  const p = Zones.marks()?.zones.get(id) ?? {};
-  const check = (k, label) => `<label class="mm-z-menu-check"><input type="checkbox" name="${k}"${p[k] ? " checked" : ""}> ${esc(label)}</label>`;
+  // the checkboxes are the GM's own marks; what the map's layers say shows as a tag (it comes and goes with the painting)
+  const own = Zones.ownMarks()?.zones.get(id) ?? {}, map = Zones.mapStates()?.get(id) ?? {}, p = Zones.marks()?.zones.get(id) ?? {};
+  const tag = (k) => (map[k] ? ` <em class="mm-z-map" data-tooltip="${esc(Z("fromMapHint"))}">${esc(Z("fromMap"))}</em>` : "");
+  const check = (k, label) => `<label class="mm-z-menu-check"><input type="checkbox" name="${k}"${own[k] ? " checked" : ""}> ${esc(label)}${tag(k)}</label>`;
   const terr = TERRAINS.map((t) => `<option value="${t}"${(p.terrain ?? "") === t ? " selected" : ""}>${esc(Z(`terrain.${t || "unset"}`))}${WRECK[t] ? ` (${WRECK[t][0]}/+${WRECK[t][1]})` : ""}</option>`).join("");
   return `<header>${esc(Z("zone.title", { n: num(id) }))}</header>
     <div class="mm-z-menu-grp">${esc(Z("grp.features"))}</div>
@@ -98,11 +100,11 @@ function zoneHtml(id, hasBorder) {
     <label class="mm-z-menu-row">${esc(Z("terrain.label"))} <select name="terrain">${terr}</select></label>
     <div class="mm-z-menu-grp">${esc(Z("grp.states"))}</div>
     ${check("wrecked", Z("state.wrecked"))}
-    <div class="mm-z-menu-row mm-z-fire-row"><span><i class="fa-solid fa-fire" inert></i> ${esc(Z("state.fire"))}</span>
+    <div class="mm-z-menu-row mm-z-fire-row"><span><i class="fa-solid fa-fire" inert></i> ${esc(Z("state.fire"))}${tag("fire")}</span>
       <span class="mm-z-step"><button type="button" data-act="fire-" aria-label="−">−</button><b>${p.fire ?? 0}</b><button type="button" data-act="fire+" aria-label="+">+</button></span></div>
     ${["dark", "ice", "flooded", "lowgrav"].map((k) => check(k, Z(`state.${k}`))).join("")}
     <footer>
-      <button type="button" data-act="clearZone"${p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav ? "" : " disabled"}><i class="fa-solid fa-eraser" inert></i> ${esc(Z("act.clearZone"))}</button>
+      <button type="button" data-act="clearZone"${own.wrecked || p.fire || own.dark || own.ice || own.flooded || own.lowgrav ? "" : " disabled"}><i class="fa-solid fa-eraser" inert></i> ${esc(Z("act.clearZone"))}</button>
       ${hasBorder ? `<button type="button" data-act="toBorder"><i class="fa-solid fa-grip-lines-vertical" inert></i> ${esc(Z("act.toBorder"))}</button>` : ""}
       ${sceneActs()}
     </footer>`;

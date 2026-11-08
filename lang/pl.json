@@ -1616,5 +1616,9 @@
   "MOINENMAPS.Zones.altShort.sky": "Niebo",
   "MOINENMAPS.Zones.altShort.orbit": "Orbita",
   "MOINENMAPS.Zones.altHud": "Wysokość: {a}. Klik: wyżej, Shift+klik: niżej, PPM: ziemia.",
-  "MOINENMAPS.Zones.h.rclick": "PPM na granicy lub strefie: jej opcje."
+  "MOINENMAPS.Zones.h.rclick": "PPM na granicy lub strefie: jej opcje.",
+  "MOINENMAPS.Zones.f.link": "Stany z warstw mapy",
+  "MOINENMAPS.Zones.h.link": "Ogień namalowany na warstwie ognia podpala strefę (a pożary stref malują się tam); ćwierć strefy rozbitej na warstwie zniszczeń czyni ją zniszczoną (zniszczenia typu powódź: zalaną); ćwierć pod wodą daje jej wodę.",
+  "MOINENMAPS.Zones.fromMap": "mapa",
+  "MOINENMAPS.Zones.fromMapHint": "Odczytane z warstw mapy (ogień, zniszczenia, woda): zmienia się razem z malowaniem."
 }

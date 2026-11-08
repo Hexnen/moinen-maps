@@ -7,6 +7,10 @@ import { preset, presets, zonesText } from "./presets.mjs";
 import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
 import * as Marks from "./marks.mjs";
+import * as Link from "./link.mjs";
+import * as FireMod from "../fire/fire.mjs";
+import * as WaterMod from "../water/water.mjs";
+import * as DestMod from "../destruction/destruction.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -18,7 +22,7 @@ import * as Marks from "./marks.mjs";
  * Public API: `game.modules.get("moinen-maps").api.zones`. Hook "moinenMapsZones" with ("loaded" | "edited" | "params" | "section").
  */
 
-let S = null, Z = null, M = null, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
+let S = null, Z = null, M = null, M0 = null, LS = null, MAP = new Map(), linkTimer = 0, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
 let saveSceneId = null, lastSaved = "";
 const undo = [], redo = [];
 const UNDO_MAX = 60;
@@ -26,8 +30,11 @@ const UNDO_MAX = 60;
 export const tell = (kind) => Hooks.callAll("moinenMapsZones", kind);
 export const state = () => S;
 export const zones = () => Z;
-/** The marks laid onto the zones now: { borders: Map pair -> {kind, x, y, a, b}, zones: Map id -> props }. */
+/** The marks laid onto the zones now: { borders: Map pair -> {kind, x, y, a, b}, zones: Map id -> props } - the GM's own marks with what
+ *  the map's layers say on top (link.mjs). `ownMarks` only the GM's, `mapStates` only the layers' (id -> props). */
 export const marks = () => M;
+export const ownMarks = () => M0;
+export const mapStates = () => MAP;
 /** A zone's name as the map writes it (1, I or A: the look's numeral format). */
 export const zoneName = (id) => numeral(id + 1, look()?.numFormat ?? "arabic");
 export const editing = () => inSection && !!game.user?.isGM;
@@ -46,6 +53,8 @@ function registerSettings() {
   W("zonesStyles", Object, { list: [] });
   W("zonesStyleDefault", String, "classic");
   W("zonesPresetDefault", String, "invincible");
+  // zone states read from the fire, destruction and water layers (and fires of the zones painted on the fire layer)
+  game.settings.register(MODULE_ID, "zonesLink", { scope: "world", config: false, type: Boolean, default: true, onChange: () => { relink(); refresh(); tell("params"); } });
 }
 export const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
 
@@ -73,7 +82,59 @@ function rebuild() {
   // a zone is at least one grid square; the scene's edge closes zones where lines reach it
   Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: g * g, edge: sceneRect() }) : null;
   // walls and zone marks keep to the border / zone their point lies on, whatever the zones are numbered now
-  M = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
+  M0 = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
+  LS = null;
+  relink();
+}
+
+/* ---------------------------------------------------------------- states from the map's layers (fire, destruction, water) */
+
+/** What the layers hold now, in the form link.mjs reads. */
+function layers() {
+  const rect = canvas.dimensions?.sceneRect ?? { x: 0, y: 0 };
+  let fire = null, water = null, dest = null;
+  try { fire = FireMod.list(); } catch {}
+  try { const w = WaterMod.state(); if ( w?.masks && w.enabled !== false ) water = { px: w.px, w: w.w, h: w.h, masks: w.masks, rect }; } catch {}
+  try { const d = DestMod.state(); if ( d?.mask ) dest = { mask: d.mask, mw: d.mw, mh: d.mh, mpx: d.mpx, rect }; } catch {}
+  return { fire, water, dest };
+}
+export const linkOn = () => setting("zonesLink", true) !== false;
+/** The GM's marks with the layers' states on top. */
+function relink() {
+  MAP = new Map();
+  if ( Z && linkOn() ) {
+    LS ??= Link.samplesOf(Z, (x, y) => Geo.zoneAt(Z, x, y), gridSize() / 4);
+    try { MAP = Link.derive(LS, layers()); } catch ( err ) { console.warn(`${MODULE_ID} | zones: reading the layers`, err); }
+  }
+  const zones = new Map(M0?.zones ?? []);
+  for ( const [id, p] of MAP ) zones.set(id, Link.merge(zones.get(id), p));
+  M = { borders: M0?.borders ?? new Map(), zones };
+}
+/** A layer changed: read it again (debounced: a stroke may fire several hooks). */
+function onLayer(kind) {
+  if ( !S || !["edited", "loaded", "gone"].includes(kind) ) return;
+  clearTimeout(linkTimer);
+  linkTimer = setTimeout(() => { linkTimer = 0; if ( !S ) return; relink(); refresh(); tell("linked"); }, 150);
+}
+
+/** The burning fire strokes that lie (mostly) in a zone: their ids. A stroke reaching into other zones stays unless half of it is here. */
+function fireStrokesIn(id) {
+  if ( !LS ) return [];
+  const fire = (() => { try { return FireMod.list(); } catch { return []; } })();
+  const here = Link.fireIn(LS.get(id) ?? [], fire);
+  if ( !here.length ) return [];
+  const total = new Map();
+  for ( const pts of LS.values() ) for ( const f of Link.fireIn(pts, here.map((h) => h.s)) ) total.set(f.s.id, (total.get(f.s.id) ?? 0) + f.hits);
+  return here.filter((h) => h.hits / (total.get(h.s.id) || 1) >= 0.5).map((h) => h.s.id);
+}
+/** Put out the fire painted in a zone (the fire layer lets it sink and smoke away). */
+function putOutMap(id) { const ids = fireStrokesIn(id); if ( ids.length ) { try { FireMod.remove(ids); } catch {} } return ids.length; }
+/** Paint a fire into a zone on the fire layer: one blob around its middle, its level from the Intensity. */
+function paintMap(id, intensity) {
+  const z = Z?.zones.find((q) => q.id === id), api = moduleApi.fire;
+  if ( !z || !api?.paint ) return null;
+  try { return api.paint([[Math.round(z.label.x), Math.round(z.label.y)]], { radius: Math.round(Math.max(gridSize() * 0.4, Math.min(z.label.r * 0.85, gridSize() * 1.3))), level: Link.intensityLevel(intensity), smoke: 2 }); }
+  catch ( err ) { console.warn(`${MODULE_ID} | zones: painting fire`, err); return null; }
 }
 const markTol = () => gridSize() * 0.35;
 
@@ -162,10 +223,10 @@ function onIconMove(ev) {
 }
 function iconTip(hit, at) {
   if ( !hit ) { tipEl?.remove(); tipEl = null; return; }
-  const p = M?.zones.get(hit.z.id) ?? {}, L = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
-  const text = hit.key === "fire" ? `${L("state.fire")}: ${p.fire}`
-    : hit.key === "terrain" ? `${L("terrain.label")}: ${L(`terrain.${p.terrain}`)}${Marks.WRECK[p.terrain] ? ` (${Marks.WRECK[p.terrain][0]}/+${Marks.WRECK[p.terrain][1]})` : ""}`
-    : L(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
+  const p = M?.zones.get(hit.z.id) ?? {}, ZL = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
+  const text = hit.key === "fire" ? `${ZL("state.fire")}: ${p.fire}`
+    : hit.key === "terrain" ? `${ZL("terrain.label")}: ${ZL(`terrain.${p.terrain}`)}${Marks.WRECK[p.terrain] ? ` (${Marks.WRECK[p.terrain][0]}/+${Marks.WRECK[p.terrain][1]})` : ""}`
+    : ZL(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
   if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip"; document.body.append(tipEl); }
   tipEl.textContent = `${zoneName(hit.z.id)} · ${text}`;
   tipEl.style.left = `${at.x + 14}px`; tipEl.style.top = `${at.y + 16}px`;
@@ -198,7 +259,8 @@ function teardown() {
   cancelAnimationFrame(tipRaf); tipRaf = 0; iconTip(null);
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
-  S = Z = M = null;
+  clearTimeout(linkTimer); linkTimer = 0;
+  S = Z = M = M0 = LS = null; MAP = new Map();
   undo.length = redo.length = 0;
 }
 
@@ -449,23 +511,42 @@ function writeZones(map, prefer) {
 /** Change a zone's features / states: { building, tall, water, terrain, wrecked, fire (0..12), dark, ice, flooded, lowgrav }. */
 export function setZone(id, patch, at = null) {
   if ( !Z || id < 0 ) return false;
-  return writeZones(new Map([[id, { ...(M?.zones.get(id) ?? {}), ...patch }]]), at);
+  // fire set from the menu: a new fire is painted on the fire layer too, a fire put out goes out there as well
+  if ( "fire" in patch && linkOn() ) {
+    const was = M?.zones.get(id)?.fire ?? 0, now = Number(patch.fire) || 0;
+    if ( !was && now ) paintMap(id, now);
+    if ( was && !now ) putOutMap(id);
+  }
+  return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at);
 }
 
 /** Clear the states (not the features) of one zone, or of every zone (end of the scene). */
 export function clearStates(id = null) {
   const map = new Map();
-  for ( const [zid, p] of M?.zones ?? [] ) if ( (id == null || zid === id) && Marks.hasStates(p) ) map.set(zid, Marks.withoutStates(p));
-  return writeZones(map);
+  for ( const [zid, p] of M0?.zones ?? [] ) if ( (id == null || zid === id) && Marks.hasStates(p) ) map.set(zid, Marks.withoutStates(p));
+  // the fires painted on the map go out with the states (wreckage and water stay: they are the map)
+  let out = 0;
+  if ( linkOn() ) for ( const [zid, p] of M?.zones ?? [] ) if ( (id == null || zid === id) && p.fire ) out += putOutMap(zid);
+  return writeZones(map) || out > 0;
 }
 
 /** One round of fire (book: Fire Spreading): a D6 for every burning zone, the result written and told in the chat. */
 export async function fireRound() {
   if ( !game.user.isGM || !Z || !M ) return null;
-  const { next, log } = Marks.fireRound(Z, M);
+  const { log } = Marks.fireRound(Z, M);
   const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.fire.${k}`, d ?? {});
   if ( !log.length ) { ui.notifications.info(L("none")); return log; }
-  writeZones(new Map([...next].map(([id, p]) => [id, p])));
+  // write only the GM's own marks (what the layers say is read from them again); fires on the map go out / are painted too
+  const own = new Map();
+  for ( const r of log ) {
+    if ( r.out ) { const p = { ...(M0.zones.get(r.id) ?? {}) }; delete p.fire; own.set(r.id, p); if ( linkOn() ) putOutMap(r.id); }
+    else if ( r.to != null ) {
+      const f = M.zones.get(r.id)?.fire ?? 6;
+      own.set(r.to, { ...(own.get(r.to) ?? M0.zones.get(r.to) ?? {}), fire: f });
+      if ( linkOn() ) paintMap(r.to, f);
+    }
+  }
+  writeZones(own);
   const num = zoneName;
   const rows = log.map((r) => {
     const d = { n: num(r.id), r: r.roll, to: r.to != null ? num(r.to) : "" };
@@ -556,7 +637,7 @@ export const zonesApi = {
   presets: () => presets().map((p) => ({ id: p.id, title: game.i18n.localize(p.title) })),
   addStroke, erase: eraseAlong, trim, clear: clearAll, undo: undoEdit, redo: redoEdit, setParams,
   /** Walls and doors, zone features and states (marks.mjs), fire, token altitude. */
-  marks: () => M, borderAt, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
+  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
   geometry: Geo
@@ -582,6 +663,7 @@ export function registerZones() {
   Hooks.on("refreshToken", (t) => { if ( t._mmAlt || altOf(t.document) !== "ground" ) altBadge(t); });
   Hooks.on("moinenMapsZones", (kind) => { if ( kind !== "section" ) altBadges(); });
   Hooks.on("renderTokenHUD", onTokenHUD);
+  for ( const h of ["moinenMapsFire", "moinenMapsWater", "moinenMapsDestruction"] ) Hooks.on(h, onLayer);
   Hooks.on("updateItem", (item) => { if ( item.parent && canvas.tokens?.controlled.some((t) => t.actor === item.parent) ) refresh(); });
   window.addEventListener("beforeunload", () => flushSave());
   document.addEventListener("visibilitychange", () => { if ( document.visibilityState === "hidden" ) flushSave(); });
