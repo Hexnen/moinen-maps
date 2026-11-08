@@ -80,7 +80,7 @@ function onCreate(message) {
       const tDocs = (Array.isArray(fl.t) ? fl.t : []).map(onScene).filter((d) => pub(d) && d !== aDoc);
       const attacker = pub(aDoc) ? ref(aDoc) : null;
       const ev = rollEvent(f, { id: `r-${message.id}`, who, attacker, targets: tDocs.map(ref), what: message.flavor, grid: grid() });
-      if ( ev ) emit({ ...ev, ref: message.id, who: ev.who });
+      if ( ev ) emit({ ...ev, ref: message.id, who: ev.who, ...combatLane(ev, aDoc) });
       return;
     }
     if ( isDamageCard(message) ) {
@@ -91,6 +91,17 @@ function onCreate(message) {
       if ( ev ) emit(ev);
     }
   } catch ( err ) { console.warn(`${MODULE_ID} | director rolls`, err); }
+}
+/**
+ * An ATTACK by the active combatant joins its combat's lane (source-move: `cbt-<combat id>`, free): it carries on from the turn / move
+ * take-over still on screen (no return in between) and is not turned soft by the rest after that shot (the source paces itself).
+ * The lane's next turn or move waits for the attack's dice (core Queue: a cued take-over is never relayed).
+ */
+function combatLane(ev, aDoc) {
+  if ( ev.kind !== "attack" || !aDoc ) return {};
+  const c = game.combats?.viewed ?? game.combat;
+  if ( !c?.started || (c.scene && c.scene.id !== canvas.scene?.id) || c.combatant?.tokenId !== aDoc.id ) return {};
+  return { lane: `cbt-${c.id}`, free: true };
 }
 function isDamageCard(message) {
   const fl = String(message.flavor ?? "").trim();

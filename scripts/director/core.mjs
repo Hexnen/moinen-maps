@@ -158,6 +158,8 @@ export function normEvent(e, now = 0) {
  *   play  - how each client plays it: { by: a play handler id (director.mjs registerPlay), ...its own plain data }, passed on as is.
  */
 export const QUICK = 120;
+/** ms more a lane event may wait (before it is stale) behind its lane's cued take-over: the dice of an attack are not cut off. */
+export const CUED_WAIT = 6000;
 function cleanPlay(p) {
   if ( !p || typeof p !== "object" || Array.isArray(p) || typeof p.by !== "string" ) return null;
   const out = {};
@@ -213,12 +215,16 @@ export class Queue {
     for ( const b of ready ) {
       const ev = merged(b), keep = () => {};
       const drop = () => { this.buckets = this.buckets.filter((q) => q !== b); };
-      if ( !ev.force && (st.paused || now - b.t0 > r.stale || !r.enabled) ) { drop(); continue; }
+      // (a lane's next event waiting for the lane's cued take-over - a turn during an attack's dice - may wait that long more)
+      const stale = r.stale + (ev.lane && this.lastTake?.cued && this.lastTake.lane === ev.lane && this.busyUntil > b.t0 ? CUED_WAIT : 0);
+      if ( !ev.force && (st.paused || now - b.t0 > stale || !r.enabled) ) { drop(); continue; }
       let form = ev.force || ev.weight >= r.takeAt ? "take" : ev.weight >= r.softAt && r.softOn ? "soft" : null;
       if ( !form ) { drop(); continue; }
       const near = (h, ms) => h.end > now - ms && h.scene === ev.scene && Math.hypot(h.x - ev.x, h.y - ev.y) <= r.mergeSq * grid;
       if ( form === "take" && !ev.force ) {
-        const relay = !!ev.lane && this.lastTake?.lane === ev.lane && this.busyUntil > now;   // the lane's own take-over plays: this one replaces it
+        // the lane's own take-over plays: this one replaces it - unless that one is CUED (a roll waiting for its dice: the next turn or
+        // move of the lane waits for the result instead of cutting it off)
+        const relay = !!ev.lane && this.lastTake?.lane === ev.lane && !this.lastTake.cued && this.busyUntil > now;
         if ( this.busyUntil > now && !relay ) { keep(); continue; }                           // a take-over is on: wait (until stale)
         const heavy = ev.weight >= 0.9 || ev.free;
         if ( relay ) { /* (the camera is already with this lane) */ }
@@ -235,7 +241,7 @@ export class Queue {
       }
       drop();
       const shot = plan(ev, form, r, now, ++this.seq);
-      if ( form === "take" ) { this.busyUntil = shot.t0 + shot.len; this.lastTake = { x: ev.x, y: ev.y, end: shot.t0 + shot.len, scene: ev.scene, lane: ev.lane ?? null }; }
+      if ( form === "take" ) { this.busyUntil = shot.t0 + shot.len; this.lastTake = { x: ev.x, y: ev.y, end: shot.t0 + shot.len, scene: ev.scene, lane: ev.lane ?? null, cued: !!ev.cue }; }
       else this.softLive.push({ end: shot.t0 + shot.len });
       this.history.push({ form, x: ev.x, y: ev.y, scene: ev.scene, end: shot.t0 + shot.len });
       while ( this.history.length > 24 ) this.history.shift();
