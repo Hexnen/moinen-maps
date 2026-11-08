@@ -27,25 +27,31 @@ const CSS = `
 .mm-dir-mark { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; transition: opacity 360ms ease-out; }
 .mm-dir-mark.is-in { opacity: 1; }
 .mm-dir-mark.is-out { opacity: 0; transition: opacity 600ms ease-in; }
-.mm-dir-ring { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(233,196,106,0.95);
-  box-shadow: 0 0 12px rgba(233,196,106,0.55), inset 0 0 8px rgba(233,196,106,0.35); animation: mm-dir-ping 1500ms cubic-bezier(0.2, 0.7, 0.3, 1) infinite; }
-.mm-dir-ring.r2 { animation-delay: 500ms; }
-.mm-dir-dot { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: #e9c46a; box-shadow: 0 0 10px #e9c46a; }
-@keyframes mm-dir-ping { 0% { transform: scale(0.35); opacity: 0; } 15% { opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
-.mm-dir-arrow { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; border-radius: 50%; background: rgba(12,10,8,0.78); border: 1px solid rgba(233,196,106,0.85);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.6), 0 0 14px rgba(233,196,106,0.35); display: grid; place-items: center; color: #e9c46a; pointer-events: auto; cursor: pointer;
-  animation: mm-dir-nudge 1100ms ease-in-out infinite; }
-.mm-dir-arrow > i { font-size: 15px; }
-.mm-dir-arrow .mm-dir-chev { position: absolute; inset: -9px; transform: rotate(var(--mm-dir-a, 0rad)); pointer-events: none; }
-.mm-dir-arrow .mm-dir-chev::after { content: ""; position: absolute; right: -2px; top: 50%; margin-top: -6px; border: 6px solid transparent; border-left: 8px solid #e9c46a; }
+.mm-dir-ring { position: absolute; left: -26px; top: -26px; width: 52px; height: 52px; border-radius: 50%; border: 3px solid #f2cf73;
+  box-shadow: 0 0 0 1.5px rgba(0,0,0,0.75), inset 0 0 0 1.5px rgba(0,0,0,0.6), 0 0 16px rgba(242,207,115,0.7); animation: mm-dir-ping 1600ms cubic-bezier(0.2, 0.7, 0.3, 1) infinite; }
+.mm-dir-ring.r2 { animation-delay: 800ms; }
+.mm-dir-reticle { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; animation: mm-dir-close 700ms cubic-bezier(0.16, 0.8, 0.3, 1) both; filter: drop-shadow(0 0 1.5px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(242,207,115,0.6)); }
+.mm-dir-dot { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #f2cf73; box-shadow: 0 0 0 2px rgba(0,0,0,0.7), 0 0 12px #f2cf73; }
+@keyframes mm-dir-ping { 0% { transform: scale(0.4); opacity: 0; } 12% { opacity: 1; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes mm-dir-close { 0% { transform: scale(1.8) rotate(-20deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.mm-dir-arrow { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; border-radius: 50%; background: radial-gradient(circle at 50% 38%, rgba(48,38,22,0.97), rgba(12,10,8,0.95));
+  border: 2px solid #f2cf73; box-shadow: 0 0 0 1.5px rgba(0,0,0,0.7), 0 3px 14px rgba(0,0,0,0.7), 0 0 20px rgba(242,207,115,0.5); display: grid; place-items: center; color: #f2cf73;
+  pointer-events: auto; cursor: pointer; animation: mm-dir-nudge 1100ms ease-in-out infinite; }
+.mm-dir-arrow:hover { background: radial-gradient(circle at 50% 38%, rgba(84,66,34,0.98), rgba(24,20,14,0.96)); color: #fff; }
+.mm-dir-arrow > i { font-size: 19px; }
+.mm-dir-chev { position: absolute; left: -40px; top: -40px; width: 80px; height: 80px; transform: rotate(var(--mm-dir-a, 0rad)); pointer-events: none; overflow: visible; }
 @keyframes mm-dir-nudge { 0%, 100% { translate: 0 0; } 50% { translate: calc(cos(var(--mm-dir-a, 0rad)) * 4px) calc(sin(var(--mm-dir-a, 0rad)) * 4px); } }
-.mm-dir-label { position: absolute; white-space: nowrap; padding: 0.22rem 0.6rem; border-radius: 3px; background: rgba(12,10,8,0.72); color: #f4efe6; font-size: 0.8rem;
+.mm-dir-label { position: absolute; white-space: nowrap; padding: 0.3rem 0.75rem; border-radius: 3px; background: rgba(12,10,8,0.82); color: #f4efe6; font-size: 0.92rem;
   letter-spacing: 0.03em; box-shadow: 0 2px 8px rgba(0,0,0,0.5); border-left: 2px solid #e9c46a; transform: translate(-50%, 0); left: 0; top: 30px; }
 .mm-dir-label > i { color: #e9c46a; margin-right: 0.4em; }
-@media (prefers-reduced-motion: reduce) { .mm-dir-ring, .mm-dir-arrow { animation: none; } .mm-dir-title { filter: none; } }
+@media (prefers-reduced-motion: reduce) { .mm-dir-ring, .mm-dir-arrow, .mm-dir-reticle { animation: none; } .mm-dir-title { filter: none; } }
 `;
 let styled = false;
 function ensureStyle() { if ( styled ) return; styled = true; const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmDir = ""; document.head.appendChild(s); }
+
+// four corner brackets that close in on the spot (a film reticle), and the chevron of the edge arrow (pointing right; rotated by --mm-dir-a)
+const RETICLE = `<svg class="mm-dir-reticle" viewBox="0 0 48 48" aria-hidden="true"><g fill="none" stroke="#f2cf73" stroke-width="3.2" stroke-linecap="square"><path d="M3 14V3h11"/><path d="M34 3h11v11"/><path d="M45 34v11H34"/><path d="M14 45H3V34"/></g></svg>`;
+const CHEVRON = `<svg class="mm-dir-chev" viewBox="0 0 80 80" aria-hidden="true"><path d="M66 31 L77 40 L66 49" fill="none" stroke="rgba(0,0,0,0.8)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M66 31 L77 40 L66 49" fill="none" stroke="#f2cf73" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 let root = null, panHook = null;
 const marks = new Set();
@@ -60,6 +66,24 @@ function host() {
   return root;
 }
 function maybeDrop() { if ( root && !root.children.length ) { root.remove(); root = null; } if ( !marks.size && panHook !== null ) { Hooks.off("canvasPan", panHook); panHook = null; } }
+
+/**
+ * The part of the screen where the map is not covered by Foundry's interface: the middle column (#ui-middle: between the scene controls
+ * and the sidebar), less the navigation on top and the hotbar below. An arrow on the edge of THIS rect is never under the chat or the
+ * scene controls.
+ */
+function safeRect() {
+  const mid = document.getElementById("ui-middle")?.getBoundingClientRect?.();
+  let x0 = mid?.width ? mid.left : 0, x1 = mid?.width ? mid.right : innerWidth, y0 = 0, y1 = innerHeight;
+  const top = document.getElementById("navigation")?.getBoundingClientRect?.(), bot = document.getElementById("hotbar")?.getBoundingClientRect?.();
+  if ( top?.height && top.bottom < innerHeight / 3 ) y0 = Math.max(y0, top.bottom);
+  if ( bot?.height && bot.top > innerHeight * 2 / 3 ) y1 = Math.min(y1, bot.top);
+  if ( x1 - x0 < 300 ) { x0 = 0; x1 = innerWidth; }
+  if ( y1 - y0 < 240 ) { y0 = 0; y1 = innerHeight; }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+/** On the screen at all (a ping is shown where it is, even near the edge). */
+const inside = (p) => p.x >= 8 && p.y >= 8 && p.x <= innerWidth - 8 && p.y <= innerHeight - 8 && !document.elementFromPoint?.(p.x, p.y)?.closest?.("#ui-left, #ui-right, #sidebar, #hotbar, #navigation, #chat-message");
 
 /** Screen px of a scene point (the canvas element is full-window in Foundry). */
 export function toScreen(x, y) {
@@ -94,21 +118,23 @@ export function marker({ x, y, text, icon, onClick }) {
   host().appendChild(el);
   const m = { el, x, y, kind: null, onClick, text, icon };
   const place = () => {
-    const p = toScreen(m.x, m.y), s = edgeSpot(p, innerWidth, innerHeight, 64), kind = s.on ? "ping" : "arrow";
+    const p = toScreen(m.x, m.y), a = safeRect(), q = edgeSpot({ x: p.x - a.x, y: p.y - a.y }, a.w, a.h, 58);
+    const s = { ...q, x: q.x + a.x, y: q.y + a.y }, kind = q.on || inside(p) ? "ping" : "arrow";
+    if ( kind === "ping" ) { s.x = p.x; s.y = p.y; }
     if ( kind !== m.kind ) {
       m.kind = kind;
       const lab = text ? `<div class="mm-dir-label">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}${esc(text)}</div>` : "";
-      el.innerHTML = kind === "ping" ? `<div class="mm-dir-ring"></div><div class="mm-dir-ring r2"></div><div class="mm-dir-dot"></div>${lab}`
-        : `<div class="mm-dir-arrow" role="button" tabindex="-1"><i class="${esc(icon || "fa-solid fa-eye")}" inert></i><span class="mm-dir-chev"></span></div>${lab}`;
+      el.innerHTML = kind === "ping" ? `<div class="mm-dir-ring"></div><div class="mm-dir-ring r2"></div>${RETICLE}<div class="mm-dir-dot"></div>${lab}`
+        : `${CHEVRON}<div class="mm-dir-arrow" role="button" tabindex="-1"><i class="${esc(icon || "fa-solid fa-eye")}" inert></i></div>${lab}`;
       el.querySelector(".mm-dir-arrow")?.addEventListener("click", (ev) => { ev.stopPropagation(); m.onClick?.(); });
     }
     el.style.transform = `translate(${Math.round(s.x)}px, ${Math.round(s.y)}px)`;
     el.style.setProperty("--mm-dir-a", `${s.a}rad`);
     const lab = el.querySelector(".mm-dir-label");
     if ( lab ) {   // the label stays on screen: below the marker, above it near the bottom, pushed in from the sides
-      const below = s.y < innerHeight - 90;
-      lab.style.top = below ? "28px" : "auto"; lab.style.bottom = below ? "auto" : "28px";
-      const half = (lab.offsetWidth || 160) / 2, dx = Math.max(0, half + 8 - s.x) - Math.max(0, s.x + half + 8 - innerWidth);
+      const below = s.y < a.y + a.h - 90;
+      lab.style.top = below ? "34px" : "auto"; lab.style.bottom = below ? "auto" : "34px";
+      const half = (lab.offsetWidth || 160) / 2, dx = Math.max(0, a.x + half + 8 - s.x) - Math.max(0, s.x + half + 8 - (a.x + a.w));
       lab.style.transform = `translate(calc(-50% + ${Math.round(dx)}px), 0)`;
     }
   };

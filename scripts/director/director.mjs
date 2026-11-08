@@ -167,10 +167,10 @@ export function canSee(shot) {
 }
 
 /* the player at work: a button held on the board, the wheel a moment ago, the pan keys held */
-const input = { down: 0, wheel: 0 };
+const input = { down: 0, wheel: 0, downAt: 0 };
 const PAN_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Numpad8", "Numpad2", "Numpad4", "Numpad6"]);
 export function busy() {
-  if ( input.down > 0 ) return true;
+  if ( input.down > 0 && performance.now() - input.downAt < 15000 ) return true;          // (a lost pointerup never keeps a player "busy" for good)
   if ( performance.now() - input.wheel < 1200 ) return true;
   const keys = game.keyboard?.downKeys;
   if ( keys ) for ( const k of keys ) if ( PAN_KEYS.has(k) ) return true;
@@ -179,7 +179,7 @@ export function busy() {
 }
 function wireInput() {
   const board = () => document.getElementById("board");
-  window.addEventListener("pointerdown", (ev) => { if ( ev.target === board() ) input.down++; }, true);
+  window.addEventListener("pointerdown", (ev) => { if ( ev.target === board() ) { input.down++; input.downAt = performance.now(); } }, true);
   const up = () => { input.down = 0; };
   window.addEventListener("pointerup", up, true); window.addEventListener("pointercancel", up, true); window.addEventListener("blur", up);
   window.addEventListener("wheel", (ev) => { if ( ev.target === board() ) input.wheel = performance.now(); }, { capture: true, passive: true });
