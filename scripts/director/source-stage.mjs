@@ -1,9 +1,9 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as SC from "./stage-core.mjs";
-import { killed, isOn, myMode, R, HOOK, registerStager } from "./director.mjs";
+import { killed, isOn, myMode, R, HOOK, registerStager, cameraHeld } from "./director.mjs";
 import { Screen } from "./stage.mjs";
-import { safeRect } from "./overlay.mjs";
+import { freeRect } from "./overlay.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
 
@@ -33,6 +33,8 @@ const KEY = "dirStage";
 let setCache = null;
 export const stageSettings = () => (setCache ??= SC.sanitizeStage((() => { try { return game.settings.get(MODULE_ID, KEY); } catch { return null; } })()));
 const grid = () => canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100;
+/** Where the stage frames: the map less Foundry's interface AND the open windows (a sheet, a roll dialog): never a combatant under a window. */
+const stageRect = () => { const r = freeRect(); return { x: r.x, y: r.y, w: r.w, h: r.h }; };
 
 const st = SC.newStage();
 let beat = null;                         // the stage beat on screen here: { id, own }
@@ -71,16 +73,23 @@ function styleOf(shot) {
   if ( st.combat !== c.id ) { st.combat = c.id; st.turn = turnKey(c); }
   const own = ownTurn(c), S = stageSettings(), kind = shot.kind;
   let cam = null;                        // a turn's calm camera (null: it stays)
+  let away = false;                      // the player's own attack off screen: the camera goes to the hit and RETURNS
   const take = () => { SC.beatStart(st, viewNow(), !!beat); claimed.set(shot.id, { own: false }); return "take"; };
   function check0(form, ph) {
     if ( own ) {
       // the player's own turn: the camera is theirs. Their own turn shot does nothing (the stage went home on the turn change), their
-      // own beats play in place when on screen, else as a marker
+      // own beats play in place when on screen; their own ATTACK on a target off screen cuts to the hit and comes back (they see their
+      // blow land: the camera returns to their view after the result); any other own beat off screen is a marker
       if ( kind === "turn" ) return ["none", "own turn"];
       if ( ph?.check ) { const f = ph.check(shot, form); if ( f === "none" ) return ["none", "own: play check"]; }
       // (in place when the tokens' middles are on screen: the box shrunk by a third of a square, no margin)
-      const rect = safeRect(), v = viewNow(), q = grid() * 0.35, b = shot.box, inner = { x0: b.x0 + q, y0: b.y0 + q, x1: Math.max(b.x0 + q, b.x1 - q), y1: Math.max(b.y0 + q, b.y1 - q) };
-      if ( !SC.comfortable(inner, v, rect, 0) ) return ["soft", "own, off screen"];
+      const rect = stageRect(), v = viewNow(), q = grid() * 0.35, b = shot.box, inner = { x0: b.x0 + q, y0: b.y0 + q, x1: Math.max(b.x0 + q, b.x1 - q), y1: Math.max(b.y0 + q, b.y1 - q) };
+      if ( !SC.comfortable(inner, v, rect, 0) ) {
+        if ( kind !== "attack" ) return ["soft", "own, off screen"];
+        away = true;
+        claimed.set(shot.id, { own: true });
+        return ["take", "own attack, there and back"];
+      }
       claimed.set(shot.id, { own: true });
       return ["take", "own, in place"];
     }
@@ -88,8 +97,9 @@ function styleOf(shot) {
       const t = seenTok(shot.play?.turn);
       if ( !t ) return ["none", "not in sight"];                                // (the camera stays where it is)
       if ( SC.beatForm(st, performance.now(), S.back * 1000) === "soft" ) return ["soft", outWhy()];
-      const v = viewNow(), scale = st.parked && st.home ? st.home.scale : v.scale;
-      cam = SC.turnCamera(tokenBox(t, grid() * 0.5), v, safeRect(), scale, R().lead);
+      // (the stage zoom: the zoom now while it is near the player's own - no re-zoom after an attack - else theirs)
+      const v = viewNow(), scale = st.parked && st.home ? SC.stageZoom(v.scale, st.home.scale) : v.scale;
+      cam = SC.turnCamera(tokenBox(t, grid() * 0.5), v, stageRect(), scale, R().lead);
       return cam ? [take(), "glide"] : ["none", "on screen"];                  // (comfortably on screen: nothing moves)
     }
     if ( ph?.check ) { const f = ph.check(shot, form); if ( f === "none" ) return ["none", "play check"]; if ( f === "soft" ) return ["soft", "play check"]; }
@@ -101,17 +111,23 @@ function styleOf(shot) {
     check(form0, ph) { const [f, why] = check0(form0, ph); return res(f, why); },
     get home() { return own ? null : st.home; },
     barsLater: true,
-    get stay() { return !own; },
+    get stay() { return !own && !away; },
     drive(sh, api) {
       if ( kind === "turn" ) {
         if ( cam ) Screen.panTo({ x: cam.x, y: cam.y, scale: cam.scale, duration: Math.min(cam.ms, sh.lead + sh.hold - 250) });
         return { stop() {} };
       }
       if ( kind === "attack" ) {
-        // in place when attacker and target are on screen already; else the framed move. The bars: at the hit (onHit) or on arrival
-        // (a mild push-in at most: 1.25 x the player's zoom, so the zoom does not pump in and out with every attack of a fight)
-        const base = st.home?.scale ?? api.from.scale, scale = Math.min(api.target.scale, base * 1.25);
-        if ( !own && !SC.comfortable(sh.box, viewNow(), safeRect(), 0.06) ) Screen.panTo({ x: api.target.x, y: api.target.y, scale, duration: api.reduced ? api.lead * 1.25 : api.lead });
+        // in place when attacker and target are on screen already; else framed at the STAGE ZOOM (within a narrow band of the player's
+        // own: the zoom does not pump out and back in with every attack of a fight), the target whole and the attacker in when it fits.
+        // The bars: at the hit (onHit) or on arrival.
+        if ( !own || away ) {
+          const base = own ? api.from.scale : (st.home?.scale ?? api.from.scale), v = viewNow();
+          const tb = Array.isArray(sh.tokens) && sh.tokens.length ? seenTok(sh.tokens[0]) : null;     // (the focus: the target, first token)
+          const focus = tb ? tokenBox(tb, grid() * 0.3) : { x0: sh.x - grid() / 2, y0: sh.y - grid() / 2, x1: sh.x + grid() / 2, y1: sh.y + grid() / 2 };
+          const c = SC.attackCamera(sh.box, focus, v, stageRect(), api.reduced ? v.scale : base, api.reduced ? [1, 1] : SC.ZOOM_BAND);
+          if ( c ) Screen.panTo({ x: c.x, y: c.y, scale: api.reduced ? v.scale : c.scale, duration: api.reduced ? api.lead * 1.25 : api.lead });
+        }
         if ( S.bars === "attacks" ) api.at(Math.round(sh.lead * 0.7), () => Screen.revealBars?.());
         return { stop() {} };
       }
@@ -149,7 +165,11 @@ function onPan(c, p) {
   if ( ![v.x, v.y, v.scale].every(Number.isFinite) ) return;
   const moved = !lastPan || Math.hypot(v.x - lastPan.x, v.y - lastPan.y) * v.scale > 1.5 || Math.abs(v.scale / lastPan.scale - 1) > 0.004;
   lastPan = v;
-  if ( !moved || !st.combat || homing || Screen.owner ) return;
+  // (a pan of a shot or of the stage's own move is not the player's. But once a beat has ended and left the camera parked - the
+  // director's screen only fades its bars out, its camera is stopped - a wheel / drag / pan IS the player's, at once: before, the
+  // ~0.6 s fade swallowed it and the next turn took the camera anyway)
+  if ( !moved || !st.combat || homing || beat ) return;
+  if ( Screen.owner && Screen.debug?.()?.cameraOn ) return;
   if ( st.parked || st.home ) { SC.ownMove(st, performance.now()); sync(); } else st.ownAt = performance.now();
 }
 
@@ -162,6 +182,7 @@ function afterScreen(fn, t0 = performance.now()) {
 /** The camera to `to` (a view) in a calm move; the player's wheel / click / key stops it (Screen's abort guard). */
 function goHome(to, ms = null) {
   if ( !to || !canvas?.ready ) return;
+  if ( cameraHeld() ) { st.parked = null; sync(); return; }       // (Hot Pan / LockView hold the camera: never pull it off their view)
   const v = viewNow();
   st.parked = null;
   if ( SC.sameView(v, to) ) { sync(); return; }
@@ -196,7 +217,7 @@ function onUpdateCombat(combat, changed) {
   const own = ownTurn(combat), act = SC.turnChange(st, key, own, !!beat && !beat.own);
   if ( act?.home ) {
     // own turn: home, with the player's own token comfortably on screen; after the beat on screen (an attack's result) when one plays
-    const t = seenTok(combat.combatant?.tokenId), to = SC.ownHome(st.home, t ? tokenBox(t, grid() * 0.5) : null, safeRect(), viewNow());
+    const t = seenTok(combat.combatant?.tokenId), to = SC.ownHome(st.home, t ? tokenBox(t, grid() * 0.5) : null, stageRect(), viewNow());
     if ( beat ) pendingHome = { to, force: true }; else afterScreen(() => goHome(to));
     st.home = { ...to };
   }
@@ -224,7 +245,7 @@ let chip = null, keyOn = false;
 function showChip() {
   if ( chip?.isConnected ) return;
   if ( !document.querySelector("style[data-mm-dst]") ) { const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmDst = ""; document.head.appendChild(s); }
-  const r = safeRect();
+  const r = stageRect();
   chip = document.createElement("div");
   chip.className = "mm-dst-chip"; chip.dataset.mmDst = ""; chip.setAttribute("role", "button");
   chip.innerHTML = `<i class="fa-solid fa-house" inert></i><span>${esc(T("DirStage.chip"))}</span><kbd>Esc</kbd>`;
@@ -236,7 +257,7 @@ function showChip() {
 function hideChip() { const c = chip; chip = null; c?.remove(); }
 /** Esc while parked: only when nothing else wants it (a focused text field, an open window). */
 function onKey(ev) {
-  if ( ev.key !== "Escape" || !st.parked || beat || homing ) return;
+  if ( ev.key !== "Escape" || !st.parked || beat || homing || cameraHeld() ) return;
   const a = document.activeElement;
   if ( a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) ) return;
   if ( [...(foundry.applications.instances?.values?.() ?? [])].some((w) => w.hasFrame && w.rendered && !w.minimized) ) return;
@@ -244,11 +265,11 @@ function onKey(ev) {
   backHome();
 }
 /** The player asked for their view back: home now, the rest of this turn as markers. */
-function backHome() { st.out = st.turn; goHome(st.home); }
+function backHome() { if ( cameraHeld() ) { sync(); return; } st.out = st.turn; goHome(st.home); }
 /** The parked-state UI follows the state: the chip and the Esc listener only while the camera is parked away and nothing plays. */
 let resync = 0;
 function sync() {
-  const want = !!st.parked && !!st.home && !beat && !homing && on(), parked = want && !Screen.owner;
+  const want = !!st.parked && !!st.home && !beat && !homing && on() && !cameraHeld(), parked = want && !Screen.owner;
   clearTimeout(resync); resync = 0;
   if ( want && !parked ) resync = setTimeout(sync, 150);        // (the beat's bars are still sliding out: once the screen is free)
   if ( parked ) { showChip(); if ( !keyOn ) { window.addEventListener("keydown", onKey, true); keyOn = true; } }
@@ -296,6 +317,9 @@ Hooks.once("ready", () => {
   Hooks.on("deleteCombat", onDeleteCombat);
   Hooks.on("canvasPan", onPan);
   Hooks.on("canvasTearDown", onTearDown);
+  // (Hot Pan / LockView switched on while parked: the chip and the parked Esc go)
+  const held = () => { if ( st.parked || chip ) sync(); };
+  Hooks.on("updateSetting", held); Hooks.on("clientSettingChanged", held); Hooks.on("updateScene", held);
 });
 extendSection("director", { panels: [{ id: "dirStage", title: "MOINENMAPS.DirStage.title", icon: "fa-solid fa-clapperboard", open: false, mount: (h) => renderPanel(h) }] });
 

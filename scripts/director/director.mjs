@@ -3,6 +3,7 @@ import { api as moduleApi } from "../attrs.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
+import { standInShot } from "./standin-core.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
 import * as Ov from "./overlay.mjs";
 
@@ -218,7 +219,10 @@ const rate = new Map();                  // player id -> [times]
 function onSocket(msg, sender) {
   if ( !msg || msg.t !== "dir" ) return;
   const from = sender ? game.users?.get(sender) : null, gm = !!from?.isGM;
-  if ( msg.op === "shot" ) { if ( gm || (sender && sender === leaderId()) ) receive(msg.shot); }
+  if ( msg.op === "shot" ) {
+    if ( gm ) receive(msg.shot);
+    else if ( sender && sender === leaderId() ) { const s = fromStandIn(msg.shot, sender); if ( s ) receive(s); }   // (a player standing in as leader)
+  }
   else if ( msg.op === "event" ) {
     if ( !isLeader() ) return;
     let ev = Dir.normEvent(msg.ev, sharedNow()); if ( !ev ) return;
@@ -237,6 +241,23 @@ function onSocket(msg, sender) {
     leaderId();
   }
   else if ( msg.op === "handover" ) { if ( msg.to === game.user.id ) takeOver(msg.q, sender); }
+}
+
+/**
+ * A shot from a PLAYER's client standing in as the leader (no GM on the players' scene): played only in the form a GM-less table needs
+ * (standin-core: no GM-only, the GM's pause and intensity, ordinary timing, the director's own captions, lanes of this scene, the
+ * queue's pace). A macro on that client cannot push forced take-overs with free captions to the others.
+ */
+const standInLog = new Map();            // sender id -> its recent shots here
+function fromStandIn(shot, sender) {
+  if ( !shot || typeof shot !== "object" ) return null;
+  const lanes = new Set();
+  for ( const c of game.combats ?? [] ) if ( c.started && (!c.scene || c.scene.id === canvas.scene?.id) ) lanes.add(`cbt-${c.id}`);
+  if ( typeof shot.lane === "string" && shot.lane.startsWith("mv-") && canvas.scene?.tokens?.get(shot.lane.slice(3)) ) lanes.add(shot.lane);
+  const log = standInLog.get(sender) ?? []; standInLog.set(sender, log);
+  const st = gmState(), s = standInShot(shot, { now: sharedNow(), paused: !!st.paused, r: R(), lanes, log });
+  if ( s ) s.k = Dir.clamp(Number(st.k ?? 1), 0, 1);
+  return s;
 }
 
 /* ---------------------------------------------------------------- play handlers (sources that play their shots their own way) */

@@ -39,7 +39,7 @@ ok(far.ms > near.ms && far.ms <= 850 * 1.6, "a longer way glides longer (capped)
 const home = { x: 1000, y: 1000, scale: 1 };
 ok(JSON.stringify(SC.ownHome(home, box(850, 1000), rect, view)) === JSON.stringify(home), "own token in the home view: exactly home");
 const oh = SC.ownHome(home, box(3000, 1000), rect, view);
-ok(oh.scale === 1 && Math.abs(oh.x - 3150) < 1e-6, "own token off the home view: home moved to it, same zoom");
+ok(oh.scale === 1 && Math.abs(oh.x - 2800) < 1e-6 && oh.y === 1000, "own token off the home view: home moved just enough to bring it into the comfort zone (20 % in), same zoom");
 ok(JSON.stringify(SC.ownHome(home, null, rect, view)) === JSON.stringify(home), "no token: home");
 
 /* the state of one client */
