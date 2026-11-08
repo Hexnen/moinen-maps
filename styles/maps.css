@@ -715,6 +715,7 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-d-actions .mm-ws-btn:disabled { opacity: 0.45; cursor: default; }
 .mm-d-form { display: grid; gap: 0.45rem; }
 .mm-d-form .mm-ws-opt { justify-content: space-between; }
+.mm-d-form .mm-ws-check { justify-content: flex-start; }
 .mm-d-form .mm-ws-opt > label { flex: 0 0 5.6rem; white-space: normal; }
 .mm-d-form .mm-ws-range range-picker { width: auto; flex: 1; }
 .mm-d-form .mm-ws-opt select { max-width: none; flex: 1; }
@@ -803,8 +804,8 @@ body.mm-painting-destruction #board { cursor: crosshair; }
   margin: 0; padding: 0.12rem 0; white-space: normal;
 }
 .mm-ws .mm-ws-form :is(.form-group, .mm-ws-opt) > label {
-  flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: inherit; font-size: inherit; line-height: 1.25;
+  flex: none; min-width: 0; white-space: normal; overflow-wrap: break-word;
+  color: inherit; font-size: inherit; line-height: 1.2;
 }
 .mm-ws .mm-ws-form :is(.form-group, .mm-ws-opt) > label[data-tooltip] { cursor: help; }
 .mm-ws .mm-ws-form .form-fields { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
