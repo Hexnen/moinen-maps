@@ -41,6 +41,7 @@ precision highp int;
 in vec2 vP;
 layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec4 dispColor;   // a big drop's refraction: (its centre - this px) / 32 + 0.5, radius / 16, image share
+layout(location = 2) out vec4 glintColor;  // the nearest drop glint: (its point - this px) / 8 + 0.5, the drop's radius / 16, 1 (none: 0)
 uniform vec2 uLens;          // lens size in lens px
 uniform float uT;            // the step time (s, mod 1 h)
 uniform int uSeed;
@@ -164,7 +165,11 @@ void gather(vec2 p) {
 // ---------------------------------------------------------------- the drop field at p
 float sdf = 1e3, best = 1e3, dR = 1.0;
 vec2 dc = vec2(0.0);
+// the GLINT nearest to this lens px (its point on the drop's upper-left rim): every lens px near it carries the same one, so the
+// sprite draws it whole across lens px (a glint taken from each px's own nearest drop came out cut along the lens grid)
+vec2 P_ = vec2(0.0), gH = vec2(0.0); float gD = 1e3, gR = 0.0;
 void put(float s, float R, vec2 c) {
+  if ( R >= 1.25 ) { vec2 h = c - vec2(0.38, 0.42) * R; float d = length(P_ - h); if ( d < gD ) { gD = d; gH = h; gR = R; } }
   if ( s < best ) { best = s; dc = c; dR = R; }
   sdf = smin(sdf, s, 1.3);
 }
@@ -394,6 +399,7 @@ void heatLens(vec2 p) {
 
 void main() {
   vec2 p = floor(vP) + 0.5;
+  P_ = p;
   if ( uSnowL.w > 0.0 ) { frost(p); crystals(p); }
   vec3 A0 = A_; float K0 = K_;
   A_ = vec3(0.0); K_ = 1.0;
@@ -507,6 +513,9 @@ void main() {
   // is not made here: this pass writes where it samples (dispColor) and the lens sprite fetches the FULL-RESOLUTION frame there, so
   // a drop never turns into a mosaic of 3 x 3 lens-px squares. A SMALL drop (radius under SMALL lens px) is only a faint lift and a
   // glint over the frame: an image, a rim or a shadow in a few whole lens px reads as a square (worst at night: dark squares).
+  // The GLINT (the light caught on a drop) is not made here either: in one whole lens px it was a bright 3 x 3 square. The lens px
+  // near it pass its point and the drop's radius on (glintColor) and the lens sprite draws it per screen px: a soft crescent of light
+  // along the drop's upper-left rim (see SHOW_FRAG).
   bool small = dR < SMALL;
   float srcK = 0.0;
   // (no contact shadow under a drop: in whole lens px it was a dark block)
@@ -516,13 +525,11 @@ void main() {
     if ( dR < 1.25 ) { bAdd = vec3(0.07) * uLight; bK = 0.97; }                                  // tiny: one barely lighter px
     else if ( small ) {
       bAdd = vec3(0.04) * uLight; bK = 1.0;
-      if ( floor(p) == floor(hl) ) { bAdd = vec3(0.6, 0.63, 0.66) * uLight; bK = 0.35; }
     } else {
       bool rim = sdf > -1.0;
       srcK = 0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR);                                   // a touch brighter low in the drop
       if ( rim && n.y > 0.3 ) srcK = 0.86;                                                       // the thin darker lower rim (a crescent)
       else if ( rim ) { srcK = 0.9; bAdd = vec3(0.05) * uLight; }                               // the faint lit top edge
-      if ( floor(p) == floor(hl) ) { srcK *= 0.3; bAdd = vec3(0.62, 0.65, 0.68) * uLight; }   // the highlight: one lens px, never a block
     }
     add = bAdd; k = bK;
   }
@@ -536,6 +543,8 @@ void main() {
   heatLens(p);
   fragColor = vec4(clamp(A_, 0.0, 1.0), clamp(K_, 0.0, 1.0));
   dispColor = S_ > 0.0 ? vec4(clamp((dc - p) / 32.0 + 0.5, 0.0, 1.0), min(dR, 16.0) / 16.0, clamp(S_, 0.0, 1.0)) : vec4(0.5, 0.5, 0.0, 0.0);
+  // (a glint within 2.8 lens px: the sprite's glint reaches 1.95 from its point, + the half diagonal of a lens px)
+  glintColor = gD < 2.8 ? vec4(clamp((gH - p) / 8.0 + 0.5, 0.0, 1.0), min(gR, 16.0) / 16.0, 1.0) : vec4(0.0);
 }`;
 
 let lensProg = null;
@@ -551,17 +560,41 @@ void main() {
   vP = aVertexPosition;
 }`;
 
-/** The glass on screen: the lens pass's (add, k), NEAREST; a big drop adds the full-resolution frame copy, refracted per screen px. */
+/**
+ * The glass on screen: the lens pass's (add, k), NEAREST; a big drop adds the full-resolution frame copy, refracted per screen px; a
+ * drop's GLINT is drawn here per screen px (a lens px is 3 CSS px: a glint in whole lens px was a square): a crescent of light along
+ * the rim toward the light (upper left), its size growing with the drop, white-hot at its core and cooler at its soft edge, which
+ * reaches exactly zero (every px away from a glint is as before).
+ */
 const SHOW_FRAG = `#version 300 es
 precision highp float;
 in vec2 vP;                  // lens px (continuous)
 out vec4 fragColor;
 uniform sampler2D uShade;    // the lens pass: (add, k)
 uniform sampler2D uDisp;     // the lens pass: a big drop's centre offset, radius, image share
+uniform sampler2D uGlint;    // the lens pass: the nearest glint's point offset, its drop's radius
 uniform sampler2D uFrame;    // the frame drawn under the glass, full resolution, top row first
 uniform vec2 uLens;          // lens px
 uniform vec2 uFrameK;        // frame uv per lens px
 uniform float uHasFrame;
+uniform float uLight;        // 1 by day, darker at night (as the lens pass)
+// the glint of the drop at centre dc, radius dR (lens px) at vP: its share (0 outside) and its colour
+float glintAt(vec2 hl, float dR, out vec3 col) {
+  col = vec3(0.0);
+  if ( dR < 1.25 ) return 0.0;
+  vec2 h = -vec2(0.38, 0.42) * dR;   // (the glint point from the drop's centre)
+  float rh = length(h), a = clamp(0.4 * dR, 0.85, 1.3), b = a * 0.68;
+  // along the rim (tt) and across it (rr), bent to a circle of radius Rc: the drop's own curve on a big drop, a gentler one on a
+  // small drop (bent to its own small radius the glint would hook)
+  vec2 rd = rh > 1e-4 ? h / rh : vec2(-0.67, -0.74), td = vec2(-rd.y, rd.x), e = vP - hl;
+  float Rc = max(rh, 2.5 * a), tt = dot(e, td), rr = dot(e, rd) + tt * tt / (2.0 * Rc);
+  float s = sqrt((tt / a) * (tt / a) + (rr / b) * (rr / b));
+  if ( s >= 1.5 ) return 0.0;
+  // a hot core (full to 0.45 of the size, soft to 1) and a faint bloom to 1.5 that ends at exactly zero
+  float core = 1.0 - smoothstep(0.45, 1.0, s), bloom = (1.0 - s / 1.5) * (1.0 - s / 1.5);
+  col = mix(vec3(0.80, 0.88, 1.0), vec3(1.0, 0.99, 0.95), core) * uLight;
+  return 0.8 * core + 0.16 * bloom * (1.0 - core);
+}
 void main() {
   vec2 q = (floor(vP) + 0.5) / uLens;
   vec4 c = texture(uShade, q), d = texture(uDisp, q);
@@ -575,6 +608,19 @@ void main() {
       vec2 sp = dc + (vP - dc) * m - vec2(0.0, 0.18 * dR);
       add += texture(uFrame, clamp(sp * uFrameK, vec2(0.0), vec2(1.0))).rgb * d.a;
     } else k = 1.0;   // (no copy of the frame: the drop is clear, the frame shows as it is)
+  }
+  // a glint near this lens px: it and the 8 around it name their nearest glints (where two glints are close, each lens px names one:
+  // drawing only this px's one cut the other along the lens grid), the brightest share wins
+  if ( texture(uGlint, q).a > 0.5 ) {
+    float G = 0.0; vec3 gc = vec3(0.0);
+    for ( int j = -1; j <= 1; j++ ) for ( int i = -1; i <= 1; i++ ) {
+      vec2 c = floor(vP) + vec2(float(i), float(j)) + 0.5;
+      vec4 gl = texture(uGlint, c / uLens);
+      if ( gl.a < 0.5 || c.x < 0.0 || c.y < 0.0 || c.x > uLens.x || c.y > uLens.y ) continue;
+      vec3 c1; float g1 = glintAt(c + (gl.xy - 0.5) * 8.0, gl.z * 16.0, c1);
+      if ( g1 > G ) { G = g1; gc = c1; }
+    }
+    if ( G > 0.0 ) { add = add * (1.0 - G) + gc * G; k *= 1.0 - G; }
   }
   fragColor = vec4(add, k);
 }`;
@@ -671,6 +717,9 @@ export class WeatherLens {
     // the second target of the lens pass (drawBuffers 1): where a big drop samples the frame
     this.disp = new PIXI.BaseTexture(null, { width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
     this.rt.framebuffer.addColorTexture(1, this.disp);
+    // the third (drawBuffers 2): the nearest drop glint, drawn by the sprite per screen px
+    this.glint = new PIXI.BaseTexture(null, { width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+    this.rt.framebuffer.addColorTexture(2, this.glint);
     // the full-resolution copy of the frame under the glass (device px)
     const fw = Math.floor(r.screen.width * dpr), fh = Math.floor(r.screen.height * dpr);
     this.frameRT = PIXI.RenderTexture.create({ width: fw, height: fh, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
@@ -685,8 +734,8 @@ export class WeatherLens {
     showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
     const sg = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
     this.sprite = new LensShow(sg, new PIXI.Shader(showProg, {
-      uShade: this.rt, uDisp: new PIXI.Texture(this.disp), uFrame: this.frameRT, uLens: new Float32Array([lw, lh]),
-      uFrameK: new Float32Array([css * dpr / fw, css * dpr / fh]), uHasFrame: 0, translationMatrix: new PIXI.Matrix().toArray(true)
+      uShade: this.rt, uDisp: new PIXI.Texture(this.disp), uGlint: new PIXI.Texture(this.glint), uFrame: this.frameRT, uLens: new Float32Array([lw, lh]),
+      uFrameK: new Float32Array([css * dpr / fw, css * dpr / fh]), uHasFrame: 0, uLight: 1, translationMatrix: new PIXI.Matrix().toArray(true)
     }));
     this.sprite.lens = this; this.sprite.px = css;
     this.sprite.state.blendMode = blendMode(); this.sprite.state.depthTest = false; this.sprite.state.culling = false;
@@ -719,6 +768,7 @@ export class WeatherLens {
     for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, this.seed | 0);
     u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
     u.uLight = 1 - 0.7 * Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
+    this.sprite.shader.uniforms.uLight = u.uLight;
     canvas.app.renderer.render(this.pass, { renderTexture: this.rt, clear: true });
     this.stats.renders++; this.stats.passMs = performance.now() - t0;
   }
@@ -727,6 +777,7 @@ export class WeatherLens {
     this.sprite?.parent?.removeChild(this.sprite); this.sprite?.geometry?.destroy(); this.sprite?.destroy(); this.sprite = null;
     this.frameRT?.destroy(true); this.frameRT = null;
     this.disp?.destroy(); this.disp = null;
+    this.glint?.destroy(); this.glint = null;
     this.pass?.geometry?.destroy(); this.pass?.destroy(); this.pass = null;
     this.rt?.destroy(true); this.rt = null;
   }
