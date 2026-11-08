@@ -1541,9 +1541,11 @@ export class FireArt extends PIXI.Container {
     this.tok = new Float32Array(64);    // (shared by the fire and front layers: setTokens)
     const common = () => ({ uArt: this.rt, uOcc: this.occRt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0, uTok: this.tok, uTokN: 0, uU: grid / 32,
       uLift: 1, uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
-    this.ground = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.ground, common()));
+    // (A13: ONE block geometry for the five every-frame layers - the same vertices each built alone, uploaded once)
+    const bg = blocks(x0, ap, y0, W, H);
+    this.ground = new PIXI.Mesh(bg, new PIXI.Shader(P.ground, common()));
     this.ground.state.blendMode = PIXI.BLEND_MODES.MULTIPLY;
-    this.show = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.show, common()));
+    this.show = new PIXI.Mesh(bg, new PIXI.Shader(P.show, common()));
     this.show.state.blendMode = PIXI.BLEND_MODES.NORMAL;   // premultiplied output
     for ( const m of [this.ground, this.show] ) {
       m.eventMode = "none";
@@ -1553,7 +1555,7 @@ export class FireArt extends PIXI.Container {
     this.addChild(this.ground, this.show);
     // the SMOKE lives in a layer above the tokens (`above`, the display's; else on top of this container): it follows this area's
     // visibility and alpha
-    this.smoke = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.smoke, common()));
+    this.smoke = new PIXI.Mesh(bg, new PIXI.Shader(P.smoke, common()));
     this.smoke.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.smoke.eventMode = "none";
     const s0 = this.smoke._render.bind(this.smoke);
     this.smoke._render = (renderer) => {
@@ -1562,7 +1564,7 @@ export class FireArt extends PIXI.Container {
     };
     (above ?? this).addChild(this.smoke);
     // the FRONT flames live in a layer between the tokens and the smoke (`front`, the display's): drawn only while a token stands here
-    this.front = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.front, common()));
+    this.front = new PIXI.Mesh(bg, new PIXI.Shader(P.front, common()));
     this.front.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.front.eventMode = "none"; this.front.visible = false;
     const f0 = this.front._render.bind(this.front);
     this.front._render = (renderer) => {
@@ -1580,7 +1582,7 @@ export class FireArt extends PIXI.Container {
     //   - the box-filter footprint reads past the art texture at the quad's edge: art() returns 0 there (bounds-checked, no undefined
     //     texelFetch).
     // the emission lives in the illumination layer (not in this container): it follows this area's visibility and alpha
-    this.glow = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.emit, common()));
+    this.glow = new PIXI.Mesh(bg, new PIXI.Shader(P.emit, common()));
     this.glow.state.blendMode = PIXI.BLEND_MODES.MAX_COLOR; this.glow.eventMode = "none";
     const e0 = this.glow._render.bind(this.glow);
     this.glow._render = (renderer) => {
@@ -1776,6 +1778,19 @@ export class FireArt extends PIXI.Container {
     this.artT = j.t; this.artWin = aw; (this.artU ??= new Float64Array(5)).set(j.s);
     this.job = null;
   }
+  /**
+   * A13: the area's data textures sent to the GPU ahead of its first draw, at most `maxBytes` a call (always one texture): a large new
+   * area's ~15 MB no longer lands in the frame that first draws it. The very texels the first draw would upload. Returns the bytes sent.
+   */
+  uploadStep(renderer, maxBytes) {
+    const q = this._up ??= [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex].filter(Boolean);
+    let sent = 0;
+    while ( q.length && (sent === 0 || sent + q[0].baseTexture.width * q[0].baseTexture.height * 4 <= maxBytes) ) {
+      const b = q.shift().baseTexture; renderer.texture.bind(b, 0); sent += b.width * b.height * 4;
+    }
+    return sent;
+  }
+  get uploaded() { return !!this._up && !this._up.length; }
   /** Do the drawn cells (this art frame) hold the window `w` (cells)? */
   covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
   destroy() {
@@ -1785,7 +1800,7 @@ export class FireArt extends PIXI.Container {
     const own = this.smoke.parent === this, ownF = this.front.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
     if ( !ownF ) this.front.parent?.removeChild(this.front);
-    for ( const m of [this.pass, this.fuelPass, this.embPass, this.tilePass, this.occPass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
+    for ( const g of new Set([this.pass, this.fuelPass, this.embPass, this.tilePass, this.occPass, this.ground, this.show, this.glow, this.smoke, this.front].map((m) => m.geometry)) ) g?.destroy();
     this.pass.destroy(); this.fuelPass.destroy(); this.embPass.destroy(); this.tilePass.destroy(); this.occPass.destroy(); this.glow.destroy();
     if ( !own ) this.smoke.destroy();
     if ( !ownF ) this.front.destroy();

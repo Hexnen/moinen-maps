@@ -69,6 +69,8 @@ const MARGIN = 0.1, PAD = 4;
  * `CONFIG.moinenMaps.fireAhead = false` turns it off (the A11 schedule).
  */
 const AHEAD = 0.1, MOVE_MS = 200;
+/** A13: a new area's textures sent to the GPU per display frame while it is made ready (a large area's ~15-19 MB: one frame of its own). */
+const UP_BYTES = 24 << 20;
 const byArtT = (x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1);
 const LEVELS = [{ budget: 1, fps6: false, parts: 1 }, { budget: 0.5, fps6: false, parts: 1 }, { budget: 0.3, fps6: true, parts: 0.5 }, { budget: 0.2, fps6: true, parts: 0 }];
 
@@ -112,6 +114,7 @@ export class FireDisplay {
     this.partsFront = new PIXI.Container(); this.partsFront.zIndex = 1; this.front.sortableChildren = true; this.front.addChild(this.partsFront);
     this.tokDirty = true;
     this.areas = new Map();          // area id -> { key, area, field, mesh, slots }
+    this.pending = new Map();        // A13: area id -> { key, area, field, it, mesh (null: not built yet), ready } - new areas being made ready
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
     // the flames' EMISSION meshes live in Foundry's illumination container, which every lighting refresh empties and refills with the
@@ -138,27 +141,36 @@ export class FireDisplay {
     const geoChanged = JSON.stringify(geo) !== JSON.stringify(this.geo);
     this.geo = geo; this.P = P;
     const want = new Map(items.map((it) => [it.area.id, it]));
+    // A13: while the fire moves (not on a new geometry - a scene load, a grid change), a NEW ART AREA IS MADE READY OVER A FEW FRAMES
+    // (adopt): built, its textures uploaded, its first frame drawn in steps - meanwhile the areas it replaces stay on screen, untouched
+    // and animating; when every new area is ready they all swap in one frame (reveal). The picture is the one an at-once build shows
+    // at that moment, a few frames later; no frame carries a whole large area's build, upload and first draw.
+    const staged = !reducedMotion() && !geoChanged && CONFIG.moinenMaps?.fireStaged !== false;
+    if ( !staged ) this.dropPending(true);
     // ONLY the areas whose key changed (their strokes, phases or the scene settings) are rebuilt: every other area keeps its mesh,
     // field, art state, lights and clocks untouched (an edit never re-renders the whole fire)
     for ( const [id, a] of this.areas ) {
       const w = want.get(id);
-      if ( !w || w.area.key !== a.key || geoChanged ) { a.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
+      if ( w && w.area.key === a.key && !geoChanged ) { a.out = false; continue; }   // (unchanged - or wanted again before its successor showed)
+      if ( staged && a.mesh.isArt ) { a.out = true; continue; }       // (shown until the new areas are ready)
+      a.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++;
+    }
+    // (a new area not shown yet is dropped when it is no longer wanted as it is, or the area it replaces is wanted again)
+    for ( const [id, p] of this.pending ) {
+      const w = want.get(id), cur = this.areas.get(id);
+      if ( !w || w.area.key !== p.key || (cur && !cur.out) ) { p.mesh?.destroy(); this.pending.delete(id); }
     }
     for ( const [id, it] of want ) {
-      if ( this.areas.has(id) ) continue;
-      const { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
-      // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
-      const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
-      // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
-      const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
-      const mesh = field.style === "fire"
-        ? new FireArt(field, area.rect, geo, { above: this.above, front: this.front, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
-          plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
-        : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
+      const cur = this.areas.get(id);
+      if ( (cur && !cur.out) || this.pending.has(id) ) continue;
+      if ( staged && it.field.style === "fire" ) { this.pending.set(id, { key: it.area.key, area: it.area, field: it.field, it, mesh: null, ready: false }); continue; }
+      if ( cur ) { cur.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
+      const mesh = this.build(it);
       this.meshes.addChild(mesh);
-      this.areas.set(id, { key: area.key, area, field, mesh });
+      this.areas.set(id, { key: it.area.key, area: it.area, field: it.field, mesh });
       this.stats.built++;
     }
+    if ( !this.pending.size ) this.reveal(false);                     // (only removals: at once)
     this.lastT = -1;                                                  // (uniforms only: every area's clock is set again this tick)
     this.tokDirty = true;
     this.stats.areas = this.areas.size;
@@ -166,11 +178,87 @@ export class FireDisplay {
     this.arm();
     // A12c: the LIGHTS follow on the next frame while the fire ticks: Foundry's light sources and the vision refresh they ask for were
     // half of the frame that adopts a new area on an older CPU; a new light fades in from dark and a handed-over one eases (lights.mjs),
-    // so one frame later is the same picture. (Not ticking - reduced motion: at once, as before.)
+    // so one frame later is the same picture. (Not ticking - reduced motion: at once, as before.) A13: while new areas are made ready,
+    // the frame after they show (reveal).
     if ( !this.ticking ) this.syncLights();
-    else this._lightsDue ??= requestAnimationFrame(() => { this._lightsDue = null; if ( this.geo ) this.syncLights(); });
+    else if ( !this.pending.size ) this.lightsNext();
     // (no forced redraw of every area: the new ones have never been drawn and go first in this tick, the others keep their frame)
     this.tick(geoChanged);
+  }
+
+  lightsNext() { this._lightsDue ??= requestAnimationFrame(() => { this._lightsDue = null; if ( this.geo ) this.syncLights(); }); }
+
+  /** A new area's mesh for item `it` ({ area, field }) at the display's geometry and settings. */
+  build(it) {
+    const geo = this.geo, P = this.P, { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
+    // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
+    const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
+    // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
+    const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
+    return field.style === "fire"
+      ? new FireArt(field, area.rect, geo, { above: this.above, front: this.front, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
+        plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
+      : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
+  }
+
+  /** Every new area not shown yet dropped (`flush`: the areas they were to replace go too - the caller builds at once). */
+  dropPending(flush) {
+    for ( const p of this.pending.values() ) p.mesh?.destroy();
+    this.pending.clear();
+    if ( flush ) this.reveal(false);
+  }
+
+  /**
+   * A13 - THE NEW AREAS SHOW: the areas they replace go and they take their place, all in one frame (each shows as the tick's hold
+   * has it: at once, its cells under the view drawn). Then the lights follow (`lights`: the frame after).
+   */
+  reveal(lights = true) {
+    for ( const [id, a] of this.areas ) if ( a.out ) { a.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
+    if ( !this.pending.size ) return;
+    for ( const [id, p] of this.pending ) {
+      p.it = null; delete p.ready; p.mesh.visible = false; p.hold = false;
+      this.areas.set(id, p); this.stats.built++;
+    }
+    this.pending.clear();
+    this.lastT = -1; this.tokDirty = true; this.stats.areas = this.areas.size;
+    this.attachGlows();
+    if ( lights ) this.lightsNext();
+  }
+
+  /**
+   * A13: the new areas made ready, a step a frame each - built (one a frame), their textures uploaded (UP_BYTES a frame), their cells
+   * under the view drawn (whole at the current art frame when that fits `room` cells, else a coming frame in steps - FireArt.startPre),
+   * with the uniforms the tick sets on a shown area. An area off screen is ready once uploaded (it is drawn as any area coming into view).
+   */
+  adopt(vw, T, nx, fps6, now0, dark, vort, wet, dt, room) {
+    const R = canvas.app.renderer, geo = this.geo, tl = CONFIG.moinenMaps?.fireTiming, t0 = tl ? performance.now() : 0;
+    let built = 0, bytes = UP_BYTES, cells = 0, sent = 0;
+    for ( const p of this.pending.values() ) {
+      if ( p.ready ) continue;
+      if ( !p.mesh ) { if ( built ) continue; p.mesh = this.build(p.it); p.mesh.visible = false; this.meshes.addChild(p.mesh); built++; continue; }
+      const m = p.mesh;
+      if ( !m.uploaded ) { if ( bytes <= 0 ) continue; const b = m.uploadStep(R, bytes); bytes -= b; sent += b; continue; }
+      if ( !M.inView(p.area.rect, geo, vw, geo.grid) ) { p.ready = true; continue; }
+      if ( m.anim ) m.setPhase(now0);
+      m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet);
+      // (a large one is drawn AHEAD as A12 draws the next frame: an art frame the clock reaches after the steps it needs, with the
+      // clocks it will have then; it shows when the clock reaches it - revealed at the very frame the areas around it show, never one
+      // behind them; one the clock passed before it was whole is dropped and a later one taken)
+      const j = m.job;
+      if ( j?.pre ) { if ( j.done && j.t === T ) m.swapJob(R); else if ( !nx || !(j.t > T) ) m.job = null; }
+      else if ( j && nx ) m.job = null;
+      if ( !m.job && !(m.artT === T && m.covers(this.windowOf(p, vw, 0, this._need))) ) {
+        const w = this.windowOf(p, vw, AHEAD, this._ahead), c = Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]);
+        const f = c > room && nx ? this.frameAfter(now0, this.P.speed, fps6, T, (Math.ceil(c / room) - 1) * Math.max(4, this.ivMs || 16.7)) : null;
+        if ( !c ) { p.ready = true; continue; }                        // (none of its cells under the view)
+        if ( c <= room || !f ) { m.setTime(T); m.renderArt(R, w); this.stats.artPasses++; cells += c; }
+        else if ( f ) m.startPre(R, w, f.t, m.clocksAt(now0 + f.due, this._preU ??= new Float64Array(5)));
+      }
+      if ( m.job && !m.job.done && cells < room ) cells += m.stepJob(R, room - cells, T);
+      if ( !m.job && m.artT === T && m.covers(this.windowOf(p, vw, 0, this._need)) ) p.ready = true;
+    }
+    if ( tl ) tl.push({ adopt: +(performance.now() - t0).toFixed(2), built, sent, cells, at: +performance.now().toFixed(1) });
+    return cells;
   }
 
   /** The lights per area (an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones). */
@@ -189,7 +277,7 @@ export class FireDisplay {
 
   /** The ticker runs only while there is something that moves on screen (areas, motion allowed). */
   arm() {
-    const want = this.areas.size > 0 && !reducedMotion();
+    const want = (this.areas.size > 0 || this.pending.size > 0) && !reducedMotion();
     if ( want === this.ticking ) return;
     this.ticking = want;
     if ( want ) canvas.app.ticker.add(this._tick); else canvas.app.ticker.remove(this._tick);
@@ -261,6 +349,7 @@ export class FireDisplay {
 
   tick(force = false) {
     if ( !canvas.stage || !this.geo ) return;
+    if ( this.pending.size && !force && [...this.pending.values()].every((p) => p.ready) ) this.reveal();   // (A13: all ready - they show now)
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
     const pn = performance.now(), dms = this.lastPn ? pn - this.lastPn : 0, dt = dms / 1000; this.lastPn = pn;
     const L0 = LEVELS[this.level] ?? LEVELS[0];
@@ -273,7 +362,9 @@ export class FireDisplay {
     // A12: the NEXT art frame (its time and how soon the shared clock reaches it) and the display's own frame interval: the next frame
     // is drawn ahead over the display frames before it is due (PRE below)
     const nx = this.ticking && !still && P.speed > 0 && CONFIG.moinenMaps?.fireAhead !== false ? this.nextFrame(now0, P.speed, L.fps6, T) : null;
-    if ( dms >= 4 && dms <= 100 ) this.ivMs = this.ivMs ? this.ivMs * 0.9 + dms * 0.1 : dms;
+    // (A13: the ticker's own interval - the display's frame interval live; a recording's step on its virtual clock, dev/fire-rec.mjs)
+    const tms = canvas.app.ticker.elapsedMS;
+    if ( tms >= 4 && tms <= 100 ) this.ivMs = this.ivMs ? this.ivMs * 0.9 + tms * 0.1 : tms;
     const R = canvas.app.renderer;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0, st = canvas.stage, cam = this.cam;
     if ( st.pivot.x !== cam[0] || st.pivot.y !== cam[1] || st.scale.x !== cam[2] ) { cam[0] = st.pivot.x; cam[1] = st.pivot.y; cam[2] = st.scale.x; this.movedAt = pn; }
@@ -329,6 +420,9 @@ export class FireDisplay {
       // too big to fit a frame at all: drawn in steps behind the frame it shows (FireArt.startJob); else it waits for a frame with room
       if ( c > budget ) { am.startJob(w ?? [0, 0, am.W, am.H], T); this.stats.jobs = (this.stats.jobs ?? 0) + 1; if ( cells < budget ) cells += am.stepJob(R, budget - cells, T); }
     }
+    // (A13: a new area's first frame takes what is left of the budget, at least a full one a frame - whatever the guard's level: an
+    // at-once build drew all of it in one frame; this is the same work over a few)
+    if ( this.pending.size && this.ticking ) cells += this.adopt(vw, T, nx, L.fps6, now0, dark, vort, wet, dt, Math.max(budget - cells, ART_BUDGET));
     // PREFETCH: in a calm frame with room left, an area just off screen (within half a view) that has never been drawn there is drawn
     // (in steps if big): a zoom-out or pan that brings it in finds its cells ready and shows them, instead of drawing them all at once
     if ( this.ticking && !moving && !force && cells < budget ) {
@@ -388,6 +482,16 @@ export class FireDisplay {
       const c = m.stepJob(R, quota, T); cells += c; quota -= c;
     }
     return cells;
+  }
+
+  /** A13: as nextFrame, the first art frame starting at least `lead` ms from `now` (for a first frame drawn in steps over that long). */
+  frameAfter(now, speed, fps6, T, lead) {
+    const o = this._fa ??= { t: 0, due: 0 }, k0 = Math.max(Math.floor(now * speed / 83.333), Math.floor((now + lead) * speed / 83.333));
+    for ( let k = k0 + 1; k < k0 + 4; k++ ) {
+      let t = (k / 12) % 1000; if ( fps6 ) t = Math.floor(t * 6) / 6;
+      if ( t !== T ) { o.t = t; o.due = k * 83.333 / speed - now; return o; }
+    }
+    return null;
   }
 
   /** The art frame after `T` (fps6: the next whole 6 fps one) and the ms until the shared clock reaches it (model.shaderTime's own steps). */
@@ -539,9 +643,14 @@ export class FireDisplay {
   /** Back to full detail (the guard starts over). */
   resetDetail() { this.level = 0; this.press = 0; this.base = 0; this.stepAt = 0; this.upAt = 0; this.calm = 3000; this._ri = 0; this._rn = 0; this.holdK = 3; this.lastCells = 0; this.stats.level = 0; }
 
-  /** Performance mode or reduced motion changed: re-arm, redraw once. */
+  /** Performance mode or reduced motion changed: re-arm, redraw once (A13: new areas being made ready show at once). */
   refresh() {
-    for ( const a of this.areas.values() ) a.mesh.setBirths?.(BIRTHS[perfMode()] ?? 8);
+    if ( this.pending.size ) {
+      for ( const p of this.pending.values() ) if ( !p.mesh ) { p.mesh = this.build(p.it); this.meshes.addChild(p.mesh); }
+      this.reveal(false);
+      if ( reducedMotion() ) this.syncLights(); else this.lightsNext();
+    }
+    for ( const a of [...this.areas.values(), ...this.pending.values()] ) a.mesh?.setBirths?.(BIRTHS[perfMode()] ?? 8);
     this.arm(); this.lastT = -1; this.tick(true);
   }
 
@@ -551,6 +660,8 @@ export class FireDisplay {
     Hooks.off("lightingRefresh", this.hookL); this.lights.destroy();
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();
+    for ( const p of this.pending.values() ) p.mesh?.destroy();
+    this.pending.clear();
     if ( !this.root.destroyed ) this.root.destroy({ children: true });
     if ( !this.above.destroyed ) this.above.destroy({ children: true });
     if ( !this.front.destroyed ) this.front.destroy({ children: true });
