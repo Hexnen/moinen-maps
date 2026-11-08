@@ -73,7 +73,7 @@ function wobble(p, amp, seed, px) {
 }
 
 /** The badge under a zone number: its outline in the ring colour over a dark fill ("plain": no badge). */
-function badgeShape(G, shape, ring, fill) {
+function badgeShape(G, shape, ring, fill, capFill = null) {
   if ( shape === "plain" ) return;
   const r = BADGE_R;
   G.lineStyle({ width: r * 0.16, color: ring, alpha: 0.95, join: PIXI.LINE_JOIN.ROUND });
@@ -81,6 +81,12 @@ function badgeShape(G, shape, ring, fill) {
   if ( shape === "square" ) G.drawRoundedRect(-r * 0.92, -r * 0.92, r * 1.84, r * 1.84, r * 0.28);
   else if ( shape === "hex" ) G.drawPolygon([...Array(6)].flatMap((_, i) => { const a = Math.PI / 6 + (i * Math.PI) / 3; return [Math.cos(a) * r * 1.05, Math.sin(a) * r * 1.05]; }));
   else if ( shape === "diamond" ) G.drawPolygon([0, -r * 1.25, r * 1.25, 0, 0, r * 1.25, -r * 1.25, 0]);
+  // a comic caption box: yellow (or the distance colour), square corners, a black frame and a hard offset shadow
+  else if ( shape === "caption" ) {
+    G.lineStyle(0); G.beginFill(0x15110f, 0.9).drawRect(-r * 1.05 + r * 0.18, -r * 0.8 + r * 0.18, r * 2.1, r * 1.6).endFill();
+    G.lineStyle({ width: r * 0.12, color: 0x15110f, alpha: 1, join: PIXI.LINE_JOIN.MITER });
+    G.beginFill(capFill ?? 0xf7d64a, 1).drawRect(-r * 1.05, -r * 0.8, r * 2.1, r * 1.6);
+  }
   else G.drawCircle(0, 0, r);
   G.endFill();
 }
@@ -223,11 +229,11 @@ export class ZoneDisplay {
       const G = new PIXI.Graphics();
       const numCol = look.numColor ? hex(look.numColor) : light, ringBase = look.ringColor ? hex(look.ringColor) : light;
       const ringCol = band ? band.color : ringBase, shape = look.numShape ?? "circle";
-      badgeShape(G, shape, ringCol, d != null || blocked ? 0.85 : 0.6);
+      badgeShape(G, shape, ringCol, d != null || blocked ? 0.85 : 0.6, band ? band.color : null);
       b.addChild(G);
       // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
       const size = BADGE_R * (text.length > 3 ? 0.62 : text.length > 2 ? 0.78 : text.length > 1 ? 1.0 : 1.2) * (shape === "plain" ? 1.25 : 1);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: d != null || blocked ? ringCol : numCol, align: "center",
+      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: shape === "caption" ? 0x15110f : d != null || blocked ? ringCol : numCol, align: "center", ...(shape === "caption" ? { fontFamily: "'Bangers', 'Comic Sans MS', Signika, sans-serif", fontWeight: "700", letterSpacing: 1 } : {}),
         ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
       t.resolution = res; t.anchor.set(0.5, 0.52);
       b.addChild(t);
@@ -259,6 +265,15 @@ export class ZoneDisplay {
       case "glow": stroke(w * 3.2, col, 0.1 * a, (p) => trace(Ln, p)); stroke(w * 1.9, col, 0.18 * a, (p) => trace(Ln, p)); stroke(w * 0.4, col, a, (p) => trace(Ln, p)); break;
       // hand-drawn: two thin, slightly wandering passes
       case "sketch": under(0.7); stroke(w * 0.3, col, 0.8 * a, (p) => trace(Ln, wobble(p, 1.8 * px, 1, px))); stroke(w * 0.25, col, 0.65 * a, (p) => trace(Ln, wobble(p, 2.2 * px, 2, px))); break;
+      // comic panels: every border is a gutter of paper between two black panel frames; the zones' outer edges are a frame alone
+      case "comic": {
+        const gw = Math.max(11, 17 * ink) * px, fw = Math.max(2, 3.5 * ink) * px;
+        const outer = (width, color) => { Ln.lineStyle({ width, color, alpha: 1, ...R }); for ( const br of Z.borders ) if ( br.b < 0 || br.edge ) { Ln.moveTo(br.pts[0], br.pts[1]); Ln.lineTo(br.pts[2], br.pts[3]); } };
+        outer(fw * 2.2, 0x15110f);
+        stroke(gw + fw * 2, 0x15110f, 1, (p) => trace(Ln, p));
+        stroke(gw, col, 1, (p) => trace(Ln, p));
+        break;
+      }
       default: under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [11 * px, 7 * px]));
     }
     this.#walls(Ln, px, w, col);

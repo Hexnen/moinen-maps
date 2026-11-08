@@ -13,7 +13,10 @@ export const BUILTIN = Object.freeze([
   { id: "classic", name: T("classic"), look: {} },
   { id: "subtle", name: T("subtle"), look: { fill: 0.12, ink: 0.7, lineAlpha: 0.55, numbers: "hover", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8 } },
   { id: "sketch", name: T("sketch"), look: { fill: 0, ink: 1.2, lineAlpha: 0.9, place: "corner", hoverHi: true, hoverFx: "crosshatch" } },
-  { id: "bold", name: T("bold"), look: { fill: 0.5, ink: 1.6, hoverHi: true, hoverFx: "dots" } }
+  { id: "bold", name: T("bold"), look: { fill: 0.5, ink: 1.6, hoverHi: true, hoverFx: "dots" } },
+  // comic book panels: wide paper gutters between black panel frames, a yellow caption box in each panel's corner, halftone on hover
+  { id: "comic", name: T("comic"), look: { fill: 0.1, ink: 1, lineAlpha: 1, lineStyle: "comic", color: "#fbf6e6", numbers: "always", place: "corner",
+    numShape: "caption", numColor: "#15110f", ringColor: "#15110f", numFormat: "arabic", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } }
 ]);
 
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k) ?? d; } catch { return d; } };

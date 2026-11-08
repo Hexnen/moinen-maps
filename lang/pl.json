@@ -1615,10 +1615,18 @@
   "MOINENMAPS.Zones.altShort.elevated": "Wyniesiony",
   "MOINENMAPS.Zones.altShort.sky": "Niebo",
   "MOINENMAPS.Zones.altShort.orbit": "Orbita",
-  "MOINENMAPS.Zones.altHud": "Wysokość: {a}. Klik: wyżej, Shift+klik: niżej, PPM: ziemia.",
+  "MOINENMAPS.Zones.altHud": "Wysokość: {a}. Klik: wybierz poziom, PPM: z powrotem na ziemię.",
   "MOINENMAPS.Zones.h.rclick": "PPM na granicy lub strefie: jej opcje.",
   "MOINENMAPS.Zones.f.link": "Stany z warstw mapy",
   "MOINENMAPS.Zones.h.link": "Ogień namalowany na warstwie ognia podpala strefę (a pożary stref malują się tam); ćwierć strefy rozbitej na warstwie zniszczeń czyni ją zniszczoną (zniszczenia typu powódź: zalaną); ćwierć pod wodą daje jej wodę.",
   "MOINENMAPS.Zones.fromMap": "mapa",
-  "MOINENMAPS.Zones.fromMapHint": "Odczytane z warstw mapy (ogień, zniszczenia, woda): zmienia się razem z malowaniem."
+  "MOINENMAPS.Zones.fromMapHint": "Odczytane z warstw mapy (ogień, zniszczenia, woda): zmienia się razem z malowaniem.",
+  "MOINENMAPS.Zones.altCost.here": "jesteś tutaj",
+  "MOINENMAPS.Zones.altCost.quick": "akcja szybka (albo w ramach ruchu)",
+  "MOINENMAPS.Zones.altCost.full": "jedna akcja pełna",
+  "MOINENMAPS.Zones.altNoLife": "wymaga Life Support albo skafandra",
+  "MOINENMAPS.Zones.altNoLifeWarn": "{name} nie ma Life Support: na orbicie próżnia zabija bez niego (albo bez skafandra).",
+  "MOINENMAPS.Zones.style.comic": "Komiks",
+  "MOINENMAPS.Zones.lineStyle.comic": "Panele komiksu (rynny)",
+  "MOINENMAPS.Zones.numShape.caption": "Ramka narracji"
 }

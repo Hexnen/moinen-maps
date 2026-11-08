@@ -725,3 +725,14 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-z-fire { margin: 0; padding-left: 1.1rem; }
 .mm-z-tip { position: fixed; z-index: 1001; pointer-events: none; padding: 0.2rem 0.5rem; border-radius: 6px; background: #1d1916f0; border: 1px solid #5a4c3c; color: #eadfc8; font-size: 0.8rem; white-space: nowrap; box-shadow: 0 3px 10px #0008; }
 .mm-z-menu .mm-z-map { margin-left: auto; font-style: normal; font-size: 0.68rem; padding: 0 0.3rem; border-radius: 4px; background: #5cc8ff26; color: #9fdcff; }
+#token-hud .mm-z-altpick { position: absolute; left: calc(100% + 6px); top: 0; z-index: 10; display: flex; flex-direction: column; gap: 2px; width: 15rem; padding: 4px;
+  border-radius: 8px; background: #1d1916f2; border: 1px solid #5a4c3c; box-shadow: 0 6px 18px #000a; pointer-events: all; }
+#token-hud .mm-z-altpick button { display: flex; align-items: center; gap: 0.5rem; width: 100%; height: auto; padding: 0.25rem 0.45rem; margin: 0; border: 0; border-radius: 5px;
+  background: none; color: #eadfc8; font-size: 0.8rem; text-align: left; justify-content: flex-start; line-height: 1.25; cursor: pointer; }
+#token-hud .mm-z-altpick button:hover { background: #ffffff14; }
+#token-hud .mm-z-altpick button.on { background: #5cc8ff22; box-shadow: inset 2px 0 0 #5cc8ff; }
+#token-hud .mm-z-altpick button i { width: 1.2rem; text-align: center; }
+#token-hud .mm-z-altpick button span { display: flex; flex-direction: column; }
+#token-hud .mm-z-altpick button small { font-size: 0.7rem; opacity: 0.7; }
+#token-hud .mm-z-altpick button.warn small { color: #ff9a7a; opacity: 1; }
+#token-hud .col.right { position: relative; }

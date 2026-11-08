@@ -27,9 +27,9 @@ export const NUMBERS = ["always", "hover", "never"];
 export const PLACES = ["center", "corner"];
 /** How a zone border is drawn. */
 /** The zone number: its badge and how it is written. */
-export const NUM_SHAPES = ["circle", "square", "hex", "diamond", "plain"];
+export const NUM_SHAPES = ["circle", "square", "hex", "diamond", "caption", "plain"];
 export const NUM_FORMATS = ["arabic", "roman", "letters"];
-export const LINE_STYLES = ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch"];
+export const LINE_STYLES = ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch", "comic"];
 /** What fills the zone under the cursor when "hoverHi" is on (besides its bright border). */
 export const HOVER_FX = ["none", "glow", "hatch", "crosshatch", "dots"];
 

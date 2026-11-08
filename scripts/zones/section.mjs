@@ -4,6 +4,7 @@ import * as Zones from "./zones.mjs";
 import * as Editor from "./editor.mjs";
 import { presets } from "./presets.mjs";
 import * as Styles from "./styles.mjs";
+import * as Model from "./model.mjs";
 
 /**
  * Zones as a workspace section (takes over the "zones" placeholder of soon.mjs). Tools: the hand, the pencil, the eraser; actions:
@@ -99,12 +100,12 @@ function settingsPanel(host) {
         ${row(Z("f.fill"), range("fill", 0, 1))}
         ${row(Z("f.ink"), range("ink", 0, 2))}
         ${row(Z("f.lineAlpha"), range("lineAlpha", 0, 1))}
-        ${row(Z("f.lineStyle"), opts("lineStyle", ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch"], L.lineStyle))}
+        ${row(Z("f.lineStyle"), opts("lineStyle", Model.LINE_STYLES, L.lineStyle))}
         ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}`)}
       ${fold("numbers", Z("grp.numbers"), "fa-solid fa-hashtag", `
         ${row(Z("f.numbers"), opts("numbers", ["always", "hover", "never"], L.numbers), Z("h.numbers"))}
         ${L.numbers !== "never" ? `${row(Z("f.place"), opts("place", ["center", "corner"], L.place))}
-          ${row(Z("f.numShape"), opts("numShape", ["circle", "square", "hex", "diamond", "plain"], L.numShape))}
+          ${row(Z("f.numShape"), opts("numShape", Model.NUM_SHAPES, L.numShape))}
           ${row(Z("f.numFormat"), opts("numFormat", ["arabic", "roman", "letters"], L.numFormat))}
           ${row(Z("f.numColor"), `<input type="color" name="numColor" value="${esc(L.numColor || L.color)}">`, Z("h.numColor"))}
           ${row(Z("f.ringColor"), `<input type="color" name="ringColor" value="${esc(L.ringColor || L.color)}">`, Z("h.numColor"))}` : ""}`)}

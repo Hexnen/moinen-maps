@@ -568,6 +568,21 @@ export async function setAltitude(token, alt) {
   return alt === "ground" ? doc.unsetFlag(MODULE_ID, "alt") : doc.setFlag(MODULE_ID, "alt", alt);
 }
 
+/**
+ * What moving between two altitudes costs (book, Movement): ground <-> elevated a quick action (or as part of a move, no action of
+ * its own); to or from Sky High or Orbit one full action - straight between any two levels (orbit to the ground is one full action).
+ */
+export function altCost(from, to) {
+  if ( from === to ) return "here";
+  return OFF_MAP.has(from) || OFF_MAP.has(to) ? "full" : "quick";
+}
+/** Life Support (or a spacesuit, which the GM judges): a power by that name keeps a character alive in orbit. */
+export function hasLifeSupport(actor) {
+  const n = (s) => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+  return !!actor?.items?.some((i) => ["lifesupport", "podtrzymywaniezycia"].some((w) => n(i.name).startsWith(w)));
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
 /** A small tag on a token that is not on the ground (only where the zones show). */
 function altBadge(t) {
   if ( !t || t.destroyed ) return;
@@ -608,11 +623,29 @@ function onTokenHUD(hud, html) {
     btn.classList.toggle("active", a !== "ground");
   };
   show();
-  btn.addEventListener("click", async (ev) => {
+  // a click opens the four levels, each with what getting there costs from here (book: Movement, vertical movement)
+  btn.addEventListener("click", (ev) => {
     ev.preventDefault(); ev.stopPropagation();
-    const a = altOf(t.document), i = ALTS.indexOf(a);
-    await setAltitude(t, ALTS[(i + (ev.shiftKey ? ALTS.length - 1 : 1)) % ALTS.length]);
-    show();
+    const old = root.querySelector(".mm-z-altpick");
+    if ( old ) { old.remove(); return; }
+    const a = altOf(t.document), life = hasLifeSupport(t.actor);
+    const pick = document.createElement("div");
+    pick.className = "mm-z-altpick";
+    pick.innerHTML = ALTS.map((k) => {
+      const cost = altCost(a, k), warn = k === "orbit" && !life;
+      return `<button type="button" data-alt="${k}" class="${k === a ? "on" : ""}${warn ? " warn" : ""}"><i class="fa-solid ${icon[k]}" inert></i>
+        <span><b>${esc(game.i18n.localize(`MOINENMAPS.Zones.alt.${k}`))}</b><small>${esc(game.i18n.localize(`MOINENMAPS.Zones.altCost.${cost}`))}${warn ? ` · ${esc(game.i18n.localize("MOINENMAPS.Zones.altNoLife"))}` : ""}</small></span></button>`;
+    }).join("");
+    pick.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-alt]"); if ( !b ) return;
+      e.preventDefault(); e.stopPropagation();
+      const k = b.dataset.alt;
+      pick.remove();
+      if ( k === "orbit" && !hasLifeSupport(t.actor) ) ui.notifications.warn(game.i18n.format("MOINENMAPS.Zones.altNoLifeWarn", { name: t.name }));
+      await setAltitude(t, k);
+      show();
+    });
+    btn.after(pick);
   });
   btn.addEventListener("contextmenu", async (ev) => { ev.preventDefault(); ev.stopPropagation(); await setAltitude(t, "ground"); show(); });
   col.append(btn);
@@ -637,7 +670,7 @@ export const zonesApi = {
   presets: () => presets().map((p) => ({ id: p.id, title: game.i18n.localize(p.title) })),
   addStroke, erase: eraseAlong, trim, clear: clearAll, undo: undoEdit, redo: redoEdit, setParams,
   /** Walls and doors, zone features and states (marks.mjs), fire, token altitude. */
-  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
+  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
   geometry: Geo
