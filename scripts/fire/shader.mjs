@@ -203,6 +203,8 @@ void main() {
 
 let program = null;
 const programOf = () => program ??= PIXI.Program.from(VERT, FRAG, "moinen-maps-fire-v2");
+/** The fireball program (pre-warmed with the art ones when the scene has a fireball stroke: fire.mjs). */
+export const fireballProgram = programOf;
 
 /** Is the edge sampler wanted (CONFIG.moinenMaps.zoomAA 'edge', the default)? -> the footprint scale. */
 export function footprintK() {
