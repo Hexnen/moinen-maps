@@ -1,5 +1,6 @@
 import * as TM from "./tornado-model.mjs";
-import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
+import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
+import { CellCache, cellVert, showNearest } from "./cells.mjs";
 import { blendMode } from "./display.mjs";
 import { hu, sceneWind, dirVec } from "../wind.mjs";
 import { mapPixels } from "../destruction/source.mjs";
@@ -146,6 +147,11 @@ class TornadoView {
       m.visible = false;
       canvas.primary.addChild(m);
     }
+    // the ground is one value per art cell: zoomed in, computed per cell into a float texture and fetched (cells.mjs)
+    this.groundCells = new CellCache(this.ground, prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG), prog("groundShow", GROUND_VERT, showNearest("vP")));
+    // the art passes back to front, drawn by ONE render call (the same draws in the same order as one call each)
+    this.artRoot = new PIXI.Container();
+    this.artRoot.addChild(this.curtain, this.skirt, this.back, this.debB, this.wallB, this.column, this.debF, this.wallF, this.front, this.curtainF, this.deck);
     this.frags = new Map();
     this.stats = { inst: 0, cpuMs: 0 };
   }
@@ -330,6 +336,7 @@ class TornadoView {
     // ---- render the art
     this.render();
     this.ground.visible = true; this.marks.visible = this.Lg.n > 0; this.show.visible = true;
+    this.groundCells.update(g, vr, [gx0, gy0, gx1, gy1]);
     this.stats.inst = this.Lb.n + this.Lf.n + this.Lg.n; this.stats.cpuMs = performance.now() - c0;
     return true;
   }
@@ -528,23 +535,17 @@ class TornadoView {
     for ( const [I, G] of [[Lb, this.ib], [Lf, this.ifr], [Lg, this.ig]] ) { G.buf.data.set(I.d.subarray(0, I.n * STRIDE)); G.buf.update(); G.g.instanceCount = I.n; }
   }
 
+  /** The art texture: far curtain, skirt, back debris, the volumes behind, column, the volumes in front, front debris, near curtain, deck. */
   render() {
-    const r = canvas.app.renderer, A = this.art;
-    const R = (m) => { if ( m.visible !== false ) r.render(m, { renderTexture: A, clear: false }); };
-    r.render(this.curtain, { renderTexture: A, clear: true });
-    R(this.skirt);
-    if ( this.Lb.n ) R(this.back);
-    R(this.debB); R(this.wallB);
-    R(this.column);
-    R(this.debF); R(this.wallF);
-    if ( this.Lf.n ) R(this.front);
-    R(this.curtainF);
-    r.render(this.deck, { renderTexture: A, clear: false });
+    this.back.visible = this.Lb.n > 0; this.front.visible = this.Lf.n > 0;
+    canvas.app.renderer.render(this.artRoot, { renderTexture: this.art, clear: true });
   }
 
   hide() { this.ground.visible = false; this.marks.visible = false; this.show.visible = false; }
 
   destroy() {
+    this.groundCells.destroy();
+    this.artRoot.removeChildren(); this.artRoot.destroy();
     for ( const m of [this.ground, this.marks, this.show] ) { m.parent?.removeChild(m); }
     for ( const m of [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF, this.back, this.front, this.marks, this.ground, this.show] ) { m.geometry?.destroy(); m.destroy(); }
     this.art.destroy(true);
