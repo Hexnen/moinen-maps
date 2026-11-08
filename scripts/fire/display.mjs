@@ -23,8 +23,9 @@ import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
  * COST: nothing painted -> no container, no ticker, no draw (the display is not even made). With fire: one ticker listener that culls
  * the areas against the view (an area off screen is `visible = false`: no draw), writes one uniform per visible area when the 12 fps
  * frame changes, and places the particles of the visible areas; an area that grows or goes out also gets its two clock uniforms
- * (model.raster's times texture does the rest on the GPU); a second, tiny listener right before the render (`guard`: the art cells
- * near the view, A9). Reduced motion (the art drawn whole): a still frame (time 0), no particles, a steady light, no
+ * (model.raster's times texture does the rest on the GPU); a check right before every render of the stage (beforeRender: the art cells
+ * that render draws, A10). The art work of a frame stays under a budget the adaptive guard lowers when frames run long (A11).
+ * Reduced motion (the art drawn whole): a still frame (time 0), no particles, a steady light, no
  * growing / going out (fire.mjs leaves the phases out) - the ticker is not registered at all.
  */
 const CAP = { high: 48, medium: 24, low: 0 };
@@ -47,7 +48,23 @@ const ART_BUDGET = 600000;
  * whose drawn cells do not hold that region; an area culled from the view but inside a capture is shown for that render, drawn at the
  * current art frame, then hidden again. So no render ever shows a cell of another art frame. A frame costs one compare per area.
  */
-const MARGIN = 0.25, PAD = 4;
+const MARGIN = 0.1, PAD = 4;
+/**
+ * A11 - RESPONSIVENESS FIRST (the camera must never wait for the fire):
+ *  - an area's cells under the view are a MUST (no render may show a cell of another frame), everything else is optional work under
+ *    the art budget. When the view leaves an area's drawn window, the window is GROWN with cells of the frame it already shows
+ *    (FireArt.extendArt: only the strips the move uncovered, AHEAD of the view each way) instead of redrawn at the new frame - a fast
+ *    pan or a jump costs the cells it uncovers. The new frame follows under the budget, the longest-waiting area first (an area coming
+ *    on screen shows the frame it had until then). An area never drawn, or one whose window lies far from the view, is drawn fresh at
+ *    the current frame over the view only (whichever is fewer cells).
+ *  - while the CAMERA MOVES (and 200 ms after) the budget is halved: fewer new frames, the same picture, the same must-cells.
+ *  - an ADAPTIVE GUARD watches the frame intervals: frames well over the display's own interval (an envelope of the shortest) lower the
+ *    fire's detail a step (budget, then art frames at 6 fps, then no particles); a calm stretch raises it again a step at a time.
+ *    `CONFIG.moinenMaps.fireAdaptive = false` keeps full detail.
+ */
+const AHEAD = 0.1, MOVE_MS = 200;
+const byArtT = (x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1);
+const LEVELS = [{ budget: 1, fps6: false, parts: 1 }, { budget: 0.5, fps6: false, parts: 1 }, { budget: 0.3, fps6: true, parts: 0.5 }, { budget: 0.2, fps6: true, parts: 0 }];
 
 /** The renderer's `render`, wrapped once per renderer (other modules may wrap it after us: never unwrapped, inert without fire). */
 let shown = null, inRender = false;
@@ -99,6 +116,11 @@ export class FireDisplay {
     this._tick = () => this.tick();
     this.ticking = false;
     this.lastT = -1;
+    // (A11: scratch reused every frame - no garbage per frame; the camera as last seen; the adaptive guard)
+    this._vw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._rvw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._nvw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._need = [0, 0, 0, 0]; this._ahead = [0, 0, 0, 0];
+    this._win = [0, 0, 0, 0]; this._pt = new PIXI.Point(); this._vis = []; this._stale = [];
+    this.cam = [NaN, NaN, NaN]; this.movedAt = -1e9;
+    this.level = 0; this.base = 0; this.press = 0; this.stepAt = 0; this.upAt = 0; this.calm = 3000; this._ri = 0; this._rn = 0; this.holdK = 3; this.lastCells = 0;
     shown = this; hookRender();
   }
 
@@ -159,48 +181,152 @@ export class FireDisplay {
     if ( want ) canvas.app.ticker.add(this._tick); else canvas.app.ticker.remove(this._tick);
   }
 
-  /** The view in scene px. */
-  view() {
-    const v = canvas.app.renderer.screen, st = canvas.stage;
-    const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
-    return { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y };
+  /** The view in scene px (written into `out`: no garbage). */
+  view(out = this._vw) {
+    const v = canvas.app.renderer.screen, st = canvas.stage, p = this._pt;
+    st.toLocal(p.set(0, 0), undefined, p); out.x0 = p.x; out.y0 = p.y;
+    st.toLocal(p.set(v.width, v.height), undefined, p); out.x1 = p.x; out.y1 = p.y;
+    return out;
+  }
+
+  /**
+   * The ADAPTIVE GUARD, once a frame with the interval since the last one (ms). `base` = the display's own interval: the 20th
+   * percentile of the last 120 intervals (re-taken every 30; a few odd short ones do not move it), never taken above a 60 Hz refresh
+   * (frames that are ALL slow - a weak GPU from the first frame - still count as slow); `press` is a running share of frames well over
+   * it. Pressed for a while: one step less detail (at most a step a second); calm for a while (3 s, doubled up to 30 s each time the
+   * pressure came back within 3 s of a step up - no see-saw): one step back. Intervals under 4 ms (frames stepped by hand, not a
+   * display) and over 250 ms (a stall: a hidden tab, a load) are not frames.
+   */
+  adapt(ms, pn) {
+    if ( CONFIG.moinenMaps?.fireAdaptive === false ) { this.level = 0; this.holdK = 3; return false; }
+    if ( !(ms >= 4) || ms > 250 ) return false;
+    const N = 120, ring = this._ring ??= new Float32Array(N), srt = this._srt ??= new Float32Array(N);
+    ring[this._ri % N] = ms; this._ri++; if ( this._rn < N ) this._rn++;
+    if ( this._rn < 30 ) return false;
+    if ( !this.base || this._ri % 30 === 0 ) { srt.set(ring); srt.sort(); this.base = Math.min(16.7, Math.max(6.5, srt[N - this._rn + Math.floor(this._rn * 0.2)])); }
+    // (a 60 Hz screen counts a frame long from 25 ms - one missed refresh; a 144 Hz one from ~11 ms)
+    const long = ms > Math.max(this.base * 1.5, this.base + 4);
+    this.press = this.press * 0.95 + (long ? 0.05 : 0);
+    if ( this.press > 0.25 && this.level < LEVELS.length - 1 && pn - this.stepAt > 1000 ) {
+      if ( this.upAt && pn - this.upAt < 3000 ) this.calm = Math.min(30000, (this.calm || 3000) * 2);   // (it came back: wait longer)
+      this.level++; this.stepAt = pn; this.upAt = 0; this.press = 0.1;
+    } else if ( this.press < 0.02 && this.level > 0 && pn - this.stepAt > (this.calm || 3000) ) { this.level--; this.stepAt = this.upAt = pn; }
+    this.stats.level = this.level;
+    return long;
+  }
+
+  /**
+   * A11: the cells of art area `a` under the view `vw` must be of one art frame. If its drawn window does not hold them: grow the window
+   * with cells of the frame it shows (extendArt), or - when that would be more cells - draw the view's cells fresh at frame `T`. The
+   * view is taken AHEAD of itself a little (a pan keeps going). Returns the cells drawn (0: nothing to do).
+   */
+  mustCost(a, vw) {
+    const m = a.mesh, need = this.windowOf(a, vw, 0, this._need);
+    if ( need[2] <= need[0] || need[3] <= need[1] || (m.artT !== null && m.covers(need)) ) return 0;
+    if ( !this.ticking ) return m.W * m.H;
+    const ahead = this.windowOf(a, vw, AHEAD, this._ahead), fresh = (ahead[2] - ahead[0]) * (ahead[3] - ahead[1]), o = m.artT !== null ? m.artWin : null;
+    if ( !o ) return fresh;
+    return Math.min(fresh, (Math.max(o[2], ahead[2]) - Math.min(o[0], ahead[0])) * (Math.max(o[3], ahead[3]) - Math.min(o[1], ahead[1])) - (o[2] - o[0]) * (o[3] - o[1]));
+  }
+
+  ensure(a, vw, T) {
+    const m = a.mesh, need = this.windowOf(a, vw, 0, this._need);
+    if ( need[2] <= need[0] || need[3] <= need[1] ) return 0;
+    if ( m.artT !== null && m.covers(need) ) return 0;
+    const R = canvas.app.renderer;
+    if ( !this.ticking ) { m.setTime(T); m.renderArt(R); this.stats.artPasses++; return m.W * m.H; }   // (still: always whole)
+    const ahead = this.windowOf(a, vw, AHEAD, this._ahead), fresh = (ahead[2] - ahead[0]) * (ahead[3] - ahead[1]);
+    const o = m.artT !== null ? m.artWin : null;
+    if ( o ) {
+      const grown = (Math.max(o[2], ahead[2]) - Math.min(o[0], ahead[0])) * (Math.max(o[3], ahead[3]) - Math.min(o[1], ahead[1])) - (o[2] - o[0]) * (o[3] - o[1]);
+      if ( grown <= fresh ) { const c = m.extendArt(R, ahead); this.stats.extends = (this.stats.extends ?? 0) + 1; return c; }
+    }
+    m.setTime(T); m.renderArt(R, ahead); this.stats.artPasses++;
+    return fresh;
   }
 
   tick(force = false) {
     if ( !canvas.stage || !this.geo ) return;
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
-    const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
-    const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
+    const pn = performance.now(), dms = this.lastPn ? pn - this.lastPn : 0, dt = dms / 1000; this.lastPn = pn;
+    const L0 = LEVELS[this.level] ?? LEVELS[0];
+    // (the last frame ran long right after the fire drew more than a budget in it: this device cannot take more at once - from now on
+    // an area coming into view is held past one budget, not three)
+    if ( this.ticking && this.adapt(dms, pn) && this.lastCells > ART_BUDGET * L0.budget ) this.holdK = 1;
+    const L = LEVELS[this.level] ?? LEVELS[0], now0 = sharedNow(), now = still ? 0 : now0;
+    let T = still ? 0 : M.shaderTime(now, P.speed); if ( L.fps6 ) T = Math.floor(T * 6) / 6;   // (a whole 12 fps frame, every other one)
+    const newFrame = T !== this.lastT || force;
+    const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0, st = canvas.stage, cam = this.cam;
+    if ( st.pivot.x !== cam[0] || st.pivot.y !== cam[1] || st.scale.x !== cam[2] ) { cam[0] = st.pivot.x; cam[1] = st.pivot.y; cam[2] = st.scale.x; this.movedAt = pn; }
+    const moving = pn - this.movedAt < MOVE_MS;
     if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
-    const vis = [], stale = [], vort = vortices().length > 0, wet = fireWet();
-    const pn = performance.now(), dt = this.lastPn ? (pn - this.lastPn) / 1000 : 0; this.lastPn = pn;
+    const vis = this._vis, stale = this._stale, vort = vortices().length > 0, wet = fireWet();
+    vis.length = 0; stale.length = 0;
     this.tornadoDepth(vort);   // (a tornado's foot: depth rects + the front layer over it; vortex-lean.mjs)
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
-      a.came = on && !a.mesh.visible;                                  // (A10: back on screen - its cells are of an older frame: drawn now)
-      if ( a.mesh.visible !== on ) a.mesh.visible = on;
-      if ( on ) {
-        vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
-        // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
-        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
+      if ( !on ) { if ( a.mesh.visible ) a.mesh.visible = false; a.hold = false; continue; }
+      // (an art area coming into view is HELD - not shown - until its cells there are drawn: at once when they fit this frame)
+      if ( !a.mesh.visible && !a.hold ) { if ( a.mesh.isArt && this.ticking && !force ) a.hold = true; else a.mesh.visible = true; }
+      vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
+      if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
+    }
+    const budget = ART_BUDGET * L.budget * (moving ? 0.5 : 1), R = canvas.app.renderer;
+    // (what an area coming into view may draw at once: 3 budgets at full detail - a zoom-out shows its areas together - one when the
+    // guard has already found the frames long)
+    const holdAt = ART_BUDGET * L.budget * (this.level === 0 ? this.holdK : 1);
+    // the MUST: every shown area's cells under the view of one art frame (A11: grown with the frame it shows - the cells a move
+    // uncovered, not a window; ensure). Counted against the budget, so the optional work below yields to it. An area just come into
+    // view whose cells do not fit this frame's budget (a jump far away, a weak GPU) stays hidden while they are drawn in steps behind
+    // (startJob) and shows when they are whole - a frame or two later, never a long frame, never a cell of another frame.
+    let cells = 0;
+    for ( const a of vis ) {
+      const am = a.mesh; if ( !am.isArt ) continue;
+      if ( !a.hold ) { cells += this.ensure(a, vw, T); continue; }
+      const c = this.mustCost(a, vw);
+      if ( !c || cells + c <= holdAt ) { cells += this.ensure(a, vw, T); a.hold = false; am.visible = true; continue; }
+      if ( !am.job ) { am.startJob(this.windowOf(a, vw, AHEAD, this._ahead), T); this.stats.held = (this.stats.held ?? 0) + 1; }
+      if ( cells < budget ) cells += am.stepJob(R, budget - cells);
+      if ( !am.job && am.covers(this.windowOf(a, vw, 0, this._need)) ) { a.hold = false; am.visible = true; }
+    }
+    // the new art frame: once per 12 fps frame per visible area, spread over the display frames - at most the budget a frame (less
+    // while the camera moves, less at a lower guard level), the longest-waiting first; a forced redraw goes now
+    stale.sort(byArtT);
+    for ( const a of stale ) {
+      const am = a.mesh;
+      if ( a.hold || (am.artT === T && !force) ) continue;             // (held: drawn above; or ensure drew it fresh just now)
+      if ( am.job && !force ) { if ( cells < budget ) cells += am.stepJob(R, budget - cells); continue; }   // (a big frame on its way)
+      const w = this.ticking ? this.windowOf(a, vw, MARGIN, this._win) : null, c = w ? Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]) : am.W * am.H;
+      if ( c <= 0 ) continue;
+      if ( force || am.artT === null || cells + c <= budget ) { am.setTime(T); am.renderArt(R, w); this.stats.artPasses++; cells += c; continue; }
+      // too big to fit a frame at all: drawn in steps behind the frame it shows (FireArt.startJob); else it waits for a frame with room
+      if ( c > budget ) { am.startJob(w ?? [0, 0, am.W, am.H], T); this.stats.jobs = (this.stats.jobs ?? 0) + 1; if ( cells < budget ) cells += am.stepJob(R, budget - cells); }
+    }
+    // PREFETCH: in a calm frame with room left, an area just off screen (within half a view) that has never been drawn there is drawn
+    // (in steps if big): a zoom-out or pan that brings it in finds its cells ready and shows them, instead of drawing them all at once
+    if ( this.ticking && !moving && !force && cells < budget ) {
+      const near = this._nvw, hx = (vw.x1 - vw.x0) * 0.5, hy = (vw.y1 - vw.y0) * 0.5;
+      near.x0 = vw.x0 - hx; near.y0 = vw.y0 - hy; near.x1 = vw.x1 + hx; near.y1 = vw.y1 + hy;
+      for ( const a of this.areas.values() ) {
+        const am = a.mesh; if ( am.visible || !am.isArt || cells >= budget ) continue;
+        if ( am.job ) { cells += am.stepJob(R, budget - cells); continue; }
+        if ( !M.inView(a.area.rect, geo, near, m) ) continue;
+        const w = this.windowOf(a, near, 0, this._win); if ( w[2] <= w[0] || w[3] <= w[1] || (am.artT !== null && am.covers(w)) ) continue;
+        am.setTime(T); if ( am.anim ) am.setPhase(now0);
+        am.startJob(w, T); this.stats.prefetch = (this.stats.prefetch ?? 0) + 1;
+        cells += am.stepJob(R, budget - cells);
       }
     }
-    // (spread over the display frames of one 12 fps frame: at most ART_BUDGET cells a frame, the longest-waiting first; an area never
-    // drawn yet, or a forced redraw, always goes now - so many areas do not all land on one frame as a spike)
-    stale.sort((x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1));
-    let cells = 0;
-    for ( const a of stale ) {
-      const w = this.ticking ? this.windowOf(a, vw, MARGIN) : null, c = w ? Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]) : a.mesh.W * a.mesh.H;
-      if ( cells > 0 && cells + c > ART_BUDGET && !force && a.mesh.artT !== null && !a.came ) continue;
-      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer, w); this.stats.artPasses++; cells += c;
-    }
+    this.stats.cells = this.lastCells = cells;
     this.lastT = T;
     const lu = this.lights.stats.updates;
     this.lights.update(now0);                                         // (the lights' uniforms: only on a new 12 fps frame)
     dampLights(this.lights, wet, this.lights.stats.updates !== lu);   // (rain / snow over fire: rain-damp.mjs)
-    this.stats.visible = vis.length;
-    // particles: only on a new 12 fps frame (they move on the art grid, in whole cells)
-    if ( newFrame ) this.placeParticles(still ? [] : vis, now);
+    // particles: only on a new 12 fps frame (they move on the art grid, in whole cells); none over a held area yet
+    const shownA = this._shownA ??= []; shownA.length = 0;
+    for ( const a of vis ) if ( !a.hold ) shownA.push(a);
+    this.stats.visible = shownA.length;
+    if ( newFrame ) this.placeParticles(still ? [] : shownA, now);
     this.stats.tickMs = performance.now() - t0;
   }
 
@@ -226,11 +352,12 @@ export class FireDisplay {
   }
 
   /** An area's cells (its art texture's) under the view `vw` (scene px) grown by `margin` x its size each way and PAD cells. */
-  windowOf(a, vw, margin = 0) {
+  windowOf(a, vw, margin = 0, out = [0, 0, 0, 0]) {
     const { ap, ox, oy } = this.geo, r = a.area.rect, x0 = ox + r.x0 * ap, y0 = oy + r.y0 * ap, W = a.mesh.W, H = a.mesh.H;
     const mx = margin * (vw.x1 - vw.x0), my = margin * (vw.y1 - vw.y0);
-    return [Math.max(0, Math.floor((vw.x0 - mx - x0) / ap) - PAD), Math.max(0, Math.floor((vw.y0 - my - y0) / ap) - PAD),
-      Math.min(W, Math.ceil((vw.x1 + mx - x0) / ap) + PAD), Math.min(H, Math.ceil((vw.y1 + my - y0) / ap) + PAD)];
+    out[0] = Math.max(0, Math.floor((vw.x0 - mx - x0) / ap) - PAD); out[1] = Math.max(0, Math.floor((vw.y0 - my - y0) / ap) - PAD);
+    out[2] = Math.min(W, Math.ceil((vw.x1 + mx - x0) / ap) + PAD); out[3] = Math.min(H, Math.ceil((vw.y1 + my - y0) / ap) + PAD);
+    return out;
   }
 
   /**
@@ -244,23 +371,31 @@ export class FireDisplay {
     const rt = options?.renderTexture ?? null, tf = options?.transform ?? null;   // (PIXI 7.4: render(object, { renderTexture, transform, ... }))
     const R = canvas.app.renderer, st = canvas.stage, w = rt ? rt.width : R.screen.width, h = rt ? rt.height : R.screen.height;
     st.transform.updateLocalTransform();
-    const X = tf ? tf.clone().append(st.localTransform) : st.localTransform.clone(), c = [[0, 0], [w, 0], [0, h], [w, h]].map(([x, y]) => X.applyInverse(new PIXI.Point(x, y)));
-    const vw = { x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)) };
-    const screen = !rt && !tf, T = this.lastT >= 0 ? this.lastT : (reducedMotion() ? 0 : M.shaderTime(sharedNow(), this.P.speed));
-    const dark = canvas.environment?.darknessLevel ?? 0, undo = [];
+    const screen = !rt && !tf, vw = this._rvw, p = this._pt;
+    // (the region drawn, in scene px: the target's corners through the inverse of (transform x stage); the frame allocates nothing)
+    const X = tf ? tf.clone().append(st.localTransform) : st.localTransform;
+    vw.x0 = vw.y0 = Infinity; vw.x1 = vw.y1 = -Infinity;
+    for ( let k = 0; k < 4; k++ ) {
+      X.applyInverse(p.set(k & 1 ? w : 0, k & 2 ? h : 0), p);
+      if ( p.x < vw.x0 ) vw.x0 = p.x; if ( p.x > vw.x1 ) vw.x1 = p.x; if ( p.y < vw.y0 ) vw.y0 = p.y; if ( p.y > vw.y1 ) vw.y1 = p.y;
+    }
+    const T = this.lastT >= 0 ? this.lastT : (reducedMotion() ? 0 : M.shaderTime(sharedNow(), this.P.speed));
+    let undo = null;
     for ( const a of this.areas.values() ) {
       const m = a.mesh; if ( !m.isArt ) continue;
-      const need = this.windowOf(a, vw); if ( need[2] <= need[0] || need[3] <= need[1] ) continue;   // (none of it in this render)
-      if ( !m.visible ) {
-        if ( screen ) continue;                                   // (the frame: the tick's culling stands)
-        m.visible = true; undo.push(m); m.setDark(dark);
-        if ( m.artT !== T ) { m.setTime(T); m.artWin = null; }   // (culled: its cells are of an older frame)
+      if ( m.visible ) {                                           // (on screen: the must of the tick, for the region this render draws)
+        if ( this.ensure(a, vw, T) ) this.stats.guarded = (this.stats.guarded ?? 0) + 1;
+        continue;
       }
-      if ( m.artT !== null && m.covers(need) ) continue;           // (drawn here: this frame's, or the last one a budgeted area shows whole)
-      if ( m.artT === null ) m.setTime(T);
-      m.renderArt(R, this.ticking ? this.windowOf(a, vw, screen ? MARGIN : 0) : null); this.stats.artPasses++; this.stats.guarded = (this.stats.guarded ?? 0) + 1;
+      if ( screen ) continue;                                      // (the frame: the tick's culling stands)
+      const need = this.windowOf(a, vw, 0, this._need); if ( need[2] <= need[0] || need[3] <= need[1] ) continue;   // (none of it here)
+      // a capture over an area culled from the view: shown for this render only, its cells there at the current frame
+      m.visible = true; (undo ??= []).push(m); m.setDark(canvas.environment?.darknessLevel ?? 0);
+      if ( m.artT !== T ) { m.setTime(T); if ( m.anim ) m.setPhase(sharedNow()); m.artWin = null; }
+      if ( m.artT !== null && m.covers(need) ) continue;
+      m.setTime(T); m.renderArt(R, this.ticking ? need : null); this.stats.artPasses++; this.stats.guarded = (this.stats.guarded ?? 0) + 1;
     }
-    return undo.length ? undo : null;
+    return undo;
   }
 
 
@@ -295,7 +430,7 @@ export class FireDisplay {
   }
 
   placeParticles(vis, now) {
-    const cap = reducedMotion() ? 0 : (CAP[perfMode()] ?? 0), geo = this.geo, ap = geo.ap;
+    const cap = reducedMotion() ? 0 : Math.round((CAP[perfMode()] ?? 0) * (LEVELS[this.level]?.parts ?? 1)), geo = this.geo, ap = geo.ap;
     const slots = M.shareSlots(vis.map((a) => a.field), cap);
     let n = 0;
     for ( let i = 0; i < vis.length; i++ ) {
@@ -330,6 +465,9 @@ export class FireDisplay {
     const t = PIXI.Texture.fromBuffer(a, 2, 2); t.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST; t.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     return this._puff = t;
   }
+
+  /** Back to full detail (the guard starts over). */
+  resetDetail() { this.level = 0; this.press = 0; this.base = 0; this.stepAt = 0; this.upAt = 0; this.calm = 3000; this._ri = 0; this._rn = 0; this.holdK = 3; this.lastCells = 0; this.stats.level = 0; }
 
   /** Performance mode or reduced motion changed: re-arm, redraw once. */
   refresh() {
