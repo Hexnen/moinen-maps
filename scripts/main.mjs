@@ -5,6 +5,7 @@ import { registerCoreSettings } from "./config.mjs";
 import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, onWorkspaceTool, installPatches } from "./tools.mjs";
 import "./workspace/sections.mjs";
 import "./destruction/cinematic-panel.mjs";      // cinematic screen effects: CinematicFx (api.cinematic), client settings, the "Cinematic effects" dock panel
+import "./director/index.mjs";                  // the Director: events -> shots for the players (scripts/director); owns the screen engine the cinematic mode uses
 import { syncWorkspace } from "./workspace/shell.mjs";
 import { registerFilterSettings } from "./filter.mjs";
 import * as WaterScene from "./water/water.mjs";
