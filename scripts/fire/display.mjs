@@ -61,6 +61,12 @@ const MARGIN = 0.1, PAD = 4;
  *  - an ADAPTIVE GUARD watches the frame intervals: frames well over the display's own interval (an envelope of the shortest) lower the
  *    fire's detail a step (budget, then art frames at 6 fps, then no particles); a calm stretch raises it again a step at a time.
  *    `CONFIG.moinenMaps.fireAdaptive = false` keeps full detail.
+ * A12 - THE NEXT ART FRAME DRAWN AHEAD (drawAhead): at rest a new 12 fps frame used to land as one burst (every shown area's window in
+ * one display frame, then nothing for four). Now each shown area that shows the current frame gets the NEXT one drawn into its back
+ * texture in even shares over the display frames before it is due (its own small maps in pre textures, its clocks / lean as they will
+ * be then: FireArt.startPre / stepJob), and swaps to it the frame the shared clock reaches it - the same cells of the same frame, shown
+ * on time, the GPU work spread instead of bunched (and the areas a burst used to leave stale until a later frame now keep 12 fps).
+ * `CONFIG.moinenMaps.fireAhead = false` turns it off (the A11 schedule).
  */
 const AHEAD = 0.1, MOVE_MS = 200;
 const byArtT = (x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1);
@@ -256,6 +262,11 @@ export class FireDisplay {
     const L = LEVELS[this.level] ?? LEVELS[0], now0 = sharedNow(), now = still ? 0 : now0;
     let T = still ? 0 : M.shaderTime(now, P.speed); if ( L.fps6 ) T = Math.floor(T * 6) / 6;   // (a whole 12 fps frame, every other one)
     const newFrame = T !== this.lastT || force;
+    // A12: the NEXT art frame (its time and how soon the shared clock reaches it) and the display's own frame interval: the next frame
+    // is drawn ahead over the display frames before it is due (PRE below)
+    const nx = this.ticking && !still && P.speed > 0 && CONFIG.moinenMaps?.fireAhead !== false ? this.nextFrame(now0, P.speed, L.fps6, T) : null;
+    if ( dms >= 4 && dms <= 100 ) this.ivMs = this.ivMs ? this.ivMs * 0.9 + dms * 0.1 : dms;
+    const R = canvas.app.renderer;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0, st = canvas.stage, cam = this.cam;
     if ( st.pivot.x !== cam[0] || st.pivot.y !== cam[1] || st.scale.x !== cam[2] ) { cam[0] = st.pivot.x; cam[1] = st.pivot.y; cam[2] = st.scale.x; this.movedAt = pn; }
     const moving = pn - this.movedAt < MOVE_MS;
@@ -269,9 +280,16 @@ export class FireDisplay {
       // (an art area coming into view is HELD - not shown - until its cells there are drawn: at once when they fit this frame)
       if ( !a.mesh.visible && !a.hold ) { if ( a.mesh.isArt && this.ticking && !force ) a.hold = true; else a.mesh.visible = true; }
       vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
-      if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
+      if ( a.mesh.isArt ) {
+        a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet);
+        // (A12: the frame drawn ahead is due: shown as it is - only its OCC tiles are drawn now; one drawn ahead for another frame - a
+        // skipped frame, the clock's wrap - is dropped)
+        const j = a.mesh.job;
+        if ( j?.pre ) { if ( j.t === T && j.done && !force ) a.mesh.swapJob(R); else if ( j.t !== T && j.t !== nx?.t ) a.mesh.job = null; }
+        if ( a.mesh.artT !== T || force ) stale.push(a);
+      }
     }
-    const budget = ART_BUDGET * L.budget * (moving ? 0.5 : 1), R = canvas.app.renderer;
+    const budget = ART_BUDGET * L.budget * (moving ? 0.5 : 1);
     // (what an area coming into view may draw at once: 3 budgets at full detail - a zoom-out shows its areas together - one when the
     // guard has already found the frames long)
     const holdAt = ART_BUDGET * L.budget * (this.level === 0 ? this.holdK : 1);
@@ -285,8 +303,9 @@ export class FireDisplay {
       if ( !a.hold ) { cells += this.ensure(a, vw, T); continue; }
       const c = this.mustCost(a, vw);
       if ( !c || cells + c <= holdAt ) { cells += this.ensure(a, vw, T); a.hold = false; am.visible = true; continue; }
+      if ( am.job?.pre ) am.job = null;                                // (a frame drawn ahead: the hold draws the current one)
       if ( !am.job ) { am.startJob(this.windowOf(a, vw, AHEAD, this._ahead), T); this.stats.held = (this.stats.held ?? 0) + 1; }
-      if ( cells < budget ) cells += am.stepJob(R, budget - cells);
+      if ( cells < budget ) cells += am.stepJob(R, budget - cells, T);
       if ( !am.job && am.covers(this.windowOf(a, vw, 0, this._need)) ) { a.hold = false; am.visible = true; }
     }
     // the new art frame: once per 12 fps frame per visible area, spread over the display frames - at most the budget a frame (less
@@ -295,12 +314,12 @@ export class FireDisplay {
     for ( const a of stale ) {
       const am = a.mesh;
       if ( a.hold || (am.artT === T && !force) ) continue;             // (held: drawn above; or ensure drew it fresh just now)
-      if ( am.job && !force ) { if ( cells < budget ) cells += am.stepJob(R, budget - cells); continue; }   // (a big frame on its way)
+      if ( am.job && !force && am.job.t === T ) { if ( cells < budget ) cells += am.stepJob(R, budget - cells, T); continue; }   // (a big frame on its way)
       const w = this.ticking ? this.windowOf(a, vw, MARGIN, this._win) : null, c = w ? Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]) : am.W * am.H;
       if ( c <= 0 ) continue;
       if ( force || am.artT === null || cells + c <= budget ) { am.setTime(T); am.renderArt(R, w); this.stats.artPasses++; cells += c; continue; }
       // too big to fit a frame at all: drawn in steps behind the frame it shows (FireArt.startJob); else it waits for a frame with room
-      if ( c > budget ) { am.startJob(w ?? [0, 0, am.W, am.H], T); this.stats.jobs = (this.stats.jobs ?? 0) + 1; if ( cells < budget ) cells += am.stepJob(R, budget - cells); }
+      if ( c > budget ) { am.startJob(w ?? [0, 0, am.W, am.H], T); this.stats.jobs = (this.stats.jobs ?? 0) + 1; if ( cells < budget ) cells += am.stepJob(R, budget - cells, T); }
     }
     // PREFETCH: in a calm frame with room left, an area just off screen (within half a view) that has never been drawn there is drawn
     // (in steps if big): a zoom-out or pan that brings it in finds its cells ready and shows them, instead of drawing them all at once
@@ -309,14 +328,15 @@ export class FireDisplay {
       near.x0 = vw.x0 - hx; near.y0 = vw.y0 - hy; near.x1 = vw.x1 + hx; near.y1 = vw.y1 + hy;
       for ( const a of this.areas.values() ) {
         const am = a.mesh; if ( am.visible || !am.isArt || cells >= budget ) continue;
-        if ( am.job ) { cells += am.stepJob(R, budget - cells); continue; }
+        if ( am.job ) { if ( am.job.pre ) am.job = null; else { cells += am.stepJob(R, budget - cells, T); continue; } }
         if ( !M.inView(a.area.rect, geo, near, m) ) continue;
         const w = this.windowOf(a, near, 0, this._win); if ( w[2] <= w[0] || w[3] <= w[1] || (am.artT !== null && am.covers(w)) ) continue;
         am.setTime(T); if ( am.anim ) am.setPhase(now0);
         am.startJob(w, T); this.stats.prefetch = (this.stats.prefetch ?? 0) + 1;
-        cells += am.stepJob(R, budget - cells);
+        cells += am.stepJob(R, budget - cells, T);
       }
     }
+    if ( nx && !force ) cells += this.drawAhead(vis, vw, T, nx, now0, budget - cells);
     this.stats.cells = this.lastCells = cells;
     this.lastT = T;
     const lu = this.lights.stats.updates;
@@ -328,6 +348,48 @@ export class FireDisplay {
     this.stats.visible = shownA.length;
     if ( newFrame ) this.placeParticles(still ? [] : shownA, now);
     this.stats.tickMs = performance.now() - t0;
+  }
+
+  /**
+   * A12 - the next art frame `nx` drawn AHEAD: every shown art area that shows the current frame gets the next one drawn into its back
+   * texture in steps (FireArt.startPre / stepJob), an even share of what is left each display frame - spread over the frames before the
+   * shared clock reaches it, one frame early - within `room` (what the must, the stale frames and the prefetch left of the budget).
+   * When it is due the area swaps to it (tick). So the art of a 12 fps frame no longer lands in one display frame. Returns the cells.
+   */
+  drawAhead(vis, vw, T, nx, now0, room) {
+    if ( room <= 0 ) return 0;
+    let left = 0;
+    for ( const a of vis ) {
+      const m = a.mesh; if ( !m.isArt || a.hold || m.artT !== T ) continue;
+      const j = m.job;
+      if ( j?.pre && j.t === nx.t ) left += m.jobLeft;
+      else if ( !j ) { const w = this.windowOf(a, vw, MARGIN, this._win); left += Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]); }
+    }
+    if ( left <= 0 ) return 0;
+    const frames = Math.floor(nx.due / Math.max(4, this.ivMs || 16.7));
+    let quota = Math.min(room, Math.ceil(left / Math.max(1, frames - 1))), cells = 0;
+    const R = canvas.app.renderer, s = this._preU ??= new Float64Array(5);
+    for ( const a of vis ) {
+      if ( quota <= 0 ) break;
+      const m = a.mesh; if ( !m.isArt || a.hold || m.artT !== T ) continue;
+      if ( m.job && !(m.job.pre && m.job.t === nx.t) ) continue;
+      if ( !m.job ) {
+        const w = this.windowOf(a, vw, MARGIN, this._win); if ( w[2] <= w[0] || w[3] <= w[1] ) continue;
+        m.startPre(R, w, nx.t, m.clocksAt(now0 + nx.due, s)); this.stats.pre = (this.stats.pre ?? 0) + 1;
+      }
+      const c = m.stepJob(R, quota, T); cells += c; quota -= c;
+    }
+    return cells;
+  }
+
+  /** The art frame after `T` (fps6: the next whole 6 fps one) and the ms until the shared clock reaches it (model.shaderTime's own steps). */
+  nextFrame(now, speed, fps6, T) {
+    const o = this._nx ??= { t: 0, due: 0 }, k0 = Math.floor(now * speed / 83.333);
+    for ( let k = k0 + 1; k < k0 + 4; k++ ) {
+      let t = (k / 12) % 1000; if ( fps6 ) t = Math.floor(t * 6) / 6;
+      if ( t !== T ) { o.t = t; o.due = k * 83.333 / speed - now; return o; }
+    }
+    return null;
   }
 
   /**
