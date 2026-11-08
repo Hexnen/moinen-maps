@@ -23,7 +23,8 @@ import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
  * COST: nothing painted -> no container, no ticker, no draw (the display is not even made). With fire: one ticker listener that culls
  * the areas against the view (an area off screen is `visible = false`: no draw), writes one uniform per visible area when the 12 fps
  * frame changes, and places the particles of the visible areas; an area that grows or goes out also gets its two clock uniforms
- * (model.raster's times texture does the rest on the GPU). Reduced motion: a still frame (time 0), no particles, a steady light, no
+ * (model.raster's times texture does the rest on the GPU); a second, tiny listener right before the render (`guard`: the art cells
+ * near the view, A9). Reduced motion (the art drawn whole): a still frame (time 0), no particles, a steady light, no
  * growing / going out (fire.mjs leaves the phases out) - the ticker is not registered at all.
  */
 const CAP = { high: 48, medium: 24, low: 0 };
@@ -37,6 +38,32 @@ function mapOf() {
 
 /** Art cells the fire style may draw per display frame (~2 ms on a mid GPU; research 13: the art pass is the layer's main cost). */
 const ART_BUDGET = 600000;
+/**
+ * A9: the art pass draws only the cells near the VIEW (the view grown by a quarter of its size each way, plus PAD cells - every cell a
+ * screen pixel's colour reads lies within PAD of it): at a close zoom most of an area's rectangle is off screen and is left as it was.
+ * A10: EVERY render of the stage - the frame, and any capture of it (Foundry's scene-transition snapshot, a module's or macro's
+ * screenshot, a render into a texture with its own transform) - first looks at the region it really draws (its target and transform,
+ * at that moment: a camera jump, pan-to, ping or token focus in the same task included) and, before it runs, draws every area there
+ * whose drawn cells do not hold that region; an area culled from the view but inside a capture is shown for that render, drawn at the
+ * current art frame, then hidden again. So no render ever shows a cell of another art frame. A frame costs one compare per area.
+ */
+const MARGIN = 0.25, PAD = 4;
+
+/** The renderer's `render`, wrapped once per renderer (other modules may wrap it after us: never unwrapped, inert without fire). */
+let shown = null, inRender = false;
+function hookRender() {
+  const R = canvas.app?.renderer; if ( !R || R._mmFireRender ) return;
+  const render = R.render;
+  R.render = function (obj, options, ...rest) {
+    let undo = null;
+    if ( shown && !inRender && obj === canvas.stage ) {
+      inRender = true;
+      try { undo = shown.beforeRender(options); } catch ( err ) { console.error("moinen-maps | fire: before render", err); } finally { inRender = false; }
+    }
+    try { return render.call(this, obj, options, ...rest); } finally { if ( undo ) for ( const m of undo ) m.visible = false; }
+  };
+  R._mmFireRender = true;
+}
 
 export class FireDisplay {
   constructor() {
@@ -72,6 +99,7 @@ export class FireDisplay {
     this._tick = () => this.tick();
     this.ticking = false;
     this.lastT = -1;
+    shown = this; hookRender();
   }
 
   /**
@@ -149,6 +177,7 @@ export class FireDisplay {
     this.tornadoDepth(vort);   // (a tornado's foot: depth rects + the front layer over it; vortex-lean.mjs)
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
+      a.came = on && !a.mesh.visible;                                  // (A10: back on screen - its cells are of an older frame: drawn now)
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
       if ( on ) {
         vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
@@ -161,9 +190,9 @@ export class FireDisplay {
     stale.sort((x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1));
     let cells = 0;
     for ( const a of stale ) {
-      const c = a.mesh.W * a.mesh.H;
-      if ( cells > 0 && cells + c > ART_BUDGET && !force && a.mesh.artT !== null ) continue;
-      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; cells += c;
+      const w = this.ticking ? this.windowOf(a, vw, MARGIN) : null, c = w ? Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]) : a.mesh.W * a.mesh.H;
+      if ( cells > 0 && cells + c > ART_BUDGET && !force && a.mesh.artT !== null && !a.came ) continue;
+      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer, w); this.stats.artPasses++; cells += c;
     }
     this.lastT = T;
     const lu = this.lights.stats.updates;
@@ -195,6 +224,45 @@ export class FireDisplay {
     if ( this.front.sortLayer !== layer ) { this.front.sortLayer = layer; canvas.primary.sortDirty = true; }
     this.feetOn = on;
   }
+
+  /** An area's cells (its art texture's) under the view `vw` (scene px) grown by `margin` x its size each way and PAD cells. */
+  windowOf(a, vw, margin = 0) {
+    const { ap, ox, oy } = this.geo, r = a.area.rect, x0 = ox + r.x0 * ap, y0 = oy + r.y0 * ap, W = a.mesh.W, H = a.mesh.H;
+    const mx = margin * (vw.x1 - vw.x0), my = margin * (vw.y1 - vw.y0);
+    return [Math.max(0, Math.floor((vw.x0 - mx - x0) / ap) - PAD), Math.max(0, Math.floor((vw.y0 - my - y0) / ap) - PAD),
+      Math.min(W, Math.ceil((vw.x1 + mx - x0) / ap) + PAD), Math.min(H, Math.ceil((vw.y1 + my - y0) / ap) + PAD)];
+  }
+
+  /**
+   * Right before a render of the stage (A10): the scene region it draws - `options` as PIXI's render takes them (a target texture, a
+   * transform) - and every art area overlapping it: shown (a culled one only for this render: the list
+   * returned is hidden again after it) and its cells there drawn at this art frame. The ordinary frame: only the areas whose drawn
+   * window no longer holds the view (a compare each).
+   */
+  beforeRender(options) {
+    if ( !this.geo || !this.areas.size ) return null;
+    const rt = options?.renderTexture ?? null, tf = options?.transform ?? null;   // (PIXI 7.4: render(object, { renderTexture, transform, ... }))
+    const R = canvas.app.renderer, st = canvas.stage, w = rt ? rt.width : R.screen.width, h = rt ? rt.height : R.screen.height;
+    st.transform.updateLocalTransform();
+    const X = tf ? tf.clone().append(st.localTransform) : st.localTransform.clone(), c = [[0, 0], [w, 0], [0, h], [w, h]].map(([x, y]) => X.applyInverse(new PIXI.Point(x, y)));
+    const vw = { x0: Math.min(...c.map((p) => p.x)), y0: Math.min(...c.map((p) => p.y)), x1: Math.max(...c.map((p) => p.x)), y1: Math.max(...c.map((p) => p.y)) };
+    const screen = !rt && !tf, T = this.lastT >= 0 ? this.lastT : (reducedMotion() ? 0 : M.shaderTime(sharedNow(), this.P.speed));
+    const dark = canvas.environment?.darknessLevel ?? 0, undo = [];
+    for ( const a of this.areas.values() ) {
+      const m = a.mesh; if ( !m.isArt ) continue;
+      const need = this.windowOf(a, vw); if ( need[2] <= need[0] || need[3] <= need[1] ) continue;   // (none of it in this render)
+      if ( !m.visible ) {
+        if ( screen ) continue;                                   // (the frame: the tick's culling stands)
+        m.visible = true; undo.push(m); m.setDark(dark);
+        if ( m.artT !== T ) { m.setTime(T); m.artWin = null; }   // (culled: its cells are of an older frame)
+      }
+      if ( m.artT !== null && m.covers(need) ) continue;           // (drawn here: this frame's, or the last one a budgeted area shows whole)
+      if ( m.artT === null ) m.setTime(T);
+      m.renderArt(R, this.ticking ? this.windowOf(a, vw, screen ? MARGIN : 0) : null); this.stats.artPasses++; this.stats.guarded = (this.stats.guarded ?? 0) + 1;
+    }
+    return undo.length ? undo : null;
+  }
+
 
   /** A token moved, appeared or went: its depth against the flames is recomputed on the next frame (once, however many moved). */
   tokensDirty() { this.tokDirty = true; if ( !this.ticking && this.areas.size ) this.updateTokens(); }   // (no ticker: reduced motion)
@@ -270,7 +338,7 @@ export class FireDisplay {
   }
 
   destroy() {
-    canvas.app?.ticker?.remove(this._tick); this.ticking = false;
+    canvas.app?.ticker?.remove(this._tick); this.ticking = false; if ( shown === this ) shown = null;
     Hooks.off("lightingRefresh", this.hookL); this.lights.destroy();
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();

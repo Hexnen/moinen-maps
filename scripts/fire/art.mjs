@@ -66,6 +66,9 @@
  * before any blob work. A8: two tiny passes before the art pass - EMB (each flame emitter's, smoke source's and puff's box this frame,
  * conservative) and TILE (per 8 x 8 cells, the lattice rows / columns whose boxes touch it, rasterised with MAX blending) - so a cell
  * looks only at what can reach it; the per-emitter code is unchanged, so the art is the same cell for cell (~0.3 x the A7 cost).
+ * A9: the every-frame layers (ground, fire, front, smoke, emission) skip what holds nothing: an OCC pass after the art (per 8 x 8 cells,
+ * which layers have anything there) culls whole 32 x 32 blocks in the vertex shader and single tiles per pixel - the screen is the same
+ * pixel for pixel (~0.15 x the layers' cost); and the art pass draws only the cells near the view (display.windowOf / guard).
  * Colour: the ramp (uRamp) is derived per area from the fire's base colour (look.mjs rampOf().ramp7). Everything is a function of
  * (cell, area seed, shared clock, field): every client draws the same frames.
  */
@@ -82,6 +85,29 @@ out vec2 vCell;
 void main() {
   gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);
   vCell = aCell;
+}`;
+
+// A9: the every-frame layers are drawn as BLOCKS of 32 x 32 cells, not one quad over the whole rectangle: a block none of whose 16 OCC
+// tiles holds anything for the layer is collapsed in its vertex shader (no pixel of it is shaded or blended at all - most of an area's
+// rectangle holds only the smoke's possible reach). The corners' positions and cells come from the same JS sums as the old quad's, so
+// shared block edges meet exactly and the outer edges are the old quad's edges.
+const BLK = 32;
+const VERT_B = (ch) => `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 aVertexPosition;
+in vec2 aCell;
+in vec2 aBlk;
+uniform mat3 projectionMatrix;
+uniform mat3 translationMatrix;
+uniform sampler2D uOcc;
+out vec2 vCell;
+void main() {
+  ivec2 T = textureSize(uOcc, 0), t0 = ivec2(aBlk) * ${BLK / 8}, t1 = min(t0 + ${BLK / 8}, T);
+  bool on = false;
+  for ( int y = t0.y; y < t1.y && !on; y++ ) for ( int x = t0.x; x < t1.x; x++ ) if ( texelFetch(uOcc, ivec2(x, y), 0)[${ch}] > 0.0 ) { on = true; break; }
+  vCell = aCell;
+  gl_Position = on ? vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0) : vec4(2.0, 2.0, 0.0, 1.0);
 }`;
 
 /* ======================================================================== pass 0: the FUEL map (12 fps, tiny) */
@@ -1159,6 +1185,7 @@ uniform float uLift;      // A7: 1 / the scene ambience's luminosity factor (Fou
                           // primary group at night - a -0.25 dark luminosity takes 20 % off the flames): the flames are lifted to keep their colour
 uniform vec4 uRamp[12];   // look.mjs ramp7: 7 flame steps, 3 bed, 2 fire-lit undersides
 uniform vec4 uSmokeTint;
+uniform sampler2D uOcc;   // A9: per 8 x 8 cells, does the tile (grown by a cell) hold anything for this layer (OCC pass)
 out vec4 fragColor;
 ivec4 art(ivec2 p) {
   if ( p.x < 0 || p.y < 0 || p.x >= int(uSize.x) || p.y >= int(uSize.y) ) return ivec4(0);
@@ -1176,6 +1203,9 @@ void axisW(float t, float w, out float i0, out vec3 a) {
 const FOOTPRINT = `
 void main() {
   vec2 w = fwidth(vCell) * uK;
+  // A9: nothing for this layer within a cell of this pixel's cell (its footprint never reaches further: w <= 2) - the colour would be
+  // exactly 0 (the ground's exactly 1), which the layer's blend leaves the screen untouched by: skip the pixel
+  if ( texelFetch(uOcc, min(ivec2(vCell), ivec2(uSize) - 1) >> 3, 0)[OCC] == 0.0 ) discard;
 #ifdef SIDE
   // DEPTH: every screen pixel belongs WHOLE to one of the two layers (SIDE 0 = the fire layer under the tokens, 1 = the front layer
   // above them): the front one when any cell of its footprint is a flame in front of a token's feet. Both layers compute the same
@@ -1283,6 +1313,7 @@ vec4 cellColor(vec2 cf) {
 }
 #define OUT(c) ((c) * uAlpha)
 #define SIDE 0
+#define OCC 0
 ${FOOTPRINT}`;
 
 // the FRONT layer (above the tokens, under the smoke): only the flame cells in front of a token's feet, over that token
@@ -1303,6 +1334,7 @@ vec4 cellColor(vec2 cf) {
 }
 #define OUT(c) ((c) * uAlpha)
 #define SIDE 1
+#define OCC 0
 ${FOOTPRINT}`;
 
 // the SMOKE layer (ABOVE the tokens: smoke drifting over a token veils it, thinly at level 1, more at 3). It is composited over the
@@ -1352,6 +1384,7 @@ vec4 cellColor(vec2 cf) {
   return vec4(rgb * al, al);
 }
 #define OUT(c) ((c) * uAlpha)
+#define OCC 1
 ${FOOTPRINT}`;
 
 const GROUND = `${SHOW_COMMON}
@@ -1368,6 +1401,7 @@ vec4 cellColor(vec2 cf) {
   return vec4(m, 1.0);
 }
 #define OUT(c) vec4(mix(vec3(1.0), (c).rgb, uAlpha), 1.0)
+#define OCC 2
 ${FOOTPRINT}`;
 
 // the flames' EMISSION: drawn into Foundry's illumination (MAX), so darkness never dims the flame body (research 2g); smoke is not
@@ -1383,7 +1417,30 @@ vec4 cellColor(vec2 cf) {
   return vec4(0.0);
 }
 #define OUT(c) ((c) * uAlpha)
+#define OCC 3
 ${FOOTPRINT}`;
+
+/* ======================================================================== A9 pass 1c: OCC, which layers each 8 x 8 tile shows (12 fps) */
+// After the art pass: per tile, whether any cell of it - grown by one cell, the furthest a screen pixel's footprint reaches - holds
+// something for the fire / front layer (G > 0), the smoke (B > 0), the ground (char, heat, shadow bits) or the emission (G > 0, or a
+// fire-lit smoke underside). Everything else gives exactly nothing there, so the every-frame quads skip those pixels (most of an
+// area's rectangle: it holds the smoke's whole reach) at the cost of one fetch.
+const OCC_F = `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 vCell;
+uniform sampler2D uArt;
+uniform vec2 uSize;
+out vec4 oOcc;
+void main() {
+  ivec2 t = ivec2(vCell), S = ivec2(uSize), c0 = max(t * 8 - 1, ivec2(0)), c1 = min(t * 8 + 9, S);
+  bool fl = false, sm = false, gr = false, em = false;
+  for ( int y = c0.y; y < c1.y; y++ ) for ( int x = c0.x; x < c1.x; x++ ) {
+    ivec4 a = ivec4(texelFetch(uArt, ivec2(x, y), 0) * 255.0 + 0.5);
+    fl = fl || a.g > 0; sm = sm || a.b > 0; gr = gr || (a.a & 31) != 0; em = em || (a.b > 0 && ((a.a >> 5) & 3) == 1);
+  }
+  oOcc = vec4(fl, sm, gr, fl || em);
+}`;
 
 let progs = null;
 const programs = () => progs ??= {
@@ -1391,13 +1448,25 @@ const programs = () => progs ??= {
   emb: PIXI.Program.from(VERT, EMB, "moinen-maps-fire-emb-v1"),
   tile: PIXI.Program.from(TILE_V, TILE_F, "moinen-maps-fire-tile-v2"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
-  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v7"),
-  front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v4"),
-  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v4"),
-  ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
-  emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v3")
+  show: PIXI.Program.from(VERT_B(0), SHOW, "moinen-maps-fire-show-v9"),
+  front: PIXI.Program.from(VERT_B(0), FRONT, "moinen-maps-fire-front-v6"),
+  smoke: PIXI.Program.from(VERT_B(1), SMOKE, "moinen-maps-fire-smoke-v6"),
+  ground: PIXI.Program.from(VERT_B(2), GROUND, "moinen-maps-fire-ground-v3"),
+  emit: PIXI.Program.from(VERT_B(3), EMIT, "moinen-maps-fire-emit-v5"),
+  occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-fire-occ-v1")
 };
 const texOf = (data, W, H) => PIXI.Texture.fromBuffer(data, W, H, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });
+/** The every-frame layers' geometry: one quad per BLK x BLK cells (aBlk = its block), corners as the whole quad's would be. */
+const blocks = (x0, ap, y0, W, H) => {
+  const BX = Math.ceil(W / BLK), BY = Math.ceil(H / BLK), pos = [], cell = [], blk = [], ind = [];
+  const px = (c, n, o) => (c >= n ? o + n * ap : o + c * ap);   // (the far edge exactly as the whole quad's x1 / y1)
+  for ( let by = 0; by < BY; by++ ) for ( let bx = 0; bx < BX; bx++ ) {
+    const k = pos.length / 2, cx0 = bx * BLK, cy0 = by * BLK, cx1 = Math.min(W, cx0 + BLK), cy1 = Math.min(H, cy0 + BLK);
+    for ( const [cx, cy] of [[cx0, cy0], [cx1, cy0], [cx1, cy1], [cx0, cy1]] ) { pos.push(cx === 0 ? x0 : px(cx, W, x0), cy === 0 ? y0 : px(cy, H, y0)); cell.push(cx, cy); blk.push(bx, by); }
+    ind.push(k, k + 1, k + 2, k, k + 2, k + 3);
+  }
+  return new PIXI.Geometry().addAttribute("aVertexPosition", pos, 2).addAttribute("aCell", cell, 2).addAttribute("aBlk", blk, 2).addIndex(new Uint32Array(ind));
+};
 const quad = (x0, y0, x1, y1, W, H) => new PIXI.Geometry()
   .addAttribute("aVertexPosition", [x0, y0, x1, y0, x1, y1, x0, y1], 2)
   .addAttribute("aCell", [0, 0, W, 0, W, H, 0, H], 2)
@@ -1462,13 +1531,17 @@ export class FireArt extends PIXI.Container {
       const g = new PIXI.Geometry().addAttribute("aIdx", idx, 2).addAttribute("aCorner", cor, 2).addIndex(new Uint32Array(ind));
       this.tilePass = new PIXI.Mesh(g, new PIXI.Shader(P.tile, U));
       this.tilePass.state.blendMode = PIXI.BLEND_MODES.MAX_COLOR;
+      // A9: the OCC pass (per 8 x 8 cells, which every-frame layers have anything there)
+      this.occRt = PIXI.RenderTexture.create({ width: TW, height: TH, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+      this.occRt.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+      this.occPass = new PIXI.Mesh(quad(0, 0, TW, TH, TW, TH), new PIXI.Shader(P.occ, { uArt: this.rt, uSize: new Float32Array([W, H]), translationMatrix: new PIXI.Matrix().toArray(true) }));
     }
     this.tok = new Float32Array(64);    // (shared by the fire and front layers: setTokens)
-    const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0, uTok: this.tok, uTokN: 0, uU: grid / 32,
+    const common = () => ({ uArt: this.rt, uOcc: this.occRt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0, uTok: this.tok, uTokN: 0, uU: grid / 32,
       uLift: 1, uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
-    this.ground = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.ground, common()));
+    this.ground = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.ground, common()));
     this.ground.state.blendMode = PIXI.BLEND_MODES.MULTIPLY;
-    this.show = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.show, common()));
+    this.show = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.show, common()));
     this.show.state.blendMode = PIXI.BLEND_MODES.NORMAL;   // premultiplied output
     for ( const m of [this.ground, this.show] ) {
       m.eventMode = "none";
@@ -1478,7 +1551,7 @@ export class FireArt extends PIXI.Container {
     this.addChild(this.ground, this.show);
     // the SMOKE lives in a layer above the tokens (`above`, the display's; else on top of this container): it follows this area's
     // visibility and alpha
-    this.smoke = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.smoke, common()));
+    this.smoke = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.smoke, common()));
     this.smoke.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.smoke.eventMode = "none";
     const s0 = this.smoke._render.bind(this.smoke);
     this.smoke._render = (renderer) => {
@@ -1487,7 +1560,7 @@ export class FireArt extends PIXI.Container {
     };
     (above ?? this).addChild(this.smoke);
     // the FRONT flames live in a layer between the tokens and the smoke (`front`, the display's): drawn only while a token stands here
-    this.front = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.front, common()));
+    this.front = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.front, common()));
     this.front.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.front.eventMode = "none"; this.front.visible = false;
     const f0 = this.front._render.bind(this.front);
     this.front._render = (renderer) => {
@@ -1505,7 +1578,7 @@ export class FireArt extends PIXI.Container {
     //   - the box-filter footprint reads past the art texture at the quad's edge: art() returns 0 there (bounds-checked, no undefined
     //     texelFetch).
     // the emission lives in the illumination layer (not in this container): it follows this area's visibility and alpha
-    this.glow = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.emit, common()));
+    this.glow = new PIXI.Mesh(blocks(x0, ap, y0, W, H), new PIXI.Shader(P.emit, common()));
     this.glow.state.blendMode = PIXI.BLEND_MODES.MAX_COLOR; this.glow.eventMode = "none";
     const e0 = this.glow._render.bind(this.glow);
     this.glow._render = (renderer) => {
@@ -1543,15 +1616,34 @@ export class FireArt extends PIXI.Container {
     const u = this.pass.shader.uniforms;
     u.uI[0] = (now - a.iRef) / 1000; u.uI[1] = a.iSpan / 1000; u.uO[0] = (now - a.oRef) / 1000; u.uO[1] = a.oSpan / 1000;
   }
-  /** Draw the art cells for the current time (the 12 fps pass). */
-  renderArt(renderer) {
-    const tf = this.fuelPass.shader.uniforms.uTime;
+  /**
+   * Draw the art cells for the current time (the 12 fps pass). A9: `win` = [x0, y0, x1, y1] (cells) draws only those cells (a scissor
+   * on the same full quad: every drawn cell is exactly what the whole pass gives it); the others keep an older frame - the display
+   * asks only for cells off screen to be left out (display.windowOf) and redraws at once when the view leaves the drawn window.
+   */
+  renderArt(renderer, win = null) {
+    const tf = this.fuelPass.shader.uniforms.uTime, W = this.W, H = this.H;
     if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
     renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
     if ( this.pass.shader.uniforms.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
-    renderer.render(this.pass, { renderTexture: this.rt, clear: true });
+    if ( !win || (win[0] <= 0 && win[1] <= 0 && win[2] >= W && win[3] >= H) ) {
+      win = null;
+      renderer.render(this.pass, { renderTexture: this.rt, clear: true });
+    } else {
+      const gl = renderer.gl, x0 = Math.max(0, win[0]), y0 = Math.max(0, win[1]), x1 = Math.min(W, win[2]), y1 = Math.min(H, win[3]);
+      renderer.renderTexture.bind(this.rt);
+      gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
+      renderer.renderTexture.clear();
+      this.pass.render(renderer); renderer.batch.flush();
+      gl.disable(gl.SCISSOR_TEST);
+      win = [x0, y0, x1, y1];
+    }
+    renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
     this.artT = this.pass.shader.uniforms.uTime;
+    this.artWin = win ?? [0, 0, W, H];
   }
+  /** Do the drawn cells (this art frame) hold the window `w` (cells)? */
+  covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
   destroy() {
     const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex];
     this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = this.puffTex = null;
@@ -1559,12 +1651,12 @@ export class FireArt extends PIXI.Container {
     const own = this.smoke.parent === this, ownF = this.front.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
     if ( !ownF ) this.front.parent?.removeChild(this.front);
-    for ( const m of [this.pass, this.fuelPass, this.embPass, this.tilePass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
-    this.pass.destroy(); this.fuelPass.destroy(); this.embPass.destroy(); this.tilePass.destroy(); this.glow.destroy();
+    for ( const m of [this.pass, this.fuelPass, this.embPass, this.tilePass, this.occPass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
+    this.pass.destroy(); this.fuelPass.destroy(); this.embPass.destroy(); this.tilePass.destroy(); this.occPass.destroy(); this.glow.destroy();
     if ( !own ) this.smoke.destroy();
     if ( !ownF ) this.front.destroy();
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
-    this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true);
+    this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true); this.occRt.destroy(true);
   }
 }
