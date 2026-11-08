@@ -78,6 +78,8 @@ function settingsPanel(host) {
       ${row(Z("f.fill"), `<range-picker name="fill" min="0" max="1" step="0.05" value="${L.fill}"></range-picker>`)}
       ${row(Z("f.ink"), `<range-picker name="ink" min="0" max="2" step="0.05" value="${L.ink}"></range-picker>`)}
       ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}
+      ${row(Z("f.hoverHi"), `<input type="checkbox" name="hoverHi"${L.hoverHi ? " checked" : ""}>`, Z("h.hoverHi"))}
+      ${row(Z("f.hoverFx"), sel("hoverFx", ["none", "glow", "hatch", "crosshatch", "dots"].map((k) => [k, Z(`hoverFx.${k}`)]), L.hoverFx))}
       ${row(Z("f.place"), sel("place", [["center", Z("place.center")], ["corner", Z("place.corner")]], L.place))}
       ${row(Z("f.numbers"), sel("numbers", [["always", Z("numbers.always")], ["hover", Z("numbers.hover")], ["never", Z("numbers.never")]], L.numbers), Z("h.numbers"))}
       </section><section class="mm-wp-sec"><h4>${esc(Z("sec.mine"))}</h4>
@@ -90,7 +92,7 @@ function settingsPanel(host) {
     const c = ev.target.closest?.("[name]"); if ( !c ) return;
     const v = c.matches("input[type=checkbox]") ? c.checked : c.value;
     if ( c.name === "preset" ) Zones.setParams({ preset: v });
-    else if ( ["who", "color", "numbers", "place"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
+    else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
     else if ( ["fill", "ink"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
   };
   const onClick = async (ev) => {

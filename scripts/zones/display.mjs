@@ -56,7 +56,15 @@ export class ZoneDisplay {
     this.fill = new PIXI.Graphics();
     this.lines = new PIXI.Graphics();
     this.badges = new PIXI.Container();
-    this.root.addChild(this.fill, this.lines, this.badges);
+    // the zone under the cursor: an effect inside it (masked to the zone) and its bright border
+    this.hi = new PIXI.Container();
+    this.hiFx = new PIXI.Graphics();
+    this.hiMask = new PIXI.Graphics();
+    this.hiLine = new PIXI.Graphics();
+    this.hi.addChild(this.hiFx, this.hiMask, this.hiLine);
+    this.hiFx.mask = this.hiMask;
+    this.root.addChild(this.fill, this.hi, this.lines, this.badges);
+    this.hoverId = -1;
     canvas.primary.addChild(this.root);
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
     this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom && this.root.visible ) this.onZoom(z); };
@@ -80,8 +88,10 @@ export class ZoneDisplay {
     for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
     this.items = [];
     this.Z = Z; this.look = look;
+    this.drawHover(this.hoverId, zoom);
     if ( !Z || !Z.zones.length ) return;
     const tint = tints(Z), light = hex(look.color);
+    this.tintOf = (id) => TINTS[tint.get(id) ?? 0];
     const fillA = Math.min(1, look.fill * (editing ? 0.75 : 0.6));
 
     // tints (holes cut out), and the reach of the selected token
@@ -142,7 +152,60 @@ export class ZoneDisplay {
   onZoom(zoom) {
     if ( !this.items?.length && !this.Z ) return;
     this.follow(zoom, false);
-    if ( this.lineZoom && Math.abs(Math.log(zoom / this.lineZoom)) > 0.08 ) this.drawLines(zoom);
+    if ( this.lineZoom && Math.abs(Math.log(zoom / this.lineZoom)) > 0.08 ) { this.drawLines(zoom); this.drawHover(this.hoverId, zoom); }
+  }
+
+  /**
+   * Light the zone under the cursor (look.hoverHi): a bright border and, inside it, the chosen effect - an inner glow, hatching,
+   * crosshatching or dots - clipped to the zone by a mask. Sizes in screen pixels. Cheap: only this layer is drawn again.
+   */
+  drawHover(id, zoom = this.zoom ?? 1) {
+    this.hoverId = id;
+    const F = this.hiFx, M = this.hiMask, L = this.hiLine;
+    F.clear(); M.clear(); L.clear();
+    const look = this.look, z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null;
+    if ( !look?.hoverHi || !z ) return;
+    const px = 1 / Math.max(0.05, zoom), light = hex(look.color);
+    const rings = z.parts.flatMap((part) => part);
+    // the mask: the zone itself (holes cut out)
+    for ( const part of z.parts ) {
+      M.beginFill(0xffffff, 1); ring(M, part[0]);
+      for ( const h of part.slice(1) ) { M.beginHole(); ring(M, h); M.endHole(); }
+      M.endFill();
+    }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for ( const r of rings ) for ( let i = 0; i < r.length; i += 2 ) { x0 = Math.min(x0, r[i]); x1 = Math.max(x1, r[i]); y0 = Math.min(y0, r[i + 1]); y1 = Math.max(y1, r[i + 1]); }
+    const fx = look.hoverFx;
+    if ( fx === "glow" ) {
+      // strokes along the border, wide and faint to narrow and bright; the mask keeps their inner half: a glow from the edge inward
+      // in the zone's own tint (a light glow vanished on light maps), brightest at the edge
+      const c = this.tintOf?.(id) ?? light;
+      for ( const [w, a] of [[64, 0.1], [44, 0.13], [28, 0.17], [14, 0.24], [6, 0.32]] ) {
+        F.lineStyle({ width: w * px, color: c, alpha: a, join: PIXI.LINE_JOIN.ROUND });
+        for ( const r of rings ) { ring(F, r); }
+      }
+    } else if ( fx === "hatch" || fx === "crosshatch" ) {
+      const gap = 11 * px, len = (x1 - x0) + (y1 - y0);
+      // two-tone: a dark line under a light one, so the hatching reads on light and dark maps alike
+      const hatch = () => {
+        for ( let s = -len; s <= len; s += gap ) { F.moveTo(x0 + s, y0); F.lineTo(x0 + s + len, y0 + len); }
+        if ( fx === "crosshatch" ) for ( let s = 0; s <= 2 * len; s += gap ) { F.moveTo(x0 + s, y0); F.lineTo(x0 + s - len, y0 + len); }
+      };
+      F.lineStyle({ width: 2.8 * px, color: 0x15110f, alpha: 0.32 }); hatch();
+      F.lineStyle({ width: 1.2 * px, color: light, alpha: 0.7 }); hatch();
+    } else if ( fx === "dots" ) {
+      const gap = 12 * px, r = 1.7 * px;
+      const dots = (rad) => { for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) F.drawCircle(x, y, rad); };
+      F.beginFill(0x15110f, 0.35); dots(r + 1.1 * px); F.endFill();
+      F.beginFill(light, 0.8); dots(r); F.endFill();
+    }
+    // the border: a soft halo and a bright line
+    L.lineStyle({ width: 7 * px, color: 0x15110f, alpha: 0.45, join: PIXI.LINE_JOIN.ROUND });
+    for ( const r of rings ) ring(L, r);
+    L.lineStyle({ width: 10 * px, color: light, alpha: 0.22, join: PIXI.LINE_JOIN.ROUND });
+    for ( const r of rings ) ring(L, r);
+    L.lineStyle({ width: 3 * px, color: light, alpha: 0.95, join: PIXI.LINE_JOIN.ROUND });
+    for ( const r of rings ) ring(L, r);
   }
 
   /** Scale every badge to its size on screen; `snap` puts them straight on their spot (a fresh render), else they glide there. */

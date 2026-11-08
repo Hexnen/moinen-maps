@@ -1504,5 +1504,13 @@
   "MOINENMAPS.Zones.place.center": "Środek strefy",
   "MOINENMAPS.Zones.place.corner": "Lewy górny róg",
   "MOINENMAPS.Zones.f.smooth": "Wygładzanie",
-  "MOINENMAPS.Zones.h.smooth": "Wygładza granice stref (linie ołówka zostają, jak je narysowano). 0 = dokładnie jak narysowane."
+  "MOINENMAPS.Zones.h.smooth": "Wygładza granice stref (linie ołówka zostają, jak je narysowano). 0 = dokładnie jak narysowane.",
+  "MOINENMAPS.Zones.f.hoverHi": "Podświetl po najechaniu",
+  "MOINENMAPS.Zones.h.hoverHi": "Strefa pod kursorem rozjaśnia granice i pokazuje efekt poniżej.",
+  "MOINENMAPS.Zones.f.hoverFx": "Efekt podświetlenia",
+  "MOINENMAPS.Zones.hoverFx.none": "Tylko granica",
+  "MOINENMAPS.Zones.hoverFx.glow": "Poświata do środka",
+  "MOINENMAPS.Zones.hoverFx.hatch": "Kreskowanie",
+  "MOINENMAPS.Zones.hoverFx.crosshatch": "Kratka (crosshatch)",
+  "MOINENMAPS.Zones.hoverFx.dots": "Kropki"
 }

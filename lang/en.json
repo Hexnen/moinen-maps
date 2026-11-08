@@ -1504,5 +1504,13 @@
   "MOINENMAPS.Zones.place.center": "Middle of the zone",
   "MOINENMAPS.Zones.place.corner": "Top left corner",
   "MOINENMAPS.Zones.f.smooth": "Smoothing",
-  "MOINENMAPS.Zones.h.smooth": "Smooths the zone borders (the pencil lines stay as drawn). 0 = exactly as drawn."
+  "MOINENMAPS.Zones.h.smooth": "Smooths the zone borders (the pencil lines stay as drawn). 0 = exactly as drawn.",
+  "MOINENMAPS.Zones.f.hoverHi": "Light up on hover",
+  "MOINENMAPS.Zones.h.hoverHi": "The zone under the cursor lights its border and shows the effect below.",
+  "MOINENMAPS.Zones.f.hoverFx": "Hover effect",
+  "MOINENMAPS.Zones.hoverFx.none": "Border only",
+  "MOINENMAPS.Zones.hoverFx.glow": "Inner glow",
+  "MOINENMAPS.Zones.hoverFx.hatch": "Hatching",
+  "MOINENMAPS.Zones.hoverFx.crosshatch": "Crosshatch",
+  "MOINENMAPS.Zones.hoverFx.dots": "Dots"
 }

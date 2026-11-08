@@ -90,14 +90,15 @@ export function refresh() {
       if ( p ) { bands = new Map(); for ( const [id, d] of dist ) { const b = p.band(d, moves); if ( b ) bands.set(id, b); } }
     }
   }
+  display.hoverId = hover;
   display.render(Z, S.look, gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x });
 }
 
 /* ---------------------------------------------------------------- numbers on hover */
 
-/** The zone under the cursor (numbers "hover"): one check per frame at most, a redraw only when it changes. */
+/** The zone under the cursor (numbers "hover", border highlight): one check per frame at most, a redraw only when it changes. */
 function onHoverMove(ev) {
-  if ( S?.look.numbers !== "hover" || !display?.root.visible ) return;
+  if ( !(S?.look.numbers === "hover" || S?.look.hoverHi) || !display?.root.visible ) return;
   hoverAt = { x: ev.clientX, y: ev.clientY };
   if ( hoverRaf ) return;
   hoverRaf = requestAnimationFrame(() => {
@@ -107,7 +108,8 @@ function onHoverMove(ev) {
     setHover(Geo.zoneAt(Z, p.x, p.y));
   });
 }
-function setHover(id) { if ( id === hover ) return; hover = id; refresh(); }
+// numbers on hover need the badges again; the highlight alone only redraws its own layer
+function setHover(id) { if ( id === hover ) return; hover = id; if ( S?.look.numbers === "hover" ) refresh(); else display?.drawHover(id); }
 const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); };
 
 /* ---------------------------------------------------------------- lifecycle */

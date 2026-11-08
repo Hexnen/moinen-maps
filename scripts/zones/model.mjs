@@ -9,18 +9,21 @@ import { MODULE_ID } from "../config.mjs";
  *     preset: "invincible" | "none",    the movement rules counted in zones (scripts/zones/presets.mjs)
  *     smooth: 0.3,                      how much the lines are smoothed before the zones are worked out (0..1; the lines stay as drawn)
  *     snap: 0.25,                       an end of a line this close to another line (in grid squares) is joined to it
- *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"; place: "center" | "corner" (top left)
+ *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"; place: "center" | "corner" (top left);
+ *                                       hoverHi: the zone under the cursor lights its border; hoverFx: none | glow | hatch | crosshatch | dots inside it
  *
  * Arrays replace each other on update, so a save never leaves stale lines behind.
  */
 export const FLAG = "zones";
 export const VERSION = 1;
 
-export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, numbers: "always", place: "center", color: "#f3e7c9" });
+export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, numbers: "always", place: "center", hoverHi: false, hoverFx: "glow", color: "#f3e7c9" });
 export const LIMITS = { smooth: [0, 1], snap: [0, 1], fill: [0, 1], ink: [0, 2] };
 export const WHO = ["all", "gm", "none"];
 export const NUMBERS = ["always", "hover", "never"];
 export const PLACES = ["center", "corner"];
+/** What fills the zone under the cursor when "hoverHi" is on (besides its bright border). */
+export const HOVER_FX = ["none", "glow", "hatch", "crosshatch", "dots"];
 
 const r1 = (v) => Math.round(v * 10) / 10;
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -34,6 +37,8 @@ export function cleanLook(l = {}) {
     // older sets stored a boolean
     numbers: NUMBERS.includes(l.numbers) ? l.numbers : l.numbers === false ? "never" : D.numbers,
     place: PLACES.includes(l.place) ? l.place : D.place,
+    hoverHi: l.hoverHi === true,
+    hoverFx: HOVER_FX.includes(l.hoverFx) ? l.hoverFx : D.hoverFx,
     color: /^#[0-9a-f]{6}$/i.test(l.color ?? "") ? l.color : D.color
   };
 }
