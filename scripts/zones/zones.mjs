@@ -351,8 +351,8 @@ export function registerZones() {
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);
   Hooks.on("controlToken", () => refresh());
-  // badges and lines keep their size on screen: draw again when the zoom moved by more than ~8 %
-  Hooks.on("canvasPan", () => { const z = canvas.stage?.scale.x ?? 1, d = display?.zoom; if ( display?.root.visible && d && Math.abs(Math.log(z / d)) > 0.08 ) refresh(); });
+  // badges and lines keep their size on screen: badges follow every zoom step, lines are drawn again after ~8 %
+  Hooks.on("canvasPan", () => { if ( display?.root.visible ) display.onZoom(canvas.stage?.scale.x ?? 1); });
   Hooks.on("updateToken", (doc, changed) => { if ( ("x" in changed || "y" in changed) && doc.object?.controlled ) refresh(); });
   Hooks.on("updateItem", (item) => { if ( item.parent && canvas.tokens?.controlled.some((t) => t.actor === item.parent) ) refresh(); });
   window.addEventListener("beforeunload", () => flushSave());

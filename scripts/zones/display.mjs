@@ -8,6 +8,9 @@
 
 import { cornerPoint } from "./geometry.mjs";
 
+/** A badge's radius on screen (CSS pixels): drawn once at this size, scaled by 1 / zoom. */
+const BADGE_R = 19;
+
 const TINTS = [0xd9a441, 0x5aa9c9, 0x9bc46b, 0xc97b9b, 0x8c7bd1, 0xd47a4a, 0x6fc2b0];
 
 function trace(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); }
@@ -55,6 +58,9 @@ export class ZoneDisplay {
     this.badges = new PIXI.Container();
     this.root.addChild(this.fill, this.lines, this.badges);
     canvas.primary.addChild(this.root);
+    // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
+    this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom && this.root.visible ) this.onZoom(z); };
+    canvas.app.ticker.add(this.watch);
   }
 
   /**
@@ -69,15 +75,14 @@ export class ZoneDisplay {
    * @param {boolean} [o.editing]              the GM is drawing: stronger tints so new zones show at once
    */
   render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1 } = {}) {
-    this.zoom = zoom;
-    const F = this.fill, Ln = this.lines;
-    F.clear(); Ln.clear();
+    const F = this.fill;
+    F.clear(); this.lines.clear();
     for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
+    this.items = [];
+    this.Z = Z; this.look = look;
     if ( !Z || !Z.zones.length ) return;
-    const tint = tints(Z), ink = look.ink, light = hex(look.color);
+    const tint = tints(Z), light = hex(look.color);
     const fillA = Math.min(1, look.fill * (editing ? 0.75 : 0.6));
-    // lines and badges keep their size on screen (zones are big areas: sizes taken from the grid were specks on small-grid maps)
-    const px = 1 / Math.max(0.05, zoom);
 
     // tints (holes cut out), and the reach of the selected token
     for ( const z of Z.zones ) {
@@ -92,44 +97,88 @@ export class ZoneDisplay {
         F.endFill();
       }
     }
+    this.drawLines(zoom);
 
-    // borders: dark under-line, light dots on top
-    if ( ink > 0 ) {
-      const w = 5.5 * px * ink;
-      Ln.lineStyle({ width: w, color: 0x15110f, alpha: Math.min(1, 0.55 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
-      for ( const p of Z.core ) trace(Ln, p);
-      Ln.lineStyle({ width: w * 0.45, color: light, alpha: Math.min(1, 0.95 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
-      for ( const p of Z.core ) dashed(Ln, p, 11 * px, 7 * px);
-    }
-
-    // badges: the zone's number, or its distance from the selected token
-    // which zones get their number: all, only the one under the cursor, or none (distances around a selected token always show)
+    // badges: the zone's number, or its distance from the selected token. Each badge is drawn once at its size ON SCREEN and scaled
+    // by 1 / zoom every frame (follow), so it keeps its size smoothly while zooming; in the corner it glides to its new spot.
     const numbered = (id) => look.numbers === "always" || (look.numbers === "hover" && id === hover);
     if ( look.numbers === "never" && !dist ) return;
+    const res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
       if ( d == null && !numbered(z.id) ) continue;
       const band = bands?.get(z.id);
       const text = d != null ? String(d) : String(z.id + 1);
-      const r = Math.min(19 * px, Math.max(8 * px, z.label.r * 0.8));
       const b = new PIXI.Container();
       const G = new PIXI.Graphics();
       const ringCol = band ? band.color : light;
-      G.lineStyle({ width: r * 0.16, color: ringCol, alpha: 0.95 });
-      G.beginFill(0x15110f, d != null ? 0.85 : 0.6).drawCircle(0, 0, r).endFill();
+      G.lineStyle({ width: BADGE_R * 0.16, color: ringCol, alpha: 0.95 });
+      G.beginFill(0x15110f, d != null ? 0.85 : 0.6).drawCircle(0, 0, BADGE_R).endFill();
       b.addChild(G);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(r * (text.length > 1 ? 1.0 : 1.2)), fill: d != null ? ringCol : light, align: "center" });
-      t.resolution = Math.min(8, Math.max(2, 3 * zoom)); t.anchor.set(0.5, 0.52);
+      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(BADGE_R * (text.length > 1 ? 1.0 : 1.2)), fill: d != null ? ringCol : light, align: "center" });
+      t.resolution = res; t.anchor.set(0.5, 0.52);
       b.addChild(t);
-      // the zone's middle, or its top-left corner (clear of the borders by a little more than the badge)
-      const at = look.place === "corner" ? cornerPoint(z, r * 1.5 + 3 * px) : z.label;
-      b.position.set(at.x, at.y);
       b.alpha = d == null && dist ? 0.45 : 1;
       this.badges.addChild(b);
+      this.items.push({ b, z, at: null });
     }
+    this.follow(zoom, true);
+  }
+
+  /** Borders: dark under-line, light dots on top; widths in screen pixels (drawn again when the zoom moved, see onZoom). */
+  drawLines(zoom) {
+    const Ln = this.lines, Z = this.Z, look = this.look;
+    Ln.clear();
+    this.lineZoom = zoom;
+    if ( !Z || !look || look.ink <= 0 ) return;
+    const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink;
+    Ln.lineStyle({ width: w, color: 0x15110f, alpha: Math.min(1, 0.55 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+    for ( const p of Z.core ) trace(Ln, p);
+    Ln.lineStyle({ width: w * 0.45, color: hex(look.color), alpha: Math.min(1, 0.95 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+    for ( const p of Z.core ) dashed(Ln, p, 11 * px, 7 * px);
+  }
+
+  /** Every zoom / pan step: badges follow at once (cheap), the border lines are drawn again once the zoom moved by ~8 %. */
+  onZoom(zoom) {
+    if ( !this.items?.length && !this.Z ) return;
+    this.follow(zoom, false);
+    if ( this.lineZoom && Math.abs(Math.log(zoom / this.lineZoom)) > 0.08 ) this.drawLines(zoom);
+  }
+
+  /** Scale every badge to its size on screen; `snap` puts them straight on their spot (a fresh render), else they glide there. */
+  follow(zoom, snap) {
+    this.zoom = zoom;
+    const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner";
+    for ( const it of this.items ?? [] ) {
+      const rw = Math.min(BADGE_R * px, Math.max(8 * px, it.z.label.r * 0.8));     // the badge's radius in scene pixels
+      it.b.scale.set(rw / BADGE_R);
+      // the corner spot depends on the badge's size: looked up on a coarse ladder of sizes (cached), reached by gliding
+      const key = Math.exp(Math.round(Math.log(rw * 1.5 + 3 * px) / 0.06) * 0.06);
+      it.at = corner ? cornerPoint(it.z, key) : it.z.label;
+      if ( snap || !corner ) it.b.position.set(it.at.x, it.at.y);
+    }
+    if ( corner && !snap ) this.#glide();
+  }
+
+  #gliding = false;
+  #glide() {
+    if ( this.#gliding ) return;
+    this.#gliding = true;
+    const tick = () => {
+      let moving = false;
+      for ( const it of this.items ?? [] ) {
+        if ( it.b.destroyed || !it.at ) continue;
+        const dx = it.at.x - it.b.x, dy = it.at.y - it.b.y;
+        if ( Math.abs(dx) + Math.abs(dy) < 0.05 ) { it.b.position.set(it.at.x, it.at.y); continue; }
+        it.b.position.set(it.b.x + dx * 0.22, it.b.y + dy * 0.22);
+        moving = true;
+      }
+      if ( !moving || this.root.destroyed ) { canvas.app.ticker.remove(tick); this.#gliding = false; }
+    };
+    canvas.app.ticker.add(tick);
   }
 
   set visible(v) { this.root.visible = v; }
 
-  destroy() { if ( !this.root.destroyed ) this.root.destroy({ children: true }); }
+  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) this.root.destroy({ children: true }); }
 }
