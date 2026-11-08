@@ -11,7 +11,8 @@
  *  1. ART PASS (12 fps, only when the shared-clock frame changes and the area is on screen): one fragment per ART CELL into a small
  *     RGBA8 render texture (W x H cells): R = flame (0 none; else 1 + its bed row in art px mod 255: depth vs tokens), G = flame band + 8 (level - 1) (1..23)
  *     or a bed ember (24..26) or a spark / hot coal (32 + ramp step 1..6), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
- *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2).
+ *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2) + 32 the smoke's NIGHT shading (a burning fire's smoke lit from below:
+ *     1 warm underside, 2 warm-dim, 3 dark top; the smoke layer blends it in with the scene's darkness, the emission makes 1 glow).
  *       - FLAMES: emitters on a jittered lattice over the burning ground (rows foreshortened, RY 0.8), kept whole or dropped by a
  *         coverage ramp at the bed's edge x the FUEL (which also scales their size and height); each emitter has 2 breathing roots and blobs born every life / 5 / rate
  *         seconds (every birth number hashed: no loop) that swell, rise accelerating (pinch-off), lean with the wind and the
@@ -554,7 +555,7 @@ void main() {
     }
     float xS0 = uPuffQ.x > 0.0 ? c.x + (fld.b * 255.0 - 1.0) * uPuffQ.z - uPuffQ.w - 1.0 : -1e9;
     float xS1 = uPuffQ.x > 0.0 ? c.x + fld.a * 255.0 * uPuffQ.z - uPuffQ.w + 1.0 : 1e9;
-    float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false, drB = false;
+    float F = 0.0, AG = 0.0, QB = -1e9, hzB = 0.0; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false, drB = false, fiB = false;
     // the FLOW: a smooth warp field that rises and drifts with the smoke - every edge rolls and curls over itself, no lobe stays a
     // circle; the same field turns the shading (the rolls inside the mass follow the curls of its silhouette)
     vec2 fp = vec2(c.x - (0.6 * uWind.x + 0.12 * gdir) * 10.0 * u * t, c.y + 10.0 * u * t) / (11.0 * u);
@@ -639,6 +640,9 @@ void main() {
 
           // (lit warm from below only while the flames under it still burn: a dead fire lights nothing)
           bool low = fromFire && z < z0 + 0.8 * L_RISE[2] * u && a < 0.5 && (ag2.y < -1e3 || ag2.y < 0.4 * uDur.y);
+          // (AT NIGHT the fire is the light: its smoke is lit from below while the flames under it burn, the more the lower it is)
+          bool fLit = fromFire && (ag2.y < -1e3 || ag2.y < 0.6 * uDur.y);
+          float hz = fLit ? clamp(1.0 - (z - z0) / (2.2 * L_RISE[2] * u), 0.0, 1.0) : 0.0;
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
             float ang = P3[k] * 6.2832 + a * (1.5 + p75);
@@ -651,8 +655,8 @@ void main() {
             float q = 1.0 - dot(dd, dd) / 1.6;
             // the cell's billow is the NEAREST lobe whose sphere covers it (oblique depth: further south and higher = nearer)
             float d2 = dot(dd, dd), dep = o0.y + 0.5 * z + float(k) * 0.7;
-            if ( d2 < min(1.0, 1.5 * env) && dep > QB ) { QB = dep; nB = dd / sqrt(max(min(1.0, 1.5 * env), 0.05)); lsB = ls; lowB = low; frB = front; drB = drift; own = true; }
-            if ( q > 0.0 ) { GR += env * sqrt(q) * dd / lr; q *= q * env; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; frB = front; drB = drift; } }
+            if ( d2 < min(1.0, 1.5 * env) && dep > QB ) { QB = dep; nB = dd / sqrt(max(min(1.0, 1.5 * env), 0.05)); lsB = ls; lowB = low; frB = front; drB = drift; fiB = fLit; hzB = hz; own = true; }
+            if ( q > 0.0 ) { GR += env * sqrt(q) * dd / lr; q *= q * env; F += q; AG += q * a; if ( !own ) { lsB = ls; lowB = low; frB = front; drB = drift; fiB = fLit; hzB = hz; } }
           }
         }
       }
@@ -677,6 +681,13 @@ void main() {
         if ( fade > 0.45 && band == 3 ) band = 2;                       // thinning old smoke is never in the darkest band
         if ( lowB && band == 3 ) band = 4;                             // the underside low over the fire is lit warm from below
         B = band + (rim ? 8 : 0) + 16 * lsB + (frB ? 64 : 0) + (frB && drB ? 128 : 0);
+        // NIGHT SHADING (A bits 5-6, the smoke layer blends it in with the darkness): a burning fire's smoke lit from BELOW - the
+        // side facing the flames and the low puffs warm (1 underside, 2 warm-dim), the tops and the high column dark (3)
+        if ( fiB ) {
+          float litF = dot(n3, normalize(vec3(0.1, 0.8, 0.55)));
+          float w = 0.55 * litF + 0.85 * hzB - 0.3;
+          A += 32 * (w > 0.5 ? 1 : w > 0.08 ? 2 : 3);
+        }
       }
     }
   }
@@ -714,7 +725,7 @@ void main() {
           float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * 0.9;
           vec2 dd = vec2((c.x - x) / r, (c.y - o0.y - 2.0 * u) / (r * RY));
           float ef = edgeFade(vec2(x, o0.y + 2.0 * u), vec2(r, r * RY) + 2.0, u);
-          if ( dot(dd, dd) < 0.8 && rk < 0.55 * ef * smoothstep(0.0, 0.24, a) * (1.0 - 0.55 * smoothstep(0.45, 0.8, a)) * (1.0 - smoothstep(0.8, 1.0, a)) ) { A = (A & 7) + 8 * (ls == 3 ? 2 : 1); }
+          if ( dot(dd, dd) < 0.8 && rk < 0.55 * ef * smoothstep(0.0, 0.24, a) * (1.0 - 0.55 * smoothstep(0.45, 0.8, a)) * (1.0 - smoothstep(0.8, 1.0, a)) ) { A = (A & 103) + 8 * (ls == 3 ? 2 : 1); }
         }
       }
     }
@@ -888,7 +899,14 @@ vec4 cellColor(vec2 cf) {
   // It keeps its own value, cooled a little by the ambient, and reads by its form: the lit tops and the outer edge facing the light
   // (top-left) catch a pale rim, the dense cores stay dark - contrast against the dimmed map, never a glow (nothing goes above the
   // day colours)
-  if ( uDark > 0.0 && band != 4 ) {
+  int NL = (a.a >> 5) & 3;
+  if ( uDark > 0.0 && NL > 0 ) {
+    // a burning fire's smoke AT NIGHT is lit by the fire, from below: a warm underside, warm-dim flanks, dark tops (never the pale
+    // moonlit rims: under the fire's light they turned pink); the scene's darkness and the fire light do the rest
+    vec3 dk = tintSmoke(SMK[(ls - 1) * 3 + 2]) * vec3(0.8, 0.82, 0.9);
+    vec3 nc = NL == 1 ? mix(dk, uRamp[11].rgb, 0.8) : NL == 2 ? mix(dk, uRamp[10].rgb, 0.35) : dk * 0.78;
+    rgb = mix(rgb, nc, uDark);
+  } else if ( uDark > 0.0 && band != 4 ) {
     vec3 cool = rgb * vec3(0.90, 0.95, 1.06);
     bool edge = art(p + ivec2(0, -1)).b == 0 || art(p + ivec2(-1, 0)).b == 0 || art(p + ivec2(-1, -1)).b == 0;
     if ( band == 1 || edge ) cool = mix(cool, vec3(0.80, 0.83, 0.90), edge ? 0.55 : 0.3);
@@ -926,13 +944,14 @@ vec4 cellColor(vec2 cf) {
 ${FOOTPRINT}`;
 
 // the flames' EMISSION: drawn into Foundry's illumination (MAX), so darkness never dims the flame body (research 2g); smoke is not
-// emissive (it stays in the dimmed scene); white where a flame or ember cell is, scaled by its flat alpha
+// emissive (it stays in the dimmed scene) except a burning fire's warm underside at half; white where a flame or ember cell is, scaled by its flat alpha
 const EMIT = `${SHOW_COMMON}
 const float OUTER[4] = float[4](0.0, 0.55, 0.85, 1.0);
 vec4 cellColor(vec2 cf) {
   ivec4 a = art(ivec2(cf));
   if ( a.r > 0 && a.g > 0 && a.g < 24 ) { int band = (a.g - 1) & 7, lv = clamp((a.g - 1) / 8 + 1, 1, 3); float al = band <= 1 ? OUTER[lv] : 1.0; return vec4(al); }
   if ( a.g >= 24 ) return vec4(1.0);
+  if ( a.b > 0 && ((a.a >> 5) & 3) == 1 ) return vec4(0.45);   // (the smoke's fire-lit underside: half emissive, it glows at night)
   return vec4(0.0);
 }
 #define OUT(c) ((c) * uAlpha)
@@ -940,13 +959,13 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v11"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v12"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
   show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v6"),
   front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v3"),
-  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v2"),
+  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v3"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
-  emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
+  emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v2")
 };
 const texOf = (data, W, H) => PIXI.Texture.fromBuffer(data, W, H, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });
 const quad = (x0, y0, x1, y1, W, H) => new PIXI.Geometry()

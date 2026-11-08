@@ -376,5 +376,38 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
   ok(edge === 0, `the puff mask never reaches the rectangle's edge (${edge})`);
 }
 
+/* LIGHT DRIVE (lighting A5): the light follows its fire's own signals (pure, CPU ports of art.mjs) */
+{
+  const LS = (x, I = null, O = null, seed = 5) => ({ x, y: 400, seed, level: 2, strength: 1, samples: [0, 1, 2, 3].map((k) => ({ w: 1, cx: x / 3 + k * 32, cy: 130, x: x + k * 96, y: 400, lv: 2, I, O, fs: 4242, wx: 0 })) });
+  const opt = { u: 1, G: 1600, O: 2200, flicker: 1 };
+  const t0 = 1.7e12, T = (ms) => M.shaderTime(ms);
+  ok(JSON.stringify(M.lightDrive(LS(500), t0, T(t0), opt)) === JSON.stringify(M.lightDrive(LS(500), t0, T(t0), opt)), "light drive deterministic");
+  // grow-in: from nothing, smoothly (no switch-on), per 12 fps frame
+  const ig = LS(500, t0), g = []; for ( let k = 0; k <= 40; k++ ) { const now = t0 + k * 83.333; g.push(M.lightDrive(ig, now, T(now), opt).gain); }
+  const steps = g.slice(1).map((v, i) => Math.abs(v - g[i]));
+  ok(g[0] === 0 && Math.max(...steps) < 0.2 && g.at(-1) > 0.4, `light grows in from 0 without a jump (max step ${Math.max(...steps).toFixed(3)}, end ${g.at(-1).toFixed(2)})`);
+  // go-out: down to 0
+  const go = LS(500, null, t0); let last = 1, mono = 0;
+  for ( let k = 0; k <= 30; k++ ) { const now = t0 + k * 83.333; const v = M.lightDrive(go, now, T(now), { ...opt, flicker: 0 }).gain; if ( k > 0 && v > last + 0.08 ) mono++; last = v; }
+  ok(last === 0 && mono === 0, `light goes out with its fire (end ${last})`);
+  // the fuel map drives it: the steady light's strength follows the mean fuel under it
+  const fs = [], gs = [];
+  for ( let k = 0; k < 300; k++ ) { const now = t0 + k * 250, t = T(now), L = LS(500); fs.push(L.samples.reduce((a, s) => a + M.fuelAt(s.cx, s.cy, t, s.fs, 1, 0), 0) / 4); gs.push(M.lightDrive(L, now, t, { ...opt, flicker: 0 }).gain); }
+  const corr = (a, b) => { const ma = a.reduce((x, y) => x + y) / a.length, mb = b.reduce((x, y) => x + y) / b.length; let c = 0, va = 0, vb = 0; a.forEach((x, i) => { c += (x - ma) * (b[i] - mb); va += (x - ma) ** 2; vb += (b[i] - mb) ** 2; }); return c / Math.sqrt(va * vb); };
+  ok(corr(fs, gs) > 0.6 && Math.max(...gs) - Math.min(...gs) > 0.3, `light follows the fuel map (corr ${corr(fs, gs).toFixed(2)}, range ${Math.min(...gs).toFixed(2)}..${Math.max(...gs).toFixed(2)})`);
+  // flicker: irregular, neighbours not in step, no strobe
+  const fa = [], fb = []; for ( let k = 0; k < 600; k++ ) { const t = k / 12; fa.push(M.fireFlicker(t, 11, 1)); fb.push(M.fireFlicker(t, 11 + 7919, 1)); }
+  const fst = fa.slice(1).map((v, i) => Math.abs(v - fa[i]));
+  ok(Math.abs(corr(fa, fb)) < 0.35, `neighbouring lights flicker independently (corr ${corr(fa, fb).toFixed(2)})`);
+  ok(Math.max(...fst) < 0.2 && Math.min(...fa) > 0.6 && Math.max(...fa) < 1.4, `flicker soft, no strobe (max step ${Math.max(...fst).toFixed(3)}, ${Math.min(...fa).toFixed(2)}..${Math.max(...fa).toFixed(2)})`);
+  const lag = (a, L) => corr(a.slice(0, -L), a.slice(L));
+  ok([6, 12, 24, 36, 48].every((L) => lag(fa, L) < 0.6), `flicker has no period (${[6, 12, 24, 36, 48].map((L) => lag(fa, L).toFixed(2)).join(" ")})`);
+  // a gust passes the lights one after another along the wind
+  // (each light's peak searched from the previous one's: one gust followed along the row)
+  const peak = (x, from) => { let bt = 0, bv = -1; for ( let k = 0; k < 54; k++ ) { const t = from + k / 12, v = M.gustAt(t, x, 1, 4242); if ( v > bv + 1e-9 ) { bv = v; bt = t; } } return bt; };
+  const p1 = peak(200, 100), p2 = peak(240, p1), p3 = peak(280, p2);
+  ok(p1 < p2 && p2 < p3 && p3 - p1 < 3, `a gust reaches the lights in turn (${[p1, p2, p3].map((v) => v.toFixed(2)).join(" < ")} s)`);
+}
+
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);
 process.exit(fails ? 1 : 0);
