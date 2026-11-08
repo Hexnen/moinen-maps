@@ -77,7 +77,7 @@ function settingsPanel(host) {
       ${row(Z("f.fill"), `<range-picker name="fill" min="0" max="1" step="0.05" value="${L.fill}"></range-picker>`)}
       ${row(Z("f.ink"), `<range-picker name="ink" min="0" max="2" step="0.05" value="${L.ink}"></range-picker>`)}
       ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}
-      ${row(Z("f.numbers"), `<input type="checkbox" name="numbers"${L.numbers ? " checked" : ""}>`)}
+      ${row(Z("f.numbers"), sel("numbers", [["always", Z("numbers.always")], ["hover", Z("numbers.hover")], ["never", Z("numbers.never")]], L.numbers), Z("h.numbers"))}
       </section><section class="mm-wp-sec"><h4>${esc(Z("sec.mine"))}</h4>
       ${optCheck({ name: "dist", label: Z("f.distances"), checked: setting("zonesDistances") !== false, hint: Z("h.distances") })}
       ${optCheck({ name: "ruler", label: Z("f.ruler"), checked: setting("zonesRuler") !== false, hint: Z("h.ruler") })}

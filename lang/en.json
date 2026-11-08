@@ -1495,5 +1495,9 @@
   "MOINENMAPS.Zones.inv.powerStress": "{power}: 1 action + 1 stress",
   "MOINENMAPS.Zones.inv.far": "out of reach this round",
   "MOINENMAPS.Zones.unit.few": "{n} zones",
-  "MOINENMAPS.Zones.unit.many": "{n} zones"
+  "MOINENMAPS.Zones.unit.many": "{n} zones",
+  "MOINENMAPS.Zones.numbers.always": "Always",
+  "MOINENMAPS.Zones.numbers.hover": "Only on hover",
+  "MOINENMAPS.Zones.numbers.never": "Never",
+  "MOINENMAPS.Zones.h.numbers": "On hover: only the zone under the cursor shows its number. Distances around a selected token always show."
 }

@@ -16,7 +16,7 @@ import * as Editor from "./editor.mjs";
  * Public API: `game.modules.get("moinen-maps").api.zones`. Hook "moinenMapsZones" with ("loaded" | "edited" | "params" | "section").
  */
 
-let S = null, Z = null, display = null, saveTimer = 0, inSection = false;
+let S = null, Z = null, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
 let saveSceneId = null, lastSaved = "";
 const undo = [], redo = [];
 const UNDO_MAX = 60;
@@ -85,8 +85,25 @@ export function refresh() {
       if ( p ) { bands = new Map(); for ( const [id, d] of dist ) { const b = p.band(d, moves); if ( b ) bands.set(id, b); } }
     }
   }
-  display.render(Z, S.look, gridSize(), { dist, bands, here, editing: editing(), zoom: canvas.stage.scale.x });
+  display.render(Z, S.look, gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x });
 }
+
+/* ---------------------------------------------------------------- numbers on hover */
+
+/** The zone under the cursor (numbers "hover"): one check per frame at most, a redraw only when it changes. */
+function onHoverMove(ev) {
+  if ( S?.look.numbers !== "hover" || !display?.root.visible ) return;
+  hoverAt = { x: ev.clientX, y: ev.clientY };
+  if ( hoverRaf ) return;
+  hoverRaf = requestAnimationFrame(() => {
+    hoverRaf = 0;
+    if ( !hoverAt || !canvas.ready ) return;
+    const p = canvas.canvasCoordinatesFromClient(hoverAt);
+    setHover(Geo.zoneAt(Z, p.x, p.y));
+  });
+}
+function setHover(id) { if ( id === hover ) return; hover = id; refresh(); }
+const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); };
 
 /* ---------------------------------------------------------------- lifecycle */
 
@@ -96,6 +113,9 @@ function onCanvasReady() {
   S = Model.load(canvas.scene);
   lastSaved = JSON.stringify(Model.encode(S));
   display = new ZoneDisplay();
+  hover = -1;
+  canvas.app.view.addEventListener("pointermove", onHoverMove, { passive: true });
+  canvas.app.view.addEventListener("pointerleave", onHoverLeave);
   rebuild(); refresh();
   Editor.onCanvasReady();
   tell("loaded");
@@ -105,6 +125,9 @@ function teardown() {
   flushSave();
   clearTimeout(saveTimer); saveTimer = 0;
   Editor.teardown();
+  canvas.app?.view?.removeEventListener("pointermove", onHoverMove);
+  canvas.app?.view?.removeEventListener("pointerleave", onHoverLeave);
+  cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   S = Z = null;
   undo.length = redo.length = 0;

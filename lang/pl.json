@@ -1495,5 +1495,9 @@
   "MOINENMAPS.Zones.inv.walk2": "2 szybkie akcje (bez pełnej)",
   "MOINENMAPS.Zones.inv.power": "{power}: 1 akcja",
   "MOINENMAPS.Zones.inv.powerStress": "{power}: 1 akcja + 1 stres",
-  "MOINENMAPS.Zones.inv.far": "poza zasięgiem w tej rundzie"
+  "MOINENMAPS.Zones.inv.far": "poza zasięgiem w tej rundzie",
+  "MOINENMAPS.Zones.numbers.always": "Zawsze",
+  "MOINENMAPS.Zones.numbers.hover": "Tylko po najechaniu",
+  "MOINENMAPS.Zones.numbers.never": "Nigdy",
+  "MOINENMAPS.Zones.h.numbers": "Po najechaniu: numer pokazuje tylko strefa pod kursorem. Odległości wokół zaznaczonego tokena widać zawsze."
 }

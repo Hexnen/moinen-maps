@@ -8,16 +8,17 @@ import { MODULE_ID } from "../config.mjs";
  *     next: id counter,
  *     preset: "invincible" | "none",    the movement rules counted in zones (scripts/zones/presets.mjs)
  *     snap: 0.25,                       an end of a line this close to another line (in grid squares) is joined to it
- *     look: { who, fill, ink, numbers, color } }
+ *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"
  *
  * Arrays replace each other on update, so a save never leaves stale lines behind.
  */
 export const FLAG = "zones";
 export const VERSION = 1;
 
-export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, numbers: true, color: "#f3e7c9" });
+export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, numbers: "always", color: "#f3e7c9" });
 export const LIMITS = { snap: [0, 1], fill: [0, 1], ink: [0, 2] };
 export const WHO = ["all", "gm", "none"];
+export const NUMBERS = ["always", "hover", "never"];
 
 const r1 = (v) => Math.round(v * 10) / 10;
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -28,7 +29,8 @@ export function cleanLook(l = {}) {
     who: WHO.includes(l.who) ? l.who : D.who,
     fill: num(l.fill, D.fill, ...LIMITS.fill),
     ink: num(l.ink, D.ink, ...LIMITS.ink),
-    numbers: l.numbers !== false,
+    // older sets stored a boolean
+    numbers: NUMBERS.includes(l.numbers) ? l.numbers : l.numbers === false ? "never" : D.numbers,
     color: /^#[0-9a-f]{6}$/i.test(l.color ?? "") ? l.color : D.color
   };
 }

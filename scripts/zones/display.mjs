@@ -63,9 +63,10 @@ export class ZoneDisplay {
    * @param {Map<number, number>} [o.dist]     zone -> distance from the selected token
    * @param {Map<number, object>} [o.bands]    zone -> preset band
    * @param {number} [o.here]                  the selected token's zone
+   * @param {number} [o.hover]                the zone under the cursor (numbers "hover")
    * @param {boolean} [o.editing]              the GM is drawing: stronger tints so new zones show at once
    */
-  render(Z, look, g, { dist = null, bands = null, here = -1, editing = false, zoom = 1 } = {}) {
+  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1 } = {}) {
     this.zoom = zoom;
     const F = this.fill, Ln = this.lines;
     F.clear(); Ln.clear();
@@ -100,10 +101,12 @@ export class ZoneDisplay {
     }
 
     // badges: the zone's number, or its distance from the selected token
-    if ( !look.numbers && !dist ) return;
+    // which zones get their number: all, only the one under the cursor, or none (distances around a selected token always show)
+    const numbered = (id) => look.numbers === "always" || (look.numbers === "hover" && id === hover);
+    if ( look.numbers === "never" && !dist ) return;
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
-      if ( dist && d == null && !look.numbers ) continue;
+      if ( d == null && !numbered(z.id) ) continue;
       const band = bands?.get(z.id);
       const text = d != null ? String(d) : String(z.id + 1);
       const r = Math.min(19 * px, Math.max(8 * px, z.label.r * 0.8));
