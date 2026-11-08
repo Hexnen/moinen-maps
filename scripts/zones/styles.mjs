@@ -10,28 +10,35 @@ import { cleanLook } from "./model.mjs";
 
 const T = (k) => `MOINENMAPS.Zones.style.${k}`;
 export const BUILTIN = Object.freeze([
-  { id: "classic", name: T("classic"), look: {} },
-  { id: "subtle", name: T("subtle"), look: { fill: 0.12, ink: 0.7, lineAlpha: 0.55, numbers: "hover", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8 } },
-  { id: "sketch", name: T("sketch"), look: { fill: 0, ink: 1.2, lineAlpha: 0.9, place: "corner", hoverHi: true, hoverFx: "crosshatch" } },
-  { id: "bold", name: T("bold"), look: { fill: 0.5, ink: 1.6, hoverHi: true, hoverFx: "dots" } },
+  // a printed field map: tinted zones with a darker ribbon inside each border, cream dashes on a dark casing, board-game counters
+  { id: "classic", name: T("classic"), look: { numShape: "counter", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8 } },
+  // quiet: a fine light hairline, a faint shade inside each zone, a small pill with the number only on hover
+  { id: "subtle", name: T("subtle"), look: { fill: 0.15, ink: 0.85, lineAlpha: 0.9, lineStyle: "hairline", color: "#f6f1e6", numbers: "hover", numShape: "pill", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8, hoverLineAlpha: 0.8 } },
+  // graphite on the map: wandering pencil passes that overshoot the corners, hand-lettered numbers in scribbled rings, crosshatch on hover
+  { id: "sketch", name: T("sketch"), look: { fill: 0, ink: 1.1, lineAlpha: 0.95, lineStyle: "sketch", color: "#2a2a30", place: "corner", numShape: "scribble", hoverHi: true, hoverFx: "crosshatch", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } },
+  // a transit map: thick white lines on a black casing, saturated zones, big discs in each zone's own colour
+  { id: "bold", name: T("bold"), look: { fill: 0.5, ink: 1.4, lineStyle: "solid", color: "#ffffff", numShape: "disc", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.8 } },
   // comic book panels: wide paper gutters between black panel frames, a yellow caption box in each panel's corner, halftone on hover
   { id: "comic", name: T("comic"), look: { fill: 0.1, ink: 1, lineAlpha: 1, lineStyle: "comic", color: "#fbf6e6", numbers: "always", place: "corner",
     numShape: "caption", numColor: "#15110f", ringColor: "#15110f", numFormat: "arabic", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } },
-  // fantasy: a cartographer's sepia ink on parchment, heraldic shields with roman numerals, engraved crosshatching on hover
-  { id: "fantasy", name: T("fantasy"), look: { fill: 0.12, ink: 1.1, lineAlpha: 0.95, lineStyle: "ink", color: "#3b2414", numbers: "always", place: "center",
+  // comic 2: halftone dots thick along every panel edge and thinning inwards, paper gutters, big tilted caption boxes
+  { id: "comic2", name: T("comic2"), look: { fill: 0.3, ink: 1, lineAlpha: 1, lineStyle: "halftone", color: "#fbf6e6", numbers: "always", place: "corner",
+    numShape: "panel", numColor: "#15110f", ringColor: "#15110f", numFormat: "arabic", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } },
+  // fantasy: the land aged to parchment, each realm edged with a watercolour ribbon, sepia dash-dot frontiers, heraldic shields
+  { id: "fantasy", name: T("fantasy"), look: { fill: 0.3, ink: 1.1, lineAlpha: 0.95, lineStyle: "ink", color: "#3b2414", numbers: "always", place: "center",
     numShape: "shield", numColor: "#3b2414", ringColor: "#6e4a22", numFormat: "roman", hoverHi: true, hoverFx: "crosshatch", hoverAlpha: 0.7, hoverLineAlpha: 0.85 } },
-  // cyberpunk: neon tubes (cyan core in a magenta glow), hexagon badges with zero-padded numbers, a glow on hover
-  { id: "cyberpunk", name: T("cyberpunk"), look: { fill: 0.16, ink: 1, lineAlpha: 1, lineStyle: "neon", color: "#29f3ff", numbers: "always", place: "corner",
-    numShape: "hex", numColor: "#29f3ff", ringColor: "#ff2bd6", numFormat: "padded", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.9, hoverLineAlpha: 1 } },
-  // noir: black and white, hard white lines with a long black shadow, no colour in the zones, venetian-blind stripes on hover
-  { id: "noir", name: T("noir"), look: { fill: 0, ink: 1, lineAlpha: 1, lineStyle: "noir", color: "#f2f2f2", numbers: "always", place: "corner",
-    numShape: "square", numColor: "#ffffff", ringColor: "#ffffff", numFormat: "arabic", hoverHi: true, hoverFx: "hatch", hoverAlpha: 0.85, hoverLineAlpha: 1 } },
-  // sakura: soft pink branches with falling petals along the borders, blossom badges, a gentle glow on hover
-  { id: "sakura", name: T("sakura"), look: { fill: 0.1, ink: 1, lineAlpha: 0.95, lineStyle: "sakura", color: "#f7a8c4", numbers: "always", place: "center",
-    numShape: "blossom", numColor: "#6b2346", ringColor: "#e07aa0", numFormat: "arabic", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.7, hoverLineAlpha: 0.9 } },
-  // sengoku: sumi ink brush strokes on washi, red hanko seals with kanji numerals, ink hatching on hover
-  { id: "sengoku", name: T("sengoku"), look: { fill: 0.08, ink: 1.15, lineAlpha: 0.95, lineStyle: "brush", color: "#141010", numbers: "always", place: "corner",
-    numShape: "seal", numColor: "#fbf1dc", ringColor: "#b3261e", numFormat: "kanji", hoverHi: true, hoverFx: "hatch", hoverAlpha: 0.6, hoverLineAlpha: 0.85 } }
+  // cyberpunk: night city HUD - zones sunk in shadow with a neon rim, light tubes with chromatic split and circuit traces, chamfered tags, target lock
+  { id: "cyberpunk", name: T("cyberpunk"), look: { fill: 0.4, ink: 1, lineAlpha: 1, lineStyle: "neon", color: "#00f0ff", numbers: "always", place: "corner",
+    numShape: "chip", numColor: "#fcee0a", ringColor: "#ff2a6d", numFormat: "padded", hoverHi: true, hoverFx: "scan", hoverAlpha: 0.85, hoverLineAlpha: 1 } },
+  // noir: every zone a pool of light in the dark, hard white lines with a long shadow, typed evidence tags with one red mark, light through blinds
+  { id: "noir", name: T("noir"), look: { fill: 0.3, ink: 1, lineAlpha: 1, lineStyle: "noir", color: "#f2f2f2", numbers: "always", place: "corner",
+    numShape: "tag", numColor: "#111111", ringColor: "#ffffff", numFormat: "arabic", hoverHi: true, hoverFx: "blinds", hoverAlpha: 0.9, hoverLineAlpha: 1 } },
+  // sakura: cherry branches for borders with blossoms and buds, a pink haze in each zone, blossom badges, falling petals on hover
+  { id: "sakura", name: T("sakura"), look: { fill: 0.25, ink: 1, lineAlpha: 0.95, lineStyle: "sakura", color: "#f7a8c4", numbers: "always", place: "center",
+    numShape: "blossom", numColor: "#6b2346", ringColor: "#e07aa0", numFormat: "arabic", hoverHi: true, hoverFx: "petals", hoverAlpha: 0.9, hoverLineAlpha: 0.9 } },
+  // sengoku: a gold-leaf folding screen - the map warmed to washi, gold clouds from every border, sumi brush strokes, war banners
+  { id: "sengoku", name: T("sengoku"), look: { fill: 0.3, ink: 1.1, lineAlpha: 0.95, lineStyle: "brush", color: "#141010", numbers: "always", place: "center",
+    numShape: "banner", numColor: "#fbf1dc", ringColor: "#b3261e", numFormat: "kanji", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8, hoverLineAlpha: 0.9 } }
 ]);
 
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k) ?? d; } catch { return d; } };
