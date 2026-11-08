@@ -145,7 +145,7 @@ const handler = {
 
 const CSS = `
 .mm-dmv { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; font-family: var(--font-primary, sans-serif); }
-.mm-dmv-b { position: absolute; left: 50%; top: var(--mm-dmv-top, 7vh); transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 0.1rem;
+.mm-dmv-b { position: absolute; left: 50%; top: var(--mm-dmv-top, 5vh); transform: translate(-50%, 0); display: grid; justify-items: center; gap: 0.1rem;
   padding: 0.5rem 4.5rem 0.6rem; color: #f4efe6; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 16px rgba(0,0,0,0.55); white-space: nowrap; }
 .mm-dmv-b::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(10,8,6,0) 0%, rgba(10,8,6,0.78) 22%, rgba(10,8,6,0.78) 78%, rgba(10,8,6,0) 100%);
   transform: scaleX(0); transition: transform 520ms cubic-bezier(0.16, 0.8, 0.3, 1); }
@@ -164,8 +164,9 @@ const CSS = `
 .mm-dmv-b.is-in .mm-dmv-kick { opacity: 0.95; transform: none; }
 .mm-dmv-b.is-in .mm-dmv-name { opacity: 1; transform: none; filter: none; }
 .mm-dmv-b.is-in .mm-dmv-sub, .mm-dmv-b.is-in .mm-dmv-tag { opacity: 1; transform: none; }
-.mm-dmv-b.is-out { opacity: 0; transform: translate(-50%, -62%); transition: opacity 420ms ease-in, transform 520ms ease-in; }
-.mm-dmv-b.is-calm, .mm-dmv-b.is-calm * { transition-property: opacity !important; transform: translate(-50%, -50%); filter: none !important; }
+.mm-dmv-b.is-out { opacity: 0; transform: translate(-50%, -14px); transition: opacity 420ms ease-in, transform 520ms ease-in; }
+.mm-dmv-b.is-calm, .mm-dmv-b.is-calm * { transition-property: opacity !important; filter: none !important; }
+.mm-dmv-b.is-calm { transform: translate(-50%, 0); }
 .mm-dmv-b.is-calm .mm-dmv-kick, .mm-dmv-b.is-calm .mm-dmv-name, .mm-dmv-b.is-calm .mm-dmv-sub { transform: none; }
 .mm-dmv-b.is-calm::before, .mm-dmv-b.is-calm::after { transform: none; opacity: 0; transition: opacity 400ms ease-out; }
 .mm-dmv-b.is-calm.is-in::before, .mm-dmv-b.is-calm.is-in::after { opacity: 1; }
@@ -185,11 +186,20 @@ function dropBanner(ms = 0) {
   const gone = () => { b.el.remove(); if ( root && !root.children.length ) { root.remove(); root = null; } };
   if ( ms ) { b.el.classList.add("is-out"); setTimeout(gone, ms); } else gone();
 }
-/** Under Foundry's top navigation, at least 7 % down (where a take-over's top bar sits). */
+/** The banner's top edge: under Foundry's top navigation, at least 3 % down. */
 function bannerTop() {
   const nav = document.getElementById("navigation")?.getBoundingClientRect?.();
-  const below = nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 34 : 0;
-  return Math.max(below, innerHeight * 0.07);
+  let top = Math.max(nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 8 : 0, innerHeight * 0.03);
+  // below anything else another module put across the top centre (an initiative bar, a HUD): the first free 48 px down the middle
+  // (the banner is centred on the window: three columns across its width are probed)
+  const cx = innerWidth / 2, OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right"]);
+  const freeAt = (x, y) => { const el = document.elementFromPoint(x, y); return !el || el === document.body || el === document.documentElement || OPEN.has(el.id) || el.tagName === "CANVAS"; };
+  const free = (y) => freeAt(cx, y) && freeAt(cx - 170, y) && freeAt(cx + 170, y);
+  let run = 0;
+  for ( let y = 0; y < innerHeight * 0.4; y += 6 ) {
+    if ( free(y) ) { run += 6; if ( run >= 48 ) { top = Math.max(top, y - run + 6 + 8); break; } } else run = 0;
+  }
+  return Math.min(top, innerHeight * 0.4);
 }
 /** Shows a banner { kick, name, sub, tag, round, icon } for `ms`; a new one replaces the one on screen at once. */
 export function showBanner({ kick, name = "", sub = "", tag = "", round = false, icon = "fa-solid fa-hourglass-half", ms = 2400 }) {
