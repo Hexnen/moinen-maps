@@ -54,7 +54,7 @@ function bar(host, ctx) {
     if ( a === "undo" ) Zones.undoEdit(); else if ( a === "redo" ) Zones.redoEdit(); else if ( a === "trim" ) Zones.trim();
   };
   const onChange = (ev) => {
-    // only the control's own event (its name ATTRIBUTE: a range-picker has no name property); its inner inputs carry no name
+    // only the control's own event: a range-picker's inner inputs fire "change" first, unnamed (and with the old value)
     const name = ev.target?.getAttribute?.("name");
     if ( name !== "snap" && name !== "smooth" ) return;
     Zones.setParams({ [name]: Number(ev.target.value) });
@@ -122,8 +122,8 @@ function settingsPanel(host) {
   };
   render();
   const onChange = (ev) => {
-    // only the control's own event, found by its name ATTRIBUTE (a range-picker has no name property). A range-picker's inner
-    // inputs fire "change" first, unnamed and while the picker still holds the old value: they are skipped.
+    // only the control's own event: a range-picker's inner inputs fire "change" first, unnamed and while the picker still holds
+    // the old value; they are skipped (the picker's own event follows with the new value).
     const c = ev.target, name = c?.getAttribute?.("name");
     if ( !name ) return;
     const v = c.matches("input[type=checkbox]") ? c.checked : c.value;
