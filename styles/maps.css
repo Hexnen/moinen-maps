@@ -1,173 +1,6 @@
-/* Moinen Maps: Scene Config "Pins" tab. Theme-agnostic: surfaces are mixed from currentColor so it follows light/dark UI themes. */
-.moinen-maps-tab {
-  --mm-surface: color-mix(in srgb, currentColor 6%, transparent);
-  --mm-edge: color-mix(in srgb, currentColor 14%, transparent);
-  --mm-accent: #e5322d;
-  --mm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  padding: 0.25rem 0.1rem 1rem;
-}
-
-/* hero: live preview + the master switches */
-.moinen-maps-tab .mm-hero {
-  display: grid;
-  grid-template-columns: 9.5rem 1fr;
-  gap: 1rem;
-  align-items: stretch;
-  margin-bottom: 1rem;
-}
-.mm-hero-fields { display: flex; flex-direction: column; justify-content: center; gap: 0.15rem; min-width: 0; }
-.mm-hero-fields .form-group { margin: 0.2rem 0; }
-
-.mm-stage {
-  position: relative;
-  display: grid;
-  place-items: end center;
-  min-height: 10.5rem;
-  padding: 0 0 1.5rem;
-  margin: 0;
-  border: 1px solid var(--mm-edge);
-  border-radius: 8px;
-  background: var(--mm-surface);
-  color: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  transition: background-color 0.2s var(--mm-ease-out), border-color 0.2s var(--mm-ease-out);
-}
-.mm-stage:hover { border-color: color-mix(in srgb, var(--mm-accent) 55%, transparent); }
-.mm-stage:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: 2px; }
-.mm-stage > * { grid-area: 1 / 1; }
-.mm-ground {
-  align-self: end;
-  justify-self: center;
-  width: 4.6rem; height: 1.3rem;
-  margin: 0 0 0.85rem 0.35rem;   /* offset away from the implied top-left light */
-  /* wide penumbra + tight contact core, same recipe as the canvas shadow */
-  background:
-    radial-gradient(ellipse 28% 36% at 50% 50%, rgb(24 14 30 / 0.85), rgb(24 14 30 / 0.6) 30%, rgb(24 14 30 / 0.2) 65%, transparent),
-    radial-gradient(ellipse 50% 50% at 50% 50%, rgb(24 14 30 / 0.34), rgb(24 14 30 / 0.24) 35%, rgb(24 14 30 / 0.09) 70%, transparent);
-  mix-blend-mode: multiply;
-  transform: scale(var(--mm-scale, 1));
-}
-.mm-stage.is-dropping .mm-ground { animation: mm-ground 1.15s linear both; }
-@keyframes mm-ground {
-  0%   { opacity: 0.25; transform: translateX(0.5rem) scale(calc(var(--mm-scale, 1) * 1.45)); animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
-  30%  { opacity: 1; transform: translateX(0) scale(calc(var(--mm-scale, 1) * 0.92)); }
-  36%  { opacity: 1; transform: scale(calc(var(--mm-scale, 1) * 1.08), calc(var(--mm-scale, 1) * 0.9)); animation-timing-function: ease-out; }
-  50%  { opacity: 0.5; transform: translateX(0.3rem) scale(calc(var(--mm-scale, 1) * (1 + 0.3 * var(--mm-bn)))); animation-timing-function: ease-in; }
-  62%  { opacity: 1; transform: scale(var(--mm-scale, 1)); }
-  72%  { opacity: 0.8; transform: translateX(0.12rem) scale(calc(var(--mm-scale, 1) * 1.08)); }
-  100% { opacity: 1; transform: scale(var(--mm-scale, 1)); }
-}
-.mm-stage.no-shadow .mm-ground { opacity: 0; }
-.mm-drop {
-  align-self: end;
-  width: 6.6rem; aspect-ratio: 320 / 352;
-  /* the canvas tip sits at 90.9% of its height; lift so the tip lands on the shadow */
-  margin-bottom: calc(1.5rem - 0.091 * 7.26rem);
-  transform-origin: 50% 90.9%;
-  transform: scale(var(--mm-scale, 1));
-}
-.mm-pin {
-  display: block;
-  width: 100%; height: 100%;
-  transform-origin: 50% 90.9%;
-}
-.mm-replay {
-  align-self: start; justify-self: end;
-  margin: 0.4rem;
-  font-size: 0.7rem;
-  opacity: 0.4;
-  transition: opacity 0.2s var(--mm-ease-out);
-}
-.mm-stage:hover .mm-replay, .mm-stage:focus-visible .mm-replay { opacity: 0.85; }
-
-/* drop preview: gravity in, impact squash, overshoot, two settling bounces */
-.mm-drop.is-dropping { animation: mm-drop 1.15s linear both; }
-@keyframes mm-drop {
-  0%   { transform: translateY(calc(var(--mm-h) * -1)) scale(0.62) rotate(-6deg); opacity: 0; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
-  6%   { opacity: 1; }
-  30%  { transform: translateY(0) scale(calc(0.97 * var(--mm-scale, 1)), calc(1.12 * var(--mm-scale, 1))) rotate(0); animation-timing-function: ease-out; }
-  36%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.38 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.42 * var(--mm-sq)))) rotate(2deg); animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1); }
-  50%  { transform: translateY(calc(var(--mm-bn) * -22px)) scale(calc(var(--mm-scale, 1) * 0.95), calc(var(--mm-scale, 1) * (1 + 0.12 * var(--mm-bn)))) rotate(-2deg); animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.6); }
-  62%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.14 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.16 * var(--mm-sq)))) rotate(0); animation-timing-function: ease-out; }
-  72%  { transform: translateY(calc(var(--mm-bn) * -7px)) scale(var(--mm-scale, 1)) rotate(0); animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.6); }
-  82%  { transform: translateY(0) scale(calc(var(--mm-scale, 1) * (1 + 0.05 * var(--mm-sq))), calc(var(--mm-scale, 1) * (1 - 0.05 * var(--mm-sq)))); }
-  100% { transform: translateY(0) scale(var(--mm-scale, 1)); }
-}
-
-/* idle preview, strength and speed come from the sliders */
-.mm-pin[data-idle="breathe"] { animation: mm-breathe var(--mm-isp, 3.1s) ease-in-out infinite; }
-.mm-pin[data-idle="bob"]     { animation: mm-bob var(--mm-isp, 3.1s) ease-in-out infinite; }
-.mm-pin[data-idle="sway"]    { animation: mm-sway var(--mm-isp, 3.1s) ease-in-out infinite; }
-.mm-pin[data-idle="pulse"]   { animation: mm-pulse var(--mm-isp, 3.1s) ease-in-out infinite; }
-@keyframes mm-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(calc(1 - 0.022 * var(--mm-is, 0.5) * 2), calc(1 + 0.04 * var(--mm-is, 0.5) * 2)); } }
-@keyframes mm-bob   { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(calc(-3.2px * var(--mm-is, 0.5) * 2)); } }
-@keyframes mm-sway  { 0%, 100% { transform: rotate(calc(-5deg * var(--mm-is, 0.5) * 2)); } 50% { transform: rotate(calc(5deg * var(--mm-is, 0.5) * 2)); } }
-@keyframes mm-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(calc(1 + 0.07 * var(--mm-is, 0.5) * 2)); } }
-
-/* sections */
-.moinen-maps-tab .mm-sections { display: flex; flex-direction: column; gap: 0.75rem; transition: opacity 0.2s var(--mm-ease-out); }
-.moinen-maps-tab fieldset {
-  margin: 0;
-  padding: 0.35rem 0.85rem 0.6rem;
-  border: 1px solid var(--mm-edge);
-  border-radius: 8px;
-  background: var(--mm-surface);
-}
-.moinen-maps-tab legend {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  padding: 0 0.4rem;
-  font-weight: 600;
-}
-.moinen-maps-tab legend i { color: var(--mm-accent); font-size: 0.85em; }
-.moinen-maps-tab .form-group { margin: 0.35rem 0; }
-.moinen-maps-tab .hint { margin: 0.1rem 0 0; opacity: 0.7; font-size: var(--font-size-12, 0.78rem); }
-/* a dependent group sits on its own tinted ground instead of a coloured side rule */
-.moinen-maps-tab .mm-sub {
-  margin: 0.3rem 0 0.5rem;
-  padding: 0.1rem 0.7rem;
-  border-radius: 6px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
-  transition: opacity 0.2s var(--mm-ease-out);
-}
-.moinen-maps-tab .mm-sub .form-group:first-child { margin-top: 0.2rem; }
-.moinen-maps-tab .is-off { opacity: 0.4; }
-
-/* the two halves of the tab: pins, then districts */
-.moinen-maps-tab .mm-group {
-  display: flex; align-items: center; gap: 0.45rem;
-  margin: 0.6rem 0 -0.1rem; padding: 0;
-  border: 0;
-  font-size: var(--font-size-16, 1rem); font-weight: 700;
-}
-.moinen-maps-tab .mm-group:first-child { margin-top: 0; }
-.moinen-maps-tab .mm-group i { color: var(--mm-accent); font-size: 0.9em; }
-
-/* rarely used blocks (label typography) start folded */
-.moinen-maps-tab .mm-fold {
-  border: 1px solid var(--mm-edge); border-radius: 8px; background: var(--mm-surface);
-}
-.moinen-maps-tab .mm-fold > summary {
-  display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.5rem 0.85rem; cursor: pointer; font-weight: 600; list-style: none; border-radius: 8px;
-}
-.moinen-maps-tab .mm-fold > summary::-webkit-details-marker { display: none; }
-.moinen-maps-tab .mm-fold > summary::after { content: ""; width: 0.45rem; height: 0.45rem; margin: 0 0.2rem 0.2rem auto; border: solid currentColor; border-width: 0 2px 2px 0; opacity: 0.6; transform: rotate(45deg); transition: transform 0.2s var(--mm-ease-out); }
-.moinen-maps-tab .mm-fold[open] > summary::after { margin-bottom: 0; transform: rotate(-135deg); }
-.moinen-maps-tab .mm-fold > summary i { color: var(--mm-accent); font-size: 0.85em; }
-.moinen-maps-tab .mm-fold > summary:focus-visible { outline: 2px solid var(--mm-accent); outline-offset: -2px; }
-.moinen-maps-tab .mm-fold-body { padding: 0 0.85rem 0.6rem; }
-
-@media (max-width: 34rem) {
-  .moinen-maps-tab .mm-hero { grid-template-columns: 1fr; }
-  .mm-stage { min-height: 8rem; }
-}
-/* reduced motion keeps the state change (the pin appears) and drops the travel, squash and loops */
-@keyframes mm-appear { from { opacity: 0; } to { opacity: 1; } }
+/* Moinen Maps. Theme-agnostic: surfaces are mixed from currentColor so they follow light/dark UI themes. */
 @media (prefers-reduced-motion: reduce) {
-  .mm-drop.is-dropping { animation: mm-appear 0.3s ease-out both; }
-  .mm-stage.is-dropping .mm-ground, .mm-pin[data-idle] { animation: none; }
-  .moinen-maps-tab .mm-fold > summary::after, #scene-controls button.tool[data-tool^="mm-"]::before, #scene-controls button.mm-section::before { transition: none; }
+  #scene-controls button.tool[data-tool^="mm-"]::before, #scene-controls button.mm-section::before { transition: none; }
   #scene-controls button.tool[data-tool^="mm-"]:hover::before { transform: none; }
 }
 
@@ -436,7 +269,6 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 
 /* the live font sample stays in view while its options are adjusted below it */
 .mm-fold-body > .mm-fontpreview { position: sticky; top: 0; z-index: 1; box-shadow: 0 6px 8px -4px rgb(0 0 0 / 0.35); }
-.moinen-maps-tab .mm-fold { scroll-margin-top: 0.25rem; }
 
 /* ---- live preview strip (every editor) ---- */
 .mm-live { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 0.45rem; margin: 0 0 0.5rem; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.8rem;
@@ -449,7 +281,6 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-live-reset:focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
 @keyframes mm-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .mm-live-dot { animation: none; } }
-.moinen-maps-tab .mm-live { margin: 0 0 0.6rem; }
 
 /* ---- workspace: the options bar across the top and the dock of panels on the right (GM, while a Moinen Maps section is open) ---- */
 #moinen-maps-workspace {
@@ -756,9 +587,6 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-tfx-ov > span { color: var(--mm-ws-muted); }
 .mm-tfx-form { margin-top: 0.5rem; padding-top: 0.25rem; border-top: 1px solid var(--mm-ws-edge); }
 .mm-tfx-form[hidden] { display: none; }
-.mm-tfx-link { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.2rem 0 0.5rem; }
-.mm-tfx-link .hint { flex: 1 1 14rem; margin: 0; }
-.mm-tfx-link button { flex: none; width: auto; }
 @media (prefers-reduced-motion: reduce) { .mm-tfx-chip { transition: none; } }
 /* cinematic mode (destruction/cinematic-ui.mjs) */
 .mm-d-cin { margin: 0 0 0.55rem; padding-top: 0.2rem; border-top: 1px solid var(--mm-ws-line, rgba(255, 255, 255, 0.12)); }

@@ -164,6 +164,6 @@ registerSection({
     { id: "brush", title: "MOINENMAPS.WS.pBrush", icon: "fa-solid fa-paintbrush", mount: (host) => brushPanel(host) },
     { id: "list", title: "MOINENMAPS.WS.pList", icon: "fa-solid fa-list-ul", mount: (host) => new DistrictsList().mount(host) },
     { id: "scene", title: "MOINENMAPS.WS.pDistrictScene", icon: "fa-solid fa-map", open: false, mount: (host) => scenePanel(host) },
-    { id: "night", title: "MOINENMAPS.Scene.Night", icon: "fa-solid fa-moon", open: false, mount: (host) => nightPanel(host) }
+    { id: "night", title: "MOINENMAPS.WS.pNight", icon: "fa-solid fa-moon", open: false, mount: (host) => nightPanel(host) }
   ]
 });
