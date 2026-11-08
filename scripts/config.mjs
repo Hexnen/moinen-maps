@@ -13,6 +13,8 @@ export const DEFAULTS = {
   color: "#e5322d",
   useNoteTint: true,
   size: 1,
+  sizeBy: "note",     // "note": the note's icon size x size; "grid": sizeGrid grid squares tall, whatever the note says
+  sizeGrid: 0.8,
   glyph: "note",       // "note" = note icon inside the pin, "dot" = plain highlight
   shadow: true,
   glow: true,          // glow around the pin on hover / selection

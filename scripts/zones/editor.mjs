@@ -39,7 +39,7 @@ export function setMode(m) {
 function ensureGfx() {
   if ( lines && !lines.destroyed ) return;
   canvas.interface.sortableChildren = true;
-  lines = new PIXI.Graphics(); lines.eventMode = "none"; lines.zIndex = 852;
+  lines = new PIXI.Graphics(); lines.eventMode = "none"; lines.zIndex = 795;   // under the pins (notes, 800)
   gfx = new PIXI.Graphics(); gfx.eventMode = "none"; gfx.zIndex = 861;
   canvas.interface.addChild(lines); canvas.interface.addChild(gfx);
   trackMarkers(lines); trackMarkers(gfx, { ring: true });

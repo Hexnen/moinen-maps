@@ -42,7 +42,9 @@ function tabHtml(scene, active) {
     <div class="mm-sections" data-mm="sections">
       <h3 class="mm-group"><i class="fa-solid fa-location-dot" inert></i> ${esc(T("Scene.GroupPins"))}</h3>
       <fieldset class="mm-look">${legend("fa-paintbrush", "Scene.Pins")}
+        ${select("sizeBy", "SizeBy", c.sizeBy, [["note", T("SizeByNote")], ["grid", T("SizeByGrid")]], "SizeByHint")}
         ${range("size", "Size", c.size, 0.5, 2, 0.05)}
+        ${range("sizeGrid", "SizeGrid", c.sizeGrid, 0.2, 3, 0.05, "SizeGridHint")}
         ${select("glyph", "GlyphInside", c.glyph, [["note", T("GlyphNote")], ["dot", T("GlyphDot")]], "GlyphHint")}
         ${check("shadow", "Shadow", c.shadow)}
         ${check("glow", "Glow", c.glow, "GlowHint")}
@@ -178,6 +180,8 @@ function wire(tab, scene, app) {
     dep("hoverColor", hm === "highlight");   // only the highlight effect uses a colour
     dep("hoverStrength", hm !== "none");
     dep("districtInkColor", val("districtInk") === "custom");
+    dep("size", val("sizeBy") !== "grid");
+    dep("sizeGrid", val("sizeBy") === "grid");
     const tokOff = !on("tokens.enabled"), tsub = tab.querySelector('[data-mm="tok-sub"]');
     tsub.classList.toggle("is-off", tokOff); tsub.inert = tokOff;
     for ( const [flag, sel] of [["tokens.target", "tok-target-sub"], ["tokens.combat", "tok-combat-sub"]] ) { const s = tab.querySelector(`[data-mm="${sel}"]`), off = !on(flag); s.classList.toggle("is-off", off); s.inert = off; }

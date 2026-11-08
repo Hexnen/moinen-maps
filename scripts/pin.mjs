@@ -86,7 +86,8 @@ class Pin extends PIXI.Container {
   redraw() {
     const cfg = this.cfg;
     const doc = this.note.document;
-    const S = doc.iconSize * cfg.size * UNIT;
+    // pin height: from the note's icon size (x size), or a share of the grid square (same on every map, whatever the notes say)
+    const S = (cfg.sizeBy === "grid" ? (canvas.dimensions?.size ?? 100) * (Number(cfg.sizeGrid) || 0.8) : doc.iconSize * cfg.size) * UNIT;
     const noteTint = doc.texture.tint;
     const type = pinTypeOf(doc);
     const own = doc.flags?.["moinen-maps"]?.color;
@@ -294,7 +295,7 @@ class Pin extends PIXI.Container {
 function syncLayout(note, pin) {
   const S = pin.S, ci = note.controlIcon;
   ci.position.set(0, -S * HEAD_Y);
-  ci.scale.set(pin.cfg.size * 0.9);   // hit area ~ the pin head
+  ci.scale.set((S / (note.document.iconSize * UNIT)) * 0.9);   // hit area ~ the pin head
   ci.border.visible = false;                  // the pin's own glow replaces the square border
   const doc = note.document, cfg = pin.cfg;
   const tt = note.tooltip;

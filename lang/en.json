@@ -1535,5 +1535,11 @@
   "MOINENMAPS.Zones.grp.look": "Zones",
   "MOINENMAPS.Zones.grp.numbers": "Numbers",
   "MOINENMAPS.Zones.grp.hover": "Highlight on hover",
-  "MOINENMAPS.Zones.h.world": "For every map whose Movement or Look is set to World."
+  "MOINENMAPS.Zones.h.world": "For every map whose Movement or Look is set to World.",
+  "MOINENMAPS.SizeBy": "Size from",
+  "MOINENMAPS.SizeByNote": "Note icon size",
+  "MOINENMAPS.SizeByGrid": "Grid square",
+  "MOINENMAPS.SizeByHint": "Grid square: every pin is the same share of a grid square tall, whatever icon size its note has.",
+  "MOINENMAPS.SizeGrid": "Size (grid squares)",
+  "MOINENMAPS.SizeGridHint": "Pin height in grid squares."
 }
