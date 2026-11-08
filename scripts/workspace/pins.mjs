@@ -1,6 +1,8 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, setting, store, onSetting, optHint, optRange, optSelect, isEcho } from "./ui.mjs";
-import { typeLabel, sceneConfig, MODULE_ID } from "../config.mjs";
+import { esc, T, setting, store, onSetting, optHint, optFold } from "./ui.mjs";
+import { typeLabel, IDLE_MODES } from "../config.mjs";
+import { fontFamilies } from "../labels.mjs";
+import { sceneForm, sf } from "./scene-form.mjs";
 import { currentPinType, thumb, mountPalette, mountPresetManager, managerSelect } from "../presets.mjs";
 import { dockFilter } from "../filter-panel.mjs";
 import { swatchesHtml, wireSwatches, clearPins } from "../tools.mjs";
@@ -40,44 +42,47 @@ function pinsBar(host, ctx) {
   return () => { off(); Hooks.off("updateSetting", offWorld); host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); };
 }
 
+// which folds of the Pin look panel are open (kept while it is drawn again)
+const lookFolds = new Set();
+
 /**
- * The size of the pins on the viewed scene (the same keys as the Scene Config tab: sizeBy, size, sizeGrid): from the note's icon size
- * times a multiplier, or a share of a grid square. Only the slider of the chosen mode shows. GM only; follows the scene and scene switches.
+ * How the pins of the viewed scene look and move (the scene's own config, GM only): on/off and colour first, then size and glyph;
+ * motion and the hover text folded. The size slider of the chosen mode only; everything but the switch hides while pins are off.
  */
 function lookPanel(host) {
-  const render = () => {
-    const s = canvas?.scene;
-    if ( !s ) { host.innerHTML = `<p class="hint">${esc(T("Zones.noScene"))}</p>`; return; }
-    const c = sceneConfig(s), grid = c.sizeBy === "grid";
-    host.innerHTML = `<div class="mm-ws-form">
-      ${optSelect({ name: "sizeBy", label: T("SizeBy"), value: c.sizeBy, hint: T("SizeByHint"), options: [["note", T("SizeByNote")], ["grid", T("SizeByGrid")]] })}
-      ${grid ? optRange({ name: "sizeGrid", label: T("SizeGrid"), value: c.sizeGrid, min: 0.2, max: 3, step: 0.05, hint: T("SizeGridHint") })
-        : optRange({ name: "size", label: T("Size"), value: c.size, min: 0.5, max: 2, step: 0.05 })}</div>`;
-    if ( !game.user.isGM ) host.querySelectorAll("select, range-picker").forEach((c2) => { c2.disabled = true; });
-  };
-  const onChange = (ev) => {
-    if ( isEcho() || !game.user.isGM ) return;
-    // only the named control's own event: a <range-picker>'s inner inputs report first, unnamed, with the old value
-    const c = ev.target, name = c?.getAttribute?.("name"), s = canvas?.scene; if ( !s || !["sizeBy", "size", "sizeGrid"].includes(name) ) return;
-    const v = name === "sizeBy" ? c.value : Number(c.value);
-    if ( name !== "sizeBy" && !Number.isFinite(v) ) return;
-    if ( sceneConfig(s)[name] === v ) return;
-    s.update({ [`flags.${MODULE_ID}.config.${name}`]: v });
-  };
-  host.addEventListener("change", onChange);
-  // redrawn when the scene's config changes (the mode swaps the slider), unless a slider of this panel is in hand; the mode
-  // select keeps the keyboard
-  const onScene = (s, ch) => {
-    if ( s.id !== canvas?.scene?.id || !foundry.utils.hasProperty(ch, `flags.${MODULE_ID}.config`) ) return;
-    const a = document.activeElement;
-    if ( host.contains(a) && a.closest("range-picker") ) return;
-    const keep = host.contains(a) ? a.getAttribute("name") : null;
-    render();
-    if ( keep ) host.querySelector(`[name="${keep}"]`)?.focus();
-  };
-  const hU = Hooks.on("updateScene", onScene), hC = Hooks.on("canvasReady", () => render());
-  render();
-  return () => { host.removeEventListener("change", onChange); Hooks.off("updateScene", hU); Hooks.off("canvasReady", hC); };
+  return sceneForm(host, {
+    folds: lookFolds,
+    deps: [
+      ['[data-dep="pins"]', (v) => v("enabled")],
+      ['[data-dep="size"]', (v) => v("sizeBy") !== "grid"],
+      ['[data-dep="sizeGrid"]', (v) => v("sizeBy") === "grid"],
+      ['[data-dep="drop"]', (v) => v("drop")],
+      ['[data-dep="idle"]', (v) => v("idle") !== "none"]
+    ],
+    html: (c) => `${sf.check(c, "enabled", "Enabled", "EnabledHint")}
+      <div data-dep="pins">
+      ${sf.color(c, "color", "Color", "#e5322d")}
+      ${sf.check(c, "useNoteTint", "UseNoteTint", "UseNoteTintHint")}
+      ${sf.select(c, "sizeBy", "SizeBy", [["note", T("SizeByNote")], ["grid", T("SizeByGrid")]], "SizeByHint")}
+      <div data-dep="size">${sf.range(c, "size", "Size", 0.5, 2, 0.05)}</div>
+      <div data-dep="sizeGrid">${sf.range(c, "sizeGrid", "SizeGrid", 0.2, 3, 0.05, "SizeGridHint")}</div>
+      ${sf.select(c, "glyph", "GlyphInside", [["note", T("GlyphNote")], ["dot", T("GlyphDot")]], "GlyphHint")}
+      ${sf.check(c, "shadow", "Shadow")}
+      ${sf.check(c, "glow", "Glow", "GlowHint")}
+      ${optFold({ id: "motion", title: T("Scene.Motion"), icon: "fa-solid fa-wand-magic-sparkles", open: lookFolds, body: `
+        ${sf.check(c, "drop", "Drop", "DropHint")}
+        <div data-dep="drop">${sf.range(c, "dropHeight", "DropHeight", 0.3, 2, 0.05)}${sf.range(c, "bounce", "Bounce", 0, 1, 0.05)}${sf.range(c, "squeeze", "Squeeze", 0, 1, 0.05)}</div>
+        ${sf.check(c, "hop", "Hop", "HopHint")}
+        ${sf.select(c, "idle", "IdleMode", IDLE_MODES.map((m) => [m, T(`Idle.${m}`)]))}
+        <div data-dep="idle">${sf.range(c, "idleStrength", "IdleStrength", 0, 1, 0.05)}${sf.range(c, "idleSpeed", "IdleSpeed", 0.2, 3, 0.05)}</div>` })}
+      ${optFold({ id: "pintext", title: T("Label.pinSection"), icon: "fa-solid fa-tag", open: lookFolds, attrs: `data-tooltip="${esc(T("Label.pinHint"))}"`, body: `
+        ${sf.select(c, "pinText.family", "Label.family", [["", T("Label.default")], ...fontFamilies().map((f) => [f, f])])}
+        ${sf.range(c, "pinText.size", "Label.size", 0, 96, 1, "Label.pinSizeHint")}
+        ${sf.color(c, "pinText.color", "Label.textColor", "#ffffff")}
+        ${sf.color(c, "pinText.halo", "Label.halo", "#000000")}
+        ${sf.range(c, "pinText.haloWidth", "Label.haloWidth", 0, 16, 0.5)}` })}
+      </div>`
+  });
 }
 
 registerSection({
