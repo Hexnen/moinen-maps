@@ -75,8 +75,10 @@ export function cloudLayer(seed, w, h, planet, { du = 0.009, dv = 0.004, exact =
     return t0 + (t1 - t0) * a;
   };
 
-  /** Paint the layer for a cloud phase (the clouds have moved `phase` along +u, towards the night side). Returns pixels changed. */
-  const paint = (phase) => {
+  /** Paint the layer for a cloud phase (the clouds have moved `phase` along +u, towards the night side). Returns pixels changed.
+   *  exact: read the noise itself instead of the table (slower; phase 0 then equals the picture pixel for pixel). */
+  const paint = (phase, exactNow = exact) => {
+    const exact = exactNow;
     if ( !exact && n ) for ( let k = Math.floor((umin - phase) / du) - 1, kh = Math.floor((umax + SHADOW_DU - phase) / du) + 1; k <= kh; k++ ) fill(k);
     let changed = 0;
     for ( let i = 0; i < n; i++ ) {

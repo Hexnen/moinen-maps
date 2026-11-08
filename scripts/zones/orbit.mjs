@@ -3,7 +3,8 @@
  * appears there; every map shows, above its top edge, a strip of everyone in orbit, and a click brings a token down onto that map.
  *
  * - The Orbit scene is made on demand by a GM: its background is procedural pixel-art space (space.mjs), painted at a low art
- *   resolution, enlarged with hard edges and uploaded once as a PNG into the world folder; the seed sits in the scene flag.
+ *   resolution, enlarged with hard edges and uploaded once as a PNG into the world folder; the seed sits in the scene flag (v 2: the
+ *   planet's layout incl. its longitude `lo`, so the live drifting clouds of orbit-clouds.mjs need no check of the picture).
  * - No socket: a player asks by setting a one-off request flag on a token they own (`orbitReq: {dir, scene, at}`; the old `alt` /
  *   `land` flags still work) and
  *   the active GM's client does the move (create on the other scene, delete here), so it works with only the GM online to act.
@@ -68,7 +69,7 @@ export async function ensureOrbitScene() {
       name: T("sceneName"), width: COLS * GRID, height: ROWS * GRID, padding: 0, grid: { size: GRID, type: CONST.GRID_TYPES.SQUARE, alpha: 0.06 },
       tokenVision: false, fog: { exploration: false }, navigation: true,
       ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.LIMITED },
-      flags: { [MODULE_ID]: { orbit: { seed, v: 1, layout: layoutOf.get(seed) ?? null } } }
+      flags: { [MODULE_ID]: { orbit: { seed, v: 2, layout: layoutOf.get(seed) ?? null } } }
     });
     await setBackground(scene, src);
     ui.notifications.info(T("made"));
@@ -82,8 +83,9 @@ export async function regenerate(seed = Math.floor(Math.random() * 2 ** 31)) {
   const scene = await ensureOrbitScene();
   if ( !scene || !game.user.isGM ) return null;
   const src = await makeBackground(seed);
+  // the flag first: the canvas redrawn for the new picture already finds the new planet (the live clouds paint that planet)
+  await scene.setFlag(MODULE_ID, "orbit", { seed, v: 2, layout: layoutOf.get(seed) ?? null });
   await setBackground(scene, src);
-  await scene.setFlag(MODULE_ID, "orbit", { seed, v: 1, layout: layoutOf.get(seed) ?? null });
   return src;
 }
 
@@ -365,6 +367,7 @@ function onTokenHUD(hud, html) {
 
 export const orbitApi = { scene: orbitScene, ensure: ensureOrbitScene, regenerate, send: sendToOrbit, land: bringBack, isOrbit, refresh: () => strip.refresh() };
 
+let readyCount = 0;
 export function registerOrbit() {
   moduleApi.orbit = orbitApi;
   Hooks.once("init", () => {
@@ -372,13 +375,26 @@ export function registerOrbit() {
     game.settings.register(MODULE_ID, "orbitFollow", { name: "MOINENMAPS.Orbit.follow", hint: "MOINENMAPS.Orbit.followHint", scope: "client", config: true, type: Boolean, default: true });
   });
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } setTimeout(sweep, 1500); });
-  Hooks.on("canvasReady", () => { rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1, canvas.scene.getFlag(MODULE_ID, "orbit")?.layout ?? null); });
+  Hooks.on("canvasReady", () => { readyCount++; rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) { const f = canvas.scene.getFlag(MODULE_ID, "orbit"); startAmbience(canvas.scene, f?.seed ?? 1, f?.layout ?? null, f); } });
   Hooks.on("canvasTearDown", () => { strip.remove(); back.remove(); stopAmbience(); });
   Hooks.on("canvasPan", () => strip.place());
   window.addEventListener("resize", () => strip.place());
   Hooks.on("createToken", onCreateToken);
   Hooks.on("updateToken", onUpdateToken);
   Hooks.on("deleteToken", (doc) => { if ( isOrbit(doc.parent) ) strip.refresh(); });
-  Hooks.on("updateScene", (scene) => { if ( isOrbit(scene) ) strip.refresh(); });
+  Hooks.on("updateScene", (scene, changed) => {
+    if ( !isOrbit(scene) ) return;
+    strip.refresh();
+    // a new sky on the scene being looked at: the ambience stops at once (its clouds belong to the old planet) and starts again with the
+    // canvas redrawn for the new picture - or, if no redraw comes (only the flag changed), on its own a moment later
+    if ( changed.flags?.[MODULE_ID]?.orbit && canvas?.ready && canvas.scene?.id === scene.id ) {
+      stopAmbience();
+      const n = readyCount;
+      setTimeout(() => {
+        if ( readyCount !== n || !canvas?.ready || canvas.scene?.id !== scene.id ) return;
+        const f = scene.getFlag(MODULE_ID, "orbit"); startAmbience(scene, f?.seed ?? 1, f?.layout ?? null, f);
+      }, 2000);
+    }
+  });
   Hooks.on("renderTokenHUD", onTokenHUD);
 }
