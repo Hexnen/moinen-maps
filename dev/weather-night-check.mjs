@@ -146,3 +146,10 @@ export async function fireDamp(name, { dims = [0, 0.3, 0.55, 0.8], moments = 3, 
   const [x, y, w, h] = crop ?? [0, 0, shots[0].w, shots[0].h];
   return { rows: out, png: await cropPng(name, shots, x, y, w, h, k) };
 }
+
+/** Zoom-`k` crops of one spot with each given list of display objects hidden in turn (the first crop hides nothing). */
+export async function hideCompare(name, lists, x, y, w, h, k = 2) {
+  for ( let i = 0; i < 3; i++ ) canvas.app.ticker.update(performance.now() + i * 17);
+  const shots = [frame(), ...lists.map((l) => frame(l))];
+  return cropPng(name, shots, x, y, w, h, k);
+}

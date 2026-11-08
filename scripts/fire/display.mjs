@@ -6,8 +6,9 @@ import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
 import { carrying } from "../tokens/carry.mjs";
-import { vortices, vortexWindAt, SPEED_SQ, fireWet } from "../wind.mjs";
+import { vortices, fireWet } from "../wind.mjs";
 import { dampArea, dampLights } from "./rain-damp.mjs";
+import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -36,29 +37,6 @@ function mapOf() {
 
 /** Art cells the fire style may draw per display frame (~2 ms on a mid GPU; research 13: the art pass is the layer's main cost). */
 const ART_BUDGET = 600000;
-
-/**
- * A TORNADO nearby (wind.mjs vortices, registered by the weather layer): the area's tongues and smoke lean into its swirl and inflow -
- * its wind at the area's centre, as scene-wind units (SPEED_SQ squares / s = 1), capped; back to the area's own wind when it is gone.
- * Only uniforms (the art pass reads them on its next 12 fps frame); nothing at all while no tornado exists.
- */
-function leanToVortices(a, geo, vort) {
-  const u = a.mesh.pass?.shader?.uniforms; if ( !u ) return;
-  if ( !vort && !a.vortexOn ) return;
-  if ( a.lean0 === undefined ) { a.lean0 = u.uLean; a.wind0 = [u.uWind[0], u.uWind[1]]; }
-  let dx = 0, dy = 0;
-  if ( vort ) {
-    const r = a.area.rect, cx = geo.ox + (r.x0 + r.x1) / 2 * geo.ap, cy = geo.oy + (r.y0 + r.y1) / 2 * geo.ap;
-    [dx, dy] = vortexWindAt(cx, cy, geo.grid);
-    const k = Math.min(1, 0.6 / Math.max(1e-6, Math.hypot(dx, dy) / SPEED_SQ));
-    dx = dx / SPEED_SQ * k; dy = dy / SPEED_SQ * k;
-  }
-  a.vortexOn = vort && (dx !== 0 || dy !== 0);
-  const wx = Math.max(-1, Math.min(1, a.wind0[0] + dx)), wy = Math.max(-1, Math.min(1, a.wind0[1] + dy));
-  u.uWind[0] = wx; u.uWind[1] = wy;
-  u.uLean = Math.max(-0.8, Math.min(0.8, a.lean0 + dx * 0.7));
-  const f = a.mesh.fuelPass?.shader?.uniforms; if ( f ) { f.uWind[0] = wx; f.uWind[1] = wy; }
-}
 
 export class FireDisplay {
   constructor() {
@@ -167,13 +145,15 @@ export class FireDisplay {
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
     if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
     const vis = [], stale = [], vort = vortices().length > 0, wet = fireWet();
+    const pn = performance.now(), dt = this.lastPn ? (pn - this.lastPn) / 1000 : 0; this.lastPn = pn;
+    this.tornadoDepth(vort);   // (a tornado's foot: depth rects + the front layer over it; vortex-lean.mjs)
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
       if ( on ) {
         vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
         // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
-        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
+        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); if ( a.mesh.artT !== T || force ) stale.push(a); }
       }
     }
     // (spread over the display frames of one 12 fps frame: at most ART_BUDGET cells a frame, the longest-waiting first; an area never
@@ -193,6 +173,27 @@ export class FireDisplay {
     // particles: only on a new 12 fps frame (they move on the art grid, in whole cells)
     if ( newFrame ) this.placeParticles(still ? [] : vis, now);
     this.stats.tickMs = performance.now() - t0;
+  }
+
+  /**
+   * A TORNADO's foot against the flames (vortex-lean.mjs): every frame while one exists, each area gets its tokens' rects plus the
+   * tornado feet over it, and the front layer sorts above the tornado; once it has gone, the tokens alone again and the usual layer.
+   */
+  tornadoDepth(any) {
+    if ( !any && !this.feetOn ) return;
+    const geo = this.geo, feet = any ? tornadoFeet(geo.grid) : [];
+    let on = false;
+    for ( const a of this.areas.values() ) {
+      if ( !a.mesh.setTokens ) continue;
+      const bx = a.area.box ?? a.area.rect, x0 = geo.ox + bx.x0 * geo.ap, y0 = geo.oy + bx.y0 * geo.ap, x1 = geo.ox + bx.x1 * geo.ap, y1 = geo.oy + bx.y1 * geo.ap;
+      const mine = feet.filter((r) => r[0] < x1 && r[2] > x0 && r[1] < y1 && r[3] > y0);
+      if ( mine.length ) on = true;
+      if ( mine.length || a.feetOn ) a.mesh.setTokens([...(a.toks ?? []), ...mine].slice(0, 16));
+      a.feetOn = mine.length > 0;
+    }
+    const layer = on ? FRONT_LAYER : 750;
+    if ( this.front.sortLayer !== layer ) { this.front.sortLayer = layer; canvas.primary.sortDirty = true; }
+    this.feetOn = on;
   }
 
   /** A token moved, appeared or went: its depth against the flames is recomputed on the next frame (once, however many moved). */
