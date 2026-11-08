@@ -70,7 +70,7 @@ function place(client) {
   el.style.top = `${Math.max(6, Math.min(client.y + 4, H - r.height - 6))}px`;
 }
 
-const num = (id) => id + 1;
+const num = (id) => Zones.zoneName(id);
 const sceneActs = () => {
   const zs = Zones.marks()?.zones ?? new Map();
   const fire = [...zs.values()].some((p) => p.fire), states = [...zs.values()].some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);

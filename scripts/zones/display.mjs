@@ -86,7 +86,7 @@ function badgeShape(G, shape, ring, fill) {
 }
 
 /** A zone number written as asked: 7, VII or G (27 -> AA). */
-function numeral(n, format) {
+export function numeral(n, format) {
   if ( format === "roman" && n < 4000 ) {
     let out = "";
     for ( const [v, sym] of [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]] ) while ( n >= v ) { out += sym; n -= v; }
@@ -273,7 +273,8 @@ export class ZoneDisplay {
       const m = M.borders.get(pairKey(br.a, br.b));
       if ( m ) (segs.get(m) ?? segs.set(m, []).get(m)).push(br.pts);
     }
-    const bw = Math.max(w, 4 * px);
+    // walls stand out from the plain borders whatever the line width is set to
+    const bw = Math.max(w, 7 * px);
     for ( const pass of [0, 1, 2] ) {
       for ( const [m, list] of segs ) {
         const k = WALL[m.kind][pass];

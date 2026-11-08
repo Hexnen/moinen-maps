@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import * as Geo from "./geometry.mjs";
-import { ZoneDisplay } from "./display.mjs";
+import { ZoneDisplay, numeral } from "./display.mjs";
 import { preset, presets, zonesText } from "./presets.mjs";
 import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
@@ -28,6 +28,8 @@ export const state = () => S;
 export const zones = () => Z;
 /** The marks laid onto the zones now: { borders: Map pair -> {kind, x, y, a, b}, zones: Map id -> props }. */
 export const marks = () => M;
+/** A zone's name as the map writes it (1, I or A: the look's numeral format). */
+export const zoneName = (id) => numeral(id + 1, look()?.numFormat ?? "arabic");
 export const editing = () => inSection && !!game.user?.isGM;
 export const gridSize = () => canvas.dimensions?.size ?? canvas.grid?.size ?? 100;
 const sceneRect = () => { const r = canvas.dimensions?.sceneRect; return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null; };
@@ -437,7 +439,7 @@ export async function fireRound() {
   const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.fire.${k}`, d ?? {});
   if ( !log.length ) { ui.notifications.info(L("none")); return log; }
   writeZones(new Map([...next].map(([id, p]) => [id, p])));
-  const num = (id) => id + 1;
+  const num = zoneName;
   const rows = log.map((r) => {
     const d = { n: num(r.id), r: r.roll, to: r.to != null ? num(r.to) : "" };
     return `<li>${r.out ? L("out", d) : r.to != null ? L("spread", d) : r.roll >= 5 ? L("blocked", d) : L("stays", d)}</li>`;
