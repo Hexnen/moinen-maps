@@ -757,3 +757,12 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 #mm-orbit-strip .mm-orbit-chip span { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
 #token-hud .col.left { position: relative; }
 #token-hud .mm-orbit-pick { left: auto; right: calc(100% + 6px); }
+
+/* orbit: the "back to the last map" bar at the top of the Orbit scene */
+#mm-orbit-back { position: fixed; z-index: 31; top: 134px; left: 50%; transform: translateX(-50%); pointer-events: all; }
+#mm-orbit-back button { display: flex; align-items: center; gap: 8px; height: auto; width: auto; margin: 0; padding: 7px 16px 7px 12px; border-radius: 8px; cursor: pointer;
+  background: linear-gradient(180deg, #1b2a6aee, #0b0a26ee); border: 1px solid #5f7fff; color: #e8ecff; font-size: 14px; font-weight: 700; letter-spacing: 0.02em;
+  box-shadow: 0 0 0 1px #000a, 0 6px 18px #000a, 0 0 14px #5f7fff44; }
+#mm-orbit-back button:hover { background: linear-gradient(180deg, #2a3f9aee, #13124aee); border-color: #a9c8ff; }
+#mm-orbit-back button i:first-child { color: #ffd27a; }
+#mm-orbit-back button i:nth-child(2) { color: #a9dcff; }

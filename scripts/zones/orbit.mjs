@@ -201,6 +201,30 @@ function onCreateToken(doc, options) {
 
 /* ---------------------------------------------------------------- the strip above each map */
 
+/** The last map (not the Orbit scene) this browser showed: where "back" goes. */
+const LAST_KEY = "mm-orbit-last-map";
+const lastMap = () => { try { const id = sessionStorage.getItem(LAST_KEY) ?? localStorage.getItem(LAST_KEY); const s = id && game.scenes.get(id); return s && !isOrbit(s) ? s : null; } catch { return null; } };
+const rememberMap = (scene) => { if ( !scene || isOrbit(scene) ) return; try { sessionStorage.setItem(LAST_KEY, scene.id); localStorage.setItem(LAST_KEY, scene.id); } catch { /* blocked */ } };
+
+/** On the Orbit scene: a bar at the top of the screen with one click back to the last map (or the active scene). */
+const back = {
+  el: null,
+  remove() { this.el?.remove(); this.el = null; },
+  refresh() {
+    if ( !canvas?.ready || !isOrbit(canvas.scene) ) return this.remove();
+    const target = lastMap() ?? game.scenes.find((s) => s.active && !isOrbit(s)) ?? null;
+    if ( !target ) return this.remove();
+    if ( !this.el ) {
+      this.el = document.createElement("div");
+      this.el.id = "mm-orbit-back";
+      this.el.addEventListener("click", (ev) => { const b = ev.target.closest("button[data-scene]"); if ( !b ) return; ev.preventDefault(); game.scenes.get(b.dataset.scene)?.view(); });
+      (document.getElementById("board") ?? document.body).after(this.el);
+    }
+    this.el.innerHTML = `<button type="button" data-scene="${target.id}" data-tooltip="${esc(T("backTip"))}"><i class="fa-solid fa-arrow-left" inert></i>
+      <i class="fa-solid fa-earth-europe" inert></i><span>${esc(T("back", { map: target.name }))}</span></button>`;
+  }
+};
+
 const strip = {
   el: null, key: "",
   remove() { this.el?.remove(); this.el = null; this.watch(false); },
@@ -316,8 +340,8 @@ export function registerOrbit() {
     game.settings.register(MODULE_ID, "orbitFollow", { name: "MOINENMAPS.Orbit.follow", hint: "MOINENMAPS.Orbit.followHint", scope: "client", config: true, type: Boolean, default: true });
   });
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } });
-  Hooks.on("canvasReady", () => { strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1); });
-  Hooks.on("canvasTearDown", () => { strip.remove(); stopAmbience(); });
+  Hooks.on("canvasReady", () => { rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1); });
+  Hooks.on("canvasTearDown", () => { strip.remove(); back.remove(); stopAmbience(); });
   Hooks.on("canvasPan", () => strip.place());
   window.addEventListener("resize", () => strip.place());
   Hooks.on("createToken", onCreateToken);

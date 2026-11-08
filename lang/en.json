@@ -1670,5 +1670,7 @@
   "MOINENMAPS.Orbit.followHint": "When your own character is thrown to orbit or comes back, your view follows it to the other scene.",
   "MOINENMAPS.Zones.f.quake": "Wrecked zones quake",
   "MOINENMAPS.Zones.h.quake": "When a zone becomes wrecked it shakes for a second, with dust and rubble (this screen only).",
-  "MOINENMAPS.Diag.codeChanged": "Moinen Maps: the module's code changed on disk ({from} → {to}) while this page was open. Reload (F5): a mix of the old and new code can stall scene loads."
+  "MOINENMAPS.Diag.codeChanged": "Moinen Maps: the module's code changed on disk ({from} → {to}) while this page was open. Reload (F5): a mix of the old and new code can stall scene loads.",
+  "MOINENMAPS.Orbit.back": "Back to {map}",
+  "MOINENMAPS.Orbit.backTip": "Show the map you came from (your view only; tokens stay in orbit)."
 }

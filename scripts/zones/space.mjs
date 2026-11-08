@@ -67,6 +67,7 @@ function makeNoise(rand) {
  * @param {number} h  art pixels down
  * @returns {Uint8ClampedArray} RGBA, w*h*4
  */
+export const lastLayout = { planet: null, moon: null };
 export function paintSpace(seed, w, h) {
   const rand = rng(seed), { fbm, noise } = makeNoise(rand), out = new Uint8ClampedArray(w * h * 4);
   const put = (x, y, c, a = 1) => {
@@ -166,6 +167,7 @@ export function paintSpace(seed, w, h) {
   {
     const left = rand() < 0.5, R = Math.max(7, Math.min(w, h) * (0.06 + 0.03 * rand()));
     const cx = left ? w * (0.1 + 0.1 * rand()) : w * (0.78 + 0.1 * rand()), cy = h * (0.14 + 0.12 * rand());
+    lastLayout.moon = { cx, cy, R };
     const craters = Array.from({ length: 7 + Math.floor(rand() * 5) }, () => [rand() * 1.6 - 0.8, rand() * 1.6 - 0.8, 0.08 + rand() * 0.2]);
     sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
       if ( rr > 1 ) return;
@@ -179,6 +181,7 @@ export function paintSpace(seed, w, h) {
   // 6. the planet: a big disc whose limb arcs across the bottom of the picture
   {
     const R = Math.max(w, h) * (0.62 + 0.12 * rand()), cx = w * (0.35 + 0.3 * rand()), cy = h + R * (0.62 + 0.08 * rand());
+    lastLayout.planet = { cx, cy, R, light: LP };
     const lo = rand() * 50;
     sphere(cx, cy, R, (x, y, nx, ny, rr, nz) => {
       // the atmosphere: a thin glowing rim just outside the disc, brightest on the lit side
