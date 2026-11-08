@@ -210,7 +210,9 @@ export class ZoneDisplay {
     // by 1 / zoom every frame (follow), so it keeps its size smoothly while zooming, on a spot that stays put.
     const numbered = (id) => look.numbers === "always" || (look.numbers === "hover" && id === hover);
     const res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
-    this.#icons(Z, marks, res, (id) => (dist ? dist.has(id) || bands?.get(id)?.key === "blocked" : numbered(id)));
+    // the icons keep one spot: under the badge's place whenever a badge can show there (numbers always / on hover, distances),
+    // so a number appearing on hover never pushes them down
+    this.#icons(Z, marks, res, () => !!dist || look.numbers !== "never");
     if ( look.numbers === "never" && !dist ) { this.follow(zoom, true); return; }
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
@@ -314,15 +316,18 @@ export class ZoneDisplay {
       row.addChild(back);
       for ( const it of parts ) {
         const t = new PIXI.Text(it.s, { fontFamily: fa ? `"${fa}"` : "sans-serif", fontWeight: "900", fontSize: size, fill: ICON_COLOR[it.k] ?? 0xf3e7c9 });
+        t.mmKey = it.k;
         t.resolution = res; t.anchor.set(0, 0.5); t.position.set(x, 0);
         row.addChild(t); x += t.width + gap;
         if ( it.k === "fire" ) {
           const n = new PIXI.Text(String(p.fire), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 12, fill: 0xffa25a });
+          n.mmKey = "fire";
           n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x - 2, 1); row.addChild(n); x += n.width + gap;
         }
       }
       if ( terrain ) {
         const n = new PIXI.Text(game.i18n.localize(`MOINENMAPS.Zones.terrainShort.${terrain}`), { fontFamily: "Signika, sans-serif", fontWeight: "600", fontSize: 11, fill: 0xd8ccb0 });
+        n.mmKey = "terrain";
         n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x, 0); row.addChild(n); x += n.width + gap;
       }
       x -= gap;
@@ -330,7 +335,7 @@ export class ZoneDisplay {
       for ( const c of row.children ) c.x -= x / 2;
       this.badges.addChild(row);
       // under the badge when there is one, else on the zone's spot
-      this.items.push({ b: row, z, at: null, dy: hasBadge(z.id) ? BADGE_R + 15 : 0 });
+      this.items.push({ b: row, z, at: null, dy: hasBadge(z.id) ? BADGE_R + 15 : 0, icons: true });
     }
   }
 
@@ -490,6 +495,20 @@ export class ZoneDisplay {
       if ( snap || !it.at ) it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
       it.b.position.set(it.at.x, it.at.y + (it.dy ?? 0) * s);
     }
+  }
+
+  /** The icon under a point of the canvas view (CSS px from its top left): { key, z } or null. */
+  iconAt(x, y) {
+    if ( !this.root.visible ) return null;
+    for ( const it of this.items ?? [] ) {
+      if ( !it.icons || !it.b.visible ) continue;
+      for ( const c of it.b.children ) {
+        if ( !c.mmKey ) continue;
+        const r = c.getBounds();
+        if ( x >= r.x - 2 && x <= r.x + r.width + 2 && y >= r.y - 2 && y <= r.y + r.height + 2 ) return { key: c.mmKey, z: it.z };
+      }
+    }
+    return null;
   }
 
   set visible(v) { this.root.visible = v; }

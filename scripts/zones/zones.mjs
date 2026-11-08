@@ -145,7 +145,31 @@ function onHoverMove(ev) {
 }
 // numbers on hover need the badges again; the highlight alone only redraws its own layer
 function setHover(id) { if ( id === hover ) return; hover = id; if ( look()?.numbers === "hover" ) refresh(); else display?.drawHover(id); }
-const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); };
+const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); iconTip(null); };
+
+/** What a zone icon means, shown next to the cursor while it rests on the icon. */
+let tipEl = null, tipRaf = 0, tipAt = null;
+function onIconMove(ev) {
+  if ( !display?.root.visible || !M?.zones.size ) { if ( tipEl ) iconTip(null); return; }
+  tipAt = { x: ev.clientX, y: ev.clientY };
+  if ( tipRaf ) return;
+  tipRaf = requestAnimationFrame(() => {
+    tipRaf = 0;
+    if ( !tipAt || !display ) return;
+    const r = canvas.app.view.getBoundingClientRect();
+    iconTip(display.iconAt(tipAt.x - r.left, tipAt.y - r.top), tipAt);
+  });
+}
+function iconTip(hit, at) {
+  if ( !hit ) { tipEl?.remove(); tipEl = null; return; }
+  const p = M?.zones.get(hit.z.id) ?? {}, L = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
+  const text = hit.key === "fire" ? `${L("state.fire")}: ${p.fire}`
+    : hit.key === "terrain" ? `${L("terrain.label")}: ${L(`terrain.${p.terrain}`)}${Marks.WRECK[p.terrain] ? ` (${Marks.WRECK[p.terrain][0]}/+${Marks.WRECK[p.terrain][1]})` : ""}`
+    : L(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
+  if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip"; document.body.append(tipEl); }
+  tipEl.textContent = `${zoneName(hit.z.id)} · ${text}`;
+  tipEl.style.left = `${at.x + 14}px`; tipEl.style.top = `${at.y + 16}px`;
+}
 
 /* ---------------------------------------------------------------- lifecycle */
 
@@ -158,6 +182,7 @@ function onCanvasReady() {
   hover = -1;
   canvas.app.view.addEventListener("pointermove", onHoverMove, { passive: true });
   canvas.app.view.addEventListener("pointerleave", onHoverLeave);
+  canvas.app.view.addEventListener("pointermove", onIconMove, { passive: true });
   rebuild(); refresh();
   Editor.onCanvasReady();
   tell("loaded");
@@ -169,6 +194,8 @@ function teardown() {
   Editor.teardown();
   canvas.app?.view?.removeEventListener("pointermove", onHoverMove);
   canvas.app?.view?.removeEventListener("pointerleave", onHoverLeave);
+  canvas.app?.view?.removeEventListener("pointermove", onIconMove);
+  cancelAnimationFrame(tipRaf); tipRaf = 0; iconTip(null);
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   S = Z = M = null;
