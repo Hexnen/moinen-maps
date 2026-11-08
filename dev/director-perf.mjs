@@ -9,6 +9,10 @@
 // Usage:
 //   node dev/director-perf.mjs <cdpPort> <gmUrl> <playerUrl>[,<playerUrl2>] <scenarios a,b,..> [--reps n] [--throttle k] [--label s] [--out f.json]
 //   scenarios: rest, pan, take, soft, follow, attack, combat, busy, arrival, arrivalOff
+//   --gpu     the GPU time of every canvas frame (EXT_disjoint_timer_query_webgl2 round the ticker update: PIXI's draw of the map; the
+//             DOM overlays are composited outside it, see --layers): gpuP50 / gpuP95 / gpuMax / gpuSum ms
+//   --layers  the compositor's side (LayerTree domain; a pass of its own: it costs main-thread time): composited layers that draw content
+//             (max count, max summed area in screens = overdraw of the DOM layers), paints (count, Mpx rasterised)
 // The world must be a lane copy (test-only): the scenarios switch the director on, move tokens, make combats and chat messages.
 import fs from "node:fs";
 
@@ -17,6 +21,7 @@ const flag = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[
 const [port, gmUrl, playersArg, scenArg] = args;
 const players = playersArg.split(",");
 const scens = scenArg.split(",");
+const gpuOn = args.includes("--gpu"), layersOn = args.includes("--layers");
 const dpr = Number(flag("dpr", 1)), reps = Number(flag("reps", 1)), throttle = Number(flag("throttle", 1)), label = flag("label", ""), outFile = flag("out", null);
 const base = `http://127.0.0.1:${port}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -40,14 +45,17 @@ async function connect(prefix) {
 /* ---------------------------------------------------------------- page side */
 
 const REC = `
-window.__dpStart = () => {
-  const T = canvas.app.ticker, S = { raf: [], tick: [], loaf: [], t0: performance.now(), on: true };
-  const o = T.update; T.update = function(t) { const a = performance.now(); try { return o.call(this, t); } finally { if ( S.on ) S.tick.push(performance.now() - a); } };
+window.__dpStart = (gpu = false) => {
+  const T = canvas.app.ticker, S = { raf: [], tick: [], loaf: [], gpu: [], qs: [], t0: performance.now(), on: true };
+  const gl = canvas.app.renderer.gl, ext = gpu ? gl.getExtension("EXT_disjoint_timer_query_webgl2") : null;
+  const poll = () => { while ( S.qs.length && gl.getQueryParameter(S.qs[0], gl.QUERY_RESULT_AVAILABLE) ) { const q = S.qs.shift(); if ( !gl.getParameter(ext.GPU_DISJOINT_EXT) ) S.gpu.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6); gl.deleteQuery(q); } };
+  const o = T.update; T.update = function(t) { const a = performance.now(); let q = null; if ( ext && S.on ) { poll(); q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+    try { return o.call(this, t); } finally { if ( q ) { gl.endQuery(ext.TIME_ELAPSED_EXT); S.qs.push(q); } if ( S.on ) S.tick.push(performance.now() - a); } };
   let last = null; const f = (ts) => { if ( !S.on ) return; if ( last !== null ) S.raf.push(ts - last); last = ts; requestAnimationFrame(f); }; requestAnimationFrame(f);
   let po = null; try { po = new PerformanceObserver((l) => { for ( const e of l.getEntries() ) if ( e.duration >= 50 ) S.loaf.push({ ms: Math.round(e.duration), block: Math.round(e.blockingDuration ?? 0), style: Math.round(e.styleAndLayoutStart ? e.startTime + e.duration - e.styleAndLayoutStart : 0),
     scripts: (e.scripts ?? []).filter((q) => q.duration > 5).map((q) => (q.sourceURL || "").split("/").slice(-2).join("/") + ":" + (q.sourceFunctionName || "") + ":" + Math.round(q.duration)).slice(0, 5) }); }); po.observe({ type: "long-animation-frame" }); } catch { }
   const hT = Hooks.once("canvasTearDown", () => { S.down = performance.now() - S.t0; }), hR = Hooks.on("canvasReady", () => { S.ready ??= performance.now() - S.t0; });
-  S.stop = () => { S.on = false; Hooks.off("canvasTearDown", hT); Hooks.off("canvasReady", hR); T.update = o; po?.disconnect(); return { raf: S.raf, tick: S.tick, loaf: S.loaf, ms: performance.now() - S.t0, down: S.down ?? null, ready: S.ready ?? null }; };
+  S.stop = async () => { S.on = false; if ( ext ) { await new Promise((r) => setTimeout(r, 300)); poll(); for ( const q of S.qs ) gl.deleteQuery(q); S.qs = []; } Hooks.off("canvasTearDown", hT); Hooks.off("canvasReady", hR); T.update = o; po?.disconnect(); return { raf: S.raf, tick: S.tick, loaf: S.loaf, gpu: S.gpu, ms: performance.now() - S.t0, down: S.down ?? null, ready: S.ready ?? null }; };
   window.__dp = S; return true;
 };`;
 
@@ -136,23 +144,28 @@ function profileSum(prof) {
   const memo = new Map();
   const under = (id) => {                          // [director on the stack, moinen-maps on the stack]
     if ( memo.has(id) ) return memo.get(id);
-    const n = nodes.get(id); const p = parent.has(id) ? under(parent.get(id)) : [false, false];
-    const r = [p[0] || isDir(n), p[1] || isMM(n)]; memo.set(id, r); return r;
+    const n = nodes.get(id); const p = parent.has(id) ? under(parent.get(id)) : [false, false, false];
+    const cam = p[0] && n.callFrame.functionName === "pan" && /\/scripts\/foundry\.mjs/.test(n.callFrame.url);   // (Canvas#pan called by a Director camera: Foundry + every canvasPan listener)
+    const r = [p[0] || isDir(n), p[1] || isMM(n), p[2] || cam]; memo.set(id, r); return r;
   };
   const nearest = new Map();                       // node -> the nearest director frame at or above it (the director code that caused it)
   const near = (id) => { if ( nearest.has(id) ) return nearest.get(id); const n = nodes.get(id); const r = isDir(n) ? n : parent.has(id) ? near(parent.get(id)) : null; nearest.set(id, r); return r; };
   const byCaller = new Map();
   let run = 0, runMax = 0, cur = new Map(), best = null;                         // the longest unbroken stretch of director samples (one task: a frame spike)
-  let total = 0, dirSelf = 0, dirIncl = 0, mmIncl = 0, gc = 0, idle = 0; const byFn = new Map();
+  let total = 0, dirSelf = 0, dirIncl = 0, dirCam = 0, mmIncl = 0, gc = 0, idle = 0; const byFn = new Map();
   const dt = prof.timeDeltas;
+  // (60 Hz bins of the main thread: a bin >= 15 ms busy is a frame a 60 Hz display cannot get in time; dirBins: of those, the ones with >= 2 ms of Director)
+  const BIN = 1000 / 60, bins = new Map(); let clock = prof.startTime / 1000;
   for ( let i = 0; i < prof.samples.length; i++ ) {
-    const ms = (dt[i + 1] ?? dt[i] ?? 0) / 1000, n = nodes.get(prof.samples[i]); total += ms;
+    const ms = (dt[i + 1] ?? dt[i] ?? 0) / 1000, n = nodes.get(prof.samples[i]); total += ms; clock += (dt[i] ?? 0) / 1000;
     const fn = n.callFrame.functionName;
     if ( fn === "(idle)" ) { idle += ms; run = 0; continue; }
+    { const b = Math.floor(clock / BIN), q = bins.get(b) ?? [0, 0, 0], u = under(n.id); q[0] += ms; if ( u[0] ) q[1] += ms; if ( u[0] && !u[2] ) q[2] += ms; bins.set(b, q); }
     if ( fn === "(garbage collector)" ) gc += ms;
     const [d, m] = under(n.id);
     if ( d ) { run += ms; const c = near(n.id), k = c ? `${c.callFrame.url.split("/").pop()}:${c.callFrame.functionName || "anon"}` : "?", k2 = isDir(n) ? k : `${k}>${fn}`; cur.set(k2, (cur.get(k2) ?? 0) + ms); if ( run > runMax ) { runMax = run; best = new Map(cur); } }
     else if ( fn !== "(garbage collector)" && fn !== "(program)" ) { run = 0; cur = new Map(); }
+    if ( d && under(n.id)[2] ) dirCam += ms;
     if ( d ) { dirIncl += ms; const c = near(n.id); if ( c ) { const k = `${c.callFrame.url.split("/").pop()}:${c.callFrame.functionName || "anon"}:${c.callFrame.lineNumber + 1}`; byCaller.set(k, (byCaller.get(k) ?? 0) + ms); } }
     if ( m ) mmIncl += ms;
     if ( isDir(n) ) { dirSelf += ms; const k = `${n.callFrame.url.split("/").pop()}:${fn || "anon"}:${n.callFrame.lineNumber + 1}`; byFn.set(k, (byFn.get(k) ?? 0) + ms); }
@@ -160,7 +173,8 @@ function profileSum(prof) {
   }
   const top = [...byFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `${k} ${v.toFixed(1)}`);
   const callers = [...byCaller].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => `${k} ${v.toFixed(1)}`);
-  return { callers, runParts: best ? [...best].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v.toFixed(1)}`) : [], dirRunMax: +runMax.toFixed(1), busyMs: +(total - idle).toFixed(1), dirSelfMs: +dirSelf.toFixed(2), dirInclMs: +dirIncl.toFixed(2), mmInclMs: +mmIncl.toFixed(1), gcMs: +gc.toFixed(1), top };
+  const full = [...bins.values()].filter((q) => q[0] >= 15);
+  return { sat60: full.length, sat60dir: full.filter((q) => q[1] >= 2).length, sat60own: full.filter((q) => q[2] >= 2).length, callers, runParts: best ? [...best].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v.toFixed(1)}`) : [], dirRunMax: +runMax.toFixed(1), busyMs: +(total - idle).toFixed(1), dirSelfMs: +dirSelf.toFixed(2), dirInclMs: +dirIncl.toFixed(2), dirCamMs: +dirCam.toFixed(2), mmInclMs: +mmIncl.toFixed(1), gcMs: +gc.toFixed(1), top };
 }
 const METRICS = ["LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration", "ScriptDuration", "TaskDuration", "JSHeapUsedSize"];
 const metrics = async (p) => Object.fromEntries((await p.send("Performance.getMetrics")).result.metrics.filter((m) => METRICS.includes(m.name)).map((m) => [m.name, m.value]));
@@ -173,6 +187,13 @@ async function attach(prefix) {
   p.sock = { sent: 0, sentB: 0, recv: 0, recvB: 0, on: false };
   const count = (dir) => (q) => { if ( !p.sock.on ) return; const s = q.response?.payloadData ?? ""; if ( !s.includes("module.moinen-maps") ) return; p.sock[dir]++; p.sock[dir + "B"] += s.length; };
   p.on("Network.webSocketFrameSent", count("sent")); p.on("Network.webSocketFrameReceived", count("recv"));
+  if ( layersOn ) {
+    await p.send("LayerTree.enable");
+    const scr = 1920 * 1080;
+    p.on("LayerTree.layerTreeDidChange", (q) => { const L = p.lay; if ( !L?.on || !q.layers ) return; const ls = q.layers.filter((l) => l.drawsContent && !l.invisible);
+      L.maxN = Math.max(L.maxN, ls.length); L.maxArea = Math.max(L.maxArea, ls.reduce((a, l) => a + l.width * l.height, 0) / scr); });
+    p.on("LayerTree.layerPainted", (q) => { const L = p.lay; if ( !L?.on ) return; L.paints++; L.paintPx += (q.clip?.width ?? 0) * (q.clip?.height ?? 0); });
+  }
   return p;
 }
 
@@ -182,17 +203,18 @@ async function measure(pages, sc, i) {
   if ( sc.gmPre ) await pages[0].evaluate(sc.gmPre);
   await sleep(sc.gmPre ? 1500 : 300);
   const m0 = [];
-  for ( const p of pages ) { p.sock = { sent: 0, sentB: 0, recv: 0, recvB: 0, on: true }; m0.push(await metrics(p)); await p.send("Profiler.start"); await p.evaluate("return window.__dpStart();"); }
+  for ( const p of pages ) { p.sock = { sent: 0, sentB: 0, recv: 0, recvB: 0, on: true }; m0.push(await metrics(p)); await p.send("Profiler.start"); if ( layersOn ) p.lay = { on: true, maxN: 0, maxArea: 0, paints: 0, paintPx: 0 }; await p.evaluate(`return window.__dpStart(${gpuOn});`); }
   if ( sc.gm ) pages[0].evaluate(sc.gm(i)).catch((e) => console.error("gm", e.message));
   if ( sc.player ) for ( const p of pages ) if ( p.role === "player" ) p.evaluate(sc.player).catch((e) => console.error("player", e.message));
   await sleep(sc.ms);
   const out = [];
   for ( const [k, p] of pages.entries() ) {
-    let rec = null; try { rec = await p.evaluate("return window.__dp?.stop?.() ?? null;"); } catch ( err ) { rec = null; }
+    let rec = null; try { rec = await p.evaluate("return (await window.__dp?.stop?.()) ?? null;"); } catch ( err ) { rec = null; }
+    const lay = p.lay ? { ...p.lay } : null; if ( p.lay ) p.lay.on = false;
     const prof = (await p.send("Profiler.stop")).result.profile, m1 = await metrics(p);
     p.sock.on = false;
     const d = (n) => +((m1[n] ?? 0) - (m0[k][n] ?? 0)).toFixed(n.endsWith("Duration") ? 4 : 0);
-    out.push({ page: p.name, rec, prof: profileSum(prof), m: { layouts: d("LayoutCount"), styles: d("RecalcStyleCount"), layoutMs: +(d("LayoutDuration") * 1000).toFixed(1), styleMs: +(d("RecalcStyleDuration") * 1000).toFixed(1), scriptMs: +(d("ScriptDuration") * 1000).toFixed(0), heapMB: +(d("JSHeapUsedSize") / 1048576).toFixed(2) }, sock: { ...p.sock } });
+    out.push({ page: p.name, rec, prof: profileSum(prof), m: { layouts: d("LayoutCount"), styles: d("RecalcStyleCount"), layoutMs: +(d("LayoutDuration") * 1000).toFixed(1), styleMs: +(d("RecalcStyleDuration") * 1000).toFixed(1), scriptMs: +(d("ScriptDuration") * 1000).toFixed(0), heapMB: +(d("JSHeapUsedSize") / 1048576).toFixed(2) }, sock: { ...p.sock }, lay });
   }
   for ( const p of pages ) if ( p.role === "player" && sc.post ) await p.evaluate(sc.post);
   return out;
@@ -204,12 +226,16 @@ function summary(runs) {
   for ( const run of runs ) for ( const r of run ) { if ( !by.has(r.page) ) by.set(r.page, []); by.get(r.page).push(r); }
   const res = {};
   for ( const [page, rs] of by ) {
+    const gpu = rs.flatMap((r) => r.rec?.gpu ?? []), lays = rs.map((r) => r.lay).filter(Boolean);
     const raf = rs.flatMap((r) => r.rec?.raf ?? []), tick = rs.flatMap((r) => r.rec?.tick ?? []), loaf = rs.flatMap((r) => r.rec?.loaf ?? []);
     const sum = (f) => +rs.reduce((s, r) => s + f(r), 0).toFixed(2), n = rs.length;
     res[page] = {
       frames: raf.length, rafP50: pct(raf, 0.5), rafP95: pct(raf, 0.95), over33: raf.filter((x) => x > 33.4).length, over50: raf.filter((x) => x > 50).length,
+      gpuP50: pct(gpu, 0.5), gpuP95: pct(gpu, 0.95), gpuMax: gpu.length ? +Math.max(...gpu).toFixed(2) : null, gpuSum: +(gpu.reduce((a, b) => a + b, 0) / rs.length).toFixed(1),
+      lay: lays.length ? { maxN: Math.max(...lays.map((l) => l.maxN)), maxArea: +Math.max(...lays.map((l) => l.maxArea)).toFixed(2), paints: Math.round(lays.reduce((a, l) => a + l.paints, 0) / lays.length), paintMpx: +(lays.reduce((a, l) => a + l.paintPx, 0) / lays.length / 1e6).toFixed(1) } : null,
       tickP50: pct(tick, 0.5), tickP95: pct(tick, 0.95), tickMax: tick.length ? +Math.max(...tick).toFixed(1) : null, loaf50: loaf.length, loafMax: loaf.length ? Math.max(...loaf.map((l) => l.ms)) : 0,
-      dirSelfMs: +(sum((r) => r.prof.dirSelfMs) / n).toFixed(2), dirRunMax: Math.max(...rs.map((r) => r.prof.dirRunMax ?? 0)), dirInclMs: +(sum((r) => r.prof.dirInclMs) / n).toFixed(2), mmInclMs: +(sum((r) => r.prof.mmInclMs) / n).toFixed(1), gcMs: +(sum((r) => r.prof.gcMs) / n).toFixed(1), busyMs: +(sum((r) => r.prof.busyMs) / n).toFixed(0),
+      sat60: +(sum((r) => r.prof.sat60 ?? 0) / n).toFixed(1), sat60dir: +(sum((r) => r.prof.sat60dir ?? 0) / n).toFixed(1), sat60own: +(sum((r) => r.prof.sat60own ?? 0) / n).toFixed(1),
+      dirSelfMs: +(sum((r) => r.prof.dirSelfMs) / n).toFixed(2), dirRunMax: Math.max(...rs.map((r) => r.prof.dirRunMax ?? 0)), dirInclMs: +(sum((r) => r.prof.dirInclMs) / n).toFixed(2), dirCamMs: +(sum((r) => r.prof.dirCamMs ?? 0) / n).toFixed(2), mmInclMs: +(sum((r) => r.prof.mmInclMs) / n).toFixed(1), gcMs: +(sum((r) => r.prof.gcMs) / n).toFixed(1), busyMs: +(sum((r) => r.prof.busyMs) / n).toFixed(0),
       layouts: Math.round(sum((r) => r.m.layouts) / n), styles: Math.round(sum((r) => r.m.styles) / n), layoutMs: +(sum((r) => r.m.layoutMs) / n).toFixed(1), styleMs: +(sum((r) => r.m.styleMs) / n).toFixed(1), heapMB: +(sum((r) => r.m.heapMB) / n).toFixed(2),
       sock: { sent: sum((r) => r.sock.sent) / n, sentB: Math.round(sum((r) => r.sock.sentB) / n), recv: sum((r) => r.sock.recv) / n, recvB: Math.round(sum((r) => r.sock.recvB) / n) },
       callers: rs[0].prof.callers, runParts: rs.reduce((m, r) => ((r.prof.dirRunMax ?? 0) >= (m.v ?? -1) ? { v: r.prof.dirRunMax, p: r.prof.runParts } : m), {}).p, load: rs.map((r) => (r.rec?.ready != null && r.rec?.down != null ? Math.round(r.rec.ready - r.rec.down) : null)), top: rs[0].prof.top, loafs: loaf.slice(0, 4)
@@ -242,7 +268,7 @@ for ( const s of scens ) {
     await sleep(s === "take" || s === "soft" ? 2500 : 1500);
   }
   result.scen[s] = summary(runs);
-  console.error(s, JSON.stringify(Object.fromEntries(Object.entries(result.scen[s]).map(([k, v]) => [k, { tick: [v.tickP50, v.tickP95, v.tickMax], raf: [v.rafP50, v.rafP95, v.over33], loaf: v.loaf50, dir: [v.dirSelfMs, v.dirInclMs], gc: v.gcMs, lay: [v.layouts, v.layoutMs], sty: [v.styles, v.styleMs], sock: v.sock }]))));
+  console.error(s, JSON.stringify(Object.fromEntries(Object.entries(result.scen[s]).map(([k, v]) => [k, { sat60: [v.sat60, v.sat60dir, v.sat60own], gpu: [v.gpuP50, v.gpuP95, v.gpuMax, v.gpuSum], lay: v.lay, tick: [v.tickP50, v.tickP95, v.tickMax], raf: [v.rafP50, v.rafP95, v.over33], loaf: v.loaf50, dir: [v.dirSelfMs, v.dirInclMs, v.dirCamMs], gc: v.gcMs, lay: [v.layouts, v.layoutMs], sty: [v.styles, v.styleMs], sock: v.sock }]))));
 }
 for ( const p of pages ) {
   if ( p.role === "player" ) {
