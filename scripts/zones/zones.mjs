@@ -8,7 +8,7 @@ import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
 import * as Marks from "./marks.mjs";
 import * as Link from "./link.mjs";
-import { quake } from "./quake.mjs";
+import { quake, stopQuakes } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
@@ -113,14 +113,17 @@ function relink() {
   for ( const [id, p] of MAP ) zones.set(id, Link.merge(zones.get(id), p));
   M = { borders: M0?.borders ?? new Map(), zones };
   // a zone that has just become wrecked quakes (on every client: each one sees the marks or the layer change)
-  const wrecked = new Set([...zones].filter(([, p]) => p?.wrecked).map(([id]) => id));
-  if ( wreckedBefore && Z && setting("zonesQuake", true) !== false ) {
-    for ( const id of wrecked ) if ( !wreckedBefore.has(id) ) {
+  // (remembered as scene points, not zone ids: editing the lines renumbers the zones; at most 3 at once, only where zones show)
+  const wrecked = [...zones].filter(([, p]) => p?.wrecked).map(([id]) => id);
+  if ( wreckedBefore && Z && setting("zonesQuake", true) !== false && visibleToMe() ) {
+    const was = new Set(wreckedBefore.map(([x, y]) => Geo.zoneAt(Z, x, y)));
+    let n = 0;
+    for ( const id of wrecked ) if ( !was.has(id) && n < 3 ) {
       const z = Z.zones.find((q) => q.id === id);
-      if ( z ) quake(z, { grid: gridSize(), inside: (x, y) => Geo.zoneAt(Z, x, y) === id });
+      if ( z ) { n++; quake(z, { grid: gridSize(), inside: (x, y) => Geo.zoneAt(Z, x, y) === id }); }
     }
   }
-  wreckedBefore = wrecked;
+  wreckedBefore = Z ? wrecked.map((id) => Z.zones.find((q) => q.id === id)?.label).filter(Boolean).map((l) => [l.x, l.y]) : null;
 }
 /** A layer changed: read it again (debounced: a stroke may fire several hooks). */
 function onLayer(kind) {
@@ -145,7 +148,7 @@ function putOutMap(id) { const ids = fireStrokesIn(id); if ( ids.length ) { try 
 function paintMap(id, intensity) {
   const z = Z?.zones.find((q) => q.id === id), api = moduleApi.fire;
   if ( !z || !api?.paint ) return null;
-  try { return api.paint([[Math.round(z.label.x), Math.round(z.label.y)]], { radius: Math.round(Math.max(gridSize() * 0.4, Math.min(z.label.r * 0.85, gridSize() * 1.3))), level: Link.intensityLevel(intensity), smoke: 2 }); }
+  try { return api.paint([[Math.round(z.label.x), Math.round(z.label.y)]], { radius: Math.round(Math.max(gridSize() * 0.4, Math.min(z.label.r * 0.85, gridSize() * 1.3))), level: intensity >= 10 ? 3 : intensity >= 8 ? 2 : 1, smoke: 2 }); }
   catch ( err ) { console.warn(`${MODULE_ID} | zones: painting fire`, err); return null; }
 }
 const markTol = () => gridSize() * 0.35;
@@ -275,7 +278,7 @@ function teardown() {
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   clearTimeout(linkTimer); linkTimer = 0;
-  S = Z = M = M0 = LS = null; MAP = new Map(); wreckedBefore = null;
+  S = Z = M = M0 = LS = null; MAP = new Map(); wreckedBefore = null; stopQuakes();
   undo.length = redo.length = 0;
 }
 
@@ -528,9 +531,12 @@ export function setZone(id, patch, at = null) {
   if ( !Z || id < 0 ) return false;
   // fire set from the menu: a new fire is painted on the fire layer too, a fire put out goes out there as well
   if ( "fire" in patch && linkOn() ) {
-    const was = M?.zones.get(id)?.fire ?? 0, now = Number(patch.fire) || 0;
+    const was = M?.zones.get(id)?.fire ?? 0, onMap = MAP.get(id)?.fire ?? 0, now = Number(patch.fire) || 0;
     if ( !was && now ) paintMap(id, now);
-    if ( was && !now ) putOutMap(id);
+    else if ( was && !now ) putOutMap(id);
+    // lowered below what the painted fire reads as: the zone shows the higher of the two, so put that fire out and paint it
+    // again no higher than the new Intensity (below 6 only the zone's own mark stays)
+    else if ( onMap > now ) { putOutMap(id); if ( now >= 6 ) paintMap(id, now); }
   }
   return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at);
 }
@@ -689,6 +695,8 @@ function onTokenHUD(hud, html) {
       if ( k.startsWith("floor:") ) { await setFloor(t, Number(k.slice(6))); show(); return; }
       if ( k === "orbit" && !hasLifeSupport(t.actor) ) ui.notifications.warn(game.i18n.format("MOINENMAPS.Zones.altNoLifeWarn", { name: t.name }));
       if ( t.document.getFlag(MODULE_ID, "floor") ) await t.document.unsetFlag(MODULE_ID, "floor");
+      // Orbit goes through the orbit module when it is on (a request that never sticks; the token really moves)
+      if ( k === "orbit" && moduleApi.orbit && game.settings.get(MODULE_ID, "orbit") !== false ) { await moduleApi.orbit.send(t); show(); return; }
       await setAltitude(t, k);
       show();
     });

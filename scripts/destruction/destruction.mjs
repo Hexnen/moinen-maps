@@ -150,7 +150,8 @@ function integrity(scene) {
 function teardown() {
   flushSave();
   gen++;
-  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer] ) clearTimeout(t);
+  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer, rimsTimer, warmTimer, warmHold, darkTimer] ) clearTimeout(t);
+  rimsTimer = warmTimer = warmHold = darkTimer = 0; persisting = null;
   rebakeQueue = []; status.rebake = null; status.olderLook = null;
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
   bakeTimer = saveTimer = persistTimer = 0;
@@ -694,7 +695,7 @@ async function prepareReveal(my) {
   Trace.markOnce("damage:visible", { groups: visible.length, of: display.order.length });
   for ( const g of visible ) {
     while ( g.made < g.pieces.length ) {
-      display.materialize(g, 800);
+      if ( !display.materialize(g, 800) ) break;      // (nothing made: stale data - do not spin)
       if ( performance.now() - t > 8 ) { await slice(); if ( my !== gen || !display ) return; t = performance.now(); }
     }
   }

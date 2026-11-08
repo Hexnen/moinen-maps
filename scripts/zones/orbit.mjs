@@ -4,7 +4,8 @@
  *
  * - The Orbit scene is made on demand by a GM: its background is procedural pixel-art space (space.mjs), painted at a low art
  *   resolution, enlarged with hard edges and uploaded once as a PNG into the world folder; the seed sits in the scene flag.
- * - No socket: a player asks by setting a flag on a token they own (`alt: "orbit"` to go up, `land: <scene id>` to come down) and
+ * - No socket: a player asks by setting a one-off request flag on a token they own (`orbitReq: {dir, scene, at}`; the old `alt` /
+ *   `land` flags still work) and
  *   the active GM's client does the move (create on the other scene, delete here), so it works with only the GM online to act.
  * - The token keeps where it came from (`orbitFrom`: scene, x, y, elevation); coming back to that same map lands it there, any
  *   other map lands it at the middle of the top edge, on the first free square.
@@ -12,7 +13,7 @@
  */
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
-import { paintSpace, enlarge } from "./space.mjs";
+import { paintSpace, enlarge, lastLayout } from "./space.mjs";
 import { startAmbience, stopAmbience } from "./orbit-ambience.mjs";
 
 const ART = 6;            // scene pixels per art pixel
@@ -35,6 +36,7 @@ const picker = () => foundry.applications.apps?.FilePicker?.implementation ?? gl
 async function makeBackground(seed) {
   const w = (COLS * GRID) / ART, h = (ROWS * GRID) / ART;
   const big = enlarge(paintSpace(seed, w, h), w, h, ART);
+  layoutOf.set(seed, JSON.parse(JSON.stringify(lastLayout)));   // where its planet / moon are: saved in the scene flag for the ambience
   const cv = document.createElement("canvas");
   cv.width = big.width; cv.height = big.height;
   cv.getContext("2d").putImageData(new ImageData(big.data, big.width, big.height), 0, 0);
@@ -53,6 +55,7 @@ async function setBackground(scene, src) {
   else await scene.update({ "background.src": src, backgroundColor: "#04030a" });
 }
 
+const layoutOf = new Map();
 let making = null;
 /** The Orbit scene, made now when the world has none (GM only). */
 export async function ensureOrbitScene() {
@@ -65,7 +68,7 @@ export async function ensureOrbitScene() {
       name: T("sceneName"), width: COLS * GRID, height: ROWS * GRID, padding: 0, grid: { size: GRID, type: CONST.GRID_TYPES.SQUARE, alpha: 0.06 },
       tokenVision: false, fog: { exploration: false }, navigation: true,
       ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.LIMITED },
-      flags: { [MODULE_ID]: { orbit: { seed, v: 1 } } }
+      flags: { [MODULE_ID]: { orbit: { seed, v: 1, layout: layoutOf.get(seed) ?? null } } }
     });
     await setBackground(scene, src);
     ui.notifications.info(T("made"));
@@ -80,7 +83,7 @@ export async function regenerate(seed = Math.floor(Math.random() * 2 ** 31)) {
   if ( !scene || !game.user.isGM ) return null;
   const src = await makeBackground(seed);
   await setBackground(scene, src);
-  await scene.setFlag(MODULE_ID, "orbit", { seed, v: 1 });
+  await scene.setFlag(MODULE_ID, "orbit", { seed, v: 1, layout: layoutOf.get(seed) ?? null });
   return src;
 }
 
@@ -121,6 +124,13 @@ function landingSlot(scene, data) {
 }
 
 const busyIds = new Set();
+/** A token that moves keeps its place in combat: its combatants point at the new token before the old one is deleted. */
+async function keepCombatants(oldDoc, made) {
+  for ( const c of game.combats ?? [] ) for ( const cb of c.combatants ) {
+    if ( cb.tokenId !== oldDoc.id || cb.sceneId !== oldDoc.parent?.id ) continue;
+    try { await cb.update({ tokenId: made.id, sceneId: made.parent.id }); } catch ( err ) { console.warn(`${MODULE_ID} | orbit: combatant`, err); }
+  }
+}
 const flagsOf = (data) => ((data.flags ??= {})[MODULE_ID] ??= {});
 
 /** Throw a token to orbit: it leaves its map and appears on the Orbit scene (a player's call becomes a request to the GM). */
@@ -130,7 +140,7 @@ export async function sendToOrbit(token, { thrown = false } = {}) {
   if ( !iAmTheGM() ) {
     if ( !doc.isOwner ) return null;
     if ( !game.users.activeGM ) ui.notifications.warn(T("noGM"));
-    return doc.setFlag(MODULE_ID, "alt", "orbit");
+    return doc.setFlag(MODULE_ID, "orbitReq", { dir: "up", thrown: !!thrown, at: Date.now() });
   }
   if ( busyIds.has(doc.uuid) ) return null;
   busyIds.add(doc.uuid);
@@ -140,12 +150,12 @@ export async function sendToOrbit(token, { thrown = false } = {}) {
     const from = doc.parent, data = doc.toObject();
     delete data._id;
     const f = flagsOf(data);
-    delete f.floor; delete f.land;
+    delete f.floor; delete f.land; delete f.orbitReq;
     f.alt = "orbit";
     f.orbitFrom = { scene: from.id, x: doc.x, y: doc.y, elevation: doc.elevation ?? 0, thrown: !!thrown, at: Date.now() };
     Object.assign(data, orbitSlot(orbit, data), { elevation: 0 });
     const [made] = await orbit.createEmbeddedDocuments("Token", [data], { mmOrbit: { dir: "up", from: from.id } });
-    if ( made ) await from.deleteEmbeddedDocuments("Token", [doc.id], { mmOrbit: { dir: "up", to: orbit.id } });
+    if ( made ) { await keepCombatants(doc, made); await from.deleteEmbeddedDocuments("Token", [doc.id], { mmOrbit: { dir: "up", to: orbit.id } }); }
     return made ?? null;
   } finally { busyIds.delete(doc.uuid); }
 }
@@ -157,7 +167,7 @@ export async function bringBack(token, sceneId = null, alt = "ground") {
   if ( !iAmTheGM() ) {
     if ( !doc.isOwner ) return null;
     if ( !game.users.activeGM ) ui.notifications.warn(T("noGM"));
-    return doc.setFlag(MODULE_ID, "land", sceneId ?? doc.getFlag(MODULE_ID, "orbitFrom")?.scene ?? "");
+    return doc.setFlag(MODULE_ID, "orbitReq", { dir: "down", scene: sceneId ?? null, alt, at: Date.now() });
   }
   if ( busyIds.has(doc.uuid) ) return null;
   busyIds.add(doc.uuid);
@@ -165,16 +175,16 @@ export async function bringBack(token, sceneId = null, alt = "ground") {
     const from = doc.getFlag(MODULE_ID, "orbitFrom") ?? {};
     const target = [sceneId, from.scene].map((id) => id && game.scenes.get(id)).find((s) => s && !isOrbit(s))
       ?? game.scenes.find((s) => s.active && !isOrbit(s)) ?? null;
-    if ( !target ) { ui.notifications.warn(T("noMap")); await doc.update({ [`flags.${MODULE_ID}.-=land`]: null, [`flags.${MODULE_ID}.alt`]: "orbit" }); return null; }
+    if ( !target ) { ui.notifications.warn(T("noMap")); await doc.update({ [`flags.${MODULE_ID}.-=land`]: null, [`flags.${MODULE_ID}.-=orbitReq`]: null, [`flags.${MODULE_ID}.alt`]: "orbit" }); return null; }
     const data = doc.toObject();
     delete data._id;
     const f = flagsOf(data);
-    delete f.orbitFrom; delete f.land; delete f.floor;
+    delete f.orbitFrom; delete f.land; delete f.floor; delete f.orbitReq;
     if ( alt && alt !== "ground" && alt !== "orbit" ) f.alt = alt; else delete f.alt;
     const home = target.id === from.scene && Number.isFinite(from.x);
     Object.assign(data, home ? { x: from.x, y: from.y, elevation: from.elevation ?? 0 } : { ...landingSlot(target, data), elevation: 0 });
     const [made] = await target.createEmbeddedDocuments("Token", [data], { mmOrbit: { dir: "down", from: doc.parent.id } });
-    if ( made ) await doc.parent.deleteEmbeddedDocuments("Token", [doc.id], { mmOrbit: { dir: "down", to: target.id } });
+    if ( made ) { await keepCombatants(doc, made); await doc.parent.deleteEmbeddedDocuments("Token", [doc.id], { mmOrbit: { dir: "down", to: target.id } }); }
     return made ?? null;
   } finally { busyIds.delete(doc.uuid); }
 }
@@ -184,10 +194,32 @@ function onUpdateToken(doc, changed) {
   const fm = changed.flags?.[MODULE_ID];
   if ( isOrbit(doc.parent) ) queueMicrotask(() => strip.refresh());
   if ( !fm || !iAmTheGM() || !enabled() ) return;
-  if ( !isOrbit(doc.parent) ) { if ( fm.alt === "orbit" ) sendToOrbit(doc); return; }
-  if ( "land" in fm && fm.land !== undefined ) return void bringBack(doc, fm.land || null);
+  if ( fm.orbitReq ) return void serve(doc);
+  if ( !isOrbit(doc.parent) ) { if ( fm.alt === "orbit" ) guarded(doc, () => sendToOrbit(doc)); return; }
+  if ( "land" in fm && fm.land !== undefined ) return void guarded(doc, () => bringBack(doc, fm.land || null));
   const alt = "-=alt" in fm ? "ground" : fm.alt;
-  if ( alt && alt !== "orbit" ) bringBack(doc, null, alt);
+  if ( alt && alt !== "orbit" ) guarded(doc, () => bringBack(doc, null, alt));
+}
+/** A request flag that is left over (the move failed or did nothing) is cleared, so asking again works. */
+const clearReq = (doc) => (doc.parent?.tokens.get(doc.id) && (doc.getFlag(MODULE_ID, "orbitReq") || doc.getFlag(MODULE_ID, "land") !== undefined)
+  ? doc.update({ [`flags.${MODULE_ID}.-=orbitReq`]: null, [`flags.${MODULE_ID}.-=land`]: null }).catch(() => null) : null);
+/** Run a move; on an error the GM is told and the request cleared. */
+async function guarded(doc, fn) {
+  try { const made = await fn(); if ( !made ) await clearReq(doc); }
+  catch ( err ) { console.error(`${MODULE_ID} | orbit`, err); ui.notifications.error(T("failed", { name: doc.name })); await clearReq(doc); }
+}
+/** A player's request (a one-off value: asking again always changes it, so it never sticks). */
+function serve(doc) {
+  const r = doc.getFlag(MODULE_ID, "orbitReq");
+  if ( !r ) return;
+  if ( r.dir === "up" && !isOrbit(doc.parent) ) return void guarded(doc, () => sendToOrbit(doc, { thrown: !!r.thrown }));
+  if ( r.dir === "down" && isOrbit(doc.parent) ) return void guarded(doc, () => bringBack(doc, r.scene || null, r.alt || "ground"));
+  clearReq(doc);
+}
+/** Requests made while no GM was online: the GM who comes in serves them. */
+function sweep() {
+  if ( !iAmTheGM() || !enabled() ) return;
+  for ( const s of game.scenes ) for ( const t of s.tokens ) if ( t.getFlag(MODULE_ID, "orbitReq") ) serve(t);
 }
 
 /** A player follows their own character up to orbit and back down. */
@@ -339,8 +371,8 @@ export function registerOrbit() {
     game.settings.register(MODULE_ID, "orbit", { name: "MOINENMAPS.Orbit.setting", hint: "MOINENMAPS.Orbit.settingHint", scope: "world", config: true, type: Boolean, default: true, onChange: () => strip.refresh() });
     game.settings.register(MODULE_ID, "orbitFollow", { name: "MOINENMAPS.Orbit.follow", hint: "MOINENMAPS.Orbit.followHint", scope: "client", config: true, type: Boolean, default: true });
   });
-  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } });
-  Hooks.on("canvasReady", () => { rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1); });
+  Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } setTimeout(sweep, 1500); });
+  Hooks.on("canvasReady", () => { rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) startAmbience(canvas.scene, canvas.scene.getFlag(MODULE_ID, "orbit")?.seed ?? 1, canvas.scene.getFlag(MODULE_ID, "orbit")?.layout ?? null); });
   Hooks.on("canvasTearDown", () => { strip.remove(); back.remove(); stopAmbience(); });
   Hooks.on("canvasPan", () => strip.place());
   window.addEventListener("resize", () => strip.place());

@@ -7,6 +7,9 @@
  * jitter and the few particles.
  */
 const DURATION = 1000;
+const live = new Set();
+/** Stop every running quake now (the zones teardown calls it). */
+export function stopQuakes() { for ( const done of [...live] ) done(); }
 
 function drawZone(G, zone) {
   for ( const part of zone.parts ) {
@@ -84,11 +87,11 @@ export function quake(zone, { grid = 100, inside = () => true } = {}) {
   };
   let over = false;
   const done = () => {
-    if ( over ) return; over = true;
+    if ( over ) return; over = true; live.delete(done);
     canvas.app?.ticker?.remove(tick);
     if ( !root.destroyed ) root.destroy({ children: true });
     rt.destroy(true);
   };
   canvas.app.ticker.add(tick);
-  Hooks.once("canvasTearDown", done);
+  live.add(done);
 }

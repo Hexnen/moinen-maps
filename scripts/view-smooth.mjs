@@ -62,6 +62,33 @@ export const due = (time, lastRun, period, k) => lastRun === null || time - last
 
 let cap = 60, ivs = [], lastRaf = null, lastRun = null, gated = null;
 
+/* Ticker listeners that throw: logged (each message once a minute) instead of freezing the canvas. */
+const errSeen = new Map();
+function tickerError(err) {
+  const k = String(err?.stack ?? err).slice(0, 300), now = Date.now();
+  if ( now - (errSeen.get(k) ?? 0) < 60000 ) return;
+  errSeen.set(k, now); if ( errSeen.size > 50 ) errSeen.clear();
+  console.error("moinen-maps | a canvas ticker listener threw (the canvas keeps running)", err);
+}
+/** Every listener of every PIXI ticker runs guarded: one that throws is reported and the rest of the frame (the render too) still runs. */
+(function guardListeners() {
+  // (Foundry's PIXI build does not export TickerListener: the shared ticker's head listener is one)
+  const L = (globalThis.PIXI?.TickerListener ?? globalThis.PIXI?.Ticker?.shared?._head?.constructor)?.prototype;
+  if ( !L || L._mmGuard ) return;
+  const emit = L.emit;
+  L._mmGuard = true;
+  L.emit = function(deltaTime) {
+    try { return emit.call(this, deltaTime); }
+    catch ( err ) {
+      tickerError(err);
+      const next = this.next;
+      if ( this.once ) this.destroy(true);
+      if ( this._destroyed ) this.next = null;
+      return next;
+    }
+  };
+})();
+
 /** Wrap the canvas ticker's requestAnimationFrame callback (once per ticker; Foundry makes a new app on a canvas re-draw only). */
 function gate(ticker) {
   if ( !ticker || ticker._mmGate ) return;
@@ -76,7 +103,13 @@ function gate(ticker) {
       if ( !due(time, lastRun, P, k) ) { ticker._requestId = requestAnimationFrame(ticker._tick); return; }
     }
     lastRun = time;
-    orig(time);
+    try { orig(time); }
+    catch ( err ) {
+      // PIXI asks for the next frame only after every listener ran: a throw would leave the canvas frozen until something
+      // adds a listener. Report it and keep the loop going.
+      tickerError(err);
+      if ( ticker.started && ticker._requestId === null ) ticker._requestId = requestAnimationFrame(ticker._tick);
+    }
   };
   gated = ticker;
 }

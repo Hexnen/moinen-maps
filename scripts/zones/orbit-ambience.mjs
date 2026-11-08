@@ -1,6 +1,6 @@
 /**
  * Life on the Orbit scene, drawn on the same art-pixel grid as its picture (6 scene px), fitted to where the picture put its planet
- * (space.mjs paints the same seed once more to learn that, ~0.1 s at scene load):
+ * (saved in the scene flag when the picture is made; an older scene paints the same seed once more to learn it, ~0.1 s):
  * - stars that twinkle, a shooting star every few seconds, faint dust drifting across;
  * - an aurora shimmering in curtains just above the planet's night-side limb;
  * - two satellites on orbits that follow the planet's curve (a high slow one, a low fast one the other way), turning slowly;
@@ -19,13 +19,14 @@ export function stopAmbience() {
   G = null;
 }
 
-export function startAmbience(scene, seed = 1) {
+export function startAmbience(scene, seed = 1, layout = null) {
   stopAmbience();
   if ( !canvas?.ready || !canvas.primary ) return;
   const W = scene.width, H = scene.height, aw = Math.round(W / ART), ah = Math.round(H / ART);
   // where the picture's planet is (art px -> scene px)
   let planet = { cx: aw * 0.5, cy: ah * 1.6, R: aw * 0.68, light: [-0.92, -0.18, 0.34] };
-  try { paintSpace(seed, aw, ah); if ( lastLayout.planet ) planet = lastLayout.planet; } catch { /* the fallback above */ }
+  if ( layout?.planet ) planet = layout.planet;
+  else try { paintSpace(seed, aw, ah); if ( lastLayout.planet ) planet = lastLayout.planet; } catch { /* the fallback above */ }
   const PCX = planet.cx * ART, PCY = planet.cy * ART, PR = planet.R * ART;
   const rand = rng((seed ^ 0x9e3779b9) >>> 0);
   const snap = (v) => Math.round(v / ART) * ART;

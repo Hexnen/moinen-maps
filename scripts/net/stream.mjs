@@ -388,7 +388,8 @@ function ensureBundle(info, signal = null, only = null) {
  */
 export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
   if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id).v); }
-  if ( inflight.has(id) ) return inflight.get(id);
+  const cur = inflight.get(id);
+  if ( cur && !cur.signal?.aborted ) return cur.p;      // (a promise whose caller gave up would resolve null for this one too)
   const p = enqueue(prio, async () => {
     if ( memo.has(id) ) return memo.get(id).v;
     if ( signal?.aborted ) return null;
@@ -414,8 +415,8 @@ export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
     remember(id, out);
     return out;
   });
-  inflight.set(id, p);
-  p.finally(() => inflight.delete(id));
+  inflight.set(id, { p, signal });
+  p.finally(() => { if ( inflight.get(id)?.p === p ) inflight.delete(id); });
   return p;
 }
 

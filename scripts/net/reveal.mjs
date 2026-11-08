@@ -89,14 +89,16 @@ function fadeIn(list, why) {
   if ( [...parts.values()].every((p) => p.shown) ) phase = "done";
 }
 
+let life = 0;                       // bumped per scene: a timer of the previous scene does nothing
 function go(why) {
   if ( phase !== "holding" ) return;
+  const my = life;
   phase = "revealing"; clearTimeout(budgetTimer);
   const late = [...parts].filter(([, p]) => !p.ready && !p.progressive).map(([n]) => n);
   markOnce("reveal", { why, late });
   fadeIn([...parts.values()].filter((p) => p.ready || p.progressive), "reveal");
   // a late layer comes in by itself when ready, and after LATE ms at the latest (what it has by then; the rest as it lands)
-  if ( late.length ) setTimeout(() => { const rest = [...parts.values()].filter((p) => !p.shown); if ( rest.length ) fadeIn(rest, "cap"); }, LATE);
+  if ( late.length ) setTimeout(() => { if ( my !== life ) return; const rest = [...parts.values()].filter((p) => !p.shown); if ( rest.length ) fadeIn(rest, "cap"); }, LATE);
   if ( !late.length ) phase = "done";
   for ( const fn of onGo.splice(0) ) { try { fn(); } catch ( err ) { console.error(`${MODULE_ID} | reveal`, err); } }
 }
@@ -126,6 +128,7 @@ export async function upload(baseTextures, slice = 16) {
 }
 
 Hooks.on("canvasInit", () => {
+  life++;
   clearTimeout(budgetTimer); parts.clear(); onGo.length = 0; readyAt = 0; budgetMs = BUDGET; budgetStart = 0;
   phase = off() ? "done" : "holding";
 });
@@ -135,7 +138,8 @@ Hooks.on("canvasReady", () => {
   // the budget counts from the first frame drawn after canvasReady: Foundry's own first frame (the map's texture going to the GPU)
   // can hold the page for a few hundred ms, and no layer could use that time anyway
   let started = false;
-  const start = () => { if ( started ) return; started = true; budgetStart = performance.now(); clearTimeout(budgetTimer); budgetTimer = setTimeout(() => go("budget"), budgetMs); };
+  const my = life;
+  const start = () => { if ( started || my !== life ) return; started = true; budgetStart = performance.now(); clearTimeout(budgetTimer); budgetTimer = setTimeout(() => go("budget"), budgetMs); };
   canvas.app?.ticker?.addOnce(start);
   budgetTimer = setTimeout(start, 300);         // (a ticker that does not run)
   // every layer registers in its own canvasReady handler: look once they all ran
