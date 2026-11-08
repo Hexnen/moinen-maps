@@ -31,8 +31,12 @@ export async function dark(d) {
 }
 
 /** Record `ms` of effect time as `name` (webm) on a virtual clock (see dev/fire-rec.mjs). Returns [bytes, path, frames, fps]. */
-export async function rec(name, ms, { fps = 60, pace = 30, during = [] } = {}) {
-  const st = canvas.app.view.captureStream(0), tr = st.getVideoTracks()[0], T = canvas.app.ticker, mf = T.maxFPS; T.maxFPS = 0;
+/** copy2d (default on): each rendered frame is copied into a 2D canvas and that one is recorded. A WebGL canvas that is not
+ * composited (the Browser pane hidden) loses frames when it is captured directly; a 2D canvas keeps its pixels. */
+export async function rec(name, ms, { fps = 60, pace = 30, during = [], copy2d = true } = {}) {
+  const V = canvas.app.view, C = copy2d ? Object.assign(document.createElement("canvas"), { width: V.width, height: V.height }) : null;
+  const g2 = C?.getContext("2d");
+  const st = (C ?? V).captureStream(0), tr = st.getVideoTracks()[0], T = canvas.app.ticker, mf = T.maxFPS; T.maxFPS = 0;
   const rc = new MediaRecorder(st, { mimeType: "video/webm;codecs=vp9", videoBitsPerSecond: 10e6 }), parts = [];
   rc.ondataavailable = (e) => parts.push(e.data);
   const realNow = Date.now, dt = 1000 / fps, n = Math.round(ms / dt);
@@ -44,7 +48,7 @@ export async function rec(name, ms, { fps = 60, pace = 30, during = [] } = {}) {
     for ( let i = 0; i < n; i++ ) {
       vt = base + i * dt;
       for ( const [at, fn] of during ) if ( i * dt >= at && !fired.has(at) ) { fired.add(at); fn(); }
-      T.update(perf0 + i * dt); canvas.app.renderer.render(canvas.app.stage); tr.requestFrame();
+      T.update(perf0 + i * dt); canvas.app.renderer.render(canvas.app.stage); if ( g2 ) g2.drawImage(V, 0, 0); tr.requestFrame();
       await wait(pace);
     }
   } finally { Date.now = realNow; T.maxFPS = mf; }

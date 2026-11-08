@@ -22,15 +22,15 @@ import { SPEED_SQ, dirVec } from "../wind.mjs";
  * shader finds its tile and slot from gl_InstanceID, so following the view costs a few uniforms, not CPU per particle.
  *
  *   PARTS   sortLayer 995, elevation Infinity: one instanced draw per kind (snow flakes + spindrift, sand grit, dust motes, ember
- *           sparks), the same tiles-of-slots scheme as the rain; a kind that is not on is not drawn.
+ *           sparks, wind lines + debris), the same tiles-of-slots scheme as the rain; a kind that is not on is not drawn.
  *   HAZE    sortLayer 990 (above tokens, below the air): sand haze, dust haze, ember smoke in flat dithered bands (map mixed per cell).
- *   The ground pass also carries snow cover, sand drifts and streamers, dust sun shafts and every effect's tint (cold, ochre, warm,
- *   the fire-lit evening); cover and drift shares come from the scene's own score quantiles (fields.mjs).
+ *   The ground pass also carries snow cover, sand drifts and streamers, dust sun shafts, the wind's grass combing, water ruffle and
+ *   cloud shadows, and every effect's tint (cold, ochre, warm, the fire-lit evening, the wind's dim); cover and drift shares come from the scene's own score quantiles (fields.mjs).
  *
  * COST: no weather -> this display does not exist (no object, no ticker). With weather: one ticker listener (a few uniforms; the
  * state is resolved at most 12 times a second), one draw call per pass that has something to draw.
  */
-const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 64]];
+const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 64], ["wind", 5, 64]];
 const PART_MAX = 60000;
 const BLEND = "MM_WEATHER";
 const MAX_INSTANCES = 150000;
@@ -95,7 +95,7 @@ export class WeatherDisplay {
     this.ground = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("ground", GROUND_VERT, GROUND_FRAG), {
       ...this.common(seed), uTime: 0, uK: footprintK(), uWet: 0, uPuddle: 2, uSheen: 0, uSky: new Float32Array(SKY), uAlpha: 1,
       uSnow: new Float32Array([9, 1, 0, 0]), uSand: new Float32Array([9, 0, 9, 0]), uSandW: new Float32Array([1, 0, 0, 0]), uDust: new Float32Array(2),
-      uEmb: new Float32Array(4), uCps: geo.grid / ap, uAny: 0,
+      uEmb: new Float32Array(4), uWindG: new Float32Array(4), uWindV: new Float32Array([1, 0, 0, 0]), uCps: geo.grid / ap, uAny: 0,
       translationMatrix: new PIXI.Matrix().toArray(true) })), 252);
     // rain: one instanced quad geometry for both the air and the splash draws
     const rg = new PIXI.Geometry()
@@ -230,7 +230,19 @@ export class WeatherDisplay {
     }
     gu2.uEmb[0] = 0; gu2.uEmb[1] = EG.dim; gu2.uEmb[2] = on("embers") ? ep : 0;
     hz.uSmoke[0] = on("embers") ? EG.smoke * ep : 0; hz.uSmoke[1] = EG.smokeL3; hz.uSmoke[2] = wd[0] * embSp; hz.uSmoke[3] = wd[1] * embSp;
-    const anyGround = wet > 0.002 || cover > 0.002 || ["snow", "sand", "dust", "embers"].some(on);
+    // WIND (visible wind: lines and debris in the air, combing / ruffle / cloud shadows on the ground, blown dust at 3); at least a
+    // breeze (1.4 squares / s) even when the scene wind is calm, slower at the lower levels
+    const wi = fx.wind, WG = M.gates("wind", wi?.s ?? 0), wp = wi?.p ?? 0, windSp = Math.max(wsp, 0.35 * SPEED_SQ * cps) * WG.spd;
+    if ( on("wind") ) {
+      setPart("wind", [WG.lines * wp * perf, WG.debris * wp * perf, 0, 0], wd, windSp, [WG.lineGate, WG.lineLen, WG.bob, 0], wp);
+      const R = windSp * 1.4 * 3.4 * 1.2 * 0.5 + 24;
+      this.reach.wind = [-Math.abs(wd[0]) * R - 24, Math.abs(wd[0]) * R + 24, -Math.abs(wd[1]) * R - lift * 30 - 24, Math.abs(wd[1]) * R + 24];
+    }
+    gu2.uWindG[0] = on("wind") ? wp : 0; gu2.uWindG[1] = WG.comb; gu2.uWindG[2] = on("wind") ? WG.cloud * wp : 0; gu2.uWindG[3] = WG.dim;
+    gu2.uWindV[0] = wd[0]; gu2.uWindV[1] = wd[1]; gu2.uWindV[2] = windSp; gu2.uWindV[3] = on("wind") ? WG.ruffle * wp : 0;
+    const wHaze = on("wind") ? WG.haze * wp : 0;
+    if ( wHaze > hz.uDustH[0] ) { hz.uDustH[0] = wHaze; hz.uDustH[1] = wd[0] * windSp * 0.8; hz.uDustH[2] = wd[1] * windSp * 0.8; }
+    const anyGround = wet > 0.002 || cover > 0.002 || ["snow", "sand", "dust", "embers", "wind"].some(on);
     gu2.uAny = anyGround ? 1 : 0;
     this.ground.visible = anyGround;
     this.haze.visible = hz.uSandH[0] > 0.001 || hz.uDustH[0] > 0.001 || hz.uSmoke[0] > 0.001;

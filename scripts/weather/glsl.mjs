@@ -139,6 +139,8 @@ uniform vec4 uSand;         // streamer threshold, the wave's push, drift thresh
 uniform vec4 uSandW;        // wind unit x, y; streamer speed (art px / s); presence
 uniform vec2 uDust;         // shafts, warm tint (x presence)
 uniform vec4 uEmb;          // source share, dim (fire-lit evening), presence, -
+uniform vec4 uWindG;        // visible wind: presence, grass-combing threshold, cloud shadows (share), overall dim
+uniform vec4 uWindV;        // the wind's unit direction x, y; its speed (art px / s); water ruffle (x presence)
 uniform float uCps;         // art cells per grid square
 uniform int uAny;           // anything to draw (else every cell is "no change")
 out vec4 fragColor;
@@ -161,8 +163,25 @@ float glint(vec2 c, float rate, int s) {
 
 // one art cell: (add.rgb, k): the frame under it becomes dst * k + add (custom blend ONE, SRC_ALPHA)
 // the smooth fields (scales of 37+ cells) once per pixel, at the cell under it; per-cell terms stay in cellGround
-float gWv = 0.0, gFr = 0.0, gSh = 0.0;
+float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gCl = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0;
 void groundFields(vec2 c) {
+  if ( uWindG.x > 0.0 ) {
+    // VISIBLE WIND: the gust at this place (fronts travel along the wind), combing bands carried downwind (crests across the wind,
+    // a field that never loops), cloud shadows drifting at about half the speed, cat's-paw patches on water
+    vec2 wd = uWindV.xy;
+    float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
+    gWg = clamp(gustEnv(uTime - pr / (uCps * 4.0), uSeed), 0.0, 1.2);
+    if ( uWindG.z > 0.0 ) gCl = drift2a(c / 120.0, wd * uWindV.z * 0.55 / 120.0, uTime, 90.0, uSeed + 203);
+    // the surface terms only where the pixel's own cell is grass or water (the rest of the map pays nothing for them)
+    vec3 M = infoAt(c).rgb;
+    if ( M.g > M.r * 1.04 && M.g > M.b * 1.1 ) {
+      gComb = drift2a(vec2(pr / 22.0, ac / 90.0), vec2(uWindV.z * 1.2 / 22.0, 0.0), uTime, 30.0, uSeed + 201);
+      gNn = fbm2(vec2(pr / 26.0, ac / 2.6), uSeed + 204);
+    } else if ( uWindV.w > 0.0 && waterOf(infoAt(c)) ) {
+      gRuf = drift2a(vec2(pr / 16.0, ac / 40.0), vec2(uWindV.z * 1.6 / 16.0, 0.0), uTime, 20.0, uSeed + 205);
+      if ( gRuf > 0.55 ) gGl = drift2a(vec2(pr / 3.0, ac / 1.2), vec2(uWindV.z * 2.0 / 3.0, 0.0), uTime, 6.0, uSeed + 207);
+    }
+  }
   if ( uWet > 0.0005 ) gWv = fbm2(c / 70.0 + vec2(3.0, 0.0), uSeed + 9);
   if ( uSandW.w > 0.0 ) {
     vec2 wd = uSandW.xy;
@@ -207,7 +226,30 @@ vec4 cellGround(vec2 c) {
     vec3 lit = vec3(0.42, 0.40, 0.48) + 0.5 * vec3(0.55, 0.30, 0.08);
     f = tint(f, mix(vec3(1.0), mix(vec3(1.02, 0.98, 0.94), lit, uEmb.y), uEmb.z), M);
   }
+  if ( uWindG.x > 0.0 ) {
+    // wind: an overall dim and (from level 2) cloud shadows, one darker step with a dithered rim, on roofs too
+    bool cl = uWindG.z > 0.0 && gCl - 0.56 > (dz - 0.5) * 0.014;
+    vec3 mul = vec3(1.0 - (1.0 - uWindG.w) * uWindG.x) * (cl ? mix(vec3(1.0), vec3(0.80, 0.82, 0.88), uWindG.z) : vec3(1.0));
+    if ( mul != vec3(1.0) ) f = tint(f, mul, M);
+  }
   if ( !open ) return f;
+  if ( uWindG.x > 0.0 ) {
+    vec2 wd = uWindV.xy;
+    float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
+    // GRASS combing: gusts sweep over the green as bands of lighter cells (the blades' undersides), broken into blade streaks
+    bool green = M.g > M.r * 1.08 && M.g > M.b * 1.15 && !water;
+    if ( green ) {
+      if ( smoothstep(0.35, 0.75, gComb) * gWg * (0.3 + gNn) > uWindG.y + (dz - 0.5) * 0.06 ) f.rgb += (M * 0.18 + 0.05) * uWindG.x;
+    }
+    // WATER ruffle: darker cat's paws running with the gusts, broken light dashes along the wind inside them
+    if ( water && uWindV.w > 0.0 ) {
+      float paw = smoothstep(0.5, 0.7, gRuf) * clamp(gWg * 1.1, 0.0, 1.0);
+      f = vec4(f.rgb * (1.0 - 0.08 * paw * uWindV.w), f.a * (1.0 - 0.08 * paw * uWindV.w));
+      if ( paw > 0.2 ) {
+        if ( gGl > 0.80 - 0.10 * paw ) f.rgb += 0.13 * uSky * uWindV.w;
+      }
+    }
+  }
   // ---- SNOW cover: where the score is over the threshold, the snow ramp replaces the map (its lines print through)
   if ( uSnow.x < 8.0 && !water ) {
     float d = snowScore(c, lum, con) - uSnow.x;
