@@ -249,20 +249,7 @@ export const TABLE = {
 /** All of the table at s: { key: value }. */
 export function looks(s) { const o = {}; for ( const [k, t] of Object.entries(TABLE) ) o[k] = lv(t, s); return o; }
 
-/**
- * THE VORTEX WIND (research 3.2 "Interaction"): what the tornado adds to the scene wind at a point, in squares / s: a tangential
- * swirl Gamma / (2 pi max(d, r0)) and an inflow toward the base, both fading out beyond R squares. It turns COUNTER-CLOCKWISE on the
- * map (north up, as a northern-hemisphere tornado seen from above): on screen (y down) the angle atan2(dy, dx) DEcreases (SPIN = -1).
- * `v` = { x, y (squares), R, w (tangential speed at r0, squares / s), r0, inflow, p }.
- */
-export const SPIN = -1;
-export function vortexWind(v, x, y) {
-  const dx = x - v.x, dy = y - v.y, d = Math.hypot(dx, dy);
-  if ( !(d < v.R) || d < 1e-6 ) return [0, 0];
-  const fall = 1 - smooth((d - v.R * 0.45) / (v.R * 0.55));
-  const tang = v.w * v.r0 / Math.max(d, v.r0) * fall * v.p, inn = v.inflow * fall * v.p * Math.min(1, d / v.r0);
-  return [(dy / d) * tang - (dx / d) * inn, (-dx / d) * tang - (dy / d) * inn];
-}
+export { vortexWind, SPIN } from "../wind.mjs";
 
 /** The vortices of the scene's tornadoes at shared ms `now` (for wind.mjs): squares, only the ones present. */
 export function vortices(list, now, grid) {

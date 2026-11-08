@@ -1,5 +1,5 @@
 import * as TM from "./tornado-model.mjs";
-import { QUAD_VERT, DECK_FRAG, WALL_FRAG, COLUMN_FRAG, FOOT_FRAG, PUFF_VERT, PUFF_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
+import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, PUFF_VERT, PUFF_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
 import { blendMode } from "./display.mjs";
 import { hu, sceneWind, dirVec } from "../wind.mjs";
 import { mapPixels } from "../destruction/source.mjs";
@@ -111,7 +111,6 @@ class TornadoView {
     const deckU = { uTop: new Float32Array(4), uDeck: new Float32Array(4), uBase: new Float32Array(4), uCurt: new Float32Array(4), uPh: new Float32Array(4), uHole: new Float32Array(4) };
     this.curtain = quad(DECK_FRAG, "deck", { uMode: 0, ...deckU });
     this.deck = quad(DECK_FRAG, "deck", { uMode: 1, ...deckU });
-    this.wallC = quad(WALL_FRAG, "wall", { uWall: new Float32Array(4), uWall2: new Float32Array(4), uPh: new Float32Array(4) });
     this.column = quad(COLUMN_FRAG, "column", { uAxis: this.axis, uCol: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
     const footU = () => ({ uHF: this.hf, uBase: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3), uWall: new Float32Array(4) });
     this.skirt = quad(FOOT_FRAG, "foot", { uMode: 0, ...footU() });
@@ -268,7 +267,7 @@ class TornadoView {
     const touchSwell = 0.7 + 0.7 * this.touchEnv(tm);
     const dust = this.dust(now, bx, by);
     const tmv = still ? 0 : tm;
-    for ( const m of [this.curtain, this.deck, this.wallC, this.column, this.skirt, this.foot, this.puffs, this.back, this.front, this.ground] ) {
+    for ( const m of [this.curtain, this.deck, this.column, this.skirt, this.foot, this.puffs, this.back, this.front, this.ground] ) {
       const u = m.shader.uniforms; u.uT = tmv; u.uView[0] = lift; u.uView[1] = sq;
     }
     // ---- deck: high above the wall cloud, so on screen it lies up-screen of the funnel top (the funnel hangs from its front edge)
@@ -280,10 +279,6 @@ class TornadoView {
     du.uCurt[0] = L.curtain * ph.cloud * ph.reach; du.uCurt[1] = L.deckR * 0.5 * U; du.uCurt[2] = lift * Z * 1.15; du.uCurt[3] = head;
     du.uPh[0] = TAU * fr(tm / 30); du.uPh[1] = TAU * fr(tm / 12); du.uPh[2] = zone;
     du.uHole[0] = top.cx; du.uHole[1] = top.sy - Hs; du.uHole[2] = L.wallR * U; du.uHole[3] = ph.cloud;
-    const wu = this.wallC.shader.uniforms;
-    wu.uWall[0] = top.cx; wu.uWall[1] = top.sy; wu.uWall[2] = L.wallR * U; wu.uWall[3] = ph.cloud;
-    wu.uWall2[0] = Hs; wu.uWall2[1] = top.rc;
-    wu.uPh[0] = -TAU * fr(0.5 * tm);
     // ---- column
     const cu = this.column.shader.uniforms;
     cu.uCol[0] = Z; cu.uCol[1] = Z * (1 - ph.reach); cu.uCol[2] = ph.rope; cu.uCol[3] = L.dust;
@@ -546,7 +541,7 @@ class TornadoView {
 
   destroy() {
     for ( const m of [this.ground, this.marks, this.show] ) { m.parent?.removeChild(m); }
-    for ( const m of [this.curtain, this.deck, this.wallC, this.column, this.skirt, this.foot, this.puffs, this.back, this.front, this.marks, this.ground, this.show] ) { m.geometry?.destroy(); m.destroy(); }
+    for ( const m of [this.curtain, this.deck, this.column, this.skirt, this.foot, this.puffs, this.back, this.front, this.marks, this.ground, this.show] ) { m.geometry?.destroy(); m.destroy(); }
     this.hf.destroy(true); this.art.destroy(true);
   }
 }

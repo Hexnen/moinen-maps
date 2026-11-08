@@ -3,7 +3,7 @@ import { GROUND_VERT, GROUND_FRAG, RAIN_VERT, RAIN_FRAG } from "./glsl.mjs";
 import { PART_VERT, PART_FRAG, HAZE_FRAG } from "./fx-glsl.mjs";
 import { snowScore, driftScore, sortedScores, quantileThr } from "./fields.mjs";
 import { footprintK } from "../fire/shader.mjs";
-import { SPEED_SQ, dirVec } from "../wind.mjs";
+import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
 
 /**
  * Shows the WEATHER of the open scene: GPU-first passes in Foundry's primary group, every pixel a pure function of (art cell, shared
@@ -68,6 +68,7 @@ export class WeatherDisplay {
     this.stats = { instances: 0, tickMs: 0, drawn: [] };
     this._tick = () => this.tick();
     this.ticking = false;
+    this.vortA = new Float32Array(12); this.vortB = new Float32Array(12); this.vortN = 0;   // (shared by every pass)
   }
 
   /** The common uniforms (ground info, shelter, art grid, seed). */
@@ -75,7 +76,8 @@ export class WeatherDisplay {
     const g = this.geo, I = this.info, S = this.shelter;
     return {
       uInfo: I?.texture ?? WHITE(), uInfoGeo: new Float32Array([I?.w ?? 1, I?.h ?? 1, I?.scale ?? 1]), uHasInfo: I ? 1 : 0,
-      uShelter: S?.texture ?? WHITE(), uHasShelter: S ? 1 : 0, uArtSize: new Float32Array([g.aw, g.ah]), uSeed: seed | 0
+      uShelter: S?.texture ?? WHITE(), uHasShelter: S ? 1 : 0, uArtSize: new Float32Array([g.aw, g.ah]), uSeed: seed | 0,
+      uVortA: this.vortA, uVortB: this.vortB, uVortN: 0
     };
   }
 
@@ -327,8 +329,26 @@ export class WeatherDisplay {
       partN += pn;
     }
     if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = footprintK(); }
+    this.vortex(n > 0 || partN > 0);
     this.stats.instances = n; this.stats.tiles = tiles; this.stats.parts = partN;
     this.stats.tickMs = performance.now() - t0;
+  }
+
+  /**
+   * The tornadoes' swirl on the drops and particles (wind.mjs vortices, art cells): set on every pass that reads it, and only while
+   * there is a tornado (or one just went: its count back to 0).
+   */
+  vortex(any) {
+    const list = any ? vortices() : [], g = this.geo, n = Math.min(3, list.length);
+    if ( !n && !this.vortN ) return;
+    const k = g.grid / g.ap;
+    for ( let i = 0; i < n; i++ ) {
+      const v = list[i];
+      this.vortA.set([(v.x * g.grid - g.ox) / g.ap, (v.y * g.grid - g.oy) / g.ap, v.R * k, v.r0 * k], i * 4);
+      this.vortB.set([v.w * k, v.inflow * k, v.p, 0], i * 4);
+    }
+    this.vortN = n;
+    for ( const m of [this.splash, this.air, ...Object.values(this.parts)] ) m.shader.uniforms.uVortN = n;
   }
 
   /** Shader time: the shared clock in seconds, mod one hour (every periodic term is whole cycles per hour). */

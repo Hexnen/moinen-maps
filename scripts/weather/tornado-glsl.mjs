@@ -7,16 +7,17 @@
  * Coordinates: absolute ART px on SCREEN, i.e. the ground point (x, y) at height z shows at (x, y - LIFT z). Rotation is counter-
  * clockwise on the map (tornado-model SPIN = -1: the screen angle decreases).
  *
- *   HEIGHTFIELD (RGBA16F, MAX blend)   R: the wall cloud's lumps, G: the debris cloud's billows (instanced domes, roughened)
+ *   DENSITY (RGBA16F, ADD blend)   G: the debris cloud's summed metaball weights, B: their weighted dome tops (billows merge into one cloud)
  *   ART (RGBA8, premultiplied), back to front:
- *     DECK    the rain curtain wrapping the rear, the STORM DECK seen from above (a wide rotating mass with spiral bands sheared by a
- *             faster core, flat see-through levels, lit edges toward the up-left light), feeder bands streaming in, lightning
+ *     CURTAIN the rain curtain wrapping the rear and the right flank (DECK_FRAG mode 0)
  *     SKIRT   the dust ring on the ground: jets thrown outward, lopsided to the side the spin throws to, rolling rings at touchdowns
  *     PARTS   (back) debris behind the funnel
  *     COLUMN  the funnel: a fluid rope solved per row from the CPU's axis table, flow-warped bands, cylinder light, sheath, flare
  *     FOOT    the debris cloud shaded from G (slope + crevices, the map's own dirt)
  *     PARTS   (front) debris in front: map fragments, planks, specks, clumps, wisps
- *     WALL    the lowered wall cloud shaded from R, hiding the funnel's top
+ *     DECK    the STORM DECK seen from above, drawn over the funnel's top (a wide rotating mass with spiral bands sheared by a faster
+ *             core, thickest over the funnel top - the wall cloud the funnel flares into - flat see-through levels, lit edges toward
+ *             the up-left light), feeder bands streaming in, lightning
  *   GROUND   storm light, the deck's shadow, the funnel's shadow, the scoured track (stage, under tokens, weather blend)
  *   GPARTS   inflow streaks, chunk shadows, scars where chunks were torn out (stage, under tokens)
  */
@@ -202,58 +203,6 @@ void main() {
   fragColor = deck;
 }`;
 
-/* ---------------------------------------------------------------- WALL: the lowered wall cloud the funnel hangs from */
-
-export const WALL_FRAG = `${HEAD}
-in vec2 vP;
-uniform vec4 uWall;         // the funnel top on screen x, y; radius; presence
-uniform vec4 uWall2;        // its height on screen (top surface above the funnel top), the funnel's top radius, -, -
-uniform vec4 uPh;           // CPU phases: side striations, top swirl
-uniform int uSd;
-out vec4 fragColor;
-${TCOMMON}
-const vec3 C0 = vec3(0.17, 0.18, 0.22), C1 = vec3(0.24, 0.26, 0.31), C2 = vec3(0.33, 0.35, 0.41), C3 = vec3(0.43, 0.45, 0.51),
-           C4 = vec3(0.55, 0.57, 0.62), C5 = vec3(0.68, 0.70, 0.74), C6 = vec3(0.80, 0.82, 0.85);
-vec3 wc(int i) { return i <= 0 ? C0 : i == 1 ? C1 : i == 2 ? C2 : i == 3 ? C3 : i == 4 ? C4 : i == 5 ? C5 : C6; }
-void main() {
-  vec2 p = texel();
-  float pr = uWall.w; if ( pr <= 0.001 ) discard;
-  float R = uWall.z * (0.6 + 0.4 * pr), Hs = uWall2.x, sq = uView.y * 0.85;
-  vec2 c = uWall.xy;
-  float dx = p.x - c.x;
-  // a short turning cylinder of cloud: its top surface (an ellipse Hs above the funnel top) and its front side down to a ragged,
-  // lumpy underside where the funnel comes out
-  float edgeN = loopN(vec2(dx / (6.0 * uU), 0.0) + vec2(uPh.x * 0.6, 0.0), 4.0, 0.9, uSd + 301);
-  float Rr = R * (1.0 + 0.12 * (edgeN - 0.5));
-  if ( abs(dx) > Rr ) discard;
-  float s = sqrt(max(0.0, 1.0 - (dx / Rr) * (dx / Rr)));
-  float yTopF = c.y - Hs + s * Rr * sq;                      // the top ellipse's near edge
-  float yTopB = c.y - Hs - s * Rr * sq;                      // ... far edge
-  // the underside: the near edge of the bottom ellipse, lowered in lumps (scud) and pulled down round the funnel
-  float th = asin(clamp(dx / Rr, -1.0, 1.0));
-  float u = th + uPh.x;
-  float lumpB = fbm2(vec2(cos(u) * 1.6, sin(u) * 1.6) + vec2(dx / (40.0 * uU), 0.0), uSd + 302);
-  float funnel = exp(-(dx * dx) / max(1.0, uWall2.y * uWall2.y * 1.6));
-  float yBot = c.y + s * Rr * sq + (5.0 + 10.0 * lumpB) * uU * s + 10.0 * uU * funnel;
-  if ( p.y < yTopB || p.y > yBot ) discard;
-  float tv; float m = 0.97 * smoothstep(0.0, 0.5, pr);
-  if ( p.y <= yTopF ) {
-    // the top surface: turning cauliflower lumps, lit from the up-left
-    float n = bil(swirl2(p, vec2(c.x, c.y - Hs), sq, -2.4, 0.5 * R, 4.0, 5.0 * uU, uSd + 303));
-    float n2 = bil(swirl2(p + vec2(2.0) * uU, vec2(c.x, c.y - Hs), sq, -2.4, 0.5 * R, 4.0, 5.0 * uU, uSd + 303));
-    tv = 4.2 + 3.2 * (n2 - n) - 0.9 * dx / R + 0.6 * (n - 0.5);
-    if ( p.y > yTopF - 1.5 ) tv += 0.8;                     // the lit rim of the top
-  } else {
-    // the side: vertical striations sliding round with the spin, darker downward and on the right
-    float st = fbm3(vec2(cos(u) * 2.2, sin(u) * 2.2 + (p.y - yTopF) / (14.0 * uU)), uSd + 304);
-    float down = clamp((p.y - yTopF) / max(1.0, yBot - yTopF), 0.0, 1.0);
-    tv = 3.0 - 1.6 * down - 1.1 * dx / R + 1.6 * (st - 0.5) + 0.8 * step(0.66, st);
-    if ( p.y > yBot - 2.0 * uU ) { tv -= 0.8; m *= 0.8; }  // the ragged underside, a little see-through
-  }
-  int ti = int(clamp(floor(tv), 0.0, 6.0));
-  fragColor = vec4(wc(ti) * m, m);
-}`;
-
 /* ---------------------------------------------------------------- COLUMN: the funnel */
 
 export const COLUMN_FRAG = `${HEAD}
@@ -343,7 +292,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-/* ---------------------------------------------------------------- SKIRT + FOOT (debris cloud) + WALL (shaded heightfields) */
+/* ---------------------------------------------------------------- SKIRT + FOOT (the debris cloud, shaded from the density field) */
 
 export const FOOT_FRAG = `${HEAD}
 in vec2 vP;
