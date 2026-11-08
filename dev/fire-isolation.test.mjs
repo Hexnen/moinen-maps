@@ -1,7 +1,8 @@
 // Fire and smoke: an edit touches ONLY the area(s) it overlaps (the pure part):   node dev/fire-isolation.test.mjs
 //   A. areas: painting elsewhere, adding onto / erasing in / re-levelling / re-colouring one fire keeps every other area's id AND key
 //      (the display keeps a mesh, field, art state and lights exactly while the key is the same)
-//   B. lights: FireLights.syncAreas replaces the sources of the changed / new / gone areas only; new light settings rebuild all
+//   B. lights: FireLights.syncAreas touches the lights of the changed / new / gone areas only, hands a changed fire's light over (same
+//      source), fades a gone fire's light out; new light settings keep the sources
 //   C. the art is WORLD-anchored: the ART and FUEL shaders read the area's origin (uOrg) and the display seeds the art by colour, not by
 //      the area id, so a rebuilt area (new rect, new id) keeps its pattern where it was - no visible reset on the swap
 // The live counterpart (lane, real meshes and light sources): dev/fire-isolation.mjs
@@ -75,20 +76,31 @@ let L = null;
 try { L = await import("../scripts/fire/lights.mjs"); } catch ( e ) { ok(false, `lights.mjs imports in node (${e.message})`); }
 if ( L ) {
   const lights = new L.FireLights();
-  let made = 0;
-  lights.make = (id, list) => list.map((_, i) => ({ id: `${id}.${i}.${made++}`, suppression: {} }));
-  lights.drop = (list) => list.length;
-  const entries = (A) => [...A.values()].map((a) => ({ id: a.id, key: a.key, list: [1, 2] }));
+  let made = 0, moved = 0;
+  lights.make = (Lc, R, now) => ({ src: { id: `l${made++}` }, mesh: null, L: Lc, x: Lc.x, y: Lc.y, R, born: now, dieAt: null, gone: false, ref: 1, bridge: null });
+  lights.move = (s, Lc, R) => { moved++; s.x = Lc.x; s.y = Lc.y; s.R = R; };
+  lights.retire = (s) => { s.gone = true; };
+  // (one light per area at its rect's centre: what lightsOf gives a small fire)
+  const lightAt = (a) => ({ x: geo.ox + (a.rect.x0 + a.rect.x1) / 2 * geo.ap, y: geo.oy + (a.rect.y0 + a.rect.y1) / 2 * geo.ap, radius: 200, seed: 1, samples: [] });
+  const entries = (A) => [...A.values()].map((a) => ({ id: a.id, key: a.key, listOf: () => [lightAt(a)] }));
   const LP = { ...P, light: true };
-  lights.syncAreas(entries(A0), LP);
-  const before = new Map([...lights.byArea].map(([id, a]) => [id, a.sources]));
-  const r = lights.syncAreas(entries(at(cases.addOntoBig)), LP);
-  ok(others.every((id) => lights.byArea.get(id).sources === before.get(id)), "lights: untouched areas keep their sources (same objects)");
-  ok(r.made === 2 && r.dropped === 2, `lights: only the touched area's sources replaced (made ${r.made}, dropped ${r.dropped})`);
-  const r2 = lights.syncAreas(entries(at(cases.addOntoBig)), LP);
-  ok(r2.made === 0 && r2.dropped === 0, "lights: nothing changed, nothing made, no refresh needed");
-  const r3 = lights.syncAreas(entries(at(cases.addOntoBig)), { ...LP, lightRadius: (LP.lightRadius ?? 1) + 1 });
-  ok(r3.made === 8 && r3.dropped === 8, "lights: new light settings rebuild every area");
+  globalThis.canvas.effects.lightSources = new Map();
+  lights.syncAreas(entries(A0), LP, 0, geo);
+  const before = new Map([...lights.byArea].map(([id, a]) => [id, a.slots.map((s) => s.src)]));
+  ok(made === 4, `lights: one per area (${made})`);
+  const m0 = made, v0 = lights.stats.visionUpdates;
+  const r = lights.syncAreas(entries(at(cases.addOntoBig)), LP, 1000, geo);
+  ok(others.every((id) => lights.byArea.get(id).slots.every((s, i) => s.src === before.get(id)[i])), "lights: untouched areas keep their sources (same objects)");
+  ok(r.made === 0 && made === m0, `lights: a stroke added onto a fire hands its light over - no new source (made ${r.made}, moved ${r.moved})`);
+  const r2 = lights.syncAreas(entries(at(cases.addOntoBig)), LP, 2000, geo);
+  ok(r2.made === 0 && r2.dropped === 0 && r2.moved === 0 && lights.stats.visionUpdates === v0 + (r.made || r.moved ? 1 : 0), "lights: nothing changed, nothing made, no refresh needed");
+  const r3 = lights.syncAreas(entries(at(cases.addOntoBig)), { ...LP, lightRadius: (LP.lightRadius ?? 1) + 1 }, 3000, geo);
+  ok(r3.made === 0 && r3.dropped === 0, `lights: new light settings re-read every area but keep the sources (made ${r3.made}, dropped ${r3.dropped})`);
+  const r4 = lights.syncAreas(entries(at(base.filter((x) => x.id !== "s3"))), LP, 4000, geo);
+  ok(r4.dropped === 1 && r4.made === 0, `lights: a fire gone -> its light fades out (dropped ${r4.dropped})`);
+  ok(lights.slots.some((s) => s.dieAt === 4000) && lights.count === 3, "lights: the fading light stays until its fade-out is done");
+  const r5 = lights.syncAreas(entries(at(cases.paintElsewhere)), LP, 4100, geo);
+  ok(r5.made === 1, `lights: a new fire elsewhere gets a new light (made ${r5.made}); the faded one comes back for its own fire`);
 }
 
 /* C */

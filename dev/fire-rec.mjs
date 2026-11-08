@@ -54,14 +54,19 @@ export async function rec(name, ms, during = [], { fps = 60, pace = 34, base: ba
   Date.now = () => Math.floor(vt);
   // (each frame: wait for the field worker, then redraw at once - the layer's own redraw waits for a requestAnimationFrame and its
   // phase timer for real time, both late against the virtual clock: a stroke would show up seconds into its grow, a pop)
-  const FM = await import("/modules/moinen-maps/scripts/fire/fire.mjs");
+  const FM = await import("/modules/moinen-maps/scripts/fire/fire.mjs"), CK = await import("/modules/moinen-maps/scripts/shared-clock.mjs");
+  // (the shared clock's skew is refined by every scene update against Date.now: on the virtual clock that reads as a client falling
+  // behind, and each edit during the recording would jump the fire's time forward - held for the recording)
+  CK.holdClock?.(true);
   const settle = async () => {
     for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
     FM.draw();
     for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
     FM.draw();
   };
-  rc.start();
+  // (the recorder starts asynchronously: frames requested before it runs are lost - wait for it; and let the encoder take the last
+  // frames before stopping)
+  await new Promise((r) => { rc.onstart = r; rc.start(); setTimeout(r, 1000); }); await wait(250);
   try {
     for ( let i = 0; i < n; i++ ) {
       vt = base + i * dt;
@@ -70,7 +75,8 @@ export async function rec(name, ms, during = [], { fps = 60, pace = 34, base: ba
       T.update(perf0 + i * dt); canvas.app.renderer.render(canvas.app.stage); tr.requestFrame();
       await wait(pace);
     }
-  } finally { Date.now = realNow; T.maxFPS = mf; }
+  } finally { Date.now = realNow; T.maxFPS = mf; CK.holdClock?.(false); }
+  await wait(500);
   rc.stop(); await new Promise((r) => { rc.onstop = r; });
   const file = new File(parts, name, { type: "video/webm" });
   try { await FP().createDirectory("data", "mm-rec"); } catch { /* there */ }
