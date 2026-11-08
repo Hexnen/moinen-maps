@@ -192,14 +192,16 @@ void main() {
     float h[9];
     for ( int q = 0; q < 9; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
     vec2 a0 = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
+    // (the cheap tests first: the density gate and the dropout; the swarm and gust fields only for the slots left)
+    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    float age = tau / life;
+    if ( hu(key, int(floor(uTime * 15.0)), sd + 21) <= smoothstep(0.7, 1.0, age) ) { hide(); return; }    // dies by pixel dropout
+    if ( hu(key, int(floor(uTime * 15.0)), sd + 22) >= smoothstep(0.0, 0.15, age) ) { hide(); return; }   // and is born the same way
     float tm = uTime - tau + 0.5 * life;
     float Gm = clamp(gustAt(a0 / uOrigin.w, uWindDir, tm, uSeed), 0.0, 1.2);
     float sw = drift2a(a0 / 170.0, uWindDir * uWindK.x / 170.0, tm, 60.0, uSeed + 170);
     float pr = uVF.x + (1.0 - uVF.x) * clamp(1.6 * smoothstep(0.3, 0.7, sw) * (0.25 + 0.75 * Gm), 0.0, 1.0);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 || h[2] >= pr ) { hide(); return; }
-    float age = tau / life;
-    if ( hu(key, int(floor(uTime * 15.0)), sd + 21) <= smoothstep(0.7, 1.0, age) ) { hide(); return; }    // dies by pixel dropout
-    if ( hu(key, int(floor(uTime * 15.0)), sd + 22) >= smoothstep(0.0, 0.15, age) ) { hide(); return; }   // and is born the same way
+    if ( h[2] >= pr ) { hide(); return; }
     // depth, continuous 0 (far, dim) .. 1 (near, bright): the same wind seen with parallax, so far sparks cross the screen slower,
     // sway less and fly lower; the fragment makes them smaller, more transparent, cooler and duller
     float dp = hu(key, ty * 977 + ci, sd + 12), par = 0.4 + 0.6 * dp;

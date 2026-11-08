@@ -119,14 +119,17 @@ export function smoothPath(path) {
 }
 
 /** The point at distance s along a smoothed path. */
-export function along(P, s) {
+export function along(P, s) { return alongInto(P, s, [0, 0]); }
+/** along, written into `out` ([x, y]; no garbage: the debris asks for hundreds of base positions per frame). */
+export function alongInto(P, s, out) {
   const { pts, cum, L } = P;
-  if ( pts.length === 1 || L <= 0 ) return [pts[0][0], pts[0][1]];
+  if ( pts.length === 1 || L <= 0 ) { out[0] = pts[0][0]; out[1] = pts[0][1]; return out; }
   s = Math.min(L, Math.max(0, s));
   let lo = 0, hi = cum.length - 1;
   while ( hi - lo > 1 ) { const m = (lo + hi) >> 1; if ( cum[m] <= s ) lo = m; else hi = m; }
   const f = (s - cum[lo]) / ((cum[hi] - cum[lo]) || 1);
-  return [pts[lo][0] + (pts[hi][0] - pts[lo][0]) * f, pts[lo][1] + (pts[hi][1] - pts[lo][1]) * f];
+  out[0] = pts[lo][0] + (pts[hi][0] - pts[lo][0]) * f; out[1] = pts[lo][1] + (pts[hi][1] - pts[lo][1]) * f;
+  return out;
 }
 
 /** Distance the base would have gone at constant speed, from rest (accelerating over ACCEL_S): px after e seconds at v px / s. */
@@ -163,25 +166,35 @@ export function distAt(T, e, grid) {
 }
 
 /** The wander offset (scene px) at elapsed seconds e. */
-export function wanderAt(T, e, grid) {
+const wPh = (s, k) => ((s * (k + 3) * 2654435761) >>> 0) / 4294967296 * 6.2832;
+export function wanderAt(T, e, grid) { return wanderInto(T, e, grid, [0, 0]); }
+function wanderInto(T, e, grid, out) {
   const w = T.wander * grid, s = T.seed;
-  const ph = (k) => ((s * (k + 3) * 2654435761) >>> 0) / 4294967296 * 6.2832;
-  return [w * (0.6 * Math.sin(0.41 * e + ph(1)) + 0.3 * Math.sin(1.07 * e + ph(2)) + 0.1 * Math.sin(2.31 * e + ph(3))),
-    w * (0.6 * Math.sin(0.37 * e + ph(4)) + 0.3 * Math.sin(0.93 * e + ph(5)) + 0.1 * Math.sin(2.67 * e + ph(6)))];
+  out[0] = w * (0.6 * Math.sin(0.41 * e + wPh(s, 1)) + 0.3 * Math.sin(1.07 * e + wPh(s, 2)) + 0.1 * Math.sin(2.31 * e + wPh(s, 3)));
+  out[1] = w * (0.6 * Math.sin(0.37 * e + wPh(s, 4)) + 0.3 * Math.sin(0.93 * e + wPh(s, 5)) + 0.1 * Math.sin(2.67 * e + wPh(s, 6)));
+  return out;
 }
 
 /** THE BASE at shared ms `now`: [x, y] scene px (path + wander). Before t0 it waits at the start. */
-export function baseAt(T, now, grid) {
+export function baseAt(T, now, grid) { return baseInto(T, now, grid, [0, 0]); }
+const _wv = [0, 0];
+/** baseAt written into `out` ([x, y]; the same numbers, no garbage). */
+export function baseInto(T, now, grid, out) {
   const e = Math.max(0, (now - T.t0) / 1000), P = smoothPath(T.path);
-  const [x, y] = along(P, distAt(T, e, grid)), [wx, wy] = wanderAt(T, e, grid);
-  return [x + wx, y + wy];
+  alongInto(P, distAt(T, e, grid), out); wanderInto(T, e, grid, _wv);
+  out[0] = out[0] + _wv[0]; out[1] = out[1] + _wv[1];
+  return out;
 }
 
 /** The base's velocity (scene px / s) and its smoothed acceleration (px / s^2, over +-h s). */
-export function motionAt(T, now, grid, h = 0.4) {
-  const a = baseAt(T, now - 50, grid), b = baseAt(T, now + 50, grid);
-  const p0 = baseAt(T, now - h * 1000, grid), p1 = baseAt(T, now, grid), p2 = baseAt(T, now + h * 1000, grid);
-  return { vx: (b[0] - a[0]) / 0.1, vy: (b[1] - a[1]) / 0.1, ax: (p0[0] - 2 * p1[0] + p2[0]) / (h * h), ay: (p0[1] - 2 * p1[1] + p2[1]) / (h * h) };
+export function motionAt(T, now, grid, h = 0.4) { return motionInto(T, now, grid, h, {}); }
+const _ma = [0, 0], _mb = [0, 0], _m0 = [0, 0], _m1 = [0, 0], _m2 = [0, 0];
+/** motionAt written into `o` ({ vx, vy, ax, ay }). */
+export function motionInto(T, now, grid, h, o) {
+  const a = baseInto(T, now - 50, grid, _ma), b = baseInto(T, now + 50, grid, _mb);
+  const p0 = baseInto(T, now - h * 1000, grid, _m0), p1 = baseInto(T, now, grid, _m1), p2 = baseInto(T, now + h * 1000, grid, _m2);
+  o.vx = (b[0] - a[0]) / 0.1; o.vy = (b[1] - a[1]) / 0.1; o.ax = (p0[0] - 2 * p1[0] + p2[0]) / (h * h); o.ay = (p0[1] - 2 * p1[1] + p2[1]) / (h * h);
+  return o;
 }
 
 /** When it starts roping out (shared ms) or null: the GM sent it away, or it arrived ("ropeOut"). */
@@ -203,6 +216,12 @@ export function phase(T, now, grid) {
   const reach = smooth((fin - 0.2) / 0.55) * (1 - smooth((r - 0.45) / 0.5));
   const touch = smooth((fin - 0.62) / 0.38) * (1 - smooth(r / 0.5));
   return { p: formed * (1 - smooth(r)), cloud, reach, touch, rope: smooth(out / 0.6), gone: r >= 1, forming: fin < 1 };
+}
+/** phase(T, now, grid).touch alone (no object). */
+export function touchAt(T, now, grid) {
+  const fin = (now - T.t0) / FORM_MS;
+  const o = outAt(T, grid), r = o === null ? 0 : Math.max(0, (now - o) / ROPE_MS);
+  return smooth((fin - 0.62) / 0.38) * (1 - smooth(r / 0.5));
 }
 
 /** The level continuum s (0..2) at shared ms `now` (a change ramps over LEVEL_MS). */
@@ -255,6 +274,13 @@ export const TABLE = {
 };
 /** All of the table at s: { key: value }. */
 export function looks(s) { const o = {}; for ( const [k, t] of Object.entries(TABLE) ) o[k] = lv(t, s); return o; }
+const LOOKS = new Map();
+/** looks(s), kept per s (read only: a display asks every frame, and s only moves during a level change). */
+export function looksOf(s) {
+  let o = LOOKS.get(s);
+  if ( !o ) { if ( LOOKS.size > 64 ) LOOKS.clear(); o = Object.freeze(looks(s)); LOOKS.set(s, o); }
+  return o;
+}
 
 export { vortexWind, SPIN } from "../wind.mjs";
 

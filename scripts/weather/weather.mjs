@@ -1,7 +1,7 @@
 import { MODULE_ID, reducedMotion } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as M from "./model.mjs";
-import { WeatherDisplay } from "./display.mjs";
+import { WeatherDisplay, displayPrograms } from "./display.mjs";
 import { buildInfo, buildShelter, shelterShapes, layoutOf } from "./sources.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { perfMode } from "../perf-mode.mjs";
@@ -10,7 +10,7 @@ import * as D from "../destruction/destruction.mjs";
 import { view as viewOf, VIEW_FLAG, cleanView } from "../view-angle.mjs";
 import { setWindProvider, setVortexProvider, setFireWetProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
 import * as TM from "./tornado-model.mjs";
-import { TornadoDisplay } from "./tornado.mjs";
+import { TornadoDisplay, tornadoPrograms } from "./tornado.mjs";
 import { SteamLayer } from "./steam.mjs";
 import { guardInfo } from "./guard.mjs";
 
@@ -73,7 +73,60 @@ function onCanvasReady() {
   if ( !canvas.scene ) return;
   load();
   refresh();
+  prewarm();
   tell("loaded");
+}
+
+/**
+ * PRE-WARM: the weather's shader programs compiled in the background after the scene loads, so the frame a weather starts does not
+ * compile up to a dozen of them at once (the cold-start hitch: on a GPU process whose program cache misses, one link is 0.3-4 s of
+ * blocked main thread). With KHR_parallel_shader_compile each program is first compiled and linked off the main thread, exactly as
+ * PIXI will (the same sources, the same link, the same sorted attribute bindings and relink), polled once a frame; the browser's
+ * program cache then holds it, and PIXI's own compile of it, one per frame, is a cache hit of a few ms. Without the extension: one
+ * plain PIXI compile per idle callback. Programs already compiled are skipped; `CONFIG.moinenMaps.weatherPrewarm = false` turns it
+ * off. Only where the weather can show for this client; the lens's only where the scene's lens is on.
+ */
+let warmJob = 0;
+async function prewarm() {
+  const job = ++warmJob;
+  if ( globalThis.CONFIG?.moinenMaps?.weatherPrewarm === false || !shown() ) return;
+  const list = [...displayPrograms(), ...tornadoPrograms()];
+  if ( P.lens?.on ) try { list.push(...(await import("./lens.mjs")).lensPrograms()); } catch { /* compiled on first use */ }
+  const live = () => job === warmJob && canvas.ready;
+  const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
+  for ( const p of list ) {
+    if ( !live() ) return;
+    const r = canvas.app.renderer;
+    if ( p.glPrograms?.[r.CONTEXT_UID] ) continue;
+    try { await warmLink(r.gl, p, live, frame); } catch { /* compiled on first use */ }
+    if ( !live() || p.glPrograms?.[r.CONTEXT_UID] ) continue;
+    await frame();
+    if ( !live() ) return;
+    try { r.shader.bind(new PIXI.Shader(p, {}), true); r.shader.reset(); } catch { /* compiled on first use */ }
+  }
+}
+
+/** One program compiled and linked in the background, the way PIXI 7's generateProgram does it (its throwaway twin warms the cache). */
+async function warmLink(gl, p, live, frame) {
+  const ext = gl?.getExtension?.("KHR_parallel_shader_compile");
+  if ( !ext ) return new Promise((res) => (globalThis.requestIdleCallback ?? setTimeout)(() => res(), { timeout: 1000 }));
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const vs = sh(gl.VERTEX_SHADER, p.vertexSrc), fs = sh(gl.FRAGMENT_SHADER, p.fragmentSrc), prog = gl.createProgram();
+  const done = async () => { while ( live() && !gl.getProgramParameter(prog, ext.COMPLETION_STATUS_KHR) ) await frame(); return live(); };
+  try {
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if ( !(await done()) || !gl.getProgramParameter(prog, gl.LINK_STATUS) ) return;
+    if ( /^[ \t]*#[ \t]*version[ \t]+300[ \t]+es[ \t]*$/m.test(p.vertexSrc) ) return;
+    const names = [];
+    for ( let i = 0, n = gl.getProgramParameter(prog, gl.ACTIVE_ATTRIBUTES); i < n; i++ ) {
+      const a = gl.getActiveAttrib(prog, i);
+      if ( a && !a.name.startsWith("gl_") ) names.push(a.name);
+    }
+    names.sort((a, b) => (a > b ? 1 : -1)).forEach((name, i) => gl.bindAttribLocation(prog, i, name));
+    gl.linkProgram(prog);
+    await done();
+  } finally { gl.deleteProgram(prog); gl.deleteShader(vs); gl.deleteShader(fs); }
 }
 
 export function teardown() {
