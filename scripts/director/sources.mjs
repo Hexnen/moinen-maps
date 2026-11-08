@@ -104,7 +104,7 @@ function onZones(kind) {
   if ( !Z?.zones || !M?.zones ) return;
   const next = new Map(), first = zSnap === null;
   const derived = moduleApi.zones?.mapStates?.() ?? new Map();
-  const look = moduleApi.zones?.look?.() ?? {}, shown = (look.who ?? "all") === "all";
+  const look = moduleApi.zones?.look?.() ?? {}, shown = (look.who ?? "all") === "all", at2 = upTime(canvas.scene);
   for ( const z of Z.zones ) {
     const p = M.zones.get(z.id) ?? {}, key = zKey(z), before = zSnap?.get(key) ?? {};
     next.set(key, { ...p });
@@ -115,7 +115,7 @@ function onZones(kind) {
     const size = Math.sqrt(Math.max(0, z.area ?? 0)), name = zoneLabel(z.id);
     const fromMap = (k) => !!(derived instanceof Map ? derived.get(z.id) : derived?.[z.id])?.[k];
     const who = (k) => (fromMap(k) || shown ? "all" : "gm");
-    const add = (k, kind2, weight, cap) => emit({ kind: kind2, src: "zones", id: `z-${key}-${k}`, weight, box, x: at.x, y: at.y, who: who(k), caption: { key: cap, data: { zone: name } } });
+    const add = (k, kind2, weight, cap) => emit({ kind: kind2, src: "zones", id: `z-${key}-${k}-${at2}`, weight, box, x: at.x, y: at.y, who: who(k), caption: { key: cap, data: { zone: name } } });
     if ( p.wrecked && !before.wrecked ) add("wrecked", "quake", Dir.clamp(0.5 + 0.5 * Dir.sizeWeight(size, grid()), 0, 1), "Dir.cap.quake");
     if ( (p.fire ?? 0) > 0 && !(before.fire > 0) ) add("fire", "fire", 0.45, "Dir.cap.zoneFire");
     else if ( (p.fire ?? 0) > (before.fire ?? 0) + 1 ) add("fire", "fire", 0.3, "Dir.cap.zoneFireUp");
@@ -127,6 +127,8 @@ function onZones(kind) {
 
 /* ---------------------------------------------------------------- tokens: orbit, altitude, floors */
 
+/** The server's time of a document's last change, base 36 (the same on every client): makes an event id unique per change. */
+const upTime = (doc) => Math.round(Number(doc?._stats?.modifiedTime) || Date.now()).toString(36);
 function tokenBox(d) { const g = grid(), w = (d.width ?? 1) * g, h = (d.height ?? 1) * g; return { x0: d.x, y0: d.y, x1: d.x + w, y1: d.y + h }; }
 function onDeleteToken(doc, options) {
   if ( options?.mmOrbit?.dir !== "up" || doc.parent?.id !== canvas.scene?.id || !live() ) return;
@@ -145,13 +147,17 @@ function onUpdateToken(doc, changed) {
   const f = changed?.flags?.[MODULE_ID];
   if ( !f || doc.parent?.id !== canvas.scene?.id || !live() ) return;
   const b = tokenBox(doc), c = Dir.boxCentre(b), who = doc.hidden ? "gm" : "all", data = { token: doc.id, name: publicName(doc) };
+  // a removed key arrives as "-=key" or (v14) as a deletion operator object; the id carries the update's server time, the same on
+  // every client (two leaders dedupe) but new for every change (sky, ground, sky again all play)
+  const gone = (k) => `-=${k}` in f || (f[k] !== null && typeof f[k] === "object");
+  const at = upTime(doc);
   if ( "alt" in f || "-=alt" in f ) {
-    const alt = "-=alt" in f || !f.alt ? "ground" : f.alt;
-    if ( alt !== "orbit" && ALT_W[alt] !== undefined ) emit({ kind: "altitude", src: "altitude", id: `a-${doc.id}-${alt}`, weight: ALT_W[alt], box: b, x: c.x, y: c.y, tokens: [doc.id], who, caption: { key: `Dir.cap.alt_${alt}`, data } });
+    const alt = gone("alt") || !f.alt ? "ground" : String(f.alt);
+    if ( alt !== "orbit" && ALT_W[alt] !== undefined ) emit({ kind: "altitude", src: "altitude", id: `a-${doc.id}-${alt}-${at}`, weight: ALT_W[alt], box: b, x: c.x, y: c.y, tokens: [doc.id], who, caption: { key: `Dir.cap.alt_${alt}`, data } });
   }
   if ( "floor" in f || "-=floor" in f ) {
-    const n = "-=floor" in f ? 0 : Number(f.floor) || 0;
-    emit({ kind: "floor", src: "altitude", id: `fl-${doc.id}-${n}`, weight: 0.25, box: b, x: c.x, y: c.y, tokens: [doc.id], who, caption: { key: n ? "Dir.cap.floor" : "Dir.cap.floorGround", data: { ...data, n } } });
+    const n = gone("floor") ? 0 : Number(f.floor) || 0;
+    emit({ kind: "floor", src: "altitude", id: `fl-${doc.id}-${n}-${at}`, weight: 0.25, box: b, x: c.x, y: c.y, tokens: [doc.id], who, caption: { key: n ? "Dir.cap.floor" : "Dir.cap.floorGround", data: { ...data, n } } });
   }
 }
 
