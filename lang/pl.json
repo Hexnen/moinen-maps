@@ -1659,7 +1659,6 @@
   "MOINENMAPS.Orbit.chipLand": "Klik: sprowadź na tę mapę",
   "MOINENMAPS.Orbit.head": "Orbita",
   "MOINENMAPS.Orbit.headTip": "Kto jest na orbicie (ze wszystkich map). Klik: pokaż scenę Orbita. Klik w portret sprowadza ten token tutaj.",
-  "MOINENMAPS.Orbit.throw": "Wyrzuć na orbitę: token znika z tej mapy i pojawia się na scenie Orbita",
   "MOINENMAPS.Orbit.land": "Zejdź z orbity: wybierz mapę",
   "MOINENMAPS.Orbit.home": "mapa, z której przyleciał - ląduje tam, gdzie był",
   "MOINENMAPS.Orbit.active": "aktywna scena - ląduje przy górnej krawędzi",

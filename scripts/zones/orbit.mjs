@@ -321,23 +321,12 @@ function onTokenHUD(hud, html) {
   const root = html instanceof HTMLElement ? html : html?.[0];
   const t = hud.object, doc = t?.document;
   if ( !root || !doc?.isOwner || !enabled() ) return;
+  // going up is the altitude picker's "Orbit" (zones); only the way down needs a button of its own (the Orbit scene has no zones)
+  if ( !isOrbit(doc.parent) ) return;
   const col = root.querySelector(".col.left") ?? root.querySelector(".left");
   if ( !col ) return;
   const btn = document.createElement("button");
   btn.type = "button"; btn.className = "control-icon mm-orbit-btn";
-  if ( !isOrbit(doc.parent) ) {
-    btn.innerHTML = `<i class="fa-solid fa-rocket" inert></i>`;
-    btn.dataset.tooltip = T("throw");
-    btn.addEventListener("click", async (ev) => {
-      ev.preventDefault(); ev.stopPropagation();
-      const life = moduleApi.zones?.hasLifeSupport?.(t.actor);
-      if ( life === false ) ui.notifications.warn(game.i18n.format("MOINENMAPS.Zones.altNoLifeWarn", { name: t.name }));
-      hud.close();
-      await sendToOrbit(doc, { thrown: true });
-    });
-    col.append(btn);
-    return;
-  }
   // in orbit: come down - onto the map it came from (first), or any other map this user can see
   btn.innerHTML = `<i class="fa-solid fa-person-falling" inert></i>`;
   btn.dataset.tooltip = T("land");
