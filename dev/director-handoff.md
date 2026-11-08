@@ -183,3 +183,20 @@ Each agent appends: date, branch, what was done, verified vs not.
 - Arrival also on login / a new tab (`login` on by default); a reload of the same scene never replays.
 - Each client plays its arrival when its own load is done, not on the shared clock (syncing would hold fast clients for slow ones).
 - Lane 3 test world: a scene copy "street (dir-scene test)" with a "Denizen" token; Test Gracz 1's character set to that Denizen for the orbit test.
+
+## 2026-11-08 - director OFF by default (agent director-off), branch `director-off`
+
+### What changed
+- New world setting `directorOn` (Boolean, default **false**; a world that never touched it is off). `director.mjs`: `isOn()` / `setOn(on)` (GM; switching on also drops an old `over.enabled: false`), on `api.director` too; `status().on`.
+- While off: `emit`, `enqueue`, `pump`, `receive`, `start` do nothing (cut to included), so nothing is planned, sent or played; switching off ends shots on screen on every client (`skipHere`). The GM's local test shot (`preview`) still works. The destruction show (staged strokes + Action!) never depends on the switch.
+- GM bar: shown to a GM also while off, then only fold + power button and "Off"; power toggles the world switch. Workspace section: the "Director on" checkbox now writes `directorOn` (the old `enabled` value stays in core.mjs, untouched). Lang en+pl: `Dir.bar.stOff`, `Dir.bar.power`, hint `Dir.h.enabled` updated.
+- core.mjs untouched (merges with the sources branches).
+
+### Verified (lane 4, headless Chrome on CDP: GM 127.0.0.45 = Gamemaster, PLAYER 127.0.0.46 = Test Gracz 1)
+- Fresh world copy: director off. OFF: GM `cutTo` spot, `emit` destruction weight 1 and a real collapse paint -> the player got no shot and **no director socket message at all**; GM bar shows only fold + power + "Off".
+- Click on the bar's power -> on (setting true, all bar controls back); GM cut -> the player gets a take-over, camera goes and returns exactly, cleaned up. Switching off mid-shot ends the player's take ("skip"), camera returns, nothing left.
+- `cinematic-check` GM scenario 13/13 OFF and 13/13 ON; the player saw the show both times (start, strokes, impacts, end). `cinematic-fx-check` on the PLAYER 29/30 OFF and ON (same known "idle-bench rest" row as phase A). ON, right after the scenario, the director played its own destruction shots on the player (expected while on), so cinematic-fx-check must run with the player idle.
+- `node dev/run-all.mjs` 56/56, `node dev/lang-audit.mjs` clean.
+
+### Not verified
+- The workspace section checkbox clicked live (the bar's power button was; both call `setOn`). A world that stored `over.enabled: false` (handled in `setOn`, not exercised).

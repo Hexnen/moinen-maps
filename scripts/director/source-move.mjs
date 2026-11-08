@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Dir from "./core.mjs";
 import * as M from "./move-core.mjs";
-import { emit, isLeader, killed, publicName, registerPlay, myMode, R, HOOK } from "./director.mjs";
+import { emit, isLeader, killed, isOn, publicName, registerPlay, myMode, R, HOOK } from "./director.mjs";
 import { Screen } from "./stage.mjs";
 import { safeRect } from "./overlay.mjs";
 import { extendSection } from "../workspace/registry.mjs";
@@ -28,7 +28,7 @@ import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } fro
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 const F = (k, data) => game.i18n.format(`MOINENMAPS.${k}`, data);
 const grid = () => canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100;
-const live = () => !killed() && canvas?.ready && isLeader();
+const live = () => !killed() && isOn() && canvas?.ready && isLeader();
 const KEY = "dirMove";
 let setCache = null;
 export const moveSettings = () => (setCache ??= M.sanitizeSet((() => { try { return game.settings.get(MODULE_ID, KEY); } catch { return null; } })()));
@@ -216,7 +216,7 @@ export function showBanner({ kick, name = "", sub = "", tag = "", round = false,
   banner = { el, timer: setTimeout(() => { if ( banner?.el === el ) dropBanner(520); }, ms) };
   return el;
 }
-const bannerOn = () => !killed() && moveSettings().banner && myMode() !== "off" && canvas?.ready;
+const bannerOn = () => !killed() && isOn() && moveSettings().banner && myMode() !== "off" && canvas?.ready;
 
 /**
  * Another module that already announces it on this client: invincible-plus-ultra shows "Combat begins" / "Round N" (combatBannerEnabled)

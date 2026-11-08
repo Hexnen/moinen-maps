@@ -4,7 +4,7 @@ import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
 import * as SC from "./scene-core.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
-import { HOOK, R, gmState, myMode, killed, busy, holds } from "./director.mjs";
+import { HOOK, R, gmState, myMode, killed, isOn, busy, holds } from "./director.mjs";
 import { isOrbit } from "../zones/orbit.mjs";
 import * as Reveal from "../net/reveal.mjs";
 
@@ -303,7 +303,7 @@ function endArrival(why, { quiet = false } = {}) {
 function ctxFor(scene, { forced = false } = {}) {
   const prev = lastSeen(), mode = myMode();
   return {
-    killed: killed(), settings: settings(), sceneOff: SC.cleanSceneFlag(scene?.getFlag?.(MODULE_ID, FLAG)).off, mode,
+    killed: killed() || (!forced && !isOn()), settings: settings(), sceneOff: SC.cleanSceneFlag(scene?.getFlag?.(MODULE_ID, FLAG)).off, mode,
     fresh: prev !== scene?.id, first: pageFirst && !prev, busy: busy({ ignoreHolds: true }), screen: !!Screen.owner && Screen.owner !== "arrival",
     k: Dir.intensity(Number(setting("dirIntensity")), Number(gmState().k)), forced
   };
@@ -313,7 +313,7 @@ function onTearDown(_c, options = {}) {
   endArrival("scene");
   const next = options?.nextScene ?? null, mode = myMode();
   const nextOff = SC.cleanSceneFlag(next?.getFlag?.(MODULE_ID, FLAG)).off;
-  if ( SC.dipOnTearDown({ killed: killed(), settings: settings(), mode, from: canvas.scene?.id, to: next?.id, nextOff, native: next ? nativeTransition(next) : false }) ) veilIn({ ms: 280 });
+  if ( SC.dipOnTearDown({ killed: killed() || !isOn(), settings: settings(), mode, from: canvas.scene?.id, to: next?.id, nextOff, native: next ? nativeTransition(next) : false }) ) veilIn({ ms: 280 });
   else if ( veil ) veilOut(0);
 }
 /** The first draw of the page (a login, a reload, a new tab): the board is black anyway; the veil starts opaque so nothing flashes. */
@@ -361,6 +361,9 @@ export function registerSceneSource() {
   Hooks.on("createToken", onCreateToken);
   // someone else takes the screen: the destruction show, or a director take-over (a forced cut: holds make the others soft)
   Hooks.on("moinenMapsCinematic", (kind) => { if ( kind === "start" && A ) endArrival("show"); });
-  Hooks.on(HOOK, (kind, data) => { if ( kind === "shot" && data?.form === "take" && A ) endArrival("shot"); });
+  Hooks.on(HOOK, (kind, data) => {
+    if ( kind === "shot" && data?.form === "take" && A ) endArrival("shot");
+    else if ( kind === "state" && A && !isOn() && !A.forced ) cut();                                  // (the GM switched the director off)
+  });
   if ( moduleApi.director ) moduleApi.director.arrival = arrivalApi;
 }

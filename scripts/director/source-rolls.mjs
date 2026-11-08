@@ -1,5 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
-import { emit, isLeader, killed, publicName, registerCue } from "./director.mjs";
+import { emit, isLeader, killed, isOn, publicName, registerCue } from "./director.mjs";
 import { audience, rollFacts, rollEvent, damageFacts, damageEvent } from "./rolls-core.mjs";
 
 /**
@@ -25,7 +25,7 @@ import { audience, rollFacts, rollEvent, damageFacts, damageEvent } from "./roll
 
 const SYSTEM = "invincible";
 const FLAG = "dr";
-const live = () => !killed() && canvas?.ready && game.system?.id === SYSTEM && isLeader();
+const live = () => !killed() && isOn() && canvas?.ready && game.system?.id === SYSTEM && isLeader();
 const grid = () => canvas?.dimensions?.size ?? 100;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DSN_MAX = 9000;                    // ms: the dice of a roll never hold a shot's result longer than this
@@ -46,7 +46,7 @@ function attackerOf(speaker, actor) {
 }
 function onPreCreate(message) {
   try {
-    if ( killed() || game.system?.id !== SYSTEM || !canvas?.ready ) return;
+    if ( killed() || !isOn() || game.system?.id !== SYSTEM || !canvas?.ready ) return;
     const roll = message.rolls?.[0], f = rollFacts(roll);
     if ( !f ) return;
     const actor = message.speakerActor ?? null;

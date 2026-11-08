@@ -33,13 +33,17 @@ const CSS = `
 #mm-dir-bar input[type=range]:focus-visible { box-shadow: 0 0 0 2px rgba(233,196,106,0.45); }
 #mm-dir-bar .mm-dir-k { min-width: 2.4em; padding-right: 6px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.8; }
 #mm-dir-bar.is-folded > :not(.mm-dir-keep) { display: none; }
+#mm-dir-bar.is-off > :not(.mm-dir-keep):not(.mm-dir-st) { display: none; }
+#mm-dir-bar.is-off { border-color: rgba(255,255,255,0.14); }
+#mm-dir-bar.is-off .mm-dir-st { opacity: 0.7; }
 `;
 let el = null, picking = null, hookId = null, hotHook = null, folded = false;
 
 function ensureStyle() { if ( document.querySelector("style[data-mm-dir-bar]") ) return; const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmDirBar = ""; document.head.appendChild(s); }
 const btn = (act, icon, key, extra = "") => `<button type="button" data-act="${act}" aria-label="${esc(T(key))}" data-tooltip="${esc(T(key))}"${extra}><i class="${icon}" inert></i></button>`;
 
-function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed() && D.R().enabled; }
+// (shown to a GM also while the director is off: then it is the power button and "Off" only)
+function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed(); }
 
 export function syncBar() {
   if ( !wanted() ) { removeBar(); return; }
@@ -52,7 +56,7 @@ function build() {
   try { folded = !!game.settings.get(MODULE_ID, "dirBarFolded"); } catch { folded = false; }
   el = document.createElement("div");
   el.id = "mm-dir-bar"; el.setAttribute("role", "toolbar"); el.setAttribute("aria-label", T("Dir.bar.title"));
-  el.innerHTML = `${btn("fold", "fa-solid fa-clapperboard", "Dir.bar.fold", ' class="mm-dir-keep"')}
+  el.innerHTML = `${btn("fold", "fa-solid fa-clapperboard", "Dir.bar.fold", ' class="mm-dir-keep"')}${btn("power", "fa-solid fa-power-off", "Dir.bar.power", ' class="mm-dir-keep" aria-pressed="false"')}
     <span class="mm-dir-st" role="status" aria-live="polite"><span class="mm-dir-dot"></span><span data-st-text></span></span>
     <span class="mm-dir-sep"></span>
     ${btn("pause", "fa-solid fa-pause", "Dir.bar.pause")}${btn("skip", "fa-solid fa-forward-step", "Dir.bar.skip")}
@@ -98,6 +102,9 @@ function place() {
 function update() {
   if ( !el ) return;
   const s = D.status();
+  el.classList.toggle("is-off", !s.on);
+  const pw = el.querySelector("[data-act=power]"); pw.setAttribute("aria-pressed", String(!!s.on));
+  if ( !s.on ) { el.dataset.st = "off"; const t = el.querySelector("[data-st-text]"), off = T("Dir.bar.stOff"); if ( t.textContent !== off ) t.textContent = off; return; }
   const st = s.show ? "show" : s.take ? "take" : s.soft.length ? "soft" : s.paused ? "paused" : "idle";
   el.dataset.st = st;
   const what = s.last?.caption?.title ? ` · ${s.last.caption.title}` : "";
@@ -121,6 +128,7 @@ function showK(v) {
 function onClick(ev) {
   const a = ev.target.closest("[data-act]")?.dataset.act; if ( !a ) return;
   if ( a === "fold" ) { folded = !folded; el.classList.toggle("is-folded", folded); try { game.settings.set(MODULE_ID, "dirBarFolded", folded); } catch { /* not registered */ } place(); return; }
+  if ( a === "power" ) { D.setOn(!D.isOn()); return; }
   if ( a === "pause" ) D.setPaused(!D.status().paused);
   else if ( a === "skip" ) D.skip();
   else if ( a === "cutLast" ) { if ( !D.cutTo("last") ) ui.notifications?.info(T("Dir.bar.noLast")); }

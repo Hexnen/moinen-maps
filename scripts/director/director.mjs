@@ -24,6 +24,8 @@ import * as Ov from "./overlay.mjs";
  * Hook "moinenMapsDirector" (kind, data): "event" (leader: an event entered the queue), "shot" (a client starts a shot: { shot, form }),
  * "end" ({ shot, form, why }), "skip", "state". Other modules may also CALL it: Hooks.callAll("moinenMapsDirector", "emit", event).
  * Kill switch: CONFIG.moinenMaps.noDirector = true (nothing is planned or played; the destruction show is not affected).
+ * World switch "directorOn" (the GM: workspace section + bar), OFF by default (also in worlds that never touched it): while off nothing
+ * is planned, sent or played (cut to included); only the GM's local test shot works. The destruction show never depends on it.
  */
 export const HOOK = "moinenMapsDirector";
 const CHANNEL = `module.${MODULE_ID}`;
@@ -40,6 +42,14 @@ export function registerCue(name, fn) { if ( typeof name === "string" && typeof 
 
 export const killed = () => !!globalThis.CONFIG?.moinenMaps?.noDirector;
 const setting = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
+/** The GM's world switch (default off). */
+export const isOn = () => setting("directorOn") === true;
+/** GM: switch the director on / off for the world (on also drops an old "enabled: false" override so on means on). */
+export async function setOn(on) {
+  if ( !game.user.isGM ) return;
+  if ( on ) { const b = Dir.sanitize(setting("director")); if ( b.over.enabled === false ) { delete b.over.enabled; await game.settings.set(MODULE_ID, "director", b); } }
+  await game.settings.set(MODULE_ID, "directorOn", !!on);
+}
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 
 /* ---------------------------------------------------------------- settings */
@@ -47,6 +57,7 @@ const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 function registerSettings() {
   const D = (k) => `MOINENMAPS.Dir.set.${k}`;
   game.settings.register(MODULE_ID, "director", { scope: "world", config: false, type: Object, default: { v: 1, preset: "standard", over: {} }, onChange: () => { rCache = null; tell("state"); } });
+  game.settings.register(MODULE_ID, "directorOn", { scope: "world", config: false, type: Boolean, default: false, onChange: (v) => { if ( !v ) skipHere(null); tell("state"); } });
   game.settings.register(MODULE_ID, "directorGm", { scope: "world", config: false, type: Object, default: { paused: false, k: 1 }, onChange: () => tell("state") });
   game.settings.register(MODULE_ID, "dirMode", {
     name: D("mode"), hint: D("modeHint"), scope: "client", config: true, type: String, default: "auto",
@@ -92,7 +103,7 @@ const grid = () => canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100;
  * { key, data }), who ("all" | "gm"), force }. The leader queues it; another client sends it to the leader. Returns the normalised event.
  */
 export function emit(e) {
-  if ( killed() || !canvas?.scene ) return null;
+  if ( killed() || !isOn() || !canvas?.scene ) return null;
   const ev = Dir.normEvent({ scene: canvas.scene.id, ...e }, sharedNow());
   if ( !ev ) return null;
   if ( isLeader() ) enqueue(ev);
@@ -100,7 +111,7 @@ export function emit(e) {
   return ev;
 }
 function enqueue(ev) {
-  if ( killed() ) return;
+  if ( killed() || !isOn() ) return;
   const r = R();
   if ( !ev.force && (!r.enabled || !Dir.sourceOn(r, ev.kind)) ) return;
   if ( ev.who === "gm" && !game.users.some((u) => u.active && u.isGM) ) return;   // a GM-only thing with no GM online: nobody may watch it
@@ -119,7 +130,7 @@ function schedulePump(ms = null) {
 }
 function pump() {
   pumpTimer = 0;
-  if ( !isLeader() || killed() ) { queue.clear(); return; }
+  if ( !isLeader() || killed() || !isOn() ) { queue.clear(); return; }
   const now = sharedNow(), st = gmState();
   if ( showOn ) {                                          // the show owns the screen: forced cuts wait for it too; the rest goes stale
     queue.buckets = queue.buckets.filter((b) => now - b.t0 <= R().stale);
@@ -171,7 +182,7 @@ const waiting = new Map();               // shot id -> timer until its start
 let last = null;                         // the last shot seen here (status)
 
 function receive(shot) {
-  if ( killed() || !Dir.validShot(shot) || seen.has(shot.id) || waiting.has(shot.id) ) return;
+  if ( killed() || !isOn() || !Dir.validShot(shot) || seen.has(shot.id) || waiting.has(shot.id) ) return;
   if ( !canvas?.ready || shot.scene !== canvas.scene?.id ) return;
   const now = sharedNow();
   if ( now > Dir.shotEnd(shot) - 200 ) return;
@@ -241,7 +252,7 @@ function ctxOf(shot) {
 }
 
 function start(shot) {
-  if ( killed() || !canvas?.ready || shot.scene !== canvas.scene?.id ) return;
+  if ( killed() || !isOn() || !canvas?.ready || shot.scene !== canvas.scene?.id ) return;
   seen.add(shot.id); if ( seen.size > 200 ) seen.delete(seen.values().next().value);
   const ctx = ctxOf(shot);
   let form = Dir.decide(shot, ctx);
@@ -531,7 +542,7 @@ const tell = (kind) => { try { Hooks.callAll(HOOK, kind, status()); } catch { /*
 /** What the director is doing on this client (the GM bar, the checks). */
 export function status() {
   return {
-    killed: killed(), leader: leaderId(), isLeader: isLeader(), enabled: R().enabled, paused: gmState().paused, k: gmState().k, mode: myMode(), show: showOn,
+    killed: killed(), on: isOn(), leader: leaderId(), isLeader: isLeader(), enabled: R().enabled, paused: gmState().paused, k: gmState().k, mode: myMode(), show: showOn,
     take: cur ? { id: cur.shot.id, kind: cur.shot.kind, taken: !!cur.taken } : null, soft: [...softs.keys()], waiting: [...waiting.keys()], last,
     queued: queue.buckets.length, screen: Screen.owner
   };
@@ -540,7 +551,7 @@ export function status() {
 /* ---------------------------------------------------------------- wiring */
 
 export const directorApi = {
-  emit, cutTo, skip, preview, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
+  emit, cutTo, skip, preview, setOn, isOn, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
   /** For the checks: the overlays, the queue. */
   _debug: () => ({ overlay: Ov.debug(), queue: { buckets: queue.buckets.length, busyUntil: queue.busyUntil, history: queue.history.slice(-6) }, cur: cur ? { id: cur.shot.id, timers: cur.timers.length } : null, screen: Screen.debug?.() ?? null }),
   _receive: receive
