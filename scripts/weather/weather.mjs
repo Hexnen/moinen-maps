@@ -99,7 +99,7 @@ export function refresh() {
   clearTimeout(timer); timer = 0;
   if ( !canvas.ready || !canvas.scene ) return;
   const now = sharedNow(), st = shown() ? clientState(now) : null;
-  const live = !!st && (Object.keys(st.fx).length > 0 || st.wet > 0.002);
+  const live = !!st && (Object.keys(st.fx).length > 0 || st.wet > 0.002 || st.cover > 0.002);
   lastState = st;
   if ( !live ) {
     if ( display ) { display.destroy(); display = null; }
@@ -124,7 +124,7 @@ function step() {
   if ( !display ) return;
   const st = clientState();
   lastState = st;
-  if ( !Object.keys(st.fx).length && st.wet <= 0.002 && st.steady ) { refresh(); return; }
+  if ( !Object.keys(st.fx).length && st.wet <= 0.002 && st.cover <= 0.002 && st.steady ) { refresh(); return; }
   display.setState(st);
   syncLens(st);
   const s1 = Math.floor(Date.now() / 1000);
@@ -138,7 +138,7 @@ let LensClass = null;
 /** Lazily loaded (lens.mjs): a client without lens effects never loads its shaders. */
 async function lensClass() { return LensClass ??= (await import("./lens.mjs")).WeatherLens; }
 function syncLens(st) {
-  const want = !!st && P.lens.on && st.lensCap > 0 && Object.keys(st.fx).some((e) => M.TABLES[e]?.lens);
+  const want = !!st && P.lens.on && st.lensCap > 0 && Object.keys(st.fx).some((e) => M.TABLES[e]?.lens && (e !== "embers" || P.lens.heat));
   if ( !want ) { if ( lens ) { lens.destroy(); lens = null; } return; }
   if ( !lens ) {
     if ( lens === null && !LensClass ) { lens = false; lensClass().then(() => { lens = null; if ( display ) syncLens(lastState); }); return; }
@@ -210,7 +210,7 @@ export function dryNow() {
   const now = Math.round(sharedNow());
   const started = P.keys.filter((k) => k.t <= now), later = P.keys.filter((k) => k.t > now), keep = started[started.length - 1];
   const from = keep ? M.stateAt(P, keep.t) : M.stateAt(P, now);
-  P = M.cleanParams({ ...P, keys: [...(keep ? [keep] : []), ...later], base: { t: now, fx: from.fx, wind: from.wind, wet: 0 } });
+  P = M.cleanParams({ ...P, keys: [...(keep ? [keep] : []), ...later], base: { t: now, fx: from.fx, wind: from.wind, wet: 0, cover: 0 } });
   refresh(); tell("changed");
   save();
 }

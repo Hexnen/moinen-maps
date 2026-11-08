@@ -47,7 +47,12 @@ uniform vec4 uRainA;         // bead density, biggest bead radius, runner rate, 
 uniform float uFilm;
 uniform vec3 uWind;          // unit direction (x, y), strength 0..1
 uniform float uSlant;        // runner slant (x per y) from the wind
-uniform float uInt[121];     // rain intensity over the last 10 s (12 Hz, oldest first)
+uniform float uG[121];       // the gust envelope over the last 10 s (12 Hz, oldest first): rain intensity, sand waves, fire gusts
+uniform vec4 uSnowL;         // frost reach, frost breathing, crystals per lens-area, presence
+uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, presence
+uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts
+uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
+uniform vec4 uHeatL;         // glow, flecks per area, presence, -
 uniform sampler2D uBg;
 uniform vec4 uMap;           // lens px -> scene background uv: uv = p * uMap.xy + uMap.zw
 uniform float uHasBg;
@@ -76,11 +81,16 @@ float dens(vec2 p) {
   float pat = fbm2(vec2(p.x / 70.0, p.y / 50.0), uSeed + 55);
   return clamp(0.30 + 0.42 * edge + 0.30 * side + 0.9 * (pat - 0.5), 0.04, 1.0);
 }
-// rain intensity tau seconds ago
-float intensityAgo(float tau) {
+// the gust envelope tau seconds ago, and the rain intensity it gives
+float gAgo(float tau) {
   float f = clamp((PERIOD - tau) * 12.0, 0.0, 119.999);
   int i = int(f);
-  return mix(uInt[i], uInt[i + 1], f - float(i));
+  return mix(uG[i], uG[i + 1], f - float(i));
+}
+float intensityAgo(float tau) { return 0.7 + 0.35 * (clamp(gAgo(tau), 0.0, 1.1) - 0.4); }
+float fbm3(vec2 p, int s) {
+  vec2 q = mat2(0.9563, 0.2924, -0.2924, 0.9563) * p * 2.17 + vec2(17.3, -9.1), r = mat2(0.7547, 0.6561, -0.6561, 0.7547) * p * 4.71 + vec2(-31.7, 5.3);
+  return (vnoise(p, s) + 0.5 * vnoise(q, s + 1) + 0.25 * vnoise(r, s + 2)) / 1.75;
 }
 // one life cycle of a hashed thing: k cycles per 10 s, absolute cycle index c (no short loop), age tau
 void cycle(int kx, int ky, int s, float kk, out float L, out int c, out float tau) {
@@ -162,8 +172,234 @@ void put(float s, float R, vec2 c) {
   sdf = smin(sdf, s, 1.3);
 }
 
+// ---------------------------------------------------------------- composing on the glass: the frame becomes dst x K + A
+vec3 A_ = vec3(0.0); float K_ = 1.0;
+void over(float k, vec3 a) { A_ = A_ * k + a; K_ *= k; }
+// items scattered by cells of C lens px (count per reference lens area 427 x 240: the same density on any screen and DPR)
+const float REF = 102480.0;
+float slotsOf(float perRef, float C) { return perRef * C * C / REF; }
+bool slotOn(int j, float e, ivec2 ce, int sd) {
+  if ( float(j) >= ceil(e) ) return false;
+  return float(j) < floor(e) || hu(ce.x * 7 + j, ce.y, sd) < fract(e);
+}
+// one cycle among the given counts per 10 s (absolute cycle index: no short loop)
+void cyc4(int kx, int ky, int sd, vec4 ks, out float L, out int c, out float tau) {
+  float h = hu(kx, ky, sd);
+  float kk = h < 0.25 ? ks.x : h < 0.5 ? ks.y : h < 0.75 ? ks.z : ks.w;
+  cycle(kx, ky, sd, kk, L, c, tau);
+}
+// the wind's along / across coordinates of p (0..1 across the glass along the wind: 0 = the side the wind comes from)
+float upwind(vec2 p) { return dot(p / uLens - 0.5, uWind.xy) + 0.5; }
+bool onSeg(vec2 q, vec2 a, vec2 d, float ln, float w) {
+  vec2 e = q - a; float t = dot(e, d);
+  return t >= -0.5 && t <= ln + 0.5 && abs(e.x * d.y - e.y * d.x) < w;
+}
+
+// ---------------- SNOW: frost from the edges (cells of a jittered 13-px grid), crystals landing and melting into beads
+float frostProg() {
+  return (uSnowL.x + uSnowL.y * sin(PI2 * uT / 30.0) + 0.012 * sin(PI2 * uT / 10.0 + 1.0)) * uSnowL.w;
+}
+// the frost at q: reach - progress (< 0: frosted), the cell hash, the crack (the cells' borders)
+float frostAt(vec2 q, float prog, out float fid, out bool crack) {
+  ivec2 c0 = ivec2(floor(q / 13.0));
+  float d1 = 1e9, d2 = 1e9; ivec2 id = c0;
+  for ( int j = -1; j <= 1; j++ ) for ( int i = -1; i <= 1; i++ ) {
+    ivec2 c = c0 + ivec2(i, j);
+    vec2 sp = vec2(c) * 13.0 + vec2(hu(c.x * 13, c.y * 13, 401), hu(c.x * 13, c.y * 13 + 1, 402)) * 12.0;
+    float d = length(q - sp);
+    if ( d < d1 ) { d2 = d1; d1 = d; id = c; } else d2 = min(d2, d);
+  }
+  fid = hu(id.x, id.y, 403);
+  crack = d2 - d1 < 1.1;
+  float ex = min(q.x, uLens.x - q.x) / uLens.x, ey = min(q.y, uLens.y - q.y) / uLens.y;
+  float reach = 0.55 * min(ex * 1.6, ey) + 0.45 * length(vec2(ex, ey)) + fid * 0.07 + (fbm3(vec2(q.x / 37.0, q.y / 29.0), 777) - 0.5) * 0.09
+    + (hu(int(floor(q.x)), int(floor(q.y)), 404) - 0.5) * 0.012;
+  return reach - prog;
+}
+void frost(vec2 p) {
+  float prog = frostProg();
+  if ( prog <= 0.0 ) return;
+  float fid; bool crack;
+  float r = frostAt(p, prog, fid, crack);
+  if ( r < 0.0 ) {
+    float tn = floor(hu(int(fid * 1e6), 1, 405) * 3.0);
+    vec3 ice = tn < 0.5 ? vec3(0.72, 0.80, 0.90) : tn < 1.5 ? vec3(0.82, 0.88, 0.95) : vec3(0.90, 0.94, 0.99);
+    if ( crack ) ice = vec3(0.97, 0.99, 1.0);
+    float dn = clamp(-r / 0.08, 0.0, 1.0), K = dn > 0.66 ? 0.72 : dn > 0.33 ? 0.52 : 0.32;
+    over(1.0 - K, ice * K * uLight);
+    if ( hu(int(floor(p.x)), int(floor(p.y)), 900 + int(floor(uT * 5.0))) < 0.004 ) over(0.0, vec3(uLight));   // a glint
+  } else if ( crack && r < 0.035 && hu(int(fid * 1e6), 2, 406) < 0.6 ) over(0.4, 0.6 * vec3(0.9, 0.95, 1.0) * uLight);   // feathers ahead
+}
+// crystals (cells of 64 px, 2 slots), drawn over everything; their melt beads go into the drop field
+int starHit = 0;   // 0 none, 1 halo, 2 arm, 3 core
+void crystals(vec2 p) {
+  float e = slotsOf(uSnowL.z * uSnowL.w, 64.0);
+  if ( e <= 0.0 ) return;
+  ivec2 ce = ivec2(floor(p / 64.0));
+  float prog = frostProg();
+  for ( int j = 0; j < 3; j++ ) {
+    if ( !slotOn(j, e, ce, 420) ) continue;
+    int key = (ce.x * 64 + ce.y) * 4 + j;
+    float L, tau; int c;
+    cyc4(key, 0, 410, vec4(1.0, 2.0, 2.0, 3.0), L, c, tau);
+    float h[6];
+    for ( int q = 0; q < 6; q++ ) h[q] = hu(key * 31 + c, 1, 411 + q);
+    vec2 x = vec2(ce) * 64.0 + vec2(10.0 + 44.0 * h[0], 10.0 + 38.0 * h[1]);
+    float R0 = 3.0 + 4.5 * h[2], hold = 0.5 + 1.4 * h[3];
+    vec2 d = p - x;
+    if ( abs(d.x) > 10.0 || d.y < -10.0 || d.y > 16.0 ) continue;
+    float fid; bool cr;
+    bool inf = prog > 0.0 && frostAt(x, prog, fid, cr) < 0.0;
+    float melt = inf ? 0.0 : ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
+    // lands: grows from a speck over 0.3 s (a little overshoot), then holds; melts or fades by shrinking
+    float land = ss(0.0, 0.3, tau) * (1.0 + 0.15 * (1.0 - ss(0.3, 0.6, tau)));
+    float R = R0 * land * (1.0 - melt) * (1.0 - gone);
+    if ( R > 0.4 && floor(p) - floor(x) == clamp(floor(p) - floor(x), 0.0, 1.0) ) { starHit = 3; continue; }
+    if ( R > 0.8 ) {
+      float m = 9.0;
+      for ( int a = 0; a < 6; a++ ) {
+        float ang = h[4] * 1.05 + float(a) * 1.0471976;
+        vec2 dir = vec2(cos(ang), sin(ang));
+        float t = dot(d, dir);
+        if ( t >= -0.5 && t <= R + 0.5 ) m = min(m, abs(d.x * dir.y - d.y * dir.x));
+        if ( R >= 3.0 ) for ( int sd = -1; sd <= 1; sd += 2 ) {
+          vec2 b0 = x + dir * R * 0.55, bd = vec2(cos(ang + float(sd) * 1.05), sin(ang + float(sd) * 1.05));
+          vec2 e2 = p - b0; float t2 = dot(e2, bd);
+          if ( t2 >= -0.5 && t2 <= R * 0.35 + 0.5 ) m = min(m, abs(e2.x * bd.y - e2.y * bd.x));
+        }
+      }
+      if ( m < 0.55 ) starHit = max(starHit, 2); else if ( m < 1.5 ) starHit = max(starHit, 1);
+    }
+    float rb = (0.9 + 1.6 * h[5]) * melt * (1.0 - gone);
+    if ( rb >= 0.35 ) {
+      vec2 b = x + vec2(0.0, 0.6 * max(0.0, tau - hold - 1.2) * melt);
+      if ( rb < 1.2 ) b = floor(b) + 0.5;
+      float RR, s = blob(p, b, rb, 0.1, h[4] * 6.0, 0.06, h[3] * 6.0, 1.0, RR);
+      put(s, RR, b);
+    }
+  }
+}
+
+// ---------------- SAND: a deposit film (wind side, lower edge), scratches catching the light, grit impacts (flash -> chipped pit)
+void sandLens(vec2 p) {
+  float pr = uSandL.w; if ( pr <= 0.0 ) return;
+  vec2 wd = uWind.xy, q = p;
+  float fr = clamp(gAgo(0.0), 0.0, 1.0);
+  float side = 1.0 - clamp(upwind(p) / 0.45, 0.0, 1.0);
+  float al = dot(q, wd), ac = -q.x * wd.y + q.y * wd.x;
+  float dep = clamp(0.55 * side + 0.65 * ss(0.55, 1.0, p.y / uLens.y) + 0.35 * (fbm3(vec2(al / 18.0, ac / 9.0), 530) - 0.5)
+    + 0.25 * (fbm2(vec2(al / 60.0, ac / 30.0), 531) - 0.5), 0.0, 1.0);
+  float lvl = dep * (0.30 + 0.25 * clamp(gAgo(1.5), 0.0, 1.0)) * uSandL.x, gr = hu(int(floor(p.x)), int(floor(p.y)), 532);
+  if ( gr < lvl * 0.55 ) over(0.45, 0.55 * vec3(0.80, 0.66, 0.44) * uLight);
+  else if ( gr < lvl ) over(0.72, 0.28 * vec3(0.84, 0.70, 0.48) * uLight);
+  // scratches (cells of 64, 2 slots; along the wind)
+  float es = slotsOf(uSandL.y, 64.0), wa = atan(wd.y, wd.x);
+  ivec2 ce = ivec2(floor(p / 64.0));
+  for ( int j = 0; j < 3; j++ ) {
+    if ( !slotOn(j, es, ce, 506) ) continue;
+    int key = (ce.x * 64 + ce.y) * 4 + j;
+    if ( hu(key, 5, 505) > (0.3 + 0.6 * fr) ) continue;
+    vec2 a = vec2(ce) * 64.0 + 16.0 + 32.0 * vec2(hu(key, 1, 501), hu(key, 2, 502));
+    float ln = 4.0 + 12.0 * hu(key, 3, 503), an = wa + (hu(key, 4, 504) - 0.5) * 0.6;
+    if ( onSeg(p, a, vec2(cos(an), sin(an)), ln, 0.5) ) { over(0.55, 0.45 * vec3(1.0, 0.93, 0.78) * uLight); break; }
+  }
+  // impacts (cells of 16, interior positions)
+  float ei = slotsOf(uSandL.z * pr, 16.0);
+  ivec2 ci = ivec2(floor(p / 16.0));
+  if ( slotOn(0, ei, ci, 525) ) {
+    int key = ci.x * 4096 + ci.y;
+    float L, tau; int c;
+    cyc4(key, 0, 520, vec4(2.0, 3.0, 4.0, 5.0), L, c, tau);
+    int kc = key * 17 + c;
+    if ( hu(kc, 1, 521) <= 0.08 + 0.85 * clamp(gAgo(tau), 0.0, 1.0) ) {
+      vec2 x = vec2(ci) * 16.0 + 2.0 + floor(12.0 * vec2(hu(kc, 2, 522), hu(kc, 3, 523)));
+      vec2 d = floor(p) - x;
+      if ( tau < 1.0 / 12.0 ) { if ( (d.x == 0.0 && abs(d.y) <= 1.0) || (d.y == 0.0 && abs(d.x) <= 1.0) ) over(0.0, vec3(1.0, 0.98, 0.88) * uLight); }
+      else if ( tau < 2.0 / 12.0 ) { if ( d == vec2(0.0) ) over(0.0, vec3(1.0, 0.92, 0.70) * uLight); }
+      else if ( tau < L - 0.4 && hu(kc, 4, 524) < 0.6 ) {
+        if ( d == vec2(0.0) ) over(0.5, vec3(0.0));
+        else if ( d == vec2(1.0, -1.0) ) over(0.4, 0.6 * vec3(1.0, 0.95, 0.80) * uLight);
+      }
+    }
+  }
+}
+
+// ---------------- DUST (ambient): veiling glare + flare ghosts from a low sun, dust discs and specks on the glass, a smudge
+void dustLens(vec2 p) {
+  float pr = uDustL2.z; if ( pr <= 0.0 ) return;
+  float sc = uLens.x / 427.0, w = PI2 / 40.0;
+  float glare = (0.55 + 0.3 * sin(w * uT - 1.0) + 0.1 * sin(2.0 * w * uT + 0.7)) * pr;
+  vec2 sun = (vec2(-40.0, -30.0) + vec2(6.0 * sin(w * uT), 4.0 * sin(w * uT + 1.2))) * sc;
+  float d = length(vec2(p.x - sun.x, (p.y - sun.y) * 1.1)) / (260.0 * sc) + 0.06 * (fbm2(p / (40.0 * sc), 607) - 0.5);
+  float lv = (d < 0.45 * glare + 0.1 ? 1.0 : 0.0) + (d < 0.30 * glare + 0.05 ? 1.0 : 0.0) + (d < 0.16 * glare ? 1.0 : 0.0);
+  vec3 add = (lv < 0.5 ? 0.0 : lv < 1.5 ? 0.05 : lv < 2.5 ? 0.10 : 0.16) * uDustL.z * vec3(1.0, 0.92, 0.72);
+  // ghosts along the axis sun -> centre -> beyond
+  vec2 ax = uLens * 0.5 - sun;
+  for ( int j = 0; j < 5; j++ ) {
+    if ( float(j) >= uDustL.w ) break;
+    float f = j == 0 ? 0.55 : j == 1 ? 1.15 : j == 2 ? 1.45 : j == 3 ? 1.9 : 2.2;
+    float rad = (j == 0 ? 9.0 : j == 1 ? 16.0 : j == 2 ? 6.0 : j == 3 ? 24.0 : 4.0) * sc;
+    vec3 col = j == 0 ? vec3(0.9, 0.8, 0.5) : j == 1 ? vec3(0.55, 0.9, 0.6) : j == 2 ? vec3(0.8, 0.6, 1.0) : j == 3 ? vec3(0.9, 0.7, 0.5) : vec3(1.0, 0.95, 0.8);
+    vec2 e = p - (sun + ax * f);
+    float r = length(e);
+    if ( j == 1 || j == 3 ) { float a = mod(abs(atan(e.y, e.x)), 1.0471976) - 0.5235988; r = r * cos(a) / 0.8660254; }
+    if ( r < rad ) { float k = uDustL2.x * glare; add += col * k * (r > rad - 1.0 ? 2.2 : 1.0); }
+  }
+  over(1.0, add * uLight);
+  // out-of-focus dust discs (cells of 48)
+  float ed = slotsOf(uDustL.y * pr, 48.0);
+  ivec2 ce = ivec2(floor(p / 48.0));
+  for ( int j = 0; j < 2; j++ ) {
+    if ( !slotOn(j, ed, ce, 615) ) continue;
+    int key = (ce.x * 64 + ce.y) * 4 + j;
+    float r = (3.0 + 6.0 * pow(hu(key, 3, 603), 2.0)) * sc;
+    vec2 x = vec2(ce) * 48.0 + 10.0 + 28.0 * vec2(hu(key, 1, 601), hu(key, 2, 602));
+    float dd = length(p - x);
+    if ( dd < r - 1.0 ) over(1.0, vec3(0.04) * uLight); else if ( dd < r ) over(0.9, vec3(0.0));
+  }
+  // specks: sharp, glinting with the glare where the sun is close
+  int ix = int(floor(p.x)), iy = int(floor(p.y));
+  if ( hu(ix, iy, 604) < 0.004 && hu(ix, iy, 609) < uDustL.x * pr ) {
+    float lit = clamp(1.0 - length(p - sun) / (420.0 * sc), 0.0, 1.0) * glare;
+    if ( hu(ix, iy, 900 + int(floor(uT * 3.0 + hu(ix, iy, 608) * 3.0))) < lit * 0.8 ) over(0.0, vec3(1.0, 0.97, 0.86) * uLight);
+    else over(0.7, vec3(0.08) * uLight);
+  }
+  // a smudge (fingerprint): only where the glare falls on it, ridges light up
+  if ( uDustL2.y > 0.0 && length(vec2(p.x - 0.70 * uLens.x, (p.y - 0.29 * uLens.y) * 1.4)) < 70.0 * sc && fbm3(vec2(p.x / 22.0, p.y / 16.0), 605) > 0.6
+       && sin((p.x * 0.8 + p.y * 0.6) / 1.6 + 4.0 * fbm2(p / 30.0, 606)) > 0.55 ) over(1.0, 0.10 * glare * uDustL2.y * vec3(1.0, 0.95, 0.85) * uLight);
+}
+
+// ---------------- HEAT (embers, optional): heat glow from the fire side, hot flecks that hit the glass and cool to ash
+void heatLens(vec2 p) {
+  float pr = uHeatL.z; if ( pr <= 0.0 ) return;
+  float g = clamp(gAgo(0.0), 0.0, 1.2), uw = upwind(p);
+  float f = (1.0 - uw / 0.5) * (0.7 + 0.35 * g) + 0.12 * (fbm2(vec2(p.x / 25.0 - mod(uT, 600.0) * 0.4, p.y / 25.0), 701) - 0.5);
+  float lv = (f > 0.25 ? 1.0 : 0.0) + (f > 0.5 ? 1.0 : 0.0) + (f > 0.75 ? 1.0 : 0.0);
+  over(1.0, (lv < 0.5 ? 0.0 : lv < 1.5 ? 0.05 : lv < 2.5 ? 0.10 : 0.16) * uHeatL.x * vec3(1.0, 0.55, 0.2) * uLight);
+  float ef = slotsOf(uHeatL.y * pr, 48.0);
+  ivec2 ce = ivec2(floor(p / 48.0));
+  if ( upwind((vec2(ce) + 0.5) * 48.0) > 0.7 || !slotOn(0, ef / 0.7, ce, 730) ) return;
+  int key = ce.x * 4096 + ce.y;
+  float L, tau; int c;
+  cyc4(key, 0, 720, vec4(1.0, 2.0, 1.0, 2.0), L, c, tau);
+  int kc = key * 11 + c;
+  if ( hu(kc, 1, 721) > 0.45 + 0.4 * clamp(gAgo(tau), 0.0, 1.2) || tau > L - 0.5 ) return;
+  vec2 x = vec2(ce) * 48.0 + 4.0 + floor(36.0 * vec2(hu(kc, 1, 722), hu(kc, 1, 723)));
+  vec2 d = floor(p) - x;
+  if ( tau < 1.0 / 12.0 ) { if ( abs(d.x + 0.5) < 2.0 && abs(d.y + 0.5) < 2.0 ) over(0.0, vec3(1.0, 0.97, 0.80) * uLight); return; }
+  float ci = 1.0 + min(3.0, floor(tau / 0.5)), sz = ci < 4.0 ? 2.0 : 1.0;
+  float sl = hu(kc, 1, 725) > 0.6 && ci < 3.0 ? min(3.0, floor(tau * 2.0)) : 0.0;
+  vec2 e = d - vec2(0.0, sl);
+  vec3 E = ci < 1.5 ? vec3(1.0, 0.82, 0.30) : ci < 2.5 ? vec3(1.0, 0.54, 0.14) : ci < 3.5 ? vec3(0.80, 0.26, 0.10) : vec3(0.30, 0.22, 0.20);
+  if ( e.x >= 0.0 && e.y >= 0.0 && e.x < sz && e.y < sz ) { over(0.0, E * uLight); return; }
+  if ( ci <= 2.0 && abs(e.x - 0.5) < 3.5 && abs(e.y - 0.5) < 3.5 ) over(1.0, 0.10 * vec3(1.0, 0.5, 0.15) * uLight);
+}
+
 void main() {
   vec2 p = floor(vP) + 0.5;
+  if ( uSnowL.w > 0.0 ) { frost(p); crystals(p); }
+  vec3 A0 = A_; float K0 = K_;
+  A_ = vec3(0.0); K_ = 1.0;
   if ( uRainA.z > 0.0 ) gather(p);
   // static beads: this cell and the 8 around it
   bool sat = false;
@@ -287,7 +523,14 @@ void main() {
     else if ( length(p - (dc - vec2(0.38, 0.42) * dR)) < max(0.72, 0.26 * dR) ) { bAdd = vec3(0.97, 0.98, 1.0) * uLight; bK = 0.0; }
     add = bAdd; k = bK;
   }
-  fragColor = vec4(clamp(add, 0.0, 1.0), clamp(k, 0.0, 1.0));
+  A_ = A0 * k + add; K_ = K0 * k;
+  if ( starHit == 1 ) over(0.72, vec3(0.0));
+  else if ( starHit == 2 ) over(0.0, vec3(0.93, 0.97, 1.0) * uLight);
+  else if ( starHit == 3 ) over(0.0, vec3(uLight));
+  sandLens(p);
+  dustLens(p);
+  heatLens(p);
+  fragColor = vec4(clamp(A_, 0.0, 1.0), clamp(K_, 0.0, 1.0));
 }`;
 
 let lensProg = null;
@@ -307,6 +550,7 @@ export class WeatherLens {
     this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0 };
     this.now = null; this.state = null; this.P = null;
     this.key = ""; this.int = new Float32Array(121);
+    this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
   }
@@ -317,6 +561,15 @@ export class WeatherLens {
     const rain = st?.fx?.rain, s = M.lensS(P, rain?.s ?? 0, st?.lensCap ?? 0), p = (rain?.p ?? 0) * (P?.lens?.strength ?? 1);
     const G = rain ? M.lensGates("rain", s) : { bead: 0, big: 0, run: 0, mist: 0, film: 0 };
     this.gates = [G.bead * p, G.big, G.run * p, G.mist * p, G.film * p];
+    // the other effects: each at its own lens level (auto: the effect's level), presence x strength
+    const str = P?.lens?.strength ?? 1, cap = st?.lensCap ?? 0;
+    const at = (e) => { const f = st?.fx?.[e]; if ( !f ) return null; return { G: M.lensGates(e, M.lensS(P, f.s, cap)), p: f.p * str }; };
+    const sn = at("snow"), sa = at("sand"), du = at("dust"), em = P?.lens?.heat ? at("embers") : null;
+    this.fx.snow = sn ? [sn.G.frost, sn.G.wob, sn.G.crystals, sn.p] : [0, 0, 0, 0];
+    this.fx.sand = sa ? [sa.G.deposit * sa.p, sa.G.scratch * sa.p, sa.G.impacts, sa.p] : [0, 0, 0, 0];
+    this.fx.dust = du ? [du.G.specks, du.G.discs, du.G.glare, Math.round(du.G.ghosts)] : [0, 0, 0, 0];
+    this.fx.dust2 = du ? [du.G.ghostK, du.G.smudge, du.p, 0] : [0, 0, 0, 0];
+    this.fx.heat = em ? [em.G.glow * em.p, em.G.flecks, em.p, 0] : [0, 0, 0, 0];
     this.wind = st?.wind ?? null; this.seed = st?.seed ?? 0;
     this.key = "";   // (re-render on the next frame)
   }
@@ -334,7 +587,8 @@ export class WeatherLens {
     const state = PIXI.State.for2d(); state.blend = false;
     this.pass = new PIXI.Mesh(g, new PIXI.Shader(lensProg, {
       uLens: new Float32Array([lw, lh]), uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
-      uInt: this.int, uBg: PIXI.Texture.WHITE, uMap: new Float32Array(4), uHasBg: 0, uLight: 1, uWet: 0, translationMatrix: new PIXI.Matrix().toArray(true)
+      uG: this.int, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
+      uBg: PIXI.Texture.WHITE, uMap: new Float32Array(4), uHasBg: 0, uLight: 1, uWet: 0, translationMatrix: new PIXI.Matrix().toArray(true)
     }), state);
     this.sprite = new ScreenSprite(this.rt);
     this.sprite.px = css;
@@ -363,11 +617,9 @@ export class WeatherLens {
     const w = this.wind, [dx, dy] = dirVec(w?.dir ?? 0), ws = Math.min(1, Math.max(0, (w?.str ?? 0) * 2));
     u.uWind[0] = dx; u.uWind[1] = dy; u.uWind[2] = ws;
     u.uSlant = 0.14 * dx * ws;
-    // rain intensity over the last 10 s on the 12 Hz grid (the same on every client)
-    for ( let i = 0; i <= 120; i++ ) {
-      const g = gustEnv(t - 10 + i / 12, this.seed | 0);
-      this.int[i] = 0.7 + 0.35 * (Math.min(1.1, Math.max(0, g)) - 0.4);
-    }
+    // the gust envelope over the last 10 s on the 12 Hz grid (the same on every client)
+    for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, this.seed | 0);
+    u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
     // refraction-lite: lens px -> scene background uv
     const bg = canvas.primary?.background, tex = bg?.texture, R = canvas.dimensions?.sceneRect;
     if ( tex?.valid && R && wt.a ) {

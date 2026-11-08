@@ -15,7 +15,7 @@
  *   s  its LEVEL as one continuous value, s = level - 1 + (i - 0.5) x 0.7 (about -0.35 .. 2.35);
  * every gate of the look (slot densities, splash crowns, wet tint, puddle threshold ...) is a piecewise-linear function of s through
  * the research's level tables at s = 0, 1, 2 (`gate`), so moving between levels never pops.
- * WET GROUND accumulates: it rises toward the rain's ceiling (30 / 65 / 100 % of the full wet tint at levels 1 / 2 / 3) with time
+ * WET GROUND (and SNOW COVER) accumulates: it rises toward the rain's ceiling (30 / 65 / 100 % of the full wet tint at levels 1 / 2 / 3) with time
  * constant wetRate and dries with dryRate, integrated in closed form between transitions (1 s steps inside them): deterministic.
  */
 import { WIND_DEFAULT } from "../wind.mjs";
@@ -28,17 +28,22 @@ export const DEFAULT_DUR = 20000;       // ms
 export const MIN_DUR = 0;
 
 /** The effects drawn by this build, in draw order. */
-export const EFFECTS = ["rain"];
-/** The GM's presets: which effects at which level (null = the chosen level). Storm / blizzard / sand ... come with their phases. */
+export const EFFECTS = ["rain", "snow", "sand", "dust", "embers"];
+/** The GM's presets: which effects at which level (null = the chosen level). */
 export const PRESETS = {
   clear: {},
-  rain: { rain: null }
+  rain: { rain: null },
+  snow: { snow: null },
+  sand: { sand: null },
+  dust: { dust: null },
+  embers: { embers: null }
 };
-export const PRESET_ICONS = { clear: "fa-solid fa-sun", rain: "fa-solid fa-cloud-rain" };
+export const PRESET_ICONS = { clear: "fa-solid fa-sun", rain: "fa-solid fa-cloud-rain", snow: "fa-solid fa-snowflake", sand: "fa-solid fa-wind",
+  dust: "fa-solid fa-sun-haze", embers: "fa-solid fa-fire-flame-curved" };
 
-export const LIMITS = { wetRate: [5, 600], dryRate: [10, 3600], strength: [0, 1], str: [0, 1], gust: [0, 1], dur: [0, 600000] };
-export const GROUND_DEFAULT = { wetRate: 60, dryRate: 300, puddles: true };
-export const LENS_DEFAULT = { on: true, level: "auto", strength: 1 };
+export const LIMITS = { wetRate: [5, 600], dryRate: [10, 3600], snowRate: [5, 1800], meltRate: [10, 7200], strength: [0, 1], str: [0, 1], gust: [0, 1], dur: [0, 600000] };
+export const GROUND_DEFAULT = { wetRate: 60, dryRate: 300, puddles: true, snowRate: 120, meltRate: 600 };
+export const LENS_DEFAULT = { on: true, level: "auto", strength: 1, heat: false };
 
 const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const lvl = (v, d = 2) => { const n = Math.round(Number(v)); return n >= 1 && n <= 3 ? n : d; };
@@ -76,7 +81,7 @@ function cleanBase(b) {
   if ( !b || typeof b !== "object" || !Number.isFinite(Number(b.t)) ) return null;
   const fx = {};
   for ( const e of EFFECTS ) { const f = b.fx?.[e]; if ( f ) fx[e] = { p: num(f.p, 0, 1, 0), s: num(f.s, -0.35, 2.35, 1) }; }
-  return { t: Math.round(Number(b.t)), fx, wind: cleanWind(b.wind), wet: num(b.wet, 0, 1.2, 0) };
+  return { t: Math.round(Number(b.t)), fx, wind: cleanWind(b.wind), wet: num(b.wet, 0, 1.2, 0), cover: num(b.cover, 0, 1.2, 0) };
 }
 
 export function cleanParams(raw) {
@@ -86,8 +91,9 @@ export function cleanParams(raw) {
   return {
     v: VERSION, on: r.on !== false, who: r.who === "gm" ? "gm" : "all", seed: Math.round(num(r.seed, 0, 1e6, 1)) || 1,
     keys, base: cleanBase(r.base),
-    ground: { wetRate: num(g.wetRate, ...LIMITS.wetRate, GROUND_DEFAULT.wetRate), dryRate: num(g.dryRate, ...LIMITS.dryRate, GROUND_DEFAULT.dryRate), puddles: g.puddles !== false },
-    lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength) }
+    ground: { wetRate: num(g.wetRate, ...LIMITS.wetRate, GROUND_DEFAULT.wetRate), dryRate: num(g.dryRate, ...LIMITS.dryRate, GROUND_DEFAULT.dryRate), puddles: g.puddles !== false,
+      snowRate: num(g.snowRate, ...LIMITS.snowRate, GROUND_DEFAULT.snowRate), meltRate: num(g.meltRate, ...LIMITS.meltRate, GROUND_DEFAULT.meltRate) },
+    lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true }
   };
 }
 
@@ -102,9 +108,35 @@ export const TABLES = {
     crown: [0, 1, 1], ripple: [0.12, 0.4, 0.5],                                 // splash crowns on / ripples on water hits
     wet: [0.3, 0.65, 1.0], puddle: [1.4, 0.68, 0.6], sheen: [0.0022, 0.003, 0.004],
     lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0, 0.4, 1], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] }
+  },
+  snow: {
+    mid: [5, 20, 40], far: [4, 16, 34], near: [0, 0, 2],                        // flakes per 64 x 64 art px
+    vMid: [22, 27, 30], vFar: [16, 19, 20],                                     // fall speed, art px / s
+    cover: [0, 0.10, 0.42],                                                     // the share of the land snow settles on (accumulated)
+    thick: [0, 0, 1],                                                           // 0 a thin dusting (the map shows through), 1 the full ramp
+    cold: [0.12, 0.55, 1], drift: [0, 0, 1],                                    // cold overcast tint; spindrift runs in gusts
+    lens: { frost: [0.075, 0.13, 0.20], wob: [0.012, 0.02, 0.03], crystals: [6, 16, 34] }
+  },
+  sand: {
+    grit: [16, 34, 60], hop: [3.5, 3.5, 7], len: [1.5, 1.5, 3],                 // grit per 64 x 64; saltation hop; streak growth in a wave
+    rib: [0.80, 0.78, 0.75], ribK: [0.05, 0.08, 0.12],                          // ground streamers: threshold, the wave's push
+    drift: [0.05, 0.12, 0.18],                                                  // settled sand in the lee: share of the land
+    haze: [0, 1, 1], hazeD: [0, 0.62, 1], hazeL3: [0, 0, 1],                    // the haze pass: on, density, 3-band look (lit / shadow)
+    ochre: [0.18, 0.55, 1],
+    lens: { deposit: [0.30, 0.65, 1], scratch: [8, 22, 40], impacts: [30, 100, 220] }
+  },
+  dust: {
+    motes: [10, 26, 52], shaft: [0, 0.8, 1], haze: [0, 0, 1], warm: [0.25, 0.6, 1],
+    lens: { specks: [0.35, 0.65, 1.01], discs: [6, 14, 26], glare: [0.45, 0.7, 1], ghosts: [0, 3, 5], ghostK: [0, 0.09, 0.14], smudge: [0, 1, 1] }
+  },
+  embers: {
+    src: [0.35, 0.6, 0.6], inview: [0, 1, 1],                                   // fire sources: share of source cells; also inside the view
+    spark: [18, 36, 90], big: [0, 1, 1],                                        // sparks per source; 2-px big sparks
+    smoke: [0, 1, 1], smokeL3: [0, 0, 1], dim: [0.15, 0.6, 1],                  // smoke haze on, its 2-band look; the fire-lit evening
+    lens: { glow: [0.4, 0.7, 1], flecks: [5, 10, 18] }
   }
 };
-const DENS = new Set(["mid", "far", "near", "bead"]);
+const DENS = new Set(["mid", "far", "near", "bead", "grit", "motes", "spark", "crystals", "impacts", "flecks"]);
 
 /** One gate at level-continuum s: piecewise linear through the table at s = 0, 1, 2. */
 export function gate(table, s, dens = false) {
@@ -172,23 +204,31 @@ export function stateAt(P, now, _starts = starts(P)) {
   return blend(_starts[n], target(k), k.dur > 0 ? smooth((now - k.t) / k.dur) : 1);
 }
 
-/** The rain's wet ceiling of a state. */
-const ceilOf = (st) => { const r = st.fx.rain; return r ? r.p * wetCeil(r.s) : 0; };
+/** The ceilings of the accumulations of a state: the rain's wetness, the snow's cover. */
+const ACC = {
+  wet: { ceil: (st) => { const r = st.fx.rain; return r ? r.p * wetCeil(r.s) : 0; }, up: (P) => P.ground.wetRate, dn: (P) => P.ground.dryRate },
+  cover: { ceil: (st) => { const r = st.fx.snow; return r ? r.p * coverCeil(r.s) : 0; }, up: (P) => P.ground.snowRate, dn: (P) => P.ground.meltRate }
+};
+/** The snow's cover ceiling at s (share of the land). */
+export const coverCeil = (s) => gate(TABLES.snow.cover, s);
 
 /**
  * WET GROUND at `now`: from the base's wetness, toward each moment's ceiling (time constant wetRate rising, dryRate falling).
- * Inside a transition the ceiling changes: 1 s steps; between transitions it is constant: closed form.
+ * Inside a transition the ceiling changes: 1 s steps; between transitions it is constant: closed form. SNOW COVER the same
+ * (`kind` "cover": snowRate settling, meltRate melting).
  */
-export function wetAt(P, now, _starts = starts(P)) {
-  let w = P.base?.wet ?? 0, t = P.base?.t ?? (P.keys[0]?.t ?? now);
-  const up = P.ground.wetRate, dn = P.ground.dryRate;
+export function wetAt(P, now, _starts = starts(P), kind = "wet") {
+  const A = ACC[kind], ceilOf = A.ceil;
+  let w = P.base?.[kind] ?? 0, t = P.base?.t ?? (P.keys[0]?.t ?? now);
+  const up = A.up(P), dn = A.dn(P);
   const approach = (w, c, dt) => { if ( dt <= 0 ) return w; const tau = c > w ? up : dn; return c + (w - c) * Math.exp(-dt / tau); };
   // segments: [t .. key0.t), then each key's ramp [k.t .. k.t + dur) and its rest [.. next key)
   const marks = [];
   for ( let n = 0; n < P.keys.length; n++ ) { const k = P.keys[n]; marks.push([k.t, false], [k.t + k.dur, true]); }
   marks.sort((a, b) => a[0] - b[0]);
   // (the value at every mark already passed is remembered per stored state: a resolve at 12 Hz only integrates the open segment)
-  let memo = WET_MEMO.get(P); if ( !memo ) WET_MEMO.set(P, memo = new Map());
+  let memos = WET_MEMO.get(P); if ( !memos ) WET_MEMO.set(P, memos = {});
+  const memo = memos[kind] ??= new Map();
   for ( const [m] of marks ) if ( m <= now && memo.has(m) && m > t ) { t = m; w = memo.get(m); }
   marks.push([now, false]);
   marks.sort((a, b) => a[0] - b[0]);
@@ -222,7 +262,7 @@ export function resolve(P, now) {
   const until = key && now < key.t + key.dur ? key.t + key.dur : nextKey ? nextKey.t : null;
   const fx = {};
   for ( const [e, f] of Object.entries(s.fx) ) if ( f.p > 0.0005 ) fx[e] = f;
-  return { fx, wind: s.wind, wet: wetAt(P, now, st), steady: !(key && now < key.t + key.dur), until, key };
+  return { fx, wind: s.wind, wet: wetAt(P, now, st), cover: wetAt(P, now, st, "cover"), steady: !(key && now < key.t + key.dur), until, key };
 }
 
 /**
@@ -243,7 +283,7 @@ export function withKey(P, change, now, { dur = DEFAULT_DUR, lead = LEAD_MS } = 
   if ( keys.length > KEEP_KEYS ) {
     const drop = keys.length - KEEP_KEYS, at = keys[drop].t, Pt = { ...P, keys: P.keys.filter((k) => k.t < t) };
     const s = stateAt(Pt, at);
-    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, f]) => [e, { p: +f.p.toFixed(4), s: +f.s.toFixed(4) }])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4) };
+    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, f]) => [e, { p: +f.p.toFixed(4), s: +f.s.toFixed(4) }])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4), cover: +wetAt(Pt, at, undefined, "cover").toFixed(4) };
     keys = keys.slice(drop);
   }
   return { keys, base };

@@ -18,7 +18,7 @@ import { VIEW_PRESETS } from "../view-angle.mjs";
  */
 const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
 const LEVEL_COLOR = ["", "#9fd0f5", "#4f9de0", "#2a5fb8"];
-const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0" };
+const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0", snow: "#e8f1fb", sand: "#d9a55b", dust: "#e6d3a3", embers: "#f07a2a" };
 const TOOLS = { "mm-wx-pick": null, "mm-wx-wind": "wind" };
 
 const over = () => Math.max(0, Number(setting("weatherOver")) || 0) * 1000;
@@ -167,11 +167,11 @@ function statusHtml() {
   const P = Wx.params0(), st = Wx.weatherApi.status(), k = cur();
   const fx = Object.entries(st.state?.fx ?? {}).map(([e, f]) => `${T(`Weather.fx.${e}`)} ${T("Weather.lvlShort")}${(f.s + 1).toFixed(1)} · ${pct(f.p)}`).join(", ") || T("Weather.none");
   const core = canvas.scene?.weather ? `<p class="mm-ws-hint mm-wx-warn"><i class="fa-solid fa-triangle-exclamation" inert></i> ${esc(T("Weather.coreWarn"))}</p>` : "";
-  return `<p class="mm-d-status" role="status">${esc(game.i18n.format("MOINENMAPS.Weather.status", { preset: T(`Weather.p.${k?.preset ?? "clear"}`), level: k?.level ?? 2, fx, wet: pct(st.state?.wet ?? 0) }))}</p>
+  return `<p class="mm-d-status" role="status">${esc(game.i18n.format("MOINENMAPS.Weather.status", { preset: T(`Weather.p.${k?.preset ?? "clear"}`), level: k?.level ?? 2, fx, wet: pct(st.state?.wet ?? 0), cover: pct(st.state?.cover ?? 0) }))}</p>
     ${st.state && !st.state.steady ? `<p class="mm-ws-hint">${esc(T("Weather.changing"))}</p>` : ""}${core}
     ${optCheck({ name: "g.on", label: T("Weather.f.on"), checked: P.on, hint: T("Weather.h.on") })}
     ${optSelect({ name: "g.who", label: T("Weather.f.who"), value: P.who, options: [["all", T("Weather.o.all")], ["gm", T("Weather.o.gm")]], hint: T("Weather.h.who") })}
-    <p class="mm-ws-hint">${esc(game.i18n.format("MOINENMAPS.Weather.cost", { n: st.instances ?? 0, ms: (st.tickMs ?? 0).toFixed(3), lens: st.lens ? T("Weather.lensOnShort") : T("Weather.lensOffShort") }))}</p>`;
+    <p class="mm-ws-hint">${esc(game.i18n.format("MOINENMAPS.Weather.cost", { n: (st.instances ?? 0) + (st.parts ?? 0), ms: (st.tickMs ?? 0).toFixed(3), lens: st.lens ? T("Weather.lensOnShort") : T("Weather.lensOffShort") }))}</p>`;
 }
 
 const PANELS = [
@@ -194,8 +194,10 @@ const PANELS = [
       ${optRange({ name: "g.wetRate", label: T("Weather.wetRate"), value: g.wetRate, min: L.wetRate[0], max: L.wetRate[1], step: 5, hint: T("Weather.wetRateHint") })}
       ${optRange({ name: "g.dryRate", label: T("Weather.dryRate"), value: g.dryRate, min: L.dryRate[0], max: L.dryRate[1], step: 10, hint: T("Weather.dryRateHint") })}
       ${optCheck({ name: "g.puddles", label: T("Weather.puddles"), checked: g.puddles, hint: T("Weather.puddlesHint") })}
+      ${optRange({ name: "g.snowRate", label: T("Weather.snowRate"), value: g.snowRate, min: L.snowRate[0], max: L.snowRate[1], step: 5, hint: T("Weather.snowRateHint") })}
+      ${optRange({ name: "g.meltRate", label: T("Weather.meltRate"), value: g.meltRate, min: L.meltRate[0], max: L.meltRate[1], step: 10, hint: T("Weather.meltRateHint") })}
       <div class="mm-d-actions"><button type="button" class="mm-ws-btn" data-act="dry"${game.user.isGM ? "" : " disabled"}><i class="fa-solid fa-sun" inert></i> ${esc(T("Weather.dryNow"))}</button></div></div>`; },
-    onChange: (n, v) => { const k = { "g.wetRate": "wetRate", "g.dryRate": "dryRate", "g.puddles": "puddles" }[n]; if ( k ) Wx.setParams({ ground: { [k]: v } }); },
+    onChange: (n, v) => { const k = { "g.wetRate": "wetRate", "g.dryRate": "dryRate", "g.puddles": "puddles", "g.snowRate": "snowRate", "g.meltRate": "meltRate" }[n]; if ( k ) Wx.setParams({ ground: { [k]: v } }); },
     onClick: (b) => { if ( b.dataset.act === "dry" ) Wx.dryNow(); }
   }) },
   { id: "lens", title: "MOINENMAPS.Weather.pLens", icon: "fa-solid fa-glasses", open: false, mount: panel({
@@ -204,11 +206,13 @@ const PANELS = [
       ${optCheck({ name: "g.lensOn", label: T("Weather.lensOn"), checked: L.on, hint: T("Weather.lensOnHint") })}
       ${optSelect({ name: "g.lensLevel", label: T("Weather.lensLevel"), value: L.level, options: [["auto", T("Weather.lensAuto")], [1, T("Weather.lvl1")], [2, T("Weather.lvl2")], [3, T("Weather.lvl3")]], hint: T("Weather.lensLevelHint") })}
       ${optRange({ name: "g.lensStrength", label: T("Weather.lensStrength"), value: L.strength, min: 0, max: 1, step: 0.05, hint: T("Weather.lensStrengthHint") })}
+      ${optCheck({ name: "g.lensHeat", label: T("Weather.lensHeat"), checked: L.heat, hint: T("Weather.lensHeatHint") })}
       <p class="mm-ws-hint">${esc(T("Weather.lensPlayers"))}</p></div>`; },
     onChange: (n, v) => {
       if ( n === "g.lensOn" ) Wx.setParams({ lens: { on: v } });
       else if ( n === "g.lensLevel" ) Wx.setParams({ lens: { level: v === "auto" ? "auto" : Number(v) } });
       else if ( n === "g.lensStrength" ) Wx.setParams({ lens: { strength: v } });
+      else if ( n === "g.lensHeat" ) Wx.setParams({ lens: { heat: v } });
     }
   }) },
   { id: "view", title: "MOINENMAPS.Weather.pView", icon: "fa-solid fa-cube", open: false, mount: panel({

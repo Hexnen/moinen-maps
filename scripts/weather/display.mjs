@@ -1,5 +1,7 @@
 import * as M from "./model.mjs";
 import { GROUND_VERT, GROUND_FRAG, RAIN_VERT, RAIN_FRAG } from "./glsl.mjs";
+import { PART_VERT, PART_FRAG, HAZE_FRAG } from "./fx-glsl.mjs";
+import { snowScore, driftScore, sortedScores, quantileThr } from "./fields.mjs";
 import { footprintK } from "../fire/shader.mjs";
 import { SPEED_SQ, dirVec } from "../wind.mjs";
 
@@ -19,9 +21,17 @@ import { SPEED_SQ, dirVec } from "../wind.mjs";
  * INSTANCES: world tiles of 64 art px over the view (+ the margin a falling drop needs); per tile N slots per depth layer; the vertex
  * shader finds its tile and slot from gl_InstanceID, so following the view costs a few uniforms, not CPU per particle.
  *
+ *   PARTS   sortLayer 995, elevation Infinity: one instanced draw per kind (snow flakes + spindrift, sand grit, dust motes, ember
+ *           sparks), the same tiles-of-slots scheme as the rain; a kind that is not on is not drawn.
+ *   HAZE    sortLayer 990 (above tokens, below the air): sand haze, dust haze, ember smoke in flat dithered bands (map mixed per cell).
+ *   The ground pass also carries snow cover, sand drifts and streamers, dust sun shafts and every effect's tint (cold, ochre, warm,
+ *   the fire-lit evening); cover and drift shares come from the scene's own score quantiles (fields.mjs).
+ *
  * COST: no weather -> this display does not exist (no object, no ticker). With weather: one ticker listener (a few uniforms; the
- * state is resolved at most 12 times a second), 3 draw calls.
+ * state is resolved at most 12 times a second), one draw call per pass that has something to draw.
  */
+const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 192]];
+const PART_MAX = 60000;
 const BLEND = "MM_WEATHER";
 const MAX_INSTANCES = 150000;
 export const SKY = [0.80, 0.86, 0.93];
@@ -84,6 +94,8 @@ export class WeatherDisplay {
       .addIndex([0, 1, 2, 0, 2, 3]);
     this.ground = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("ground", GROUND_VERT, GROUND_FRAG), {
       ...this.common(seed), uTime: 0, uK: footprintK(), uWet: 0, uPuddle: 2, uSheen: 0, uSky: new Float32Array(SKY), uAlpha: 1,
+      uSnow: new Float32Array([9, 1, 0, 0]), uSand: new Float32Array([9, 0, 9, 0]), uSandW: new Float32Array([1, 0, 0, 0]), uDust: new Float32Array(2),
+      uEmb: new Float32Array(4), uCps: geo.grid / ap, uAny: 0,
       translationMatrix: new PIXI.Matrix().toArray(true) })), 252);
     // rain: one instanced quad geometry for both the air and the splash draws
     const rg = new PIXI.Geometry()
@@ -99,7 +111,25 @@ export class WeatherDisplay {
       uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, translationMatrix: new PIXI.Matrix().toArray(true) });
     this.splash = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(1))), 253);
     this.air = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(0))), 995, Infinity);
-    for ( const m of [this.ground, this.splash, this.air] ) {
+    // particles: one instanced geometry + mesh per kind
+    this.parts = {}; this.partGeoms = [];
+    for ( const [name, kind, ts] of KINDS ) {
+      const pg = new PIXI.Geometry()
+        .addAttribute("aVertexPosition", [ox, oy, x1, oy, x1, y1, ox, y1], 2)
+        .addAttribute("aCorner", [0, 0, 1, 0, 1, 1, 0, 1], 2)
+        .addIndex([0, 1, 2, 0, 2, 3]);
+      pg.instanced = true; pg.instanceCount = 0;
+      this.partGeoms.push(pg);
+      this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0,
+        uTiles: new Float32Array([0, 0, 1, 1]), uTileSz: ts, uPer: new Float32Array(4), uDens: new Float32Array(4), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]),
+        uWindDir: new Float32Array([1, 0]), uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array(4), uI: 1, uAlpha: 1,
+        uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, translationMatrix: new PIXI.Matrix().toArray(true) })), 995, Infinity);
+    }
+    // haze: one quad over the scene, above tokens
+    this.haze = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("haze", GROUND_VERT, HAZE_FRAG), { ...this.common(seed), uTime: 0, uK: footprintK(), uAlpha: 1,
+      uSandH: new Float32Array(4), uSandW: new Float32Array([1, 0, 0, 0]), uDustH: new Float32Array(4), uSmoke: new Float32Array(4),
+      uAvg: new Float32Array([0.5, 0.5, 0.5]), uCps: geo.grid / ap, translationMatrix: new PIXI.Matrix().toArray(true) })), 990);
+    for ( const m of [this.ground, this.splash, this.air, ...Object.values(this.parts), this.haze] ) {
       m.state.blendMode = bm; m.state.depthTest = false; m.state.culling = false;
       m.visible = false;
       canvas.primary.addChild(m);
@@ -113,12 +143,14 @@ export class WeatherDisplay {
     if ( !this.geo ) return;
     const c = this.common(this.seed);
     for ( const m of this.meshes ) Object.assign(m.shader.uniforms, c);
+    if ( this.haze && info?.avg ) this.haze.shader.uniforms.uAvg.set(info.avg);
+    this.snowSorted = null; this.driftSorted = null; this.driftDir = null;
   }
 
   /** The resolved weather to show (model.resolve + the client's caps), from the engine at <= 12 Hz. */
   setState(st) {
     this.state = st;
-    const any = !!st && Object.keys(st.fx).length > 0 || (st?.wet ?? 0) > 0.002;
+    const any = !!st && Object.keys(st.fx).length > 0 || (st?.wet ?? 0) > 0.002 || (st?.cover ?? 0) > 0.002;
     this.arm(any);
     if ( any ) this.apply();
   }
@@ -146,7 +178,78 @@ export class WeatherDisplay {
       u.uVF[0] = G.vMid; u.uVF[1] = G.vFar; u.uVF[2] = 420; u.uExpK = G.exp;
       u.uSplash[0] = G.crown; u.uSplash[1] = G.ripple; u.uPuddle = puddle; u.uWetP = wet; u.uI = 1;
     }
-    this.ground.visible = wet > 0.002;
+    // ---- snow, sand, dust, embers
+    const fx = st.fx, wsp = speed, gustK = st.wind?.gust ?? 0.5, lift = st.view?.lift ?? 0.5, noNear = st.noNear;
+    const on = (e) => !!fx[e] && fx[e].p > 0.0005;
+    const gu2 = this.ground.shader.uniforms, hz = this.haze.shader.uniforms;
+    this.partDens = {}; this.reach = {};
+    const setPart = (name, dens, windDir, speedK, vf, I) => {
+      this.partDens[name] = dens;
+      const u = this.parts[name].shader.uniforms;
+      u.uWindDir[0] = windDir[0]; u.uWindDir[1] = windDir[1]; u.uWindK[0] = speedK; u.uWindK[1] = gustK;
+      u.uView[0] = lift; u.uView[1] = st.view?.squash ?? 0.8; u.uVF.set(vf); u.uI = I;
+    };
+    // SNOW
+    const sn = fx.snow, SG = M.gates("snow", sn?.s ?? 0), sp = sn?.p ?? 0;
+    if ( on("snow") ) {
+      setPart("snow", [SG.mid * sp * perf, SG.far * sp * perf, noNear ? 0 : SG.near * sp * perf, SG.drift * sp * perf * 10.7], wd, wsp, [SG.vMid, SG.vFar, 60, 0], sp);
+      const Wm = wsp * 1.3 * 3.4 * 1.15 + 16;
+      this.reach.snow = [Math.min(0, -wd[0] * Wm) - 16, Math.max(0, -wd[0] * Wm) + 16, Math.min(0, -wd[1] * Wm) - lift * 250 - 16, Math.max(0, -wd[1] * Wm) + 16];
+      this.lastThick = SG.thick;
+    }
+    const cover = st.cover ?? 0;
+    gu2.uSnow[0] = cover > 0.002 ? this.snowThr(cover) : 9; gu2.uSnow[1] = this.lastThick ?? 1; gu2.uSnow[2] = on("snow") ? SG.cold * sp : 0;
+    gu2.uSnow[3] = st.sheen === false ? 0 : 0.0025;
+    // SAND (a sandstorm blows: at least 2.4 squares / s)
+    const sa = fx.sand, AG = M.gates("sand", sa?.s ?? 0), ap_ = sa?.p ?? 0, sandSp = Math.max(wsp, 0.6 * SPEED_SQ * cps);
+    if ( on("sand") ) {
+      setPart("sand", [AG.grit * ap_ * perf, 0, 0, 0], wd, sandSp, [AG.hop, AG.len, 0, 0], ap_);
+      const R = sandSp * 2.4 + 8;
+      this.reach.sand = [Math.min(0, wd[0] * R) - 8, Math.max(0, wd[0] * R) + 8, Math.min(0, wd[1] * R) - lift * 9 - 8, Math.max(0, wd[1] * R) + 8];
+    }
+    gu2.uSand[0] = AG.rib; gu2.uSand[1] = AG.ribK; gu2.uSand[2] = on("sand") && AG.drift * ap_ > 0.002 ? this.driftThr(AG.drift * ap_, st.wind?.dir ?? 0, wd) : 9; gu2.uSand[3] = on("sand") ? AG.ochre * ap_ : 0;
+    gu2.uSandW[0] = wd[0]; gu2.uSandW[1] = wd[1]; gu2.uSandW[2] = sandSp * 1.1; gu2.uSandW[3] = on("sand") ? ap_ : 0;
+    hz.uSandH[0] = on("sand") ? AG.haze * AG.hazeD * ap_ : 0; hz.uSandH[1] = AG.hazeL3;
+    hz.uSandW[0] = wd[0]; hz.uSandW[1] = wd[1]; hz.uSandW[2] = sandSp;
+    // DUST (calm air: a slow drift)
+    const du = fx.dust, DG = M.gates("dust", du?.s ?? 0), dp = du?.p ?? 0, dustSp = Math.max(4, 0.12 * wsp);
+    if ( on("dust") ) {
+      setPart("dust", [DG.motes * dp * perf, 0, 0, 0], wd, dustSp, [0, 0, 0, 0], dp);
+      const R = dustSp * 10 + 8;
+      this.reach.dust = [Math.min(0, wd[0] * R) - 8, Math.max(0, wd[0] * R) + 8, Math.min(0, wd[1] * R) - lift * 60 - 8, Math.max(0, wd[1] * R) + 8];
+    }
+    gu2.uDust[0] = on("dust") ? DG.shaft * dp : 0; gu2.uDust[1] = on("dust") ? DG.warm * dp : 0;
+    hz.uDustH[0] = on("dust") ? DG.haze * dp : 0; hz.uDustH[1] = wd[0] * dustSp; hz.uDustH[2] = wd[1] * dustSp;
+    // EMBERS (sparks carried by the wind; at least 1.6 squares / s)
+    const em = fx.embers, EG = M.gates("embers", em?.s ?? 0), ep = em?.p ?? 0, embSp = Math.max(wsp, 0.4 * SPEED_SQ * cps);
+    if ( on("embers") ) {
+      setPart("embers", [EG.spark * ep * perf, 0, 0, 0], wd, embSp, [EG.src, EG.big, 0, 0], ep);
+      const R = embSp * 1.4 * 5 * 1.43 + 24;
+      this.reach.embers = [Math.min(0, wd[0] * R) - 24, Math.max(0, wd[0] * R) + 24 + 192, Math.min(0, wd[1] * R) - lift * 120 - 24, Math.max(0, wd[1] * R) + 24 + 192];
+    }
+    gu2.uEmb[0] = EG.src; gu2.uEmb[1] = EG.dim; gu2.uEmb[2] = on("embers") ? ep : 0;
+    hz.uSmoke[0] = on("embers") ? EG.smoke * ep : 0; hz.uSmoke[1] = EG.smokeL3; hz.uSmoke[2] = wd[0] * embSp; hz.uSmoke[3] = wd[1] * embSp;
+    const anyGround = wet > 0.002 || cover > 0.002 || ["snow", "sand", "dust", "embers"].some(on);
+    gu2.uAny = anyGround ? 1 : 0;
+    this.ground.visible = anyGround;
+    this.haze.visible = hz.uSandH[0] > 0.001 || hz.uDustH[0] > 0.001 || hz.uSmoke[0] > 0.001;
+  }
+
+  /** The snow score threshold for a cover share (the scene's own quantile; none without the ground info). */
+  snowThr(cover) {
+    const I = this.info; if ( !I?.samples?.length ) return 9;
+    this.snowSorted ??= sortedScores(I.samples, (p) => snowScore(p.x, p.y, p.lum, p.con, this.seed));
+    return quantileThr(this.snowSorted, Math.min(1, cover));
+  }
+  /** The drift score threshold for a share at a wind direction (re-sorted when the direction moves by a degree). */
+  driftThr(share, dir, wd) {
+    const I = this.info; if ( !I?.samples?.length ) return 9;
+    const key = Math.round(dir);
+    if ( this.driftDir !== key || !this.driftSorted ) {
+      this.driftDir = key;
+      this.driftSorted = sortedScores(I.samples, (p) => driftScore(p.x, p.y, p.con, this.seed, wd[0], wd[1]));
+    }
+    return quantileThr(this.driftSorted, Math.min(1, share));
   }
 
   /** The view in scene px. */
@@ -189,7 +292,29 @@ export class WeatherDisplay {
     }
     const au = this.air.shader.uniforms;
     if ( depth ) { au.uDepth = depth; au.uHasDepth = 1; au.uDepthElev = canvas.masks.depth.mapElevation(Infinity); } else au.uHasDepth = 0;
-    this.stats.instances = n; this.stats.tiles = tiles;
+    // particles: each kind's tiles over the view, widened by where a slot's particle can be seen from its anchor (reach)
+    let partN = 0;
+    const axv = [ax0, ay0, ax1, ay1];
+    for ( const [name, , TS] of KINDS ) {
+      const m = this.parts[name], u = m.shader.uniforms, d0 = this.partDens?.[name], R = this.reach?.[name];
+      if ( !d0 || !R || !(d0[0] + d0[1] + d0[2] + d0[3] > 0) ) { m.visible = false; continue; }
+      const px0 = Math.max(0, Math.floor((axv[0] - R[1]) / TS)), py0 = Math.max(0, Math.floor((axv[1] - R[3]) / TS));
+      const px1 = Math.min(Math.ceil(g.aw / TS) - 1, Math.floor((axv[2] - R[0]) / TS)), py1 = Math.min(Math.ceil(g.ah / TS) - 1, Math.floor((axv[3] - R[2]) / TS));
+      const pnx = Math.max(0, px1 - px0 + 1), pny = Math.max(0, py1 - py0 + 1), pt = pnx * pny;
+      let dd = d0;
+      const want = pt * dd.reduce((a, b) => a + Math.ceil(b), 0);
+      if ( want > PART_MAX ) { const f = PART_MAX / want; dd = dd.map((x) => x * f); }
+      const pp = dd.map((x) => Math.ceil(x - 1e-6)), ps = pp[0] + pp[1] + pp[2] + pp[3];
+      const pn = ps > 0 ? pt * ps : 0;
+      m.geometry.instanceCount = pn;
+      u.uTime = T; u.uTiles[0] = px0; u.uTiles[1] = py0; u.uTiles[2] = Math.max(1, pnx); u.uTiles[3] = Math.max(1, pny);
+      u.uPer.set(pp); u.uDens.set(dd); u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1];
+      if ( depth ) { u.uDepth = depth; u.uHasDepth = 1; u.uDepthElev = au.uDepthElev; } else u.uHasDepth = 0;
+      m.visible = pn > 0;
+      partN += pn;
+    }
+    if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = footprintK(); }
+    this.stats.instances = n; this.stats.tiles = tiles; this.stats.parts = partN;
     this.stats.tickMs = performance.now() - t0;
   }
 
@@ -200,6 +325,8 @@ export class WeatherDisplay {
     for ( const m of this.meshes ) { m.parent?.removeChild(m); m.destroy(); }
     this.meshes = [];
     this.rainGeom?.destroy(); this.rainGeom = null;
+    for ( const pg of this.partGeoms ?? [] ) pg.destroy();
+    this.partGeoms = []; this.parts = {}; this.haze = null;
     this.ground?.geometry?.destroy?.();
   }
 

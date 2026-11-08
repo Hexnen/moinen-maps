@@ -1,4 +1,5 @@
 import { mapPixels } from "../destruction/source.mjs";
+import { landSample } from "./fields.mjs";
 
 /**
  * The two shared textures of the weather passes, built on the CPU ONCE (never per frame):
@@ -53,7 +54,7 @@ export function buildInfo(geo) {
   const px = mapPixels(geo.ap * L.scale, { x0: 0, y0: 0, w: L.w, h: L.h });
   const data = new Uint8Array(px.buffer, px.byteOffset, px.byteLength);
   const avg = withContrast(data, L.w, L.h);
-  return { texture: tex(data, L.w, L.h), ...L, avg };
+  return { texture: tex(data, L.w, L.h), ...L, avg, samples: landSample(data, L.w, L.h, L.scale) };
 }
 
 /**

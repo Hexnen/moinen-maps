@@ -58,11 +58,12 @@ export async function frame(n = 120) {
 /** One row: weather (preset, level, lens) then the frame cost. preset null = weather cleared (and dry). */
 export async function row(preset, level = 2, lens = false, n = 120) {
   const rec = await R();
-  await rec.set(preset ?? "clear", level, { lens, wet: preset ? null : 0 });
+  await W().lens({ heat: preset === "embers" && !!lens });
+  await rec.set(preset ?? "clear", level, { lens, wet: preset ? null : 0, cover: preset ? null : 0 });
   await wait(800);
   const p = await frame(n);
   const st = W().status();
-  return { case: `${preset ?? "off"} L${level} lens ${lens}`, cpu: p.cpu, gpu: p.gpu, draws: p.draws, instances: st.instances ?? 0, tickMs: r2(st.tickMs ?? 0),
+  return { case: `${preset ?? "off"} L${level} lens ${lens}`, cpu: p.cpu, gpu: p.gpu, draws: p.draws, instances: (st.instances ?? 0) + (st.parts ?? 0), tickMs: r2(st.tickMs ?? 0),
     lensPass: lens ? await lensPass() : null };
 }
 

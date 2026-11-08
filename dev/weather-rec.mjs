@@ -13,12 +13,13 @@ export async function prep() {
   if ( game.paused ) game.togglePause(false, { broadcast: true });
   await ui.controls.activate({ control: "tokens" });
 }
-/** The weather at once: preset at level, wind, wet ground already at `wet` (0..1), lens level (false = lens off). */
-export async function set(preset, level = 2, { wind = { dir: 20, str: 0.45, gust: 0.7 }, wet = null, lens = "auto", i = 0.5 } = {}) {
+/** The weather at once: preset at level, wind, wet ground already at `wet` (0..1), snow cover at `cover` (default: the level's ceiling), lens level (false = lens off). */
+export async function set(preset, level = 2, { wind = { dir: 20, str: 0.45, gust: 0.7 }, wet = null, cover = null, lens = "auto", i = 0.5 } = {}) {
   const now = Date.now();
   const M = W().model, P0 = W().params();
   const key = M.cleanKey({ t: now - 60000, dur: 0, preset, level, i, wind });
-  const base = { t: now - 60000, fx: {}, wind, wet: wet ?? M.wetCeil(level - 1 + (i - 0.5) * 0.7) };
+  const sl = level - 1 + (i - 0.5) * 0.7, fx = M.PRESETS[preset] ?? {};
+  const base = { t: now - 60000, fx: {}, wind, wet: wet ?? ("rain" in fx ? M.wetCeil(sl) : 0), cover: cover ?? ("snow" in fx ? M.coverCeil(sl) : 0) };
   await canvas.scene.update({ "flags.moinen-maps.weather": { ...P0, keys: [key], base, lens: { ...P0.lens, on: lens !== false, level: lens === false ? P0.lens.level : lens } } });
   await wait(1200);
   W().refresh();

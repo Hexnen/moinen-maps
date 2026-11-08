@@ -10,6 +10,7 @@
 import * as M from "../scripts/weather/model.mjs";
 import * as W from "../scripts/wind.mjs";
 import * as V from "../scripts/view-angle.mjs";
+import * as F from "../scripts/weather/fields.mjs";
 
 let fails = 0, n = 0;
 const ok = (c, msg) => { n++; if ( !c ) { fails++; console.log(`FAIL ${msg}`); } };
@@ -150,6 +151,32 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
   ok(V.cleanView(null).lift === 0.5 && V.cleanView(null).squash === 0.8 && V.cleanView(null).preset === "oblique", "default view");
   ok(V.cleanView({ preset: "top" }).lift === 0.25 && V.cleanView({ lift: 9, squash: 0 }).lift === 0.8 && V.cleanView({ lift: 9, squash: 0 }).squash === 0.6, "presets, clamps");
   ok(V.project(10, 20, 10, { lift: 0.5 })[1] === 15, "project");
+}
+
+
+/* G: phase 2 effects, snow cover, ground share quantiles */
+{
+  for ( const e of ["snow", "sand", "dust", "embers"] ) ok(M.EFFECTS.includes(e) && e in M.PRESETS && M.TABLES[e]?.lens, `effect ${e} with a preset and a lens table`);
+  ok(M.gates("snow", 2).near === 2 && M.gates("snow", 0).near === 0 && M.gates("sand", 1).grit === 34, "snow / sand gates");
+  ok(M.coverCeil(0) === 0 && Math.abs(M.coverCeil(1) - 0.10) < 1e-9 && Math.abs(M.coverCeil(2) - 0.42) < 1e-9, "snow cover ceilings 0 / 10 / 42 %");
+  const t0 = 1_000_000, P = M.cleanParams({ keys: [{ t: t0, dur: 0, preset: "snow", level: 3, i: 0.5 }], ground: { snowRate: 100, meltRate: 400 } });
+  const c1 = M.resolve(P, t0 + 100000).cover, c2 = M.resolve(P, t0 + 600000).cover;
+  ok(c1 > 0.42 * 0.55 && c1 < 0.42 * 0.7 && Math.abs(c2 - 0.42) < 0.01, `snow settles toward its ceiling (${c1.toFixed(3)}, ${c2.toFixed(3)})`);
+  ok(M.resolve(P, t0 + 100000).wet === 0, "snow does not wet the ground");
+  const P2 = M.cleanParams({ ...P, keys: [...P.keys, { t: t0 + 600000, dur: 0, preset: "clear", level: 2 }] });
+  const m1 = M.resolve(P2, t0 + 600000 + 400000 + M.LEAD_MS).cover;
+  ok(m1 > 0.42 * 0.3 && m1 < 0.42 * 0.45, `snow melts with meltRate (${m1.toFixed(3)})`);
+  ok(JSON.stringify(M.resolve(M.cleanParams(JSON.parse(JSON.stringify(P2))), t0 + 777777)) === JSON.stringify(M.resolve(P2, t0 + 777777)), "cover: same from the stored flag");
+  ok(M.cleanParams({ lens: { heat: true } }).lens.heat === true && M.cleanParams({}).lens.heat === false, "lens heat option, off by default");
+  // the shares the shader draws: the quantile threshold gives the wanted share of the sample
+  const px = new Uint8Array(64 * 64 * 4);
+  for ( let i = 0; i < 64 * 64; i++ ) { px[i * 4] = 120 + (i % 50); px[i * 4 + 1] = 110; px[i * 4 + 2] = 90; px[i * 4 + 3] = (i * 7) % 255; }
+  const smp = F.landSample(px, 64, 64, 4, 2000), sorted = F.sortedScores(smp, (q) => F.snowScore(q.x, q.y, q.lum, q.con, 3));
+  const thr = F.quantileThr(sorted, 0.42), share = smp.filter((q) => F.snowScore(q.x, q.y, q.lum, q.con, 3) > thr).length / smp.length;
+  ok(smp.length === 2000 && Math.abs(share - 0.42) < 0.01, `snow quantile share (${share.toFixed(3)})`);
+  const ds = F.sortedScores(smp, (q) => F.driftScore(q.x, q.y, q.con, 3, 0.94, 0.34)), dt = F.quantileThr(ds, 0.12);
+  ok(Math.abs(smp.filter((q) => F.driftScore(q.x, q.y, q.con, 3, 0.94, 0.34) > dt).length / smp.length - 0.12) < 0.01 && F.quantileThr(ds, 0) === 9, "drift quantile share, none = 9");
+  ok(Math.abs(F.vnoise(3.25, 7.5, 11) - F.vnoise(3.25, 7.5, 11)) === 0 && F.fbm3(1.5, 2.5, 4) >= 0 && F.fbm3(1.5, 2.5, 4) <= 1, "noise ports");
 }
 
 console.log(`${fails ? "FAIL" : "ok"} weather model: ${n - fails}/${n} checks`);
