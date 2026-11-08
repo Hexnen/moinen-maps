@@ -306,7 +306,9 @@ async function rimsHere(sprites, areas) { const { rimsOf } = await import("../de
 
 async function download(dir, id, reload = false, signal = null) {
   stats.requests++;
-  const res = await fetch(foundry.utils.getRoute(fileOf(dir, id)), { cache: reload ? "reload" : "force-cache", signal });
+  // a request that never answers gives its download slot back after 30 s (six stalled ones held every chunk load for the session)
+  const limit = AbortSignal.timeout?.(30000), sig = signal && limit && AbortSignal.any ? AbortSignal.any([signal, limit]) : (signal ?? limit);
+  const res = await fetch(foundry.utils.getRoute(fileOf(dir, id)), { cache: reload ? "reload" : "force-cache", signal: sig });
   if ( !res.ok ) return null;
   const b = new Uint8Array(await res.arrayBuffer());
   stats.bytesDown += b.length;

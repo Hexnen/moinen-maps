@@ -83,7 +83,10 @@ function engine() {
     };
     worker.onerror = (e) => { console.error(`${MODULE_ID} | flood worker`, e); disposeEngine(); };
     const base = new URL(".", new URL(route("water-worker.js"), location.href)).href;
-    winfo = await post({ type: "init", base });
+    // a worker that never answers "init" (a script that failed to load, a file from another version) must not hold every flood bake
+    let timer = 0;
+    winfo = await Promise.race([post({ type: "init", base }), new Promise((_, no) => { timer = setTimeout(() => no(new Error("the flood worker did not start")), 15000); })])
+      .finally(() => clearTimeout(timer));
     return winfo;
   })().catch((err) => { disposeEngine(); throw err; });
   return ready;

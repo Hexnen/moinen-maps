@@ -290,7 +290,7 @@ export function flagUpdate(S, scene) {
 /** Download a published bake of the first format and decode it: { w, h, rgba } (png.mjs: exact bytes, no canvas), or null. */
 export async function fetchLegacy(baked) {
   try {
-    const res = await fetch(`${foundry.utils.getRoute(baked.path)}?v=${encodeURIComponent(baked.key)}`, { cache: "force-cache" });
+    const res = await fetch(`${foundry.utils.getRoute(baked.path)}?v=${encodeURIComponent(baked.key)}`, { cache: "force-cache", signal: AbortSignal.timeout?.(60000) });
     return res.ok ? await decodePng(new Uint8Array(await res.arrayBuffer())) : null;
   } catch ( err ) { console.warn(`${MODULE_ID} | published destruction`, err); return null; }
 }

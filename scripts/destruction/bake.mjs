@@ -10,6 +10,8 @@ import { packLook } from "./look-pack.mjs";
  * and is let go ten minutes after its last job (or when the scene closes: disposeBaker).
  */
 const WATCHDOG = 30000, IDLE = 600000;
+/** The extra workers of running bake pools: let go with the main one (a scene that closes stops its pool), each failing its pending call. */
+const extraLanes = new Set();
 let worker = null, nextId = 1, idleTimer = 0, workerMap = "";
 const pending = new Map();
 
@@ -145,11 +147,19 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
   const laneExtra = async () => {
     const w = new Worker(foundry.utils.getRoute(`modules/${MODULE_ID}/scripts/destruction/worker.mjs`), { type: "module" });
     extra.push(w);
-    let id = 0;
+    let id = 0, dead = null;
+    const fails = new Set();
+    const ln = { w, fail: (err) => { dead ??= err; for ( const f of [...fails] ) f(dead); } };
+    extraLanes.add(ln);
+    // a worker script that does not load fails at once (it waited for the 30 s watchdog before)
+    w.onerror = (e) => { e.preventDefault?.(); ln.fail(new Error(`an extra bake worker failed (${e.message ?? "load"})`)); };
     const ask = (msg, transfer = []) => new Promise((resolve, reject) => {
-      const my = ++id, arm = () => setTimeout(() => reject(new Error("the destruction bake took too long")), WATCHDOG);
+      if ( dead ) return reject(dead);
+      const my = ++id, arm = () => setTimeout(() => stop(new Error("the destruction bake took too long")), WATCHDOG);
       let timer = arm();
-      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { clearTimeout(timer); timer = arm(); return; } w.removeEventListener("message", on); clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      const stop = (err) => { clearTimeout(timer); fails.delete(stop); w.removeEventListener("message", on); reject(err); };
+      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { clearTimeout(timer); timer = arm(); return; } w.removeEventListener("message", on); clearTimeout(timer); fails.delete(stop); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      fails.add(stop);
       w.addEventListener("message", on);
       w.postMessage({ id: my, ...msg }, transfer);
     });
@@ -177,6 +187,7 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
   }
   finally {
     for ( const w of extra ) w.terminate();
+    for ( const ln of [...extraLanes] ) if ( extra.includes(ln.w) ) extraLanes.delete(ln);
     // the main worker keeps none of the Rebake's looks after it (a failed job left some behind)
     if ( mainLane && mainWorker === worker && worker ) call({ kind: "dropPlain", keys: null }).catch(() => {});
     // (what each lane held at most of the looks, Mpx of RGBA: x4 bytes)
@@ -194,6 +205,8 @@ export function encodeInWorker(w, h, data) {
 /** Let the worker go: every pending call is rejected and its watchdog cleared (an old watchdog must never kill a newer worker). */
 export function disposeBaker() {
   worker?.terminate(); worker = null; workerMap = ""; clearTimeout(idleTimer);
+  for ( const ln of [...extraLanes] ) { ln.w.terminate(); ln.fail(new Error("the destruction worker was let go")); }
+  extraLanes.clear();
   for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(new Error("the destruction worker was let go")); }
   pending.clear();
 }

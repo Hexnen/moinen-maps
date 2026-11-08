@@ -56,7 +56,7 @@ async function fetchTiles(baked) {
 /** The first format: one PNG, frames in a grid, the level in the red channel (read with png.mjs, no canvas). */
 async function fetchLegacy(baked) {
   const url = `${foundry.utils.getRoute(baked.path)}?v=${encodeURIComponent(baked.key)}`;
-  const res = await fetch(url, { cache: "force-cache" });
+  const res = await fetch(url, { cache: "force-cache", signal: AbortSignal.timeout?.(60000) });
   if ( !res.ok ) return null;
   const png = await decodePng(new Uint8Array(await res.arrayBuffer()));
   const { box, frames: n, cols } = baked, d = png.rgba, W = png.w, out = [];
