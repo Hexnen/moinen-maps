@@ -93,10 +93,15 @@ function settingsPanel(host) {
         ${row(Z("f.fill"), range("fill", 0, 1))}
         ${row(Z("f.ink"), range("ink", 0, 2))}
         ${row(Z("f.lineAlpha"), range("lineAlpha", 0, 1))}
+        ${row(Z("f.lineStyle"), opts("lineStyle", ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch"], L.lineStyle))}
         ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}`)}
       ${fold("numbers", Z("grp.numbers"), "fa-solid fa-hashtag", `
         ${row(Z("f.numbers"), opts("numbers", ["always", "hover", "never"], L.numbers), Z("h.numbers"))}
-        ${L.numbers !== "never" ? row(Z("f.place"), opts("place", ["center", "corner"], L.place)) : ""}`)}
+        ${L.numbers !== "never" ? `${row(Z("f.place"), opts("place", ["center", "corner"], L.place))}
+          ${row(Z("f.numShape"), opts("numShape", ["circle", "square", "hex", "diamond", "plain"], L.numShape))}
+          ${row(Z("f.numFormat"), opts("numFormat", ["arabic", "roman", "letters"], L.numFormat))}
+          ${row(Z("f.numColor"), `<input type="color" name="numColor" value="${esc(L.numColor || L.color)}">`, Z("h.numColor"))}
+          ${row(Z("f.ringColor"), `<input type="color" name="ringColor" value="${esc(L.ringColor || L.color)}">`, Z("h.numColor"))}` : ""}`)}
       ${fold("hover", Z("grp.hover"), "fa-solid fa-hand-pointer", `
         ${optCheck({ name: "hoverHi", label: Z("f.hoverHi"), checked: L.hoverHi, hint: Z("h.hoverHi") })}
         ${L.hoverHi ? `${row(Z("f.hoverFx"), opts("hoverFx", ["none", "glow", "hatch", "crosshatch", "dots"], L.hoverFx))}
@@ -121,7 +126,7 @@ function settingsPanel(host) {
     else if ( c.name === "lookFrom" ) Zones.setParams({ lookFrom: v || null });
     else if ( c.name === "worldPreset" ) Styles.setWorldPreset(v);
     else if ( c.name === "worldStyle" ) Styles.setWorldStyle(v);
-    else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
+    else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx", "lineStyle", "numColor", "ringColor", "numShape", "numFormat"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
     // these show or hide other rows, or switch the look preset to "own": draw the panel again now (focus is still in it)
     if ( ["lookFrom", "numbers", "hoverHi", "hoverFx", "preset"].includes(c.name) || c.closest(".mm-z-fold[data-fold=look], .mm-z-fold[data-fold=hover], .mm-z-fold[data-fold=numbers]") ) queueMicrotask(render);
     else if ( ["fill", "ink", "lineAlpha", "hoverAlpha", "hoverLineAlpha"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });

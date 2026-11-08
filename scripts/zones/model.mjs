@@ -17,11 +17,16 @@ import { MODULE_ID } from "../config.mjs";
 export const FLAG = "zones";
 export const VERSION = 1;
 
-export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, lineAlpha: 1, hoverAlpha: 1, hoverLineAlpha: 1, numbers: "always", place: "center", hoverHi: false, hoverFx: "glow", color: "#f3e7c9" });
+export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, lineAlpha: 1, hoverAlpha: 1, hoverLineAlpha: 1, numbers: "always", place: "center", hoverHi: false, hoverFx: "glow", color: "#f3e7c9", lineStyle: "dashed", numColor: "", ringColor: "", numShape: "circle", numFormat: "arabic" });
 export const LIMITS = { smooth: [0, 1], snap: [0, 1], fill: [0, 1], ink: [0, 2], lineAlpha: [0, 1], hoverAlpha: [0, 1], hoverLineAlpha: [0, 1] };
 export const WHO = ["all", "gm", "none"];
 export const NUMBERS = ["always", "hover", "never"];
 export const PLACES = ["center", "corner"];
+/** How a zone border is drawn. */
+/** The zone number: its badge and how it is written. */
+export const NUM_SHAPES = ["circle", "square", "hex", "diamond", "plain"];
+export const NUM_FORMATS = ["arabic", "roman", "letters"];
+export const LINE_STYLES = ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch"];
 /** What fills the zone under the cursor when "hoverHi" is on (besides its bright border). */
 export const HOVER_FX = ["none", "glow", "hatch", "crosshatch", "dots"];
 
@@ -42,7 +47,13 @@ export function cleanLook(l = {}) {
     place: PLACES.includes(l.place) ? l.place : D.place,
     hoverHi: l.hoverHi === true,
     hoverFx: HOVER_FX.includes(l.hoverFx) ? l.hoverFx : D.hoverFx,
-    color: /^#[0-9a-f]{6}$/i.test(l.color ?? "") ? l.color : D.color
+    color: /^#[0-9a-f]{6}$/i.test(l.color ?? "") ? l.color : D.color,
+    lineStyle: LINE_STYLES.includes(l.lineStyle) ? l.lineStyle : D.lineStyle,
+    // number text and badge ring: "" = the border colour
+    numColor: /^#[0-9a-f]{6}$/i.test(l.numColor ?? "") ? l.numColor : "",
+    ringColor: /^#[0-9a-f]{6}$/i.test(l.ringColor ?? "") ? l.ringColor : "",
+    numShape: NUM_SHAPES.includes(l.numShape) ? l.numShape : D.numShape,
+    numFormat: NUM_FORMATS.includes(l.numFormat) ? l.numFormat : D.numFormat
   };
 }
 

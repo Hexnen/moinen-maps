@@ -17,8 +17,9 @@ function trace(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i +=
 
 function ring(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); G.closePath(); }
 
-function dashed(G, p, dash, gap) {
-  let on = true, left = dash;
+/** A polyline drawn as a repeating pattern of on/off lengths: [on, off] dashes, [0.01, gap] dots (round caps), [a, b, c, d] dash-dot. */
+function pattern(G, p, pat) {
+  let k = 0, on = true, left = pat[0];
   G.moveTo(p[0], p[1]);
   for ( let i = 2; i < p.length; i += 2 ) {
     let ax = p[i - 2], ay = p[i - 1];
@@ -29,9 +30,49 @@ function dashed(G, p, dash, gap) {
       const x = ax + (bx - ax) * f, y = ay + (by - ay) * f;
       if ( on ) G.lineTo(x, y); else G.moveTo(x, y);
       ax = x; ay = y; seg -= t; left -= t;
-      if ( left <= 1e-6 ) { on = !on; left = on ? dash : gap; }
+      if ( left <= 1e-6 ) { k = (k + 1) % pat.length; on = k % 2 === 0; left = pat[k]; if ( on ) G.moveTo(x, y); }
     }
   }
+}
+
+/**
+ * A copy of a polyline that wanders slowly to either side (for the hand-drawn border): an offset along the normal that changes with
+ * the distance walked (wavelengths of ~40 and ~17 screen px), different per seed. Ends stay put.
+ */
+function wobble(p, amp, seed, px) {
+  const out = p.slice(), n = p.length;
+  let s = 0;
+  for ( let i = 2; i < n - 2; i += 2 ) {
+    s += Math.hypot(p[i] - p[i - 2], p[i + 1] - p[i - 1]);
+    const dx = p[i + 2] - p[i - 2], dy = p[i + 3] - p[i - 1], L = Math.hypot(dx, dy) || 1;
+    const u = s / px, off = amp * (Math.sin(u / 6.4 + seed * 2.1) * 0.7 + Math.sin(u / 2.7 + seed * 5.3) * 0.3);
+    out[i] += (-dy / L) * off; out[i + 1] += (dx / L) * off;
+  }
+  return out;
+}
+
+/** The badge under a zone number: its outline in the ring colour over a dark fill ("plain": no badge). */
+function badgeShape(G, shape, ring, fill) {
+  if ( shape === "plain" ) return;
+  const r = BADGE_R;
+  G.lineStyle({ width: r * 0.16, color: ring, alpha: 0.95, join: PIXI.LINE_JOIN.ROUND });
+  G.beginFill(0x15110f, fill);
+  if ( shape === "square" ) G.drawRoundedRect(-r * 0.92, -r * 0.92, r * 1.84, r * 1.84, r * 0.28);
+  else if ( shape === "hex" ) G.drawPolygon([...Array(6)].flatMap((_, i) => { const a = Math.PI / 6 + (i * Math.PI) / 3; return [Math.cos(a) * r * 1.05, Math.sin(a) * r * 1.05]; }));
+  else if ( shape === "diamond" ) G.drawPolygon([0, -r * 1.25, r * 1.25, 0, 0, r * 1.25, -r * 1.25, 0]);
+  else G.drawCircle(0, 0, r);
+  G.endFill();
+}
+
+/** A zone number written as asked: 7, VII or G (27 -> AA). */
+function numeral(n, format) {
+  if ( format === "roman" && n < 4000 ) {
+    let out = "";
+    for ( const [v, sym] of [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]] ) while ( n >= v ) { out += sym; n -= v; }
+    return out;
+  }
+  if ( format === "letters" ) { let out = ""; while ( n > 0 ) { n--; out = String.fromCharCode(65 + (n % 26)) + out; n = Math.floor(n / 26); } return out; }
+  return String(n);
 }
 
 /** Greedy colouring: each zone takes the first tint none of its neighbours has. */
@@ -135,14 +176,17 @@ export class ZoneDisplay {
       const d = dist ? dist.get(z.id) : null;
       if ( d == null && !numbered(z.id) ) continue;
       const band = bands?.get(z.id);
-      const text = d != null ? String(d) : String(z.id + 1);
+      const text = d != null ? String(d) : numeral(z.id + 1, look.numFormat);
       const b = new PIXI.Container();
       const G = new PIXI.Graphics();
-      const ringCol = band ? band.color : light;
-      G.lineStyle({ width: BADGE_R * 0.16, color: ringCol, alpha: 0.95 });
-      G.beginFill(0x15110f, d != null ? 0.85 : 0.6).drawCircle(0, 0, BADGE_R).endFill();
+      const numCol = look.numColor ? hex(look.numColor) : light, ringBase = look.ringColor ? hex(look.ringColor) : light;
+      const ringCol = band ? band.color : ringBase, shape = look.numShape ?? "circle";
+      badgeShape(G, shape, ringCol, d != null ? 0.85 : 0.6);
       b.addChild(G);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(BADGE_R * (text.length > 1 ? 1.0 : 1.2)), fill: d != null ? ringCol : light, align: "center" });
+      // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
+      const size = BADGE_R * (text.length > 3 ? 0.62 : text.length > 2 ? 0.78 : text.length > 1 ? 1.0 : 1.2) * (shape === "plain" ? 1.25 : 1);
+      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: d != null ? ringCol : numCol, align: "center",
+        ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
       t.resolution = res; t.anchor.set(0.5, 0.52);
       b.addChild(t);
       b.alpha = d == null && dist ? 0.45 : 1;
@@ -159,11 +203,22 @@ export class ZoneDisplay {
     this.lineZoom = zoom;
     if ( !Z || !look || look.ink <= 0 ) return;
     Ln.alpha = look.lineAlpha ?? 1;
-    const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink;
-    Ln.lineStyle({ width: w, color: 0x15110f, alpha: Math.min(1, 0.55 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
-    for ( const p of Z.core ) trace(Ln, p);
-    Ln.lineStyle({ width: w * 0.45, color: hex(look.color), alpha: Math.min(1, 0.95 * ink), cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
-    for ( const p of Z.core ) dashed(Ln, p, 11 * px, 7 * px);
+    const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink, col = hex(look.color), a = Math.min(1, 0.95 * ink);
+    const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
+    const stroke = (width, color, alpha, draw) => { Ln.lineStyle({ width, color, alpha, ...R }); for ( const p of Z.core ) draw(p); };
+    const under = (k = 1) => stroke(w * k, 0x15110f, Math.min(1, 0.55 * ink), (p) => trace(Ln, p));
+    switch ( look.lineStyle ) {
+      case "solid": under(); stroke(w * 0.45, col, a, (p) => trace(Ln, p)); break;
+      case "dotted": under(0.8); stroke(w * 0.5, col, a, (p) => pattern(Ln, p, [0.01 * px, 7 * px])); break;
+      case "dashdot": under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [14 * px, 5 * px, 0.01 * px, 5 * px])); break;
+      // two light lines: a wide light line split by a dark core
+      case "double": under(1.5); stroke(w * 0.95, col, a, (p) => trace(Ln, p)); stroke(w * 0.35, 0x15110f, Math.min(1, 0.8 * ink), (p) => trace(Ln, p)); break;
+      // a soft halo in the border colour around a thin bright core, no dark under-line
+      case "glow": stroke(w * 3.2, col, 0.1 * a, (p) => trace(Ln, p)); stroke(w * 1.9, col, 0.18 * a, (p) => trace(Ln, p)); stroke(w * 0.4, col, a, (p) => trace(Ln, p)); break;
+      // hand-drawn: two thin, slightly wandering passes
+      case "sketch": under(0.7); stroke(w * 0.3, col, 0.8 * a, (p) => trace(Ln, wobble(p, 1.8 * px, 1, px))); stroke(w * 0.25, col, 0.65 * a, (p) => trace(Ln, wobble(p, 2.2 * px, 2, px))); break;
+      default: under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [11 * px, 7 * px]));
+    }
   }
 
   /** Every zoom / pan step: badges follow at once (cheap), the border lines are drawn again once the zoom moved by ~8 %. */
