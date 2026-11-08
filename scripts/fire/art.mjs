@@ -37,8 +37,11 @@
  *         darkest band; the torn-off last lobe stays close and small), so the column's top never grows dark round balloons.
  *         SMOKE AND FLAMES MIX: 40 % of a fire's puffs are born low, between the tongues; 45 % curl IN FRONT of the flames (a thin
  *         warm veil lit from below), the rest pass behind them (hidden by the tongues); 40 % of the front ones are DENSE DRIFTS that
- *         really cover part of the flames for a moment (lit from below, the flame's colour glowing through). Sparks glow through. The plume gate also probes upwind, so sheared puffs are
- *         never cut off straight.
+ *         really cover part of the flames for a moment (lit from below, the flame's colour glowing through). Sparks glow through.
+ *         NEVER CUT: the area's rectangle holds every puff's whole reach (model.puffReach: highest rise, drift, shear, gust, size)
+ *         and the smoke is only looked for where a puff can be (the PUFF mask, model.puffMask: each source's drift cone grown by the
+ *         puff's extent, with the source rows to search); a puff whose extent would still near the rectangle (a clamped or mixed-wind
+ *         area) thins out as a whole first. The source's end is frayed (each puff its own last moment, the last ones smaller).
  *       - GROUND: char inside the bed (clustered ragged edge), a heat-tint ring outside it, the smoke's shadow on the ground.
  *  2. GROUND (every frame): a MULTIPLY quad - the map's own colours darkened / warmed (never an opaque ground colour).
  *  3. ART (every frame): flames, embers and sparks (the FIRE layer, under the tokens), and the SMOKE layer (a second quad in the
@@ -139,6 +142,10 @@ uniform int uLvMax;         // the area's highest fire level (the emitter lattic
 uniform float uLean;        // the wind's lean (cells per cell of height)
 uniform vec2 uWind;         // the area's wind
 uniform float uPlume;       // P.plume (squares)
+uniform sampler2D uPuff;    // model.raster's puff mask: G = 0 no puff can reach the cell, else the nearest source row's distance code; R the farthest's
+uniform vec4 uBox;          // the FIRE BOX (world cells x0, y0, x1, y1): the tongues and sparks are only looked for inside it (model.reachOf
+                            // without the puffs - the rectangle's extra room for the smoke costs them nothing)
+uniform vec4 uPuffQ;        // ... their step and offset (rows), then B / A (the sources' columns): step, offset; 0 = no puff texture
 uniform int uBirths;        // blobs per emitter (Performance: 8 / 6 / 4)
 uniform sampler2D uFuel;    // pass 0: R fuel (how hard the fire burns here), G the beds' variety (bilinear, one texel per FUEL_K cells)
 uniform vec2 uFuelSize;
@@ -165,6 +172,7 @@ const float S_R0[4]   = float[4](0.0, 4.0, 6.0, 8.0);      // puff radius at bir
 const float S_R1[4]   = float[4](0.0, 11.0, 17.0, 21.0);    // ... at its largest
 const float S_LIFE[4] = float[4](0.0, 2.4, 3.6, 4.6);      // puff life (s)
 const float S_V0[4]   = float[4](0.0, 16.0, 20.0, 24.0);   // rise speed at birth (art px / s, x plume / 2.5 x 1.5)
+const bool EXIT = true;
 const float TAU = 1.3;                                     // the smoke cools: rise speed v0 e^(-age / tau)
 const int VC[256] = int[256](${VC16.join(",")});
 
@@ -227,6 +235,11 @@ float dBed(ivec2 p, float d) {
   return mix(dO, d, g * g * (3.0 - 2.0 * g));
 }
 int levelAt(ivec2 p) { int code = int(fF(p).a * 255.0 + 0.5) - 1; return code < 0 ? 2 : clamp(code / 4 + 1, 1, 3); }
+// a puff centred at q (WORLD cells) reaching h either way: 1 well inside the area, 0 once its extent touches the rectangle
+float edgeFade(vec2 q, vec2 h, float u) {
+  vec2 l = q - uOrg, d2 = min(l - h, uSize - l - h);
+  return smoothstep(0.0, 6.0 * u + 2.0, min(d2.x, d2.y));
+}
 bool inArea(ivec2 p) { p = Lc(p); return p.x >= 0 && p.y >= 0 && p.x < int(uSize.x) && p.y < int(uSize.y); }
 // a cell's ignite / out ages (s): flames (x, y), smoke (z, w); 1e4 = long lit, -1e4 = not out
 vec4 ages(ivec2 p) {
@@ -245,7 +258,11 @@ void main() {
   ivec2 ic = ivec2(floor(c));
   float u = uU, t = uTime, gdir = uWind.x < -0.05 ? -1.0 : 1.0;
   vec4 aux = fA(ic) * 255.0;
-  vec4 fld = fF(ic);
+  vec4 fld = texelFetch(uPuff, Lc(ic), 0);         // (only the puff mask: the field's own bytes are not needed per cell)
+  // (off the puff mask, outside the fire box (no tongue, no spark) and beyond the heat ring, nothing is drawn: the room the rectangle
+  // keeps for the smoke costs two fetches a cell there. aux.g: the ground-plane chamfer distance to the bed, at least the true one)
+  bool inBox = c.x >= uBox.x && c.y >= uBox.y && c.x < uBox.z && c.y < uBox.w;
+  if ( EXIT && fld.g == 0.0 && !inBox && aux.g > 0.8 * 32.0 * u / RY + 4.0 ) { oArt = vec4(0.0); return; }
   float rk = rank(c);
   int lvMax = clamp(uLvMax, 1, 3);
   int R = 0, G = 0, B = 0, A = 0;
@@ -256,8 +273,8 @@ void main() {
   float lo0 = uLean + min(gdir * 0.036, gdir * 0.38), hi0 = uLean + max(gdir * 0.036, gdir * 0.38);
   float W2 = 2.6 * Rm * 1.3 + 3.2 * u;
   // (a cell far from any burning ground below it is skipped: flames only rise)
-  bool nearBed = aux.r > 0.5 || aux.g < (W2 + abs(hi0) * reachUp) / RY + 2.0;
-  for ( int s = 1; s <= 3 && !nearBed; s++ ) {
+  bool nearBed = inBox && (aux.r > 0.5 || aux.g < (W2 + abs(hi0) * reachUp) / RY + 2.0);
+  for ( int s = 1; s <= 3 && !nearBed && inBox; s++ ) {
     ivec2 p = ivec2(ic.x, ic.y + int(reachUp * float(s) / 3.0));
     if ( Lc(p).y < int(uSize.y) ) { float g = fA(p).g * 255.0; nearBed = fA(p).r > 0.0 || g < (W2 + abs(hi0) * reachUp) / RY + 2.0; }
   }
@@ -467,7 +484,7 @@ void main() {
   // (a rising frame per layer: each spark sits in one cell of a grid that moves up with it, so a cell finds its spark in O(1); its
   // birth place, below along its path, must be burning ground - denser over the heart of the fire and in gusts)
   bool nearSp = nearBed || dIn > 0.5;
-  for ( int s = 1; s <= 3 && !nearSp && t > 0.0; s++ ) {                     // (sparks rise higher than the flames reach)
+  for ( int s = 1; s <= 3 && !nearSp && inBox && t > 0.0; s++ ) {                     // (sparks rise higher than the flames reach)
     ivec2 p = ivec2(floor(c + vec2(-(uLean + 0.6 * uWind.x), 1.0) * float(s) * 22.0 * u));
     if ( inArea(p) ) nearSp = fA(p).r > 0.0;
   }
@@ -483,9 +500,9 @@ void main() {
       vec4 J = hb(g.x + int(k) * 7919, g.y, 310 + L);
       float life = life0 * (0.6 + 0.8 * J.z);
       if ( age > life ) continue;
-      // (near the area's top each spark burns out at its own height, 2-16 art px below it: sparks die at scattered heights, never
-      // cut off by the area's edge - no bigger area, no extra cost)
-      if ( c.y - uOrg.y < (2.0 + 14.0 * H.z) * max(1.0, u) ) continue;
+      // (near the fire box's top each spark burns out at its own height, 2-16 art px below it: sparks die at scattered heights, never
+      // cut off by the box's edge - no bigger box, no extra cost)
+      if ( c.y - uBox.y < (2.0 + 14.0 * H.z) * max(1.0, u) ) continue;
       vec2 q = (vec2(g) + 0.15 + 0.7 * J.xy) * S;
       float hs = (L == 2 || (L == 0 && J.z > 0.8)) ? 1.0 : 0.5;                          // (a few 2 px sparks)
       if ( abs(xq - q.x) > hs || abs(yq - q.y) > hs ) continue;
@@ -512,14 +529,9 @@ void main() {
   /* ---------------- SMOKE: lit puffs from the sources ---------------- */
   // (only near the plume: the model's plume field says where smoke can be, never what its silhouette is)
   float R1m = S_R1[3] * u * 1.25;
+  // (the puff mask marks every cell a puff can cover - model.puffMask: its drift cone and its size, conservative - so this cheap gate
+  // never cuts the smoke)
   bool smk = fld.g > 0.0;
-  // (the puffs shear downwind and the gust bends them further than the model's plume: the upwind probes reach their sources)
-  for ( int s = 0; s < 14 && !smk; s++ ) {
-    vec2 o = s < 8 ? vec2(cos(float(s) * 0.7854), sin(float(s) * 0.7854)) * R1m * 1.6
-                   : vec2(-gdir * R1m * (s < 11 ? 2.8 : 4.0), float((s - 8) % 3 - 1) * R1m * 1.3);
-    ivec2 p = ivec2(floor(c + o));
-    if ( inArea(p) ) smk = fF(p).g > 0.0;
-  }
   if ( smk ) {
     float sps = 22.0 * u, spys = sps * RY, Hk = uPlume / 2.5;
     float zTop = 1.0 * L_RISE[3] * u + S_V0[3] * u * Hk * 1.5 * 1.35 * TAU + R1m;
@@ -527,6 +539,13 @@ void main() {
     float strM = 1.0 + 0.55 * (0.3 + 2.0 * (abs(0.6 * uWind.x) + 0.216));   // (the widest shear stretch; + the flow warp below)
     float pad = R1m * (0.83 + 1.15 * strM) + sps * 0.5 + 2.5 * u + 4.0 * u;
     int jHi = int(floor((c.y + zTop * (1.0 + max(0.0, -0.5 * uWind.y)) + R1m + 4.5 * u) / spys)) + 1, jLo = int(floor((c.y - R1m - 4.5 * u - max(0.0, 0.5 * uWind.y) * zTop) / spys)) - 1;
+    // (only the rows where a source that can reach this cell lies: model.puffMask's nearest / farthest, conservative)
+    if ( uPuffQ.x > 0.0 ) {
+      float dLo = (fld.g * 255.0 - 1.0) * uPuffQ.x - uPuffQ.y, dHi = fld.r * 255.0 * uPuffQ.x - uPuffQ.y;
+      jHi = min(jHi, int(floor((c.y + dHi + 1.0) / spys)) + 1); jLo = max(jLo, int(floor((c.y + dLo - 1.0) / spys)) - 1);
+    }
+    float xS0 = uPuffQ.x > 0.0 ? c.x + (fld.b * 255.0 - 1.0) * uPuffQ.z - uPuffQ.w - 1.0 : -1e9;
+    float xS1 = uPuffQ.x > 0.0 ? c.x + fld.a * 255.0 * uPuffQ.z - uPuffQ.w + 1.0 : 1e9;
     float F = 0.0, AG = 0.0, QB = -1e9; vec2 nB = vec2(0.0), GR = vec2(0.0); int lsB = 2; bool lowB = false, own = false, frB = false, drB = false;
     // the FLOW: a smooth warp field that rises and drifts with the smoke - every edge rolls and curls over itself, no lobe stays a
     // circle; the same field turns the shading (the rolls inside the mass follow the curls of its silhouette)
@@ -538,7 +557,7 @@ void main() {
       int j = jHi - jj; if ( j < jLo ) break;
       float dyc = max(0.0, float(j) * spys - c.y);
       float xlo = c.x - max(0.0, rMax * dyc) - pad, xhi = c.x - min(0.0, rMin * dyc) + pad;   // (the puffs shear along the wind)
-      int i0 = int(floor(xlo / sps - 0.5)), i1 = int(floor(xhi / sps - 0.5)) + 1;
+      int i0 = int(floor(max(xlo, xS0) / sps - 0.5)), i1 = int(floor(min(xhi, xS1) / sps - 0.5)) + 1;
       for ( int ii = 0; ii < 16; ii++ ) {
         int i = i0 + ii; if ( i > i1 ) break;
         vec2 e = vec2((float(i) + 0.5) * sps, (float(j) + 0.5) * spys);
@@ -574,7 +593,10 @@ void main() {
           float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
           if ( age < 0.0 ) continue;
           if ( tb < t - ag2.z ) continue;                                 // before the smoke started
-          if ( ag2.w > -1e3 && tb > t - ag2.w ) continue;                // after it stopped: the last puffs drift off
+          // after it stopped the last puffs drift off - and the source does not stop all at once: each puff has its own last moment
+          // (up to 1.8 s early) and the last ones are smaller, so the column's foot frays out instead of lifting off as a flat line
+          float dS = ag2.w > -1e3 ? t - ag2.w - tb : 1e4;
+          if ( dS < 1.8 * fract(P1.y * 7.31 + P1.z * 3.17) ) continue;
           float life = lifeS * (0.7 + 0.6 * P1.z), a = age / life;
           if ( a >= 1.0 ) continue;
           float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);            // the first puffs are wisps, building up over ~2 s
@@ -589,17 +611,26 @@ void main() {
           float g = gust(t, o0.x);
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)) + 2.5 * u * sin(6.2832 * (0.35 * age + P2.z));
           float y = o0.y - z + 0.5 * uWind.y * z;
-          float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * P2.w);
+          float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * P2.w)
+                  * (0.55 + 0.45 * clamp(dS / 1.8, 0.0, 1.0));
           // (wisps stretch along the wind and the gust as they age: shear, not round puffs)
           float strx = 1.0 + (0.1 + 0.45 * a) * (0.3 + 2.0 * abs(0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)));
-          if ( abs(cw.x - x) > r * (0.8 + 1.3 * strx) + 2.0 || abs(cw.y - y) > r * 2.5 + 2.0 ) continue;
+          // (the cull box: a lobe sits at most 0.6 r x tear 1.44 across / 0.42 r x 1.44 down from the centre and covers sqrt(1.6) x its
+          // radius 0.95 r (x strx across): nothing beyond the box is drawn - model.puffReach mirrors it)
+          vec2 hb2 = vec2(r * (0.87 + 1.2 * strx), r * 1.85) + 2.0;
+          if ( abs(cw.x - x) > hb2.x || abs(cw.y - y) > hb2.y ) continue;
           int nl = 3;
           vec4 P3 = hb(eid, n, 70), P4 = hb(eid, n, 75); float p75 = P4.w;
           // every puff CONDENSES from nothing (thin first, then dense) and DISSIPATES by thinning: no puff ever pops in or out
           float env = smoothstep(0.0, 0.24, a) * (1.0 - smoothstep(0.55, 1.0, a));
+          // ... and a puff whose whole extent (the cull box above + the flow warp) comes near the area's rectangle thins out AS A WHOLE
+          // before it could touch it: no smoke silhouette ever meets a straight edge (model.reachOf makes room, so this rarely acts)
+          env *= edgeFade(vec2(x, y), hb2 + 4.0 * u, u);
+          if ( env <= 0.0 ) continue;
           // (wisps stretch along the wind and the gust as they age: shear, not round puffs)
 
-          bool low = fromFire && z < z0 + 0.8 * L_RISE[2] * u && a < 0.5;
+          // (lit warm from below only while the flames under it still burn: a dead fire lights nothing)
+          bool low = fromFire && z < z0 + 0.8 * L_RISE[2] * u && a < 0.5 && (ag2.y < -1e3 || ag2.y < 0.4 * uDur.y);
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
             float ang = P3[k] * 6.2832 + a * (1.5 + p75);
@@ -665,7 +696,7 @@ void main() {
           vec4 P1 = hb(eid, n, 59);
           if ( P1.x > src ) continue;
           float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
-          if ( age < 0.0 || tb < t - ag2.z || (ag2.w > -1e3 && tb > t - ag2.w) ) continue;
+          if ( age < 0.0 || tb < t - ag2.z || (ag2.w > -1e3 && t - ag2.w - tb < 1.8 * fract(P1.y * 7.31 + P1.z * 3.17)) ) continue;
           float life = S_LIFE[ls] * (0.7 + 0.6 * P1.z), a = age / life;
           if ( a >= 1.0 ) continue;
           float z = z0 + v0 * (0.65 + 0.7 * P1.w) * TAU * (1.0 - exp(-age / TAU));
@@ -674,7 +705,8 @@ void main() {
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir) + z * 0.25;
           float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * 0.9;
           vec2 dd = vec2((c.x - x) / r, (c.y - o0.y - 2.0 * u) / (r * RY));
-          if ( dot(dd, dd) < 0.8 && rk < 0.55 * smoothstep(0.0, 0.24, a) * (1.0 - 0.55 * smoothstep(0.45, 0.8, a)) * (1.0 - smoothstep(0.8, 1.0, a)) ) { A = (A & 7) + 8 * (ls == 3 ? 2 : 1); }
+          float ef = edgeFade(vec2(x, o0.y + 2.0 * u), vec2(r, r * RY) + 2.0, u);
+          if ( dot(dd, dd) < 0.8 && rk < 0.55 * ef * smoothstep(0.0, 0.24, a) * (1.0 - 0.55 * smoothstep(0.45, 0.8, a)) * (1.0 - smoothstep(0.8, 1.0, a)) ) { A = (A & 7) + 8 * (ls == 3 ? 2 : 1); }
         }
       }
     }
@@ -784,8 +816,20 @@ vec4 cellColor(vec2 cf) {
   if ( a.g >= 32 ) return vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);
   int band = a.b & 7, rim = (a.b >> 3) & 1, ls = clamp((a.b >> 4) & 3, 1, 3);
   bool front = (a.b & 64) != 0, drift = (a.b & 128) != 0;
-  vec3 rgb = band == 4 ? uRamp[11].rgb * (1.0 - 0.3 * uDark) : tintSmoke(SMK[(ls - 1) * 3 + band - 1]) * (1.0 - 0.62 * uDark);
+  vec3 rgb = band == 4 ? uRamp[11].rgb : tintSmoke(SMK[(ls - 1) * 3 + band - 1]);
   float al = rim == 1 ? S_RIM[ls] : S_A[ls][min(band, 3) - 1];
+  // AT NIGHT the scene's darkness already dims the smoke with the map (it is not emissive): darkening it again made a black smudge.
+  // It keeps its own value, cooled a little by the ambient, and reads by its form: the lit tops and the outer edge facing the light
+  // (top-left) catch a pale rim, the dense cores stay dark - contrast against the dimmed map, never a glow (nothing goes above the
+  // day colours)
+  if ( uDark > 0.0 && band != 4 ) {
+    vec3 cool = rgb * vec3(0.90, 0.95, 1.06);
+    bool edge = art(p + ivec2(0, -1)).b == 0 || art(p + ivec2(-1, 0)).b == 0 || art(p + ivec2(-1, -1)).b == 0;
+    if ( band == 1 || edge ) cool = mix(cool, vec3(0.80, 0.83, 0.90), edge ? 0.55 : 0.3);
+    else if ( band == 3 ) cool *= 0.85;
+    rgb = mix(rgb, cool, uDark);
+    if ( edge ) al = mix(al, max(al, 0.7 * S_A[ls].x), uDark);
+  }
   vec4 fl = flameColor(p, a);
   if ( fl.a > 0.0 ) {
     if ( !front ) return vec4(0.0);
@@ -830,10 +874,10 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v4"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v6"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
   show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v3"),
-  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v1"),
+  smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v2"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
 };
@@ -852,7 +896,7 @@ export const BIRTHS = { high: 8, medium: 6, low: 4 };
  * frame. Same contract as shader.mjs FireMesh for the display (anim, visible, destroy).
  */
 export class FireArt extends PIXI.Container {
-  constructor(field, rect, geo, { above = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
+  constructor(field, rect, geo, { above = null, box = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
     super();
     this.eventMode = "none"; this.interactiveChildren = false;
     const { ap, ox, oy } = geo, W = field.w, H = field.h, P = programs();
@@ -861,6 +905,7 @@ export class FireArt extends PIXI.Container {
     this.auxTex = texOf(field.aux ?? new Uint8Array(W * H * 4), W, H);
     this.timesTex = field.times ? texOf(field.times, W, H) : null;
     this.auxOldTex = field.auxOld && field.times ? texOf(field.auxOld, W, H) : null;
+    this.puffTex = field.puff ? texOf(field.puff, W, H) : null;
     this.rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
     this.rt.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     this.anim = field.anim; this.W = W; this.H = H;
@@ -873,10 +918,11 @@ export class FireArt extends PIXI.Container {
     this.artT = null;
     const ramp = rampOf(field.color ?? NATURAL);
     this.pass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
-      uField: this.fieldTex, uAux: this.auxTex, uAuxOld: this.auxOldTex ?? this.auxTex, uHasOld: this.auxOldTex ? 1 : 0, uTimes: this.timesTex ?? this.fieldTex, uAnim: this.timesTex ? 1 : 0,
+      uField: this.fieldTex, uAux: this.auxTex, uAuxOld: this.auxOldTex ?? this.auxTex, uHasOld: this.auxOldTex ? 1 : 0, uPuff: this.puffTex ?? this.fieldTex, uTimes: this.timesTex ?? this.fieldTex, uAnim: this.timesTex ? 1 : 0,
       uI: new Float32Array([0, 1]), uO: new Float32Array([0, 1]), uDur: new Float32Array(dur),
       uSize: new Float32Array([W, H]), uTime: 0, uSeed: seed % 65536, uU: grid / 32, uLvMax: lvMax, uLean: lean,
-      uWind: new Float32Array(wind), uPlume: plume, uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
+      uWind: new Float32Array(wind), uPlume: plume, uPuffQ: new Float32Array(field.puff ? field.puffQ : [0, 0, 0, 0]),
+      uBox: new Float32Array(box ? [box.x0, box.y0, box.x1, box.y1] : [rect.x0, rect.y0, rect.x1, rect.y1]), uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
       translationMatrix: new PIXI.Matrix().toArray(true) }));
     const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0,
       uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
@@ -938,8 +984,8 @@ export class FireArt extends PIXI.Container {
     this.artT = this.pass.shader.uniforms.uTime;
   }
   destroy() {
-    const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex];
-    this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = null;
+    const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex];
+    this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = this.puffTex = null;
     this.glow.parent?.removeChild(this.glow);
     const own = this.smoke.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
