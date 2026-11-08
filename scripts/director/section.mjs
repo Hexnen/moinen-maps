@@ -17,7 +17,7 @@ const UNIT = (k) => Dir.NUM[k]?.[3] ? ` (${Dir.NUM[k][3]})` : "";
 const step = (k) => { const u = Dir.NUM[k]?.[3]; return u === "ms" ? 50 : u === "sq" ? 1 : 0.05; };
 const TIMING = ["takeAt", "softAt", "merge", "mergeSq", "cooldown", "rest", "stale", "lead", "back", "holdK", "maxShot", "zoomIn", "softMs"];
 const PRESET_LABEL = { calm: "Dir.pn.calm", standard: "Dir.pn.standard", dramatic: "Dir.pn.dramatic", documentary: "Dir.pn.documentary", custom: "Dir.pn.custom" };
-const SRC_LABEL = { destruction: "Dir.src.destruction", fire: "Dir.src.fire", zones: "Dir.src.zones", orbit: "Dir.src.orbit", altitude: "Dir.src.altitude" };
+const SRC_LABEL = { destruction: "Dir.src.destruction", fire: "Dir.src.fire", zones: "Dir.src.zones", orbit: "Dir.src.orbit", altitude: "Dir.src.altitude", attacks: "Dir.src.attacks", rolls: "Dir.src.rolls" };
 const LABEL = {
   takeAt: "Dir.p.takeAt", softAt: "Dir.p.softAt", merge: "Dir.p.merge", mergeSq: "Dir.p.mergeSq", cooldown: "Dir.p.cooldown", rest: "Dir.p.rest", stale: "Dir.p.stale",
   lead: "Dir.p.lead", back: "Dir.p.back", holdK: "Dir.p.holdK", maxShot: "Dir.p.maxShot", zoomIn: "Dir.p.zoomIn", softMs: "Dir.p.softMs"

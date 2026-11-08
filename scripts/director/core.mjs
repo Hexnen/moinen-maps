@@ -16,6 +16,7 @@ export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 /**
  * Every kind the director knows: `pri` breaks ties between equal weights, `hold` the base time a take-over stays on the place (ms),
  * `impact` = the shot has a hit (flash + shake when the camera arrives), `group` the source toggle it belongs to.
+ * `fresh` = news at a place just shown (damage after the attack, a pushed roll): never dropped as "just shown", soft at least.
  */
 export const KINDS = Object.freeze({
   destruction: { pri: 5, hold: 1700, impact: true, group: "destruction", icon: "fa-solid fa-house-crack" },
@@ -31,12 +32,15 @@ export const KINDS = Object.freeze({
   floor: { pri: 2, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-stairs" },
   move: { pri: 3, hold: 1400, impact: false, group: null, icon: "fa-solid fa-person-running" },
   turn: { pri: 6, hold: 1500, impact: false, group: null, icon: "fa-solid fa-hourglass-half" },
+  attack: { pri: 6, hold: 3200, impact: true, group: "attacks", icon: "fa-solid fa-burst", fresh: true },
+  damage: { pri: 6, hold: 1600, impact: true, group: "attacks", icon: "fa-solid fa-heart-crack", fresh: true },
+  roll: { pri: 2, hold: 2600, impact: false, group: "rolls", icon: "fa-solid fa-dice", fresh: true },
   cut: { pri: 9, hold: 1800, impact: false, group: null, icon: "fa-solid fa-video" },
   custom: { pri: 3, hold: 1500, impact: false, group: null, icon: "fa-solid fa-film" }
 });
 export const KIND_IDS = Object.keys(KINDS);
 /** The source toggles of the settings (one per group of kinds). */
-export const GROUPS = ["destruction", "fire", "zones", "orbit", "altitude"];
+export const GROUPS = ["destruction", "fire", "zones", "orbit", "altitude", "attacks", "rolls"];
 const kindOf = (k) => KINDS[k] ?? KINDS.custom;
 
 /* ---------------------------------------------------------------- settings (world) */
@@ -57,7 +61,7 @@ export const NUM = {
   zoomIn: [1.6, 1, 3, "x"],            // at most this much closer than the player's own zoom
   softMs: [3600, 1000, 10000, "ms"]    // how long a soft shot stays
 };
-export const BOOLS = { enabled: true, captions: true, softOn: true, src_destruction: true, src_fire: true, src_zones: true, src_orbit: true, src_altitude: true };
+export const BOOLS = { enabled: true, captions: true, softOn: true, src_destruction: true, src_fire: true, src_zones: true, src_orbit: true, src_altitude: true, src_attacks: true, src_rolls: true };
 export const STRS = { look: "epic" };   // the cinematic look preset of the take-overs (cinematic-core presets or a GM preset id)
 export const KEYS = [...Object.keys(NUM), ...Object.keys(BOOLS), ...Object.keys(STRS)];
 export const DEFAULTS = Object.freeze({ ...Object.fromEntries(Object.entries(NUM).map(([k, v]) => [k, v[0]])), ...BOOLS, ...STRS });
@@ -108,10 +112,22 @@ export const boxCentre = (b) => ({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 })
 export const unionBox = (a, b) => (!a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 export const pointBox = (x, y, r = 0) => ({ x0: x - r, y0: y - r, x1: x + r, y1: y + r });
 
+/** A caption: a plain string, or { key, data, kick? } (kick: an optional key for the small line above, formatted with the same data). */
+function normCaption(c) {
+  if ( typeof c === "string" ) return c.slice(0, 160);
+  if ( !c || typeof c !== "object" || typeof c.key !== "string" ) return null;
+  const out = { key: c.key, data: c.data && typeof c.data === "object" ? c.data : {} };
+  if ( typeof c.kick === "string" ) out.kick = c.kick;
+  return out;
+}
+
 /**
  * An event as the queue takes it, validated: { id, kind, weight 0..1, box (scene px), x, y (its focus), tokens [ids], caption, who
  * ("all" | "gm"), t, src, force }. A place is required: a box, a point (x, y), or both. Null when unusable.
  * `caption` = a plain string, or { key, data } (localised on each client, so every player reads it in their own language).
+ * A CUED event (`cue`: a name registered with the director's registerCue) has a moment each client finds for itself (a roll's dice
+ * landing on THAT client): the hit and the `after` caption (the result) wait for it. `strict`: every token of `tokens` must be visible
+ * to a client (the first one is the focus: when only another one is not, the client gets the soft form; when the focus is not, nothing).
  */
 export function normEvent(e, now = 0) {
   if ( !e || typeof e !== "object" ) return null;
@@ -121,7 +137,7 @@ export function normEvent(e, now = 0) {
   if ( !Number.isFinite(x) || !Number.isFinite(y) ) { if ( !box ) return null; ({ x, y } = boxCentre(box)); }
   if ( !box ) box = pointBox(x, y, 0);
   const w = num(e.weight);
-  const caption = typeof e.caption === "string" ? e.caption.slice(0, 160) : e.caption && typeof e.caption === "object" && typeof e.caption.key === "string" ? { key: e.caption.key, data: e.caption.data && typeof e.caption.data === "object" ? e.caption.data : {} } : null;
+  const caption = normCaption(e.caption);
   return {
     id: typeof e.id === "string" && e.id ? e.id.slice(0, 40) : `e${Math.round(now)}-${Math.floor(Math.random() * 1e6)}`,
     kind, weight: Number.isFinite(w) ? clamp(w, 0, 1) : 0.5, x, y, box,
@@ -130,7 +146,7 @@ export function normEvent(e, now = 0) {
     src: typeof e.src === "string" ? e.src.slice(0, 40) : "api", force: !!e.force, scene: typeof e.scene === "string" ? e.scene : null,
     path: Array.isArray(e.path) ? e.path.filter(Number.isFinite).slice(0, 64) : null, dur: Number.isFinite(num(e.dur)) ? clamp(num(e.dur), 0, 8000) : null,
     ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null,
-    lane: typeof e.lane === "string" && e.lane ? e.lane.slice(0, 60) : null, free: !!e.free, quick: !!e.quick, play: cleanPlay(e.play)
+    lane: typeof e.lane === "string" && e.lane ? e.lane.slice(0, 60) : null, free: !!e.free, quick: !!e.quick, play: cleanPlay(e.play), cue: typeof e.cue === "string" && e.cue ? e.cue.slice(0, 24) : null, after: normCaption(e.after), strict: !!e.strict
   };
 }
 /**
@@ -214,7 +230,7 @@ export class Queue {
       if ( form === "soft" ) {
         if ( !r.softOn ) { drop(); continue; }
         if ( this.busyUntil > now ) { keep(); continue; }                                     // after the take-over that plays now
-        if ( this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }     // that place was just shown
+        if ( !kindOf(ev.kind).fresh && this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }     // that place was just shown (news there, e.g. damage, still gets its soft shot)
         if ( this.softLive.length >= 2 ) { keep(); continue; }
       }
       drop();
@@ -255,7 +271,7 @@ export function merged(b) {
     id: b.id, kind: ph.kind, kinds, weight: clamp(Math.max(...(who === "gm" ? evs : pub).map((e) => e.weight)) + 0.06 * ((who === "gm" ? evs : pub).length - 1), 0, 1),
     x: ph.x, y: ph.y, box: who === "gm" ? box : pbox, tokens: [...(who === "gm" ? tokens : ptok)], caption: ph.caption, who,
     n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null,
-    lane: ph.lane ?? null, free: evs.every((e) => e.free), quick: !!b.quick, play: ph.play ?? null
+    lane: ph.lane ?? null, free: evs.every((e) => e.free), quick: !!b.quick, play: ph.play ?? null, cue: ph.cue ?? null, after: ph.after ?? null, strict: !!ph.strict
   };
 }
 
@@ -272,7 +288,7 @@ export function plan(ev, form, r, now, seq = 0) {
     v: VERSION, id: `${ev.id}-${form[0]}`, form, kind: ev.kind, kinds: ev.kinds ?? [ev.kind], weight: ev.weight, x: ev.x, y: ev.y, box: ev.box, tokens: ev.tokens,
     caption: ev.caption, who: ev.who, scene: ev.scene, path: ev.path ?? null, t0: now, lead, hold: form === "take" ? len - lead - back : len, back, len,
     impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null,
-    lane: ev.lane ?? null, play: ev.play ?? null
+    lane: ev.lane ?? null, play: ev.play ?? null, cue: ev.cue ?? null, after: ev.after ?? null, strict: !!ev.strict
   };
   return shot;
 }
@@ -304,10 +320,17 @@ export function frameShot(shot, view, r, k = 1, limits = [0.1, 3], reduced = fal
   const fit = Math.min(view.vw / (w * 1.8), view.vh / (h * 1.8));
   const most = view.scale * (1 + (r.zoomIn - 1) * clamp(k, 0, 1)), least = view.scale * 0.7;
   let scale = reduced ? view.scale : clamp(fit, least, most);
+  // the box's own extent (no padding) inside the frame less the letterbox bars: a little further out (down to half the player's
+  // zoom) when that is what it takes to keep it whole (an attacker and its target both on screen)
+  const MX = 0.06, MY = 0.32, bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const whole = Math.min(view.vw / Math.max(1, bw) * (1 - MX), view.vh / Math.max(1, bh) * (1 - MY));
+  if ( !reduced && whole < scale && whole >= view.scale * 0.5 ) scale = whole;
   scale = clamp(scale, limits[0], limits[1]);
   const c = boxCentre(b), focus = { x: shot.x, y: shot.y };
-  // the focus stays in the middle third of the frame: between the box centre and the focus
-  return { x: (c.x + focus.x) / 2, y: (c.y + focus.y) / 2, scale };
+  // the focus stays in the middle third of the frame: between the box centre and the focus, while the whole box fits
+  const keep = (v, lo, hi, half, mk) => { const m = half * mk; return hi - lo <= 2 * (half - m) ? clamp(v, hi - half + m, lo + half - m) : v; };
+  const hw = view.vw / (2 * scale), hh = view.vh / (2 * scale);
+  return { x: keep((c.x + focus.x) / 2, b.x0, b.x1, hw, MX), y: keep((c.y + focus.y) / 2, b.y0, b.y1, hh, MY), scale };
 }
 
 /** The screen effects of a take-over, scaled by the intensity `k` and calmed by reduced motion: the look values `r` (cinematic-core). */

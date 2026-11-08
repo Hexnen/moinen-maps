@@ -28,6 +28,15 @@ import * as Ov from "./overlay.mjs";
 export const HOOK = "moinenMapsDirector";
 const CHANNEL = `module.${MODULE_ID}`;
 const SLACK = 450;                       // ms between planning a shot and its start (the socket has to reach everyone)
+const CUE_AFTER = 2200;                  // ms a cued take-over stays on the result after its cue (a soft one a little longer)
+const CUE_MAX = 4500;                    // ms after the camera arrived: a cue that has not landed by then lands anyway
+
+/**
+ * CUES: name -> (shot) => Promise (or a value) that resolves when THIS client reaches the shot's moment (e.g. "dice": the roll's 3D dice
+ * have landed here). It may resolve with { impact: false } (no flash/shake: a miss). A source registers its cue on every client.
+ */
+const cues = new Map();
+export function registerCue(name, fn) { if ( typeof name === "string" && typeof fn === "function" ) cues.set(name, fn); }
 
 export const killed = () => !!globalThis.CONFIG?.moinenMaps?.noDirector;
 const setting = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
@@ -179,11 +188,25 @@ export function canSee(shot) {
     const d = canvas.scene?.tokens?.get(id);
     if ( d?.hidden && !d.isOwner ) return false;
   }
+  if ( shot.strict && seeTokens(shot) === "none" ) return false;
   const vis = canvas.visibility;
   if ( !vis?.tokenVision ) return true;                    // no token vision on this scene: the players see the whole map
   const b = shot.box, g = grid();
   const pts = [[shot.x, shot.y], [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], [b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]];
   return pts.some(([x, y]) => { try { return vis.testVisibility({ x, y }, { tolerance: g * 0.3 }); } catch { return false; } });
+}
+
+/**
+ * A strict shot's tokens as this client sees them (Token#visible: vision, detection, hidden): "all", "focus" (the first token is
+ * visible, another is not: the soft form at the focus, so the framing never points at what this client cannot see) or "none".
+ */
+export function seeTokens(shot) {
+  if ( game.user.isGM ) return "all";
+  const ids = shot.tokens ?? [];
+  if ( !ids.length ) return "all";
+  const vis = (id) => { const d = canvas.scene?.tokens?.get(id), t = d?.object; return !!t && !!t.visible && !(d.hidden && !d.isOwner); };
+  if ( !vis(ids[0]) ) return "none";
+  return ids.every(vis) ? "all" : "focus";
 }
 
 /* the player at work: a button held on the board, the wheel a moment ago, the pan keys held */
@@ -209,7 +232,7 @@ function wireInput() {
 function ctxOf(shot) {
   const mode = myMode(), opts = clientOpts();
   return {
-    killed: killed(), mode: mode === "bar" ? "soft" : mode, gm: game.user.isGM, visible: canSee(shot), busy: busy(), show: showOn || Screen.owner === "show",
+    killed: killed(), mode: mode === "bar" ? "soft" : mode, gm: game.user.isGM, visible: canSee(shot), busy: busy() || (!!shot.strict && seeTokens(shot) !== "all"), show: showOn || Screen.owner === "show",
     k: Dir.intensity(Number(setting("dirIntensity")), shot.k), camera: !opts.noCamera || mode === "full", softOn: mode !== "bar" ? true : false
   };
 }
@@ -232,19 +255,26 @@ function start(shot) {
   tell("state");
 }
 
-/** The caption text of a shot for this client: { kick, title, icon }. Token names only when this user may see them. */
-export function captionText(shot) {
+/**
+ * The caption text of a shot for this client: { kick, title, icon }. Token names only when this user may see them (`token` with its
+ * public `name`, `target` with `tname`). `c` = another caption of the shot (a cued shot's `after`); its optional `kick` key replaces the
+ * kind's name on the small line.
+ */
+export function captionText(shot, c = shot.caption) {
   const kind = Dir.KINDS[shot.kind] ? shot.kind : "custom";
-  const kick = T(`Dir.kind.${kind}`), icon = Dir.KINDS[kind].icon;
+  let kick = T(`Dir.kind.${kind}`);
+  const icon = Dir.KINDS[kind].icon;
   let title = "";
-  const c = shot.caption;
   if ( typeof c === "string" ) title = c;
   else if ( c?.key ) {
     const data = { ...(c.data ?? {}) };
     if ( data.token !== undefined ) data.token = tokenName(data.token, data.name);
-    delete data.name;
+    if ( data.target !== undefined ) data.target = tokenName(data.target, data.tname);
+    delete data.name; delete data.tname;
     const key = `MOINENMAPS.${c.key}`;
     title = game.i18n.has(key) ? game.i18n.format(key, data) : "";
+    const kk = c.kick ? `MOINENMAPS.${c.kick}` : null;
+    if ( kk && game.i18n.has(kk) ) kick = game.i18n.format(kk, data);
   }
   if ( shot.n > 1 && !title ) title = game.i18n.format("MOINENMAPS.Dir.cap.many", { n: shot.n });
   return { kick, title, icon };
@@ -292,7 +322,7 @@ function playTake(shot, ctx, late = 0) {
   const hit = () => { if ( c.hit ) return; c.hit = true; if ( shot.impact >= 0 && Screen.owner === "director" ) Screen.impact({ x: shot.x, y: shot.y, size: Math.max(shot.box.x1 - shot.box.x0, shot.box.y1 - shot.box.y0) }); };
   // a destruction stroke: the hit lands when THIS client's entry of it starts (its data comes after the save and the bake), and the
   // camera stays until the entry has played (at most EXTRA longer than planned); without one the hit lands as the camera arrives
-  const entry = entryState(shot.ref);
+  const entry = shot.cue ? null : entryState(shot.ref);
   if ( shot.ref && entry !== null ) {
     c.watch = setInterval(() => {
       if ( cur !== c || c.done ) return clearInterval(c.watch);
@@ -302,14 +332,36 @@ function playTake(shot, ctx, late = 0) {
     }, 60);
     c.timers.push(c.watch);
     at(shot.lead + 1500, () => hit());                                                           // (never without the hit)
+  } else if ( shot.cue && cues.has(shot.cue) ) {
+    // a cued shot (a roll: the dice landing on THIS client): the hit and the result caption wait for the cue, never before the camera
+    // is there; then the camera stays CUE_AFTER on the result (also when that ends the shot earlier than planned)
+    c.pending = true;
+    const arrive = shot.impact >= 0 ? shot.impact : Math.round(shot.lead * 0.92);
+    const land = (res) => {
+      if ( cur !== c || c.done || !c.pending ) return;
+      c.pending = false;
+      const go = () => {
+        if ( cur !== c || c.done ) return;
+        if ( shot.impact >= 0 && res?.impact !== false ) { c.hit = false; hit(); }
+        if ( dr.captions && shot.after ) { c.cap?.out(260); c.cap = Ov.caption({ ...captionText(shot, shot.after), lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") }); }
+        c.minEnd = performance.now() + CUE_AFTER;
+        c.timers.push(setTimeout(() => { if ( cur === c && !c.done && performance.now() - c.t0 < plannedEnd ) endTake("done"); }, CUE_AFTER));
+      };
+      const wait = c.t0 + arrive - performance.now();
+      if ( wait > 0 ) c.timers.push(setTimeout(go, wait)); else go();
+    };
+    c.hit = true;                                                                                // (no hit on arrival: the cue lands it)
+    Promise.resolve().then(() => cues.get(shot.cue)(shot)).then(land, () => land(null));
+    at(shot.lead + CUE_MAX, () => land(null));                                                   // (never without the result)
   } else if ( shot.impact >= 0 ) at(shot.impact, hit);
-  if ( dr.captions && ph?.caption !== false && captionText(shot).title ) at(Math.round(shot.lead * 0.45), () => {
+  if ( dr.captions && ph?.caption !== false && (captionText(shot).title || shot.after) ) at(Math.round(shot.lead * 0.45), () => {
+    if ( c.cap ) return;                                                                         // (the cue landed first: its caption is up)
     const t = captionText(shot);
-    c.cap = Ov.caption({ ...t, lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") });
+    if ( t.title ) c.cap = Ov.caption({ ...t, lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") });
   });
   const EXTRA = 2200, plannedEnd = shot.lead + shot.hold;
   const ending = () => {
-    const now = performance.now(), wait = Math.max(c.minEnd ?? 0, shot.ref && entry !== null && !c.hit ? c.t0 + plannedEnd + 600 : 0) - now;
+    const now = performance.now(), wait = Math.max(c.minEnd ?? 0, (shot.ref && entry !== null && !c.hit) || c.pending ? c.t0 + plannedEnd + 600 : 0) - now;
     if ( wait > 30 && now - c.t0 < plannedEnd + EXTRA ) { c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) ending(); }, Math.min(wait, 250))); return; }
     endTake("done");
   };
@@ -358,9 +410,21 @@ function entryState(id) {
 function playSoft(shot, late = 0) {
   if ( myMode() === "bar" ) return;                       // the GM's default: the bar's status line only
   const t = captionText(shot), dr = R();
-  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? (t.title || t.kick) : "", icon: t.icon, onClick: () => lookAt(shot) });
+  const label = t.title && shot.caption?.kick ? `${t.kick} · ${t.title}` : (t.title || t.kick);   // (a caption with its own kick: "Push · ...")
+  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? label : "", icon: t.icon, onClick: () => lookAt(shot) });
   const s = { shot, mark, timer: setTimeout(() => endSoft(shot.id, "done"), Math.max(400, shot.len - late)) };
   softs.set(shot.id, s);
+  if ( shot.cue && cues.has(shot.cue) && shot.after ) {        // a cued soft shot: the label turns into the result when the cue lands
+    let landed = false;
+    const land = () => {
+      if ( landed || softs.get(shot.id) !== s ) return;
+      landed = true;
+      if ( dr.captions ) { const a = captionText(shot, shot.after); mark.setText?.(a.title ? `${a.kick} · ${a.title}` : a.kick); }
+      clearTimeout(s.timer); s.timer = setTimeout(() => endSoft(shot.id, "done"), CUE_AFTER + 600);
+    };
+    Promise.resolve().then(() => cues.get(shot.cue)(shot)).then(land, land);
+    setTimeout(land, CUE_MAX);
+  }
 }
 function endSoft(id, why) {
   const s = softs.get(id); if ( !s ) return;
@@ -473,7 +537,7 @@ export function status() {
 /* ---------------------------------------------------------------- wiring */
 
 export const directorApi = {
-  emit, cutTo, skip, preview, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay,
+  emit, cutTo, skip, preview, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
   /** For the checks: the overlays, the queue. */
   _debug: () => ({ overlay: Ov.debug(), queue: { buckets: queue.buckets.length, busyUntil: queue.busyUntil, history: queue.history.slice(-6) }, cur: cur ? { id: cur.shot.id, timers: cur.timers.length } : null, screen: Screen.debug?.() ?? null }),
   _receive: receive
