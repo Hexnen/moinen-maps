@@ -755,6 +755,7 @@
   "MOINENMAPS.Roads.tool.erase": "Erase roads",
   "MOINENMAPS.Roads.tool.settings": "Roads and traffic",
   "MOINENMAPS.Roads.sec.brush": "Brush",
+  "MOINENMAPS.Roads.grp.vehicles": "Car details",
   "MOINENMAPS.Roads.sec.traffic": "Traffic",
   "MOINENMAPS.Roads.sec.look": "Road look",
   "MOINENMAPS.Roads.mode.draw": "Paint",

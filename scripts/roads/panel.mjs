@@ -4,7 +4,7 @@ import * as Roads from "./roads.mjs";
 import * as Editor from "./editor.mjs";
 import { kindSwatch } from "./art.mjs";
 import * as Graph from "./graph.mjs";
-import { writeControl, isEcho } from "../workspace/ui.mjs";
+import { writeControl, isEcho, optFold, keepFolds } from "../workspace/ui.mjs";
 
 /**
  * The roads' controls, in three sections that can be mounted into any element: "brush" (the tool, road kind, width, lanes,
@@ -16,6 +16,8 @@ const T = (k) => game.i18n.localize(`MOINENMAPS.Roads.${k}`);
 const F = (k, d) => game.i18n.format(`MOINENMAPS.Roads.${k}`, d);
 const esc = (s) => foundry.utils.escapeHTML(String(s ?? ""));
 let uid = 0;
+// which folding groups are open (kept while the controls are drawn again)
+const roadFolds = new Set();
 
 /* ---------------------------------------------------------------- markup */
 
@@ -89,19 +91,22 @@ function barHtml(p) {
 function trafficHtml(p) {
   const R = Roads.state(), t = R?.traffic ?? Model.cleanTraffic();
   const types = Model.BODY_TYPES.map((k) => `<label class="mm-rd-chip"><input type="checkbox" name="kind:${k}"${t.kinds.includes(k) ? " checked" : ""}><span>${esc(T(`types.${k}`))}</span></label>`).join("");
+  // the cars' switch first; everything else only while there are cars, the vehicles' own details folded
   return `<section class="mm-wp-sec mm-rd-traffic"><h4>${esc(T("sec.traffic"))}</h4>
     ${row(`${p}-on`, "on", check(`${p}-on`, "on", t.on))}
+    <div class="mm-rd-dep" data-dep="on"${t.on ? "" : " hidden"}>
     ${row(`${p}-density`, "density", range(`${p}-density`, "density", 0, 100, 5, Math.round(t.density * 100)))}
     ${row(`${p}-speed`, "speed", range(`${p}-speed`, "speed", 0.2, 3, 0.1, t.speed))}
-    ${row(`${p}-size`, "size", range(`${p}-size`, "size", 0.03, 1.5, 0.01, t.size))}
-    ${row(`${p}-vary`, "vary", range(`${p}-vary`, "vary", 0, 50, 5, Math.round((t.vary ?? 0) * 100)))}
-    ${row(`${p}-max`, "max", range(`${p}-max`, "max", 0, 150, 5, t.max))}
-    <div class="mm-rd-types" role="group" aria-label="${esc(T("f.types"))}"><span class="mm-rd-types-label">${esc(T("f.types"))}</span>${types}</div>
-    ${row(`${p}-side`, "side", select(`${p}-side`, "side", ["right", "left"], t.side, "o.side"))}
-    ${row(`${p}-lights`, "lights", select(`${p}-lights`, "lights", ["auto", "on", "off"], t.lights, "o.lights"))}
     ${row(`${p}-who`, "who", select(`${p}-who`, "who", ["all", "gm"], t.who, "o.who"))}
-    ${row(`${p}-style`, "style", select(`${p}-style`, "style", ["ink", "pixel"], t.style, "o.style"))}
-    <div class="mm-rd-btns"><button type="button" data-act="shuffle"><i class="fa-solid fa-shuffle" inert></i> ${esc(T("shuffle"))}</button></div></section>`;
+    ${optFold({ id: "vehicles", title: T("grp.vehicles"), icon: "fa-solid fa-car-side", open: roadFolds, body: `
+      ${row(`${p}-size`, "size", range(`${p}-size`, "size", 0.03, 1.5, 0.01, t.size))}
+      ${row(`${p}-vary`, "vary", range(`${p}-vary`, "vary", 0, 50, 5, Math.round((t.vary ?? 0) * 100)))}
+      ${row(`${p}-max`, "max", range(`${p}-max`, "max", 0, 150, 5, t.max))}
+      <div class="mm-rd-types" role="group" aria-label="${esc(T("f.types"))}"><span class="mm-rd-types-label">${esc(T("f.types"))}</span>${types}</div>
+      ${row(`${p}-style`, "style", select(`${p}-style`, "style", ["ink", "pixel"], t.style, "o.style"))}
+      ${row(`${p}-lights`, "lights", select(`${p}-lights`, "lights", ["auto", "on", "off"], t.lights, "o.lights"))}
+      ${row(`${p}-side`, "side", select(`${p}-side`, "side", ["right", "left"], t.side, "o.side"))}` })}
+    <div class="mm-rd-btns"><button type="button" data-act="shuffle"><i class="fa-solid fa-shuffle" inert></i> ${esc(T("shuffle"))}</button></div></div></section>`;
 }
 
 function lookHtml(p) {
@@ -112,7 +117,7 @@ function lookHtml(p) {
     ${row(`${p}-marks`, "marks", check(`${p}-marks`, "marks", l.marks))}
     ${row(`${p}-crossings`, "crossings", check(`${p}-crossings`, "crossings", l.crossings))}
     ${row(`${p}-guides`, "guides", select(`${p}-guides`, "guides", ["tool", "always"], l.guides, "o.guides"))}
-    <div class="mm-rd-btns"><button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("clear"))}</button></div></section>`;
+    <div class="mm-rd-btns mm-ws-danger"><button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("clear"))}</button></div></section>`;
 }
 
 const statusText = () => { const s = Roads.stats(); return F("status", { roads: s.roads, junctions: s.junctions, cars: s.cars }); };
@@ -172,6 +177,7 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   // a range-picker reports while dragging ("input"); everything else on change
   host.addEventListener("click", onClick);
   host.addEventListener("change", onInput);
+  const offFolds = keepFolds(host, roadFolds);
   const refresh = () => sync(host);
   // the bar is rebuilt when the tool or (edit tool) the selected road changes; everything else updates in place
   // (an edit of the selected road updates its controls in place, so a slider or field being used with the keys keeps the focus)
@@ -185,7 +191,7 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
   const timer = setInterval(() => { const s = host.querySelector(".mm-rd-status"); if ( s ) s.textContent = statusText(); }, 1000);
   return {
     refresh,
-    destroy() { Hooks.off("moinenMapsRoads", hook); clearInterval(timer); host.removeEventListener("click", onClick); host.removeEventListener("change", onInput); host.innerHTML = ""; host.classList.remove("mm-rd", "mm-rd-noheads"); }
+    destroy() { offFolds(); Hooks.off("moinenMapsRoads", hook); clearInterval(timer); host.removeEventListener("click", onClick); host.removeEventListener("change", onInput); host.innerHTML = ""; host.classList.remove("mm-rd", "mm-rd-noheads"); }
   };
 }
 
@@ -213,6 +219,7 @@ function sync(host) {
     set("on", t.on); set("density", Math.round(t.density * 100)); set("speed", t.speed); set("size", t.size); set("vary", Math.round((t.vary ?? 0) * 100)); set("max", t.max);
     set("side", t.side); set("lights", t.lights); set("who", t.who); set("style", t.style);
     for ( const k of Model.BODY_TYPES ) set(`kind:${k}`, t.kinds.includes(k));
+    const dep = host.querySelector('[data-dep="on"]'); if ( dep ) dep.hidden = !t.on;
   }
   if ( l ) { set("shadow", Math.round(l.shadow * 100)); set("ink", l.ink); set("marks", l.marks); set("crossings", l.crossings); set("guides", l.guides); }
   const s = host.querySelector(".mm-rd-status"); if ( s ) s.textContent = statusText();

@@ -858,3 +858,9 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-water-panel .mm-water-head .mm-ws-icon { width: 1.75rem; height: 1.75rem; }
 .mm-water-panel .mm-wp-body > .mm-ws-group { margin: 0.35rem 0; }
 .mm-water-panel .mm-ws-group .mm-fold-body { padding-top: 0.1rem; }
+/* roads in the dock: the status inside the panel's padding, the vehicle chips under their label */
+.mm-ws .mm-rd-status { margin: 0 0 0.35rem; }
+.mm-ws .mm-rd .mm-rd-types-label { flex: 1 0 100%; }
+.mm-ws .mm-rd .mm-ws-group { margin: 0.35rem 0; }
+.mm-ws .mm-rd .mm-rd-btns.mm-ws-danger { margin-top: 0.6rem; }
+.mm-ws .mm-rd .mm-rd-btns.mm-ws-danger > button { flex: 0 0 auto; }

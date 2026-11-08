@@ -755,6 +755,7 @@
   "MOINENMAPS.Roads.tool.erase": "Gumka do dróg",
   "MOINENMAPS.Roads.tool.settings": "Drogi i ruch",
   "MOINENMAPS.Roads.sec.brush": "Pędzel",
+  "MOINENMAPS.Roads.grp.vehicles": "Szczegóły aut",
   "MOINENMAPS.Roads.sec.traffic": "Ruch",
   "MOINENMAPS.Roads.sec.look": "Wygląd dróg",
   "MOINENMAPS.Roads.mode.draw": "Maluj",
