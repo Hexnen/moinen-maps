@@ -37,7 +37,7 @@ export function renderDirectorPanel(host) {
   const r0 = Dir.resolve(block()), b0 = block();
   const presetOpts = (b) => [...Dir.PRESET_IDS, "custom"].map((id) => [id, T(PRESET_LABEL[id]) + (id === b.preset && Object.keys(b.over).length ? " *" : "")]);
   host.innerHTML = `<div class="mm-ws-form mm-dir-panel">
-    ${optCheck({ name: "enabled", label: T("Dir.p.enabled"), checked: r0.enabled, hint: T("Dir.h.enabled") })}
+    ${optCheck({ name: "directorOn", label: T("Dir.p.enabled"), checked: D.isOn(), hint: T("Dir.h.enabled") })}
     ${optSelect({ name: "preset", label: T("Dir.p.preset"), value: b0.preset, options: presetOpts(b0), hint: T("Dir.h.preset") })}
     ${optSelect({ name: "look", label: T("Dir.p.look"), value: r0.look, options: lookOptions(), hint: T("Dir.h.look") })}
     ${optCheck({ name: "captions", label: T("Dir.p.captions"), checked: r0.captions, hint: T("Dir.h.captions") })}
@@ -65,13 +65,15 @@ export function renderDirectorPanel(host) {
       writeControl(sel, b.preset);
     }
     for ( const k of Dir.KEYS ) { const c = ctl(k); if ( c && !c.contains(document.activeElement) ) writeControl(c, r[k]); }
-    host.querySelector(".mm-dir-panel")?.classList.toggle("is-off", !r.enabled);
+    { const c = ctl("directorOn"); if ( c && !c.contains(document.activeElement) ) writeControl(c, D.isOn()); }
+    host.querySelector(".mm-dir-panel")?.classList.toggle("is-off", !D.isOn() || !r.enabled);
   }
   const read = (c) => c.matches("input[type=checkbox]") ? c.checked : c.matches("range-picker, input[type=number]") ? Number(c.value) : c.value;
   const onChange = (ev) => {
     if ( isEcho() ) return;
     const c = ev.target.closest?.("[name]"); if ( !c ) return;
     const b = block(), r = Dir.resolve(b);
+    if ( c.name === "directorOn" ) { if ( c.checked !== D.isOn() ) D.setOn(c.checked); return; }
     if ( c.name === "preset" ) {
       if ( c.value === b.preset ) return;
       setBlock({ ...b, preset: c.value, over: c.value === "custom" ? Dir.cleanPartial(r) : {} });

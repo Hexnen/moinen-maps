@@ -1829,7 +1829,7 @@
   "MOINENMAPS.Dir.p.maxShot": "Longest take-over",
   "MOINENMAPS.Dir.p.zoomIn": "Zoom in at most",
   "MOINENMAPS.Dir.p.softMs": "Soft shot length",
-  "MOINENMAPS.Dir.h.enabled": "The director reacts to events by itself. Off: nothing is shown (the destruction show still plays).",
+  "MOINENMAPS.Dir.h.enabled": "The director reacts to events by itself. Off (the default): players get nothing from the director (the destruction show still plays).",
   "MOINENMAPS.Dir.h.preset": "Calm: few take-overs. Standard. Dramatic: many, closer and longer. Documentary: slow camera, long holds. A change below makes it your own (*).",
   "MOINENMAPS.Dir.h.look": "The screen effects of a take-over: one of the cinematic looks (your own saved ones too, made in the screen effects panel below).",
   "MOINENMAPS.Dir.h.captions": "A short caption with each shot (each player reads it in their own language; token names only when they may see them).",
@@ -1916,6 +1916,8 @@
   "MOINENMAPS.Dir.bar.stSoft": "Marker",
   "MOINENMAPS.Dir.bar.stPaused": "Paused",
   "MOINENMAPS.Dir.bar.stIdle": "Watching",
+  "MOINENMAPS.Dir.bar.stOff": "Off",
+  "MOINENMAPS.Dir.bar.power": "Director on / off (for the whole world)",
   "MOINENMAPS.Dir.bar.noLast": "No event to cut to yet.",
   "MOINENMAPS.Dir.bar.noToken": "Select (or target) a token first."
 }
