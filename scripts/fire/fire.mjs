@@ -360,7 +360,7 @@ export const fireApi = {
   list: () => list().map((s) => ({ ...s, p: [...s.p] })),
   params: () => ({ ...params }), setParams,
   /** How it stands: strokes, areas, what is drawn, particles, lights, the last tick's ms. */
-  status: () => ({ pending: running.size + queued.size, strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
+  status: () => ({ pending: running.size + queued.size + (display?.pending?.size ?? 0), adopting: display?.pending?.size ?? 0, strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
   display: () => display,
   geo, setExtra, model: M
 };

@@ -37,7 +37,8 @@ export function view(x, y, scale) { canvas.pan({ x, y, scale }); for ( let i = 0
 /**
  * Record `ms` of EFFECT time as `name` (webm), DETERMINISTIC: the clock the fire reads (Date.now, so sharedNow; the ticker's time) is
  * virtual during the recording and steps exactly 1 / fps per captured frame; each step is rendered, waits for the field worker
- * (fire.status().pending) and is captured once (track.requestFrame), paced in real time so the encoder never drops one. The webm's
+ * (fire.status().pending less .adopting - new areas being made ready take the frames they take, A13) and is captured once
+ * (track.requestFrame), paced in real time so the encoder never drops one. The webm's
  * own timestamps are wall-clock, so re-time it to a fixed rate with `node dev/fire-retime.mjs <file.webm>` (setpts = N / fps; it
  * checks the frame count and the deltas). fps 60: each 12 fps art frame is held exactly 5 video frames (the virtual clock starts
  * 1 ms after a whole art frame, so the art steps fall on frame boundaries). `during` = [[atMs, fn], ...] in effect time. `base`: the
@@ -59,9 +60,9 @@ export async function rec(name, ms, during = [], { fps = 60, pace = 34, base: ba
   // behind, and each edit during the recording would jump the fire's time forward - held for the recording)
   CK.holdClock?.(true);
   const settle = async () => {
-    for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
+    for ( let k = 0; k < 200 && ((api().status().pending ?? 0) - (api().status().adopting ?? 0)) > 0; k++ ) await wait(10);
     FM.draw();
-    for ( let k = 0; k < 200 && (api().status().pending ?? 0) > 0; k++ ) await wait(10);
+    for ( let k = 0; k < 200 && ((api().status().pending ?? 0) - (api().status().adopting ?? 0)) > 0; k++ ) await wait(10);
     FM.draw();
   };
   // (the recorder starts asynchronously: frames requested before it runs are lost - wait for it; and let the encoder take the last
