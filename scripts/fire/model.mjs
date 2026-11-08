@@ -211,6 +211,80 @@ const marginOf = (st, geo) => (st.st === "fireball" ? 2 : 2 + Math.ceil(geo.grid
 /** How far a stroke's smoke travels (cells along the plume); the plume fades to nothing by then (fieldFrom). */
 export const plumeReach = (s, Z) => Z.plumeL * (0.4 + 0.6 * s) * 2.4;
 
+/**
+ * How far the fire style's smoke PUFFS can reach from the cell that gives them off (cells): art.mjs's puff loop at its extremes - the
+ * highest rise (level 3, the fastest puff), the shear and gust drift along the wind, the wobble, the lattice jitter, the largest
+ * stretched lobe (the loop's own cull bound), the flow warp, the ground shadow's offset. { up (rows), sMin, sMax (cells across per
+ * row risen), padX, padY }. The area's rectangle holds all of it (reachOf) and the field's G marks every cell a puff can cover
+ * (puffMask): the smoke is never cut by either. Mirrors art.mjs (L_RISE, S_V0, S_R1, TAU, the 22 art px source lattice, the gust
+ * 0.06..0.38): keep them in step.
+ */
+const P_RISE = [0, 10, 22, 40], P_V0 = [0, 16, 20, 24], P_R1 = [0, 11, 17, 21];   // (art.mjs L_RISE, S_V0, S_R1: art px)
+export function puffReach(cpg, plume, wind, lv = 3, sm = 3) {
+  const u = cpg / 32, Hk = plume / 2.5, wx = wind[0] ?? 0, wy = wind[1] ?? 0, gdir = wx < -0.05 ? -1 : 1;
+  lv = Math.max(1, Math.min(3, lv)); sm = Math.max(1, Math.min(3, sm));
+  const zMax = P_RISE[lv] * u + P_V0[sm] * u * Hk * 1.5 * 1.35 * 1.3, k = Math.max(0.25, 1 - 0.5 * wy);
+  const sA = 0.6 * wx + 0.12 * gdir * 1.048, sB = 0.6 * wx + 0.12 * gdir * 1.304, sS = 0.6 * wx + 0.12 * gdir + 0.25;
+  const sMin = Math.min(0, sA, sB) / k, sMax = Math.max(0, sA, sB, sS) / k;
+  const r = P_R1[sm] * u * 1.2, strx = 1 + 0.55 * (0.3 + 2 * Math.max(Math.abs(sA), Math.abs(sB)));
+  const padX = r * (0.87 + 1.2 * strx) + 2 + 4 * u + 2.5 * u + 11 * u + 2, padY = r * 1.85 + 2 + 4 * u + 8.8 * u + 2;
+  return { up: Math.ceil(zMax * k), sMin, sMax, padX: Math.ceil(padX), padY: Math.ceil(padY) };
+}
+
+/** A sliding-window min (or max) along rows (`across`) or columns, window +-w, in place over Float32 `v` (W x H). O(N). */
+function slide(v, W, H, across, w, max) {
+  const n = across ? W : H, m = across ? H : W, at = across ? (k, j) => k * W + j : (k, j) => j * W + k;
+  const line = new Float32Array(n), q = new Int32Array(n), better = max ? (a, b) => a >= b : (a, b) => a <= b;
+  for ( let k = 0; k < m; k++ ) {
+    for ( let j = 0; j < n; j++ ) line[j] = v[at(k, j)];
+    let h = 0, t = 0, j2 = 0;
+    for ( let j = 0; j < n; j++ ) {
+      for ( ; j2 < n && j2 <= j + w; j2++ ) { while ( t > h && better(line[j2], line[q[t - 1]]) ) t--; q[t++] = j2; }
+      while ( q[h] < j - w ) h++;
+      v[at(k, j)] = line[q[h]];
+    }
+  }
+}
+
+/**
+ * The cells the puffs can cover, and from where: { M (Uint8Array W x H, 1 = maybe smoke), lo, hi (Float32Array: how far below the
+ * cell, in rows, the nearest / the farthest source that can reach it lies; negative = above), xlo, xhi (the columns those sources
+ * lie in, relative to the cell) }. Every smoke source (`src(i)`) swept up
+ * its drift cone, then grown by the puff's own extent. O(N x a few); conservative (a cell more, a row more, never less). art.mjs only
+ * looks for puffs on these cells, and only among those source rows and columns.
+ */
+export function puffMask(W, H, src, R) {
+  const N = W * H, B = new Int32Array(N).fill(-1), Bm = new Int32Array(N).fill(-1), BIG = 1e9;
+  const Xa = new Float32Array(N).fill(BIG), Xb = new Float32Array(N).fill(-BIG);   // (the reaching sources' columns: min, max)
+  for ( let i = 0; i < N; i++ ) if ( src(i) ) { B[i] = Bm[i] = R.up; Xa[i] = Xb[i] = i % W; }
+  // the cone, row by row upwards (B = the rows the NEAREST source's puffs can still rise, Bm = the farthest's): the drift counted from
+  // the bottom row and rounded per row, so the shifts telescope - a source's spread stays within a cell of the exact one (the pads
+  // hold that cell)
+  const off = (y, s) => s * (H - 1 - y);
+  for ( let y = H - 2; y >= 0; y-- ) {
+    const lo = Math.floor(off(y, R.sMin)) - Math.floor(off(y + 1, R.sMin)), hi = Math.ceil(off(y, R.sMax)) - Math.ceil(off(y + 1, R.sMax));
+    for ( let x = 0; x < W; x++ ) {
+      const i = y * W + x; let b = B[i], bm = Bm[i] >= 0 ? Bm[i] : 1e9;
+      for ( let d = lo; d <= hi; d++ ) {
+        const xs = x - d; if ( xs < 0 || xs >= W ) continue;
+        const j = (y + 1) * W + xs;
+        if ( B[j] > 0 ) b = Math.max(b, B[j] - 1);
+        if ( B[j] > 0 ) { bm = Math.min(bm, Math.max(0, Bm[j] - 1)); Xa[i] = Math.min(Xa[i], Xa[j]); Xb[i] = Math.max(Xb[i], Xb[j]); }   // (the farthest may run out first: then 0, never less - conservative)
+      }
+      B[i] = b; Bm[i] = bm < 1e9 ? bm : -1;
+    }
+  }
+  // grown by the puff's extent (across, then down): the source distances of the cells within reach, widened by the vertical pad
+  const lo = new Float32Array(N), hi = new Float32Array(N);
+  for ( let i = 0; i < N; i++ ) { lo[i] = B[i] >= 0 ? R.up - B[i] : BIG; hi[i] = Bm[i] >= 0 ? R.up - Bm[i] : -BIG; }
+  slide(lo, W, H, true, R.padX, false); slide(hi, W, H, true, R.padX, true);
+  slide(lo, W, H, false, R.padY, false); slide(hi, W, H, false, R.padY, true);
+  slide(Xa, W, H, true, R.padX, false); slide(Xb, W, H, true, R.padX, true); slide(Xa, W, H, false, R.padY, false); slide(Xb, W, H, false, R.padY, true);
+  const M = new Uint8Array(N);
+  for ( let i = 0; i < N; i++ ) if ( lo[i] < BIG / 2 ) { M[i] = 1; lo[i] -= R.padY; hi[i] += R.padY; Xa[i] -= i % W; Xb[i] -= i % W; }
+  return { M, lo, hi, xlo: Xa, xhi: Xb };
+}
+
 /** A stroke's CORE (cells, integers, x1/y1 exclusive): its path and its flame tongues - what joins areas. */
 export function coreOf(st, geo, P) {
   const b = pathBox(st, geo);
@@ -218,8 +292,11 @@ export function coreOf(st, geo, P) {
   return cells(b, marginOf(st, geo));
 }
 
-/** What a stroke can reach (cells, integers, x1/y1 exclusive): its path, its flame tongues and its smoke plume. */
-export function reachOf(st, geo, P) {
+/**
+ * What a stroke can reach (cells, integers, x1/y1 exclusive): its path, its flame tongues, its smoke plume and (`puffs`) its smoke
+ * puffs' whole reach. Without the puffs: the FIRE BOX (where the tongues, the bed and the sparks are drawn; art.mjs skips them outside).
+ */
+export function reachOf(st, geo, P, puffs = true) {
   const Z = sizes(geo, P), b = pathBox(st, geo), r = { ...b };
   if ( st.k === "fire" ) r.y0 -= flameOf(st, Z) + 2;
   if ( smokeOf(st, P) > 0 && P.plume > 0 ) {
@@ -227,6 +304,13 @@ export function reachOf(st, geo, P) {
     const E = plumeReach(st.s, Z) + (st.k === "fire" ? flameOf(st, Z) : 0), ex = ux * E, ey = uy * E;
     r.x0 = Math.min(r.x0, b.x0 + ex); r.x1 = Math.max(r.x1, b.x1 + ex); r.y0 = Math.min(r.y0, b.y0 + ey); r.y1 = Math.max(r.y1, b.y1 + ey);
     const spread = E * 0.15; r.x0 -= spread; r.x1 += spread;
+  }
+  // the fire style's PUFFS: their whole reach (rise, drift, size) fits, so none ever comes near the rectangle (art.mjs also fades a
+  // puff out as a whole before its extent could touch the edge: a safety, for the clamped and the mixed-wind areas)
+  if ( puffs && st.st !== "fireball" && smokeOf(st, P) > 0 ) {
+    const R = puffReach(geo.grid / geo.ap, P.plume, windVec(st.wd, st.ws), st.k === "fire" ? st.lv ?? 2 : 1, smokeOf(st, P));
+    r.x0 = Math.min(r.x0, b.x0 + Math.min(0, R.sMin * R.up) - R.padX); r.x1 = Math.max(r.x1, b.x1 + Math.max(0, R.sMax * R.up) + R.padX);
+    r.y0 = Math.min(r.y0, b.y0 - R.up - R.padY); r.y1 = Math.max(r.y1, b.y1 + R.padY);
   }
   return cells(r, marginOf(st, geo));
 }
@@ -326,6 +410,8 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     const members = idx.map((i) => list[i]);
     let rect = reach[idx[0]]; for ( const i of idx ) rect = union(rect, reach[i]);
     rect = { ...rect, x1: Math.min(rect.x1, rect.x0 + MAX_SIDE), y1: Math.min(rect.y1, rect.y0 + MAX_SIDE) };
+    let box = reachOf(members[0], geo, P, false); for ( const s of members ) box = union(box, reachOf(s, geo, P, false));
+    box = { x0: Math.max(box.x0, rect.x0), y0: Math.max(box.y0, rect.y0), x1: Math.min(box.x1, rect.x1), y1: Math.min(box.y1, rect.y1) };
     const er = erasers.filter((e) => overlaps(reachOf(e, geo, P), rect));
     const all = [...members, ...er].sort(byOrder);
     // the area's wind: the strength-weighted mean of its strokes' (an area is one plume direction)
@@ -335,7 +421,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     const id = members.map((s) => s.id).sort()[0], ph = {};
     for ( const s of all ) ph[s.id] = phases[s.id];
     const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
-    out.push({ id, key, rect, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
+    out.push({ id, key, rect, box, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
@@ -553,7 +639,25 @@ export function raster(area, geo, P) {
   for ( let i = 0; i < N; i++ ) if ( buf.O[i] < Infinity && buf.FA[i] > 0 && buf.FA[i] >= 0.25 * buf.F[i] ) { buf.F[i] = buf.FA[i]; buf.O[i] = Infinity; }
   const sMax = Math.max(0.1, ...area.strokes.filter((s) => s.k !== "erase").map((s) => s.s));
   const f = fieldFrom(buf.F, buf.S, W, H, area.wind, geo, P, area.seed, { style: area.style, buf, reach: plumeReach(sMax, Z) });
-  if ( area.style !== "fireball" ) { f.aux = auxOf(buf, W, H, P); f.auxOld = auxOldOf(buf, W, H); }
+  if ( area.style !== "fireball" ) {
+    f.aux = auxOf(buf, W, H, P); f.auxOld = auxOldOf(buf, W, H);
+    // where the smoke PUFFS can be (art.mjs draws smoke only there, so it is never cut where the plume field thins out)
+    const lvs = area.strokes.filter((s) => s.k !== "erase"), lvM = Math.max(1, ...lvs.map((s) => (s.k === "fire" ? s.lv ?? 2 : 1))), smM = Math.max(1, ...lvs.map((s) => smokeOf(s, P)));
+    const aux = f.aux, R = puffReach(Z.cellsPerGrid, P.plume, area.wind ?? [0, 0], lvM, smM), { M, lo, hi, xlo, xhi } = puffMask(W, H, (i) => aux[i * 4 + 2] >= 5, R);
+    // the PUFF texture (RGBA8): G = 1 + the nearest source row's distance below (floored), R = the farthest's (ceiled), both + OFF,
+    // in steps of S rows; B = 1 + the sources' leftmost column (floored), A = their rightmost (ceiled), relative, + OX, steps of SX
+    // (art.mjs decodes them with uPuffQ = [S, OFF, SX, OX] and searches only there); G = 0: no puff reaches this cell
+    const OFF = R.padY + 2, S = Math.max(1, Math.ceil((R.up + 2 * R.padY + 4) / 253)), pf = new Uint8Array(N * 4);
+    const OX = R.padX + Math.ceil(Math.max(Math.abs(R.sMin), Math.abs(R.sMax)) * R.up) + 2, SX = Math.max(1, Math.ceil((2 * OX + 2) / 253));
+    const enc = (v, o, q, up) => Math.min(255, Math.max(1, up ? Math.ceil((v + o) / q) : Math.floor((v + o) / q) + 1));
+    for ( let i = 0; i < N; i++ ) {
+      if ( !M[i] ) continue;
+      const o = i * 4;
+      pf[o + 1] = Math.min(255, enc(lo[i], OFF, S, false)); pf[o] = enc(hi[i], OFF, S, true);
+      pf[o + 2] = Math.min(255, enc(xlo[i], OX, SX, false)); pf[o + 3] = enc(xhi[i], OX, SX, true);
+    }
+    f.puff = pf; f.puffQ = [S, OFF, SX, OX];
+  }
   return withColor(f, area.color, P);
 }
 

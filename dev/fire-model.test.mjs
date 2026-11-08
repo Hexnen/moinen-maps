@@ -137,7 +137,9 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
   const fg = M.raster(M.areasOf([f], geo, P, q + 10)[0], geo, P);
   ok(fg.times && fg.anim, "growing: a times texture");
   const W = fg.w, ign = (x) => { let best = 255; for ( let y = 0; y < fg.h; y++ ) { const v = fg.times[(y * W + x) * 4]; if ( v ) best = Math.min(best, v); } return best; };
-  const xs = [Math.floor(W * 0.2), Math.floor(W * 0.5), Math.floor(W * 0.8)].map(ign);
+  // (across the burning columns: the rectangle also holds the smoke's reach either side)
+  const lit = [...Array(W).keys()].filter((x) => ign(x) < 255), xa = lit[0], xb = lit[lit.length - 1];
+  const xs = [0.2, 0.5, 0.8].map((k) => ign(Math.floor(xa + (xb - xa) * k)));
   ok(xs[0] < xs[1] && xs[1] < xs[2], `it catches from where the stroke began (${xs})`);
   ok(M.raster(M.areasOf([f], geo, P, q + cm + T.growSpan + 1)[0], geo, P).times === null, "at rest: no times texture");
   // going out: out times written, smoke later than flames (it lingers)
@@ -321,6 +323,57 @@ ok(M.shaderTime(1000) === M.shaderTime(1050), "shader time stepped (12 fps)");
     while ( st2.length ) { const [a, b] = st2.pop(); for ( const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] ) { const k = `${a + dx},${b + dy}`; if ( torn.set.has(k) && !seen.has(k) ) { seen.add(k); st2.push([a + dx, b + dy]); } } }
   }
   ok(comps > 1, `torn has detached islands (${comps} parts)`);
+}
+
+// the smoke puffs never meet the area's rectangle or the field's gate: the reach holds the whole puff extent, the mask covers the cone
+{
+  const cpg = geo.grid / geo.ap;
+  for ( const [wd, ws] of [[0, 0], [0, 1], [180, 1], [-90, 1], [90, 1], [-45, 0.6]] ) {
+    const w = M.windVec(wd, ws), R = M.puffReach(cpg, P.plume, w);
+    // one source in a big field: every point the puff loop can draw (rise z, drift s z, the pads) is marked
+    const W = 400, H = 400, sx = 200, sy = 300, Mk = M.puffMask(W, H, (i) => i === sy * W + sx, R).M;
+    let miss = 0;
+    for ( let d = 0; d <= R.up; d += 3 ) for ( const s of [R.sMin, R.sMax] ) {
+      const x = Math.round(sx + s * d), y = sy - d;
+      for ( const [ox, oy] of [[-R.padX + 2, 0], [R.padX - 2, 0], [0, -R.padY + 2], [0, R.padY - 2]] ) {
+        const X = x + ox, Y = y + oy; if ( X >= 0 && X < W && Y >= 0 && Y < H && !Mk[Y * W + X] ) miss++;
+      }
+    }
+    ok(miss === 0, `puff mask covers the drift cone + the puff (wind ${wd}/${ws}: ${miss} missed)`);
+    // the source rows each cell searches hold the source (it lies d rows below a cone cell d rows up)
+    const PM = M.puffMask(W, H, (i) => i === sy * W + sx, R); let rowBad = 0;
+    for ( let d = 0; d <= R.up; d += 2 ) for ( const s of [R.sMin, 0.5 * (R.sMin + R.sMax), R.sMax] ) for ( const oy of [-R.padY + 2, 0, R.padY - 2] ) {
+      const X = Math.round(sx + s * d), Y = sy - d + oy; if ( Y < 0 || Y >= H ) continue;
+      const i = Y * W + X, dist = sy - Y; if ( !(PM.lo[i] <= dist && dist <= PM.hi[i] && PM.xlo[i] <= sx - X && sx - X <= PM.xhi[i]) ) rowBad++;
+    }
+    ok(rowBad === 0, `puff mask: the searched source rows hold the source (wind ${wd}/${ws}: ${rowBad} off)`);
+    // two sources, one far below the other: above the lower one's reach the upper one's rows are still searched
+    const s2 = sy - Math.round(R.up / 2), P2 = M.puffMask(W, H, (i) => i === sy * W + sx || i === s2 * W + sx, R); let bad2 = 0;
+    for ( let d = 0; d <= R.up; d += 2 ) for ( const s of [R.sMin, R.sMax] ) {
+      const X = Math.round(sx + s * d), Y = s2 - d; if ( Y < 0 ) continue;
+      const i = Y * W + X, dist = s2 - Y; if ( !(P2.lo[i] <= dist && dist <= P2.hi[i]) ) bad2++;
+    }
+    ok(bad2 === 0, `puff mask: stacked sources keep their rows (wind ${wd}/${ws}: ${bad2} off)`);
+    // ... and is no box: a far corner off the cone stays clear
+    // (at the source's own row the mask is only the puff's width: the drift's far end is off it there)
+    if ( ws > 0.5 && wd % 180 === 0 ) {
+      const R8 = M.puffReach(cpg, 8, w), M8 = M.puffMask(1200, 900, (i) => i === 850 * 1200 + 600, R8).M, dx = wd === 0 ? R8.sMax * R8.up : R8.sMin * R8.up;
+      ok(Math.abs(dx) > R8.padX + 8 && !M8[850 * 1200 + Math.round(600 + dx)] && M8[(850 - R8.up + 4) * 1200 + Math.round(600 + dx * (R8.up - 4) / R8.up)],
+        `puff mask follows the cone, not a box (wind ${wd}/${ws})`);
+    }
+    // the stroke's rectangle holds it all
+    const st = M.cleanStroke({ id: "pf", k: "fire", s: 0.9, r: 20, p: [400, 400, 420, 400], lv: 3, sm: 3, wd, ws, q: 0 });
+    const rc = M.reachOf(st, geo, P), bx = (400 - geo.ox) / geo.ap, by = (400 - geo.oy) / geo.ap;
+    ok(rc.y0 <= by - R.up - R.padY && rc.x0 <= bx + Math.min(0, R.sMin * R.up) - R.padX && rc.x1 >= bx + Math.max(0, R.sMax * R.up) + R.padX && rc.y1 >= by + R.padY,
+      `the rectangle holds the puffs' whole reach (wind ${wd}/${ws})`);
+  }
+  // the field's G: every cell the mask marks is at least 1 (art.mjs gates the smoke on it)
+  const st = M.cleanStroke({ id: "pg", k: "fire", s: 0.4, r: 20, p: [400, 400, 470, 400], lv: 3, sm: 3, wd: 0, ws: 1, q: 0 });
+  const ar = M.areasOf([st], geo, P)[0], f = M.raster(ar, geo, P), W = f.w, H = f.h;
+  const Mk = M.puffMask(W, H, (i) => f.aux[i * 4 + 2] >= 5, M.puffReach(geo.grid / geo.ap, P.plume, ar.wind, 3, 3)).M;
+  let bad = 0, edge = 0; for ( let i = 0; i < W * H; i++ ) { if ( Mk[i] !== (f.puff[i * 4 + 1] > 0 ? 1 : 0) ) bad++; const x = i % W, y = Math.floor(i / W); if ( Mk[i] && (x === 0 || y === 0 || x === W - 1 || y === H - 1) ) edge++; }
+  ok(bad === 0, "the puff texture is the puff mask");
+  ok(edge === 0, `the puff mask never reaches the rectangle's edge (${edge})`);
 }
 
 console.log(`${fails ? "FAIL" : "ok"} fire model: ${n - fails}/${n} checks`);

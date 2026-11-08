@@ -42,6 +42,12 @@ export class FireDisplay {
     this.meshes = new PIXI.Container(); this.parts = new PIXI.Container();
     this.root.addChild(this.meshes, this.parts);
     canvas.primary.addChild(this.root);
+    // the SMOKE layer: above the tokens (a token under the smoke is veiled by it) and under the weather; the bed, char, coals and flames
+    // stay in `root`, under the tokens
+    this.above = new PIXI.Container();
+    this.above.eventMode = "none"; this.above.interactiveChildren = false;
+    Object.assign(this.above, { elevation: 0, sortLayer: 800, sort: 0, _lastSortedIndex: 0 });
+    canvas.primary.addChild(this.above);
     this.areas = new Map();          // area id -> { key, area, field, mesh, slots }
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
@@ -74,7 +80,7 @@ export class FireDisplay {
       // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
       const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
       const mesh = field.style === "fire"
-        ? new FireArt(field, area.rect, geo, { seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
+        ? new FireArt(field, area.rect, geo, { above: this.above, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
           plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
         : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
       this.meshes.addChild(mesh);
@@ -184,6 +190,7 @@ export class FireDisplay {
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();
     if ( !this.root.destroyed ) this.root.destroy({ children: true });
+    if ( !this.above.destroyed ) this.above.destroy({ children: true });
     this._puff?.destroy(true); this._puff = null;
     this.pool.length = 0;
   }
