@@ -851,3 +851,9 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-ws .mm-row { gap: 0.3rem; padding: 0.25rem 0.35rem; }
 .mm-ws .mm-row .mm-icon { width: 1.4rem; min-width: 0; font-size: 0.85em; }
 .mm-ws .mm-row .mm-grip { font-size: 0.7rem; }
+/* water settings in the dock: the status with "new variation" beside it, groups that fold, "clear all water" alone at the bottom */
+.mm-water-panel .mm-water-head { display: flex; align-items: center; gap: 0.4rem; border-bottom: 1px solid var(--mm-edge); padding-bottom: 0.3rem; }
+.mm-water-panel .mm-water-head .mm-wp-status { flex: 1 1 auto; padding: 0; border: 0; }
+.mm-water-panel .mm-water-head .mm-ws-icon { width: 1.75rem; height: 1.75rem; }
+.mm-water-panel .mm-wp-body > .mm-ws-group { margin: 0.35rem 0; }
+.mm-water-panel .mm-ws-group .mm-fold-body { padding-top: 0.1rem; }

@@ -8,7 +8,7 @@ import { FX_DEFAULTS } from "./ripples.mjs";
 import { REFLECT_DEFAULTS } from "./reflect.mjs";
 import { SUBMERGE_DEFAULTS } from "./submerge.mjs";
 import { useTool } from "../workspace/shell.mjs";
-import { writeControl, isEcho } from "../workspace/ui.mjs";
+import { writeControl, isEcho, optFold, keepFolds } from "../workspace/ui.mjs";
 
 /**
  * The water settings: every setting of the engine, on six tabs (Look, Water, River, Fall, Rods, Output), applied live
@@ -24,6 +24,12 @@ const hint = (key) => has(`Water.h.${key}`) ? T(`Water.h.${key}`) : "";
 const hexOf = (c) => `#${String(c).replace("#", "")}`;
 
 let panel = null;
+
+// which named groups of each tab are open ("tab.section"), kept while the panel is drawn again; the scene group starts open
+const folds = new Set(["output.scene"]);
+/** A named group led by an on/off switch (tide, tokens in the water...): its other rows show only while the switch is on. */
+const leadToggle = (fields) => fields[0]?.kind === "toggle" ? fields[0].key : null;
+const LEADS = new Set(Object.values(SECTIONS).flatMap((secs) => secs.filter(([name]) => name).map(([, f]) => leadToggle(f)).filter(Boolean)));
 
 /** Build the settings into `host` (a dock panel), opened on `tab`. Returns the cleanup. */
 export function mountWaterSettings(host, { tab } = {}) {
@@ -45,6 +51,7 @@ class WaterSettings {
   #rodHook = null;
   #palTimer = 0;
   #listeners = null;
+  #offFolds = null;
 
   /** @param {HTMLElement} host */
   constructor(host, tab) {
@@ -56,6 +63,7 @@ class WaterSettings {
     host.addEventListener("input", this.#listeners.input);
     host.addEventListener("change", this.#listeners.input);
     host.addEventListener("keydown", this.#listeners.key);
+    this.#offFolds = keepFolds(host, folds);
     this.#hook = (kind) => { if ( kind === "status" ) this.#updateStatus(); else if ( kind === "loaded" ) this.render(); };
     this.#rodHook = () => { if ( this.tab === "rods" ) this.render(); };
     Hooks.on("moinenMapsRods", this.#rodHook);
@@ -70,6 +78,7 @@ class WaterSettings {
       host.removeEventListener("change", this.#listeners.input); host.removeEventListener("keydown", this.#listeners.key);
       this.#listeners = null;
     }
+    this.#offFolds?.(); this.#offFolds = null;
     if ( this.#hook ) Hooks.off("moinenMapsWater", this.#hook);
     if ( this.#rodHook ) Hooks.off("moinenMapsRods", this.#rodHook);
     this.#hook = this.#rodHook = null;
@@ -87,11 +96,11 @@ class WaterSettings {
     const S = Water.state(), info = Water.waterInfo();
     const body = !S ? this.#emptyHtml() : !info ? `<p class="hint">${esc(T("Water.loading"))}</p>` : this.#tabHtml(S, info);
     const tabs = TABS.map((id) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${this.tab === id}"${this.tab === id ? "" : ' tabindex="-1"'}>${esc(T(`Water.tab.${id}`))}</button>`).join("");
-    return `<div class="mm-wp-status" role="status" aria-live="polite">${esc(this.#statusText())}</div>
+    return `<div class="mm-water-head"><div class="mm-wp-status" role="status" aria-live="polite">${esc(this.#statusText())}</div>
+      ${S ? `<button type="button" class="mm-ws-icon" data-act="variation" aria-label="${esc(T("Water.variation"))}" data-tooltip="${esc(T("Water.variation"))}"><i class="fa-solid fa-dice" inert></i></button>` : ""}</div>
       <nav class="mm-wp-tabs" role="tablist" aria-label="${esc(T("Water.title"))}">${tabs}</nav>
       <div class="mm-wp-body" role="tabpanel">${body}</div>
-      ${S ? `<footer class="mm-wp-foot"><button type="button" data-act="variation"><i class="fa-solid fa-dice" inert></i> ${esc(T("Water.variation"))}</button>
-        <button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("Water.clear"))}</button></footer>` : ""}`;
+      ${S ? `<footer class="mm-ws-danger mm-water-foot"><button type="button" data-act="clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("Water.clear"))}</button></footer>` : ""}`;
   }
 
   /* ---------------------------------------------------------------- status */
@@ -114,10 +123,16 @@ class WaterSettings {
     return `<p class="hint">${esc(T("Water.empty"))}</p><button type="button" data-act="create"><i class="fa-solid fa-plus" inert></i> ${esc(T("Water.create"))}</button>`;
   }
 
+  /** The tab's first, unnamed group as plain rows; every named group folds (a switch-led group shows its rows only while on). */
   #tabHtml(S, info) {
+    const P = { ...FX_DEFAULTS, ...REFLECT_DEFAULTS, ...SUBMERGE_DEFAULTS, ...S.params };
     return (SECTIONS[this.tab] ?? []).map(([name, fields]) => {
-      const rows = fields.map((f) => this.#field(f, S, info)).join("");
-      return `<section class="mm-wp-sec">${name ? `<h4>${esc(T(`Water.sec.${name}`))}</h4>` : ""}${rows}</section>`;
+      if ( !name ) return `<section class="mm-wp-sec">${fields.map((f) => this.#field(f, S, info)).join("")}</section>`;
+      const lead = leadToggle(fields);
+      const body = lead
+        ? `${this.#field(fields[0], S, info)}<div data-dep="${lead}"${P[lead] ? "" : " hidden"}>${fields.slice(1).map((f) => this.#field(f, S, info)).join("")}</div>`
+        : fields.map((f) => this.#field(f, S, info)).join("");
+      return optFold({ id: `${this.tab}.${name}`, title: T(`Water.sec.${name}`), open: folds, body, cls: lead && !P[lead] ? "is-off" : "" });
     }).join("");
   }
 
@@ -169,10 +184,9 @@ class WaterSettings {
           + ALPHA_GROUPS.map((g) => this.#row(`alpha.${g}`, T(`Water.a.${g}`), "", `<range-picker id="mm-wp-alpha.${g}" name="alpha.${g}" min="0" max="100" step="5" value="${Number(P.alpha?.[g] ?? ALPHA_START[g] ?? 100)}"></range-picker>`)).join("");
       case "rods": {
         const kind = game.settings.get(MODULE_ID, "waterRodKind"), branch = game.settings.get(MODULE_ID, "waterRodBranch"), n = (P.guides ?? []).length;
-        return `<p class="hint">${esc(T("Water.rodsHint"))}</p>
-          ${this.#row("rodKind", T("Water.rod.kind"), T("Water.rod.kindHint"), `<select id="mm-wp-rodKind" name="rodKind"><option value="flow"${kind === "flow" ? " selected" : ""}>${esc(T("Water.rod.flow"))}</option><option value="lip"${kind === "lip" ? " selected" : ""}>${esc(T("Water.rod.lip"))}</option></select>`)}
+        return `${this.#row("rodKind", T("Water.rod.kind"), T("Water.rod.kindHint"), `<select id="mm-wp-rodKind" name="rodKind"><option value="flow"${kind === "flow" ? " selected" : ""}>${esc(T("Water.rod.flow"))}</option><option value="lip"${kind === "lip" ? " selected" : ""}>${esc(T("Water.rod.lip"))}</option></select>`)}
           ${this.#row("rodBranch", T("Water.rod.branch"), T("Water.rod.branchHint"), `<input type="checkbox" id="mm-wp-rodBranch" name="rodBranch"${branch ? " checked" : ""}>`)}
-          <div class="mm-wp-rodbtns"><button type="button" data-act="rod-tool"><i class="fa-solid fa-bezier-curve" inert></i> ${esc(T("Water.rod.draw"))}</button>
+          <div class="mm-wp-rodbtns"><button type="button" data-act="rod-tool" data-tooltip="${esc(T("Water.rodsHint"))}"><i class="fa-solid fa-bezier-curve" inert></i> ${esc(T("Water.rod.draw"))}</button>
             <button type="button" data-act="rod-reverse" data-tooltip="${esc(T("Water.rod.reverseHint"))}"><i class="fa-solid fa-arrows-left-right" inert></i> ${esc(T("Water.rod.reverse"))}</button>
             <button type="button" data-act="rod-undo"><i class="fa-solid fa-rotate-left" inert></i> ${esc(T("Water.rod.undo"))}</button>
             <button type="button" data-act="rod-clear" class="mm-danger"><i class="fa-solid fa-trash" inert></i> ${esc(T("Water.rod.clear"))} (${n})</button></div>`;
@@ -254,7 +268,12 @@ class WaterSettings {
     if ( name === "enabled" ) return Water.setEnabled(!!value);
     if ( name === "frames" ) return Water.setParams({ frames: Number(value) });
     if ( name === "fallStyle" || name === "light" || name === "fxWho" || name === "reflectType" || name === "reflectWho" || name === "reflectBlurType" || name === "submergeWho" ) return Water.setParams({ [name]: String(value) });
-    if ( typeof value === "boolean" ) { Water.setParams({ [name]: value }); return; }
+    if ( typeof value === "boolean" ) {
+      Water.setParams({ [name]: value });
+      // a group's switch shows or hides the group's other rows (in place: nothing else of the panel is drawn again)
+      if ( LEADS.has(name) ) { const dep = this.element?.querySelector(`[data-dep="${name}"]`); if ( dep ) { dep.hidden = !value; dep.closest(".mm-ws-group")?.classList.toggle("is-off", !value); } }
+      return;
+    }
     const num = Number(value); if ( Number.isFinite(num) ) Water.setParams({ [name]: num });
   }
 
