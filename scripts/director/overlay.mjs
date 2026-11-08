@@ -72,7 +72,7 @@ function maybeDrop() { if ( root && !root.children.length ) { root.remove(); roo
  * and the sidebar), less the navigation on top and the hotbar below. An arrow on the edge of THIS rect is never under the chat or the
  * scene controls.
  */
-function safeRect() {
+export function safeRect() {
   const mid = document.getElementById("ui-middle")?.getBoundingClientRect?.();
   let x0 = mid?.width ? mid.left : 0, x1 = mid?.width ? mid.right : innerWidth, y0 = 0, y1 = innerHeight;
   const top = document.getElementById("navigation")?.getBoundingClientRect?.(), bot = document.getElementById("hotbar")?.getBoundingClientRect?.();

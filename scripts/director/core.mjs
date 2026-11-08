@@ -29,6 +29,8 @@ export const KINDS = Object.freeze({
   orbitDown: { pri: 8, hold: 1700, impact: true, group: "orbit", icon: "fa-solid fa-meteor" },
   altitude: { pri: 3, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-feather" },
   floor: { pri: 2, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-stairs" },
+  move: { pri: 3, hold: 1400, impact: false, group: null, icon: "fa-solid fa-person-running" },
+  turn: { pri: 6, hold: 1500, impact: false, group: null, icon: "fa-solid fa-hourglass-half" },
   cut: { pri: 9, hold: 1800, impact: false, group: null, icon: "fa-solid fa-video" },
   custom: { pri: 3, hold: 1500, impact: false, group: null, icon: "fa-solid fa-film" }
 });
@@ -127,8 +129,28 @@ export function normEvent(e, now = 0) {
     caption, who: e.who === "gm" ? "gm" : "all", t: Number.isFinite(num(e.t)) ? num(e.t) : now,
     src: typeof e.src === "string" ? e.src.slice(0, 40) : "api", force: !!e.force, scene: typeof e.scene === "string" ? e.scene : null,
     path: Array.isArray(e.path) ? e.path.filter(Number.isFinite).slice(0, 64) : null, dur: Number.isFinite(num(e.dur)) ? clamp(num(e.dur), 0, 8000) : null,
-    ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null
+    ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null,
+    lane: typeof e.lane === "string" && e.lane ? e.lane.slice(0, 60) : null, free: !!e.free, quick: !!e.quick, play: cleanPlay(e.play)
   };
+}
+/**
+ * Event fields for sources that need more than "a place" (all optional):
+ *   lane  - a newer event of the same lane supersedes the lane's pending ones, and may replace the lane's take-over that plays now
+ *           (the camera goes on from where it is: a token's next move, the next combat turn);
+ *   free  - the "same place again", "just got the camera back" and ping-pong downgrades do not apply (the source paces itself);
+ *   quick - decided after a short merge window (QUICK ms) instead of `merge` (things that are already moving on the screen);
+ *   play  - how each client plays it: { by: a play handler id (director.mjs registerPlay), ...its own plain data }, passed on as is.
+ */
+export const QUICK = 120;
+function cleanPlay(p) {
+  if ( !p || typeof p !== "object" || Array.isArray(p) || typeof p.by !== "string" ) return null;
+  const out = {};
+  for ( const [k, v] of Object.entries(p).slice(0, 16) ) {
+    if ( typeof v === "string" ) out[k] = v.slice(0, 80);
+    else if ( typeof v === "number" ? Number.isFinite(v) : typeof v === "boolean" ) out[k] = v;
+    else if ( Array.isArray(v) ) out[k] = v.filter((q) => typeof q === "string" || Number.isFinite(q)).slice(0, 64);
+  }
+  return out;
 }
 
 /** Weight of a damage area from its size (scene px, the larger side) and the grid: one square ~0.2, six or more ~1. */
@@ -147,8 +169,9 @@ export class Queue {
   push(ev, r, grid = 100) {
     if ( !ev ) return null;
     const dist = r.mergeSq * grid;
+    if ( ev.lane ) this.buckets = this.buckets.filter((q) => !q.events.every((e) => e.lane === ev.lane));   // (superseded: the lane's newer event wins)
     let b = !ev.force && this.buckets.find((q) => q.scene === ev.scene && !q.force && ev.t - q.t0 <= r.merge && Math.hypot(q.x - ev.x, q.y - ev.y) <= dist);
-    if ( !b ) { b = { id: ev.id, t0: ev.t, scene: ev.scene, events: [], x: ev.x, y: ev.y, force: ev.force }; this.buckets.push(b); }
+    if ( !b ) { b = { id: ev.id, t0: ev.t, scene: ev.scene, events: [], x: ev.x, y: ev.y, force: ev.force, quick: ev.quick }; this.buckets.push(b); }
     b.events.push(ev);
     const h = heaviest(b.events);
     b.x = h.x; b.y = h.y;
@@ -157,7 +180,7 @@ export class Queue {
   /** The earliest moment a decision is due (ms), or null when nothing waits. */
   due(r) {
     if ( !this.buckets.length ) return null;
-    return Math.min(...this.buckets.map((b) => (b.force ? b.t0 : b.t0 + r.merge)));
+    return Math.min(...this.buckets.map((b) => b.t0 + win(b, r)));
   }
   clear() { this.buckets = []; }
   /** Forget a take-over that was cut short (skip): the camera is free again from `now`. */
@@ -170,7 +193,7 @@ export class Queue {
   pump(r, st, grid = 100) {
     const now = st.now, out = [];
     this.softLive = this.softLive.filter((s) => s.end > now);
-    const ready = this.buckets.filter((b) => b.force || now >= b.t0 + r.merge).sort((a, b) => bucketRank(b) - bucketRank(a) || a.t0 - b.t0);
+    const ready = this.buckets.filter((b) => now >= b.t0 + win(b, r)).sort((a, b) => bucketRank(b) - bucketRank(a) || a.t0 - b.t0);
     for ( const b of ready ) {
       const ev = merged(b), keep = () => {};
       const drop = () => { this.buckets = this.buckets.filter((q) => q !== b); };
@@ -179,9 +202,12 @@ export class Queue {
       if ( !form ) { drop(); continue; }
       const near = (h, ms) => h.end > now - ms && h.scene === ev.scene && Math.hypot(h.x - ev.x, h.y - ev.y) <= r.mergeSq * grid;
       if ( form === "take" && !ev.force ) {
-        if ( this.busyUntil > now ) { keep(); continue; }                                     // a take-over is on: wait (until stale)
-        const heavy = ev.weight >= 0.9;
-        if ( this.history.some((h) => h.form === "take" && near(h, r.cooldown)) ) form = "soft";               // the same place again: no second take-over
+        const relay = !!ev.lane && this.lastTake?.lane === ev.lane && this.busyUntil > now;   // the lane's own take-over plays: this one replaces it
+        if ( this.busyUntil > now && !relay ) { keep(); continue; }                           // a take-over is on: wait (until stale)
+        const heavy = ev.weight >= 0.9 || ev.free;
+        if ( relay ) { /* (the camera is already with this lane) */ }
+        else if ( ev.free ) { /* (the source paces itself) */ }
+        else if ( this.history.some((h) => h.form === "take" && near(h, r.cooldown)) ) form = "soft";               // the same place again: no second take-over
         else if ( this.lastTake && now - this.lastTake.end < r.rest && !heavy ) form = "soft";                  // the player just got the camera back
         else if ( this.pingPong(ev, now, r, grid) && !heavy ) form = "soft";                                    // back to where it was a moment ago
       }
@@ -193,7 +219,7 @@ export class Queue {
       }
       drop();
       const shot = plan(ev, form, r, now, ++this.seq);
-      if ( form === "take" ) { this.busyUntil = shot.t0 + shot.len; this.lastTake = { x: ev.x, y: ev.y, end: shot.t0 + shot.len, scene: ev.scene }; }
+      if ( form === "take" ) { this.busyUntil = shot.t0 + shot.len; this.lastTake = { x: ev.x, y: ev.y, end: shot.t0 + shot.len, scene: ev.scene, lane: ev.lane ?? null }; }
       else this.softLive.push({ end: shot.t0 + shot.len });
       this.history.push({ form, x: ev.x, y: ev.y, scene: ev.scene, end: shot.t0 + shot.len });
       while ( this.history.length > 24 ) this.history.shift();
@@ -209,6 +235,8 @@ export class Queue {
     return Math.hypot(b.x - ev.x, b.y - ev.y) <= d && Math.hypot(a.x - ev.x, a.y - ev.y) > d;
   }
 }
+/** A bucket's merge window: none for a forced one, short for a quick one. */
+const win = (b, r) => (b.force ? 0 : b.quick ? Math.min(r.merge, QUICK) : r.merge);
 const heaviest = (evs) => evs.reduce((a, b) => (b.weight > a.weight || (b.weight === a.weight && kindOf(b.kind).pri > kindOf(a.kind).pri) ? b : a));
 const bucketRank = (b) => { const h = heaviest(b.events); return (b.force ? 10 : 0) + h.weight + kindOf(h.kind).pri / 100; };
 
@@ -226,7 +254,8 @@ export function merged(b) {
   return {
     id: b.id, kind: ph.kind, kinds, weight: clamp(Math.max(...(who === "gm" ? evs : pub).map((e) => e.weight)) + 0.06 * ((who === "gm" ? evs : pub).length - 1), 0, 1),
     x: ph.x, y: ph.y, box: who === "gm" ? box : pbox, tokens: [...(who === "gm" ? tokens : ptok)], caption: ph.caption, who,
-    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null
+    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null,
+    lane: ph.lane ?? null, free: evs.every((e) => e.free), quick: !!b.quick, play: ph.play ?? null
   };
 }
 
@@ -242,7 +271,8 @@ export function plan(ev, form, r, now, seq = 0) {
   const shot = {
     v: VERSION, id: `${ev.id}-${form[0]}`, form, kind: ev.kind, kinds: ev.kinds ?? [ev.kind], weight: ev.weight, x: ev.x, y: ev.y, box: ev.box, tokens: ev.tokens,
     caption: ev.caption, who: ev.who, scene: ev.scene, path: ev.path ?? null, t0: now, lead, hold: form === "take" ? len - lead - back : len, back, len,
-    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null
+    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null,
+    lane: ev.lane ?? null, play: ev.play ?? null
   };
   return shot;
 }

@@ -77,6 +77,14 @@ export function createOverlays(doc, r, eff, { insert, timer }) {
     for ( const b of o.bars ?? [] ) b.style.transform = "translateY(0)";
     if ( o.vignette ) o.vignette.style.opacity = "1";
   };
+  /** Shown at once, no slide-in (a session that takes over from one whose bars were already in). */
+  o.showNow = () => {
+    const all = [...(o.bars ?? []), o.vignette].filter(Boolean), was = all.map((el) => el.style.transition);
+    for ( const el of all ) el.style.transition = "none";
+    o.show();
+    void root.offsetWidth;
+    all.forEach((el, i) => { el.style.transition = was[i]; });
+  };
   o.hide = () => {
     o.hidden = true;
     for ( const [i, b] of (o.bars ?? []).entries() ) { b.style.transition = `transform ${r.lbOut}ms ${ease}`; b.style.transform = `translateY(${i === 0 ? "-100%" : "100%"})`; }
@@ -163,6 +171,7 @@ export function createFx(getEnv) {
   function begin(snap, { strokes = [], bounds = null, owner = "show", guard = true, opts = null, home = null, frame = true } = {}) {
     // (the session before ends at once; its home view - the player's own - is the one this session returns to)
     const inherit = S?.cam?.on && S.prev ? { ...S.prev } : null;
+    const barsIn = !!(S && !S.ending && S.ov && !S.ov.hidden && (S.ov.bars || S.ov.vignette));   // (the bars stay put: no out-and-in again)
     if ( S ) finish(S);
     const raw = snap?.r ?? snap;
     if ( !raw || typeof raw !== "object" ) return false;
@@ -173,7 +182,7 @@ export function createFx(getEnv) {
       shaker: null, ov: null, guard: null, tick: null, prev: null, ending: null, endRes: null, preview: false, lastImpact: null, done: false, onDone: [], owner, useGuard: guard !== false, frame };
     try {
       s.ov = createOverlays(env.doc, r, eff, { insert: env.insert, timer: env.timer });
-      s.ov.show();
+      if ( barsIn ) s.ov.showNow(); else s.ov.show();
       if ( eff.shake ) s.shaker = new StageShaker(env.stage);
       if ( eff.camera ) startCamera(s, home ?? inherit);
       s.tick = () => onTick(s);

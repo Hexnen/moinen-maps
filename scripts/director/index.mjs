@@ -7,6 +7,7 @@ import "./director.mjs";
 import { registerSources } from "./sources.mjs";
 import { registerBar } from "./bar.mjs";
 import "./section.mjs";
+import "./source-move.mjs";
 
 registerSources();
 registerBar();
