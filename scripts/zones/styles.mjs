@@ -13,7 +13,7 @@ export const BUILTIN = Object.freeze([
   // a printed field map: tinted zones with a darker ribbon inside each border, cream dashes on a dark casing, board-game counters
   { id: "classic", name: T("classic"), look: { numShape: "counter", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8 } },
   // quiet: a fine light hairline, a faint shade inside each zone, a small pill with the number only on hover
-  { id: "subtle", name: T("subtle"), look: { fill: 0.15, ink: 0.85, lineAlpha: 0.9, lineStyle: "hairline", color: "#f6f1e6", numbers: "hover", numShape: "pill", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8, hoverLineAlpha: 0.8 } },
+  { id: "subtle", name: T("subtle"), look: { fill: 0.15, ink: 1, lineAlpha: 0.95, lineStyle: "hairline", color: "#f6f1e6", numbers: "hover", numShape: "pill", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.8, hoverLineAlpha: 0.8 } },
   // graphite on the map: wandering pencil passes that overshoot the corners, hand-lettered numbers in scribbled rings, crosshatch on hover
   { id: "sketch", name: T("sketch"), look: { fill: 0, ink: 1.1, lineAlpha: 0.95, lineStyle: "sketch", color: "#2a2a30", place: "corner", numShape: "scribble", hoverHi: true, hoverFx: "crosshatch", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } },
   // a transit map: thick white lines on a black casing, saturated zones, big discs in each zone's own colour

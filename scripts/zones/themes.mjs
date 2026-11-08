@@ -302,13 +302,20 @@ export const THEMES = {
 
   /* ---- subtle: a fine light hairline over a soft shadow, a soft shade inside each zone, a small pill on hover */
   hairline: {
-    palette: [0xe9e2d0, 0xd8e4ea, 0xe2e8d8, 0xeadbe0, 0xe0dcef, 0xeee0d4],
-    wash: { zone(c, o) { band(c, o.path, 0x0b0a12, 34 * o.u, 0.75 * Math.min(1.2, o.ink)); } },
+    // no wash: the zones keep the map as it is, under the faintest milky veil (pale tints); the line carries the preset
+    palette: [0xf4efe4, 0xe8eef2, 0xeef2e8, 0xf2e8ec, 0xece8f4, 0xf4ece2],
     lines(D) {
-      const { Ln, px, w, col, a, stroke } = D;
-      stroke(w * 1.5, 0x000000, 0.16 * a, (p) => D.trace(Ln, p));
-      stroke(w * 0.75, 0x000000, 0.4 * a, (p) => D.trace(Ln, p));
-      stroke(Math.max(1.8 * px, w * 0.34), col, a, (p) => D.trace(Ln, p));
+      const { Ln, Z, px, w, col, a, stroke } = D;
+      // a thin, soft shadow under a fine light line: lifted off the map, never heavy
+      // a soft shadow line with a string of fine light beads on it: the map's own roads are lines, the zone borders are beads
+      stroke(w * 2.4, col, 0.08 * a, (p) => D.trace(Ln, p));
+      stroke(w * 1.0, 0x000000, 0.18 * a, (p) => D.trace(Ln, p));
+      stroke(w * 0.55, 0x000000, 0.34 * a, (p) => D.trace(Ln, p));
+      stroke(Math.max(3.2 * px, w * 0.62), col, a, (p) => D.pattern(Ln, p, [0.01 * px, 8 * px]));
+      // a small light bead where borders meet
+      for ( const [x, y] of junctions(Z) ) {
+        Ln.lineStyle({ width: 1.2 * px, color: 0x000000, alpha: 0.35 * a }); Ln.beginFill(col, a).drawCircle(x, y, 4 * px).endFill();
+      }
     },
     hoverTint: 0xfffaf0
   },
@@ -478,27 +485,18 @@ export const THEMES = {
       }
     },
     lines(D) {
-      const { Ln, Z, px, w, a, col } = D, bark = 0x4a2630;
-      const P = Z.core.map(pairs);
-      Ln.lineStyle({ width: w * 2.4, color: col, alpha: 0.3 * a, ...R() }); for ( const q of P ) tracePts(Ln, q);
-      // the branch: a dark ribbon that thickens and thins
-      Ln.lineStyle(0); Ln.beginFill(bark, 0.95 * a);
-      for ( const [i, q] of P.entries() ) {
-        const s = spline(pairs(D.wobble(q.flat(), 1.3 * px, 7 + i, px)), 1);
-        ribbon(Ln, s, (t, d) => w * (0.9 + 0.3 * Math.sin(d / (D.g * 0.9) + i) + 0.1 * Math.sin(d / (D.g * 0.23) + i * 3)));
-      }
-      Ln.endFill();
-      // twigs, blossoms and buds at spots fixed on the map
-      const step = octave(D.g * 0.42, 30, px);
-      for ( const [i, q] of P.entries() ) {
-        for ( const [x, y, nx, ny, s] of along(q, step) ) {
-          const h = hash(i * 97 + Math.round(s / step) * 13), side = h < 0.5 ? 1 : -1;
-          if ( h < 0.38 || h > 0.72 ) {
-            const tl = (14 + 9 * hash(h * 50)) * px, ang = 0.7 * side, tx = x + (nx * Math.cos(ang) * side - ny * Math.sin(ang)) * tl, ty = y + (ny * Math.cos(ang) * side + nx * Math.sin(ang)) * tl;
-            Ln.lineStyle({ width: Math.max(1.6 * px, w * 0.34), color: bark, alpha: 0.9 * a, ...R() }); Ln.moveTo(x, y); Ln.lineTo(tx, ty);
-            blossom(Ln, tx, ty, (7.5 + 3 * hash(h * 91)) * px, h * 7, { alpha: a });
-          } else if ( h < 0.55 ) blossom(Ln, x + nx * side * 2 * px, y + ny * side * 2 * px, (5.5 + 2.5 * hash(h * 33)) * px, h * 11, { alpha: a, petal: 0xfbd3e1 });
-          else { Ln.lineStyle({ width: 0.8 * px, color: 0x9c2f55, alpha: a }); Ln.beginFill(0xe0587f, a).drawCircle(x + nx * side * 3 * px, y + ny * side * 3 * px, 2.8 * px).endFill(); }
+      const { Ln, Z, px, w, a, col, stroke } = D;
+      // a calm line in plum ink inside a pink haze; the blossoms mark only the places where borders meet
+      stroke(w * 2.6, col, 0.22 * a, (p) => D.trace(Ln, p));
+      stroke(w * 0.85, 0xfff1f6, 0.55 * a, (p) => D.trace(Ln, p));
+      stroke(Math.max(1.6 * px, w * 0.4), 0x5a2338, a, (p) => D.trace(Ln, p));
+      for ( const [i, [x, y]] of junctions(Z).entries() ) {
+        const h = hash(i * 17 + 3);
+        blossom(Ln, x, y, 12 * px, h * 6, { alpha: a });
+        // a bud or two beside it
+        for ( let q = 0; q < 1 + (h > 0.5); q++ ) {
+          const an = h * 9 + q * 2.4, d = 13 * px;
+          Ln.lineStyle({ width: 0.9 * px, color: 0x9c2f55, alpha: a }); Ln.beginFill(0xf08aae, a).drawCircle(x + Math.cos(an) * d, y + Math.sin(an) * d, 3 * px).endFill();
         }
       }
     },
@@ -510,65 +508,93 @@ export const THEMES = {
     palette: [0xd8a73a, 0xc99a30, 0xe0b448, 0xcf9f3a],
     wash: [
       { blend: "multiply", zone(c, o) { c.fillStyle = css(0xf2dfb4, Math.min(1, o.fill * 3)); c.fillRect(-1e6, -1e6, 2e6, 2e6); } },
-      // the gold clouds (suyari-gasumi): long rounded bands of gold leaf drifting in from the borders, with the leaf's square seams
+      // gold leaf framing every zone like the cloud bands of a folding screen: a scalloped band hugging the border (lobes of
+      // varying size), outlined in dark gold, with a sheen across the leaf, its square seams and gold dust (sunago) beyond it
       { after(c0, { zs, u, ink, g, cv, k, x0, y0 }) {
         if ( ink <= 0 ) return;
         const lay = document.createElement("canvas"); lay.width = cv.width; lay.height = cv.height;
         const c = lay.getContext("2d"); c.setTransform(k, 0, 0, k, 1 - x0 * k, 1 - y0 * k);
+        const dust = [];
         for ( const [zi, it] of zs.entries() ) {
-          c.save(); c.clip(it.path, "evenodd");
-          const clouds = [];
+          const lobes = [];
+          let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
           for ( const part of it.z.parts ) {
             const P = pairs(part[0]); P.push(P[0]);
-            for ( const [j, [x, y, nx, ny]] of along(P, g * 1.3).entries() ) {
-              const h = hash(zi * 131 + j * 7.3);
-              if ( h < 0.55 ) continue;
-              // a band: a row of overlapping rounded lobes, long and level like the clouds on a screen
-              const len = g * (1.2 + 1.6 * hash(h * 13)), th = g * (0.22 + 0.16 * hash(h * 29)), cx = x - nx * th * 0.4, cy = y - ny * th * 0.4;
-              const n = 4 + Math.round(3 * h);
-              for ( let q = 0; q < n; q++ ) { const t = q / (n - 1) - 0.5; clouds.push([cx + t * len, cy + Math.sin(q * 2.1 + h * 9) * th * 0.25, th * (1 - 0.55 * Math.abs(t) * 2 * 0.6)]); }
+            for ( const [j, [x, y, nx, ny]] of along(P, g * 0.42).entries() ) {
+              const h = hash(zi * 131 + j * 7.3), h2 = hash(zi * 17 + j * 3.1);
+              // the band swells into cloud heads now and then, and thins between them
+              const swell = Math.max(0, Math.sin(j * 0.38 + zi * 1.7)) ** 6;
+              const rr = g * (0.14 + 0.04 * h + 0.34 * swell * (0.7 + 0.3 * h2));
+              lobes.push([x, y, rr]);
+              bx0 = Math.min(bx0, x); by0 = Math.min(by0, y); bx1 = Math.max(bx1, x); by1 = Math.max(by1, y);
+              for ( let q = 0; q < 3; q++ ) { const hq = hash(zi * 7 + j * 11 + q * 5.7), an = hq * TAU, dd = rr + (2 + 9 * hash(hq * 3)) * u; dust.push([zi, x + Math.cos(an) * dd, y + Math.sin(an) * dd, (0.5 + 1.1 * hash(hq * 9)) * u]); }
             }
           }
-          const blob = (grow, col, al) => { c.globalAlpha = al; c.fillStyle = col; c.beginPath(); for ( const [x, y, rr] of clouds ) { c.moveTo(x + (rr + grow) * 1.9, y); c.ellipse(x, y, (rr + grow) * 1.9, (rr + grow) * 0.8, 0, 0, TAU); } c.fill(); };
-          blob(2 * u, "#8a5a10", Math.min(1, ink));
-          blob(0, "#e3b84f", Math.min(1, ink));
+          c.save(); c.clip(it.path, "evenodd");
+          const blob = (grow, fill) => { c.fillStyle = fill; c.beginPath(); for ( const [x, y, rr] of lobes ) { c.moveTo(x + rr + grow, y); c.arc(x, y, rr + grow, 0, TAU); } c.fill(); };
+          c.globalAlpha = Math.min(1, ink);
+          blob(1.8 * u, "#5c3a0c");
+          const gr = c.createLinearGradient(bx0, by0, bx1, by1);
+          [[0, "#d9a83c"], [0.22, "#f6d985"], [0.38, "#dcac44"], [0.6, "#f1cf72"], [0.8, "#cf9c33"], [1, "#eccb6c"]].forEach(([t, col]) => gr.addColorStop(t, col));
+          blob(0, gr);
           c.restore();
         }
-        // gold leaf is laid in squares: faint seams, kept to the gold
+        // the leaf's square seams, kept to the gold
         c.setTransform(1, 0, 0, 1, 0, 0);
-        c.globalCompositeOperation = "source-atop"; c.globalAlpha = 0.45;
-        c.strokeStyle = "#9a6a18"; c.lineWidth = Math.max(0.6, 0.8 * u * k);
-        const s = g * 0.5 * k; c.beginPath();
+        c.globalCompositeOperation = "source-atop"; c.globalAlpha = 0.35;
+        c.strokeStyle = "#8a5c14"; c.lineWidth = Math.max(0.6, 0.7 * u * k);
+        const s = g * 0.45 * k; c.beginPath();
         for ( let x = 0; x <= lay.width; x += s ) { c.moveTo(x, 0); c.lineTo(x, lay.height); }
         for ( let y = 0; y <= lay.height; y += s ) { c.moveTo(0, y); c.lineTo(lay.width, y); }
         c.stroke();
+        // gold dust beyond the band, inside its own zone
         c.globalCompositeOperation = "source-over"; c.globalAlpha = 0.9;
-        c0.save(); c0.setTransform(1, 0, 0, 1, 0, 0); c0.drawImage(lay, 0, 0); c0.restore();
+        c.setTransform(k, 0, 0, k, 1 - x0 * k, 1 - y0 * k);
+        for ( const [zi, it] of zs.entries() ) {
+          c.save(); c.clip(it.path, "evenodd"); c.fillStyle = "#e9c463"; c.beginPath();
+          for ( const [di, x, y, r] of dust ) if ( di === zi ) { c.moveTo(x + r, y); c.arc(x, y, r, 0, TAU); }
+          c.fill(); c.restore();
+        }
+        c0.save(); c0.setTransform(1, 0, 0, 1, 0, 0); c0.globalAlpha = 0.95; c0.drawImage(lay, 0, 0); c0.restore();
       } }
     ],
     lines(D) {
       const { Ln, Z, px, w, a, col } = D, P = Z.core.map(pairs);
-      // a washi halo so the ink reads on dark water
-      Ln.lineStyle({ width: w * 2.6, color: 0xf3e6c8, alpha: 0.35 * a, ...R() }); for ( const q of P ) tracePts(Ln, q);
-      // sumi strokes: each border painted in several strokes, pressed, swelling, lifting off dry
-      const step = Math.max(D.g * 2.4, 110 * px), bw = w * 1.9;
+      const sm = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      // a washi edge under the ink so it reads on dark water and on the gold
+      Ln.lineStyle({ width: w * 2.3, color: 0xf6ead0, alpha: 0.4 * a, ...R() }); for ( const q of P ) tracePts(Ln, q);
+      // sumi strokes: every border painted in long overlapping strokes - the brush lands round, swells, and lifts off into
+      // separate bristle trails (kasure); sizes on screen, stroke breaks fixed on the map
+      const step = Math.max(D.g * 3.2, 150 * px), bw = w * 1.45;
       for ( const [i, q] of P.entries() ) {
-        for ( const [j, piece] of pieces(q, step, 8 * px).entries() ) {
-          const seed = i * 13 + j * 5, wf = brushWidth(bw, seed);
-          const s = spline(pairs(D.wobble(piece.flat(), 1.8 * px, seed, px)), 1);
-          Ln.lineStyle(0); Ln.beginFill(col, 0.95 * a); ribbon(Ln, s, wf); Ln.endFill();
-          // dry brush (kasure): pale streaks through the lifted tail
-          const L = lenOf(s), tail = sub(s, L * (0.55 + 0.15 * hash(seed)), L);
-          if ( tail.length > 1 ) for ( const kk of [-0.24, 0.05, 0.28] ) {
-            Ln.lineStyle({ width: Math.max(0.8 * px, bw * 0.08), color: 0xf3e6c8, alpha: 0.8 * a, cap: PIXI.LINE_CAP.ROUND });
-            tracePts(Ln, sub(offset(tail, kk * bw * 0.8), lenOf(tail) * 0.25 * hash(seed + kk), lenOf(tail)));
+        for ( const [j, piece] of pieces(q, step, 16 * px).entries() ) {
+          const seed = i * 13 + j * 5, s0 = spline(pairs(D.wobble(piece.flat(), 0.7 * px, seed, px)), 3), L = lenOf(s0);
+          if ( L < 4 * px ) continue;
+          const body = sub(s0, 0, L * 0.74), prof = (t) => bw * (0.6 + 0.4 * sm(0, 0.1, t)) * (1 + 0.14 * Math.sin(Math.PI * t)) * (1 - 0.55 * sm(0.72, 1, t));
+          // the ink bleeds a little at the edge: a soft wider pass, then the stroke
+          for ( const [k, al] of [[1.25, 0.28], [1, 0.95]] ) {
+            Ln.lineStyle(0); Ln.beginFill(col, al * a);
+            ribbon(Ln, body, (t) => prof(t) * k);
+            const [x, y] = s0[0]; Ln.drawCircle(x, y, (prof(0) * k) / 2);
+            Ln.endFill();
           }
-          // a few drops of ink where the brush landed
-          if ( hash(seed * 3.3) > 0.55 ) {
-            const [x, y] = s[0], h = hash(seed * 9.1);
-            Ln.lineStyle(0); Ln.beginFill(col, 0.9 * a).drawCircle(x + (h - 0.5) * 16 * px, y + (hash(h * 7) - 0.5) * 16 * px, (1.2 + 2.2 * h) * px).endFill();
+          // bristle trails: the tail splits into a few thinning lines of different length
+          const tail = sub(s0, L * 0.6, L);
+          if ( tail.length < 2 ) continue;
+          for ( let m = 0; m < 4; m++ ) {
+            const off = (m - 1.5) * bw * 0.24, reach = 0.7 + 0.3 * hash(seed * 3 + m), line = sub(offset(tail, off), 0, lenOf(tail) * reach);
+            if ( line.length < 2 ) continue;
+            Ln.lineStyle(0); Ln.beginFill(col, 0.9 * a);
+            ribbon(Ln, line, (t) => bw * 0.26 * (1 - 0.85 * t) * (0.8 + 0.4 * hash(seed + m)));
+            Ln.endFill();
           }
         }
+      }
+      // gilt fittings where the borders meet keep the junctions readable
+      for ( const [x, y] of junctions(Z) ) {
+        const s2 = 5.5 * px;
+        Ln.lineStyle({ width: 1.3 * px, color: 0x4a2e08, alpha: a, join: PIXI.LINE_JOIN.MITER });
+        Ln.beginFill(0xe9c25a, a).drawPolygon([x, y - s2, x + s2, y, x, y + s2, x - s2, y]).endFill();
       }
     },
     hoverColor: 0xe9c25a,
@@ -674,31 +700,24 @@ export const BADGES = {
     return 1.15;
   },
   banner(B) {
-    const { G, r } = B;
-    if ( B.dist || B.blocked || !B.kanji ) {
-      // distances: a red seal with the number
-      shadow(G, (dy) => G.drawRoundedRect(-r * 0.9, -r * 0.9 + dy, r * 1.8, r * 1.8, r * 0.14), 2, 0.4);
-      G.lineStyle(0); G.beginFill(B.band?.color ?? 0xb3261e, 1).drawRoundedRect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8, r * 0.14).endFill();
-      G.lineStyle({ width: r * 0.07, color: (B.band?.color ?? 0) === 0xffffff ? 0x141010 : 0xfbf1dc, alpha: 0.9 }); G.drawRect(-r * 0.7, -r * 0.7, r * 1.4, r * 1.4);
-      const sealC = B.band?.color ?? 0xb3261e, lum = (0.299 * ((sealC >> 16) & 255) + 0.587 * ((sealC >> 8) & 255) + 0.114 * (sealC & 255)) / 255;
-      B.add(B.label, { fontFamily: "Amiri, Georgia, serif", fontWeight: "700", fill: lum > 0.6 ? 0x141010 : 0xfbf1dc, size: 0.95 });
-      return 1;
+    // a lacquered plaque: black lacquer, a double gold rim, the number large in gold; a small vermilion seal with the brushed numeral
+    const { G, r } = B, n = B.label.length, ring = B.band?.color ?? 0xe3b84f;
+    const hw = r * (0.78 + 0.26 * Math.max(1, Math.min(3, B.arabic.length))), hh = r * 0.86;
+    shadow(G, (dy) => G.drawRoundedRect(-hw, -hh + dy, hw * 2, hh * 2, r * 0.22), 2.4, 0.45);
+    G.lineStyle({ width: r * 0.12, color: ring, alpha: 1 }); G.beginFill(0x161210, 0.96).drawRoundedRect(-hw, -hh, hw * 2, hh * 2, r * 0.22).endFill();
+    G.lineStyle({ width: r * 0.04, color: ring, alpha: 0.8 }); G.drawRoundedRect(-hw + r * 0.16, -hh + r * 0.16, hw * 2 - r * 0.32, hh * 2 - r * 0.32, r * 0.12);
+    const num = B.dist || B.blocked ? B.label : B.arabic;
+    B.add(num, { fontFamily: "Amiri, Georgia, serif", fontWeight: "700", fill: B.band?.color ?? 0xf3dc9a, size: num.length > 1 ? 0.95 : 1.1, dy: 0.06 });
+    if ( B.kanji && !B.dist && !B.blocked ) {
+      const k = [...B.kanji], ss = r * 0.55, sw = ss * 1.25, sh = k.length * ss * 1.1 + ss * 0.25, sx = hw - sw * 0.35, sy = -hh - sh * 0.45;
+      G.lineStyle(0); G.beginFill(0xb3261e, 1).drawRoundedRect(sx - sw / 2, sy, sw, sh, ss * 0.12).endFill();
+      const kc = new PIXI.Graphics(); brushKanji(kc, B.kanji, ss, 0xfbf1dc); kc.position.set(sx, sy + sh / 2); B.b.addChild(kc);
     }
-    // a war banner (sashimono): washi cloth on a black pole, the numeral brushed down it, the arabic number in a red seal below
-    const gl = [...B.kanji].length, s = r * 0.95, bh = gl * s + (gl - 1) * s * 0.12 + r * 0.6, bw2 = r * 0.72, top = -bh / 2 - r * 0.3;
-    shadow(G, (dy) => G.drawRect(-bw2, top + dy, bw2 * 2, bh), 2.2, 0.38);
-    G.lineStyle(0); G.beginFill(0x161210, 1).drawRect(-bw2 - r * 0.2, top - r * 0.35, r * 0.13, bh + r * 0.9).drawRect(-bw2 - r * 0.2, top - r * 0.35, bw2 * 2 + r * 0.32, r * 0.13).endFill();
-    G.lineStyle({ width: r * 0.06, color: 0x161210, alpha: 1 }); G.beginFill(0xf4ead2, 1).drawRect(-bw2, top, bw2 * 2, bh).endFill();
-    G.lineStyle(0); G.beginFill(0xb3261e, 1).drawRect(-bw2, top, bw2 * 2, r * 0.18).endFill();
-    const kc = new PIXI.Graphics(); brushKanji(kc, B.kanji, s, 0x141010); kc.position.set(0, top + bh / 2 + r * 0.06); B.b.addChild(kc);
-    const sy = top + bh - r * 0.15, sr = r * 0.52;
-    G.beginFill(B.band?.color ?? 0xb3261e, 1).drawRoundedRect(bw2 - sr * 0.8, sy, sr * 1.7, sr * 1.7, sr * 0.2).endFill();
-    B.add(B.arabic, { fontFamily: "Amiri, Georgia, serif", fontWeight: "700", fill: 0xfbf1dc, size: B.arabic.length > 1 ? 0.52 : 0.62, x: bw2 + sr * 0.05, y: sy + sr * 0.85 });
-    return Math.max(1, (sy + sr * 1.7) / r);
+    return 1;
   }
 };
 /** How big each badge is drawn (multiples of the base badge radius). */
-export const BADGE_SCALE = { counter: 1.2, pill: 1.25, scribble: 1.3, disc: 1.45, panel: 1.35, shield: 1.35, chip: 1.3, tag: 1.35, blossom: 1.35, banner: 1.55 };
+export const BADGE_SCALE = { counter: 1.2, pill: 1.5, scribble: 1.3, disc: 1.45, panel: 1.35, shield: 1.35, chip: 1.3, tag: 1.35, blossom: 1.35, banner: 1.5 };
 
 /** Make a polyline a little longer at both ends (pencil lines overshoot their corners). */
 function extend(P, d) {
