@@ -107,7 +107,7 @@ export const TABLES = {
     exp: [0.55, 1, 1],                                                          // streak length (exposure) factor
     crown: [0, 1, 1], ripple: [0.12, 0.4, 0.5],                                 // splash crowns on / ripples on water hits
     wet: [0.3, 0.65, 1.0], puddle: [1.4, 0.68, 0.6], sheen: [0.0022, 0.003, 0.004],
-    lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0, 0.4, 1], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] }
+    lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0.2, 0.65, 1.25], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] }
   },
   snow: {
     mid: [5, 20, 40], far: [4, 16, 34], near: [0, 0, 2],                        // flakes per 64 x 64 art px
@@ -130,9 +130,9 @@ export const TABLES = {
     lens: { specks: [0.35, 0.65, 1.01], discs: [6, 14, 26], glare: [0.45, 0.7, 1], ghosts: [0, 3, 5], ghostK: [0, 0.09, 0.14], smudge: [0, 1, 1] }
   },
   embers: {
-    src: [0.35, 0.6, 0.6], inview: [0, 1, 1],                                   // fire sources: share of source cells; also inside the view
-    spark: [18, 36, 90], big: [0, 1, 1],                                        // sparks per source; 2-px big sparks
-    smoke: [0, 1, 1], smokeL3: [0, 0, 1], dim: [0.15, 0.6, 1],                  // smoke haze on, its 2-band look; the fire-lit evening
+    spark: [1.8, 6, 18], big: [0, 1, 1],                                        // spark slots per 64 x 64 (wind-borne, gated by swarms); 2-px big sparks
+    swarm: [0.15, 0.3, 0.45],                                                   // the swarm floor: share of sparks that fly outside the gust swarms
+    smoke: [0, 1, 1], smokeL3: [0, 0, 1], dim: [0.15, 0.6, 1],                  // smoke haze on, its 2-band look; the dim, warm evening
     lens: { glow: [0.4, 0.7, 1], flecks: [5, 10, 18] }
   }
 };

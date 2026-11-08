@@ -30,7 +30,7 @@ import { SPEED_SQ, dirVec } from "../wind.mjs";
  * COST: no weather -> this display does not exist (no object, no ticker). With weather: one ticker listener (a few uniforms; the
  * state is resolved at most 12 times a second), one draw call per pass that has something to draw.
  */
-const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 192]];
+const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 64]];
 const PART_MAX = 60000;
 const BLEND = "MM_WEATHER";
 const MAX_INSTANCES = 150000;
@@ -223,11 +223,12 @@ export class WeatherDisplay {
     // EMBERS (sparks carried by the wind; at least 1.6 squares / s)
     const em = fx.embers, EG = M.gates("embers", em?.s ?? 0), ep = em?.p ?? 0, embSp = Math.max(wsp, 0.4 * SPEED_SQ * cps);
     if ( on("embers") ) {
-      setPart("embers", [EG.spark * ep * perf, 0, 0, 0], wd, embSp, [EG.src, EG.big, 0, 0], ep);
-      const R = embSp * 1.4 * 5 * 1.43 + 24;
-      this.reach.embers = [Math.min(0, wd[0] * R) - 24, Math.max(0, wd[0] * R) + 24 + 192, Math.min(0, wd[1] * R) - lift * 120 - 24, Math.max(0, wd[1] * R) + 24 + 192];
+      setPart("embers", [EG.spark * ep * perf, 0, 0, 0], wd, embSp, [EG.swarm, EG.big, 0, 0], ep);
+      // a spark crosses its anchor mid-life: half its flight either way along the wind (+ the sway, + its height)
+      const R = embSp * 1.3 * 3.4 * 1.46 * 0.5 + 16;
+      this.reach.embers = [-Math.abs(wd[0]) * R - 16, Math.abs(wd[0]) * R + 16, -Math.abs(wd[1]) * R - lift * 80 - 16, Math.abs(wd[1]) * R + 16];
     }
-    gu2.uEmb[0] = EG.src; gu2.uEmb[1] = EG.dim; gu2.uEmb[2] = on("embers") ? ep : 0;
+    gu2.uEmb[0] = 0; gu2.uEmb[1] = EG.dim; gu2.uEmb[2] = on("embers") ? ep : 0;
     hz.uSmoke[0] = on("embers") ? EG.smoke * ep : 0; hz.uSmoke[1] = EG.smokeL3; hz.uSmoke[2] = wd[0] * embSp; hz.uSmoke[3] = wd[1] * embSp;
     const anyGround = wet > 0.002 || cover > 0.002 || ["snow", "sand", "dust", "embers"].some(on);
     gu2.uAny = anyGround ? 1 : 0;

@@ -11,8 +11,9 @@ import { GLSL_WIND, gustEnv, dirVec } from "../wind.mjs";
  * RENDER: one low-res pass into a lens-size RenderTexture, only when its 12 Hz step changes (or the view moves: the drops refract
  * the map under them); every frame one NEAREST-upscaled sprite, a child of the stage drawn last, in screen space (its world transform
  * ignores the stage's). Both use the weather's blend (dst x k + add): wet film, streaks, mist and rims are the frame under them
- * scaled (no capture), only a drop's body fetches the map (refraction-lite, way (a): the scene background at the world point under
- * the drop centre + offset, magnified in medium drops, inverted in big ones).
+ * scaled (no capture); only a drop's body fetches an image: a clear water lens over what lies under it, slightly magnified and
+ * pulled at the edge, with a thin rim and highlight. The image is way (b), a lens-size copy of the frame drawn so far (LensGrab:
+ * map, tokens, fire, weather), or way (a), the scene background at the world point, when that copy is not possible.
  *
  * RAIN (4.3): static beads (one per jittered 8-px cell, lobed, born with a splat, sag, evaporate), runners in two column grids (grow
  * in place, then stick-slip down a wobbly path slanted by the wind, leave a wet streak that beads up and clears the misty film),
@@ -56,6 +57,8 @@ uniform vec4 uHeatL;         // glow, flecks per area, presence, -
 uniform sampler2D uBg;
 uniform vec4 uMap;           // lens px -> scene background uv: uv = p * uMap.xy + uMap.zw
 uniform float uHasBg;
+uniform sampler2D uGrab;     // way (b): a lens-size copy of the frame drawn under the glass (tokens, fire, weather and all)
+uniform float uHasGrab;
 uniform float uLight;        // 1 by day, darker at night
 uniform float uWet;          // the wet ground under the glass (the map sample is the dry map)
 ${GLSL_WIND}
@@ -135,9 +138,9 @@ void runner(int layer, int ci, float Wc, float off, int seed) {
   float h[12];
   for ( int q = 0; q < 12; q++ ) h[q] = hu(key, layer, seed + 10 + q);
   float colx = off + (float(ci) + 0.5) * Wc + (h[0] - 0.5) * Wc * 0.4;
-  if ( h[1] > (0.25 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z ) return;
+  if ( h[1] > (0.4 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z ) return;
   float y0 = -4.0 + h[2] * uLens.y * 0.62, r0 = 3.6 + 5.0 * pow(h[3], 0.8), ta = 0.5 + 1.8 * h[4];
-  bool stall = h[5] > 0.72;
+  bool stall = h[5] > 0.8;
   float dist = stall ? 22.0 + 70.0 * h[6] : uLens.y + 24.0 - y0;
   float runT = L - ta - 1.3, V = 20.0 + 60.0 * pow(h[7], 1.5);
   if ( !stall ) V = max(V, dist / max(runT, 0.4) * 1.15);
@@ -504,23 +507,27 @@ void main() {
   if ( lit && !inside && hu(int(floor(p.x)), int(floor(p.y / 3.0)), 345) < 0.6 ) { add = vec3(0.2) * uLight; k = 0.85; }
   if ( mist && !inside ) { add = vec3(0.12) * uLight; k = 1.0; }
   if ( sat && !inside ) { add = vec3(0.16) * uLight; k = 0.9; }
-  if ( !inside && sdf < 1.0 && p.y - dc.y > 0.45 * dR ) { add = vec3(0.0); k = 0.78; }     // contact shadow under the drop
+  if ( !inside && sdf < 1.0 && p.y - dc.y > 0.45 * dR ) { add = vec3(0.0); k = 0.86; }     // a faint contact shadow under the drop
   if ( inside ) {
+    // a clear water lens: it shows what lies under it, magnified a little at the centre and pulled at the edge (barrel-like), with
+    // the image nudged up; no fill or tint, only a thin dark rim on the lower / side edge, a faint lit top edge and a highlight
     vec2 n = (p - dc) / max(dR, 0.5);
-    bool big = dR >= 3.0;
-    float km = big ? -0.42 : 0.5;
-    vec2 sp = floor(dc + (p - dc) * km - vec2(0.0, big ? dR * 0.25 : 0.0)) + 0.5;
-    vec2 uv = sp * uMap.xy + uMap.zw;
-    bool onMap = uHasBg > 0.5 && all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
-    vec3 src = onMap ? (texture(uBg, uv).rgb * (1.0 - 0.29 * uWet) + vec3(0.0, 0.012, 0.035) * uWet) * uLight : vec3(0.0);
-    // body: the refracted map; off the map, the frame itself (k form)
-    vec3 bAdd = onMap ? src * 0.86 + 0.11 * vec3(0.86, 0.91, 1.0) * uLight : 0.11 * vec3(0.86, 0.91, 1.0) * uLight; float bK = onMap ? 0.0 : 0.86;
-    bool rim = sdf > -1.0, low = rim && n.y > -0.35;
-    if ( low ) { bAdd = onMap ? src * 0.42 : vec3(0.0); bK = onMap ? 0.0 : 0.42; }
-    else if ( rim ) { bAdd = (onMap ? src * 0.74 : vec3(0.0)) + 0.05 * uLight; bK = onMap ? 0.0 : 0.74; }
-    if ( !rim && dR >= 2.2 && n.y > 0.25 && length(n) > 0.35 ) bAdd += 0.17 * uLight;          // the lower caustic crescent
-    if ( dR < 1.25 ) { bAdd = vec3(0.13) * uLight; bK = 1.0; }                                 // tiny: one lighter px
-    else if ( length(p - (dc - vec2(0.38, 0.42) * dR)) < max(0.72, 0.26 * dR) ) { bAdd = vec3(0.97, 0.98, 1.0) * uLight; bK = 0.0; }
+    float l2 = min(dot(n, n), 1.0), m = 0.68 + 0.22 * l2;
+    vec2 sp = dc + (p - dc) * m - vec2(0.0, 0.18 * dR);
+    vec3 src; bool have = true;
+    if ( uHasGrab > 0.5 ) src = texture(uGrab, clamp(sp, vec2(0.5), uLens - 0.5) / uLens).rgb;     // way (b): the frame itself
+    else {
+      vec2 uv = floor(sp) * uMap.xy + uMap.zw + 0.5 * uMap.xy;                                     // way (a): the map only
+      have = uHasBg > 0.5 && all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)));
+      src = have ? (texture(uBg, uv).rgb * (1.0 - 0.29 * uWet) + vec3(0.0, 0.012, 0.035) * uWet) * uLight : vec3(0.0);
+    }
+    // body: the refracted image, a touch brighter where the drop gathers light (lower half), never a flat fill
+    vec3 bAdd = have ? src * (0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR)) : vec3(0.0); float bK = have ? 0.0 : 1.0;
+    bool rim = sdf > -1.0, low = rim && n.y > -0.2;
+    if ( low ) { bAdd = have ? src * 0.58 : vec3(0.0); bK = have ? 0.0 : 0.6; }
+    else if ( rim ) { bAdd = (have ? src * 0.9 : vec3(0.0)) + 0.05 * uLight; bK = have ? 0.0 : 0.95; }
+    if ( dR < 1.25 ) { bAdd = vec3(0.07) * uLight; bK = 0.97; }                                  // tiny: one barely lighter px
+    else if ( length(p - (dc - vec2(0.38, 0.42) * dR)) < max(0.6, 0.2 * dR) ) { bAdd = vec3(0.92, 0.95, 1.0) * uLight; bK = 0.0; }
     add = bAdd; k = bK;
   }
   A_ = A0 * k + add; K_ = K0 * k;
@@ -545,9 +552,44 @@ class ScreenSprite extends PIXI.Sprite {
   }
 }
 
+/**
+ * Way (b) of the refraction (doc 4.2): drawn just before the lens sprite, it copies the frame drawn so far (everything under the
+ * glass: map, tokens, fire, weather) into a lens-size texture with one downscaling blit, on every frame while lens drops exist (a lens-size blit), so each 12 Hz step refracts the frame just before it. No redraw, no
+ * full-res capture.
+ */
+class LensGrab extends PIXI.Container {
+  render(r) {
+    const L = this.lens;
+    if ( !L?.grabWanted || !L.grabRT ) return;
+    L.grabWanted = false;
+    const gl = r.gl, cur = r.renderTexture.current, ctx = r.CONTEXT_UID;
+    try {
+      r.batch.flush();
+      const srcFB = cur ? cur.framebuffer?.glFramebuffers?.[ctx]?.framebuffer ?? null : null;
+      if ( cur && (!srcFB || cur.framebuffer.multisample > 1) ) { L.grabOk = false; return; }
+      if ( !cur && gl.getContextAttributes()?.antialias ) { L.grabOk = false; return; }
+      const res = cur ? cur.baseTexture.resolution : r.resolution, sf = r.renderTexture.sourceFrame, df = r.renderTexture.destinationFrame;
+      const sf0 = sf.clone(), df0 = df.clone();
+      const W = Math.floor((cur ? cur.width : r.screen.width) * res), H = Math.floor((cur ? cur.height : r.screen.height) * res);
+      const { lw, lh, lpx } = L.stats, dw = Math.min(lw, Math.floor(W / lpx)), dh = Math.min(lh, Math.floor(H / lpx));
+      r.renderTexture.bind(L.grabRT);
+      const dstFB = L.grabRT.framebuffer.glFramebuffers[ctx].framebuffer;
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, srcFB);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, dstFB);
+      // a render texture holds its top row first, the screen its bottom row: flip only from the screen
+      if ( cur ) gl.blitFramebuffer(0, 0, dw * lpx, dh * lpx, 0, 0, dw, dh, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+      else gl.blitFramebuffer(0, H - dh * lpx, dw * lpx, H, 0, dh, dw, 0, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFB);
+      r.renderTexture.bind(cur, sf0, df0);
+      L.grabOk = true; L.stats.grabs++;
+    } catch ( err ) { L.grabOk = false; try { r.renderTexture.bind(cur); } catch {} }
+  }
+}
+
 export class WeatherLens {
   constructor() {
-    this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0 };
+    this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, grabs: 0, way: "a" };
+    this.grabWanted = false; this.grabOk = false;
     this.now = null; this.state = null; this.P = null;
     this.key = ""; this.int = new Float32Array(121);
     this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
@@ -582,28 +624,33 @@ export class WeatherLens {
     this.free();
     this.stats.lw = lw; this.stats.lh = lh; this.stats.lpx = lpx;
     this.rt = PIXI.RenderTexture.create({ width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+    this.grabRT = PIXI.RenderTexture.create({ width: lw, height: lh, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+    this.grab = new LensGrab(); this.grab.lens = this; this.grab.eventMode = "none";
     lensProg ??= PIXI.Program.from(LENS_VERT, LENS_FRAG, "moinen-maps-weather-lens");
     const g = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
     const state = PIXI.State.for2d(); state.blend = false;
     this.pass = new PIXI.Mesh(g, new PIXI.Shader(lensProg, {
       uLens: new Float32Array([lw, lh]), uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
       uG: this.int, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
-      uBg: PIXI.Texture.WHITE, uMap: new Float32Array(4), uHasBg: 0, uLight: 1, uWet: 0, translationMatrix: new PIXI.Matrix().toArray(true)
+      uBg: PIXI.Texture.WHITE, uMap: new Float32Array(4), uHasBg: 0, uGrab: PIXI.Texture.WHITE, uHasGrab: 0, uLight: 1, uWet: 0, translationMatrix: new PIXI.Matrix().toArray(true)
     }), state);
     this.sprite = new ScreenSprite(this.rt);
     this.sprite.px = css;
     this.sprite.blendMode = blendMode();
     this.sprite.eventMode = "none";
-    canvas.stage.addChild(this.sprite);
+    canvas.stage.addChild(this.grab, this.sprite);
   }
 
   /** Every frame: re-render the lens when its step, the view or the state changed (a compare otherwise). */
   tick() {
     const st = this.state; if ( !st || !canvas.stage ) return;
     this.ensure();
-    if ( this.sprite.parent !== canvas.stage || canvas.stage.children.at(-1) !== this.sprite ) canvas.stage.addChild(this.sprite);   // (drawn last)
+    const ch = canvas.stage.children;
+    if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite || ch.at(-2) !== this.grab ) canvas.stage.addChild(this.grab, this.sprite);   // (drawn last)
     const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12), wt = canvas.stage.worldTransform;
     const key = `${q}|${wt.a}|${wt.d}|${wt.tx}|${wt.ty}`;
+    // copy every frame while drops exist (one small blit), so a step always refracts the frame just before it
+    this.grabWanted = (this.gates?.[0] ?? 0) > 0;
     if ( key === this.key ) return;
     this.key = key;
     this.render(q / 12, wt);
@@ -627,6 +674,8 @@ export class WeatherLens {
       u.uMap[0] = css / wt.a / R.width; u.uMap[1] = css / wt.d / R.height;
       u.uMap[2] = (-wt.tx / wt.a - R.x) / R.width; u.uMap[3] = (-wt.ty / wt.d - R.y) / R.height;
     } else u.uHasBg = 0;
+    // way (b) when the last copy worked (the frame under the glass, one frame late); else way (a), the map
+    u.uGrab = this.grabRT; u.uHasGrab = this.grabOk ? 1 : 0; this.stats.way = this.grabOk ? "b" : "a";
     u.uWet = Math.min(1, this.state?.wet ?? 0);
     u.uLight = 1 - 0.7 * Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
     canvas.app.renderer.render(this.pass, { renderTexture: this.rt, clear: true });
@@ -635,6 +684,8 @@ export class WeatherLens {
 
   free() {
     this.sprite?.parent?.removeChild(this.sprite); this.sprite?.destroy(); this.sprite = null;
+    this.grab?.parent?.removeChild(this.grab); this.grab?.destroy(); this.grab = null;
+    this.grabRT?.destroy(true); this.grabRT = null; this.grabOk = false;
     this.pass?.geometry?.destroy(); this.pass?.destroy(); this.pass = null;
     this.rt?.destroy(true); this.rt = null;
   }

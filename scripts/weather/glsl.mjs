@@ -98,14 +98,6 @@ float driftScore(vec2 c, float con, vec2 wd) {
 }
 // SUN SHAFTS (dust): wide warped diagonal bands where motes catch the light
 float shaftAt(vec2 c) { return 0.5 + 0.5 * sin(dot(c, vec2(0.8, 0.6)) / 37.0 + 3.0 * fbm2(c / 60.0, uSeed + 181)); }
-// EMBER SOURCES: one burning spot per source cell (192 art px) where hashed in; its place in the cell and its rate
-const float SRC = 192.0;
-bool srcAt(ivec2 q, float share, out vec2 pos, out float rate) {
-  if ( hu(q.x, q.y, uSeed + 150) >= share ) return false;
-  pos = (vec2(q) + 0.2 + 0.6 * vec2(hu(q.x, q.y, uSeed + 151), hu(q.x, q.y, uSeed + 152))) * SRC;
-  rate = 0.5 + 0.5 * hu(q.x, q.y, uSeed + 153);
-  return true;
-}
 // a puddle cell (flat, not dark, not water) at a puddle threshold (> 1.3: none)
 bool puddleAt(vec2 c, vec4 inf, float thr) {
   if ( thr > 1.3 || uHasInfo == 0 ) return false;
@@ -169,17 +161,9 @@ float glint(vec2 c, float rate, int s) {
 
 // one art cell: (add.rgb, k): the frame under it becomes dst * k + add (custom blend ONE, SRC_ALPHA)
 // the smooth fields (scales of 37+ cells) once per pixel, at the cell under it; per-cell terms stay in cellGround
-float gWv = 0.0, gGlow = 0.0, gFr = 0.0, gSh = 0.0;
+float gWv = 0.0, gFr = 0.0, gSh = 0.0;
 void groundFields(vec2 c) {
   if ( uWet > 0.0005 ) gWv = fbm2(c / 70.0 + vec2(3.0, 0.0), uSeed + 9);
-  if ( uEmb.z > 0.0 ) {
-    ivec2 q0 = ivec2(floor(c / SRC));
-    for ( int j = -1; j <= 1; j++ ) for ( int i = -1; i <= 1; i++ ) {
-      vec2 sp; float r;
-      if ( !srcAt(q0 + ivec2(i, j), uEmb.x, sp, r) ) continue;
-      gGlow += r * exp(-length(vec2(c.x - sp.x, (c.y - sp.y) / 0.8)) / 80.0);
-    }
-  }
   if ( uSandW.w > 0.0 ) {
     vec2 wd = uSandW.xy;
     float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
@@ -219,10 +203,8 @@ vec4 cellGround(vec2 c) {
   if ( uSand.w > 0.0 ) f = tint(f, mix(vec3(1.0), vec3(1.0, 0.88, 0.70) * 0.86, uSand.w), M);
   if ( uDust.y > 0.0 ) f = tint(f, mix(vec3(1.0), vec3(1.04, 1.0, 0.90), uDust.y), M);
   if ( uEmb.z > 0.0 ) {
-    // the fire-lit evening: dim, warm light pooling around the burning spots in flat steps (dithered between)
-    float glow = gGlow;
-    float qg = clamp(floor(glow * 4.0 + (dz - 0.5) * 0.18 + 0.5) / 4.0, 0.0, 1.2);
-    vec3 lit = vec3(0.42, 0.40, 0.48) + qg * vec3(0.55, 0.30, 0.08);
+    // a dim, warm evening: the same light everywhere (the fires are somewhere upwind, not on this map)
+    vec3 lit = vec3(0.42, 0.40, 0.48) + 0.5 * vec3(0.55, 0.30, 0.08);
     f = tint(f, mix(vec3(1.0), mix(vec3(1.02, 0.98, 0.94), lit, uEmb.y), uEmb.z), M);
   }
   if ( !open ) return f;

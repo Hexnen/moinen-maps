@@ -24,7 +24,7 @@ uniform vec4 uOrigin;        // scene rect x, y; art px (scene px); art cells pe
 uniform vec2 uWindDir;       // unit (sand: the sand's direction)
 uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust amount
 uniform vec2 uView;          // lift, squash
-uniform vec4 uVF;            // snow: fall speeds mid, far, near; grit: hop, length; embers: source share, big sparks
+uniform vec4 uVF;            // snow: fall speeds mid, far, near; grit: hop, length; embers: swarm floor, big sparks
 uniform float uI;            // presence x performance
 out vec2 vArt;
 out vec2 vScr;
@@ -51,11 +51,6 @@ float lifeOf(int key, int tx, int ty, int j, int sd, float kc0, float kcr, out f
 vec2 windAt(vec2 g, float lag) {
   float G = gustAt(g / uOrigin.w, uWindDir, uTime - lag, uSeed);
   return uWindDir * uWindK.x * windFactor(G, uWindK.y);
-}
-// ember travel along the wind after tau s (the gust at the middle of the flight: smooth in time)
-float emberTravel(vec2 s, float tau, float drag) {
-  float G = gustAt(s / uOrigin.w, uWindDir, uTime - tau * 0.5, uSeed);
-  return uWindK.x * drag * tau * (0.35 + 0.9 * clamp(G, 0.0, 1.2));
 }
 
 void main() {
@@ -149,33 +144,41 @@ void main() {
     vA = vec4(P, 0.0, 0.0); vB = vec4(lit * smoothstep(0.55, 0.85, tw), h[6] > 0.93 ? 1.0 : 0.0, 0.0, 0.0);
     lo = floor(P) - 1.0; hi = floor(P) + 3.0;
   } else {
-    // EMBERS: sparks from the burning spots, rising with decaying buoyancy, carried by the wind, cooling through the ember ramp
-    vec2 pos; float rate;
-    if ( !srcAt(ivec2(tx, ty), uVF.x, pos, rate) ) { hide(); return; }
-    key = tx * 1000 + j;
-    float tau = lifeOf(key, tx, ty, j, sd, 720.0, 721.0, life, ci);
-    float h[8];
-    for ( int q = 0; q < 8; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
-    float G0 = gustAt(pos / uOrigin.w, uWindDir, uTime - tau, uSeed);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 || h[0] >= rate * (0.55 + 0.45 * clamp(G0, 0.0, 1.0)) ) { hide(); return; }
-    float lf = life * (0.7 + 0.3 * h[1]), age = tau / lf;
-    if ( age >= 1.0 ) { hide(); return; }
-    if ( hu(key, int(floor(uTime * 15.0)), sd + 21) <= smoothstep(0.7, 1.0, age) ) { hide(); return; }   // dies by pixel dropout
-    vec2 s = pos + vec2((h[2] - 0.5) * 30.0, (h[3] - 0.5) * 18.0);
-    if ( openAt(s, true) < 0.5 ) { hide(); return; }
-    float drag = 0.8 + 0.6 * h[4], zb = 40.0 + 70.0 * h[5], tb = 0.5 + 0.7 * h[6];
+    // EMBERS: a wind-borne field. Every slot's spark crosses its tile in the middle of its life, blown along the wind with a sway,
+    // so sparks come in from upwind and from everywhere in view and drift through; swarms (a slow patchy field drifting with the
+    // wind x the travelling gust fronts) decide which slots carry a spark this cycle (fixed per cycle: no pop mid-flight). Born and
+    // gone by pixel dropout, cooling through the ember ramp.
+    float tau = lifeOf(key, tx, ty, j, sd, 1080.0, 1081.0, life, ci);
+    float h[9];
+    for ( int q = 0; q < 9; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
+    vec2 a0 = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
+    float tm = uTime - tau + 0.5 * life;
+    float Gm = clamp(gustAt(a0 / uOrigin.w, uWindDir, tm, uSeed), 0.0, 1.2);
+    float sw = drift2a(a0 / 170.0, uWindDir * uWindK.x / 170.0, tm, 60.0, uSeed + 170);
+    float pr = uVF.x + (1.0 - uVF.x) * clamp(1.6 * smoothstep(0.3, 0.7, sw) * (0.25 + 0.75 * Gm), 0.0, 1.0);
+    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 || h[2] >= pr ) { hide(); return; }
+    float age = tau / life;
+    if ( hu(key, int(floor(uTime * 15.0)), sd + 21) <= smoothstep(0.7, 1.0, age) ) { hide(); return; }    // dies by pixel dropout
+    if ( hu(key, int(floor(uTime * 15.0)), sd + 22) >= smoothstep(0.0, 0.15, age) ) { hide(); return; }   // and is born the same way
+    // depth, continuous 0 (far, dim) .. 1 (near, bright): the same wind seen with parallax, so far sparks cross the screen slower,
+    // sway less and fly lower; the fragment makes them smaller, more transparent, cooler and duller
+    float dp = hu(key, ty * 977 + ci, sd + 12), par = 0.4 + 0.6 * dp;
+    float drag = 0.8 + 0.5 * h[4], span = uWindK.x * drag * life * (0.45 + 0.8 * Gm) * par;
     vec2 WN = vec2(-uWindDir.y, uWindDir.x);
     float tp = max(tau - 0.07, 0.0);
-    float z = zb * (1.0 - exp(-tau / tb)) + 4.0, zp = zb * (1.0 - exp(-tp / tb)) + 4.0;
-    float turb = 7.0 * sin(tau * (2.1 + 2.0 * h[7]) + h[2] * 6.28) + 3.0 * sin(tau * (5.3 + 3.0 * h[1]) + h[3] * 6.28);
-    float turbp = 7.0 * sin(tp * (2.1 + 2.0 * h[7]) + h[2] * 6.28) + 3.0 * sin(tp * (5.3 + 3.0 * h[1]) + h[3] * 6.28);
-    vec2 Xg = s + uWindDir * emberTravel(s, tau, drag) + WN * turb;
-    vec2 Xgp = s + uWindDir * emberTravel(s, tp, drag) + WN * turbp;
-    vec2 P = Xg - vec2(0.0, lift * z), Pp = Xgp - vec2(0.0, lift * zp);
+    float turb = par * 9.0 * sin(tau * (1.7 + 1.5 * h[5]) + h[6] * 6.28) + 4.0 * sin(tau * (4.3 + 3.0 * h[7]) + h[3] * 6.28);
+    float turbp = par * 9.0 * sin(tp * (1.7 + 1.5 * h[5]) + h[6] * 6.28) + 4.0 * sin(tp * (4.3 + 3.0 * h[7]) + h[3] * 6.28);
+    vec2 Xg = a0 + uWindDir * span * (age - 0.5) + WN * turb;
+    vec2 Xgp = a0 + uWindDir * span * (tp / life - 0.5) + WN * turbp;
+    if ( Xg.x < 0.0 || Xg.y < 0.0 || Xg.x >= uArtSize.x || Xg.y >= uArtSize.y || openAt(Xg, true) < 0.5 ) { hide(); return; }
+    float z = 8.0 + 55.0 * h[3] + 6.0 * sin(tau * (2.0 + 2.0 * h[8]) + h[5] * 6.28) + 8.0 * age;
+    float zp = 8.0 + 55.0 * h[3] + 6.0 * sin(tp * (2.0 + 2.0 * h[8]) + h[5] * 6.28) + 8.0 * tp / life;
+    vec2 P = Xg - vec2(0.0, lift * z * par), Pp = Xgp - vec2(0.0, lift * zp * par);
     float fl = hu(key, int(floor(uTime * 10.0)), sd + 20);
-    float cI = clamp(floor(age * 3.2 + fl * 1.3 - 0.3), 0.0, 4.0);
-    float big = h[7] > 0.8 && cI < 2.0 && uVF.y > 0.5 ? 1.0 : 0.0;
-    vA = vec4(P, Pp); vB = vec4(Xg, cI, big + (z < 22.0 && cI < 3.0 ? 2.0 : 0.0));
+    float cI = clamp(floor(age * 2.6 + fl * 1.2 + h[8] * 0.8 - 0.4), 0.0, 4.0);
+    float big = h[7] > 0.85 && cI < 2.0 && uVF.y > 0.5 && dp > 0.6 ? 1.0 : 0.0;
+    float low = z * par < 22.0 && cI < 3.0 && dp > 0.5 ? 2.0 : 0.0;
+    vA = vec4(P, Pp); vB = vec4(Xg, cI, big + low + 4.0 * floor(dp * 15.99));   // flags + 4 x depth (0..15)
     lo = floor(min(min(P, Pp), Xg)) - 2.0; hi = floor(max(max(P, Pp), Xg)) + 3.0;
   }
   vec2 a = mix(lo, hi, aCorner);
@@ -276,13 +279,17 @@ void main() {
   }
   // embers
   vec2 P = floor(vA.xy), d = c - P;
-  float ci = vB.z, fl = vB.w;
-  if ( d == vec2(0.0) ) { out_(0.0, ember(ci)); return; }
-  if ( mod(fl, 2.0) > 0.5 && d == vec2(1.0, 0.0) ) { out_(0.0, ember(ci) * 0.9); return; }
-  float f = onLine(c, floor(vA.zw) + 0.5, P + 0.5);
-  if ( f >= 0.0 && f < 0.99 ) { out_(0.0, ember(min(ci + 1.0, 4.0)) * 0.85); return; }
-  if ( ci < 3.0 && abs(d.x) + abs(d.y) == 1.0 ) { out_(1.0, vec3(0.22, 0.09, 0.02)); return; }
-  if ( fl >= 2.0 && c == floor(vB.xy) ) { out_(1.0, vec3(0.10, 0.04, 0.0)); return; }
+  float ci = vB.z, fl = mod(vB.w, 4.0), dp = floor(vB.w / 4.0) / 15.0;
+  // depth: far sparks are a dim, cool, dull, see-through single pixel; near ones are bright, opaque, with trail, glow and big sparks
+  float al = mix(0.28, 1.0, dp);
+  vec3 col = ember(min(ci + (dp < 0.35 ? 1.0 : 0.0), 4.0));
+  col = mix(mix(vec3(dot(col, vec3(0.3, 0.5, 0.2))), col, 0.55) * vec3(0.85, 0.8, 0.9), col, dp);
+  if ( d == vec2(0.0) ) { out_(1.0 - al, col * al); return; }
+  if ( mod(fl, 2.0) > 0.5 && d == vec2(1.0, 0.0) ) { out_(0.0, col * 0.9); return; }
+  float f = dp < 0.3 ? -1.0 : onLine(c, floor(vA.zw) + 0.5, P + 0.5);
+  if ( f >= 0.0 && f < 0.99 ) { float at = al * 0.85; out_(1.0 - at, ember(min(ci + 1.0, 4.0)) * at); return; }
+  if ( ci < 3.0 && dp > 0.55 && abs(d.x) + abs(d.y) == 1.0 ) { out_(1.0, vec3(0.22, 0.09, 0.02) * dp); return; }
+  if ( fl >= 2.0 && c == floor(vB.xy) ) { out_(1.0, vec3(0.10, 0.04, 0.0)); return; }    // a faint glow on the ground under low near sparks
   discard;
 }`;
 
