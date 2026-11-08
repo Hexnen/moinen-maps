@@ -1,0 +1,22 @@
+const L = window.__gl = []; const t0 = performance.now(); const log = (s) => L.push([Math.round(performance.now() - t0), s]);
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const combat = game.combat;
+const atk = async (a, t, dice = 4) => {
+  for ( const x of [...game.user.targets] ) x.setTarget(false, { releaseOthers: false });
+  canvas.tokens.get(t).setTarget(true, { releaseOthers: false });
+  const Y = CONFIG.Dice.rolls.find((r) => r.name === "YearZeroRoll");
+  const roll = await new Y(`${dice}db`, { maxPush: 1 }, { damage: 3, attackType: "melee", minRange: 0, maxRange: 1, breakdown: [], stressCost: 0, actualDamage: true }).roll();
+  await roll.toMessage({ speaker: ChatMessage.getSpeaker({ token: canvas.tokens.get(a).document }), flavor: "Punch" }, { rollMode: "publicroll" });
+  return roll.successCount;
+};
+log("start"); const p = combat.startCombat(); await Promise.race([p, wait(3000)]); log("started " + combat.round + "/" + combat.turn + " " + combat.combatant?.name);
+await wait(4000); log("next"); await combat.nextTurn(); log("now " + combat.combatant?.name);
+await wait(3000); log("BB move"); await canvas.scene.tokens.get("R4hFNWZj1BNOkHkY").update({ x: 1120, y: 560 });
+await wait(5000); log("BB attack"); log("succ " + await atk("R4hFNWZj1BNOkHkY", "1cFaD2vRMk4RmRMD"));
+await wait(8000); log("next"); await combat.nextTurn(); log("now " + combat.combatant?.name);
+await wait(3000); log("Superhero move short"); await canvas.scene.tokens.get("akYjM5eS7fvdheb1").update({ x: 527, y: 569 });
+await wait(3000); log("next"); await combat.nextTurn(); log("now " + combat.combatant?.name);
+await wait(4000); log("next"); await combat.nextTurn(); log("now " + combat.combatant?.name);
+await wait(4000); log("next"); await combat.nextTurn(); log("now " + combat.combatant?.name + " r" + combat.round);
+await wait(4000); log("end combat"); await combat.delete(); await wait(3500); log("done");
+return L;

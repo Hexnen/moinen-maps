@@ -173,6 +173,15 @@ const plays = new Map();
 export function registerPlay(id, handler) { if ( typeof id === "string" && handler && typeof handler === "object" ) plays.set(id, handler); }
 const playOf = (shot) => (shot?.play?.by ? plays.get(shot.play.by) ?? null : null);
 
+/**
+ * A STAGER (source-stage.mjs, the combat stage) may restyle a take-over on this client: stager(shot) -> null (not its shot) or a style
+ * { check(form, playHandler) -> form (replaces the play handler's check), home (the view a cut returns to), barsLater (bars + vignette
+ * wait for revealBars), drive(shot, api) -> controller | null (null: the play handler's drive / the framed move), stay, onHit() }.
+ */
+let stager = null;
+export function registerStager(fn) { stager = typeof fn === "function" ? fn : null; }
+const styleOf = (shot) => { try { return stager?.(shot) ?? null; } catch ( err ) { console.error(`${MODULE_ID} | director stage`, err); return null; } };
+
 /* ---------------------------------------------------------------- one client: playing shots */
 
 let cur = null;                          // the take-over on screen here: { shot, form, timers, cap, onKey, onPtr, ... }
@@ -256,8 +265,9 @@ function start(shot) {
   seen.add(shot.id); if ( seen.size > 200 ) seen.delete(seen.values().next().value);
   const ctx = ctxOf(shot);
   let form = Dir.decide(shot, ctx);
-  const ph = playOf(shot);
-  if ( ph?.check && form !== "none" ) {
+  const ph = playOf(shot), sg = form === "take" ? styleOf(shot) : null;
+  if ( sg?.check ) { try { form = sg.check(form, ph); } catch ( err ) { console.error(`${MODULE_ID} | director stage`, err); form = "none"; } }
+  else if ( ph?.check && form !== "none" ) {
     try { const f = ph.check(shot, form); if ( f === "none" || (f === "soft" && form === "take") ) form = f; } catch ( err ) { console.error(`${MODULE_ID} | director play`, err); form = "none"; }
   }
   last = { id: shot.id, kind: shot.kind, form, planned: shot.form, at: sharedNow(), caption: captionText(shot) };
@@ -265,7 +275,7 @@ function start(shot) {
   const late = sharedNow() - shot.t0;
   if ( form === "take" && late > shot.lead + shot.hold * 0.5 ) form = "soft";
   Hooks.callAll(HOOK, "shot", { shot, form });
-  if ( form === "take" ) playTake(shot, ctx, Math.max(0, late)); else playSoft(shot, Math.max(0, late));
+  if ( form === "take" ) playTake(shot, ctx, Math.max(0, late), sg); else playSoft(shot, Math.max(0, late));
   tell("state");
 }
 
@@ -305,35 +315,36 @@ function tokenName(id, fallback) {
 
 /* ---- the take-over */
 
-function playTake(shot, ctx, late = 0) {
+function playTake(shot, ctx, late = 0, sg = null) {
   endTake("replaced", { quiet: true });
   const dr = R(), opts = clientOpts(), reduced = !!opts.reduced;
   const look = { ...Dir.lookFor(lookValues(), ctx.k, reduced), camMode: "frame", camHold: 0, camOn: true, fx: true };
   const v = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y, scale: canvas.stage.scale.x, vw: canvas.app.screen.width, vh: canvas.app.screen.height, grid: grid() };
   const lim = [CONFIG.Canvas?.minZoom ?? 0.1, CONFIG.Canvas?.maxZoom ?? 3];
-  const home = Screen.home;                                 // (a shot or the show before: its home view is the player's own)
-  if ( !Screen.begin({ r: look }, { owner: "director", guard: false, frame: false, opts: { noCamera: false, allow: ["camera"] } }) ) return;
+  const home = sg?.home ?? Screen.home;                    // (a shot or the show before: its home view is the player's own)
+  if ( !Screen.begin({ r: look }, { owner: "director", guard: false, frame: false, home: sg?.home ?? null, barsLater: !!sg?.barsLater, opts: { noCamera: false, allow: ["camera"] } }) ) return;
   const from = home ?? { x: v.x, y: v.y, scale: v.scale };
   const target = Dir.frameShot(shot, { ...v, ...from }, dr, ctx.k, lim, reduced);
   const lead = Math.max(250, shot.lead - late);
   const c = cur = { shot, form: "take", timers: [], cap: null, t0: performance.now() - late, done: false };
   const at = (ms, fn) => c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) { try { fn(); } catch ( err ) { console.error(`${MODULE_ID} | director`, err); endTake("error"); } } }, Math.max(0, ms - late)));
   const ph = playOf(shot);
-  if ( ph?.drive ) {
+  if ( sg?.drive || ph?.drive ) {
     // the source's own camera (e.g. following a token): it gets the framed target, the time it has to get there and the end
     try {
-      c.drv = ph.drive(shot, { target, from: { x: v.x, y: v.y, scale: v.scale }, home: from, lead, late, reduced, k: ctx.k, limits: lim, grid: grid(), r: dr,
-        cameraOn: () => cur === c && !c.done && !c.taken && Screen.owner === "director", end: (why = "done") => { if ( cur === c && !c.done ) endTake(why); }, at });
+      const api = { target, from: { x: v.x, y: v.y, scale: v.scale }, home: from, lead, late, reduced, k: ctx.k, limits: lim, grid: grid(), r: dr,
+        cameraOn: () => cur === c && !c.done && !c.taken && Screen.owner === "director", end: (why = "done") => { if ( cur === c && !c.done ) endTake(why); }, at };
+      c.drv = sg?.drive?.(shot, api) || ph?.drive?.(shot, api) || null;
     } catch ( err ) { console.error(`${MODULE_ID} | director drive`, err); c.drv = null; }
   }
-  c.stay = !!ph?.stay?.(shot);
+  c.stay = sg ? !!sg.stay : !!ph?.stay?.(shot);
   if ( !c.drv ) Screen.panTo({ x: target.x, y: target.y, scale: target.scale, duration: reduced ? lead * 1.25 : lead });
   // a carried token / a path: the camera drifts along it during the hold (half the way: the frame already holds both ends)
   if ( !c.drv && shot.path?.length >= 4 && !reduced ) {
     const p = shot.path, ex = p[p.length - 2], ey = p[p.length - 1];
     at(shot.lead, () => Screen.panTo({ x: (target.x + ex) / 2, y: (target.y + ey) / 2, scale: target.scale, duration: Math.max(400, shot.hold * 0.8) }));
   }
-  const hit = () => { if ( c.hit ) return; c.hit = true; if ( shot.impact >= 0 && Screen.owner === "director" ) Screen.impact({ x: shot.x, y: shot.y, size: Math.max(shot.box.x1 - shot.box.x0, shot.box.y1 - shot.box.y0) }); };
+  const hit = () => { if ( c.hit ) return; c.hit = true; sg?.onHit?.(); if ( shot.impact >= 0 && Screen.owner === "director" ) Screen.impact({ x: shot.x, y: shot.y, size: Math.max(shot.box.x1 - shot.box.x0, shot.box.y1 - shot.box.y0) }); };
   // a destruction stroke: the hit lands when THIS client's entry of it starts (its data comes after the save and the bake), and the
   // camera stays until the entry has played (at most EXTRA longer than planned); without one the hit lands as the camera arrives
   const entry = shot.cue ? null : entryState(shot.ref);
@@ -410,7 +421,7 @@ function endTake(why, { quiet = false } = {}) {
     if ( why === "scene" || why === "error" ) Screen.end({ immediate: true });
     else Screen.end({ backMs: why === "done" ? c.shot.back : 450, hold: 0 });
   }
-  if ( !quiet ) Hooks.callAll(HOOK, "end", { shot: c.shot, form: "take", why });
+  if ( !quiet ) Hooks.callAll(HOOK, "end", { shot: c.shot, form: "take", why, taken: !!c.taken });
   tell("state");
 }
 
@@ -555,7 +566,7 @@ export function status() {
 /* ---------------------------------------------------------------- wiring */
 
 export const directorApi = {
-  emit, cutTo, skip, preview, setOn, isOn, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
+  emit, cutTo, skip, preview, setOn, isOn, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, registerStager, seeTokens,
   /** For the checks: the overlays, the queue. */
   _debug: () => ({ overlay: Ov.debug(), queue: { buckets: queue.buckets.length, busyUntil: queue.busyUntil, history: queue.history.slice(-6) }, cur: cur ? { id: cur.shot.id, timers: cur.timers.length } : null, screen: Screen.debug?.() ?? null }),
   _receive: receive

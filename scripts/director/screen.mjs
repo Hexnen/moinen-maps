@@ -168,10 +168,10 @@ export function createFx(getEnv) {
 
   const frameMs = (s) => Math.max(0, ...s.frames);
 
-  function begin(snap, { strokes = [], bounds = null, owner = "show", guard = true, opts = null, home = null, frame = true } = {}) {
+  function begin(snap, { strokes = [], bounds = null, owner = "show", guard = true, opts = null, home = null, frame = true, barsLater = false } = {}) {
     // (the session before ends at once; its home view - the player's own - is the one this session returns to)
     const inherit = S?.cam?.on && S.prev ? { ...S.prev } : null;
-    const barsIn = !!(S && !S.ending && S.ov && !S.ov.hidden && (S.ov.bars || S.ov.vignette));   // (the bars stay put: no out-and-in again)
+    const barsIn = !!(S && !S.ending && S.ov && !S.ov.hidden && !S.ov.held && (S.ov.bars || S.ov.vignette));   // (the bars stay put: no out-and-in again)
     if ( S ) finish(S);
     const raw = snap?.r ?? snap;
     if ( !raw || typeof raw !== "object" ) return false;
@@ -182,7 +182,7 @@ export function createFx(getEnv) {
       shaker: null, ov: null, guard: null, tick: null, prev: null, ending: null, endRes: null, preview: false, lastImpact: null, done: false, onDone: [], owner, useGuard: guard !== false, frame };
     try {
       s.ov = createOverlays(env.doc, r, eff, { insert: env.insert, timer: env.timer });
-      if ( barsIn ) s.ov.showNow(); else s.ov.show();
+      if ( barsIn ) s.ov.showNow(); else if ( barsLater ) s.ov.held = true; else s.ov.show();   // (barsLater: they wait for revealBars())
       if ( eff.shake ) s.shaker = new StageShaker(env.stage);
       if ( eff.camera ) startCamera(s, home ?? inherit);
       s.tick = () => onTick(s);
@@ -362,12 +362,14 @@ export function createFx(getEnv) {
     get home() { return S?.cam?.on && S.prev ? { ...S.prev } : null; },
     /** A camera move of the session (scene px centre, absolute scale, ms); nothing when the camera is off or was taken by the player. */
     panTo: (leg) => { if ( S && !S.ending ) pan(S, { duration: 800, ...leg }); },
+    /** Bars + vignette of a session begun with { barsLater } slide in now (once). */
+    revealBars: () => { const o = S?.ov; if ( o?.held && !S.ending ) { o.held = false; o.show(); } },
     /** The player took the camera: it stays where it is, the session goes on without it (no return). */
     stopCamera: (kind = "player") => { if ( S ) abortCamera(S, kind); },
     /** The slow-motion factor in force now (1 = none). */
     get rate() { const w = S?.slow; return w?.set != null && w.base ? w.set / w.base : 1; },
     /** For checks: what is on screen and in effect. */
-    debug: () => S && ({ eff: S.eff, bars: !!S.ov?.bars, vignette: !!S.ov?.vignette, flash: !!S.ov?.flashEl, shake: S.shaker?.offset ?? null, shaking: !!S.shake, cameraOn: !!S.cam?.on, cameraAborted: !!S.cam?.aborted, abortedBy: S.cam?.aborted ?? null,
+    debug: () => S && ({ eff: S.eff, bars: !!S.ov?.bars && !S.ov.held, vignette: !!S.ov?.vignette, flash: !!S.ov?.flashEl, shake: S.shaker?.offset ?? null, shaking: !!S.shake, cameraOn: !!S.cam?.on, cameraAborted: !!S.cam?.aborted, abortedBy: S.cam?.aborted ?? null,
       slow: !!S.slow, ending: !!S.ending, preview: S.preview, impacts: S.n, root: S.ov?.root ?? null, timers: S.timers.size })
   };
 }
