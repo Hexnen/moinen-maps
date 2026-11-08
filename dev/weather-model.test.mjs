@@ -182,5 +182,21 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
   ok(Math.abs(F.vnoise(3.25, 7.5, 11) - F.vnoise(3.25, 7.5, 11)) === 0 && F.fbm3(1.5, 2.5, 4) >= 0 && F.fbm3(1.5, 2.5, 4) <= 1, "noise ports");
 }
 
+/* H: rain and snow over fire (research D9) */
+{
+  ok(M.cleanParams().fire.out === false && M.cleanParams({ fire: { out: true } }).fire.out === true && M.cleanParams({ fire: { out: "yes" } }).fire.out === false, "fire.out: off by default, boolean");
+  const none = M.fireWet({ fx: {} });
+  ok(none.dim === 0 && none.steam === 0 && none.outAfter === Infinity, "no rain: nothing");
+  const r = [0, 1, 2].map((s) => M.fireWet({ fx: { rain: { p: 1, s } } }));
+  ok(r[0].dim < r[1].dim && r[1].dim < r[2].dim && r[2].dim <= 0.8 && r[0].outAfter > r[2].outAfter, "rain dims more and puts out sooner by level");
+  ok(M.fireWet({ fx: { snow: { p: 1, s: 2 } } }).outAfter === Infinity && M.fireWet({ fx: { snow: { p: 1, s: 2 } } }).dim < r[2].dim, "snow dims less and never puts fire out");
+  ok(M.fireWet({ fx: { rain: { p: 0.4, s: 2 } } }).outAfter === Infinity, "a fading-in rain does not put fire out yet");
+  // continuous along a transition (p and s ramp): no jump
+  const P = M.cleanParams({ keys: [{ t: 0, dur: 0, preset: "clear" }, { t: 10000, dur: 20000, preset: "rain", level: 3 }] });
+  let jump = 0, prev = M.fireWet(M.resolve(P, 9000));
+  for ( let t = 9050; t < 32000; t += 50 ) { const w = M.fireWet(M.resolve(P, t)); jump = Math.max(jump, Math.abs(w.dim - prev.dim), Math.abs(w.steam - prev.steam)); prev = w; }
+  ok(jump < 0.02 && prev.dim > 0.7, `fire damping follows the transition smoothly (largest 50 ms step ${jump.toFixed(4)})`);
+}
+
 console.log(`${fails ? "FAIL" : "ok"} weather model: ${n - fails}/${n} checks`);
 process.exit(fails ? 1 : 0);

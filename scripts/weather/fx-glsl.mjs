@@ -50,7 +50,7 @@ float lifeOf(int key, int tx, int ty, int j, int sd, float kc0, float kcr, out f
 }
 vec2 windAt(vec2 g, float lag) {
   float G = gustAt(g / uOrigin.w, uWindDir, uTime - lag, uSeed);
-  return uWindDir * uWindK.x * windFactor(G, uWindK.y);
+  return uWindDir * uWindK.x * windFactor(G, uWindK.y) + 0.6 * vortexAt(g);
 }
 
 void main() {
@@ -81,7 +81,7 @@ void main() {
     if ( z <= 0.0 ) { hide(); return; }
     float rem = z / vf;
     float G = gustAt(g / uOrigin.w, uWindDir, uTime - 0.6, uSeed);
-    vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y);
+    vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) + 0.6 * vortexAt(g);
     float A = 2.0 + 5.0 * h3, fq = 0.3 + 0.5 * h4;
     float sway = A * sin(6.283185 * fq * tau + 6.28 * h5);
     float sw = 5.0 * sin(g.y / 23.0 + 6.283185 * uTime / 5.0 + g.x / 61.0) * (0.4 + clamp(G, 0.0, 1.2));
@@ -98,7 +98,7 @@ void main() {
     vec2 g = (vec2(float(tx), float(ty)) + vec2(hu(key, ty * 7 + ci, sd + 2), hu(key, ty * 7 + ci, sd + 3))) * TS;
     float G = gustAt(g / uOrigin.w, uWindDir, uTime - 0.2, uSeed);
     if ( G <= 0.45 || openAt(g, true) < 0.5 ) { hide(); return; }
-    vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y);
+    vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) + 0.6 * vortexAt(g);
     vec2 p1 = g + W * 2.2 * tau + vec2(0.0, sin(tau * 7.0 + float(j)) * 1.5 - lift);
     float ln = 4.0 + 6.0 * min(G, 1.2);
     vec2 p0 = p1 - uWindDir * ln;
