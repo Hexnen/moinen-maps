@@ -78,6 +78,39 @@ export function setWindProvider(fn) { provider = typeof fn === "function" ? fn :
 /** The scene's base wind now (null when no weather wind is set: layers keep their own). */
 export function sceneWind() { try { const w = provider?.(); return w && w.str > 0 ? w : null; } catch { return null; } }
 
+/* ---------------------------------------------------------------- tornado vortices (weather registers, fire and weather read) */
+
+let vortexProvider = null;
+/**
+ * The weather engine registers `fn() -> [{ x, y (squares), R, r0, w, inflow, p }]`: the scene's tornadoes now (tornado-model.mjs
+ * `vortices`, a pure function of the stored paths and the shared clock); the wind they add is tornado-model `vortexWind`.
+ */
+export function setVortexProvider(fn) { vortexProvider = typeof fn === "function" ? fn : null; }
+/** The tornado vortices now ([] when there are none: the common case costs one call). */
+export function vortices() { try { return vortexProvider?.() ?? []; } catch { return []; } }
+const vSmooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+/**
+ * THE VORTEX WIND (research 3.2 "Interaction"): what the tornado adds to the scene wind at a point, in squares / s: a tangential
+ * swirl Gamma / (2 pi max(d, r0)) and an inflow toward the base, both fading out beyond R squares. It turns COUNTER-CLOCKWISE on the
+ * map (north up, as a northern-hemisphere tornado seen from above): on screen (y down) the angle atan2(dy, dx) DEcreases (SPIN = -1).
+ * `v` = { x, y (squares), R, w (tangential speed at r0, squares / s), r0, inflow, p }.
+ */
+export const SPIN = -1;
+export function vortexWind(v, x, y) {
+  const dx = x - v.x, dy = y - v.y, d = Math.hypot(dx, dy);
+  if ( !(d < v.R) || d < 1e-6 ) return [0, 0];
+  const fall = 1 - vSmooth((d - v.R * 0.45) / (v.R * 0.55));
+  const tang = v.w * v.r0 / Math.max(d, v.r0) * fall * v.p, inn = v.inflow * fall * v.p * Math.min(1, d / v.r0);
+  return [(dy / d) * tang - (dx / d) * inn, (-dx / d) * tang - (dy / d) * inn];
+}
+/** The wind all the scene's tornadoes add at scene px x, y now: [x, y] squares / s ([0, 0] when there are none). */
+export function vortexWindAt(x, y, grid) {
+  const list = vortices(); if ( !list.length ) return [0, 0];
+  let vx = 0, vy = 0;
+  for ( const v of list ) { const [a, b] = vortexWind(v, x / grid, y / grid); vx += a; vy += b; }
+  return [vx, vy];
+}
+
 /* ---------------------------------------------------------------- the same in GLSL (ES 3.00) */
 
 export const GLSL_WIND = `

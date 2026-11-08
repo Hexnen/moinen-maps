@@ -6,6 +6,7 @@ import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
 import { carrying } from "../tokens/carry.mjs";
+import { vortices, vortexWindAt, SPEED_SQ } from "../wind.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -34,6 +35,29 @@ function mapOf() {
 
 /** Art cells the fire style may draw per display frame (~2 ms on a mid GPU; research 13: the art pass is the layer's main cost). */
 const ART_BUDGET = 600000;
+
+/**
+ * A TORNADO nearby (wind.mjs vortices, registered by the weather layer): the area's tongues and smoke lean into its swirl and inflow -
+ * its wind at the area's centre, as scene-wind units (SPEED_SQ squares / s = 1), capped; back to the area's own wind when it is gone.
+ * Only uniforms (the art pass reads them on its next 12 fps frame); nothing at all while no tornado exists.
+ */
+function leanToVortices(a, geo, vort) {
+  const u = a.mesh.pass?.shader?.uniforms; if ( !u ) return;
+  if ( !vort && !a.vortexOn ) return;
+  if ( a.lean0 === undefined ) { a.lean0 = u.uLean; a.wind0 = [u.uWind[0], u.uWind[1]]; }
+  let dx = 0, dy = 0;
+  if ( vort ) {
+    const r = a.area.rect, cx = geo.ox + (r.x0 + r.x1) / 2 * geo.ap, cy = geo.oy + (r.y0 + r.y1) / 2 * geo.ap;
+    [dx, dy] = vortexWindAt(cx, cy, geo.grid);
+    const k = Math.min(1, 0.6 / Math.max(1e-6, Math.hypot(dx, dy) / SPEED_SQ));
+    dx = dx / SPEED_SQ * k; dy = dy / SPEED_SQ * k;
+  }
+  a.vortexOn = vort && (dx !== 0 || dy !== 0);
+  const wx = Math.max(-1, Math.min(1, a.wind0[0] + dx)), wy = Math.max(-1, Math.min(1, a.wind0[1] + dy));
+  u.uWind[0] = wx; u.uWind[1] = wy;
+  u.uLean = Math.max(-0.8, Math.min(0.8, a.lean0 + dx * 0.7));
+  const f = a.mesh.fuelPass?.shader?.uniforms; if ( f ) { f.uWind[0] = wx; f.uWind[1] = wy; }
+}
 
 export class FireDisplay {
   constructor() {
@@ -141,14 +165,14 @@ export class FireDisplay {
     const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
     if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
-    const vis = [], stale = [];
+    const vis = [], stale = [], vort = vortices().length > 0;
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
       if ( a.mesh.visible !== on ) a.mesh.visible = on;
       if ( on ) {
         vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
         // the fire style's art pass: once per 12 fps frame per visible area (an area coming on screen draws its frame first)
-        if ( a.mesh.isArt ) { a.mesh.setDark(dark); if ( a.mesh.artT !== T || force ) stale.push(a); }
+        if ( a.mesh.isArt ) { a.mesh.setDark(dark); leanToVortices(a, geo, vort); if ( a.mesh.artT !== T || force ) stale.push(a); }
       }
     }
     // (spread over the display frames of one 12 fps frame: at most ART_BUDGET cells a frame, the longest-waiting first; an area never

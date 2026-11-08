@@ -8,7 +8,9 @@ import { perfMode } from "../perf-mode.mjs";
 import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import { view as viewOf, VIEW_FLAG, cleanView } from "../view-angle.mjs";
-import { setWindProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
+import { setWindProvider, setVortexProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
+import * as TM from "./tornado-model.mjs";
+import { TornadoDisplay } from "./tornado.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -18,7 +20,7 @@ import { setWindProvider, windVecAt, SPEED_SQ } from "../wind.mjs";
  * COST WHEN OFF: no display object, no ticker, no texture: only these hooks. A future key (a change scheduled ahead) is one timer.
  */
 let P = M.cleanParams();
-let display = null, lens = null;
+let display = null, lens = null, tornado = null, tornadoTimer = 0;
 let info = null, shelter = null, infoKey = "", shelterKey = "", infoJob = 0;
 let timer = 0, shelterTimer = 0;
 let lastState = null;
@@ -74,6 +76,8 @@ function onCanvasReady() {
 
 export function teardown() {
   clearTimeout(timer); timer = 0; clearTimeout(shelterTimer); shelterTimer = 0;
+  clearTimeout(tornadoTimer); tornadoTimer = 0;
+  tornado?.destroy(); tornado = null;
   cancelIdle();
   display?.destroy(); display = null;
   lens?.destroy?.(); lens = null;
@@ -98,6 +102,7 @@ function onUpdateScene(scene, changed) {
 export function refresh() {
   clearTimeout(timer); timer = 0;
   if ( !canvas.ready || !canvas.scene ) return;
+  syncTornadoes();
   const now = sharedNow(), st = shown() ? clientState(now) : null;
   const live = !!st && (Object.keys(st.fx).length > 0 || st.wet > 0.002 || st.cover > 0.002);
   lastState = st;
@@ -118,6 +123,97 @@ export function refresh() {
   display.setState(st);
   syncLens(st);
 }
+
+/* ---------------------------------------------------------------- tornadoes (their own display: tornado.mjs) */
+
+/**
+ * Show the scene's tornadoes that are forming, on the ground or roping out; none -> no display. One that starts later is a timer;
+ * one that is finished drops out (the display tells when all of its tornadoes are gone).
+ */
+function syncTornadoes() {
+  clearTimeout(tornadoTimer); tornadoTimer = 0;
+  if ( !canvas.ready || !canvas.scene ) return;
+  const now = sharedNow(), grid = canvas.grid?.size ?? 100;
+  const list = shown() ? P.tornadoes.filter((T) => !TM.phase(T, now, grid).gone) : [];
+  const live = list.filter((T) => T.t0 <= now + 1000), later = list.filter((T) => T.t0 > now + 1000);
+  if ( later.length ) tornadoTimer = setTimeout(() => { tornadoTimer = 0; syncTornadoes(); }, Math.min(2 ** 31 - 1, Math.min(...later.map((T) => T.t0)) - now - 900));
+  if ( !live.length ) { if ( tornado ) { tornado.destroy(); tornado = null; } return; }
+  try {
+    tornado ??= new TornadoDisplay();
+    tornado.now = sharedNow;
+    tornado.onEmpty = () => setTimeout(syncTornadoes, 0);
+    tornado.sync(live, geo(), { view: viewOf(), cap: detailCap(), still: reducedMotion() });
+  } catch ( err ) { console.warn(`${MODULE_ID} | weather: tornado`, err); tornado?.destroy(); tornado = null; }
+}
+
+/** A GM edit of the tornado list: the finished ones are dropped, the list cleaned, saved; every client follows the flag. */
+function saveTornadoes(list) {
+  const now = sharedNow(), grid = canvas.grid?.size ?? 100;
+  P = M.cleanParams({ ...P, tornadoes: list.filter((T) => !TM.phase(T, now, grid).gone) });
+  syncTornadoes(); tell("changed");
+  return save();
+}
+
+export const tornadoApi = {
+  /**
+   * A new tornado (GM): `path` = scene points [[x, y], ...] or [{ x, y }, ...] (one point: it stays there, wandering); { level 1..3,
+   * speed squares / s, size, wander squares, end "loop" | "stop" | "ropeOut", at shared ms }. Returns its id (null: not GM, or 3
+   * already on the scene).
+   */
+  add(path, { level = TM.DEFAULTS.level, speed = TM.DEFAULTS.speed, size = TM.DEFAULTS.size, wander = TM.DEFAULTS.wander, end = TM.DEFAULTS.end, at = null } = {}) {
+    if ( !game.user.isGM || !canvas.scene ) return null;
+    const now = sharedNow(), grid = canvas.grid?.size ?? 100;
+    const alive = P.tornadoes.filter((T) => !TM.phase(T, now, grid).gone);
+    if ( alive.length >= TM.MAX_TORNADOES ) { ui.notifications?.warn(game.i18n.localize("MOINENMAPS.Weather.tornadoMax")); return null; }
+    const id = foundry.utils.randomID(10), t0 = Math.round(at ?? now + M.LEAD_MS);
+    const T = TM.cleanTornado({ id, path, t0, level, lv0: level, lvT: t0, speed, size, wander, end });
+    if ( !T ) return null;
+    saveTornadoes([...alive, T]);
+    return id;
+  },
+  /** Change a tornado (GM): { level (ramps over 5 s), end, damage }. */
+  update(id, patch = {}) {
+    if ( !game.user.isGM ) return null;
+    const now = sharedNow();
+    const list = P.tornadoes.map((T) => {
+      if ( T.id !== id ) return T;
+      const n = { ...T };
+      if ( patch.level !== undefined ) { const s = TM.levelS(T, now); n.lv0 = Math.min(3, Math.max(1, Math.round(s + 1))); n.level = Math.min(3, Math.max(1, Math.round(Number(patch.level)) || T.level)); n.lvT = Math.round(now); }
+      if ( patch.end !== undefined && TM.ENDS.includes(patch.end) ) n.end = patch.end;
+      if ( patch.damage !== undefined ) n.damage = patch.damage === true;
+      return n;
+    });
+    saveTornadoes(list);
+    return P.tornadoes.find((T) => T.id === id) ?? null;
+  },
+  /** Send a tornado away (GM): it ropes out over a few seconds; { now: true } removes it at once. */
+  remove(id, { now: cut = false } = {}) {
+    if ( !game.user.isGM ) return;
+    const now = Math.round(sharedNow() + M.LEAD_MS);
+    saveTornadoes(cut ? P.tornadoes.filter((T) => T.id !== id) : P.tornadoes.map((T) => T.id === id && (T.out === null || T.out > now) ? { ...T, out: now } : T));
+  },
+  /** Every tornado ropes out (GM); { now: true } removes them at once. */
+  clear({ now: cut = false } = {}) {
+    if ( !game.user.isGM ) return;
+    const now = Math.round(sharedNow() + M.LEAD_MS);
+    saveTornadoes(cut ? [] : P.tornadoes.map((T) => (T.out === null || T.out > now) ? { ...T, out: now } : T));
+  },
+  /** The scene's tornadoes with where they are now: [{ ...record, x, y, phase, s }]. */
+  list() {
+    const now = sharedNow(), grid = canvas.grid?.size ?? 100;
+    return P.tornadoes.map((T) => { const [x, y] = TM.baseAt(T, now, grid); return { ...foundry.utils.deepClone(T), x, y, phase: TM.phase(T, now, grid), s: TM.levelS(T, now) }; });
+  },
+  /** Where a tornado's base is at shared ms `t` (default now): { x, y } scene px, or null. */
+  positionAt(id, t = sharedNow()) { const T = P.tornadoes.find((T) => T.id === id); if ( !T ) return null; const [x, y] = TM.baseAt(T, t, canvas.grid?.size ?? 100); return { x, y }; },
+  /** The wind a tornado adds at a scene point now: { x, y } squares / s. */
+  windAt(x, y) {
+    const g = canvas.grid?.size ?? 100; let vx = 0, vy = 0;
+    for ( const v of TM.vortices(P.tornadoes, sharedNow(), g) ) { const [a, b] = TM.vortexWind(v, x / g, y / g); vx += a; vy += b; }
+    return { x: vx, y: vy };
+  },
+  display: () => tornado,
+  model: TM
+};
 
 /** At most 12 times a second (the display's ticker): the state moves along the timeline. */
 function step() {
@@ -264,8 +360,9 @@ export const weatherApi = {
   rainAt() { const r = M.resolve(P, sharedNow()).fx.rain; return r ? r.p * M.gate([0.35, 0.7, 1], r.s) : 0; },
   /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
-    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, state: lastState }),
-  display: () => display, lensDisplay: () => lens, refresh, model: M, geo
+    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, state: lastState }),
+  display: () => display, lensDisplay: () => lens, refresh, model: M, geo,
+  tornado: tornadoApi
 };
 
 /* ---------------------------------------------------------------- wiring */
@@ -281,6 +378,7 @@ export function registerWeatherSettings() {
 export function registerWeather() {
   moduleApi.weather = weatherApi;
   setWindProvider(() => (P.on && canvas.scene ? M.resolve(P, sharedNow()).wind : null));
+  setVortexProvider(() => (P.on && canvas.scene && P.tornadoes.length ? TM.vortices(P.tornadoes, sharedNow(), canvas.grid?.size ?? 100) : []));
   Hooks.once("init", registerWeatherSettings);
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);

@@ -47,6 +47,25 @@ uniform sampler2D uShelter;
 uniform int uHasShelter;
 uniform vec2 uArtSize;      // the scene in art cells
 uniform int uSeed;
+// tornado vortices (wind.mjs vortices, up to 3): centre x, y (art cells from the scene origin), reach, core radius (art cells); the
+// tangential speed at the core and the inflow (art cells / s), presence; how many
+uniform vec4 uVortA[3];
+uniform vec4 uVortB[3];
+uniform int uVortN;
+// the wind the tornadoes add at art cell g (art cells / s): a counter-clockwise swirl (on the map) and an inflow, gone beyond the reach
+vec2 vortexAt(vec2 g) {
+  vec2 w = vec2(0.0);
+  for ( int k = 0; k < 3; k++ ) {
+    if ( k >= uVortN ) break;
+    vec2 d = g - uVortA[k].xy; float r = length(d);
+    if ( r >= uVortA[k].z || r < 1e-3 ) continue;
+    float fall = 1.0 - smoothstep(uVortA[k].z * 0.45, uVortA[k].z, r);
+    float tang = uVortB[k].x * uVortA[k].w / max(r, uVortA[k].w) * fall * uVortB[k].z;
+    float inn = uVortB[k].y * fall * uVortB[k].z * min(1.0, r / uVortA[k].w);
+    w += vec2(d.y, -d.x) / r * tang - d / r * inn;
+  }
+  return w;
+}
 
 vec4 infoAt(vec2 c) {
   if ( uHasInfo == 0 ) return vec4(0.5, 0.5, 0.5, 0.0);
@@ -377,7 +396,8 @@ void main() {
   vec2 zr = layer == 0 ? vec2(34.0, 62.0) : layer == 1 ? vec2(18.0, 34.0) : vec2(70.0, 110.0);
   float z0 = zr.x + h3 * (zr.y - zr.x), vf = (layer == 0 ? uVF.x : layer == 1 ? uVF.y : uVF.z) * (0.88 + 0.24 * h4), Df = z0 / vf;
   float G = gustAt(g / uOrigin.w, uWindDir, uTime, uSeed);
-  vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) * (0.85 + 0.3 * hu(j, ci, sd + 7));
+  vec2 W = uWindDir * uWindK.x * windFactor(G, uWindK.y) * (0.85 + 0.3 * hu(j, ci, sd + 7))
+    + 0.6 * vortexAt(g);
   vH = hu(key, ty * 13 + ci, sd + 9);
   vec2 lo, hi;
   if ( uMode == 0 ) {
