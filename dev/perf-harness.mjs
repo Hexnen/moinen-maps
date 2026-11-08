@@ -2371,8 +2371,9 @@ export function grabSS(f = 4) {
   return out;
 }
 export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy = null, ss = 0, ref = 0 } = {}) {
-  // (a client without a destruction display - a player on a scene with no damage drawn - has no cache / fx layer: the map alone is measured)
   const R = canvas.app.renderer, d = (() => { try { return D() ?? null; } catch { return null; } })(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
+  // (it measures the destruction layer itself - grab() renders it: with none on this client there is nothing to measure)
+  if ( !d?.objs ) return { ok: true, skipped: "no destruction display on this client (a player on a scene without drawn damage)", rows: [] };
   cx ??= sr.x + sr.width * 0.5; cy ??= sr.y + sr.height * 0.5;
   const PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);

@@ -1,7 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as SC from "./stage-core.mjs";
-import { killed, isOn, myMode, R, HOOK, registerStager, cameraHeld } from "./director.mjs";
+import { killed, isOn, myMode, R, HOOK, registerStager, cameraHeld, busy } from "./director.mjs";
 import { Screen } from "./stage.mjs";
 import { freeRect } from "./overlay.mjs";
 import { extendSection } from "../workspace/registry.mjs";
@@ -81,7 +81,7 @@ function styleOf(shot) {
       // own beats play in place when on screen; their own ATTACK on a target off screen cuts to the hit and comes back (they see their
       // blow land: the camera returns to their view after the result); any other own beat off screen is a marker
       if ( kind === "turn" ) return ["none", "own turn"];
-      if ( ph?.check ) { const f = ph.check(shot, form); if ( f === "none" ) return ["none", "own: play check"]; }
+      if ( ph?.check ) { const f = ph.check(shot, form); if ( f === "none" ) { if ( kind === "move" ) keepOwnInFrame(shot); return ["none", "own: play check"]; } }
       // (in place when the tokens' middles are on screen: the box shrunk by a third of a square, no margin)
       const rect = stageRect(), v = viewNow(), q = grid() * 0.35, b = shot.box, inner = { x0: b.x0 + q, y0: b.y0 + q, x1: Math.max(b.x0 + q, b.x1 - q), y1: Math.max(b.y0 + q, b.y1 - q) };
       if ( !SC.comfortable(inner, v, rect, 0) ) {
@@ -196,6 +196,26 @@ function goHome(to, ms = null) {
     if ( st.combat && !SC.sameView(viewNow(), to, 12) ) SC.ownMove(st, performance.now());   // (the player stopped it: the camera is theirs)
     sync();
   });
+}
+
+/**
+ * The player's OWN token moved on their own turn (they moved it: the move source shows them nothing): when it ends near the edge of
+ * the free screen - under the hotbar's edge, behind the sidebar - the camera reframes it calmly, the smallest shift that brings it
+ * well inside (as a camera operator keeps the acting character in frame). Not while the player is at work on the board (dragging,
+ * the wheel, the ruler), nor when the camera is held, a beat plays, or the turn has moved on.
+ */
+function keepOwnInFrame(shot) {
+  const id = shot.tokens?.[0], turn = st.turn, t = seenTok(id);
+  if ( !t ) return;
+  const done = Promise.race([Promise.resolve(t.movementAnimationPromise ?? null).catch(() => null), new Promise((res) => setTimeout(res, 4000))]);
+  done.then(() => setTimeout(() => {
+    if ( !on() || st.turn !== turn || beat || homing || cameraHeld() || busy() ) return;
+    const tk = seenTok(id); if ( !tk ) return;
+    const v = viewNow(), rect = stageRect(), b = tokenBox(tk, grid() * 0.5);
+    if ( SC.comfortable(b, v, rect, 0.08) ) return;
+    trace.push([Math.round(performance.now()), "move", "reframe", "own token near the edge"]); if ( trace.length > 30 ) trace.shift();
+    goHome(SC.ownHome(v, b, rect, v, 0.2));
+  }, 250));
 }
 
 /** The stage is over here (the combat ended, the director or the stage was switched off): home if the camera is parked away. */
