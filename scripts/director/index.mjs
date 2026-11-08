@@ -7,6 +7,9 @@ import "./director.mjs";
 import { registerSources } from "./sources.mjs";
 import { registerBar } from "./bar.mjs";
 import "./section.mjs";
+import { registerSceneSource } from "./source-scene.mjs";
+import "./scene-panel.mjs";
 
 registerSources();
 registerBar();
+registerSceneSource();
