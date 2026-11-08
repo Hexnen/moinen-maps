@@ -5,6 +5,7 @@ import * as Geo from "./geometry.mjs";
 import { ZoneDisplay } from "./display.mjs";
 import { preset, presets, zonesText } from "./presets.mjs";
 import * as Editor from "./editor.mjs";
+import * as Styles from "./styles.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -35,8 +36,27 @@ function registerSettings() {
   R("zonesDistances", Boolean, true, () => { refresh(); tell("params"); });
   R("zonesEraser", Number, 0.5, () => tell("params"));
   R("zonesRuler", Boolean, true, () => tell("params"));
+  // world defaults: look presets saved by the GM, the default look preset and movement preset (scenes may pick their own)
+  const W = (k, type, def) => game.settings.register(MODULE_ID, k, { scope: "world", config: false, type, default: def, onChange: () => { refresh(); tell("params"); } });
+  W("zonesStyles", Object, { list: [] });
+  W("zonesStyleDefault", String, "classic");
+  W("zonesPresetDefault", String, "invincible");
 }
 export const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
+
+/** The look in force on this scene: its own ("custom"), a look preset it picked, or the world's default; "who" is always its own. */
+export function look() {
+  if ( !S ) return null;
+  const from = S.lookFrom ?? Styles.worldStyle();
+  if ( from === "custom" ) return S.look;
+  const st = Styles.style(from) ?? Styles.style("classic");
+  return Model.cleanLook({ ...st.look, who: S.look.who });
+}
+/** The movement preset in force: the scene's own pick or the world's default. */
+export function movePreset() {
+  const id = S?.preset ?? Styles.worldPreset();
+  return preset(id) ? id : "invincible";
+}
 
 /* ---------------------------------------------------------------- the zones of the lines */
 
@@ -53,7 +73,7 @@ function rebuild() {
 export function visibleToMe() {
   if ( !S || !Z ) return false;
   if ( editing() ) return true;
-  const who = S.look.who;
+  const who = look().who;
   return who === "all" || (who === "gm" && game.user.isGM);
 }
 
@@ -86,19 +106,20 @@ export function refresh() {
     here = Geo.zoneAt(Z, c.x, c.y);
     if ( here >= 0 ) {
       dist = Geo.distances(Z, here);
-      const p = preset(S.preset), moves = movesOf(t.actor);
+      const p = preset(movePreset()), moves = movesOf(t.actor);
       if ( p ) { bands = new Map(); for ( const [id, d] of dist ) { const b = p.band(d, moves); if ( b ) bands.set(id, b); } }
     }
   }
   display.hoverId = hover;
-  display.render(Z, S.look, gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x });
+  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x });
 }
 
 /* ---------------------------------------------------------------- numbers on hover */
 
 /** The zone under the cursor (numbers "hover", border highlight): one check per frame at most, a redraw only when it changes. */
 function onHoverMove(ev) {
-  if ( !(S?.look.numbers === "hover" || S?.look.hoverHi) || !display?.root.visible ) return;
+  const L = look();
+  if ( !(L?.numbers === "hover" || L?.hoverHi) || !display?.root.visible ) return;
   hoverAt = { x: ev.clientX, y: ev.clientY };
   if ( hoverRaf ) return;
   hoverRaf = requestAnimationFrame(() => {
@@ -109,7 +130,7 @@ function onHoverMove(ev) {
   });
 }
 // numbers on hover need the badges again; the highlight alone only redraws its own layer
-function setHover(id) { if ( id === hover ) return; hover = id; if ( S?.look.numbers === "hover" ) refresh(); else display?.drawHover(id); }
+function setHover(id) { if ( id === hover ) return; hover = id; if ( look()?.numbers === "hover" ) refresh(); else display?.drawHover(id); }
 const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); };
 
 /* ---------------------------------------------------------------- lifecycle */
@@ -241,20 +262,34 @@ export function trim() {
 
 export const clearAll = () => edit((st) => { if ( !st.size ) return false; st.clear(); return true; });
 
-/** Scene settings: preset, snap, look. */
+/**
+ * Scene settings: preset (movement; null / "" = the world's default), lookFrom (null / "" = world default, a look preset id, "custom"),
+ * snap, smooth, look. Changing the look (other than who sees it) while following a preset turns this scene's look into its own copy.
+ */
 export function setParams(patch) {
   if ( !game.user.isGM || !S ) return;
   const next = Model.canonical(S);
-  if ( patch.preset != null && preset(patch.preset) ) next.preset = patch.preset;
+  if ( "preset" in patch && (!patch.preset || preset(patch.preset)) ) next.preset = patch.preset || null;
+  if ( "lookFrom" in patch && (!patch.lookFrom || patch.lookFrom === "custom" || Styles.style(patch.lookFrom)) ) {
+    // switching to its own look starts from the look it shows now
+    if ( patch.lookFrom === "custom" && next.lookFrom !== "custom" ) next.look = Model.cleanLook({ ...look(), who: next.look.who });
+    next.lookFrom = patch.lookFrom || null;
+  }
   if ( patch.smooth != null ) next.smooth = Math.min(1, Math.max(0, Number(patch.smooth) || 0));
   if ( patch.snap != null ) next.snap = Math.min(Model.LIMITS.snap[1], Math.max(Model.LIMITS.snap[0], Number(patch.snap) || 0));
-  if ( patch.look ) next.look = Model.cleanLook({ ...next.look, ...patch.look });
+  if ( patch.look ) {
+    const own = Object.keys(patch.look).some((k) => k !== "who");
+    if ( own && next.lookFrom !== "custom" ) { next.look = Model.cleanLook({ ...lookOf(next), who: next.look.who }); next.lookFrom = "custom"; }
+    next.look = Model.cleanLook({ ...next.look, ...patch.look });
+  }
   if ( JSON.stringify(Model.encode(next)) === snapshot() ) return;
   const snapChanged = next.snap !== S.snap || next.smooth !== S.smooth;
   S = Model.canonical(next);
   if ( snapChanged ) rebuild();
   refresh(); scheduleSave(); tell("params");
 }
+
+function lookOf(st) { const keep = S; S = st; try { return look(); } finally { S = keep; } }
 
 function scheduleSave(ms = 400) {
   clearTimeout(saveTimer);
@@ -314,7 +349,7 @@ function patchRuler() {
       if ( !ctx || !Z || !setting("zonesRuler", true) || !visibleToMe() || !waypoint.previous ) return ctx;
       const n = legsInZones(waypoint);
       if ( n == null ) return ctx;
-      const band = preset(S.preset)?.band(n, movesOf(this.token?.actor));
+      const band = preset(movePreset())?.band(n, movesOf(this.token?.actor));
       ctx.cost = { total: zonesText(n), units: band?.cost ? `· ${band.cost}` : "" };
       ctx.distance = { total: zonesText(n) };
       ctx.cssClass = `${ctx.cssClass ?? ""} mm-zones-label`;
@@ -328,6 +363,8 @@ function patchRuler() {
 export const zonesApi = {
   /** The decoded scene data (lines, preset, look) and the zones worked out from them. */
   state: () => (S ? Model.encode(S) : null),
+  /** The look and movement preset in force here (after world defaults), and the look presets. */
+  look, movePreset, styles: Styles,
   zones: () => Z,
   /** The zone at a scene point (-1: none), and zones between two points (null: outside, or no route). */
   zoneAt: (x, y) => Geo.zoneAt(Z, x, y),

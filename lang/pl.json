@@ -1514,5 +1514,21 @@
   "MOINENMAPS.Zones.hoverFx.crosshatch": "Kratka (crosshatch)",
   "MOINENMAPS.Zones.hoverFx.dots": "Kropki",
   "MOINENMAPS.Zones.f.lineAlpha": "Krycie linii",
-  "MOINENMAPS.Zones.f.hoverAlpha": "Krycie podświetlenia"
+  "MOINENMAPS.Zones.f.hoverAlpha": "Krycie podświetlenia",
+  "MOINENMAPS.Zones.sec.map": "Ta mapa",
+  "MOINENMAPS.Zones.sec.world": "Domyślne dla świata",
+  "MOINENMAPS.Zones.fromWorld": "Domyślny świata",
+  "MOINENMAPS.Zones.f.style": "Preset wyglądu",
+  "MOINENMAPS.Zones.h.style": "Jak wyglądają strefy na tej mapie. Zmiana dowolnego ustawienia wyglądu poniżej robi z niego własny wygląd tej mapy.",
+  "MOINENMAPS.Zones.h.worldPreset": "Zasady ruchu dla każdej mapy, która nie wybrała własnych.",
+  "MOINENMAPS.Zones.h.worldStyle": "Wygląd dla każdej mapy, która nie wybrała własnego.",
+  "MOINENMAPS.Zones.style.classic": "Klasyczny",
+  "MOINENMAPS.Zones.style.subtle": "Subtelny",
+  "MOINENMAPS.Zones.style.sketch": "Szkic",
+  "MOINENMAPS.Zones.style.bold": "Wyrazisty",
+  "MOINENMAPS.Zones.style.custom": "Własny (ta mapa)",
+  "MOINENMAPS.Zones.style.save": "Zapisz jako preset…",
+  "MOINENMAPS.Zones.style.delete": "Usuń preset",
+  "MOINENMAPS.Zones.style.name": "Nazwa",
+  "MOINENMAPS.Zones.style.deleteAsk": "Usunąć ten preset wyglądu? Ta mapa zachowa jego wygląd jako własny, inne mapy z tym presetem wrócą do Klasycznego."
 }

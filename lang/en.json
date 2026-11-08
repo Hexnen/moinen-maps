@@ -1514,5 +1514,21 @@
   "MOINENMAPS.Zones.hoverFx.crosshatch": "Crosshatch",
   "MOINENMAPS.Zones.hoverFx.dots": "Dots",
   "MOINENMAPS.Zones.f.lineAlpha": "Line opacity",
-  "MOINENMAPS.Zones.f.hoverAlpha": "Highlight opacity"
+  "MOINENMAPS.Zones.f.hoverAlpha": "Highlight opacity",
+  "MOINENMAPS.Zones.sec.map": "This map",
+  "MOINENMAPS.Zones.sec.world": "World defaults",
+  "MOINENMAPS.Zones.fromWorld": "World default",
+  "MOINENMAPS.Zones.f.style": "Look preset",
+  "MOINENMAPS.Zones.h.style": "How the zones look on this map. Changing any look setting below makes it this map's own look.",
+  "MOINENMAPS.Zones.h.worldPreset": "Movement rules for every map that does not pick its own.",
+  "MOINENMAPS.Zones.h.worldStyle": "Look for every map that does not pick its own.",
+  "MOINENMAPS.Zones.style.classic": "Classic",
+  "MOINENMAPS.Zones.style.subtle": "Subtle",
+  "MOINENMAPS.Zones.style.sketch": "Sketch",
+  "MOINENMAPS.Zones.style.bold": "Bold",
+  "MOINENMAPS.Zones.style.custom": "Own (this map)",
+  "MOINENMAPS.Zones.style.save": "Save as preset…",
+  "MOINENMAPS.Zones.style.delete": "Delete preset",
+  "MOINENMAPS.Zones.style.name": "Name",
+  "MOINENMAPS.Zones.style.deleteAsk": "Delete this look preset? Maps using it keep its look as their own (this one) or fall back to Classic."
 }

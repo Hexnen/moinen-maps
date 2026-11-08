@@ -3,6 +3,7 @@ import { esc, T, setting, optRange, optCheck, optHint, bindSettings } from "../w
 import * as Zones from "./zones.mjs";
 import * as Editor from "./editor.mjs";
 import { presets } from "./presets.mjs";
+import * as Styles from "./styles.mjs";
 
 /**
  * Zones as a workspace section (takes over the "zones" placeholder of soon.mjs). Tools: the hand, the pencil, the eraser; actions:
@@ -68,12 +69,21 @@ function bar(host, ctx) {
 function settingsPanel(host) {
   const render = () => {
     const S = Zones.state(); if ( !S ) { host.innerHTML = `<p class="hint">${esc(Z("noScene"))}</p>`; return; }
-    const L = S.look;
+    const L = Zones.look(), from = S.lookFrom ?? "", world = Styles.worldStyle(), wPreset = Styles.worldPreset();
+    const styles = Styles.styles(), styleName = (id) => styles.find((x) => x.id === id)?.name ?? id;
+    const moves = presets().map((p) => [p.id, game.i18n.localize(p.title)]), moveName = (id) => moves.find((m) => m[0] === id)?.[1] ?? id;
+    const mine = from.startsWith("u-");
     const row = (label, ctl, hint = "") => `<div class="mm-wp-row"><label${hint ? ` data-tooltip="${esc(hint)}"` : ""}>${esc(label)}</label><div class="mm-wp-ctl">${ctl}</div></div>`;
     const sel = (name, opts, v) => `<select name="${name}">${opts.map(([k, l]) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     host.innerHTML = `<section class="mm-wp-sec">
-      ${row(Z("f.preset"), sel("preset", presets().map((p) => [p.id, game.i18n.localize(p.title)]), S.preset), Z("h.preset"))}
-      <p class="hint">${esc(Z(`presetInfo.${S.preset}`))}</p>
+      <h4>${esc(Z("sec.map"))}</h4>
+      ${row(Z("f.preset"), sel("preset", [["", `${Z("fromWorld")} (${moveName(wPreset)})`], ...moves], S.preset ?? ""), Z("h.preset"))}
+      <p class="hint">${esc(Z(`presetInfo.${Zones.movePreset()}`))}</p>
+      ${row(Z("f.style"), sel("lookFrom", [["", `${Z("fromWorld")} (${styleName(world)})`], ...styles.map((x) => [x.id, x.name]), ["custom", Z("style.custom")]], from), Z("h.style"))}
+      <div class="mm-wp-row"><label></label><div class="mm-wp-ctl">
+        <button type="button" class="mm-ws-btn" data-act="saveStyle"><i class="fa-solid fa-floppy-disk" inert></i> ${esc(Z("style.save"))}</button>
+        ${mine ? `<button type="button" class="mm-ws-btn mm-danger" data-act="delStyle"><i class="fa-solid fa-trash" inert></i> ${esc(Z("style.delete"))}</button>` : ""}
+      </div></div>
       ${row(Z("f.who"), sel("who", [["all", Z("who.all")], ["gm", Z("who.gm")], ["none", Z("who.none")]], L.who), Z("h.who"))}
       ${row(Z("f.fill"), `<range-picker name="fill" min="0" max="1" step="0.05" value="${L.fill}"></range-picker>`)}
       ${row(Z("f.ink"), `<range-picker name="ink" min="0" max="2" step="0.05" value="${L.ink}"></range-picker>`)}
@@ -84,6 +94,9 @@ function settingsPanel(host) {
       ${row(Z("f.hoverAlpha"), `<range-picker name="hoverAlpha" min="0" max="1" step="0.05" value="${L.hoverAlpha}"></range-picker>`)}
       ${row(Z("f.place"), sel("place", [["center", Z("place.center")], ["corner", Z("place.corner")]], L.place))}
       ${row(Z("f.numbers"), sel("numbers", [["always", Z("numbers.always")], ["hover", Z("numbers.hover")], ["never", Z("numbers.never")]], L.numbers), Z("h.numbers"))}
+      </section><section class="mm-wp-sec"><h4>${esc(Z("sec.world"))}</h4>
+      ${row(Z("f.preset"), sel("worldPreset", moves, wPreset), Z("h.worldPreset"))}
+      ${row(Z("f.style"), sel("worldStyle", styles.map((x) => [x.id, x.name]), world), Z("h.worldStyle"))}
       </section><section class="mm-wp-sec"><h4>${esc(Z("sec.mine"))}</h4>
       ${optCheck({ name: "dist", label: Z("f.distances"), checked: setting("zonesDistances") !== false, hint: Z("h.distances") })}
       ${optCheck({ name: "ruler", label: Z("f.ruler"), checked: setting("zonesRuler") !== false, hint: Z("h.ruler") })}
@@ -93,12 +106,37 @@ function settingsPanel(host) {
   const onChange = (ev) => {
     const c = ev.target.closest?.("[name]"); if ( !c ) return;
     const v = c.matches("input[type=checkbox]") ? c.checked : c.value;
-    if ( c.name === "preset" ) Zones.setParams({ preset: v });
+    if ( c.name === "preset" ) Zones.setParams({ preset: v || null });
+    else if ( c.name === "lookFrom" ) Zones.setParams({ lookFrom: v || null });
+    else if ( c.name === "worldPreset" ) Styles.setWorldPreset(v);
+    else if ( c.name === "worldStyle" ) Styles.setWorldStyle(v);
     else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
     else if ( ["fill", "ink", "lineAlpha", "hoverAlpha"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
   };
   const onClick = async (ev) => {
-    if ( !ev.target.closest("[data-act=clear]") ) return;
+    const act = ev.target.closest("[data-act]")?.dataset.act;
+    if ( act === "saveStyle" ) {
+      const name = await foundry.applications.api.DialogV2.prompt({
+        window: { title: Z("style.save") },
+        content: `<label>${esc(Z("style.name"))} <input type="text" name="name" autofocus></label>`,
+        ok: { callback: (_e, b) => b.form.elements.name.value }
+      }).catch(() => null);
+      if ( !name?.trim() ) return;
+      const id = await Styles.saveStyle(name, Zones.look());
+      Zones.setParams({ lookFrom: id });
+      return;
+    }
+    if ( act === "delStyle" ) {
+      const id = Zones.state()?.lookFrom;
+      if ( !id?.startsWith("u-") ) return;
+      const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: Z("style.delete") }, content: `<p>${esc(Z("style.deleteAsk"))}</p>` });
+      if ( !ok ) return;
+      // this scene keeps the look it shows, as its own
+      Zones.setParams({ lookFrom: "custom" });
+      await Styles.deleteStyle(id);
+      return;
+    }
+    if ( act !== "clear" ) return;
     const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: Z("clear") }, content: `<p>${esc(Z("clearAsk"))}</p>` });
     if ( ok ) Zones.clearAll();
   };

@@ -45,7 +45,8 @@ export function cleanLook(l = {}) {
   };
 }
 
-export const blank = () => ({ strokes: new Map(), next: 1, preset: "invincible", snap: 0.25, smooth: 0.3, look: cleanLook() });
+// preset null = the world's default movement preset; lookFrom null = the world's default look preset, "custom" = this scene's own look
+export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook() });
 
 /** The scene's stored zones, decoded (an empty set when nothing is stored). */
 export function load(scene) {
@@ -58,7 +59,9 @@ export function load(scene) {
     const pts = p.filter(Number.isFinite);
     if ( pts.length >= 4 ) S.strokes.set(id, pts.slice(0, pts.length & ~1));
   }
-  S.preset = typeof f.preset === "string" ? f.preset : "invincible";
+  S.preset = typeof f.preset === "string" && f.preset ? f.preset : null;
+  // scenes saved before look presets keep the look they had (their own)
+  S.lookFrom = "lookFrom" in f ? (typeof f.lookFrom === "string" && f.lookFrom ? f.lookFrom : null) : "custom";
   S.snap = num(f.snap, 0.25, ...LIMITS.snap);
   S.smooth = num(f.smooth, 0.3, ...LIMITS.smooth);
   S.look = cleanLook(f.look);
@@ -70,7 +73,7 @@ export function encode(S) {
   return {
     v: VERSION,
     s: [...S.strokes].map(([id, p]) => [id, p.map(r1)]),
-    next: S.next, preset: S.preset, snap: S.snap, smooth: S.smooth,
+    next: S.next, preset: S.preset, lookFrom: S.lookFrom, snap: S.snap, smooth: S.smooth,
     look: { ...S.look }
   };
 }

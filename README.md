@@ -53,6 +53,13 @@ distance and what reaching it costs under the scene's movement rules, and the to
 First preset: **Invincible** (quick action = 1 zone on foot, two quick actions = 2 zones; movement powers 2/4, Major 4/8,
 Massive 8/16, Monstrous 16/32, read from the actor's power items). API: `game.modules.get("moinen-maps").api.zones`.
 
+Look: tint, border width and opacity, colour, zone numbers (always / on hover / never, centred or in the top-left corner, fixed on
+the map while zooming) and an optional highlight of the zone under the cursor (bright border plus an inner glow, or hatching,
+crosshatch or dots that sit along the border and gather in the corners; its own opacity). **Presets**: look presets (Classic,
+Subtle, Sketch, Bold, plus any the GM saves with *Save as preset*) and movement presets. *World defaults* sets the look and movement
+preset for every map; a map follows them (*World default*) or picks its own preset, and changing any look setting on a map makes it
+that map's own look. Who sees the zones is always the map's own choice.
+
 ## Destruction
 
 Paint damage on the map; every brush stroke is an object of its own with a damage kind and a level (cracked, broken, crater).
