@@ -80,7 +80,7 @@ function onCreate(message) {
       const tDocs = (Array.isArray(fl.t) ? fl.t : []).map(onScene).filter((d) => pub(d) && d !== aDoc);
       const attacker = pub(aDoc) ? ref(aDoc) : null;
       const ev = rollEvent(f, { id: `r-${message.id}`, who, attacker, targets: tDocs.map(ref), what: message.flavor, grid: grid() });
-      if ( ev ) emit({ ...ev, ref: message.id, who: ev.who, ...combatLane(ev, aDoc) });
+      if ( ev ) { withMsg(ev, message.id); emit({ ...ev, ref: message.id, who: ev.who, ...combatLane(ev, aDoc) }); }
       return;
     }
     if ( isDamageCard(message) ) {
@@ -88,7 +88,7 @@ function onCreate(message) {
       const d = onScene(message.speaker?.token) ?? actor?.getActiveTokens?.(false, true)?.find((x) => x.parent === sc) ?? null;
       if ( !pub(d) ) return;
       const ev = damageEvent(damageFacts(message.content, message.flags?.["invincible-plus-ultra"]?.dmg), { id: `g-${message.id}`, who, t: ref(d), grid: grid() });
-      if ( ev ) emit(ev);
+      if ( ev ) { withMsg(ev, message.id); emit(ev); }
     }
   } catch ( err ) { console.warn(`${MODULE_ID} | director rolls`, err); }
 }
@@ -103,6 +103,8 @@ function combatLane(ev, aDoc) {
   if ( !c?.started || (c.scene && c.scene.id !== canvas.scene?.id) || c.combatant?.tokenId !== aDoc.id ) return {};
   return { lane: `cbt-${c.id}`, free: true };
 }
+/** The chat message's id into the caption data: each client names the speaker as its own chat card shows it (director tokenName). */
+function withMsg(ev, id) { for ( const c of [ev.caption, ev.after] ) if ( c?.data && typeof c.data === "object" ) c.data.msg = id; }
 function isDamageCard(message) {
   const fl = String(message.flavor ?? "").trim();
   if ( !fl ) return false;
@@ -112,6 +114,17 @@ function isDamageCard(message) {
 
 /* ---------------------------------------------------------------- every client: the cue */
 
+/**
+ * Invincible Plus Ultra announces this roll's result on this client itself (its comic splash at the token + the chat card): then the
+ * director keeps its setup line ("Attacker -> Target") and frames the moment, and does not print the result a second time.
+ */
+function announcedHere(id) {
+  if ( !game.modules.get("invincible-plus-ultra")?.active ) return false;
+  const get = (k) => { try { return game.settings.get("invincible-plus-ultra", k); } catch { return undefined; } };
+  const m = id ? game.messages?.get(id) : null;
+  if ( !m || get("splashEnabled") === false || m.visible === false ) return false;
+  return (m.author?.id ?? m.user?.id) === game.user.id || get("splashOthers") !== false;
+}
 /** "dice": resolves when this client's 3D dice of the roll (shot.ref = the message id) have landed (at once without Dice So Nice). */
 async function diceCue(shot) {
   const miss = shot.after?.key === "Dir.cap.miss";
@@ -119,7 +132,7 @@ async function diceCue(shot) {
   if ( id && d3?.waitFor3DAnimationByMessageID ) {
     try { await Promise.race([d3.waitFor3DAnimationByMessageID(id), sleep(DSN_MAX)]); } catch { /* (the result shows anyway) */ }
   }
-  return { impact: !miss };
+  return { impact: !miss, quiet: announcedHere(id) };
 }
 
 export function registerRollsSource() {

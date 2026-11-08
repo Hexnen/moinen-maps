@@ -82,6 +82,37 @@ export function safeRect() {
   if ( y1 - y0 < 240 ) { y0 = 0; y1 = innerHeight; }
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
+/** The screen rects of the open windows (framed ApplicationV2 and the old Application windows), minimised ones left out. */
+export function windowRects() {
+  const out = [];
+  const add = (el) => {
+    const e = el?.[0] ?? el; if ( !e?.getBoundingClientRect || !e.isConnected ) return;
+    if ( e.classList?.contains("minimized") || getComputedStyle(e).display === "none" ) return;
+    const r = e.getBoundingClientRect(); if ( r.width > 40 && r.height > 40 ) out.push({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom });
+  };
+  try { for ( const a of foundry.applications?.instances?.values?.() ?? [] ) if ( a.hasFrame && a.rendered && !a.minimized ) add(a.element); } catch { /* */ }
+  try { for ( const a of Object.values(ui.windows ?? {}) ) if ( a?.rendered && !a._minimized ) add(a.element); } catch { /* */ }
+  return out;
+}
+/**
+ * The part of the safe rect (safeRect) that no open window covers: the biggest free piece left of, right of, above or below each
+ * window (the biggest windows first). A take-over frames its place into it, so the subject is not under a sheet or a dialog. When the
+ * windows leave less than a usable piece, the safe rect itself (the shot is still better than none).
+ */
+export function freeRect() {
+  const a = safeRect();
+  let r = { x0: a.x, y0: a.y, x1: a.x + a.w, y1: a.y + a.h };
+  const area = (q) => Math.max(0, q.x1 - q.x0) * Math.max(0, q.y1 - q.y0);
+  const ws = windowRects().sort((p, q) => area(q) - area(p));
+  for ( const w of ws ) {
+    if ( w.x1 <= r.x0 || w.x0 >= r.x1 || w.y1 <= r.y0 || w.y0 >= r.y1 ) continue;
+    const parts = [{ ...r, x1: Math.min(r.x1, w.x0) }, { ...r, x0: Math.max(r.x0, w.x1) }, { ...r, y1: Math.min(r.y1, w.y0) }, { ...r, y0: Math.max(r.y0, w.y1) }]
+      .filter((q) => q.x1 - q.x0 >= 280 && q.y1 - q.y0 >= 200).sort((p, q) => area(q) - area(p));
+    if ( parts.length ) r = parts[0];
+  }
+  return { x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
+}
+
 /** On the screen at all (a ping is shown where it is, even near the edge). */
 const inside = (p) => p.x >= 8 && p.y >= 8 && p.x <= innerWidth - 8 && p.y <= innerHeight - 8 && !document.elementFromPoint?.(p.x, p.y)?.closest?.("#ui-left, #ui-right, #sidebar, #hotbar, #navigation, #chat-message");
 
@@ -101,11 +132,32 @@ export function caption({ kick, title, icon, lb = 0, hint = "" }) {
   el.style.setProperty("--mm-dir-lb", `${lb}vh`);
   el.innerHTML = `<div class="mm-dir-kick">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}<span>${esc(kick)}</span></div><div class="mm-dir-title">${esc(title)}</div>${hint ? `<div class="mm-dir-hint">${esc(hint)}</div>` : ""}`;
   host().appendChild(el);
+  clearOfUi(el);
   void el.offsetWidth;
   el.classList.add("is-in");
   let gone = false;
   const remove = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); };
   return { el, out: (ms = 420) => { if ( gone ) return; el.classList.add("is-out"); setTimeout(remove, ms); }, remove };
+}
+
+/**
+ * The lower third never sits under Foundry's interface: centred over the free part of the screen (not under an open window), and lifted
+ * above the hotbar (macro slots, the chat input...) when the letterbox bar puts it there.
+ */
+function clearOfUi(el) {
+  try {
+    const f = freeRect();
+    el.style.left = `${Math.round(f.x + f.w / 2)}px`;
+    el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
+    const r = el.getBoundingClientRect();
+    let lift = 0;
+    for ( const id of ["hotbar", "players", "chat-message"] ) {
+      const b = document.getElementById(id)?.getBoundingClientRect?.();
+      if ( !b?.height || b.top < innerHeight * 0.55 ) continue;
+      if ( b.left < r.right && b.right > r.left && b.top < r.bottom ) lift = Math.max(lift, innerHeight - b.top + 10);
+    }
+    if ( lift ) { el.classList.add("is-low"); el.style.bottom = `${Math.round(lift)}px`; }
+  } catch { /* the default place */ }
 }
 
 /**

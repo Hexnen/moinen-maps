@@ -240,11 +240,11 @@ function onUpdateCombat(combat, changed) {
 function onTurnChange(combat, prev, cur) {
   if ( combat !== combatHere() ) return;
   if ( bannerOn() ) {
-    const cb = combat.combatant, visible = !!cb && (game.user.isGM || !cb.hidden);
+    const cb = combat.combatant, visible = !!cb && (game.user.isGM || (!cb.hidden && !cb.token?.hidden));
     const b = M.bannerFor(prev, cur, { name: cb?.name, visible, mine: !game.user.isGM && !!cb?.isOwner });
     if ( b && (b.title || b.kick !== "turn") && !announcedElsewhere(b) ) {
       const kick = b.kick === "start" ? F("DirMove.b.start", { n: b.round }) : F("DirMove.b.round", { n: b.round });
-      showBanner({ kick, name: b.title ?? "", sub: b.mine ? T("DirMove.b.mine") : "", tag: game.user.isGM && cb?.hidden ? T("DirMove.b.hidden") : "", round: b.kick !== "turn",
+      showBanner({ kick, name: b.title ?? "", sub: b.mine ? T("DirMove.b.mine") : "", tag: game.user.isGM && (cb?.hidden || cb?.token?.hidden) ? T("DirMove.b.hidden") : "", round: b.kick !== "turn",
         icon: b.kick === "start" ? "fa-solid fa-swords" : "fa-solid fa-hourglass-half", ms: b.kick === "turn" ? 2300 : 2900 });
     }
   }

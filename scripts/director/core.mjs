@@ -106,7 +106,9 @@ export const sourceOn = (r, kind) => { const g = kindOf(kind).group; return !g |
 
 /* ---------------------------------------------------------------- events */
 
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
+// (null, "" and booleans are "missing", not 0: an event that crossed the socket as JSON has `dur: null` where the sender had none, and
+// Number(null) === 0 would have cut every shot emitted on another client down to the minimum hold)
+const num = (v) => (v === null || v === undefined || v === "" || typeof v === "boolean" ? NaN : Number.isFinite(Number(v)) ? Number(v) : NaN);
 const boxOk = (b) => b && [b.x0, b.y0, b.x1, b.y1].every((v) => Number.isFinite(v)) && b.x1 >= b.x0 && b.y1 >= b.y0;
 export const boxCentre = (b) => ({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 });
 export const unionBox = (a, b) => (!a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
@@ -220,6 +222,7 @@ export class Queue {
       if ( !ev.force && (st.paused || now - b.t0 > stale || !r.enabled) ) { drop(); continue; }
       let form = ev.force || ev.weight >= r.takeAt ? "take" : ev.weight >= r.softAt && r.softOn ? "soft" : null;
       if ( !form ) { drop(); continue; }
+      const wanted = form;
       const near = (h, ms) => h.end > now - ms && h.scene === ev.scene && Math.hypot(h.x - ev.x, h.y - ev.y) <= r.mergeSq * grid;
       if ( form === "take" && !ev.force ) {
         // the lane's own take-over plays: this one replaces it - unless that one is CUED (a roll waiting for its dice: the next turn or
@@ -236,7 +239,9 @@ export class Queue {
       if ( form === "soft" ) {
         if ( !r.softOn ) { drop(); continue; }
         if ( this.busyUntil > now ) { keep(); continue; }                                     // after the take-over that plays now
-        if ( !kindOf(ev.kind).fresh && this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }     // that place was just shown (news there, e.g. damage, still gets its soft shot)
+        // that place was just shown: dropped - unless it is news there (damage, a push: a fresh kind) or it would have taken the camera
+        // (a take-over turned soft by the cooldown / rest is a big event: it never vanishes without a trace)
+        if ( wanted !== "take" && !kindOf(ev.kind).fresh && this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }
         if ( this.softLive.length >= 2 ) { keep(); continue; }
       }
       drop();
@@ -265,18 +270,19 @@ const bucketRank = (b) => { const h = heaviest(b.events); return (b.force ? 10 :
 /** One event out of a bucket: the heaviest one's place and caption, the union of the boxes and tokens, a little weight for each extra event. */
 export function merged(b) {
   const evs = b.events, h = heaviest(evs);
-  let box = null; const tokens = new Set(), kinds = [];
-  for ( const e of evs ) { box = unionBox(box, e.box); for ( const t of e.tokens ) tokens.add(t); if ( !kinds.includes(e.kind) ) kinds.push(e.kind); }
+  let box = null; const tokens = new Set();
+  for ( const e of evs ) { box = unionBox(box, e.box); for ( const t of e.tokens ) tokens.add(t); }
   const who = evs.every((e) => e.who === "gm") ? "gm" : "all";
-  // a GM-only part is never mixed into what the players get: their box/tokens come from their events only
-  const pub = evs.filter((e) => e.who !== "gm");
+  // a GM-only part is never mixed into what the players get: their box/tokens/kinds/count come from their events only
+  const pub = evs.filter((e) => e.who !== "gm"), seen = who === "gm" ? evs : pub, kinds = [];
+  for ( const e of seen ) if ( !kinds.includes(e.kind) ) kinds.push(e.kind);
   let pbox = null; const ptok = new Set();
   for ( const e of pub ) { pbox = unionBox(pbox, e.box); for ( const t of e.tokens ) ptok.add(t); }
   const ph = pub.length ? heaviest(pub) : h;
   return {
     id: b.id, kind: ph.kind, kinds, weight: clamp(Math.max(...(who === "gm" ? evs : pub).map((e) => e.weight)) + 0.06 * ((who === "gm" ? evs : pub).length - 1), 0, 1),
     x: ph.x, y: ph.y, box: who === "gm" ? box : pbox, tokens: [...(who === "gm" ? tokens : ptok)], caption: ph.caption, who,
-    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null,
+    n: seen.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null,
     lane: ph.lane ?? null, free: evs.every((e) => e.free), quick: !!b.quick, play: ph.play ?? null, cue: ph.cue ?? null, after: ph.after ?? null, strict: !!ph.strict
   };
 }
@@ -321,7 +327,10 @@ export function decide(shot, ctx) {
 }
 
 /** The camera target of a take-over: centre and zoom framing `box` (scene px) on a screen vw x vh, from the player's zoom `z0`. */
-export function frameShot(shot, view, r, k = 1, limits = [0.1, 3], reduced = false) {
+export function frameShot(shot, view0, r, k = 1, limits = [0.1, 3], reduced = false) {
+  // `view0.rect` ({ x, y, w, h } screen px): the part of the screen not covered by windows / the interface - the box is framed into it
+  const rc = view0.rect && view0.rect.w > 0 && view0.rect.h > 0 ? view0.rect : null;
+  const view = rc ? { ...view0, vw: rc.w, vh: rc.h } : view0;
   const b = shot.box, w = Math.max(view.grid ?? 100, b.x1 - b.x0), h = Math.max(view.grid ?? 100, b.y1 - b.y0);
   const fit = Math.min(view.vw / (w * 1.8), view.vh / (h * 1.8));
   const most = view.scale * (1 + (r.zoomIn - 1) * clamp(k, 0, 1)), least = view.scale * 0.7;
@@ -336,7 +345,10 @@ export function frameShot(shot, view, r, k = 1, limits = [0.1, 3], reduced = fal
   // the focus stays in the middle third of the frame: between the box centre and the focus, while the whole box fits
   const keep = (v, lo, hi, half, mk) => { const m = half * mk; return hi - lo <= 2 * (half - m) ? clamp(v, hi - half + m, lo + half - m) : v; };
   const hw = view.vw / (2 * scale), hh = view.vh / (2 * scale);
-  return { x: keep((c.x + focus.x) / 2, b.x0, b.x1, hw, MX), y: keep((c.y + focus.y) / 2, b.y0, b.y1, hh, MY), scale };
+  const out = { x: keep((c.x + focus.x) / 2, b.x0, b.x1, hw, MX), y: keep((c.y + focus.y) / 2, b.y0, b.y1, hh, MY), scale };
+  // (the camera centre is the screen centre: shift it so that the framed point lands in the middle of the free rect)
+  if ( rc ) { out.x += (view0.vw / 2 - (rc.x + rc.w / 2)) / scale; out.y += (view0.vh / 2 - (rc.y + rc.h / 2)) / scale; }
+  return out;
 }
 
 /** The screen effects of a take-over, scaled by the intensity `k` and calmed by reduced motion: the look values `r` (cinematic-core). */
@@ -372,6 +384,37 @@ export function leaderOf(users) {
   const gm = act.filter((u) => u.isGM).sort((a, b) => (a.id < b.id ? -1 : 1));
   if ( gm.length ) return gm[0].id;
   return act.sort((a, b) => (a.id < b.id ? -1 : 1))[0]?.id ?? null;
+}
+
+/**
+ * The director's leader, every client computing the same answer from what all of them know (users' activity: active, GM, the scene
+ * they view; and each client's own announcement over the socket: its tab visible or not, when it came online).
+ * `users` = [{ id, active, isGM, viewed }], `scene` = the players' scene (the active one), `states` = Map id -> { vis, since }.
+ * Ranked: on the players' scene first (a GM preparing another scene must not silence the director: a player on the scene stands in),
+ * then a visible tab (a background tab's timers are throttled), a GM before a player, then the one online the longest (a second GM
+ * logging in does not take the lead over), then the id. An unknown state counts as "visible, online since just now" (a client that
+ * has not announced itself yet never takes the lead from one that has; the new client itself waits a moment before it leads).
+ */
+export function pickLeader(users, { scene = null, states = null } = {}) {
+  const act = users.filter((u) => u.active);
+  if ( !act.length ) return null;
+  const st = (u) => states?.get?.(u.id) ?? null;
+  const on = (u) => !scene || !u.viewed || u.viewed === scene;
+  const vis = (u) => st(u)?.vis !== false;
+  const since = (u) => (Number.isFinite(st(u)?.since) ? st(u).since : Infinity);
+  const key = (u) => [on(u) ? 0 : 1, vis(u) ? 0 : 1, u.isGM ? 0 : 1, since(u)];
+  const cmp = (a, b) => { const ka = key(a), kb = key(b); for ( let i = 0; i < ka.length; i++ ) if ( ka[i] !== kb[i] ) return ka[i] - kb[i]; return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; };
+  // (a GM on the scene with a hidden tab still leads over a player only while no visible client is on the scene)
+  return [...act].sort(cmp)[0].id;
+}
+
+/**
+ * An event that came from a PLAYER's client (another module, a macro): it may ask for a shot, never command one. No `force` (the GM's
+ * pause and the cooldowns apply), no lane / free (a combat lane is the director's own), weight below "heavy". `null` when unusable.
+ */
+export function fromPlayer(ev) {
+  if ( !ev ) return null;
+  return { ...ev, force: false, free: false, lane: null, quick: false, weight: Math.min(ev.weight, 0.85) };
 }
 
 /** The effective intensity: the player's own times the GM's (bar). */

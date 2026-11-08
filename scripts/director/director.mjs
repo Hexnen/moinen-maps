@@ -91,27 +91,83 @@ let pumpTimer = 0;
 let showOn = false;                      // a destruction show owns the screen (moinenMapsCinematic start .. end)
 const lastEvents = [];                   // the leader's last events (cut to: "the last event")
 
+/**
+ * THE LEADER (core pickLeader): on the players' scene (the active one), a visible tab, a GM, online the longest. Every client announces
+ * its tab visibility and when it came online ("hi"; a new client asks the others with "hello"), so all of them pick the same one. When
+ * the lead moves (a GM tabs away, goes to prepare another scene, a second GM), the old leader hands its queue over (pending events,
+ * the cooldown / rest history, the last events for "cut to last"); a leader that just closed its tab cannot, the new one starts fresh.
+ */
+const states = new Map();                // user id -> { vis, since } as that client announced it
+const me = { since: null, graceUntil: 0 };
+let lastLeader = null, formerLeader = null;
+const visNow = () => document.visibilityState !== "hidden";
 export function leaderId() {
-  const users = game.users?.contents ?? [];
-  return game.users?.activeGM?.id ?? Dir.leaderOf(users.map((u) => ({ id: u.id, active: u.active, isGM: u.isGM })));
+  const users = (game.users?.contents ?? []).map((u) => ({ id: u.id, active: u.active, isGM: u.isGM, viewed: u.isSelf ? (canvas?.scene?.id ?? u.viewedScene ?? null) : (u.viewedScene ?? null) }));
+  if ( game.user && me.since !== null ) states.set(game.user.id, { vis: visNow(), since: me.since });
+  const scene = game.scenes?.active?.id ?? null;
+  let id = Dir.pickLeader(users, { scene, states });
+  // (a client that just came online leads only once it has heard the others, or when it is alone)
+  if ( id === game.user?.id && performance.now() < me.graceUntil && users.some((u) => u.active && u.id !== id) ) {
+    id = Dir.pickLeader(users.filter((u) => u.id !== game.user.id), { scene, states }) ?? id;
+  }
+  if ( id !== lastLeader ) { const was = lastLeader; lastLeader = id; formerLeader = was; onLeaderChange(was, id); }
+  return id;
 }
 export const isLeader = () => !!game.user && leaderId() === game.user.id;
+function announce(op = "hi") { if ( game.user ) game.socket?.emit(CHANNEL, { t: "dir", op, vis: visNow(), since: me.since }); }
+/** The lead moved: the old leader (this client) hands its queue to the new one. */
+function onLeaderChange(was, now) {
+  if ( !game.user || was !== game.user.id || !now || now === game.user.id ) return;
+  const q = { buckets: queue.buckets.flatMap((b) => b.events), history: queue.history.slice(-24), lastTake: queue.lastTake, busyUntil: queue.busyUntil, lastEvents: lastEvents.slice(-8) };
+  clearTimeout(pumpTimer); pumpTimer = 0;
+  queue.clear();
+  try { game.socket?.emit(CHANNEL, { t: "dir", op: "handover", q, to: now }, { recipients: [now] }); } catch ( err ) { console.warn(`${MODULE_ID} | director handover`, err); }
+  Hooks.callAll(HOOK, "leader", { from: was, to: now });
+}
+/** The new leader takes the old one's queue (values checked: a player's client may send this too). */
+function takeOver(q, sender) {
+  if ( !q || typeof q !== "object" || !isLeader() ) return;
+  const now = sharedNow(), r = R(), gm = !!game.users.get(sender)?.isGM || (!!sender && sender === formerLeader);   // (the leader before me: its own events, lanes and all)
+  const okH = (h) => h && typeof h === "object" && Number.isFinite(h.x) && Number.isFinite(h.y) && Number.isFinite(h.end) && (h.form === "take" || h.form === "soft");
+  if ( Array.isArray(q.history) ) {
+    for ( const h of q.history.slice(-24) ) if ( okH(h) ) queue.history.push({ form: h.form, x: h.x, y: h.y, scene: typeof h.scene === "string" ? h.scene : null, end: Math.min(h.end, now + r.maxShot) });
+    queue.history.sort((a, b) => a.end - b.end); while ( queue.history.length > 24 ) queue.history.shift();
+  }
+  if ( Number.isFinite(q.busyUntil) ) queue.busyUntil = Math.max(queue.busyUntil, Math.min(q.busyUntil, now + r.maxShot));
+  const lt = q.lastTake;
+  if ( lt && typeof lt === "object" && Number.isFinite(lt.end) && (!queue.lastTake || lt.end > queue.lastTake.end) ) {
+    queue.lastTake = { x: Number(lt.x), y: Number(lt.y), end: Math.min(lt.end, now + r.maxShot), scene: typeof lt.scene === "string" ? lt.scene : null, lane: typeof lt.lane === "string" ? lt.lane : null, cued: !!lt.cued };
+  }
+  for ( const e of Array.isArray(q.lastEvents) ? q.lastEvents.slice(-8) : [] ) { const ev = Dir.normEvent(e, now); if ( ev ) lastEvents.push(gm ? ev : Dir.fromPlayer(ev)); }
+  while ( lastEvents.length > 8 ) lastEvents.shift();
+  for ( const e of Array.isArray(q.buckets) ? q.buckets.slice(0, 24) : [] ) {
+    let ev = Dir.normEvent(e, now); if ( !ev ) continue;
+    if ( !gm ) ev = Dir.fromPlayer(ev);
+    const t0 = ev.t;
+    enqueue(ev);
+    if ( Number.isFinite(t0) && t0 <= now ) for ( const b of queue.buckets ) if ( b.events.includes(ev) && b.events.length === 1 ) b.t0 = t0;   // (it keeps its age: a stale one still goes stale)
+  }
+  schedulePump();
+}
 const grid = () => canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100;
 
 /**
  * Emit an event (any client, any module): { kind, weight 0..1, x, y | box {x0,y0,x1,y1} (scene px), tokens [ids], caption (string or
  * { key, data }), who ("all" | "gm"), force }. The leader queues it; another client sends it to the leader. Returns the normalised event.
  */
-export function emit(e) {
+export function emit(e, { untrusted = false } = {}) {
   if ( killed() || !isOn() || !canvas?.scene ) return null;
-  const ev = Dir.normEvent({ scene: canvas.scene.id, ...e }, sharedNow());
+  let ev = Dir.normEvent({ scene: canvas.scene.id, ...e }, sharedNow());
   if ( !ev ) return null;
+  if ( untrusted && !game.user.isGM ) ev = Dir.fromPlayer(ev);          // (the API / the hook on a player's client: a request, not a command)
   if ( isLeader() ) enqueue(ev);
   else { const to = leaderId(); if ( to ) game.socket?.emit(CHANNEL, { t: "dir", op: "event", ev, to }, { recipients: [to] }); }   // (to the leader only)
   return ev;
 }
+/** The public emit (api.director.emit, the "emit" hook): on a player's client the event is a request (core fromPlayer). */
+export const apiEmit = (e) => emit(e, { untrusted: true });
 function enqueue(ev) {
-  if ( killed() || !isOn() ) return;
+  if ( killed() || !isOn() || !ev ) return;
   const r = R();
   if ( !ev.force && (!r.enabled || !Dir.sourceOn(r, ev.kind)) ) return;
   if ( ev.who === "gm" && !game.users.some((u) => u.active && u.isGM) ) return;   // a GM-only thing with no GM online: nobody may watch it
@@ -152,11 +208,35 @@ function send(shot) {
 
 /* ---------------------------------------------------------------- the socket */
 
-function onSocket(msg) {
+/**
+ * The module socket. The server adds the SENDER's user id: shots are taken only from a GM or from the leader (a player's macro cannot
+ * play a shot on everyone's screen), "skip" only from a GM, and an event from a player is a request (core fromPlayer: no force, the
+ * pause and the cooldowns apply), at most PLAYER_RATE of them per 10 s per player.
+ */
+const PLAYER_RATE = 8;
+const rate = new Map();                  // player id -> [times]
+function onSocket(msg, sender) {
   if ( !msg || msg.t !== "dir" ) return;
-  if ( msg.op === "shot" ) receive(msg.shot);
-  else if ( msg.op === "event" ) { if ( isLeader() ) enqueue(Dir.normEvent(msg.ev, sharedNow())); }
-  else if ( msg.op === "skip" ) skipHere(msg.id ?? null);
+  const from = sender ? game.users?.get(sender) : null, gm = !!from?.isGM;
+  if ( msg.op === "shot" ) { if ( gm || (sender && sender === leaderId()) ) receive(msg.shot); }
+  else if ( msg.op === "event" ) {
+    if ( !isLeader() ) return;
+    let ev = Dir.normEvent(msg.ev, sharedNow()); if ( !ev ) return;
+    if ( !gm ) {
+      const now = performance.now(), ts = (rate.get(sender) ?? []).filter((t) => now - t < 10000);
+      if ( ts.length >= PLAYER_RATE ) return;
+      ts.push(now); rate.set(sender, ts);
+      ev = Dir.fromPlayer(ev);
+    }
+    enqueue(ev);
+  }
+  else if ( msg.op === "skip" ) { if ( gm ) skipHere(msg.id ?? null); }
+  else if ( msg.op === "hi" || msg.op === "hello" ) {
+    if ( sender ) states.set(sender, { vis: msg.vis !== false, since: Number.isFinite(msg.since) ? msg.since : null });
+    if ( msg.op === "hello" ) announce("hi");
+    leaderId();
+  }
+  else if ( msg.op === "handover" ) { if ( msg.to === game.user.id ) takeOver(msg.q, sender); }
 }
 
 /* ---------------------------------------------------------------- play handlers (sources that play their shots their own way) */
@@ -203,8 +283,14 @@ export function canSee(shot) {
   const vis = canvas.visibility;
   if ( !vis?.tokenVision ) return true;                    // no token vision on this scene: the players see the whole map
   const b = shot.box, g = grid();
-  const pts = [[shot.x, shot.y], [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], [b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]];
-  return pts.some(([x, y]) => { try { return vis.testVisibility({ x, y }, { tolerance: g * 0.3 }); } catch { return false; } });
+  const at = (x, y) => { try { return vis.testVisibility({ x, y }, { tolerance: g * 0.3 }); } catch { return false; } };
+  // the FOCUS (where it happens) must be in this player's sight: a corner of the box in sight is not enough (a take-over into the dark
+  // with "It comes crashing down" tells what happened and where). A source that plays its own way (a move: the follow stops where the
+  // token leaves the player's sight; its handler checks the token itself) is still judged by its box.
+  if ( at(shot.x, shot.y) ) return true;
+  if ( !playOf(shot)?.check ) return false;
+  const pts = [[(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], [b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]];
+  return pts.some(([x, y]) => at(x, y));
 }
 
 /**
@@ -232,8 +318,21 @@ export function busy({ ignoreHolds = false } = {}) {
   const keys = game.keyboard?.downKeys;
   if ( keys ) for ( const k of keys ) if ( PAN_KEYS.has(k) ) return true;
   if ( canvas?.controls?.ruler?.active ) return true;
+  if ( document.querySelector(".sketch-reveal-overlay") ) return true;                     // (a sketch-reveal splash / transition covers the screen)
   return false;
 }
+/**
+ * Another module holds this client's camera: LockView's pan lock (the camera cannot move: a take-over would play its bars and caption over
+ * a view that stays put) or Hot Pan & Zoom! switched on (the GM drives every player's view: the director's return would undo it).
+ * Then take-overs come soft here. `zoom`: LockView locks only the zoom (the camera may move, at the player's own zoom).
+ */
+export function cameraHeld() {
+  const lv = globalThis.lockView?.locks;
+  if ( lv?.applyLocks && lv.pan ) return true;
+  if ( game.modules?.get("hot-pan")?.active ) { try { if ( game.settings.get("hot-pan", "isActive") ) return true; } catch { /* not registered */ } }
+  return false;
+}
+const zoomHeld = () => { const lv = globalThis.lockView?.locks; return !!(lv?.applyLocks && lv.zoom); };
 function wireInput() {
   const board = () => document.getElementById("board");
   window.addEventListener("pointerdown", (ev) => { if ( ev.target === board() ) { input.down++; input.downAt = performance.now(); } }, true);
@@ -247,7 +346,7 @@ function ctxOf(shot) {
   const mode = myMode(), opts = clientOpts();
   return {
     killed: killed(), mode: mode === "bar" ? "soft" : mode, gm: game.user.isGM, visible: canSee(shot), busy: busy() || (!!shot.strict && seeTokens(shot) !== "all"), show: showOn || Screen.owner === "show",
-    k: Dir.intensity(Number(setting("dirIntensity")), shot.k), camera: !opts.noCamera || mode === "full", softOn: mode !== "bar" ? true : false
+    k: Dir.intensity(Number(setting("dirIntensity")), shot.k), camera: (!opts.noCamera || mode === "full") && !cameraHeld(), softOn: mode !== "bar" ? true : false
   };
 }
 
@@ -282,9 +381,9 @@ export function captionText(shot, c = shot.caption) {
   if ( typeof c === "string" ) title = c;
   else if ( c?.key ) {
     const data = { ...(c.data ?? {}) };
-    if ( data.token !== undefined ) data.token = tokenName(data.token, data.name);
-    if ( data.target !== undefined ) data.target = tokenName(data.target, data.tname);
-    delete data.name; delete data.tname;
+    if ( data.token !== undefined ) data.token = tokenName(data.token, data.name, data.msg);
+    if ( data.target !== undefined ) data.target = tokenName(data.target, data.tname, data.msg);
+    delete data.name; delete data.tname; delete data.msg;
     const key = `MOINENMAPS.${c.key}`;
     title = game.i18n.has(key) ? game.i18n.format(key, data) : "";
     const kk = c.kick ? `MOINENMAPS.${c.kick}` : null;
@@ -293,14 +392,28 @@ export function captionText(shot, c = shot.caption) {
   if ( shot.n > 1 && !title ) title = game.i18n.format("MOINENMAPS.Dir.cap.many", { n: shot.n });
   return { kick, title, icon };
 }
-function tokenName(id, fallback) {
-  const d = canvas.scene?.tokens?.get(id);
-  if ( !d ) return fallback || T("Dir.someone");
-  if ( game.user.isGM ) return d.name;
+/**
+ * A token's name as THIS player already reads it elsewhere - never more: their own token; a visible token whose name is shown on hover;
+ * a party character (Foundry's players list names it); a combatant the combat tracker shows; the speaker of the roll's chat card
+ * (`msg`, when this user sees that message). A hidden token is never named. Otherwise "Someone".
+ */
+export function tokenName(id, fallback, msg = null) {
+  const d = canvas.scene?.tokens?.get(id), someone = T("Dir.someone");
+  if ( !d ) return fallback || someone;
+  if ( game.user.isGM || d.isOwner ) return d.name;
+  if ( d.hidden ) return someone;
   const t = d.object, M = CONST.TOKEN_DISPLAY_MODES;
-  if ( d.hidden && !d.isOwner ) return T("Dir.someone");
-  if ( t && !t.visible ) return T("Dir.someone");
-  return d.isOwner || [M.ALWAYS, M.HOVER].includes(d.displayName) ? d.name : T("Dir.someone");
+  if ( t?.visible && [M.ALWAYS, M.HOVER].includes(d.displayName) ) return d.name;
+  const actor = d.actor;
+  if ( actor && game.users.some((u) => u.character?.id === actor.id) ) return actor.name;
+  for ( const c of game.combats ?? [] ) {
+    if ( !c.started || (c.scene && c.scene.id !== canvas.scene?.id) ) continue;
+    const cb = c.combatants.find((x) => x.tokenId === id);
+    if ( cb && !cb.hidden && (cb.visible ?? true) && cb.name ) return cb.name;
+  }
+  const m = typeof msg === "string" ? game.messages?.get(msg) : null;
+  if ( m && m.visible !== false && m.speaker?.token === id && m.alias ) return m.alias;
+  return someone;
 }
 
 /* ---- the take-over */
@@ -314,7 +427,16 @@ function playTake(shot, ctx, late = 0) {
   const home = Screen.home;                                 // (a shot or the show before: its home view is the player's own)
   if ( !Screen.begin({ r: look }, { owner: "director", guard: false, frame: false, opts: { noCamera: false, allow: ["camera"] } }) ) return;
   const from = home ?? { x: v.x, y: v.y, scale: v.scale };
-  const target = Dir.frameShot(shot, { ...v, ...from }, dr, ctx.k, lim, reduced);
+  // framed into the part of the screen nothing covers (the interface columns, open windows: a sheet, a roll dialog, a journal)
+  const free = Ov.freeRect();
+  const target = Dir.frameShot(shot, { ...v, ...from, rect: free }, dr, ctx.k, lim, reduced);
+  if ( zoomHeld() ) target.scale = from.scale;                                                    // (LockView: the zoom is locked)
+  // a soft marker of the same place on screen goes: the take-over says it now (no second caption of the same thing)
+  const near = dr.mergeSq * grid();
+  for ( const [sid, s] of [...softs] ) {
+    const sx = s.shot.x, sy = s.shot.y, b = shot.box;
+    if ( Math.hypot(sx - shot.x, sy - shot.y) <= near || (sx >= b.x0 && sx <= b.x1 && sy >= b.y0 && sy <= b.y1) ) endSoft(sid, "take");
+  }
   const lead = Math.max(250, shot.lead - late);
   const c = cur = { shot, form: "take", timers: [], cap: null, t0: performance.now() - late, done: false };
   const at = (ms, fn) => c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) { try { fn(); } catch ( err ) { console.error(`${MODULE_ID} | director`, err); endTake("error"); } } }, Math.max(0, ms - late)));
@@ -323,7 +445,7 @@ function playTake(shot, ctx, late = 0) {
     // the source's own camera (e.g. following a token): it gets the framed target, the time it has to get there and the end
     try {
       c.drv = ph.drive(shot, { target, from: { x: v.x, y: v.y, scale: v.scale }, home: from, lead, late, reduced, k: ctx.k, limits: lim, grid: grid(), r: dr,
-        cameraOn: () => cur === c && !c.done && !c.taken && Screen.owner === "director", end: (why = "done") => { if ( cur === c && !c.done ) endTake(why); }, at });
+        cameraOn: () => cur === c && !c.done && !c.taken && !c.press && Screen.owner === "director", end: (why = "done") => { if ( cur === c && !c.done ) endTake(why); }, at });
     } catch ( err ) { console.error(`${MODULE_ID} | director drive`, err); c.drv = null; }
   }
   c.stay = !!ph?.stay?.(shot);
@@ -357,7 +479,8 @@ function playTake(shot, ctx, late = 0) {
       const go = () => {
         if ( cur !== c || c.done ) return;
         if ( shot.impact >= 0 && res?.impact !== false ) { c.hit = false; hit(); }
-        if ( dr.captions && shot.after ) { c.cap?.out(260); c.cap = Ov.caption({ ...captionText(shot, shot.after), lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") }); }
+        // (`quiet`: another module announces the result on this client - Invincible Plus Ultra's splash and card: the setup line stays)
+        if ( dr.captions && shot.after && !res?.quiet ) { c.cap?.out(260); c.cap = Ov.caption({ ...captionText(shot, shot.after), lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") }); }
         c.minEnd = performance.now() + CUE_AFTER;
         c.timers.push(setTimeout(() => { if ( cur === c && !c.done && performance.now() - c.t0 < plannedEnd ) endTake("done"); }, CUE_AFTER));
       };
@@ -383,18 +506,45 @@ function playTake(shot, ctx, late = 0) {
     endTake("done");
   };
   at(plannedEnd, ending);
-  // the player: Esc or a click on the map cuts the shot short (the camera returns); the wheel or another button takes the camera
-  c.onKey = (ev) => { if ( ev.key === "Escape" && cur === c ) { ev.preventDefault(); ev.stopImmediatePropagation(); endTake("cut"); } };
+  // the player: Esc or a click on the map cuts the shot short (the camera returns); the wheel or another button takes the camera.
+  // The player's input is never swallowed: a press on the map freezes the camera where it is (what they press on stays under the
+  // pointer) and goes on to Foundry - a click (short, still) then cuts and returns, a drag (a token, a ruler, a pan) keeps the view.
+  // Esc while typing is left alone; with a window / menu open it cuts the shot AND closes what Foundry closes; else it only cuts.
+  c.onKey = (ev) => {
+    if ( ev.key !== "Escape" || cur !== c ) return;
+    if ( typing(ev) ) return;
+    endTake("cut");
+    if ( !escTaken() ) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+  };
   c.onPtr = (ev) => {
     if ( cur !== c || ev.target !== document.getElementById("board") ) return;
     if ( ev.type === "wheel" || ev.button !== 0 ) { Screen.stopCamera("player"); c.taken = true; return; }
-    ev.preventDefault(); ev.stopImmediatePropagation(); endTake("cut");
+    c.press = { x: ev.clientX, y: ev.clientY, t: performance.now(), home: Screen.home };
+    Screen.stopCamera("player");                                                                 // (frozen under the pointer)
+  };
+  c.onUp = (ev) => {
+    const p = c.press; if ( cur !== c || !p || ev.button !== 0 ) return;
+    c.press = null;
+    const click = Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 6 && performance.now() - p.t < 450;
+    if ( !click ) { c.taken = true; endTake("taken"); return; }                                 // a drag: the view is the player's now
+    endTake("cut");
+    if ( p.home ) canvas.animatePan({ ...p.home, duration: 450 });                               // a click: back to the player's own view
   };
   window.addEventListener("keydown", c.onKey, true);
   window.addEventListener("pointerdown", c.onPtr, true);
+  window.addEventListener("pointerup", c.onUp, true);
   window.addEventListener("wheel", c.onPtr, { capture: true, passive: true });
 }
-/** The take-over ends here: "done" (its time), "cut" (Esc / a click: quick return), "skip" (the GM), "show", "replaced", "scene", "error". */
+/** Esc in a text field (chat, a sheet's input): it belongs to the field. */
+const typing = (ev) => { const el = ev.target; return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? "")) && el.type !== "checkbox" && el.type !== "radio"; };
+/** Something Foundry's own Esc would close (core "dismiss": the menu, a context menu, a tour, open windows): then Esc goes on to it too. */
+function escTaken() {
+  if ( ui.menu?.rendered || ui.context?.element || foundry.nue?.Tour?.tourInProgress ) return true;
+  if ( Object.values(ui.windows ?? {}).some((a) => a?.rendered) ) return true;
+  for ( const a of foundry.applications?.instances?.values?.() ?? [] ) if ( a.hasFrame && a.rendered ) return true;
+  return false;
+}
+/** The take-over ends here: "done" (its time), "cut" (Esc / a click: quick return), "taken" (the player dragged: no return), "skip" (the GM), "show", "replaced", "scene", "error". */
 function endTake(why, { quiet = false } = {}) {
   const c = cur; if ( !c || c.done ) return;
   c.done = true; cur = null;
@@ -404,8 +554,9 @@ function endTake(why, { quiet = false } = {}) {
   if ( c.watch ) clearInterval(c.watch);
   window.removeEventListener("keydown", c.onKey, true);
   window.removeEventListener("pointerdown", c.onPtr, true);
+  window.removeEventListener("pointerup", c.onUp, true);
   window.removeEventListener("wheel", c.onPtr, true);
-  c.cap?.out(why === "cut" || why === "skip" ? 250 : 420);
+  c.cap?.out(why === "cut" || why === "skip" || why === "taken" ? 250 : 420);
   if ( why !== "replaced" && why !== "show" && Screen.owner === "director" ) {
     if ( why === "scene" || why === "error" ) Screen.end({ immediate: true });
     else Screen.end({ backMs: why === "done" ? c.shot.back : 450, hold: 0 });
@@ -555,7 +706,7 @@ export function status() {
 /* ---------------------------------------------------------------- wiring */
 
 export const directorApi = {
-  emit, cutTo, skip, preview, setOn, isOn, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
+  emit: apiEmit, cutTo, skip, preview, setOn, isOn, cameraHeld, tokenName, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, seeTokens,
   /** For the checks: the overlays, the queue. */
   _debug: () => ({ overlay: Ov.debug(), queue: { buckets: queue.buckets.length, busyUntil: queue.busyUntil, history: queue.history.slice(-6) }, cur: cur ? { id: cur.shot.id, timers: cur.timers.length } : null, screen: Screen.debug?.() ?? null }),
   _receive: receive
@@ -568,8 +719,17 @@ Hooks.once("ready", () => {
   wireInput();
   Hooks.on("moinenMapsCinematic", onShow);
   Hooks.on("canvasTearDown", onTearDown);
-  Hooks.on(HOOK, (kind, data) => { if ( kind === "emit" && data && typeof data === "object" ) emit(data); });
-  Hooks.on("userConnected", () => { tell("state"); if ( isLeader() ) schedulePump(); });
+  Hooks.on(HOOK, (kind, data) => { if ( kind === "emit" && data && typeof data === "object" ) apiEmit(data); });
+  Hooks.on("userConnected", (u, on) => { if ( !on ) states.delete(u.id); tell("state"); if ( isLeader() ) schedulePump(); });
+  // the leader election: this client's tab and its time online, the others' on request; re-checked when the scene a user views changes
+  me.since = Number(game.time?.serverTime) || Date.now(); me.graceUntil = performance.now() + 1500;
+  announce("hello");
+  setTimeout(() => { if ( isLeader() ) schedulePump(); tell("state"); }, 1600);
+  document.addEventListener("visibilitychange", () => { announce("hi"); if ( isLeader() ) schedulePump(); });
+  Hooks.on("renderSceneNavigation", () => leaderId());
+  Hooks.on("updateScene", (sc, ch) => { if ( "active" in (ch ?? {}) ) leaderId(); });
+  // Hot Pan & Zoom! switched on mid-shot: the GM's view is the players' now - the take-over lets go of the camera (no return)
+  Hooks.on("updateSetting", (st) => { if ( st?.key === "hot-pan.isActive" && cameraHeld() && cur ) { Screen.stopCamera("hotpan"); cur.taken = true; endTake("taken"); } });
 });
 // (the shots planned by this leader stay "the last event" for cut to after the queue forgot them)
 Hooks.on(HOOK, (kind, data) => { if ( kind === "shot" && data?.shot ) lastShotEvent = { kind: data.shot.kind, x: data.shot.x, y: data.shot.y, box: data.shot.box, tokens: data.shot.tokens, caption: data.shot.caption, who: data.shot.who }; });

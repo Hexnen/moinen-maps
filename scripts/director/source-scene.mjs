@@ -4,7 +4,7 @@ import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
 import * as SC from "./scene-core.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
-import { HOOK, R, gmState, myMode, killed, isOn, busy, holds } from "./director.mjs";
+import { HOOK, R, gmState, myMode, killed, isOn, busy, holds, cameraHeld } from "./director.mjs";
 import { isOrbit } from "../zones/orbit.mjs";
 import * as Reveal from "../net/reveal.mjs";
 
@@ -304,7 +304,7 @@ function ctxFor(scene, { forced = false } = {}) {
   const prev = lastSeen(), mode = myMode();
   return {
     killed: killed() || (!forced && !isOn()), settings: settings(), sceneOff: SC.cleanSceneFlag(scene?.getFlag?.(MODULE_ID, FLAG)).off, mode,
-    fresh: prev !== scene?.id, first: pageFirst && !prev, busy: busy({ ignoreHolds: true }), screen: !!Screen.owner && Screen.owner !== "arrival",
+    fresh: prev !== scene?.id, first: pageFirst && !prev, busy: busy({ ignoreHolds: true }) || cameraHeld(), screen: !!Screen.owner && Screen.owner !== "arrival",
     k: Dir.intensity(Number(setting("dirIntensity")), Number(gmState().k)), forced
   };
 }
@@ -329,7 +329,9 @@ function onReady() {
   const c = ctxFor(scene);
   pageFirst = false;
   setLastSeen(scene.id);
-  const form = SC.decideArrival(c);
+  // sketch-reveal plays its own scene transition on this client (its overlay is up from canvasInit): that is the opening, with its own
+  // title; ours under it would never be seen (one owner of the arrival)
+  const form = document.querySelector(".sketch-reveal-overlay.sr-transition") ? "none" : SC.decideArrival(c);
   if ( form === "none" ) { if ( veil ) veilOut(450); return; }
   try { play(form); } catch ( err ) { console.error(`${MODULE_ID} | director arrival`, err); endArrival("error"); if ( veil ) veilOut(300); }
 }
