@@ -26,9 +26,27 @@ export const OPT_KEYS = {
   cinNoLetterbox: "noLetterbox", cinNoVignette: "noVignette", cinNoShake: "noShake", cinNoFlash: "noFlash", cinNoSlow: "noSlow"
 };
 
+/**
+ * A client setting of this module (scope "client", a plain value), read through a cache keyed by its raw text in the browser storage:
+ * game.settings.get builds a Setting document for every read of a client setting (~35 us; a shot start read about twenty of them, a
+ * busy combat hundreds). The storage is written before onChange and the hooks run, so the cached value is never stale. Any other
+ * setting: game.settings.get.
+ */
+const clientMemo = new Map();
+export function clientGet(k) {
+  const id = `${MODULE_ID}.${k}`, cfg = game.settings.settings.get(id);
+  if ( cfg?.scope !== "client" ) return game.settings.get(MODULE_ID, k);
+  let raw = null; try { raw = game.settings.storage.get("client").getItem(id); } catch { return game.settings.get(MODULE_ID, k); }
+  const m = clientMemo.get(k);
+  if ( m && m.raw === raw ) return m.v;
+  const v = game.settings.get(MODULE_ID, k);
+  if ( v === null || typeof v !== "object" ) clientMemo.set(k, { raw, v });
+  return v;
+}
+
 /** The client's opt-outs as cinematic-core effective() takes them. */
 export function clientOpts() {
-  const get = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
+  const get = (k) => { try { return clientGet(k); } catch { return undefined; } };
   const o = {};
   for ( const [k, v] of Object.entries(OPT_KEYS) ) o[v] = !!get(k);
   const cam = get("cinCamera") ?? "auto";

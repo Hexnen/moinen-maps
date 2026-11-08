@@ -187,20 +187,35 @@ function dropBanner(ms = 0) {
   const gone = () => { b.el.remove(); if ( root && !root.children.length ) { root.remove(); root = null; } };
   if ( ms ) { b.el.classList.add("is-out"); setTimeout(gone, ms); } else gone();
 }
-/** The banner's top edge: under Foundry's top navigation, at least 3 % down. */
-function bannerTop() {
+/**
+ * The banner's top edge: under Foundry's top navigation, at least 3 % down, and below anything else another module put across the top
+ * centre (an initiative bar, a HUD): the first free 48 px down the middle (the banner is centred on the window: three columns across its
+ * width are probed). Cost: a hit test costs ~0.3 ms on a page with a long chat log (more on a slow machine) and this needs 24 or more of
+ * them: they run in slices of SLICE_MS between frames (the banner slides in when its place is known, a few frames later), never as one
+ * long frame on every client at the turn change. `alive()` false: stop; `done(top)` once.
+ */
+const SLICE_MS = 4;
+/** The next slice: after the frames due now (scheduler.yield where the browser has it: no timer clamping). */
+const later = (fn) => { const y = globalThis.scheduler?.yield; if ( typeof y === "function" ) y.call(globalThis.scheduler).then(fn, fn); else setTimeout(fn, 0); };
+function bannerTop(alive, done) {
   const nav = document.getElementById("navigation")?.getBoundingClientRect?.();
   let top = Math.max(nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 8 : 0, innerHeight * 0.03);
-  // below anything else another module put across the top centre (an initiative bar, a HUD): the first free 48 px down the middle
-  // (the banner is centred on the window: three columns across its width are probed)
   const cx = innerWidth / 2, OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right"]);
   const freeAt = (x, y) => { const el = document.elementFromPoint(x, y); return !el || el === document.body || el === document.documentElement || OPEN.has(el.id) || el.tagName === "CANVAS"; };
   const free = (y) => freeAt(cx, y) && freeAt(cx - 170, y) && freeAt(cx + 170, y);
-  let run = 0;
-  for ( let y = 0; y < innerHeight * 0.4; y += 6 ) {
-    if ( free(y) ) { run += 6; if ( run >= 48 ) { top = Math.max(top, y - run + 6 + 8); break; } } else run = 0;
-  }
-  return Math.min(top, innerHeight * 0.4);
+  let run = 0, y = 0;
+  const step = () => {
+    if ( !alive() ) return;
+    const t0 = performance.now();
+    try {
+      for ( ; y < innerHeight * 0.4; y += 6 ) {
+        if ( y > 0 && performance.now() - t0 > SLICE_MS ) { later(step); return; }
+        if ( free(y) ) { run += 6; if ( run >= 48 ) { top = Math.max(top, y - run + 6 + 8); break; } } else run = 0;
+      }
+    } catch { /* the place so far */ }
+    done(Math.min(top, innerHeight * 0.4));
+  };
+  step();
 }
 /** Shows a banner { kick, name, sub, tag, round, icon } for `ms`; a new one replaces the one on screen at once. */
 export function showBanner({ kick, name = "", sub = "", tag = "", round = false, icon = "fa-solid fa-hourglass-half", ms = 2400 }) {
@@ -208,13 +223,17 @@ export function showBanner({ kick, name = "", sub = "", tag = "", round = false,
   const reduced = (() => { try { return game.settings.get(MODULE_ID, "cinReduced") === "on" || (game.settings.get(MODULE_ID, "cinReduced") === "auto" && matchMedia("(prefers-reduced-motion: reduce)").matches); } catch { return false; } })();
   const el = document.createElement("div");
   el.className = `mm-dmv-b${round ? " is-round" : ""}${reduced ? " is-calm" : ""}`;
-  el.style.setProperty("--mm-dmv-top", `${Math.round(bannerTop())}px`);
   el.innerHTML = `<div class="mm-dmv-kick"><i class="${esc(icon)}" inert></i><span>${esc(kick)}</span></div>${name ? `<div class="mm-dmv-name">${esc(name)}</div>` : ""}`
     + `${sub ? `<div class="mm-dmv-sub">${esc(sub)}</div>` : ""}${tag ? `<div class="mm-dmv-tag">${esc(tag)}</div>` : ""}`;
-  host().appendChild(el);
-  void el.offsetWidth;
-  el.classList.add("is-in");
-  banner = { el, timer: setTimeout(() => { if ( banner?.el === el ) dropBanner(520); }, ms) };
+  const b = banner = { el, timer: 0 };
+  // (placed before it is in the page: the probes must not meet it; it slides in once its place is known)
+  bannerTop(() => banner === b, (top) => {
+    el.style.setProperty("--mm-dmv-top", `${Math.round(top)}px`);
+    host().appendChild(el);
+    void el.offsetWidth;
+    el.classList.add("is-in");
+    b.timer = setTimeout(() => { if ( banner?.el === el ) dropBanner(520); }, ms);
+  });
   return el;
 }
 const bannerOn = () => !killed() && isOn() && moveSettings().banner && myMode() !== "off" && canvas?.ready;

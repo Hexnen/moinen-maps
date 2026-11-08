@@ -3,7 +3,7 @@ import { api as moduleApi } from "../attrs.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
-import { Screen, clientOpts } from "./stage.mjs";
+import { Screen, clientOpts, clientGet } from "./stage.mjs";
 import * as Ov from "./overlay.mjs";
 
 /**
@@ -41,7 +41,7 @@ const cues = new Map();
 export function registerCue(name, fn) { if ( typeof name === "string" && typeof fn === "function" ) cues.set(name, fn); }
 
 export const killed = () => !!globalThis.CONFIG?.moinenMaps?.noDirector;
-const setting = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
+const setting = (k) => { try { return clientGet(k); } catch { return undefined; } };   // (client settings through a cache: stage.mjs clientGet)
 /** The GM's world switch (default off). */
 export const isOn = () => setting("directorOn") === true;
 /** GM: switch the director on / off for the world (on also drops an old "enabled: false" override so on means on). */
