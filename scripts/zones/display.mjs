@@ -81,6 +81,22 @@ function badgeShape(G, shape, ring, fill, capFill = null) {
   if ( shape === "square" ) G.drawRoundedRect(-r * 0.92, -r * 0.92, r * 1.84, r * 1.84, r * 0.28);
   else if ( shape === "hex" ) G.drawPolygon([...Array(6)].flatMap((_, i) => { const a = Math.PI / 6 + (i * Math.PI) / 3; return [Math.cos(a) * r * 1.05, Math.sin(a) * r * 1.05]; }));
   else if ( shape === "diamond" ) G.drawPolygon([0, -r * 1.25, r * 1.25, 0, 0, r * 1.25, -r * 1.25, 0]);
+  // a heraldic shield: parchment (or the distance colour) with a sepia rim
+  else if ( shape === "shield" ) {
+    G.beginFill(capFill ?? 0xefe0bb, 1);
+    G.drawPolygon([-r, -r * 0.95, r, -r * 0.95, r, -r * 0.1, r * 0.8, r * 0.55, 0, r * 1.15, -r * 0.8, r * 0.55, -r, -r * 0.1]);
+  }
+  // a cherry blossom: five round petals (light pink, or the distance colour) around the number
+  else if ( shape === "blossom" ) {
+    G.beginFill(capFill ?? 0xfbd3e1, 1);
+    for ( let i = 0; i < 5; i++ ) { const an = -Math.PI / 2 + (i * 2 * Math.PI) / 5; G.drawCircle(Math.cos(an) * r * 0.62, Math.sin(an) * r * 0.62, r * 0.55); }
+    G.lineStyle(0); G.drawCircle(0, 0, r * 0.6);
+  }
+  // a hanko seal: a red square stamp (or the distance colour) with a thin inner border
+  else if ( shape === "seal" ) {
+    G.lineStyle(0); G.beginFill(capFill ?? ring, 1).drawRoundedRect(-r * 0.95, -r * 0.95, r * 1.9, r * 1.9, r * 0.12).endFill();
+    G.lineStyle({ width: r * 0.07, color: 0xfbf1dc, alpha: 0.85 }); G.beginFill(0, 0).drawRect(-r * 0.75, -r * 0.75, r * 1.5, r * 1.5);
+  }
   // a comic caption box: yellow (or the distance colour), square corners, a black frame and a hard offset shadow
   else if ( shape === "caption" ) {
     G.lineStyle(0); G.beginFill(0x15110f, 0.9).drawRect(-r * 1.05 + r * 0.18, -r * 0.8 + r * 0.18, r * 2.1, r * 1.6).endFill();
@@ -97,6 +113,11 @@ export function numeral(n, format) {
     let out = "";
     for ( const [v, sym] of [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]] ) while ( n >= v ) { out += sym; n -= v; }
     return out;
+  }
+  if ( format === "padded" ) return String(n).padStart(2, "0");
+  if ( format === "kanji" && n < 100 ) {
+    const K = "〇一二三四五六七八九", t = Math.floor(n / 10), u = n % 10;
+    return `${t > 1 ? K[t] : ""}${t ? "十" : ""}${u || !t ? K[u] : ""}`;
   }
   if ( format === "letters" ) { let out = ""; while ( n > 0 ) { n--; out = String.fromCharCode(65 + (n % 26)) + out; n = Math.floor(n / 26); } return out; }
   return String(n);
@@ -233,7 +254,10 @@ export class ZoneDisplay {
       b.addChild(G);
       // long numerals (roman) shrink to fit; a plain number gets a dark outline instead of a badge
       const size = BADGE_R * (text.length > 3 ? 0.62 : text.length > 2 ? 0.78 : text.length > 1 ? 1.0 : 1.2) * (shape === "plain" ? 1.25 : 1);
-      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: shape === "caption" ? 0x15110f : d != null || blocked ? ringCol : numCol, align: "center", ...(shape === "caption" ? { fontFamily: "'Bangers', 'Comic Sans MS', Signika, sans-serif", fontWeight: "700", letterSpacing: 1 } : {}),
+      const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(size), fill: shape === "caption" ? 0x15110f : shape === "shield" || shape === "blossom" ? (look.numColor ? hex(look.numColor) : 0x3b2414) : d != null || blocked ? ringCol : numCol, align: "center", ...(shape === "caption" ? { fontFamily: "'Bangers', 'Comic Sans MS', Signika, sans-serif", fontWeight: "700", letterSpacing: 1 } : {}),
+        ...(shape === "shield" ? { fontFamily: "'Modesto Condensed', 'Cinzel', Georgia, serif", fontWeight: "700" } : {}),
+        ...(shape === "seal" ? { fill: band ? 0x141010 : look.numColor ? hex(look.numColor) : 0xfbf1dc, fontFamily: "'Yu Mincho', 'MS Mincho', 'Noto Serif JP', serif", fontWeight: "700" } : {}),
+        ...(look.lineStyle === "neon" && shape !== "caption" && shape !== "shield" ? { dropShadow: true, dropShadowColor: ringCol, dropShadowBlur: 6, dropShadowDistance: 0, dropShadowAlpha: 0.9 } : {}),
         ...(shape === "plain" ? { stroke: 0x15110f, strokeThickness: Math.round(BADGE_R * 0.28), lineJoin: "round" } : {}) });
       t.resolution = res; t.anchor.set(0.5, 0.52);
       b.addChild(t);
@@ -272,6 +296,46 @@ export class ZoneDisplay {
         outer(fw * 2.2, 0x15110f);
         stroke(gw + fw * 2, 0x15110f, 1, (p) => trace(Ln, p));
         stroke(gw, col, 1, (p) => trace(Ln, p));
+        break;
+      }
+      // fantasy: a cartographer's ink line - a soft parchment halo, then a slightly wandering sepia stroke and a finer second pass
+      case "ink": {
+        stroke(w * 1.5, 0xf1e2bf, 0.35 * a, (p) => trace(Ln, p));
+        stroke(w * 0.55, col, a, (p) => trace(Ln, wobble(p, 1.1 * px, 3, px)));
+        stroke(w * 0.22, col, 0.7 * a, (p) => trace(Ln, wobble(p, 1.6 * px, 5, px)));
+        break;
+      }
+      // cyberpunk: a neon tube - a wide magenta glow, a cyan tube, a white-hot core
+      case "neon": {
+        const glow = look.ringColor ? hex(look.ringColor) : 0xff2bd6;
+        stroke(w * 3.6, glow, 0.1 * a, (p) => trace(Ln, p));
+        stroke(w * 2.0, glow, 0.24 * a, (p) => trace(Ln, p));
+        stroke(w * 0.85, col, a, (p) => trace(Ln, p));
+        stroke(w * 0.28, 0xffffff, 0.85 * a, (p) => trace(Ln, p));
+        break;
+      }
+      // noir: a hard white line over a long black shadow thrown down and to the right
+      case "noir": {
+        const off = (p, d) => p.map((v, i) => v + d);
+        stroke(w * 1.1, 0x000000, 0.75 * a, (p) => trace(Ln, off(p, 3 * px)));
+        stroke(w * 0.9, 0x000000, 0.9 * a, (p) => trace(Ln, p));
+        stroke(w * 0.38, col, a, (p) => trace(Ln, p));
+        break;
+      }
+      // sakura: a dark branch line in a pink haze, petals scattered along it
+      case "sakura": {
+        stroke(w * 1.8, col, 0.22 * a, (p) => trace(Ln, p));
+        stroke(w * 0.32, 0x5a2a3a, 0.85 * a, (p) => trace(Ln, wobble(p, 0.9 * px, 7, px)));
+        stroke(w * 0.75, col, a, (p) => pattern(Ln, p, [0.01 * px, 13 * px]));
+        stroke(w * 0.45, 0xffe3ee, a, (p) => pattern(Ln, p, [0.01 * px, 13 * px]));
+        break;
+      }
+      // sengoku: a sumi brush stroke - a washi halo, a heavy wandering ink line, a dry-brush pass that breaks up along the way
+      case "brush": {
+        stroke(w * 1.7, 0xf4ead2, 0.3 * a, (p) => trace(Ln, p));
+        stroke(w * 0.8, col, 0.92 * a, (p) => trace(Ln, wobble(p, 2.2 * px, 11, px)));
+        stroke(w * 1.35, col, 0.8 * a, (p) => pattern(Ln, wobble(p, 2.2 * px, 11, px), [34 * px, 46 * px, 18 * px, 30 * px]));
+        stroke(w * 0.35, col, 0.75 * a, (p) => pattern(Ln, wobble(p, 2.4 * px, 13, px), [26 * px, 4 * px, 9 * px, 6 * px]));
         break;
       }
       default: under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [11 * px, 7 * px]));

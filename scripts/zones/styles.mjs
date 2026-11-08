@@ -16,7 +16,22 @@ export const BUILTIN = Object.freeze([
   { id: "bold", name: T("bold"), look: { fill: 0.5, ink: 1.6, hoverHi: true, hoverFx: "dots" } },
   // comic book panels: wide paper gutters between black panel frames, a yellow caption box in each panel's corner, halftone on hover
   { id: "comic", name: T("comic"), look: { fill: 0.1, ink: 1, lineAlpha: 1, lineStyle: "comic", color: "#fbf6e6", numbers: "always", place: "corner",
-    numShape: "caption", numColor: "#15110f", ringColor: "#15110f", numFormat: "arabic", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } }
+    numShape: "caption", numColor: "#15110f", ringColor: "#15110f", numFormat: "arabic", hoverHi: true, hoverFx: "dots", hoverAlpha: 0.75, hoverLineAlpha: 0.9 } },
+  // fantasy: a cartographer's sepia ink on parchment, heraldic shields with roman numerals, engraved crosshatching on hover
+  { id: "fantasy", name: T("fantasy"), look: { fill: 0.12, ink: 1.1, lineAlpha: 0.95, lineStyle: "ink", color: "#3b2414", numbers: "always", place: "center",
+    numShape: "shield", numColor: "#3b2414", ringColor: "#6e4a22", numFormat: "roman", hoverHi: true, hoverFx: "crosshatch", hoverAlpha: 0.7, hoverLineAlpha: 0.85 } },
+  // cyberpunk: neon tubes (cyan core in a magenta glow), hexagon badges with zero-padded numbers, a glow on hover
+  { id: "cyberpunk", name: T("cyberpunk"), look: { fill: 0.16, ink: 1, lineAlpha: 1, lineStyle: "neon", color: "#29f3ff", numbers: "always", place: "corner",
+    numShape: "hex", numColor: "#29f3ff", ringColor: "#ff2bd6", numFormat: "padded", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.9, hoverLineAlpha: 1 } },
+  // noir: black and white, hard white lines with a long black shadow, no colour in the zones, venetian-blind stripes on hover
+  { id: "noir", name: T("noir"), look: { fill: 0, ink: 1, lineAlpha: 1, lineStyle: "noir", color: "#f2f2f2", numbers: "always", place: "corner",
+    numShape: "square", numColor: "#ffffff", ringColor: "#ffffff", numFormat: "arabic", hoverHi: true, hoverFx: "hatch", hoverAlpha: 0.85, hoverLineAlpha: 1 } },
+  // sakura: soft pink branches with falling petals along the borders, blossom badges, a gentle glow on hover
+  { id: "sakura", name: T("sakura"), look: { fill: 0.1, ink: 1, lineAlpha: 0.95, lineStyle: "sakura", color: "#f7a8c4", numbers: "always", place: "center",
+    numShape: "blossom", numColor: "#6b2346", ringColor: "#e07aa0", numFormat: "arabic", hoverHi: true, hoverFx: "glow", hoverAlpha: 0.7, hoverLineAlpha: 0.9 } },
+  // sengoku: sumi ink brush strokes on washi, red hanko seals with kanji numerals, ink hatching on hover
+  { id: "sengoku", name: T("sengoku"), look: { fill: 0.08, ink: 1.15, lineAlpha: 0.95, lineStyle: "brush", color: "#141010", numbers: "always", place: "corner",
+    numShape: "seal", numColor: "#fbf1dc", ringColor: "#b3261e", numFormat: "kanji", hoverHi: true, hoverFx: "hatch", hoverAlpha: 0.6, hoverLineAlpha: 0.85 } }
 ]);
 
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k) ?? d; } catch { return d; } };

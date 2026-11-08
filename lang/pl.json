@@ -1635,5 +1635,20 @@
   "MOINENMAPS.Zones.floorN": "Piętro {n}",
   "MOINENMAPS.Zones.groundFloor": "Parter",
   "MOINENMAPS.Zones.roof": "Dach",
-  "MOINENMAPS.Zones.altCost.zones": "{n} ruchu"
+  "MOINENMAPS.Zones.altCost.zones": "{n} ruchu",
+  "MOINENMAPS.Zones.style.fantasy": "Fantasy",
+  "MOINENMAPS.Zones.style.cyberpunk": "Cyberpunk",
+  "MOINENMAPS.Zones.lineStyle.ink": "Tusz kartografa",
+  "MOINENMAPS.Zones.lineStyle.neon": "Neon",
+  "MOINENMAPS.Zones.numShape.shield": "Tarcza",
+  "MOINENMAPS.Zones.numFormat.padded": "01, 02, 03",
+  "MOINENMAPS.Zones.style.noir": "Noir",
+  "MOINENMAPS.Zones.style.sakura": "Sakura",
+  "MOINENMAPS.Zones.lineStyle.noir": "Noir (twardy cień)",
+  "MOINENMAPS.Zones.lineStyle.sakura": "Sakura (płatki)",
+  "MOINENMAPS.Zones.numShape.blossom": "Kwiat",
+  "MOINENMAPS.Zones.style.sengoku": "Sengoku",
+  "MOINENMAPS.Zones.lineStyle.brush": "Pędzel sumi",
+  "MOINENMAPS.Zones.numShape.seal": "Pieczęć hanko",
+  "MOINENMAPS.Zones.numFormat.kanji": "一, 二, 三"
 }

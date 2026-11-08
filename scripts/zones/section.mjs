@@ -106,7 +106,7 @@ function settingsPanel(host) {
         ${row(Z("f.numbers"), opts("numbers", ["always", "hover", "never"], L.numbers), Z("h.numbers"))}
         ${L.numbers !== "never" ? `${row(Z("f.place"), opts("place", ["center", "corner"], L.place))}
           ${row(Z("f.numShape"), opts("numShape", Model.NUM_SHAPES, L.numShape))}
-          ${row(Z("f.numFormat"), opts("numFormat", ["arabic", "roman", "letters"], L.numFormat))}
+          ${row(Z("f.numFormat"), opts("numFormat", Model.NUM_FORMATS, L.numFormat))}
           ${row(Z("f.numColor"), `<input type="color" name="numColor" value="${esc(L.numColor || L.color)}">`, Z("h.numColor"))}
           ${row(Z("f.ringColor"), `<input type="color" name="ringColor" value="${esc(L.ringColor || L.color)}">`, Z("h.numColor"))}` : ""}`)}
       ${fold("hover", Z("grp.hover"), "fa-solid fa-hand-pointer", `

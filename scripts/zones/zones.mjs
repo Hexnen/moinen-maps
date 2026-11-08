@@ -666,6 +666,8 @@ function onTokenHUD(hud, html) {
       rows.push(item(`floor:${n + 1}`, "fa-building-user", AL("roof"), lvl(n + 1), cur === n + 1));
       html = `${rows.reverse().join("")}<hr>${off("sky")}${off("orbit")}`;
     } else html = ALTS.map(off).join("");
+    const pick = document.createElement("div");
+    pick.className = "mm-z-altpick";
     pick.innerHTML = html;
     pick.addEventListener("click", async (e) => {
       const b = e.target.closest("[data-alt]"); if ( !b ) return;

@@ -1635,5 +1635,20 @@
   "MOINENMAPS.Zones.floorN": "Floor {n}",
   "MOINENMAPS.Zones.groundFloor": "Ground floor",
   "MOINENMAPS.Zones.roof": "Rooftop",
-  "MOINENMAPS.Zones.altCost.zones": "{n} of movement"
+  "MOINENMAPS.Zones.altCost.zones": "{n} of movement",
+  "MOINENMAPS.Zones.style.fantasy": "Fantasy",
+  "MOINENMAPS.Zones.style.cyberpunk": "Cyberpunk",
+  "MOINENMAPS.Zones.lineStyle.ink": "Cartographer's ink",
+  "MOINENMAPS.Zones.lineStyle.neon": "Neon",
+  "MOINENMAPS.Zones.numShape.shield": "Shield",
+  "MOINENMAPS.Zones.numFormat.padded": "01, 02, 03",
+  "MOINENMAPS.Zones.style.noir": "Noir",
+  "MOINENMAPS.Zones.style.sakura": "Sakura",
+  "MOINENMAPS.Zones.lineStyle.noir": "Noir (hard shadow)",
+  "MOINENMAPS.Zones.lineStyle.sakura": "Sakura (petals)",
+  "MOINENMAPS.Zones.numShape.blossom": "Blossom",
+  "MOINENMAPS.Zones.style.sengoku": "Sengoku",
+  "MOINENMAPS.Zones.lineStyle.brush": "Sumi brush",
+  "MOINENMAPS.Zones.numShape.seal": "Hanko seal",
+  "MOINENMAPS.Zones.numFormat.kanji": "一, 二, 三"
 }
