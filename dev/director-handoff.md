@@ -200,3 +200,31 @@ Each agent appends: date, branch, what was done, verified vs not.
 
 ### Not verified
 - The workspace section checkbox clicked live (the bar's power button was; both call `setOn`). A world that stored `over.enabled: false` (handled in `setOn`, not exercised).
+
+## 2026-11-08 - phase B integration (agent director-int), branch `director-int`
+
+### Merges
+- `director-int` = `director-move` (already contained `main` fa42549, fire lighting) + `director-rolls` + `director-scene` + `director-off` (8803153). `main` had not moved past fa42549, so no further main merge was needed.
+- Conflicts, all additive: `core.mjs` (KINDS move/turn + attack/damage/roll; normEvent/merged/plan carry both `lane/free/quick/play` and `cue/after/strict`), `director.mjs` (the caption line keeps move's `ph.caption !== false` AND rolls' `shot.after` / cue guard; `directorApi` exports `registerPlay`, `registerCue`, `seeTokens`, `setOn`, `isOn`), `index.mjs` (all three sources registered), `lang/en.json` + `pl.json` (both key blocks; checked with a duplicate-rejecting json load), this log (sections kept in order).
+
+### How the sources combine (designed here)
+- **An attack by the active combatant joins its combat's lane** (`source-rolls.mjs` `combatLane`: `lane: cbt-<combat id>`, `free`). So turn -> move -> attack plays as one chain: an attack while the turn/move shot is on replaces it (no return in between); an attack right after it is NOT turned soft by the rest / same-place rules (before: an attack just after a follow became a marker). Plain rolls and damage stay outside the lane (rolls' design: damage after its attack = soft caption).
+- **A cued take-over is never relayed** (`core.mjs` Queue: `lastTake.cued`): the next turn / move of the lane during an attack's dice WAITS for the result instead of cutting it off, and such a waiting lane event may wait `CUED_WAIT` (6 s) longer than `stale`.
+- **Arrival vs. director** (scene `holds`): a turn starting during an arrival comes soft (marker), never fights the arrival. Move's "already on my screen" check now judges from the arrival's home (the view the player lands in), not from the wide establishing start that is on screen while the arrival plays.
+- **The world switch (director-off)**: while `directorOn` is off there are no move/turn events, no turn banner, no roll flags/events, no arrival and no dip. **Choice: the arrival counts as automatic Director output** (off = Foundry's plain scene change); the GM's "Test the arrival here" still plays (like the GM's test shot); switching off cuts an arrival that plays. The destruction show (Action!) stays independent.
+- New pure test `dev/director-int.test.mjs` (13 checks: the chain, the cued wait, damage soft, lane supersede).
+
+### Integration bugs found and fixed
+1. Attack after the active combatant's move/turn became a soft marker (rest + same-place downgrade) -> lane + free (above).
+2. A lane turn/move would have relayed (cut off) an attack still waiting for its dice -> cued shots are not relayed.
+3. After a scene change the LEADER's queue still thought the old scene's take-over played (`busyUntil`): the new scene's first turn waited ~4 s and came too late (live: shot arrived after the arrival, form none). `director.mjs` onTearDown now releases `busyUntil` and `lastTake`.
+4. Move/turn in-view check during an arrival judged from the wide start (everything "on screen" -> none) -> uses `Screen.home` of any screen owner.
+
+### Verified (lane 4 serving this worktree, own headless Chrome on CDP port 9344: GM 127.0.0.47 = Gamemaster, PLAYER 127.0.0.48 = Test Gracz 1)
+- `node dev/run-all.mjs` 60/60, `node dev/lang-audit.mjs` clean, no duplicate lang keys.
+- OFF (fresh state of the lane world: off): GM cutTo, emit, an NPC move, a combat start + next turn, a public attack -> the player got NO director socket message, no banner, no caption; the roll message carried no `dr` flag.
+- ON, `director-check watchShot` on the PLAYER (GM cutTo): none / esc / click / wheel / busy all OK.
+- Mixed sequence on the PLAYER (`dev/director-int-mixed.webm`): combat start -> camera to Battle Beast (turn, take) -> its 10-square move RELAYS into the follow -> follow ends -> its attack on Atom Eve is a TAKE in the lane (setup caption, dice, "Hit! Damage 3 · stunts: 1", hit) -> Apply damage: soft "Atom Eve: -3 Health" -> next turn = the player's own (Atom Eve): camera goes there and STAYS. (No turn banner of ours: invincible-plus-ultra announces the start and "Your turn", by move's design.)
+- Scene switch mid-follow: GM activates another scene 0.9 s into the follow -> the follow ends "scene", the arrival plays ("IB Test Scene"); the new scene's combat starts during the arrival -> the turn reaches the player at once and is SOFT ("Turn: Battle Beast" marker over the arrival); back to the first scene -> its arrival; DOM / holds / screen / ticker listeners / hook counts identical before and after, no errors (only Foundry's own missing note icons on that scene).
+- Rolls on the merged code (`dev/rolls-js` with lane-4 tokens): public attack take with cued result; GM roll and blind roll -> nothing on the player's socket; Esc mid cued shot -> cut, camera exactly back, overlays clean; the player's own attack (take) and its Push from the chat card (soft "Push · ..." -> "... · Miss!").
+- `cinematic-check` GM scenario 13/13 (director on).

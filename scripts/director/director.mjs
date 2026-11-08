@@ -373,10 +373,13 @@ function playTake(shot, ctx, late = 0) {
     const t = captionText(shot);
     if ( t.title ) c.cap = Ov.caption({ ...t, lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") });
   });
-  const EXTRA = 2200, plannedEnd = shot.lead + shot.hold;
+  // (a cue that has not landed by the planned end is waited for until CUE_MAX lands it anyway, and its result then still gets its
+  // time on screen: slow dice must never end the shot on the setup caption with the result unseen)
+  const EXTRA = 2200, plannedEnd = shot.lead + shot.hold, cap = plannedEnd + EXTRA + (shot.cue ? CUE_AFTER : 0);
   const ending = () => {
-    const now = performance.now(), wait = Math.max(c.minEnd ?? 0, (shot.ref && entry !== null && !c.hit) || c.pending ? c.t0 + plannedEnd + 600 : 0) - now;
-    if ( wait > 30 && now - c.t0 < plannedEnd + EXTRA ) { c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) ending(); }, Math.min(wait, 250))); return; }
+    const now = performance.now();
+    const wait = Math.max(c.minEnd ?? 0, shot.ref && entry !== null && !c.hit ? c.t0 + plannedEnd + 600 : 0, c.pending ? c.t0 + shot.lead + CUE_MAX + 100 : 0) - now;
+    if ( wait > 30 && now - c.t0 < cap ) { c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) ending(); }, Math.min(wait, 250))); return; }
     endTake("done");
   };
   at(plannedEnd, ending);
