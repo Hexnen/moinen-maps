@@ -63,7 +63,9 @@
  *    a GUST that bends a whole stretch at once (broad, fast across; the lean grows with height), ground GLOW POOLS that swell and
  *    wander with the fuel, and CHAR that creeps out from the bed while it burns.
  * Cost: every per-cell random comes from one 32-bit hash split into 4 bytes (hb), and emitters out of reach of the cell are culled
- * before any blob work.
+ * before any blob work. A8: two tiny passes before the art pass - EMB (each flame emitter's, smoke source's and puff's box this frame,
+ * conservative) and TILE (per 8 x 8 cells, the lattice rows / columns whose boxes touch it, rasterised with MAX blending) - so a cell
+ * looks only at what can reach it; the per-emitter code is unchanged, so the art is the same cell for cell (~0.3 x the A7 cost).
  * Colour: the ramp (uRamp) is derived per area from the fire's base colour (look.mjs rampOf().ramp7). Everything is a function of
  * (cell, area seed, shared clock, field): every client draws the same frames.
  */
@@ -131,7 +133,7 @@ void main() {
 }`;
 
 /* ======================================================================== pass 1: the art cells */
-const ART = `#version 300 es
+const ART_HEAD = `#version 300 es
 precision highp float;
 precision highp int;
 in vec2 vCell;
@@ -272,7 +274,29 @@ vec4 ages(ivec2 p) {
   if ( T.a < 254.5 ) a.w = uO.x - T.a / 254.0 * uO.y;
   return a;
 }
+`;
 
+/* A8 COST: the cells look only at the emitters / smoke sources that can reach them. Two tiny passes before the art pass:
+ *  - EMB: one texel per flame emitter and per smoke source (both lattices, side by side): the box its roots, blobs, torn pieces and
+ *    puffs cover THIS frame (RGBA8: min x, min y, max x, max y as steps of QF / QS art px from its lattice point, rounded outwards and
+ *    widened by one step; 0 / 255 = unbounded on that side; an emitter that draws nothing gets an empty box);
+ *  - TILE: per 8 x 8 cells, the range of lattice rows and columns whose boxes touch the tile (flames, then smoke; empty = 255, 0).
+ * The cell code itself is unchanged: an emitter outside its box contributes nothing there, so skipping it changes no cell. */
+const BOXDEC = `const float QF = 2.0, QS = 4.0;            // box steps (x uU art px): flames reach ~250 art px, smoke ~500
+vec4 boxDec(vec4 b, vec2 L, float Q) {
+  b = floor(b * 255.0 + 0.5);
+  return vec4(b.x < 0.5 ? -1e9 : L.x + (b.x - 128.0) * Q, b.y < 0.5 ? -1e9 : L.y + (b.y - 128.0) * Q,
+              b.z > 254.5 ? 1e9 : L.x + (b.z - 128.0) * Q, b.w > 254.5 ? 1e9 : L.y + (b.w - 128.0) * Q);
+}`;
+
+const ART = `${ART_HEAD}
+uniform sampler2D uEmb;    // A8: the EMB pass (each emitter's and smoke source's box this frame)
+uniform sampler2D uTile;   // A8: the TILE pass (per 8 x 8 cells: the lattice rows / columns that reach it)
+uniform ivec4 uEB;         // the lattices' first indices in uEmb: flame i, j, smoke i, j
+uniform ivec4 uEN;         // their sizes: flame W, H, smoke W, H (the smoke's texels follow the flames' in x)
+uniform int uTileOn;       // 0: no tile ranges (a lattice wider than 255)
+
+${BOXDEC}
 void main() {
   vec2 c = vCell + uOrg;                            // the cell's centre (WORLD cells)
   ivec2 ic = ivec2(floor(c));
@@ -301,16 +325,28 @@ void main() {
   // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
   // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
   float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0, BF = -1.0, CT = 0.0; int lvL = 1;
-  if ( nearBed ) {
+  // (A8: this tile's lattice ranges - flame rows, columns; smoke rows, columns - absolute indices; no tile pass: everything)
+  ivec4 tlF = ivec4(-1000000, 1000000, -1000000, 1000000), tlS = tlF;
+  if ( uTileOn == 1 ) {
+    ivec2 tp = Lc(ic) / 8;
+    ivec4 a = ivec4(floor(texelFetch(uTile, tp, 0) * 255.0 + 0.5)), b = ivec4(floor(texelFetch(uTile, ivec2(textureSize(uTile, 0).x / 2 + tp.x, tp.y), 0) * 255.0 + 0.5));
+    tlF = uEB.yyxx + ivec4(255 - a.x, a.y, 255 - a.z, a.w); tlS = uEB.wwzz + ivec4(255 - b.x, b.y, 255 - b.z, b.w);
+  }
+  if ( nearBed && tlF.x <= tlF.y ) {
     int jHi = int(floor((c.y + reachUp) / spy)), jLo = int(floor((c.y - reachDn) / spy)) - 1;
-    for ( int jj = 0; jj < 32; jj++ ) {
-      int j = jHi - jj; if ( j < jLo ) break;
+    for ( int jj = max(0, jHi - tlF.y); jj < 32; jj++ ) {
+      int j = jHi - jj; if ( j < jLo || j < tlF.x ) break;
       float dyc = max(0.0, (float(j) + 0.5) * spy - c.y);
       float xlo = c.x - max(0.0, dyc * hi0) - W2, xhi = c.x - min(0.0, dyc * lo0) + W2;
       int i0 = int(floor(xlo / sp)) - 1, i1 = int(floor(xhi / sp));
       float rF = 0.0, rH = 0.0, rB = 0.0, rY = 0.0, tF = 0.0, tY = 0.0;
-      for ( int ii = 0; ii < 12; ii++ ) {
-        int i = i0 + ii; if ( i > i1 ) break;
+      for ( int ii = max(0, tlF.z - i0); ii < 12; ii++ ) {
+        int i = i0 + ii; if ( i > i1 || i > tlF.w ) break;
+        // (A8: this emitter's box this frame - nothing of it reaches a cell outside)
+        ivec2 et = ivec2(i, j) - uEB.xy;
+        if ( et.x < 0 || et.y < 0 || et.x >= uEN.x || et.y >= uEN.y ) continue;      // (off the lattice texture: never on this area's bed)
+        vec4 bx = boxDec(texelFetch(uEmb, et, 0), vec2(float(i) * sp, float(j) * spy), QF * u);
+        if ( c.x < bx.x || c.x > bx.z || c.y < bx.y || c.y > bx.w ) continue;
         vec4 E1 = hb(i, j, 1);
         vec2 e = vec2((float(i) + E1.x) * sp, (float(j) + E1.y) * spy);
         ivec2 ei = ivec2(floor(e));
@@ -694,13 +730,18 @@ void main() {
     vec3 fg = vnd(fp, 611);
     vec2 wv = clamp(vec2(fg.z, -fg.y) * 0.33, -0.5, 0.5);           // (CURL of a noise: it swirls, it never bunches up)
     vec2 cw = c + wv * 8.0 * u;
-    for ( int jj = 0; jj < 40; jj++ ) {
-      int j = jHi - jj; if ( j < jLo ) break;
+    for ( int jj = max(0, jHi - tlS.y); jj < 40; jj++ ) {
+      int j = jHi - jj; if ( j < jLo || j < tlS.x ) break;
       float dyc = max(0.0, float(j) * spys - c.y);
       float xlo = c.x - max(0.0, rMax * dyc) - pad, xhi = c.x - min(0.0, rMin * dyc) + pad;   // (the puffs shear along the wind)
       int i0 = int(floor(max(xlo, xS0) / sps - 0.5)), i1 = int(floor(min(xhi, xS1) / sps - 0.5)) + 1;
-      for ( int ii = 0; ii < 16; ii++ ) {
-        int i = i0 + ii; if ( i > i1 ) break;
+      for ( int ii = max(0, tlS.z - i0); ii < 16; ii++ ) {
+        int i = i0 + ii; if ( i > i1 || i > tlS.w ) break;
+        // (A8: this source's box this frame, in the warped cell's frame - its puffs' cull boxes)
+        ivec2 et = ivec2(i - uEB.z, j - uEB.w);
+        if ( et.x < 0 || et.y < 0 || et.x >= uEN.z || et.y >= uEN.w ) continue;
+        vec4 bx = boxDec(texelFetch(uEmb, ivec2(uEN.x + et.x, et.y), 0), vec2(float(i) * sps, float(j) * spys), QS * u);
+        if ( cw.x < bx.x || cw.x > bx.z || cw.y < bx.y || cw.y > bx.w ) continue;
         vec2 e = vec2((float(i) + 0.5) * sps, (float(j) + 0.5) * spys);
         ivec2 ei = ivec2(floor(e));
         if ( !inArea(ei) ) continue;
@@ -727,8 +768,12 @@ void main() {
         aHi = min(aHi, lifeS * 1.3);
         int nLo = int(floor((t - aHi) / iv)) - 1, nHi = int(floor((t - aLo) / iv));
         int eid = i * 977 + j * 3163;
+        vec2 Ls = vec2(float(i) * sps, float(j) * spys);
         for ( int kk2 = 0; kk2 < 8; kk2++ ) {
           int n = nHi - kk2; if ( n < nLo ) break;
+          // (A8: this puff's cull box this frame - EMB, the source's slot n & 15)
+          vec4 pb = boxDec(texelFetch(uEmb, ivec2(uEN.x + uEN.z + et.x * 16 + (n & 15), et.y), 0), Ls, QS * u);
+          if ( cw.x < pb.x || cw.x > pb.z || cw.y < pb.y || cw.y > pb.w ) continue;
           vec4 P1 = hb(eid, n, 59);
           if ( P1.x > src ) continue;                                    // a weak source: fewer puffs (whole shapes, never holes)
           float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
@@ -866,6 +911,239 @@ void main() {
   if ( G == 0 && R == 0 ) { if ( shim > 0 ) G = 39 + shim; else if ( glowL > 0 ) G = 41 + glowL; }
   oArt = vec4(float(R), float(G), float(B), float(A)) / 255.0;
 }`;
+
+/* ======================================================================== A8 pass 1a: EMB, each emitter's / source's box (tiny) */
+// One fragment per flame emitter (lattice i, j), per smoke source and per source's puff slot (16: the births n & 15): everything the art pass does per emitter that does not depend on
+// the cell (the same lines, kept in step with the art pass), then the box of what it draws this frame - its roots, each live blob
+// (with a leader's fork and torn piece), each live puff's lobes. Rounded outwards: a box is never smaller than what is drawn.
+const EMB = `${ART_HEAD}
+uniform ivec4 uEB;
+uniform ivec4 uEN;
+const float QF = 2.0, QS = 4.0;
+const vec4 NOBOX = vec4(1e9, 1e9, -1e9, -1e9), ANYBOX = vec4(-1e9, -1e9, 1e9, 1e9);
+vec4 grow(vec4 b, float x0, float y0, float x1, float y1) { return vec4(min(b.x, x0), min(b.y, y0), max(b.z, x1), max(b.w, y1)); }
+vec4 boxEnc(vec4 b, vec2 L, float Q) {
+  if ( b.x > b.z ) return vec4(255.0, 255.0, 0.0, 0.0) / 255.0;            // (draws nothing: an empty box)
+  return clamp(vec4(floor((b.xy - L) / Q) - 1.0, ceil((b.zw - L) / Q) + 1.0) + 128.0, 0.0, 255.0) / 255.0;
+}
+vec4 boxFlame(int i, int j) {
+  float u = uU, t = uTime, gdir = uWind.x < -0.05 ? -1.0 : 1.0;
+  float sp = 32.0 * u / sqrt(L_DENS[3]), spy = sp * RY;
+  vec4 E1 = hb(i, j, 1);
+  vec2 e = vec2((float(i) + E1.x) * sp, (float(j) + E1.y) * spy);
+  ivec2 ei = ivec2(floor(e));
+  if ( !inArea(ei) ) return NOBOX;
+  float d = fA(ei).r * 255.0;
+  if ( d < 0.5 ) return NOBOX;
+  d = dBed(ei, d);
+  vec4 E2 = hb(i, j, 2);
+  int lv = levelAt(ei), lvO = lv;
+  float kL = 1.0;
+  if ( uHasOld == 1 ) {
+    int o = int(texelFetch(uAuxOld, Lc(ei), 0).g * 255.0 + 0.5);
+    if ( o > 0 && o != lv ) { lvO = o; kL = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0); kL *= kL * (3.0 - 2.0 * kL); }
+  }
+  if ( E2.y >= max(L_DENS[lv], L_DENS[lvO]) / L_DENS[3] * 1.44 ) return NOBOX;
+  float LD = mix(L_DENS[lvO], L_DENS[lv], kL), LR = mix(L_R[lvO], L_R[lv], kL), LRI = mix(L_RISE[lvO], L_RISE[lv], kL);
+  float ramp = clamp(d / (0.35 * 32.0 * u), 0.0, 1.0);
+  float r0 = LR * u;
+  float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0);
+  float eh0 = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(E1.w, 1.6)) * (E2.x < 0.12 ? 1.25 : 1.0);
+  float fz = max(fuelAt(e).x, 0.07 * float(lv - 1));
+  float thr = LD / L_DENS[3] * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
+  float on = clamp((thr - E2.y) / 0.14, 0.0, 1.0);
+  if ( on <= 0.0 ) return NOBOX;
+  float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.4 + 0.9 * fz) * (on * (2.0 - on)) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
+  float eh = eh0 * (0.5 + 0.88 * fz) * (0.15 + 0.85 * on);
+  float lw = sheetAt(t, e.x);
+  bool lead = E2.x < 0.16 && lv >= 2;
+  float shH = lv >= 2 ? (lead ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw;
+  float shW = (lead ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
+  float rate = 0.8 + 0.5 * E2.z;
+  int id = i * 131 + j * 7919;
+  vec4 ag = ages(ei);
+  float ageI = ag.x, ageO = ag.y;
+  float outS = 1.0;
+  if ( ageO > -1e3 ) {
+    float stg = (ramp * 0.6 + 0.2 * E2.w) * uDur.y;
+    outS = 1.0 - 0.7 * clamp(ageO / max(stg, 0.25 * uDur.y), 0.0, 1.0);
+    ageO -= stg;
+  }
+  if ( ageI <= 0.0 ) return NOBOX;
+  float gE = clamp(ageI / max(uDur.x, 0.01), 0.0, 1.0); gE *= 2.0 - gE;
+  int cl = int(floor(e.x / (96.0 * u))) * 7 + int(floor(e.y / (96.0 * u))) * 13 + uSeed;
+  float br = breath(t, cl);
+  float rootK = ageO > -1e3 ? 1.0 - clamp(ageO / max(0.5 * uDur.y, 0.01), 0.0, 1.0) : 1.0;
+  float rb = r0 * es * (0.9 + 0.25 * br + 0.15 * sin(t * 2.1 + float(id))) * rootK * gE;
+  vec4 bb = NOBOX;
+  for ( int k = 0; k < 2; k++ ) {
+    float rr = rb * (0.75 - 0.15 * float(k)); if ( rr < 0.6 ) continue;
+    vec2 p = vec2(e.x + (float(k) - 0.5 + (E2.w - 0.5) * 0.8) * rb * 0.9 + 0.8 * u * sin(t * (1.3 + float(k)) + float(id) * 0.7), e.y - rb * 0.1 - float(k) * 1.5 * u);
+    float hx = 1.4833 * (0.95 + 0.75 * E1.z) * rr, hy = 1.4833 * 0.9 * rr;      // (q > 0: dx^2 + dy^2 < 2.2; below, dy x 1.5)
+    bb = grow(bb, p.x - hx, p.y - hy, p.x + hx, p.y + hy / 1.5);
+  }
+  float life0 = L_LIFE[lv] * (lead ? 1.3 : 1.0), iv = life0 / 5.0 / rate;
+  int n0 = int(floor(t / iv));
+  for ( int k = 0; k < 8; k++ ) {
+    if ( k >= uBirths ) break;
+    int n = n0 - k;
+    vec4 B1 = hb(id, n, 11);
+    float tb = (float(n) + 0.6 * B1.x) * iv;
+    if ( tb < t - ageI ) continue;
+    if ( ageO > -1e3 && tb > t - ageO ) continue;
+    float life = life0 * (0.6 + 0.8 * B1.y) * (0.8 + 0.4 * br);
+    float a = (t - tb) / life;
+    if ( a < 0.0 || a >= 1.0 ) continue;
+    float size = es * (0.7 + 0.6 * B1.z) * (0.75 + 0.35 * br) * (0.15 + 0.85 * gE) * outS;
+    float z = LRI * u * size * eh * shH * (0.6 + 0.8 * B1.w) * (0.3 + 0.7 * gE) * pow(a, 1.35);
+    float r = r0 * size * shW * (a < 0.15 ? 0.3 + 4.667 * a : pow(1.0 - (a - 0.15) / 0.85, 0.8));
+    if ( r < 0.6 ) continue;
+    float y = e.y - z, sy = r * (1.3 + 1.1 * a);
+    vec4 B2 = hb(id, n, 12);
+    float gb = gust(t, e.x), lean = uLean + gdir * gb * (0.6 + 0.4 * B2.x) * (0.75 + 0.5 * min(1.0, z / (LRI * u)));
+    float x = e.x + (B2.y - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + B2.z));
+    if ( lead && a > 0.55 && B2.w < 0.6 ) {
+      float ta = (a - 0.55) / 0.45, tr = r * 0.45 * (1.0 - ta * ta), ty = y - sy * (0.55 + 0.9 * ta);
+      float tx = x + z * 0.15 * lean;
+      if ( tr > 0.6 ) bb = grow(bb, tx - 1.4833 * tr, ty - 3.0 * tr, tx + 1.4833 * tr, ty + tr);   // (its width factor is at most 1)
+      sy *= 1.0 - 0.3 * ta;
+    }
+    // (the blob: y - 1.5 sy .. y + sy; across, its width (at most r (1.1 - 0.3 a), at least 0.3) x sqrt(2.2), + a leader's fork)
+    float hw = 1.4833 * max(r * (1.1 - 0.3 * a), 0.3) + (lead && a > 0.3 ? abs(B2.z - 0.5) * r * 0.4 + r * 0.5 : 0.0);
+    bb = grow(bb, x - hw, y - 1.5 * sy, x + hw, y + sy);
+  }
+  return bb.x > bb.z ? bb : bb + vec4(-1.0, -1.0, 1.0, 1.0);
+}
+vec4 boxSmoke(int i, int j, int slot) {
+  float u = uU, t = uTime, gdir = uWind.x < -0.05 ? -1.0 : 1.0;
+  float sps = 22.0 * u, spys = sps * RY, Hk = uPlume / 2.5;
+  vec2 e = vec2((float(i) + 0.5) * sps, (float(j) + 0.5) * spys);
+  ivec2 ei = ivec2(floor(e));
+  if ( !inArea(ei) ) return NOBOX;
+  vec4 sa = fA(ei) * 255.0;
+  if ( sa.b < 5.0 ) return NOBOX;
+  int code = int(sa.a + 0.5), ls = clamp(code & 3, 1, 3);
+  bool fromFire = code >= 4;
+  float src = sa.b / 255.0;
+  float rate = S_RATE[ls] / 3.6 * (sps * spys) / (1024.0 * u * u), iv = 1.0 / max(rate, 0.05);
+  float z0 = fromFire ? 1.0 * L_RISE[levelAt(ei)] * u : 2.0 * u;
+  float lifeS = S_LIFE[ls];
+  float v0 = S_V0[ls] * u * Hk * 1.5;
+  vec4 ag2 = ages(ei);
+  // (every birth the art pass can look at: ages 0 .. 1.3 x the life, + a margin; one SLOT = the births n with n & 15 == slot: the
+  // window must hold each slot once, with room for the art pass's own rounding of it)
+  int nHi = int(floor(t / iv)) + 1, nLo = int(floor((t - lifeS * 1.3) / iv)) - 2;
+  if ( nHi - nLo > (slot < 0 ? 30 : 13) ) return ANYBOX;
+  int eid = i * 977 + j * 3163;
+  vec4 bb = NOBOX;
+  for ( int kk2 = 0; kk2 < 32; kk2++ ) {
+    int n = nHi - kk2; if ( n < nLo ) break;
+    if ( slot >= 0 && (n & 15) != slot ) continue;
+    vec4 P1 = hb(eid, n, 59);
+    if ( P1.x > src ) continue;
+    float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
+    if ( age < 0.0 ) continue;
+    if ( tb < t - ag2.z ) continue;
+    float dS = ag2.w > -1e3 ? t - ag2.w - tb : 1e4;
+    if ( dS < 1.8 * fract(P1.y * 7.31 + P1.z * 3.17) ) continue;
+    float life = lifeS * (0.7 + 0.6 * P1.z), a = age / life;
+    if ( a >= 1.0 ) continue;
+    float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);
+    float vj = v0 * (0.65 + 0.7 * P1.w);
+    float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0 * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0;
+    float z = zb + vj * TAU * (1.0 - exp(-age / TAU));
+    vec4 P2 = hb(eid, n, 62);
+    vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
+    float g = gust(t, o0.x);
+    float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)) + 2.5 * u * sin(6.2832 * (0.35 * age + P2.z));
+    float y = o0.y - z + 0.5 * uWind.y * z;
+    float r = (S_R0[ls] + (S_R1[ls] - S_R0[ls]) * min(1.0, a / 0.55)) * u * (0.45 + 0.55 * build) * (0.8 + 0.4 * P2.w)
+            * (0.55 + 0.45 * clamp(dS / 1.8, 0.0, 1.0));
+    float strx = 1.0 + (0.1 + 0.45 * a) * (0.3 + 2.0 * abs(0.6 * uWind.x + 0.12 * gdir * (1.0 + 0.8 * g)));
+    vec2 hb2 = vec2(r * (0.87 + 1.2 * strx), r * 1.85) + 2.0;
+    // (what it draws: its lobes - each covers (cw - l) / lr inside sqrt(1.6), x stretched - within its cull box)
+    int nl = 3;
+    vec4 P3 = hb(eid, n, 70), P4 = hb(eid, n, 75); float p75 = P4.w;
+    float env = smoothstep(0.0, 0.24, a) * (1.0 - smoothstep(0.55, 1.0, a));
+    env *= edgeFade(vec2(x, y), hb2 + 4.0 * u, u);
+    if ( env <= 0.0 ) continue;
+    vec4 lb = NOBOX;
+    for ( int k = 0; k < 4; k++ ) {
+      if ( k >= nl ) break;
+      float ang = P3[k] * 6.2832 + a * (1.5 + p75);
+      float tear = k == nl - 1 ? 1.0 + 1.0 * max(0.0, a - 0.5) * (0.5 + g) : 1.0;
+      vec2 l = vec2(x + cos(ang) * r * 0.6 * tear, y + sin(ang) * r * 0.42 * tear - (k == 3 ? r * 0.45 : 0.0));
+      float lr = r * (0.45 + 0.5 * P4[k]) * (1.0 - 0.7 * max(0.0, a - 0.6) / 0.4) * (1.0 - 0.3 * (tear - 1.0));
+      if ( lr < 0.8 * u ) continue;
+      vec2 h = vec2(1.2650 * lr * strx, 1.2650 * lr) + 0.5;
+      lb = grow(lb, l.x - h.x, l.y - h.y, l.x + h.x, l.y + h.y);
+    }
+    if ( lb.x > lb.z ) continue;
+    bb = grow(bb, max(lb.x, x - hb2.x), max(lb.y, y - hb2.y), min(lb.z, x + hb2.x), min(lb.w, y + hb2.y));
+  }
+  return bb.x > bb.z ? bb : bb + vec4(-1.0, -1.0, 1.0, 1.0);
+}
+void main() {
+  ivec2 px = ivec2(floor(vCell));
+  float u = uU;
+  if ( px.x < uEN.x ) {
+    if ( px.y >= uEN.y ) { oArt = boxEnc(NOBOX, vec2(0.0), 1.0); return; }
+    int i = uEB.x + px.x, j = uEB.y + px.y; float sp = 32.0 * u / sqrt(L_DENS[3]);
+    oArt = boxEnc(boxFlame(i, j), vec2(float(i) * sp, float(j) * sp * RY), QF * u);
+  } else if ( px.x < uEN.x + uEN.z ) {
+    if ( px.y >= uEN.w ) { oArt = boxEnc(NOBOX, vec2(0.0), 1.0); return; }
+    int i = uEB.z + px.x - uEN.x, j = uEB.w + px.y; float sps = 22.0 * u;
+    oArt = boxEnc(boxSmoke(i, j, -1), vec2(float(i) * sps, float(j) * sps * RY), QS * u);
+  } else {
+    // (each source's 16 puff SLOTS: one puff's cull box each)
+    int q = px.x - uEN.x - uEN.z;
+    if ( px.y >= uEN.w || q >= uEN.z * 16 ) { oArt = boxEnc(NOBOX, vec2(0.0), 1.0); return; }
+    int i = uEB.z + q / 16, j = uEB.w + px.y; float sps = 22.0 * u;
+    oArt = boxEnc(boxSmoke(i, j, q % 16), vec2(float(i) * sps, float(j) * sps * RY), QS * u);
+  }
+}`;
+
+/* ======================================================================== A8 pass 1b: TILE, the lattice ranges per 8 x 8 cells */
+// Drawn, not searched: one quad per flame emitter and per smoke source, covering the tiles its EMB box touches (the smoke's widened by
+// the flow warp, which moves the cell it tests by up to 4 art px), blended MAX into a (2 x tiles wide) target - flames left, smoke
+// right: R = 255 - row, G = row, B = 255 - column, A = column, so each tile ends up with the min / max lattice row and column of
+// everything that reaches it (cleared 0 = none: rows 255 .. 0). Indices from uEB / uEN; empty boxes draw nothing.
+const TILE_V = `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 aIdx;        // the lattice point's texel in uEmb
+in vec2 aCorner;     // the quad's corner (0 / 1)
+uniform mat3 projectionMatrix;
+uniform mat3 translationMatrix;
+uniform sampler2D uEmb;
+uniform ivec4 uEB;
+uniform ivec4 uEN;
+uniform vec2 uOrg;
+uniform vec2 uSize;
+uniform float uU;
+flat out vec4 vRange;
+const float RY = 0.8;
+${BOXDEC}
+void main() {
+  ivec2 t = ivec2(aIdx); bool smoke = t.x >= uEN.x;
+  float u = uU, sp = smoke ? 22.0 * u : 32.0 * u / 3.0;
+  ivec2 ij = smoke ? ivec2(uEB.z + t.x - uEN.x, uEB.w + t.y) : uEB.xy + t;
+  vec4 b = boxDec(texelFetch(uEmb, t, 0), vec2(float(ij.x) * sp, float(ij.y) * sp * RY), (smoke ? QS : QF) * u);
+  if ( smoke ) b += vec4(-1.0, -1.0, 1.0, 1.0) * (4.0 * u + 0.5);
+  // (tile k holds the cell centres uOrg + 8k + 0.5 .. + 7.5: the tiles from t0 to t1 - 1 overlap the box)
+  vec2 nT = ceil(uSize / 8.0);
+  vec2 t0 = clamp(floor((b.xy - uOrg - 7.5) / 8.0), vec2(0.0), nT), t1 = clamp(floor((b.zw - uOrg - 0.5) / 8.0) + 1.0, vec2(0.0), nT);
+  if ( b.x > b.z || b.y > b.w || t0.x >= t1.x || t0.y >= t1.y ) { gl_Position = vec4(2.0, 2.0, 0.0, 1.0); vRange = vec4(0.0); return; }
+  vec2 p = mix(t0, t1, aCorner) + (smoke ? vec2(nT.x, 0.0) : vec2(0.0));
+  gl_Position = vec4((projectionMatrix * translationMatrix * vec3(p, 1.0)).xy, 0.0, 1.0);
+  ivec2 e = smoke ? ivec2(t.x - uEN.x, t.y) : t;
+  vRange = vec4(255.0 - float(e.y), float(e.y), 255.0 - float(e.x), float(e.x)) / 255.0;
+}`;
+const TILE_F = `#version 300 es
+precision highp float;
+flat in vec4 vRange;
+out vec4 oTile;
+void main() { oTile = vRange; }`;
 
 /* ======================================================================== pass 2: the art on screen; pass 3: the ground */
 const SHOW_COMMON = `#version 300 es
@@ -1109,7 +1387,9 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v13"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v14"),
+  emb: PIXI.Program.from(VERT, EMB, "moinen-maps-fire-emb-v1"),
+  tile: PIXI.Program.from(TILE_V, TILE_F, "moinen-maps-fire-tile-v2"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
   show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v7"),
   front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v4"),
@@ -1160,6 +1440,29 @@ export class FireArt extends PIXI.Container {
       uWind: new Float32Array(wind), uPlume: plume, uPuffQ: new Float32Array(field.puff ? field.puffQ : [0, 0, 0, 0]),
       uBox: new Float32Array(box ? [box.x0, box.y0, box.x1, box.y1] : [rect.x0, rect.y0, rect.x1, rect.y1]), uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
       translationMatrix: new PIXI.Matrix().toArray(true) }));
+    // A8: the EMB pass (each flame emitter's and smoke source's box this frame, both lattices side by side) and the TILE pass (per
+    // 8 x 8 cells, the lattice ranges that reach it): two tiny render targets, drawn before the art pass with the same uniforms
+    {
+      const u = grid / 32, sp = 32 * u / 3, spy = sp * 0.8, sps = 22 * u, spys = sps * 0.8;
+      const EW = Math.ceil(W / sp) + 5, EH = Math.ceil(H / spy) + 5, SW = Math.ceil(W / sps) + 5, SH = Math.ceil(H / spys) + 5;
+      const BW = EW + 17 * SW, BH = Math.max(EH, SH), TW = Math.ceil(W / 8), TH = Math.ceil(H / 8);
+      this.embRt = PIXI.RenderTexture.create({ width: BW, height: BH, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+      this.tileRt = PIXI.RenderTexture.create({ width: 2 * TW, height: TH, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+      for ( const t of [this.embRt, this.tileRt] ) t.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+      const U = this.pass.shader.uniforms;
+      Object.assign(U, { uEmb: this.embRt, uTile: this.tileRt, uTileOn: Math.max(EW, EH, SW, SH) <= 255 ? 1 : 0,
+        uEB: new Int32Array([Math.floor(rect.x0 / sp) - 2, Math.floor(rect.y0 / spy) - 2, Math.floor(rect.x0 / sps) - 2, Math.floor(rect.y0 / spys) - 2]),
+        uEN: new Int32Array([EW, EH, SW, SH]) });
+      this.embPass = new PIXI.Mesh(quad(0, 0, BW, BH, BW, BH), new PIXI.Shader(P.emb, U));
+      // (one quad per flame emitter and smoke source: TILE_V places it over the tiles its box touches, blended MAX)
+      const idx = [], cor = [], ind = [];
+      const add = (x, y) => { const k = idx.length / 2; idx.push(x, y, x, y, x, y, x, y); cor.push(0, 0, 1, 0, 1, 1, 0, 1); ind.push(k, k + 1, k + 2, k, k + 2, k + 3); };
+      for ( let y = 0; y < EH; y++ ) for ( let x = 0; x < EW; x++ ) add(x, y);
+      for ( let y = 0; y < SH; y++ ) for ( let x = 0; x < SW; x++ ) add(EW + x, y);
+      const g = new PIXI.Geometry().addAttribute("aIdx", idx, 2).addAttribute("aCorner", cor, 2).addIndex(new Uint32Array(ind));
+      this.tilePass = new PIXI.Mesh(g, new PIXI.Shader(P.tile, U));
+      this.tilePass.state.blendMode = PIXI.BLEND_MODES.MAX_COLOR;
+    }
     this.tok = new Float32Array(64);    // (shared by the fire and front layers: setTokens)
     const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0, uTok: this.tok, uTokN: 0, uU: grid / 32,
       uLift: 1, uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
@@ -1244,6 +1547,8 @@ export class FireArt extends PIXI.Container {
   renderArt(renderer) {
     const tf = this.fuelPass.shader.uniforms.uTime;
     if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
+    renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
+    if ( this.pass.shader.uniforms.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
     renderer.render(this.pass, { renderTexture: this.rt, clear: true });
     this.artT = this.pass.shader.uniforms.uTime;
   }
@@ -1254,12 +1559,12 @@ export class FireArt extends PIXI.Container {
     const own = this.smoke.parent === this, ownF = this.front.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
     if ( !ownF ) this.front.parent?.removeChild(this.front);
-    for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
-    this.pass.destroy(); this.fuelPass.destroy(); this.glow.destroy();
+    for ( const m of [this.pass, this.fuelPass, this.embPass, this.tilePass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
+    this.pass.destroy(); this.fuelPass.destroy(); this.embPass.destroy(); this.tilePass.destroy(); this.glow.destroy();
     if ( !own ) this.smoke.destroy();
     if ( !ownF ) this.front.destroy();
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
-    this.rt.destroy(true); this.fuelRt.destroy(true);
+    this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true);
   }
 }
