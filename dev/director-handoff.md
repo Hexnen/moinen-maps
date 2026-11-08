@@ -720,3 +720,18 @@ Lane 5, 165 Hz, interleaved A/B: the same pages, with the junction flipped betwe
 - Junction back to `C:\mmwt-dir-rolls`. Director OFF.
 - ZZ-dir-rolls: token vision on, combats deleted, test tokens back in place, bench chat messages deleted.
 - Lease released.
+
+## director-fix3 (2026-11-09) - bugfix pass after verify ver3
+
+Lane 4 (port 30004), headless Chrome CDP 9481; GM = Gamemaster (127.0.0.84), P1 = Test Gracz 1 (.85), P2 = Test Gracz 2 (.86). A/B against a clean main build by flipping the lane junction.
+
+1. Slow client caption late (~1 s at 4x CPU). Cause: sliced placement did one `elementsFromPoint` per candidate point; each costs 2-16 ms at 4x, so with a window open the caption slid in 1381-1919 ms after shot start. Fix (overlay.mjs): per-point hit memo (4 px grid, dropped on resize / when a window rect changes), numeric placement from the default box, live revalidation afterwards (may move the caption with a 260 ms bottom transition if the kept answer was stale), idle warm-up of the memo (`warmCaptions`, director.mjs `warmSoon`), and the setup caption is created hidden one frame after shot start and revealed at lead*0.45. Verified (captime + LoAF, P2, 4x, settings window 720x620 on the right): shown 388-426 ms after shot start (main 1381-1919), no director long frames.
+2. Turn banner with a window in the centre column. Cause: banner top scan only looked at x = innerWidth/2 and fell back to top 24, under the combat carousel; x stayed centred on the screen. Fix (source-move.mjs): `bannerX()` = centre of the free rect the stage frames into; `bannerTop()` scans with hitAt, skips blocked columns, falls back below the bars. Verified (banner.mjs, P2, 1x and 4x, with/without window): with window banners centred at ~538 in free rect 317-760, top 80-86, never under carousel, name never over the window; delay 0-279 ms at 4x. webm: dev/director-fix3-banner-window-4x.webm (P2, 4x, window open).
+3. Late GM skip leaves players parked. Cause: skip only ended a running shot; a skip arriving after the beat ended "done" found nothing to end, the player's camera stayed parked. Fix: `skipHere` fires the "skip" hook on every client; source-stage sends a parked player home on GM skip. Verified (skiprace.mjs, P1, skip 300 ms after beat end): main 0/2 home, fix 3/3 home.
+Other bugs found and fixed:
+4. GM bar: skip disabled / wrong state in combat between beats (bar mode does not run shots). Fix: bar watches shots (`watched`, +4 s after combat-lane shots), skip enabled while staged combat runs. Verified (barcheck.mjs, GM).
+5. Move handler in-view check used the whole screen, not the free rect (target hidden by a window counted as visible). Fixed with `freeRect()`. Verified by code + banner/move runs only.
+6. Scene-arrival Esc: fired while typing in an input and always preventDefault'ed (ate Esc that closes windows). Fix: ignore when typing, preventDefault only if no one else takes Esc. Not separately verified live (control.mjs Esc rows pass).
+7. Settings section: "look" select options not rebuilt when the look list changed. Fixed in section.mjs refresh. Not verified live.
+Regression: run-all 65/65, lang-audit clean, director-check watchShot (P1: none/esc/click/wheel/busy) all rows OK, stage-js/control.mjs 16/16.
+Open decisions: with no window narrowing the free rect the banner stays screen-centred (as designed); GM skip in combat now also sends players home (that is what we think a GM expects); bar keeps "take" state 4 s after a combat-lane shot; warm-up costs a short idle burst after settings change/resize/canvas ready; revalidation can visibly nudge a caption once.
