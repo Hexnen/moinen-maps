@@ -179,7 +179,7 @@ export function hash(b) { let h = 0x811c9dc5; for ( let i = 0; i < b.length; i++
  */
 export const AB_CASES = [["rain", 1], ["rain", 3], ["snow", 3], ["sand", 1], ["sand", 3], ["dust", 3], ["embers", 3], ["wind", 1], ["wind", 3], ["tornado", 1], ["tornado", 3]];
 export const AB_VIEWS = [[1, 1], [1, 3], [2, 1], [2, 3]];
-export function abStart(label, T0, { cases = AB_CASES, views = AB_VIEWS, n = 120, c = [768, 512], save: save_ = (e) => e === "tornado" } = {}) {
+export function abStart(label, T0, { cases = AB_CASES, views = AB_VIEWS, n = 120, c = [768, 512], save: save_ = (e) => e === "tornado", timing = true } = {}) {
   window.__ab = { label, done: false, i: 0 };
   (async () => {
     const H = await import("./perf-harness.mjs"), rows = [], dpr0 = canvas.app.renderer.resolution;
@@ -189,7 +189,7 @@ export function abStart(label, T0, { cases = AB_CASES, views = AB_VIEWS, n = 120
         canvas.pan({ x: c[0], y: c[1], scale: z }); await wait(300);
         for ( const [e, l] of cases ) {
           await setCase(e, l, { t: T0, at: [c[0], c[1] + 48] });
-          const raw = shots([T0 + 5000, T0 + 5900]), sh = raw.map(hash);
+          const raw = shots([T0 + 5000, T0 + 5900]), sh = raw.map(hash), gq = W().guard?.().q ?? null;   // (the frame guard's level at the shots: 1 = full)
           if ( save_?.(e, dpr, z) ) await save(`ab-${label}-${dpr}-${z}-${e}${l}`, [raw[0]]);
           // in this build: the cell caches off (twice: the a/a control) vs on, pixel diffs (a build without them: all zero)
           let cells = null;
@@ -199,6 +199,7 @@ export function abStart(label, T0, { cases = AB_CASES, views = AB_VIEWS, n = 120
             CONFIG.moinenMaps.weatherCells = was; const y = shots([T0 + 5000]);
             cells = { aa: diff(x[0], x2[0]), ab: diff(x[0], y[0]) };
           }
+          if ( !timing ) { rows.push({ dpr, z, e, l, sh, gq, cells, scr: [canvas.app.renderer.width, canvas.app.renderer.height] }); window.__ab.i = rows.length; continue; }
           const p = await passes({ n, t0: T0 + 6000 }), f = await frame({ n, t0: T0 + 9000 });
           // in this build, interleaved in the same page: the caches off / on / off / on (per-pass GPU; the a/a = off vs off)
           let inter = null;
@@ -209,7 +210,7 @@ export function abStart(label, T0, { cases = AB_CASES, views = AB_VIEWS, n = 120
             for ( const fl of [false, was, false, was] ) { CONFIG.moinenMaps.weatherCells = fl; inter.push(await passes({ n, t0: T0 + 6000 })); }
             CONFIG.moinenMaps.weatherCells = was;
           }
-          rows.push({ dpr, z, e, l, frame: f, passes: p, sh, cells, inter });
+          rows.push({ dpr, z, e, l, frame: f, passes: p, sh, gq, cells, inter });
           window.__ab.i = rows.length;
         }
       }

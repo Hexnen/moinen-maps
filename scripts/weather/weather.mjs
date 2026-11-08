@@ -12,6 +12,7 @@ import { setWindProvider, setVortexProvider, setFireWetProvider, windVecAt, SPEE
 import * as TM from "./tornado-model.mjs";
 import { TornadoDisplay } from "./tornado.mjs";
 import { SteamLayer } from "./steam.mjs";
+import { guardInfo } from "./guard.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -415,7 +416,7 @@ export const weatherApi = {
   /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
     info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, fireWet: fireWetNow(), state: lastState }),
-  display: () => display, lensDisplay: () => lens, tornadoDisplay: () => tornado, steamDisplay: () => steam, refresh, model: M, geo,
+  display: () => display, lensDisplay: () => lens, tornadoDisplay: () => tornado, steamDisplay: () => steam, guard: guardInfo, refresh, model: M, geo,
   tornado: tornadoApi
 };
 

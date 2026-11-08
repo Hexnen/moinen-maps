@@ -1,6 +1,7 @@
 import * as TM from "./tornado-model.mjs";
 import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
 import { CellCache, cellVert, showNearest } from "./cells.mjs";
+import { weatherQ } from "./guard.mjs";
 import { blendMode } from "./display.mjs";
 import { hu, sceneWind, dirVec } from "../wind.mjs";
 import { mapPixels } from "../destruction/source.mjs";
@@ -387,7 +388,7 @@ class TornadoView {
     const dustRamp = (i) => dust.map((v) => Math.min(1, v * (0.28 + 0.157 * i)));
     const bot = this.ax[0];
     // FINE DEBRIS: specks orbiting the funnel, rising from the foot to under the wall cloud (2 px smears along their path)
-    const nS = Math.round(L.specks * (0.3 + 0.7 * touch));
+    const gq = weatherQ(), nS = Math.round(L.specks * (0.3 + 0.7 * touch) * gq);   // (gq: the frame guard thins the small stuff)
     for ( let i = 0; i < nS; i++ ) {
       const h = (q) => hu(i, 1, 980 + q);
       const turns = Math.floor(5 + 7 * h(0)), zf = fr(h(1) + Math.floor(1 + 2 * h(2)) * tm / 10);
@@ -401,7 +402,7 @@ class TornadoView {
       (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, Ls / 2 + 0.5, h(5) > 0.7 ? 1 : 0.5, ang, 0, i, al, ...col, 0);
     }
     // WISPS: torn fragments peeling off the funnel, flung round it (three chords of an arc each)
-    const nW = Math.round(L.wisps * (0.4 + 0.6 * ph.reach));
+    const nW = Math.round(L.wisps * (0.4 + 0.6 * ph.reach) * gq);
     for ( let i = 0; i < nW; i++ ) {
       const h = (q) => hu(i, 4, 1010 + q);
       const dustW = i < nW / 2, zf = fr(h(0) + Math.floor(1 + 2 * h(1)) * tm / 10);
@@ -427,7 +428,7 @@ class TornadoView {
     }
     if ( touch > 0.01 ) {
       // SPRAYED CLUMPS: dust thrown out of the foot on spirals, dissolving as they go
-      const nC = Math.round(L.clumps * touch);
+      const nC = Math.round(L.clumps * touch * gq);
       for ( let i = 0; i < nC; i++ ) {
         const kc = 1080 + Math.floor(hu(i, 1, 1060) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1061) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);
@@ -442,7 +443,7 @@ class TornadoView {
         (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, rr, rr, 0, 3, i * 13 + cyc, 1, ...c, sF / 0.9);
       }
       // INFLOW: dust and leaf streaks dragged over the ground toward the foot on tightening spirals (on the ground: the stage)
-      const nI = Math.round(L.inflow * touch);
+      const nI = Math.round(L.inflow * touch * gq);
       for ( let i = 0; i < nI; i++ ) {
         const kc = 1440 + Math.floor(hu(i, 1, 1200) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1201) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);

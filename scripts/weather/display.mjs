@@ -4,6 +4,7 @@ import { PART_VERT, PART_FRAG, HAZE_FRAG } from "./fx-glsl.mjs";
 import { snowScore, driftScore, sortedScores, quantileThr } from "./fields.mjs";
 import { footprintK } from "../fire/shader.mjs";
 import { CellCache, CELL_VERT, SHOW_FRAG as CELL_SHOW_FRAG, cellFrag } from "./cells.mjs";
+import { weatherQ } from "./guard.mjs";
 import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
 
 /**
@@ -68,7 +69,9 @@ export class WeatherDisplay {
     this.geo = null; this.info = null; this.shelter = null;
     this.meshes = [];
     this.state = null; this.view = null;
-    this.stats = { instances: 0, tickMs: 0, drawn: [] };
+    this.stats = { instances: 0, tickMs: 0, drawn: [], guard: 1 };
+    // the per-frame scratch (no garbage per frame)
+    this._v = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._p = new PIXI.Point(); this._d3 = [0, 0, 0]; this._d4 = [0, 0, 0, 0]; this._pp = [0, 0, 0, 0]; this._p3 = [0, 0, 0];
     this._tick = () => this.tick();
     this.ticking = false;
     this.vortA = new Float32Array(12); this.vortB = new Float32Array(12); this.vortN = 0;   // (shared by every pass)
@@ -116,6 +119,7 @@ export class WeatherDisplay {
       uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, translationMatrix: new PIXI.Matrix().toArray(true) });
     this.splash = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(1))), 253);
     this.air = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(0))), 995, Infinity);
+    this.rainMeshes = [this.splash, this.air];
     // particles: one instanced geometry + mesh per kind
     this.parts = {}; this.partGeoms = [];
     for ( const [name, kind, ts] of KINDS ) {
@@ -276,10 +280,13 @@ export class WeatherDisplay {
 
   /** The view in scene px. */
   viewRect() {
-    const v = canvas.app.renderer.screen, st = canvas.stage;
-    const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
-    return { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y };
+    const v = canvas.app.renderer.screen, st = canvas.stage, p = this._p, o = this._v;
+    p.set(0, 0); st.toLocal(p, undefined, p); o.x0 = p.x; o.y0 = p.y;
+    p.set(v.width, v.height); st.toLocal(p, undefined, p); o.x1 = p.x; o.y1 = p.y;
+    return o;
   }
+
+
 
   tick() {
     const t0 = performance.now(), g = this.geo, st = this.state;
@@ -288,22 +295,25 @@ export class WeatherDisplay {
     const s12 = Math.floor((this.now?.() ?? Date.now()) * 0.012);
     if ( s12 !== this.s12 ) { this.s12 = s12; this.onStep?.(); if ( !this.geo ) return; }
     const T = this.clock();
-    this.ground.shader.uniforms.uTime = T; this.ground.shader.uniforms.uK = footprintK();
+    const gq = this.stats.guard = weatherQ(), fk = footprintK() * (0.5 + 0.5 * gq);   // (the guard: denser filter / particles back at 1)
+    this.ground.shader.uniforms.uTime = T; this.ground.shader.uniforms.uK = fk;
     // the tiles over the view (+ the margin: drops fall from above their ground point and drift from upwind)
     const v = this.viewRect(), ap = g.ap;
     const ax0 = (v.x0 - g.ox) / ap, ay0 = (v.y0 - g.oy) / ap, ax1 = (v.x1 - g.ox) / ap, ay1 = (v.y1 - g.oy) / ap;
     const mx = 96, tx0 = Math.max(0, Math.floor((ax0 - mx) / 64)), ty0 = Math.max(0, Math.floor((ay0 - 64) / 64));
     const tx1 = Math.min(Math.ceil(g.aw / 64) - 1, Math.floor((ax1 + mx) / 64)), ty1 = Math.min(Math.ceil(g.ah / 64) - 1, Math.floor((ay1 + 128) / 64));
     const ntx = Math.max(0, tx1 - tx0 + 1), nty = Math.max(0, ty1 - ty0 + 1), tiles = ntx * nty;
-    let dens = this.dens ?? [0, 0, 0];
+    const d0 = this.dens ?? this._d3, dens = this._d3;
+    for ( let i = 0; i < 3; i++ ) dens[i] = (d0[i] ?? 0) * gq;
     const want = tiles * (Math.ceil(dens[0]) + Math.ceil(dens[1]) + Math.ceil(dens[2]));
-    if ( want > MAX_INSTANCES ) { const f = MAX_INSTANCES / want; dens = dens.map((d) => d * f); }   // (far zoomed out: fewer drops, never a stall)
-    const per = dens.map((d) => Math.ceil(d - 1e-6)), sum = per[0] + per[1] + per[2];
+    if ( want > MAX_INSTANCES ) { const f = MAX_INSTANCES / want; for ( let i = 0; i < 3; i++ ) dens[i] *= f; }   // (far zoomed out: fewer drops, never a stall)
+    const per = this._p3; for ( let i = 0; i < 3; i++ ) per[i] = Math.ceil(dens[i] - 1e-6);
+    const sum = per[0] + per[1] + per[2];
     const n = sum > 0 ? tiles * sum : 0;
     this.rainGeom.instanceCount = n;
     const scr = canvas.screenDimensions ?? [canvas.app.renderer.screen.width, canvas.app.renderer.screen.height];
     const depth = canvas.masks?.depth?.renderTexture ?? null;
-    for ( const m of [this.splash, this.air] ) {
+    for ( const m of this.rainMeshes ) {
       const u = m.shader.uniforms;
       u.uTime = T;
       u.uTiles[0] = tx0; u.uTiles[1] = ty0; u.uTiles[2] = Math.max(1, ntx); u.uTiles[3] = Math.max(1, nty);
@@ -316,17 +326,18 @@ export class WeatherDisplay {
     if ( depth ) { au.uDepth = depth; au.uHasDepth = 1; au.uDepthElev = canvas.masks.depth.mapElevation(Infinity); } else au.uHasDepth = 0;
     // particles: each kind's tiles over the view, widened by where a slot's particle can be seen from its anchor (reach)
     let partN = 0;
-    const axv = [ax0, ay0, ax1, ay1];
     for ( const [name, , TS] of KINDS ) {
       const m = this.parts[name], u = m.shader.uniforms, d0 = this.partDens?.[name], R = this.reach?.[name];
       if ( !d0 || !R || !(d0[0] + d0[1] + d0[2] + d0[3] > 0) ) { m.visible = false; continue; }
-      const px0 = Math.max(0, Math.floor((axv[0] - R[1]) / TS)), py0 = Math.max(0, Math.floor((axv[1] - R[3]) / TS));
-      const px1 = Math.min(Math.ceil(g.aw / TS) - 1, Math.floor((axv[2] - R[0]) / TS)), py1 = Math.min(Math.ceil(g.ah / TS) - 1, Math.floor((axv[3] - R[2]) / TS));
+      const px0 = Math.max(0, Math.floor((ax0 - R[1]) / TS)), py0 = Math.max(0, Math.floor((ay0 - R[3]) / TS));
+      const px1 = Math.min(Math.ceil(g.aw / TS) - 1, Math.floor((ax1 - R[0]) / TS)), py1 = Math.min(Math.ceil(g.ah / TS) - 1, Math.floor((ay1 - R[2]) / TS));
       const pnx = Math.max(0, px1 - px0 + 1), pny = Math.max(0, py1 - py0 + 1), pt = pnx * pny;
-      let dd = d0;
-      const want = pt * dd.reduce((a, b) => a + Math.ceil(b), 0);
-      if ( want > PART_MAX ) { const f = PART_MAX / want; dd = dd.map((x) => x * f); }
-      const pp = dd.map((x) => Math.ceil(x - 1e-6)), ps = pp[0] + pp[1] + pp[2] + pp[3];
+      const dd = this._d4, pp = this._pp;
+      let want = 0; for ( let i = 0; i < 4; i++ ) { dd[i] = d0[i] * gq; want += Math.ceil(dd[i]); }
+      want *= pt;
+      if ( want > PART_MAX ) { const f = PART_MAX / want; for ( let i = 0; i < 4; i++ ) dd[i] *= f; }
+      for ( let i = 0; i < 4; i++ ) pp[i] = Math.ceil(dd[i] - 1e-6);
+      const ps = pp[0] + pp[1] + pp[2] + pp[3];
       const pn = ps > 0 ? pt * ps : 0;
       m.geometry.instanceCount = pn;
       u.uTime = T; u.uTiles[0] = px0; u.uTiles[1] = py0; u.uTiles[2] = Math.max(1, pnx); u.uTiles[3] = Math.max(1, pny);
@@ -335,7 +346,7 @@ export class WeatherDisplay {
       m.visible = pn > 0;
       partN += pn;
     }
-    if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = footprintK(); }
+    if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = fk; }
     if ( this.ground.visible ) this.groundCells.update(g, v);
     if ( this.haze.visible ) this.hazeCells.update(g, v);
     this.vortex(n > 0 || partN > 0);

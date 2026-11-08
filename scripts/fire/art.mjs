@@ -1622,25 +1622,104 @@ export class FireArt extends PIXI.Container {
    * asks only for cells off screen to be left out (display.windowOf) and redraws at once when the view leaves the drawn window.
    */
   renderArt(renderer, win = null) {
-    const tf = this.fuelPass.shader.uniforms.uTime, W = this.W, H = this.H;
+    const u = this.pass.shader.uniforms, tf = this.fuelPass.shader.uniforms.uTime, W = this.W, H = this.H;
+    this.job = null;                       // (a frame drawn now supersedes one being drawn in steps)
     if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
     renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
-    if ( this.pass.shader.uniforms.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
+    if ( u.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
+    const aw = this._win ??= [0, 0, 0, 0];   // (one array per area, rewritten: no garbage per pass)
     if ( !win || (win[0] <= 0 && win[1] <= 0 && win[2] >= W && win[3] >= H) ) {
-      win = null;
       renderer.render(this.pass, { renderTexture: this.rt, clear: true });
+      aw[0] = 0; aw[1] = 0; aw[2] = W; aw[3] = H;
     } else {
-      const gl = renderer.gl, x0 = Math.max(0, win[0]), y0 = Math.max(0, win[1]), x1 = Math.min(W, win[2]), y1 = Math.min(H, win[3]);
+      const x0 = Math.max(0, win[0]), y0 = Math.max(0, win[1]), x1 = Math.min(W, win[2]), y1 = Math.min(H, win[3]);
       renderer.renderTexture.bind(this.rt);
-      gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
-      renderer.renderTexture.clear();
-      this.pass.render(renderer); renderer.batch.flush();
-      gl.disable(gl.SCISSOR_TEST);
-      win = [x0, y0, x1, y1];
+      this.scissorPass(renderer, x0, y0, x1, y1);
+      aw[0] = x0; aw[1] = y0; aw[2] = x1; aw[3] = y1;
     }
     renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
-    this.artT = this.pass.shader.uniforms.uTime;
-    this.artWin = win ?? [0, 0, W, H];
+    this.artT = u.uTime;
+    this.artWin = aw;
+    // (the art pass's other per-frame uniforms at this frame - the grow / go-out clocks and the lean: extendArt draws more cells of it)
+    const s = this.artU ??= new Float64Array(5);
+    s[0] = u.uI[0]; s[1] = u.uI[1]; s[2] = u.uO[0]; s[3] = u.uO[1]; s[4] = u.uLean;
+  }
+  /** The art pass over cells [x0, x1) x [y0, y1) only: a scissor on the bound art texture (A9: exactly the whole pass's cells there). */
+  scissorPass(renderer, x0, y0, x1, y1) {
+    if ( x1 <= x0 || y1 <= y0 ) return;
+    const gl = renderer.gl;
+    gl.enable(gl.SCISSOR_TEST); gl.scissor(x0, y0, x1 - x0, y1 - y0);
+    renderer.renderTexture.clear();
+    this.pass.render(renderer); renderer.batch.flush();
+    gl.disable(gl.SCISSOR_TEST);
+  }
+  /**
+   * A11: grow the drawn window so it holds `need` (cells) with more cells OF THE FRAME IT SHOWS (artT, with that frame's grow / go-out
+   * clocks and lean): only the new strips around the old window are drawn, so a camera move costs the cells it uncovers, not a window.
+   * Every drawn cell is still of one art frame (the same full-quad pass under a scissor, A9). Returns the cells drawn.
+   */
+  extendArt(renderer, need) {
+    const o = this.artWin, s = this.artU, W = this.W, H = this.H; if ( !o || !s || this.artT === null ) return 0;
+    const x0 = Math.max(0, Math.min(o[0], need[0])), y0 = Math.max(0, Math.min(o[1], need[1]));
+    const x1 = Math.min(W, Math.max(o[2], need[2])), y1 = Math.min(H, Math.max(o[3], need[3]));
+    const cells = (x1 - x0) * (y1 - y0) - (o[2] - o[0]) * (o[3] - o[1]); if ( cells <= 0 ) return 0;
+    const k = this.frameOn(renderer, this.artT, s);
+    try {
+      renderer.renderTexture.bind(this.rt);
+      this.scissorPass(renderer, x0, y0, x1, o[1]);          // (above the old window, the new full width)
+      this.scissorPass(renderer, x0, o[3], x1, y1);          // (below it)
+      this.scissorPass(renderer, x0, o[1], o[0], o[3]);      // (left of it)
+      this.scissorPass(renderer, o[2], o[1], x1, o[3]);      // (right of it)
+      renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
+    } finally { this.frameOff(k); }
+    o[0] = x0; o[1] = y0; o[2] = x1; o[3] = y1;
+    return cells;
+  }
+  /**
+   * The art pass's uniforms set to frame `t` with clocks / lean `s` (saved: frameOff puts the current ones back), and its small maps
+   * drawn for it (the fuel map when its quantised time differs from the one it holds; the emitter and tile maps always - a few hundred
+   * texels: another frame may have been drawn in between).
+   */
+  frameOn(renderer, t, s) {
+    const u = this.pass.shader.uniforms, k = this._saved ??= new Float64Array(6);
+    k[0] = u.uTime; k[1] = u.uI[0]; k[2] = u.uI[1]; k[3] = u.uO[0]; k[4] = u.uO[1]; k[5] = u.uLean;
+    this.setTime(t); u.uI[0] = s[0]; u.uI[1] = s[1]; u.uO[0] = s[2]; u.uO[1] = s[3]; u.uLean = s[4];
+    const tf = this.fuelPass.shader.uniforms.uTime;
+    if ( tf !== this.fuelT ) { this.fuelT = tf; renderer.render(this.fuelPass, { renderTexture: this.fuelRt, clear: true }); }
+    renderer.render(this.embPass, { renderTexture: this.embRt, clear: true });
+    if ( u.uTileOn ) renderer.render(this.tilePass, { renderTexture: this.tileRt, clear: true });
+    return k;
+  }
+  frameOff(k) { const u = this.pass.shader.uniforms; this.setTime(k[0]); u.uI[0] = k[1]; u.uI[1] = k[2]; u.uO[0] = k[3]; u.uO[1] = k[4]; u.uLean = k[5]; }
+  /**
+   * A11: a NEW FRAME TOO BIG FOR ONE DISPLAY FRAME (a large area at a far zoom), drawn in steps: `startJob(win, t)` takes the frame (its
+   * time and the clocks / lean as they are now); each `stepJob(renderer, maxCells)` draws the next rows of it into a BACK texture; the
+   * area keeps showing the frame it has meanwhile, and when the last rows are in, the two textures swap: the new frame shows at once,
+   * whole. Returns the cells drawn this step.
+   */
+  startJob(win, t) {
+    const u = this.pass.shader.uniforms, W = this.W, H = this.H;
+    const j = this.job = { t, x0: Math.max(0, win[0]), y0: Math.max(0, win[1]), x1: Math.min(W, win[2]), y1: Math.min(H, win[3]), y: 0, s: new Float64Array(5) };
+    j.y = j.y0; j.s[0] = u.uI[0]; j.s[1] = u.uI[1]; j.s[2] = u.uO[0]; j.s[3] = u.uO[1]; j.s[4] = u.uLean;
+    return j;
+  }
+  stepJob(renderer, maxCells) {
+    const j = this.job; if ( !j ) return 0;
+    const w = j.x1 - j.x0; if ( w <= 0 || j.y >= j.y1 ) { this.job = null; return 0; }
+    const rows = Math.max(1, Math.min(j.y1 - j.y, Math.floor(maxCells / w)));
+    if ( !this.back ) { this.back = PIXI.RenderTexture.create({ width: this.W, height: this.H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST }); this.back.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF; }
+    const k = this.frameOn(renderer, j.t, j.s);
+    try { renderer.renderTexture.bind(this.back); this.scissorPass(renderer, j.x0, j.y, j.x1, j.y + rows); } finally { this.frameOff(k); }
+    j.y += rows;
+    if ( j.y >= j.y1 ) {
+      const f = this.rt; this.rt = this.back; this.back = f;
+      for ( const m of [this.occPass, this.ground, this.show, this.smoke, this.front, this.glow] ) m.shader.uniforms.uArt = this.rt;
+      renderer.render(this.occPass, { renderTexture: this.occRt, clear: true });
+      const aw = this._win ??= [0, 0, 0, 0]; aw[0] = j.x0; aw[1] = j.y0; aw[2] = j.x1; aw[3] = j.y1;
+      this.artT = j.t; this.artWin = aw; (this.artU ??= new Float64Array(5)).set(j.s);
+      this.job = null;
+    }
+    return rows * w;
   }
   /** Do the drawn cells (this art frame) hold the window `w` (cells)? */
   covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
@@ -1657,6 +1736,7 @@ export class FireArt extends PIXI.Container {
     if ( !ownF ) this.front.destroy();
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
+    this.back?.destroy(true); this.back = null; this.job = null;
     this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true); this.occRt.destroy(true);
   }
 }
