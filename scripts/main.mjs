@@ -20,11 +20,13 @@ import { registerTokenFx } from "./tokens/fx.mjs";
 import { registerTokenFxSetting } from "./tokens/settings.mjs";
 import { registerRoads } from "./roads/roads.mjs";
 import { registerZones } from "./zones/zones.mjs";
+import { registerOrbit } from "./zones/orbit.mjs";
 import { registerFlood } from "./destruction/flood.mjs";
 import { registerSmoothView } from "./view-smooth.mjs";
 import { registerWarmup } from "./warmup.mjs";
 registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
 registerZones();   // zones drawn with a pencil, movement counted in zones (scripts/zones)
+registerOrbit();   // the shared Orbit scene: tokens thrown to orbit from any map, the strip of who is up there (scripts/zones/orbit.mjs)
 registerFlood();   // the water of the flooded holes (destruction kind "flood"): its own hooks (scripts/destruction/flood.mjs)
 registerSmoothView();   // smooth wheel zoom + even frame pacing on fast displays (client settings, scripts/view-smooth.mjs)
 registerWarmup();   // GPU objects the first zoom / pan would make, made at idle after the scene opens (scripts/warmup.mjs)

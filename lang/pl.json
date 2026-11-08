@@ -1650,5 +1650,22 @@
   "MOINENMAPS.Zones.style.sengoku": "Sengoku",
   "MOINENMAPS.Zones.lineStyle.brush": "Pędzel sumi",
   "MOINENMAPS.Zones.numShape.seal": "Pieczęć hanko",
-  "MOINENMAPS.Zones.numFormat.kanji": "一, 二, 三"
+  "MOINENMAPS.Zones.numFormat.kanji": "一, 二, 三",
+  "MOINENMAPS.Orbit.sceneName": "Orbita",
+  "MOINENMAPS.Orbit.made": "Moinen Maps: scena Orbita gotowa (proceduralny kosmos w pixel arcie).",
+  "MOINENMAPS.Orbit.noGM": "Orbita: do przeniesienia tokenu potrzebny jest MG online.",
+  "MOINENMAPS.Orbit.noMap": "Orbita: brak mapy do lądowania (ani mapy, z której przyleciał, ani aktywnej sceny).",
+  "MOINENMAPS.Orbit.fromMap": "z mapy: {map}",
+  "MOINENMAPS.Orbit.chipLand": "Klik: sprowadź na tę mapę",
+  "MOINENMAPS.Orbit.head": "Orbita",
+  "MOINENMAPS.Orbit.headTip": "Kto jest na orbicie (ze wszystkich map). Klik: pokaż scenę Orbita. Klik w portret sprowadza ten token tutaj.",
+  "MOINENMAPS.Orbit.throw": "Wyrzuć na orbitę: token znika z tej mapy i pojawia się na scenie Orbita",
+  "MOINENMAPS.Orbit.land": "Zejdź z orbity: wybierz mapę",
+  "MOINENMAPS.Orbit.home": "mapa, z której przyleciał - ląduje tam, gdzie był",
+  "MOINENMAPS.Orbit.active": "aktywna scena - ląduje przy górnej krawędzi",
+  "MOINENMAPS.Orbit.map": "ląduje przy górnej krawędzi",
+  "MOINENMAPS.Orbit.setting": "Orbita (wspólna scena)",
+  "MOINENMAPS.Orbit.settingHint": "Tokeny wyrzucone na orbitę z dowolnej mapy trafiają na jedną wspólną scenę Orbita z proceduralnym kosmosem w pixel arcie; każda mapa wypisuje je nad górną krawędzią.",
+  "MOINENMAPS.Orbit.follow": "Podążaj za moją postacią na orbitę",
+  "MOINENMAPS.Orbit.followHint": "Gdy twoja postać zostanie wyrzucona na orbitę albo z niej wróci, widok przenosi się za nią na drugą scenę."
 }
