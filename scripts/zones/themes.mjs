@@ -679,8 +679,9 @@ export const BADGES = {
       // distances: a red seal with the number
       shadow(G, (dy) => G.drawRoundedRect(-r * 0.9, -r * 0.9 + dy, r * 1.8, r * 1.8, r * 0.14), 2, 0.4);
       G.lineStyle(0); G.beginFill(B.band?.color ?? 0xb3261e, 1).drawRoundedRect(-r * 0.9, -r * 0.9, r * 1.8, r * 1.8, r * 0.14).endFill();
-      G.lineStyle({ width: r * 0.07, color: 0xfbf1dc, alpha: 0.9 }); G.drawRect(-r * 0.7, -r * 0.7, r * 1.4, r * 1.4);
-      B.add(B.label, { fontFamily: "Amiri, Georgia, serif", fontWeight: "700", fill: 0xfbf1dc, size: 0.95 });
+      G.lineStyle({ width: r * 0.07, color: (B.band?.color ?? 0) === 0xffffff ? 0x141010 : 0xfbf1dc, alpha: 0.9 }); G.drawRect(-r * 0.7, -r * 0.7, r * 1.4, r * 1.4);
+      const sealC = B.band?.color ?? 0xb3261e, lum = (0.299 * ((sealC >> 16) & 255) + 0.587 * ((sealC >> 8) & 255) + 0.114 * (sealC & 255)) / 255;
+      B.add(B.label, { fontFamily: "Amiri, Georgia, serif", fontWeight: "700", fill: lum > 0.6 ? 0x141010 : 0xfbf1dc, size: 0.95 });
       return 1;
     }
     // a war banner (sashimono): washi cloth on a black pole, the numeral brushed down it, the arabic number in a red seal below
