@@ -9,7 +9,7 @@
  *     masses where it is hot, single tongues and gaps with only embers where it is weak, and each base's width, offset,
  *     brightness and coal spill - no regular rhythm and no relation to the brush stamp spacing.
  *  1. ART PASS (12 fps, only when the shared-clock frame changes and the area is on screen): one fragment per ART CELL into a small
- *     RGBA8 render texture (W x H cells): R = flame (0 none; else 64 + the rows its bed lies below the cell, x u: depth vs tokens), G = flame band + 8 (level - 1) (1..23)
+ *     RGBA8 render texture (W x H cells): R = flame (0 none; else 1 + its bed row in art px mod 255: depth vs tokens), G = flame band + 8 (level - 1) (1..23)
  *     or a bed ember (24..26) or a spark / hot coal (32 + ramp step 1..6), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
  *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2).
  *       - FLAMES: emitters on a jittered lattice over the burning ground (rows foreshortened, RY 0.8), kept whole or dropped by a
@@ -280,7 +280,7 @@ void main() {
   }
   // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
   // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
-  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0; int lvL = 1;
+  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0, BF = -1.0, CT = 0.0; int lvL = 1;
   if ( nearBed ) {
     int jHi = int(floor((c.y + reachUp) / spy)), jLo = int(floor((c.y - reachDn) / spy)) - 1;
     for ( int jj = 0; jj < 32; jj++ ) {
@@ -288,7 +288,7 @@ void main() {
       float dyc = max(0.0, (float(j) + 0.5) * spy - c.y);
       float xlo = c.x - max(0.0, dyc * hi0) - W2, xhi = c.x - min(0.0, dyc * lo0) + W2;
       int i0 = int(floor(xlo / sp)) - 1, i1 = int(floor(xhi / sp));
-      float rF = 0.0, rH = 0.0, rB = 0.0, rY = 0.0;
+      float rF = 0.0, rH = 0.0, rB = 0.0, rY = 0.0, tF = 0.0, tY = 0.0;
       for ( int ii = 0; ii < 12; ii++ ) {
         int i = i0 + ii; if ( i > i1 ) break;
         vec4 E1 = hb(i, j, 1);
@@ -376,12 +376,16 @@ void main() {
           float x = e.x + (B2.y - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + B2.z));
           float dx = (c.x - x) / (r * (1.05 - 0.45 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;   // (wide low, thin tips)
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; rF += q; rY += q * e.y; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
+          if ( q > 0.0 ) { q *= q; rF += q; rY += q * e.y; tF += q; tY += q * e.y; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
         }
       }
       // the union (silhouette) is the plain sum; the COLOUR is seen front first: a row further back shows through where the rows in
       // front are thin (between and above their tongues), so the bands flow across the body without per-tongue outlines
       F += rF; HT += TR * rH; BASE += TR * rB; WS += TR * rF; BY += TR * rY; TR *= exp(-2.2 * rF);
+      // (DEPTH: the bed row where the TONGUES (blobs, not the flat roots) seen front to back first cover this cell - a depth test on
+      // their silhouettes, not a blend of the rows: so the line between the tongues in front of a token and those behind it follows
+      // their outlines, never a straight column split)
+      CT += tF; if ( BF < 0.0 && CT >= 0.34 ) BF = tY / max(tF, 1e-4);
       if ( TR < 0.25 ) break;                                         // (opaque: the rows further back change nothing)
     }
   }
@@ -406,9 +410,11 @@ void main() {
       int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
       if ( band == 6 && st < 0.4 ) band = 5;                           // the cream core only in licks, never a slab
       if ( core > 0.5 && band < 3 ) band = 3;                          // (deep inside the body: no dark-red mottling)
-      // R: where this cell's flame STANDS - its emitters' bed row as seen (front rows first, like the colour), in cells below the
-      // cell (64 = level with it): the screen passes sort it against the tokens' feet
-      R = clamp(64 + int(floor((BY / max(WS, 1e-4) - c.y) / max(u, 0.25) + 0.5)), 1, 255); G = band + 1 + 8 * (lvL - 1);                             // (one layer: the outline is the merged silhouette only)
+      // R: where this cell's flame STANDS - the bed row of the tongues that cover it first (else the rows' blend), in whole art px
+      // (u cells), stored ABSOLUTE mod 255 (+1: 0 = no flame), so every cell of one tongue holds the same value (a code relative to
+      // the cell rounds differently row by row: a tongue standing level with a token's feet would flip in stripes); the screen passes
+      // unwrap it around the cell (DEPTH) and sort it against the tokens' feet
+      R = 1 + int(mod(floor(((BF >= 0.0 ? BF : BY / max(WS, 1e-4)) - uOrg.y) / max(u, 0.25) + 0.5), 255.0)); G = band + 1 + 8 * (lvL - 1);   // (R: area-local rows)                             // (one layer: the outline is the merged silhouette only)
     }
   }
 
@@ -745,6 +751,21 @@ void axisW(float t, float w, out float i0, out vec3 a) {
 const FOOTPRINT = `
 void main() {
   vec2 w = fwidth(vCell) * uK;
+#ifdef SIDE
+  // DEPTH: every screen pixel belongs WHOLE to one of the two layers (SIDE 0 = the fire layer under the tokens, 1 = the front layer
+  // above them): the front one when any cell of its footprint is a flame in front of a token's feet. Both layers compute the same
+  // colour, so the pair draws each pixel exactly once and a split pixel never lets the token show through between them (a seam)
+  bool own = false;
+  if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) own = ownCell(floor(vCell));
+  else if ( uTokN > 0 ) {
+    vec2 ww = clamp(w, vec2(0.01), vec2(2.0));
+    float jx, jy; vec3 bx, by;
+    axisW(vCell.x, ww.x, jx, bx); axisW(vCell.y, ww.y, jy, by);
+    for ( int j = 0; j < 3 && !own; j++ ) { if ( by[j] <= 0.0 ) continue;
+      for ( int i = 0; i < 3; i++ ) if ( bx[i] > 0.0 && ownCell(vec2(jx + float(i), jy + float(j))) ) { own = true; break; } }
+  }
+  if ( own != (SIDE == 1) ) { fragColor = vec4(0.0); return; }
+#endif
   if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) { fragColor = OUT(cellColor(floor(vCell))); return; }
   w = clamp(w, vec2(0.01), vec2(2.0));
   float ix, iy; vec3 ax, ay;
@@ -799,13 +820,21 @@ uniform int uTokN;
 uniform float uU;         // art px scale (cells per art px): R's step
 bool inFront(vec2 cf, int r) {
   if ( r <= 0 || uTokN == 0 ) return false;
-  vec2 q = cf + 0.5; float by = q.y + float(r - 64) * max(uU, 0.25);
+  // (R - 1 = the bed row in art px mod 255; a flame's bed lies at most 24 art px above the cell and 230 below it)
+  float uq = max(uU, 0.25); vec2 q = cf + 0.5; int lo = int(floor(q.y / uq)) - 24;
+  float by = (float(lo) + mod(float(r - 1 - lo), 255.0)) * uq;   // (float mod: never negative)
   for ( int k = 0; k < 16; k++ ) {
     if ( k >= uTokN ) break;
     vec4 T = uTok[k];
     if ( q.x >= T.x && q.x < T.z && q.y >= T.y && q.y < T.w && by > T.w ) return true;
   }
   return false;
+}
+// a cell the FRONT layer owns: a flame cell (not an ember / spark / coal) in front of a token's feet over that token
+bool ownCell(vec2 cf) {
+  if ( uTokN == 0 ) return false;
+  ivec4 a = art(ivec2(cf));
+  return a.g < 24 && inFront(cf, a.r);
 }`;
 const SHOW = `${SHOW_COMMON}
 ${FLAME_COLOR}
@@ -813,12 +842,13 @@ ${DEPTH}
 vec4 cellColor(vec2 cf) {
   ivec2 p = ivec2(cf);
   ivec4 a = art(p);
-  vec4 col = inFront(cf, a.r) ? vec4(0.0) : flameColor(p, a);
+  vec4 col = flameColor(p, a);
   if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
   if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);   // sparks and hot coals
   return col;
 }
 #define OUT(c) ((c) * uAlpha)
+#define SIDE 0
 ${FOOTPRINT}`;
 
 // the FRONT layer (above the tokens, under the smoke): only the flame cells in front of a token's feet, over that token
@@ -828,10 +858,13 @@ ${DEPTH}
 vec4 cellColor(vec2 cf) {
   ivec2 p = ivec2(cf);
   ivec4 a = art(p);
-  if ( a.g >= 24 || !inFront(cf, a.r) ) return vec4(0.0);
-  return flameColor(p, a);
+  vec4 col = flameColor(p, a);
+  if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
+  if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);
+  return col;
 }
 #define OUT(c) ((c) * uAlpha)
+#define SIDE 1
 ${FOOTPRINT}`;
 
 // the SMOKE layer (ABOVE the tokens: smoke drifting over a token veils it, thinly at level 1, more at 3). It is composited over the
@@ -907,10 +940,10 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v6"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v11"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
-  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v4"),
-  front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v1"),
+  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v6"),
+  front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v3"),
   smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v2"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")

@@ -55,6 +55,8 @@ export class FireDisplay {
     this.front.eventMode = "none"; this.front.interactiveChildren = false;
     Object.assign(this.front, { elevation: 0, sortLayer: 750, sort: 0, _lastSortedIndex: 0 });
     canvas.primary.addChild(this.front);
+    // (the particles in front of a token's feet over that token: above the front flames, the way every particle is above its flames)
+    this.partsFront = new PIXI.Container(); this.partsFront.zIndex = 1; this.front.sortableChildren = true; this.front.addChild(this.partsFront);
     this.tokDirty = true;
     this.areas = new Map();          // area id -> { key, area, field, mesh, slots }
     this.pool = [];                  // particle sprites
@@ -178,7 +180,8 @@ export class FireDisplay {
       const bx = a.area.box ?? a.area.rect, x0 = geo.ox + bx.x0 * geo.ap, y0 = geo.oy + bx.y0 * geo.ap, x1 = geo.ox + bx.x1 * geo.ap, y1 = geo.oy + bx.y1 * geo.ap;
       const on = toks.filter((k) => k.r[0] < x1 && k.r[2] > x0 && k.r[1] < y1 && k.r[3] > y0);
       for ( const k of on ) top = Math.max(top, k.e);
-      a.mesh.setTokens(on.map((k) => k.r));
+      a.toks = on.map((k) => k.r);
+      a.mesh.setTokens(a.toks);
     }
     if ( this.front.elevation !== top ) { this.front.elevation = this.above.elevation = top; canvas.primary.sortDirty = true; }
     this.stats.tokens = toks.length;
@@ -195,7 +198,11 @@ export class FireDisplay {
         const s = this.sprite(n++);
         s.texture = p.size === 2 ? this.puffTex() : PIXI.Texture.WHITE;
         s.tint = p.color;
-        s.position.set(geo.ox + (r.x0 + p.x) * ap, geo.oy + (r.y0 + p.y) * ap);
+        const sx = geo.ox + (r.x0 + p.x) * ap, sy = geo.oy + (r.y0 + p.y) * ap, by = geo.oy + (r.y0 + p.by) * ap;
+        s.position.set(sx, sy);
+        // DEPTH, the flames' rule: a particle over a token standing here whose source lies in front of the token's feet goes above it
+        const box = a.toks?.length && a.toks.some((t) => sx >= t[0] && sx < t[2] && sy >= t[1] && sy < t[3] && by > t[3]) ? this.partsFront : this.parts;
+        if ( s.parent !== box ) box.addChild(s);
         s.scale.set(p.size === 2 ? ap : ap / 16);   // (Texture.WHITE is 16 x 16)
         s.visible = true;
       }
