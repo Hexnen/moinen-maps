@@ -1,0 +1,172 @@
+{
+ "id": "hJ9bxb2OK7nYfxIZ",
+ "turns": [
+  "Superhero",
+  "Atom Eve",
+  "test",
+  "TT0",
+  "Battle Beast"
+ ]
+}
+{
+ "user": "Test Gracz 1",
+ "home": [
+  1176,
+  360,
+  2.2
+ ]
+}
+{
+ "user": "Test Gracz 2",
+ "home": [
+  400,
+  500,
+  2.2
+ ]
+}
+[[68,"start","Superhero r1"],[2144,"Superhero attacks Atom Eve",0],[8139,"next","Atom Eve r1"],[10733,"Atom Eve P1 moves Atom Eve 4 sq","ok"],[13745,"Atom Eve P1 attacks Battle Beast",0],[20238,"next","test r1"],[22302,"test moves 3 sq","ok"],[25319,"next","TT0 r1"],[29404,"next","Battle Beast r1"],[31986,"Battle Beast moves 8 sq","ok"],[35491,"Battle Beast attacks Atom Eve",0],[41984,"end combat","ok"]]
+{"user":"Test Gracz 1","spanS":47.6,"moves":8,"awayS":30.6,"barsS":0,"outs":2,"returns":2,"endAway":false,"last":[47707,1176,360,2.2,0],"home":[1176,360,2.2]}
+ mv [2211,3406,[627,686,2.2]]
+ mv [4716,5605,[1022,511,1.54]]
+ mv [10106,11003,[1176,360,2.198]]
+ mv [22302,23707,[360,737,2.2]]
+ mv [27414,28504,[360,337,2.2]]
+ mv [31502,32709,[720,737,2.2]]
+ mv [34108,35701,[1031,554,2.013]]
+ mv [43514,44504,[1176,360,2.2]]
+  {"t":1646,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":2236,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-0-mw885sxh-t","homing":false,"chip":false}
+  {"t":2236,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":4717,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":"r-zMLo99IvmE0Fl4Cu-t","homing":false,"chip":false}
+  {"t":4717,"k":"shot","form":"take","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":9581,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":9581,"k":"end","form":"take","why":"done","kind":"attack","taken":false}
+  {"t":9705,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":9866,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":10022,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":10146,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":null,"homing":true,"chip":false}
+  {"t":11007,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":16217,"k":"shot","form":"soft","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":20919,"k":"end","form":"soft","why":"done","kind":"attack"}
+  {"t":21807,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":22382,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":null,"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-2-mw8868ho-t","homing":false,"chip":false}
+  {"t":22382,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":24882,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":24882,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":25037,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":25194,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":25350,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":25508,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":26873,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":27466,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-3-mw886cel-t","homing":false,"chip":false}
+  {"t":27466,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":29965,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":29965,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":30118,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":30272,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":30431,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":30584,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":30972,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":31552,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-4-mw886fkg-t","homing":false,"chip":false}
+  {"t":31552,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":34057,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":720.0035511363636,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":34057,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":34143,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":720.0035511363636,"y":737.2727272727273,"scale":2.2},"out":null,"beat":"mv-0n9vn3gRYfxLIqRb-t","homing":false,"chip":false}
+  {"t":34143,"k":"shot","form":"take","kind":"move","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":35697,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":35697,"k":"end","form":"take","why":"done","kind":"move","taken":false}
+  {"t":35854,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":36005,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":36157,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":36316,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":37966,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":"r-v6S9dUZEu5n4rAvK-t","homing":false,"chip":false}
+  {"t":37966,"k":"shot","form":"take","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":41444,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41444,"k":"end","form":"take","why":"done","kind":"attack","taken":false}
+  {"t":41599,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41755,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41906,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":42067,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":1176,"y":360,"scale":2.2},"parked":{"x":1030.779201280717,"y":554.2510926502844,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":43559,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":true,"chip":false}
+  {"t":43560,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":true,"chip":false}
+  {"t":44484,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false}
+{"user":"Test Gracz 2","spanS":47.3,"moves":9,"awayS":42.3,"barsS":0,"outs":1,"returns":1,"endAway":false,"last":[47406,400,500,2.2,0],"home":[400,500,2.2]}
+ mv [1802,2810,[627,686,2.2]]
+ mv [4301,5204,[1022,511,1.54]]
+ mv [9905,10801,[1176,437,2.2]]
+ mv [15803,16702,[825,639,1.72]]
+ mv [22002,23012,[360,737,2.2]]
+ mv [27005,28107,[360,337,2.2]]
+ mv [31107,32301,[720,737,2.2]]
+ mv [33702,35301,[1031,554,2.013]]
+ mv [43107,44402,[400,500,2.2]]
+  {"t":1265,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":1860,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":null,"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-0-mw885sxh-t","homing":false,"chip":false}
+  {"t":1860,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":4329,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":null,"out":null,"beat":"r-zMLo99IvmE0Fl4Cu-t","homing":false,"chip":false}
+  {"t":4329,"k":"shot","form":"take","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":8104,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":8104,"k":"end","form":"take","why":"done","kind":"attack","taken":false}
+  {"t":8256,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":8407,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":8560,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":8713,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:tKG4CivDF3o5mEsp","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":9335,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":9922,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1021.7142857142858,"y":511.27272727272725,"scale":1.54},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-1-mw885z5v-t","homing":false,"chip":false}
+  {"t":9922,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":12420,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":12420,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":12571,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":12729,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":12883,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":13039,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":15837,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1176,"y":437.27272727272725,"scale":2.2},"out":null,"beat":"r-ry83GcwvH3s031if-t","homing":false,"chip":false}
+  {"t":15837,"k":"shot","form":"take","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":20648,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":20648,"k":"end","form":"take","why":"done","kind":"attack","taken":false}
+  {"t":20808,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":20961,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":21115,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":21271,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:TWM41bmJO6fZEqBF","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":21421,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":22001,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":825,"y":639.12,"scale":1.7200854700854702},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-2-mw8868ho-t","homing":false,"chip":false}
+  {"t":22001,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":24503,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":24503,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":24653,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":24814,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":24970,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":25124,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:S3UNxBXN8ApJrx40","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":26496,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":27084,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-3-mw886cel-t","homing":false,"chip":false}
+  {"t":27084,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":29587,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":29587,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":29740,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":29896,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":30052,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":30210,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:aOI2s4nc8erGq70Y","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":30593,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":31170,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":"tn-hJ9bxb2OK7nYfxIZ-1-4-mw886fkg-t","homing":false,"chip":false}
+  {"t":31170,"k":"shot","form":"take","kind":"turn","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":33672,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":720.0035511363636,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":33672,"k":"end","form":"take","why":"done","kind":"turn","taken":false}
+  {"t":33768,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":720.0035511363636,"y":737.2727272727273,"scale":2.2},"out":null,"beat":"mv-0n9vn3gRYfxLIqRb-t","homing":false,"chip":false}
+  {"t":33768,"k":"shot","form":"take","kind":"move","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":35308,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":35308,"k":"end","form":"take","why":"done","kind":"move","taken":false}
+  {"t":35458,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":35614,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":35768,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":35923,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":37598,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":"r-v6S9dUZEu5n4rAvK-t","homing":false,"chip":false}
+  {"t":37598,"k":"shot","form":"take","kind":"attack","lane":"cbt-hJ9bxb2OK7nYfxIZ"}
+  {"t":41538,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41538,"k":"end","form":"take","why":"done","kind":"attack","taken":false}
+  {"t":41689,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41842,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":41996,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":false}
+  {"t":42154,"k":"stage","on":true,"combat":"hJ9bxb2OK7nYfxIZ","turn":"1:6FQBtI8dHT0S8EKk","home":{"x":400,"y":500,"scale":2.2},"parked":{"x":1030.7660960780495,"y":554.2580820917069,"scale":2.0125},"out":null,"beat":null,"homing":false,"chip":true}
+  {"t":43179,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":true,"chip":false}
+  {"t":43180,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":true,"chip":false}
+  {"t":44319,"k":"stage","on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false}

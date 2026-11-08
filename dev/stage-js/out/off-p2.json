@@ -1,0 +1,550 @@
+{
+ "user": "Test Gracz 2",
+ "spanS": 46.9,
+ "moves": 15,
+ "awayS": 32.2,
+ "barsS": 26.1,
+ "outs": 7,
+ "returns": 7,
+ "endAway": false,
+ "last": [
+  47003,
+  400,
+  500,
+  2.2,
+  0
+ ],
+ "home": [
+  400,
+  500,
+  2.2
+ ],
+ "moveList": [
+  [
+   1702,
+   2608,
+   [
+    720,
+    720,
+    1.863
+   ]
+  ],
+  [
+   4213,
+   6809,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   8237,
+   9103,
+   [
+    1200,
+    470,
+    2.485
+   ]
+  ],
+  [
+   12101,
+   13007,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   14208,
+   15200,
+   [
+    1111,
+    420,
+    1.863
+   ]
+  ],
+  [
+   16710,
+   18601,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   20105,
+   21005,
+   [
+    1050,
+    545,
+    3
+   ]
+  ],
+  [
+   24002,
+   25001,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   26302,
+   27202,
+   [
+    627,
+    669,
+    1.863
+   ]
+  ],
+  [
+   28606,
+   29608,
+   [
+    1012,
+    542,
+    1.591
+   ]
+  ],
+  [
+   32403,
+   33405,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   34311,
+   35308,
+   [
+    425,
+    720,
+    1.863
+   ]
+  ],
+  [
+   36804,
+   37804,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ],
+  [
+   39407,
+   40303,
+   [
+    425,
+    320,
+    1.863
+   ]
+  ],
+  [
+   41904,
+   42916,
+   [
+    400,
+    500,
+    2.2
+   ]
+  ]
+ ],
+ "log": [
+  {
+   "t": 1772,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 1772,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 4270,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 4270,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn",
+   "taken": false
+  },
+  {
+   "t": 4306,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 4306,
+   "k": "shot",
+   "form": "take",
+   "kind": "move",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 5838,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 5838,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "move",
+   "taken": false
+  },
+  {
+   "t": 8238,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 8238,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 12096,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 12096,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack",
+   "taken": false
+  },
+  {
+   "t": 14291,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 14291,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 16801,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 16801,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn",
+   "taken": false
+  },
+  {
+   "t": 16838,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 16838,
+   "k": "shot",
+   "form": "take",
+   "kind": "move",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 17670,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 17670,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "move",
+   "taken": false
+  },
+  {
+   "t": 20151,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 20151,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 24066,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 24066,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack",
+   "taken": false
+  },
+  {
+   "t": 26337,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 26337,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 28685,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 28685,
+   "k": "shot",
+   "form": "take",
+   "kind": "attack",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 32465,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 32465,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "attack",
+   "taken": false
+  },
+  {
+   "t": 34384,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 34384,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 36880,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 36880,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn",
+   "taken": false
+  },
+  {
+   "t": 39431,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 39431,
+   "k": "shot",
+   "form": "take",
+   "kind": "turn",
+   "lane": "cbt-spVbnTVpM620R7l7"
+  },
+  {
+   "t": 41930,
+   "k": "stage",
+   "on": false,
+   "combat": null,
+   "turn": null,
+   "home": null,
+   "parked": null,
+   "out": null,
+   "beat": null,
+   "homing": false,
+   "chip": false
+  },
+  {
+   "t": 41930,
+   "k": "end",
+   "form": "take",
+   "why": "done",
+   "kind": "turn",
+   "taken": false
+  }
+ ]
+}
