@@ -153,6 +153,11 @@ function onDirector(kind, d) {
     }
     sync();
   } else if ( kind === "state" && d && !d.on && (st.parked || st.combat) ) endStage();
+  else if ( kind === "skip" ) {
+    // the GM's skip: a beat on screen ended "skip" and went home already; one that ended a moment ago left the camera parked - the GM
+    // skipping now means the same (the players get their own view back), not "nothing to skip"
+    if ( !beat && !homing && st.parked && st.home && on() ) { trace.push([Math.round(performance.now()), "skip", "home", "GM skip while parked"]); if ( trace.length > 30 ) trace.shift(); afterScreen(() => goHome(st.home)); }
+  }
 }
 
 /**

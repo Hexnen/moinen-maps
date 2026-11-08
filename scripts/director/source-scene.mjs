@@ -4,7 +4,7 @@ import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
 import * as SC from "./scene-core.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
-import { HOOK, R, gmState, myMode, killed, isOn, busy, holds, cameraHeld } from "./director.mjs";
+import { HOOK, R, gmState, myMode, killed, isOn, busy, holds, cameraHeld, typing, escTaken } from "./director.mjs";
 import { isOrbit } from "../zones/orbit.mjs";
 import * as Reveal from "../net/reveal.mjs";
 
@@ -249,7 +249,8 @@ function play(form, { forced = false } = {}) {
   // the player: Esc / a click cuts it (the camera is back at once); the wheel, another button or a pan key takes the camera
   a.onKey = (ev) => {
     if ( A !== a ) return;
-    if ( ev.key === "Escape" ) { ev.preventDefault(); ev.stopImmediatePropagation(); cut(); }
+    // (Esc as during a take-over: left to a text field; with a window / menu open it cuts AND goes on to Foundry, which closes them)
+    if ( ev.key === "Escape" ) { if ( typing(ev) ) return; cut(); if ( !escTaken() ) { ev.preventDefault(); ev.stopImmediatePropagation(); } }
     else if ( PAN_KEYS.has(ev.code) && !ev.target?.closest?.("input, textarea, [contenteditable]") ) takeCamera();
   };
   a.onPtr = (ev) => {

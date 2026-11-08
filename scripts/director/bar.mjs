@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { api as moduleApi } from "../attrs.mjs";
 import * as D from "./director.mjs";
 
 /**
@@ -99,13 +100,19 @@ function place() {
   el.style.left = `${x}px`; el.style.bottom = `${bottom}px`;
 }
 
+/** A combat on this scene with the combat stage on: the players' cameras may be parked with the action. */
+function staged() {
+  try { const c = game.combats?.viewed ?? game.combat; return !!moduleApi.directorStage?.settings?.().on && !!c?.started && (!c.scene || c.scene.id === canvas.scene?.id); } catch { return false; }
+}
 function update() {
   if ( !el ) return;
   const s = D.status();
   el.classList.toggle("is-off", !s.on);
   const pw = el.querySelector("[data-act=power]"); pw.setAttribute("aria-pressed", String(!!s.on));
   if ( !s.on ) { el.dataset.st = "off"; const t = el.querySelector("[data-st-text]"), off = T("Dir.bar.stOff"); if ( t.textContent !== off ) t.textContent = off; return; }
-  const st = s.show ? "show" : s.take ? "take" : s.soft.length ? "soft" : s.paused ? "paused" : "idle";
+  // (a GM's client in "bar" mode plays nothing itself: what the table sees now is in s.watch)
+  const w = (s.watch ?? []).filter((q) => q.on), table = w.some((q) => q.form === "take") ? "take" : w.length ? "soft" : null;
+  const st = s.show ? "show" : s.take || table === "take" ? "take" : s.soft.length || table ? "soft" : s.paused ? "paused" : "idle";
   el.dataset.st = st;
   const what = s.last?.caption?.title ? ` · ${s.last.caption.title}` : "";
   const text = st === "show" ? T("Dir.bar.stShow") : st === "take" ? `${T("Dir.bar.stTake")}${what}` : st === "soft" ? `${T("Dir.bar.stSoft")}${what}` : st === "paused" ? T("Dir.bar.stPaused") : T("Dir.bar.stIdle");
@@ -114,7 +121,8 @@ function update() {
   p.setAttribute("aria-pressed", String(!!s.paused));
   p.querySelector("i").className = s.paused ? "fa-solid fa-play" : "fa-solid fa-pause";
   const pl = T(s.paused ? "Dir.bar.resume" : "Dir.bar.pause"); p.setAttribute("aria-label", pl); p.dataset.tooltip = pl;
-  el.querySelector("[data-act=skip]").disabled = !(s.take || s.soft.length || s.show || s.queued);
+  // (skip also while a combat is staged: the players' camera may be parked with the last beat - skip sends it home)
+  el.querySelector("[data-act=skip]").disabled = !(s.take || s.soft.length || s.show || s.queued || s.watch?.length || staged());
   const k = el.querySelector("[name=k]"); if ( document.activeElement !== k ) { k.value = String(s.k ?? 1); showK(Number(k.value)); }
 }
 /** The intensity slider's fill and its percent. */
@@ -162,5 +170,6 @@ export function registerBar() {
   Hooks.on("canvasReady", syncBar);
   Hooks.on("canvasTearDown", removeBar);
   Hooks.on(D.HOOK, (kind) => { if ( kind === "state" ) syncBar(); });
+  for ( const h of ["updateCombat", "deleteCombat", "createCombat"] ) Hooks.on(h, () => { if ( el ) update(); });
   Hooks.on("collapseSidebar", () => setTimeout(place, 50));
 }

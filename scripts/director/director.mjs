@@ -57,15 +57,15 @@ const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
 
 function registerSettings() {
   const D = (k) => `MOINENMAPS.Dir.set.${k}`;
-  game.settings.register(MODULE_ID, "director", { scope: "world", config: false, type: Object, default: { v: 1, preset: "standard", over: {} }, onChange: () => { rCache = null; tell("state"); } });
-  game.settings.register(MODULE_ID, "directorOn", { scope: "world", config: false, type: Boolean, default: false, onChange: (v) => { if ( !v ) skipHere(null); tell("state"); } });
-  game.settings.register(MODULE_ID, "directorGm", { scope: "world", config: false, type: Object, default: { paused: false, k: 1 }, onChange: () => tell("state") });
+  game.settings.register(MODULE_ID, "director", { scope: "world", config: false, type: Object, default: { v: 1, preset: "standard", over: {} }, onChange: () => { rCache = null; warmSoon(); tell("state"); } });
+  game.settings.register(MODULE_ID, "directorOn", { scope: "world", config: false, type: Boolean, default: false, onChange: (v) => { if ( !v ) skipHere(null, "off"); else warmSoon(600); tell("state"); } });
+  game.settings.register(MODULE_ID, "directorGm", { scope: "world", config: false, type: Object, default: { paused: false, k: 1 }, onChange: () => { warmSoon(); tell("state"); } });
   game.settings.register(MODULE_ID, "dirMode", {
     name: D("mode"), hint: D("modeHint"), scope: "client", config: true, type: String, default: "auto",
-    choices: { auto: D("modeAuto"), full: D("modeFull"), soft: D("modeSoft"), off: D("modeOff") }, onChange: () => tell("state")
+    choices: { auto: D("modeAuto"), full: D("modeFull"), soft: D("modeSoft"), off: D("modeOff") }, onChange: () => { warmSoon(); tell("state"); }
   });
   game.settings.register(MODULE_ID, "dirIntensity", {
-    name: D("intensity"), hint: D("intensityHint"), scope: "client", config: true, type: Number, default: 1, range: { min: 0, max: 1, step: 0.05 }, onChange: () => tell("state")
+    name: D("intensity"), hint: D("intensityHint"), scope: "client", config: true, type: Number, default: 1, range: { min: 0, max: 1, step: 0.05 }, onChange: () => { warmSoon(); tell("state"); }
   });
 }
 
@@ -393,6 +393,7 @@ function start(shot) {
     try { const f = ph.check(shot, form); if ( f === "none" || (f === "soft" && form === "take") ) form = f; } catch ( err ) { console.error(`${MODULE_ID} | director play`, err); form = "none"; }
   }
   last = { id: shot.id, kind: shot.kind, form, planned: shot.form, at: sharedNow(), caption: captionText(shot) };
+  if ( myMode() === "bar" && !killed() ) watch(shot);                                            // (the GM's bar: what the table sees)
   if ( form === "none" ) { tell("state"); return; }
   const late = sharedNow() - shot.t0;
   if ( form === "take" && late > shot.lead + shot.hold * 0.5 ) form = "soft";
@@ -525,11 +526,19 @@ function playTake(shot, ctx, late = 0, sg = null) {
     Promise.resolve().then(() => cues.get(shot.cue)(shot)).then(land, () => land(null));
     at(shot.lead + CUE_MAX, () => land(null));                                                   // (never without the result)
   } else if ( shot.impact >= 0 ) at(shot.impact, hit);
-  if ( dr.captions && ph?.caption !== false && (captionText(shot).title || shot.after) ) at(Math.round(shot.lead * 0.45), () => {
-    if ( c.cap ) return;                                                                         // (the cue landed first: its caption is up)
-    const t = captionText(shot);
-    if ( t.title ) c.cap = Ov.caption({ ...t, lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") });
-  });
+  // the caption is made and placed (hit tests of the interface, in slices) as the camera sets off - a frame after the shot's start, not
+  // in its task - still invisible, and slides in at 0.45 of the way: on a slow client too (placed only then, it came up to a second late)
+  const t0cap = dr.captions && ph?.caption !== false ? captionText(shot) : null;
+  if ( t0cap?.title ) {
+    const lb = Screen.debug?.()?.bars ? look.lbHeight : 0;
+    let setup = null, due = false;
+    Ov.later(() => {
+      if ( cur !== c || c.done || c.cap ) return;                                                // (the cue landed first: its result is up)
+      setup = c.cap = Ov.caption({ ...t0cap, lb, hint: T("Dir.cutHint"), hold: true });
+      if ( due ) setup.reveal();
+    });
+    at(Math.round(shot.lead * 0.45), () => { due = true; if ( setup && c.cap === setup ) setup.reveal(); });
+  }
   // (a cue that has not landed by the planned end is waited for until CUE_MAX lands it anyway, and its result then still gets its
   // time on screen: slow dice must never end the shot on the setup caption with the result unseen)
   const EXTRA = 2200, plannedEnd = shot.lead + shot.hold, cap = plannedEnd + EXTRA + (shot.cue ? CUE_AFTER : 0);
@@ -570,9 +579,9 @@ function playTake(shot, ctx, late = 0, sg = null) {
   window.addEventListener("wheel", c.onPtr, { capture: true, passive: true });
 }
 /** Esc in a text field (chat, a sheet's input): it belongs to the field. */
-const typing = (ev) => { const el = ev.target; return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? "")) && el.type !== "checkbox" && el.type !== "radio"; };
+export const typing = (ev) => { const el = ev.target; return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? "")) && el.type !== "checkbox" && el.type !== "radio"; };
 /** Something Foundry's own Esc would close (core "dismiss": the menu, a context menu, a tour, open windows): then Esc goes on to it too. */
-function escTaken() {
+export function escTaken() {
   if ( ui.menu?.rendered || ui.context?.element || foundry.nue?.Tour?.tourInProgress ) return true;
   if ( Object.values(ui.windows ?? {}).some((a) => a?.rendered) ) return true;
   for ( const a of foundry.applications?.instances?.values?.() ?? [] ) if ( a.hasFrame && a.rendered ) return true;
@@ -640,6 +649,36 @@ function lookAt(shot) {
   canvas.animatePan({ x: shot.x, y: shot.y, duration: 700 });
 }
 
+/**
+ * The shots a client in "bar" mode (a GM: the bar's status line only) does not play itself but the table sees now: { id -> { shot,
+ * form, timer } } until the shot's end (a combat-lane beat a little longer: the stage keeps the players' camera there after it). The bar
+ * shows them and keeps skip ready for them.
+ */
+const watched = new Map();
+const WATCH_AFTER = 4000;
+function watch(shot) {
+  const old = watched.get(shot.id); if ( old ) { clearTimeout(old.timer); clearTimeout(old.ends); }
+  const left = Math.max(400, Dir.shotEnd(shot) - sharedNow()), extra = shot.form === "take" && shot.lane?.startsWith("cbt-") ? WATCH_AFTER : 0;
+  const w = { shot, form: shot.form, ends: extra ? setTimeout(() => tell("state"), left + 20) : 0 };
+  w.timer = setTimeout(() => { if ( watched.get(shot.id) === w ) { watched.delete(shot.id); tell("state"); } }, left + extra);
+  watched.set(shot.id, w);
+}
+
+/**
+ * The caption places of the take-overs to come, found ahead in idle time (overlay warmCaptions; nothing is shown): only on a client
+ * that plays take-overs with captions. Again after a window resize, a change of the intensity or the look (the letterbox height).
+ */
+let warmT = 0;
+function warmSoon(ms = 2500) {
+  clearTimeout(warmT);
+  warmT = setTimeout(() => {
+    warmT = 0;
+    if ( killed() || !isOn() || !canvas?.ready || myMode() !== "full" || !R().captions ) return;
+    const k = Dir.intensity(Number(setting("dirIntensity")), Number(gmState().k));
+    try { Ov.warmCaptions([0, Dir.lookFor(lookValues(), k, !!clientOpts().reduced).lbHeight]); } catch ( err ) { console.warn(`${MODULE_ID} | director warm`, err); }
+  }, ms);
+}
+
 /* ---------------------------------------------------------------- GM controls (the bar) */
 
 /** Skip: the take-over on screen ends everywhere (the camera returns), soft shots go, the queue is emptied. During a show: Reveal now. */
@@ -649,14 +688,21 @@ export async function skip() {
   const id = cur?.shot?.id ?? null;
   game.socket?.emit(CHANNEL, { t: "dir", op: "skip", id });
   skipHere(id);
-  Hooks.callAll(HOOK, "skip", { id });
   return true;
 }
-function skipHere(id) {
+/**
+ * The GM's skip (or the director switched off: why "off") on this client: what plays or waits here ends, the camera returns. Hook "skip"
+ * on every client (a skip): the combat stage then also sends home a camera that a beat which ended a moment ago left parked - a GM who
+ * skips just after the beat's end means the same thing as one who skips during it.
+ */
+function skipHere(id, why = "skip") {
   if ( isLeader() ) { queue.clear(); queue.release(sharedNow()); }
   for ( const [sid, t] of waiting ) { clearTimeout(t); waiting.delete(sid); seen.add(sid); }
   if ( cur ) endTake("skip");
   for ( const sid of [...softs.keys()] ) endSoft(sid, "skip");
+  for ( const [, w] of watched ) { clearTimeout(w.timer); clearTimeout(w.ends); }
+  watched.clear();
+  if ( why === "skip" ) Hooks.callAll(HOOK, "skip", { id });
 }
 export async function setPaused(paused) { if ( game.user.isGM ) await game.settings.set(MODULE_ID, "directorGm", { ...gmState(), paused: !!paused }); }
 export async function setGmIntensity(k) { if ( game.user.isGM ) await game.settings.set(MODULE_ID, "directorGm", { ...gmState(), k: Dir.clamp(Number(k), 0, 1) }); }
@@ -718,6 +764,8 @@ function onShow(kind) {
 function onTearDown() {
   for ( const [, t] of waiting ) clearTimeout(t);
   waiting.clear();
+  for ( const [, w] of watched ) { clearTimeout(w.timer); clearTimeout(w.ends); }
+  watched.clear();
   if ( cur ) endTake("scene");
   for ( const id of [...softs.keys()] ) endSoft(id, "scene");
   Ov.clearAll();
@@ -733,6 +781,7 @@ export function status() {
   return {
     killed: killed(), on: isOn(), leader: leaderId(), isLeader: isLeader(), enabled: R().enabled, paused: gmState().paused, k: gmState().k, mode: myMode(), show: showOn,
     take: cur ? { id: cur.shot.id, kind: cur.shot.kind, taken: !!cur.taken } : null, soft: [...softs.keys()], waiting: [...waiting.keys()], last,
+    watch: [...watched.values()].map((w) => ({ id: w.shot.id, kind: w.shot.kind, form: w.form, on: sharedNow() < Dir.shotEnd(w.shot) })),
     queued: queue.buckets.length, screen: Screen.owner
   };
 }
@@ -753,12 +802,15 @@ Hooks.once("ready", () => {
   wireInput();
   Hooks.on("moinenMapsCinematic", onShow);
   Hooks.on("canvasTearDown", onTearDown);
+  Hooks.on("canvasReady", () => warmSoon());
+  window.addEventListener("resize", () => warmSoon(1500), { passive: true });
   Hooks.on(HOOK, (kind, data) => { if ( kind === "emit" && data && typeof data === "object" ) apiEmit(data); });
   Hooks.on("userConnected", (u, on) => { if ( !on ) states.delete(u.id); tell("state"); if ( isLeader() ) schedulePump(); });
   // the leader election: this client's tab and its time online, the others' on request; re-checked when the scene a user views changes
   me.since = Number(game.time?.serverTime) || Date.now(); me.graceUntil = performance.now() + 1500;
   announce("hello");
   setTimeout(() => { if ( isLeader() ) schedulePump(); tell("state"); }, 1600);
+  warmSoon(3000);
   document.addEventListener("visibilitychange", () => { announce("hi"); if ( isLeader() ) schedulePump(); });
   Hooks.on("renderSceneNavigation", () => leaderId());
   Hooks.on("updateScene", (sc, ch) => { if ( "active" in (ch ?? {}) ) leaderId(); });

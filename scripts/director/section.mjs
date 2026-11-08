@@ -64,6 +64,12 @@ export function renderDirectorPanel(host) {
       if ( sel.dataset.opts !== want ) { sel.innerHTML = presetOpts(b).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join(""); sel.dataset.opts = want; }
       writeControl(sel, b.preset);
     }
+    // (the looks: the GM's own cinematic presets come and go - saved in the look panel below - while this panel is open)
+    const lk = ctl("look");
+    if ( lk && !lk.contains(document.activeElement) ) {
+      const want = JSON.stringify(lookOptions());
+      if ( lk.dataset.opts !== want ) { lk.innerHTML = lookOptions().map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join(""); lk.dataset.opts = want; }
+    }
     for ( const k of Dir.KEYS ) { const c = ctl(k); if ( c && !c.contains(document.activeElement) ) writeControl(c, r[k]); }
     { const c = ctl("directorOn"); if ( c && !c.contains(document.activeElement) ) writeControl(c, D.isOn()); }
     host.querySelector(".mm-dir-panel")?.classList.toggle("is-off", !D.isOn() || !r.enabled);

@@ -4,7 +4,7 @@ import * as Dir from "./core.mjs";
 import * as M from "./move-core.mjs";
 import { emit, isLeader, killed, isOn, publicName, registerPlay, myMode, R, HOOK } from "./director.mjs";
 import { Screen } from "./stage.mjs";
-import { safeRect } from "./overlay.mjs";
+import { safeRect, freeRect, hitAt, hitsFresh, sliced } from "./overlay.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
 
@@ -111,7 +111,8 @@ const handler = {
     if ( !t ) return "none";                                                       // not in my sight (hidden, out of vision, gone)
     if ( form === "soft" && p.follow && !game.user.isGM && canvas.visibility?.tokenVision && !sees(shot.x, shot.y) ) return "none";   // (the marker would show where it went)
     const box = p.follow ? shot.box : tokenBox(t, grid() * 0.5);
-    if ( M.inView(box, viewFor(shot), safeRect(), 12) ) return "none";             // it is on my screen already
+    // (on my screen already: in the part no window covers - a move under an open sheet is not "seen")
+    if ( M.inView(box, viewFor(shot), freeRect(), 12) ) return "none";
     return null;
   },
   drive(shot, api) {
@@ -188,34 +189,50 @@ function dropBanner(ms = 0) {
   if ( ms ) { b.el.classList.add("is-out"); setTimeout(gone, ms); } else gone();
 }
 /**
- * The banner's top edge: under Foundry's top navigation, at least 3 % down, and below anything else another module put across the top
- * centre (an initiative bar, a HUD): the first free 48 px down the middle (the banner is centred on the window: three columns across its
- * width are probed). Cost: a hit test costs ~0.3 ms on a page with a long chat log (more on a slow machine) and this needs 24 or more of
- * them: they run in slices of SLICE_MS between frames (the banner slides in when its place is known, a few frames later), never as one
- * long frame on every client at the turn change. `alive()` false: stop; `done(top)` once.
+ * Where the banner goes. Across: centred on the window - or, when open windows narrow the free part of the map (a sheet on the right),
+ * on that free part, where the combat stage frames the combatant. Down: under Foundry's top navigation, at least 3 % down, and below
+ * anything else across the top there (an initiative bar, a HUD): the first free 48 px down the middle (three columns across its width;
+ * what blocks a column is skipped to its bottom edge at once). When nothing that free is found (above 40 % of the screen) it sits just
+ * below the bar across the top there - never under it. The hit tests (overlay hitAt: kept answers cost nothing, live ones ~0.3 ms, more on
+ * a slow machine) run in slices between frames (SLICE_MS), never as one long frame on every client at the turn change. `alive()` false:
+ * stop; `done(top)` once.
  */
 const SLICE_MS = 4;
-/** The next slice: after the next frame is drawn (one slice per frame; a hidden tab, where frames stop, goes on after 120 ms). */
-const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
-function bannerTop(alive, done) {
+function bannerX() {
+  try {
+    const f = freeRect(), a = safeRect();
+    if ( !f.covered && (Math.abs(f.x - a.x) > 1 || Math.abs(f.w - a.w) > 1) ) return f.x + f.w / 2;
+  } catch { /* the window's middle */ }
+  return innerWidth / 2;
+}
+function bannerTop(cx, alive, done) {
   const nav = document.getElementById("navigation")?.getBoundingClientRect?.();
-  let top = Math.max(nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 8 : 0, innerHeight * 0.03);
-  const cx = innerWidth / 2, OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right"]);
-  const freeAt = (x, y) => { const el = document.elementFromPoint(x, y); return !el || el === document.body || el === document.documentElement || OPEN.has(el.id) || el.tagName === "CANVAS"; };
-  const free = (y) => freeAt(cx, y) && freeAt(cx - 170, y) && freeAt(cx + 170, y);
-  let run = 0, y = 0;
-  const step = () => {
-    if ( !alive() ) return;
-    const t0 = performance.now();
-    try {
-      for ( ; y < innerHeight * 0.4; y += 6 ) {
-        if ( y > 0 && performance.now() - t0 > SLICE_MS ) { later(step); return; }
-        if ( free(y) ) { run += 6; if ( run >= 48 ) { top = Math.max(top, y - run + 6 + 8); break; } } else run = 0;
+  const top0 = Math.max(nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 8 : 0, innerHeight * 0.03), lim = innerHeight * 0.4;
+  const xs = [cx, cx - 170, cx + 170].map((x) => Math.min(innerWidth - 2, Math.max(2, x)));
+  try { hitsFresh(); } catch { /* */ }
+  let run = 0, y = 0, under = 0, top = null;
+  const step = (t0) => {
+    while ( y < lim ) {
+      let block = null;
+      for ( const x of xs ) { const h = hitAt(x, y); if ( h.kind !== "open" ) { block = h; break; } }
+      if ( !block ) {
+        run += 6;
+        if ( run >= 48 ) { top = y - run + 6 + 8; return true; }
+        y += 6;
+      } else {
+        run = 0;
+        // (a box of the interface: on below it at once - every point above its bottom edge is covered by it)
+        if ( block.kind === "ui" && block.bottom > y ) {
+          if ( block.top <= top0 + 60 ) under = Math.max(under, block.bottom);      // (a bar across the top: the fallback goes below it)
+          y = Math.max(y + 6, Math.ceil(block.bottom / 6) * 6);
+        }
+        else y += 6;
       }
-    } catch { /* the place so far */ }
-    done(Math.min(top, innerHeight * 0.4));
+      if ( performance.now() - t0 > SLICE_MS ) return false;
+    }
+    return true;
   };
-  step();
+  sliced(step, alive, () => done(Math.min(Math.max(top0, top ?? (under ? under + 8 : top0)), lim)));
 }
 /** Shows a banner { kick, name, sub, tag, round, icon } for `ms`; a new one replaces the one on screen at once. */
 export function showBanner({ kick, name = "", sub = "", tag = "", round = false, icon = "fa-solid fa-hourglass-half", ms = 2400 }) {
@@ -226,10 +243,14 @@ export function showBanner({ kick, name = "", sub = "", tag = "", round = false,
   el.innerHTML = `<div class="mm-dmv-kick"><i class="${esc(icon)}" inert></i><span>${esc(kick)}</span></div>${name ? `<div class="mm-dmv-name">${esc(name)}</div>` : ""}`
     + `${sub ? `<div class="mm-dmv-sub">${esc(sub)}</div>` : ""}${tag ? `<div class="mm-dmv-tag">${esc(tag)}</div>` : ""}`;
   const b = banner = { el, timer: 0 };
-  // (placed before it is in the page: the probes must not meet it; it slides in once its place is known)
-  bannerTop(() => banner === b, (top) => {
+  const cx = bannerX();
+  // (in the page at once, every part of it still transparent - the hit tests pass through it; it slides in once its place is known)
+  el.style.left = `${Math.round(cx)}px`;
+  host().appendChild(el);
+  bannerTop(cx, () => banner === b, (top) => {
     el.style.setProperty("--mm-dmv-top", `${Math.round(top)}px`);
-    host().appendChild(el);
+    const w = el.offsetWidth;                                       // (never off the screen: a wide name next to a window)
+    if ( w ) el.style.left = `${Math.round(Math.min(innerWidth - w / 2 - 8, Math.max(w / 2 + 8, cx)))}px`;
     void el.offsetWidth;
     el.classList.add("is-in");
     b.timer = setTimeout(() => { if ( banner?.el === el ) dropBanner(520); }, ms);

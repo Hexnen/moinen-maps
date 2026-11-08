@@ -140,77 +140,184 @@ export function toScreen(x, y) {
 
 /**
  * The take-over caption: `kick` (kind, small caps with the icon), `title` (what happened); `lb` = the letterbox height (% of the screen)
- * so the caption sits in the bottom bar when it is tall enough, else just above the bottom. Returns { out(), remove() }.
+ * so the caption sits in the bottom bar when it is tall enough, else just above the bottom. Returns { el, reveal(), out(), remove() }.
+ * `hold`: it is made and placed now but slides in only at reveal() (a take-over makes its caption when the camera sets off, so the place
+ * is known by the moment it is due, also on a slow client); without `hold` it slides in as soon as its place is known.
  */
-export function caption({ kick, title, icon, lb = 0, hint = "" }) {
+export function caption({ kick, title, icon, lb = 0, hint = "", hold = false }) {
   const el = document.createElement("div");
   el.className = `mm-dir-cap${lb >= 7 ? "" : " is-low"}`;
   el.style.setProperty("--mm-dir-lb", `${lb}vh`);
   el.innerHTML = `<div class="mm-dir-kick">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}<span>${esc(kick)}</span></div><div class="mm-dir-title">${esc(title)}</div>${hint ? `<div class="mm-dir-hint">${esc(hint)}</div>` : ""}`;
   host().appendChild(el);
-  let gone = false, shown = false;
-  // (it slides in once its place is known: until then every part of it is transparent - the hidden state of the slide-in)
-  const show = () => { if ( gone || shown ) return; shown = true; void el.offsetWidth; el.classList.add("is-in"); };
-  clearOfUi(el, () => !gone, show);
+  let gone = false, leaving = false, shown = false, placed = false, want = !hold;
+  // (it slides in once its place is known AND it is due: until then every part of it is transparent - the hidden state of the slide-in)
+  const show = () => { if ( gone || leaving || shown || !placed || !want ) return; shown = true; void el.offsetWidth; el.classList.add("is-in"); };
+  clearOfUi(el, () => !gone && !leaving, () => { placed = true; show(); });
   const remove = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); };
-  return { el, out: (ms = 420) => { if ( gone ) return; el.classList.add("is-out"); setTimeout(remove, ms); }, remove };
+  return {
+    el, remove, get placed() { return placed; }, get shown() { return shown; },
+    reveal: () => { want = true; show(); },
+    out: (ms = 420) => { if ( gone || leaving ) return; leaving = true; el.classList.add("is-out"); setTimeout(remove, ms); }
+  };
+}
+
+/**
+ * HIT TESTS OF THE INTERFACE (where the caption and the turn banner may sit): what is on top at a screen point, past the director's own
+ * layers. A hit test (elementsFromPoint) costs ~0.3 ms on a page with a long chat log and ~2-4 ms on a slow client (4x CPU), and a
+ * caption needs dozens: the answers are kept per point (HITS, on a 4 px grid) - the interface around the map hardly ever moves - so a
+ * caption whose points are known is placed at once, on any client. What can make a kept answer wrong: the window size (all go), a
+ * window opened / closed / moved (the points under it go), anything else (a module's buttons): a caption placed from kept answers
+ * re-checks its points afterwards, live, in slices, and moves if its place changed.
+ */
+const SKIP = ".mm-dir, .mm-cin, .mm-dmv, .mm-dst-chip";
+const OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right", "ui-bottom"]);
+const HITS = new Map();
+let hitView = "", hitWins = [];
+const snap = (v) => Math.round(v / 4) * 4;
+/** What is at (x, y) now: { kind: "open" (the map, an empty interface region), "full" (a full-screen layer) or "ui" (interface), top, bottom }. */
+function probe(x, y) {
+  for ( const e of document.elementsFromPoint?.(x, y) ?? [] ) {
+    if ( e.closest?.(SKIP) ) continue;
+    if ( e === document.body || e === document.documentElement || OPEN.has(e.id) || e.tagName === "CANVAS" ) return { kind: "open" };
+    const b = e.getBoundingClientRect();
+    return { kind: b.height > innerHeight * 0.6 || b.width > innerWidth * 0.9 ? "full" : "ui", top: b.top, bottom: b.bottom };
+  }
+  return { kind: "open" };
+}
+/** The answer at (x, y) (snapped to the grid): kept, or a live hit test (then kept). `memo` false: always live. { kind, top, bottom, kept } */
+export function hitAt(x, y, memo = true) {
+  const sx = snap(x), sy = snap(y), k = `${sx}|${sy}`;
+  if ( memo ) { const h = HITS.get(k); if ( h ) return { ...h, kept: true }; }
+  const h = probe(sx, sy);
+  if ( HITS.size > 6000 ) HITS.clear();
+  HITS.set(k, h);
+  return { ...h, kept: false };
+}
+/** Before a placement: drop the kept answers the window size or the open windows may have changed since. */
+export function hitsFresh() {
+  const view = `${innerWidth}x${innerHeight}`;
+  if ( view !== hitView ) { HITS.clear(); hitView = view; hitWins = windowRects(); return; }
+  const now = windowRects(), key = (r) => `${Math.round(r.x0)},${Math.round(r.y0)},${Math.round(r.x1)},${Math.round(r.y1)}`;
+  const was = new Set(hitWins.map(key)), is = new Set(now.map(key));
+  const changed = [...hitWins.filter((r) => !is.has(key(r))), ...now.filter((r) => !was.has(key(r)))];
+  hitWins = now;
+  if ( !changed.length || !HITS.size ) return;
+  for ( const k of [...HITS.keys()] ) {
+    const [x, y] = k.split("|").map(Number);
+    if ( changed.some((r) => x >= r.x0 - 4 && x <= r.x1 + 4 && y >= r.y0 - 4 && y <= r.y1 + 4) ) HITS.delete(k);
+  }
 }
 
 /**
  * The lower third never sits under Foundry's interface: centred over the free part of the screen (not under an open window), and lifted
  * above the hotbar (macro slots, the chat input...) when the letterbox bar puts it there.
- * Cost: a hit test (elementsFromPoint) costs ~0.3 ms on a page with a long chat log (more on a slow machine) and the caption needs 21 to
- * 63 of them: they run in slices of SLICE_MS between frames (the caption shows when its place is known, a few frames later), never as
- * one long frame in the middle of the camera move. `alive()` false: stop; `done()` once the place is set.
+ * The hit tests (hitAt: 21 to 80 of them) run in slices of SLICE_MS between frames, never as one long frame in the middle of the camera
+ * move; kept answers cost nothing, so a caption whose points are known is placed in the same frame. `alive()` false: stop; `done()` once
+ * the place is set (then a live re-check of the kept answers, which moves the caption only when the interface changed under it).
  */
 const SLICE_MS = 4;
+const COL = 80;                          // px between two probed columns, from the caption's middle (the same columns for every caption)
 /** The next slice: after the next frame is drawn (one slice per frame; a hidden tab, where frames stop, goes on after 120 ms). */
-const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
+export const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
+/** Runs `step(t0)` (true = finished) once per slice until it finishes or `alive()` turns false; then `done()`. */
+export function sliced(step, alive, done) {
+  const go = () => {
+    if ( !alive() ) return;
+    let fin = true;
+    try { fin = step(performance.now()); } catch { fin = true; }
+    if ( fin ) done(); else later(go);
+  };
+  go();
+}
+/**
+ * The caption's place (arithmetic over the hit answers): from its default box `R0` (screen px, centred on `cx`), points across its width
+ * and height; anything of the interface there (its top below 45 % of the screen) lifts it above the highest one, and the lifted box is
+ * probed again (three passes at most). `res` = { lift, bottom (px from the screen bottom), kept (a kept answer was used) }.
+ */
+function placement(R0, cx, memo) {
+  const res = { lift: false, bottom: null, kept: false };
+  let R = R0, pass = 0, pts = null, k = 0, top = Infinity;
+  const points = (r) => {
+    const half = Math.max(1, r.width / 2 - 1), n = Math.floor(half / COL), xs = [];
+    for ( let j = -n; j <= n; j++ ) xs.push(cx + j * COL);
+    if ( half - n * COL > 8 ) xs.push(cx - half, cx + half);
+    const out = [];
+    for ( const x of xs ) for ( const fy of [0.2, 0.6, 0.95] ) out.push([x, r.top + r.height * fy]);
+    return out;
+  };
+  const step = (t0) => {
+    for ( ;; ) {
+      if ( !pts ) { pts = points(R); k = 0; top = Infinity; }
+      while ( k < pts.length ) {
+        const h = hitAt(pts[k][0], pts[k][1], memo); k++;
+        if ( h.kept ) res.kept = true;
+        if ( h.kind === "ui" && h.top > innerHeight * 0.45 ) top = Math.min(top, h.top);
+        if ( k < pts.length && !h.kept && performance.now() - t0 > SLICE_MS ) return false;
+      }
+      if ( top === Infinity ) return true;
+      res.lift = true; res.bottom = Math.round(innerHeight - top + 10);
+      R = { left: R.left, width: R.width, height: R.height, top: innerHeight - res.bottom - R.height };   // (is-low: its bottom edge there)
+      pts = null;
+      if ( ++pass >= 3 ) return true;
+      if ( performance.now() - t0 > SLICE_MS ) return false;
+    }
+  };
+  return { res, step };
+}
 function clearOfUi(el, alive = () => true, done = () => {}) {
+  let cx = 0, R0 = null;
+  const low0 = el.classList.contains("is-low");
   try {
     const f = freeRect();
-    el.style.left = `${Math.round(f.x + f.w / 2)}px`;
+    cx = Math.round(f.x + f.w / 2);
+    el.style.left = `${cx}px`;
     el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
+    hitsFresh();
+    const r = el.getBoundingClientRect(); R0 = { left: r.left, width: r.width, top: r.top, height: r.height };
   } catch { done(); return; }
-  // whatever interface sits where the caption would be (Foundry's hotbar, the players list, the chat input, another module's
-  // buttons above the hotbar): the caption goes above the highest of them (probed across its width, twice: lifting may meet more)
-  const OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right", "ui-bottom"]);
-  const blocker = (x, y) => {
-    for ( const e of document.elementsFromPoint?.(x, y) ?? [] ) {
-      if ( e.closest?.(".mm-dir, .mm-cin, .mm-dmv") ) continue;
-      if ( e === document.body || e === document.documentElement || OPEN.has(e.id) || e.tagName === "CANVAS" ) return null;
-      const b = e.getBoundingClientRect();
-      if ( b.height > innerHeight * 0.6 || b.width > innerWidth * 0.9 ) return null;   // (a full-screen layer: not interface)
-      return b;
-    }
-    return null;
+  const apply = (res, ease = false) => {
+    if ( ease ) el.style.transition = "bottom 260ms ease-out";
+    if ( res.lift ) { el.classList.add("is-low"); el.style.bottom = `${res.bottom}px`; }
+    else { el.classList.toggle("is-low", low0); el.style.bottom = ""; }
   };
-  let pass = 0, pts = null, k = 0, top = Infinity;
-  const step = () => {
-    if ( !alive() ) return;
-    try {
-      const t0 = performance.now();
-      for ( ;; ) {
-        if ( !pts ) {
-          const r = el.getBoundingClientRect();
-          pts = []; k = 0; top = Infinity;
-          for ( let i = 0; i <= 6; i++ ) for ( const fy of [0.2, 0.6, 0.95] ) pts.push([r.left + (r.width * i) / 6, r.top + r.height * fy]);
-        }
-        while ( k < pts.length ) {
-          const b = blocker(pts[k][0], pts[k][1]); k++;
-          if ( b && b.top > innerHeight * 0.45 ) top = Math.min(top, b.top);
-          if ( k < pts.length && performance.now() - t0 > SLICE_MS ) { later(step); return; }
-        }
-        if ( top === Infinity ) break;
-        el.classList.add("is-low"); el.style.bottom = `${Math.round(innerHeight - top + 10)}px`;
-        pts = null;
-        if ( ++pass >= 3 ) break;
-        if ( performance.now() - t0 > SLICE_MS ) { later(step); return; }
-      }
-    } catch { /* the default place */ }
+  const p = placement(R0, cx, true);
+  sliced(p.step, alive, () => {
+    apply(p.res);
     done();
+    if ( !p.res.kept ) return;
+    // (placed from kept answers: the same points live once more, in slices, after it is up; it moves only when the interface changed)
+    const q = placement(R0, cx, false);
+    later(() => sliced(q.step, alive, () => { if ( q.res.lift !== p.res.lift || q.res.bottom !== p.res.bottom ) apply(q.res, true); }));
+  });
+}
+/**
+ * Fills the kept answers for the captions to come (the widest one, where it sits with and without the letterbox bars `lbs`), in slices,
+ * once the page is idle: the first caption of a take-over is then placed at once too, also on a slow client. Points already kept cost
+ * nothing; nothing is shown.
+ */
+let warming = false;
+export function warmCaptions(lbs = [0]) {
+  if ( warming || !document.getElementById("interface") ) return;
+  warming = true;
+  const todo = [...new Set(lbs.map((v) => (v >= 7 ? v : 0)))];
+  const next = () => {
+    const lb = todo.shift(); if ( lb === undefined ) { warming = false; return; }
+    const el = document.createElement("div");
+    el.className = `mm-dir-cap${lb >= 7 ? "" : " is-low"}`; el.style.setProperty("--mm-dir-lb", `${lb}vh`); el.style.visibility = "hidden";
+    el.innerHTML = `<div class="mm-dir-kick"><i class="fa-solid fa-burst" inert></i><span>Wwwww</span></div><div class="mm-dir-title" style="white-space:nowrap;overflow:hidden">${"W".repeat(80)}</div><div class="mm-dir-hint">W</div>`;
+    host().appendChild(el);
+    let gone = false;
+    const end = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); later(next); };
+    try {
+      const f = freeRect(), cx = Math.round(f.x + f.w / 2);
+      el.style.left = `${cx}px`; el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
+      hitsFresh();
+      const r = el.getBoundingClientRect(), p = placement({ left: r.left, width: r.width, top: r.top, height: r.height }, cx, true);
+      sliced(p.step, () => !gone, end);
+    } catch { end(); }
   };
-  step();
+  (globalThis.requestIdleCallback ?? ((fn) => setTimeout(fn, 200)))(() => next(), { timeout: 3000 });
 }
 
 /**
@@ -271,4 +378,4 @@ export function marker({ x, y, text, icon, onClick }) {
 
 /** Everything off at once (scene change, kill switch). */
 export function clearAll() { for ( const m of [...marks] ) { marks.delete(m); m.el.remove(); } root?.remove(); root = null; maybeDrop(); }
-export const debug = () => ({ root: !!root, marks: marks.size, panHook: panHook !== null, captions: root?.querySelectorAll(".mm-dir-cap").length ?? 0 });
+export const debug = () => ({ root: !!root, marks: marks.size, panHook: panHook !== null, captions: root?.querySelectorAll(".mm-dir-cap").length ?? 0, hits: HITS.size });
