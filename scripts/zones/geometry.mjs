@@ -103,6 +103,42 @@ class SegGrid {
   }
 }
 
+/**
+ * A smoothed copy of a line (0 = as drawn, 1 = very smooth): resampled every `step` pixels, then moving-average passes. The ends stay
+ * where they are (lines still meet where they met); a closed line (ends together) is smoothed all the way round.
+ */
+export function smoothLine(p, amount, step) {
+  const passes = Math.round(Math.max(0, Math.min(1, amount)) * 14);
+  if ( !passes || p.length < 6 ) return p;
+  // resample
+  const q = [p[0], p[1]];
+  let carry = 0;
+  for ( let i = 2; i < p.length; i += 2 ) {
+    const ax = p[i - 2], ay = p[i - 1], bx = p[i], by = p[i + 1], L = Math.hypot(bx - ax, by - ay);
+    let s = step - carry;
+    while ( s < L ) { q.push(ax + ((bx - ax) * s) / L, ay + ((by - ay) * s) / L); s += step; }
+    carry = L - (s - step);
+  }
+  q.push(p[p.length - 2], p[p.length - 1]);
+  const n = q.length >> 1;
+  if ( n < 3 ) return p;
+  const closed = Math.hypot(q[0] - q[q.length - 2], q[1] - q[q.length - 1]) < step * 0.5;
+  let a = q;
+  for ( let k = 0; k < passes; k++ ) {
+    const b = a.slice();
+    for ( let i = 0; i < n; i++ ) {
+      let im = i - 1, ip = i + 1;
+      if ( closed ) { if ( i === 0 || i === n - 1 ) { im = n - 2; ip = 1; } }
+      else if ( i === 0 || i === n - 1 ) continue;
+      b[i * 2] = (a[im * 2] + 2 * a[i * 2] + a[ip * 2]) / 4;
+      b[i * 2 + 1] = (a[im * 2 + 1] + 2 * a[i * 2 + 1] + a[ip * 2 + 1]) / 4;
+    }
+    if ( closed ) { b[(n - 1) * 2] = b[0]; b[(n - 1) * 2 + 1] = b[1]; }
+    a = b;
+  }
+  return simplify(a, step * 0.05);
+}
+
 /* ---------------------------------------------------------------- the planar graph */
 
 /**
@@ -425,6 +461,37 @@ function chains(V, E, keep) {
   for ( let v = 0; v < V.length; v++ ) if ( inc[v].length && inc[v].length !== 2 ) for ( const i of inc[v] ) if ( !used[i] ) out.push(walk(v, i));
   for ( let i = 0; i < E.length; i++ ) if ( keep[i] && !used[i] ) out.push(walk(E[i][0], i));
   return out;
+}
+
+/**
+ * The top-left-most point of a zone where a badge of radius `minR` fits (clear of every border by `minR`): scans the zone's
+ * bounding box and keeps the inside point closest to its top-left corner. Falls back to the label point. Cached per zone and radius.
+ */
+export function cornerPoint(zone, minR) {
+  const key = Math.round(minR * 4) / 4;
+  zone._corner ??= new Map();
+  if ( zone._corner.has(key) ) return zone._corner.get(key);
+  const rings = zone.rings, o = rings[0];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for ( let i = 0; i < o.length; i += 2 ) { x0 = Math.min(x0, o[i]); x1 = Math.max(x1, o[i]); y0 = Math.min(y0, o[i + 1]); y1 = Math.max(y1, o[i + 1]); }
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const inside = (x, y) => pointInRing(o, x, y) && !rings.slice(1).some((r) => pointInRing(r, x, y));
+  const clearOf = (x, y, need) => {
+    for ( const r of rings ) for ( let i = 0, n = r.length; i < n; i += 2 ) { const j = (i + 2) % n; if ( distToSeg(x, y, r[i], r[i + 1], r[j], r[j + 1]).d < need ) return false; }
+    return true;
+  };
+  // candidates ordered by closeness to the top-left corner; the first that fits wins
+  const N = 28, cand = [];
+  for ( let i = 0; i <= N; i++ ) for ( let j = 0; j <= N; j++ ) {
+    const x = x0 + (w * i) / N, y = y0 + (h * j) / N;
+    cand.push([(x - x0) / w + (y - y0) / h, x, y]);
+  }
+  cand.sort((a, b) => a[0] - b[0]);
+  let best = null;
+  for ( const [, x, y] of cand ) if ( inside(x, y) && clearOf(x, y, minR) ) { best = { x, y }; break; }
+  best ??= { x: zone.label.x, y: zone.label.y };
+  zone._corner.set(key, best);
+  return best;
 }
 
 /* ---------------------------------------------------------------- queries */

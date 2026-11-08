@@ -40,9 +40,10 @@ function bar(host, ctx) {
     const size = mode === "erase"
       ? optRange({ name: "eraser", label: Z("f.eraser"), value: setting("zonesEraser") ?? 0.5, min: 0.1, max: 4, step: 0.1, hint: Z("h.eraser") })
       : mode === "draw" ? optRange({ name: "snap", label: Z("f.snap"), value: S?.snap ?? 0.25, min: 0, max: 1, step: 0.05, hint: Z("h.snap") }) : "";
+    const smooth = optRange({ name: "smooth", label: Z("f.smooth"), value: S?.smooth ?? 0.3, min: 0, max: 1, step: 0.05, hint: Z("h.smooth") });
     host.innerHTML = `${btn("undo", "fa-solid fa-rotate-left", "undo", !Zones.canUndo())}${btn("redo", "fa-solid fa-rotate-right", "redo", !Zones.canRedo())}
       ${btn("trim", "fa-solid fa-scissors", "trimHint", !Zones.zones(), Z("trim"))}
-      ${size}<span class="mm-ws-hint mm-z-status">${esc(statusText())}</span>
+      ${smooth}${size}<span class="mm-ws-hint mm-z-status">${esc(statusText())}</span>
       ${optHint(Z(mode === "erase" ? "hintErase" : mode === "draw" ? "hintDraw" : "hintPick"))}`;
   };
   render();
@@ -52,8 +53,8 @@ function bar(host, ctx) {
     if ( a === "undo" ) Zones.undoEdit(); else if ( a === "redo" ) Zones.redoEdit(); else if ( a === "trim" ) Zones.trim();
   };
   const onChange = (ev) => {
-    const c = ev.target.closest?.("[name=snap]"); if ( !c ) return;
-    Zones.setParams({ snap: Number(c.value) });
+    const c = ev.target.closest?.("[name=snap], [name=smooth]"); if ( !c ) return;
+    Zones.setParams({ [c.name]: Number(c.value) });
   };
   host.addEventListener("click", onClick);
   host.addEventListener("change", onChange);
@@ -77,6 +78,7 @@ function settingsPanel(host) {
       ${row(Z("f.fill"), `<range-picker name="fill" min="0" max="1" step="0.05" value="${L.fill}"></range-picker>`)}
       ${row(Z("f.ink"), `<range-picker name="ink" min="0" max="2" step="0.05" value="${L.ink}"></range-picker>`)}
       ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}
+      ${row(Z("f.place"), sel("place", [["center", Z("place.center")], ["corner", Z("place.corner")]], L.place))}
       ${row(Z("f.numbers"), sel("numbers", [["always", Z("numbers.always")], ["hover", Z("numbers.hover")], ["never", Z("numbers.never")]], L.numbers), Z("h.numbers"))}
       </section><section class="mm-wp-sec"><h4>${esc(Z("sec.mine"))}</h4>
       ${optCheck({ name: "dist", label: Z("f.distances"), checked: setting("zonesDistances") !== false, hint: Z("h.distances") })}
@@ -88,7 +90,7 @@ function settingsPanel(host) {
     const c = ev.target.closest?.("[name]"); if ( !c ) return;
     const v = c.matches("input[type=checkbox]") ? c.checked : c.value;
     if ( c.name === "preset" ) Zones.setParams({ preset: v });
-    else if ( ["who", "color", "numbers"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
+    else if ( ["who", "color", "numbers", "place"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
     else if ( ["fill", "ink"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
   };
   const onClick = async (ev) => {

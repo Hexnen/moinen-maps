@@ -41,7 +41,10 @@ export const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k);
 
 function rebuild() {
   const g = gridSize();
-  Z = S && S.strokes.size ? Geo.buildZones([...S.strokes.values()], { snap: S.snap * g, merge: 0.5, minArea: 0.15 * g * g }) : null;
+  // smoothing works on screen-sized steps of the line (scene pixels), so it looks the same on small- and large-grid maps
+  const step = Math.max(3, Math.min(g * 0.15, 12));
+  const lines = S ? [...S.strokes.values()].map((p) => Geo.smoothLine(p, S.smooth, step)) : [];
+  Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: 0.15 * g * g }) : null;
 }
 
 /** Who sees the finished zones: always the GM drawing them, else as the scene says. */
@@ -230,10 +233,11 @@ export function setParams(patch) {
   if ( !game.user.isGM || !S ) return;
   const next = Model.canonical(S);
   if ( patch.preset != null && preset(patch.preset) ) next.preset = patch.preset;
+  if ( patch.smooth != null ) next.smooth = Math.min(1, Math.max(0, Number(patch.smooth) || 0));
   if ( patch.snap != null ) next.snap = Math.min(Model.LIMITS.snap[1], Math.max(Model.LIMITS.snap[0], Number(patch.snap) || 0));
   if ( patch.look ) next.look = Model.cleanLook({ ...next.look, ...patch.look });
   if ( JSON.stringify(Model.encode(next)) === snapshot() ) return;
-  const snapChanged = next.snap !== S.snap;
+  const snapChanged = next.snap !== S.snap || next.smooth !== S.smooth;
   S = Model.canonical(next);
   if ( snapChanged ) rebuild();
   refresh(); scheduleSave(); tell("params");

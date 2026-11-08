@@ -6,6 +6,8 @@
  * One container in the primary group above the roads (245) and districts (250), under tiles, drawings and tokens.
  */
 
+import { cornerPoint } from "./geometry.mjs";
+
 const TINTS = [0xd9a441, 0x5aa9c9, 0x9bc46b, 0xc97b9b, 0x8c7bd1, 0xd47a4a, 0x6fc2b0];
 
 function trace(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); }
@@ -119,7 +121,9 @@ export class ZoneDisplay {
       const t = new PIXI.Text(text, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(r * (text.length > 1 ? 1.0 : 1.2)), fill: d != null ? ringCol : light, align: "center" });
       t.resolution = Math.min(8, Math.max(2, 3 * zoom)); t.anchor.set(0.5, 0.52);
       b.addChild(t);
-      b.position.set(z.label.x, z.label.y);
+      // the zone's middle, or its top-left corner (clear of the borders by a little more than the badge)
+      const at = look.place === "corner" ? cornerPoint(z, r * 1.5 + 3 * px) : z.label;
+      b.position.set(at.x, at.y);
       b.alpha = d == null && dist ? 0.45 : 1;
       this.badges.addChild(b);
     }

@@ -1499,5 +1499,10 @@
   "MOINENMAPS.Zones.numbers.always": "Zawsze",
   "MOINENMAPS.Zones.numbers.hover": "Tylko po najechaniu",
   "MOINENMAPS.Zones.numbers.never": "Nigdy",
-  "MOINENMAPS.Zones.h.numbers": "Po najechaniu: numer pokazuje tylko strefa pod kursorem. Odległości wokół zaznaczonego tokena widać zawsze."
+  "MOINENMAPS.Zones.h.numbers": "Po najechaniu: numer pokazuje tylko strefa pod kursorem. Odległości wokół zaznaczonego tokena widać zawsze.",
+  "MOINENMAPS.Zones.f.place": "Pozycja numeru",
+  "MOINENMAPS.Zones.place.center": "Środek strefy",
+  "MOINENMAPS.Zones.place.corner": "Lewy górny róg",
+  "MOINENMAPS.Zones.f.smooth": "Wygładzanie",
+  "MOINENMAPS.Zones.h.smooth": "Wygładza granice stref (linie ołówka zostają, jak je narysowano). 0 = dokładnie jak narysowane."
 }

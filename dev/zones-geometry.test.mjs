@@ -79,5 +79,23 @@ for ( let k = 0; k < 200; k++ ) { const p = []; let x = rnd() * 4000, y = rnd() 
 const t0 = performance.now(); R = Z.buildZones(many, { snap: 15, minArea: 2000 }); const ms = performance.now() - t0;
 check(ms < 1500, `200 messy strokes in ${ms.toFixed(0)} ms (${R.zones.length} zones, ${R.stats.segments} segments)`);
 
+// 9. smoothing: ends stay put, a zigzag gets calmer, the sketch keeps its 2 zones, a closed loop stays closed
+const zig = []; for ( let i = 0; i <= 40; i++ ) zig.push(i * 10, i % 2 ? 6 : -6);
+const sm = Z.smoothLine(zig, 0.6, 5);
+check(sm[0] === 0 && sm[1] === -6 && sm[sm.length - 2] === 400 && sm[sm.length - 1] === zig[zig.length - 1], "smooth: ends stay where they were");
+const amp = (p) => Math.max(...p.filter((_, i) => i % 2).slice(2, -2).map(Math.abs));
+check(amp(sm) < 2, `smooth: zigzag amplitude 6 -> ${amp(sm).toFixed(2)}`);
+check(Z.smoothLine(zig, 0, 5) === zig, "smooth 0: the line as drawn");
+R = Z.buildZones(sketch.map((p) => Z.smoothLine(p, 1, 5)), { snap: 10, minArea: 100 });
+check(R.zones.length === 2, `smooth 1: sketch still 2 zones (got ${R.zones.length})`);
+const loop = []; for ( let i = 0; i <= 48; i++ ) { const a = (i / 48) * Math.PI * 2; loop.push(200 + 100 * Math.cos(a) + (i % 2 ? 8 : 0), 200 + 100 * Math.sin(a)); }
+loop[loop.length - 2] = loop[0]; loop[loop.length - 1] = loop[1];
+R = Z.buildZones([Z.smoothLine(loop, 1, 5)], { snap: 5 });
+check(R.zones.length === 1, `smooth 1: closed wobbly loop stays one zone (got ${R.zones.length})`);
+// 10. a badge in the top-left corner sits inside the zone, clear of its borders
+R = Z.buildZones([[0, 0, 400, 0, 400, 300, 0, 300, 0, 0]], { snap: 5 });
+const cp = Z.cornerPoint(R.zones[0], 20);
+check(cp.x >= 20 && cp.y >= 20 && cp.x < 60 && cp.y < 60, `corner badge near the top left, clear of the border (${cp.x.toFixed(0)}, ${cp.y.toFixed(0)})`);
+
 console.log(failed ? `${failed} failed` : "all zones geometry checks passed");
 process.exit(failed ? 1 : 0);
