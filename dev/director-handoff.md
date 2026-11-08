@@ -242,3 +242,160 @@ Each agent appends: date, branch, what was done, verified vs not.
 
 ### Lane 4 state
 - Lane 4's `moinen-maps` junction was pointed at this worktree for the tests and set back to `C:\mmwt-director` afterwards. World copy: test combats deleted, Battle Beast back at (700,700), Atom Eve healed, the director switch left OFF; a small blast painted at (1350,250) on `director-test`.
+
+## 2026-11-08 - adversary fixes (agent director-fix), branch `director-fix` (from main b4f7cf5)
+
+Scope: every finding of `C:/mmwt-adv1/director-adversary-1.md` and `C:/mmwt-adv2/director-adversary-2.md` EXCEPT the combat camera ping-pong (a separate "combat stage mode" agent). The turn/move sources and the queue's lane rules were not touched, apart from one line in `source-move.mjs` (the banner).
+
+### Fixes (finding -> what changed)
+- **Shots from a non-leader cut to 600 ms** (adv2):
+  - Cause: an event that crossed the socket had `dur: null`, which became 0.
+  - Fix: `core.mjs` `num()` now treats null / "" / booleans as missing. The same guard covers x, y, weight and t.
+- **Players could force take-overs, skip shots, or play past the pause** (adv1, adv2):
+  - The socket handler now uses the sender id that the server appends.
+  - An event from a player is a request (`core.fromPlayer`): no force / lane / free / quick, weight at most 0.85. The GM's pause and the cooldowns apply. At most 8 per 10 s per player.
+  - `skip` is accepted only from a GM.
+  - A `shot` record is accepted only from a GM or the leader.
+  - The public API and the "emit" hook on a player's client send the same request form (`apiEmit`). The module's own sources keep their full events.
+- **Leader choice; GM on another scene; GM tab in the background** (adv1, adv2):
+  - `core.pickLeader` ranks clients in this order:
+    1. on the players' (active) scene;
+    2. tab visible;
+    3. GM before player;
+    4. online the longest (each client announces `{vis, since}`; a new client leads only after 1.5 s);
+    5. user id.
+  - So when the GM prepares another scene, another GM on the players' scene leads; if there is none, a player client on that scene stands in.
+  - A lead change hands the queue over (op "handover"): pending events, cooldown/rest history, lastTake/busyUntil, and the last events for "cut to last". The old leader then forgets them.
+  - A handover from a non-GM is clamped and its events become requests, unless that client was the leader before.
+- **A take-over could show a place in fog** (adv1):
+  - `canSee` now requires the FOCUS to be in sight; a box corner is no longer enough.
+  - Moves keep the box rule, because their play handler checks the token itself.
+- **Names a player should not know** (adv1, adv2):
+  - `tokenName` shows a name only when this player can already read it:
+    - their own token;
+    - a visible token with name display on hover or always;
+    - a user's assigned character;
+    - a non-hidden combatant of a started combat on this scene (the tracker name);
+    - the speaker of the roll's chat message.
+  - Hidden tokens are never named.
+- **Clicks and drags were swallowed during a shot** (adv2):
+  - A left press on the board freezes the camera and goes on to Foundry.
+  - On release, a click (short, under 6 px) cuts the shot and returns to the player's view.
+  - A drag ends the shot as `taken`, and the view stays where the player put it.
+  - The follow drive pauses while the button is pressed.
+- **Esc** (adv1, adv2):
+  - In a text field it is left alone.
+  - With a menu, context menu, tour or window open, it cuts the shot and passes on, so Foundry closes them.
+  - Otherwise it cuts the shot and is eaten (the game menu does not open).
+- **LockView and Hot Pan** (adv2, adv1):
+  - `cameraHeld()` is true when LockView locks panning or Hot Pan is on. Take-overs then come as soft markers; this includes the scene arrival.
+  - A LockView zoom-only lock keeps the player's zoom.
+  - If Hot Pan is switched on mid-shot, the shot ends as `taken` with no return.
+- **sketch-reveal** (adv1):
+  - If a sketch-reveal transition overlay is present at canvasReady, the director plays no arrival; sketch-reveal owns the opening.
+  - While a sketch-reveal overlay is on screen, the director counts as busy (soft).
+- **Open windows and the hotbar** (adv1, adv2):
+  - `overlay.freeRect()` is the safe rect minus open windows (the biggest free piece). `frameShot` frames the place into that rect.
+  - If windows leave no usable free piece, the shot comes soft.
+  - The lower-third caption is centred over the free rect and lifted above any interface element under it.
+- **Plus Ultra already shows the result** (adv2):
+  - When Invincible Plus Ultra's splash shows this roll on this client, the dice cue returns `quiet`. The caption keeps only the setup line ("Omni-Man -> Kid Omni-Man").
+- **Double caption** (adv2): a take-over ends the soft markers at the same place.
+- **Heavy news dropped** (adv1): an event that is downgraded by cooldown or rest is never dropped as "just shown"; it comes soft at least.
+- **Banner for a hidden token** (adv1): players get no turn banner when the combatant's token is hidden. The GM sees the banner with a "hidden" tag.
+- **Merged count included GM-only events** (adv2): `merged()` counts and lists kinds from public events only.
+- `dev/director-check.mjs`: the synthetic click now sends pointerup at the press position, so it counts as a click under the new rule.
+
+### Not bugs
+- **Roll result and move path reach players early** (adv2): Foundry already sends the same data at the same time.
+  - The public roll's ChatMessage, with the full roll, reaches every client before the dice land; Dice So Nice only hides it.
+  - `moveToken` fires on every client with the full waypoints.
+  - Moves of hidden tokens are GM-only events and are never sent to players.
+- **Raw scene name on the arrival card** (adv1): this is by design. It matches what the navigation bar shows; it is an existing open decision.
+- **Damage marker next to the "Damage taken" card** (adv2): kept, because the marker shows where it happened. The duplicate result caption is now quiet.
+
+### Verified
+Lane 5 served this worktree. Tool: headless Chrome CDP (port 9371). Logins:
+- Gamemaster (GM);
+- Test Gracz 1 (player, owns Kid Omni-Man);
+- Test Gracz 2 (player, temporarily owner of Omni-Man);
+- claude (second GM).
+
+Test scene: ZZ-dir-rolls, token vision on.
+
+- **Tests:** `node dev/run-all.mjs` passes, including the new `dev/director-fix.test.mjs` (32 checks). `node dev/lang-audit.mjs` is clean.
+- **Shot timing:** an orbit started by the non-leader GM claude played on TG2 with hold 2040 ms (len 3790); claude's cut to a place played with hold 2160 (len 3910). Before the fix: hold 600.
+- **Player requests:**
+  - With the GM's pause on, TG1's forced emit (API and hook) reached TG2 as nothing.
+  - A forged shot from TG1 was ignored. The same record replayed locally on TG2 did play, so the forged record itself was valid.
+  - TG1's skip during a GM cut was ignored; TG2's shot ended "done".
+- **Leader:**
+  - claude logging in: the leader stayed Gamemaster on all pages.
+  - GM tab hidden (simulated): claude took the lead with the history (3 entries), and claude's cut to the last event played. GM tab visible again: Gamemaster led again.
+  - Both GMs viewing another scene: TG2 led. TG1 moved Kid (the active combatant); TG2 got the take and returned exactly to its view. Before the fix: no shot.
+- **Fog:** the focus was out of TG1's sight while the box corners were in sight → TG1 got nothing.
+- **Names:**
+  - TG1 read "Omni-Man -> Kid Omni-Man" both in combat and out of combat.
+  - TG2 read the same in combat, and "Omni-Man -> Someone" out of combat (no rule reveals Kid to TG2).
+- **Plus Ultra:** only the setup line showed; Plus Ultra's splash and card showed the result. The caption sat above the hotbar and Plus Ultra's buttons (`dev/director-fix-attack-names.webm`).
+- **Input** (real CDP mouse and keys on TG1):
+  - drag of Kid during a shot → the token moved, the shot ended "taken", the camera stayed (`dev/director-fix-drag-during-shot.webm`);
+  - click on the empty board → cut, camera back exactly;
+  - click on Kid → Kid selected, cut, camera back;
+  - Esc with nothing open → cut, game menu not opened;
+  - Esc with the sheet open → cut and the sheet closed;
+  - Esc while typing in chat → the shot played to the end;
+  - `director-check watchShot` none / esc / click / wheel / busy: all OK.
+- **Windows:**
+  - Sheet open on the right → the token landed in the centre of the free left part, with the caption centred there (`dev/director-fix-window-framing.webm`).
+  - Full-size sheet → soft marker.
+- **LockView, Hot Pan:**
+  - LockView pan lock → soft marker.
+  - Hot Pan on → soft marker.
+  - Hot Pan switched on during a take → the shot ended "taken" with no return.
+- **sketch-reveal:** activating a scene with a sketch transition → no director arrival on TG1/TG2. Control: a scene without one played the arrival.
+- **Soft marker then take at the same place:** the marker ended when the take started; one caption.
+- **Heavy event after a cooldown:** a 0.95 event at a just-shown place → soft marker. Before the fix: nothing.
+- **Hidden turret's turn:** no banner on TG1/TG2. Control: Omni-Man's turn showed the banner.
+- **Merged events:** a public event plus 2 GM-only events → TG1 shot with n=1, kinds [custom].
+
+### Not verified
+- Real browser timer throttling of a hidden leader tab (only simulated).
+- The player rate limit live.
+- LockView zoom-only and bounding-box locks.
+- DPR 2; touch input.
+- `cinematic-check`, `cinematic-fx-check` and `idle-bench` were not re-run. The screen engine and the show are untouched, and no ticker work was added. TG1 at rest: no overlay, no pan hook.
+
+### Shared files touched (small, for the merge with the combat-stage branch)
+- **`core.mjs`:**
+  - `num()`;
+  - `merged()` (n / kinds);
+  - `Queue.pump`: one `wanted` constant and the soft-drop condition;
+  - `frameShot` (`view.rect`);
+  - new `pickLeader` and `fromPlayer`.
+  - No lane or combat rule changed.
+- **`director.mjs`:**
+  - leader election and handover (replaces `leaderId` / `isLeader`);
+  - `emit` / `apiEmit`, `onSocket`, `canSee`;
+  - `busy`, `cameraHeld`, `zoomHeld`, `ctxOf`;
+  - `tokenName`, `playTake`, `endTake`;
+  - ready wiring.
+- **`overlay.mjs`:** `windowRects`, `freeRect`, caption placement.
+- **`source-rolls.mjs`:** `withMsg`, `announcedHere`.
+- **`source-scene.mjs`:** sketch-reveal check and `cameraHeld`.
+- **`source-move.mjs`:** one line (banner visibility and the GM tag).
+
+### Open decisions for the user
+- **Player as stand-in leader.** When no GM views the players' scene, a player's client may lead and plan shots for everyone. Alternative: the director pauses while the GM is away.
+- **Hidden GM tab.** It hands the lead to a visible client on the scene, which can be a player. Keep, or hand it only to another GM?
+- **Player API events.** They stay allowed as requests (weight at most 0.85, no force). Stricter option: soft markers only.
+- **Covering window.** A window covering the whole free screen makes take-overs soft.
+- **Hidden names.** A fellow PC that is not a user's assigned character, outside combat, with token names off, still reads "Someone".
+
+### Lane 5 state
+- Director OFF and not paused.
+- Ownership and token position, sight and lights restored. The turret unhidden for the test is unhidden again; the three turrets that were hidden before stay hidden.
+- Test combats deleted.
+- Sketch flag off; Hot Pan off; active scene ZZ-dir-rolls.
+- Test attack chat messages remain in the world.
+- Junction back to `C:\mmwt-dir-rolls`; lease released; headless Chrome closed.

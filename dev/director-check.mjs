@@ -34,7 +34,7 @@ export function watchShot({ act = "none", timeout = 15000 } = {}) {
         const f = () => samples.push({ t: performance.now() - t0, ...view() });
         canvas.app.ticker.add(f); samples.f = f;
         if ( act === "esc" ) setTimeout(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), shot.lead + 250);
-        if ( act === "click" ) setTimeout(() => { board.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, buttons: 1, clientX: 700, clientY: 400 })); window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); }, shot.lead + 250);
+        if ( act === "click" ) setTimeout(() => { board.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, buttons: 1, clientX: 700, clientY: 400 })); window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, clientX: 700, clientY: 400 })); }, shot.lead + 250);
         if ( act === "wheel" ) setTimeout(() => { board.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -100, clientX: 700, clientY: 400 })); canvas.pan({ scale: canvas.stage.scale.x * 1.05 }); }, shot.lead + 250);
       }
       if ( kind === "end" && shot && data.shot.id === shot.id ) { ended = { why: data.why, t: performance.now() - t0 }; setTimeout(done, 2600); }
