@@ -435,5 +435,7 @@ export function registerCarry() {
   Hooks.on("deleteToken", (doc) => { for ( const [t, c] of [...ACTIVE] ) if ( t.document === doc ) c.end(false); });
 }
 
+/** Is a carry playing now (a token's mesh moves every frame without a refresh: the fire's depth sort follows it while this holds)? */
+export const carrying = () => ACTIVE.size > 0;
 export const _carryStats = () => ({ ...stats, active: ACTIVE.size, ticking });
 export const _carryState = () => [...ACTIVE.values()].map((c) => ({ id: c.doc.id, objId: c.objId, el: Math.round(c.lastEl), off: { ...c.off }, base: c.base ? { x: c.base.px, y: c.base.py } : null, moved: c.moved, real: c.real, visual: c.visual, mode: c.mode, D: Math.round(c.D), hit: !!c.hit, pushed: c.pushed.length }));

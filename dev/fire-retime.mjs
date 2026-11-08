@@ -12,7 +12,11 @@ if ( !inp || !out ) { console.error("usage: node dev/fire-retime.mjs <in.webm> <
 const fps = Number(fpsArg) || 60, want = framesArg ? Number(framesArg) : null;
 const run = (args) => { const r = spawnSync("ffmpeg", args, { encoding: "utf8", maxBuffer: 1 << 28 }); if ( r.status !== 0 ) { console.error(r.stderr.slice(-2000)); process.exit(1); } return r.stderr; };
 
-run(["-y", "-loglevel", "error", "-i", inp, "-vf", `setpts=N/(${fps}*TB)`, "-fps_mode", "passthrough", "-an", "-c:v", "libvpx-vp9", "-b:v", "10M", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", out]);
+// (MediaRecorder may emit the canvas as it was when the recording started, before the first requested frame: a PRE-ROLL frame that
+// is not part of the recording - dropped when the input holds exactly one frame more than `frames`)
+const inRows = [...run(["-i", inp, "-vf", "showinfo", "-f", "null", "-"]).matchAll(/n:\s*(\d+).*?pts_time:([\d.]+)/g)].map((m) => +m[2]);
+const preRoll = want !== null && inRows.length === want + 1;
+run(["-y", "-loglevel", "error", "-i", inp, "-vf", `${preRoll ? "trim=start_frame=1," : ""}setpts=N/(${fps}*TB)`, "-fps_mode", "passthrough", "-an", "-c:v", "libvpx-vp9", "-b:v", "10M", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", out]);
 // timestamps and a per-frame checksum of the decoded output
 const info = run(["-i", out, "-vf", "showinfo", "-f", "null", "-"]);
 const rows = [...info.matchAll(/n:\s*(\d+).*?pts_time:([\d.]+).*?checksum:([0-9A-F]+)/g)].map((m) => ({ n: +m[1], t: +m[2], c: m[3] }));
@@ -21,5 +25,5 @@ const maxDev = Math.max(0, ...d.map((x) => Math.abs(x - step)));
 const drift = rows.length ? Math.abs(rows.at(-1).t - (rows.length - 1) * step) : 0;
 const dups = rows.slice(1).filter((r, i) => r.c === rows[i].c).length;
 const ok = rows.length > 1 && maxDev <= 0.0011 && drift <= 0.0011 && (want === null || rows.length === want);
-console.log(JSON.stringify({ out, fps, frames: rows.length, expected: want, deltaMs: [Math.min(...d) * 1000, Math.max(...d) * 1000].map((x) => +x.toFixed(2)), maxDevMs: +(maxDev * 1000).toFixed(2), driftMs: +(drift * 1000).toFixed(2), identicalNeighbours: dups, ok }));
+console.log(JSON.stringify({ out, fps, frames: rows.length, expected: want, deltaMs: [Math.min(...d) * 1000, Math.max(...d) * 1000].map((x) => +x.toFixed(2)), maxDevMs: +(maxDev * 1000).toFixed(2), preRollDropped: preRoll, driftMs: +(drift * 1000).toFixed(2), identicalNeighbours: dups, ok }));
 process.exit(ok ? 0 : 1);

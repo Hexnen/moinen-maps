@@ -9,7 +9,7 @@
  *     masses where it is hot, single tongues and gaps with only embers where it is weak, and each base's width, offset,
  *     brightness and coal spill - no regular rhythm and no relation to the brush stamp spacing.
  *  1. ART PASS (12 fps, only when the shared-clock frame changes and the area is on screen): one fragment per ART CELL into a small
- *     RGBA8 render texture (W x H cells): R = flame (7; 0 none), G = flame band + 8 (level - 1) (1..23)
+ *     RGBA8 render texture (W x H cells): R = flame (0 none; else 1 + its bed row in art px mod 255: depth vs tokens), G = flame band + 8 (level - 1) (1..23)
  *     or a bed ember (24..26) or a spark / hot coal (32 + ramp step 1..6), B = smoke band (1 light, 2 mid, 3 shadow, 4 fire-lit underside) + 8 rim + 16 smoke level, A = ground
  *     code: char level (0..3) + 4 heat tint + 8 smoke shadow (0..2).
  *       - FLAMES: emitters on a jittered lattice over the burning ground (rows foreshortened, RY 0.8), kept whole or dropped by a
@@ -280,7 +280,7 @@ void main() {
   }
   // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
   // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
-  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0; int lvL = 1;
+  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0, BF = -1.0, CT = 0.0; int lvL = 1;
   if ( nearBed ) {
     int jHi = int(floor((c.y + reachUp) / spy)), jLo = int(floor((c.y - reachDn) / spy)) - 1;
     for ( int jj = 0; jj < 32; jj++ ) {
@@ -288,7 +288,7 @@ void main() {
       float dyc = max(0.0, (float(j) + 0.5) * spy - c.y);
       float xlo = c.x - max(0.0, dyc * hi0) - W2, xhi = c.x - min(0.0, dyc * lo0) + W2;
       int i0 = int(floor(xlo / sp)) - 1, i1 = int(floor(xhi / sp));
-      float rF = 0.0, rH = 0.0, rB = 0.0;
+      float rF = 0.0, rH = 0.0, rB = 0.0, rY = 0.0, tF = 0.0, tY = 0.0;
       for ( int ii = 0; ii < 12; ii++ ) {
         int i = i0 + ii; if ( i > i1 ) break;
         vec4 E1 = hb(i, j, 1);
@@ -350,7 +350,7 @@ void main() {
           vec2 p = vec2(e.x + (float(k) - 0.5 + (E2.w - 0.5) * 0.8) * rb * 0.9 + 0.8 * u * sin(t * (1.3 + float(k)) + float(id) * 0.7), e.y - rb * 0.1 - float(k) * 1.5 * u);
           float dx = (c.x - p.x) / ((1.1 + 0.9 * E1.z) * rr), dy = (c.y - p.y) / (1.0 * rr); if ( dy > 0.0 ) dy *= 1.5;
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; rF += q; rH += q * (0.6 + 0.5 * fz) * (0.5 + 0.5 * q) * (0.3 + 0.7 * outS); rB += q * (0.5 + 0.7 * fz) * outS; lvL = max(lvL, lv); }   // (sinking roots cool)
+          if ( q > 0.0 ) { q *= q; rF += q; rY += q * e.y; rH += q * (0.6 + 0.5 * fz) * (0.5 + 0.5 * q) * (0.3 + 0.7 * outS); rB += q * (0.5 + 0.7 * fz) * outS; lvL = max(lvL, lv); }   // (sinking roots cool)
         }
         // the BLOBS: born every life / 5 / rate s (jittered), uneven lives, accelerating up, leaning, swaying, swelling then shrinking
         float life0 = L_LIFE[lv], iv = life0 / 5.0 / rate;
@@ -376,12 +376,16 @@ void main() {
           float x = e.x + (B2.y - 0.5) * 3.0 * u + z * lean + 1.6 * u * a * sin(6.2832 * (1.2 * a + B2.z));
           float dx = (c.x - x) / (r * (1.05 - 0.45 * a)), dy = (c.y - y) / sy; if ( dy > 0.0 ) dy *= 1.5;   // (wide low, thin tips)
           float q = 1.0 - (dx * dx + dy * dy) / 2.2;
-          if ( q > 0.0 ) { q *= q; rF += q; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
+          if ( q > 0.0 ) { q *= q; rF += q; rY += q * e.y; tF += q; tY += q * e.y; rH += q * (1.0 - a) * (0.6 + 0.4 * q); lvL = max(lvL, lv); }   // (hot core, cool rim and top)
         }
       }
       // the union (silhouette) is the plain sum; the COLOUR is seen front first: a row further back shows through where the rows in
       // front are thin (between and above their tongues), so the bands flow across the body without per-tongue outlines
-      F += rF; HT += TR * rH; BASE += TR * rB; WS += TR * rF; TR *= exp(-2.2 * rF);
+      F += rF; HT += TR * rH; BASE += TR * rB; WS += TR * rF; BY += TR * rY; TR *= exp(-2.2 * rF);
+      // (DEPTH: the bed row where the TONGUES (blobs, not the flat roots) seen front to back first cover this cell - a depth test on
+      // their silhouettes, not a blend of the rows: so the line between the tongues in front of a token and those behind it follows
+      // their outlines, never a straight column split)
+      CT += tF; if ( BF < 0.0 && CT >= 0.34 ) BF = tY / max(tF, 1e-4);
       if ( TR < 0.25 ) break;                                         // (opaque: the rows further back change nothing)
     }
   }
@@ -406,7 +410,11 @@ void main() {
       int band = clamp(int(v * (float(nb) + 0.4)), 1, nb - 1);
       if ( band == 6 && st < 0.4 ) band = 5;                           // the cream core only in licks, never a slab
       if ( core > 0.5 && band < 3 ) band = 3;                          // (deep inside the body: no dark-red mottling)
-      R = 7; G = band + 1 + 8 * (lvL - 1);                             // (one layer: the outline is the merged silhouette only)
+      // R: where this cell's flame STANDS - the bed row of the tongues that cover it first (else the rows' blend), in whole art px
+      // (u cells), stored ABSOLUTE mod 255 (+1: 0 = no flame), so every cell of one tongue holds the same value (a code relative to
+      // the cell rounds differently row by row: a tongue standing level with a token's feet would flip in stripes); the screen passes
+      // unwrap it around the cell (DEPTH) and sort it against the tokens' feet
+      R = 1 + int(mod(floor(((BF >= 0.0 ? BF : BY / max(WS, 1e-4)) - uOrg.y) / max(u, 0.25) + 0.5), 255.0)); G = band + 1 + 8 * (lvL - 1);   // (R: area-local rows)                             // (one layer: the outline is the merged silhouette only)
     }
   }
 
@@ -743,6 +751,21 @@ void axisW(float t, float w, out float i0, out vec3 a) {
 const FOOTPRINT = `
 void main() {
   vec2 w = fwidth(vCell) * uK;
+#ifdef SIDE
+  // DEPTH: every screen pixel belongs WHOLE to one of the two layers (SIDE 0 = the fire layer under the tokens, 1 = the front layer
+  // above them): the front one when any cell of its footprint is a flame in front of a token's feet. Both layers compute the same
+  // colour, so the pair draws each pixel exactly once and a split pixel never lets the token show through between them (a seam)
+  bool own = false;
+  if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) own = ownCell(floor(vCell));
+  else if ( uTokN > 0 ) {
+    vec2 ww = clamp(w, vec2(0.01), vec2(2.0));
+    float jx, jy; vec3 bx, by;
+    axisW(vCell.x, ww.x, jx, bx); axisW(vCell.y, ww.y, jy, by);
+    for ( int j = 0; j < 3 && !own; j++ ) { if ( by[j] <= 0.0 ) continue;
+      for ( int i = 0; i < 3; i++ ) if ( bx[i] > 0.0 && ownCell(vec2(jx + float(i), jy + float(j))) ) { own = true; break; } }
+  }
+  if ( own != (SIDE == 1) ) { fragColor = vec4(0.0); return; }
+#endif
   if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) { fragColor = OUT(cellColor(floor(vCell))); return; }
   w = clamp(w, vec2(0.01), vec2(2.0));
   float ix, iy; vec3 ax, ay;
@@ -780,16 +803,42 @@ vec4 flameColor(ivec2 p, ivec4 a) {
     // -> 2 steps darker, the lit left side -> 1 step; hot flanks get red, never plum; none at the bottom
     int up = art(p + ivec2(0, -1)).r, lf = art(p + ivec2(-1, 0)).r, rt = art(p + ivec2(1, 0)).r;
     bool outer = up == 0 || rt == 0 || lf == 0;
-    if ( up < a.r || rt < a.r ) band = max(band - (outer ? 2 : 1), band >= 4 ? 1 : 0);
-    else if ( lf < a.r ) band = max(band - 1, 1);
+    if ( up == 0 || rt == 0 ) band = max(band - 2, band >= 4 ? 1 : 0);
+    else if ( lf == 0 ) band = max(band - 1, 1);
     float al = band <= 1 ? OUTER[lv] : 1.0;
     return vec4(uRamp[band].rgb * al, al);
   }
   return vec4(0.0);
 }`;
 // the FIRE layer (under the tokens): flames, bed embers, coals and sparks
+// DEPTH against the tokens standing on this area (display.tokensOn: up to 16, set when a token moves): a flame whose bed lies in front
+// of a token's feet (lower on screen) is drawn by the FRONT layer above the tokens where it overlaps the token; every other flame
+// cell stays in the fire layer under them
+const DEPTH = `
+uniform vec4 uTok[16];    // x0, y0, x1, feet (cells, area-local; the token's visible rect, its bottom = its feet)
+uniform int uTokN;
+uniform float uU;         // art px scale (cells per art px): R's step
+bool inFront(vec2 cf, int r) {
+  if ( r <= 0 || uTokN == 0 ) return false;
+  // (R - 1 = the bed row in art px mod 255; a flame's bed lies at most 24 art px above the cell and 230 below it)
+  float uq = max(uU, 0.25); vec2 q = cf + 0.5; int lo = int(floor(q.y / uq)) - 24;
+  float by = (float(lo) + mod(float(r - 1 - lo), 255.0)) * uq;   // (float mod: never negative)
+  for ( int k = 0; k < 16; k++ ) {
+    if ( k >= uTokN ) break;
+    vec4 T = uTok[k];
+    if ( q.x >= T.x && q.x < T.z && q.y >= T.y && q.y < T.w && by > T.w ) return true;
+  }
+  return false;
+}
+// a cell the FRONT layer owns: a flame cell (not an ember / spark / coal) in front of a token's feet over that token
+bool ownCell(vec2 cf) {
+  if ( uTokN == 0 ) return false;
+  ivec4 a = art(ivec2(cf));
+  return a.g < 24 && inFront(cf, a.r);
+}`;
 const SHOW = `${SHOW_COMMON}
 ${FLAME_COLOR}
+${DEPTH}
 vec4 cellColor(vec2 cf) {
   ivec2 p = ivec2(cf);
   ivec4 a = art(p);
@@ -799,6 +848,23 @@ vec4 cellColor(vec2 cf) {
   return col;
 }
 #define OUT(c) ((c) * uAlpha)
+#define SIDE 0
+${FOOTPRINT}`;
+
+// the FRONT layer (above the tokens, under the smoke): only the flame cells in front of a token's feet, over that token
+const FRONT = `${SHOW_COMMON}
+${FLAME_COLOR}
+${DEPTH}
+vec4 cellColor(vec2 cf) {
+  ivec2 p = ivec2(cf);
+  ivec4 a = art(p);
+  vec4 col = flameColor(p, a);
+  if ( a.g >= 24 && a.g < 32 ) col = vec4(uRamp[7 + min(2, a.g - 24)].rgb, 1.0);
+  if ( a.g >= 32 ) col = vec4(uRamp[min(6, a.g - 32)].rgb, 1.0);
+  return col;
+}
+#define OUT(c) ((c) * uAlpha)
+#define SIDE 1
 ${FOOTPRINT}`;
 
 // the SMOKE layer (ABOVE the tokens: smoke drifting over a token veils it, thinly at level 1, more at 3). It is composited over the
@@ -874,9 +940,10 @@ ${FOOTPRINT}`;
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v6"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-fire-art-v11"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
-  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v3"),
+  show: PIXI.Program.from(VERT, SHOW, "moinen-maps-fire-show-v6"),
+  front: PIXI.Program.from(VERT, FRONT, "moinen-maps-fire-front-v3"),
   smoke: PIXI.Program.from(VERT, SMOKE, "moinen-maps-fire-smoke-v2"),
   ground: PIXI.Program.from(VERT, GROUND, "moinen-maps-fire-ground-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-fire-emit-v1")
@@ -896,7 +963,7 @@ export const BIRTHS = { high: 8, medium: 6, low: 4 };
  * frame. Same contract as shader.mjs FireMesh for the display (anim, visible, destroy).
  */
 export class FireArt extends PIXI.Container {
-  constructor(field, rect, geo, { above = null, box = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
+  constructor(field, rect, geo, { above = null, front = null, box = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
     super();
     this.eventMode = "none"; this.interactiveChildren = false;
     const { ap, ox, oy } = geo, W = field.w, H = field.h, P = programs();
@@ -924,7 +991,8 @@ export class FireArt extends PIXI.Container {
       uWind: new Float32Array(wind), uPlume: plume, uPuffQ: new Float32Array(field.puff ? field.puffQ : [0, 0, 0, 0]),
       uBox: new Float32Array(box ? [box.x0, box.y0, box.x1, box.y1] : [rect.x0, rect.y0, rect.x1, rect.y1]), uBirths: births, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
       translationMatrix: new PIXI.Matrix().toArray(true) }));
-    const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0,
+    this.tok = new Float32Array(64);    // (shared by the fire and front layers: setTokens)
+    const common = () => ({ uArt: this.rt, uSize: new Float32Array([W, H]), uK: footprintK(), uAlpha: 1, uDark: 0, uTok: this.tok, uTokN: 0, uU: grid / 32,
       uRamp: new Float32Array(ramp.ramp7), uSmokeTint: new Float32Array([...ramp.tint, smokeTint]), translationMatrix: new PIXI.Matrix().toArray(true) });
     this.ground = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.ground, common()));
     this.ground.state.blendMode = PIXI.BLEND_MODES.MULTIPLY;
@@ -946,6 +1014,16 @@ export class FireArt extends PIXI.Container {
       const u = this.smoke.shader.uniforms; u.uAlpha = this.worldAlpha; u.uK = footprintK(); s0(renderer);
     };
     (above ?? this).addChild(this.smoke);
+    // the FRONT flames live in a layer between the tokens and the smoke (`front`, the display's): drawn only while a token stands here
+    this.front = new PIXI.Mesh(quad(x0, y0, x1, y1, W, H), new PIXI.Shader(P.front, common()));
+    this.front.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.front.eventMode = "none"; this.front.visible = false;
+    const f0 = this.front._render.bind(this.front);
+    this.front._render = (renderer) => {
+      if ( !this.worldVisible || !this.parent ) return;
+      const u = this.front.shader.uniforms; u.uAlpha = this.worldAlpha; u.uK = footprintK(); f0(renderer);
+    };
+    (front ?? this).addChild(this.front);
+    this.rect = rect; this.geo = geo;
     // KNOWN RISKS for "the area's rectangle shows" (each quad covers the whole area rect; checked by diffing frames with each pass
     // hidden, dev/out bbox probe: clean at zoom 1-3, day and dark, DPR 1 - the one real case was the outside distance, model.chamfer):
     //   - the ground pass is a MULTIPLY quad writing alpha 1 over the whole rect (exact 1.0 colour outside the marks: invisible on an
@@ -968,8 +1046,17 @@ export class FireArt extends PIXI.Container {
   // (the fuel map evolves over seconds: it is re-rendered at 4 fps on a quantised clock - deterministic, and its pass costs a
   // render-target switch per area, so it must not run with every 12 fps art frame)
   setTime(t) { this.pass.shader.uniforms.uTime = t; this.fuelPass.shader.uniforms.uTime = Math.floor(t * 4) / 4; }
-  setDark(d) { this.show.shader.uniforms.uDark = d; this.ground.shader.uniforms.uDark = d; this.smoke.shader.uniforms.uDark = d; }
+  setDark(d) { this.front.shader.uniforms.uDark = d; this.show.shader.uniforms.uDark = d; this.ground.shader.uniforms.uDark = d; this.smoke.shader.uniforms.uDark = d; }
   setBirths(n) { this.pass.shader.uniforms.uBirths = n; }
+  /** The tokens standing on this area: [[x0, y0, x1, feet], ...] in scene px (their visible rects), at most 16. */
+  setTokens(list) {
+    const { ap, ox, oy } = this.geo, r = this.rect, n = Math.min(16, list.length);
+    for ( let k = 0; k < n; k++ ) {
+      const [a, b, c, d] = list[k];
+      this.tok.set([(a - ox) / ap - r.x0, (b - oy) / ap - r.y0, (c - ox) / ap - r.x0, (d - oy) / ap - r.y0], k * 4);
+    }
+    this.show.shader.uniforms.uTokN = n; this.front.shader.uniforms.uTokN = n; this.front.visible = n > 0;
+  }
   /** The area's grow / out clocks at shared time `now` (ms). */
   setPhase(now) {
     const a = this.anim; if ( !a ) return;
@@ -987,11 +1074,13 @@ export class FireArt extends PIXI.Container {
     const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex];
     this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = this.puffTex = null;
     this.glow.parent?.removeChild(this.glow);
-    const own = this.smoke.parent === this;
+    const own = this.smoke.parent === this, ownF = this.front.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
-    for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow, this.smoke] ) m.geometry?.destroy();
+    if ( !ownF ) this.front.parent?.removeChild(this.front);
+    for ( const m of [this.pass, this.fuelPass, this.ground, this.show, this.glow, this.smoke, this.front] ) m.geometry?.destroy();
     this.pass.destroy(); this.fuelPass.destroy(); this.glow.destroy();
     if ( !own ) this.smoke.destroy();
+    if ( !ownF ) this.front.destroy();
     super.destroy({ children: true });
     for ( const t of tx ) t?.destroy(true);
     this.rt.destroy(true); this.fuelRt.destroy(true);

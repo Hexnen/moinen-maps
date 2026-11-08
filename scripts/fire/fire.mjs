@@ -348,5 +348,7 @@ export function registerFire() {
   // the art grid follows the destruction layer's (its ap may arrive after the canvas is ready)
   Hooks.on("moinenMapsDestruction", (kind) => { if ( kind === "loaded" && strokes.size ) { const g = JSON.stringify(geo()); if ( display && JSON.stringify(display.geo) !== g ) { fields.clear(); draw(); } } });
   Hooks.on("moinenMapsPerfMode", () => display?.refresh());
+  // (a token moved, appeared, went or changed size: its depth against the flames, recomputed once on the next frame)
+  for ( const h of ["refreshToken", "createToken", "deleteToken"] ) Hooks.on(h, () => display?.tokensDirty());
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.fire ??= fireApi; } });
 }

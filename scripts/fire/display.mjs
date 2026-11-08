@@ -5,6 +5,7 @@ import { FireLights } from "./lights.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
+import { carrying } from "../tokens/carry.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -48,6 +49,15 @@ export class FireDisplay {
     this.above.eventMode = "none"; this.above.interactiveChildren = false;
     Object.assign(this.above, { elevation: 0, sortLayer: 800, sort: 0, _lastSortedIndex: 0 });
     canvas.primary.addChild(this.above);
+    // the FRONT flames: between the tokens (700) and the smoke - a tongue whose bed lies in front of a token's feet is drawn over that
+    // token (art.mjs FRONT); both layers rise to the highest token standing in the fire (a carried or flying one) so they sort above it
+    this.front = new PIXI.Container();
+    this.front.eventMode = "none"; this.front.interactiveChildren = false;
+    Object.assign(this.front, { elevation: 0, sortLayer: 750, sort: 0, _lastSortedIndex: 0 });
+    canvas.primary.addChild(this.front);
+    // (the particles in front of a token's feet over that token: above the front flames, the way every particle is above its flames)
+    this.partsFront = new PIXI.Container(); this.partsFront.zIndex = 1; this.front.sortableChildren = true; this.front.addChild(this.partsFront);
+    this.tokDirty = true;
     this.areas = new Map();          // area id -> { key, area, field, mesh, slots }
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
@@ -80,7 +90,7 @@ export class FireDisplay {
       // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
       const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
       const mesh = field.style === "fire"
-        ? new FireArt(field, area.rect, geo, { above: this.above, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
+        ? new FireArt(field, area.rect, geo, { above: this.above, front: this.front, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
           plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
         : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
       this.meshes.addChild(mesh);
@@ -88,6 +98,7 @@ export class FireDisplay {
       this.stats.built++;
     }
     this.lastT = -1;                                                  // (uniforms only: every area's clock is set again this tick)
+    this.tokDirty = true;
     this.stats.areas = this.areas.size;
     // (lights per area: an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones)
     const lightKeys = [...this.areas].map(([id, a]) => ({ id, key: a.key, a }));
@@ -119,6 +130,7 @@ export class FireDisplay {
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
     const now0 = sharedNow(), now = still ? 0 : now0, T = still ? 0 : M.shaderTime(now, P.speed), newFrame = T !== this.lastT || force;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0;
+    if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
     const vis = [], stale = [];
     for ( const a of this.areas.values() ) {
       const on = M.inView(a.area.rect, geo, vw, m);
@@ -145,6 +157,36 @@ export class FireDisplay {
     this.stats.tickMs = performance.now() - t0;
   }
 
+  /** A token moved, appeared or went: its depth against the flames is recomputed on the next frame (once, however many moved). */
+  tokensDirty() { this.tokDirty = true; if ( !this.ticking && this.areas.size ) this.updateTokens(); }   // (no ticker: reduced motion)
+
+  /**
+   * The tokens STANDING ON each fire area (their visible rect - a carried or flying token where it is drawn - overlapping the area's fire
+   * box), handed to its art as depth rects; the front and smoke layers rise to the highest of them. Only on a token change, never per
+   * frame (and every frame only while a carry plays: carry.mjs moves the mesh without a refresh); one pass over the tokens per area.
+   */
+  updateTokens() {
+    this.tokDirty = false;
+    if ( !this.geo || !canvas.tokens ) return;
+    const st = canvas.stage, geo = this.geo, toks = [];
+    for ( const t of canvas.tokens.placeables ) {
+      const m = t.mesh; if ( !t.visible || !m || m.destroyed || !m.visible || !m.renderable ) continue;
+      const b = m.getBounds(false), a = st.toLocal({ x: b.x, y: b.y }), c = st.toLocal({ x: b.x + b.width, y: b.y + b.height });
+      toks.push({ r: [a.x, a.y, c.x, c.y], e: m.elevation ?? t.document.elevation ?? 0 });
+    }
+    let top = 0;
+    for ( const a of this.areas.values() ) {
+      if ( !a.mesh.setTokens ) continue;
+      const bx = a.area.box ?? a.area.rect, x0 = geo.ox + bx.x0 * geo.ap, y0 = geo.oy + bx.y0 * geo.ap, x1 = geo.ox + bx.x1 * geo.ap, y1 = geo.oy + bx.y1 * geo.ap;
+      const on = toks.filter((k) => k.r[0] < x1 && k.r[2] > x0 && k.r[1] < y1 && k.r[3] > y0);
+      for ( const k of on ) top = Math.max(top, k.e);
+      a.toks = on.map((k) => k.r);
+      a.mesh.setTokens(a.toks);
+    }
+    if ( this.front.elevation !== top ) { this.front.elevation = this.above.elevation = top; canvas.primary.sortDirty = true; }
+    this.stats.tokens = toks.length;
+  }
+
   placeParticles(vis, now) {
     const cap = reducedMotion() ? 0 : (CAP[perfMode()] ?? 0), geo = this.geo, ap = geo.ap;
     const slots = M.shareSlots(vis.map((a) => a.field), cap);
@@ -156,7 +198,11 @@ export class FireDisplay {
         const s = this.sprite(n++);
         s.texture = p.size === 2 ? this.puffTex() : PIXI.Texture.WHITE;
         s.tint = p.color;
-        s.position.set(geo.ox + (r.x0 + p.x) * ap, geo.oy + (r.y0 + p.y) * ap);
+        const sx = geo.ox + (r.x0 + p.x) * ap, sy = geo.oy + (r.y0 + p.y) * ap, by = geo.oy + (r.y0 + p.by) * ap;
+        s.position.set(sx, sy);
+        // DEPTH, the flames' rule: a particle over a token standing here whose source lies in front of the token's feet goes above it
+        const box = a.toks?.length && a.toks.some((t) => sx >= t[0] && sx < t[2] && sy >= t[1] && sy < t[3] && by > t[3]) ? this.partsFront : this.parts;
+        if ( s.parent !== box ) box.addChild(s);
         s.scale.set(p.size === 2 ? ap : ap / 16);   // (Texture.WHITE is 16 x 16)
         s.visible = true;
       }
@@ -191,6 +237,7 @@ export class FireDisplay {
     this.areas.clear();
     if ( !this.root.destroyed ) this.root.destroy({ children: true });
     if ( !this.above.destroyed ) this.above.destroy({ children: true });
+    if ( !this.front.destroyed ) this.front.destroy({ children: true });
     this._puff?.destroy(true); this._puff = null;
     this.pool.length = 0;
   }
