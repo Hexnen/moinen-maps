@@ -381,7 +381,8 @@ function entryState(id) {
 function playSoft(shot, late = 0) {
   if ( myMode() === "bar" ) return;                       // the GM's default: the bar's status line only
   const t = captionText(shot), dr = R();
-  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? (t.title || t.kick) : "", icon: t.icon, onClick: () => lookAt(shot) });
+  const label = t.title && shot.caption?.kick ? `${t.kick} · ${t.title}` : (t.title || t.kick);   // (a caption with its own kick: "Push · ...")
+  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? label : "", icon: t.icon, onClick: () => lookAt(shot) });
   const s = { shot, mark, timer: setTimeout(() => endSoft(shot.id, "done"), Math.max(400, shot.len - late)) };
   softs.set(shot.id, s);
   if ( shot.cue && cues.has(shot.cue) && shot.after ) {        // a cued soft shot: the label turns into the result when the cue lands

@@ -1,0 +1,10 @@
+window.__home = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y, s: canvas.stage.scale.x };
+const res = {};
+await new Promise((r) => setTimeout(r, 2600));
+res.during = game.modules.get("moinen-maps").api.director.status().take;
+window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+await new Promise((r) => setTimeout(r, 1600));
+res.after = game.modules.get("moinen-maps").api.director.status().take;
+res.back = { dx: Math.round(canvas.stage.pivot.x - window.__home.x), dy: Math.round(canvas.stage.pivot.y - window.__home.y), ds: +(canvas.stage.scale.x - window.__home.s).toFixed(4) };
+res.overlay = game.modules.get("moinen-maps").api.director._debug().overlay;
+return res;

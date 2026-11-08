@@ -16,6 +16,7 @@ export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 /**
  * Every kind the director knows: `pri` breaks ties between equal weights, `hold` the base time a take-over stays on the place (ms),
  * `impact` = the shot has a hit (flash + shake when the camera arrives), `group` the source toggle it belongs to.
+ * `fresh` = news at a place just shown (damage after the attack, a pushed roll): never dropped as "just shown", soft at least.
  */
 export const KINDS = Object.freeze({
   destruction: { pri: 5, hold: 1700, impact: true, group: "destruction", icon: "fa-solid fa-house-crack" },
@@ -29,9 +30,9 @@ export const KINDS = Object.freeze({
   orbitDown: { pri: 8, hold: 1700, impact: true, group: "orbit", icon: "fa-solid fa-meteor" },
   altitude: { pri: 3, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-feather" },
   floor: { pri: 2, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-stairs" },
-  attack: { pri: 6, hold: 3200, impact: true, group: "attacks", icon: "fa-solid fa-burst" },
-  damage: { pri: 6, hold: 1600, impact: true, group: "attacks", icon: "fa-solid fa-heart-crack" },
-  roll: { pri: 2, hold: 2600, impact: false, group: "rolls", icon: "fa-solid fa-dice" },
+  attack: { pri: 6, hold: 3200, impact: true, group: "attacks", icon: "fa-solid fa-burst", fresh: true },
+  damage: { pri: 6, hold: 1600, impact: true, group: "attacks", icon: "fa-solid fa-heart-crack", fresh: true },
+  roll: { pri: 2, hold: 2600, impact: false, group: "rolls", icon: "fa-solid fa-dice", fresh: true },
   cut: { pri: 9, hold: 1800, impact: false, group: null, icon: "fa-solid fa-video" },
   custom: { pri: 3, hold: 1500, impact: false, group: null, icon: "fa-solid fa-film" }
 });
@@ -204,7 +205,7 @@ export class Queue {
       if ( form === "soft" ) {
         if ( !r.softOn ) { drop(); continue; }
         if ( this.busyUntil > now ) { keep(); continue; }                                     // after the take-over that plays now
-        if ( this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }     // that place was just shown
+        if ( !kindOf(ev.kind).fresh && this.history.some((h) => near(h, Math.min(r.cooldown, 4000))) ) { drop(); continue; }     // that place was just shown (news there, e.g. damage, still gets its soft shot)
         if ( this.softLive.length >= 2 ) { keep(); continue; }
       }
       drop();
@@ -292,10 +293,17 @@ export function frameShot(shot, view, r, k = 1, limits = [0.1, 3], reduced = fal
   const fit = Math.min(view.vw / (w * 1.8), view.vh / (h * 1.8));
   const most = view.scale * (1 + (r.zoomIn - 1) * clamp(k, 0, 1)), least = view.scale * 0.7;
   let scale = reduced ? view.scale : clamp(fit, least, most);
+  // the box's own extent (no padding) inside the frame less the letterbox bars: a little further out (down to half the player's
+  // zoom) when that is what it takes to keep it whole (an attacker and its target both on screen)
+  const MX = 0.06, MY = 0.32, bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const whole = Math.min(view.vw / Math.max(1, bw) * (1 - MX), view.vh / Math.max(1, bh) * (1 - MY));
+  if ( !reduced && whole < scale && whole >= view.scale * 0.5 ) scale = whole;
   scale = clamp(scale, limits[0], limits[1]);
   const c = boxCentre(b), focus = { x: shot.x, y: shot.y };
-  // the focus stays in the middle third of the frame: between the box centre and the focus
-  return { x: (c.x + focus.x) / 2, y: (c.y + focus.y) / 2, scale };
+  // the focus stays in the middle third of the frame: between the box centre and the focus, while the whole box fits
+  const keep = (v, lo, hi, half, mk) => { const m = half * mk; return hi - lo <= 2 * (half - m) ? clamp(v, hi - half + m, lo + half - m) : v; };
+  const hw = view.vw / (2 * scale), hh = view.vh / (2 * scale);
+  return { x: keep((c.x + focus.x) / 2, b.x0, b.x1, hw, MX), y: keep((c.y + focus.y) / 2, b.y0, b.y1, hh, MY), scale };
 }
 
 /** The screen effects of a take-over, scaled by the intensity `k` and calmed by reduced motion: the look values `r` (cinematic-core). */

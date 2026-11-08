@@ -95,4 +95,31 @@ const hit = R.rollFacts({ successCount: 2, options: { damage: 3, attackType: "sl
   const [s] = q.pump(r, { now: 2000, paused: false }, G);
   ok(s.who === "all" && !s.tokens.includes("h") && s.after.key === "Dir.cap.hitStunts", "public shot without the GM-only part");
 }
-console.log(`director rolls: ${n} checks passed`);
+
+// ---- framing: an attacker and its target both stay in the frame when they fit at the allowed zoom
+{
+  const r = D.resolve(null), view = { x: 0, y: 0, scale: 0.35, vw: 1584, vh: 805, grid: 350 };
+  const shot = { box: { x0: 1400, y0: 2707, x1: 2198, y1: 5600 }, x: 1575, y: 5425 };
+  const f = D.frameShot(shot, view, r, 1, [0.1, 3]);
+  const hh = view.vh / (2 * f.scale);
+  ok(f.y - hh * 0.68 <= 2707 && f.y + hh * 0.68 >= 5600 && f.scale >= 0.175, "both ends inside the frame (clear of the bars), at most half the zoom");
+  const far = { box: { x0: 0, y0: 0, x1: 100, y1: 20000 }, x: 50, y: 19900 };
+  const g = D.frameShot(far, view, r, 1, [0.1, 3]);
+  ok(g.y > 10000, "too far apart: the frame leans to the focus");
+}
+
+// ---- damage right after the attack shot at the same place: soft, not dropped
+{
+  const r = D.resolve(null), q = new D.Queue();
+  const atk = D.normEvent({ ...R.rollEvent(hit, { id: "a1", who: "all", attacker: A, targets: [T] }), scene: "s" }, 0);
+  q.push(atk, r, G);
+  const [s1] = q.pump(r, { now: 1000, paused: false }, G);
+  const dm = D.normEvent({ ...R.damageEvent(R.damageFacts("<p><strong>X</strong> took <strong>3</strong> damage.</p>", { from: 9, to: 6, max: 9 }), { id: "g1", who: "all", t: T }), scene: "s", t: s1.t0 + s1.len + 1500 }, s1.t0 + s1.len + 1500);
+  q.push(dm, r, G);
+  const out = q.pump(r, { now: s1.t0 + s1.len + 2500, paused: false }, G);
+  ok(out.length === 1 && out[0].form === "soft" && out[0].kind === "damage", "damage after the attack: soft");
+  const e2 = D.normEvent({ kind: "fire", weight: 0.3, x: 650, y: 50, scene: "s" }, s1.t0 + s1.len + 1600);
+  q.push(e2, r, G);
+  ok(q.pump(r, { now: s1.t0 + s1.len + 2700, paused: false }, G).length === 0, "other kinds there are still dropped as just shown");
+}
+console.log(`director rolls: all ${n} checks passed`);

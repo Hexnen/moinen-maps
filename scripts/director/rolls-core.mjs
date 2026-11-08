@@ -51,7 +51,7 @@ export function rollEvent(f, { id, who, attacker = null, targets = [], what = ""
   if ( !focus ) return null;
   let box = null;
   for ( const t of [at, ...tg] ) if ( t ) box = unionBox(box, t.box);
-  box = unionBox(box, pointBox(boxCentre(focus.box).x, boxCentre(focus.box).y, grid));
+  box = unionBox(box, pointBox(boxCentre(focus.box).x, boxCentre(focus.box).y, grid * 0.5));
   const c = boxCentre(focus.box);
   const data = { token: at?.id ?? null, name: at?.name ?? "", target: tg[0]?.id ?? null, tname: tg[0]?.name ?? "", more: Math.max(0, tg.length - 1), n: f.n, dmg: f.dmg, s: f.stunts, what: shortText(what) };
   const tokens = [focus.id, ...[at, ...tg].filter((t) => t && t !== focus).map((t) => t.id)];
