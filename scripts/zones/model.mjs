@@ -27,11 +27,11 @@ export const NUMBERS = ["always", "hover", "never"];
 export const PLACES = ["center", "corner"];
 /** How a zone border is drawn. */
 /** The zone number: its badge and how it is written. */
-export const NUM_SHAPES = ["circle", "square", "hex", "diamond", "caption", "shield", "blossom", "seal", "plain"];
+export const NUM_SHAPES = ["circle", "square", "hex", "diamond", "caption", "shield", "blossom", "seal", "plain", "counter", "pill", "scribble", "disc", "chip", "tag", "banner", "panel"];
 export const NUM_FORMATS = ["arabic", "padded", "roman", "letters", "kanji"];
-export const LINE_STYLES = ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch", "comic", "ink", "neon", "noir", "sakura", "brush"];
+export const LINE_STYLES = ["dashed", "solid", "dotted", "dashdot", "double", "glow", "sketch", "comic", "ink", "neon", "noir", "sakura", "brush", "hairline", "halftone"];
 /** What fills the zone under the cursor when "hoverHi" is on (besides its bright border). */
-export const HOVER_FX = ["none", "glow", "hatch", "crosshatch", "dots"];
+export const HOVER_FX = ["none", "glow", "hatch", "crosshatch", "dots", "scan", "blinds", "petals"];
 
 const r1 = (v) => Math.round(v * 10) / 10;
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
