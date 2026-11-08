@@ -70,6 +70,11 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
   ok(up.scale > home.scale && up.x === 1000 && down.scale < home.scale && down.y === 800, "orbit: close then out; landing: high then down");
   ok(S.startView({ home: { ...home, scale: 2.9 }, vw, vh, move: "rise", limits: [0.1, 3] }).scale === 3, "zoom limits");
   ok(S.glideMs({ move: "none" }, home) === 0, "no shot: no glide");
+  const clip = { x0: 0, y0: 0, x1: 4320, y1: 7680 };
+  const c1 = S.startView({ home: { x: 2160, y: 3840, scale: 0.5 }, vw: 1600, vh: 900, box: clip, clip });
+  ok(c1.scale >= 1600 / 4320 - 1e-9 && c1.x - 800 / c1.scale >= -1e-6 && c1.x + 800 / c1.scale <= 4320 + 1e-6 && c1.y - 450 / c1.scale >= -1e-6, "the wide start stays on the map (no empty canvas)");
+  const c2 = S.startView({ home: { x: 300, y: 300, scale: 0.2 }, vw: 1600, vh: 900, box: clip, clip });
+  ok(c2.scale <= 0.2 + 1e-9, "never closer than the player's own view because of the map edge");
   const g1 = S.glideMs(s, home, 3000, vw), g2 = S.glideMs(s2, home, 3000, vw);
   ok(g1 > g2 && g1 <= 4200 && g2 >= 2400, "a bigger move glides longer, inside sane bounds");
 }

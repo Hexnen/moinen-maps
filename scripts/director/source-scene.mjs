@@ -69,6 +69,8 @@ const CSS = `
 .mm-dir-arr.is-out .mm-dir-arr-card { opacity: 0; transform: translateY(calc(-5vh - 10px)); transition: opacity 650ms ease-in, transform 800ms ease-in; }
 .mm-dir-arr.is-out .mm-dir-arr-title { letter-spacing: 0.2em; filter: blur(4px); transition: letter-spacing 800ms ease-in, filter 700ms ease-in; }
 .mm-dir-arr.is-cut .mm-dir-arr-card { transition-duration: 260ms; }
+.mm-dir-arr.is-paused:not(.is-soft) .mm-dir-arr-card { transform: translateY(-22vh); }
+.mm-dir-arr.is-paused.is-out:not(.is-soft) .mm-dir-arr-card { transform: translateY(calc(-22vh - 10px)); }
 .mm-dir-arr.is-soft { align-items: flex-start; padding-top: 11vh; }
 .mm-dir-arr.is-soft .mm-dir-arr-card { transform: none; gap: 0.3rem; }
 .mm-dir-arr.is-soft .mm-dir-arr-title { font-size: clamp(1.4rem, 2.6vw, 2.2rem); }
@@ -110,7 +112,7 @@ function veilOut(ms = 1000) {
 function makeCard({ title, sub, kick, soft, reduced }) {
   ensureStyle();
   const el = document.createElement("div");
-  el.className = `mm-dir-arr${soft ? " is-soft" : ""}${reduced ? " is-reduced" : ""}`; el.dataset.mmDir = "";
+  el.className = `mm-dir-arr${soft ? " is-soft" : ""}${reduced ? " is-reduced" : ""}${game.paused ? " is-paused" : ""}`;   // (paused: above Foundry's pause badge) el.dataset.mmDir = "";
   el.innerHTML = `<div class="mm-dir-arr-card">${kick ? `<div class="mm-dir-arr-kick">${esc(kick)}</div>` : ""}<div class="mm-dir-arr-title">${esc(title)}</div>`
     + `<div class="mm-dir-arr-rule"></div>${sub ? `<div class="mm-dir-arr-sub">${esc(sub)}</div>` : ""}</div>`;
   insert(el);
@@ -195,7 +197,7 @@ function play(form, { forced = false } = {}) {
   const tk = fl ? canvas.tokens?.get(fl.token) : null;
   const centre = tk?.center ? { x: tk.center.x, y: tk.center.y } : { x: home.x, y: home.y };
   const lim = [CONFIG.Canvas?.minZoom ?? 0.1, CONFIG.Canvas?.maxZoom ?? 3];
-  let start = SC.startView({ home: { ...home, ...centre }, vw: app.screen.width, vh: app.screen.height, box: move === "establish" ? seenBox() : null, move, k, reduced, limits: lim });
+  let start = SC.startView({ home: { ...home, ...centre }, vw: app.screen.width, vh: app.screen.height, box: move === "establish" ? seenBox() : null, clip: sceneBox(), move, k, reduced, limits: lim });
   if ( start.move !== "none" && typeof canvas._constrainView === "function" ) { const c = canvas._constrainView(start); start = { ...start, x: c.x, y: c.y, scale: c.scale }; }
   move = start.move;
   const gMs = SC.glideMs(start, home, s.glideMs, app.screen.width);

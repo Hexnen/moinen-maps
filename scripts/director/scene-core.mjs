@@ -89,7 +89,7 @@ export function dipOnTearDown({ killed, settings, mode, from, to, nextOff, nativ
  * null = nothing to show wide), `move` = "establish" | "rise" (into orbit: start close, pull back) | "descend" (a landing: start high,
  * come down) | "none", `k` the intensity 0..1, `limits` the zoom range. Returns { x, y, scale, move } (move "none" = no camera at all).
  */
-export function startView({ home, vw, vh, box = null, move = "establish", k = 1, reduced = false, limits = [0.1, 3] }) {
+export function startView({ home, vw, vh, box = null, clip = null, move = "establish", k = 1, reduced = false, limits = [0.1, 3] }) {
   const q = clamp(Number(k) || 0, 0, 1);
   const none = { x: home.x, y: home.y, scale: home.scale, move: "none" };
   if ( reduced || move === "none" || q < 0.15 ) return none;
@@ -104,7 +104,21 @@ export function startView({ home, vw, vh, box = null, move = "establish", k = 1,
   const c = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
   // the start frames the box's middle but leans toward the player's view, so the glide reads as one move into it (not a sweep across)
   const lean = fit >= home.scale * 0.78 ? 0.7 : 0.35;
-  return { x: lerp(c.x, home.x, lean), y: lerp(c.y, home.y, lean), scale, move: "establish" };
+  return inside({ x: lerp(c.x, home.x, lean), y: lerp(c.y, home.y, lean), scale, move: "establish" }, clip, vw, vh, home.scale);
+}
+
+/**
+ * Keep a wide start on the map: never so far out that the empty canvas around the scene shows (unless the player's own view already
+ * does), and the centre pulled in so the frame stays inside `clip` (the scene rect) where it can.
+ */
+function inside(v, clip, vw, vh, homeScale) {
+  if ( !clip || !(clip.x1 > clip.x0) || !(clip.y1 > clip.y0) ) return v;
+  const W = clip.x1 - clip.x0, H = clip.y1 - clip.y0;
+  const scale = Math.max(v.scale, Math.min(homeScale, Math.max(vw / W, vh / H)));
+  const hw = vw / (2 * scale), hh = vh / (2 * scale);
+  const x = W >= 2 * hw ? clamp(v.x, clip.x0 + hw, clip.x1 - hw) : (clip.x0 + clip.x1) / 2;
+  const y = H >= 2 * hh ? clamp(v.y, clip.y0 + hh, clip.y1 - hh) : (clip.y0 + clip.y1) / 2;
+  return { ...v, x, y, scale };
 }
 
 /** The glide's length (ms): the setting, a little longer for a big change of zoom or place, never under 1 s. */
