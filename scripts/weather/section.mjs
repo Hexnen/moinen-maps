@@ -15,7 +15,7 @@ import { VIEW_PRESETS } from "../view-angle.mjs";
  *    level, the wind (eight directions + strength), how long a change takes ("over N s"), the lens on / off and its level;
  *  - dock: Weather (status, on / off, who sees it, the layers and their levels), Wind (direction, strength, gusts), Tornadoes (the
  *    next one's level / speed / end, the list with each one's level and rope-out, rope out all), Ground (how fast it
- *    wets and dries, puddles), Lens (on, level, strength), View (the oblique angle, shared with fire), This client (detail and lens
+ *    wets and dries, puddles, whether rain puts fire out), Lens (on, level, strength), View (the oblique angle, shared with fire), This client (detail and lens
  *    caps: the same settings every player has in Configure Settings).
  * Every change is one key on the timeline (one scene write); every client ramps to it from the shared clock.
  */
@@ -284,8 +284,12 @@ const PANELS = [
       ${optCheck({ name: "g.puddles", label: T("Weather.puddles"), checked: g.puddles, hint: T("Weather.puddlesHint") })}
       ${optRange({ name: "g.snowRate", label: T("Weather.snowRate"), value: g.snowRate, min: L.snowRate[0], max: L.snowRate[1], step: 5, hint: T("Weather.snowRateHint") })}
       ${optRange({ name: "g.meltRate", label: T("Weather.meltRate"), value: g.meltRate, min: L.meltRate[0], max: L.meltRate[1], step: 10, hint: T("Weather.meltRateHint") })}
+      ${optCheck({ name: "g.fireOut", label: T("Weather.fireOut"), checked: Wx.params0().fire.out, hint: T("Weather.fireOutHint") })}
       <div class="mm-d-actions"><button type="button" class="mm-ws-btn" data-act="dry"${game.user.isGM ? "" : " disabled"}><i class="fa-solid fa-sun" inert></i> ${esc(T("Weather.dryNow"))}</button></div></div>`; },
-    onChange: (n, v) => { const k = { "g.wetRate": "wetRate", "g.dryRate": "dryRate", "g.puddles": "puddles", "g.snowRate": "snowRate", "g.meltRate": "meltRate" }[n]; if ( k ) Wx.setParams({ ground: { [k]: v } }); },
+    onChange: (n, v) => {
+      if ( n === "g.fireOut" ) { Wx.setParams({ fire: { out: v } }); return; }
+      const k = { "g.wetRate": "wetRate", "g.dryRate": "dryRate", "g.puddles": "puddles", "g.snowRate": "snowRate", "g.meltRate": "meltRate" }[n]; if ( k ) Wx.setParams({ ground: { [k]: v } });
+    },
     onClick: (b) => { if ( b.dataset.act === "dry" ) Wx.dryNow(); }
   }) },
   { id: "lens", title: "MOINENMAPS.Weather.pLens", icon: "fa-solid fa-glasses", open: false, mount: panel({

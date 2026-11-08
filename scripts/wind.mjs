@@ -111,6 +111,15 @@ export function vortexWindAt(x, y, grid) {
   return [vx, vy];
 }
 
+/* ---------------------------------------------------------------- rain and snow over fire (weather registers, fire reads) */
+
+let fireWetProvider = null;
+/** The weather engine registers `fn() -> { dim 0..1, steam 0..1 }`: what its rain and snow do to fire now (weather model fireWet). */
+export function setFireWetProvider(fn) { fireWetProvider = typeof fn === "function" ? fn : null; }
+/** Rain / snow over fire now ({ dim: 0, steam: 0 } when there is none: the common case costs one call). */
+export function fireWet() { try { return fireWetProvider?.() ?? NO_WET; } catch { return NO_WET; } }
+const NO_WET = Object.freeze({ dim: 0, steam: 0 });
+
 /* ---------------------------------------------------------------- the same in GLSL (ES 3.00) */
 
 export const GLSL_WIND = `

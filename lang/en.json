@@ -1470,6 +1470,8 @@
   "MOINENMAPS.Weather.lensHeatHint": "Embers: a heat glow from the fire side and hot flecks hitting the glass. Off by default.",
   "MOINENMAPS.Weather.lensHeat": "Heat on the lens (embers)",
   "MOINENMAPS.Weather.meltRateHint": "Seconds for the snow cover to melt two thirds of the way after the snow stops or weakens.",
+  "MOINENMAPS.Weather.fireOut": "Rain puts fire out",
+  "MOINENMAPS.Weather.fireOutHint": "Off: rain and snow only dim fire (lower flames, steam, weaker light). On: steady rain puts the scene's fires out after a while (90 s at level 1, 45 s at level 2, 20 s at level 3). Undo brings them back.",
   "MOINENMAPS.Weather.meltRate": "Snow melts in (s)",
   "MOINENMAPS.Weather.snowRateHint": "Seconds for the snow cover to get about two thirds of the way to its share of the land for the level.",
   "MOINENMAPS.Weather.snowRate": "Snow settles in (s)",
