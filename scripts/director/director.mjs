@@ -345,7 +345,9 @@ function wireInput() {
 function ctxOf(shot) {
   const mode = myMode(), opts = clientOpts();
   return {
-    killed: killed(), mode: mode === "bar" ? "soft" : mode, gm: game.user.isGM, visible: canSee(shot), busy: busy() || (!!shot.strict && seeTokens(shot) !== "all"), show: showOn || Screen.owner === "show",
+    killed: killed(), mode: mode === "bar" ? "soft" : mode, gm: game.user.isGM, visible: canSee(shot), show: showOn || Screen.owner === "show",
+    // (busy: at work on the board; a strict shot of which this player sees only the focus; a window covering the whole free screen)
+    busy: busy() || (!!shot.strict && seeTokens(shot) !== "all") || !!Ov.freeRect().covered,
     k: Dir.intensity(Number(setting("dirIntensity")), shot.k), camera: (!opts.noCamera || mode === "full") && !cameraHeld(), softOn: mode !== "bar" ? true : false
   };
 }
@@ -429,7 +431,7 @@ function playTake(shot, ctx, late = 0) {
   const from = home ?? { x: v.x, y: v.y, scale: v.scale };
   // framed into the part of the screen nothing covers (the interface columns, open windows: a sheet, a roll dialog, a journal)
   const free = Ov.freeRect();
-  const target = Dir.frameShot(shot, { ...v, ...from, rect: free }, dr, ctx.k, lim, reduced);
+  const target = Dir.frameShot(shot, { ...v, ...from, rect: free.covered ? null : free }, dr, ctx.k, lim, reduced);
   if ( zoomHeld() ) target.scale = from.scale;                                                    // (LockView: the zoom is locked)
   // a soft marker of the same place on screen goes: the take-over says it now (no second caption of the same thing)
   const near = dr.mergeSq * grid();

@@ -86,7 +86,7 @@ export function safeRect() {
 export function windowRects() {
   const out = [];
   const add = (el) => {
-    const e = el?.[0] ?? el; if ( !e?.getBoundingClientRect || !e.isConnected ) return;
+    const e = el instanceof HTMLElement ? el : el?.[0]; if ( !e?.getBoundingClientRect || !e.isConnected ) return;   // (v1 windows: jQuery)
     if ( e.classList?.contains("minimized") || getComputedStyle(e).display === "none" ) return;
     const r = e.getBoundingClientRect(); if ( r.width > 40 && r.height > 40 ) out.push({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom });
   };
@@ -97,19 +97,23 @@ export function windowRects() {
 /**
  * The part of the safe rect (safeRect) that no open window covers: the biggest free piece left of, right of, above or below each
  * window (the biggest windows first). A take-over frames its place into it, so the subject is not under a sheet or a dialog. When the
- * windows leave less than a usable piece, the safe rect itself (the shot is still better than none).
+ * windows leave no usable piece, the safe rect itself with `covered: true` (the player is reading a big window: the take-over comes
+ * soft, the camera is not moved behind it).
  */
 export function freeRect() {
   const a = safeRect();
   let r = { x0: a.x, y0: a.y, x1: a.x + a.w, y1: a.y + a.h };
   const area = (q) => Math.max(0, q.x1 - q.x0) * Math.max(0, q.y1 - q.y0);
   const ws = windowRects().sort((p, q) => area(q) - area(p));
+  let covered = false;
   for ( const w of ws ) {
     if ( w.x1 <= r.x0 || w.x0 >= r.x1 || w.y1 <= r.y0 || w.y0 >= r.y1 ) continue;
     const parts = [{ ...r, x1: Math.min(r.x1, w.x0) }, { ...r, x0: Math.max(r.x0, w.x1) }, { ...r, y1: Math.min(r.y1, w.y0) }, { ...r, y0: Math.max(r.y0, w.y1) }]
       .filter((q) => q.x1 - q.x0 >= 280 && q.y1 - q.y0 >= 200).sort((p, q) => area(q) - area(p));
     if ( parts.length ) r = parts[0];
+    else { covered = true; break; }
   }
+  if ( covered ) return { x: a.x, y: a.y, w: a.w, h: a.h, covered: true };
   return { x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
 }
 
@@ -149,14 +153,29 @@ function clearOfUi(el) {
     const f = freeRect();
     el.style.left = `${Math.round(f.x + f.w / 2)}px`;
     el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
-    const r = el.getBoundingClientRect();
-    let lift = 0;
-    for ( const id of ["hotbar", "players", "chat-message"] ) {
-      const b = document.getElementById(id)?.getBoundingClientRect?.();
-      if ( !b?.height || b.top < innerHeight * 0.55 ) continue;
-      if ( b.left < r.right && b.right > r.left && b.top < r.bottom ) lift = Math.max(lift, innerHeight - b.top + 10);
+    // whatever interface sits where the caption would be (Foundry's hotbar, the players list, the chat input, another module's
+    // buttons above the hotbar): the caption goes above the highest of them (probed across its width, twice: lifting may meet more)
+    const OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right", "ui-bottom"]);
+    const blocker = (x, y) => {
+      for ( const e of document.elementsFromPoint?.(x, y) ?? [] ) {
+        if ( e.closest?.(".mm-dir, .mm-cin, .mm-dmv") ) continue;
+        if ( e === document.body || e === document.documentElement || OPEN.has(e.id) || e.tagName === "CANVAS" ) return null;
+        const b = e.getBoundingClientRect();
+        if ( b.height > innerHeight * 0.6 || b.width > innerWidth * 0.9 ) return null;   // (a full-screen layer: not interface)
+        return b;
+      }
+      return null;
+    };
+    for ( let pass = 0; pass < 3; pass++ ) {
+      const r = el.getBoundingClientRect();
+      let top = Infinity;
+      for ( let i = 0; i <= 6; i++ ) for ( const fy of [0.2, 0.6, 0.95] ) {
+        const b = blocker(r.left + (r.width * i) / 6, r.top + r.height * fy);
+        if ( b && b.top > innerHeight * 0.45 ) top = Math.min(top, b.top);
+      }
+      if ( top === Infinity ) break;
+      el.classList.add("is-low"); el.style.bottom = `${Math.round(innerHeight - top + 10)}px`;
     }
-    if ( lift ) { el.classList.add("is-low"); el.style.bottom = `${Math.round(lift)}px`; }
   } catch { /* the default place */ }
 }
 
