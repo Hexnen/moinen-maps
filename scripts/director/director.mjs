@@ -533,7 +533,8 @@ function onTearDown() {
   if ( cur ) endTake("scene");
   for ( const id of [...softs.keys()] ) endSoft(id, "scene");
   Ov.clearAll();
-  queue.clear(); clearTimeout(pumpTimer); pumpTimer = 0;
+  // (the take-over of the old scene is over on every client that leaves it: the new scene's events must not wait for its planned end)
+  queue.clear(); queue.release(sharedNow()); queue.lastTake = null; clearTimeout(pumpTimer); pumpTimer = 0;
   showOn = false;
 }
 

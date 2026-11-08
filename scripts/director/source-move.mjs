@@ -88,7 +88,8 @@ function emitTurn(combat, cur) {
 let curLane = null;                      // the lane of the take-over on this screen (a later shot of it is judged from the camera now)
 function viewFor(shot) {
   const st = canvas.stage, vw = canvas.app.screen.width, vh = canvas.app.screen.height;
-  if ( Screen.owner === "director" && Screen.home && (!shot.lane || curLane !== shot.lane) ) return { ...Screen.home, vw, vh };   // (it returns there)
+  // (it returns there: the home of a take-over of another lane, or of the scene arrival whose wide start is on screen now)
+  if ( Screen.owner && Screen.home && (Screen.owner !== "director" || !shot.lane || curLane !== shot.lane) ) return { ...Screen.home, vw, vh };
   return { x: st.pivot.x, y: st.pivot.y, scale: st.scale.x, vw, vh };
 }
 const sees = (x, y) => { try { return canvas.visibility.testVisibility({ x, y }, { tolerance: grid() * 0.3 }); } catch { return false; } };
