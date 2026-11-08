@@ -120,7 +120,7 @@ function onLeaderChange(was, now) {
   if ( !game.user || was !== game.user.id || !now || now === game.user.id ) return;
   const q = { buckets: queue.buckets.flatMap((b) => b.events), history: queue.history.slice(-24), lastTake: queue.lastTake, busyUntil: queue.busyUntil, lastEvents: lastEvents.slice(-8) };
   clearTimeout(pumpTimer); pumpTimer = 0;
-  queue.clear();
+  queue.clear(); queue.history = []; queue.lastTake = null; queue.busyUntil = 0; lastEvents.length = 0;   // (the new leader has them now)
   try { game.socket?.emit(CHANNEL, { t: "dir", op: "handover", q, to: now }, { recipients: [now] }); } catch ( err ) { console.warn(`${MODULE_ID} | director handover`, err); }
   Hooks.callAll(HOOK, "leader", { from: was, to: now });
 }
