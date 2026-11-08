@@ -40,6 +40,19 @@ Paint roads on the map and little cars start driving on them. Moinen Maps Tools 
 - **How it is shared:** the roads and settings are one small scene flag. Nothing else is ever sent: every client runs the same seeded simulation from the server clock, so the GM and the players see the same cars in the same places. The simulation restarts from a new seeded layout every 20 minutes (the cars cross-fade); a client that joins steps from the start of that period, which takes a few frames.
 - Reduced motion (the module's setting with the system preference) keeps the cars moving but drops their sway and flicker.
 
+## Zones
+
+Zones for Year Zero style movement (counted in zones, not squares). In the **Zones** section the GM draws loose pencil lines: any
+area the lines close off becomes a zone. Lines may overshoot and cross; an end that stops just short of another line is joined to it
+("Join gaps"). **Trim** cuts away every bit of line that does not bound a zone; the eraser rubs lines out; Ctrl+Z / Ctrl+Shift+Z.
+Inside the section the GM sees the raw lines; everywhere else (and for players) only the finished zones show: a soft tint per zone,
+dotted borders and zone numbers (who sees them: everyone / GM / nobody).
+
+The distance between two zones is the number of borders on the shortest route. With one token selected every zone shows its
+distance and what reaching it costs under the scene's movement rules, and the token ruler shows zones instead of squares.
+First preset: **Invincible** (quick action = 1 zone on foot, two quick actions = 2 zones; movement powers 2/4, Major 4/8,
+Massive 8/16, Monstrous 16/32, read from the actor's power items). API: `game.modules.get("moinen-maps").api.zones`.
+
 ## Destruction
 
 Paint damage on the map; every brush stroke is an object of its own with a damage kind and a level (cracked, broken, crater).
