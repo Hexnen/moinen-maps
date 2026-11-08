@@ -223,7 +223,7 @@ export function captionText(shot) {
     title = game.i18n.has(key) ? game.i18n.format(key, data) : "";
   }
   if ( shot.n > 1 && !title ) title = game.i18n.format("MOINENMAPS.Dir.cap.many", { n: shot.n });
-  return { kick, title: title || kick, icon };
+  return { kick, title, icon };
 }
 function tokenName(id, fallback) {
   const d = canvas.scene?.tokens?.get(id);
@@ -256,12 +256,31 @@ function playTake(shot, ctx, late = 0) {
     const p = shot.path, ex = p[p.length - 2], ey = p[p.length - 1];
     at(shot.lead, () => Screen.panTo({ x: (target.x + ex) / 2, y: (target.y + ey) / 2, scale: target.scale, duration: Math.max(400, shot.hold * 0.8) }));
   }
-  if ( shot.impact >= 0 ) at(shot.impact, () => { if ( Screen.owner === "director" ) Screen.impact({ x: shot.x, y: shot.y, size: Math.max(shot.box.x1 - shot.box.x0, shot.box.y1 - shot.box.y0) }); });
-  if ( dr.captions ) at(Math.round(shot.lead * 0.45), () => {
+  const hit = () => { if ( c.hit ) return; c.hit = true; if ( shot.impact >= 0 && Screen.owner === "director" ) Screen.impact({ x: shot.x, y: shot.y, size: Math.max(shot.box.x1 - shot.box.x0, shot.box.y1 - shot.box.y0) }); };
+  // a destruction stroke: the hit lands when THIS client's entry of it starts (its data comes after the save and the bake), and the
+  // camera stays until the entry has played (at most EXTRA longer than planned); without one the hit lands as the camera arrives
+  const entry = entryState(shot.ref);
+  if ( shot.ref && entry !== null ) {
+    c.watch = setInterval(() => {
+      if ( cur !== c || c.done ) return clearInterval(c.watch);
+      const e = entryState(shot.ref);
+      if ( e === "anim" && !c.hit ) { hit(); c.minEnd = performance.now() + Math.min(1400, shot.hold); }
+      else if ( e === "settled" && !c.hit && performance.now() - c.t0 > shot.lead ) hit();      // (it played before this client got here)
+    }, 60);
+    c.timers.push(c.watch);
+    at(shot.lead + 1500, () => hit());                                                           // (never without the hit)
+  } else if ( shot.impact >= 0 ) at(shot.impact, hit);
+  if ( dr.captions && captionText(shot).title ) at(Math.round(shot.lead * 0.45), () => {
     const t = captionText(shot);
     c.cap = Ov.caption({ ...t, lb: Screen.debug?.()?.bars ? look.lbHeight : 0, hint: T("Dir.cutHint") });
   });
-  at(shot.lead + shot.hold, () => endTake("done"));
+  const EXTRA = 2200, plannedEnd = shot.lead + shot.hold;
+  const ending = () => {
+    const now = performance.now(), wait = Math.max(c.minEnd ?? 0, shot.ref && entry !== null && !c.hit ? c.t0 + plannedEnd + 600 : 0) - now;
+    if ( wait > 30 && now - c.t0 < plannedEnd + EXTRA ) { c.timers.push(setTimeout(() => { if ( cur === c && !c.done ) ending(); }, Math.min(wait, 250))); return; }
+    endTake("done");
+  };
+  at(plannedEnd, ending);
   // the player: Esc or a click on the map cuts the shot short (the camera returns); the wheel or another button takes the camera
   c.onKey = (ev) => { if ( ev.key === "Escape" && cur === c ) { ev.preventDefault(); ev.stopImmediatePropagation(); endTake("cut"); } };
   c.onPtr = (ev) => {
@@ -278,6 +297,7 @@ function endTake(why, { quiet = false } = {}) {
   const c = cur; if ( !c || c.done ) return;
   c.done = true; cur = null;
   for ( const t of c.timers ) clearTimeout(t);
+  if ( c.watch ) clearInterval(c.watch);
   window.removeEventListener("keydown", c.onKey, true);
   window.removeEventListener("pointerdown", c.onPtr, true);
   window.removeEventListener("wheel", c.onPtr, true);
@@ -290,12 +310,20 @@ function endTake(why, { quiet = false } = {}) {
   tell("state");
 }
 
+/** A destruction stroke on this client's display: null (no display / unknown), "none" (not on screen yet), "anim" (its entry plays), "settled". */
+function entryState(id) {
+  if ( !id ) return null;
+  const d = moduleApi.destruction?.display?.(); if ( !d?.order ) return null;
+  const gs = d.order.filter((g) => g.objId === id);
+  return !gs.length ? "none" : gs.some((g) => g.anim) ? "anim" : "settled";
+}
+
 /* ---- the soft form */
 
 function playSoft(shot, late = 0) {
   if ( myMode() === "bar" ) return;                       // the GM's default: the bar's status line only
   const t = captionText(shot), dr = R();
-  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? t.title : "", icon: t.icon, onClick: () => lookAt(shot) });
+  const mark = Ov.marker({ x: shot.x, y: shot.y, text: dr.captions ? (t.title || t.kick) : "", icon: t.icon, onClick: () => lookAt(shot) });
   const s = { shot, mark, timer: setTimeout(() => endSoft(shot.id, "done"), Math.max(400, shot.len - late)) };
   softs.set(shot.id, s);
 }

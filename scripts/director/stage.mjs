@@ -55,6 +55,21 @@ function registerSettings() {
 }
 Hooks.once("init", registerSettings);
 
+/**
+ * A camera move: Foundry's own animatePan, minus the wrappers other modules put on it. A camera module (EZGlide) replaces the easing of
+ * EVERY animatePan with its exponential glide, so a shot's camera snapped off and crawled in, whatever the look's camera easing said.
+ * The same animation is run here (constrained view, CanvasAnimation under the name "canvas.animatePan", so terminateAnimation and
+ * every listener that knows that name still work), with the easing the look asks for.
+ */
+function cameraMove({ x, y, scale, duration = 250, easing } = {}) {
+  const CA = foundry.canvas.animation.CanvasAnimation;
+  if ( typeof canvas._constrainView !== "function" || !canvas.scene?._viewPosition ) return canvas.animatePan({ x, y, scale, duration, easing });
+  const position = { ...canvas.scene._viewPosition }, to = canvas._constrainView({ x, y, scale });
+  return CA.animate([
+    { parent: position, attribute: "x", to: to.x }, { parent: position, attribute: "y", to: to.y }, { parent: position, attribute: "scale", to: to.scale }
+  ], { name: "canvas.animatePan", duration, easing: easing ?? CA.easeInOutCosine, ontick: () => canvas.pan(position) });
+}
+
 const env = () => {
   const ui = document.getElementById("interface");
   const stage = canvas.stage, app = canvas.app;
@@ -65,7 +80,7 @@ const env = () => {
     now: () => performance.now(),
     stage,
     ticker: { add: (fn) => app.ticker.add(fn, null, PIXI.UPDATE_PRIORITY.LOW), remove: (fn) => app.ticker.remove(fn) },
-    pan: (v) => canvas.animatePan(v),
+    pan: (v) => cameraMove(v),
     stopPan: () => foundry.canvas.animation.CanvasAnimation.terminateAnimation("canvas.animatePan"),
     view: () => ({ x: stage.pivot.x, y: stage.pivot.y, scale: stage.scale.x, vw: app.screen.width, vh: app.screen.height }),
     centre: () => ({ x: stage.pivot.x, y: stage.pivot.y }),

@@ -43,7 +43,7 @@ const kindOf = (k) => KINDS[k] ?? KINDS.custom;
 export const NUM = {
   takeAt: [0.55, 0.05, 1, ""],         // weight from which an event takes the camera over
   softAt: [0.12, 0, 1, ""],            // weight from which an event is shown at all (as a soft shot)
-  merge: [700, 0, 3000, "ms"],         // events this close in time (and place) become one shot
+  merge: [450, 0, 3000, "ms"],         // events this close in time (and place) become one shot
   mergeSq: [10, 1, 60, "sq"],          // ... this close in place (grid squares)
   cooldown: [7000, 0, 60000, "ms"],    // the same place is not taken over again within this time (soft at most)
   rest: [1800, 0, 20000, "ms"],        // the camera stays with the player at least this long between two take-overs (a heavier event may break it)
@@ -126,7 +126,8 @@ export function normEvent(e, now = 0) {
     tokens: Array.isArray(e.tokens) ? e.tokens.filter((t) => typeof t === "string").slice(0, 16) : [],
     caption, who: e.who === "gm" ? "gm" : "all", t: Number.isFinite(num(e.t)) ? num(e.t) : now,
     src: typeof e.src === "string" ? e.src.slice(0, 40) : "api", force: !!e.force, scene: typeof e.scene === "string" ? e.scene : null,
-    path: Array.isArray(e.path) ? e.path.filter(Number.isFinite).slice(0, 64) : null, dur: Number.isFinite(num(e.dur)) ? clamp(num(e.dur), 0, 8000) : null
+    path: Array.isArray(e.path) ? e.path.filter(Number.isFinite).slice(0, 64) : null, dur: Number.isFinite(num(e.dur)) ? clamp(num(e.dur), 0, 8000) : null,
+    ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null
   };
 }
 
@@ -225,7 +226,7 @@ export function merged(b) {
   return {
     id: b.id, kind: ph.kind, kinds, weight: clamp(Math.max(...(who === "gm" ? evs : pub).map((e) => e.weight)) + 0.06 * ((who === "gm" ? evs : pub).length - 1), 0, 1),
     x: ph.x, y: ph.y, box: who === "gm" ? box : pbox, tokens: [...(who === "gm" ? tokens : ptok)], caption: ph.caption, who,
-    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur
+    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null
   };
 }
 
@@ -239,9 +240,9 @@ export function plan(ev, form, r, now, seq = 0) {
   const lead = Math.round(r.lead), back = Math.round(r.back);
   let len = form === "take" ? Math.min(r.maxShot, lead + hold + back) : Math.round(r.softMs);
   const shot = {
-    v: VERSION, id: `${ev.id}-${seq}`, form, kind: ev.kind, kinds: ev.kinds ?? [ev.kind], weight: ev.weight, x: ev.x, y: ev.y, box: ev.box, tokens: ev.tokens,
+    v: VERSION, id: `${ev.id}-${form[0]}`, form, kind: ev.kind, kinds: ev.kinds ?? [ev.kind], weight: ev.weight, x: ev.x, y: ev.y, box: ev.box, tokens: ev.tokens,
     caption: ev.caption, who: ev.who, scene: ev.scene, path: ev.path ?? null, t0: now, lead, hold: form === "take" ? len - lead - back : len, back, len,
-    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force
+    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null
   };
   return shot;
 }

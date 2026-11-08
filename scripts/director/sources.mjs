@@ -35,8 +35,8 @@ function strokeBox(o, ap) {
   const r = canvas.dimensions.sceneRect, m = ap * MK;
   return { x0: r.x + o.x0 * m, y0: r.y + o.y0 * m, x1: r.x + (o.x0 + o.w) * m, y1: r.y + (o.y0 + o.h) * m };
 }
-function onDestruction(objs, scene) {
-  const ap = Number(flagsOf(scene).destruction?.ap) || 1;
+function onDestruction(objs, scene, apIn = null) {
+  const ap = Number(apIn ?? flagsOf(scene).destruction?.ap) || 1;
   for ( const [id, o] of Object.entries(objs) ) {
     if ( id.startsWith("-=") || !o || typeof o !== "object" || o.k || o.cin ) continue;      // erase strokes; staged / show strokes (the show plays them)
     if ( dIds.has(id) ) continue;
@@ -45,7 +45,7 @@ function onDestruction(objs, scene) {
     const box = strokeBox(o, ap), size = Math.max(box.x1 - box.x0, box.y1 - box.y0), type = TYPES[o.t] ?? "blast";
     if ( o.tk && typeof o.tk === "object" ) { carryEvent(o, box, ap, scene); continue; }
     const c = Dir.boxCentre(box);
-    emit({ kind: type === "flood" ? "flood" : "destruction", src: "destruction", id: `d-${id}`, weight: Dir.sizeWeight(size, grid(), TYPE_K[type] ?? 1), box, x: c.x, y: c.y,
+    emit({ kind: type === "flood" ? "flood" : "destruction", src: "destruction", id: `d-${id}`, ref: id, weight: Dir.sizeWeight(size, grid(), TYPE_K[type] ?? 1), box, x: c.x, y: c.y,
       caption: { key: `Dir.cap.${type}`, data: {} } });
   }
 }
@@ -59,9 +59,19 @@ function carryEvent(o, box, ap, scene) {
   const hits = Array.isArray(tk.hit) ? tk.hit.filter((q) => q && typeof q.id === "string") : [];
   const p = Array.isArray(tk.p) ? tk.p : [], dur = p.length >= 3 ? Number(p[p.length - 1]) || 0 : 0;
   const hidden = !!d?.hidden || hits.some((q) => scene.tokens.get(q.id)?.hidden);
-  emit({ kind: hits.length ? "plough" : "carry", src: "destruction", id: `c-${o.id}`, weight: hits.length ? 0.9 : 0.7, box: fb, x: b.x, y: b.y,
+  emit({ kind: hits.length ? "plough" : "carry", src: "destruction", id: `c-${o.id}`, ref: o.id, weight: hits.length ? 0.9 : 0.7, box: fb, x: b.x, y: b.y,
     tokens: [tk.id, ...hits.map((q) => q.id)], path: [a.x, a.y, b.x, b.y], dur: dur ? Math.min(3500, dur + 600) : null, who: hidden ? "gm" : "all",
     caption: { key: hits.length ? "Dir.cap.plough" : "Dir.cap.carry", data: { token: tk.id, name: d ? publicName(d) : "", n: hits.length } } });
+}
+
+/** The leader painted it itself ("edited" comes before the save): the event goes at once, the players' entry starts after the save and
+ * the bake, so the camera is on its way before the damage shows. The flag path above then knows the ids. */
+function onDestructionHook(kind) {
+  if ( kind !== "edited" || !dIds || !live() ) return;
+  const S = moduleApi.destruction?.state?.(); if ( !S?.o ) return;
+  const fresh = {};
+  for ( const o of S.o ) if ( o?.id && !dIds.has(o.id) ) fresh[o.id] = o;
+  if ( Object.keys(fresh).length ) onDestruction(fresh, canvas.scene, S.ap);
 }
 
 /* ---------------------------------------------------------------- fire */
@@ -166,6 +176,7 @@ export function registerSources() {
   Hooks.on("canvasTearDown", () => { dIds = fIds = zSnap = null; });
   Hooks.on("updateScene", onUpdateScene);
   Hooks.on("moinenMapsZones", onZones);
+  Hooks.on("moinenMapsDestruction", onDestructionHook);
   Hooks.on("deleteToken", onDeleteToken);
   Hooks.on("createToken", onCreateToken);
   Hooks.on("updateToken", onUpdateToken);
