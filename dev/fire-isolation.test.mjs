@@ -109,9 +109,10 @@ const src = (p) => readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r
 const art = src("../scripts/fire/art.mjs");
 const disp = src("../scripts/fire/display.mjs");
 const block = (name) => art.slice(art.indexOf(`const ${name} = \``), art.indexOf("`;", art.indexOf(`const ${name} = \``)));
-ok(/uniform vec2 uOrg;/.test(block("ART")) && /vCell \+ uOrg/.test(block("ART")), "ART samples world cells (uOrg)");
+const artSrc = block("ART_HEAD") + block("ART");   // (A8: the uniforms and helpers are shared with the EMB pass in ART_HEAD)
+ok(/uniform vec2 uOrg;/.test(artSrc) && /vCell \+ uOrg/.test(artSrc), "ART samples world cells (uOrg)");
 ok(/uniform vec2 uOrg;/.test(block("FUEL")) && /\+ uOrg/.test(block("FUEL")), "FUEL samples world cells (uOrg)");
-ok(!/\buArea\b/.test(block("ART")),"ART has no whole-area clock (per-cell clocks only)");
+ok(!/\buArea\b/.test(artSrc),"ART has no whole-area clock (per-cell clocks only)");
 ok(/new FireArt\([^)]*seed: M\.hashStr\("art:"/.test(disp), "the display seeds the art by colour, not by the area id");
 const s0 = disp.indexOf("  sync("), syncBody = disp.slice(s0, disp.indexOf("\n  }\n", s0));
 ok(syncBody.length > 100 && !/tick\(true\)/.test(syncBody), "a sync does not force every area to re-render");
