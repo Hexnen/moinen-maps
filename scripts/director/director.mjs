@@ -87,13 +87,14 @@ export function emit(e) {
   const ev = Dir.normEvent({ scene: canvas.scene.id, ...e }, sharedNow());
   if ( !ev ) return null;
   if ( isLeader() ) enqueue(ev);
-  else game.socket?.emit(CHANNEL, { t: "dir", op: "event", ev, to: leaderId() });
+  else { const to = leaderId(); if ( to ) game.socket?.emit(CHANNEL, { t: "dir", op: "event", ev, to }, { recipients: [to] }); }   // (to the leader only)
   return ev;
 }
 function enqueue(ev) {
   if ( killed() ) return;
   const r = R();
   if ( !ev.force && (!r.enabled || !Dir.sourceOn(r, ev.kind)) ) return;
+  if ( ev.who === "gm" && !game.users.some((u) => u.active && u.isGM) ) return;   // a GM-only thing with no GM online: nobody may watch it
   ev.t = sharedNow();                                      // (the leader's moment: the merge window counts from arrival)
   lastEvents.push(ev); while ( lastEvents.length > 8 ) lastEvents.shift();
   queue.push(ev, r, grid());
@@ -120,7 +121,12 @@ function pump() {
   if ( queue.buckets.length ) schedulePump(250);
 }
 function send(shot) {
-  game.socket?.emit(CHANNEL, { t: "dir", op: "shot", shot });
+  // a GM-only shot (a hidden token, a GM-only thing) never goes over the wire to a player: the server's custom socket honours
+  // { recipients }, so it reaches only the other GMs online (none: it stays here)
+  if ( shot.who === "gm" ) {
+    const gms = game.users.filter((u) => u.active && u.isGM && u.id !== game.user.id).map((u) => u.id);
+    if ( gms.length ) game.socket?.emit(CHANNEL, { t: "dir", op: "shot", shot }, { recipients: gms });
+  } else game.socket?.emit(CHANNEL, { t: "dir", op: "shot", shot });
   receive(shot);
 }
 
