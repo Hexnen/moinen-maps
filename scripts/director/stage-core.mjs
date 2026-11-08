@@ -92,7 +92,7 @@ export function stageZoom(now, base, band = ZOOM_BAND) {
 }
 /**
  * The camera of an attack: null when attacker and target (`box`) are comfortable on screen already (it plays in place), else a view at
- * a zoom within the band of the player's zoom `base` that holds the whole box when it fits; when it does not fit even at the band's
+ * a zoom within the band of the player's zoom `base` (the zoom on screen when that holds the pair) that holds the whole box when it fits; when it does not fit even at the band's
  * widest, the TARGET (`focus`, the place the hit lands) stays whole in the frame and the frame leans toward the attacker as far as that
  * allows. `rect` = the free part of the screen (screen px).
  */
@@ -102,7 +102,9 @@ export function attackCamera(box, focus, view, rect, base, band = ZOOM_BAND, mar
   const uw = rect.w * (1 - 2 * mx), uh = rect.h * (1 - 2 * my);
   const bw = Math.max(1, box.x1 - box.x0), bh = Math.max(1, box.y1 - box.y0);
   const fit = Math.min(uw / bw, uh / bh);
-  const scale = clamp(fit, base * band[0], base * band[1]);
+  // the zoom on screen stays when it is within the band and holds the pair: no push-in, no pull-out (the steadiest frame)
+  const now = clamp(view.scale, base * band[0], base * band[1]);
+  const scale = fit >= now ? now : clamp(fit, base * band[0], base * band[1]);
   let cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2;
   if ( fit < scale && focus ) {
     const hw = uw / (2 * scale), hh = uh / (2 * scale);

@@ -51,7 +51,8 @@ const box = (cx, cy, rr = 40) => ({ x0: cx - rr, y0: cy - rr, x1: cx + rr, y1: c
 const u = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 ok(SC.attackCamera(u(box(700, 1000), box(900, 1000)), box(900, 1000), view, rect, 1) === null, "both on screen: in place");
 let c = SC.attackCamera(u(box(3000, 1000), box(3300, 1000)), box(3300, 1000), view, rect, 1);
-ok(c && c.scale >= 0.85 && c.scale <= 1.12, "off screen: framed within the zoom band");
+ok(c && c.scale === 1, "off screen, the pair fits at the zoom on screen: that zoom (no push-in)");
+ok(SC.attackCamera(u(box(3000, 1000), box(3300, 1000)), box(3300, 1000), { ...view, scale: 1.5 }, rect, 1).scale === 1.12, "a zoom on screen above the band: back into it");
 const sx = (x) => (x - c.x) * c.scale + 800;
 ok(sx(2960) > 0 && sx(3340) < 1300, "the pair fits: both in the free rect");
 c = SC.attackCamera(u(box(-2000, 1000), box(3300, 1000)), box(3300, 1000), view, rect, 1);
