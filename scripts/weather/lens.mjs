@@ -579,6 +579,12 @@ void main() {
   fragColor = vec4(add, k);
 }`;
 let showProg = null;
+/** The lens's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
+export function lensPrograms() {
+  lensProg ??= PIXI.Program.from(LENS_VERT, LENS_FRAG, "moinen-maps-weather-lens");
+  showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
+  return [lensProg, showProg];
+}
 
 /**
  * The lens on screen: a quad over the screen in screen space whatever its parent's transform (the stage pans and zooms; the glass
@@ -603,7 +609,7 @@ class LensShow extends PIXI.Mesh {
         const srcFB = cur ? cur.framebuffer?.glFramebuffers?.[ctx]?.framebuffer ?? null : null;
         const ok = cur ? !!srcFB && !(cur.framebuffer.multisample > 1) : !gl.getContextAttributes()?.antialias;
         if ( ok ) {
-          const sf0 = r.renderTexture.sourceFrame.clone(), df0 = r.renderTexture.destinationFrame.clone();
+          const sf0 = (this._sf ??= new PIXI.Rectangle()).copyFrom(r.renderTexture.sourceFrame), df0 = (this._df ??= new PIXI.Rectangle()).copyFrom(r.renderTexture.destinationFrame);
           const res = cur ? cur.baseTexture.resolution : r.resolution;
           const H = Math.floor((cur ? cur.height : r.screen.height) * res);
           const w = L.frameRT.width, h = L.frameRT.height;
@@ -695,7 +701,7 @@ export class WeatherLens {
     const ch = canvas.stage.children;
     if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite ) canvas.stage.addChild(this.sprite);   // (drawn last)
     const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12);
-    const key = `${q}`;
+    const key = q;
     this.copyWanted = (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0;   // (big drops: rain beads and runners, melted crystals)
     if ( key === this.key ) return;
     this.key = key;

@@ -155,7 +155,8 @@ export class CellCache {
     }
     const u = this.direct.uniforms;
     u.uCellO[0] = x0; u.uCellO[1] = y0; u.uCellN[0] = w; u.uCellN[1] = h; u.uCells = this.rt;
-    const b = this.quad.getBuffer("aVertexPosition").data; b.set([0, 0, w, 0, w, h, 0, h]); this.quad.getBuffer("aVertexPosition").update();
+    const qb = this.quad.getBuffer("aVertexPosition"), b = qb.data;
+    b[0] = 0; b[1] = 0; b[2] = w; b[3] = 0; b[4] = w; b[5] = h; b[6] = 0; b[7] = h; qb.update();
     this.draw();
     this.use(true);
     this.stats.cells = w * h; this.stats.w = w; this.stats.h = h;
@@ -169,7 +170,7 @@ export class CellCache {
   draw() {
     const r = canvas.app.renderer, RT = r.renderTexture, u = this.direct.uniforms;
     r.batch.flush();
-    const cur = RT.current, sf = RT.sourceFrame.clone(), df = RT.destinationFrame.clone();
+    const cur = RT.current, sf = (this._sf ??= new PIXI.Rectangle()).copyFrom(RT.sourceFrame), df = (this._df ??= new PIXI.Rectangle()).copyFrom(RT.destinationFrame);
     RT.bind(this.rt);
     u.translationMatrix = IDENT;
     r.shader.bind(this.cellShader);

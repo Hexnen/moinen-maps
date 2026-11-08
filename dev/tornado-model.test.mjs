@@ -86,5 +86,43 @@ const G = 100;
   ok(W.vortexWindAt(700, 500, G).every((c) => c === 0), "no provider: no vortex wind");
 }
 
+/* F: the no-garbage forms give the same numbers as the reference formulas (the old allocating code, kept here) */
+{
+  const smooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  const refWander = (T, e, grid) => {
+    const w = T.wander * grid, s = T.seed, ph = (k) => ((s * (k + 3) * 2654435761) >>> 0) / 4294967296 * 6.2832;
+    return [w * (0.6 * Math.sin(0.41 * e + ph(1)) + 0.3 * Math.sin(1.07 * e + ph(2)) + 0.1 * Math.sin(2.31 * e + ph(3))),
+      w * (0.6 * Math.sin(0.37 * e + ph(4)) + 0.3 * Math.sin(0.93 * e + ph(5)) + 0.1 * Math.sin(2.67 * e + ph(6)))];
+  };
+  const refAlong = (P, s) => {
+    const { pts, cum, L } = P;
+    if ( pts.length === 1 || L <= 0 ) return [pts[0][0], pts[0][1]];
+    s = Math.min(L, Math.max(0, s));
+    let lo = 0, hi = cum.length - 1;
+    while ( hi - lo > 1 ) { const m = (lo + hi) >> 1; if ( cum[m] <= s ) lo = m; else hi = m; }
+    const f = (s - cum[lo]) / ((cum[hi] - cum[lo]) || 1);
+    return [pts[lo][0] + (pts[hi][0] - pts[lo][0]) * f, pts[lo][1] + (pts[hi][1] - pts[lo][1]) * f];
+  };
+  const refBase = (T, now, grid) => {
+    const e = Math.max(0, (now - T.t0) / 1000), P = TM.smoothPath(T.path);
+    const [x, y] = refAlong(P, TM.distAt(T, e, grid)), [wx, wy] = refWander(T, e, grid);
+    return [x + wx, y + wy];
+  };
+  let same = true;
+  const out = [0, 0], mo = {};
+  for ( const T of [TM.cleanTornado({ id: "f1", path: [[100, 100], [900, 300], [400, 800], [1200, 900]], t0: 0, wander: 0.4, speed: 0.3 }),
+    TM.cleanTornado({ id: "f2", path: [[500, 500]], t0: 1000, wander: 0 }), TM.cleanTornado({ id: "f3", path: [[0, 0], [2000, 0]], t0: 0, end: "loop", speed: 2 })] ) {
+    for ( let t = -2000; t < 60000; t += 137.3 ) {
+      const r = refBase(T, t, G), b = TM.baseInto(T, t, G, out), a = TM.baseAt(T, t, G);
+      if ( r[0] !== b[0] || r[1] !== b[1] || r[0] !== a[0] || r[1] !== a[1] ) same = false;
+      const m = TM.motionInto(T, t, G, 0.45, mo), p0 = refBase(T, t - 450, G), p1 = refBase(T, t, G), p2 = refBase(T, t + 450, G), ma = refBase(T, t - 50, G), mb = refBase(T, t + 50, G);
+      if ( m.vx !== (mb[0] - ma[0]) / 0.1 || m.ay !== (p0[1] - 2 * p1[1] + p2[1]) / (0.45 * 0.45) ) same = false;
+      if ( TM.touchAt(T, t, G) !== TM.phase(T, t, G).touch ) same = false;
+    }
+  }
+  ok(same, "baseInto / motionInto / touchAt = the reference formulas, bit for bit");
+  ok([0, 0.5, 1.37, 2].every((s) => JSON.stringify(TM.looksOf(s)) === JSON.stringify(TM.looks(s))) && TM.looksOf(1.37) === TM.looksOf(1.37), "looksOf = looks, kept per s");
+}
+
 console.log(`${n - fails}/${n} ok`);
 if ( fails ) process.exit(1);

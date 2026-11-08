@@ -30,9 +30,21 @@ const GREYS = [[0.11, 0.12, 0.15], [0.18, 0.19, 0.23], [0.26, 0.27, 0.31], [0.35
 const SNAKE = [[9.0, 0.019, 3, 0.3], [5.0, 0.034, -2, 1.9], [2.8, 0.051, 5, 4.1], [1.4, 0.083, 7, 2.6], [0.8, 0.13, -4, 0.8], [0.45, 0.21, 9, 5.0]];
 const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const fr = (x) => x - Math.floor(x);
+const PINCH = [[0.2, 0.1, 0.8], [0.3, 0.55, 0.65]];
+const TOUCHES = [[1.6, 1.0], [4.3, 0.6], [6.9, 0.85], [8.8, 0.45]];
+const STRIKE = [[0, 1], [0.22, 0.7]];
+const SPECK_A = [0.30, 0.23, 0.17], SPECK_B = [0.20, 0.19, 0.20], LEAF = [0.62, 0.52, 0.22];
+const PL_A = [0.55, 0.40, 0.24], PL_B = [0.66, 0.52, 0.34];
 
 let progs = {};
 const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-tornado-${k}`);
+
+/** A tornado's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
+export function tornadoPrograms() {
+  return [prog("deck", QUAD_VERT, DECK_FRAG), prog("column", QUAD_VERT, COLUMN_FRAG), prog("foot", QUAD_VERT, FOOT_FRAG), prog("vol", QUAD_VERT, VOL_FRAG),
+    prog("part", PART_VERT, PART_FRAG), prog("ground", GROUND_VERT, GROUND_FRAG), prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG),
+    prog("groundShow", GROUND_VERT, showNearest("vP")), prog("show", GROUND_VERT, SHOW_FRAG)];
+}
 
 /** The scene's background as the shader samples it, or null (as fire's display). */
 function mapOf() {
@@ -155,6 +167,11 @@ class TornadoView {
     this.artRoot.addChild(this.curtain, this.skirt, this.back, this.debB, this.wallB, this.column, this.debF, this.wallF, this.front, this.curtainF, this.deck);
     this.frags = new Map();
     this.stats = { inst: 0, cpuMs: 0 };
+    // the per-frame scratch (no garbage per frame)
+    this.timed = [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF, this.back, this.front, this.ground];
+    this.lists = [[this.Lb, this.ib], [this.Lf, this.ifr], [this.Lg, this.ig]];
+    this._b0 = [0, 0]; this._b1 = [0, 0]; this._mo = {}; this._a0 = {}; this._a1 = {}; this._a2 = {}; this._dr = [0, 0, 0]; this._lf = [0, 0, 0, 0];
+    this._pts = new Float64Array(12);
   }
 
   setRecord(T) { this.T = T; }
@@ -162,7 +179,13 @@ class TornadoView {
   /* ---------------------------------------------------------------- the per-frame tables */
 
   /** The base in art px (ground) at shared ms t. */
-  baseArt(t) { const g = this.owner.geo, [x, y] = TM.baseAt(this.T, t, g.grid); return [(x - g.ox) / g.ap, (y - g.oy) / g.ap]; }
+  baseArt(t) { return this.baseArtInto(t, [0, 0]); }
+  /** baseArt written into `out` (no garbage). */
+  baseArtInto(t, out) {
+    const g = this.owner.geo; TM.baseInto(this.T, t, g.grid, out);
+    out[0] = (out[0] - g.ox) / g.ap; out[1] = (out[1] - g.oy) / g.ap;
+    return out;
+  }
 
   /** Core radius at height z (art px) at shared seconds tm (mod hour) for looks L; touch swell. */
   coreR(z, tm, L, Z, touch, rope) {
@@ -174,7 +197,7 @@ class TornadoView {
     const w = TAU * tm;
     const breathe = 1 + 0.16 * Math.sin(z * 0.045 / U - w * 0.5) * Math.sin(Math.PI * q) + 0.09 * Math.sin(z * 0.11 / U + w * 0.7 + 1.0) + 0.06 * Math.sin(z * 0.2 / U - w * 0.9 + 2.0);
     let pinch = 1;
-    for ( const [m, off, zz] of [[0.2, 0.1, 0.8], [0.3, 0.55, 0.65]] ) {
+    for ( const [m, off, zz] of PINCH ) {
       const f = fr(tm * m + off), zp = 15 * U + Z * zz * f;
       pinch *= 1 - 0.34 * Math.sin(Math.PI * f) ** 2 * Math.exp(-(((z - zp) / (15 * U)) ** 2));
     }
@@ -189,8 +212,8 @@ class TornadoView {
     let prevSy = Infinity;
     for ( let k = 0; k < K; k++ ) {
       const q = k / (K - 1), z = q * Z, lag = 1.6 * Math.pow(q, 1.1);
-      const [bx, by] = this.baseArt(now - lag * 1000);
-      const m = TM.motionAt(this.T, now - 600 * lag, g.grid, 0.45);
+      const b_ = this.baseArtInto(now - lag * 1000, this._b0), bx = b_[0], by = b_[1];
+      const m = TM.motionInto(this.T, now - 600 * lag, g.grid, 0.45, this._mo);
       const ax = Math.max(-60, Math.min(60, m.ax / g.ap)), ay = Math.max(-60, Math.min(60, m.ay / g.ap));
       const env = Math.sin(Math.PI * Math.pow(q, 0.8));
       let sx = 0, sy = 0;
@@ -217,10 +240,11 @@ class TornadoView {
   }
 
   /** The axis at height z (interpolated): { cx, cy, rc }. */
-  axZ(z) {
+  axZ(z, o = {}) {
     const a = this.ax, Z = a[K - 1].z, f = Math.min(K - 1, Math.max(0, z / Z * (K - 1))), i = Math.min(K - 2, Math.floor(f)), u = f - i;
     const A = a[i], B = a[i + 1];
-    return { cx: A.cx + (B.cx - A.cx) * u, cy: A.cy + (B.cy - A.cy) * u, rc: A.rc + (B.rc - A.rc) * u };
+    o.cx = A.cx + (B.cx - A.cx) * u; o.cy = A.cy + (B.cy - A.cy) * u; o.rc = A.rc + (B.rc - A.rc) * u;
+    return o;
   }
 
   /** The lightning envelope now (0..1.2) and its zone angle: hashed strikes, at most one pair every 12 s. */
@@ -231,7 +255,7 @@ class TornadoView {
       const jj = ((j % 300) + 300) % 300;
       if ( hu(jj, 1, this.T.seed) > 0.5 ) continue;
       const t0 = j * 12 + 2 + 7 * hu(jj, 2, this.T.seed);
-      for ( const [dt, a] of [[0, 1], [0.22, 0.7]] ) {
+      for ( const [dt, a] of STRIKE ) {
         const d = tm - (t0 + dt);
         const e = d < 0 ? Math.exp(d / 0.03) : Math.exp(-d / 0.16);
         if ( e > 0.001 ) { f += a * e; zone = hu(jj, 3, this.T.seed) * TAU; }
@@ -247,7 +271,7 @@ class TornadoView {
     const T = this.T, g = this.owner.geo, U = this.U;
     const ph = TM.phase(T, now, g.grid);
     if ( ph.gone ) { this.hide(); return false; }
-    const s = Math.min(TM.levelS(T, now), cap - 1 + 0.35), L = TM.looks(s);
+    const s = Math.min(TM.levelS(T, now), cap - 1 + 0.35), L = TM.looksOf(s);
     const view = this.owner.view ?? { lift: 0.5, squash: 0.8 };
     this.lift = view.lift; this.squash = view.squash;
     const lift = this.lift, sq = this.squash;
@@ -270,7 +294,7 @@ class TornadoView {
     const touchSwell = 0.7 + 0.7 * this.touchEnv(tm);
     const dust = this.dust(now, bx, by);
     const tmv = still ? 0 : tm;
-    for ( const m of [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF, this.back, this.front, this.ground] ) {
+    for ( const m of this.timed ) {
       const u = m.shader.uniforms; u.uT = tmv; u.uView[0] = lift; u.uView[1] = sq;
     }
     // ---- deck: high above the wall cloud, so on screen it lies up-screen of the funnel top (the funnel hangs from its front edge)
@@ -300,7 +324,7 @@ class TornadoView {
     const vol = (mB, mF, z0, z1, pres, R, turn) => {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for ( let k = 0; k <= 6; k++ ) {
-        const z = z0 + (z1 - z0) * k / 6, a = this.axZ(Math.min(Math.max(z, 0), Z)), e = a.rc + R;
+        const z = z0 + (z1 - z0) * k / 6, a = this.axZ(Math.min(Math.max(z, 0), Z), this._a0), e = a.rc + R;
         x0 = Math.min(x0, a.cx - e); x1 = Math.max(x1, a.cx + e);
         y0 = Math.min(y0, a.cy - lift * z - e * sq); y1 = Math.max(y1, a.cy - lift * z + e * sq);
       }
@@ -326,9 +350,9 @@ class TornadoView {
     gu.uGc[0] = gcx; gu.uGc[1] = gcy; gu.uGc[2] = SPIN * TAU * fr(tm / 30); gu.uGc[3] = Z;
     const tw = (L.skirt * 0.22 + 4) * U;
     for ( let j = 0; j < 16; j++ ) {
-      const [tx, ty] = this.baseArt(now - j * 400);
-      const age = j / 15, tph = TM.phase(T, now - j * 400, g.grid);
-      this.track[j * 4] = tx; this.track[j * 4 + 1] = ty; this.track[j * 4 + 2] = age; this.track[j * 4 + 3] = tw * tph.touch * ph.p;
+      const b_ = this.baseArtInto(now - j * 400, this._b0);
+      const age = j / 15, touch_ = TM.touchAt(T, now - j * 400, g.grid);
+      this.track[j * 4] = b_[0]; this.track[j * 4 + 1] = b_[1]; this.track[j * 4 + 2] = age; this.track[j * 4 + 3] = tw * touch_ * ph.p;
     }
     const gr = L.deckR * U * 1.85;
     const gx0 = Math.floor(Math.min(gcx, bx) - gr), gy0 = Math.floor(Math.min(gcy, by) - gr * sq), gx1 = Math.ceil(Math.max(gcx, bx) + gr), gy1 = Math.ceil(Math.max(gcy, by) + gr * sq);
@@ -345,7 +369,7 @@ class TornadoView {
   /** Touchdowns: fast attack, slower release (the foot and the spray pulse with them); whole cycles per hour. */
   touchEnv(tm) {
     let g = 0;
-    for ( const [c, a] of [[1.6, 1.0], [4.3, 0.6], [6.9, 0.85], [8.8, 0.45]] ) {
+    for ( const [c, a] of TOUCHES ) {
       const d = ((tm - c) % 10 + 10) % 10;
       g += a * (d < 0.35 ? ss(0, 0.35, d) : Math.exp(-(d - 0.35) / 1.1));
     }
@@ -366,8 +390,9 @@ class TornadoView {
     const g = this.owner.geo, ap = g.ap;
     const p = G.getBuffer("aVertexPosition"), c = G.getBuffer("aCell");
     const sx0 = g.ox + x0 * ap, sy0 = g.oy + y0 * ap, sx1 = g.ox + x1 * ap, sy1 = g.oy + y1 * ap;
-    p.data.set([sx0, sy0, sx1, sy0, sx1, sy1, sx0, sy1]); p.update();
-    c.data.set([x0, y0, x1, y0, x1, y1, x0, y1]); c.update();
+    const P = p.data, C = c.data;
+    P[0] = sx0; P[1] = sy0; P[2] = sx1; P[3] = sy0; P[4] = sx1; P[5] = sy1; P[6] = sx0; P[7] = sy1; p.update();
+    C[0] = x0; C[1] = y0; C[2] = x1; C[3] = y0; C[4] = x1; C[5] = y1; C[6] = x0; C[7] = y1; c.update();
   }
 
   /** A quad mesh of the art texture onto the art px rect x0..x1, y0..y1 (absolute; clamped to the texture, whole px). */
@@ -375,7 +400,8 @@ class TornadoView {
     const W = this.W, H = this.H, ox = this.rect[0], oy = this.rect[1];
     const a = Math.max(0, Math.floor(x0 - ox)), b = Math.max(0, Math.floor(y0 - oy)), c = Math.min(W, Math.ceil(x1 - ox)), d = Math.min(H, Math.ceil(y1 - oy));
     const p = G.getBuffer("aVertexPosition");
-    p.data.set(c > a && d > b ? [a, b, c, b, c, d, a, d] : [0, 0, 0, 0, 0, 0, 0, 0]); p.update();
+    const P = p.data, ok = c > a && d > b;
+    P[0] = ok ? a : 0; P[1] = ok ? b : 0; P[2] = ok ? c : 0; P[3] = ok ? b : 0; P[4] = ok ? c : 0; P[5] = ok ? d : 0; P[6] = ok ? a : 0; P[7] = ok ? d : 0; p.update();
   }
 
   /* ---------------------------------------------------------------- debris (closed-form slots) */
@@ -385,45 +411,48 @@ class TornadoView {
     const Lb = this.Lb, Lf = this.Lf, Lg = this.Lg;
     Lb.n = Lf.n = Lg.n = 0;
     const touch = ph.touch, rope = ph.rope;
-    const dustRamp = (i) => dust.map((v) => Math.min(1, v * (0.28 + 0.157 * i)));
+    const dr = this._dr, dustRamp = (i) => { const k = 0.28 + 0.157 * i; dr[0] = Math.min(1, dust[0] * k); dr[1] = Math.min(1, dust[1] * k); dr[2] = Math.min(1, dust[2] * k); return dr; };
+    const hS = (i, q) => hu(i, 1, 980 + q), hW = (i, q) => hu(i, 4, 1010 + q), hC = (k, q) => hu(k, 8, 1062 + q), hI = (k, q) => hu(k, 3, 1202 + q), hF = (k, q) => hu(k, 6, 1702 + q);
+    const pushW = (wF, x, y, hx, hy, ang, kind, seed, al, r, g_, b, dis, sx, sy, fresh, extra) => {
+      if ( wF < 1 ) Lb.push(x, y, hx, hy, ang, kind, seed, al * (1 - wF), r, g_, b, dis, sx, sy, fresh, extra);
+      if ( wF > 0 ) Lf.push(x, y, hx, hy, ang, kind, seed, al * wF, r, g_, b, dis, sx, sy, fresh, extra);
+    };
+    const A0 = this._a0, A1 = this._a1, A2 = this._a2, B0 = this._b0, B1 = this._b1, LF = this._lf, pts = this._pts;
     const bot = this.ax[0];
     // FINE DEBRIS: specks orbiting the funnel, rising from the foot to under the wall cloud (2 px smears along their path)
     const gq = weatherQ(), nS = Math.round(L.specks * (0.3 + 0.7 * touch) * gq);   // (gq: the frame guard thins the small stuff)
     for ( let i = 0; i < nS; i++ ) {
-      const h = (q) => hu(i, 1, 980 + q);
-      const turns = Math.floor(5 + 7 * h(0)), zf = fr(h(1) + Math.floor(1 + 2 * h(2)) * tm / 10);
-      const z = 12 * U + Z * 0.78 * Math.pow(zf, 1.2), a = this.axZ(z);
-      const r = a.rc * (1 + 0.8 * h(3)) + 2 * U, w = SPIN * TAU * turns / 10, pa = h(4) * TAU + w * tm;
+      const turns = Math.floor(5 + 7 * hS(i, 0)), zf = fr(hS(i, 1) + Math.floor(1 + 2 * hS(i, 2)) * tm / 10);
+      const z = 12 * U + Z * 0.78 * Math.pow(zf, 1.2), a = this.axZ(z, A0);
+      const r = a.rc * (1 + 0.8 * hS(i, 3)) + 2 * U, w = SPIN * TAU * turns / 10, pa = hS(i, 4) * TAU + w * tm;
       const X = a.cx + Math.cos(pa) * r, Y = a.cy + Math.sin(pa) * r * sq - lift * z;
       const tx = -Math.sin(pa) * r * w / 30, ty = Math.cos(pa) * r * sq * w / 30;
       const Ls = Math.min(5, Math.hypot(tx, ty)), ang = Math.atan2(ty, tx);
-      const col = h(6) > 0.5 ? [0.30, 0.23, 0.17] : [0.20, 0.19, 0.20];
+      const col = hS(i, 6) > 0.5 ? SPECK_A : SPECK_B;
       const al = ss(0, 0.08, zf) * ss(1, 0.85, zf) * (1 - rope);
-      (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, Ls / 2 + 0.5, h(5) > 0.7 ? 1 : 0.5, ang, 0, i, al, ...col, 0);
+      (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, Ls / 2 + 0.5, hS(i, 5) > 0.7 ? 1 : 0.5, ang, 0, i, al, col[0], col[1], col[2], 0);
     }
     // WISPS: torn fragments peeling off the funnel, flung round it (three chords of an arc each)
     const nW = Math.round(L.wisps * (0.4 + 0.6 * ph.reach) * gq);
     for ( let i = 0; i < nW; i++ ) {
-      const h = (q) => hu(i, 4, 1010 + q);
-      const dustW = i < nW / 2, zf = fr(h(0) + Math.floor(1 + 2 * h(1)) * tm / 10);
-      const z = dustW ? (8 + 26 * Math.pow(h(2), 1.2) * (0.4 + 0.6 * zf)) * U : 30 * U + Z * 0.62 * zf;
+      const dustW = i < nW / 2, zf = fr(hW(i, 0) + Math.floor(1 + 2 * hW(i, 1)) * tm / 10);
+      const z = dustW ? (8 + 26 * Math.pow(hW(i, 2), 1.2) * (0.4 + 0.6 * zf)) * U : 30 * U + Z * 0.62 * zf;
       if ( z < Z * (1 - ph.reach) ) continue;
-      const turns = dustW ? Math.floor(5 + 4 * h(3)) : Math.floor(8 + 6 * h(3));
-      const pa0 = h(4) * TAU + SPIN * TAU * turns / 10 * tm;
-      const ln = (dustW ? 0.5 + 0.7 * h(5) : 0.3 + 0.5 * h(5)) * Math.sqrt(Math.sin(Math.PI * zf));
-      const a = this.axZ(z), R = dustW ? (16 + 26 * Math.pow(h(6), 0.8)) * U : a.rc * (1.15 + 0.45 * h(6)) + 2 * U;
-      const pts = [];
+      const turns = dustW ? Math.floor(5 + 4 * hW(i, 3)) : Math.floor(8 + 6 * hW(i, 3));
+      const pa0 = hW(i, 4) * TAU + SPIN * TAU * turns / 10 * tm;
+      const ln = (dustW ? 0.5 + 0.7 * hW(i, 5) : 0.3 + 0.5 * hW(i, 5)) * Math.sqrt(Math.sin(Math.PI * zf));
+      const a = this.axZ(z, A0), R = dustW ? (16 + 26 * Math.pow(hW(i, 6), 0.8)) * U : a.rc * (1.15 + 0.45 * hW(i, 6)) + 2 * U;
       for ( let k = 0; k <= 3; k++ ) {
-        const f = k / 3, pa = pa0 - SPIN * ln * f, zk = z - (dustW ? 3 : 9) * U * f, Rk = R * (dustW ? 1 - 0.4 * f : 1 + 0.25 * f), ak = this.axZ(Math.max(0, zk));
-        pts.push([ak.cx + Math.cos(pa) * Rk, ak.cy + Math.sin(pa) * Rk * sq - lift * zk, pa]);
+        const f = k / 3, pa = pa0 - SPIN * ln * f, zk = z - (dustW ? 3 : 9) * U * f, Rk = R * (dustW ? 1 - 0.4 * f : 1 + 0.25 * f), ak = this.axZ(Math.max(0, zk), A1);
+        pts[k * 3] = ak.cx + Math.cos(pa) * Rk; pts[k * 3 + 1] = ak.cy + Math.sin(pa) * Rk * sq - lift * zk; pts[k * 3 + 2] = pa;
       }
       for ( let k = 0; k < 3; k++ ) {
-        const [x0, y0, pa] = pts[k], [x1, y1] = pts[k + 1], front = Math.sin(pa) > 0;
+        const x0 = pts[k * 3], y0 = pts[k * 3 + 1], pa = pts[k * 3 + 2], x1 = pts[k * 3 + 3], y1 = pts[k * 3 + 4], front = Math.sin(pa) > 0;
         const lit = -Math.cos(pa) > 0.3 ? 1 : 0;
         const tone = front ? 4 + lit - (k > 1 ? 1 : 0) - (dustW ? 1 : 0) : 1 + lit;
         const c = dustW ? dustRamp(tone) : GREYS[Math.max(0, Math.min(6, tone))];
         const L2 = Math.hypot(x1 - x0, y1 - y0) / 2;
-        (front ? Lf : Lb).push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, h(8) > 0.6 && k < 2 ? 1 : 0.5, Math.atan2(y1 - y0, x1 - x0), 0, i * 4 + k, (1 - k * 0.22) * (1 - rope), ...c, 0);
+        (front ? Lf : Lb).push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, hW(i, 8) > 0.6 && k < 2 ? 1 : 0.5, Math.atan2(y1 - y0, x1 - x0), 0, i * 4 + k, (1 - k * 0.22) * (1 - rope), c[0], c[1], c[2], 0);
       }
     }
     if ( touch > 0.01 ) {
@@ -433,30 +462,31 @@ class TornadoView {
         const kc = 1080 + Math.floor(hu(i, 1, 1060) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1061) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);
         if ( sF > 0.9 ) continue;
-        const h = (q) => hu(i * 13 + cyc, 8, 1062 + q);
-        const rho = 20 * U + (40 + 50 * h(0)) * U * Math.pow(sF, 0.6) * (0.7 + 0.5 * o.touchSwell) * L.skirt / 52;
-        const pa = h(1) * TAU + SPIN * (2.4 * Math.pow(sF, 0.7) + TAU * 0.3 * tm);
-        const z = (4 + 30 * h(2)) * U * Math.sin(Math.PI * Math.min(sF * 1.2, 1)) + 3 * U;
-        const rr = (1.2 + 2.6 * h(3)) * U * (1 - 0.6 * sF) * ss(0, 0.12, sF);
+        const kk = i * 13 + cyc;
+        const rho = 20 * U + (40 + 50 * hC(kk, 0)) * U * Math.pow(sF, 0.6) * (0.7 + 0.5 * o.touchSwell) * L.skirt / 52;
+        const pa = hC(kk, 1) * TAU + SPIN * (2.4 * Math.pow(sF, 0.7) + TAU * 0.3 * tm);
+        const z = (4 + 30 * hC(kk, 2)) * U * Math.sin(Math.PI * Math.min(sF * 1.2, 1)) + 3 * U;
+        const rr = (1.2 + 2.6 * hC(kk, 3)) * U * (1 - 0.6 * sF) * ss(0, 0.12, sF);
         const X = bot.cx + Math.cos(pa) * rho, Y = bot.cy + Math.sin(pa) * rho * sq - lift * z;
-        const c = dustRamp(3 + (h(4) > 0.6 ? 1 : 0));
-        (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, rr, rr, 0, 3, i * 13 + cyc, 1, ...c, sF / 0.9);
+        const c = dustRamp(3 + (hC(kk, 4) > 0.6 ? 1 : 0));
+        (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, rr, rr, 0, 3, i * 13 + cyc, 1, c[0], c[1], c[2], sF / 0.9);
       }
       // INFLOW: dust and leaf streaks dragged over the ground toward the foot on tightening spirals (on the ground: the stage)
       const nI = Math.round(L.inflow * touch * gq);
       for ( let i = 0; i < nI; i++ ) {
         const kc = 1440 + Math.floor(hu(i, 1, 1200) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1201) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);
-        const h = (q) => hu(i * 31 + cyc, 3, 1202 + q);
-        if ( h(3) < 0.12 ) continue;
-        const pos = (s_) => {
-          const r = 20 * U + (55 + 85 * h(0)) * U * L.skirt / 52 * Math.pow(1 - s_, 1.3), a = h(1) * TAU + SPIN * (2.4 * Math.pow(s_, 1.6) + TAU * 0.1 * tm);
-          return [bot.cx + Math.cos(a) * r, bot.cy + Math.sin(a) * r * sq];
-        };
-        const [x1, y1] = pos(sF), [x0, y0] = pos(Math.max(sF - (0.05 + 0.10 * sF) * ss(0, 0.25, sF), 0));
+        const kk = i * 31 + cyc;
+        if ( hI(kk, 3) < 0.12 ) continue;
+        const h0 = hI(kk, 0), h1 = hI(kk, 1);
+        let s_ = sF, r = 20 * U + (55 + 85 * h0) * U * L.skirt / 52 * Math.pow(1 - s_, 1.3), a = h1 * TAU + SPIN * (2.4 * Math.pow(s_, 1.6) + TAU * 0.1 * tm);
+        const x1 = bot.cx + Math.cos(a) * r, y1 = bot.cy + Math.sin(a) * r * sq;
+        s_ = Math.max(sF - (0.05 + 0.10 * sF) * ss(0, 0.25, sF), 0);
+        r = 20 * U + (55 + 85 * h0) * U * L.skirt / 52 * Math.pow(1 - s_, 1.3); a = h1 * TAU + SPIN * (2.4 * Math.pow(s_, 1.6) + TAU * 0.1 * tm);
+        const x0 = bot.cx + Math.cos(a) * r, y0 = bot.cy + Math.sin(a) * r * sq;
         const L2 = Math.hypot(x1 - x0, y1 - y0) / 2;
-        const leaf = h(2) > 0.8, c = leaf ? [0.62, 0.52, 0.22] : dustRamp(5);
-        Lg.push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, 0.5, Math.atan2(y1 - y0, x1 - x0), 10, i, 0.85 * ss(0, 0.12, sF) * ss(1, 0.85, sF), ...c, 0);
+        const leaf = hI(kk, 2) > 0.8, c = leaf ? LEAF : dustRamp(5);
+        Lg.push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, 0.5, Math.atan2(y1 - y0, x1 - x0), 10, i, 0.85 * ss(0, 0.12, sF) * ss(1, 0.85, sF), c[0], c[1], c[2], 0);
       }
     }
     // MAP FRAGMENTS (and planks): torn out of the map near the base, spiralled up round the vortex, flung out on arcs, land, dissolve
@@ -465,65 +495,65 @@ class TornadoView {
       const plank = i >= nF;
       const kc = plank ? 450 : 450, life = 3600 / kc;
       const u = (tm + hu(i, 2, 1701) * life) / life, cyc = Math.floor(u) % kc, tau = (u - Math.floor(u)) * life;
-      const h = (q) => hu(i * 23 + cyc, 6, 1702 + q);
-      const t0 = now - tau * 1000, ph0 = TM.phase(T, t0, g.grid);
-      if ( ph0.touch < 0.5 || h(11) > 0.3 + 0.7 * touch ) continue;     // (only torn out while it is on the ground)
-      const [b0x, b0y] = this.baseArt(t0);
-      const rs = (6 + 30 * h(0)) * U * L.skirt / 52, as = h(1) * TAU;
+      const kk = i * 23 + cyc;
+      const t0 = now - tau * 1000;
+      if ( TM.touchAt(T, t0, g.grid) < 0.5 || hF(kk, 11) > 0.3 + 0.7 * touch ) continue;     // (only torn out while it is on the ground)
+      const b0 = this.baseArtInto(t0, B0), b0x = b0[0], b0y = b0[1];
+      const rs = (6 + 30 * hF(kk, 0)) * U * L.skirt / 52, as = hF(kk, 1) * TAU;
       const sx = Math.floor(b0x + Math.cos(as) * rs), sy = Math.floor(b0y + Math.sin(as) * rs * sq);
       // sizes vary a lot: mostly small chunks, some slabs, a few big pieces of the map (heavier: they rise less and fly shorter)
-      const big = !plank && L.frags >= 10 && h(12) < 0.16, heavy = big ? 0.5 : 1;
-      const size = plank ? 0 : L.fragSz * U * (0.5 + 1.1 * Math.pow(h(2), 1.6)) * (big ? 1.8 : 1), rr = size / 2;
-      const tl = 0.7 + 0.8 * h(3), zr = (30 + 70 * Math.pow(h(4), 1.3)) * U * heavy, om = (1.3 + 0.6 * h(5)) * TAU;
+      const big = !plank && L.frags >= 10 && hF(kk, 12) < 0.16, heavy = big ? 0.5 : 1;
+      const size = plank ? 0 : L.fragSz * U * (0.5 + 1.1 * Math.pow(hF(kk, 2), 1.6)) * (big ? 1.8 : 1), rr = size / 2;
+      const tl = 0.7 + 0.8 * hF(kk, 3), zr = (30 + 70 * Math.pow(hF(kk, 4), 1.3)) * U * heavy, om = (1.3 + 0.6 * hF(kk, 5)) * TAU;
       const lift_ = (tt) => {
         const e = ss(0, 1, tt / tl), z = zr * Math.pow(e, 1.4);
-        const [bx2, by2] = this.baseArt(t0 + tt * 1000), a = this.axZ(Math.min(z, Z));
+        const b2 = this.baseArtInto(t0 + tt * 1000, B1), bx2 = b2[0], by2 = b2[1], a = this.axZ(Math.min(z, Z), A1);
         const ox = a.cx - bot.cx, oy = a.cy - bot.cy;
         const r2 = (1 - e) * rs + e * (a.rc * 1.25 + 4 * U), pa = as + SPIN * om * tt * e;
         const gx = (1 - e) * (bx2 + Math.cos(as) * rs) + e * (bx2 + ox + Math.cos(pa) * r2);
         const gy = (1 - e) * (by2 + Math.sin(as) * rs * sq) + e * (by2 + oy + Math.sin(pa) * r2 * sq);
-        return [gx, gy, z, pa];
+        LF[0] = gx; LF[1] = gy; LF[2] = z; LF[3] = pa;
       };
       let gx, gy, z, front, landed = false, dis = 0, tland = 0;
       // in front of the funnel when it is down-map of the axis at its height (it crosses at the funnel's sides: no pop through it)
-      if ( tau < tl ) [gx, gy, z] = lift_(tau);
+      if ( tau < tl ) { lift_(tau); gx = LF[0]; gy = LF[1]; z = LF[2]; }
       else {
         // flung out on a widening spiral: the velocity keeps turning with the vortex while the drag slows it (closed form of
         // dv/dt = (-k + i W) v on the ground plane, squash undone)
-        const [gx1, gy1, z1] = lift_(tl), [gx0, gy0] = lift_(tl - 0.04);
+        lift_(tl); const gx1 = LF[0], gy1 = LF[1], z1 = LF[2];
+        lift_(tl - 0.04); const gx0 = LF[0], gy0 = LF[1];
         let vx = (gx1 - gx0) / 0.04, vy = (gy1 - gy0) / 0.04 / sq;
-        const spd = Math.hypot(vx, vy) + 1e-6, vmax = (95 + 60 * h(8)) * U * (big ? 0.6 : 1);
+        const spd = Math.hypot(vx, vy) + 1e-6, vmax = (95 + 60 * hF(kk, 8)) * U * (big ? 0.6 : 1);
         vx = vx / spd * Math.min(spd, vmax); vy = vy / spd * Math.min(spd, vmax);
-        const vz = (12 + 28 * h(9)) * U * heavy, gg = 110 * U, tf = tau - tl;
+        const vz = (12 + 28 * hF(kk, 9)) * U * heavy, gg = 110 * U, tf = tau - tl;
         tland = (vz + Math.sqrt(vz * vz + 2 * gg * z1)) / gg;
-        const tt = Math.min(tf, tland), kd = 0.8, Om = SPIN * (1.0 + 0.8 * h(13));
+        const tt = Math.min(tf, tland), kd = 0.8, Om = SPIN * (1.0 + 0.8 * hF(kk, 13));
         const e_ = Math.exp(-kd * tt), ar = e_ * Math.cos(Om * tt) - 1, ai = e_ * Math.sin(Om * tt), den = kd * kd + Om * Om;
         const qr = (-ar * kd + ai * Om) / den, qi = (-ai * kd - ar * Om) / den;
         gx = gx1 + vx * qr - vy * qi; gy = gy1 + (vx * qi + vy * qr) * sq; z = Math.max(z1 + vz * tt - 0.5 * gg * tt * tt, 0);
         landed = tf >= tland;
-        if ( landed ) { const rest = tf - tland, lie = 0.8 + 1.6 * h(10); if ( rest > lie + 0.8 ) continue; dis = ss(lie, lie + 0.8, rest); }
+        if ( landed ) { const rest = tf - tland, lie = 0.8 + 1.6 * hF(kk, 10); if ( rest > lie + 0.8 ) continue; dis = ss(lie, lie + 0.8, rest); }
       }
-      const spin = (2 + 5 * h(6)) * (h(7) > 0.5 ? 1 : -1) * (big ? 0.5 : 1);
+      const spin = (2 + 5 * hF(kk, 6)) * (hF(kk, 7) > 0.5 ? 1 : -1) * (big ? 0.5 : 1);
       // TUMBLING: it flips about its own axis while it flies (fc = cos of the flip: the face foreshortens, the underside shows), and
       // settles flat when it lands (face up, or upside down for some)
-      const flipW = (4 + 9 * h(14)) * (h(15) > 0.5 ? 1 : -1) * (big ? 0.45 : 1), air = Math.max(0, tau - 0.15);
+      const flipW = (4 + 9 * hF(kk, 14)) * (hF(kk, 15) > 0.5 ? 1 : -1) * (big ? 0.45 : 1), air = Math.max(0, tau - 0.15);
       const tAir = landed ? tl + tland : tau;
       let phi = flipW * Math.max(0, tAir - 0.15) * ss(0, 0.5, tAir);
       if ( landed ) { const up = Math.cos(phi) >= -0.3 ? 0 : Math.PI, k_ = ss(0, 0.18, tau - tAir); phi = phi + (Math.round((phi - up) / TAU) * TAU + up - phi) * k_; }
       const fc = Math.cos(phi), light = 0.5 + 0.5 * Math.cos(phi - 0.7);
-      const ang = spin * (landed ? tAir : tau) * 0.6 + h(16) * TAU;
+      const ang = spin * (landed ? tAir : tau) * 0.6 + hF(kk, 16) * TAU;
       // depth: in front of the funnel when down-map of the axis at its height; it crosses at the funnel's sides, faded across a few px
       // (drawn in both lists there) so it slides out from behind the dust instead of popping over it
-      const wF = ss(-3 * U, 3 * U, gy - this.axZ(Math.min(z, Z)).cy);
-      const Lst = { push: (...a) => { if ( wF < 1 ) Lb.push(...a.slice(0, 7), a[7] * (1 - wF), ...a.slice(8)); if ( wF > 0 ) Lf.push(...a.slice(0, 7), a[7] * wF, ...a.slice(8)); } };
+      const wF = ss(-3 * U, 3 * U, gy - this.axZ(Math.min(z, Z), A2).cy);
       const X = gx, Y = gy - lift * z;
       const al = 1 - rope * 0.7;
       if ( plank ) {
-        const w = (5 + 4 * h(2)) * U / 2, c = h(3) > 0.5 ? [0.55, 0.40, 0.24] : [0.66, 0.52, 0.34];
-        Lst.push(X, Y, w, Math.max(0.5, 0.75 * U * Math.abs(fc) + 0.4), ang, 2, i * 23 + cyc, al * (1 - dis), ...c, 0, 0, 0, 1, light);
+        const w = (5 + 4 * hF(kk, 2)) * U / 2, c = hF(kk, 3) > 0.5 ? PL_A : PL_B;
+        pushW(wF, X, Y, w, Math.max(0.5, 0.75 * U * Math.abs(fc) + 0.4), ang, 2, i * 23 + cyc, al * (1 - dis), c[0], c[1], c[2], 0, 0, 0, 1, light);
       } else {
         const sd = (i * 131 + cyc * 7 + 3) % 99991, thick = Math.max(1, Math.round(rr * 0.3));
-        Lst.push(X, Y, rr * 1.75 + thick, rr * 1.75 + thick, ang, 1, sd, al, fc, light, thick, dis, sx, sy, 1, rr);
+        pushW(wF, X, Y, rr * 1.75 + thick, rr * 1.75 + thick, ang, 1, sd, al, fc, light, thick, dis, sx, sy, 1, rr);
         // the scar where it was torn out (on the ground: torn earth, fading over 6 s)
         if ( tau < 6 ) Lg.push(sx, sy, rr * 1.75, rr * 1.75, 0, 12, sd, ss(0, 0.25, tau), 1, 0, 0, ss(3, 6, tau), sx, sy, 0, rr);
       }
@@ -533,7 +563,7 @@ class TornadoView {
         Lg.push(gx, gy, r, r * 0.6, 0, 11, i, al, 0, 0, 0, 0);
       }
     }
-    for ( const [I, G] of [[Lb, this.ib], [Lf, this.ifr], [Lg, this.ig]] ) { G.buf.data.set(I.d.subarray(0, I.n * STRIDE)); G.buf.update(); G.g.instanceCount = I.n; }
+    for ( const [I, G] of this.lists ) { G.buf.data.set(I.d.subarray(0, I.n * STRIDE)); G.buf.update(); G.g.instanceCount = I.n; }
   }
 
   /** The art texture: far curtain, skirt, back debris, the volumes behind, column, the volumes in front, front debris, near curtain, deck. */
@@ -576,9 +606,10 @@ export class TornadoDisplay {
   }
 
   viewRect() {
-    const v = canvas.app.renderer.screen, st = canvas.stage;
-    const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
-    return { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y };
+    const v = canvas.app.renderer.screen, st = canvas.stage, p = this._p ??= new PIXI.Point(), o = this._v ??= { x0: 0, y0: 0, x1: 0, y1: 0 };
+    p.set(0, 0); st.toLocal(p, undefined, p); o.x0 = p.x; o.y0 = p.y;
+    p.set(v.width, v.height); st.toLocal(p, undefined, p); o.x1 = p.x; o.y1 = p.y;
+    return o;
   }
 
   tick() {
