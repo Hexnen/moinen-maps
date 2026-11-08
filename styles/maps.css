@@ -552,7 +552,7 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-ws-hint { margin-left: auto; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); white-space: normal; }
 .mm-ws-colors .mm-swatches { display: flex; flex-wrap: nowrap; gap: 0.25rem; margin: 0; }
 .mm-ws-colors .mm-swatch { width: 1.35rem; height: 1.35rem; border-width: 2px; font-size: 0.65rem; }
-.mm-ws-colors color-picker { width: 4.6rem; }
+.mm-ws-colors color-picker { width: 5.8rem; }
 .mm-ws .mm-swatch.on { border-color: var(--mm-ws-text); box-shadow: 0 0 0 2px var(--mm-ws-ground), 0 0 0 4px var(--c, var(--mm-accent)); }
 .mm-ws-pinpick {
   flex: none; display: inline-flex; align-items: center; gap: 0.4rem; width: auto; height: 2rem; margin: 0; padding: 0 0.6rem 0 0.25rem;
@@ -633,7 +633,10 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-ws .mm-pm .mm-pm-row color-picker { grid-area: color; width: 100%; }
 .mm-ws .mm-pm [data-act="up"] { grid-area: up; } .mm-ws .mm-pm [data-act="down"] { grid-area: down; } .mm-ws .mm-pm [data-act="del"] { grid-area: del; }
 .mm-ws .mm-pm .mm-pm-row.mm-pm-ro { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto 1.1rem; gap: 0.35rem; align-items: center; }
-.mm-ws .mm-pm .mm-pm-ro .mm-pm-thumb { width: 1.8rem; height: 1.8rem; }
+.mm-ws .mm-pm .mm-pm-ro .mm-pm-thumb { grid-area: auto; width: 1.8rem; height: 1.8rem; }
+.mm-ws .mm-pm .mm-pm-ro > span:not(.mm-swatchdot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-ws .mm-pm .mm-pm-glyph { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+.mm-ws .mm-pm > .mm-pm-body > .hint { margin: 0 0 0.4rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
 .mm-ws .mm-pm .mm-pm-add { width: 100%; }
 .mm-pm-foot { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.6rem; }
 .mm-pm-state { flex: 1; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
@@ -788,3 +791,59 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-z-panel .mm-z-fold .mm-fold-body { display: grid; gap: 0.1rem; }
 .mm-z-panel .mm-ws-hint { display: block; margin: 0.15rem 0 0.35rem; opacity: 0.7; font-size: 0.78rem; }
 .mm-z-danger { padding-top: 0.5rem; border-top: 1px solid var(--mm-edge); }
+
+/* ---- dock panel forms, shared by every section (the zones panel's pattern):
+   one row per setting (a short label in a fixed column, the control filling the rest), checkboxes before their label,
+   explanations in tooltips, related settings in folding groups (.mm-ws-group, workspace/ui.mjs optFold), the destructive
+   action alone at the bottom (.mm-ws-danger). A panel opts in with the class .mm-ws-form on its own wrapper. */
+.mm-ws .mm-ws-form { display: grid; gap: 0.1rem; }
+.mm-ws .mm-ws-form > *, .mm-ws .mm-ws-form .mm-fold-body > * { min-width: 0; }
+.mm-ws .mm-ws-form :is(.form-group, .mm-ws-opt:not(.mm-ws-check)) {
+  display: grid; grid-template-columns: 6.2rem minmax(0, 1fr); align-items: center; gap: 0.5rem;
+  margin: 0; padding: 0.12rem 0; white-space: normal;
+}
+.mm-ws .mm-ws-form :is(.form-group, .mm-ws-opt) > label {
+  flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: inherit; font-size: inherit; line-height: 1.25;
+}
+.mm-ws .mm-ws-form :is(.form-group, .mm-ws-opt) > label[data-tooltip] { cursor: help; }
+.mm-ws .mm-ws-form .form-fields { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.mm-ws .mm-ws-form :is(.form-fields, .mm-ws-opt) > :is(range-picker, select, color-picker, input[type="text"]) { flex: 1 1 auto; width: 100%; min-width: 0; max-width: none; }
+.mm-ws .mm-ws-form .form-fields > color-picker + color-picker, .mm-ws .mm-ws-form .form-fields > select + color-picker { flex: 0 0 5.4rem; }
+/* a checkbox row: the box first, then its label (the whole row clicks) */
+.mm-ws .mm-ws-form .form-group:has(> .form-fields > input[type="checkbox"]:only-child) {
+  display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 0.45rem;
+}
+.mm-ws .mm-ws-form .form-group:has(> .form-fields > input[type="checkbox"]:only-child) > label { flex: 1 1 auto; cursor: pointer; }
+.mm-ws .mm-ws-form .form-group:has(> .form-fields > input[type="checkbox"]:only-child) .form-fields { flex: none; }
+.mm-ws .mm-ws-form .mm-ws-check { display: flex; justify-content: flex-start; align-items: center; gap: 0.45rem; margin: 0; padding: 0.15rem 0; white-space: normal; }
+.mm-ws .mm-ws-form .form-group.stacked { display: block; }
+.mm-ws .mm-ws-form .form-group.stacked > label { display: block; margin-bottom: 0.3rem; }
+.mm-ws .mm-ws-form input[type="checkbox"] { flex: none; margin: 0; }
+.mm-ws .mm-ws-form p.hint[hidden] { display: none; }
+.mm-ws .mm-ws-form .mm-ws-hint { display: block; margin: 0.15rem 0 0.3rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+.mm-ws .mm-ws-form .mm-ws-sub { margin: 0.45rem 0 0.1rem; padding: 0; border: 0; font-size: var(--font-size-12, 0.75rem); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mm-ws-muted); }
+.mm-ws .mm-ws-form [hidden] { display: none !important; }
+/* folding groups (also the zones panel's) */
+.mm-ws :is(.mm-ws-group, .mm-z-fold) > summary { display: flex; align-items: center; gap: 0.45rem; list-style: none; }
+.mm-ws :is(.mm-ws-group, .mm-z-fold) > summary::-webkit-details-marker { display: none; }
+.mm-ws :is(.mm-ws-group, .mm-z-fold) > summary > span { flex: 1 1 auto; min-width: 0; }
+.mm-ws :is(.mm-ws-group, .mm-z-fold) > summary::after {
+  content: ""; flex: none; width: 0.4rem; height: 0.4rem; margin: 0 0.15rem 0.2rem auto;
+  border: solid currentColor; border-width: 0 2px 2px 0; opacity: 0.5; transform: rotate(45deg); transition: transform 0.18s var(--mm-ease-out);
+}
+.mm-ws :is(.mm-ws-group, .mm-z-fold)[open] > summary::after { margin-bottom: 0; transform: rotate(-135deg); }
+.mm-ws .mm-ws-group > summary > i { width: 1rem; text-align: center; color: var(--mm-sec, var(--mm-accent)); font-size: 0.85em; }
+.mm-ws .mm-ws-group > summary > input[type="checkbox"] { flex: none; margin: 0; }
+.mm-ws .mm-ws-group .mm-fold-body { display: grid; gap: 0.1rem; }
+.mm-ws .mm-ws-group.is-off > summary > span { opacity: 0.55; }
+/* a row of buttons in a panel, and the destructive action alone at the bottom */
+.mm-ws .mm-ws-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0.2rem; }
+.mm-ws .mm-ws-actions > button { flex: 1 1 auto; width: auto; height: 1.9rem; margin: 0; padding: 0 0.6rem; white-space: nowrap; }
+.mm-ws .mm-ws-danger { margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px solid var(--mm-ws-edge); }
+.mm-ws .mm-ws-danger > button { width: auto; height: 1.9rem; margin: 0; padding: 0 0.7rem; }
+.mm-ws .mm-ws-danger > button:hover { color: var(--mm-accent); }
+.mm-ws .mm-ws-inline { display: flex; align-items: center; gap: 0.3rem; width: 100%; min-width: 0; }
+.mm-ws .mm-ws-inline > select { flex: 1 1 auto; min-width: 0; }
+.mm-ws .mm-ws-icon { flex: none; width: 1.9rem; height: 1.9rem; margin: 0; padding: 0; display: grid; place-items: center; }
+@media (prefers-reduced-motion: reduce) { .mm-ws :is(.mm-ws-group, .mm-z-fold) > summary::after { transition: none; } }
