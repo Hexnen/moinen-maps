@@ -78,6 +78,17 @@ export function setWindProvider(fn) { provider = typeof fn === "function" ? fn :
 /** The scene's base wind now (null when no weather wind is set: layers keep their own). */
 export function sceneWind() { try { const w = provider?.(); return w && w.str > 0 ? w : null; } catch { return null; } }
 
+/* ---------------------------------------------------------------- tornado vortices (weather registers, fire and weather read) */
+
+let vortexProvider = null;
+/**
+ * The weather engine registers `fn() -> [{ x, y (squares), R, r0, w, inflow, p }]`: the scene's tornadoes now (tornado-model.mjs
+ * `vortices`, a pure function of the stored paths and the shared clock); the wind they add is tornado-model `vortexWind`.
+ */
+export function setVortexProvider(fn) { vortexProvider = typeof fn === "function" ? fn : null; }
+/** The tornado vortices now ([] when there are none: the common case costs one call). */
+export function vortices() { try { return vortexProvider?.() ?? []; } catch { return []; } }
+
 /* ---------------------------------------------------------------- the same in GLSL (ES 3.00) */
 
 export const GLSL_WIND = `

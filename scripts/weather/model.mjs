@@ -6,7 +6,8 @@
  *     keys: [ { t: shared ms, dur: ms, preset, level 1..3, i 0..1, fx: { rain: { l, i }, ... }, wind: { dir, str, gust } } ],  (the timeline)
  *     base: { t, fx: { eff: { p, s } }, wind, wet },     (the state the oldest kept key starts from: older keys are folded into it)
  *     ground: { wetRate, dryRate, puddles },             (seconds to wet / dry the ground; puddles on / off)
- *     lens: { on, level: "auto" | 1 | 2 | 3, strength } }
+ *     lens: { on, level: "auto" | 1 | 2 | 3, strength },
+ *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] }   (weather OBJECTS on their own paths: tornado-model.mjs)
  *
  * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key cross-fades from the state at its
  * start to its target along a smoothstep over its `dur`, so a change of preset, level or wind is a smooth ramp, never a cut, and a
@@ -19,6 +20,7 @@
  * constant wetRate and dries with dryRate, integrated in closed form between transitions (1 s steps inside them): deterministic.
  */
 import { WIND_DEFAULT } from "../wind.mjs";
+import { cleanTornadoes } from "./tornado-model.mjs";
 
 export const FLAG = "weather";
 export const VERSION = 1;
@@ -97,7 +99,8 @@ export function cleanParams(raw) {
     keys, base: cleanBase(r.base),
     ground: { wetRate: num(g.wetRate, ...LIMITS.wetRate, GROUND_DEFAULT.wetRate), dryRate: num(g.dryRate, ...LIMITS.dryRate, GROUND_DEFAULT.dryRate), puddles: g.puddles !== false,
       snowRate: num(g.snowRate, ...LIMITS.snowRate, GROUND_DEFAULT.snowRate), meltRate: num(g.meltRate, ...LIMITS.meltRate, GROUND_DEFAULT.meltRate) },
-    lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true }
+    lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
+    tornadoes: cleanTornadoes(r.tornadoes)
   };
 }
 
