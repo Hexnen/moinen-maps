@@ -219,12 +219,26 @@ Each agent appends: date, branch, what was done, verified vs not.
 2. A lane turn/move would have relayed (cut off) an attack still waiting for its dice -> cued shots are not relayed.
 3. After a scene change the LEADER's queue still thought the old scene's take-over played (`busyUntil`): the new scene's first turn waited ~4 s and came too late (live: shot arrived after the arrival, form none). `director.mjs` onTearDown now releases `busyUntil` and `lastTake`.
 4. Move/turn in-view check during an arrival judged from the wide start (everything "on screen" -> none) -> uses `Screen.home` of any screen owner.
+5. A cued take-over (attack) ended at its planned end + 600 ms while its dice had not landed (DSN slow under load): the camera returned on the setup caption and the result was never shown (seen live, reproducible with a slow cue). `director.mjs` now waits for the cue until CUE_MAX lands it and lets the result stay (cap plannedEnd + EXTRA + CUE_AFTER for cued shots). Verified live with a cue that never resolves: result at ~5.5 s, held ~2 s, normal return.
 
 ### Verified (lane 4 serving this worktree, own headless Chrome on CDP port 9344: GM 127.0.0.47 = Gamemaster, PLAYER 127.0.0.48 = Test Gracz 1)
-- `node dev/run-all.mjs` 60/60, `node dev/lang-audit.mjs` clean, no duplicate lang keys.
+- `node dev/run-all.mjs` 60/60 (final code), `node dev/lang-audit.mjs` clean, no duplicate lang keys.
 - OFF (fresh state of the lane world: off): GM cutTo, emit, an NPC move, a combat start + next turn, a public attack -> the player got NO director socket message, no banner, no caption; the roll message carried no `dr` flag.
 - ON, `director-check watchShot` on the PLAYER (GM cutTo): none / esc / click / wheel / busy all OK.
 - Mixed sequence on the PLAYER (`dev/director-int-mixed.webm`): combat start -> camera to Battle Beast (turn, take) -> its 10-square move RELAYS into the follow -> follow ends -> its attack on Atom Eve is a TAKE in the lane (setup caption, dice, "Hit! Damage 3 · stunts: 1", hit) -> Apply damage: soft "Atom Eve: -3 Health" -> next turn = the player's own (Atom Eve): camera goes there and STAYS. (No turn banner of ours: invincible-plus-ultra announces the start and "Your turn", by move's design.)
 - Scene switch mid-follow: GM activates another scene 0.9 s into the follow -> the follow ends "scene", the arrival plays ("IB Test Scene"); the new scene's combat starts during the arrival -> the turn reaches the player at once and is SOFT ("Turn: Battle Beast" marker over the arrival); back to the first scene -> its arrival; DOM / holds / screen / ticker listeners / hook counts identical before and after, no errors (only Foundry's own missing note icons on that scene).
 - Rolls on the merged code (`dev/rolls-js` with lane-4 tokens): public attack take with cued result; GM roll and blind roll -> nothing on the player's socket; Esc mid cued shot -> cut, camera exactly back, overlays clean; the player's own attack (take) and its Push from the chat card (soft "Push · ..." -> "... · Miss!").
 - `cinematic-check` GM scenario 13/13 (director on).
+- `cinematic-fx-check` on the PLAYER 29/30 (the known "idle-bench rest" row, ticker +1, as phase A / director-off). It needs a destruction display on the scene (with none, `cameraMoveCheck` throws on `display().fx` and leaves its show on - a check-tool limitation) and an idle player: a director shot still playing when it starts, or two overlapping runs, freeze the page clock (the harness overrides `performance.now`).
+- `idle-bench rest` on the PLAYER: director on 2.07 / killed 2.03 / on 2.18 ms per frame (noise); no director, follow or arrival listener among the ticker listeners at rest.
+- OFF once more with the player: a scene change -> no dip, no card; a combat start + next turn on that scene -> nothing on the player. ON again: the arrival plays.
+
+### Not verified
+- Two player pages at once, a second GM, DPR 2, touch / a real GPU; a damage TAKE-over (always soft after its attack here); the turn banner of ours live (invincible-plus-ultra announces start / "Your turn" on this world, so ours stayed quiet by design); a multi-checkpoint drag; Foundry's own scene transitions.
+- The return to a scene: Foundry pans a player onto their owned token when the scene is drawn (Atom Eve here), so the arrival lands there, not on the view remembered at teardown - Foundry's behaviour, not changed.
+
+### Video (PLAYER page, Test Gracz 1)
+- `dev/director-int-mixed.webm` - combat start (camera to Battle Beast), its move followed straight on, its attack on Atom Eve (setup caption, dice, "Hit! Damage 3", splash), Apply damage (soft "-3 Health"), then the player's own turn: the camera goes to Atom Eve and stays.
+
+### Lane 4 state
+- Lane 4's `moinen-maps` junction was pointed at this worktree for the tests and set back to `C:\mmwt-director` afterwards. World copy: test combats deleted, Battle Beast back at (700,700), Atom Eve healed, the director switch left OFF; a small blast painted at (1350,250) on `director-test`.
