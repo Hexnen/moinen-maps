@@ -218,12 +218,30 @@ export function showBanner({ kick, name = "", sub = "", tag = "", round = false,
 }
 const bannerOn = () => !killed() && moveSettings().banner && myMode() !== "off" && canvas?.ready;
 
+/**
+ * Another module that already announces it on this client: invincible-plus-ultra shows "Combat begins" / "Round N" (combatBannerEnabled)
+ * and a "Your turn" message (turnMessage). Then that banner is theirs and ours stays away (no two titles at once).
+ */
+function announcedElsewhere(b) {
+  if ( !game.modules.get("invincible-plus-ultra")?.active ) return false;
+  const get = (k) => { try { return game.settings.get("invincible-plus-ultra", k); } catch { return undefined; } };
+  if ( b.kick !== "turn" && get("combatBannerEnabled") !== false && (b.kick !== "round" || get("combatBannerRounds") !== "edges") ) return true;
+  return b.mine && get("turnMessage") !== false;
+}
+const lastTurn = new Map();              // combat id -> "round:combatant" announced (an update that changes nothing else is not a turn)
+function onUpdateCombat(combat, changed) {
+  if ( !changed || !("turn" in changed || "round" in changed) || !combat.started ) return;
+  const cur = combat.current, key = `${cur?.round}:${cur?.combatantId}`;
+  if ( lastTurn.get(combat.id) === key ) return;
+  lastTurn.set(combat.id, key);
+  onTurnChange(combat, combat.previous, cur);
+}
 function onTurnChange(combat, prev, cur) {
   if ( combat !== combatHere() ) return;
   if ( bannerOn() ) {
     const cb = combat.combatant, visible = !!cb && (game.user.isGM || !cb.hidden);
     const b = M.bannerFor(prev, cur, { name: cb?.name, visible, mine: !game.user.isGM && !!cb?.isOwner });
-    if ( b && (b.title || b.kick !== "turn") ) {
+    if ( b && (b.title || b.kick !== "turn") && !announcedElsewhere(b) ) {
       const kick = b.kick === "start" ? F("DirMove.b.start", { n: b.round }) : F("DirMove.b.round", { n: b.round });
       showBanner({ kick, name: b.title ?? "", sub: b.mine ? T("DirMove.b.mine") : "", tag: game.user.isGM && cb?.hidden ? T("DirMove.b.hidden") : "", round: b.kick !== "turn",
         icon: b.kick === "start" ? "fa-solid fa-swords" : "fa-solid fa-hourglass-half", ms: b.kick === "turn" ? 2300 : 2900 });
@@ -232,7 +250,7 @@ function onTurnChange(combat, prev, cur) {
   if ( live() ) emitTurn(combat, cur);
 }
 function onDeleteCombat(combat) {
-  if ( !combat?.started || !bannerOn() ) return;
+  if ( !combat?.started || !bannerOn() || announcedElsewhere({ kick: "end" }) ) return;
   if ( combat.scene && combat.scene.id !== canvas.scene?.id ) return;
   showBanner({ kick: T("DirMove.b.endKick"), name: T("DirMove.b.end"), round: true, icon: "fa-solid fa-flag-checkered", ms: 2400 });
 }
@@ -273,8 +291,10 @@ Hooks.once("init", registerSettings);
 Hooks.once("ready", () => {
   registerPlay("move", handler);
   Hooks.on("moveToken", onMoveToken);
-  Hooks.on("combatTurnChange", onTurnChange);
-  Hooks.on("deleteCombat", onDeleteCombat);
+  // (updateCombat, not combatTurnChange: the active GM gets combatTurnChange only after awaiting the turn events - a system's
+  // initiative dialog can hold it for seconds - while every other client already has it)
+  Hooks.on("updateCombat", onUpdateCombat);
+  Hooks.on("deleteCombat", (c) => { lastTurn.delete(c.id); onDeleteCombat(c); });
   Hooks.on("canvasTearDown", () => { dropBanner(0); curLane = null; });
   Hooks.on(HOOK, (kind, data) => {
     if ( kind === "shot" && data?.form === "take" ) curLane = data.shot?.lane ?? null;

@@ -1935,7 +1935,7 @@
   "MOINENMAPS.DirMove.ownStay": "Własna tura: kamera zostaje na twoim tokenie",
   "MOINENMAPS.DirMove.ownStayHint": "W turze gracza kamera jedzie do jego tokenu i tam zostaje (bez powrotu), żeby mógł od razu działać.",
   "MOINENMAPS.DirMove.banner": "Baner tury",
-  "MOINENMAPS.DirMove.bannerHint": "Tytuł u góry każdego ekranu w każdej turze: runda, imię uczestnika (tak jak w trackerze walki), „Twoja tura” dla jego właściciela.",
+  "MOINENMAPS.DirMove.bannerHint": "Tytuł u góry każdego ekranu w każdej turze: runda, imię uczestnika (tak jak w trackerze walki), „Twoja tura” dla jego właściciela. Gdy invincible-plus-ultra już ogłasza na ekranie początek walki, rundy albo twoją turę, to ogłoszenie zostaje jemu.",
   "MOINENMAPS.DirMove.panelHint": "Ukryte tokeny i ukryci uczestnicy walki nigdy nie są pokazywani graczom; token poza widzeniem gracza nie jest śledzony.",
   "MOINENMAPS.DirMove.cap.move": "{token} w ruchu",
   "MOINENMAPS.DirMove.cap.teleport": "Teleport: {token}",

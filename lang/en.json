@@ -1935,7 +1935,7 @@
   "MOINENMAPS.DirMove.ownStay": "Own turn: the camera stays on your token",
   "MOINENMAPS.DirMove.ownStayHint": "On a player's own turn the camera goes to their token and stays there (no return), so they can act at once.",
   "MOINENMAPS.DirMove.banner": "Turn banner",
-  "MOINENMAPS.DirMove.bannerHint": "A title across the top of every screen on each turn: the round, the combatant's name (as the combat tracker shows it), \"Your turn\" for its owner.",
+  "MOINENMAPS.DirMove.bannerHint": "A title across the top of every screen on each turn: the round, the combatant's name (as the combat tracker shows it), \"Your turn\" for its owner. When invincible-plus-ultra already announces the start, the rounds or your own turn on a screen, that announcement is left to it.",
   "MOINENMAPS.DirMove.panelHint": "Hidden tokens and hidden combatants are never shown to players; a token out of a player's vision is not followed.",
   "MOINENMAPS.DirMove.cap.move": "{token} on the move",
   "MOINENMAPS.DirMove.cap.teleport": "{token} teleports",
