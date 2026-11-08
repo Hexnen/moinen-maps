@@ -227,10 +227,10 @@ export class FireDisplay {
 
   /**
    * A13: the new areas made ready, a step a frame each - built (one a frame), their textures uploaded (UP_BYTES a frame), their cells
-   * under the view drawn at the current art frame (whole when that fits `room` cells, else in steps behind - FireArt.startJob), with the
-   * uniforms the tick sets on a shown area. An area off screen is ready once uploaded (it is drawn as any area coming into view).
+   * under the view drawn (whole at the current art frame when that fits `room` cells, else a coming frame in steps - FireArt.startPre),
+   * with the uniforms the tick sets on a shown area. An area off screen is ready once uploaded (it is drawn as any area coming into view).
    */
-  adopt(vw, T, now0, dark, vort, wet, dt, room) {
+  adopt(vw, T, nx, fps6, now0, dark, vort, wet, dt, room) {
     const R = canvas.app.renderer, geo = this.geo, tl = CONFIG.moinenMaps?.fireTiming, t0 = tl ? performance.now() : 0;
     let built = 0, bytes = UP_BYTES, cells = 0, sent = 0;
     for ( const p of this.pending.values() ) {
@@ -241,13 +241,21 @@ export class FireDisplay {
       if ( !M.inView(p.area.rect, geo, vw, geo.grid) ) { p.ready = true; continue; }
       if ( m.anim ) m.setPhase(now0);
       m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet);
-      if ( !m.job ) {
-        const c = this.mustCost(p, vw);
-        if ( c && cells + c <= room ) { m.setTime(T); cells += this.ensure(p, vw, T); }
-        else if ( c ) { m.setTime(T); m.startJob(this.windowOf(p, vw, AHEAD, this._ahead), T); }
+      // (a large one is drawn AHEAD as A12 draws the next frame: an art frame the clock reaches after the steps it needs, with the
+      // clocks it will have then; it shows when the clock reaches it - revealed at the very frame the areas around it show, never one
+      // behind them; one the clock passed before it was whole is dropped and a later one taken)
+      const j = m.job;
+      if ( j?.pre ) { if ( j.done && j.t === T ) m.swapJob(R); else if ( !nx || !(j.t > T) ) m.job = null; }
+      else if ( j && nx ) m.job = null;
+      if ( !m.job && !(m.artT === T && m.covers(this.windowOf(p, vw, 0, this._need))) ) {
+        const w = this.windowOf(p, vw, AHEAD, this._ahead), c = Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]);
+        const f = c > room && nx ? this.frameAfter(now0, this.P.speed, fps6, T, (Math.ceil(c / room) - 1) * Math.max(4, this.ivMs || 16.7)) : null;
+        if ( !c ) { p.ready = true; continue; }                        // (none of its cells under the view)
+        if ( c <= room || !f ) { m.setTime(T); m.renderArt(R, w); this.stats.artPasses++; cells += c; }
+        else if ( f ) m.startPre(R, w, f.t, m.clocksAt(now0 + f.due, this._preU ??= new Float64Array(5)));
       }
-      if ( m.job && cells < room ) cells += m.stepJob(R, room - cells, T);
-      if ( !m.job && m.artT !== null && m.covers(this.windowOf(p, vw, 0, this._need)) ) p.ready = true;
+      if ( m.job && !m.job.done && cells < room ) cells += m.stepJob(R, room - cells, T);
+      if ( !m.job && m.artT === T && m.covers(this.windowOf(p, vw, 0, this._need)) ) p.ready = true;
     }
     if ( tl ) tl.push({ adopt: +(performance.now() - t0).toFixed(2), built, sent, cells, at: +performance.now().toFixed(1) });
     return cells;
@@ -354,7 +362,9 @@ export class FireDisplay {
     // A12: the NEXT art frame (its time and how soon the shared clock reaches it) and the display's own frame interval: the next frame
     // is drawn ahead over the display frames before it is due (PRE below)
     const nx = this.ticking && !still && P.speed > 0 && CONFIG.moinenMaps?.fireAhead !== false ? this.nextFrame(now0, P.speed, L.fps6, T) : null;
-    if ( dms >= 4 && dms <= 100 ) this.ivMs = this.ivMs ? this.ivMs * 0.9 + dms * 0.1 : dms;
+    // (A13: the ticker's own interval - the display's frame interval live; a recording's step on its virtual clock, dev/fire-rec.mjs)
+    const tms = canvas.app.ticker.elapsedMS;
+    if ( tms >= 4 && tms <= 100 ) this.ivMs = this.ivMs ? this.ivMs * 0.9 + tms * 0.1 : tms;
     const R = canvas.app.renderer;
     const vw = this.view(), m = geo.grid, dark = canvas.environment?.darknessLevel ?? 0, st = canvas.stage, cam = this.cam;
     if ( st.pivot.x !== cam[0] || st.pivot.y !== cam[1] || st.scale.x !== cam[2] ) { cam[0] = st.pivot.x; cam[1] = st.pivot.y; cam[2] = st.scale.x; this.movedAt = pn; }
@@ -410,9 +420,9 @@ export class FireDisplay {
       // too big to fit a frame at all: drawn in steps behind the frame it shows (FireArt.startJob); else it waits for a frame with room
       if ( c > budget ) { am.startJob(w ?? [0, 0, am.W, am.H], T); this.stats.jobs = (this.stats.jobs ?? 0) + 1; if ( cells < budget ) cells += am.stepJob(R, budget - cells, T); }
     }
-    // (A13: a new area's first frame takes what is left of the budget, at least half a full one a frame - whatever the guard's level:
-    // an at-once build drew all of it in one frame; this is the same work over a few)
-    if ( this.pending.size && this.ticking ) cells += this.adopt(vw, T, now0, dark, vort, wet, dt, Math.max(budget - cells, ART_BUDGET * 0.5));
+    // (A13: a new area's first frame takes what is left of the budget, at least a full one a frame - whatever the guard's level: an
+    // at-once build drew all of it in one frame; this is the same work over a few)
+    if ( this.pending.size && this.ticking ) cells += this.adopt(vw, T, nx, L.fps6, now0, dark, vort, wet, dt, Math.max(budget - cells, ART_BUDGET));
     // PREFETCH: in a calm frame with room left, an area just off screen (within half a view) that has never been drawn there is drawn
     // (in steps if big): a zoom-out or pan that brings it in finds its cells ready and shows them, instead of drawing them all at once
     if ( this.ticking && !moving && !force && cells < budget ) {
@@ -472,6 +482,16 @@ export class FireDisplay {
       const c = m.stepJob(R, quota, T); cells += c; quota -= c;
     }
     return cells;
+  }
+
+  /** A13: as nextFrame, the first art frame starting at least `lead` ms from `now` (for a first frame drawn in steps over that long). */
+  frameAfter(now, speed, fps6, T, lead) {
+    const o = this._fa ??= { t: 0, due: 0 }, k0 = Math.max(Math.floor(now * speed / 83.333), Math.floor((now + lead) * speed / 83.333));
+    for ( let k = k0 + 1; k < k0 + 4; k++ ) {
+      let t = (k / 12) % 1000; if ( fps6 ) t = Math.floor(t * 6) / 6;
+      if ( t !== T ) { o.t = t; o.due = k * 83.333 / speed - now; return o; }
+    }
+    return null;
   }
 
   /** The art frame after `T` (fps6: the next whole 6 fps one) and the ms until the shared clock reaches it (model.shaderTime's own steps). */
