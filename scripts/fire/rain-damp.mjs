@@ -28,13 +28,15 @@ uniform float uK;
 out vec4 o;
 void main() { o = vec4(uK, uK, 1.0, 1.0); }`;
 
+/** The damper's program (pre-warmed when the fire is wet as the scene opens: fire.mjs). */
+export const damperProgram = () => fuelProg ??= PIXI.Program.from(VERT, FRAG, "moinen-maps-fire-rain-damp");
+
 /** The fuel damper of an art area (made once, on first rain): a quad over its fuel texture, MULTIPLY (dst x src). */
 function damper(m) {
   if ( m.wxDamper && !m.wxDamper.destroyed ) return m.wxDamper;
   const FW = m.fuelRt.width, FH = m.fuelRt.height;
   const g = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, FW, 0, FW, FH, 0, FH], 2).addIndex([0, 1, 2, 0, 2, 3]);
-  fuelProg ??= PIXI.Program.from(VERT, FRAG, "moinen-maps-fire-rain-damp");
-  const d = new PIXI.Mesh(g, new PIXI.Shader(fuelProg, { uK: 1, translationMatrix: new PIXI.Matrix().toArray(true) }));
+  const d = new PIXI.Mesh(g, new PIXI.Shader(damperProgram(), { uK: 1, translationMatrix: new PIXI.Matrix().toArray(true) }));
   d.state.blendMode = PIXI.BLEND_MODES.MULTIPLY;
   m.fuelPass.addChild(d);
   return m.wxDamper = d;

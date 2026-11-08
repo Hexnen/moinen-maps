@@ -1455,6 +1455,8 @@ const programs = () => progs ??= {
   emit: PIXI.Program.from(VERT_B(3), EMIT, "moinen-maps-fire-emit-v5"),
   occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-fire-occ-v1")
 };
+/** Every art-style program (the pre-warm compiles them in the background after a scene with fire opens: fire.mjs). */
+export const artPrograms = () => Object.values(programs());
 /** A small pass into its target, cleared: bound and drawn directly (A12: renderer.render's per-call overhead is most of a tiny pass's CPU). */
 function renderPass(renderer, mesh, rt) { renderer.renderTexture.bind(rt); renderer.renderTexture.clear(); mesh.render(renderer); renderer.batch.flush(); }
 const texOf = (data, W, H) => PIXI.Texture.fromBuffer(data, W, H, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });

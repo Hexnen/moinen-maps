@@ -7,6 +7,11 @@ import { sharedNow } from "../shared-clock.mjs";
 import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import { reducedMotion } from "../config.mjs";
+import { warmPrograms } from "../gl-warm.mjs";
+import { artPrograms } from "./art.mjs";
+import { fireballProgram } from "./shader.mjs";
+import { damperProgram } from "./rain-damp.mjs";
+import { fireWet } from "../wind.mjs";
 
 /**
  * FIRE AND SMOKE, the engine: the strokes of the open scene (scene flags, model.mjs), the display (display.mjs), the GM's edits
@@ -55,11 +60,37 @@ function onCanvasReady() {
   teardown();
   if ( !canvas.scene ) return;
   load();
+  prewarm();
   draw();
   tell("loaded");
 }
 
+/**
+ * PRE-WARM (gl-warm.mjs): when the scene opens with fire or smoke this client shows, every fire program it will draw with is compiled
+ * and linked in the background (KHR_parallel_shader_compile; else one per idle callback) - the first fire draw of a session no longer
+ * blocks on the GPU process for the links (seconds on a program-cache miss). Meanwhile the fire's first display waits for it (draw):
+ * the fire shows when its programs are ready - the same picture, a moment later, never a frozen frame. Only the programs: no pixel
+ * changes. `CONFIG.moinenMaps.firePrewarm = false` turns it off.
+ */
+let warmJob = 0, warming = null;
+function prewarm() {
+  const job = ++warmJob; warming = null;
+  if ( CONFIG.moinenMaps?.firePrewarm === false || !strokes.size || !shown() ) return;
+  const list = [...artPrograms()];
+  if ( [...strokes.values()].some((s) => s.st === "fireball") ) list.push(fireballProgram());
+  const wet = fireWet(); if ( wet && (wet.dim > 0.001 || wet.steam > 0.001) ) list.push(damperProgram());
+  const live = () => job === warmJob && canvas.ready;
+  const tl = timing(), t0 = performance.now();
+  warming = warmPrograms(list, live).catch(() => {}).finally(() => {
+    if ( job !== warmJob ) return;
+    warming = null;
+    if ( tl ) tl.push({ warm: +(performance.now() - t0).toFixed(1), programs: list.length, at: +t0.toFixed(1) });
+    scheduleDraw();
+  });
+}
+
 function teardown() {
+  warmJob++; warming = null;
   cancelAnimationFrame(drawFrame); drawFrame = 0;
   clearTimeout(phaseTimer); phaseTimer = 0;
   display?.destroy(); display = null;
@@ -185,6 +216,7 @@ export function draw() {
   lastItems = items.slice();
   for ( const it of extra.values() ) items.push(it);
   fields = keep; lastAreas = areas;
+  if ( !display && warming ) return;                                  // (the first display waits for the pre-warm: prewarm)
   display ??= new FireDisplay();
   const t2 = tl ? performance.now() : 0, b0 = tl ? display.stats.built : 0;
   display.sync(items, g, params);
