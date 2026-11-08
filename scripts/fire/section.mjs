@@ -95,10 +95,7 @@ function bar(host, ctx) {
 
 function mountPanel(host) {
   const gm = game.user.isGM;
-  const render = () => {
-    const P = Fire.params0(), L = M.LIMITS, st = Fire.fireApi.status();
-    const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Fire.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Fire.h.${k}`) });
-    const rows = Fire.list().reverse().map((s) => {
+  const rowsOf = (P) => Fire.list().reverse().map((s) => {
       const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : "");
       const tip = s.k === "erase" ? name : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
       // the levels: click to step them (fire 1..3, smoke 0..3 / 1..3)
@@ -108,9 +105,15 @@ function mountPanel(host) {
       return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${s.k === "fire" ? esc(s.c ?? P.fireColor) : KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}${torn}</span>
         ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>`;
     }).join("");
+  const statusOf = (st) => game.i18n.format("MOINENMAPS.Fire.status", { n: st.strokes, a: st.areas, l: st.lights });
+  const listOf = (rows) => (rows ? `<ul class="mm-d-areas mm-d-objs mm-fire-list" aria-label="${esc(T("Fire.strokes"))}">${rows}</ul>` : `<p class="mm-ws-hint">${esc(T("Fire.empty"))}</p>`);
+  const render = () => {
+    const P = Fire.params0(), L = M.LIMITS, st = Fire.fireApi.status();
+    const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Fire.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Fire.h.${k}`) });
+    const rows = rowsOf(P);
     host.innerHTML = `<div class="mm-d-form mm-fire-panel">
-      <p class="mm-d-status" role="status">${esc(game.i18n.format("MOINENMAPS.Fire.status", { n: st.strokes, a: st.areas, l: st.lights }))}</p>
-      ${rows ? `<ul class="mm-d-areas mm-d-objs mm-fire-list" aria-label="${esc(T("Fire.strokes"))}">${rows}</ul>` : `<p class="mm-ws-hint">${esc(T("Fire.empty"))}</p>`}
+      <p class="mm-d-status" role="status">${esc(statusOf(st))}</p>
+      ${listOf(rows)}
       <div class="mm-d-actions"><button type="button" class="mm-ws-btn" data-act="clear"${st.strokes && gm ? "" : " disabled"}><i class="fa-solid fa-trash" inert></i> ${esc(T("Fire.clear"))}</button></div>
       ${optCheck({ name: "p.on", label: T("Fire.f.on"), checked: P.on, hint: T("Fire.h.on") })}
       ${optSelect({ name: "p.who", label: T("Fire.f.who"), value: P.who, options: [["all", T("Fire.o.all")], ["gm", T("Fire.o.gm")]] })}
@@ -127,6 +130,17 @@ function mountPanel(host) {
         <div class="mm-ws-opt"><label data-tooltip="${esc(T("Fire.h.lightColor"))}">${esc(T("Fire.f.lightColor"))}</label><input type="color" name="p.lightColor" value="${esc(P.lightColor)}"></div>
       </fieldset></div>`;
     if ( !gm ) for ( const c of host.querySelectorAll("[name^='p.']") ) c.disabled = true;
+  };
+  // A12c: an EDIT (a stroke painted, erased, undone - kind "edited") rewrites only the status line, the stroke list and the clear
+  // button: rebuilding the whole panel (its sliders, pickers and fieldsets) cost a long frame of layout on an older CPU at every release
+  const renderList = () => {
+    const form = host.querySelector(".mm-fire-panel"), s = form?.querySelector(":scope > .mm-d-status"), l = form?.querySelector(":scope > .mm-fire-list, :scope > .mm-ws-hint");
+    if ( !s || !l ) { render(); return; }
+    if ( l.contains(document.activeElement) ) return;                // (a list button in focus: left as it is, as before)
+    const st = Fire.fireApi.status();
+    s.textContent = statusOf(st);
+    l.outerHTML = listOf(rowsOf(Fire.params0()));
+    const clr = form.querySelector(":scope > .mm-d-actions [data-act='clear']"); if ( clr ) clr.disabled = !(st.strokes && gm);
   };
   render();
   const read = (c) => c.matches("input[type=checkbox]") ? c.checked : c.matches("range-picker, input[type=number]") ? Number(c.value) : c.value;
@@ -152,11 +166,14 @@ function mountPanel(host) {
     }
   };
   host.addEventListener("change", onChange); host.addEventListener("click", onClick);
-  let frame = 0;
+  let frame = 0, full = false;
   const id = Hooks.on("moinenMapsFire", (kind) => {
+    if ( kind !== "edited" ) full = true;
     if ( frame ) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
+      const all = full; full = false;
+      if ( !all ) { renderList(); return; }
       if ( !host.contains(document.activeElement) || document.activeElement === document.body ) { render(); return; }
       const P = Fire.params0();
       for ( const c of host.querySelectorAll("[name^='p.']") ) if ( !c.contains(document.activeElement) ) writeControl(c, P[c.name.slice(2)]);
