@@ -3,6 +3,7 @@ import { GROUND_VERT, GROUND_FRAG, RAIN_VERT, RAIN_FRAG } from "./glsl.mjs";
 import { PART_VERT, PART_FRAG, HAZE_FRAG } from "./fx-glsl.mjs";
 import { snowScore, driftScore, sortedScores, quantileThr } from "./fields.mjs";
 import { footprintK } from "../fire/shader.mjs";
+import { CellCache, CELL_VERT, SHOW_FRAG as CELL_SHOW_FRAG, cellFrag } from "./cells.mjs";
 import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
 
 /**
@@ -28,7 +29,9 @@ import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
  *   cloud shadows, and every effect's tint (cold, ochre, warm, the fire-lit evening, the wind's dim); cover and drift shares come from the scene's own score quantiles (fields.mjs).
  *
  * COST: no weather -> this display does not exist (no object, no ticker). With weather: one ticker listener (a few uniforms; the
- * state is resolved at most 12 times a second), one draw call per pass that has something to draw.
+ * state is resolved at most 12 times a second), one draw call per pass that has something to draw. The ground and the haze are one
+ * value per art cell: zoomed in (a cell over 1.6 device px across) each is computed once per CELL into a float texture and the stage
+ * pass only fetches it (cells.mjs; the same pixels, a fraction of the cost at zoom 3 / DPR 2).
  */
 const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 64], ["wind", 5, 64]];
 const PART_MAX = 60000;
@@ -137,6 +140,10 @@ export class WeatherDisplay {
       canvas.primary.addChild(m);
       this.meshes.push(m);
     }
+    // the per-cell caches of the ground and the haze (cells.mjs)
+    const show = prog("cellShow", GROUND_VERT, CELL_SHOW_FRAG);
+    this.groundCells = new CellCache(this.ground, prog("groundCell", CELL_VERT, cellFrag(GROUND_FRAG, "groundFields", "cellGround")), show);
+    this.hazeCells = new CellCache(this.haze, prog("hazeCell", CELL_VERT, cellFrag(HAZE_FRAG, "smoothFields", "cellHaze")), show);
   }
 
   /** New ground info / shelter textures (the owner built them): rebind. */
@@ -329,6 +336,8 @@ export class WeatherDisplay {
       partN += pn;
     }
     if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = footprintK(); }
+    if ( this.ground.visible ) this.groundCells.update(g, v);
+    if ( this.haze.visible ) this.hazeCells.update(g, v);
     this.vortex(n > 0 || partN > 0);
     this.stats.instances = n; this.stats.tiles = tiles; this.stats.parts = partN;
     this.stats.tickMs = performance.now() - t0;
@@ -355,6 +364,7 @@ export class WeatherDisplay {
   clock() { return this.fixedT ?? ((this.now?.() ?? Date.now()) / 1000) % 3600; }
 
   destroyMeshes() {
+    this.groundCells?.destroy(); this.hazeCells?.destroy(); this.groundCells = this.hazeCells = null;
     for ( const m of this.meshes ) { m.parent?.removeChild(m); m.destroy(); }
     this.meshes = [];
     this.rainGeom?.destroy(); this.rainGeom = null;
