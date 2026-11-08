@@ -87,11 +87,18 @@ export function cleanTornadoes(list) {
 /* ---------------------------------------------------------------- the path */
 
 const PATHS = new Map();
-/** The smoothed path (Chaikin, 3 rounds; the ends kept) with its cumulative length: { pts, cum, L }. Cached by content. */
+const BY_REF = new WeakMap();
+/**
+ * The smoothed path (Chaikin, 3 rounds; the ends kept) with its cumulative length: { pts, cum, L }. Cached by content, and by the
+ * path array itself (a frame asks for it hundreds of times - every base position of the debris - and the content key is a string
+ * of the whole path; a stored path is never changed in place, a new one is a new array).
+ */
 export function smoothPath(path) {
-  const key = path.map((p) => p.join(",")).join(";");
-  let P = PATHS.get(key);
+  let P = BY_REF.get(path);
   if ( P ) return P;
+  const key = path.map((p) => p.join(",")).join(";");
+  P = PATHS.get(key);
+  if ( P ) { BY_REF.set(path, P); return P; }
   let pts = path.map((p) => [p[0], p[1]]);
   for ( let r = 0; r < 3 && pts.length > 2; r++ ) {
     const nx = [pts[0]];
@@ -107,7 +114,7 @@ export function smoothPath(path) {
   for ( let i = 1; i < pts.length; i++ ) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
   P = { pts, cum, L: cum[cum.length - 1] };
   if ( PATHS.size > 32 ) PATHS.clear();
-  PATHS.set(key, P);
+  PATHS.set(key, P); BY_REF.set(path, P);
   return P;
 }
 

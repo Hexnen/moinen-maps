@@ -478,6 +478,18 @@ void main() {
   float T = 1.0, sT = -1.0, sN = 0.5, sF = 0.5, sX = 0.0, sZ = 0.0, sR = 0.0;
   vec2 sD = vec2(0.0);
   bool hit = false;
+  if ( uPass == 1 ) {
+    // the front pass draws only where the ray meets the funnel: find that first with the axis alone (no density), so a ray that
+    // never meets it is discarded before any noise (the same samples and test as the march below: the same pixels)
+    bool meets = false;
+    for ( int k = 0; k < N; k++ ) {
+      float z = z1 - (float(k) + j) * dz;
+      vec3 A = axisG(z);
+      vec2 d = vec2(p.x - A.x, (p.y + lift * z - A.y) / sq);
+      if ( length(d) < A.z * 0.9 && z < uAxis[39].w * (uMode == 1 ? 0.84 : 1.0) && z > -2.0 ) { meets = true; break; }
+    }
+    if ( !meets ) discard;
+  }
   for ( int k = 0; k < N; k++ ) {
     float z = z1 - (float(k) + j) * dz;
     vec3 A = axisG(z);
@@ -740,8 +752,8 @@ void main() {
     }
     if ( sd < 0.0 ) k *= mix(1.0, 0.78, uG.w);
   }
-  // the scoured track of the last seconds
-  float best = 1e4;
+  // the scoured track of the last seconds (its ragged edge: one noise per cell, the same for every segment)
+  float best = 1e4, rag = 3.0 * uU * (fbm2(c / (6.0 * uU), uSd + 202) - 0.5);
   for ( int i = 0; i < 15; i++ ) {
     vec4 a = uTrack[i], b = uTrack[i + 1];
     if ( a.w <= 0.0 || b.w <= 0.0 ) continue;
@@ -749,13 +761,16 @@ void main() {
     float f = clamp(dot(c - a.xy, ab) / L2, 0.0, 1.0);
     vec2 q = a.xy + ab * f;
     float w = mix(a.w, b.w, f) * (1.0 - mix(a.z, b.z, f));
-    best = min(best, length((c - q) * vec2(1.0, 1.0 / uView.y)) - w - 3.0 * uU * (fbm2(c / (6.0 * uU), uSd + 202) - 0.5));
+    best = min(best, length((c - q) * vec2(1.0, 1.0 / uView.y)) - w - rag);
   }
   vec3 add = vec3(0.0);
   if ( best < 0.0 ) k *= 0.84;
   k = mix(1.0, k, uAlpha);
   fragColor = vec4(add, k);
 }`;
+
+/** The ground's cell pass (weather/cells.mjs): the same cell function, one fragment per art cell of a float texture. */
+export const GROUND_CELL_FRAG = GROUND_FRAG.replace("void main() {\n  vec2 c = floor(vP) + 0.5;", "uniform vec2 uCellO;\nvoid main() {\n  vec2 c = uCellO + floor(gl_FragCoord.xy) + 0.5;");
 
 /* ================================================================== show the art texture (stage, above the tokens) */
 
