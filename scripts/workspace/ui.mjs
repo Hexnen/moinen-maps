@@ -63,6 +63,33 @@ export function optCheck({ name, label, checked, hint = "" }) {
 export const optHint = (text) => `<span class="mm-ws-hint">${esc(text)}</span>`;
 
 /**
+ * A folding group of a dock panel (the zones panel's pattern): a <details> whose open state lives in `open`, a Set the panel keeps
+ * across re-renders (see keepFolds). `head` (optional) is extra markup inside the summary, e.g. the group's own on/off switch.
+ */
+export function optFold({ id, title, icon = "", body, open, head = "", cls = "", attrs = "" }) {
+  return `<details class="mm-fold mm-ws-group${cls ? ` ${cls}` : ""}" data-fold="${esc(id)}"${attrs ? ` ${attrs}` : ""}${open?.has(id) ? " open" : ""}><summary>${head}${icon ? `<i class="${esc(icon)}" inert></i>` : ""}<span>${esc(title)}</span></summary><div class="mm-fold-body">${body}</div></details>`;
+}
+
+/** Keep `open` (a Set of fold ids) in step with the folds of `host` as they are opened and closed. Returns the cleanup. */
+export function keepFolds(host, open) {
+  const onToggle = (ev) => { const d = ev.target; if ( d.matches?.(".mm-ws-group[data-fold]") && host.contains(d) ) { if ( d.open ) open.add(d.dataset.fold); else open.delete(d.dataset.fold); } };
+  host.addEventListener("toggle", onToggle, true);
+  return () => host.removeEventListener("toggle", onToggle, true);
+}
+
+/**
+ * Dock panels are narrow: the explanation under a Foundry form-group (labels.mjs fg) goes into its label's tooltip instead of a
+ * paragraph. The paragraph stays in the DOM, hidden, so the control is still described by it (aria-describedby).
+ */
+export function tipHints(root) {
+  for ( const p of root.querySelectorAll(".form-group > p.hint") ) {
+    const label = p.parentElement.querySelector(":scope > label"); if ( !label ) continue;
+    label.dataset.tooltip = label.dataset.tooltip ? `${label.dataset.tooltip} ${p.textContent}` : p.textContent;
+    p.hidden = true;
+  }
+}
+
+/**
  * Wire a host's named controls to client settings: `map` = { controlName: settingKey | { key, read(control), write(value, control) } }.
  * A change stores the value; a change of the setting from elsewhere updates the control (unless it has focus). Returns the cleanup.
  * `onInput(name, value)` (optional) previews a value while a slider is being dragged.

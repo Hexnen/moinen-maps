@@ -859,7 +859,7 @@ export function registerTokenFx() {
   });
   Hooks.on("createToken", () => queueIdle());
   Hooks.on("updateScene", (scene, changes) => { if ( scene.id === canvas.scene?.id && foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`) ) { schedule(canvas.tokens.placeables); queueIdle(); } });
-  for ( const h of ["moinenMapsSceneDraft", "moinenMapsPerfMode", "moinenMapsTokenFxSettings"] ) Hooks.on(h, () => queueIdle());
+  for ( const h of ["moinenMapsPerfMode", "moinenMapsTokenFxSettings"] ) Hooks.on(h, () => queueIdle());
   Hooks.on("updateCombat", () => { for ( const r of RIGS.values() ) r.cfg = null; });
 }
 

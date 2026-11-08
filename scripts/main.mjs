@@ -1,9 +1,7 @@
 import { MODULE_ID } from "./config.mjs";
-import { onRenderSceneConfig } from "./scene-tab.mjs";
 import { onCanvasReady, teardown, onUpdateSceneDistricts, onCanvasPan, onAttrStoreChanged } from "./districts.mjs";
 import { api, isStore, resetStore } from "./attrs.mjs";
-import { setSceneDraft, registerCoreSettings } from "./config.mjs";
-import { refreshAllDistricts } from "./districts.mjs";
+import { registerCoreSettings } from "./config.mjs";
 import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, onWorkspaceTool, installPatches } from "./tools.mjs";
 import "./workspace/sections.mjs";
 import "./destruction/cinematic-panel.mjs";      // cinematic screen effects: CinematicFx (api.cinematic), client settings, the "Cinematic effects" dock panel
@@ -31,7 +29,6 @@ registerFlood();   // the water of the flooded holes (destruction kind "flood"):
 registerSmoothView();   // smooth wheel zoom + even frame pacing on fast displays (client settings, scripts/view-smooth.mjs)
 registerWarmup();   // GPU objects the first zoom / pan would make, made at idle after the scene opens (scripts/warmup.mjs)
 
-Hooks.on("renderSceneConfig", onRenderSceneConfig);
 Hooks.on("drawNote", onDrawNote);
 Hooks.on("refreshNote", onRefreshNote);
 Hooks.on("createNote", onCreateNote);
@@ -53,14 +50,6 @@ Hooks.on("combatStart", onCombatStart);
 Hooks.on("canvasTearDown", teardownTokenDrops);
 // enter / leave / idle / death styles of tokens (after the hooks above: a deleted token's ghost is made before its rig goes)
 registerTokenFx();
-// Scene Config live preview: a draft of the form values is laid over the scene config; closing the sheet (or leaving the scene) drops it
-let draftFrame = 0;
-Hooks.on("moinenMapsSceneDraft", () => {
-  if ( draftFrame ) return;
-  draftFrame = requestAnimationFrame(() => { draftFrame = 0; if ( canvas.ready ) { refreshPins(); refreshAllDistricts(); } });
-});
-Hooks.on("closeSceneConfig", () => setSceneDraft(null));
-Hooks.on("canvasTearDown", () => setSceneDraft(null));
 
 Hooks.once("init", () => { registerCoreSettings(); registerTokenFxSetting(); registerSettings(); registerFilterSettings(); });
 // the floating pin filter follows what is on the map

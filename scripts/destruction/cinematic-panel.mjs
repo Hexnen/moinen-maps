@@ -1,6 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Cin from "./cinematic-core.mjs";
-import { esc, T, optRange, optSelect, optCheck, optHint, isEcho, writeControl, onSetting, bindSettings } from "../workspace/ui.mjs";
+import { esc, T, optRange, optSelect, optCheck, optHint, optFold, keepFolds, isEcho, writeControl, onSetting, bindSettings } from "../workspace/ui.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { CinematicFx, clientOpts } from "./cinematic-fx.mjs";
 
@@ -42,17 +42,12 @@ export function stepFor(k) {
 }
 
 const CSS = `
-.mm-cin-panel { display: flex; flex-direction: column; gap: 0.5rem; font-size: var(--font-size-12, 0.75rem); }
-.mm-cin-panel fieldset { border: 1px solid var(--color-border-light-2, #8884); border-radius: 4px; margin: 0; padding: 0.25rem 0.5rem 0.4rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.mm-cin-panel fieldset.mm-cin-off > .mm-cin-body { opacity: 0.45; }
-.mm-cin-panel legend { display: flex; align-items: center; gap: 0.35rem; padding: 0 0.25rem; font-weight: bold; }
-.mm-cin-panel .mm-cin-row { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
-.mm-cin-panel .mm-ws-opt { display: flex; justify-content: space-between; white-space: normal; }
-.mm-cin-panel .mm-ws-range range-picker { width: 10rem; }
-.mm-cin-panel button { width: auto; flex: 0 1 auto; padding: 0 0.5rem; line-height: 1.6; }
+.mm-cin-panel .mm-cin-off > .mm-fold-body { opacity: 0.45; }
+.mm-cin-panel .mm-cin-off > summary > span { opacity: 0.55; }
 .mm-cin-panel textarea { width: 100%; min-height: 4rem; font-family: monospace; }
-.mm-cin-summary { font-style: italic; color: var(--mm-ws-muted, #aaa); }
-.mm-cin-panel input[type=color] { width: 3rem; height: 1.4rem; padding: 0; }
+.mm-ws .mm-ws-form .mm-ws-opt.mm-cin-presetrow.mm-cin-presetrow { grid-template-columns: auto minmax(0, 1fr); }
+.mm-cin-summary { color: var(--mm-ws-muted, #aaa); font-size: var(--font-size-12, 0.75rem); }
+.mm-cin-panel input[type=color] { width: 3rem; height: 1.4rem; padding: 0; justify-self: start; }
 `;
 let styled = false;
 function ensureStyle() { if ( styled ) return; styled = true; const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmCin = ""; document.head.appendChild(s); }
@@ -73,6 +68,9 @@ function controlHtml(k, r) {
   return `<div class="mm-ws-opt"><label for="mm-cin-${k}" data-tooltip="${esc(hint(k))}">${esc(label(k))}</label><input type="color" id="mm-cin-${k}" name="${k}" value="${esc(r[k])}"></div>`;
 }
 
+// which groups of the panel are open (kept while the panel is drawn again)
+const cinFolds = new Set();
+
 export function renderCinematicPanel(container, { scene = null, readOnly = false, store = defaultStore } = {}) {
   ensureStyle();
   const block = () => store.block(), users = () => store.users();
@@ -80,27 +78,31 @@ export function renderCinematicPanel(container, { scene = null, readOnly = false
   const resolved = () => Cin.resolve(block(), valuesMap());
   const r0 = resolved(), dis = readOnly ? " disabled" : "";
   const presetOptions = (b) => [...Cin.PRESET_IDS, ...Object.keys(users()), "custom"].map((id) => [id, presetName(id, users()) + (id === b.preset && Object.keys(b.over).length ? " *" : "")]);
-  const group = (g) => `<fieldset data-group="${g.id}"><legend>${g.toggle ? `<input type="checkbox" name="${g.toggle}"${r0[g.toggle] ? " checked" : ""}${dis}>` : ""}${esc(T(`Destr.cin.g.${g.id}`))}</legend><div class="mm-cin-body">${
-    g.aspect ? optSelect({ name: "aspect", label: T("Destr.cin.aspect"), value: "", options: [["", T("Destr.cin.aspectPick")], ["2.39", "2.39:1"], ["1.85", "1.85:1"]], hint: T("Destr.cin.h.aspect") }) : ""}${g.keys.map((k) => controlHtml(k, r0)).join("")}</div></fieldset>`;
-  container.innerHTML = `<div class="mm-cin-panel">
-    <div class="mm-cin-row">${optSelect({ name: "preset", label: T("Destr.cin.preset"), value: block().preset, options: presetOptions(block()), hint: T("Destr.cin.h.preset") })}</div>
-    <div class="mm-cin-row mm-cin-actions">
-      <button type="button" data-act="saveas"${dis}>${esc(T("Destr.cin.saveAs"))}</button><button type="button" data-act="duplicate"${dis}>${esc(T("Destr.cin.duplicate"))}</button>
-      <button type="button" data-act="delete"${dis}>${esc(T("Destr.cin.delete"))}</button><button type="button" data-act="reset"${dis}>${esc(T("Destr.cin.reset"))}</button>
-      <button type="button" data-act="export">${esc(T("Destr.cin.export"))}</button><button type="button" data-act="import"${dis}>${esc(T("Destr.cin.import"))}</button>
-    </div>
-    <div class="mm-cin-io" hidden><textarea spellcheck="false" placeholder="${esc(T("Destr.cin.ioHint"))}"></textarea></div>
+  // each element is a folding group with its on/off switch in the group's title (it works with the group folded)
+  const group = (g) => optFold({ id: g.id, title: T(`Destr.cin.g.${g.id}`), open: cinFolds, attrs: `data-group="${g.id}"`,
+    head: g.toggle ? `<input type="checkbox" name="${g.toggle}" aria-label="${esc(T(`Destr.cin.g.${g.id}`))}"${r0[g.toggle] ? " checked" : ""}${dis}>` : "",
+    body: `${g.aspect ? optSelect({ name: "aspect", label: T("Destr.cin.aspect"), value: "", options: [["", T("Destr.cin.aspectPick")], ["2.39", "2.39:1"], ["1.85", "1.85:1"]], hint: T("Destr.cin.h.aspect") }) : ""}${g.keys.map((k) => controlHtml(k, r0)).join("")}` });
+  const icon = (act, ic, key, off = "") => `<button type="button" class="mm-ws-icon" data-act="${act}" aria-label="${esc(T(key))}" data-tooltip="${esc(T(key))}"${off}><i class="${ic}" inert></i></button>`;
+  container.innerHTML = `<div class="mm-cin-panel mm-ws-form">
+    <div class="mm-ws-opt mm-cin-presetrow"><label for="mm-cin-preset" data-tooltip="${esc(T("Destr.cin.h.preset"))}">${esc(T("Destr.cin.preset"))}</label><div class="mm-ws-inline">
+      <select id="mm-cin-preset" name="preset">${presetOptions(block()).map(([v, l]) => `<option value="${esc(v)}"${v === block().preset ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      ${icon("saveas", "fa-solid fa-floppy-disk", "Destr.cin.saveAs", dis)}${icon("reset", "fa-solid fa-rotate-left", "Destr.cin.reset", dis)}${icon("delete", "fa-solid fa-trash", "Destr.cin.delete", dis)}</div></div>
+    ${optFold({ id: "share", title: T("Destr.cin.share"), icon: "fa-solid fa-share-nodes", open: cinFolds, body: `<div class="mm-ws-actions">
+      <button type="button" data-act="duplicate"${dis}><i class="fa-solid fa-clone" inert></i> ${esc(T("Destr.cin.duplicate"))}</button>
+      <button type="button" data-act="export"><i class="fa-solid fa-file-export" inert></i> ${esc(T("Destr.cin.export"))}</button>
+      <button type="button" data-act="import"${dis}><i class="fa-solid fa-file-import" inert></i> ${esc(T("Destr.cin.import"))}</button></div>
+      <div class="mm-cin-io" hidden><textarea spellcheck="false" placeholder="${esc(T("Destr.cin.ioHint"))}"></textarea></div>` })}
     ${optCheck({ name: "fx", label: T("Destr.cin.fx"), checked: r0.fx, hint: T("Destr.cin.h.fx") })}
     ${GROUPS.map(group).join("")}
-    <div class="mm-cin-row"><button type="button" data-act="preview">${esc(T("Destr.cin.test"))}</button></div>
+    <div class="mm-ws-actions"><button type="button" data-act="preview"><i class="fa-solid fa-play" inert></i> ${esc(T("Destr.cin.test"))}</button></div>
     <div class="mm-cin-summary"></div>
-    <fieldset class="mm-cin-client"><legend>${esc(T("Destr.cin.myOptions"))}</legend>
+    ${optFold({ id: "mine", title: T("Destr.cin.myOptions"), icon: "fa-solid fa-display", open: cinFolds, cls: "mm-cin-client", body: `
       ${OPTS.map((k) => optCheck({ name: k, label: T(`Destr.cin.${k.replace(/^cinNo/, "no")}`), checked: !!game.settings.get(MODULE_ID, k) })).join("")}
       ${optSelect({ name: "cinCamera", label: T("Destr.cin.cameraSetting"), value: game.settings.get(MODULE_ID, "cinCamera"), options: [["auto", T("Destr.cin.camAuto")], ["on", T("Destr.cin.camOn")], ["off", T("Destr.cin.noCamera")]] })}
       ${optSelect({ name: "cinReduced", label: T("Destr.cin.reducedSetting"), value: game.settings.get(MODULE_ID, "cinReduced"), options: [["auto", T("Destr.cin.redAuto")], ["on", T("Destr.cin.redOn")], ["off", T("Destr.cin.redOff")]], hint: T("Destr.cin.reducedHint") })}
-      ${optHint(T("Destr.cin.hintOptOut"))}
-    </fieldset></div>`;
-  if ( readOnly ) for ( const c of container.querySelectorAll(".mm-cin-panel fieldset:not(.mm-cin-client) :is(input, select, range-picker), [name=preset], [name=fx]") ) c.disabled = true;
+      ${optHint(T("Destr.cin.hintOptOut"))}` })}</div>`;
+  if ( readOnly ) for ( const c of container.querySelectorAll(".mm-cin-panel [data-group] :is(input, select, range-picker), [name=preset], [name=fx]") ) c.disabled = true;
+  const offFolds = keepFolds(container, cinFolds);
 
   const q = (sel) => container.querySelector(sel), io = q(".mm-cin-io"), ta = io.querySelector("textarea");
   const ctl = (name) => q(`[name="${name}"]`);
@@ -185,6 +187,7 @@ export function renderCinematicPanel(container, { scene = null, readOnly = false
     try { offBind?.(); } catch { /* gone */ }
     try { offSet?.(); } catch { /* gone */ }
     Hooks.off("moinenMapsDestruction", hook);
+    offFolds();
     container.innerHTML = "";
   };
 }
