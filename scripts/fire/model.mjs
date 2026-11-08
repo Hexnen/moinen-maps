@@ -233,15 +233,25 @@ export function puffReach(cpg, plume, wind, lv = 3, sm = 3) {
 
 /** A sliding-window min (or max) along rows (`across`) or columns, window +-w, in place over Float32 `v` (W x H). O(N). */
 function slide(v, W, H, across, w, max) {
-  const n = across ? W : H, m = across ? H : W, at = across ? (k, j) => k * W + j : (k, j) => j * W + k;
-  const line = new Float32Array(n), q = new Int32Array(n), better = max ? (a, b) => a >= b : (a, b) => a <= b;
+  // (A12c: the same deque as before, specialised - no per-cell closures; the identical values)
+  const n = across ? W : H, m = across ? H : W, sj = across ? 1 : W, sk = across ? W : 1;
+  const line = new Float32Array(n), q = new Int32Array(n);
   for ( let k = 0; k < m; k++ ) {
-    for ( let j = 0; j < n; j++ ) line[j] = v[at(k, j)];
+    const base = k * sk;
+    for ( let j = 0, o = base; j < n; j++, o += sj ) line[j] = v[o];
     let h = 0, t = 0, j2 = 0;
-    for ( let j = 0; j < n; j++ ) {
-      for ( ; j2 < n && j2 <= j + w; j2++ ) { while ( t > h && better(line[j2], line[q[t - 1]]) ) t--; q[t++] = j2; }
-      while ( q[h] < j - w ) h++;
-      v[at(k, j)] = line[q[h]];
+    if ( max ) {
+      for ( let j = 0, o = base; j < n; j++, o += sj ) {
+        for ( ; j2 < n && j2 <= j + w; j2++ ) { const x = line[j2]; while ( t > h && x >= line[q[t - 1]] ) t--; q[t++] = j2; }
+        while ( q[h] < j - w ) h++;
+        v[o] = line[q[h]];
+      }
+    } else {
+      for ( let j = 0, o = base; j < n; j++, o += sj ) {
+        for ( ; j2 < n && j2 <= j + w; j2++ ) { const x = line[j2]; while ( t > h && x <= line[q[t - 1]] ) t--; q[t++] = j2; }
+        while ( q[h] < j - w ) h++;
+        v[o] = line[q[h]];
+      }
     }
   }
 }
@@ -897,10 +907,27 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1, samples = 
   const B = Math.max(2, Math.round(bin * geo.grid / geo.ap)), G = gap * geo.grid / geo.ap, cl = [];
   // (the light's SAMPLES: the burning ground in one-square cells, each with its own ignite / out, level and the area's fuel seed and
   // wind - model.lightDrive reads the fire's live strength there: grow-in, go-out, the fuel map, the breathing)
-  const SB = Math.max(1, Math.round(geo.grid / geo.ap));
+  const SB = Math.max(1, Math.round(geo.grid / geo.ap)), bk = `${B}:${SB}`;
   for ( const { area, field } of items ) {
+    // (the per-area clusters: those the field worker already made for this bin size, else made here - the same objects either way)
+    if ( field.lightKey === bk && field.lightBins ) { for ( const c of field.lightBins ) cl.push(c); continue; }
+    lightBinsInto(cl, area, field, B, SB);
+  }
+  return lightsMerge(cl, geo, P, B, G, max, samples);
+}
+
+/** A12c: the light bin sizes lightsOf uses for `geo` (default bin): "B:SB" - the key of a field's precomputed clusters. */
+export function lightBinKey(geo, bin = 3) { return `${Math.max(2, Math.round(bin * geo.grid / geo.ap))}:${Math.max(1, Math.round(geo.grid / geo.ap))}`; }
+/** A12c: one area's light clusters (lightsOf's first pass), for the field worker: { key, bins } (plain objects, cloned to the page). */
+export function lightBins(area, field, geo, bin = 3) {
+  const B = Math.max(2, Math.round(bin * geo.grid / geo.ap)), SB = Math.max(1, Math.round(geo.grid / geo.ap)), cl = [];
+  lightBinsInto(cl, area, field, B, SB);
+  return { key: `${B}:${SB}`, bins: cl };
+}
+function lightBinsInto(cl, area, field, B, SB) {
+  {
     const F = field.burn, W = field.w, H = field.h, bins = new Map();
-    if ( !F ) continue;
+    if ( !F ) return;
     const fuel = field.style === "fire", fs = hashStr("art:" + (area.color ?? "")) % 65536, wx = area.wind?.[0] ?? 0;
     for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
       const i = y * W + x, v = F[i]; if ( v < 0.05 ) continue;
@@ -926,6 +953,8 @@ export function lightsOf(items, geo, P, { bin = 3, max = 24, gap = 1, samples = 
         x0: area.rect.x0 + c.x0, y0: area.rect.y0 + c.y0, x1: area.rect.x0 + c.x1 + 1, y1: area.rect.y0 + c.y1 + 1, seed: area.seed });
     }
   }
+}
+function lightsMerge(cl, geo, P, B, G, max, samples) {
   const merge = (a, b) => {
     const m = a.m + b.m;
     return { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,

@@ -162,15 +162,23 @@ export class FireDisplay {
     this.lastT = -1;                                                  // (uniforms only: every area's clock is set again this tick)
     this.tokDirty = true;
     this.stats.areas = this.areas.size;
-    // (lights per area: an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones)
-    const lightKeys = [...this.areas].map(([id, a]) => ({ id, key: a.key, a }));
-    const r = this.lights.syncAreas(lightKeys.map((e) => ({ id: e.id, key: e.key, listOf: (max) => M.lightsOf([e.a], geo, P, { max }) })), P, sharedNow(), geo);
     this.attachGlows();
-    this.stats.lightsMade += r.made;
-    this.stats.lights = this.lights.count;
     this.arm();
+    // A12c: the LIGHTS follow on the next frame while the fire ticks: Foundry's light sources and the vision refresh they ask for were
+    // half of the frame that adopts a new area on an older CPU; a new light fades in from dark and a handed-over one eases (lights.mjs),
+    // so one frame later is the same picture. (Not ticking - reduced motion: at once, as before.)
+    if ( !this.ticking ) this.syncLights();
+    else this._lightsDue ??= requestAnimationFrame(() => { this._lightsDue = null; if ( this.geo ) this.syncLights(); });
     // (no forced redraw of every area: the new ones have never been drawn and go first in this tick, the others keep their frame)
     this.tick(geoChanged);
+  }
+
+  /** The lights per area (an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones). */
+  syncLights() {
+    const geo = this.geo, P = this.P;
+    const r = this.lights.syncAreas([...this.areas].map(([id, a]) => ({ id, key: a.key, listOf: (max) => M.lightsOf([a], geo, P, { max }) })), P, sharedNow(), geo);
+    this.stats.lightsMade += r.made;
+    this.stats.lights = this.lights.count;
   }
 
   /** Every area's emission mesh in the illumination container (after a lighting refresh emptied it). */
@@ -539,6 +547,7 @@ export class FireDisplay {
 
   destroy() {
     canvas.app?.ticker?.remove(this._tick); this.ticking = false; if ( shown === this ) shown = null;
+    if ( this._lightsDue ) { cancelAnimationFrame(this._lightsDue); this._lightsDue = null; }
     Hooks.off("lightingRefresh", this.hookL); this.lights.destroy();
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();
