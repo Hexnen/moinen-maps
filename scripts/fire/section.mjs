@@ -94,6 +94,7 @@ function bar(host, ctx) {
 /* ---------------------------------------------------------------- the dock */
 
 function mountPanel(host) {
+  if ( game.user.isGM ) Fire.warmUp();                                 // (the fire panel open: a stroke is coming)
   const gm = game.user.isGM;
   const rowsOf = (P) => Fire.list().reverse().map((s) => {
       const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : "");
@@ -199,7 +200,11 @@ if ( !OFF ) {
       { name: "mm-fire-erase", order: 6, title: "MOINENMAPS.Fire.tool.erase", icon: "fa-solid fa-fire-extinguisher", color: KIND_INK.erase }
     ],
     bars: Object.fromEntries(Object.keys(TOOLS).map((t) => [t, bar])),
-    onToolChange: (tool, active) => { if ( tool in TOOLS ) Editor.setMode(active ? TOOLS[tool] : null); },
+    onToolChange: (tool, active) => {
+      if ( !(tool in TOOLS) ) return;
+      Editor.setMode(active ? TOOLS[tool] : null);
+      if ( active && TOOLS[tool] !== "erase" ) Fire.warmUp();          // (the fire's programs warmed before the first stroke: fire.mjs)
+    },
     panels: [{ id: "fire", title: "MOINENMAPS.Fire.panel", icon: "fa-solid fa-fire", open: true, mount: mountPanel }]
   }));
 }
