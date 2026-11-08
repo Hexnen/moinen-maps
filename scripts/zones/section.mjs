@@ -118,6 +118,7 @@ function settingsPanel(host) {
       <section class="mm-wp-sec mm-z-panel"><h4>${esc(Z("sec.mine"))}</h4>
       ${optCheck({ name: "dist", label: Z("f.distances"), checked: setting("zonesDistances") !== false, hint: Z("h.distances") })}
       ${optCheck({ name: "ruler", label: Z("f.ruler"), checked: setting("zonesRuler") !== false, hint: Z("h.ruler") })}
+      ${optCheck({ name: "quake", label: Z("f.quake"), checked: setting("zonesQuake") !== false, hint: Z("h.quake") })}
       ${fold("world", Z("sec.world"), "fa-solid fa-earth-europe", `
         <p class="mm-ws-hint">${esc(Z("h.world"))}</p>
         ${row(Z("f.preset"), sel("worldPreset", moves, wPreset), Z("h.worldPreset"))}
@@ -176,7 +177,7 @@ function settingsPanel(host) {
   host.addEventListener("change", onChange);
   host.addEventListener("click", onClick);
   host.addEventListener("toggle", onToggle, true);
-  const off = bindSettings(host, { dist: "zonesDistances", ruler: "zonesRuler" });
+  const off = bindSettings(host, { dist: "zonesDistances", ruler: "zonesRuler", quake: "zonesQuake" });
   const hook = Hooks.on("moinenMapsZones", (kind) => { if ( (kind === "loaded" || kind === "params") && !host.contains(document.activeElement) ) render(); });
   return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); host.removeEventListener("toggle", onToggle, true); off(); Hooks.off("moinenMapsZones", hook); };
 }

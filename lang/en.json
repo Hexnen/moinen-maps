@@ -1667,5 +1667,7 @@
   "MOINENMAPS.Orbit.setting": "Orbit (shared scene)",
   "MOINENMAPS.Orbit.settingHint": "Tokens thrown to orbit from any map move to one shared Orbit scene with a procedural pixel-art space; every map lists them above its top edge.",
   "MOINENMAPS.Orbit.follow": "Follow my character to orbit",
-  "MOINENMAPS.Orbit.followHint": "When your own character is thrown to orbit or comes back, your view follows it to the other scene."
+  "MOINENMAPS.Orbit.followHint": "When your own character is thrown to orbit or comes back, your view follows it to the other scene.",
+  "MOINENMAPS.Zones.f.quake": "Wrecked zones quake",
+  "MOINENMAPS.Zones.h.quake": "When a zone becomes wrecked it shakes for a second, with dust and rubble (this screen only)."
 }

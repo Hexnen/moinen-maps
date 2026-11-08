@@ -8,6 +8,7 @@ import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
 import * as Marks from "./marks.mjs";
 import * as Link from "./link.mjs";
+import { quake } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
@@ -22,6 +23,7 @@ import * as DestMod from "../destruction/destruction.mjs";
  * Public API: `game.modules.get("moinen-maps").api.zones`. Hook "moinenMapsZones" with ("loaded" | "edited" | "params" | "section").
  */
 
+let wreckedBefore = null;   // the zones wrecked at the last relink (null: just loaded - nothing quakes)
 let S = null, Z = null, M = null, M0 = null, LS = null, MAP = new Map(), linkTimer = 0, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
 let saveSceneId = null, lastSaved = "";
 const undo = [], redo = [];
@@ -48,6 +50,7 @@ function registerSettings() {
   R("zonesDistances", Boolean, true, () => { refresh(); tell("params"); });
   R("zonesEraser", Number, 0.5, () => tell("params"));
   R("zonesRuler", Boolean, true, () => tell("params"));
+  R("zonesQuake", Boolean, true);
   // world defaults: look presets saved by the GM, the default look preset and movement preset (scenes may pick their own)
   const W = (k, type, def) => game.settings.register(MODULE_ID, k, { scope: "world", config: false, type, default: def, onChange: () => { refresh(); tell("params"); } });
   W("zonesStyles", Object, { list: [] });
@@ -109,6 +112,15 @@ function relink() {
   const zones = new Map(M0?.zones ?? []);
   for ( const [id, p] of MAP ) zones.set(id, Link.merge(zones.get(id), p));
   M = { borders: M0?.borders ?? new Map(), zones };
+  // a zone that has just become wrecked quakes (on every client: each one sees the marks or the layer change)
+  const wrecked = new Set([...zones].filter(([, p]) => p?.wrecked).map(([id]) => id));
+  if ( wreckedBefore && Z && setting("zonesQuake", true) !== false ) {
+    for ( const id of wrecked ) if ( !wreckedBefore.has(id) ) {
+      const z = Z.zones.find((q) => q.id === id);
+      if ( z ) quake(z, { grid: gridSize(), inside: (x, y) => Geo.zoneAt(Z, x, y) === id });
+    }
+  }
+  wreckedBefore = wrecked;
 }
 /** A layer changed: read it again (debounced: a stroke may fire several hooks). */
 function onLayer(kind) {
@@ -263,7 +275,7 @@ function teardown() {
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   clearTimeout(linkTimer); linkTimer = 0;
-  S = Z = M = M0 = LS = null; MAP = new Map();
+  S = Z = M = M0 = LS = null; MAP = new Map(); wreckedBefore = null;
   undo.length = redo.length = 0;
 }
 

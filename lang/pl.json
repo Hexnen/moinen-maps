@@ -1667,5 +1667,7 @@
   "MOINENMAPS.Orbit.setting": "Orbita (wspólna scena)",
   "MOINENMAPS.Orbit.settingHint": "Tokeny wyrzucone na orbitę z dowolnej mapy trafiają na jedną wspólną scenę Orbita z proceduralnym kosmosem w pixel arcie; każda mapa wypisuje je nad górną krawędzią.",
   "MOINENMAPS.Orbit.follow": "Podążaj za moją postacią na orbitę",
-  "MOINENMAPS.Orbit.followHint": "Gdy twoja postać zostanie wyrzucona na orbitę albo z niej wróci, widok przenosi się za nią na drugą scenę."
+  "MOINENMAPS.Orbit.followHint": "Gdy twoja postać zostanie wyrzucona na orbitę albo z niej wróci, widok przenosi się za nią na drugą scenę.",
+  "MOINENMAPS.Zones.f.quake": "Trzęsienie zniszczonej strefy",
+  "MOINENMAPS.Zones.h.quake": "Gdy strefa staje się zniszczona, przez sekundę się trzęsie, z pyłem i gruzem (tylko na tym ekranie)."
 }
