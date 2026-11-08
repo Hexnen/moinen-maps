@@ -1,0 +1,5 @@
+== none: "OK a shot reached this page | OK the camera went to the place | OK the camera is back where the player had it | OK the shot ended on its time | OK everything cleaned up (overlays, the screen engine, the take-over)"
+== esc: "OK a shot reached this page | OK the camera went to the place | OK the camera is back where the player had it | OK esc: the shot was cut short | OK everything cleaned up (overlays, the screen engine, the take-over)"
+== click: "OK a shot reached this page | OK the camera went to the place | OK the camera is back where the player had it | OK click: the shot was cut short | OK everything cleaned up (overlays, the screen engine, the take-over)"
+== wheel: "OK a shot reached this page | OK the camera went to the place | OK wheel: the camera stays with the player (no return) | OK everything cleaned up (overlays, the screen engine, the take-over)"
+== busy: "OK a shot reached this page | OK soft form: the camera did not move (busy player) | OK everything cleaned up (overlays, the screen engine, the take-over)"

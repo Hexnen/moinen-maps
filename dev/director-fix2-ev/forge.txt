@@ -1,0 +1,18 @@
+GM views map map
+[{"me":"Test Gracz 1","leader":"Test Gracz 1","scene":"director-test"},{"me":"Test Gracz 2","leader":"Test Gracz 1","scene":"director-test"}]
+A forged take, free caption {"id":"forged-wuj9z0rdq4i-t","form":"take","len":20000}
+  other: [[316976,"shot","soft","custom",null,"FORGED: the GM says you lose",null]]
+B forged take, director key caption {"id":"forged-e31vk9pjp0i-t","form":"take","len":20000}
+  other: {"L":[[322380,"end","soft","custom","done","FORGED: the GM says you lose",null],[323488,"shot","take","destruction",null,"Dir.cap.collapse",null]],"take":{"id":"forged-e31vk9pjp0i-t","kind":"destruction","taken":false}}
+C second forged take 0.3 s later {"id":"forged-moht0udc0v-t","form":"take","len":20000}
+  other: [[323488,"shot","take","destruction",null,"Dir.cap.collapse",null],[325007,"shot","soft","destruction",null,"Dir.cap.collapse",null]]
+D GM pauses 1
+  forged during pause {"id":"forged-a6x6ce1rmd4-t","form":"take","len":20000}
+  other: [[329096,"end","take","destruction","done","Dir.cap.collapse",null],[330408,"end","soft","destruction","done","Dir.cap.collapse",null]]
+E start combat (GM away) Superhero
+  next Atom Eve
+  other: [[341315,"shot","take","turn",null,"DirMove.cap.turn","Test Gracz 1"],[343816,"end","take","turn","done","DirMove.cap.turn","Test Gracz 1"]]
+  next TT0
+  other: [[344845,"shot","take","turn",null,"DirMove.cap.turn","Test Gracz 1"],[347349,"end","take","turn","done","DirMove.cap.turn","Test Gracz 1"]]
+GM back director-test
+[{"me":"Test Gracz 1","leader":"Gamemaster","scene":"director-test"},{"me":"Test Gracz 2","leader":"Gamemaster","scene":"director-test"}]

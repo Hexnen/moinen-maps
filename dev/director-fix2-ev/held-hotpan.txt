@@ -1,0 +1,8 @@
+next Superhero
+parked {"held":false,"stage":{"on":true,"combat":"I6oXcskIBsXWVAOB","turn":"1:sgUmrV86EpInJSu8","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":627.0035511363636,"y":686.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"cam":[627,686,2.2],"trace":[[255200,"turn","take","glide"],[265156,"turn","take","glide"]],"lv":{"pan":false,"zoom":false,"boundingBox":true,"apply
+hotpan on true
+held, before next {"held":true,"stage":{"on":true,"combat":"I6oXcskIBsXWVAOB","turn":"1:sgUmrV86EpInJSu8","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":627.0035511363636,"y":686.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"cam":[627,686,2.2],"trace":[[255200,"turn","take","glide"],[265156,"turn","take","glide"]],"lv":{"pan":false,"zoom":false,"boundingBox":t
+next TT0
+held, after next turn {"held":true,"stage":{"on":true,"combat":"I6oXcskIBsXWVAOB","turn":"1:j2eXwa3c03A9nVHf","home":null,"parked":null,"out":"1:j2eXwa3c03A9nVHf","beat":null,"homing":false,"chip":false},"cam":[768,512,1.25],"trace":[[255200,"turn","take","glide"],[265156,"turn","take","glide"]],"lv":{"pan":false,"zoom":false,"boundingBox":true,"applyLocks":true}}
+end combat 1
+held, after combat end {"held":true,"stage":{"on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false},"cam":[768,512,1.25],"trace":[[255200,"turn","take","glide"],[265156,"turn","take","glide"]],"lv":{"pan":false,"zoom":false,"boundingBox":true,"applyLocks":true}}

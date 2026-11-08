@@ -1,0 +1,8 @@
+next test
+parked {"held":false,"stage":{"on":true,"combat":"cdRjXvmQsoNrobEh","turn":"1:zCi4hXacDgxVAN7X","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"cam":[360,737,2.2],"trace":[[278180,"turn","take","glide"],[288158,"turn","take","glide"]],"lv":{"pan":false,"zoom":false,"boundingBox":true,"appl
+lockview { pan: true, zoom: true, boundingBox: true, applyLocks: true }
+held, before next {"held":true,"stage":{"on":true,"combat":"cdRjXvmQsoNrobEh","turn":"1:zCi4hXacDgxVAN7X","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"cam":[360,737,2.2],"trace":[[278180,"turn","take","glide"],[288158,"turn","take","glide"]],"lv":{"pan":true,"zoom":true,"boundingBox":tr
+next Battle Beast
+held, after next turn {"held":true,"stage":{"on":true,"combat":"cdRjXvmQsoNrobEh","turn":"1:l74isR071UgIqKgn","home":null,"parked":null,"out":"1:l74isR071UgIqKgn","beat":null,"homing":false,"chip":false},"cam":[768,512,1.031],"trace":[[278180,"turn","take","glide"],[288158,"turn","take","glide"]],"lv":{"pan":true,"zoom":true,"boundingBox":true,"applyLocks":true}}
+end combat 1
+held, after combat end {"held":true,"stage":{"on":true,"combat":null,"turn":null,"home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false},"cam":[768,512,1.031],"trace":[[278180,"turn","take","glide"],[288158,"turn","take","glide"]],"lv":{"pan":true,"zoom":true,"boundingBox":true,"applyLocks":true}}

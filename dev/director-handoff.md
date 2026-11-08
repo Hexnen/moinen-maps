@@ -481,3 +481,126 @@ The user's choice: in combat the camera stays on the active combatant for its wh
 - The director is OFF.
 - Test combats are deleted and token positions restored by setup.js.
 - The scene is `director-test`.
+
+## 2026-11-08 - adversary-3 fixes (agent director-fix2), branch `director-fix2` (from main cdae76d)
+
+Scope: the findings N1-N6 of `C:/mmwt-adv3/director-adversary-3.md`, the two broken dev tools, and the lights tick side finding.
+Another agent optimizes the camera engine, overlays and handlers in parallel, so the changes stay local. `screen.mjs`, `stage.mjs`, `overlay.mjs` and `core.mjs` are not changed.
+
+### Fixes
+- **N1 (stage turns frame combatants under open windows):** `source-stage.mjs` now frames with `freeRect()` (the safe rect less the open windows) everywhere it used `safeRect()`:
+  - the turn camera and its dead zone;
+  - the own-beat check;
+  - the attack framing;
+  - the own-turn home;
+  - the chip.
+  A window that covers the whole free rect already makes the director's context busy, so the shot comes soft.
+- **N2 (wheel or pan right after a beat was ignored):** `onPan` no longer ignores pans just because `Screen.owner` is set. It ignores them only in three cases:
+  - a stage beat plays;
+  - the stage moves home;
+  - the screen engine's camera is still on (a return is in progress).
+  After a beat that stays, the engine's camera is stopped and only the bars fade out. A pan in that moment is now the player's at once. This also covers a scripted pan, so no stale home is left.
+- **N3 (chip and Esc stay active while the camera is held):**
+  - While `cameraHeld()` is true (Hot Pan on, LockView pan lock), `sync()` shows no chip and does not listen for the parked Esc.
+  - `goHome`, `backHome` and Esc do nothing then; they only forget the parked state.
+  - `updateSetting`, `clientSettingChanged` and `updateScene` re-run `sync()` while the camera is parked.
+- **N4 (a stand-in player leader may send any shot):** a new pure module `scripts/director/standin-core.mjs` (`standInShot`). `director.mjs onSocket` calls it (through `fromStandIn`) for every `op: "shot"` from a NON-GM leader. Each receiving client plays such a shot only in the form a GM-less table needs:
+  - Dropped: anything while the GM's pause is on, anything GM-only, and anything planned more than 3 s ahead.
+  - Never forced.
+  - Timing: lead and back 200-3000 ms; a take-over at most `maxShot`; a soft shot at most 1.5 x `softMs`.
+  - Captions: only director keys (`Dir.*`, `DirMove.*`, `DirStage.*`) with short plain data. A free text or a foreign key makes the shot soft and short.
+  - Lanes: kept only when the lane names a started combat or a token of this scene.
+  - Pace: at most 10 shots in 10 s. Take-overs outside a combat lane: at most 3 in 10 s, and `rest` apart. Combat-lane beats keep the GM's pace.
+  - Weight at most 0.85. The intensity is the GM's (`gmState().k`), not the sender's.
+  GM shots and the stand-in's own screen are unchanged.
+- **N5 (zoom pumping on attacks):** in `stage-core.mjs`:
+  - `ZOOM_BAND` = [0.85, 1.12] x the player's zoom.
+  - `attackCamera` keeps the zoom on screen when attacker and target fit at it; otherwise it uses the nearest zoom inside the band. A pair that does not fit even at 0.85 keeps the target whole and leans toward the attacker. There is no more pull-out to half the zoom.
+  - `stageZoom`: a turn keeps the zoom on screen while it is inside the band, so there is no re-zoom after an attack.
+- **N6 (the player never sees their own hit; own token at the bottom edge):**
+  - The player's own ATTACK whose tokens are off screen is now a take-over. The camera goes to the hit and RETURNS to the player's view after the result: style `stay` is false and home is the player's view. Other own beats off screen stay markers.
+  - `ownHome` now uses the comfort zone (20 % in from every side) and the smallest shift. Before, it used a 4 % margin and re-centred the token.
+  - On their own turn the player may move their own token near the edge. The move source shows the mover nothing, so `keepOwnInFrame` now reframes it calmly after the move ends. It uses the smallest shift into the 20 % zone. It does nothing when the player is busy, the camera is held, a beat plays or the turn has moved on. The trace shows `move reframe`.
+- **Dev tools:**
+  - `perf-harness.cameraMoveCheck`:
+    - On a client with no destruction display it returns `{ ok: true, skipped }`, because it measures that layer.
+    - All its patches (performance.now, the ticker stop, the GL hooks) are now inside the try, so a throw can no longer leave the page with a FROZEN `performance.now`.
+    - That frozen clock was why `idle-bench rest` then read 0 and returned an empty listener list.
+  - `idle-bench rest`:
+    - It refuses a frozen clock with a clear error.
+    - During the bench, `ticker.remove(fn)` first unwraps the listener.
+    - The cause of the lights tick copies: the bench's wrapper made `lights.mjs sleep()` miss its own `tick`. Every bench left one lights tick on the ticker while `_lightsDbg().ticking` was false (the 3 copies on P1 after two benches).
+    - `lights.mjs` itself is fine and was not changed.
+  - `cinematic-fx-check`: it now ends its show in a `finally` around `cameraMoveCheck`.
+
+### Verified
+Setup: lane 4 served this worktree. My own headless Chrome on CDP port 9391. Logins:
+- GM `127.0.0.91` = Gamemaster;
+- P1 `127.0.0.92` = Test Gracz 1 (owns Atom Eve);
+- P2 `127.0.0.93` = Test Gracz 2.
+
+Evidence is in `dev/director-fix2-ev/`.
+
+- **Tests:** `node dev/run-all.mjs` 64/64, with the new `dev/director-fix2.test.mjs` (25 checks). One expectation in `director-stage.test` changed for the smallest-shift own home. `node dev/lang-audit.mjs` is clean.
+- **N1:** the adversary's seam D on P2 (a 720x620 window on the right, 3 turns). Every combatant landed at screen (538,365), left of the window [760..1480]. Video: `dev/director-fix2-window-p2.webm`.
+- **N2:** real CDP wheel on P2, 0 ms and 150 ms after a beat ended, while the screen was still "director":
+  - the parked state was cleared and P2 was out for that turn;
+  - the next turn came SOFT ("player moved the camera");
+  - the zoom stayed at 2.464.
+  A scripted pan 0 ms after the beat gave the same result and the camera stayed (`late-wheel.txt`).
+- **N3:** Hot Pan switched on while parked, and a LockView pan lock while parked:
+  - chip false, Esc listener off;
+  - the next turn and the combat end did not move the camera (`held-*.txt`).
+  The chip CLICK in that state was not exercised, because no chip is shown.
+- **N4:** the GM viewed "map", so Test Gracz 1 led. Its forged shots, as seen on Test Gracz 2:
+
+  | forged shot | what Test Gracz 2 played |
+  |---|---|
+  | forced take-over, free caption | soft |
+  | forced take-over, `Dir.cap.collapse`, len 20000 | take-over, capped at ~5.6 s |
+  | a second one 0.3 s later | soft |
+  | during the GM's pause | nothing |
+
+  The stand-in's real combat turns still played as take-overs. When the GM came back, Gamemaster led again (`forge.txt`, script `forge.mjs`).
+- **N5:** the adversaries' scenario with 5 combatants. P2's zoom over the fight: 2.2 -> 1.87 -> 1.87 -> 2.013 (the move follow, the move source's zoom) -> 2.2 at home. That is 3 zoom changes; before there were 6 (2.2 -> 1.33 -> 2.2 -> 1.54 -> 2.2 -> 2.01 -> 2.2). Video: `dev/director-fix2-stage-p2.webm`.
+- **N6:**
+  - P1's own attack on an off-screen Battle Beast: trace "own attack, there and back"; the camera went to the hit (bars, result) and back to P1's view. Video: `dev/director-fix2-own-attack-p1.webm`, ~16-21 s.
+  - P1 moved Atom Eve to the bottom edge on its own turn: trace "move reframe"; the camera shifted 80 px down and the token sat at ~60 % of the height. Video: `dev/director-fix2-own-turn-p1.webm`, ~22-24 s.
+- **Regressions:**
+  - `director-check watchShot` none / esc / click / wheel / busy: all OK on P1.
+  - `dev/stage-js/control.mjs`: 16/16. The first run had 1 FAIL ("GM skip during a beat": the camera stayed parked at the turn). A dedicated skip repro (`skip.mjs`) returned home 2 times out of 2, and the rerun was 16/16. I count it as a timing flake; it did not reproduce.
+  - Seam A/B/C: OK.
+- **Dev tools on P1** (no destruction display):
+  - `cinematic-fx-check`: 30/30 (before: 28/30);
+  - `idle-bench rest`, 4 runs: 13-17 listeners each;
+  - a ticker listener that removes itself is gone after a bench, and `ticker.remove` is restored.
+
+### Not verified
+- The lights tick copies were not re-created with the OLD bench. The cause comes from the code plus a probe with a self-removing listener; this scene had no ticking lights on P1.
+- `cameraMoveCheck` on a client WITH a destruction display (the lane GM had none on director-test). The try/finally change is mechanical.
+- A second GM, DPR 2, touch.
+- Reduced motion with the new attack and reframe cameras (by code, reduced motion keeps the zoom on attacks).
+- The stand-in rules against a REAL GM-less burst of events. The rate limits were hit only by forged bursts.
+
+### Shared files touched
+- `scripts/director/director.mjs`: one import, the `onSocket` shot branch, and the new `fromStandIn` + `standInLog` (above the play handlers). No other line.
+- `scripts/director/source-stage.mjs` and `scripts/director/stage-core.mjs` (stage only).
+- New: `scripts/director/standin-core.mjs`.
+- dev:
+  - `perf-harness.mjs` (`cameraMoveCheck` only);
+  - `idle-bench.mjs` (`rest` only);
+  - `cinematic-fx-check.mjs` (3 lines);
+  - `director-stage.test.mjs` (1 line);
+  - new `director-fix2.test.mjs`.
+
+### Open decisions for the user
+- **Stand-in captions:** on a player-led table a free-text caption is never a take-over, only soft. This also applies when a GM's hidden tab relays a GM cut with a free caption. Alternatives: stricter (a stand-in plays only soft shots) or looser.
+- **Own attack:** an own attack off screen now takes the camera there and back. This is an exception to the stage rule "own beats never move the camera".
+- **Own-turn reframe:** after the player's own move, the camera reframes with the smallest shift, only when the token ends in the outer 8 % of the free rect. Keep it, or leave the camera alone on the own turn?
+- **Zoom band 0.85-1.12** of the player's zoom: for long-range pairs the frame shows the target and leans toward the attacker; the attacker may be out of frame.
+
+### Lane 4 state
+- Director OFF, not paused, intensity 1; Hot Pan off.
+- Combats and roll messages deleted; token positions reset by `setup.js`; scene director-test.
+- Junction back to `C:\mmwt-director`; lease released.
+- My Chrome (CDP 9391) also had the lane-5 agent's pages open (127.0.0.57-59:30005). I closed only my three tabs and left the browser running.

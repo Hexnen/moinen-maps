@@ -1,0 +1,17 @@
+OK   parked: the 'My view' chip shows   [627,686,2.2]
+OK   Esc while parked: camera home, chip gone   [400,500,2.2]
+OK   Esc: out for the rest of this turn   {"out":"1:qxYIKfFVX7W6S4bD","turn":"1:qxYIKfFVX7W6S4bD"}
+OK   a move later in the same turn does not take the camera   [1597325,"move","soft","out this turn"]
+OK   camera still home   [400,500,2.2]
+OK   click on the chip: camera home   [400,500,2.2]
+OK   Esc with a window open: the window closes, the camera stays   {"cam":[320,737,2.2],"win":false}
+OK   second Esc: home   [400,500,2.2]
+OK   wheel during a beat: nothing parked, the player's camera   {"cam":[358,414,2.464],"home":null}
+OK   the same turn's move does not move the camera   {"before":[358,414,2.464],"now":[358,414,2.464],"trace":[[1605397,"turn","take","glide"],[1612229,"turn","take","glide"],[1615870,"move","soft","out this turn"]]}
+OK   a later turn (after `back`) is on stage again   [1622506,"turn","take","glide"]
+OK   wheel while parked: the camera is the player's (no chip, nothing to return to)   [1260,435,2.203]
+OK   GM skip during a beat: the beat ends, nothing parked (the camera went to the player's home)   [1260,435,2.2]
+OK   director off while parked: home   {"cam":[1260,435,2.2],"home":{"x":1260.0031706574675,"y":435.4220779220779,"scale":2.2}}
+OK   combat end while parked: home, stage over   {"cam":[1260,435,2.2],"home":{"x":1260.0031706574675,"y":435.4220779220779,"scale":2.2}}
+OK   nothing left on screen after the combat   {"chip":false,"root":false,"screen":null,"ticker":23}
+{"fails":0,"n":16}

@@ -1,0 +1,19 @@
+next test
+end ["done",207418]
+screen at input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"2:jB3L57QVEAzQDTWy","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"screen":"director","cam":[360,737,2.2],"trace":[[176513,"turn","none","on screen"],[204922,"turn","take","glide"]]}
+after own input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"2:jB3L57QVEAzQDTWy","home":null,"parked":null,"out":"2:jB3L57QVEAzQDTWy","beat":null,"homing":false,"chip":false},"screen":null,"cam":[360,737,2.464],"trace":[[176513,"turn","none","on screen"],[204922,"turn","take","glide"]]}
+next Battle Beast
+next turn (within back=5s of own input) {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:5U4V7QivxFtdQc7j","home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false},"screen":null,"cam":[360,737,2.464],"trace":[[204922,"turn","take","glide"],[209599,"turn","soft","player moved the camera"]]}
+next test
+end ["done",221584]
+screen at input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:jB3L57QVEAzQDTWy","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":359.99999999999994,"y":737.2727272727273,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"screen":"director","cam":[360,737,2.2],"trace":[[209599,"turn","soft","player moved the camera"],[219082,"turn","take","glide"]]}
+after own input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:jB3L57QVEAzQDTWy","home":null,"parked":null,"out":"3:jB3L57QVEAzQDTWy","beat":null,"homing":false,"chip":false},"screen":null,"cam":[360,737,2.464],"trace":[[209599,"turn","soft","player moved the camera"],[219082,"turn","take","glide"]]}
+next Superhero
+next turn (within back=5s of own input) {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:ROU34ayVN8gwR9aX","home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false},"screen":null,"cam":[360,737,2.464],"trace":[[219082,"turn","take","glide"],[223563,"turn","soft","player moved the camera"]]}
+== scripted pan, delay 0
+next TT0
+end ["done",242982]
+screen at input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:B5p0ZdOCLTZb9XTQ","home":{"x":359.99999999999994,"y":182.95454545454544,"scale":2.2},"parked":{"x":359.99999999999994,"y":337.27272727272725,"scale":2.2},"out":null,"beat":null,"homing":false,"chip":false},"screen":"director","cam":[360,337,2.2],"trace":[[223563,"turn","soft","player moved the camera"],[240483,"turn","take","glide"]]}
+after own input {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:B5p0ZdOCLTZb9XTQ","home":null,"parked":null,"out":"3:B5p0ZdOCLTZb9XTQ","beat":null,"homing":false,"chip":false},"screen":null,"cam":[900,300,2.2],"trace":[[223563,"turn","soft","player moved the camera"],[240483,"turn","take","glide"]]}
+next Atom Eve
+next turn (within back=5s of own input) {"stage":{"on":true,"combat":"NMMhb7QC1RhSRDC5","turn":"3:G28t68AXHSeduCtX","home":null,"parked":null,"out":null,"beat":null,"homing":false,"chip":false},"screen":null,"cam":[900,300,2.2],"trace":[[240483,"turn","take","glide"],[244806,"turn","soft","player moved the camera"]]}
