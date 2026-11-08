@@ -1016,10 +1016,10 @@ export function breathAt(t, s, seed) {
 }
 /** art.mjs's breathing cluster of a world art cell. */
 export const breathCluster = (cx, cy, u, seed) => Math.floor(cx / (96 * u)) * 7 + Math.floor(cy / (96 * u)) * 13 + seed;
-/** art.mjs gust(t, x): the gust travelling along the wind, 0 calm .. 1 its peak at world art column x. */
+/** art.mjs gust(t, x): the gust travelling along the wind, 0 calm .. 1 its peak at world art column x (A7: broad, ~5 squares at once). */
 export function gustAt(t, x, u, seed) {
-  const v = t * 0.22 - x / (160 * u) + (seed & 255) * 0.0137, f = v - Math.floor(v);
-  return Math.max(0, Math.sin(Math.PI * Math.max(0, Math.min(1, (f - 0.55) / 0.3))));
+  const v = t * 0.22 - x / (480 * u) + (seed & 255) * 0.0137, f = v - Math.floor(v);
+  return Math.max(0, Math.sin(Math.PI * Math.max(0, Math.min(1, (f - 0.5) / 0.4))));
 }
 const vn1 = (t, seed, k) => { const i = Math.floor(t), f = sstep(t - i), a = hash4(seed, i, k, 77), b = hash4(seed, i + 1, k, 77); return a + (b - a) * f; };
 /**
