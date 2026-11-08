@@ -7,14 +7,15 @@
  * Coordinates: absolute ART px on SCREEN, i.e. the ground point (x, y) at height z shows at (x, y - LIFT z). Rotation is counter-
  * clockwise on the map (tornado-model SPIN = -1: the screen angle decreases).
  *
- *   DENSITY (RGBA16F, ADD blend)   G: the debris cloud's summed metaball weights, B: their weighted dome tops (billows merge into one cloud)
  *   ART (RGBA8, premultiplied), back to front:
- *     CURTAIN the rain curtain wrapping the rear and the right flank (DECK_FRAG mode 0)
+ *     CURTAIN the far half of the rain curtain wrapping the rear and the right flank (DECK_FRAG mode 0)
  *     SKIRT   the dust ring on the ground: jets thrown outward, lopsided to the side the spin throws to, rolling rings at touchdowns
- *     PARTS   (back) debris behind the funnel
- *     COLUMN  the funnel: a fluid rope solved per row from the CPU's axis table, flow-warped bands, cylinder light, sheath, flare
- *     FOOT    the debris cloud shaded from G (slope + crevices, the map's own dirt)
- *     PARTS   (front) debris in front: map fragments, planks, specks, clumps, wisps
+ *     PARTS   (back) debris behind the funnel (under the dust)
+ *     VOLUME  (behind) the debris cloud round the foot and the wall cloud round the top, ray-marched (VOL_FRAG pass 0)
+ *     COLUMN  the funnel: a fluid rope solved per row from the CPU's axis table, flow-warped bands, cylinder light, sheath, a frayed top
+ *     VOLUME  (in front) only what lies between the eye and the funnel (VOL_FRAG pass 1): the material orbits round it in depth
+ *     PARTS   (front) debris in front: tumbling map fragments, planks, specks, clumps, wisps
+ *     CURTAIN the near half of the rain curtain, thin, on the flanks only (DECK_FRAG mode 2)
  *     DECK    the STORM DECK seen from above, drawn over the funnel's top (a wide rotating mass with spiral bands sheared by a faster
  *             core, thickest over the funnel top - the wall cloud the funnel flares into - flat see-through levels, lit edges toward
  *             the up-left light), feeder bands streaming in, lightning
@@ -112,23 +113,32 @@ float deckD(vec2 p, out float nf) {
   float R = uTop.z, r = length(d) / R, re = length(e) / R, th = atan(d.y, d.x);
   nf = swirl3(p, C, SQ, -1.5, 0.25 * R, 6.0, 20.0 * uU, uSd + 11);
   float lump = swirl2(p, C, SQ, -1.2, 0.3 * R, 5.0, 7.0 * uU, uSd + 13);
-  float arm = 0.5 + 0.5 * cos(2.0 * (th + uPh.x + 2.2 * log(max(r, 0.03) * 4.0)) + 3.5 * (nf - 0.5));
+  float arm = 0.5 + 0.5 * cos(3.0 * (th + uPh.x + 2.6 * log(max(r, 0.03) * 4.0)) + 3.5 * (nf - 0.5));
   // the wall cloud: the deck is thickest right over the funnel
   vec2 hw = (p - C) / vec2(uHole.z * 1.5, uHole.z * 1.5 * SQ);
   float wallk = (1.0 - smoothstep(0.3, 1.1, length(hw) + 0.35 * (nf - 0.5))) * uHole.w;
-  float body = 1.0 - smoothstep(0.45, 1.0, re + 0.3 * (nf - 0.5));
-  float D = body * (0.35 + 0.75 * pow(arm, 1.2) * (0.45 + 0.9 * nf)) + 0.75 * wallk;
+  float body = 1.0 - smoothstep(0.3, 1.2, re + 0.35 * (nf - 0.5));
+  float core = 1.0 - smoothstep(0.05, 0.6, re + 0.3 * (nf - 0.5));
+  // spiral arms with clear gaps between them (the rotation reads from the arms; no solid cap), a dense core, the wall cloud
+  float D = body * (0.08 + 1.2 * pow(arm, 1.3) * (0.4 + 0.95 * nf)) + 0.4 * core + 0.2 * wallk;
   D += 0.22 * (lump - 0.5) * smoothstep(0.15, 0.45, D);
-  return D * 1.25 * uTop.w;
+  // the near side, below the funnel top on screen, thins to see-through levels: the funnel shows rising into the wall cloud
+  float near = smoothstep(0.0, 0.4 * R, p.y - C.y + 12.0 * uU * (nf - 0.5)) * (1.0 - smoothstep(1.2 * uHole.z, 3.4 * uHole.z, abs(p.x - C.x) + 10.0 * uU * (nf - 0.5)));
+  D *= 1.0 - 0.72 * near;
+  return D * 1.5 * uTop.w;
 }
 
 void main() {
   vec2 p = texel();
-  if ( uMode == 0 ) {
+  if ( uMode == 0 || uMode == 2 ) {
     // ---- THE RAIN CURTAIN: sheets standing on rings round the base, wrapping the rear (behind the motion) and the right flank,
-    // ragged at the top (under the deck), in strands, with falling streaks
+    // ragged at the top (under the deck), in strands, with falling streaks. Mode 0 draws the far half (behind everything), mode 2
+    // the near half (in front of the funnel and the debris). The foot never ends in a line: the shafts reach down unevenly, thin
+    // out in dithered steps and break into spray and mist drifting round with the rotation.
     if ( uCurt.x <= 0.001 ) discard;
-    float lift = uView.x, sq = uView.y, dens = 0.0;
+    float lift = uView.x, sq = uView.y, dens = 0.0, mist = 0.0;
+    // a random (not ordered) dither: rain and spray must never show a regular grid; it changes every 0.1 s (the spray flickers)
+    float bay = hu(int(p.x), int(p.y) + 4096 * int(mod(floor(uT * 10.0), 64.0)), uSd + 58);
     for ( int k = 0; k < 3; k++ ) {
       // a ragged outline (the sheet's radius wobbles with height), thinning toward the silhouette so it has no hard side edge
       float Rk = uCurt.y * (0.82 + 0.16 * float(k)) * (1.0 + 0.16 * (fbm2(vec2(p.y / (40.0 * uU), float(k) * 2.3 + uT * 0.05), uSd + 55) - 0.5));
@@ -136,20 +146,40 @@ void main() {
       if ( abs(cx) >= 1.0 ) continue;
       float side = 1.0 - smoothstep(0.55, 1.0, abs(cx));
       for ( int s2 = 0; s2 < 2; s2++ ) {
+        if ( (uMode == 0 && s2 == 1) || (uMode == 2 && s2 == 0) ) continue;
         float ph = s2 == 0 ? -acos(cx) : acos(cx);
         float gy = uBase.y + sin(ph) * Rk * sq;                                         // the sheet's foot on the ground (screen)
         float rel = mod(ph - uCurt.w + 12.5664, 6.2832) - 3.14159;                   // 0 = straight behind the motion, -pi/2 its right flank
         float sect = 1.0 - smoothstep(1.0, 2.0, abs(rel + 0.55) + 0.7 * (loopN(vec2(ph * 1.3, float(k)), 12.0, 1.1, uSd + 51) - 0.5));
         float strand = fbm2(vec2(p.x / (5.0 * uU), p.y / (60.0 * uU) - uT * 0.4), uSd + 52);
         float top = gy - uCurt.z * (0.6 + 0.4 * fbm2(vec2(p.x / (14.0 * uU), float(k) * 3.1), uSd + 53));
-        if ( p.y < top || p.y > gy + 1.0 ) continue;
+        // the shafts' feet: uneven (some reach the ground, some end above it), moving with the rotation
+        float shaft = loopN(vec2(p.x / (9.0 * uU) + float(k) * 4.1, float(k)), 4.0, 1.3, uSd + 56);
+        float foot = gy - (2.0 + 16.0 * shaft) * uU, fw = (10.0 + 10.0 * shaft) * uU;
+        if ( p.y < top || p.y > foot + fw ) {
+          // spray and mist round the foot, drifting with the rotation (both sides of the foot line)
+          float dy = p.y - gy;
+          if ( abs(dy) < 9.0 * uU ) {
+            float mn = drift2(vec2(p.x, p.y / sq), vec2(-26.0 * uU * sign(cos(ph)), 4.0 * uU), uT, 3.0, 7.0 * uU, uSd + 57);
+            mist = max(mist, sect * side * (s2 == 1 ? smoothstep(0.45, 0.85, abs(cx)) : 1.0) * smoothstep(0.5, 0.8, mn) * (1.0 - smoothstep(2.0 * uU, 9.0 * uU, abs(dy + 2.0 * uU))));
+          }
+          continue;
+        }
         float v = sect * side * (0.4 + 0.9 * strand) * smoothstep(top, top + 18.0 * uU, p.y) * (1.0 - 0.3 * float(k) / 2.0);
+        v *= 1.0 - smoothstep(foot - fw * 0.2, foot + fw, p.y);                       // thinning toward the ground
+        if ( s2 == 1 ) v *= 0.55 * smoothstep(0.45, 0.85, abs(cx));                    // the near half: thin, only on the flanks
         dens = max(dens, v);
       }
     }
-    dens *= uCurt.x;
-    if ( dens <= 0.2 ) discard;
+    dens *= uCurt.x; mist *= uCurt.x;
     float st = hu(int(floor(p.x + 0.33 * p.y)), int(floor((p.y + 170.0 * uT) / (6.0 * uU))), uSd + 54);
+    if ( dens <= 0.12 + 0.22 * bay ) {
+      // no sheet here: spray / mist only (dithered, faint)
+      if ( mist <= 0.25 + 0.6 * bay ) discard;
+      float mm = 0.22 + 0.12 * step(0.86, st);
+      fragColor = vec4(vec3(0.58, 0.62, 0.68) * mm, mm);
+      return;
+    }
     float m = dens > 0.66 ? 0.56 : dens > 0.4 ? 0.42 : 0.28;
     vec3 c = vec3(0.36, 0.40, 0.47);
     if ( st > 0.78 ) { c = vec3(0.62, 0.66, 0.72); m += 0.14; }
@@ -163,7 +193,7 @@ void main() {
   vec2 d = p - C; d.y /= SQ;
   vec2 e = p - M; e.y /= SQ;
   float R = uTop.z, r = length(d) / R, re = length(e) / R;
-  if ( re > 1.6 ) discard;
+  if ( min(re, r) > 2.0 ) discard;
   float nf, nf2, nf3;
   float grow = 0.45 + 0.55 * pr;                                          // forming: it grows out from the core
   float D = deckD(p, nf) * smoothstep(grow + 0.1, grow - 0.25, min(r, re));
@@ -187,16 +217,26 @@ void main() {
     float m = (lev == 1.0 ? 0.34 : lev == 2.0 ? 0.56 : lev == 3.0 ? 0.78 : 0.94) * smoothstep(0.0, 0.3, pr);
     deck = vec4(cloud(ti) * m, m);
   }
-  // feeder bands: thin streaks of low cloud spiralling in toward the core, moving fast (scud)
-  if ( uDeck.y > 0.001 && re > 0.5 && deck.a < 0.55 ) {
+  // FEEDER (INFLOW) BANDS: long thin bands of low cloud spiralling in from far out to the wall cloud, scud racing along them, lit on
+  // the light side, a dark underside line under each (they hang below the deck: drawn where the deck is thin)
+  if ( uDeck.y > 0.001 && deck.a < 0.6 ) {
     float th = atan(d.y, d.x);
-    float nb = swirl2(p, C, SQ, -1.3, 0.4 * R, 5.0, 8.0 * uU, uSd + 71);
-    float band = 0.5 + 0.5 * cos(4.0 * (th + uPh.y + 3.2 * log(r)) + 6.0 * (nb - 0.5));
-    float f = band * (0.5 + 1.0 * nb) * smoothstep(0.5, 0.8, re) * (1.0 - smoothstep(1.1, 1.5, re + 0.3 * (nb - 0.5)));
-    if ( f > 0.8 ) {
-      float m = (f > 0.95 ? 0.6 : 0.4) * uDeck.y * smoothstep(0.2, 0.8, pr);
-      vec3 c = f > 0.95 ? cloud(5) : cloud(3);
+    float nb = swirl2(p, C, SQ, -1.4, 0.35 * R, 5.0, 9.0 * uU, uSd + 71);
+    float sc = swirl2(p, C, SQ, -2.4, 0.3 * R, 3.0, 3.5 * uU, uSd + 72);
+    float ph = 2.0 * (th + uPh.y + 3.4 * log(max(r, 0.05))) + 4.0 * (nb - 0.5);
+    float band = pow(0.5 + 0.5 * cos(ph), 5.0), under = pow(0.5 + 0.5 * cos(ph + 0.45), 5.0);
+    float reach = smoothstep(0.25, 0.55, r) * (1.0 - smoothstep(1.2, 1.9, r + 0.5 * (nb - 0.5)));
+    // they stream in from the flanks and the rear; the near side, over the funnel and its base, stays clear
+    reach *= 1.0 - 0.95 * smoothstep(0.05, 0.75, d.y / max(length(d), 1.0) + 0.3 * (nb - 0.5));
+    float f = band * (0.75 + 0.5 * sc) * reach, g = under * (0.75 + 0.5 * sc) * reach;
+    float pres = uDeck.y * smoothstep(0.2, 0.8, pr), bz = hc(p, uSd + 73);
+    if ( f > 0.5 || (f > 0.38 && bz < (f - 0.38) / 0.12) ) {
+      float m = (f > 0.85 && sc > 0.55 ? 0.7 : f > 0.62 ? 0.58 : 0.44) * pres;
+      vec3 c = f > 0.85 && sc > 0.55 ? cloud(5) : f > 0.62 ? cloud(4) : cloud(3);
       deck = vec4(c * m, m) + deck * (1.0 - m);
+    } else if ( g > 0.55 ) {
+      float m = 0.36 * pres;
+      deck = vec4(cloud(1) * m, m) + deck * (1.0 - m);
     }
   }
   if ( deck.a < 0.003 ) discard;
@@ -253,6 +293,11 @@ void main() {
     float br = fbm2(vec2(zc / (18.0 * uU), uPh.z * 0.3), uSd + 109);
     if ( br < rope * 1.1 - 0.25 + 0.4 * (1.0 - q) * rope ) discard;
   }
+  // the top never ends in a line: the flare frays into the wall cloud at a ragged, moving height, the last of it see-through
+  float topN = loopN(vec2(dx / (7.0 * uU), zc / (20.0 * uU)), 3.0, 1.0, uSd + 110);
+  float zTop = Z * (0.84 + 0.13 * topN);
+  if ( zc > zTop ) discard;
+  bool fray = zc > zTop - 0.05 * Z;
   bool inside = abs(dx) < rce && z > -3.0 * uU && z < Z + 2.0 * uU;
   float sn = loopN(vec2(zc / (11.0 * uU) + side * 5.0, 0.0), 2.0, 1.1, uSd + 104);
   bool sheath = !inside && abs(dx) < rce * (1.18 + 0.4 * sn) * (1.0 - 0.6 * rope) && z > 2.0 * uU && z < Z * 0.8;
@@ -278,12 +323,14 @@ void main() {
   // roping out: paler, thinner, condensation only
   tv += 0.8 * rope;
   int tone = int(clamp(floor(tv), 0.0, 6.0));
-  float dq = clamp(floor((1.0 - smoothstep(0.03, 0.40 + 0.25 * uCol.w, q)) * 2.99 * min(1.0, uCol.w / 0.6)), 0.0, 2.0);   // dusty low down
+  // dusty low down; the dust's upper edge follows the bands (curved, turning, ragged): never a straight line across the funnel
+  float qd = q + 0.16 * (n - 0.5) + 0.06 * (mm - 0.5);
+  float dq = clamp(floor((1.0 - smoothstep(0.03, 0.40 + 0.25 * uCol.w, qd)) * 2.99 * min(1.0, uCol.w / 0.6)), 0.0, 2.0);
   vec3 col = ramp(uDust, dq, tone);
   // a 1-px darker outline on the shadow (right) side
   if ( inside && dx > 0.0 && abs(dx + 1.0) >= rce ) col = ramp(uDust, dq, 0);
   bool gap = inside && n < 0.27 + 0.1 * (mm - 0.5) && abs(dx) > rce * 0.55 && q > 0.3 && q < 0.7;
-  if ( sheath || gap ) {
+  if ( sheath || gap || fray ) {
     float m = 0.38 * (1.0 - 0.5 * rope);
     vec3 sc = ramp(uDust, dq, int(clamp(float(tone), 2.0, 5.0)));
     fragColor = vec4(sc * m, m);
@@ -292,12 +339,11 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-/* ---------------------------------------------------------------- SKIRT + FOOT (the debris cloud, shaded from the density field) */
+/* ---------------------------------------------------------------- SKIRT (the dust thrown over the ground round the foot) */
 
 export const FOOT_FRAG = `${HEAD}
 in vec2 vP;
-uniform int uMode;          // 0 the dust skirt on the ground, 1 the debris cloud (hf G)
-uniform sampler2D uHF;
+uniform int uMode;          // 0 the dust skirt on the ground
 uniform vec4 uBase;         // base x, y (screen art px), touch, skirt radius
 uniform vec4 uMot;          // trailing direction x, y (unit, screen), the side the spin throws to (rad), touchdown swell
 uniform vec4 uPh;           // CPU phases: jets, rolling rings 1, 2, wall lumps
@@ -314,17 +360,6 @@ float jets(float ps, float rg, float v, float P, int s) {
   float nb = fbm3(vec2(cos(ps) * 4.5 + sb / (30.0 * uU) + hu(int(kb), 5, s) * 50.0, sin(ps) * 4.5 - sb / (30.0 * uU)), s + 7);
   return mix(nb, na, 1.0 - abs(2.0 * fa - 1.0));
 }
-float H(vec2 p, int ch) {
-  ivec2 q = ivec2(floor(p - uRect.xy));
-  if ( q.x < 0 || q.y < 0 || q.x >= int(uRect.z) || q.y >= int(uRect.w) ) return 0.0;
-  vec4 v = texelFetch(uHF, q, 0);
-  if ( ch == 0 ) return v.r;
-  // the merged debris cloud: a surface where the summed weight passes the threshold, its height the weighted mean dome top, rising
-  // toward the dense middle
-  float g = v.g - 0.2;
-  return g <= 0.0 ? 0.0 : v.b / v.g * (0.45 + 0.55 * clamp(g / 0.7, 0.0, 1.0)) + 3.0;
-}
-
 void main() {
   vec2 p = texel();
   if ( uMode == 0 ) {
@@ -351,67 +386,139 @@ void main() {
     fragColor = vec4(c * m, m);
     return;
   }
-  int ch = uMode == 1 ? 1 : 0;
-  float h = H(p, ch);
-  if ( h <= 0.0 ) discard;
-  // slope toward the up-left light, crevices (below the local mean), the rotating billow texture
-  float o = 2.0 * uU;
-  float sl = H(p + vec2(o), ch) - H(p - vec2(o), ch);
-  float K = 5.0 * uU, bl = 0.0;
-  for ( int a = -1; a <= 1; a++ ) for ( int b = -1; b <= 1; b++ ) bl += max(H(p + vec2(float(a), float(b)) * K, ch), h - 10.0 * uU);
-  bl /= 9.0;
-  float nf = bil(fbm2(rot(p - uBase.xy, uPh.w) / (7.0 * uU), uSd + 141));
-  bool rim = H(p + vec2(1.0, 0.0), ch) <= 0.0 || H(p - vec2(1.0, 0.0), ch) <= 0.0 || H(p + vec2(0.0, 1.0), ch) <= 0.0 || H(p - vec2(0.0, 1.0), ch) <= 0.0;
-  if ( uMode == 1 ) {
-    float tv = 3.3 + clamp(0.16 * sl / uU, -1.8, 1.8) + clamp(0.16 * (h - bl) / uU, -1.2, 0.6) + 1.2 * (nf - 0.5) + 0.7 * clamp(-(p.x - uBase.x) / (30.0 * uU), -1.0, 1.0);
-    int tone = int(clamp(floor(tv), 0.0, 6.0));
-    // high billows grey into storm, low ones are the map's dirt
-    float q = 1.45 - smoothstep(20.0 * uU, 60.0 * uU, h) * 0.75;
-    vec3 c = ramp(uDust, q, tone);
-    float m = rim ? 0.82 : 0.95;
-    fragColor = vec4(c * m, m);
-    return;
-  }
   discard;
 }`;
 
-/* ================================================================== instanced: puffs into the heightfield */
+/* ---------------------------------------------------------------- VOLUME: the debris cloud and the wall cloud, depth-sorted round the funnel */
 
-export const PUFF_VERT = `${HEAD}
-in vec2 aCorner;
-in vec4 aA;                 // centre x, y (screen art px), radius, y squash
-in vec4 aB;                 // base height, dome height, channel (0 wall, 1 debris), seed
-uniform mat3 projectionMatrix;
-uniform mat3 translationMatrix;
-uniform vec4 uRect;
-out vec2 vP;
-flat out vec4 vA;
-flat out vec4 vB;
-void main() {
-  vec2 e = vec2(aA.z * 1.5 + 2.0, aA.z * aA.w * 1.5 + 2.0);
-  vec2 w = aA.xy + (aCorner * 2.0 - 1.0) * e;
-  gl_Position = vec4((projectionMatrix * translationMatrix * vec3(w - uRect.xy, 1.0)).xy, 0.0, 1.0);
-  vP = w; vA = aA; vB = aB;
-}`;
-
-export const PUFF_FRAG = `${HEAD}
+// Each pixel marches its view ray through the volume from the near side (high z, low on the map) to the far side (low z, up the map):
+// the ground point under the ray at height z is (p.x, p.y + LIFT z). The funnel is a disc of radius rc round the axis at every z, so
+// the ray meets the funnel where it passes inside it: uPass 0 integrates the whole volume (drawn BEHIND the column), uPass 1 only the
+// samples in FRONT of that hit (drawn over the column, only where the ray meets the funnel). Material orbiting the funnel therefore
+// goes behind it on the far side and comes out in front on the near side. The tone comes from the first dense sample (a surface,
+// palette steps), the coverage from the whole ray (stepped). The noise turns with the vortex (inner faster: torn spiral streaks) and
+// rises, restarted every P s and cross-faded with the contrast kept, so it never winds up and never loops.
+export const VOL_FRAG = `${HEAD}
 in vec2 vP;
-flat in vec4 vA;
-flat in vec4 vB;
-uniform vec4 uRough;        // roughening: centre x, y (screen) of the turning billow field, its angle, amount
+uniform vec4 uAxis[40];     // as COLUMN
+uniform int uMode;          // 0 the debris cloud round the foot, 1 the wall cloud round the funnel top
+uniform int uPass;          // 0 the whole volume (behind the column), 1 only what lies in front of the funnel
+uniform vec4 uVol;          // z bottom, z top, presence, outer radius (art px)
+uniform vec4 uMot;          // trailing direction x, y (unit, screen), the throw side (rad), touchdown swell
+uniform vec4 uPh;           // CPU phases (rad): the arms' turn
+uniform vec3 uDust;
+uniform int uSd;
 out vec4 fragColor;
 ${TCOMMON}
+float h3(ivec3 c, int s) { return hu(c.x, c.y + c.z * 7919, s); }
+float vn3(vec3 p, int s) {
+  vec3 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  ivec3 c = ivec3(i);
+  float a = mix(mix(h3(c, s), h3(c + ivec3(1, 0, 0), s), u.x), mix(h3(c + ivec3(0, 1, 0), s), h3(c + ivec3(1, 1, 0), s), u.x), u.y);
+  float b = mix(mix(h3(c + ivec3(0, 0, 1), s), h3(c + ivec3(1, 0, 1), s), u.x), mix(h3(c + ivec3(0, 1, 1), s), h3(c + ivec3(1, 1, 1), s), u.x), u.y);
+  return mix(a, b, u.z);
+}
+float fb3(vec3 p, int s) { return (vn3(p, s) + 0.5 * vn3(p * 2.13 + vec3(17.3, -9.1, 4.7), s + 1)) / 1.5; }
+// the turning, rising field: d ground offset from the axis (squash undone), r its length
+float vortexN(vec2 d, float r, float z, float w0, float rw, float P, float sc, float scz, float rise, int s) {
+  float w = w0 / (1.0 + r / rw);
+  float a = uT / P, b = a + 0.5, ka = floor(a), kb = floor(b), fa = a - ka, fb = b - kb;
+  vec3 oa = vec3(hu(int(ka), 3, s), hu(int(ka), 4, s), hu(int(ka), 5, s)) * 97.0, ob = vec3(hu(int(kb), 6, s), hu(int(kb), 7, s), hu(int(kb), 8, s)) * 97.0;
+  float na = fb3(vec3(rot(d, -w * fa * P) / sc, (z - rise * fa * P) / scz) + oa, s);
+  float nb = fb3(vec3(rot(d, -w * fb * P) / sc, (z - rise * fb * P) / scz) + ob, s + 11);
+  float wa = 1.0 - abs(2.0 * fa - 1.0), wb = 1.0 - wa;
+  return 0.5 + (wa * na + wb * nb - 0.5) / sqrt(wa * wa + wb * wb);
+}
+// the axis at height z: ground x, y and the core radius
+vec3 axisG(float z) {
+  float Z = uAxis[39].w, f = clamp(z / Z, 0.0, 1.0) * 39.0;
+  int i = min(int(floor(f)), 38);
+  float u = f - float(i);
+  vec4 a = uAxis[i], b = uAxis[i + 1];
+  float zz = mix(a.w, b.w, u);
+  return vec3(mix(a.x, b.x, u), mix(a.y, b.y, u) + uView.x * zz, mix(a.z, b.z, u));
+}
+float gNf = 0.5;            // the fine noise of the last dens() (shading)
+// density at ground offset d (squash undone) and height z; n out: the big noise (shading)
+float dens(vec2 d, float z, float rc, out float n) {
+  float r = length(d), th = atan(d.y, d.x);
+  float z0 = uVol.x, z1 = uVol.y, zn = (z - z0) / (z1 - z0), R = uVol.w;
+  if ( uMode == 0 ) {
+    // THE DEBRIS CLOUD: a churning skirt hugging the foot, widest low down, lopsided to the throw side, torn into spiral streaks
+    float zc = clamp(zn, 0.0, 1.0);
+    float lop = 1.0 + 0.3 * cos(th - uMot.z) + 0.15 * dot(d / max(r, 0.01), uMot.xy);
+    // widest on the ground (the skirt), drawn in round the funnel higher up (the sheath of dust climbing it)
+    float Ro = rc + R * (0.32 + 0.95 * exp(-3.2 * zc)) * lop * uMot.w;
+    float x = (r - rc) / max(Ro - rc, 1.0);
+    if ( x > 1.8 || x < -0.2 ) { n = 0.5; return 0.0; }
+    n = vortexN(d, r, z, -3.6, 0.8 * rc + 5.0 * uU, 2.5, 12.0 * uU, 8.0 * uU, 11.0 * uU, uSd + 301);
+    float nf = vortexN(d, r, z, -4.5, 0.8 * rc + 5.0 * uU, 2.0, 4.0 * uU, 3.0 * uU, 16.0 * uU, uSd + 311); gNf = nf;
+    // spiral arms of thicker dust, trailing (a rigidly turning pattern, warped by the noise: it never winds up)
+    float arm = 0.5 + 0.5 * sin(3.0 * (th + uPh.x) + 3.0 * log(max(r, 1.0) / max(rc, 1.0)) + 3.0 * (n - 0.5));
+    float rad = (1.0 - smoothstep(0.15, 1.15, x + 0.7 * (n - 0.5) + 0.3 * (nf - 0.5) - 0.2 * arm)) * smoothstep(-0.2, 0.12, x);
+    float vert = (1.0 - smoothstep(0.1, 0.8, zn + 0.6 * (n - 0.5) + 0.25 * (nf - 0.5))) * (1.0 - smoothstep(0.7, 0.95, zn));
+    return rad * vert * (1.6 * n - 0.15 + 0.45 * (nf - 0.5) + 0.35 * (arm - 0.5)) * uVol.z;
+  }
+  // THE WALL CLOUD: a lowered, rotating collar round the funnel top, ragged underneath (scud), striated, merging up into the deck
+  float Ro = rc * 0.85 + R * (0.35 + 0.65 * smoothstep(0.0, 1.0, zn));
+  float x = r / max(Ro, 1.0);
+  if ( x > 1.5 ) { n = 0.5; return 0.0; }
+  n = vortexN(d, r, z, -1.6, 0.5 * R, 5.0, 16.0 * uU, 6.0 * uU, 2.0 * uU, uSd + 321);
+  float nf = vortexN(d, r, z, -2.2, 0.5 * R, 4.0, 6.0 * uU, 3.0 * uU, 3.0 * uU, uSd + 331); gNf = nf;
+  float rad = 1.0 - smoothstep(0.4, 1.15, x + 0.9 * (n - 0.5) + 0.35 * (nf - 0.5));
+  float bot = smoothstep(0.0, 0.45, zn + 0.7 * (n - 0.5) + 0.3 * (nf - 0.5) - 0.25 * (1.0 - x));
+  return rad * bot * (1.0 - smoothstep(0.55, 1.0, zn + 0.6 * (n - 0.5) + 0.25 * x)) * (0.3 + 1.1 * n + 0.35 * (nf - 0.5)) * uVol.z;
+}
 void main() {
   vec2 p = texel();
-  // a soft metaball (ADD): G sums the weights, B the weighted dome tops, so overlapping billows merge into one cloud
-  vec2 d = (p - vA.xy) / vec2(vA.z, vA.z * vA.w) / 1.5;
-  float dd = dot(d, d);
-  if ( dd >= 1.0 ) discard;
-  float nf = bil(fbm2(rot(p - uRough.xy, uRough.z) / (7.0 * uU), 141));
-  float nb = fbm2(p / (18.0 * uU) + vec2(vB.w * 0.37, 0.0), 1421);
-  float w = pow(1.0 - dd, 3.0) * (1.0 + uRough.w * (0.7 * (nf - 0.5) + 0.5 * (nb - 0.5)));
-  w = max(w, 0.0);
-  fragColor = vec4(0.0, w, w * (vB.x + vB.y), 0.0);
+  float z0 = uVol.x, z1 = uVol.y, lift = uView.x, sq = uView.y;
+  const int N = 18;
+  float dz = (z1 - z0) / float(N);
+  float j = uMode == 0 ? 0.25 + 0.5 * hc(p, uSd + 340) : 0.4 + 0.2 * hc(p, uSd + 340);   // a fixed per-pixel sample offset: no slab lines
+  float T = 1.0, sT = -1.0, sN = 0.5, sF = 0.5, sX = 0.0, sZ = 0.0, sR = 0.0;
+  vec2 sD = vec2(0.0);
+  bool hit = false;
+  for ( int k = 0; k < N; k++ ) {
+    float z = z1 - (float(k) + j) * dz;
+    vec3 A = axisG(z);
+    vec2 d = vec2(p.x - A.x, (p.y + lift * z - A.y) / sq);
+    float r = length(d);
+    // the funnel (only where it exists: below its top, above the ground)
+    // (the funnel frays out at 0.84..0.97 Z: above 0.84 Z the wall cloud fills its place)
+    if ( r < A.z * 0.9 && z < uAxis[39].w * (uMode == 1 ? 0.84 : 1.0) && z > -2.0 ) { hit = true; if ( uPass == 1 ) break; continue; }
+    float n;
+    float D = dens(d, z, A.z, n);
+    float a = clamp((D - 0.42) * 2.6, 0.0, 1.0) * (uMode == 0 ? 0.55 : 0.6);
+    if ( a <= 0.0 ) continue;
+    if ( sT < 0.0 && 1.0 - T * (1.0 - a) > 0.45 ) { sT = D; sN = n; sF = gNf; sD = d; sZ = z; sR = A.z; }
+    T *= 1.0 - a;
+    if ( T < 0.04 ) break;
+  }
+  if ( uPass == 1 && !hit ) discard;
+  float cov = 1.0 - T;
+  if ( cov < 0.2 || sT < 0.0 ) discard;
+  // the surface's light: thinner toward the light (up-left on screen, and up) is lit, thicker toward it is in shadow
+  vec2 Ld = vec2(-0.62, -0.62 / sq) * 4.0 * uU;
+  float nl;
+  float Dl = dens(sD + Ld, sZ + 3.0 * uU, sR, nl);
+  float lit = clamp((sT - Dl) * 2.2, -1.0, 1.0);
+  float r = length(sD), zn = (sZ - z0) / (z1 - z0);
+  float side = -(sD.x + sD.y) / max(r, 0.01) * 0.7;           // the up-left half of the cloud faces the light
+  vec3 col;
+  if ( uMode == 0 ) {
+    float tv = 3.4 + 2.4 * lit + 0.9 * side + 1.6 * (zn - 0.35) + 2.0 * (sN - 0.5) + 1.0 * (sF - 0.5) - 1.0 * smoothstep(0.9, 0.0, (r - sR) / max(uVol.w * 0.4, 1.0));
+    int tone = int(clamp(floor(tv), 0.0, 6.0));
+    float q = 1.9 - 1.0 * smoothstep(0.2, 0.9, zn) - 0.4 * step(4.5, tv);          // the dirt low down, greying into the storm higher up
+    col = ramp(uDust, q, tone);
+  } else {
+    // striations: stacked rings of the turning cloud (the rotation reads from them), warped by the noise
+    float stri = sin((sZ + 7.0 * uU * (sN - 0.5)) / (2.2 * uU));
+    float tv = 2.4 + 1.6 * lit + 0.9 * side + 1.4 * (zn - 0.3) + 1.2 * (sN - 0.5) + 0.9 * (sF - 0.5) + 0.8 * stri;
+    int ti = int(clamp(floor(tv), 0.0, 6.0));
+    col = mix(grey(ti), grey(min(ti + 1, 6)) * vec3(0.98, 1.0, 1.04), smoothstep(0.55, 0.9, zn));
+  }
+  float m = cov > 0.8 ? 1.0 : cov > 0.55 ? 0.82 : cov > 0.35 ? 0.62 : 0.42;
+  fragColor = vec4(col * m, m);
 }`;
 
 /* ================================================================== instanced: debris (art texture) and marks (ground, stage) */
@@ -461,6 +568,8 @@ float hu(int x, int y, int s) {
   h = h ^ (h >> 16u);
   return float(h) / 4294967296.0;
 }
+// the dissolve threshold of an art px: hashed (a regular ordered dither would show a grid)
+float bayerP(vec2 p) { return hu(int(floor(p.x)) + 911, int(floor(p.y)) + 577, 4243); }
 void out_(vec3 c, float a) {
   if ( a <= 0.002 ) discard;
   fragColor = uStage == 1 ? vec4(c * a, 1.0 - a) : vec4(c * a, a);
@@ -491,6 +600,8 @@ vec3 mapAt(vec2 a) {
 }
 // the chunk cell under screen texel p (rotated back into the chunk's frame, rounded to whole cells as the mock-up's lookup)
 vec2 cellOf(vec2 p) { vec2 o = p - vA.xy; float c = cos(-vB.x), s = sin(-vB.x); return floor(vec2(c * o.x - s * o.y, s * o.x + c * o.y) + 0.5); }
+// ... with the chunk's local y foreshortened by fa (it is tilted about its local x axis)
+vec2 cellT(vec2 p, float fa) { vec2 o = p - vA.xy; float c = cos(-vB.x), s = sin(-vB.x); vec2 l = vec2(c * o.x - s * o.y, s * o.x + c * o.y); return floor(vec2(l.x, l.y / fa) + 0.5); }
 
 void main() {
   vec2 p = floor(vP) + 0.5;
@@ -508,29 +619,51 @@ void main() {
     return;
   }
   if ( kind == 1 || kind == 12 ) {
-    // a MAP FRAGMENT (or its scar on the ground): the map's own pixels inside an irregular chunk
-    float rr = vD.w;
-    vec2 q = cellOf(p);
-    bool m = chunkIn(q + 0.5, sd, rr) && hu(int(q.x) + 40, int(q.y) + 40, sd) >= vC.a;
-    if ( kind == 12 ) { if ( !m ) discard; out_(vec3(0.0), al * 0.58); return; }
-    if ( !m ) {
-      // the outline: a dark ring where a 4-neighbour is in the chunk
-      bool nb = false;
-      for ( int k = 0; k < 4; k++ ) {
-        vec2 d = k == 0 ? vec2(1.0, 0.0) : k == 1 ? vec2(-1.0, 0.0) : k == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
-        vec2 q2 = cellOf(p + d);
-        if ( chunkIn(q2 + 0.5, sd, rr) && hu(int(q2.x) + 40, int(q2.y) + 40, sd) >= vC.a ) { nb = true; break; }
-      }
-      if ( !nb ) discard;
-      out_(vec3(0.07, 0.06, 0.06), al * vD.z);
+    // a MAP FRAGMENT: a slab of the map's own pixels torn out, TUMBLING (foreshortened across its local y by |fc|, its earthy
+    // underside showing when fc < 0), lit by how its face turns to the light, with its thickness showing under it (no outline);
+    // or (12) the hole it left in the ground
+    float rr = vD.w, fa = kind == 12 ? 1.0 : max(abs(vC.r), 0.16);
+    vec2 q = cellT(p, fa);
+    bool m = chunkIn(q + 0.5, sd, rr) && bayerP(p) >= vC.a;
+    if ( kind == 12 ) {
+      // the scar: dark torn earth, a rim of lighter crumbs where it broke
+      if ( m ) {
+        bool rim = false;
+        for ( int k = 0; k < 4; k++ ) { vec2 d = k == 0 ? vec2(1.0, 0.0) : k == 1 ? vec2(-1.0, 0.0) : k == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0); if ( !chunkIn(cellT(p + d, 1.0) + 0.5, sd, rr) ) { rim = true; break; } }
+        float hh = hu(int(q.x) + 7, int(q.y) + 9, sd);
+        vec3 e = rim ? vec3(0.42, 0.34, 0.25) : hh > 0.8 ? vec3(0.24, 0.18, 0.12) : vec3(0.15, 0.11, 0.08);
+        out_(e, al * (rim ? 0.55 : 0.8));
+      } else discard;
       return;
     }
-    vec3 C = mapAt(vD.xy + q) * (1.0 - 0.18 * vD.z);
-    vec2 qu = cellOf(p - vec2(0.0, 1.0)), ql = cellOf(p - vec2(1.0, 0.0)), qd = cellOf(p + vec2(0.0, 1.0)), qr = cellOf(p + vec2(1.0, 0.0));
-    bool L = !chunkIn(qu + 0.5, sd, rr) || !chunkIn(ql + 0.5, sd, rr);
-    bool D = !chunkIn(qd + 0.5, sd, rr) || !chunkIn(qr + 0.5, sd, rr);
-    if ( L && !D ) C = mix(C, clamp(C * 1.24 + 0.03, 0.0, 1.0), vD.z);
-    if ( D && !L ) C *= 1.0 - 0.38 * vD.z;
+    if ( !m ) {
+      // the slab's near edge (its thickness), seen below the face
+      float th = max(1.0, vC.b * (0.35 + 0.65 * sqrt(max(0.0, 1.0 - vC.r * vC.r))));
+      for ( int t = 1; t <= 4; t++ ) {
+        if ( float(t) > th + 0.5 ) break;
+        vec2 q2 = cellT(p - vec2(0.0, float(t)), fa);
+        if ( chunkIn(q2 + 0.5, sd, rr) && bayerP(p) >= vC.a ) {
+          vec3 e = vec3(0.30, 0.23, 0.16) * (1.0 - 0.18 * float(t - 1)) * (0.7 + 0.35 * vC.g);
+          out_(e, al);
+          return;
+        }
+      }
+      discard;
+    }
+    vec3 C;
+    if ( vC.r >= 0.0 ) C = mapAt(vD.xy + q);
+    else {
+      // the underside: packed earth, broad patches, a few clods and roots
+      float hh = hu(int(floor(q.x / 3.0)) + 3, int(floor(q.y / 3.0)) + 5, sd + 1), hc_ = hu(int(q.x) + 3, int(q.y) + 5, sd + 2);
+      C = mix(vec3(0.42, 0.32, 0.22), vec3(0.50, 0.40, 0.28), step(0.6, hh));
+      if ( hc_ > 0.93 ) C = vec3(0.30, 0.22, 0.15);
+    }
+    C *= 0.55 + 0.6 * vC.g;
+    vec2 qu = cellT(p - vec2(0.0, 1.0), fa), ql = cellT(p - vec2(1.0, 0.0), fa), qd = cellT(p + vec2(0.0, 1.0), fa), qr = cellT(p + vec2(1.0, 0.0), fa);
+    bool Lt = !chunkIn(qu + 0.5, sd, rr) || !chunkIn(ql + 0.5, sd, rr);
+    bool Dk = !chunkIn(qd + 0.5, sd, rr) || !chunkIn(qr + 0.5, sd, rr);
+    if ( Lt && !Dk ) C = clamp(C * 1.22 + 0.04, 0.0, 1.0);
+    if ( Dk && !Lt ) C *= 0.78;
     out_(C, al);
     return;
   }
@@ -538,7 +671,7 @@ void main() {
     // a PLANK: a thin board, outlined, flashing as it turns (extra = the light on its face)
     if ( abs(l.x) > vA.z + 0.5 || abs(l.y) > vA.w + 0.5 ) discard;
     bool edge = abs(l.x) > vA.z - 0.5 || abs(l.y) > vA.w - 0.5;
-    vec3 C = edge ? vC.rgb * 0.35 : vC.rgb * (0.7 + 0.55 * vD.w);
+    vec3 C = edge ? vC.rgb * (0.5 + 0.3 * vD.w) : vC.rgb * (0.7 + 0.55 * vD.w);
     out_(C, al);
     return;
   }
@@ -636,6 +769,8 @@ void main() {
   ivec2 q = ivec2(floor(vP - uRect.xy));
   if ( q.x < 0 || q.y < 0 || q.x >= int(uRect.z) || q.y >= int(uRect.w) ) discard;
   vec4 a = texelFetch(uArt, q, 0) * uAlpha;
+  float edge = float(min(min(q.x, q.y), min(int(uRect.z) - 1 - q.x, int(uRect.w) - 1 - q.y)));
+  if ( edge < 24.0 && (edge + 0.5) / 24.0 < 0.0 + fract(52.9829189 * fract(0.06711056 * float(q.x) + 0.00583715 * float(q.y))) ) discard;
   if ( a.a <= 0.002 ) discard;
   fragColor = vec4(a.rgb, 1.0 - a.a);
 }`;

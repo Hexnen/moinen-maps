@@ -17,14 +17,13 @@ export async function place(level = 3, { path = null, x = 780, y = 600, ago = 20
   return id;
 }
 
-const ORDER = ["curtain", "skirt", "back", "column", "foot", "front", "deck"];
+const ORDER = ["curtain", "skirt", "back", "debB", "wallB", "column", "debF", "wallF", "front", "deck"];
 export function solo(list = null) {
   const v = view(); if ( !v ) return;
   delete v.render;
   if ( !list ) return;
   const r = canvas.app.renderer, base = Object.getPrototypeOf(v).render;
   v.render = function() {
-    r.render(this.puffs, { renderTexture: this.hf, clear: true });
     let first = true;
     for ( const k of ORDER ) {
       if ( !list.includes(k) ) continue;
