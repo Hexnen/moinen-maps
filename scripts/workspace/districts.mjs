@@ -1,9 +1,11 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, setting, store, onSetting, optRange, optSelect, optCheck, optHint, bindSettings } from "./ui.mjs";
+import { esc, T, setting, store, onSetting, optRange, optSelect, optCheck, optHint, bindSettings, optFold, keepFolds, tipHints } from "./ui.mjs";
 import { previewBrush, clearDistricts, readForm } from "../districts.mjs";
 import { DistrictsList } from "../panel.mjs";
 import { swatchesHtml, wireSwatches } from "../tools.mjs";
-import { fg, fgGroup } from "../labels.mjs";
+import { fg, fgGroup, labelFieldsHtml, wireFontPreview } from "../labels.mjs";
+import { lightsCfg, lightFieldsHtml, wireLightFields, previewWhileOpen } from "../lights.mjs";
+import { sceneForm, sf, N } from "./scene-form.mjs";
 import { dotsCfg, dotsFieldsHtml, readDotsValues, wireDotsFields } from "../dots.mjs";
 
 /**
@@ -50,30 +52,34 @@ function districtsBar(host, ctx) {
   return () => { offs.forEach((f) => f()); previewBrush(null); };
 }
 
+// which folding groups of the brush panel are open (kept while the panel is mounted again)
+const brushFolds = new Set();
+
 /** The dock's brush panel: everything the old brush dialog had, applied as it changes. */
 function brushPanel(host) {
   const sel = (name, val, opts) => `<select name="${name}">${opts.map(([v, l]) => `<option value="${v}"${v === val ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   const o = setting;
-  host.innerHTML = `${fg(T("District.size"), `<range-picker name="size" value="${o("districtSize")}" min="0.2" max="4" step="0.1"></range-picker>`, T("District.sizeHint"))}
+  if ( o("districtFill") === "dots" ) brushFolds.add("dots");
+  host.innerHTML = `<div class="mm-ws-form">
+    ${fg(T("District.size"), `<range-picker name="size" value="${o("districtSize")}" min="0.2" max="4" step="0.1"></range-picker>`, T("District.sizeHint"))}
     ${fgGroup(T("Editor.color"), swatchesHtml(o("districtColor"), false, true))}
-    ${fg(T("District.border"), sel("border", o("districtBorder"), borders()))}
     ${fg(T("District.fill"), sel("fill", o("districtFill"), fills()))}
-    <details class="mm-fold mm-dotsfold"${o("districtFill") === "dots" ? " open" : ""}><summary>${esc(T("Dots.section"))}</summary><div class="mm-fold-body">${dotsFieldsHtml("bd_", dotsCfg({ dots: o("districtDots") }))}</div></details>
+    ${fg(T("District.border"), sel("border", o("districtBorder"), borders()))}
     ${fg(T("District.opacity"), `<range-picker name="opacity" value="${o("districtOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-    <details class="mm-fold"><summary>${esc(T("District.inkSection"))}</summary><div class="mm-fold-body">
+    ${fg(T("WS.merge"), `<input type="checkbox" name="merge"${o("districtMerge") ? " checked" : ""}>`, T("Tool.districtMerge"))}
+    ${optFold({ id: "dots", title: T("Dots.section"), icon: "fa-solid fa-braille", open: brushFolds, cls: "mm-dotsfold", body: dotsFieldsHtml("bd_", dotsCfg({ dots: o("districtDots") })) })}
+    ${optFold({ id: "ink", title: T("District.inkSection"), icon: "fa-solid fa-pen-nib", open: brushFolds, body: `
       ${fg(T("District.ink"), `${sel("ink", o("districtInk"), [["ink", T("District.inkDark")], ["match", T("District.inkMatch")], ["custom", T("District.inkCustom")]])}<color-picker name="inkColor" value="${esc(o("districtInkColor"))}"></color-picker>`)}
       ${fg(T("District.inkOpacity"), `<range-picker name="inkOpacity" value="${o("districtInkOpacity")}" min="0" max="1" step="0.05"></range-picker>`)}
-      ${fg(T("District.inkWidth"), `<range-picker name="inkWidth" value="${o("districtInkWidth")}" min="0.2" max="4" step="0.1"></range-picker>`)}
-    </div></details>
-    ${fg(T("WS.merge"), `<input type="checkbox" name="merge"${o("districtMerge") ? " checked" : ""}>`, T("Tool.districtMerge"))}
-    <input type="hidden" name="pick" value="${esc(o("districtColor"))}">`;
+      ${fg(T("District.inkWidth"), `<range-picker name="inkWidth" value="${o("districtInkWidth")}" min="0.2" max="4" step="0.1"></range-picker>`)}` })}
+    <input type="hidden" name="pick" value="${esc(o("districtColor"))}"></div>`;
+  tipHints(host);
+  const offFolds = keepFolds(host, brushFolds);
   wireDotsFields(host, "bd_");
   // the custom outline colour only matters with "custom" ink; the dot options only with the dots fill
   const dep = () => {
-    const ink = host.querySelector('[name="inkColor"]'), custom = host.querySelector('[name="ink"]').value === "custom";
-    ink.inert = !custom; ink.classList.toggle("is-off", !custom);
-    const fold = host.querySelector(".mm-dotsfold"), dots = host.querySelector('[name="fill"]').value === "dots";
-    fold.classList.toggle("is-off", !dots); fold.querySelector(".mm-fold-body").inert = !dots;
+    host.querySelector('[name="inkColor"]').hidden = host.querySelector('[name="ink"]').value !== "custom";
+    host.querySelector(".mm-dotsfold").hidden = host.querySelector('[name="fill"]').value !== "dots";
   };
   const onDots = (ev) => {
     if ( ev.target.name === "fill" && ev.target.value === "dots" ) host.querySelector(".mm-dotsfold").open = true;
@@ -86,9 +92,62 @@ function brushPanel(host) {
   const offs = [
     bindSettings(host, { size: sizeSpec, border: "districtBorder", fill: "districtFill", opacity: num("districtOpacity", 0, 1), ink: "districtInk", inkColor: "districtInkColor",
       inkOpacity: num("districtInkOpacity", 0, 1), inkWidth: num("districtInkWidth", 0.2, 4), merge: "districtMerge" }, { onInput: ringPreview }),
-    colorGroup(host)
+    colorGroup(host),
+    // the fill or the outline changed elsewhere (the bar, the [ ] keys): the rows that depend on them follow
+    onSetting(["districtFill", "districtInk"], () => queueMicrotask(dep))
   ];
-  return () => { offs.forEach((f) => f()); host.removeEventListener("change", onDots); previewBrush(null); };
+  return () => { offs.forEach((f) => f()); offFolds(); host.removeEventListener("change", onDots); previewBrush(null); };
+}
+
+// which folds of the scene panels are open (kept while they are drawn again)
+const sceneFolds = new Set();
+
+/**
+ * How the districts of the viewed scene behave and look by default (the scene's own config, GM only): hover, attributes and the
+ * player list first; the default look, halftone dots and label typography folded. Districts with their own values keep them.
+ */
+function scenePanel(host) {
+  return sceneForm(host, {
+    folds: sceneFolds,
+    deps: [
+      ['[data-dep="hoverColor"]', (v) => v("hoverMode") === "highlight"],   // only the highlight effect uses a colour
+      ['[data-dep="hoverStrength"]', (v) => v("hoverMode") !== "none"],
+      ['[data-dep="inkColor"]', (v) => v("districtInk") === "custom"]
+    ],
+    html: (c) => `${sf.select(c, "hoverMode", "Hover.mode", [["none", T("Hover.none")], ["saturate", T("Hover.saturate")], ["highlight", T("Hover.highlight")], ["map", T("Hover.map")]], "Hover.hint")}
+      <div data-dep="hoverColor">${sf.color(c, "hoverColor", "Hover.color", "#ffd36b", "Hover.colorHint")}</div>
+      <div data-dep="hoverStrength">${sf.range(c, "hoverStrength", "Hover.strength", 0, 1, 0.05, "Hover.strengthHint")}</div>
+      ${sf.select(c, "attrDisplay", "Attr.mode", [["off", T("Attr.modeOff")], ["hover", T("Attr.modeHover")], ["always", T("Attr.modeAlways")]], "Attr.modeHint")}
+      ${sf.check(c, "districtListForPlayers", "Panel.players", "Panel.playersHint")}
+      ${optFold({ id: "look", title: T("Scene.DistrictLook"), icon: "fa-solid fa-pen-nib", open: sceneFolds, body: `
+        ${sf.range(c, "districtOpacity", "District.opacityDefault", 0, 1, 0.05, "District.opacityHint")}
+        ${sf.select(c, "districtInk", "District.ink", [["ink", T("District.inkDark")], ["match", T("District.inkMatch")], ["custom", T("District.inkCustom")]])}
+        <div data-dep="inkColor">${sf.color(c, "districtInkColor", "District.inkCustomColor", "#15110f")}</div>
+        ${sf.range(c, "districtInkOpacity", "District.inkOpacity", 0, 1, 0.05)}
+        ${sf.range(c, "districtInkWidth", "District.inkWidth", 0.2, 4, 0.1)}
+        ${sf.check(c, "districtNoBorder", "District.noOutline", "District.noOutlineHint")}
+        ${sf.check(c, "districtNoColor", "District.noColor", "District.noColorHint")}` })}
+      ${optFold({ id: "dots", title: T("Scene.Dots"), icon: "fa-solid fa-braille", open: sceneFolds, body: dotsFieldsHtml(`${N}.dots.`, c.dots) })}
+      ${optFold({ id: "labels", title: T("Label.sceneSection"), icon: "fa-solid fa-font", open: sceneFolds, body: labelFieldsHtml(`${N}.label.`, c.label) })}`,
+    wire: (form) => { wireDotsFields(form, `${N}.dots.`); wireFontPreview(form, `${N}.label.`); }
+  });
+}
+
+/**
+ * Night lights of the viewed scene (GM only): whether districts light up, when the night comes, and the default look of the lights.
+ * While the look fold is open the scene shows its lights as at night, as the Scene Config fold did.
+ */
+function nightPanel(host) {
+  return sceneForm(host, {
+    folds: sceneFolds,
+    deps: [['[data-dep="nightAuto"]', (v) => v("nightMode") === "auto"]],   // thresholds only matter when following the darkness
+    html: (c, scene) => `${sf.check(c, "lights.on", "Night.sceneOn", "Night.sceneOnHint")}
+      ${sf.select(c, "nightMode", "Night.mode", [["auto", T("Night.modeAuto")], ["on", T("Night.modeOn")], ["off", T("Night.modeOff")]], "Night.modeHint")}
+      <div data-dep="nightAuto">${sf.range(c, "nightStart", "Night.start", 0, 1, 0.05, "Night.startHint")}${sf.range(c, "nightFull", "Night.full", 0, 1, 0.05, "Night.fullHint")}</div>
+      ${optFold({ id: "nightlook", title: T("Night.lookFold"), icon: "fa-solid fa-lightbulb", open: sceneFolds, cls: "mm-nightlook", attrs: `data-tooltip="${esc(T("Night.scenePreviewHint"))}"`,
+        body: lightFieldsHtml(`${N}.lights.`, lightsCfg({}, scene)) })}`,
+    wire: (form) => { wireLightFields(form, `${N}.lights.`); return previewWhileOpen(form.querySelector(".mm-nightlook"), "*"); }
+  });
 }
 
 registerSection({
@@ -103,6 +162,8 @@ registerSection({
   bar: districtsBar,
   panels: [
     { id: "brush", title: "MOINENMAPS.WS.pBrush", icon: "fa-solid fa-paintbrush", mount: (host) => brushPanel(host) },
-    { id: "list", title: "MOINENMAPS.WS.pList", icon: "fa-solid fa-list-ul", mount: (host) => new DistrictsList().mount(host) }
+    { id: "list", title: "MOINENMAPS.WS.pList", icon: "fa-solid fa-list-ul", mount: (host) => new DistrictsList().mount(host) },
+    { id: "scene", title: "MOINENMAPS.WS.pDistrictScene", icon: "fa-solid fa-map", open: false, mount: (host) => scenePanel(host) },
+    { id: "night", title: "MOINENMAPS.WS.pNight", icon: "fa-solid fa-moon", open: false, mount: (host) => nightPanel(host) }
   ]
 });

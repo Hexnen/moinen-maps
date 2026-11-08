@@ -10,4 +10,5 @@ import "./soon.mjs";
 import "../destruction/section.mjs";   // Destruction takes over its placeholder (localStorage "mm-destruction" = "off" leaves it out)
 import "../fire/section.mjs";          // Fire and smoke: tools and a dock panel of the Destruction section (scripts/fire)
 import "../roads/workspace.mjs";   // Roads take over their placeholder
+import "../zones/section.mjs";   // Zones take over their placeholder (pencil lines -> zones, movement presets)
 import "./tokens.mjs";             // Tokens: enter / leave / idle / death of tokens (scripts/tokens)

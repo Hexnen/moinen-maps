@@ -13,6 +13,8 @@ export const DEFAULTS = {
   color: "#e5322d",
   useNoteTint: true,
   size: 1,
+  sizeBy: "note",     // "note": the note's icon size x size; "grid": sizeGrid grid squares tall, whatever the note says
+  sizeGrid: 0.8,
   glyph: "note",       // "note" = note icon inside the pin, "dot" = plain highlight
   shadow: true,
   glow: true,          // glow around the pin on hover / selection
@@ -186,22 +188,9 @@ export function sceneConfig(scene) {
   if ( !c ) {
     const f = scene.flags?.[MODULE_ID]?.config ?? {};
     c = foundry.utils.mergeObject(foundry.utils.deepClone(DEFAULTS), f, { inplace: false });
-    // resolution order: unsaved draft (Scene Config form) > saved scene config > built-in default
-    if ( sceneDraft && sceneDraft.sceneId === scene.id ) c = foundry.utils.mergeObject(c, sceneDraft.data, { inplace: false });
     configCache.set(scene, c);
   }
   return c;
-}
-
-/**
- * Unsaved Scene Config form values, laid over the stored config of one scene for a live preview. Never written to the document.
- * `setSceneDraft(null)` discards it. Listeners (pins, districts) are told through the `moinenMapsSceneDraft` hook.
- */
-let sceneDraft = null;
-export function setSceneDraft(sceneId, data = null) {
-  sceneDraft = sceneId && data ? { sceneId, data } : null;
-  configCache = new WeakMap();
-  Hooks.callAll("moinenMapsSceneDraft");
 }
 
 /** True when the OS asks for less motion (Windows "animation effects" off, macOS "reduce motion"). Used for UI niceties such as smooth scrolling. */

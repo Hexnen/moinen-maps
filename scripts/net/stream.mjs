@@ -306,7 +306,9 @@ async function rimsHere(sprites, areas) { const { rimsOf } = await import("../de
 
 async function download(dir, id, reload = false, signal = null) {
   stats.requests++;
-  const res = await fetch(foundry.utils.getRoute(fileOf(dir, id)), { cache: reload ? "reload" : "force-cache", signal });
+  // a request that never answers gives its download slot back after 30 s (six stalled ones held every chunk load for the session)
+  const limit = AbortSignal.timeout?.(30000), sig = signal && limit && AbortSignal.any ? AbortSignal.any([signal, limit]) : (signal ?? limit);
+  const res = await fetch(foundry.utils.getRoute(fileOf(dir, id)), { cache: reload ? "reload" : "force-cache", signal: sig });
   if ( !res.ok ) return null;
   const b = new Uint8Array(await res.arrayBuffer());
   stats.bytesDown += b.length;
@@ -388,7 +390,8 @@ function ensureBundle(info, signal = null, only = null) {
  */
 export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
   if ( memo.has(id) ) { stats.memHits++; return Promise.resolve(memo.get(id).v); }
-  if ( inflight.has(id) ) return inflight.get(id);
+  const cur = inflight.get(id);
+  if ( cur && !cur.signal?.aborted ) return cur.p;      // (a promise whose caller gave up would resolve null for this one too)
   const p = enqueue(prio, async () => {
     if ( memo.has(id) ) return memo.get(id).v;
     if ( signal?.aborted ) return null;
@@ -414,8 +417,8 @@ export function getChunk(dir, id, { prio = 0, signal = null } = {}) {
     remember(id, out);
     return out;
   });
-  inflight.set(id, p);
-  p.finally(() => inflight.delete(id));
+  inflight.set(id, { p, signal });
+  p.finally(() => { if ( inflight.get(id)?.p === p ) inflight.delete(id); });
   return p;
 }
 

@@ -46,7 +46,7 @@ export class FireDisplay {
     this.pool = [];                  // particle sprites
     this.lights = new FireLights();
     this.geo = null; this.P = M.cleanParams();
-    this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0, artPasses: 0 };
+    this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0, artPasses: 0, built: 0, destroyed: 0, lightsMade: 0 };
     this._tick = () => this.tick();
     this.ticking = false;
     this.lastT = -1;
@@ -60,10 +60,11 @@ export class FireDisplay {
     const geoChanged = JSON.stringify(geo) !== JSON.stringify(this.geo);
     this.geo = geo; this.P = P;
     const want = new Map(items.map((it) => [it.area.id, it]));
-    let changed = geoChanged;
+    // ONLY the areas whose key changed (their strokes, phases or the scene settings) are rebuilt: every other area keeps its mesh,
+    // field, art state, lights and clocks untouched (an edit never re-renders the whole fire)
     for ( const [id, a] of this.areas ) {
       const w = want.get(id);
-      if ( !w || w.area.key !== a.key || geoChanged ) { a.mesh.destroy(); this.areas.delete(id); changed = true; }
+      if ( !w || w.area.key !== a.key || geoChanged ) { a.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
     }
     for ( const [id, it] of want ) {
       if ( this.areas.has(id) ) continue;
@@ -73,19 +74,23 @@ export class FireDisplay {
       // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
       const lvMax = Math.max(1, ...area.strokes.filter((s) => s.k === "fire").map((s) => s.lv ?? 2), area.strokes.some((s) => s.k === "fire") ? 1 : 2);
       const mesh = field.style === "fire"
-        ? new FireArt(field, area.rect, geo, { seed: area.seed, grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
+        ? new FireArt(field, area.rect, geo, { seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
           plume: P.plume, lvMax, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
         : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
       this.meshes.addChild(mesh);
       this.areas.set(id, { key: area.key, area, field, mesh });
-      changed = true;
+      this.stats.built++;
     }
-    this.lastT = -1;
+    this.lastT = -1;                                                  // (uniforms only: every area's clock is set again this tick)
     this.stats.areas = this.areas.size;
-    if ( changed || this.lights.dirtyParams(P) ) this.lights.sync(this.areas.size ? M.lightsOf([...this.areas.values()], geo, P) : [], P);
+    // (lights per area: an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones)
+    const lightKeys = [...this.areas].map(([id, a]) => ({ id, key: a.key, a }));
+    const r = this.lights.syncAreas(lightKeys.map((e) => ({ id: e.id, key: e.key, get list() { return M.lightsOf([e.a], geo, P); } })), P);
+    this.stats.lightsMade += r.made;
     this.stats.lights = this.lights.count;
     this.arm();
-    this.tick(true);
+    // (no forced redraw of every area: the new ones have never been drawn and go first in this tick, the others keep their frame)
+    this.tick(geoChanged);
   }
 
   /** The ticker runs only while there is something that moves on screen (areas, motion allowed). */

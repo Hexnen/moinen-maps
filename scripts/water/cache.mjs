@@ -42,20 +42,26 @@ export function makeKey(sceneId, S) {
   return `${VERSION}:${sceneId}:${S.px}:${S.w}x${S.h}:${h.toString(36)}:${p.toString(36)}`;
 }
 
+/* When each bake was last used lives in the small "meta" store ({ id: "at:<key>", at }): marking a bake used, or picking the
+   oldest to drop, never reads or rewrites the frames (tens of MB each - a structured clone on the main thread). */
+const touch = (key) => run("meta", "readwrite", (s) => s.put({ id: `at:${key}`, at: Date.now() }));
+
 export async function getBake(key) {
   const hit = await run("bakes", "readonly", (s) => s.get(key));
-  if ( hit ) run("bakes", "readwrite", (s) => s.put({ ...hit, at: Date.now() }));   // used just now
+  if ( hit ) touch(key);   // used just now
   return hit;
 }
 
 export async function putBake(key, data) {
   await run("bakes", "readwrite", (s) => s.put({ key, ...data, at: Date.now() }));
-  // keep the most recent few
-  const all = await run("bakes", "readonly", (s) => s.getAll());
-  if ( all && all.length > KEEP ) {
-    const old = all.sort((a, b) => a.at - b.at).slice(0, all.length - KEEP);
-    await run("bakes", "readwrite", (s) => { for ( const o of old ) s.delete(o.key); return null; });
-  }
+  await touch(key);
+  // keep the most recent few: keys only (a bake with no "at" entry, from before, counts as the oldest)
+  const keys = await run("bakes", "readonly", (s) => s.getAllKeys());
+  if ( !keys || keys.length <= KEEP ) return;
+  const ats = new Map(((await run("meta", "readonly", (s) => s.getAll())) ?? []).filter((m) => m.id?.startsWith?.("at:")).map((m) => [m.id.slice(3), m.at]));
+  const old = [...keys].sort((a, b) => (ats.get(a) ?? 0) - (ats.get(b) ?? 0)).slice(0, keys.length - KEEP);
+  await run("bakes", "readwrite", (s) => { for ( const k of old ) s.delete(k); return null; });
+  await run("meta", "readwrite", (s) => { for ( const k of old ) s.delete(`at:${k}`); return null; });
 }
 
 /** What a client needs besides the frames to paint them: the code table and the engine's default settings. */

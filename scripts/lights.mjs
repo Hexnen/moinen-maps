@@ -538,8 +538,6 @@ Hooks.on("canvasPan", () => { if ( ENTRIES.size ) wake(); });
 Hooks.on("lightingRefresh", () => { attachHalos(); if ( ENTRIES.size ) retarget(); });
 Hooks.on("initializeCanvasEnvironment", () => { if ( ENTRIES.size ) retarget(); });
 Hooks.on("updateScene", (scene) => { if ( scene.id === canvas.scene?.id && ENTRIES.size ) retarget(); });
-Hooks.on("moinenMapsSceneDraft", () => { if ( ENTRIES.size ) retarget(); });
-Hooks.on("closeSceneConfig", () => setNightPreview("*", false));
 Hooks.on("updateSetting", (s) => { if ( s.key === `${MODULE_ID}.respectReducedMotion` ) { for ( const e of ENTRIES.values() ) e.applied = -1; wake(); } });
 
 export const _lightsDbg = () => ({ entries: [...ENTRIES.values()].map((e) => ({ id: e.id, count: e.count, n: e.n, shown: e.shown, visible: e.core.visible })), target, ticking, halo: !!haloLayer?.parent });
@@ -547,7 +545,7 @@ export const _lightsDbg = () => ({ entries: [...ENTRIES.values()].map((e) => ({ 
 /* ------------------------------------------------------------------ UI */
 
 /**
- * The look controls (shared by the district editor and the Scene Config tab). `p` = field-name prefix, `v` = values.
+ * The look controls (shared by the district editor and the Districts workspace night panel). `p` = field-name prefix, `v` = values.
  * The editor adds its own on/inherit select and the "own look" switch around these.
  */
 export function lightFieldsHtml(p, v) {

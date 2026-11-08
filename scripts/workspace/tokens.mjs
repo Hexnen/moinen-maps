@@ -1,5 +1,5 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, isEcho, writeControl, optRange, optSelect, optHint } from "./ui.mjs";
+import { esc, T, isEcho, writeControl, optRange, optSelect, optHint, tipHints } from "./ui.mjs";
 import { workspaceTool } from "./shell.mjs";
 import { MODULE_ID, sceneConfig, DEFAULTS } from "../config.mjs";
 import { fg } from "../labels.mjs";
@@ -175,7 +175,10 @@ const rowText = (k, label, placeholder, hint = "") => fg(T(label), `<input type=
  */
 function wirePanel(host, { deps = [], playOnChange = null } = {}) {
   const valueOf = (c) => c.matches("input[type=checkbox]") ? c.checked : c.matches("range-picker, input[type=number]") ? Number(c.value) : c.value;
-  const dim = () => { for ( const [sel, on] of deps ) for ( const el of host.querySelectorAll(sel) ) { const off = !on(); el.classList.toggle("is-off", off); el.inert = off; } };
+  // what does not apply is hidden (and inert) until it does
+  const dim = () => { for ( const [sel, on] of deps ) for ( const el of host.querySelectorAll(sel) ) { const off = !on(); el.hidden = off; el.inert = off; } };
+  host.classList.add("mm-ws-form");
+  tipHints(host);
   const onClick = (ev) => {
     const chip = ev.target.closest(".mm-tfx-chip"); if ( !chip ) return;
     const set = chip.closest(".mm-tfx-chips").dataset.set, style = chip.dataset.style;
@@ -255,11 +258,10 @@ function tokensBar(host) {
 /* ================================================================== panels */
 
 function generalPanel(host) {
-  host.innerHTML = `${rowSelect("who", "Tok.who", [["all", T("Tok.whoAll")], ["gm", T("Tok.whoGM")]])}
+  host.innerHTML = `${rowSelect("who", "Tok.who", [["all", T("Tok.whoAll")], ["gm", T("Tok.whoGM")]], "TokFx.clientNote")}
     ${rowSelect("filter", "Tok.filter", [["all", T("Tok.filterAll")], ["player", T("Tok.filterPlayer")], ["npc", T("Tok.filterNpc")]])}
     ${rowRange("intensity", "Tok.intensity", 0.3, 1.6, 0.05, "Tok.intensityHint")}
-    ${rowRange("speed", "TokFx.speed", 0.5, 2, 0.05, "TokFx.speedHint")}
-    <p class="hint mm-tfx-note">${esc(T("TokFx.clientNote"))}</p>`;
+    ${rowRange("speed", "TokFx.speed", 0.5, 2, 0.05, "TokFx.speedHint")}`;
   return wirePanel(host);
 }
 
@@ -280,8 +282,7 @@ function enterPanel(host) {
 
 function leavePanel(host) {
   const c = cfg();
-  host.innerHTML = `<h4 class="mm-tfx-h">${esc(T("TokFx.set.leave"))}</h4>${chipsHtml("leave", c.leaveStyle)}
-    <p class="hint">${esc(T("TokFx.leaveNote"))}</p>
+  host.innerHTML = `<h4 class="mm-tfx-h" data-tooltip="${esc(T("TokFx.leaveNote"))}">${esc(T("TokFx.set.leave"))}</h4>${chipsHtml("leave", c.leaveStyle)}
     <div class="mm-tfx-block" data-dep="hide"><h4 class="mm-tfx-h">${esc(T("TokFx.set.hide"))}</h4>${chipsHtml("hide", c.hideStyle)}</div>`;
   return wirePanel(host, { deps: [['[data-dep="hide"]', () => !!cfg().hide]] });
 }
@@ -292,10 +293,9 @@ function idlePanel(host) {
     <div class="mm-tfx-block" data-dep="idle">
       ${rowRange("idleAmp", "TokFx.idleAmp", 0.2, 2.5, 0.05)}
       ${rowRange("idleSpeed", "TokFx.idleSpeed", 0.2, 3, 0.05)}
-      ${rowSelect("idleWhen", "TokFx.idleWhen", St.IDLE_WHEN.map((w) => [w, T(`TokFx.when.${w}`)]), "TokFx.idleWhenHint")}
+      ${fg(T("TokFx.idleWhen"), `<select name="idleWhen">${St.IDLE_WHEN.map((w) => `<option value="${esc(w)}"${w === String(cfg().idleWhen) ? " selected" : ""}>${esc(T(`TokFx.when.${w}`))}</option>`).join("")}</select>`, `${T("TokFx.idleWhenHint")} ${T("TokFx.idleNote")}`)}
       ${rowCheck("idleTurn", "TokFx.idleTurn", "TokFx.idleTurnHint")}
-    </div>
-    <p class="hint mm-tfx-note">${esc(T("TokFx.idleNote"))}</p>`;
+    </div>`;
   return wirePanel(host, { deps: [['[data-dep="idle"]', () => cfg().idleStyle !== "none"]], playOnChange: (k) => { if ( k === "idleAmp" || k === "idleSpeed" ) playSet("idle", null, true); } });
 }
 
@@ -306,7 +306,7 @@ function deathPanel(host) {
       ${chipsHtml("death", c.deathStyle)}
       ${rowSelect("corpse", "TokFx.corpseLabel", St.CORPSE_STYLES.map((s) => [s, T(`TokFx.corpse.${s}`)]), "TokFx.corpseHint")}
       ${rowSelect("revive", "TokFx.reviveLabel", St.REVIVE_STYLES.map((s) => [s, T(`TokFx.revive.${s}`)]))}
-      <h4 class="mm-tfx-h">${esc(T("TokFx.detect"))}</h4>
+      <h4 class="mm-ws-sub">${esc(T("TokFx.detect"))}</h4>
       ${rowCheck("deathDefeated", "TokFx.detectDefeated")}
       ${rowCheck("deathStatus", "TokFx.detectStatus")}
       ${rowCheck("deathHp", "TokFx.detectHp", "TokFx.detectHpHint")}
@@ -388,6 +388,7 @@ function overridesPanel(host) {
   };
   host.addEventListener("change", onChange);
   host.addEventListener("click", onClick);
+  host.classList.add("mm-ws-form");
   const off = listen((what) => { if ( what === "picks" || what === "tokens" ) draw(); });
   draw();
   return () => { off(); host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); };

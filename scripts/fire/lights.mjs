@@ -80,7 +80,7 @@ const isDay = () => (canvas.environment?.darknessLevel ?? 1) < DAY_BELOW;
 
 export class FireLights {
   constructor() {
-    this.sources = []; this.params = ""; this.day = null;
+    this.sources = []; this.byArea = new Map(); this.params = ""; this.day = null;
     // by day (darkness below DAY_BELOW) the fire does not light (its orange colouration only muddied the map): the sources are
     // suppressed. Checked after every lighting refresh; only a flip asks for one more refresh (the darkness crossing the threshold)
     this.hook = Hooks.on("lightingRefresh", () => this.daylight());
@@ -94,36 +94,58 @@ export class FireLights {
   get count() { return this.sources.length; }
   dirtyParams(P) { return JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightFollow, P.lightColor, P.lightFlicker]) !== this.params; }
 
-  /** Make the lights `list` (model.lightsOf) with the settings `P`; the old ones go. */
-  sync(list, P) {
-    this.params = JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightFollow, P.lightColor, P.lightFlicker]);
-    const had = this.sources.length;
-    this.clear(false);
-    if ( P.light && list.length && canvas.effects?.lightSources && foundry.canvas?.sources?.PointLightSource ) {
-      const C = sourceClass(), level = canvas.inferLevelFromElevation?.(0)?.id ?? canvas.level?.id ?? null, still = reducedMotion();
-      list.forEach((L, i) => {
-        try {
-          const s = new C({ sourceId: `moinenMapsFire.${i}` });
-          s.mmSeed = L.seed; s.mmFlicker = still ? 0 : P.lightFlicker;
-          s.mmTime = !still && (L.ignite !== null || L.out !== null) ? { ignite: L.ignite, out: L.out, G: P.grow * 1000, O: P.out * 1000 } : null;
-          const alpha = Math.min(1, P.lightIntensity * (0.55 + 0.45 * L.strength) * FIRE_LV.lightI[L.level ?? 2]);
-          s.initialize({ x: L.x, y: L.y, elevation: 0, level, walls: true, vision: false, dim: L.radius, bright: Math.round(L.radius * 0.45),
-            color: hexColor(P.lightFollow && L.color ? L.color : P.lightColor), alpha: alpha * 0.75, luminosity: 0.5 + 0.2 * P.lightIntensity, attenuation: 0.6, coloration: 1,
-            animation: s.mmFlicker > 0 || s.mmTime ? { type: "torch", speed: 5, intensity: 5, reverse: false } : { type: null }, seed: L.seed % 10000 });
-          s.suppression.mmDaylight = isDay();
-          s.add();
-          this.sources.push(s);
-        } catch ( err ) { console.warn("moinen-maps | fire light", err); }
-      });
+  /**
+   * Make the lights per AREA: `entries` [{ id, key, list }] (list = model.lightsOf of that area alone). An area whose key is the same as
+   * before keeps its light sources untouched (no rebuild, no restarted flicker or grow); only the areas that changed, came or went
+   * replace theirs. New settings (`P`) rebuild all. Returns how many sources were made and dropped.
+   */
+  syncAreas(entries, P) {
+    const params = JSON.stringify([P.light, P.lightRadius, P.lightIntensity, P.lightFollow, P.lightColor, P.lightFlicker]);
+    const all = params !== this.params; this.params = params;
+    const want = new Map(entries.map((e) => [e.id, e]));
+    let made = 0, dropped = 0;
+    for ( const [id, a] of this.byArea ) {
+      const w = want.get(id);
+      if ( all || !w || w.key !== a.key ) { dropped += this.drop(a.sources); this.byArea.delete(id); }
     }
+    const ok = P.light && canvas.effects?.lightSources && foundry.canvas?.sources?.PointLightSource;
+    for ( const e of entries ) {
+      if ( this.byArea.has(e.id) ) continue;
+      const sources = ok ? this.make(e.id, e.list, P) : [];
+      made += sources.length;
+      this.byArea.set(e.id, { key: e.key, sources });
+    }
+    this.sources = [...this.byArea.values()].flatMap((a) => a.sources);
     this.day = isDay();
-    if ( had || this.sources.length ) canvas.perception?.update({ refreshLighting: true, refreshVision: true });
+    if ( made || dropped ) canvas.perception?.update({ refreshLighting: true, refreshVision: true });
+    return { made, dropped };
   }
+  /** The light sources of one area (for checks). */
+  sourcesOf(id) { return this.byArea.get(id)?.sources ?? []; }
+  make(id, list, P) {
+    const C = sourceClass(), level = canvas.inferLevelFromElevation?.(0)?.id ?? canvas.level?.id ?? null, still = reducedMotion(), out = [];
+    list.forEach((L, i) => {
+      try {
+        const s = new C({ sourceId: `moinenMapsFire.${id}.${i}` });
+        s.mmSeed = L.seed; s.mmFlicker = still ? 0 : P.lightFlicker;
+        s.mmTime = !still && (L.ignite !== null || L.out !== null) ? { ignite: L.ignite, out: L.out, G: P.grow * 1000, O: P.out * 1000 } : null;
+        const alpha = Math.min(1, P.lightIntensity * (0.55 + 0.45 * L.strength) * FIRE_LV.lightI[L.level ?? 2]);
+        s.initialize({ x: L.x, y: L.y, elevation: 0, level, walls: true, vision: false, dim: L.radius, bright: Math.round(L.radius * 0.45),
+          color: hexColor(P.lightFollow && L.color ? L.color : P.lightColor), alpha: alpha * 0.75, luminosity: 0.5 + 0.2 * P.lightIntensity, attenuation: 0.6, coloration: 1,
+          animation: s.mmFlicker > 0 || s.mmTime ? { type: "torch", speed: 5, intensity: 5, reverse: false } : { type: null }, seed: L.seed % 10000 });
+        s.suppression.mmDaylight = isDay();
+        s.add();
+        out.push(s);
+      } catch ( err ) { console.warn("moinen-maps | fire light", err); }
+    });
+    return out;
+  }
+  drop(list) { for ( const s of list ) { try { s.destroy(); } catch { /* gone with the canvas */ } } return list.length; }
 
   clear(update = true) {
     const had = this.sources.length;
     for ( const s of this.sources ) { try { s.destroy(); } catch { /* gone with the canvas */ } }
-    this.sources = [];
+    this.sources = []; this.byArea.clear();
     if ( update && had ) canvas.perception?.update({ refreshLighting: true, refreshVision: true });
   }
   destroy() { Hooks.off("lightingRefresh", this.hook); this.clear(!!canvas.effects?.lightSources); }

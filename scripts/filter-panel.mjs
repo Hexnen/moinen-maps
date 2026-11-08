@@ -124,7 +124,7 @@ function renderDocked() {
   dockHost.innerHTML = `<div class="mm-filter-tools">
       <span class="mm-filter-count" aria-label="${esc(game.i18n.format("MOINENMAPS.Filter.shown", { n: shown, total }))}">${shown}/${total}</span>
       <button type="button" data-act="all"${groups.length ? "" : " disabled"}>${esc(T("Filter.showAll"))}</button><button type="button" data-act="none"${groups.length ? "" : " disabled"}>${esc(T("Filter.hideAll"))}</button></div>
-    ${groups.length ? `<ul class="mm-filter-list">${rows}</ul><p class="mm-filter-hint">${esc(T("Filter.hint"))}</p>` : `<p class="mm-filter-hint">${esc(T("WS.filterEmpty"))}</p>`}
+    ${groups.length ? `<ul class="mm-filter-list">${rows}</ul>` : `<p class="mm-filter-hint">${esc(T("WS.filterEmpty"))}</p>`}
     <label class="mm-ws-check"><input type="checkbox" name="floating"${floating ? " checked" : ""}> ${esc(T("WS.filterFloating"))}</label>`;
   const l = dockHost.querySelector(".mm-filter-list"); if ( l ) l.scrollTop = keep;
   if ( focus ) dockHost.querySelector(`[${focus[0]}="${CSS.escape(focus[1])}"]`)?.focus();

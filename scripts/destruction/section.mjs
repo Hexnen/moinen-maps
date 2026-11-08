@@ -1,5 +1,5 @@
 import { registerSection } from "../workspace/registry.mjs";
-import { esc, T, optRange, optSelect, optCheck, optHint } from "../workspace/ui.mjs";
+import { esc, T, optRange, optSelect, optCheck, optHint, optFold, keepFolds } from "../workspace/ui.mjs";
 import { MODULE_ID } from "../config.mjs";
 import * as Model from "./model.mjs";
 import * as Editor from "./editor.mjs";
@@ -97,7 +97,7 @@ function bar(host, ctx) {
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.level"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("Destr.level"))}">${levels}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.kind"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.kind"))}">${types}</div></div>
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.causeLabel"))}</span><div class="mm-ws-tools mm-d-causes" role="group" aria-label="${esc(T("Destr.causeLabel"))}">${causes}</div></div>
-      <div class="mm-ws-opt"><div class="mm-ws-tools" role="group">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}${freeBtn}${Cui.barButtons()}</div></div>
+      <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Destr.toggles"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Destr.toggles"))}">${quick("jagged", "fa-solid fa-wave-square", "Destr.quickJagged")}${quick("directional", "fa-solid fa-route", "Destr.quickDirectional")}${carryBtn}${superBtn}${freeBtn}${Cui.barButtons()}</div></div>
       <span class="mm-ws-hint mm-d-carryhint"${carryOn() ? "" : " hidden"}>${esc(T("Destr.carryArmedHint"))}</span>
       ${optHint(T("Destr.paintHint"))}`;
   }
@@ -193,19 +193,19 @@ function mountDamage(host) {
       return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(kind)}</span>
         <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span>${gm && older.has(o.id) && !st.rebake ? `<button type="button" class="mm-d-rebake" data-act="rebakeOne" data-obj="${esc(o.id)}" data-tooltip="${esc(T("Destr.rebakeOne"))}" aria-label="${esc(T("Destr.rebakeOne"))}"><i class="fa-solid fa-rotate" inert></i></button>` : ""}</li>`;
     }).join("");
-    host.innerHTML = `<p class="mm-d-status" role="status">${esc(statusLine())}</p>
+    host.innerHTML = `<div class="mm-ws-form mm-d-panel"><p class="mm-d-status" role="status">${esc(statusLine())}</p>
       ${rows ? `<ul class="mm-d-areas mm-d-objs" aria-label="${esc(T("Destr.strokesLabel"))}">${rows}</ul>` : ""}
       <div class="mm-d-actions">
         <button type="button" class="mm-ws-btn" data-act="detonate"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-explosion" inert></i> ${esc(T("Destr.detonate"))}</button>
         <button type="button" class="mm-ws-btn" data-act="variation"${S && Model.hasPaint(S) ? "" : " disabled"} data-tooltip="${esc(T("Destr.variationHint"))}"><i class="fa-solid fa-dice" inert></i> ${esc(T("Destr.variation"))}</button>
-        <button type="button" class="mm-ws-btn" data-act="clear"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-trash" inert></i> ${esc(T("Destr.clear"))}</button>
         ${gm && st.paused ? `<button type="button" class="mm-ws-btn" data-act="bakeNow" data-tooltip="${esc(T("Destr.bakeNowHint"))}"><i class="fa-solid fa-rotate" inert></i> ${esc(T("Destr.bakeNow"))}</button>` : ""}
         ${gm && (st.compat || st.olderLook) && !st.paused && !st.rebake ? `<button type="button" class="mm-ws-btn" data-act="rebakeAll" data-tooltip="${esc(T("Destr.rebakeAllHint"))}"><i class="fa-solid fa-wand-magic-sparkles" inert></i> ${esc(T("Destr.rebakeAll"))}</button>` : ""}
         ${gm && st.rebake ? `<button type="button" class="mm-ws-btn" data-act="rebakePause"><i class="fa-solid ${st.rebake.paused ? "fa-play" : "fa-pause"}" inert></i> ${esc(T(st.rebake.paused ? "Destr.rebakeResume" : "Destr.rebakePause"))}</button>
           <button type="button" class="mm-ws-btn" data-act="rebakeCancel"><i class="fa-solid fa-xmark" inert></i> ${esc(T("Destr.rebakeCancel"))}</button>` : ""}
       </div>
+      ${optCheck({ name: "enabled", label: T("Destr.enabled"), checked: S ? S.enabled : true, hint: T("Destr.enabledHint") })}
       ${Cui.block()}
-      ${optCheck({ name: "enabled", label: T("Destr.enabled"), checked: S ? S.enabled : true, hint: T("Destr.enabledHint") })}`;
+      <div class="mm-ws-danger"><button type="button" class="mm-ws-btn mm-danger" data-act="clear"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-trash" inert></i> ${esc(T("Destr.clear"))}</button></div></div>`;
   };
   render();
   const onClick = async (ev) => {
@@ -235,25 +235,30 @@ function mountDamage(host) {
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off("moinenMapsDestruction", id); cancelAnimationFrame(frame); };
 }
 
+// which folding groups of the Look panel are open (kept while the panel is mounted again)
+const lookFolds = new Set(["debris"]);
+
 function mountLook(host) {
   const P = D.state()?.params ?? Model.PARAM_DEFAULTS, L = Model.LIMITS;
   const range = (k, step = 0.05) => optRange({ name: `p.${k}`, label: T(`Destr.f.${k}`), value: P[k], min: L[k][0], max: L[k][1], step, hint: T(`Destr.h.${k}`) });
-  host.innerHTML = `<div class="mm-d-form">
+  const client = (k) => game.settings.get(MODULE_ID, k);
+  host.innerHTML = `<div class="mm-ws-form mm-d-form">
     ${optSelect({ name: "p.cause", label: T("Destr.f.cause"), value: Model.causeOf(P.cause), hint: T("Destr.h.cause"), options: causeOptions(T("Destr.causeNone")) })}
     ${optSelect({ name: "p.material", label: T("Destr.f.material"), value: P.material, hint: T("Destr.h.material"), options: Model.MATERIALS.map((m) => [m, T(`Destr.mat.${m}`)]) })}
-    ${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}${range("edge")}
-    ${optCheck({ name: "p.jagged", label: T("Destr.f.jagged"), checked: P.jagged, hint: T("Destr.h.jagged") })}
-    <div class="mm-d-jag"${P.jagged ? "" : " hidden"}>${range("jag")}</div>
-    ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}
-    <p class="mm-ws-hint">${esc(T("Destr.lookNewOnly"))}</p>
-    <div class="mm-d-carry">
-    ${optCheck({ name: "c.destrCarry", label: T("Destr.f.carry"), checked: game.settings.get(MODULE_ID, "destrCarry"), hint: T("Destr.h.carry") })}
-    ${optCheck({ name: "c.destrSuper", label: T("Destr.f.super"), checked: game.settings.get(MODULE_ID, "destrSuper"), hint: T("Destr.h.super") })}
-    ${optSelect({ name: "c.carryEnds", label: T("Destr.carryEnds"), value: game.settings.get(MODULE_ID, "carryEnds"), hint: T("Destr.carryEndsHint"), options: [["real", T("Destr.carryEndsReal")], ["return", T("Destr.carryEndsReturn")]] })}
-    ${optCheck({ name: "c.carryFree", label: T("Destr.f.free"), checked: game.settings.get(MODULE_ID, "carryFree"), hint: T("Destr.h.free") })}
-    ${optCheck({ name: "c.carrySnap", label: T("Destr.carrySnap"), checked: game.settings.get(MODULE_ID, "carrySnap"), hint: T("Destr.carrySnapHint") })}
-    </div>
-    <button type="button" class="mm-ws-btn" data-act="applyLook" data-tooltip="${esc(T("Destr.applyLookHint"))}"><i class="fa-solid fa-paintbrush" inert></i> ${esc(T("Destr.applyLook"))}</button></div>`;
+    ${optFold({ id: "debris", title: T("Destr.grp.debris"), icon: "fa-solid fa-cubes-stacked", open: lookFolds, body: `${range("debris")}${range("scatter")}${range("lift")}${range("rubble")}${range("halo")}` })}
+    ${optFold({ id: "edges", title: T("Destr.grp.edges"), icon: "fa-solid fa-wave-square", open: lookFolds, body: `${range("edge")}
+      ${optCheck({ name: "p.jagged", label: T("Destr.f.jagged"), checked: P.jagged, hint: T("Destr.h.jagged") })}
+      <div class="mm-d-jag"${P.jagged ? "" : " hidden"}>${range("jag")}</div>
+      ${optCheck({ name: "p.directional", label: T("Destr.f.directional"), checked: P.directional, hint: T("Destr.h.directional") })}` })}
+    <div class="mm-ws-actions"><button type="button" class="mm-ws-btn" data-act="applyLook" data-tooltip="${esc(`${T("Destr.lookNewOnly")} ${T("Destr.applyLookHint")}`)}"><i class="fa-solid fa-paintbrush" inert></i> ${esc(T("Destr.applyLook"))}</button></div>
+    ${optFold({ id: "carry", title: T("Destr.grp.carry"), icon: "fa-solid fa-people-carry-box", open: lookFolds, cls: "mm-d-carry", body: `
+      ${optCheck({ name: "c.destrCarry", label: T("Destr.f.carry"), checked: client("destrCarry"), hint: T("Destr.h.carry") })}
+      ${optCheck({ name: "c.destrSuper", label: T("Destr.f.super"), checked: client("destrSuper"), hint: T("Destr.h.super") })}
+      ${optSelect({ name: "c.carryEnds", label: T("Destr.carryEnds"), value: client("carryEnds"), hint: T("Destr.carryEndsHint"), options: [["real", T("Destr.carryEndsReal")], ["return", T("Destr.carryEndsReturn")]] })}
+      ${optCheck({ name: "c.carryFree", label: T("Destr.f.free"), checked: client("carryFree"), hint: T("Destr.h.free") })}
+      ${optCheck({ name: "c.carrySnap", label: T("Destr.carrySnap"), checked: client("carrySnap"), hint: T("Destr.carrySnapHint") })}` })}
+    </div>`;
+  const offFolds = keepFolds(host, lookFolds);
   const onApply = async (ev) => {
     const b = ev.target.closest?.("[data-act=applyLook]"); if ( !b || !game.user.isGM ) return;
     const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.applyLook") }, content: `<p>${esc(T("Destr.applyLookConfirm"))}</p>`, rejectClose: false, modal: true });
@@ -276,20 +281,27 @@ function mountLook(host) {
     const j = host.querySelector(".mm-d-jag"); if ( j ) j.hidden = !(D.state()?.params ?? Model.PARAM_DEFAULTS).jagged;
   });
   const off = bindParams(host);
-  return () => { off(); host.removeEventListener("click", onApply); host.removeEventListener("change", onCarry); Hooks.off("moinenMapsDestruction", id); Hooks.off("moinenMapsDestruction", idC); };
+  return () => { off(); offFolds(); host.removeEventListener("click", onApply); host.removeEventListener("change", onCarry); Hooks.off("moinenMapsDestruction", id); Hooks.off("moinenMapsDestruction", idC); };
 }
 
 function mountMotion(host) {
   const P = D.state()?.params ?? Model.PARAM_DEFAULTS;
-  host.innerHTML = `<div class="mm-d-form">
-    ${optCheck({ name: "p.anim", label: T("Destr.f.anim"), checked: P.anim, hint: T("Destr.h.anim") })}
+  host.innerHTML = `<div class="mm-ws-form mm-d-form">
+    ${optCheck({ name: "p.anim", label: T("Destr.f.anim"), checked: P.anim, hint: `${T("Destr.h.anim")} ${T("Destr.motionHint")}` })}
     ${optCheck({ name: "p.idle", label: T("Destr.f.idle"), checked: P.idle, hint: T("Destr.h.idle") })}
     ${optSelect({ name: "p.fxWho", label: T("Destr.f.fxWho"), value: P.fxWho, options: [["all", T("Destr.o.all")], ["gm", T("Destr.o.gm")]] })}
     ${optCheck({ name: "p.entry", label: T("Destr.f.entry"), checked: P.entry, hint: T("Destr.h.entry") })}
+    <div class="mm-d-entry"${P.entry ? "" : " hidden"}>
     ${optRange({ name: "p.entrySpeed", label: T("Destr.f.entrySpeed"), value: P.entrySpeed, min: Model.LIMITS.entrySpeed[0], max: Model.LIMITS.entrySpeed[1], step: 0.1, hint: T("Destr.h.entrySpeed") })}
     ${optRange({ name: "p.entryPower", label: T("Destr.f.entryPower"), value: P.entryPower, min: Model.LIMITS.entryPower[0], max: Model.LIMITS.entryPower[1], step: 0.1, hint: T("Destr.h.entryPower") })}
-    <p class="mm-ws-hint">${esc(T("Destr.motionHint"))}</p></div>`;
-  return bindParams(host);
+    </div></div>`;
+  // the entry sliders only while the entry animation is on
+  const id = Hooks.on("moinenMapsDestruction", (kind) => {
+    if ( kind !== "loaded" && kind !== "params" ) return;
+    const e = host.querySelector(".mm-d-entry"); if ( e ) e.hidden = !(D.state()?.params ?? Model.PARAM_DEFAULTS).entry;
+  });
+  const off = bindParams(host);
+  return () => { off(); Hooks.off("moinenMapsDestruction", id); };
 }
 
 if ( !OFF ) registerSection({

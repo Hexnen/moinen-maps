@@ -23,8 +23,9 @@ try {
   }).observe({ type: "longtask", buffered: false });
 } catch { /* not in this browser */ }
 
-let last = 0, polls = 0;
-function frame(now) {
+let last = 0, polls = 0, loop = 0;
+function frame(now, my) {
+  if ( my !== loop ) return;                  // a newer scene load runs its own loop
   if ( !state.t0 || now > state.until ) { last = 0; return; }
   if ( last && now - last > 34 ) state.hitches.push({ t: Math.round(last - state.t0), ms: Math.round(now - last) });
   last = now;
@@ -33,12 +34,12 @@ function frame(now) {
     const holes = game.modules.get("moinen-maps")?.api?.destruction?.flood?.status?.()?.holes;
     if ( holes?.length && holes.every((h) => h.state === "ready") ) markOnce("flood:all", { holes: holes.length });
   }
-  requestAnimationFrame(frame);
+  requestAnimationFrame((t) => frame(t, my));
 }
 
 Hooks.on("canvasInit", () => {
   Object.assign(state, { t0: performance.now(), marks: [], longtasks: [], hitches: [], until: performance.now() + 30000, frames: [] });
-  last = 0; requestAnimationFrame(frame);
+  last = 0; const my = ++loop; requestAnimationFrame((t) => frame(t, my));
   // tests in a hidden browser pane (no requestAnimationFrame there): localStorage "mm-trace-pump" = "1" drives the canvas ticker
   // itself every 16 ms and records what each frame cost (texture uploads included)
   let pump = false; try { pump = localStorage.getItem("mm-trace-pump") === "1"; } catch { /* blocked */ }
