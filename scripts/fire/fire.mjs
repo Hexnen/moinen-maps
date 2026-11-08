@@ -66,6 +66,13 @@ function onCanvasReady() {
 }
 
 /**
+ * The fire is about to be painted (the GM picked the fire or smoke tool, or opened the fire panel): its programs are warmed now, in
+ * the background, if they are not yet - a scene that opened without fire no longer compiles them on the first stroke. Never blocks;
+ * never twice (prewarm).
+ */
+export function warmUp() { prewarm(true); }
+
+/**
  * PRE-WARM (gl-warm.mjs): when the scene opens with fire or smoke this client shows, every fire program it will draw with is compiled
  * and linked in the background (KHR_parallel_shader_compile; else one per idle callback) - the first fire draw of a session no longer
  * blocks on the GPU process for the links (seconds on a program-cache miss). Meanwhile the fire's first display waits for it (draw):
@@ -73,12 +80,17 @@ function onCanvasReady() {
  * changes. `CONFIG.moinenMaps.firePrewarm = false` turns it off.
  */
 let warmJob = 0, warming = null;
-function prewarm() {
-  const job = ++warmJob; warming = null;
-  if ( CONFIG.moinenMaps?.firePrewarm === false || !strokes.size || !shown() ) return;
+function prewarm(force = false) {
+  if ( warming ) return;                                              // (one at a time: a second ask while it runs is the same warm-up)
+  if ( CONFIG.moinenMaps?.firePrewarm === false || !canvas.ready || !shown() || (!force && !strokes.size && !draft) ) return;
   const list = [...artPrograms()];
-  if ( [...strokes.values()].some((s) => s.st === "fireball") ) list.push(fireballProgram());
+  const ball = [...strokes.values()].some((s) => s.st === "fireball") || draft?.st === "fireball"
+    || (force && game.user.isGM && (() => { try { return game.settings.get(MODULE_ID, "fireStyle") === "fireball"; } catch { return false; } })());
+  if ( ball ) list.push(fireballProgram());
   const wet = fireWet(); if ( wet && (wet.dim > 0.001 || wet.steam > 0.001) ) list.push(damperProgram());
+  const uid = canvas.app.renderer.CONTEXT_UID;
+  if ( list.every((p) => p.glPrograms?.[uid]) ) return;              // (already warm: compiled earlier this session)
+  const job = ++warmJob;
   const live = () => job === warmJob && canvas.ready;
   const tl = timing(), t0 = performance.now();
   warming = warmPrograms(list, live).catch(() => {}).finally(() => {
@@ -103,6 +115,9 @@ function onUpdateScene(scene, changed) {
   const f = changed?.flags?.[MODULE_ID]; if ( !f ) return;
   if ( ![M.FLAG, M.STROKES, `-=${M.STROKES}`, `-=${M.FLAG}`].some((k) => k in f) ) return;
   load(scene);
+  // (the first fire on a scene that had none, painted by another client: its programs warmed as the edit arrives - the new areas'
+  // adoption waits for them, the page stays responsive)
+  if ( !display ) prewarm();
   scheduleDraw();
   tell(M.FLAG in f ? "params" : "edited");
 }
@@ -250,6 +265,7 @@ function fresh(raw) {
 let draftAt = 0, draftTimer = 0;
 export function setDraft(st) {
   draft = st ? M.cleanStroke({ ...fresh(st), id: "draft", q: st.q ?? sharedNow() }) : null;
+  if ( draft && !display ) prewarm();                                 // (a stroke begun before any warm-up: now - the tool usually did it)
   // (a big area takes ~25 ms to rasterize: while painting, at most ~12 redraws a second)
   clearTimeout(draftTimer);
   const wait = 80 - (performance.now() - draftAt);
