@@ -10,6 +10,14 @@
 export const LEVEL_INTENSITY = [0, 6, 8, 10];
 export const intensityLevel = (i) => (i <= 6 ? 1 : i <= 8 ? 2 : 3);
 const SHARE = 0.25, FIRE_SHARE = 0.05;
+function inRing(p, x, y) {
+  let c = false;
+  for ( let i = 0, n = p.length, j = n - 2; i < n; j = i, i += 2 ) {
+    const xi = p[i], yi = p[i + 1], xj = p[j], yj = p[j + 1];
+    if ( (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi ) c = !c;
+  }
+  return c;
+}
 
 /** Sample points per zone: id -> [x0, y0, x1, y1, ...] (scene px), `step` apart. */
 export function samplesOf(Z, zoneAt, step) {
@@ -19,7 +27,10 @@ export function samplesOf(Z, zoneAt, step) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for ( const part of z.parts ?? [z.rings] ) { const p = part[0]; for ( let i = 0; i < p.length; i += 2 ) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); } }
     const pts = [];
-    for ( let y = y0 + step / 2; y < y1; y += step ) for ( let x = x0 + step / 2; x < x1; x += step ) if ( zoneAt(x, y) === z.id ) pts.push(x, y);
+    // zones never overlap: a point inside this zone's own rings is this zone (testing every zone per sample was O(zones^2))
+    const parts = z.parts ?? [[z.rings]];
+    const mine = (x, y) => parts.some((part) => inRing(part[0], x, y) && !part.slice(1).some((h) => inRing(h, x, y)));
+    for ( let y = y0 + step / 2; y < y1; y += step ) for ( let x = x0 + step / 2; x < x1; x += step ) if ( mine(x, y) ) pts.push(x, y);
     if ( !pts.length ) pts.push(z.label.x, z.label.y);
     out.set(z.id, pts);
   }
