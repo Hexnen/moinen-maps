@@ -89,5 +89,14 @@ const sm = new Uint8Array(W * H); for ( let y = 0; y < 10; y++ ) for ( let x = 1
 check(!Lk.derive(LS, { dest: { mask: sm, mw: W, mh: H, mpx: 1, rect } }).get(1), "a little damage at a zone's edge does not wreck it");
 check(JSON.stringify(Lk.merge({ fire: 6, dark: true }, { fire: 8, water: true })) === JSON.stringify({ fire: 8, dark: true, water: true }), "own marks and the map's states merge (fire: the higher)");
 
+
+// floors: a building's floors are vertical zones; walkers come down first
+const MF = M([], [[350, 50, { building: true, floors: 3 }], [150, 50, { building: true, floors: 2, wrecked: true }]]);
+check(K.floorsOf(MF, 3) === 3 && K.floorsOf(MF, 1) === 0 && K.floorsOf(MF, 0) === 0, "floors only count in a standing building");
+check(K.vertical(MF, 3, 2, "ground") === 2 && K.vertical(MF, 3, 9, "ground") === 3 && K.vertical(MF, 3, 0, "elevated") === 4 && K.vertical(MF, 0, 2, "ground") === 0, "a token's height: its floor, the rooftop one above the top floor");
+const dv = K.addVertical({ walk: 1, air: 1, through: 1, swim: undefined, swing: 1 }, 3);
+check(dv.walk === 4 && dv.air === 1 && dv.through === 1 && dv.swim === undefined, "walking adds the way down; flight leaves by a window");
+check(K.cleanProps({ building: true, floors: 99 }).floors === 40 && K.cleanProps({ floors: 0 }).floors === undefined, "floors are capped and dropped at 0");
+
 console.log(failed ? `${failed} check(s) failed` : "all zones marks checks passed");
 process.exit(failed ? 1 : 0);

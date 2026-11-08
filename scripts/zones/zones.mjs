@@ -177,9 +177,11 @@ export function refresh() {
     if ( here >= 0 ) {
       // each way of moving counts its own route past the walls (marks.mjs); the preset picks the cheapest and says what it costs
       const D = Marks.moveDistances(Z, here, M), p = preset(movePreset()), moves = movesOf(t.actor);
+      // a token up on a floor (or on the roof of a building with floors) walks down first
+      const v = Marks.vertical(M, here, t.document.getFlag(MODULE_ID, "floor"), altOf(t.document));
       dist = new Map(); bands = p ? new Map() : null;
       for ( const z of Z.zones ) {
-        const dd = Marks.distancesTo(D, z.id), b = p?.band(dd, moves);
+        const dd = z.id === here ? Marks.distancesTo(D, z.id) : Marks.addVertical(Marks.distancesTo(D, z.id), v), b = p?.band(dd, moves);
         if ( b ) { bands.set(z.id, b); if ( b.d != null ) dist.set(z.id, b.d); }
         else if ( dd.walk != null ) dist.set(z.id, dd.walk);
       }
@@ -226,6 +228,7 @@ function iconTip(hit, at) {
   const p = M?.zones.get(hit.z.id) ?? {}, ZL = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
   const text = hit.key === "fire" ? `${ZL("state.fire")}: ${p.fire}`
     : hit.key === "terrain" ? `${ZL("terrain.label")}: ${ZL(`terrain.${p.terrain}`)}${Marks.WRECK[p.terrain] ? ` (${Marks.WRECK[p.terrain][0]}/+${Marks.WRECK[p.terrain][1]})` : ""}`
+    : hit.key === "building" && p.floors && !p.wrecked ? `${ZL("feat.building")} · ${game.i18n.format("MOINENMAPS.Zones.floorsTip", { n: p.floors + 1 })}`
     : ZL(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
   if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip"; document.body.append(tipEl); }
   tipEl.textContent = `${zoneName(hit.z.id)} · ${text}`;
@@ -586,9 +589,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 /** A small tag on a token that is not on the ground (only where the zones show). */
 function altBadge(t) {
   if ( !t || t.destroyed ) return;
-  const alt = altOf(t.document), show = alt !== "ground" && !!Z && visibleToMe();
+  const alt = altOf(t.document), fl = floorOf(t), show = (alt !== "ground" || fl > 0) && !!Z && visibleToMe();
   if ( !show ) { if ( t._mmAlt ) { t._mmAlt.destroy({ children: true }); t._mmAlt = null; } return; }
-  const text = `▲ ${game.i18n.localize(`MOINENMAPS.Zones.altShort.${alt}`)}`;
+  const roof = alt === "elevated" && Marks.floorsOf(M, zoneOfToken(t)) > 0;
+  const text = fl > 0 && alt === "ground" ? `▦ ${game.i18n.format("MOINENMAPS.Zones.floorN", { n: fl })}`
+    : roof ? `▲ ${game.i18n.localize("MOINENMAPS.Zones.roof")}` : `▲ ${game.i18n.localize(`MOINENMAPS.Zones.altShort.${alt}`)}`;
   if ( t._mmAlt?.destroyed ) t._mmAlt = null;
   if ( !t._mmAlt ) {
     const c = new PIXI.Container(); c.eventMode = "none";
@@ -598,13 +603,30 @@ function altBadge(t) {
   }
   const [G, T] = t._mmAlt.children;
   T.text = text;
-  const w = T.width + 12, col = alt === "elevated" ? 0x5cc8ff : alt === "sky" ? 0xc38bff : 0xe06666;
+  const w = T.width + 12, col = alt === "ground" ? 0xf2c14e : alt === "elevated" ? 0x5cc8ff : alt === "sky" ? 0xc38bff : 0xe06666;
   G.clear().lineStyle({ width: 1.5, color: col }).beginFill(0x15110f, 0.85).drawRoundedRect(-w / 2, -10, w, 20, 9).endFill();
   const s = Math.max(0.6, Math.min(2, t.w / 100));
   t._mmAlt.scale.set(s);
   t._mmAlt.position.set(t.w / 2, -4 * s);
 }
 const altBadges = () => { for ( const t of canvas.tokens?.placeables ?? [] ) altBadge(t); };
+const zoneOfToken = (t) => { const c = tokenCenter(t); return Geo.zoneAt(Z, c.x, c.y); };
+/** The floor a token stands on (0: the ground floor or not in a building with floors). */
+function floorOf(t) {
+  const f = Math.round(Number(t?.document?.getFlag?.(MODULE_ID, "floor")) || 0);
+  return f > 0 && Z && Marks.floorsOf(M, zoneOfToken(t)) >= f ? f : 0;
+}
+/** Put a token on a floor of its building: 0 the ground floor, 1..n a floor, n + 1 the rooftop (elevated). */
+export async function setFloor(token, f) {
+  const doc = token?.document ?? token;
+  if ( !doc?.isOwner ) return;
+  const t = doc.object, n = t ? Marks.floorsOf(M, zoneOfToken(t)) : 0;
+  f = Math.max(0, Math.min(n + 1, Math.round(Number(f) || 0)));
+  const k = `flags.${MODULE_ID}`;
+  if ( f === 0 ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.-=alt`]: null });
+  if ( f > n ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.alt`]: "elevated" });
+  return doc.update({ [`${k}.floor`]: f, [`${k}.-=alt`]: null });
+}
 
 /** Token HUD: a button that cycles the altitude (only where the zones show). */
 function onTokenHUD(hud, html) {
@@ -617,10 +639,11 @@ function onTokenHUD(hud, html) {
   const btn = document.createElement("button");
   btn.type = "button"; btn.className = "control-icon mm-z-alt";
   const show = () => {
-    const a = altOf(t.document);
-    btn.innerHTML = `<i class="fa-solid ${icon[a]}"></i>`;
-    btn.dataset.tooltip = game.i18n.format("MOINENMAPS.Zones.altHud", { a: game.i18n.localize(`MOINENMAPS.Zones.alt.${a}`) });
-    btn.classList.toggle("active", a !== "ground");
+    const a = altOf(t.document), fl = floorOf(t);
+    btn.innerHTML = `<i class="fa-solid ${fl && a === "ground" ? "fa-stairs" : icon[a]}"></i>`;
+    const where = fl && a === "ground" ? game.i18n.format("MOINENMAPS.Zones.floorN", { n: fl }) : game.i18n.localize(`MOINENMAPS.Zones.alt.${a}`);
+    btn.dataset.tooltip = game.i18n.format("MOINENMAPS.Zones.altHud", { a: where });
+    btn.classList.toggle("active", a !== "ground" || fl > 0);
   };
   show();
   // a click opens the four levels, each with what getting there costs from here (book: Movement, vertical movement)
@@ -628,26 +651,36 @@ function onTokenHUD(hud, html) {
     ev.preventDefault(); ev.stopPropagation();
     const old = root.querySelector(".mm-z-altpick");
     if ( old ) { old.remove(); return; }
-    const a = altOf(t.document), life = hasLifeSupport(t.actor);
-    const pick = document.createElement("div");
-    pick.className = "mm-z-altpick";
-    pick.innerHTML = ALTS.map((k) => {
-      const cost = altCost(a, k), warn = k === "orbit" && !life;
-      return `<button type="button" data-alt="${k}" class="${k === a ? "on" : ""}${warn ? " warn" : ""}"><i class="fa-solid ${icon[k]}" inert></i>
-        <span><b>${esc(game.i18n.localize(`MOINENMAPS.Zones.alt.${k}`))}</b><small>${esc(game.i18n.localize(`MOINENMAPS.Zones.altCost.${cost}`))}${warn ? ` · ${esc(game.i18n.localize("MOINENMAPS.Zones.altNoLife"))}` : ""}</small></span></button>`;
-    }).join("");
+    const a = altOf(t.document), life = hasLifeSupport(t.actor), n = Marks.floorsOf(M, zoneOfToken(t)), fl = floorOf(t);
+    const AL = (k, d) => (d ? game.i18n.format(`MOINENMAPS.Zones.${k}`, d) : game.i18n.localize(`MOINENMAPS.Zones.${k}`));
+    const item = (key, ic, name, cost, on, warn = "") => `<button type="button" data-alt="${key}" class="${on ? "on" : ""}${warn ? " warn" : ""}"><i class="fa-solid ${ic}" inert></i>
+        <span><b>${esc(name)}</b><small>${esc(cost)}${warn ? ` · ${esc(warn)}` : ""}</small></span></button>`;
+    const off = (k) => item(k, icon[k], AL(`alt.${k}`), AL(`altCost.${altCost(a, k)}`), a === k, k === "orbit" && !life ? AL("altNoLife") : "");
+    let html;
+    if ( n > 0 && !OFF_MAP.has(a) ) {
+      // inside a building with floors: the ground floor, every floor, the rooftop - each floor a vertical zone of movement
+      const cur = a === "elevated" ? n + 1 : fl;
+      const lvl = (i) => { const d = Math.abs(i - cur); return d ? AL("altCost.zones", { n: zonesText(d) }) : AL("altCost.here"); };
+      const rows = [item("floor:0", "fa-door-open", AL("groundFloor"), lvl(0), cur === 0)];
+      for ( let i = 1; i <= n; i++ ) rows.push(item(`floor:${i}`, "fa-stairs", AL("floorN", { n: i }), lvl(i), cur === i));
+      rows.push(item(`floor:${n + 1}`, "fa-building-user", AL("roof"), lvl(n + 1), cur === n + 1));
+      html = `${rows.reverse().join("")}<hr>${off("sky")}${off("orbit")}`;
+    } else html = ALTS.map(off).join("");
+    pick.innerHTML = html;
     pick.addEventListener("click", async (e) => {
       const b = e.target.closest("[data-alt]"); if ( !b ) return;
       e.preventDefault(); e.stopPropagation();
       const k = b.dataset.alt;
       pick.remove();
+      if ( k.startsWith("floor:") ) { await setFloor(t, Number(k.slice(6))); show(); return; }
       if ( k === "orbit" && !hasLifeSupport(t.actor) ) ui.notifications.warn(game.i18n.format("MOINENMAPS.Zones.altNoLifeWarn", { name: t.name }));
+      if ( t.document.getFlag(MODULE_ID, "floor") ) await t.document.unsetFlag(MODULE_ID, "floor");
       await setAltitude(t, k);
       show();
     });
     btn.after(pick);
   });
-  btn.addEventListener("contextmenu", async (ev) => { ev.preventDefault(); ev.stopPropagation(); await setAltitude(t, "ground"); show(); });
+  btn.addEventListener("contextmenu", async (ev) => { ev.preventDefault(); ev.stopPropagation(); await setFloor(t, 0); await setAltitude(t, "ground"); show(); });
   col.append(btn);
 }
 
@@ -670,7 +703,7 @@ export const zonesApi = {
   presets: () => presets().map((p) => ({ id: p.id, title: game.i18n.localize(p.title) })),
   addStroke, erase: eraseAlong, trim, clear: clearAll, undo: undoEdit, redo: redoEdit, setParams,
   /** Walls and doors, zone features and states (marks.mjs), fire, token altitude. */
-  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, rules: Marks,
+  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, floor: floorOf, setFloor, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
   geometry: Geo
@@ -688,12 +721,18 @@ export function registerZones() {
   // badges and lines keep their size on screen: badges follow every zoom step, lines are drawn again after ~8 %
   Hooks.on("canvasPan", () => { if ( display?.root.visible ) display.onZoom(canvas.stage?.scale.x ?? 1); });
   Hooks.on("updateToken", (doc, changed) => {
-    const alt = changed.flags?.[MODULE_ID] && ("alt" in changed.flags[MODULE_ID] || "-=alt" in changed.flags[MODULE_ID]);
-    if ( alt ) altBadge(doc.object);
+    const fm = changed.flags?.[MODULE_ID];
+    const alt = !!fm && ["alt", "-=alt", "floor", "-=floor"].some((k) => k in fm);
+    if ( alt || "x" in changed || "y" in changed ) altBadge(doc.object);
     if ( ("x" in changed || "y" in changed || alt) && doc.object?.controlled ) refresh();
   });
   Hooks.on("drawToken", (t) => altBadge(t));
   Hooks.on("refreshToken", (t) => { if ( t._mmAlt || altOf(t.document) !== "ground" ) altBadge(t); });
+  // a token that walks out of its building leaves its floor behind (the client that moved it clears the flag)
+  Hooks.on("updateToken", (doc, changed, _o, userId) => {
+    if ( userId !== game.user.id || !("x" in changed || "y" in changed) || !doc.getFlag(MODULE_ID, "floor") || !Z || !doc.object ) return;
+    if ( !floorOf(doc.object) ) doc.unsetFlag(MODULE_ID, "floor");
+  });
   Hooks.on("moinenMapsZones", (kind) => { if ( kind !== "section" ) altBadges(); });
   Hooks.on("renderTokenHUD", onTokenHUD);
   for ( const h of ["moinenMapsFire", "moinenMapsWater", "moinenMapsDestruction"] ) Hooks.on(h, onLayer);

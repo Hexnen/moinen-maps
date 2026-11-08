@@ -18,6 +18,8 @@ export const TERRAINS = ["", "office", "warehouse", "street", "woods", "building
 export const WRECK = { office: [4, 1], warehouse: [5, 2], street: [6, 3], woods: [7, 4], building: [8, 5], cliffs: [9, 6] };
 export const STATES = ["wrecked", "fire", "dark", "ice", "flooded", "lowgrav"];
 export const FIRE_MAX = 12;
+/** Floors above the ground floor a building may have (book: each floor of a large building is a vertical zone of its own). */
+export const FLOORS_MAX = 40;
 
 /** Who a border stops. Walking: every wall and a locked door. Over the top (flight, leaping, super-speed, swinging): an exterior
  *  wall is a building's wall, so they pass over it; inner walls and locked doors still stop them. Burrowing and teleportation: nothing. */
@@ -36,6 +38,8 @@ export function cleanProps(p = {}) {
   if ( TERRAINS.includes(p.terrain) && p.terrain ) o.terrain = p.terrain;
   const f = Math.round(Number(p.fire) || 0);
   if ( f > 0 ) o.fire = Math.min(FIRE_MAX, f);
+  const fl = Math.round(Number(p.floors) || 0);
+  if ( fl > 0 ) o.floors = Math.min(FLOORS_MAX, fl);
   return o;
 }
 export const hasStates = (p) => !!(p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
@@ -110,6 +114,26 @@ export function moveDistances(Z, from, M) {
   // a wrecked building has no rooftop left to swing onto; tall features (trees, cranes) still work
   for ( const [id, d] of air ) { const p = M?.zones.get(id); if ( id === from || p?.tall || (p?.building && !p.wrecked) ) swing.set(id, d); }
   return { walk: bfs(Z, from, M, "walk"), air, through: bfs(Z, from, M, "through"), swim: bfs(Z, from, M, "walk", water), swing };
+}
+
+/** Floors above the ground floor of a zone: a standing building's (a wrecked one has none left). */
+export const floorsOf = (M, id) => { const p = M?.zones.get(id); return p?.building && !p.wrecked ? (p.floors ?? 0) : 0; };
+
+/**
+ * How high a token stands inside its zone, in vertical zones: its floor (1..floors), the rooftop of a building with floors one above
+ * the top floor, else 0. Walking and swimming have to come down to the ground first; flight and swinging leave by a window or the
+ * roof, burrowing and teleportation do not count it (our reading: the book only says each floor is a vertical zone).
+ */
+export function vertical(M, id, floor, alt) {
+  const n = floorsOf(M, id);
+  if ( !n ) return 0;
+  if ( alt === "elevated" ) return n + 1;
+  return Math.max(0, Math.min(n, Math.round(Number(floor) || 0)));
+}
+/** Distances with the way down added for those who need it (every zone but the token's own). */
+export function addVertical(dd, v) {
+  if ( !v ) return dd;
+  return { ...dd, walk: dd.walk == null ? undefined : dd.walk + v, swim: dd.swim == null ? undefined : dd.swim + v };
 }
 
 /** The distances one zone gets, as the presets take them: { walk, air, through, swim, swing } (undefined = no way). */

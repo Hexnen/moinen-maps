@@ -1628,5 +1628,12 @@
   "MOINENMAPS.Zones.altNoLifeWarn": "{name} has no Life Support: in orbit the vacuum of space kills without it (or a spacesuit).",
   "MOINENMAPS.Zones.style.comic": "Comic",
   "MOINENMAPS.Zones.lineStyle.comic": "Comic panels (gutters)",
-  "MOINENMAPS.Zones.numShape.caption": "Caption box"
+  "MOINENMAPS.Zones.numShape.caption": "Caption box",
+  "MOINENMAPS.Zones.floors": "Floors above ground",
+  "MOINENMAPS.Zones.floorsHint": "Each floor of a large building is a vertical zone of its own (book: Large Buildings). 0: one level. Shift: 5 at a time.",
+  "MOINENMAPS.Zones.floorsTip": "{n} storeys",
+  "MOINENMAPS.Zones.floorN": "Floor {n}",
+  "MOINENMAPS.Zones.groundFloor": "Ground floor",
+  "MOINENMAPS.Zones.roof": "Rooftop",
+  "MOINENMAPS.Zones.altCost.zones": "{n} of movement"
 }

@@ -736,3 +736,6 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 #token-hud .mm-z-altpick button small { font-size: 0.7rem; opacity: 0.7; }
 #token-hud .mm-z-altpick button.warn small { color: #ff9a7a; opacity: 1; }
 #token-hud .col.right { position: relative; }
+#token-hud .mm-z-altpick { max-height: 60vh; overflow-y: auto; }
+#token-hud .mm-z-altpick hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid #4a3f33; }
+.mm-z-floors-row i { color: #d8ccb0; }

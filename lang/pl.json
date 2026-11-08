@@ -1628,5 +1628,12 @@
   "MOINENMAPS.Zones.altNoLifeWarn": "{name} nie ma Life Support: na orbicie próżnia zabija bez niego (albo bez skafandra).",
   "MOINENMAPS.Zones.style.comic": "Komiks",
   "MOINENMAPS.Zones.lineStyle.comic": "Panele komiksu (rynny)",
-  "MOINENMAPS.Zones.numShape.caption": "Ramka narracji"
+  "MOINENMAPS.Zones.numShape.caption": "Ramka narracji",
+  "MOINENMAPS.Zones.floors": "Piętra nad parterem",
+  "MOINENMAPS.Zones.floorsHint": "Każde piętro dużego budynku to osobna pionowa strefa (podręcznik: Large Buildings). 0: jeden poziom. Shift: po 5.",
+  "MOINENMAPS.Zones.floorsTip": "kondygnacje: {n}",
+  "MOINENMAPS.Zones.floorN": "Piętro {n}",
+  "MOINENMAPS.Zones.groundFloor": "Parter",
+  "MOINENMAPS.Zones.roof": "Dach",
+  "MOINENMAPS.Zones.altCost.zones": "{n} ruchu"
 }

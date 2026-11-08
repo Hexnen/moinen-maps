@@ -334,6 +334,10 @@ export class ZoneDisplay {
         t.mmKey = it.k;
         t.resolution = res; t.anchor.set(0, 0.5); t.position.set(x, 0);
         row.addChild(t); x += t.width + gap;
+        if ( it.k === "building" && p.floors && !p.wrecked ) {
+          const n = new PIXI.Text(`${p.floors + 1}`, { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 12, fill: 0xf3e7c9 });
+          n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x - 2, 1); n.mmKey = "building"; row.addChild(n); x += n.width + gap;
+        }
         if ( it.k === "fire" ) {
           const n = new PIXI.Text(String(p.fire), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 12, fill: 0xffa25a });
           n.mmKey = "fire";

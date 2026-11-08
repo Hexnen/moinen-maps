@@ -1,5 +1,5 @@
 import * as Zones from "./zones.mjs";
-import { BORDER_KINDS, ARMOR, FEATURES, TERRAINS, WRECK, FIRE_MAX } from "./marks.mjs";
+import { BORDER_KINDS, ARMOR, FEATURES, TERRAINS, WRECK, FIRE_MAX, FLOORS_MAX } from "./marks.mjs";
 
 /**
  * The right-click menu of the Zones section (GM): near a border it marks the border (open, door, locked door, wall, exterior wall,
@@ -42,6 +42,11 @@ export function open(client, at) {
       const cur = Zones.marks()?.zones.get(zone)?.fire ?? 0;
       const f = a === "fire+" ? (cur ? Math.min(FIRE_MAX, cur + 1) : 6) : Math.max(0, cur - 1);
       Zones.setZone(zone, { fire: f }, at);
+      draw("zone");
+    }
+    else if ( a === "floors+" || a === "floors-" ) {
+      const cur = Zones.ownMarks()?.zones.get(zone)?.floors ?? 0;
+      Zones.setZone(zone, { floors: Math.max(0, Math.min(FLOORS_MAX, cur + (a === "floors+" ? 1 : -1) * (ev.shiftKey ? 5 : 1))) }, at);
       draw("zone");
     }
     else if ( a === "clearZone" ) { Zones.clearStates(zone); draw("zone"); }
@@ -97,6 +102,8 @@ function zoneHtml(id, hasBorder) {
   return `<header>${esc(Z("zone.title", { n: num(id) }))}</header>
     <div class="mm-z-menu-grp">${esc(Z("grp.features"))}</div>
     ${FEATURES.map((k) => check(k, Z(`feat.${k}`))).join("")}
+    ${own.building ? `<div class="mm-z-menu-row mm-z-floors-row" data-tooltip="${esc(Z("floorsHint"))}"><span><i class="fa-solid fa-stairs" inert></i> ${esc(Z("floors"))}</span>
+      <span class="mm-z-step"><button type="button" data-act="floors-" aria-label="−">−</button><b>${own.floors ?? 0}</b><button type="button" data-act="floors+" aria-label="+">+</button></span></div>` : ""}
     <label class="mm-z-menu-row">${esc(Z("terrain.label"))} <select name="terrain">${terr}</select></label>
     <div class="mm-z-menu-grp">${esc(Z("grp.states"))}</div>
     ${check("wrecked", Z("state.wrecked"))}
