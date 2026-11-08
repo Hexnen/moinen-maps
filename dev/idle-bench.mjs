@@ -16,12 +16,22 @@ function label(l, i) {
 
 /** Step the canvas ticker by hand `frames` frames at 165 Hz spacing, timing every listener. */
 export async function rest({ frames = 400, warm = 120, zoom = 1.2, gc = true } = {}) {
+  // (a harness that threw mid-run can leave performance.now replaced by a frozen clock: every timing would read 0 and the listener list
+  // come back empty - say so instead of returning zeros)
+  if ( Object.prototype.hasOwnProperty.call(performance, "now") ) {
+    const a = performance.now(); let x = 0; for ( let i = 0; i < 2e5; i++ ) x += i; const b = performance.now();
+    if ( b === a && x > 0 ) throw new Error("idle-bench rest: performance.now is frozen (another dev tool left it patched; `delete performance.now` restores it)");
+  }
   const T = canvas.app.ticker, r = canvas.dimensions.sceneRect;
   canvas.pan({ x: r.x + r.width / 2, y: r.y + r.height / 2, scale: zoom });
   const ls = []; for ( let n = T._head.next; n; n = n.next ) ls.push(n);
   const keys = ls.map((l) => (l._fn ? "_fn" : "fn")), orig = ls.map((l, i) => l[keys[i]]), names = ls.map(label);
   const acc = new Array(ls.length).fill(0);
   ls.forEach((l, i) => { l[keys[i]] = function(...a) { const t = performance.now(); try { return orig[i].apply(this, a); } finally { acc[i] += performance.now() - t; } }; });
+  // a listener that removes ITSELF while it is wrapped (ticker.remove(fn) matches the listener's fn: the wrapper) would stay on the
+  // ticker for good and its owner would add a second copy on its next wake (lights.mjs sleep / wake): remove() unwraps it first
+  const rm = T.remove;
+  T.remove = function(fn, ctx) { ls.forEach((l, i) => { if ( orig[i] === fn ) l[keys[i]] = orig[i]; }); return rm.call(this, fn, ctx); };
   const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
   const rows = [], mem = [];
   let t = performance.now();
@@ -35,7 +45,7 @@ export async function rest({ frames = 400, warm = 120, zoom = 1.2, gc = true } =
       const m = performance.memory?.usedJSHeapSize ?? 0; if ( m < lastM ) gcs++; else grew += m - lastM; lastM = m;
     }
     mem.push({ gcs, grewKB: Math.round(grew / 1024), perFrameBytes: Math.round(grew / frames) });
-  } finally { ls.forEach((l, i) => { l[keys[i]] = orig[i]; }); T.maxFPS = mf; if ( st ) T.start(); }
+  } finally { ls.forEach((l, i) => { l[keys[i]] = orig[i]; }); if ( T.remove !== rm ) delete T.remove; if ( T.remove !== rm ) T.remove = rm; T.maxFPS = mf; if ( st ) T.start(); }
   const per = names.map((nm, i) => ({ nm, med: q(rows.map((x) => x.by[i]), 0.5), mean: avg(rows.map((x) => x.by[i])), p95: q(rows.map((x) => x.by[i]), 0.95) })).filter((x) => x.mean > 0.002);
   return { total: { med: q(rows.map((x) => x.c), 0.5), mean: avg(rows.map((x) => x.c)), p95: q(rows.map((x) => x.c), 0.95) }, listeners: per.sort((a, b) => b.mean - a.mean), mem: mem[0] };
 }

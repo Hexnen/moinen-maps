@@ -2371,7 +2371,8 @@ export function grabSS(f = 4) {
   return out;
 }
 export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy = null, ss = 0, ref = 0 } = {}) {
-  const R = canvas.app.renderer, d = D(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
+  // (a client without a destruction display - a player on a scene with no damage drawn - has no cache / fx layer: the map alone is measured)
+  const R = canvas.app.renderer, d = (() => { try { return D() ?? null; } catch { return null; } })(), T = canvas.app.ticker, sr = canvas.dimensions.sceneRect, k = R.resolution;
   cx ??= sr.x + sr.width * 0.5; cy ??= sr.y + sr.height * 0.5;
   const PW = Math.round(R.screen.width * k), PH = Math.round(R.screen.height * k);
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
@@ -2381,7 +2382,7 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
     canvas.stage.position.set(canvas.stage.position.x + jx, canvas.stage.position.y + jy);
   };
   const lum = (px, x, y) => { const q = (y * PW + x) * 4; return px[q] + px[q + 1] + px[q + 2]; };
-  const tileRects = () => (d.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => ({ x: t.x, y: t.y, w: t.w, h: t.h })));
+  const tileRects = () => (d?.cache?.bands ?? []).flatMap((b) => b.tiles.map((t) => ({ x: t.x, y: t.y, w: t.w, h: t.h })));
   const stats = (px, rect) => {            // mean gradient over alpha > 200 pixels and the ink, in a screen rectangle
     let s = 0, n = 0, ink = 0;
     for ( let y = Math.max(1, rect[1]); y < Math.min(PH - 1, rect[3]); y++ ) for ( let x = Math.max(1, rect[0]); x < Math.min(PW - 1, rect[2]); x++ ) {
@@ -2400,18 +2401,23 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
     }
     return n ? s / n : 0;
   };
-  const real = performance.now.bind(performance); let V = real(); performance.now = () => V;
-  const mf = T.maxFPS, st = T.started; T.maxFPS = 0; T.stop();
-  const gl = R.gl; let glTex = 0; const oct = gl.createTexture; gl.createTexture = function(...a) { glTex++; return oct.apply(gl, a); };
-  let rtMade = 0; const orc = PIXI.RenderTexture.create; PIXI.RenderTexture.create = function(...a) { rtMade++; return orc.apply(this, a); };
-  const fxWas = d.fx.visible; d.fx.visible = false;
+  const real = performance.now.bind(performance); let V = real();
+  const mf = T.maxFPS, st = T.started;
+  const gl = R.gl; let glTex = 0; const oct = gl.createTexture;
+  let rtMade = 0; const orc = PIXI.RenderTexture.create;
+  const fxWas = d?.fx ? d.fx.visible : null;
   const rows = [];
   try {
+    // (every patch inside the try: a throw must never leave the page with a frozen clock or a stopped ticker)
+    performance.now = () => V; T.maxFPS = 0; T.stop();
+    gl.createTexture = function(...a) { glTex++; return oct.apply(gl, a); };
+    PIXI.RenderTexture.create = function(...a) { rtMade++; return orc.apply(this, a); };
+    if ( d?.fx ) d.fx.visible = false;
     const BLK = 24;
     for ( const mv of moves ) {
       const { z0, z1, ms, pan = [0, 0], shake = 0 } = mv, n = Math.max(3, Math.round(ms / (1000 / fps)));
       setView(cx, cy, z0, 0, 0); V += 1000; T.update(V); V += 1000; T.update(V);
-      const bakes0 = d.cache?.stats.bakes ?? 0; glTex = 0; rtMade = 0;
+      const bakes0 = d?.cache?.stats.bakes ?? 0; glTex = 0; rtMade = 0;
       let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
       const tilesNow = tileRects();
       let boxSum = 0, boxN = 0, softSum = 0, beatSum = 0, beatN = 0, bp = null, bpp = null, lastSharp = NaN;
@@ -2467,10 +2473,10 @@ export function cameraMoveCheck({ moves = CAMERA_MOVES, fps = 60, cx = null, cy 
       const cs = cpu.slice().sort((a, b) => a - b);
       const es = errs.slice().sort((a, b) => a - b);
       rows.push({ move: mv.name, frames: n, beatX: ref ? +(bxSum / Math.max(1, bxN)).toFixed(4) : undefined, err: ref ? +(errs.reduce((a, b) => a + b, 0) / Math.max(1, errs.length)).toFixed(3) : undefined, errP95: ref ? +(es[Math.floor(es.length * 0.95)] ?? 0).toFixed(3) : undefined, boxes: +(boxSum / Math.max(1, boxN)).toFixed(4), soft: +(softSum / Math.max(1, boxN)).toFixed(4), seam: +(seams[0] ?? 0).toFixed(2), weight: +(wSum / Math.max(1, wN)).toFixed(4), beat: +(beatSum / Math.max(1, beatN)).toFixed(4),
-        pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), sharpEnd: +lastSharp.toFixed(2), sharpRest: +rest.toFixed(2), bakes: (d.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
+        pop: +(Math.abs(rest - lastSharp) / Math.max(1, rest)).toFixed(4), sharpEnd: +lastSharp.toFixed(2), sharpRest: +rest.toFixed(2), bakes: (d?.cache?.stats.bakes ?? 0) - bakes0, rtMade, glTex, cpuP50: +cs[cs.length >> 1].toFixed(2), cpuP99: +cs[Math.floor(cs.length * 0.99)].toFixed(2) });
     }
   } finally {
-    gl.createTexture = oct; PIXI.RenderTexture.create = orc; d.fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start();
+    gl.createTexture = oct; PIXI.RenderTexture.create = orc; if ( d?.fx ) d.fx.visible = fxWas; performance.now = real; T.maxFPS = mf; T.lastTime = real(); if ( st ) T.start();
   }
   return { dpr: k, cfg: { zoomAA: globalThis.CONFIG.moinenMaps?.zoomAA !== false, aaK: globalThis.CONFIG.moinenMaps?.aaK ?? null }, rows };
 }

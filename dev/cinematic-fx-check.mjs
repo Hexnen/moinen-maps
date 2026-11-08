@@ -158,8 +158,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
       if ( typeof P.cameraMoveCheck === "function" ) {
         await clientOpt("cinCamera", "on"); await park();
         mark(); fx.begin({ r }, { strokes }); fx.impact({ x: cx, y: cy, size: 200 });
-        const res = await P.cameraMoveCheck();
-        await fx.end({ immediate: true });
+        let res; try { res = await P.cameraMoveCheck(); } finally { await fx.end({ immediate: true }); }
         need("cameraMoveCheck during a show (shake + zoom)", res?.ok !== false, { res: res && JSON.stringify(res).slice(0, 300) });
       } else need("cameraMoveCheck not in this build (skipped)", true, { skipped: true });
     } catch ( err ) { need("cameraMoveCheck ran", false, { err: String(err) }); }
