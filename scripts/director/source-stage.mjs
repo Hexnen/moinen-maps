@@ -71,7 +71,7 @@ function styleOf(shot) {
   if ( st.combat !== c.id ) { st.combat = c.id; st.turn = turnKey(c); }
   const own = ownTurn(c), S = stageSettings(), kind = shot.kind;
   let cam = null;                        // a turn's calm camera (null: it stays)
-  const take = () => { SC.beatStart(st, viewNow()); claimed.set(shot.id, { own: false }); return "take"; };
+  const take = () => { SC.beatStart(st, viewNow(), !!beat); claimed.set(shot.id, { own: false }); return "take"; };
   function check0(form, ph) {
     if ( own ) {
       // the player's own turn: the camera is theirs. Their own turn shot does nothing (the stage went home on the turn change), their
@@ -193,7 +193,7 @@ function onUpdateCombat(combat, changed) {
   if ( st.combat !== combat.id ) { if ( st.combat ) endStage(); st.combat = combat.id; }
   const key = turnKey(combat);
   if ( key === st.turn ) return;
-  const own = ownTurn(combat), act = SC.turnChange(st, key, own);
+  const own = ownTurn(combat), act = SC.turnChange(st, key, own, !!beat && !beat.own);
   if ( act?.home ) {
     // own turn: home, with the player's own token comfortably on screen; after the beat on screen (an attack's result) when one plays
     const t = seenTok(combat.combatant?.tokenId), to = SC.ownHome(st.home, t ? tokenBox(t, grid() * 0.5) : null, safeRect(), viewNow());
@@ -204,6 +204,7 @@ function onUpdateCombat(combat, changed) {
 }
 function onDeleteCombat(combat) { if ( st.combat === combat?.id ) endStage(); }
 function onTearDown() {
+  clearTimeout(resync); resync = 0;
   Object.assign(st, SC.newStage()); beat = null; pendingHome = null; homing = false; claimed.clear(); sync();
 }
 
@@ -245,8 +246,11 @@ function onKey(ev) {
 /** The player asked for their view back: home now, the rest of this turn as markers. */
 function backHome() { st.out = st.turn; goHome(st.home); }
 /** The parked-state UI follows the state: the chip and the Esc listener only while the camera is parked away and nothing plays. */
+let resync = 0;
 function sync() {
-  const parked = !!st.parked && !!st.home && !beat && !homing && !Screen.owner && on();
+  const want = !!st.parked && !!st.home && !beat && !homing && on(), parked = want && !Screen.owner;
+  clearTimeout(resync); resync = 0;
+  if ( want && !parked ) resync = setTimeout(sync, 150);        // (the beat's bars are still sliding out: once the screen is free)
   if ( parked ) { showChip(); if ( !keyOn ) { window.addEventListener("keydown", onKey, true); keyOn = true; } }
   else { hideChip(); if ( keyOn ) { window.removeEventListener("keydown", onKey, true); keyOn = false; } }
   tell();

@@ -92,9 +92,13 @@ export function beatForm(st, now, backMs) {
   if ( now - st.ownAt < backMs ) return "soft";
   return "take";
 }
-/** A beat took the camera: the home is the player's view now, unless the camera is already parked by the stage. */
-export function beatStart(st, view) {
-  if ( !st.parked || !st.home ) { st.home = { x: view.x, y: view.y, scale: view.scale }; st.parked = null; }
+/**
+ * A beat took the camera: the home is the player's view now, unless the camera is already the stage's (parked, or `onStage`: a beat
+ * plays now and this one carries on from it).
+ */
+export function beatStart(st, view, onStage = false) {
+  if ( st.home && (st.parked || onStage) ) return;
+  st.home = { x: view.x, y: view.y, scale: view.scale }; st.parked = null;
 }
 /**
  * A beat ended: why = the director's end reason; taken = the player took the camera during it; view = the camera now.
@@ -116,13 +120,13 @@ export function ownMove(st, now) {
   st.parked = null; st.home = null;
 }
 /**
- * The turn changed. Returns what the camera does on this client now: null (nothing), or { home: true } (go home: own turn or the stage
- * is over) when the stage has the camera parked away. `own` = it is this player's own combatant's turn.
+ * The turn changed. Returns what the camera does on this client now: null (nothing), or { home: true } (go home: own turn) when the
+ * stage has the camera (parked away, or `onStage`: a beat plays now). `own` = it is this player's own combatant's turn.
  */
-export function turnChange(st, turn, own) {
+export function turnChange(st, turn, own, onStage = false) {
   st.turn = turn;
   if ( st.out && st.out !== turn ) st.out = null;
-  return own && st.parked ? { home: true } : null;
+  return own && st.home && (st.parked || onStage) ? { home: true } : null;
 }
 /** The combat is over (or the stage switched off): go home when the camera is parked away; the stage forgets everything. */
 export function stageEnd(st) {

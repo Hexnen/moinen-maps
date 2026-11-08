@@ -52,6 +52,8 @@ SC.beatEnd(st, "done", false, { x: 500, y: 500, scale: 1.4 }, 100);
 ok(st.parked && st.parked.x === 500 && st.home.x === 10, "natural end: parked there, home kept");
 SC.beatStart(st, { x: 500, y: 500, scale: 1.4 });
 ok(st.home.x === 10, "the next beat from the parked camera keeps the home");
+{ const q = SC.newStage(); SC.beatStart(q, { x: 1, y: 1, scale: 1 }); SC.beatStart(q, { x: 70, y: 70, scale: 2 }, true);
+  ok(q.home.x === 1, "a beat that carries on from one on screen (a relay) keeps the home"); }
 SC.beatEnd(st, "replaced", false, { x: 600, y: 500, scale: 1.4 }, 200);
 ok(st.parked.x === 500, "replaced (a relay): nothing changes");
 SC.beatEnd(st, "cut", false, { x: 10, y: 20, scale: 1.5 }, 300);
@@ -84,6 +86,7 @@ SC.beatStart(st, { x: 10, y: 20, scale: 1.5 }); SC.beatEnd(st, "done", false, { 
 ok(SC.turnChange(st, "1:me", true)?.home === true, "own turn while parked: home");
 st.parked = null;
 ok(SC.turnChange(st, "1:me2", true) === null, "own turn with the camera at home: nothing");
+ok(SC.turnChange(st, "1:me3", true, true)?.home === true, "own turn while a beat plays: home (after it)");
 
 // combat end
 st = SC.newStage(); st.turn = "1:a"; st.combat = "c";
