@@ -183,7 +183,9 @@ export class ZoneDisplay {
     F.clear(); M.clear(); L.clear();
     const look = this.look, z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null;
     if ( !look?.hoverHi || !z ) { this.#softTex(); return; }
-    this.hi.alpha = look.hoverAlpha ?? 1;
+    // the effect inside and the bright border have their own opacity
+    this.hiFx.alpha = this.hiSoft.alpha = look.hoverAlpha ?? 1;
+    this.hiLine.alpha = look.hoverLineAlpha ?? 1;
     const px = 1 / Math.max(0.05, zoom), light = hex(look.color);
     const rings = z.parts.flatMap((part) => part);
     // the mask: the zone itself (holes cut out)

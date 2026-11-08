@@ -778,3 +778,13 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-fire-custom { display: inline-flex; align-items: center; gap: 4px; padding: 0 0.35rem; border-radius: 4px; border: 1px solid transparent; cursor: pointer; }
 .mm-fire-custom[aria-pressed="true"] { border-color: var(--color-border-highlight, #ff6400); }
 .mm-fire-custom input[type="color"] { width: 1.6em; height: 1.4em; padding: 0; border: none; background: none; }
+
+/* zones settings panel: short rows, groups that fold, the look preset with its buttons on one line */
+.mm-z-panel .mm-wp-row { grid-template-columns: 6.2rem minmax(0, 1fr); }
+.mm-z-panel .mm-z-inline { display: flex; align-items: center; gap: 0.3rem; width: 100%; min-width: 0; }
+.mm-z-panel .mm-z-inline select { flex: 1 1 auto; min-width: 0; }
+.mm-z-panel .mm-z-icon { flex: none; width: 1.9rem; padding: 0; justify-content: center; }
+.mm-z-panel .mm-z-fold > summary { display: flex; align-items: center; gap: 0.45rem; }
+.mm-z-panel .mm-z-fold .mm-fold-body { display: grid; gap: 0.1rem; }
+.mm-z-panel .mm-ws-hint { display: block; margin: 0.15rem 0 0.35rem; opacity: 0.7; font-size: 0.78rem; }
+.mm-z-danger { padding-top: 0.5rem; border-top: 1px solid var(--mm-edge); }

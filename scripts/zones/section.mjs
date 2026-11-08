@@ -65,6 +65,9 @@ function bar(host, ctx) {
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); off(); Hooks.off("moinenMapsZones", hook); };
 }
 
+// which groups of the settings panel are open (kept while the panel is re-drawn)
+const openFolds = new Set(["look", "hover"]);
+
 /** The scene's zone settings (preset, who sees them, look) and this user's own (distances, ruler). */
 function settingsPanel(host) {
   const render = () => {
@@ -75,32 +78,40 @@ function settingsPanel(host) {
     const mine = from.startsWith("u-");
     const row = (label, ctl, hint = "") => `<div class="mm-wp-row"><label${hint ? ` data-tooltip="${esc(hint)}"` : ""}>${esc(label)}</label><div class="mm-wp-ctl">${ctl}</div></div>`;
     const sel = (name, opts, v) => `<select name="${name}">${opts.map(([k, l]) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
-    host.innerHTML = `<section class="mm-wp-sec">
+    const range = (name, min, max) => `<range-picker name="${name}" min="${min}" max="${max}" step="0.05" value="${L[name]}"></range-picker>`;
+    const fold = (id, title, icon, body) => `<details class="mm-fold mm-z-fold" data-fold="${id}"${openFolds.has(id) ? " open" : ""}><summary><i class="${icon}" inert></i> ${esc(title)}</summary><div class="mm-fold-body">${body}</div></details>`;
+    const opts = (name, keys, v) => sel(name, keys.map((k) => [k, Z(`${name}.${k}`)]), v);
+    const iconBtn = (act, icon, title, cls = "") => `<button type="button" class="mm-ws-btn mm-z-icon ${cls}" data-act="${act}" aria-label="${esc(title)}" data-tooltip="${esc(title)}"><i class="${icon}" inert></i></button>`;
+    const rules = `${Z("h.preset")} ${Z(`presetInfo.${Zones.movePreset()}`)}`;
+    host.innerHTML = `<section class="mm-wp-sec mm-z-panel">
       <h4>${esc(Z("sec.map"))}</h4>
-      ${row(Z("f.preset"), sel("preset", [["", `${Z("fromWorld")} (${moveName(wPreset)})`], ...moves], S.preset ?? ""), Z("h.preset"))}
-      <p class="hint">${esc(Z(`presetInfo.${Zones.movePreset()}`))}</p>
-      ${row(Z("f.style"), sel("lookFrom", [["", `${Z("fromWorld")} (${styleName(world)})`], ...styles.map((x) => [x.id, x.name]), ["custom", Z("style.custom")]], from), Z("h.style"))}
-      <div class="mm-wp-row"><label></label><div class="mm-wp-ctl">
-        <button type="button" class="mm-ws-btn" data-act="saveStyle"><i class="fa-solid fa-floppy-disk" inert></i> ${esc(Z("style.save"))}</button>
-        ${mine ? `<button type="button" class="mm-ws-btn mm-danger" data-act="delStyle"><i class="fa-solid fa-trash" inert></i> ${esc(Z("style.delete"))}</button>` : ""}
-      </div></div>
-      ${row(Z("f.who"), sel("who", [["all", Z("who.all")], ["gm", Z("who.gm")], ["none", Z("who.none")]], L.who), Z("h.who"))}
-      ${row(Z("f.fill"), `<range-picker name="fill" min="0" max="1" step="0.05" value="${L.fill}"></range-picker>`)}
-      ${row(Z("f.ink"), `<range-picker name="ink" min="0" max="2" step="0.05" value="${L.ink}"></range-picker>`)}
-      ${row(Z("f.lineAlpha"), `<range-picker name="lineAlpha" min="0" max="1" step="0.05" value="${L.lineAlpha}"></range-picker>`)}
-      ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}
-      ${row(Z("f.hoverHi"), `<input type="checkbox" name="hoverHi"${L.hoverHi ? " checked" : ""}>`, Z("h.hoverHi"))}
-      ${row(Z("f.hoverFx"), sel("hoverFx", ["none", "glow", "hatch", "crosshatch", "dots"].map((k) => [k, Z(`hoverFx.${k}`)]), L.hoverFx))}
-      ${row(Z("f.hoverAlpha"), `<range-picker name="hoverAlpha" min="0" max="1" step="0.05" value="${L.hoverAlpha}"></range-picker>`)}
-      ${row(Z("f.place"), sel("place", [["center", Z("place.center")], ["corner", Z("place.corner")]], L.place))}
-      ${row(Z("f.numbers"), sel("numbers", [["always", Z("numbers.always")], ["hover", Z("numbers.hover")], ["never", Z("numbers.never")]], L.numbers), Z("h.numbers"))}
-      </section><section class="mm-wp-sec"><h4>${esc(Z("sec.world"))}</h4>
-      ${row(Z("f.preset"), sel("worldPreset", moves, wPreset), Z("h.worldPreset"))}
-      ${row(Z("f.style"), sel("worldStyle", styles.map((x) => [x.id, x.name]), world), Z("h.worldStyle"))}
-      </section><section class="mm-wp-sec"><h4>${esc(Z("sec.mine"))}</h4>
+      ${row(Z("f.preset"), sel("preset", [["", Z("fromWorld", { name: moveName(wPreset) })], ...moves], S.preset ?? ""), rules)}
+      ${row(Z("f.style"), `<div class="mm-z-inline">${sel("lookFrom", [["", Z("fromWorld", { name: styleName(world) })], ...styles.map((x) => [x.id, x.name]), ["custom", Z("style.custom")]], from)}
+        ${iconBtn("saveStyle", "fa-solid fa-floppy-disk", Z("style.save"))}${mine ? iconBtn("delStyle", "fa-solid fa-trash", Z("style.delete"), "mm-danger") : ""}</div>`, Z("h.style"))}
+      ${row(Z("f.who"), opts("who", ["all", "gm", "none"], L.who), Z("h.who"))}
+      ${fold("look", Z("grp.look"), "fa-solid fa-draw-polygon", `
+        ${row(Z("f.fill"), range("fill", 0, 1))}
+        ${row(Z("f.ink"), range("ink", 0, 2))}
+        ${row(Z("f.lineAlpha"), range("lineAlpha", 0, 1))}
+        ${row(Z("f.color"), `<input type="color" name="color" value="${esc(L.color)}">`)}`)}
+      ${fold("numbers", Z("grp.numbers"), "fa-solid fa-hashtag", `
+        ${row(Z("f.numbers"), opts("numbers", ["always", "hover", "never"], L.numbers), Z("h.numbers"))}
+        ${L.numbers !== "never" ? row(Z("f.place"), opts("place", ["center", "corner"], L.place)) : ""}`)}
+      ${fold("hover", Z("grp.hover"), "fa-solid fa-hand-pointer", `
+        ${optCheck({ name: "hoverHi", label: Z("f.hoverHi"), checked: L.hoverHi, hint: Z("h.hoverHi") })}
+        ${L.hoverHi ? `${row(Z("f.hoverFx"), opts("hoverFx", ["none", "glow", "hatch", "crosshatch", "dots"], L.hoverFx))}
+          ${L.hoverFx !== "none" ? row(Z("f.hoverAlpha"), range("hoverAlpha", 0, 1)) : ""}
+          ${row(Z("f.hoverLineAlpha"), range("hoverLineAlpha", 0, 1))}` : ""}`)}
+      </section>
+      <section class="mm-wp-sec mm-z-panel"><h4>${esc(Z("sec.mine"))}</h4>
       ${optCheck({ name: "dist", label: Z("f.distances"), checked: setting("zonesDistances") !== false, hint: Z("h.distances") })}
       ${optCheck({ name: "ruler", label: Z("f.ruler"), checked: setting("zonesRuler") !== false, hint: Z("h.ruler") })}
-      </section><section class="mm-wp-sec"><button type="button" class="mm-ws-btn mm-danger" data-act="clear"><i class="fa-solid fa-trash" inert></i> ${esc(Z("clear"))}</button></section>`;
+      ${fold("world", Z("sec.world"), "fa-solid fa-earth-europe", `
+        <p class="mm-ws-hint">${esc(Z("h.world"))}</p>
+        ${row(Z("f.preset"), sel("worldPreset", moves, wPreset), Z("h.worldPreset"))}
+        ${row(Z("f.style"), sel("worldStyle", styles.map((x) => [x.id, x.name]), world), Z("h.worldStyle"))}`)}
+      </section>
+      <section class="mm-wp-sec mm-z-panel mm-z-danger"><button type="button" class="mm-ws-btn mm-danger" data-act="clear"><i class="fa-solid fa-trash" inert></i> ${esc(Z("clear"))}</button></section>`;
   };
   render();
   const onChange = (ev) => {
@@ -111,7 +122,9 @@ function settingsPanel(host) {
     else if ( c.name === "worldPreset" ) Styles.setWorldPreset(v);
     else if ( c.name === "worldStyle" ) Styles.setWorldStyle(v);
     else if ( ["who", "color", "numbers", "place", "hoverHi", "hoverFx"].includes(c.name) ) Zones.setParams({ look: { [c.name]: v } });
-    else if ( ["fill", "ink", "lineAlpha", "hoverAlpha"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
+    // these show or hide other rows, or switch the look preset to "own": draw the panel again now (focus is still in it)
+    if ( ["lookFrom", "numbers", "hoverHi", "hoverFx", "preset"].includes(c.name) || c.closest(".mm-z-fold[data-fold=look], .mm-z-fold[data-fold=hover], .mm-z-fold[data-fold=numbers]") ) queueMicrotask(render);
+    else if ( ["fill", "ink", "lineAlpha", "hoverAlpha", "hoverLineAlpha"].includes(c.name) ) Zones.setParams({ look: { [c.name]: Number(v) } });
   };
   const onClick = async (ev) => {
     const act = ev.target.closest("[data-act]")?.dataset.act;
@@ -140,11 +153,13 @@ function settingsPanel(host) {
     const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: Z("clear") }, content: `<p>${esc(Z("clearAsk"))}</p>` });
     if ( ok ) Zones.clearAll();
   };
+  const onToggle = (ev) => { const d = ev.target; if ( d.matches?.(".mm-z-fold") ) { if ( d.open ) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold); } };
   host.addEventListener("change", onChange);
   host.addEventListener("click", onClick);
+  host.addEventListener("toggle", onToggle, true);
   const off = bindSettings(host, { dist: "zonesDistances", ruler: "zonesRuler" });
   const hook = Hooks.on("moinenMapsZones", (kind) => { if ( (kind === "loaded" || kind === "params") && !host.contains(document.activeElement) ) render(); });
-  return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); off(); Hooks.off("moinenMapsZones", hook); };
+  return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); host.removeEventListener("toggle", onToggle, true); off(); Hooks.off("moinenMapsZones", hook); };
 }
 
 export function zonesSection() {

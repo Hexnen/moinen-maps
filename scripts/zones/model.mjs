@@ -17,8 +17,8 @@ import { MODULE_ID } from "../config.mjs";
 export const FLAG = "zones";
 export const VERSION = 1;
 
-export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, lineAlpha: 1, hoverAlpha: 1, numbers: "always", place: "center", hoverHi: false, hoverFx: "glow", color: "#f3e7c9" });
-export const LIMITS = { smooth: [0, 1], snap: [0, 1], fill: [0, 1], ink: [0, 2], lineAlpha: [0, 1], hoverAlpha: [0, 1] };
+export const LOOK_DEFAULTS = Object.freeze({ who: "all", fill: 0.35, ink: 1, lineAlpha: 1, hoverAlpha: 1, hoverLineAlpha: 1, numbers: "always", place: "center", hoverHi: false, hoverFx: "glow", color: "#f3e7c9" });
+export const LIMITS = { smooth: [0, 1], snap: [0, 1], fill: [0, 1], ink: [0, 2], lineAlpha: [0, 1], hoverAlpha: [0, 1], hoverLineAlpha: [0, 1] };
 export const WHO = ["all", "gm", "none"];
 export const NUMBERS = ["always", "hover", "never"];
 export const PLACES = ["center", "corner"];
@@ -36,6 +36,7 @@ export function cleanLook(l = {}) {
     ink: num(l.ink, D.ink, ...LIMITS.ink),
     lineAlpha: num(l.lineAlpha, D.lineAlpha, ...LIMITS.lineAlpha),
     hoverAlpha: num(l.hoverAlpha, D.hoverAlpha, ...LIMITS.hoverAlpha),
+    hoverLineAlpha: num(l.hoverLineAlpha, D.hoverLineAlpha, ...LIMITS.hoverLineAlpha),
     // older sets stored a boolean
     numbers: NUMBERS.includes(l.numbers) ? l.numbers : l.numbers === false ? "never" : D.numbers,
     place: PLACES.includes(l.place) ? l.place : D.place,
