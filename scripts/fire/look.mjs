@@ -33,10 +33,11 @@ export const REF_EMBERS = Object.freeze([0xfff0a0, 0xffb030, 0xe0501c, 0x7a2a14]
 export const REF_PUFFS = Object.freeze([0x4a4541, 0x5d5853, 0x77716b]);
 export const REF_LIGHT = "#ff8a3c";
 /**
- * The FIRE STYLE's ramp (research recipe 4.5, natural): 7 flame steps (0 plum rim of cool tips .. 6 cream-white core, level 3 only),
+ * The FIRE STYLE's ramp (research recipe 4.5, natural): 7 flame steps (0 plum, 1 the dark-red outline, 2 red .. 5 yellow body, 6 the
+ * cream-white core over the embers),
  * 3 bed embers (dark, mid, hot), 2 fire-lit smoke undersides (light, shadow). The fireball keeps REF above.
  */
-export const REF7 = Object.freeze(["#3d0f24", "#7e1717", "#c22e10", "#ee6514", "#ffa529", "#ffe073", "#fffbea",
+export const REF7 = Object.freeze(["#3d0f24", "#6e1513", "#c22e10", "#ee6514", "#ffa529", "#ffe073", "#fffbea",
   "#6a1a14", "#b5340f", "#f2781e", "#c4673a", "#7c3a28"]);
 /** The fire style's sparks over their life: ramp steps 5 -> 3 -> 2 (-> 1). */
 const SPARK_STEPS = [5, 3, 2, 1];
