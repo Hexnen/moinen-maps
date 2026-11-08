@@ -26,6 +26,7 @@ export const state = () => S;
 export const zones = () => Z;
 export const editing = () => inSection && !!game.user?.isGM;
 export const gridSize = () => canvas.dimensions?.size ?? canvas.grid?.size ?? 100;
+const sceneRect = () => { const r = canvas.dimensions?.sceneRect; return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null; };
 
 /* ---------------------------------------------------------------- settings */
 
@@ -44,7 +45,8 @@ function rebuild() {
   // smoothing works on screen-sized steps of the line (scene pixels), so it looks the same on small- and large-grid maps
   const step = Math.max(3, Math.min(g * 0.15, 12));
   const lines = S ? [...S.strokes.values()].map((p) => Geo.smoothLine(p, S.smooth, step)) : [];
-  Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: 0.15 * g * g }) : null;
+  // a zone is at least one grid square; the scene's edge closes zones where lines reach it
+  Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: g * g, edge: sceneRect() }) : null;
 }
 
 /** Who sees the finished zones: always the GM drawing them, else as the scene says. */
@@ -217,7 +219,16 @@ export function eraseAlong(trail, r) {
 /** Trim: keep only the lines that bound zones (everything sticking out goes). */
 export function trim() {
   if ( !Z ) return false;
-  const core = Z.core.map((p) => Geo.simplify(p, 0.3)).filter((p) => p.length >= 4);
+  // a line that ends on the map's edge is pushed a little past it, so it still meets the edge after the flag's rounding
+  const r = sceneRect(), out = (p) => {
+    if ( !r ) return p;
+    for ( const i of [0, p.length - 2] ) {
+      if ( Math.abs(p[i] - r.x) < 1 ) p[i] = r.x - 2; else if ( Math.abs(p[i] - r.x - r.width) < 1 ) p[i] = r.x + r.width + 2;
+      if ( Math.abs(p[i + 1] - r.y) < 1 ) p[i + 1] = r.y - 2; else if ( Math.abs(p[i + 1] - r.y - r.height) < 1 ) p[i + 1] = r.y + r.height + 2;
+    }
+    return p;
+  };
+  const core = Z.core.map((p) => out(Geo.simplify(p, 0.3))).filter((p) => p.length >= 4);
   return edit((st, s) => {
     const before = JSON.stringify([...st.values()]);
     st.clear();

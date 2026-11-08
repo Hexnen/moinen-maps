@@ -188,7 +188,7 @@ function collectSegments(strokes, snap) {
 }
 
 /** Cut every segment at its crossings; merge vertices closer than `merge`. Returns { V: [[x, y]], E: [[a, b]] } without duplicates. */
-function planarize(segs, merge) {
+function planarize(segs, merge, isEdge = null) {
   const n = segs.length;
   const cuts = segs.map(() => [0, 1]);
   let cell = 0; for ( const g of segs ) cell += Math.hypot(g[2] - g[0], g[3] - g[1]);
@@ -218,7 +218,7 @@ function planarize(segs, merge) {
     const k = `${i},${j}`; let l = vmap.get(k); if ( !l ) vmap.set(k, l = []); l.push(id);
     return id;
   };
-  const E = [], seen = new Set();
+  const E = [], seen = new Set(), edgeE = [];
   for ( let i = 0; i < n; i++ ) {
     const g = segs[i], ts = [...new Set(cuts[i])].sort((p, q) => p - q);
     let prev = vid(g[0] + (g[2] - g[0]) * ts[0], g[1] + (g[3] - g[1]) * ts[0]);
@@ -226,12 +226,12 @@ function planarize(segs, merge) {
       const v = vid(g[0] + (g[2] - g[0]) * ts[k], g[1] + (g[3] - g[1]) * ts[k]);
       if ( v !== prev ) {
         const key = prev < v ? `${prev},${v}` : `${v},${prev}`;
-        if ( !seen.has(key) ) { seen.add(key); E.push([prev, v]); }
+        if ( !seen.has(key) ) { seen.add(key); E.push([prev, v]); edgeE.push(isEdge?.[i] ? 1 : 0); }
       }
       prev = v;
     }
   }
-  return { V, E };
+  return { V, E, edgeE };
 }
 
 /** Drop vertices of degree <= 1 until none is left; returns the surviving edges' indices. */
@@ -325,12 +325,18 @@ function labelPoint(rings) {
  * @param {object} [o]
  * @param {number} [o.snap=0]            an end this close to a line is joined to it
  * @param {number} [o.merge]             vertices this close are one (default snap / 20, at least 0.01)
- * @param {number} [o.minArea=0]         smaller faces merge into their neighbour
+ * @param {number} [o.minArea=0]         smaller zones merge into their neighbour (a small zone with no neighbour is no zone)
+ * @param {{x, y, width, height}} [o.edge]   the map's edge: it closes zones like a line where lines reach it, but an area bounded by
+ *                                       the edge alone (the rest of the map around the drawn zones) is not a zone
  */
-export function buildZones(strokes, { snap = 0, merge, minArea = 0 } = {}) {
+export function buildZones(strokes, { snap = 0, merge, minArea = 0, edge = null } = {}) {
   const clean = strokes.filter((p) => Array.isArray(p) && p.length >= 4);
-  const { segs } = collectSegments(clean, snap);
-  const { V, E } = planarize(segs, merge ?? Math.max(0.01, snap / 20));
+  const edgeAt = edge && edge.width > 0 && edge.height > 0 ? clean.length : -1;
+  if ( edgeAt >= 0 ) { const { x, y, width: w, height: h } = edge; clean.push([x, y, x + w, y, x + w, y + h, x, y + h, x, y]); }
+  const { segs, strokeOf } = collectSegments(clean, snap);
+  const isEdge = strokeOf.map((s) => (s === edgeAt && edgeAt >= 0 ? 1 : 0));
+  const P = planarize(segs, merge ?? Math.max(0.01, snap / 20), isEdge);
+  const { V, E } = P, edgeE = P.edgeE;
   const alive = new Uint8Array(E.length).fill(1);
   pruneDangling(V, E, alive);
   // bridges (the same face on both sides) go too, then whatever they left dangling; repeat until stable
@@ -355,7 +361,8 @@ export function buildZones(strokes, { snap = 0, merge, minArea = 0 } = {}) {
     nc++;
   }
   const faceComp = faces.map((f) => comp[E[f.hes[0] >> 1][f.hes[0] & 1]]);
-  const bounded = faces.map((f) => f.area > 0);
+  // a face bounded by the map's edge alone is the rest of the map, not a zone: it counts as the outside
+  const bounded = faces.map((f) => f.area > 0 && !(edgeAt >= 0 && f.hes.every((h) => edgeE[h >> 1])));
 
   // holes: the outer face of a component that lies inside a bounded face of another component
   const container = faces.map(() => -1);   // outer face -> the bounded face around it (-1: the real outside)
@@ -402,6 +409,9 @@ export function buildZones(strokes, { snap = 0, merge, minArea = 0 } = {}) {
   faces.forEach((f, i) => { if ( !bounded[i] ) return; const r = find(i); let g = groups.get(r); if ( !g ) groups.set(r, g = []); g.push(i); });
   const holesOf = new Map();   // bounded face -> [outer rings of components inside it]
   faces.forEach((f, i) => { if ( !bounded[i] && container[i] >= 0 ) { let l = holesOf.get(container[i]); if ( !l ) holesOf.set(container[i], l = []); l.push(f.ring); } });
+  const groupArea = (fl) => { let a = 0; for ( const fi of fl ) { a += faces[fi].area; for ( const h of holesOf.get(fi) ?? [] ) a += ringArea(h); } return a; };
+  // still too small (nothing to merge into): not a zone
+  if ( minArea > 0 ) for ( const [r, fl] of [...groups] ) if ( groupArea(fl) < minArea ) groups.delete(r);
   let zones = [...groups.values()].map((fl) => {
     const parts = fl.map((fi) => [faces[fi].ring, ...(holesOf.get(fi) ?? [])]);
     let area = 0; for ( const fi of fl ) { area += faces[fi].area; for ( const h of holesOf.get(fi) ?? [] ) area += ringArea(h); }   // hole rings run the other way
@@ -423,7 +433,7 @@ export function buildZones(strokes, { snap = 0, merge, minArea = 0 } = {}) {
     const a = zoneOfOwner(owner[faceOf[2 * i]]), b = zoneOfOwner(owner[faceOf[2 * i + 1]]);
     if ( a === b ) return;                        // inside a merged zone
     const p = V[e[0]], q = V[e[1]], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
-    borders.push({ a: Math.max(a, b), b: Math.min(a, b), pts: [p[0], p[1], q[0], q[1]], len: L });
+    borders.push({ a: Math.max(a, b), b: Math.min(a, b), pts: [p[0], p[1], q[0], q[1]], len: L, edge: !!edgeE[i] });
     if ( a >= 0 && b >= 0 ) {
       adj.get(a).set(b, (adj.get(a).get(b) ?? 0) + L);
       adj.get(b).set(a, (adj.get(b).get(a) ?? 0) + L);
@@ -432,7 +442,8 @@ export function buildZones(strokes, { snap = 0, merge, minArea = 0 } = {}) {
 
   // the lines that bound zones, as chains between vertices of degree != 2 (what trimming keeps)
   const keep = new Uint8Array(E.length);
-  E.forEach((e, i) => { if ( alive[i] && zoneOfOwner(owner[faceOf[2 * i]]) !== zoneOfOwner(owner[faceOf[2 * i + 1]]) ) keep[i] = 1; });
+  // (the map's edge is no pencil line: never kept, never drawn)
+  E.forEach((e, i) => { if ( alive[i] && !edgeE[i] && zoneOfOwner(owner[faceOf[2 * i]]) !== zoneOfOwner(owner[faceOf[2 * i + 1]]) ) keep[i] = 1; });
   const core = chains(V, E, keep);
 
   for ( const z of zones ) delete z.faces;

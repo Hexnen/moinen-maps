@@ -97,5 +97,26 @@ R = Z.buildZones([[0, 0, 400, 0, 400, 300, 0, 300, 0, 0]], { snap: 5 });
 const cp = Z.cornerPoint(R.zones[0], 20);
 check(cp.x >= 20 && cp.y >= 20 && cp.x < 60 && cp.y < 60, `corner badge near the top left, clear of the border (${cp.x.toFixed(0)}, ${cp.y.toFixed(0)})`);
 
+// 11. the map's edge: lines that reach it close zones; the rest of the map is never a zone by itself
+const map = { x: 0, y: 0, width: 1000, height: 800 };
+R = Z.buildZones([], { snap: 5, edge: map });
+check(R.zones.length === 0, `edge: an empty map has no zones (got ${R.zones.length})`);
+R = Z.buildZones(sketch, { snap: 10, minArea: 100, edge: map });
+check(R.zones.length === 2, `edge: a frame inside the map -> still 2 zones, the rest of the map is not a zone (got ${R.zones.length})`);
+R = Z.buildZones([[-20, 300, 300, -20]], { snap: 5, edge: map });
+check(R.zones.length === 2 && Z.zoneAt(R, 50, 50) >= 0 && Z.zoneAt(R, 600, 600) >= 0, `edge: a line across a corner -> corner zone + the rest (got ${R.zones.length})`);
+check(R.core.length === 1, `edge: the map's edge is not kept as a line by trim (${R.core.length} chain)`);
+R = Z.buildZones([[-20, 400, 1020, 410]], { snap: 5, edge: map });
+check(R.zones.length === 2 && Z.distances(R, Z.zoneAt(R, 500, 100)).get(Z.zoneAt(R, 500, 700)) === 1, "edge: a line across the map -> 2 neighbouring halves");
+R = Z.buildZones([[200, 0, 200, 800]], { snap: 5, edge: map });
+check(R.zones.length === 2, `edge: a line ending exactly on the edge counts (got ${R.zones.length})`);
+R = Z.buildZones([[200, 4, 200, 796]], { snap: 5, edge: map });
+check(R.zones.length === 2, `edge: a line stopping 4 px short of the edge is joined (snap 5) (got ${R.zones.length})`);
+// 12. minimum zone size: smaller than minArea merges into a neighbour, or is no zone when alone
+R = Z.buildZones([[0, 0, 300, 0, 300, 300, 0, 300, 0, 0], [600, 600, 650, 600, 650, 650, 600, 650, 600, 600]], { snap: 2, minArea: 100 * 100 });
+check(R.zones.length === 1, `min size: a lone 50x50 loop is no zone with a 100x100 minimum (got ${R.zones.length})`);
+R = Z.buildZones([[0, 0, 300, 0, 300, 300, 0, 300, 0, 0], [0, 30, 300, 30]], { snap: 2, minArea: 100 * 100 });
+check(R.zones.length === 1, `min size: a 300x30 strip merges into its neighbour (got ${R.zones.length})`);
+
 console.log(failed ? `${failed} failed` : "all zones geometry checks passed");
 process.exit(failed ? 1 : 0);
