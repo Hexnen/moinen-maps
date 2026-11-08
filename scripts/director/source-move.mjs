@@ -195,8 +195,8 @@ function dropBanner(ms = 0) {
  * long frame on every client at the turn change. `alive()` false: stop; `done(top)` once.
  */
 const SLICE_MS = 4;
-/** The next slice: after the frames due now (scheduler.yield where the browser has it: no timer clamping). */
-const later = (fn) => { const y = globalThis.scheduler?.yield; if ( typeof y === "function" ) y.call(globalThis.scheduler).then(fn, fn); else setTimeout(fn, 0); };
+/** The next slice: after the next frame is drawn (one slice per frame; a hidden tab, where frames stop, goes on after 120 ms). */
+const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
 function bannerTop(alive, done) {
   const nav = document.getElementById("navigation")?.getBoundingClientRect?.();
   let top = Math.max(nav?.height && nav.bottom < innerHeight / 3 ? nav.bottom + 8 : 0, innerHeight * 0.03);

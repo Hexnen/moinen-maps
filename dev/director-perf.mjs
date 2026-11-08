@@ -142,14 +142,17 @@ function profileSum(prof) {
   const nearest = new Map();                       // node -> the nearest director frame at or above it (the director code that caused it)
   const near = (id) => { if ( nearest.has(id) ) return nearest.get(id); const n = nodes.get(id); const r = isDir(n) ? n : parent.has(id) ? near(parent.get(id)) : null; nearest.set(id, r); return r; };
   const byCaller = new Map();
+  let run = 0, runMax = 0, cur = new Map(), best = null;                         // the longest unbroken stretch of director samples (one task: a frame spike)
   let total = 0, dirSelf = 0, dirIncl = 0, mmIncl = 0, gc = 0, idle = 0; const byFn = new Map();
   const dt = prof.timeDeltas;
   for ( let i = 0; i < prof.samples.length; i++ ) {
     const ms = (dt[i + 1] ?? dt[i] ?? 0) / 1000, n = nodes.get(prof.samples[i]); total += ms;
     const fn = n.callFrame.functionName;
-    if ( fn === "(idle)" ) { idle += ms; continue; }
+    if ( fn === "(idle)" ) { idle += ms; run = 0; continue; }
     if ( fn === "(garbage collector)" ) gc += ms;
     const [d, m] = under(n.id);
+    if ( d ) { run += ms; const c = near(n.id), k = c ? `${c.callFrame.url.split("/").pop()}:${c.callFrame.functionName || "anon"}` : "?", k2 = isDir(n) ? k : `${k}>${fn}`; cur.set(k2, (cur.get(k2) ?? 0) + ms); if ( run > runMax ) { runMax = run; best = new Map(cur); } }
+    else if ( fn !== "(garbage collector)" && fn !== "(program)" ) { run = 0; cur = new Map(); }
     if ( d ) { dirIncl += ms; const c = near(n.id); if ( c ) { const k = `${c.callFrame.url.split("/").pop()}:${c.callFrame.functionName || "anon"}:${c.callFrame.lineNumber + 1}`; byCaller.set(k, (byCaller.get(k) ?? 0) + ms); } }
     if ( m ) mmIncl += ms;
     if ( isDir(n) ) { dirSelf += ms; const k = `${n.callFrame.url.split("/").pop()}:${fn || "anon"}:${n.callFrame.lineNumber + 1}`; byFn.set(k, (byFn.get(k) ?? 0) + ms); }
@@ -157,7 +160,7 @@ function profileSum(prof) {
   }
   const top = [...byFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `${k} ${v.toFixed(1)}`);
   const callers = [...byCaller].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => `${k} ${v.toFixed(1)}`);
-  return { callers, busyMs: +(total - idle).toFixed(1), dirSelfMs: +dirSelf.toFixed(2), dirInclMs: +dirIncl.toFixed(2), mmInclMs: +mmIncl.toFixed(1), gcMs: +gc.toFixed(1), top };
+  return { callers, runParts: best ? [...best].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v.toFixed(1)}`) : [], dirRunMax: +runMax.toFixed(1), busyMs: +(total - idle).toFixed(1), dirSelfMs: +dirSelf.toFixed(2), dirInclMs: +dirIncl.toFixed(2), mmInclMs: +mmIncl.toFixed(1), gcMs: +gc.toFixed(1), top };
 }
 const METRICS = ["LayoutCount", "RecalcStyleCount", "LayoutDuration", "RecalcStyleDuration", "ScriptDuration", "TaskDuration", "JSHeapUsedSize"];
 const metrics = async (p) => Object.fromEntries((await p.send("Performance.getMetrics")).result.metrics.filter((m) => METRICS.includes(m.name)).map((m) => [m.name, m.value]));
@@ -206,10 +209,10 @@ function summary(runs) {
     res[page] = {
       frames: raf.length, rafP50: pct(raf, 0.5), rafP95: pct(raf, 0.95), over33: raf.filter((x) => x > 33.4).length, over50: raf.filter((x) => x > 50).length,
       tickP50: pct(tick, 0.5), tickP95: pct(tick, 0.95), tickMax: tick.length ? +Math.max(...tick).toFixed(1) : null, loaf50: loaf.length, loafMax: loaf.length ? Math.max(...loaf.map((l) => l.ms)) : 0,
-      dirSelfMs: +(sum((r) => r.prof.dirSelfMs) / n).toFixed(2), dirInclMs: +(sum((r) => r.prof.dirInclMs) / n).toFixed(2), mmInclMs: +(sum((r) => r.prof.mmInclMs) / n).toFixed(1), gcMs: +(sum((r) => r.prof.gcMs) / n).toFixed(1), busyMs: +(sum((r) => r.prof.busyMs) / n).toFixed(0),
+      dirSelfMs: +(sum((r) => r.prof.dirSelfMs) / n).toFixed(2), dirRunMax: Math.max(...rs.map((r) => r.prof.dirRunMax ?? 0)), dirInclMs: +(sum((r) => r.prof.dirInclMs) / n).toFixed(2), mmInclMs: +(sum((r) => r.prof.mmInclMs) / n).toFixed(1), gcMs: +(sum((r) => r.prof.gcMs) / n).toFixed(1), busyMs: +(sum((r) => r.prof.busyMs) / n).toFixed(0),
       layouts: Math.round(sum((r) => r.m.layouts) / n), styles: Math.round(sum((r) => r.m.styles) / n), layoutMs: +(sum((r) => r.m.layoutMs) / n).toFixed(1), styleMs: +(sum((r) => r.m.styleMs) / n).toFixed(1), heapMB: +(sum((r) => r.m.heapMB) / n).toFixed(2),
       sock: { sent: sum((r) => r.sock.sent) / n, sentB: Math.round(sum((r) => r.sock.sentB) / n), recv: sum((r) => r.sock.recv) / n, recvB: Math.round(sum((r) => r.sock.recvB) / n) },
-      callers: rs[0].prof.callers, load: rs.map((r) => (r.rec?.ready != null && r.rec?.down != null ? Math.round(r.rec.ready - r.rec.down) : null)), top: rs[0].prof.top, loafs: loaf.slice(0, 4)
+      callers: rs[0].prof.callers, runParts: rs.reduce((m, r) => ((r.prof.dirRunMax ?? 0) >= (m.v ?? -1) ? { v: r.prof.dirRunMax, p: r.prof.runParts } : m), {}).p, load: rs.map((r) => (r.rec?.ready != null && r.rec?.down != null ? Math.round(r.rec.ready - r.rec.down) : null)), top: rs[0].prof.top, loafs: loaf.slice(0, 4)
     };
   }
   return res;

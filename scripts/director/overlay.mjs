@@ -164,8 +164,8 @@ export function caption({ kick, title, icon, lb = 0, hint = "" }) {
  * one long frame in the middle of the camera move. `alive()` false: stop; `done()` once the place is set.
  */
 const SLICE_MS = 4;
-/** The next slice: after the frames due now (scheduler.yield where the browser has it: no timer clamping). */
-const later = (fn) => { const y = globalThis.scheduler?.yield; if ( typeof y === "function" ) y.call(globalThis.scheduler).then(fn, fn); else setTimeout(fn, 0); };
+/** The next slice: after the next frame is drawn (one slice per frame; a hidden tab, where frames stop, goes on after 120 ms). */
+const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
 function clearOfUi(el, alive = () => true, done = () => {}) {
   try {
     const f = freeRect();
@@ -205,6 +205,7 @@ function clearOfUi(el, alive = () => true, done = () => {}) {
         el.classList.add("is-low"); el.style.bottom = `${Math.round(innerHeight - top + 10)}px`;
         pts = null;
         if ( ++pass >= 3 ) break;
+        if ( performance.now() - t0 > SLICE_MS ) { later(step); return; }
       }
     } catch { /* the default place */ }
     done();
