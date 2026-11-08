@@ -57,15 +57,24 @@ function lookPanel(host) {
   };
   const onChange = (ev) => {
     if ( isEcho() || !game.user.isGM ) return;
-    const c = ev.target.closest?.("[name]"), s = canvas?.scene; if ( !c || !s ) return;
-    if ( !["sizeBy", "size", "sizeGrid"].includes(c.name) ) return;
-    const v = c.name === "sizeBy" ? c.value : Number(c.value);
-    if ( c.name !== "sizeBy" && !Number.isFinite(v) ) return;
-    if ( sceneConfig(s)[c.name] === v ) return;
-    s.update({ [`flags.${MODULE_ID}.config.${c.name}`]: v });
+    // only the named control's own event: a <range-picker>'s inner inputs report first, unnamed, with the old value
+    const c = ev.target, name = c?.getAttribute?.("name"), s = canvas?.scene; if ( !s || !["sizeBy", "size", "sizeGrid"].includes(name) ) return;
+    const v = name === "sizeBy" ? c.value : Number(c.value);
+    if ( name !== "sizeBy" && !Number.isFinite(v) ) return;
+    if ( sceneConfig(s)[name] === v ) return;
+    s.update({ [`flags.${MODULE_ID}.config.${name}`]: v });
   };
   host.addEventListener("change", onChange);
-  const onScene = (s, ch) => { if ( s.id === canvas?.scene?.id && foundry.utils.hasProperty(ch, `flags.${MODULE_ID}.config`) && !host.contains(document.activeElement) ) render(); };
+  // redrawn when the scene's config changes (the mode swaps the slider), unless a slider of this panel is in hand; the mode
+  // select keeps the keyboard
+  const onScene = (s, ch) => {
+    if ( s.id !== canvas?.scene?.id || !foundry.utils.hasProperty(ch, `flags.${MODULE_ID}.config`) ) return;
+    const a = document.activeElement;
+    if ( host.contains(a) && a.closest("range-picker") ) return;
+    const keep = host.contains(a) ? a.getAttribute("name") : null;
+    render();
+    if ( keep ) host.querySelector(`[name="${keep}"]`)?.focus();
+  };
   const hU = Hooks.on("updateScene", onScene), hC = Hooks.on("canvasReady", () => render());
   render();
   return () => { host.removeEventListener("change", onChange); Hooks.off("updateScene", hU); Hooks.off("canvasReady", hC); };
