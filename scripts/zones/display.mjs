@@ -87,6 +87,7 @@ export class ZoneDisplay {
     F.clear(); this.lines.clear();
     for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
     this.items = [];
+    this.g = g;
     this.Z = Z; this.look = look;
     this.drawHover(this.hoverId, zoom);
     if ( !Z || !Z.zones.length ) return;
@@ -110,7 +111,7 @@ export class ZoneDisplay {
     this.drawLines(zoom);
 
     // badges: the zone's number, or its distance from the selected token. Each badge is drawn once at its size ON SCREEN and scaled
-    // by 1 / zoom every frame (follow), so it keeps its size smoothly while zooming; in the corner it glides to its new spot.
+    // by 1 / zoom every frame (follow), so it keeps its size smoothly while zooming, on a spot that stays put.
     const numbered = (id) => look.numbers === "always" || (look.numbers === "hover" && id === hover);
     if ( look.numbers === "never" && !dist ) return;
     const res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
@@ -208,37 +209,21 @@ export class ZoneDisplay {
     for ( const r of rings ) ring(L, r);
   }
 
-  /** Scale every badge to its size on screen; `snap` puts them straight on their spot (a fresh render), else they glide there. */
+  /**
+   * Scale every badge to its size on screen. Its spot is fixed on the map: the centre, or in the corner a point found for a badge of
+   * about half a grid square (not for its size at this zoom), so zooming only scales the badge around a spot that never moves.
+   */
   follow(zoom, snap) {
     this.zoom = zoom;
-    const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner";
+    const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner", g = this.g ?? 100;
     for ( const it of this.items ?? [] ) {
       const rw = Math.min(BADGE_R * px, Math.max(8 * px, it.z.label.r * 0.8));     // the badge's radius in scene pixels
       it.b.scale.set(rw / BADGE_R);
-      // the corner spot depends on the badge's size: looked up on a coarse ladder of sizes (cached), reached by gliding
-      const key = Math.exp(Math.round(Math.log(rw * 1.5 + 3 * px) / 0.06) * 0.06);
-      it.at = corner ? cornerPoint(it.z, key) : it.z.label;
-      if ( snap || !corner ) it.b.position.set(it.at.x, it.at.y);
-    }
-    if ( corner && !snap ) this.#glide();
-  }
-
-  #gliding = false;
-  #glide() {
-    if ( this.#gliding ) return;
-    this.#gliding = true;
-    const tick = () => {
-      let moving = false;
-      for ( const it of this.items ?? [] ) {
-        if ( it.b.destroyed || !it.at ) continue;
-        const dx = it.at.x - it.b.x, dy = it.at.y - it.b.y;
-        if ( Math.abs(dx) + Math.abs(dy) < 0.05 ) { it.b.position.set(it.at.x, it.at.y); continue; }
-        it.b.position.set(it.b.x + dx * 0.22, it.b.y + dy * 0.22);
-        moving = true;
+      if ( snap || !it.at ) {
+        it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
+        it.b.position.set(it.at.x, it.at.y);
       }
-      if ( !moving || this.root.destroyed ) { canvas.app.ticker.remove(tick); this.#gliding = false; }
-    };
-    canvas.app.ticker.add(tick);
+    }
   }
 
   set visible(v) { this.root.visible = v; }
