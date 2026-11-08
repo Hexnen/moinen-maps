@@ -23,7 +23,8 @@ import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
  * COST: nothing painted -> no container, no ticker, no draw (the display is not even made). With fire: one ticker listener that culls
  * the areas against the view (an area off screen is `visible = false`: no draw), writes one uniform per visible area when the 12 fps
  * frame changes, and places the particles of the visible areas; an area that grows or goes out also gets its two clock uniforms
- * (model.raster's times texture does the rest on the GPU). Reduced motion: a still frame (time 0), no particles, a steady light, no
+ * (model.raster's times texture does the rest on the GPU); a second, tiny listener right before the render (`guard`: the art cells
+ * near the view, A9). Reduced motion (the art drawn whole): a still frame (time 0), no particles, a steady light, no
  * growing / going out (fire.mjs leaves the phases out) - the ticker is not registered at all.
  */
 const CAP = { high: 48, medium: 24, low: 0 };
@@ -37,6 +38,13 @@ function mapOf() {
 
 /** Art cells the fire style may draw per display frame (~2 ms on a mid GPU; research 13: the art pass is the layer's main cost). */
 const ART_BUDGET = 600000;
+/**
+ * A9: the art pass draws only the cells near the VIEW (the view grown by a quarter of its size each way, plus PAD cells - every cell a
+ * screen pixel's colour reads lies within PAD of it): at a close zoom most of an area's rectangle is off screen and is left as it was.
+ * Every frame, after the camera's animations and right before the render (`guard`, priority just above Foundry's render), an area
+ * whose drawn cells no longer hold the view (+ PAD) is drawn again at once - so a cell on screen is always this art frame's.
+ */
+const MARGIN = 0.25, PAD = 4;
 
 export class FireDisplay {
   constructor() {
@@ -70,6 +78,7 @@ export class FireDisplay {
     this.geo = null; this.P = M.cleanParams();
     this.stats = { areas: 0, visible: 0, particles: 0, lights: 0, tickMs: 0, artPasses: 0, built: 0, destroyed: 0, lightsMade: 0 };
     this._tick = () => this.tick();
+    this._guard = () => this.guard();
     this.ticking = false;
     this.lastT = -1;
   }
@@ -128,7 +137,8 @@ export class FireDisplay {
     const want = this.areas.size > 0 && !reducedMotion();
     if ( want === this.ticking ) return;
     this.ticking = want;
-    if ( want ) canvas.app.ticker.add(this._tick); else canvas.app.ticker.remove(this._tick);
+    if ( want ) { canvas.app.ticker.add(this._tick); canvas.app.ticker.add(this._guard, undefined, PIXI.UPDATE_PRIORITY.LOW + 0.5); }
+    else { canvas.app.ticker.remove(this._tick); canvas.app.ticker.remove(this._guard); }
   }
 
   /** The view in scene px. */
@@ -161,9 +171,9 @@ export class FireDisplay {
     stale.sort((x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1));
     let cells = 0;
     for ( const a of stale ) {
-      const c = a.mesh.W * a.mesh.H;
+      const w = this.ticking ? this.windowOf(a, vw, MARGIN) : null, c = w ? Math.max(0, w[2] - w[0]) * Math.max(0, w[3] - w[1]) : a.mesh.W * a.mesh.H;
       if ( cells > 0 && cells + c > ART_BUDGET && !force && a.mesh.artT !== null ) continue;
-      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer); this.stats.artPasses++; cells += c;
+      a.mesh.setTime(T); a.mesh.renderArt(canvas.app.renderer, w); this.stats.artPasses++; cells += c;
     }
     this.lastT = T;
     const lu = this.lights.stats.updates;
@@ -194,6 +204,26 @@ export class FireDisplay {
     const layer = on ? FRONT_LAYER : 750;
     if ( this.front.sortLayer !== layer ) { this.front.sortLayer = layer; canvas.primary.sortDirty = true; }
     this.feetOn = on;
+  }
+
+  /** An area's cells (its art texture's) under the view `vw` (scene px) grown by `margin` x its size each way and PAD cells. */
+  windowOf(a, vw, margin = 0) {
+    const { ap, ox, oy } = this.geo, r = a.area.rect, x0 = ox + r.x0 * ap, y0 = oy + r.y0 * ap, W = a.mesh.W, H = a.mesh.H;
+    const mx = margin * (vw.x1 - vw.x0), my = margin * (vw.y1 - vw.y0);
+    return [Math.max(0, Math.floor((vw.x0 - mx - x0) / ap) - PAD), Math.max(0, Math.floor((vw.y0 - my - y0) / ap) - PAD),
+      Math.min(W, Math.ceil((vw.x1 + mx - x0) / ap) + PAD), Math.min(H, Math.ceil((vw.y1 + my - y0) / ap) + PAD)];
+  }
+
+  /** Right before the render (the camera has moved this frame): an area shown whose drawn cells no longer hold the view is drawn now. */
+  guard() {
+    if ( !this.geo || !canvas.stage ) return;
+    let vw = null;
+    for ( const a of this.areas.values() ) {
+      const m = a.mesh; if ( !m.isArt || !m.visible || m.artT === null ) continue;
+      vw ??= this.view();
+      const need = this.windowOf(a, vw); if ( need[2] <= need[0] || need[3] <= need[1] || m.covers(need) ) continue;   // (none of it on screen, or drawn)
+      m.renderArt(canvas.app.renderer, this.windowOf(a, vw, MARGIN)); this.stats.artPasses++; this.stats.guarded = (this.stats.guarded ?? 0) + 1;
+    }
   }
 
   /** A token moved, appeared or went: its depth against the flames is recomputed on the next frame (once, however many moved). */
@@ -270,7 +300,7 @@ export class FireDisplay {
   }
 
   destroy() {
-    canvas.app?.ticker?.remove(this._tick); this.ticking = false;
+    canvas.app?.ticker?.remove(this._tick); canvas.app?.ticker?.remove(this._guard); this.ticking = false;
     Hooks.off("lightingRefresh", this.hookL); this.lights.destroy();
     for ( const a of this.areas.values() ) a.mesh.destroy();
     this.areas.clear();
