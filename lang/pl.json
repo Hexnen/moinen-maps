@@ -1669,5 +1669,6 @@
   "MOINENMAPS.Orbit.follow": "Podążaj za moją postacią na orbitę",
   "MOINENMAPS.Orbit.followHint": "Gdy twoja postać zostanie wyrzucona na orbitę albo z niej wróci, widok przenosi się za nią na drugą scenę.",
   "MOINENMAPS.Zones.f.quake": "Trzęsienie zniszczonej strefy",
-  "MOINENMAPS.Zones.h.quake": "Gdy strefa staje się zniszczona, przez sekundę się trzęsie, z pyłem i gruzem (tylko na tym ekranie)."
+  "MOINENMAPS.Zones.h.quake": "Gdy strefa staje się zniszczona, przez sekundę się trzęsie, z pyłem i gruzem (tylko na tym ekranie).",
+  "MOINENMAPS.Diag.codeChanged": "Moinen Maps: kod modułu zmienił się na dysku ({from} → {to}), gdy ta strona była otwarta. Odśwież (F5): mieszanka starego i nowego kodu może zawieszać ładowanie scen."
 }

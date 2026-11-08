@@ -21,6 +21,7 @@ import { registerTokenFxSetting } from "./tokens/settings.mjs";
 import { registerRoads } from "./roads/roads.mjs";
 import { registerZones } from "./zones/zones.mjs";
 import { registerOrbit } from "./zones/orbit.mjs";
+import "./diag.mjs";   // code-changed-on-disk notice + scene-switch log (api.diag)
 import { registerFlood } from "./destruction/flood.mjs";
 import { registerSmoothView } from "./view-smooth.mjs";
 import { registerWarmup } from "./warmup.mjs";
