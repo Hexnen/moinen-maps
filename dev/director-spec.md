@@ -26,5 +26,6 @@ A new submodule of moinen-maps. Its job: a cinematic feel for the PLAYERS. Every
 ## Phases
 - **A (one agent):** the engine (event model, queue, shot planner, sync, camera take-over and return, soft forms, overlays, GM bar, settings, per-player options, API), absorbing the cinematic mode, and the module-events source as the first real source.
 - **B (after A is merged, in parallel):** movement + combat turns; rolls + damage (Invincible); scene transitions.
+- **C (after B is merged, user order 2026-11-08):** two independent adversaries on the finished realization (GM + real player on a lane, watching it in motion). Each one: what breaks or feels wrong, what could work better, what to add, what to streamline - a brainstorm, not only a bug list. Their findings go to the user before anything is changed.
 
 Every agent appends what it did, what is verified and what is not to `dev/director-handoff.md`.
