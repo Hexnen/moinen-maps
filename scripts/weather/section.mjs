@@ -18,7 +18,7 @@ import { VIEW_PRESETS } from "../view-angle.mjs";
  */
 const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
 const LEVEL_COLOR = ["", "#9fd0f5", "#4f9de0", "#2a5fb8"];
-const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0", snow: "#e8f1fb", sand: "#d9a55b", dust: "#e6d3a3", embers: "#f07a2a" };
+const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0", snow: "#e8f1fb", sand: "#d9a55b", dust: "#e6d3a3", embers: "#f07a2a", wind: "#9fd38a", storm: "#5b7fa8", blizzard: "#cfe3f5" };
 const TOOLS = { "mm-wx-pick": null, "mm-wx-wind": "wind" };
 
 const over = () => Math.max(0, Number(setting("weatherOver")) || 0) * 1000;

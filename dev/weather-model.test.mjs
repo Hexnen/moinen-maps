@@ -157,6 +157,9 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
 /* G: phase 2 effects, snow cover, ground share quantiles */
 {
   for ( const e of ["snow", "sand", "dust", "embers"] ) ok(M.EFFECTS.includes(e) && e in M.PRESETS && M.TABLES[e]?.lens, `effect ${e} with a preset and a lens table`);
+  ok(M.EFFECTS.includes("wind") && "wind" in M.PRESETS && M.TABLES.wind && !M.TABLES.wind.lens, "wind: an effect with a preset and no lens part");
+  ok(JSON.stringify(Object.keys(M.presetFx("storm", 3)).sort()) === '["rain","wind"]' && M.presetFx("blizzard", 1).wind.l === 1 && M.presetFx("blizzard", 1).snow.l === 1, "storm = rain + wind, blizzard = snow + wind, at the chosen level");
+  { const g1 = M.gates("wind", 0), g3 = M.gates("wind", 2); ok(g1.lines < g3.lines && g1.debris < g3.debris && g1.comb > g3.comb && g1.cloud === 0 && g3.haze > 0 && g1.spd < g3.spd, "wind levels: 1 delicate .. 3 strongest"); }
   ok(M.gates("snow", 2).near === 2 && M.gates("snow", 0).near === 0 && M.gates("sand", 1).grit === 34, "snow / sand gates");
   ok(M.coverCeil(0) === 0 && Math.abs(M.coverCeil(1) - 0.10) < 1e-9 && Math.abs(M.coverCeil(2) - 0.42) < 1e-9, "snow cover ceilings 0 / 10 / 42 %");
   const t0 = 1_000_000, P = M.cleanParams({ keys: [{ t: t0, dur: 0, preset: "snow", level: 3, i: 0.5 }], ground: { snowRate: 100, meltRate: 400 } });

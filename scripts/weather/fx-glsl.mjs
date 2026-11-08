@@ -15,7 +15,7 @@ uniform mat3 projectionMatrix;
 uniform mat3 translationMatrix;
 uniform vec2 uScreen;
 uniform float uTime;
-uniform int uKind;           // 1 snow, 2 grit, 3 dust, 4 embers
+uniform int uKind;           // 1 snow, 2 grit, 3 dust, 4 embers, 5 wind (lines, debris)
 uniform vec4 uTiles;         // first tile x, y; tiles across, down
 uniform float uTileSz;       // art px per tile (embers: the source cell)
 uniform vec4 uPer;           // slots per tile per layer (snow: mid, far, near, spindrift)
@@ -24,7 +24,7 @@ uniform vec4 uOrigin;        // scene rect x, y; art px (scene px); art cells pe
 uniform vec2 uWindDir;       // unit (sand: the sand's direction)
 uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust amount
 uniform vec2 uView;          // lift, squash
-uniform vec4 uVF;            // snow: fall speeds mid, far, near; grit: hop, length; embers: swarm floor, big sparks
+uniform vec4 uVF;            // snow: fall speeds mid, far, near; grit: hop, length; embers: swarm floor, big sparks; wind: line gate, line length, bob
 uniform float uI;            // presence x performance
 out vec2 vArt;
 out vec2 vScr;
@@ -143,6 +143,46 @@ void main() {
     float tw = 0.5 + 0.5 * sin(6.283185 * (0.25 + 0.5 * h[3]) * uTime + 6.28 * h[4]);
     vA = vec4(P, 0.0, 0.0); vB = vec4(lit * smoothstep(0.55, 0.85, tw), h[6] > 0.93 ? 1.0 : 0.0, 0.0, 0.0);
     lo = floor(P) - 1.0; hi = floor(P) + 3.0;
+  } else if ( uKind == 5 && layer == 0 ) {
+    // WIND LINES: in a gust, a light 1-px stroke runs downwind from its slot, curving (two sines), drawn over the last 0.45-0.75 s
+    // of its path; it grows from its start and in its last half retracts from the tail, the head fading last. Only where the gust at its birth is strong enough.
+    float tau = lifeOf(key, tx, ty, j, sd, 1440.0, 961.0, life, ci);
+    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    float h[6];
+    for ( int q = 0; q < 6; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
+    float ll = 0.7 + 0.5 * h[2];
+    if ( tau >= ll ) { hide(); return; }
+    vec2 s = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
+    float G = gustAt(s / uOrigin.w, uWindDir, uTime - tau, uSeed);
+    if ( G <= 0.42 + 0.3 * h[3] + uVF.x || s.x < 0.0 || s.y < 0.0 || s.x >= uArtSize.x || s.y >= uArtSize.y || openAt(s, false) < 0.5 ) { hide(); return; }
+    float v = 1.6 * uWindK.x * windFactor(clamp(G, 0.0, 1.2), uWindK.y);     // the air itself: faster than what it carries
+    float b = v * tau, a = v * max(tau - (0.45 + 0.30 * h[4]) * uVF.y, 0.0);
+    if ( b - a < 1.0 ) { hide(); return; }
+    vec2 S = s - vec2(0.0, lift * (10.0 + 14.0 * h[4]));
+    vA = vec4(S, a, b); vB = vec4(h[2] * 6.28 + tau * 2.0, h[3] * 6.28, tau / ll, 0.0);
+    vec2 P0 = S + uWindDir * a, P1 = S + uWindDir * b;
+    lo = floor(min(P0, P1)) - 8.0; hi = floor(max(P0, P1)) + 9.0;
+  } else if ( uKind == 5 ) {
+    // DEBRIS: leaves and bits tumbling with the wind, bouncing more in the gusts, flipping (light / dark side), each with its ground
+    // shadow; anchored at mid-life like the sparks, so they come in from upwind and from everywhere, born and gone by pixel dropout
+    float tau = lifeOf(key, tx, ty, j, sd, 1200.0, 1201.0, life, ci);
+    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    float h[8];
+    for ( int q = 0; q < 8; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
+    float age = tau / life;
+    if ( hu(key, int(floor(uTime * 12.0)), sd + 21) <= smoothstep(0.75, 1.0, age) ) { hide(); return; }
+    if ( hu(key, int(floor(uTime * 12.0)), sd + 22) >= smoothstep(0.0, 0.12, age) ) { hide(); return; }
+    vec2 a0 = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
+    float Gm = clamp(gustAt(a0 / uOrigin.w, uWindDir, uTime - tau + 0.5 * life, uSeed), 0.0, 1.2);
+    float v = uWindK.x * windFactor(Gm, uWindK.y) * (0.7 + 0.5 * h[2]);
+    vec2 WN = vec2(-uWindDir.y, uWindDir.x);
+    vec2 Xg = a0 + uWindDir * v * (tau - 0.5 * life) + WN * 6.0 * sin(tau * (0.8 + h[6]) + h[3] * 6.28);
+    if ( Xg.x < 0.0 || Xg.y < 0.0 || Xg.x >= uArtSize.x || Xg.y >= uArtSize.y || openAt(Xg, true) < 0.5 ) { hide(); return; }
+    float bob = uVF.z * abs(sin(tau * (1.5 + 2.0 * h[3]) + h[4] * 6.28)) * (0.4 + Gm);
+    vec2 P = Xg - vec2(0.0, lift * (2.0 + bob + 8.0 * h[5]));
+    float flip = sin(tau * (9.0 + 8.0 * h[2]) + h[6] * 6.28) > 0.0 ? 1.0 : 0.0;
+    vA = vec4(P, Xg); vB = vec4(floor(h[7] * 5.99), flip, h[5] > 0.35 ? 1.0 : 0.0, h[5] > 0.8 ? 1.0 : 0.0);
+    lo = floor(min(P, Xg)) - 2.0; hi = floor(max(P, Xg)) + 3.0;
   } else {
     // EMBERS: a wind-borne field. Every slot's spark crosses its tile in the middle of its life, blown along the wind with a sway,
     // so sparks come in from upwind and from everywhere in view and drift through; swarms (a slow patchy field drifting with the
@@ -203,6 +243,7 @@ uniform sampler2D uDepth;
 uniform float uDepthElev;
 uniform int uHasDepth;
 uniform int uSeed;
+uniform vec2 uWindDir;
 out vec4 fragColor;
 float hu(int x, int y, int s) {
   uint h = uint(x) * 374761393u + uint(y) * 668265263u + uint(s) * 1274126177u;
@@ -226,6 +267,13 @@ float onLine(vec2 c, vec2 a, vec2 b) {
 }
 const vec3 OCHRE = vec3(0.82, 0.62, 0.36);
 const vec3 DUST = vec3(0.93, 0.86, 0.70);
+float bayer4(vec2 c) {
+  int x = int(mod(c.x, 4.0)), y = int(mod(c.y, 4.0)), i = x + 4 * y;
+  int b = i == 0 ? 0 : i == 1 ? 8 : i == 2 ? 2 : i == 3 ? 10 : i == 4 ? 12 : i == 5 ? 4 : i == 6 ? 14 : i == 7 ? 6
+        : i == 8 ? 3 : i == 9 ? 11 : i == 10 ? 1 : i == 11 ? 9 : i == 12 ? 15 : i == 13 ? 7 : i == 14 ? 13 : 5;
+  return (float(b) + 0.5) / 16.0;
+}
+vec3 leaf(float i) { return i < 0.5 ? vec3(0.78, 0.55, 0.20) : i < 1.5 ? vec3(0.62, 0.38, 0.14) : i < 2.5 ? vec3(0.55, 0.62, 0.22) : i < 3.5 ? vec3(0.85, 0.72, 0.30) : i < 4.5 ? vec3(0.45, 0.50, 0.20) : vec3(0.86, 0.85, 0.80); }
 vec3 ember(float i) { return i < 0.5 ? vec3(1.0, 0.96, 0.76) : i < 1.5 ? vec3(1.0, 0.82, 0.29) : i < 2.5 ? vec3(1.0, 0.54, 0.14) : i < 3.5 ? vec3(0.82, 0.25, 0.11) : vec3(0.45, 0.16, 0.10); }
 // (add, k) faded in / out by vFade, then the layer's alpha
 void out_(float k, vec3 add) {
@@ -276,6 +324,28 @@ void main() {
     }
     if ( d != vec2(0.0) ) discard;
     out_(mix(0.5, 0.0, e), mix(dullA, brA, e) + 0.08 * e); return;
+  }
+  if ( kind == 5 && layer == 0 ) {
+    // a wind line: the pixels along its curved path, light over what is under them (dst x 0.35 + 0.70)
+    vec2 e = c + 0.5 - vA.xy, wn = vec2(-uWindDir.y, uWindDir.x);
+    float s = dot(e, uWindDir), lat = dot(e, wn);
+    if ( s < vA.z - 0.5 || s > vA.w + 0.5 ) discard;
+    float w = 4.5 * sin(s / 21.0 + vB.x) + 1.8 * sin(s / 8.3 + vB.y);
+    float dw = abs(4.5 / 21.0 * cos(s / 21.0 + vB.x) + 1.8 / 8.3 * cos(s / 8.3 + vB.y));
+    if ( abs(lat - w) > 0.5 + 0.5 * dw ) discard;
+    float f = (vA.w - s) / max(vA.w - vA.z, 1.0), age = vB.z;      // f: 0 at the head .. 1 at the tail
+    if ( f > 1.0 - smoothstep(0.45, 1.0, age) || f < 0.9 * smoothstep(0.8, 1.0, age) || bayer4(c) >= (f < 0.5 ? 1.01 : 1.5 - 1.2 * f) ) discard;
+    out_(0.35, vec3(0.70)); return;
+  }
+  if ( kind == 5 ) {
+    vec2 d = c - floor(vA.xy);
+    bool fl = vB.y > 0.5;
+    vec3 col = leaf(vB.x) * (fl ? 1.0 : 0.72);
+    if ( d == vec2(0.0) ) { out_(0.0, col); return; }
+    if ( vB.z > 0.5 && d == (fl ? vec2(1.0, 0.0) : vec2(0.0, 1.0)) ) { out_(0.0, col * 0.85); return; }
+    if ( vB.w > 0.5 && (d == vec2(1.0) || (fl && d == vec2(-1.0, 0.0))) ) { out_(0.0, col * (d == vec2(1.0) ? 0.7 : 0.9)); return; }
+    if ( c == floor(vA.zw) ) { out_(0.7, vec3(0.0)); return; }       // its ground shadow: shows the height
+    discard;
   }
   // embers
   vec2 P = floor(vA.xy), d = c - P;

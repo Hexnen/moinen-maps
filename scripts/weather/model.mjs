@@ -28,7 +28,7 @@ export const DEFAULT_DUR = 20000;       // ms
 export const MIN_DUR = 0;
 
 /** The effects drawn by this build, in draw order. */
-export const EFFECTS = ["rain", "snow", "sand", "dust", "embers"];
+export const EFFECTS = ["rain", "snow", "sand", "dust", "embers", "wind"];
 /** The GM's presets: which effects at which level (null = the chosen level). */
 export const PRESETS = {
   clear: {},
@@ -36,10 +36,14 @@ export const PRESETS = {
   snow: { snow: null },
   sand: { sand: null },
   dust: { dust: null },
-  embers: { embers: null }
+  embers: { embers: null },
+  wind: { wind: null },
+  storm: { rain: null, wind: null },
+  blizzard: { snow: null, wind: null }
 };
 export const PRESET_ICONS = { clear: "fa-solid fa-sun", rain: "fa-solid fa-cloud-rain", snow: "fa-solid fa-snowflake", sand: "fa-solid fa-wind",
-  dust: "fa-solid fa-sun-haze", embers: "fa-solid fa-fire-flame-curved" };
+  dust: "fa-solid fa-sun-haze", embers: "fa-solid fa-fire-flame-curved", wind: "fa-solid fa-leaf", storm: "fa-solid fa-cloud-showers-heavy",
+  blizzard: "fa-solid fa-icicles" };
 
 export const LIMITS = { wetRate: [5, 600], dryRate: [10, 3600], snowRate: [5, 1800], meltRate: [10, 7200], strength: [0, 1], str: [0, 1], gust: [0, 1], dur: [0, 600000] };
 export const GROUND_DEFAULT = { wetRate: 60, dryRate: 300, puddles: true, snowRate: 120, meltRate: 600 };
@@ -134,9 +138,18 @@ export const TABLES = {
     swarm: [0.15, 0.3, 0.45],                                                   // the swarm floor: share of sparks that fly outside the gust swarms
     smoke: [0, 1, 1], smokeL3: [0, 0, 1], dim: [0.15, 0.6, 1],                  // smoke haze on, its 2-band look; the dim, warm evening
     lens: { glow: [0.4, 0.7, 1], flecks: [5, 10, 18] }
+  },
+  wind: {                                                                       // visible wind (no lens part: air is invisible on glass)
+    spd: [0.55, 0.8, 1],                                                        // everything carried slower in a breeze
+    lines: [1.3, 3.6, 7.1], lineGate: [0.12, 0.04, 0], lineLen: [0.75, 1, 1],   // wind lines per 64 x 64, extra gust gate, length
+    debris: [0.6, 3.2, 7.7], bob: [2.5, 3.5, 6],                                // leaves and bits per 64 x 64, their bounce (art px)
+    comb: [0.80, 0.72, 0.66],                                                   // grass combing: threshold (lower = more combed)
+    ruffle: [0.35, 0.65, 1],                                                    // cat's paws and glints on water
+    cloud: [0, 0.6, 1], dim: [1, 0.985, 0.97],                                  // cloud shadows (share of the full look); overall dim
+    haze: [0, 0, 0.5]                                                           // blown dust drifting along the wind
   }
 };
-const DENS = new Set(["mid", "far", "near", "bead", "grit", "motes", "spark", "crystals", "impacts", "flecks"]);
+const DENS = new Set(["mid", "far", "near", "bead", "grit", "motes", "spark", "crystals", "impacts", "flecks", "lines", "debris"]);
 
 /** One gate at level-continuum s: piecewise linear through the table at s = 0, 1, 2. */
 export function gate(table, s, dens = false) {
