@@ -71,8 +71,20 @@ function maybeDrop() { if ( root && !root.children.length ) { root.remove(); roo
  * The part of the screen where the map is not covered by Foundry's interface: the middle column (#ui-middle: between the scene controls
  * and the sidebar), less the navigation on top and the hotbar below. An arrow on the edge of THIS rect is never under the chat or the
  * scene controls.
+ * Cost: the three rects force a style + layout pass whenever the page wrote to the DOM since the last one (every camera frame: Foundry's
+ * HUD, a marker): the rect is kept SAFE_MS (the interface columns do not move in that time; a window resize drops it at once), so a
+ * marker following a pan, or the stage's checks of one beat, do not force a layout each.
  */
+const SAFE_MS = 200;
+let safeMemo = null, safeAt = -Infinity, safeWired = false;
 export function safeRect() {
+  const now = performance.now();
+  if ( safeMemo && now - safeAt < SAFE_MS ) return { ...safeMemo };
+  if ( !safeWired ) { safeWired = true; window.addEventListener("resize", () => { safeMemo = null; }, { passive: true }); }
+  safeMemo = measureSafe(); safeAt = now;
+  return { ...safeMemo };
+}
+function measureSafe() {
   const mid = document.getElementById("ui-middle")?.getBoundingClientRect?.();
   let x0 = mid?.width ? mid.left : 0, x1 = mid?.width ? mid.right : innerWidth, y0 = 0, y1 = innerHeight;
   const top = document.getElementById("navigation")?.getBoundingClientRect?.(), bot = document.getElementById("hotbar")?.getBoundingClientRect?.();
@@ -136,10 +148,10 @@ export function caption({ kick, title, icon, lb = 0, hint = "" }) {
   el.style.setProperty("--mm-dir-lb", `${lb}vh`);
   el.innerHTML = `<div class="mm-dir-kick">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}<span>${esc(kick)}</span></div><div class="mm-dir-title">${esc(title)}</div>${hint ? `<div class="mm-dir-hint">${esc(hint)}</div>` : ""}`;
   host().appendChild(el);
-  clearOfUi(el);
-  void el.offsetWidth;
-  el.classList.add("is-in");
-  let gone = false;
+  let gone = false, shown = false;
+  // (it slides in once its place is known: until then every part of it is transparent - the hidden state of the slide-in)
+  const show = () => { if ( gone || shown ) return; shown = true; void el.offsetWidth; el.classList.add("is-in"); };
+  clearOfUi(el, () => !gone, show);
   const remove = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); };
   return { el, out: (ms = 420) => { if ( gone ) return; el.classList.add("is-out"); setTimeout(remove, ms); }, remove };
 }
@@ -147,36 +159,58 @@ export function caption({ kick, title, icon, lb = 0, hint = "" }) {
 /**
  * The lower third never sits under Foundry's interface: centred over the free part of the screen (not under an open window), and lifted
  * above the hotbar (macro slots, the chat input...) when the letterbox bar puts it there.
+ * Cost: a hit test (elementsFromPoint) costs ~0.3 ms on a page with a long chat log (more on a slow machine) and the caption needs 21 to
+ * 63 of them: they run in slices of SLICE_MS between frames (the caption shows when its place is known, a few frames later), never as
+ * one long frame in the middle of the camera move. `alive()` false: stop; `done()` once the place is set.
  */
-function clearOfUi(el) {
+const SLICE_MS = 4;
+/** The next slice: after the next frame is drawn (one slice per frame; a hidden tab, where frames stop, goes on after 120 ms). */
+const later = (fn) => { let ran = false; const go = () => { if ( !ran ) { ran = true; fn(); } }; requestAnimationFrame(() => setTimeout(go, 0)); setTimeout(go, 120); };
+function clearOfUi(el, alive = () => true, done = () => {}) {
   try {
     const f = freeRect();
     el.style.left = `${Math.round(f.x + f.w / 2)}px`;
     el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
-    // whatever interface sits where the caption would be (Foundry's hotbar, the players list, the chat input, another module's
-    // buttons above the hotbar): the caption goes above the highest of them (probed across its width, twice: lifting may meet more)
-    const OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right", "ui-bottom"]);
-    const blocker = (x, y) => {
-      for ( const e of document.elementsFromPoint?.(x, y) ?? [] ) {
-        if ( e.closest?.(".mm-dir, .mm-cin, .mm-dmv") ) continue;
-        if ( e === document.body || e === document.documentElement || OPEN.has(e.id) || e.tagName === "CANVAS" ) return null;
-        const b = e.getBoundingClientRect();
-        if ( b.height > innerHeight * 0.6 || b.width > innerWidth * 0.9 ) return null;   // (a full-screen layer: not interface)
-        return b;
-      }
-      return null;
-    };
-    for ( let pass = 0; pass < 3; pass++ ) {
-      const r = el.getBoundingClientRect();
-      let top = Infinity;
-      for ( let i = 0; i <= 6; i++ ) for ( const fy of [0.2, 0.6, 0.95] ) {
-        const b = blocker(r.left + (r.width * i) / 6, r.top + r.height * fy);
-        if ( b && b.top > innerHeight * 0.45 ) top = Math.min(top, b.top);
-      }
-      if ( top === Infinity ) break;
-      el.classList.add("is-low"); el.style.bottom = `${Math.round(innerHeight - top + 10)}px`;
+  } catch { done(); return; }
+  // whatever interface sits where the caption would be (Foundry's hotbar, the players list, the chat input, another module's
+  // buttons above the hotbar): the caption goes above the highest of them (probed across its width, twice: lifting may meet more)
+  const OPEN = new Set(["board", "interface", "ui-top", "ui-middle", "ui-left", "ui-right", "ui-bottom"]);
+  const blocker = (x, y) => {
+    for ( const e of document.elementsFromPoint?.(x, y) ?? [] ) {
+      if ( e.closest?.(".mm-dir, .mm-cin, .mm-dmv") ) continue;
+      if ( e === document.body || e === document.documentElement || OPEN.has(e.id) || e.tagName === "CANVAS" ) return null;
+      const b = e.getBoundingClientRect();
+      if ( b.height > innerHeight * 0.6 || b.width > innerWidth * 0.9 ) return null;   // (a full-screen layer: not interface)
+      return b;
     }
-  } catch { /* the default place */ }
+    return null;
+  };
+  let pass = 0, pts = null, k = 0, top = Infinity;
+  const step = () => {
+    if ( !alive() ) return;
+    try {
+      const t0 = performance.now();
+      for ( ;; ) {
+        if ( !pts ) {
+          const r = el.getBoundingClientRect();
+          pts = []; k = 0; top = Infinity;
+          for ( let i = 0; i <= 6; i++ ) for ( const fy of [0.2, 0.6, 0.95] ) pts.push([r.left + (r.width * i) / 6, r.top + r.height * fy]);
+        }
+        while ( k < pts.length ) {
+          const b = blocker(pts[k][0], pts[k][1]); k++;
+          if ( b && b.top > innerHeight * 0.45 ) top = Math.min(top, b.top);
+          if ( k < pts.length && performance.now() - t0 > SLICE_MS ) { later(step); return; }
+        }
+        if ( top === Infinity ) break;
+        el.classList.add("is-low"); el.style.bottom = `${Math.round(innerHeight - top + 10)}px`;
+        pts = null;
+        if ( ++pass >= 3 ) break;
+        if ( performance.now() - t0 > SLICE_MS ) { later(step); return; }
+      }
+    } catch { /* the default place */ }
+    done();
+  };
+  step();
 }
 
 /**
@@ -187,7 +221,10 @@ export function marker({ x, y, text, icon, onClick }) {
   const el = document.createElement("div");
   el.className = "mm-dir-mark";
   host().appendChild(el);
-  const m = { el, x, y, kind: null, onClick, text, icon };
+  const m = { el, x, y, kind: null, onClick, text, icon, labW: 0, w: {} };
+  // (the writes only when a value changed, and the label's width measured once per text: a pan moves the marker every frame, and a
+  // read of the layout after a write forced a style + layout pass per marker per frame)
+  const put = (node, k, v, set) => { if ( m.w[k] !== v ) { m.w[k] = v; set(node, v); } };
   const place = () => {
     const p = toScreen(m.x, m.y), a = safeRect(), q = edgeSpot({ x: p.x - a.x, y: p.y - a.y }, a.w, a.h, 58);
     const s = { ...q, x: q.x + a.x, y: q.y + a.y }, kind = q.on || inside(p) ? "ping" : "arrow";
@@ -198,15 +235,17 @@ export function marker({ x, y, text, icon, onClick }) {
       el.innerHTML = kind === "ping" ? `<div class="mm-dir-ring"></div><div class="mm-dir-ring r2"></div>${RETICLE}<div class="mm-dir-dot"></div>${lab}`
         : `${CHEVRON}<div class="mm-dir-arrow" role="button" tabindex="-1"><i class="${esc(icon || "fa-solid fa-eye")}" inert></i></div>${lab}`;
       el.querySelector(".mm-dir-arrow")?.addEventListener("click", (ev) => { ev.stopPropagation(); m.onClick?.(); });
+      m.lab = el.querySelector(".mm-dir-label"); m.labW = 0; m.w = {};
     }
-    el.style.transform = `translate(${Math.round(s.x)}px, ${Math.round(s.y)}px)`;
-    el.style.setProperty("--mm-dir-a", `${s.a}rad`);
-    const lab = el.querySelector(".mm-dir-label");
+    put(el, "t", `translate(${Math.round(s.x)}px, ${Math.round(s.y)}px)`, (n, v) => { n.style.transform = v; });
+    put(el, "a", `${s.a}rad`, (n, v) => n.style.setProperty("--mm-dir-a", v));
+    const lab = m.lab;
     if ( lab ) {   // the label stays on screen: below the marker, above it near the bottom, pushed in from the sides
       const below = s.y < a.y + a.h - 90;
-      lab.style.top = below ? "34px" : "auto"; lab.style.bottom = below ? "auto" : "34px";
-      const half = (lab.offsetWidth || 160) / 2, dx = Math.max(0, a.x + half + 8 - s.x) - Math.max(0, s.x + half + 8 - (a.x + a.w));
-      lab.style.transform = `translate(calc(-50% + ${Math.round(dx)}px), 0)`;
+      put(lab, "b", below, (n, v) => { n.style.top = v ? "34px" : "auto"; n.style.bottom = v ? "auto" : "34px"; });
+      m.labW ||= lab.offsetWidth;
+      const half = (m.labW || 160) / 2, dx = Math.max(0, a.x + half + 8 - s.x) - Math.max(0, s.x + half + 8 - (a.x + a.w));
+      put(lab, "x", `translate(calc(-50% + ${Math.round(dx)}px), 0)`, (n, v) => { n.style.transform = v; });
     }
   };
   m.place = place;
@@ -223,7 +262,7 @@ export function marker({ x, y, text, icon, onClick }) {
     m.text = String(t ?? "");
     const span = el.querySelector(".mm-dir-label > span");
     if ( !span ) { m.kind = null; place(); return; }
-    span.textContent = m.text;
+    span.textContent = m.text; m.labW = 0;
     span.animate?.([{ filter: "brightness(2.2)", opacity: 0.4 }, { filter: "none", opacity: 1 }], { duration: 420, easing: "ease-out" });
     place();
   };
