@@ -106,7 +106,9 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     mark(); fx.begin({ r }, { strokes }); fx.impact({ x: cx - 300, y: cy, size: 160 }); await sleep(250);
     // (a pointerdown: the canvas's own wheel handler would zoom by itself and blur the "stays where the player left it" measure; the wheel is tested after)
     (canvas.app.view ?? canvas.app.canvas).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-    const dbgA = fx.debug(); await sleep(60);
+    const dbgA = fx.debug();
+    (canvas.app.view ?? canvas.app.canvas).dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));   // (a press never released is a long press: Foundry pings, and the ping's animations count as listeners)
+    await sleep(60);
     const Vb = view();
     need("a pointerdown on the canvas aborts the camera at once", dbgA && !dbgA.cameraOn && dbgA.cameraAborted);
     await sleep(700); const Vc = view();
@@ -165,7 +167,7 @@ export async function cinematicFxCheck({ idleFrames = 200 } = {}) {
     // ---- idle cost unchanged
     await park();
     const idleAfter = await I.rest({ frames: idleFrames, warm: Math.round(idleFrames / 3), zoom: V0.scale });
-    need("idle-bench rest unchanged (mean within +0.15 ms)", idleAfter.total.mean <= idleBefore.total.mean + 0.15 && tickerCount() <= T0, { before: idleBefore.total, after: idleAfter.total });
+    need("idle-bench rest unchanged (mean within +0.15 ms)", idleAfter.total.mean <= idleBefore.total.mean + 0.15 && tickerCount() <= T0, { before: idleBefore.total, after: idleAfter.total, ticker: tickerCount(), T0 });
   } catch ( err ) {
     rows.push(row("check threw", false, { err: String(err?.stack ?? err) }));
   } finally {

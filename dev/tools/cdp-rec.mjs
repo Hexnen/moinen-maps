@@ -3,7 +3,8 @@
 //   chrome --headless=new --remote-debugging-port=9333 --user-data-dir=<scratch> --window-size=1280,800 --disable-background-timer-throttling
 //          --disable-renderer-backgrounding --disable-backgrounding-occluded-windows
 // Usage (node 22, ffmpeg on PATH):
-//   node dev/tools/cdp-rec.mjs open <port> <url>                          new page at url (1280x800)
+//   node dev/tools/cdp-rec.mjs open <port> <url>                          new page at url, in its own window (so every page stays visible and ticks)
+//   node dev/tools/cdp-rec.mjs front <port> <urlPrefix>                   bring a page to the front
 //   node dev/tools/cdp-rec.mjs eval <port> <urlPrefix> <js | @file>      evaluate (async body, `return` a value) -> JSON
 //   node dev/tools/cdp-rec.mjs rec <port> <recPrefix> <out.webm> <ms> [<drivePrefix> <js | @file>] [--at ms]
 //        screencast the page <recPrefix> for <ms>; after --at ms (default 400) the js runs in <drivePrefix> (not awaited); 30 fps webm.
@@ -32,12 +33,17 @@ async function evaluate(t, js, wait = true) {
   return r.result?.exceptionDetails ? { exception: r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text } : r.result?.result?.value;
 }
 
+async function browser() { return connect({ webSocketDebuggerUrl: (await (await fetch(`${base}/json/version`)).json()).webSocketDebuggerUrl }); }
 if ( cmd === "open" ) {
-  const t = await (await fetch(`${base}/json/new?${a}`, { method: "PUT" })).json();
+  // each page in its OWN window: a background tab of a shared window is "hidden" and its requestAnimationFrame stops
+  const br = await browser(), made = await br.send("Target.createTarget", { url: a, newWindow: true }); br.close();
+  const t = (await list()).find((x) => x.id === made.result.targetId);
   const s = await connect(t);
   await s.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: DPR, mobile: false });
   await s.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   s.close(); console.log(t.id);
+} else if ( cmd === "front" ) {
+  const br = await browser(); await br.send("Target.activateTarget", { targetId: (await find(a)).id }); br.close();
 } else if ( cmd === "eval" ) {
   console.log(JSON.stringify(await evaluate(await find(a), code(b)), null, 1));
 } else if ( cmd === "rec" ) {
