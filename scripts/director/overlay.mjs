@@ -123,7 +123,7 @@ export function marker({ x, y, text, icon, onClick }) {
     if ( kind === "ping" ) { s.x = p.x; s.y = p.y; }
     if ( kind !== m.kind ) {
       m.kind = kind;
-      const lab = text ? `<div class="mm-dir-label">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}${esc(text)}</div>` : "";
+      const lab = m.text ? `<div class="mm-dir-label">${icon ? `<i class="${esc(icon)}" inert></i>` : ""}<span>${esc(m.text)}</span></div>` : "";
       el.innerHTML = kind === "ping" ? `<div class="mm-dir-ring"></div><div class="mm-dir-ring r2"></div>${RETICLE}<div class="mm-dir-dot"></div>${lab}`
         : `${CHEVRON}<div class="mm-dir-arrow" role="button" tabindex="-1"><i class="${esc(icon || "fa-solid fa-eye")}" inert></i></div>${lab}`;
       el.querySelector(".mm-dir-arrow")?.addEventListener("click", (ev) => { ev.stopPropagation(); m.onClick?.(); });
@@ -146,7 +146,17 @@ export function marker({ x, y, text, icon, onClick }) {
   el.classList.add("is-in");
   let gone = false;
   const remove = () => { if ( gone ) return; gone = true; marks.delete(m); el.remove(); maybeDrop(); };
-  return { el, out: (ms = 600) => { if ( gone ) return; el.classList.add("is-out"); setTimeout(remove, ms); }, remove, get kind() { return m.kind; } };
+  /** A new caption (a cued shot's result): the label's text changes in place with a short flash. */
+  const setText = (t) => {
+    if ( gone ) return;
+    m.text = String(t ?? "");
+    const span = el.querySelector(".mm-dir-label > span");
+    if ( !span ) { m.kind = null; place(); return; }
+    span.textContent = m.text;
+    span.animate?.([{ filter: "brightness(2.2)", opacity: 0.4 }, { filter: "none", opacity: 1 }], { duration: 420, easing: "ease-out" });
+    place();
+  };
+  return { el, out: (ms = 600) => { if ( gone ) return; el.classList.add("is-out"); setTimeout(remove, ms); }, remove, setText, get kind() { return m.kind; } };
 }
 
 /** Everything off at once (scene change, kill switch). */

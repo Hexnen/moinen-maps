@@ -29,12 +29,15 @@ export const KINDS = Object.freeze({
   orbitDown: { pri: 8, hold: 1700, impact: true, group: "orbit", icon: "fa-solid fa-meteor" },
   altitude: { pri: 3, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-feather" },
   floor: { pri: 2, hold: 1100, impact: false, group: "altitude", icon: "fa-solid fa-stairs" },
+  attack: { pri: 6, hold: 3200, impact: true, group: "attacks", icon: "fa-solid fa-burst" },
+  damage: { pri: 6, hold: 1600, impact: true, group: "attacks", icon: "fa-solid fa-heart-crack" },
+  roll: { pri: 2, hold: 2600, impact: false, group: "rolls", icon: "fa-solid fa-dice" },
   cut: { pri: 9, hold: 1800, impact: false, group: null, icon: "fa-solid fa-video" },
   custom: { pri: 3, hold: 1500, impact: false, group: null, icon: "fa-solid fa-film" }
 });
 export const KIND_IDS = Object.keys(KINDS);
 /** The source toggles of the settings (one per group of kinds). */
-export const GROUPS = ["destruction", "fire", "zones", "orbit", "altitude"];
+export const GROUPS = ["destruction", "fire", "zones", "orbit", "altitude", "attacks", "rolls"];
 const kindOf = (k) => KINDS[k] ?? KINDS.custom;
 
 /* ---------------------------------------------------------------- settings (world) */
@@ -55,7 +58,7 @@ export const NUM = {
   zoomIn: [1.6, 1, 3, "x"],            // at most this much closer than the player's own zoom
   softMs: [3600, 1000, 10000, "ms"]    // how long a soft shot stays
 };
-export const BOOLS = { enabled: true, captions: true, softOn: true, src_destruction: true, src_fire: true, src_zones: true, src_orbit: true, src_altitude: true };
+export const BOOLS = { enabled: true, captions: true, softOn: true, src_destruction: true, src_fire: true, src_zones: true, src_orbit: true, src_altitude: true, src_attacks: true, src_rolls: true };
 export const STRS = { look: "epic" };   // the cinematic look preset of the take-overs (cinematic-core presets or a GM preset id)
 export const KEYS = [...Object.keys(NUM), ...Object.keys(BOOLS), ...Object.keys(STRS)];
 export const DEFAULTS = Object.freeze({ ...Object.fromEntries(Object.entries(NUM).map(([k, v]) => [k, v[0]])), ...BOOLS, ...STRS });
@@ -106,10 +109,22 @@ export const boxCentre = (b) => ({ x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 })
 export const unionBox = (a, b) => (!a ? b : !b ? a : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 export const pointBox = (x, y, r = 0) => ({ x0: x - r, y0: y - r, x1: x + r, y1: y + r });
 
+/** A caption: a plain string, or { key, data, kick? } (kick: an optional key for the small line above, formatted with the same data). */
+function normCaption(c) {
+  if ( typeof c === "string" ) return c.slice(0, 160);
+  if ( !c || typeof c !== "object" || typeof c.key !== "string" ) return null;
+  const out = { key: c.key, data: c.data && typeof c.data === "object" ? c.data : {} };
+  if ( typeof c.kick === "string" ) out.kick = c.kick;
+  return out;
+}
+
 /**
  * An event as the queue takes it, validated: { id, kind, weight 0..1, box (scene px), x, y (its focus), tokens [ids], caption, who
  * ("all" | "gm"), t, src, force }. A place is required: a box, a point (x, y), or both. Null when unusable.
  * `caption` = a plain string, or { key, data } (localised on each client, so every player reads it in their own language).
+ * A CUED event (`cue`: a name registered with the director's registerCue) has a moment each client finds for itself (a roll's dice
+ * landing on THAT client): the hit and the `after` caption (the result) wait for it. `strict`: every token of `tokens` must be visible
+ * to a client (the first one is the focus: when only another one is not, the client gets the soft form; when the focus is not, nothing).
  */
 export function normEvent(e, now = 0) {
   if ( !e || typeof e !== "object" ) return null;
@@ -119,7 +134,7 @@ export function normEvent(e, now = 0) {
   if ( !Number.isFinite(x) || !Number.isFinite(y) ) { if ( !box ) return null; ({ x, y } = boxCentre(box)); }
   if ( !box ) box = pointBox(x, y, 0);
   const w = num(e.weight);
-  const caption = typeof e.caption === "string" ? e.caption.slice(0, 160) : e.caption && typeof e.caption === "object" && typeof e.caption.key === "string" ? { key: e.caption.key, data: e.caption.data && typeof e.caption.data === "object" ? e.caption.data : {} } : null;
+  const caption = normCaption(e.caption);
   return {
     id: typeof e.id === "string" && e.id ? e.id.slice(0, 40) : `e${Math.round(now)}-${Math.floor(Math.random() * 1e6)}`,
     kind, weight: Number.isFinite(w) ? clamp(w, 0, 1) : 0.5, x, y, box,
@@ -127,7 +142,8 @@ export function normEvent(e, now = 0) {
     caption, who: e.who === "gm" ? "gm" : "all", t: Number.isFinite(num(e.t)) ? num(e.t) : now,
     src: typeof e.src === "string" ? e.src.slice(0, 40) : "api", force: !!e.force, scene: typeof e.scene === "string" ? e.scene : null,
     path: Array.isArray(e.path) ? e.path.filter(Number.isFinite).slice(0, 64) : null, dur: Number.isFinite(num(e.dur)) ? clamp(num(e.dur), 0, 8000) : null,
-    ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null
+    ref: typeof e.ref === "string" ? e.ref.slice(0, 40) : null,
+    cue: typeof e.cue === "string" && e.cue ? e.cue.slice(0, 24) : null, after: normCaption(e.after), strict: !!e.strict
   };
 }
 
@@ -226,7 +242,8 @@ export function merged(b) {
   return {
     id: b.id, kind: ph.kind, kinds, weight: clamp(Math.max(...(who === "gm" ? evs : pub).map((e) => e.weight)) + 0.06 * ((who === "gm" ? evs : pub).length - 1), 0, 1),
     x: ph.x, y: ph.y, box: who === "gm" ? box : pbox, tokens: [...(who === "gm" ? tokens : ptok)], caption: ph.caption, who,
-    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null
+    n: evs.length, force: evs.some((e) => e.force), scene: b.scene, path: ph.path, dur: ph.dur, ref: ph.ref ?? null,
+    cue: ph.cue ?? null, after: ph.after ?? null, strict: !!ph.strict
   };
 }
 
@@ -242,7 +259,8 @@ export function plan(ev, form, r, now, seq = 0) {
   const shot = {
     v: VERSION, id: `${ev.id}-${form[0]}`, form, kind: ev.kind, kinds: ev.kinds ?? [ev.kind], weight: ev.weight, x: ev.x, y: ev.y, box: ev.box, tokens: ev.tokens,
     caption: ev.caption, who: ev.who, scene: ev.scene, path: ev.path ?? null, t0: now, lead, hold: form === "take" ? len - lead - back : len, back, len,
-    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null
+    impact: form === "take" && k.impact ? Math.round(lead * 0.92) : -1, n: ev.n ?? 1, force: !!ev.force, ref: ev.ref ?? null,
+    cue: ev.cue ?? null, after: ev.after ?? null, strict: !!ev.strict
   };
   return shot;
 }

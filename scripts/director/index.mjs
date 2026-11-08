@@ -6,7 +6,9 @@
 import "./director.mjs";
 import { registerSources } from "./sources.mjs";
 import { registerBar } from "./bar.mjs";
+import { registerRollsSource } from "./source-rolls.mjs";
 import "./section.mjs";
 
 registerSources();
 registerBar();
+registerRollsSource();
