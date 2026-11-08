@@ -94,5 +94,10 @@ const env = () => {
 export const Screen = createFx(env);
 export const CinematicFx = Screen;
 moduleApi.cinematic = Screen;
-// a scene change or a reload of the canvas: everything of the show goes at once
-Hooks.on("canvasTearDown", () => Screen.abort());
+// a scene change or a reload of the canvas: everything of the show goes at once; a shot (or the show) on screen leaves the scene with the
+// player's OWN view as its remembered one (Foundry restores _viewPosition when the scene is drawn again), not the shot's camera
+Hooks.on("canvasTearDown", () => {
+  const h = Screen.home, sc = canvas?.scene;
+  if ( h && sc?._viewPosition && [h.x, h.y, h.scale].every(Number.isFinite) ) sc._viewPosition = { ...sc._viewPosition, x: h.x, y: h.y, scale: h.scale };
+  Screen.abort();
+});

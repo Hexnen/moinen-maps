@@ -132,3 +132,54 @@ Each agent appends: date, branch, what was done, verified vs not.
 - Plain (non-attack) rolls: soft in standard/dramatic, hidden in calm. Keep, or off by default?
 - A roll a player whispers to the GM gives that player (its author) no shot either (the engine has only "all" / "gm"). Add per-user recipients?
 - Long-range attacks that do not fit even at half zoom lean to the target; a pan from attacker to target during the dice would need an explicit path start in the engine.
+
+## 2026-11-08 - phase B, scene transitions (agent director-scene), branch `director-scene`
+
+### What exists
+- `scripts/director/scene-core.mjs` (pure, 45 checks in `dev/director-scene.test.mjs`): settings (`dirArrival` world: on, dip, card, shot, login, names nav|navOnly, cardMs, glideMs, holdMs), the scene flag `dirScene` ({ title, sub, off }), `titleOf` (GM's card title > navigation name > name; never more than Foundry's navigation bar already shows a player viewing that scene; Orbit's name always), `decideArrival` (full / soft / none), `dipOnTearDown`, `startView` (establish / rise / descend; a wide start is kept on the map so no empty canvas shows), `glideMs`, `timeline`.
+- `scripts/director/source-scene.mjs` (per client, no socket, no leader): an ARRIVAL when this tab shows a scene it did not show last (sessionStorage; a reload or redraw of the same scene plays nothing):
+  - DIP: at `canvasTearDown` with `options.nextScene` another scene, a DOM veil fades to dark over Foundry's frozen old-scene picture. Scenes with Foundry's own transition keep theirs (no dip). A 20 s safety removes a veil a failed load would leave.
+  - At `canvasReady`: camera put on the start (behind the veil / before Foundry's transition captures), bars + vignette of the director's look via `Screen.begin({ owner: "arrival" })` (home = the view Foundry gave the player), the title card (kicker, title, gold rule, line under it) over the dark; the veil lifts when the module's `net/reveal.mjs` reveal is done (min 380 ms, cap `holdMs`) and after Foundry's own transition (`canvas.root.visible`); the camera glides into the player's view (own CanvasAnimation named `canvas.animatePan`, zoom on a log scale); bars go.
+  - Wide start: no token vision = the scene; token vision = the union of this player's vision source shapes (after `perception.applyRenderFlags`, as Foundry does before its transitions); fog and vision are drawn by Foundry over every frame.
+  - Orbit: a player who FOLLOWS their character up (orbit.mjs `mmOrbit` createToken, `game.user.character`) starts close on it and pulls back (kicker "Launch"); a landing starts high and comes down onto it ("Landing"); the Orbit scene opened by hand pulls back too.
+  - Control: Esc / left click on the board = cut (camera in the player's view at once, all out); wheel / other button / pan keys = the player takes the camera. Busy player, `dirMode` soft or intensity < 0.15 = soft form (short dip, small title at the top, no camera); reduced motion = no camera move; `dirMode` off / GM "bar" = nothing; kill switch = nothing. Game paused: the card sits above Foundry's pause badge.
+  - While an arrival plays, director take-overs come soft (`holds`); a destruction show or a take that still gets the screen ends the arrival.
+  - Hook `moinenMapsDirector`: `arrival` ({ scene, form, title, move, native }) and `arrivalEnd` ({ scene, why }). API `api.director.arrival` (test, settings, cut, status, _debug).
+- `scripts/director/scene-panel.mjs`: panel "Scene transitions" in the Director section via `extendSection` (world settings, this scene's card title / line / off, "Test the arrival here"). en + pl.
+- `dev/director-scene-check.mjs`: `watchArrival`, `sample`, `leaks`, `switchLoop`, `errors`.
+
+### Shared files touched (minimal)
+- `scripts/director/director.mjs`: `export const holds = new Set()`; `busy({ ignoreHolds })` is true while a hold is set.
+- `scripts/director/stage.mjs`: the canvasTearDown handler first writes `Screen.home` (the player's own view) into the old scene's `_viewPosition`, then aborts: a scene change mid-shot no longer leaves the shot's camera as that scene's remembered view.
+- `scripts/director/index.mjs`: imports + `registerSceneSource()`.
+- `lang/en.json`, `lang/pl.json`: 31 keys `MOINENMAPS.Dir.arr.*` appended at the end.
+
+### Verified (lane 3, restarted for the module socket; headless Chrome CDP: GM page 127.0.0.31 = Gamemaster, PLAYER page 127.0.0.32 = Test Gracz 1)
+- PLAYER, GM activates a scene: dip at tearDown, veil opaque at ready, card "Old Street" (the navName of the copy "street (dir-scene test)": its real name never shown) + line, wide start -> the player's own view exactly, bars out, everything removed (`watchArrival`, video).
+- PLAYER follows own character to Orbit (`sendToOrbit`): "Launch / Orbit" + pull-back; back (`bringBack`): "Landing / Old Street" + descent onto the token (videos).
+- Token vision on (sight 15): start framed from the vision shape; the video shows only the lit vision area, the rest black through the whole move.
+- Load not slowed: view() -> canvasReady, arrival off vs on, balanced per scene: 81/95 vs 92/87 ms and 103/110 vs 105/103 ms; long tasks after the switch not higher with it on.
+- Scene change in the middle of a director take-over (GM cutTo, player switches at 1.3 s): the new scene's arrival took the screen, no caption / bars left; the old scene remembered the player's own view (2500,4000,0.6) and going back landed there exactly. (Closes phase A's open item.)
+- Director cutTo during an arrival -> soft on the player; Esc during the arrival -> camera at home within 0.7 s, veil / card / bars gone.
+- Soft mode: no camera move, no bars. Reduced motion: no camera move, card + bars.
+- 12 scene switches on the PLAYER (4 scenes, arrivals interrupted after 0.6-0.7 s, 4 cut at 0.9 s): no errors; DOM, holds, screen, ticker listener count and hook counts identical before and after.
+- Idle: no arrival listener at rest (`idle-bench rest` on the player). GM (auto = bar): no dip, no card. Panel renders and writes the scene flag.
+- `node dev/run-all.mjs` 57/57, `node dev/lang-audit.mjs` clean.
+
+### Not verified
+- Scenes with Foundry's own transition (fade, swirl...): the no-dip path and the wait on `canvas.root.visible` were not exercised live.
+- Two player pages at once, DPR 2, a slow machine / touch device; the login arrival ran (state checked) but was not recorded.
+- A cold first visit of a heavy scene showed a ~4 s main-thread long task after canvasReady (the module's own load work, arrival off or on); the veil stays dark through it and the card comes after it (timers cannot run on a frozen main thread).
+
+### Videos (PLAYER page, Test Gracz 1)
+- `dev/director-scene-arrival.webm` - GM activates a scene: dip, title card + line, establishing glide.
+- `dev/director-scene-orbit-up.webm` - the player's character sent to orbit: follow, "Launch / Orbit", pull-back.
+- `dev/director-scene-landing.webm` - back from orbit: "Landing / Old Street", descent onto the token.
+- `dev/director-scene-vision.webm` - token-vision scene: the wide start shows only what the token sees.
+- `dev/director-scene-paused.webm` - arrival while the game is paused (card above the pause badge).
+
+### Open decisions for the user
+- The card shows the navigation name, else the scene's name (what Foundry's navigation bar already shows a player viewing it). "Map 03 v2"-style names land on the card: switch "Name on the card" to "Navigation name only" or set a card title per scene.
+- Arrival also on login / a new tab (`login` on by default); a reload of the same scene never replays.
+- Each client plays its arrival when its own load is done, not on the shared clock (syncing would hold fast clients for slow ones).
+- Lane 3 test world: a scene copy "street (dir-scene test)" with a "Denizen" token; Test Gracz 1's character set to that Denizen for the orbit test.

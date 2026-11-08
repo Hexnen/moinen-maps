@@ -211,8 +211,11 @@ export function seeTokens(shot) {
 
 /* the player at work: a button held on the board, the wheel a moment ago, the pan keys held */
 const input = { down: 0, wheel: 0, downAt: 0 };
+/** Other parts of the director that own the screen for a moment (the scene arrival): while any holds it, take-overs come soft. */
+export const holds = new Set();
 const PAN_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Numpad8", "Numpad2", "Numpad4", "Numpad6"]);
-export function busy() {
+export function busy({ ignoreHolds = false } = {}) {
+  if ( !ignoreHolds && holds.size ) return true;
   if ( input.down > 0 && performance.now() - input.downAt < 15000 ) return true;          // (a lost pointerup never keeps a player "busy" for good)
   if ( performance.now() - input.wheel < 1200 ) return true;
   const keys = game.keyboard?.downKeys;

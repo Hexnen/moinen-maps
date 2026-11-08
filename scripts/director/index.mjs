@@ -9,7 +9,10 @@ import { registerBar } from "./bar.mjs";
 import { registerRollsSource } from "./source-rolls.mjs";
 import "./section.mjs";
 import "./source-move.mjs";
+import { registerSceneSource } from "./source-scene.mjs";
+import "./scene-panel.mjs";
 
 registerSources();
 registerBar();
 registerRollsSource();
+registerSceneSource();
