@@ -1,6 +1,6 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, setting, store, onSetting, optHint } from "./ui.mjs";
-import { typeLabel } from "../config.mjs";
+import { esc, T, setting, store, onSetting, optHint, optRange, optSelect, isEcho } from "./ui.mjs";
+import { typeLabel, sceneConfig, MODULE_ID } from "../config.mjs";
 import { currentPinType, thumb, mountPalette, mountPresetManager, managerSelect } from "../presets.mjs";
 import { dockFilter } from "../filter-panel.mjs";
 import { swatchesHtml, wireSwatches, clearPins } from "../tools.mjs";
@@ -40,6 +40,37 @@ function pinsBar(host, ctx) {
   return () => { off(); Hooks.off("updateSetting", offWorld); host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); };
 }
 
+/**
+ * The size of the pins on the viewed scene (the same keys as the Scene Config tab: sizeBy, size, sizeGrid): from the note's icon size
+ * times a multiplier, or a share of a grid square. Only the slider of the chosen mode shows. GM only; follows the scene and scene switches.
+ */
+function lookPanel(host) {
+  const render = () => {
+    const s = canvas?.scene;
+    if ( !s ) { host.innerHTML = `<p class="hint">${esc(T("Zones.noScene"))}</p>`; return; }
+    const c = sceneConfig(s), grid = c.sizeBy === "grid";
+    host.innerHTML = `<div class="mm-ws-form">
+      ${optSelect({ name: "sizeBy", label: T("SizeBy"), value: c.sizeBy, hint: T("SizeByHint"), options: [["note", T("SizeByNote")], ["grid", T("SizeByGrid")]] })}
+      ${grid ? optRange({ name: "sizeGrid", label: T("SizeGrid"), value: c.sizeGrid, min: 0.2, max: 3, step: 0.05, hint: T("SizeGridHint") })
+        : optRange({ name: "size", label: T("Size"), value: c.size, min: 0.5, max: 2, step: 0.05 })}</div>`;
+    if ( !game.user.isGM ) host.querySelectorAll("select, range-picker").forEach((c2) => { c2.disabled = true; });
+  };
+  const onChange = (ev) => {
+    if ( isEcho() || !game.user.isGM ) return;
+    const c = ev.target.closest?.("[name]"), s = canvas?.scene; if ( !c || !s ) return;
+    if ( !["sizeBy", "size", "sizeGrid"].includes(c.name) ) return;
+    const v = c.name === "sizeBy" ? c.value : Number(c.value);
+    if ( c.name !== "sizeBy" && !Number.isFinite(v) ) return;
+    if ( sceneConfig(s)[c.name] === v ) return;
+    s.update({ [`flags.${MODULE_ID}.config.${c.name}`]: v });
+  };
+  host.addEventListener("change", onChange);
+  const onScene = (s, ch) => { if ( s.id === canvas?.scene?.id && foundry.utils.hasProperty(ch, `flags.${MODULE_ID}.config`) && !host.contains(document.activeElement) ) render(); };
+  const hU = Hooks.on("updateScene", onScene), hC = Hooks.on("canvasReady", () => render());
+  render();
+  return () => { host.removeEventListener("change", onChange); Hooks.off("updateScene", hU); Hooks.off("canvasReady", hC); };
+}
+
 registerSection({
   id: "pins", order: 1, title: "MOINENMAPS.WS.pins", icon: "fa-solid fa-location-dot", color: "#e5322d",
   activeTool: "select",
@@ -53,6 +84,7 @@ registerSection({
   panels: [
     { id: "palette", title: "MOINENMAPS.WS.pPalette", icon: "fa-solid fa-layer-group",
       mount: (host, ctx) => mountPalette(host, { onManage: async (id) => { await ctx.revealPanel("presets"); managerSelect(id); } }) },
+    { id: "look", title: "MOINENMAPS.WS.pLook", icon: "fa-solid fa-up-right-and-down-left-from-center", mount: (host) => lookPanel(host) },
     { id: "filter", title: "MOINENMAPS.WS.pFilter", icon: "fa-solid fa-filter", mount: (host) => dockFilter(host) },
     { id: "presets", title: "MOINENMAPS.WS.pPresets", icon: "fa-solid fa-sliders", open: false, mount: (host) => mountPresetManager(host) }
   ]
