@@ -1,6 +1,6 @@
 # Fire level slider 1..3: design (task F1)
 
-Status: design, then built on branch `fire-slider` (from main 94659bc). Written 2026-11-09. The "as built" notes are in section 9.
+Status: design, then built on branch `fire-slider` (from main 94659bc). Written 2026-11-09. The "as built" notes are in section 8.
 
 ## 0. The ask
 
@@ -126,7 +126,7 @@ ramps use the new paths.
   * Release calls `Fire.setLevels(id, { lv })`, which starts a ramp.
   * While the stroke ramps, a live value ("now 1.84") and a marker on the track update at 4 Hz.
   * The list is never rebuilt under the pointer (the existing focus rule).
-* **API.** `fire.setLevels(id, { level, over })` (over in s, 0 = at once), and `fire.paint(..., { level })` takes a float. `list()` gives `lv` and `lvNow`.
+* **API.** `fire.setLevels(id, { level, over })` (over in ms, default 4000, max 25 000, 0 = at once), and `fire.paint(..., { level })` takes a float. `list()` gives `lv` and `lvNow`.
 * **i18n.** EN and PL: the new slider texts and the live value. The level names stay.
 
 ## 6. Proof plan (binding bar)
@@ -165,3 +165,24 @@ ramps use the new paths.
 | Pop at the end of a ramp | The area keeps the ramp texture for a tail (puffs up to 6 s / speed). After that it is rebuilt with k = 1, identical. |
 | Lights radius jump | The polygon at the max radius during the ramp, reach scaled; one move at the end with the same look. |
 | Low-strength strokes (s < 0.2) at level 1 have a smaller bed (heat 0.74 x s x 0.35 < 0.05 at the rim) | A ramp across level 1 changes the bed's edge cells at the start: known, small, only at s < 0.2. |
+
+## 8. As built (2026-11-09/10, branch `fire-slider`)
+
+What differs from, or adds to, sections 2-5:
+
+* **`over` is in ms** (API `setLevels(id, { level, over })`, default `LV_RAMP_MS` 4000, clamped 0..25 000). The record's `lr` is in s.
+* **The ramp starts `LV_LEAD_MS` = 300 ms after the write**, so players have the record before anything moves. After the ramp the area keeps its ramp texture for a tail of `LV_TAIL_MS` = 6500 / speed (the puffs and blobs born on the old schedule finish), then it is rebuilt to the steady field.
+* **Level codes.** Whole levels keep the old A-byte codes; fractional levels use `13 + 4q + sm`. The ramp texture: R = from-code, G = start byte, B = smoke source at the from-level, A = length.
+* **An interrupted ramp keeps its history.** A change during a ramp starts from `levelNow`, and the stroke also keeps the ramp it cut short (`p0 / pv / pt / pr`). The area gets a second ramp texture (`ramp2`, uniforms `uLvRamp2`, `uHasRamp2`, `uRampP`): a puff, spark or blob born before the new ramp takes its level from the old ramp, so nothing in flight changes its look at the interruption. Without this, the interrupt webm showed a pop at the cut.
+* **Lights.** The hand-over bridge's start ratio is solved by bisection on the tint magnitude. The old a/b ratio overshot by 10-15 %, which made a visible +1.7..+4 luminance step at night when a change started. A light that is moved or made now forces its update.
+* **Two program variants.** The art programs (ART_F, ART_S, EMB) are built twice from one source: `#define LVC 0` (whole levels; every continuous-level path folds away, so the whole-level programs are the old code) and `LVC 1` (continuous). An area uses LVC 1 only while it has a fractional level or a ramp (`model.areaLvc`). Reason: one program carrying both paths linked ~1.7x slower on D3D11 (the first fire after a shader update). The LVC 1 set is linked in the background after the whole-level pre-warm (`fire.mjs warmLvc`, KHR_parallel_shader_compile); an LVC area drawn before that waits (the old picture stays) instead of stalling the frame. Dev switch: `CONFIG.moinenMaps.fireLvcAll = true` puts every area on LVC 1 (used for the A/B below).
+* **The emitter blob loop keeps its old form** (`kk < 16`, the second half the hand-off schedule). A uniform loop bound changed float results (10-20k px off in the A/B), so it was reverted.
+
+### Results (lane 1, RTX 3070 Ti, D3D11 ANGLE)
+
+* **Identical at the old levels.** `dev/fire-slider.test.mjs` 884/884 checks. Live pixel A/B, 16 stills (day and night, zoom 1 and 3, two virtual times, strokes at levels 1/2/3 and a preset fire), fresh reload each: 0 differing px against main 2a59411 with the whole-level programs, and 0 with the continuous programs forced on every area.
+* **Smooth in between.** Seven ramp webms (dev/out/f1, uncommitted): 1->3 and 3->1 by day and at night, an interrupted ramp by day and at night, a slow 20 s ramp at night. The largest frame-to-frame change against its neighbours is at most 1.19x in every video (a pop scores several x); mean luminance moves at most 1.3 / 255 per art frame at night.
+* **Cost** (dev/fire-slider-cost.mjs, 5 strokes, median of interleaved runs, art frames): see the table in the F1 report. Whole levels: GPU 1.59 vs 1.44 ms at zoom 1 (1.45 vs 1.38 at zoom 3), within the run-to-run noise (single runs ranged 1.24-2.11 on main); with the art passes drawn 4x (weak-GPU emulation) 2.26 vs 2.34 ms. Fractional levels 1.80 / 2.81 ms (x1 / x4), a running ramp 1.73 / 2.63 ms. CPU unchanged (~1.3-1.4 ms a frame).
+* **First fire (link, cache miss, all at once):** whole-level set 4.73 / 5.70 / 4.79 s vs main 4.40 / 4.87 / 4.78 s; the LVC set 7.2-9.6 s more, in the background.
+* **Migration:** an old scene with raw strokes (`lv` 1, "3", missing, 7 with junk `l0`/`lt`, a smoke stroke) loads with levels 1 / 3 / 2 / 2 / 3, no errors, and the scene flag is not rewritten.
+* **Sync:** GM and Test Gracz 1 (a real player login) read the same record, the same `levelNow` at five shared times through a 20 s ramp, the same area keys, ramp-texture hash and uniforms; a still at the same shared time mid-ramp differs only in a 38x32 px UI corner.
