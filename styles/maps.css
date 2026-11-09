@@ -551,6 +551,106 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-d-form .mm-ws-range range-picker { width: auto; flex: 1; }
 .mm-d-form .mm-ws-opt select { max-width: none; flex: 1; }
 .mm-d-form .mm-ws-hint { margin: 0.2rem 0 0; }
+/* ------------------------------------------------------------------ destruction presets: the soundboard (scripts/presets/section.mjs)
+   Built from the workspace's own pieces (mm-ws-toolbtn, mm-d-level, mm-d-areas, mm-fold): only what a pad, a tile and the timeline
+   need on top of them. */
+body.mm-aiming-preset #board { cursor: crosshair; }
+
+/* the bar's pads: icon, name, hotkey and the gesture glyph */
+.mm-pr-pads { flex-wrap: wrap; gap: 3px; }
+.mm-ws-toolbtn.mm-pr-pad {
+  width: auto; display: inline-flex; gap: 0.4rem; padding: 0 0.4rem 0 0.5rem;
+  color: var(--mm-ws-text); font-size: var(--font-size-12, 0.75rem);
+}
+.mm-pr-pad > i:first-child { color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 70%, #fff); }
+.mm-pr-pad .mm-pr-name { max-width: 8.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-pr-pad kbd, .mm-pr-tile kbd {
+  min-width: 1.05rem; padding: 0 0.2rem; border-radius: 3px; text-align: center;
+  font: 600 0.62rem/1.05rem var(--font-mono, ui-monospace, monospace); color: var(--mm-ws-muted);
+  background: color-mix(in srgb, var(--mm-ws-text) 9%, transparent); box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.3); border: 0;
+}
+.mm-pr-gest { font-size: 0.62rem; color: var(--mm-ws-muted); }
+.mm-pr-pad.is-custom .mm-pr-name::after, .mm-pr-tile.is-custom > span::after { content: " ✎"; color: var(--mm-ws-muted); font-size: 0.85em; }
+.mm-pr-pad[aria-pressed="true"] kbd, .mm-pr-tile[aria-pressed="true"] kbd { color: var(--mm-ws-text); background: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 40%, transparent); }
+.mm-pr-aft range-picker { width: 9rem; }
+.mm-pr-aft range-picker[disabled] { opacity: 0.4; pointer-events: none; }
+.mm-pr-aft .mm-ws-toolbtn { width: 1.75rem; height: 1.75rem; font-size: 0.8rem; }
+.mm-pr-none { color: var(--mm-ws-muted); }
+
+/* the dock: a grid of tiles (drag to reorder) */
+.mm-pr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.4rem, 1fr)); gap: 4px; }
+.mm-pr-tile {
+  position: relative; display: grid; justify-items: center; align-content: center; gap: 0.25rem;
+  height: 4.4rem; margin: 0; padding: 0.45rem 0.3rem 0.35rem; line-height: 1.15;
+  color: var(--mm-ws-text); background: var(--mm-ws-raise); border: 1px solid transparent; border-radius: 6px;
+  font-size: var(--font-size-12, 0.75rem); cursor: grab;
+  transition: background-color 0.15s var(--mm-ease-out), border-color 0.15s var(--mm-ease-out), transform 0.18s var(--mm-ease-out);
+}
+.mm-pr-tile > i:first-child { font-size: 1.35rem; color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 70%, #fff); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.45)); }
+.mm-pr-tile > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-pr-tile kbd { position: absolute; top: 4px; left: 4px; }
+.mm-pr-tile .mm-pr-gest { position: absolute; top: 6px; right: 6px; }
+.mm-pr-tile:hover { background: color-mix(in srgb, var(--mm-ws-text) 13%, transparent); }
+.mm-pr-tile:hover > i:first-child { transform: translateY(-1px) scale(1.06); transition: transform 0.18s var(--mm-ease-out); }
+.mm-pr-tile[aria-pressed="true"] { background: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 28%, var(--mm-ws-ground)); border-color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 75%, transparent); }
+.mm-pr-tile.is-dragging { opacity: 0.45; cursor: grabbing; }
+.mm-pr-tile.is-over { border-color: var(--mm-ws-text); border-style: dashed; }
+.mm-pr-gridhint { display: block; margin: 0.3rem 0 0.2rem; }
+.mm-pr-hint { margin: 0.2rem 0 0.35rem; font-size: var(--font-size-12, 0.75rem); line-height: 1.35; }
+#interface.theme-light .mm-pr-tile > i:first-child, body.theme-light .mm-pr-tile > i:first-child,
+#interface.theme-light .mm-pr-pad > i:first-child, body.theme-light .mm-pr-pad > i:first-child { color: color-mix(in srgb, var(--mm-sec, var(--mm-accent)) 80%, #15110f); }
+@media (prefers-reduced-motion: reduce) { .mm-pr-tile, .mm-pr-tile > i:first-child { transition: none; } .mm-pr-tile:hover > i:first-child { transform: none; } }
+
+/* the editor */
+.mm-pr-editor { display: grid; gap: 0.4rem; margin-top: 0.3rem; padding-top: 0.45rem; border-top: 1px solid var(--mm-ws-edge); }
+.mm-pr-editor .mm-ws-opt { justify-content: space-between; }
+.mm-pr-editor .mm-ws-opt > label { flex: 0 0 5.6rem; white-space: normal; }
+.mm-pr-editor .mm-ws-opt > input[type="text"] { flex: 1; min-width: 0; }
+.mm-pr-editor .mm-ws-range range-picker, .mm-pr-eaft range-picker { width: auto; flex: 1; }
+.mm-ws .mm-ws-form .mm-pr-editor .mm-ws-opt.mm-pr-eaft { grid-template-columns: 6.2rem minmax(0, 1fr) auto; }
+.mm-pr-eaft .mm-ws-toolbtn { width: 1.75rem; height: 1.75rem; font-size: 0.8rem; }
+.mm-pr-eaft range-picker[disabled] { opacity: 0.4; pointer-events: none; }
+.mm-ws .mm-ws-form .mm-pr-editor .mm-ws-opt.mm-pr-icons { grid-template-columns: minmax(0, 1fr); gap: 0.3rem; }
+.mm-pr-icons .mm-ws-tools { grid-area: auto; width: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(1.75rem, 1fr)); gap: 3px; }
+.mm-pr-icons .mm-ws-toolbtn { width: 1.75rem; height: 1.75rem; font-size: 0.8rem; }
+.mm-pr-sub { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.2rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); font-weight: 600; }
+.mm-pr-sub > i { cursor: help; }
+/* the timeline: a row per layer, its bar from start to end, T0 marked; drag a bar to move its start */
+.mm-pr-tl { position: relative; display: grid; gap: 3px; padding: 0.35rem 0.3rem; border-radius: 5px; background: color-mix(in srgb, var(--mm-ws-text) 5%, transparent); }
+.mm-pr-t0 { position: absolute; top: 3px; bottom: 3px; width: 1px; background: color-mix(in srgb, var(--mm-ws-text) 45%, transparent); }
+.mm-pr-tlrow { position: relative; height: 7px; }
+.mm-pr-tlrow.is-off { opacity: 0.3; }
+.mm-pr-tlbar {
+  position: absolute; top: 0; bottom: 0; min-width: 6px; border-radius: 4px; cursor: ew-resize; touch-action: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--mm-tool) 95%, #fff), color-mix(in srgb, var(--mm-tool) 70%, transparent));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--mm-tool) 45%, transparent);
+}
+.mm-pr-tlbar.is-long { background: linear-gradient(90deg, color-mix(in srgb, var(--mm-tool) 95%, #fff), color-mix(in srgb, var(--mm-tool) 55%, transparent) 70%, transparent); }
+.mm-pr-tlbar:hover, .mm-pr-tlbar.is-dragging { filter: brightness(1.25); }
+/* the layers: a switch with the layer's icon and name, then its few values */
+.mm-pr-layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.mm-pr-layer { display: grid; gap: 0.2rem; padding: 0.3rem 0.45rem; border-radius: 4px; background: var(--mm-ws-raise); border-left: 3px solid var(--mm-tool); }
+.mm-pr-layer.is-off { opacity: 0.5; }
+.mm-pr-switch { display: flex; align-items: center; gap: 0.45rem; cursor: pointer; }
+.mm-pr-switch > input { margin: 0; }
+.mm-pr-switch > i:not(.mm-pr-pending) { width: 1rem; text-align: center; color: color-mix(in srgb, var(--mm-tool) 85%, #fff); }
+.mm-pr-pending { margin-left: auto; color: var(--mm-ws-muted); font-size: 0.75rem; cursor: help; }
+.mm-pr-fields { display: grid; gap: 0.15rem; }
+.mm-pr-field { display: flex; align-items: center; gap: 0.45rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
+.mm-pr-field > span { flex: 0 0 4.4rem; }
+.mm-pr-field range-picker { flex: 1; min-width: 0; }
+.mm-pr-field range-picker input[type="number"] { flex: 0 0 3rem; }
+
+/* the firings */
+.mm-pr-firings li { grid-template-columns: 1.2rem minmax(0, 1fr) auto auto; }
+.mm-pr-fname { display: grid; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-pr-fname small { color: var(--mm-ws-muted); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
+.mm-pr-state { font-size: 0.68rem; color: var(--mm-ws-muted); white-space: nowrap; }
+.mm-pr-state.is-playing, .mm-pr-state.is-coming { color: #ffb347; }
+.mm-pr-state.is-burning { color: #ff8a24; }
+.mm-pr-rowacts { display: inline-flex; gap: 2px; }
+.mm-pr-rowacts > button { width: 1.6rem; height: 1.6rem; margin: 0; padding: 0; font-size: 0.75rem; line-height: 1; }
+.mm-pr-firings li:hover { background: color-mix(in srgb, var(--mm-ws-text) 11%, transparent); }
 /* ---------------------------------------------------------------- Tokens section (workspace/tokens.mjs) */
 #moinen-maps-workspace .is-off { opacity: 0.42; }
 .mm-tfx-chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; margin: 0.25rem 0 0.2rem; }
