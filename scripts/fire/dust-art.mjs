@@ -70,6 +70,8 @@ uniform vec4 uK1[${CODES}];     //           life, lin, chips, chipD
 uniform vec4 uK2[${CODES}];     //           chipH, chipSz, grit, aura
 uniform vec4 uK3[${CODES}];     //           auraA, mark, trackW, v
 uniform vec4 uK4[${CODES}];     //           riseK, jetK, hits, 0
+uniform vec4 uK5[${CODES}];     //           linW, haze, haze grow, 0
+uniform float uPuffEnd;         // s: after it no puff / chip of the area can live (an area of blasts: the haze's minutes skip the emitters)
 out vec4 oArt;
 ${HASH}
 const float RY = 0.8, TAU = ${TAU.toFixed(1)}, LIN_P = ${LIN_P.toFixed(2)}, LIN_L = ${LIN_L.toFixed(2)};
@@ -134,28 +136,35 @@ void main() {
   vec2 p = vec2(c) + 0.5;
   float t = uNow;
   int R = 0, G = 0, B = 0, A = 0;
+  float mD = 0.0;                                                      // (a blast's haze here: its motes' density)
   // ---------------------------------------------------------------- the ground: aura, film, marks, grit
   vec4 C = texelFetch(uCell, c, 0);
   if ( C.x < 1e8 ) {
     int code = int(mod(C.w, ${CODE_N.toFixed(1)})), lv = code & 3;
     float hw = floor(C.w / ${CODE_N.toFixed(1)}) * 0.25;
-    vec4 k1 = uK1[code], k2 = uK2[code], k3 = uK3[code];
+    vec4 k1 = uK1[code], k2 = uK2[code], k3 = uK3[code], k5 = uK5[code];
     vec4 Bk = uHasBack == 1 ? texelFetch(uBack, c, 0) : vec4(1e9);
     float a = t - C.x, fo = fadeAt(C.y, Bk.x, Bk.y, t), dn = abs(C.z) / hw;
     if ( a > 0.0 && fo > 0.0 ) {
       // the AURA: a haze that rises as the source passes, thins to a lingering veil, drifts downwind; organic outline from the noise
       vec2 dr = (uWind + uSWind) * 0.35 * t, q = (p - dr) / (0.55 * uG);
       float n = 0.65 * vn(q, uSeed) + 0.35 * vn(q * 2.3 + vec2(t * 0.07, -t * 0.05), uSeed + 1);
-      float reach = 1.0 + k2.w * uG / hw * (0.45 + 0.55 * smoothstep(0.0, 2.5, a));
+      // (a blast's HAZE, k5.y s: it spreads over the first minutes, holds as a pall, then thins over the second half of its life)
+      float hz = k5.y > 0.0 ? 1.0 : 0.0, hl = 1.0;
+      if ( hz > 0.0 ) hl = 1.0 - smoothstep(0.42 * k5.y, k5.y, a);
+      float reach = 1.0 + k2.w * uG / hw * (0.45 + 0.55 * smoothstep(0.0, 2.5, a) + k5.z * smoothstep(2.0, 0.4 * k5.y + 1.0, a));
       float edge = dn + (n - 0.5) * 0.7;
-      float env = smoothstep(0.0, 1.0, a) * mix(1.0, 0.42, smoothstep(1.5, 8.0, a));
+      float env = smoothstep(0.0, 1.0, a) * mix(1.0, hz > 0.0 ? 0.62 : 0.42, smoothstep(1.5, hz > 0.0 ? 20.0 : 8.0, a)) * hl;
       float dens = (1.0 - smoothstep(0.3 * reach, reach, edge)) * env * fo * k3.x * (0.6 + 0.5 * n);
+      // (a blast's haze: a fuller pall, its own veil - A bit 8 - thinner over the crater: the blast threw its dust outward, the
+      // ruin stays readable under it)
+      if ( hz > 0.0 ) { mD = dens * smoothstep(1.5, 6.0, a); dens *= 1.45 * mix(0.5, 1.0, smoothstep(0.15, 0.75, dn)); }
       // (the bands' edges: a small-scale smooth noise - blobby pixel contours, never a salt-and-pepper dither over a big fading area)
       float dz = 0.0;
       if ( dens > 0.05 && dens < 0.8 ) dz = (vn(p / (2.0 * max(uU, 0.25)), uSeed + 31) - 0.5) * 0.3;
       int band = dens + dz > 0.52 ? 2 : dens + dz > 0.2 ? 1 : 0;
       // the FILM: settled dust in patches over the band
-      float fil = smoothstep(0.6, 3.5, a) * fo;
+      float fil = smoothstep(0.6, 3.5, a) * fo * (hz > 0.0 ? smoothstep(0.0, 0.5, hl) : 1.0);
       bool film = false;
       if ( edge < 0.95 && fil > 0.0 ) film = vn(p / (2.5 * max(uU, 0.25)), uSeed + 33) < 0.62 * fil * (0.4 + 0.6 * n);   // (in patches, not specks)
       // MARKS: wheel tracks (a tread rhythm along the path) / a scraped groove with streaks along the drag
@@ -179,15 +188,15 @@ void main() {
       float land = 0.25 + 0.45 * h3(c.x, c.y, 13);
       if ( a > land && edge < 1.0 ) {
         bool g1 = h3(c.x, c.y, 11) < gp * 0.7, g2 = k2.y > 1.5 && h3(c.x >> 1, c.y >> 1, 12) < gp * 0.18;
-        if ( (g1 || g2) && h3(c.x, c.y, 14) < fo ) { float ht = h3(c.x, c.y, 15); gt = ht < 0.5 ? 1 : ht < 0.88 ? 2 : 3; }
+        if ( (g1 || g2) && h3(c.x, c.y, 14) < fo * (hz > 0.0 ? smoothstep(0.0, 0.35, hl) : 1.0) ) { float ht = h3(c.x, c.y, 15); gt = ht < 0.5 ? 1 : ht < 0.88 ? 2 : 3; }
       }
       B = band + 4 * gt + (film ? 16 : 0);
-      A = mk + (scuff ? 4 : 0);
+      A = mk + (scuff ? 4 : 0) + (hz > 0.0 && band > 0 ? 8 : 0);
     }
   }
   // ---------------------------------------------------------------- puffs and chips: the tile's emitters
   vec4 th = texelFetch(uTileH, c >> 4, 0);
-  int st = int(th.x), cnt = int(th.y);
+  int st = int(th.x), cnt = t > uPuffEnd ? 0 : int(th.y);
   int chip = 0; float chipGy = 0.0; bool shadow = false;
   float uq = max(uU, 0.25);
   for ( int i = 0; i < ${MAX_PER_TILE}; i++ ) {
@@ -200,7 +209,7 @@ void main() {
     if ( t < ke ) continue;                                            // (the source has not passed here yet)
     vec4 e1 = texelFetch(uEm, eb + ivec2(1, 0), 0), e2 = texelFetch(uEm, eb + ivec2(2, 0), 0);
     int code = int(e1.w), lv = code & 3, es = int(e0.w);
-    vec4 k0 = uK0[code], k1 = uK1[code], k2 = uK2[code], k4 = uK4[code];
+    vec4 k0 = uK0[code], k1 = uK1[code], k2 = uK2[code], k4 = uK4[code], k5 = uK5[code];
     vec2 P0 = e0.xy, Hd = e1.xy, N = vec2(-Hd.y, Hd.x) * e1.z;
     float eo = e2.x, ebk = e2.y, eo2 = e2.z;
     // CHIPS: a few frames of flight right after the kick (none if it was put out before)
@@ -237,7 +246,8 @@ void main() {
         int ik = int(kk), sl = es * 7 + ik * 131 + 17;
         if ( h3(es, ik, 41) > k1.y ) continue;
         float b = t0 + kk * LIN_P + h3(es, ik, 42) * LIN_P * 0.5;
-        if ( b > eo && !(b > ebk && b < eo2) ) continue;            // (none after the put-out - or again after an undone eraser)
+        if ( b > eo && !(b > ebk && b < eo2) ) continue;
+        if ( k5.x > 0.0 && b > ke + k5.x ) continue;                  // (a blast's lazy puffs stop after linW s: its haze hangs on alone)            // (none after the put-out - or again after an undone eraser)
         float al = t - b, Ll = LIN_L * (0.85 + 0.3 * h3(es, ik, 43));
         if ( al < 0.0 || al > Ll ) continue;
         puff(p, al, Ll, 0.62, 0.4, 0.6, sl, P0, Hd, N, k0, k4, lv);
@@ -265,6 +275,34 @@ void main() {
       int cls = ba < 0.55 + 0.25 * h3(c.x >> 1, c.y >> 1, 64) ? 1 : age > 0.62 + hv ? 3 : age > 0.4 + hv ? 2 : 0;
       G = 1 + band + 4 * (blv - 1) + 12 * cls;
       R = 1 + int(mod(floor(bgy / uq), 255.0));
+    }
+  }
+  // MOTES of a blast's HAZE (the weather dust's way - weather/fx-glsl.mjs motes: hashed slots per world tile, whole-cycle lives of
+  // 6 .. 10 s, a slow Brownian sway of a few sines, riding the wind - here one art pixel each, in the dust's own tones): specks of
+  // the dust that hang in the air over the swept ground, lit (glint) in their prime and mid-tone as they come and go, fewer as the
+  // haze thins; a slot looks at its 3 x 3 tiles only (the sway < a tile), so the cost is nine hashes a haze cell
+  if ( mD > 0.03 && G == 0 && chip == 0 ) {
+    const float MT = 10.0;
+    vec2 q = p - (uWind + uSWind) * 0.5 * t;
+    ivec2 tq = ivec2(floor(q / MT)), cq = ivec2(floor(q));
+    for ( int j = -1; j <= 1 && G == 0; j++ ) for ( int i = -1; i <= 1; i++ ) {
+      ivec2 tt = tq + ivec2(i, j);
+      float L = 6.0 + 4.0 * h3(tt.x, tt.y, 71), ph = h3(tt.x, tt.y, 72) * L, cyc = floor((t + ph) / L), age = (t + ph - cyc * L) / L;
+      int ci = int(cyc);
+      float hk = h3(tt.x * 7 + ci, tt.y, 73);
+      if ( hk > 1.3 * mD ) continue;                                  // (fewer where the haze is thin, none past it)
+      float ha = h3(tt.x, tt.y * 3 + ci, 76), hb = h3(tt.x + ci * 5, tt.y, 77);
+      if ( age < 0.04 + 0.12 * ha || age > 0.96 - 0.12 * hb ) continue;
+      vec2 b = (vec2(tt) + vec2(h3(tt.x, tt.y + ci * 13, 74), h3(tt.x + ci * 17, tt.y, 75))) * MT;
+      float T6 = t * 6.283, hs = h3(tt.x, tt.y, 78);
+      vec2 sw = vec2(2.6 * sin(T6 * (0.05 + 0.04 * hs) + 6.28 * ha) + 1.1 * sin(T6 * (0.17 + 0.1 * hb) + 6.28 * hs),
+                     1.8 * sin(T6 * (0.06 + 0.05 * hb) + 6.28 * hs) + 0.8 * sin(T6 * (0.19 + 0.08 * ha) + 6.28 * hb));
+      float z = (2.0 + 6.0 * hb + 1.2 * sin(T6 * (0.08 + 0.05 * ha) + 6.28 * hk)) * uU;
+      vec2 gp = b + sw;                                               // (its ground point; drawn lifted by its height)
+      if ( ivec2(floor(gp - vec2(0.0, z * RY))) != cq ) continue;
+      bool prime = age > 0.16 + 0.12 * ha && age < 0.84 - 0.12 * hb;
+      G = 64 + (prime ? 2 : 1); R = 1 + int(mod(floor((gp.y + (p.y - q.y)) / uq), 255.0));
+      break;
     }
   }
   if ( shadow ) B |= 32;
@@ -398,6 +436,8 @@ ${FOOTPRINT}`;
 const GROUND = `${SHOW_COMMON}
 ${PAL}
 const float AURA[3] = float[3](0.0, 0.15, 0.27);
+// a blast's HAZE (A bit 8): a denser veil, a little paler and greyer than the soil - hanging dust that softens the map under it
+const float HAZE[3] = float[3](0.0, 0.24, 0.42);
 vec4 over(vec4 dst, vec3 c, float a) { return vec4(c * a + dst.rgb * (1.0 - a), a + dst.a * (1.0 - a)); }
 vec4 cellColor(vec2 cf) {
   ivec4 a = art(ivec2(cf));
@@ -421,7 +461,9 @@ vec4 cellColor(vec2 cf) {
   int sh = (a.b >> 6) & 3;
   if ( sh > 0 ) o = over(o, T * 0.32, (sh == 2 ? 0.3 : 0.16) * (1.0 - 0.6 * uDark));
   int au = a.b & 3;
-  if ( au > 0 ) o = over(o, lit, AURA[au] * (1.0 + 0.25 * uDark));
+  // (by day a pale dust over the soil's own tone - it reads on a light ground as on a dark one; at night the moonlit soil tone)
+  if ( au > 0 && (a.a & 8) != 0 ) o = over(o, mix(mix(lit, vec3(0.88, 0.85, 0.79), 0.5), lit, 0.8 * uDark), HAZE[au] * (1.0 + 0.25 * uDark));
+  else if ( au > 0 ) o = over(o, lit, AURA[au] * (1.0 + 0.25 * uDark));
   return o;
 }
 #define OUT(c) ((c) * uAlpha)
@@ -473,7 +515,7 @@ export class DustArt extends PIXI.Container {
     this.eventMode = "none"; this.interactiveChildren = false;
     const { ap, ox, oy } = geo, W = field.w, H = field.h, P = programs();
     const x0 = ox + rect.x0 * ap, y0 = oy + rect.y0 * ap;
-    this.W = W; this.H = H; this.rect = rect; this.geo = geo; this.speed = speed || 1; this.ref = field.ref; this.maxKick = field.maxKick;
+    this.W = W; this.H = H; this.rect = rect; this.geo = geo; this.speed = speed || 1; this.ref = field.ref; this.maxKick = field.maxKick; this.puffEnd = field.puffEnd ?? 1e9;
     this.anim = true; this.glow = null; this.artT = null; this.job = null;
     this.cellTex = fTex(field.cell, W, H);
     this.emTex = fTex(field.em, field.emW, field.emH);
@@ -488,7 +530,7 @@ export class DustArt extends PIXI.Container {
     this.dpass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
       uCell: this.cellTex, uEm: this.emTex, uTileH: this.tileTex, uIdx: this.idxTex, uBack: this.backTex, uHasBack: field.back ? 1 : 0, uNow: 0,
       uWind: new Float32Array([wind[0] * 0.25 * g, wind[1] * 0.25 * g]), uSWind: new Float32Array(2), uG: g, uU: g / 32, uSeed: (seed % 65536) | 0,
-      uK0: KT[0], uK1: KT[1], uK2: KT[2], uK3: KT[3], uK4: KT[4], translationMatrix: new PIXI.Matrix().toArray(true) }));
+      uK0: KT[0], uK1: KT[1], uK2: KT[2], uK3: KT[3], uK4: KT[4], uK5: KT[5], uPuffEnd: field.puffEnd ?? 1e9, translationMatrix: new PIXI.Matrix().toArray(true) }));
     // the tone map (pass 0): one texel per 8 x 8 cells, from the scene's map (none: a plain soil tone)
     const TW = Math.ceil(W / 8), TH = Math.ceil(H / 8);
     this.toneRt = map ? rtOf(TW, TH, true) : null; this.toneN = [TW, TH];
@@ -526,7 +568,11 @@ export class DustArt extends PIXI.Container {
     return k * 83.333 / sp;
   }
   /** The art time (s since the area's ref) of the frame `T` (reduced motion: the dust at rest, after its last kick). */
-  timeOf(T, now) { return reducedMotion() ? this.maxKick + 30 : (this.frameMs(T, now) - this.ref) / 1000; }
+  timeOf(T, now) {
+    if ( !reducedMotion() ) return (this.frameMs(T, now) - this.ref) / 1000;
+    // (an area of blasts: at rest after its last kick, then its haze thins on the clock - no pop when its minutes are over)
+    return this.puffEnd < 1e8 ? Math.max(this.maxKick + 30, (this.frameMs(T, now) - this.ref) / 1000) : this.maxKick + 30;
+  }
   setTime(T) { this.T = T; this.dpass.shader.uniforms.uNow = this.timeOf(T, sharedNow()); }
   setPhase() { /* (the frame's time comes with setTime) */ }
   setBirths() {}

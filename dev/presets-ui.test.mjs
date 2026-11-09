@@ -111,7 +111,7 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
   ok(J({ ...p1, preset: 0 }) === J({ ...p2, preset: 0 }), "F duplicate: fires exactly as its original");
   const off = { ...copy, layers: copy.layers.map((L) => (L.l === "fire" ? { ...L, off: true } : L)) };
   const p3 = C.expand(U.effective(off), G, { seed: 11 }, env);
-  ok(p3.fire.every((f) => f.k === "smoke") && p3.destruction.length === p1.destruction.length, "F a layer switched off is left out of the firing (the rest unchanged)");
+  ok(p3.fire.every((f) => f.k === "smoke" || f.k === "dust") && p3.destruction.length === p1.destruction.length, "F a layer switched off is left out of the firing (the rest unchanged)");
   ok(C.cleanDef(U.effective(off)).ok, "F a definition with layers off stays valid");
   const tl = U.timelineOf(bomb);
   ok(tl.rows.length === bomb.layers.length && tl.from === -1200 && tl.to <= 8000 && tl.rows.every((r) => r.start <= r.end && r.end <= tl.to), `F timeline: a row per layer within the strip (${tl.from}..${tl.to})`);

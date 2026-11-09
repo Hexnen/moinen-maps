@@ -18,8 +18,8 @@
  *                  lifeK [lo, hi] (each one's share of the aftermath, so they die out one by one)
  *     smoke        sm 1..3, r, len, life | aftermath, lifeK
  *     burst        lv, r                    (pending: the explosion fire, P3)
- *     dust         dk "shock" | "hits", lv, r, life (pending: the new dust kinds, P4; "hits" with a walk place is written at once as
- *                  fire-layer dust strokes - fire/dust-model.mjs, one per lane and unbroken run of hits)
+ *     dust         dk "shock" | "hits", lv, r, life: written at once as fire-layer dust strokes (fire/dust-model.mjs) - "hits" with a
+ *                  walk place one per lane and unbroken run of hits, "shock" one per point (its centre; r its reach)
  *     accent       kind (ACCENTS), dur, every (walk hits: each n-th one of each gun), lv 1..3 (how heavy), shake 0..1 (the hits' rumble)
  *                  (kept in the firing record; the guns' tracer / hitFx / muzzle are drawn by presets/accents.mjs)
  *     cue          kind "screen" (shake, flash) | "light" (peak, radius, decay)   (pending: P5)
@@ -47,6 +47,8 @@ export const PENDING = ["burst", "dust", "accent", "cue"];
 export const PLACES = ["centre", "ring", "scatter", "walk"];
 export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer"];
 export const CUES = ["screen", "light"];
+/** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
+export const SHOCK_HAZE = [0, 150, 240, 300];
 export const DUST = ["shock", "hits"];
 /** Same order as scripts/destruction/model.mjs TYPES / CAUSES (a stroke stores the index). */
 export const D_TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
@@ -366,6 +368,16 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         break;
       case "dust":
         if ( L.dk === "hits" && L.place.m === "walk" && walk ) { hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }); break; }
+        // (a shock ring: a fire-layer dust stroke of kind "shock" per point - fire/dust-model.mjs - its centre, its reach, its life)
+        if ( L.dk === "shock" && L.place.m !== "walk" ) {
+          pts.forEach((p, i) => {
+            // (the stroke lives at least as long as its level's HAZE, plus a margin: the haze has thinned out before the put-out)
+            const lv = clamp(L.lv + power, 1, 3), q = Math.round(t0 + at + (p.t ?? 0)), life = Math.max(L.life ? Math.round(r.range(L.life)) : 20000, SHOCK_HAZE[lv] * 1000 + 5000);
+            plan.fire.push({ key: `${L.id}.${i}`, k: "dust", dk: "shock", lv, r: Math.max(8, Math.round(r.range(L.r) * sq)), s: 1,
+              p: [Math.round(p.x), Math.round(p.y)], q, o: q + life, wd: wind.dir, ws: wind.speed });
+          });
+          break;
+        }
         if ( L.place.m === "walk" ) plan.pending.dust.push({ id: L.id, dk: L.dk, lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at, pts: pts.map((p) => [round(p.x, 10), round(p.y, 10), p.t]),
           life: L.life ? Math.round(r.range(L.life)) : null });
         else for ( const p of pts ) plan.pending.dust.push({ id: L.id, dk: L.dk, lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at, x: round(p.x, 10), y: round(p.y, 10),
@@ -415,7 +427,7 @@ function accentOf(L, at, { plan, hits, from }) {
   switch ( L.kind ) {
     case "fallShadow": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.dir };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
-    case "bounce": return { ...base, x: plan.at[0], y: plan.at[1] };
+    case "bounce": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.gesture.a, dir: plan.dir };
     case "muzzle": return { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.filter((h) => h.lane === 0).map((p) => [p.x, p.y, p.t, p.lane]) : [] };
     case "hitFx": case "tracer": {
       // (every n-th shot of each gun, counted per lane - the second gun's count shifted half way - so both guns fire tracers)

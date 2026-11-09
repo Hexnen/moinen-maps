@@ -53,7 +53,7 @@ if ( cmd === "open" ) {
   if ( process.env.CDP_W ) { await s.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: DPR, mobile: false }); await new Promise((r) => setTimeout(r, 300)); }
   const frames = [];
   s.on("Page.screencastFrame", (p) => { frames.push({ t: p.metadata.timestamp * 1000, data: p.data }); s.send("Page.screencastFrameAck", { sessionId: p.sessionId }); });
-  await s.send("Page.startScreencast", { format: "jpeg", quality: 82, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
+  await s.send("Page.startScreencast", { format: "jpeg", quality: 82, maxWidth: Number(process.env.CDP_CAPW ?? W), maxHeight: Number(process.env.CDP_CAPH ?? H), everyNthFrame: 1 });
   const t0 = Date.now();
   if ( d && e && !String(d).startsWith("--") ) setTimeout(async () => { try { await evaluate(await find(d), code(e), false); } catch ( err ) { console.error(err.message); } }, at);
   await new Promise((r) => setTimeout(r, ms));

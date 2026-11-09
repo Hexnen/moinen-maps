@@ -68,7 +68,7 @@ for ( const id of ["uzi", "heliHmg"] ) for ( const seed of [1, 7, 99] ) {
   ok(JSON.stringify(first) === "[0,1,2,3]" && em.every((t) => { const k = Math.round((t - kicks[0]) / dt); return t - kicks[0] - k * dt > -1e-4 && t - kicks[0] - k * dt < 0.05; }), "emitters kick at their hit (+ < 50 ms)");
   ok(D.passMs(st, geo) === Math.round(3 * D.hitDt(st)) || Math.abs(D.passMs(st, geo) - 3 * D.hitDt(st)) < 1, "pass = (hits - 1) x dt");
   const T = D.kindTable(), code = L.code;
-  ok(T.length === 5 && T[4][code * 4 + 2] === 1 && T[4][D.look({ dk: "car", lv: 3 }).code * 4 + 2] === 0, "kind table flags hits only");
+  ok(T.length === 6 && T[4][code * 4 + 2] === 1 && T[4][D.look({ dk: "car", lv: 3 }).code * 4 + 2] === 0, "kind table flags hits only");
 }
 
 /* D */

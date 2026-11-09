@@ -13,10 +13,22 @@
  * A frame is a PURE function of (the firing record's accents, T0, the shared clock): a late joiner sees whatever is still in flight.
  */
 
-/** The palette: white-hot, yellow, orange, red, ember, pale (the bullet streak). */
-export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8];
-/** How much each palette colour lights itself at night (its emission, 0..1). */
-export const GLOW = [1, 0.95, 0.78, 0.5, 0.22, 0.6];
+/** The palette: white-hot, yellow, orange, red, ember, pale (the bullet streak / a glint); the thrown and dropped things: iron
+ * (a bomb's body, a grenade's band), metal light, olive (a grenade), dust (kicked up where a grenade lands). */
+export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8, 0x27231f, 0x8d867a, 0x505b33, 0xb3a68d];
+/** How much each palette colour lights itself at night (its emission, 0..1; 0: lit by the scene only, never by itself). */
+export const GLOW = [1, 0.95, 0.78, 0.5, 0.22, 0.6, 0, 0, 0, 0];
+/** The ground SHADOWS (a falling bomb's, a thrown grenade's): two dithered steps of a dark tone, drawn under every pixel above. */
+export const SHADE = 0x120e0a, SHADE_A = [0.17, 0.36];
+/** The bomb: it falls from BOMB_Z squares (gravity: z ~ (1 - u)^2), drifting BOMB_D squares along the firing's direction; seen
+ * below BOMB_SHOW squares; its shadow shrinks from SHADOW_R[0] to SHADOW_R[1] squares and darkens as it comes. */
+export const BOMB_Z = 14, BOMB_D = 2.2, BOMB_SHOW = 4.5, SHADOW_R = [1.45, 0.36];
+/** The grenade: it lands this far (squares, at most 35 % of the throw) short of its mark and hops / rolls the rest (the bounce). */
+export const BOUNCE_BACK = 0.75;
+/** The screen cue: a shake of SHAKE_PX x shake screen px decaying over SHAKE_MS[0] + SHAKE_MS[1] x shake ms; a flash over FLASH_CUE_MS. */
+export const SHAKE_PX = 7, SHAKE_MS = [250, 650], FLASH_CUE_MS = 210;
+/** The accent kinds this layer draws. */
+export const ACCENT_KINDS = ["tracer", "hitFx", "muzzle", "fallShadow", "throwArc", "bounce"];
 /** A tracer's visible flight (ms) before its hit, the streak's length (ms of flight), a glancing one's life (ms). */
 export const TRACER_MS = 210, STREAK_MS = 85, RICO_MS = 200;
 /** A tracer comes in from this far behind (squares along the run) and this high (squares) at the start of its visible flight. */
@@ -40,11 +52,35 @@ export function h3(a, b, c) {
  * `glows` ground glows [x, y, radius (scene px), intensity 0..1, palette colour] for the night, `kick` the rumble at the view (the
  * renderer weighs it by distance), `live` whether anything was drawn or is still to come.
  */
-export const newFrame = () => ({ px: PAL.map(() => []), glows: [], kicks: [], live: false });
-export function clearFrame(F) { for ( const a of F.px ) a.length = 0; F.glows.length = 0; F.kicks.length = 0; F.live = false; return F; }
+export const newFrame = () => ({ px: PAL.map(() => []), shade: [[], []], glows: [], kicks: [], shakes: [], flashes: [], live: false });
+export function clearFrame(F) {
+  for ( const a of F.px ) a.length = 0;
+  F.shade[0].length = 0; F.shade[1].length = 0; F.glows.length = 0; F.kicks.length = 0; F.shakes.length = 0; F.flashes.length = 0; F.live = false;
+  return F;
+}
+
+/**
+ * What of a firing record this layer plays: its accents of the kinds above and its cues - a screen cue placed at the impact (rec.at:
+ * the renderer weighs it by the distance from the view), a light cue left out when the firing has a burst (the explosion fire lights
+ * the ground itself: fire/burst-art.mjs).
+ */
+export function itemsOf(rec) {
+  const acc = (rec?.pending?.accent ?? []).filter((a) => a && ACCENT_KINDS.includes(a.kind));
+  const burst = (rec?.f ?? []).some((f) => /^burst\./.test(f?.key ?? ""));
+  const at = Array.isArray(rec?.at) ? rec.at : [null, null];
+  const cues = (rec?.pending?.cue ?? []).filter((c) => c && (c.kind === "screen" ? (c.shake > 0 || c.flash > 0) : c.kind === "light" && !burst && c.peak > 0))
+    .map((c) => (c.kind === "screen" ? { ...c, x: at[0], y: at[1] } : c));
+  return [...acc, ...cues];
+}
 
 /** The time span (ms from T0) an accent item draws in: [from, to]. */
 export function spanOf(item) {
+  const at = Number(item?.at) || 0;
+  switch ( item?.kind ) {
+    case "fallShadow": case "throwArc": case "bounce": return item.dur > 0 ? [at, at + item.dur] : null;
+    case "screen": return [at, at + Math.max(item.shake > 0 ? SHAKE_MS[0] + SHAKE_MS[1] * item.shake : 0, item.flash > 0 ? FLASH_CUE_MS : 0)];
+    case "light": return item.decay > 0 ? [at, at + item.decay] : null;
+  }
   const ts = (item?.hits ?? []).map((h) => h[2]);
   if ( !ts.length ) return null;
   const lo = Math.min(...ts), hi = Math.max(...ts);
@@ -69,6 +105,10 @@ export function draw(items, t0, now, env, F) {
     if ( it.kind === "tracer" ) tracers(it, t, env, F, seed);
     else if ( it.kind === "hitFx" ) hitFx(it, t, env, F, seed);
     else if ( it.kind === "muzzle" ) muzzle(it, t, env, F, seed);
+    else if ( it.kind === "fallShadow" ) fallShadow(it, t, env, F, seed);
+    else if ( it.kind === "throwArc" ) throwArc(it, t, env, F, seed);
+    else if ( it.kind === "bounce" ) bounce(it, t, env, F, seed);
+    else if ( it.kind === "screen" || it.kind === "light" ) cue(it, t - (Number(it.at) || 0), F);
   }
   return F;
 }
@@ -201,4 +241,141 @@ function muzzle(it, t, env, F, seed) {
       line(F, ax, ay, bx, by, (v, k) => (v > 0.75 ? 5 : (k & 1) ? 5 : -1));
     }
   });
+}
+
+/* ---------------------------------------------------------------- the bomb and the grenade (P5) */
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const smooth = (a, b, v) => { const x = clamp01((v - a) / (b - a)); return x * x * (3 - 2 * x); };
+/** The dither's threshold of a 2 x 2 cluster (destruction's dropout grain, hashed: no ordered halftone grid), anchored to the art grid,
+ * so a growing shadow only ever adds clusters (no crawl). */
+const bayer = (x, y) => h3(x >> 1, y >> 1, 91);
+
+/** A soft ground shadow at (x, y): an ellipse of radius r (scene px, squashed by the view), its density `dens` (0..1) highest in the
+ * middle and dithered out to the rim in two steps - dark in the core, a light penumbra round it. */
+function shadow(F, env, x, y, r, dens) {
+  if ( !(dens > 0.01) || !(r > 0) ) return;
+  const ap = env.ap, rx = Math.max(1, r / ap), ry = Math.max(1, rx * (env.squash ?? 0.8)), [cx, cy] = scr(env, x, y, 0);
+  const X = Math.ceil(rx), Y = Math.ceil(ry);
+  for ( let j = -Y; j <= Y; j++ ) for ( let i = -X; i <= X; i++ ) {
+    const e = Math.hypot((i + 0.5) / rx, (j + 0.5) / ry); if ( e >= 1 ) continue;
+    const v = dens * (1 - smooth(0.2, 1, e)), th = bayer(cx + i, cy + j);
+    if ( th < v ) F.shade[1].push(cx + i, cy + j); else if ( th < Math.min(0.97, v * 1.9) ) F.shade[0].push(cx + i, cy + j);
+  }
+}
+
+/**
+ * The bomb's FALL: its shadow on the mark, wide and faint while the bomb is high, tightening and darkening as it comes down (along
+ * the firing's direction, if it has one), and the bomb itself for its last BOMB_SHOW squares: a dark finned body nose-down, lit from
+ * the top left, with a pale streak of air behind it (a glint at night), falling screen-down faster and faster.
+ */
+function fallShadow(it, t, env, F, seed) {
+  const g = env.grid, u = clamp01((t - it.at) / Math.max(1, it.dur)); if ( u >= 1 ) return;
+  const k = 1 - u, d = Array.isArray(it.from) ? it.from : [0, 0], D = BOMB_D * g;
+  const x = it.x - d[0] * D * k, y = it.y - d[1] * D * k, z = BOMB_Z * g * k * k;
+  shadow(F, env, x, y, g * (SHADOW_R[1] + (SHADOW_R[0] - SHADOW_R[1]) * k), smooth(0, 0.18, u) * (0.2 + 0.68 * Math.pow(u, 1.4)));
+  if ( z > BOMB_SHOW * g ) return;
+  // (its screen velocity: the drift along the direction, squashed, and the fall, lifted - the body's axis and the streak's way)
+  const sq = env.squash ?? 0.8, dur = Math.max(1, it.dur), vx = d[0] * D / dur, vy = d[1] * D * sq / dur + (env.lift ?? 0.5) * 2 * BOMB_Z * g * k / dur;
+  const vl = Math.hypot(vx, vy) || 1, ax = vx / vl, ay = vy / vl, nx = -ay, ny = ax;
+  const ap = env.ap, hl = Math.max(2.5, 0.17 * g / ap), hw = Math.max(1.2, 0.075 * g / ap), [cx, cy] = scr(env, x, y, z);
+  // the STREAK of air behind it: pale, dithered, longer the faster it falls (a glint at night: the only thing of it that shows)
+  const sl = Math.min(4 * hl, 1.5 * hl + vl * 40 / ap);
+  line(F, Math.round(cx - ax * (hl + sl)), Math.round(cy - ay * (hl + sl)), Math.round(cx - ax * hl * 0.6), Math.round(cy - ay * hl * 0.6),
+    (v, i) => (v > 0.55 ? ((i & 1) ? 5 : -1) : ((i % 3) === 0 ? 5 : -1)));
+  const R = Math.ceil(hl + 2);
+  for ( let j = -R; j <= R; j++ ) for ( let i = -R; i <= R; i++ ) {
+    const px = i + 0.5, py = j + 0.5, al = px * ax + py * ay, ac = px * nx + py * ny;
+    // the body: a teardrop nose-down (round at the nose, tapering to the tail), then two fins across the tail
+    const w = al > 0 ? hw * Math.sqrt(Math.max(0, 1 - (al / hl) ** 2)) : hw * (1 - 0.45 * clamp01(-al / hl));
+    const body = al > -hl && al < hl && Math.abs(ac) < w, fin = al <= -hl * 0.55 && al > -hl - 1.2 && Math.abs(ac) < hw + 1.1 && Math.abs(ac) > hw * 0.35;
+    if ( !body && !fin ) continue;
+    // (lit from the top left: the side of the body facing left-up)
+    const lit = body && (ac * nx + ac * ny) < -0.3 * hw && al > -0.4 * hl;
+    F.px[lit ? 7 : 6].push(cx + i, cy + j);
+  }
+}
+
+/** A grenade at (x, y) lifted z: an olive egg, a dark band round it turned by `spin` (rad: it tumbles), lit from the top left, a
+ * pale glint (at night: the point that shows it); `squash` > 0 just after it hits the ground. */
+function grenade(F, env, x, y, z, spin, squash = 0) {
+  const ap = env.ap, r = Math.max(1.3, 0.085 * env.grid / ap), rx = r * (1 + 0.25 * squash), ry = r * 0.92 * (1 - 0.3 * squash), [cx, cy] = scr(env, x, y, z);
+  const bx = Math.cos(spin), by = Math.sin(spin), X = Math.ceil(rx) + 1, Y = Math.ceil(ry) + 1;
+  for ( let j = -Y; j <= Y; j++ ) for ( let i = -X; i <= X; i++ ) {
+    const px = i + 0.5, py = j + 0.5, e = Math.hypot(px / rx, py / ry); if ( e >= 1 ) continue;
+    const band = Math.abs(px * bx + py * by) < Math.max(0.6, 0.22 * r), lit = px + py < -0.55 * r;
+    F.px[band ? 6 : lit ? 7 : 8].push(cx + i, cy + j);
+  }
+  F.px[5].push(cx + Math.round(-0.4 * rx) - 1, cy + Math.round(-0.4 * ry) - 1);
+}
+/** Where a throw lands (short of its mark: it bounces the rest), and its unit direction; null when nothing is thrown (a click). */
+export function throwOf(from, to, g) {
+  if ( !Array.isArray(from) || !Array.isArray(to) ) return null;
+  const dx = to[0] - from[0], dy = to[1] - from[1], L = Math.hypot(dx, dy);
+  if ( L < 0.6 * g ) return null;
+  const ux = dx / L, uy = dy / L, back = Math.min(BOUNCE_BACK * g, 0.35 * L);
+  return { L, ux, uy, back, land: [to[0] - ux * back, to[1] - uy * back] };
+}
+
+/**
+ * The grenade's THROW: from the thrower (gesture.a) along an arc (its apex as the aim's ghost: 35 % of the throw, lifted by the
+ * view) to where it lands short of its mark, tumbling, its small shadow running under it on the ground.
+ */
+function throwArc(it, t, env, F, seed) {
+  const g = env.grid, T = throwOf(it.from, it.to, g); if ( !T ) return;
+  const u = clamp01((t - it.at) / Math.max(1, it.dur)); if ( u >= 1 ) return;
+  const x = it.from[0] + (T.land[0] - it.from[0]) * u, y = it.from[1] + (T.land[1] - it.from[1]) * u;
+  const z = 0.35 * T.L * 4 * u * (1 - u) + 0.3 * g * (1 - u);
+  shadow(F, env, x, y, g * (0.13 + 0.05 * z / g), 0.62 / (1 + 0.45 * z / g));
+  grenade(F, env, x, y, z, (t - it.at) * 0.016 + h3(seed, 1, 1) * 6.28);
+}
+
+/**
+ * Its BOUNCE onto the mark: it hits the ground where the throw landed (squashed, a puff of the dust), hops once, hits again and rolls
+ * the rest, slowing, and lies still on the mark until it goes off. A click (nothing thrown): it drops on the mark and hops in place.
+ */
+function bounce(it, t, env, F, seed) {
+  const g = env.grid, tau = t - it.at, dur = Math.max(1, it.dur); if ( tau >= dur ) return;
+  const T = throwOf(it.from, [it.x, it.y], g), ux = T?.ux ?? 0, uy = T?.uy ?? 0, back = T?.back ?? 0;
+  const p0 = [it.x - ux * back, it.y - uy * back], p1 = [it.x - ux * back * 0.35, it.y - uy * back * 0.35];
+  const tH = 0.48 * dur, tR = 0.9 * dur;
+  let x, y, z = 0, sq = 0, dist;
+  if ( tau < tH ) {
+    const f = tau / tH; x = p0[0] + (p1[0] - p0[0]) * f; y = p0[1] + (p1[1] - p0[1]) * f; z = (T ? 0.26 : 0.16) * g * 4 * f * (1 - f); dist = back * 0.65 * f;
+  } else {
+    const f = clamp01((tau - tH) / (tR - tH)), e = 1 - (1 - f) * (1 - f);
+    x = p1[0] + (it.x - p1[0]) * e; y = p1[1] + (it.y - p1[1]) * e; dist = back * (0.65 + 0.35 * e);
+  }
+  // (squashed for a moment each time it hits the ground)
+  for ( const tg of [0, tH] ) if ( tau >= tg && tau < tg + 50 ) sq = 1 - (tau - tg) / 50;
+  shadow(F, env, x, y, g * (0.13 + 0.05 * z / g), 0.62 / (1 + 0.45 * z / g));
+  grenade(F, env, x, y, z, h3(seed, 1, 1) * 6.28 + dist / (0.085 * g), sq);
+  // a little DUST where it hits: a few grains of the ground thrown out low, settling and dropping out
+  [[0, p0], [tH, p1]].forEach(([tg, p], m) => {
+    const a = tau - tg; if ( a < 0 || a > 260 ) return;
+    const f = a / 260, n = m ? 4 : 6;
+    for ( let s = 0; s < n; s++ ) {
+      if ( h3(seed + m, s, 33) < f * f ) continue;
+      const an = h3(seed + m, s, 31) * 6.283, v = (0.18 + 0.2 * h3(seed + m, s, 32)) * g * (1 - (1 - f) * (1 - f));
+      const zz = 0.12 * g * 4 * f * (1 - f) * h3(seed + m, s, 34);
+      put(F, env, p[0] + Math.cos(an) * v, p[1] + Math.sin(an) * v * (env.squash ?? 0.8), zz, 9);
+    }
+  });
+}
+
+/**
+ * The CUES at time t (ms after the cue's moment): a screen cue's shake (F.shakes [x, y, amplitude in screen px]: it eases in over 30
+ * ms and dies away) and flash (F.flashes [x, y, alpha]: up in 35 ms, gone by FLASH_CUE_MS) - the renderer weighs them by the
+ * distance from the view and the client's opt-outs; a light cue a warm ground glow (yellow, then orange) that decays.
+ */
+function cue(it, t, F) {
+  if ( t < 0 ) return;
+  if ( it.kind === "screen" ) {
+    const S = SHAKE_MS[0] + SHAKE_MS[1] * (it.shake ?? 0);
+    if ( it.shake > 0 && t < S ) F.shakes.push(it.x ?? NaN, it.y ?? NaN, SHAKE_PX * it.shake * Math.min(1, t / 30) * (1 - t / S) ** 2);
+    if ( it.flash > 0 && t < FLASH_CUE_MS ) F.flashes.push(it.x ?? NaN, it.y ?? NaN, it.flash * Math.min(1, t / 35) * (1 - t / FLASH_CUE_MS) ** 2);
+  } else if ( it.kind === "light" && t < it.decay ) {
+    const f = 1 - t / it.decay;
+    F.glows.push(it.x, it.y, it.radius, (it.peak ?? 1) * f * f * Math.min(1, t / 40), f > 0.55 ? 1 : 2);
+  }
 }
