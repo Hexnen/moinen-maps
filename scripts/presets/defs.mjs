@@ -6,6 +6,8 @@
  * The user's answers (design note, section 10): no sound, no helicopter shadow, nothing pushes tokens; the aftermath fire ends after
  * the preset's aftermath duration, or burns until the GM puts it out (aftermath.dur null) - a preset setting, per firing too.
  */
+import { LANDING } from "./def-landing.mjs";
+
 export const BUILTIN = Object.freeze([
   {
     id: "bomb", v: 1, set: "military", name: "MOINENMAPS.DPreset.bomb", hint: "MOINENMAPS.DPreset.bombHint", icon: "fa-solid fa-bomb",
@@ -92,8 +94,9 @@ export const BUILTIN = Object.freeze([
       { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
     ]
   },
+  LANDING,
   {
-    // THE METEOR (dev/presets-design.md section 20): a white-hot head rushing down the sky at an angle with a plasma tail, shedding
+    // THE METEOR (dev/presets-design.md section 21): a white-hot head rushing down the sky at an angle with a plasma tail, shedding
     // sparks, a dark smoke trail hanging along the way it came, its shadow / its light running in over the ground; then the biggest
     // blast of the set - a pressure ring racing out, a huge fireball, a big torn crater, the shock dust and its five-minute haze, rocks
     // thrown out on arcs that land one by one (each a pock and a geyser of dust), burning chunks, fires round the rim and in the

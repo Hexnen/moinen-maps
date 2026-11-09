@@ -8,7 +8,7 @@ import { HOOK, status } from "./runtime.mjs";
  */
 let accents = null;
 const load = () => (accents ??= import("./accents.mjs"));
-const KINDS = ["tracer", "hitFx", "muzzle", "fallShadow", "throwArc", "bounce"];
+const KINDS = ["tracer", "hitFx", "muzzle", "fallShadow", "throwArc", "bounce", "landing", "airRing"];
 export const hasGun = (rec) => (rec?.pending?.accent ?? []).some((a) => a?.kind === "tracer" || a?.kind === "hitFx" || a?.kind === "muzzle");
 /** A record with anything this layer plays (accents-core itemsOf: its accents, its cues). */
 export const hasAccents = (rec) => (rec?.pending?.accent ?? []).some((a) => KINDS.includes(a?.kind)) || (rec?.pending?.cue ?? []).length > 0;

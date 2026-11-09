@@ -2081,6 +2081,8 @@
   "MOINENMAPS.DPreset.heliHmgHint": "Przeciągnij przelot ostrzału. Dwa równoległe pasy ciężkich trafień pędzą po ziemi. Gdy strzelcem jest token śmigłowca, błyskają obie lufy i z niego lecą smugacze; bez niego strzela spoza mapy.",
   "MOINENMAPS.DPreset.lightning": "Uderzenie pioruna",
   "MOINENMAPS.DPreset.lightningHint": "Kliknij cel; przeciągnij, by ustawić stronę, z której piorun nadchodzi. Powietrze trzeszczy, piorun uderza z błyskiem i powtórnymi wyładowaniami, łuki biegną po ziemi; zostaje mała stopiona blizna, para i małe pożary.",
+  "MOINENMAPS.DPreset.landing": "Lądowanie superbohatera",
+  "MOINENMAPS.DPreset.landingHint": "Kliknij miejsce lądowania (albo token: to on jest bohaterem); przeciągnij, by wskazać kierunek nadlotu. Smuga z nieba, wgnieciony krater, pęknięcia rozchodzące się gwiazdą i fala kurzu. Bez ognia.",
   "MOINENMAPS.DPreset.meteor": "Meteor",
   "MOINENMAPS.DPreset.meteorHint": "Kliknij miejsce uderzenia; przeciągnij, by wskazać kierunek lotu. Płonąca smuga i ślad dymu na niebie, największy wybuch zestawu, wielki poszarpany krater, kamienie rzucone daleko, ogień i długo wisząca kurzawa.",
   "MOINENMAPS.DPreset.aftermath": "Pożar po wybuchu",
