@@ -4,7 +4,7 @@ import * as Core from "./core.mjs";
 import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import * as FModel from "../fire/model.mjs";
-import { newId as fireId } from "../fire/fire.mjs";
+import { prepare as firePrepare } from "../fire/fire.mjs";
 import * as R from "./runtime-core.mjs";
 
 /**
@@ -63,19 +63,38 @@ export async function fire(def, gesture, opts = {}) {
   D.ensureState();
   // ids first: the record names every stroke from the start
   const dIds = plan.destruction.map(() => foundry.utils.randomID(10));
-  const fStrokes = [];
+  // (each as the fire layer makes a new stroke - fire.mjs prepare: the organic edge and the scene's torn edges)
+  const fStrokes = [], fKeys = [];
+  // (the debris fires of a firing with a burst catch where and when a thrown chunk lands: its flight grows with its distance, so the
+  // chunks land one by one, the near ones first - each fire keeps its own life)
+  const b0 = plan.pending.burst?.[0], grid = envOf(scene).grid;
   for ( const rec of plan.fire ) {
+    if ( b0 && /^debris\./.test(rec.key ?? "") ) {
+      const d = Math.hypot(rec.p[0] - b0.x, rec.p[1] - b0.y), j = (FModel.hash4(plan.seed, d | 0, 3) - 0.5) * 160;
+      const q = Math.round(plan.t0 + (b0.at ?? 0) + Math.min(1600, 280 + 520 * Math.sqrt(d / grid) + j)), dq = q - rec.q;
+      rec.q = q; if ( rec.o !== undefined ) rec.o += dq;
+    }
     const { key, ...raw } = rec;
-    const st = FModel.cleanStroke({ ...raw, id: fireId() });
-    if ( st ) fStrokes.push(st);
+    const st = firePrepare(raw);
+    if ( st ) { fStrokes.push(st); fKeys.push(key); }
+  }
+  // THE EXPLOSION FIRE (P3, fire/burst-model.mjs): each pending burst a fire-layer stroke of its own, timed at its impact; the burning
+  // chunks it throws land where the plan's debris fires catch (their offsets and catch times), so each fire starts where a chunk fell
+  const debris = plan.fire.filter((r) => /^debris\./.test(r.key ?? ""));
+  for ( const b of plan.pending.burst ?? [] ) {
+    const q = Math.round(plan.t0 + (b.at ?? 0));
+    const db = debris.filter((r) => r.q >= q).map((r) => [r.p[0] - b.x, r.p[1] - b.y, r.q - q]).flat();
+    const st = firePrepare({ k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, q, wd: plan.fire[0]?.wd ?? envOf(scene).wind.dir, ws: plan.fire[0]?.ws ?? envOf(scene).wind.speed, ...(db.length ? { db } : {}) });
+    if ( st ) { fStrokes.push(st); fKeys.push(`burst.${b.id}`); }
   }
   const upd = {};
   for ( const st of fStrokes ) upd[`flags.${MODULE_ID}.${FModel.STROKES}.${st.id}`] = st;
   const record = {
     id: fid, v: plan.v, preset: plan.preset, t0: plan.t0, seed: plan.seed, size: plan.size, power: plan.power, aftermath: plan.aftermath,
     at: plan.at, dir: plan.dir, gesture: plan.gesture, walk: plan.walk, by: game.user.id,
-    d: plan.destruction.map((r, i) => ({ id: dIds[i], key: r.key, at: Math.round(plan.t0 + (r.at ?? 0)) })), f: fStrokes.map((s, i) => ({ id: s.id, key: plan.fire[i]?.key })),
-    pending: plan.pending
+    d: plan.destruction.map((r, i) => ({ id: dIds[i], key: r.key, at: Math.round(plan.t0 + (r.at ?? 0)) })), f: fStrokes.map((s, i) => ({ id: s.id, key: fKeys[i] })),
+    // (the bursts are fire-layer strokes now, named in `f`: nothing left pending for them)
+    pending: { ...plan.pending, burst: [] }
   };
   upd[`flags.${MODULE_ID}.${FLAG}.${fid}`] = record;
   // ONE update: the damage (painted now, each stroke timed by its `at`: every client holds it until just before then), the fire and

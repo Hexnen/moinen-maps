@@ -140,6 +140,9 @@ function cleanLayer(L, i, errors) {
       out.aftermath = L.aftermath === true;
       out.life = out.aftermath ? null : range(L.life, null, ...LIMITS.life);
       out.lifeK = range(L.lifeK, [1, 1], 0.05, 1);
+      // (the stroke's own grow / out seconds - the fire layer's gr / ot: an explosion-born fire flares fast; absent: the scene's)
+      if ( isNum(L.gr) ) out.gr = clamp(L.gr, 0, 10);
+      if ( isNum(L.ot) ) out.ot = clamp(L.ot, 0, 10);
       break;
     case "burst":
       out.lv = intLv(L.lv, 2); out.r = range(L.r, [1, 1], ...LIMITS.r);
@@ -338,6 +341,8 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
             q: Math.round(q), wd: wind.dir, ws: wind.speed, e: 1 };
           if ( L.l === "fire" ) st.lv = levelOf(L, r, power);
           if ( life !== null ) st.o = Math.round(q + life);
+          if ( L.gr !== undefined ) st.gr = L.gr;
+          if ( L.ot !== undefined ) st.ot = L.ot;
           plan.fire.push(st);
         });
         break;

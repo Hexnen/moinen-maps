@@ -2,6 +2,8 @@ import * as M from "./model.mjs";
 import { FireMesh } from "./shader.mjs";
 import { FireArt, BIRTHS } from "./art.mjs";
 import { DustArt } from "./dust-art.mjs";
+import { BurstArt } from "./burst-art.mjs";
+import { burstLight } from "./burst-model.mjs";
 import { SDRIFT } from "./dust-model.mjs";
 import { FireLights } from "./lights.mjs";
 import { sharedNow } from "../shared-clock.mjs";
@@ -12,7 +14,7 @@ import { vortices, fireWet, sceneWind } from "../wind.mjs";
 import { dampArea, dampLights } from "./rain-damp.mjs";
 import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
 import { G as GUARD, guardQ, guardOff, paceNow } from "../frame-guard.mjs";
-import { fireDetail, levelOf } from "./guard.mjs";
+import { fireDetail, levelOf, burstDetail } from "./guard.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -167,7 +169,7 @@ export class FireDisplay {
     for ( const [id, it] of want ) {
       const cur = this.areas.get(id);
       if ( (cur && !cur.out) || this.pending.has(id) ) continue;
-      if ( staged && (it.field.style === "fire" || it.field.style === "dust") ) { this.pending.set(id, { key: it.area.key, area: it.area, field: it.field, it, mesh: null, ready: false }); continue; }
+      if ( staged && (it.field.style === "fire" || it.field.style === "dust" || it.field.style === "burst") ) { this.pending.set(id, { key: it.area.key, area: it.area, field: it.field, it, mesh: null, ready: false }); continue; }
       if ( cur ) { cur.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
       const mesh = this.build(it);
       this.meshes.addChild(mesh);
@@ -196,7 +198,9 @@ export class FireDisplay {
   build(it) {
     // DUST AND GRIT (dust-art.mjs): an art area of its own look, on the same art grid, under the same schedule
     if ( it.field.style === "dust" ) return new DustArt(it.field, it.area.rect, this.geo, { front: this.front, seed: it.area.seed, grid: this.geo.grid / this.geo.ap, speed: this.P.speed, map: mapOf() });
-    const geo = this.geo, P = this.P, { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
+    // THE EXPLOSION FIRE (burst-art.mjs): one burst, its own look, the same schedule
+    if ( it.field.style === "burst" ) return new BurstArt(it.field, it.area.rect, this.geo, { front: this.front, grid: this.geo.grid / this.geo.ap, speed: this.P.speed, map: mapOf(), color: it.area.color });
+    const geo = this.geo, { area, field } = it, P = M.areaP(area, this.P), [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
     // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
     const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
     // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
@@ -246,7 +250,7 @@ export class FireDisplay {
       if ( !m.uploaded ) { if ( bytes <= 0 ) continue; const b = m.uploadStep(R, bytes); bytes -= b; sent += b; continue; }
       if ( !M.inView(p.area.rect, geo, vw, geo.grid) ) { p.ready = true; continue; }
       if ( m.anim ) m.setPhase(now0);
-      m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet); m.setSceneWind?.(this.sw[0], this.sw[1]);
+      m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet); m.setSceneWind?.(this.sw[0], this.sw[1]); m.setDetail?.(burstDetail(this.D));
       // (a large one is drawn AHEAD as A12 draws the next frame: an art frame the clock reaches after the steps it needs, with the
       // clocks it will have then; it shows when the clock reaches it - revealed at the very frame the areas around it show, never one
       // behind them; one the clock passed before it was whole is dropped and a later one taken)
@@ -272,7 +276,14 @@ export class FireDisplay {
     const geo = this.geo, P = this.P;
     // (dust gives no light: its areas never enter the light sync, so they neither take a share of the light budget from the fire nor
     // re-sync the fire's lights when they come and go)
-    const r = this.lights.syncAreas([...this.areas].filter(([, a]) => a.area.style !== "dust").map(([id, a]) => ({ id, key: a.key, listOf: (max) => M.lightsOf([a], geo, P, { max }) })), P, sharedNow(), geo);
+    // (an explosion: its flash, one light per burst - burst-model.burstLight; a fire with its own grow / out times: its lights grow
+    // in and go out with them - L.G / L.O, lights.mjs)
+    const listOf = (a, max) => {
+      if ( a.area.style === "burst" ) return a.area.strokes.filter((s) => s.k === "burst").slice(0, max).map((s) => burstLight(s, geo, P));
+      const list = M.lightsOf([a], geo, P, { max }), tm = a.area.tm;
+      return tm ? list.map((L) => ({ ...L, G: (tm[0] ?? P.grow) * 1000, O: (tm[1] ?? P.out) * 1000 })) : list;
+    };
+    const r = this.lights.syncAreas([...this.areas].filter(([, a]) => a.area.style !== "dust").map(([id, a]) => ({ id, key: a.key, listOf: (max) => listOf(a, max) })), P, sharedNow(), geo);
     this.stats.lightsMade += r.made;
     this.stats.lights = this.lights.count;
   }
@@ -377,7 +388,7 @@ export class FireDisplay {
       if ( !a.mesh.visible && !a.hold ) { if ( a.mesh.isArt && this.ticking && !force ) a.hold = true; else a.mesh.visible = true; }
       vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
       if ( a.mesh.isArt ) {
-        a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); a.mesh.setSceneWind?.(this.sw[0], this.sw[1]);
+        a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); a.mesh.setSceneWind?.(this.sw[0], this.sw[1]); a.mesh.setDetail?.(burstDetail(L));
         // (A12: the frame drawn ahead is due: shown as it is - only its OCC tiles are drawn now; one drawn ahead for another frame - a
         // skipped frame, the clock's wrap - is dropped)
         const j = a.mesh.job;

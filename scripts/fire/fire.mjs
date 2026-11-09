@@ -10,6 +10,7 @@ import { reducedMotion } from "../config.mjs";
 import { warmPrograms } from "../gl-warm.mjs";
 import { artPrograms } from "./art.mjs";
 import { dustPrograms } from "./dust-art.mjs";
+import { burstPrograms } from "./burst-art.mjs";
 import { fireballProgram } from "./shader.mjs";
 import { damperProgram } from "./rain-damp.mjs";
 import { fireWet } from "../wind.mjs";
@@ -38,7 +39,8 @@ let purging = false;
 
 export const tell = (kind) => Hooks.callAll("moinenMapsFire", kind);
 export const params0 = () => params;
-export const list = () => [...strokes.values()].filter((s) => s.o === undefined).sort(M.byOrder);
+// (the panel's list: every stroke still burning - a preset's timed fire too, whose out time is still to come: model.burningAt)
+export const list = () => { const now = sharedNow(); return [...strokes.values()].filter((s) => M.burningAt(s, now)).sort(M.byOrder); };
 
 /** The art grid this layer draws on: the destruction layer's (same ap, same origin), else the formula it would use. */
 export function geo() {
@@ -105,6 +107,8 @@ function prewarm(force = false) {
   const list = [...artPrograms()];
   // (DUST: its own programs, when the scene has dust or a brush may paint it)
   if ( force || [...strokes.values()].some((s) => s.k === "dust") || draft?.k === "dust" ) list.push(...dustPrograms());
+  // (the EXPLOSION FIRE: its own programs, when the scene has a burst - a preset writes it ahead of its impact)
+  if ( [...strokes.values()].some((s) => s.k === "burst") ) list.push(...burstPrograms());
   const ball = [...strokes.values()].some((s) => s.st === "fireball") || draft?.st === "fireball"
     || (force && game.user.isGM && (() => { try { return game.settings.get(MODULE_ID, "fireStyle") === "fireball"; } catch { return false; } })());
   if ( ball ) list.push(fireballProgram());
@@ -304,9 +308,31 @@ function purge(now, g) {
   write(Object.fromEntries(gone.map((s) => [`flags.${MODULE_ID}.${M.STROKES}.-=${s.id}`, null]))).finally(() => { purging = false; });
 }
 
+/**
+ * A stroke as this layer stores it, not stored: cleaned, with the footprint a new stroke gets (an organic edge, the scene's torn edges -
+ * `fresh`), its paint time and an id. For a writer that puts strokes into a scene update of its own (presets/write.mjs: one update
+ * for a whole firing). null when it is not a stroke.
+ */
+export const prepare = (raw) => M.cleanStroke({ ...fresh(raw), q: raw.q ?? sharedNow(), id: raw.id && raw.id !== "draft" ? raw.id : newId() });
+
+/**
+ * Store MANY strokes in ONE write (GM): each as `add` makes it (prepare: the torn edges too), one undo step for all; `extra` more keys
+ * for the same scene update. -> the stored strokes.
+ */
+export async function addMany(raws, { undoable = true, extra = null } = {}) {
+  if ( !game.user.isGM ) return [];
+  const list = (raws ?? []).map(prepare).filter(Boolean);
+  if ( !list.length && !extra ) return [];
+  for ( const st of list ) strokes.set(st.id, st);
+  if ( undoable && list.length ) { undoStack.push({ add: list }); if ( undoStack.length > UNDO_MAX ) undoStack.shift(); redoStack.length = 0; }
+  draw(); tell("edited");
+  await write({ ...Object.fromEntries(list.map((st) => [sKey(st.id), st])), ...(extra ?? {}) });
+  return list;
+}
+
 /** Store a stroke (one flag key). */
 export function add(raw, { undoable = true } = {}) {
-  const st = M.cleanStroke({ ...fresh(raw), q: raw.q ?? sharedNow(), id: raw.id && raw.id !== "draft" ? raw.id : newId() });
+  const st = prepare(raw);
   if ( !st || !game.user.isGM ) return null;
   strokes.set(st.id, st); draft = null;
   if ( undoable ) { undoStack.push({ add: [st] }); if ( undoStack.length > UNDO_MAX ) undoStack.shift(); redoStack.length = 0; }
@@ -320,13 +346,31 @@ export function add(raw, { undoable = true } = {}) {
  * every client - the flames sink, the embers darken, the smoke drifts away - then the GM removes the records (`purge`).
  */
 export function remove(ids, { undoable = true } = {}) {
-  const gone = (Array.isArray(ids) ? ids : [ids]).map((id) => strokes.get(id)).filter((s) => s && s.o === undefined);
-  if ( !gone.length || !game.user.isGM ) return 0;
-  if ( undoable ) { undoStack.push({ del: gone }); redoStack.length = 0; }
-  putOut(gone);
-  return gone.length;
+  // (a stroke timed to go out later - a preset's - is put out now too; one not caught yet is dropped: model.putOutPlan)
+  const now = Math.round(sharedNow());
+  const { put, drop } = M.putOutPlan((Array.isArray(ids) ? ids : [ids]).map((id) => strokes.get(id)).filter(Boolean), now);
+  if ( (!put.length && !drop.length) || !game.user.isGM ) return 0;
+  if ( undoable ) { undoStack.push({ del: put, dropped: drop }); redoStack.length = 0; }
+  if ( drop.length ) dropOut(drop, put.length ? null : true);
+  if ( put.length ) putOut(put);
+  return put.length + drop.length;
+}
+/** Strokes not caught yet taken away: their records deleted (`write` false: the caller writes; null: drawn, written with a put-out). */
+function dropOut(list, alone = true) {
+  for ( const s of list ) strokes.delete(s.id);
+  const upd = Object.fromEntries(list.map((s) => [`flags.${MODULE_ID}.${M.STROKES}.-=${s.id}`, null]));
+  if ( alone ) { draw(); tell("edited"); }
+  write(upd);
+}
+/** Strokes dropped before they caught, given back as they were (an undo of their drop: they catch at their own time). */
+function restore(list) {
+  const upd = {};
+  for ( const s of list ) { strokes.set(s.id, s); upd[sKey(s.id)] = s; }
+  draw(); tell("edited");
+  write(upd);
 }
 function putOut(list) {
+  if ( !list.length ) return;
   const now = Math.round(sharedNow()), upd = {};
   for ( const s of list ) { const o = { ...s, o: now }; strokes.set(s.id, o); upd[sKey(s.id)] = o; }
   draw(); tell("edited");
@@ -343,7 +387,7 @@ function relight(list) {
 
 /** Change a stroke's fire / smoke level afterwards (the dock list): one write, the area is drawn again (no animation). */
 export function setLevels(id, { lv, sm } = {}) {
-  const s = strokes.get(id); if ( !s || !game.user.isGM || s.o !== undefined ) return null;
+  const s = strokes.get(id); if ( !s || !game.user.isGM || !M.burningAt(s, sharedNow()) ) return null;
   const st = M.cleanStroke({ ...s, ...(lv !== undefined ? { lv } : {}), ...(sm !== undefined ? { sm } : {}) });
   strokes.set(id, st); draw(); tell("edited");
   write({ [sKey(id)]: st });
@@ -352,7 +396,7 @@ export function setLevels(id, { lv, sm } = {}) {
 
 /** Torn edges on (amount 0.1..1; true = the scene's tearing) or off (0 / false) for one stroke afterwards: one write, drawn again. */
 export function setTorn(id, amount) {
-  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || s.o !== undefined ) return null;
+  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || !M.burningAt(s, sharedNow()) ) return null;
   const tn = amount === true ? params.tear : Number(amount) || 0;
   const { tn: _t, ...rest } = s;
   const st = M.cleanStroke(tn > 0 ? { ...rest, tn } : rest);
@@ -363,7 +407,7 @@ export function setTorn(id, amount) {
 
 /** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null / "" = the scene's): one write, drawn again. */
 export function setColor(id, color) {
-  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || s.o !== undefined ) return null;
+  const s = strokes.get(id); if ( !s || s.k === "erase" || !game.user.isGM || !M.burningAt(s, sharedNow()) ) return null;
   const { c, ...rest } = s;
   const st = M.cleanStroke(color ? { ...rest, c: color } : rest);
   strokes.set(id, st); draw(); tell("edited");
@@ -371,14 +415,16 @@ export function setColor(id, color) {
   return st;
 }
 
-/** Every stroke goes out (one undo step). */
-export function clear() { return remove([...strokes.values()].filter((s) => s.o === undefined).map((s) => s.id)); }
+/** Every stroke the panel lists goes out (one undo step) - a preset's timed fire too (list / model.burningAt). */
+export function clear() { return remove(list().map((s) => s.id)); }
 
 /** Undo / redo of whole strokes, with the same animations: what comes back grows, what goes away goes out. */
 function apply(step, back) {
-  const addL = back ? step.del : step.add, delL = back ? step.add : step.del;
-  if ( delL?.length ) putOut(delL.map((s) => strokes.get(s.id)).filter((s) => s && s.o === undefined));
+  const addL = back ? step.del : step.add, delL = back ? step.add : step.del, now = sharedNow();
+  if ( delL?.length ) putOut(delL.map((s) => strokes.get(s.id)).filter((s) => s && M.burningAt(s, now)));
   if ( addL?.length ) relight(addL);
+  // (strokes dropped before they caught: given back as they were - or dropped again on a redo)
+  if ( step.dropped?.length ) { if ( back ) restore(step.dropped); else dropOut(step.dropped.filter((s) => strokes.has(s.id))); }
 }
 export function undo() { const s = undoStack.pop(); if ( !s ) return false; redoStack.push(s); apply(s, true); return true; }
 export function redo() { const s = redoStack.pop(); if ( !s ) return false; undoStack.push(s); apply(s, false); return true; }
@@ -412,12 +458,21 @@ export const fireApi = {
    * `dust` "bike" | "car" | "drag" | "heavy" what passed along the path, `level` 1..3, `radius` the band's half-width. Returns the
    * stored stroke (or null).
    */
-  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null, torn = undefined, dust = "car" } = {}) {
+  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null, torn = undefined, dust = "car", grow = undefined, out = undefined, at = undefined, debris = null } = {}) {
     const pts = Array.isArray(points) ? points : [[points.x, points.y]];
     const w = wind ?? { dir: game.settings.get(MODULE_ID, "fireWindDir"), speed: game.settings.get(MODULE_ID, "fireWind") };
     return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}), ...(kind === "dust" ? { dk: dust } : {}),
-      ...(torn === undefined ? {} : { tn: torn === true ? params.tear : Number(torn) || 0 }) });
+      ...(torn === undefined ? {} : { tn: torn === true ? params.tear : Number(torn) || 0 }), ...(grow !== undefined ? { gr: grow } : {}), ...(out !== undefined ? { ot: out } : {}),
+      ...(at !== undefined ? { q: at } : {}), ...(kind === "burst" && Array.isArray(debris) ? { db: debris.flat() } : {}) });
   },
+  /**
+   * An EXPLOSION (burst-model.mjs) at (x, y): `radius` the fireball's (scene px), `level` 1 grenade / 2 shell / 3 bomb, `at` the impact
+   * (shared clock ms; omitted: now), `color`, `debris` [[dx, dy, ms], ...] burning chunks thrown to where they land. Returns the stroke.
+   */
+  burst(x, y, { radius = 100, level = 3, at = undefined, color = null, debris = null, wind = null } = {}) {
+    return fireApi.paint([[x, y]], { kind: "burst", radius, level, at, color, debris, wind });
+  },
+  addMany: (raws, opts) => addMany(raws, opts), prepare,
   /** Torn edges for one stroke afterwards: true (the scene's tearing), an amount 0.1..1, or false. */
   setTorn: (id, amount) => setTorn(id, amount),
   /** Change a stroke's levels afterwards: `{ level, smoke }`. */

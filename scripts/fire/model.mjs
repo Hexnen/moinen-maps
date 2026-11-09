@@ -51,7 +51,7 @@
 export const FLAG = "fire";
 export const STROKES = "fireStrokes";
 export const VERSION = 2;
-export const KINDS = ["fire", "smoke", "erase", "dust"];
+export const KINDS = ["fire", "smoke", "erase", "dust", "burst"];
 export const STYLES = ["fire", "fireball"];
 export const LEVELS = [1, 2, 3];
 
@@ -91,6 +91,7 @@ export const SMOKE_LV = [0, 0.55, 1, 1.45];
 
 import { NATURAL, cleanColor, rampOf, puffsOf } from "./look.mjs";
 import { DUST_KINDS, dustRect, dustCore, dustEnd, dustRaster } from "./dust-model.mjs";
+import { burstRect, burstCore, burstEnd, burstRaster, MAX_DEBRIS } from "./burst-model.mjs";
 export { NATURAL, rampOf };
 
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -131,7 +132,22 @@ export function cleanStroke(o) {
   if ( k === "fire" ) { out.lv = int(o.lv, 2, 1, 3); out.sm = int(o.sm, 2, 0, 3); }
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
   else if ( k === "dust" ) { out.lv = int(o.lv, 2, 1, 3); out.dk = DUST_KINDS.includes(o.dk) ? o.dk : "car"; }   // (dust-model.mjs)
+  else if ( k === "burst" ) {                                         // (burst-model.mjs: one point, its level, colour and debris)
+    out.p = p.slice(0, 2); out.lv = int(o.lv, 2, 1, 3);
+    const c = cleanColor(o.c); if ( c ) out.c = c;
+    if ( Array.isArray(o.db) ) {
+      const db = [];
+      for ( let i = 0; i + 2 < o.db.length && db.length < MAX_DEBRIS * 3; i += 3 ) {
+        const v = [Number(o.db[i]), Number(o.db[i + 1]), Number(o.db[i + 2])];
+        if ( v.every(Number.isFinite) ) db.push(Math.round(v[0]), Math.round(v[1]), Math.round(Math.min(10000, Math.max(0, v[2]))));
+      }
+      if ( db.length ) out.db = db;
+    }
+  }
   const own = k === "fire" || k === "smoke";
+  // a stroke's OWN grow / out times (s; absent: the scene's - P.grow, P.out): an explosion-born fire flares in a fraction of a second
+  if ( own && o.gr !== undefined && o.gr !== null && Number.isFinite(Number(o.gr)) ) out.gr = Math.round(num(o.gr, 1.6, ...LIMITS.grow) * 100) / 100;
+  if ( own && o.ot !== undefined && o.ot !== null && Number.isFinite(Number(o.ot)) ) out.ot = Math.round(num(o.ot, 2.2, ...LIMITS.out) * 100) / 100;
   if ( own && o.st === "fireball" ) out.st = "fireball";
   if ( own ) { const c = cleanColor(o.c); if ( c ) out.c = c; }
   // the footprint: e = 1 an organic edge (every stroke painted since; older ones keep their round brush), tn = torn (0.1..1)
@@ -301,6 +317,7 @@ export function puffMask(W, H, src, R) {
 /** A stroke's CORE (cells, integers, x1/y1 exclusive): its path and its flame tongues - what joins areas. */
 export function coreOf(st, geo, P) {
   if ( st.k === "dust" ) return dustCore(st, geo);
+  if ( st.k === "burst" ) return burstCore(st, geo);
   const b = pathBox(st, geo);
   if ( st.k === "fire" ) b.y0 -= flameOf(st, sizes(geo, P)) + 2;
   return cells(b, marginOf(st, geo));
@@ -312,6 +329,7 @@ export function coreOf(st, geo, P) {
  */
 export function reachOf(st, geo, P, puffs = true) {
   if ( st.k === "dust" ) return dustRect(st, geo);
+  if ( st.k === "burst" ) return burstRect(st, geo);
   const Z = sizes(geo, P), b = pathBox(st, geo), r = { ...b };
   if ( st.k === "fire" ) r.y0 -= flameOf(st, Z) + 2;
   if ( smokeOf(st, P) > 0 && P.plume > 0 ) {
@@ -346,6 +364,11 @@ export function timing(geo, P) {
   return { G, O, lag: 0.35 * G, perCell, travel, growSpan: 1.35 * G + travel, outSpan: 1.6 * O + travel + SMOKE_TAIL };
 }
 
+/** The settings a stroke times itself by: the scene's, with its own grow / out (gr, ot) when it has them. */
+export const ownP = (st, P) => (st.gr === undefined && st.ot === undefined ? P : { ...P, grow: st.gr ?? P.grow, out: st.ot ?? P.out });
+/** A stroke's timing (its own grow / out, else the scene's: `T` the scene's, reused). */
+const timingOf = (st, geo, P, T) => (st.gr === undefined && st.ot === undefined ? T : timing(geo, ownP(st, P)));
+
 /** How long a stroke takes to catch along its whole path (ms): its length (plus half its radius) at P.spread squares a second. */
 export function catchMs(st, geo, P) {
   if ( st.k === "erase" ) return 0;
@@ -359,6 +382,8 @@ export function catchMs(st, geo, P) {
 export const litTime = (st) => st.g ?? st.q;
 function endOf(st, geo, P, T) {
   if ( st.k === "dust" ) return dustEnd(st, geo);
+  if ( st.k === "burst" ) return burstEnd(st);
+  T = timingOf(st, geo, P, T);
   if ( st.k === "erase" ) return st.o !== undefined ? st.o + T.growSpan : litTime(st) + T.outSpan;
   return st.o !== undefined ? st.o + T.outSpan : litTime(st) + catchMs(st, geo, P) + T.growSpan;
 }
@@ -369,24 +394,51 @@ function endOf(st, geo, P, T) {
  * animation (on, or gone once put out).
  */
 export function phaseOf(st, now, geo, P, still = false) {
-  const put = st.o !== undefined;
+  // (a fire / smoke stroke whose out time is still to come - a preset's timed fire, written with its `o` - burns as one without it
+  // until then: it catches at its q and grows in; at its `o` it goes out as a put-out one does)
+  const put = st.o !== undefined && !(ahead(st, now));
+  // (a BURST lives its own life from q: "on" while it plays, then gone; reduced motion shows no fireball at all)
+  if ( st.k === "burst" ) return still ? "gone" : now === undefined ? "on" : now < endOf(st, geo, P, null) ? (put ? "out" : "on") : "gone";
   if ( still || now === undefined ) return put ? "gone" : "on";
-  const live = now < endOf(st, geo, P, timing(geo, P));
+  const live = now < endOf(put || st.o === undefined ? st : { ...st, o: undefined }, geo, P, timing(geo, P));
   if ( st.k === "erase" ) return put ? (live ? "regrow" : "gone") : (live ? "out" : "on");
   return put ? (live ? "out" : "gone") : (live ? "grow" : "on");
 }
+
+/** Is a fire / smoke stroke's out time still to come at `now` (a preset's timed fire; a put-out's `o` = now is never ahead)? */
+const ahead = (st, now) => st.o !== undefined && now !== undefined && (st.k === "fire" || st.k === "smoke") && st.o - now > 1;
 
 /** The next moment (ms, > now) one of the strokes changes phase; Infinity when none will. */
 export function nextChange(strokes, now, geo, P, still = false) {
   if ( still || now === undefined ) return Infinity;
   const T = timing(geo, P);
   let t = Infinity;
-  for ( const st of strokes ) { const e = endOf(st, geo, P, T); if ( e > now && e < t ) t = e; }
+  for ( const st of strokes ) {
+    // (a timed fire: its grow-in ends as an unput one's, then its out time comes)
+    if ( ahead(st, now) ) { const { o, ...un } = st, g = endOf(un, geo, P, T); if ( g > now && g < t ) t = g; if ( o - 1 < t ) t = o - 1; continue; }
+    const e = endOf(st, geo, P, T); if ( e > now && e < t ) t = e;
+  }
   return t;
 }
 
+/**
+ * Is a stroke still BURNING at `now` for the Fire panel (fire.mjs list / clear / the row edits): no out time, or one still to come (a
+ * preset's timed fire: its `o` is written with it, it goes out by itself later). Never a burst (a point event: it plays out by itself).
+ * `now` undefined: no out time only.
+ */
+export const burningAt = (s, now) => s.k !== "burst" && (s.o === undefined || (now !== undefined && s.o > now));
+/**
+ * Putting strokes out at `now` (fire.mjs remove / clear): { put: the ones burning (o = now: their own going-out), drop: the ones not
+ * caught yet (q in the future, never lit again: their records are deleted - a fire put out before it caught never shows) }.
+ */
+export function putOutPlan(list, now) {
+  const put = [], drop = [];
+  for ( const s of list ) { if ( !burningAt(s, now) && s.k !== "burst" ) continue; if ( s.k === "burst" && s.o !== undefined && s.o <= now ) continue; (s.q > now && s.g === undefined ? drop : put).push(s); }
+  return { put, drop };
+}
+
 /** The strokes whose put-out animation is over at `now` (the GM removes their records). */
-export const goneAt = (strokes, now, geo, P) => strokes.filter((s) => s.o !== undefined && phaseOf(s, now, geo, P) === "gone");
+export const goneAt = (strokes, now, geo, P) => strokes.filter((s) => (s.o !== undefined || s.k === "burst") && phaseOf(s, now, geo, P) === "gone");
 
 /** A stroke's fire colour: its own, else the scene's (P.fireColor), else the natural orange. */
 export const colorOf = (st, P) => st.c ?? P?.fireColor ?? NATURAL;
@@ -401,7 +453,9 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   for ( const s of strokes ) phases[s.id] = phaseOf(s, now, geo, P, still);
   const live = strokes.filter((s) => phases[s.id] !== "gone");
   const list = live.filter((s) => s.k !== "erase"), erasers = live.filter((s) => s.k === "erase");
-  const style = (s) => (s.k === "dust" ? "dust" : s.st === "fireball" ? "fireball" : "fire"), color = (s) => (s.k === "dust" ? "" : colorOf(s, P));
+  const style = (s) => (s.k === "dust" ? "dust" : s.k === "burst" ? "burst" : s.st === "fireball" ? "fireball" : "fire"), color = (s) => (s.k === "dust" ? "" : colorOf(s, P));
+  // (strokes with their own grow / out times share an area only with strokes timed the same: an area is drawn with one timing)
+  const tm = (s) => (s.gr === undefined && s.ot === undefined ? "" : `${s.gr ?? ""}/${s.ot ?? ""}`);
   const reach = list.map((s) => reachOf(s, geo, P)), rects = list.map((s) => coreOf(s, geo, P));
   const parent = list.map((_, i) => i);
   const find = (i) => { while ( parent[i] !== i ) i = parent[i] = parent[parent[i]]; return i; };
@@ -410,7 +464,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   while ( changed ) {
     changed = false;
     for ( let i = 0; i < list.length; i++ ) for ( let j = i + 1; j < list.length; j++ ) {
-      const a = find(i), b = find(j); if ( a === b || style(list[a]) !== style(list[b]) || color(list[a]) !== color(list[b]) ) continue;
+      const a = find(i), b = find(j); if ( a === b || style(list[a]) !== style(list[b]) || color(list[a]) !== color(list[b]) || tm(list[a]) !== tm(list[b]) || style(list[a]) === "burst" ) continue;
       if ( overlaps(rects[a], rects[b]) ) {
         const lo = Math.min(a, b), hi = Math.max(a, b);
         parent[hi] = lo; rects[lo] = union(rects[a], rects[b]);
@@ -428,7 +482,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     rect = { ...rect, x1: Math.min(rect.x1, rect.x0 + MAX_SIDE), y1: Math.min(rect.y1, rect.y0 + MAX_SIDE) };
     let box = reachOf(members[0], geo, P, false); for ( const s of members ) box = union(box, reachOf(s, geo, P, false));
     box = { x0: Math.max(box.x0, rect.x0), y0: Math.max(box.y0, rect.y0), x1: Math.min(box.x1, rect.x1), y1: Math.min(box.y1, rect.y1) };
-    const er = erasers.filter((e) => overlaps(reachOf(e, geo, P), rect));
+    const er = style(members[0]) === "burst" ? [] : erasers.filter((e) => overlaps(reachOf(e, geo, P), rect));
     const all = [...members, ...er].sort(byOrder);
     // the area's wind: the strength-weighted mean of its strokes' (an area is one plume direction)
     let wx = 0, wy = 0, wsum = 0;
@@ -438,12 +492,18 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     for ( const s of all ) ph[s.id] = phases[s.id];
     // (a DUST area's look follows the shared clock from its strokes' times alone: its phases are left out of the key, so a stroke done
     // kicking up its dust does not rebuild the area)
-    const dust = style(members[0]) === "dust";
-    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => { const r = [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), dust ? null : ph[s.id], s.p.length, hashStr(s.p.join(","))]; if ( s.dk ) r.push(s.dk); return r; })))}`;
-    out.push({ id, key, rect, box, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
+    // (a BURST plays from its record and the clock alone: its phase is left out of its key too)
+    const dust = style(members[0]) === "dust" || style(members[0]) === "burst";
+    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => { const r = [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), dust ? null : ph[s.id], s.p.length, hashStr(s.p.join(","))]; if ( s.dk ) r.push(s.dk); if ( s.gr !== undefined || s.ot !== undefined ) r.push(s.gr ?? null, s.ot ?? null); if ( s.db ) r.push(hashStr(s.db.join(","))); return r; })))}`;
+    const area = { id, key, rect, box, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) };
+    if ( tm(members[0]) ) area.tm = [members[0].gr ?? null, members[0].ot ?? null];   // (its own timing: model.areaP)
+    out.push(area);
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
+
+/** The settings an area is drawn with: the scene's, with its strokes' own grow / out (area.tm) when they have them. */
+export const areaP = (area, P) => (area?.tm ? { ...P, grow: area.tm[0] ?? P.grow, out: area.tm[1] ?? P.out } : P);
 
 /* ---------------------------------------------------------------- the field */
 
@@ -652,6 +712,8 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
  */
 export function raster(area, geo, P) {
   if ( area.style === "dust" ) return dustRaster(area, geo, P);
+  if ( area.style === "burst" ) return burstRaster(area, geo);
+  P = areaP(area, P);
   const { rect } = area, W = Math.max(1, rect.x1 - rect.x0), H = Math.max(1, rect.y1 - rect.y0), N = W * H;
   const Z = sizes(geo, P), T = timing(geo, P), buf = buffers(N);
   for ( const st of area.strokes ) stamp(buf, W, H, rect.x0, rect.y0, st, geo, P, area.phases?.[st.id] ?? "on", Z, T, area.style === "fireball");

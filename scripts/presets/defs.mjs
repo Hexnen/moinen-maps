@@ -17,8 +17,8 @@ export const BUILTIN = Object.freeze([
       { l: "burst", id: "burst", at: 0, lv: 3, r: 1.6 },
       { l: "destruction", id: "crater", at: 0, type: "blast", level: 3, cause: "fire", r: 1.2, pr: { jagged: true, jag: 0.7 } },
       { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 3.5, life: 90000 },
-      { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [2, 4], d: [0.95, 1.3] }, lv: 2, lvMix: [0.5, 0.5, 0], sm: 1, r: [0.3, 0.45], len: [0.3, 0.7], aftermath: true, lifeK: [0.5, 1] },
-      { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [6, 12], d: [1.5, 3.5], bias: 1.4 }, lv: 1, sm: 1, r: [0.15, 0.25], aftermath: true, lifeK: [0.3, 0.8] },
+      { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [2, 4], d: [0.95, 1.3] }, lv: 2, lvMix: [0.5, 0.5, 0], sm: 1, r: [0.3, 0.45], len: [0.3, 0.7], aftermath: true, lifeK: [0.5, 1], gr: 0.6 },
+      { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [6, 12], d: [1.5, 3.5], bias: 1.4 }, lv: 1, sm: 1, r: [0.15, 0.25], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
       { l: "smoke", id: "column", at: 1200, sm: 3, r: 0.8, aftermath: true }
     ]
   },
@@ -34,8 +34,8 @@ export const BUILTIN = Object.freeze([
       { l: "destruction", id: "crater", at: 0, type: "blast", level: 2, cause: "impact", r: 0.35 },
       { l: "destruction", id: "shrapnel", at: 0, type: "cracks", level: 1, cause: "impact", place: { m: "scatter", n: [10, 18], d: [0.3, 2], bias: 1.6 }, r: [0.08, 0.14] },
       { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 1.5, life: 20000 },
-      { l: "smoke", id: "wisps", at: 300, sm: 1, r: 0.5, life: 8000 },
-      { l: "fire", id: "smoulder", at: 400, chance: 0.3, place: { m: "scatter", n: [1, 1], d: [0, 0.3] }, lv: 1, sm: 1, r: 0.25, aftermath: true }
+      { l: "smoke", id: "wisps", at: 300, sm: 1, r: 0.5, life: 8000, gr: 0.6 },
+      { l: "fire", id: "smoulder", at: 400, chance: 0.3, place: { m: "scatter", n: [1, 1], d: [0, 0.3] }, lv: 1, sm: 1, r: 0.25, aftermath: true, gr: 0.4 }
     ]
   },
   {
