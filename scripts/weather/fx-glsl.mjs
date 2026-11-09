@@ -382,6 +382,7 @@ precision highp int;
 in vec2 vCell;
 uniform float uTime;
 uniform float uK;
+uniform float uQ;            // the frame guard's detail 0.35..1 (weatherQ)
 uniform float uAlpha;
 uniform vec4 uSandH;        // presence x density, 3-band look (lit / shadow), -, -
 uniform vec4 uSandW;        // sand direction x, y; speed (art px / s); -
@@ -396,13 +397,15 @@ const vec3 DUST = vec3(0.93, 0.86, 0.70);
 vec4 mixTo(vec4 f, vec3 col, float m) { return vec4(f.rgb * (1.0 - m) + col * m, f.a * (1.0 - m)); }
 
 // the smooth fields (scales of 30+ cells) once per evaluation point
-float sDens = 0.0, sLit = 0.0, dH = 0.0, mH = 0.0;
+float sDens = 0.0, sLit = 0.0, sLitW = 1.0, dH = 0.0, mH = 0.0;
 void smoothFields(vec2 c) {
   if ( uSandH.x > 0.0 ) {
-    // sand billows in flat see-through bands, the waves passing; a lit side and a shadow side (one step toward the light)
+    // sand billows in flat see-through bands, the waves passing; a lit side and a shadow side (one step toward the light; the frame
+    // guard fades the sides out between q 0.8 and 0.5 and then skips their second sample)
     vec2 v = uSandW.xy * uSandW.z * 0.8 / 58.0;
     float bil = drift3a(c / 58.0, v, uTime, 40.0, uSeed + 121);
-    sLit = uSandH.y > 0.5 ? bil - drift3a((c + 3.0) / 58.0, v, uTime, 40.0, uSeed + 121) : 0.0;
+    sLitW = uQ >= 1.0 ? 1.0 : smoothstep(0.5, 0.8, uQ);
+    sLit = uSandH.y > 0.5 && sLitW > 0.0 ? bil - drift3a((c + 3.0) / 58.0, v, uTime, 40.0, uSeed + 121) : 0.0;
     float pr = dot(c, uSandW.xy), ac = -c.x * uSandW.y + c.y * uSandW.x;
     float rag = 140.0 * (fbm2(vec2(ac / 95.0, pr / 300.0), uSeed + 141) - 0.5);
     float fr = clamp(gustEnv(uTime - (pr + rag) / (uCps * 4.0), uSeed), 0.0, 1.2);
@@ -419,12 +422,15 @@ vec4 cellHaze(vec2 c) {
   if ( c.x < 0.0 || c.y < 0.0 || c.x >= uArtSize.x || c.y >= uArtSize.y ) return f;
   float op = openS(c, true);
   if ( op <= 0.0 ) return f;
-  float nz = vnoise(c / 2.6, uSeed + 997);           // (the smooth stand-in for the old per-cell dither)
+  // (the smooth stand-in for the old per-cell dither; the frame guard eases it to its mean between q 0.85 and 0.5, skipped below)
+  float hw = uQ >= 1.0 ? 1.0 : smoothstep(0.5, 0.85, uQ);
+  float nz = hw >= 1.0 ? vnoise(c / 2.6, uSeed + 997) : hw > 0.0 ? mix(0.5, vnoise(c / 2.6, uSeed + 997), hw) : 0.5;
   if ( uSandH.x > 0.0 ) {
     float dens = sDens, lit = sLit;
     float l = stairs(dens * 3.2 + (nz - 0.5) * 0.2, 3.0);
     float m = mix(lv3(l, 0.20, 0.34, 0.34), lv3(l, 0.32, 0.55, 0.78), uSandH.y);
     float dd = uSandH.y > 0.5 ? (lit >= 0.0 ? mix(0.02, 0.09, smoothstep(0.0, 0.008, lit)) : mix(0.02, -0.06, smoothstep(0.0, 0.008, -lit))) : 0.02;
+    if ( sLitW < 1.0 ) dd = mix(0.02, dd, sLitW);
     if ( m > 0.0 ) f = mixTo(f, clamp(uAvg * 0.35 + OCHRE * 0.75 + dd, 0.0, 1.0), m);
   }
   if ( uDustH.x > 0.0 ) {

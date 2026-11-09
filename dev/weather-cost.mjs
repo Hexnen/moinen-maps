@@ -14,6 +14,13 @@ const W = () => game.modules.get("moinen-maps").api.weather;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const med = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s[s.length >> 1] : 0; };
 
+/** Wait (up to 5 s) until every timer query's result is available: a heavy frame's results come in late (2026-11-09: a fixed 250 ms
+ * dropped most of them under the frame-guard sweep's 8x load at DPR 2, and the per-frame means came out a quarter of the truth). */
+async function ready(gl, list) {
+  const end = performance.now() + 5000;
+  while ( performance.now() < end && list.some((q) => !gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) ) await wait(20);
+}
+
 /** Every weather object worth timing: [key, object, method] (GPU: render; CPU: tick). */
 export function targets() {
   const out = [], d = W().display(), L = W().lensDisplay(), T = W().tornadoDisplay?.(), S = W().steamDisplay?.(), K = W().cloudDisplay?.();
@@ -76,7 +83,7 @@ export async function passes({ n = 120, warm = 20, t0 = Date.now() } = {}) {
     undo.push(() => { delete o.tick; });
   }
   try { on = true; run(n, { t0: t0 + warm * 1000 / 60 }); } finally { on = false; undo.forEach((f) => f()); }
-  await wait(250);
+  await ready(gl, [...qs.values()].flat());   // (every query: one still pending would be dropped and the mean come out too low)
   const out = {};
   for ( const [key, list] of qs ) {
     if ( !list.length ) continue;
@@ -102,7 +109,7 @@ export async function frame({ n = 120, warm = 20, t0 = Date.now() } = {}) {
       gl.endQuery(ext.TIME_ELAPSED_EXT); qs.push(q); gl.finish();
     }
   } finally { Date.now = realNow; T.maxFPS = mf; if ( st ) T.start(); }
-  await wait(250);
+  await ready(gl, qs);
   const g = []; for ( const q of qs ) { if ( gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE) ) g.push(gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6); gl.deleteQuery(q); }
   return { gpu: r3(med(g)), cpu: r3(med(cpu)) };
 }
