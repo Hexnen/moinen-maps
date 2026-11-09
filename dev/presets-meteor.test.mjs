@@ -119,6 +119,12 @@ for ( const seed of [1, 7, 99] ) for ( const power of [-1, 0, 1] ) {
   ok(/if \( !hasMeteor\(data\?\.rec\) \) return;/.test(w), "only for a record with a meteor accent");
   const art = readFileSync(new URL("../scripts/presets/meteor-art.mjs", import.meta.url), "utf8");
   ok(/guardQ\("meteor"\)/.test(art) && /noShake/.test(art), "art: frame guard + shake opt-out");
+  // (responsiveness: the programs are linked in the background - never by the click's frame - and nothing is drawn before they are)
+  ok(/import \{ warmPrograms \} from "\.\.\/gl-warm\.mjs"/.test(art) && /export function warmUp\(\)/.test(art), "art: background program link (warmUp)");
+  ok(/this\.show\.visible = this\.glow\.visible = false;/.test(art) && /if \( !ready \) continue;/.test(art) && /warmUp\(\);\s*live\.set/.test(art), "art: a shot stays hidden until its programs are linked");
+  ok(/Hooks\.on\(UI_HOOK/.test(w) && /m\.warmUp\(\)/.test(w) && /game\.user\?\.isGM/.test(w), "wire: the GM arming a meteor pad links its programs");
+  const rt = readFileSync(new URL("../scripts/presets/runtime.mjs", import.meta.url), "utf8"), lw = readFileSync(new URL("../scripts/load-warm.mjs", import.meta.url), "utf8");
+  ok(/rec\.t0 > now \) import\("\.\.\/load-warm\.mjs"\)\.then\(\(m\) => m\.warmDamage\(\)\)/.test(rt) && /export function warmDamage\(\)/.test(lw), "runtime: a firing ahead of its impact links the damage programs (load-warm warmDamage)");
 }
 
 console.log(`${n - fails}/${n} ok`);

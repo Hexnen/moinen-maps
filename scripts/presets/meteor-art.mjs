@@ -7,6 +7,7 @@ import { clientOpts } from "../director/stage.mjs";
 import { geo as fireGeo } from "../fire/fire.mjs";
 import { footprintK } from "../fire/shader.mjs";
 import { rampOf, NATURAL } from "../fire/look.mjs";
+import { warmPrograms } from "../gl-warm.mjs";
 import * as M from "./meteor-core.mjs";
 
 /**
@@ -290,6 +291,20 @@ const programs = () => progs ??= {
   show: PIXI.Program.from(VERT, SHOW, "moinen-maps-meteor-show-v1"),
   emit: PIXI.Program.from(VERT, EMIT, "moinen-maps-meteor-emit-v1")
 };
+/**
+ * The programs LINKED IN THE BACKGROUND (gl-warm.mjs: KHR_parallel_shader_compile, then PIXI's own compile, a cache hit): on a
+ * program-cache miss the art pass alone froze the click's frame for 0.4-0.75 s. A firing is drawn once they are ready - the head is
+ * still far up the sky (off screen at zoom 1 for its first second), so nothing is seen later than before. The GM's client starts this
+ * when the meteor pad is armed (meteor-wire.mjs), every client on the firing record.
+ */
+let warm = false, warming = null;
+const isWarm = () => warm || (warm = !!progs && Object.values(progs).every((p) => p.glPrograms?.[canvas.app.renderer.CONTEXT_UID]));
+export function warmUp() {
+  if ( !canvas?.ready || !canvas.app?.renderer?.gl ) return Promise.resolve(false);
+  programs();
+  if ( isWarm() ) return Promise.resolve(true);
+  return warming ??= warmPrograms(Object.values(progs), () => !!canvas?.ready).catch(() => {}).then(() => { warming = null; return isWarm(); });
+}
 const quad = (x0, y0, x1, y1, W, H) => new PIXI.Geometry()
   .addAttribute("aVertexPosition", [x0, y0, x1, y0, x1, y1, x0, y1], 2)
   .addAttribute("aCell", [0, 0, W, 0, W, H, 0, H], 2)
@@ -317,6 +332,7 @@ class Shot {
     this.show = new PIXI.Mesh(geom, new PIXI.Shader(P.show, common())); this.show.eventMode = "none";
     this.glow = new PIXI.Mesh(geom, new PIXI.Shader(P.emit, common())); this.glow.eventMode = "none"; this.glow.blendMode = PIXI.BLEND_MODES.MAX_COLOR;
     this.show.state.blendMode = PIXI.BLEND_MODES.NORMAL;
+    this.show.visible = this.glow.visible = false;   // (until its programs are linked: tick)
     root.addChild(this.show); glowBox.addChild(this.glow);
   }
   /** Draw the art pass for shared time `now` into the cells of the window `win` (cells [x0, y0, x1, y1]) - if anything changed. */
@@ -374,6 +390,7 @@ export function take(rec) {
   drop(rec.id);
   mount();
   const g = fireGeo(), v = viewOf();
+  warmUp();
   live.set(rec.id, items.map((it) => new Shot(rec, it, g, v.lift)));
   arm();
 }
@@ -427,10 +444,13 @@ function tick() {
   if ( !canvas?.ready || !root || root.destroyed ) { stop(); return; }
   const now = sharedNow(), renderer = canvas.app.renderer, q = guardQ("meteor"), [dark, liftL] = darkness();
   let rum = 0;
+  const ready = isWarm();
   for ( const [fid, shots] of live ) {
     if ( shots.every((s) => now > s.end) ) { drop(fid); continue; }
     for ( const s of shots ) {
       if ( now > s.end ) { s.show.visible = s.glow.visible = false; continue; }
+      if ( !ready ) continue;
+      s.show.visible = s.glow.visible = true;
       s.draw(renderer, now, s.windowOf(), q, dark, liftL);
       rum = Math.max(rum, M.rumbleAt(now - s.t0) * nearView(s.W.P[0], s.W.P[1]));
     }
