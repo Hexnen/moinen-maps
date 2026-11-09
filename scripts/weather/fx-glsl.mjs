@@ -20,7 +20,7 @@ uniform vec4 uTiles;         // first tile x, y; tiles across, down
 uniform float uTileSz;       // art px per tile (embers: the source cell)
 uniform vec4 uPer;           // slots per tile per layer (snow: mid, far, near, spindrift)
 uniform vec4 uDens;          // live slots per tile per layer (fractional)
-uniform vec4 uDensR[14];     // per layer: the density then / now at the whole seconds A - i, i = 0..11 ([12]: the largest; [13].x: A - uTime), exactly 1 when steady (D7); embers .w: the big-spark share then
+uniform vec4 uDensR[14];     // per layer: the density then / now at the whole seconds A - i, i = 0..11 ([12]: the largest; [13].x: A - uTime; [13].y: 1 while a history is live, else 0: steady), (D7); embers .w: the big-spark share then
 uniform vec4 uOrigin;        // scene rect x, y; art px (scene px); art cells per grid square
 uniform vec2 uWindDir;       // unit (sand: the sand's direction)
 uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust amount
@@ -42,7 +42,8 @@ void hide() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); vArt = vec2(0.0); vScr =
 // (the samples sit at fixed whole seconds of the clock, so a particle's birth density is the same on every frame of its life)
 vec4 agoR(float tau) { float a = clamp(tau + uDensR[13].x, 0.0, 10.999); int i = int(a); return uDensR[i] + (uDensR[i + 1] - uDensR[i]) * (a - float(i)); }
 float rB = 1.0;
-float bornDens(float dens, int layer, float tau) { vec4 r = agoR(tau); rB = layer == 0 ? r.x : layer == 1 ? r.y : layer == 2 ? r.z : r.w; return dens * rB; }
+// (steady: the code before D7 exactly, so the steady weather is the same to the bit: the extra arithmetic, though x 1, moved a few px by 1 / 255)
+float bornDens(float dens, int layer, float tau) { if ( uDensR[13].y < 0.5 ) { rB = 1.0; return dens; } vec4 r = agoR(tau); rB = layer == 0 ? r.x : layer == 1 ? r.y : layer == 2 ? r.z : r.w; return dens * rB; }
 float gateOf(int j, float dens, int key, int ty, int ci, int sd) {
   if ( float(j) >= ceil(dens) ) return 0.0;
   float g = float(j) < floor(dens) ? 1.0 : fract(dens);
@@ -233,12 +234,12 @@ void main() {
     float fl = hu(key, int(floor(uTime * 10.0)), sd + 20);
     float cI = clamp(floor(age * 2.6 + fl * 1.2 + h[8] * 0.8 - 0.4), 0.0, 4.0);
     // big sparks: the share grows 0 -> 15 % with uVF.y 0 -> 1 (the threshold is exactly 1.0 at 0, which no hash passes, and 0.85 at 1)
-    float big = h[7] > 0.85 + 0.15 * (1.0 - agoR(tau).w) && cI < 2.0 && dp > 0.6 ? 1.0 : 0.0;
+    float big = h[7] > 0.85 + 0.15 * (1.0 - (uDensR[13].y < 0.5 ? uVF.y : agoR(tau).w)) && cI < 2.0 && dp > 0.6 ? 1.0 : 0.0;
     float low = z * par < 22.0 && cI < 3.0 && dp > 0.5 ? 2.0 : 0.0;
     vA = vec4(P, Pp); vB = vec4(Xg, cI, big + low + 4.0 * floor(dp * 15.99));   // flags + 4 x depth (0..15)
     lo = min(min(P, Pp), Xg) - M_ - 2.3; hi = max(max(P, Pp), Xg) + M_ + 2.3;
   }
-  vFade *= min(1.0, 1.0 / rB);
+  if ( rB != 1.0 ) vFade *= min(1.0, 1.0 / rB);
   vec2 a = mix(lo, hi, aCorner);
   vArt = a;
   vec2 world = uOrigin.xy + a * uOrigin.z;

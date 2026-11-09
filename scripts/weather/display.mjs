@@ -157,7 +157,7 @@ export class WeatherDisplay {
         .addIndex([0, 1, 2, 0, 2, 3]);
       pg.instanced = true; pg.instanceCount = 0;
       this.partGeoms.push(pg);
-      this.densR[name] = new Float32Array(56).fill(1);
+      this.densR[name] = new Float32Array(56).fill(1); this.densR[name][53] = 0;
       this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0, uDensR: this.densR[name],
         uTiles: new Float32Array([0, 0, 1, 1]), uTileSz: ts, uPer: new Float32Array(4), uDens: new Float32Array(4), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]),
         uWindDir: new Float32Array([1, 0]), uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array(4), uI: 1, uAlpha: 1,
@@ -309,7 +309,8 @@ export class WeatherDisplay {
     for ( const [name] of KINDS ) {
       const R = this.densR[name], c = cur[name];
       if ( !R ) continue;
-      if ( !ramp ) R.fill(1);
+      R[53] = ramp ? 1 : 0;
+      if ( !ramp ) { R.fill(1); R[53] = 0; }
       else for ( let i = 0; i < 4; i++ ) {
         let mx = 1;
         for ( let a = 0; a <= 11; a++ ) { const d = past[a][name]?.[i] ?? 0, c0 = c?.[i] ?? 0, r = c0 > 0 ? Math.min(d / c0, 1e3) : d > 0 ? 1e3 : 1; R[a * 4 + i] = r; mx = Math.max(mx, r); }
