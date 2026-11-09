@@ -1177,3 +1177,29 @@ come from off screen at zoom 1).
   (bomb: 7.7-8.8 ms). stack-bench's stepped CPU p95 is high in the first ~25 s (20-46 ms, from the ~20 aftermath fires: dropping the
   debris / rim / heart fires takes it to 1.2 ms) - an artefact of stepping the fire layer back to back; the real frames above do not
   show it. Cold first firing on a fresh page: one long task 175-886 ms (bomb ~170 ms), at the click, not at the impact.
+
+### 22.2 Responsiveness (2026-11-09, after "responsywność ponad wszystko")
+
+Measured on lane 5 in a real headless Chrome (RTX 3070 Ti, DPR 2, 165 Hz display: 6.1 ms frames), each run a FRESH Chrome with
+the shader disk cache off (the worst case: a program-cache miss), the GM firing the meteor at the ZZ test street, real rAF
+frame times; "before" = c390063, "after" = this branch (2-3 runs each, zoom 1 and 3):
+
+| window | before: longest frame | after: longest frame |
+|---|---|---|
+| the click (to T0, 2.6 s) | 494-1058 ms | 73-88 ms |
+| impact to +3 s | 22-1604 ms (60-1200 ms damage programs) | 19-27 ms |
+| +3 to +10 s | 9-22 ms | 10 ms |
+| +10 to +25 s | 10-33 ms | 9-21 ms |
+
+- Cause 1 (the meteor's own): its three programs were linked by the frame that first drew it - the art pass alone 0.4-0.9 s
+  on a cache miss. Now `meteor-art warmUp` links them off the main thread (gl-warm warmPrograms) when the GM arms a meteor pad
+  and on every client when the firing record arrives; a shot stays hidden until they are linked (the head is still off screen).
+- Cause 2 (shared, the bomb / grenade / rocket pay it too): the damage layer's programs (sharp batch, patch, tiles, the GPU
+  pieces' pose, the erosion pass) were linked by the impact frame on a scene with no damage yet (60 ms - 1.2 s). Now the presets
+  runtime calls `load-warm warmDamage` when it takes up a firing ahead of its impact: the same programs, linked in the background.
+- Left, shared, not changed: the GM's first damage on a scene samples the scene map once (`destruction/source.mjs sceneMap`,
+  getImageData ~85 ms, at the click - every blast preset has it); the fire lights' program (~30 ms on a miss).
+- The aftermath (~20 fires): no long frames in real frames at zoom 1 or 3 (p95 7.2-7.5 ms, p99 <= 8 ms over +3..+25 s, the same
+  as before). The 20-46 ms CPU p95 of dev/meteor-cost.mjs came from stack-bench stepping the frames back to back: the fire layer
+  spreads its next art frame over the real frames before it is due (display.mjs drawAhead), which a back-to-back stepper defeats;
+  removing the meteor's fires removed it there, but real frames never showed it. Nothing changed in the fire layer.
