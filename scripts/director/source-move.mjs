@@ -118,18 +118,46 @@ const handler = {
   },
   drive(shot, api) {
     const id = shot.play?.follow; if ( !id ) return null;                          // (a turn: the framed move to the combatant)
-    const g = api.grid, app = canvas.app;
-    const scale1 = M.followScale(api.home.scale, app.screen.width, app.screen.height, g, api.r.zoomIn, api.k, api.reduced, api.limits);
+    const g = api.grid, app = canvas.app, vw = app.screen.width, vh = app.screen.height;
+    // an open window narrows the free part of the screen (freeRect; the take-over was framed into it): the token is followed in THAT
+    // part - the aim is its middle, the look-ahead keeps the token inside it. No window: the whole screen, exactly as before.
+    const a = safeRect(), f = freeRect();
+    const rc = !f.covered && (f.x !== a.x || f.y !== a.y || f.w !== a.w || f.h !== a.h) ? f : null;
+    const scale1 = M.followScale(api.home.scale, vw, vh, g, api.r.zoomIn, api.k, api.reduced, api.limits);
+    const ox = rc ? vw / 2 - (rc.x + rc.w / 2) : 0, oy = rc ? vh / 2 - (rc.y + rc.h / 2) : 0;
     const centre = (t) => { const c = t.center; return { x: c.x, y: c.y }; };
     const t0 = seen(id);
+    const halfS = (t0 ? Math.max(sizePx(t0.document).w, sizePx(t0.document).h) : g) / 2;          // (the token's half size, scene px)
+    const aheadAt = (s) => (rc ? Math.min(g * 1.5, Math.max(0, Math.min(rc.w, rc.h) / 2 - halfS * s - 16) / s) : g * 1.5);
+    // the camera may be held back from the aim (LockView's bounding box keeps the scene's edge off the screen): the token then sits
+    // off the free part - near the map's edge only a closer zoom lets the camera put it there, so the zoom pushes in, gently, until
+    // it does (at most 1.6x the follow zoom, never past the canvas limit)
+    // (and stops where zooming in does not bring it closer: a token at the very edge of the map)
+    let zk = 1, zTry = null, zMax = rc ? Math.max(1, Math.min(api.limits[1], scale1 * 1.6) / scale1) : 1;
+    const zRate = api.reduced ? 0.3 : 0.6;
     const st = M.followInit(t0 ? centre(t0) : null, { x: shot.x, y: shot.y });
     const settleMs = Math.round(700 * (api.r.holdK ?? 1));
     let settleAt = null, lost = !t0;
     const tick = () => {
       const t = seen(id), here = t ? centre(t) : null;
       if ( !here ) lost = true;                                                    // left my sight: the camera stays where I last saw it
-      const v = M.followStep(st, lost ? null : here, app.ticker.deltaMS, { from: api.from, lead: api.lead, scale0: api.from.scale, scale1, ahead: g * 1.5, smoothS: api.reduced ? 0.6 : 0.32 });
-      if ( api.cameraOn() ) canvas.pan(v);
+      const s1 = scale1 * zk, dtMs = app.ticker.deltaMS;
+      const v = M.followStep(st, lost ? null : here, dtMs, { from: api.from, lead: api.lead, scale0: api.from.scale, scale1: s1, ahead: aheadAt(s1), smoothS: api.reduced ? 0.6 : 0.32, ox, oy });
+      if ( api.cameraOn() ) {
+        canvas.pan({ ...v });                                                      // (a copy: LockView writes its bounded view into it)
+        if ( rc && here && zk < zMax && st.t >= api.lead * 0.6 ) {
+          const p = canvas.stage.pivot, s = canvas.stage.scale.x;
+          if ( (Math.abs(p.x - v.x) + Math.abs(p.y - v.y)) * s > 2 ) {
+            const sx = (here.x - p.x) * s + vw / 2, sy = (here.y - p.y) * s + vh / 2, m = halfS * s + 8;
+            const err = Math.max(0, rc.x + m - sx, sx - (rc.x + rc.w - m), rc.y + m - sy, sy - (rc.y + rc.h - m));
+            if ( err > 0 ) {
+              if ( !zTry ) zTry = { zk, err };
+              else if ( zk >= zTry.zk * 1.12 ) { if ( err > zTry.err * 0.85 ) zMax = zk; else zTry = { zk, err }; }
+              zk = Math.min(zMax, zk * (1 + zRate * Math.min(dtMs, 100) / 1000));
+            }
+          }
+        }
+      }
       const moving = !lost && !!t && t.animationContexts?.has?.(t.movementAnimationName);
       const now = performance.now();
       if ( moving ) settleAt = null; else settleAt ??= now + (lost ? 350 : settleMs);

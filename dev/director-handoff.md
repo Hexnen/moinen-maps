@@ -804,3 +804,53 @@ Setup caption at 4x, real attack (P1, Plus Ultra "splash for others" off so the 
 
 ### New dev tools
 `dev/director-perf.mjs` (--gpu, --layers, sat60 / sat60own, camera share), `dev/director-perf-table.mjs`, `dev/director-perf-merge.mjs`, `dev/director-micro-ab.mjs`, `dev/director-look-ab.js`; evidence in `dev/director-opt-ev/`.
+
+## director-fix-opt2 (2026-11-09) - the two bugs of verify-opt (dev/director-verify-opt.md)
+
+Branch `director-opt`, worktree `C:/mmwt-dir-opt`. Lane 4 (port 30004, world `invincible`, scene `director-test`), junction flipped to this worktree and back to `C:\mmwt-director`, lease taken and released. My headless Chrome on CDP 9511 (1600x900): GM = Gamemaster (127.0.0.101), P1 = Test Gracz 1 (.102), P2 = Test Gracz 2 (.103), second GM = `claude` (.104). Before = HEAD 9cc7b08 (changes stashed, P1/GM reloaded on it, stash popped; the page keeps the old modules until its next reload). Evidence: `dev/director-fix-opt2-ev/`. The opt pass (restyle via getComputedStyle, `contain: strict`, `idleSliced`) is untouched.
+
+### Bug 1: the move follow camera ignored the free part of the screen
+- Cause: `source-move.mjs handler.drive` -> `move-core.followStep` centred the token on the whole screen; `freeRect()` was only used by `check`.
+- Fix:
+  - `followStep` takes `ox` / `oy` (screen px: screen centre - free rect centre); the camera centre is shifted by them / the zoom of THAT frame (the same shift `frameShot` / `centreFor` use). Default 0: unchanged.
+  - `drive` uses the free rect only when an open window narrows it (freeRect differs from safeRect and is not `covered`); no window = exactly the old math (ox = oy = 0, look-ahead g*1.5, same zoom).
+  - With a window the look-ahead is capped so the token stays inside the rect (half the rect's short side - the token's half size - 16 px).
+  - `canvas.pan({ ...v })`: LockView's libWrapper writes its bounded view INTO the object passed to `canvas.pan`, so the old code could not see that the camera was held back.
+  - LockView `boundingBox` (on in director-test) keeps the map edge off screen: near the right edge the camera cannot put the token on the left of the screen at the follow zoom. When the camera is held back and the token is outside the rect, the zoom pushes in gently (0.6 x per s, 0.3 with reduced motion; at most 1.6 x the follow zoom, never past the canvas limit), and stops when zooming in does not bring the token closer (a token at the very edge of the map).
+- Numbers (P1, Game Settings 720x620 at x 640-1360, free rect x 317-640, home (500,500) at 1.5, GM `doc.update`), per frame of the shot (`toScreen(token.center)` each ticker frame, `p-watch-move.js` / `p-res.js` of the verifier):
+
+| case | before (9cc7b08) | after |
+|---|---|---|
+| TT2 (480,300) -> (760,520) | 0 / 96 in the free rect (verifier: 0 / 68) | 61 / 96; first frame inside at +624 ms, then 61 / 61 (no frame out after it); last half 48 / 48 |
+| TT0 (300,300) -> (760,560) | verifier: 0 / 101 | 121 / 146; first inside at +509 ms, then 121 / 121; last half 73 / 73 |
+| TT2 -> (760,520), no recorder | - | 54 / 86, last half 43 / 43; camera back exactly at home (528,500,1.5), Screen owner null |
+| TT2 -> (1080,520) (held back by the bounding box) | - | push-in to 1.127 x; 117 / 152, last half 76 / 76 |
+| TT2 -> (1480,520) (map edge, 56 px from it) | - | push-in stopped at 1.12 x (no progress); 85 / 278: the token runs out of the rect toward the edge - the bounding box makes it impossible |
+
+  The frames before the first one inside are the lead: the token starts behind the window and the camera blends from the player's view (no cut).
+  The two LockView rows ran with temporary logging lines (removed before the commit; no logic in them); the first three rows ran on the final code.
+- No window (home (300,300) at 2, TT2 -> (1080,520), a follow take-over): before / after camera at +300 / 700 / 1200 / 2000 ms = 479/324/2.072 vs 478/324/2.071, 746/411/2.231 vs 740/409/2.228, 887/462/2.25 vs 888/462/2.25, 1067/528 vs 1069/529; last frame 1113/545/2.25 both; shot 2782 vs 2787 ms; home 400/300/2 both. Same math, the differences are frame timing. The no-window repro move stays `none` (in view), as before.
+- Soft form: not touched by the change. Two runs inside the cooldown played `soft` with the new code (form soft, ended done).
+- webm (P1): `after-A-TT2.webm` (fixed), `before-win-TT2.webm` (bug), `after-C-TT0.webm`, `after-E-push.webm` (push-in), strips `*-strip.png`, single frames `after-A-mid.png` / `before-mid.png`.
+- Unit: `dev/director-move.test.mjs` +4 checks for the offset (61 checks).
+
+### Bug 2: the Director look dropdown did not refresh
+- Cause: `section.mjs` listened with `onSetting` = `clientSettingChanged`, which Foundry fires only for CLIENT settings (`#setClient`); `cinUserPresets` is a world Setting document.
+- Fix: `workspace/ui.mjs onWorldSetting(keys, fn)` (create / update / deleteSetting hooks, which run on every connected client); `section.mjs` uses it for `cinUserPresets`. `onSetting` itself is unchanged (its other callers are client settings).
+- Check (GM page, the real look panel "Duplicate" button + name dialog, then the real "Delete" button + confirm; `fx2/js/sec-ui.js`):
+  - before: the new option never appeared in 3 s (setting written, hook 8 ms after OK).
+  - after: shown 34-41 ms after OK (25 ms polling; the rebuild runs inside the setting hook, 3-12 ms after OK), gone 25-29 ms after the confirm.
+  - second GM page (`claude`, Director section open): its look `<select>` changed in the same hook dispatch as the setting, for both saves and both deletes (MutationObserver log).
+
+### Regression
+- `node dev/run-all.mjs` 65/65, `node dev/lang-audit.mjs` clean.
+
+### Not verified
+- Reduced motion with a window (the slower push-in, the 0.6 s spring) was not run live.
+- A window opened / moved / closed DURING a follow (the free rect is measured once, at the start of the shot).
+- Turn glide / stage beats near a LockView bounding-box edge (same physical limit, not touched).
+- DPR 2, Firefox, a real 60 Hz display; the push-in heuristic on maps without LockView (Foundry's own pan clamp is loose, it should never trigger there).
+- director-check watchShot / cinematic checks were not re-run (the take-over code outside the move drive is unchanged).
+
+### State restored
+- Director OFF (paused false, k 1, mode bar); `splashOthers` true; `cinUserPresets` {}; the scene's cinematic block back to its exact earlier value (epic + the previous `over`; Duplicate/Delete change it); no combats; TT0-TT6 at their places; tokenVision false as found. Junction back to `C:\mmwt-director`, lease released, my Chrome closed.

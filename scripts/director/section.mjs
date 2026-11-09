@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as Dir from "./core.mjs";
 import * as Cin from "../destruction/cinematic-core.mjs";
 import { registerSection } from "../workspace/registry.mjs";
-import { esc, T, optRange, optSelect, optCheck, optHint, optFold, keepFolds, isEcho, writeControl, onSetting, bindSettings } from "../workspace/ui.mjs";
+import { esc, T, optRange, optSelect, optCheck, optHint, optFold, keepFolds, isEcho, writeControl, onWorldSetting, bindSettings } from "../workspace/ui.mjs";
 import { renderCinematicPanel } from "../destruction/cinematic-panel.mjs";
 import * as D from "./director.mjs";
 
@@ -98,7 +98,8 @@ export function renderDirectorPanel(host) {
   host.addEventListener("click", onClick);
   const offBind = bindSettings(host, { dirMode: "dirMode", dirIntensity: "dirIntensity", cinReduced: "cinReduced" });
   const hook = Hooks.on(D.HOOK, (kind) => { if ( kind === "state" ) refresh(); });
-  const offSet = onSetting(["cinUserPresets"], () => refresh());
+  // (cinUserPresets is a WORLD setting: no clientSettingChanged for it - the Setting document hooks, on this GM and on any other)
+  const offSet = onWorldSetting(["cinUserPresets"], () => refresh());
   refresh();
   return () => {
     host.removeEventListener("change", onChange); host.removeEventListener("click", onClick);

@@ -91,6 +91,19 @@ const G = 100;
     over = Math.max(over, q.x - px);
   }
   ok(over < 160, `corner overshoot bounded (${over.toFixed(0)} px)`);
+  // a window narrows the free part of the screen: the aim is its middle (ox / oy screen px at the zoom of the frame); 0 = unchanged
+  {
+    const f0 = { x: 0, y: 0, scale: 1 }, sa = M.followInit({ x: 500, y: 300 }, f0), sb = M.followInit({ x: 500, y: 300 }, f0);
+    let va, vb;
+    for ( let t = 0; t <= 3000; t += 16 ) {
+      va = M.followStep(sa, { x: 500, y: 300 }, 16, { from: f0, lead: 800, scale0: 1, scale1: 2, ox: 320, oy: -40 });
+      vb = M.followStep(sb, { x: 500, y: 300 }, 16, { from: f0, lead: 800, scale0: 1, scale1: 2 });
+    }
+    near(va.x, 500 + 160, 0.5, "free rect: the camera centre moves by ox / scale"); near(va.y, 300 - 20, 0.5, "free rect: and by oy / scale");
+    near(vb.x, 500, 0.5, "no offset: the token in the screen centre");
+    // the token then sits at the free rect's middle: screen x = (token - camera) * scale + vw / 2 = vw / 2 - ox
+    near((500 - va.x) * va.scale + 800, 800 - 320, 0.5, "token on screen at the free rect's middle");
+  }
   const [a, va] = M.damp(0, 100, 0, 0.3, 10);
   near(a, 100, 1, "damp converges"); ok(Math.abs(va) < 5, "damp at rest");
 }

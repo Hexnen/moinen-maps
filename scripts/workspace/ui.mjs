@@ -41,6 +41,21 @@ export function onSetting(keys, fn) {
   });
   return () => Hooks.off("clientSettingChanged", id);
 }
+/**
+ * The same for WORLD settings: Foundry fires no "clientSettingChanged" for them (they are Setting documents in the world database);
+ * their create / update / delete hooks run on every connected client, the one that wrote the value included.
+ * @param {string[]} keys
+ * @param {(key: string) => void} fn
+ */
+export function onWorldSetting(keys, fn) {
+  const prefix = `${MODULE_ID}.`;
+  const on = (doc) => {
+    const key = String(doc?.key ?? "");
+    if ( key.startsWith(prefix) && keys.includes(key.slice(prefix.length)) ) fn(key.slice(prefix.length));
+  };
+  const ids = ["createSetting", "updateSetting", "deleteSetting"].map((h) => [h, Hooks.on(h, on)]);
+  return () => { for ( const [h, id] of ids ) Hooks.off(h, id); };
+}
 
 /** A slider with its number field. */
 export function optRange({ name, label, value, min, max, step, hint = "" }) {

@@ -112,13 +112,14 @@ export const smooth = (t) => { const u = clamp(t, 0, 1); return u * u * (3 - 2 *
  * The follow camera, one frame. st = { x, y, vx, vy (the spring), tx, ty, tvx, tvy (the token's own smoothed velocity), t (ms since
  * the start) } (made by followInit). `live` = the token's centre now (null = not visible here: the spring settles where it was last seen).
  * `from` = the camera when the shot began, `lead` = ms to blend from it into the follow, `scale0`/`scale1` the zoom from/to.
- * Look-ahead: the camera aims a little ahead of the token in its direction of travel (at most `ahead` px). Returns { x, y, scale }.
+ * Look-ahead: the camera aims a little ahead of the token in its direction of travel (at most `ahead` px). `ox`/`oy` (screen px, default 0):
+ * where the aim sits off the screen centre - (screen centre - free rect centre), as frameShot shifts a framed box. Returns { x, y, scale }.
  */
 export function followInit(live, from) {
   const p = live ?? from;
   return { x: p.x, y: p.y, vx: 0, vy: 0, lx: p.x, ly: p.y, tvx: 0, tvy: 0, t: 0, seen: !!live };
 }
-export function followStep(st, live, dtMs, { from, lead, scale0, scale1, ahead = 150, smoothS = 0.32 }) {
+export function followStep(st, live, dtMs, { from, lead, scale0, scale1, ahead = 150, smoothS = 0.32, ox = 0, oy = 0 }) {
   const dt = clamp(dtMs, 0, 100) / 1000;
   st.t += dtMs;
   if ( live ) {
@@ -134,8 +135,11 @@ export function followStep(st, live, dtMs, { from, lead, scale0, scale1, ahead =
   if ( m > ahead ) { ax *= ahead / m; ay *= ahead / m; }
   [st.x, st.vx] = damp(st.x, st.lx + ax, st.vx, smoothS, dt);
   [st.y, st.vy] = damp(st.y, st.ly + ay, st.vy, smoothS, dt);
-  const e = lead > 0 ? smooth(st.t / lead) : 1;
-  return { x: from.x + (st.x - from.x) * e, y: from.y + (st.y - from.y) * e, scale: scale0 + (scale1 - scale0) * e };
+  const e = lead > 0 ? smooth(st.t / lead) : 1, scale = scale0 + (scale1 - scale0) * e;
+  // (ox, oy: screen px from the screen centre to the middle of the free rect, negated - the camera centre moves by them at the zoom of
+  // this frame, so the token sits in the part of the screen no window covers; 0 = the screen centre)
+  const cx = st.x + ox / scale, cy = st.y + oy / scale;
+  return { x: from.x + (cx - from.x) * e, y: from.y + (cy - from.y) * e, scale };
 }
 
 /* ---------------------------------------------------------------- the turn banner */
