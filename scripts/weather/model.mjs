@@ -1,25 +1,33 @@
 /**
  * WEATHER, the pure model (no Foundry, no PIXI: node-tested in dev/weather-model.test.mjs).
  *
- * THE STORED STATE is one scene flag, `flags.moinen-maps.weather`, written by the GM only; nothing is sent per frame:
+ * THE STORED STATE is one scene flag, `flags.moinen-maps.weather`, written by the GM only; nothing is sent per frame (VERSION 2):
  *   { v, on, who: "all" | "gm", seed,
- *     keys: [ { t: shared ms, dur: ms, preset, level 1..3, i 0..1, fx: { rain: { l, i }, ... }, wind: { dir, str, gust } } ],  (the timeline)
- *     base: { t, fx: { eff: { p, s } }, wind, wet },     (the state the oldest kept key starts from: older keys are folded into it)
+ *     keys: [ { t: shared ms, dur: ms, preset, level: v (the preset strength), fx: { rain: v, ... }, wind: { dir, str, gust } } ],
+ *                                                        (the timeline; every v is one continuous STRENGTH 0..V_MAX)
+ *     base: { t, fx: { eff: v }, wind, wet, cover, drift? },  (the state the oldest kept key starts from: older keys are folded into it)
  *     ground: { wetRate, dryRate, puddles },             (seconds to wet / dry the ground; puddles on / off)
- *     lens: { on, level: "auto" | 1 | 2 | 3, strength },
- *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] },  (weather OBJECTS on their own paths: tornado-model.mjs)
+ *     lens: { on, level: "auto" | v, strength, heat },
+ *     tornadoes: [ { id, path, t0, speed, wander, size, level 1..3 (float), ... } ] },  (weather OBJECTS on their own paths: tornado-model.mjs)
  *     fire: { out },                                     (rain puts fire areas out: off by default, research D9)
  *     clouds: { mode: "sky" | "shadows", modeT, rays, raysT },  (the cloud layer's look: bodies + shadows or shadows only, godrays;
  *                                                        each switch fades over CLOUD_FADE ms from its shared time)
  *     storm: { on, rate, power, near, bolts, t, prev } }  (the rain's lightning, storm-model.mjs; absent until the GM first sets it)
+ * A VERSION 1 flag (keys with `i` and fx { l, i }, base fx { p, s }) is read the same way and migrated at read time (`cleanParams`):
+ * see dev/weather-slider-design.md 3.2. The next GM change writes VERSION 2.
  *
- * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key cross-fades from the state at its
- * start to its target along a smoothstep over its `dur`, so a change of preset, level or wind is a smooth ramp, never a cut, and a
- * client that joins late computes the same thing. Each effect carries
- *   p  its presence 0..1 (fading in / out), and
- *   s  its LEVEL as one continuous value, s = level - 1 + (i - 0.5) x 0.7 (about -0.35 .. 2.35);
+ * STRENGTH v (dev/weather-slider-design.md 2.1): 0 off, 1 / 2 / 3 exactly the old levels 1 / 2 / 3 at the default fine intensity,
+ * up to V_MAX = 3.35 (the "overdrive": the old level 3 at fine intensity 1). `strength(v)` is the only place that maps it onto the
+ * two quantities every consumer reads:
+ *   p  its presence 0..1 = clamp(v, 0, 1) (0..1 fades the level-1 look in), and
+ *   s  its LEVEL continuum = clamp(v - 1, 0, V_MAX - 1) (0 / 1 / 2 at the levels; up to 2.35 in the overdrive);
  * every gate of the look (slot densities, splash crowns, wet tint, puddle threshold ...) is a piecewise-linear function of s through
  * the research's level tables at s = 0, 1, 2 (`gate`), so moving between levels never pops.
+ *
+ * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key ramps each effect's v from the
+ * state at its start to its target along a smoothstep over its `dur` (an effect missing on one side counts as v = 0), so a change is
+ * a smooth ramp through exactly the states the slider would show (rain 3 -> clear passes through 2 and 1), and a client that joins
+ * late computes the same thing.
  * WET GROUND (and SNOW COVER) accumulates: it rises toward the rain's ceiling (30 / 65 / 100 % of the full wet tint at levels 1 / 2 / 3) with time
  * constant wetRate and dries with dryRate, integrated in closed form between transitions (1 s steps inside them): deterministic.
  */
@@ -28,7 +36,7 @@ import { cleanTornadoes } from "./tornado-model.mjs";
 import { cleanStorm } from "./storm-model.mjs";
 
 export const FLAG = "weather";
-export const VERSION = 1;
+export const VERSION = 2;
 export const KEEP_KEYS = 8;
 export const LEAD_MS = 300;             // a change starts this far ahead, so every client starts it on the same frame
 export const DEFAULT_DUR = 20000;       // ms
@@ -61,44 +69,94 @@ export const CLOUD_MODES = ["sky", "shadows"];
 export const CLOUD_FADE = 4000;         // ms: a switch of the cloud mode or the godrays fades in / out over this
 
 const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-const lvl = (v, d = 2) => { const n = Math.round(Number(v)); return n >= 1 && n <= 3 ? n : d; };
-export const levelS = (level, i = 0.5) => lvl(level) - 1 + (num(i, 0, 1, 0.5) - 0.5) * 0.7;
+/** A number given as a number or a numeric string (form values); anything else (null, "", junk) is NaN. */
+const numOf = (v) => typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+
+/* ---------------------------------------------------------------- strength v (dev/weather-slider-design.md 2.1) */
+
+/** The strength's top: the old level 3 at fine intensity 1 (3 + 0.5 x 0.7), the "overdrive" above 3. */
+export const V_MAX = 3.35;
+/** Below this a strength counts as off (dropped from the resolved state, the same as the old presence floor). */
+export const V_OFF = 0.0005;
+/** The fine intensity's old span: v1 `i` 0..1 moved the level continuum by (i - 0.5) x FINE. */
+export const FINE = 0.7;
+/** A stored strength: finite, clamped to 0..V_MAX, rounded to 1e-4 (the integers and k / 20 slider steps stay exact). */
+export const cleanV = (v, d = 0) => { const n = numOf(v); return Number.isFinite(n) ? Math.round(Math.min(V_MAX, Math.max(0, n)) * 1e4) / 1e4 : d; };
+/**
+ * THE MAPPING of a strength onto what every consumer reads: { v, p: presence 0..1, s: level continuum 0..V_MAX - 1 }.
+ * v = 1 / 2 / 3 give p = 1 and s = 0 / 1 / 2 exactly (the old levels 1 / 2 / 3 at i 0.5); 0 < v < 1 is the level-1 look faded in.
+ */
+export function strength(v) {
+  const x = Number.isFinite(v) ? Math.min(V_MAX, Math.max(0, v)) : 0;
+  return { v: x, p: Math.min(1, x), s: Math.max(0, x - 1) };
+}
+/** A v1 (level, fine intensity i) as a strength: level + (i - 0.5) x FINE, clamped (lossless: level 3 at i 1 is V_MAX). */
+export const legacyV = (level, i = 0.5) => cleanV(numOf(level) + (num(i, 0, 1, 0.5) - 0.5) * FINE, 2);
+/** (v1) the level continuum of a (level, i): kept for old callers; new code reads strength(v).s. */
+export const levelS = (level, i = 0.5) => legacyV(level, i) - 1;
+/** A strength capped by a client's detail setting (cap 1..3: the old `s <= cap - 1 + 0.35`). */
+export const capV = (v, cap = 3) => Math.min(v, cap + 0.35);
+/** A resolved fx map capped for a client: { eff: { v, p, s } } with every v <= cap + 0.35 (cap 3: unchanged). */
+export function capFx(fx, cap = 3) {
+  const out = {};
+  // (s as the old clamp computed it, so a capped level is bit-identical to before; the s test too: at v = cap + 0.35 exactly, v - 1
+  // is 1 ulp above cap - 1 + 0.35, which the old min() clamped)
+  for ( const [e, f] of Object.entries(fx ?? {}) ) {
+    out[e] = f.v > cap + 0.35 || f.s > cap - 1 + 0.35 ? { v: capV(f.v, cap), p: f.p, s: Math.min(f.s, cap - 1 + 0.35) } : f;
+  }
+  return out;
+}
 
 export function cleanWind(w, d = WIND_DEFAULT) {
   return { dir: Math.round(((num(w?.dir, -1e6, 1e6, d.dir) % 360) + 360) % 360), str: num(w?.str, 0, 1, d.str), gust: num(w?.gust, 0, 1, d.gust) };
 }
 
-/** A key's effects: { eff: { l, i } } for known effects. */
+/**
+ * One stored effect strength from any of its forms: a number (v2 v; in v1 a number already meant "level n at i 0.5", the same v),
+ * { v } (a resolved state), { l | level, i } (a v1 key), { p, s } (a v1 base: v = s + 1 at full presence, else the presence).
+ */
+function fxV(f) {
+  if ( typeof f === "number" || typeof f === "string" ) return cleanV(f, 0);
+  if ( !f || typeof f !== "object" ) return 0;
+  if ( "v" in f ) return cleanV(f.v, 0);
+  if ( "l" in f || "level" in f ) return legacyV(f.l ?? f.level, f.i);
+  if ( "p" in f ) { const p = num(f.p, 0, 1, 0); return cleanV(p >= 0.999 ? num(f.s, -0.35, V_MAX - 1, 1) + 1 : p, 0); }
+  return 0;
+}
+/** An fx map, cleaned: { eff: v } for known effects with v > 0. */
 function cleanFx(fx) {
   const out = {};
   for ( const e of EFFECTS ) {
     const f = fx?.[e]; if ( f === undefined || f === null || f === false ) continue;
-    out[e] = typeof f === "number" ? { l: lvl(f), i: 0.5 } : { l: lvl(f.l ?? f.level), i: num(f.i, 0, 1, 0.5) };
+    const v = fxV(f); if ( v > 0 ) out[e] = v;
   }
   return out;
 }
 
-/** The effects of a preset at a level and fine intensity. */
-export function presetFx(preset, level = 2, i = 0.5) {
+/** The effects of a preset at a strength (v1 callers may still pass a fine intensity i: folded in). */
+export function presetFx(preset, level = 2, i) {
   const p = PRESETS[preset]; if ( !p ) return {};
-  return cleanFx(Object.fromEntries(Object.entries(p).map(([e, l]) => [e, { l: l ?? level, i }])));
+  const v = i === undefined ? cleanV(level, 2) : legacyV(level, i);
+  return cleanFx(Object.fromEntries(Object.entries(p).map(([e, l]) => [e, l ?? v])));
 }
 
 export function cleanKey(k) {
   if ( !k || typeof k !== "object" || !Number.isFinite(Number(k.t)) ) return null;
   const preset = typeof k.preset === "string" && k.preset in PRESETS ? k.preset : "custom";
-  const level = lvl(k.level), i = num(k.i, 0, 1, 0.5);
-  const fx = k.fx ? cleanFx(k.fx) : presetFx(preset, level, i);
-  return { t: Math.round(Number(k.t)), dur: Math.round(num(k.dur, ...LIMITS.dur, DEFAULT_DUR)), preset, level, i, fx, wind: cleanWind(k.wind) };
+  // (v1: an int level and a fine intensity i, folded into one strength; v2 keys carry no i)
+  const level = k.i === undefined ? cleanV(k.level, 2) : legacyV(k.level, k.i);
+  const fx = k.fx ? cleanFx(k.fx) : presetFx(preset, level);
+  return { t: Math.round(Number(k.t)), dur: Math.round(num(k.dur, ...LIMITS.dur, DEFAULT_DUR)), preset, level, fx, wind: cleanWind(k.wind) };
 }
 
 function cleanBase(b) {
   if ( !b || typeof b !== "object" || !Number.isFinite(Number(b.t)) ) return null;
-  const fx = {};
-  for ( const e of EFFECTS ) { const f = b.fx?.[e]; if ( f ) fx[e] = { p: num(f.p, 0, 1, 0), s: num(f.s, -0.35, 2.35, 1) }; }
+  const fx = cleanFx(b.fx);
   const d = Array.isArray(b.drift) && b.drift.length === 2 && b.drift.every((v) => Number.isFinite(Number(v))) ? [Number(b.drift[0]), Number(b.drift[1])] : null;
   return { t: Math.round(Number(b.t)), fx, wind: cleanWind(b.wind), wet: num(b.wet, 0, 1.2, 0), cover: num(b.cover, 0, 1.2, 0), ...(d ? { drift: d } : {}) };
 }
+/** The lens's level: "auto" (follows each effect's strength) or a fixed strength 0..V_MAX (v1 ints 1..3 are valid strengths). */
+const cleanLensLevel = (l) => l === "auto" || l === undefined || !Number.isFinite(numOf(l)) ? "auto" : cleanV(l);
 
 export function cleanParams(raw) {
   const r = raw && typeof raw === "object" ? raw : {};
@@ -109,7 +167,7 @@ export function cleanParams(raw) {
     keys, base: cleanBase(r.base),
     ground: { wetRate: num(g.wetRate, ...LIMITS.wetRate, GROUND_DEFAULT.wetRate), dryRate: num(g.dryRate, ...LIMITS.dryRate, GROUND_DEFAULT.dryRate), puddles: g.puddles !== false,
       snowRate: num(g.snowRate, ...LIMITS.snowRate, GROUND_DEFAULT.snowRate), meltRate: num(g.meltRate, ...LIMITS.meltRate, GROUND_DEFAULT.meltRate) },
-    lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
+    lens: { on: l.on !== false, level: cleanLensLevel(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
     tornadoes: cleanTornadoes(r.tornadoes),
     fire: { out: r.fire?.out === true },
     clouds: cleanClouds(r.clouds),
@@ -230,18 +288,20 @@ export const wetCeil = (s) => gate(TABLES.rain.wet, s);
 const smooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 const angLerp = (a, b, f) => { const d = ((b - a + 540) % 360) - 180; return ((a + d * f) % 360 + 360) % 360; };
 
-/** The state a key aims at. */
-const target = (k) => ({ fx: Object.fromEntries(Object.entries(k.fx).map(([e, f]) => [e, { p: 1, s: levelS(f.l, f.i) }])), wind: k.wind });
+/** The strengths a key aims at: { fx: { eff: v }, wind }. */
+const target = (k) => ({ fx: k.fx, wind: k.wind });
 const EMPTY = { fx: {}, wind: { ...WIND_DEFAULT } };
 
-/** Blend state `a` toward the target `b` by f (0..1). An effect only in `a` fades out at its own level; only in `b` fades in at b's. */
+/**
+ * Blend state `a` toward the target `b` by f (0..1): each effect's STRENGTH v is lerped (missing on one side = 0), so an effect
+ * fading out eases down through the levels (3 -> 2 -> 1) and then thins out, and one fading in rises through them; the ramp passes
+ * through exactly the states the slider would show. At f = 1 it is exactly b (bit for bit).
+ */
 function blend(a, b, f) {
   const fx = {};
   for ( const e of new Set([...Object.keys(a.fx), ...Object.keys(b.fx)]) ) {
-    const x = a.fx[e], y = b.fx[e];
-    if ( x && y ) fx[e] = { p: x.p + (1 - x.p) * f, s: x.p > 0.001 ? x.s + (y.s - x.s) * f : y.s };
-    else if ( x ) { const p = x.p * (1 - f); if ( p > 0 || f < 1 ) fx[e] = { p, s: x.s }; }
-    else fx[e] = { p: f, s: y.s };
+    const x = a.fx[e] ?? 0, y = b.fx[e] ?? 0, v = f >= 1 ? y : f <= 0 ? x : x + (y - x) * f;
+    if ( v > 0 ) fx[e] = v;
   }
   const w = { dir: angLerp(a.wind.dir, b.wind.dir, a.wind.str > 0.001 ? f : 1), str: a.wind.str + (b.wind.str - a.wind.str) * f, gust: a.wind.gust + (b.wind.gust - a.wind.gust) * f };
   return { fx, wind: w };
@@ -249,7 +309,7 @@ function blend(a, b, f) {
 
 /**
  * The start states of the keys: starts[n] = the state when key n begins (the previous key's ramp evaluated at that moment).
- * Pure in (P.base, P.keys).
+ * Pure in (P.base, P.keys). States here carry strengths: { fx: { eff: v }, wind }.
  */
 function starts(P) {
   const out = [];
@@ -261,19 +321,25 @@ function starts(P) {
   return out;
 }
 
-/** The fx / wind state at shared time `now` (ms), without the accumulations. */
-export function stateAt(P, now, _starts = starts(P)) {
+/** The strengths at shared time `now`: { fx: { eff: v }, wind } (internal; stateAt adds p and s). */
+function stateV(P, now, _starts = starts(P)) {
   let n = -1;
   for ( let k = 0; k < P.keys.length; k++ ) if ( P.keys[k].t <= now ) n = k;
   if ( n < 0 ) return P.base ? { fx: P.base.fx, wind: P.base.wind } : EMPTY;
   const k = P.keys[n];
   return blend(_starts[n], target(k), k.dur > 0 ? smooth((now - k.t) / k.dur) : 1);
 }
+const derive = (sv) => ({ fx: Object.fromEntries(Object.entries(sv.fx).map(([e, v]) => [e, strength(v)])), wind: sv.wind });
 
-/** The ceilings of the accumulations of a state: the rain's wetness, the snow's cover. */
+/** The fx / wind state at shared time `now` (ms), without the accumulations: { fx: { eff: { v, p, s } }, wind }. */
+export function stateAt(P, now, _starts = starts(P)) {
+  return derive(stateV(P, now, _starts));
+}
+
+/** The ceilings of the accumulations of a state of strengths (stateV): the rain's wetness, the snow's cover. */
 const ACC = {
-  wet: { ceil: (st) => { const r = st.fx.rain; return r ? r.p * wetCeil(r.s) : 0; }, up: (P) => P.ground.wetRate, dn: (P) => P.ground.dryRate },
-  cover: { ceil: (st) => { const r = st.fx.snow; return r ? r.p * coverCeil(r.s) : 0; }, up: (P) => P.ground.snowRate, dn: (P) => P.ground.meltRate }
+  wet: { ceil: (st) => { const r = st.fx.rain; if ( !r ) return 0; const f = strength(r); return f.p * wetCeil(f.s); }, up: (P) => P.ground.wetRate, dn: (P) => P.ground.dryRate },
+  cover: { ceil: (st) => { const r = st.fx.snow; if ( !r ) return 0; const f = strength(r); return f.p * coverCeil(f.s); }, up: (P) => P.ground.snowRate, dn: (P) => P.ground.meltRate }
 };
 /** The snow's cover ceiling at s (share of the land). */
 export const coverCeil = (s) => gate(TABLES.snow.cover, s);
@@ -302,11 +368,11 @@ export function wetAt(P, now, _starts = starts(P), kind = "wet") {
     const end = Math.min(m, now);
     if ( end <= t ) continue;
     // inside a ramp (the state changes between t and end)? step it; else closed form at the segment's (constant) ceiling
-    const cA = ceilOf(stateAt(P, t + 1, _starts)), cB = ceilOf(stateAt(P, end - 1, _starts));
+    const cA = ceilOf(stateV(P, t + 1, _starts)), cB = ceilOf(stateV(P, end - 1, _starts));
     if ( Math.abs(cA - cB) < 1e-4 ) w = approach(w, cB, (end - t) / 1000);
     else {
       const steps = Math.min(1200, Math.ceil((end - t) / 1000)), dt = (end - t) / steps;
-      for ( let i = 0; i < steps; i++ ) w = approach(w, ceilOf(stateAt(P, t + (i + 0.5) * dt, _starts)), dt / 1000);
+      for ( let i = 0; i < steps; i++ ) w = approach(w, ceilOf(stateV(P, t + (i + 0.5) * dt, _starts)), dt / 1000);
     }
     t = end;
     if ( end === m && m < now ) memo.set(m, w);
@@ -317,61 +383,151 @@ export function wetAt(P, now, _starts = starts(P), kind = "wet") {
 const WET_MEMO = new WeakMap();
 
 /**
- * THE RESOLVED STATE at shared time `now` (ms): { fx: { eff: { p, s } }, wind, wet, steady (no ramp running), until (ms of the end of
- * the running ramp, or null), key (the newest started key) }.
+ * THE RESOLVED STATE at shared time `now` (ms): { fx: { eff: { v, p, s } }, wind, wet, cover, steady (no ramp running), until (ms of
+ * the end of the running ramp, or null), key (the newest started key) }. Effects below V_OFF are dropped. Every consumer reads p
+ * and s as before; v is the strength they come from.
  */
 export function resolve(P, now) {
-  const st = starts(P), s = stateAt(P, now, st);
+  const st = starts(P), sv = stateV(P, now, st);
   let n = -1;
   for ( let k = 0; k < P.keys.length; k++ ) if ( P.keys[k].t <= now ) n = k;
   const key = n >= 0 ? P.keys[n] : null, nextKey = P.keys[n + 1] ?? null;
   const until = key && now < key.t + key.dur ? key.t + key.dur : nextKey ? nextKey.t : null;
   const fx = {};
-  for ( const [e, f] of Object.entries(s.fx) ) if ( f.p > 0.0005 ) fx[e] = f;
-  return { fx, wind: s.wind, wet: wetAt(P, now, st), cover: wetAt(P, now, st, "cover"), steady: !(key && now < key.t + key.dur), until, key };
+  for ( const [e, v] of Object.entries(sv.fx) ) if ( v >= V_OFF ) fx[e] = strength(v);
+  return { fx, wind: sv.wind, wet: wetAt(P, now, st), cover: wetAt(P, now, st, "cover"), steady: !(key && now < key.t + key.dur), until, key };
+}
+
+/**
+ * The effects a preset's strength drives (what the old level buttons and keys 1-3 set): a named preset's own effects (the clouds
+ * preset: clouds; clear: none); "custom": every non-cloud effect of `fx`.
+ */
+export function drivenFx(preset, fx = {}) {
+  if ( preset === "custom" ) return Object.keys(fx).filter((e) => e !== "clouds");
+  return Object.keys(PRESETS[preset] ?? {});
+}
+const setKey = (fx) => Object.keys(fx).filter((e) => e !== "clouds").sort().join();
+const PRESET_SETS = Object.entries(PRESETS).filter(([n]) => n !== "clear" && n !== "clouds").map(([n, p]) => [setKey(p), n]);
+/**
+ * The preset an fx set shows as (the pressed preset button): the preset whose non-cloud effects are exactly these; none of them:
+ * "clouds" when clouds are on, else "clear"; no preset has this set: "custom". The strengths do not matter.
+ */
+export function presetOf(fx) {
+  const k = setKey(fx ?? {});
+  if ( !k ) return fx?.clouds ? "clouds" : "clear";
+  return PRESET_SETS.find(([s]) => s === k)?.[1] ?? "custom";
 }
 
 /**
  * A NEW KEY appended (the GM's change): returns the new { keys, base } (the oldest keys folded into the base when there are more
- * than KEEP_KEYS). `change` = { preset?, level?, i?, fx?, wind? }: what is not given is kept from the newest key.
+ * than KEEP_KEYS). What is not given is kept from the newest key. `change`:
+ *   { preset, level? }  the preset's effects at strength `level` (default: the newest key's level, else 2); other non-cloud effects
+ *                       dropped; clouds kept, except by "clear" (clear sky clears them) and by the clouds preset (its own strength).
+ *                       preset "custom": the newest key's effects (with `fx`: exactly `fx`, nothing kept).
+ *   { level }           every effect the current preset drives (drivenFx) set to `level`; 0 removes them (clouds kept).
+ *   { fx: { eff: v } }  a PATCH on the newest key's effects (or on the preset's, with `preset`): v 0 removes eff.
+ *   { clouds: v }       sugar for { fx: { clouds: v } }.
+ *   { wind }            the wind (a partial { dir, str, gust }).
+ *   v1 callers: `i` (fine intensity 0..1) folds into the level: level + (i - 0.5) x 0.7; `i` alone uses the newest key's level
+ *   rounded to 1..3 as that level.
+ * The key's `preset` is then presetOf(fx) (a patch that leaves a preset's set of effects keeps its name; else "custom"), and its
+ * `level` (the preset strength, carried to the next preset click) is the given level when > 0 (0: the newest key's is kept), else
+ * the one strength all of the preset's driven effects share, else the newest key's.
  */
 export function withKey(P, change, now, { dur = DEFAULT_DUR, lead = LEAD_MS } = {}) {
-  const last = P.keys[P.keys.length - 1] ?? null;
-  let preset = change.preset ?? last?.preset ?? "clear";
-  let level = change.level ?? last?.level ?? 2;
-  const i = change.i ?? last?.i ?? 0.5;
-  // CLOUDS are a layer of their own: a change of preset, level or wind keeps them (clear sky clears them); `clouds` 0..3 sets them
-  const cl = change.clouds === undefined ? undefined : lvl(change.clouds, 0);
-  if ( cl !== undefined && preset === "clouds" ) { if ( cl ) level = cl; else preset = "clear"; }
-  const fx = change.fx ? cleanFx(change.fx) : preset === "custom" && last ? { ...last.fx } : presetFx(preset, level, i);
-  if ( !change.fx && !("clouds" in (PRESETS[preset] ?? {})) ) {
-    if ( cl ) fx.clouds = { l: cl, i: 0.5 };
-    else if ( cl === 0 || (preset === "clear" && change.preset === "clear") ) delete fx.clouds;
-    else if ( last?.fx?.clouds ) fx.clouds = { ...last.fx.clouds };
+  const last = current(P), lastFx = last?.fx ?? {}, lastLevel = last && last.level > 0 ? last.level : 2;
+  const named = typeof change.preset === "string" && (change.preset in PRESETS || change.preset === "custom") ? change.preset : null;
+  const lv = change.i !== undefined ? legacyV(change.level ?? Math.min(3, Math.max(1, Math.round(lastLevel))), change.i)
+    : change.level !== undefined ? cleanV(change.level, lastLevel) : undefined;
+  let fx;
+  if ( named === "custom" ) fx = change.fx ? {} : { ...lastFx };
+  else if ( named ) {
+    fx = presetFx(named, lv ?? lastLevel);
+    // CLOUDS are a layer of their own: a preset keeps them (clear sky clears them; the clouds preset sets its own)
+    if ( named !== "clear" && !("clouds" in PRESETS[named]) && lastFx.clouds ) fx.clouds = lastFx.clouds;
+  } else {
+    fx = { ...lastFx };
+    if ( lv !== undefined ) for ( const e of drivenFx(last?.preset ?? "clear", lastFx) ) { if ( lv > 0 ) fx[e] = lv; else delete fx[e]; }
   }
+  const patch = { ...(change.fx ?? {}), ...(change.clouds !== undefined ? { clouds: change.clouds } : {}) };
+  for ( const [e, f] of Object.entries(patch) ) { if ( !EFFECTS.includes(e) ) continue; const v = fxV(f); if ( v > 0 ) fx[e] = v; else delete fx[e]; }
+  const preset = presetOf(fx);
+  const vs = drivenFx(preset, fx).map((e) => fx[e]);
+  const level = lv > 0 ? lv : lv === 0 ? lastLevel : vs.length && vs.every((v) => v === vs[0]) ? vs[0] : lastLevel;
   const wind = cleanWind({ ...(last?.wind ?? WIND_DEFAULT), ...(change.wind ?? {}) });
   const t = Math.round(now + lead);
   // keys that start after the new one are dropped (the newest change wins)
   let keys = P.keys.filter((k) => k.t < t);
-  keys.push(cleanKey({ t, dur, preset, level, i, fx, wind }));
+  keys.push(cleanKey({ t, dur, preset, level, fx, wind }));
   let base = P.base;
   if ( keys.length > KEEP_KEYS ) {
     const drop = keys.length - KEEP_KEYS, at = keys[drop].t, Pt = { ...P, keys: P.keys.filter((k) => k.t < t) };
-    const s = stateAt(Pt, at);
-    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, f]) => [e, { p: +f.p.toFixed(4), s: +f.s.toFixed(4) }])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4), cover: +wetAt(Pt, at, undefined, "cover").toFixed(4),
+    const s = stateV(Pt, at);
+    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, v]) => [e, +v.toFixed(4)])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4), cover: +wetAt(Pt, at, undefined, "cover").toFixed(4),
       drift: cloudDrift(Pt, at) };
     keys = keys.slice(drop);
   }
   return { keys, base };
 }
 
-/** The level of each effect a GM picked last (for the UI): the newest key's. */
-export const current = (P) => P.keys[P.keys.length - 1] ?? null;
+/** The newest key (for the UI: its preset, its level = the preset strength, its fx = each effect's strength v). */
+export function current(P) { return P.keys[P.keys.length - 1] ?? null; }
 
-/** The lens level to show for an effect at s (lens.level "auto" follows the world level), capped by the player's setting. */
+/**
+ * The lens level continuum for an effect at s, capped by the player's setting (cap 1..3): lens.level "auto" follows the effect's s;
+ * a fixed lens strength v gives strength(v).s (its presence is lensP).
+ */
 export function lensS(P, s, cap = 3) {
-  const want = P.lens.level === "auto" ? s : P.lens.level - 1;
+  const want = P.lens.level === "auto" ? s : strength(P.lens.level).s;
   return Math.min(want, cap - 1 + 0.35);
+}
+/** The lens's own presence factor: 1 for "auto"; a fixed lens strength below 1 fades the level-1 lens in (strength(v).p). */
+export function lensP(P) { return P.lens.level === "auto" ? 1 : strength(P.lens.level).p; }
+
+/* ---------------------------------------------------------------- the public API's arguments (weather.mjs weatherApi; dev/weather-api.test.mjs) */
+
+/**
+ * set(what, { level, i }): the change for withKey. `what` = a preset name or { preset?, fx?, wind? } (fx without a preset: exactly
+ * those effects, "custom"). `level` a strength 0..V_MAX (a float; the old ints 1..3 are the same strengths; junk: 2); with `i`
+ * (v1 fine intensity 0..1) it folds in as level + (i - 0.5) x FINE, so old callers keep their meaning.
+ */
+export function setChange(what, { level, i } = {}) {
+  const c = typeof what === "string" ? { preset: what } : { ...(what ?? {}) };
+  if ( level !== undefined ) c.level = cleanV(level, 2);
+  if ( i !== undefined ) c.i = num(i, 0, 1, 0);
+  if ( c.fx && !c.preset ) c.preset = "custom";
+  return c;
+}
+/** level(n, { i }): every effect the current preset drives at strength n (0..V_MAX, 0 removes them; junk: 2); v1 `i` folds in. */
+export function levelChange(n, { i } = {}) {
+  const c = { level: cleanV(n, 2) };
+  if ( i !== undefined ) c.i = num(i, 0, 1, 0.5);
+  return c;
+}
+/** clouds({ level }): the clouds' strength 0..V_MAX (0 removes them; junk: 0), no rounding. */
+export const cloudsChange = (level) => ({ clouds: cleanV(level, 0) });
+/**
+ * strength({ eff: v, ... }): the per-effect PATCH (withKey `fx`): v 0..V_MAX, 0 / null / false removes the effect; unknown effects and
+ * junk values are ignored (never a removal). null: nothing to change.
+ */
+export function strengthChange(patch) {
+  const fx = {};
+  for ( const [e, v] of Object.entries(patch && typeof patch === "object" ? patch : {}) ) {
+    if ( !EFFECTS.includes(e) ) continue;
+    if ( v === null || v === false ) { fx[e] = 0; continue; }
+    const x = cleanV(v, NaN); if ( Number.isFinite(x) ) fx[e] = x;
+  }
+  return Object.keys(fx).length ? { fx } : null;
+}
+/**
+ * What the GM's controls show: { preset, level (the preset strength), target: { eff: v } (the newest key's: where the weather goes),
+ * live: { eff: v } (the WORLD state now, no client caps: where it is), steady, until }. A slider shows `target`, and `live` while
+ * a ramp runs (steady false).
+ */
+export function strengthsOf(P, now) {
+  const k = current(P), st = resolve(P, now);
+  return { preset: k?.preset ?? "clear", level: k?.level ?? 2, target: { ...(k?.fx ?? {}) },
+    live: Object.fromEntries(Object.entries(st.fx).map(([e, f]) => [e, f.v])), steady: st.steady, until: st.until };
 }
 
 /** The levels table of a preset, for UIs and generators: [{ level, effects: { eff: gates } }]. */
@@ -397,18 +553,18 @@ const DRIFT_MEMO = new WeakMap();
  */
 export function cloudDrift(P, now, _starts = starts(P)) {
   let x = P.base?.drift?.[0] ?? 0, y = P.base?.drift?.[1] ?? 0, t = P.base?.t ?? 0;
-  if ( now <= t ) { const v = cloudVel(stateAt(P, now, _starts)); return [x - v[0] * (t - now) / 1000, y - v[1] * (t - now) / 1000]; }
+  if ( now <= t ) { const v = cloudVel(stateV(P, now, _starts)); return [x - v[0] * (t - now) / 1000, y - v[1] * (t - now) / 1000]; }
   const marks = [];
   for ( const k of P.keys ) marks.push(k.t, k.t + k.dur);
   const ms = [...new Set(marks)].filter((m) => m > t).sort((a, b) => a - b);
   let memo = DRIFT_MEMO.get(P); if ( !memo ) DRIFT_MEMO.set(P, memo = new Map());
   for ( const m of ms ) if ( m <= now && memo.has(m) ) { t = m; [x, y] = memo.get(m); }
   const seg = (a, b) => {
-    const va = cloudVel(stateAt(P, a + 0.5, _starts)), vb = cloudVel(stateAt(P, b - 0.5, _starts));
+    const va = cloudVel(stateV(P, a + 0.5, _starts)), vb = cloudVel(stateV(P, b - 0.5, _starts));
     if ( Math.abs(va[0] - vb[0]) + Math.abs(va[1] - vb[1]) < 1e-9 ) { const dt = (b - a) / 1000; return [va[0] * dt, va[1] * dt]; }
     const N = 32, h = (b - a) / N; let sx = 0, sy = 0;
     for ( let i = 0; i <= N; i++ ) {
-      const w = i === 0 || i === N ? 1 : i % 2 ? 4 : 2, v = cloudVel(stateAt(P, Math.min(b - 0.5, Math.max(a + 0.5, a + i * h)), _starts));
+      const w = i === 0 || i === N ? 1 : i % 2 ? 4 : 2, v = cloudVel(stateV(P, Math.min(b - 0.5, Math.max(a + 0.5, a + i * h)), _starts));
       sx += w * v[0]; sy += w * v[1];
     }
     return [sx * h / 3000, sy * h / 3000];

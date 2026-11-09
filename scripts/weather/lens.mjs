@@ -861,11 +861,13 @@ export class WeatherLens {
   /** The state (engine, <= 12 Hz). */
   setState(st, P) {
     this.state = st; this.P = P;
-    const rain = st?.fx?.rain, s = M.lensS(P, rain?.s ?? 0, st?.lensCap ?? 0), p = (rain?.p ?? 0) * (P?.lens?.strength ?? 1);
+    // the lens's own presence: x its strength, x M.lensP (a lens fixed at a strength below 1 fades the level-1 lens in; auto and
+    // fixed >= 1: x 1, exact)
+    const str = (P?.lens?.strength ?? 1) * (P?.lens ? M.lensP(P) : 1), cap = st?.lensCap ?? 0;
+    const rain = st?.fx?.rain, s = M.lensS(P, rain?.s ?? 0, cap), p = (rain?.p ?? 0) * str;
     const G = rain ? M.lensGates("rain", s) : { bead: 0, big: 0, run: 0, mist: 0, film: 0 };
     this.gates = [G.bead * p, G.big, G.run * p, G.mist * p, G.film * p];
     // the other effects: each at its own lens level (auto: the effect's level), presence x strength
-    const str = P?.lens?.strength ?? 1, cap = st?.lensCap ?? 0;
     const at = (e) => { const f = st?.fx?.[e]; if ( !f ) return null; return { G: M.lensGates(e, M.lensS(P, f.s, cap)), p: f.p * str }; };
     const sn = at("snow"), sa = at("sand"), du = at("dust"), em = P?.lens?.heat ? at("embers") : null;
     this.fx.snow = sn ? [sn.G.frost, sn.G.wob, sn.G.crystals, sn.p] : [0, 0, 0, 0];

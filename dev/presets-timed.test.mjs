@@ -147,7 +147,7 @@ const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     "F the display: only a preset's stroke that is gone dissolves; every other area fades as before (260 ms)");
   ok(dp.includes("this.retire(g, !!g.objId && !!this.dropsOut?.(g.objId))") && dp.includes("if ( a.strict && now < a.start ) return 0;")
     && dp.includes("T = strict && path?.length > 1 ? path.at(-1)[2] || 0 : 0;") && dp.includes("const spd = T > 0 ? slow / (T / Math.min(2200, Math.max(350, T))) : this.look.speed;")
-    && dp.includes("speed: spd, simul, coll: null"), "F the display: a timed entry shows nothing before its start and runs its path in real time; any other entry keeps the look's speed");
+    && dp.includes("speed: spd, simul, tight, coll: null"), "F the display: a timed entry shows nothing before its start and runs its path in real time; any other entry keeps the look's speed");
 }
 
 console.log(`${n - fails}/${n} presets timed checks passed`);

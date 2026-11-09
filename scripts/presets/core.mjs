@@ -185,6 +185,8 @@ function cleanLayer(L, i, errors) {
       if ( L.lv !== undefined ) out.lv = intLv(L.lv, 2);
       if ( L.shake !== undefined ) out.shake = num(L.shake, 0, 0, 1);
       if ( L.reach !== undefined ) out.reach = num(L.reach, 2, 0.2, 8);
+      // (a gun's rounds between two walk hits of a lane: drawn by the accents only - presets/gun-fx.mjs roundsOf)
+      if ( L.fill !== undefined ) out.fill = Math.round(num(L.fill, 0, 0, 4));
       break;
     case "cue":
       out.kind = CUES.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown cue "${L.kind}"`), "screen");
@@ -378,7 +380,9 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   for ( const L of def.layers ) {
     const r = stream(seed, `layer:${L.id}`);
     if ( r() >= L.chance ) continue;
-    const at = Math.round(r.range(L.at)), pts = placeOf(L, def, r, ctx).filter((p) => inRect(p, R));
+    // (env.dry: the GM's map - a gun's walk hit in water leaves no pock and kicks no soil dust; its accents splash there instead)
+    const wetCut = typeof env.dry === "function" && L.place?.m === "walk" && (L.l === "destruction" || L.l === "dust");
+    const at = Math.round(r.range(L.at)), pts = placeOf(L, def, r, ctx).filter((p) => inRect(p, R) && (!wetCut || env.dry(p)));
     if ( !pts.length && L.l !== "cue" && L.l !== "accent" ) continue;
     switch ( L.l ) {
       case "destruction": {
@@ -491,6 +495,7 @@ function accentOf(L, at, { plan, hits, from, grid, wind }) {
   const base = { id: L.id, kind: L.kind, at, dur: L.dur };
   if ( L.lv !== undefined ) base.lv = L.lv;
   if ( L.shake ) base.shake = L.shake;
+  if ( L.fill ) base.fill = L.fill;
   switch ( L.kind ) {
     case "fallShadow": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.dir };
     // (the superhero landing, landing-fx.mjs: tok - it lands on a token, which is the hero: no body is drawn)

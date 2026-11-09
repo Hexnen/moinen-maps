@@ -483,7 +483,10 @@ export function tickLights(d, now) {
   const rimK = Math.min(1, Math.max(0, (dark - 0.5) / 0.35));
   for ( const g of L.groups ) {
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
-    if ( g.rim ) { const a = shown ? rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; if ( a > 0.01 && !g.rim.tex ) rimTexture(g.rim); g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
+    // (a gun's walked pocks: no night rim - full, their many small lips read as white speckle round every pock at night, and even
+    // at 30 % (round 2) as pale dotted outlines; a gouge stays a dark hole)
+    const gk = g.objId && d.gunPocks?.(g.objId) ? 0 : 1;
+    if ( g.rim ) { const a = shown ? gk * rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; if ( a > 0.01 && !g.rim.tex ) rimTexture(g.rim); g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
     const lt = g.light; if ( !lt ) continue;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);

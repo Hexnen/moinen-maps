@@ -181,7 +181,7 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
   ok(b.pending.burst.length === 1 && b.pending.dust.length === 0 && b.fire.filter((f) => f.k === "dust" && f.dk === "shock").length === 1 && b.pending.cue.length === 2 && b.pending.accent[0].kind === "fallShadow", "I bomb: the parts no layer plays yet are kept as pending (the shock dust is a fire-layer stroke)");
   const h = fireAt(get("heliHmg"));
   const tr = h.pending.accent.find((a) => a.kind === "tracer");
-  ok(tr && tr.hits.length === Math.floor(h.walk.hits.length / 4), "I heli: every 4th hit a tracer");
+  ok(tr && Math.abs(tr.hits.length - h.walk.hits.length / 2) <= 1, "I heli: every 2nd walk hit a tracer (guns round 3: the walk hits are every 3rd round)");   // (counted per gun: +-1 with the round count)
   const ln = h.destruction.filter((r) => r.key.startsWith("lanes"));
   ok(ln.some((r) => r.key.startsWith("lanes.0")) && ln.some((r) => r.key.startsWith("lanes.1")) && ln.length <= 2 * Math.ceil((h.walk.dur + 1) / C.RUN_MS),
     "I heli: the damage strokes of each lane (a long burst in runs of RUN_MS)");

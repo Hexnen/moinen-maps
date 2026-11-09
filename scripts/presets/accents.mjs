@@ -6,6 +6,9 @@ import { StageShaker } from "../director/screen.mjs";
 import { clientOpts } from "../director/stage.mjs";
 import { geo as fireGeo } from "../fire/fire.mjs";
 import * as A from "./accents-core.mjs";
+import * as X from "./gun-fx.mjs";
+import { mapPixels } from "../destruction/source.mjs";
+import { sceneRect } from "../destruction/model.mjs";
 
 /**
  * DESTRUCTION PRESETS, the ACCENTS on every client (the pure drawing rules: accents-core.mjs): tracers, hit flashes and sparks,
@@ -29,6 +32,10 @@ import * as A from "./accents-core.mjs";
 const SORT_LAYER = 820;
 const live = new Map();             // fid -> { t0, items, end, seed }
 let root = null, shadeG = null, flashEl = null, colG = null, glowBox = null, glowG = null, glowPool = [], ticking = false, hookL = 0, shaker = null, glowTex = null;
+let spurtBox = null, spurtPool = [], addG = null, bloomBox = null, bloomPool = [], bloomTex = null;
+const spurtStrip = new Map();   // (kind|S|lift|variant -> a baked strip of all its frames, gun-fx.mjs bakeStrip: one base texture)
+const spurtTex = new Map();     // (kind|S|lift|variant|frame -> that frame's texture: a window into its strip)
+const bakeQueue = [];           // strips to bake ahead (during a firing's lead-in), a few a frame
 let softBox = null, softPool = [], softTex = null;
 const F = A.newFrame();
 
@@ -38,6 +45,18 @@ export const gunItems = (rec) => (rec?.pending?.accent ?? []).filter((a) => a &&
 export function take(rec) {
   const items = A.itemsOf(rec);
   if ( !items.length || reducedMotion() ) return;
+  // (a gun's hits: the ground's colour under each - its spurt is that ground's soil; the same map, the same tones on every client)
+  // (its rounds - gun-fx.mjs roundsOf: the walk hits and the rounds between - each with its own tone: water splashes)
+  for ( const it of items ) if ( it.kind === "hitFx" && Array.isArray(it.hits) && !it.tones ) { try { it.tones = groundTones(X.roundsOf(it)); } catch { it.tones = null; } }
+  // (the spurt strips this firing will show, baked ahead in the lead-in - a few a frame - so its first hits never pay a bake)
+  try {
+    const g = fireGeo(), S = Math.max(8, Math.round(g.grid / g.ap)), lift = Math.round(view().lift * 20) / 20;
+    for ( const it of items ) if ( it.kind === "hitFx" ) {
+      const heavy = (it.lv ?? 1) >= 3, wet = (it.tones ?? []).some((c) => X.wetOf(c));
+      const kinds = [X.kindOf(1), ...(heavy ? [X.kindOf(3)] : []), ...(wet ? [X.kindOf(1, true), ...(heavy ? [X.kindOf(3, true)] : [])] : [])];
+      for ( const k of kinds ) for ( let v = 0; v < X.SPURT_VARIANTS; v++ ) bakeQueue.push([k, S, lift, v]);
+    }
+  } catch { /* baked when first shown */ }
   let end = -Infinity;
   for ( const it of items ) { const s = A.spanOf(it); if ( s ) end = Math.max(end, rec.t0 + s[1]); }
   if ( !(end > sharedNow()) ) return;
@@ -46,13 +65,63 @@ export function take(rec) {
 }
 export function drop(fid) { if ( live.delete(fid) && !live.size ) stop(); }
 
+/** The map's colour round each hit (packed rgb; the art pixels within ~0.1 square, averaged), read once from one box over the run. */
+function groundTones(hits) {
+  if ( !hits.length ) return [];
+  const g = fireGeo(), ap = g.ap, r = sceneRect(), k = Math.max(1, Math.round(0.1 * g.grid / ap));
+  const cx = hits.map((h) => Math.floor((h[0] - r.x) / ap)), cy = hits.map((h) => Math.floor((h[1] - r.y) / ap));
+  const x0 = Math.min(...cx) - k, y0 = Math.min(...cy) - k, w = Math.max(...cx) + k + 1 - x0, h = Math.max(...cy) + k + 1 - y0;
+  if ( w * h > 4e6 ) return hits.map(() => -1);
+  const px = mapPixels(ap, { x0, y0, w, h });
+  return hits.map((_, i) => {
+    let R = 0, G = 0, B = 0, n = 0;
+    for ( let y = cy[i] - k; y <= cy[i] + k; y++ ) for ( let x = cx[i] - k; x <= cx[i] + k; x++ ) {
+      const o = ((y - y0) * w + (x - x0)) * 4; R += px[o]; G += px[o + 1]; B += px[o + 2]; n++;
+    }
+    return n ? (Math.round(R / n) << 16) | (Math.round(G / n) << 8) | Math.round(B / n) : -1;
+  });
+}
+
+/** A baked strip of a spurt's frames as one base texture (NEAREST: one texel an art pixel), made ahead or the first time it is shown. */
+function stripOf(kind, S, lift, v) {
+  const key = `${kind}|${S}|${lift}|${v}`;
+  let b = spurtStrip.get(key);
+  if ( b && !b.base.destroyed ) return b;
+  const s = X.bakeStrip(kind, S, lift, v);
+  const base = PIXI.BaseTexture.fromBuffer(s.data, s.w * s.n, s.h, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.PMA });
+  b = { base, box: s };
+  spurtStrip.set(key, b);
+  return b;
+}
+/** A spurt frame's texture: its window in the strip. */
+function spurtTexture(kind, S, lift, v, f) {
+  const key = `${kind}|${S}|${lift}|${v}|${f}`;
+  let t = spurtTex.get(key);
+  if ( t && !t.baseTexture?.destroyed ) return t;
+  const { base, box } = stripOf(kind, S, lift, v);
+  t = new PIXI.Texture(base, new PIXI.Rectangle(f * box.w, 0, box.w, box.h));
+  t.mmBox = box;
+  spurtTex.set(key, t);
+  return t;
+}
+/** Bake queued strips within a small budget a frame (the lead-in of a firing). */
+function bakeAhead(ms = 2.5) {
+  const end = performance.now() + ms;
+  while ( bakeQueue.length && performance.now() < end ) { const [k, S, lift, v] = bakeQueue.shift(); try { stripOf(k, S, lift, v); } catch { /* shown later */ } }
+}
+
 function mount() {
   if ( root && !root.destroyed && root.parent ) return;
   root = new PIXI.Container();
   root.eventMode = "none"; root.interactiveChildren = false;
   Object.assign(root, { elevation: 0, sortLayer: SORT_LAYER, sort: 0, _lastSortedIndex: 0 });
   shadeG = new PIXI.Graphics(); colG = new PIXI.Graphics(); softBox = new PIXI.Container(); softBox.eventMode = "none"; softPool = [];
-  root.addChild(softBox, shadeG, colG);
+  spurtBox = new PIXI.Container(); spurtBox.eventMode = "none"; spurtPool = [];
+  addG = new PIXI.Graphics(); addG.blendMode = PIXI.BLEND_MODES.ADD;
+  bloomBox = new PIXI.Container(); bloomBox.eventMode = "none"; bloomPool = [];
+  // (soft shadows under everything; the guns' spurts over the shade, under the colour pixels; the additive halo pixels and the soft
+  // blooms of light last: they light what is under them, a shooter's token too)
+  root.addChild(softBox, shadeG, spurtBox, colG, addG, bloomBox);
   canvas.primary.addChild(root);
   glowBox = new PIXI.Container(); glowBox.eventMode = "none";
   glowG = new PIXI.Graphics(); glowG.blendMode = PIXI.BLEND_MODES.MAX_COLOR; glowBox.addChild(glowG);
@@ -74,10 +143,14 @@ function stop() {
   shaker?.restore(); shaker = null;
   guardOff("presets");
   if ( colG && !colG.destroyed ) colG.clear();
+  if ( addG && !addG.destroyed ) addG.clear();
+  for ( const s of bloomPool ) s.visible = false;
+  bakeQueue.length = 0;
   if ( shadeG && !shadeG.destroyed ) shadeG.clear();
   if ( flashEl ) flashEl.style.opacity = "0";
   if ( glowG && !glowG.destroyed ) glowG.clear();
   for ( const s of glowPool ) s.visible = false;
+  for ( const s of spurtPool ) s.visible = false;
   for ( const s of softPool ) s.visible = false;
 }
 /** The scene goes: everything of this layer goes with it. */
@@ -87,21 +160,39 @@ export function reset() {
   if ( root && !root.destroyed ) root.destroy({ children: true });
   if ( glowBox && !glowBox.destroyed ) { glowBox.parent?.removeChild(glowBox); glowBox.destroy({ children: true }); }
   flashEl?.remove();
-  root = colG = shadeG = glowBox = glowG = flashEl = softBox = null; glowPool = []; softPool = [];
+  root = colG = shadeG = glowBox = glowG = flashEl = softBox = spurtBox = addG = bloomBox = null; glowPool = []; softPool = []; spurtPool = []; bloomPool = [];
+  for ( const t of spurtTex.values() ) t.destroy(false);
+  for ( const b of spurtStrip.values() ) b.base.destroy();
+  spurtTex.clear(); spurtStrip.clear();
 }
 
-/** A soft-stepped round glow (pixel-art: 4 flat rings with dithered edges, 32 x 32), white: tinted and scaled per hit. */
+/**
+ * A round glow, white (tinted and scaled per hit): a LIGHT on the ground - a smooth falloff to nothing, linear filtered (a light has
+ * no pixel grid: a dithered / stepped one lit the map in a disc with a rim, round every hit), 128 x 128.
+ */
 function glowTexture() {
   if ( glowTex && !glowTex.baseTexture?.destroyed ) return glowTex;
-  const N = 32, a = new Uint8Array(N * N * 4);
+  const N = 128, a = new Uint8Array(N * N * 4);
   for ( let y = 0; y < N; y++ ) for ( let x = 0; x < N; x++ ) {
-    const d = Math.hypot(x + 0.5 - N / 2, (y + 0.5 - N / 2)) / (N / 2), dz = (A.h3(x >> 1, y >> 1, 5) - 0.5) * 0.12, e = d + dz;
-    const v = e < 0.3 ? 1 : e < 0.55 ? 0.62 : e < 0.78 ? 0.34 : e < 1 ? 0.14 : 0;
-    const o = (y * N + x) * 4; a[o] = a[o + 1] = a[o + 2] = Math.round(255 * v); a[o + 3] = 255;
+    const d = Math.hypot(x + 0.5 - N / 2, (y + 0.5 - N / 2)) / (N / 2), f = Math.max(0, 1 - d);
+    const v = d >= 1 ? 0 : Math.exp(-4.2 * d * d) * f * (2 - f);   // (a bright core, a long soft tail that reaches 0 exactly at the rim)
+    const o = (y * N + x) * 4; a[o] = a[o + 1] = a[o + 2] = Math.round(255 * Math.min(1, v * 1.15)); a[o + 3] = 255;
   }
   glowTex = PIXI.Texture.fromBuffer(a, N, N);
-  glowTex.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST; glowTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+  glowTex.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR; glowTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
   return glowTex;
+}
+/** The bloom: a smooth warm light over what is lit (a shooter's flash lights its own token), additive, premultiplied. */
+function bloomTexture() {
+  if ( bloomTex && !bloomTex.baseTexture?.destroyed ) return bloomTex;
+  const N = 64, a = new Uint8Array(N * N * 4);
+  for ( let y = 0; y < N; y++ ) for ( let x = 0; x < N; x++ ) {
+    const d = Math.hypot(x + 0.5 - N / 2, y + 0.5 - N / 2) / (N / 2), v = d >= 1 ? 0 : Math.exp(-5 * d * d) * (1 - d);
+    const o = (y * N + x) * 4; a[o] = a[o + 1] = a[o + 2] = Math.round(255 * v); a[o + 3] = 0;   // (additive: no coverage)
+  }
+  bloomTex = PIXI.Texture.fromBuffer(a, N, N);
+  bloomTex.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR; bloomTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF; bloomTex.baseTexture.alphaMode = PIXI.ALPHA_MODES.PMA;
+  return bloomTex;
 }
 /** The soft shadow: a smooth feathered disc (64 x 64, linear filtered: a shadow is light, it has no pixel grid), white alpha. */
 function softTexture() {
@@ -122,6 +213,7 @@ function tick() {
   if ( !canvas?.ready || !root || root.destroyed ) { stop(); return; }
   const now = sharedNow(), g = fireGeo(), v = view(), q = guardQ("presets");
   A.clearFrame(F);
+  if ( F.spurts ) F.spurts.length = 0;
   for ( const [fid, f] of live ) {
     if ( now > f.end ) { live.delete(fid); continue; }
     A.draw(f.items, f.t0, now, { ap: g.ap, ox: g.ox, oy: g.oy, grid: g.grid, lift: v.lift, squash: v.squash, q, seed: f.seed }, F);
@@ -137,7 +229,7 @@ function tick() {
   }
   for ( let k = ns; k < softPool.length; k++ ) softPool[k].visible = false;
   // colour (dim first: a brighter pixel drawn later wins) and its emission
-  colG.clear(); glowG.clear(); shadeG.clear();
+  colG.clear(); glowG.clear(); shadeG.clear(); addG.clear();
   const ap = g.ap;
   F.shade.forEach((L, k) => {
     if ( !L.length ) return;
@@ -152,6 +244,28 @@ function tick() {
     for ( let i = 0; i < L.length; i += 2 ) { const x = g.ox + L[i] * ap, y = g.oy + L[i + 1] * ap; colG.drawRect(x, y, ap, ap); if ( em ) glowG.drawRect(x, y, ap, ap); }
     colG.endFill(); if ( em ) glowG.endFill();
   }
+  // the HALO pixels (additive, part strength: a tracer's / a flame's glow), and their emission at night
+  const AD = F.add;
+  if ( AD.length ) {
+    for ( let c = 1; c <= 3; c++ ) {
+      addG.beginFill(A.PAL[c], c === 1 ? 0.5 : c === 2 ? 0.4 : 0.28); glowG.beginFill(mul(0xffffff, A.GLOW[c] * 0.6), 1);
+      for ( let i = 0; i < AD.length; i += 3 ) if ( AD[i + 2] === c ) { const x = g.ox + AD[i] * ap, y = g.oy + AD[i + 1] * ap; addG.drawRect(x, y, ap, ap); glowG.drawRect(x, y, ap, ap); }
+      addG.endFill(); glowG.endFill();
+    }
+  }
+  spurtSprites(g, v);
+  // the BLOOMS: a soft light over a shooter's flash (it lights the token too: the ground light under it is hidden by the token),
+  // stronger in the dark
+  const BL = F.blooms, bt = bloomTexture(), darkB = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
+  let nb = 0;
+  for ( let i = 0; i < BL.length; i += 5, nb++ ) {
+    let s = bloomPool[nb];
+    if ( !s ) { s = bloomPool[nb] = new PIXI.Sprite(bt); s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD; s.eventMode = "none"; bloomBox.addChild(s); }
+    s.position.set(BL[i], BL[i + 1]); s.width = 2 * BL[i + 2]; s.height = 2 * BL[i + 2] * v.squash;
+    s.tint = A.PAL[BL[i + 4]]; s.alpha = Math.min(1, BL[i + 3] * (0.18 + 0.72 * darkB)); s.visible = true;
+  }
+  for ( let k = nb; k < bloomPool.length; k++ ) bloomPool[k].visible = false;
+  bakeAhead();
   // the ground glows (night light round the hits / the muzzle): pooled sprites in the emission container
   const G = F.glows, tex = glowTexture();
   let n = 0;
@@ -165,6 +279,36 @@ function tick() {
   for ( let k = n; k < glowPool.length; k++ ) glowPool[k].visible = false;
   rumble(F.kicks, F.shakes, now);
   flash(F.flashes);
+}
+
+/**
+ * The hits' SPURTS (gun-fx.mjs): one pooled sprite each, its baked frame at the art grid (anchored at the hit's ground point, snapped
+ * to the art grid), tinted with that ground's dust colour - a moonlit one at night (lifted against the ambience, as the fire's) -
+ * the nearer ones drawn over the farther.
+ */
+function spurtSprites(g, v) {
+  const L = F.spurts ?? [], N = L.length / X.SPURT_STRIDE, ap = g.ap, S = Math.max(8, Math.round(g.grid / ap)), lift = Math.round(v.lift * 20) / 20;
+  const order = Array.from({ length: N }, (_, i) => i).sort((a, b) => L[a * X.SPURT_STRIDE + 1] - L[b * X.SPURT_STRIDE + 1]);
+  const dark = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
+  let amb = 1;
+  if ( dark > 0 ) {
+    const env = canvas.scene?.environment, cyc = env?.cycle !== false, bl = env?.base?.luminosity ?? 0, dl = env?.dark?.luminosity ?? 0;
+    const lb = cyc ? bl + (dl - bl) * dark : bl, lum = lb * (lb >= 0 ? 1.2 : 0.8); amb = 1 / Math.max(0.2, 1 + lum);
+  }
+  let n = 0;
+  for ( const i of order ) {
+    const o = i * X.SPURT_STRIDE, kind = X.SPURT_KINDS[L[o + 2]], tex = spurtTexture(kind, S, lift, L[o + 3], L[o + 4]), b = tex.mmBox, flip = L[o + 6] === 1;
+    let s = spurtPool[n];
+    if ( !s ) { s = spurtPool[n] = new PIXI.Sprite(tex); s.eventMode = "none"; spurtBox.addChild(s); }
+    s.texture = tex; s.scale.set(flip ? -ap : ap, ap);
+    // (mirrored: its ground texel stays on the hit - the sprite's left edge moves to the right of it)
+    const gx = Math.floor((L[o] - g.ox) / ap);
+    s.position.set(g.ox + (flip ? gx + b.cx + 1 : gx - b.cx) * ap, g.oy + (Math.floor((L[o + 1] - g.oy) / ap) - b.gy) * ap);
+    const T = L[o + 5] >= 0 ? X.unpackRgb(L[o + 5]) : [0.6, 0.53, 0.43];
+    s.tint = X.packRgb(X.dustNight(X.SPURT[kind].wet ? X.splashLit(T) : X.dustLit(T), dark, amb));
+    s.zIndex = n; s.visible = true; n++;
+  }
+  for ( let k = n; k < spurtPool.length; k++ ) spurtPool[k].visible = false;
 }
 
 /** How much of a cue at (x, y) reaches this client's view: 1 on screen, falling off past it (NaN: everywhere). */

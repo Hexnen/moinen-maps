@@ -42,7 +42,7 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   { rev: "7edbbc3", other: /CORE_VERSION|compat:/ }, "e1735f7",   // (the cause hairlines' ink on turf and earth)
   { rev: "a1e829c", other: /^(?![\s\S]*(rimArgs|rimQueue|rimSlice|addRim|BLOTS|blotGrid))/ },
   // the gun presets (display only: a walked gun stroke skips the area-wide impact ring / shock / skirt, its chips and rims follow the walk)
-  "c47949c", "6457d70", "5b4448d", "86739d0"];   // (86739d0: presets polish, the night rim's inside lift and lip band; 50458de was reverted in e5714bb and redone as 7115e86)
+  "c47949c", "6457d70", "5b4448d", "86739d0", "dc990b7", "a237695"];   // (a237695: guns round 3, no night rim on a gun pock; dc990b7: guns polish 2, a gun pock's tight clock and faint night rim; 86739d0: presets polish, the night rim's inside lift and lip band; 50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = makeTempDir("cause");   // removed on any exit (dev/lib/tmp.mjs)
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)

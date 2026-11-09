@@ -759,6 +759,60 @@ distinct hits opening in sequence along the walk, a believable spread, a slightl
 - **Not checked:** a GTX 1080 (only the weak-2 emulation); the remote host; two guns fired at once; a run across a
   scene edge.
 
+### Guns polish round 2 (2026-11-09, lane 4, headless Chrome DPR 2)
+
+- **Hit spurts** (`scripts/presets/gun-fx.mjs`, pure): a baked pixel sprite per hit (a jet column into a crown that erodes, clods,
+  grains; light 580 ms / heavy 850 ms, 30 fps, 4 variants), drawn by `accents.mjs` in the accent layer, tinted by the ground under the
+  hit (one `mapPixels` box per run), lifted toward moonlight at night. A heavy gun mixes about a third light spurts. The dust layer's
+  `hits` kind is now only a low lingering haze.
+- **Pocks**: a gun stroke's entry uses a **tight clock** (`entry-clock.mjs` `tight`, display passes it for a preset's path stroke):
+  a narrow band (70 ms) that only trails the walk, so no pock pixel shows before its bullet lands (the old band of a long walk showed
+  specks up to ~500 ms early). Calmer pock params (uzi and heli: no debris, no halo, low scatter); heli `minis` dropped (they had the
+  impact's falling-blow shock ring and ring pebbles). A gun's small pocks get a 30 % night rim (`destruction.mjs` gunSeen, cause-fx).
+- **Night glow** round each hit: a smooth dithered 64 px falloff to zero (the old 4 flat rings ended on a 14 % step: a blocky disc).
+- Tests: `dev/presets-gunfx.test.mjs` (bake, timing, frame, tone, tight clock); CAUSE_COMMITS takes `dc990b7`.
+- Cost (`dev/guns-cost.mjs` matrix, ZZ scene, GPU median / p95 ms, before f2b669d -> after): see the round-2 report; within noise
+  of before at z1 and z3, weak 1 and 2.
+- Blind judge (one, round-1 scale): uzi 4 -> 5, heli 5 -> 6. **Not at the bar (8).** Open: dark clods hanging in the spurts, stamped
+  identical columns, lanes read as a scatter, pock decals grey/ring pebbles/white night speckle and left on water, the muzzle flash
+  a thin cross with its light cut at the token edge, ruled tracers, the uzi near invisible at zoom 1.
+
+### Guns round 3 as built (2026-11-09, branch polish3-guns, lane 4, headless Chrome DPR 2)
+
+- **"Ma pruć" (the user): density from cheap rounds.** `gun-fx.mjs roundsOf(item)`: an accent item's `fill` (0..4) adds that many
+  accent-only rounds in every gap of a lane's walk hits (jittered along and across, deterministic, cached on the item). They get a
+  spurt, a small star and a glow but no pock and no dust stroke, so the damage layer and the GM's writes are unchanged in kind. The heli's
+  walk is 14 hits/s a gun (was 11), 6.5 sq/s, lanes +-0.45 sq, sigma 0.05-0.09, maxHits 72, with `fill: 2` on hitFx and muzzle,
+  about 42 rounds/s a gun on screen. Tracers on every 2nd hit. The uzi has `fill: 1`.
+- **Spurts rebuilt** (`gun-fx.mjs`, pure, baked): jets (strings of grains launched together, jittered angles and lengths, joined by a line
+  only while young), loose grains with a short streak, landed grains lying 90 ms, a lit dust cloud (warped-distance density, alpha
+  steps, darker while fresh) and a column of dust left by the rising jets. No 2x2 clods (they read as hanging squares). Kinds
+  light / heavy and splashL / splashH for water (`wetOf` of the ground tone). Each (kind, variant) is ONE strip texture (8 variants, 30 fps),
+  pre-baked in a queue at 2.5 ms per tick during the lead-in. All strips take ~100-125 ms to bake.
+- **Water:** the GM's `write.mjs dryOf(gesture)` reads one map box round the run; `core.mjs expand` drops a gun walk's destruction
+  and dust points in water (`env.dry`); clients splash there.
+- **Muzzle:** a pixel flame per barrel's newest shot (core, forward tongue, side jets, each shot different, a cooler remnant in the
+  second half: no every-other-frame strobe), a continuous ground glow (heli 2.4 sq) and an additive bloom over the shooter that
+  lights the token (day 0.18, night up to 0.9). No shooter, no flame.
+- **Tracers:** a tapered streak (2-3 px hot head, rounded tip) with additive halo pixels. A glancing round ends orange.
+- **Hit glows:** an 18 ms attack and an exponential decay; a smooth LINEAR 128 px falloff texture.
+- **Pocks:** both guns now use `cause: "none"` with no edge/scatter and jag 0.5, which gives a dark gouge tinted by the ground. The impact
+  cause drew rings, scribbles and lip speckle. The heli has lvMix [1,0,0]. A gun's walked pocks get no night rim (cause-fx
+  `gunPocks` 0, was 0.3; CAUSE_COMMITS a237695). The heli's lingering `hits` dust is now lv 2, r 0.18, life 4.5 s: at lv 3 the
+  denser hits stacked into a banded pale wall.
+- **Cost** (`guns-cost.mjs` matrix, ZZ-g3-day, GPU/CPU median ms, before 970eee3 -> after): within noise at z1 and z3, weak 1 and 2.
+  First fire after a fresh reload: no long frames in 5 of 6 tries. One early try had 0.5-0.9 s long frames; that did not reproduce, and
+  its cause is not established.
+- **Blind judge** (one, round-2 scale, overall): uzi 5 -> 5, heli 6 -> 6.5. Open items:
+  - The night pocks still show pale rims, from the pock's own lip, not the night rim.
+  - The pocks are big dark clumps, not delicate.
+  - Single ember pixels linger for seconds.
+  - Night hit lights read as round pools.
+  - The muzzle flash reads as a steady torch.
+  - The dust merges into two pale ribbons.
+  - The tracers are thick.
+  - The uzi is too small to read at zoom 1, and its dust is grey, not tinted by the ground.
+
 ## 17. The blasts as built (bomb, grenade: presets-boom)
 
 The bar: the whole firing reads as ONE natural explosion, from the click to the settled ground, and the ground keeps a dust haze

@@ -19,6 +19,7 @@
  * (a bomb's body), metal light (a grenade's lever), olive, dust (kicked up where a grenade lands), lit olive, dark olive (a grenade's
  * shade and its grooves). */
 import { LANDING_KINDS, landingSpan, landingDraw } from "./landing-fx.mjs";   // (the superhero landing's accents: landing-fx.mjs)
+import { spurts, SPURT, roundsOf, wetOf } from "./gun-fx.mjs";   // (a gun's hit spurts: gun-fx.mjs)
 
 export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8, 0x27231f, 0x8d867a, 0x505b33, 0xb3a68d, 0x7f8c4c, 0x2f3720];
 /** How much each palette colour lights itself at night (its emission, 0..1; 0: lit by the scene only, never by itself). */
@@ -40,7 +41,7 @@ export const TRACER_MS = 210, STREAK_MS = 85, RICO_MS = 200;
  * from above (the helicopter's guns are high up) - a shallow one read as a flat line across the map. */
 export const TRACER_BACK = 3.2, TRACER_UP = 7.5;
 /** The hit flash (ms): the big star, then the small one; the ground glow's life (ms). */
-export const FLASH_MS = [55, 125], GLOW_MS = 150;
+export const FLASH_MS = [55, 125], GLOW_MS = 210;
 /** The muzzle flash (ms) and the bullet's speed (squares a second; the streak takes at least BULLET_MIN ms). */
 export const MUZZLE_MS = 50, BULLET_SQ = 160, BULLET_MIN = 25;
 /** A round's flight from a shooter takes at most this long (ms): the muzzle's and the tracers' lead before their first hit. */
@@ -62,9 +63,10 @@ export function h3(a, b, c) {
  * `glows` ground glows [x, y, radius (scene px), intensity 0..1, palette colour] for the night, `kick` the rumble at the view (the
  * renderer weighs it by distance), `live` whether anything was drawn or is still to come.
  */
-export const newFrame = () => ({ px: PAL.map(() => []), shade: [[], []], soft: [], glows: [], kicks: [], shakes: [], flashes: [], live: false });
+export const newFrame = () => ({ px: PAL.map(() => []), add: [], blooms: [], shade: [[], []], soft: [], glows: [], kicks: [], shakes: [], flashes: [], live: false });
 export function clearFrame(F) {
   for ( const a of F.px ) a.length = 0;
+  F.add.length = 0; F.blooms.length = 0;
   F.shade[0].length = 0; F.shade[1].length = 0; F.soft.length = 0; F.glows.length = 0; F.kicks.length = 0; F.shakes.length = 0; F.flashes.length = 0; F.live = false;
   return F;
 }
@@ -97,6 +99,8 @@ export function spanOf(item) {
   const lo = Math.min(...ts), hi = Math.max(...ts);
   if ( item.kind === "tracer" ) return [lo - (Array.isArray(item.from) ? BULLET_MAX : TRACER_MS), hi + RICO_MS];
   if ( item.kind === "muzzle" ) return [lo - BULLET_MAX, hi + MUZZLE_MS];
+  // (a hit's spurt of soil, gun-fx.mjs, outlives its flash and sparks)
+  if ( item.kind === "hitFx" ) return [lo, hi + Math.max(AFTER_MS, SPURT[(item.lv ?? 1) >= 3 ? "heavy" : "light"].L)];
   return [lo, hi + AFTER_MS];
 }
 
@@ -114,7 +118,7 @@ export function draw(items, t0, now, env, F) {
     if ( t < sp[0] ) continue;
     const seed = ((env.seed ?? 1) + k * 7919) | 0;
     if ( it.kind === "tracer" ) tracers(it, t, env, F, seed);
-    else if ( it.kind === "hitFx" ) hitFx(it, t, env, F, seed);
+    else if ( it.kind === "hitFx" ) { hitFx(it, t, env, F, seed); spurts(it, t, F, seed); }
     else if ( it.kind === "muzzle" ) muzzle(it, t, env, F, seed);
     else if ( it.kind === "fallShadow" ) fallShadow(it, t, env, F, seed);
     else if ( it.kind === "throwArc" ) throwArc(it, t, env, F, seed);
@@ -167,12 +171,46 @@ function star(F, env, x, y, z, { arm = 2, side = arm, dir = [1, 0], big = true, 
 
 /* ---------------------------------------------------------------- the kinds */
 
+/**
+ * A STREAK of light from screen cell a (tail) to b (head) - a tracer, a glancing round: a crisp core that is white-hot at the head
+ * and cools along the tail (yellow, orange, a broken red end), thicker over its hot front half, a rounded tip (never a square
+ * head), and a halo of additive warm pixels round the hot part (F.add: it glows, it is not a ruled line). `flick` (0..1) dims it
+ * a step now and then (a tracer's burning compound flickers).
+ */
+function streak(F, ax, ay, bx, by, heavy, flick = 0) {
+  const dx = bx - ax, dy = by - ay, n = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+  const horiz = Math.abs(dx) >= Math.abs(dy), px = horiz ? 0 : 1, py = horiz ? 1 : 0;
+  const hot = flick > 0.75 ? 1 : 0;
+  const core = new Set();
+  for ( let i = 0; i <= n; i++ ) {
+    const u = i / n, x = Math.round(ax + dx * u), y = Math.round(ay + dy * u);
+    const c = u > 0.86 ? hot : u > 0.6 ? 1 : u > 0.33 ? 2 : u > 0.12 ? 3 : ((i & 1) ? 4 : -1);
+    if ( c < 0 ) continue;
+    F.px[c].push(x, y); core.add(x * 4096 + y);
+    // (the hot front: two pixels thick, three at the head of a heavy round)
+    if ( u > (heavy ? 0.45 : 0.62) ) { F.px[Math.min(4, c + 1)].push(x + px, y + py); core.add((x + px) * 4096 + y + py); }
+    if ( heavy && u > 0.82 ) { F.px[Math.min(4, c + 1)].push(x - px, y - py); core.add((x - px) * 4096 + y - py); }
+  }
+  // the rounded tip: one pixel past the head, a step dimmer
+  const ux = dx / n, uy = dy / n, tx = Math.round(bx + ux), ty = Math.round(by + uy);
+  F.px[1].push(tx, ty); core.add(tx * 4096 + ty);
+  // the HALO (additive): round the hot front, wider at the head
+  for ( let i = Math.floor(n * 0.35); i <= n + 1; i++ ) {
+    const u = i / n, x = Math.round(ax + dx * u), y = Math.round(ay + dy * u), w = u > 0.8 ? (heavy ? 3 : 2) : u > 0.55 ? 2 : 1;
+    for ( let s = -w; s <= w; s++ ) {
+      const hx = x + px * s, hy = y + py * s; if ( core.has(hx * 4096 + hy) ) continue;
+      F.add.push(hx, hy, Math.abs(s) >= w ? 3 : u > 0.8 ? 1 : 2);
+    }
+  }
+}
+
 function tracers(it, t, env, F, seed) {
   const g = env.grid, d = it.dir ?? [1, 0], heavy = (it.lv ?? 3) >= 3;
   const B = TRACER_BACK * g, Z = TRACER_UP * g;
   it.hits.forEach((h, i) => {
     const tau = t - h[2], shot = Array.isArray(it.from);
     if ( tau < -(shot ? BULLET_MAX : TRACER_MS) || tau > RICO_MS ) return;
+    const flick = h3(seed + i, Math.floor(t / 33), 9);
     if ( shot ) {
       // a SHOOTER on the map (a gunship token): the round flies out of its barrel (as its muzzle flash, muzzleOf) to the hit
       if ( tau <= 0 ) {
@@ -182,8 +220,7 @@ function tracers(it, t, env, F, seed) {
         const uh = 1 + tau / fl, ut = Math.max(0, uh - SHOT_STREAK[heavy ? 0 : 1] * g / Math.max(1, m.L));
         const [hx, hy, hz] = at(uh), [tx, ty, tz] = at(ut);
         const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
-        line(F, ax, ay, bx, by, (u, k) => (u > 0.9 ? 0 : u > 0.62 ? 1 : u > 0.32 ? 2 : u > 0.12 ? 3 : (k & 1) ? 4 : -1));
-        if ( heavy ) { line(F, ax, ay + 1, bx, by + 1, (u) => (u > 0.8 ? 1 : u > 0.5 ? 2 : -1)); put2(F, env, hx, hy, hz, 0); } else put(F, env, hx, hy, hz, 0);
+        streak(F, ax, ay, bx, by, heavy, flick);
         return;
       }
     } else if ( tau <= 0 ) {
@@ -194,51 +231,60 @@ function tracers(it, t, env, F, seed) {
       const uh = 1 + tau / TRACER_MS, ut = Math.max(0, uh - STREAK_MS / TRACER_MS);
       const [hx, hy, hz] = at(uh), [tx, ty, tz] = at(ut);
       const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
-      line(F, ax, ay, bx, by, (u, k) => (u > 0.9 ? 0 : u > 0.62 ? 1 : u > 0.32 ? 2 : u > 0.12 ? 3 : (k & 1) ? 4 : -1));
-      // (a heavy round's streak is 2 px thick over its hot front half: it reads at zoom 0.6)
-      if ( heavy ) { line(F, ax, ay + 1, bx, by + 1, (u) => (u > 0.8 ? 1 : u > 0.5 ? 2 : -1)); put2(F, env, hx, hy, hz, 0); } else put(F, env, hx, hy, hz, 0);
+      streak(F, ax, ay, bx, by, heavy, flick);
       return;
     }
-    // a glancing round: off the ground forward along the run, a little up, cooling
+    // a glancing round: off the ground forward along the run, a little up, cooling (it goes out orange, never a dark ember)
     if ( h3(seed, i, 2) > 0.42 ) return;
-    // (a shooter's round glances on along its own line of fire)
     const a = (shot ? Math.atan2(h[1] - it.from[1], h[0] - it.from[0]) : Math.atan2(d[1], d[0])) + (h3(seed, i, 3) - 0.5) * 1.4, v = (3 + 3 * h3(seed, i, 4)) * g / 1000, vz = (1 + 2 * h3(seed, i, 5)) * g / 1000;
     const pos = (s) => [h[0] + Math.cos(a) * v * s, h[1] + Math.sin(a) * v * s * (env.squash ?? 0.8), Math.max(0, vz * s - 0.5 * 9 * g / 1e6 * s * s)];
     const [hx, hy, hz] = pos(tau), [tx, ty, tz] = pos(Math.max(0, tau - 45));
-    const f = tau / RICO_MS, c = f < 0.3 ? 1 : f < 0.65 ? 2 : 3;
+    const f = tau / RICO_MS, c = f < 0.35 ? 1 : 2;
     const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
-    line(F, ax, ay, bx, by, (u, k) => (u > 0.7 ? c : (k & 1) ? Math.min(4, c + 1) : -1));
+    line(F, ax, ay, bx, by, (u, k) => (u > 0.7 ? c : (k & 1) && f < 0.7 ? c + 1 : -1));
+    if ( f < 0.5 ) F.add.push(bx, by - 1, 2, bx, by + 1, 2);
   });
 }
 
+/** The night light of a hit (attack, then an exponential decay - several overlap in a run, never a pulse of one or two). */
+const hitGlow = (tau, life, tauK) => (tau < 0 || tau >= life ? 0 : Math.min(1, tau / 18) * Math.exp(-tau / tauK) * (1 - smooth(0.7, 1, tau / life)));
+
 function hitFx(it, t, env, F, seed) {
   const g = env.grid, lv = it.lv ?? 2, heavy = lv >= 3, q = env.q ?? 1, d = it.dir ?? [1, 0];
-  const nS = Math.max(1, Math.round((heavy ? 6 : lv === 2 ? 4 : 3) * (0.4 + 0.6 * q)));
-  it.hits.forEach((h, i) => {
+  const R = roundsOf(it), tones = it.tones;
+  R.forEach((h, i) => {
     const tau = t - h[2];
     if ( tau < 0 || tau > AFTER_MS ) return;
-    const zf = 0.08 * g;
-    // the FLASH: a big star, then a small one (its long arm along the run: the rounds come in along it)
-    if ( tau < FLASH_MS[0] ) star(F, env, h[0], h[1], zf, { arm: heavy ? 3 : 2, side: heavy ? 2 : 1, dir: d, big: lv >= 2 });
-    else if ( tau < FLASH_MS[1] ) star(F, env, h[0], h[1], zf, { arm: 1, side: 1, dir: d, big: false, c0: 1, c1: 2, c2: 3 });
-    // the GROUND GLOW (night: lights the ground round the hit)
-    if ( tau < GLOW_MS ) { const f = 1 - tau / GLOW_MS; F.glows.push(h[0], h[1], (heavy ? 0.85 : 0.55) * g, f * f * (heavy ? 0.9 : 0.6), 2); }
+    const major = h[4] === 1, wet = Array.isArray(tones) && wetOf(tones[i]);
+    const zf = 0.06 * g, sd = seed + i * 13;
+    // the FLASH: a major round's star (its long arm along the run: the rounds come in along it), a minor round's spark of a star;
+    // in water a pale fleck only
+    if ( wet ) { if ( tau < 50 ) star(F, env, h[0], h[1], zf, { arm: 1, side: 1, dir: d, big: false, c0: 5, c1: 5, c2: 5 }); }
+    else if ( major ) {
+      if ( tau < FLASH_MS[0] ) star(F, env, h[0], h[1], zf, { arm: heavy ? 3 : 2, side: heavy ? 2 : 1, dir: d, big: true });
+      else if ( tau < FLASH_MS[1] ) star(F, env, h[0], h[1], zf, { arm: 1, side: 1, dir: d, big: false, c0: 1, c1: 2, c2: 3 });
+    } else if ( tau < 40 ) star(F, env, h[0], h[1], zf, { arm: 1, side: 1, dir: d, big: false, c0: 0, c1: 1, c2: 2 });
+    else if ( tau < 75 ) put(F, env, h[0], h[1], zf, 1);
+    // the GROUND LIGHT (night): a fast attack and a long tail - a run keeps a string of them lit
+    const life = heavy ? (major ? 520 : 320) : 380, gl = hitGlow(tau, life, heavy ? (major ? 150 : 90) : 110);
+    if ( gl > 0.01 ) F.glows.push(h[0], h[1], (heavy ? (major ? 1.5 : 1.0) : 1.0) * g, gl * (wet ? 0.35 : heavy ? (major ? 1 : 0.7) : 0.9), tau < 40 ? 1 : 2);
     // the RUMBLE share
-    if ( it.shake && tau < 140 ) F.kicks.push(h[0], h[1], it.shake * (1 - tau / 140));
-    // SPARKS: out and up, falling back, cooling
+    if ( it.shake && major && tau < 140 ) F.kicks.push(h[0], h[1], it.shake * (1 - tau / 140));
+    if ( wet ) return;
+    // SPARKS: out and up, falling back, cooling - and going out while still orange (no dark ember left hanging)
+    const nS = Math.max(1, Math.round((major ? (heavy ? 6 : 4) : 2) * (0.4 + 0.6 * q)));
     for ( let s = 0; s < nS; s++ ) {
-      const r1 = h3(seed + i, s, 7), r2 = h3(seed + i, s, 8), r3 = h3(seed + i, s, 9), r4 = h3(seed + i, s, 10);
-      const L = (heavy ? 180 : 140) + 200 * r3, s0 = 18 * r4, a = tau - s0;
+      const r1 = h3(sd, s, 7), r2 = h3(sd, s, 8), r3 = h3(sd, s, 9), r4 = h3(sd, s, 10);
+      const L = (heavy ? 150 : 120) + 150 * r3, s0 = 12 * r4, a = tau - s0;
       if ( a < 0 || a > L ) continue;
-      // (thrown mostly forward along the run - the rounds' momentum - and to the sides)
       const ang = Math.atan2(d[1], d[0]) + (r1 - 0.5) * (heavy ? 3.6 : 4.4);
-      const vh = (heavy ? 2.2 + 3.2 * r2 : 1.6 + 2.4 * r2) * g / 1000, vz = (heavy ? 1.8 + 2.6 * r3 : 1.2 + 1.8 * r3) * g / 1000, G = 11 * g / 1e6;
+      const vh = (heavy ? 2.2 + 3.2 * r2 : 1.8 + 2.6 * r2) * g / 1000, vz = (heavy ? 1.8 + 2.6 * r3 : 1.4 + 2 * r3) * g / 1000, G = 11 * g / 1e6;
       const pos = (u) => [h[0] + Math.cos(ang) * vh * u, h[1] + Math.sin(ang) * vh * u * (env.squash ?? 0.8), zf + vz * u - 0.5 * G * u * u];
       const [x, y, z] = pos(a);
       if ( z < 0 ) continue;
-      const f = a / L, c = f < 0.2 ? 0 : f < 0.45 ? 1 : f < 0.75 ? 2 : 3;
+      const f = a / L, c = f < 0.25 ? 0 : f < 0.55 ? 1 : 2;
       put(F, env, x, y, z, c);
-      if ( heavy || f < 0.5 ) { const [px, py, pz] = pos(Math.max(0, a - 22)); if ( pz >= 0 ) put(F, env, px, py, pz, Math.min(4, c + 1)); }
+      if ( f < 0.6 ) { const [px, py, pz] = pos(Math.max(0, a - 20)); if ( pz >= 0 ) put(F, env, px, py, pz, Math.min(2, c + 1)); }
     }
   });
 }
@@ -259,29 +305,74 @@ export function muzzleOf(it, h, g) {
   return { x, y, z: 0.32 * g, ux, uy, L: Math.hypot(h[0] - x, h[1] - y) || 1 };
 }
 
+/**
+ * A MUZZLE FLAME in art pixels at (x, y) lifted z, pointing (ux, uy) on the ground: a white-hot core, a forward tongue that narrows
+ * and wavers, and (most shots) two short side jets - the three-pronged bloom of a gun's flash seen from above - coloured white at
+ * the core through yellow and orange to red tips; a ring of additive warm pixels round it (F.add: it glows). Every shot draws a
+ * different one (seed); `k` 1 its full size, smaller as it dies (k < 1: the remnant, a colour step cooler). L its length (art px).
+ */
+function flame(F, env, x, y, z, ux, uy, L, seed, k) {
+  const [cx, cy] = scr(env, x, y, z), sq = env.squash ?? 0.8;
+  let dx = ux, dy = uy * sq; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+  const cool = k < 0.8 ? 1 : 0;
+  const Lf = L * k * (0.75 + 0.5 * h3(seed, 1, 1)), Wf = Math.max(1.1, L * 0.22 * k), rc = Math.max(1.2, L * 0.17 * k);
+  const side = h3(seed, 2, 1) < 0.75, th = 1.05 + 0.35 * h3(seed, 3, 1), Ls = L * k * (0.32 + 0.22 * h3(seed, 4, 1));
+  const sa = [[Math.cos(th) * dx - Math.sin(th) * dy, Math.sin(th) * dx + Math.cos(th) * dy], [Math.cos(-th) * dx - Math.sin(-th) * dy, Math.sin(-th) * dx + Math.cos(-th) * dy]];
+  const ph = h3(seed, 5, 1) * 6.28, R = Math.ceil(Math.max(Lf, rc) + 3);
+  const tongue = (px, py, ax, ay, len, wid) => {
+    const a = px * ax + py * ay; if ( a <= 0 || a >= len ) return -1;
+    const c = Math.abs(-px * ay + py * ax), w = wid * Math.pow(1 - a / len, 0.6) * (0.8 + 0.2 * Math.sin(a * 1.4 + ph));
+    return w > 0.3 ? 1 - c / w : -1;
+  };
+  for ( let j = -R; j <= R; j++ ) for ( let i = -R; i <= R; i++ ) {
+    const px = i + 0.5, py = j + 0.5, r = Math.hypot(px, py);
+    let s = 1 - r / rc;
+    s = Math.max(s, tongue(px, py, dx, dy, Lf, Wf));
+    if ( side ) for ( const [ax, ay] of sa ) s = Math.max(s, tongue(px, py, ax, ay, Ls, Wf * 0.7));
+    if ( s > 0 ) {
+      const hd = r / Math.max(2, Lf), c = Math.min(3, (r < rc ? 0 : hd < 0.42 ? 1 : hd < 0.72 ? 2 : 3) + cool);
+      F.px[c].push(cx + i, cy + j);
+    } else if ( s > -0.7 && r < Lf + 2 ) F.add.push(cx + i, cy + j, r < rc + 2 ? 1 : 2);
+  }
+}
+
 function muzzle(it, t, env, F, seed) {
   if ( !Array.isArray(it.from) ) return;
-  const g = env.grid, heavy = (it.lv ?? 1) >= 3, MS = heavy ? 60 : MUZZLE_MS;
-  it.hits.forEach((h, i) => {
-    const m = muzzleOf(it, h, g), mx = m.x, my = m.y, zM = m.z, ux = m.ux, uy = m.uy, L = m.L;
-    const fl = flightOf(L, g), ts = h[2] - fl, tau = t - ts;
-    if ( tau < 0 || tau > fl + MS ) return;
-    // the FLASH: a star stretched along the aim, a different one each shot (two frames; a heavy gun's longer and wider)
-    if ( tau < MS ) {
-      const big = tau < MS * 0.5, r = h3(seed, i, 21);
-      star(F, env, mx, my, zM, big ? { arm: (heavy ? 4 : 3) + Math.round(r * 2), side: (heavy ? 2 : 1) + (r > 0.5 ? 1 : 0), dir: [ux, uy], big: true }
-        : { arm: heavy ? 3 : 2, side: 1, dir: [ux, uy], big: false, c0: 1, c1: 2, c2: 3 });
-      if ( big ) F.glows.push(mx, my, (heavy ? 1.4 : 1.1) * g, heavy ? 0.95 : 0.85, 1);
-    }
-    // the BULLET: a pale streak from the muzzle to the hit
-    if ( tau <= fl ) {
-      const u = tau / fl, ul = Math.max(0, u - 0.9 * g / L);
-      const at = (v) => [mx + (h[0] - mx) * v, my + (h[1] - my) * v, zM * (1 - v)];
-      const [hx, hy, hz] = at(u), [tx, ty, tz] = at(ul);
-      const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
-      line(F, ax, ay, bx, by, (v, k) => (v > 0.75 ? 5 : (k & 1) ? 5 : -1));
+  const g = env.grid, heavy = (it.lv ?? 1) >= 3, MS = heavy ? 75 : 60, Lpx = (heavy ? 0.6 : 0.42) * g / env.ap;
+  const R = roundsOf(it);
+  const lastBy = new Map();   // barrel -> the newest shot already fired
+  let first = Infinity, last = -Infinity;
+  R.forEach((h, i) => {
+    const m = muzzleOf(it, h, g), fl = flightOf(m.L, g), ts = h[2] - fl, tau = t - ts;
+    first = Math.min(first, ts); last = Math.max(last, ts);
+    if ( tau >= 0 && tau <= fl + MS ) {
+      const b = it.twin ? h[3] % 2 : 0, p = lastBy.get(b);
+      if ( !p || ts > p.ts ) lastBy.set(b, { ts, tau, m, i });
+      // the BULLET of a major round: a pale streak from the muzzle to the hit (a minor one is too fast to see)
+      if ( h[4] === 1 && tau <= fl ) {
+        const u = tau / fl, ul = Math.max(0, u - 0.9 * g / m.L);
+        const at = (v) => [m.x + (h[0] - m.x) * v, m.y + (h[1] - m.y) * v, m.z * (1 - v)];
+        const [hx, hy, hz] = at(u), [tx, ty, tz] = at(ul);
+        const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
+        line(F, ax, ay, bx, by, (v, k) => (v > 0.75 ? 5 : (k & 1) ? 5 : -1));
+      }
     }
   });
+  // the FLAME of each barrel's newest shot: full for its first half, then a cooler remnant - so a burst is a steady flicker of
+  // different flames, never on / off every other frame; its LIGHT (the ground at night, F.glows) and BLOOM (a soft warm light
+  // over the shooter itself, F.blooms: the token is lit too) for as long as the burst lasts
+  for ( const { tau, m, i } of lastBy.values() ) {
+    if ( tau >= MS ) continue;
+    flame(F, env, m.x, m.y, m.z, m.ux, m.uy, Lpx, seed + i * 7, tau < MS * 0.5 ? 1 : 0.6);
+  }
+  if ( t >= first && t <= last + MS ) {
+    const all = [...lastBy.values()], ref = all.filter((s) => s.tau < MS).sort((p, q) => p.tau - q.tau)[0] ?? all[0];
+    if ( ref ) {
+      const I = 0.55 + 0.45 * Math.exp(-Math.max(0, ref.tau) / 45);
+      F.glows.push(ref.m.x, ref.m.y, (heavy ? 2.4 : 1.9) * g, (heavy ? 0.95 : 0.85) * I, 1);
+      F.blooms.push(ref.m.x, ref.m.y - (env.lift ?? 0.5) * ref.m.z, (heavy ? 1.1 : 0.8) * g, I, 1);
+    }
+  }
 }
 
 /* ---------------------------------------------------------------- the bomb and the grenade (P5) */

@@ -9,6 +9,7 @@
 import { cornerPoint } from "./geometry.mjs";
 import { pairKey } from "./marks.mjs";
 import { THEMES, BADGES, BADGE_SCALE, bakeWash } from "./themes.mjs";
+import { drawDots, drawPetals } from "./hover-pattern.mjs";
 
 /** Zone states as a tint over the zone (colour, alpha). */
 const STATE_TINT = { fire: [0xff5a1f, 0.3], dark: [0x05050a, 0.45], ice: [0xbfe8ff, 0.3], flooded: [0x2f7fd6, 0.32], wrecked: [0x6b5b4b, 0.32], lowgrav: [0xb48cff, 0.2], water: [0x2f7fd6, 0.18] };
@@ -503,7 +504,11 @@ export class ZoneDisplay {
       const key = `${id}|${fx}|${light}`;
       if ( key !== this.#patKey || this.Z !== this.#patZ ) {
         this.#softTex();
+        const t0 = performance.now();
         this.#edgePattern(z, rings, (this.g ?? 100) / 50, [x0, y0, x1, y1], fx, light);
+        // (a hover runs on the main thread right after a scene loads too: say so when one ever gets slow again - it froze the street for 40 s)
+        const ms = performance.now() - t0;
+        if ( ms > 150 && !this.#slowWarned ) { this.#slowWarned = true; console.warn(`moinen-maps | zones: the hover pattern "${fx}" of a ${Math.round(x1 - x0)} x ${Math.round(y1 - y0)} px zone took ${Math.round(ms)} ms`); }
         this.#patKey = key; this.#patZ = this.Z;
       } else this.hiSoft.visible = true;
     } else this.#softTex();
@@ -596,10 +601,8 @@ export class ZoneDisplay {
     const css = (n, a) => `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
     const len = w + h;
     if ( fx === "dots" ) {
-      const gap = 12 * u, r = 1.7 * u;
-      const dots = (rad) => { c.beginPath(); for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) { c.moveTo(x + rad, y); c.arc(x, y, rad, 0, 2 * Math.PI); } c.fill(); };
-      c.fillStyle = css(0x15110f, 0.42); dots(r + 1.1 * u);
-      c.fillStyle = css(light, 0.9); dots(r);
+      // one period of the dot grid as a pattern tile: a constant cost for any zone (hover-pattern.mjs; the per-dot path froze big zones)
+      drawDots(c, [x0, y0, x1, y1], u, k, light);
     } else if ( fx === "scan" ) {
       // scan lines: fine horizontal rules, a brighter one every fourth
       const gap = 4.5 * u;
@@ -613,19 +616,8 @@ export class ZoneDisplay {
       const bars = (lw, a) => { c.beginPath(); for ( let s = -len; s <= len; s += gap ) { c.moveTo(x0 + s, y0); c.lineTo(x0 + s + len * 0.55, y0 + len); } c.strokeStyle = css(light, a); c.lineWidth = lw; c.stroke(); };
       bars(17 * u, 0.13); bars(12 * u, 0.2); bars(8 * u, 0.28);
     } else if ( fx === "petals" ) {
-      // falling petals: notched cherry petals at random turns, two pinks
-      const gap = 16 * u;
-      for ( let y = y0, row = 0; y <= y1; y += gap, row++ ) for ( let x = x0 + (row % 2 ? gap / 2 : 0); x <= x1; x += gap ) {
-        const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453, r1 = h - Math.floor(h), r2 = (h * 7.13) - Math.floor(h * 7.13);
-        if ( r1 < 0.35 ) continue;
-        const px = x + (r2 - 0.5) * gap * 0.8, py = y + (r1 - 0.5) * gap * 0.8, sz = (3 + 2.5 * r2) * u;
-        c.save(); c.translate(px, py); c.rotate(r1 * 6.28);
-        c.beginPath(); c.moveTo(0, sz); c.bezierCurveTo(sz * 0.9, sz * 0.4, sz * 0.7, -sz * 0.8, sz * 0.15, -sz); c.lineTo(0, -sz * 0.75); c.lineTo(-sz * 0.15, -sz);
-        c.bezierCurveTo(-sz * 0.7, -sz * 0.8, -sz * 0.9, sz * 0.4, 0, sz); c.closePath();
-        c.fillStyle = r2 > 0.5 ? "rgba(255,228,238,0.95)" : "rgba(247,168,196,0.95)"; c.fill();
-        c.strokeStyle = "rgba(205,90,135,0.7)"; c.lineWidth = 0.6 * u; c.stroke();
-        c.restore();
-      }
+      // falling petals: notched cherry petals at random turns, two pinks (hover-pattern.mjs: cell by cell, a repeating tile on big zones)
+      drawPetals(c, [x0, y0, x1, y1], u, k);
     } else {
       const gap = 11 * u;
       const hatch = () => {
@@ -648,7 +640,7 @@ export class ZoneDisplay {
   }
 
   /** Drop the soft mask's texture (a new one is drawn per hovered zone and zoom step). */
-  #patKey = null; #patZ = null;
+  #patKey = null; #patZ = null; #slowWarned = false;
   #softTex() {
     this.#patKey = null;
     const S = this.hiSoft;
