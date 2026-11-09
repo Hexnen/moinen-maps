@@ -642,3 +642,33 @@ The four questions asked here were answered by the user; P1 is built on these an
   a bomb with aftermath 60: 16 timed fires → `o = now`, `fires()` empty, the record stays `playing` until its dust is over.
 - **Not checked:** the remote host; a GTX 1080; the purge of a bomb after its 90 s dust (rule tested in node only); two GMs firing
   at once live.
+
+## 14. P7 as built (the presets UI)
+
+- **Tool:** `mm-d-preset` in the Destruction section (order 7, icon `fa-table-cells-large`, not `fa-bomb` as planned: the bomb
+  reads as one preset, the grid as a board of pads). Picking it the first time reveals the `presets` dock panel (registered
+  `open:false`) and scrolls it into view.
+- **Bar:** pads (icon, name, hotkey, gesture glyph), Size (0.5-2), Power (-1/0/+1), Variation (dice), aftermath range 5-600 s with
+  an ∞ "no end" toggle and a reset ("—" for a gun pad), hint. Keys while the tool is active: 1-9 / Shift+1-9 arm a pad, `[` `]`
+  size ±0.1, Esc cancels a drag, Alt = repeat the last seed, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y = undo / redo.
+- **Gesture:** click = drop, drag = line or throw (from the controlled token when the press starts on it). The release fires
+  `api.presets.fire(effective(def), gesture, fireOpts(def, bar, seed))`.
+- **Ghost:** the seed is drawn before the release, so the ghost is the exact plan (`expand` with that seed). Soft feathered discs /
+  rings / dots in a container with a BlurFilter; no squares, no hard edges; fades in 180 ms, out 220 ms; after a release it stays
+  hidden (quiet zone) until the pointer moves 0.75 grid, so it never covers the real explosion. Squashed on the ground, lifted
+  for heights (view-angle).
+- **Panel:** draggable pad grid (order = hotkeys); the armed fold (Test fire, Duplicate, Edit, Delete with a confirm); the editor
+  (name, icon, lead-in, aftermath with ∞, timeline with draggable bars snapping to 50 ms, layers with an on/off switch that writes
+  `off:true`, per-layer fields; a draft is saved 350 ms after the last change); the firings fold (rows with age and state, per-row
+  undo and settle, Take back / Fire again / Put out fires). The list refreshes after every awaited action and every 2 s.
+- **Test fire:** a local dry run at the view centre: the ghost timeline plus the presets hook with `test:true`; nothing is written.
+- **Settings:** `destrPresets` (world: custom presets + order) and `presetBar` (client). The CSS lives in styles/maps.css (a new
+  manifest stylesheet needs a world restart).
+- **Nothing runs for anyone who does not open the tool:** the canvas layer, the 8 listeners and the hook are built only on tool
+  activation. Hash A/B vs 3267077 on lane 2: GM frame `eaaw2s` = baseline, player frame `1fdzrlq` = baseline, ticker listeners
+  15 = 15, records and objects equal; settings 93 vs 91 (the two new ones).
+- **Verified live (lane 2, real CDP input):** the four pads by hotkey and gesture; size keys; vary off repeats the seed; keyboard
+  undo/redo with consistent stacks; duplicate / layer off / timeline drag / delete; test fire writes nothing; settle and per-row
+  undo; a real player login (Test Gracz 1) gets no tool, no panel, no ghost layer, and `fire` returns null.
+- **Seen, not tuned (gun agent's area):** the Uzi hits barely read at play zoom.
+- **Not checked:** the remote host; a GTX 1080; two GMs using the board at once.
