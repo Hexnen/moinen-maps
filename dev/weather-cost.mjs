@@ -22,7 +22,12 @@ export function targets() {
     for ( const [k, m] of Object.entries(d.parts ?? {}) ) out.push([`part.${k}`, m]);
     if ( d.groundCells ) out.push(["ground.cells", d.groundCells, "draw"], ["haze.cells", d.hazeCells, "draw"]);
   }
-  if ( L?.pass ) out.push(["lens.pass", L.pass], ["lens.show", L.sprite]);
+  if ( L?.slices ) {   // (the pass in bands, its two pre-passes)
+    L.slices.forEach((m, i) => out.push([`lens.band${i}`, m]));
+    if ( L.runMesh ) out.push(["lens.pre1", L.runMesh], ["lens.pre2", L.beadMesh]);
+    out.push(["lens.show", L.sprite]);
+  }
+  else if ( L?.pass ) out.push(["lens.pass", L.pass], ["lens.show", L.sprite]);
   if ( S?.root ) out.push(["steam", S.root]);
   for ( const v of T?.views?.values?.() ?? [] ) {
     for ( const k of ["curtain", "skirt", "back", "debB", "wallB", "column", "debF", "wallF", "front", "curtainF", "deck"] ) if ( v[k] ) out.push([`torn.art.${k}`, v[k]]);
