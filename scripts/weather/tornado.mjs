@@ -1,5 +1,5 @@
 import * as TM from "./tornado-model.mjs";
-import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, volFrag, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
+import { QUAD_VERT, deckFrag, COLUMN_FRAG, FOOT_FRAG, volFrag, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
 import { CellCache, cellVert, showSmooth } from "./cells.mjs";
 import { weatherQ } from "./guard.mjs";
 import { blendMode } from "./display.mjs";
@@ -44,10 +44,14 @@ const volSteps = (k, gq) => Math.max(10, Math.round((k <= 1.25 ? 18 : k <= 2.5 ?
 let progs = {};
 const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-tornado-${k}`);
 
+// (the deck and the volume are split per part / mode: one program each links many times faster than the whole on D3D11, see volFrag)
+const deckProg = (part) => prog(`deck-${part}`, QUAD_VERT, deckFrag(part));
+const volProg = (stage, mode) => prog(`vol${stage}-${mode}`, QUAD_VERT, volFrag(stage, mode));
+
 /** A tornado's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
 export function tornadoPrograms() {
-  return [prog("deck", QUAD_VERT, DECK_FRAG), prog("column", QUAD_VERT, COLUMN_FRAG), prog("foot", QUAD_VERT, FOOT_FRAG), prog("vol", QUAD_VERT, VOL_FRAG),
-    prog("vol0", QUAD_VERT, volFrag(0)), prog("vol1", QUAD_VERT, volFrag(1)),
+  return [deckProg("curtain"), deckProg("deck"), prog("column", QUAD_VERT, COLUMN_FRAG), prog("foot", QUAD_VERT, FOOT_FRAG),
+    volProg(2, 0), volProg(2, 1), volProg(0, 0), volProg(0, 1), volProg(1, 0), volProg(1, 1),
     prog("part", PART_VERT, PART_FRAG), prog("ground", GROUND_VERT, GROUND_FRAG), prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG),
     prog("groundShow", GROUND_VERT, showSmooth("vP")), prog("show", GROUND_VERT, SHOW_FRAG)];
 }
@@ -123,26 +127,27 @@ class TornadoView {
     this.win = new Float32Array([0, 0, 1, 0]); this.winS = new Float32Array([W, H]);
     const sd = T.seed % 9973;
     const common = { uT: 0, uU: U, uPx: 1, uView: new Float32Array([0.5, 0.8]), uRect: this.rect, uSd: sd, translationMatrix: new PIXI.Matrix().toArray(true) };
-    const quad = (frag, key, extra) => {
-      const m = new PIXI.Mesh(quadGeom(0, 0, W, H), new PIXI.Shader(prog(key, QUAD_VERT, frag), { ...common, ...extra }));
+    const quad = (program, extra) => {
+      const m = new PIXI.Mesh(quadGeom(0, 0, W, H), new PIXI.Shader(program, { ...common, ...extra }));
       m.state.blendMode = PIXI.BLEND_MODES.NORMAL; m.state.depthTest = false; m.state.culling = false;
       return m;
     };
     this.axis = new Float32Array(K * 4);
     const deckU = { uTop: new Float32Array(4), uDeck: new Float32Array(4), uBase: new Float32Array(4), uCurt: new Float32Array(4), uPh: new Float32Array(4), uHole: new Float32Array(4) };
-    this.curtain = quad(DECK_FRAG, "deck", { uMode: 0, ...deckU });
-    this.curtainF = quad(DECK_FRAG, "deck", { uMode: 2, ...deckU });
-    this.deck = quad(DECK_FRAG, "deck", { uMode: 1, ...deckU });
-    this.column = quad(COLUMN_FRAG, "column", { uAxis: this.axis, uCol: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
+    this.curtain = quad(deckProg("curtain"), { uMode: 0, ...deckU });
+    this.curtainF = quad(deckProg("curtain"), { uMode: 2, ...deckU });
+    this.deck = quad(deckProg("deck"), { uMode: 1, ...deckU });
+    this.column = quad(prog("column", QUAD_VERT, COLUMN_FRAG), { uAxis: this.axis, uCol: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
     const footU = () => ({ uBase: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3), uWall: new Float32Array(4) });
-    this.skirt = quad(FOOT_FRAG, "foot", { uMode: 0, ...footU() });
+    this.skirt = quad(prog("foot", QUAD_VERT, FOOT_FRAG), { uMode: 0, ...footU() });
     // the volumes (debris cloud, wall cloud) x (behind the column, in front of it): each on its own sub-rect of the art texture
     const volU = (mode, pass) => ({ ...common, uAxis: this.axis, uMode: mode, uPass: pass, uSteps: 18, uMarch: PIXI.Texture.EMPTY, uMwin: new Float32Array([0, 0, 1, 0]), uMsize: new Float32Array([1, 1]), uVol: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
     const vmesh = (mode, pass) => {
-      const m = new PIXI.Mesh(quadGeom(0, 0, 1, 1), new PIXI.Shader(prog("vol", QUAD_VERT, VOL_FRAG), volU(mode, pass)));
+      const m = new PIXI.Mesh(quadGeom(0, 0, 1, 1), new PIXI.Shader(volProg(2, mode), volU(mode, pass)));
+      m.vmode = mode;
       m.state.blendMode = PIXI.BLEND_MODES.NORMAL; m.state.depthTest = false; m.state.culling = false;
       // its MARCH (the adaptive-resolution ray march): the same quad and uniforms, the march stage into its own float texture
-      const mm = new PIXI.Mesh(m.geometry, new PIXI.Shader(prog("vol0", QUAD_VERT, volFrag(0)), m.shader.uniformGroup));
+      const mm = new PIXI.Mesh(m.geometry, new PIXI.Shader(volProg(0, mode), m.shader.uniformGroup));
       mm.state.blendMode = PIXI.BLEND_MODES.NONE; mm.state.depthTest = false; mm.state.culling = false;
       m.march = { mesh: mm, rt: null, cw: 0, ch: 0 };
       return m;
@@ -435,7 +440,7 @@ class TornadoView {
    */
   marchVol(m, k) {
     const kv = k > 1.25 && this.owner.halfFloat ? Math.max(1, k / 3) : k;
-    if ( kv >= k ) { m.shader.program = prog("vol", QUAD_VERT, VOL_FRAG); return; }
+    if ( kv >= k ) { m.shader.program = volProg(2, m.vmode); return; }
     const P = m.geometry.getBuffer("aVertexPosition").data, ox = this.rect[0], oy = this.rect[1];
     const wx1 = this.win[0] + this.winS[0] / k, wy1 = this.win[1] + this.winS[1] / k;
     const ax0 = Math.max(P[0] + ox, this.win[0]), ay0 = Math.max(P[1] + oy, this.win[1]), ax1 = Math.min(P[4] + ox, wx1), ay1 = Math.min(P[5] + oy, wy1);
@@ -456,7 +461,7 @@ class TornadoView {
     u.uMarch = PIXI.Texture.EMPTY;                             // (never the texture being drawn into)
     canvas.app.renderer.render(M.mesh, { renderTexture: M.rt, clear: true });
     u.uMarch = M.rt; u.uMwin[0] = mx0; u.uMwin[1] = my0; u.uMwin[2] = kv; u.uMsize[0] = pw; u.uMsize[1] = ph;
-    m.shader.program = prog("vol1", QUAD_VERT, volFrag(1));
+    m.shader.program = volProg(1, m.vmode);
   }
 
   /** Touchdowns: fast attack, slower release (the foot and the spray pulse with them); whole cycles per hour. */
