@@ -997,3 +997,33 @@ New: `scripts/presets/def-landing.mjs` (the definition), `scripts/presets/rays.m
   - The streak near the body still reads a little like a rod.
   - At night the cracks are subtle.
   - The shock dust (section 17) is large and lumpy, and its haze motes read as dark pepper on light ground.
+
+## 21. Polish round 2: bomb and grenade (branch polish2-boom, 2026-11-09)
+
+Goal: the round-1 judge's list for bomb (6) and grenade (5). Lane 1, headless Chrome DPR 2.
+- **Fireball growth** (`fire/burst-model.mjs`): the lobes grow over about 4 art frames from a compact white ball (`E = 1 - exp(-6.5 a)`,
+  staggered per lobe); the burst light swells to its peak at `BURST_UP` (140 ms) instead of snapping on.
+- **Burst art** (`fire/burst-art.mjs`, program v2): one heat field blended over the billows (no ring per billow, no grey billow on a
+  hot ball); a churn noise breaks the flat colour patches; the erosion shrinks billows and opens only coarse blobby holes (no fine
+  octave, which read as square specks); chunks hidden inside the fire; blobby ground pool and shadow edges.
+- **Draw order** (`fire/display.mjs`): the areas are sorted (`sortableChildren`); the burst sits at zIndex 1, its front at 0.5, so the
+  shock-dust puffs no longer paint grey "rocks" over the fireball.
+- **Shadows and grenade** (`presets/accents-core.mjs`, `accents.mjs`): fall and throw shadows are one feathered sprite (`F.soft`),
+  not a dithered 2x2 grid; the grenade is one shaded olive egg (lit/mid/dark olive, groove, lever fleck, glint).
+- **Definitions** (`presets/defs.mjs`, `fire/dust-model.mjs`): smaller shock rings (bomb 2.7, grenade 0.85 squares; L3 shock puff
+  0.31, L1/L2 unchanged so lightning and landing keep their look); 2-3 scattered blast lobes tear the bomb crater; the grenade
+  crater is jagged.
+- **Tool**: `dev/tools/preset-rec.mjs` `settle` (a wiped firing's smoke drifts for seconds; recordings use 8000 ms).
+- **Tests**: `dev/presets-polish2.test.mjs` (21); burst-model, presets-boom and presets-landing tests updated.
+
+Checked: landing and lightning before vs after at zoom 2, day and night: the same within run-to-run noise. Cost (lane 1, n=90,
+shared GPU): every blast row sits in the idle noise band in both builds (bomb z3 blast weak x1 GPU median 1.79 -> 1.69 ms,
+p95 3.9 -> 3.0); the round-1 "4.6 ms" reading did not reproduce (noise). A real player (Test Gracz 1, own origin) saw the bomb and
+grenade fully; one earlier player try, fired seconds after the player switched scene with a dialog open, showed nothing (not
+reproduced, not explained).
+
+**Blind judge (one fresh agent): bomb 5.5, grenade 4.5** (round 1: 6 and 5). NOT at the bar. The judge's main points: the flash
+still pops as a flat hard-edged white oval; the fireball turns flat terracotta at 2.7-3.6 s; the shock dust is many identical flat
+lens discs, day-lit at night; a pale ground patch pops in under the fireball; smoke fades into ghost disc outlines and is short-lived
+(no mushroom); the bomb fall is hard to see and invisible at night; the grenade is nearly unreadable at zoom 1 and its heart ends as
+a flat brick slab with no jets or shrapnel streaks; the crater reads as a noise patch.
