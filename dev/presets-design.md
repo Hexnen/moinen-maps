@@ -460,12 +460,48 @@ Dependencies:
 - A first playable bomb needs P1 + P2 + P3 + P6 (+ the shock dust from P4 for the full read).
 - The guns need P1 + P2 + P4 (`hits`) + P5 (tracers, sparks) + P6.
 
-## 10. Open questions for the user
+## 10. The user's answers (2026-11-09)
 
-1. **Sound:**
-   - Is it in scope? pixel-vfx has explosions and one gunshot.
-   - Autofire bursts and a rotor would need new sound files (a download: ask first).
-2. **Helicopter:** should its shadow sweep over the map during the run, or only the tracers and hits?
-3. **Tokens:** should a bomb push tokens (knock-back), or only shake the screen?
-4. **Aftermath:** should a bomb's fires and smoke burn for about a minute and go out (the proposal), or keep burning until the GM
-   puts them out?
+The four questions asked here were answered by the user; P1 is built on these answers.
+
+1. **Sound: none.** Presets play no sound at all, so there is no sound layer in the format (`sound` is an unknown layer kind). The
+   sound rows in sections 4, 5 (G8), 6 and 7 are dropped.
+2. **Helicopter shadow: no.** The heli preset shows only the strafing trail: the hits, their dust and the tracers. No helicopter
+   shadow and no rotor-wash shimmer accent.
+3. **Tokens: not pushed.** Neither the bomb nor the grenade pushes tokens; no preset touches a token.
+4. **Aftermath: a preset setting.** How the aftermath fire ends is set per preset as a duration slider (`aftermath.dur`, 5-600 s)
+   with a "no end" option (`aftermath.dur: null`: the fires burn until the GM puts them out). A firing may override it
+   (`opts.aftermath`). Each aftermath fire gets its own share of the duration (`lifeK`), so they die out one by one; the smoke column
+   ends with the duration. Transient parts (the grenade's wisps) always end on their own.
+
+## 11. P1 as built (the preset core)
+
+- `scripts/presets/core.mjs` (pure, node-tested by `dev/presets-core.test.mjs`): the format (`cleanDef`), the seeded streams, the
+  gun walk (`walkHits`), `expand()` and `areaCount()`.
+- `scripts/presets/defs.mjs`: the four built-ins (bomb, grenade, uzi, heliHmg).
+- `scripts/presets/write.mjs` (GM, loaded on the first firing): fire and smoke strokes with their times and the firing record
+  `presetFirings.<id>` in ONE scene update; the destruction strokes through the brush's own entry (`edited()`) LEAD ms (350,
+  `CONFIG.moinenMaps.presetLead`) before T0, with ids chosen up front so the record names them.
+- `scripts/presets/presets.mjs`: `api.presets` (`list`, `get`, `validate`, `expand`, `fire`, `firings`). It registers no hook, no
+  setting and no ticker: an unused preset changes nothing.
+- `scripts/destruction/destruction.mjs` `edited()`: three opt-in stroke fields, used only by presets: `id`, `pr` (the stroke's own
+  look instead of the scene's) and `keepPath` (keep the timed path, so the gun strokes follow the stroke). Without them a stroke is
+  made exactly as before.
+
+**Written now:** destruction strokes (blast / cracks with cause, own look, the guns' timed paths) and fire and smoke strokes (q / o).
+**Kept as pending in the firing record** (no layer plays them yet): `burst` (P3), dust `shock` / `hits` (P4), accents and cues
+(P5).
+
+### Hooks for later (in files P1 does not touch)
+
+- **fire/fire.mjs:** a fire stroke written straight into the flag does not get the scene's torn edges (`fresh()` adds `tn` only
+  inside `add`). Presets give their fires the organic edge (`e: 1`) only. A public `addMany(raws, { undoable })` would let presets
+  use the layer's own path.
+- **fire/model.mjs:** per-stroke `gr` / `ot` (G2); `cleanStroke` drops unknown fields today, so the firing record holds the stroke
+  ids, not a tag on the strokes.
+- **fire/fire.mjs `list()`:** it shows only strokes without `o`. A timed preset fire is "put out in the future" from its first
+  write, so it is not in the Fire panel's list and `clear()` does not reach it (it goes out on its own). P6 should list them through
+  the firing record.
+- **destruction:** the entry start `at` on the shared clock (P2) replaces the LEAD stand-in. In an unpinned (pre-0.4.2) scene a gun
+  stroke's path joins its bake key only when the scene's own "follows the stroke" is on (`store.mjs objStr`). With cinematic mode
+  on, preset strokes are staged like brush strokes.

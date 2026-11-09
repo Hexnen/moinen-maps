@@ -6,6 +6,7 @@ import { registerSettings, onGetSceneControlButtons, onRenderSceneControls, onWo
 import "./workspace/sections.mjs";
 import "./destruction/cinematic-panel.mjs";      // cinematic screen effects: CinematicFx (api.cinematic), client settings, the "Cinematic effects" dock panel
 import "./director/index.mjs";                  // the Director: events -> shots for the players (scripts/director); owns the screen engine the cinematic mode uses
+import "./presets/presets.mjs";              // destruction presets: api.presets (data, expander, the GM's writer; scripts/presets, dev/presets-design.md)
 import { syncWorkspace } from "./workspace/shell.mjs";
 import { registerFilterSettings } from "./filter.mjs";
 import * as WaterScene from "./water/water.mjs";
