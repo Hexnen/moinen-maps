@@ -3,7 +3,8 @@
 //   B. motion: the base starts at the path's start, moves continuously (no jumps at the ends: loop turns back eased, stop / ropeOut
 //      brake to the end), deterministic, a single point stays near it (wander only)
 //   C. phases: forming -> on the ground -> roping out -> gone; presence continuous; a GM "out" and the ropeOut end both rope out
-//   D. levels: a change ramps over LEVEL_MS, the table is continuous across levels
+//   D. levels: a change ramps over LEVEL_MS, the table is continuous across levels; levels are floats 1..3 (the strength slider),
+//      v1 ints read the same, 0 is not a rope-out, the ramp is bit-exact at its ends (the old formula at int levels)
 //   E. vortex: counter-clockwise on the map (SPIN), inflow toward the base, nothing beyond the reach, vortices() only while present
 import * as TM from "../scripts/weather/tornado-model.mjs";
 import * as W from "../scripts/wind.mjs";
@@ -18,7 +19,7 @@ const G = 100;
   ok(TM.cleanTornado(null) === null && TM.cleanTornado({ id: "a", path: [], t0: 0 }) === null && TM.cleanTornado({ id: "a b!", path: [[0, 0]], t0: 0 }) === null, "junk dropped");
   const T = TM.cleanTornado({ id: "t1", path: [{ x: 10.4, y: 20.6 }, [10, 21], [300, 400]], t0: 1000, level: 9, speed: 50, size: 0, end: "nope" });
   ok(T && T.path.length === 2 && T.path[0][0] === 10 && T.path[0][1] === 21, "path rounded, duplicates dropped");
-  ok(T.level === 2 && T.speed === TM.LIMITS.speed[1] && T.size === TM.LIMITS.size[0] && T.end === TM.DEFAULTS.end && T.out === null && T.damage === false, "clamps, an out-of-range level falls back to the default, damage off");
+  ok(T.level === 3 && T.lv0 === 3 && T.speed === TM.LIMITS.speed[1] && T.size === TM.LIMITS.size[0] && T.end === TM.DEFAULTS.end && T.out === null && T.damage === false, "clamps (an out-of-range level to 1..3), damage off");
   ok(JSON.stringify(TM.cleanTornado(JSON.parse(JSON.stringify(T)))) === JSON.stringify(T), "round trip");
   const long = TM.cleanPath(Array.from({ length: 500 }, (_, i) => [i * 7, Math.round(200 * Math.sin(i / 9))]));
   ok(long.length <= 64 && long.length >= 4, "path capped at 64 points");
@@ -67,6 +68,24 @@ const G = 100;
   let jump = 0;
   for ( const [k, t] of Object.entries(TM.TABLE) ) for ( let s = 0.01; s <= 2; s += 0.01 ) jump = Math.max(jump, Math.abs(TM.lv(t, s) - TM.lv(t, s - 0.01)) / (Math.max(...t.map(Math.abs)) || 1));
   ok(jump < 0.02, "the table is continuous");
+  // float levels (the slider 1..3; dev/weather-slider-design.md Q3)
+  const F = TM.cleanTornado({ id: "fl", path: [[0, 0]], t0: 0, level: 2.45, lv0: "1.3", lvT: 1000 });
+  ok(F.level === 2.45 && F.lv0 === 1.3, "float level and lv0 kept (form strings read)");
+  const L = (level) => TM.cleanTornado({ id: "c", path: [[0, 0]], t0: 0, level }).level;
+  ok(L(0) === 1 && L(-4) === 1 && L(3.35) === 3 && L(9) === 3 && L("x") === TM.DEFAULTS.level && L(null) === TM.DEFAULTS.level && L(undefined) === TM.DEFAULTS.level && L(2.123456) === 2.1235, "level clamped to 1..3 (0 is level 1, never a rope-out), junk -> the default, rounded 1e-4");
+  ok(TM.cleanTornado({ id: "z0", path: [[0, 0]], t0: 0, level: 0 }).out === null, "level 0 does not rope out (rope-out is its own action)");
+  ok(TM.cleanLevel(1.5) === 1.5 && TM.cleanLevel(7) === 3, "cleanLevel exported for the API");
+  ok(Math.abs(TM.levelS(F, 1000) - 0.3) < 1e-12, "a float ramp starts at lv0");
+  ok(TM.levelS(F, 1000 + TM.LEVEL_MS) === F.level - 1 && TM.levelS(F, 99999) === F.level - 1, "a float ramp ends exactly at level - 1");
+  let fj = 0, prev = TM.levelS(F, 900);
+  for ( let t = 920; t < 1000 + TM.LEVEL_MS + 200; t += 20 ) { const x = TM.levelS(F, t); fj = Math.max(fj, Math.abs(x - prev)); prev = x; }
+  ok(fj <= 1.5 * (2.45 - 1.3) * 20 / TM.LEVEL_MS + 1e-12, `a float ramp is continuous (largest 20 ms step ${fj.toFixed(5)})`);
+  // the old formula at int levels, bit for bit (main before the slider)
+  const oldLevelS = (T, now) => { const t = Math.min(1, Math.max(0, (now - T.lvT) / TM.LEVEL_MS)), f = t * t * (3 - 2 * t); return T.lv0 - 1 + (T.level - T.lv0) * f; };
+  let same = true;
+  for ( const a of [1, 2, 3] ) for ( const b of [1, 2, 3] ) { const T = TM.cleanTornado({ id: "o", path: [[0, 0]], t0: 0, level: b, lv0: a, lvT: 500 });
+    for ( let t = 0; t < 7000; t += 37 ) if ( TM.levelS(T, t) !== oldLevelS(T, t) || JSON.stringify(TM.looks(TM.levelS(T, t))) !== JSON.stringify(TM.looks(oldLevelS(T, t))) ) same = false; }
+  ok(same, "int levels: levelS and the looks bit for bit as before");
 }
 
 /* E */

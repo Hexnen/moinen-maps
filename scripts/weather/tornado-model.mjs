@@ -5,7 +5,8 @@
  * its own level 1..3. The scene stores at most MAX_TORNADOES of them in the weather flag (`flags.moinen-maps.weather.tornadoes`):
  *
  *   { id, path: [[x, y], ...] (scene px, simplified), t0 (shared ms: it starts forming), speed (squares / s), wander (squares),
- *     size (x), level 1..3, lv0 (the level before the last change), lvT (shared ms of that change), end: "loop" | "stop" | "ropeOut",
+ *     size (x), level 1..3 (a float: the strength slider), lv0 (the level the last change ramps from, float), lvT (shared ms of that
+ *     change), end: "loop" | "stop" | "ropeOut",
  *     out (shared ms: the GM sent it away, it ropes out; null), damage (false: D20, off by default), seed }
  *
  * EVERYTHING ELSE IS A PURE FUNCTION of that record and the shared clock, so every client draws the same tornado at the same place
@@ -15,7 +16,9 @@
  *   - a WANDER of incommensurate sines is added, so it never follows the line exactly;
  *   - PRESENCE: it forms over FORM_MS from t0 (the cloud first, then the funnel lowers and touches down), and ropes out over ROPE_MS
  *     from `out` (or from its arrival with "ropeOut"); `phase()` splits that into the parts the display needs;
- *   - its LEVEL ramps over LEVEL_MS after a change (level continuum s = level - 1, as the weather's levels).
+ *   - its LEVEL ramps over LEVEL_MS after a change (level continuum s = level - 1, as the weather's levels). The level is a float
+ *     1..3 (dev/weather-slider-design.md, Q3: a slider 1..3; rope-out stays its own action, 0 never means rope-out); a v1 int level is
+ *     the same number.
  */
 export const MAX_TORNADOES = 3;
 export const FORM_MS = 7000;
@@ -27,7 +30,9 @@ export const DEFAULTS = Object.freeze({ speed: 0.6, wander: 0.35, size: 1, level
 export const ENDS = ["loop", "stop", "ropeOut"];
 
 const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-const lvl = (v, d = 2) => { const n = Math.round(Number(v)); return n >= 1 && n <= 3 ? n : d; };
+/** A tornado level: a float 1..3 (clamped, rounded to 1e-4 so slider steps and the integers stay exact); not a number: d. */
+const lvl = (v, d = 2) => { const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN; return Number.isFinite(n) ? Math.round(Math.min(3, Math.max(1, n)) * 1e4) / 1e4 : d; };
+export const cleanLevel = lvl;
 const smooth = (x) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 
 /** A string's 31-bit hash (seeds). */
@@ -227,7 +232,7 @@ export function touchAt(T, now, grid) {
 /** The level continuum s (0..2) at shared ms `now` (a change ramps over LEVEL_MS). */
 export function levelS(T, now) {
   const f = smooth((now - T.lvT) / LEVEL_MS);
-  return T.lv0 - 1 + (T.level - T.lv0) * f;
+  return f >= 1 ? T.level - 1 : T.lv0 - 1 + (T.level - T.lv0) * f;
 }
 
 /** One value of a level table [L1, L2, L3] at s (piecewise linear). */

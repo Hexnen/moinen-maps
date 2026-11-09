@@ -253,9 +253,9 @@ This is **optional**. Do it after a live A/B. If snow and motes do not visibly p
 ### 3.1 The stored flag (VERSION 1 -> 2)
 
 ```
-key:  { t, dur, preset, level: v 0..3 (float: the preset's strength), fx: { eff: v (number, 0 < v <= 3) }, wind }
+key:  { t, dur, preset, level: v 0..3.35 (float: the preset's strength), fx: { eff: v (number, 0 < v <= 3.35) }, wind }
 base: { t, fx: { eff: v }, wind, wet, cover, drift? }
-lens: { on, level: "auto" | v 0..3 (float), strength, heat }
+lens: { on, level: "auto" | v 0..3.35 (float), strength, heat }
 tornadoes[n]: { ..., level: v 1..3 (float), lv0: v (float), lvT, ... }
 storm: (unchanged, the lightning agent's)
 ```
@@ -270,18 +270,17 @@ storm: (unchanged, the lightning agent's)
 
 | v1 field | v2 |
 |---|---|
-| `key.fx[e] = { l, i }` | `v = clamp(l + (i - 0.5) x 0.7, 0, 3)` |
+| `key.fx[e] = { l, i }` | `v = clamp(l + (i - 0.5) x 0.7, 0, 3.35)` (user decision Q1: overdrive kept, so nothing clamps) |
 | `key.fx[e] = number` | unchanged (same meaning) |
-| `key.level` int + `key.i` | `level = clamp(level + (i - 0.5) x 0.7, 0, 3)` |
+| `key.level` int + `key.i` | `level = clamp(level + (i - 0.5) x 0.7, 0, 3.35)` |
 | `base.fx[e] = { p, s }` | `v = p >= 0.999 ? s + 1 : p` (clamped). The base only matters before its next key; a visible difference needs a ramp running at the moment of the upgrade, and then it is a small step once |
 | `lens.level` int / "auto" | unchanged (int 1..3 is a valid v) |
 | tornado `level`, `lv0` int | unchanged (valid floats) |
 
 * `cleanParams` returns v2 for both inputs. `save()` writes `v: 2` on the GM's next change. Clients that only read never write, so
   there is no write storm on load.
-* **Lossy corner:** v1 level 3 with `i > 0.5` (s up to 2.35, densities up to 1.35x) clamps to v = 3. Such scenes get up to 26 % fewer
-  drops / flakes than before at the very top. This only happens if the GM moved the old fine-intensity slider above the middle at
-  level 3. See Q1 (keep an "overdrive" range to 3.35?).
+* **No lossy corner (Q1 decided: "Dodaj nadbieg do ~3,35"):** the strength range is 0..3.35. v1 level 3 with `i > 0.5` migrates to
+  v 3..3.35 (s up to 2.35, densities up to 1.35x), exactly as before. Every clamp in the model is 0..`V_MAX` = 3.35.
 * All clients load the same module version from the server, so no mixed-version reader exists.
 * The `storm` field (lightning) passes through `cleanParams` as the lightning agent wrote it.
 
@@ -452,3 +451,56 @@ Parallel plan: T1 and T3 together (T3 after the lightning merge), then T2 and T4
 * **Q4 Bar layout:** all seven sliders always (proposed), or only the active ones plus "+ type"?
 * **Q5 Keys:** 0-3 for the preset (proposed). Also `[` / `]` to nudge?
 * **Q6 Fire:** the fire layer also has levels 1 / 2 / 3. Same slider there, later? (Out of scope here.)
+
+---
+
+## 8. T1 as built (branch `weather-slider-t1`, 2026-11-09)
+
+User decisions applied: Q1 overdrive to 3.35 (`V_MAX`), Q2 v-blend (eases through the levels), Q3 tornado level a float 1..3 with
+rope-out separate (0 clamps to 1, never ropes out).
+
+**Model (`scripts/weather/model.mjs`, VERSION 2).** `strength(v) -> { v, p: clamp(v, 0, 1), s: clamp(v - 1, 0, 2.35) }` is the only
+mapping. Stored strengths go through `cleanV` (0..3.35, rounded to 1e-4). `fxV` reads every form (number, `{ v }`, v1 `{ l | level, i }`,
+v1 base `{ p, s }`); `cleanKey` folds a v1 key `i` into `level` and drops `i`. The timeline blends v (missing = 0; exactly the target at
+f = 1); `stateAt` / `resolve` return `fx: { e: { v, p, s } }` (dropped below `V_OFF` = 0.0005). Folding writes `base.fx` as numbers.
+New exports: `V_MAX`, `V_OFF`, `FINE`, `cleanV`, `strength`, `legacyV`, `capV`, `capFx`, `lensP`, `presetOf`, `drivenFx`. `levelS` is
+kept as a v1 helper (`legacyV - 1`).
+
+**`withKey` semantics (3.3, with these details decided while building):**
+* `{ preset, level? }`: the preset's effects at `level` (default the newest key's level; a stored level 0 falls back to 2). Clouds kept
+  except by `clear` and by the clouds preset. `{ preset: "custom", fx }` = exactly `fx` (the old `set({ fx })` meaning); `custom`
+  without fx keeps the effects.
+* `{ level }` alone: every effect the current preset drives (`drivenFx`: a named preset's own effects, the clouds preset's clouds,
+  custom's non-cloud effects); 0 removes them.
+* `{ fx }`: a patch (v 0 removes); `{ clouds: v }` is sugar for it.
+* v1 callers: `i` with `level` folds in; `i` alone uses round(newest level) as the level (the old fine slider; T5 removes it).
+* The key's `preset` is always derived, `presetOf(fx)`: the preset whose non-cloud set equals fx's; none: "clouds" if clouds are on,
+  else "clear"; else "custom". The key's `level` (carried to the next preset click) = the given level when > 0; a given 0 keeps the
+  newest key's; otherwise the one strength all driven effects share; else the newest key's.
+
+**Lens.** `lens.level` is "auto" or a strength 0..3.35 (junk / null -> "auto"; was -> 2). `lensS(P, s, cap)` keeps its signature
+(fixed: `strength(v).s`); the new `lensP(P)` is the fixed lens's presence (1 for auto and for v >= 1). **lens.mjs does not multiply by
+`lensP` yet** (T3's file): a lens fixed below 1 shows the level-1 lens at full presence until T2 / T3 wire it.
+
+**Tornado (`tornado-model.mjs`).** `level` / `lv0` are floats clamped to 1..3, rounded to 1e-4 (an out-of-range number now clamps; it
+used to fall back to 2); `cleanLevel` exported. `levelS` returns exactly `level - 1` once the ramp is over (bit-identical for ints).
+
+**Tests.** weather-model: new sections J (mapping; at v 1 / 2 / 3 every resolved p, s, gate, lens gate, client cap, fireWet / rainAt
+and the wet closed form equal the old formulas bit for bit, also through v1 `{ l, i }` keys and a chain of interrupted ramps;
+overdrive; continuity of p, s and every gate x p along 0 -> 3.35 -> 0 and along a timeline), K (v1 fixtures: `{ l, i }`, numeric fx,
+key level + i incl. 3 + i 1 -> 3.35, base `{ p, s }`, lens int, tornado int, storm passed through, idempotent, v1 and its v2 resolve the
+same, v1 fine intensity), L (withKey patch semantics, presetOf, drivenFx, folding). Rewritten: the "fading effect keeps its level"
+asserts (now eases through 2 and 1), `.l` reads, the continuity bounds (now the smoothstep's analytic slope 1.5 x dv / dur, since a
+v ramp moves further than an s ramp). tornado-model: float levels, clamps, 0 is not rope-out, the int ramp bit for bit vs the old
+formula. A throwaway A/B also ran the old main model against the new one on 576 integer-level cases (resolve, gates, lens, caps,
+fireWet, drift; wet / cover for cut keys): all identical.
+
+**Not covered by T1 (left for T2 / T4 / T5):**
+* `weather.mjs` still reads the v1 shapes in a few places: `clouds()` returns `current(P).fx.clouds.l` (now undefined -> 0),
+  `clientState` caps s itself (equivalent; T2 should use `capFx`), `tornadoApi.update` still rounds `level` / `lv0` (D6), `set()` /
+  `level()` / `clouds()` still round to ints (`lvlOf`). `section.mjs` reads `fx.clouds.l` and `cur().i` (the clouds row and the fine
+  slider show wrong values until T5). Nothing else breaks: `resolve` keeps p and s, `withKey` still accepts `{ level, i, clouds }`.
+* Behaviour change by design (2.1, Q2): ramps blend v, so wet / cover accumulated during a ramp differ slightly from before (a fade-in
+  of rain 2 is drizzle first). Steady states are identical.
+* v1 level 1 with `i < 0.5` now maps to v 0.65..1 (presence): densities identical, tints scale with p (2.1, "negligible").
+* Not verified live: no Foundry run, no pixel A/B (T6).
