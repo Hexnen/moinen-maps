@@ -1322,3 +1322,20 @@ Lane 1, headless Chrome DPR 2.
   and a glint pixel on its lit shoulder (glows at night).
 - **Definitions**: bomb `blast` L3 reach 1.6, burst look 3, shock np; grenade `blast` L1 reach 0.8, burst r 0.75 look 3, shock np.
 - **Tests**: `dev/presets-blast.test.mjs` (33).
+
+Checked (lane 1, headless Chrome DPR 2): first fire after a page reload on a scene with no bursts - fireball on time, no rAF gap
+over 45 ms (before the preload: one 86 ms frame at the click; base 505edbb: no gap but the first fireball late). Cost vs 505edbb
+(n=90, shared GPU, same run conditions): every row inside the idle noise band (bomb z3 blast weak x1 GPU median 1.89 -> 1.80 ms,
+p95 3.6 -> 4.1; weak x2 2.00 -> 1.77; grenade z3 blast 1.10 -> 1.13; CPU median 0.5-0.8 ms during the blast in both; no long
+frames in either). Meteor and rocket (look 2 burst, puffed shock dust) before vs after at zoom 1, day and night: the same look within
+run-to-run variation (their stroke ids, hence billow layouts, differ per run; pixel identity not checked). A real player (Test Gracz
+1, own origin) saw the bomb fully and the grenade's flash, fireball and smoke (at the edge of its view).
+
+**Blind judge (one fresh agent, round-2 brief and scale): bomb 5, grenade 4** (round 2: 5.5 and 4.5; round 1: 6 and 5). NOT better.
+Its main points: the blast's thin 1 px shock ring reads as a vector outline (both presets); flash -> speckle -> billow fireball are
+three shapes in three frames, the crater disc pops in under them; the crater + pale surge dust read as a disc with a donut rim that
+glows at night; the fireball's late phase is flat red/orange camouflage patches (no roll/volume); some night fires render as pale
+blue-grey blobs; a fire burns on water with a round scorch disc; the smoke column is a flat posterized stack, its dissolve leaves dark
+stains; the grenade's flash is the bomb's star scaled down and its smoke a flat translucent blanket; the grenade and its throw are
+hard to see at zoom 1 and at night. Works: the night flash lighting, timing, the ember/debris field, the column rising up-screen and
+dissolving gradually, the fires that keep burning.
