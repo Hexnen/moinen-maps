@@ -1,7 +1,8 @@
 // Drive Foundry pages in a HEADLESS Chrome over CDP and record one page as a webm (the director's shots as a PLAYER sees them).
-// Start a private headless Chrome first (it ticks every page, fronted or not):
-//   chrome --headless=new --remote-debugging-port=9333 --user-data-dir=<scratch> --window-size=1280,800 --disable-background-timer-throttling
-//          --disable-renderer-backgrounding --disable-backgrounding-occluded-windows
+// Start a private headless Chrome first (it ticks every page, fronted or not) with dev/tools/chrome.mjs - its temp profile is removed
+// on every way out (never chrome.exe by hand with a --user-data-dir under %TEMP%: that profile leaks):
+//   node dev/tools/chrome.mjs --port 9333                       (until Ctrl+C), or wrap the whole job:
+//   node dev/tools/chrome.mjs --port 9333 -- node dev/tools/cdp-rec.mjs rec 9333 ...
 // Usage (node 22, ffmpeg on PATH):
 //   node dev/tools/cdp-rec.mjs open <port> <url>                          new page at url, in its own window (so every page stays visible and ticks)
 //   node dev/tools/cdp-rec.mjs front <port> <urlPrefix>                   bring a page to the front

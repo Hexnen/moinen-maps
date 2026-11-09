@@ -35,8 +35,9 @@ export const SHAKE_PX = 7, SHAKE_MS = [250, 650], FLASH_CUE_MS = 210;
 export const ACCENT_KINDS = ["tracer", "hitFx", "muzzle", "fallShadow", "throwArc", "bounce", ...LANDING_KINDS];
 /** A tracer's visible flight (ms) before its hit, the streak's length (ms of flight), a glancing one's life (ms). */
 export const TRACER_MS = 210, STREAK_MS = 85, RICO_MS = 200;
-/** A tracer comes in from this far behind (squares along the run) and this high (squares) at the start of its visible flight. */
-export const TRACER_BACK = 5, TRACER_UP = 4.2;
+/** A tracer comes in from this far behind (squares along the run) and this high (squares) at the start of its visible flight: steep,
+ * from above (the helicopter's guns are high up) - a shallow one read as a flat line across the map. */
+export const TRACER_BACK = 3.2, TRACER_UP = 7.5;
 /** The hit flash (ms): the big star, then the small one; the ground glow's life (ms). */
 export const FLASH_MS = [55, 125], GLOW_MS = 150;
 /** The muzzle flash (ms) and the bullet's speed (squares a second; the streak takes at least BULLET_MIN ms). */
@@ -338,7 +339,7 @@ function fallShadow(it, t, env, F, seed) {
 /** A grenade at (x, y) lifted z: an olive egg, a dark band round it turned by `spin` (rad: it tumbles), lit from the top left, a
  * pale glint (at night: the point that shows it); `squash` > 0 just after it hits the ground. */
 function grenade(F, env, x, y, z, spin, squash = 0) {
-  const ap = env.ap, r = Math.max(1.3, 0.085 * env.grid / ap), rx = r * (1 + 0.25 * squash), ry = r * 0.92 * (1 - 0.3 * squash), [cx, cy] = scr(env, x, y, z);
+  const ap = env.ap, r = Math.max(1.6, 0.105 * env.grid / ap), rx = r * (1 + 0.25 * squash), ry = r * 0.92 * (1 - 0.3 * squash), [cx, cy] = scr(env, x, y, z);
   const bx = Math.cos(spin), by = Math.sin(spin), X = Math.ceil(rx) + 1, Y = Math.ceil(ry) + 1;
   for ( let j = -Y; j <= Y; j++ ) for ( let i = -X; i <= X; i++ ) {
     const px = i + 0.5, py = j + 0.5, e = Math.hypot(px / rx, py / ry); if ( e >= 1 ) continue;
@@ -388,7 +389,7 @@ function bounce(it, t, env, F, seed) {
   // (squashed for a moment each time it hits the ground)
   for ( const tg of [0, tH] ) if ( tau >= tg && tau < tg + 50 ) sq = 1 - (tau - tg) / 50;
   shadow(F, env, x, y, g * (0.13 + 0.05 * z / g), 0.62 / (1 + 0.45 * z / g));
-  grenade(F, env, x, y, z, h3(seed, 1, 1) * 6.28 + dist / (0.085 * g), sq);
+  grenade(F, env, x, y, z, h3(seed, 1, 1) * 6.28 + dist / (0.105 * g), sq);
   // a little DUST where it hits: a few grains of the ground thrown out low, settling and dropping out
   [[0, p0], [tH, p1]].forEach(([tg, p], m) => {
     const a = tau - tg; if ( a < 0 || a > 260 ) return;
