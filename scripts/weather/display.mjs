@@ -111,7 +111,7 @@ export class WeatherDisplay {
       .addAttribute("aCell", [0, 0, aw, 0, aw, ah, 0, ah], 2)
       .addIndex([0, 1, 2, 0, 2, 3]);
     this.ground = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("ground", GROUND_VERT, GROUND_FRAG), {
-      ...this.common(seed), uTime: 0, uK: footprintK(), uWet: 0, uPuddle: 2, uSheen: 0, uSky: new Float32Array(SKY), uAlpha: 1,
+      ...this.common(seed), uTime: 0, uK: footprintK(), uQ: 1, uWet: 0, uPuddle: 2, uSheen: 0, uSky: new Float32Array(SKY), uAlpha: 1,
       uSnow: new Float32Array([9, 1, 0, 0]), uSand: new Float32Array([9, 0, 9, 0]), uSandW: new Float32Array([1, 0, 0, 0]), uDust: new Float32Array(2),
       uEmb: new Float32Array(4), uWindG: new Float32Array(4), uWindV: new Float32Array([1, 0, 0, 0]), uCps: geo.grid / ap, uAny: 0,
       translationMatrix: new PIXI.Matrix().toArray(true) })), 252);
@@ -145,7 +145,7 @@ export class WeatherDisplay {
         uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, uPx: 1, translationMatrix: new PIXI.Matrix().toArray(true) })), 995, Infinity);
     }
     // haze: one quad over the scene, above tokens
-    this.haze = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("haze", GROUND_VERT, HAZE_FRAG), { ...this.common(seed), uTime: 0, uK: footprintK(), uAlpha: 1,
+    this.haze = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("haze", GROUND_VERT, HAZE_FRAG), { ...this.common(seed), uTime: 0, uK: footprintK(), uQ: 1, uAlpha: 1,
       uSandH: new Float32Array(4), uSandW: new Float32Array([1, 0, 0, 0]), uDustH: new Float32Array(4), uSmoke: new Float32Array(4),
       uAvg: new Float32Array([0.5, 0.5, 0.5]), uCps: geo.grid / ap, translationMatrix: new PIXI.Matrix().toArray(true) })), 990);
     for ( const m of [this.ground, this.splash, this.air, ...Object.values(this.parts), this.haze] ) {
@@ -306,8 +306,8 @@ export class WeatherDisplay {
     const s12 = Math.floor((this.now?.() ?? Date.now()) * 0.012);
     if ( s12 !== this.s12 ) { this.s12 = s12; this.onStep?.(); if ( !this.geo ) return; }
     const T = this.clock();
-    const gq = this.stats.guard = weatherQ(), fk = footprintK() * (0.5 + 0.5 * gq);   // (the guard: denser filter / particles back at 1)
-    this.ground.shader.uniforms.uTime = T; this.ground.shader.uniforms.uK = fk;
+    const gq = this.stats.guard = weatherQ(), fk = footprintK() * (0.5 + 0.5 * gq);   // (the guard: fewer drops / particles / glints, back at 1; uK itself is unused by the look)
+    this.ground.shader.uniforms.uTime = T; this.ground.shader.uniforms.uK = fk; this.ground.shader.uniforms.uQ = gq;   // (uQ: the glints thin)
     // the tiles over the view (+ the margin: drops fall from above their ground point and drift from upwind)
     const v = this.viewRect(), ap = g.ap;
     const ax0 = (v.x0 - g.ox) / ap, ay0 = (v.y0 - g.oy) / ap, ax1 = (v.x1 - g.ox) / ap, ay1 = (v.y1 - g.oy) / ap;
@@ -358,7 +358,7 @@ export class WeatherDisplay {
       m.visible = pn > 0;
       partN += pn;
     }
-    if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = fk; }
+    if ( this.haze.visible ) { this.haze.shader.uniforms.uTime = T; this.haze.shader.uniforms.uK = fk; this.haze.shader.uniforms.uQ = gq; }   // (uQ: the sand's lit sides fade)
     if ( this.ground.visible ) this.groundCells.update(g, v);
     if ( this.haze.visible ) this.hazeCells.update(g, v);
     this.vortex(n > 0 || partN > 0);

@@ -169,6 +169,7 @@ precision highp int;
 in vec2 vCell;
 uniform float uTime;        // shared clock, s mod 3600
 uniform float uK;           // (the old footprint scale: kept for the cell pass's uniforms; the look no longer uses it)
+uniform float uQ;           // the frame guard's detail 0.35..1 (weatherQ): the share of glint spots kept
 uniform float uWet;         // wet ground 0..~1 (accumulated)
 uniform float uPuddle;      // puddle threshold (> 1.3: none)
 uniform float uSheen;       // glints: fraction of sheen spots lit at a moment
@@ -206,9 +207,12 @@ float puddleField(vec2 c) {
 }
 
 // the smooth fields once per evaluation point (scales of 6+ cells); gPd/gPdY: the puddle field and its slope down the screen
-float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0, gPd = 0.0, gPdY = 0.0;
+float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0, gPd = 0.0, gPdY = 0.0, gWq = 1.0;
 void groundFields(vec2 c) {
   if ( uWindG.x > 0.0 ) {
+    // (the frame guard fades the fine wind detail between q 0.85 and 0.5 - the blade streaks ease to their mean, the light dashes on
+    // the water fade out - and skips their noise below; exactly the full look at q = 1)
+    gWq = uQ >= 1.0 ? 1.0 : smoothstep(0.5, 0.85, uQ);
     // VISIBLE WIND: the gust at this place (fronts travel along the wind), combing bands carried downwind (crests across the wind,
     // a field that never loops), cat's-paw patches on water (its cloud shadows: the cloud layer, clouds.mjs)
     vec2 wd = uWindV.xy;
@@ -219,11 +223,11 @@ void groundFields(vec2 c) {
     vec3 M = I.rgb;
     if ( M.g > M.r * 1.02 && M.g > M.b * 1.06 ) {
       gComb = drift2a(vec2(pr / 22.0, ac / 90.0), vec2(uWindV.z * 1.2 / 22.0, 0.0), uTime, 30.0, uSeed + 201);
-      gNn = fbm2(vec2(pr / 26.0, ac / 2.6), uSeed + 204);
+      gNn = gWq >= 1.0 ? fbm2(vec2(pr / 26.0, ac / 2.6), uSeed + 204) : gWq > 0.0 ? mix(0.5, fbm2(vec2(pr / 26.0, ac / 2.6), uSeed + 204), gWq) : 0.5;
     }
     if ( uWindV.w > 0.0 && I.b > I.r && lumOf(M) < 0.4 ) {
       gRuf = drift2a(vec2(pr / 16.0, ac / 40.0), vec2(uWindV.z * 1.6 / 16.0, 0.0), uTime, 20.0, uSeed + 205);
-      if ( gRuf > 0.5 ) gGl = drift2a(vec2(pr / 3.0, ac / 1.2), vec2(uWindV.z * 2.0 / 3.0, 0.0), uTime, 6.0, uSeed + 207);
+      if ( gRuf > 0.5 && gWq > 0.0 ) gGl = drift2a(vec2(pr / 3.0, ac / 1.2), vec2(uWindV.z * 2.0 / 3.0, 0.0), uTime, 6.0, uSeed + 207);
     }
   }
   if ( uWet > 0.0005 ) {
@@ -299,7 +303,7 @@ vec4 cellGround(vec2 c) {
     if ( water > 0.0 && uWindV.w > 0.0 ) {
       float paw = smoothstep(0.5, 0.7, gRuf) * clamp(gWg * 1.1, 0.0, 1.0) * water;
       f = vec4(f.rgb * (1.0 - 0.08 * paw * uWindV.w), f.a * (1.0 - 0.08 * paw * uWindV.w));
-      f.rgb += 0.13 * uSky * uWindV.w * sst(paw - 0.2, 0.05) * sst(gGl - (0.80 - 0.10 * paw), 0.08);
+      if ( gWq > 0.0 ) f.rgb += 0.13 * uSky * uWindV.w * sst(paw - 0.2, 0.05) * sst(gGl - (0.80 - 0.10 * paw), 0.08) * gWq;
     }
   }
   // ---- SNOW cover: where the score is over the threshold, the snow ramp replaces the map (its lines print through)
@@ -342,7 +346,11 @@ float glintAt(vec2 c, float aa, float rate, int s, out vec2 at) {
   float u = (uTime + h * P) / P, cyc = floor(u), ph = (u - cyc) * P;
   at = (id + 0.2 + 0.6 * vec2(hu(ix, iy, uSeed + s + 2), hu(ix, iy, uSeed + s + 3))) * 3.0;
   if ( ph >= 0.4 || hu(ix * 7 + int(mod(cyc, 4096.0)), iy, uSeed + s + 1) >= rate * P / 0.4 ) return 0.0;
-  float e = sin(3.14159 * ph / 0.4);
+  // the frame guard thins the glints: each cycle keeps its glint while q is over its own hash, fading out over 0.15 of q (all of them
+  // at q = 1: the gate is 1 there; a gated glint skips the map lookups after it)
+  float gq = uQ >= 1.0 ? 1.0 : clamp((uQ - 0.85 * hu(ix * 7 + int(mod(cyc, 4096.0)), iy, uSeed + s + 4)) / 0.15, 0.0, 1.0);
+  if ( gq <= 0.0 ) return 0.0;
+  float e = sin(3.14159 * ph / 0.4) * gq;
   vec2 d = c - at;
   float r = 0.45 + 0.25 * e;
   float core = clamp(0.5 - (length(d) - r) / max(aa, 0.35), 0.0, 1.0);

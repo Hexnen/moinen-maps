@@ -172,10 +172,14 @@ function syncSteam() {
   try {
     steam ??= new SteamLayer();
     steam.now = sharedNow; steam.view = viewOf;
+    // (once per state: lastState is a new object every 12 Hz step, and geo() costs more than the rest of the steam's tick)
+    let wKey, wVal = [0, 0];
     steam.wind = () => {
-      const w = lastState?.wind, g = geo(); if ( !w || !(w.str > 0) ) return [0, 0];
-      const a = (w.dir ?? 0) * Math.PI / 180, v = w.str * SPEED_SQ * (g.grid / g.ap) * 0.5;
-      return [Math.cos(a) * v, Math.sin(a) * v];
+      if ( wKey === lastState ) return wVal;
+      wKey = lastState;
+      const w = lastState?.wind; if ( !w || !(w.str > 0) ) return (wVal = [0, 0]);
+      const g = geo(), a = (w.dir ?? 0) * Math.PI / 180, v = w.str * SPEED_SQ * (g.grid / g.ap) * 0.5;
+      return (wVal = [Math.cos(a) * v, Math.sin(a) * v]);
     };
     steam.arm(!reducedMotion());
   } catch ( err ) { console.warn(`${MODULE_ID} | weather: steam`, err); steam?.destroy(); steam = null; }

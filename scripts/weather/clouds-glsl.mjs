@@ -152,6 +152,7 @@ uniform vec2 uSize;          // the light texture in texels
 uniform vec4 uEdge;          // the rect the pass fades out at: x0, y0, x1, y1 (squares)
 uniform float uEdgeW;        // the fade's width (squares)
 uniform float uNight;        // the scene's darkness 0..1
+uniform float uQ;            // the frame guard's detail 0.35..1 (weatherQ)
 vec4 L4(vec2 p) { return texture(uLight, (p - uGrid.xy) * uGrid.z / uSize); }
 float edgeFade(vec2 p) {
   vec2 e = min(p - uEdge.xy, uEdge.zw - p);
@@ -191,9 +192,16 @@ void main() {
   float x = max(0.0, b.a - 0.18 * (1.0 - uRay.y)) / (1.0 - 0.18 * (1.0 - uRay.y));
   // what makes a shaft visible is lit air beside shadowed air: the light above its surroundings (a ring of six taps 2.5 squares
   // out) carries most of it; the even glow of a wide open gap only a little (so a gap filling the view is no milky veil)
-  float m = 0.0;
-  for ( int i = 0; i < 6; i++ ) { float t = float(i) * 1.0472; m += L4(p + 2.5 * vec2(cos(t), sin(t))).a; }
-  float hp = max(0.0, b.a - m / 6.0);
+  // (the frame guard blends the ring to its three even taps between q 0.85 and 0.55; under that only they are fetched)
+  float m = 0.0, wq = uQ >= 1.0 ? 1.0 : smoothstep(0.55, 0.85, uQ);
+  if ( wq >= 1.0 ) { for ( int i = 0; i < 6; i++ ) { float t = float(i) * 1.0472; m += L4(p + 2.5 * vec2(cos(t), sin(t))).a; } m /= 6.0; }
+  else {
+    float m3 = 0.0, mo = 0.0;
+    for ( int i = 0; i < 6; i += 2 ) { float t = float(i) * 1.0472; m3 += L4(p + 2.5 * vec2(cos(t), sin(t))).a; }
+    if ( wq > 0.0 ) for ( int i = 1; i < 6; i += 2 ) { float t = float(i) * 1.0472; mo += L4(p + 2.5 * vec2(cos(t), sin(t))).a; }
+    m = mix(m3 / 3.0, (m3 + mo) / 6.0, wq);
+  }
+  float hp = max(0.0, b.a - m);
   float a = uRay.x * edgeFade(p) * min(1.0, 0.45 * pow(x, 1.6) + 2.4 * hp);
   // drawn over the cloud bodies (the shafts glow up through the gaps and show through the thinner deck), dimmed where a body is
   a *= 1.0 - 0.6 * uRay.w * smoothstep(uRay.z - 0.01, uRay.z + 0.08, b.r);
@@ -222,7 +230,10 @@ void main() {
   vec4 b = L4(p);
   float t = uCl.x;
   if ( b.r < t - 0.08 ) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-  float n = (oc7(p) - 0.5) + 0.5 * (oc8(p) - 0.5) + 0.25 * (oc9(p) - 0.5);
+  // (the finest octave fades out under the frame guard between q 0.85 and 0.55, and is skipped below)
+  float w9 = uQ >= 1.0 ? 1.0 : smoothstep(0.55, 0.85, uQ);
+  float n = (oc7(p) - 0.5) + 0.5 * (oc8(p) - 0.5);
+  if ( w9 > 0.0 ) n += 0.25 * w9 * (oc9(p) - 0.5);
   float th = clamp((b.r - t) / 0.16, 0.0, 1.0);
   float d = b.r + n * uCl.w * (1.0 - 0.7 * th);       // the rim frays into wisps; the core keeps its shape
   float a = smoothstep(t - 0.012, t + 0.045, d);

@@ -1,6 +1,7 @@
 import * as M from "./model.mjs";
 import { blendMode } from "./display.mjs";
 import { GLSL_WIND, gustEnv, dirVec } from "../wind.mjs";
+import { weatherQ } from "./guard.mjs";
 
 /**
  * The LENS: what happens ON the glass (doc 4.2-4.4), never a second copy of the world weather.
@@ -812,6 +813,10 @@ class LensShow extends PIXI.Mesh {
   render(r) {
     const L = this.lens, u = this.shader.uniforms;
     u.uHasFrame = 0;
+    // (the frame guard: under q 0.7 the frame under the glass is copied every other frame, the drops read the last copy between:
+    // a frame's lag in what a big drop refracts, nothing else changes; the copy is half this pass's cost at DPR 2)
+    if ( L?.copyWanted && L.frameRT && (L.q ?? 1) < 0.7 && this.copied === L.frameRT && !(this.skip = !this.skip) ) { u.uHasFrame = 1; super.render(r); return; }
+    this.copied = null;
     if ( L?.copyWanted && L.frameRT ) {
       const gl = r.gl, cur = r.renderTexture.current, ctx = r.CONTEXT_UID;
       try {
@@ -832,7 +837,7 @@ class LensShow extends PIXI.Mesh {
           else gl.blitFramebuffer(0, H - h, w, H, 0, h, w, 0, gl.COLOR_BUFFER_BIT, gl.NEAREST);
           gl.bindFramebuffer(gl.FRAMEBUFFER, dstFB);
           r.renderTexture.bind(cur, sf0, df0);
-          u.uHasFrame = 1; L.stats.copies++;
+          u.uHasFrame = 1; L.stats.copies++; this.copied = L.frameRT;
         }
       } catch ( err ) { u.uHasFrame = 0; try { r.renderTexture.bind(r.renderTexture.current); } catch {} }
     }
@@ -946,6 +951,7 @@ export class WeatherLens {
     const ch = canvas.stage.children;
     if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite ) canvas.stage.addChild(this.sprite);   // (drawn last)
     const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12);
+    this.q = weatherQ();
     this.copyWanted = (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0;   // (big drops: rain beads and runners, melted crystals)
     const fix = CONFIG.moinenMaps?.weatherLensBands, fps = canvas.app.ticker.FPS || 60;
     const k = [1, 2, 4].includes(fix) ? fix : fps >= 48 ? 4 : fps >= 24 ? 2 : 1, per = BANDS / k;
@@ -967,8 +973,12 @@ export class WeatherLens {
     for ( const s of this.shaders ) { const v = s.uniforms; v.uT = t; v.uSeed = this.seed | 0; v.uFilm = film; v.uSlant = 0.14 * dx * ws; v.uLight = light; }
     u.uRainA[0] = bead; u.uRainA[1] = big; u.uRainA[2] = run; u.uRainA[3] = mist;
     u.uWind[0] = dx; u.uWind[1] = dy; u.uWind[2] = ws;
-    // the gust envelope over the last 10 s on the 12 Hz grid (the same on every client)
-    for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, this.seed | 0);
+    // the gust envelope over the last 10 s on the 12 Hz grid (the same on every client): on the next step only the newest value is
+    // new (the rest shift down one; every value is at a whole step k / 12, so a shifted one is the one a full refill would give)
+    const k = Math.round(t * 12), sd = this.seed | 0;
+    if ( Math.abs(t * 12 - k) > 1e-6 ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, sd); this.gk = null; }
+    else if ( this.gk === k - 1 && this.gs === sd ) { this.int.copyWithin(0, 1); this.int[120] = gustEnv(k / 12, sd); this.gk = k; }
+    else if ( this.gk !== k || this.gs !== sd ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv((k - 120 + i) / 12, sd); this.gk = k; this.gs = sd; }
     u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
     if ( this.pre ) {   // (the runners first: the beads read them; tiny, so every step, never stale)
       const R = canvas.app.renderer;
