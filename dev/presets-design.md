@@ -1233,3 +1233,7 @@ still pops as a flat hard-edged white oval; the fireball turns flat terracotta a
 lens discs, day-lit at night; a pale ground patch pops in under the fireball; smoke fades into ghost disc outlines and is short-lived
 (no mushroom); the bomb fall is hard to see and invisible at night; the grenade is nearly unreadable at zoom 1 and its heart ends as
 a flat brick slab with no jets or shrapnel streaks; the crater reads as a noise patch.
+
+Shared with the meteor (section 22, merged into main after this branch started): the meteor uses the same burst art and the L3 shock
+puff, so it changes too. Seen before (main 12602f2) vs after at zoom 1 by day: the same timeline and structure; the fireball shows the
+new blended heat patches (redder, blobby) and the shock dust is slightly smaller. Not re-judged; not checked at night or zoom 3.
