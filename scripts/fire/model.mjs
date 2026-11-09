@@ -89,6 +89,64 @@ export const FIRE_LV = {
 /** Per SMOKE LEVEL (index 0..3): how much smoke (x the layer's `smoke`), 0 = none. Level 2 = the old amount. */
 export const SMOKE_LV = [0, 0.55, 1, 1.45];
 
+/*
+ * F1 THE FIRE LEVEL IS CONTINUOUS (dev/fire-slider-design.md): a fire stroke's `lv` is any value 1..3 in steps of LV_STEP; a whole
+ * level reads every table exactly as before (lvLerp returns the entry itself), between two levels the tables are interpolated. A
+ * level CHANGED afterwards ramps (l0 -> lv along a smoothstep from lt over lr s), so the fire eases through every in-between look.
+ */
+export const LV_STEP = 0.05;
+/** A level change's default length (ms), its lead (the record reaches the players before it starts) and its TAIL (ms at speed 1): the
+ * area keeps its ramp data that long after the end, so the blobs, sparks and puffs born during the ramp finish their lives as born. */
+export const LV_RAMP_MS = 4000, LV_LEAD_MS = 300, LV_TAIL_MS = 6500;
+/** A fire level, cleaned: 1..3 on the LV_STEP grid (a whole level stays the very integer). */
+export const cleanLv = (v, d = 2) => { const n = Number(v); return !Number.isFinite(n) ? d : Math.round(Math.min(3, Math.max(1, n)) * 20) / 20; };
+/** A per-level table ([_, L1, L2, L3]) at a level 1..3: the entry itself at a whole level, linear between (no mix computed there). */
+export function lvLerp(tab, lv) {
+  const i = Math.floor(lv), f = lv - i;
+  if ( !(f > 0) ) return tab[Math.max(0, Math.min(tab.length - 1, i))];
+  if ( i >= tab.length - 1 ) return tab[tab.length - 1];
+  return tab[i] + (tab[i + 1] - tab[i]) * f;
+}
+const ss01 = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+/** A stroke's ramp length (ms). */
+export const rampMs = (st) => (st.lr !== undefined ? st.lr * 1000 : LV_RAMP_MS);
+/** A fire stroke's level at shared time `now` (ms): its own ramp (l0 -> lv from lt), else lv. Pure. */
+export function levelNow(st, now) {
+  const lv = st.lv ?? 2;
+  if ( st.l0 === undefined || st.lt === undefined || now === undefined ) return lv;
+  if ( st.p0 !== undefined && now < st.lt - LV_LEAD_MS ) return levelNow({ lv: st.pv, l0: st.p0, lt: st.pt, lr: st.pr }, now);   // (before it: the ramp it interrupted)
+  const ms = rampMs(st);
+  if ( ms <= 0 ) return now >= st.lt ? lv : st.l0;
+  const k = ss01((now - st.lt) / ms);
+  return k >= 1 ? lv : k <= 0 ? st.l0 : st.l0 + (lv - st.l0) * k;
+}
+/** Is a fire stroke's ramp (with its tail) still running at `now`: its [l0, lt, ms], else null. `speed` the layer's animation speed. */
+export function rampAt(st, now, speed = 1) {
+  if ( st.k !== "fire" || st.l0 === undefined || st.lt === undefined || now === undefined || st.l0 === st.lv ) return null;
+  const ms = rampMs(st);
+  if ( !(now < st.lt + ms + LV_TAIL_MS / Math.max(0.2, speed)) ) return null;
+  return st.p0 !== undefined ? [st.l0, st.lt, ms, st.p0, st.pv, st.pt, st.pr !== undefined ? st.pr * 1000 : LV_RAMP_MS] : [st.l0, st.lt, ms];
+}
+/** The highest level a (decorated: areasOf `rl`) stroke shows while its ramp runs: its rectangle and reach hold both ends. */
+const lvTop = (st) => (st.rl ? Math.max(st.lv ?? 2, st.rl[0]) : st.lv ?? 2);
+/**
+ * The field's A byte for a cell of fire level `lv` and smoke level `sm` (0 = no smoke byte): a WHOLE level keeps its old code
+ * 1 + (lv - 1) x 4 + sm (1..12: old fields bit for bit); a fractional one 13 + 4 x q + sm, q = its LV_STEP index - 1 (0..38).
+ */
+export function levelCode(lv, sm) {
+  const n = Math.round((lv - 1) / LV_STEP);
+  return n % 20 === 0 ? 1 + (n / 20) * 4 + sm : 13 + 4 * (n - 1 - Math.floor(n / 20)) + sm;
+}
+/** levelCode's inverse (the level; art.mjs levelAt decodes the same): code 0 = none (level 2). */
+export function levelOfCode(code) {
+  const c = code - 1; if ( c < 0 ) return 2;
+  if ( code <= 12 ) return Math.min(3, Math.max(1, Math.floor(c / 4) + 1));
+  const q = Math.floor((code - 13) / 4), n = q + 1 + Math.floor(q / 19);   // (the steps skip the whole level 2 in the middle)
+  return 1 + n * LV_STEP;
+}
+/** auxOldOf's G for a raised cell's old level: a whole level 1..3 as before, a fractional one 4 + round((l - 1) x 100). */
+export const oldLvCode = (l) => (Number.isInteger(l) ? l : 4 + Math.round((l - 1) * 100));
+
 import { NATURAL, cleanColor, rampOf, puffsOf } from "./look.mjs";
 import { DUST_KINDS, dustRect, dustCore, dustEnd, dustRaster } from "./dust-model.mjs";
 import { burstRect, burstCore, burstEnd, burstRaster, MAX_DEBRIS } from "./burst-model.mjs";
@@ -129,7 +187,22 @@ export function cleanStroke(o) {
   const out = { id: o.id, k, s: Math.round(num(o.s, 0.8, ...LIMITS.s) * 100) / 100, r: Math.round(num(o.r, 50, ...LIMITS.r)), p,
     wd: Math.round(((Number(o.wd) || 0) % 360 + 360) % 360), ws: Math.round(num(o.ws, 0, ...LIMITS.ws) * 100) / 100,
     q: Number.isFinite(Number(o.q)) ? Math.round(Number(o.q)) : 0, sd: (Number(o.sd) >>> 0) || hashStr(o.id) };
-  if ( k === "fire" ) { out.lv = int(o.lv, 2, 1, 3); out.sm = int(o.sm, 2, 0, 3); }
+  if ( k === "fire" ) {
+    // (F1: the fire level is continuous - an old whole level reads as it always did; a level change's ramp: l0, lt, lr)
+    out.lv = cleanLv(o.lv); out.sm = int(o.sm, 2, 0, 3);
+    if ( o.l0 !== undefined && o.l0 !== null && Number.isFinite(Number(o.l0)) && Number.isFinite(Number(o.lt)) ) {
+      const l0 = Math.round(num(o.l0, out.lv, 1, 3) * 100) / 100;
+      if ( l0 !== out.lv ) {
+        out.l0 = l0; out.lt = Math.round(Number(o.lt));
+        if ( o.lr !== undefined && o.lr !== null && Number.isFinite(Number(o.lr)) ) { const lr = Math.round(num(o.lr, 4, 0, 25) * 10) / 10; if ( lr !== LV_RAMP_MS / 1000 ) out.lr = lr; }
+        // (the ramp it interrupted - p0 -> pv from pt over pr s - while that one's history still shows: setLevels)
+        if ( [o.p0, o.pv, o.pt].every((v) => v !== undefined && v !== null && Number.isFinite(Number(v))) ) {
+          out.p0 = Math.round(num(o.p0, l0, 1, 3) * 100) / 100; out.pv = Math.round(num(o.pv, l0, 1, 3) * 100) / 100; out.pt = Math.round(Number(o.pt));
+          if ( o.pr !== undefined && o.pr !== null && Number.isFinite(Number(o.pr)) ) { const pr = Math.round(num(o.pr, 4, 0, 25) * 10) / 10; if ( pr !== LV_RAMP_MS / 1000 ) out.pr = pr; }
+        }
+      }
+    }
+  }
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
   else if ( k === "dust" ) { out.lv = int(o.lv, 2, 1, 3); out.dk = DUST_KINDS.includes(o.dk) ? o.dk : "car"; if ( o.np && out.dk === "shock" ) out.np = 1; }   // (dust-model.mjs; np: a shock without puffs)
   else if ( k === "burst" ) {                                         // (burst-model.mjs: one point, its level, colour and debris)
@@ -217,7 +290,7 @@ function cellPath(st, geo) {
 /** A stroke's smoke level (0 = it makes no smoke). */
 export const smokeOf = (st, P) => (st.k === "smoke" ? st.sm ?? 2 : st.k === "fire" && P.smoke > 0 ? st.sm ?? 2 : 0);
 // (the fire style's licking tongues reach up to 1.25 x their mean length: its rectangle is a little taller)
-const flameOf = (st, Z) => Z.flameH * FIRE_LV.height[st.lv ?? 2] * st.s * (st.st === "fireball" ? 1 : 1.3);
+const flameOf = (st, Z) => Z.flameH * lvLerp(FIRE_LV.height, lvTop(st)) * st.s * (st.st === "fireball" ? 1 : 1.3);
 
 function pathBox(st, geo) {
   const { pts, R: R0 } = cellPath(st, geo), R = R0 + (st.st === "fireball" ? 0 : outlineMargin(st, R0));
@@ -243,7 +316,7 @@ const P_RISE = [0, 10, 22, 40], P_V0 = [0, 16, 20, 24], P_R1 = [0, 11, 17, 21]; 
 export function puffReach(cpg, plume, wind, lv = 3, sm = 3) {
   const u = cpg / 32, Hk = plume / 2.5, wx = wind[0] ?? 0, wy = wind[1] ?? 0, gdir = wx < -0.05 ? -1 : 1;
   lv = Math.max(1, Math.min(3, lv)); sm = Math.max(1, Math.min(3, sm));
-  const zMax = P_RISE[lv] * u + P_V0[sm] * u * Hk * 1.5 * 1.35 * 1.3, k = Math.max(0.25, 1 - 0.5 * wy);
+  const zMax = lvLerp(P_RISE, lv) * u + P_V0[sm] * u * Hk * 1.5 * 1.35 * 1.3, k = Math.max(0.25, 1 - 0.5 * wy);
   const sA = 0.6 * wx + 0.12 * gdir * 1.048, sB = 0.6 * wx + 0.12 * gdir * 1.304, sS = 0.6 * wx + 0.12 * gdir + 0.25;
   const sMin = Math.min(0, sA, sB) / k, sMax = Math.max(0, sA, sB, sS) / k;
   const r = P_R1[sm] * u * 1.2, strx = 1 + 0.55 * (0.3 + 2 * Math.max(Math.abs(sA), Math.abs(sB)));
@@ -342,7 +415,7 @@ export function reachOf(st, geo, P, puffs = true) {
   // the fire style's PUFFS: their whole reach (rise, drift, size) fits, so none ever comes near the rectangle (art.mjs also fades a
   // puff out as a whole before its extent could touch the edge: a safety, for the clamped and the mixed-wind areas)
   if ( puffs && st.st !== "fireball" && smokeOf(st, P) > 0 ) {
-    const R = puffReach(geo.grid / geo.ap, P.plume, windVec(st.wd, st.ws), st.k === "fire" ? st.lv ?? 2 : 1, smokeOf(st, P));
+    const R = puffReach(geo.grid / geo.ap, P.plume, windVec(st.wd, st.ws), st.k === "fire" ? lvTop(st) : 1, smokeOf(st, P));
     r.x0 = Math.min(r.x0, b.x0 + Math.min(0, R.sMin * R.up) - R.padX); r.x1 = Math.max(r.x1, b.x1 + Math.max(0, R.sMax * R.up) + R.padX);
     r.y0 = Math.min(r.y0, b.y0 - R.up - R.padY); r.y1 = Math.max(r.y1, b.y1 + R.padY);
   }
@@ -418,6 +491,8 @@ export function nextChange(strokes, now, geo, P, still = false) {
     // (a timed fire: its grow-in ends as an unput one's, then its out time comes)
     if ( ahead(st, now) ) { const { o, ...un } = st, g = endOf(un, geo, P, T); if ( g > now && g < t ) t = g; if ( o - 1 < t ) t = o - 1; continue; }
     const e = endOf(st, geo, P, T); if ( e > now && e < t ) t = e;
+    // (F1: a level ramp's end - with its tail - rebuilds the area as a steady one)
+    const r = rampAt(st, now, P.speed); if ( r ) { const re = r[1] + r[2] + LV_TAIL_MS / Math.max(0.2, P.speed ?? 1); if ( re > now && re < t ) t = re; }
   }
   return t;
 }
@@ -450,6 +525,9 @@ export const colorOf = (st, P) => st.c ?? P?.fireColor ?? NATURAL;
  * not join areas); an eraser joins every area it touches (and makes none of its own). Deterministic.
  */
 export function areasOf(strokes, geo, P, now = undefined, still = false) {
+  // (F1: a fire stroke whose level RAMPS at `now` is drawn from a copy carrying its ramp - rl: [l0, lt, ms] - so its rectangle holds
+  // both ends, its field gets the ramp data and its area's key changes when the ramp, with its tail, is over)
+  if ( !still && now !== undefined ) strokes = strokes.map((s) => { const r = rampAt(s, now, P.speed); return r ? { ...s, rl: r } : s; });
   const phases = {};
   for ( const s of strokes ) phases[s.id] = phaseOf(s, now, geo, P, still);
   const live = strokes.filter((s) => phases[s.id] !== "gone");
@@ -495,7 +573,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     // kicking up its dust does not rebuild the area)
     // (a BURST plays from its record and the clock alone: its phase is left out of its key too)
     const dust = style(members[0]) === "dust" || style(members[0]) === "burst";
-    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => { const r = [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), dust ? null : ph[s.id], s.p.length, hashStr(s.p.join(","))]; if ( s.dk ) r.push(s.dk); if ( s.gr !== undefined || s.ot !== undefined ) r.push(s.gr ?? null, s.ot ?? null); if ( s.db ) r.push(hashStr(s.db.join(","))); return r; })))}`;
+    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => { const r = [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), dust ? null : ph[s.id], s.p.length, hashStr(s.p.join(","))]; if ( s.dk ) r.push(s.dk); if ( s.gr !== undefined || s.ot !== undefined ) r.push(s.gr ?? null, s.ot ?? null); if ( s.db ) r.push(hashStr(s.db.join(","))); if ( s.rl ) r.push(s.rl); return r; })))}`;
     const area = { id, key, rect, box, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) };
     if ( tm(members[0]) ) area.tm = [members[0].gr ?? null, members[0].ot ?? null];   // (its own timing: model.areaP)
     out.push(area);
@@ -566,7 +644,9 @@ const rimMax = (O) => 0.7 + 0.52 * O.OL2 + (O.tn ? 2.3 * O.RG + 1.5 : 0);
 function buffers(N) {
   return { F: new Float32Array(N), S: new Float32Array(N), FA: new Float32Array(N), I: new Float64Array(N).fill(NaN), O: new Float64Array(N).fill(Infinity),
     SI: new Float64Array(N).fill(NaN), SO: new Float64Array(N).fill(Infinity),
-    LF: new Uint8Array(N).fill(2), LO: new Uint8Array(N), SMF: new Uint8Array(N).fill(2), LS: new Uint8Array(N).fill(2), FH: new Float32Array(N) };
+    LF: new Float32Array(N).fill(2), LO: new Float32Array(N), SMF: new Uint8Array(N).fill(2), LS: new Uint8Array(N).fill(2), FH: new Float32Array(N),
+    // (F1: a cell of a stroke whose level ramps - its level at the ramp's start, the start (ms), the burning ground at that level)
+    RL: null, RT: null, F0: null, PL: null };
 }
 
 /** Stamp a stroke into the buffers (W x H, area origin x0, y0 in cells), in paint order. */
@@ -576,7 +656,11 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
   const segs = pts.length === 1 ? [[pts[0], pts[0]]] : pts.slice(1).map((b, i) => [pts[i], b]);
   const cm = catchMs(st, geo, P);
   let total = 0; const lens = segs.map(([a, b]) => { const l = Math.hypot(b[0] - a[0], b[1] - a[1]); total += l; return l; });
-  const lv = st.lv ?? 2, heat = FIRE_LV.heat[lv], fh = Z.flameH * FIRE_LV.height[lv];
+  const lv = st.lv ?? 2, heat = lvLerp(FIRE_LV.heat, lv), fh = Z.flameH * lvLerp(FIRE_LV.height, lv);
+  // (F1: a ramping stroke's cells carry where their level comes from: l0, its start, and the ground's heat at l0 - its smoke sources then)
+  const rl = st.k === "fire" ? st.rl ?? null : null, heat0 = rl ? lvLerp(FIRE_LV.heat, rl[0]) : heat;
+  if ( rl && !buf.RL ) { const N = buf.F.length; buf.RL = new Float32Array(N).fill(NaN); buf.RT = new Float64Array(N); buf.RD = new Float32Array(N); buf.F0 = new Float32Array(N); }
+  if ( rl?.length > 3 && !buf.PL ) { const N = buf.F.length; buf.PL = new Float32Array(N).fill(NaN); buf.PV = new Float32Array(N); buf.PT = new Float64Array(N); buf.PD = new Float32Array(N); }
   // ignite times are encoded only while they matter: a stroke still growing, or one put out before it had finished growing
   const lt = litTime(st), timed = phase === "grow" || (phase === "out" && st.o < lt + cm + T.growSpan);
   const fire = st.k === "fire";
@@ -604,6 +688,8 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
         const lit = buf.F[i] > 0.02 && !dying;
         if ( lit && timed && Number.isNaN(buf.I[i]) && !buf.LO[i] && buf.LF[i] !== lv ) buf.LO[i] = buf.LF[i];   // (a burning cell raised: its old level)
         buf.F[i] = v; buf.LF[i] = lv; buf.SMF[i] = st.sm ?? 2; buf.FH[i] = fh;
+        if ( buf.RL ) { if ( rl ) { buf.RL[i] = rl[0]; buf.RT[i] = rl[1]; buf.RD[i] = rl[2]; buf.F0[i] = v / heat * heat0; } else buf.RL[i] = NaN; }
+        if ( buf.PL ) { if ( rl?.length > 3 ) { buf.PL[i] = rl[3]; buf.PV[i] = rl[4]; buf.PT[i] = rl[5]; buf.PD[i] = rl[6]; } else buf.PL[i] = NaN; }
         if ( !lit ) buf.I[i] = ign;
         buf.O[i] = outT;
       }
@@ -725,8 +811,14 @@ export function raster(area, geo, P) {
   if ( area.style !== "fireball" ) {
     f.aux = auxOf(buf, W, H, P); f.auxOld = auxOldOf(buf, W, H);
     // where the smoke PUFFS can be (art.mjs draws smoke only there, so it is never cut where the plume field thins out)
-    const lvs = area.strokes.filter((s) => s.k !== "erase"), lvM = Math.max(1, ...lvs.map((s) => (s.k === "fire" ? s.lv ?? 2 : 1))), smM = Math.max(1, ...lvs.map((s) => smokeOf(s, P)));
-    const aux = f.aux, R = puffReach(Z.cellsPerGrid, P.plume, area.wind ?? [0, 0], lvM, smM), { M, lo, hi, xlo, xhi } = puffMask(W, H, (i) => aux[i * 4 + 2] >= 5, R);
+    const lvs = area.strokes.filter((s) => s.k !== "erase"), lvM = Math.max(1, ...lvs.map((s) => (s.k === "fire" ? lvTop(s) : 1))), smM = Math.max(1, ...lvs.map((s) => smokeOf(s, P)));
+    // F1: a ramping stroke's cells - the RAMP texture (RGBA8): R = 1 + round((l0 - 1) x 127) (0 = no ramp), G = its start (floored,
+    // steps of rampQ.span over 254 from rampQ.ref: never later than the true start), B = the smoke source at l0 (the aux B it had),
+    // A = its length (0.1 s steps)
+    const rp = buf.RL ? rampTex(buf, f.aux, W, H, P) : null;
+    if ( rp ) { f.ramp = rp.tex; f.rampQ = rp.q; f.l0 = rp.l0; f.rt = buf.RT; f.rd = buf.RD; if ( rp.prev ) { f.ramp2 = rp.prev.tex; f.rampQ2 = rp.prev.q; } }
+    const aux = f.aux, src = rp ? (i) => aux[i * 4 + 2] >= 5 || rp.tex[i * 4 + 2] >= 5 : (i) => aux[i * 4 + 2] >= 5;
+    const R = puffReach(Z.cellsPerGrid, P.plume, area.wind ?? [0, 0], lvM, smM), { M, lo, hi, xlo, xhi } = puffMask(W, H, src, R);
     // the PUFF texture (RGBA8): G = 1 + the nearest source row's distance below (floored), R = the farthest's (ceiled), both + OFF,
     // in steps of S rows; B = 1 + the sources' leftmost column (floored), A = their rightmost (ceiled), relative, + OX, steps of SX
     // (art.mjs decodes them with uPuffQ = [S, OFF, SX, OX] and searches only there); G = 0: no puff reaches this cell
@@ -795,8 +887,41 @@ function auxOldOf(buf, W, H) {
   }
   if ( !fresh || !any ) return null;
   const D = chamfer(old, W, H), out = new Uint8Array(N * 4);
-  for ( let i = 0; i < N; i++ ) if ( old[i] ) { out[i * 4] = Math.min(255, Math.max(1, Math.round(D[i]))); out[i * 4 + 1] = buf.LO[i]; }
+  for ( let i = 0; i < N; i++ ) if ( old[i] ) { out[i * 4] = Math.min(255, Math.max(1, Math.round(D[i]))); out[i * 4 + 1] = buf.LO[i] ? oldLvCode(buf.LO[i]) : 0; }
   return out;
+}
+
+/** F1: the RAMP texture of an area (see raster) and its refs { ref, span, ms } (ms), with the per-cell start levels (lights). */
+function rampTex(buf, aux, W, H, P) {
+  const N = W * H; let t0 = Infinity, t1 = -Infinity, ms = 0, n = 0;
+  for ( let i = 0; i < N; i++ ) if ( buf.F[i] > 0.05 && !Number.isNaN(buf.RL[i]) ) { t0 = Math.min(t0, buf.RT[i]); t1 = Math.max(t1, buf.RT[i]); n++; }
+  if ( !n ) return null;
+  const span = Math.max(1, t1 - t0), tex = new Uint8Array(N * 4), l0 = new Float32Array(N).fill(NaN);
+  for ( let i = 0; i < N; i++ ) {
+    if ( !(buf.F[i] > 0.05) || Number.isNaN(buf.RL[i]) ) continue;
+    const o = i * 4; l0[i] = buf.RL[i];
+    tex[o] = 1 + Math.round((buf.RL[i] - 1) * 127); tex[o + 1] = Math.floor((buf.RT[i] - t0) / span * 254); tex[o + 3] = Math.min(255, Math.round(buf.RD[i] / 100));
+    // (the smoke source this cell had at l0: auxOf's rule with the ground's heat at l0)
+    const fireS = P.smoke > 0 && buf.SMF[i] > 0 ? Math.min(1, buf.F0[i] * Math.min(1, P.smoke * 2)) : 0, ss = buf.S[i];
+    tex[o + 2] = ss >= fireS && ss > 0.02 ? Math.round(Math.min(1, ss) * 255) : fireS > 0.02 ? Math.round(fireS * 255) : 0;
+  }
+  // (the ramp each cell's ramp interrupted, if any - its level history before this one: R = 1 + (from - 1) x 127, G its start (steps
+  // of q2.span / 254 from q2.ref), B = 1 + (to - 1) x 127, A its length (0.1 s))
+  let prev = null;
+  if ( buf.PL ) {
+    let p0 = Infinity, p1 = -Infinity;
+    for ( let i = 0; i < N; i++ ) if ( !Number.isNaN(l0[i]) && !Number.isNaN(buf.PL[i]) ) { p0 = Math.min(p0, buf.PT[i]); p1 = Math.max(p1, buf.PT[i]); }
+    if ( p0 < Infinity ) {
+      const ps = Math.max(1, p1 - p0), t2 = new Uint8Array(N * 4);
+      for ( let i = 0; i < N; i++ ) {
+        if ( Number.isNaN(l0[i]) || Number.isNaN(buf.PL[i]) ) continue;
+        const o = i * 4;
+        t2[o] = 1 + Math.round((buf.PL[i] - 1) * 127); t2[o + 1] = Math.floor((buf.PT[i] - p0) / ps * 254); t2[o + 2] = 1 + Math.round((buf.PV[i] - 1) * 127); t2[o + 3] = Math.min(255, Math.round(buf.PD[i] / 100));
+      }
+      prev = { tex: t2, q: { ref: p0, span: ps } };
+    }
+  }
+  return { tex, l0, q: { ref: t0, span }, prev };
 }
 
 function auxOf(buf, W, H, P) {
@@ -914,7 +1039,7 @@ export function fieldFrom(F, S0, W, H, wind, geo, P, seed = 1, { style = "fire",
   for ( let i = 0; i < N; i++ ) {
     const r = Math.round(Math.min(1, Ht[i]) * 255), g = Math.round(Math.min(1, Pl[i]) * 255), b = Math.round(Math.min(1, F[i]) * 255);
     const o = i * 4; data[o] = r; data[o + 1] = g; data[o + 2] = b;
-    data[o + 3] = r || g ? 1 + (lvF(i) - 1) * 4 + (g ? Math.max(1, LS[i] || 2) : 0) : 0;
+    data[o + 3] = r || g ? levelCode(lvF(i), g ? Math.max(1, LS[i] || 2) : 0) : 0;   // (F1: a whole level's code as before)
     mass += F[i];
     if ( buf && (r || g) && (!Number.isNaN(I[i]) || O[i] < Infinity || !Number.isNaN(PI[i]) || PO[i] < Infinity) ) anim = true;
   }
@@ -941,10 +1066,11 @@ export function fieldFrom(F, S0, W, H, wind, geo, P, seed = 1, { style = "fire",
   // evenly thinned to at most 240 / 160, deterministic; each carries its ignite / out time
   for ( let i = 0; i < N; i++ ) {
     const lf = buf ? buf.LF[i] : 2;
-    if ( F[i] >= 0.45 * FIRE_LV.heat[lf] ) {
-      const sp = FIRE_LV.sparks[lf];
+    if ( F[i] >= 0.45 * lvLerp(FIRE_LV.heat, lf) ) {
+      // (F1: the spark share between levels - a second emitter by its own hash above 1: 2 at level 3 as before, never a step)
+      const sp = lvLerp(FIRE_LV.sparks, lf);
       if ( sp >= 1 || hash4(seed, i, 11) < sp ) emitF.push(i);
-      if ( sp >= 2 ) emitF.push(i);
+      if ( sp >= 2 || (sp > 1 && hash4(seed, i, 12) < sp - 1) ) emitF.push(i);
     } else if ( S0[i] >= 0.3 || (Ht[i] > 0.12 && Ht[i] < 0.3 && P.smoke > 0 && smF(i) > 0) ) emitS.push(i);
   }
   const thin = (L, n) => { if ( L.length <= n ) return L; const out = []; for ( let k = 0; k < n; k++ ) out.push(L[Math.floor((k + hash4(seed, k, 7) * 0.999) * L.length / n)]); return out; };
@@ -952,7 +1078,7 @@ export function fieldFrom(F, S0, W, H, wind, geo, P, seed = 1, { style = "fire",
     const a = smoke ? PI[i] : I[i], b = smoke ? PO[i] : O[i];
     return [i % W, Math.floor(i / W), Number.isNaN(a) ? null : a, b < Infinity ? b : null];
   };
-  const lv = new Uint8Array(N); for ( let i = 0; i < N; i++ ) lv[i] = buf ? buf.LF[i] : 2;
+  const lv = new Float32Array(N); for ( let i = 0; i < N; i++ ) lv[i] = buf ? buf.LF[i] : 2;
   return { w: W, h: H, data, times, anim: refs, mass, emit: { fire: thin(emitF, 240).map(em(false)), smoke: thin(emitS, 160).map(em(true)) },
     plume: [ux, uy], burn: F, lv, I: buf ? buf.I : null, O: buf ? buf.O : null, style: ball ? "fireball" : "fire", tOut: T.O, tGrow: T.G };
 }
@@ -1002,24 +1128,34 @@ function lightBinsInto(cl, area, field, B, SB) {
     const F = field.burn, W = field.w, H = field.h, bins = new Map();
     if ( !F ) return;
     const fuel = field.style === "fire", fs = hashStr("art:" + (area.color ?? "")) % 65536, wx = area.wind?.[0] ?? 0;
+    const L0 = field.l0 ?? null;
     for ( let y = 0; y < H; y++ ) for ( let x = 0; x < W; x++ ) {
       const i = y * W + x, v = F[i]; if ( v < 0.05 ) continue;
       const k = Math.floor(x / B) + Math.floor(y / B) * 65536;
       let c = bins.get(k); if ( !c ) bins.set(k, c = { m: 0, sx: 0, sy: 0, x0: x, y0: y, x1: x, y1: y, n: 0, lv: 0, im: 0, iw: 0, om: 0, ow: 0, subs: new Map() });
-      c.m += v; c.sx += x * v; c.sy += y * v; c.n++; c.lv += (field.lv?.[i] ?? 2) * v;
+      const lc = field.lv?.[i] ?? 2;
+      c.m += v; c.sx += x * v; c.sy += y * v; c.n++; c.lv += lc * v;
+      // (F1: a fractional level's mass kept apart - lightLevel - and, while a ramp runs, the levels at its start and its clock)
+      if ( lc % 1 ) { const fr = c.fr ??= {}; fr[lc] = (fr[lc] ?? 0) + v; }
+      if ( L0 ) {
+        const l0 = Number.isNaN(L0[i]) ? lc : L0[i]; c.lv0 = (c.lv0 ?? 0) + l0 * v;
+        if ( l0 % 1 ) { const fr = c.fr0 ??= {}; fr[l0] = (fr[l0] ?? 0) + v; }
+        if ( !Number.isNaN(L0[i]) ) { c.rw = (c.rw ?? 0) + v; c.rt = (c.rt ?? 0) + field.rt[i] * v; c.rd = (c.rd ?? 0) + field.rd[i] * v; }
+      }
       const I = field.I?.[i], O = field.O?.[i];
       if ( I !== undefined && !Number.isNaN(I) ) { c.im += I * v; c.iw += v; }
       if ( O !== undefined && O < Infinity ) { c.om += O * v; c.ow += v; }
       if ( x < c.x0 ) c.x0 = x; if ( x > c.x1 ) c.x1 = x; if ( y < c.y0 ) c.y0 = y; if ( y > c.y1 ) c.y1 = y;
       const sk = Math.floor(x / SB) + Math.floor(y / SB) * 65536;
       let sb = c.subs.get(sk); if ( !sb ) c.subs.set(sk, sb = { m: 0, sx: 0, sy: 0, lv: 0, im: 0, iw: 0, om: 0, ow: 0 });
-      sb.m += v; sb.sx += x * v; sb.sy += y * v; sb.lv += (field.lv?.[i] ?? 2) * v;
+      sb.m += v; sb.sx += x * v; sb.sy += y * v; sb.lv += lc * v;
+      if ( lc % 1 ) { const fr = sb.fr ??= {}; fr[lc] = (fr[lc] ?? 0) + v; }
       if ( I !== undefined && !Number.isNaN(I) ) { sb.im += I * v; sb.iw += v; }
       if ( O !== undefined && O < Infinity ) { sb.om += O * v; sb.ow += v; }
     }
     for ( const c of [...bins.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]) ) {
       const subs = [...c.subs.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => ({ w: b.m, cx: area.rect.x0 + b.sx / b.m, cy: area.rect.y0 + b.sy / b.m,
-        lv: Math.max(1, Math.min(3, Math.round(b.lv / b.m))), I: b.iw > b.m * 0.25 ? Math.round(b.im / b.iw) : null, O: b.ow > b.m * 0.5 ? Math.round(b.om / b.ow) : null,
+        lv: lightLevel(b.lv, b.m, b.fr), I: b.iw > b.m * 0.25 ? Math.round(b.im / b.iw) : null, O: b.ow > b.m * 0.5 ? Math.round(b.om / b.ow) : null,
         fs: fuel ? fs : -1, wx }));
       delete c.subs;
       cl.push({ ...c, subs, col: area.color ?? field.color ?? NATURAL, cx: area.rect.x0 + c.sx / c.m, cy: area.rect.y0 + c.sy / c.m,
@@ -1030,9 +1166,17 @@ function lightBinsInto(cl, area, field, B, SB) {
 function lightsMerge(cl, geo, P, B, G, max, samples) {
   const merge = (a, b) => {
     const m = a.m + b.m;
-    return { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
+    const out = { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
       im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow, subs: [...a.subs, ...b.subs],
       x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), seed: (a.seed ^ b.seed) >>> 0 };
+    // (F1: the fractional levels' masses, and the ramp's start levels and clock, merged too)
+    const sum = (p, q) => { if ( !p && !q ) return undefined; const r = { ...p }; for ( const k in q ) r[k] = (r[k] ?? 0) + q[k]; return r; };
+    if ( a.fr || b.fr ) out.fr = sum(a.fr, b.fr);
+    if ( a.lv0 !== undefined || b.lv0 !== undefined ) {
+      out.lv0 = (a.lv0 ?? a.lv) + (b.lv0 ?? b.lv); out.fr0 = sum(a.lv0 !== undefined ? a.fr0 : a.fr, b.lv0 !== undefined ? b.fr0 : b.fr);
+      out.rw = (a.rw ?? 0) + (b.rw ?? 0); out.rt = (a.rt ?? 0) + (b.rt ?? 0); out.rd = (a.rd ?? 0) + (b.rd ?? 0);
+    }
+    return out;
   };
   const gapOf = (a, b) => Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1), Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
   const compact = (a, b) => Math.hypot(Math.max(a.x1, b.x1) - Math.min(a.x0, b.x0), Math.max(a.y1, b.y1) - Math.min(a.y0, b.y0)) <= B * 2.2;
@@ -1048,14 +1192,42 @@ function lightsMerge(cl, geo, P, B, G, max, samples) {
     cl[bi] = merge(cl[bi], cl[bj]); cl.splice(bj, 1);
   }
   return cl.map((c, i) => {
-    const half = Math.hypot(c.x1 - c.x0, c.y1 - c.y0) / 2 * geo.ap, level = Math.max(1, Math.min(3, Math.round(c.lv / c.m)));
-    return { x: geo.ox + c.cx * geo.ap, y: geo.oy + c.cy * geo.ap, radius: Math.round(P.lightRadius * (half + geo.grid / 2) * FIRE_LV.lightR[level]),
-      strength: Math.min(1, c.m / c.n / FIRE_LV.heat[level]), level, ignite: c.iw > c.m * 0.25 ? Math.round(c.im / c.iw) : null,
+    const half = Math.hypot(c.x1 - c.x0, c.y1 - c.y0) / 2 * geo.ap, level = lightLevel(c.lv, c.m, c.fr);
+    const radiusOf = (l) => Math.round(P.lightRadius * (half + geo.grid / 2) * lvLerp(FIRE_LV.lightR, l));
+    // (F1: while a level ramps under it, the light's own ramp: from the level at the start - lights.mjs eases its look along it)
+    const l0 = c.rw > 0 ? lightLevel(c.lv0, c.m, c.fr0) : level;
+    const ramp = l0 !== level ? { l0, t0: Math.round(c.rt / c.rw), ms: Math.round(c.rd / c.rw), r0: radiusOf(l0) } : null;
+    return { x: geo.ox + c.cx * geo.ap, y: geo.oy + c.cy * geo.ap, radius: radiusOf(level), ...(ramp ? { ramp } : {}),
+      strength: Math.min(1, c.m / c.n / lvLerp(FIRE_LV.heat, level)), level, ignite: c.iw > c.m * 0.25 ? Math.round(c.im / c.iw) : null,
       out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0, fire: c.col, color: rampOf(c.col).light,
       // (the heaviest one-square samples, at most `samples`, in scene px and world art cells)
       samples: [...c.subs].sort((a, b) => b.w - a.w || a.cy - b.cy || a.cx - b.cx).slice(0, samples)
         .map((s) => ({ ...s, x: geo.ox + s.cx * geo.ap, y: geo.oy + s.cy * geo.ap })) };
   });
+}
+
+/**
+ * F1: a light's LEVEL from its cells' levels: `sum` = sum of level x mass (the old accumulator, in the old order), `m` the mass, `fr`
+ * the fractional levels' masses { level: mass }. All whole: Math.round(sum / m), the old rule bit for bit. Else E[round(mean)] with
+ * each fractional level rounded up with the chance of its fraction (a Bernoulli per level value): exactly the old rule at every whole
+ * configuration and continuous in each level between (more than 8 fractional values: the plain mean, continuous).
+ */
+/** F1: an area drawn with the continuous-level art programs (art.mjs lvcArtPrograms): a fire stroke at a fractional level or ramping. */
+export const areaLvc = (area) => area.style === "fire" && area.strokes.some((s) => s.k === "fire" && ((s.lv ?? 2) % 1 !== 0 || !!s.rl));
+export function lightLevel(sum, m, fr) {
+  const cl = (x) => Math.max(1, Math.min(3, x));
+  if ( !(m > 0) ) return 2;
+  if ( !fr ) return cl(Math.round(sum / m));
+  const parts = Object.entries(fr).map(([k, w]) => [Number(k), w]);
+  if ( parts.length > 8 ) return cl(sum / m);
+  let base = sum; for ( const [l, w] of parts ) base -= l * w;
+  let e = 0;
+  for ( let b = 0; b < 1 << parts.length; b++ ) {
+    let p = 1, s = base;
+    for ( let j = 0; j < parts.length; j++ ) { const [l, w] = parts[j], lo = Math.floor(l), f = l - lo, up = (b >> j) & 1; p *= up ? f : 1 - f; s += (lo + up) * w; }
+    if ( p > 0 ) e += p * cl(Math.round(s / m));
+  }
+  return e;
 }
 
 /** The light's flicker at shared time `now` (ms): stepped at 12 Hz (pixel-art pace), smooth noise between steps, 1 = full. Pure. */
