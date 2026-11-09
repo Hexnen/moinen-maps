@@ -357,8 +357,10 @@ void crystals(vec2 p) {
     vec2 d = p - x;
     if ( abs(d.x) > 10.0 || d.y < -10.0 || d.y > 16.0 ) continue;
     float fid, cr;
-    bool inf = prog > 0.0 && frostAt(x, prog, fid, cr) < 0.0;
-    float melt = inf ? 0.0 : ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
+    // (in the frost it does not melt: by the frost's own cover there, so a frost edge moving over a melted crystal (its breathing, a
+    // strength ramp) brings it back gradually, never at full size in one step)
+    float inF = prog > 0.0 ? clamp(-frostAt(x, prog, fid, cr) / 0.08, 0.0, 1.0) : 0.0;
+    float melt = (1.0 - inF) * ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
     // lands: grows from a speck over 0.3 s (a little overshoot), then holds; melts or fades by shrinking
     float land = ss(0.0, 0.3, tau) * (1.0 + 0.15 * (1.0 - ss(0.3, 0.6, tau)));
     float R = R0 * land * (1.0 - melt) * (1.0 - gone) * min(1.0, 1.0 / r);
