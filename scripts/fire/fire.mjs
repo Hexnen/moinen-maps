@@ -61,9 +61,27 @@ function onCanvasReady() {
   if ( !canvas.scene ) return;
   load();
   prewarm();
+  if ( !warming ) idleWarm();
   draw();
   tell("loaded");
 }
+
+/**
+ * A scene that opens WITHOUT fire still warms the fire's programs, a few seconds after it opened, when the page is idle: the first
+ * stroke another client paints then shows at once. Before, the warm-up began only when that stroke arrived, and on a program-cache
+ * miss the art program alone links for 5-20 s on D3D11 (measured: 14 s, a fresh Chrome profile) - the player saw no fire that long.
+ * Background links only (KHR_parallel_shader_compile), nothing drawn: no pixel changes. Cancelled by a scene change (warmJob).
+ */
+let idleTimer = 0;
+function idleWarm() {
+  clearTimeout(idleTimer);
+  const job = warmJob;
+  idleTimer = setTimeout(() => {
+    const go = () => { if ( job === warmJob && !warming && !display ) prewarm(true); };
+    if ( globalThis.requestIdleCallback ) requestIdleCallback(go, { timeout: 2000 }); else go();
+  }, IDLE_WARM_MS);
+}
+const IDLE_WARM_MS = 3000;
 
 /**
  * The fire is about to be painted (the GM picked the fire or smoke tool, or opened the fire panel): its programs are warmed now, in
@@ -102,7 +120,7 @@ function prewarm(force = false) {
 }
 
 function teardown() {
-  warmJob++; warming = null;
+  warmJob++; warming = null; clearTimeout(idleTimer); idleTimer = 0;
   cancelAnimationFrame(drawFrame); drawFrame = 0;
   clearTimeout(phaseTimer); phaseTimer = 0;
   display?.destroy(); display = null;

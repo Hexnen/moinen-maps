@@ -133,3 +133,81 @@ console.log("vsync floor checks passed");
   assert.ok(rises <= 120000 / GUARD.bMax + 4, `hovering load: ${rises} rises in 120 s`);
   console.log(`hovering load: ${rises} rises / 120 s, q ${g.q.toFixed(2)}`);
 }
+
+/* ---------------------------------------------------------------- 2026-11-09: noise vs overload, the sticky vsync */
+{
+  const FG = await import("../scripts/frame-guard.mjs");
+  const OLD = { z: 0, noiseCap: 0 };   // (ENTER fixed at 0.3: the guard before the noise threshold)
+  const DISP = [[60, 1, 60], [144, 1, 0], [165, 3, 60], [240, 1, 0]];
+  // PURE NOISE (no overload: 0-20 % of the frames a vsync late at random), 120 s, 3 seeds: q stays at or near 1 at every cadence
+  for ( const [hz, k, cap] of DISP ) {
+    const P = 1000 / hz * k, row = [];
+    for ( const noise of [0, 0.05, 0.1, 0.15, 0.2] ) {
+      const m = {};
+      for ( const [nm, o] of [["old", OLD], ["new", {}]] ) {
+        let mq = 0, trips = 0;
+        for ( const seed of [1, 2, 3] ) {
+          const g = new FrameGuard(o), r = sim({ hz, k, cap, secs: 120, noise, seed, g, work: () => 0.5 * P });
+          const tl = r.rows.filter(([t]) => t > 10000); mq += tl.reduce((a, x) => a + x[1], 0) / tl.length / 3; trips += g.trips / 3;
+        }
+        m[nm] = { mq, trips };
+      }
+      row.push(`${noise}: old ${m.old.mq.toFixed(2)} new ${m.new.mq.toFixed(2)}`);
+      assert.ok(m.new.mq >= 0.97, `${hz} Hz noise ${noise}: pure noise keeps q near 1 (${m.new.mq.toFixed(3)})`);
+      assert.ok(m.new.trips <= 1.5, `${hz} Hz noise ${noise}: no overload taken from noise (${m.new.trips.toFixed(1)} trips / 120 s)`);
+    }
+    console.log(`pure noise ${hz} Hz (mean q, 120 s): ${row.join(" | ")}`);
+  }
+  // REAL OVERLOAD still trips as fast: 20 s of noise, then every frame 2 vsyncs late (or worse); ms to the first trip
+  const tripAt = (o, [hz, k, cap], noise, w, seed) => {
+    const P = 1000 / hz, Pk = P * k, L = lateTest({ period: P, k, cap }), g = new FrameGuard(o);
+    let s = seed, t = 0, tr0 = null; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+    while ( t < 30000 ) {
+      const on = t >= 20000; if ( on && tr0 === null ) tr0 = g.trips;
+      let n = Math.max(k, Math.ceil((on ? w * Pk : 0.5 * Pk) / P - 1e-9)); if ( rnd() < noise ) n += 1;
+      const dt = n * P; g.step(dt, L.frame, L.slack); t += dt;
+      if ( on && g.trips > tr0 ) return t - 20000;
+    }
+    return Infinity;
+  };
+  for ( const d of DISP ) for ( const noise of [0, 0.1, 0.2] ) for ( const w of [2.2, 1.15] ) {
+    let a = 0, b = 0;
+    for ( const seed of [1, 2, 3, 4, 5] ) { a += tripAt(OLD, d, noise, w, seed) / 5; b += tripAt({}, d, noise, w, seed) / 5; }
+    if ( noise === 0 ) assert.equal(b, a, `${d[0]} Hz: without noise an overload trips exactly as before`);
+    else assert.ok(b <= Math.max(a, 150) + 150 && b < 1500, `${d[0]} Hz noise ${noise} load ${w}: trips in ${b.toFixed(0)} ms (was ${a.toFixed(0)})`);
+  }
+  console.log("real overload trips as fast (no noise: identical; with noise: within 150 ms)");
+
+  // THE STICKY VSYNC (stickyVsync): reads once a second
+  const P165 = 1000 / 165, run = (secs, cand, busy, st, t0) => { let p; for ( let s = 1; s <= secs; s++ ) p = FG.stickyVsync(st, cand, busy, t0 + s * 1000); return p; };
+  let st = { period: null, longAt: null };
+  run(5, P165, 2, st, 0);
+  assert.ok(Math.abs(run(60, 4 * P165, 26, st, 5000) - P165) < 1e-9, "a CPU overload (every frame 4 vsyncs, 26 ms of work) for a minute: kept");
+  assert.ok(Math.abs(run(15, 4 * P165, 3, st, 65000) - P165) < 1e-9, "a GPU-bound multiple: kept for 15 s");
+  assert.ok(Math.abs(run(10, 4 * P165, 3, st, 80000) - 4 * P165) < 1e-9, "... taken after 20 s of nothing shorter (a real 4x slower display)");
+  st = { period: P165, longAt: null };
+  assert.ok(Math.abs(run(3, 1000 / 60, 3, st, 0) - P165) < 1e-9 && Math.abs(run(2, 1000 / 60, 3, st, 3000) - 1000 / 60) < 1e-9, "moved to a 60 Hz monitor: taken after ~4 s");
+  assert.ok(Math.abs(run(1, 1000 / 144, 3, st, 9000) - 1000 / 144) < 1e-9, "back on a faster monitor: at once");
+  st = { period: 1000 / 120, longAt: null };
+  assert.ok(Math.abs(run(19, 1000 / 60, 3, st, 0) - 1000 / 120) < 1e-9 && Math.abs(run(2, 1000 / 60, 3, st, 19000) - 1000 / 60) < 1e-9, "a laptop throttling 120 -> 60 Hz: taken after 20 s");
+  st = { period: P165, longAt: null };
+  assert.ok(Math.abs(run(30, 1000 / 60, 14, st, 0) - P165) < 1e-9, "a longer period explained by the frames' work is never taken");
+
+  // OLD vs NEW under a constant CPU overload at 165 Hz (k 1): 26 ms of work a frame (5 vsyncs, every frame), the ring of the last 120
+  // rAF intervals, the period re-read once a second: the old floor reads the overloaded interval after ~3 s and the guard goes blind
+  for ( const sticky of [false, true] ) {
+    const g = new FrameGuard(), ring = [], st2 = { period: null, longAt: null };
+    let t = 0, nextRead = 0, L = null, qAt = null, qMinSeen = 1;
+    while ( t < 40000 ) {
+      const on = t >= 10000, dt = on ? 5 * P165 : P165;
+      ring.push(dt + ((t * 7) % 3 - 1) * 0.05); if ( ring.length > 120 ) ring.shift();
+      if ( t >= nextRead ) { nextRead += 1000; const f = FG.vsyncFloor(ring); const p = sticky ? FG.stickyVsync(st2, f, on ? 26 : 2, t) : f; if ( p ) L = lateTest({ period: p, k: 1, cap: 0 }); }
+      if ( L ) g.step(dt, L.frame, L.slack); qMinSeen = Math.min(qMinSeen, g.q);
+      t += dt; if ( t > 20000 && qAt === null ) qAt = g.q;
+    }
+    console.log(`constant CPU overload 165 Hz, ${sticky ? "sticky vsync" : "old floor  "}: lowest q ${qMinSeen.toFixed(2)}, q at 10 s of overload ${qAt.toFixed(2)}, at 30 s ${g.q.toFixed(2)}`);
+    if ( sticky ) assert.equal(g.q, GUARD.qMin, "sticky: the overload stays seen (to the floor)");
+    else assert.ok(g.q > GUARD.qMin + 0.1, "old: went blind (q back up while the overload lasts)");
+  }
+}
+console.log("noise and sticky vsync checks passed");

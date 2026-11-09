@@ -109,7 +109,7 @@ const src = (p) => readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r
 const art = src("../scripts/fire/art.mjs");
 const disp = src("../scripts/fire/display.mjs");
 const block = (name) => art.slice(art.indexOf(`const ${name} = \``), art.indexOf("`;", art.indexOf(`const ${name} = \``)));
-const artSrc = block("ART_HEAD") + block("ART");   // (A8: the uniforms and helpers are shared with the EMB pass in ART_HEAD)
+const artSrc = block("ART_HEAD") + block("ART_TOP") + block("ART_F") + block("ART_S");   // (A8: helpers shared with EMB in ART_HEAD; the art pass is ART_F + ART_S, their common prologue ART_TOP)
 ok(/uniform vec2 uOrg;/.test(artSrc) && /vCell \+ uOrg/.test(artSrc), "ART samples world cells (uOrg)");
 ok(/uniform vec2 uOrg;/.test(block("FUEL")) && /\+ uOrg/.test(block("FUEL")), "FUEL samples world cells (uOrg)");
 ok(!/\buArea\b/.test(artSrc),"ART has no whole-area clock (per-cell clocks only)");
