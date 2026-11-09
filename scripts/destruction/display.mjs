@@ -16,6 +16,7 @@ import { GpuPieceBatch, STUB, gpuPiecesSupported } from "./piece-gpu.mjs";
 import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, ATONCE_JITTER, plainInfo, countSort, clockUpper, timeBytes } from "./entry-clock.mjs";
 import { ClockPool } from "./clock-pool.mjs";
 import { ErodeGPU, MAX_STAGES } from "./erode-gpu.mjs";
+import { dropTime, DROP_MS } from "./timed-core.mjs";
 
 /** Entering areas draw their pieces as one batched geometry each (piece-batch.mjs); `CONFIG.moinenMaps.noBatchRender = true`: sprites (A/B). */
 const batchOn = () => !globalThis.CONFIG?.moinenMaps?.noBatchRender;
@@ -302,7 +303,7 @@ export class DestructionDisplay {
         this.groups.set(r.hash, g); added.push(g);
       } else if ( !g ) {
         const i = this.dying.findIndex((q) => q.hash === r.hash);
-        if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); g.heldBy = null; g.cont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
+        if ( i >= 0 ) { g = this.dying[i]; this.dying.splice(i, 1); this.clearDrop(g); g.heldBy = null; g.cont.alpha = 1; for ( const p of g.pieces ) if ( p.spr ) p.spr.visible = true; g.reused = true; }
         // (an area that enters at once - a staged stroke put on screen by its show, entersNow - is not flattened: the entry took the flat
         // texture apart again at once, ~1.8 ms of GPU work an area in the show; see settleIdle when the entry does not happen)
         else { g = this.build(r, rgba, w, meta, null, !!this.entersNow?.(objects[r.index]?.id)); g.reused = false; }
@@ -313,7 +314,9 @@ export class DestructionDisplay {
     }
     const removed = [];
     for ( const [hash, g] of this.groups ) if ( !seen.has(hash) ) { this.groups.delete(hash); removed.push(g); }
-    for ( const g of removed ) this.retire(g);
+    // (a stroke a preset owns that is gone - not a new look of it - dissolves out pixel by pixel: dropsOut, destruction.mjs)
+    const kept = removed.length && this.dropsOut ? new Set(objects.map((o) => o?.id)) : null;
+    for ( const g of removed ) this.retire(g, !!kept && !!g.objId && !kept.has(g.objId) && this.dropsOut(g.objId));
     this.shellCount = next.reduce((a, g) => a + (g.shell ? 1 : 0), 0);
     if ( replaced ) this.cache?.invalidate();     // (the bands' members are other containers now; their pixels are the same)
     // erase strokes: plain map laid over everything painted before them (no bake)
@@ -682,11 +685,39 @@ export class DestructionDisplay {
    * instead: its pieces go as the new front passes them and it is removed when the entry ends, so the change is revealed along the
    * front (before, the unchanged part was cut out by a rectangle and showed as square blocks).
    */
-  retire(g) {
+  retire(g, drop = false) {
     this.endAnim(g);
     this.downGpu(g);       // (its pieces are flung by the front that replaces it: CPU poses)
     g.dieStart = performance.now();
+    if ( drop ) this.dropOut(g);
     this.dying.push(g);
+  }
+
+  /**
+   * An area that leaves for good (a preset's stroke undone) dissolves out over ~DROP_MS: a mask of its whole rect, art pixel by art
+   * pixel, rim first and heart last, broken up by noise (timed-core.mjs dropTime) - never an edge, never a square; what lies under it
+   * shows through where it has gone. Reduced motion / perf Low / entries off: a plain fade of the same length.
+   */
+  dropOut(g) {
+    const r = g.info?.rect;
+    if ( !r || g.shell || reducedMotion() || perfMode() === "low" || !this.look.entry || g.cont?.destroyed ) { g.outDur = DROP_MS; return; }
+    const m = 2, x0 = Math.floor(r.x0) - m, y0 = Math.floor(r.y0) - m, w = Math.ceil(r.x1) + m - x0, h = Math.ceil(r.y1) + m - y0;
+    if ( w <= 0 || h <= 0 || w * h > 4e6 ) { g.outDur = DROP_MS; return; }
+    const data = new Uint8Array(w * h * 4).fill(255);
+    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2, R = Math.max(4, Math.hypot(r.x1 - r.x0, r.y1 - r.y0) / 2), seed = g.hash | 0;
+    const D = this.makeDissolve(data, w, h, x0, y0, (x, y) => dropTime(x, y, cx, cy, R, (a, b) => vnoise(a, b, seed), (a, b) => hash2(a | 0, b | 0, seed ^ 0x5bd1)), true);
+    const spr = new PIXI.Sprite(new PIXI.Texture(D.tex));
+    spr.eventMode = "none"; spr.scale.set(this.ap); spr.position.set(this.origin.x + x0 * this.ap, this.origin.y + y0 * this.ap);
+    g.cont.addChild(spr); g.cont.mask = spr;
+    g.drop = { D, spr };
+  }
+  /** The dissolve of a leaving area let go of (it is gone, or came back: an undo redone). */
+  clearDrop(g) {
+    g.outDur = null;
+    const d = g.drop; if ( !d ) return;
+    g.drop = null;
+    if ( g.cont && !g.cont.destroyed ) { if ( g.cont.mask === d.spr ) g.cont.mask = null; g.cont.removeChild(d.spr); }
+    d.spr.destroy(); d.D.tex.destroy(true);
   }
 
   /** The plain map, as the scene draws it (same texture and placement as the background), for patches. */
@@ -902,6 +933,7 @@ export class DestructionDisplay {
    * shows it again at once instead of building and uploading it again. The oldest beyond SPARE are destroyed.
    */
   stash(g) {
+    this.clearDrop(g);
     g.heldBy = null; g.fade = null;
     if ( !g.batch?.gpu ) for ( const p of g.pieces ) { if ( p.spr && !p.spr.destroyed ) this.place(p, 2, null, g.info.type); }   // back where it lies (a newer front may have flung it)
     g.cont.alpha = 1;
@@ -911,6 +943,7 @@ export class DestructionDisplay {
   }
 
   kill(g) {
+    this.clearDrop(g);
     g.dead = true;
     this.endAnim(g);
     for ( const p of g.pieces ) p.spr?.texture?.destroy(false);
@@ -940,7 +973,7 @@ export class DestructionDisplay {
    * (follows the stroke only), `under` older looks of the same stroke kept underneath until it is in, `path` [[x, y, ms], ...]: the
    * front runs along the brush path at the drawing speed.
    */
-  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null, simul = false } = {}) {
+  enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null, simul = false, strict = false } = {}) {
     this.enterQueue?.delete(g);
     this.endAnim(g);
     const now = performance.now();
@@ -966,9 +999,14 @@ export class DestructionDisplay {
     for ( const u of under ) { if ( u.flat ) { this.unflatten(u); this.materialize(u, Infinity); } else this.downGpu(u); }
     // the entry's clock (entry-clock.mjs, shared with the clock worker): the kind's, tuned by the cause (rot creeps, lightning
     // strikes, arcane spirals); a tear's and a cave-in's own
-    const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (this.look.speed || 1)) * (Cause.causeLook(info.cause)?.slow ?? 1));
+    // (a timed stroke, timed-core.mjs: its path times are the hits' own moments - the front runs them in real time, whatever the
+    // entry speed and the cause's pace, and reaches the first hit at its start; pathTimes stretches a run to 350..2200 ms otherwise)
+    const slow = Cause.causeLook(g.info.cause)?.slow ?? 1, T = strict && path?.length > 1 ? path.at(-1)[2] || 0 : 0;
+    const spd = T > 0 ? slow / (T / Math.min(2200, Math.max(350, T))) : this.look.speed;
+    const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (spd || 1)) * slow);
     lapE("unflat");
-    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: this.look.speed, pathFront, simul });
+    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: spd, pathFront, simul });
+    if ( T > 0 && pathFront && !C.tear && info.type !== "collapse" ) start -= C.delay;
     const { CL, L, k, ox, oy, Rmax, tear, seed, noise, atOnce } = C;
     const r = info.rect;
     // a cave-in has its own clock too (collapse-entry.mjs): anticipation, then the rings slump from the rim inwards
@@ -979,7 +1017,7 @@ export class DestructionDisplay {
     const arrive = coll ? coll.arrive : C.arrive;
     const pixelTime = coll ? coll.pixelTime : C.pixelTime;
     // what the clock worker needs to make the same clock (clock-worker.mjs)
-    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: this.look.speed, simul, coll: null };
+    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: spd, simul, coll: null };
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
@@ -1065,6 +1103,7 @@ export class DestructionDisplay {
       path: pathFront, end: start + delay + reveal + band + 1600 * k, fired: new Set(), type: info.type, k, pw,
       reach: (x, y) => start + arrive(x, y), seed };
     g.anim.cl = CL; g.glowIn = 0;
+    if ( strict ) g.anim.strict = true;       // (a timed stroke, timed-core.mjs: not one pixel of its ruin before its start - the impact is the moment)
     if ( coll ) { g.anim.coll = coll; g.anim.end = Math.max(g.anim.end, coll.endBy + 200 * k); }
     if ( gpu ) this.gpuEnter(g, g.anim, gmode);
     lapE("gpuEnter");
@@ -1255,7 +1294,7 @@ export class DestructionDisplay {
    * until it has gone, so nothing old flashes back.
    */
   fadeAll() {
-    for ( const g of this.groups.values() ) this.retire(g);
+    for ( const g of this.groups.values() ) this.retire(g, !!g.objId && !!this.dropsOut?.(g.objId));     // (a preset's stroke dissolves out: dropOut)
     this.groups.clear(); this.order = [];
     const t = performance.now() + 320;
     for ( const e of this.erasers.values() ) { e.leaving = true; e.killAt = t; }
@@ -1336,6 +1375,7 @@ export class DestructionDisplay {
    * dissolving edge itself carries the dust, embers, spray or sparks. One upload per frame, only while something changed.
    */
   erode(g, a, now, onScreen, maxPx = Infinity) {
+    if ( a.strict && now < a.start ) return 0;
     if ( a.crev?.gpu ) this.coverGpu(g, a, now);
     else if ( a.crev ) { this.stepDissolve(a.crev, now - a.start); if ( a.crev.shown && g.patch && !g.patch.renderable ) g.patch.renderable = true; }
     const R = a.rev;
@@ -1715,6 +1755,11 @@ export class DestructionDisplay {
     }
     for ( let i = this.dying.length - 1; i >= 0; i-- ) {
       const g = this.dying[i], h = g.heldBy;
+      // a preset's area leaving for good: its dissolve runs to the end, then it is put aside like any faded area
+      if ( g.drop && !h ) {
+        if ( !this.stepDissolve(g.drop.D, t0 - g.dieStart) && t0 - g.dieStart > g.drop.D.end ) { this.dying.splice(i, 1); this.stash(g); this.onGone?.(g); }
+        continue;
+      }
       if ( h && !h.dead && (h.anim || h.fade) ) {
         // under the area that replaced it: whole until the new front (or the cross-fade) has passed; its pieces go with the front
         g.dieStart = t0;
@@ -1734,7 +1779,7 @@ export class DestructionDisplay {
         }
         continue;
       }
-      const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / 260);
+      const f = h && !h.dead ? 1 : clamp01((t0 - g.dieStart) / (g.outDur ?? 260));
       g.cont.alpha = 1 - f;
       if ( f >= 1 ) { this.dying.splice(i, 1); this.stash(g); this.onGone?.(g); }     // (the flooded holes let go of the water of an area that has faded out: flood.mjs sync)
     }

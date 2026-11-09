@@ -31,6 +31,12 @@
  * height } (the scene), now (shared clock ms), wind { dir, speed } }. Returns a PLAN (see expand) or throws on a bad definition.
  */
 export const VERSION = 1;
+/**
+ * The longest run (ms) of one timed damage stroke along a walk. The damage layer's entry runs a followed path in at most 2200 ms
+ * (entry-clock.mjs pathTimes), so a longer walk is cut into runs of this length, each its own stroke starting at its first hit: every
+ * hit then opens at its own moment. A run's path times count from its first hit (its `at`).
+ */
+export const RUN_MS = 2000;
 export const GESTURES = ["point", "throw", "line", "run"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
@@ -305,11 +311,19 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         groups.forEach((g, j) => {
           if ( !g.length ) return;
           const discs = g.map((p) => [round(p.x, 10), round(p.y, 10), round(r.range(L.r) * sq, 10), levelOf(L, r, power)]);
-          const path = L.place.m === "walk" && g.length > 1 ? g.map((p) => [round(p.x, 10), round(p.y, 10), p.t]) : null;
-          const first = path ? path[0] : [c[0], c[1]], last = path ? path.at(-1) : null;
-          plan.destruction.push({ key: groups.length > 1 ? `${L.id}.${j}` : L.id, type: L.type, cause: L.cause, discs, path,
-            a: [round(first[0], 10), round(first[1], 10)], b: last ? [round(last[0], 10), round(last[1], 10)] : null,
-            pr: L.place.m === "walk" ? { ...(L.pr ?? {}), directional: L.pr?.directional ?? true } : L.pr ?? null, at: at + (g[0].t ?? 0) });
+          // a walk: runs of at most RUN_MS (each hit opens at its own moment); anything else: one stroke
+          const runs = [];
+          if ( L.place.m === "walk" ) { let cur = null; g.forEach((p, i) => { if ( !cur || (p.t ?? 0) - cur.t0 > RUN_MS ) runs.push(cur = { t0: p.t ?? 0, idx: [] }); cur.idx.push(i); }); }
+          else runs.push({ t0: g[0].t ?? 0, idx: g.map((_, i) => i) });
+          const key0 = groups.length > 1 ? `${L.id}.${j}` : L.id;
+          runs.forEach((run, k) => {
+            const pts = run.idx.map((i) => g[i]);
+            const path = L.place.m === "walk" && pts.length > 1 ? pts.map((p) => [round(p.x, 10), round(p.y, 10), Math.round((p.t ?? 0) - run.t0)]) : null;
+            const first = path ? path[0] : L.place.m === "walk" ? [pts[0].x, pts[0].y] : [c[0], c[1]], last = path ? path.at(-1) : null;
+            plan.destruction.push({ key: runs.length > 1 ? `${key0}~${k}` : key0, type: L.type, cause: L.cause, discs: run.idx.map((i) => discs[i]), path,
+              a: [round(first[0], 10), round(first[1], 10)], b: last ? [round(last[0], 10), round(last[1], 10)] : null,
+              pr: L.place.m === "walk" ? { ...(L.pr ?? {}), directional: L.pr?.directional ?? true } : L.pr ?? null, at: at + Math.round(run.t0) });
+          });
         });
         break;
       }

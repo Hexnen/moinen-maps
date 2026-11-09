@@ -16,7 +16,9 @@ const zoneLabel = (id) => { try { return zoneName(id); } catch { return String(i
  *   - zones: a zone newly wrecked (quake), on fire, flooded, or with a new state of the GM's (dark, ice, low gravity: GM only while the
  *     zones are hidden from the players);
  *   - orbit: a token leaving for orbit (deleteToken with options.mmOrbit.dir "up") and one landing (createToken, "down");
- *   - altitude and floors: a token's flags alt / floor.
+ *   - altitude and floors: a token's flags alt / floor;
+ *   - destruction presets (scripts/presets): ONE event per firing (its record in flags.presetFirings), never one per stroke - the
+ *     firing's destruction strokes (ps) and fire / smoke strokes (named in its record) are skipped above.
  * A hidden token makes its event GM-only; a token's name travels only when every player may read it (publicName).
  */
 
@@ -30,6 +32,8 @@ const TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 const TYPE_K = { blast: 1.15, collapse: 1.25, scorch: 0.75, flood: 1, cracks: 0.6, gash: 0.95 };
 const MK = 2;                                    // mask px per art px (destruction model K)
 let dIds = null;                                 // stroke ids known on this scene
+let pIds = null;                                 // firing ids known on this scene (presets)
+const owned = new Set();                         // fire / destruction stroke ids a firing names (its record): the firing tells them
 
 function strokeBox(o, ap) {
   const r = canvas.dimensions.sceneRect, m = ap * MK;
@@ -39,6 +43,7 @@ function onDestruction(objs, scene, apIn = null) {
   const ap = Number(apIn ?? flagsOf(scene).destruction?.ap) || 1;
   for ( const [id, o] of Object.entries(objs) ) {
     if ( id.startsWith("-=") || !o || typeof o !== "object" || o.k || o.cin ) continue;      // erase strokes; staged / show strokes (the show plays them)
+    if ( o.ps || owned.has(id) ) { dIds?.add(id); continue; }                               // a preset's stroke: its firing is the event (onFirings)
     if ( dIds.has(id) ) continue;
     dIds.add(id);
     if ( !live() || !Number.isFinite(o.x0) || !Number.isFinite(o.w) ) continue;
@@ -74,6 +79,30 @@ function onDestructionHook(kind) {
   if ( Object.keys(fresh).length ) onDestruction(fresh, canvas.scene, S.ap);
 }
 
+/* ---------------------------------------------------------------- presets */
+
+/** The strokes a firing record names (so their own sources stay quiet). */
+function own(rec) {
+  for ( const k of ["d", "f"] ) for ( const q of Array.isArray(rec?.[k]) ? rec[k] : [] ) if ( typeof q?.id === "string" ) owned.add(q.id);
+}
+/** A new firing: one event at its impact, framing what it reaches; weight from the preset's size and power. */
+function onFirings(recs) {
+  for ( const [id, r] of Object.entries(recs) ) {
+    if ( id.startsWith("-=") || !r || typeof r !== "object" ) continue;
+    own(r);
+    if ( pIds.has(id) ) continue;
+    pIds.add(id);
+    if ( !live() || !Array.isArray(r.at) || !Number.isFinite(r.at[0]) || !Number.isFinite(r.at[1]) ) continue;
+    const g = grid(), size = Math.max(0.25, Number(r.size) || 1), reach = g * size * 1.5;
+    let box = Dir.pointBox(r.at[0], r.at[1], reach);
+    for ( const h of Array.isArray(r.walk?.hits) ? r.walk.hits : [] ) if ( Number.isFinite(h?.[0]) && Number.isFinite(h?.[1]) ) box = Dir.unionBox(box, Dir.pointBox(h[0], h[1], g * size * 0.5));
+    const span = Math.max(box.x1 - box.x0, box.y1 - box.y0), power = Number(r.power) || 0;
+    const c = r.walk?.hits?.length ? Dir.boxCentre(box) : { x: r.at[0], y: r.at[1] };
+    emit({ kind: "destruction", src: "destruction", id: `p-${id}`, ref: id, weight: Dir.clamp(0.35 + 0.1 * power + 0.5 * Dir.sizeWeight(span, g, 1.15), 0, 1), box, x: c.x, y: c.y,
+      caption: { key: "Dir.cap.blast", data: {} } });
+  }
+}
+
 /* ---------------------------------------------------------------- fire */
 
 let fIds = null;
@@ -82,6 +111,7 @@ function onFire(strokes, scene) {
   for ( const [id, s] of Object.entries(strokes) ) {
     if ( id.startsWith("-=") || !s || typeof s !== "object" ) continue;
     if ( fIds.has(id) ) continue;
+    if ( owned.has(id) ) { fIds.add(id); continue; }                                        // a preset's fire / smoke: its firing is the event
     fIds.add(id);
     if ( !live() || s.k === "erase" || s.o !== undefined || !Array.isArray(s.p) || s.p.length < 2 ) continue;
     const r = Number(s.r) || grid() * 0.5;
@@ -166,6 +196,7 @@ function onUpdateToken(doc, changed) {
 function onUpdateScene(scene, changed) {
   if ( scene.id !== canvas.scene?.id ) return;
   const f = changed?.flags?.[MODULE_ID]; if ( !f ) return;
+  if ( f.presetFirings && typeof f.presetFirings === "object" && pIds ) onFirings(f.presetFirings);       // (first: it names the strokes written with it)
   if ( f.destructionObjects && typeof f.destructionObjects === "object" && dIds ) onDestruction(f.destructionObjects, scene);
   if ( f.fireStrokes && typeof f.fireStrokes === "object" && fIds ) onFire(f.fireStrokes, scene);
 }
@@ -173,13 +204,15 @@ function onCanvasReady() {
   const f = flagsOf(canvas.scene);
   dIds = new Set(Object.keys(f.destructionObjects ?? {}));
   fIds = new Set(Object.keys(f.fireStrokes ?? {}));
+  pIds = new Set(Object.keys(f.presetFirings ?? {}));
+  owned.clear(); for ( const r of Object.values(f.presetFirings ?? {}) ) own(r);
   zSnap = null;
   // (the zones are worked out after canvasReady: their "loaded" takes the first snapshot)
 }
 
 export function registerSources() {
   Hooks.on("canvasReady", onCanvasReady);
-  Hooks.on("canvasTearDown", () => { dIds = fIds = zSnap = null; });
+  Hooks.on("canvasTearDown", () => { dIds = fIds = pIds = zSnap = null; owned.clear(); });
   Hooks.on("updateScene", onUpdateScene);
   Hooks.on("moinenMapsZones", onZones);
   Hooks.on("moinenMapsDestruction", onDestructionHook);
@@ -187,4 +220,4 @@ export function registerSources() {
   Hooks.on("createToken", onCreateToken);
   Hooks.on("updateToken", onUpdateToken);
 }
-export const _sources = { snap: () => ({ d: dIds?.size ?? null, f: fIds?.size ?? null, z: zSnap?.size ?? null }) };
+export const _sources = { snap: () => ({ d: dIds?.size ?? null, f: fIds?.size ?? null, p: pIds?.size ?? null, z: zSnap?.size ?? null }) };

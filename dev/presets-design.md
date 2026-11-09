@@ -522,3 +522,58 @@ The four questions asked here were answered by the user; P1 is built on these an
   timed path; the bomb's crater its torn border.
 - **Not checked:** the remote host, a GTX 1080 machine, how it looks (P1 writes the parts that exist; the burst, the new dust kinds
   and the accents are still missing, so the presets do not read as finished yet).
+
+## 12. P2 as built (the destruction hooks, G5 / G6 / G10)
+
+- **Timed strokes** (`scripts/destruction/timed-core.mjs`): a stroke may carry `at` (its entry start on the shared clock) and `ps`
+  (its firing). Neither is part of any signature, so the bake, the chunks and the bake key are the same as without them.
+  - Every client, the GM too, keeps the stroke off the screen until `at` − LEAD (cinematic LEAD, 450 ms). Then it shows it again and
+    enters it with a start in the future (`timedEnter`).
+  - A late chunk enters from now, up to 1.5 s past `at`. After that it is shown settled (a soft fade).
+  - A start more than 60 s ahead is not believed: the stroke is never held for ever.
+  - A staged stroke (cinematic mode) is timed by its show, as before.
+  - A timed entry is strict: not one pixel of the ruin shows before its start. Its path runs in real time (the path times are the
+    hits' own moments, whatever the entry speed and the cause's pace). Every other entry is unchanged.
+- **API** (`api.destruction`):
+  - `paintStroke({ discs | mask, type, level, cause, path, pr, at, ps, id, a, b })` returns the stroke id;
+  - `removeStrokes(ids)`;
+  - `saveNow()`.
+- **Undo** (G6):
+  - The brush's undo skips `ps` strokes. Redo puts a stroke back under preset strokes painted after it, which is the order a reload
+    gives.
+  - A preset stroke that goes dissolves out on every client in about 0.6 s, art pixel by art pixel: rim first, heart last, broken
+    up by noise. Every other area fades as before (260 ms).
+  - `api.presets.undo(fid)`:
+    - the damage dissolves out;
+    - fire and smoke go out from now (`o` = now; one that has not caught yet is dropped);
+    - the record goes.
+- **Writer:** the LEAD stand-in is gone. The destruction strokes are painted at once with `at` = T0 + offset and `ps` = the firing,
+  and saved at once.
+- **Walk runs:** the display runs a followed path in at most 2200 ms, so the expander cuts a walk into runs of at most
+  `RUN_MS` = 2000 ms. Each run is its own stroke from its first hit; its path times count from 0. The keys are `lanes.0~0`,
+  `lanes.0~1`, ...
+- **Director** (G10): the sources skip `ps` strokes and the fire / smoke strokes a firing record names. Each new firing record
+  emits one `destruction` event, weighted by the preset's size and power, framing its impact and its walk.
+
+### P2 checks (2026-11-09, lane 2, RTX 3070 Ti)
+
+- `node dev/run-all.mjs` 74/74, with the new `dev/presets-timed.test.mjs` (31 checks: phases, old strokes unchanged, signatures
+  with and without `at` / `ps`, undo / redo order, the dissolve's timing, walk runs, wiring).
+- **Unused = unchanged, hash A/B** against 8b0f9d7, two runs per build:
+  - empty scene: the whole frame's hash is identical (`k2c4fq`);
+  - 91 settings and 15 ticker listeners on both builds;
+  - the brush-painted scene: records `cd5i5kb` and stored strokes `8908yg` on both builds.
+- **A real player (Test Gracz 1) against the GM**, entry start minus `at`:
+  - one firing at a time: the bomb −1 ms and the uzi +1 ms on the player, 0 ms on the GM;
+  - the heli's four runs: 0..1 ms on both;
+  - every heli hit is reached by the damage front at its own moment: 0 ms on the player, 0..1 ms on the GM (24 path points);
+  - no ruin pixel before the start.
+- **Four firings at once:** the GM bakes them one after another. On the player the bomb started +174 ms late and the uzi +753 ms
+  late, because the uzi's pre-roll is 600 ms. Each entered late, as designed. The pre-rolls are P8's question.
+- **Undo of a firing, on the player:** the crater dissolved in about 0.5 s, art pixel by art pixel with a ragged edge. This held
+  alone and next to a plain stroke that stayed.
+- **Director:** a bomb plus a heli firing gave 2 events (one each); a brush stroke still gives 1.
+- **Not checked:**
+  - the remote host;
+  - a GTX 1080;
+  - the fire layer's going-out after `undo` (written as data, not watched).
