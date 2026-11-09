@@ -2,7 +2,7 @@
 //   node dev/tools/preset-rec.mjs <cdpPort> <urlPrefix> <out.webm> <json opts>
 //   opts { scene: "ZZ-pol-day", id: "bomb", a: [x, y], b?: [x, y], from?, at?: [x, y] (view centre, default a / mid a-b), zoom: 1, ms: 12000,
 //          seed: 7, pre: 600 (ms recorded before the click), crop?: [x, y, w, h] (CSS px of the page, a region captured at full DPR),
-//          ui: false (hide the Foundry interface) }
+//          ui: false (hide the Foundry interface), from?: [x, y] + fr?: px (a shooter: its centre and radius) }
 // The screencast frames are resampled to 30 fps (the frame shown at each 1/30 s), vp9 webm. Prints { frames, secs, maxGapMs, t0Lag }.
 // Only scenes named ZZ-... are wiped (guns-cost wipe).
 import { spawn } from "node:child_process";
@@ -18,7 +18,7 @@ const prep = await c.ev(`
   const sc = game.scenes.getName(o.scene); if ( !sc ) throw new Error("no scene " + o.scene);
   if ( canvas.scene?.id !== sc.id ) { await sc.view(); await new Promise((r) => setTimeout(r, 4000)); }
   const G = await import("/modules/moinen-maps/dev/guns-cost.mjs"); await G.wipe();
-  for ( const id of ["interface", "invincible-combat-bar", "notifications", "pause"] ) { const I = document.getElementById(id); if ( I ) I.style.visibility = o.ui ? "" : "hidden"; }
+  for ( const id of ["interface", "invincible-combat-bar", "notifications", "pause", "mm-orbit-strip", "hud"] ) { const I = document.getElementById(id); if ( I ) I.style.visibility = o.ui ? "" : "hidden"; }
   const at = o.at ?? (o.b ? [(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2] : o.a);
   canvas.pan({ x: at[0], y: at[1], scale: o.zoom, duration: 0 });
   await new Promise((r) => setTimeout(r, 2500));
@@ -52,7 +52,7 @@ const fired = await c.ev(`
   const P = game.modules.get("moinen-maps").api.presets;
   // (o.off: layer ids switched off - a diagnosis of which layer draws what)
   const def = o.def ? o.def : o.off ? { ...P.get(o.id), id: o.id + "-diag", layers: P.get(o.id).layers.filter((l) => !o.off.includes(l.id)) } : o.id;
-  const rec = await P.fire(def, { a: o.a, ...(o.b ? { b: o.b } : {}), ...(o.from ? { from: o.from } : {}) }, { seed: o.seed, ...(o.opts ?? {}) });
+  const rec = await P.fire(def, { a: o.a, ...(o.b ? { b: o.b } : {}), ...(o.from ? { from: o.from } : {}), ...(o.fr ? { fr: o.fr } : {}) }, { seed: o.seed, ...(o.opts ?? {}) });
   const t0 = rec?.plan?.t0 ?? null;
   if ( o.clock && t0 ) {
     // (diagnosis only: a label with the shared clock relative to the impact, in every frame)

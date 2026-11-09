@@ -160,7 +160,7 @@ function teardown() {
   clearTimeout(compositeTimer); compositeTimer = 0; compositeTries = 0; lastDark = null; clearTimeout(settleTimer); settleTimer = 0; settleTries = 0;
   if ( display?.composite ) { display.composite.destroy(); display.composite = null; }
   compositeShown?.destroy(); compositeShown = null; reshow = null; lastShow = null; cinePlays.clear(); Cine.reset();
-  for ( const t of timedTimers.values() ) clearTimeout(t); timedTimers.clear(); presetSeen.clear();
+  for ( const t of timedTimers.values() ) clearTimeout(t); timedTimers.clear(); presetSeen.clear(); gunSeen.clear();
   display?.destroy(); display = null;
   S = null; shownKey = ""; shownMask = null; strokes = []; again = null; forceEntry = false;
   played.clear(); entryLog.clear(); playedBlast = null; loaded = false; lastRecs = null;
@@ -235,6 +235,7 @@ const cinePlays = new Map();           // stroke id -> { start, o, d, real, unti
 // TIMED strokes (a preset's, timed-core.mjs): off the screen until LEAD before their `at`, then entered with a start in the future
 const timedTimers = new Map();         // stroke id -> the timer that shows it again at its moment
 const presetSeen = new Set();          // ids of strokes a preset owns (ps) seen here: when one goes, its areas dissolve out (display.dropsOut)
+const gunSeen = new Set();             // of those, a gun's walked pocks (a timed path of small discs): a faint night rim (display.gunPocks)
 /** Is a stroke held off this client's screen because it is timed and its moment has not come yet? (A staged stroke's show times it.) */
 const holdsTimed = (o) => !!o && !o.cin && Timed.phase(o, now(), { lead: Cin.LEAD })?.k === "hold";
 /** Held off this client's screen: staged (cinematic.mjs) or timed. */
@@ -768,6 +769,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
     // CINEMATIC: a staged stroke is baked and fetched like any other but not put on screen until its show (cinematic.mjs)
     const ob = S.objects[w.index];
     if ( ob?.ps ) presetSeen.add(ob.id);
+    if ( ob?.ps && ob.path?.length > 1 && ob.discs?.length > 1 && ob.discs.every((c) => c[2] <= 0.22 * (canvas.grid?.size ?? 100)) ) gunSeen.add(ob.id);
     if ( Cine.holds(ob) ) { heldIds.push(w.objId); continue; }
     // TIMED (a preset's stroke): off the screen until LEAD before its start; then shown again (armTimed) and entered (playEntries)
     if ( holdsTimed(ob) ) { heldIds.push(w.objId); armTimed(ob); continue; }
@@ -798,6 +800,7 @@ function showRecs(want, objs, taken, mask, first, soft = false, allow = null) {
   }
   display.entersNow ??= (id) => !!id && cinePlays.has(id);       // (CINEMATIC: a staged stroke's areas built to enter at once, not flattened first)
   display.onGone ??= () => tell("gone");
+  display.gunPocks ??= (id) => gunSeen.has(id);         // (cause-fx tickLights: a gun's small pocks get a faint rim, not white-speckled lips)
   display.dropsOut ??= (id) => presetSeen.has(id);      // (a preset's stroke that goes - an undone firing - dissolves out pixel by pixel)        // (an area finished fading out: the flooded holes that were kept for its water are let go)
   display.pixelSource ??= pixelSource;
   display.setIdle(S.params.idle, S.params.fxWho); display.setLook(lookOf(S.params));

@@ -18,6 +18,7 @@
 /** The palette: white-hot, yellow, orange, red, ember, pale (the bullet streak / a glint); the thrown and dropped things: iron
  * (a bomb's body, a grenade's band), metal light, olive (a grenade), dust (kicked up where a grenade lands). */
 import { LANDING_KINDS, landingSpan, landingDraw } from "./landing-fx.mjs";   // (the superhero landing's accents: landing-fx.mjs)
+import { spurts, SPURT } from "./gun-fx.mjs";   // (a gun's hit spurts: gun-fx.mjs)
 
 export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8, 0x27231f, 0x8d867a, 0x505b33, 0xb3a68d];
 /** How much each palette colour lights itself at night (its emission, 0..1; 0: lit by the scene only, never by itself). */
@@ -39,7 +40,7 @@ export const TRACER_MS = 210, STREAK_MS = 85, RICO_MS = 200;
  * from above (the helicopter's guns are high up) - a shallow one read as a flat line across the map. */
 export const TRACER_BACK = 3.2, TRACER_UP = 7.5;
 /** The hit flash (ms): the big star, then the small one; the ground glow's life (ms). */
-export const FLASH_MS = [55, 125], GLOW_MS = 150;
+export const FLASH_MS = [55, 125], GLOW_MS = 210;
 /** The muzzle flash (ms) and the bullet's speed (squares a second; the streak takes at least BULLET_MIN ms). */
 export const MUZZLE_MS = 50, BULLET_SQ = 160, BULLET_MIN = 25;
 /** A round's flight from a shooter takes at most this long (ms): the muzzle's and the tracers' lead before their first hit. */
@@ -96,6 +97,8 @@ export function spanOf(item) {
   const lo = Math.min(...ts), hi = Math.max(...ts);
   if ( item.kind === "tracer" ) return [lo - (Array.isArray(item.from) ? BULLET_MAX : TRACER_MS), hi + RICO_MS];
   if ( item.kind === "muzzle" ) return [lo - BULLET_MAX, hi + MUZZLE_MS];
+  // (a hit's spurt of soil, gun-fx.mjs, outlives its flash and sparks)
+  if ( item.kind === "hitFx" ) return [lo, hi + Math.max(AFTER_MS, SPURT[(item.lv ?? 1) >= 3 ? "heavy" : "light"].L)];
   return [lo, hi + AFTER_MS];
 }
 
@@ -113,7 +116,7 @@ export function draw(items, t0, now, env, F) {
     if ( t < sp[0] ) continue;
     const seed = ((env.seed ?? 1) + k * 7919) | 0;
     if ( it.kind === "tracer" ) tracers(it, t, env, F, seed);
-    else if ( it.kind === "hitFx" ) hitFx(it, t, env, F, seed);
+    else if ( it.kind === "hitFx" ) { hitFx(it, t, env, F, seed); spurts(it, t, F, seed); }
     else if ( it.kind === "muzzle" ) muzzle(it, t, env, F, seed);
     else if ( it.kind === "fallShadow" ) fallShadow(it, t, env, F, seed);
     else if ( it.kind === "throwArc" ) throwArc(it, t, env, F, seed);
@@ -221,7 +224,9 @@ function hitFx(it, t, env, F, seed) {
     if ( tau < FLASH_MS[0] ) star(F, env, h[0], h[1], zf, { arm: heavy ? 3 : 2, side: heavy ? 2 : 1, dir: d, big: lv >= 2 });
     else if ( tau < FLASH_MS[1] ) star(F, env, h[0], h[1], zf, { arm: 1, side: 1, dir: d, big: false, c0: 1, c1: 2, c2: 3 });
     // the GROUND GLOW (night: lights the ground round the hit)
-    if ( tau < GLOW_MS ) { const f = 1 - tau / GLOW_MS; F.glows.push(h[0], h[1], (heavy ? 0.85 : 0.55) * g, f * f * (heavy ? 0.9 : 0.6), 2); }
+    // (a heavy round's lasts longer and reaches farther; white-yellow in its first instant, then orange: the hit reads at night)
+    const GM = heavy ? GLOW_MS * 1.35 : GLOW_MS;
+    if ( tau < GM ) { const f = 1 - tau / GM; F.glows.push(h[0], h[1], (heavy ? 1.15 : 0.75) * g, f * f * (heavy ? 1 : 0.8), tau < 45 ? 1 : 2); }
     // the RUMBLE share
     if ( it.shake && tau < 140 ) F.kicks.push(h[0], h[1], it.shake * (1 - tau / 140));
     // SPARKS: out and up, falling back, cooling
