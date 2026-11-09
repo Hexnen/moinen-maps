@@ -1,6 +1,6 @@
-// THE SUPERHERO LANDING preset (dev/presets-design.md section 18): the definition, the rays place (rays.mjs), the two accents
-// (landing-fx.mjs) and their wiring, the token landing of a point gesture - and that the four older presets expand and draw exactly
-// as they did at eb85f59 (the baseline tree from git).
+// THE SUPERHERO LANDING preset (dev/presets-design.md section 20): the definition, the rays place (rays.mjs), the two accents
+// (landing-fx.mjs) and their wiring, the token landing of a point gesture - and that the older presets expand and draw exactly
+// as they did at c7babb0 (main when the landing was merged: the baseline tree from git).
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -130,10 +130,10 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   ok(/def\.onToken \? tokenAt\(cursor\) : null/.test(aim) && /\|\| def\.onToken\) \? tokenAt\(at\)/.test(aim), "E the aim passes the token only to an onToken preset");
 }
 
-/* F the older presets: the same plans and accent frames as at eb85f59 */
+/* F the older presets (main at c7babb0: the four military + the lightning strike): the same plans and accent frames */
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-land-"));
-  revTree(root, "eb85f59", "scripts/presets", tmp);
+  revTree(root, "c7babb0", "scripts/presets", tmp);
   const imp = (f) => import(pathToFileURL(path.join(tmp, f)).href);
   const [C0, D0, A0] = await Promise.all([imp("core.mjs"), imp("defs.mjs"), imp("accents-core.mjs")]);
   const g = { point: { a: [600, 500] }, throw: { a: [400, 500], b: [600, 520] }, line: { a: [300, 300], b: [600, 420], from: [280, 290] }, run: { a: [200, 700], b: [900, 600] } };
@@ -149,7 +149,7 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
       for ( let t = -1600; t < 3000; t += 70 ) if ( J(A0.draw(i0, 0, t, env, A0.newFrame())) !== J(A.draw(i1, 0, t, env, A.newFrame())) ) frames = false;
     }
   }
-  ok(same, "F the four older presets: definitions and plans unchanged");
+  ok(same, `F the ${D0.BUILTIN.length} older presets: definitions and plans unchanged`);
   ok(frames, "F their accents draw the same frames");
   ok(J(C0.cleanDef(D0.BUILTIN[0])) === J(C.cleanDef(BUILTIN[0])), "F cleanDef of the bomb unchanged");
   fs.rmSync(tmp, { recursive: true, force: true });

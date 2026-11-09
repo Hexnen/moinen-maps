@@ -10,6 +10,10 @@ import * as S from "./store.mjs";
  * DESTRUCTION PRESETS, aiming on the map (P7, GM): while the Presets tool is in hand, ONE gesture fires the armed pad -
  *   point (bomb): click; drag to set the direction it falls from     throw (grenade): drag from the thrower to where it lands
  *   line (guns): drag the line the burst walks (started on a token: the shooter)      run (heli): drag the strafing run
+ * THE SHOOTER of a gun (a firearm, ui-core isFirearm): the GM chooses a source token per gun and scene (the bar's Shooter, or S over a
+ * token); its muzzle flashes and its rounds fly from it, and it wins over a token the drag starts on (a target). With none chosen a
+ * line dragged out of a token makes that token the shooter for the burst (a run never). A soft ring marks the chosen one while the
+ * tool is in hand. No shooter, no muzzle flash.
  * A GHOST follows the pointer before the release: the exact plan the release will fire (the expander with the next seed), drawn
  * as soft feathered shapes in the oblique view (craters round on the map, ground rings and smoke squashed, the throw's arc lifted).
  * Keys while the tool is in hand: 1-9 / Shift+1-9 arm a pad, [ ] size, Esc cancels a gesture, Alt held repeats the last firing's
@@ -23,6 +27,8 @@ let active = false, listeners = null, layer = null, gfx = null, raf = 0;
 let down = null, cursor = null, alt = false, seed = newSeed(), lastSeed = null, busy = false, fadeAt = 0;
 let quiet = null;            // where the last firing was released: the ghost stays away until the pointer leaves it (never over a real firing)
 let flash = null;            // { box, gfx, raf } the dry run / outline overlay (also when the tool is not in hand)
+let picking = false;         // choosing the armed gun's shooter: the next click on a token (Esc / a click off the tokens cancels)
+const SRC_INK = 0xffb347;    // the shooter's ring (the presets' own colour)
 
 function newSeed() { return (Math.random() * 4294967296) >>> 0; }
 const worldPoint = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
@@ -46,11 +52,11 @@ function planOf(def, gesture, s = seedNow()) {
 
 function makeLayer(z = 905) {
   const box = new PIXI.Container(); box.eventMode = "none"; box.zIndex = z;
-  const g = new PIXI.Graphics(); box.addChild(g);
+  const g = new PIXI.Graphics(), src = new PIXI.Graphics(); box.addChild(src, g);
   try { const f = new PIXI.BlurFilter(3, 2); f.padding = 24; box.filters = [f]; } catch { /* no filters: still soft (feathered) */ }
   canvas.interface.sortableChildren = true; canvas.interface.addChild(box);
   trackMarkers(box, { ring: true });
-  return { box, g };
+  return { box, g, src };
 }
 /** Draw shapes into a Graphics; `k(s)` the alpha factor of a shape (the dry run's time), default 1. */
 function draw(g, shapes, k = () => 1) {
@@ -71,15 +77,27 @@ function draw(g, shapes, k = () => 1) {
   }
 }
 
+/** The armed gun's shooter (null: none, or not a gun). */
+const shooter = (def = S.armed()) => S.shooterOf(S.srcToken(def));
+/** The soft rings round the shooter (and, while choosing one, round the token under the pointer). */
+function srcShapes() {
+  const def = S.armed(); if ( !U.isFirearm(def) ) return [];
+  const out = [], grid = canvas.grid?.size ?? 100, ring = (t, a) => ({ id: t.id, k: "ring", x: t.x, y: t.y, r: t.r + grid * 0.12, sq: 1, z: 0, w: grid * 0.09, c: SRC_INK, a, t: 0, d: 1 });
+  const s = shooter(def);
+  if ( s ) out.push(ring(s, 0.55));
+  if ( picking && cursor ) { const h = tokenAt(cursor); if ( h && h.id !== s?.id ) out.push(ring(h, 0.4)); }
+  return out;
+}
+
 function aimShapes() {
-  if ( !cursor ) return [];
+  if ( !cursor || picking ) return [];
   if ( quiet && !down ) {
     if ( Math.hypot(cursor[0] - quiet[0], cursor[1] - quiet[1]) < (canvas.grid?.size ?? 100) * 0.75 ) return [];
     quiet = null; fadeAt = performance.now();
   }
   const def = S.armed(); if ( !def ) return [];
   const grid = canvas.grid?.size ?? 100;
-  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token) : U.gestureOf(def.gesture, cursor, cursor, grid, def.onToken ? tokenAt(cursor) : null);
+  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token, shooter(def)) : U.gestureOf(def.gesture, cursor, cursor, grid, def.onToken ? tokenAt(cursor) : null, shooter(def));
   const plan = planOf(def, g); if ( !plan ) return [];
   const shapes = U.ghostOf(plan, viewOf());
   // before a drag of a line / run / throw: a soft reticle where it starts
@@ -87,25 +105,39 @@ function aimShapes() {
   return shapes;
 }
 
-let shown = null, outAt = 0;  // the shapes last drawn, and when they began to fade out (released, cancelled, the pointer gone)
+let shown = null, outAt = 0, srcT = 0;
+const srcFade = new Map();   // the shooter rings on show: token id -> { s (its shape), v (its fade 0..1) }  // the shapes last drawn, and when they began to fade out (released, cancelled, the pointer gone)
 const smooth = (u) => u * u * (3 - 2 * u);
 function redraw() {
   raf = 0;
   if ( !active || !gfx ) return;
   const now = performance.now(), sh = aimShapes();
+  // the shooter's ring (and while choosing, the ring under the pointer): steady while the tool is in hand, each ring with its own fade
+  // in and out (220 ms, never tied to the pointer or to the ghost's fades)
+  const dt = srcT ? Math.min(50, now - srcT) : 16, want = new Map(srcShapes().map((x) => [x.id, x]));
+  srcT = now;
+  for ( const [id, x] of want ) { const f = srcFade.get(id); if ( f ) f.s = x; else srcFade.set(id, { s: x, v: 0 }); }
+  let moving = false;
+  for ( const [id, f] of srcFade ) {
+    f.v = want.has(id) ? Math.min(1, f.v + dt / 220) : Math.max(0, f.v - dt / 220);
+    if ( f.v <= 0 ) srcFade.delete(id); else if ( f.v < 1 ) moving = true;
+  }
+  const fades = [...srcFade.values()];
+  draw(gfx.src, fades.map((f) => f.s), (x) => smooth(srcFade.get(x.id)?.v ?? 0));
+  if ( moving ) raf ||= requestAnimationFrame(redraw); else if ( !fades.length ) srcT = 0;
   if ( sh.length ) {
     shown = sh; outAt = 0;
     draw(gfx.g, sh);
     // fade in (no pop): over 180 ms from when it was shown
     const u = Math.min(1, (now - fadeAt) / 180);
-    gfx.box.alpha = smooth(u);
-    if ( u < 1 ) raf = requestAnimationFrame(redraw);
+    gfx.g.alpha = smooth(u);
+    if ( u < 1 ) raf ||= requestAnimationFrame(redraw);
   } else if ( shown ) {
     // fade out over 220 ms (no pop either)
     if ( !outAt ) outAt = now;
     const u = Math.min(1, (now - outAt) / 220);
     draw(gfx.g, shown, () => 1 - smooth(u));
-    if ( u < 1 ) raf = requestAnimationFrame(redraw); else { shown = null; gfx.g.clear(); }
+    if ( u < 1 ) raf ||= requestAnimationFrame(redraw); else { shown = null; gfx.g.clear(); }
   } else gfx.g.clear();
 }
 const schedule = () => { if ( !raf ) raf = requestAnimationFrame(redraw); };
@@ -114,12 +146,18 @@ const schedule = () => { if ( !raf ) raf = requestAnimationFrame(redraw); };
 
 function tokenAt(p) {
   const hit = (canvas.tokens?.placeables ?? []).filter((t) => t.visible && t.bounds?.contains(p[0], p[1])).at(-1);
-  return hit ? { x: hit.center.x, y: hit.center.y, r: Math.max(hit.w, hit.h) / 2 } : null;
+  return S.shooterOf(hit ?? null);
 }
 function onDown(ev) {
   if ( ev.button !== 0 || !active || down || ev.target !== canvas.app?.view ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
   const p = worldPoint(ev), at = [p.x, p.y], def = S.armed();
+  if ( picking ) {
+    // choosing the shooter: a token takes it, a click off the tokens leaves it as it was
+    const t = tokenAt(at); setPicking(false);
+    if ( t && U.isFirearm(def) ) S.setSrc(def, t.id);
+    quiet = at; schedule(); return;
+  }
   down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line" || def.onToken) ? tokenAt(at) : null };
   cursor = at; schedule();
 }
@@ -136,8 +174,9 @@ async function onUp(ev) {
   const d = down; down = null;
   const p = worldPoint(ev), up = [p.x, p.y], def = S.armed();
   if ( !def || busy ) { schedule(); return; }
-  const g = U.gestureOf(def.gesture, d.p, up, canvas.grid?.size ?? 100, d.token);
-  quiet = up;
+  const g = U.gestureOf(def.gesture, d.p, up, canvas.grid?.size ?? 100, d.token, shooter(def));
+  // (the pointer is where it was released: a last move the browser coalesced away must not leave the quiet zone at once)
+  quiet = up; cursor = up;
   const s = (ev.altKey || !S.bar().vary) && lastSeed !== null ? lastSeed : seed;
   busy = true;
   try {
@@ -161,6 +200,16 @@ function onKey(e) {
   }
   if ( e.ctrlKey || e.metaKey || e.altKey ) return;
   if ( e.key === "Escape" && down ) { e.preventDefault(); e.stopPropagation(); cancel(); return; }
+  if ( e.key === "Escape" && picking ) { e.preventDefault(); e.stopPropagation(); setPicking(false); return; }
+  // S: the token under the pointer becomes the armed gun's shooter (S on the shooter itself: no shooter)
+  if ( e.code === "KeyS" && !down ) {
+    // (only over a token while a gun is armed: else S stays Foundry's - the canvas pans)
+    const def = S.armed(), t = U.isFirearm(def) && cursor ? tokenAt(cursor) : null; if ( !t ) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    setPicking(false);
+    S.setSrc(def, t.id === S.srcToken(def)?.id ? null : t.id);
+    return;
+  }
   if ( e.key === "[" || e.key === "]" ) {
     e.preventDefault(); e.stopPropagation();
     const b = S.bar(); S.setBar({ size: Math.round(Math.min(U.SIZE.max, Math.max(U.SIZE.min, b.size + (e.key === "]" ? 0.1 : -0.1))) * 100) / 100 });
@@ -189,6 +238,9 @@ function build() {
   window.addEventListener("keydown", listeners.key, true);
   window.addEventListener("keyup", listeners.key, true);
   listeners.hook = Hooks.on(S.HOOK, listeners.setting);
+  // (the shooter's ring follows its token; a deleted shooter's ring goes)
+  listeners.tok = Hooks.on("refreshToken", (t) => { if ( t.id === S.srcToken(S.armed())?.id ) schedule(); });
+  listeners.del = Hooks.on("deleteToken", () => schedule());
   document.body.classList.add("mm-aiming-preset");
 }
 function unbuild() {
@@ -199,12 +251,13 @@ function unbuild() {
     window.removeEventListener("pointerup", listeners.up); window.removeEventListener("pointercancel", listeners.cancel);
     window.removeEventListener("blur", listeners.cancel); window.removeEventListener("keydown", listeners.key, true);
     window.removeEventListener("keyup", listeners.key, true);
-    Hooks.off(S.HOOK, listeners.hook);
+    Hooks.off(S.HOOK, listeners.hook); Hooks.off("refreshToken", listeners.tok); Hooks.off("deleteToken", listeners.del);
     listeners = null;
   }
   cancelAnimationFrame(raf); raf = 0;
   if ( gfx && !gfx.box.destroyed ) gfx.box.destroy({ children: true });
-  gfx = null; down = null; cursor = null; quiet = null; shown = null; outAt = 0;
+  gfx = null; down = null; cursor = null; quiet = null; shown = null; outAt = 0; srcFade.clear(); srcT = 0;
+  if ( picking ) { picking = false; document.body.classList.remove("mm-picking-src"); Hooks.callAll(S.HOOK, "picking", false); }
   document.body.classList.remove("mm-aiming-preset");
 }
 /** The Presets tool in hand (true) or put down (false). GM only. */
@@ -215,6 +268,16 @@ export function setActive(on) {
   if ( on ) build(); else unbuild();
 }
 export const isActive = () => active;
+/** Choosing the armed gun's shooter on the map (the bar's Shooter button): on / off. */
+export function setPicking(on) {
+  on = !!on && active && U.isFirearm(S.armed());
+  if ( on === picking ) return;
+  picking = on;
+  document.body.classList.toggle("mm-picking-src", on);
+  Hooks.callAll(S.HOOK, "picking", on);
+  schedule();
+}
+export const isPicking = () => picking;
 /** A new canvas while the tool is in hand: the ghost and listeners again on it. */
 export function onCanvasReady() { stopFlash(); if ( active ) { unbuild(); if ( canvas.ready ) build(); else active = false; } }
 export function onTearDown() { stopFlash(); if ( active ) unbuild(); }

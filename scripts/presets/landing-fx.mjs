@@ -1,6 +1,6 @@
 /**
  * DESTRUCTION PRESETS, the SUPERHERO LANDING's accents - the pure part (no Foundry, no PIXI: node-tested in dev/presets-landing.test.mjs;
- * drawn by accents.mjs through accents-core.mjs draw / spanOf). dev/presets-design.md section 18:
+ * drawn by accents.mjs through accents-core.mjs draw / spanOf). dev/presets-design.md section 20:
  *   landing  the approach from the sky: the hero drops onto the mark, falling screen-down faster and faster (lifted by the view
  *            angle), a dark compact body lit from the top left with a pale streak of torn air behind it and speed lines beside it
  *            (a glint at night); with a drag it dives in at a slant along the firing's direction; landing ON a token (rec.tok) draws no

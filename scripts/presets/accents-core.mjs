@@ -2,12 +2,14 @@
  * DESTRUCTION PRESETS, the gun ACCENTS - the pure part (no Foundry, no PIXI: node-tested in dev/presets-accents.test.mjs; drawn by
  * accents.mjs). dev/presets-design.md G7 / P5, for the two guns: what no layer draws by itself -
  *   tracer  every n-th round of each gun: a bright streak coming in from above and behind along the run (lifted by the view angle),
- *           white-hot head, yellow / orange / red tail with a dithered end, landing ON its hit; some glance off as a short spark
+ *           white-hot head, yellow / orange / red tail with a dithered end, landing ON its hit; some glance off as a short spark;
+ *           with a shooter on the map (gesture.from: a gunship token) it flies out of that shooter's barrel instead
  *   hitFx   at every hit: a pixel star flash (two frames), a spray of sparks thrown out and up, falling back under gravity and cooling
  *           white -> yellow -> orange -> red, a short warm ground glow (the night: it lights the ground round the hit); a rumble
  *           (the screen shake share of the hit, heavy guns)
  *   muzzle  the shooter's muzzle flash at every shot (a star stretched along the aim, a different one each shot) with its glow, and a
- *           pale bullet streak from the muzzle to its hit - only when the firing names a shooter (gesture.from)
+ *           pale bullet streak from the muzzle to its hit - only when the firing names a shooter (gesture.from: the GM's chosen
+ *           source token); at the shooter's edge (gesture.fr), a twin gun's two barrels side by side; no shooter, no muzzle flash
  * Everything is ART PIXELS on the destruction layer's art grid (ap scene px, origin ox / oy): crisp at any zoom, the same language as
  * the fire's sparks and the destruction's pixel-fx; colours from one small palette, ends by dithered dropout, never a soft blur.
  * A frame is a PURE function of (the firing record's accents, T0, the shared clock): a late joiner sees whatever is still in flight.
@@ -39,6 +41,10 @@ export const TRACER_BACK = 5, TRACER_UP = 4.2;
 export const FLASH_MS = [55, 125], GLOW_MS = 150;
 /** The muzzle flash (ms) and the bullet's speed (squares a second; the streak takes at least BULLET_MIN ms). */
 export const MUZZLE_MS = 50, BULLET_SQ = 160, BULLET_MIN = 25;
+/** A round's flight from a shooter takes at most this long (ms): the muzzle's and the tracers' lead before their first hit. */
+export const BULLET_MAX = 400;
+/** A tracer fired by a shooter: its glowing streak's length (squares; heavy / light). */
+export const SHOT_STREAK = [1.6, 1];
 /** The longest any accent of one hit lives after it (ms): the purge / the ticker's end. */
 export const AFTER_MS = 420;
 
@@ -87,8 +93,8 @@ export function spanOf(item) {
   const ts = (item?.hits ?? []).map((h) => h[2]);
   if ( !ts.length ) return null;
   const lo = Math.min(...ts), hi = Math.max(...ts);
-  if ( item.kind === "tracer" ) return [lo - TRACER_MS, hi + RICO_MS];
-  if ( item.kind === "muzzle" ) return [lo - 400, hi + MUZZLE_MS];
+  if ( item.kind === "tracer" ) return [lo - (Array.isArray(item.from) ? BULLET_MAX : TRACER_MS), hi + RICO_MS];
+  if ( item.kind === "muzzle" ) return [lo - BULLET_MAX, hi + MUZZLE_MS];
   return [lo, hi + AFTER_MS];
 }
 
@@ -163,12 +169,25 @@ function tracers(it, t, env, F, seed) {
   const g = env.grid, d = it.dir ?? [1, 0], heavy = (it.lv ?? 3) >= 3;
   const B = TRACER_BACK * g, Z = TRACER_UP * g;
   it.hits.forEach((h, i) => {
-    const tau = t - h[2];
-    if ( tau < -TRACER_MS || tau > RICO_MS ) return;
-    // (each gun's rounds come in on its own side, a little spread: the twin guns' streams)
-    const side = (h[3] % 2 ? 1 : -1) * 0.25 * g + (h3(seed, i, 1) - 0.5) * 0.4 * g;
-    const sx = -d[0] * B - d[1] * side, sy = -d[1] * B + d[0] * side;
-    if ( tau <= 0 ) {
+    const tau = t - h[2], shot = Array.isArray(it.from);
+    if ( tau < -(shot ? BULLET_MAX : TRACER_MS) || tau > RICO_MS ) return;
+    if ( shot ) {
+      // a SHOOTER on the map (a gunship token): the round flies out of its barrel (as its muzzle flash, muzzleOf) to the hit
+      if ( tau <= 0 ) {
+        const m = muzzleOf(it, h, g), fl = flightOf(m.L, g);
+        if ( tau < -fl ) return;
+        const at = (u) => [m.x + (h[0] - m.x) * u, m.y + (h[1] - m.y) * u, m.z * (1 - u)];
+        const uh = 1 + tau / fl, ut = Math.max(0, uh - SHOT_STREAK[heavy ? 0 : 1] * g / Math.max(1, m.L));
+        const [hx, hy, hz] = at(uh), [tx, ty, tz] = at(ut);
+        const [ax, ay] = scr(env, tx, ty, tz), [bx, by] = scr(env, hx, hy, hz);
+        line(F, ax, ay, bx, by, (u, k) => (u > 0.9 ? 0 : u > 0.62 ? 1 : u > 0.32 ? 2 : u > 0.12 ? 3 : (k & 1) ? 4 : -1));
+        if ( heavy ) { line(F, ax, ay + 1, bx, by + 1, (u) => (u > 0.8 ? 1 : u > 0.5 ? 2 : -1)); put2(F, env, hx, hy, hz, 0); } else put(F, env, hx, hy, hz, 0);
+        return;
+      }
+    } else if ( tau <= 0 ) {
+      // (each gun's rounds come in on its own side, a little spread: the twin guns' streams)
+      const side = (h[3] % 2 ? 1 : -1) * 0.25 * g + (h3(seed, i, 1) - 0.5) * 0.4 * g;
+      const sx = -d[0] * B - d[1] * side, sy = -d[1] * B + d[0] * side;
       const at = (u) => [h[0] + sx * (1 - u), h[1] + sy * (1 - u), Z * (1 - u)];
       const uh = 1 + tau / TRACER_MS, ut = Math.max(0, uh - STREAK_MS / TRACER_MS);
       const [hx, hy, hz] = at(uh), [tx, ty, tz] = at(ut);
@@ -180,7 +199,8 @@ function tracers(it, t, env, F, seed) {
     }
     // a glancing round: off the ground forward along the run, a little up, cooling
     if ( h3(seed, i, 2) > 0.42 ) return;
-    const a = Math.atan2(d[1], d[0]) + (h3(seed, i, 3) - 0.5) * 1.4, v = (3 + 3 * h3(seed, i, 4)) * g / 1000, vz = (1 + 2 * h3(seed, i, 5)) * g / 1000;
+    // (a shooter's round glances on along its own line of fire)
+    const a = (shot ? Math.atan2(h[1] - it.from[1], h[0] - it.from[0]) : Math.atan2(d[1], d[0])) + (h3(seed, i, 3) - 0.5) * 1.4, v = (3 + 3 * h3(seed, i, 4)) * g / 1000, vz = (1 + 2 * h3(seed, i, 5)) * g / 1000;
     const pos = (s) => [h[0] + Math.cos(a) * v * s, h[1] + Math.sin(a) * v * s * (env.squash ?? 0.8), Math.max(0, vz * s - 0.5 * 9 * g / 1e6 * s * s)];
     const [hx, hy, hz] = pos(tau), [tx, ty, tz] = pos(Math.max(0, tau - 45));
     const f = tau / RICO_MS, c = f < 0.3 ? 1 : f < 0.65 ? 2 : 3;
@@ -221,20 +241,35 @@ function hitFx(it, t, env, F, seed) {
   });
 }
 
+/** The flight of a round over L scene px (ms). */
+const flightOf = (L, g) => Math.min(BULLET_MAX, Math.max(BULLET_MIN, (L / g) / BULLET_SQ * 1000));
+/**
+ * Where a shooter's round leaves its barrel for hit h: at the shooter's edge (it.fr, its radius; 0.38 squares without one) towards
+ * the hit, a twin gun's two barrels side by side across the aim (lane 0 left, lane 1 right), lifted to the gun's height.
+ * -> { x, y, z, ux, uy, L (px from the barrel to the hit) }.
+ */
+export function muzzleOf(it, h, g) {
+  const M0 = it.from, dx = h[0] - M0[0], dy = h[1] - M0[1], D = Math.hypot(dx, dy) || 1, ux = dx / D, uy = dy / D;
+  const fr = Number.isFinite(it.fr) ? it.fr : null;
+  const off = Math.min(D * 0.5, fr !== null ? Math.max(0.3 * g, 0.85 * fr) : 0.38 * g);
+  const side = it.twin ? ((h[3] % 2) ? 1 : -1) * Math.min(0.3 * g, 0.35 * (fr ?? 0.5 * g)) : 0;
+  const x = M0[0] + ux * off - uy * side, y = M0[1] + uy * off + ux * side;
+  return { x, y, z: 0.32 * g, ux, uy, L: Math.hypot(h[0] - x, h[1] - y) || 1 };
+}
+
 function muzzle(it, t, env, F, seed) {
-  const M0 = it.from; if ( !Array.isArray(M0) ) return;
-  const g = env.grid, zM = 0.32 * g;
+  if ( !Array.isArray(it.from) ) return;
+  const g = env.grid, heavy = (it.lv ?? 1) >= 3, MS = heavy ? 60 : MUZZLE_MS;
   it.hits.forEach((h, i) => {
-    const dx = h[0] - M0[0], dy = h[1] - M0[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
-    const mx = M0[0] + ux * 0.38 * g, my = M0[1] + uy * 0.38 * g;
-    const fl = Math.max(BULLET_MIN, (L / g) / BULLET_SQ * 1000), ts = h[2] - fl, tau = t - ts;
-    if ( tau < 0 || tau > fl + MUZZLE_MS ) return;
-    // the FLASH: a star stretched along the aim, a different one each shot (two frames)
-    if ( tau < MUZZLE_MS ) {
-      const big = tau < MUZZLE_MS * 0.5, r = h3(seed, i, 21);
-      star(F, env, mx, my, zM, big ? { arm: 3 + Math.round(r * 2), side: 1 + (r > 0.5 ? 1 : 0), dir: [ux, uy], big: true }
-        : { arm: 2, side: 1, dir: [ux, uy], big: false, c0: 1, c1: 2, c2: 3 });
-      if ( big ) F.glows.push(mx, my, 1.1 * g, 0.85, 1);
+    const m = muzzleOf(it, h, g), mx = m.x, my = m.y, zM = m.z, ux = m.ux, uy = m.uy, L = m.L;
+    const fl = flightOf(L, g), ts = h[2] - fl, tau = t - ts;
+    if ( tau < 0 || tau > fl + MS ) return;
+    // the FLASH: a star stretched along the aim, a different one each shot (two frames; a heavy gun's longer and wider)
+    if ( tau < MS ) {
+      const big = tau < MS * 0.5, r = h3(seed, i, 21);
+      star(F, env, mx, my, zM, big ? { arm: (heavy ? 4 : 3) + Math.round(r * 2), side: (heavy ? 2 : 1) + (r > 0.5 ? 1 : 0), dir: [ux, uy], big: true }
+        : { arm: heavy ? 3 : 2, side: 1, dir: [ux, uy], big: false, c0: 1, c1: 2, c2: 3 });
+      if ( big ) F.glows.push(mx, my, (heavy ? 1.4 : 1.1) * g, heavy ? 0.95 : 0.85, 1);
     }
     // the BULLET: a pale streak from the muzzle to the hit
     if ( tau <= fl ) {

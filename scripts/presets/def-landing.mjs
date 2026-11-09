@@ -1,5 +1,5 @@
 /**
- * THE SUPERHERO LANDING (built-in preset, set "hero"; dev/presets-design.md section 18). A hero drops out of the sky onto the mark:
+ * THE SUPERHERO LANDING (built-in preset, set "hero"; dev/presets-design.md section 20). A hero drops out of the sky onto the mark:
  * a streak of torn air comes down screen-down onto a tightening shadow (onto the token, when the click is on one: the token is the
  * hero), then the blow - a white pin, the air thrown out in a broken pale ring, a hard screen shake - a pressed impact crater, cracks
  * running out from it in a ragged star (a stroke per ray, opening from the centre out), and a wave of the ground's own dust rolling

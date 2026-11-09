@@ -1,6 +1,6 @@
 /**
  * DESTRUCTION PRESETS, the RAYS place (pure, node-tested in dev/presets-landing.test.mjs): cracks running out from an impact - the
- * superhero landing's radial cracks (dev/presets-design.md section 18). Each ray is its OWN damage stroke with a timed path from near
+ * superhero landing's radial cracks (dev/presets-design.md section 20). Each ray is its OWN damage stroke with a timed path from near
  * the centre outward: the destruction layer's crack strokes grow one dominant fissure along a followed path, widest where it starts,
  * inside the stroke's own mask (scripts/destruction/core.mjs crackStrokes) - so a ray's mask is a tapering band round its path, wide
  * enough for the fissure's kinks, and the path's times open it from the centre out (fast, then slowing: a crack running out of
