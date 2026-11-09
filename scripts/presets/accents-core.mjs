@@ -28,7 +28,7 @@ export const GLOW = [1, 0.95, 0.78, 0.5, 0.22, 0.6, 0, 0, 0, 0, 0, 0];
 export const SHADE = 0x120e0a, SHADE_A = [0.17, 0.36];
 /** The bomb: it falls from BOMB_Z squares (gravity: z ~ (1 - u)^2), drifting BOMB_D squares along the firing's direction; seen
  * below BOMB_SHOW squares; its shadow shrinks from SHADOW_R[0] to SHADOW_R[1] squares and darkens as it comes. */
-export const BOMB_Z = 14, BOMB_D = 2.2, BOMB_SHOW = 4.5, SHADOW_R = [1.45, 0.36];
+export const BOMB_Z = 14, BOMB_D = 2.2, BOMB_SHOW = 8, SHADOW_R = [1.45, 0.36];
 /** The grenade: it lands this far (squares, at most 35 % of the throw) short of its mark and hops / rolls the rest (the bounce). */
 export const BOUNCE_BACK = 0.75;
 /** The screen cue: a shake of SHAKE_PX x shake screen px decaying over SHAKE_MS[0] + SHAKE_MS[1] x shake ms; a flash over FLASH_CUE_MS. */
@@ -402,11 +402,11 @@ function fallShadow(it, t, env, F, seed) {
   // (its screen velocity: the drift along the direction, squashed, and the fall, lifted - the body's axis and the streak's way)
   const sq = env.squash ?? 0.8, dur = Math.max(1, it.dur), vx = d[0] * D / dur, vy = d[1] * D * sq / dur + (env.lift ?? 0.5) * 2 * BOMB_Z * g * k / dur;
   const vl = Math.hypot(vx, vy) || 1, ax = vx / vl, ay = vy / vl, nx = -ay, ny = ax;
-  const ap = env.ap, hl = Math.max(2.5, 0.17 * g / ap), hw = Math.max(1.2, 0.075 * g / ap), [cx, cy] = scr(env, x, y, z);
+  const ap = env.ap, hl = Math.max(3, 0.21 * g / ap), hw = Math.max(1.5, 0.09 * g / ap), [cx, cy] = scr(env, x, y, z);
   // the STREAK of air behind it: pale, dithered, longer the faster it falls (a glint at night: the only thing of it that shows)
   const sl = Math.min(4 * hl, 1.5 * hl + vl * 40 / ap);
   line(F, Math.round(cx - ax * (hl + sl)), Math.round(cy - ay * (hl + sl)), Math.round(cx - ax * hl * 0.6), Math.round(cy - ay * hl * 0.6),
-    (v, i) => (v > 0.55 ? ((i & 1) ? 5 : -1) : ((i % 3) === 0 ? 5 : -1)));
+    (v, i) => (v > 0.5 ? 5 : v > 0.2 ? ((i & 1) ? 5 : -1) : ((i % 3) === 0 ? 5 : -1)));
   const R = Math.ceil(hl + 2);
   for ( let j = -R; j <= R; j++ ) for ( let i = -R; i <= R; i++ ) {
     const px = i + 0.5, py = j + 0.5, al = px * ax + py * ay, ac = px * nx + py * ny;
@@ -418,6 +418,8 @@ function fallShadow(it, t, env, F, seed) {
     const lit = body && (ac * nx + ac * ny) < -0.3 * hw && al > -0.4 * hl;
     F.px[lit ? 7 : 6].push(cx + i, cy + j);
   }
+  // (a glint on its lit shoulder: the point that shows it at night - code 5 glows)
+  F.px[5].push(Math.round(cx - nx * hw * 0.6 + ax * hl * 0.3), Math.round(cy - ny * hw * 0.6 + ay * hl * 0.3));
 }
 
 /** A grenade at (x, y) lifted z: ONE olive egg, shaded as a ball lit from the top left (lit olive, olive, dark olive), a groove round it

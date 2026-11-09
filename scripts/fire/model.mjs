@@ -131,9 +131,10 @@ export function cleanStroke(o) {
     q: Number.isFinite(Number(o.q)) ? Math.round(Number(o.q)) : 0, sd: (Number(o.sd) >>> 0) || hashStr(o.id) };
   if ( k === "fire" ) { out.lv = int(o.lv, 2, 1, 3); out.sm = int(o.sm, 2, 0, 3); }
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
-  else if ( k === "dust" ) { out.lv = int(o.lv, 2, 1, 3); out.dk = DUST_KINDS.includes(o.dk) ? o.dk : "car"; }   // (dust-model.mjs)
+  else if ( k === "dust" ) { out.lv = int(o.lv, 2, 1, 3); out.dk = DUST_KINDS.includes(o.dk) ? o.dk : "car"; if ( o.np && out.dk === "shock" ) out.np = 1; }   // (dust-model.mjs; np: a shock without puffs)
   else if ( k === "burst" ) {                                         // (burst-model.mjs: one point, its level, colour and debris)
     out.p = p.slice(0, 2); out.lv = int(o.lv, 2, 1, 3);
+    if ( Number(o.bv) === 3 ) out.bv = 3;                             // (look 3: burst-model.mjs BURST_V3; absent: look 2)
     const c = cleanColor(o.c); if ( c ) out.c = c;
     if ( Array.isArray(o.db) ) {
       const db = [];

@@ -50,7 +50,7 @@ export const GESTURES = ["point", "throw", "line", "run", "shot"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
 export const PLACES = ["centre", "ring", "scatter", "walk", "rays", "ejecta"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "rocket", "meteor"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "rocket", "meteor", "blast"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
@@ -169,11 +169,14 @@ function cleanLayer(L, i, errors) {
       break;
     case "burst":
       out.lv = intLv(L.lv, 2); out.r = range(L.r, [1, 1], ...LIMITS.r);
+      // (the burst's look: 3 = round 3's one smoke body that lives on - fire/burst-model.mjs BURST_V3; absent: look 2)
+      if ( L.look === 3 ) out.look = 3;
       break;
     case "dust":
       out.dk = DUST.includes(L.dk) ? L.dk : (errors.push(`${where}: unknown dust kind "${L.dk}"`), "shock");
       out.lv = intLv(L.lv, 2); out.r = range(L.r, [1, 1], ...LIMITS.r);
       out.life = range(L.life, null, ...LIMITS.life);
+      if ( L.np === true ) out.np = true;   // (a shock ring without its puffs: a burst of look 3 rolls its own surge over it)
       break;
     case "accent":
       out.kind = ACCENTS.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown accent "${L.kind}"`), "hitFx");
@@ -427,7 +430,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         });
         break;
       case "burst":
-        for ( const p of pts ) plan.pending.burst.push({ id: L.id, x: round(p.x, 10), y: round(p.y, 10), lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at: at + (p.t ?? 0) });
+        for ( const p of pts ) plan.pending.burst.push({ id: L.id, x: round(p.x, 10), y: round(p.y, 10), lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at: at + (p.t ?? 0), ...(L.look === 3 ? { bv: 3 } : {}) });
         break;
       case "dust":
         if ( L.dk === "hits" && L.place.m === "walk" && walk ) { hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }); break; }
@@ -442,7 +445,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
             // (the stroke lives at least as long as its level's HAZE, plus a margin: the haze has thinned out before the put-out)
             const lv = clamp(L.lv + power, 1, 3), q = Math.round(t0 + at + (p.t ?? 0)), life = Math.max(L.life ? Math.round(r.range(L.life)) : 20000, SHOCK_HAZE[lv] * 1000 + 5000);
             plan.fire.push({ key: `${L.id}.${i}`, k: "dust", dk: "shock", lv, r: Math.max(8, Math.round(r.range(L.r) * sq)), s: 1,
-              p: [Math.round(p.x), Math.round(p.y)], q, o: q + life, wd: wind.dir, ws: wind.speed });
+              p: [Math.round(p.x), Math.round(p.y)], q, o: q + life, wd: wind.dir, ws: wind.speed, ...(L.np ? { np: 1 } : {}) });
           });
           break;
         }
@@ -498,6 +501,8 @@ function accentOf(L, at, { plan, hits, from, grid, wind }) {
     // (the superhero landing, landing-fx.mjs: tok - it lands on a token, which is the hero: no body is drawn)
     case "landing": return { ...base, x: plan.at[0], y: plan.at[1], dir: plan.dir, tok: !!plan.gesture.from };
     case "airRing": return { ...base, x: plan.at[0], y: plan.at[1], size: plan.size, ...(L.reach !== undefined ? { reach: L.reach } : {}) };
+    // (a bomb's / grenade's detonation at the display's rate, presets/blast.mjs: r the fireball's radius in px - reach squares x size)
+    case "blast": return { ...base, x: plan.at[0], y: plan.at[1], lv: clamp((L.lv ?? 3) + (plan.power | 0), 1, 3), r: round((L.reach ?? 1) * grid * (plan.size ?? 1), 10), dir: plan.dir };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
     case "bounce": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.gesture.a, dir: plan.dir };
     // (the meteor's flight, its pressure ring and its ejecta rocks: presets/meteor-art.mjs draws them from this)

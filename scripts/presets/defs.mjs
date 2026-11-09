@@ -16,11 +16,13 @@ export const BUILTIN = Object.freeze([
       { l: "accent", id: "fall", kind: "fallShadow", at: -1200, dur: 1200 },
       { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.9, flash: 0.6 },
       { l: "cue", id: "light", kind: "light", at: 0, peak: 1, radius: 4, decay: 1500 },
-      { l: "burst", id: "burst", at: 0, lv: 3, r: 1.6 },
+      // (the detonation at the display's frame rate - flash, the air's ring, shrapnel, jets of earth: presets/blast.mjs)
+      { l: "accent", id: "blast", kind: "blast", at: 0, dur: 2000, lv: 3, reach: 1.6 },
+      { l: "burst", id: "burst", at: 0, lv: 3, r: 1.6, look: 3 },
       { l: "destruction", id: "crater", at: 200, type: "blast", level: 3, cause: "fire", r: 1.2, pr: { jagged: true, jag: 0.7 } },
       // (two or three smaller blasts torn out of its rim: one round crater read as a stamped disc)
       { l: "destruction", id: "lobes", at: 240, type: "blast", level: 2, cause: "fire", place: { m: "scatter", n: [2, 3], d: [0.6, 0.9] }, r: [0.42, 0.62], pr: { jagged: true, jag: 0.8 } },
-      { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 2.7, life: 305000 },   // (3.5 read as a huge flat oval over the whole view at zoom 3)
+      { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 2.7, life: 305000, np: true },   // (3.5 read as a huge flat oval over the whole view at zoom 3)
       { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [2, 4], d: [0.95, 1.3] }, lv: 2, lvMix: [0.5, 0.5, 0], sm: 1, r: [0.3, 0.45], len: [0.3, 0.7], aftermath: true, lifeK: [0.5, 1], gr: 0.6 },
       { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [6, 12], d: [1.5, 3.5], bias: 1.4 }, lv: 1, sm: 1, r: [0.15, 0.25], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
       { l: "smoke", id: "column", at: 1200, sm: 3, r: 0.8, aftermath: true }
@@ -34,10 +36,11 @@ export const BUILTIN = Object.freeze([
       { l: "accent", id: "bounce", kind: "bounce", at: -500, dur: 500 },
       { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.5, flash: 0 },
       { l: "cue", id: "light", kind: "light", at: 0, peak: 0.5, radius: 2, decay: 600 },
-      { l: "burst", id: "burst", at: 0, lv: 1, r: 0.55 },
+      { l: "accent", id: "blast", kind: "blast", at: 0, dur: 1600, lv: 1, reach: 0.8 },
+      { l: "burst", id: "burst", at: 0, lv: 1, r: 0.75, look: 3 },
       { l: "destruction", id: "crater", at: 200, type: "blast", level: 2, cause: "fire", r: 0.35, pr: { jagged: true, jag: 0.6 } },   // (under the fireball: its white core alone shows ~T+120, the crater must not open round it first)
       { l: "destruction", id: "shrapnel", at: 150, type: "cracks", level: 1, cause: "none", place: { m: "scatter", n: [10, 18], d: [0.3, 1.4], bias: 1.6 }, r: [0.08, 0.14] },
-      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 0.85, life: 155000 },   // (a grenade's dust ring stays low and close)
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 0.85, life: 155000, np: true },   // (a grenade's dust ring stays low and close)
       { l: "smoke", id: "wisps", at: 300, sm: 1, r: 0.5, life: 8000, gr: 0.6 },
       { l: "fire", id: "smoulder", at: 400, chance: 0.3, place: { m: "scatter", n: [1, 1], d: [0, 0.3] }, lv: 1, sm: 1, r: 0.25, aftermath: true, gr: 0.4 }
     ]

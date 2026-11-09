@@ -1291,3 +1291,51 @@ a flat brick slab with no jets or shrapnel streaks; the crater reads as a noise 
 Shared with the meteor (section 22, merged into main after this branch started): the meteor uses the same burst art and the L3 shock
 puff, so it changes too. Seen before (main 12602f2) vs after at zoom 1 by day: the same timeline and structure; the fireball shows the
 new blended heat patches (redder, blobby) and the shock dust is slightly smaller. Not re-judged; not checked at night or zoom 3.
+
+## 24. Round 3 as built: bomb and grenade (branch polish3-boom, 2026-11-09)
+
+Goal: past blind scores bomb 6 / 5.5, grenade 5 / 4.5; tuning had stalled, so round 3 builds new parts instead of nudging numbers.
+Lane 1, headless Chrome DPR 2.
+
+- **Blast accent** (new: `presets/blast-core.mjs` pure, `blast.mjs` renderer, `blast-wire.mjs`; accent kind `"blast"`): the
+  detonation at the DISPLAY's frame rate (the fire layer's art steps at 12 fps): a ragged flash ball with short lumpy tongues and a
+  temperature ramp that breaks up in ~200 ms; a pale shock ring racing over the ground (arcs dropping out as it ages); shrapnel
+  streaks (white head, ember tail, gravity); ballistic clods (some burning); dirt plumes for the grenade only (L1 `jets` 0 in the
+  end - straight jets read as a sea urchin / asterisk over the fireball, both for the bomb and the grenade); a smooth light sprite
+  (night) that swells in two frames and eases out inside the span (`LIGHT_END`, no pop). One program (`moinen-maps-presets-blast-v1`)
+  into the primary group (sortLayer 821) plus its emission into the illumination (MAX_COLOR).
+- **Burst look 3** (`bv: 3`, opt-in per definition: `look: 3`; `fire/burst-model.mjs` `BURST_V3`, `surgeAt`; `fire/burst-art.mjs`
+  program `moinen-maps-burst-art-v3`, the v2 path unchanged in its `else`): one metaball density over the billows (saturating, so the
+  churn tears the outline into billows); each billow lit as a SPHERE (normals weighted by share squared; creases where two meet);
+  heat hottest low and inside, lit tops a step brighter; cooling soot glows only in deep creases (no vein network); smoke in four
+  lit bands; the cloud climbs and widens late (mushroom), lives 26 s at L3; after 1.4 s it never covers tokens. The ground SURGE is
+  analytic: a lumpy torus of dust (scalloped front, lit as a torus section, noise sampled on the circle - no seam), settling and
+  breaking into arcs; no separate surge billows in look 3 (they read as lens discs). `burstRect` covers 1.32 x each billow (a clipped
+  cloud showed straight box edges).
+- **Shock dust `np`** (`dust-model.mjs` shockOf): a stroke flag that drops the puff emitters (the look-3 surge rolls instead); grit,
+  aura and haze stay.
+- **First fire** (`fire/fire.mjs` `warmBurst`, `blast-wire.mjs`): the burst/dust/fire-art programs and blast.mjs with its program are
+  linked in the background 3 s after every canvasReady (idle callback), on every client, and when the GM arms a pad with a burst.
+  Before: a scene without bursts linked them only when the burst stroke arrived (~1.2 s before impact), so the first fireball of a
+  session showed 1-1.5 s late; the first load of blast.mjs at the click cost an 86 ms frame.
+- **Bomb fall** (`accents-core.mjs`): the bomb shows from 8 squares up (was 4.5), body ~25 % larger, a solid air streak near the body
+  and a glint pixel on its lit shoulder (glows at night).
+- **Definitions**: bomb `blast` L3 reach 1.6, burst look 3, shock np; grenade `blast` L1 reach 0.8, burst r 0.75 look 3, shock np.
+- **Tests**: `dev/presets-blast.test.mjs` (33).
+
+Checked (lane 1, headless Chrome DPR 2): first fire after a page reload on a scene with no bursts - fireball on time, no rAF gap
+over 45 ms (before the preload: one 86 ms frame at the click; base 505edbb: no gap but the first fireball late). Cost vs 505edbb
+(n=90, shared GPU, same run conditions): every row inside the idle noise band (bomb z3 blast weak x1 GPU median 1.89 -> 1.80 ms,
+p95 3.6 -> 4.1; weak x2 2.00 -> 1.77; grenade z3 blast 1.10 -> 1.13; CPU median 0.5-0.8 ms during the blast in both; no long
+frames in either). Meteor and rocket (look 2 burst, puffed shock dust) before vs after at zoom 1, day and night: the same look within
+run-to-run variation (their stroke ids, hence billow layouts, differ per run; pixel identity not checked). A real player (Test Gracz
+1, own origin) saw the bomb fully and the grenade's flash, fireball and smoke (at the edge of its view).
+
+**Blind judge (one fresh agent, round-2 brief and scale): bomb 5, grenade 4** (round 2: 5.5 and 4.5; round 1: 6 and 5). NOT better.
+Its main points: the blast's thin 1 px shock ring reads as a vector outline (both presets); flash -> speckle -> billow fireball are
+three shapes in three frames, the crater disc pops in under them; the crater + pale surge dust read as a disc with a donut rim that
+glows at night; the fireball's late phase is flat red/orange camouflage patches (no roll/volume); some night fires render as pale
+blue-grey blobs; a fire burns on water with a round scorch disc; the smoke column is a flat posterized stack, its dissolve leaves dark
+stains; the grenade's flash is the bomb's star scaled down and its smoke a flat translucent blanket; the grenade and its throw are
+hard to see at zoom 1 and at night. Works: the night flash lighting, timing, the ember/debris field, the column rising up-screen and
+dissolving gradually, the fires that keep burning.

@@ -311,6 +311,8 @@ export function dustRaster(area, geo, P) {
       if ( back ) { back[o] = bk ? bk[1] : NONE; back[o + 1] = bk ? out : NONE; }
       cell[o + 2] = d; cell[o + 3] = A;
     }
+    // (np: no puffs - a burst of look 3 rolls its own ground surge over the ring; the stroke keeps its grit, aura and haze)
+    if ( st.np ) return;
     const sp = L.sp * g, fr = KIND.shock.fr;
     let n = 0;
     fr.forEach((f, ri) => {

@@ -114,7 +114,7 @@ export async function fire(def, gesture, opts = {}) {
   for ( const b of plan.pending.burst ?? [] ) {
     const q = Math.round(plan.t0 + (b.at ?? 0));
     const db = debris.filter((r) => r.q >= q).map((r) => [r.p[0] - b.x, r.p[1] - b.y, r.q - q]).flat();
-    const st = firePrepare({ k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, q, wd: plan.fire[0]?.wd ?? envOf(scene).wind.dir, ws: plan.fire[0]?.ws ?? envOf(scene).wind.speed, ...(db.length ? { db } : {}) });
+    const st = firePrepare({ k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, ...(b.bv === 3 ? { bv: 3 } : {}), q, wd: plan.fire[0]?.wd ?? envOf(scene).wind.dir, ws: plan.fire[0]?.ws ?? envOf(scene).wind.speed, ...(db.length ? { db } : {}) });
     if ( st ) { fStrokes.push(st); fKeys.push(`burst.${b.id}`); }
   }
   const upd = {};
