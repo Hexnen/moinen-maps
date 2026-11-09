@@ -1,5 +1,5 @@
 /**
- * SHADER PRE-WARM, shared (fire; the weather keeps its own copy in weather.mjs for now): PIXI programs compiled and linked in the
+ * SHADER PRE-WARM, shared (fire and weather): PIXI programs compiled and linked in the
  * background after a scene opens, so the frame that first draws with them does not block on the GPU process (on a program-cache miss
  * one link is 0.3 s to several seconds of frozen main thread).
  *
