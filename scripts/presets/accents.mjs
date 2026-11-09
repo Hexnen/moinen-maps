@@ -29,6 +29,7 @@ import * as A from "./accents-core.mjs";
 const SORT_LAYER = 820;
 const live = new Map();             // fid -> { t0, items, end, seed }
 let root = null, shadeG = null, flashEl = null, colG = null, glowBox = null, glowG = null, glowPool = [], ticking = false, hookL = 0, shaker = null, glowTex = null;
+let softBox = null, softPool = [], softTex = null;
 const F = A.newFrame();
 
 /** Records with gun accents (what this layer draws). */
@@ -50,7 +51,8 @@ function mount() {
   root = new PIXI.Container();
   root.eventMode = "none"; root.interactiveChildren = false;
   Object.assign(root, { elevation: 0, sortLayer: SORT_LAYER, sort: 0, _lastSortedIndex: 0 });
-  shadeG = new PIXI.Graphics(); colG = new PIXI.Graphics(); root.addChild(shadeG, colG);
+  shadeG = new PIXI.Graphics(); colG = new PIXI.Graphics(); softBox = new PIXI.Container(); softBox.eventMode = "none"; softPool = [];
+  root.addChild(softBox, shadeG, colG);
   canvas.primary.addChild(root);
   glowBox = new PIXI.Container(); glowBox.eventMode = "none";
   glowG = new PIXI.Graphics(); glowG.blendMode = PIXI.BLEND_MODES.MAX_COLOR; glowBox.addChild(glowG);
@@ -76,6 +78,7 @@ function stop() {
   if ( flashEl ) flashEl.style.opacity = "0";
   if ( glowG && !glowG.destroyed ) glowG.clear();
   for ( const s of glowPool ) s.visible = false;
+  for ( const s of softPool ) s.visible = false;
 }
 /** The scene goes: everything of this layer goes with it. */
 export function reset() {
@@ -84,7 +87,7 @@ export function reset() {
   if ( root && !root.destroyed ) root.destroy({ children: true });
   if ( glowBox && !glowBox.destroyed ) { glowBox.parent?.removeChild(glowBox); glowBox.destroy({ children: true }); }
   flashEl?.remove();
-  root = colG = shadeG = glowBox = glowG = flashEl = null; glowPool = [];
+  root = colG = shadeG = glowBox = glowG = flashEl = softBox = null; glowPool = []; softPool = [];
 }
 
 /** A soft-stepped round glow (pixel-art: 4 flat rings with dithered edges, 32 x 32), white: tinted and scaled per hit. */
@@ -100,6 +103,19 @@ function glowTexture() {
   glowTex.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST; glowTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
   return glowTex;
 }
+/** The soft shadow: a smooth feathered disc (64 x 64, linear filtered: a shadow is light, it has no pixel grid), white alpha. */
+function softTexture() {
+  if ( softTex && !softTex.baseTexture?.destroyed ) return softTex;
+  const N = 64, a = new Uint8Array(N * N * 4);
+  for ( let y = 0; y < N; y++ ) for ( let x = 0; x < N; x++ ) {
+    const d = Math.hypot(x + 0.5 - N / 2, y + 0.5 - N / 2) / (N / 2), v = d >= 1 ? 0 : Math.pow(1 - d * d, 1.6);
+    const o = (y * N + x) * 4; a[o] = a[o + 1] = a[o + 2] = a[o + 3] = Math.round(255 * v);
+  }
+  softTex = PIXI.Texture.fromBuffer(a, N, N);
+  softTex.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR; softTex.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+  softTex.baseTexture.alphaMode = PIXI.ALPHA_MODES.PMA;
+  return softTex;
+}
 const mul = (c, k) => ((Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k));
 
 function tick() {
@@ -111,6 +127,15 @@ function tick() {
     A.draw(f.items, f.t0, now, { ap: g.ap, ox: g.ox, oy: g.oy, grid: g.grid, lift: v.lift, squash: v.squash, q, seed: f.seed }, F);
   }
   if ( !live.size ) { stop(); return; }
+  // the soft shadows (a falling bomb's, a thrown grenade's): pooled feathered sprites under everything else
+  const SF = F.soft, st = softTexture();
+  let ns = 0;
+  for ( let i = 0; i < SF.length; i += 5, ns++ ) {
+    let s = softPool[ns];
+    if ( !s ) { s = softPool[ns] = new PIXI.Sprite(st); s.anchor.set(0.5); s.eventMode = "none"; s.tint = A.SHADE; softBox.addChild(s); }
+    s.position.set(SF[i], SF[i + 1]); s.width = 2 * SF[i + 2]; s.height = 2 * SF[i + 3]; s.alpha = SF[i + 4]; s.visible = true;
+  }
+  for ( let k = ns; k < softPool.length; k++ ) softPool[k].visible = false;
   // colour (dim first: a brighter pixel drawn later wins) and its emission
   colG.clear(); glowG.clear(); shadeG.clear();
   const ap = g.ap;
