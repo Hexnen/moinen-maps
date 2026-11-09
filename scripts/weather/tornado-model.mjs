@@ -235,6 +235,15 @@ export function levelS(T, now) {
   return f >= 1 ? T.level - 1 : T.lv0 - 1 + (T.level - T.lv0) * f;
 }
 
+/**
+ * A LEVEL CHANGE of a tornado at shared ms `now` (design D6): the new ramp starts from where the running one is (lv0 = the level
+ * now, a float: no jump to the nearest integer) to `level` (a float 1..3; junk: unchanged; 0 clamps to 1, never a rope-out) over
+ * LEVEL_MS. Returns the changed record.
+ */
+export function retarget(T, level, now) {
+  return { ...T, lv0: lvl(levelS(T, now) + 1, T.level), level: lvl(level, T.level), lvT: Math.round(now) };
+}
+
 /** One value of a level table [L1, L2, L3] at s (piecewise linear). */
 export function lv(table, s) {
   const [a, b, c] = table;

@@ -527,3 +527,45 @@ fireWet, drift; wet / cover for cut keys): all identical.
   of rain 2 is drizzle first). Steady states are identical.
 * v1 level 1 with `i < 0.5` now maps to v 0.65..1 (presence): densities identical, tints scale with p (2.1, "negligible").
 * Not verified live: no Foundry run, no pixel A/B (T6).
+
+## 9. T2 as built (branch `weather-slider-t2`, 2026-11-09)
+
+**Engine (`weather.mjs`).** `clientState` caps with `M.capFx(st.fx, detailCap())`: every fx entry is `{ v, p, s }`, p / s bit for bit
+the old `s <= cap - 1 + 0.35` (a 1-ulp miss of T1's `capFx` at exactly v = cap + 0.35 was fixed: it now also tests s). `fireWet`,
+`rainAt`, `syncClouds` and the storm already read p / s only: unchanged (fireWet is not level-shaped). `syncLens` makes no lens while
+a fixed lens strength is 0. `lens.mjs` multiplies every lens presence (rain gates and each effect's p) by `M.lensP(P)` (x 1 exactly
+for auto and fixed >= 1). `status().state` and `state()` carry v per effect.
+
+**API (4.4).** The argument handling is pure and lives in model.mjs (`setChange`, `levelChange`, `cloudsChange`, `strengthChange`,
+`strengthsOf`); weather.mjs only wraps them:
+* `set(what, { level, i, over, at })`: `level` a float 0..3.35 (no rounding; junk -> 2; 0 = the preset's effects off); with `i`:
+  `level + (i - 0.5) x 0.7`. Ints 1..3 with or without `i` give the same key as before (tested against the old code).
+* `level(n, { i, over })`: float; 0 removes the driven effects (clouds kept).
+* `strength(patch?, { over, at })` (new): `{ eff: v }` patch on the newest key (0 / null / false removes, unknown effects and junk
+  ignored, nothing valid = no write). Always returns `{ preset, level, target: { eff: v }, live: { eff: v }, steady, until }`
+  (world state, no client cap); without a patch it only reads.
+* `clouds({ level, mode, rays }, { over })`: float, no rounding; returns `{ level: the target clouds v (0 = off), mode, rays, ... }`.
+* `lens({ level: "auto" | v })`: a fixed float strength (below 1 fades the level-1 lens in).
+* `tornado.add({ level })` float 1..3; `tornado.update(id, { level })` = `TM.retarget` (D6: `lv0` = the level now as a float,
+  `level` = `TM.cleanLevel`, 0 clamps to 1, junk keeps it; steady int changes identical to before); `tornado.list()` adds `v = s + 1`.
+
+**Back-compat notes.** Old `set(..., { level: 0 })` / `level(0)` meant "level 2" (lvlOf fallback); it now means off (design 4.4,
+float 0..3). No caller in the module or dev scripts passes 0. Old `tornado.update({ level: 0 })` kept the level; now it clamps to 1.
+
+**Tests.** New `dev/weather-api.test.mjs` (284 checks): A the helpers vs the old set() for every preset x level 1..3 x i (keys and
+resolved states identical), floats, patches, `strengthsOf` mid-ramp; B `capFx` vs the old cap for v 0..3.35 step 0.01 x caps 1..3
+bit for bit; C `retarget` vs the old update for steady 1..3 -> 1..3 (record and 6 s of `levelS` bit for bit), mid-ramp continuity
+(old jumped > 0.1), floats / clamps; D the REAL `weatherApi` imported under small Foundry stubs (canvas not ready, so no display
+runs): what set / level / clouds / strength / lens / tornado.* write to the flag, `state()` v mid-ramp, `rainAt`, and source checks
+(no `lvlOf` / `.l` / rounded tornado level in weather.mjs; capFx and lensP wired).
+
+**For T5 (section.mjs).** Read `Wx.strength()` (or `M.strengthsOf(P, now)`) for each slider: `target[e] ?? 0` is the slider value,
+`live[e]` the live value while `!steady`. Write `Wx.strength({ [e]: v }, { over })` on release (clouds too: `{ clouds: v }`; or
+`Wx.clouds({ level: v })`). Preset buttons: `Wx.set(preset, { over })` (the preset strength `level` carries over) and keys 0-3:
+`Wx.level(n, { over })`. Replace `cur().fx.clouds.l` with `cur().fx.clouds ?? 0` and drop `cur().i` / the fine slider. The dock's
+status: `state.fx[e].v` (and p while fading). Lens: `Wx.lens({ level: "auto" | v })`. Tornado sliders: `tornado.update(id, { level })`
+float 1..3, `tornado.list()[n].v` for the live level; rope-out stays `tornado.remove(id)`.
+
+**For T6 (live, not verified here).** No Foundry run: the display, lens and tornado paths were not drawn. Check live: a lens fixed at
+0.5 shows at half presence and a fixed 0 creates no lens; clients with caps 1 / 2 see the same as before; tornado slider changes
+mid-ramp glide; the dev scripts that call `set(..., { level })` still give the old looks (pixel A/B).

@@ -99,8 +99,11 @@ export const capV = (v, cap = 3) => Math.min(v, cap + 0.35);
 /** A resolved fx map capped for a client: { eff: { v, p, s } } with every v <= cap + 0.35 (cap 3: unchanged). */
 export function capFx(fx, cap = 3) {
   const out = {};
-  // (s as the old clamp computed it, so a capped level is bit-identical to before)
-  for ( const [e, f] of Object.entries(fx ?? {}) ) out[e] = f.v > cap + 0.35 ? { v: capV(f.v, cap), p: f.p, s: Math.min(f.s, cap - 1 + 0.35) } : f;
+  // (s as the old clamp computed it, so a capped level is bit-identical to before; the s test too: at v = cap + 0.35 exactly, v - 1
+  // is 1 ulp above cap - 1 + 0.35, which the old min() clamped)
+  for ( const [e, f] of Object.entries(fx ?? {}) ) {
+    out[e] = f.v > cap + 0.35 || f.s > cap - 1 + 0.35 ? { v: capV(f.v, cap), p: f.p, s: Math.min(f.s, cap - 1 + 0.35) } : f;
+  }
   return out;
 }
 
@@ -480,6 +483,52 @@ export function lensS(P, s, cap = 3) {
 }
 /** The lens's own presence factor: 1 for "auto"; a fixed lens strength below 1 fades the level-1 lens in (strength(v).p). */
 export function lensP(P) { return P.lens.level === "auto" ? 1 : strength(P.lens.level).p; }
+
+/* ---------------------------------------------------------------- the public API's arguments (weather.mjs weatherApi; dev/weather-api.test.mjs) */
+
+/**
+ * set(what, { level, i }): the change for withKey. `what` = a preset name or { preset?, fx?, wind? } (fx without a preset: exactly
+ * those effects, "custom"). `level` a strength 0..V_MAX (a float; the old ints 1..3 are the same strengths; junk: 2); with `i`
+ * (v1 fine intensity 0..1) it folds in as level + (i - 0.5) x FINE, so old callers keep their meaning.
+ */
+export function setChange(what, { level, i } = {}) {
+  const c = typeof what === "string" ? { preset: what } : { ...(what ?? {}) };
+  if ( level !== undefined ) c.level = cleanV(level, 2);
+  if ( i !== undefined ) c.i = num(i, 0, 1, 0);
+  if ( c.fx && !c.preset ) c.preset = "custom";
+  return c;
+}
+/** level(n, { i }): every effect the current preset drives at strength n (0..V_MAX, 0 removes them; junk: 2); v1 `i` folds in. */
+export function levelChange(n, { i } = {}) {
+  const c = { level: cleanV(n, 2) };
+  if ( i !== undefined ) c.i = num(i, 0, 1, 0.5);
+  return c;
+}
+/** clouds({ level }): the clouds' strength 0..V_MAX (0 removes them; junk: 0), no rounding. */
+export const cloudsChange = (level) => ({ clouds: cleanV(level, 0) });
+/**
+ * strength({ eff: v, ... }): the per-effect PATCH (withKey `fx`): v 0..V_MAX, 0 / null / false removes the effect; unknown effects and
+ * junk values are ignored (never a removal). null: nothing to change.
+ */
+export function strengthChange(patch) {
+  const fx = {};
+  for ( const [e, v] of Object.entries(patch && typeof patch === "object" ? patch : {}) ) {
+    if ( !EFFECTS.includes(e) ) continue;
+    if ( v === null || v === false ) { fx[e] = 0; continue; }
+    const x = cleanV(v, NaN); if ( Number.isFinite(x) ) fx[e] = x;
+  }
+  return Object.keys(fx).length ? { fx } : null;
+}
+/**
+ * What the GM's controls show: { preset, level (the preset strength), target: { eff: v } (the newest key's: where the weather goes),
+ * live: { eff: v } (the WORLD state now, no client caps: where it is), steady, until }. A slider shows `target`, and `live` while
+ * a ramp runs (steady false).
+ */
+export function strengthsOf(P, now) {
+  const k = current(P), st = resolve(P, now);
+  return { preset: k?.preset ?? "clear", level: k?.level ?? 2, target: { ...(k?.fx ?? {}) },
+    live: Object.fromEntries(Object.entries(st.fx).map(([e, f]) => [e, f.v])), steady: st.steady, until: st.until };
+}
 
 /** The levels table of a preset, for UIs and generators: [{ level, effects: { eff: gates } }]. */
 export function levels(preset) {
