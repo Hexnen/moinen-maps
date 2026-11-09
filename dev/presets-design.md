@@ -964,3 +964,21 @@ come from off screen at zoom 1).
   times, a place `{ m: "ejecta" }` for the layers - destruction as one timed path stroke, dust `hits` as one stroke; a point preset
   with ejecta and no drag gets a seeded way.
 - `defs.mjs`: the built-in `meteor` (set "nature"). `ui-core.mjs ghostOf`: the approach drawn as dots coming down the sky.
+
+### 20.1 The meteor as built (presets-meteor)
+
+- **Files:** new `scripts/presets/meteor-core.mjs`, `meteor-art.mjs`, `meteor-wire.mjs`, `dev/presets-meteor.test.mjs`,
+  `dev/meteor-cost.mjs`; edited `core.mjs` (PLACES + "ejecta", ACCENTS + "meteor", EJECTA_DEFAULTS / cleanEjecta / ejectaOf, a seeded
+  way for a point preset with ejecta and no drag, accent dur clamp 8 s -> 30 s, accentOf "meteor"), `defs.mjs` (built-in meteor),
+  `presets.mjs` (registerMeteor), `ui-core.mjs` (ghostOf: the approach as dots), `lang/en.json` + `pl.json` (name, hint).
+  Nothing of the others changed: a definition without `ejecta` expands exactly as before (presets-core / boom / guns tests unchanged).
+- **Tuned constants:** way 18 sq up / 12 sq back, ease s = u^1.25 (the head is readable for ~1.5 s at zoom 1, not a 0.5 s blip),
+  trail 16 s, ring to 7 sq x size, 13-16 ejecta rocks + 22 pebbles + 30 tail sparks (sparks below heat 0.2 are dropped: no dark
+  specks falling), rock sizes 2 / 3 / 4 art px. The smoke trail is two loose rows of lit billows (not a rod, not a bead chain),
+  blown away after the impact by a growing per-cell cut (no sheet fade).
+- **Checks (2026-11-09, lane 5, DPR 2):** presets-meteor 225/225; run-all 81/81 after merging main c7babb0; lang audit clean;
+  frame hash, ticker listeners (19) and settings (93) on a blank ZZ scene identical merged vs c7babb0. The art pass (713 x 892 cells
+  at zoom 1) costs ~0.1 ms GPU (timed with gl.finish). Real rAF frames at zoom 3 over 26 s: p95 8.2-9.2 ms, none over 50 ms
+  (bomb: 7.7-8.8 ms). stack-bench's stepped CPU p95 is high in the first ~25 s (20-46 ms, from the ~20 aftermath fires: dropping the
+  debris / rim / heart fires takes it to 1.2 ms) - an artefact of stepping the fire layer back to back; the real frames above do not
+  show it. Cold first firing on a fresh page: one long task 175-886 ms (bomb ~170 ms), at the click, not at the impact.
