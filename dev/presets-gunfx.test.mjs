@@ -75,5 +75,18 @@ for ( const lv of [1, 3] ) {
   ok(T.band < W.band, `tight band narrower (${T.band.toFixed(0)} < ${W.band.toFixed(0)})`);
 }
 
+/* F. the rounds (fill: accent-only rounds between a lane's walk hits) and water */
+{
+  const hits = Array.from({ length: 12 }, (_, i) => [i * 20, (i & 1) * 30, (i >> 1) * 70, i & 1]);
+  const R0 = X.roundsOf({ hits }), R2 = X.roundsOf({ hits, fill: 2 });
+  ok(R0.length === hits.length && R0.every((r) => r[4] === 1), "no fill: the walk hits only, all major");
+  ok(R2.length === hits.length + 2 * (hits.length - 2), `fill 2: two rounds in every gap of each lane (${R2.length})`);
+  ok(R2.every((r, i) => !i || R2[i - 1][2] <= r[2]), "rounds in time order");
+  ok(JSON.stringify(X.roundsOf({ hits, fill: 2 })) === JSON.stringify(R2), "rounds deterministic");
+  ok(R2.filter((r) => !r[4]).every((r) => r[3] === 0 || r[3] === 1), "minor rounds keep their lane");
+  ok(X.wetOf(X.packRgb([0.17, 0.24, 0.31])) && !X.wetOf(X.packRgb([0.45, 0.62, 0.36])) && !X.wetOf(X.packRgb([0.9, 0.8, 0.45])), "water is wet, grass and sand dry");
+  ok(X.kindOf(3, true) === "splashH" && X.kindOf(1, true) === "splashL", "wet hits splash");
+}
+
 console.log(fails ? `${fails}/${n} presets-gunfx check(s) FAILED` : `ok presets-gunfx: ${n}/${n} checks`);
 process.exit(fails ? 1 : 0);
