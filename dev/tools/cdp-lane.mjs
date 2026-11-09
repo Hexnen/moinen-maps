@@ -46,7 +46,7 @@ export async function join(port, origin, uid, { wait = 90000 } = {}) {
   throw new Error(`join ${origin} ${uid}: no ready canvas`);
 }
 
-if ( import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/").replace(/^\//, "")}` || process.argv[1]?.endsWith("cdp-lane.mjs") ) {
+if ( import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/").replace(/^\//, "")}` || process.argv[1]?.endsWith("cdp-lane.mjs") ) {
   const [cmd, port, a, b] = process.argv.slice(2);
   if ( cmd === "eval" ) { const c = await connect(port, a); console.log(JSON.stringify(await c.ev(fs.readFileSync(b, "utf8")))); c.close(); }
   else if ( cmd === "join" ) console.log(await join(port, a, b));
