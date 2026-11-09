@@ -7,7 +7,8 @@ import { HOOK as UI_HOOK, armed } from "./store.mjs";
  * run); until then nothing of it runs (the firings runtime calls its hook only on scenes with firing records). Its program is linked
  * in the background as the record arrives (the fall / throw before the impact is long enough). The explosion FIRE's programs (the
  * burst and dust: fire.mjs warmBurst) are linked in the background a few seconds after every scene is ready, on every client (a player
- * gets a firing with ~1 s to its impact: a cold link took longer, the first fireball of a session showed late), and again when the GM
+ * gets a firing with ~1 s to its impact: a cold link took longer, the first fireball of a session showed late) - blast.mjs and its own
+ * program too (its first load and link at the click cost a ~90 ms frame) - and again when the GM
  * arms a pad that has a burst. Listeners: the runtime's hook, the presets UI's, canvasReady and canvasTearDown.
  */
 let idle = 0;
@@ -32,7 +33,7 @@ export function registerBlast() {
   });
   Hooks.on("canvasReady", () => {
     clearTimeout(idle);
-    idle = setTimeout(() => { idle = 0; (globalThis.requestIdleCallback ?? ((f) => f()))(() => warmFire(), { timeout: 4000 }); }, 3000);
+    idle = setTimeout(() => { idle = 0; (globalThis.requestIdleCallback ?? ((f) => f()))(() => { warmFire(); load().then((m) => m.warmUp()).catch(() => {}); }, { timeout: 4000 }); }, 3000);
   });
   Hooks.on("canvasTearDown", () => { clearTimeout(idle); idle = 0; if ( blast ) blast.then((m) => m.reset()); });
 }

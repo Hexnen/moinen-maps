@@ -249,7 +249,7 @@ export function surgeAt(f, a, out = [0, 0, 0, 0]) {
   if ( !f?.v3 || a < 0 || f.none ) return out;
   const lv = f.lv ?? 2, R = f.R, life = BURST_V3.surge[lv];
   if ( a > life ) return out;
-  const [k0, k1, tau] = [[0, 0, 0], [0.45, 1.5, 0.3], [0.35, 1.45, 0.45], [0.3, 1.25, 0.5]][lv];
+  const [k0, k1, tau] = [[0, 0, 0], [0.4, 1.2, 0.3], [0.35, 1.45, 0.45], [0.3, 1.25, 0.5]][lv];
   const fade = f.out < 1e8 ? 1 - sm(f.out, f.out + BURST_FADE, a) : 1;
   out[0] = R * (k0 + k1 * (1 - Math.exp(-a / tau)));
   out[1] = R * (0.13 + 0.17 * (1 - Math.exp(-a / 1.1))) * (lv === 1 ? 1.4 : 1);
