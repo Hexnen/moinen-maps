@@ -35,6 +35,7 @@ let root = null, shadeG = null, flashEl = null, colG = null, glowBox = null, glo
 let spurtBox = null, spurtPool = [], addG = null, bloomBox = null, bloomPool = [], bloomTex = null;
 const spurtStrip = new Map();   // (kind|S|lift|variant -> a baked strip of all its frames, gun-fx.mjs bakeStrip: one base texture)
 const spurtTex = new Map();     // (kind|S|lift|variant|frame -> that frame's texture: a window into its strip)
+const SYNC_BAKES = 1;            // strips a frame's spurts may bake on the spot (spurtSprites)
 const bakeQueue = [];           // strips to bake ahead (during a firing's lead-in), a few a frame
 let softBox = null, softPool = [], softTex = null;
 const F = A.newFrame();
@@ -93,6 +94,8 @@ function stripOf(kind, S, lift, v) {
   spurtStrip.set(key, b);
   return b;
 }
+/** Is that strip baked (spurtTexture would not bake it now)? */
+function stripReady(kind, S, lift, v) { const b = spurtStrip.get(`${kind}|${S}|${lift}|${v}`); return !!b && !b.base.destroyed; }
 /** A spurt frame's texture: its window in the strip. */
 function spurtTexture(kind, S, lift, v, f) {
   const key = `${kind}|${S}|${lift}|${v}|${f}`;
@@ -295,9 +298,17 @@ function spurtSprites(g, v) {
     const env = canvas.scene?.environment, cyc = env?.cycle !== false, bl = env?.base?.luminosity ?? 0, dl = env?.dark?.luminosity ?? 0;
     const lb = cyc ? bl + (dl - bl) * dark : bl, lum = lb * (lb >= 0 ? 1.2 : 0.8); amb = 1 / Math.max(0.2, 1 + lum);
   }
-  let n = 0;
+  // (at most SYNC_BAKES strips baked here a frame: a spurt whose strip is not baked yet waits a frame or two, its strip first in the
+  // bake-ahead queue - the lead-in normally bakes them all, but when its frames were lost (a stalled or hidden page, a late join) the
+  // first visible frame baked every missing strip at once: 8-13 of the 32 in one frame in tests, 55-300 ms)
+  let n = 0, bakes = SYNC_BAKES;
   for ( const i of order ) {
-    const o = i * X.SPURT_STRIDE, kind = X.SPURT_KINDS[L[o + 2]], tex = spurtTexture(kind, S, lift, L[o + 3], L[o + 4]), b = tex.mmBox, flip = L[o + 6] === 1;
+    const o = i * X.SPURT_STRIDE, kind = X.SPURT_KINDS[L[o + 2]], sv = L[o + 3];
+    if ( !stripReady(kind, S, lift, sv) ) {
+      if ( bakes <= 0 ) { const q = bakeQueue.findIndex(([k, s2, l2, v2]) => k === kind && s2 === S && l2 === lift && v2 === sv); bakeQueue.unshift(q >= 0 ? bakeQueue.splice(q, 1)[0] : [kind, S, lift, sv]); continue; }
+      bakes--;
+    }
+    const tex = spurtTexture(kind, S, lift, sv, L[o + 4]), b = tex.mmBox, flip = L[o + 6] === 1;
     let s = spurtPool[n];
     if ( !s ) { s = spurtPool[n] = new PIXI.Sprite(tex); s.eventMode = "none"; spurtBox.addChild(s); }
     s.texture = tex; s.scale.set(flip ? -ap : ap, ap);

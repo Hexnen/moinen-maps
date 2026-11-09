@@ -18,6 +18,8 @@
  * `main()` after a line `// ---- main` (glsl.mjs GROUND_FRAG, fx-glsl.mjs HAZE_FRAG).
  * CONFIG.moinenMaps.weatherCells: false = always direct (the A/B switch); a number = the CELL_MIN override.
  */
+import { bindBack } from "./rt-bind.mjs";
+
 export const CELL_MIN = 1.6;
 /** At most this many cells cached (16 bytes each: ~48 MB; a 4K window at DPR 1 zoomed to just over CELL_MIN): more draws directly. */
 export const MAX_CELLS = 3e6;
@@ -184,7 +186,7 @@ export class CellCache {
     r.state.set(this.pass.state);
     r.geometry.bind(this.quad, this.cellShader);
     r.geometry.draw(PIXI.DRAW_MODES.TRIANGLES, 6, 0);
-    RT.bind(cur, sf, df);
+    bindBack(RT, cur, sf, df);
   }
 
   use(on) {
