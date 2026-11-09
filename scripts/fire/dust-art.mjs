@@ -338,7 +338,8 @@ vec4 cellColor(vec2 cf) {
   if ( (a.a & 4) != 0 ) o = over(o, min(b * 1.2 + 0.05, vec3(1.0)), 0.2);
   if ( (a.b & 16) != 0 ) o = over(o, min(b * 1.2 + 0.05, vec3(1.0)), 0.1);
   int gt = (a.b >> 2) & 3;
-  if ( gt > 0 ) o = over(o, gt == 1 ? T * 0.42 : gt == 2 ? T * 0.68 : mix(b, vec3(1.0), 0.3), 1.0);
+  // (grains in the soil's own dark / mid tone, not black: they read as grit on any ground, never as specks of ink)
+  if ( gt > 0 ) o = over(o, gt == 1 ? mix(T * 0.5, b * 0.55, 0.5) : gt == 2 ? mix(T, b, 0.5) * 0.78 : mix(b, vec3(1.0), 0.3), gt == 1 ? 0.8 : 0.7);
   if ( (a.b & 32) != 0 ) o = over(o, T * 0.3, 0.35);
   int au = a.b & 3;
   if ( au > 0 ) o = over(o, min(b * 1.18 + 0.05, vec3(1.0)), AURA[au]);

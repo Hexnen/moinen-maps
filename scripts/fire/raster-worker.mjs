@@ -13,7 +13,7 @@ self.onmessage = (ev) => {
   let field; const t0 = t ? performance.now() : 0;
   try {
     field = M.raster(area, geo, P);
-    const lb = M.lightBins(area, field, geo); field.lightKey = lb.key; field.lightBins = lb.bins;
+    if ( field.style !== "dust" ) { const lb = M.lightBins(area, field, geo); field.lightKey = lb.key; field.lightBins = lb.bins; }   // (dust gives no light)
   } catch ( err ) { self.postMessage({ key, err: String(err?.message ?? err) }); return; }
   const tr = [];
   for ( const v of Object.values(field) ) if ( ArrayBuffer.isView(v) && !tr.includes(v.buffer) ) tr.push(v.buffer);

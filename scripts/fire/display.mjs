@@ -270,7 +270,9 @@ export class FireDisplay {
   /** The lights per area (an unchanged area keeps its sources; lightsOf runs only for the areas that need new ones). */
   syncLights() {
     const geo = this.geo, P = this.P;
-    const r = this.lights.syncAreas([...this.areas].map(([id, a]) => ({ id, key: a.key, listOf: (max) => M.lightsOf([a], geo, P, { max }) })), P, sharedNow(), geo);
+    // (dust gives no light: its areas never enter the light sync, so they neither take a share of the light budget from the fire nor
+    // re-sync the fire's lights when they come and go)
+    const r = this.lights.syncAreas([...this.areas].filter(([, a]) => a.area.style !== "dust").map(([id, a]) => ({ id, key: a.key, listOf: (max) => M.lightsOf([a], geo, P, { max }) })), P, sharedNow(), geo);
     this.stats.lightsMade += r.made;
     this.stats.lights = this.lights.count;
   }
