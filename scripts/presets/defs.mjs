@@ -96,7 +96,49 @@ export const BUILTIN = Object.freeze([
       { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
     ]
   },
-  LANDING
+  LANDING,
+  {
+    // ROCKET / RPG (dev/presets-design.md section 21): with a SHOOTER (a token the GM chose, or a shot dragged out of a token) a hiss at
+    // the tube's rear, the launch flash and a billowing backblast; the rocket flies to the target with its motor flame, laying a smoke
+    // trail that swells, rises, wanders and dissolves; a shell's fireball, a crater, the dust ring, small fires. No shooter: no hiss,
+    // no flash, no backblast - it comes in from off the map (the accent "rocket" is drawn by presets/rocket.mjs)
+    id: "rocket", v: 1, set: "military", name: "MOINENMAPS.DPreset.rocket", hint: "MOINENMAPS.DPreset.rocketHint", icon: "fa-solid fa-rocket",
+    gesture: "shot", preroll: 1100, aftermath: { dur: 45 },
+    layers: [
+      { l: "accent", id: "rocket", kind: "rocket", at: -1100, dur: 6400, lv: 2 },
+      { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.6, flash: 0.3 },
+      { l: "burst", id: "burst", at: 0, lv: 2, r: 0.85 },
+      { l: "destruction", id: "crater", at: 0, type: "blast", level: 2, cause: "fire", r: 0.7, pr: { jagged: true, jag: 0.6 } },
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 2, r: 2.2, life: 245000 },
+      { l: "fire", id: "debris", at: [150, 900], place: { m: "scatter", n: [3, 6], d: [1, 2.4], bias: 1.3 }, lv: 1, sm: 1, r: [0.14, 0.22], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
+      { l: "fire", id: "rim", at: [700, 1100], place: { m: "ring", n: [1, 3], d: [0.6, 0.9] }, lv: 1, lvMix: [0.7, 0.3, 0], sm: 1, r: [0.22, 0.32], len: [0.2, 0.5], aftermath: true, lifeK: [0.5, 1], gr: 0.5 },
+      { l: "smoke", id: "column", at: 1200, sm: 2, r: 0.55, aftermath: true }
+    ]
+  },
+  {
+    // THE METEOR (dev/presets-design.md section 22): a white-hot head rushing down the sky at an angle with a plasma tail, shedding
+    // sparks, a dark smoke trail hanging along the way it came, its shadow / its light running in over the ground; then the biggest
+    // blast of the set - a pressure ring racing out, a huge fireball, a big torn crater, the shock dust and its five-minute haze, rocks
+    // thrown out on arcs that land one by one (each a pock and a geyser of dust), burning chunks, fires round the rim and in the
+    // heart, the smoke column; the sky trail lingers, drifts and breaks up
+    id: "meteor", v: 1, set: "nature", name: "MOINENMAPS.DPreset.meteor", hint: "MOINENMAPS.DPreset.meteorHint", icon: "fa-solid fa-meteor",
+    gesture: "point", preroll: 2600, aftermath: { dur: 90 },
+    ejecta: { n: [13, 16], d: [2.3, 6.5], t: [420, 1500], gap: 70, bias: 1.3 },
+    layers: [
+      { l: "accent", id: "meteor", kind: "meteor", at: -2600, dur: 18600 },
+      { l: "cue", id: "screen", kind: "screen", at: 0, shake: 1, flash: 1 },
+      { l: "burst", id: "burst", at: 0, lv: 3, r: 2.4 },
+      { l: "destruction", id: "crater", at: 0, type: "blast", level: 3, cause: "fire", r: 2.0, pr: { jagged: true, jag: 0.75, rubble: 0.7, debris: 0.8 } },
+      { l: "destruction", id: "ejecta", at: 0, type: "blast", cause: "impact", lvMix: [0.5, 0.5, 0], place: { m: "ejecta" }, r: [0.2, 0.32],
+        pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, edge: 0.55, jagged: true, jag: 0.6 } },
+      { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 6.5, life: 305000 },
+      { l: "dust", id: "landings", dk: "hits", at: 0, lv: 3, r: 0.3, place: { m: "ejecta" }, life: 7000 },
+      { l: "fire", id: "heart", at: 1000, lv: 2, sm: 1, r: 0.55, aftermath: true, lifeK: [0.85, 1], gr: 0.5 },
+      { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [3, 5], d: [1.6, 2.1] }, lv: 2, lvMix: [0.4, 0.6, 0], sm: 1, r: [0.35, 0.5], len: [0.4, 0.9], aftermath: true, lifeK: [0.45, 1], gr: 0.6 },
+      { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [8, 14], d: [2.4, 5.5], bias: 1.2 }, lv: 1, sm: 1, r: [0.15, 0.28], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
+      { l: "smoke", id: "column", at: 1200, sm: 3, r: 1.1, aftermath: true }
+    ]
+  }
 ]);
 
 export const builtinIds = () => BUILTIN.map((d) => d.id);

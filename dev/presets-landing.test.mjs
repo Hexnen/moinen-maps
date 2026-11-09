@@ -28,7 +28,7 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   ok(def.gesture === "point" && def.onToken === true && def.aftermath === null && def.preroll === 1300, "A point, lands on a token, no aftermath fire");
   ok(!def.layers.some((l) => l.l === "fire" || l.l === "smoke" || l.l === "burst" || l.l === "sound"), "A no fire, smoke, burst or sound");
   ok(!def.layers.some((l) => l.l === "cue" && l.flash > 0), "A no flash (nothing burns)");
-  ok(BUILTIN.map((d) => d.id).join().startsWith("bomb,grenade,uzi,heliHmg") && BUILTIN.at(-1).id === "landing", "A one new entry after the military four");
+  ok(BUILTIN.map((d) => d.id).join().startsWith("bomb,grenade,uzi,heliHmg") && BUILTIN.findIndex((d) => d.id === "landing") > 3, "A one new entry after the military four");
   ok(C.ACCENTS.includes("landing") && C.ACCENTS.includes("airRing") && C.PLACES.includes("rays"), "A core knows the kinds and the place");
   ok(A.ACCENT_KINDS.includes("landing") && A.ACCENT_KINDS.includes("airRing"), "A accents-core draws them");
   const wire = fs.readFileSync(path.join(root, "scripts/presets/accents-wire.mjs"), "utf8");

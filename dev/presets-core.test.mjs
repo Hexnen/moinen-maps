@@ -24,12 +24,12 @@ const ok = (c, msg) => { n++; if ( !c ) { fails++; console.log(`FAIL ${msg}`); }
 const RECT = { x: 0, y: 0, width: 3000, height: 2000 };
 const ENV = { grid: 100, rect: RECT, now: 1_800_000_000_000, wind: { dir: 45, speed: 0.4 } };
 const get = (id) => BUILTIN.find((d) => d.id === id);
-const G = { point: { a: [1500, 1000] }, throw: { a: [1000, 1000], b: [1500, 1100] }, line: { a: [1000, 900], b: [1800, 1100] }, run: { a: [600, 1000], b: [2400, 1000] } };
+const G = { point: { a: [1500, 1000] }, throw: { a: [1000, 1000], b: [1500, 1100] }, line: { a: [1000, 900], b: [1800, 1100] }, run: { a: [600, 1000], b: [2400, 1000] }, shot: { a: [1000, 1000], b: [1600, 1200], from: [1000, 1000], fr: 50 } };
 const fireAt = (d, seed = 7, opts = {}, g = G[d.gesture], env = ENV) => C.expand(d, g, { seed, ...opts }, env);
 
 /* A */
 for ( const d of BUILTIN ) { const c = C.cleanDef(d); ok(c.ok, `A built-in ${d.id} clean (${c.errors.join("; ")})`); }
-ok(BUILTIN.map((d) => d.id).join() === "bomb,grenade,uzi,heliHmg,lightning,landing", "A the built-ins in order (the four military, the lightning strike, the superhero landing)");
+ok(BUILTIN.map((d) => d.id).join() === "bomb,grenade,uzi,heliHmg,lightning,landing,rocket,meteor", "A the built-ins in order (the four military, the lightning strike, the superhero landing, the rocket, the meteor)");
 {
   const c = C.cleanDef({ id: "x y", v: 2, gesture: "laser", layers: [{ l: "sound", id: "s" }, { l: "destruction", type: "meteor", cause: "x", r: 99 }, { l: "fire", aftermath: true }] });
   ok(!c.ok && c.def, "A junk: named, still a safe definition");

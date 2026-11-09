@@ -9,8 +9,9 @@
  *     lens: { on, level: "auto" | 1 | 2 | 3, strength },
  *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] },  (weather OBJECTS on their own paths: tornado-model.mjs)
  *     fire: { out },                                     (rain puts fire areas out: off by default, research D9)
- *     clouds: { mode: "sky" | "shadows", modeT, rays, raysT } }  (the cloud layer's look: bodies + shadows or shadows only, godrays;
+ *     clouds: { mode: "sky" | "shadows", modeT, rays, raysT },  (the cloud layer's look: bodies + shadows or shadows only, godrays;
  *                                                        each switch fades over CLOUD_FADE ms from its shared time)
+ *     storm: { on, rate, power, near, bolts, t, prev } }  (the rain's lightning, storm-model.mjs; absent until the GM first sets it)
  *
  * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key cross-fades from the state at its
  * start to its target along a smoothstep over its `dur`, so a change of preset, level or wind is a smooth ramp, never a cut, and a
@@ -24,6 +25,7 @@
  */
 import { WIND_DEFAULT, SPEED_SQ, dirVec } from "../wind.mjs";
 import { cleanTornadoes } from "./tornado-model.mjs";
+import { cleanStorm } from "./storm-model.mjs";
 
 export const FLAG = "weather";
 export const VERSION = 1;
@@ -110,7 +112,9 @@ export function cleanParams(raw) {
     lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
     tornadoes: cleanTornadoes(r.tornadoes),
     fire: { out: r.fire?.out === true },
-    clouds: cleanClouds(r.clouds)
+    clouds: cleanClouds(r.clouds),
+    // (the rain's lightning, storm-model.mjs: only once the GM has set it, so a scene that never did keeps its flag as it was)
+    ...(r.storm && typeof r.storm === "object" ? { storm: cleanStorm(r.storm) } : {})
   };
 }
 

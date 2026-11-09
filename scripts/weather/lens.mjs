@@ -58,7 +58,7 @@ uniform float uSlant;        // runner slant (x per y) from the wind
 uniform float uG[121];       // the gust envelope over the last 10 s (12 Hz, oldest first): rain intensity, sand waves, fire gusts
 uniform vec4 uSnowL;         // frost reach, frost breathing, crystals per lens-area, presence
 uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, presence
-uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts
+uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts (a float count: the last ghost fades in by its fraction)
 uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
 uniform vec4 uHeatL;         // glow, flecks per area, presence, -
 uniform float uLight;        // 1 by day, darker at night
@@ -444,17 +444,19 @@ void dustLens(vec2 p) {
   float lv = 0.05 * clamp((0.45 * glare + 0.1 - d) / dw + 0.5, 0.0, 1.0) + 0.05 * clamp((0.30 * glare + 0.05 - d) / dw + 0.5, 0.0, 1.0)
     + 0.06 * clamp((0.16 * glare - d) / dw + 0.5, 0.0, 1.0);
   vec3 add = lv * uDustL.z * vec3(1.0, 0.92, 0.72);
-  // ghosts along the axis sun -> centre -> beyond
+  // ghosts along the axis sun -> centre -> beyond; ghost j weighs clamp(count - j, 0, 1), so a whole count draws the old ghosts at
+  // weight 1.0 exactly and a fractional one fades the next ghost in
   vec2 ax = uLens * 0.5 - sun;
   for ( int j = 0; j < 5; j++ ) {
-    if ( float(j) >= uDustL.w ) break;
+    float gw = clamp(uDustL.w - float(j), 0.0, 1.0);
+    if ( gw <= 0.0 ) break;
     float f = j == 0 ? 0.55 : j == 1 ? 1.15 : j == 2 ? 1.45 : j == 3 ? 1.9 : 2.2;
     float rad = (j == 0 ? 9.0 : j == 1 ? 16.0 : j == 2 ? 6.0 : j == 3 ? 24.0 : 4.0) * sc;
     vec3 col = j == 0 ? vec3(0.9, 0.8, 0.5) : j == 1 ? vec3(0.55, 0.9, 0.6) : j == 2 ? vec3(0.8, 0.6, 1.0) : j == 3 ? vec3(0.9, 0.7, 0.5) : vec3(1.0, 0.95, 0.8);
     vec2 e = p - (sun + ax * f);
     float r = length(e);
     if ( j == 1 || j == 3 ) { float a = mod(abs(atan(e.y, e.x)), 1.0471976) - 0.5235988; r = r * cos(a) / 0.8660254; }
-    float inG = cov(r - rad);
+    float inG = cov(r - rad) * gw;
     if ( inG > 0.0 ) add += col * uDustL2.x * glare * inG * (1.0 + 1.2 * cov(rad - 1.0 - r));
   }
   over(1.0, add * uLight);
@@ -868,7 +870,7 @@ export class WeatherLens {
     const sn = at("snow"), sa = at("sand"), du = at("dust"), em = P?.lens?.heat ? at("embers") : null;
     this.fx.snow = sn ? [sn.G.frost, sn.G.wob, sn.G.crystals, sn.p] : [0, 0, 0, 0];
     this.fx.sand = sa ? [sa.G.deposit * sa.p, sa.G.scratch * sa.p, sa.G.impacts, sa.p] : [0, 0, 0, 0];
-    this.fx.dust = du ? [du.G.specks, du.G.discs, du.G.glare, Math.round(du.G.ghosts)] : [0, 0, 0, 0];
+    this.fx.dust = du ? [du.G.specks, du.G.discs, du.G.glare, du.G.ghosts] : [0, 0, 0, 0];
     this.fx.dust2 = du ? [du.G.ghostK, du.G.smudge, du.p, 0] : [0, 0, 0, 0];
     this.fx.heat = em ? [em.G.glow * em.p, em.G.flecks, em.p, 0] : [0, 0, 0, 0];
     this.wind = st?.wind ?? null; this.seed = st?.seed ?? 0;

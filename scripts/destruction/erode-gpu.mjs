@@ -16,6 +16,8 @@
  * those entries stay on the CPU path.
  */
 export const MAX_STAGES = 6;
+/** The erosion pass's program (PIXI caches it by source: the one ErodeGPU.init's shader uses) - scripts/load-warm.mjs links it ahead. */
+export const erodeProgram = () => PIXI.Program.from(VERT, FRAG);
 const LUT_ROWS = 256;
 const POOL = new Map();                // "WxH" -> finished entries' render textures, ready for the next entry of that size
 const POOL_MAX = 64 * 1048576;

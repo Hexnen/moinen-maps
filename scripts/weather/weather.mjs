@@ -15,6 +15,8 @@ import { SteamLayer } from "./steam.mjs";
 import { guardInfo } from "./guard.mjs";
 import { warmPrograms } from "../gl-warm.mjs";
 import { CloudDisplay, cloudPrograms } from "./clouds.mjs";
+import * as SM from "./storm-model.mjs";
+import { StormDisplay, stormPrograms } from "./storm.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -24,7 +26,7 @@ import { CloudDisplay, cloudPrograms } from "./clouds.mjs";
  * COST WHEN OFF: no display object, no ticker, no texture: only these hooks. A future key (a change scheduled ahead) is one timer.
  */
 let P = M.cleanParams();
-let display = null, lens = null, tornado = null, tornadoTimer = 0, steam = null, clouds = null;
+let display = null, lens = null, tornado = null, tornadoTimer = 0, steam = null, clouds = null, storm = null;
 let info = null, shelter = null, infoKey = "", shelterKey = "", infoJob = 0;
 let timer = 0, shelterTimer = 0;
 let lastState = null;
@@ -106,6 +108,10 @@ async function prewarm() {
   if ( globalThis.CONFIG?.moinenMaps?.weatherPrewarm === false || !shown() ) return;
   const list = [...displayPrograms(), ...cloudPrograms(), ...tornadoPrograms()];
   if ( P.lens?.on ) try { list.push(...(await import("./lens.mjs")).lensPrograms()); } catch { /* compiled on first use */ }
+  if ( P.storm?.on ) {
+    list.push(...stormPrograms());
+    if ( P.storm.bolts ) try { list.push((await import("../presets/lightning.mjs")).strikeProgram()); } catch { /* compiled on first use */ }
+  }
   await warmPrograms(list, () => job === warmJob && canvas.ready);
 }
 
@@ -117,6 +123,7 @@ export function teardown() {
   display?.destroy(); display = null;
   steam?.destroy(); steam = null;
   clouds?.destroy(); clouds = null;
+  storm?.destroy(); storm = null;
   lens?.destroy?.(); lens = null;
   info?.texture?.destroy(true); info = null; infoKey = "";
   shelter?.texture?.destroy(true); shelter = null; shelterKey = "";
@@ -128,8 +135,10 @@ function onUpdateScene(scene, changed) {
   if ( scene.id !== canvas.scene?.id ) return;
   const f = changed?.flags?.[MODULE_ID]; if ( !f ) return;
   if ( ![M.FLAG, `-=${M.FLAG}`, VIEW_FLAG, `-=${VIEW_FLAG}`].some((k) => k in f) ) return;
+  const stormWas = !!P.storm?.on;
   load(scene);
   refresh();
+  if ( P.storm?.on && !stormWas ) prewarm();   // (the lightning just switched on: its programs in the background before its first flash)
   tell("changed");
 }
 
@@ -149,6 +158,7 @@ export function refresh() {
     if ( lens ) { lens.destroy(); lens = null; }
     if ( steam ) { steam.destroy(); steam = null; }
     if ( clouds ) { clouds.destroy(); clouds = null; }
+    if ( storm ) { storm.destroy(); storm = null; }
     // (a key that has just started fades in from nothing: its first few ms are below the presence cut, so look again shortly)
     const next = P.keys.find((k) => k.t + k.dur > now && Object.keys(k.fx ?? {}).length);
     if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t > now ? next.t - now + 20 : 100)));
@@ -165,6 +175,46 @@ export function refresh() {
   syncLens(st);
   syncSteam();
   syncClouds(st);
+  syncStorm(st);
+}
+
+/* ---------------------------------------------------------------- the rain's lightning (storm-model.mjs, storm.mjs) */
+
+// the rain's WORLD presence at a shared moment (no client caps: every client sees the same flashes), one function per stored state
+let rainPOf = null, rainPFn = null;
+const rainP = () => {
+  if ( rainPOf !== P ) { const Q = P; rainPOf = Q; rainPFn = (t) => M.stateAt(Q, t).fx.rain?.p ?? 0; }
+  return rainPFn;
+};
+let stageOpts = null, stageLoading = false;
+/** The client's flash / reduced-motion opt-outs (director/stage.mjs, loaded on the first storm; until then: calm). */
+const flashOpts = () => {
+  if ( stageOpts ) return stageOpts();
+  if ( !stageLoading ) { stageLoading = true; import("../director/stage.mjs").then((m) => { stageOpts = m.clientOpts; }).catch(() => { stageOpts = () => ({}); }); }
+  return { noFlash: true };
+};
+/** The lightning while the scene's storm is on (or a flash of the settings before a switch-off is still running) and it rains here. */
+function syncStorm(st) {
+  const S = P.storm ?? null, now = sharedNow();
+  const preview = !!storm && !!display && storm.extra.some((e) => e.t + e.end > now);   // (a GM's local test flash still running)
+  // (after a switch-off: until its running flashes and the gloom's fade are over)
+  const want = preview || (!!S && (S.on || (S.prev?.on && now - S.t < SM.GLOOM_MS + SM.SPAN[1])) && !!display && !!st && (st.fx.rain?.p ?? 0) > 0.01);
+  if ( !want ) { if ( storm ) { storm.destroy(); storm = null; } return; }
+  try {
+    storm ??= new StormDisplay();
+    storm.now = sharedNow; storm.opts = flashOpts;
+    storm.update(S, P.seed, rainP(), geo(), st?.view ?? viewOf(), display, clouds, now);
+  } catch ( err ) { console.warn(`${MODULE_ID} | weather: lightning`, err); storm?.destroy(); storm = null; }
+}
+
+/** The lightning's settings (GM): { on, rate (per minute), power 0..1, near 0..1, bolts }; takes effect a moment ahead on every client. */
+export function setStorm(patch = {}) {
+  if ( !game.user.isGM || !canvas.scene ) return null;
+  P = M.cleanParams({ ...P, storm: SM.withChange(P.storm ?? null, patch, sharedNow() + M.LEAD_MS) });
+  refresh(); tell("params");
+  prewarm();
+  save();
+  return { ...SM.cleanCore(P.storm) };
 }
 
 /** The cloud layer (clouds.mjs): the Clouds weather and the wind's cloud shadows, one field; no cover -> no display. */
@@ -330,6 +380,7 @@ function step() {
   display.setState(st);
   syncLens(st);
   syncClouds(st);
+  syncStorm(st);
   fireOutCheck();
   const s1 = Math.floor(Date.now() / 1000);
   if ( s1 !== stateTold ) { stateTold = s1; tell("state"); }   // (the dock's status line, once a second)
@@ -482,13 +533,23 @@ export const weatherApi = {
   rainAt() { const r = M.resolve(P, sharedNow()).fx.rain; return r ? r.p * M.gate([0.35, 0.7, 1], r.s) : 0; },
   /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
-    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, clouds: clouds ? { ...clouds.stats, on: clouds.ticking } : null, fireWet: fireWetNow(), state: lastState }),
+    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, clouds: clouds ? { ...clouds.stats, on: clouds.ticking } : null,
+    storm: storm ? { ...storm.stats } : null, fireWet: fireWetNow(), state: lastState }),
   /** The cloud layer: { level 0 (off) .. 3, mode "sky" | "shadows", rays true | false }, { over ms } (GM). */
   clouds({ level, mode, rays } = {}, { over = M.DEFAULT_DUR } = {}) {
     if ( mode !== undefined || rays !== undefined ) setCloudLook({ mode, rays });
     if ( level !== undefined ) change({ clouds: Math.max(0, Math.min(3, Math.round(Number(level)) || 0)) }, { over });
     return { level: M.current(P)?.fx?.clouds?.l ?? 0, ...P.clouds };
   },
+  /** The rain's lightning: settings { on, rate, power, near, bolts } (GM; none: just read them). */
+  lightning(patch) { if ( patch && Object.keys(patch).length ) return setStorm(patch); return SM.cleanCore(P.storm ?? null); },
+  /** A local preview flash (this client only, nothing written): "far" | "mid" | "close". */
+  previewFlash(kind = "close") {
+    if ( !display || !lastState ) return null;
+    if ( !storm ) { storm = new StormDisplay(); storm.now = sharedNow; storm.opts = flashOpts; storm.update(P.storm ?? null, P.seed, rainP(), geo(), lastState.view ?? viewOf(), display, clouds, sharedNow()); }
+    return storm.preview(SM.KINDS.includes(kind) ? kind : "close", sharedNow());
+  },
+  stormDisplay: () => storm, stormModel: SM,
   display: () => display, lensDisplay: () => lens, cloudDisplay: () => clouds, tornadoDisplay: () => tornado, steamDisplay: () => steam, guard: guardInfo, refresh, model: M, geo,
   tornado: tornadoApi
 };

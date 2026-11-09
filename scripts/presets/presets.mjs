@@ -6,6 +6,8 @@ import * as Run from "./runtime.mjs";
 import { BUILTIN } from "./defs.mjs";
 import { registerAccents } from "./accents-wire.mjs";
 import { registerLightning } from "./lightning-wire.mjs";
+import { registerRocket } from "./rocket-wire.mjs";
+import { registerMeteor } from "./meteor-wire.mjs";
 
 /**
  * DESTRUCTION PRESETS: the public API, `game.modules.get("moinen-maps").api.presets` (dev/presets-design.md; P1 the data format, the
@@ -66,4 +68,6 @@ moduleApi.presets = presetsApi;
 Run.registerRuntime();
 registerAccents();
 registerLightning();
+registerRocket();
+registerMeteor();
 
