@@ -739,10 +739,12 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 #token-hud .mm-z-altpick hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid #4a3f33; }
 .mm-z-floors-row i { color: #d8ccb0; }
 
-/* orbit: the strip of tokens in orbit above each map's top edge, and the Token HUD button */
-#mm-orbit-strip { position: fixed; z-index: 31; display: flex; align-items: flex-end; gap: 6px; padding: 5px 8px; border-radius: 10px; pointer-events: all;
+/* orbit: the GM's strip of tokens in orbit, docked at the top of the screen (orbit.mjs sets top / left / max-width: the free area between the
+   scene navigation and the sidebar, or centred under the Invincible initiative bar when that shows), and the Token HUD button */
+#mm-orbit-strip { position: fixed; z-index: 31; top: 16px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 70vw; box-sizing: border-box; display: flex; flex-wrap: wrap;
+  justify-content: center; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 10px; pointer-events: all;
   background: linear-gradient(180deg, #0b0a26ee, #05040ce6); border: 1px solid #3a3a7a; box-shadow: 0 0 0 1px #000a, 0 6px 18px #000a, inset 0 0 12px #5f7fff22;
-  image-rendering: pixelated; white-space: nowrap; max-width: 90vw; overflow: hidden; }
+  image-rendering: pixelated; white-space: nowrap; }
 #mm-orbit-strip button { display: flex; align-items: center; gap: 5px; height: auto; width: auto; margin: 0; padding: 2px 8px 2px 3px; border-radius: 18px; cursor: pointer;
   background: #ffffff10; border: 1px solid #ffffff22; color: #e8ecff; font-size: 12px; font-weight: 700; line-height: 1; }
 #mm-orbit-strip button:hover { background: #7f9fff33; border-color: #a9c8ff; }
@@ -752,7 +754,6 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 #mm-orbit-strip .mm-orbit-chip img { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; border: 2px solid #5f7fff; background: #05040c; }
 #mm-orbit-strip .mm-orbit-chip.home img { border-color: #ffd27a; }
 #mm-orbit-strip .mm-orbit-chip.hid { opacity: 0.55; }
-#mm-orbit-strip .mm-orbit-chip:not(.own) { cursor: default; }
 #mm-orbit-strip .mm-orbit-chip span { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
 #token-hud .mm-orbit-pick { left: auto; right: calc(100% + 6px); }
 

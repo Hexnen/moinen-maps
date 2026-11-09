@@ -1,6 +1,7 @@
 /**
  * Orbit: one shared "Orbit" scene for the whole world. A token thrown (or flown) to orbit from any map really leaves that map and
- * appears there; every map shows, above its top edge, a strip of everyone in orbit, and a click brings a token down onto that map.
+ * appears there; on every map the GM sees, docked at the top of the screen, a strip of everyone in orbit, and a click brings a token down
+ * onto that map (players see no strip).
  *
  * - The Orbit scene is made on demand by a GM: its background is procedural pixel-art space (space.mjs), painted at a low art
  *   resolution, enlarged with hard edges and uploaded once as a PNG into the world folder; the seed sits in the scene flag (v 2: the
@@ -233,7 +234,7 @@ function onCreateToken(doc, options) {
   if ( follow && canvas.scene?.id === o.from ) doc.parent.view();
 }
 
-/* ---------------------------------------------------------------- the strip above each map */
+/* ---------------------------------------------------------------- the GM's strip at the top of the screen */
 
 /** The last map (not the Orbit scene) this browser showed: where "back" goes. */
 const LAST_KEY = "mm-orbit-last-map";
@@ -259,30 +260,53 @@ const back = {
   }
 };
 
+/** The GM's strip of everyone in orbit: docked at the top of the screen (screen-fixed, it never follows the camera), shown to the GM only.
+ * Players get no strip at all (nothing about who is in orbit reaches them through it); they go up with the altitude picker's Orbit
+ * and come down with the Token HUD button on the Orbit scene, and follow their own character there (orbitFollow).
+ * Where: 16 px from the top (like the scene controls and navigation), centred on the free strip of screen between the scene
+ * navigation and the sidebar, never wider than it (it wraps to a second row instead). When the Invincible Plus Ultra initiative bar
+ * is up at the top (it publishes its bottom edge as data-icbar-bottom on <html>, its centre / width as --icbar-cx / --icbar-maxw on
+ * its root), the strip sits centred under it. dock() measures this only when something it depends on changes: the bar (a
+ * MutationObserver), the sidebar / navigation size (a ResizeObserver: collapse, expand) and the window size. No camera, ticker or
+ * per-frame work. */
 const strip = {
-  el: null, key: "",
-  // PERF: the strip's height (offsetHeight), kept between camera frames. place() runs on every camera frame (canvasPan and the tick
-  // below); reading offsetHeight there, after the style writes of the previous place() and whatever else changed this frame, forced a
-  // synchronous layout of the page on each frame (21-93 ms per Director shot on a 2x-throttled player). The height changes only with the
-  // content (refresh() measures it right after writing it) or a re-layout of the content itself (fonts, zoom), which a ResizeObserver
-  // reports after a layout the browser does anyway. `last` = the values written last: the same place again writes nothing.
-  h: null, ro: null, last: null,
-  remove() { this.ro?.disconnect(); this.ro = null; this.h = null; this.last = null; this.el?.remove(); this.el = null; this.watch(false); },
-  /** Follow the camera every frame it moves (canvasPan does not fire for every camera change): one cheap compare per tick. */
-  tick: () => {
-    const st = canvas?.stage; if ( !st || !strip.el ) return;
-    const k = `${st.position.x.toFixed(1)},${st.position.y.toFixed(1)},${st.scale.x.toFixed(4)},${innerWidth},${innerHeight}`;
-    if ( k !== strip.key ) { strip.key = k; strip.place(); }
+  el: null, mo: null, ro: null, bar: null, key: "",
+  onResize: () => strip.dock(),
+  remove() {
+    this.mo?.disconnect(); this.ro?.disconnect(); this.mo = this.ro = this.bar = null; this.key = "";
+    window.removeEventListener("resize", this.onResize);
+    this.el?.remove(); this.el = null;
   },
-  watch(on) {
-    const tk = canvas?.app?.ticker; if ( !tk ) return;
-    tk.remove(this.tick);
-    if ( on ) tk.add(this.tick);
+  /** The free strip of screen at the top: right of the scene controls and the navigation, left of the sidebar. */
+  freeArea() {
+    const W = window.innerWidth, R = (q) => { const r = document.querySelector(q)?.getBoundingClientRect(); return r && r.width > 0 && r.height > 0 ? r : null; };
+    const ctl = R("#scene-controls"), nav = R("#scene-navigation .scene-navigation-menu") ?? R("#scene-navigation li.scene"), side = R("#sidebar");
+    let lo = Math.max(0, ctl && ctl.right < W * 0.4 ? ctl.right : 0, nav && nav.top < 120 && nav.right < W * 0.5 ? nav.right : 0) + 12;
+    let hi = (side && side.left > W * 0.4 ? side.left : W) - 12;
+    if ( hi - lo < 240 ) { lo = Math.max(0, (ctl?.right ?? 0) + 12); hi = Math.max(lo + 240, hi); }
+    return { lo, hi };
+  },
+  /** Place it: under the initiative bar when that shows, else at the top of the free area (only writes what changed). */
+  dock() {
+    const el = this.el; if ( !el ) return;
+    const bar = document.getElementById("invincible-combat-bar");
+    if ( bar && bar !== this.bar ) { this.bar = bar; this.mo?.observe(bar, { attributes: true, attributeFilter: ["style"] }); }
+    const under = Number(document.documentElement.dataset.icbarBottom) || 0;
+    const bcx = under > 0 ? parseFloat(bar?.style.getPropertyValue("--icbar-cx")) : NaN, bw = parseFloat(bar?.style.getPropertyValue("--icbar-maxw"));
+    let top = 16, cx, w;
+    if ( Number.isFinite(bcx) ) { top = under + 8; cx = bcx; w = bw > 0 ? bw : 480; }
+    else { const { lo, hi } = this.freeArea(); cx = (lo + hi) / 2; w = hi - lo; }
+    const k = `${Math.round(top)}|${Math.round(cx)}|${Math.round(w)}`;
+    if ( k === this.key ) return;
+    this.key = k;
+    el.style.top = `${Math.round(top)}px`;
+    el.style.left = `${Math.round(cx)}px`;
+    el.style.maxWidth = `${Math.max(160, Math.round(w))}px`;
   },
   refresh() {
-    if ( !canvas?.ready || !canvas.scene || isOrbit(canvas.scene) || !enabled() ) return this.remove();
+    if ( !game.user?.isGM || !canvas?.ready || !canvas.scene || isOrbit(canvas.scene) || !enabled() ) return this.remove();
     const orbit = orbitScene();
-    const list = orbit ? orbit.tokens.filter((t) => game.user.isGM || !t.hidden) : [];
+    const list = orbit ? orbit.tokens.contents : [];
     if ( !list.length ) return this.remove();
     if ( !this.el ) {
       this.el = document.createElement("div");
@@ -290,44 +314,29 @@ const strip = {
       this.el.addEventListener("click", (ev) => this.onClick(ev));
       this.el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); orbitScene()?.view(); });
       (document.getElementById("board") ?? document.body).after(this.el);
-      this.watch(true);
-      // (offsetHeight read inside the observer's callback: the layout it reports is fresh, so the read forces nothing)
-      this.ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => { if ( this.el ) this.h = this.el.offsetHeight; }) : null;
-      this.ro?.observe(this.el);
+      this.mo = typeof MutationObserver === "function" ? new MutationObserver(() => this.dock()) : null;
+      this.mo?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-icbar-bottom"] });
+      this.ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => this.dock()) : null;
+      for ( const id of ["sidebar", "scene-navigation"] ) { const n = document.getElementById(id); if ( n ) this.ro?.observe(n); }
+      window.addEventListener("resize", this.onResize);
+      this.dock();
     }
     const here = canvas.scene.id;
     const chip = (t) => {
       const from = game.scenes.get(t.getFlag(MODULE_ID, "orbitFrom")?.scene ?? "")?.name ?? "?";
-      const tip = `${t.name} - ${T("fromMap", { map: from })}${t.isOwner ? `<br>${T("chipLand")}` : ""}`;
-      return `<button type="button" class="mm-orbit-chip${t.isOwner ? " own" : ""}${t.hidden ? " hid" : ""}${t.getFlag(MODULE_ID, "orbitFrom")?.scene === here ? " home" : ""}" data-id="${t.id}" data-tooltip="${esc(tip)}">
+      const tip = `${t.name} - ${T("fromMap", { map: from })}<br>${T("chipLand")}`;
+      return `<button type="button" class="mm-orbit-chip${t.hidden ? " hid" : ""}${t.getFlag(MODULE_ID, "orbitFrom")?.scene === here ? " home" : ""}" data-id="${t.id}" data-tooltip="${esc(tip)}">
         <img src="${esc(t.texture.src)}" alt=""><span>${esc(t.name)}</span></button>`;
     };
     this.el.innerHTML = `<button type="button" class="mm-orbit-head" data-view="1" data-tooltip="${esc(T("headTip"))}"><i class="fa-solid fa-earth-europe" inert></i>
       <span>${esc(T("head"))}</span><b>${list.length}</b></button>${list.map(chip).join("")}`;
-    this.h = this.el.offsetHeight;                    // new content: measured now (one layout per refresh, as before)
-    this.place();
-  },
-  /** Keep it on the map's top edge, sized with the map (within limits, so it stays readable zoomed out). */
-  place() {
-    if ( !this.el || !canvas?.ready ) return;
-    const r = canvas.dimensions.sceneRect, p = canvas.clientCoordinatesFromCanvas({ x: r.x + r.width / 2, y: r.y });
-    const k = Math.max(0.55, Math.min(1.5, (canvas.stage.scale.x * canvas.grid.size) / 100));
-    // above the top edge; when the edge is at (or past) the top of the screen it stays on screen, just inside the map
-    // (no ResizeObserver: the height is read live, as it always was)
-    const h = this.ro ? (this.h ??= this.el.offsetHeight) : this.el.offsetHeight;
-    const top = Math.max(p.y, h * k + 10);
-    // only what changed is written (each write is parsed as CSS; most camera frames move the strip, few rescale it)
-    const s = this.el.style, L = (this.last ||= {}), left = `${p.x}px`, topS = `${top}px`, tf = `translate(-50%, calc(-100% - 6px)) scale(${k})`;
-    if ( L.left !== left ) s.left = L.left = left;
-    if ( L.top !== topS ) s.top = L.top = topS;
-    if ( L.tf !== tf ) { s.transform = L.tf = tf; s.transformOrigin = "50% 100%"; }
   },
   onClick(ev) {
     const b = ev.target.closest("button"); if ( !b ) return;
     ev.preventDefault();
     if ( b.dataset.view ) return void orbitScene()?.view();
     const t = orbitScene()?.tokens.get(b.dataset.id);
-    if ( t?.isOwner ) bringBack(t, canvas.scene.id);
+    if ( t && game.user.isGM ) bringBack(t, canvas.scene.id);
   }
 };
 
@@ -380,8 +389,6 @@ export function registerOrbit() {
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } setTimeout(sweep, 1500); });
   Hooks.on("canvasReady", () => { readyCount++; rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) { const f = canvas.scene.getFlag(MODULE_ID, "orbit"); startAmbience(canvas.scene, f?.seed ?? 1, f?.layout ?? null, f); } });
   Hooks.on("canvasTearDown", () => { strip.remove(); back.remove(); stopAmbience(); });
-  Hooks.on("canvasPan", () => strip.place());
-  window.addEventListener("resize", () => strip.place());
   Hooks.on("createToken", onCreateToken);
   Hooks.on("updateToken", onUpdateToken);
   Hooks.on("deleteToken", (doc) => { if ( isOrbit(doc.parent) ) strip.refresh(); });
