@@ -155,7 +155,8 @@ function onKey(e) {
   if ( (e.ctrlKey || e.metaKey) && !e.altKey && (k === "z" || k === "y") ) {
     e.preventDefault(); e.stopPropagation();
     if ( down ) return;
-    if ( k === "y" || e.shiftKey ) api()?.redo(); else api()?.undo();
+    // (the panel's firings list and its "fire again" follow once the stacks have moved)
+    Promise.resolve(k === "y" || e.shiftKey ? api()?.redo() : api()?.undo()).finally(() => Hooks.callAll(S.HOOK, "fired", null));
     return;
   }
   if ( e.ctrlKey || e.metaKey || e.altKey ) return;

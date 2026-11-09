@@ -241,10 +241,10 @@ function mountPanel(host) {
         if ( ok ) { editing = null; await S.deleteCustom(def.id); }
         break;
       }
-      case "undoOne": await P?.undo(b.dataset.id); break;
-      case "settle": await P?.settle(b.dataset.id); break;
-      case "undoLast": await P?.undo(); break;
-      case "redo": await P?.redo(); break;
+      case "undoOne": await P?.undo(b.dataset.id); refreshFirings(); break;
+      case "settle": await P?.settle(b.dataset.id); refreshFirings(); break;
+      case "undoLast": await P?.undo(); refreshFirings(); break;
+      case "redo": await P?.redo(); refreshFirings(); break;
       case "clearFires": await P?.clearFires(); refreshFirings(); break;
     }
   };
@@ -327,7 +327,7 @@ function mountPanel(host) {
     if ( scene.id === canvas?.scene?.id && f && ("presetFirings" in f || "-=presetFirings" in f || "fireStrokes" in f) ) refreshFirings();
   });
   const idC = Hooks.on("canvasReady", () => render());
-  const tick = setInterval(() => { if ( folds.has("firings") ) refreshFirings(); }, 5000);
+  const tick = setInterval(() => { if ( folds.has("firings") ) refreshFirings(); }, 2000);
   return () => {
     for ( const [e, f] of evs ) host.removeEventListener(e, f);
     host.removeEventListener("toggle", onToggle, true);
