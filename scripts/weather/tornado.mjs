@@ -1,5 +1,5 @@
 import * as TM from "./tornado-model.mjs";
-import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
+import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, volFrag, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
 import { CellCache, cellVert, showSmooth } from "./cells.mjs";
 import { weatherQ } from "./guard.mjs";
 import { blendMode } from "./display.mjs";
@@ -35,6 +35,11 @@ const TOUCHES = [[1.6, 1.0], [4.3, 0.6], [6.9, 0.85], [8.8, 0.45]];
 const STRIKE = [[0, 1], [0.22, 0.7]];
 const SPECK_A = [0.30, 0.23, 0.17], SPECK_B = [0.20, 0.19, 0.20], LEAF = [0.62, 0.52, 0.22];
 const PL_A = [0.55, 0.40, 0.24], PL_B = [0.66, 0.52, 0.34];
+// THE ART AT SCREEN RESOLUTION (2026-11-09): k texels per art px, about the device px per art px, over the part on screen only; the
+// texel budget (x the frame guard's q) caps k when the tornado fills a large, magnified screen (then a texel is still under ~1.5
+// device px: real detail, never a magnified texture). The volumes' ray samples drop a little as k grows (finer texels, finer jitter).
+const ART_BUDGET = 2.4e6, K_MAX = 6, ART_MAX = 4096;
+const volSteps = (k, gq) => Math.max(10, Math.round((k <= 1.25 ? 18 : k <= 2.5 ? 15 : 13) * (0.6 + 0.4 * gq)));
 
 let progs = {};
 const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-tornado-${k}`);
@@ -42,6 +47,7 @@ const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-torn
 /** A tornado's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
 export function tornadoPrograms() {
   return [prog("deck", QUAD_VERT, DECK_FRAG), prog("column", QUAD_VERT, COLUMN_FRAG), prog("foot", QUAD_VERT, FOOT_FRAG), prog("vol", QUAD_VERT, VOL_FRAG),
+    prog("vol0", QUAD_VERT, volFrag(0)), prog("vol1", QUAD_VERT, volFrag(1)),
     prog("part", PART_VERT, PART_FRAG), prog("ground", GROUND_VERT, GROUND_FRAG), prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG),
     prog("groundShow", GROUND_VERT, showSmooth("vP")), prog("show", GROUND_VERT, SHOW_FRAG)];
 }
@@ -108,11 +114,15 @@ class TornadoView {
     this.bot = Math.ceil(L3.skirt * 0.8 * 1.7 * U + 30 * U);
     this.H = Math.min(2048, this.top + this.bot);
     const W = this.W, H = this.H;
+    // (the art texture: a frame of it is drawn each frame, the window on screen at k texels per art px; it grows in steps, never shrinks)
     this.art = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
     this.art.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
+    this.art.noFrame = false;                                  // (its frame is ours: a base update must not reset it to the whole)
+    this.capW = W; this.capH = H;
     this.rect = new Float32Array([0, 0, W, H]);
+    this.win = new Float32Array([0, 0, 1, 0]); this.winS = new Float32Array([W, H]);
     const sd = T.seed % 9973;
-    const common = { uT: 0, uU: U, uView: new Float32Array([0.5, 0.8]), uRect: this.rect, uSd: sd, translationMatrix: new PIXI.Matrix().toArray(true) };
+    const common = { uT: 0, uU: U, uPx: 1, uView: new Float32Array([0.5, 0.8]), uRect: this.rect, uSd: sd, translationMatrix: new PIXI.Matrix().toArray(true) };
     const quad = (frag, key, extra) => {
       const m = new PIXI.Mesh(quadGeom(0, 0, W, H), new PIXI.Shader(prog(key, QUAD_VERT, frag), { ...common, ...extra }));
       m.state.blendMode = PIXI.BLEND_MODES.NORMAL; m.state.depthTest = false; m.state.culling = false;
@@ -127,10 +137,14 @@ class TornadoView {
     const footU = () => ({ uBase: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3), uWall: new Float32Array(4) });
     this.skirt = quad(FOOT_FRAG, "foot", { uMode: 0, ...footU() });
     // the volumes (debris cloud, wall cloud) x (behind the column, in front of it): each on its own sub-rect of the art texture
-    const volU = (mode, pass) => ({ ...common, uAxis: this.axis, uMode: mode, uPass: pass, uVol: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
+    const volU = (mode, pass) => ({ ...common, uAxis: this.axis, uMode: mode, uPass: pass, uSteps: 18, uMarch: PIXI.Texture.EMPTY, uMwin: new Float32Array([0, 0, 1, 0]), uMsize: new Float32Array([1, 1]), uVol: new Float32Array(4), uMot: new Float32Array(4), uPh: new Float32Array(4), uDust: new Float32Array(3) });
     const vmesh = (mode, pass) => {
       const m = new PIXI.Mesh(quadGeom(0, 0, 1, 1), new PIXI.Shader(prog("vol", QUAD_VERT, VOL_FRAG), volU(mode, pass)));
       m.state.blendMode = PIXI.BLEND_MODES.NORMAL; m.state.depthTest = false; m.state.culling = false;
+      // its MARCH (the adaptive-resolution ray march): the same quad and uniforms, the march stage into its own float texture
+      const mm = new PIXI.Mesh(m.geometry, new PIXI.Shader(prog("vol0", QUAD_VERT, volFrag(0)), m.shader.uniformGroup));
+      mm.state.blendMode = PIXI.BLEND_MODES.NONE; mm.state.depthTest = false; mm.state.culling = false;
+      m.march = { mesh: mm, rt: null, cw: 0, ch: 0 };
       return m;
     };
     this.debB = vmesh(0, 0); this.debF = vmesh(0, 1); this.wallB = vmesh(1, 0); this.wallF = vmesh(1, 1);
@@ -152,7 +166,7 @@ class TornadoView {
     this.track = new Float32Array(16 * 4);
     this.ground = new PIXI.Mesh(this.gGeom, new PIXI.Shader(prog("ground", GROUND_VERT, GROUND_FRAG), { ...common, uAxis: this.axis, uG: new Float32Array(4), uGc: new Float32Array(4), uTrack: this.track, uAlpha: 1 }));
     this.sGeom = new PIXI.Geometry().addAttribute("aVertexPosition", new Float32Array(8), 2).addAttribute("aCell", new Float32Array(8), 2).addIndex([0, 1, 2, 0, 2, 3]);
-    this.show = new PIXI.Mesh(this.sGeom, new PIXI.Shader(prog("show", GROUND_VERT, SHOW_FRAG), { uArt: this.art, uRect: this.rect, uAlpha: 1, translationMatrix: new PIXI.Matrix().toArray(true) }));
+    this.show = new PIXI.Mesh(this.sGeom, new PIXI.Shader(prog("show", GROUND_VERT, SHOW_FRAG), { uArt: this.art, uRect: this.rect, uWin: this.win, uWinS: this.winS, uAlpha: 1, translationMatrix: new PIXI.Matrix().toArray(true) }));
     const bm = blendMode();
     for ( const [m, layer] of [[this.ground, 252], [this.marks, 252.5], [this.show, 993]] ) {
       m.eventMode = "none"; m.state.blendMode = bm; m.state.depthTest = false; m.state.culling = false;
@@ -166,9 +180,11 @@ class TornadoView {
     this.artRoot = new PIXI.Container();
     this.artRoot.addChild(this.curtain, this.skirt, this.back, this.debB, this.wallB, this.column, this.debF, this.wallF, this.front, this.curtainF, this.deck);
     this.frags = new Map();
-    this.stats = { inst: 0, cpuMs: 0 };
+    this.stats = { inst: 0, cpuMs: 0, k: 1, texels: 0 };
     // the per-frame scratch (no garbage per frame)
     this.timed = [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF, this.back, this.front, this.ground];
+    this.vols = [this.debB, this.debF, this.wallB, this.wallF];
+    this.fine = [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF];
     this.lists = [[this.Lb, this.ib], [this.Lf, this.ifr], [this.Lg, this.ig]];
     this._b0 = [0, 0]; this._b1 = [0, 0]; this._mo = {}; this._a0 = {}; this._a1 = {}; this._a2 = {}; this._dr = [0, 0, 0]; this._lf = [0, 0, 0, 0];
     this._pts = new Float64Array(12);
@@ -297,6 +313,7 @@ class TornadoView {
     for ( const m of this.timed ) {
       const u = m.shader.uniforms; u.uT = tmv; u.uView[0] = lift; u.uView[1] = sq;
     }
+    const k = this.window(rx0, ry0, vr);
     // ---- deck: high above the wall cloud, so on screen it lies up-screen of the funnel top (the funnel hangs from its front edge)
     const du = this.deck.shader.uniforms, [fl, zone] = this.flash(tm);
     const Hs = lift * Z * 0.06, shift = 0.85 * L.deckR * U * 0.58, Cx = top.cx + 4 * U, Cy = top.sy - Hs - shift;
@@ -319,6 +336,19 @@ class TornadoView {
       u.uPh[0] = TAU * fr(-0.6 * tm); u.uPh[3] = -TAU * fr(0.3 * tm);
       u.uDust.set(dust);
     }
+    // ---- each full-rect pass only on the rect it can reach (the rest of the art window spends no fragment on it)
+    {
+      let x0 = Infinity, x1 = -Infinity, rM = 0;
+      for ( const o of ax ) { x0 = Math.min(x0, o.cx); x1 = Math.max(x1, o.cx); rM = Math.max(rM, o.rc); }
+      const e = rM * 4.2 + 6 * U;                                         // (the lean widens a row by up to 1.56, the sheath 2.45 x)
+      this.setLocal(this.column.geometry, x0 - e, top.sy - 4 * U, x1 + e, bot.sy + 4 * U + lift * 3 * U + 4);
+      const Rs = L.skirt * U * 1.6 * 1.01 + 8 * U;
+      this.setLocal(this.skirt.geometry, bot.cx - Rs, bot.cy - Rs * sq, bot.cx + Rs, bot.cy + Rs * sq);
+      const R2 = 2 * L.deckR * U + 4, R2y = R2 * 0.58;
+      this.setLocal(this.deck.geometry, Math.min(Cx, top.cx) - R2, Math.min(Cy, top.sy - Hs) - R2y, Math.max(Cx, top.cx) + R2, Math.max(Cy, top.sy - Hs) + R2y);
+      const Rc = du.uCurt[1] * 1.26 + 4, Hc = du.uCurt[2] * 1.02 + 4;
+      for ( const m of [this.curtain, this.curtainF] ) this.setLocal(m.geometry, bx - Rc, by - Rc * sq - Hc, bx + Rc, by + Rc * sq + 12 * U);
+    }
     const cl = ph.cloud;
     // ---- the volumes: the debris cloud round the foot, the wall cloud round the funnel top (each on the sub-rect it can reach)
     const vol = (mB, mF, z0, z1, pres, R, turn) => {
@@ -340,6 +370,7 @@ class TornadoView {
     };
     vol(this.debB, this.debF, 0, L.puffH * U * 1.9, Math.sqrt(ph.touch), L.skirt * 0.55 * U, 0.35);
     vol(this.wallB, this.wallF, Z * 0.86, Z * 1.05, ph.cloud * (0.35 + 0.65 * ph.reach) * (1 - 0.6 * ph.rope), L.wallR * 0.85 * U, 0.12);
+    for ( const m of this.vols ) if ( m.visible ) this.marchVol(m, k);
     // ---- debris
     this.debris(now, tm, L, ph, { bx, by, Z, sq, lift, trx, try_, throwAng, touchSwell, dust });
     // ---- ground
@@ -357,13 +388,75 @@ class TornadoView {
     const gr = L.deckR * U * 1.85;
     const gx0 = Math.floor(Math.min(gcx, bx) - gr), gy0 = Math.floor(Math.min(gcy, by) - gr * sq), gx1 = Math.ceil(Math.max(gcx, bx) + gr), gy1 = Math.ceil(Math.max(gcy, by) + gr * sq);
     this.setQuad(this.gGeom, gx0, gy0, gx1, gy1);
-    this.setQuad(this.sGeom, rx0, ry0, rx0 + this.W, ry0 + this.H);
+    this.setQuad(this.sGeom, this.win[0], this.win[1], this.win[0] + this.winS[0] / k, this.win[1] + this.winS[1] / k);
     // ---- render the art
     this.render();
     this.ground.visible = true; this.marks.visible = this.Lg.n > 0; this.show.visible = true;
     this.groundCells.update(g, vr, [gx0, gy0, gx1, gy1]);
     this.stats.inst = this.Lb.n + this.Lf.n + this.Lg.n; this.stats.cpuMs = performance.now() - c0;
     return true;
+  }
+
+  /**
+   * The art's WINDOW this frame: the part of the art rect on screen (with a margin) at k texels per art px (about the device px per
+   * art px, capped by the texel budget x the guard's q), its origin on whole texels of the art grid (the texels stay put while k
+   * does). Sets the art root's transform, the texture's frame (grown in steps when it must), the shaders' texel size. Returns k.
+   */
+  window(rx0, ry0, vr) {
+    const g = this.owner.geo, ap = g.ap, R = canvas.app.renderer;
+    const dev = ap * Math.abs(canvas.stage.scale.x) * (R.resolution || 1), Mg = 6;
+    const ax0 = Math.max(rx0, (vr.x0 - g.ox) / ap - Mg), ay0 = Math.max(ry0, (vr.y0 - g.oy) / ap - Mg);
+    const ax1 = Math.min(rx0 + this.W, (vr.x1 - g.ox) / ap + Mg), ay1 = Math.min(ry0 + this.H, (vr.y1 - g.oy) / ap + Mg);
+    const gq = weatherQ(), area = Math.max(1, (ax1 - ax0) * (ay1 - ay0)), bud = (globalThis.CONFIG?.moinenMaps?.tornadoBudget ?? ART_BUDGET) * gq;
+    let k = Math.min(dev, Math.sqrt(bud / area), K_MAX, ART_MAX / Math.max(1, ax1 - ax0), ART_MAX / Math.max(1, ay1 - ay0));
+    k = Math.max(0.25, Math.floor(k * 16) / 16);
+    const wx0 = Math.floor(ax0 * k) / k, wy0 = Math.floor(ay0 * k) / k;
+    const pw = Math.max(1, Math.min(ART_MAX, Math.ceil((ax1 - wx0) * k))), ph = Math.max(1, Math.min(ART_MAX, Math.ceil((ay1 - wy0) * k)));
+    if ( pw > this.capW || ph > this.capH ) {
+      this.capW = Math.min(ART_MAX, Math.max(this.capW, Math.ceil(pw / 256) * 256)); this.capH = Math.min(ART_MAX, Math.max(this.capH, Math.ceil(ph / 256) * 256));
+      this.art.resize(this.capW, this.capH, true);
+    }
+    if ( this.art.frame.width !== pw || this.art.frame.height !== ph ) this.art.resize(pw, ph, false);
+    this.artRoot.scale.set(k, k); this.artRoot.position.set((rx0 - wx0) * k, (ry0 - wy0) * k);
+    this.win[0] = wx0; this.win[1] = wy0; this.win[2] = k; this.winS[0] = pw; this.winS[1] = ph;
+    const px = 1 / k, steps = volSteps(k, gq);
+    for ( const m of this.fine ) m.shader.uniforms.uPx = px;
+    for ( const m of [this.debB, this.debF, this.wallB, this.wallF] ) m.shader.uniforms.uSteps = steps;
+    this.stats.k = k; this.stats.texels = pw * ph; this.stats.steps = steps;
+    return k;
+  }
+
+  /**
+   * The volume's ADAPTIVE-RESOLUTION RAY MARCH: magnified (k > 1.25, a float texture can be drawn), the costly march runs at a third of
+   * the art texture's resolution (never coarser than an art px, the old art grid) over the part of its quad in the art window, into its
+   * own float texture (coverage, surface height, fade: smooth quantities that interpolate); the volume's pass in the art then only
+   * shades - its density, light and wisps evaluated per texel at full resolution, the coverage's edge torn by the wisps there.
+   * Otherwise the volume is marched and shaded in one pass.
+   */
+  marchVol(m, k) {
+    const kv = k > 1.25 && this.owner.halfFloat ? Math.max(1, k / 3) : k;
+    if ( kv >= k ) { m.shader.program = prog("vol", QUAD_VERT, VOL_FRAG); return; }
+    const P = m.geometry.getBuffer("aVertexPosition").data, ox = this.rect[0], oy = this.rect[1];
+    const wx1 = this.win[0] + this.winS[0] / k, wy1 = this.win[1] + this.winS[1] / k;
+    const ax0 = Math.max(P[0] + ox, this.win[0]), ay0 = Math.max(P[1] + oy, this.win[1]), ax1 = Math.min(P[4] + ox, wx1), ay1 = Math.min(P[5] + oy, wy1);
+    if ( ax1 <= ax0 || ay1 <= ay0 ) { m.visible = false; return; }
+    const mx0 = Math.floor(ax0 * kv) / kv, my0 = Math.floor(ay0 * kv) / kv;
+    const pw = Math.min(ART_MAX, Math.ceil((ax1 - mx0) * kv) + 1), ph = Math.min(ART_MAX, Math.ceil((ay1 - my0) * kv) + 1);
+    const M = m.march;
+    if ( !M.rt || pw > M.cw || ph > M.ch ) {
+      M.cw = Math.min(ART_MAX, Math.max(M.cw, Math.ceil(pw / 128) * 128)); M.ch = Math.min(ART_MAX, Math.max(M.ch, Math.ceil(ph / 128) * 128));
+      if ( M.rt ) M.rt.resize(M.cw, M.ch, true);
+      else M.rt = PIXI.RenderTexture.create({ width: M.cw, height: M.ch, resolution: 1, type: PIXI.TYPES.HALF_FLOAT, format: PIXI.FORMATS.RGBA,
+        scaleMode: PIXI.SCALE_MODES.LINEAR, mipmap: PIXI.MIPMAP_MODES.OFF });
+      M.rt.noFrame = false;
+    }
+    if ( M.rt.frame.width !== pw || M.rt.frame.height !== ph ) M.rt.resize(pw, ph, false);
+    M.mesh.scale.set(kv, kv); M.mesh.position.set((ox - mx0) * kv, (oy - my0) * kv);
+    const u = m.shader.uniforms;
+    u.uMarch = PIXI.Texture.EMPTY;                             // (never the texture being drawn into)
+    canvas.app.renderer.render(M.mesh, { renderTexture: M.rt, clear: true });
+    u.uMarch = M.rt; u.uMwin[0] = mx0; u.uMwin[1] = my0; u.uMwin[2] = kv; u.uMsize[0] = pw; u.uMsize[1] = ph;
+    m.shader.program = prog("vol1", QUAD_VERT, volFrag(1));
   }
 
   /** Touchdowns: fast attack, slower release (the foot and the spray pulse with them); whole cycles per hour. */
@@ -575,6 +668,7 @@ class TornadoView {
   hide() { this.ground.visible = false; this.marks.visible = false; this.show.visible = false; }
 
   destroy() {
+    for ( const m of this.vols ) { m.march.mesh.destroy(); m.march.rt?.destroy(true); }
     this.groundCells.destroy();
     this.artRoot.removeChildren(); this.artRoot.destroy();
     for ( const m of [this.ground, this.marks, this.show] ) { m.parent?.removeChild(m); }

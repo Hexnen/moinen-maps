@@ -31,6 +31,7 @@ export function targets() {
   if ( S?.root ) out.push(["steam", S.root]);
   for ( const v of T?.views?.values?.() ?? [] ) {
     for ( const k of ["curtain", "skirt", "back", "debB", "wallB", "column", "debF", "wallF", "front", "curtainF", "deck"] ) if ( v[k] ) out.push([`torn.art.${k}`, v[k]]);
+    for ( const k of ["debB", "wallB", "debF", "wallF"] ) if ( v[k]?.march ) out.push([`torn.march.${k}`, v[k].march.mesh]);   // (the volumes' coarse ray march)
     out.push(["torn.ground", v.ground], ["torn.marks", v.marks], ["torn.show", v.show]);
     if ( v.groundCells ) out.push(["torn.ground.cells", v.groundCells, "draw"]);
   }
