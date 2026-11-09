@@ -793,3 +793,11 @@ for minutes after it (the user, G2: "a dust haze that stays for a long time, abo
 - **Fixes on the way (one natural explosion):** the burst's heat pool was drawn before the impact (`uAge < 0` in the pre-roll made
   `exp(-uAge / 0.45)` grow: an orange disc by day, a lit disc at night, for the whole pre-roll) - now nothing before T0
   (`fire/burst-art.mjs`, one line).
+- **Measured** (lane 3, GTX 1080, DPR 2, 3168 x 1584, `dev/boom-cost.mjs` timeline, one firing, n = 150 per row): GPU median
+  1.00 - 1.07 ms per frame at every lead (-0.2, 1.6 - 5, 19 - 24, 89 - 94, 239 - 244 s) and zoom (1, 3), weak x 2 included, against
+  0.97 - 1.03 ms with nothing fired; CPU median 0.5 - 1.2 ms (none: 0.4 - 1.2); no long frames. The haze minutes (90 s, 240 s) read
+  the same as the empty scene. (The timer spans the whole ticker step; a blast's delta stays inside the run-to-run noise.)
+- **Checked:** hash A/B against d5bf9ce on a blank ZZ scene (frame, dust-hash series, paint records / strokes) identical - the shader
+  changes leave the old kinds untouched; a player (Test Gracz 1) sees the whole firing, a reload at 40 s still shows the haze, the
+  GM's undo takes it out on the player within seconds; reduced motion: no burst, no accents, the dust at rest, the haze thins on the
+  clock. Not fixed (pre-existing in d5bf9ce): a grenade's white specks ~200 ms before its impact.
