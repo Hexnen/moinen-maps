@@ -106,12 +106,12 @@ export const KIND = {
   // (hits: `back` is the radial throw - an emitter's heading points back at its hit, so the throw sends the puff outwards; `rise` the
   // geyser's height, risen fast (riseK / s), its young jet - the column from the ground up to the cloud - lasting longer (jetK);
   // `per` emitters a hit, the first one nearly straight up)
-  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.11, 0.13, 0.15], out: [0, 0.04, 0.05, 0.06], back: [0, 0.2, 0.26, 0.34],
+  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.12, 0.15, 0.2], out: [0, 0.04, 0.06, 0.1], back: [0, 0.2, 0.26, 0.34],
     rise: [0, 0.32, 0.5, 0.78], life: [0, 1.3, 1.7, 2.0], lin: [0, 0.02, 0.03, 0.035], chips: [0, 3, 4, 6], chipD: 0.6, chipH: 0.55, chipSz: 2,
     grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] },
   // (shock: the emitters lie on rings round the centre (`fr` of the reach, `sp` apart along each), the heading points back at the
   // centre so `back` is the outward throw; low and rolling (small rise), `tau` the front's slowing - see shockAt)
-  shock: { v: 1, lanes: (hw) => [hw], sp: 0.3, pr: [0, 0.15, 0.22, 0.3], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
+  shock: { v: 1, lanes: (hw) => [hw], sp: 0.22, pr: [0, 0.17, 0.27, 0.37], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
     rise: [0, 0.06, 0.1, 0.15], life: [0, 1.6, 2.3, 3.2], lin: [0, 0.12, 0.2, 0.28], chips: [0, 2, 3, 4], chipD: 0.5, chipH: 0.2, chipSz: 1,
     grit: [0, 0.1, 0.16, 0.24], aura: [0, 0.25, 0.4, 0.55], auraA: [0, 0.45, 0.6, 0.75], mark: 0, trackW: 0, riseK: 1.4, jetK: 3.0,
     tau: [0, 0.2, 0.28, 0.38], fr: [0.18, 0.38, 0.58, 0.76, 0.92], linW: [0, 10, 14, 18], haze: [0, 150, 240, 300] }

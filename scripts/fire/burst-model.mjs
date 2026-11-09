@@ -165,7 +165,7 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
     }
     rho = Math.max(0, rho);
     const [ax, ay] = axis(z), gx = Math.cos(az) * rho, gy = Math.sin(az) * rho;
-    const r = R * (0.2 + 0.3 * h4 * h4) * (0.45 + 0.55 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1);
+    const r = R * (0.2 + 0.3 * h4 * h4) * (0.3 + 0.7 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1);
     const tau = hot * (0.7 + 0.7 * h5) * (0.75 + 0.6 * (1 - h3)), heat = a < core ? 1 : Math.exp(-Math.max(0, a - core) / tau) * (a < core * 3 ? 1 : 1);
     put(cx + ax + gx, cy + ay + gy * sq - z * lift, r, heat, cy + gy * sq, 0, Math.min(1, E * 3) * fade, (a / life) * (0.78 + 0.25 * h5 + 0.22 * up));
   }

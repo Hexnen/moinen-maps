@@ -432,7 +432,8 @@ function accentOf(L, at, { plan, hits, from }) {
     case "hitFx": case "tracer": {
       // (every n-th shot of each gun, counted per lane - the second gun's count shifted half way - so both guns fire tracers)
       const every = L.every ?? 1, k = every > 1 ? Math.floor(every / 2) : 0;
-      const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === every - 1);
+      // (the very first round of the first gun is a tracer: the run reads from its first hit, the tracer showing where it comes from)
+      const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === 0);
       return { ...base, hits: pick.map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir, from: from ?? null, a: plan.gesture.a, b: plan.gesture.b };
     }
   }
