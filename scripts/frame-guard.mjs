@@ -139,8 +139,10 @@ export function vsyncFloor(intervals, min = 4) {
  * longer period); a longer period that is a whole multiple of the kept one (what an overload makes, and also a 120 -> 60 Hz throttle)
  * must last LONG_X ms. A window moved to a 60 Hz monitor, a laptop throttling its display: taken after a few / 20 seconds.
  * `st` = { period, longAt } (kept between reads), `cand` = vsyncFloor now, `busy` = the frames' median work (ms) or null.
+ * Callers read the floor with at least STICK.min recurring intervals (not vsyncFloor's 4): a shorter period is taken at once, and under
+ * a load a few stray short intervals recur (measured live: ~5.15 ms on a 6.05 ms display with fire + rain and 8 ms of CPU a frame).
  */
-export const STICK = { long: 4000, longX: 20000, explain: 0.5 };
+export const STICK = { long: 4000, longX: 20000, explain: 0.5, min: 10 };
 export function stickyVsync(st, cand, busy, now, o = STICK) {
   if ( !cand ) return st.period;
   if ( !st.period || cand <= st.period * 1.08 ) { st.period = cand; st.longAt = null; return cand; }
@@ -183,7 +185,7 @@ export function pacing(now = performance.now()) {
   if ( override ) return override;
   if ( now - pace.at < 1000 ) return pace;
   const p = globalThis.game?.modules?.get("moinen-maps")?.api?.view?.pacing?.();
-  const period = stickyVsync(vs, vsyncFloor(rafIv), median(rafBusy), now) ?? p?.period ?? null;
+  const period = stickyVsync(vs, vsyncFloor(rafIv, STICK.min), median(rafBusy), now) ?? p?.period ?? null;
   const k = !p || !period ? null : p.mode === "foundry" ? null : vsyncsPerFrame(p.mode, p.cap, period);
   pace = { at: now, period, ...lateTest({ period, k, cap: p?.cap ?? 0 }) };
   return pace;

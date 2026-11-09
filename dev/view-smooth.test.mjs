@@ -82,4 +82,54 @@ ok(V.vsyncsPerFrame("even", 0, 1000 / 165) === 1, "no cap: every vsync");
   ok(W.loopMix(123, ms, 1, true)[2] === 0, "a single frame: no mix");
   console.log(`water loop: phase step per drawn frame ${mean.toFixed(4)} frames, CV ${(sd / mean).toFixed(5)}`);
 }
+// UNDER LOAD (2026-11-09): the gate's period held to the display's stable one. A display model: rAF on every vsync while the main
+// thread is free; a drawn frame's work `w` (ms) holds the next rAF to the first vsync after it. OLD = the trimmed mean alone (it climbs
+// to the overloaded interval: k falls, the cadence goes uneven, over the cap); NEW = gatePeriod(trimmed mean, stablePeriod).
+{
+  const sim = (hz, cap, w, stableOn, secs = 20) => {
+    const P = 1000 / hz, ivs = [], st = V.stableState(), drawn = []; let t = 1000, lastRaf = null, lastRun = null, s2 = 11;
+    const jit = () => ((s2 = Math.imul(s2 ^ (s2 >>> 15), 2654435761) + 0x6d2b79f5 | 0) >>> 0) / 4294967296 - 0.5;
+    while ( t < 1000 + secs * 1000 ) {
+      const time = t + jit() * 0.4;
+      if ( lastRaf !== null ) { const d = time - lastRaf; if ( d > 2 && d < 60 ) { ivs.push(d); if ( ivs.length > 31 ) ivs.shift(); st.iv.push(d); if ( st.iv.length > 120 ) st.iv.shift(); } }
+      lastRaf = time;
+      const P0 = V.vsyncPeriod(ivs), Pp = stableOn ? V.gatePeriod(P0, V.stablePeriod(st, time)) : P0;
+      if ( Pp && !V.due(time, lastRun, Pp, V.vsyncsPerFrame("even", cap, Pp)) ) { t += P; continue; }
+      lastRun = time; drawn.push(time);
+      const work = time < 4000 ? 1 : w(time - 4000);   // (the page idle for its first 3 s, then the load) st.busy.push(work); if ( st.busy.length > 120 ) st.busy.shift();
+      t += Math.max(1, Math.ceil(work / P - 1e-9)) * P;
+    }
+    return drawn;
+  };
+  const stats = (d, from) => {
+    const g = gaps(d.filter((x) => x >= from)), sorted = [...g].sort((a, b) => a - b), q = (f) => sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
+    let irr = 0; for ( let i = 1; i < g.length; i++ ) if ( Math.abs(g[i] - g[i - 1]) > 2 ) irr++;
+    return { p50: q(0.5), p95: q(0.95), irr: irr / Math.max(1, g.length - 1), fps: 1000 / (g.reduce((a, b) => a + b, 0) / g.length) };
+  };
+  // a few stray short intervals under a load (measured live: ~5.15 ms on a 6.05 ms display) are not taken as a faster display
+  { const st = V.stableState(), P = 1000 / 165; st.iv = Array.from({ length: 120 }, (_, i) => P * (1 + (i % 3)) + (i % 5) * 0.03); V.stablePeriod(st, 0);
+    st.iv = Array.from({ length: 120 }, (_, i) => (i % 20 === 0 ? 5.15 : P * (2 + (i % 2)))); st.busy = Array(20).fill(9);
+    ok(Math.abs(V.stablePeriod(st, 1000) - P) < 0.1, `stray short intervals: the period kept (${st.period.toFixed(2)})`);
+    st.iv = Array(120).fill(1000 / 240); ok(Math.abs(V.stablePeriod(st, 2000) - 1000 / 240) < 0.01, "a really faster display: taken at once"); }
+  // no load: exactly the same frames as before at every rate, capped and not
+  for ( const hz of [60, 144, 165, 240] ) for ( const cap of [60, 0] ) {
+    const a = sim(hz, cap, () => 1, false, 10), b = sim(hz, cap, () => 1, true, 10);
+    ok(a.length === b.length && a.every((x, i) => x === b[i]), `${hz} Hz cap ${cap || "none"}: no load, the same frames as before`);
+  }
+  // loads at 165 Hz with Foundry's 60 fps cap (k 3: 55 fps, 18.2 ms) and at 144 Hz (k 2: 72 fps): 8 ms, 14 ms, 26 ms of work, and a
+  // load that comes and goes (26 ms for 3 s, then 2 ms)
+  const rows = [];
+  for ( const [hz, cap] of [[165, 60], [144, 60], [240, 60]] ) {
+    const P = 1000 / hz, k = V.vsyncsPerFrame("even", cap, P);
+    for ( const [nm, w] of [["8 ms", () => 8], ["14 ms", () => 14], ["26 ms", () => 26], ["26 ms 3 s on / 3 s off", (t) => (Math.floor(t / 3000) % 2 ? 2 : 26)], ["4-16 ms varying", (t) => 10 + 6 * Math.sin(t * 0.37) * Math.cos(t * 0.011)], ["4-28 ms varying", (t) => 16 + 12 * Math.sin(t * 0.37) * Math.cos(t * 0.013)]] ) {
+      const o = stats(sim(hz, cap, w, false), 8000), n = stats(sim(hz, cap, w, true), 8000);
+      rows.push(`${hz} Hz cap ${cap} ${nm}: old p50 ${o.p50.toFixed(1)} p95 ${o.p95.toFixed(1)} irregular ${(o.irr * 100).toFixed(0)} % ${o.fps.toFixed(0)} fps | new p50 ${n.p50.toFixed(1)} p95 ${n.p95.toFixed(1)} irregular ${(n.irr * 100).toFixed(0)} % ${n.fps.toFixed(0)} fps`);
+      ok(n.fps <= cap * 1.5 + 0.5 && n.fps <= hz / k + 0.5, `${hz} Hz ${nm}: never over the paced rate (${n.fps.toFixed(1)} fps)`);
+      let wMax = 0; for ( let x = 0; x < 20000; x += 0.5 ) wMax = Math.max(wMax, w(x));
+      if ( wMax < k * P ) ok(n.irr === 0 && Math.abs(n.p95 - k * P) < P * 0.5, `${hz} Hz ${nm}: work fits k vsyncs - every gap ${k} vsyncs`);
+      ok(n.irr <= o.irr + 1e-9, `${hz} Hz ${nm}: no less even than before`);
+    }
+  }
+  console.log(rows.join(String.fromCharCode(10)));
+}
 console.log(`view-smooth: ${n} checks ok`);
