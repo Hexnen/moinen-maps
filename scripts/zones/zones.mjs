@@ -77,17 +77,31 @@ export function movePreset() {
 
 /* ---------------------------------------------------------------- the zones of the lines */
 
+/**
+ * PERF (perf-arrival, 2026-11-09): the zones worked out from the same lines are the same (buildZones is pure, its result is never
+ * changed): the last few are kept by their input, with their sample points, so a scene seen before in this session skips the geometry
+ * in its canvasReady (street: ~20 ms in node, x2-4 on a slow client).
+ */
+const built = new Map(), BUILT_MAX = 6;
 function rebuild() {
   const g = gridSize();
   // smoothing works on screen-sized steps of the line (scene pixels), so it looks the same on small- and large-grid maps
   const step = Math.max(3, Math.min(g * 0.15, 12));
-  const lines = S ? [...S.strokes.values()].map((p) => Geo.smoothLine(p, S.smooth, step)) : [];
-  // a zone is at least one grid square; the scene's edge closes zones where lines reach it
-  Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: g * g, edge: sceneRect() }) : null;
+  const edge = sceneRect();
+  const key = S && S.strokes.size ? JSON.stringify([g, step, S.smooth, S.snap, edge, [...S.strokes.values()]]) : null;
+  let hit = key ? built.get(key) : null;
+  if ( hit ) { built.delete(key); built.set(key, hit); Z = hit.Z; }
+  else {
+    const lines = S ? [...S.strokes.values()].map((p) => Geo.smoothLine(p, S.smooth, step)) : [];
+    // a zone is at least one grid square; the scene's edge closes zones where lines reach it
+    Z = S && S.strokes.size ? Geo.buildZones(lines, { snap: S.snap * g, merge: 0.5, minArea: g * g, edge }) : null;
+    if ( key ) { built.set(key, hit = { Z, LS: null }); if ( built.size > BUILT_MAX ) built.delete(built.keys().next().value); }
+  }
   // walls and zone marks keep to the border / zone their point lies on, whatever the zones are numbered now
   M0 = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
-  LS = null;
+  LS = hit?.LS ?? null;
   relink();
+  if ( hit && LS && hit.Z === Z ) hit.LS = LS;
 }
 
 /* ---------------------------------------------------------------- states from the map's layers (fire, destruction, water) */

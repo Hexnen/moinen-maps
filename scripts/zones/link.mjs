@@ -10,27 +10,58 @@
 export const LEVEL_INTENSITY = [0, 6, 8, 10];
 export const intensityLevel = (i) => (i <= 6 ? 1 : i <= 8 ? 2 : 3);
 const SHARE = 0.25, FIRE_SHARE = 0.05;
-function inRing(p, x, y) {
-  let c = false;
+/** The x where each edge of ring `p` crosses the row y (the same test and formula as inRing), ascending. */
+function rowCrossings(p, y, out) {
+  out.length = 0;
   for ( let i = 0, n = p.length, j = n - 2; i < n; j = i, i += 2 ) {
     const xi = p[i], yi = p[i + 1], xj = p[j], yj = p[j + 1];
-    if ( (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi ) c = !c;
+    if ( (yi > y) !== (yj > y) ) out.push(((xj - xi) * (y - yi)) / (yj - yi) + xi);
   }
-  return c;
+  return out.sort((a, b) => a - b);
 }
 
-/** Sample points per zone: id -> [x0, y0, x1, y1, ...] (scene px), `step` apart. */
+/**
+ * Sample points per zone: id -> [x0, y0, x1, y1, ...] (scene px), `step` apart.
+ * PERF (arrival, 2026-11-09): one scan line per sample row instead of a point-in-polygon test per sample. inRing(p, x, y) is true when
+ * an odd number of the row's crossings lie strictly right of x; with the crossings of the row sorted once, that count is read off by
+ * walking the row's samples left to right - the same crossings (same formula), the same strict test, so exactly the same points
+ * (dev/zones-link-scan.test.mjs checks it against the per-point test). The street map's 12 zones: ~31 -> ~3 ms in node.
+ */
 export function samplesOf(Z, zoneAt, step) {
   const out = new Map();
   if ( !Z ) return out;
+  const cr = [];                                           // per ring of a part: its sorted crossings of the current row
   for ( const z of Z.zones ) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for ( const part of z.parts ?? [z.rings] ) { const p = part[0]; for ( let i = 0; i < p.length; i += 2 ) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); } }
     const pts = [];
     // zones never overlap: a point inside this zone's own rings is this zone (testing every zone per sample was O(zones^2))
     const parts = z.parts ?? [[z.rings]];
-    const mine = (x, y) => parts.some((part) => inRing(part[0], x, y) && !part.slice(1).some((h) => inRing(h, x, y)));
-    for ( let y = y0 + step / 2; y < y1; y += step ) for ( let x = x0 + step / 2; x < x1; x += step ) if ( mine(x, y) ) pts.push(x, y);
+    const xs = []; for ( let x = x0 + step / 2; x < x1; x += step ) xs.push(x);   // (the same x values, row after row, as the old loop)
+    const nr = parts.reduce((s, part) => s + part.length, 0);
+    while ( cr.length < nr ) cr.push([]);
+    const at = new Int32Array(nr);                          // per ring: how many of its crossings are <= the current x
+    for ( let y = y0 + step / 2; y < y1; y += step ) {
+      let r = 0;
+      for ( const part of parts ) for ( const ring of part ) rowCrossings(ring, y, cr[r++]);
+      at.fill(0);
+      for ( const x of xs ) {
+        let mine = false;
+        r = 0;
+        for ( const part of parts ) {
+          let inside = false;
+          for ( let h = 0; h < part.length; h++, r++ ) {
+            const c = cr[r]; let k = at[r];
+            while ( k < c.length && c[k] <= x ) k++;
+            at[r] = k;
+            const odd = ((c.length - k) & 1) === 1;            // inRing: crossings with x < cross
+            if ( h === 0 ) inside = odd; else if ( odd ) inside = false;
+          }
+          if ( inside ) mine = true;
+        }
+        if ( mine ) pts.push(x, y);
+      }
+    }
     if ( !pts.length ) pts.push(z.label.x, z.label.y);
     out.set(z.id, pts);
   }

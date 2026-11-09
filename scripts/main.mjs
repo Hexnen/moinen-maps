@@ -26,12 +26,14 @@ import "./diag.mjs";   // code-changed-on-disk notice + scene-switch log (api.di
 import { registerFlood } from "./destruction/flood.mjs";
 import { registerSmoothView } from "./view-smooth.mjs";
 import { registerWarmup } from "./warmup.mjs";
+import { registerLoadWarm } from "./load-warm.mjs";
 registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
 registerZones();   // zones drawn with a pencil, movement counted in zones (scripts/zones)
 registerOrbit();   // the shared Orbit scene: tokens thrown to orbit from any map, the strip of who is up there (scripts/zones/orbit.mjs)
 registerFlood();   // the water of the flooded holes (destruction kind "flood"): its own hooks (scripts/destruction/flood.mjs)
 registerSmoothView();   // smooth wheel zoom + even frame pacing on fast displays (client settings, scripts/view-smooth.mjs)
 registerWarmup();   // GPU objects the first zoom / pan would make, made at idle after the scene opens (scripts/warmup.mjs)
+registerLoadWarm();   // the damage layer's programs linked while the scene loads, not in its first frame (scripts/load-warm.mjs)
 
 Hooks.on("drawNote", onDrawNote);
 Hooks.on("refreshNote", onRefreshNote);

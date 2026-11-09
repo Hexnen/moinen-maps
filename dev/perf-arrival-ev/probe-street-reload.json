@@ -1,0 +1,629 @@
+{
+ "label": "probe-street-reload",
+ "throttle": 2,
+ "dir": "on",
+ "to": "street",
+ "back": "map",
+ "at": "2026-11-09T06:32:13.681Z",
+ "runs": [
+  {
+   "scene": "street",
+   "loadMs": 2039,
+   "stallMs": 6061.4,
+   "stallStartAfterReady": -1915,
+   "longestMs": 6061.4,
+   "longestAt": -1915,
+   "over50AfterReady": 4,
+   "over33AfterReady": 13,
+   "firstFrameAfterReady": 4147,
+   "firstTickMs": 455.1,
+   "firstTickAt": 3691,
+   "cardAt": 4183,
+   "cardFrameAt": 4351,
+   "gl": {
+    "n": 160,
+    "ms": 314.4,
+    "max": 257.6,
+    "mipN": 140,
+    "mipMs": 0.3,
+    "inStall": 275.3,
+    "big": [
+     "texImage2D 4320x7680 257.6",
+     "texImage2D 381x859 3.4",
+     "texImage2D 500x500 2.5",
+     "texImage2D 500x500 2.5",
+     "texImage2D 500x500 2.4",
+     "texImage2D 500x500 2.3",
+     "texImage2D 500x500 2.3",
+     "texImage2D 500x500 2.3"
+    ]
+   },
+   "progMs": 514.2,
+   "progInStall": 98.8,
+   "progs": [
+    {
+     "at": 3707,
+     "ms": 19.9,
+     "src": "in vec2 aVertexPosition; in vec2 aTextureCoord; in vec4 aColor; in float aTextureId; uniform mat3 projectionMatrix; uniform mat3 translation",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpBatchRenderer.start (scripts/pixi.min.js:348:4852) < Yr.setObjectRenderer (scripts/pixi.min.js:381:1523) < ce._render (scripts/pixi.min.js:529:35341) < ce.render (scripts/pixi.min.js:529:31283)"
+    },
+    {
+     "at": 3730,
+     "ms": 7.8,
+     "src": "in vec2 vMask; in vec2 vMap; uniform sampler2D uMask; uniform sampler2D uMap; uniform float uAlpha; uniform float uSharpMode, uSharpK, uMask",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < MaskedPatch.render (modules/moinen-maps/scripts/destruction/masked-map.mjs:89:21) < ia._renderWithCulling (scripts/pixi.min.js:529:31055) < ia.render (scripts/pixi.min.js:529:31251) < ia.render (scripts/pixi.min.js:529:31354)"
+    },
+    {
+     "at": 4014,
+     "ms": 71.1,
+     "src": "in vec2 vUV; uniform sampler2D uTex; uniform vec2 uSize; uniform float uScale; uniform float uSharp; uniform float uSoft; uniform vec2 uSoft",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpTile.render (modules/moinen-maps/scripts/destruction/static-cache.mjs:249:21) < ia.render (scripts/pixi.min.js:529:31354) < ia.render (scripts/pixi.min.js:529:31354) < container.render (modules/moinen-maps/scripts/destruction/sharp-batch.mjs:79:23)"
+    },
+    {
+     "at": 4873,
+     "ms": 21.9,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4921,
+     "ms": 16.8,
+     "src": "in vec2 aVertexPosition; // (only for the mesh's bounds) in vec2 aCorner; // 0..1 corner of the instance's quad uniform mat3 projectionMatri",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4954,
+     "ms": 28.3,
+     "src": "in vec2 aVertexPosition; in vec2 aCorner; uniform mat3 projectionMatrix; uniform mat3 translationMatrix; uniform vec2 uScreen; uniform float",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5002,
+     "ms": 23.8,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5046,
+     "ms": 13.7,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5072,
+     "ms": 14.9,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5107,
+     "ms": 9,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5130,
+     "ms": 10.7,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5152,
+     "ms": 74.5,
+     "src": "uniform vec4 uGrid; // the grid: origin x, y (squares), texels per square, - out vec4 fragColor; uniform vec2 uOff[10]; // per octave: its o",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5241,
+     "ms": 7.9,
+     "src": "uniform sampler2D uField; uniform vec4 uGrid; // origin x, y (squares), texels per square, - uniform vec2 uSize; // the field texture in tex",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5265,
+     "ms": 6.8,
+     "src": "in vec2 vW; uniform vec4 uShade; // darkening, its cool tint, -, - out vec4 fragColor; uniform sampler2D uLight; uniform vec4 uGrid; // orig",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5290,
+     "ms": 8,
+     "src": "in vec2 vW; uniform vec4 uRay; // strength, the share of the sky covered (contrast), the bodies' threshold, their opacity out vec4 fragColor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5316,
+     "ms": 3.8,
+     "src": "in vec2 vW; uniform vec4 uCl; // threshold, its soft width, opacity (x presence x mode), detail uniform vec4 uTor[3]; // tornadoes: x, y, re",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5331,
+     "ms": 9,
+     "src": "in vec2 vP; uniform int uMode; // 0 the rain curtain (behind everything), 1 the storm deck (over everything) uniform vec4 uTop; // deck cent",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5350,
+     "ms": 30.8,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // per height sample: x, screen y (absolute art px), core radius, z; screen y strictly decreasing unifor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5399,
+     "ms": 8.4,
+     "src": "in vec2 vP; uniform int uMode; // 0 the dust skirt on the ground uniform vec4 uBase; // base x, y (screen art px), touch, skirt radius unifo",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5418,
+     "ms": 11.8,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5450,
+     "ms": 15.8,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5484,
+     "ms": 10.3,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5509,
+     "ms": 4.4,
+     "src": "in vec2 aVertexPosition; in vec2 aCorner; in vec4 aA; // centre x, y (absolute art px on screen), half extents along the local axes in vec4 ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5528,
+     "ms": 4.3,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; uniform vec4 uG; // storm light (multiply at the core), deck shadow radius (ground), presence (cloud), t",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5545,
+     "ms": 9.7,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; uniform vec4 uG; // storm light (multiply at the core), deck shadow radius (ground), presence (cloud), t",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5570,
+     "ms": 7.7,
+     "src": "in vec2 vP; uniform sampler2D uCells; uniform vec2 uCellO; uniform vec2 uCellSz; out vec4 fragColor; vec4 bsp(float v) { vec4 n = vec4(1.0, ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5589,
+     "ms": 4,
+     "src": "in vec2 vP; uniform sampler2D uArt; uniform vec4 uRect; // the tornado's art rect (absolute art px): the edge fade uniform vec4 uWin; // the",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5602,
+     "ms": 19.7,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5639,
+     "ms": 17.3,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5668,
+     "ms": 15.6,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5696,
+     "ms": 6.5,
+     "src": "in vec2 vP; // lens px (continuous) out vec4 fragColor; uniform sampler2D uShade; // the lens pass: (add, k) uniform sampler2D uDisp; // the",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    }
+   ],
+   "readyDispatch": 1555.6,
+   "arrival": {
+    "scene": "RMOpLmjOqDe9bsPt",
+    "form": "full",
+    "move": "establish",
+    "title": "street",
+    "taken": false,
+    "screen": true,
+    "owner": "arrival"
+   },
+   "stallProf": {
+    "busy": 5795.4,
+    "by": {
+     "program": 23.2,
+     "mm": 4577.6,
+     "native": 6.2,
+     "pixi": 17.1,
+     "foundry": 46.9,
+     "otherMod": 1078.6,
+     "other": 3.2,
+     "gc": 42.6
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 3562.1",
+     "scripts/destruction/masked-map.mjs:render:66 270.6",
+     "scripts/zones/geometry.mjs:distToSeg:43 215.6",
+     "scripts/fire/display.mjs:R.render:84 113.2",
+     "scripts/zones/link.mjs:inRing:13 93.3",
+     "scripts/destruction/static-cache.mjs:render:218 73.6",
+     "scripts/destruction/model.mjs:hasPaint:350 30.4",
+     "scripts/zones/themes.mjs:bakeWash:235 20.2",
+     "scripts/view-smooth.mjs:L.emit:104 10.5",
+     "scripts/destruction/display.mjs:upload:111 9.2",
+     "scripts/zones/geometry.mjs:scan:308 7.9",
+     "scripts/destruction/debris.mjs:inside:55 7.6",
+     "scripts/destruction/display.mjs:flatten:536 7.2",
+     "scripts/net/chunks.mjs:anon:388 5.5",
+     "scripts/zones/geometry.mjs:planarize:191 5.0",
+     "scripts/destruction/model.mjs:diffBox:382 5.0"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 645.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 68.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 62.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 55.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 53.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:grad 32.0"
+    ],
+    "self": [
+     "getShaderParameter native:0 3561.3",
+     "anon engine.js:421 394.2",
+     "texImage2D native:0 287.8",
+     "anon engine.js:228 215.9",
+     "distToSeg geometry.mjs:43 215.6",
+     "getProgramParameter native:0 99.2",
+     "inRing link.mjs:13 93.3",
+     "post engine.js:1074 68.8",
+     "lookup engine.js:95 62.2",
+     "paint engine.js:1054 55.2",
+     "field engine.js:159 53.6",
+     "(garbage collector) native:0 42.6",
+     "grad engine.js:59 32.0",
+     "hasPaint model.mjs:350 30.4",
+     "findPhrase forms.js:472 29.2",
+     "renderFrame engine.js:1017 27.5"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 5701.2,
+    "by": {
+     "mm": 4561.7,
+     "gc": 42.6,
+     "program": 8.1,
+     "foundry": 16.6,
+     "otherMod": 1067.8,
+     "other": 2.3,
+     "native": 2.2
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 3562.1",
+     "scripts/destruction/masked-map.mjs:render:66 270.6",
+     "scripts/zones/geometry.mjs:distToSeg:43 215.6",
+     "scripts/fire/display.mjs:R.render:84 104.3",
+     "scripts/zones/link.mjs:inRing:13 93.3",
+     "scripts/destruction/static-cache.mjs:render:218 73.6",
+     "scripts/destruction/model.mjs:hasPaint:350 30.4",
+     "scripts/zones/themes.mjs:bakeWash:235 20.2",
+     "scripts/view-smooth.mjs:L.emit:104 10.5",
+     "scripts/destruction/display.mjs:upload:111 9.2",
+     "scripts/zones/geometry.mjs:scan:308 7.9",
+     "scripts/destruction/debris.mjs:inside:55 7.6",
+     "scripts/destruction/display.mjs:flatten:536 7.2",
+     "scripts/net/chunks.mjs:anon:388 5.5",
+     "scripts/zones/geometry.mjs:planarize:191 5.0",
+     "scripts/destruction/model.mjs:diffBox:382 5.0"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 645.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 68.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 62.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 55.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 53.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:grad 32.0"
+    ],
+    "self": [
+     "getShaderParameter native:0 3561.3",
+     "anon engine.js:421 394.2",
+     "texImage2D native:0 287.8",
+     "anon engine.js:228 215.9",
+     "distToSeg geometry.mjs:43 215.6",
+     "getProgramParameter native:0 99.2",
+     "inRing link.mjs:13 93.3",
+     "post engine.js:1074 68.8",
+     "lookup engine.js:95 62.2",
+     "paint engine.js:1054 55.2",
+     "field engine.js:159 53.6",
+     "(garbage collector) native:0 42.6",
+     "grad engine.js:59 32.0",
+     "hasPaint model.mjs:350 30.4",
+     "findPhrase forms.js:472 29.2",
+     "renderFrame engine.js:1017 27.5"
+    ]
+   },
+   "postProf": {
+    "busy": 3998.9,
+    "by": {
+     "mm": 3971.6,
+     "program": 4,
+     "otherMod": 1.2,
+     "other": 2.3,
+     "native": 2.2,
+     "gc": 1.5,
+     "foundry": 16.1
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 3562.1",
+     "scripts/destruction/masked-map.mjs:render:66 270.0",
+     "scripts/fire/display.mjs:R.render:84 33.8",
+     "scripts/view-smooth.mjs:L.emit:104 10.5",
+     "scripts/destruction/display.mjs:upload:111 9.2",
+     "scripts/destruction/debris.mjs:inside:55 7.6",
+     "scripts/destruction/display.mjs:flatten:536 7.2",
+     "scripts/net/chunks.mjs:anon:388 5.5",
+     "scripts/destruction/model.mjs:diffBox:382 5.0",
+     "scripts/destruction/display.mjs:anon:398 4.8",
+     "scripts/destruction/display.mjs:build:392 4.2",
+     "scripts/destruction/debris.mjs:anon:68 3.4",
+     "scripts/destruction/display.mjs:frame:411 3.4",
+     "scripts/destruction/debris.mjs:chunkSet:147 3.3",
+     "scripts/destruction/display.mjs:sync:264 2.9",
+     "scripts/destruction/debris.mjs:mask0:41 2.6"
+    ],
+    "otherMods": [
+     "LockView/src/helpers.js:getUserSetting 0.7",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:layoutRelevant 0.5"
+    ],
+    "self": [
+     "getShaderParameter native:0 3561.3",
+     "texImage2D native:0 266.2",
+     "getProgramParameter native:0 28.2",
+     "inside debris.mjs:55 7.6",
+     "_preSyncPartState foundry.mjs:32331 5.5",
+     "anon chunks.mjs:388 5.5",
+     "diffBox model.mjs:382 5.0",
+     "anon display.mjs:398 4.8",
+     "(program) native:0 4.0",
+     "anon debris.mjs:68 3.4",
+     "chunkSet debris.mjs:147 3.3",
+     "build display.mjs:392 2.9",
+     "mask0 debris.mjs:41 2.6",
+     "sync display.mjs:264 2.6",
+     "localTone debris.mjs:209 2.5",
+     "#parsePartHTML foundry.mjs:32263 2.0"
+    ]
+   }
+  },
+  {
+   "scene": "street",
+   "loadMs": 1917,
+   "stallMs": 1571.1,
+   "stallStartAfterReady": -1457,
+   "longestMs": 1571.1,
+   "longestAt": -1457,
+   "over50AfterReady": 7,
+   "over33AfterReady": 8,
+   "firstFrameAfterReady": 114,
+   "firstTickMs": 440.6,
+   "firstTickAt": 173,
+   "cardAt": 156,
+   "cardFrameAt": 716,
+   "gl": {
+    "n": 146,
+    "ms": 308.9,
+    "max": 256.1,
+    "mipN": 126,
+    "mipMs": 0.4,
+    "inStall": 2.7,
+    "big": [
+     "texImage2D 381x859 2.7"
+    ]
+   },
+   "progMs": 89.7,
+   "progInStall": 0,
+   "progs": [
+    {
+     "at": 194,
+     "ms": 11.1,
+     "src": "in vec2 aVertexPosition; in vec2 aTextureCoord; in vec4 aColor; in float aTextureId; uniform mat3 projectionMatrix; uniform mat3 translation",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpBatchRenderer.start (scripts/pixi.min.js:348:4852) < Yr.setObjectRenderer (scripts/pixi.min.js:381:1523) < ce._render (scripts/pixi.min.js:529:35341) < ce.render (scripts/pixi.min.js:529:31283)"
+    },
+    {
+     "at": 208,
+     "ms": 9.1,
+     "src": "in vec2 vMask; in vec2 vMap; uniform sampler2D uMask; uniform sampler2D uMap; uniform float uAlpha; uniform float uSharpMode, uSharpK, uMask",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < MaskedPatch.render (modules/moinen-maps/scripts/destruction/masked-map.mjs:89:21) < ia._renderWithCulling (scripts/pixi.min.js:529:31055) < ia.render (scripts/pixi.min.js:529:31251) < ia.render (scripts/pixi.min.js:529:31354)"
+    },
+    {
+     "at": 490,
+     "ms": 69.5,
+     "src": "in vec2 vUV; uniform sampler2D uTex; uniform vec2 uSize; uniform float uScale; uniform float uSharp; uniform float uSoft; uniform vec2 uSoft",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpTile.render (modules/moinen-maps/scripts/destruction/static-cache.mjs:249:21) < ia.render (scripts/pixi.min.js:529:31354) < ia.render (scripts/pixi.min.js:529:31354) < container.render (modules/moinen-maps/scripts/destruction/sharp-batch.mjs:79:23)"
+    }
+   ],
+   "readyDispatch": 1312,
+   "arrival": null,
+   "stallProf": {
+    "busy": 1570.2,
+    "by": {
+     "mm": 323.3,
+     "program": 34,
+     "gc": 44.2,
+     "foundry": 52.4,
+     "pixi": 17.6,
+     "native": 2.6,
+     "otherMod": 1092.3,
+     "other": 3.9
+    },
+    "mm": [
+     "scripts/zones/link.mjs:inRing:13 103.9",
+     "scripts/fire/display.mjs:R.render:84 21.9",
+     "scripts/destruction/model.mjs:hasPaint:350 21.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 15.0",
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 9.8",
+     "scripts/destruction/debris.mjs:inside:55 9.3",
+     "scripts/destruction/display.mjs:upload:111 7.9",
+     "scripts/zones/display.mjs:render:199 5.2",
+     "scripts/destruction/model.mjs:anon:350 4.9",
+     "scripts/destruction/model.mjs:diffBox:382 4.5",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.1",
+     "scripts/zones/zones.mjs:relink:106 4.0",
+     "scripts/zones/geometry.mjs:planarize:191 4.0",
+     "scripts/destruction/display.mjs:flatten:536 3.9",
+     "scripts/zones/geometry.mjs:cornerPoint:481 3.9",
+     "scripts/zones/geometry.mjs:vid:211 3.6"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 652.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 67.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 54.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 54.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 51.0",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 39.4"
+    ],
+    "self": [
+     "anon engine.js:421 391.3",
+     "anon engine.js:228 217.7",
+     "inRing link.mjs:13 103.9",
+     "field engine.js:159 67.7",
+     "post engine.js:1074 54.9",
+     "paint engine.js:1054 54.3",
+     "lookup engine.js:95 51.0",
+     "(garbage collector) native:0 44.2",
+     "renderFrame engine.js:1017 36.3",
+     "findPhrase forms.js:472 36.3",
+     "(program) native:0 34.0",
+     "grad engine.js:59 23.5",
+     "hasPaint model.mjs:350 21.8",
+     "anon engine.js:1027 21.7",
+     "hash engine.js:34 19.9",
+     "distToSeg geometry.mjs:43 15.0"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 1425.5,
+    "by": {
+     "mm": 309.8,
+     "gc": 12,
+     "foundry": 15.8,
+     "otherMod": 1080.3,
+     "program": 4.8,
+     "other": 2.3,
+     "native": 0.5
+    },
+    "mm": [
+     "scripts/zones/link.mjs:inRing:13 103.9",
+     "scripts/destruction/model.mjs:hasPaint:350 21.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 15.0",
+     "scripts/fire/display.mjs:R.render:84 10.5",
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 9.8",
+     "scripts/destruction/debris.mjs:inside:55 9.3",
+     "scripts/destruction/display.mjs:upload:111 7.9",
+     "scripts/zones/display.mjs:render:199 5.2",
+     "scripts/destruction/model.mjs:anon:350 4.9",
+     "scripts/destruction/model.mjs:diffBox:382 4.5",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.1",
+     "scripts/zones/zones.mjs:relink:106 4.0",
+     "scripts/zones/geometry.mjs:planarize:191 4.0",
+     "scripts/destruction/display.mjs:flatten:536 3.9",
+     "scripts/zones/geometry.mjs:cornerPoint:481 3.9",
+     "scripts/zones/geometry.mjs:vid:211 3.6"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 652.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 67.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 54.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 54.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 51.0",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 39.4"
+    ],
+    "self": [
+     "anon engine.js:421 391.3",
+     "anon engine.js:228 217.7",
+     "inRing link.mjs:13 103.9",
+     "field engine.js:159 67.7",
+     "post engine.js:1074 54.9",
+     "paint engine.js:1054 54.3",
+     "lookup engine.js:95 51.0",
+     "renderFrame engine.js:1017 36.3",
+     "findPhrase forms.js:472 36.3",
+     "grad engine.js:59 23.5",
+     "hasPaint model.mjs:350 21.8",
+     "anon engine.js:1027 21.7",
+     "hash engine.js:34 19.9",
+     "distToSeg geometry.mjs:43 15.0",
+     "(garbage collector) native:0 12.0",
+     "hash01 engine.js:42 12.0"
+    ]
+   },
+   "postProf": {
+    "busy": 3140.3,
+    "by": {
+     "mm": 1977.1,
+     "program": 654.1,
+     "gc": 30.7,
+     "foundry": 67.5,
+     "other": 6.9,
+     "otherMod": 96.3,
+     "native": 25.1,
+     "pixi": 89.4,
+     "gl": 193.1
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 839.9",
+     "scripts/destruction/masked-map.mjs:render:66 272.6",
+     "scripts/director/source-scene.mjs:ontick:173 144.2",
+     "scripts/zones/orbit.mjs:place:301 97.4",
+     "scripts/zones/display.mjs:dots:600 91.5",
+     "scripts/destruction/static-cache.mjs:render:218 80.1",
+     "scripts/view-smooth.mjs:L.emit:104 78.5",
+     "scripts/zones/zones.mjs:anon:234 59.2",
+     "scripts/director/overlay.mjs:probe:180 57.4",
+     "scripts/director/stage.mjs:ontick:88 21.7",
+     "scripts/view-smooth.mjs:ticker._tick:121 19.1",
+     "scripts/destruction/display.mjs:tick:1658 12.0",
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 9.8",
+     "scripts/destruction/debris.mjs:inside:55 9.3",
+     "scripts/destruction/display.mjs:upload:111 7.9",
+     "scripts/destruction/display.mjs:DestructionDisplay._tick:247 7.2"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/sound.mjs:audio 50.0",
+     "dice-so-nice/main.js:mouseNDC 5.6",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 2.9",
+     "invincible-plus-ultra/scripts/party/panel.mjs:ensureRoot 2.5",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 2.5",
+     "moinen-pixel-vfx/scripts/player.mjs:play 2.4"
+    ],
+    "self": [
+     "(program) native:0 654.1",
+     "texImage2D native:0 304.4",
+     "readPixels native:0 193.1",
+     "place orbit.mjs:301 96.6",
+     "getProgramParameter native:0 89.3",
+     "getBoundingClientRect native:0 70.6",
+     "arc native:0 60.2",
+     "elementsFromPoint native:0 55.4",
+     "render pixi.min.js:529 52.0",
+     "resume native:0 50.0",
+     "bufferSubData native:0 43.9",
+     "updateTransform pixi.min.js:529 42.2",
+     "getTextureAlphaData foundry.mjs:104476 36.9",
+     "(garbage collector) native:0 30.7",
+     "bind pixi.min.js:492 23.3",
+     "uniformMatrix3fv native:0 22.1"
+    ]
+   }
+  }
+ ]
+}

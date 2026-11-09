@@ -42,6 +42,8 @@ void main() {
   fragColor = texture(uMap, vMap) * (m.r * uAlpha);
 }`;
 
+/** The patch's program (PIXI keeps one per source pair: the one every patch's shader uses) - scripts/load-warm.mjs links it ahead. */
+export const maskedProgram = () => PIXI.Program.from(VERT, FRAG);
 const shaderFor = () => PIXI.Shader.from(VERT, FRAG, { uMask: PIXI.Texture.EMPTY, uMap: PIXI.Texture.EMPTY, uAlpha: 1, uSharpMode: 0, uSharpK: 1, uSharpB: 0, uMaskTop: 0 });
 
 export class MaskedPatch extends PIXI.Container {

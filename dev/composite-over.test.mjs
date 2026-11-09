@@ -33,4 +33,17 @@ for ( let n = 0; n < 60 && undoOk; n++ ) {
   if ( S.mask.some((v, i) => v !== full[i]) ) undoOk = false;
 }
 ok(undoOk, "60 undos: the box-only recomposite equals the full composite");
+// hasPaint (a Uint32 scan since perf-arrival): the same answer as "any byte with a level" - level bits only (a type alone is no paint), every
+// position (the tail bytes of a length that is no multiple of 4, an unaligned view)
+{
+  const ref = (m) => m.some((v) => v & 3);
+  let same = true;
+  for ( const n of [0, 1, 3, 4, 5, 63, 64, 1001] ) for ( let i = -1; i < n && same; i++ ) for ( const b of [1, 2, 3, 4, 8, 28, 0x1c | 1] ) {
+    const m = new Uint8Array(n); if ( i >= 0 ) m[i] = b;
+    if ( M.hasPaint({ mask: m }) !== ref(m) ) same = false;
+    const buf = new Uint8Array(n + 3); if ( i >= 0 ) buf[i + 1] = b; const v = buf.subarray(1, n + 1);
+    if ( M.hasPaint({ mask: v }) !== ref(v) ) same = false;
+  }
+  ok(same && M.hasPaint(null) === false, "hasPaint: the same as a byte-by-byte test (levels only, tails, unaligned views)");
+}
 process.exit(failed ? 1 : 0);

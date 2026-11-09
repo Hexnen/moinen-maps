@@ -198,6 +198,8 @@ export function aaWeight(scale, k = null) {
 }
 const AA_K = [1.5, 0.8, 1.0];
 let sharpProgram = null;
+/** The band tiles' program (one for all; scripts/load-warm.mjs links it ahead). */
+export const sharpTileProgram = () => (sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile"));
 
 export class SharpTile extends PIXI.Container {
   constructor(rt, w, h, res) {
@@ -210,8 +212,7 @@ export class SharpTile extends PIXI.Container {
       .addAttribute("aVertexPosition", new PIXI.Buffer(this.pos, false, false), 2)
       .addAttribute("aUV", new PIXI.Buffer(this.uv, false, false), 2)
       .addIndex(new Uint16Array([0, 1, 2, 0, 2, 3]));
-    sharpProgram ??= PIXI.Program.from(SHARP_VERT, SHARP_FRAG, "moinen-sharp-tile");
-    this.shader = new PIXI.Shader(sharpProgram, { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1, uTop: 0, uSharpB: 0 });
+    this.shader = new PIXI.Shader(sharpTileProgram(), { uTex: rt, uSize: new Float32Array(2), uScale: 1, uSharp: 0, uSoft: 0, uSoftK: new Float32Array([0.5, 0.5]), uAA: 0, uAlpha: 1, uMode: 0, uK: 1, uTop: 0, uSharpB: 0 });
     this.state = PIXI.State.for2d();
   }
 

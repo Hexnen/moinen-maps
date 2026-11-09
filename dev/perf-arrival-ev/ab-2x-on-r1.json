@@ -1,0 +1,2994 @@
+{
+ "at": "2026-11-09T06:48:41.563Z",
+ "A": "C:\\mmwt-perf-arr-base",
+ "B": "C:\\mmwt-perf-arr",
+ "args": [
+  "9533",
+  "http://127.0.0.141",
+  "http://127.0.0.142",
+  "street",
+  "map",
+  "--throttle",
+  "2",
+  "--dir",
+  "on"
+ ],
+ "runs": [
+  {
+   "build": "A",
+   "round": 0,
+   "scene": "street",
+   "loadMs": 1830,
+   "stallMs": 1864.7,
+   "stallStartAfterReady": -1338,
+   "longestMs": 1864.7,
+   "longestAt": -1338,
+   "over50AfterReady": 4,
+   "over33AfterReady": 8,
+   "firstFrameAfterReady": 527,
+   "firstTickMs": 415.3,
+   "firstTickAt": 111,
+   "cardAt": 555,
+   "cardFromDown": 2513,
+   "marks": {
+    "down": -1830,
+    "init": -1802,
+    "draw": -1330,
+    "readyFirst": -1223,
+    "ready": 0
+   },
+   "long": [
+    [
+     -1859,
+     70
+    ],
+    [
+     -1788,
+     59
+    ],
+    [
+     -1335,
+     1443
+    ],
+    [
+     110,
+     419
+    ],
+    [
+     572,
+     114
+    ],
+    [
+     690,
+     297
+    ],
+    [
+     4276,
+     102
+    ]
+   ],
+   "ticks": [
+    [
+     111,
+     415.3
+    ],
+    [
+     573,
+     24.5
+    ],
+    [
+     988,
+     14.9
+    ],
+    [
+     1034,
+     24.5
+    ],
+    [
+     1067,
+     20.6
+    ],
+    [
+     1102,
+     5
+    ],
+    [
+     1120,
+     6.8
+    ],
+    [
+     1137,
+     3.4
+    ],
+    [
+     1164,
+     5.4
+    ],
+    [
+     1182,
+     2.9
+    ]
+   ],
+   "cardFrameAt": 682,
+   "gl": {
+    "n": 160,
+    "ms": 280.2,
+    "max": 231.4,
+    "mipN": 140,
+    "mipMs": 0.7,
+    "inStall": 242.1,
+    "big": [
+     "texImage2D 4320x7680 231.4",
+     "texImage2D 381x859 7.6",
+     "texImage2D 500x500 3.1"
+    ]
+   },
+   "progMs": 109.4,
+   "progInStall": 109.4,
+   "progs": [
+    {
+     "at": 126,
+     "ms": 18.1,
+     "src": "in vec2 aVertexPosition; in vec2 aTextureCoord; in vec4 aColor; in float aTextureId; uniform mat3 projectionMatrix; uniform mat3 translation",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpBatchRenderer.start (scripts/pixi.min.js:348:4852) < Yr.setObjectRenderer (scripts/pixi.min.js:381:1523) < ce._render (scripts/pixi.min.js:529:35341) < ce.render (scripts/pixi.min.js:529:31283)"
+    },
+    {
+     "at": 146,
+     "ms": 8.4,
+     "src": "in vec2 vMask; in vec2 vMap; uniform sampler2D uMask; uniform sampler2D uMap; uniform float uAlpha; uniform float uSharpMode, uSharpK, uMask",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < MaskedPatch.render (modules/moinen-maps/scripts/destruction/masked-map.mjs:89:21) < ia._renderWithCulling (scripts/pixi.min.js:529:31055) < ia.render (scripts/pixi.min.js:529:31251) < ia.render (scripts/pixi.min.js:529:31354)"
+    },
+    {
+     "at": 402,
+     "ms": 82.9,
+     "src": "in vec2 vUV; uniform sampler2D uTex; uniform vec2 uSize; uniform float uScale; uniform float uSharp; uniform float uSoft; uniform vec2 uSoft",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpTile.render (modules/moinen-maps/scripts/destruction/static-cache.mjs:249:21) < ia.render (scripts/pixi.min.js:529:31354) < ia.render (scripts/pixi.min.js:529:31354) < container.render (modules/moinen-maps/scripts/destruction/sharp-batch.mjs:79:23)"
+    }
+   ],
+   "readyDispatch": 1222.8,
+   "arrival": null,
+   "warm": null,
+   "cold": false,
+   "stallProf": {
+    "busy": 1864.9,
+    "by": {
+     "program": 7.3,
+     "native": 15.1,
+     "pixi": 23.3,
+     "mm": 724.2,
+     "foundry": 22.7,
+     "gc": 44.2,
+     "other": 3.8,
+     "otherMod": 1024.2
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:66 244.0",
+     "scripts/zones/link.mjs:inRing:13 102.8",
+     "scripts/fire/display.mjs:R.render:84 87.7",
+     "scripts/destruction/static-cache.mjs:render:218 84.4",
+     "scripts/config.mjs:sceneConfig:185 21.9",
+     "scripts/zones/geometry.mjs:distToSeg:43 14.0",
+     "scripts/weather/weather.mjs:setting:43 13.7",
+     "scripts/destruction/display.mjs:upload:111 13.4",
+     "scripts/destruction/debris.mjs:mask0:41 8.6",
+     "scripts/view-smooth.mjs:L.emit:104 8.0",
+     "scripts/zones/geometry.mjs:clear:302 6.2",
+     "scripts/destruction/display.mjs:flatten:536 6.1",
+     "scripts/zones/geometry.mjs:cornerPoint:481 4.4",
+     "scripts/destruction/display.mjs:build:392 4.2",
+     "scripts/zones/display.mjs:render:199 4.2",
+     "scripts/zones/geometry.mjs:buildZones:332 4.1"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 620.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 65.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 55.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 53.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 41.8",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 360.7",
+     "texImage2D native:0 257.7",
+     "anon engine.js:228 217.6",
+     "getProgramParameter native:0 107.4",
+     "inRing link.mjs:13 102.8",
+     "field engine.js:159 65.2",
+     "post engine.js:1074 55.6",
+     "lookup engine.js:95 53.6",
+     "(garbage collector) native:0 44.2",
+     "paint engine.js:1054 41.8",
+     "findPhrase forms.js:472 33.8",
+     "renderFrame engine.js:1017 27.2",
+     "grad engine.js:59 24.5",
+     "sceneConfig config.mjs:185 21.9",
+     "hash engine.js:34 19.2",
+     "anon engine.js:1027 16.3"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 1752.9,
+    "by": {
+     "mm": 698.8,
+     "program": 4.8,
+     "gc": 12.6,
+     "otherMod": 1020.5,
+     "foundry": 12.9,
+     "other": 1,
+     "native": 1.8,
+     "pixi": 0.4
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:66 244.0",
+     "scripts/zones/link.mjs:inRing:13 102.8",
+     "scripts/destruction/static-cache.mjs:render:218 84.4",
+     "scripts/fire/display.mjs:R.render:84 84.2",
+     "scripts/zones/geometry.mjs:distToSeg:43 14.0",
+     "scripts/weather/weather.mjs:setting:43 13.7",
+     "scripts/destruction/display.mjs:upload:111 13.4",
+     "scripts/destruction/debris.mjs:mask0:41 8.6",
+     "scripts/view-smooth.mjs:L.emit:104 8.0",
+     "scripts/zones/geometry.mjs:clear:302 6.2",
+     "scripts/destruction/display.mjs:flatten:536 6.1",
+     "scripts/zones/geometry.mjs:cornerPoint:481 4.4",
+     "scripts/destruction/display.mjs:build:392 4.2",
+     "scripts/zones/display.mjs:render:199 4.2",
+     "scripts/zones/geometry.mjs:buildZones:332 4.1",
+     "scripts/destruction/debris.mjs:inside:55 4.1"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 620.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 65.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 55.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 53.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 41.8",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 360.7",
+     "texImage2D native:0 257.7",
+     "anon engine.js:228 217.6",
+     "getProgramParameter native:0 107.4",
+     "inRing link.mjs:13 102.8",
+     "field engine.js:159 65.2",
+     "post engine.js:1074 55.6",
+     "lookup engine.js:95 53.6",
+     "paint engine.js:1054 41.8",
+     "findPhrase forms.js:472 33.8",
+     "renderFrame engine.js:1017 27.2",
+     "grad engine.js:59 24.5",
+     "hash engine.js:34 19.2",
+     "anon engine.js:1027 16.3",
+     "anon engine.js:880 14.1",
+     "distToSeg geometry.mjs:43 14.0"
+    ]
+   },
+   "postProf": {
+    "busy": 2784.4,
+    "by": {
+     "mm": 1839.1,
+     "foundry": 75.2,
+     "other": 2.9,
+     "program": 516,
+     "native": 25,
+     "gc": 5.2,
+     "pixi": 79.3,
+     "otherMod": 25.4,
+     "gl": 216.3
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 802.2",
+     "scripts/destruction/masked-map.mjs:render:66 244.0",
+     "scripts/director/source-scene.mjs:ontick:173 127.4",
+     "scripts/destruction/static-cache.mjs:render:218 89.6",
+     "scripts/zones/orbit.mjs:place:301 81.1",
+     "scripts/view-smooth.mjs:L.emit:104 71.1",
+     "scripts/zones/zones.mjs:anon:234 69.1",
+     "scripts/zones/display.mjs:dots:600 68.9",
+     "scripts/director/overlay.mjs:probe:180 52.9",
+     "scripts/director/stage.mjs:ontick:88 15.7",
+     "scripts/destruction/display.mjs:upload:111 13.4",
+     "scripts/view-smooth.mjs:ticker._tick:121 9.4",
+     "scripts/destruction/display.mjs:tick:1658 9.4",
+     "scripts/destruction/debris.mjs:mask0:41 8.6",
+     "scripts/destruction/static-cache.mjs:cacheEnabled:43 7.7",
+     "scripts/zones/display.mjs:drawHover:471 6.2"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/party/panel.mjs:box 3.1",
+     "moinen-pixel-vfx/scripts/player.mjs:play 2.0",
+     "invincible-plus-ultra/scripts/party/main.mjs:get 1.7",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 1.5",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 1.5",
+     "invincible-plus-ultra/scripts/party/panel.mjs:ensureRoot 1.4"
+    ],
+    "self": [
+     "(program) native:0 516.0",
+     "texImage2D native:0 301.1",
+     "readPixels native:0 216.3",
+     "getProgramParameter native:0 107.4",
+     "place orbit.mjs:301 80.6",
+     "getBoundingClientRect native:0 74.2",
+     "elementsFromPoint native:0 52.9",
+     "render pixi.min.js:529 47.9",
+     "getTextureAlphaData foundry.mjs:104476 44.6",
+     "arc native:0 42.9",
+     "updateTransform pixi.min.js:529 37.7",
+     "bufferSubData native:0 34.0",
+     "_unpremultiplyAlpha pixi.min.js:871 27.7",
+     "bind pixi.min.js:492 24.0",
+     "anon native:1 22.4",
+     "renderAdvanced pixi.min.js:529 20.4"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 417.8,
+    "by": {
+     "mm": 416,
+     "gc": 1.3,
+     "pixi": 0.4
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:66 244.0",
+     "scripts/destruction/static-cache.mjs:render:218 84.4",
+     "scripts/fire/display.mjs:R.render:84 73.7",
+     "scripts/view-smooth.mjs:L.emit:104 8.0",
+     "scripts/destruction/display.mjs:spawn:1593 1.0",
+     "scripts/zones/orbit.mjs:tick:266 0.8",
+     "scripts/destruction/display.mjs:tick:1658 0.6",
+     "scripts/destruction/display.mjs:DestructionDisplay._tick:247 0.6",
+     "scripts/destruction/static-cache.mjs:SharpTile:203 0.5",
+     "scripts/destruction/static-cache.mjs:bakeBands:504 0.5",
+     "scripts/destruction/static-cache.mjs:Run:260 0.5",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 0.5",
+     "scripts/destruction/display.mjs:make:210 0.4",
+     "scripts/destruction/static-cache.mjs:update:359 0.4",
+     "scripts/destruction/sharp-batch.mjs:flush:47 0.3"
+    ],
+    "otherMods": [],
+    "self": [
+     "texImage2D native:0 243.8",
+     "getProgramParameter native:0 107.4",
+     "call_wrapper lib-wrapper.js:1 5.0",
+     "ct pixi-graphics-smooth.js:491 4.5",
+     "_calculateBounds foundry.mjs:107236 2.6",
+     "gl.<computed> native:18 2.0",
+     "now native:4 2.0",
+     "scale native:0 1.8",
+     "os pixi.min.js:7 1.8",
+     "updateText pixi.min.js:929 1.7",
+     "fill pixi-graphics-smooth.js:491 1.7",
+     "updateTransform pixi.min.js:529 1.7",
+     "measureText native:0 1.4",
+     "(garbage collector) native:0 1.3",
+     "shaderSource native:0 1.3",
+     "bind pixi.min.js:492 1.1"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1229.8,
+    "by": {
+     "mm": 196.9,
+     "program": 1.1,
+     "gc": 11.3,
+     "otherMod": 1020.5
+    },
+    "mm": [
+     "scripts/zones/link.mjs:inRing:13 102.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 14.0",
+     "scripts/weather/weather.mjs:setting:43 13.7",
+     "scripts/zones/geometry.mjs:clear:302 6.2",
+     "scripts/zones/geometry.mjs:cornerPoint:481 4.4",
+     "scripts/zones/display.mjs:render:199 4.2",
+     "scripts/zones/geometry.mjs:buildZones:332 4.1",
+     "scripts/zones/geometry.mjs:vid:211 4.0",
+     "scripts/zones/link.mjs:samplesOf:23 3.7",
+     "scripts/zones/geometry.mjs:smoothLine:110 3.5",
+     "scripts/destruction/model.mjs:hasPaint:350 3.5",
+     "scripts/zones/geometry.mjs:anon:500 3.4",
+     "scripts/zones/link.mjs:derive:78 3.2",
+     "scripts/zones/orbit.mjs:place:301 2.0",
+     "scripts/zones/geometry.mjs:traceFaces:260 1.9",
+     "scripts/zones/display.mjs:#icons:417 1.9"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 620.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 65.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 55.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 53.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 41.8",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 360.7",
+     "anon engine.js:228 217.6",
+     "inRing link.mjs:13 102.8",
+     "field engine.js:159 65.2",
+     "post engine.js:1074 55.6",
+     "lookup engine.js:95 53.6",
+     "paint engine.js:1054 41.8",
+     "findPhrase forms.js:472 33.8",
+     "renderFrame engine.js:1017 27.2",
+     "grad engine.js:59 24.5",
+     "hash engine.js:34 19.2",
+     "anon engine.js:1027 16.3",
+     "anon engine.js:880 14.1",
+     "distToSeg geometry.mjs:43 14.0",
+     "_castType foundry.mjs:57996 14.0",
+     "TYPES.ring engine.js:221 12.3"
+    ]
+   },
+   "loadProf": {
+    "busy": 290.3,
+    "by": {
+     "pixi": 37.3,
+     "foundry": 25.2,
+     "mm": 59.9,
+     "other": 4.9,
+     "otherMod": 60.6,
+     "program": 53.5,
+     "native": 17.2,
+     "gc": 31.5
+    },
+    "mm": [
+     "scripts/config.mjs:sceneConfig:185 21.9",
+     "scripts/net/stream.mjs:w.onmessage:48 10.4",
+     "scripts/fire/display.mjs:R.render:84 6.2",
+     "scripts/frame-guard.mjs:rafLoop:160 5.1",
+     "scripts/destruction/model.mjs:composite:165 2.8",
+     "scripts/net/trace.mjs:frame:27 2.0",
+     "scripts/view-smooth.mjs:ticker._tick:121 2.0",
+     "scripts/net/stream.mjs:tx:113 1.5",
+     "scripts/pin.mjs:destroy:80 1.5",
+     "scripts/destruction/model.mjs:load:255 1.2",
+     "scripts/destruction/flood.mjs:readAhead:143 1.0",
+     "scripts/net/preload.mjs:chunksOf:21 1.0",
+     "scripts/destruction/store.mjs:enc:26 0.8",
+     "scripts/net/trace.mjs:anon:37 0.6",
+     "scripts/frame-guard.mjs:chan.port1.onmessage:164 0.5",
+     "scripts/view-smooth.mjs:anon:43 0.5"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 53.8",
+     "LockView/src/controlButtons.js:anon 3.7",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 1.5",
+     "invincible-plus-ultra/scripts/hotpan-quiet.mjs:wrapped 0.6",
+     "invincible-plus-ultra/scripts/hotpan-quiet.mjs:isHandOver 0.6",
+     "moinen-pixel-vfx/scripts/sequencer.mjs:g.fetch 0.5"
+    ],
+    "self": [
+     "getBoundingClientRect native:0 53.8",
+     "(program) native:0 53.5",
+     "(garbage collector) native:0 31.5",
+     "sceneConfig config.mjs:185 21.9",
+     "updateText pixi.min.js:929 12.0",
+     "w.onmessage stream.mjs:48 10.4",
+     "setProperty native:0 8.3",
+     "set pixi.min.js:381 6.8",
+     "RenderFlags foundry.mjs:53128 6.4",
+     "getContext native:0 5.7",
+     "querySelectorAll native:0 3.8",
+     "get foundry.mjs:202442 3.7",
+     "_getField foundry.mjs:9661 3.5",
+     "update pixi.min.js:529 3.5",
+     "rafLoop frame-guard.mjs:160 3.2",
+     "destroy pixi.min.js:529 3.0"
+    ]
+   }
+  },
+  {
+   "build": "B",
+   "round": 0,
+   "scene": "street",
+   "loadMs": 2998,
+   "stallMs": 5668.8,
+   "stallStartAfterReady": -2672,
+   "longestMs": 5668.8,
+   "longestAt": -2672,
+   "over50AfterReady": 9,
+   "over33AfterReady": 16,
+   "firstFrameAfterReady": 2997,
+   "firstTickMs": 631.6,
+   "firstTickAt": 2365,
+   "cardAt": 189,
+   "cardFromDown": 6156,
+   "marks": {
+    "down": -2998,
+    "init": -2893,
+    "draw": -2121,
+    "readyFirst": -1940,
+    "ready": 0
+   },
+   "long": [
+    [
+     -2873,
+     134
+    ],
+    [
+     -2730,
+     55
+    ],
+    [
+     -2126,
+     2265
+    ],
+    [
+     2364,
+     802
+    ],
+    [
+     3181,
+     234
+    ],
+    [
+     3416,
+     129
+    ],
+    [
+     3547,
+     65
+    ],
+    [
+     3630,
+     58
+    ],
+    [
+     4212,
+     91
+    ],
+    [
+     4304,
+     180
+    ]
+   ],
+   "ticks": [
+    [
+     2365,
+     631.6
+    ],
+    [
+     3181,
+     32.5
+    ],
+    [
+     3547,
+     39.2
+    ],
+    [
+     3631,
+     39.5
+    ],
+    [
+     3692,
+     9.2
+    ],
+    [
+     3724,
+     12.7
+    ],
+    [
+     3755,
+     10.7
+    ],
+    [
+     3784,
+     8.7
+    ],
+    [
+     3805,
+     8.3
+    ],
+    [
+     3833,
+     12.2
+    ]
+   ],
+   "cardFrameAt": 3158,
+   "gl": {
+    "n": 154,
+    "ms": 529.8,
+    "max": 451.7,
+    "mipN": 117,
+    "mipMs": 0.8,
+    "inStall": 507.4,
+    "big": [
+     "texImage2D 4320x7680 451.7",
+     "texImage2D 880x880 19.8",
+     "texImage2D 540x208 4.3",
+     "texImage2D 500x500 4.2",
+     "texImage2D 500x500 4.1",
+     "texImage2D 381x859 3.6",
+     "texImage2D 500x500 3.6",
+     "texImage2D 500x500 3.5"
+    ]
+   },
+   "progMs": 482.5,
+   "progInStall": 0,
+   "progs": [
+    {
+     "at": 3215,
+     "ms": 187.5,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3589,
+     "ms": 12.7,
+     "src": "in vec2 aVertexPosition; // (only for the mesh's bounds) in vec2 aCorner; // 0..1 corner of the instance's quad uniform mat3 projectionMatri",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3671,
+     "ms": 14.8,
+     "src": "in vec2 aVertexPosition; in vec2 aCorner; uniform mat3 projectionMatrix; uniform mat3 translationMatrix; uniform vec2 uScreen; uniform float",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3703,
+     "ms": 15,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3737,
+     "ms": 13.2,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3766,
+     "ms": 12.8,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3794,
+     "ms": 8.3,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3814,
+     "ms": 15.4,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3846,
+     "ms": 9,
+     "src": "uniform vec4 uGrid; // the grid: origin x, y (squares), texels per square, - out vec4 fragColor; uniform vec2 uOff[10]; // per octave: its o",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3873,
+     "ms": 7.1,
+     "src": "uniform sampler2D uField; uniform vec4 uGrid; // origin x, y (squares), texels per square, - uniform vec2 uSize; // the field texture in tex",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3922,
+     "ms": 4.3,
+     "src": "in vec2 vW; uniform vec4 uRay; // strength, the share of the sky covered (contrast), the bodies' threshold, their opacity out vec4 fragColor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 3966,
+     "ms": 22.2,
+     "src": "in vec2 vP; uniform int uMode; // 0 the rain curtain (behind everything), 1 the storm deck (over everything) uniform vec4 uTop; // deck cent",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4010,
+     "ms": 12.4,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // per height sample: x, screen y (absolute art px), core radius, z; screen y strictly decreasing unifor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4044,
+     "ms": 18,
+     "src": "in vec2 vP; uniform int uMode; // 0 the dust skirt on the ground uniform vec4 uBase; // base x, y (screen art px), touch, skirt radius unifo",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4098,
+     "ms": 27.4,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4150,
+     "ms": 22.3,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4188,
+     "ms": 15.8,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // as COLUMN uniform int uMode; // 0 the debris cloud round the foot, 1 the wall cloud round the funnel ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4286,
+     "ms": 12.7,
+     "src": "in vec2 aVertexPosition; in vec2 aCorner; in vec4 aA; // centre x, y (absolute art px on screen), half extents along the local axes in vec4 ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4479,
+     "ms": 3.7,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; uniform vec4 uG; // storm light (multiply at the core), deck shadow radius (ground), presence (cloud), t",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4533,
+     "ms": 5.1,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; uniform vec4 uG; // storm light (multiply at the core), deck shadow radius (ground), presence (cloud), t",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4564,
+     "ms": 3.1,
+     "src": "in vec2 vP; uniform sampler2D uCells; uniform vec2 uCellO; uniform vec2 uCellSz; out vec4 fragColor; vec4 bsp(float v) { vec4 n = vec4(1.0, ",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4624,
+     "ms": 19.6,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4676,
+     "ms": 9,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4710,
+     "ms": 11.1,
+     "src": "in vec2 vP; layout(location = 0) out vec4 fragColor; layout(location = 1) out vec4 dispColor; // a big drop's refraction: (its centre - this",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    }
+   ],
+   "readyDispatch": 1939.7,
+   "arrival": null,
+   "warm": {
+    "programs": 3,
+    "warmMs": 234.5
+   },
+   "cold": false,
+   "stallProf": {
+    "busy": 3213.5,
+    "by": {
+     "foundry": 79.4,
+     "program": 201.6,
+     "otherMod": 1546.5,
+     "native": 13.5,
+     "mm": 1244.9,
+     "pixi": 34.2,
+     "gc": 89.6,
+     "other": 3.8
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 463.4",
+     "scripts/zones/geometry.mjs:distToSeg:43 303.7",
+     "scripts/fire/display.mjs:R.render:84 144.8",
+     "scripts/view-smooth.mjs:L.emit:104 27.2",
+     "scripts/gl-warm.mjs:sh:26 22.9",
+     "scripts/zones/link.mjs:samplesOf:30 10.6",
+     "scripts/zones/geometry.mjs:scan:308 10.3",
+     "scripts/zones/display.mjs:render:199 10.1",
+     "scripts/destruction/display.mjs:upload:111 9.6",
+     "scripts/destruction/display.mjs:flatten:536 7.4",
+     "scripts/zones/geometry.mjs:clear:302 7.1",
+     "scripts/zones/display.mjs:#icons:417 6.5",
+     "scripts/destruction/debris.mjs:inside:55 6.4",
+     "scripts/destruction/display.mjs:anon:398 6.3",
+     "scripts/zones/display.mjs:pattern:43 5.9",
+     "scripts/destruction/display.mjs:build:392 5.7"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 881.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 86.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 85.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 84.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 78.1",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 53.1"
+    ],
+    "self": [
+     "anon engine.js:421 526.3",
+     "texImage2D native:0 511.9",
+     "distToSeg geometry.mjs:43 303.7",
+     "anon engine.js:228 296.8",
+     "(program) native:0 201.6",
+     "(garbage collector) native:0 89.6",
+     "field engine.js:159 86.8",
+     "lookup engine.js:95 85.2",
+     "post engine.js:1074 84.4",
+     "paint engine.js:1054 78.1",
+     "renderFrame engine.js:1017 53.1",
+     "grad engine.js:59 45.3",
+     "findPhrase forms.js:472 43.6",
+     "hash engine.js:34 30.2",
+     "shaderSource native:0 22.9",
+     "anon engine.js:1027 21.1"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 2875,
+    "by": {
+     "other": 2.7,
+     "otherMod": 1533.2,
+     "foundry": 23.5,
+     "native": 4.5,
+     "mm": 1220.7,
+     "gc": 26.5,
+     "program": 61.7,
+     "pixi": 2.2
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 463.4",
+     "scripts/zones/geometry.mjs:distToSeg:43 303.7",
+     "scripts/fire/display.mjs:R.render:84 133.9",
+     "scripts/view-smooth.mjs:L.emit:104 26.7",
+     "scripts/gl-warm.mjs:sh:26 22.9",
+     "scripts/zones/link.mjs:samplesOf:30 10.6",
+     "scripts/zones/geometry.mjs:scan:308 10.3",
+     "scripts/zones/display.mjs:render:199 10.1",
+     "scripts/destruction/display.mjs:upload:111 9.6",
+     "scripts/destruction/display.mjs:flatten:536 7.4",
+     "scripts/zones/geometry.mjs:clear:302 7.1",
+     "scripts/zones/display.mjs:#icons:417 6.5",
+     "scripts/destruction/debris.mjs:inside:55 6.4",
+     "scripts/destruction/display.mjs:anon:398 6.3",
+     "scripts/zones/display.mjs:pattern:43 5.9",
+     "scripts/destruction/display.mjs:build:392 5.7"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 881.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 86.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 85.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 84.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 78.1",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 53.1"
+    ],
+    "self": [
+     "anon engine.js:421 526.3",
+     "texImage2D native:0 511.9",
+     "distToSeg geometry.mjs:43 303.7",
+     "anon engine.js:228 296.8",
+     "field engine.js:159 86.8",
+     "lookup engine.js:95 85.2",
+     "post engine.js:1074 84.4",
+     "paint engine.js:1054 78.1",
+     "(program) native:0 61.7",
+     "renderFrame engine.js:1017 53.1",
+     "grad engine.js:59 45.3",
+     "findPhrase forms.js:472 43.6",
+     "hash engine.js:34 30.2",
+     "(garbage collector) native:0 26.5",
+     "shaderSource native:0 22.9",
+     "anon engine.js:1027 21.1"
+    ]
+   },
+   "postProf": {
+    "busy": 1918.6,
+    "by": {
+     "otherMod": 71.6,
+     "mm": 1557.1,
+     "program": 129.6,
+     "gc": 1.7,
+     "foundry": 96.3,
+     "native": 5.3,
+     "other": 2.5,
+     "pixi": 35.4,
+     "gl": 19.1
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 463.4",
+     "scripts/gl-warm.mjs:pixi:68 351.9",
+     "scripts/fire/display.mjs:R.render:84 328.7",
+     "scripts/zones/display.mjs:dots:600 130.2",
+     "scripts/view-smooth.mjs:L.emit:104 45.7",
+     "scripts/gl-warm.mjs:sh:26 22.9",
+     "scripts/zones/zones.mjs:anon:234 12.4",
+     "scripts/destruction/display.mjs:upload:111 9.6",
+     "scripts/zones/display.mjs:#edgePattern:553 7.9",
+     "scripts/zones/orbit.mjs:place:301 7.7",
+     "scripts/destruction/display.mjs:flatten:536 7.4",
+     "scripts/destruction/debris.mjs:inside:55 6.4",
+     "scripts/destruction/display.mjs:anon:398 6.3",
+     "scripts/destruction/display.mjs:build:392 5.7",
+     "scripts/net/chunks.mjs:anon:388 5.5",
+     "scripts/destruction/debris.mjs:anon:68 5.5"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/sequencer.mjs:g.fetch 7.4",
+     "dice-so-nice/main.js:mouseNDC 7.0",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 6.0",
+     "invincible-plus-ultra/scripts/party/main.mjs:measure 3.6",
+     "invincible-plus-ultra/scripts/yze.mjs:yzeOn 3.0",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 3.0"
+    ],
+    "self": [
+     "texImage2D native:0 516.9",
+     "getProgramParameter native:0 326.6",
+     "(program) native:0 129.6",
+     "arc native:0 91.7",
+     "getTextureAlphaData foundry.mjs:104476 71.8",
+     "shaderSource native:0 29.5",
+     "_unpremultiplyAlpha pixi.min.js:871 29.5",
+     "fill native:0 27.8",
+     "getBoundingClientRect native:0 22.9",
+     "readPixels native:0 19.1",
+     "render pixi.min.js:529 16.6",
+     "bufferSubData native:0 14.4",
+     "anon native:1 9.5",
+     "gl.<computed> native:18 9.3",
+     "place orbit.mjs:301 7.7",
+     "syncUniforms pixi.min.js:492 7.1"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 625.2,
+    "by": {
+     "mm": 625.2
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 463.4",
+     "scripts/fire/display.mjs:R.render:84 115.1",
+     "scripts/view-smooth.mjs:L.emit:104 26.7",
+     "scripts/destruction/sharp-batch.mjs:flush:47 4.5",
+     "scripts/zones/display.mjs:pattern:43 2.2",
+     "scripts/destruction/static-cache.mjs:render:219 1.6",
+     "scripts/destruction/static-cache.mjs:bakeBands:505 1.5",
+     "scripts/director/source-scene.mjs:ontick:173 1.3",
+     "scripts/zones/orbit.mjs:place:301 1.1",
+     "scripts/destruction/display.mjs:make:210 1.0",
+     "scripts/zones/themes.mjs:anon:298 0.7",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 0.6",
+     "scripts/view-smooth.mjs:anon:43 0.5",
+     "scripts/zones/display.mjs:trace:38 0.5",
+     "scripts/destruction/static-cache.mjs:units:296 0.5",
+     "scripts/destruction/display.mjs:lap:1675 0.5"
+    ],
+    "otherMods": [],
+    "self": [
+     "texImage2D native:0 499.6",
+     "bufferData native:0 3.5",
+     "_initialize foundry.mjs:13887 3.4",
+     "line pixi-graphics-smooth.js:491 3.1",
+     "entries foundry.mjs:9616 3.0",
+     "Wn pixi.min.js:929 2.2",
+     "validate foundry.mjs:9030 2.1",
+     "ee.experimentalLetterSpacing pixi.min.js:929 2.0",
+     "initGeometryVao pixi.min.js:381 1.9",
+     "clean foundry.mjs:11383 1.9",
+     "generateMipmap native:0 1.8",
+     "buildTexturesAndDrawCalls pixi.min.js:348 1.8",
+     "bufferSubData native:0 1.7",
+     "os pixi.min.js:7 1.6",
+     "_render pixi.min.js:529 1.5",
+     "bind pixi.min.js:381 1.5"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1939.7,
+    "by": {
+     "other": 0.2,
+     "otherMod": 1482.7,
+     "foundry": 5,
+     "native": 1,
+     "mm": 421.9,
+     "gc": 24.8,
+     "program": 4.1
+    },
+    "mm": [
+     "scripts/zones/geometry.mjs:distToSeg:43 303.7",
+     "scripts/zones/link.mjs:samplesOf:30 10.6",
+     "scripts/zones/geometry.mjs:scan:308 10.3",
+     "scripts/zones/geometry.mjs:clear:302 7.1",
+     "scripts/zones/display.mjs:render:199 5.4",
+     "scripts/zones/geometry.mjs:vid:211 4.6",
+     "scripts/zones/geometry.mjs:planarize:191 4.6",
+     "scripts/zones/display.mjs:#icons:417 4.5",
+     "scripts/destruction/model.mjs:hasPaint:352 4.3",
+     "scripts/zones/geometry.mjs:cornerPoint:481 4.1",
+     "scripts/zones/geometry.mjs:pointInRing:34 3.9",
+     "scripts/zones/orbit.mjs:place:301 3.0",
+     "scripts/zones/link.mjs:rowCrossings:14 2.8",
+     "scripts/zones/zones.mjs:relink:106 2.8",
+     "scripts/destruction/destruction.mjs:onCanvasReady:97 2.7",
+     "scripts/zones/geometry.mjs:simplify:52 2.6"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 881.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 86.8",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 85.2",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 84.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 78.1",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 53.1"
+    ],
+    "self": [
+     "anon engine.js:421 526.3",
+     "distToSeg geometry.mjs:43 303.7",
+     "anon engine.js:228 296.8",
+     "field engine.js:159 86.8",
+     "lookup engine.js:95 85.2",
+     "post engine.js:1074 84.4",
+     "paint engine.js:1054 78.1",
+     "renderFrame engine.js:1017 53.1",
+     "grad engine.js:59 45.3",
+     "findPhrase forms.js:472 41.1",
+     "hash engine.js:34 30.2",
+     "(garbage collector) native:0 24.8",
+     "anon engine.js:1027 21.1",
+     "anon engine.js:880 19.7",
+     "anon engine.js:227 11.9",
+     "hash01 engine.js:42 11.7"
+    ]
+   },
+   "loadProf": {
+    "busy": 663.6,
+    "by": {
+     "mm": 49.9,
+     "otherMod": 146.9,
+     "foundry": 143.1,
+     "pixi": 60.3,
+     "other": 2.4,
+     "gc": 91.6,
+     "native": 16.1,
+     "program": 153.4
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 10.9",
+     "scripts/districts.mjs:destroy:352 5.1",
+     "scripts/net/stream.mjs:w.onmessage:48 4.9",
+     "scripts/pin.mjs:destroy:80 4.5",
+     "scripts/destruction/model.mjs:composite:165 3.8",
+     "scripts/destruction/store.mjs:fnv:25 2.0",
+     "scripts/destruction/flood.mjs:anon:150 1.4",
+     "scripts/net/stream.mjs:anon:112 1.2",
+     "scripts/config.mjs:sceneConfig:185 0.9",
+     "scripts/water/water.mjs:anon:175 0.9",
+     "scripts/net/preload.mjs:chunksOf:21 0.8",
+     "scripts/destruction/store.mjs:enc:26 0.8",
+     "scripts/water/publish.mjs:walk:82 0.7",
+     "scripts/tokens/styles.mjs:resolveFx:133 0.7",
+     "scripts/net/trace.mjs:markOnce:14 0.6",
+     "scripts/districts.mjs:teardown:872 0.6"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 127.1",
+     "invincible-plus-ultra/scripts/tokenhalo/halo.mjs:bake 4.2",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 2.0",
+     "invincible-plus-ultra/scripts/tokenhalo/dots.mjs:wob 2.0",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 1.1",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:anon 1.1"
+    ],
+    "self": [
+     "(program) native:0 153.4",
+     "getBoundingClientRect native:0 127.2",
+     "(garbage collector) native:0 91.6",
+     "formatDuration foundry.mjs:81507 47.2",
+     "#onChildAdded foundry.mjs:117932 9.0",
+     "destroy pixi.min.js:529 8.7",
+     "w.onmessage stream.mjs:48 4.9",
+     "_deepClone foundry.mjs:1830 4.8",
+     "removeChildren pixi.min.js:529 4.1",
+     "Wn pixi.min.js:929 4.0",
+     "composite model.mjs:165 3.8",
+     "#onProgress foundry.mjs:104723 3.5",
+     "anon pixi.min.js:869 3.5",
+     "_initialize foundry.mjs:13887 3.2",
+     "updateTimestamps foundry.mjs:129601 3.1",
+     "destroy pixi.min.js:929 3.0"
+    ]
+   }
+  },
+  {
+   "build": "B",
+   "round": 1,
+   "scene": "street",
+   "loadMs": 1761,
+   "stallMs": 1649.8,
+   "stallStartAfterReady": -1290,
+   "longestMs": 1649.8,
+   "longestAt": -1290,
+   "over50AfterReady": 5,
+   "over33AfterReady": 9,
+   "firstFrameAfterReady": 359,
+   "firstTickMs": 258.8,
+   "firstTickAt": 101,
+   "cardAt": 390,
+   "cardFromDown": 2287,
+   "marks": {
+    "down": -1760,
+    "init": -1719,
+    "draw": -1289,
+    "readyFirst": -1223,
+    "ready": 0
+   },
+   "long": [
+    [
+     -1794,
+     85
+    ],
+    [
+     -1708,
+     81
+    ],
+    [
+     -1290,
+     1389
+    ],
+    [
+     99,
+     265
+    ],
+    [
+     412,
+     117
+    ],
+    [
+     534,
+     247
+    ],
+    [
+     803,
+     52
+    ],
+    [
+     4046,
+     114
+    ]
+   ],
+   "ticks": [
+    [
+     101,
+     258.8
+    ],
+    [
+     412,
+     24.6
+    ],
+    [
+     782,
+     5.8
+    ],
+    [
+     803,
+     50.4
+    ],
+    [
+     862,
+     10.4
+    ],
+    [
+     883,
+     11.6
+    ],
+    [
+     909,
+     10.4
+    ],
+    [
+     932,
+     13.4
+    ],
+    [
+     953,
+     13.2
+    ],
+    [
+     975,
+     24.3
+    ]
+   ],
+   "cardFrameAt": 526,
+   "gl": {
+    "n": 160,
+    "ms": 264.8,
+    "max": 206.2,
+    "mipN": 140,
+    "mipMs": 1.4,
+    "inStall": 211.2,
+    "big": [
+     "texImage2D 4320x7680 206.2",
+     "texImage2D 381x859 2.9",
+     "texImage2D 209x436 2.1"
+    ]
+   },
+   "progMs": 0,
+   "progInStall": 0,
+   "progs": [],
+   "readyDispatch": 1223,
+   "arrival": null,
+   "warm": {
+    "programs": 3,
+    "warmMs": 163.30000019073486
+   },
+   "cold": false,
+   "stallProf": {
+    "busy": 1652.4,
+    "by": {
+     "native": 4.8,
+     "foundry": 44,
+     "pixi": 16.5,
+     "mm": 415.3,
+     "otherMod": 1151.5,
+     "other": 3.1,
+     "program": 1.7,
+     "gc": 15.6
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 209.6",
+     "scripts/fire/display.mjs:R.render:84 51.8",
+     "scripts/zones/geometry.mjs:clear:302 13.3",
+     "scripts/view-smooth.mjs:L.emit:104 10.3",
+     "scripts/zones/link.mjs:samplesOf:30 8.6",
+     "scripts/net/chunks.mjs:anon:403 7.4",
+     "scripts/destruction/display.mjs:upload:111 7.2",
+     "scripts/destruction/debris.mjs:anon:68 5.7",
+     "scripts/destruction/display.mjs:frame:411 5.2",
+     "scripts/zones/geometry.mjs:add:87 4.9",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.0",
+     "scripts/zones/geometry.mjs:distToSeg:43 3.8",
+     "scripts/destruction/display.mjs:anon:398 3.4",
+     "scripts/zones/display.mjs:render:199 3.3",
+     "scripts/destruction/display.mjs:flatten:536 3.3",
+     "scripts/destruction/model.mjs:diffBox:392 3.0"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 702.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 75.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 60.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 58.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 441.5",
+     "anon engine.js:228 229.7",
+     "texImage2D native:0 214.7",
+     "post engine.js:1074 75.4",
+     "lookup engine.js:95 71.3",
+     "field engine.js:159 60.7",
+     "paint engine.js:1054 58.4",
+     "renderFrame engine.js:1017 36.2",
+     "findPhrase forms.js:472 34.7",
+     "grad engine.js:59 23.8",
+     "(garbage collector) native:0 15.6",
+     "anon engine.js:1027 13.8",
+     "hash engine.js:34 13.7",
+     "line pixi-graphics-smooth.js:491 13.4",
+     "clear geometry.mjs:302 13.3",
+     "_preSyncPartState foundry.mjs:32331 11.1"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 1585.6,
+    "by": {
+     "foundry": 14.5,
+     "mm": 410.6,
+     "gc": 15.6,
+     "program": 1.5,
+     "otherMod": 1139.1,
+     "native": 1.7,
+     "other": 2.6
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 209.6",
+     "scripts/fire/display.mjs:R.render:84 47.9",
+     "scripts/zones/geometry.mjs:clear:302 13.3",
+     "scripts/view-smooth.mjs:L.emit:104 10.3",
+     "scripts/zones/link.mjs:samplesOf:30 8.6",
+     "scripts/net/chunks.mjs:anon:403 7.4",
+     "scripts/destruction/display.mjs:upload:111 7.2",
+     "scripts/destruction/debris.mjs:anon:68 5.7",
+     "scripts/destruction/display.mjs:frame:411 5.2",
+     "scripts/zones/geometry.mjs:add:87 4.9",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.0",
+     "scripts/zones/geometry.mjs:distToSeg:43 3.8",
+     "scripts/destruction/display.mjs:anon:398 3.4",
+     "scripts/zones/display.mjs:render:199 3.3",
+     "scripts/destruction/display.mjs:flatten:536 3.3",
+     "scripts/destruction/model.mjs:diffBox:392 3.0"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 702.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 75.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 60.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 58.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 441.5",
+     "anon engine.js:228 229.7",
+     "texImage2D native:0 214.7",
+     "post engine.js:1074 75.4",
+     "lookup engine.js:95 71.3",
+     "field engine.js:159 60.7",
+     "paint engine.js:1054 58.4",
+     "renderFrame engine.js:1017 36.2",
+     "findPhrase forms.js:472 34.7",
+     "grad engine.js:59 23.8",
+     "(garbage collector) native:0 15.6",
+     "anon engine.js:1027 13.8",
+     "hash engine.js:34 13.7",
+     "line pixi-graphics-smooth.js:491 13.4",
+     "clear geometry.mjs:302 13.3",
+     "anon engine.js:227 8.9"
+    ]
+   },
+   "postProf": {
+    "busy": 2608.9,
+    "by": {
+     "mm": 1647.4,
+     "gc": 3.1,
+     "foundry": 39.7,
+     "native": 23.8,
+     "other": 7.5,
+     "program": 583,
+     "pixi": 64.3,
+     "otherMod": 27.3,
+     "gl": 212.8
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 762.3",
+     "scripts/destruction/masked-map.mjs:render:68 213.2",
+     "scripts/director/source-scene.mjs:ontick:173 112.7",
+     "scripts/view-smooth.mjs:L.emit:104 94.4",
+     "scripts/zones/orbit.mjs:place:301 75.3",
+     "scripts/zones/display.mjs:dots:600 71.0",
+     "scripts/zones/zones.mjs:anon:248 54.9",
+     "scripts/director/stage.mjs:ontick:88 27.3",
+     "scripts/director/overlay.mjs:probe:180 26.7",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 12.9",
+     "scripts/destruction/display.mjs:DestructionDisplay._tick:247 10.9",
+     "scripts/destruction/display.mjs:tick:1658 10.8",
+     "scripts/view-smooth.mjs:ticker._tick:121 9.3",
+     "scripts/net/chunks.mjs:anon:403 7.4",
+     "scripts/destruction/display.mjs:upload:111 7.2",
+     "scripts/destruction/static-cache.mjs:render:219 7.1"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/party/panel.mjs:box 6.2",
+     "invincible-plus-ultra/scripts/party/panel.mjs:ensureRoot 2.6",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 1.9",
+     "invincible-plus-ultra/scripts/party/main.mjs:measure 1.4",
+     "moinen-pixel-vfx/scripts/core.mjs:anon 1.4",
+     "dice-so-nice/main.js:mouseNDC 1.3"
+    ],
+    "self": [
+     "(program) native:0 583.0",
+     "texImage2D native:0 232.4",
+     "readPixels native:0 212.8",
+     "place orbit.mjs:301 74.1",
+     "getBoundingClientRect native:0 63.0",
+     "arc native:0 52.7",
+     "render pixi.min.js:529 45.0",
+     "updateTransform pixi.min.js:529 42.9",
+     "bufferSubData native:0 33.4",
+     "line pixi-graphics-smooth.js:491 32.4",
+     "splitSet direction.mjs:156 25.8",
+     "elementsFromPoint native:0 25.4",
+     "anon native:1 24.1",
+     "bind pixi.min.js:492 23.4",
+     "uniformMatrix3fv native:0 21.4",
+     "bindTexture native:0 19.9"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 262,
+    "by": {
+     "mm": 262
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 209.6",
+     "scripts/fire/display.mjs:R.render:84 38.0",
+     "scripts/view-smooth.mjs:L.emit:104 9.8",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 2.7",
+     "scripts/destruction/display.mjs:spawn:1593 0.9",
+     "scripts/destruction/sharp-batch.mjs:flush:47 0.6",
+     "scripts/destruction/static-cache.mjs:bakeBands:505 0.4"
+    ],
+    "otherMods": [],
+    "self": [
+     "texImage2D native:0 206.8",
+     "line pixi-graphics-smooth.js:491 13.4",
+     "update pixi.min.js:422 6.6",
+     "Wn pixi.min.js:929 3.8",
+     "_packInterleavedGeometry foundry.mjs:108467 2.7",
+     "capType pixi-graphics-smooth.js:9 2.3",
+     "rt pixi.min.js:7 1.7",
+     "updateText pixi.min.js:929 1.6",
+     "_renderWithCulling pixi.min.js:529 1.6",
+     "initGeometryVao pixi.min.js:381 1.6",
+     "get uniforms pixi.min.js:309 1.5",
+     "get plugins pixi.min.js:529 1.1",
+     "render pixi.min.js:529 1.0",
+     "updateBuffers pixi.min.js:381 1.0",
+     "anon native:1 0.9",
+     "castToBaseTexture pixi.min.js:381 0.9"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1223.7,
+    "by": {
+     "foundry": 0.3,
+     "mm": 69.4,
+     "gc": 13.5,
+     "program": 1.5,
+     "otherMod": 1139.1
+    },
+    "mm": [
+     "scripts/zones/geometry.mjs:clear:302 13.3",
+     "scripts/zones/link.mjs:samplesOf:30 8.6",
+     "scripts/zones/geometry.mjs:add:87 4.9",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.0",
+     "scripts/zones/geometry.mjs:distToSeg:43 3.8",
+     "scripts/zones/display.mjs:render:199 3.3",
+     "scripts/zones/orbit.mjs:refresh:276 3.0",
+     "scripts/zones/geometry.mjs:anon:500 2.9",
+     "scripts/zones/geometry.mjs:inside:301 2.5",
+     "scripts/zones/zones.mjs:relink:120 2.0",
+     "scripts/zones/geometry.mjs:cornerPoint:481 1.5",
+     "scripts/director/source-scene.mjs:play:186 1.5",
+     "scripts/director/director.mjs:busy:344 1.4",
+     "scripts/destruction/model.mjs:composite:165 1.3",
+     "scripts/zones/geometry.mjs:scan:308 1.1",
+     "scripts/zones/zones.mjs:anon:95 1.0"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 702.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 75.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 60.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 58.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 36.2"
+    ],
+    "self": [
+     "anon engine.js:421 441.5",
+     "anon engine.js:228 229.7",
+     "post engine.js:1074 75.4",
+     "lookup engine.js:95 71.3",
+     "field engine.js:159 60.7",
+     "paint engine.js:1054 58.4",
+     "renderFrame engine.js:1017 36.2",
+     "findPhrase forms.js:472 34.7",
+     "grad engine.js:59 23.8",
+     "anon engine.js:1027 13.8",
+     "hash engine.js:34 13.7",
+     "(garbage collector) native:0 13.5",
+     "clear geometry.mjs:302 13.3",
+     "anon engine.js:227 8.9",
+     "samplesOf link.mjs:30 8.6",
+     "TYPES.particles engine.js:613 6.2"
+    ]
+   },
+   "loadProf": {
+    "busy": 275.7,
+    "by": {
+     "foundry": 48.5,
+     "pixi": 37.7,
+     "other": 1.9,
+     "otherMod": 92.7,
+     "mm": 31.6,
+     "program": 57.2,
+     "native": 6
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 8.6",
+     "scripts/net/stream.mjs:idbGetMany:214 3.3",
+     "scripts/destruction/model.mjs:composite:165 2.9",
+     "scripts/frame-guard.mjs:rafLoop:160 2.5",
+     "scripts/view-smooth.mjs:periodNow:143 1.6",
+     "scripts/destruction/model.mjs:load:255 1.4",
+     "scripts/diag.mjs:save:45 1.1",
+     "scripts/diag.mjs:anon:76 1.1",
+     "scripts/view-smooth.mjs:ticker._tick:121 1.0",
+     "scripts/net/stream.mjs:w.onmessage:48 1.0",
+     "scripts/pin.mjs:destroy:80 0.9",
+     "scripts/destruction/flood.mjs:anon:150 0.7",
+     "scripts/water/publish.mjs:walk:82 0.6",
+     "scripts/net/stream.mjs:anon:361 0.6",
+     "scripts/destruction/store.mjs:sigsKey:119 0.6",
+     "scripts/net/stream.mjs:setBundles:335 0.6"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 74.5",
+     "invincible-plus-ultra/scripts/tokenhalo/halo.mjs:bake 3.8",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 2.7",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 2.5",
+     "invincible-plus-ultra/scripts/tokenhalo/dots.mjs:anon 1.2",
+     "invincible-plus-ultra/scripts/tokenhalo/dots.mjs:wob 1.1"
+    ],
+    "self": [
+     "getBoundingClientRect native:0 74.5",
+     "(program) native:0 57.2",
+     "_preSyncPartState foundry.mjs:32331 5.3",
+     "idbGetMany stream.mjs:214 3.3",
+     "composite model.mjs:165 2.9",
+     "_deepClone foundry.mjs:1830 2.8",
+     "querySelectorAll native:0 2.7",
+     "destroy pixi.min.js:529 2.6",
+     "Wn pixi.min.js:929 2.6",
+     "removeChildren pixi.min.js:529 2.6",
+     "mergeObject foundry.mjs:2687 2.6",
+     "entries foundry.mjs:9616 2.2",
+     "postMessage native:0 2.1",
+     "anon pixi.min.js:871 2.1",
+     "destroy pixi.min.js:929 2.0",
+     "copyPointerData pixi.min.js:869 2.0"
+    ]
+   }
+  },
+  {
+   "build": "A",
+   "round": 1,
+   "scene": "street",
+   "loadMs": 1935,
+   "stallMs": 2787.7,
+   "stallStartAfterReady": 91,
+   "longestMs": 2787.7,
+   "longestAt": 91,
+   "over50AfterReady": 4,
+   "over33AfterReady": 7,
+   "firstFrameAfterReady": 91,
+   "firstTickMs": 2772.5,
+   "firstTickAt": 106,
+   "cardAt": 2993,
+   "cardFromDown": 5206,
+   "marks": {
+    "down": -1934,
+    "init": -1892,
+    "draw": -1246,
+    "readyFirst": -1193,
+    "ready": 0
+   },
+   "long": [
+    [
+     -1958,
+     74
+    ],
+    [
+     -1883,
+     71
+    ],
+    [
+     -1248,
+     1338
+    ],
+    [
+     106,
+     2880
+    ],
+    [
+     2996,
+     242
+    ],
+    [
+     3241,
+     63
+    ],
+    [
+     6583,
+     105
+    ]
+   ],
+   "ticks": [
+    [
+     106,
+     2772.5
+    ],
+    [
+     3242,
+     15.8
+    ],
+    [
+     3323,
+     41.4
+    ],
+    [
+     3372,
+     3.5
+    ],
+    [
+     3392,
+     8.3
+    ],
+    [
+     3419,
+     4.4
+    ],
+    [
+     3456,
+     5.9
+    ],
+    [
+     3469,
+     3.2
+    ],
+    [
+     3480,
+     8.6
+    ],
+    [
+     3522,
+     8.2
+    ]
+   ],
+   "cardFrameAt": 3271,
+   "gl": {
+    "n": 158,
+    "ms": 305.3,
+    "max": 248.1,
+    "mipN": 139,
+    "mipMs": 0.1,
+    "inStall": 266.9,
+    "big": [
+     "texImage2D 4320x7680 248.1",
+     "texImage2D 500x500 5.1",
+     "texImage2D 500x500 5",
+     "texImage2D 500x500 3.4",
+     "texImage2D 500x500 2.7",
+     "texImage2D 500x500 2.6"
+    ]
+   },
+   "progMs": 2444.1,
+   "progInStall": 2444.1,
+   "progs": [
+    {
+     "at": 113,
+     "ms": 2209.1,
+     "src": "in vec2 aVertexPosition; in vec2 aTextureCoord; in vec4 aColor; in float aTextureId; uniform mat3 projectionMatrix; uniform mat3 translation",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpBatchRenderer.start (scripts/pixi.min.js:348:4852) < Yr.setObjectRenderer (scripts/pixi.min.js:381:1523) < ce._render (scripts/pixi.min.js:529:35341) < ce.render (scripts/pixi.min.js:529:31283)"
+    },
+    {
+     "at": 2325,
+     "ms": 62.2,
+     "src": "in vec2 vMask; in vec2 vMap; uniform sampler2D uMask; uniform sampler2D uMap; uniform float uAlpha; uniform float uSharpMode, uSharpK, uMask",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < MaskedPatch.render (modules/moinen-maps/scripts/destruction/masked-map.mjs:89:21) < ia._renderWithCulling (scripts/pixi.min.js:529:31055) < ia.render (scripts/pixi.min.js:529:31251) < ia.render (scripts/pixi.min.js:529:31354)"
+    },
+    {
+     "at": 2653,
+     "ms": 172.8,
+     "src": "in vec2 vUV; uniform sampler2D uTex; uniform vec2 uSize; uniform float uScale; uniform float uSharp; uniform float uSoft; uniform vec2 uSoft",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpTile.render (modules/moinen-maps/scripts/destruction/static-cache.mjs:249:21) < ia.render (scripts/pixi.min.js:529:31354) < ia.render (scripts/pixi.min.js:529:31354) < container.render (modules/moinen-maps/scripts/destruction/sharp-batch.mjs:79:23)"
+    }
+   ],
+   "readyDispatch": 1193.1,
+   "arrival": {
+    "scene": "RMOpLmjOqDe9bsPt",
+    "form": "full",
+    "move": "establish",
+    "title": "street",
+    "taken": false,
+    "screen": true,
+    "owner": null
+   },
+   "warm": null,
+   "cold": true,
+   "stallProf": {
+    "busy": 2785.1,
+    "by": {
+     "pixi": 7,
+     "otherMod": 6.8,
+     "mm": 2769.3,
+     "gc": 2
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 2273.9",
+     "scripts/destruction/masked-map.mjs:render:66 315.4",
+     "scripts/destruction/static-cache.mjs:render:218 173.7",
+     "scripts/view-smooth.mjs:L.emit:104 2.8",
+     "scripts/destruction/static-cache.mjs:render:261 1.7",
+     "scripts/destruction/sharp-batch.mjs:flush:47 1.1",
+     "scripts/destruction/static-cache.mjs:Run:260 0.5",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 0.4"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/motion.mjs:entryFor 6.8"
+    ],
+    "self": [
+     "getProgramParameter native:0 2444.0",
+     "texImage2D native:0 275.1",
+     "Wn pixi.min.js:929 7.7",
+     "hitTestFn pixi.min.js:869 7.0",
+     "path pixi-graphics-smooth.js:491 5.8",
+     "packInterleavedGeometry pixi-graphics-smooth.js:9 4.9",
+     "(garbage collector) native:0 2.0",
+     "scale native:0 1.9",
+     "bind pixi.min.js:492 1.9",
+     "setObjectRenderer pixi.min.js:381 1.8",
+     "get uniforms pixi.min.js:309 1.8",
+     "render static-cache.mjs:261 1.7",
+     "updateBuild pixi-graphics-smooth.js:491 1.7",
+     "shimData foundry.mjs:14352 1.6",
+     "gl.<computed> native:18 1.5",
+     "updateText pixi.min.js:929 1.2"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 1288.8,
+    "by": {
+     "foundry": 1.4,
+     "mm": 264.3,
+     "gc": 15.9,
+     "otherMod": 1005.2,
+     "program": 1.5,
+     "native": 0.5
+    },
+    "mm": [
+     "scripts/zones/link.mjs:inRing:13 48.7",
+     "scripts/zones/link.mjs:mine:32 25.5",
+     "scripts/zones/geometry.mjs:clear:302 17.5",
+     "scripts/zones/link.mjs:anon:32 16.7",
+     "scripts/destruction/model.mjs:diffBox:382 15.5",
+     "scripts/destruction/model.mjs:hasPaint:350 15.0",
+     "scripts/fire/display.mjs:R.render:84 10.2",
+     "scripts/zones/display.mjs:render:199 9.1",
+     "scripts/destruction/display.mjs:upload:111 8.6",
+     "scripts/destruction/display.mjs:anon:398 6.6",
+     "scripts/destruction/debris.mjs:inside:55 5.7",
+     "scripts/destruction/display.mjs:flatten:536 5.4",
+     "scripts/net/chunks.mjs:anon:388 4.8",
+     "scripts/destruction/debris.mjs:mask0:41 4.0",
+     "scripts/destruction/display.mjs:sync:264 3.9",
+     "scripts/zones/link.mjs:derive:78 3.9"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 623.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 59.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 55.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 51.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 49.9",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 36.3"
+    ],
+    "self": [
+     "anon engine.js:421 372.1",
+     "anon engine.js:228 218.5",
+     "field engine.js:159 59.3",
+     "paint engine.js:1054 55.0",
+     "lookup engine.js:95 51.6",
+     "post engine.js:1074 49.9",
+     "inRing link.mjs:13 48.7",
+     "findPhrase forms.js:472 33.7",
+     "grad engine.js:59 32.7",
+     "renderFrame engine.js:1017 25.7",
+     "mine link.mjs:32 25.5",
+     "clear geometry.mjs:302 17.5",
+     "anon link.mjs:32 16.7",
+     "(garbage collector) native:0 15.9",
+     "diffBox model.mjs:382 15.5",
+     "hasPaint model.mjs:350 15.0"
+    ]
+   },
+   "postProf": {
+    "busy": 3910.5,
+    "by": {
+     "mm": 3289.2,
+     "otherMod": 109.9,
+     "native": 2.5,
+     "pixi": 28.3,
+     "gc": 35,
+     "program": 216.4,
+     "foundry": 26.4,
+     "gl": 202.4,
+     "other": 0.5
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 2447.8",
+     "scripts/destruction/masked-map.mjs:render:66 318.3",
+     "scripts/destruction/static-cache.mjs:render:218 175.6",
+     "scripts/zones/display.mjs:dots:600 95.4",
+     "scripts/director/source-scene.mjs:ontick:173 31.2",
+     "scripts/director/overlay.mjs:probe:180 30.0",
+     "scripts/zones/orbit.mjs:place:301 24.4",
+     "scripts/view-smooth.mjs:L.emit:104 22.8",
+     "scripts/destruction/model.mjs:diffBox:382 15.5",
+     "scripts/zones/zones.mjs:anon:234 8.8",
+     "scripts/destruction/display.mjs:upload:111 8.6",
+     "scripts/destruction/display.mjs:anon:398 6.6",
+     "scripts/destruction/debris.mjs:inside:55 5.7",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 5.7",
+     "scripts/destruction/display.mjs:flatten:536 5.4",
+     "scripts/net/chunks.mjs:anon:388 4.8"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/sound.mjs:anon 57.1",
+     "invincible-plus-ultra/scripts/party/panel.mjs:box 23.0",
+     "invincible-plus-ultra/scripts/base/entry.mjs:place 13.2",
+     "moinen-pixel-vfx/scripts/motion.mjs:entryFor 6.8",
+     "invincible-plus-ultra/scripts/party/main.mjs:measure 4.4",
+     "invincible-plus-ultra/scripts/combat/bar.mjs:get 1.5"
+    ],
+    "self": [
+     "getProgramParameter native:0 2444.0",
+     "texImage2D native:0 303.5",
+     "(program) native:0 216.4",
+     "readPixels native:0 202.4",
+     "decodeAudioData native:0 57.1",
+     "arc native:0 53.1",
+     "getBoundingClientRect native:0 39.0",
+     "(garbage collector) native:0 35.0",
+     "fill native:0 34.7",
+     "elementsFromPoint native:0 28.5",
+     "#getTextureAlpha foundry.mjs:109513 24.6",
+     "place orbit.mjs:301 23.9",
+     "diffBox model.mjs:382 15.5",
+     "pixels pixi.min.js:871 13.8",
+     "place entry.mjs:204 13.2",
+     "render pixi.min.js:529 10.1"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 2771.4,
+    "by": {
+     "mm": 2769.3,
+     "gc": 2
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 2273.9",
+     "scripts/destruction/masked-map.mjs:render:66 315.4",
+     "scripts/destruction/static-cache.mjs:render:218 173.7",
+     "scripts/view-smooth.mjs:L.emit:104 2.8",
+     "scripts/destruction/static-cache.mjs:render:261 1.7",
+     "scripts/destruction/sharp-batch.mjs:flush:47 1.1",
+     "scripts/destruction/static-cache.mjs:Run:260 0.5",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 0.4"
+    ],
+    "otherMods": [],
+    "self": [
+     "getProgramParameter native:0 2444.0",
+     "texImage2D native:0 275.1",
+     "path pixi-graphics-smooth.js:491 5.8",
+     "packInterleavedGeometry pixi-graphics-smooth.js:9 4.9",
+     "(garbage collector) native:0 2.0",
+     "scale native:0 1.9",
+     "bind pixi.min.js:492 1.9",
+     "setObjectRenderer pixi.min.js:381 1.8",
+     "get uniforms pixi.min.js:309 1.8",
+     "render static-cache.mjs:261 1.7",
+     "updateBuild pixi-graphics-smooth.js:491 1.7",
+     "shimData foundry.mjs:14352 1.6",
+     "gl.<computed> native:18 1.5",
+     "updateText pixi.min.js:929 1.2",
+     "clean foundry.mjs:8852 1.1",
+     "render pixi.min.js:529 1.0"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1194.5,
+    "by": {
+     "foundry": 1.4,
+     "mm": 171,
+     "gc": 15.9,
+     "otherMod": 1004.8,
+     "program": 1.5
+    },
+    "mm": [
+     "scripts/zones/link.mjs:inRing:13 48.7",
+     "scripts/zones/link.mjs:mine:32 25.5",
+     "scripts/zones/geometry.mjs:clear:302 17.5",
+     "scripts/zones/link.mjs:anon:32 16.7",
+     "scripts/destruction/model.mjs:hasPaint:350 15.0",
+     "scripts/zones/display.mjs:render:199 9.1",
+     "scripts/zones/link.mjs:derive:78 3.9",
+     "scripts/zones/geometry.mjs:buildZones:332 3.8",
+     "scripts/zones/orbit.mjs:place:301 3.4",
+     "scripts/zones/geometry.mjs:near:95 3.2",
+     "scripts/zones/link.mjs:samplesOf:23 2.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 2.7",
+     "scripts/zones/geometry.mjs:simplify:52 2.0",
+     "scripts/zones/zones.mjs:relink:106 1.6",
+     "scripts/director/source-scene.mjs:play:186 1.6",
+     "scripts/zones/geometry.mjs:vid:211 1.3"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 623.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 59.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 55.0",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 51.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 49.9",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 36.3"
+    ],
+    "self": [
+     "anon engine.js:421 372.1",
+     "anon engine.js:228 218.5",
+     "field engine.js:159 59.3",
+     "paint engine.js:1054 55.0",
+     "lookup engine.js:95 51.6",
+     "post engine.js:1074 49.9",
+     "inRing link.mjs:13 48.7",
+     "findPhrase forms.js:472 33.7",
+     "grad engine.js:59 32.7",
+     "renderFrame engine.js:1017 25.7",
+     "mine link.mjs:32 25.5",
+     "clear geometry.mjs:302 17.5",
+     "anon link.mjs:32 16.7",
+     "(garbage collector) native:0 15.9",
+     "hasPaint model.mjs:350 15.0",
+     "anon engine.js:1027 12.5"
+    ]
+   },
+   "loadProf": {
+    "busy": 290.7,
+    "by": {
+     "foundry": 48,
+     "pixi": 27.7,
+     "program": 73.6,
+     "mm": 53,
+     "other": 5.3,
+     "otherMod": 79.6,
+     "native": 3.4
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 17.4",
+     "scripts/destruction/flood.mjs:anon:150 14.3",
+     "scripts/net/stream.mjs:w.onmessage:48 6.9",
+     "scripts/frame-guard.mjs:rafLoop:160 3.0",
+     "scripts/destruction/model.mjs:load:255 2.3",
+     "scripts/view-smooth.mjs:ticker._tick:121 1.6",
+     "scripts/destruction/store.mjs:pjOf:31 1.0",
+     "scripts/setting-cache.mjs:cachedSetting:12 0.9",
+     "scripts/view-smooth.mjs:get:30 0.8",
+     "scripts/net/preload.mjs:anon:78 0.6",
+     "scripts/net/stream.mjs:remember:196 0.5",
+     "scripts/view-smooth.mjs:periodNow:143 0.5",
+     "scripts/frame-guard.mjs:chan.port1.onmessage:164 0.5",
+     "scripts/pin.mjs:destroy:80 0.5",
+     "scripts/config.mjs:sceneConfig:185 0.5",
+     "scripts/destruction/model.mjs:composite:165 0.5"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 66.3",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 4.4",
+     "invincible-plus-ultra/scripts/tokenhalo/halo.mjs:bake 2.9",
+     "moinen-pixel-vfx/scripts/sequencer.mjs:g.fetch 2.1",
+     "LockView/src/controlButtons.js:anon 1.1",
+     "LockView/src/helpers.js:getUserSetting 0.8"
+    ],
+    "self": [
+     "(program) native:0 73.6",
+     "getBoundingClientRect native:0 66.3",
+     "anon flood.mjs:150 14.3",
+     "w.onmessage stream.mjs:48 6.9",
+     "_initialize foundry.mjs:13887 4.7",
+     "querySelectorAll native:0 4.4",
+     "fill pixi-graphics-smooth.js:491 3.9",
+     "getBarAttribute foundry.mjs:61622 3.1",
+     "d handlebars.min.js:27 3.0",
+     "postMessage native:0 3.0",
+     "entries foundry.mjs:9616 3.0",
+     "destroy pixi.min.js:529 2.8",
+     "Wn pixi.min.js:929 2.6",
+     "parse pixi.min.js:871 2.4",
+     "load model.mjs:255 2.3",
+     "fetch native:0 2.1"
+    ]
+   }
+  },
+  {
+   "build": "A",
+   "round": 2,
+   "scene": "street",
+   "loadMs": 2496,
+   "stallMs": 5476.7,
+   "stallStartAfterReady": -2288,
+   "longestMs": 5476.7,
+   "longestAt": -2288,
+   "over50AfterReady": 17,
+   "over33AfterReady": 19,
+   "firstFrameAfterReady": 3188,
+   "firstTickMs": 954.7,
+   "firstTickAt": 2234,
+   "cardAt": 3232,
+   "cardFromDown": 5923,
+   "marks": {
+    "down": -2496,
+    "init": -2444,
+    "draw": -1919,
+    "readyFirst": -1839,
+    "ready": 0
+   },
+   "long": [
+    [
+     -2427,
+     106
+    ],
+    [
+     -1920,
+     4152
+    ],
+    [
+     2232,
+     965
+    ],
+    [
+     3266,
+     170
+    ],
+    [
+     3449,
+     317
+    ],
+    [
+     3855,
+     64
+    ],
+    [
+     4292,
+     146
+    ],
+    [
+     4438,
+     104
+    ],
+    [
+     4545,
+     123
+    ],
+    [
+     4937,
+     77
+    ],
+    [
+     5035,
+     87
+    ],
+    [
+     5123,
+     67
+    ],
+    [
+     5200,
+     57
+    ],
+    [
+     5263,
+     64
+    ]
+   ],
+   "ticks": [
+    [
+     2234,
+     954.7
+    ],
+    [
+     3266,
+     36.2
+    ],
+    [
+     3768,
+     15.1
+    ],
+    [
+     3856,
+     59.8
+    ],
+    [
+     3996,
+     20.1
+    ],
+    [
+     4086,
+     10.3
+    ],
+    [
+     4138,
+     9.4
+    ],
+    [
+     4232,
+     7.9
+    ],
+    [
+     4439,
+     9.2
+    ],
+    [
+     4546,
+     14.6
+    ]
+   ],
+   "cardFrameAt": 3427,
+   "gl": {
+    "n": 156,
+    "ms": 625.7,
+    "max": 560.5,
+    "mipN": 137,
+    "mipMs": 0.8,
+    "inStall": 579.3,
+    "big": [
+     "texImage2D 4320x7680 560.5",
+     "texImage2D 381x859 4.4",
+     "texImage2D 500x500 2.7",
+     "texImage2D 500x500 2.6",
+     "texImage2D 500x500 2.4",
+     "texImage2D 500x500 2.3",
+     "texImage2D 500x500 2.2",
+     "texImage2D 500x500 2.2"
+    ]
+   },
+   "progMs": 5159.9,
+   "progInStall": 246.3,
+   "progs": [
+    {
+     "at": 2272,
+     "ms": 22.6,
+     "src": "in vec2 aVertexPosition; in vec2 aTextureCoord; in vec4 aColor; in float aTextureId; uniform mat3 projectionMatrix; uniform mat3 translation",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpBatchRenderer.start (scripts/pixi.min.js:348:4852) < Yr.setObjectRenderer (scripts/pixi.min.js:381:1523) < ce._render (scripts/pixi.min.js:529:35341) < ce.render (scripts/pixi.min.js:529:31283)"
+    },
+    {
+     "at": 2904,
+     "ms": 223.7,
+     "src": "in vec2 vUV; uniform sampler2D uTex; uniform vec2 uSize; uniform float uScale; uniform float uSharp; uniform float uSoft; uniform vec2 uSoft",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < SharpTile.render (modules/moinen-maps/scripts/destruction/static-cache.mjs:249:21) < ia.render (scripts/pixi.min.js:529:31354) < ia.render (scripts/pixi.min.js:529:31354) < container.render (modules/moinen-maps/scripts/destruction/sharp-batch.mjs:79:23)"
+    },
+    {
+     "at": 4293,
+     "ms": 143.8,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4449,
+     "ms": 87.9,
+     "src": "in vec2 aVertexPosition; // (only for the mesh's bounds) in vec2 aCorner; // 0..1 corner of the instance's quad uniform mat3 projectionMatri",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4561,
+     "ms": 102.5,
+     "src": "in vec2 aVertexPosition; in vec2 aCorner; uniform mat3 projectionMatrix; uniform mat3 translationMatrix; uniform vec2 uScreen; uniform float",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4717,
+     "ms": 46.9,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4776,
+     "ms": 17.1,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4813,
+     "ms": 16,
+     "src": "in vec2 vCell; uniform float uTime; // shared clock, s mod 3600 uniform float uK; // (the old footprint scale: kept for the cell pass's unif",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4886,
+     "ms": 28.2,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 4952,
+     "ms": 51.8,
+     "src": "in vec2 vCell; uniform float uTime; uniform float uK; uniform float uAlpha; uniform vec4 uSandH; // presence x density, 3-band look (lit / s",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5055,
+     "ms": 63.1,
+     "src": "uniform vec4 uGrid; // the grid: origin x, y (squares), texels per square, - out vec4 fragColor; uniform vec2 uOff[10]; // per octave: its o",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5134,
+     "ms": 51.6,
+     "src": "uniform sampler2D uField; uniform vec4 uGrid; // origin x, y (squares), texels per square, - uniform vec2 uSize; // the field texture in tex",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5223,
+     "ms": 28.8,
+     "src": "in vec2 vW; uniform vec4 uShade; // darkening, its cool tint, -, - out vec4 fragColor; uniform sampler2D uLight; uniform vec4 uGrid; // orig",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5268,
+     "ms": 56,
+     "src": "in vec2 vW; uniform vec4 uRay; // strength, the share of the sky covered (contrast), the bodies' threshold, their opacity out vec4 fragColor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5349,
+     "ms": 52.2,
+     "src": "in vec2 vW; uniform vec4 uCl; // threshold, its soft width, opacity (x presence x mode), detail uniform vec4 uTor[3]; // tornadoes: x, y, re",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 5453,
+     "ms": 4129.7,
+     "src": "in vec2 vP; uniform int uMode; // 0 the rain curtain (behind everything), 1 the storm deck (over everything) uniform vec4 uTop; // deck cent",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    },
+    {
+     "at": 9601,
+     "ms": 38,
+     "src": "in vec2 vP; uniform vec4 uAxis[40]; // per height sample: x, screen y (absolute art px), core radius, z; screen y strictly decreasing unifor",
+     "st": "Wo (scripts/pixi.min.js:422:13193) < dn.generateProgram (scripts/pixi.min.js:492:2599) < dn.bind (scripts/pixi.min.js:492:557) < pixi (modules/moinen-maps/scripts/gl-warm.mjs:68:40) < warmPrograms (modules/moinen-maps/scripts/gl-warm.mjs:85:5) < async prewarm (modules/moinen-maps/scripts/weather/weather.mjs:98:3)"
+    }
+   ],
+   "readyDispatch": 1839.2,
+   "arrival": {
+    "scene": "RMOpLmjOqDe9bsPt",
+    "form": "full",
+    "move": "establish",
+    "title": "street",
+    "taken": false,
+    "screen": true,
+    "owner": "arrival"
+   },
+   "warm": null,
+   "cold": true,
+   "stallProf": {
+    "busy": 5140.4,
+    "by": {
+     "program": 30.3,
+     "mm": 3658.6,
+     "pixi": 17.7,
+     "native": 10.7,
+     "foundry": 64.5,
+     "gc": 21.8,
+     "other": 6.2,
+     "otherMod": 1330.6
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 1946.0",
+     "scripts/destruction/masked-map.mjs:render:66 572.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 245.9",
+     "scripts/destruction/static-cache.mjs:render:218 227.8",
+     "scripts/fire/display.mjs:R.render:84 132.9",
+     "scripts/zones/link.mjs:inRing:13 108.0",
+     "scripts/destruction/model.mjs:diffBox:382 29.1",
+     "scripts/view-smooth.mjs:L.emit:104 28.4",
+     "scripts/destruction/model.mjs:hasPaint:350 25.6",
+     "scripts/destruction/display.mjs:flatten:536 21.1",
+     "scripts/destruction/display.mjs:build:392 17.1",
+     "scripts/destruction/debris.mjs:anon:68 16.5",
+     "scripts/net/chunks.mjs:anon:388 13.1",
+     "scripts/zones/geometry.mjs:scan:308 12.7",
+     "scripts/destruction/debris.mjs:pose:377 11.6",
+     "scripts/destruction/debris.mjs:mask0:41 10.5"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 764.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 85.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 75.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 70.6",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 51.2"
+    ],
+    "self": [
+     "getShaderParameter native:0 1945.5",
+     "texImage2D native:0 590.9",
+     "anon engine.js:421 466.7",
+     "anon engine.js:228 255.1",
+     "getProgramParameter native:0 249.9",
+     "distToSeg geometry.mjs:43 245.9",
+     "inRing link.mjs:13 108.0",
+     "post engine.js:1074 85.6",
+     "paint engine.js:1054 75.3",
+     "lookup engine.js:95 71.6",
+     "field engine.js:159 70.6",
+     "findPhrase forms.js:472 47.2",
+     "renderFrame engine.js:1017 43.4",
+     "grad engine.js:59 34.5",
+     "(program) native:0 30.3",
+     "diffBox model.mjs:382 29.1"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 5026.7,
+    "by": {
+     "otherMod": 1319.9,
+     "native": 5.2,
+     "foundry": 35.8,
+     "mm": 3633.7,
+     "gc": 21.3,
+     "program": 7.4,
+     "other": 3.4
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 1946.0",
+     "scripts/destruction/masked-map.mjs:render:66 572.8",
+     "scripts/zones/geometry.mjs:distToSeg:43 245.9",
+     "scripts/destruction/static-cache.mjs:render:218 227.8",
+     "scripts/fire/display.mjs:R.render:84 121.1",
+     "scripts/zones/link.mjs:inRing:13 108.0",
+     "scripts/destruction/model.mjs:diffBox:382 29.1",
+     "scripts/view-smooth.mjs:L.emit:104 28.4",
+     "scripts/destruction/model.mjs:hasPaint:350 25.6",
+     "scripts/destruction/display.mjs:flatten:536 21.1",
+     "scripts/destruction/display.mjs:build:392 17.1",
+     "scripts/destruction/debris.mjs:anon:68 16.5",
+     "scripts/net/chunks.mjs:anon:388 13.1",
+     "scripts/zones/geometry.mjs:scan:308 12.7",
+     "scripts/destruction/debris.mjs:pose:377 11.6",
+     "scripts/destruction/debris.mjs:mask0:41 10.5"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 764.4",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 85.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 75.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 70.6",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 51.2"
+    ],
+    "self": [
+     "getShaderParameter native:0 1945.5",
+     "texImage2D native:0 590.9",
+     "anon engine.js:421 466.7",
+     "anon engine.js:228 255.1",
+     "getProgramParameter native:0 249.9",
+     "distToSeg geometry.mjs:43 245.9",
+     "inRing link.mjs:13 108.0",
+     "post engine.js:1074 85.6",
+     "paint engine.js:1054 75.3",
+     "lookup engine.js:95 71.6",
+     "field engine.js:159 70.6",
+     "findPhrase forms.js:472 47.2",
+     "renderFrame engine.js:1017 43.4",
+     "grad engine.js:59 34.5",
+     "diffBox model.mjs:382 29.1",
+     "hash engine.js:34 26.8"
+    ]
+   },
+   "postProf": {
+    "busy": 3940,
+    "by": {
+     "otherMod": 77,
+     "mm": 3404.8,
+     "native": 8,
+     "gc": 2.9,
+     "program": 94.2,
+     "foundry": 80.5,
+     "other": 3.9,
+     "pixi": 26.4,
+     "gl": 242.2
+    },
+    "mm": [
+     "scripts/destruction/sharp-batch.mjs:installSharpBatch:39 1946.0",
+     "scripts/destruction/masked-map.mjs:render:66 578.0",
+     "scripts/destruction/static-cache.mjs:render:218 227.8",
+     "scripts/fire/display.mjs:R.render:84 208.5",
+     "scripts/zones/display.mjs:dots:600 105.7",
+     "scripts/view-smooth.mjs:L.emit:104 47.0",
+     "scripts/destruction/model.mjs:diffBox:382 29.1",
+     "scripts/destruction/display.mjs:flatten:536 21.1",
+     "scripts/destruction/display.mjs:build:392 17.1",
+     "scripts/destruction/debris.mjs:anon:68 16.5",
+     "scripts/net/chunks.mjs:anon:388 13.1",
+     "scripts/destruction/debris.mjs:pose:377 11.6",
+     "scripts/destruction/debris.mjs:mask0:41 10.5",
+     "scripts/destruction/display.mjs:upload:111 9.7",
+     "scripts/destruction/debris.mjs:inside:55 8.5",
+     "scripts/destruction/destruction.mjs:playEntries:1271 8.3"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/sound.mjs:anon 16.7",
+     "invincible-plus-ultra/scripts/party/panel.mjs:box 6.1",
+     "moinen-pixel-vfx/scripts/core.mjs:anon 4.9",
+     "moinen-pixel-vfx/scripts/sound.mjs:audio 4.8",
+     "invincible-plus-ultra/scripts/party/panel.mjs:ensureRoot 4.0",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 3.9"
+    ],
+    "self": [
+     "getShaderParameter native:0 1945.5",
+     "texImage2D native:0 616.4",
+     "getProgramParameter native:0 249.9",
+     "readPixels native:0 242.2",
+     "(program) native:0 94.2",
+     "arc native:0 77.3",
+     "getTextureAlphaData foundry.mjs:104476 35.9",
+     "diffBox model.mjs:382 29.1",
+     "_unpremultiplyAlpha pixi.min.js:871 22.1",
+     "fill native:0 18.6",
+     "anon debris.mjs:68 16.5",
+     "decodeAudioData native:0 15.7",
+     "anon chunks.mjs:388 13.1",
+     "#getTextureAlpha foundry.mjs:109513 12.7",
+     "build display.mjs:392 12.4",
+     "updateSkew pixi.min.js:15 11.6"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 954.3,
+    "by": {
+     "foundry": 3.6,
+     "other": 2.2,
+     "native": 0.5,
+     "program": 0.5,
+     "mm": 947.6
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:66 572.8",
+     "scripts/destruction/static-cache.mjs:render:218 227.8",
+     "scripts/fire/display.mjs:R.render:84 102.9",
+     "scripts/view-smooth.mjs:L.emit:104 28.4",
+     "scripts/destruction/sharp-batch.mjs:flush:47 4.2",
+     "scripts/destruction/display.mjs:tick:1658 1.6",
+     "scripts/destruction/static-cache.mjs:update:359 1.5",
+     "scripts/destruction/display.mjs:make:210 1.4",
+     "scripts/destruction/static-cache.mjs:SharpTile:203 1.1",
+     "scripts/destruction/static-cache.mjs:bake:495 0.6",
+     "scripts/zones/orbit.mjs:place:301 0.6",
+     "scripts/destruction/static-cache.mjs:bakeBands:504 0.6",
+     "scripts/destruction/display.mjs:idleTick:2190 0.6",
+     "scripts/destruction/static-cache.mjs:Run:260 0.6",
+     "scripts/tokens/fx.mjs:onRefreshToken:825 0.5",
+     "scripts/setting-cache.mjs:cachedSetting:12 0.5"
+    ],
+    "otherMods": [],
+    "self": [
+     "texImage2D native:0 580.9",
+     "getProgramParameter native:0 249.9",
+     "gl.<computed> native:18 5.5",
+     "bufferData native:0 4.7",
+     "initGeometryVao pixi.min.js:381 3.5",
+     "validate foundry.mjs:13987 3.0",
+     "reset pixi.min.js:929 2.7",
+     "h handlebars.min.js:27 2.2",
+     "remove foundry.mjs:60063 2.1",
+     "get schema foundry.mjs:13609 2.0",
+     "Wn pixi.min.js:929 2.0",
+     "#assertSetting foundry.mjs:202495 1.7",
+     "createBuffer native:0 1.7",
+     "calculateVertices pixi.min.js:529 1.7",
+     "syncUniforms pixi.min.js:492 1.6",
+     "tick display.mjs:1658 1.6"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1839.6,
+    "by": {
+     "otherMod": 1310,
+     "native": 1.5,
+     "foundry": 5.5,
+     "mm": 500.2,
+     "gc": 18.4,
+     "program": 3.9
+    },
+    "mm": [
+     "scripts/zones/geometry.mjs:distToSeg:43 245.9",
+     "scripts/zones/link.mjs:inRing:13 108.0",
+     "scripts/destruction/model.mjs:hasPaint:350 25.6",
+     "scripts/zones/geometry.mjs:scan:308 12.7",
+     "scripts/zones/geometry.mjs:clear:302 9.2",
+     "scripts/zones/geometry.mjs:vid:211 7.4",
+     "scripts/zones/display.mjs:render:199 5.7",
+     "scripts/zones/geometry.mjs:buildZones:332 5.1",
+     "scripts/zones/geometry.mjs:anon:500 4.4",
+     "scripts/zones/link.mjs:samplesOf:23 4.3",
+     "scripts/zones/geometry.mjs:pointInRing:34 4.0",
+     "scripts/zones/geometry.mjs:cornerPoint:481 4.0",
+     "scripts/filter-panel.mjs:refreshPanel:133 3.6",
+     "scripts/zones/link.mjs:anon:32 3.5",
+     "scripts/zones/orbit.mjs:place:301 3.5",
+     "scripts/zones/geometry.mjs:simplify:52 3.1"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 763.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 85.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 75.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 71.6",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 70.6",
+     "moinen-pixel-vfx/scripts/engine/forms.js:findPhrase 51.2"
+    ],
+    "self": [
+     "anon engine.js:421 466.7",
+     "anon engine.js:228 254.6",
+     "distToSeg geometry.mjs:43 245.9",
+     "inRing link.mjs:13 108.0",
+     "post engine.js:1074 85.6",
+     "paint engine.js:1054 75.3",
+     "lookup engine.js:95 71.6",
+     "field engine.js:159 70.6",
+     "findPhrase forms.js:472 47.2",
+     "renderFrame engine.js:1017 42.8",
+     "grad engine.js:59 34.5",
+     "hash engine.js:34 26.8",
+     "hasPaint model.mjs:350 25.6",
+     "(garbage collector) native:0 18.4",
+     "anon engine.js:880 17.1",
+     "anon engine.js:1027 14.6"
+    ]
+   },
+   "loadProf": {
+    "busy": 320.4,
+    "by": {
+     "mm": 41.9,
+     "otherMod": 115.2,
+     "foundry": 65.8,
+     "pixi": 34.2,
+     "other": 4.3,
+     "native": 9.5,
+     "program": 49.1,
+     "gc": 0.5
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 11.8",
+     "scripts/net/stream.mjs:w.onmessage:48 5.6",
+     "scripts/destruction/model.mjs:composite:165 2.2",
+     "scripts/districts.mjs:destroy:352 2.0",
+     "scripts/pin.mjs:destroy:80 2.0",
+     "scripts/net/stream.mjs:anon:118 1.6",
+     "scripts/districts.mjs:teardown:872 1.4",
+     "scripts/destruction/flood.mjs:anon:150 1.4",
+     "scripts/tokens/styles.mjs:resolveFx:133 1.2",
+     "scripts/net/stream.mjs:idbGetMany:214 1.0",
+     "scripts/net/stream.mjs:remember:196 1.0",
+     "scripts/diag.mjs:load:44 0.7",
+     "scripts/water/publish.mjs:walk:82 0.5",
+     "scripts/destruction/model.mjs:load:255 0.5",
+     "scripts/water/display.mjs:free:139 0.5",
+     "scripts/districts.mjs:dropMap:359 0.5"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 98.0",
+     "invincible-plus-ultra/scripts/tokenhalo/halo.mjs:bake 3.5",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 2.0",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 1.5",
+     "invincible-plus-ultra/scripts/tokenhalo/dots.mjs:wob 1.0",
+     "LockView/src/helpers.js:getUserSetting 1.0"
+    ],
+    "self": [
+     "getBoundingClientRect native:0 98.2",
+     "(program) native:0 49.1",
+     "w.onmessage stream.mjs:48 5.6",
+     "#onProgress foundry.mjs:104723 5.5",
+     "_deepClone foundry.mjs:1830 4.2",
+     "anon pixi.min.js:871 4.1",
+     "destroy pixi.min.js:529 3.6",
+     "_initialize foundry.mjs:13887 3.1",
+     "#parsePartHTML foundry.mjs:32263 2.7",
+     "anon pixi.min.js:869 2.6",
+     "Wn pixi.min.js:929 2.6",
+     "fill pixi-graphics-smooth.js:491 2.4",
+     "composite model.mjs:165 2.2",
+     "DataModel foundry.mjs:13470 2.1",
+     "packInterleavedGeometry pixi-graphics-smooth.js:9 2.1",
+     "querySelectorAll native:0 2.0"
+    ]
+   }
+  },
+  {
+   "build": "B",
+   "round": 2,
+   "scene": "street",
+   "loadMs": 1961,
+   "stallMs": 1287.2,
+   "stallStartAfterReady": -1152,
+   "longestMs": 1287.2,
+   "longestAt": -1152,
+   "over50AfterReady": 5,
+   "over33AfterReady": 7,
+   "firstFrameAfterReady": 136,
+   "firstTickMs": 471.1,
+   "firstTickAt": 171,
+   "cardAt": 171,
+   "cardFromDown": 2674,
+   "marks": {
+    "down": -1961,
+    "init": -1938,
+    "draw": -1148,
+    "readyFirst": -1090,
+    "ready": 0
+   },
+   "long": [
+    [
+     -1930,
+     122
+    ],
+    [
+     -1150,
+     1283
+    ],
+    [
+     171,
+     542
+    ],
+    [
+     731,
+     341
+    ],
+    [
+     4389,
+     104
+    ]
+   ],
+   "ticks": [
+    [
+     171,
+     471.1
+    ],
+    [
+     1073,
+     24.1
+    ],
+    [
+     1148,
+     39.6
+    ],
+    [
+     1204,
+     4.8
+    ],
+    [
+     1233,
+     4.5
+    ],
+    [
+     1256,
+     5.2
+    ],
+    [
+     1287,
+     8.5
+    ],
+    [
+     1306,
+     12
+    ],
+    [
+     1329,
+     7.5
+    ],
+    [
+     1350,
+     4.7
+    ]
+   ],
+   "cardFrameAt": 713,
+   "gl": {
+    "n": 159,
+    "ms": 462.2,
+    "max": 407.2,
+    "mipN": 139,
+    "mipMs": 0.5,
+    "inStall": 7.2,
+    "big": [
+     "texImage2D 381x859 7.2"
+    ]
+   },
+   "progMs": 0,
+   "progInStall": 0,
+   "progs": [],
+   "readyDispatch": 1089.9,
+   "arrival": null,
+   "warm": {
+    "programs": 3,
+    "warmMs": 3668.9000000953674
+   },
+   "cold": true,
+   "stallProf": {
+    "busy": 1284.9,
+    "by": {
+     "mm": 208,
+     "program": 6.5,
+     "foundry": 41.8,
+     "pixi": 12.8,
+     "native": 7.2,
+     "otherMod": 990.7,
+     "other": 2.5,
+     "gc": 15.5
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 15.8",
+     "scripts/destruction/display.mjs:upload:111 11.6",
+     "scripts/destruction/display.mjs:flatten:536 10.9",
+     "scripts/zones/geometry.mjs:distToSeg:43 10.3",
+     "scripts/zones/link.mjs:samplesOf:30 10.1",
+     "scripts/zones/display.mjs:render:199 9.9",
+     "scripts/destruction/debris.mjs:mask0:41 9.6",
+     "scripts/destruction/display.mjs:anon:398 7.6",
+     "scripts/destruction/debris.mjs:inside:55 6.4",
+     "scripts/destruction/display.mjs:build:392 5.9",
+     "scripts/zones/orbit.mjs:place:301 5.3",
+     "scripts/destruction/model.mjs:diffBox:392 5.2",
+     "scripts/net/chunks.mjs:anon:388 4.8",
+     "scripts/zones/geometry.mjs:vid:211 4.6",
+     "scripts/destruction/debris.mjs:outlineChunk:188 3.6",
+     "scripts/zones/geometry.mjs:anon:500 3.6"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 550.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 65.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 63.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 63.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 45.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 43.2"
+    ],
+    "self": [
+     "anon engine.js:421 321.5",
+     "anon engine.js:228 200.1",
+     "paint engine.js:1054 65.3",
+     "field engine.js:159 63.9",
+     "post engine.js:1074 63.7",
+     "renderFrame engine.js:1017 45.9",
+     "lookup engine.js:95 43.2",
+     "findPhrase forms.js:472 33.0",
+     "grad engine.js:59 30.5",
+     "hash01 engine.js:42 15.8",
+     "(garbage collector) native:0 15.5",
+     "hash engine.js:34 14.8",
+     "anon engine.js:1027 14.5",
+     "_preSyncPartState foundry.mjs:32331 11.3",
+     "distToSeg geometry.mjs:43 10.3",
+     "samplesOf link.mjs:30 10.1"
+    ]
+   },
+   "readyToFrameProf": {
+    "busy": 1226,
+    "by": {
+     "program": 4.3,
+     "mm": 197.6,
+     "foundry": 19.2,
+     "gc": 15.5,
+     "otherMod": 983,
+     "other": 1.8,
+     "native": 4.6
+    },
+    "mm": [
+     "scripts/destruction/display.mjs:upload:111 11.6",
+     "scripts/destruction/display.mjs:flatten:536 10.9",
+     "scripts/zones/geometry.mjs:distToSeg:43 10.3",
+     "scripts/zones/link.mjs:samplesOf:30 10.1",
+     "scripts/zones/display.mjs:render:199 9.9",
+     "scripts/destruction/debris.mjs:mask0:41 9.6",
+     "scripts/destruction/display.mjs:anon:398 7.6",
+     "scripts/destruction/debris.mjs:inside:55 6.4",
+     "scripts/fire/display.mjs:R.render:84 6.0",
+     "scripts/destruction/display.mjs:build:392 5.9",
+     "scripts/zones/orbit.mjs:place:301 5.3",
+     "scripts/destruction/model.mjs:diffBox:392 5.2",
+     "scripts/net/chunks.mjs:anon:388 4.8",
+     "scripts/zones/geometry.mjs:vid:211 4.6",
+     "scripts/destruction/debris.mjs:outlineChunk:188 3.6",
+     "scripts/zones/geometry.mjs:anon:500 3.6"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 550.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 65.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 63.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 63.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 45.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 43.2"
+    ],
+    "self": [
+     "anon engine.js:421 321.5",
+     "anon engine.js:228 200.1",
+     "paint engine.js:1054 65.3",
+     "field engine.js:159 63.9",
+     "post engine.js:1074 63.7",
+     "renderFrame engine.js:1017 45.9",
+     "lookup engine.js:95 43.2",
+     "findPhrase forms.js:472 33.0",
+     "grad engine.js:59 30.5",
+     "hash01 engine.js:42 15.8",
+     "(garbage collector) native:0 15.5",
+     "hash engine.js:34 14.8",
+     "anon engine.js:1027 14.5",
+     "distToSeg geometry.mjs:43 10.3",
+     "samplesOf link.mjs:30 10.1",
+     "mask0 debris.mjs:41 9.6"
+    ]
+   },
+   "postProf": {
+    "busy": 2736.2,
+    "by": {
+     "mm": 1789.5,
+     "program": 442.6,
+     "foundry": 95.2,
+     "other": 8.7,
+     "native": 17.9,
+     "otherMod": 45,
+     "pixi": 76.6,
+     "gc": 3.2,
+     "gl": 257.6
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 730.9",
+     "scripts/destruction/masked-map.mjs:render:68 412.7",
+     "scripts/director/source-scene.mjs:ontick:173 127.7",
+     "scripts/zones/orbit.mjs:place:301 97.1",
+     "scripts/zones/display.mjs:dots:600 62.5",
+     "scripts/view-smooth.mjs:L.emit:104 59.4",
+     "scripts/zones/zones.mjs:anon:248 42.5",
+     "scripts/director/overlay.mjs:probe:180 14.1",
+     "scripts/destruction/display.mjs:upload:111 11.6",
+     "scripts/destruction/display.mjs:flatten:536 10.9",
+     "scripts/view-smooth.mjs:ticker._tick:121 10.6",
+     "scripts/destruction/debris.mjs:mask0:41 9.6",
+     "scripts/director/stage.mjs:ontick:88 8.7",
+     "scripts/destruction/display.mjs:anon:398 7.6",
+     "scripts/destruction/display.mjs:tick:1658 7.4",
+     "scripts/destruction/static-cache.mjs:update:360 7.1"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/party/main.mjs:measure 5.0",
+     "invincible-plus-ultra/scripts/party/panel.mjs:box 4.5",
+     "invincible-plus-ultra/scripts/challenges/main.mjs:lowerLimit 3.0",
+     "invincible-plus-ultra/scripts/party/panel.mjs:accentTokens 3.0",
+     "moinen-pixel-vfx/scripts/sound.mjs:audio 2.6",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 2.5"
+    ],
+    "self": [
+     "texImage2D native:0 454.2",
+     "(program) native:0 442.6",
+     "readPixels native:0 257.6",
+     "place orbit.mjs:301 96.0",
+     "getBoundingClientRect native:0 50.3",
+     "render pixi.min.js:529 50.3",
+     "getTextureAlphaData foundry.mjs:104476 47.2",
+     "arc native:0 44.6",
+     "updateTransform pixi.min.js:529 44.1",
+     "bufferSubData native:0 34.9",
+     "getGlProgram pixi.min.js:492 27.3",
+     "_unpremultiplyAlpha pixi.min.js:871 24.6",
+     "syncUniformGroup pixi.min.js:492 23.8",
+     "bind pixi.min.js:492 18.5",
+     "anon pixi.min.js:13 18.2",
+     "updateTransform pixi.min.js:15 18.2"
+    ]
+   },
+   "firstTickProf": {
+    "busy": 470.9,
+    "by": {
+     "mm": 470.6,
+     "gc": 0.3
+    },
+    "mm": [
+     "scripts/destruction/masked-map.mjs:render:68 409.8",
+     "scripts/fire/display.mjs:R.render:84 43.7",
+     "scripts/view-smooth.mjs:L.emit:104 11.7",
+     "scripts/zones/orbit.mjs:place:301 2.6",
+     "scripts/destruction/sharp-batch.mjs:flush:47 1.1",
+     "scripts/destruction/sharp-batch.mjs:container.render:75 0.6",
+     "scripts/destruction/static-cache.mjs:render:219 0.5",
+     "scripts/roads/cars.mjs:tick:142 0.4",
+     "scripts/destruction/static-cache.mjs:update:360 0.1"
+    ],
+    "otherMods": [],
+    "self": [
+     "texImage2D native:0 421.4",
+     "line pixi-graphics-smooth.js:491 4.3",
+     "place orbit.mjs:301 2.6",
+     "Wn pixi.min.js:929 2.1",
+     "updateBatches pixi-graphics-smooth.js:491 2.1",
+     "initGeometryVao pixi.min.js:381 2.1",
+     "wa pixi.min.js:7 1.9",
+     "#assertSetting foundry.mjs:202495 1.5",
+     "ee.experimentalLetterSpacing pixi.min.js:929 1.5",
+     "entries foundry.mjs:9616 1.4",
+     "_initialize foundry.mjs:13887 1.2",
+     "clear pixi-graphics-smooth.js:491 1.2",
+     "get uniforms pixi.min.js:309 1.1",
+     "yu pixi.min.js:7 1.0",
+     "get actor foundry.mjs:61327 1.0",
+     "measureText pixi.min.js:928 1.0"
+    ]
+   },
+   "dispatchProf": {
+    "busy": 1090.4,
+    "by": {
+     "program": 1.4,
+     "mm": 89.5,
+     "foundry": 1,
+     "gc": 15.5,
+     "otherMod": 983
+    },
+    "mm": [
+     "scripts/zones/geometry.mjs:distToSeg:43 10.3",
+     "scripts/zones/link.mjs:samplesOf:30 10.1",
+     "scripts/zones/display.mjs:render:199 9.9",
+     "scripts/zones/orbit.mjs:place:301 5.3",
+     "scripts/zones/geometry.mjs:vid:211 4.6",
+     "scripts/zones/geometry.mjs:anon:500 3.6",
+     "scripts/zones/geometry.mjs:buildZones:332 3.5",
+     "scripts/zones/geometry.mjs:planarize:191 3.3",
+     "scripts/zones/link.mjs:derive:109 3.1",
+     "scripts/zones/geometry.mjs:pointInRing:34 2.8",
+     "scripts/zones/themes.mjs:bakeWash:235 2.6",
+     "scripts/zones/geometry.mjs:cornerPoint:481 2.3",
+     "scripts/water/reflect.mjs:onCanvasReady:299 2.3",
+     "scripts/zones/display.mjs:follow:663 2.0",
+     "scripts/zones/geometry.mjs:smoothLine:110 1.9",
+     "scripts/weather/weather.mjs:setting:43 1.7"
+    ],
+    "otherMods": [
+     "moinen-pixel-vfx/scripts/engine/engine.js:anon 550.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:paint 65.3",
+     "moinen-pixel-vfx/scripts/engine/engine.js:field 63.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:post 63.7",
+     "moinen-pixel-vfx/scripts/engine/engine.js:renderFrame 45.9",
+     "moinen-pixel-vfx/scripts/engine/engine.js:lookup 43.2"
+    ],
+    "self": [
+     "anon engine.js:421 321.5",
+     "anon engine.js:228 200.1",
+     "paint engine.js:1054 65.3",
+     "field engine.js:159 63.9",
+     "post engine.js:1074 63.7",
+     "renderFrame engine.js:1017 45.9",
+     "lookup engine.js:95 43.2",
+     "findPhrase forms.js:472 33.0",
+     "grad engine.js:59 30.5",
+     "hash01 engine.js:42 15.8",
+     "(garbage collector) native:0 15.5",
+     "hash engine.js:34 14.8",
+     "anon engine.js:1027 14.5",
+     "distToSeg geometry.mjs:43 10.3",
+     "samplesOf link.mjs:30 10.1",
+     "anon engine.js:227 7.9"
+    ]
+   },
+   "loadProf": {
+    "busy": 355.9,
+    "by": {
+     "pixi": 24.5,
+     "other": 1.5,
+     "foundry": 36.3,
+     "native": 12.4,
+     "mm": 32.3,
+     "otherMod": 130.2,
+     "program": 118.6
+    },
+    "mm": [
+     "scripts/fire/display.mjs:R.render:84 16.8",
+     "scripts/net/stream.mjs:w.onmessage:48 4.0",
+     "scripts/destruction/model.mjs:composite:165 2.6",
+     "scripts/destruction/store.mjs:fnv:25 1.5",
+     "scripts/frame-guard.mjs:rafLoop:160 1.0",
+     "scripts/destruction/flood.mjs:anon:150 1.0",
+     "scripts/view-smooth.mjs:get:30 0.8",
+     "scripts/view-smooth.mjs:ticker._tick:121 0.7",
+     "scripts/destruction/model.mjs:load:255 0.6",
+     "scripts/config.mjs:sceneConfig:185 0.6",
+     "scripts/view-smooth.mjs:periodNow:143 0.5",
+     "scripts/frame-guard.mjs:chan.port1.onmessage:164 0.5",
+     "scripts/net/stream.mjs:anon:90 0.5",
+     "scripts/net/trace.mjs:frame:27 0.5",
+     "scripts/net/stream.mjs:idbGetMany:214 0.5",
+     "scripts/water/publish.mjs:walk:82 0.3"
+    ],
+    "otherMods": [
+     "invincible-plus-ultra/scripts/challenges/main.mjs:measure 121.1",
+     "invincible-plus-ultra/scripts/tokenhalo/halo.mjs:bake 1.9",
+     "invincible-plus-ultra/scripts/tokenhalo/dots.mjs:wob 1.1",
+     "invincible-plus-ultra/scripts/tokenhalo/main.mjs:get 1.0",
+     "moinen-pixel-vfx/scripts/sequencer.mjs:g.fetch 0.8",
+     "LockView/src/controlButtons.js:anon 0.7"
+    ],
+    "self": [
+     "getBoundingClientRect native:0 121.1",
+     "(program) native:0 118.6",
+     "_preSyncPartState foundry.mjs:32331 6.8",
+     "bufferSubData native:0 5.6",
+     "fill pixi-graphics-smooth.js:491 4.5",
+     "setProperty native:0 4.2",
+     "w.onmessage stream.mjs:48 4.0",
+     "hitTestMoveRecursive pixi.min.js:869 3.4",
+     "get layer foundry.mjs:54519 3.1",
+     "entries foundry.mjs:9616 2.7",
+     "composite model.mjs:165 2.6",
+     "_deepClone foundry.mjs:1830 2.4",
+     "Worker native:0 2.3",
+     "path pixi-graphics-smooth.js:491 2.2",
+     "requestAnimationFrame native:0 2.0",
+     "initAttributes pixi-graphics-smooth.js:491 1.9"
+    ]
+   }
+  }
+ ]
+}
