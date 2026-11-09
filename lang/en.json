@@ -2108,6 +2108,8 @@
   "MOINENMAPS.DPreset.accent.rocket": "Rocket and smoke trail",
   "MOINENMAPS.DPreset.landing": "Superhero landing",
   "MOINENMAPS.DPreset.landingHint": "Click the landing spot (or a token: it is the hero); drag to set the way they come in. A streak from the sky, a pressed crater, cracks running out in a star and a wave of dust. No fire.",
+  "MOINENMAPS.DPreset.meteor": "Meteor",
+  "MOINENMAPS.DPreset.meteorHint": "Click where it strikes; drag to set the way it flies in. A blazing streak and its smoke trail across the sky, the biggest blast of the set, a huge torn crater, rocks thrown far out, fires and a long dust haze.",
   "MOINENMAPS.DPreset.aftermath": "Aftermath fire",
   "MOINENMAPS.DPreset.aftermathNoEnd": "No end (burns until put out)",
   "MOINENMAPS.DPreset.aftermathHint": "How long the fires a preset leaves keep burning before they go out by themselves.",

@@ -5,6 +5,8 @@
  * times for the test fire's dry run), and the custom presets' editor (a copy of a built-in: layers on / off, a few values, the
  * timeline).
  */
+import { wayOf, screenOf } from "./meteor-core.mjs";
+
 export const PAD_KEYS = 18;                 // 1-9, then Shift+1-9
 export const SIZE = Object.freeze({ min: 0.5, max: 2, step: 0.05 });
 export const POWERS = [-1, 0, 1];
@@ -184,6 +186,8 @@ export function ghostOf(plan, view = { lift: 0.5, squash: 0.8 }) {
       const pts = Array.from({ length: n + 1 }, (_, i) => { const u = i / n; return [round(ac.m[0] + (ac.to[0] - ac.m[0]) * u, 10), round(ac.m[1] + (ac.to[1] - ac.m[1]) * u - lift * (ac.z0 ?? 0) * (1 - u), 10)]; });
       out.push({ k: "dots", pts: ac.shot ? pts : pts.slice(Math.floor(n * 0.55)), r: 4.5, c: INK.aim, a: ac.shot ? 0.7 : 0.5, t: -(ac.fl ?? 600), d: (ac.fl ?? 600) + 300 });
     }
+    // (the meteor: its way down the sky, the last part of it - where it comes in from)
+    if ( ac.kind === "meteor" && ac.g > 0 ) { const W = wayOf(ac, ac.g); out.push({ k: "dots", pts: Array.from({ length: 19 }, (_, i) => screenOf(W, 0.45 + 0.55 * i / 18, lift).map((v) => round(v, 10))), r: 5, c: INK.aim, a: 0.7, t: ac.at, d: -ac.at }); }
   }
   for ( const rec of plan.destruction ?? [] ) {
     rec.discs.forEach((dc, i) => {

@@ -252,6 +252,9 @@ function shader(mode) {
   });
 }
 
+/** The program of a pose mode ("plain" | "tear" | "coll") - scripts/load-warm.mjs links it ahead for a preset firing. */
+export const pieceProgram = (mode = "plain") => shader(mode).program;
+
 /** Can the GPU path run here (WebGL 2: instanced drawing)? */
 export function gpuPiecesSupported(renderer) { return !!renderer && renderer.context?.webGLVersion >= 2; }
 
