@@ -40,7 +40,9 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   // the batched-renderer round moved the dark rim out of the area's build (display rimSlice) and made the blot of a cause's anticipation
   // read its cells from a kept grid (byte-identical): only those hunks are cause code
   { rev: "7edbbc3", other: /CORE_VERSION|compat:/ }, "e1735f7",   // (the cause hairlines' ink on turf and earth)
-  { rev: "a1e829c", other: /^(?![\s\S]*(rimArgs|rimQueue|rimSlice|addRim|BLOTS|blotGrid))/ }];   // (50458de was reverted in e5714bb and redone as 7115e86)
+  { rev: "a1e829c", other: /^(?![\s\S]*(rimArgs|rimQueue|rimSlice|addRim|BLOTS|blotGrid))/ },
+  // the gun presets (display only: a walked gun stroke skips the area-wide impact ring / shock / skirt, its chips and rims follow the walk)
+  "c47949c"];   // (50458de was reverted in e5714bb and redone as 7115e86)
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)

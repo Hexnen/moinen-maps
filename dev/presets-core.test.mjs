@@ -165,7 +165,8 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
     for ( const f of p.fire ) {
       nF++;
       const { key, ...raw } = f, st = FM.cleanStroke({ ...raw, id: "ftest" });
-      if ( !st || st.q !== raw.q || st.o !== raw.o || st.k !== raw.k || st.sm !== raw.sm || (raw.lv && st.lv !== raw.lv) || st.r !== raw.r || st.e !== 1 || st.p.join() !== raw.p.join() ) fireBad++;
+      const own = raw.k === "dust" ? st && st.dk === raw.dk && st.s === raw.s : st && st.sm === raw.sm && st.e === 1;
+      if ( !st || !own || st.q !== raw.q || st.o !== raw.o || st.k !== raw.k || (raw.lv && st.lv !== raw.lv) || st.r !== raw.r || st.p.join() !== raw.p.join() ) fireBad++;
     }
     for ( const r of p.destruction ) {
       ok(C.D_TYPES.includes(r.type) && C.D_CAUSES.includes(r.cause) && r.discs.every((q) => q[2] > 0 && q[3] >= 1 && q[3] <= 3), `I ${d.id} destruction record valid`);

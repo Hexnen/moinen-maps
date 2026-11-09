@@ -60,6 +60,10 @@ export function causeParticle(d, cl, x, y, k = 1) {
     color: pick(e.color), alpha: 0.9, flicker: e.flicker, size: Math.random() < 0.2 ? 2 : 1 });
 }
 
+/** A gun preset's pock (a preset stroke entering along its timed path: presets/core.mjs walk), and when its bullet lands (ms of the entry). */
+export const isGun = (d, g, a) => (a._gun ??= !!a.path && !!g.objId && !!d.dropsOut?.(g.objId));
+const gunAt = (a) => (a.gunAt ??= Math.max(0, a.reach ? a.reach(a.ox, a.oy) - a.start : (a.delay ?? 0) + (a.path.at?.(a.ox, a.oy) ?? 0)));
+
 /** The cause's part of an entry frame: the light's fade-in, what rides on the front, one-shot accents. */
 export function causeEffects(d, g, a, now, el) {
   const cl = a.cl; if ( !cl ) return;
@@ -67,7 +71,9 @@ export function causeEffects(d, g, a, now, el) {
   const X = (x) => o.x + x * ap, Y = (y) => o.y + y * ap;
   const once = (key, at, fn) => { if ( el >= at && !a.fired.has(`c:${key}`) ) { a.fired.add(`c:${key}`); fn(); } };
   const tFront = clamp01((el - a.delay) / Math.max(1, a.reveal));
-  g.glowIn = clamp01((el - a.delay) / Math.max(1, a.reveal + a.band * 0.5));
+  // (a gun's walked pocks: the area's night rim / light is one sprite for all its pocks - it comes in when the walk has passed, never
+  // ahead of the hits)
+  g.glowIn = isGun(d, g, a) ? clamp01((el - a.delay - a.reveal - a.band) / 500) : clamp01((el - a.delay) / Math.max(1, a.reveal + a.band * 0.5));
   // on the front
   if ( cl.front && tFront < 1 && Math.random() < cl.front ) {
     const ang = Math.random() * TAU, fr = a.Rmax * Math.sqrt(tFront);
@@ -82,7 +88,7 @@ export function causeEffects(d, g, a, now, el) {
   if ( cl.flash ) draw("flash", 0, 150 * k, (gr, t) => pxFlash(gr, V, a.ox, a.oy, Math.min(R * 0.5, 14) * pw, t, { seed: a.seed + 31, colors: [0xffffff, cl.flash, cl.ring ?? cl.flash], rays: 5 }));
   // the cause's shock: a skirt of puffs in its colour, never a drawn ring; not round a tear (round its puncture the puffs spread
   // into curved arcs that read as vector ring segments)
-  if ( cl.ring && !a.tear ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
+  if ( cl.ring && !a.tear && !isGun(d, g, a) ) once("ring", a.delay + a.reveal * 0.15, () => d.burst(a.ox, a.oy, Math.min(R * 1.2, 60) * pw, now, { n: 16, color: cl.ring, rise: -2, speed: 1.2 }));
   if ( cl.bolt ) {
     // ONE strike (two channels on a big area): a branching bolt from above (screen-up) to the strike point - a jagged main channel,
     // 2-4 forks and a twig (pixel-fx boltTree), white core over a blue glow, on ~170 ms with one flicker gap; a hard, small additive
@@ -114,9 +120,13 @@ export function causeEffects(d, g, a, now, el) {
     // IMPACT, a heavy blow: anticipation - the shadow of what falls tightens onto the spot (0-55 ms); the HIT - a sharp white shock
     // ring broken into arcs races out, straight radial fractures shoot from the spot, the ground thumps (2 px down, a damped
     // rebound), chips pop, a low dust skirt rolls out
-    const hit = 55 * k;
-    draw("shadow", 0, hit, (gr, t) => pxRunDisc(gr, V, a.ox, a.oy + 1, Math.max(2, R * (0.55 - 0.4 * t)), 0x1a1612, 0.18 + 0.4 * t, a.seed + 41));
-    draw("shock", hit, 320 * k, (gr, t) => {
+    // (a GUN's hits - a preset's stroke walked along its timed path: bullets, not a falling blow - have no falling shadow, no shock
+    // ring and no skirt of pale puffs: their flash, sparks and dust are the preset's own layers; the fractures, the thump and the
+    // chips stay, each pock's at the moment its bullet lands - when the front reaches it - not at the stroke's start)
+    const gun = isGun(d, g, a);
+    const hit = gun ? gunAt(a) : 55 * k;
+    if ( !gun ) draw("shadow", 0, hit, (gr, t) => pxRunDisc(gr, V, a.ox, a.oy + 1, Math.max(2, R * (0.55 - 0.4 * t)), 0x1a1612, 0.18 + 0.4 * t, a.seed + 41));
+    if ( !gun ) draw("shock", hit, 320 * k, (gr, t) => {
       // (white arcs with a dark outer pixel: it reads on pale stone as well as on dark ground)
       const e = 1 - Math.pow(1 - t, 2.2);
       pxRing(gr, V, a.ox, a.oy, Math.max(2, R * (0.35 + 1.25 * e) * pw), t * 0.6, { core: 0xffffff, outer: 0x4a4038, seed: a.seed + 43, dash: 7, thick: 2 });
@@ -139,8 +149,9 @@ export function causeEffects(d, g, a, now, el) {
     const je = el - hit, J = [2, -1, 1, 0];
     const j = je >= 0 && je < 140 * k ? J[Math.min(3, Math.floor(je / (35 * k)))] * ap : 0;
     g.baseCont?.position.set(0, j); g.shardCont?.position.set(0, j);
-    once("chips", hit + 10 * k, () => { if ( g.chunks ) d.chunks(g, a, { count: Math.min(10, Math.round((4 + R * 0.2) * pw)), reach: [0.5, 1.3], H: [3, 7], sizes: [3, 5], seed: 7 }); });
-    once("skirt", hit + 40 * k, () => d.burst(a.ox, a.oy, R * 1.1 * pw, now, { n: 22, color: 0xcfc6b8, rise: -1.5, speed: 1.6 }));
+    once("chips", hit + 10 * k, () => { if ( g.chunks ) d.chunks(g, a, gun ? { count: Math.min(5, Math.round((2 + R * 0.15) * pw)), reach: [0.5, 1.2], H: [4, 9], sizes: [2, 4], seed: 7 }
+      : { count: Math.min(10, Math.round((4 + R * 0.2) * pw)), reach: [0.5, 1.3], H: [3, 7], sizes: [3, 5], seed: 7 }); });
+    if ( !gun ) once("skirt", hit + 40 * k, () => d.burst(a.ox, a.oy, R * 1.1 * pw, now, { n: 22, color: 0xcfc6b8, rise: -1.5, speed: 1.6 }));
   }
   if ( cl.slash ) {
     // CLAWS: one swipe - the furrows' streaks (as many as the bake's furrows: 3 on a tear, else clawCount) cut in one after another,

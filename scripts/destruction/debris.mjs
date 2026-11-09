@@ -407,9 +407,20 @@ export class Debris {
     return plan.length;
   }
 
-  /** The staying chunks fly in from the damage when their area enters (the same plan as their rest). */
-  throwRest(g, start, k = 1) {
-    for ( const r of g.rest ?? [] ) this.launch(g, r.c, r.body.texture, g.chunks.frames[r.c.fi], start + r.c.t0 * k, null, false, false, r);
+  /**
+   * The staying chunks fly in from the damage when their area enters (the same plan as their rest). `at` (optional, (x, y) -> time):
+   * a walked entry (a gun's pocks) - each one a short hop from beside its rest spot, thrown when the walk reaches that spot.
+   */
+  throwRest(g, start, k = 1, at = null) {
+    for ( const r of g.rest ?? [] ) {
+      let c = r.c, t = start + c.t0 * k;
+      if ( at ) {
+        const px = c.P.px, py = c.P.py, h = (q) => hashD(g.hash | 0, c.i, 870 + q), an = h(1) * 6.283, d = 2 + 3 * h(2);
+        c = { ...c, P: hopPlan(px - Math.cos(an) * d, py - Math.sin(an) * d * 0.8, px, py, 3 + 3 * h(3), 1) };
+        t = at(px, py) + 20 + 40 * h(4);
+      }
+      this.launch(g, c, r.body.texture, g.chunks.frames[c.fi], t, null, false, false, r);
+    }
   }
 
   launch(g, c, tex, f, t0, tint, coal, dissolve, rest = null) {

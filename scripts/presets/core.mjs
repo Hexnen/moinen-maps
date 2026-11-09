@@ -18,8 +18,10 @@
  *                  lifeK [lo, hi] (each one's share of the aftermath, so they die out one by one)
  *     smoke        sm 1..3, r, len, life | aftermath, lifeK
  *     burst        lv, r                    (pending: the explosion fire, P3)
- *     dust         dk "shock" | "hits", lv, r (pending: the new dust kinds, P4)
- *     accent       kind (ACCENTS), dur, every (walk hits: each n-th one)   (pending: P5)
+ *     dust         dk "shock" | "hits", lv, r, life (pending: the new dust kinds, P4; "hits" with a walk place is written at once as
+ *                  fire-layer dust strokes - fire/dust-model.mjs, one per lane and unbroken run of hits)
+ *     accent       kind (ACCENTS), dur, every (walk hits: each n-th one of each gun), lv 1..3 (how heavy), shake 0..1 (the hits' rumble)
+ *                  (kept in the firing record; the guns' tracer / hitFx / muzzle are drawn by presets/accents.mjs)
  *     cue          kind "screen" (shake, flash) | "light" (peak, radius, decay)   (pending: P5)
  *   PLACE = { m: "centre" } | { m: "ring", n: [lo, hi], d: [lo, hi] } (around the centre, evenly with jitter) | { m: "scatter", n,
  *     d, bias } (around the centre, denser inside for bias > 1) | { m: "walk", pick: share of the hits (0..1, omitted: all) }
@@ -37,6 +39,8 @@ export const VERSION = 1;
  * hit then opens at its own moment. A run's path times count from its first hit (its `at`).
  */
 export const RUN_MS = 2000;
+/** A gun's shot interval is a whole number of these ms (the dust layer's hits stroke stores it as s = interval / HIT_DT, 0.01 steps). */
+export const DT_STEP = 2.5, HIT_DT = 250;
 export const GESTURES = ["point", "throw", "line", "run"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
@@ -55,6 +59,8 @@ export const MATERIALS = ["auto", "grass", "earth", "stone", "wood", "sand", "sn
 export const AFTERMATH = Object.freeze({ min: 5, max: 600, step: 5, label: "MOINENMAPS.DPreset.aftermath", noEnd: "MOINENMAPS.DPreset.aftermathNoEnd", hint: "MOINENMAPS.DPreset.aftermathHint" });
 /** At most this many separate damage areas per firing (dev/presets-design.md 8.1): the walk is capped by WALK.maxHits. */
 export const MAX_AREAS = 30;
+/** A gun fired by a shooter (gesture.from within SHOOTER_NEAR squares of the drag's start): the hits start SHOOTER_GAP squares out. */
+export const SHOOTER_NEAR = 0.75, SHOOTER_GAP = 1.2;
 export const LIMITS = { preroll: [0, 4000], at: [-4000, 120000], r: [0.02, 6], d: [0, 12], n: [0, 64], len: [0, 4], life: [200, 600000],
   size: [0.5, 2], power: [-1, 1] };
 /** The walk of a gun (line / run): rate (hits a second per lane), speed (squares a second), dur [min, max] s, lanes (offsets across
@@ -156,6 +162,8 @@ function cleanLayer(L, i, errors) {
       out.kind = ACCENTS.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown accent "${L.kind}"`), "hitFx");
       out.dur = num(L.dur, 500, 0, 8000);
       if ( L.every !== undefined ) out.every = Math.round(num(L.every, 1, 1, 20));
+      if ( L.lv !== undefined ) out.lv = intLv(L.lv, 2);
+      if ( L.shake !== undefined ) out.shake = num(L.shake, 0, 0, 1);
       break;
     case "cue":
       out.kind = CUES.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown cue "${L.kind}"`), "screen");
@@ -225,6 +233,8 @@ export function walkHits(W, a, b, { seed, grid, size }) {
   const dur = click ? W.dur[0] : clamp(L / W.speed, W.dur[0], W.dur[1]);
   const lanes = W.lanes.length, n = Math.max(1, Math.min(Math.round(W.rate * dur), Math.floor(W.maxHits / lanes)));
   const sway = swayFn(r, W.sway.amp, W.sway.wave), side = r() < 0.5 ? -1 : 1;
+  // (the shot interval in whole DT_STEP ms: the dust layer's hits stroke keeps it exactly - fire/dust-model.mjs hitDt)
+  const dt = Math.max(DT_STEP * 10, Math.round(dur * 1000 / n / DT_STEP) * DT_STEP);
   const hits = [];
   for ( let j = 0; j < lanes; j++ ) {
     const wob = swayFn(stream(seed, `wobble${j}`), W.wobble.amp, W.wobble.wave), rj = stream(seed, `lane${j}`);
@@ -234,11 +244,11 @@ export function walkHits(W, a, b, { seed, grid, size }) {
       const across = W.lanes[j] + sway(s) + wob(s) + side * W.drift * f + rj.gauss() * sig * k;
       const along = rj.gauss() * sig * 0.5 * k;
       const x = a[0] + dx * (u2(along) + s * grid) - dy * u2(across), y = a[1] + dy * (u2(along) + s * grid) + dx * u2(across);
-      hits.push({ x: round(x, 10), y: round(y, 10), t: Math.round(f * dur * 1000), lane: j, i });
+      hits.push({ x: round(x, 10), y: round(y, 10), t: n > 1 ? Math.round((i + W.phase[j]) * dt) : Math.round(0.5 * dur * 1000), lane: j, i });
     }
   }
   hits.sort((p, q) => p.t - q.t || p.lane - q.lane);
-  return { hits, dur: Math.round(dur * 1000), dir: [round(dx, 1e4), round(dy, 1e4)], len };
+  return { hits, dur: n > 1 ? Math.round(n * dt) : Math.round(dur * 1000), dt, dir: [round(dx, 1e4), round(dy, 1e4)], len };
 }
 
 /* ---------------------------------------------------------------- placing and expanding */
@@ -260,7 +270,7 @@ function placeOf(L, P, r, ctx) {
     }
     case "walk": {
       const pick = L.place.pick ?? 1;
-      return (hits ?? []).filter(() => pick >= 1 || r() < pick).map((h) => ({ x: h.x, y: h.y, t: h.t, lane: h.lane }));
+      return (hits ?? []).filter(() => pick >= 1 || r() < pick).map((h) => ({ x: h.x, y: h.y, t: h.t, lane: h.lane, i: h.i }));
     }
   }
   return [];
@@ -296,11 +306,16 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   const t0 = Math.round(now + def.preroll);
   const sq = grid * size;
   const hasB = Array.isArray(b) && isNum(b[0]) && isNum(b[1]) && Math.hypot(b[0] - a[0], b[1] - a[1]) > grid * 0.1;
-  const walk = def.walk ? walkHits(def.walk, a, hasB ? b : null, { seed, grid, size }) : null;
+  let wa = a;
+  if ( def.walk && hasB && Array.isArray(from) && isNum(from[0]) && isNum(from[1]) && Math.hypot(from[0] - a[0], from[1] - a[1]) < grid * SHOOTER_NEAR ) {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.min(SHOOTER_GAP * grid, L * 0.4) / L;
+    wa = [round(a[0] + (b[0] - a[0]) * k, 10), round(a[1] + (b[1] - a[1]) * k, 10)];
+  }
+  const walk = def.walk ? walkHits(def.walk, wa, hasB ? b : null, { seed, grid, size }) : null;
   const c = def.gesture === "throw" && hasB ? b : a;
   const dir = def.gesture === "point" ? (hasB ? unit(b[0] - a[0], b[1] - a[1]) : null) : walk ? walk.dir : hasB ? unit(b[0] - a[0], b[1] - a[1]) : null;
   const plan = { v: VERSION, preset: def.id, seed, size, power, aftermath: aft, t0, at: [round(c[0], 10), round(c[1], 10)], dir,
-    gesture: { a, b: hasB ? b : null, from }, walk: walk ? { dur: walk.dur, len: Math.round(walk.len), hits: walk.hits.map((h) => [h.x, h.y, h.t, h.lane]) } : null,
+    gesture: { a, b: hasB ? b : null, from }, walk: walk ? { dur: walk.dur, dt: walk.dt, len: Math.round(walk.len), hits: walk.hits.map((h) => [h.x, h.y, h.t, h.lane]) } : null,
     destruction: [], fire: [], pending: { burst: [], dust: [], accent: [], cue: [] } };
   const ctx = { c, grid, size, hits: walk?.hits };
   for ( const L of def.layers ) {
@@ -350,6 +365,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         for ( const p of pts ) plan.pending.burst.push({ id: L.id, x: round(p.x, 10), y: round(p.y, 10), lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at: at + (p.t ?? 0) });
         break;
       case "dust":
+        if ( L.dk === "hits" && L.place.m === "walk" && walk ) { hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }); break; }
         if ( L.place.m === "walk" ) plan.pending.dust.push({ id: L.id, dk: L.dk, lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at, pts: pts.map((p) => [round(p.x, 10), round(p.y, 10), p.t]),
           life: L.life ? Math.round(r.range(L.life)) : null });
         else for ( const p of pts ) plan.pending.dust.push({ id: L.id, dk: L.dk, lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at, x: round(p.x, 10), y: round(p.y, 10),
@@ -364,19 +380,48 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   return plan;
 }
 
+/**
+ * The dust of a gun's hits: fire-layer dust strokes of kind "hits" (fire/dust-model.mjs) - per lane, per unbroken run of its hits
+ * (a hit outside the scene breaks it), the points in shot order, q the first one's moment, s the shot interval / HIT_DT; it lingers
+ * `life` ms after the burst's end (o), then settles by itself.
+ */
+function hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }) {
+  const lanes = new Map();
+  for ( const p of pts ) { if ( !lanes.has(p.lane) ) lanes.set(p.lane, []); lanes.get(p.lane).push(p); }
+  const lv = clamp(L.lv + power, 1, 3), rad = Math.max(4, Math.round(r.range(L.r) * sq)), s = round(walk.dt / HIT_DT, 100);
+  const life = L.life ? Math.round(r.range(L.life)) : 6000;
+  for ( const [j, list] of [...lanes].sort((x, y) => x[0] - y[0]) ) {
+    list.sort((x, y) => x.i - y.i);
+    let run = [];
+    const flush = () => {
+      if ( !run.length ) return;
+      const q = Math.round(t0 + at + run[0].t);
+      plan.fire.push({ key: `${L.id}.${j}~${plan.fire.filter((f) => f.key.startsWith(`${L.id}.${j}~`)).length}`, k: "dust", dk: "hits", lv, r: rad, s,
+        p: run.flatMap((h) => [Math.round(h.x), Math.round(h.y)]), q, o: Math.round(t0 + at + walk.dur + life), wd: wind.dir, ws: wind.speed });
+      run = [];
+    };
+    for ( const h of list ) { if ( run.length && h.i !== run.at(-1).i + 1 ) flush(); run.push(h); }
+    flush();
+  }
+}
+
 function unit(x, y) { const l = Math.hypot(x, y); return l > 1e-9 ? [round(x / l, 1e4), round(y / l, 1e4)] : null; }
 
 /** An accent's data: where and when (pending: the accents layer, P5, plays it). */
 function accentOf(L, at, { plan, hits, from }) {
   const base = { id: L.id, kind: L.kind, at, dur: L.dur };
+  if ( L.lv !== undefined ) base.lv = L.lv;
+  if ( L.shake ) base.shake = L.shake;
   switch ( L.kind ) {
     case "fallShadow": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.dir };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
     case "bounce": return { ...base, x: plan.at[0], y: plan.at[1] };
-    case "muzzle": return { ...base, from: from ?? null };
+    case "muzzle": return { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.filter((h) => h.lane === 0).map((p) => [p.x, p.y, p.t, p.lane]) : [] };
     case "hitFx": case "tracer": {
-      const every = L.every ?? 1;
-      return { ...base, hits: hits.filter((_, i) => i % every === every - 1).map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir };
+      // (every n-th shot of each gun, counted per lane - the second gun's count shifted half way - so both guns fire tracers)
+      const every = L.every ?? 1, k = every > 1 ? Math.floor(every / 2) : 0;
+      const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === every - 1);
+      return { ...base, hits: pick.map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir, from: from ?? null, a: plan.gesture.a, b: plan.gesture.b };
     }
   }
   return base;
