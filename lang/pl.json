@@ -2079,6 +2079,8 @@
   "MOINENMAPS.DPreset.uziHint": "Przeciągnij linię, po której idzie seria (kliknięcie to krótka seria). Poszarpany ścieg lekkich trafień, który podjeżdża w bok i faluje.",
   "MOINENMAPS.DPreset.heliHmg": "Podwójny CKM ze śmigłowca",
   "MOINENMAPS.DPreset.heliHmgHint": "Przeciągnij przelot ostrzału. Dwa równoległe pasy ciężkich trafień pędzą po ziemi.",
+  "MOINENMAPS.DPreset.meteor": "Meteor",
+  "MOINENMAPS.DPreset.meteorHint": "Kliknij miejsce uderzenia; przeciągnij, by wskazać kierunek lotu. Płonąca smuga i ślad dymu na niebie, największy wybuch zestawu, wielki poszarpany krater, kamienie rzucone daleko, ogień i długo wisząca kurzawa.",
   "MOINENMAPS.DPreset.aftermath": "Pożar po wybuchu",
   "MOINENMAPS.DPreset.aftermathNoEnd": "Bez końca (płonie, aż się go ugasi)",
   "MOINENMAPS.DPreset.aftermathHint": "Jak długo płoną ognie pozostawione przez preset, zanim same zgasną.",

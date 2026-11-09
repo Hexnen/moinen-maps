@@ -2079,6 +2079,8 @@
   "MOINENMAPS.DPreset.uziHint": "Drag the line the burst walks along (a click is a short burst). A ragged stitch of light hits that climbs and wobbles.",
   "MOINENMAPS.DPreset.heliHmg": "Helicopter twin HMG",
   "MOINENMAPS.DPreset.heliHmgHint": "Drag the strafing run. Two parallel lanes of heavy hits race along the ground.",
+  "MOINENMAPS.DPreset.meteor": "Meteor",
+  "MOINENMAPS.DPreset.meteorHint": "Click where it strikes; drag to set the way it flies in. A blazing streak and its smoke trail across the sky, the biggest blast of the set, a huge torn crater, rocks thrown far out, fires and a long dust haze.",
   "MOINENMAPS.DPreset.aftermath": "Aftermath fire",
   "MOINENMAPS.DPreset.aftermathNoEnd": "No end (burns until put out)",
   "MOINENMAPS.DPreset.aftermathHint": "How long the fires a preset leaves keep burning before they go out by themselves.",
