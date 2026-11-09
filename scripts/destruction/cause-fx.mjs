@@ -422,11 +422,16 @@ export function addRim(d, g, cov, x, y, base = null, bx = x, by = y) {
     if ( !c && !al(X, Y) ) continue;
     const i = Y * w + X, Lm = base?.data && al(X, Y) ? lum(X, Y) : 128;
     // the band's own width (1-3 px) and strength (broken in places) wander slowly along the edge
-    const wv = 1 + 2 * vn((X + ox) / 7, (Y + oy) / 7, seed + 3), br = vn((X + ox) / 5, (Y + oy) / 5, seed + 5), on = br < 0.18 ? 0.15 : 0.6 + 0.4 * br;
-    let v = c ? (DK ? Math.max(lift, Math.min(1, lift0 * 1.2) * Math.max(0, 1 - DK[i] / 6) * (0.75 + 0.25 * br)) : lift) : 0;
+    const wv = 1 + 2 * vn((X + ox) / 7, (Y + oy) / 7, seed + 3), br = vn((X + ox) / 5, (Y + oy) / 5, seed + 5), on = br < 0.3 ? 0.12 : 0.45 + 0.55 * br;
+    // (the lift over the inside is mottled and low, never one even level up to the cover's edge: an even lift read as a pale disc with
+    // a hard round edge at night - the lightning cracks, the gun pocks, a grenade's crater)
+    const inner = lift * (0.2 + 0.45 * vn((X + ox) / 6, (Y + oy) / 6, seed + 11));
+    let v = c ? (DK ? Math.max(inner, Math.min(1, lift0 * 1.2) * Math.max(0, 1 - DK[i] / 6) * (0.75 + 0.25 * br)) : inner) : 0;
     if ( c && D[i] < 255 && D[i] < wv ) {
       const l = Math.hypot(dirX[i], dirY[i]) || 1, face = (-(dirX[i] + dirY[i]) / l) * 0.7071;   // 1: the edge faces the top-left light
-      v = Math.max(v, Math.pow(1 - D[i] / (wv + 0.5), 0.7) * on * (0.75 + 0.25 * face) * (g.info.type === "gash" ? 0.5 : 1));   // (a tear: its opening's bevel carries it, the stroke's border only faintly)
+      // (the lit lips are the ones facing the light; the far ones nearly dark - an even band all round read as a pale hard ring at night)
+      const lit = 0.15 + 0.85 * Math.pow(Math.max(0, (face + 1) / 2), 1.4);
+      v = Math.max(v, Math.pow(1 - D[i] / (wv + 0.5), 0.7) * on * lit * (g.info.type === "gash" ? 0.5 : 1));   // (a tear: its opening's bevel carries it, the stroke's border only faintly)
     }
     if ( base?.data ) {
       let dark = 0;

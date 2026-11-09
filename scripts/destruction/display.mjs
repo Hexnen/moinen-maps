@@ -1091,10 +1091,14 @@ export class DestructionDisplay {
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
       const size = p.w ? Math.sqrt(p.w * p.h) : p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
-      const t0 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * (atOnce ? ATONCE_JITTER : 90) * k;
+      const t1 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * (atOnce ? ATONCE_JITTER : 90) * k;
+      const t0 = strict ? Math.max(start, t1) : t1;
       const dur = (p.thrown ? 380 + Math.min(460, dd * 14) : 260 + Math.min(220, dd * 30)) * L.flight * k * (0.8 + 0.45 * hB) * (0.85 + Math.min(0.5, size / 40));
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw * (0.7 + 0.6 * hC) + (info.type === "cracks" ? 1.5 : 0);
-      const it = { p, t0, dur, arc, spin: 0.6 + 0.9 * hA, bounces: p.chip ? 2 : 1, pre: (60 + 60 * hB) * k, dusted: false, seed: n };
+      // (a timed stroke, timed-core.mjs strict: no anticipation shiver - a piece is a cut of the RUIN, so shivering in place it showed
+      // the crater's charred ring before the blast reached it; it shows when the front tears it loose)
+      const pre = strict ? 0.01 : (60 + 60 * hB) * k;
+      const it = { p, t0, dur, arc, spin: 0.6 + 0.9 * hA, bounces: p.chip ? 2 : 1, pre, dusted: false, seed: n };
       list.push(it); byPiece.set(p, it);
       if ( !gpu ) this.place(p, -9, it, info.type);
     });
