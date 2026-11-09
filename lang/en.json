@@ -2070,5 +2070,19 @@
   "MOINENMAPS.Weather.cmh.sky": "Clouds float above the map with their shadows on the ground (cloud and shadow apart by the view and the sun)",
   "MOINENMAPS.Weather.cmh.shadows": "Only the clouds' shadows drift over the ground; the sky above the map stays clear",
   "MOINENMAPS.Weather.rays": "Godrays",
-  "MOINENMAPS.Weather.raysHint": "Sunlight breaking through the gaps in the clouds as slanting shafts (moonbeams at night); off costs nothing"
+  "MOINENMAPS.Weather.raysHint": "Sunlight breaking through the gaps in the clouds as slanting shafts (moonbeams at night); off costs nothing",
+  "MOINENMAPS.DPreset.bomb": "Bomb",
+  "MOINENMAPS.DPreset.bombHint": "Click the target; drag to set the direction it falls from. A falling shadow, the blast, a charred crater, burning debris and a smoke column.",
+  "MOINENMAPS.DPreset.grenade": "Grenade",
+  "MOINENMAPS.DPreset.grenadeHint": "Drag from the thrower to where it lands (a click drops it in place). A small crater, a spray of shrapnel pocks and a puff of smoke.",
+  "MOINENMAPS.DPreset.uzi": "Uzi",
+  "MOINENMAPS.DPreset.uziHint": "Drag the line the burst walks along (a click is a short burst). A ragged stitch of light hits that climbs and wobbles.",
+  "MOINENMAPS.DPreset.heliHmg": "Helicopter twin HMG",
+  "MOINENMAPS.DPreset.heliHmgHint": "Drag the strafing run. Two parallel lanes of heavy hits race along the ground.",
+  "MOINENMAPS.DPreset.aftermath": "Aftermath fire",
+  "MOINENMAPS.DPreset.aftermathNoEnd": "No end (burns until put out)",
+  "MOINENMAPS.DPreset.aftermathHint": "How long the fires a preset leaves keep burning before they go out by themselves.",
+  "MOINENMAPS.DPreset.gmOnly": "Only a GM can fire destruction presets.",
+  "MOINENMAPS.DPreset.unknown": "Unknown destruction preset: {id}",
+  "MOINENMAPS.DPreset.noDestruction": "Destruction is switched off on this client: presets cannot fire."
 }

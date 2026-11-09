@@ -1762,9 +1762,10 @@ export function edited(box, stroke = null) {
     // follows the stroke: the brush path is kept with the stroke (art px, ms since it began); the bake and the entry read it
     let path = null;
     // (a tear keeps it always: its brush path is the tear's spine)
-    if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash") && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
-    const id = foundry.utils.randomID(10);
-    const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause || (S.params.pin ? S.params.cause : 0) || 0, pr: S.params.pin ? Pin.pinDiff(S.params) : null });
+    if ( (S.params.directional || Model.TYPES[stroke.type ?? 0] === "gash" || stroke.keepPath) && stroke.path?.length > 1 && !stroke.erase ) path = simplify(stroke.path.map(([x, y, t]) => { const [ax, ay] = toArt({ x, y }); return [Math.round(ax), Math.round(ay), Math.round(t)]; }));
+    // (a preset's stroke (scripts/presets) brings its own id, its own look `pr` and keeps its path: none of these is set by the brush)
+    const id = typeof stroke.id === "string" && Model.safeId(stroke.id) && !S.objects.some((o) => o.id === stroke.id) ? stroke.id : foundry.utils.randomID(10);
+    const ob = Model.makeObject(stroke.buf, S.mw, box, { id, erase: !!stroke.erase, type: stroke.type ?? 0, path: path?.flat() ?? null, cause: stroke.cause || (S.params.pin ? S.params.cause : 0) || 0, pr: stroke.pr ? Pin.pinDiff({ ...Pin.PIN_DEFAULTS, ...stroke.pr }) : S.params.pin ? Pin.pinDiff(S.params) : null });
     // a token carried by the stroke: its record (tokens/carry-core.mjs; not part of the signature, so nothing re-bakes)
     const tk = stroke.carry && !stroke.erase ? carryRecord(stroke) : null;
     if ( tk ) ob.tk = tk;
