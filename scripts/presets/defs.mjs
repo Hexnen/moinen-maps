@@ -6,6 +6,8 @@
  * The user's answers (design note, section 10): no sound, no helicopter shadow, nothing pushes tokens; the aftermath fire ends after
  * the preset's aftermath duration, or burns until the GM puts it out (aftermath.dur null) - a preset setting, per firing too.
  */
+import { LANDING } from "./def-landing.mjs";
+
 export const BUILTIN = Object.freeze([
   {
     id: "bomb", v: 1, set: "military", name: "MOINENMAPS.DPreset.bomb", hint: "MOINENMAPS.DPreset.bombHint", icon: "fa-solid fa-bomb",
@@ -91,7 +93,8 @@ export const BUILTIN = Object.freeze([
       { l: "smoke", id: "steam", at: 250, sm: 1, r: 0.4, life: 14000, gr: 0.4 },
       { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
     ]
-  }
+  },
+  LANDING
 ]);
 
 export const builtinIds = () => BUILTIN.map((d) => d.id);
