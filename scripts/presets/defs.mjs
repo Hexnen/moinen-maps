@@ -70,6 +70,22 @@ export const BUILTIN = Object.freeze([
         pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, jagged: true, jag: 0.6 } },
       { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 6000 }
     ]
+  },
+  {
+    // LIGHTNING STRIKE (dev/presets-design.md section 18): the charge crackles over the spot, the sky flickers, a stepped leader feels
+    // its way down and streamers reach up; the return stroke slams a white channel down from above the screen with a cold flash, two
+    // or three restrikes, arcs racing over the ground, a molten spray - then a small fused, burnt scar, steam
+    // and smoke, and small grass fires catching (the accent "strike" is drawn by presets/lightning.mjs)
+    id: "lightning", v: 1, set: "nature", name: "MOINENMAPS.DPreset.lightning", hint: "MOINENMAPS.DPreset.lightningHint", icon: "fa-solid fa-bolt-lightning",
+    gesture: "point", preroll: 1000, aftermath: { dur: 40 },
+    layers: [
+      { l: "accent", id: "strike", kind: "strike", at: -1000, dur: 2600, lv: 2 },
+      { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.55, flash: 0 },
+      { l: "destruction", id: "scar", at: 40, type: "blast", level: 1, cause: "lightning", r: 0.45 },
+      { l: "dust", id: "shock", dk: "shock", at: 10, lv: 1, r: 1.2, life: 155000 },
+      { l: "smoke", id: "steam", at: 250, sm: 1, r: 0.4, life: 14000, gr: 0.4 },
+      { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
+    ]
   }
 ]);
 
