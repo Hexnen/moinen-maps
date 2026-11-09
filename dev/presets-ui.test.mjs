@@ -29,14 +29,25 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
   ok(J(U.cleanStore(undefined)) === J({ v: 1, custom: [], order: [] }), "A store: empty");
   const b = U.cleanBar({ pad: "uzi", size: 9, power: 3, vary: false, aft: { bomb: 1000, grenade: null, x: "no" } });
   ok(b.pad === "uzi" && b.size === 2 && b.power === 0 && b.vary === false && J(b.aft) === J({ bomb: 600, grenade: null }), `A bar: clamped (${J(b)})`);
-  ok(J(U.cleanBar(null)) === J({ pad: "bomb", size: 1, power: 0, vary: true, aft: {} }), "A bar: defaults");
+  ok(J(U.cleanBar(null)) === J({ pad: "bomb", size: 1, power: 0, vary: true, aft: {}, src: {} }), "A bar: defaults");
+  // the shooters: "scene:pad" -> token id, junk dropped, at most SRC_MAX (the newest kept)
+  const bs = U.cleanBar({ src: { "S1:uzi": "T1", "S1:heliHmg": "T2", "bad key": "T3", "S2:uzi": 5, "S3:uzi": "", "S4:x y": "T4" } });
+  ok(J(bs.src) === J({ "S1:uzi": "T1", "S1:heliHmg": "T2" }), `A bar: shooters cleaned (${J(bs.src)})`);
+  ok(U.srcOf(bs, "S1", "uzi") === "T1" && U.srcOf(bs, "S2", "uzi") === null && U.srcOf(null, "S1", "uzi") === null, "A bar: a pad's shooter on a scene");
+  const w1 = U.withSrc(bs, "S1", "uzi", "T9"), w0 = U.withSrc(bs, "S1", "uzi", null);
+  ok(J(w1) === J({ "S1:heliHmg": "T2", "S1:uzi": "T9" }) && J(w0) === J({ "S1:heliHmg": "T2" }) && J(bs.src) === J({ "S1:uzi": "T1", "S1:heliHmg": "T2" }), "A bar: set / clear a shooter (the newest last, the old bar untouched)");
+  let many = {}; for ( let i = 0; i < U.SRC_MAX + 5; i++ ) many = U.withSrc({ src: many }, `S${i}`, "uzi", `T${i}`);
+  ok(Object.keys(many).length === U.SRC_MAX && many[`S${U.SRC_MAX + 4}:uzi`] && !many["S0:uzi"], "A bar: at most SRC_MAX shooters, the oldest dropped");
+  ok(Object.keys(U.cleanBar({ src: Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`S${i}:uzi`, `T${i}`])) }).src).length === U.SRC_MAX, "A bar: a stored list longer than SRC_MAX cut");
+  ok(U.isFirearm(BUILTIN.find((d) => d.id === "uzi")) && U.isFirearm(BUILTIN.find((d) => d.id === "heliHmg")) && !U.isFirearm(BUILTIN.find((d) => d.id === "bomb")) && !U.isFirearm(BUILTIN.find((d) => d.id === "grenade")) && !U.isFirearm(null),
+    "A firearms: the guns (a walk), not the bomb or grenade");
 }
 
 /* B */
 {
   const custom = [{ id: "bomb-copy", layers: [] }];
   const o = U.ordered(BUILTIN, { custom, order: ["uzi", "gone", "bomb-copy"] }).map((d) => d.id);
-  ok(J(o) === J(["uzi", "bomb-copy", "bomb", "grenade", "heliHmg"]), `B order: listed first, then the rest (${J(o)})`);
+  ok(J(o) === J(["uzi", "bomb-copy", "bomb", "grenade", "heliHmg", "lightning"]), `B order: listed first, then the rest (${J(o)})`);
   ok(J(U.reorder(["a", "b", "c", "d"], "d", "b")) === J(["a", "d", "b", "c"]) && J(U.reorder(["a", "b", "c"], "a", null)) === J(["b", "c", "a"]) && J(U.reorder(["a", "b"], "z", "a")) === J(["a", "b"]), "B reorder");
   ok(U.hotkeyOf(0) === "1" && U.hotkeyOf(8) === "9" && U.hotkeyOf(9) === "⇧1" && U.hotkeyOf(17) === "⇧9" && U.hotkeyOf(18) === "", "B hotkey labels");
   ok(U.padOfKey("Digit1", false) === 0 && U.padOfKey("Digit9", true) === 17 && U.padOfKey("Numpad3", false) === 2 && U.padOfKey("Digit0", false) === -1 && U.padOfKey("KeyA", false) === -1, "B hotkeys -> pads");
@@ -64,7 +75,15 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
   ok(J(U.gestureOf("throw", [110, 95], [600, 300], g, { x: 100, y: 100, r: 50 })) === J({ a: [100, 100], b: [600, 300], from: [100, 100] }), "D throw: from the token");
   ok(J(U.gestureOf("throw", [110, 95], [112, 96], g, { x: 100, y: 100, r: 50 })) === J({ a: [100, 100], b: null, from: [100, 100] }), "D throw: a click drops it at the thrower");
   const ln = U.gestureOf("line", [100, 100], [900, 100], g, { x: 100, y: 100, r: 50 });
-  ok(J(ln) === J({ a: [200, 100], b: [900, 100], from: [100, 100] }), `D line from a token: the hits start past its edge (${J(ln)})`);
+  ok(J(ln) === J({ a: [200, 100], b: [900, 100], from: [100, 100], fr: 50 }), `D line from a token: the hits start past its edge (${J(ln)})`);
+  // the chosen shooter: the hits where the drag is, fired from the shooter (its radius sent for the muzzle at its edge)
+  const sh = { x: 100, y: 100, r: 50 };
+  ok(J(U.gestureOf("line", [400, 300], [900, 300], g, null, sh)) === J({ a: [400, 300], b: [900, 300], from: [100, 100], fr: 50 }), "D line with a shooter: from the shooter, the hits along the drag");
+  ok(J(U.gestureOf("line", [400, 300], [402, 301], g, null, sh)) === J({ a: [400, 300], b: null, from: [100, 100], fr: 50 }), "D line with a shooter: a click is a short burst there");
+  ok(J(U.gestureOf("run", [0, 0], [1000, 200], g, null, sh)) === J({ a: [0, 0], b: [1000, 200], from: [100, 100], fr: 50 }), "D run with a shooter (the gunship)");
+  ok(J(U.gestureOf("line", [100, 100], [900, 100], g, { x: 100, y: 100, r: 50 }, { x: 700, y: 700, r: 40 })) === J({ a: [100, 100], b: [900, 100], from: [700, 700], fr: 40 }), "D the chosen shooter wins over a token the drag starts on (a target)");
+  ok(J(U.gestureOf("line", [110, 100], [900, 100], g, { x: 100, y: 100, r: 50 }, sh)) === J({ a: [200, 100], b: [900, 100], from: [100, 100], fr: 50 }), "D a drag out of the chosen shooter: the hits start past its edge");
+  ok(J(U.gestureOf("run", [100, 100], [900, 100], g, { x: 100, y: 100, r: 50 })) === J({ a: [100, 100], b: [900, 100], from: null }), "D a run started on a token: no shooter (only a chosen one)");
   ok(J(U.gestureOf("line", [100, 100], [900, 100], g)) === J({ a: [100, 100], b: [900, 100], from: null }), "D line");
   ok(J(U.gestureOf("run", [0, 0], [1000, 200], g)) === J({ a: [0, 0], b: [1000, 200], from: null }), "D run");
 }
@@ -123,7 +142,9 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
 {
   const code = (f) => readFileSync(path.join(root, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const sec = code("scripts/presets/section.mjs"), aim = code("scripts/presets/aim.mjs"), store = code("scripts/presets/store.mjs"), uic = code("scripts/presets/ui-core.mjs");
-  ok(!/ticker|setInterval/.test(aim) && (aim.match(/Hooks\.on\(/g) ?? []).length === 1 && /listeners\.hook = Hooks\.on\(S\.HOOK/.test(aim), "G aim: no ticker or interval; its one hook is made with the tool's listeners");
+  const hooks = aim.match(/.*Hooks\.on\(.*/g) ?? [];
+  ok(!/ticker|setInterval/.test(aim) && hooks.length === 3 && hooks.every((l) => /listeners\.\w+ = Hooks\.on\(/.test(l)) && /listeners\.hook = Hooks\.on\(S\.HOOK/.test(aim)
+    && (aim.match(/Hooks\.off\(/g) ?? []).length === 3, "G aim: no ticker or interval; its hooks (settings, the shooter's token moved / deleted) made with the tool's listeners and removed with them");
   ok(/function build\(\) \{\s*gfx = makeLayer\(\);/.test(aim) && (aim.match(/addEventListener\(/g) ?? []).length === 8 && /export function setActive\(on\) \{[\s\S]*?if \( on \) build\(\); else unbuild\(\);/.test(aim),
     "G aim: the ghost and the listeners are made only when the tool is picked, and gone when it is put down");
   ok(/export function onCanvasReady\(\) \{ stopFlash\(\); if \( active \)/.test(aim) && /export function onTearDown\(\) \{ stopFlash\(\); if \( active \)/.test(aim), "G aim: a new canvas does nothing unless the tool is in hand");

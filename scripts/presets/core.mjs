@@ -45,7 +45,7 @@ export const GESTURES = ["point", "throw", "line", "run"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
 export const PLACES = ["centre", "ring", "scatter", "walk"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
@@ -299,6 +299,8 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   if ( !def ) throw new Error(`presets: bad definition (${errors.join("; ")})`);
   if ( !ok ) throw new Error(`presets: bad definition "${def.id}" (${errors.join("; ")})`);
   const a = gesture?.a, b = gesture?.b ?? null, from = gesture?.from ?? null;
+  // (the shooter's radius, px: its muzzle sits at its edge; only with a shooter)
+  const fr = Array.isArray(from) && isNum(gesture?.fr) ? Math.round(clamp(gesture.fr, 0, 2000)) : null;
   if ( !Array.isArray(a) || !isNum(a[0]) || !isNum(a[1]) ) throw new Error("presets: the gesture needs a point a: [x, y]");
   const seed = (isNum(opts.seed) ? opts.seed : 1) >>> 0, size = num(opts.size, 1, ...LIMITS.size), power = Math.round(num(opts.power, 0, ...LIMITS.power));
   const grid = num(env.grid, 100, 4, 2000), R = env.rect ?? { x: -1e9, y: -1e9, width: 2e9, height: 2e9 }, now = isNum(env.now) ? env.now : 0;
@@ -317,7 +319,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   const c = def.gesture === "throw" && hasB ? b : a;
   const dir = def.gesture === "point" ? (hasB ? unit(b[0] - a[0], b[1] - a[1]) : null) : walk ? walk.dir : hasB ? unit(b[0] - a[0], b[1] - a[1]) : null;
   const plan = { v: VERSION, preset: def.id, seed, size, power, aftermath: aft, t0, at: [round(c[0], 10), round(c[1], 10)], dir,
-    gesture: { a, b: hasB ? b : null, from }, walk: walk ? { dur: walk.dur, dt: walk.dt, len: Math.round(walk.len), hits: walk.hits.map((h) => [h.x, h.y, h.t, h.lane]) } : null,
+    gesture: { a, b: hasB ? b : null, from, ...(fr !== null ? { fr } : {}) }, walk: walk ? { dur: walk.dur, dt: walk.dt, len: Math.round(walk.len), hits: walk.hits.map((h) => [h.x, h.y, h.t, h.lane]) } : null,
     destruction: [], fire: [], pending: { burst: [], dust: [], accent: [], cue: [] } };
   const ctx = { c, grid, size, hits: walk?.hits };
   for ( const L of def.layers ) {
@@ -428,13 +430,24 @@ function accentOf(L, at, { plan, hits, from }) {
     case "fallShadow": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.dir };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
     case "bounce": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.gesture.a, dir: plan.dir };
-    case "muzzle": return { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.filter((h) => h.lane === 0).map((p) => [p.x, p.y, p.t, p.lane]) : [] };
+    // (every round of every gun - a twin gun's two barrels side by side - and only with a shooter: no source, no muzzle flash)
+    case "muzzle": {
+      const m = { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.map((p) => [p.x, p.y, p.t, p.lane]) : [] };
+      if ( from && plan.gesture.fr !== undefined ) m.fr = plan.gesture.fr;
+      if ( from && (plan.walk ? new Set(plan.walk.hits.map((h) => h[3])).size : 1) > 1 ) m.twin = true;
+      return m;
+    }
     case "hitFx": case "tracer": {
       // (every n-th shot of each gun, counted per lane - the second gun's count shifted half way - so both guns fire tracers)
       const every = L.every ?? 1, k = every > 1 ? Math.floor(every / 2) : 0;
       // (the very first round of the first gun is a tracer: the run reads from its first hit, the tracer showing where it comes from)
       const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === 0);
-      return { ...base, hits: pick.map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir, from: from ?? null, a: plan.gesture.a, b: plan.gesture.b };
+      const o = { ...base, hits: pick.map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir, from: from ?? null, a: plan.gesture.a, b: plan.gesture.b };
+      if ( from && L.kind === "tracer" ) {
+        if ( plan.gesture.fr !== undefined ) o.fr = plan.gesture.fr;
+        if ( new Set((plan.walk?.hits ?? []).map((h) => h[3])).size > 1 ) o.twin = true;
+      }
+      return o;
     }
   }
   return base;

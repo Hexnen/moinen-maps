@@ -74,8 +74,9 @@ export function causeEffects(d, g, a, now, el) {
   // (a gun's walked pocks: the area's night rim / light is one sprite for all its pocks - it comes in when the walk has passed, never
   // ahead of the hits)
   g.glowIn = isGun(d, g, a) ? clamp01((el - a.delay - a.reveal - a.band) / 500) : clamp01((el - a.delay) / Math.max(1, a.reveal + a.band * 0.5));
-  // on the front
-  if ( cl.front && tFront < 1 && Math.random() < cl.front ) {
+  // on the front (not a gun's: its pocks have no common front - the particles sprang from its first pock alone, before any round
+  // landed; not a preset's stroke before its start: in its lead-in the front sits at the origin, and a pale fleck hung there)
+  if ( cl.front && tFront < 1 && !isGun(d, g, a) && !(el < 0 && g.objId && d.dropsOut?.(g.objId)) && Math.random() < cl.front ) {
     const ang = Math.random() * TAU, fr = a.Rmax * Math.sqrt(tFront);
     causeParticle(d, cl, a.ox + Math.cos(ang) * fr, a.oy + Math.sin(ang) * fr * 0.85, k);
   }
@@ -133,7 +134,9 @@ export function causeEffects(d, g, a, now, el) {
     });
     const nf = 6 + Math.floor(hashU(a.seed, 1, 47) * 3), fan = impactSpokes(nf, a.seed + 47);
     const fl = fan.map((_, q) => 0.22 + 0.78 * Math.pow(hashU(q, 3, a.seed + 47), 1.4)), fk = fan.map((_, q) => hashU(q, 4, a.seed + 47) < 0.4 ? (hashU(q, 5, a.seed + 47) < 0.5 ? -1 : 1) * (0.45 + 0.35 * hashU(q, 6, a.seed + 47)) : 0);
-    draw("fract", hit, 420 * k, (gr, t) => {
+    // (not for a gun: its area is a whole lane of pocks, so the fan - as long as the area's radius - burst out of the first pock alone,
+    // a big star the size of a muzzle flash where the first bullet landed; each pock has its own hit flash and chips instead)
+    if ( !gun ) draw("fract", hit, 420 * k, (gr, t) => {
       const grow = Math.min(1, t * 4), al = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
       for ( let q = 0; q < nf; q++ ) {
         // (two legs with a kink: the ray wanders; it stops short of the rim or reaches it, now and then forking)
