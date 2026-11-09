@@ -1846,3 +1846,7 @@ export class FireArt extends PIXI.Container {
     this.rt.destroy(true); this.fuelRt.destroy(true); this.embRt.destroy(true); this.tileRt.destroy(true); this.occRt.destroy(true);
   }
 }
+
+/** Shared with the dust layer (dust-art.mjs): the art-grid vertex shaders, the every-frame layers' common head and footprint sampler, the
+ * block / quad geometry, the data textures and the small-pass helper - the fire's own programs are unchanged. */
+export { VERT, VERT_B, BLK, SHOW_COMMON, FOOTPRINT, DEPTH, blocks, quad, texOf, renderPass };

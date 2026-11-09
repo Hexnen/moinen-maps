@@ -1,12 +1,14 @@
 import * as M from "./model.mjs";
 import { FireMesh } from "./shader.mjs";
 import { FireArt, BIRTHS } from "./art.mjs";
+import { DustArt } from "./dust-art.mjs";
+import { SDRIFT } from "./dust-model.mjs";
 import { FireLights } from "./lights.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 import { perfMode } from "../perf-mode.mjs";
 import { carrying } from "../tokens/carry.mjs";
-import { vortices, fireWet } from "../wind.mjs";
+import { vortices, fireWet, sceneWind } from "../wind.mjs";
 import { dampArea, dampLights } from "./rain-damp.mjs";
 import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
 import { G as GUARD, guardQ, guardOff, paceNow } from "../frame-guard.mjs";
@@ -165,7 +167,7 @@ export class FireDisplay {
     for ( const [id, it] of want ) {
       const cur = this.areas.get(id);
       if ( (cur && !cur.out) || this.pending.has(id) ) continue;
-      if ( staged && it.field.style === "fire" ) { this.pending.set(id, { key: it.area.key, area: it.area, field: it.field, it, mesh: null, ready: false }); continue; }
+      if ( staged && (it.field.style === "fire" || it.field.style === "dust") ) { this.pending.set(id, { key: it.area.key, area: it.area, field: it.field, it, mesh: null, ready: false }); continue; }
       if ( cur ) { cur.mesh.destroy(); this.areas.delete(id); this.stats.destroyed++; }
       const mesh = this.build(it);
       this.meshes.addChild(mesh);
@@ -192,6 +194,8 @@ export class FireDisplay {
 
   /** A new area's mesh for item `it` ({ area, field }) at the display's geometry and settings. */
   build(it) {
+    // DUST AND GRIT (dust-art.mjs): an art area of its own look, on the same art grid, under the same schedule
+    if ( it.field.style === "dust" ) return new DustArt(it.field, it.area.rect, this.geo, { front: this.front, seed: it.area.seed, grid: this.geo.grid / this.geo.ap, speed: this.P.speed, map: mapOf() });
     const geo = this.geo, P = this.P, { area, field } = it, [ux, uy] = field.plume, g = geo.grid / geo.ap, sp = 0.45 * g * P.speed;   // (the smoke drifts ~half a square a second)
     // the tongues lean as the field's envelope does (model.fieldFrom: wind x 0.7 cells per row)
     const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
@@ -242,7 +246,7 @@ export class FireDisplay {
       if ( !m.uploaded ) { if ( bytes <= 0 ) continue; const b = m.uploadStep(R, bytes); bytes -= b; sent += b; continue; }
       if ( !M.inView(p.area.rect, geo, vw, geo.grid) ) { p.ready = true; continue; }
       if ( m.anim ) m.setPhase(now0);
-      m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet);
+      m.setDark(dark); leanToVortices(p, geo, vort, dt); dampArea(p, wet); m.setSceneWind?.(this.sw[0], this.sw[1]);
       // (a large one is drawn AHEAD as A12 draws the next frame: an art frame the clock reaches after the steps it needs, with the
       // clocks it will have then; it shows when the clock reaches it - revealed at the very frame the areas around it show, never one
       // behind them; one the clock passed before it was whole is dropped and a later one taken)
@@ -361,6 +365,7 @@ export class FireDisplay {
     const moving = pn - this.movedAt < MOVE_MS;
     if ( this.tokDirty || carrying() ) this.updateTokens();   // (a carried token's mesh moves every frame without a refresh)
     const vis = this._vis, stale = this._stale, vort = vortices().length > 0, wet = fireWet();
+    this.dustWind();
     vis.length = 0; stale.length = 0;
     this.tornadoDepth(vort);   // (a tornado's foot: depth rects + the front layer over it; vortex-lean.mjs)
     for ( const a of this.areas.values() ) {
@@ -370,7 +375,7 @@ export class FireDisplay {
       if ( !a.mesh.visible && !a.hold ) { if ( a.mesh.isArt && this.ticking && !force ) a.hold = true; else a.mesh.visible = true; }
       vis.push(a); if ( newFrame ) a.mesh.setTime(T); if ( a.mesh.anim ) a.mesh.setPhase(now0);
       if ( a.mesh.isArt ) {
-        a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet);
+        a.mesh.setDark(dark); leanToVortices(a, geo, vort, dt); dampArea(a, wet); a.mesh.setSceneWind?.(this.sw[0], this.sw[1]);
         // (A12: the frame drawn ahead is due: shown as it is - only its OCC tiles are drawn now; one drawn ahead for another frame - a
         // skipped frame, the clock's wrap - is dropped)
         const j = a.mesh.job;
@@ -513,6 +518,17 @@ export class FireDisplay {
     const layer = on ? FRONT_LAYER : 750;
     if ( this.front.sortLayer !== layer ) { this.front.sortLayer = layer; canvas.primary.sortDirty = true; }
     this.feetOn = on;
+  }
+
+  /**
+   * The scene's wind (the weather's, wind.mjs) as the dust drifts with it: its base direction and strength (capped at 1) x SDRIFT
+   * squares / s, in cells. The same on every client (the weather resolves it from the scene's flags and the shared clock).
+   */
+  dustWind() {
+    const w = sceneWind(), sw = this.sw ??= new Float32Array(2);
+    if ( !w ) { sw[0] = sw[1] = 0; return; }
+    const a = (Number(w.dir) || 0) * Math.PI / 180, k = Math.min(1, w.str) * SDRIFT * this.geo.grid / this.geo.ap;
+    sw[0] = Math.cos(a) * k; sw[1] = Math.sin(a) * k;
   }
 
   /** An area's cells (its art texture's) under the view `vw` (scene px) grown by `margin` x its size each way and PAD cells. */

@@ -9,6 +9,7 @@ import * as D from "../destruction/destruction.mjs";
 import { reducedMotion } from "../config.mjs";
 import { warmPrograms } from "../gl-warm.mjs";
 import { artPrograms } from "./art.mjs";
+import { dustPrograms } from "./dust-art.mjs";
 import { fireballProgram } from "./shader.mjs";
 import { damperProgram } from "./rain-damp.mjs";
 import { fireWet } from "../wind.mjs";
@@ -102,6 +103,8 @@ function prewarm(force = false) {
   if ( warming ) return;                                              // (one at a time: a second ask while it runs is the same warm-up)
   if ( CONFIG.moinenMaps?.firePrewarm === false || !canvas.ready || !shown() || (!force && !strokes.size && !draft) ) return;
   const list = [...artPrograms()];
+  // (DUST: its own programs, when the scene has dust or a brush may paint it)
+  if ( force || [...strokes.values()].some((s) => s.k === "dust") || draft?.k === "dust" ) list.push(...dustPrograms());
   const ball = [...strokes.values()].some((s) => s.st === "fireball") || draft?.st === "fireball"
     || (force && game.user.isGM && (() => { try { return game.settings.get(MODULE_ID, "fireStyle") === "fireball"; } catch { return false; } })());
   if ( ball ) list.push(fireballProgram());
@@ -405,12 +408,14 @@ export const fireApi = {
    * Paint a stroke from a macro: `points` = [[x, y], ...] or { x, y } (scene px); `kind` "fire" | "smoke" | "erase"; `radius` scene
    * px; `strength` 0.1..1; `wind` { dir (degrees, 0 = right, 90 = down), speed 0..1 }; `level` 1..3 (fire), `smoke` 0..3 (fire) /
    * 1..3 (smoke); `style` "fire" | "fireball"; `color` "#rrggbb" or a preset name (look.PRESETS; omitted: the scene's fire colour).
-   * `torn`: true / an amount 0.1..1 / false (omitted: the scene's torn edges). Returns the stored stroke (or null).
+   * `torn`: true / an amount 0.1..1 / false (omitted: the scene's torn edges). `kind` "dust": ground DUST AND GRIT (dust-model.mjs),
+   * `dust` "bike" | "car" | "drag" | "heavy" what passed along the path, `level` 1..3, `radius` the band's half-width. Returns the
+   * stored stroke (or null).
    */
-  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null, torn = undefined } = {}) {
+  paint(points, { kind = "fire", radius = 50, strength = 0.8, wind = null, level = 2, smoke = 2, style = "fire", color = null, torn = undefined, dust = "car" } = {}) {
     const pts = Array.isArray(points) ? points : [[points.x, points.y]];
     const w = wind ?? { dir: game.settings.get(MODULE_ID, "fireWindDir"), speed: game.settings.get(MODULE_ID, "fireWind") };
-    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}),
+    return add({ k: kind, r: radius, s: strength, p: pts.flatMap(([x, y]) => [x, y]), wd: w.dir ?? 0, ws: w.speed ?? 0, lv: level, sm: smoke, st: style, ...(color ? { c: color } : {}), ...(kind === "dust" ? { dk: dust } : {}),
       ...(torn === undefined ? {} : { tn: torn === true ? params.tear : Number(torn) || 0 }) });
   },
   /** Torn edges for one stroke afterwards: true (the scene's tearing), an amount 0.1..1, or false. */
