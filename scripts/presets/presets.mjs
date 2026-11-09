@@ -5,6 +5,7 @@ import * as R from "./runtime-core.mjs";
 import * as Run from "./runtime.mjs";
 import { BUILTIN } from "./defs.mjs";
 import { registerAccents } from "./accents-wire.mjs";
+import { registerLightning } from "./lightning-wire.mjs";
 import { registerMeteor } from "./meteor-wire.mjs";
 
 /**
@@ -65,5 +66,6 @@ export const presetsApi = {
 moduleApi.presets = presetsApi;
 Run.registerRuntime();
 registerAccents();
+registerLightning();
 registerMeteor();
 

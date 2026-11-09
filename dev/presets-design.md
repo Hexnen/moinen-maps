@@ -802,7 +802,120 @@ for minutes after it (the user, G2: "a dust haze that stays for a long time, abo
   GM's undo takes it out on the player within seconds; reduced motion: no burst, no accents, the dust at rest, the haze thins on the
   clock. Not fixed (pre-existing in d5bf9ce): a grenade's white specks ~200 ms before its impact.
 
-## 18. The meteor (design, presets-meteor)
+## 18. Lightning strike (uderzenie pioruna): design
+
+The user (verbatim): "dodaj nowy uderzenie pioruna". A fifth pad in the board, same bar as the others: WOW, natural and organic, no
+squares or area edges, smooth in and out, the oblique top-down view, readable at zoom 0.6-3 by day and by night. No sound, nothing
+pushes tokens, the aftermath fire's duration is the preset's setting with "no end".
+
+### 18.1 How it reads at the table
+
+Gesture: a click on the target (a drag sets the side the bolt leans in from). Lead-in 1000 ms.
+
+**In one breath:** the air over the spot starts to crackle with tiny blue sparks; the sky flickers twice; a faint violet stepped
+leader feels its way down the screen in jerks, forking, while thin streamers reach up from the ground to meet it; they touch - and a
+blinding white channel slams down from above the top of the screen to the ground, branches lit, the whole screen flashes cold white
+(at night the whole view is lit for an instant), the ground jolts. The channel flickers: two or three restrikes down the same path,
+each a flash. Electric arcs race out over the ground and die in flickers, molten droplets spray and cool from white to red, a puff
+of soil and steam. The channel fades violet, top first, by pixel dropout. Left behind: a small fused scar (the planned branching
+burnt trails were dropped, 18.4), a glowing molten point that cools, steam and smoke drifting off, and here and there a
+small fire catching in the grass.
+
+### 18.2 The timeline (lv 2, size 1; ms from T0)
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1000 to -60 | accent `strike` | CRACKLE: single-pixel blue sparks flicker within ~0.5 sq of the target, denser as T0 nears (anticipation; marks the spot). |
+| -760, -560 | accent `strike` | SKY FLICKERS: a faint cold screen flicker (and at night a faint lift of the whole view's light). |
+| -320 to 0 | accent `strike` | STEPPED LEADER: a dim violet branching channel descends from above the screen in visible steps (each step lands at once), its tips brighter; dead-end branches probe. |
+| -220 to 0 | accent `strike` | STREAMERS: 2-4 short, faint upward sparks from the ground near the target; the one under the leader connects. |
+| 0 | accent `strike` | RETURN STROKE: the whole channel lights white bottom-up in two frames; branches lit. A blue first ring (normal blend: it reads on a pale map) and stepped additive glow bands. Screen flash (cold, screen blend), at night the view's light and a big local ground light. |
+| 0 | cue `screen` | Shake 0.55 (accents layer: opt-outs, distance), no warm flash. |
+| 0 to 400 | accent `strike` | SURFACE ARCS: 5-7 jagged forking arcs race out over the ground (110 ms) and flicker out tip-first. PLASMA point: white-hot at the base, then cools to a molten orange point (to ~900 ms). |
+| 0 to 900 | accent `strike` | MOLTEN SPRAY: droplets thrown out and up, gravity, cooling white > yellow > orange > red, a short trail. |
+| ~80, ~190, (~320) | accent `strike` | RESTRIKES: the main channel again (no branches), weaker each, each with a flash. Between them a dim continuing glow. |
+| last + 0-300 | accent `strike` | AFTERGLOW: the channel fades violet, thinning (side pixels first), top first, by dithered dropout. |
+| +10 | dust `shock` L1 | Soil thrown out in a low ragged ring (reach ~1.2 sq) and the long thin haze. |
+| +40 | destruction | The SCAR: blast L1 cause lightning, r 0.45 (fused core, glass beads). Opened under the flash. (As built: the planned cracks L2 lightning stroke for the branching trails was DROPPED - at night the destruction layer lights a cracks-lightning area as a pale disc with a hard edge; see 18.4.) |
+| +250 to 14 s | smoke L1 | Steam and smoke wisps off the scar. |
+| +400 to 1200 | fire L1 | 1-3 small grass fires near the scar (aftermath: their share of the preset's duration, default 40 s, or no end). |
+
+### 18.3 How it is built
+
+- **One accent kind `strike`** (core.mjs ACCENTS gets the name; the item is the generic accent `{ id, kind, at, dur, lv }`, its place,
+  side and size come from the firing record: `at`, `dir`, `size`, `seed`). Drawn by NEW files: `presets/lightning-core.mjs` (pure,
+  node-tested: the timing, the current I(t), the geometry and its data texture) and `presets/lightning.mjs` (every client: the meshes,
+  the overlay, the night light), wired by `presets/lightning-wire.mjs` (presets.mjs registers it, like the accents). The accents layer
+  ignores the kind (its own kinds only), so nothing there changes.
+- **Geometry, once per firing and client:** the channel is a 3D random walk from ~44 sq above the target down to it (a slow wander,
+  a mean-reverting zig-zag per step, a fine kink per segment), with branches and twigs that walk down and away (each with the
+  leader's arrival time), streamers and ground arcs; projected with the scene's view lift (at least 0.4: a pure top view would
+  flatten the bolt into a point). It is rasterised on the destruction art grid into a DATA TEXTURE: per art pixel its class (main
+  core, its side pixels, branch, twig, streamer, arc, plasma), its arrival time, the distance to the nearest core (a chamfer
+  transform: the glow bands) and a dropout hash.
+- **Drawing:** one shader over only the occupied 16 x 16 blocks of that texture: per frame only uniforms change (time, the strokes'
+  times and strengths). Crisp art pixels (texelFetch), premultiplied output: the core and first ring opaque, the glow bands
+  additive. The same shader in the illumination (MAX_COLOR) is its emission at night. The molten spray and the crackle are a few
+  pixels drawn on the CPU (as the gun accents).
+- **Cost:** one texture upload per firing (a few hundred kB), a handful of blocks per frame for ~1.6 s; nothing after it.
+- **Reduced motion:** no strike accent (the scar, dust, steam and fires are the result). The guard thins the spray only.
+
+### 18.4 As built and checked (branch presets-lightning, 2026-11-09)
+
+- **Files:** NEW `scripts/presets/lightning-core.mjs` (pure), `lightning.mjs` (renderer), `lightning-wire.mjs` (two listeners),
+  `dev/presets-lightning.test.mjs` (definition, determinism, timing, frameAt phases, geometry and data texture, spray / crackle,
+  wiring), `dev/lightning-cost.mjs` (the cost over the strike's whole life). Edited: core.mjs (ACCENTS + "strike"), presets.mjs
+  (registerLightning), defs.mjs (the built-in, set "nature"), lang en / pl (name, hint, accent name), the two preset tests that list
+  the built-ins.
+- **Night light:** the whole view lifted for the flash frames (a view rect in the illumination, MAX_COLOR) plus a ground pool round the
+  strike (7 squares). The pool is a SMOOTH 128 px texture, linear-filtered, soft falloff with a gently lobed rim: a first version
+  (48 px, stepped bands, hashed 2 x 2 cells, NEAREST) stretched over 14 squares lit the map in big blocky squares - a light has no
+  pixel grid. The bolt's own emission (the shader in the illumination) stays crisp on the art grid.
+- **Dropped:** the cracks L2 lightning "trails" layer. At night the destruction layer's cracks-lightning area glows as a pale disc with
+  a hard round edge (the destruction cause-fx, not this preset; reported). The scar is blast L1 r 0.45 alone.
+- **Reduced motion:** the strike accent is skipped (the scar, dust, steam and fires remain); clients with no flash / reduced get no
+  screen overlay. The shake is the preset's screen cue (accents.mjs), so its own opt-outs apply.
+- **Checked live (lane, GM DPR 2, ZZ-ltn):** zoom 1 and 3, day and night, click to settled; 5x crops in motion; a real player
+  (Test Gracz 1, another origin) sees the leader, the strike, the flash and the fires; the panel's test fire draws the strike and
+  writes nothing; the pad sits in the bar and the panel (5th, hotkey 5).
+- **Cost (lightning-cost.mjs, lane GM, DPR 2, 3200 x 1800, every frame from T0 - 1000 to T0 + 1600):** CPU median +0.3 ms, p95 ~1.2 ms
+  over the empty view's 0.3 / 0.5-0.8 ms; GPU within the empty view's noise (median ~1.5-2.4 ms, p95 ~3.3-4.6 ms for both) at zoom 1
+  and 3, weak x1 and x2, day and night; no frame over 16.7 ms except one weak x2 outlier in one of three runs.
+- **Unused = unchanged (A/B vs eb85f59 on the lane, ZZ-ltn wiped):** the same blank frame hash, ticker listeners (14), settings (93),
+  stage nodes (157) and scene flags; the only difference is one more listener on moinenMapsPresets and on canvasTearDown (the wire,
+  returning at once without a strike record). lightning.mjs / lightning-core.mjs are not loaded until a strike firing arrives.
+
+## 19. The shooter (the guns' source token: presets-source)
+
+The user (2026-11-09): for firearms show the muzzle flash at the SOURCE token; the GM picks it; no source, no muzzle flash; the uzi's
+pointless flash where the first bullet lands goes.
+
+- **Firearm** = a preset with a walk (`ui-core isFirearm`): the uzi, the heliHmg and any copy of them. The bomb and grenade are not.
+- **Choosing**, in the bar (only for a firearm): the "Shooter" block shows the chosen token (its picture and name) or "None";
+  the button arms PICK mode (`aim.setPicking`: the next click on a token takes it, hover ring on the candidate, Esc or a click
+  off the tokens cancels); the person-check button takes the selected token; the x clears it. On the map: **S over a token**
+  makes it the armed gun's shooter (S over the shooter again: none). Each gun remembers its own shooter on each scene
+  (`presetBar.src["scene:pad"] = tokenId`, client setting, at most SRC_MAX = 40, the oldest dropped). A deleted token = none.
+- **Precedence**: the chosen shooter wins over a token the drag starts on (a target). With none chosen, a LINE dragged out of a
+  token makes it the shooter for that burst (the old behaviour); a RUN never takes a token (only a chosen gunship).
+- **Shown**: a soft feathered orange ring (#ffb347) round the shooter while the tool is in hand (fades in, follows the token);
+  the ghost adds a fainter line of fire from the shooter's edge to the first hit.
+- **The look** (`accents-core muzzleOf`): the barrel sits at the shooter's edge toward each hit (0.85 x its radius, never past half
+  way); every round flashes (the heli: a heavier, longer star, both barrels side by side, `twin`); the rounds fly from the barrel
+  as short streaks (BULLET_MAX 400 ms of flight); the heli's tracers leave the gunship. Without a shooter the heli is an
+  off-map gunship as before (tracers from above, no muzzle). The heli's muzzle layer sits AFTER its tracers / hits so their
+  per-item seeds are unchanged.
+- **The "flash at the first bullet"** was not the muzzle: the destruction stroke's fract starburst (cause-fx, the area's radius,
+  centred on the gun stroke's origin = the first pock) and its pale front particles. Both are skipped for gun strokes
+  (`isGun`, commits 6457d70, 5b4448d); each pock keeps its own hit flash and chips.
+- **Checked:** offline A/B vs eb85f59 (dev/out/src/ab-offline.mjs, not committed): without a shooter every built-in plan, accent
+  frame (t -1.2..6 s), ghost and the cleaned bar identical (4729/4729); live hash A/B on a blank ZZ scene (frame, ticker count,
+  settings count, scene flags) identical. Live on lane 3: pick mode, S key, the x, the ring, the ghost's line of fire; uzi with
+  and without a shooter, heli with the gunship (fired from it even when the drag starts on another token) and without; a real
+  player (Test Gracz 1) sees the uzi's muzzle flash at the shooter. Custom copies saved before this keep their own layers (a
+  heli copy has no muzzle layer: its tracers still fly from a chosen gunship).
+
+## 20. The meteor (design, presets-meteor)
 
 The user picked it from a list as "meteor / spadająca gwiazda: cień i smuga z góry, wielki krater, ogień i długa kurzawa" - meant as
 the biggest WOW of the set. The bar is the set's: natural and organic, no squares or area edges, a smooth start and end, the oblique

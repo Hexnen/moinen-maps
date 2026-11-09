@@ -1,6 +1,6 @@
 /**
  * DESTRUCTION PRESETS, THE METEOR - the pure part (no Foundry, no PIXI: node-tested in dev/presets-meteor.test.mjs; drawn by
- * meteor-art.mjs). dev/presets-design.md section 18. One accent item of kind "meteor" (core.mjs accentOf) holds everything this needs:
+ * meteor-art.mjs). dev/presets-design.md section 20. One accent item of kind "meteor" (core.mjs accentOf) holds everything this needs:
  *   { at (ms from T0, < 0: the flight starts), dur (the flight + the lingering trail), x, y (the impact, scene px), dir (the unit way it
  *     travels on the ground), sz (the firing's size), wd / ws (the scene wind), rocks: [[x, y, t], ...] (the ejecta's landings, ms) }
  *

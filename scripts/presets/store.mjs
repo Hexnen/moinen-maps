@@ -44,3 +44,21 @@ export async function deleteCustom(id) {
   if ( bar().pad === id ) await setBar({ pad: pads()[0]?.id ?? "bomb" });
 }
 export const setOrder = (ids) => setStore({ ...store(), order: ids });
+
+/* ---------------------------------------------------------------- the shooter (a firearm's source token, this client's choice) */
+
+/** The armed gun's chosen shooter on the open scene: its Token placeable, or null (none chosen, not a gun, or the token is gone). */
+export function srcToken(def) {
+  const sid = canvas?.scene?.id;
+  if ( !sid || !U.isFirearm(def) ) return null;
+  const id = U.srcOf(bar(), sid, def.id);
+  return (id && canvas.tokens?.get(id)) || null;
+}
+/** A token as a shooter: its centre and radius (scene px). */
+export const shooterOf = (t) => (t ? { id: t.id, x: t.center.x, y: t.center.y, r: Math.max(t.w, t.h) / 2 } : null);
+/** Choose (a token id) or clear (null) the shooter of gun `def` on the open scene. */
+export function setSrc(def, tokenId) {
+  const sid = canvas?.scene?.id;
+  if ( !sid || !U.isFirearm(def) ) return null;
+  return setBar({ src: U.withSrc(bar(), sid, def.id, tokenId) });
+}

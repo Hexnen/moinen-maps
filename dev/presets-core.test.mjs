@@ -29,7 +29,7 @@ const fireAt = (d, seed = 7, opts = {}, g = G[d.gesture], env = ENV) => C.expand
 
 /* A */
 for ( const d of BUILTIN ) { const c = C.cleanDef(d); ok(c.ok, `A built-in ${d.id} clean (${c.errors.join("; ")})`); }
-ok(BUILTIN.map((d) => d.id).join().startsWith("bomb,grenade,uzi,heliHmg,") && BUILTIN.some((d) => d.id === "meteor"), "A the four first built-ins in order, then the others (the meteor)");
+ok(BUILTIN.map((d) => d.id).join() === "bomb,grenade,uzi,heliHmg,lightning,meteor", "A the built-ins in order (the four military, then the lightning strike, the meteor)");
 {
   const c = C.cleanDef({ id: "x y", v: 2, gesture: "laser", layers: [{ l: "sound", id: "s" }, { l: "destruction", type: "meteor", cause: "x", r: 99 }, { l: "fire", aftermath: true }] });
   ok(!c.ok && c.def, "A junk: named, still a safe definition");

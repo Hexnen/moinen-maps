@@ -12,7 +12,8 @@ import * as Aim from "./aim.mjs";
  * ready settings under one brush". Added to the Destruction workspace with extendSection (destruction/section.mjs is unchanged):
  *  - tool "Presets" (mm-d-preset): one gesture on the map fires the armed pad (aim.mjs: the ghost, the keys);
  *  - bar: the pads (icon, name, hotkey, gesture glyph), size, power (weaker / normal / stronger), variation (a new seed each firing),
- *    the aftermath (the armed preset's duration slider and "no end", back to the preset's own);
+ *    the aftermath (the armed preset's duration slider and "no end", back to the preset's own), and for a gun its SHOOTER (the source
+ *    token its muzzle flashes at: pick one on the map, take the selected token, or none - no shooter, no muzzle flash);
  *  - dock panel "Presets" (closed until the tool is first picked): the pad grid (drag to reorder: the hotkeys follow), the armed
  *    preset (test fire, duplicate, delete), the editor of the world's own presets (name, icon, lead-in, aftermath, the layers with
  *    their switches and values, the timeline - drag a bar to move its start) and the scene's firings (take back, settle, fire again,
@@ -50,6 +51,19 @@ function aftermathBlock(def, b) {
     <button type="button" class="mm-ws-toolbtn mm-pr-reset" data-aft-reset${a.own ? "" : " hidden"} aria-label="${esc(fmt("DPreset.aftermathReset", { dur: secs(own) }))}" data-tooltip="${esc(fmt("DPreset.aftermathReset", { dur: secs(own) }))}"><i class="fa-solid fa-rotate-left" inert></i></button></div>`;
 }
 
+/** A gun's shooter: the chosen token (its picture and name) or none; choose on the map, take the selected token, clear. */
+function srcBlock(def) {
+  if ( !U.isFirearm(def) ) return "";
+  const t = S.srcToken(def), pick = Aim.isPicking();
+  const face = t ? `<img src="${esc(t.document.texture?.src ?? "")}" alt="" inert><span class="mm-pr-srcname">${esc(t.name || t.document.name || "")}</span>`
+    : `<i class="fa-solid fa-crosshairs" inert></i><span class="mm-pr-srcname">${esc(T(pick ? "DPreset.srcPicking" : "DPreset.srcNone"))}</span>`;
+  return `<div class="mm-ws-opt mm-pr-src${t ? " has-src" : ""}">
+    <span class="mm-ws-label" data-tooltip="${esc(T("DPreset.srcHint"))}">${esc(T("DPreset.src"))}</span>
+    <button type="button" class="mm-ws-toolbtn mm-pr-srcpick" data-src-pick aria-pressed="${pick}" aria-label="${esc(T("DPreset.srcPick"))}" data-tooltip="${esc(T(pick ? "DPreset.srcPickingHint" : "DPreset.srcPick"))}">${pick && t ? `<i class="fa-solid fa-crosshairs" inert></i><span class="mm-pr-srcname">${esc(T("DPreset.srcPicking"))}</span>` : face}</button>
+    <button type="button" class="mm-ws-toolbtn" data-src-sel aria-label="${esc(T("DPreset.srcSelected"))}" data-tooltip="${esc(T("DPreset.srcSelected"))}"><i class="fa-solid fa-user-check" inert></i></button>
+    <button type="button" class="mm-ws-toolbtn" data-src-clear${t ? "" : " hidden"} aria-label="${esc(T("DPreset.srcClear"))}" data-tooltip="${esc(T("DPreset.srcClear"))}"><i class="fa-solid fa-xmark" inert></i></button></div>`;
+}
+
 function bar(host, ctx) {
   const render = () => {
     const b = S.bar(), list = S.pads(), def = S.armed();
@@ -59,8 +73,14 @@ function bar(host, ctx) {
       ${optRange({ name: "size", label: T("DPreset.size"), value: b.size, min: U.SIZE.min, max: U.SIZE.max, step: U.SIZE.step, hint: T("DPreset.sizeHint") })}
       <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("DPreset.power"))}</span><div class="mm-ws-tools mm-d-levels" role="group" aria-label="${esc(T("DPreset.power"))}">${power}</div></div>
       <button type="button" class="mm-ws-toolbtn mm-pr-vary" data-vary aria-pressed="${b.vary}" aria-label="${esc(T("DPreset.vary"))}" data-tooltip="${esc(T("DPreset.varyHint"))}"><i class="fa-solid fa-dice" inert></i></button>
+      ${def ? srcBlock(def) : ""}
       ${def ? aftermathBlock(def, b) : ""}
-      ${optHint(T("DPreset.barHint"))}`;
+      ${optHint(T(U.isFirearm(def) ? "DPreset.barHintGun" : "DPreset.barHint"))}`;
+  };
+  // the shooter's block alone (a choice, the picking state, its token changed or gone)
+  const renderSrc = () => {
+    const el = host.querySelector(".mm-pr-src"), def = S.armed(), html = def ? srcBlock(def) : "";
+    if ( el && html ) el.outerHTML = html; else if ( !!el !== !!html ) render();
   };
   render();
   const onClick = (ev) => {
@@ -69,6 +89,13 @@ function bar(host, ctx) {
     if ( pad && pad.dataset.pad !== b.pad ) S.setBar({ pad: pad.dataset.pad });
     else if ( pw && Number(pw.dataset.power) !== b.power ) S.setBar({ power: Number(pw.dataset.power) });
     else if ( ev.target.closest("[data-vary]") ) S.setBar({ vary: !b.vary });
+    else if ( def && ev.target.closest("[data-src-pick]") ) Aim.setPicking(!Aim.isPicking());
+    else if ( def && ev.target.closest("[data-src-clear]") ) { Aim.setPicking(false); S.setSrc(def, null); }
+    else if ( def && ev.target.closest("[data-src-sel]") ) {
+      const t = canvas.tokens?.controlled?.at(-1);
+      Aim.setPicking(false);
+      if ( t ) S.setSrc(def, t.id); else ui.notifications?.info(T("DPreset.srcNoSelected"));
+    }
     else if ( def && ev.target.closest("[data-aft-noend]") ) {
       const a = U.aftermathOf(def, b);
       S.setBar({ aft: { ...b.aft, [def.id]: a.dur === null ? (def.aftermath?.dur ?? 60) : null } });
@@ -86,9 +113,11 @@ function bar(host, ctx) {
   // a change elsewhere (keys, the panel, another tab): another pad re-draws the bar; else the controls are written without echo
   const id = Hooks.on(S.HOOK, (what) => {
     if ( what === "store" ) return render();
+    if ( what === "picking" ) return renderSrc();
     if ( what !== "bar" ) return;
     const b = S.bar(), def = S.armed();
     if ( host.querySelector("[data-pad][aria-pressed=true]")?.dataset.pad !== def?.id ) return render();
+    renderSrc();
     const s = host.querySelector("[name=size]"); if ( s && !s.contains(document.activeElement) ) writeControl(s, b.size);
     for ( const x of host.querySelectorAll("[data-power]") ) x.setAttribute("aria-pressed", String(Number(x.dataset.power) === b.power));
     host.querySelector("[data-vary]")?.setAttribute("aria-pressed", String(b.vary));
@@ -106,7 +135,14 @@ function bar(host, ctx) {
     // the dock brought to the soundboard (it sits under the Damage, Look and Fire panels)
     requestAnimationFrame(() => document.querySelector("#moinen-maps-workspace .mm-ws-panel[data-panel='presets']")?.scrollIntoView({ block: "start", behavior: "smooth" }));
   }
-  return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off(S.HOOK, id); };
+  // (the shooter's token renamed, re-imaged or deleted; another scene)
+  const idT = Hooks.on("updateToken", (doc) => { if ( doc.id === S.srcToken(S.armed())?.id ) renderSrc(); });
+  const idD = Hooks.on("deleteToken", () => renderSrc());
+  const idC = Hooks.on("canvasReady", () => renderSrc());
+  return () => {
+    host.removeEventListener("click", onClick); host.removeEventListener("change", onChange);
+    Hooks.off(S.HOOK, id); Hooks.off("updateToken", idT); Hooks.off("deleteToken", idD); Hooks.off("canvasReady", idC);
+  };
 }
 let revealed = false;
 
