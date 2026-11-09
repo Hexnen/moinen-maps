@@ -10,11 +10,11 @@
 //  5. emissive causes bake a light sprite (kind 3), the others do not; the base row carries the cause (field 17).
 // A new commit that changes cause code in scripts/destruction/*.mjs goes into CAUSE_COMMITS.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { revTree, withoutCommits, onlyFeature } from "./lib/baseline.mjs";
+import { makeTempDir, removeTempDir } from "./lib/tmp.mjs";
 import { execFileSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -43,7 +43,7 @@ export const CAUSE_COMMITS = ["291ebda", "7cd5dcd", "c3ea9fe", "7115e86", { rev:
   { rev: "a1e829c", other: /^(?![\s\S]*(rimArgs|rimQueue|rimSlice|addRim|BLOTS|blotGrid))/ },
   // the gun presets (display only: a walked gun stroke skips the area-wide impact ring / shock / skirt, its chips and rims follow the walk)
   "c47949c", "6457d70", "5b4448d", "86739d0"];   // (86739d0: presets polish, the night rim's inside lift and lip band; 50458de was reverted in e5714bb and redone as 7115e86)
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-cause-"));
+const tmp = makeTempDir("cause");   // removed on any exit (dev/lib/tmp.mjs)
 const load = (dir) => import(pathToFileURL(path.join(dir, "core.mjs")).href);
 // today's baseline: the working tree minus the cause commits (only the files they touched)
 const baseDir = path.join(tmp, "today-base");
@@ -206,6 +206,6 @@ const ob0 = strokes[0].ob;
 check(bytesOf(Cur.bake(input([ob0], { cause: 4 }))) === bytesOf(Cur.bake(input([{ ...ob0, c: 4 }]))), "a stroke without a cause takes the scene default");
 check(bytesOf(Cur.bake(input([{ ...ob0, c: 2 }], { cause: 4 }))) === bytesOf(Cur.bake(input([{ ...ob0, c: 2 }]))), "a stroke with its own cause ignores the scene default");
 
-fs.rmSync(tmp, { recursive: true, force: true });
+removeTempDir(tmp);
 console.log(failed ? `${failed} check(s) failed` : "all checks passed");
 process.exit(failed ? 1 : 0);
