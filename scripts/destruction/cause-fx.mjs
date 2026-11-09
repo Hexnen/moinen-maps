@@ -74,8 +74,9 @@ export function causeEffects(d, g, a, now, el) {
   // (a gun's walked pocks: the area's night rim / light is one sprite for all its pocks - it comes in when the walk has passed, never
   // ahead of the hits)
   g.glowIn = isGun(d, g, a) ? clamp01((el - a.delay - a.reveal - a.band) / 500) : clamp01((el - a.delay) / Math.max(1, a.reveal + a.band * 0.5));
-  // on the front
-  if ( cl.front && tFront < 1 && Math.random() < cl.front ) {
+  // on the front (not a gun's: its pocks have no common front - the particles sprang from its first pock alone, before any round
+  // landed; not a preset's stroke before its start: in its lead-in the front sits at the origin, and a pale fleck hung there)
+  if ( cl.front && tFront < 1 && !isGun(d, g, a) && !(el < 0 && g.objId && d.dropsOut?.(g.objId)) && Math.random() < cl.front ) {
     const ang = Math.random() * TAU, fr = a.Rmax * Math.sqrt(tFront);
     causeParticle(d, cl, a.ox + Math.cos(ang) * fr, a.oy + Math.sin(ang) * fr * 0.85, k);
   }
