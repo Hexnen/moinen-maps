@@ -114,7 +114,7 @@ export function fireOpts(def, bar, seed) {
  * A map gesture -> the expander's gesture { a, b, from, fr? } (scene px): `down` / `up` [x, y], `grid` px per square, `token` the
  * token under the pointer at the start ({ x, y, r } its centre and radius) or null, `src` the armed gun's chosen shooter ({ x, y, r })
  * or null. Below `grid * 0.25` of movement there is no drag. `fr`: the shooter's radius (px; its muzzle sits at its edge).
- *   point  a = the click; a drag sets the direction it falls from (b)
+ *   point  a = the click; a drag sets the direction it falls from (b); a token is passed only for a def.onToken preset: its centre is the mark, the token the hero (from)
  *   throw  from = the token (or the click), b = where it lands (a click: in place)
  *   line   the burst walks a -> b; started on a token: it is the shooter (from), the hits start just past its edge; else the chosen
  *          shooter (src) fires it from where it stands; neither: no shooter (no muzzle flash)
@@ -140,6 +140,8 @@ export function gestureOf(kind, down, up, grid, token = null, src = null) {
     if ( drag && Math.hypot(down[0] - s.x, down[1] - s.y) <= s.r ) return outOf(s);
     return { a: P(down), b: drag ? P(up) : null, from: P([s.x, s.y]), fr: Math.round(s.r) };
   }
+  // (a point preset that lands on a token - def.onToken, the superhero landing: the token is passed only then): its centre is the mark
+  if ( kind === "point" && token ) return { a: P([token.x, token.y]), b: drag ? P(up) : null, from: P([token.x, token.y]) };
   // no shooter chosen: a line dragged out of a token makes it the shooter for that burst (a run - the strafing gunship - never does)
   if ( kind === "line" && token && drag ) return outOf(token);
   return { a: P(down), b: drag ? P(up) : null, from: null };

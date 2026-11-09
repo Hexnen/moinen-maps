@@ -97,7 +97,7 @@ function aimShapes() {
   }
   const def = S.armed(); if ( !def ) return [];
   const grid = canvas.grid?.size ?? 100;
-  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token, shooter(def)) : U.gestureOf(def.gesture, cursor, cursor, grid, null, shooter(def));
+  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token, shooter(def)) : U.gestureOf(def.gesture, cursor, cursor, grid, def.onToken ? tokenAt(cursor) : null, shooter(def));
   const plan = planOf(def, g); if ( !plan ) return [];
   const shapes = U.ghostOf(plan, viewOf());
   // before a drag of a line / run / throw: a soft reticle where it starts
@@ -158,7 +158,7 @@ function onDown(ev) {
     if ( t && U.isFirearm(def) ) S.setSrc(def, t.id);
     quiet = at; schedule(); return;
   }
-  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line") ? tokenAt(at) : null };
+  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line" || def.onToken) ? tokenAt(at) : null };
   cursor = at; schedule();
 }
 function onMove(ev) {

@@ -914,3 +914,86 @@ pointless flash where the first bullet lands goes.
   and without a shooter, heli with the gunship (fired from it even when the drag starts on another token) and without; a real
   player (Test Gracz 1) sees the uzi's muzzle flash at the shooter. Custom copies saved before this keep their own layers (a
   heli copy has no muzzle layer: its tracers still fly from a chosen gunship).
+
+## 20. The superhero landing (presets-landing)
+
+The user picked it from the list as: "lądowanie superbohatera: krater z pęknięciami rozchodzącymi się promieniście, fala kurzu, bez
+ognia". The campaign is Invincible, so a hero dropping out of the sky onto a street is a common beat at the table. The bar is the
+presets' bar (section 1): WOW, natural and organic, no squares or area edges, smooth in and out, the oblique view, readable at zoom
+0.6-3 by day and by night; no sound, nothing pushes a token.
+
+### 20.1 How it reads, layer by layer
+
+Gesture: **point**. A click is the landing spot. A click on a token lands ON it: its centre is the mark and the token is the hero
+(`onToken: true` in the definition, read by the aim: a point preset gets the token under the press only then; nothing is written to
+the token). A drag sets the way the hero comes in (a dive at a slant), as the bomb's drag does. Pre-roll 1300 ms (900 was too short on a loaded host: the chunks were named
+200-320 ms after the impact and entered late; at 1300 they are named before it and enter on time, 20.4).
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1300 to 0 | accent `landing` | **The approach from the sky.** A small shadow on the mark, wide and faint at first, tightening and darkening (two flat dithered steps, no chequer). For the last ~7.5 squares of a 30-square fall the hero is seen dropping screen-down, faster and faster (z ~ (1 - u)^2): a compact dark body lit from the top left with a streak of torn air behind it (2-px core, white at the body, pale behind, broken towards its end) and speed lines beside it. At night the streak glints (its pale pixels are emissive), the body does not. On a token: no body (the token is the hero), only the streak coming down onto it. With a drag the fall slants in along the direction. |
+| 0 | accent `airRing` | **The blow.** A white-hot pin of a few pixels for 90 ms (no cross: it read as a crosshair). |
+| 0-560 | accent `airRing` | **The air thrown out:** a broken ring of pale arcs (12-18 arcs, a quarter missing, each a little in or out of round), squashed by the view, racing out to 2.6 squares and slowing (tau 120 ms), 2 px thick early, thinning and dropping out pixel by pixel. |
+| 50-950 | accent `airRing` | A slower, lower ring in the ground's dust tone behind it (0.62 of the reach). |
+| 0 | cue `screen` | A hard shake (0.85), no flash: there is no fire. |
+| 30 | destruction `crater` | Blast L3, cause **impact**: the pressed pale bowl with a dark core, its own short radial fractures and lit crest, chunks thrown. Starts 30 ms after the contact so the hero visibly arrives first. |
+| 50 | destruction `cracks` | **The radial cracks**: 5-7 crack strokes, ONE PER RAY (new place `rays`, `presets/rays.mjs`), from 0.45 sq out to 1.6-3 sq (rays ahead of a drag up to 45 % longer), uneven gaps, each ray wandering a little. Each ray's timed path opens its fissure from the centre out, fast then slowing (380-560 ms to the tip). Levels L2-L3 (60 / 40 %). |
+| 20 | dust `shock` L2 | **The dust wave**: the blasts' shock dust (section 17), r 2.7 sq, then its haze (240 s at L2), thinner over the crater. |
+
+Nothing burns, so there is **no aftermath fire** (`aftermath: null`: the bar shows "—" as for the guns). The lasting part is the
+dust haze, which thins out by itself (the shock dust's own haze life by level). Power -1 / +1 shifts the crater, cracks and dust
+levels; Size scales everything but the fall height.
+
+### 20.2 Why a stroke per ray
+
+A crack stroke grows ONE dominant fissure per area along a followed path, widest where it starts, and only inside the stroke's own
+mask (`destruction/core.mjs crackStrokes`). Tried live:
+- a star of thin rays in one stroke (a star path out and back): the fissure leaves the thin mask at its kinks and is cut into
+  specks - no rays;
+- one band-shaped stroke per ray with a straight timed path: one tapering, kinked fissure per ray with its secondaries. This is
+  what reads as "cracks running out from the impact".
+The mask of a crack stroke keeps the map's own pixels except the fissure, so the band itself never shows (no area edge). Cost: 6-8
+small strokes per firing (1 crater + 5-7 rays) instead of the 1-3 of section 8.2 - measured in 20.4.
+
+### 20.3 Files
+
+New: `scripts/presets/def-landing.mjs` (the definition), `scripts/presets/rays.mjs` (the rays place), `scripts/presets/landing-fx.mjs`
+(the two accents, pure), `dev/presets-landing.test.mjs`. Edited (small): `presets/defs.mjs` (one entry), `presets/core.mjs` (the
+`rays` place, the two accent kinds and their data), `presets/accents-core.mjs` (dispatch to landing-fx), `presets/accents-wire.mjs`
+(the two kinds), `presets/ui-core.mjs` + `presets/aim.mjs` (a point preset with `onToken` lands on the token), `lang/en.json`,
+`lang/pl.json`, two tests that assumed exactly four built-ins.
+
+### 20.4 Measured (lane 4, headless Chrome at DPR 2, 3168x1584)
+
+- **On time.** The entries were checked with a wrapped `display.enter` that logs how late each chunk is against its stroke's `at`.
+  - Pre-roll 900: the chunks were named 200-320 ms after the impact and entered late.
+  - Pre-roll 1300: the chunks were named about 60 ms before the impact. The GM entered all of them 0 ms late.
+  - A real player (Test Gracz 1, own origin) entered all six (crater + 5 rays) 0-1 ms late in the last run. One earlier run under heavier lane load was about 200 ms late.
+- **Cost** (`dev/boom-cost.mjs timeline`, 150 frames per row, leads drift because the rows run one after another).
+  - Nothing fired: GPU median 2.3-2.4 ms, p95 3.3-3.6; CPU median 0.4-0.5.
+  - Approach (-1.3 s, zoom 1): GPU median 2.5; CPU median 2.2 (the accent redraw), p95 3.3.
+  - Impact to 4 s (zoom 1 and 3, weak x1/x2): GPU median 2.4-3.2, p95 4.0-4.7; CPU median 0.5-0.6, p95 6.2-6.4.
+  - Haze at 6-26 s: GPU median 1.1-3.0, p95 3.5-5.6; CPU median 0.5.
+  - Haze at about 120 s: GPU median 3.4-3.7, p95 5.2-5.8; CPU median 0.5-0.9, p95 up to 11.7. This is the shock haze of section 17, unchanged here. The lane was shared with other agents' servers, so single p95 values are noisy.
+  - No long-frame bursts that the "nothing" rows do not also show (2-6 per 150 frames on this host).
+- **Nothing changes when the preset is not used.** On ZZ-land-day, with presets unused, the landing build and eb85f59 gave the same:
+  - fire/dust frame hashes (`dust-hash.mjs`, 3 times);
+  - the record of a brush-painted blast stroke;
+  - the count of moinen-maps settings (93);
+  - the presets API size.
+  The ticker listener count was 14-15 in both builds (A/A noise: when it is read). Offline, `dev/presets-landing.test.mjs` F checks that the older presets' definitions, plans and accent frames are identical to main at merge time (c7babb0: the four military presets and the lightning strike), with the shooter left unset.
+- **Seen in motion** (recordings click to settled):
+  - day and night at zoom 1 and 3;
+  - 5x crops in motion, day and night;
+  - a real player at zoom 2;
+  - the pad armed with the crack-star ghost over a token, and a landing on a token: it snaps to the token centre, with no body drawn.
+- **Not verified:**
+  - another GPU (GTX 1080) or a remote host (foundry.snieg.ovh);
+  - DPR 1;
+  - two GMs at once;
+  - zoom 0.6, judged only from the zoom-1 recordings.
+- **Weak points as built (honest):**
+  - The impact frame is busy: the L3 crater throws many small pieces.
+  - The streak near the body still reads a little like a rod.
+  - At night the cracks are subtle.
+  - The shock dust (section 17) is large and lumpy, and its haze motes read as dark pepper on light ground.

@@ -47,7 +47,7 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
 {
   const custom = [{ id: "bomb-copy", layers: [] }];
   const o = U.ordered(BUILTIN, { custom, order: ["uzi", "gone", "bomb-copy"] }).map((d) => d.id);
-  ok(J(o) === J(["uzi", "bomb-copy", "bomb", "grenade", "heliHmg", "lightning"]), `B order: listed first, then the rest (${J(o)})`);
+  ok(J(o) === J(["uzi", "bomb-copy", ...BUILTIN.map((d) => d.id).filter((id) => id !== "uzi")]), `B order: listed first, then the rest (${J(o)})`);
   ok(J(U.reorder(["a", "b", "c", "d"], "d", "b")) === J(["a", "d", "b", "c"]) && J(U.reorder(["a", "b", "c"], "a", null)) === J(["b", "c", "a"]) && J(U.reorder(["a", "b"], "z", "a")) === J(["a", "b"]), "B reorder");
   ok(U.hotkeyOf(0) === "1" && U.hotkeyOf(8) === "9" && U.hotkeyOf(9) === "⇧1" && U.hotkeyOf(17) === "⇧9" && U.hotkeyOf(18) === "", "B hotkey labels");
   ok(U.padOfKey("Digit1", false) === 0 && U.padOfKey("Digit9", true) === 17 && U.padOfKey("Numpad3", false) === 2 && U.padOfKey("Digit0", false) === -1 && U.padOfKey("KeyA", false) === -1, "B hotkeys -> pads");
