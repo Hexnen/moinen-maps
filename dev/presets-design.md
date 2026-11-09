@@ -642,3 +642,46 @@ The four questions asked here were answered by the user; P1 is built on these an
   a bomb with aftermath 60: 16 timed fires → `o = now`, `fires()` empty, the record stays `playing` until its dust is over.
 - **Not checked:** the remote host; a GTX 1080; the purge of a bomb after its 90 s dust (rule tested in node only); two GMs firing
   at once live.
+
+## 14. The guns as built (uzi, heliHmg: presets-guns)
+
+The user: the heli strafe was weak ("only two hits"). A strafe must read as a violent, natural run seen from the oblique view: many
+distinct hits opening in sequence along the walk, a believable spread, a slightly random path, at zoom 0.6-3, day and night.
+
+- **Walk timing** (`presets/core.mjs walkHits`): the shot interval `dt` is a whole number of `DT_STEP` (2.5 ms); hit `i` of lane `j`
+  lands at `(i + phase[j]) x dt`, the run lasts `n x dt`. A shooter given (`gesture.from` within 0.75 squares of the drag's start)
+  moves the first hit 1.2 squares out. `plan.walk.dt` is kept.
+- **Pocks** (destruction, timed path strokes, one per lane and 2 s run): small jagged blasts (`impact`, low rubble / debris /
+  scatter, pinned `pr`), a few small craters (heli `minis`). Gun strokes (`cause-fx.mjs isGun`: a path stroke of a preset) skip the
+  area-wide blast look that made the old run read as two blobs: no shock ring, no shadow, no dust skirt, no rolling path flashes
+  (`display.pathEffects`). Their chips, the chunks that stay (`debris.throwRest(.., at)`, a short hop from beside the spot) and
+  the night rim (`g.glowIn` after the walk) all follow the walk: nothing shows before its bullet lands.
+- **Hits dust** (fire layer, `fire/dust-model.mjs` kind `hits`): written at once as fire-layer dust strokes, one per lane and
+  unbroken run (`s = dt / HIT_DT`, `q` = the first hit). Each hit kicks its own cells and `per` emitters at `q + k x dt`, thrown
+  radially (the heading points back at the hit), rising fast (own `riseK` / `jetK` in a 5th kind table row) and gone in about
+  2 s; in the ground's own colour, moonlit at night. The table grew from 16 to 24 codes (`CODE_N` 32 in the cell packing); the
+  old kinds are unchanged (tested).
+- **Accents** (`presets/accents*.mjs`, every client, only while a gun firing is live): tracers (every 4th round of EACH heli gun,
+  from behind and above along the run, some ricochet), hit flashes with sparks, the muzzle flash and pale bullet streaks with a
+  shooter (uzi), a short warm ground glow per hit at night (illumination, MAX_COLOR), a small screen rumble for the heli (StageShaker,
+  never with noShake / reduced motion). Art pixels in the primary group (sortLayer 820). Reduced motion: no accents.
+- Tuned values live in `defs.mjs` (uzi: rate 14, sigma 0.18-0.36, pocks r 0.10-0.14, dust L1; heli: two lanes, rate 9, tracers
+  every 4, pocks r 0.18-0.26 + 6 % minis, dust L3, life 6 s).
+
+### Guns checks (2026-11-09, lane 3, RTX 3070 Ti, DPR 2)
+
+- `node dev/run-all.mjs` all pass, with the new `dev/presets-guns.test.mjs` (76 checks: beat, dust strokes and their cleaning, the
+  dust field's kicks per hit, accents determinism / spans / both guns' tracers / muzzle only with a shooter, the wiring).
+  `dev/destruction-cause.test.mjs` lists the guns commit (`c47949c`) as a cause-code commit (display only; the bake is unchanged).
+  `node dev/lang-audit.mjs` clean (no new strings).
+- **Unused = unchanged, A/B against 3267077** (lane junction flipped to a detached checkout and back, two runs each, blank test
+  scene): frozen-clock frame hash `ogwy91`, 91 settings, 13 ticker listeners; brush discs: records `cd5i5kb`, strokes `323h1f`;
+  `dev/dust-hash.mjs` fire / smoke / dust shots identical (`27c3881c`, `db0dd482`, `16b63806`, `ca64e437`).
+- **Cost** (`dev/guns-cost.mjs matrix`, at the busiest moment, GPU per frame median / p95 ms, weak 2 = dust and accents drawn twice):
+  heli z1: none 1.03 / 2.91, w1 1.21 / 3.29, w2 1.21 / 3.10; z3: none 0.98 / 2.33, w1 1.35 / 3.31, w2 1.62 / 3.61.
+  uzi z1: none 1.33 / 3.02, w1 1.03 / 2.66, w2 1.04 / 2.60; z3: none 0.97 / 2.27, w1 1.13 / 2.93, w2 1.50 / 2.96.
+  CPU ticker step median 1.2-1.4 ms (heli), 0.7 ms (uzi). The pocks' entry is not weak-emulated.
+- Recordings (not committed) in `dev/out/guns/`: each gun at zoom 1 and 3, day and night (heli also at zoom 0.6); before | after against 3267077;
+  5x crops; a real player (Test Gracz 1) watching a heli run fired by the GM.
+- **Not checked:** a GTX 1080 (only the weak-2 emulation); the remote host; two guns fired at once; a run across a
+  scene edge.
