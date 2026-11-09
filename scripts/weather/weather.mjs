@@ -138,8 +138,9 @@ export function refresh() {
     if ( lens ) { lens.destroy(); lens = null; }
     if ( steam ) { steam.destroy(); steam = null; }
     if ( clouds ) { clouds.destroy(); clouds = null; }
-    const next = P.keys.find((k) => k.t > now);
-    if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t - now + 20)));
+    // (a key that has just started fades in from nothing: its first few ms are below the presence cut, so look again shortly)
+    const next = P.keys.find((k) => k.t + k.dur > now && Object.keys(k.fx ?? {}).length);
+    if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t > now ? next.t - now + 20 : 100)));
     return;
   }
   const g = geo();
