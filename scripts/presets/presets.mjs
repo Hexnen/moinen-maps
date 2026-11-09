@@ -14,6 +14,7 @@ import { BUILTIN } from "./defs.mjs";
  *   fire(def | id, gesture, opts)  GM: fire it -> { id, plan }   gesture { a: [x, y], b?: [x, y], from?: [x, y] } in scene px;
  *                                 opts { seed, size 0.5..2, power -1..1, aftermath: seconds | null (no end) | undefined (the preset's) }
  *   firings()                     the open scene's firing records, newest first
+ *   undo(id)                      GM: take a firing back (its damage dissolves out, its fire and smoke go out, the record goes)
  */
 const defOf = (d) => (typeof d === "string" ? BUILTIN.find((b) => b.id === d) ?? null : d);
 let writer = null;
@@ -34,6 +35,7 @@ export const presetsApi = {
     if ( !d ) { ui.notifications?.warn(game.i18n.format("MOINENMAPS.DPreset.unknown", { id: String(def) })); return null; }
     return (await W()).fire(d, gesture, opts);
   },
+  async undo(id) { return (await W()).undo(id); },
   firings: () => {
     const F = canvas?.scene?.flags?.["moinen-maps"]?.presetFirings ?? {};
     return Object.values(F).filter((r) => r && typeof r === "object" && r.id).sort((a, b) => (b.t0 ?? 0) - (a.t0 ?? 0));

@@ -181,7 +181,9 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
   const h = fireAt(get("heliHmg"));
   const tr = h.pending.accent.find((a) => a.kind === "tracer");
   ok(tr && tr.hits.length === Math.floor(h.walk.hits.length / 4), "I heli: every 4th hit a tracer");
-  ok(h.destruction.filter((r) => r.key.startsWith("lanes")).length === 2, "I heli: one damage stroke per lane");
+  const ln = h.destruction.filter((r) => r.key.startsWith("lanes"));
+  ok(ln.some((r) => r.key.startsWith("lanes.0")) && ln.some((r) => r.key.startsWith("lanes.1")) && ln.length <= 2 * Math.ceil((h.walk.dur + 1) / C.RUN_MS),
+    "I heli: the damage strokes of each lane (a long burst in runs of RUN_MS)");
 }
 
 /* J */
