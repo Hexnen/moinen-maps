@@ -40,7 +40,18 @@ export function geo() {
 
 /* ---------------------------------------------------------------- the client's caps */
 
-const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
+// PERF: game.settings.get of a client setting reads local storage and builds a Setting document (~65 us a call on a 2x-throttled
+// player) and detailCap / lensCap run several times per weather step (~30 ms per 6 s there). Kept here; dropped when a client setting
+// changes (the hook, and these settings' own onChange, which Foundry calls BEFORE the hook) and read again at most a second later
+// anyway (a change written by another tab of the same browser).
+const setCache = new Map();
+const dropSettings = () => setCache.clear();
+const setting = (k, d) => {
+  const c = setCache.get(k), t = performance.now();
+  if ( c && t - c.at < 1000 ) return c.v;
+  let v; try { v = game.settings.get(MODULE_ID, k); } catch { return d; }
+  setCache.set(k, { v, at: t }); return v;
+};
 /** The highest world level this client draws (0 = off): its own setting, Performance Low caps at 2. */
 export function detailCap() {
   const s = setting("weatherDetail", "3"); if ( s === "off" ) return 0;
@@ -482,8 +493,8 @@ export const weatherApi = {
 
 export function registerWeatherSettings() {
   const ch = (k) => ({ off: `MOINENMAPS.Weather.cap.off`, 1: `MOINENMAPS.Weather.cap.1`, 2: `MOINENMAPS.Weather.cap.2`, 3: `MOINENMAPS.Weather.cap.3` });
-  game.settings.register(MODULE_ID, "weatherDetail", { name: "MOINENMAPS.Weather.set.detail", hint: "MOINENMAPS.Weather.set.detailHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { refresh(); tell("client"); } });
-  game.settings.register(MODULE_ID, "weatherLens", { name: "MOINENMAPS.Weather.set.lens", hint: "MOINENMAPS.Weather.set.lensHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { refresh(); tell("client"); } });
+  game.settings.register(MODULE_ID, "weatherDetail", { name: "MOINENMAPS.Weather.set.detail", hint: "MOINENMAPS.Weather.set.detailHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { dropSettings(); refresh(); tell("client"); } });
+  game.settings.register(MODULE_ID, "weatherLens", { name: "MOINENMAPS.Weather.set.lens", hint: "MOINENMAPS.Weather.set.lensHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { dropSettings(); refresh(); tell("client"); } });
   // the GM's last transition time (s) in the bar
   game.settings.register(MODULE_ID, "weatherOver", { scope: "client", config: false, type: Number, default: 20 });
 }
@@ -494,6 +505,7 @@ export function registerWeather() {
   setVortexProvider(() => (P.on && canvas.scene && P.tornadoes.length ? TM.vortices(P.tornadoes, sharedNow(), canvas.grid?.size ?? 100) : []));
   setFireWetProvider(fireWetNow);
   Hooks.once("init", registerWeatherSettings);
+  Hooks.on("clientSettingChanged", dropSettings);
   Hooks.on("canvasReady", onCanvasReady);
   Hooks.on("canvasTearDown", teardown);
   Hooks.on("updateScene", onUpdateScene);

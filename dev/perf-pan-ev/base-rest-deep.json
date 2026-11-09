@@ -1,0 +1,564 @@
+[
+ {
+  "wall": 6008,
+  "busyMs": 1745,
+  "layouts": 24,
+  "layoutMs": 11.4,
+  "styles": 24,
+  "styleMs": 1.2,
+  "scriptMs": 1773,
+  "taskMs": 2713,
+  "frames": 990,
+  "p50": "6.1",
+  "over17": 2,
+  "max": "484.3",
+  "incl": [
+   [
+    "mm:scripts/view-smooth.mjs",
+    1689.6
+   ],
+   [
+    "foundry",
+    1662.2
+   ],
+   [
+    "mm:scripts/fire/display.mjs",
+    1382.3
+   ],
+   [
+    "mm:scripts/weather/display.mjs",
+    130.6
+   ],
+   [
+    "mm:scripts/fire/art.mjs",
+    93.8
+   ],
+   [
+    "mm:scripts/weather/lens.mjs",
+    74.1
+   ],
+   [
+    "mm:scripts/weather/weather.mjs",
+    64.8
+   ],
+   [
+    "mm:scripts/weather/cells.mjs",
+    62.9
+   ],
+   [
+    "sequencer",
+    47.6
+   ],
+   [
+    "mm:scripts/frame-guard.mjs",
+    46.4
+   ],
+   [
+    "mm:scripts/destruction/sharp-batch.mjs",
+    28.1
+   ],
+   [
+    "mm:scripts/weather/steam.mjs",
+    26.4
+   ],
+   [
+    "mm:scripts/weather/model.mjs",
+    24.9
+   ],
+   [
+    "mm:scripts/destruction/display.mjs",
+    24.1
+   ],
+   [
+    "mm:scripts/pin.mjs",
+    23.2
+   ],
+   [
+    "mm:scripts/destruction/static-cache.mjs",
+    18.1
+   ],
+   [
+    "mm:scripts/filter.mjs",
+    8.6
+   ],
+   [
+    "mm:scripts/fire/model.mjs",
+    5.5
+   ],
+   [
+    "mm:scripts/fire/lights.mjs",
+    4.5
+   ],
+   [
+    "mm:scripts/zones/orbit.mjs",
+    4.2
+   ],
+   [
+    "mm:scripts/config.mjs",
+    3.9
+   ],
+   [
+    "mm:scripts/weather/guard.mjs",
+    3.8
+   ],
+   [
+    "mm:scripts/view-angle.mjs",
+    3.4
+   ],
+   [
+    "mm:scripts/wind.mjs",
+    3
+   ],
+   [
+    "mm:scripts/destruction/cause-fx.mjs",
+    2.5
+   ]
+  ],
+  "self": [
+   [
+    "(idle)",
+    3901.9
+   ],
+   [
+    "(program)",
+    362.5
+   ],
+   [
+    "foundry render:528",
+    118.3
+   ],
+   [
+    "foundry updateTransform:528",
+    94.7
+   ],
+   [
+    "(native) (anon):0",
+    91
+   ],
+   [
+    "(native) bufferSubData:-1",
+    59.3
+   ],
+   [
+    "foundry bind:491",
+    57.3
+   ],
+   [
+    "(native) uniformMatrix3fv:-1",
+    44.3
+   ],
+   [
+    "(native) drawElements:-1",
+    36.2
+   ],
+   [
+    "(native) bindTexture:-1",
+    34.6
+   ],
+   [
+    "(native) bindVertexArray:-1",
+    34.2
+   ],
+   [
+    "foundry (anon):12",
+    32.4
+   ],
+   [
+    "foundry _renderDirect:490",
+    32.3
+   ],
+   [
+    "foundry _renderWithCulling:528",
+    31.2
+   ],
+   [
+    "foundry bind:380",
+    31
+   ],
+   [
+    "foundry syncUniformGroup:491",
+    27.2
+   ],
+   [
+    "(native) useProgram:-1",
+    24.2
+   ],
+   [
+    "foundry _render:870",
+    24
+   ],
+   [
+    "(native) bindFramebuffer:-1",
+    23.6
+   ],
+   [
+    "foundry update:528",
+    20.1
+   ],
+   [
+    "(native) postMessage:-1",
+    16.8
+   ],
+   [
+    "foundry getStackLength:421",
+    16.6
+   ],
+   [
+    "(native) bindBuffer:-1",
+    16.2
+   ],
+   [
+    "foundry getBounds:528",
+    15.6
+   ],
+   [
+    "foundry packInterleavedGeometry:347",
+    15.4
+   ],
+   [
+    "foundry buildTexturesAndDrawCalls:347",
+    14.9
+   ],
+   [
+    "mm:scripts/view-smooth.mjs ticker._tick:120",
+    14.5
+   ],
+   [
+    "(native) requestAnimationFrame:-1",
+    14.3
+   ],
+   [
+    "foundry updateTransform:14",
+    14
+   ],
+   [
+    "mm:scripts/frame-guard.mjs chan.port1.onmessage:163",
+    13.8
+   ]
+  ],
+  "deep": [
+   [
+    "mm:scripts/fire/display.mjs R.render:83",
+    1213.6
+   ],
+   [
+    "mm:scripts/view-smooth.mjs ticker._tick:120",
+    68
+   ],
+   [
+    "mm:scripts/weather/cells.mjs draw:176",
+    59.9
+   ],
+   [
+    "mm:scripts/weather/weather.mjs setting:42",
+    31.7
+   ],
+   [
+    "mm:scripts/frame-guard.mjs rafLoop:159",
+    26.4
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.front._render:1600",
+    21.9
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.m._render:1583",
+    21.3
+   ],
+   [
+    "mm:scripts/weather/lens.mjs render:811",
+    19.8
+   ],
+   [
+    "mm:scripts/fire/art.mjs scissorPass:1684",
+    16.4
+   ],
+   [
+    "mm:scripts/fire/art.mjs renderPass:1482",
+    15.9
+   ],
+   [
+    "mm:scripts/frame-guard.mjs chan.port1.onmessage:163",
+    14.6
+   ],
+   [
+    "mm:scripts/destruction/sharp-batch.mjs container.render:74",
+    14
+   ],
+   [
+    "mm:scripts/destruction/static-cache.mjs render:217",
+    11.6
+   ],
+   [
+    "mm:scripts/weather/display.mjs tick:301",
+    11
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.glow._render:1618",
+    9.4
+   ],
+   [
+    "mm:scripts/filter.mjs isHidden:43",
+    8.6
+   ],
+   [
+    "mm:scripts/destruction/display.mjs tick:1657",
+    7.4
+   ],
+   [
+    "mm:scripts/view-smooth.mjs vsyncPeriod:39",
+    7.2
+   ],
+   [
+    "mm:scripts/pin.mjs sharedTick:16",
+    6.5
+   ],
+   [
+    "mm:scripts/weather/model.mjs blend:233",
+    6.2
+   ],
+   [
+    "mm:scripts/weather/steam.mjs tick:132",
+    6
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.smoke._render:1591",
+    5.9
+   ],
+   [
+    "mm:scripts/pin.mjs applyPose:205",
+    5
+   ],
+   [
+    "mm:scripts/weather/model.mjs wetAt:281",
+    4.8
+   ],
+   [
+    "mm:scripts/weather/model.mjs target:229",
+    4.8
+   ],
+   [
+    "mm:scripts/view-smooth.mjs get:29",
+    4.6
+   ],
+   [
+    "mm:scripts/zones/orbit.mjs tick:265",
+    4.2
+   ],
+   [
+    "mm:scripts/fire/display.mjs tick:339",
+    4
+   ],
+   [
+    "mm:scripts/config.mjs osReducedMotion:197",
+    3.9
+   ],
+   [
+    "mm:scripts/destruction/display.mjs sharpLive:1652",
+    3.5
+   ],
+   [
+    "mm:scripts/view-smooth.mjs (anon):42",
+    3.5
+   ],
+   [
+    "mm:scripts/fire/display.mjs placeParticles:595",
+    3.5
+   ],
+   [
+    "mm:scripts/view-angle.mjs cleanView:21",
+    3
+   ],
+   [
+    "mm:scripts/wind.mjs gustEnv:37",
+    3
+   ],
+   [
+    "mm:scripts/view-smooth.mjs push:86",
+    2.8
+   ],
+   [
+    "mm:scripts/weather/model.mjs gates:210",
+    2.5
+   ],
+   [
+    "mm:scripts/weather/display.mjs viewRect:292",
+    2.4
+   ],
+   [
+    "mm:scripts/view-smooth.mjs read:24",
+    2.3
+   ],
+   [
+    "mm:scripts/fire/display.mjs drawAhead:450",
+    2
+   ],
+   [
+    "mm:scripts/weather/cells.mjs update:146",
+    2
+   ]
+  ],
+  "fnIncl": [
+   [
+    "mm:scripts/view-smooth.mjs ticker._tick:120",
+    1689.1
+   ],
+   [
+    "mm:scripts/fire/display.mjs R.render:83",
+    1320.5
+   ],
+   [
+    "mm:scripts/weather/display.mjs WeatherDisplay._tick:84",
+    130.6
+   ],
+   [
+    "mm:scripts/weather/display.mjs tick:301",
+    129.1
+   ],
+   [
+    "mm:scripts/weather/cells.mjs update:146",
+    62.4
+   ],
+   [
+    "mm:scripts/fire/display.mjs FireDisplay._tick:126",
+    61.8
+   ],
+   [
+    "mm:scripts/weather/cells.mjs draw:176",
+    59.9
+   ],
+   [
+    "mm:scripts/fire/display.mjs tick:339",
+    58.6
+   ],
+   [
+    "mm:scripts/weather/lens.mjs WeatherLens._tick:849",
+    52.2
+   ],
+   [
+    "mm:scripts/weather/lens.mjs tick:942",
+    51.2
+   ],
+   [
+    "mm:scripts/weather/weather.mjs step:309",
+    48.2
+   ],
+   [
+    "mm:scripts/weather/weather.mjs display.onStep:151",
+    48.2
+   ],
+   [
+    "mm:scripts/weather/weather.mjs clientState:57",
+    43.7
+   ],
+   [
+    "mm:scripts/weather/lens.mjs draw:981",
+    33.9
+   ],
+   [
+    "mm:scripts/weather/weather.mjs setting:42",
+    31.7
+   ],
+   [
+    "mm:scripts/fire/display.mjs drawAhead:450",
+    30.4
+   ],
+   [
+    "mm:scripts/destruction/sharp-batch.mjs container.render:74",
+    28.1
+   ],
+   [
+    "mm:scripts/frame-guard.mjs rafLoop:159",
+    26.4
+   ],
+   [
+    "mm:scripts/weather/steam.mjs SteamLayer._tick:102",
+    26.4
+   ],
+   [
+    "mm:scripts/weather/steam.mjs tick:132",
+    24.4
+   ],
+   [
+    "mm:scripts/weather/weather.mjs detailCap:44",
+    23.9
+   ],
+   [
+    "mm:scripts/pin.mjs sharedTick:16",
+    22.7
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.front._render:1600",
+    21.9
+   ],
+   [
+    "mm:scripts/destruction/display.mjs DestructionDisplay._tick:246",
+    21.8
+   ],
+   [
+    "mm:scripts/fire/art.mjs FireArt.m._render:1583",
+    21.3
+   ],
+   [
+    "mm:scripts/weather/model.mjs resolve:318",
+    20.5
+   ],
+   [
+    "mm:scripts/destruction/display.mjs tick:1657",
+    19.9
+   ],
+   [
+    "mm:scripts/weather/lens.mjs render:811",
+    19.8
+   ],
+   [
+    "mm:scripts/weather/lens.mjs begin:961",
+    16.8
+   ],
+   [
+    "mm:scripts/pin.mjs tick:251",
+    16.6
+   ],
+   [
+    "mm:scripts/fire/art.mjs scissorPass:1684",
+    16.4
+   ],
+   [
+    "mm:scripts/fire/art.mjs stepJob:1787",
+    16.4
+   ],
+   [
+    "mm:scripts/fire/art.mjs renderPass:1482",
+    15.9
+   ],
+   [
+    "mm:scripts/frame-guard.mjs chan.port1.onmessage:163",
+    14.6
+   ],
+   [
+    "mm:scripts/weather/weather.mjs fireWetNow:281",
+    14
+   ],
+   [
+    "mm:scripts/view-smooth.mjs periodNow:142",
+    12.5
+   ],
+   [
+    "mm:scripts/destruction/static-cache.mjs render:217",
+    12.1
+   ],
+   [
+    "mm:scripts/fire/art.mjs startPre:1750",
+    11.5
+   ],
+   [
+    "mm:scripts/pin.mjs stepPresence:148",
+    10.8
+   ],
+   [
+    "mm:scripts/view-smooth.mjs vsyncPeriod:39",
+    10.7
+   ]
+  ]
+ }
+]

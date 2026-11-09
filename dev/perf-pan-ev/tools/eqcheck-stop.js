@@ -1,0 +1,1 @@
+const S = window.__eq; canvas.app.ticker.remove(S.tick); Hooks.off("canvasPan", S.hook); return { calls: S.calls, pans: S.pans, ticks: S.ticks, moved: S.moved, bad: S.bad, ks: S.kSet.size, heights: [...S.hSet], clampPlaces: S.clampN, edgePlaces: S.edgeN, badRows: S.badRows };

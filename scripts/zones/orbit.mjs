@@ -261,7 +261,13 @@ const back = {
 
 const strip = {
   el: null, key: "",
-  remove() { this.el?.remove(); this.el = null; this.watch(false); },
+  // PERF: the strip's height (offsetHeight), kept between camera frames. place() runs on every camera frame (canvasPan and the tick
+  // below); reading offsetHeight there, after the style writes of the previous place() and whatever else changed this frame, forced a
+  // synchronous layout of the page on each frame (21-93 ms per Director shot on a 2x-throttled player). The height changes only with the
+  // content (refresh() measures it right after writing it) or a re-layout of the content itself (fonts, zoom), which a ResizeObserver
+  // reports after a layout the browser does anyway. `last` = the values written last: the same place again writes nothing.
+  h: null, ro: null, last: null,
+  remove() { this.ro?.disconnect(); this.ro = null; this.h = null; this.last = null; this.el?.remove(); this.el = null; this.watch(false); },
   /** Follow the camera every frame it moves (canvasPan does not fire for every camera change): one cheap compare per tick. */
   tick: () => {
     const st = canvas?.stage; if ( !st || !strip.el ) return;
@@ -285,6 +291,9 @@ const strip = {
       this.el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); orbitScene()?.view(); });
       (document.getElementById("board") ?? document.body).after(this.el);
       this.watch(true);
+      // (offsetHeight read inside the observer's callback: the layout it reports is fresh, so the read forces nothing)
+      this.ro = typeof ResizeObserver === "function" ? new ResizeObserver(() => { if ( this.el ) this.h = this.el.offsetHeight; }) : null;
+      this.ro?.observe(this.el);
     }
     const here = canvas.scene.id;
     const chip = (t) => {
@@ -295,6 +304,7 @@ const strip = {
     };
     this.el.innerHTML = `<button type="button" class="mm-orbit-head" data-view="1" data-tooltip="${esc(T("headTip"))}"><i class="fa-solid fa-earth-europe" inert></i>
       <span>${esc(T("head"))}</span><b>${list.length}</b></button>${list.map(chip).join("")}`;
+    this.h = this.el.offsetHeight;                    // new content: measured now (one layout per refresh, as before)
     this.place();
   },
   /** Keep it on the map's top edge, sized with the map (within limits, so it stays readable zoomed out). */
@@ -303,10 +313,14 @@ const strip = {
     const r = canvas.dimensions.sceneRect, p = canvas.clientCoordinatesFromCanvas({ x: r.x + r.width / 2, y: r.y });
     const k = Math.max(0.55, Math.min(1.5, (canvas.stage.scale.x * canvas.grid.size) / 100));
     // above the top edge; when the edge is at (or past) the top of the screen it stays on screen, just inside the map
-    const top = Math.max(p.y, this.el.offsetHeight * k + 10);
-    this.el.style.left = `${p.x}px`; this.el.style.top = `${top}px`;
-    this.el.style.transform = `translate(-50%, calc(-100% - 6px)) scale(${k})`;
-    this.el.style.transformOrigin = "50% 100%";
+    // (no ResizeObserver: the height is read live, as it always was)
+    const h = this.ro ? (this.h ??= this.el.offsetHeight) : this.el.offsetHeight;
+    const top = Math.max(p.y, h * k + 10);
+    // only what changed is written (each write is parsed as CSS; most camera frames move the strip, few rescale it)
+    const s = this.el.style, L = (this.last ||= {}), left = `${p.x}px`, topS = `${top}px`, tf = `translate(-50%, calc(-100% - 6px)) scale(${k})`;
+    if ( L.left !== left ) s.left = L.left = left;
+    if ( L.top !== topS ) s.top = L.top = topS;
+    if ( L.tf !== tf ) { s.transform = L.tf = tf; s.transformOrigin = "50% 100%"; }
   },
   onClick(ev) {
     const b = ev.target.closest("button"); if ( !b ) return;

@@ -1,0 +1,5 @@
+glide-top {"calls":536,"pans":270,"ticks":266,"moved":350,"bad":0,"ks":90,"heights":[48],"clampPlaces":102,"edgePlaces":402,"badRows":[]}
+wheel-zoom {"calls":302,"pans":151,"ticks":151,"moved":223,"bad":0,"ks":72,"heights":[48],"clampPlaces":1,"edgePlaces":301,"badRows":[]}
+drag {"calls":791,"pans":395,"ticks":396,"moved":403,"bad":0,"ks":9,"heights":[48],"clampPlaces":434,"edgePlaces":20,"badRows":[]}
+director-take {"calls":471,"pans":67,"ticks":404,"moved":98,"bad":0,"ks":1,"heights":[48],"clampPlaces":123,"edgePlaces":40,"badRows":[]}
+director-follow {"calls":550,"pans":106,"ticks":444,"moved":106,"bad":0,"ks":1,"heights":[48],"clampPlaces":174,"edgePlaces":0,"badRows":[]}
