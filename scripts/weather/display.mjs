@@ -125,7 +125,7 @@ export class WeatherDisplay {
     const ru = (mode) => ({ ...this.common(seed), uMode: mode, uTime: 0, uTiles: new Float32Array([0, 0, 1, 1]), uPer: new Float32Array([0, 0, 0]),
       uDens: new Float32Array([0, 0, 0]), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]), uWindDir: new Float32Array([1, 0]),
       uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array([235, 170, 420]), uExpK: 1,
-      uSplash: new Float32Array([1, 0.5]), uPuddle: 2, uWetP: 0, uI: 1, uSky: new Float32Array(SKY), uAlpha: 1,
+      uSplash: new Float32Array([1, 0.5]), uPuddle: 2, uWetP: 0, uI: 1, uSky: new Float32Array(SKY), uAlpha: 1, uFlash: 0,
       uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, uPx: 1, translationMatrix: new PIXI.Matrix().toArray(true) });
     this.splash = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(1))), 253);
     this.air = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(0))), 995, Infinity);

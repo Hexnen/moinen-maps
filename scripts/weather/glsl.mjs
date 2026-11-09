@@ -577,6 +577,7 @@ flat in vec4 vDb;
 flat in vec4 vDc;
 uniform vec3 uSky;
 uniform float uAlpha;
+uniform float uFlash;         // the rain's lightning (storm.mjs): the streaks catch the flash (0: exactly the plain rain)
 uniform vec2 uView;
 uniform sampler2D uDepth;     // Foundry's depth mask (roofs that hide the weather)
 uniform float uDepthElev;
@@ -603,16 +604,19 @@ void main() {
     // a falling streak: a capsule from its tail to its head, thinner and fainter toward the tail (the drop is at the head)
     float t, d = segT(p, vSeg.xy, vSeg.zw, t);
     float hd = smoothstep(0.15, 0.85, t);
+    // (a lightning flash: every streak lit at once, whiter and more opaque - the rain frozen in the flash; uFlash 0 adds exactly 0)
+    float fa = 1.0 + uFlash * 0.9;
+    vec3 fc = uFlash * vec3(0.30, 0.33, 0.40);
     if ( layer == 0 ) {
       float w = mix(0.36, 0.5, hd);
-      lay(cov(d - w, w, 0.25) * mix(0.42, 0.68, hd), 1.12 * uSky);
+      lay(min(1.0, cov(d - w, w, 0.25) * mix(0.42, 0.68, hd) * fa), 1.12 * uSky + fc);
     } else if ( layer == 1 ) {
       float w = mix(0.26, 0.34, hd);
-      lay(cov(d - w, w, 0.25) * mix(0.16, 0.24, hd), 1.05 * uSky);
+      lay(min(1.0, cov(d - w, w, 0.25) * mix(0.16, 0.24, hd) * (1.0 + uFlash * 1.4)), 1.05 * uSky + fc);
     } else {
       // near the camera: wider, out of focus, see-through
       float w = mix(0.7, 0.95, hd);
-      lay(cov(d - w, w, 0.7) * mix(0.30, 0.46, hd), 1.12 * uSky);
+      lay(min(1.0, cov(d - w, w, 0.7) * mix(0.30, 0.46, hd) * fa), 1.12 * uSky + fc);
     }
     out_(); return;
   }

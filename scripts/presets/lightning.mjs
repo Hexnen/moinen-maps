@@ -110,6 +110,8 @@ void main() {
 }`;
 let program = null;
 const prog = () => (program ??= PIXI.Program.from(VERT, FRAG, "moinen-maps-presets-strike-v3"));
+/** The bolt's program, shared (read only) with the rain's lightning (weather/storm.mjs): the same crisp bolt, its own uniforms. */
+export const strikeProgram = prog;
 
 /* ---------------------------------------------------------------- one strike */
 
