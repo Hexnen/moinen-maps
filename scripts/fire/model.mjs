@@ -51,7 +51,7 @@
 export const FLAG = "fire";
 export const STROKES = "fireStrokes";
 export const VERSION = 2;
-export const KINDS = ["fire", "smoke", "erase"];
+export const KINDS = ["fire", "smoke", "erase", "dust"];
 export const STYLES = ["fire", "fireball"];
 export const LEVELS = [1, 2, 3];
 
@@ -90,6 +90,7 @@ export const FIRE_LV = {
 export const SMOKE_LV = [0, 0.55, 1, 1.45];
 
 import { NATURAL, cleanColor, rampOf, puffsOf } from "./look.mjs";
+import { DUST_KINDS, dustRect, dustCore, dustEnd, dustRaster } from "./dust-model.mjs";
 export { NATURAL, rampOf };
 
 const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -129,11 +130,13 @@ export function cleanStroke(o) {
     q: Number.isFinite(Number(o.q)) ? Math.round(Number(o.q)) : 0, sd: (Number(o.sd) >>> 0) || hashStr(o.id) };
   if ( k === "fire" ) { out.lv = int(o.lv, 2, 1, 3); out.sm = int(o.sm, 2, 0, 3); }
   else if ( k === "smoke" ) out.sm = int(o.sm, 2, 1, 3);
-  if ( k !== "erase" && o.st === "fireball" ) out.st = "fireball";
-  if ( k !== "erase" ) { const c = cleanColor(o.c); if ( c ) out.c = c; }
+  else if ( k === "dust" ) { out.lv = int(o.lv, 2, 1, 3); out.dk = DUST_KINDS.includes(o.dk) ? o.dk : "car"; }   // (dust-model.mjs)
+  const own = k === "fire" || k === "smoke";
+  if ( own && o.st === "fireball" ) out.st = "fireball";
+  if ( own ) { const c = cleanColor(o.c); if ( c ) out.c = c; }
   // the footprint: e = 1 an organic edge (every stroke painted since; older ones keep their round brush), tn = torn (0.1..1)
-  if ( k !== "erase" && o.e === 1 ) out.e = 1;
-  if ( k !== "erase" && Number(o.tn) > 0 ) out.tn = Math.round(num(o.tn, 0.6, ...LIMITS.tear) * 100) / 100;
+  if ( own && o.e === 1 ) out.e = 1;
+  if ( own && Number(o.tn) > 0 ) out.tn = Math.round(num(o.tn, 0.6, ...LIMITS.tear) * 100) / 100;
   if ( o.o !== undefined && o.o !== null && Number.isFinite(Number(o.o)) ) out.o = Math.round(Number(o.o));
   if ( o.g !== undefined && o.g !== null && Number.isFinite(Number(o.g)) ) out.g = Math.round(Number(o.g));
   return out;
@@ -297,6 +300,7 @@ export function puffMask(W, H, src, R) {
 
 /** A stroke's CORE (cells, integers, x1/y1 exclusive): its path and its flame tongues - what joins areas. */
 export function coreOf(st, geo, P) {
+  if ( st.k === "dust" ) return dustCore(st, geo);
   const b = pathBox(st, geo);
   if ( st.k === "fire" ) b.y0 -= flameOf(st, sizes(geo, P)) + 2;
   return cells(b, marginOf(st, geo));
@@ -307,6 +311,7 @@ export function coreOf(st, geo, P) {
  * puffs' whole reach. Without the puffs: the FIRE BOX (where the tongues, the bed and the sparks are drawn; art.mjs skips them outside).
  */
 export function reachOf(st, geo, P, puffs = true) {
+  if ( st.k === "dust" ) return dustRect(st, geo);
   const Z = sizes(geo, P), b = pathBox(st, geo), r = { ...b };
   if ( st.k === "fire" ) r.y0 -= flameOf(st, Z) + 2;
   if ( smokeOf(st, P) > 0 && P.plume > 0 ) {
@@ -353,6 +358,7 @@ export function catchMs(st, geo, P) {
 /** When a stroke was lit (or its eraser applied): its paint time, or the time an undo / redo brought it back. */
 export const litTime = (st) => st.g ?? st.q;
 function endOf(st, geo, P, T) {
+  if ( st.k === "dust" ) return dustEnd(st, geo);
   if ( st.k === "erase" ) return st.o !== undefined ? st.o + T.growSpan : litTime(st) + T.outSpan;
   return st.o !== undefined ? st.o + T.outSpan : litTime(st) + catchMs(st, geo, P) + T.growSpan;
 }
@@ -395,7 +401,7 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   for ( const s of strokes ) phases[s.id] = phaseOf(s, now, geo, P, still);
   const live = strokes.filter((s) => phases[s.id] !== "gone");
   const list = live.filter((s) => s.k !== "erase"), erasers = live.filter((s) => s.k === "erase");
-  const style = (s) => (s.st === "fireball" ? "fireball" : "fire"), color = (s) => colorOf(s, P);
+  const style = (s) => (s.k === "dust" ? "dust" : s.st === "fireball" ? "fireball" : "fire"), color = (s) => (s.k === "dust" ? "" : colorOf(s, P));
   const reach = list.map((s) => reachOf(s, geo, P)), rects = list.map((s) => coreOf(s, geo, P));
   const parent = list.map((_, i) => i);
   const find = (i) => { while ( parent[i] !== i ) i = parent[i] = parent[parent[i]]; return i; };
@@ -430,7 +436,10 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     wx /= wsum || 1; wy /= wsum || 1;
     const id = members.map((s) => s.id).sort()[0], ph = {};
     for ( const s of all ) ph[s.id] = phases[s.id];
-    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), ph[s.id], s.p.length, hashStr(s.p.join(","))])))}`;
+    // (a DUST area's look follows the shared clock from its strokes' times alone: its phases are left out of the key, so a stroke done
+    // kicking up its dust does not rebuild the area)
+    const dust = style(members[0]) === "dust";
+    const key = `${id}:${hashStr(pkey + JSON.stringify(all.map((s) => { const r = [s.id, s.k, s.s, s.r, s.wd, s.ws, s.q, s.g ?? null, s.o ?? null, s.lv ?? 0, s.sm ?? 0, s.st ?? "", s.e ?? 0, s.tn ?? 0, color(s), dust ? null : ph[s.id], s.p.length, hashStr(s.p.join(","))]; if ( s.dk ) r.push(s.dk); return r; })))}`;
     out.push({ id, key, rect, box, strokes: all, phases: ph, wind: [wx, wy], seed: hashStr(id), style: style(members[0]), color: color(members[0]) });
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -642,6 +651,7 @@ function stamp(buf, W, H, x0, y0, st, geo, P, phase, Z, T, ball = true) {
  * for the channels. Pure and deterministic (the same bytes on every client).
  */
 export function raster(area, geo, P) {
+  if ( area.style === "dust" ) return dustRaster(area, geo, P);
   const { rect } = area, W = Math.max(1, rect.x1 - rect.x0), H = Math.max(1, rect.y1 - rect.y0), N = W * H;
   const Z = sizes(geo, P), T = timing(geo, P), buf = buffers(N);
   for ( const st of area.strokes ) stamp(buf, W, H, rect.x0, rect.y0, st, geo, P, area.phases?.[st.id] ?? "on", Z, T, area.style === "fireball");

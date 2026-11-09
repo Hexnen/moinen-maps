@@ -4,16 +4,18 @@ import * as Fire from "./fire.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 
 /**
- * Painting FIRE AND SMOKE (GM): a fire brush, a smoke brush and an eraser of this layer. A stroke shows at once while painted (a
+ * Painting FIRE AND SMOKE (GM): a fire brush, a smoke brush, a DUST brush (ground dust and grit: dust-model.mjs) and an eraser of this
+ * layer. A stroke shows at once while painted (a
  * draft, catching from where it began) and is stored as one stroke object at the pointer-up. Keys while a tool is in hand: [ ] brush
  * size, 1 2 3 the level (fire brush: the fire level; smoke brush: the smoke level - as destruction's 1 2 3), Shift+0..3 the fire
  * brush's own smoke level (0 = no smoke; by key position), Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Escape ends the stroke.
  * Client settings: fireBrush (grid squares), fireStrength, fireWind, fireWindDir, fireLevel, fireSmoke (the fire brush's smoke
  * level), smokeLevel (the smoke brush's), fireStyle ("fire" | "fireball"), fireBrushColor (the fire brush's colour "#rrggbb", "" = the
- * scene's fire colour: the stroke stores none); each control remembers its own last value.
+ * scene's fire colour: the stroke stores none), dustKind ("bike" | "car" | "drag" | "heavy"), dustLevel (1..3; keys 1 2 3 with the
+ * dust brush); each control remembers its own last value.
  */
-const RING = { fire: 0xff8a24, smoke: 0x9a948c, erase: 0xffffff };
-let mode = null;            // "fire" | "smoke" | "erase" | null
+const RING = { fire: 0xff8a24, smoke: 0x9a948c, erase: 0xffffff, dust: 0xc8b48c };
+let mode = null;            // "fire" | "smoke" | "erase" | "dust" | null
 let cursor = null, listeners = null, stroke = null, lastPoint = null;
 
 const opt = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
@@ -30,6 +32,9 @@ export function registerFireSettings(onChange) {
   game.settings.register(MODULE_ID, "smokeLevel", { scope: "client", config: false, type: Number, default: 2, onChange: f });
   game.settings.register(MODULE_ID, "fireStyle", { scope: "client", config: false, type: String, default: "fire", onChange: f });
   game.settings.register(MODULE_ID, "fireBrushColor", { scope: "client", config: false, type: String, default: "", onChange: f });
+  // the DUST brush: what passed along the path (dust-model.mjs DUST_KINDS) and its level
+  game.settings.register(MODULE_ID, "dustKind", { scope: "client", config: false, type: String, default: "car", onChange: f });
+  game.settings.register(MODULE_ID, "dustLevel", { scope: "client", config: false, type: Number, default: 2, onChange: f });
 }
 
 export const brush = () => ({
@@ -41,7 +46,9 @@ export const brush = () => ({
   fireSmoke: clamp(Math.round(Number(opt("fireSmoke", 2)) ?? 2), 0, 3),
   smokeLevel: clamp(Math.round(Number(opt("smokeLevel", 2)) || 2), 1, 3),
   style: opt("fireStyle", "fire") === "fireball" ? "fireball" : "fire",
-  color: /^#[0-9a-f]{6}$/i.test(String(opt("fireBrushColor", ""))) ? String(opt("fireBrushColor", "")).toLowerCase() : ""
+  color: /^#[0-9a-f]{6}$/i.test(String(opt("fireBrushColor", ""))) ? String(opt("fireBrushColor", "")).toLowerCase() : "",
+  dust: ["bike", "car", "drag", "heavy"].includes(opt("dustKind", "car")) ? opt("dustKind", "car") : "car",
+  dustLevel: clamp(Math.round(Number(opt("dustLevel", 2)) || 2), 1, 3)
 });
 const radius = () => canvas.grid.size * brush().size / 2;
 const worldPoint = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
@@ -73,6 +80,7 @@ function drawCursor(p) {
 
 function strokeOf(s) {
   const b = brush();
+  if ( mode === "dust" ) return { k: "dust", r: Math.round(radius()), s: 1, wd: b.windDir, ws: b.wind, p: s.pts.flat(), q: s.q, lv: b.dustLevel, dk: b.dust };
   return { k: mode, r: Math.round(radius()), s: mode === "erase" ? 1 : b.strength, wd: b.windDir, ws: mode === "erase" ? 0 : b.wind, p: s.pts.flat(), q: s.q,
     lv: b.level, sm: mode === "smoke" ? b.smokeLevel : b.fireSmoke, st: b.style, ...(mode === "fire" && b.color ? { c: b.color } : {}) };
 }
@@ -134,7 +142,7 @@ export function onCanvasReady() {
         game.settings.set(MODULE_ID, "fireBrush", Math.round(clamp(brush().size + (e.key === "]" ? 0.25 : -0.25), 0.25, 10) * 4) / 4);
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && mode !== "erase" && /^[123]$/.test(e.key) ) {
         e.preventDefault(); e.stopPropagation();
-        game.settings.set(MODULE_ID, mode === "smoke" ? "smokeLevel" : "fireLevel", Number(e.key));
+        game.settings.set(MODULE_ID, mode === "smoke" ? "smokeLevel" : mode === "dust" ? "dustLevel" : "fireLevel", Number(e.key));
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey && mode === "fire" && /^Digit[0-3]$/.test(e.code) ) {
         e.preventDefault(); e.stopPropagation();
         game.settings.set(MODULE_ID, "fireSmoke", Number(e.code.slice(5)));

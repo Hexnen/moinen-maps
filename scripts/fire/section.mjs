@@ -8,7 +8,8 @@ import { PRESETS } from "./look.mjs";
 
 /**
  * FIRE AND SMOKE in the Destruction workspace (added with extendSection: section.mjs is unchanged):
- *  - tools: a fire brush, a smoke brush, an eraser of this layer;
+ *  - tools: a fire brush, a smoke brush, a DUST brush (ground dust and grit kicked up by something moving: a motorbike, a car, small or
+ *    large rubble dragged - its kind and level 1..3), an eraser of this layer;
  *  - bar: size, strength and wind (direction + strength) of the brush in hand; the fire brush's FIRE LEVEL and its own SMOKE LEVEL
  *    side by side (smoke with "off"), its style (fire / fireball) and its COLOUR (the scene's, seven presets, a custom colour);
  *    the smoke brush's smoke level - the same level buttons as
@@ -19,9 +20,13 @@ import { PRESETS } from "./look.mjs";
  *    fire or an override, flicker), torn edges + tearing, and the list of strokes (newest first, its
  *    levels - click to change them -, torn on / off for that stroke, and delete one), Clear.
  */
-const TOOLS = { "mm-fire-paint": "fire", "mm-fire-smoke": "smoke", "mm-fire-erase": "erase" };
-const KIND_ICON = { fire: "fa-solid fa-fire", smoke: "fa-solid fa-smog", erase: "fa-solid fa-eraser" };
-const KIND_INK = { fire: "#ff8a24", smoke: "#a8a29a", erase: "#ffffff" };
+const TOOLS = { "mm-fire-paint": "fire", "mm-fire-smoke": "smoke", "mm-fire-dust": "dust", "mm-fire-erase": "erase" };
+const KIND_ICON = { fire: "fa-solid fa-fire", smoke: "fa-solid fa-smog", erase: "fa-solid fa-eraser", dust: "fa-solid fa-wind" };
+const KIND_INK = { fire: "#ff8a24", smoke: "#a8a29a", erase: "#ffffff", dust: "#c8b48c" };
+/** DUST AND GRIT (dust-model.mjs): what passed along the path, and the level colours (light dust ... a thick cloud). */
+const DUST_KINDS = ["bike", "car", "drag", "heavy"];
+const DUST_KIND_INK = { bike: "#d9c9a3", car: "#c8b48c", drag: "#a8987a", heavy: "#8a7a62" };
+const DUST_COLOR = ["#8c8c8c", "#e3d6b8", "#c8b48c", "#9a8664"];
 /** The eight wind directions (degrees, screen: 0 = right, 90 = down), drawn as one arrow turned. */
 const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
 /** Level colours, as destruction's level buttons (0: smoke off). */
@@ -50,7 +55,15 @@ function bar(host, ctx) {
   const mode = TOOLS[ctx.tool], b = Editor.brush();
   const size = optRange({ name: "fireBrush", label: T("Fire.size"), value: b.size, min: 0.25, max: 10, step: 0.25, hint: T("Fire.sizeHint") });
   if ( mode === "erase" ) host.innerHTML = `${size}${optHint(T("Fire.eraseHint"))}`;
-  else {
+  else if ( mode === "dust" ) {
+    const dirs = DIRS.map((d) => `<button type="button" class="mm-ws-toolbtn" data-wind-dir="${d}" aria-pressed="${d === b.windDir}" aria-label="${esc(T(`Fire.dir.${d}`))}" data-tooltip="${esc(T(`Fire.dir.${d}`))}"><i class="fa-solid fa-arrow-right fa-rotate-by" style="--fa-rotate-angle:${d}deg" inert></i></button>`).join("");
+    host.innerHTML = `${size}
+      ${levelRow("Fire.dustKind", "dust-kind", DUST_KINDS, b.dust, (k) => T(`Fire.dk.${k}`), (k) => T(`Fire.dkHint.${k}`), DUST_KIND_INK)}
+      ${levelRow("Fire.dustLevel", "dust-level", [1, 2, 3], b.dustLevel, (l) => T(`Fire.dst${l}`), (l) => T(`Fire.dstHint${l}`), DUST_COLOR)}
+      ${optRange({ name: "fireWind", label: T("Fire.wind"), value: b.wind, min: 0, max: 1, step: 0.05, hint: T("Fire.dustWindHint") })}
+      <div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Fire.windDir"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Fire.windDir"))}">${dirs}</div></div>
+      ${optHint(T("Fire.dustHint"))}`;
+  } else {
     const dirs = DIRS.map((d) => `<button type="button" class="mm-ws-toolbtn" data-wind-dir="${d}" aria-pressed="${d === b.windDir}" aria-label="${esc(T(`Fire.dir.${d}`))}" data-tooltip="${esc(T(`Fire.dir.${d}`))}"><i class="fa-solid fa-arrow-right fa-rotate-by" style="--fa-rotate-angle:${d}deg" inert></i></button>`).join("");
     const levels = mode === "smoke"
       ? levelRow("Fire.smokeLevel", "smoke-level", [1, 2, 3], b.smokeLevel, SMK, SMKH, SMOKE_COLOR)
@@ -66,8 +79,8 @@ function bar(host, ctx) {
       ${optHint(mode === "smoke" ? T("Fire.smokeHint") : T("Fire.paintHint"))}`;
   }
   const off = bindSettings(host, { fireBrush: "fireBrush", fireStrength: "fireStrength", fireWind: "fireWind" });
-  const PICK = { windDir: "fireWindDir", fireLevel: "fireLevel", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle", fireColor: "fireBrushColor" };
-  const STR = new Set(["fireStyle", "fireColor"]);
+  const PICK = { windDir: "fireWindDir", fireLevel: "fireLevel", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle", fireColor: "fireBrushColor", dustKind: "dustKind", dustLevel: "dustLevel" };
+  const STR = new Set(["fireStyle", "fireColor", "dustKind"]);
   const onClick = (ev) => {
     if ( ev.target.closest?.("[data-fire-torn]") ) { Fire.setParams({ torn: !Fire.params0().torn }); return; }
     for ( const k of Object.keys(PICK) ) {
@@ -79,7 +92,7 @@ function bar(host, ctx) {
   const onInput = (ev) => { const c = ev.target.closest?.("input[name=fireBrushColor]"); if ( c ) game.settings.set(MODULE_ID, "fireBrushColor", c.value.toLowerCase()); };
   host.addEventListener("click", onClick); host.addEventListener("change", onInput);
   const sync = () => {
-    const nb = Editor.brush(), cur = { windDir: nb.windDir, fireLevel: nb.level, fireSmoke: nb.fireSmoke, smokeLevel: nb.smokeLevel, fireStyle: nb.style, fireColor: nb.color };
+    const nb = Editor.brush(), cur = { windDir: nb.windDir, fireLevel: nb.level, fireSmoke: nb.fireSmoke, smokeLevel: nb.smokeLevel, fireStyle: nb.style, fireColor: nb.color, dustKind: nb.dust, dustLevel: nb.dustLevel };
     for ( const k of Object.keys(PICK) ) for ( const x of host.querySelectorAll(`[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`) ) {
       x.setAttribute("aria-pressed", String((STR.has(k) ? x.dataset[k] : Number(x.dataset[k])) === cur[k]));
     }
@@ -97,12 +110,13 @@ function mountPanel(host) {
   if ( game.user.isGM ) Fire.warmUp();                                 // (the fire panel open: a stroke is coming)
   const gm = game.user.isGM;
   const rowsOf = (P) => Fire.list().reverse().map((s) => {
-      const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : "");
-      const tip = s.k === "erase" ? name : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
+      const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : s.k === "dust" ? ` (${T(`Fire.dk.${s.dk}`)})` : "");
+      const tip = s.k === "erase" ? name : s.k === "dust" ? `${name} · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%` : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
       // the levels: click to step them (fire 1..3, smoke 0..3 / 1..3)
-      const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${LEVEL_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.level")}: ${T(`Fire.lvl${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>` : "";
-      const smk = s.k !== "erase" ? `<button type="button" class="mm-fire-lv" data-act="sm" data-id="${esc(s.id)}" style="--mm-tool:${SMOKE_COLOR[s.sm]}" data-tooltip="${esc(`${T("Fire.smokeLevel")}: ${T(`Fire.smk${s.sm}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.smkShort"))}${s.sm}</button>` : "";
-      const torn = s.k !== "erase" && s.st !== "fireball" ? `<button type="button" class="mm-fire-lv" data-act="torn" data-id="${esc(s.id)}" aria-pressed="${!!s.tn}" style="--mm-tool:${s.tn ? "#ef8a3a" : "#8c8c8c"}" data-tooltip="${esc(T(s.tn ? "Fire.tornOn" : "Fire.tornOff"))}"${gm ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button>` : "";
+      const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${LEVEL_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.level")}: ${T(`Fire.lvl${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>`
+        : s.k === "dust" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${DUST_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.dustLevel")}: ${T(`Fire.dst${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>` : "";
+      const smk = s.k !== "erase" && s.k !== "dust" ? `<button type="button" class="mm-fire-lv" data-act="sm" data-id="${esc(s.id)}" style="--mm-tool:${SMOKE_COLOR[s.sm]}" data-tooltip="${esc(`${T("Fire.smokeLevel")}: ${T(`Fire.smk${s.sm}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.smkShort"))}${s.sm}</button>` : "";
+      const torn = s.k !== "erase" && s.k !== "dust" && s.st !== "fireball" ? `<button type="button" class="mm-fire-lv" data-act="torn" data-id="${esc(s.id)}" aria-pressed="${!!s.tn}" style="--mm-tool:${s.tn ? "#ef8a3a" : "#8c8c8c"}" data-tooltip="${esc(T(s.tn ? "Fire.tornOn" : "Fire.tornOff"))}"${gm ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button>` : "";
       return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${s.k === "fire" ? esc(s.c ?? P.fireColor) : KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}${torn}</span>
         ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>`;
     }).join("");
@@ -197,6 +211,7 @@ if ( !OFF ) {
     tools: () => [
       { name: "mm-fire-paint", order: 4, title: "MOINENMAPS.Fire.tool.fire", icon: "fa-solid fa-fire", color: KIND_INK.fire },
       { name: "mm-fire-smoke", order: 5, title: "MOINENMAPS.Fire.tool.smoke", icon: "fa-solid fa-smog", color: KIND_INK.smoke },
+      { name: "mm-fire-dust", order: 5.5, title: "MOINENMAPS.Fire.tool.dust", icon: KIND_ICON.dust, color: KIND_INK.dust },
       { name: "mm-fire-erase", order: 6, title: "MOINENMAPS.Fire.tool.erase", icon: "fa-solid fa-fire-extinguisher", color: KIND_INK.erase }
     ],
     bars: Object.fromEntries(Object.keys(TOOLS).map((t) => [t, bar])),

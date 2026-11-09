@@ -27,8 +27,8 @@ export async function place(list) {
   });
   await canvas.scene.update(upd); await wait(2500);
 }
-/** Paint now through the API (it catches and grows): returns the stroke. */
-export const paint = (o) => api().paint(o.pts ?? [[o.x - (o.len ?? 60) / 2, o.y], [o.x + (o.len ?? 60) / 2, o.y + 4]], { kind: o.k ?? "fire", radius: o.r ?? 28, strength: o.s ?? 0.9, level: o.lv ?? 2, smoke: o.sm ?? 2, style: o.st ?? "fire", color: o.c, wind: { dir: o.wd ?? 0, speed: o.ws ?? 0 }, torn: o.tn });
+/** Paint now through the API (it catches and grows; `k: "dust"` with `dk` the dust kind): returns the stroke. */
+export const paint = (o) => api().paint(o.pts ?? [[o.x - (o.len ?? 60) / 2, o.y], [o.x + (o.len ?? 60) / 2, o.y + 4]], { kind: o.k ?? "fire", radius: o.r ?? 28, strength: o.s ?? 0.9, level: o.lv ?? 2, smoke: o.sm ?? 2, style: o.st ?? "fire", color: o.c, wind: { dir: o.wd ?? 0, speed: o.ws ?? 0 }, torn: o.tn, dust: o.dk });
 export async function dark(d) {
   await canvas.scene.update({ "environment.darknessLevel": d }, { animateDarkness: 0 }); await wait(1500);
   for ( let i = 0; i < 5; i++ ) canvas.app.ticker.update(performance.now());
