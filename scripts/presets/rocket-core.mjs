@@ -1,6 +1,6 @@
 /**
  * DESTRUCTION PRESETS, the ROCKET / RPG - the pure part (no Foundry, no PIXI: node-tested in dev/presets-rocket.test.mjs; drawn by
- * rocket.mjs). dev/presets-design.md section 20. From the firing's accent item (core.mjs rocketFlight: the target `to`, the launch
+ * rocket.mjs). dev/presets-design.md section 21. From the firing's accent item (core.mjs rocketFlight: the target `to`, the launch
  * point `m` and its height `z0`, the flight `fl` ms, `shot` = a shooter fired it, the wind `wd` / `ws`) and its seed, every client
  * builds the same flight:
  *   FLIGHT   path samples from the launch point to the target (a seeded bow, a corkscrew, a slight lob or a long descent), each with

@@ -1,7 +1,7 @@
 import { HOOK, status } from "./runtime.mjs";
 
 /**
- * The ROCKET's wiring (rocket.mjs; dev/presets-design.md section 20): rocket.mjs is loaded on the first firing record this client takes
+ * The ROCKET's wiring (rocket.mjs; dev/presets-design.md section 21): rocket.mjs is loaded on the first firing record this client takes
  * up that has a "rocket" accent (or a test fire of one: the panel's dry run, this client only); until then nothing of it runs (the
  * firings runtime calls its hook only on scenes with firing records). Two listeners: the runtime's hook and canvasTearDown, both
  * returning at once otherwise.

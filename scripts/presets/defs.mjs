@@ -6,6 +6,8 @@
  * The user's answers (design note, section 10): no sound, no helicopter shadow, nothing pushes tokens; the aftermath fire ends after
  * the preset's aftermath duration, or burns until the GM puts it out (aftermath.dur null) - a preset setting, per firing too.
  */
+import { LANDING } from "./def-landing.mjs";
+
 export const BUILTIN = Object.freeze([
   {
     id: "bomb", v: 1, set: "military", name: "MOINENMAPS.DPreset.bomb", hint: "MOINENMAPS.DPreset.bombHint", icon: "fa-solid fa-bomb",
@@ -92,8 +94,9 @@ export const BUILTIN = Object.freeze([
       { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
     ]
   },
+  LANDING,
   {
-    // ROCKET / RPG (dev/presets-design.md section 20): with a SHOOTER (a token the GM chose, or a shot dragged out of a token) a hiss at
+    // ROCKET / RPG (dev/presets-design.md section 21): with a SHOOTER (a token the GM chose, or a shot dragged out of a token) a hiss at
     // the tube's rear, the launch flash and a billowing backblast; the rocket flies to the target with its motor flame, laying a smoke
     // trail that swells, rises, wanders and dissolves; a shell's fireball, a crater, the dust ring, small fires. No shooter: no hiss,
     // no flash, no backblast - it comes in from off the map (the accent "rocket" is drawn by presets/rocket.mjs)

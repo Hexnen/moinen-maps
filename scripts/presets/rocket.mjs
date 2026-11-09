@@ -6,7 +6,7 @@ import { geo as fireGeo } from "../fire/fire.mjs";
 import * as R from "./rocket-core.mjs";
 
 /**
- * DESTRUCTION PRESETS, the ROCKET / RPG on every client (dev/presets-design.md section 20; the pure rules in rocket-core.mjs). Loaded by
+ * DESTRUCTION PRESETS, the ROCKET / RPG on every client (dev/presets-design.md section 21; the pure rules in rocket-core.mjs). Loaded by
  * rocket-wire.mjs on the first firing record with a "rocket" accent; draws while a rocket's smoke lives, then removes its ticker - a
  * scene without rockets runs nothing of this.
  *  - SMOKE (the trail, the backblast, the hiss, the muzzle puff): one shader evaluates them per ART CELL of the destruction layer's art
