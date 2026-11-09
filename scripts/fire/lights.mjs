@@ -167,7 +167,16 @@ export class FireLights {
           else if ( !s.ref || mass > 1.5 * s.ref ) s.ref = mass;      // (its mass reference: kept while the fire stays about its size)
           s.bridge = null;
           const is = this.lookOf(s, now), a = Math.hypot(...was.tint), b = Math.hypot(...is.tint);
-          s.bridge = { r0: b > 1e-4 ? Math.min(4, a / b) : 1, ox0: wx - (s.x + is.off[0] * 2 * s.R), oy0: wy - (s.y + is.off[1] * 2 * s.R), t0: now };
+          // (F1: the gain factor that gives the look on screen - solved, not a / b: the tint grows faster than the gain (it turns paler
+          // as it rises), so a / b overshot by 10-15 % at a level change - a step at night)
+          let r0 = b > 1e-4 ? Math.min(4, a / b) : 1;
+          if ( b > 1e-4 && r0 !== 1 ) {
+            const mag = (r) => { s.bridge = { r0: r, ox0: 0, oy0: 0, t0: now }; return Math.hypot(...this.lookOf(s, now).tint); };
+            if ( mag(4) <= a ) r0 = 4;
+            else { let lo = 0, hi = 4; for ( let k = 0; k < 24; k++ ) { const m = (lo + hi) / 2; if ( mag(m) < a ) lo = m; else hi = m; } r0 = (lo + hi) / 2; }
+            s.bridge = null;
+          }
+          s.bridge = { r0, ox0: wx - (s.x + is.off[0] * 2 * s.R), oy0: wy - (s.y + is.off[1] * 2 * s.R), t0: now };
         } else {
           s = this.make(L, R, now); if ( !s ) continue;
           if ( L.ramp ) s.scaleR = true;
@@ -183,8 +192,9 @@ export class FireLights {
     if ( vision ) { this.stats.visionUpdates++; canvas.perception?.update({ refreshVision: true }); }
     this.stats.added += made; this.stats.moved += moved; this.stats.retired += dropped;
     // (not forced: a new light starts dark and a handed-over one keeps its look until the next 12 fps frame - at most 12 updates a second;
-    // reduced motion has no ticker: then now)
-    this.update(now, reducedMotion());
+    // reduced motion has no ticker: then now. F1: forced when a light was MOVED or made - its source re-initialised draws Foundry's
+    // default look until our uniforms are written: a one-frame flash at every level change, at night)
+    this.update(now, reducedMotion() || moved > 0 || made > 0);
     return { made, dropped, moved };
   }
 

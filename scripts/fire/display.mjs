@@ -208,16 +208,17 @@ export class FireDisplay {
     const lean = Math.max(-0.8, Math.min(0.8, (area.wind?.[0] ?? 0) * 0.7));
     // the fire style: the art-resolution look (art.mjs); the fireball: its v1 shader, unchanged
     // (F1: lvMax bounds the culls - whole, the top level a ramp passes; lvTop the look's top level, from .. to over a ramp, shader s)
+    // (lvc: the continuous-level programs for an area with a fractional level or a ramp, M.areaLvc; dev: CONFIG.moinenMaps.fireLvcAll)
     const fs = area.strokes.filter((s) => s.k === "fire"), lvOf = (s) => s.lv ?? 2, kS = P.speed / 83.333 / 12;   // (model.shaderTime's own scale)
     const lvMax = Math.max(1, ...fs.map((s) => Math.ceil(Math.max(lvOf(s), s.rl?.[0] ?? 0))), fs.length ? 1 : 2);
     const lvTo = Math.max(1, ...fs.map(lvOf), fs.length ? 1 : 2), rs = fs.filter((s) => s.rl);
     const lvFrom = rs.length ? Math.max(1, ...fs.map((s) => s.rl?.[0] ?? lvOf(s))) : lvTo;
     const r0 = rs.length ? Math.min(...rs.map((s) => s.rl[1])) : 0, r1 = rs.length ? Math.max(...rs.map((s) => s.rl[1] + s.rl[2])) : 0;
     const lvTop = rs.length ? [lvFrom, lvTo, (r0 * kS) % 1000, (r0 * kS) % 1000 + (r1 - r0) * kS] : [lvTo, lvTo, 0, 0];
-    const rampT = field.rampQ ? [(field.rampQ.ref * kS) % 1000, field.rampQ.span * kS, P.speed] : null;
+    const rampT = field.rampQ ? [(field.rampQ.ref * kS) % 1000, field.rampQ.span * kS, P.speed] : null, rampP = field.rampQ2 ? [(field.rampQ2.ref * kS) % 1000, field.rampQ2.span * kS] : null;
     return field.style === "fire"
       ? new FireArt(field, area.rect, geo, { above: this.above, front: this.front, box: area.box, seed: M.hashStr("art:" + (area.color ?? "")), grid: g, lean, wind: area.wind ?? [0, 0], dur: [P.grow, P.out, M.timing(geo, P).outSpan / 1000],
-        plume: P.plume, lvMax, lvTop, rampT, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
+        plume: P.plume, lvMax, lvTop, rampT, rampP, lvc: M.areaLvc(area) || CONFIG.moinenMaps?.fireLvcAll === true, smokeTint: P.smokeTint, births: BIRTHS[perfMode()] ?? 8 })
       : new FireMesh(field, area.rect, geo, { flow: [ux * sp, uy * sp], seed: area.seed, grid: g, lean, flameH: M.sizes(geo, P).flameH, dur: [P.grow, P.out], map: mapOf(), smokeTint: P.smokeTint });
   }
 

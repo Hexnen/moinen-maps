@@ -35,7 +35,8 @@ const LEVEL_COLOR = ["#8c8c8c", "#f2c14e", "#ef8a3a", "#e0453a"];
 const SMK = (l) => T(`Fire.smk${l}`), SMKH = (l) => T(`Fire.smkHint${l}`);
 const SMOKE_COLOR = ["#5a5a5a", "#c9c5bf", "#8f8a84", "#4a4541"];
 /** F1: a fire level 1..3 as text ("2", "2.35") and its colour (the nearest whole level's). */
-const lvTxt = (v) => String(Math.round(v * 100) / 100);
+let lvFmt = null;
+const lvTxt = (v) => { try { lvFmt ??= new Intl.NumberFormat(game.i18n.lang, { maximumFractionDigits: 2 }); return lvFmt.format(Math.round(v * 100) / 100); } catch { return String(Math.round(v * 100) / 100); } };   // (PL: 2,35)
 const lvInk = (v) => LEVEL_COLOR[Math.min(3, Math.max(1, Math.round(v)))];
 
 /**

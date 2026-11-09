@@ -105,6 +105,23 @@ for ( const [sum, m] of [[2, 1], [5, 2], [7, 3], [3, 2], [9, 4]] ) ok(M.lightLev
   // (the lights carry the ramp: from l0's radius to lv's)
   const L = M.lightsOf([{ area: a1[0], field: f1 }], geo, P);
   ok(L.length && L.every((l) => l.ramp && l.ramp.l0 === 1 && l.level === 3 && l.ramp.r0 < l.radius), "lights carry the ramp (l0, start, length, the smaller radius)");
+  // (an INTERRUPTED ramp: 1 -> 3 from 10000, then at 12000 (level 2 by then) -> 1; the old ramp is kept as the new one's history)
+  const mid = M.levelNow(st, 12000);
+  const it = M.cleanStroke({ id: "x", k: "fire", s: 1, r: 40, p: [0, 0], lv: 1, l0: mid, lt: 12300, p0: 1, pv: 3, pt: 10000, pr: 4 });
+  ok(it.p0 === 1 && it.pv === 3 && it.pt === 10000 && it.pr === undefined, "the interrupted ramp's keys kept (default length dropped)");
+  ok(M.cleanStroke({ ...it, pt: "junk" }).p0 === undefined, "junk history keys dropped");
+  ok(Math.abs(M.levelNow(it, 11000) - M.levelNow(st, 11000)) < 1e-9 && Math.abs(M.levelNow(it, 12000) - mid) < 1e-9, "levelNow before the interrupt follows the old ramp");
+  let pv = M.levelNow(it, 11000), mx = 0;
+  for ( let t = 11000; t <= 17000; t += 20 ) { const v = M.levelNow(it, t); mx = Math.max(mx, Math.abs(v - pv)); pv = v; }
+  ok(mx < 0.02 && M.levelNow(it, 17000) === 1, `levelNow continuous across the interrupt (max step ${mx.toFixed(4)} per 20 ms)`);
+  const ra = M.rampAt(it, 13000);
+  ok(ra && ra.length === 7 && ra[3] === 1 && ra[4] === 3 && ra[5] === 10000 && ra[6] === M.LV_RAMP_MS, "rampAt carries the interrupted ramp");
+  const ai = M.areasOf([it], geo, P, 13000), fi = M.raster(ai[0], geo, P);
+  ok(fi.ramp && fi.ramp2 && fi.rampQ2 && fi.rampQ2.ref === 10000, "raster: the second ramp texture (the interrupted ramp) and its time base");
+  let c2 = 0, ok2 = true;
+  for ( let i = 0; i < fi.ramp2.length; i += 4 ) if ( fi.ramp2[i] ) { c2++; ok2 &&= fi.ramp2[i] === 1 && fi.ramp2[i + 2] === 255 && fi.ramp2[i + 3] === 40 && fi.ramp[i] > 0; }
+  ok(c2 > 0 && ok2, `ramp2 texels: from 1, to 3, 4.0 s, only on ramping cells (${c2} cells)`);
+  ok(!M.raster(M.areasOf([st], geo, P, 12000)[0], geo, P).ramp2, "no history: no second texture");
 }
 
 /* ---------------- 5. migration ---------------- */

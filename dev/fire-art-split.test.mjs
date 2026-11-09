@@ -48,7 +48,25 @@ for ( let y = 0; y < 16; y++ ) for ( let x = 0; x < 16; x++ ) assert.equal((P[y 
 assert.match(F.fragmentSrc, /float\(\(uVC\[q\.y \* 4 \+ \(q\.x >> 2\)\] >> \(\(q\.x & 3\) \* 8\)\) & 255\)/);
 // 4. no constant arrays left in the art programs (each was an indexable temp FXC filled per pixel: 324 movs a cell)
 for ( const p of [F, S] ) assert.ok(!/const (float|int) \w+\s*\[/.test(p.fragmentSrc), `${p.name}: no const arrays`);
-// 5. neither half grows back towards the one program (57 kB of GLSL linked in 13 s; the halves are ~42 and ~28 kB)
-for ( const p of [F, S] ) assert.ok(p.fragmentSrc.length < 46000, `${p.name}: ${p.fragmentSrc.length} chars - split it again or measure the link (dev/fire-art-link-run.mjs)`);
+// 5. neither half grows back towards the one program (57 kB of GLSL linked in 13 s; the halves are ~42 and ~28 kB): the source the
+// compiler sees - the #if LVC blocks of the other variant stripped (F1: the whole-level programs are LVC 0, art.mjs)
+const pre = (src) => {
+  const def = Number(/#define LVC (\d)/.exec(src)?.[1] ?? 1), out = [], st = [];
+  for ( const l of src.split("\n") ) {
+    const t = l.trim();
+    if ( t === "#if LVC" ) { st.push(def === 1); continue; }
+    if ( t === "#else" && st.length ) { st.push(!st.pop()); continue; }
+    if ( t === "#endif" && st.length ) { st.pop(); continue; }
+    if ( st.every(Boolean) ) out.push(l);
+  }
+  return out.join("\n");
+};
+for ( const p of [F, S] ) { const n = pre(p.fragmentSrc).length; assert.ok(n < 46000, `${p.name}: ${n} chars - split it again or measure the link (dev/fire-art-link-run.mjs)`); }
+// 6. F1: the continuous-level variants (LVC 1) of the same three programs exist apart, the whole-level ones are LVC 0
+const C = art.lvcArtPrograms();
+assert.equal(C.length, 3, "three continuous-level art programs (art, artS, emb)");
+for ( const p of progs.filter((q) => /fire-(art|emb)/.test(q.name)) ) assert.match(p.fragmentSrc, /#define LVC 0\n/, `${p.name} is the whole-level variant`);
+for ( const p of C ) assert.match(p.fragmentSrc, /#define LVC 1\n/, `${p.name} is the continuous variant`);
+assert.equal(pre(F.fragmentSrc).includes("uLvRamp, Lc(p)"), false, "the whole-level ART_F reads no ramp texture");
 
-console.log(`fire-art-split: ok (ART_F ${F.fragmentSrc.length} + ART_S ${S.fragmentSrc.length} chars; channels disjoint, ${Object.keys(T).length} tables, ranks)`);
+console.log(`fire-art-split: ok (ART_F ${pre(F.fragmentSrc).length} + ART_S ${pre(S.fragmentSrc).length} chars compiled, LVC 1 variants ${C.map((p) => pre(p.fragmentSrc).length).join(" / ")}; channels disjoint, ${Object.keys(T).length} tables, ranks)`);
