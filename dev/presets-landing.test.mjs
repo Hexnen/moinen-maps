@@ -130,10 +130,11 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   ok(/def\.onToken \? tokenAt\(cursor\) : null/.test(aim) && /\|\| def\.onToken\) \? tokenAt\(at\)/.test(aim), "E the aim passes the token only to an onToken preset");
 }
 
-/* F the older presets (main at c7babb0: the four military + the lightning strike): the same plans and accent frames */
+/* F the older presets (main at c7babb0: the four military + the lightning strike; the military four as the presets polish 763e72c
+ * re-tuned them - c7babb0 merged into it): the same plans and accent frames */
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-land-"));
-  revTree(root, "c7babb0", "scripts/presets", tmp);
+  revTree(root, "763e72c", "scripts/presets", tmp);
   const imp = (f) => import(pathToFileURL(path.join(tmp, f)).href);
   const [C0, D0, A0] = await Promise.all([imp("core.mjs"), imp("defs.mjs"), imp("accents-core.mjs")]);
   const g = { point: { a: [600, 500] }, throw: { a: [400, 500], b: [600, 520] }, line: { a: [300, 300], b: [600, 420], from: [280, 290] }, run: { a: [200, 700], b: [900, 600] } };
