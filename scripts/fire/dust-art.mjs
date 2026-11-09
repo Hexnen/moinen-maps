@@ -29,7 +29,7 @@
  */
 import { VERT, VERT_B, SHOW_COMMON, FOOTPRINT, blocks, quad, texOf, renderPass } from "./art.mjs";
 import { footprintK } from "./shader.mjs";
-import { kindTable, LIN_P, LIN_L, TAU, MAX_PER_TILE } from "./dust-model.mjs";
+import { kindTable, LIN_P, LIN_L, TAU, MAX_PER_TILE, CODES, CODE_N } from "./dust-model.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
 
@@ -65,10 +65,11 @@ uniform vec2 uSWind;      // the scene's wind drift (cells / s)
 uniform float uG;         // cells per grid square
 uniform float uU;         // cells per art px
 uniform int uSeed;
-uniform vec4 uK0[16];     // per code: pr, out, back, rise (squares)
-uniform vec4 uK1[16];     //           life, lin, chips, chipD
-uniform vec4 uK2[16];     //           chipH, chipSz, grit, aura
-uniform vec4 uK3[16];     //           auraA, mark, trackW, v
+uniform vec4 uK0[${CODES}];     // per code: pr, out, back, rise (squares)
+uniform vec4 uK1[${CODES}];     //           life, lin, chips, chipD
+uniform vec4 uK2[${CODES}];     //           chipH, chipSz, grit, aura
+uniform vec4 uK3[${CODES}];     //           auraA, mark, trackW, v
+uniform vec4 uK4[${CODES}];     //           riseK, jetK, hits, 0
 out vec4 oArt;
 ${HASH}
 const float RY = 0.8, TAU = ${TAU.toFixed(1)}, LIN_P = ${LIN_P.toFixed(2)}, LIN_L = ${LIN_L.toFixed(2)};
@@ -80,7 +81,7 @@ float fadeOut(float o, float t) { return 1.0 - smoothstep(o, o + 2.8, t); }
 float fadeAt(float o, float bk, float o2, float t) { return t < bk ? fadeOut(o, t) : mix(fadeOut(o, bk), 1.0, smoothstep(bk, bk + 1.5, t)) * fadeOut(o2, t); }
 
 // one puff, a s old: life L, size scale sc, throw scale so, rise scale sr
-void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0, vec2 Hd, vec2 N, vec4 k0, int lv) {
+void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0, vec2 Hd, vec2 N, vec4 k0, vec4 k4, int lv) {
   float f = a / L;
   float str = 1.0 - smoothstep(0.3, 1.0, f);
   if ( str <= 0.0 ) return;
@@ -90,7 +91,7 @@ void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0
   vec2 d = (N * k0.y * so * (0.1 + 0.9 * hA * hA) - Hd * k0.z * so * (0.5 + 0.5 * hB)) * uG * E;
   d.y *= RY;                                                           // (the ground plane, foreshortened)
   vec2 g = P0 + d + (uWind + uSWind) * TAU * (1.0 - exp(-a / TAU));   // where it is over the ground (it settles: the drift slows)
-  float rise = k0.w * uG * sr * (0.55 + 0.45 * hC) * (1.0 - exp(-1.1 * a));
+  float rise = k0.w * uG * sr * (0.55 + 0.45 * hC) * (1.0 - exp(-k4.x * a));
   vec2 c = g - vec2(0.0, rise);
   // (it grows from a small puff to its size fast, then keeps spreading slowly as it thins)
   float r = k0.x * uG * sc * (0.35 + 0.65 * (1.0 - exp(-2.2 * a)) + 0.35 * f) * (0.6 + 0.8 * hD * hD);
@@ -102,7 +103,7 @@ void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0
   if ( ws > 0.0 ) FS += ws * str * (1.0 - smoothstep(0.15, 0.8, f));
   // YOUNG: the body is still a jet from where it was kicked - a capsule from its centre back toward the source (P0), shrinking as it
   // slows: the newest puffs read as one spray streaming off the source (speed), never a row of separate balls
-  float yth = exp(-4.0 * a);
+  float yth = exp(-k4.y * a);
   vec2 tl = (P0 - c) * yth;
   // (its depth: the body's BOTTOM - one per puff, as a token's feet: a puff never sinks below its own depth line, so a token's
   // square never cuts it - the whole puff is in front of a token or behind it)
@@ -136,8 +137,8 @@ void main() {
   // ---------------------------------------------------------------- the ground: aura, film, marks, grit
   vec4 C = texelFetch(uCell, c, 0);
   if ( C.x < 1e8 ) {
-    int code = int(mod(C.w, 16.0)), lv = code & 3;
-    float hw = floor(C.w / 16.0) * 0.25;
+    int code = int(mod(C.w, ${CODE_N.toFixed(1)})), lv = code & 3;
+    float hw = floor(C.w / ${CODE_N.toFixed(1)}) * 0.25;
     vec4 k1 = uK1[code], k2 = uK2[code], k3 = uK3[code];
     vec4 Bk = uHasBack == 1 ? texelFetch(uBack, c, 0) : vec4(1e9);
     float a = t - C.x, fo = fadeAt(C.y, Bk.x, Bk.y, t), dn = abs(C.z) / hw;
@@ -199,14 +200,15 @@ void main() {
     if ( t < ke ) continue;                                            // (the source has not passed here yet)
     vec4 e1 = texelFetch(uEm, eb + ivec2(1, 0), 0), e2 = texelFetch(uEm, eb + ivec2(2, 0), 0);
     int code = int(e1.w), lv = code & 3, es = int(e0.w);
-    vec4 k0 = uK0[code], k1 = uK1[code], k2 = uK2[code];
+    vec4 k0 = uK0[code], k1 = uK1[code], k2 = uK2[code], k4 = uK4[code];
     vec2 P0 = e0.xy, Hd = e1.xy, N = vec2(-Hd.y, Hd.x) * e1.z;
     float eo = e2.x, ebk = e2.y, eo2 = e2.z;
     // CHIPS: a few frames of flight right after the kick (none if it was put out before)
     float ac = t - ke;
     if ( ac < 1.0 && ke < eo ) {
       int nC = int(k1.z);
-      vec2 thr = normalize(N + (-Hd) * (code < 8 ? 1.2 : 0.3));
+      // (hits: out from the impact in every direction - the heading points back at it)
+      vec2 thr = k4.z > 0.5 ? normalize(-Hd + N * 0.2 + vec2(1e-4)) : normalize(N + (-Hd) * (code < 8 ? 1.2 : 0.3));
       for ( int j = 0; j < 8; j++ ) {
         if ( j >= nC ) break;
         float hj = h3(es, j, 21), hk = h3(es, j, 22), hl = h3(es, j, 23);
@@ -225,7 +227,7 @@ void main() {
     }
     // the BURST puff, as the source passes
     float L = k1.x * (0.85 + 0.3 * h3(es, 0, 31));
-    if ( ke < eo && ac < L ) puff(p, ac, L, 1.0, 1.0, 1.0, es, P0, Hd, N, k0, lv);
+    if ( ke < eo && ac < L ) puff(p, ac, L, 1.0, 1.0, 1.0, es, P0, Hd, N, k0, k4, lv);
     // the LINGERING ones: a share of the slots, smaller, lazier, never born after the put-out
     float t0 = ke + k1.x * 0.5;
     if ( t > t0 && k1.y > 0.0 ) {
@@ -238,7 +240,7 @@ void main() {
         if ( b > eo && !(b > ebk && b < eo2) ) continue;            // (none after the put-out - or again after an undone eraser)
         float al = t - b, Ll = LIN_L * (0.85 + 0.3 * h3(es, ik, 43));
         if ( al < 0.0 || al > Ll ) continue;
-        puff(p, al, Ll, 0.62, 0.4, 0.6, sl, P0, Hd, N, k0, lv);
+        puff(p, al, Ll, 0.62, 0.4, 0.6, sl, P0, Hd, N, k0, k4, lv);
       }
     }
   }
@@ -486,7 +488,7 @@ export class DustArt extends PIXI.Container {
     this.dpass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
       uCell: this.cellTex, uEm: this.emTex, uTileH: this.tileTex, uIdx: this.idxTex, uBack: this.backTex, uHasBack: field.back ? 1 : 0, uNow: 0,
       uWind: new Float32Array([wind[0] * 0.25 * g, wind[1] * 0.25 * g]), uSWind: new Float32Array(2), uG: g, uU: g / 32, uSeed: (seed % 65536) | 0,
-      uK0: KT[0], uK1: KT[1], uK2: KT[2], uK3: KT[3], translationMatrix: new PIXI.Matrix().toArray(true) }));
+      uK0: KT[0], uK1: KT[1], uK2: KT[2], uK3: KT[3], uK4: KT[4], translationMatrix: new PIXI.Matrix().toArray(true) }));
     // the tone map (pass 0): one texel per 8 x 8 cells, from the scene's map (none: a plain soil tone)
     const TW = Math.ceil(W / 8), TH = Math.ceil(H / 8);
     this.toneRt = map ? rtOf(TW, TH, true) : null; this.toneN = [TW, TH];

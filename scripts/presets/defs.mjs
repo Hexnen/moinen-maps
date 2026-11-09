@@ -39,27 +39,36 @@ export const BUILTIN = Object.freeze([
     ]
   },
   {
+    // UZI: a ragged stitch of small hits walking along the line - each a sharp pock with chips (the damage), a quick spit of the
+    // ground's own dust (dust "hits" L1), a spark star and sparks; the shooter's muzzle flash and pale bullet streaks when a shooter
+    // is given (gesture.from: the burst then starts a little way out from them)
     id: "uzi", v: 1, set: "military", name: "MOINENMAPS.DPreset.uzi", hint: "MOINENMAPS.DPreset.uziHint", icon: "fa-solid fa-gun",
     gesture: "line", preroll: 600, aftermath: null,
-    walk: { rate: 10, speed: 5, dur: [0.6, 2.5], lanes: [0], sigma: [0.25, 0.5], drift: 0.3, sway: { amp: 0.15, wave: 3 }, stray: { p: 0.15, k: 1.5 }, maxHits: 25 },
+    walk: { rate: 14, speed: 5, dur: [0.6, 2.5], lanes: [0], sigma: [0.18, 0.36], drift: 0.3, sway: { amp: 0.15, wave: 3 }, stray: { p: 0.15, k: 1.5 }, maxHits: 25 },
     layers: [
       { l: "accent", id: "muzzle", kind: "muzzle", at: -600, dur: 600 },
-      { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 250 },
-      { l: "destruction", id: "pocks", at: 0, type: "cracks", cause: "impact", lvMix: [0.8, 0.2, 0], place: { m: "walk" }, r: [0.15, 0.25] },
-      { l: "dust", id: "puffs", dk: "hits", at: 0, lv: 1, r: 0.2, place: { m: "walk" }, life: 6000 }
+      { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 250, lv: 1 },
+      { l: "destruction", id: "pocks", at: 0, type: "blast", cause: "impact", lvMix: [0.85, 0.15, 0], place: { m: "walk" }, r: [0.1, 0.14],
+        pr: { rubble: 0.1, debris: 0.2, scatter: 0.35, halo: 0.15, edge: 0.5, jagged: true, jag: 0.5 } },
+      { l: "dust", id: "puffs", dk: "hits", at: 0, lv: 1, r: 0.16, place: { m: "walk" }, life: 6000 }
     ]
   },
   {
+    // THE CLASSIC TWIN HEAVY MACHINE GUN FROM A HELICOPTER: two lanes of heavy hits racing along the run side by side, out of step -
+    // each a chewed pock (now and then a small crater), a tall geyser of the ground's dust with chips flying high (dust "hits" L3), a
+    // flash and a spray of sparks, every 4th round of each gun a tracer streaking in from above along the run; the screen rumbles
     id: "heliHmg", v: 1, set: "military", name: "MOINENMAPS.DPreset.heliHmg", hint: "MOINENMAPS.DPreset.heliHmgHint", icon: "fa-solid fa-helicopter",
     gesture: "run", preroll: 1500, aftermath: null,
     walk: { rate: 9, speed: 8, dur: [0.6, 3], lanes: [-0.35, 0.35], phase: [0, 0.5], sigma: [0.3, 0.3], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.1, wave: 2 },
       stray: { p: 0.1, k: 1.5 }, maxHits: 24 },
     layers: [
-      { l: "accent", id: "tracers", kind: "tracer", at: 0, dur: 200, every: 4 },
-      { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 300 },
-      { l: "destruction", id: "lanes", at: 0, type: "cracks", cause: "impact", lvMix: [0.6, 0.4, 0], place: { m: "walk" }, lanes: "each", r: [0.2, 0.35] },
-      { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.05 }, lanes: "all", r: [0.25, 0.32] },
-      { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.3, place: { m: "walk" }, life: 20000 }
+      { l: "accent", id: "tracers", kind: "tracer", at: -250, dur: 200, every: 4, lv: 3 },
+      { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 300, lv: 3, shake: 0.6 },
+      { l: "destruction", id: "lanes", at: 0, type: "blast", cause: "impact", lvMix: [0.7, 0.3, 0], place: { m: "walk" }, lanes: "each", r: [0.18, 0.26],
+        pr: { rubble: 0.15, debris: 0.25, scatter: 0.35, halo: 0.2, edge: 0.55, jagged: true, jag: 0.55 } },
+      { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.06 }, lanes: "all", r: [0.3, 0.36],
+        pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, jagged: true, jag: 0.6 } },
+      { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 8000 }
     ]
   }
 ]);

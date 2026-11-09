@@ -1109,7 +1109,8 @@ export class DestructionDisplay {
     lapE("gpuEnter");
     // the chunks that stay by the rim are hidden and thrown from the damage: each shows where it lies when it lands
     this.debris.hideRest(g);
-    this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k);
+    // (a gun's pocks: each where and when the walk reaches it, cause-fx.mjs isGun)
+    this.debris.throwRest(g, start + (info.type === "blast" ? 40 * k : delay + reveal * 0.7), k, Cause.isGun(this, g, g.anim) ? g.anim.reach : null);
     // a flattened area has no shards yet: the ones due in its first 150 ms at once, the rest a slice per frame, earliest first (tick)
     if ( g.made < g.pieces.length && !tear && !gpu ) this.materialize(g, Infinity, start + 150);
     lapE("debris");
@@ -1253,6 +1254,9 @@ export class DestructionDisplay {
 
   /** What rides on the head of a followed stroke: rolling explosions, a fire front, water surging in behind, a cave-in, a racing fracture, a claw. */
   pathEffects(g, a, now, el) {
+    // (a gun preset's pocks: no rolling explosions at the head - each pock has its own moment, cause-fx isGun, and the preset's dust
+    // and accents throw the rest)
+    if ( Cause.isGun(this, g, a) ) return;
     const P = a.path, h = P.head(el - a.delay); if ( !h ) return;
     const [x, y, dx, dy] = h, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, type = a.type, pw = a.pw;
     if ( now < (a.nextFx ?? 0) ) return;

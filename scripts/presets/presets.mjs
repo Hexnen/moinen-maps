@@ -4,6 +4,7 @@ import * as Core from "./core.mjs";
 import * as R from "./runtime-core.mjs";
 import * as Run from "./runtime.mjs";
 import { BUILTIN } from "./defs.mjs";
+import { registerAccents } from "./accents-wire.mjs";
 
 /**
  * DESTRUCTION PRESETS: the public API, `game.modules.get("moinen-maps").api.presets` (dev/presets-design.md; P1 the data format, the
@@ -62,3 +63,5 @@ export const presetsApi = {
 
 moduleApi.presets = presetsApi;
 Run.registerRuntime();
+registerAccents();
+
