@@ -569,3 +569,51 @@ float 1..3, `tornado.list()[n].v` for the live level; rope-out stays `tornado.re
 **For T6 (live, not verified here).** No Foundry run: the display, lens and tornado paths were not drawn. Check live: a lens fixed at
 0.5 shows at half presence and a fixed 0 creates no lens; clients with caps 1 / 2 see the same as before; tornado slider changes
 mid-ramp glide; the dev scripts that call `set(..., { level })` still give the old looks (pixel A/B).
+
+## 10. T5 as built (branch `weather-slider-t5`, 2026-11-09)
+
+**Bar (`section.mjs`).** Preset row unchanged (quick sets: `weatherApi.set(preset, { over })`, the preset strength carries over;
+pressed = `presetOf`). Below it **seven strength sliders, always shown** (Rain, Snow, Sand, Dust, Embers, Wind, Clouds; `strRow`): the
+workspace's `optRange` markup (a `<range-picker>` 0..3.35 step 0.05 in an `mm-ws-opt mm-ws-range` row), the label the type's
+`PRESET_ICONS` icon in its `PRESET_COLOR`, fixed label width so they line up in columns (4 + 3 at 1600 px). CSS (`.mm-wx-str`) draws
+notches at 1 / 2 / 3 on the range input, tints the track above 3 (overdrive) in the type's colour, tints the thumb, dims a slider at 0
+and underlines the one `[ ]` nudge. The cloud look buttons (sky / shadows, godrays) sit after the Clouds slider. Removed: the level
+row, the clouds 0..3 row, the fine `wx.i` slider and every `lvl*` / `cl.*` / `intensity` key.
+* **Write on release:** `change` of a range-picker (it fires only on release; arrows / the number field also commit) ->
+  `weatherApi.strength({ [e]: v }, { over })`, skipped when v equals the target. One scene write per release (verified live: a 25-step
+  drag wrote 1 key).
+* **Live value:** while `strengthsOf` is not steady **or a key is still ahead** (`until !== null`: a change starts `LEAD_MS` later, and
+  during the lead the state reads steady at the old values) a 4 Hz timer writes only `now 1.45` under the name and a marker on the track
+  (`--mm-livef`, class `mm-wx-moving`); it stops when the ramp arrives. No re-render.
+* **No re-render under the hand:** the existing rule (focus in the bar -> `sync()` only). `sync` writes every control except one the
+  pointer holds (`held`, pointerdown until pointerup) or whose number field is being typed in; focus alone does not block it, because a
+  slider keeps the focus after release and keys 0-3 must still move it.
+* **Keys** (window capture, section open, no modifiers; typing = text / number inputs, select, textarea, contenteditable; a focused
+  range input does NOT count as typing): **0-3** `weatherApi.level(n, { over })` on the preset's driven effects (`drivenFx`), no write
+  when all already equal n; after 0 nothing is driven, so 1-3 bring back the effects 0 turned off (this client remembers them).
+  **`[` / `]`** nudge the last-touched slider (default: the preset's first effect, else rain) along the 0.25 grid (1.3 ] -> 1.5, top
+  3.35); the slider moves at once and ONE key is written 450 ms after the last press (a held key = one write).
+* **Lens:** select Auto / Fixed strength + (when fixed) a 0..3.35 slider (`lensLevelHtml`, bar and dock; hidden, not removed, so a
+  select change needs no re-render); writes `weatherApi.lens({ level })`. Fixed again restores the slider's last value.
+
+**Dock.** Status line: `Storm, strength 2.21. Now: Rain 2.21, Wind 3, Clouds 1.` (v per effect, 2 decimals in the client's
+language; presence is not shown, it equals v below 1). Tornadoes: "Next tornado" slider 1..3 (client), each tornado a slider 1..3
+(`g.tlv.<id>`, release -> `tornadoApi.update(id, { level })`) with the live value / marker while its 5 s ramp runs (`list()[n].v`), the
+rope-out button after it; the row label is "Tornado n" (+ "roping out"), its end in the tooltip. Lens panel as the bar. This client:
+caps stay selects, texts say "strength".
+
+**i18n.** New: `strength`, `strHint`, `sh.<type>` (per-type 1/2/3 meaning), `liveNow`, `lensFixed`, `lensFixedAt`, `lensFixedHint`,
+`tornadoLevelHint`, `tornadoNewHint`. Reworded "level" -> "strength" / "siła": `ph.*`, `barHint`, `overHint`, `status`, `cap.*`,
+`set.*Hint`, `lens*`, `tornadoHint`, `tornadoN` ("Tornado {n}"). Removed: `level`, `lvl1-3`, `lvlHint1-3`, `lvlShort`, `intensity*`,
+`clouds`, `cl.*`, `clh.*`. `lang-audit` clean.
+
+**Verified live** (lane 5, own headless Chrome, scene `ZZ-t5-weather`, GM + real player Test Gracz 1): the bar in EN and PL; a drag
+writes one key and the weather ramps with the live value; keys 0-3 (incl. no-op repeat, 0 then 1), `[ ]` (3 presses = 1 write);
+presets as quick sets incl. clouds; a custom mix (rain + snow) and key 2; clouds slider + look buttons; lens Auto / Fixed in bar and
+dock; tornado slider (one write, live 1.78 -> 3 over 5 s) and rope-out; a v1 flag (`{ l, i }`, key `i` 0.8, lens 3) shows rain 2.21
+(the range-picker displays 2.2: step 0.05), wind 3, clouds 1, lens Fixed 3, and is not rewritten on load; the player resolves the same
+and follows a GM change mid-ramp; no new console error. Pre-existing (also on the T2 base, not T5): `CloudDisplay.draw` throws
+"Cannot read properties of null (reading 'resolution')" (clouds.mjs:243, rt null) twice while a scene with clouds loads, GM and player.
+
+**For T6.** Slider ramps per type at 1080p (the D7 question); a 1920 px bar (columns); the light theme; keyboard-only use of a slider
+(arrows write one key per press); a 2-GM table (two GMs dragging at once: last write wins, as before).
