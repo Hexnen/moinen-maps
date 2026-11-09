@@ -401,7 +401,7 @@ function syncLens(st) {
     if ( lens === null && !LensClass ) { lens = false; lensClass().then(() => { lens = null; if ( display ) syncLens(lastState); }); return; }
     if ( lens === false ) return;
     lens = new LensClass();
-    lens.now = sharedNow;
+    lens.now = sharedNow; lens.stAt = clientState;
   }
   lens.setState(st, P);
 }

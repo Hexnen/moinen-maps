@@ -57,6 +57,7 @@ uniform vec3 uWind;          // unit direction (x, y), strength 0..1
 uniform float uSlant;        // runner slant (x per y) from the wind
 uniform float uG[121];       // the gust envelope over the last 10 s (12 Hz, oldest first): rain intensity, sand waves, fire gusts
 uniform vec4 uSnowL;         // frost reach, frost breathing, crystals per lens-area, presence
+uniform float uCrR[12];      // the crystal count then / now at ages 0..10 s ([11]: the largest); all exactly 1 when steady
 uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, presence
 uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts (a float count: the last ghost fades in by its fraction)
 uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
@@ -331,14 +332,19 @@ void frost(vec2 p) {
 vec3 star = vec3(0.0);   // the coverage of a crystal's halo, arms, core (antialiased)
 void crystals(vec2 p) {
   float e = slotsOf(uSnowL.z * uSnowL.w, 64.0);
-  if ( e <= 0.0 ) return;
+  if ( e * uCrR[11] <= 0.0 ) return;
   ivec2 ce = ivec2(floor(p / 64.0));
   float prog = frostProg();
   for ( int j = 0; j < 3; j++ ) {
-    if ( !slotOn(j, e, ce, 420) ) continue;
+    if ( float(j) >= ceil(e * uCrR[11]) ) continue;
     int key = (ce.x * 64 + ce.y) * 4 + j;
     float L, tau; int c;
     cyc4(key, 0, 410, vec4(1.0, 2.0, 2.0, 3.0), L, c, tau);
+    // (gated by the count at its BIRTH: a strength ramp turns no crystal on or off mid-life; while the count falls below the one it
+    // was born with it shrinks with it. Steady: r is exactly 1)
+    float a = min(tau, 9.999); int ia = int(a);
+    float r = uCrR[ia] + (uCrR[ia + 1] - uCrR[ia]) * (a - float(ia));
+    if ( !slotOn(j, e * r, ce, 420) ) continue;
     float h[6];
     for ( int q = 0; q < 6; q++ ) h[q] = hu(key * 31 + c, 1, 411 + q);
     vec2 x = vec2(ce) * 64.0 + vec2(10.0 + 44.0 * h[0], 10.0 + 38.0 * h[1]);
@@ -350,7 +356,7 @@ void crystals(vec2 p) {
     float melt = inf ? 0.0 : ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
     // lands: grows from a speck over 0.3 s (a little overshoot), then holds; melts or fades by shrinking
     float land = ss(0.0, 0.3, tau) * (1.0 + 0.15 * (1.0 - ss(0.3, 0.6, tau)));
-    float R = R0 * land * (1.0 - melt) * (1.0 - gone);
+    float R = R0 * land * (1.0 - melt) * (1.0 - gone) * min(1.0, 1.0 / r);
     // the core: a small soft bright point (in whole lens px it was a white square)
     if ( R > 0.4 ) star.z = max(star.z, soft(d, 0.8) * ss(0.4, 0.6, R));
     if ( R > 0.8 ) {
@@ -860,7 +866,7 @@ export class WeatherLens {
     this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, copies: 0 };
     this.copyWanted = false;
     this.now = null; this.state = null; this.P = null;
-    this.key = ""; this.int = new Float32Array(121);
+    this.key = ""; this.int = new Float32Array(121); this.crR = new Float32Array(12).fill(1);
     this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
@@ -910,7 +916,7 @@ export class WeatherLens {
     makeLensProgs();
     const U = {
       uLens: new Float32Array([lw, lh]), uAA: 1 / SUB, uVS: 1 / SUB, uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
-      uG: this.int, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
+      uG: this.int, uCrR: this.crR, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
       uLight: 1, uRun: PIXI.Texture.WHITE, uBead: PIXI.Texture.WHITE, uRunC0: new Int32Array(2), uCell0: new Int32Array(2), translationMatrix: new PIXI.Matrix().toArray(true)
     };
     const state = PIXI.State.for2d(); state.blend = false;
@@ -976,6 +982,20 @@ export class WeatherLens {
     } else if ( this.pend ) this.draw(per);
   }
 
+  /**
+   * Snow crystals are gated by the count at their BIRTH (a strength ramp turns none on or off mid-life): the count's ratio then / now
+   * at ages 0..10 s of the step at t ([11]: the largest), from the client state at those times (`stAt`, set by weather.mjs). Exactly 1
+   * when the weather has been steady for a crystal's whole life (10 s), so the steady lens is unchanged; only computed while snow is on.
+   */
+  crystalHist(t) {
+    const r = this.crR, k = this.state?.key, now = this.now?.() ?? Date.now(), base = now - ((now / 1000) % 3600 - t) * 1000;
+    if ( !(this.fx.snow[3] > 0) || !this.stAt || !k || base - (k.t + (k.dur ?? 0)) > 10500 ) { if ( r[0] !== 1 || r[11] !== 1 ) r.fill(1); return; }
+    const at = (ms) => { const st = this.stAt(ms), f = st?.fx?.snow; return f ? M.lensGates("snow", M.lensS(this.P, f.s, st.lensCap)).crystals * f.p : 0; };
+    const c0 = at(base); let mx = 1;
+    for ( let a = 0; a <= 10; a++ ) { const c = a ? at(base - a * 1000) : c0; r[a] = c0 > 0 ? Math.min(c / c0, 1e3) : c > 0 ? 1e3 : 1; mx = Math.max(mx, r[a]); }
+    r[11] = mx;
+  }
+
   /** The uniforms of the step at time t (s); its bands follow. */
   begin(t) {
     const t0 = performance.now(), u = this.slices[0].shader.uniforms, [bead, big, run, mist, film] = this.gates ?? [0, 0, 0, 0, 0];
@@ -991,6 +1011,7 @@ export class WeatherLens {
     if ( Math.abs(t * 12 - k) > 1e-6 ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, sd); this.gk = null; }
     else if ( this.gk === k - 1 && this.gs === sd ) { this.int.copyWithin(0, 1); this.int[120] = gustEnv(k / 12, sd); this.gk = k; }
     else if ( this.gk !== k || this.gs !== sd ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv((k - 120 + i) / 12, sd); this.gk = k; this.gs = sd; }
+    this.crystalHist(t);
     u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
     if ( this.pre ) {   // (the runners first: the beads read them; tiny, so every step, never stale)
       const R = canvas.app.renderer;
