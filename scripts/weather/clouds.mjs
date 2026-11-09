@@ -21,7 +21,8 @@ import { vortices } from "../wind.mjs";
  * the view and the sun.
  *
  * COST: no clouds (and no wind cloud shadows) -> this display does not exist. Godrays off -> their loop and their mesh are skipped.
- * The frame guard (weatherQ) trims the ray samples and the field density while it holds the frame rate.
+ * The frame guard (weatherQ) trims the ray samples and the field resolution, fades out the bodies' finest rim octave and blends the
+ * godrays' ring of taps down to three while it holds the frame rate (all exactly the full look at q = 1).
  */
 export const H = 4;                     // the cloud layer's height (squares)
 export const SUN = [0.5, 0.38];         // the shadow's offset per square of height (from the sun in the upper left)
@@ -67,7 +68,7 @@ export class CloudDisplay {
     const quad = (r) => new PIXI.Geometry().addAttribute("aVertexPosition", [r.x, r.y, r.x + r.width, r.y, r.x + r.width, r.y + r.height, r.x, r.y + r.height], 2).addIndex([0, 1, 2, 0, 2, 3]);
     this.gScene = quad(sr); this.gAll = quad(R);
     const g = this.grid, sq = (r) => new Float32Array([r.x / g, r.y / g, (r.x + r.width) / g, (r.y + r.height) / g]);
-    const common = (edge, w) => ({ uLight: PIXI.Texture.WHITE, uGrid: new Float32Array([0, 0, TPS, g]), uSize: new Float32Array([1, 1]), uEdge: sq(edge), uEdgeW: w,
+    const common = (edge, w) => ({ uQ: 1, uLight: PIXI.Texture.WHITE, uGrid: new Float32Array([0, 0, TPS, g]), uSize: new Float32Array([1, 1]), uEdge: sq(edge), uEdgeW: w,
       uNight: 0, translationMatrix: IDENT });
     const place = (m, layer, elev) => { m.eventMode = "none"; Object.assign(m, { elevation: elev, sortLayer: layer, sort: 0, _lastSortedIndex: 0 });
       m.state.blendMode = bm; m.state.depthTest = false; m.state.culling = false; m.visible = false; canvas.primary.addChild(m); this.meshes.push(m); return m; };
@@ -154,7 +155,7 @@ export class CloudDisplay {
     // the stage passes
     for ( const m of this.meshes ) {
       const u = m.shader.uniforms;
-      u.uLight = this.rtB; u.uGrid[0] = ox; u.uGrid[1] = oy; u.uGrid[2] = tps; u.uSize[0] = this.rtB.width; u.uSize[1] = this.rtB.height; u.uNight = night;
+      u.uLight = this.rtB; u.uGrid[0] = ox; u.uGrid[1] = oy; u.uGrid[2] = tps; u.uSize[0] = this.rtB.width; u.uSize[1] = this.rtB.height; u.uNight = night; u.uQ = q;
     }
     // shadow: the clouds' own darkness, the wind's lighter shadows where they make the cover
     const CG = this.CG, cc = this.cover > 0 ? Math.min(1, (CG.cover * ss(this.cp * 1.15)) / this.cover) : 0;

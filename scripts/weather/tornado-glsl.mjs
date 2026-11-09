@@ -684,8 +684,15 @@ void main() {
 #endif
 }`;
 
-/** The volume in two stages (the march at a coarser resolution, the shade at the art texture's): VSTAGE 0, 1 (2: one pass). */
-export const volFrag = (stage) => VOL_FRAG.replace("#define VSTAGE 2", `#define VSTAGE ${stage}`);
+/**
+ * The volume in two stages (the march at a coarser resolution, the shade at the art texture's): VSTAGE 0, 1 (2: one pass), for one
+ * mode (0 the debris cloud, 1 the wall cloud): uMode becomes a constant, so each program holds one density function. LINK TIME
+ * (2026-11-09): on a program-cache miss D3D11's compiler (FXC) linked the one-pass program with both modes in 8.7-8.9 s (3070 Ti);
+ * its cost grows much faster than the code, and the modes never share a draw (dev/weather-link.test.mjs, dev/weather-link-run.mjs).
+ */
+export const volFrag = (stage, mode) => VOL_FRAG.replace("#define VSTAGE 2", `#define VSTAGE ${stage}`).replace("uniform int uMode;", `const int uMode = ${mode};`);
+/** The deck program for one part: "curtain" (modes 0 and 2: the rain curtain's far and near halves) or "deck" (mode 1); same split. */
+export const deckFrag = (part) => DECK_FRAG.replace("if ( uMode == 0 || uMode == 2 ) {", `if ( ${part === "curtain" ? "true" : "false"} ) {`);
 
 /* ================================================================== instanced: debris (art texture) and marks (ground, stage) */
 
