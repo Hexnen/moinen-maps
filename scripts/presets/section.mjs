@@ -75,7 +75,7 @@ function bar(host, ctx) {
       <button type="button" class="mm-ws-toolbtn mm-pr-vary" data-vary aria-pressed="${b.vary}" aria-label="${esc(T("DPreset.vary"))}" data-tooltip="${esc(T("DPreset.varyHint"))}"><i class="fa-solid fa-dice" inert></i></button>
       ${def ? srcBlock(def) : ""}
       ${def ? aftermathBlock(def, b) : ""}
-      ${optHint(T(U.isFirearm(def) ? "DPreset.barHintGun" : "DPreset.barHint"))}`;
+      ${optHint(def?.gesture === "shot" ? T("DPreset.barHintShot") : T(U.isFirearm(def) ? "DPreset.barHintGun" : "DPreset.barHint"))}`;
   };
   // the shooter's block alone (a choice, the picking state, its token changed or gone)
   const renderSrc = () => {

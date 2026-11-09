@@ -47,7 +47,7 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
 {
   const custom = [{ id: "bomb-copy", layers: [] }];
   const o = U.ordered(BUILTIN, { custom, order: ["uzi", "gone", "bomb-copy"] }).map((d) => d.id);
-  ok(J(o) === J(["uzi", "bomb-copy", "bomb", "grenade", "heliHmg", "lightning"]), `B order: listed first, then the rest (${J(o)})`);
+  ok(J(o) === J(["uzi", "bomb-copy", "bomb", "grenade", "heliHmg", "lightning", "rocket"]), `B order: listed first, then the rest (${J(o)})`);
   ok(J(U.reorder(["a", "b", "c", "d"], "d", "b")) === J(["a", "d", "b", "c"]) && J(U.reorder(["a", "b", "c"], "a", null)) === J(["b", "c", "a"]) && J(U.reorder(["a", "b"], "z", "a")) === J(["a", "b"]), "B reorder");
   ok(U.hotkeyOf(0) === "1" && U.hotkeyOf(8) === "9" && U.hotkeyOf(9) === "⇧1" && U.hotkeyOf(17) === "⇧9" && U.hotkeyOf(18) === "", "B hotkey labels");
   ok(U.padOfKey("Digit1", false) === 0 && U.padOfKey("Digit9", true) === 17 && U.padOfKey("Numpad3", false) === 2 && U.padOfKey("Digit0", false) === -1 && U.padOfKey("KeyA", false) === -1, "B hotkeys -> pads");
@@ -90,7 +90,7 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
 
 /* E */
 {
-  const G = { point: { a: [2000, 1500], b: null }, throw: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600] }, line: { a: [1500, 1500], b: [2200, 1500] }, run: { a: [1200, 1300], b: [2400, 1700] } };
+  const G = { point: { a: [2000, 1500], b: null }, throw: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600] }, line: { a: [1500, 1500], b: [2200, 1500] }, run: { a: [1200, 1300], b: [2400, 1700] }, shot: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600], fr: 50 } };
   const sumA = U.FEATHER.reduce((s, f) => s + f[1], 0);
   ok(U.RING_FEATHER.reduce((s, f) => s + f[1], 0) <= 1.0001, "E ring feather: never past the ring's alpha");
   ok(sumA <= 1.0001 && U.FEATHER.every((f, i) => i === 0 || f[0] < U.FEATHER[i - 1][0]), "E feather: rings shrink inwards and never add up past the shape's alpha");

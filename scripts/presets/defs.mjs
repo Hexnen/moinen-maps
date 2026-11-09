@@ -91,6 +91,24 @@ export const BUILTIN = Object.freeze([
       { l: "smoke", id: "steam", at: 250, sm: 1, r: 0.4, life: 14000, gr: 0.4 },
       { l: "fire", id: "grass", at: [400, 1200], place: { m: "ring", n: [1, 3], d: [0.35, 0.9] }, lv: 1, sm: 1, r: [0.18, 0.28], aftermath: true, lifeK: [0.4, 1], gr: 0.5 }
     ]
+  },
+  {
+    // ROCKET / RPG (dev/presets-design.md section 20): with a SHOOTER (a token the GM chose, or a shot dragged out of a token) a hiss at
+    // the tube's rear, the launch flash and a billowing backblast; the rocket flies to the target with its motor flame, laying a smoke
+    // trail that swells, rises, wanders and dissolves; a shell's fireball, a crater, the dust ring, small fires. No shooter: no hiss,
+    // no flash, no backblast - it comes in from off the map (the accent "rocket" is drawn by presets/rocket.mjs)
+    id: "rocket", v: 1, set: "military", name: "MOINENMAPS.DPreset.rocket", hint: "MOINENMAPS.DPreset.rocketHint", icon: "fa-solid fa-rocket",
+    gesture: "shot", preroll: 1100, aftermath: { dur: 45 },
+    layers: [
+      { l: "accent", id: "rocket", kind: "rocket", at: -1100, dur: 6400, lv: 2 },
+      { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.6, flash: 0.3 },
+      { l: "burst", id: "burst", at: 0, lv: 2, r: 0.85 },
+      { l: "destruction", id: "crater", at: 0, type: "blast", level: 2, cause: "fire", r: 0.7, pr: { jagged: true, jag: 0.6 } },
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 2, r: 2.2, life: 245000 },
+      { l: "fire", id: "debris", at: [150, 900], place: { m: "scatter", n: [3, 6], d: [1, 2.4], bias: 1.3 }, lv: 1, sm: 1, r: [0.14, 0.22], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
+      { l: "fire", id: "rim", at: [700, 1100], place: { m: "ring", n: [1, 3], d: [0.6, 0.9] }, lv: 1, lvMix: [0.7, 0.3, 0], sm: 1, r: [0.22, 0.32], len: [0.2, 0.5], aftermath: true, lifeK: [0.5, 1], gr: 0.5 },
+      { l: "smoke", id: "column", at: 1200, sm: 2, r: 0.55, aftermath: true }
+    ]
   }
 ]);
 

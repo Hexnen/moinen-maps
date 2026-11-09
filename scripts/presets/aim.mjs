@@ -158,7 +158,7 @@ function onDown(ev) {
     if ( t && U.isFirearm(def) ) S.setSrc(def, t.id);
     quiet = at; schedule(); return;
   }
-  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line") ? tokenAt(at) : null };
+  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line" || def.gesture === "shot") ? tokenAt(at) : null };
   cursor = at; schedule();
 }
 function onMove(ev) {
@@ -298,6 +298,7 @@ function testGesture(def) {
   if ( def.gesture === "throw" ) return { a: [x - 2.5 * g, y + g], b: [x, y], from: [x - 2.5 * g, y + g] };
   if ( def.gesture === "line" ) return { a: [x - 3 * g, y], b: [x + 3 * g, y], from: null };
   if ( def.gesture === "run" ) return { a: [x - 5 * g, y - g], b: [x + 5 * g, y + g], from: null };
+  if ( def.gesture === "shot" ) return { a: [x - 5 * g, y + g], b: [x, y], from: [x - 5 * g, y + g], fr: Math.round(g / 2) };
   return { a: [x, y], b: null, from: null };
 }
 /**
