@@ -172,7 +172,10 @@ void runner(int layer, int ci, float Wc, float off, int seed) {
   float h[12];
   for ( int q = 0; q < 12; q++ ) h[q] = hu(key, layer, seed + 10 + q);
   float colx = off + (float(ci) + 0.5) * Wc + (h[0] - 0.5) * Wc * 0.4;
-  if ( h[1] > (0.4 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z ) return;
+  float thr = (0.4 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z;
+  if ( h[1] > thr ) return;
+  // (a rain strength change mid-life moves thr across h1: the runner and its trail fade over that, never vanish at once)
+  float gon = ss(0.0, 0.04, thr - h[1]);
   float y0 = -4.0 + h[2] * uLens.y * 0.62, r0 = 3.6 + 5.0 * pow(h[3], 0.8), ta = 0.5 + 1.8 * h[4];
   bool stall = h[5] > 0.8;
   float dist = stall ? 22.0 + 70.0 * h[6] : uLens.y + 24.0 - y0;
@@ -182,8 +185,9 @@ void runner(int layer, int ci, float Wc, float off, int seed) {
   q.a = vec4(colx, y0, V, max(0.0, tau - ta));
   q.b = vec4(PI2 / (0.35 + 0.5 * h[8]), PI2 / (0.9 + 0.8 * h[9]), dist, uSlant * (0.7 + 0.6 * h[9]));
   q.c = vec4(h[10] * 6.28, h[11] * 6.28, h[8] * 6.28, r0);
-  float yh = yOf(q, q.a.w), prog = min(1.0, (yh - y0) / 160.0), grow = 0.4 + 0.6 * ss(0.0, ta, tau), fade = 1.0 - ss(L - 1.2, L, tau);
-  q.d = vec4(0.0, yh, r0 * grow * (1.0 - 0.32 * prog) * (0.25 + 0.75 * fade), fade);
+  float yh = yOf(q, q.a.w), prog = min(1.0, (yh - y0) / 160.0), grow = 0.4 + 0.6 * ss(0.0, ta, tau), fade = (1.0 - ss(L - 1.2, L, tau)) * gon;
+  // (the head shrinks to nothing as it fades: at a quarter size it used to vanish at the end of its life)
+  q.d = vec4(0.0, yh, r0 * grow * (1.0 - 0.32 * prog) * (0.25 + 0.75 * fade) * min(1.0, 4.0 * fade), fade);
   q.d.x = xOf(q, yh);
   R_[nR] = q; Rmov[nR] = (q.a.w > 0.0 && yh < y0 + dist - 0.5) ? 1.0 : 0.0; Rkey[nR] = key * 2 + layer;
   nR++;
@@ -632,20 +636,24 @@ void main() {
     if ( abs(dxp) > r0 + 6.0 ) continue;
     float age = ageAt(q, p.y);
     bool fresh = age < 1e8 && p.y < q.d.y - rh * 0.6;
-    float wide = 0.55 + 0.10 * r0, br = clamp((age - 0.7) / 1.6, 0.0, 1.0);
-    if ( fresh && fade > 0.3 ) {
+    float wide = 0.55 + 0.10 * r0, br = clamp((age - 0.7) / 1.6, 0.0, 1.25);
+    // (the trail's top end, where the drop sat before it ran: rounded off over the drop's size, not a straight cut)
+    float top = ss(q.a.y - 1.0, q.a.y + 0.8 * r0, p.y);
+    if ( fresh && fade > 0.0 ) {
       // THE WET TRAIL: a thin film of water left down the runner's path. Its width wavers along it; as it ages it pulls apart into
       // pieces (where a smooth noise along the path falls under the age); its edge toward the light catches a thin line of light,
       // broken here and there. All along the path, never per lens px (a hash per lens px made it a stair of 3 x 3 blocks).
-      float ky = float(rk % 4096) * 5.0;
-      float w = wide * (0.8 + 0.4 * vnoise(vec2(p.y / 2.6, ky), 341));
-      float on = ss(br - 0.06, br + 0.06, 0.04 + 0.92 * vnoise(vec2(p.y / 1.9, ky), 340));
+      // Every end is soft: a piece thins and fades toward its ends (the softer the older), the pieces dry out completely (br runs
+      // past 1), the top end is rounded and the whole trail fades with the runner (it was cut at once at 30 % of the fade).
+      float ky = float(rk % 4096) * 5.0, kb = 0.06 + 0.12 * min(br, 1.0);
+      float on = ss(br - kb, br + kb, 0.04 + 0.92 * vnoise(vec2(p.y / 1.9, ky), 340)) * fade * top;
+      float w = wide * (0.8 + 0.4 * vnoise(vec2(p.y / 2.6, ky), 341)) * (0.45 + 0.55 * on);
       wet = max(wet, cov(abs(dxp) - w) * on);
       float le = abs(dxp + w + 0.4);
       lit = max(lit, (1.0 - ss(0.12, 0.5, le)) * on * ss(0.36, 0.5, vnoise(vec2(p.y / 3.0, ky), 345)));
     }
     // (the cleared path fades out to its sides, so it never shows a straight-edged band)
-    if ( fresh && abs(dxp) < r0 * 0.9 + 1.0 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade * (1.0 - ss(r0 * 0.3, r0 * 0.9 + 1.0, abs(dxp))));
+    if ( fresh && abs(dxp) < r0 * 0.9 + 1.0 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade * top * (1.0 - ss(r0 * 0.3, r0 * 0.9 + 1.0, abs(dxp))));
     // trail beads at jittered spacing (4.5-9 px) behind the head
     float j0 = floor((p.y - q.a.y) / 6.75);
     for ( int dj = -1; dj <= 1; dj++ ) {

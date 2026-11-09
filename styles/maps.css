@@ -372,6 +372,9 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-ws-opt > label, .mm-ws-label { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
 .mm-ws-opt > label[data-tooltip] { cursor: help; }
 .mm-ws-opt select { width: auto; max-width: 9rem; }
+.mm-ws-opts > .mm-ws-opt:has(> .mm-d-levels) { max-width: 100%; min-width: 0; }
+/* the weather preset row wraps inside the bar on narrow screens (it was clipped at 1280 px and below) */
+.mm-ws-opts > .mm-ws-opt > .mm-d-levels { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; row-gap: 3px; }
 .mm-ws-range range-picker { width: 10rem; }
 .mm-ws-range range-picker input[type="number"] { flex: 0 0 3rem; }
 /* the GM's marker opacity (workspace/markers.mjs): a small slider at the start of the bar's right side */
