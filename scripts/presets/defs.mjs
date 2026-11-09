@@ -18,7 +18,9 @@ export const BUILTIN = Object.freeze([
       { l: "cue", id: "light", kind: "light", at: 0, peak: 1, radius: 4, decay: 1500 },
       { l: "burst", id: "burst", at: 0, lv: 3, r: 1.6 },
       { l: "destruction", id: "crater", at: 200, type: "blast", level: 3, cause: "fire", r: 1.2, pr: { jagged: true, jag: 0.7 } },
-      { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 3.5, life: 305000 },
+      // (two or three smaller blasts torn out of its rim: one round crater read as a stamped disc)
+      { l: "destruction", id: "lobes", at: 240, type: "blast", level: 2, cause: "fire", place: { m: "scatter", n: [2, 3], d: [0.6, 0.9] }, r: [0.42, 0.62], pr: { jagged: true, jag: 0.8 } },
+      { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 2.7, life: 305000 },   // (3.5 read as a huge flat oval over the whole view at zoom 3)
       { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [2, 4], d: [0.95, 1.3] }, lv: 2, lvMix: [0.5, 0.5, 0], sm: 1, r: [0.3, 0.45], len: [0.3, 0.7], aftermath: true, lifeK: [0.5, 1], gr: 0.6 },
       { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [6, 12], d: [1.5, 3.5], bias: 1.4 }, lv: 1, sm: 1, r: [0.15, 0.25], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
       { l: "smoke", id: "column", at: 1200, sm: 3, r: 0.8, aftermath: true }
@@ -32,10 +34,10 @@ export const BUILTIN = Object.freeze([
       { l: "accent", id: "bounce", kind: "bounce", at: -500, dur: 500 },
       { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.5, flash: 0 },
       { l: "cue", id: "light", kind: "light", at: 0, peak: 0.5, radius: 2, decay: 600 },
-      { l: "burst", id: "burst", at: 0, lv: 1, r: 0.5 },
-      { l: "destruction", id: "crater", at: 200, type: "blast", level: 2, cause: "fire", r: 0.35 },   // (under the fireball: its white core alone shows ~T+120, the crater must not open round it first)
+      { l: "burst", id: "burst", at: 0, lv: 1, r: 0.55 },
+      { l: "destruction", id: "crater", at: 200, type: "blast", level: 2, cause: "fire", r: 0.35, pr: { jagged: true, jag: 0.6 } },   // (under the fireball: its white core alone shows ~T+120, the crater must not open round it first)
       { l: "destruction", id: "shrapnel", at: 150, type: "cracks", level: 1, cause: "none", place: { m: "scatter", n: [10, 18], d: [0.3, 1.4], bias: 1.6 }, r: [0.08, 0.14] },
-      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 1.15, life: 155000 },
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 0.85, life: 155000 },   // (a grenade's dust ring stays low and close)
       { l: "smoke", id: "wisps", at: 300, sm: 1, r: 0.5, life: 8000, gr: 0.6 },
       { l: "fire", id: "smoulder", at: 400, chance: 0.3, place: { m: "scatter", n: [1, 1], d: [0, 0.3] }, lv: 1, sm: 1, r: 0.25, aftermath: true, gr: 0.4 }
     ]
@@ -47,12 +49,12 @@ export const BUILTIN = Object.freeze([
     // that burst - it then starts a little way out from them); no shooter, no muzzle flash
     id: "uzi", v: 1, set: "military", name: "MOINENMAPS.DPreset.uzi", hint: "MOINENMAPS.DPreset.uziHint", icon: "fa-solid fa-gun",
     gesture: "line", preroll: 600, aftermath: null,
-    walk: { rate: 14, speed: 5, dur: [0.6, 2.5], lanes: [0], sigma: [0.18, 0.36], drift: 0.3, sway: { amp: 0.15, wave: 3 }, stray: { p: 0.15, k: 1.5 }, maxHits: 25 },
+    walk: { rate: 16, speed: 5, dur: [0.8, 2.5], lanes: [0], sigma: [0.12, 0.28], drift: 0.3, sway: { amp: 0.15, wave: 3 }, stray: { p: 0.15, k: 1.5 }, maxHits: 28 },
     layers: [
       { l: "accent", id: "muzzle", kind: "muzzle", at: -600, dur: 600 },
       { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 250, lv: 1 },
-      { l: "destruction", id: "pocks", at: 0, type: "blast", cause: "impact", lvMix: [0.6, 0.4, 0], place: { m: "walk" }, r: [0.14, 0.2],
-        pr: { rubble: 0.1, debris: 0.2, scatter: 0.3, halo: 0.15, edge: 0.5, jagged: true, jag: 0.3 } },
+      { l: "destruction", id: "pocks", at: 0, type: "blast", cause: "impact", lvMix: [0.85, 0.15, 0], place: { m: "walk" }, r: [0.075, 0.11],
+        pr: { rubble: 0, debris: 0, scatter: 0.2, halo: 0, edge: 0.35, jagged: true, jag: 0.25 } },
       { l: "dust", id: "puffs", dk: "hits", at: 0, lv: 1, r: 0.22, place: { m: "walk" }, life: 6000 }
     ]
   },
@@ -64,17 +66,16 @@ export const BUILTIN = Object.freeze([
     // the tracers fly out of them; without one the gunship is off the map - no muzzle flash, the tracers come in from above
     id: "heliHmg", v: 1, set: "military", name: "MOINENMAPS.DPreset.heliHmg", hint: "MOINENMAPS.DPreset.heliHmgHint", icon: "fa-solid fa-helicopter",
     gesture: "run", preroll: 1500, aftermath: null,
-    walk: { rate: 9, speed: 8, dur: [0.6, 3], lanes: [-0.55, 0.55], phase: [0, 0.5], sigma: [0.16, 0.22], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.1, wave: 2 },
-      stray: { p: 0.1, k: 1.5 }, maxHits: 24 },
+    walk: { rate: 11, speed: 8, dur: [0.6, 3], lanes: [-0.6, 0.6], phase: [0, 0.5], sigma: [0.08, 0.13], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.06, wave: 2 },
+      stray: { p: 0.08, k: 1.8 }, maxHits: 26 },
     layers: [
       { l: "accent", id: "tracers", kind: "tracer", at: -250, dur: 200, every: 4, lv: 3 },
       { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 300, lv: 3, shake: 0.6 },
       // (after the tracers and hits: their accents keep their order, so without a shooter the heli draws exactly as before)
       { l: "accent", id: "muzzle", kind: "muzzle", at: -300, dur: 300, lv: 3 },
-      { l: "destruction", id: "lanes", at: 0, type: "blast", cause: "impact", lvMix: [0.7, 0.3, 0], place: { m: "walk" }, lanes: "each", r: [0.18, 0.26],
-        pr: { rubble: 0.15, debris: 0.25, scatter: 0.3, halo: 0.2, edge: 0.55, jagged: true, jag: 0.35 } },
-      { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.06 }, lanes: "all", r: [0.3, 0.36],
-        pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, jagged: true, jag: 0.6 } },
+      { l: "destruction", id: "lanes", at: 0, type: "blast", cause: "impact", lvMix: [0.9, 0.1, 0], place: { m: "walk" }, lanes: "each", r: [0.1, 0.17],
+        pr: { rubble: 0, debris: 0, scatter: 0.15, halo: 0, edge: 0.3, jagged: true, jag: 0.2 } },
+      // (round 2: no "minis" - a few single larger blows had the impact's falling-blow shock ring and chunk rings, not a gun's)
       { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 6000 }
     ]
   },

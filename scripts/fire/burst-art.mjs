@@ -80,6 +80,9 @@ void main() {
   int top = -1, cover = 0;
   float tD = 0.0, tR = 1.0;
   vec2 tq = vec2(0.0);
+  // (the fire's HEAT as one field over the whole cloud: the billows' heats blended by their cover - the colour runs across the
+  // billows in organic patches, never a ring per billow or single billows gone grey on a hot ball)
+  float hs = 0.0, ws = 0.0;
   for ( int i = 0; i < ${MAX_LOBES}; i++ ) {
     if ( i >= uLobN ) break;
     vec4 A = uLob[2 * i], Bq = uLob[2 * i + 1];
@@ -87,30 +90,35 @@ void main() {
     if ( Bq.y < 1.5 ) {
       float hh = max(0.0, Bq.x - A.y);
       vec2 qs = p - vec2(A.x + 0.42 * hh, Bq.x + 0.08 * hh);
-      float ws = 1.0 - dot(qs, qs) / (A.z * A.z * 1.15);
-      if ( ws > 0.0 ) FS += ws * (1.0 - smoothstep(0.0, 3.5 * uR, hh));
+      float ws2 = 1.0 - dot(qs, qs) / (A.z * A.z * 1.15);
+      if ( ws2 > 0.0 ) FS += ws2 * (1.0 - smoothstep(0.0, 3.5 * uR, hh));
     }
+    // erosion (late in its life, or taken back): the billow shrinks, thins and opens a few big blobby holes from its rim - it
+    // dissolves, never in square specks
+    float er = smoothstep(0.45, 1.0, Bq.w) * 1.05 + put;
     vec2 q = p - A.xy;
     if ( Bq.y > 1.5 ) q.y /= 0.62;   // (the ground surge: low, wide billows)
     // (a lumpy edge in two octaves - a billow is a clump of small bulges, never a clean circle)
     vec2 lp = vec2(c >> 1) * 2.0 + 0.5;
     float rr = A.z * min(1.0, Bq.z * 2.5) * (0.76 + 0.24 * vn(lp / max(1.5, 0.3 * A.z), uSeed + 7 * i) + 0.16 * vn(lp / max(1.2, 0.13 * A.z), uSeed + 7 * i + 3));
+    rr *= 1.0 - 0.3 * smoothstep(0.2, 1.0, er);
     float d2 = dot(q, q);
     if ( d2 >= rr * rr ) continue;
     float d = sqrt(d2) / rr;
-    // erosion: holes open with the billow's age (late in its life) and on a take-back - from its rim inwards
-    float er = smoothstep(0.4, 1.0, Bq.w) * 1.05 + put;
-    if ( er > 0.0 ) {
-      float hole = 0.7 * vn(p / (4.5 * uq), uSeed + 21 + i) + 0.3 * vn(p / (1.6 * uq), uSeed + 22);
-      if ( hole + 0.35 * (1.0 - d) < er ) continue;
+    if ( er > 0.3 ) {
+      float hole = 0.75 * vn(p / (6.0 * uq), uSeed + 21 + i) + 0.25 * vn(p / (3.2 * uq), uSeed + 22);
+      if ( hole + 0.45 * (1.0 - d) < er - 0.2 ) continue;
     }
+    if ( Bq.y < 1.5 ) { float w = 1.0 - d * d; w *= w; hs += w * A.w; ws += w; }
     cover++;
     top = i; tD = d; tR = rr; tq = q;
   }
   if ( top >= 0 ) {
     vec4 A = uLob[2 * top], Bq = uLob[2 * top + 1];
     vec3 n = vec3(tq / tR, sqrt(max(0.0, 1.0 - tD * tD)));
-    float lum = dot(n, L) + (h3(c.x >> 1, c.y >> 1, 62) - 0.5) * 0.08;
+    // (a churning texture over the cloud: two octaves drifting with its age - the tone bands' edges wander organically)
+    float tz = 0.75 * vn(p / (4.0 * uq) + vec2(0.0, uAge * 1.6), uSeed + 41) + 0.25 * vn(p / (2.2 * uq) - vec2(uAge * 0.9, 0.0), uSeed + 42);
+    float lum = dot(n, L) + (tz - 0.5) * 0.4;
     // (an edge: the outline of the cloud, or a crease where this billow lies over another one behind it)
     // (the outline only on the cloud's outside; where a billow lies over another, a broken crease - the billows read one by one
     // without each being ringed)
@@ -118,21 +126,29 @@ void main() {
     bool crease = rim && cover > 1;
     if ( crease && (tD < 0.95 || h3(c.x >> 1, c.y >> 1, 63) < 0.35) ) { rim = false; crease = false; }
     float age = Bq.w;
+    float er = smoothstep(0.45, 1.0, age) * 1.05 + put;
     if ( Bq.y < 1.5 ) {
-      // fire and smoke: the billow's heat, hotter in its middle than at its edge (the colour sinks from the outside in)
-      float temp = A.w * (0.55 + 0.6 * n.z) + 0.1 * (lum - 0.2);
+      // fire and smoke: the cloud's heat field, hotter where it is deep (the overlaps) than at its outside edge - the colour sinks
+      // from the outside in; the churn and a fine dither break the bands into ragged patches
+      float H = hs / max(ws, 1e-4), deep = min(1.0, ws * 2.2);
+      // (each billow keeps its form: lit top left, its lower right a step darker, a dark crease where it lies over another - the
+      // cloud reads as a cauliflower of billows in one fire, never a flat slab)
+      float temp = H * (0.62 + 0.38 * deep) + 0.16 * (lum - 0.15) + (tz - 0.5) * 0.18 * min(1.0, H * 2.0);
+      bool fold = tD > 0.8 && cover > 1 && lum < 0.15 && h3(c.x >> 1, c.y >> 1, 65) < 0.8;
       int fG = 0;
       if ( temp > 0.33 ) {
         int st = temp > 0.88 ? 6 : temp > 0.74 ? 5 : temp > 0.6 ? 4 : temp > 0.47 ? 3 : temp > 0.39 ? 2 : 1;
         st = max(st, 2);                                  // (inside: never the plum / dark red - they are the outline's)
-        if ( lum < 0.0 && st > 2 && st < 6 ) st--;
-        if ( rim ) st = crease ? max(2, st - 1) : max(1, min(st - 1, temp > 0.6 ? 3 : 2));
+        if ( (lum < -0.1 || fold) && st > 2 && st < 6 ) st--;
+        if ( rim && !crease ) st = max(1, min(st - 1, temp > 0.6 ? 3 : 2));
         fG = 1 + st;
-      } else if ( temp > 0.17 ) fG = rim || lum < 0.05 ? 10 : 9;
+      } else if ( temp > 0.17 ) fG = (rim && !crease) || lum < -0.12 || fold ? 10 : 9;
       else {
-        int band = rim ? 3 : lum > 0.42 ? 0 : lum > 0.05 ? 1 : 2;
-        if ( crease ) band = 2;
-        fG = 11 + band + (age > 0.78 ? 4 : 0);
+        // (smoke: three tones by its light and churn, the outline broken and the outer edge thinning - a billowing column, never
+        // stacked clay discs)
+        int band = rim && !crease ? (h3(c.x >> 1, c.y >> 1, 66) < 0.55 ? 3 : 1) : lum > 0.38 ? 0 : lum > -0.02 && !fold ? 1 : 2;
+        bool edgeThin = tD > 0.82 && !(cover > 1) && h3(c.x >> 1, c.y >> 1, 68) < 0.6;
+        fG = 11 + band + (age > 0.78 || er > 0.3 || edgeThin ? 4 : 0);
       }
       G = fG;
     } else {
@@ -160,7 +176,12 @@ void main() {
     vec4 D0 = uDbr[2 * i], D1 = uDbr[2 * i + 1];
     if ( D1.x < 1.5 ) {
       ivec2 ci = ivec2(floor(D0.xy)) - ivec2(s2 / 2);
-      if ( c.x >= ci.x && c.x < ci.x + s2 && c.y >= ci.y && c.y < ci.y + s2 ) { G = c.y < ci.y + max(1, s2 / 2) ? 40 : 41; R = 1 + int(mod(floor(D0.w / uq), 255.0)); }
+      // (a chunk inside the fireball is hidden in it - dark specks in the white core read as holes; its corners knocked off: a lump,
+      // never a square)
+      bool inFire = G >= 1 && G <= 10;
+      ivec2 cc = c - ci;
+      bool corner = (cc.x == 0 || cc.x == s2 - 1) && (cc.y == 0 || cc.y == s2 - 1) && h3(i, cc.x + 4 * cc.y, 71) < 0.7;
+      if ( !inFire && !corner && c.x >= ci.x && c.x < ci.x + s2 && c.y >= ci.y && c.y < ci.y + s2 ) { G = c.y < ci.y + max(1, s2 / 2) ? 40 : 41; R = 1 + int(mod(floor(D0.w / uq), 255.0)); }
       else {
         for ( int k = 1; k <= 3; k++ ) {
           ivec2 ct = ivec2(floor(D0.xy + D1.zw * float(k) * 0.9));
@@ -178,9 +199,11 @@ void main() {
   vec2 g = (p - uC) / vec2(uR * 1.5, uR * 1.2);
   // (nothing before the impact: uAge < 0 in the pre-roll - exp() of it grew the pool over the map before the bomb had landed)
   float pool = uAge < 0.0 ? -1.0 : (1.0 - dot(g, g)) * exp(-uAge / 0.45) * (1.0 - put);
-  pool += (h3(c.x >> 1, c.y >> 1, 67) - 0.5) * 0.12;
+  // (the steps' edges in a smooth blobby noise - a hashed 2 x 2 grain read as square blocks round the shadow)
+  float gz = vn(p / (3.0 * uq), uSeed + 67) - 0.5;
+  pool += gz * 0.16;
   if ( pool > 0.55 ) B |= 3; else if ( pool > 0.3 ) B |= 2; else if ( pool > 0.12 ) B |= 1;
-  float sh = FS + (h3(c.x >> 1, c.y >> 1, 66) - 0.5) * 0.1;
+  float sh = FS + gz * 0.22;
   if ( sh > 0.6 ) B |= 8; else if ( sh > 0.25 ) B |= 4;
   oArt = vec4(float(R), float(G), float(B), 0.0) / 255.0;
 }`;
@@ -356,7 +379,7 @@ void main() {
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-burst-art-v1"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-burst-art-v2"),
   tone: PIXI.Program.from(VERT, TONE, "moinen-maps-burst-tone-v1"),
   occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-burst-occ-v1"),
   ground: PIXI.Program.from(VERT_B(2), GROUND, "moinen-maps-burst-ground-v1"),
@@ -413,6 +436,9 @@ export class BurstArt extends PIXI.Container {
     for ( const m of [this.ground, this.show] ) live(m);
     this.addChild(this.ground, this.show);
     this.front = new PIXI.Mesh(bg, new PIXI.Shader(P.front, common())); this.front.state.blendMode = PIXI.BLEND_MODES.NORMAL; this.front.visible = false;
+    // (over the other areas - the dust's ground puffs - in both containers: the display sorts by zIndex, insertion order otherwise;
+    // the front's particles stay on top at zIndex 1)
+    this.zIndex = 1; this.front.zIndex = 0.5;
     live(this.front, false);
     (front ?? this).addChild(this.front);
     // the emission lives in the illumination layer: it follows this area's visibility and alpha

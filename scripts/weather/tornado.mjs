@@ -1,4 +1,5 @@
 import * as TM from "./tornado-model.mjs";
+import * as TD from "./tornado-debris.mjs";
 import { QUAD_VERT, deckFrag, COLUMN_FRAG, FOOT_FRAG, volFrag, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
 import { CellCache, cellVert, showSmooth } from "./cells.mjs";
 import { weatherQ } from "./guard.mjs";
@@ -184,7 +185,7 @@ class TornadoView {
     // the art passes back to front, drawn by ONE render call (the same draws in the same order as one call each)
     this.artRoot = new PIXI.Container();
     this.artRoot.addChild(this.curtain, this.skirt, this.back, this.debB, this.wallB, this.column, this.debF, this.wallF, this.front, this.curtainF, this.deck);
-    this.frags = new Map();
+    this.frags = [];                                           // per fragment slot: what its current life was born as (debris)
     this.stats = { inst: 0, cpuMs: 0, k: 1, texels: 0 };
     // the per-frame scratch (no garbage per frame)
     this.timed = [this.curtain, this.curtainF, this.deck, this.column, this.skirt, this.debB, this.debF, this.wallB, this.wallF, this.back, this.front, this.ground];
@@ -292,7 +293,7 @@ class TornadoView {
     const T = this.T, g = this.owner.geo, U = this.U;
     const ph = TM.phase(T, now, g.grid);
     if ( ph.gone ) { this.hide(); return false; }
-    const s = Math.min(TM.levelS(T, now), cap - 1 + 0.35), L = TM.looksOf(s);
+    const sCap = cap - 1 + 0.35, s = Math.min(TM.levelS(T, now), sCap), L = TM.looksOf(s);
     const view = this.owner.view ?? { lift: 0.5, squash: 0.8 };
     this.lift = view.lift; this.squash = view.squash;
     const lift = this.lift, sq = this.squash;
@@ -377,7 +378,7 @@ class TornadoView {
     vol(this.wallB, this.wallF, Z * 0.86, Z * 1.05, ph.cloud * (0.35 + 0.65 * ph.reach) * (1 - 0.6 * ph.rope), L.wallR * 0.85 * U, 0.12);
     for ( const m of this.vols ) if ( m.visible ) this.marchVol(m, k);
     // ---- debris
-    this.debris(now, tm, L, ph, { bx, by, Z, sq, lift, trx, try_, throwAng, touchSwell, dust });
+    this.debris(now, tm, L, ph, { bx, by, Z, sq, lift, trx, try_, throwAng, touchSwell, dust, sCap });
     // ---- ground
     const gu = this.ground.shader.uniforms;
     // the deck's shadow on the ground: under it, pushed down-right by the light from the up-left
@@ -505,7 +506,7 @@ class TornadoView {
   /* ---------------------------------------------------------------- debris (closed-form slots) */
 
   debris(now, tm, L, ph, o) {
-    const T = this.T, g = this.owner.geo, U = this.U, { Z, sq, lift, trx, try_, throwAng, dust } = o;
+    const T = this.T, g = this.owner.geo, U = this.U, { Z, sq, lift, trx, try_, throwAng, dust, sCap } = o;
     const Lb = this.Lb, Lf = this.Lf, Lg = this.Lg;
     Lb.n = Lf.n = Lg.n = 0;
     const touch = ph.touch, rope = ph.rope;
@@ -517,8 +518,10 @@ class TornadoView {
     };
     const A0 = this._a0, A1 = this._a1, A2 = this._a2, B0 = this._b0, B1 = this._b1, LF = this._lf, pts = this._pts;
     const bot = this.ax[0];
+    // COUNTS ARE CONTINUOUS (tornado-debris.mjs): ceil(n) slots, the last one at alpha x fract(n), so a level ramp, a touchdown or
+    // the guard fades one item in or out instead of popping it at each 0.5; a whole count draws exactly the old items
     // FINE DEBRIS: specks orbiting the funnel, rising from the foot to under the wall cloud (2 px smears along their path)
-    const gq = weatherQ(), nS = Math.round(L.specks * (0.3 + 0.7 * touch) * gq);   // (gq: the frame guard thins the small stuff)
+    const gq = weatherQ(), nS = TD.whole(L.specks * (0.3 + 0.7 * touch) * gq);   // (gq: the frame guard thins the small stuff)
     for ( let i = 0; i < nS; i++ ) {
       const turns = Math.floor(5 + 7 * hS(i, 0)), zf = fr(hS(i, 1) + Math.floor(1 + 2 * hS(i, 2)) * tm / 10);
       const z = 12 * U + Z * 0.78 * Math.pow(zf, 1.2), a = this.axZ(z, A0);
@@ -527,13 +530,17 @@ class TornadoView {
       const tx = -Math.sin(pa) * r * w / 30, ty = Math.cos(pa) * r * sq * w / 30;
       const Ls = Math.min(5, Math.hypot(tx, ty)), ang = Math.atan2(ty, tx);
       const col = hS(i, 6) > 0.5 ? SPECK_A : SPECK_B;
-      const al = ss(0, 0.08, zf) * ss(1, 0.85, zf) * (1 - rope);
+      const al = ss(0, 0.08, zf) * ss(1, 0.85, zf) * (1 - rope) * TD.share(nS, i);
       (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, Ls / 2 + 0.5, hS(i, 5) > 0.7 ? 1 : 0.5, ang, 0, i, al, col[0], col[1], col[2], 0);
     }
     // WISPS: torn fragments peeling off the funnel, flung round it (three chords of an arc each)
-    const nW = Math.round(L.wisps * (0.4 + 0.6 * ph.reach) * gq);
-    for ( let i = 0; i < nW; i++ ) {
-      const dustW = i < nW / 2, zf = fr(hW(i, 0) + Math.floor(1 + 2 * hW(i, 1)) * tm / 10);
+    // (the first half are dust wisps low round the foot, the rest grey ones up the funnel: the slot on the half's fractional edge is
+    // drawn as both, crossfaded, so no wisp switches kind; each slot's alpha x its share of the count)
+    const nW = TD.whole(L.wisps * (0.4 + 0.6 * ph.reach) * gq);
+    for ( let j = 0; j < 2 * nW; j++ ) {
+      const i = j >> 1, dustW = (j & 1) === 0, wD = TD.share(nW / 2, i), wK = TD.share(nW, i) * (dustW ? wD : 1 - wD);
+      if ( !(wK > 0) ) continue;
+      const zf = fr(hW(i, 0) + Math.floor(1 + 2 * hW(i, 1)) * tm / 10);
       const z = dustW ? (8 + 26 * Math.pow(hW(i, 2), 1.2) * (0.4 + 0.6 * zf)) * U : 30 * U + Z * 0.62 * zf;
       if ( z < Z * (1 - ph.reach) ) continue;
       const turns = dustW ? Math.floor(5 + 4 * hW(i, 3)) : Math.floor(8 + 6 * hW(i, 3));
@@ -550,12 +557,12 @@ class TornadoView {
         const tone = front ? 4 + lit - (k > 1 ? 1 : 0) - (dustW ? 1 : 0) : 1 + lit;
         const c = dustW ? dustRamp(tone) : GREYS[Math.max(0, Math.min(6, tone))];
         const L2 = Math.hypot(x1 - x0, y1 - y0) / 2;
-        (front ? Lf : Lb).push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, hW(i, 8) > 0.6 && k < 2 ? 1 : 0.5, Math.atan2(y1 - y0, x1 - x0), 0, i * 4 + k, (1 - k * 0.22) * (1 - rope), c[0], c[1], c[2], 0);
+        (front ? Lf : Lb).push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, hW(i, 8) > 0.6 && k < 2 ? 1 : 0.5, Math.atan2(y1 - y0, x1 - x0), 0, i * 4 + k, (1 - k * 0.22) * (1 - rope) * wK, c[0], c[1], c[2], 0);
       }
     }
     if ( touch > 0.01 ) {
       // SPRAYED CLUMPS: dust thrown out of the foot on spirals, dissolving as they go
-      const nC = Math.round(L.clumps * touch * gq);
+      const nC = TD.whole(L.clumps * touch * gq);
       for ( let i = 0; i < nC; i++ ) {
         const kc = 1080 + Math.floor(hu(i, 1, 1060) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1061) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);
@@ -567,10 +574,10 @@ class TornadoView {
         const rr = (1.2 + 2.6 * hC(kk, 3)) * U * (1 - 0.6 * sF) * ss(0, 0.12, sF);
         const X = bot.cx + Math.cos(pa) * rho, Y = bot.cy + Math.sin(pa) * rho * sq - lift * z;
         const c = dustRamp(3 + (hC(kk, 4) > 0.6 ? 1 : 0));
-        (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, rr, rr, 0, 3, i * 13 + cyc, 1, c[0], c[1], c[2], sF / 0.9);
+        (Math.sin(pa) > 0 ? Lf : Lb).push(X, Y, rr, rr, 0, 3, i * 13 + cyc, TD.share(nC, i), c[0], c[1], c[2], sF / 0.9);
       }
       // INFLOW: dust and leaf streaks dragged over the ground toward the foot on tightening spirals (on the ground: the stage)
-      const nI = Math.round(L.inflow * touch * gq);
+      const nI = TD.whole(L.inflow * touch * gq);
       for ( let i = 0; i < nI; i++ ) {
         const kc = 1440 + Math.floor(hu(i, 1, 1200) * 1080), life = 3600 / kc;
         const u = (tm + hu(i, 2, 1201) * life) / life, cyc = Math.floor(u) % kc, sF = u - Math.floor(u);
@@ -584,24 +591,39 @@ class TornadoView {
         const x0 = bot.cx + Math.cos(a) * r, y0 = bot.cy + Math.sin(a) * r * sq;
         const L2 = Math.hypot(x1 - x0, y1 - y0) / 2;
         const leaf = hI(kk, 2) > 0.8, c = leaf ? LEAF : dustRamp(5);
-        Lg.push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, 0.5, Math.atan2(y1 - y0, x1 - x0), 10, i, 0.85 * ss(0, 0.12, sF) * ss(1, 0.85, sF), c[0], c[1], c[2], 0);
+        Lg.push((x0 + x1) / 2, (y0 + y1) / 2, L2 + 0.5, 0.5, Math.atan2(y1 - y0, x1 - x0), 10, i, 0.85 * ss(0, 0.12, sF) * ss(1, 0.85, sF) * TD.share(nI, i), c[0], c[1], c[2], 0);
       }
     }
-    // MAP FRAGMENTS (and planks): torn out of the map near the base, spiralled up round the vortex, flung out on arcs, land, dissolve
-    const nF = Math.round(L.frags), nP = Math.round(L.planks);
-    for ( let i = 0; i < nF + nP; i++ ) {
-      const plank = i >= nF;
-      const kc = plank ? 450 : 450, life = 3600 / kc;
+    // MAP FRAGMENTS (and planks): torn out of the map near the base, spiralled up round the vortex, flung out on arcs, land, dissolve.
+    // A slot's life is decided ONCE, from the level and the touch at its BIRTH (t0), and kept for that life (this.frags: so a level
+    // change, even one interrupting a ramp, never turns a fragment in flight into a plank, resizes it or removes it): its kind
+    // (fragment / plank / none; a fractional count's last slot by its own hash: no half-transparent pieces of the map), big or not
+    // (the big share ramps smoothly with the birth level), its size and where it was torn out. While the level has been still for a
+    // whole life every slot was born at today's level: only today's slots are visited, else every slot a level can use.
+    const life = 3600 / 450, settled = now - T.lvT >= TM.LEVEL_MS + life * 1000 + 50;
+    const nFP = settled ? TD.whole(L.frags) + TD.whole(L.planks) : TD.FRAG_SLOTS;
+    for ( let i = 0; i < nFP; i++ ) {
+      const kc = 450;
       const u = (tm + hu(i, 2, 1701) * life) / life, cyc = Math.floor(u) % kc, tau = (u - Math.floor(u)) * life;
       const kk = i * 23 + cyc;
       const t0 = now - tau * 1000;
-      if ( TM.touchAt(T, t0, g.grid) < 0.5 || hF(kk, 11) > 0.3 + 0.7 * touch ) continue;     // (only torn out while it is on the ground)
+      const M = this.frags[i] ??= { cyc: -1, t0: NaN, kind: 0, big: false, fragSz: 0, skirt: 0 };
+      if ( M.cyc !== cyc || !(Math.abs(M.t0 - t0) < 100) ) {
+        const sB = Math.min(TM.levelS(T, t0), sCap), tB = TM.touchAt(T, t0, g.grid);
+        M.cyc = cyc; M.t0 = t0;
+        // (only torn out while it is on the ground)
+        M.kind = tB < 0.5 || hF(kk, 11) > 0.3 + 0.7 * tB ? TD.NONE : TD.fragKind(sB, i, hF(kk, 17));
+        M.big = M.kind === TD.FRAG && hF(kk, 12) < TD.BIG * TD.bigShare(sB);
+        M.fragSz = TM.lv(TM.TABLE.fragSz, sB); M.skirt = TM.lv(TM.TABLE.skirt, sB);
+      }
+      if ( M.kind === TD.NONE ) continue;
+      const plank = M.kind === TD.PLANK;
       const b0 = this.baseArtInto(t0, B0), b0x = b0[0], b0y = b0[1];
-      const rs = (6 + 30 * hF(kk, 0)) * U * L.skirt / 52, as = hF(kk, 1) * TAU;
+      const rs = (6 + 30 * hF(kk, 0)) * U * M.skirt / 52, as = hF(kk, 1) * TAU;
       const sx = Math.floor(b0x + Math.cos(as) * rs), sy = Math.floor(b0y + Math.sin(as) * rs * sq);
       // sizes vary a lot: mostly small chunks, some slabs, a few big pieces of the map (heavier: they rise less and fly shorter)
-      const big = !plank && L.frags >= 10 && hF(kk, 12) < 0.16, heavy = big ? 0.5 : 1;
-      const size = plank ? 0 : L.fragSz * U * (0.5 + 1.1 * Math.pow(hF(kk, 2), 1.6)) * (big ? 1.8 : 1), rr = size / 2;
+      const big = M.big, heavy = big ? 0.5 : 1;
+      const size = plank ? 0 : M.fragSz * U * (0.5 + 1.1 * Math.pow(hF(kk, 2), 1.6)) * (big ? 1.8 : 1), rr = size / 2;
       const tl = 0.7 + 0.8 * hF(kk, 3), zr = (30 + 70 * Math.pow(hF(kk, 4), 1.3)) * U * heavy, om = (1.3 + 0.6 * hF(kk, 5)) * TAU;
       const lift_ = (tt) => {
         const e = ss(0, 1, tt / tl), z = zr * Math.pow(e, 1.4);

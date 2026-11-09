@@ -71,19 +71,19 @@ ok((fire("bomb").fire.find((f) => f.k === "dust").o - fire("bomb").fire.find((f)
 
 /* C */
 const env = { ap: 3, ox: 0, oy: 0, grid: 100, lift: 0.5, squash: 0.8, q: 1, seed: 7 };
-const snap = (items, t) => { const F = A.draw(items, 0, t, env, A.newFrame()); return JSON.stringify([F.px, F.shade, F.glows, F.shakes, F.flashes]); };
+const snap = (items, t) => { const F = A.draw(items, 0, t, env, A.newFrame()); return JSON.stringify([F.px, F.shade, F.soft, F.glows, F.shakes, F.flashes]); };
 const count = (F) => F.px.reduce((a, l) => a + l.length / 2, 0);
 {
   const P = fire("bomb"), items = A.itemsOf({ ...P, f: [] }), fall = items.find((a) => a.kind === "fallShadow");
   ok(fall && fall.at === -1200 && fall.dur === 1200, "the bomb's fall from -1200");
   const F0 = A.draw([fall], 0, -1100, env, A.newFrame()), F1 = A.draw([fall], 0, -150, env, A.newFrame());
-  ok(F0.shade[0].length + F0.shade[1].length > 0 && count(F0) === 0, "early: a faint shadow, the bomb not seen yet");
-  ok(F1.shade[1].length / 2 > (F0.shade[1].length / 2) && count(F1) > 10, `late: a darker core (${F0.shade[1].length / 2} -> ${F1.shade[1].length / 2} cells) and the bomb`);
-  const r0 = F0.shade[0].length + F0.shade[1].length, xs = (F) => { const l = [...F.shade[0], ...F.shade[1]].filter((_, i) => i % 2 === 0); return Math.max(...l) - Math.min(...l); };
-  ok(r0 > 0 && xs(F1) < xs(F0), `the shadow tightens (${xs(F0)} -> ${xs(F1)} cells wide)`);
+  // (the shadow is a soft feathered ellipse, F.soft [x, y, rx, ry, alpha]: no dithered pixel grid)
+  ok(F0.soft.length === 5 && !F0.shade[0].length && !F0.shade[1].length && count(F0) === 0, "early: a faint soft shadow, the bomb not seen yet");
+  ok(F1.soft[4] > F0.soft[4] && count(F1) > 10, `late: darker (${F0.soft[4].toFixed(2)} -> ${F1.soft[4].toFixed(2)}) and the bomb`);
+  ok(F1.soft[2] < F0.soft[2] && F1.soft[3] < F1.soft[2], `the shadow tightens (${F0.soft[2].toFixed(0)} -> ${F1.soft[2].toFixed(0)} px), squashed by the view`);
   ok(snap([fall], -400) === snap([fall], -400), "fall deterministic");
   const Fa = A.draw([fall], 0, 1, env, A.newFrame());
-  ok(count(Fa) === 0 && !Fa.shade[0].length && !Fa.live, "nothing of the fall after T0");
+  ok(count(Fa) === 0 && !Fa.soft.length && !Fa.live, "nothing of the fall after T0");
 }
 {
   const P = fire("grenade"), items = A.itemsOf({ ...P, f: [] }), arc = items.find((a) => a.kind === "throwArc"), bo = items.find((a) => a.kind === "bounce");
@@ -98,7 +98,7 @@ const count = (F) => F.px.reduce((a, l) => a + l.length / 2, 0);
   ok(Math.hypot(ex - P.at[0] / 3, ey - P.at[1] / 3) < 4, "it lies on the mark at the end");
   const mid = A.draw([arc], 0, arc.at + arc.dur / 2, env, A.newFrame()), [mx, my] = cen(mid);
   ok(my < (arc.from[1] + T.land[1]) / 2 / 3 - 0.35 * T.L * 0.5 / 3, `the arc rises (${my.toFixed(0)} vs ground ${((arc.from[1] + T.land[1]) / 6).toFixed(0)})`);
-  ok(mid.shade[0].length + mid.shade[1].length > 0, "its shadow runs under it");
+  ok(mid.soft.length === 5, "its soft shadow runs under it");
   ok(snap(items, -700) === snap(items, -700) && snap(items, -200) === snap(items, -200), "grenade accents deterministic");
   const click = fire("grenade", 7, { a: [1500, 1000], b: null }), ci = A.itemsOf({ ...click, f: [] }), carc = ci.find((a) => a.kind === "throwArc");
   ok(count(A.draw([carc], 0, carc.at + 300, env, A.newFrame())) === 0, "a click throw: no arc");

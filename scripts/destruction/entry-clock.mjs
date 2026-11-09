@@ -104,7 +104,7 @@ export const plainInfo = (i) => ({ x: i.x, y: i.y, w: i.w, h: i.h, ex: i.ex, ey:
  * `simul`: the stroke does NOT follow its path (directional off): with no path, no direction and no tear the whole area goes off AT
  * ONCE (ATONCE_MS of radial stagger from the epicentre, nothing that sweeps across it); `atOnce` in the result says so.
  */
-export function clockOf({ info, hash, o = null, dir = null, path = null, spine = null, speed = 1, pathFront = undefined, simul = false }) {
+export function clockOf({ info, hash, o = null, dir = null, path = null, spine = null, speed = 1, pathFront = undefined, simul = false, tight = false }) {
   // the cause tunes the clock on top of the kind's (cause-fx.mjs): rot creeps, lightning strikes, arcane spirals
   const CL = causeLook(info.cause);
   const L = LOOK[info.type] ?? LOOK.blast, k = (1 / (speed || 1)) * (CL?.slow ?? 1);
@@ -123,7 +123,10 @@ export function clockOf({ info, hash, o = null, dir = null, path = null, spine =
   const atOnce = !!simul && !pathFront && !wipe && !tear;
   const delay = tear ? tear.delay : pathFront ? 40 * k : atOnce ? Math.min(L.delay, 40) * k : L.delay * k;
   const reveal = tear ? tear.reveal : pathFront ? pathFront.D : atOnce ? ATONCE_MS * k : L.reveal * k * (0.6 + 0.4 * Math.min(2, Rmax / 40));
-  const band = tear ? tear.band : atOnce ? 24 * k : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
+  // `tight` (a gun preset's pocks, cause-fx.mjs isGun): a narrow band that only trails the front - a pock never shows a pixel
+  // before its own bullet lands (the wide band of a long walk showed specks hundreds of ms early)
+  const T8 = !!tight && !!pathFront && !tear;
+  const band = tear ? tear.band : T8 ? 70 * k : atOnce ? 24 * k : info.type === "cracks" ? 45 * k : Math.max(160 * k, reveal * 0.38);
   const front = (x, y) => {   // 0..1: when the front reaches (x, y)
     if ( wipe ) return clamp01((((x - ox) * wipe.u[0] + (y - oy) * wipe.u[1]) - wipe.p0) / (wipe.p1 - wipe.p0));
     // a cave-in runs from the rim of the hole (the impact's reach), not from the corners of the halo
@@ -141,8 +144,9 @@ export function clockOf({ info, hash, o = null, dir = null, path = null, spine =
   const noise = (x, y) => n7(x, y) * 0.65 + n26(x, y) * 0.35;
   // every pixel's moment (ms after start): the front's arrival, a wide band of smooth noise, a little grain (absolute coordinates,
   // so the ruin and the cover of the same pixel share it)
-  const pixelTime = (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
-  return { CL, L, k, atOnce, ox, oy, wipe, Rmax, pathFront, tear, delay, reveal, band, front, arrive, seed, noise, pixelTime };
+  const pixelTime = T8 ? (ax, ay) => arrive(ax, ay) + noise(ax, ay) * band + hash2(ax | 0, ay | 0, seed) * band * 0.22
+    : (ax, ay) => arrive(ax, ay) + (noise(ax, ay) - 0.5) * band + (hash2(ax | 0, ay | 0, seed) - 0.5) * band * 0.22;
+  return { CL, L, k, atOnce, tight: T8, ox, oy, wipe, Rmax, pathFront, tear, delay, reveal, band, front, arrive, seed, noise, pixelTime };
 }
 
 /**

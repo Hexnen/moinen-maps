@@ -528,6 +528,42 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-d-levels { gap: 3px; }
 .mm-ws-toolbtn.mm-d-level { width: auto; gap: 0.35rem; padding: 0 0.55rem 0 0.45rem; display: inline-flex; color: var(--mm-ws-text); font-size: var(--font-size-12, 0.75rem); }
 .mm-d-dot { width: 0.6rem; height: 0.6rem; border-radius: 2px; background: var(--mm-tool); box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.35); }
+/* weather STRENGTH SLIDERS (scripts/weather/section.mjs strRow): the workspace's range row, its label the type's icon in its ink
+   (fixed width, so the sliders line up in columns). On the range input: notches at the whole strengths 1 / 2 / 3, the overdrive band
+   above 3 (--mm-vmin / --mm-vmax: the slider's range; Foundry's thumb is 12 px wide, so a value's place is 6 px + (100% - 12 px) x its
+   share) and, while the weather ramps to the slider, a marker where it is now (--mm-livef, its share) with the value under the name.
+   A slider at 0 is dimmed; the one the [ ] keys nudge is underlined. */
+.mm-wx-strs { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.9rem; }
+.mm-wx-str > label { display: grid; grid-template-columns: 1rem minmax(0, 1fr); align-items: center; align-content: center; column-gap: 0.35rem; min-width: 5rem; line-height: 1.1; }
+.mm-wx-str > label > i { grid-row: 1 / 3; text-align: center; color: color-mix(in srgb, var(--mm-tool) 85%, #fff); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.45)); }
+.mm-wx-str.mm-wx-off > label { opacity: 0.55; }
+.mm-wx-str.mm-wx-off > label > i { filter: grayscale(1); }
+.mm-wx-str.mm-wx-last > label > span:first-of-type { text-decoration: underline 1px color-mix(in srgb, var(--mm-tool) 80%, transparent); text-underline-offset: 3px; }
+.mm-wx-live { grid-column: 2; color: color-mix(in srgb, var(--mm-tool) 65%, var(--mm-ws-text)); font-size: 0.65rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mm-wx-live:empty { display: none; }
+.mm-wx-str range-picker { width: 10rem; }
+.mm-wx-str range-picker input[type="number"] { flex: 0 0 2.8rem; }
+.mm-wx-lens select { max-width: none; }
+.mm-wx-str range-picker input[type="range"] {
+  --mm-span: calc(var(--mm-vmax, 3) - var(--mm-vmin, 0));
+  --mm-tick: color-mix(in srgb, var(--mm-ws-text) 45%, transparent);
+  --range-thumb-border-color: var(--mm-tool);
+  background:
+    linear-gradient(var(--mm-ghost, transparent), var(--mm-ghost, transparent)) calc(5px + (100% - 12px) * var(--mm-livef, 0)) 50% / 3px 12px no-repeat,
+    linear-gradient(var(--mm-tick), var(--mm-tick)) calc(6px + (100% - 12px) * (1 - var(--mm-vmin, 0)) / var(--mm-span)) 50% / 1px 10px no-repeat,
+    linear-gradient(var(--mm-tick), var(--mm-tick)) calc(6px + (100% - 12px) * (2 - var(--mm-vmin, 0)) / var(--mm-span)) 50% / 1px 10px no-repeat,
+    linear-gradient(var(--mm-tick), var(--mm-tick)) calc(6px + (100% - 12px) * (3 - var(--mm-vmin, 0)) / var(--mm-span)) 50% / 1px 10px no-repeat;
+}
+.mm-wx-str.mm-wx-moving { --mm-ghost: color-mix(in srgb, var(--mm-tool) 85%, #fff); }
+.mm-wx-str range-picker input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--range-track-color) calc(6px + (100% - 12px) * (3 - var(--mm-vmin, 0)) / var(--mm-span)), color-mix(in srgb, var(--mm-tool) 45%, var(--range-track-color)) 0);
+}
+.mm-wx-str range-picker input[type="range"]::-moz-range-track {
+  background: linear-gradient(to right, var(--range-track-color) calc(6px + (100% - 12px) * (3 - var(--mm-vmin, 0)) / var(--mm-span)), color-mix(in srgb, var(--mm-tool) 45%, var(--range-track-color)) 0);
+}
+.mm-wx-str.mm-wx-off range-picker input[type="range"] { --range-thumb-border-color: var(--mm-ws-muted); }
+.mm-wx-lensv { display: contents; }
+.mm-wx-lensv[hidden] { display: none; }
 .mm-d-status { margin: 0 0 0.5rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); font-variant-numeric: tabular-nums; }
 .mm-d-areas { list-style: none; margin: 0 0 0.6rem; padding: 0; display: grid; gap: 2px; }
 .mm-d-areas li { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr) auto; align-items: center; gap: 0.45rem; padding: 0.3rem 0.45rem; background: var(--mm-ws-raise); border-radius: 4px; }
