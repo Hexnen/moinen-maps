@@ -1,0 +1,60 @@
+armed true
+successes 0
+[[0,"shot","take","attack","dice",850,3430],
+[81,"made","Concussion Turret → Kid Omni-Man"],
+[432,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[1913,"is-out","Concussion Turret → Kid Omni-Man"],
+[1914,"made","Miss!"],
+[1996,"is-in","Miss!",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[2151,"removed","Concussion Turret → Kid Omni-Man"],
+[4136,"end","done"],
+[4136,"is-out","Miss!"],
+[4614,"removed","Miss!"]]
+armed true
+successes 1
+[[0,"shot","take","attack","dice",850,3430],
+[140,"made","Concussion Turret → Kid Omni-Man"],
+[363,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[1664,"is-out","Concussion Turret → Kid Omni-Man"],
+[1664,"made","Hit! Damage 3"],
+[1667,"is-in","Hit! Damage 3",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[1937,"removed","Concussion Turret → Kid Omni-Man"],
+[3875,"end","done"],
+[3875,"is-out","Hit! Damage 3"],
+[4290,"removed","Hit! Damage 3"]]
+armed true
+successes 1
+[[0,"shot","take","attack","dice",850,3430],
+[57,"made","Concussion Turret → Kid Omni-Man"],
+[377,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[1958,"is-out","Concussion Turret → Kid Omni-Man"],
+[1958,"made","Hit! Damage 3"],
+[1958,"is-in","Hit! Damage 3",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[2266,"removed","Concussion Turret → Kid Omni-Man"],
+[4200,"end","done"],
+[4200,"is-out","Hit! Damage 3"],
+[4619,"removed","Hit! Damage 3"]]
+== final code (IDLE_WAIT 16)
+armed true
+successes 1
+[[0,"shot","take","attack","dice",850,3430],
+[87,"made","Concussion Turret → Kid Omni-Man"],
+[853,"is-out","Concussion Turret → Kid Omni-Man"],
+[853,"made","Hit! Damage 3"],
+[933,"is-in","Hit! Damage 3",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[1101,"removed","Concussion Turret → Kid Omni-Man"],
+[3075,"end","done"],
+[3075,"is-out","Hit! Damage 3"],
+[3517,"removed","Hit! Damage 3"]]
+armed true
+successes 0
+[[0,"shot","take","attack","dice",850,3430],
+[78,"made","Concussion Turret → Kid Omni-Man"],
+[405,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[2085,"is-out","Concussion Turret → Kid Omni-Man"],
+[2085,"made","Miss!"],
+[2088,"is-in","Miss!",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}],
+[2349,"removed","Concussion Turret → Kid Omni-Man"],
+[4293,"end","done"],
+[4293,"is-out","Miss!"],
+[4730,"removed","Miss!"]]

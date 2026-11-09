@@ -1,0 +1,8 @@
+after [374,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}] [2539,"made","Miss!"] 
+after [384,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}] [1865,"made","Miss!"] 
+after [400,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}] [1628,"made","Miss!"] 
+after [379,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":899,"hotbarTop":909,"clearOfHotbar":true}] [2134,"made","Miss!"] 
+before [424,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}] [1726,"made","Hit! Damage 3"] 
+before [411,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}] [2324,"made","Hit! Damage 3"] 
+before [433,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}] [1693,"made","Hit! Damage 3"] 
+before [398,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}] [1526,"made","Miss!"] 

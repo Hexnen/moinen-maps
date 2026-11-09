@@ -1,0 +1,244 @@
+{
+ "rate": 2,
+ "reps": 3,
+ "at": "2026-11-09T00:16:56.624Z",
+ "build": "after",
+ "cases": {
+  "pan": {
+   "median": {
+    "frames": 485,
+    "over17": 1,
+    "over20": 1,
+    "over33": 1,
+    "max": 60.5,
+    "layouts": 275,
+    "layoutMs": 43.3,
+    "styles": 277,
+    "styleMs": 25,
+    "scriptMs": 1170.9,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 481,
+     "over17": 2,
+     "over20": 1,
+     "over33": 1,
+     "max": 66.6,
+     "layouts": 270,
+     "styles": 270,
+     "layoutMs": 42.5,
+     "styleMs": 20.7,
+     "scriptMs": 1170.9
+    },
+    {
+     "frames": 488,
+     "over17": 1,
+     "over20": 1,
+     "over33": 0,
+     "max": 24.1,
+     "layouts": 277,
+     "styles": 277,
+     "layoutMs": 43.3,
+     "styleMs": 25,
+     "scriptMs": 1143.7
+    },
+    {
+     "frames": 485,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 60.5,
+     "layouts": 275,
+     "styles": 375,
+     "layoutMs": 48.5,
+     "styleMs": 45.2,
+     "scriptMs": 1171.5
+    }
+   ]
+  },
+  "impacts": {
+   "median": {
+    "frames": 494,
+    "over17": 0,
+    "over20": 0,
+    "over33": 0,
+    "max": 6.3,
+    "layouts": 337,
+    "layoutMs": 54,
+    "styles": 723,
+    "styleMs": 72.7,
+    "scriptMs": 1144.6,
+    "impactMs": 3.4
+   },
+   "runs": [
+    {
+     "frames": 494,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.3,
+     "impacts": 11,
+     "impactMs": 4.2,
+     "layouts": 337,
+     "styles": 723,
+     "layoutMs": 52.3,
+     "styleMs": 65,
+     "scriptMs": 1117
+    },
+    {
+     "frames": 494,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.2,
+     "impacts": 11,
+     "impactMs": 2.6,
+     "layouts": 337,
+     "styles": 723,
+     "layoutMs": 54,
+     "styleMs": 74,
+     "scriptMs": 1197.7
+    },
+    {
+     "frames": 485,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.2,
+     "impacts": 11,
+     "impactMs": 3.4,
+     "layouts": 332,
+     "styles": 717,
+     "layoutMs": 54.4,
+     "styleMs": 72.7,
+     "scriptMs": 1144.6
+    }
+   ]
+  },
+  "captions": {
+   "median": {
+    "frames": 542,
+    "over17": 0,
+    "over20": 0,
+    "over33": 0,
+    "max": 12.2,
+    "layouts": 1015,
+    "layoutMs": 170,
+    "styles": 1601,
+    "styleMs": 315.4,
+    "scriptMs": 2435.5,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 542,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.2,
+     "shownMs": [
+      2,
+      2,
+      2
+     ],
+     "layouts": 1021,
+     "styles": 1616,
+     "layoutMs": 187.8,
+     "styleMs": 329.6,
+     "scriptMs": 2456.6
+    },
+    {
+     "frames": 530,
+     "over17": 2,
+     "over20": 1,
+     "over33": 1,
+     "max": 66.5,
+     "shownMs": [
+      2,
+      2,
+      2
+     ],
+     "layouts": 994,
+     "styles": 1601,
+     "layoutMs": 170,
+     "styleMs": 315.4,
+     "scriptMs": 2435.5
+    },
+    {
+     "frames": 544,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.1,
+     "shownMs": [
+      1,
+      2,
+      2
+     ],
+     "layouts": 1015,
+     "styles": 1523,
+     "layoutMs": 143.2,
+     "styleMs": 230.2,
+     "scriptMs": 2209.2
+    }
+   ]
+  },
+  "card": {
+   "median": {
+    "frames": 495,
+    "over17": 0,
+    "over20": 0,
+    "over33": 0,
+    "max": 6.2,
+    "layouts": 436,
+    "layoutMs": 88.7,
+    "styles": 437,
+    "styleMs": 75.6,
+    "scriptMs": 698.2,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 486,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 60.5,
+     "contain": "strict",
+     "layouts": 436,
+     "styles": 538,
+     "layoutMs": 90.3,
+     "styleMs": 82.9,
+     "scriptMs": 716.2
+    },
+    {
+     "frames": 495,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.2,
+     "contain": "strict",
+     "layouts": 436,
+     "styles": 437,
+     "layoutMs": 88.7,
+     "styleMs": 70.8,
+     "scriptMs": 694.7
+    },
+    {
+     "frames": 495,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.2,
+     "contain": "strict",
+     "layouts": 434,
+     "styles": 435,
+     "layoutMs": 84.3,
+     "styleMs": 75.6,
+     "scriptMs": 698.2
+    }
+   ]
+  }
+ }
+}

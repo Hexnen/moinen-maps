@@ -735,3 +735,72 @@ Other bugs found and fixed:
 7. Settings section: "look" select options not rebuilt when the look list changed. Fixed in section.mjs refresh. Not verified live.
 Regression: run-all 65/65, lang-audit clean, director-check watchShot (P1: none/esc/click/wheel/busy) all rows OK, stage-js/control.mjs 16/16.
 Open decisions: with no window narrowing the free rect the banner stays screen-centred (as designed); GM skip in combat now also sends players home (that is what we think a GM expects); bar keeps "take" state 4 s after a combat-lane shot; warm-up costs a short idle burst after settings change/resize/canvas ready; revalidation can visibly nudge a caption once.
+
+## director-opt (2026-11-09) - lossless cost pass for a GTX 1080 / i7-7700K-class client
+
+Branch `director-opt` (from `director-fix3`), worktree `C:/mmwt-dir-opt`. Only `scripts/director/` changed. Lanes 4 (director-test) and 5 (ZZ-dir-rolls); my headless Chrome on CDP 9491; GM / Test Gracz 1 (P1) / Test Gracz 2 (P2), each on its own origin. Before = `C:\mmwt-dir-fix3`, after = this worktree, swapped by flipping the lane junction and reloading every page.
+
+### The approximation
+- CPU: CDP `Emulation.setCPUThrottlingRate` 2. Calibrated here (i5-13600KF) on P1: script 1.9-2.15x, 40 hit tests 11 -> 28 ms, layout 1.9-2.2x. Single-thread i7-7700K is ~1.5-1.8x slower than this machine, Ryzen 5 1600 ~2.0-2.2x, so 2x is the middle; 4x is the worst-case re-check.
+- GPU: PIXI GPU ms per canvas frame (EXT_disjoint_timer_query_webgl2) and composited layer area (LayerTree), x2 for a GTX 1080 vs this RTX 3070 Ti (Time Spy ~7.3k vs ~14.5k, fill 111 vs 170 GPix/s, bandwidth 320 vs 608 GB/s).
+- Limits: only the renderer main thread is slowed (compositor, raster, GPU process run at full speed, 20 threads vs 8); hybrid P/E cores; the headless page runs at 165 Hz, not 60; other agents' lanes load the same machine. Whole-scenario numbers drift by 30-90 % between rounds (the camera's share, which nothing here touches, moved as much), so decisions rest on the micro A/B (one isolated thing per case, A-B-A-B) and on interleaved rounds.
+
+### What costs what (2x, P1, before)
+- GPU: PIXI p50 2-3 ms / p95 5-7 ms here (~4-6 / 10-14 ms on a 1080); a Director shot does not raise it measurably (it only moves the camera). Overlay layers: rest ~3.9 screens of layer area, take-over 5.1, arrival 6.5 -> ~0.05-0.2 ms per frame of compositing on a 1080. Not a problem.
+- CPU (Director inclusive per scenario): take 188 ms (camera 42, elementsFromPoint ~80), attack 193, combat 414, arrival 177, follow 141 (mostly camera), soft 21. Hit tests cost ~0.27 ms each at 1x because of the long chat log (4800 elements).
+- Running CSS animations (marker rings, arrow nudge) cost one style recalc per frame (~0.1 ms at 2x). Left as is (they are the look).
+
+### Changes (all in scripts/director, nothing visible changes)
+1. `screen.mjs restyle(el)`: the "start the transition from here" read is `getComputedStyle(el).opacity` (style only) instead of `offsetWidth` (style + layout). Used by the take-over screen (show / showNow / flash), caption, marker, chip (source-stage), banner (source-move), arrival veil and card (source-scene).
+2. `contain: strict` on the three fixed full-screen overlay roots (`.mm-dir`, `.mm-dmv`, `.mm-dir-arr`): their layout no longer touches the rest of the page. Arrival card (2.6 s of letter-spacing / rule-width transitions): layout ms 132/137 -> 89/100 in the micro A/B.
+3. `overlay.idleSliced`: the live re-check of a caption placed from kept answers and the idle warm-up of the hit memo run in requestIdleCallback time, each slice capped at the idle time left minus one hit test (`probeMs`, measured), with a SLICE_MS slice at least every 16 ms when the page has no idle time (the cadence sliced() had at 60 Hz). Warm-up: the next lb's box is made in its own idle period. The first version (250 ms fallback) made the warm-up finish up to 18 s late; fixed before commit (numbers below are the final code).
+
+### Before / after
+Micro A/B, P1, 2x, median of 3, two runs per build (A-B-A-B): `dev/director-micro-ab.mjs`, `dev/director-opt-ev/micro-*.json`
+
+| case | layouts | layout ms | style ms | frames > 16.7 ms | worst frame ms |
+|---|---|---|---|---|---|
+| pan (control) | 278/277 -> 275/276 | 41.6/47 -> 43.3/43 | 24.7/30.5 -> 25/28 | 1/1 -> 1/1 | 60.5/66.7 -> 60.5/60.6 |
+| take-over screen + 12 impacts | 337/337 -> 337/337 | 51.7/52.3 -> 54/52.8 | 64.7/52.9 -> 72.7/55.4 | 0/0 -> 0/0 | 12.1/12.1 -> 6.3/6.2 |
+| 3 captions during a pan | 1003/1008 -> 1015/1011 | 202.7/193.4 -> 170/179.3 | 282.9/240 -> 315.4/329.3 | 1/0 -> 0/0 | 18.2/12.2 -> 12.2/12.2 |
+| arrival card 3 s | 430/427 -> 436/434 | 132.3/137.2 -> 88.7/100.4 | 76.9/90.4 -> 75.6/90 | 0/1 -> 0/0 | 12.2/18.2 -> 6.2/12.1 |
+
+(The micro runs were on the 250 ms-fallback version; the captions case is the only one idleSliced touches.)
+
+Idle warm-up after a resize (`warmcost`, P1, 180 hit tests; `dev/director-opt-ev/warmcost2.txt`, final code = "after3"):
+
+| | done after first probe | Director ms | longest Director run |
+|---|---|---|---|
+| 2x before | 0.6 / 1.1 s | 180 / 254 | 9.6 / 9.2 ms |
+| 2x after | 1.1 / 1.1 s | 197 / 214 | 5.9 / 5.6 ms |
+| 4x before | 1.8 / 0.4 s (2nd: 135 probes) | 549 / 176 | 15.1 / 17.3 ms |
+| 4x after | 3.0 / 1.4 s (2nd: 135 probes) | 620 / 127 | 8.6 / 11.6 ms |
+
+Interleaved scenario A/B (2 rounds x 2 reps, P1 + P2, `ab-x2-*.json`, table by `dev/director-perf-table.mjs`): the Director's own saturated 60 Hz bins without the camera go down or stay (take P1 9.5 -> 6, attack 18.3 -> 10.3 / 10.5 -> 8.5, combat 21.3 -> 19.8 / 16 -> 15.3, soft ~0), layouts down (arrival 560 -> 474 / 563 -> 488, soft 185 -> 154); the whole-frame columns are dominated by machine drift (round 1 "after" ran under a load spike: camera share +35-80 %; in round 2 after <= before almost everywhere). No scenario-level claim beyond "not worse" is made from them.
+
+Setup caption at 4x, real attack (P1, Plus Ultra "splash for others" off so the Director's own result caption shows; restored after): slid in 374-400 ms after shot start (before 398-433 ms), result caption ("Hit! Damage 3" / "Miss!") made and slid in 0-82 ms after the dice cue, clear of the hotbar (`regress/attack-*.txt`). With the splash on (default) the result caption is quiet by design and only the setup caption shows.
+
+### Same look
+- `dev/director-look-ab.js` (+ scratch driver): captions (3 texts, with / without bars), markers (ping, edge arrow), turn banner, arrival card, on P1 over a black backdrop, both builds. Geometry JSON identical except the card's `contain` value; screenshots pixel-identical for the 3 captions, the banner and the card; marker ping/arrow differ only in the running ring / nudge animation phase (arrow: no pixel > 8). Files `dev/director-opt-ev/look/`. (A first after run differed because an Invincible Plus Ultra "end-of-session review" toast was on screen and the caption correctly sat above it; rerun with the toast removed.)
+- Transitions verified running after the change (bars / vignette, flash at impact, caption slide-in, marker, banner).
+- webm (P1, 1920x1080) before | after side by side: `dev/director-opt-ev/video/take-ab.webm`, `arrival-ab.webm` (+ strips). Same shot, letterbox, marker, caption, title card; the red pulsing is the scene's own lighting, its phase differs.
+
+### Regression
+- run-all 65/65, lang-audit clean (final code).
+- director-check watchShot on P1 (lane 4): none / esc / click / wheel / busy all OK (`regress/director-check-p1.txt`; before and after the IDLE_WAIT fix; in the final run the first "none" right after the page reload came as a soft shot (rows still OK), the repeat was a full take-over).
+- stage-js/vision.mjs 4/4, stage-js/control.mjs on P2 16/16 (pre-IDLE_WAIT-fix code; the fix touches only warm-up / re-check scheduling).
+- cinematic-check GM 13/13. cinematic-fx-check on P1: first run 28/30 because a Director take-over (from the GM check's destruction, director ON) was still on screen when it started; rerun 3 s later 29/30, and with the director OFF 29/30; the one failing row is "idle-bench rest unchanged (mean within +0.15 ms)" (8.0 -> 9.4, 9.4 -> 17.9 ms with p95 65 ms: machine load; listener count unchanged). cinematic(-fx).mjs are not touched by this branch.
+
+### Not verified
+- A real GTX 1080 / i7-7700K / 60 Hz display (all of it is the approximation above). The 16 ms idle fallback is tuned for 60 Hz; at 165 Hz headless the 4x warm-up finished up to ~1.2 s later than before in one of two runs (a shot in that window places live, as before).
+- DPR 2, Firefox, two GMs.
+
+### Big costs outside the Director (not changed)
+- `scripts/zones/orbit.mjs` strip `place()` on every canvasPan reads `this.el.offsetHeight` after writes: a forced layout per camera frame, 21-93 ms per shot at 2x. Fix idea: cache the height (it changes only on content / resize).
+- LockView `socket.js emitViewbox` (socket emit per pan) and `helpers.js getUserSetting` (game.settings.get through the DataModel per pan).
+- At rest moinen-maps costs ~1560 ms per 6 s on a 2x player (~26 % of a core), mostly outside the Director.
+- Arrival: the establishing frame is a 1.1 s ticker stall at 2x (texture uploads 359 ms, Foundry panCanvas 181 ms, zones onCanvasReady / relink 144 ms), behind the veil; on a slow client the title card comes ~1 s later.
+- Dice So Nice stalls during rolls.
+
+### New dev tools
+`dev/director-perf.mjs` (--gpu, --layers, sat60 / sat60own, camera share), `dev/director-perf-table.mjs`, `dev/director-perf-merge.mjs`, `dev/director-micro-ab.mjs`, `dev/director-look-ab.js`; evidence in `dev/director-opt-ev/`.

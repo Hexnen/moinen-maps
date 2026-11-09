@@ -4,6 +4,7 @@ import * as SC from "./stage-core.mjs";
 import { killed, isOn, myMode, R, HOOK, registerStager, cameraHeld, busy } from "./director.mjs";
 import { Screen } from "./stage.mjs";
 import { freeRect } from "./overlay.mjs";
+import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
 
@@ -277,7 +278,7 @@ function showChip() {
   chip.style.left = `${Math.round(r.x + r.w / 2)}px`; chip.style.top = `${Math.round(r.y + r.h - 40)}px`;
   chip.addEventListener("pointerdown", (ev) => { ev.preventDefault(); ev.stopPropagation(); backHome(); });
   document.body.appendChild(chip);
-  void chip.offsetWidth; chip.classList.add("is-in");
+  restyle(chip); chip.classList.add("is-in");
 }
 function hideChip() { const c = chip; chip = null; c?.remove(); }
 /** Esc while parked: only when nothing else wants it (a focused text field, an open window). */

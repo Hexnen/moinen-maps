@@ -1,4 +1,5 @@
 import { edgeSpot } from "./core.mjs";
+import { restyle } from "./screen.mjs";
 
 /**
  * DIRECTOR OVERLAYS (DOM, this client only): the caption of a take-over (a film lower third over the bottom letterbox bar), and the soft
@@ -8,7 +9,7 @@ import { edgeSpot } from "./core.mjs";
  */
 
 const CSS = `
-.mm-dir { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; font-family: var(--font-primary, sans-serif); }
+.mm-dir { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; contain: strict; font-family: var(--font-primary, sans-serif); }
 .mm-dir-cap { position: absolute; left: 50%; bottom: calc(var(--mm-dir-lb, 0%) * 0.5); transform: translate(-50%, 50%); display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
   color: #f4efe6; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.6); max-width: min(80vw, 56rem); }
 .mm-dir-cap.is-low { bottom: 9vh; transform: translate(-50%, 0); }
@@ -152,7 +153,7 @@ export function caption({ kick, title, icon, lb = 0, hint = "", hold = false }) 
   host().appendChild(el);
   let gone = false, leaving = false, shown = false, placed = false, want = !hold;
   // (it slides in once its place is known AND it is due: until then every part of it is transparent - the hidden state of the slide-in)
-  const show = () => { if ( gone || leaving || shown || !placed || !want ) return; shown = true; void el.offsetWidth; el.classList.add("is-in"); };
+  const show = () => { if ( gone || leaving || shown || !placed || !want ) return; shown = true; restyle(el); el.classList.add("is-in"); };
   clearOfUi(el, () => !gone && !leaving, () => { placed = true; show(); });
   const remove = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); };
   return {
@@ -186,10 +187,12 @@ function probe(x, y) {
   return { kind: "open" };
 }
 /** The answer at (x, y) (snapped to the grid): kept, or a live hit test (then kept). `memo` false: always live. { kind, top, bottom, kept } */
+let probeMs = 1;                         // (a live hit test's cost here, smoothed: idleSliced keeps one of them inside the idle time)
 export function hitAt(x, y, memo = true) {
   const sx = snap(x), sy = snap(y), k = `${sx}|${sy}`;
   if ( memo ) { const h = HITS.get(k); if ( h ) return { ...h, kept: true }; }
-  const h = probe(sx, sy);
+  const t = performance.now(), h = probe(sx, sy);
+  probeMs = Math.min(20, probeMs * 0.8 + (performance.now() - t) * 0.2);
   if ( HITS.size > 6000 ) HITS.clear();
   HITS.set(k, h);
   return { ...h, kept: false };
@@ -229,6 +232,28 @@ export function sliced(step, alive, done) {
     if ( fin ) done(); else later(go);
   };
   go();
+}
+/**
+ * The same slices for work nobody waits to see (the live re-check of a caption placed from kept answers, the warm-up): each runs in
+ * the browser's IDLE time after a frame (requestIdleCallback), only as long as that idle time lasts, less one hit test - so it never
+ * makes a frame later when the page has idle time (a fixed SLICE_MS slice after every frame did: ~4-6 ms on top of a busy frame).
+ * Same steps, same answers; only when they run. A page with no idle time still gets a SLICE_MS slice at least every IDLE_WAIT ms
+ * (about one 60 Hz frame, the cadence sliced() had), so the work never finishes later than it did. Without requestIdleCallback: sliced().
+ */
+const IDLE_WAIT = 16;
+export function idleSliced(step, alive, done) {
+  const ric = globalThis.requestIdleCallback;
+  if ( typeof ric !== "function" ) { later(() => sliced(step, alive, done)); return; }
+  const go = (dl) => {
+    if ( !alive() ) return;
+    const left = dl?.didTimeout ? SLICE_MS : (dl?.timeRemaining?.() ?? 0) - probeMs;
+    if ( left <= 0.5 ) { ric(go, { timeout: IDLE_WAIT }); return; }
+    let fin = true;
+    // (step() stops once SLICE_MS has passed since its t0: a t0 that makes that moment `left` ms from now)
+    try { fin = step(performance.now() - SLICE_MS + left); } catch { fin = true; }
+    if ( fin ) done(); else ric(go, { timeout: IDLE_WAIT });
+  };
+  ric(go, { timeout: IDLE_WAIT });
 }
 /**
  * The caption's place (arithmetic over the hit answers): from its default box `R0` (screen px, centred on `cx`), points across its width
@@ -288,7 +313,7 @@ function clearOfUi(el, alive = () => true, done = () => {}) {
     if ( !p.res.kept ) return;
     // (placed from kept answers: the same points live once more, in slices, after it is up; it moves only when the interface changed)
     const q = placement(R0, cx, false);
-    later(() => sliced(q.step, alive, () => { if ( q.res.lift !== p.res.lift || q.res.bottom !== p.res.bottom ) apply(q.res, true); }));
+    idleSliced(q.step, alive, () => { if ( q.res.lift !== p.res.lift || q.res.bottom !== p.res.bottom ) apply(q.res, true); });
   });
 }
 /**
@@ -308,17 +333,19 @@ export function warmCaptions(lbs = [0]) {
     el.innerHTML = `<div class="mm-dir-kick"><i class="fa-solid fa-burst" inert></i><span>Wwwww</span></div><div class="mm-dir-title" style="white-space:nowrap;overflow:hidden">${"W".repeat(80)}</div><div class="mm-dir-hint">W</div>`;
     host().appendChild(el);
     let gone = false;
-    const end = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); later(next); };
+    const end = () => { if ( gone ) return; gone = true; el.remove(); maybeDrop(); idle(next, IDLE_WAIT); };
     try {
       const f = freeRect(), cx = Math.round(f.x + f.w / 2);
       el.style.left = `${cx}px`; el.style.maxWidth = `${Math.round(Math.max(260, f.w - 24))}px`;
       hitsFresh();
       const r = el.getBoundingClientRect(), p = placement({ left: r.left, width: r.width, top: r.top, height: r.height }, cx, true);
-      sliced(p.step, () => !gone, end);
+      idleSliced(p.step, () => !gone, end);
     } catch { end(); }
   };
-  (globalThis.requestIdleCallback ?? ((fn) => setTimeout(fn, 200)))(() => next(), { timeout: 3000 });
+  idle(next, 3000);
 }
+// (the next lb's box is made and measured at the start of an idle period of its own, not at the end of the one its slices used up)
+const idle = (fn, timeout) => (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 200)))(() => fn(), { timeout });
 
 /**
  * A soft marker at scene point (x, y): a ping when on screen, an edge arrow when not; `text` its caption, `icon` the kind's icon.
@@ -359,7 +386,7 @@ export function marker({ x, y, text, icon, onClick }) {
   marks.add(m);
   if ( panHook === null ) panHook = Hooks.on("canvasPan", () => { for ( const q of marks ) q.place(); });
   place();
-  void el.offsetWidth;
+  restyle(el);
   el.classList.add("is-in");
   let gone = false;
   const remove = () => { if ( gone ) return; gone = true; marks.delete(m); el.remove(); maybeDrop(); };

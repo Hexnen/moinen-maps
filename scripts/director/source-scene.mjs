@@ -4,6 +4,7 @@ import * as Cin from "../destruction/cinematic-core.mjs";
 import * as Dir from "./core.mjs";
 import * as SC from "./scene-core.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
+import { restyle } from "./screen.mjs";
 import { HOOK, R, gmState, myMode, killed, isOn, busy, holds, cameraHeld, typing, escTaken } from "./director.mjs";
 import { isOrbit } from "../zones/orbit.mjs";
 import * as Reveal from "../net/reveal.mjs";
@@ -51,7 +52,7 @@ let pageFirst = true;                    // no scene drawn yet in this page (a l
 
 const CSS = `
 .mm-dir-veil { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, #0b0a09 0%, #030303 75%); opacity: 0; transition: opacity 280ms ease-out; }
-.mm-dir-arr { position: fixed; inset: 0; z-index: 2; pointer-events: none; display: flex; align-items: center; justify-content: center; font-family: var(--font-primary, sans-serif); }
+.mm-dir-arr { position: fixed; inset: 0; z-index: 2; pointer-events: none; contain: strict; display: flex; align-items: center; justify-content: center; font-family: var(--font-primary, sans-serif); }
 .mm-dir-arr-card { display: flex; flex-direction: column; align-items: center; gap: 0.55rem; transform: translateY(-5vh); color: #f4efe6; text-align: center; max-width: min(86vw, 72rem);
   text-shadow: 0 2px 3px rgba(0,0,0,0.85), 0 0 28px rgba(0,0,0,0.65); }
 .mm-dir-arr-kick { font-size: 0.8rem; letter-spacing: 0.46em; text-transform: uppercase; color: #e9c46a; opacity: 0; transform: translateY(8px);
@@ -91,7 +92,7 @@ function veilIn({ ms = 280, opaque = false } = {}) {
   if ( !veil ) {
     const el = document.createElement("div"); el.className = "mm-dir-veil"; el.dataset.mmDir = "";
     insert(el); veil = { el, timer: 0, gone: 0 };
-    if ( !opaque ) void el.offsetWidth;
+    if ( !opaque ) restyle(el);
   }
   clearTimeout(veil.gone); veil.gone = 0;
   veil.el.style.transition = opaque ? "none" : `opacity ${ms}ms ease-out`;
@@ -116,7 +117,7 @@ function makeCard({ title, sub, kick, soft, reduced }) {
   el.innerHTML = `<div class="mm-dir-arr-card">${kick ? `<div class="mm-dir-arr-kick">${esc(kick)}</div>` : ""}<div class="mm-dir-arr-title">${esc(title)}</div>`
     + `<div class="mm-dir-arr-rule"></div>${sub ? `<div class="mm-dir-arr-sub">${esc(sub)}</div>` : ""}</div>`;
   insert(el);
-  void el.offsetWidth;
+  restyle(el);
   el.classList.add("is-in");
   let gone = false;
   const remove = () => { if ( gone ) return; gone = true; el.remove(); };

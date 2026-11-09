@@ -1,0 +1,2408 @@
+{
+ "label": "base-2x",
+ "throttle": 2,
+ "dpr": 1,
+ "at": "2026-11-08T23:12:22.636Z",
+ "scen": {
+  "rest": {
+   "gm": {
+    "frames": 2269,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 0,
+    "over50": 0,
+    "gpuP50": 1.31,
+    "gpuP95": 2.93,
+    "gpuMax": 5.59,
+    "gpuSum": 573.4,
+    "lay": null,
+    "tickP50": 2,
+    "tickP95": 2.5,
+    "tickMax": 4.6,
+    "loaf50": 2,
+    "loafMax": 212,
+    "dirSelfMs": 0,
+    "dirRunMax": 0,
+    "dirInclMs": 0,
+    "mmInclMs": 842.5,
+    "gcMs": 3.4,
+    "busyMs": 1183,
+    "layouts": 30,
+    "styles": 80,
+    "layoutMs": 8.8,
+    "styleMs": 6,
+    "heapMB": 0.79,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [],
+    "runParts": [],
+    "load": [
+     null,
+     null
+    ],
+    "top": [],
+    "loafs": [
+     {
+      "ms": 208,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 212,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 2225,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 1,
+    "over50": 1,
+    "gpuP50": 1.89,
+    "gpuP95": 3.96,
+    "gpuMax": 7.73,
+    "gpuSum": 766.2,
+    "lay": null,
+    "tickP50": 3.9,
+    "tickP95": 5.1,
+    "tickMax": 9.3,
+    "loaf50": 3,
+    "loafMax": 462,
+    "dirSelfMs": 0,
+    "dirRunMax": 0,
+    "dirInclMs": 0,
+    "mmInclMs": 1562.5,
+    "gcMs": 5,
+    "busyMs": 2040,
+    "layouts": 29,
+    "styles": 78,
+    "layoutMs": 19.1,
+    "styleMs": 11.7,
+    "heapMB": 0.37,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [],
+    "runParts": [],
+    "load": [
+     null,
+     null
+    ],
+    "top": [],
+    "loafs": [
+     {
+      "ms": 413,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 81,
+      "block": 27,
+      "style": 29,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:42",
+       "scripts/view-smooth.mjs::5"
+      ]
+     },
+     {
+      "ms": 462,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p2": {
+    "frames": 2200,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 2,
+    "over50": 2,
+    "gpuP50": 2.99,
+    "gpuP95": 4.66,
+    "gpuMax": 6.31,
+    "gpuSum": 1119.8,
+    "lay": null,
+    "tickP50": 4,
+    "tickP95": 5.1,
+    "tickMax": 5.9,
+    "loaf50": 4,
+    "loafMax": 437,
+    "dirSelfMs": 0,
+    "dirRunMax": 0,
+    "dirInclMs": 0,
+    "mmInclMs": 1565.7,
+    "gcMs": 4,
+    "busyMs": 2067,
+    "layouts": 30,
+    "styles": 128,
+    "layoutMs": 22.4,
+    "styleMs": 21.1,
+    "heapMB": 0.21,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [],
+    "runParts": [],
+    "load": [
+     null,
+     null
+    ],
+    "top": [],
+    "loafs": [
+     {
+      "ms": 425,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 67,
+      "block": 17,
+      "style": 29,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:37"
+      ]
+     },
+     {
+      "ms": 437,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 71,
+      "block": 21,
+      "style": 31,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:40"
+      ]
+     }
+    ]
+   }
+  },
+  "take": {
+   "gm": {
+    "frames": 2768,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 1,
+    "over50": 0,
+    "gpuP50": 1.76,
+    "gpuP95": 3.51,
+    "gpuMax": 17.12,
+    "gpuSum": 838.4,
+    "lay": null,
+    "tickP50": 2.1,
+    "tickP95": 3.2,
+    "tickMax": 14.5,
+    "loaf50": 3,
+    "loafMax": 221,
+    "dirSelfMs": 0,
+    "dirRunMax": 1.4,
+    "dirInclMs": 2,
+    "mmInclMs": 1047.2,
+    "gcMs": 3.5,
+    "busyMs": 1576,
+    "layouts": 42,
+    "styles": 302,
+    "layoutMs": 14.1,
+    "styleMs": 29.9,
+    "heapMB": -1.06,
+    "sock": {
+     "sent": 1,
+     "sentB": 539,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "bar.mjs:rect:90 1.1",
+     "stage.mjs:clientGet:36 0.4"
+    ],
+    "runParts": [
+     "director.mjs:tell>callAll 0.5",
+     "stage.mjs:clientGet>find 0.5",
+     "bar.mjs:rect>getBoundingClientRect 0.4"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:getBoundingClientRect 1.1",
+     "> foundry.mjs:find 0.4"
+    ],
+    "loafs": [
+     {
+      "ms": 221,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 50,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::7"
+      ]
+     },
+     {
+      "ms": 221,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 2650,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 3,
+    "over50": 1,
+    "gpuP50": 2.3,
+    "gpuP95": 5.14,
+    "gpuMax": 9.56,
+    "gpuSum": 1152.6,
+    "lay": null,
+    "tickP50": 4.1,
+    "tickP95": 6.5,
+    "tickMax": 49.8,
+    "loaf50": 4,
+    "loafMax": 447,
+    "dirSelfMs": 11.66,
+    "dirRunMax": 8,
+    "dirInclMs": 136.14,
+    "mmInclMs": 2170,
+    "gcMs": 19.1,
+    "busyMs": 3025,
+    "layouts": 351,
+    "styles": 702,
+    "layoutMs": 82.7,
+    "styleMs": 82,
+    "heapMB": -1.36,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 558
+    },
+    "callers": [
+     "stage.mjs:ontick:88 101.4",
+     "overlay.mjs:probe:179 33.2",
+     "stage.mjs:now:98 2.0",
+     "screen.mjs:onTick:267 1.5",
+     "stage.mjs:clientGet:36 1.5",
+     "screen.mjs:s.tick:188 1.0",
+     "overlay.mjs:clearOfUi:268 0.9",
+     "director.mjs:hit:493 0.6",
+     "screen.mjs:startCamera:194 0.6",
+     "screen.mjs:createOverlays:53 0.5"
+    ],
+    "runParts": [
+     "overlay.mjs:probe>elementsFromPoint 7.6",
+     "overlay.mjs:probe>getBoundingClientRect 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:elementsFromPoint 31.0",
+     "> orbit.mjs:place 24.3",
+     "> foundry.mjs:anon 4.7",
+     "> foundry.mjs:clean 4.1",
+     "> native:send 3.6",
+     "> socket.io.min.js:n.encodeAsString 2.7",
+     "> foundry.mjs:shimData 2.6",
+     "> lib-wrapper.js:call_wrapped 2.4",
+     "> viewbox.js:emit 2.3",
+     "> foundry.mjs:getInitialValue 2.1",
+     "> display.mjs:onZoom 2.1",
+     "> lib-wrapper.js:call_wrapper 2.1"
+    ],
+    "loafs": [
+     {
+      "ms": 447,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 103,
+      "block": 52,
+      "style": 25,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:41",
+       "scripts/view-smooth.mjs::36"
+      ]
+     },
+     {
+      "ms": 427,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::6"
+      ]
+     },
+     {
+      "ms": 64,
+      "block": 14,
+      "style": 1,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:13",
+       "scripts/view-smooth.mjs::50"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 2615,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 4,
+    "over50": 1,
+    "gpuP50": 2.48,
+    "gpuP95": 5.44,
+    "gpuMax": 18.55,
+    "gpuSum": 1235.6,
+    "lay": null,
+    "tickP50": 4,
+    "tickP95": 6.5,
+    "tickMax": 173.6,
+    "loaf50": 3,
+    "loafMax": 445,
+    "dirSelfMs": 6.99,
+    "dirRunMax": 13,
+    "dirInclMs": 147.54,
+    "mmInclMs": 2192.7,
+    "gcMs": 20.6,
+    "busyMs": 2990,
+    "layouts": 349,
+    "styles": 586,
+    "layoutMs": 54.7,
+    "styleMs": 66.3,
+    "heapMB": -0.93,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 558
+    },
+    "callers": [
+     "stage.mjs:ontick:88 116.9",
+     "overlay.mjs:probe:179 26.0",
+     "stage.mjs:now:98 2.3",
+     "screen.mjs:onTick:267 1.1",
+     "director.mjs:endTake:591 1.1",
+     "screen.mjs:s.tick:188 1.1",
+     "overlay.mjs:clearOfUi:268 1.0",
+     "stage.mjs:clientOpts:48 1.0",
+     "stage.mjs:clientGet:36 1.0",
+     "overlay.mjs:step:249 0.7"
+    ],
+    "runParts": [
+     "overlay.mjs:probe>elementsFromPoint 13.0"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:elementsFromPoint 25.0",
+     "> orbit.mjs:place 23.3",
+     "> native:send 13.1",
+     "> foundry.mjs:validate 6.8",
+     "> socket.js:emitViewbox 6.2",
+     "> foundry.mjs:_initialize 4.7",
+     "> pixi-graphics-smooth.js:drawShape 3.6",
+     "> native:structuredClone 3.0",
+     "> foundry.mjs:DataModel 2.8",
+     "> socket.io.min.js:r.write 2.6",
+     "> lib-wrapper.js:call_wrapper 2.5",
+     "> pixi.min.js:updateTransform 2.4"
+    ],
+    "loafs": [
+     {
+      "ms": 445,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 424,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 249,
+      "block": 125,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::174"
+      ]
+     }
+    ]
+   }
+  },
+  "soft": {
+   "gm": {
+    "frames": 2611,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 0,
+    "over50": 0,
+    "gpuP50": 1.86,
+    "gpuP95": 3.75,
+    "gpuMax": 8.1,
+    "gpuSum": 855.3,
+    "lay": null,
+    "tickP50": 2.2,
+    "tickP95": 4.1,
+    "tickMax": 8.2,
+    "loaf50": 2,
+    "loafMax": 234,
+    "dirSelfMs": 0.57,
+    "dirRunMax": 1.5,
+    "dirInclMs": 1.72,
+    "mmInclMs": 950.9,
+    "gcMs": 3.8,
+    "busyMs": 1375,
+    "layouts": 38,
+    "styles": 199,
+    "layoutMs": 10.3,
+    "styleMs": 21.3,
+    "heapMB": 0.75,
+    "sock": {
+     "sent": 1,
+     "sentB": 539,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "core.mjs:pickLeader:398 0.5",
+     "bar.mjs:rect:90 0.5",
+     "director.mjs:busy:344 0.5"
+    ],
+    "runParts": [
+     "core.mjs:pickLeader 0.5",
+     "bar.mjs:rect>getBoundingClientRect 0.5",
+     "director.mjs:busy>querySelector 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "core.mjs:pickLeader:398 0.5",
+     "> native:getBoundingClientRect 0.5",
+     "> native:querySelector 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 234,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 211,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 2470,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 4,
+    "over50": 1,
+    "gpuP50": 2.76,
+    "gpuP95": 7.06,
+    "gpuMax": 32.09,
+    "gpuSum": 1382.2,
+    "lay": null,
+    "tickP50": 3.9,
+    "tickP95": 7.7,
+    "tickMax": 39.3,
+    "loaf50": 5,
+    "loafMax": 481,
+    "dirSelfMs": 18.7,
+    "dirRunMax": 11.4,
+    "dirInclMs": 31.48,
+    "mmInclMs": 1970.9,
+    "gcMs": 5.3,
+    "busyMs": 2807,
+    "layouts": 191,
+    "styles": 962,
+    "layoutMs": 40.5,
+    "styleMs": 214.3,
+    "heapMB": 3.21,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 558
+    },
+    "callers": [
+     "overlay.mjs:place:335 6.9",
+     "core.mjs:edgeSpot:365 5.8",
+     "overlay.mjs:remove:365 3.7",
+     "overlay.mjs:anon:348 3.5",
+     "overlay.mjs:anon:360 2.2",
+     "overlay.mjs:safeRect:80 2.1",
+     "overlay.mjs:toScreen:136 1.7",
+     "source-stage.mjs:onPan:168 1.4",
+     "overlay.mjs:measureSafe:87 0.9",
+     "director.mjs:start:385 0.6"
+    ],
+    "runParts": [
+     "overlay.mjs:anon>setProperty 11.4"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "overlay.mjs:place:335 6.9",
+     "core.mjs:edgeSpot:365 5.8",
+     "> native:remove 3.7",
+     "overlay.mjs:anon:360 2.2",
+     "overlay.mjs:safeRect:80 2.1",
+     "overlay.mjs:anon:348 1.9",
+     "> native:setProperty 1.7",
+     "source-stage.mjs:onPan:168 1.4",
+     "> native:getBoundingClientRect 0.9",
+     "> pixi.min.js:get worldTransform 0.8",
+     "director.mjs:start:385 0.6",
+     "overlay.mjs:anon:352 0.6"
+    ],
+    "loafs": [
+     {
+      "ms": 435,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 72,
+      "block": 0,
+      "style": 1,
+      "scripts": []
+     },
+     {
+      "ms": 481,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 90,
+      "block": 39,
+      "style": 3,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:44",
+       "scripts/view-smooth.mjs::40"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 2443,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 5,
+    "over50": 2,
+    "gpuP50": 2.99,
+    "gpuP95": 6.45,
+    "gpuMax": 10.92,
+    "gpuSum": 1379.9,
+    "lay": null,
+    "tickP50": 3.9,
+    "tickP95": 7.2,
+    "tickMax": 23,
+    "loaf50": 5,
+    "loafMax": 466,
+    "dirSelfMs": 11.68,
+    "dirRunMax": 11,
+    "dirInclMs": 16.94,
+    "mmInclMs": 1918,
+    "gcMs": 4.2,
+    "busyMs": 2791,
+    "layouts": 190,
+    "styles": 911,
+    "layoutMs": 39.1,
+    "styleMs": 262.7,
+    "heapMB": 1,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 558
+    },
+    "callers": [
+     "overlay.mjs:place:335 10.2",
+     "overlay.mjs:anon:348 2.2",
+     "overlay.mjs:anon:360 1.2",
+     "overlay.mjs:remove:365 0.9",
+     "overlay.mjs:measureSafe:87 0.8",
+     "director.mjs:start:385 0.5",
+     "overlay.mjs:anon:347 0.5",
+     "overlay.mjs:anon:355 0.5",
+     "stage.mjs:clientGet:36 0.5",
+     "director.mjs:busy:344 0.5"
+    ],
+    "runParts": [
+     "overlay.mjs:place 7.5",
+     "director.mjs:start 0.5",
+     "overlay.mjs:anon 0.5",
+     "stage.mjs:clientGet 0.5",
+     "director.mjs:busy>querySelector 0.5",
+     "director.mjs:playSoft 0.5",
+     "overlay.mjs:put 0.5",
+     "overlay.mjs:toScreen>apply 0.3"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "overlay.mjs:place:335 10.2",
+     "> native:setProperty 2.2",
+     "overlay.mjs:anon:360 1.2",
+     "> native:remove 0.9",
+     "> native:getBoundingClientRect 0.8",
+     "director.mjs:start:385 0.5",
+     "overlay.mjs:anon:347 0.5",
+     "overlay.mjs:anon:355 0.5",
+     "stage.mjs:clientGet:36 0.5",
+     "> native:querySelector 0.5",
+     "director.mjs:playSoft:621 0.5",
+     "overlay.mjs:put:334 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 432,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 53,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 132,
+      "block": 77,
+      "style": 101,
+      "scripts": [
+       "scripts/view-smooth.mjs::8"
+      ]
+     },
+     {
+      "ms": 466,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   }
+  },
+  "follow": {
+   "gm": {
+    "frames": 3285,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 0,
+    "over50": 0,
+    "gpuP50": 1.24,
+    "gpuP95": 3.13,
+    "gpuMax": 8.19,
+    "gpuSum": 845.9,
+    "lay": null,
+    "tickP50": 2.2,
+    "tickP95": 3.5,
+    "tickMax": 9.3,
+    "loaf50": 2,
+    "loafMax": 215,
+    "dirSelfMs": 1.76,
+    "dirRunMax": 1.8,
+    "dirInclMs": 3.42,
+    "mmInclMs": 1329.3,
+    "gcMs": 5.8,
+    "busyMs": 1911,
+    "layouts": 47,
+    "styles": 209,
+    "layoutMs": 12.1,
+    "styleMs": 19.9,
+    "heapMB": 0.46,
+    "sock": {
+     "sent": 1,
+     "sentB": 757,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "overlay.mjs:windowRects:98 0.9",
+     "bar.mjs:rect:90 0.6",
+     "core.mjs:anon:244 0.5",
+     "move-core.mjs:pathOf:58 0.5"
+    ],
+    "runParts": [
+     "director.mjs:busy>querySelector 0.8",
+     "bar.mjs:rect>getBoundingClientRect 0.5",
+     "bar.mjs:update 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> foundry.mjs:get hasFrame 0.9",
+     "> native:getBoundingClientRect 0.6",
+     "core.mjs:anon:244 0.5",
+     "move-core.mjs:pathOf:58 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 215,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 212,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 3166,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 3,
+    "over50": 2,
+    "gpuP50": 3.08,
+    "gpuP95": 5.34,
+    "gpuMax": 25.25,
+    "gpuSum": 1729.9,
+    "lay": null,
+    "tickP50": 4.2,
+    "tickP95": 7,
+    "tickMax": 22.9,
+    "loaf50": 4,
+    "loafMax": 507,
+    "dirSelfMs": 10.85,
+    "dirRunMax": 6,
+    "dirInclMs": 89.75,
+    "mmInclMs": 2484.6,
+    "gcMs": 17.9,
+    "busyMs": 3440,
+    "layouts": 160,
+    "styles": 664,
+    "layoutMs": 47.1,
+    "styleMs": 97.9,
+    "heapMB": -2.47,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 776
+    },
+    "callers": [
+     "overlay.mjs:place:335 3.4",
+     "director.mjs:start:385 1.1",
+     "overlay.mjs:marker:327 0.5",
+     "director.mjs:busy:344 0.5",
+     "director.mjs:receive:294 0.5",
+     "director.mjs:leaderId:105 0.5",
+     "move-core.mjs:inView:86 0.5"
+    ],
+    "runParts": [
+     "overlay.mjs:place 3.4",
+     "director.mjs:start>has 0.6",
+     "director.mjs:start 0.5",
+     "overlay.mjs:marker 0.5",
+     "director.mjs:busy>querySelector 0.5",
+     "move-core.mjs:inView 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "overlay.mjs:place:335 3.4",
+     "> foundry.mjs:has 0.6",
+     "director.mjs:start:385 0.5",
+     "overlay.mjs:marker:327 0.5",
+     "> native:querySelector 0.5",
+     "director.mjs:receive:294 0.5",
+     "director.mjs:leaderId:105 0.5",
+     "move-core.mjs:inView:86 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 483,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 78,
+      "block": 26,
+      "style": 32,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:39",
+       "scripts/view-smooth.mjs::5"
+      ]
+     },
+     {
+      "ms": 507,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::5"
+      ]
+     },
+     {
+      "ms": 73,
+      "block": 23,
+      "style": 29,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:39"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 3168,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 2,
+    "over50": 1,
+    "gpuP50": 2.62,
+    "gpuP95": 4.98,
+    "gpuMax": 12.94,
+    "gpuSum": 1531.8,
+    "lay": null,
+    "tickP50": 4.1,
+    "tickP95": 6.7,
+    "tickMax": 34,
+    "loaf50": 4,
+    "loafMax": 470,
+    "dirSelfMs": 9.43,
+    "dirRunMax": 4.6,
+    "dirInclMs": 77.64,
+    "mmInclMs": 2440.8,
+    "gcMs": 32.6,
+    "busyMs": 3384,
+    "layouts": 158,
+    "styles": 658,
+    "layoutMs": 43.8,
+    "styleMs": 83.7,
+    "heapMB": 1.25,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 776
+    },
+    "callers": [
+     "overlay.mjs:place:335 2.6",
+     "overlay.mjs:marker:327 0.9",
+     "source-move.mjs:check:107 0.6",
+     "stage.mjs:clientGet:36 0.5",
+     "director.mjs:captionText:410 0.5"
+    ],
+    "runParts": [
+     "overlay.mjs:place 2.6",
+     "source-move.mjs:check 0.6",
+     "overlay.mjs:marker>on 0.5",
+     "director.mjs:captionText 0.5",
+     "overlay.mjs:marker 0.4"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "overlay.mjs:place:335 2.6",
+     "source-move.mjs:check:107 0.6",
+     "> foundry.mjs:getSetting 0.5",
+     "> foundry.mjs:on 0.5",
+     "director.mjs:captionText:410 0.5",
+     "overlay.mjs:marker:327 0.4"
+    ],
+    "loafs": [
+     {
+      "ms": 470,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 52,
+      "block": 2,
+      "style": 31,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:20"
+      ]
+     },
+     {
+      "ms": 442,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 65,
+      "block": 14,
+      "style": 27,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:36"
+      ]
+     }
+    ]
+   }
+  },
+  "attack": {
+   "gm": {
+    "frames": 4834,
+    "rafP50": 6.1,
+    "rafP95": 6.1,
+    "over33": 2,
+    "over50": 2,
+    "gpuP50": 1.64,
+    "gpuP95": 4.02,
+    "gpuMax": 8.79,
+    "gpuSum": 1488.5,
+    "lay": null,
+    "tickP50": 2.3,
+    "tickP95": 4.1,
+    "tickMax": 260.7,
+    "loaf50": 4,
+    "loafMax": 267,
+    "dirSelfMs": 1.77,
+    "dirRunMax": 4.5,
+    "dirInclMs": 5.61,
+    "mmInclMs": 2225.8,
+    "gcMs": 14.6,
+    "busyMs": 3503,
+    "layouts": 103,
+    "styles": 1123,
+    "layoutMs": 32,
+    "styleMs": 142.9,
+    "heapMB": 4.07,
+    "sock": {
+     "sent": 1,
+     "sentB": 970,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "bar.mjs:rect:90 4.1",
+     "director.mjs:leaderId:105 0.6",
+     "director.mjs:ctxOf:375 0.6",
+     "source-rolls.mjs:onPreCreate:47 0.5",
+     "source-rolls.mjs:tokenBox:33 0.5",
+     "director.mjs:busy:344 0.5",
+     "stage.mjs:clientGet:36 0.5",
+     "bar.mjs:update:107 0.4"
+    ],
+    "runParts": [
+     "bar.mjs:rect>getBoundingClientRect 3.0",
+     "director.mjs:ctxOf 0.6",
+     "director.mjs:busy>querySelector 0.5",
+     "bar.mjs:update 0.4"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:getBoundingClientRect 3.6",
+     "> foundry.mjs:anon 0.6",
+     "director.mjs:ctxOf:375 0.6",
+     "source-rolls.mjs:tokenBox:33 0.5",
+     "> native:querySelector 0.5",
+     "> foundry.mjs:find 0.5",
+     "bar.mjs:rect:90 0.5",
+     "bar.mjs:update:107 0.4",
+     "> foundry.mjs:initialize 0.3",
+     "> foundry.mjs:_cleanType 0.2",
+     "> foundry.mjs:expandObjectInPlace 0.0"
+    ],
+    "loafs": [
+     {
+      "ms": 205,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 160,
+      "block": 77,
+      "style": 0,
+      "scripts": [
+       "dice-so-nice/main.js:_onMessage:127"
+      ]
+     },
+     {
+      "ms": 267,
+      "block": 211,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::261"
+      ]
+     },
+     {
+      "ms": 198,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 4692,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 5,
+    "over50": 4,
+    "gpuP50": 2.27,
+    "gpuP95": 4.72,
+    "gpuMax": 9.68,
+    "gpuSum": 1983.7,
+    "lay": null,
+    "tickP50": 4.2,
+    "tickP95": 7,
+    "tickMax": 358.5,
+    "loaf50": 6,
+    "loafMax": 433,
+    "dirSelfMs": 9.66,
+    "dirRunMax": 8.5,
+    "dirInclMs": 173.06,
+    "mmInclMs": 3934.5,
+    "gcMs": 7.7,
+    "busyMs": 5879,
+    "layouts": 394,
+    "styles": 1422,
+    "layoutMs": 102.4,
+    "styleMs": 280.5,
+    "heapMB": 2.21,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 989
+    },
+    "callers": [
+     "stage.mjs:ontick:88 119.5",
+     "overlay.mjs:probe:179 70.0",
+     "screen.mjs:s.tick:188 4.1",
+     "overlay.mjs:clearOfUi:268 4.0",
+     "stage.mjs:now:98 2.7",
+     "screen.mjs:onTick:267 2.3",
+     "overlay.mjs:step:249 2.3",
+     "overlay.mjs:windowRects:98 0.6",
+     "director.mjs:canSee:305 0.6",
+     "director.mjs:endTake:591 0.6"
+    ],
+    "runParts": [
+     "overlay.mjs:clearOfUi>getBoundingClientRect 4.0",
+     "overlay.mjs:probe>elementsFromPoint 3.5",
+     "overlay.mjs:step 0.5",
+     "overlay.mjs:probe>getBoundingClientRect 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:elementsFromPoint 69.5",
+     "> orbit.mjs:place 35.5",
+     "> native:send 5.6",
+     "> foundry.mjs:get rendered 4.9",
+     "> foundry.mjs:clean 4.9",
+     "> socket.js:emitViewbox 4.7",
+     "> socket.io.min.js:n.encodeAsString 4.7",
+     "> native:getBoundingClientRect 4.5",
+     "screen.mjs:s.tick:188 4.1",
+     "> native:now 3.6",
+     "> native:structuredClone 3.5",
+     "> foundry.mjs:_cleanType 2.9"
+    ],
+    "loafs": [
+     {
+      "ms": 420,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 248,
+      "block": 146,
+      "style": 0,
+      "scripts": [
+       "dice-so-nice/main.js:_onMessage:173"
+      ]
+     },
+     {
+      "ms": 359,
+      "block": 309,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::359"
+      ]
+     },
+     {
+      "ms": 78,
+      "block": 28,
+      "style": 2,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:41",
+       "challenges/main.mjs:measure:34"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 4656,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 5,
+    "over50": 4,
+    "gpuP50": 2.65,
+    "gpuP95": 5.18,
+    "gpuMax": 11.92,
+    "gpuSum": 2307,
+    "lay": null,
+    "tickP50": 4.3,
+    "tickP95": 7,
+    "tickMax": 337.4,
+    "loaf50": 7,
+    "loafMax": 468,
+    "dirSelfMs": 10.42,
+    "dirRunMax": 9,
+    "dirInclMs": 181.93,
+    "mmInclMs": 4016.1,
+    "gcMs": 9.8,
+    "busyMs": 6010,
+    "layouts": 442,
+    "styles": 1482,
+    "layoutMs": 115.3,
+    "styleMs": 283.4,
+    "heapMB": 0.8,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 989
+    },
+    "callers": [
+     "stage.mjs:ontick:88 114.9",
+     "overlay.mjs:probe:179 73.0",
+     "overlay.mjs:clearOfUi:268 4.4",
+     "stage.mjs:now:98 2.5",
+     "overlay.mjs:go:225 1.0",
+     "screen.mjs:s.tick:188 1.0",
+     "overlay.mjs:step:249 1.0",
+     "overlay.mjs:apply:279 1.0",
+     "screen.mjs:onTick:267 0.6",
+     "director.mjs:land:511 0.5"
+    ],
+    "runParts": [
+     "overlay.mjs:clearOfUi>getBoundingClientRect 4.4",
+     "overlay.mjs:probe>elementsFromPoint 4.1",
+     "overlay.mjs:step>now 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:elementsFromPoint 71.5",
+     "> orbit.mjs:place 32.6",
+     "> native:send 5.9",
+     "> foundry.mjs:DataModel 4.9",
+     "> native:getBoundingClientRect 4.4",
+     "> foundry.mjs:anon 3.8",
+     "> foundry.mjs:clean 3.6",
+     "> foundry.mjs:_cleanType 3.4",
+     "> foundry.mjs:validate 3.4",
+     "> native:structuredClone 2.9",
+     "> foundry.mjs:pan 2.9",
+     "> foundry.mjs:_initialize 2.6"
+    ],
+    "loafs": [
+     {
+      "ms": 468,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 240,
+      "block": 140,
+      "style": 0,
+      "scripts": [
+       "dice-so-nice/main.js:_onMessage:171"
+      ]
+     },
+     {
+      "ms": 338,
+      "block": 288,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::337"
+      ]
+     },
+     {
+      "ms": 74,
+      "block": 24,
+      "style": 36,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:38"
+      ]
+     }
+    ]
+   }
+  },
+  "combat": {
+   "gm": {
+    "frames": 14779,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 22,
+    "over50": 12,
+    "gpuP50": 1.54,
+    "gpuP95": 3.84,
+    "gpuMax": 93.15,
+    "gpuSum": 4683.8,
+    "lay": null,
+    "tickP50": 2.1,
+    "tickP95": 3.4,
+    "tickMax": 9.9,
+    "loaf50": 16,
+    "loafMax": 232,
+    "dirSelfMs": 12.32,
+    "dirRunMax": 9.6,
+    "dirInclMs": 39.55,
+    "mmInclMs": 5997.4,
+    "gcMs": 49.6,
+    "busyMs": 10748,
+    "layouts": 475,
+    "styles": 2986,
+    "layoutMs": 133.4,
+    "styleMs": 546.9,
+    "heapMB": 6.3,
+    "sock": {
+     "sent": 6.5,
+     "sentB": 4485,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "overlay.mjs:probe:179 27.1",
+     "bar.mjs:rect:90 6.2",
+     "core.mjs:pump:213 4.5",
+     "source-move.mjs:anon:250 2.5",
+     "director.mjs:leaderId:105 1.7",
+     "director.mjs:busy:344 1.7",
+     "stage.mjs:clientGet:36 1.5",
+     "bar.mjs:showK:129 1.4",
+     "source-move.mjs:host:177 1.0",
+     "overlay.mjs:measureSafe:87 1.0"
+    ],
+    "runParts": [
+     "overlay.mjs:probe>elementsFromPoint 9.6"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> native:elementsFromPoint 27.1",
+     "> native:getBoundingClientRect 6.3",
+     "core.mjs:pump:213 4.5",
+     "source-move.mjs:anon:250 2.5",
+     "director.mjs:leaderId:105 1.7",
+     "> native:querySelector 1.7",
+     "> foundry.mjs:find 1.5",
+     "> native:setProperty 1.0",
+     "bar.mjs:update:107 0.9",
+     "overlay.mjs:go:225 0.9",
+     "> native:matchMedia 0.7",
+     "bar.mjs:staged:104 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 217,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 82,
+      "block": 17,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::6",
+       "scripts/socket.io.min.js::55",
+       "scripts/view-smooth.mjs::9"
+      ]
+     },
+     {
+      "ms": 172,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 99,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 14485,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 45,
+    "over50": 25,
+    "gpuP50": 2.63,
+    "gpuP95": 4.89,
+    "gpuMax": 51.83,
+    "gpuSum": 7128.1,
+    "lay": null,
+    "tickP50": 4.1,
+    "tickP95": 6.6,
+    "tickMax": 21.1,
+    "loaf50": 26,
+    "loafMax": 492,
+    "dirSelfMs": 43.7,
+    "dirRunMax": 17.7,
+    "dirInclMs": 486.19,
+    "mmInclMs": 11572.8,
+    "gcMs": 107.8,
+    "busyMs": 19164,
+    "layouts": 815,
+    "styles": 3640,
+    "layoutMs": 325.1,
+    "styleMs": 913.2,
+    "heapMB": -1.69,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 6.5,
+     "recvB": 4609
+    },
+    "callers": [
+     "stage.mjs:ontick:88 415.9",
+     "overlay.mjs:probe:179 66.8",
+     "source-stage.mjs:showChip:270 12.1",
+     "overlay.mjs:place:335 6.0",
+     "director.mjs:busy:344 5.3",
+     "stage.mjs:now:98 3.4",
+     "screen.mjs:onTick:267 2.9",
+     "screen.mjs:s.tick:188 2.5",
+     "stage.mjs:clientGet:36 2.5",
+     "source-stage.mjs:check:111 2.1"
+    ],
+    "runParts": [
+     "overlay.mjs:probe>elementsFromPoint 9.7",
+     "source-stage.mjs:showChip 6.0",
+     "source-move.mjs:anon 1.0",
+     "source-stage.mjs:showChip>appendChild 0.5",
+     "source-stage.mjs:showChip>querySelector 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> orbit.mjs:place 93.2",
+     "> native:elementsFromPoint 65.8",
+     "> native:send 35.0",
+     "> foundry.mjs:clean 17.3",
+     "> socket.io.min.js:n.encodeAsString 16.5",
+     "> foundry.mjs:align 15.7",
+     "> foundry.mjs:anon 13.1",
+     "> foundry.mjs:validate 12.4",
+     "> socket.js:emitViewbox 11.8",
+     "> foundry.mjs:find 11.6",
+     "source-stage.mjs:showChip:270 11.1",
+     "> native:setTimeout 11.0"
+    ],
+    "loafs": [
+     {
+      "ms": 492,
+      "block": 0,
+      "style": 1,
+      "scripts": []
+     },
+     {
+      "ms": 97,
+      "block": 40,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::80",
+       "scripts/view-smooth.mjs::7"
+      ]
+     },
+     {
+      "ms": 56,
+      "block": 3,
+      "style": 22,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:27"
+      ]
+     },
+     {
+      "ms": 259,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::6"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 14536,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 41,
+    "over50": 22,
+    "gpuP50": 2.51,
+    "gpuP95": 5.22,
+    "gpuMax": 46.47,
+    "gpuSum": 6895.1,
+    "lay": null,
+    "tickP50": 4.2,
+    "tickP95": 6.5,
+    "tickMax": 41.3,
+    "loaf50": 25,
+    "loafMax": 504,
+    "dirSelfMs": 42.52,
+    "dirRunMax": 35.2,
+    "dirInclMs": 491.06,
+    "mmInclMs": 11797,
+    "gcMs": 138.2,
+    "busyMs": 19178,
+    "layouts": 817,
+    "styles": 3754,
+    "layoutMs": 294.6,
+    "styleMs": 928.1,
+    "heapMB": -4.2,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 6.5,
+     "recvB": 4609
+    },
+    "callers": [
+     "stage.mjs:ontick:88 408.6",
+     "overlay.mjs:probe:179 61.1",
+     "source-stage.mjs:showChip:270 9.9",
+     "overlay.mjs:place:335 4.6",
+     "source-move.mjs:anon:250 4.2",
+     "screen.mjs:s.tick:188 4.1",
+     "stage.mjs:clientGet:36 3.4",
+     "source-stage.mjs:onPan:168 3.4",
+     "director.mjs:playTake:455 3.4",
+     "stage.mjs:now:98 3.2"
+    ],
+    "runParts": [
+     "stage.mjs:ontick>place 34.7",
+     "stage.mjs:ontick>structuredClone 0.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "> orbit.mjs:place 74.3",
+     "> native:elementsFromPoint 60.8",
+     "> native:send 30.4",
+     "> socket.js:emitViewbox 21.2",
+     "> foundry.mjs:anon 19.1",
+     "> foundry.mjs:clean 16.1",
+     "> foundry.mjs:DataModel 14.3",
+     "> native:setTimeout 11.3",
+     "> foundry.mjs:validate 10.9",
+     "> socket.io.min.js:n.encodeAsString 10.9",
+     "> foundry.mjs:align 10.7",
+     "> native:structuredClone 10.6"
+    ],
+    "loafs": [
+     {
+      "ms": 482,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::6"
+      ]
+     },
+     {
+      "ms": 83,
+      "block": 26,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::62",
+       "scripts/view-smooth.mjs::11"
+      ]
+     },
+     {
+      "ms": 53,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/socket.io.min.js::23",
+       "tokenhalo/main.mjs:syncAll:15",
+       "scripts/view-smooth.mjs::8"
+      ]
+     },
+     {
+      "ms": 65,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   }
+  },
+  "busy": {
+   "gm": {
+    "frames": 4127,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 2,
+    "over50": 1,
+    "gpuP50": 1.95,
+    "gpuP95": 4.76,
+    "gpuMax": 9.82,
+    "gpuSum": 1582.7,
+    "lay": null,
+    "tickP50": 2.1,
+    "tickP95": 4.1,
+    "tickMax": 7.8,
+    "loaf50": 4,
+    "loafMax": 236,
+    "dirSelfMs": 0.78,
+    "dirRunMax": 1.8,
+    "dirInclMs": 2.18,
+    "mmInclMs": 1725.2,
+    "gcMs": 42.1,
+    "busyMs": 4441,
+    "layouts": 483,
+    "styles": 1634,
+    "layoutMs": 123.3,
+    "styleMs": 383.5,
+    "heapMB": 0.9,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "core.mjs:pickLeader:398 0.5",
+     "source-rolls.mjs:onPreCreate:47 0.5",
+     "director.mjs:leaderId:105 0.5",
+     "stage.mjs:clientGet:36 0.5"
+    ],
+    "runParts": [
+     "stage.mjs:clientGet> 1.8"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "core.mjs:pickLeader:398 0.5",
+     "source-rolls.mjs:onPreCreate:47 0.5",
+     "director.mjs:leaderId:105 0.5",
+     "> foundry.mjs:anon 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 206,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 64,
+      "block": 10,
+      "style": 25,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:35"
+      ]
+     },
+     {
+      "ms": 236,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 52,
+      "block": 2,
+      "style": 21,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:31"
+      ]
+     }
+    ]
+   },
+   "p1": {
+    "frames": 3778,
+    "rafP50": 6.1,
+    "rafP95": 12.1,
+    "over33": 14,
+    "over50": 4,
+    "gpuP50": 2.44,
+    "gpuP95": 5.2,
+    "gpuMax": 10.7,
+    "gpuSum": 1872.7,
+    "lay": null,
+    "tickP50": 3.9,
+    "tickP95": 5.5,
+    "tickMax": 20.9,
+    "loaf50": 5,
+    "loafMax": 524,
+    "dirSelfMs": 1.39,
+    "dirRunMax": 0.9,
+    "dirInclMs": 1.65,
+    "mmInclMs": 2799.9,
+    "gcMs": 36.4,
+    "busyMs": 6676,
+    "layouts": 377,
+    "styles": 1437,
+    "layoutMs": 174.2,
+    "styleMs": 614,
+    "heapMB": 1.16,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "source-rolls.mjs:onCreate:63 0.9",
+     "director.mjs:leaderId:105 0.5",
+     "director.mjs:isLeader:117 0.5"
+    ],
+    "runParts": [
+     "source-rolls.mjs:onCreate 0.9"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "source-rolls.mjs:onCreate:63 0.9",
+     "> foundry.mjs:find 0.5",
+     "director.mjs:isLeader:117 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 444,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 120,
+      "block": 22,
+      "style": 5,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:48",
+       "scripts/socket.io.min.js::59"
+      ]
+     },
+     {
+      "ms": 59,
+      "block": 0,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::20",
+       "scripts/socket.io.min.js::25"
+      ]
+     },
+     {
+      "ms": 524,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p2": {
+    "frames": 3810,
+    "rafP50": 6.1,
+    "rafP95": 12,
+    "over33": 12,
+    "over50": 1,
+    "gpuP50": 2.58,
+    "gpuP95": 5.46,
+    "gpuMax": 15.92,
+    "gpuSum": 1992.3,
+    "lay": null,
+    "tickP50": 3.9,
+    "tickP95": 5.5,
+    "tickMax": 10.1,
+    "loaf50": 4,
+    "loafMax": 511,
+    "dirSelfMs": 1,
+    "dirRunMax": 1.5,
+    "dirInclMs": 1.25,
+    "mmInclMs": 2759.1,
+    "gcMs": 42.8,
+    "busyMs": 6530,
+    "layouts": 391,
+    "styles": 1485,
+    "layoutMs": 179.3,
+    "styleMs": 633.5,
+    "heapMB": 4.36,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "stage.mjs:clientGet:36 2.0"
+    ],
+    "runParts": [
+     "stage.mjs:clientGet 1.5"
+    ],
+    "load": [
+     null,
+     null
+    ],
+    "top": [
+     "stage.mjs:clientGet:36 1.5",
+     "> foundry.mjs:#assertSetting 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 458,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 85,
+      "block": 35,
+      "style": 33,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:52"
+      ]
+     },
+     {
+      "ms": 511,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::7"
+      ]
+     },
+     {
+      "ms": 119,
+      "block": 69,
+      "style": 48,
+      "scripts": [
+       "scripts/foundry.mjs:updateTimestamps:71"
+      ]
+     }
+    ]
+   }
+  },
+  "arrival": {
+   "gm": {
+    "frames": 2900,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 14,
+    "over50": 10,
+    "gpuP50": 1.35,
+    "gpuP95": 2.87,
+    "gpuMax": 119.9,
+    "gpuSum": 873.3,
+    "lay": null,
+    "tickP50": 1.7,
+    "tickP95": 2.5,
+    "tickMax": 515.7,
+    "loaf50": 13,
+    "loafMax": 810,
+    "dirSelfMs": 1.99,
+    "dirRunMax": 2.5,
+    "dirInclMs": 4.2,
+    "mmInclMs": 1437.8,
+    "gcMs": 64.5,
+    "busyMs": 2736,
+    "layouts": 54,
+    "styles": 158,
+    "layoutMs": 18.5,
+    "styleMs": 122,
+    "heapMB": 0.45,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 1,
+     "recvB": 173
+    },
+    "callers": [
+     "sources.mjs:onZones:101 1.1",
+     "core.mjs:pointBox:115 0.5",
+     "bar.mjs:removeBar:78 0.5",
+     "source-scene.mjs:setting:33 0.5",
+     "scene-core.mjs:cleanSettings:29 0.5",
+     "source-scene.mjs:settings:35 0.5",
+     "bar.mjs:rect:90 0.5"
+    ],
+    "runParts": [
+     "bar.mjs:rect>getBoundingClientRect 1.5",
+     "stage.mjs:clientGet> 1.0"
+    ],
+    "load": [
+     1366,
+     234
+    ],
+    "top": [
+     "sources.mjs:onZones:101 1.1",
+     "core.mjs:pointBox:115 0.5",
+     "> native:remove 0.5",
+     "> foundry.mjs:_initialize 0.5",
+     "scene-core.mjs:cleanSettings:29 0.5",
+     "source-scene.mjs:settings:35 0.5",
+     "> native:getBoundingClientRect 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 224,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 74,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 175,
+      "block": 120,
+      "style": 2,
+      "scripts": [
+       "scripts/socket.io.min.js::60",
+       "party/main.mjs:measure:108"
+      ]
+     },
+     {
+      "ms": 61,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p1": {
+    "frames": 2570,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 21,
+    "over50": 14,
+    "gpuP50": 2.29,
+    "gpuP95": 4.65,
+    "gpuMax": 56.69,
+    "gpuSum": 1099,
+    "lay": null,
+    "tickP50": 3.6,
+    "tickP95": 6.5,
+    "tickMax": 674.6,
+    "loaf50": 18,
+    "loafMax": 1415,
+    "dirSelfMs": 14.76,
+    "dirRunMax": 8.7,
+    "dirInclMs": 179.97,
+    "mmInclMs": 2798.8,
+    "gcMs": 134,
+    "busyMs": 5223,
+    "layouts": 608,
+    "styles": 752,
+    "layoutMs": 150.9,
+    "styleMs": 238.8,
+    "heapMB": 0.42,
+    "sock": {
+     "sent": 0.5,
+     "sentB": 95,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "source-scene.mjs:ontick:172 111.5",
+     "stage.mjs:ontick:88 28.1",
+     "source-scene.mjs:veilIn:89 5.1",
+     "source-scene.mjs:makeCard:112 4.0",
+     "source-scene.mjs:play:185 3.7",
+     "source-scene.mjs:setting:33 2.0",
+     "overlay.mjs:next:304 2.0",
+     "screen.mjs:o.show:75 1.5",
+     "stage.mjs:clientGet:36 1.0",
+     "source-scene.mjs:ease:169 1.0"
+    ],
+    "runParts": [
+     "source-scene.mjs:play 2.4",
+     "screen.mjs:o.show 1.5",
+     "source-scene.mjs:onReady>querySelector 0.5",
+     "source-scene.mjs:play>_validateModel 0.5",
+     "screen.mjs:begin>cleanPartial 0.5",
+     "source-scene.mjs:setting>_validateModel 0.5",
+     "source-scene.mjs:play> 0.5",
+     "source-scene.mjs:setting>#validate 0.5"
+    ],
+    "load": [
+     1958,
+     437
+    ],
+    "top": [
+     "> orbit.mjs:place 14.7",
+     "> native:send 8.9",
+     "> socket.js:emitViewbox 8.0",
+     "> foundry.mjs:_cleanType 5.5",
+     "> foundry.mjs:clean 5.5",
+     "source-scene.mjs:veilIn:89 5.1",
+     "> foundry.mjs:DataModel 5.0",
+     "> socket.io.min.js:n.encodeAsString 4.6",
+     "> foundry.mjs:anon 4.5",
+     "> foundry.mjs:shimData 4.4",
+     "> foundry.mjs:validate 4.4",
+     "> foundry.mjs:align 4.4"
+    ],
+    "loafs": [
+     {
+      "ms": 514,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 211,
+      "block": 161,
+      "style": 2,
+      "scripts": [
+       "scripts/socket.io.min.js::118",
+       "party/main.mjs:measure:88"
+      ]
+     },
+     {
+      "ms": 80,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 64,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     }
+    ]
+   },
+   "p2": {
+    "frames": 2580,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 18,
+    "over50": 13,
+    "gpuP50": 1.89,
+    "gpuP95": 4.43,
+    "gpuMax": 35.46,
+    "gpuSum": 966.4,
+    "lay": null,
+    "tickP50": 3.5,
+    "tickP95": 6.1,
+    "tickMax": 574.4,
+    "loaf50": 15,
+    "loafMax": 1458,
+    "dirSelfMs": 15.64,
+    "dirRunMax": 7.1,
+    "dirInclMs": 165.91,
+    "mmInclMs": 2668.9,
+    "gcMs": 50,
+    "busyMs": 4942,
+    "layouts": 588,
+    "styles": 820,
+    "layoutMs": 143.5,
+    "styleMs": 257.5,
+    "heapMB": 14.17,
+    "sock": {
+     "sent": 0.5,
+     "sentB": 95,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "source-scene.mjs:ontick:172 97.8",
+     "stage.mjs:ontick:88 28.8",
+     "source-scene.mjs:veilIn:89 5.1",
+     "source-scene.mjs:makeCard:112 3.0",
+     "stage.mjs:now:98 2.0",
+     "stage.mjs:clientGet:36 1.5",
+     "overlay.mjs:measureSafe:87 1.5",
+     "overlay.mjs:next:304 1.5",
+     "source-scene.mjs:play:185 1.0",
+     "source-scene.mjs:ensureStyle:84 0.9"
+    ],
+    "runParts": [
+     "source-scene.mjs:veilIn 5.1",
+     "source-scene.mjs:ensureStyle>appendChild 0.9",
+     "source-scene.mjs:settings 0.6",
+     "source-scene.mjs:onTearDown 0.5"
+    ],
+    "load": [
+     1969,
+     382
+    ],
+    "top": [
+     "> orbit.mjs:place 10.6",
+     "> native:send 9.1",
+     "> foundry.mjs:anon 8.0",
+     "> foundry.mjs:clean 6.5",
+     "source-scene.mjs:veilIn:89 5.1",
+     "> foundry.mjs:validate 5.1",
+     "> lib-wrapper.js:call_wrapper 4.8",
+     "> socket.io.min.js:n.encodeAsString 4.7",
+     "> foundry.mjs:DataModel 4.6",
+     "> socket.js:emitViewbox 4.5",
+     "> native:structuredClone 3.3",
+     "> foundry.mjs:_initialize 3.1"
+    ],
+    "loafs": [
+     {
+      "ms": 534,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 202,
+      "block": 152,
+      "style": 3,
+      "scripts": [
+       "scripts/socket.io.min.js::107",
+       "party/main.mjs:measure:91"
+      ]
+     },
+     {
+      "ms": 56,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 71,
+      "block": 0,
+      "style": 2,
+      "scripts": []
+     }
+    ]
+   }
+  },
+  "arrivalOff": {
+   "gm": {
+    "frames": 3082,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 11,
+    "over50": 6,
+    "gpuP50": 1.05,
+    "gpuP95": 3.66,
+    "gpuMax": 17.55,
+    "gpuSum": 775.4,
+    "lay": null,
+    "tickP50": 1.6,
+    "tickP95": 4.2,
+    "tickMax": 20.4,
+    "loaf50": 10,
+    "loafMax": 330,
+    "dirSelfMs": 0.95,
+    "dirRunMax": 2.2,
+    "dirInclMs": 2.83,
+    "mmInclMs": 1310.3,
+    "gcMs": 81,
+    "busyMs": 2174,
+    "layouts": 55,
+    "styles": 244,
+    "layoutMs": 21.9,
+    "styleMs": 122.8,
+    "heapMB": -4.41,
+    "sock": {
+     "sent": 0,
+     "sentB": 0,
+     "recv": 2,
+     "recvB": 346
+    },
+    "callers": [
+     "bar.mjs:rect:90 1.0",
+     "bar.mjs:build:55 0.5",
+     "director.mjs:busy:344 0.5",
+     "director.mjs:onSocket:219 0.5"
+    ],
+    "runParts": [
+     "director.mjs:anon>get id 1.3",
+     "sources.mjs:live 0.9"
+    ],
+    "load": [
+     232,
+     259
+    ],
+    "top": [
+     "> native:getBoundingClientRect 1.0",
+     "bar.mjs:build:55 0.5",
+     "> native:querySelector 0.5",
+     "director.mjs:onSocket:219 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 250,
+      "block": 0,
+      "style": 0,
+      "scripts": []
+     },
+     {
+      "ms": 273,
+      "block": 220,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::266"
+      ]
+     },
+     {
+      "ms": 70,
+      "block": 16,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::18",
+       "zones/zones.mjs::46"
+      ]
+     },
+     {
+      "ms": 70,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "net/stream.mjs::30",
+       "scripts/view-smooth.mjs::12"
+      ]
+     }
+    ]
+   },
+   "p1": {
+    "frames": 2945,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 11,
+    "over50": 6,
+    "gpuP50": 2.28,
+    "gpuP95": 4.49,
+    "gpuMax": 15.21,
+    "gpuSum": 1228,
+    "lay": null,
+    "tickP50": 3.4,
+    "tickP95": 4.9,
+    "tickMax": 57.2,
+    "loaf50": 10,
+    "loafMax": 549,
+    "dirSelfMs": 0,
+    "dirRunMax": 1,
+    "dirInclMs": 1.58,
+    "mmInclMs": 2198,
+    "gcMs": 67.8,
+    "busyMs": 3326,
+    "layouts": 52,
+    "styles": 150,
+    "layoutMs": 31.1,
+    "styleMs": 184.5,
+    "heapMB": -0.05,
+    "sock": {
+     "sent": 1,
+     "sentB": 190,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "source-scene.mjs:setting:33 0.6",
+     "director.mjs:cameraHeld:359 0.6",
+     "director.mjs:warmSoon:672 0.5"
+    ],
+    "runParts": [
+     "director.mjs:busy>querySelector 0.5",
+     "source-scene.mjs:setting>_cleanType 0.5"
+    ],
+    "load": [
+     365,
+     429
+    ],
+    "top": [
+     "> foundry.mjs:prepareData 0.6",
+     "> foundry.mjs:anon 0.6",
+     "> native:setTimeout 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 549,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::7"
+      ]
+     },
+     {
+      "ms": 464,
+      "block": 413,
+      "style": 2,
+      "scripts": [
+       "scripts/socket.io.min.js::420",
+       "scripts/view-smooth.mjs::35"
+      ]
+     },
+     {
+      "ms": 93,
+      "block": 30,
+      "style": 0,
+      "scripts": [
+       "zones/zones.mjs::68"
+      ]
+     },
+     {
+      "ms": 54,
+      "block": 2,
+      "style": 0,
+      "scripts": [
+       "net/stream.mjs::37",
+       "scripts/view-smooth.mjs::14"
+      ]
+     }
+    ]
+   },
+   "p2": {
+    "frames": 2906,
+    "rafP50": 6.1,
+    "rafP95": 6.2,
+    "over33": 13,
+    "over50": 9,
+    "gpuP50": 1.91,
+    "gpuP95": 4.49,
+    "gpuMax": 16.28,
+    "gpuSum": 1109.8,
+    "lay": null,
+    "tickP50": 3.3,
+    "tickP95": 4.3,
+    "tickMax": 96.8,
+    "loaf50": 12,
+    "loafMax": 512,
+    "dirSelfMs": 1.48,
+    "dirRunMax": 1.3,
+    "dirInclMs": 2.51,
+    "mmInclMs": 2212.2,
+    "gcMs": 80.5,
+    "busyMs": 3265,
+    "layouts": 50,
+    "styles": 144,
+    "layoutMs": 28,
+    "styleMs": 181.9,
+    "heapMB": 16.23,
+    "sock": {
+     "sent": 1,
+     "sentB": 190,
+     "recv": 0,
+     "recvB": 0
+    },
+    "callers": [
+     "director.mjs:onLeaderChange:120 0.7",
+     "source-scene.mjs:setting:33 0.5",
+     "director.mjs:busy:344 0.5",
+     "stage.mjs:clientGet:36 0.5"
+    ],
+    "runParts": [
+     "director.mjs:onLeaderChange 1.3"
+    ],
+    "load": [
+     412,
+     398
+    ],
+    "top": [
+     "director.mjs:onLeaderChange:120 0.7",
+     "> foundry.mjs:_cleanType 0.5",
+     "> native:querySelector 0.5",
+     "stage.mjs:clientGet:36 0.5"
+    ],
+    "loafs": [
+     {
+      "ms": 478,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::6"
+      ]
+     },
+     {
+      "ms": 512,
+      "block": 451,
+      "style": 1,
+      "scripts": [
+       "scripts/socket.io.min.js::462",
+       "scripts/view-smooth.mjs::35"
+      ]
+     },
+     {
+      "ms": 101,
+      "block": 36,
+      "style": 0,
+      "scripts": [
+       "zones/zones.mjs::78"
+      ]
+     },
+     {
+      "ms": 74,
+      "block": 0,
+      "style": 0,
+      "scripts": [
+       "scripts/view-smooth.mjs::15"
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

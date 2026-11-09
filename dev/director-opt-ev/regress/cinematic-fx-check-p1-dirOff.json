@@ -1,0 +1,203 @@
+{
+ "ok": false,
+ "rows": [
+  {
+   "name": "idle: no overlay, no show, no extra listener",
+   "ok": true,
+   "overlays": 0,
+   "ticker": 23
+  },
+  {
+   "name": "begin",
+   "ok": true
+  },
+  {
+   "name": "overlay root: pointer-events none, above the canvas, below the interface",
+   "ok": true,
+   "z": "1"
+  },
+  {
+   "name": "one extra ticker listener while active",
+   "ok": true,
+   "ticker": 24
+  },
+  {
+   "name": "two bars of the configured height (px within 1.5)",
+   "ok": true,
+   "h": 147.75,
+   "want": 147.75
+  },
+  {
+   "name": "camera follows (pivot or scale moved through animatePan)",
+   "ok": true,
+   "scale": 1.8345833333333332,
+   "startScale": 1.2395833333333333
+  },
+  {
+   "name": "camera zoom inside the band 0.5x-4x of the start",
+   "ok": true
+  },
+  {
+   "name": "shake offsets are whole pixels",
+   "ok": true
+  },
+  {
+   "name": "shake has decayed (no offset held)",
+   "ok": true,
+   "shake": [
+    0,
+    0
+   ]
+  },
+  {
+   "name": "camera returned to the previous view",
+   "ok": true,
+   "V0": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   },
+   "V1": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   }
+  },
+  {
+   "name": "stage position exact (shake restored)",
+   "ok": true,
+   "px": 961.1351540051401,
+   "py": 490.5955581665039,
+   "was": [
+    961.1351540051401,
+    490.5955581665039
+   ]
+  },
+  {
+   "name": "nothing left: no overlay, no ticker listener, entry speed back",
+   "ok": true,
+   "overlays": 0,
+   "ticker": 23,
+   "T0": 23
+  },
+  {
+   "name": "shake moves the stage, never past the cap",
+   "ok": true,
+   "max": 13,
+   "cap": 20
+  },
+  {
+   "name": "shake offsets are whole pixels",
+   "ok": true
+  },
+  {
+   "name": "shake restores the EXACT stage position",
+   "ok": true,
+   "Vs": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   },
+   "Ve": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   }
+  },
+  {
+   "name": "camera off: the view was never panned",
+   "ok": true
+  },
+  {
+   "name": "a pointerdown on the canvas aborts the camera at once",
+   "ok": true
+  },
+  {
+   "name": "after the abort the camera stays where the player left it",
+   "ok": true
+  },
+  {
+   "name": "immediate end leaves nothing",
+   "ok": true
+  },
+  {
+   "name": "camera off setting: no camera",
+   "ok": true
+  },
+  {
+   "name": "a lone modifier key does not abort",
+   "ok": true
+  },
+  {
+   "name": "a key aborts the camera",
+   "ok": true
+  },
+  {
+   "name": "opted out of letterbox: bars absent",
+   "ok": true
+  },
+  {
+   "name": "master switch off: no bars, no vignette, no camera",
+   "ok": true
+  },
+  {
+   "name": "reduced motion: bars stay, camera/shake/flash off",
+   "ok": true
+  },
+  {
+   "name": "preview shows the bars",
+   "ok": true
+  },
+  {
+   "name": "preview leaves nothing and the same view",
+   "ok": true,
+   "Vp": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   },
+   "Vq": {
+    "x": 768,
+    "y": 512,
+    "scale": 1.2395833333333333,
+    "px": 961.1351540051401,
+    "py": 490.5955581665039
+   }
+  },
+  {
+   "name": "preview did not touch the strokes or the flags",
+   "ok": true
+  },
+  {
+   "name": "cameraMoveCheck during a show (shake + zoom)",
+   "ok": true,
+   "res": "{\"dpr\":1,\"cfg\":{\"zoomAA\":true,\"aaK\":null},\"rows\":[{\"move\":\"in 0.5>3 400ms\",\"frames\":24,\"boxes\":0,\"soft\":0,\"seam\":0,\"weight\":0,\"beat\":0,\"pop\":null,\"sharpEnd\":null,\"sharpRest\":null,\"bakes\":0,\"rtMade\":49,\"glTex\":49,\"cpuP50\":105.5,\"cpuP99\":117.5},{\"move\":\"out 3>0.8 800ms\",\"frames\":48,\"boxes\":0,\"soft\":0,"
+  },
+  {
+   "name": "idle-bench rest unchanged (mean within +0.15 ms)",
+   "ok": false,
+   "before": {
+    "med": 9.5,
+    "mean": 9.407,
+    "p95": 14.8
+   },
+   "after": {
+    "med": 9.8,
+    "mean": 17.94,
+    "p95": 65.8
+   },
+   "ticker": 23,
+   "T0": 23
+  }
+ ]
+}

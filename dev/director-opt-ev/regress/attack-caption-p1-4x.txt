@@ -1,0 +1,48 @@
+armed true
+successes 0
+[[0,"shot","take","attack","dice",850,3430],
+[158,"made","Concussion Turret → Kid Omni-Man"],
+[1109,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[3029,"end","done"],
+[3029,"is-out","Concussion Turret → Kid Omni-Man"],
+[3602,"removed","Concussion Turret → Kid Omni-Man"]]
+armed true
+successes 0
+[[0,"shot","take","attack","dice",850,3430],
+[51,"made","Concussion Turret → Kid Omni-Man"],
+[407,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[4737,"end","done"],
+[4737,"is-out","Concussion Turret → Kid Omni-Man"],
+[5098,"removed","Concussion Turret → Kid Omni-Man"]]
+armed true
+successes 1
+[[0,"shot","take","attack","dice",850,3430],
+[175,"made","Concussion Turret → Kid Omni-Man"],
+[396,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[3866,"end","done"],
+[3866,"is-out","Concussion Turret → Kid Omni-Man"],
+[4286,"removed","Concussion Turret → Kid Omni-Man"]]
+armed true
+successes 2
+[[0,"shot","take","attack","dice",850,3430],
+[151,"made","Concussion Turret → Kid Omni-Man"],
+[398,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[4421,"end","done"],
+[4421,"is-out","Concussion Turret → Kid Omni-Man"],
+[4898,"removed","Concussion Turret → Kid Omni-Man"]]
+armed true
+successes 0
+[[0,"shot","take","attack","dice",850,3430],
+[259,"made","Concussion Turret → Kid Omni-Man"],
+[389,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[4091,"end","done"],
+[4091,"is-out","Concussion Turret → Kid Omni-Man"],
+[4506,"removed","Concussion Turret → Kid Omni-Man"]]
+armed true
+successes 1
+[[0,"shot","take","attack","dice",850,3430],
+[138,"made","Concussion Turret → Kid Omni-Man"],
+[409,"is-in","Concussion Turret → Kid Omni-Man",{"bottom":790,"hotbarTop":909,"clearOfHotbar":true}],
+[4141,"end","done"],
+[4141,"is-out","Concussion Turret → Kid Omni-Man"],
+[4563,"removed","Concussion Turret → Kid Omni-Man"]]

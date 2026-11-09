@@ -1,0 +1,244 @@
+{
+ "rate": 2,
+ "reps": 3,
+ "at": "2026-11-09T00:21:39.303Z",
+ "build": "before",
+ "cases": {
+  "pan": {
+   "median": {
+    "frames": 483,
+    "over17": 1,
+    "over20": 1,
+    "over33": 1,
+    "max": 66.7,
+    "layouts": 277,
+    "layoutMs": 47,
+    "styles": 277,
+    "styleMs": 30.5,
+    "scriptMs": 1241.6,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 481,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 78.8,
+     "layouts": 270,
+     "styles": 270,
+     "layoutMs": 43.2,
+     "styleMs": 23.5,
+     "scriptMs": 1251.4
+    },
+    {
+     "frames": 491,
+     "over17": 1,
+     "over20": 0,
+     "over33": 0,
+     "max": 18.2,
+     "layouts": 277,
+     "styles": 277,
+     "layoutMs": 47,
+     "styleMs": 30.5,
+     "scriptMs": 1241.6
+    },
+    {
+     "frames": 483,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 66.7,
+     "layouts": 277,
+     "styles": 377,
+     "layoutMs": 54,
+     "styleMs": 43.5,
+     "scriptMs": 1219.9
+    }
+   ]
+  },
+  "impacts": {
+   "median": {
+    "frames": 494,
+    "over17": 0,
+    "over20": 0,
+    "over33": 0,
+    "max": 12.1,
+    "layouts": 337,
+    "layoutMs": 52.3,
+    "styles": 722,
+    "styleMs": 52.9,
+    "scriptMs": 1115.8,
+    "impactMs": 2.5
+   },
+   "runs": [
+    {
+     "frames": 492,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.1,
+     "impacts": 11,
+     "impactMs": 2.5,
+     "layouts": 337,
+     "styles": 722,
+     "layoutMs": 52.3,
+     "styleMs": 61.6,
+     "scriptMs": 1115.8
+    },
+    {
+     "frames": 494,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.1,
+     "impacts": 11,
+     "impactMs": 2.3,
+     "layouts": 337,
+     "styles": 722,
+     "layoutMs": 53.6,
+     "styleMs": 52.9,
+     "scriptMs": 1145.7
+    },
+    {
+     "frames": 495,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.2,
+     "impacts": 11,
+     "impactMs": 2.7,
+     "layouts": 336,
+     "styles": 722,
+     "layoutMs": 51.7,
+     "styleMs": 51.6,
+     "scriptMs": 1115.5
+    }
+   ]
+  },
+  "captions": {
+   "median": {
+    "frames": 531,
+    "over17": 0,
+    "over20": 0,
+    "over33": 0,
+    "max": 12.2,
+    "layouts": 1008,
+    "layoutMs": 193.4,
+    "styles": 1601,
+    "styleMs": 240,
+    "scriptMs": 2450.9,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 531,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.2,
+     "shownMs": [
+      2,
+      2,
+      2
+     ],
+     "layouts": 1008,
+     "styles": 1603,
+     "layoutMs": 207,
+     "styleMs": 269.2,
+     "scriptMs": 2574.8
+    },
+    {
+     "frames": 526,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 54.5,
+     "shownMs": [
+      2,
+      2,
+      2
+     ],
+     "layouts": 1003,
+     "styles": 1601,
+     "layoutMs": 193.4,
+     "styleMs": 240,
+     "scriptMs": 2450.9
+    },
+    {
+     "frames": 533,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 12.2,
+     "shownMs": [
+      2,
+      3,
+      2
+     ],
+     "layouts": 1018,
+     "styles": 1521,
+     "layoutMs": 190.9,
+     "styleMs": 231,
+     "scriptMs": 2352.4
+    }
+   ]
+  },
+  "card": {
+   "median": {
+    "frames": 489,
+    "over17": 1,
+    "over20": 0,
+    "over33": 0,
+    "max": 18.2,
+    "layouts": 427,
+    "layoutMs": 137.2,
+    "styles": 437,
+    "styleMs": 90.4,
+    "scriptMs": 830.1,
+    "impactMs": null
+   },
+   "runs": [
+    {
+     "frames": 484,
+     "over17": 1,
+     "over20": 1,
+     "over33": 1,
+     "max": 66.6,
+     "contain": "none",
+     "layouts": 424,
+     "styles": 526,
+     "layoutMs": 131,
+     "styleMs": 94.4,
+     "scriptMs": 810.4
+    },
+    {
+     "frames": 495,
+     "over17": 0,
+     "over20": 0,
+     "over33": 0,
+     "max": 6.2,
+     "contain": "none",
+     "layouts": 435,
+     "styles": 437,
+     "layoutMs": 142.2,
+     "styleMs": 90.4,
+     "scriptMs": 857.2
+    },
+    {
+     "frames": 489,
+     "over17": 2,
+     "over20": 0,
+     "over33": 0,
+     "max": 18.2,
+     "contain": "none",
+     "layouts": 427,
+     "styles": 429,
+     "layoutMs": 137.2,
+     "styleMs": 86.3,
+     "scriptMs": 830.1
+    }
+   ]
+  }
+ }
+}

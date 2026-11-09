@@ -21,6 +21,17 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 export const EASE_CSS = { linear: "linear", out: "cubic-bezier(0.16, 0.8, 0.3, 1)", inout: "cubic-bezier(0.65, 0, 0.35, 1)" };
 export function hexRgb(h) { const n = parseInt(String(h).slice(1), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+/**
+ * The element's styles brought up to date WITHOUT a layout pass, so a transition set next starts from the style it has now. A read of
+ * offsetWidth did the same plus a forced layout of the whole page - in the middle of a camera frame, whose writes (the HUD, the
+ * markers) dirty the layout again, so the frame paid a second one. getComputedStyle(el).opacity is not layout-dependent: Chrome and
+ * Firefox recalc the styles only. (Node tests: no getComputedStyle, the old read.)
+ */
+export function restyle(el) {
+  const v = el?.ownerDocument?.defaultView;
+  if ( typeof v?.getComputedStyle === "function" ) void v.getComputedStyle(el).opacity;
+  else void el?.offsetWidth;
+}
 /** The camera easing 0..1: 0 linear, 1 a full smoothstep (animatePan's `easing` is a function of progress). */
 export const camEasing = (e) => (t) => { const s = t * t * (3 - 2 * t); return t + (s - t) * clamp(e, 0, 1); };
 
@@ -73,7 +84,7 @@ export function createOverlays(doc, r, eff, { insert, timer }) {
   }
   insert(root);
   o.show = () => {
-    void root.offsetWidth;                       // (a reflow, so the transition runs from the hidden state)
+    restyle(root);                               // (the styles of the hidden state first, so the transition runs from it)
     for ( const b of o.bars ?? [] ) b.style.transform = "translateY(0)";
     if ( o.vignette ) o.vignette.style.opacity = "1";
   };
@@ -82,7 +93,7 @@ export function createOverlays(doc, r, eff, { insert, timer }) {
     const all = [...(o.bars ?? []), o.vignette].filter(Boolean), was = all.map((el) => el.style.transition);
     for ( const el of all ) el.style.transition = "none";
     o.show();
-    void root.offsetWidth;
+    restyle(root);
     all.forEach((el, i) => { el.style.transition = was[i]; });
   };
   o.hide = () => {
@@ -94,7 +105,7 @@ export function createOverlays(doc, r, eff, { insert, timer }) {
   o.flash = (k = 1) => {
     const f = o.flashEl; if ( !f ) return;
     f.style.transition = "none"; f.style.opacity = String(clamp(r.flIntensity * k, 0, 1));
-    void root.offsetWidth;
+    restyle(f);
     f.style.transition = `opacity ${r.flDur}ms ease-out`; f.style.opacity = "0";
   };
   o.destroy = () => { try { root.remove(); } catch { /* already gone */ } o.bars = o.vignette = o.flashEl = null; };

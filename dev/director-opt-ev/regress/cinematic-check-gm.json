@@ -1,0 +1,87 @@
+{
+ "ok": true,
+ "rows": [
+  {
+   "name": "a drag is staged in 'drags' mode (cin p, queue place, origin kept), a tap is not",
+   "ok": true
+  },
+  {
+   "name": "GM without preview: the staged stroke is not on the display (0 groups, 0 pixels), the tap is",
+   "ok": true,
+   "sa": [
+    0,
+    0
+   ],
+   "sb": [
+    1,
+    3615
+   ]
+  },
+  {
+   "name": "the counter says 1 staged",
+   "ok": true
+  },
+  {
+   "name": "GM preview ON: the GM sees it at once (pixels)",
+   "ok": true,
+   "ink": 31699
+  },
+  {
+   "name": "undo removes the last staged stroke (the counter drops by one)",
+   "ok": true
+  },
+  {
+   "name": "redo brings it back still staged (cin p, hidden)",
+   "ok": true
+  },
+  {
+   "name": "a staged carry: tk kept, the token has NOT moved (document) after 3.5 s",
+   "ok": true
+  },
+  {
+   "name": "Action: a show record with both staged strokes in queue order",
+   "ok": true,
+   "ids": [
+    "LBrXx6VDhI",
+    "tsisnZp2m9",
+    "GBYb5IeD8m"
+   ]
+  },
+  {
+   "name": "the show played: every staged stroke settled as d, flags gone, counter 0",
+   "ok": true,
+   "cin": [
+    "d",
+    null,
+    "d",
+    "d"
+   ]
+  },
+  {
+   "name": "entries started exactly on the shared schedule",
+   "ok": true,
+   "starts": [
+    601,
+    1399,
+    2201
+   ],
+   "offs": [
+    600,
+    1400,
+    2200
+   ]
+  },
+  {
+   "name": "the carried token moved for real at the end of its stroke's play",
+   "ok": true
+  },
+  {
+   "name": "Clear removes staged strokes too",
+   "ok": true
+  },
+  {
+   "name": "kill switch: the staged stroke shows at once, the counter is 0, a new drag is not staged",
+   "ok": true
+  }
+ ]
+}

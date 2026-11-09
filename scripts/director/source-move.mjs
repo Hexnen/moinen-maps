@@ -5,6 +5,7 @@ import * as M from "./move-core.mjs";
 import { emit, isLeader, killed, isOn, publicName, registerPlay, myMode, R, HOOK } from "./director.mjs";
 import { Screen } from "./stage.mjs";
 import { safeRect, freeRect, hitAt, hitsFresh, sliced } from "./overlay.mjs";
+import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
 
@@ -146,7 +147,7 @@ const handler = {
 /* ---------------------------------------------------------------- the turn banner (every client, from the combat update itself) */
 
 const CSS = `
-.mm-dmv { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; font-family: var(--font-primary, sans-serif); }
+.mm-dmv { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; contain: strict; font-family: var(--font-primary, sans-serif); }
 .mm-dmv-b { position: absolute; left: 50%; top: var(--mm-dmv-top, 5vh); transform: translate(-50%, 0); display: grid; justify-items: center; gap: 0.1rem;
   padding: 0.5rem 4.5rem 0.6rem; color: #f4efe6; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 16px rgba(0,0,0,0.55); white-space: nowrap; }
 .mm-dmv-b::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(10,8,6,0) 0%, rgba(10,8,6,0.78) 22%, rgba(10,8,6,0.78) 78%, rgba(10,8,6,0) 100%);
@@ -251,7 +252,7 @@ export function showBanner({ kick, name = "", sub = "", tag = "", round = false,
     el.style.setProperty("--mm-dmv-top", `${Math.round(top)}px`);
     const w = el.offsetWidth;                                       // (never off the screen: a wide name next to a window)
     if ( w ) el.style.left = `${Math.round(Math.min(innerWidth - w / 2 - 8, Math.max(w / 2 + 8, cx)))}px`;
-    void el.offsetWidth;
+    restyle(el);
     el.classList.add("is-in");
     b.timer = setTimeout(() => { if ( banner?.el === el ) dropBanner(520); }, ms);
   });
