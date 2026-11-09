@@ -156,7 +156,9 @@ void main() {
       float edge = dn + (n - 0.5) * 0.7;
       float env = smoothstep(0.0, 1.0, a) * mix(1.0, hz > 0.0 ? 0.62 : 0.42, smoothstep(1.5, hz > 0.0 ? 20.0 : 8.0, a)) * hl;
       float dens = (1.0 - smoothstep(0.3 * reach, reach, edge)) * env * fo * k3.x * (0.6 + 0.5 * n);
-      if ( hz > 0.0 ) { mD = dens * smoothstep(1.5, 6.0, a); dens *= 1.45; }   // (a blast's haze: a fuller pall, its own veil - A bit 8)
+      // (a blast's haze: a fuller pall, its own veil - A bit 8 - thinner over the crater: the blast threw its dust outward, the
+      // ruin stays readable under it)
+      if ( hz > 0.0 ) { mD = dens * smoothstep(1.5, 6.0, a); dens *= 1.45 * mix(0.5, 1.0, smoothstep(0.15, 0.75, dn)); }
       // (the bands' edges: a small-scale smooth noise - blobby pixel contours, never a salt-and-pepper dither over a big fading area)
       float dz = 0.0;
       if ( dens > 0.05 && dens < 0.8 ) dz = (vn(p / (2.0 * max(uU, 0.25)), uSeed + 31) - 0.5) * 0.3;

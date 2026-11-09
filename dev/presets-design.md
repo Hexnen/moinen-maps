@@ -758,3 +758,38 @@ distinct hits opening in sequence along the walk, a believable spread, a slightl
   5x crops; a real player (Test Gracz 1) watching a heli run fired by the GM.
 - **Not checked:** a GTX 1080 (only the weak-2 emulation); the remote host; two guns fired at once; a run across a
   scene edge.
+
+## 17. The blasts as built (bomb, grenade: presets-boom)
+
+The bar: the whole firing reads as ONE natural explosion, from the click to the settled ground, and the ground keeps a dust haze
+for minutes after it (the user, G2: "a dust haze that stays for a long time, about 5 minutes").
+
+- **Shock dust** (fire layer, `fire/dust-model.mjs` kind `shock`, written by `presets/core.mjs` as one dust stroke at the impact,
+  `q` = T0 + its `at`): no path, the stroke's point is the blast's centre and `r` the shock wave's reach. Every cell is kicked when
+  the ragged front reaches it (`shockAt`: fast, slowing with drag, the rim at ~2.2 tau); the emitters lie on rings round the centre
+  and throw their puffs outward (the heading points back at the centre: the radial flag, as hits); chips skitter out low, grit
+  lands, the aura rises. Level 1 a grenade, 3 a bomb.
+- **The haze** (shock only, `KIND.shock.haze` s by level: 150 / 240 / 300; core `SHOCK_HAZE` keeps the stroke alive at least that
+  long + 5 s): the aura does not stop at a veil - it hangs as a pall of the ground's own dust (by day paler than the soil, so it
+  reads on a light ground; moonlit at night), spreads past the rim by up to `HAZE_GROW` x the aura over the first minutes, churns
+  and drifts with the wind (the aura's drifting noise), is thinner over the crater (the blast threw its dust out: the ruin stays
+  readable), and thins over the second half of its life (its pixel bands shrink and break into patches; grit and film go with
+  it) - nothing pops: the stroke's own `o` comes after it has gone. MOTES (the weather dust's approach, `weather/fx-glsl.mjs`
+  motes, re-done in the dust art pass - the weather layer is not touched): hashed slots per world tile, 6-10 s lives, a slow
+  Brownian sway riding the wind, one art pixel each in the dust's tones, fewer where the haze is thin.
+- **Cost of the minutes:** the lazy puffs of a blast stop after `linW` s (10 / 14 / 18), and an area of blasts only (`puffEnd`)
+  then skips its emitter loop: for the haze's minutes the art pass is the ground part alone (aura noise, nine mote hashes) at
+  12 fps.
+- **Accents** (`presets/accents-core.mjs`, drawn by `accents.mjs` - the guns' layer, now loaded for any record with accents or cues):
+  - bomb `fallShadow`: a dithered shadow on the mark (hashed 2 x 2 clusters, two dark steps at low alpha) wide and faint while
+    the bomb is high, tightening and darkening as it falls; the bomb itself in its last 4.5 squares - a dark finned teardrop
+    nose-down with a pale air streak (a glint at night), falling screen-down faster and faster.
+  - grenade `throwArc` + `bounce`: an olive egg tumbling along the aim's arc (the ghost's apex: 35 % of the throw), its small
+    shadow under it; it lands short of the mark (`BOUNCE_BACK`), squashes, kicks a few grains of dust, hops, rolls onto the mark
+    and lies still until it goes off. A click throw (no distance) drops on the mark and hops in place.
+  - cues: the screen cue shakes the stage (up to `SHAKE_PX` x shake screen px, easing in, dying away over 250 + 650 x shake ms)
+    and flashes a warm overlay (`flash`, 210 ms), both weighed by the distance from the view, never with noShake / noFlash /
+    reduced motion; a light cue is a decaying warm ground glow, left out when the firing has a burst (the burst lights itself).
+- **Fixes on the way (one natural explosion):** the burst's heat pool was drawn before the impact (`uAge < 0` in the pre-roll made
+  `exp(-uAge / 0.45)` grow: an orange disc by day, a lit disc at night, for the whole pre-roll) - now nothing before T0
+  (`fire/burst-art.mjs`, one line).
