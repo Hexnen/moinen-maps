@@ -133,7 +133,7 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
 /* F the older presets (main at c7babb0: the four military + the lightning strike; the military four as the presets polish 763e72c
  * re-tuned them - c7babb0 merged into it): the same plans and accent frames. The bomb and the grenade were re-tuned again by the
  * presets polish round 2 (their fall / throw / bounce accents, their dust): they are checked by presets-boom / presets-polish2, here
- * only the others (a frame's new `soft` list - the soft shadows - is left out of the comparison: the old code has none) */
+ * only the others (a frame's new `soft` list - the soft shadows - and the guns round 3 `add` / `blooms` lists, empty for these, are left out of the comparison: the old code has none) */
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-land-"));
   revTree(root, "763e72c", "scripts/presets", tmp);
@@ -143,7 +143,7 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   let same = true, frames = true;
   // (re-tuned since: the bomb / grenade by the boom polish, the guns - uzi, heliHmg - by the guns polish rounds, their hit spurts and
   // glows new: dev/presets-guns.test.mjs and dev/presets-gunfx.test.mjs hold them; the other older presets must stay exactly as they were)
-  const RETUNED = new Set(["bomb", "grenade", "uzi", "heliHmg"]), noSoft = (F) => { const { soft, ...o } = F; o.px = o.px.slice(0, 10).concat(o.px.slice(10).filter((l) => l.length)); return o; };   // (and the palette's two new grenade olives, empty for these)
+  const RETUNED = new Set(["bomb", "grenade", "uzi", "heliHmg"]), noSoft = (F) => { const { soft, add, blooms, ...o } = F; if ( add?.length || blooms?.length ) o.gunLight = [add, blooms]; o.px = o.px.slice(0, 10).concat(o.px.slice(10).filter((l) => l.length)); return o; };   // (and the palette's two new grenade olives, empty for these)
   for ( const d0 of D0.BUILTIN.filter((d) => !RETUNED.has(d.id)) ) {
     const d1 = BUILTIN.find((d) => d.id === d0.id);
     if ( J(d0) !== J(d1) ) same = false;
