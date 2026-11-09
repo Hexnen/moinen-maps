@@ -92,6 +92,56 @@ for ( const id of ["uzi", "heliHmg"] ) for ( const seed of [1, 7, 99] ) {
   ok(after.px.every((l) => !l.length) && !after.glows.length && !after.live, "empty after the span");
 }
 
+/* D2: the shooter (a source token): its muzzle flashes at its edge, the rounds fly from it; none: no muzzle flash at all */
+{
+  const J = (v) => JSON.stringify(v);
+  const env = { ap: 3, ox: 0, oy: 0, grid: 100, lift: 0.5, squash: 0.8, q: 1, seed: 7 };
+  ok(get("heliHmg").layers.some((l) => l.kind === "muzzle") && get("uzi").layers.some((l) => l.kind === "muzzle"), "both guns have a muzzle layer");
+  for ( const id of ["uzi", "heliHmg"] ) {
+    const P0 = fire(id, 7), m0 = P0.pending.accent.find((a) => a.kind === "muzzle");
+    ok(m0 && m0.from === null && !m0.hits.length, `${id}: no shooter -> no muzzle hits`);
+    let lit = 0;
+    for ( let t = -1000; t < P0.walk.dur + 400; t += 7 ) { const F = A.draw([m0], 0, t, env, A.newFrame()); lit += F.px.reduce((s, l) => s + l.length, 0) + F.glows.length; }
+    ok(lit === 0, `${id}: no shooter -> the muzzle layer never draws (${lit})`);
+  }
+  const from = [300, 300], fr = 50;
+  const Pu = fire("uzi", 7, { ...G.line, from, fr }), mu = Pu.pending.accent.find((a) => a.kind === "muzzle");
+  ok(mu.hits.length === Pu.walk.hits.length && mu.fr === fr && !mu.twin && J(mu.from) === J(from), `uzi with a shooter: a flash every round, its radius, one barrel (${mu.hits.length}/${Pu.walk.hits.length})`);
+  ok(J(Pu.gesture.from) === J(from) && Pu.gesture.fr === fr, "uzi with a shooter: the gesture carries it");
+  const Ph = fire("heliHmg", 7, { ...G.run, from, fr: 100 }), mh = Ph.pending.accent.find((a) => a.kind === "muzzle"), tu = Ph.pending.accent.find((a) => a.kind === "tracer");
+  ok(mh.hits.length === Ph.walk.hits.length && mh.twin && new Set(mh.hits.map((h) => h[3])).size === 2, "heli with a shooter: both barrels, every round");
+  ok(J(tu.from) === J(from) && tu.fr === 100 && tu.twin, "heli with a shooter: its tracers fly from it (both barrels)");
+  ok(fire("heliHmg", 7).pending.accent.find((a) => a.kind === "tracer").from === null, "heli without a shooter: tracers from off the map, as before");
+  ok(!("fr" in fire("uzi", 7, { ...G.line, fr }).gesture), "no shooter -> no radius kept");
+  // the barrel: at the shooter's edge, toward the hit, never past half way; twin barrels side by side
+  const m1 = A.muzzleOf({ from, fr }, [1300, 300, 0, 0], 100);
+  ok(Math.abs(m1.x - (300 + Math.max(30, 0.85 * fr))) < 1e-6 && Math.abs(m1.y - 300) < 1e-6 && m1.ux === 1 && m1.uy === 0, `muzzle at the shooter's edge (${m1.x}, ${m1.y})`);
+  ok(Math.abs(A.muzzleOf({ from, fr: 400 }, [400, 300, 0, 0], 100).x - 350) < 1e-6, "a hit close to the shooter: the barrel stays half way");
+  const ma = A.muzzleOf({ from, fr: 100, twin: true }, [1300, 300, 0, 0], 100), mb = A.muzzleOf({ from, fr: 100, twin: true }, [1300, 300, 0, 1], 100);
+  ok(Math.abs(ma.x - mb.x) < 1e-6 && Math.abs(Math.abs(ma.y - mb.y) - 2 * 30) < 1e-6, `twin barrels side by side (${ma.y} / ${mb.y})`);
+  // drawn: the first flash at the barrel, before its round lands; tracers from a shooter fly (start before their round lands)
+  const first = mu.hits.reduce((a, b) => (b[2] < a[2] ? b : a)), bm = A.muzzleOf(mu, first, 100), spU = A.spanOf(mu);
+  let near = false, early = false;
+  for ( let t = spU[0]; t < first[2] && !early; t += 3 ) {
+    const F = A.draw([mu], 0, t, env, A.newFrame());
+    if ( F.glows.length ) { early = true; near = Math.hypot(F.glows[0] - bm.x, F.glows[1] - bm.y) < 1; }
+  }
+  ok(early && near, "the first muzzle flash at the barrel, before its round lands");
+  const spT = A.spanOf(tu), t1 = Math.min(...tu.hits.map((x) => x[2]));
+  ok(spT && spT[0] < t1 - 1, `tracers from a shooter start before their round lands (${spT?.[0]} < ${t1})`);
+}
+
+/* D3: the ghost: a fainter line of fire from the shooter's edge to where the burst opens; none without a shooter */
+{
+  const UC = await import("../scripts/presets/ui-core.mjs");
+  const from = [300, 300], P = fire("uzi", 7, { ...G.line, from, fr: 50 }), P0 = fire("uzi", 7);
+  const dots = (p) => UC.ghostOf(p).filter((s) => s.k === "dots");
+  const line = dots(P).find((s) => s.a === 0.5);
+  ok(line && Math.hypot(line.pts[0][0] - from[0], line.pts[0][1] - from[1]) >= 45 && Math.hypot(line.pts.at(-1)[0] - P.walk.hits[0][0], line.pts.at(-1)[1] - P.walk.hits[0][1]) < 21,
+    "ghost: the line of fire from the shooter's edge to the first hit");
+  ok(!dots(P0).some((s) => s.a === 0.5), "ghost: no line of fire without a shooter");
+}
+
 /* E */
 {
   const cf = readFileSync(new URL("../scripts/destruction/cause-fx.mjs", import.meta.url), "utf8");

@@ -576,6 +576,19 @@ body.mm-aiming-preset #board { cursor: crosshair; }
 .mm-pr-aft range-picker[disabled] { opacity: 0.4; pointer-events: none; }
 .mm-pr-aft .mm-ws-toolbtn { width: 1.75rem; height: 1.75rem; font-size: 0.8rem; }
 .mm-pr-none { color: var(--mm-ws-muted); }
+/* a gun's shooter: the chosen token (its picture and name) or none, choose / take the selected / clear */
+body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
+.mm-pr-src .mm-ws-label { cursor: help; }
+.mm-pr-src .mm-ws-toolbtn { width: 1.75rem; height: 1.75rem; font-size: 0.8rem; }
+.mm-ws-toolbtn.mm-pr-srcpick {
+  width: auto; max-width: 11rem; display: inline-flex; gap: 0.35rem; padding: 0 0.5rem 0 0.3rem;
+  color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem);
+}
+.mm-pr-srcpick > i { width: 1.15rem; text-align: center; }
+.mm-pr-srcpick > img { width: 1.25rem; height: 1.25rem; object-fit: cover; border: 0; border-radius: 50%; box-shadow: 0 0 0 1.5px #ffb347; }
+.mm-pr-srcname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-pr-src.has-src .mm-pr-srcpick { color: var(--mm-ws-text); }
+.mm-pr-srcpick[aria-pressed="true"] { color: var(--mm-ws-text); border-color: color-mix(in srgb, #ffb347 75%, transparent); background: color-mix(in srgb, #ffb347 22%, var(--mm-ws-raise)); }
 
 /* the dock: a grid of tiles (drag to reorder) */
 .mm-pr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.4rem, 1fr)); gap: 4px; }
