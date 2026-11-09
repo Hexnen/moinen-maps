@@ -9,6 +9,8 @@ import { carrying } from "../tokens/carry.mjs";
 import { vortices, fireWet } from "../wind.mjs";
 import { dampArea, dampLights } from "./rain-damp.mjs";
 import { leanToVortices, tornadoFeet, FRONT_LAYER } from "./vortex-lean.mjs";
+import { G as GUARD, guardQ, guardOff, paceNow } from "../frame-guard.mjs";
+import { fireDetail, levelOf } from "./guard.mjs";
 
 /**
  * Shows FIRE AND SMOKE: one container in the primary group at sortLayer 256 - above the destruction layer (damage 247, shards 248, its
@@ -58,9 +60,10 @@ const MARGIN = 0.1, PAD = 4;
  *    on screen shows the frame it had until then). An area never drawn, or one whose window lies far from the view, is drawn fresh at
  *    the current frame over the view only (whichever is fewer cells).
  *  - while the CAMERA MOVES (and 200 ms after) the budget is halved: fewer new frames, the same picture, the same must-cells.
- *  - an ADAPTIVE GUARD watches the frame intervals: frames well over the display's own interval (an envelope of the shortest) lower the
- *    fire's detail a step (budget, then art frames at 6 fps, then no particles); a calm stretch raises it again a step at a time.
- *    `CONFIG.moinenMaps.fireAdaptive = false` keeps full detail.
+ *  - an ADAPTIVE GUARD (the client's one frame guard, scripts/frame-guard.mjs, 2026-11-09; the weather follows it too) lowers the
+ *    fire's detail q smoothly while frames come late against the display's real vsync, and only for as long as they do: back to full
+ *    in a few seconds once the load is gone, held steady under a lasting one; q drives the budget, the particles and (near the floor)
+ *    the 6 fps art continuously (fire/guard.mjs). `CONFIG.moinenMaps.fireAdaptive = false` keeps full detail.
  * A12 - THE NEXT ART FRAME DRAWN AHEAD (drawAhead): at rest a new 12 fps frame used to land as one burst (every shown area's window in
  * one display frame, then nothing for four). Now each shown area that shows the current frame gets the NEXT one drawn into its back
  * texture in even shares over the display frames before it is due (its own small maps in pre textures, its clocks / lean as they will
@@ -72,7 +75,6 @@ const AHEAD = 0.1, MOVE_MS = 200;
 /** A13: a new area's textures sent to the GPU per display frame while it is made ready (a large area's ~15-19 MB: one frame of its own). */
 const UP_BYTES = 24 << 20;
 const byArtT = (x, y) => (x.mesh.artT ?? -1) - (y.mesh.artT ?? -1);
-const LEVELS = [{ budget: 1, fps6: false, parts: 1 }, { budget: 0.5, fps6: false, parts: 1 }, { budget: 0.3, fps6: true, parts: 0.5 }, { budget: 0.2, fps6: true, parts: 0 }];
 
 /** The renderer's `render`, wrapped once per renderer (other modules may wrap it after us: never unwrapped, inert without fire). */
 let shown = null, inRender = false;
@@ -129,7 +131,7 @@ export class FireDisplay {
     this._vw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._rvw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._nvw = { x0: 0, y0: 0, x1: 0, y1: 0 }; this._need = [0, 0, 0, 0]; this._ahead = [0, 0, 0, 0];
     this._win = [0, 0, 0, 0]; this._pt = new PIXI.Point(); this._vis = []; this._stale = [];
     this.cam = [NaN, NaN, NaN]; this.movedAt = -1e9;
-    this.level = 0; this.base = 0; this.press = 0; this.stepAt = 0; this.upAt = 0; this.calm = 3000; this._ri = 0; this._rn = 0; this.holdK = 3; this.lastCells = 0;
+    this.D = fireDetail(1); this.gT = -1; this.holdK = 3; this.lastCells = 0;
     shown = this; hookRender();
   }
 
@@ -292,29 +294,17 @@ export class FireDisplay {
   }
 
   /**
-   * The ADAPTIVE GUARD, once a frame with the interval since the last one (ms). `base` = the display's own interval: the 20th
-   * percentile of the last 120 intervals (re-taken every 30; a few odd short ones do not move it), never taken above a 60 Hz refresh
-   * (frames that are ALL slow - a weak GPU from the first frame - still count as slow); `press` is a running share of frames well over
-   * it. Pressed for a while: one step less detail (at most a step a second); calm for a while (3 s, doubled up to 30 s each time the
-   * pressure came back within 3 s of a step up - no see-saw): one step back. Intervals under 4 ms (frames stepped by hand, not a
-   * display) and over 250 ms (a stall: a hidden tab, a load) are not frames.
+   * The ADAPTIVE GUARD, once a drawn frame (the ticker's): the shared frame guard steps with the ticker's interval against the
+   * display's paced frame time (frame-guard.mjs), and the fire's detail follows its q (fire/guard.mjs). Returns whether this frame
+   * came late.
    */
-  adapt(ms, pn) {
-    if ( CONFIG.moinenMaps?.fireAdaptive === false ) { this.level = 0; this.holdK = 3; return false; }
-    if ( !(ms >= 4) || ms > 250 ) return false;
-    const N = 120, ring = this._ring ??= new Float32Array(N), srt = this._srt ??= new Float32Array(N);
-    ring[this._ri % N] = ms; this._ri++; if ( this._rn < N ) this._rn++;
-    if ( this._rn < 30 ) return false;
-    if ( !this.base || this._ri % 30 === 0 ) { srt.set(ring); srt.sort(); this.base = Math.min(16.7, Math.max(6.5, srt[N - this._rn + Math.floor(this._rn * 0.2)])); }
-    // (a 60 Hz screen counts a frame long from 25 ms - one missed refresh; a 144 Hz one from ~11 ms)
-    const long = ms > Math.max(this.base * 1.5, this.base + 4);
-    this.press = this.press * 0.95 + (long ? 0.05 : 0);
-    if ( this.press > 0.25 && this.level < LEVELS.length - 1 && pn - this.stepAt > 1000 ) {
-      if ( this.upAt && pn - this.upAt < 3000 ) this.calm = Math.min(30000, (this.calm || 3000) * 2);   // (it came back: wait longer)
-      this.level++; this.stepAt = pn; this.upAt = 0; this.press = 0.1;
-    } else if ( this.press < 0.02 && this.level > 0 && pn - this.stepAt > (this.calm || 3000) ) { this.level--; this.stepAt = this.upAt = pn; }
-    this.stats.level = this.level;
-    return long;
+  adapt() {
+    const T = canvas.app.ticker;
+    if ( CONFIG.moinenMaps?.fireAdaptive === false ) { guardOff("fire"); fireDetail(1, this.D); this.holdK = 3; this.stats.level = 0; this.stats.q = 1; return false; }
+    const stepped = T.lastTime !== this.gT; this.gT = T.lastTime;
+    const q = guardQ("fire"), P = paceNow();
+    fireDetail(q, this.D); this.stats.q = q; this.stats.level = levelOf(q);
+    return stepped && !!P.frame && T.elapsedMS > P.frame + P.slack && T.elapsedMS <= GUARD.o.stall;
   }
 
   /**
@@ -352,11 +342,11 @@ export class FireDisplay {
     if ( this.pending.size && !force && [...this.pending.values()].every((p) => p.ready) ) this.reveal();   // (A13: all ready - they show now)
     const t0 = performance.now(), geo = this.geo, P = this.P, still = reducedMotion();
     const pn = performance.now(), dms = this.lastPn ? pn - this.lastPn : 0, dt = dms / 1000; this.lastPn = pn;
-    const L0 = LEVELS[this.level] ?? LEVELS[0];
     // (the last frame ran long right after the fire drew more than a budget in it: this device cannot take more at once - from now on
     // an area coming into view is held past one budget, not three)
-    if ( this.ticking && this.adapt(dms, pn) && this.lastCells > ART_BUDGET * L0.budget ) this.holdK = 1;
-    const L = LEVELS[this.level] ?? LEVELS[0], now0 = sharedNow(), now = still ? 0 : now0;
+    const b0 = this.D.budget;
+    if ( this.ticking && this.adapt() && this.lastCells > ART_BUDGET * b0 ) this.holdK = 1;
+    const L = this.D, now0 = sharedNow(), now = still ? 0 : now0;
     let T = still ? 0 : M.shaderTime(now, P.speed); if ( L.fps6 ) T = Math.floor(T * 6) / 6;   // (a whole 12 fps frame, every other one)
     const newFrame = T !== this.lastT || force;
     // A12: the NEXT art frame (its time and how soon the shared clock reaches it) and the display's own frame interval: the next frame
@@ -391,7 +381,7 @@ export class FireDisplay {
     const budget = ART_BUDGET * L.budget * (moving ? 0.5 : 1);
     // (what an area coming into view may draw at once: 3 budgets at full detail - a zoom-out shows its areas together - one when the
     // guard has already found the frames long)
-    const holdAt = ART_BUDGET * L.budget * (this.level === 0 ? this.holdK : 1);
+    const holdAt = ART_BUDGET * L.budget * (GUARD.q >= 1 ? this.holdK : 1);
     // the MUST: every shown area's cells under the view of one art frame (A11: grown with the frame it shows - the cells a move
     // uncovered, not a window; ensure). Counted against the budget, so the optional work below yields to it. An area just come into
     // view whose cells do not fit this frame's budget (a jump far away, a weak GPU) stays hidden while they are drawn in steps behind
@@ -604,7 +594,7 @@ export class FireDisplay {
   }
 
   placeParticles(vis, now) {
-    const cap = reducedMotion() ? 0 : Math.round((CAP[perfMode()] ?? 0) * (LEVELS[this.level]?.parts ?? 1)), geo = this.geo, ap = geo.ap;
+    const cap = reducedMotion() ? 0 : Math.round((CAP[perfMode()] ?? 0) * this.D.parts), geo = this.geo, ap = geo.ap;
     const slots = M.shareSlots(vis.map((a) => a.field), cap);
     let n = 0;
     for ( let i = 0; i < vis.length; i++ ) {
@@ -641,7 +631,7 @@ export class FireDisplay {
   }
 
   /** Back to full detail (the guard starts over). */
-  resetDetail() { this.level = 0; this.press = 0; this.base = 0; this.stepAt = 0; this.upAt = 0; this.calm = 3000; this._ri = 0; this._rn = 0; this.holdK = 3; this.lastCells = 0; this.stats.level = 0; }
+  resetDetail() { GUARD.reset(); fireDetail(1, this.D); this.holdK = 3; this.lastCells = 0; this.stats.level = 0; this.stats.q = 1; }
 
   /** Performance mode or reduced motion changed: re-arm, redraw once (A13: new areas being made ready show at once). */
   refresh() {
