@@ -1109,3 +1109,97 @@ The aftermath default is 45 s (or no end).
 - **Not checked / known:** the very end of the dissolve leaves small speckles for a moment before the trail is gone; the
   mid-age trail can still read a little "cotton-ball" at zoom 3; a scene with a very different ground colour; weak GPUs only by
   emulation.
+
+## 22. The meteor (design, presets-meteor)
+
+The user picked it from a list as "meteor / spadająca gwiazda: cień i smuga z góry, wielki krater, ogień i długa kurzawa" - meant as
+the biggest WOW of the set. The bar is the set's: natural and organic, no squares or area edges, a smooth start and end, the oblique
+view, readable at zoom 0.6-3 by day and night, optimised only without a visible loss. No sound, nothing pushes a token, the aftermath
+duration is the preset's setting with "no end".
+
+**Gesture:** point. A click is the impact; a drag sets the way it travels (as the bomb: it comes in from behind the press and flies
+along the drag, so the drag also says where the ejecta goes). A click alone draws the way from the seed, always coming in from the
+top half of the screen (screen-down: things fall down the screen in the oblique view).
+
+**Scale against the bomb:** crater r 2.0 sq (bomb 1.2), fireball r 2.4 sq (1.6), shock dust reach 6.5 sq (3.5), ejecta to 6.5 sq,
+pre-roll 2.6 s (1.2 s). The size slider scales everything on the ground; the flight path in the sky keeps its length (it must still
+come from off screen at zoom 1).
+
+**How it reads, over time** (ms from the impact T0):
+
+| t | Layer | What |
+|---|---|---|
+| -2600..0 | meteor (new) | THE APPROACH. A speck of light high up and far back along its way (18 sq up, 12 sq back) that grows into a white-hot head rushing down at an angle, eased in (s = u^1.25: slow and far, then a rush: the last half of the way in the last ~1.1 s). Round the head a flickering yellow coma and a hot plasma TAIL (white, yellow, orange, red, ember, broken into streaks along the way, never a cone with an edge); sparks peel off the tail and fall back cooling; behind it a dark SMOKE TRAIL (the "smuga") hangs in the sky along the whole way it came, young and thin at the head, billowing wider and paler as it ages. |
+| -2600..0 | meteor | The GROUND sees it come: by day its small dithered SHADOW runs in along the way and tightens; at night its light sweeps in and grows on the ground (emission, stepped bands), so a dark map lights up before the hit. The last 0.9 s a low rumble of the screen builds (opt-outs apply). |
+| 0 | cue | Screen flash (full, warm white) and the strongest shake of the set (decaying 0.9 s). |
+| 0..0.6 s | meteor | The PRESSURE FRONT: a pale ragged ring races out over the ground to ~7 sq in a third of a second and breaks up - it tells the scale before the dust can. |
+| 0 | burst L3 | The fireball, r 2.4 sq: white core, rolling cauliflower, mushroom cap on a stem that darkens into the column. |
+| 0 | destruction | The crater: blast L3, cause fire, r 2.0 sq, torn and jagged with heavy rubble and debris. |
+| 30 ms | dust shock L3 | The ring of the ground's own dust tearing out to 6.5 sq, then the five-minute HAZE (the "długa kurzawa"). |
+| 0.35..1.6 s | meteor + destruction + dust | The EJECTA: 13-16 rocks thrown out of the fireball on high arcs (a butterfly downrange: none in a 70° wedge back up the way it came, the most along its way), hot at first (they glow at night), cooling to dark rock, each with its shadow on the ground, landing one by one from 2.3 to 6.5 sq out. Each landing opens a small pock (one timed path stroke: the guns' follow-the-stroke entry) and throws a geyser of the ground's dust (dust "hits" L3, one stroke). 22 smaller pebbles fly with them and land in the dust. |
+| 0.15..1.4 s | burst debris / fire | Burning chunks (the burst's debris) land downrange and catch as small fires (8-14, L1). |
+| 0.9..1.3 s | fire | Fires along the torn rim (3-5, L2) and the impactor still burning in the heart of the crater (L2). |
+| 1.2 s | smoke | The smoke column L3 rising out of the crater; the burst's cap hands over to it. |
+| to ~16 s | meteor | The sky trail lingers, widening, drifting with the wind, and breaks up into holes art pixel by art pixel - never fades as a sheet. |
+| to the aftermath (default 90 s) | fire / smoke | The fires die out one by one, the column with the duration ("no end": they burn until the GM puts them out). |
+| to 5 min | dust | The haze hangs, drifts and thins. |
+
+**What is new and where** (everything else is the existing layers driven by data):
+- `scripts/presets/meteor-core.mjs` (pure, node-tested): the way through the sky (the head's place and height at a time, the easing,
+  where the trail of a point was made), the bodies of a frame (the tail's sparks, the ejecta rocks and pebbles) and the item a plan
+  carries.
+- `scripts/presets/meteor-art.mjs` (every client, only while a meteor firing is live): one art pass per frame into a render texture
+  of art cells (the destruction layer's art grid; only the cells in view are drawn), drawn crisp at any zoom by the fire's footprint
+  sampler; the head, tail, sparks, rocks, smoke trail, pressure ring, shadows in the primary group above the tokens (as the accents);
+  what burns glows in Foundry's illumination; the approach rumble. Every frame while something moves fast (the flight, the ejecta),
+  then at the fire's 12 fps for the lingering trail. Reduced motion: none of it (the result stays). The frame guard thins the sparks
+  and pebbles only, never the silhouette.
+- `scripts/presets/meteor-wire.mjs`: loads meteor-art on the first record with a meteor accent (a scene without one runs nothing).
+- `core.mjs` (additive): an accent kind `meteor`; a definition-level `ejecta` (like `walk`): the landing points with even landing
+  times, a place `{ m: "ejecta" }` for the layers - destruction as one timed path stroke, dust `hits` as one stroke; a point preset
+  with ejecta and no drag gets a seeded way.
+- `defs.mjs`: the built-in `meteor` (set "nature"). `ui-core.mjs ghostOf`: the approach drawn as dots coming down the sky.
+
+### 22.1 The meteor as built (presets-meteor)
+
+- **Files:** new `scripts/presets/meteor-core.mjs`, `meteor-art.mjs`, `meteor-wire.mjs`, `dev/presets-meteor.test.mjs`,
+  `dev/meteor-cost.mjs`; edited `core.mjs` (PLACES + "ejecta", ACCENTS + "meteor", EJECTA_DEFAULTS / cleanEjecta / ejectaOf, a seeded
+  way for a point preset with ejecta and no drag, accent dur clamp 8 s -> 30 s, accentOf "meteor"), `defs.mjs` (built-in meteor),
+  `presets.mjs` (registerMeteor), `ui-core.mjs` (ghostOf: the approach as dots), `lang/en.json` + `pl.json` (name, hint).
+  Nothing of the others changed: a definition without `ejecta` expands exactly as before (presets-core / boom / guns tests unchanged).
+- **Tuned constants:** way 18 sq up / 12 sq back, ease s = u^1.25 (the head is readable for ~1.5 s at zoom 1, not a 0.5 s blip),
+  trail 16 s, ring to 7 sq x size, 13-16 ejecta rocks + 22 pebbles + 30 tail sparks (sparks below heat 0.2 are dropped: no dark
+  specks falling), rock sizes 2 / 3 / 4 art px. The smoke trail is two loose rows of lit billows (not a rod, not a bead chain),
+  blown away after the impact by a growing per-cell cut (no sheet fade).
+- **Checks (2026-11-09, lane 5, DPR 2):** presets-meteor 225/225; run-all 81/81 after merging main c7babb0; lang audit clean;
+  frame hash, ticker listeners (19) and settings (93) on a blank ZZ scene identical merged vs c7babb0. The art pass (713 x 892 cells
+  at zoom 1) costs ~0.1 ms GPU (timed with gl.finish). Real rAF frames at zoom 3 over 26 s: p95 8.2-9.2 ms, none over 50 ms
+  (bomb: 7.7-8.8 ms). stack-bench's stepped CPU p95 is high in the first ~25 s (20-46 ms, from the ~20 aftermath fires: dropping the
+  debris / rim / heart fires takes it to 1.2 ms) - an artefact of stepping the fire layer back to back; the real frames above do not
+  show it. Cold first firing on a fresh page: one long task 175-886 ms (bomb ~170 ms), at the click, not at the impact.
+
+### 22.2 Responsiveness (2026-11-09, after "responsywność ponad wszystko")
+
+Measured on lane 5 in a real headless Chrome (RTX 3070 Ti, DPR 2, 165 Hz display: 6.1 ms frames), each run a FRESH Chrome with
+the shader disk cache off (the worst case: a program-cache miss), the GM firing the meteor at the ZZ test street, real rAF
+frame times; "before" = c390063, "after" = this branch (2-3 runs each, zoom 1 and 3):
+
+| window | before: longest frame | after: longest frame |
+|---|---|---|
+| the click (to T0, 2.6 s) | 494-1058 ms | 73-88 ms |
+| impact to +3 s | 22-1604 ms (60-1200 ms damage programs) | 19-27 ms |
+| +3 to +10 s | 9-22 ms | 10 ms |
+| +10 to +25 s | 10-33 ms | 9-21 ms |
+
+- Cause 1 (the meteor's own): its three programs were linked by the frame that first drew it - the art pass alone 0.4-0.9 s
+  on a cache miss. Now `meteor-art warmUp` links them off the main thread (gl-warm warmPrograms) when the GM arms a meteor pad
+  and on every client when the firing record arrives; a shot stays hidden until they are linked (the head is still off screen).
+- Cause 2 (shared, the bomb / grenade / rocket pay it too): the damage layer's programs (sharp batch, patch, tiles, the GPU
+  pieces' pose, the erosion pass) were linked by the impact frame on a scene with no damage yet (60 ms - 1.2 s). Now the presets
+  runtime calls `load-warm warmDamage` when it takes up a firing ahead of its impact: the same programs, linked in the background.
+- Left, shared, not changed: the GM's first damage on a scene samples the scene map once (`destruction/source.mjs sceneMap`,
+  getImageData ~85 ms, at the click - every blast preset has it); the fire lights' program (~30 ms on a miss).
+- The aftermath (~20 fires): no long frames in real frames at zoom 1 or 3 (p95 7.2-7.5 ms, p99 <= 8 ms over +3..+25 s, the same
+  as before). The 20-46 ms CPU p95 of dev/meteor-cost.mjs came from stack-bench stepping the frames back to back: the fire layer
+  spreads its next art frame over the real frames before it is due (display.mjs drawAhead), which a back-to-back stepper defeats;
+  removing the meteor's fires removed it there, but real frames never showed it. Nothing changed in the fire layer.
