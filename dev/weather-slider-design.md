@@ -527,3 +527,42 @@ fireWet, drift; wet / cover for cut keys): all identical.
   of rain 2 is drizzle first). Steady states are identical.
 * v1 level 1 with `i < 0.5` now maps to v 0.65..1 (presence): densities identical, tints scale with p (2.1, "negligible").
 * Not verified live: no Foundry run, no pixel A/B (T6).
+
+## 9. T4 as built (D4, D5; branch `weather-slider-t4`, 2026-11-09)
+
+**Counts (D4).** New pure module `scripts/weather/tornado-debris.mjs`: `whole(n)` (snaps float noise to a whole number), `share(n, i)`
+= clamp(n - i, 0, 1). `nS`, `nW`, `nC`, `nI` are no longer rounded: the loops visit ceil(n) slots and each slot's alpha is x its
+share, so the last item fades in / out. **Wisps**: the first half are dust wisps, the rest grey (`i < nW / 2`); the slot on the half's
+fractional edge is drawn as both kinds crossfaded (dust x `share(nW / 2, i)`, grey x the rest), so no wisp switches kind.
+**Fragments / planks (`nF`, `nP`) never fade** (no half-transparent map pieces) and never change mid-life: each slot's life is decided
+once, from the level (and touch) at its **birth** t0, and memoised per slot (`this.frags[i]`, keyed by cycle and birth): kind
+(`fragKind`: fragments fill [0, nF), planks [nF, nF + nP); a slot cut by a fractional boundary picks its kind with its own hash
+`hF(kk, 17)` in proportion), big or not, `fragSz`, and the skirt radius where it is torn out (the scar no longer slides during a ramp).
+The memo is what keeps a fragment intact when a **second change interrupts a running ramp**: the record only knows the newest ramp, so
+the pure birth level of an older slot would move at that moment (shown by a mutation run of the test: without the memo, 390 / 1296
+kind / size / vanish faults in the two interrupted scenarios). While the level has been still for a whole life (`now - lvT >= LEVEL_MS
++ 8 s + 50 ms`) only today's slots are visited; else all 50 (`FRAG_SLOTS`), a few dozen cheap rejects.
+
+**Big fragments (D5).** `big = kind is fragment && hF(kk, 12) < 0.16 x bigShare(sB)`, `bigShare = smoothstep(0.3, 0.8, s)` at the
+birth level (centred near the old step at s 0.56). Exactly 0 at level 1 (no fragments anyway) and exactly 1 (0.16) at levels 2 and 3.
+
+**Also changed (touch / rope-out only):** the "torn out only while on the ground" hash gate `hF(kk, 11) > 0.3 + 0.7 x touch` now uses
+the touch at birth (the other half of that gate already did). Before, a fragment in flight vanished when the touch dropped (rope-out);
+now it finishes its flight and dissolves. Same at touch 1.
+
+**Identity.** At levels 1 / 2 / 3, steady (touch, reach 1 and rope 0 for the last 9 s, any earlier ramp over by 13.1 s), guard q 1,
+the output is identical: a throwaway A/B ran the old (127a873) and the new `TornadoView.debris()` with stubs on 42 498 frames (3
+levels x 3 sizes x loop / ropeOut x ramps from each level, 0-260 s, ~11.7 M pushes): every push's float64 arguments and the float32
+instance buffers equal. **Differences by design**, all outside that state: fractional counts under the guard (q < 1) and during
+touch-down / rope-out now fade one item instead of rounding; fragments born during touch-down / a ramp keep their birth decisions for
+their (8 s) life, so the first 8 s after the ramp ends differ from the old code too.
+
+**Tests.** `dev/tornado-debris.test.mjs`: A whole / share (exact 0 / 1 at whole n, the integer levels' steady counts are whole and even
+for wisps, shares sum to n and are continuous), B fragKind / bigShare (the old split at 1 / 2 / 3 for every slot and hash, expected
+counts follow the table between levels, big share 0 / 0.16 / 0.16 and smooth), C the real `debris()` with stubs over 5 ramps (1 -> 3,
+3 -> 1, 1.4 -> 2.6 and two interrupted by a second change): every fragment / plank keeps kind and size and is drawn every frame of its
+life; at a settled level the fast path draws exactly what the full path draws.
+
+**Not verified (T6, live):** the look of the fades (a speck / wisp / clump / streak fading over a 5 s ramp, day and night), that the big
+fragments' share ramp reads naturally on 1 -> 2, the rope-out with fragments finishing their flight, and the CPU time of the 50-slot
+path during a ramp (expected: microseconds).
