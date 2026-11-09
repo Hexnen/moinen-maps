@@ -672,3 +672,46 @@ The four questions asked here were answered by the user; P1 is built on these an
   undo; a real player login (Test Gracz 1) gets no tool, no panel, no ghost layer, and `fire` returns null.
 - **Seen, not tuned (gun agent's area):** the Uzi hits barely read at play zoom.
 - **Not checked:** the remote host; a GTX 1080; two GMs using the board at once.
+
+## 15. P3 as built (the explosion fire `burst`, G1 / G2)
+
+- **Stroke** `{ k: "burst", p: [x, y], r, lv, q, c?, db?: [dx, dy, ms, ...], wd, ws, o? }` in `fireStrokes`. The pure part is
+  `fire/burst-model.mjs` (levels `BURST_LV`, the area `burstRect`, the motion `burstAt`, the light `burstLight` / `burstGain`). The
+  look is `fire/burst-art.mjs` (`BurstArt`, on FireArt's contract).
+  - It is one area of its own: never merged, no erasers.
+  - It lives `life` s from q (L1 2.2, L2 5, L3 8.5), then it is gone and the GM purges it.
+  - `o` takes it back: it fades in 0.6 s. Reduced motion shows no burst.
+  - Its area is every body of its motion at every frame, at the four corner views (lift 0 to 0.8, squash 0.6 to 1), plus the
+    wind's drift. Nothing it draws is cut by its rectangle.
+- **Motion:** computed on the CPU per 12 fps art frame and sent as uniform arrays: up to 64 billows, 40 sparks and 16 debris.
+  - Billows: a white-hot core, a fireball thrown out with drag, a buoyant rise, the cap spreading and rolling, a stem at L2-L3.
+  - Ground surge: billows of the ground's own dust.
+  - Sparks fly ballistic and cool through the ramp.
+  - Debris chunks fly to their landing points.
+- **Look:**
+  - Each billow is drawn back to front with a lumpy edge and is lit from the top left.
+  - A dark crease where a billow overlies another, so it reads as a cauliflower, never a disc.
+  - The colour sinks from the outside in: ramp, then fire-lit brown, then the column smoke tones (L3; a dirty dust mix at L1).
+  - Late in its life and on a take-back it erodes in blobby holes, the top billows first.
+  - Ground: a heat pool and the cloud's shadow (multiply).
+  - Emission: the flames, sparks and chunks glow; the fire-lit smoke glows at half.
+- **Light:** one light per burst, joined to the fire lights. It has no 700 ms fade-in: a flash peaks at 50 ms and decays (L3 about
+  1.3 s). It never takes over a fire's light, and no fire light takes over its light.
+- **Guard:** `fire/guard.mjs burstDetail` thins the sparks only (never under a quarter). The billows (the silhouette) never
+  change.
+- **Per-stroke timing (G2):** fire and smoke may carry `gr` / `ot` (s). Strokes are merged only with strokes timed the same way.
+  An area carries `tm`, and FireArt and its lights use it. A stroke without them is byte-identical.
+- **Timed fires (fix):** a fire or smoke stroke whose `o` is still to come burns as one without `o` until then: it catches at its
+  `q` and grows in. Before this fix a preset's aftermath fire was drawn burning from its first write, up to 1.4 s before the
+  impact.
+- **Fire panel (section 13 hook):**
+  - `list()` / `clear()` and the row edits take strokes whose `o` lies in the future (`model.burningAt`).
+  - `remove()` puts burning ones out and deletes the ones not caught yet (`model.putOutPlan`); undo / redo handle that drop.
+  - New `prepare` / `addMany`: the torn edges for writers. New `api.fire.burst(x, y, opts)`, and `paint` gains
+    `grow / out / at / debris`.
+- **Presets (small):**
+  - `write.mjs` writes fire / smoke through `fire.prepare` and each pending burst as a burst stroke named in `f`
+    (`pending.burst` is then empty).
+  - Its debris chunks land where and when the debris fires catch. Their catch times are spread by distance.
+  - `core.mjs` passes the layer fields `gr` / `ot`. `defs.mjs` sets `gr` on the bomb's rim / debris and the grenade's wisps /
+    smoulder.

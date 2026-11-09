@@ -1,5 +1,6 @@
 import { lightDrive, shaderTime, hash4, FIRE_LV } from "./model.mjs";
 import { reducedMotion } from "../config.mjs";
+import { burstGain } from "./burst-model.mjs";
 
 /**
  * FIRE LIGHT through Foundry's OWN light sources: one client-side PointLightSource per light cluster (model.lightsOf: a fire is one
@@ -138,8 +139,9 @@ export class FireLights {
       const list = ok ? e.listOf(per) : [], slots = [];
       for ( const L of list ) {
         // the nearest orphan light (alive or fading) takes this cluster over
+        // (an EXPLOSION's light is its own: a flash that never takes over a fire's light, nor a fire one its)
         let bi = -1, bd = Infinity;
-        orphans.forEach((s, i) => { if ( !s ) return; const d = Math.hypot(s.x - L.x, s.y - L.y); if ( d < bd ) { bd = d; bi = i; } });
+        orphans.forEach((s, i) => { if ( !s || !!s.L.burst !== !!L.burst ) return; const d = Math.hypot(s.x - L.x, s.y - L.y); if ( d < bd ) { bd = d; bi = i; } });
         const R = Math.round((L.radius ?? 0) * 1.15);
         let s = bi >= 0 && bd <= Math.max(1.5 * grid, 0.4 * orphans[bi].R) ? orphans[bi] : null;
         if ( s ) {
@@ -224,7 +226,14 @@ export class FireLights {
     const P = this.P, geo = this.geo, still = reducedMotion();
     if ( T === null ) T = still ? 0 : shaderTime(now, P.speed ?? 1);
     const u = geo.grid / geo.ap / 32, G = still ? 0 : (P.grow ?? 0) * 1000, O = still ? 0 : (P.out ?? 0) * 1000, flick = still ? 0 : P.lightFlicker ?? 0;
-    const L = s.L, d = lightDrive(L, still ? Infinity : now, T, { u, G, O, flicker: flick, ref: s.ref });
+    const L = s.L;
+    // (an EXPLOSION: the flash and its decay - burst-model.burstGain - at once, no fade-in: 700 ms would swallow a 50 ms flash; its
+    // own amplitude, not a fire level's; a pale hot colour at the peak that deepens as it decays: lightLook's rule)
+    if ( L.burst ) {
+      const g = still ? 0 : burstGain(L.burst, now), k = s.dieAt !== null ? 1 - (still ? 1 : ease((now - s.dieAt) / FADE_OUT)) : 1;
+      return lightLook({ gain: g, x: L.x, y: L.y }, rgbOf(P.lightFollow && L.color ? L.color : P.lightColor ?? "#ff8a3c"), Math.min(1, (P.lightIntensity ?? 0.6) * 1.15) * 0.8, s.R, s.x, s.y, k, L.seed ?? 0, T, null);
+    }
+    const d = lightDrive(L, still ? Infinity : now, T, { u, G: L.G ?? G, O: L.O ?? O, flicker: flick, ref: s.ref });
     let k = still ? 1 : ease((now - s.born) / FADE_IN);
     if ( s.dieAt !== null ) k *= 1 - (still ? 1 : ease((now - s.dieAt) / FADE_OUT));
     let br = null;

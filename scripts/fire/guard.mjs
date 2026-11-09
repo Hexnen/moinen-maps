@@ -27,3 +27,9 @@ export function fireDetail(q, out = { budget: 1, fps6: false, parts: 1 }) {
 
 /** The old guard's level number for a q (stats / tools that print a level: 0 = full). */
 export const levelOf = (q) => { const f = fireLevel(q); return f >= 0.999 ? 0 : f > 0.5 ? 1 : f > 0.3 ? 2 : 3; };
+
+/**
+ * An EXPLOSION's detail (burst-art.mjs setDetail) from the fire's detail `D`: the share of its sparks follows the particles' share,
+ * never under a quarter; its fireball's lobes never thin (the silhouette stays the same at every level - presets-design 5.1).
+ */
+export const burstDetail = (D) => Math.max(0.25, Math.min(1, D.parts));
