@@ -16,13 +16,14 @@
  */
 
 /** The palette: white-hot, yellow, orange, red, ember, pale (the bullet streak / a glint); the thrown and dropped things: iron
- * (a bomb's body, a grenade's band), metal light, olive (a grenade), dust (kicked up where a grenade lands). */
+ * (a bomb's body), metal light (a grenade's lever), olive, dust (kicked up where a grenade lands), lit olive, dark olive (a grenade's
+ * shade and its grooves). */
 import { LANDING_KINDS, landingSpan, landingDraw } from "./landing-fx.mjs";   // (the superhero landing's accents: landing-fx.mjs)
 import { spurts, SPURT } from "./gun-fx.mjs";   // (a gun's hit spurts: gun-fx.mjs)
 
-export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8, 0x27231f, 0x8d867a, 0x505b33, 0xb3a68d];
+export const PAL = [0xfffbe8, 0xffe27a, 0xffa13a, 0xe0532a, 0x8a2e1a, 0xfff0c8, 0x27231f, 0x8d867a, 0x505b33, 0xb3a68d, 0x7f8c4c, 0x2f3720];
 /** How much each palette colour lights itself at night (its emission, 0..1; 0: lit by the scene only, never by itself). */
-export const GLOW = [1, 0.95, 0.78, 0.5, 0.22, 0.6, 0, 0, 0, 0];
+export const GLOW = [1, 0.95, 0.78, 0.5, 0.22, 0.6, 0, 0, 0, 0, 0, 0];
 /** The ground SHADOWS (a falling bomb's, a thrown grenade's): two dithered steps of a dark tone, drawn under every pixel above. */
 export const SHADE = 0x120e0a, SHADE_A = [0.17, 0.36];
 /** The bomb: it falls from BOMB_Z squares (gravity: z ~ (1 - u)^2), drifting BOMB_D squares along the firing's direction; seen
@@ -62,10 +63,10 @@ export function h3(a, b, c) {
  * `glows` ground glows [x, y, radius (scene px), intensity 0..1, palette colour] for the night, `kick` the rumble at the view (the
  * renderer weighs it by distance), `live` whether anything was drawn or is still to come.
  */
-export const newFrame = () => ({ px: PAL.map(() => []), shade: [[], []], glows: [], kicks: [], shakes: [], flashes: [], live: false });
+export const newFrame = () => ({ px: PAL.map(() => []), shade: [[], []], soft: [], glows: [], kicks: [], shakes: [], flashes: [], live: false });
 export function clearFrame(F) {
   for ( const a of F.px ) a.length = 0;
-  F.shade[0].length = 0; F.shade[1].length = 0; F.glows.length = 0; F.kicks.length = 0; F.shakes.length = 0; F.flashes.length = 0; F.live = false;
+  F.shade[0].length = 0; F.shade[1].length = 0; F.soft.length = 0; F.glows.length = 0; F.kicks.length = 0; F.shakes.length = 0; F.flashes.length = 0; F.live = false;
   return F;
 }
 
@@ -292,21 +293,13 @@ function muzzle(it, t, env, F, seed) {
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const smooth = (a, b, v) => { const x = clamp01((v - a) / (b - a)); return x * x * (3 - 2 * x); };
-/** The dither's threshold of a 2 x 2 cluster (destruction's dropout grain, hashed: no ordered halftone grid), anchored to the art grid,
- * so a growing shadow only ever adds clusters (no crawl). */
-const bayer = (x, y) => h3(x >> 1, y >> 1, 91);
-
-/** A soft ground shadow at (x, y): an ellipse of radius r (scene px, squashed by the view), its density `dens` (0..1) highest in the
- * middle and dithered out to the rim in two steps - dark in the core, a light penumbra round it. */
-function shadow(F, env, x, y, r, dens) {
+/** A SOFT ground shadow at (x, y) (a falling bomb's, a thrown grenade's): a smooth feathered ellipse of radius r (scene px, squashed
+ * by the view), its darkness `dens` 0..1 - F.soft [x, y, rx, ry, alpha]. A shadow is light, not a thing: it has no pixel grid (a
+ * dithered one read as a square of 2 x 2 blocks). */
+export const SOFT_A = 0.62;
+function softShadow(F, env, x, y, r, dens) {
   if ( !(dens > 0.01) || !(r > 0) ) return;
-  const ap = env.ap, rx = Math.max(1, r / ap), ry = Math.max(1, rx * (env.squash ?? 0.8)), [cx, cy] = scr(env, x, y, 0);
-  const X = Math.ceil(rx), Y = Math.ceil(ry);
-  for ( let j = -Y; j <= Y; j++ ) for ( let i = -X; i <= X; i++ ) {
-    const e = Math.hypot((i + 0.5) / rx, (j + 0.5) / ry); if ( e >= 1 ) continue;
-    const v = dens * (1 - smooth(0.2, 1, e)), th = bayer(cx + i, cy + j);
-    if ( th < v ) F.shade[1].push(cx + i, cy + j); else if ( th < Math.min(0.97, v * 1.9) ) F.shade[0].push(cx + i, cy + j);
-  }
+  F.soft.push(x, y, r, r * (env.squash ?? 0.8), Math.min(1, dens) * SOFT_A);
 }
 
 /**
@@ -318,7 +311,7 @@ function fallShadow(it, t, env, F, seed) {
   const g = env.grid, u = clamp01((t - it.at) / Math.max(1, it.dur)); if ( u >= 1 ) return;
   const k = 1 - u, d = Array.isArray(it.from) ? it.from : [0, 0], D = BOMB_D * g;
   const x = it.x - d[0] * D * k, y = it.y - d[1] * D * k, z = BOMB_Z * g * k * k;
-  shadow(F, env, x, y, g * (SHADOW_R[1] + (SHADOW_R[0] - SHADOW_R[1]) * k), smooth(0, 0.18, u) * (0.2 + 0.68 * Math.pow(u, 1.4)));
+  softShadow(F, env, x, y, g * (SHADOW_R[1] + (SHADOW_R[0] - SHADOW_R[1]) * k), smooth(0, 0.18, u) * (0.2 + 0.68 * Math.pow(u, 1.4)));
   if ( z > BOMB_SHOW * g ) return;
   // (its screen velocity: the drift along the direction, squashed, and the fall, lifted - the body's axis and the streak's way)
   const sq = env.squash ?? 0.8, dur = Math.max(1, it.dur), vx = d[0] * D / dur, vy = d[1] * D * sq / dur + (env.lift ?? 0.5) * 2 * BOMB_Z * g * k / dur;
@@ -341,16 +334,21 @@ function fallShadow(it, t, env, F, seed) {
   }
 }
 
-/** A grenade at (x, y) lifted z: an olive egg, a dark band round it turned by `spin` (rad: it tumbles), lit from the top left, a
- * pale glint (at night: the point that shows it); `squash` > 0 just after it hits the ground. */
+/** A grenade at (x, y) lifted z: ONE olive egg, shaded as a ball lit from the top left (lit olive, olive, dark olive), a groove round it
+ * turned by `spin` (rad: it tumbles) in dark olive, the lever and fuse a fleck of metal on its top, a pale glint (at night: the point
+ * that shows it); `squash` > 0 just after it hits the ground. (An iron band across it split it into two pebbles.) */
 function grenade(F, env, x, y, z, spin, squash = 0) {
-  const ap = env.ap, r = Math.max(1.6, 0.105 * env.grid / ap), rx = r * (1 + 0.25 * squash), ry = r * 0.92 * (1 - 0.3 * squash), [cx, cy] = scr(env, x, y, z);
+  const ap = env.ap, r = Math.max(1.7, 0.11 * env.grid / ap), rx = r * (1 + 0.25 * squash), ry = r * 0.95 * (1 - 0.3 * squash), [cx, cy] = scr(env, x, y, z);
   const bx = Math.cos(spin), by = Math.sin(spin), X = Math.ceil(rx) + 1, Y = Math.ceil(ry) + 1;
   for ( let j = -Y; j <= Y; j++ ) for ( let i = -X; i <= X; i++ ) {
     const px = i + 0.5, py = j + 0.5, e = Math.hypot(px / rx, py / ry); if ( e >= 1 ) continue;
-    const band = Math.abs(px * bx + py * by) < Math.max(0.6, 0.22 * r), lit = px + py < -0.55 * r;
-    F.px[band ? 6 : lit ? 7 : 8].push(cx + i, cy + j);
+    const l = (-px - py) / (1.4142 * r) + 0.35 * Math.sqrt(Math.max(0, 1 - e * e));   // (a ball's light: top left)
+    const groove = r >= 2.4 && Math.abs(px * bx + py * by) < 0.5 && e < 0.8;
+    F.px[groove || l < -0.35 ? 11 : l > 0.3 ? 10 : 8].push(cx + i, cy + j);
   }
+  // the lever and fuse: a fleck of metal at its top, turning with it
+  const lx = Math.round(-by * ry * 0.95 - 0.5), ly = Math.round(-Math.abs(bx) * ry - 0.5);
+  F.px[7].push(cx + lx, cy + ly);
   F.px[5].push(cx + Math.round(-0.4 * rx) - 1, cy + Math.round(-0.4 * ry) - 1);
 }
 /** Where a throw lands (short of its mark: it bounces the rest), and its unit direction; null when nothing is thrown (a click). */
@@ -371,7 +369,7 @@ function throwArc(it, t, env, F, seed) {
   const u = clamp01((t - it.at) / Math.max(1, it.dur)); if ( u >= 1 ) return;
   const x = it.from[0] + (T.land[0] - it.from[0]) * u, y = it.from[1] + (T.land[1] - it.from[1]) * u;
   const z = 0.35 * T.L * 4 * u * (1 - u) + 0.3 * g * (1 - u);
-  shadow(F, env, x, y, g * (0.13 + 0.05 * z / g), 0.62 / (1 + 0.45 * z / g));
+  softShadow(F, env, x, y, g * (0.15 + 0.05 * z / g), 0.8 / (1 + 0.45 * z / g));
   grenade(F, env, x, y, z, (t - it.at) * 0.016 + h3(seed, 1, 1) * 6.28);
 }
 
@@ -393,7 +391,7 @@ function bounce(it, t, env, F, seed) {
   }
   // (squashed for a moment each time it hits the ground)
   for ( const tg of [0, tH] ) if ( tau >= tg && tau < tg + 50 ) sq = 1 - (tau - tg) / 50;
-  shadow(F, env, x, y, g * (0.13 + 0.05 * z / g), 0.62 / (1 + 0.45 * z / g));
+  softShadow(F, env, x, y, g * (0.15 + 0.05 * z / g), 0.8 / (1 + 0.45 * z / g));
   grenade(F, env, x, y, z, h3(seed, 1, 1) * 6.28 + dist / (0.105 * g), sq);
   // a little DUST where it hits: a few grains of the ground thrown out low, settling and dropping out
   [[0, p0], [tH, p1]].forEach(([tg, p], m) => {

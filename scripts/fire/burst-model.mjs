@@ -153,7 +153,9 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
   const NL = BURST_LV.lobes[lv];
   for ( let j = 0; j < NL; j++ ) {
     const az = 6.2832 * H(s, j, 1), el = -0.2 + 1.45 * Math.pow(H(s, j, 2), 0.75), h3 = H(s, j, 3), h4 = H(s, j, 4), h5 = H(s, j, 5);
-    const ae = Math.max(0, a - 0.012 * j % 0.09), E = 1 - Math.exp(-11 * ae);
+    // (out with drag, but over a few art frames: at 12 fps a 90 ms expansion read as a pin that snapped to full size - the flash
+    // grows from a compact white ball over ~4 frames)
+    const ae = Math.max(0, a - 0.012 * j % 0.09), E = 1 - Math.exp(-6.5 * ae);
     if ( E <= 0 ) continue;
     const dist = R * (0.15 + 0.6 * h3) * E, up = sm(-0.2, 0.9, el), kz = (lv === 3 ? 0.18 : lv === 2 ? 0.45 : 0.7) + (1 - (lv === 3 ? 0.18 : lv === 2 ? 0.45 : 0.7)) * up;
     let rho = Math.cos(el) * dist * (1 + spread * sr * (0.6 + 0.8 * up)), z = R * 0.5 * E + Math.sin(el) * dist * 0.85 + Zc * kz;
@@ -165,8 +167,9 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
     }
     rho = Math.max(0, rho);
     const [ax, ay] = axis(z), gx = Math.cos(az) * rho, gy = Math.sin(az) * rho;
-    const r = R * (0.2 + 0.3 * h4 * h4) * (0.3 + 0.7 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1);
-    const tau = hot * (0.7 + 0.7 * h5) * (0.75 + 0.6 * (1 - h3)), heat = a < core ? 1 : Math.exp(-Math.max(0, a - core) / tau) * (a < core * 3 ? 1 : 1);
+    const r = R * (0.2 + 0.3 * h4 * h4) * (0.42 + 0.58 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1);
+    // (the cloud cools as one body - the inner and lower billows a little later - never single billows going grey on a hot ball)
+    const tau = hot * (0.85 + 0.3 * h5) * (0.8 + 0.45 * (1 - h3)) * (1.1 - 0.25 * up), heat = a < core ? 1 : Math.exp(-Math.max(0, a - core) / tau);
     put(cx + ax + gx, cy + ay + gy * sq - z * lift, r, heat, cy + gy * sq, 0, Math.min(1, E * 3) * fade, (a / life) * (0.78 + 0.25 * h5 + 0.22 * up));
   }
   // the STEM (L2 short, L3 tall): billows up the axis from the ground to under the cap, the lowest licking with flame a while
@@ -230,11 +233,15 @@ export function burstLight(st, geo, P) {
     ignite: null, out: null, seed: (st.sd >>> 0) || 1, burst: { q: litTime(st), o: st.o ?? null, lv }, samples: [] };
 }
 
-/** The burst light's gain at `now` (ms): 0 before the impact, a peak at 50 ms, a long decay (L3 ~2 s); a taken-back burst dims fast. */
+/** The burst light's swell to its peak (s). */
+export const BURST_UP = 0.14;
+/** The burst light's gain at `now` (ms): 0 before the impact, a peak at BURST_UP, a long decay (L3 ~2 s); a taken-back burst dims fast. */
 export function burstGain(B, now) {
   const a = (now - B.q) / 1000; if ( a < 0 ) return 0;
   const lv = B.lv ?? 2, dec = [0, 0.35, 0.8, 1.3][lv];
-  let g = BURST_LV.lightI[lv] * (a < 0.05 ? a / 0.05 : 0.18 + 0.82 * Math.exp(-(a - 0.05) / dec)) * (1 - Math.min(1, Math.max(0, (a - BURST_LV.life[lv] * 0.55) / (BURST_LV.life[lv] * 0.4))));
+  // (it swells over two art frames - a light that snapped on read as a pop at night - then decays)
+  const up = Math.min(1, a / BURST_UP), sw = up * up * (3 - 2 * up);
+  let g = BURST_LV.lightI[lv] * (a < BURST_UP ? sw : 0.18 + 0.82 * Math.exp(-(a - BURST_UP) / dec)) * (1 - Math.min(1, Math.max(0, (a - BURST_LV.life[lv] * 0.55) / (BURST_LV.life[lv] * 0.4))));
   if ( B.o !== null && B.o !== undefined ) g *= 1 - Math.min(1, Math.max(0, (now - B.o) / (BURST_FADE * 1000)));
   return Math.max(0, g);
 }

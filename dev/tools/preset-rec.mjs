@@ -2,7 +2,8 @@
 //   node dev/tools/preset-rec.mjs <cdpPort> <urlPrefix> <out.webm> <json opts>
 //   opts { scene: "ZZ-pol-day", id: "bomb", a: [x, y], b?: [x, y], from?, at?: [x, y] (view centre, default a / mid a-b), zoom: 1, ms: 12000,
 //          seed: 7, pre: 600 (ms recorded before the click), crop?: [x, y, w, h] (CSS px of the page, a region captured at full DPR),
-//          ui: false (hide the Foundry interface), from?: [x, y] + fr?: px (a shooter: its centre and radius) }
+//          ui: false (hide the Foundry interface), settle: 2500 (ms waited after the wipe and the pan), from?: [x, y] + fr?: px (a shooter:
+//          its centre and radius) }
 // The screencast frames are resampled to 30 fps (the frame shown at each 1/30 s), vp9 webm. Prints { frames, secs, maxGapMs, t0Lag }.
 // Only scenes named ZZ-... are wiped (guns-cost wipe).
 import { spawn } from "node:child_process";
@@ -21,7 +22,7 @@ const prep = await c.ev(`
   for ( const id of ["interface", "invincible-combat-bar", "notifications", "pause", "mm-orbit-strip", "hud"] ) { const I = document.getElementById(id); if ( I ) I.style.visibility = o.ui ? "" : "hidden"; }
   const at = o.at ?? (o.b ? [(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2] : o.a);
   canvas.pan({ x: at[0], y: at[1], scale: o.zoom, duration: 0 });
-  await new Promise((r) => setTimeout(r, 2500));
+  await new Promise((r) => setTimeout(r, o.settle ?? 2500));   // (settle: a wiped firing's smoke drifts off for a few seconds after its put-out)
   return { scene: canvas.scene.name, scale: canvas.stage.scale.x, dpr: devicePixelRatio };`);
 const frames = [];
 let cap = { maxWidth: 1600, maxHeight: 900 };

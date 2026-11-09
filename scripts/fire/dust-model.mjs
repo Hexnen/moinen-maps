@@ -111,7 +111,7 @@ export const KIND = {
     grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 2.4, jetK: 7, per: [0, 2, 2, 3] },
   // (shock: the emitters lie on rings round the centre (`fr` of the reach, `sp` apart along each), the heading points back at the
   // centre so `back` is the outward throw; low and rolling (small rise), `tau` the front's slowing - see shockAt)
-  shock: { v: 1, lanes: (hw) => [hw], sp: 0.22, pr: [0, 0.17, 0.27, 0.37], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
+  shock: { v: 1, lanes: (hw) => [hw], sp: 0.22, pr: [0, 0.17, 0.27, 0.31], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
     rise: [0, 0.06, 0.1, 0.15], life: [0, 1.6, 2.3, 3.2], lin: [0, 0.12, 0.2, 0.28], chips: [0, 2, 3, 4], chipD: 0.5, chipH: 0.2, chipSz: 1,
     grit: [0, 0.1, 0.16, 0.24], aura: [0, 0.25, 0.4, 0.55], auraA: [0, 0.45, 0.6, 0.75], mark: 0, trackW: 0, riseK: 1.4, jetK: 3.0,
     tau: [0, 0.2, 0.28, 0.38], fr: [0.18, 0.38, 0.58, 0.76, 0.92], linW: [0, 10, 14, 18], haze: [0, 150, 240, 300] }
