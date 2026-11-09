@@ -75,7 +75,7 @@ export class CloudDisplay {
     this.shadow = place(new PIXI.Mesh(this.gScene, new PIXI.Shader(prog("shadow", CLOUD_VERT, SHADOW_FRAG), { ...common(sr, 0.35), uShade: new Float32Array(4) })), 254, 0);
     this.rays = place(new PIXI.Mesh(this.gScene, new PIXI.Shader(prog("rays", CLOUD_VERT, RAYS_FRAG), { ...common(sr, 1.2), uRay: new Float32Array(4) })), 997, Infinity);
     this.body = place(new PIXI.Mesh(this.gAll, new PIXI.Shader(prog("body", CLOUD_VERT, BODY_FRAG), { ...common(R, 2.5), uCl: new Float32Array(4), uTor: this.tor, uTorN: 0, uFire: this.fire, uFireN: 0,
-      uOff: this.off, uSeed: 1 })), 996, Infinity);
+      uOff: this.off, uSeed: 1, uBolt: this.bolt = new Float32Array(4) })), 996, Infinity);
     // the two texture passes: one quad in texel units, drawn straight into its texture (as cells.mjs)
     this.rtQuad = new PIXI.Geometry().addAttribute("aVertexPosition", new Float32Array(8), 2).addIndex([0, 1, 2, 0, 2, 3]);
     const st = PIXI.State.for2d(); st.blend = false; st.depthTest = false; st.culling = false; this.rtState = st;
