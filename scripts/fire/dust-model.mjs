@@ -31,8 +31,10 @@
  * THE FIELD (dustRaster, in the field worker):
  *   cell   Float32 RGBA per cell: kick time (s since the area's ref; NONE = no dust reaches it), out time (s; NONE = none), the signed
  *          offset across the nearest path (cells, + = the path's left normal), code (kind * 4 + level) + 16 x round(band half-width x 4)
+ *   back   (only with an UNDONE eraser over the dust) Float32 RGBA per cell: [back, out2, 0, 0] - the dust put out at `out` came back
+ *          at `back` (s; NONE = no), easing in from what was left; out2 = its next out time after that (NONE = none)
  *   em     Float32, 3 RGBA texels an emitter (1024 emitters a row): [x, y (cells, area-local), kick, seed], [heading x, y, side +-1,
- *          code], [out, 0, 0, 0]
+ *          code], [out, back, out2, 0]
  *   tileH  Float32 RGBA per 16 x 16 cells: [start, count, 0, 0] into `idx` - the emitters whose whole reach touches the tile (a cell
  *          looks only at those: the art pass's cost is bounded, and no puff is ever cut at a tile's edge - the reach is the whole one)
  *   idx    Float32 RGBA, 4 emitter indices a texel (1024 texels a row)
@@ -59,18 +61,18 @@ export const DUST_TAIL = Math.max(LIN_L * 1.15, 3) + 0.3;
  * past the band, auraA its density; mark: 1 wheel tracks (trackW wide), 2 a scraped groove.
  */
 export const KIND = {
-  bike: { v: 5.5, lanes: () => [0], sp: 0.14, pr: [0, 0.14, 0.2, 0.28], out: [0, 0.12, 0.16, 0.22], back: [0, 0.5, 0.85, 1.2],
-    rise: [0, 0.1, 0.16, 0.26], life: [0, 2.2, 3.0, 4.0], lin: [0, 0.25, 0.4, 0.55], chips: [0, 1, 2, 3], chipD: 0.4, chipH: 0.3, chipSz: 1,
+  bike: { v: 5.5, lanes: () => [0], sp: 0.14, pr: [0, 0.14, 0.2, 0.28], out: [0, 0.12, 0.16, 0.22], back: [0, 0.6, 1.0, 1.45],
+    rise: [0, 0.12, 0.2, 0.32], life: [0, 2.2, 3.0, 4.0], lin: [0, 0.25, 0.4, 0.55], chips: [0, 2, 3, 5], chipD: 0.45, chipH: 0.3, chipSz: 1,
     grit: [0, 0.03, 0.05, 0.08], aura: [0, 0.4, 0.6, 0.85], auraA: [0, 0.6, 0.85, 1], mark: 1, trackW: 0.035 },
   car: { v: 4.5, lanes: (hw, g) => { const o = Math.min(0.22 * g, 0.6 * hw); return [-o, o]; }, sp: 0.15, pr: [0, 0.2, 0.3, 0.42],
     out: [0, 0.3, 0.45, 0.6], back: [0, 0.4, 0.7, 1.0], rise: [0, 0.12, 0.2, 0.32], life: [0, 2.6, 3.6, 4.8], lin: [0, 0.25, 0.4, 0.55],
-    chips: [0, 1, 1, 2], chipD: 0.35, chipH: 0.25, chipSz: 1, grit: [0, 0.025, 0.045, 0.07], aura: [0, 0.5, 0.75, 1.05], auraA: [0, 0.6, 0.85, 1],
+    chips: [0, 1, 2, 3], chipD: 0.35, chipH: 0.25, chipSz: 1, grit: [0, 0.025, 0.045, 0.07], aura: [0, 0.5, 0.75, 1.05], auraA: [0, 0.6, 0.85, 1],
     mark: 1, trackW: 0.05 },
   drag: { v: 1.6, lanes: (hw) => [-0.5 * hw, 0, 0.5 * hw], sp: 0.14, pr: [0, 0.12, 0.17, 0.24], out: [0, 0.25, 0.38, 0.55], back: [0, 0.08, 0.1, 0.12],
-    rise: [0, 0.06, 0.1, 0.15], life: [0, 2.0, 2.6, 3.3], lin: [0, 0.2, 0.3, 0.4], chips: [0, 2, 3, 4], chipD: 0.3, chipH: 0.18, chipSz: 1,
+    rise: [0, 0.06, 0.1, 0.15], life: [0, 2.0, 2.6, 3.3], lin: [0, 0.2, 0.3, 0.4], chips: [0, 2, 4, 6], chipD: 0.3, chipH: 0.18, chipSz: 1,
     grit: [0, 0.12, 0.18, 0.26], aura: [0, 0.3, 0.45, 0.65], auraA: [0, 0.55, 0.75, 0.95], mark: 2, trackW: 0 },
   heavy: { v: 1.0, lanes: (hw) => [-0.66 * hw, -0.22 * hw, 0.22 * hw, 0.66 * hw], sp: 0.2, pr: [0, 0.24, 0.36, 0.5], out: [0, 0.45, 0.7, 1.0],
-    back: [0, 0.12, 0.15, 0.18], rise: [0, 0.12, 0.2, 0.3], life: [0, 3.0, 4.2, 5.5], lin: [0, 0.25, 0.4, 0.55], chips: [0, 2, 3, 5], chipD: 0.5,
+    back: [0, 0.12, 0.15, 0.18], rise: [0, 0.12, 0.2, 0.3], life: [0, 3.0, 4.2, 5.5], lin: [0, 0.25, 0.4, 0.55], chips: [0, 3, 5, 8], chipD: 0.55,
     chipH: 0.32, chipSz: 2, grit: [0, 0.15, 0.24, 0.34], aura: [0, 0.55, 0.85, 1.25], auraA: [0, 0.65, 0.9, 1], mark: 2, trackW: 0 }
 };
 
@@ -177,9 +179,14 @@ export function dustRaster(area, geo, P) {
   // ERASERS (painted, not undone): the earliest and the latest that cover each cell - a stroke is put out by the first eraser
   // painted after it (by the latest when the earliest came before it)
   const eMin = new Float32Array(N).fill(Infinity), eMax = new Float32Array(N).fill(-Infinity);
+  // UNDONE erasers (o set: the dust they put out comes BACK from o - it eases in from what was left, never pops): per cell the
+  // earliest one's paint time and its undo time
+  const uTe = new Float32Array(N).fill(Infinity), uBk = new Float32Array(N).fill(NONE);
+  let undone = false;
   for ( const e of area.strokes ) {
-    if ( e.k !== "erase" || e.o !== undefined ) continue;
-    const { pts } = pathOf(e, geo), r = Math.max(1, e.r / geo.ap), te = sec(litTime(e));
+    if ( e.k !== "erase" ) continue;
+    const { pts } = pathOf(e, geo), r = Math.max(1, e.r / geo.ap), te = sec(litTime(e)), bk = e.o !== undefined ? sec(e.o) : null;
+    if ( bk !== null ) undone = true;
     for ( let k = 0; k < pts.length; k++ ) {
       const [ax, ay] = pts[k], [bx, by] = pts[Math.min(pts.length - 1, k + 1)];
       const xa = Math.max(rect.x0, Math.floor(Math.min(ax, bx) - r)), xb = Math.min(rect.x1, Math.ceil(Math.max(ax, bx) + r));
@@ -189,11 +196,16 @@ export function dustRaster(area, geo, P) {
         const px = x + 0.5, py = y + 0.5, t = l2 > 0 ? Math.min(1, Math.max(0, ((px - ax) * dx + (py - ay) * dy) / l2)) : 0;
         if ( Math.hypot(px - ax - dx * t, py - ay - dy * t) > r ) continue;
         const i = (y - rect.y0) * W + (x - rect.x0);
+        if ( bk !== null ) { if ( te < uTe[i] ) { uTe[i] = te; uBk[i] = bk; } continue; }
         if ( te < eMin[i] ) eMin[i] = te; if ( te > eMax[i] ) eMax[i] = te;
       }
     }
   }
   const erasedAt = (i, t0) => (eMin[i] > t0 ? eMin[i] : eMax[i] > t0 ? eMax[i] : NONE);
+  // (an undone eraser painted after the dust, before any live eraser: the dust went out at its paint time and comes back at its undo)
+  const backOf = (i, t0, out) => (i >= 0 && uTe[i] > t0 && uTe[i] < out && uBk[i] > uTe[i] ? [uTe[i], uBk[i]] : null);
+  const back = undone ? new Float32Array(N * 4) : null;
+  if ( back ) for ( let i = 0; i < N; i++ ) { back[i * 4] = NONE; back[i * 4 + 1] = NONE; }
   const cellOf = (x, y) => { const cx = Math.floor(x), cy = Math.floor(y); return cx >= rect.x0 && cy >= rect.y0 && cx < rect.x1 && cy < rect.y1 ? (cy - rect.y0) * W + (cx - rect.x0) : -1; };
 
   const ems = [];   // [x, y, kick, seed, hx, hy, side, code, out, reach]
@@ -219,7 +231,9 @@ export function dustRaster(area, geo, P) {
         best[i] = nd;
         const o = i * 4;
         cell[o] = t0 + (s0 + t * len) / v;
-        cell[o + 1] = Math.min(oSt, erasedAt(i, t0));
+        const out = Math.min(oSt, erasedAt(i, t0)), bk = back ? backOf(i, t0, out) : null;
+        cell[o + 1] = bk ? bk[0] : out;
+        if ( back ) { back[o] = bk ? bk[1] : NONE; back[o + 1] = bk ? out : NONE; }
         cell[o + 2] = len > 0 ? ((py - ay) * dx - (px - ax) * dy) / len : py - ay;
         cell[o + 3] = A;
       }
@@ -232,7 +246,8 @@ export function dustRaster(area, geo, P) {
     let n = 0;
     const push = (x, y, hx, hy, side, kick) => {
       const es = (Math.imul(seed, 31) + n * 7919) >>> 0, i = cellOf(x, y);
-      ems.push([x - rect.x0, y - rect.y0, kick, es % 1000003, hx, hy, side, L.code, Math.min(oSt, i >= 0 ? erasedAt(i, t0) : NONE), reach]);
+      const out = Math.min(oSt, i >= 0 ? erasedAt(i, t0) : NONE), bk = back ? backOf(i, t0, out) : null;
+      ems.push([x - rect.x0, y - rect.y0, kick, es % 1000003, hx, hy, side, L.code, bk ? bk[0] : out, reach, bk ? bk[1] : NONE, bk ? out : NONE]);
       n++;
     };
     if ( wk.total < sp ) {
@@ -274,7 +289,7 @@ export function dustRaster(area, geo, P) {
   const emW = Math.max(1, Math.min(E, 1024)) * 3;
   keep.forEach((e, i) => {
     const o = ((i >> 10) * emW + (i & 1023) * 3) * 4;
-    em.set([e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], 0, 0, 0], o);
+    em.set([e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[10], e[11], 0], o);
   });
   const cnt = new Uint32Array(TW * TH);
   keep.forEach((e) => tilesOf(e, (t) => cnt[t]++));
@@ -285,6 +300,6 @@ export function dustRaster(area, geo, P) {
   keep.forEach((e, i) => tilesOf(e, (t) => { idx[fill[t]++] = i; }));
   let maxKick = 0; for ( const e of keep ) if ( e[2] > maxKick ) maxKick = e[2];
   for ( let i = 0; i < N; i++ ) { const k = cell[i * 4]; if ( k < NONE && k > maxKick ) maxKick = k; }
-  return { style: "dust", w: W, h: H, ref, cell, em, emW, emH: emRows, emN: E, thin, tileH, tw: TW, th: TH, idx, idxH: idxRows, maxKick,
+  return { style: "dust", w: W, h: H, ref, cell, back, em, emW, emH: emRows, emN: E, thin, tileH, tw: TW, th: TH, idx, idxH: idxRows, maxKick,
     emit: { fire: [], smoke: [] }, anim: true, wind: area.wind ?? [0, 0] };
 }
