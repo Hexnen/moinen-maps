@@ -3,6 +3,7 @@ import { CLOUD_VERT, FIELD_FRAG, LIGHT_FRAG, SHADOW_FRAG, RAYS_FRAG, BODY_FRAG, 
 import { blendMode } from "./display.mjs";
 import { weatherQ } from "./guard.mjs";
 import { vortices } from "../wind.mjs";
+import { bindBack } from "./rt-bind.mjs";
 
 /**
  * THE CLOUD LAYER (the weather type Clouds, and the wind's cloud shadows: ONE field, so nothing is doubled). The look is in
@@ -240,7 +241,7 @@ export class CloudDisplay {
     r.state.set(this.rtState);
     r.geometry.bind(this.rtQuad, shader);
     r.geometry.draw(PIXI.DRAW_MODES.TRIANGLES, 6, 0);
-    RT.bind(cur, sf, df);
+    bindBack(RT, cur, sf, df);
   }
 
   destroy() {
