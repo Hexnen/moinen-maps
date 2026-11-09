@@ -1,0 +1,471 @@
+# Destruction presets: design (I0)
+
+Status: design only, no module code. Branch `presets-design` from main 7b59fbf. Written 2026-11-09.
+
+## 1. The ask
+
+The user (Polish, verbatim): "potem robimy nowy temat, presety. coś jak soundboard ale do zniszczeń. zestaw gotowych ustawień pod
+jednym brushem. pierwsze presety to bomba, granat, uzi, klasyczny podwójny ckm z helikoptera. czyli np w przypadku bomby łączymy
+najpierw wszystkie efekty tak żeby pasowało. przy ckmie trzeba dodać jakiś spread zniszczeń, wybrać delikatne zniszczenia, trochę
+losową ścieżkę. możliwe że brakuje nam jeszcze ognia dedykowanego do samych wybuchów"
+
+In short: a soundboard of destruction. A pad is one ready-made preset under ONE brush, which puts down everything that belongs to
+that event at once and in step: damage, fire, smoke, dust, light, screen shake and possibly sound. The first four are a **bomb**, a
+**grenade**, an **Uzi** and a **classic twin heavy machine gun from a helicopter**. The guns need a spread, light damage and a
+slightly random path. Explosions may need fire of their own.
+
+Quality bar (coordinator): WOW, natural and organic. No squares, rectangles or area edges, a smooth start and end, and the oblique
+view. Optimising must cause no visible loss.
+
+## 2. Decisions in one screen
+
+1. **A preset is data plus an expander.**
+   - A preset definition is JSON: layers, a timeline and the rules for spread and randomness.
+   - On the GM, a pure function (`expand(def, gesture, seed)`) turns one gesture into concrete records for the existing layers.
+   - Nothing is simulated per frame and nothing is sent per frame.
+2. **One firing is one scene update.**
+   - The update holds every record of every layer, plus one *firing record*.
+   - Every client plays it from the flags and the shared clock, the way fire, dust and weather already work.
+3. **Every firing has a start time T0 on the shared clock.**
+   - The impact happens at T0 = click + the preset's pre-roll.
+   - The pre-roll is anticipation: the bomb's falling shadow, the grenade's flight, the guns walking in.
+   - The pre-roll also hides the one thing that cannot be instant, the destruction bake and chunk download (measured below).
+4. **Dedicated explosion fire is needed.**
+   - Without it the bomb is a stain plus debris. The current blast entry shows a flat orange disc with a hard round edge, then char.
+   - It becomes a new fire-layer stroke kind, `burst`: a fireball that rolls up and darkens into the smoke column. It is drawn in the
+     fire's own pixel-art language, colours and lights.
+5. **Guns are ONE destruction stroke per lane per firing.**
+   - The stroke's mask is the union of the impacts. Its brush path carries the bullets' timestamps, so the existing "follows the
+     stroke" entry reveals the impacts in sequence.
+   - So a firing costs one bake and one chunk per lane, not one per bullet: 0.5-0.7 s instead of 1.1 s for 24 impacts (measured).
+6. **The soundboard lives in the Destruction section.**
+   - A *Presets* tool shows the pads in the bar (hotkeys 1-9), with a dock panel for the pad grid, the editor and the list of
+     firings.
+   - Ctrl+Z undoes a whole firing across all layers.
+
+## 3. What exists that a preset can drive
+
+Read from the code on main 7b59fbf. The "Preset use" column says what a preset gets today and what blocks it.
+
+| Layer | What it does | How it is driven | Data / sync | Preset use: today / gaps |
+|---|---|---|---|---|
+| **Destruction** (`scripts/destruction`) | Strokes with kind (blast, collapse, scorch, flood, cracks, gash), level 1-3 and cause (fire, acid, lightning, arcane, impact, claws, water, decay, frost). Each stroke has a type-specific entry: a blast has a flash, a skirt of dust puffs and thrown chunks cut from the map. Torn borders, substrate rules (newer over older), carried tokens. | `api.destruction.paint(x, y, r, {type, level, cause})` stamps ONE disc, with no path and no per-stroke look. The editor's `edited(box, stroke)` takes any mask, a path with ms timestamps and a carry. | One flag key per stroke (`destructionObjects.<id>`, an RLE mask in a box). Baked in workers on the GM, published as chunks (`destruction.baked.c[id]`). Players download chunks and bake nothing. Entries are played at server time (`destruction.entries`). | **Yes**, through `edited()`: any mask, a path, a cause. **Gaps:** <ul><li>no public paint-with-path</li><li>no per-stroke look (`pr` comes from the scene params)</li><li>no scheduled entry start</li><li>no remove-by-id</li><li>the save is debounced by 700 ms</li><li>undo pops the last object with no fade</li></ul> |
+| **Cinematic mode** (`destruction/cinematic*.mjs`) | Stages strokes (baked, hidden). A *show record* makes every client reveal them LEAD ms before a start time on the shared clock. Screen effects: bars, shake, flash, vignette, slow motion, camera. | Scene params `cinematic`, Action. | Flag `cinShows`, the shared clock. | It is the **proof** that a timed reveal of baked strokes works in sync. A preset needs only a light version: a start time per stroke, no camera, no bars. |
+| **Screen engine** (`director/stage.mjs`, `screen.mjs`) | Shake (one stage offset, never accumulates) and flash, with per-player opt-outs. | `Screen.begin/impact/end`. | Per client. | **Yes**, for the shake and flash at T0. It is independent of the Director's world switch (off by default). |
+| **Director** (`director/`) | Events become shots for players (camera take-over, captions). It has sources for destruction and fire strokes. | `api.director.emit(event)`. | The module socket, the leader GM. | One event per firing (weight from the preset). **Gap:** the per-stroke sources would flood it with every sub-stroke, so they must skip preset strokes. |
+| **Fire** (`fire/model.mjs`, `art.mjs`, `display.mjs`) | Pixel-art fire on the art grid at 12 fps: levels 1-3, a colour ramp from one base colour (`look.rampOf`), emissive in the dark, Foundry client-side lights (at most 24), torn edges, rain damping, tornado lean. | `api.fire.paint(pts, {level, smoke, color, torn, wind})`, `remove`, `setLevels`, and `add(raw, {undoable})` inside. | One flag key per stroke (`fireStrokes.<id>`). Nothing is baked: every client computes areas and fields from the strokes and the shared clock. A stroke catches at `q` and goes out at `o`. | **Yes, with timing.** Verified on lane 2: one write of a stroke with `q` = now+1.5 s and `o` = now+5 s caught at q, burned and went out at o by itself (frames: `dev/presets-design-fire-timed.png`). **Gaps:**<ul><li>grow (1.6 s), out (2.2 s) and spread are scene-wide, so a 0.1 s flare is impossible</li><li>there is no explosion kind</li></ul> |
+| **Smoke** (fire layer, kind `smoke`) | Wisps, a plume or a thick dark column (levels 1-3), carried by the wind, rising up the screen in the oblique view. | Same as fire. | Same as fire. | **Yes**, for the aftermath column and haze, scheduled with q/o. |
+| **Dust** (`fire/dust-model.mjs`, `dust-art.mjs`) | Ground dust from a source moving along a path (bike, car, drag, heavy), in three layers (chips/grit, puffs, aura) plus ground marks. Uses the ground's own colour. | `api.fire.paint(pts, {kind: "dust", dust, level, radius})`. | Stored with the fire strokes, computed per client. | **Partly.** It is path-based with a fixed speed per kind. **Gaps:**<ul><li>no radial shock ring</li><li>no point bursts at given times (bullet impacts)</li><li>no per-stroke speed</li></ul> The fire agent is editing these two files now. |
+| **Weather** (`weather/`) | Rain, snow, sand, dust, embers, wind, clouds, tornado, lens. | `api.weather.*`. | Scene flag timeline. | Not needed for the four presets. Possibly later: dust or heat on the lens after a near bomb. Burning fire already opens the clouds over it, and rain already damps fire (both work with preset fire as it is). |
+| **Tokens** (`tokens/carry*`, `plough*`) | A stroke can carry a token along its path. Superhero ploughs through tokens. | The editor's carry gesture. | Part of the stroke (`tk`). | Not in the first four. Later: knockback for a bomb. |
+| **moinen-pixel-vfx** (another module, optional) | Sounds: about 20 explosion oggs and recipes (`sound.play("explosion-big")`), one single gunshot, no autofire loop, no rotor. `playForAll`, `shake`, `react` (token flinch / knock-back). | `game.modules.get("moinen-pixel-vfx").api`. | Its own socket. | **Optional sound source** (a soft dependency, like the carry's visual API). Its sprite explosions are not used for the look: they would be enlarged clips, the wrong language. |
+| **Frame guard** (`frame-guard.mjs`) | One per-client guard for weather and fire (q 0.35-1). | `guardQ()`. | Per client. | New preset layers (burst, accents) hook into it. |
+| **View angle** (`view-angle.mjs`) | lift / squash per scene. | `flags.view`. | Shared. | Height of the fireball, column, tracers and shadows. |
+
+### Measured live (lane 2 GM page, RTX 3070 Ti, 20 threads, scene 1536 x 1024, grid 40 px; player page not measured)
+
+| Case | Shown on the GM | Stroke in the flag | Chunk named for players |
+|---|---|---|---|
+| Bomb: blast L3, fire, r 3 sq | 0.36-0.40 s | 0.70 s | 0.70 s |
+| Grenade: blast L2, impact, r 1 sq | 0.18 s | 0.49 s | 0.49 s |
+| Uzi as ONE stroke (24 discs r 0.22 sq + path) | 0.19-0.34 s | 0.52-0.67 s | 0.52-0.67 s |
+| Uzi as 24 strokes | 0.18 s | 0.72 s | 1.13-1.16 s |
+
+- The flag time is mostly the 700 ms save debounce. A firing should save at once.
+- The player still has to download the chunk. That is not measured here, and on the user's remote host (behind Cloudflare) it
+  will be longer.
+- `bake-policy.mjs` records a heavy case: a burst of 18 strokes on a loaded machine took 25-30 s of bake, upload and manifest.
+- The existing L3 fire blast entry (frames: `dev/presets-design-blast-l3.png`, frames at 0.26 / 0.78 / 1.0 / 1.2 / 1.5 / 1.8 / 2.6 s of the recording, painted at 0.3 s):
+  - At about 0.5 s a **flat orange disc with a hard round edge** appears.
+  - Then come the char, chunks and a dust skirt.
+  - There is no fireball, no rising column and no shock ring.
+  - On its own it fails the bar (an area edge, no volume). In a preset the burst must cover that moment.
+- Cracks L1 at r 0.22 sq are barely readable at zoom 1.6. Bullet pocks need the accents (dust, sparks) and a slightly larger or
+  L2 core to read.
+
+## 4. The four presets at the table
+
+Times are ms from T0 (the impact). Negative is pre-roll. Sizes are in grid squares (sq) at size 1 (the bar's size slider scales
+them). Every random choice comes from the firing's seed, chosen once on the GM and stored. Every client shows the same thing.
+
+### 4.1 Bomb (aerial bomb)
+
+Gesture: click the spot. An optional drag sets the direction the bomb comes in from. Footprint about 2.5 sq.
+
+**How it reads:** a shadow races in and tightens. A white-hot flash. A fireball rolls up and turns into a dark mushroom. A ring of
+dust tears outward over the ground. Burning debris arcs out and starts small fires. A charred, torn crater is left, with a smoke
+column drifting downwind for a minute while small fires smoulder.
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1200 to 0 | accents | Falling shadow: a soft ellipse grows dark and tight on the target, coming in along the drag direction. Optional whistle (sound). The GM's crater bake and the players' chunk download happen in this window. |
+| 0 | screen | Flash (short, warm) and shake (strong, decaying 0.8 s). Players' opt-outs apply. |
+| 0-120 | burst | Core flash: a small white-yellow lobed core. Light flash at full intensity (night). |
+| 60-450 | burst | Fireball: a lobed, rolling cauliflower body grows to about 1.6 sq and rises by the view lift. No disc edge: the outline is billows. |
+| 0-600 | destruction | Blast L3, cause fire, torn borders. Its entry starts at T0 under the burst: its flash is hidden, its chunks fly out of the fireball. |
+| 30-900 | dust | Shock ring: a ragged front of ground-coloured puffs runs out to about 3.5 sq, slowing with drag. Grit and a low aura are left. |
+| 300-2500 | burst | Roll-up: the fireball rises and darkens from the edge in (fire, then brown-black billows). Its base collapses into licking flames and embers. The cap leans downwind. |
+| 150-1400 | burst / fire | Flaming debris: 6-12 burning chunks fly parabolas (visible apex, ground shadow). Each spawns a small fire stroke where it lands. |
+| 1200 to 60 s | smoke | Smoke column L3 rising from the crater (q = T0+1.2 s, o = T0+60 s). The burst's dark cap hands over to it without a seam. |
+| 1000 to 40 s | fire | Crater fires L1-L2 (2-4 strokes along the torn rim) and the landed debris fires L1. Each has its own `o` (20-40 s), so they die out one by one. |
+| to 90 s | dust | The aura settles and drifts with the scene wind. |
+
+### 4.2 Grenade
+
+Gesture: drag from the thrower (a token under the cursor at the start) to the landing spot. A click drops it in place. Footprint
+about 0.7 sq.
+
+**How it reads:** a small dark dot arcs in, bounces once and rolls. A sharp crack. A dirty grey-brown puff with a short orange heart.
+A spray of shrapnel pocks around a small crater. A low dust ring. Light smoke drifts away. Nothing keeps burning (or one smoulder).
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1500 to -500 | accents | Thrown arc: a dot with a ground shadow; the apex depends on the distance. |
+| -500 to 0 | accents | One bounce and a short roll (squash on landing). An optional tink sound. |
+| 0 | screen | Short sharp shake, no flash. |
+| 0-350 | burst L1 | Mostly dust and smoke, a small orange core of 80 ms, lobed, about 0.5 sq. |
+| 0-500 | destruction | Blast L2, cause impact (a pale compact crater, radial fractures, a lit crest). |
+| 0-500 | destruction | Shrapnel: one cracks L1 stroke of 10-18 small pocks scattered out to 2 sq (denser near the centre), revealed by distance from the centre in the same entry. |
+| 20-700 | dust | Low shock ring to about 1.5 sq, grit. |
+| 300 to 12 s | smoke | Wisps L1, short-lived (`o` = T0+8 s). |
+| optional | fire | 30 % chance of one smoulder L1 (o = 10 s). |
+
+### 4.3 Uzi
+
+Gesture: drag from the shooter (a token, or any point) to the end of the burst. The drag's length sets the burst length; a click is a
+short burst at the point.
+
+**How it reads:** a ragged stitch of hits walks along the line. Each hit throws a tiny puff of the ground's colour, a few chips and,
+on hard ground, a ricochet spark. The line climbs sideways and wobbles (muzzle climb). A fine haze hangs over it. Light damage only.
+
+- **Rate:** about 10 rounds a second, a 1-2.5 s burst (10-25 hits). With a shooter, a muzzle flicker at the start point.
+- **Spread:** each hit is offset across the aim line by a Gaussian (sigma 0.25 sq, growing to 0.5 sq along the burst). It also
+  drifts along a low-frequency random walk: the "slightly random path". About 15 % of hits are strays at 1.5x sigma.
+- **Damage:** one cracks stroke per firing (cause impact):
+  - pocks r 0.15-0.25 sq;
+  - 80 % L1, 20 % L2 cores (so they read);
+  - every hit is in the mask; overlapping hits merge into a short gouge.
+- **Timing:** the stroke's path is the walk, with each hit's time, so the follows-the-stroke entry opens each pock when its bullet
+  lands.
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -600 to 0 | accents | Muzzle flicker at the shooter (if given); the first tracer is in flight. |
+| 0 to burst end | accents | Per hit: a 2-4 frame spark (on stone, metal or road; none on grass or water), plus a water splash ring on water. |
+| per hit | destruction | Its pock opens (entry along the path). |
+| per hit | dust | A small burst puff, 3-5 chips with shadows, grit left behind. |
+| end + 2-6 s | dust | The aura thins and drifts. |
+
+The bake (about 0.5 s on the dev machine) runs during the pre-roll. If a player's chunk is late, the first pocks enter up to 1.5 s
+late (`WAIT_LATE_MS`) under their dust puffs, which have no bake. This must be checked on the remote host.
+
+### 4.4 Classic twin heavy machine gun from a helicopter
+
+Gesture: drag the strafing run (start to end). The helicopter comes in from beyond the start and passes over the end.
+
+**How it reads:** two parallel lines of heavy hits race along the ground, side by side and slightly out of step. Each hit is a tall
+dust geyser with chips and sparks. Tracers streak in from above along the run. The ground is chewed into two ragged lanes of
+pocks and small craters. A wide band of dust hangs and drifts. Optionally the helicopter's shadow sweeps over.
+
+- **Rate:** two guns, about 8-10 rounds a second each. The run speed is about 6-10 sq/s, so a 10 sq drag is about 1.2 s of fire.
+- **Lanes:** ±0.35 sq either side of the run line (scaled by size), each with its own wobble and Gaussian spread (sigma 0.3 sq). The
+  run line itself gets a gentle random sway (amplitude 0.3 sq, wavelength 4-6 sq), so the two lanes snake together.
+- **Damage:** two cracks strokes (one per lane, cause impact):
+  - pocks r 0.2-0.35 sq;
+  - 60 % L1, 35 % L2;
+  - 5 % broken-L2 mini craters, as one small blast stroke per run holding all of them.
+  - Path timing as for the Uzi, offset by half a shot between the guns.
+- **Every 4th-5th round is a tracer:** a bright thin streak from above along the run (lifted by the view angle), ending in its hit.
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1500 to 0 | accents | Rotor-wash shimmer and (optional) the helicopter's soft shadow approaching. The first tracers arrive at T0. |
+| 0 to run end | accents / destruction / dust | As for the Uzi, heavier: tall geysers (puffs thrown up more than out), more chips, sparks on hard ground, splash columns on water. |
+| run end + 0.5 s | accents | The shadow passes off the far end. |
+| to 20 s | dust | A wide aura along both lanes drifts downwind and settles. |
+| optional | fire | Rare (5 %) smoulders where a tracer hits dry grass or wood (material from the destruction substrate: grass or wood only). |
+
+## 5. What is missing
+
+| # | Gap | What it must be | Files (fire/smoke/dust files in bold) |
+|---|---|---|---|
+| G1 | **Explosion fire** (`burst`) | See 5.1. Without it no explosion reads as one. | **fire/model.mjs**, new **fire/burst-art.mjs**, **fire/display.mjs**, **fire/lights.mjs**, **fire/guard.mjs**, **fire/fire.mjs** (api) |
+| G2 | Per-stroke fire timing | Optional `gr` (grow s) and `ot` (out s) on a stroke, overriding the scene's grow / out. Explosion-born fires flare fast; debris fires catch in 0.3 s. Scene defaults are unchanged (identity test). | **fire/model.mjs** (`timing`, `endOf`, `cleanStroke`) |
+| G3 | Dust: shock ring | New dust kind `shock`: the source is a ring growing from a centre at a decaying speed. Puffs are thrown outward, then grit and the aura. Levels 1-3 = grenade, shell, bomb. | **fire/dust-model.mjs**, **fire/dust-art.mjs** |
+| G4 | Dust: impacts | New dust kind `hits`: emitters only at given points, each with its own kick time (from the stroke's path timestamps). The kind sets the puff shape (light = Uzi, heavy geyser = HMG). Water points give a splash instead. | **fire/dust-model.mjs**, **fire/dust-art.mjs** |
+| G5 | Destruction: paint API for presets | `paintStroke({ mask or discs[], type, level, cause, path:[[x,y,ms]], pr, at, ps })`:<ul><li>`pr` per-stroke look (directional true for guns, jagged for the bomb);</li><li>`at` the entry start on the shared clock (every client starts the entry then; LEAD as in cinematic.mjs);</li><li>`ps` the firing id.</li></ul>Plus `removeStrokes(ids)` and `saveNow()`. | destruction/destruction.mjs, model.mjs, display.mjs (entry start) |
+| G6 | Destruction: undo with a fade | Undo of preset strokes fades their areas out (about 0.6 s, a dissolve by pixel dropout) instead of popping. Layer undo (`undoLast`) skips `ps` strokes: the preset owns them. | destruction/destruction.mjs, display.mjs |
+| G7 | Accents layer | Things that are no layer's own: <ul><li>the falling-bomb shadow, the grenade arc and bounce</li><li>muzzle flicker, tracers, ricochet sparks, water splash at a hit</li><li>helicopter shadow and rotor-wash shimmer</li></ul>Drawn on the art grid in the destruction accents' language (pixel-fx: dropout fades, ground shadows), lifted by the view angle. A pure function of the firing record and the clock, pooled, under the frame guard. | new `scripts/presets/accents.mjs` (+ pure `accents-core.mjs`) |
+| G8 | Screen, light, sound | At T0 (and per heavy hit): shake / flash through `Screen` (opt-outs, reduced motion); a flash light (a client-side light like the fire's, a fast attack and 1.5 s decay); sound through pixel-vfx when installed. | new `scripts/presets/cues.mjs`; the light either reuses **fire/lights.mjs** (G1) or is its own |
+| G9 | Firing record + cross-layer undo | `flags.moinen-maps.presetFirings.<id>`: what was put down, in which layers, T0, cues. The preset undo / redo stack. Purge after the aftermath. | new `scripts/presets/presets.mjs` |
+| G10 | Director: one event | The sources skip strokes with `ps`; the firing emits one event (kind destruction, weight from the preset and size). | director/sources.mjs |
+| G11 | Blast entry's flat disc | With a burst on top it is hidden. A plain blast painted with the brush still shows a hard-edged orange disc at L3 fire. Out of scope for presets, but it fails the same bar: a separate destruction look task. | destruction/display.mjs, cause-fx.mjs |
+
+### 5.1 The dedicated explosion fire (`burst`)
+
+Yes, it is needed. Burning-in-place fire grows over 1.6 s and stays. An explosion is a 0.1 s flare that becomes a rising, darkening
+volume within 2-3 s. With today's strokes the bomb shows a flat crater disc under a slowly growing campfire.
+
+What it must be:
+
+- **A stroke kind of the fire layer:**
+
+  ```
+  { k: "burst", p: [x, y], r, lv: 1..3, q: T0, c?, sd, wd, ws, dir? }
+  ```
+
+  It lives in `fireStrokes`, is computed per client, and has no field worker (it is a point event). Each burst is one area
+  sized to hold its whole roll-up. It is a pure function of (record, shared clock) on the art grid at 12 fps, the same
+  quantisation as the fire, and crisp at any zoom with the sharp sampler.
+- **Phases (L3):**
+  - **Core:** white-yellow, 0-120 ms.
+  - **Fireball:** 60-450 ms, an expanding body made of lobed billows (cauliflower), each lobe lit top-left with the fire's ramp
+    bands. The silhouette is ragged and rolling, never a disc.
+  - **Roll-up:** 0.3-2.5 s. It rises by the view lift and the billows turn over. The colour sinks from the outside in: hot core,
+    mid, outer, then smoke-brown, then the smoke layer's dark tone. The base pinches into a stem (mushroom at L3, a lopsided puff
+    at L1-2). The cap leans with the wind (`windAt`, the tornado included).
+  - **Hand-over:** 2-4 s. The cap thins by dropout into the smoke column stroke that starts under it at T0+1.2 s. Same tone at the
+    joint, no seam.
+  - **Embers:** sparks thrown up and out, cooling through the ramp.
+- **Ground:** a short heat-tint ring on the ground multiply. The destruction stroke owns the char.
+- **Colour:** `look.rampOf(c)`, so a blue-gas, arcane or white-hot bomb works the same way the fire colours do.
+- **Light:** joins the fire lights. A burst's light has its own curve: a peak at 50 ms with a big radius, decaying over 1.5 s into
+  the light of the fires it leaves.
+- **Emissive:** the core and fireball are emissive in the dark (they write into illumination like flames). Smoke is not.
+- **Levels:**
+  - L1 grenade: dirty, mostly dust-brown with a small heart, 0.4 s, no stem.
+  - L2 shell or rocket: a fireball and a short column.
+  - L3 bomb: the full mushroom.
+  - The size follows `r`.
+- **Under the guard:** fewer lobes and embers, never a different silhouette. At q = 1 it is the full look.
+- **Reduced motion:** a short fade of the settled smoke, no fireball.
+- **Not** the existing `fireball` style. That one is the frozen v1 look of a burning area and stays as it is (identity test).
+
+## 6. UI: the soundboard
+
+**Where:** Moinen Maps Tools, Destruction section. A new tool **Presets** (`mm-d-preset`, fa-bomb) next to the damage brush, the
+eraser and the fire / smoke / dust tools. GM only; players see none of it.
+
+**Bar** (while the tool is active):
+
+- **The pads:** one button per preset of the current set (icon, short name, hotkey 1-9; Shift+1-9 for the next 9).
+  - The armed pad is lit.
+  - A pad shows its gesture as a small glyph: point, throw, line or run.
+  - Picking a pad never fires it. The map gesture does, so one brush is one preset.
+- **Size** (0.5-2x, `[` `]`), **Power** (level shift -1 / 0 / +1 within the preset's range) and **Variation** (a new seed every
+  firing; Alt-held keeps the last seed, to repeat a firing exactly).
+- **Aftermath** (short / normal / long): scales the `o` times of fires, smoke and dust.
+- **Sound** on / off (only with pixel-vfx installed).
+
+**On the map:**
+
+- A ghost preview follows the cursor before release, drawn in the oblique view (a squashed ellipse for the bomb, the arc and landing
+  ring for the grenade, the line with its spread band for the guns, the run with both lanes for the heli).
+- Esc cancels. Release fires.
+- A token under the cursor at the start of a throw or line is the shooter or thrower (its centre, nothing written to it).
+- **Ctrl+Z / Ctrl+Shift+Z** undo / redo the last firing as one step, across all layers.
+- Firing again before the last one ends is fine: firings overlap like real ones. The newer damage lies on the older (substrate
+  rules).
+
+**Dock panel "Presets":**
+
+- **Pad grid:** built-in and custom presets in sets (Military for the first four; later Magic, Nature...). Drag to reorder, which
+  sets the hotkeys.
+- **Editor:** pick a pad, then Edit (or Duplicate a built-in).
+  - The layers of the preset, each a row with an on/off switch and its few controls:
+    - Destruction: kind, level, cause, size, spread;
+    - Burst: level, colour;
+    - Fire: level, how many, life;
+    - Smoke: level, life;
+    - Dust: kind, level;
+    - Screen: shake, flash;
+    - Light;
+    - Sound.
+  - A timeline strip (layers by time, draggable start / end).
+  - **Test fire** plays it locally on the GM only: nothing is written, no bake is published. A dry run of the timeline on a
+    temporary local stroke.
+  - Built-in presets are read-only; edits go to a copy. Custom presets are a world setting (like the pin presets).
+- **Firings:** the last firings of the scene (preset, time, place). Hover outlines the firing. Undo per firing. **Settle**
+  makes a firing permanent and drops its record: its strokes become ordinary strokes, listed in the Damage and Fire panels.
+
+## 7. Data format and sync
+
+### 7.1 A preset definition (world setting `destrPresets`; built-ins in code)
+
+```jsonc
+{
+  "id": "bomb", "v": 1, "name": "MOINENMAPS.Preset.bomb", "icon": "fa-solid fa-bomb", "set": "military",
+  "gesture": "point",                     // point | throw | line | run
+  "preroll": 1200,                        // ms from the click to T0
+  "size": 2.5,                            // footprint radius in grid squares at size 1
+  "layers": [
+    { "l": "accent", "kind": "fallShadow", "at": -1200, "dur": 1200 },
+    { "l": "screen", "at": 0, "shake": 0.9, "flash": 0.6 },
+    { "l": "burst", "at": 0, "lv": 3, "r": 1.6 },
+    { "l": "destruction", "at": 0, "type": "blast", "level": 3, "cause": "fire", "r": 1.0, "pr": { "jagged": true, "jag": 0.7 } },
+    { "l": "dust", "at": 30, "dk": "shock", "lv": 3, "r": 3.5, "life": 90000 },
+    { "l": "debrisFire", "at": 150, "n": [6, 12], "reach": [1.2, 3.0], "fire": { "lv": 1, "gr": 0.3, "life": [15000, 30000] } },
+    { "l": "fire", "at": 1000, "n": [2, 4], "on": "rim", "lv": [1, 2], "gr": 0.6, "life": [20000, 40000] },
+    { "l": "smoke", "at": 1200, "sm": 3, "r": 0.8, "life": 60000 },
+    { "l": "light", "at": 0, "peak": 1, "radius": 4, "decay": 1500 },
+    { "l": "sound", "at": 0, "pvfx": "explosion-big" }
+  ]
+}
+```
+
+- Ranges (`[a, b]`) are drawn from the firing's seed.
+- Lengths are in grid squares (so a preset fits any grid) and times are in ms.
+- For guns, the destruction / dust layers carry `walk` rules instead of a centre:
+
+  ```
+  { "rate": 10, "lanes": [0], "sigma": [0.25, 0.5], "sway": { "amp": 0.3, "wave": 5 }, "stray": 0.15, "r": [0.15, 0.25], "lvMix": [0.8, 0.2] }
+  ```
+
+  The heli has `"lanes": [-0.35, 0.35]`, `"phase": 0.5` and a `"mini"` share of small blasts.
+
+### 7.2 Expanding a firing (GM only)
+
+- `expand(def, gesture, { seed, size, power, aftermath, grid, sceneRect, now })` returns the concrete records. It is pure, has no
+  Foundry, and is node-tested: the same input gives the same records, it covers every preset, and it keeps the bounds.
+- The expander does all the randomness: positions, the walk, chunk counts, lifetimes. Clients only play stored data.
+- Material-dependent choices (sparks on stone, smoulders on grass) read the destruction substrate's material at the GM. The result
+  is stored, never re-decided per client.
+
+### 7.3 What is written (one `scene.update`)
+
+| Key | Contents |
+|---|---|
+| `destructionObjects.<id>` | One per destruction layer or lane. A normal stroke object plus `ps` (firing id), `at` (entry start, shared clock) and `pr` (per-stroke look). Its path carries the hit times for guns. |
+| `fireStrokes.<id>` | Burst, fire, smoke and dust strokes, each with `q` = T0 + at, `o` = T0 + at + life, optional `gr` / `ot`, plus `ps`. |
+| `presetFirings.<fid>` | The record below. |
+
+```jsonc
+{ "id": "fid", "preset": "bomb", "v": 1, "t0": 1794219436270, "seed": 1234,
+  "at": [x, y], "end": [x, y] | null, "size": 1, "power": 0,
+  "d": ["id", ...], "f": ["id", ...],
+  "cues": [ { "k": "screen", "t": 0, "shake": 0.9, "flash": 0.6 }, { "k": "light", "t": 0, ... }, { "k": "sound", "t": 0, "pvfx": "explosion-big" } ],
+  "acc": [ { "k": "fallShadow", "t": -1200, "dur": 1200, "from": [dx, dy] }, { "k": "tracer", "t": 120, "a": [..], "b": [..] }, ... ] }
+```
+
+- The accents and cues of a gun firing are arrays of hits (positions and times). That is small: 2 lanes x 20 hits is about 2 kB.
+
+### 7.4 How it plays
+
+- **The GM:** the click starts the bake of the destruction strokes at once and `saveNow()` writes everything. The GM's own screen
+  waits for T0 like everyone else.
+- **Every client:** on the flag change it schedules the cues and accents from the firing record and the shared clock. The fire,
+  smoke, dust and burst strokes play by themselves (q / o). The destruction strokes enter at `at`: the display holds a `ps`
+  stroke's area until `at - LEAD`, then enters it with a start in the future, as the cinematic show does. A chunk that arrives
+  late enters late (up to `WAIT_LATE_MS` 1.5 s past `at`); later than that it is shown settled.
+- **A late joiner, or a reload:**
+  - a cue whose moment has passed is not played (no shake, flash or sound);
+  - accents are a pure function of time, so whatever is still in flight is shown;
+  - fires, smoke and dust are in the right phase;
+  - destruction older than `ENTRY_WINDOW` shows settled.
+- **Purge:** when the last `o` of a firing plus its tail has passed, the GM drops the firing record (one write). The layers purge
+  their own put-out strokes as today.
+- **Who sees it:** the layers' own `who` settings apply (a fire layer set to GM only hides the preset's fire from players too).
+  The destruction strokes follow the destruction rules.
+
+## 8. Risks
+
+### 8.1 Cost on a GTX 1080 (the players' card)
+
+Not measured; these are targets. The dev numbers in this note are from an RTX 3070 Ti. Before tuning, check with the weak-GPU
+emulation (`weather-opt.mjs weak(N)`, as in the weather guard work) and DPR 1 and 2.
+
+| Part | Budget at the peak (1080, DPR 1) | Notes |
+|---|---|---|
+| Burst | ≤ 0.6 ms GPU per burst at L3 while it lives (about 4 s), ≤ 3 bursts at once before the guard thins | One quad per burst on the art grid. Lobes are a loop over a few billows, capped. Its texture never exceeds its roll-up box. |
+| Destruction entry | CPU per frame within the existing budgets (`ONCE_MS` 5, `enterMs` 4); chunks capped by the performance mode (high 600) | Bomb: one area. Guns: impacts merged so a firing is ≤ about 30 areas (overlapping pocks join). Many tiny areas cost more one-shot work than a few. |
+| Dust | As the dust kinds now; shock ring L3 ≤ the heavy kind at L3 | The fire agent's `dust-cost.mjs` measures it. |
+| Fire and smoke | Unchanged per area; fewer, merged fires (2-4 rim fires, not 12) | Fire areas merge by their burning core. Lights are capped at 24 per scene. |
+| Accents | ≤ 0.2 ms; pooled sprites, ≤ 300 at once | Tracers and sparks live 2-6 frames each. |
+| Lights | One flash light per burst, merged with the fire lights | No refresh of the lighting per frame (as the fire). |
+
+- **The guard:** the burst, accents and shock dust hook into the shared frame guard (`frame-guard.mjs`, through each layer's guard
+  API). The degradation must be soft: fewer lobes, embers and puffs, never squares or a different silhouette. Exactly the full
+  look at q = 1. This is the same standard as the weather layer: types checked at q 1 / 0.7 / 0.5 / 0.35.
+- **Stacking:** a heli run over a burning bomb site is the worst case: fire + smoke + 2 dust strokes + 2 destruction entries + a
+  burst + weather. It must be measured as one stack, in the style of stack-bench.
+- **"Optimising must cause no visible loss":** every cut is an A/B against the full look (pixel diff at q = 1, a judge on video
+  for anything below).
+
+### 8.2 Latency
+
+- **Measured on the dev machine** (the table in section 3): the GM sees the bake in 0.2-0.4 s, and the chunk is named in
+  0.5-0.7 s. Most of that is the 700 ms save debounce, which a firing skips.
+- **Not measured:**
+  - a player's download, especially through the remote host behind Cloudflare;
+  - the GTX 1080 machine;
+  - a GM machine with fewer cores than 20.
+- **The design hides it:**
+  - Pre-roll: the bomb's 1.2 s, the grenade's 1.0-1.5 s, the heli's 1.5 s.
+  - The guns: the first hits land 0.6 s after the click. Their dust and sparks need no bake; a pock that comes late enters under
+    its dust.
+- **Must be checked live before the look work:** the first pock of an Uzi firing on a real player on the remote host. If it is
+  over 1.5 s, raise the gun pre-roll or let the first hits' pocks fade in.
+- **Pre-baking is a possible further step:** bake the mask while the gesture is still being drawn (the preview knows it), as the
+  live brush already shows its own stroke.
+- **Heavy loads** (18 strokes took 25-30 s on a loaded machine): a firing must stay at 1-3 destruction strokes. The expander
+  merges, it never makes one stroke per hit.
+
+### 8.3 Undo and redo
+
+- Undo of a firing:
+  - fire, smoke and dust put out with their own going-out;
+  - burst and accents stop: anything still in the air fades;
+  - destruction fades out (G6, new: today an undo pops).
+  The firing record goes.
+- Redo writes the same records with a new T0, so it plays again.
+- **Risk:** layer-level undo (the damage brush's Ctrl+Z, the fire brush's) could take one piece of a firing. Fix: the layers'
+  undo skips `ps` strokes (G6; fire `add(..., { undoable: false })` already exists). Deleting a single piece from the Damage or
+  Fire panel stays possible and turns the firing partial (the firing list shows that).
+- **Two GMs:** firings are independent records (one key each). Undo is per user, as the layers do now.
+
+### 8.4 Smaller risks
+
+- **Flag growth:** a firing writes 3-10 keys of a few kB. Gun masks are sparse and RLE-small. Settled firings drop their record.
+- **Bake versions:** preset strokes are ordinary strokes, so they are pinned with the version they were baked with (the
+  bake-policy rules).
+- **Director:** without G10 a bomb sends about 10 events. With G10 it sends one.
+- **Interplay:** the substrate rules handle damage stacking. Rain damps preset fires as any fire. Fire opens the clouds over it.
+  Strong wind bends the smoke and the burst cap.
+- **Reduced motion and performance Low:**
+  - entries become fades, no particles, no shake;
+  - the burst becomes a short fade of its smoke;
+  - accents are only the static results.
+
+## 9. Implementation tasks
+
+Ordered. Each task ends with tests and a live check on a lane, and a real player for anything a player sees.
+
+| # | Task | Touches | Fire / smoke / dust files? |
+|---|---|---|---|
+| P1 | **Preset core (pure):**<ul><li>schema and validation</li><li>the four built-in definitions</li><li>`expand()` with the walk / spread / sway generators</li><li>seeds, size / power / aftermath</li><li>node tests: determinism, bounds, merge into ≤ 30 areas, counts</li></ul> | new `scripts/presets/core.mjs`, `defs.mjs`, `dev/presets-core.test.mjs` | No |
+| P2 | **Destruction hooks** (G5, G6, G10):<ul><li>`paintStroke` with path / pr / at / ps</li><li>entry start at `at` on every client (LEAD, held until then)</li><li>`removeStrokes(ids)` with a fade</li><li>`saveNow`; layer undo skips `ps`</li><li>director sources skip `ps`</li><li>tests: an old stroke without these fields is unchanged</li></ul> | destruction/destruction.mjs, model.mjs, display.mjs, director/sources.mjs, dev tests | No |
+| P3 | **Explosion fire `burst`** (G1, G2):<ul><li>the kind, its art pass and its light curve</li><li>per-stroke `gr` / `ot`</li><li>guard hook</li><li>fireball identity test kept; scene-default timing unchanged</li></ul> | **fire/model.mjs, fire/burst-art.mjs (new), fire/display.mjs, fire/lights.mjs, fire/guard.mjs, fire/fire.mjs** | **Yes**: the fire agent, or after its dust work is merged |
+| P4 | **Dust kinds `shock` and `hits`** (G3, G4): per-stroke speed and kick times from the path. | **fire/dust-model.mjs, fire/dust-art.mjs, fire/model.mjs** (KINDS) | **Yes**: the fire agent is in these files now, so this is its task or comes after it |
+| P5 | **Accents and cues** (G7, G8):<ul><li>fall shadow, throw arc, tracers, muzzle, sparks, splash, heli shadow</li><li>Screen shake / flash with opt-outs</li><li>flash light (if not in P3)</li><li>pixel-vfx sound when present</li><li>guard hook</li></ul> | new `scripts/presets/accents.mjs`, `accents-core.mjs`, `cues.mjs` | No (unless the light goes through **fire/lights.mjs**, then coordinate with P3) |
+| P6 | **Firings runtime** (G9): <ul><li>the one-update write</li><li>the firing record</li><li>scheduling on every client</li><li>late join / reload</li><li>purge</li><li>cross-layer undo / redo</li><li>`api.presets` (`fire(id, gesture, opts)`, `list`, `undo`, `settle`)</li></ul> | new `scripts/presets/presets.mjs`; calls the layers' APIs only | No (uses `api.fire` as it is) |
+| P7 | **UI:**<ul><li>the Presets tool</li><li>the bar pads and controls, hotkeys</li><li>gesture and ghost previews</li><li>the dock panel (pad grid, editor with test fire, firings list)</li><li>en / pl lang, a clean lang audit</li></ul> | new `scripts/presets/section.mjs`, destruction/section.mjs (the tool), lang/*.json, styles | No |
+| P8 | **Look and proof:**<ul><li>tune each preset to the WOW bar: a webm per preset, oblique view, day and night, zoom 1 and 3, with a judge</li><li>cost on a GTX 1080 by emulation at DPR 1 / 2, the stacked worst case</li><li>latency on a real player via the remote host</li></ul> | dev tools / videos only, then fixes in the owning files | Fixes may touch fire files (P3 / P4 owners) |
+
+Dependencies:
+- P1 first.
+- P2, P3 and P4 can run in parallel (P3 and P4 are fire-layer work, sequenced with the fire agent).
+- P5 and P6 need P1 and P2.
+- P7 needs P6.
+- P8 last, but measure the latency on the remote host right after P2 and P6 (it decides the pre-rolls).
+- A first playable bomb needs P1 + P2 + P3 + P6 (+ the shock dust from P4 for the full read).
+- The guns need P1 + P2 + P4 (`hits`) + P5 (tracers, sparks) + P6.
+
+## 10. Open questions for the user
+
+1. **Sound:**
+   - Is it in scope? pixel-vfx has explosions and one gunshot.
+   - Autofire bursts and a rotor would need new sound files (a download: ask first).
+2. **Helicopter:** should its shadow sweep over the map during the run, or only the tracers and hits?
+3. **Tokens:** should a bomb push tokens (knock-back), or only shake the screen?
+4. **Aftermath:** should a bomb's fires and smoke burn for about a minute and go out (the proposal), or keep burning until the GM
+   puts them out?
