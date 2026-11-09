@@ -1088,3 +1088,24 @@ The aftermath default is 45 s (or no end).
   - `aim.mjs`: a shot started on a token takes it; the test gesture of a shot;
   - `section.mjs`: the bar's hint for a shot pad;
   - lang en / pl: the pad, its hint, the accent's name, the bar hint.
+
+### 21.5 As built and checked (lane 3, headless Chrome DPR 2, 3168 x 1584)
+
+- **The smoke, as built:** the trail is a "cauliflower" of lit puffs strung along the displaced sample line (puff spacing 0.075 sq,
+  each puff's radius and side offset hashed), joined by a core body so it never reads as beads on a string; the front-most puff owns
+  a cell (a depth hash), with a dark crease where two puffs meet. Three tones plus the crease and rim, a 2 x 2 dither at each step,
+  drawn NEAREST on the art grid. It dissolves by blobby, rising value-noise holes, oldest (the shooter's end) first. The backblast
+  billows use the same puff logic in a tan dust tone. Night: the hot head and the motor light glow; the smoke writes a faint moonlit
+  emission (0.17, 0.12 in the shadow tones) so the trail stays readable in the dark.
+- **Verified (recordings, not committed, in dev/out/rpg):** with a shooter at zoom 0.6, 1 and 3 by day, zoom 1 and 3 at darkness
+  0.92; no shooter by click (seeded side) and by drag (the drag's side); 5x crops of the launch and the impact; a real player login
+  (Test Gracz 2, another origin) sees the hiss, launch, backblast, trail, impact and dissolve. Real input: S over a token picks the
+  shooter, a click fires from it; with none chosen a drag out of a token makes it the shooter, a drag from the ground has no
+  shooter (no flash, approach from 11 squares back along the drag); the panel's test fire draws the rocket and writes no firing.
+- **Cost (dev/rocket-cost.mjs, a firing measured in virtual time at -900 / 0 / 800 / 2500 ms, 90 frames):** CPU median +0.3 to
+  +1.1 ms over the empty view (p95 up to 3.7 ms in the flight with the backblast); GPU within this machine's timer noise (the empty
+  view itself read 1.0-2.1 ms between runs), medians 1.3-3.9 ms at zoom 1 / 3, weak x2 not clearly above x1; no long frame warm. A
+  cold reload's first firing shows one long frame (~150-200 ms), the same as the grenade's (shader / texture first use).
+- **Not checked / known:** the very end of the dissolve leaves small speckles for a moment before the trail is gone; the
+  mid-age trail can still read a little "cotton-ball" at zoom 3; a scene with a very different ground colour; weak GPUs only by
+  emulation.
