@@ -505,3 +505,20 @@ The four questions asked here were answered by the user; P1 is built on these an
 - **destruction:** the entry start `at` on the shared clock (P2) replaces the LEAD stand-in. In an unpinned (pre-0.4.2) scene a gun
   stroke's path joins its bake key only when the scene's own "follows the stroke" is on (`store.mjs objStr`). With cinematic mode
   on, preset strokes are staged like brush strokes.
+
+### P1 checks (2026-11-09, lane 2, RTX 3070 Ti)
+
+- `node dev/run-all.mjs` 73/73 (with `dev/presets-core.test.mjs`, 365 checks); `node dev/lang-audit.mjs` clean.
+- **Unused = unchanged, hash A/B** against main 67e9d18, two runs per build:
+  - scene with nothing painted: the whole frame's hash is identical (`k2c4fq`, all runs and builds); the same 91 module settings
+    and 14 ticker listeners; the same scene flags;
+  - scene painted through the brush paths (three discs and a timed gash path): the baked records' hash is identical (`cd5i5kb`)
+    and so are the stored strokes (ids aside).
+  - A pixel grab of the painted scene differs between two runs of the SAME build too (live entries and idle), so it proves nothing
+    either way and was not used.
+- **Firing on the GM, seen by a real player** (Test Gracz 1): all four built-ins fired at once. The player had every firing
+  record, every fire / smoke stroke 1.1-1.4 s before T0, and every destruction stroke on screen 0.2-1.2 s after T0 (the four
+  bakes queued behind each other; P2's `at` will start them on time). The gun strokes kept their own ids, `pr.directional` and the
+  timed path; the bomb's crater its torn border.
+- **Not checked:** the remote host, a GTX 1080 machine, how it looks (P1 writes the parts that exist; the burst, the new dust kinds
+  and the accents are still missing, so the presets do not read as finished yet).
