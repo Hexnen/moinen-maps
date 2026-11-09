@@ -40,6 +40,8 @@ function take(rec) {
   if ( known.has(rec.id) ) return;
   known.add(rec.id);
   const now = sharedNow(), list = [];
+  // (the damage it wrote draws at its impact: link the damage layer's programs now, in the background - load-warm.mjs warmDamage)
+  if ( rec.t0 > now ) import("../load-warm.mjs").then((m) => m.warmDamage()).catch(() => {});
   call("firing", { fid: rec.id, rec, late: Math.max(0, Math.round(now - rec.t0)) });
   for ( const e of R.schedule(rec, now) ) {
     const go = () => {

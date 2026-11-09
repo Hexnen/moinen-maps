@@ -19,12 +19,15 @@
  *     smoke        sm 1..3, r, len, life | aftermath, lifeK
  *     burst        lv, r                    (pending: the explosion fire, P3)
  *     dust         dk "shock" | "hits", lv, r, life: written at once as fire-layer dust strokes (fire/dust-model.mjs) - "hits" with a
- *                  walk place one per lane and unbroken run of hits, "shock" one per point (its centre; r its reach)
+ *                  walk place one per lane and unbroken run of hits (an ejecta place: one for its landings), "shock" one per point
+ *                  (its centre; r its reach)
  *     accent       kind (ACCENTS), dur, every (walk hits: each n-th one of each gun), lv 1..3 (how heavy), shake 0..1 (the hits' rumble)
  *                  (kept in the firing record; the guns' tracer / hitFx / muzzle are drawn by presets/accents.mjs)
  *     cue          kind "screen" (shake, flash) | "light" (peak, radius, decay)   (pending: P5)
  *   PLACE = { m: "centre" } | { m: "ring", n: [lo, hi], d: [lo, hi] } (around the centre, evenly with jitter) | { m: "scatter", n,
- *     d, bias } (around the centre, denser inside for bias > 1) | { m: "walk", pick: share of the hits (0..1, omitted: all) }
+ *     d, bias } (around the centre, denser inside for bias > 1) | { m: "walk", pick: share of the hits (0..1, omitted: all) } |
+ *     { m: "ejecta" } (the landings of the definition's `ejecta`, EJECTA_DEFAULTS: timed like a walk - a destruction layer opens each
+ *     one when its rock lands)
  *   Answers of the user (2026-11-09, dev/presets-design.md section 10): no sound, no helicopter shadow, nothing pushes tokens; how
  *   the aftermath fire ends is a preset setting (aftermath.dur: a duration, or null = no end), overridable per firing.
  *
@@ -46,8 +49,8 @@ export const DT_STEP = 2.5, HIT_DT = 250;
 export const GESTURES = ["point", "throw", "line", "run", "shot"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
-export const PLACES = ["centre", "ring", "scatter", "walk", "rays"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "rocket"];
+export const PLACES = ["centre", "ring", "scatter", "walk", "rays", "ejecta"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "rocket", "meteor"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
@@ -73,6 +76,10 @@ export const LIMITS = { preroll: [0, 4000], at: [-4000, 120000], r: [0.02, 6], d
  * { p, k } (share of strays at k x sigma), maxHits (all lanes). */
 export const WALK_DEFAULTS = Object.freeze({ rate: 10, speed: 5, dur: [0.6, 2.5], lanes: [0], phase: [0], sigma: [0.25, 0.5], drift: 0,
   sway: { amp: 0, wave: 5 }, wobble: { amp: 0, wave: 2 }, stray: { p: 0, k: 1.5 }, maxHits: 30 });
+/** The EJECTA of an impact (the meteor): rocks thrown out of the crater on arcs, landing one by one - n [lo, hi] rocks, d [lo, hi]
+ * squares out (the later ones the farther), t [first, last] ms after the impact (evenly spaced: the dust layer's hits stroke keeps one
+ * interval), gap the wedge (degrees) back up the way it came where none lands, bias (>= 1) how much they keep to the way it went. */
+export const EJECTA_DEFAULTS = Object.freeze({ n: [12, 16], d: [2.3, 6.5], t: [420, 1500], gap: 70, bias: 1.3 });
 
 /* ---------------------------------------------------------------- small helpers */
 
@@ -170,7 +177,7 @@ function cleanLayer(L, i, errors) {
       break;
     case "accent":
       out.kind = ACCENTS.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown accent "${L.kind}"`), "hitFx");
-      out.dur = num(L.dur, 500, 0, 8000);
+      out.dur = num(L.dur, 500, 0, 30000);   // (up to 30 s: a meteor's sky trail lingers; the others are well under the old 8 s)
       if ( L.every !== undefined ) out.every = Math.round(num(L.every, 1, 1, 20));
       if ( L.lv !== undefined ) out.lv = intLv(L.lv, 2);
       if ( L.shake !== undefined ) out.shake = num(L.shake, 0, 0, 1);
@@ -183,6 +190,13 @@ function cleanLayer(L, i, errors) {
       break;
   }
   return out;
+}
+
+function cleanEjecta(e) {
+  const D = EJECTA_DEFAULTS;
+  if ( !e || typeof e !== "object" ) return null;
+  return { n: range(e.n, [...D.n], 1, MAX_AREAS - 2).map(Math.round), d: range(e.d, [...D.d], 0.2, LIMITS.d[1]), t: range(e.t, [...D.t], 50, 4000),
+    gap: num(e.gap, D.gap, 0, 300), bias: num(e.bias, D.bias, 1, 4) };
 }
 
 function cleanWalk(w, errors) {
@@ -213,11 +227,14 @@ export function cleanDef(raw) {
   const layers = (Array.isArray(raw.layers) ? raw.layers : (errors.push("no layers"), [])).slice(0, 32).map((L, i) => cleanLayer(L, i, errors)).filter(Boolean);
   const walk = gesture === "line" || gesture === "run" ? cleanWalk(raw.walk, errors) : null;
   if ( !walk && layers.some((L) => L.place.m === "walk") ) errors.push("a walk place without a line / run gesture");
+  const ejecta = cleanEjecta(raw.ejecta);
+  if ( !ejecta && layers.some((L) => L.place.m === "ejecta") ) errors.push("an ejecta place without ejecta");
   if ( !aftermath && layers.some((L) => L.aftermath) ) errors.push("an aftermath layer in a preset without aftermath");
   const ids = new Set();
   for ( const L of layers ) { if ( ids.has(L.id) ) errors.push(`layer id "${L.id}" twice`); ids.add(L.id); }
   const def = { id, v: VERSION, name: str(raw.name), hint: str(raw.hint), icon: str(raw.icon) || "fa-solid fa-burst", set: str(raw.set),
     gesture, preroll: Math.round(num(raw.preroll, 0, ...LIMITS.preroll)), aftermath, walk, layers };
+  if ( ejecta ) def.ejecta = ejecta;
   return { ok: !errors.length, def, errors };
 }
 
@@ -262,6 +279,25 @@ export function walkHits(W, a, b, { seed, grid, size }) {
   return { hits, dur: n > 1 ? Math.round(n * dt) : Math.round(dur * 1000), dt, dir: [round(dx, 1e4), round(dy, 1e4)], len };
 }
 
+/**
+ * The EJECTA of an impact at c (px) for a firing going way `dir` (a unit vector, or null: any way): `n` rocks landing at evenly spaced
+ * moments between E.t[0] and E.t[1] ms, the later the farther out (E.d squares, x size), round the way it went (none in the wedge of
+ * E.gap degrees back up the way it came; E.bias > 1 keeps them nearer the way it went). Returns { dt (ms, a whole DT_STEP), pts: [{ x,
+ * y, t, i }] } in landing order.
+ */
+export function ejectaOf(E, c, dir, { seed, grid, size }) {
+  const r = stream(seed, "ejecta"), n = Math.max(1, r.int(E.n)), sq = grid * size;
+  const dt = n > 1 ? Math.max(DT_STEP * 4, Math.round((E.t[1] - E.t[0]) / (n - 1) / DT_STEP) * DT_STEP) : 0;
+  const base = dir ? Math.atan2(dir[1], dir[0]) : r() * 6.2832, half = Math.PI * (1 - E.gap / 360);
+  const pts = [];
+  for ( let i = 0; i < n; i++ ) {
+    const u = r() * 2 - 1, ang = base + Math.sign(u) * Math.pow(Math.abs(u), E.bias) * half;
+    const f = n > 1 ? (i + 0.5) / n : 0.5, d = (E.d[0] + (E.d[1] - E.d[0]) * Math.pow(f, 0.85) * (0.88 + 0.24 * r())) * sq;
+    pts.push({ x: round(c[0] + Math.cos(ang) * d, 10), y: round(c[1] + Math.sin(ang) * d, 10), t: Math.round(E.t[0] + i * dt), i });
+  }
+  return { dt, pts };
+}
+
 /* ---------------------------------------------------------------- placing and expanding */
 
 /** The points a layer is put at: [{ x, y, t, tan? (a unit tangent, for a segment), lane? }] (px, ms from T0 before `at`). */
@@ -279,6 +315,7 @@ function placeOf(L, P, r, ctx) {
       }
       return out;
     }
+    case "ejecta": return (ctx.ejecta ?? []).map((p) => ({ x: p.x, y: p.y, t: p.t, i: p.i }));
     case "walk": {
       const pick = L.place.pick ?? 1;
       return (hits ?? []).filter(() => pick >= 1 || r() < pick).map((h) => ({ x: h.x, y: h.y, t: h.t, lane: h.lane, i: h.i }));
@@ -326,11 +363,15 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
   }
   const walk = def.walk ? walkHits(def.walk, wa, hasB ? b : null, { seed, grid, size }) : null;
   const c = (def.gesture === "throw" || def.gesture === "shot") && hasB ? b : a;
-  const dir = def.gesture === "point" ? (hasB ? unit(b[0] - a[0], b[1] - a[1]) : null) : walk ? walk.dir : hasB ? unit(b[0] - a[0], b[1] - a[1]) : null;
+  let dir = def.gesture === "point" ? (hasB ? unit(b[0] - a[0], b[1] - a[1]) : null) : walk ? walk.dir : hasB ? unit(b[0] - a[0], b[1] - a[1]) : null;
+  // (an impact with ejecta and no drag: a way of its own from the seed, always coming down the screen - things fall screen-down)
+  if ( !dir && def.ejecta ) { const rd = stream(seed, "dir"), sx = rd() < 0.5 ? -1 : 1, ux = sx * (0.5 + 0.42 * rd()); dir = unit(ux, Math.sqrt(1 - ux * ux)); }
+  const ejo = def.ejecta ? ejectaOf(def.ejecta, c, dir, { seed, grid, size }) : null, ejecta = ejo ? ejo.pts.filter((p) => inRect(p, R)) : null;
   const plan = { v: VERSION, preset: def.id, seed, size, power, aftermath: aft, t0, at: [round(c[0], 10), round(c[1], 10)], dir,
     gesture: { a, b: hasB ? b : null, from, ...(fr !== null ? { fr } : {}) }, walk: walk ? { dur: walk.dur, dt: walk.dt, len: Math.round(walk.len), hits: walk.hits.map((h) => [h.x, h.y, h.t, h.lane]) } : null,
     destruction: [], fire: [], pending: { burst: [], dust: [], accent: [], cue: [] } };
-  const ctx = { c, grid, size, hits: walk?.hits };
+  if ( ejecta ) plan.ejecta = { dt: ejo.dt, pts: ejecta.map((p) => [p.x, p.y, p.t]) };
+  const ctx = { c, grid, size, hits: walk?.hits, ejecta };
   for ( const L of def.layers ) {
     const r = stream(seed, `layer:${L.id}`);
     if ( r() >= L.chance ) continue;
@@ -350,17 +391,17 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
           if ( !g.length ) return;
           const discs = g.map((p) => [round(p.x, 10), round(p.y, 10), round(r.range(L.r) * sq, 10), levelOf(L, r, power)]);
           // a walk: runs of at most RUN_MS (each hit opens at its own moment); anything else: one stroke
-          const runs = [];
-          if ( L.place.m === "walk" ) { let cur = null; g.forEach((p, i) => { if ( !cur || (p.t ?? 0) - cur.t0 > RUN_MS ) runs.push(cur = { t0: p.t ?? 0, idx: [] }); cur.idx.push(i); }); }
+          const runs = [], tm = L.place.m === "walk" || L.place.m === "ejecta";   // (timed points: each opens at its own moment)
+          if ( tm ) { let cur = null; g.forEach((p, i) => { if ( !cur || (p.t ?? 0) - cur.t0 > RUN_MS ) runs.push(cur = { t0: p.t ?? 0, idx: [] }); cur.idx.push(i); }); }
           else runs.push({ t0: g[0].t ?? 0, idx: g.map((_, i) => i) });
           const key0 = groups.length > 1 ? `${L.id}.${j}` : L.id;
           runs.forEach((run, k) => {
             const pts = run.idx.map((i) => g[i]);
-            const path = L.place.m === "walk" && pts.length > 1 ? pts.map((p) => [round(p.x, 10), round(p.y, 10), Math.round((p.t ?? 0) - run.t0)]) : null;
-            const first = path ? path[0] : L.place.m === "walk" ? [pts[0].x, pts[0].y] : [c[0], c[1]], last = path ? path.at(-1) : null;
+            const path = tm && pts.length > 1 ? pts.map((p) => [round(p.x, 10), round(p.y, 10), Math.round((p.t ?? 0) - run.t0)]) : null;
+            const first = path ? path[0] : tm ? [pts[0].x, pts[0].y] : [c[0], c[1]], last = path ? path.at(-1) : null;
             plan.destruction.push({ key: runs.length > 1 ? `${key0}~${k}` : key0, type: L.type, cause: L.cause, discs: run.idx.map((i) => discs[i]), path,
               a: [round(first[0], 10), round(first[1], 10)], b: last ? [round(last[0], 10), round(last[1], 10)] : null,
-              pr: L.place.m === "walk" ? { ...(L.pr ?? {}), directional: L.pr?.directional ?? true } : L.pr ?? null, at: at + Math.round(run.t0) });
+              pr: tm ? { ...(L.pr ?? {}), directional: L.pr?.directional ?? true } : L.pr ?? null, at: at + Math.round(run.t0) });
           });
         });
         break;
@@ -386,6 +427,11 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         break;
       case "dust":
         if ( L.dk === "hits" && L.place.m === "walk" && walk ) { hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }); break; }
+        // (the ejecta's landings: the same hits stroke - one lane, evenly spaced kicks - per unbroken run of landings in the scene)
+        if ( L.dk === "hits" && L.place.m === "ejecta" && ejo ) {
+          hitsDust(L, pts.map((p) => ({ ...p, lane: 0 })), { plan, at, t0, walk: { dt: ejo.dt, dur: Math.max(...pts.map((p) => p.t)) }, sq, r, power, wind });
+          break;
+        }
         // (a shock ring: a fire-layer dust stroke of kind "shock" per point - fire/dust-model.mjs - its centre, its reach, its life)
         if ( L.dk === "shock" && L.place.m !== "walk" ) {
           pts.forEach((p, i) => {
@@ -449,6 +495,8 @@ function accentOf(L, at, { plan, hits, from, grid, wind }) {
     case "airRing": return { ...base, x: plan.at[0], y: plan.at[1], size: plan.size, ...(L.reach !== undefined ? { reach: L.reach } : {}) };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
     case "bounce": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.gesture.a, dir: plan.dir };
+    // (the meteor's flight, its pressure ring and its ejecta rocks: presets/meteor-art.mjs draws them from this)
+    case "meteor": return { ...base, x: plan.at[0], y: plan.at[1], dir: plan.dir, sz: plan.size, g: grid, wd: wind.dir, ws: wind.speed, rocks: plan.ejecta?.pts ?? [] };
     // (every round of every gun - a twin gun's two barrels side by side - and only with a shooter: no source, no muzzle flash)
     case "muzzle": {
       const m = { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.map((p) => [p.x, p.y, p.t, p.lane]) : [] };

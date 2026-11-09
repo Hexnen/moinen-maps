@@ -3,6 +3,8 @@ import { warmPrograms } from "./gl-warm.mjs";
 import { installSharpBatch } from "./destruction/sharp-batch.mjs";
 import { maskedProgram } from "./destruction/masked-map.mjs";
 import { sharpTileProgram } from "./destruction/static-cache.mjs";
+import { pieceProgram, gpuPiecesSupported } from "./destruction/piece-gpu.mjs";
+import { erodeProgram } from "./destruction/erode-gpu.mjs";
 
 /**
  * WARM-UP DURING THE SCENE LOAD (perf-arrival, 2026-11-09): GPU work the FIRST FRAME of a scene used to do, started while the scene still
@@ -42,6 +44,25 @@ function warmProgramsFor(scene, my) {
   const t0 = performance.now();
   // (live while this scene loads or shows: a program left half-warm is compiled by its first use, as before)
   warmPrograms(list, () => my === job).then(() => { stats.programs += list.length; stats.warmMs += performance.now() - t0; }).catch(() => {});
+}
+
+/**
+ * The damage layer's programs linked NOW on any scene, in the background: a destruction preset's firing writes damage that first draws at
+ * its impact (1-3 s later), and on a scene with no damage yet that frame linked them (the sharp batch: 2-4 s on a program-cache miss).
+ * Called by the presets runtime when a firing record is taken up; the same programs, linked earlier; a no-op once they are.
+ */
+let damageWarming = false;
+export function warmDamage() {
+  if ( off() || damageWarming ) return;
+  const r = canvas?.app?.renderer; if ( !r?.gl ) return;
+  // (and what a blast's entry draws with: its pieces' GPU pose program and the erosion pass - 0.1-1.2 s each on a cache miss)
+  const more = [];
+  try { if ( gpuPiecesSupported(r) ) more.push(pieceProgram("plain")); } catch { /* compiled on first use */ }
+  try { if ( r.context?.webGLVersion >= 2 ) more.push(erodeProgram()); } catch { /* compiled on first use */ }
+  const list = [...damagePrograms(r), ...more].filter((p) => !p.glPrograms?.[r.CONTEXT_UID]);
+  if ( !list.length ) return;
+  const my = job; damageWarming = true;
+  warmPrograms(list, () => my === job).catch(() => {}).finally(() => { damageWarming = false; });
 }
 
 export function registerLoadWarm() {
