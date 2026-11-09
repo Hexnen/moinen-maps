@@ -102,6 +102,9 @@ export class FireDisplay {
     this.root.eventMode = "none"; this.root.interactiveChildren = false;
     Object.assign(this.root, { elevation: 0, sortLayer: 256, sort: 0, _lastSortedIndex: 0 });
     this.meshes = new PIXI.Container(); this.parts = new PIXI.Container();
+    // (the areas in the order they were made, except an explosion's fireball over the dust - burst-art.mjs zIndex 1: a shock ring's
+    // ground puffs drawn over it read as grey rocks stuck on the ball)
+    this.meshes.sortableChildren = true;
     this.root.addChild(this.meshes, this.parts);
     canvas.primary.addChild(this.root);
     // the SMOKE layer: above the tokens (a token under the smoke is veiled by it) and under the weather; the bed, char, coals and flames

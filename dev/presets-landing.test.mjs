@@ -131,7 +131,9 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
 }
 
 /* F the older presets (main at c7babb0: the four military + the lightning strike; the military four as the presets polish 763e72c
- * re-tuned them - c7babb0 merged into it): the same plans and accent frames */
+ * re-tuned them - c7babb0 merged into it): the same plans and accent frames. The bomb and the grenade were re-tuned again by the
+ * presets polish round 2 (their fall / throw / bounce accents, their dust): they are checked by presets-boom / presets-polish2, here
+ * only the others (a frame's new `soft` list - the soft shadows - is left out of the comparison: the old code has none) */
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-land-"));
   revTree(root, "763e72c", "scripts/presets", tmp);
@@ -139,7 +141,8 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   const [C0, D0, A0] = await Promise.all([imp("core.mjs"), imp("defs.mjs"), imp("accents-core.mjs")]);
   const g = { point: { a: [600, 500] }, throw: { a: [400, 500], b: [600, 520] }, line: { a: [300, 300], b: [600, 420], from: [280, 290] }, run: { a: [200, 700], b: [900, 600] } };
   let same = true, frames = true;
-  for ( const d0 of D0.BUILTIN ) {
+  const RETUNED = new Set(["bomb", "grenade"]), noSoft = (F) => { const { soft, ...o } = F; o.px = o.px.slice(0, 10).concat(o.px.slice(10).filter((l) => l.length)); return o; };   // (and the palette's two new grenade olives, empty for these)
+  for ( const d0 of D0.BUILTIN.filter((d) => !RETUNED.has(d.id)) ) {
     const d1 = BUILTIN.find((d) => d.id === d0.id);
     if ( J(d0) !== J(d1) ) same = false;
     for ( const seed of [1, 7, 42] ) for ( const size of [0.5, 1, 2] ) {
@@ -147,12 +150,12 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
       if ( J(p0) !== J(p1) ) same = false;
       const rec = { ...p1, id: "x", f: [] }, env = { ap: 1, ox: 0, oy: 0, grid: 40, lift: 0.5, squash: 0.8, q: 1, seed };
       const i0 = A0.itemsOf(rec), i1 = A.itemsOf(rec);
-      for ( let t = -1600; t < 3000; t += 70 ) if ( J(A0.draw(i0, 0, t, env, A0.newFrame())) !== J(A.draw(i1, 0, t, env, A.newFrame())) ) frames = false;
+      for ( let t = -1600; t < 3000; t += 70 ) if ( J(noSoft(A0.draw(i0, 0, t, env, A0.newFrame()))) !== J(noSoft(A.draw(i1, 0, t, env, A.newFrame()))) ) frames = false;
     }
   }
-  ok(same, `F the ${D0.BUILTIN.length} older presets: definitions and plans unchanged`);
+  ok(same, `F the ${D0.BUILTIN.length - RETUNED.size} older presets (not the re-tuned bomb / grenade): definitions and plans unchanged`);
   ok(frames, "F their accents draw the same frames");
-  ok(J(C0.cleanDef(D0.BUILTIN[0])) === J(C.cleanDef(BUILTIN[0])), "F cleanDef of the bomb unchanged");
+  ok(J(C0.cleanDef(D0.BUILTIN.find((d) => d.id === "uzi"))) === J(C.cleanDef(BUILTIN.find((d) => d.id === "uzi"))), "F cleanDef of the uzi unchanged");
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 

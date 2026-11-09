@@ -125,7 +125,8 @@ const fire = (id, p, extra = {}) => M.cleanStroke({ id, k: "fire", p, r: 40, lv:
   const b = burst("b1"), L = B.burstLight(b, geo, P);
   ok(L.burst && L.burst.q === 10000 && L.radius > 160 && L.y < 1500, "the light: at the fireball, a big reach");
   const g = (t) => B.burstGain(L.burst, t);
-  ok(g(9999) === 0 && g(10050) > g(10010) && g(10050) >= g(10300) && g(10300) > g(12000) && g(10000 + B.BURST_LV.life[3] * 1000) === 0, "flash at 50 ms, decay, 0 at the end");
+  const pk = 10000 + B.BURST_UP * 1000;
+  ok(g(9999) === 0 && g(10050) > g(10010) && g(pk) > g(10050) && g(pk) >= g(10300) && g(10300) > g(12000) && g(10000 + B.BURST_LV.life[3] * 1000) === 0, "the flash swells to its peak at BURST_UP, decays, 0 at the end");
   const o = B.burstGain({ ...L.burst, o: 10200 }, 10200 + B.BURST_FADE * 1000);
   ok(o === 0, "taken back: dark within BURST_FADE");
 }
