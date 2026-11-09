@@ -25,7 +25,7 @@
 import { VERT, VERT_B, SHOW_COMMON, FOOTPRINT, blocks, quad, texOf, renderPass } from "./art.mjs";
 import { footprintK } from "./shader.mjs";
 import { rampOf, NATURAL } from "./look.mjs";
-import { burstAt, BURST_LV, MAX_LOBES, MAX_SPARKS, MAX_DEBRIS } from "./burst-model.mjs";
+import { burstAt, surgeAt, BURST_LV, MAX_LOBES, MAX_SPARKS, MAX_DEBRIS } from "./burst-model.mjs";
 import { view as viewOf } from "../view-angle.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 import { reducedMotion } from "../config.mjs";
@@ -62,6 +62,9 @@ uniform float uAge;       // s since the impact (whole 12 fps frames)
 uniform float uOutA;      // s since the impact it was taken back (1e9: never)
 uniform float uU;         // cells per art px
 uniform int uSeed;
+uniform int uV3;         // 1: look 3 (burst-model BURST_V3)
+uniform vec4 uSurge;     // look 3: the ground surge (burst-model surgeAt) [front radius, wall half-width, settled, shown]
+uniform float uSq;       // the view's squash
 out vec4 oArt;
 ${HASH}
 const float TH = 0.13;
@@ -77,86 +80,193 @@ void main() {
   // billow covering a cell owns it (a cauliflower of overlapping billows, each lit, never one smooth blob); where a billow's edge lies
   // over another billow behind it a dark crease is drawn (the billows read one by one); a billow eroding (its age) opens blobby holes
   // that show the billows behind it
-  int top = -1, cover = 0;
-  float tD = 0.0, tR = 1.0;
-  vec2 tq = vec2(0.0);
-  // (the fire's HEAT as one field over the whole cloud: the billows' heats blended by their cover - the colour runs across the
-  // billows in organic patches, never a ring per billow or single billows gone grey on a hot ball)
-  float hs = 0.0, ws = 0.0;
-  for ( int i = 0; i < ${MAX_LOBES}; i++ ) {
-    if ( i >= uLobN ) break;
-    vec4 A = uLob[2 * i], Bq = uLob[2 * i + 1];
-    // the cloud's SHADOW on the ground: each billow's footprint cast down-right by its height
-    if ( Bq.y < 1.5 ) {
-      float hh = max(0.0, Bq.x - A.y);
-      vec2 qs = p - vec2(A.x + 0.42 * hh, Bq.x + 0.08 * hh);
-      float ws2 = 1.0 - dot(qs, qs) / (A.z * A.z * 1.15);
-      if ( ws2 > 0.0 ) FS += ws2 * (1.0 - smoothstep(0.0, 3.5 * uR, hh));
-    }
-    // erosion (late in its life, or taken back): the billow shrinks, thins and opens a few big blobby holes from its rim - it
-    // dissolves, never in square specks
-    float er = smoothstep(0.45, 1.0, Bq.w) * 1.05 + put;
-    vec2 q = p - A.xy;
-    if ( Bq.y > 1.5 ) q.y /= 0.62;   // (the ground surge: low, wide billows)
-    // (a lumpy edge in two octaves - a billow is a clump of small bulges, never a clean circle)
-    vec2 lp = vec2(c >> 1) * 2.0 + 0.5;
-    float rr = A.z * min(1.0, Bq.z * 2.5) * (0.76 + 0.24 * vn(lp / max(1.5, 0.3 * A.z), uSeed + 7 * i) + 0.16 * vn(lp / max(1.2, 0.13 * A.z), uSeed + 7 * i + 3));
-    rr *= 1.0 - 0.3 * smoothstep(0.2, 1.0, er);
-    float d2 = dot(q, q);
-    if ( d2 >= rr * rr ) continue;
-    float d = sqrt(d2) / rr;
-    if ( er > 0.3 ) {
-      float hole = 0.75 * vn(p / (6.0 * uq), uSeed + 21 + i) + 0.25 * vn(p / (3.2 * uq), uSeed + 22);
-      if ( hole + 0.45 * (1.0 - d) < er - 0.2 ) continue;
-    }
-    if ( Bq.y < 1.5 ) { float w = 1.0 - d * d; w *= w; hs += w * A.w; ws += w; }
-    cover++;
-    top = i; tD = d; tR = rr; tq = q;
-  }
-  if ( top >= 0 ) {
-    vec4 A = uLob[2 * top], Bq = uLob[2 * top + 1];
-    vec3 n = vec3(tq / tR, sqrt(max(0.0, 1.0 - tD * tD)));
-    // (a churning texture over the cloud: two octaves drifting with its age - the tone bands' edges wander organically)
-    float tz = 0.75 * vn(p / (4.0 * uq) + vec2(0.0, uAge * 1.6), uSeed + 41) + 0.25 * vn(p / (2.2 * uq) - vec2(uAge * 0.9, 0.0), uSeed + 42);
-    float lum = dot(n, L) + (tz - 0.5) * 0.4;
-    // (an edge: the outline of the cloud, or a crease where this billow lies over another one behind it)
-    // (the outline only on the cloud's outside; where a billow lies over another, a broken crease - the billows read one by one
-    // without each being ringed)
-    bool rim = tD > 0.9;
-    bool crease = rim && cover > 1;
-    if ( crease && (tD < 0.95 || h3(c.x >> 1, c.y >> 1, 63) < 0.35) ) { rim = false; crease = false; }
-    float age = Bq.w;
-    float er = smoothstep(0.45, 1.0, age) * 1.05 + put;
-    if ( Bq.y < 1.5 ) {
-      // fire and smoke: the cloud's heat field, hotter where it is deep (the overlaps) than at its outside edge - the colour sinks
-      // from the outside in; the churn and a fine dither break the bands into ragged patches
-      float H = hs / max(ws, 1e-4), deep = min(1.0, ws * 2.2);
-      // (each billow keeps its form: lit top left, its lower right a step darker, a dark crease where it lies over another - the
-      // cloud reads as a cauliflower of billows in one fire, never a flat slab)
-      float temp = H * (0.62 + 0.38 * deep) + 0.16 * (lum - 0.15) + (tz - 0.5) * 0.18 * min(1.0, H * 2.0);
-      bool fold = tD > 0.8 && cover > 1 && lum < 0.15 && h3(c.x >> 1, c.y >> 1, 65) < 0.8;
-      int fG = 0;
-      if ( temp > 0.33 ) {
-        int st = temp > 0.88 ? 6 : temp > 0.74 ? 5 : temp > 0.6 ? 4 : temp > 0.47 ? 3 : temp > 0.39 ? 2 : 1;
-        st = max(st, 2);                                  // (inside: never the plum / dark red - they are the outline's)
-        if ( (lum < -0.1 || fold) && st > 2 && st < 6 ) st--;
-        if ( rim && !crease ) st = max(1, min(st - 1, temp > 0.6 ? 3 : 2));
-        fG = 1 + st;
-      } else if ( temp > 0.17 ) fG = (rim && !crease) || lum < -0.12 || fold ? 10 : 9;
-      else {
-        // (smoke: three tones by its light and churn, the outline broken and the outer edge thinning - a billowing column, never
-        // stacked clay discs)
-        int band = rim && !crease ? (h3(c.x >> 1, c.y >> 1, 66) < 0.55 ? 3 : 1) : lum > 0.38 ? 0 : lum > -0.02 && !fold ? 1 : 2;
-        bool edgeThin = tD > 0.82 && !(cover > 1) && h3(c.x >> 1, c.y >> 1, 68) < 0.6;
-        fG = 11 + band + (age > 0.78 || er > 0.3 || edgeThin ? 4 : 0);
+  if ( uV3 == 1 ) {
+    // LOOK 3: ONE DENSITY FIELD over every billow (metaball kernels, no billow is ever a disc of its own) broken by a churning billow
+    // noise; shaded by its own self-shadow (the density a step towards the light: the lit side is where it thins towards the sun);
+    // the heat of the billows blended through it, hotter in the deep parts; cooling soot shows glowing VEINS (ridges of a noise that
+    // drift up), never a flat brown slab; late in its life the threshold rises through big blobby holes - it thins into wisps.
+    // The ground surge (kind 2) its own field in the ground's dust.
+    vec2 lo = normalize(vec2(-0.55, -0.7)) * max(1.5, 0.08 * uR);
+    float D = 0.0, D2 = 0.0, Hs = 0.0, Es = 0.0, Ds = 0.0, Ds2 = 0.0, Ea = 0.0, Fy = 0.0, Fw = 0.0, Kq = 0.0, Km = 0.0;
+    vec3 Nn = vec3(0.0);
+    for ( int i = 0; i < ${MAX_LOBES}; i++ ) {
+      if ( i >= uLobN ) break;
+      vec4 A = uLob[2 * i], Bq = uLob[2 * i + 1];
+      bool gnd = Bq.y > 1.5;
+      if ( !gnd ) {
+        float hh = max(0.0, Bq.x - A.y);
+        vec2 qs = p - vec2(A.x + 0.42 * hh, Bq.x + 0.08 * hh);
+        float ws2 = 1.0 - dot(qs, qs) / (A.z * A.z * 1.15);
+        if ( ws2 > 0.0 ) FS += ws2 * (1.0 - smoothstep(0.0, 3.5 * uR, hh));
       }
-      G = fG;
-    } else {
-      int band = lum > 0.5 ? 0 : lum > 0.05 ? 1 : 2;
-      if ( rim && !crease ) band = 3;
-      G = 20 + band + (age > 0.7 ? 4 : 0);
+      float ri = A.z * 1.22;
+      vec2 q = p - A.xy, q2 = q + lo;
+      if ( gnd ) { q.y /= 0.6; q2.y /= 0.6; }
+      float d = dot(q, q) / (ri * ri), d2 = dot(q2, q2) / (ri * ri);
+      if ( d >= 1.0 && d2 >= 1.0 ) continue;
+      float eri = smoothstep(0.45, 1.0, Bq.w) * 1.05 + put;
+      float wi = Bq.z * (1.0 - 0.5 * min(1.0, eri));
+      float k = d < 1.0 ? (1.0 - d) * (1.0 - d) * wi : 0.0, k2 = d2 < 1.0 ? (1.0 - d2) * (1.0 - d2) * wi : 0.0;
+      if ( gnd ) { Ds += k; Ds2 += k2; Ea += k * min(1.0, Bq.w); }
+      else {
+        D += k; D2 += k2; Hs += k * A.w; Es += k * eri; Fy += k * Bq.x;
+        // (each billow a lit SPHERE: its normal weighted by its share squared - the dominant billow decides, creases where two meet)
+        if ( d < 1.0 ) { float kk = k * k; Nn += kk * vec3(q / ri, sqrt(1.0 - d) * 0.9); Kq += kk; Km = max(Km, k); }
+      }
     }
-    R = 1 + int(mod(floor(max(Bq.x, A.y) / uq), 255.0));
+    // (the billows' churn: two octaves riding up with the cloud; the same at the light's step, so the bumps shade themselves)
+    vec2 dr = vec2(0.0, uAge * 1.3);
+    float sc = max(6.0, 0.15 * uR) * uq;
+    float nz = 0.72 * vn(p / sc + dr, uSeed + 41) + 0.28 * vn(p / (0.45 * sc) + dr * 1.6, uSeed + 42);
+    float nz2 = 0.72 * vn((p + lo) / sc + dr, uSeed + 41) + 0.28 * vn((p + lo) / (0.45 * sc) + dr * 1.6, uSeed + 42);
+    // (the density saturates inside, so the churn tears the OUTLINE into billows - a sum of many kernels alone grew a smooth slab
+    // with straight sides)
+    float Dn = 1.0 - exp(-2.2 * D) + (nz - 0.5) * 0.62, D2n = 1.0 - exp(-2.2 * D2) + (nz2 - 0.5) * 0.62;
+    float E = Es / max(D, 1e-4);
+    float holes = vn(p / (6.5 * uq) + vec2(0.0, uAge * 0.45), uSeed + 51);
+    float th = 0.3 + E * (0.2 + 0.75 * holes);
+    float bay = float((c.x & 1) * 2 + ((c.x ^ c.y) & 1)) / 4.0 - 0.375;   // (a 2 x 2 ordered dither at every tone step)
+    if ( Dn > th && D > 0.02 ) {
+      // (the light: the billow spheres' normals against the sun up-left, a crease where two billows share a cell, a little churn;
+      // the density step towards the light only darkens the cloud's own far side - no noise-on-noise camouflage)
+      vec3 nn = Kq > 0.0 ? normalize(Nn / Kq) : vec3(0.0, 0.0, 1.0);
+      float crease = smoothstep(0.62, 0.35, Km / max(D, 1e-4));
+      float lum = clamp(1.6 * dot(nn, L) - 0.55, -1.0, 1.0) - 0.45 * crease + clamp((Dn - D2n) * 1.2, -0.4, 0.2) + (nz - 0.5) * 0.22;
+      float deep = smoothstep(th, th + 0.45, Dn), H = Hs / max(D, 1e-4);
+      bool rim = Dn < th + 0.035;
+      // (heat: the hot heart low and inside, the lit tops a step brighter, the shadow side and creases a step redder)
+      float big = vn(p / (2.2 * sc) + dr * 0.5, uSeed + 61);
+      float temp = H * (0.45 + 0.55 * deep) + (0.3 * lum - 0.1 * crease) * min(1.0, H * 3.0) + (big - 0.5) * 0.08 * min(1.0, H * 2.0);
+      if ( temp > 0.34 ) {
+        int st = temp > 0.86 ? 6 : temp > 0.72 ? 5 : temp > 0.6 ? 4 : temp > 0.47 ? 3 : 2;
+        if ( rim ) st = max(2, st - 1);
+        G = 1 + st;
+      } else if ( temp > 0.1 ) {
+        // cooling soot: the dark shell rolls over the fire - the glow lingers in the deep shadowed creases and the heart, in a few
+        // broad patches that close up as it cools (never a network of veins)
+        float gl = deep * (0.55 + 0.45 * big) + 0.35 * crease + 0.2 * max(0.0, -lum);
+        float tv = 1.0 - (temp - 0.1) * 3.2;
+        if ( !rim && gl > tv + 0.12 ) G = 1 + (temp > 0.25 ? 3 : 2);
+        else if ( !rim && gl > tv ) G = 10;
+        else { float lv2 = lum + bay * 0.14; G = 11 + (lv2 > 0.3 ? 0 : lv2 > -0.1 ? 1 : 2); }
+      } else {
+        float lv2 = lum + bay * 0.14;
+        int band = lv2 > 0.35 ? 0 : lv2 > 0.0 ? 1 : lv2 > -0.45 ? 2 : 3;
+        if ( rim && lum < 0.1 ) band = 3;
+        G = 11 + band + (E > 0.35 || deep < 0.12 ? 4 : 0);
+      }
+      // (depth against the tokens: the fireball's moment only - the cloud that stands for minutes never covers a token)
+      R = uAge < 1.4 ? 1 + int(mod(floor((Fy / max(D, 1e-4)) / uq), 255.0)) : 0;
+    } else if ( uSurge.w > 0.0 ) {
+      // THE GROUND SURGE: one ragged ring of dust rolling out over the ground (its front torn by an angular noise, a thinner veil
+      // inside), lit by its own self-shadow, eroding in blobs as it settles - never single lens-shaped billows
+      vec2 dv = p - uC; dv.y /= max(0.45, uSq);
+      float rr = length(dv);
+      // (a thick ROLL of billows, not a rope: the front gently scalloped, the wall broken into lumps by a big noise riding outward)
+      vec2 cs = rr > 1e-3 ? dv / rr : vec2(1.0, 0.0);   // (noise round the ring sampled on a circle: no seam where the angle wraps)
+      float tear = (vn(cs * 2.2 + vec2(3.0, uAge * 0.5), uSeed + 71) - 0.5) * 0.28;
+      float Rs = uSurge.x * (1.0 + tear), W = uSurge.y * 1.35 * (0.85 + 0.4 * vn(cs * 1.6 + 7.0, uSeed + 73));
+      vec2 bq = (dv - cs * uSurge.x * 0.6) / (0.9 * sc);
+      float lump = 0.6 * vn(bq, uSeed + 74) + 0.4 * vn(bq * 2.3 + 5.0, uSeed + 75);
+      float x1 = (rr - Rs * (1.0 + 0.1 * (lump - 0.5))) / W;
+      float wall = max(0.0, 1.0 - x1 * x1);
+      float veil = 0.22 * smoothstep(0.2, -2.2, x1) * (1.0 - uSurge.z);
+      float Dsn = (max(wall * (0.1 + 1.35 * lump), veil) + (lump - 0.5) * 0.4) * uSurge.w;
+      float ths = 0.48 + uSurge.z * (0.25 + 0.9 * holes);
+      if ( Dsn > ths ) {
+        // (lit as a torus: its section's normal - out and up - against the sun, the lumps shading themselves)
+        vec2 dir = cs;
+        float xc = clamp(x1, -1.0, 1.0);
+        vec3 tn = normalize(vec3(dir * xc * vec2(1.0, uSq), sqrt(max(0.05, 1.0 - xc * xc))));
+        float lum = clamp(1.5 * dot(tn, L) - 0.5, -1.0, 1.0) + (lump - 0.5) * 0.5 + bay * 0.12;
+        int band = lum > 0.3 ? 0 : lum > -0.05 ? 1 : 2;
+        if ( Dsn < ths + 0.03 && lum < 0.1 ) band = 3;
+        G = 20 + band + (uSurge.z > 0.4 || wall < 0.05 ? 4 : 0);
+        R = uAge < 1.0 ? 1 + int(mod(floor(p.y / uq), 255.0)) : 0;
+      }
+    }
+  } else {
+    int top = -1, cover = 0;
+    float tD = 0.0, tR = 1.0;
+    vec2 tq = vec2(0.0);
+    // (the fire's HEAT as one field over the whole cloud: the billows' heats blended by their cover - the colour runs across the
+    // billows in organic patches, never a ring per billow or single billows gone grey on a hot ball)
+    float hs = 0.0, ws = 0.0;
+    for ( int i = 0; i < ${MAX_LOBES}; i++ ) {
+      if ( i >= uLobN ) break;
+      vec4 A = uLob[2 * i], Bq = uLob[2 * i + 1];
+      // the cloud's SHADOW on the ground: each billow's footprint cast down-right by its height
+      if ( Bq.y < 1.5 ) {
+        float hh = max(0.0, Bq.x - A.y);
+        vec2 qs = p - vec2(A.x + 0.42 * hh, Bq.x + 0.08 * hh);
+        float ws2 = 1.0 - dot(qs, qs) / (A.z * A.z * 1.15);
+        if ( ws2 > 0.0 ) FS += ws2 * (1.0 - smoothstep(0.0, 3.5 * uR, hh));
+      }
+      // erosion (late in its life, or taken back): the billow shrinks, thins and opens a few big blobby holes from its rim - it
+      // dissolves, never in square specks
+      float er = smoothstep(0.45, 1.0, Bq.w) * 1.05 + put;
+      vec2 q = p - A.xy;
+      if ( Bq.y > 1.5 ) q.y /= 0.62;   // (the ground surge: low, wide billows)
+      // (a lumpy edge in two octaves - a billow is a clump of small bulges, never a clean circle)
+      vec2 lp = vec2(c >> 1) * 2.0 + 0.5;
+      float rr = A.z * min(1.0, Bq.z * 2.5) * (0.76 + 0.24 * vn(lp / max(1.5, 0.3 * A.z), uSeed + 7 * i) + 0.16 * vn(lp / max(1.2, 0.13 * A.z), uSeed + 7 * i + 3));
+      rr *= 1.0 - 0.3 * smoothstep(0.2, 1.0, er);
+      float d2 = dot(q, q);
+      if ( d2 >= rr * rr ) continue;
+      float d = sqrt(d2) / rr;
+      if ( er > 0.3 ) {
+        float hole = 0.75 * vn(p / (6.0 * uq), uSeed + 21 + i) + 0.25 * vn(p / (3.2 * uq), uSeed + 22);
+        if ( hole + 0.45 * (1.0 - d) < er - 0.2 ) continue;
+      }
+      if ( Bq.y < 1.5 ) { float w = 1.0 - d * d; w *= w; hs += w * A.w; ws += w; }
+      cover++;
+      top = i; tD = d; tR = rr; tq = q;
+    }
+    if ( top >= 0 ) {
+      vec4 A = uLob[2 * top], Bq = uLob[2 * top + 1];
+      vec3 n = vec3(tq / tR, sqrt(max(0.0, 1.0 - tD * tD)));
+      // (a churning texture over the cloud: two octaves drifting with its age - the tone bands' edges wander organically)
+      float tz = 0.75 * vn(p / (4.0 * uq) + vec2(0.0, uAge * 1.6), uSeed + 41) + 0.25 * vn(p / (2.2 * uq) - vec2(uAge * 0.9, 0.0), uSeed + 42);
+      float lum = dot(n, L) + (tz - 0.5) * 0.4;
+      // (an edge: the outline of the cloud, or a crease where this billow lies over another one behind it)
+      // (the outline only on the cloud's outside; where a billow lies over another, a broken crease - the billows read one by one
+      // without each being ringed)
+      bool rim = tD > 0.9;
+      bool crease = rim && cover > 1;
+      if ( crease && (tD < 0.95 || h3(c.x >> 1, c.y >> 1, 63) < 0.35) ) { rim = false; crease = false; }
+      float age = Bq.w;
+      float er = smoothstep(0.45, 1.0, age) * 1.05 + put;
+      if ( Bq.y < 1.5 ) {
+        // fire and smoke: the cloud's heat field, hotter where it is deep (the overlaps) than at its outside edge - the colour sinks
+        // from the outside in; the churn and a fine dither break the bands into ragged patches
+        float H = hs / max(ws, 1e-4), deep = min(1.0, ws * 2.2);
+        // (each billow keeps its form: lit top left, its lower right a step darker, a dark crease where it lies over another - the
+        // cloud reads as a cauliflower of billows in one fire, never a flat slab)
+        float temp = H * (0.62 + 0.38 * deep) + 0.16 * (lum - 0.15) + (tz - 0.5) * 0.18 * min(1.0, H * 2.0);
+        bool fold = tD > 0.8 && cover > 1 && lum < 0.15 && h3(c.x >> 1, c.y >> 1, 65) < 0.8;
+        int fG = 0;
+        if ( temp > 0.33 ) {
+          int st = temp > 0.88 ? 6 : temp > 0.74 ? 5 : temp > 0.6 ? 4 : temp > 0.47 ? 3 : temp > 0.39 ? 2 : 1;
+          st = max(st, 2);                                  // (inside: never the plum / dark red - they are the outline's)
+          if ( (lum < -0.1 || fold) && st > 2 && st < 6 ) st--;
+          if ( rim && !crease ) st = max(1, min(st - 1, temp > 0.6 ? 3 : 2));
+          fG = 1 + st;
+        } else if ( temp > 0.17 ) fG = (rim && !crease) || lum < -0.12 || fold ? 10 : 9;
+        else {
+          // (smoke: three tones by its light and churn, the outline broken and the outer edge thinning - a billowing column, never
+          // stacked clay discs)
+          int band = rim && !crease ? (h3(c.x >> 1, c.y >> 1, 66) < 0.55 ? 3 : 1) : lum > 0.38 ? 0 : lum > -0.02 && !fold ? 1 : 2;
+          bool edgeThin = tD > 0.82 && !(cover > 1) && h3(c.x >> 1, c.y >> 1, 68) < 0.6;
+          fG = 11 + band + (age > 0.78 || er > 0.3 || edgeThin ? 4 : 0);
+        }
+        G = fG;
+      } else {
+        int band = lum > 0.5 ? 0 : lum > 0.05 ? 1 : 2;
+        if ( rim && !crease ) band = 3;
+        G = 20 + band + (age > 0.7 ? 4 : 0);
+      }
+      R = 1 + int(mod(floor(max(Bq.x, A.y) / uq), 255.0));
+    }
   }
   // ---------------------------------------------------------------- sparks: one art px, cooling through the ramp
   int sz = max(1, int(uU + 0.5));
@@ -191,8 +301,9 @@ void main() {
       if ( c == ivec2(floor(D0.zw)) ) B |= 16;
     } else if ( D1.y > 0.0 ) {
       // just landed: a little flare where its fire will catch
-      vec2 q = (p - D0.zw) / (uq * (1.0 + 2.0 * D1.y));
-      if ( dot(q, q) < 1.2 && h3(c.x, c.y, int(uAge * 12.0)) < D1.y + 0.2 ) { G = 32 + (D1.y > 0.6 ? 5 : D1.y > 0.3 ? 4 : 3); R = 1 + int(mod(floor(D0.w / uq), 255.0)); }
+      // (look 3: a few scattered sparks, never a round yellow blot that breaks up like a firework)
+      vec2 q = (p - D0.zw) / (uq * (1.0 + (uV3 == 1 ? 0.9 : 2.0) * D1.y));
+      if ( dot(q, q) < 1.2 && h3(c.x, c.y, int(uAge * 12.0)) < (uV3 == 1 ? 0.5 * D1.y : D1.y + 0.2) ) { G = 32 + (D1.y > 0.6 ? 5 : D1.y > 0.3 ? 4 : 3); R = 1 + int(mod(floor(D0.w / uq), 255.0)); }
     }
   }
   // ---------------------------------------------------------------- the ground: a heat pool under the flash, the cloud's shadow
@@ -379,7 +490,7 @@ void main() {
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-burst-art-v2"),
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-burst-art-v3"),
   tone: PIXI.Program.from(VERT, TONE, "moinen-maps-burst-tone-v1"),
   occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-burst-occ-v1"),
   ground: PIXI.Program.from(VERT_B(2), GROUND, "moinen-maps-burst-ground-v1"),
@@ -411,7 +522,7 @@ export class BurstArt extends PIXI.Container {
     const g = grid;
     this.dpass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
       uLob: new Float32Array(MAX_LOBES * 8), uLobN: 0, uSpk: new Float32Array(MAX_SPARKS * 4), uSpkN: 0, uDbr: new Float32Array(MAX_DEBRIS * 8), uDbrN: 0,
-      uC: new Float32Array(field.c ?? [0, 0]), uR: field.R ?? 1, uAge: -1, uOutA: field.out ?? 1e9, uU: g / 32, uSeed: (field.seed ?? 1) | 0,
+      uC: new Float32Array(field.c ?? [0, 0]), uR: field.R ?? 1, uAge: -1, uOutA: field.out ?? 1e9, uU: g / 32, uSeed: (field.seed ?? 1) | 0, uV3: field.v3 ? 1 : 0, uSurge: new Float32Array(4), uSq: 0.8,
       translationMatrix: new PIXI.Matrix().toArray(true) }));
     const TW = Math.ceil(W / 8), TH = Math.ceil(H / 8);
     this.toneRt = map ? rtOf(TW, TH, true) : null;
@@ -468,6 +579,7 @@ export class BurstArt extends PIXI.Container {
     for ( let k = 0; k < n; k++ ) { const j = ord[k] * 8; for ( let m = 0; m < 8; m++ ) U[k * 8 + m] = L[j + m]; }
     u.uSpk.set(b.spk); u.uDbr.set(b.dbr);
     u.uLobN = b.n[0]; u.uSpkN = b.n[1]; u.uDbrN = b.n[2]; u.uAge = a;
+    if ( this.field.v3 ) { surgeAt(this.field, a, this._sg ??= [0, 0, 0, 0]); u.uSurge.set(this._sg); u.uSq = this.view?.squash ?? 0.8; }
     this.fa = a; this.fsw = [sw[0], sw[1]];
   }
   setTime(T) { this.T = T; this.tNow = this.timeOf(T, sharedNow()); }

@@ -2181,6 +2181,7 @@
   "MOINENMAPS.DPreset.accent.hitFx": "Hit sparks",
   "MOINENMAPS.DPreset.accent.tracer": "Tracers",
   "MOINENMAPS.DPreset.accent.strike": "Lightning bolt",
+  "MOINENMAPS.DPreset.accent.blast": "Detonation (flash, shock ring, jets)",
   "MOINENMAPS.DPreset.cue.screen": "Screen shake and flash",
   "MOINENMAPS.DPreset.cue.light": "Flash of light",
   "MOINENMAPS.DPreset.field.level": "Level",

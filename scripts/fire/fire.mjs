@@ -92,6 +92,19 @@ const IDLE_WARM_MS = 3000;
  * never twice (prewarm).
  */
 export function warmUp() { prewarm(true); }
+/**
+ * The EXPLOSION programs (burst + dust: a destruction preset's bomb / grenade / rocket / meteor) linked in the background before any
+ * firing (presets/blast-wire.mjs: when the scene is ready, when a pad is armed): a firing writes its burst only ~1 s before its impact
+ * and a cold link of these took longer, so the first fireball of a session showed late. Only the programs: no pixel changes.
+ */
+let burstWarming = null;
+export function warmBurst() {
+  if ( burstWarming || CONFIG.moinenMaps?.firePrewarm === false || !canvas?.ready || !shown() ) return burstWarming;
+  const uid = canvas.app.renderer.CONTEXT_UID, list = [...artPrograms(), ...burstPrograms(), ...dustPrograms()].filter((p) => !p.glPrograms?.[uid]);
+  if ( !list.length ) return null;
+  const live = () => !!canvas?.ready;
+  return burstWarming = warmPrograms(list, live).catch(() => {}).finally(() => { burstWarming = null; });
+}
 
 /**
  * PRE-WARM (gl-warm.mjs): when the scene opens with fire or smoke this client shows, every fire program it will draw with is compiled

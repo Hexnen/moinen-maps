@@ -28,6 +28,15 @@ export const BURST_LV = {
   lightR: [0, 3.5, 4.5, 6],
   lightI: [0, 0.75, 1.0, 1.35]
 };
+/**
+ * LOOK 3 (round 3, opt-in per stroke: `bv: 3`; the bomb and the grenade - the rocket and the meteor keep look 2): one smoke body that
+ * lives on - life (s) per level, the ground surge's own life (s), the cap's slow climb after the fireball (x r, at most) and how much
+ * wider the cap spreads (share, at most) and the billows swell (share, at most) over the minutes of its life. burst-art.mjs draws it as
+ * one density field (no billow outlines), lit by its own self-shadow, with glowing veins in the cooling soot.
+ */
+export const BURST_V3 = { life: [0, 6, 12, 26], surge: [0, 3.2, 4.5, 5.5], climb: [0, 0.35, 0.8, 1.5], widen: [0, 0.3, 0.5, 0.75], swell: [0, 0.35, 0.45, 0.6] };
+/** A burst's life (s): look 3 its own. */
+export const lifeOf = (st) => (st?.bv === 3 ? BURST_V3 : BURST_LV).life[lvOf(st)];
 /** A burst taken back (o) fades out over this long (s). */
 export const BURST_FADE = 0.6;
 /** Debris pieces a burst may throw. */
@@ -35,7 +44,7 @@ export const MAX_DEBRIS = 16;
 /** The view's largest lift (view-angle.mjs): the area holds the cap at any view. */
 const LIFT_MAX = 0.8;
 
-const lvOf = (st) => Math.min(3, Math.max(1, st.lv | 0 || 2));
+function lvOf(st) { return Math.min(3, Math.max(1, st.lv | 0 || 2)); }
 
 /** A burst's ground point and radius in cells. */
 function pointOf(st, geo) {
@@ -57,22 +66,25 @@ export function debrisOf(st, geo) {
 const RECTS = new Map();
 const CORNERS = [{ lift: 0, squash: 0.6 }, { lift: 0, squash: 1 }, { lift: LIFT_MAX, squash: 0.6 }, { lift: LIFT_MAX, squash: 1 }];
 export function burstRect(st, geo) {
-  const key = `${st.id}|${st.q}|${st.g}|${st.p}|${st.r}|${st.lv}|${st.wd}|${st.ws}|${st.db}|${geo.ap}|${geo.ox}|${geo.oy}|${geo.grid}`;
+  const key = `${st.id}|${st.q}|${st.g}|${st.p}|${st.r}|${st.lv}|${st.bv}|${st.wd}|${st.ws}|${st.db}|${geo.ap}|${geo.ox}|${geo.oy}|${geo.grid}`;
   const had = RECTS.get(key); if ( had ) return { ...had };
-  const lv = lvOf(st), { x, y } = pointOf(st, geo), g = geo.grid / geo.ap, life = BURST_LV.life[lv];
+  const lv = lvOf(st), { x, y } = pointOf(st, geo), g = geo.grid / geo.ap, life = lifeOf(st);
   const f = fieldOf(st, geo, 0, 0), o = { lob: new Float32Array(MAX_LOBES * 8), spk: new Float32Array(MAX_SPARKS * 4), dbr: new Float32Array(MAX_DEBRIS * 8), n: [0, 0, 0] };
   let x0 = x - 2, y0 = y - 2, x1 = x + 2, y1 = y + 2;
+  // (look 3 draws each billow's kernel out to 1.22 x its radius, its churn past that: the rect holds it all - a clipped cloud read as a box)
+  const kr = f.v3 ? 1.32 : 1;
   const add = (ax, ay, r) => { x0 = Math.min(x0, ax - r); x1 = Math.max(x1, ax + r); y0 = Math.min(y0, ay - r); y1 = Math.max(y1, ay + r); };
-  for ( let a = 0; a <= life + 1e-6; a += 1 / 24 ) for ( const v of CORNERS ) {
+  for ( let a = 0; a <= life + 1e-6; a += life > 9 ? 1 / 8 : 1 / 24 ) for ( const v of CORNERS ) {
     burstAt(f, a, v, [0, 0], 1, o);
-    for ( let i = 0; i < o.n[0]; i++ ) add(o.lob[i * 8], o.lob[i * 8 + 1], o.lob[i * 8 + 2] + 1);
+    for ( let i = 0; i < o.n[0]; i++ ) add(o.lob[i * 8], o.lob[i * 8 + 1], o.lob[i * 8 + 2] * kr + 1);
     for ( let i = 0; i < o.n[1]; i++ ) add(o.spk[i * 4], o.spk[i * 4 + 1], 2);
     for ( let i = 0; i < o.n[2]; i++ ) { add(o.dbr[i * 8], o.dbr[i * 8 + 1], 3); add(o.dbr[i * 8] + 3 * o.dbr[i * 8 + 6], o.dbr[i * 8 + 1] + 3 * o.dbr[i * 8 + 7], 2); add(o.dbr[i * 8 + 2], o.dbr[i * 8 + 3], 2 + 3 * f.R / 8); }
   }
   // (the scene's wind carries the cloud: burst-art's drift, sw x a x 0.7, for a wind up to a quarter square a second; and the ground
   // heat pool under the flash, 1.5 R x 1.2 R)
   const m = 0.7 * 0.25 * g * life + 3;
-  add(x, y, 0); x0 = Math.min(x0, x - 1.5 * f.R); x1 = Math.max(x1, x + 1.5 * f.R); y1 = Math.max(y1, y + 1.2 * f.R);
+  add(x, y, 0); if ( f.v3 ) add(x, y, 3.3 * f.R);   // (look 3's ground surge: surgeAt, at most ~2.4 R x its tear + its wall)
+  x0 = Math.min(x0, x - 1.5 * f.R); x1 = Math.max(x1, x + 1.5 * f.R); y1 = Math.max(y1, y + 1.2 * f.R);
   const r = { x0: Math.floor(x0 - m), y0: Math.floor(y0 - m), x1: Math.ceil(x1 + m), y1: Math.ceil(y1 + m) };
   if ( RECTS.size > 256 ) RECTS.clear();
   RECTS.set(key, r);
@@ -85,7 +97,7 @@ export function burstCore(st, geo) {
 }
 /** When a burst ends (ms): its life, or its fade after it was taken back. */
 export function burstEnd(st) {
-  const e = litTime(st) + BURST_LV.life[lvOf(st)] * 1000;
+  const e = litTime(st) + lifeOf(st) * 1000;
   return st.o !== undefined ? Math.min(e, Math.max(st.o, litTime(st)) + BURST_FADE * 1000) : e;
 }
 
@@ -105,7 +117,7 @@ function fieldOf(st, geo, x0, y0) {
   const db = debrisOf(st, geo), dbA = new Float32Array(MAX_DEBRIS * 4);
   db.forEach(([dx, dy, t], i) => dbA.set([dx, dy, t, hash4(st.sd | 0, i, 7)], i * 4));
   return { ref: litTime(st), c: [x - x0, y - y0], R, lv, wind: [wx, wy], db: dbA, dbN: db.length,
-    out: st.o !== undefined ? (st.o - litTime(st)) / 1000 : 1e9, seed: (st.sd >>> 0) % 65536, color: st.c ?? null };
+    out: st.o !== undefined ? (st.o - litTime(st)) / 1000 : 1e9, seed: (st.sd >>> 0) % 65536, color: st.c ?? null, v3: st.bv === 3 };
 }
 
 /* ---------------------------------------------------------------- the motion (per art frame, on the CPU: a few dozen bodies) */
@@ -134,14 +146,17 @@ const H = (s, j, k) => hash4(s, j, k, 911);
  */
 export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
   out ??= { lob: new Float32Array(MAX_LOBES * 8), spk: new Float32Array(MAX_SPARKS * 4), dbr: new Float32Array(MAX_DEBRIS * 8), n: [0, 0, 0] };
-  const { lob, spk, dbr } = out, lv = f.lv ?? 2, R = f.R, [cx, cy] = f.c, s = f.seed | 0, life = BURST_LV.life[lv];
+  const { lob, spk, dbr } = out, lv = f.lv ?? 2, R = f.R, [cx, cy] = f.c, s = f.seed | 0, v3 = !!f.v3, life = (v3 ? BURST_V3 : BURST_LV).life[lv];
   const lift = v?.lift ?? 0.5, sq = v?.squash ?? 0.8, [wx, wy] = f.wind ?? [0, 0];
   out.n[0] = out.n[1] = out.n[2] = 0;
   if ( a < 0 || a > life || f.none ) return out;
   const fade = f.out < 1e8 ? 1 - sm(f.out, f.out + BURST_FADE, a) : 1;
   const Hh = BURST_LV.rise[lv] * R, tr = [0, 0.5, 0.95, 1.3][lv];
-  const Zc = Hh * (1 - Math.exp(-Math.max(0, a - 0.15) / tr)), sr = Hh > 0 ? Zc / Hh : 0;
-  const spread = [0, 0.25, 0.35, 0.55][lv], roll = [0, 0.5, 0.9, 1.7][lv], hot = BURST_LV.hot[lv], core = [0, 0.08, 0.1, 0.12][lv];
+  // (look 3: after the fireball the cloud keeps climbing slowly, its cap spreading wider and its billows swelling - a mushroom that
+  // stands and drifts for its whole life, never a puff that is gone in seconds)
+  const late = v3 ? Math.max(0, a - 1.6) : 0, lateK = v3 ? 1 - Math.exp(-late / (life * 0.4)) : 0;
+  const Zc = Hh * (1 - Math.exp(-Math.max(0, a - 0.15) / tr)) + (v3 ? BURST_V3.climb[lv] * R * lateK : 0), sr = Hh > 0 ? Math.min(1, Zc / Hh) : 0;
+  const spread = [0, 0.25, 0.35, 0.55][lv] * (1 + (v3 ? BURST_V3.widen[lv] * lateK / 0.55 : 0)), roll = [0, 0.5, 0.9, 1.7][lv], hot = BURST_LV.hot[lv], core = [0, 0.08, 0.1, 0.12][lv];
   // the axis leans downwind with height, and the whole cloud rides the scene's wind
   const axis = (z) => [wx * z * 0.45 + sw[0] * a * 0.7, wy * z * 0.18 + sw[1] * a * 0.7];
   let n = 0;
@@ -167,7 +182,7 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
     }
     rho = Math.max(0, rho);
     const [ax, ay] = axis(z), gx = Math.cos(az) * rho, gy = Math.sin(az) * rho;
-    const r = R * (0.2 + 0.3 * h4 * h4) * (0.42 + 0.58 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1);
+    const r = R * (0.2 + 0.3 * h4 * h4) * (0.42 + 0.58 * E) * (1 + 0.35 * sr * up + 0.05 * Math.min(a, 3)) * (lv === 1 ? 1.25 : 1) * (1 + (v3 ? BURST_V3.swell[lv] * lateK : 0));
     // (the cloud cools as one body - the inner and lower billows a little later - never single billows going grey on a hot ball)
     const tau = hot * (0.85 + 0.3 * h5) * (0.8 + 0.45 * (1 - h3)) * (1.1 - 0.25 * up), heat = a < core ? 1 : Math.exp(-Math.max(0, a - core) / tau);
     put(cx + ax + gx, cy + ay + gy * sq - z * lift, r, heat, cy + gy * sq, 0, Math.min(1, E * 3) * fade, (a / life) * (0.78 + 0.25 * h5 + 0.22 * up));
@@ -185,7 +200,8 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
     }
   }
   // the SURGE: low billows of the ground's own dust thrown out along the ground (the grenade is mostly this)
-  const NB = BURST_LV.surge[lv], sk = [0, 1.5, 1.05, 1.25][lv], slife = life * [0, 0.9, 0.55, 0.45][lv];
+  // (look 3: the ground surge is one ring of dust - surgeAt, drawn as a field by burst-art.mjs - never single lens-shaped billows)
+  const NB = v3 ? 0 : BURST_LV.surge[lv], sk = [0, 1.5, 1.05, 1.25][lv], slife = v3 ? BURST_V3.surge[lv] : life * [0, 0.9, 0.55, 0.45][lv];
   for ( let k = 0; k < NB; k++ ) {
     const az = 6.2832 * (k + 2.5 * H(s, 200 + k, 1)) / NB, h2 = H(s, 200 + k, 2), h3 = H(s, 200 + k, 3);
     const E = 1 - Math.exp(-3.2 * Math.max(0, a - 0.02)), D = R * sk * (0.25 + (0.25 + 1.35 * h2 * h2) * E);
@@ -220,6 +236,25 @@ export function burstAt(f, a, v, sw = [0, 0], det = 1, out = null) {
     dbr.set([gx, gy - z * lift, gx, gy, landed ? 2 : 1, landed ? 1 - (a - tl) / 0.35 : 0.55 + 0.45 * (1 - fr), (cx + dx * fr2) - gx, (cy + dy * fr2 - z2 * lift) - (gy - z * lift)], d * 8); d++;
   }
   out.n[2] = d;
+  return out;
+}
+
+/**
+ * LOOK 3's GROUND SURGE at age `a` (s): one ragged ring of the ground's own dust rolling out from the blast along the ground and slowing
+ * (base surge), its inside a thinner veil, settling over BURST_V3.surge s - [front radius, wall half-width (cells), settled share 0..1,
+ * shown 0..1]; zeros when there is none. burst-art.mjs evaluates it per cell (angular noise tears its front; it erodes in blobs).
+ */
+export function surgeAt(f, a, out = [0, 0, 0, 0]) {
+  out[0] = out[1] = out[2] = out[3] = 0;
+  if ( !f?.v3 || a < 0 || f.none ) return out;
+  const lv = f.lv ?? 2, R = f.R, life = BURST_V3.surge[lv];
+  if ( a > life ) return out;
+  const [k0, k1, tau] = [[0, 0, 0], [0.45, 1.5, 0.3], [0.35, 1.45, 0.45], [0.3, 1.25, 0.5]][lv];
+  const fade = f.out < 1e8 ? 1 - sm(f.out, f.out + BURST_FADE, a) : 1;
+  out[0] = R * (k0 + k1 * (1 - Math.exp(-a / tau)));
+  out[1] = R * (0.13 + 0.17 * (1 - Math.exp(-a / 1.1))) * (lv === 1 ? 1.4 : 1);
+  out[2] = sm(0.12 * life, 0.8 * life, a);
+  out[3] = sm(0.02, 0.12, a) * fade;
   return out;
 }
 
