@@ -67,11 +67,12 @@ export function lensCap() {
 }
 const shown = () => P.on && (P.who !== "gm" || game.user.isGM) && detailCap() > 0;
 
-/** The resolved state for this client: levels capped, densities scaled by performance / reduced motion, the view. */
+/**
+ * The resolved state for this client: strengths capped (M.capFx: v <= cap + 0.35, s as the old `s <= cap - 1 + 0.35` bit for bit;
+ * every fx entry { v, p, s }), densities scaled by performance / reduced motion, the view.
+ */
 function clientState(now = sharedNow()) {
-  const st = M.resolve(P, now), cap = detailCap();
-  const fx = {};
-  for ( const [e, f] of Object.entries(st.fx) ) fx[e] = { p: f.p, s: Math.min(f.s, cap - 1 + 0.35) };
+  const st = M.resolve(P, now), fx = M.capFx(st.fx, detailCap());
   const pm = perfMode(), still = reducedMotion();
   const perf = (pm === "low" ? 0.3 : pm === "medium" ? 0.6 : 1) * (still ? 0.5 : 1);
   return { ...st, fx, perf, noNear: pm !== "high", sheen: pm !== "low", puddles: P.ground.puddles, view: viewOf(), seed: P.seed, lensCap: lensCap() };
@@ -293,14 +294,14 @@ export const tornadoApi = {
     saveTornadoes([...alive, T]);
     return id;
   },
-  /** Change a tornado (GM): { level (ramps over 5 s), end, damage }. */
+  /** Change a tornado (GM): { level 1..3 float (ramps over 5 s from the level now), end, damage }. */
   update(id, patch = {}) {
     if ( !game.user.isGM ) return null;
     const now = sharedNow();
     const list = P.tornadoes.map((T) => {
       if ( T.id !== id ) return T;
-      const n = { ...T };
-      if ( patch.level !== undefined ) { const s = TM.levelS(T, now); n.lv0 = Math.min(3, Math.max(1, Math.round(s + 1))); n.level = Math.min(3, Math.max(1, Math.round(Number(patch.level)) || T.level)); n.lvT = Math.round(now); }
+      // (D6: the new ramp starts from the level now, a float; level a float 1..3, 0 is not a rope-out: remove() is)
+      const n = patch.level !== undefined ? TM.retarget(T, patch.level, now) : { ...T };
       if ( patch.end !== undefined && TM.ENDS.includes(patch.end) ) n.end = patch.end;
       if ( patch.damage !== undefined ) n.damage = patch.damage === true;
       return n;
@@ -320,10 +321,10 @@ export const tornadoApi = {
     const now = Math.round(sharedNow() + M.LEAD_MS);
     saveTornadoes(cut ? [] : P.tornadoes.map((T) => (T.out === null || T.out > now) ? { ...T, out: now } : T));
   },
-  /** The scene's tornadoes with where they are now: [{ ...record, x, y, phase, s }]. */
+  /** The scene's tornadoes with where they are now: [{ ...record, x, y, phase, s, v (the level now, 1..3: s + 1) }]. */
   list() {
     const now = sharedNow(), grid = canvas.grid?.size ?? 100;
-    return P.tornadoes.map((T) => { const [x, y] = TM.baseAt(T, now, grid); return { ...foundry.utils.deepClone(T), x, y, phase: TM.phase(T, now, grid), s: TM.levelS(T, now) }; });
+    return P.tornadoes.map((T) => { const [x, y] = TM.baseAt(T, now, grid), s = TM.levelS(T, now); return { ...foundry.utils.deepClone(T), x, y, phase: TM.phase(T, now, grid), s, v: s + 1 }; });
   },
   /** Where a tornado's base is at shared ms `t` (default now): { x, y } scene px, or null. */
   positionAt(id, t = sharedNow()) { const T = P.tornadoes.find((T) => T.id === id); if ( !T ) return null; const [x, y] = TM.baseAt(T, t, canvas.grid?.size ?? 100); return { x, y }; },
@@ -393,7 +394,8 @@ let LensClass = null;
 /** Lazily loaded (lens.mjs): a client without lens effects never loads its shaders. */
 async function lensClass() { return LensClass ??= (await import("./lens.mjs")).WeatherLens; }
 function syncLens(st) {
-  const want = !!st && P.lens.on && st.lensCap > 0 && Object.keys(st.fx).some((e) => M.TABLES[e]?.lens && (e !== "embers" || P.lens.heat));
+  // (a lens fixed at strength 0 draws nothing: M.lensP 0)
+  const want = !!st && P.lens.on && st.lensCap > 0 && M.lensP(P) > 0 && Object.keys(st.fx).some((e) => M.TABLES[e]?.lens && (e !== "embers" || P.lens.heat));
   if ( !want ) { if ( lens ) { lens.destroy(); lens = null; } return; }
   if ( !lens ) {
     if ( lens === null && !LensClass ) { lens = false; lensClass().then(() => { lens = null; if ( display ) syncLens(lastState); }); return; }
@@ -446,7 +448,7 @@ const flagKey = `flags.${MODULE_ID}.${M.FLAG}`;
 function save() { return write({ [flagKey]: { ...P, v: M.VERSION } }); }
 
 /**
- * A CHANGE on the timeline (GM): `change` = { preset?, level?, i?, fx?, wind? }; `over` ms (the transition), `at` shared ms (default
+ * A CHANGE on the timeline (GM): `change` = M.withKey's { preset?, level?, fx? (a patch), clouds?, wind?, i? (v1) }; `over` ms (the transition), `at` shared ms (default
  * now + the lead). One scene write; every client ramps from the shared clock.
  */
 export function change(chg, { over = M.DEFAULT_DUR, at = null } = {}) {
@@ -501,23 +503,29 @@ export function setView(v) {
 
 /* ---------------------------------------------------------------- the api */
 
-const lvlOf = (n) => { const v = Math.round(Number(n)); return v >= 1 && v <= 3 ? v : null; };
 export const weatherApi = {
-  /** The resolved state now (or at shared ms `t`): { fx: { eff: { p, s } }, wind, wet, steady, until, key }. */
+  /** The resolved WORLD state now (or at shared ms `t`): { fx: { eff: { v, p, s } }, wind, wet, cover, steady, until, key }. */
   state: (t) => M.resolve(P, t ?? sharedNow()),
-  /** Change the weather: a preset name ("clear", "rain", ...) or { preset?, fx?, wind? }; { level 1..3, i 0..1, over ms, at shared ms }. */
-  set(what, { level, i, over = M.DEFAULT_DUR, at = null } = {}) {
-    const c = typeof what === "string" ? { preset: what } : { ...(what ?? {}) };
-    if ( level !== undefined ) c.level = lvlOf(level) ?? 2;
-    if ( i !== undefined ) c.i = Math.min(1, Math.max(0, Number(i) || 0));
-    if ( c.fx && !c.preset ) c.preset = "custom";
-    return change(c, { over, at });
+  /**
+   * Change the weather: a preset name ("clear", "rain", ...) or { preset?, fx?, wind? }; { level 0..3.35 (a float strength; the old
+   * 1..3 mean the same), i 0..1 (v1 fine intensity: folds in as level + (i - 0.5) x 0.7), over ms, at shared ms }.
+   */
+  set(what, { level, i, over = M.DEFAULT_DUR, at = null } = {}) { return change(M.setChange(what, { level, i }), { over, at }); },
+  /** Change only the strength of the current preset's effects: level(n 0..3.35 float (0 removes them), { i (v1), over }). */
+  level(n, { i, over = M.DEFAULT_DUR } = {}) { return change(M.levelChange(n, { i }), { over }); },
+  /**
+   * Per-effect strengths: strength({ rain: 2.4, wind: 1, clouds: 0 }, { over, at }) patches the newest key (0 / null removes an effect,
+   * the others are kept; GM). Always returns M.strengthsOf: { preset, level, target: { eff: v }, live: { eff: v }, steady, until }.
+   * Without a patch it only reads.
+   */
+  strength(patch, { over = M.DEFAULT_DUR, at = null } = {}) {
+    const c = M.strengthChange(patch);
+    if ( c ) change(c, { over, at });
+    return M.strengthsOf(P, sharedNow());
   },
-  /** Change only the level (and fine intensity) of the current preset: level(n, { i, over }). */
-  level(n, { i, over = M.DEFAULT_DUR } = {}) { const c = { level: lvlOf(n) ?? 2 }; if ( i !== undefined ) c.i = Number(i); return change(c, { over }); },
   /** The scene wind: { dir (deg, 0 = right, 90 = down), str 0..1, gust 0..1 }, { over ms }. */
   wind(w, { over = 5000 } = {}) { return change({ wind: w }, { over }); },
-  /** Lens effects (scene default): { on, level: "auto" | 1..3, strength 0..1 }. */
+  /** Lens effects (scene default): { on, level: "auto" | a fixed strength 0..3.35 (below 1 fades the level-1 lens in), strength 0..1, heat }. */
   lens(l = {}) { setParams({ lens: l }); return { ...P.lens }; },
   clear({ over = M.DEFAULT_DUR } = {}) { return change({ preset: "clear" }, { over }); },
   presets: () => Object.keys(M.PRESETS),
@@ -531,15 +539,15 @@ export const weatherApi = {
   },
   /** How much it rains at a point now (0..~1.35; 0 under a roof is not checked here), for other layers (fire). */
   rainAt() { const r = M.resolve(P, sharedNow()).fx.rain; return r ? r.p * M.gate([0.35, 0.7, 1], r.s) : 0; },
-  /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
+  /** How it stands on this client: what is drawn, instances, last tick ms, lens; `state` = this client's capped state (fx { v, p, s }). */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
     info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, clouds: clouds ? { ...clouds.stats, on: clouds.ticking } : null,
     storm: storm ? { ...storm.stats } : null, fireWet: fireWetNow(), state: lastState }),
-  /** The cloud layer: { level 0 (off) .. 3, mode "sky" | "shadows", rays true | false }, { over ms } (GM). */
+  /** The cloud layer: { level 0 (off) .. 3.35 (a float strength), mode "sky" | "shadows", rays true | false }, { over ms } (GM). Returns { level (the target strength), mode, rays, ... }. */
   clouds({ level, mode, rays } = {}, { over = M.DEFAULT_DUR } = {}) {
     if ( mode !== undefined || rays !== undefined ) setCloudLook({ mode, rays });
-    if ( level !== undefined ) change({ clouds: Math.max(0, Math.min(3, Math.round(Number(level)) || 0)) }, { over });
-    return { level: M.current(P)?.fx?.clouds?.l ?? 0, ...P.clouds };
+    if ( level !== undefined ) change(M.cloudsChange(level), { over });
+    return { level: M.current(P)?.fx?.clouds ?? 0, ...P.clouds };
   },
   /** The rain's lightning: settings { on, rate, power, near, bolts } (GM; none: just read them). */
   lightning(patch) { if ( patch && Object.keys(patch).length ) return setStorm(patch); return SM.cleanCore(P.storm ?? null); },
