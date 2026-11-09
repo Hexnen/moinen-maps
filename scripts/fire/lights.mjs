@@ -1,4 +1,4 @@
-import { lightDrive, shaderTime, hash4, FIRE_LV } from "./model.mjs";
+import { lightDrive, shaderTime, hash4, FIRE_LV, lvLerp } from "./model.mjs";
 import { reducedMotion } from "../config.mjs";
 import { burstGain } from "./burst-model.mjs";
 
@@ -82,7 +82,17 @@ const rgbOf = (hex) => { const n = Number.parseInt(String(hex).slice(1), 16) || 
 const ease = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
 
 /** A light's amplitude: the intensity setting x its level x its fire's strength. */
-export const lightAmp = (L, P) => Math.min(1, (P.lightIntensity ?? 0.6) * 1.15) * 0.8 * FIRE_LV.lightI[L.level ?? 2] * (0.6 + 0.4 * (L.strength ?? 1));
+export const lightAmp = (L, P, lv = L.level ?? 2) => Math.min(1, (P.lightIntensity ?? 0.6) * 1.15) * 0.8 * lvLerp(FIRE_LV.lightI, lv) * (0.6 + 0.4 * (L.strength ?? 1));
+/**
+ * F1: a light whose fire's level RAMPS (model.lightsOf L.ramp { l0, t0, ms, r0 }) at `now`: { lv, R } its level and radius (px, model
+ * radius) now - the ramp's smoothstep, as the flames'; no ramp: its own.
+ */
+export function lightRampAt(L, now) {
+  const r = L.ramp; if ( !r ) return { lv: L.level ?? 2, R: L.radius ?? 0 };
+  const x = r.ms > 0 ? Math.max(0, Math.min(1, (now - r.t0) / r.ms)) : now >= r.t0 ? 1 : 0, k = x * x * (3 - 2 * x);
+  if ( k >= 1 ) return { lv: L.level ?? 2, R: L.radius ?? 0 };
+  return { lv: r.l0 + ((L.level ?? 2) - r.l0) * k, R: r.r0 + ((L.radius ?? 0) - r.r0) * k };
+}
 
 /**
  * The light's uniforms from its drive (model.lightDrive), pure: { tint [r, g, b] (colour x strength), reach, off [x, y] (uv) }. `c` the
@@ -142,7 +152,8 @@ export class FireLights {
         // (an EXPLOSION's light is its own: a flash that never takes over a fire's light, nor a fire one its)
         let bi = -1, bd = Infinity;
         orphans.forEach((s, i) => { if ( !s || !!s.L.burst !== !!L.burst ) return; const d = Math.hypot(s.x - L.x, s.y - L.y); if ( d < bd ) { bd = d; bi = i; } });
-        const R = Math.round((L.radius ?? 0) * 1.15);
+        // (F1: a ramping light's polygon holds both ends of its ramp; lookOf draws its reach at the radius of the moment)
+        const R = Math.round(Math.max(L.radius ?? 0, L.ramp?.r0 ?? 0) * 1.15);
         let s = bi >= 0 && bd <= Math.max(1.5 * grid, 0.4 * orphans[bi].R) ? orphans[bi] : null;
         if ( s ) {
           // HAND-OVER: from the look ON SCREEN (its last uniforms) to the look with its new cluster; the difference eases out over
@@ -150,7 +161,7 @@ export class FireLights {
           orphans[bi] = null;
           const was = s.last ?? this.lookOf(s, now), wx = s.x + was.off[0] * 2 * s.R, wy = s.y + was.off[1] * 2 * s.R;
           if ( s.dieAt !== null ) { s.born = now - FADE_IN * (1 - Math.min(1, (now - s.dieAt) / FADE_OUT)); s.dieAt = null; }
-          s.L = L;
+          s.L = L; if ( L.ramp ) s.scaleR = true;
           const mass = this.massOf(L);
           if ( bd > 0.5 * grid || R > s.R || R < 0.75 * s.R ) { this.move(s, L, R); s.ref = mass; moved++; vision = true; }
           else if ( !s.ref || mass > 1.5 * s.ref ) s.ref = mass;      // (its mass reference: kept while the fire stays about its size)
@@ -159,6 +170,7 @@ export class FireLights {
           s.bridge = { r0: b > 1e-4 ? Math.min(4, a / b) : 1, ox0: wx - (s.x + is.off[0] * 2 * s.R), oy0: wy - (s.y + is.off[1] * 2 * s.R), t0: now };
         } else {
           s = this.make(L, R, now); if ( !s ) continue;
+          if ( L.ramp ) s.scaleR = true;
           made++; vision = true;
         }
         slots.push(s);
@@ -191,7 +203,7 @@ export class FireLights {
   }
   /** Its fire moved: one new polygon (the same source, mesh and look). */
   move(s, L, R) {
-    try { s.src.initialize({ x: L.x, y: L.y, dim: R }); s.x = s.src.data.x; s.y = s.src.data.y; s.R = R; this.attach(s); } catch ( err ) { console.warn("moinen-maps | fire light", err); }
+    try { s.src.initialize({ x: L.x, y: L.y, dim: R }); s.x = s.src.data.x; s.y = s.src.data.y; s.R = R; s.scaleR = !!L.ramp; this.attach(s); } catch ( err ) { console.warn("moinen-maps | fire light", err); }
   }
   /** Put the source's illumination mesh where Foundry's lighting refresh would (and position it); no refresh. */
   attach(s) {
@@ -242,7 +254,12 @@ export class FireLights {
       if ( e >= 1 ) s.bridge = null;
       else br = { r: s.bridge.r0 + (1 - s.bridge.r0) * e, ox: s.bridge.ox0 * (1 - e), oy: s.bridge.oy0 * (1 - e) };
     }
-    return lightLook(d, rgbOf(P.lightFollow && L.color ? L.color : P.lightColor ?? "#ff8a3c"), lightAmp(L, P), s.R, s.x, s.y, k, L.seed ?? 0, T, br);
+    // (F1: a light that ramps - or did, until its polygon is moved - shows its level and reach of the moment: the reach scaled from the
+    // polygon it holds; one never ramped draws exactly as before)
+    const rz = s.scaleR ? lightRampAt(L, still ? Infinity : now) : null;
+    const look = lightLook(d, rgbOf(P.lightFollow && L.color ? L.color : P.lightColor ?? "#ff8a3c"), rz ? lightAmp(L, P, rz.lv) : lightAmp(L, P), s.R, s.x, s.y, k, L.seed ?? 0, T, br);
+    if ( rz && s.R > 0 ) look.reach = Math.min(0.9, look.reach * Math.min(1, Math.round(rz.R * 1.15) / s.R));
+    return look;
   }
   /** Faded out: out of the light collection, its mesh out of the illumination container, destroyed (no refresh). */
   retire(s) {

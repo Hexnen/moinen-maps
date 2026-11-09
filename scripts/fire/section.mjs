@@ -5,6 +5,7 @@ import * as M from "./model.mjs";
 import * as Fire from "./fire.mjs";
 import * as Editor from "./editor.mjs";
 import { PRESETS } from "./look.mjs";
+import { sharedNow as sharedNowMs } from "../shared-clock.mjs";
 
 /**
  * FIRE AND SMOKE in the Destruction workspace (added with extendSection: section.mjs is unchanged):
@@ -33,6 +34,20 @@ const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
 const LEVEL_COLOR = ["#8c8c8c", "#f2c14e", "#ef8a3a", "#e0453a"];
 const SMK = (l) => T(`Fire.smk${l}`), SMKH = (l) => T(`Fire.smkHint${l}`);
 const SMOKE_COLOR = ["#5a5a5a", "#c9c5bf", "#8f8a84", "#4a4541"];
+/** F1: a fire level 1..3 as text ("2", "2.35") and its colour (the nearest whole level's). */
+const lvTxt = (v) => String(Math.round(v * 100) / 100);
+const lvInk = (v) => LEVEL_COLOR[Math.min(3, Math.max(1, Math.round(v)))];
+
+/**
+ * F1 - THE FIRE LEVEL SLIDER (the weather's strength row: .mm-wx-str, notches at 1 2 3): 1..3 in steps of 0.05; under its name the
+ * nearest level's name. `name` the control's name, `v` its value.
+ */
+function fireLvRow(name, v, { hint = T("Fire.levelHint"), label = T("Fire.level") } = {}) {
+  const id = `mm-fire-lv-${name.replace(/\W/g, "-")}`, n = Math.min(3, Math.max(1, Math.round(v)));
+  return `<div class="mm-ws-opt mm-ws-range mm-wx-str mm-fire-lvstr" style="--mm-tool:${lvInk(v)};--mm-vmin:1;--mm-vmax:3">`
+    + `<label for="${id}" data-tooltip="${esc(hint)}"><i class="fa-solid fa-fire" inert></i><span>${esc(label)}</span><span class="mm-wx-live" data-fire-lvname>${esc(T(`Fire.lvl${n}`))}</span></label>`
+    + `<range-picker id="${id}" name="${esc(name)}" value="${Number(v)}" min="1" max="3" step="${M.LV_STEP}"></range-picker></div>`;
+}
 
 /** The fire brush's colour row: the scene's colour (""), the presets, a custom colour. */
 function colorRow(cur) {
@@ -67,7 +82,7 @@ function bar(host, ctx) {
     const dirs = DIRS.map((d) => `<button type="button" class="mm-ws-toolbtn" data-wind-dir="${d}" aria-pressed="${d === b.windDir}" aria-label="${esc(T(`Fire.dir.${d}`))}" data-tooltip="${esc(T(`Fire.dir.${d}`))}"><i class="fa-solid fa-arrow-right fa-rotate-by" style="--fa-rotate-angle:${d}deg" inert></i></button>`).join("");
     const levels = mode === "smoke"
       ? levelRow("Fire.smokeLevel", "smoke-level", [1, 2, 3], b.smokeLevel, SMK, SMKH, SMOKE_COLOR)
-      : `${levelRow("Fire.level", "fire-level", [1, 2, 3], b.level, (l) => T(`Fire.lvl${l}`), (l) => T(`Fire.lvlHint${l}`), LEVEL_COLOR)}
+      : `${fireLvRow("fireLevel", b.level)}
          ${levelRow("Fire.smokeLevel", "fire-smoke", [0, 1, 2, 3], b.fireSmoke, SMK, SMKH, SMOKE_COLOR)}
          ${levelRow("Fire.style", "fire-style", ["fire", "fireball"], b.style, (l) => T(`Fire.sty.${l}`), (l) => T(`Fire.styHint.${l}`), { fire: "#ff8a24", fireball: "#ffb030" })}
          ${colorRow(b.color)}`;
@@ -78,8 +93,15 @@ function bar(host, ctx) {
       <div class="mm-ws-opt"><div class="mm-ws-tools" role="group"><button type="button" class="mm-ws-toolbtn" data-fire-torn aria-pressed="${!!Fire.params0().torn}" aria-label="${esc(T("Fire.quickTorn"))}" data-tooltip="${esc(T("Fire.quickTorn"))}"${game.user.isGM ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button></div></div>
       ${optHint(mode === "smoke" ? T("Fire.smokeHint") : T("Fire.paintHint"))}`;
   }
-  const off = bindSettings(host, { fireBrush: "fireBrush", fireStrength: "fireStrength", fireWind: "fireWind" });
-  const PICK = { windDir: "fireWindDir", fireLevel: "fireLevel", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle", fireColor: "fireBrushColor", dustKind: "dustKind", dustLevel: "dustLevel" };
+  // (the fire level slider: its colour and the level's name follow it while dragged and when the keys move it)
+  const lvLook = (v) => {
+    const r = host.querySelector(".mm-fire-lvstr"); if ( !r ) return;
+    r.style.setProperty("--mm-tool", lvInk(v)); const n = r.querySelector("[data-fire-lvname]"); if ( n ) n.textContent = T(`Fire.lvl${Math.min(3, Math.max(1, Math.round(v)))}`);
+  };
+  const off = bindSettings(host, { fireBrush: "fireBrush", fireStrength: "fireStrength", fireWind: "fireWind",
+    fireLevel: { key: "fireLevel", read: (c) => Math.round(Number(c.value) * 20) / 20, write: (v, c) => { writeControl(c, v); lvLook(v); } } },
+  { onInput: (n, v) => { if ( n === "fireLevel" ) lvLook(v); } });
+  const PICK = { windDir: "fireWindDir", fireSmoke: "fireSmoke", smokeLevel: "smokeLevel", fireStyle: "fireStyle", fireColor: "fireBrushColor", dustKind: "dustKind", dustLevel: "dustLevel" };
   const STR = new Set(["fireStyle", "fireColor", "dustKind"]);
   const onClick = (ev) => {
     if ( ev.target.closest?.("[data-fire-torn]") ) { Fire.setParams({ torn: !Fire.params0().torn }); return; }
@@ -92,7 +114,8 @@ function bar(host, ctx) {
   const onInput = (ev) => { const c = ev.target.closest?.("input[name=fireBrushColor]"); if ( c ) game.settings.set(MODULE_ID, "fireBrushColor", c.value.toLowerCase()); };
   host.addEventListener("click", onClick); host.addEventListener("change", onInput);
   const sync = () => {
-    const nb = Editor.brush(), cur = { windDir: nb.windDir, fireLevel: nb.level, fireSmoke: nb.fireSmoke, smokeLevel: nb.smokeLevel, fireStyle: nb.style, fireColor: nb.color, dustKind: nb.dust, dustLevel: nb.dustLevel };
+    const nb = Editor.brush(); lvLook(nb.level);
+    const cur = { windDir: nb.windDir, fireSmoke: nb.fireSmoke, smokeLevel: nb.smokeLevel, fireStyle: nb.style, fireColor: nb.color, dustKind: nb.dust, dustLevel: nb.dustLevel };
     for ( const k of Object.keys(PICK) ) for ( const x of host.querySelectorAll(`[data-${k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`) ) {
       x.setAttribute("aria-pressed", String((STR.has(k) ? x.dataset[k] : Number(x.dataset[k])) === cur[k]));
     }
@@ -109,16 +132,20 @@ function bar(host, ctx) {
 function mountPanel(host) {
   if ( game.user.isGM ) Fire.warmUp();                                 // (the fire panel open: a stroke is coming)
   const gm = game.user.isGM;
+  let openLv = null;                                                 // (F1: the stroke whose fire level slider is open)
   const rowsOf = (P) => Fire.list().reverse().map((s) => {
       const name = T(`Fire.kind.${s.k}`) + (s.st === "fireball" ? ` (${T("Fire.sty.fireball")})` : s.k === "dust" ? ` (${T(`Fire.dk.${s.dk}`)})` : "");
       const tip = s.k === "erase" ? name : s.k === "dust" ? `${name} · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%` : `${name} · ${Math.round(s.s * 100)}% · ${T("Fire.wind")} ${Math.round(s.ws * 100)}%`;
-      // the levels: click to step them (fire 1..3, smoke 0..3 / 1..3)
-      const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${LEVEL_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.level")}: ${T(`Fire.lvl${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>`
+      // the levels: click to step them (smoke 0..3 / 1..3, dust 1..3); F1: the fire level's chip opens its slider (under the row) and
+      // shows where a ramp is now
+      const now = M.levelNow(s, sharedNowMs()), rmp = s.k === "fire" && Math.abs(now - s.lv) > 0.004;
+      const lvl = s.k === "fire" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" aria-expanded="${openLv === s.id}" style="--mm-tool:${lvInk(s.lv)}" data-tooltip="${esc(`${T("Fire.level")}: ${lvTxt(s.lv)} (${T(`Fire.lvl${Math.round(s.lv)}`)}) · ${T("Fire.lvOpen")}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}<span data-fire-lvnow="${esc(s.id)}">${rmp ? `${lvTxt(now)}→${lvTxt(s.lv)}` : lvTxt(s.lv)}</span></button>`
         : s.k === "dust" ? `<button type="button" class="mm-fire-lv" data-act="lv" data-id="${esc(s.id)}" style="--mm-tool:${DUST_COLOR[s.lv]}" data-tooltip="${esc(`${T("Fire.dustLevel")}: ${T(`Fire.dst${s.lv}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.lvlShort"))}${s.lv}</button>` : "";
       const smk = s.k !== "erase" && s.k !== "dust" ? `<button type="button" class="mm-fire-lv" data-act="sm" data-id="${esc(s.id)}" style="--mm-tool:${SMOKE_COLOR[s.sm]}" data-tooltip="${esc(`${T("Fire.smokeLevel")}: ${T(`Fire.smk${s.sm}`)}`)}"${gm ? "" : " disabled"}>${esc(T("Fire.smkShort"))}${s.sm}</button>` : "";
       const torn = s.k !== "erase" && s.k !== "dust" && s.st !== "fireball" ? `<button type="button" class="mm-fire-lv" data-act="torn" data-id="${esc(s.id)}" aria-pressed="${!!s.tn}" style="--mm-tool:${s.tn ? "#ef8a3a" : "#8c8c8c"}" data-tooltip="${esc(T(s.tn ? "Fire.tornOn" : "Fire.tornOff"))}"${gm ? "" : " disabled"}><i class="fa-solid fa-wave-square" inert></i></button>` : "";
+      const slider = s.k === "fire" && gm && openLv === s.id ? `<li class="mm-fire-lvset" data-lvset="${esc(s.id)}">${fireLvRow(`lvset.${s.id}`, s.lv, { hint: T("Fire.lvSetHint") })}</li>` : "";
       return `<li data-stroke="${esc(s.id)}"><i class="${KIND_ICON[s.k]}" style="color:${s.k === "fire" ? esc(s.c ?? P.fireColor) : KIND_INK[s.k]}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(name)}</span><span class="mm-fire-lvs">${lvl}${smk}${torn}</span>
-        ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>`;
+        ${gm ? `<button type="button" class="mm-fire-del" data-act="del" data-id="${esc(s.id)}" aria-label="${esc(T("Fire.delete"))}" data-tooltip="${esc(T("Fire.delete"))}"><i class="fa-solid fa-trash" inert></i></button>` : "<span></span>"}</li>${slider}`;
     }).join("");
   const statusOf = (st) => game.i18n.format("MOINENMAPS.Fire.status", { n: st.strokes, a: st.areas, l: st.lights });
   const listOf = (rows) => (rows ? `<ul class="mm-d-areas mm-d-objs mm-fire-list" aria-label="${esc(T("Fire.strokes"))}">${rows}</ul>` : `<p class="mm-ws-hint">${esc(T("Fire.empty"))}</p>`);
@@ -148,10 +175,21 @@ function mountPanel(host) {
   };
   // A12c: an EDIT (a stroke painted, erased, undone - kind "edited") rewrites only the status line, the stroke list and the clear
   // button: rebuilding the whole panel (its sliders, pickers and fieldsets) cost a long frame of layout on an older CPU at every release
-  const renderList = () => {
+  // (F1: while a fire level ramps, its chip shows where it is now - 4 times a second, text only)
+  const liveLv = () => {
+    const nowMs = sharedNowMs();
+    for ( const e of host.querySelectorAll("[data-fire-lvnow]") ) {
+      const st = Fire.list().find((x) => x.id === e.dataset.fireLvnow); if ( !st ) continue;
+      const v = M.levelNow(st, nowMs), t = Math.abs(v - st.lv) > 0.004 ? `${lvTxt(v)}→${lvTxt(st.lv)}` : lvTxt(st.lv);
+      if ( e.textContent !== t ) e.textContent = t;
+    }
+  };
+  const lvTick = setInterval(() => { if ( host.isConnected && host.querySelector("[data-fire-lvnow]") ) liveLv(); }, 250);
+  const renderList = (force = false) => {
     const form = host.querySelector(".mm-fire-panel"), s = form?.querySelector(":scope > .mm-d-status"), l = form?.querySelector(":scope > .mm-fire-list, :scope > .mm-ws-hint");
     if ( !s || !l ) { render(); return; }
-    if ( l.contains(document.activeElement) ) return;                // (a list button in focus: left as it is, as before)
+    if ( !force && l.contains(document.activeElement) ) { liveLv(); return; }   // (a list control in focus: left as it is - its live levels move on)
+    if ( l.contains(document.activeElement) ) document.activeElement.blur?.();
     const st = Fire.fireApi.status();
     s.textContent = statusOf(st);
     l.outerHTML = listOf(rowsOf(Fire.params0()));
@@ -161,6 +199,13 @@ function mountPanel(host) {
   const read = (c) => c.matches("input[type=checkbox]") ? c.checked : c.matches("range-picker, input[type=number]") ? Number(c.value) : c.value;
   const onChange = (ev) => {
     if ( isEcho() || !gm ) return;
+    // F1: a stroke's fire level slider, on release: the fire eases there (fire.setLevels' ramp)
+    const lc = ev.target.closest?.("[name^='lvset.']");
+    if ( lc ) {
+      const id = lc.name.slice(6), v = Math.round(Number(lc.value) * 20) / 20, st = Fire.list().find((x) => x.id === id);
+      if ( st && v !== st.lv ) Fire.setLevels(id, { lv: v });
+      return;
+    }
     const c = ev.target.closest?.("[name^='p.']"); if ( !c ) return;
     const k = c.name.slice(2), v = read(c);
     if ( v !== Fire.params0()[k] ) Fire.setParams({ [k]: v });
@@ -172,7 +217,8 @@ function mountPanel(host) {
     else if ( b.dataset.act === "torn" ) { const st = Fire.list().find((x) => x.id === b.dataset.id); if ( st ) Fire.setTorn(st.id, st.tn ? 0 : true); }
     else if ( b.dataset.act === "lv" || b.dataset.act === "sm" ) {
       const st = Fire.list().find((x) => x.id === b.dataset.id); if ( !st ) return;
-      if ( b.dataset.act === "lv" ) Fire.setLevels(st.id, { lv: st.lv % 3 + 1 });
+      if ( b.dataset.act === "lv" && st.k === "fire" ) { openLv = openLv === st.id ? null : st.id; renderList(true); }
+      else if ( b.dataset.act === "lv" ) Fire.setLevels(st.id, { lv: st.lv % 3 + 1 });
       else Fire.setLevels(st.id, { sm: st.k === "smoke" ? st.sm % 3 + 1 : (st.sm + 1) % 4 });
     }
     else if ( b.dataset.act === "clear" ) {
@@ -195,7 +241,7 @@ function mountPanel(host) {
       const tr = host.querySelector(".mm-fire-tear"); if ( tr ) tr.hidden = !P.torn;
     });
   });
-  return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); Hooks.off("moinenMapsFire", id); cancelAnimationFrame(frame); };
+  return () => { host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); Hooks.off("moinenMapsFire", id); cancelAnimationFrame(frame); clearInterval(lvTick); };
 }
 
 /* ---------------------------------------------------------------- wiring */

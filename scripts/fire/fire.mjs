@@ -398,12 +398,23 @@ function relight(list) {
   write(upd);
 }
 
-/** Change a stroke's fire / smoke level afterwards (the dock list): one write, the area is drawn again (no animation). */
-export function setLevels(id, { lv, sm } = {}) {
+/**
+ * Change a stroke's fire / smoke level afterwards (the dock list, the API): one write. F1: a fire stroke's new level (1..3, steps of
+ * 0.05) RAMPS from the level it shows now along a smoothstep over `over` ms (default model.LV_RAMP_MS; 0 = at once), starting
+ * LV_LEAD_MS from now so every client gets the write before it begins; the smoke level changes at once.
+ */
+export function setLevels(id, { lv, sm, over } = {}) {
   const s = strokes.get(id); if ( !s || !game.user.isGM || !M.burningAt(s, sharedNow()) ) return null;
-  const st = M.cleanStroke({ ...s, ...(lv !== undefined ? { lv } : {}), ...(sm !== undefined ? { sm } : {}) });
+  const now = Math.round(sharedNow()), { l0: _a, lt: _b, lr: _c, ...rest } = s;
+  const nlv = lv !== undefined && lv !== null ? M.cleanStroke({ ...s, lv }).lv : s.lv;
+  const ms = over === undefined || over === null ? M.LV_RAMP_MS : Math.min(25000, Math.max(0, Number(over) || 0));
+  const from = s.k === "fire" ? M.levelNow(s, now) : s.lv;
+  const ramp = s.k === "fire" && Math.abs(nlv - from) > 1e-6 && ms > 0 ? { l0: from, lt: now + M.LV_LEAD_MS, lr: ms / 1000 }
+    : s.k === "fire" && nlv === s.lv && s.l0 !== undefined && M.levelNow(s, now) !== s.lv ? { l0: s.l0, lt: s.lt, lr: s.lr } : {};   // (same level: a running ramp runs on)
+  const st = M.cleanStroke({ ...rest, lv: nlv, ...(sm !== undefined ? { sm } : {}), ...ramp });
   strokes.set(id, st); draw(); tell("edited");
-  write({ [sKey(id)]: st });
+  const drop = {}; for ( const k of ["l0", "lt", "lr"] ) if ( s[k] !== undefined && st[k] === undefined ) drop[`${sKey(id)}.-=${k}`] = null;
+  write({ [sKey(id)]: st, ...drop });
   return st;
 }
 
@@ -488,8 +499,8 @@ export const fireApi = {
   addMany: (raws, opts) => addMany(raws, opts), prepare,
   /** Torn edges for one stroke afterwards: true (the scene's tearing), an amount 0.1..1, or false. */
   setTorn: (id, amount) => setTorn(id, amount),
-  /** Change a stroke's levels afterwards: `{ level, smoke }`. */
-  setLevels: (id, { level, smoke } = {}) => setLevels(id, { lv: level, sm: smoke }),
+  /** Change a stroke's levels afterwards: `{ level, smoke, over }` - a fire level 1..3 (steps of 0.05) eases there over `over` ms (default 4000, 0 = at once). */
+  setLevels: (id, { level, smoke, over } = {}) => setLevels(id, { lv: level, sm: smoke, over }),
   /** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null = the scene's). */
   setColor: (id, color) => setColor(id, color),
   /** The colour presets and the palette rule (look.mjs). */

@@ -7,7 +7,8 @@ import { sharedNow } from "../shared-clock.mjs";
  * Painting FIRE AND SMOKE (GM): a fire brush, a smoke brush, a DUST brush (ground dust and grit: dust-model.mjs) and an eraser of this
  * layer. A stroke shows at once while painted (a
  * draft, catching from where it began) and is stored as one stroke object at the pointer-up. Keys while a tool is in hand: [ ] brush
- * size, 1 2 3 the level (fire brush: the fire level; smoke brush: the smoke level - as destruction's 1 2 3), Shift+0..3 the fire
+ * size, 1 2 3 the level (fire brush: the fire level; smoke brush: the smoke level - as destruction's 1 2 3), Shift+[ Shift+] the fire
+ * brush's level in fine steps (0.25 on the 0.25 grid; F1: the fire level is continuous, 1..3 in steps of 0.05), Shift+0..3 the fire
  * brush's own smoke level (0 = no smoke; by key position), Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Escape ends the stroke.
  * Client settings: fireBrush (grid squares), fireStrength, fireWind, fireWindDir, fireLevel, fireSmoke (the fire brush's smoke
  * level), smokeLevel (the smoke brush's), fireStyle ("fire" | "fireball"), fireBrushColor (the fire brush's colour "#rrggbb", "" = the
@@ -42,7 +43,7 @@ export const brush = () => ({
   strength: clamp(Number(opt("fireStrength", 0.8)) || 0.8, 0.1, 1),
   wind: clamp(Number(opt("fireWind", 0.3)) || 0, 0, 1),
   windDir: ((Number(opt("fireWindDir", 0)) || 0) % 360 + 360) % 360,
-  level: clamp(Math.round(Number(opt("fireLevel", 2)) || 2), 1, 3),
+  level: clamp(Math.round((Number(opt("fireLevel", 2)) || 2) * 20) / 20, 1, 3),   // (F1: continuous, steps of 0.05)
   fireSmoke: clamp(Math.round(Number(opt("fireSmoke", 2)) ?? 2), 0, 3),
   smokeLevel: clamp(Math.round(Number(opt("smokeLevel", 2)) || 2), 1, 3),
   style: opt("fireStyle", "fire") === "fireball" ? "fireball" : "fire",
@@ -140,6 +141,11 @@ export function onCanvasReady() {
       else if ( !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "[" || e.key === "]") ) {
         e.preventDefault(); e.stopPropagation();
         game.settings.set(MODULE_ID, "fireBrush", Math.round(clamp(brush().size + (e.key === "]" ? 0.25 : -0.25), 0.25, 10) * 4) / 4);
+      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey && mode === "fire" && (e.code === "BracketLeft" || e.code === "BracketRight") ) {
+        // (F1: the fire level in fine steps - to the next 0.25 up or down)
+        e.preventDefault(); e.stopPropagation();
+        const v = brush().level, up = e.code === "BracketRight", q = up ? Math.floor(v * 4 + 1e-6) / 4 + 0.25 : Math.ceil(v * 4 - 1e-6) / 4 - 0.25;
+        game.settings.set(MODULE_ID, "fireLevel", clamp(q, 1, 3));
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && mode !== "erase" && /^[123]$/.test(e.key) ) {
         e.preventDefault(); e.stopPropagation();
         game.settings.set(MODULE_ID, mode === "smoke" ? "smokeLevel" : mode === "dust" ? "dustLevel" : "fireLevel", Number(e.key));
