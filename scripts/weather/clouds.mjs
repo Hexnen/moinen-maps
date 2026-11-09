@@ -56,6 +56,7 @@ export class CloudDisplay {
     this.ticking = false;
     this.off = new Float32Array(NOCT * 2);
     this.tor = new Float32Array(12);
+    this.fire = new Float32Array(48); this.holes = new Map(); this.fireAt = 0; this.fireT = 0;
     this._p = new PIXI.Point();
     this.build();
   }
@@ -72,7 +73,7 @@ export class CloudDisplay {
       m.state.blendMode = bm; m.state.depthTest = false; m.state.culling = false; m.visible = false; canvas.primary.addChild(m); this.meshes.push(m); return m; };
     this.shadow = place(new PIXI.Mesh(this.gScene, new PIXI.Shader(prog("shadow", CLOUD_VERT, SHADOW_FRAG), { ...common(sr, 0.35), uShade: new Float32Array(4) })), 254, 0);
     this.rays = place(new PIXI.Mesh(this.gScene, new PIXI.Shader(prog("rays", CLOUD_VERT, RAYS_FRAG), { ...common(sr, 1.2), uRay: new Float32Array(4) })), 997, Infinity);
-    this.body = place(new PIXI.Mesh(this.gAll, new PIXI.Shader(prog("body", CLOUD_VERT, BODY_FRAG), { ...common(R, 2.5), uCl: new Float32Array(4), uTor: this.tor, uTorN: 0,
+    this.body = place(new PIXI.Mesh(this.gAll, new PIXI.Shader(prog("body", CLOUD_VERT, BODY_FRAG), { ...common(R, 2.5), uCl: new Float32Array(4), uTor: this.tor, uTorN: 0, uFire: this.fire, uFireN: 0,
       uOff: this.off, uSeed: 1 })), 996, Infinity);
     // the two texture passes: one quad in texel units, drawn straight into its texture (as cells.mjs)
     this.rtQuad = new PIXI.Geometry().addAttribute("aVertexPosition", new Float32Array(8), 2).addIndex([0, 1, 2, 0, 2, 3]);
@@ -163,9 +164,12 @@ export class CloudDisplay {
     const ru = this.rays.shader.uniforms;
     ru.uRay[0] = raysOn ? this.cp * CG.rays * raysK : 0; ru.uRay[1] = this.cover; ru.uRay[2] = thr; ru.uRay[3] = Math.min(1, CG.body * ss(this.cp * 1.4) * sky);
     this.rays.visible = raysOn;
-    const bu = this.body.shader.uniforms, bodyA = CG.body * ss(this.cp * 1.4) * sky;
+    // (at night the bodies thin: under the dark sky they are seen mostly as the stars and map they hide, and where a light such as a
+    // fire reaches them the scene's lighting would show them as flat bright shapes)
+    const bu = this.body.shader.uniforms, bodyA = CG.body * ss(this.cp * 1.4) * sky * (1 - 0.25 * night);
     bu.uCl[0] = thr; bu.uCl[1] = soft; bu.uCl[2] = bodyA; bu.uCl[3] = 0.11; bu.uSeed = this.seed;
     this.vortex();
+    this.fireHoles(now);
     this.body.visible = bodyA > 0.002;
     this.stats.texels = w * h; this.stats.tps = tps; this.stats.rays = raysOn ? nRays : 0; this.stats.cover = this.cover; this.stats.thr = thr;
     this.stats.tickMs = performance.now() - t0;
@@ -176,6 +180,42 @@ export class CloudDisplay {
     const list = vortices(), n = Math.min(3, list.length), T = this.tor;
     for ( let i = 0; i < n; i++ ) { const v = list[i]; T[i * 4] = v.x; T[i * 4 + 1] = v.y; T[i * 4 + 2] = Math.max(2, v.R * 1.3); T[i * 4 + 3] = v.p; }
     this.body.shader.uniforms.uTorN = n;
+  }
+
+  /**
+   * Burning fire opens the cloud bodies over it (its heat breaks the cloud; seen from above the flames would otherwise vanish under
+   * a cloud, or show through as flat bright shapes where the fire's own light skips the scene's darkness). The fire strokes
+   * (api.fire.list, read 4 times a second) as up to 12 circles along them; each opening eases in and out over ~2 s.
+   */
+  fireHoles(now) {
+    const H = this.holes, g = this.grid;
+    if ( now - this.fireAt > 250 || now < this.fireAt ) {
+      this.fireAt = now;
+      let list = [];
+      try { list = game.modules.get("moinen-maps")?.api?.fire?.list?.() ?? []; } catch { list = []; }
+      for ( const h of H.values() ) h.want = 0;
+      for ( const f of list ) {
+        if ( f.k !== "fire" || !Array.isArray(f.p) || f.p.length < 2 ) continue;
+        const r = (f.r ?? 50) / g, pts = [];
+        for ( let i = 0; i + 1 < f.p.length; i += 2 ) pts.push([f.p[i] / g, f.p[i + 1] / g]);
+        // circles along the stroke, about one reach apart
+        const step = Math.max(0.5, r * 1.2);
+        const add = (x, y) => { const key = `${f.id}:${Math.round(x * 4)}:${Math.round(y * 4)}`; const h = H.get(key); if ( h ) h.want = 1; else H.set(key, { x, y, r: r + 2.5, w: 0, want: 1 }); };
+        add(pts[0][0], pts[0][1]);
+        for ( let i = 1; i < pts.length; i++ ) {
+          const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.round(L / step));
+          for ( let j = 1; j <= n; j++ ) add(x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n);
+        }
+      }
+    }
+    const dt = Math.min(0.25, Math.max(0, (now - (this.fireT || now)) / 1000)); this.fireT = now;
+    const F = this.fire; let n = 0;
+    for ( const [k, h] of H ) {
+      h.w += Math.sign(h.want - h.w) * Math.min(Math.abs(h.want - h.w), dt / 2);
+      if ( h.w <= 0 && !h.want ) { H.delete(k); continue; }
+      if ( n < 12 ) { F[n * 4] = h.x; F[n * 4 + 1] = h.y; F[n * 4 + 2] = h.r; F[n * 4 + 3] = h.w * h.w * (3 - 2 * h.w); n++; }
+    }
+    this.body.shader.uniforms.uFireN = n;
   }
 
   ensure(w, h) {

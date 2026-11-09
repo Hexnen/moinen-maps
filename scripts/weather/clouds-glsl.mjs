@@ -189,7 +189,12 @@ void main() {
   vec4 b = L4(p);
   // the shafts: the light that came through, its floor (the open-sky glow) pushed down as the sky closes
   float x = max(0.0, b.a - 0.18 * (1.0 - uRay.y)) / (1.0 - 0.18 * (1.0 - uRay.y));
-  float a = uRay.x * edgeFade(p) * pow(x, 1.6);
+  // what makes a shaft visible is lit air beside shadowed air: the light above its surroundings (a ring of six taps 2.5 squares
+  // out) carries most of it; the even glow of a wide open gap only a little (so a gap filling the view is no milky veil)
+  float m = 0.0;
+  for ( int i = 0; i < 6; i++ ) { float t = float(i) * 1.0472; m += L4(p + 2.5 * vec2(cos(t), sin(t))).a; }
+  float hp = max(0.0, b.a - m / 6.0);
+  float a = uRay.x * edgeFade(p) * min(1.0, 0.45 * pow(x, 1.6) + 2.4 * hp);
   // drawn over the cloud bodies (the shafts glow up through the gaps and show through the thinner deck), dimmed where a body is
   a *= 1.0 - 0.6 * uRay.w * smoothstep(uRay.z - 0.01, uRay.z + 0.08, b.r);
   vec3 col = mix(vec3(1.0, 0.89, 0.66), vec3(0.62, 0.72, 0.95), uNight) * mix(0.40, 0.16, uNight);
@@ -198,7 +203,8 @@ void main() {
 
 // the BODIES, seen from above: billowed domes of cloud lit by the sun from the upper left (the light texture: each face's slope toward
 // the sun, the cloud's own shade on its far side), white tops, blue-grey lee sides, translucent wispy rims (two fine octaves riding
-// with the cloud at full resolution); thinned around tornadoes (their own wall cloud and deck are there)
+// with the cloud at full resolution); thinned around tornadoes (their own wall cloud and deck are there) and open over burning fire
+// (its heat breaks the cloud above it, and the flames stay in view)
 export const BODY_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
@@ -206,6 +212,8 @@ in vec2 vW;
 uniform vec4 uCl;            // threshold, its soft width, opacity (x presence x mode), detail
 uniform vec4 uTor[3];        // tornadoes: x, y, reach (squares), presence
 uniform int uTorN;
+uniform vec4 uFire[12];      // burning fire: x, y, reach (squares), presence
+uniform int uFireN;
 out vec4 fragColor;
 ${STAGE}
 ${NOISE}
@@ -224,11 +232,17 @@ void main() {
     float r = length(p - uTor[k].xy) / uTor[k].z;
     a *= 1.0 - 0.85 * uTor[k].w * (1.0 - smoothstep(0.35, 1.0, r));
   }
+  for ( int k = 0; k < 12; k++ ) {
+    if ( k >= uFireN ) break;
+    float r = length(p - uFire[k].xy) / uFire[k].z;
+    a *= 1.0 - 0.95 * uFire[k].w * (1.0 - smoothstep(0.45, 1.0, r + 0.25 * (n + 0.5) * r));
+  }
   a *= uCl.z * edgeFade(p);
   if ( a <= 0.001 ) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
   float l = clamp(b.g + (1.0 - th) * 0.22 + n * 0.10, 0.0, 1.0);
   vec3 sun = vec3(1.0, 0.995, 0.98), shade = vec3(0.68, 0.72, 0.81), deep = vec3(0.50, 0.55, 0.66);
   vec3 c = mix(mix(deep, shade, smoothstep(0.0, 0.42, l)), sun, smoothstep(0.42, 0.9, l));
-  c = mix(c, c * vec3(0.55, 0.60, 0.78), uNight * 0.5);
+  // under the moon: silvered and cool, not darkened here (the scene's darkness dims them like the map, so they keep reading lighter)
+  c = mix(c, vec3(dot(c, vec3(0.333))) * vec3(0.84, 0.90, 1.06), uNight * 0.7);
   fragColor = vec4(c * a, 1.0 - a);
 }`;
