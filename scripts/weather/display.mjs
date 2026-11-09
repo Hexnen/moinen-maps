@@ -36,6 +36,24 @@ import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
  */
 const KINDS = [["snow", 1, 64], ["sand", 2, 64], ["dust", 3, 64], ["embers", 4, 64], ["wind", 5, 64]];
 const PART_MAX = 60000;
+
+/** Each particle kind's live slots per tile per layer in the client state `st` (null: off), and the embers' big-spark share. */
+export function partDensOf(st) {
+  const fx = st?.fx ?? {}, perf = st?.perf ?? 1, noNear = st?.noNear, on = (e) => !!fx[e] && fx[e].p > 0.0005;
+  const sn = fx.snow, SG = M.gates("snow", sn?.s ?? 0), sp = sn?.p ?? 0;
+  const sa = fx.sand, AG = M.gates("sand", sa?.s ?? 0), ap_ = sa?.p ?? 0;
+  const du = fx.dust, DG = M.gates("dust", du?.s ?? 0), dp = du?.p ?? 0;
+  const em = fx.embers, EG = M.gates("embers", em?.s ?? 0), ep = em?.p ?? 0;
+  const wi = fx.wind, WG = M.gates("wind", wi?.s ?? 0), wp = wi?.p ?? 0;
+  return {
+    snow: on("snow") ? [SG.mid * sp * perf, SG.far * sp * perf, noNear ? 0 : SG.near * sp * perf, SG.drift * sp * perf * 10.7] : null,
+    sand: on("sand") ? [AG.grit * ap_ * perf, 0, 0, 0] : null,
+    dust: on("dust") ? [DG.motes * dp * perf, 0, 0, 0] : null,
+    embers: on("embers") ? [EG.spark * ep * perf, 0, 0, 0] : null,
+    wind: on("wind") ? [WG.lines * wp * perf, WG.debris * wp * perf, 0, 0] : null,
+    embBig: EG.big
+  };
+}
 const BLEND = "MM_WEATHER";
 const MAX_INSTANCES = 150000;
 export const SKY = [0.80, 0.86, 0.93];
@@ -131,7 +149,7 @@ export class WeatherDisplay {
     this.air = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(0))), 995, Infinity);
     this.rainMeshes = [this.splash, this.air];
     // particles: one instanced geometry + mesh per kind
-    this.parts = {}; this.partGeoms = [];
+    this.parts = {}; this.partGeoms = []; this.densR = {};
     for ( const [name, kind, ts] of KINDS ) {
       const pg = new PIXI.Geometry()
         .addAttribute("aVertexPosition", [ox, oy, x1, oy, x1, y1, ox, y1], 2)
@@ -139,7 +157,8 @@ export class WeatherDisplay {
         .addIndex([0, 1, 2, 0, 2, 3]);
       pg.instanced = true; pg.instanceCount = 0;
       this.partGeoms.push(pg);
-      this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0,
+      this.densR[name] = new Float32Array(48).fill(1);
+      this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0, uDensR: this.densR[name],
         uTiles: new Float32Array([0, 0, 1, 1]), uTileSz: ts, uPer: new Float32Array(4), uDens: new Float32Array(4), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]),
         uWindDir: new Float32Array([1, 0]), uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array(4), uI: 1, uAlpha: 1,
         uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, uPx: 1, translationMatrix: new PIXI.Matrix().toArray(true) })), 995, Infinity);
@@ -206,6 +225,7 @@ export class WeatherDisplay {
     const on = (e) => !!fx[e] && fx[e].p > 0.0005;
     const gu2 = this.ground.shader.uniforms, hz = this.haze.shader.uniforms;
     this.partDens = {}; this.reach = {};
+    const D = partDensOf(st);
     const setPart = (name, dens, windDir, speedK, vf, I) => {
       this.partDens[name] = dens;
       const u = this.parts[name].shader.uniforms;
@@ -215,7 +235,7 @@ export class WeatherDisplay {
     // SNOW
     const sn = fx.snow, SG = M.gates("snow", sn?.s ?? 0), sp = sn?.p ?? 0;
     if ( on("snow") ) {
-      setPart("snow", [SG.mid * sp * perf, SG.far * sp * perf, noNear ? 0 : SG.near * sp * perf, SG.drift * sp * perf * 10.7], wd, wsp, [SG.vMid, SG.vFar, 60, 0], sp);
+      setPart("snow", D.snow, wd, wsp, [SG.vMid, SG.vFar, 60, 0], sp);
       const Wm = wsp * 1.3 * 3.4 * 1.15 + 16;
       this.reach.snow = [Math.min(0, -wd[0] * Wm) - 16, Math.max(0, -wd[0] * Wm) + 16, Math.min(0, -wd[1] * Wm) - lift * 250 - 16, Math.max(0, -wd[1] * Wm) + 16];
       this.lastThick = SG.thick;
@@ -226,7 +246,7 @@ export class WeatherDisplay {
     // SAND (a sandstorm blows: at least 2.4 squares / s)
     const sa = fx.sand, AG = M.gates("sand", sa?.s ?? 0), ap_ = sa?.p ?? 0, sandSp = Math.max(wsp, 0.6 * SPEED_SQ * cps);
     if ( on("sand") ) {
-      setPart("sand", [AG.grit * ap_ * perf, 0, 0, 0], wd, sandSp, [AG.hop, AG.len, 0, 0], ap_);
+      setPart("sand", D.sand, wd, sandSp, [AG.hop, AG.len, 0, 0], ap_);
       const R = sandSp * 2.4 + 8;
       this.reach.sand = [Math.min(0, wd[0] * R) - 8, Math.max(0, wd[0] * R) + 8, Math.min(0, wd[1] * R) - lift * 9 - 8, Math.max(0, wd[1] * R) + 8];
     }
@@ -237,7 +257,7 @@ export class WeatherDisplay {
     // DUST (calm air: a slow drift)
     const du = fx.dust, DG = M.gates("dust", du?.s ?? 0), dp = du?.p ?? 0, dustSp = Math.max(4, 0.12 * wsp);
     if ( on("dust") ) {
-      setPart("dust", [DG.motes * dp * perf, 0, 0, 0], wd, dustSp, [0, 0, 0, 0], dp);
+      setPart("dust", D.dust, wd, dustSp, [0, 0, 0, 0], dp);
       const R = dustSp * 10 + 8;
       this.reach.dust = [Math.min(0, wd[0] * R) - 8, Math.max(0, wd[0] * R) + 8, Math.min(0, wd[1] * R) - lift * 60 - 8, Math.max(0, wd[1] * R) + 8];
     }
@@ -246,7 +266,7 @@ export class WeatherDisplay {
     // EMBERS (sparks carried by the wind; at least 1.6 squares / s)
     const em = fx.embers, EG = M.gates("embers", em?.s ?? 0), ep = em?.p ?? 0, embSp = Math.max(wsp, 0.4 * SPEED_SQ * cps);
     if ( on("embers") ) {
-      setPart("embers", [EG.spark * ep * perf, 0, 0, 0], wd, embSp, [EG.swarm, EG.big, 0, 0], ep);
+      setPart("embers", D.embers, wd, embSp, [EG.swarm, EG.big, 0, 0], ep);
       // a spark crosses its anchor mid-life: half its flight either way along the wind (+ the sway, + its height)
       const R = embSp * 1.3 * 3.4 * 1.46 * 0.5 + 16;
       this.reach.embers = [-Math.abs(wd[0]) * R - 16, Math.abs(wd[0]) * R + 16, -Math.abs(wd[1]) * R - lift * 80 - 16, Math.abs(wd[1]) * R + 16];
@@ -257,7 +277,7 @@ export class WeatherDisplay {
     // breeze (1.4 squares / s) even when the scene wind is calm, slower at the lower levels
     const wi = fx.wind, WG = M.gates("wind", wi?.s ?? 0), wp = wi?.p ?? 0, windSp = Math.max(wsp, 0.35 * SPEED_SQ * cps) * WG.spd;
     if ( on("wind") ) {
-      setPart("wind", [WG.lines * wp * perf, WG.debris * wp * perf, 0, 0], wd, windSp, [WG.lineGate, WG.lineLen, WG.bob, 0], wp);
+      setPart("wind", D.wind, wd, windSp, [WG.lineGate, WG.lineLen, WG.bob, 0], wp);
       const R = windSp * 1.4 * 3.4 * 1.2 * 0.5 + 24;
       this.reach.wind = [-Math.abs(wd[0]) * R - 24, Math.abs(wd[0]) * R + 24, -Math.abs(wd[1]) * R - lift * 30 - 24, Math.abs(wd[1]) * R + 24];
     }
@@ -270,6 +290,31 @@ export class WeatherDisplay {
     gu2.uAny = anyGround ? 1 : 0;
     this.ground.visible = anyGround;
     this.haze.visible = hz.uSandH[0] > 0.001 || hz.uDustH[0] > 0.001 || hz.uSmoke[0] > 0.001;
+    this.densHist();
+  }
+
+  /**
+   * D7: each particle kind's layer densities then / now at ages 0..10 s of now (uDensR; [11]: the largest; embers .w: the big-spark
+   * share then), from the client state at those times (`stAt`, set by weather.mjs): the shader gates a slot by the density at its
+   * birth, so a strength ramp turns no particle on or off mid-life. All exactly 1 (not computed) once the weather has been steady for
+   * a particle's whole life (10 s): the steady weather is unchanged.
+   */
+  densHist() {
+    const st = this.state; if ( !this.densR || !st ) return;
+    const now = this.now?.() ?? Date.now(), k = st.key, cur = partDensOf(st);
+    const ramp = !!this.stAt && !!k && now - (k.t + (k.dur ?? 0)) <= 10500, past = [cur];
+    if ( ramp ) for ( let a = 1; a <= 10; a++ ) past.push(partDensOf(this.stAt(now - a * 1000)));
+    for ( const [name] of KINDS ) {
+      const R = this.densR[name], c = cur[name];
+      if ( !R ) continue;
+      if ( !ramp ) R.fill(1);
+      else for ( let i = 0; i < 4; i++ ) {
+        let mx = 1;
+        for ( let a = 0; a <= 10; a++ ) { const d = past[a][name]?.[i] ?? 0, c0 = c?.[i] ?? 0, r = c0 > 0 ? Math.min(d / c0, 1e3) : d > 0 ? 1e3 : 1; R[a * 4 + i] = r; mx = Math.max(mx, r); }
+        R[44 + i] = mx;
+      }
+      if ( name === "embers" ) for ( let a = 0; a < 12; a++ ) R[a * 4 + 3] = ramp ? past[Math.min(a, 10)].embBig : cur.embBig;
+    }
   }
 
   /** The snow score threshold for a cover share (the scene's own quantile; none without the ground info). */
@@ -304,7 +349,7 @@ export class WeatherDisplay {
     if ( !g || !st || !canvas.stage ) return;
     // the state moves along the timeline at most 12 times a second (the engine resolves it; may destroy this display)
     const s12 = Math.floor((this.now?.() ?? Date.now()) * 0.012);
-    if ( s12 !== this.s12 ) { this.s12 = s12; this.onStep?.(); if ( !this.geo ) return; }
+    if ( s12 !== this.s12 ) { this.s12 = s12; this.onStep?.(); if ( !this.geo ) return; this.densHist(); }
     const T = this.clock();
     const gq = this.stats.guard = weatherQ(), fk = footprintK() * (0.5 + 0.5 * gq);   // (the guard: fewer drops / particles / glints, back at 1; uK itself is unused by the look)
     this.ground.shader.uniforms.uTime = T; this.ground.shader.uniforms.uK = fk; this.ground.shader.uniforms.uQ = gq;   // (uQ: the glints thin)
@@ -344,11 +389,11 @@ export class WeatherDisplay {
       const px0 = Math.max(0, Math.floor((ax0 - R[1]) / TS)), py0 = Math.max(0, Math.floor((ay0 - R[3]) / TS));
       const px1 = Math.min(Math.ceil(g.aw / TS) - 1, Math.floor((ax1 - R[0]) / TS)), py1 = Math.min(Math.ceil(g.ah / TS) - 1, Math.floor((ay1 - R[2]) / TS));
       const pnx = Math.max(0, px1 - px0 + 1), pny = Math.max(0, py1 - py0 + 1), pt = pnx * pny;
-      const dd = this._d4, pp = this._pp;
-      let want = 0; for ( let i = 0; i < 4; i++ ) { dd[i] = d0[i] * gq; want += Math.ceil(dd[i]); }
+      const dd = this._d4, pp = this._pp, DR = this.densR[name];   // (D7: a layer keeps the slots of the densest birth still alive: x its largest ratio)
+      let want = 0; for ( let i = 0; i < 4; i++ ) { dd[i] = d0[i] * gq; want += Math.ceil(dd[i] * Math.max(1, DR[44 + i])); }
       want *= pt;
       if ( want > PART_MAX ) { const f = PART_MAX / want; for ( let i = 0; i < 4; i++ ) dd[i] *= f; }
-      for ( let i = 0; i < 4; i++ ) pp[i] = Math.ceil(dd[i] - 1e-6);
+      for ( let i = 0; i < 4; i++ ) pp[i] = Math.ceil(dd[i] * Math.max(1, DR[44 + i]) - 1e-6);
       const ps = pp[0] + pp[1] + pp[2] + pp[3];
       const pn = ps > 0 ? pt * ps : 0;
       m.geometry.instanceCount = pn;

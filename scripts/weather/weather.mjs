@@ -167,7 +167,7 @@ export function refresh() {
   }
   const g = geo();
   display ??= new WeatherDisplay();
-  display.now = sharedNow;
+  display.now = sharedNow; display.stAt = clientState;
   display.build(g, P.seed);
   sources(g);
   display.setSources(info, shelter);
