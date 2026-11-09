@@ -79,7 +79,7 @@ export async function emu({ hz = 60, k = 1, cap60 = false, phases = [[3, 0], [8,
  * frame for `secs`; every 0.5 s view-smooth's period estimate (api.view.pacing) and the guard's (frame-guard: the shortest recurring
  * rAF interval), the frames per second and q. The first climbs with the overload, the second must stay the display's.
  */
-export async function vsyncCheck({ load = 26, secs = 6, after = 8 } = {}) {
+export async function vsyncCheck({ load = 26, secs = 6, after = 8 } = {}) {   // (rows: t, load, fps, view-smooth period, the guard's period, q, the frames' median work)
   const FG = await import("../scripts/frame-guard.mjs");
   const T = canvas.app.ticker, rows = [], t0 = performance.now();
   let on = false, n = 0;
@@ -91,7 +91,8 @@ export async function vsyncCheck({ load = 26, secs = 6, after = 8 } = {}) {
       on = s >= 3 && s < 3 + secs; n = 0; await sleep(500);
       FG.pacing(performance.now() + 2000);   // (re-read now: it caches for a second)
       const v = api().view.pacing(), lp = FG.lastPacing();
-      rows.push([s + 0.5, on ? load : 0, n * 2, v.period ? +v.period.toFixed(2) : null, lp.period ? +lp.period.toFixed(2) : null, +FG.G.q.toFixed(2)]);
+      const bz = FG.vsyncInfo?.().busy;
+      rows.push([s + 0.5, on ? load : 0, n * 2, v.period ? +v.period.toFixed(2) : null, lp.period ? +lp.period.toFixed(2) : null, +FG.G.q.toFixed(2), bz == null ? null : +bz.toFixed(1)]);
     }
   } finally { T.remove(burn); }
   return rows;

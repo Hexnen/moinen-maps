@@ -2,7 +2,7 @@
 // bench scene: the fire alone (20 fires) and the fire + rain, each on an emulated 60 Hz, 144 Hz and 165 Hz (Foundry's 60 fps cap)
 // display: load off, a heavy load, off, a load the guard can relieve, off. Prints q / fire level / fps / late share per second.
 //   node dev/guard-live-run.mjs [--dpr 1,2] [--port 9444] [--gm http://127.0.0.14:30001] [--gmId 3dzfyqQ1n98OkCwE] [--profile <dir>]
-//        [--cases fire,fire+rain] [--hz 60,144,165] [--label guard] [--phases '[[3,0],[25,"mid"],[25,0]]'] [--vsync]
+//        [--cases fire,fire+rain] [--hz 60,144,165] [--label guard] [--phases '[[3,0],[25,"mid"],[25,0]]'] [--vsync [--vsyncSecs 6]]
 // Writes dev/out/guard/<label>-dpr<k>.json. Chrome is started and stopped here (its profile deleted unless --profile is given).
 import fs from "node:fs";
 import path from "node:path";
@@ -43,11 +43,11 @@ for ( const dpr of DPRS ) {
     console.log("scene", JSON.stringify(await gm.ev(`${SB} return await S.ensureScene();`)));
     if ( process.argv.includes("--vsync") ) {
       await gm.ev(`${SB} await S.setLayers({ fire: 20 }); await S.ready(); canvas.pan({ x: 768, y: 512, scale: 1 }); return 1;`);
-      const v = await gm.ev(`${GL} return await E.vsyncCheck();`);
+      const VS = Number(arg("vsyncSecs", 6)), v = await gm.ev(`${GL} return await E.vsyncCheck({ secs: ${VS} });`);
       console.log(`
-=== dpr ${dpr} vsync under a real overload (26 ms CPU burn a frame from 3 s to 9 s, real ticker)
-  t    load fps  view-smooth  guard  q`);
-      for ( const r of v ) console.log(`  ${String(r[0]).padStart(4)} ${String(r[1]).padStart(4)} ${String(r[2]).padStart(3)}  ${String(r[3]).padStart(6)}       ${String(r[4]).padStart(6)} ${r[5]}`);
+=== dpr ${dpr} vsync under a real overload (26 ms CPU burn a frame from 3 s to ${3 + VS} s, real ticker)
+  t    load fps  view-smooth  guard  q     work`);
+      for ( const r of v ) console.log(`  ${String(r[0]).padStart(4)} ${String(r[1]).padStart(4)} ${String(r[2]).padStart(3)}  ${String(r[3]).padStart(6)}       ${String(r[4]).padStart(6)} ${String(r[5]).padEnd(5)} ${r[6]}`);
       res.push({ vsync: v });
     }
     for ( const cs of CASES ) {
