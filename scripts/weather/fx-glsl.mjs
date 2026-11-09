@@ -225,7 +225,8 @@ void main() {
     vec2 P = Xg - vec2(0.0, lift * z * par), Pp = Xgp - vec2(0.0, lift * zp * par);
     float fl = hu(key, int(floor(uTime * 10.0)), sd + 20);
     float cI = clamp(floor(age * 2.6 + fl * 1.2 + h[8] * 0.8 - 0.4), 0.0, 4.0);
-    float big = h[7] > 0.85 && cI < 2.0 && uVF.y > 0.5 && dp > 0.6 ? 1.0 : 0.0;
+    // big sparks: the share grows 0 -> 15 % with uVF.y 0 -> 1 (the threshold is exactly 1.0 at 0, which no hash passes, and 0.85 at 1)
+    float big = h[7] > 0.85 + 0.15 * (1.0 - uVF.y) && cI < 2.0 && dp > 0.6 ? 1.0 : 0.0;
     float low = z * par < 22.0 && cI < 3.0 && dp > 0.5 ? 2.0 : 0.0;
     vA = vec4(P, Pp); vB = vec4(Xg, cI, big + low + 4.0 * floor(dp * 15.99));   // flags + 4 x depth (0..15)
     lo = min(min(P, Pp), Xg) - M_ - 2.3; hi = max(max(P, Pp), Xg) + M_ + 2.3;
@@ -405,7 +406,7 @@ void smoothFields(vec2 c) {
     vec2 v = uSandW.xy * uSandW.z * 0.8 / 58.0;
     float bil = drift3a(c / 58.0, v, uTime, 40.0, uSeed + 121);
     sLitW = uQ >= 1.0 ? 1.0 : smoothstep(0.5, 0.8, uQ);
-    sLit = uSandH.y > 0.5 && sLitW > 0.0 ? bil - drift3a((c + 3.0) / 58.0, v, uTime, 40.0, uSeed + 121) : 0.0;
+    sLit = uSandH.y > 0.0 && sLitW > 0.0 ? bil - drift3a((c + 3.0) / 58.0, v, uTime, 40.0, uSeed + 121) : 0.0;
     float pr = dot(c, uSandW.xy), ac = -c.x * uSandW.y + c.y * uSandW.x;
     float rag = 140.0 * (fbm2(vec2(ac / 95.0, pr / 300.0), uSeed + 141) - 0.5);
     float fr = clamp(gustEnv(uTime - (pr + rag) / (uCps * 4.0), uSeed), 0.0, 1.2);
@@ -429,7 +430,9 @@ vec4 cellHaze(vec2 c) {
     float dens = sDens, lit = sLit;
     float l = stairs(dens * 3.2 + (nz - 0.5) * 0.2, 3.0);
     float m = mix(lv3(l, 0.20, 0.34, 0.34), lv3(l, 0.32, 0.55, 0.78), uSandH.y);
-    float dd = uSandH.y > 0.5 ? (lit >= 0.0 ? mix(0.02, 0.09, smoothstep(0.0, 0.008, lit)) : mix(0.02, -0.06, smoothstep(0.0, 0.008, -lit))) : 0.02;
+    // the lit / shadow sides grow with the 3-band look (uSandH.y 0..1): mix(0.02, mix(0.02, x, t), y) = mix(0.02, x, t * y), so y 0
+    // and 1 are the old off / full sides bit for bit (t * 1.0 == t, t * 0.0 == 0) and nothing steps in between
+    float dd = lit >= 0.0 ? mix(0.02, 0.09, smoothstep(0.0, 0.008, lit) * uSandH.y) : mix(0.02, -0.06, smoothstep(0.0, 0.008, -lit) * uSandH.y);
     if ( sLitW < 1.0 ) dd = mix(0.02, dd, sLitW);
     if ( m > 0.0 ) f = mixTo(f, clamp(uAvg * 0.35 + OCHRE * 0.75 + dd, 0.0, 1.0), m);
   }
