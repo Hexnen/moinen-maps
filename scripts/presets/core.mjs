@@ -32,6 +32,8 @@
  * -1..1 (a level shift), aftermath: seconds | null | undefined (the preset's) }; env { grid (px per square), rect { x, y, width,
  * height } (the scene), now (shared clock ms), wind { dir, speed } }. Returns a PLAN (see expand) or throws on a bad definition.
  */
+import { raysOf } from "./rays.mjs";   // (the "rays" place: radial cracks, a stroke per ray - rays.mjs)
+
 export const VERSION = 1;
 /**
  * The longest run (ms) of one timed damage stroke along a walk. The damage layer's entry runs a followed path in at most 2200 ms
@@ -44,8 +46,8 @@ export const DT_STEP = 2.5, HIT_DT = 250;
 export const GESTURES = ["point", "throw", "line", "run"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
-export const PLACES = ["centre", "ring", "scatter", "walk"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer"];
+export const PLACES = ["centre", "ring", "scatter", "walk", "rays"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "landing", "airRing"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
@@ -111,6 +113,12 @@ function cleanPlace(p, kind, errors, where) {
   if ( m === "ring" || m === "scatter" ) { out.n = range(p.n, [1, 1], ...LIMITS.n).map(Math.round); out.d = range(p.d, [0, 1], ...LIMITS.d); }
   if ( m === "scatter" ) out.bias = num(p.bias, 1, 0.2, 5);
   if ( m === "walk" && p.pick !== undefined ) out.pick = num(p.pick, 1, 0, 1);
+  if ( m === "rays" ) {   // (rays.mjs: radial cracks, destruction only)
+    if ( kind !== "destruction" ) errors.push(`${where}: a rays place outside a destruction layer`);
+    out.n = range(p.n, [5, 7], 1, 12).map(Math.round); out.d = range(p.d, [1.5, 3], ...LIMITS.d); out.from = num(p.from, 0.4, 0, 4);
+    out.w = [num(Array.isArray(p.w) ? p.w[0] : p.w, 0.3, 0.03, 1), num(Array.isArray(p.w) ? p.w[1] : p.w, 0.15, 0.03, 1)];
+    out.ms = range(p.ms, [350, 500], 0, 2000); out.fwd = num(p.fwd, 0, 0, 1); out.bend = num(p.bend, 0.5, 0, 1);
+  }
   return out;
 }
 
@@ -166,6 +174,7 @@ function cleanLayer(L, i, errors) {
       if ( L.every !== undefined ) out.every = Math.round(num(L.every, 1, 1, 20));
       if ( L.lv !== undefined ) out.lv = intLv(L.lv, 2);
       if ( L.shake !== undefined ) out.shake = num(L.shake, 0, 0, 1);
+      if ( L.reach !== undefined ) out.reach = num(L.reach, 2, 0.2, 8);
       break;
     case "cue":
       out.kind = CUES.includes(L.kind) ? L.kind : (errors.push(`${where}: unknown cue "${L.kind}"`), "screen");
@@ -259,7 +268,7 @@ export function walkHits(W, a, b, { seed, grid, size }) {
 function placeOf(L, P, r, ctx) {
   const { c, grid, size, hits } = ctx, sq = grid * size;
   switch ( L.place.m ) {
-    case "centre": return [{ x: c[0], y: c[1], t: 0 }];
+    case "centre": case "rays": return [{ x: c[0], y: c[1], t: 0 }];
     case "ring": case "scatter": {
       const n = r.int(L.place.n), out = [], a0 = r() * 6.2832;
       for ( let i = 0; i < n; i++ ) {
@@ -327,6 +336,13 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
     if ( !pts.length && L.l !== "cue" && L.l !== "accent" ) continue;
     switch ( L.l ) {
       case "destruction": {
+        if ( L.place.m === "rays" ) {
+          // a stroke per ray (rays.mjs), each with its timed path from the centre out: key `${id}~k`
+          const rays = raysOf(L.place, { c, sq, dir: plan.dir, r, lvOf: () => levelOf(L, r, power), inRect: (p) => inRect(p, R) });
+          rays.forEach((ray, k) => plan.destruction.push({ key: `${L.id}~${k}`, type: L.type, cause: L.cause, discs: ray.discs, path: ray.path,
+            a: [ray.path[0][0], ray.path[0][1]], b: [ray.path.at(-1)[0], ray.path.at(-1)[1]], pr: { ...(L.pr ?? {}), directional: true }, at }));
+          break;
+        }
         const groups = L.place.m === "walk" && L.lanes === "each" ? def.walk.lanes.map((_, j) => pts.filter((p) => p.lane === j)) : [pts];
         groups.forEach((g, j) => {
           if ( !g.length ) return;
@@ -426,6 +442,9 @@ function accentOf(L, at, { plan, hits, from }) {
   if ( L.shake ) base.shake = L.shake;
   switch ( L.kind ) {
     case "fallShadow": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.dir };
+    // (the superhero landing, landing-fx.mjs: tok - it lands on a token, which is the hero: no body is drawn)
+    case "landing": return { ...base, x: plan.at[0], y: plan.at[1], dir: plan.dir, tok: !!plan.gesture.from };
+    case "airRing": return { ...base, x: plan.at[0], y: plan.at[1], size: plan.size, ...(L.reach !== undefined ? { reach: L.reach } : {}) };
     case "throwArc": return { ...base, from: plan.gesture.a, to: plan.at };
     case "bounce": return { ...base, x: plan.at[0], y: plan.at[1], from: plan.gesture.a, dir: plan.dir };
     case "muzzle": return { ...base, from: from ?? null, dir: plan.dir, hits: from ? hits.filter((h) => h.lane === 0).map((p) => [p.x, p.y, p.t, p.lane]) : [] };

@@ -2079,6 +2079,8 @@
   "MOINENMAPS.DPreset.uziHint": "Przeciągnij linię, po której idzie seria (kliknięcie to krótka seria). Poszarpany ścieg lekkich trafień, który podjeżdża w bok i faluje.",
   "MOINENMAPS.DPreset.heliHmg": "Podwójny CKM ze śmigłowca",
   "MOINENMAPS.DPreset.heliHmgHint": "Przeciągnij przelot ostrzału. Dwa równoległe pasy ciężkich trafień pędzą po ziemi.",
+  "MOINENMAPS.DPreset.landing": "Lądowanie superbohatera",
+  "MOINENMAPS.DPreset.landingHint": "Kliknij miejsce lądowania (albo token: to on jest bohaterem); przeciągnij, by wskazać kierunek nadlotu. Smuga z nieba, wgnieciony krater, pęknięcia rozchodzące się gwiazdą i fala kurzu. Bez ognia.",
   "MOINENMAPS.DPreset.aftermath": "Pożar po wybuchu",
   "MOINENMAPS.DPreset.aftermathNoEnd": "Bez końca (płonie, aż się go ugasi)",
   "MOINENMAPS.DPreset.aftermathHint": "Jak długo płoną ognie pozostawione przez preset, zanim same zgasną.",

@@ -79,7 +79,7 @@ function aimShapes() {
   }
   const def = S.armed(); if ( !def ) return [];
   const grid = canvas.grid?.size ?? 100;
-  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token) : U.gestureOf(def.gesture, cursor, cursor, grid, null);
+  const g = down ? U.gestureOf(def.gesture, down.p, cursor, grid, down.token) : U.gestureOf(def.gesture, cursor, cursor, grid, def.onToken ? tokenAt(cursor) : null);
   const plan = planOf(def, g); if ( !plan ) return [];
   const shapes = U.ghostOf(plan, viewOf());
   // before a drag of a line / run / throw: a soft reticle where it starts
@@ -120,7 +120,7 @@ function onDown(ev) {
   if ( ev.button !== 0 || !active || down || ev.target !== canvas.app?.view ) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
   const p = worldPoint(ev), at = [p.x, p.y], def = S.armed();
-  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line") ? tokenAt(at) : null };
+  down = { p: at, token: def && (def.gesture === "throw" || def.gesture === "line" || def.onToken) ? tokenAt(at) : null };
   cursor = at; schedule();
 }
 function onMove(ev) {

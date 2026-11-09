@@ -86,7 +86,7 @@ export function fireOpts(def, bar, seed) {
 /**
  * A map gesture -> the expander's gesture { a, b, from } (scene px): `down` / `up` [x, y], `grid` px per square, `token` the token
  * under the pointer at the start ({ x, y, r } its centre and radius) or null. Below `grid * 0.25` of movement there is no drag.
- *   point  a = the click; a drag sets the direction it falls from (b)
+ *   point  a = the click; a drag sets the direction it falls from (b); a token is passed only for a def.onToken preset: its centre is a
  *   throw  from = the token (or the click), b = where it lands (a click: in place)
  *   line   the burst walks a -> b; started on a token: it is the shooter (from), the hits start just past its edge
  *   run    the strafing run a -> b
@@ -102,6 +102,8 @@ export function gestureOf(kind, down, up, grid, token = null) {
     const ux = dx / len, uy = dy / len, start = Math.min(len * 0.5, token.r + grid * 0.5);
     return { a: P([token.x + ux * start, token.y + uy * start]), b: P(up), from: P([token.x, token.y]) };
   }
+  // (a point preset that lands on a token - def.onToken, the superhero landing: the token is passed only then): its centre is the mark
+  if ( kind === "point" && token ) return { a: P([token.x, token.y]), b: drag ? P(up) : null, from: P([token.x, token.y]) };
   return { a: P(down), b: drag ? P(up) : null, from: null };
 }
 
