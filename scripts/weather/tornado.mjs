@@ -1,6 +1,6 @@
 import * as TM from "./tornado-model.mjs";
 import { QUAD_VERT, DECK_FRAG, COLUMN_FRAG, FOOT_FRAG, VOL_FRAG, PART_VERT, PART_FRAG, GROUND_VERT, GROUND_FRAG, GROUND_CELL_FRAG, SHOW_FRAG } from "./tornado-glsl.mjs";
-import { CellCache, cellVert, showNearest } from "./cells.mjs";
+import { CellCache, cellVert, showSmooth } from "./cells.mjs";
 import { weatherQ } from "./guard.mjs";
 import { blendMode } from "./display.mjs";
 import { hu, sceneWind, dirVec } from "../wind.mjs";
@@ -43,7 +43,7 @@ const prog = (k, v, f) => progs[k] ??= PIXI.Program.from(v, f, `moinen-maps-torn
 export function tornadoPrograms() {
   return [prog("deck", QUAD_VERT, DECK_FRAG), prog("column", QUAD_VERT, COLUMN_FRAG), prog("foot", QUAD_VERT, FOOT_FRAG), prog("vol", QUAD_VERT, VOL_FRAG),
     prog("part", PART_VERT, PART_FRAG), prog("ground", GROUND_VERT, GROUND_FRAG), prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG),
-    prog("groundShow", GROUND_VERT, showNearest("vP")), prog("show", GROUND_VERT, SHOW_FRAG)];
+    prog("groundShow", GROUND_VERT, showSmooth("vP")), prog("show", GROUND_VERT, SHOW_FRAG)];
 }
 
 /** The scene's background as the shader samples it, or null (as fire's display). */
@@ -108,7 +108,7 @@ class TornadoView {
     this.bot = Math.ceil(L3.skirt * 0.8 * 1.7 * U + 30 * U);
     this.H = Math.min(2048, this.top + this.bot);
     const W = this.W, H = this.H;
-    this.art = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+    this.art = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
     this.art.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     this.rect = new Float32Array([0, 0, W, H]);
     const sd = T.seed % 9973;
@@ -161,7 +161,7 @@ class TornadoView {
       canvas.primary.addChild(m);
     }
     // the ground is one value per art cell: zoomed in, computed per cell into a float texture and fetched (cells.mjs)
-    this.groundCells = new CellCache(this.ground, prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG), prog("groundShow", GROUND_VERT, showNearest("vP")));
+    this.groundCells = new CellCache(this.ground, prog("groundCell", cellVert("vP"), GROUND_CELL_FRAG), prog("groundShow", GROUND_VERT, showSmooth("vP")), { smooth: true });
     // the art passes back to front, drawn by ONE render call (the same draws in the same order as one call each)
     this.artRoot = new PIXI.Container();
     this.artRoot.addChild(this.curtain, this.skirt, this.back, this.debB, this.wallB, this.column, this.debF, this.wallF, this.front, this.curtainF, this.deck);

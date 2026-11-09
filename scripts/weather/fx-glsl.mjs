@@ -4,7 +4,7 @@
  * (glsl.mjs): world tiles of slots indexed by gl_InstanceID, whole cycles per hour, hashed birth gates, the oblique lift.
  * Ported from the research mock-ups (snow.py, sand.py, dust.py, embers.py); every pass writes (add, k) for the weather blend.
  */
-import { GLSL_COMMON } from "./glsl.mjs";
+import { GLSL_COMMON, GLSL_SHAPES } from "./glsl.mjs";
 
 export const PART_VERT = `#version 300 es
 precision highp float;
@@ -26,6 +26,7 @@ uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust
 uniform vec2 uView;          // lift, squash
 uniform vec4 uVF;            // snow: fall speeds mid, far, near; grit: hop, length; embers: swarm floor, big sparks; wind: line gate, line length, bob
 uniform float uI;            // presence x performance
+uniform float uPx;           // art px per device px now (the quads' antialiasing margin)
 out vec2 vArt;
 out vec2 vScr;
 flat out vec4 vA;
@@ -68,6 +69,9 @@ void main() {
   vec2 lo, hi;
   vFade = 1.0;
   vK = ivec2(uKind, layer);
+  // the antialiasing margin round a particle's shape: a shape reaches at most a device px past its edge (cov: half a px of widening,
+  // half a px of soft edge); each kind adds its own reach (radius + soft edge + offset) below, so the quads stay tight at any zoom
+  float M_ = 1.2 * uPx + 0.2;
   if ( uKind == 1 && layer < 3 ) {
     // SNOW flakes: 2 .. 3.3 s lives, falling with sway and a swirl, carried by the wind (lag 0.6 s)
     float tau = lifeOf(key, tx, ty, j, sd, 1080.0, 721.0, life, ci);
@@ -90,7 +94,8 @@ void main() {
     float Y = Yg - lift * z;
     vFade = min(1.0, tau / 0.3) * min(1.0, rem / 0.25);
     vA = vec4(X, Y, X, Yg); vB = vec4(h4, h5, z, 0.0);
-    lo = floor(vec2(X, min(Y, Yg))) - 2.0; hi = floor(vec2(X, max(Y, Yg))) + 4.0;
+    float rr = layer == 2 ? 3.1 : 1.2, ys = layer == 0 && z < 26.0 ? Yg : Y;   // (the shadow only while it shows: low flakes)
+    lo = vec2(X, min(Y, ys)) - M_ - rr; hi = vec2(X, max(Y, ys)) + M_ + rr;
   } else if ( uKind == 1 ) {
     // SPINDRIFT: snow blown along the ground in strong gusts, thin low runs
     float tau = lifeOf(key, tx, ty, j, sd, 2160.0, 1441.0, life, ci);
@@ -104,7 +109,7 @@ void main() {
     vec2 p0 = p1 - uWindDir * ln;
     vFade = min(1.0, tau / 0.15) * min(1.0, (0.9 - tau) / 0.2);
     vA = vec4(p0, p1); vB = vec4(0.0);
-    lo = floor(min(p0, p1)) - 1.0; hi = floor(max(p0, p1)) + 2.0;
+    lo = min(p0, p1) - M_ - 0.6; hi = max(p0, p1) + M_ + 0.6;
   } else if ( uKind == 2 ) {
     // GRIT: sand hopping along the ground (saltation), fast, in the waves
     float tau = lifeOf(key, tx, ty, j, sd, 4320.0, 3241.0, life, ci);
@@ -122,7 +127,7 @@ void main() {
     vec2 p0 = p1 - uWindDir * (2.0 + uVF.y * fr);
     vFade = min(1.0, tau / 0.06) * min(1.0, (life - tau) / 0.06);
     vA = vec4(p0, p1); vB = vec4(0.0);
-    lo = floor(min(p0, p1)) - 1.0; hi = floor(max(p0, p1)) + 2.0;
+    lo = min(p0, p1) - M_ - 0.6; hi = max(p0, p1) + M_ + 0.6;
   } else if ( uKind == 3 ) {
     // DUST motes: 5 .. 10 s lives, slow Brownian drift in calm air, glinting in the sun shafts
     float tau = lifeOf(key, tx, ty, j, sd, 360.0, 361.0, life, ci);
@@ -142,7 +147,8 @@ void main() {
     float lit = smoothstep(0.55, 0.7, shaftAt(P));
     float tw = 0.5 + 0.5 * sin(6.283185 * (0.25 + 0.5 * h[3]) * uTime + 6.28 * h[4]);
     vA = vec4(P, 0.0, 0.0); vB = vec4(lit * smoothstep(0.55, 0.85, tw), h[6] > 0.93 ? 1.0 : 0.0, 0.0, 0.0);
-    lo = floor(P) - 1.0; hi = floor(P) + 3.0;
+    float rr = vB.y > 0.5 ? 2.5 : vB.x > 0.001 ? 2.35 : 1.2;        // (near: out of focus; lit: its glow; else the speck alone)
+    lo = P - M_ - rr; hi = P + M_ + rr;
   } else if ( uKind == 5 && layer == 0 ) {
     // WIND LINES: in a gust, a light 1-px stroke runs downwind from its slot, curving (two sines), drawn over the last 0.45-0.75 s
     // of its path; it grows from its start and in its last half retracts from the tail, the head fading last. Only where the gust at its birth is strong enough.
@@ -161,7 +167,7 @@ void main() {
     vec2 S = s - vec2(0.0, lift * (10.0 + 14.0 * h[4]));
     vA = vec4(S, a, b); vB = vec4(h[2] * 6.28 + tau * 2.0, h[3] * 6.28, tau / ll, 0.0);
     vec2 P0 = S + uWindDir * a, P1 = S + uWindDir * b;
-    lo = floor(min(P0, P1)) - 8.0; hi = floor(max(P0, P1)) + 9.0;
+    lo = min(P0, P1) - 6.9 - M_; hi = max(P0, P1) + 6.9 + M_;
   } else if ( uKind == 5 ) {
     // DEBRIS: leaves and bits tumbling with the wind, bouncing more in the gusts, flipping (light / dark side), each with its ground
     // shadow; anchored at mid-life like the sparks, so they come in from upwind and from everywhere, born and gone by pixel dropout
@@ -180,9 +186,10 @@ void main() {
     if ( Xg.x < 0.0 || Xg.y < 0.0 || Xg.x >= uArtSize.x || Xg.y >= uArtSize.y || openAt(Xg, true) < 0.5 ) { hide(); return; }
     float bob = uVF.z * abs(sin(tau * (1.5 + 2.0 * h[3]) + h[4] * 6.28)) * (0.4 + Gm);
     vec2 P = Xg - vec2(0.0, lift * (2.0 + bob + 8.0 * h[5]));
-    float flip = sin(tau * (9.0 + 8.0 * h[2]) + h[6] * 6.28) > 0.0 ? 1.0 : 0.0;
-    vA = vec4(P, Xg); vB = vec4(floor(h[7] * 5.99), flip, h[5] > 0.35 ? 1.0 : 0.0, h[5] > 0.8 ? 1.0 : 0.0);
-    lo = floor(min(P, Xg)) - 2.0; hi = floor(max(P, Xg)) + 3.0;
+    // (it flips: the side seen is the sign of this sine, its width its size; it turns slowly in the plane of the screen)
+    float flip = sin(tau * (9.0 + 8.0 * h[2]) + h[6] * 6.28), spin = h[4] * 6.28 + tau * (1.5 + 2.5 * h[3]) * (h[2] > 0.5 ? 1.0 : -1.0);
+    vA = vec4(P, Xg); vB = vec4(floor(h[7] * 5.99), flip, h[5] > 0.8 ? 2.0 : h[5] > 0.35 ? 1.0 : 0.0, spin);
+    lo = min(P, Xg) - M_ - 1.35; hi = max(P, Xg) + M_ + 1.35;
   } else {
     // EMBERS: a wind-borne field. Every slot's spark crosses its tile in the middle of its life, blown along the wind with a sway,
     // so sparks come in from upwind and from everywhere in view and drift through; swarms (a slow patchy field drifting with the
@@ -221,7 +228,7 @@ void main() {
     float big = h[7] > 0.85 && cI < 2.0 && uVF.y > 0.5 && dp > 0.6 ? 1.0 : 0.0;
     float low = z * par < 22.0 && cI < 3.0 && dp > 0.5 ? 2.0 : 0.0;
     vA = vec4(P, Pp); vB = vec4(Xg, cI, big + low + 4.0 * floor(dp * 15.99));   // flags + 4 x depth (0..15)
-    lo = floor(min(min(P, Pp), Xg)) - 2.0; hi = floor(max(max(P, Pp), Xg)) + 3.0;
+    lo = min(min(P, Pp), Xg) - M_ - 2.3; hi = max(max(P, Pp), Xg) + M_ + 2.3;
   }
   vec2 a = mix(lo, hi, aCorner);
   vArt = a;
@@ -253,117 +260,119 @@ float hu(int x, int y, int s) {
   h = h ^ (h >> 16u);
   return float(h) / 4294967296.0;
 }
-float hc(vec2 c, int s) { return hu(int(floor(c.x)), int(floor(c.y)), s); }
-float onLine(vec2 c, vec2 a, vec2 b) {
-  vec2 d = b - a;
-  if ( abs(d.y) >= abs(d.x) ) {
-    float y = c.y + 0.5;
-    if ( y < min(a.y, b.y) - 0.01 || y > max(a.y, b.y) + 0.99 ) return -1.0;
-    float f = abs(d.y) < 1e-4 ? 1.0 : clamp((y - a.y) / d.y, 0.0, 1.0);
-    return floor(a.x + d.x * f) == c.x ? f : -1.0;
-  }
-  float x = c.x + 0.5;
-  if ( x < min(a.x, b.x) - 0.01 || x > max(a.x, b.x) + 0.99 ) return -1.0;
-  float f = clamp((x - a.x) / d.x, 0.0, 1.0);
-  return floor(a.y + d.y * f) == c.y ? f : -1.0;
-}
+${GLSL_SHAPES}
 const vec3 OCHRE = vec3(0.82, 0.62, 0.36);
 const vec3 DUST = vec3(0.93, 0.86, 0.70);
-float bayer4(vec2 c) {
-  int x = int(mod(c.x, 4.0)), y = int(mod(c.y, 4.0)), i = x + 4 * y;
-  int b = i == 0 ? 0 : i == 1 ? 8 : i == 2 ? 2 : i == 3 ? 10 : i == 4 ? 12 : i == 5 ? 4 : i == 6 ? 14 : i == 7 ? 6
-        : i == 8 ? 3 : i == 9 ? 11 : i == 10 ? 1 : i == 11 ? 9 : i == 12 ? 15 : i == 13 ? 7 : i == 14 ? 13 : 5;
-  return (float(b) + 0.5) / 16.0;
-}
 vec3 leaf(float i) { return i < 0.5 ? vec3(0.78, 0.55, 0.20) : i < 1.5 ? vec3(0.62, 0.38, 0.14) : i < 2.5 ? vec3(0.55, 0.62, 0.22) : i < 3.5 ? vec3(0.85, 0.72, 0.30) : i < 4.5 ? vec3(0.45, 0.50, 0.20) : vec3(0.86, 0.85, 0.80); }
 vec3 ember(float i) { return i < 0.5 ? vec3(1.0, 0.96, 0.76) : i < 1.5 ? vec3(1.0, 0.82, 0.29) : i < 2.5 ? vec3(1.0, 0.54, 0.14) : i < 3.5 ? vec3(0.82, 0.25, 0.11) : vec3(0.45, 0.16, 0.10); }
-// (add, k) faded in / out by vFade, then the layer's alpha
-void out_(float k, vec3 add) {
+// the shapes laid so far, faded in / out by vFade, then the layer's alpha
+void out_() {
+  if ( K_ > 0.9995 && dot(A_, vec3(1.0)) < 0.0005 ) discard;
   float a = uAlpha * vFade;
-  fragColor = vec4(add * a, 1.0 - a * (1.0 - k));
+  fragColor = vec4(A_ * a, 1.0 - a * (1.0 - K_));
 }
+// a soft dot: coverage at p of a disc of radius r at c (edge soft over soft art px or a device px)
+float dotC(vec2 p, vec2 c, float r, float soft) { return cov(length(p - c) - r, r, soft); }
 
+// Every particle is a SHAPE drawn per screen pixel (2026-11-09): round flakes and motes, antialiased strokes, tumbling leaves, glowing
+// sparks with trails, at the particle's continuous position (no whole art cells, no dithered halos)
 void main() {
   if ( uHasDepth == 1 && step(uDepthElev, (254.5 / 255.0) - texture(uDepth, vScr).b) < 0.5 ) discard;
-  vec2 c = floor(vArt);
+  vec2 p = vArt, fw = fwidth(vArt);
+  AA = max(max(fw.x, fw.y), 1e-3);
   int kind = vK.x, layer = vK.y;
   if ( kind == 1 && layer < 3 ) {
-    vec2 P = floor(vA.xy), d = c - P;
-    if ( layer == 1 ) { if ( d == vec2(0.0) && hc(c, uSeed + 410) < 0.75 ) { out_(0.0, vec3(0.80, 0.85, 0.93)); return; } discard; }
+    vec2 P = vA.xy;
+    if ( layer == 1 ) { lay(dotC(p, P, 0.42, 0.3) * 0.75, vec3(0.80, 0.85, 0.93)); out_(); return; }       // far: a small dim flake
     if ( layer == 0 ) {
+      // its shadow on the ground (shows the height), then the flake: round, a touch longer down the screen as it falls, bright core
+      if ( vB.z < 26.0 ) lay(dotC(p, vA.zw, 0.6, 0.5) * 0.28 * (1.0 - vB.z / 26.0), vec3(0.0));
       bool big = vB.x > 0.72;
-      if ( d == vec2(0.0) ) { out_(0.0, vec3(0.98, 0.99, 1.0)); return; }
-      if ( big && d == vec2(1.0, 0.0) ) { out_(0.0, vec3(0.86, 0.90, 0.97)); return; }
-      if ( d == vec2(0.0, 1.0) ) { if ( big ) { out_(0.0, vec3(0.80, 0.85, 0.94)); return; } if ( vB.y > 0.45 ) { out_(0.0, vec3(0.62, 0.68, 0.80)); return; } }
-      if ( vB.z < 26.0 && c == floor(vA.zw) ) { out_(0.72, vec3(0.0)); return; }       // its shadow on the ground: shows the height
-      discard;
+      float r = big ? 0.85 : 0.6;
+      vec2 q = p - P; q.y /= 1.2;
+      float c = cov(length(q) - r, r, 0.35);
+      vec3 col = mix(vec3(0.84, 0.88, 0.96), vec3(0.98, 0.99, 1.0), smoothstep(r, 0.2 * r, length(q)));
+      lay(c * (big ? 1.0 : mix(0.8, 0.95, vB.y)), col);
+      out_(); return;
     }
-    // near: a 2x2 flake close to the camera with a dithered halo
-    if ( d.x >= 0.0 && d.x <= 1.0 && d.y >= 0.0 && d.y <= 1.0 ) {
-      float cc = d == vec2(0.0) ? 1.0 : d == vec2(1.0, 0.0) ? 0.95 : d == vec2(0.0, 1.0) ? 0.9 : 0.85;
-      out_(0.0, vec3(cc, cc, 1.0) * 0.97); return;
-    }
-    if ( (d == vec2(-1.0, 0.0) || d == vec2(2.0, 0.0) || d == vec2(0.0, -1.0) || d == vec2(1.0, 2.0)) && hc(c, uSeed + 411) < 0.4 ) { out_(0.0, vec3(0.85, 0.89, 0.97)); return; }
-    discard;
+    // near: a large soft flake close to the camera, out of focus, with a faint halo
+    float d = length(p - P - 0.5);
+    lay(cov(d - 1.9, 1.9, 1.4) * 0.35, vec3(0.85, 0.89, 0.97));
+    lay(cov(d - 1.1, 1.1, 0.6) * 0.9, vec3(0.94, 0.95, 1.0));
+    out_(); return;
   }
   if ( kind == 1 ) {
-    float f = onLine(c, floor(vA.xy) + 0.5, floor(vA.zw) + 0.5);
-    if ( f < 0.0 || hc(c, uSeed + 412) >= 0.25 + 0.6 * f ) discard;
-    out_(0.0, vec3(0.93, 0.95, 1.0)); return;
+    // spindrift: a thin streak of blown snow, denser toward its head, broken softly along its length
+    float t, d = segT(p, vA.xy, vA.zw, t);
+    float brk = smoothstep(0.25, 0.6, n1(t * 5.0 + vA.x * 0.37, uSeed + 412));
+    lay(cov(d - 0.38, 0.38, 0.3) * (0.25 + 0.6 * t) * mix(0.55, 1.0, brk), vec3(0.93, 0.95, 1.0));
+    out_(); return;
   }
   if ( kind == 2 ) {
-    float f = onLine(c, floor(vA.xy) + 0.5, floor(vA.zw) + 0.5);
-    if ( f < 0.0 ) discard;
-    out_(0.25, min(vec3(1.0), OCHRE * (0.9 + 0.35 * f))); return;
+    // grit: a short ochre stroke, brighter at its head
+    float t, d = segT(p, vA.xy, vA.zw, t);
+    lay(cov(d - 0.42, 0.42, 0.3) * mix(0.55, 0.8, t), min(vec3(1.0), OCHRE * (0.9 + 0.35 * t) * 1.15));
+    out_(); return;
   }
   if ( kind == 3 ) {
-    vec2 d = c - floor(vA.xy);
     float e = vB.x;
     vec3 dullA = DUST * 0.55, brA = vec3(1.0, 0.97, 0.85);
-    if ( vB.y > 0.5 ) {
-      if ( d.x < 0.0 || d.y < 0.0 || d.x > 1.0 || d.y > 1.0 ) discard;
-      out_(0.7, mix(dullA, brA, e) * 0.6); return;                       // near: out of focus, a dimmer 2x2
-    }
-    if ( d != vec2(0.0) ) discard;
-    out_(mix(0.5, 0.0, e), mix(dullA, brA, e) + 0.08 * e); return;
+    vec2 P = vA.xy + 0.5;
+    if ( vB.y > 0.5 ) { lay(cov(length(p - P - 0.5) - 1.0, 1.0, 0.9) * 0.3, mix(dullA, brA, e) * 2.0); out_(); return; }   // near: out of focus
+    // a mote: a soft speck, catching the light in the sun shafts (a little brighter, a faint glow)
+    glow(brA * 0.12 * e * cov(length(p - P) - 1.3, 1.3, 1.0));
+    lay(dotC(p, P, 0.48, 0.3) * mix(0.5, 1.0, e), (mix(dullA, brA, e) + 0.08 * e) / mix(0.5, 1.0, e));
+    out_(); return;
   }
   if ( kind == 5 && layer == 0 ) {
-    // a wind line: the pixels along its curved path, light over what is under them (dst x 0.35 + 0.70)
-    vec2 e = c + 0.5 - vA.xy, wn = vec2(-uWindDir.y, uWindDir.x);
+    // a wind line: an antialiased stroke along its curved path, light over what is under it; it grows from its start, retracts from
+    // its tail in its last half, the head fading last, the tail thinning out
+    vec2 e = p - vA.xy, wn = vec2(-uWindDir.y, uWindDir.x);
     float s = dot(e, uWindDir), lat = dot(e, wn);
-    if ( s < vA.z - 0.5 || s > vA.w + 0.5 ) discard;
     float w = 4.5 * sin(s / 21.0 + vB.x) + 1.8 * sin(s / 8.3 + vB.y);
-    float dw = abs(4.5 / 21.0 * cos(s / 21.0 + vB.x) + 1.8 / 8.3 * cos(s / 8.3 + vB.y));
-    if ( abs(lat - w) > 0.5 + 0.5 * dw ) discard;
+    float dw = 4.5 / 21.0 * cos(s / 21.0 + vB.x) + 1.8 / 8.3 * cos(s / 8.3 + vB.y);
+    float dl = abs(lat - w) / sqrt(1.0 + dw * dw);
     float f = (vA.w - s) / max(vA.w - vA.z, 1.0), age = vB.z;      // f: 0 at the head .. 1 at the tail
-    if ( f > 1.0 - smoothstep(0.45, 1.0, age) || f < 0.9 * smoothstep(0.8, 1.0, age) || bayer4(c) >= (f < 0.5 ? 1.01 : 1.5 - 1.2 * f) ) discard;
-    out_(0.35, vec3(0.70)); return;
+    float L = max(vA.w - vA.z, 1.0), ff = 1.0 / L;
+    float len = smoothstep(-ff, ff, (1.0 - smoothstep(0.45, 1.0, age)) - f) * smoothstep(-ff, ff, f - 0.9 * smoothstep(0.8, 1.0, age));
+    float ends = smoothstep(-0.5, 0.5, s - vA.z) * smoothstep(-0.5, 0.5, vA.w - s);
+    float o = f < 0.5 ? 1.0 : clamp(1.5 - 1.2 * f, 0.0, 1.0);
+    float hw = mix(0.42, 0.25, f);
+    lay(cov(dl - hw, hw, 0.3) * 0.65 * o * len * ends, vec3(1.077));
+    out_(); return;
   }
   if ( kind == 5 ) {
-    vec2 d = c - floor(vA.xy);
-    bool fl = vB.y > 0.5;
-    vec3 col = leaf(vB.x) * (fl ? 1.0 : 0.72);
-    if ( d == vec2(0.0) ) { out_(0.0, col); return; }
-    if ( vB.z > 0.5 && d == (fl ? vec2(1.0, 0.0) : vec2(0.0, 1.0)) ) { out_(0.0, col * 0.85); return; }
-    if ( vB.w > 0.5 && (d == vec2(1.0) || (fl && d == vec2(-1.0, 0.0))) ) { out_(0.0, col * (d == vec2(1.0) ? 0.7 : 0.9)); return; }
-    if ( c == floor(vA.zw) ) { out_(0.7, vec3(0.0)); return; }       // its ground shadow: shows the height
-    discard;
+    // debris: a small leaf or bit tumbling (it turns, and flips: its width is the flip's cosine, its side light or dark), and its soft
+    // ground shadow (shows the height)
+    lay(dotC(p, vA.zw, 0.55 + 0.25 * vB.z, 0.5) * 0.3, vec3(0.0));
+    float fl = vB.y, sz = vB.z;
+    vec3 col = leaf(vB.x) * (fl > 0.0 ? 1.0 : 0.72);
+    vec2 d = p - vA.xy;
+    float a = vB.w, ca = cos(a), sa = sin(a);
+    vec2 q = vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y);
+    float L = 0.6 + 0.45 * sz, Wd = (0.45 + 0.15 * sz) * max(abs(fl), 0.22);
+    float el = length(q / vec2(L, Wd)) - 1.0;
+    lay(cov(el * min(L, Wd), min(L, Wd), 0.25), col);
+    out_(); return;
   }
-  // embers
-  vec2 P = floor(vA.xy), d = c - P;
+  // EMBERS: depth: far sparks are a dim, cool, dull, see-through speck; near ones bright and opaque with a trail, a glow and, the big
+  // ones, a larger core; a faint warm glow on the ground under low near sparks
+  vec2 P = vA.xy;
   float ci = vB.z, fl = mod(vB.w, 4.0), dp = floor(vB.w / 4.0) / 15.0;
-  // depth: far sparks are a dim, cool, dull, see-through single pixel; near ones are bright, opaque, with trail, glow and big sparks
   float al = mix(0.28, 1.0, dp);
   vec3 col = ember(min(ci + (dp < 0.35 ? 1.0 : 0.0), 4.0));
   col = mix(mix(vec3(dot(col, vec3(0.3, 0.5, 0.2))), col, 0.55) * vec3(0.85, 0.8, 0.9), col, dp);
-  if ( d == vec2(0.0) ) { out_(1.0 - al, col * al); return; }
-  if ( mod(fl, 2.0) > 0.5 && d == vec2(1.0, 0.0) ) { out_(0.0, col * 0.9); return; }
-  float f = dp < 0.3 ? -1.0 : onLine(c, floor(vA.zw) + 0.5, P + 0.5);
-  if ( f >= 0.0 && f < 0.99 ) { float at = al * 0.85; out_(1.0 - at, ember(min(ci + 1.0, 4.0)) * at); return; }
-  if ( ci < 3.0 && dp > 0.55 && abs(d.x) + abs(d.y) == 1.0 ) { out_(1.0, vec3(0.22, 0.09, 0.02) * dp); return; }
-  if ( fl >= 2.0 && c == floor(vB.xy) ) { out_(1.0, vec3(0.10, 0.04, 0.0)); return; }    // a faint glow on the ground under low near sparks
-  discard;
+  if ( fl >= 2.0 ) glow(vec3(0.10, 0.04, 0.0) * dotC(p, vB.xy, 1.3, 1.1));                        // the glow on the ground
+  if ( ci < 3.0 && dp > 0.55 ) glow(vec3(0.22, 0.09, 0.02) * dp * cov(length(p - P) - 1.5, 1.5, 1.4));   // the glow round it
+  if ( dp >= 0.3 ) {
+    float t, d = segT(p, vA.zw, P, t);
+    lay(cov(d - 0.35, 0.35, 0.3) * al * 0.85 * t, ember(min(ci + 1.0, 4.0)));                       // the trail, cooling behind
+  }
+  float big = mod(fl, 2.0) > 0.5 ? 1.0 : 0.0;
+  lay(dotC(p, P + vec2(0.5 * big, 0.0), 0.5 + 0.3 * big, 0.3) * al, col);
+  out_();
 }`;
+
 
 /* ================================================================== HAZE (sand haze, dust haze, ember smoke): above tokens */
 
@@ -386,7 +395,7 @@ const vec3 OCHRE = vec3(0.82, 0.62, 0.36);
 const vec3 DUST = vec3(0.93, 0.86, 0.70);
 vec4 mixTo(vec4 f, vec3 col, float m) { return vec4(f.rgb * (1.0 - m) + col * m, f.a * (1.0 - m)); }
 
-// the smooth fields (scales of 30+ cells) once per pixel, at its centre; only the bands' dither and the shelter are per cell
+// the smooth fields (scales of 30+ cells) once per evaluation point
 float sDens = 0.0, sLit = 0.0, dH = 0.0, mH = 0.0;
 void smoothFields(vec2 c) {
   if ( uSandH.x > 0.0 ) {
@@ -402,56 +411,40 @@ void smoothFields(vec2 c) {
   if ( uDustH.x > 0.0 ) dH = drift3a(vec2(c.x / 80.0, c.y / 55.0), uDustH.yz * 1.2 / vec2(80.0, 55.0), uTime, 60.0, uSeed + 182);
   if ( uSmoke.x > 0.0 ) mH = drift3a(vec2(c.x / 48.0, c.y / 30.0), uSmoke.zw * 0.9 / vec2(48.0, 30.0), uTime, 40.0, uSeed + 151);
 }
+// a soft staircase: whole levels with a smooth rise between them (the bands stay, their edges are never cells)
+float stairs(float x, float n) { x = clamp(x, 0.0, n); float i = floor(x); return min(n, i + smoothstep(0.3, 0.7, x - i)); }
+float lv3(float l, float a, float b, float c) { return l < 1.0 ? a * l : l < 2.0 ? mix(a, b, l - 1.0) : mix(b, c, l - 2.0); }
 vec4 cellHaze(vec2 c) {
   vec4 f = vec4(0.0, 0.0, 0.0, 1.0);
-  if ( c.x < 0.0 || c.y < 0.0 || c.x >= uArtSize.x || c.y >= uArtSize.y || openAt(c, true) < 0.5 ) return f;
-  float dz = hc(c, uSeed + 997);
+  if ( c.x < 0.0 || c.y < 0.0 || c.x >= uArtSize.x || c.y >= uArtSize.y ) return f;
+  float op = openS(c, true);
+  if ( op <= 0.0 ) return f;
+  float nz = vnoise(c / 2.6, uSeed + 997);           // (the smooth stand-in for the old per-cell dither)
   if ( uSandH.x > 0.0 ) {
     float dens = sDens, lit = sLit;
-    int lv = int(clamp(floor(dens * 3.2 + (dz - 0.5) * 0.2), 0.0, 3.0));
-    float m3 = lv == 0 ? 0.0 : lv == 1 ? 0.32 : lv == 2 ? 0.55 : 0.78, m2 = lv == 0 ? 0.0 : lv == 1 ? 0.20 : 0.34;
-    float dd = uSandH.y > 0.5 ? (lit > 0.004 ? 0.09 : lit < -0.004 ? -0.06 : 0.02) : 0.02;
-    if ( lv > 0 ) f = mixTo(f, clamp(uAvg * 0.35 + OCHRE * 0.75 + dd, 0.0, 1.0), mix(m2, m3, uSandH.y));
+    float l = stairs(dens * 3.2 + (nz - 0.5) * 0.2, 3.0);
+    float m = mix(lv3(l, 0.20, 0.34, 0.34), lv3(l, 0.32, 0.55, 0.78), uSandH.y);
+    float dd = uSandH.y > 0.5 ? (lit >= 0.0 ? mix(0.02, 0.09, smoothstep(0.0, 0.008, lit)) : mix(0.02, -0.06, smoothstep(0.0, 0.008, -lit))) : 0.02;
+    if ( m > 0.0 ) f = mixTo(f, clamp(uAvg * 0.35 + OCHRE * 0.75 + dd, 0.0, 1.0), m);
   }
   if ( uDustH.x > 0.0 ) {
-    float h = dH;
-    int lv = int(clamp(floor((h - 0.44) * 7.0 + (dz - 0.5) * 0.2), 0.0, 2.0));
-    if ( lv > 0 ) f = mixTo(f, clamp(uAvg * 0.4 + DUST * 0.7, 0.0, 1.0), (lv == 1 ? 0.09 : 0.17) * uDustH.x);
+    float l = stairs((dH - 0.44) * 7.0 + (nz - 0.5) * 0.2, 2.0);
+    float m = l < 1.0 ? 0.09 * l : mix(0.09, 0.17, l - 1.0);
+    if ( m > 0.0 ) f = mixTo(f, clamp(uAvg * 0.4 + DUST * 0.7, 0.0, 1.0), m * uDustH.x);
   }
   if ( uSmoke.x > 0.0 ) {
-    float h = mH;
-    int lv = int(clamp(floor((h - 0.42) * 6.0 + (dz - 0.5) * 0.2), 0.0, 2.0));
-    float m = lv == 0 ? 0.0 : lv == 1 ? mix(0.13, 0.22, uSmoke.y) : mix(0.13, 0.40, uSmoke.y);
-    if ( lv > 0 ) f = mixTo(f, vec3(0.20, 0.17, 0.16), m * uSmoke.x);
+    float l = stairs((mH - 0.42) * 6.0 + (nz - 0.5) * 0.2, 2.0);
+    float a = mix(0.13, 0.22, uSmoke.y), b = mix(0.13, 0.40, uSmoke.y);
+    float m = l < 1.0 ? a * l : mix(a, b, l - 1.0);
+    if ( m > 0.0 ) f = mixTo(f, vec3(0.20, 0.17, 0.16), m * uSmoke.x);
   }
-  return f;
+  return mix(vec4(0.0, 0.0, 0.0, 1.0), f, op);
 }
 
-void axisW(float t, float w, out float i0, out vec3 a) {
-  float lo = t - 0.5 * w, hi = t + 0.5 * w;
-  i0 = floor(lo);
-  a.x = min(i0 + 1.0, hi) - lo;
-  a.y = clamp(min(i0 + 2.0, hi) - (i0 + 1.0), 0.0, 1.0);
-  a.z = max(0.0, hi - (i0 + 2.0));
-  a /= w;
-}
+// ---- main (the direct pass: one evaluation per screen px at its own point; cells.mjs makes the cached pair from the above)
 void main() {
-  vec2 w = fwidth(vCell) * uK;
-  vec4 c;
-  smoothFields(floor(vCell));
-  if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) c = cellHaze(floor(vCell));
-  else {
-    w = clamp(w, vec2(0.01), vec2(2.0));
-    float ix, iy; vec3 ax, ay;
-    axisW(vCell.x, w.x, ix, ax); axisW(vCell.y, w.y, iy, ay);
-    c = vec4(0.0);
-    for ( int j = 0; j < 3; j++ ) {
-      float wy = ay[j]; if ( wy <= 0.0 ) continue;
-      for ( int i = 0; i < 3; i++ ) {
-        float wx = ax[i]; if ( wx <= 0.0 ) continue;
-        c += wx * wy * cellHaze(vec2(ix + float(i), iy + float(j)));
-      }
-    }
-  }
-  fragColor = vec4(c.rgb * uAlpha, 1.0 - uAlpha * (1.0 - c.a));
+  vec2 c = vCell;
+  smoothFields(c);
+  vec4 f = cellHaze(c);
+  fragColor = vec4(f.rgb * uAlpha, 1.0 - uAlpha * (1.0 - f.a));
 }`;

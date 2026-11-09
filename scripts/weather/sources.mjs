@@ -10,7 +10,7 @@ import { landSample } from "./fields.mjs";
  *    Also the map's average colour (the weather palette is derived from it).
  *
  *  SHELTER: where the sky is open, per texel: r = not under a roof (tiles with "restricts weather"), g = not in a Suppress Weather
- *    region, each a chamfer distance ramp over FADE art px (the shader dithers the ramp: a pixel-art fade, never soft alpha), b unused.
+ *    region, each a chamfer distance ramp over FADE art px (the ground and haze read it as a soft fade; the particles' gates dither it), b unused.
  *    Rebuilt only when tiles or regions change (debounced hooks in weather.mjs).
  */
 export const FADE = 4;            // art px of the dithered fade at a roof eave or a region edge
@@ -22,7 +22,8 @@ export function layoutOf(aw, ah) {
   return { w: Math.ceil(aw / scale), h: Math.ceil(ah / scale), scale };
 }
 
-const tex = (data, w, h) => PIXI.Texture.fromBuffer(data, w, h, { scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });
+// (LINEAR: the ground and the haze read them bilinearly, smooth like the map; texelFetch readers are not affected by the filter)
+const tex = (data, w, h) => PIXI.Texture.fromBuffer(data, w, h, { scaleMode: PIXI.SCALE_MODES.LINEAR, mipmap: PIXI.MIPMAP_MODES.OFF, alphaMode: PIXI.ALPHA_MODES.NO_PREMULTIPLIED_ALPHA });
 
 /** Contrast from rgba pixels: |grad lum| smoothed 3x3, into the alpha channel (x 4, 0..255). Returns the average colour [r, g, b] 0..1. */
 export function withContrast(px, w, h) {

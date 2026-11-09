@@ -6,8 +6,8 @@ import { fireWet } from "../wind.mjs";
  * above it). All on the GPU: per area one instanced quad mesh over a lattice of slots on its fire box (2 slots per quarter square);
  * each slot lives 1.8-3.3 s on a whole number of cycles per hour, is born at a hashed cell of its tile and draws only when that cell
  * BURNS (the area's own field texture, R heat, read in the vertex shader) and its hash is under the steam share. The CPU writes a few
- * uniforms per area per frame; no per-cell work, nothing read back. Pixel art: drawn on the fire's art grid (whole art cells, stepped
- * alpha, lit from the up-left).
+ * uniforms per area per frame; no per-cell work, nothing read back. Drawn per screen px at the puff's continuous point (2026-11-09:
+ * no whole art cells, no stepped alpha or tones; a soft antialiased rim), lit from the up-left.
  * COST: nothing while there is no rain / snow over fire (the meshes are hidden, the ticker returns at once; made only on first use).
  */
 const VERT = `#version 300 es
@@ -54,7 +54,7 @@ void main() {
   float r = (2.0 + 6.0 * pow(f, 0.7)) * uU * (0.8 + 0.4 * h2);
   float a = 0.6 * smoothstep(0.0, 0.2, f) * pow(1.0 - f, 1.4) * (0.6 + 0.4 * heat);
   vec2 e = vec2(r * 0.8 + 3.0, r * 1.6 + 3.0);
-  vec2 w = floor(c - e) + aCorner * (2.0 * e + 1.0);
+  vec2 w = c - e + aCorner * (2.0 * e);
   vC = w; vP = vec4(c, r, a); vH = h3;
   vec2 world = uGeo.xy + w * uGeo.z;
   gl_Position = vec4((projectionMatrix * translationMatrix * vec3(world, 1.0)).xy, 0.0, 1.0);
@@ -75,19 +75,20 @@ float vn(vec2 p) {
 void main() {
   if ( vP.w <= 0.0 ) discard;
   // a WISP, not a ball: taller than wide, leaning with its sway, eaten by noise into strands and holes
-  vec2 p = floor(vC) + 0.5, q = p - vP.xy;
+  vec2 p = vC, q = p - vP.xy;
   q.x -= 0.35 * q.y * (vH - 0.5);
   vec2 d = q / vec2(vP.z * 0.65, vP.z * 1.45);
   float n = vn(p / max(1.5, vP.z * 0.35)), n2 = vn(vec2(p.x / max(1.0, vP.z * 0.2), p.y / max(2.0, vP.z * 0.9)) + 7.3);
   float r = length(d) + 0.55 * (n - 0.5) + 0.45 * (n2 - 0.5);
-  if ( r >= 1.0 ) discard;
-  // lit from the up-left: three tones; thinner toward the rim (stepped)
+  float rim = 1.0 - smoothstep(1.0 - max(1.5 * fwidth(r), 0.06), 1.0, r);   // (a soft edge, at least a device px)
+  if ( rim <= 0.0 ) discard;
+  // lit from the up-left: light, mid and shade blending; thinner toward the rim
   float l = clamp(-0.7 * (d.x + d.y) + 0.4 * (n - 0.5), -1.0, 1.0);
-  vec3 c = l > 0.25 ? vec3(0.95, 0.96, 0.97) : l > -0.3 ? vec3(0.84, 0.86, 0.90) : vec3(0.70, 0.73, 0.78);
-  float a = vP.w * (r < 0.45 ? 1.0 : r < 0.75 ? 0.66 : 0.4);
-  a = a > 0.42 ? 0.46 : a > 0.24 ? 0.32 : a > 0.1 ? 0.18 : 0.0;
-  a *= uAlpha;
-  if ( a <= 0.0 ) discard;
+  vec3 c = mix(vec3(0.70, 0.73, 0.78), vec3(0.84, 0.86, 0.90), smoothstep(-0.42, -0.18, l));
+  c = mix(c, vec3(0.95, 0.96, 0.97), smoothstep(0.13, 0.37, l));
+  float a = vP.w * mix(1.0, 0.4, smoothstep(0.3, 0.9, r));
+  a = min(0.46, 1.1 * a) * smoothstep(0.03, 0.12, a) * rim * uAlpha;
+  if ( a <= 0.002 ) discard;
   o = vec4(c * a, a);
 }`;
 
