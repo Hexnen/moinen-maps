@@ -17,7 +17,7 @@ export const BUILTIN = Object.freeze([
       { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.9, flash: 0.6 },
       { l: "cue", id: "light", kind: "light", at: 0, peak: 1, radius: 4, decay: 1500 },
       { l: "burst", id: "burst", at: 0, lv: 3, r: 1.6 },
-      { l: "destruction", id: "crater", at: 0, type: "blast", level: 3, cause: "fire", r: 1.2, pr: { jagged: true, jag: 0.7 } },
+      { l: "destruction", id: "crater", at: 200, type: "blast", level: 3, cause: "fire", r: 1.2, pr: { jagged: true, jag: 0.7 } },
       { l: "dust", id: "shock", dk: "shock", at: 30, lv: 3, r: 3.5, life: 305000 },
       { l: "fire", id: "rim", at: [900, 1300], place: { m: "ring", n: [2, 4], d: [0.95, 1.3] }, lv: 2, lvMix: [0.5, 0.5, 0], sm: 1, r: [0.3, 0.45], len: [0.3, 0.7], aftermath: true, lifeK: [0.5, 1], gr: 0.6 },
       { l: "fire", id: "debris", at: [150, 1400], place: { m: "scatter", n: [6, 12], d: [1.5, 3.5], bias: 1.4 }, lv: 1, sm: 1, r: [0.15, 0.25], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
@@ -33,9 +33,9 @@ export const BUILTIN = Object.freeze([
       { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.5, flash: 0 },
       { l: "cue", id: "light", kind: "light", at: 0, peak: 0.5, radius: 2, decay: 600 },
       { l: "burst", id: "burst", at: 0, lv: 1, r: 0.5 },
-      { l: "destruction", id: "crater", at: 0, type: "blast", level: 2, cause: "impact", r: 0.35 },
-      { l: "destruction", id: "shrapnel", at: 0, type: "cracks", level: 1, cause: "impact", place: { m: "scatter", n: [10, 18], d: [0.3, 2], bias: 1.6 }, r: [0.08, 0.14] },
-      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 1.5, life: 155000 },
+      { l: "destruction", id: "crater", at: 200, type: "blast", level: 2, cause: "fire", r: 0.35 },   // (under the fireball: its white core alone shows ~T+120, the crater must not open round it first)
+      { l: "destruction", id: "shrapnel", at: 150, type: "cracks", level: 1, cause: "none", place: { m: "scatter", n: [10, 18], d: [0.3, 1.4], bias: 1.6 }, r: [0.08, 0.14] },
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 1, r: 1.15, life: 155000 },
       { l: "smoke", id: "wisps", at: 300, sm: 1, r: 0.5, life: 8000, gr: 0.6 },
       { l: "fire", id: "smoulder", at: 400, chance: 0.3, place: { m: "scatter", n: [1, 1], d: [0, 0.3] }, lv: 1, sm: 1, r: 0.25, aftermath: true, gr: 0.4 }
     ]
@@ -51,9 +51,9 @@ export const BUILTIN = Object.freeze([
     layers: [
       { l: "accent", id: "muzzle", kind: "muzzle", at: -600, dur: 600 },
       { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 250, lv: 1 },
-      { l: "destruction", id: "pocks", at: 0, type: "blast", cause: "impact", lvMix: [0.85, 0.15, 0], place: { m: "walk" }, r: [0.1, 0.14],
-        pr: { rubble: 0.1, debris: 0.2, scatter: 0.35, halo: 0.15, edge: 0.5, jagged: true, jag: 0.5 } },
-      { l: "dust", id: "puffs", dk: "hits", at: 0, lv: 1, r: 0.16, place: { m: "walk" }, life: 6000 }
+      { l: "destruction", id: "pocks", at: 0, type: "blast", cause: "impact", lvMix: [0.6, 0.4, 0], place: { m: "walk" }, r: [0.14, 0.2],
+        pr: { rubble: 0.1, debris: 0.2, scatter: 0.3, halo: 0.15, edge: 0.5, jagged: true, jag: 0.3 } },
+      { l: "dust", id: "puffs", dk: "hits", at: 0, lv: 1, r: 0.22, place: { m: "walk" }, life: 6000 }
     ]
   },
   {
@@ -64,7 +64,7 @@ export const BUILTIN = Object.freeze([
     // the tracers fly out of them; without one the gunship is off the map - no muzzle flash, the tracers come in from above
     id: "heliHmg", v: 1, set: "military", name: "MOINENMAPS.DPreset.heliHmg", hint: "MOINENMAPS.DPreset.heliHmgHint", icon: "fa-solid fa-helicopter",
     gesture: "run", preroll: 1500, aftermath: null,
-    walk: { rate: 9, speed: 8, dur: [0.6, 3], lanes: [-0.35, 0.35], phase: [0, 0.5], sigma: [0.3, 0.3], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.1, wave: 2 },
+    walk: { rate: 9, speed: 8, dur: [0.6, 3], lanes: [-0.55, 0.55], phase: [0, 0.5], sigma: [0.16, 0.22], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.1, wave: 2 },
       stray: { p: 0.1, k: 1.5 }, maxHits: 24 },
     layers: [
       { l: "accent", id: "tracers", kind: "tracer", at: -250, dur: 200, every: 4, lv: 3 },
@@ -72,7 +72,7 @@ export const BUILTIN = Object.freeze([
       // (after the tracers and hits: their accents keep their order, so without a shooter the heli draws exactly as before)
       { l: "accent", id: "muzzle", kind: "muzzle", at: -300, dur: 300, lv: 3 },
       { l: "destruction", id: "lanes", at: 0, type: "blast", cause: "impact", lvMix: [0.7, 0.3, 0], place: { m: "walk" }, lanes: "each", r: [0.18, 0.26],
-        pr: { rubble: 0.15, debris: 0.25, scatter: 0.35, halo: 0.2, edge: 0.55, jagged: true, jag: 0.55 } },
+        pr: { rubble: 0.15, debris: 0.25, scatter: 0.3, halo: 0.2, edge: 0.55, jagged: true, jag: 0.35 } },
       { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.06 }, lanes: "all", r: [0.3, 0.36],
         pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, jagged: true, jag: 0.6 } },
       { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 6000 }
@@ -96,7 +96,25 @@ export const BUILTIN = Object.freeze([
   },
   LANDING,
   {
-    // THE METEOR (dev/presets-design.md section 21): a white-hot head rushing down the sky at an angle with a plasma tail, shedding
+    // ROCKET / RPG (dev/presets-design.md section 21): with a SHOOTER (a token the GM chose, or a shot dragged out of a token) a hiss at
+    // the tube's rear, the launch flash and a billowing backblast; the rocket flies to the target with its motor flame, laying a smoke
+    // trail that swells, rises, wanders and dissolves; a shell's fireball, a crater, the dust ring, small fires. No shooter: no hiss,
+    // no flash, no backblast - it comes in from off the map (the accent "rocket" is drawn by presets/rocket.mjs)
+    id: "rocket", v: 1, set: "military", name: "MOINENMAPS.DPreset.rocket", hint: "MOINENMAPS.DPreset.rocketHint", icon: "fa-solid fa-rocket",
+    gesture: "shot", preroll: 1100, aftermath: { dur: 45 },
+    layers: [
+      { l: "accent", id: "rocket", kind: "rocket", at: -1100, dur: 6400, lv: 2 },
+      { l: "cue", id: "screen", kind: "screen", at: 0, shake: 0.6, flash: 0.3 },
+      { l: "burst", id: "burst", at: 0, lv: 2, r: 0.85 },
+      { l: "destruction", id: "crater", at: 0, type: "blast", level: 2, cause: "fire", r: 0.7, pr: { jagged: true, jag: 0.6 } },
+      { l: "dust", id: "shock", dk: "shock", at: 20, lv: 2, r: 2.2, life: 245000 },
+      { l: "fire", id: "debris", at: [150, 900], place: { m: "scatter", n: [3, 6], d: [1, 2.4], bias: 1.3 }, lv: 1, sm: 1, r: [0.14, 0.22], aftermath: true, lifeK: [0.3, 0.8], gr: 0.3 },
+      { l: "fire", id: "rim", at: [700, 1100], place: { m: "ring", n: [1, 3], d: [0.6, 0.9] }, lv: 1, lvMix: [0.7, 0.3, 0], sm: 1, r: [0.22, 0.32], len: [0.2, 0.5], aftermath: true, lifeK: [0.5, 1], gr: 0.5 },
+      { l: "smoke", id: "column", at: 1200, sm: 2, r: 0.55, aftermath: true }
+    ]
+  },
+  {
+    // THE METEOR (dev/presets-design.md section 22): a white-hot head rushing down the sky at an angle with a plasma tail, shedding
     // sparks, a dark smoke trail hanging along the way it came, its shadow / its light running in over the ground; then the biggest
     // blast of the set - a pressure ring racing out, a huge fireball, a big torn crater, the shock dust and its five-minute haze, rocks
     // thrown out on arcs that land one by one (each a pock and a geyser of dust), burning chunks, fires round the rim and in the

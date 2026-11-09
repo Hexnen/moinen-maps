@@ -7,7 +7,7 @@
  * client never decides anything again, so every client shows the same firing.
  *
  * THE DEFINITION (version 1):
- *   { id, v: 1, name, hint (i18n keys), icon, set, gesture: "point" | "throw" | "line" | "run", preroll (ms from the click to the
+ *   { id, v: 1, name, hint (i18n keys), icon, set, gesture: "point" | "throw" | "line" | "run" | "shot", preroll (ms from the click to the
  *     impact T0), aftermath: null (no lasting fire) | { dur: seconds | null (no end: it burns until the GM puts it out) },
  *     walk: { ... } (line / run: how the hits walk, see WALK), layers: [ layer, ... ] }
  *   Lengths are in GRID SQUARES at size 1 (the firing's size scales them), times in ms from T0 (negative: the pre-roll).
@@ -46,11 +46,11 @@ export const VERSION = 1;
 export const RUN_MS = 2000;
 /** A gun's shot interval is a whole number of these ms (the dust layer's hits stroke stores it as s = interval / HIT_DT, 0.01 steps). */
 export const DT_STEP = 2.5, HIT_DT = 250;
-export const GESTURES = ["point", "throw", "line", "run"];
+export const GESTURES = ["point", "throw", "line", "run", "shot"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
 export const PLACES = ["centre", "ring", "scatter", "walk", "rays", "ejecta"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "meteor"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike", "landing", "airRing", "rocket", "meteor"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
@@ -362,7 +362,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
     wa = [round(a[0] + (b[0] - a[0]) * k, 10), round(a[1] + (b[1] - a[1]) * k, 10)];
   }
   const walk = def.walk ? walkHits(def.walk, wa, hasB ? b : null, { seed, grid, size }) : null;
-  const c = def.gesture === "throw" && hasB ? b : a;
+  const c = (def.gesture === "throw" || def.gesture === "shot") && hasB ? b : a;
   let dir = def.gesture === "point" ? (hasB ? unit(b[0] - a[0], b[1] - a[1]) : null) : walk ? walk.dir : hasB ? unit(b[0] - a[0], b[1] - a[1]) : null;
   // (an impact with ejecta and no drag: a way of its own from the seed, always coming down the screen - things fall screen-down)
   if ( !dir && def.ejecta ) { const rd = stream(seed, "dir"), sx = rd() < 0.5 ? -1 : 1, ux = sx * (0.5 + 0.42 * rd()); dir = unit(ux, Math.sqrt(1 - ux * ux)); }
@@ -447,7 +447,7 @@ export function expand(defIn, gesture, opts = {}, env = {}) {
         else for ( const p of pts ) plan.pending.dust.push({ id: L.id, dk: L.dk, lv: clamp(L.lv + power, 1, 3), r: round(r.range(L.r) * sq, 10), at, x: round(p.x, 10), y: round(p.y, 10),
           life: L.life ? Math.round(r.range(L.life)) : null });
         break;
-      case "accent": plan.pending.accent.push(accentOf(L, at, { plan, hits: (walk?.hits ?? []).filter((h) => inRect(h, R)), from, wind, grid })); break;
+      case "accent": plan.pending.accent.push(accentOf(L, at, { plan, hits: (walk?.hits ?? []).filter((h) => inRect(h, R)), from, grid, wind })); break;
       case "cue": plan.pending.cue.push(L.kind === "screen" ? { id: L.id, kind: "screen", at, shake: L.shake, flash: L.flash }
         : { id: L.id, kind: "light", at, x: round(c[0], 10), y: round(c[1], 10), peak: L.peak, radius: round(L.radius * sq, 10), decay: L.decay });
         break;
@@ -484,7 +484,7 @@ function hitsDust(L, pts, { plan, at, t0, walk, sq, r, power, wind }) {
 function unit(x, y) { const l = Math.hypot(x, y); return l > 1e-9 ? [round(x / l, 1e4), round(y / l, 1e4)] : null; }
 
 /** An accent's data: where and when (pending: the accents layer, P5, plays it). */
-function accentOf(L, at, { plan, hits, from, wind, grid }) {
+function accentOf(L, at, { plan, hits, from, grid, wind }) {
   const base = { id: L.id, kind: L.kind, at, dur: L.dur };
   if ( L.lv !== undefined ) base.lv = L.lv;
   if ( L.shake ) base.shake = L.shake;
@@ -504,10 +504,12 @@ function accentOf(L, at, { plan, hits, from, wind, grid }) {
       if ( from && (plan.walk ? new Set(plan.walk.hits.map((h) => h[3])).size : 1) > 1 ) m.twin = true;
       return m;
     }
+    case "rocket": return { ...base, ...rocketFlight(L, at, plan, from, grid), wd: wind.dir, ws: wind.speed };
     case "hitFx": case "tracer": {
       // (every n-th shot of each gun, counted per lane - the second gun's count shifted half way - so both guns fire tracers)
       const every = L.every ?? 1, k = every > 1 ? Math.floor(every / 2) : 0;
-      const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === every - 1);
+      // (the very first round of the first gun is a tracer: the run reads from its first hit, the tracer showing where it comes from)
+      const pick = hits.filter((h) => (h.i + (h.lane % 2) * k) % every === 0);
       const o = { ...base, hits: pick.map((p) => [p.x, p.y, p.t, p.lane]), dir: plan.dir, from: from ?? null, a: plan.gesture.a, b: plan.gesture.b };
       if ( from && L.kind === "tracer" ) {
         if ( plan.gesture.fr !== undefined ) o.fr = plan.gesture.fr;
@@ -517,6 +519,32 @@ function accentOf(L, at, { plan, hits, from, wind, grid }) {
     }
   }
   return base;
+}
+
+/**
+ * A ROCKET's flight (dev/presets-design.md section 21): the target (the firing's point), the launch point and its height, the flight
+ * time. With a shooter (gesture.from) it leaves the shooter's edge (gesture.fr, its radius) at shoulder height and its flight grows
+ * with the distance (ROCKET_FL); with none it comes in from ROCKET_FAR squares out, high, along the gesture's direction or a side the
+ * seed chooses (its own stream). The launch never comes before the accent's start (at): the flight is cut to fit.
+ */
+export const ROCKET_FAR = 11, ROCKET_Z = [0.32, 1.4], ROCKET_FL = { base: 200, perSq: 45, min: 280, max: 900 };
+function rocketFlight(L, at, plan, from, grid) {
+  const to = plan.at, shot = Array.isArray(from) && isNum(from[0]) && isNum(from[1]);
+  const avail = Math.max(150, -at);
+  if ( shot ) {
+    const dx = to[0] - from[0], dy = to[1] - from[1], D = Math.hypot(dx, dy) || 1, ux = dx / D, uy = dy / D;
+    const fr = isNum(plan.gesture.fr) ? plan.gesture.fr : null;
+    const off = Math.min(D * 0.5, fr !== null ? Math.max(0.3 * grid, 0.85 * fr) : 0.38 * grid);
+    const m = [round(from[0] + ux * off, 10), round(from[1] + uy * off, 10)], Dsq = (D - off) / grid;
+    const want = clamp(ROCKET_FL.base + ROCKET_FL.perSq * Dsq, ROCKET_FL.min, ROCKET_FL.max);
+    const out = { to, m, z0: round(ROCKET_Z[0] * grid, 10), fl: Math.round(Math.max(150, Math.min(want, avail - 150))), shot: true, from };
+    if ( fr !== null ) out.fr = fr;
+    return out;
+  }
+  const r = stream(plan.seed, `rocket:${L.id}`), a = r() * 6.2832;
+  const d = plan.dir ?? [round(Math.cos(a), 1e4), round(Math.sin(a), 1e4)];
+  const m = [round(to[0] - d[0] * ROCKET_FAR * grid, 10), round(to[1] - d[1] * ROCKET_FAR * grid, 10)];
+  return { to, m, z0: round(ROCKET_Z[1] * grid, 10), fl: Math.round(Math.max(150, avail - 150)), shot: false };
 }
 
 /* ---------------------------------------------------------------- checks the tests and the writer share */

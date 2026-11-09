@@ -11,7 +11,7 @@ import { warmPrograms } from "../gl-warm.mjs";
 import * as M from "./meteor-core.mjs";
 
 /**
- * DESTRUCTION PRESETS, THE METEOR on every client (dev/presets-design.md section 21; the pure rules: meteor-core.mjs). Loaded by
+ * DESTRUCTION PRESETS, THE METEOR on every client (dev/presets-design.md section 22; the pure rules: meteor-core.mjs). Loaded by
  * meteor-wire.mjs on the first firing record with a meteor accent; draws while one is live, then removes its ticker.
  *  - ONE ART PASS per firing into a render texture of ART CELLS (the destruction layer's art grid: the same pixel size and phase as
  *    the crater, the fire and the dust under it) - the head, its coma and plasma tail, the sparks it sheds, the smoke trail along the

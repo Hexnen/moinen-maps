@@ -153,10 +153,10 @@ function nearView(x, y) {
 /** A blast's FLASH: a warm overlay over the board for a moment (never for an opted-out client). */
 function flash(L) {
   if ( !L.length && !flashEl ) return;
-  let a = 0;
+  let a = 0, at = null;
   if ( L.length ) {
     let opts = null; try { opts = clientOpts(); } catch { /* not ready */ }
-    if ( !opts?.noFlash && !opts?.reduced ) for ( let i = 0; i < L.length; i += 3 ) a = Math.max(a, L[i + 2] * nearView(L[i], L[i + 1]));
+    if ( !opts?.noFlash && !opts?.reduced ) for ( let i = 0; i < L.length; i += 3 ) { const v = L[i + 2] * nearView(L[i], L[i + 1]); if ( v > a ) { a = v; at = [L[i], L[i + 1]]; } }
   }
   if ( !flashEl ) {
     if ( a < 0.005 ) return;
@@ -165,7 +165,20 @@ function flash(L) {
     flashEl.className = "mm-preset-flash";
     document.body.appendChild(flashEl);
   }
-  flashEl.style.opacity = String(Math.round(Math.min(0.6, 0.55 * a) * 1000) / 1000);
+  // (a pool of light round the blast, not a wash of the whole screen: brightest over it, gone towards the edges; in the dark it is
+  // weaker - the burst's own light lights the ground there, a screen-wide lift read as a grey veil)
+  if ( a >= 0.005 && at ) {
+    let cx = 50, cy = 50, R = 70;
+    try {
+      const st = canvas.stage, p = st.worldTransform.apply({ x: at[0], y: at[1] }), r = canvas.app.renderer.resolution || 1;
+      const w = canvas.app.screen.width, h = canvas.app.screen.height;
+      cx = Math.round(p.x / (canvas.app.renderer.width / r) * 100); cy = Math.round(p.y / (canvas.app.renderer.height / r) * 100);
+      R = Math.round(Math.max(45, Math.min(110, 0.75 * Math.hypot(w, h) / Math.max(w, h) * 100)));
+    } catch { /* keep the centre */ }
+    flashEl.style.background = `radial-gradient(ellipse ${R}% ${Math.round(R * 1.15)}% at ${cx}% ${cy}%, #fff6e2 0%, rgba(255,236,204,0.75) 30%, rgba(255,228,190,0.25) 65%, rgba(255,224,184,0) 100%)`;
+  }
+  const dark = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
+  flashEl.style.opacity = String(Math.round(Math.min(0.6, 0.55 * a) * (1 - 0.55 * dark) * 1000) / 1000);
 }
 
 /** The screen shake of the heavy hits near the view (a small jitter, at most a few screen px) and of a blast's screen cue (up to

@@ -998,7 +998,119 @@ New: `scripts/presets/def-landing.mjs` (the definition), `scripts/presets/rays.m
   - At night the cracks are subtle.
   - The shock dust (section 17) is large and lumpy, and its haze motes read as dark pepper on light ground.
 
-## 21. The meteor (design, presets-meteor)
+## 21. Rocket / RPG (rakieta): design
+
+The user picked it from a list: "rakieta / RPG: smuga dymu od tokenu źródłowego do celu, potem wybuch". A sixth pad with the same
+bar as the others (WOW, natural and organic, no squares or area edges, smooth in and out, the oblique view, readable at zoom 0.6-3
+by day and by night, optimise only with no visible loss). No sound, nothing pushes tokens, and the aftermath fire's duration is the
+preset's setting with "no end". It is a FIREARM in the sense of section 19: it has a shooter, and with no shooter there is no launch
+flash (the user: "jeśli nie ma wybranego źródłowego tokenu, nie wyświetlaj muzzle flash").
+
+### 21.1 How it reads at the table
+
+**In one breath, with a shooter:**
+- A hiss at the shooter's back: sputtering sparks and a few thin wisps for a third of a second.
+- The launch: a sharp flash at the muzzle and a hot BACKBLAST out of the tube's rear. It turns at once into a big billowing cloud
+  of grey-tan smoke and dust thrown backwards.
+- The rocket leaves fast and keeps accelerating: a dark dart with a white-hot motor flame flickering behind it, a slight corkscrew
+  and a gentle lob, its small shadow running on the ground under it. A short way out its sustainer kicks in with a small flash.
+- Behind it a SMOKE TRAIL is laid down where it passes: white-hot and orange right behind the flame, then lumpy white-grey smoke
+  that swells, rises a little up the screen, drifts with the wind and wanders into a wavy line.
+- It slams into the target. The shell-sized fireball (burst L2) rolls up into a short dark column, the screen jolts and flashes a
+  little, a ragged shock ring of the ground's dust runs out, and burning debris arcs out.
+- Left behind: a charred, torn crater, small fires at its rim and where the debris fell, a thin smoke column. The trail hangs for a
+  few seconds, the shooter's end first, breaking up into blobby patches, and is gone. The backblast cloud settles the same way.
+
+**With no shooter** (none chosen, and the drag did not start on a token) there is no hiss, no launch flash and no backblast. The
+rocket comes in from off the map: from 11 squares out, high, along the drag (a drag sets the direction it comes from) or from a side
+chosen by the firing's seed (a click). Its trail grows out of nothing (the far end fades in by dropout, never a hard start), and it
+hits as above.
+
+### 21.2 The gesture: `shot` (a new gesture, glyph fa-location-crosshairs)
+
+- **A chosen shooter** (the bar's Shooter block, or S over a token, exactly as the guns in section 19): a CLICK is the target, and
+  so is a drag's release. The rocket leaves the shooter's edge towards the target at shoulder height (0.32 sq).
+- **None chosen, a drag started on a token:** that token is the shooter for this shot; the release is the target.
+- **None chosen, a drag from the ground:** no shooter; the release is the target and the drag sets the direction it comes from.
+- **None chosen, a click:** no shooter; the click is the target and the direction is the seed's.
+- **The ghost:** a dotted, lifted flight line from the launch point (or the far approach) to the target, and the crater, burst and
+  shock ring at the target. The shooter's ring is drawn as for the guns.
+
+### 21.3 The timeline (lv 2, size 1; ms from T0, the impact)
+
+| t (ms) | Layer | What |
+|---|---|---|
+| -1100 to launch | (quiet / bake) | The GM bakes the crater, players fetch the chunk. With a shooter, the last ~320 ms before the launch are the HISS (sparks, wisps at the tube's rear). |
+| launch = -F | accent `rocket` | F (the flight) = 200 ms + 45 ms per square, 280-900 ms with a shooter (a point-blank shot is quick, a long one is seen); 950 ms from 11 squares out without one. Launch flash and backblast (shooter only). |
+| -F to 0 | accent `rocket` | The flight: body, motor flame and ground shadow. It accelerates (s = 0.35 u + 0.65 u² of the way; nearly even without a shooter), lobs slightly (height peak min(0.5 sq, 0.05 x distance)), bows (seeded, up to 0.6 sq) and corkscrews (0.045 sq). The trail is laid down behind it. A sustainer flash a short way out. At night: a moving warm ground light under the flame; the launch flash lights the shooter's ground. |
+| 0 | cue `screen` | Shake 0.6, a short warm flash 0.3 (opt-outs and distance: accents.mjs). |
+| 0 | burst L2 r 0.85 | The fireball, its short column and its light. Its debris land where the debris fires catch. |
+| 0 | destruction | Blast L2, cause fire, r 0.7, jagged. |
+| 20 | dust `shock` L2 r 2.2 | The ground's dust ring and its long haze. |
+| 150-900 | fire L1 debris | 3-6 small fires where burning debris fell (aftermath share). |
+| 700-1100 | fire L1-2 rim | 1-3 fires on the crater's rim (aftermath share). |
+| 1200 | smoke L2 column | A thin column (aftermath: it ends with the duration). |
+| 0 to ~4500 | accent `rocket` | The trail and the backblast cloud dissolve by blobby dropout, oldest first. The trail's last stretch is lit warm by the fireball for a moment. |
+
+The aftermath default is 45 s (or no end).
+
+### 21.4 How it is built
+
+- **Data (core.mjs):** `GESTURES` gains `shot` (c = the target, as for a throw); `ACCENTS` gains `rocket`. The expander stores the
+  rocket's flight in its accent item:
+
+  ```
+  { id, kind: "rocket", at, dur, lv, to: [x, y] (the target), m: [x, y] (the launch point at the shooter's edge, or the far
+    approach), z0 (px), fl (ms), shot (a shooter: hiss, flash, backblast), from?, fr? }
+  ```
+
+  Without a shooter the approach side comes from the seed (its own stream: no other layer moves). Every client builds the same
+  flight from the item.
+- **The pure part (`presets/rocket-core.mjs`, node-tested):** the flight geometry (path samples, passage times, heights), the rocket
+  at time t, the trail's samples for a frame (each sample's age, swell, rise, wind drift and wander, and its density as it
+  dissolves), the backblast and hiss billows, the CPU art pixels (motor flame, body, shadow, sparks, flashes) and the lights.
+- **The renderer (`presets/rocket.mjs`, every client; loaded by `rocket-wire.mjs` on the first record with a rocket accent):**
+  - SMOKE: one shader evaluates the trail and the billows per ART CELL into a render texture of the trail's box (one texel per art
+    pixel, so the cost is cells, not screen pixels). The trail is a lumpy tube round the displaced sample polyline: its radius
+    swells with age and wobbles in lobes along the trail, and its edge is ragged by noise. It is lit from the top left in three
+    tones and a dark rim, coloured by age (white-hot and orange behind the flame, warm-lit, then white-grey), and dissolves by
+    blobby value-noise dropout. The texture is drawn NEAREST on the art grid: crisp art pixels at every zoom, no square, no blur.
+  - NIGHT: a second pass of the same shader writes its emission into Foundry's illumination (MAX_COLOR): the hot part strongly, the
+    warm-lit part at half, the smoke as a faint moonlit glow so the trail reads in the dark. Smooth ground lights (a linear radial
+    texture: a light has no pixel grid) sit under the motor flame and at the launch.
+  - PIXELS: the body, the flame, its shadow, the sparks and the flashes are CPU art pixels (the gun accents' way), above the trail.
+  - Reduced motion: nothing of the rocket is drawn (the crater, the fire and the dust are the result). The frame guard thins the
+    sparks and, below q 0.7, re-renders the smoke every other frame (its silhouette never changes).
+- **UI:**
+  - `ui-core isFirearm` = a walk OR the `shot` gesture (the shooter block, the S key, the ring);
+  - `gestureOf("shot", ...)`;
+  - the ghost's flight line (`ghostOf`: an accent `rocket`);
+  - `aim.mjs`: a shot started on a token takes it; the test gesture of a shot;
+  - `section.mjs`: the bar's hint for a shot pad;
+  - lang en / pl: the pad, its hint, the accent's name, the bar hint.
+
+### 21.5 As built and checked (lane 3, headless Chrome DPR 2, 3168 x 1584)
+
+- **The smoke, as built:** the trail is a "cauliflower" of lit puffs strung along the displaced sample line (puff spacing 0.075 sq,
+  each puff's radius and side offset hashed), joined by a core body so it never reads as beads on a string; the front-most puff owns
+  a cell (a depth hash), with a dark crease where two puffs meet. Three tones plus the crease and rim, a 2 x 2 dither at each step,
+  drawn NEAREST on the art grid. It dissolves by blobby, rising value-noise holes, oldest (the shooter's end) first. The backblast
+  billows use the same puff logic in a tan dust tone. Night: the hot head and the motor light glow; the smoke writes a faint moonlit
+  emission (0.17, 0.12 in the shadow tones) so the trail stays readable in the dark.
+- **Verified (recordings, not committed, in dev/out/rpg):** with a shooter at zoom 0.6, 1 and 3 by day, zoom 1 and 3 at darkness
+  0.92; no shooter by click (seeded side) and by drag (the drag's side); 5x crops of the launch and the impact; a real player login
+  (Test Gracz 2, another origin) sees the hiss, launch, backblast, trail, impact and dissolve. Real input: S over a token picks the
+  shooter, a click fires from it; with none chosen a drag out of a token makes it the shooter, a drag from the ground has no
+  shooter (no flash, approach from 11 squares back along the drag); the panel's test fire draws the rocket and writes no firing.
+- **Cost (dev/rocket-cost.mjs, a firing measured in virtual time at -900 / 0 / 800 / 2500 ms, 90 frames):** CPU median +0.3 to
+  +1.1 ms over the empty view (p95 up to 3.7 ms in the flight with the backblast); GPU within this machine's timer noise (the empty
+  view itself read 1.0-2.1 ms between runs), medians 1.3-3.9 ms at zoom 1 / 3, weak x2 not clearly above x1; no long frame warm. A
+  cold reload's first firing shows one long frame (~150-200 ms), the same as the grenade's (shader / texture first use).
+- **Not checked / known:** the very end of the dissolve leaves small speckles for a moment before the trail is gone; the
+  mid-age trail can still read a little "cotton-ball" at zoom 3; a scene with a very different ground colour; weak GPUs only by
+  emulation.
+
+## 22. The meteor (design, presets-meteor)
 
 The user picked it from a list as "meteor / spadająca gwiazda: cień i smuga z góry, wielki krater, ogień i długa kurzawa" - meant as
 the biggest WOW of the set. The bar is the set's: natural and organic, no squares or area edges, a smooth start and end, the oblique
@@ -1048,7 +1160,7 @@ come from off screen at zoom 1).
   with ejecta and no drag gets a seeded way.
 - `defs.mjs`: the built-in `meteor` (set "nature"). `ui-core.mjs ghostOf`: the approach drawn as dots coming down the sky.
 
-### 21.1 The meteor as built (presets-meteor)
+### 22.1 The meteor as built (presets-meteor)
 
 - **Files:** new `scripts/presets/meteor-core.mjs`, `meteor-art.mjs`, `meteor-wire.mjs`, `dev/presets-meteor.test.mjs`,
   `dev/meteor-cost.mjs`; edited `core.mjs` (PLACES + "ejecta", ACCENTS + "meteor", EJECTA_DEFAULTS / cleanEjecta / ejectaOf, a seeded

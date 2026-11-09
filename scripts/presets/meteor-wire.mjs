@@ -2,7 +2,7 @@ import { HOOK, status } from "./runtime.mjs";
 import { HOOK as UI_HOOK, armed } from "./store.mjs";
 
 /**
- * THE METEOR's wiring (meteor-art.mjs draws it: dev/presets-design.md section 21): meteor-art.mjs is loaded on the first firing record
+ * THE METEOR's wiring (meteor-art.mjs draws it: dev/presets-design.md section 22): meteor-art.mjs is loaded on the first firing record
  * this client takes up that has a meteor accent; until then nothing of it runs (the firings runtime calls its hook only on scenes
  * with firing records). Three listeners: the runtime's hook, the presets UI's (a pad armed) and canvasTearDown, all returning at once otherwise. A test fire (the
  * editor's dry run, `test: true`) plays it on this client too. When the GM arms a meteor pad its programs are linked in the background

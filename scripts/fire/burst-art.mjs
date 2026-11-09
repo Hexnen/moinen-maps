@@ -92,7 +92,9 @@ void main() {
     }
     vec2 q = p - A.xy;
     if ( Bq.y > 1.5 ) q.y /= 0.62;   // (the ground surge: low, wide billows)
-    float rr = A.z * min(1.0, Bq.z * 2.5) * (0.84 + 0.26 * vn((vec2(c >> 1) * 2.0 + 0.5) / max(1.5, 0.3 * A.z), uSeed + 7 * i));
+    // (a lumpy edge in two octaves - a billow is a clump of small bulges, never a clean circle)
+    vec2 lp = vec2(c >> 1) * 2.0 + 0.5;
+    float rr = A.z * min(1.0, Bq.z * 2.5) * (0.76 + 0.24 * vn(lp / max(1.5, 0.3 * A.z), uSeed + 7 * i) + 0.16 * vn(lp / max(1.2, 0.13 * A.z), uSeed + 7 * i + 3));
     float d2 = dot(q, q);
     if ( d2 >= rr * rr ) continue;
     float d = sqrt(d2) / rr;
@@ -110,8 +112,11 @@ void main() {
     vec3 n = vec3(tq / tR, sqrt(max(0.0, 1.0 - tD * tD)));
     float lum = dot(n, L) + (h3(c.x >> 1, c.y >> 1, 62) - 0.5) * 0.08;
     // (an edge: the outline of the cloud, or a crease where this billow lies over another one behind it)
-    bool rim = tD > 0.89;
+    // (the outline only on the cloud's outside; where a billow lies over another, a broken crease - the billows read one by one
+    // without each being ringed)
+    bool rim = tD > 0.9;
     bool crease = rim && cover > 1;
+    if ( crease && (tD < 0.95 || h3(c.x >> 1, c.y >> 1, 63) < 0.35) ) { rim = false; crease = false; }
     float age = Bq.w;
     if ( Bq.y < 1.5 ) {
       // fire and smoke: the billow's heat, hotter in its middle than at its edge (the colour sinks from the outside in)
@@ -121,7 +126,7 @@ void main() {
         int st = temp > 0.88 ? 6 : temp > 0.74 ? 5 : temp > 0.6 ? 4 : temp > 0.47 ? 3 : temp > 0.39 ? 2 : 1;
         st = max(st, 2);                                  // (inside: never the plum / dark red - they are the outline's)
         if ( lum < 0.0 && st > 2 && st < 6 ) st--;
-        if ( rim ) st = crease ? max(1, st - 2) : min(st, temp > 0.6 ? 2 : 1);
+        if ( rim ) st = crease ? max(2, st - 1) : max(1, min(st - 1, temp > 0.6 ? 3 : 2));
         fG = 1 + st;
       } else if ( temp > 0.17 ) fG = rim || lum < 0.05 ? 10 : 9;
       else {
@@ -241,7 +246,8 @@ vec4 burstColor(ivec2 p, ivec4 a) {
     if ( thin ) { rgb = mix(rgb, SMK[(ls - 1) * 3 + 1], 0.4); al *= 0.75; }
     if ( uDark > 0.0 ) {
       vec3 cool = rgb * vec3(0.9, 0.95, 1.06);
-      if ( band == 0 || edge ) cool = mix(cool, vec3(0.8, 0.83, 0.9), edge ? 0.5 : 0.28);
+      // (moonlit tops only a little: a bright rim read as a pale disc with a white outline at night)
+      if ( band == 0 || edge ) cool = mix(cool, vec3(0.8, 0.83, 0.9), edge ? 0.18 : 0.14);
       rgb = mix(rgb, cool, uDark);
     }
     return vec4(rgb * al, al);

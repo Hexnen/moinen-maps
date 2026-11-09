@@ -51,6 +51,9 @@ const cloudRow = () => {
   return btnRow("Weather.clouds", "wx-clouds", [0, 1, 2, 3], (v) => v === curClouds(), (v) => T(`Weather.cl.${v}`), (v) => T(`Weather.clh.${v}`), (v) => CLOUD_COLOR[v], (v) => v ? "fa-solid fa-cloud" : "fa-solid fa-sun")
     + `<div class="mm-ws-opt"><div class="mm-ws-tools" role="group" aria-label="${esc(T("Weather.cloudLook"))}">${b("wx-cmode=\"sky\"", C.mode === "sky", "fa-solid fa-cloud-sun", "Weather.cm.sky", "Weather.cmh.sky")}${b("wx-cmode=\"shadows\"", C.mode === "shadows", "fa-solid fa-circle-half-stroke", "Weather.cm.shadows", "Weather.cmh.shadows")}${b("wx-rays", C.rays, "fa-solid fa-sun-bright", "Weather.rays", "Weather.raysHint")}</div></div>`;
 };
+// the rain's lightning: on / off in the bar (its settings in the dock's Lightning panel)
+const stormOn = () => !!Wx.params0().storm?.on;
+const stormRow = () => `<div class="mm-ws-opt"><div class="mm-ws-tools" role="group" aria-label="${esc(T("Weather.lt.title"))}"><button type="button" class="mm-ws-toolbtn" data-wx-storm aria-pressed="${stormOn()}" aria-label="${esc(T("Weather.lt.on"))}" data-tooltip="${esc(T("Weather.lt.barHint"))}"><i class="fa-solid fa-bolt-lightning" inert></i></button></div></div>`;
 const lensRow = () => {
   const L = Wx.params0().lens;
   return `<div class="mm-ws-opt"><div class="mm-ws-tools" role="group"><button type="button" class="mm-ws-toolbtn" data-wx-lens aria-pressed="${L.on}" aria-label="${esc(T("Weather.lensOn"))}" data-tooltip="${esc(T("Weather.lensOnHint"))}"><i class="fa-solid fa-glasses" inert></i></button></div>
@@ -66,6 +69,7 @@ function bar(host, ctx) {
       ${dirRow()}
       ${optRange({ name: "wx.str", label: T("Weather.windStr"), value: curWind().str, min: 0, max: 1, step: 0.05, hint: T("Weather.windStrHint") })}
       ${optRange({ name: "weatherOver", label: T("Weather.over"), value: setting("weatherOver") ?? 20, min: 0, max: 120, step: 1, hint: T("Weather.overHint") })}
+      ${stormRow()}
       ${lensRow()}
       ${optHint(TOOLS[ctx.tool] === "wind" ? T("Weather.windHint") : TOOLS[ctx.tool] === "tornado" ? T("Weather.tornadoHint") : T("Weather.barHint"))}`;
   };
@@ -79,6 +83,7 @@ function bar(host, ctx) {
     const cm = t.closest?.("[data-wx-cmode]"); if ( cm ) { Wx.setCloudLook({ mode: cm.dataset.wxCmode }); return; }
     if ( t.closest?.("[data-wx-rays]") ) { Wx.setCloudLook({ rays: !Wx.params0().clouds.rays }); return; }
     const d = t.closest?.("[data-wx-dir]"); if ( d ) { const w = curWind(); Wx.change({ wind: { dir: Number(d.dataset.wxDir), str: w.str > 0 ? w.str : 0.4 } }, { over: Math.min(over(), 5000) }); return; }
+    if ( t.closest?.("[data-wx-storm]") ) { Wx.setStorm({ on: !stormOn() }); return; }
     if ( t.closest?.("[data-wx-lens]") ) { Wx.setParams({ lens: { on: !Wx.params0().lens.on } }); }
   };
   const onChange = (ev) => {
@@ -109,6 +114,7 @@ function bar(host, ctx) {
     const C = Wx.params0().clouds;
     for ( const b of host.querySelectorAll("[data-wx-cmode]") ) b.setAttribute("aria-pressed", String(b.dataset.wxCmode === C.mode));
     for ( const b of host.querySelectorAll("[data-wx-rays]") ) b.setAttribute("aria-pressed", String(C.rays));
+    for ( const b of host.querySelectorAll("[data-wx-storm]") ) b.setAttribute("aria-pressed", String(stormOn()));
   };
   // keys 1-3: the level, while the section is open (not while typing)
   const key = (e) => {
@@ -291,6 +297,28 @@ const PANELS = [
       else if ( a === "tout" ) Wx.tornadoApi.remove(b.dataset.id);
       else if ( a === "tall" ) Wx.tornadoApi.clear();
     }
+  }) },
+  { id: "lightning", title: "MOINENMAPS.Weather.lt.title", icon: "fa-solid fa-bolt-lightning", open: false, mount: panel({
+    kinds: ["params", "loaded", "changed"],
+    html: () => {
+      const S = Wx.weatherApi.lightning(), SL = Wx.weatherApi.stormModel.LIMITS, gm = game.user.isGM;
+      const rain = (Wx.weatherApi.state()?.fx?.rain?.p ?? 0) > 0.01 || ["rain", "storm"].includes(curPreset());
+      const pv = ["far", "mid", "close"].map((k) => `<button type="button" class="mm-ws-btn" data-act="lpv" data-v="${k}"${gm && rain ? "" : " disabled"} data-tooltip="${esc(T(`Weather.lt.pvh.${k}`))}"><i class="fa-solid ${k === "close" ? "fa-bolt-lightning" : k === "mid" ? "fa-cloud-bolt" : "fa-cloud"}" inert></i> ${esc(T(`Weather.lt.pv.${k}`))}</button>`).join("");
+      return `<div class="mm-d-form">
+      ${optCheck({ name: "g.ltOn", label: T("Weather.lt.on"), checked: S.on, hint: T("Weather.lt.onHint") })}
+      ${optRange({ name: "g.ltRate", label: T("Weather.lt.rate"), value: S.rate, min: SL.rate[0], max: SL.rate[1], step: 1, hint: T("Weather.lt.rateHint") })}
+      ${optRange({ name: "g.ltPower", label: T("Weather.lt.power"), value: S.power, min: 0, max: 1, step: 0.05, hint: T("Weather.lt.powerHint") })}
+      ${optRange({ name: "g.ltNear", label: T("Weather.lt.near"), value: S.near, min: 0, max: 1, step: 0.05, hint: T("Weather.lt.nearHint") })}
+      ${optCheck({ name: "g.ltBolts", label: T("Weather.lt.bolts"), checked: S.bolts, hint: T("Weather.lt.boltsHint") })}
+      ${rain ? "" : `<p class="mm-ws-hint mm-wx-warn"><i class="fa-solid fa-triangle-exclamation" inert></i> ${esc(T("Weather.lt.needsRain"))}</p>`}
+      <span class="mm-ws-label">${esc(T("Weather.lt.preview"))}</span><div class="mm-d-actions">${pv}</div>
+      <p class="mm-ws-hint">${esc(T("Weather.lt.hint"))}</p></div>`;
+    },
+    onChange: (n, v) => {
+      const k = { "g.ltOn": "on", "g.ltRate": "rate", "g.ltPower": "power", "g.ltNear": "near", "g.ltBolts": "bolts" }[n];
+      if ( k ) Wx.setStorm({ [k]: v });
+    },
+    onClick: (b) => { if ( b.dataset.act === "lpv" ) Wx.weatherApi.previewFlash(b.dataset.v); }
   }) },
   { id: "ground", title: "MOINENMAPS.Weather.pGround", icon: "fa-solid fa-water", open: false, mount: panel({
     kinds: ["params", "loaded", "changed"],

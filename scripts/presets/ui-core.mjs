@@ -19,7 +19,7 @@ export const ICONS = ["fa-solid fa-bomb", "fa-solid fa-burst", "fa-solid fa-gun"
   "fa-solid fa-fire-flame-curved", "fa-solid fa-bolt", "fa-solid fa-wand-sparkles", "fa-solid fa-hammer", "fa-solid fa-skull", "fa-solid fa-dragon",
   "fa-solid fa-rocket", "fa-solid fa-person-rifle", "fa-solid fa-tornado", "fa-solid fa-volcano"];
 /** The gesture's glyph on a pad. */
-export const GESTURE_ICON = { point: "fa-solid fa-crosshairs", throw: "fa-solid fa-share", line: "fa-solid fa-grip-lines", run: "fa-solid fa-angles-right" };
+export const GESTURE_ICON = { point: "fa-solid fa-crosshairs", throw: "fa-solid fa-share", line: "fa-solid fa-grip-lines", run: "fa-solid fa-angles-right", shot: "fa-solid fa-location-crosshairs" };
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
@@ -53,9 +53,9 @@ export function cleanBar(raw) {
 
 /* ---------------------------------------------------------------- the shooter (a firearm's source token) */
 
-/** A FIREARM: a preset that walks a burst of rounds (the guns: line / run). Only a firearm has a shooter, and only a firearm with a
- * shooter shows a muzzle flash (the user: no source token, no muzzle flash). */
-export const isFirearm = (def) => !!def?.walk;
+/** A FIREARM: a preset that walks a burst of rounds (the guns: line / run) or fires one shot (the rocket: gesture "shot"). Only a
+ * firearm has a shooter, and only a firearm with a shooter shows a muzzle flash (the user: no source token, no muzzle flash). */
+export const isFirearm = (def) => !!def?.walk || def?.gesture === "shot";
 /** The key of a pad's shooter on a scene (each scene remembers its own, each gun its own). */
 export const srcKey = (sceneId, padId) => `${sceneId}:${padId}`;
 /** The token id of a pad's shooter on a scene, or null. */
@@ -121,6 +121,9 @@ export function fireOpts(def, bar, seed) {
  *   line   the burst walks a -> b; started on a token: it is the shooter (from), the hits start just past its edge; else the chosen
  *          shooter (src) fires it from where it stands; neither: no shooter (no muzzle flash)
  *   run    the strafing run a -> b, its shooter as the line's
+ *   shot   one round (the rocket) at a target: with a chosen shooter (src) a click or a drag's release is the target and it flies from
+ *          the shooter; none chosen, a drag out of a token makes it the shooter; else no shooter: the target is b (a drag: it comes in
+ *          from a's side) or the click (a)
  */
 export function gestureOf(kind, down, up, grid, token = null, src = null) {
   const dx = up[0] - down[0], dy = up[1] - down[1], len = Math.hypot(dx, dy), drag = len > grid * 0.25;
@@ -128,6 +131,11 @@ export function gestureOf(kind, down, up, grid, token = null, src = null) {
   if ( kind === "throw" ) {
     const from = token ? [token.x, token.y] : down;
     return { a: P(from), b: drag ? P(up) : null, from: token ? P(from) : null };
+  }
+  if ( kind === "shot" ) {
+    const s = src && isNum(src.x) && isNum(src.y) ? src : (!src && token && drag ? token : null);
+    if ( s ) return { a: P([s.x, s.y]), b: P(drag ? up : down), from: P([s.x, s.y]), fr: Math.round(isNum(s.r) ? s.r : grid / 2) };
+    return { a: P(down), b: drag ? P(up) : null, from: null };
   }
   // a burst dragged out of a token: the hits start past its edge, it is the shooter
   const outOf = (t) => {
@@ -172,6 +180,12 @@ export function ghostOf(plan, view = { lift: 0.5, squash: 0.8 }) {
   }
   for ( const ac of plan.pending?.accent ?? [] ) {
     if ( ac.kind === "throwArc" && ac.from && ac.to ) out.push({ k: "dots", pts: arcDots(ac.from, ac.to, lift, 22), r: 5, c: INK.aim, a: 0.75, t: ac.at, d: ac.dur });
+    // a rocket's flight: from the launch point (lifted to its height) down to the target, dotted (fainter from far off: no shooter)
+    if ( ac.kind === "rocket" && ac.m && ac.to ) {
+      const n = Math.max(6, Math.min(40, Math.round(Math.hypot(ac.to[0] - ac.m[0], ac.to[1] - ac.m[1]) / 22)));
+      const pts = Array.from({ length: n + 1 }, (_, i) => { const u = i / n; return [round(ac.m[0] + (ac.to[0] - ac.m[0]) * u, 10), round(ac.m[1] + (ac.to[1] - ac.m[1]) * u - lift * (ac.z0 ?? 0) * (1 - u), 10)]; });
+      out.push({ k: "dots", pts: ac.shot ? pts : pts.slice(Math.floor(n * 0.55)), r: 4.5, c: INK.aim, a: ac.shot ? 0.7 : 0.5, t: -(ac.fl ?? 600), d: (ac.fl ?? 600) + 300 });
+    }
     // (the meteor: its way down the sky, the last part of it - where it comes in from)
     if ( ac.kind === "meteor" && ac.g > 0 ) { const W = wayOf(ac, ac.g); out.push({ k: "dots", pts: Array.from({ length: 19 }, (_, i) => screenOf(W, 0.45 + 0.55 * i / 18, lift).map((v) => round(v, 10))), r: 5, c: INK.aim, a: 0.7, t: ac.at, d: -ac.at }); }
   }

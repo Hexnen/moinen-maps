@@ -218,6 +218,29 @@ The rule for each fix: **at the old integer levels the result is bit-identical**
 D1 to D3 add a few tokens to three existing programs (`haze`, `hazeCell`, `hazeShow`, `part`, `lens*`). They stay under the link-test
 caps (section 5.1). D4 to D6 are CPU-side.
 
+### 2.3.1 T3 as built (D1-D3, 2026-11-09, branch `weather-slider-t3`)
+
+* **D1** (fx-glsl `smoothFields`, `cellHaze`): the second `drift3a` sample is taken when `uSandH.y > 0.0` (was `> 0.5`), and
+  `dd = mix(0.02, x, smoothstep(0.0, 0.008, |lit|) * uSandH.y)` per side. This is `mix(0.02, mix(0.02, x, t), y)` folded into one mix,
+  chosen over the suggested outer `mix(0.02, ddLit, y)` because GPU `mix` is often `a + t (b - a)`, which is not exact at t = 1; here
+  y = 1 multiplies t by 1.0 and y = 0 makes t 0, so both ends are the old expression bit for bit. The sides grow linearly with y, the
+  same ramp the 3-band `m` mix already uses.
+* **D2** (fx-glsl PART_VERT): `big = h[7] > 0.85 + 0.15 * (1.0 - uVF.y) && cI < 2.0 && dp > 0.6`. The threshold is exactly 1.0 at
+  y = 0 (no hash passes: `hu` can return 1.0, and `1.0 > 1.0` is false) and exactly 0.85 at y = 1, under any rounding or FMA; the
+  form `1.0 - 0.15 * y` lands on 0.85f only by a round-to-even tie, so it was not used. The share of big sparks ramps 0 -> 15 %
+  linearly. During a ramp a spark whose hash is crossed switches to big mid-life (one spark at a time, the D7 class).
+* **D3** (lens.mjs): `uDustL.w` gets the float `G.ghosts` (no `Math.round`); the loop weighs ghost j by
+  `gw = clamp(uDustL.w - j, 0, 1)`, breaks at `gw <= 0`, and scales `inG` by gw. Whole counts draw the old ghosts at weight 1.0.
+* **Proof:** a float32 emulation (3 mix forms, FMA, reassociation; 3.1 M cases) and a WebGL2 check on the real compiler path
+  (headless Chrome, ANGLE D3D11, RTX 3070 Ti): old vs new snippets bit for bit at y 0 / 1 and counts 0 / 3 / 5, 0 differing words
+  of 1 M per case. The snippets were isolated, not the full programs: T6's pixel A/B still checks them in context.
+* **Sizes** (fragment chars, cap): haze 12 989 -> 13 230, hazeCell 12 896 -> 13 137, hazeShow 13 721 -> 13 962 (display cap
+  23 500); part fragment unchanged 7 741 (vertex 24 304 -> 24 448, uncapped); lens / runners / beads 39 688 -> 39 942 (cap 43 500).
+  Most of the growth is comments. No cap moved.
+* **Side effects to know:** a client cap (s <= cap - 1 + 0.35) now gives fractional values where the old code rounded or
+  stepped: sand 3 on a cap-2 client shows lit sides at y 0.35 and pays the second `drift3a` sample (the frame guard still fades and
+  skips it under load); embers at cap 1 pass the big-spark hash at ~5 % (a third of level 2's 15 %; was none); dust lens at cap 2 draws 3.7 ghosts (was 4).
+
 ### 2.4 Counts while moving: slots that switch mid-life (optional polish, D7)
 
 Every particle kind already thins out per slot: a slot is drawn when its per-cycle hash is below the fractional density, so

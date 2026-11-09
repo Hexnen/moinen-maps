@@ -28,7 +28,7 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   ok(def.gesture === "point" && def.onToken === true && def.aftermath === null && def.preroll === 1300, "A point, lands on a token, no aftermath fire");
   ok(!def.layers.some((l) => l.l === "fire" || l.l === "smoke" || l.l === "burst" || l.l === "sound"), "A no fire, smoke, burst or sound");
   ok(!def.layers.some((l) => l.l === "cue" && l.flash > 0), "A no flash (nothing burns)");
-  ok(BUILTIN.map((d) => d.id).join().startsWith("bomb,grenade,uzi,heliHmg") && BUILTIN.findIndex((d) => d.id === "landing") === BUILTIN.findIndex((d) => d.id === "lightning") + 1, "A one new entry after the military four (and the lightning strike)");
+  ok(BUILTIN.map((d) => d.id).join().startsWith("bomb,grenade,uzi,heliHmg") && BUILTIN.findIndex((d) => d.id === "landing") > 3, "A one new entry after the military four");
   ok(C.ACCENTS.includes("landing") && C.ACCENTS.includes("airRing") && C.PLACES.includes("rays"), "A core knows the kinds and the place");
   ok(A.ACCENT_KINDS.includes("landing") && A.ACCENT_KINDS.includes("airRing"), "A accents-core draws them");
   const wire = fs.readFileSync(path.join(root, "scripts/presets/accents-wire.mjs"), "utf8");
@@ -130,10 +130,11 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   ok(/def\.onToken \? tokenAt\(cursor\) : null/.test(aim) && /\|\| def\.onToken\) \? tokenAt\(at\)/.test(aim), "E the aim passes the token only to an onToken preset");
 }
 
-/* F the older presets (main at c7babb0: the four military + the lightning strike): the same plans and accent frames */
+/* F the older presets (main at c7babb0: the four military + the lightning strike; the military four as the presets polish 763e72c
+ * re-tuned them - c7babb0 merged into it): the same plans and accent frames */
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mm-land-"));
-  revTree(root, "c7babb0", "scripts/presets", tmp);
+  revTree(root, "763e72c", "scripts/presets", tmp);
   const imp = (f) => import(pathToFileURL(path.join(tmp, f)).href);
   const [C0, D0, A0] = await Promise.all([imp("core.mjs"), imp("defs.mjs"), imp("accents-core.mjs")]);
   const g = { point: { a: [600, 500] }, throw: { a: [400, 500], b: [600, 520] }, line: { a: [300, 300], b: [600, 420], from: [280, 290] }, run: { a: [200, 700], b: [900, 600] } };

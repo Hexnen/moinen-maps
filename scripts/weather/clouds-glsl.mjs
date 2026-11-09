@@ -222,6 +222,7 @@ uniform vec4 uTor[3];        // tornadoes: x, y, reach (squares), presence
 uniform int uTorN;
 uniform vec4 uFire[12];      // burning fire: x, y, reach (squares), presence
 uniform int uFireN;
+uniform vec4 uBolt;          // the rain's lightning (storm.mjs): x, y, reach (squares), light (0: exactly the plain clouds)
 out vec4 fragColor;
 ${STAGE}
 ${NOISE}
@@ -255,5 +256,11 @@ void main() {
   vec3 c = mix(mix(deep, shade, smoothstep(0.0, 0.42, l)), sun, smoothstep(0.42, 0.9, l));
   // under the moon: silvered and cool, not darkened here (the scene's darkness dims them like the map, so they keep reading lighter)
   c = mix(c, vec3(dot(c, vec3(0.333))) * vec3(0.84, 0.90, 1.06), uNight * 0.7);
+  // lightning lights the cloud from inside: brightest in the thick core near the flash, the thin rims only a little
+  if ( uBolt.w > 0.0 ) {
+    vec2 q = (p - uBolt.xy) / uBolt.z;
+    float lit = uBolt.w * (0.35 + 0.65 * exp(-dot(q, q))) * (0.45 + 0.55 * th) * (0.85 + 0.3 * (n + 0.5));
+    c += vec3(0.80, 0.86, 1.0) * lit;
+  }
   fragColor = vec4(c * a, 1.0 - a);
 }`;
