@@ -107,7 +107,7 @@ float snowScore(vec2 c, float lum, float con) {
   float warp = fbm2(c / 31.0, uSeed + 41);
   float n = fbm3(c / 19.0 + vec2(4.0, -3.0) * warp, uSeed + 42);
   float flat_ = 1.0 - smoothstep(0.02, 0.14, con), fine = fbm2(c / 6.3, uSeed + 44);
-  return 0.42 * n + 0.22 * fine + 0.26 * flat_ + 0.13 * lum + (hc(c, uSeed + 43) - 0.5) * 0.07;
+  return 0.42 * n + 0.22 * fine + 0.26 * flat_ + 0.13 * lum + (vnoise(c / 2.0, uSeed + 43) - 0.5) * 0.1;
 }
 // SAND settles in the lee where this is over the drift threshold (fields.mjs driftScore); wd = the wind's unit vector
 float driftScore(vec2 c, float con, vec2 wd) {
@@ -126,6 +126,27 @@ bool puddleAt(vec2 c, vec4 inf, float thr) {
   float w = vnoise(p * 0.37 + 11.0, uSeed + 70);
   return fbm3(p + 0.6 * vec2(w, -w), uSeed + 5) > thr;
 }
+// SMOOTH, NOT CELLED (2026-11-09): every threshold is a soft step over gW art cells (about a device px when zoomed out, ~1.3 cells
+// zoomed in, where the cached cells are magnified bilinearly like the map itself), every per-cell hash dither is a smooth noise,
+// the map info is read bilinearly and the roof / region fade is a soft ramp, so no edge is a staircase of cells
+float gW = 1.3;
+float sst(float x, float w) { float s = clamp(x / max(w * gW, 1e-4) + 0.5, 0.0, 1.0); return s * s * (3.0 - 2.0 * s); }
+// the ground info read bilinearly (the map is shown smooth: so is what the weather reads from it)
+vec4 infoS(vec2 c) {
+  if ( uHasInfo == 0 ) return vec4(0.5, 0.5, 0.5, 0.0);
+  return texture(uInfo, c / uInfoGeo.z / uInfoGeo.xy);
+}
+// open sky 0..1 (1 = open; the roof / region / scene-edge ramp as it is, soft)
+float openS(vec2 c, bool roofs) {
+  vec2 e = min(c, uArtSize - c);
+  float o = clamp(min(e.x, e.y) / 4.0, 0.0, 1.0);
+  if ( uHasShelter == 1 ) {
+    vec4 m = texture(uShelter, c / uInfoGeo.z / uInfoGeo.xy);
+    o = min(o, roofs ? min(m.r, m.g) : m.g);
+  }
+  return smoothstep(0.0, 1.0, o);
+}
+float waterS(vec4 i) { return sst(i.b - i.r - 0.04, 0.02) * sst(0.36 - lumOf(i.rgb), 0.02); }
 `;
 
 /* ================================================================== GROUND (wet tint, puddles, sheen) */
@@ -147,10 +168,10 @@ precision highp float;
 precision highp int;
 in vec2 vCell;
 uniform float uTime;        // shared clock, s mod 3600
-uniform float uK;           // footprint scale (0 = nearest)
+uniform float uK;           // (the old footprint scale: kept for the cell pass's uniforms; the look no longer uses it)
 uniform float uWet;         // wet ground 0..~1 (accumulated)
 uniform float uPuddle;      // puddle threshold (> 1.3: none)
-uniform float uSheen;       // glints: fraction of sheen cells lit at a moment
+uniform float uSheen;       // glints: fraction of sheen spots lit at a moment
 uniform vec3 uSky;
 uniform float uAlpha;
 uniform vec4 uSnow;         // cover threshold (> 8: none), thick (0 dusting .. 1 full ramp), cold tint (x presence), glints
@@ -167,22 +188,25 @@ ${GLSL_COMMON}
 
 const vec3 OCHRE = vec3(0.82, 0.62, 0.36);
 vec3 snowRamp(int i) { return i <= 0 ? vec3(0.64, 0.67, 0.75) : i == 1 ? vec3(0.79, 0.82, 0.88) : i == 2 ? vec3(0.89, 0.91, 0.95) : vec3(0.97, 0.98, 0.99); }
+// the ramp at a continuous index (soft steps between its four tones: still banded, never a hard pixel edge)
+vec3 snowRampF(float x) {
+  x = clamp(x, 0.0, 3.0); int i = int(min(floor(x), 2.0));
+  return mix(snowRamp(i), snowRamp(i + 1), smoothstep(0.25, 0.75, x - float(i)));
+}
 // a colour multiply t applied to (add, k) with one scalar k: the hue goes into add through the map's own colour M (exact on the map)
 vec4 tint(vec4 f, vec3 t, vec3 M) {
   float kt = min(1.0, min(t.r, min(t.g, t.b)));
   return vec4(f.rgb * t + (t - kt) * M * f.a, f.a * kt);
 }
-// a smooth glint: a cell's own cycle; a few cycles hold a glint that rises and falls over 0.4 s (rate = lit share at a moment)
-float glint(vec2 c, float rate, int s) {
-  float h = hc(c, uSeed + s), P = 1.5 + 1.5 * h;
-  float u = (uTime + h * P) / P, cyc = floor(u), ph = (u - cyc) * P;
-  float on = hu(int(c.x) * 7 + int(mod(cyc, 4096.0)), int(c.y), uSeed + s + 1) < rate * P / 0.4 ? 1.0 : 0.0;
-  return on * sin(3.14159 * clamp(ph / 0.4, 0.0, 1.0)) * step(ph, 0.4);
+
+float puddleField(vec2 c) {
+  vec2 p = c / 46.0;
+  float w = vnoise(p * 0.37 + 11.0, uSeed + 70);
+  return fbm3(p + 0.6 * vec2(w, -w), uSeed + 5);
 }
 
-// one art cell: (add.rgb, k): the frame under it becomes dst * k + add (custom blend ONE, SRC_ALPHA)
-// the smooth fields (scales of 37+ cells) once per pixel, at the cell under it; per-cell terms stay in cellGround
-float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gCl = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0;
+// the smooth fields once per evaluation point (scales of 6+ cells); gPd/gPdY: the puddle field and its slope down the screen
+float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gCl = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0, gPd = 0.0, gPdY = 0.0;
 void groundFields(vec2 c) {
   if ( uWindG.x > 0.0 ) {
     // VISIBLE WIND: the gust at this place (fronts travel along the wind), combing bands carried downwind (crests across the wind,
@@ -191,17 +215,22 @@ void groundFields(vec2 c) {
     float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
     gWg = clamp(gustEnv(uTime - pr / (uCps * 4.0), uSeed), 0.0, 1.2);
     if ( uWindG.z > 0.0 ) gCl = drift2a(c / 120.0, wd * uWindV.z * 0.55 / 120.0, uTime, 90.0, uSeed + 203);
-    // the surface terms only where the pixel's own cell is grass or water (the rest of the map pays nothing for them)
-    vec3 M = infoAt(c).rgb;
-    if ( M.g > M.r * 1.04 && M.g > M.b * 1.1 ) {
+    // the surface terms only where the map is grass or water (the rest of the map pays nothing for them)
+    vec4 I = infoS(c);
+    vec3 M = I.rgb;
+    if ( M.g > M.r * 1.02 && M.g > M.b * 1.06 ) {
       gComb = drift2a(vec2(pr / 22.0, ac / 90.0), vec2(uWindV.z * 1.2 / 22.0, 0.0), uTime, 30.0, uSeed + 201);
       gNn = fbm2(vec2(pr / 26.0, ac / 2.6), uSeed + 204);
-    } else if ( uWindV.w > 0.0 && waterOf(infoAt(c)) ) {
+    }
+    if ( uWindV.w > 0.0 && I.b > I.r && lumOf(M) < 0.4 ) {
       gRuf = drift2a(vec2(pr / 16.0, ac / 40.0), vec2(uWindV.z * 1.6 / 16.0, 0.0), uTime, 20.0, uSeed + 205);
-      if ( gRuf > 0.55 ) gGl = drift2a(vec2(pr / 3.0, ac / 1.2), vec2(uWindV.z * 2.0 / 3.0, 0.0), uTime, 6.0, uSeed + 207);
+      if ( gRuf > 0.5 ) gGl = drift2a(vec2(pr / 3.0, ac / 1.2), vec2(uWindV.z * 2.0 / 3.0, 0.0), uTime, 6.0, uSeed + 207);
     }
   }
-  if ( uWet > 0.0005 ) gWv = fbm2(c / 70.0 + vec2(3.0, 0.0), uSeed + 9);
+  if ( uWet > 0.0005 ) {
+    gWv = fbm2(c / 70.0 + vec2(3.0, 0.0), uSeed + 9);
+    if ( uPuddle < 1.3 && uHasInfo == 1 ) { gPd = puddleField(c); gPdY = puddleField(c - vec2(0.0, 1.0)); }
+  }
   if ( uSandW.w > 0.0 ) {
     vec2 wd = uSandW.xy;
     float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
@@ -210,34 +239,42 @@ void groundFields(vec2 c) {
   }
   if ( uDust.x > 0.0 ) gSh = shaftAt(c);
 }
+
+// one evaluation point c (continuous art cells): (add.rgb, k): the frame under it becomes dst * k + add (custom blend ONE, SRC_ALPHA)
 vec4 cellGround(vec2 c) {
   if ( uAny == 0 || c.x < 0.0 || c.y < 0.0 || c.x >= uArtSize.x || c.y >= uArtSize.y ) return vec4(0.0, 0.0, 0.0, 1.0);
-  bool open = openAt(c, true) > 0.5;
-  vec4 inf = infoAt(c);
+  float op = openS(c, true);
+  vec4 inf = infoS(c);
   vec3 M = inf.rgb;
-  float lum = lumOf(M), con = inf.a * 0.25, dz = hc(c, uSeed + 998);
-  bool water = waterOf(inf);
+  float lum = lumOf(M), con = inf.a * 0.25;
+  float nz = vnoise(c / 2.6, uSeed + 998);           // (the smooth stand-in for the old per-cell dither)
+  float water = waterS(inf);
   vec4 f = vec4(0.0, 0.0, 0.0, 1.0);
-  // ---- RAIN: wet ground, puddles, sheen
-  if ( open && uWet > 0.0005 ) {
+  // ---- RAIN: wet ground, puddles (their sheen glints are drawn per screen px: groundGlints)
+  if ( uWet > 0.0005 ) {
     float W = min(uWet, 1.2);
-    float wv = gWv;
-    float band = smoothstep(0.35, 0.65, wv) * 0.28 + 0.72 > 0.86 + (dz - 0.5) * 0.12 ? 1.0 : 0.0;
-    float kf = (water ? 0.97 : mix(0.744, 0.80, band)) * 0.95;
+    float band = sst(smoothstep(0.35, 0.65, gWv) * 0.28 + 0.72 - 0.86 - (nz - 0.5) * 0.12, 0.05);
+    float kf = mix(mix(0.744, 0.80, band), 0.97, water) * 0.95;
     vec3 add = vec3(0.0, 0.012, 0.035) * W;
     float k = 1.0 - W * (1.0 - kf);
-    if ( uPuddle < 1.3 && puddleAt(c, inf, uPuddle + (1.0 - min(W, 1.0)) * 0.35) ) {
-      k = 1.0 - W * (1.0 - 0.60);
-      add = vec3(0.0, 0.02, 0.06) * W;
-      if ( !puddleAt(c - vec2(0.0, 1.0), infoAt(c - vec2(0.0, 1.0)), uPuddle + (1.0 - min(W, 1.0)) * 0.35) && hc(c, uSeed + 99) < 0.7 ) { k = 1.0; add = 0.16 * uSky * W; }
-    } else if ( !water && lum > 0.5 && con < 0.05 && uSheen > 0.0 ) {
-      float e = glint(c, uSheen * min(W, 1.0), 3);
-      if ( e > 0.0 ) { k *= 1.0 - 0.6 * e; add = add * (1.0 - 0.6 * e) + 0.6 * e * mix(uSky, vec3(1.0), 0.3); }
+    if ( uPuddle < 1.3 && uHasInfo == 1 ) {
+      float thr = uPuddle + (1.0 - min(W, 1.0)) * 0.35;
+      float el = sst(0.035 - con, 0.008) * sst(lum - 0.25, 0.02) * (1.0 - water);
+      float pw = el * sst(gPd - thr, 0.025);
+      if ( pw > 0.0 ) {
+        // the puddle: darker, a cool sheen; its upper rim (where the puddle begins going down the screen) catches the sky
+        float rim = pw * (1.0 - sst(gPdY - thr, 0.025)) * smoothstep(0.25, 0.45, vnoise(c / 2.2, uSeed + 99));
+        float kp = 1.0 - W * (1.0 - 0.60);
+        vec3 ap = vec3(0.0, 0.02, 0.06) * W;
+        k = mix(k, kp, pw); add = mix(add, ap, pw);
+        k = mix(k, 1.0, rim); add = mix(add, 0.16 * uSky * W, rim);
+      }
     }
     f = vec4(add, k);
   }
+  f = mix(vec4(0.0, 0.0, 0.0, 1.0), f, op);
   // ---- tints (the light of the weather: everywhere, under roofs too)
-  if ( uSnow.z > 0.0 ) f = tint(f, mix(vec3(0.99), water ? vec3(0.82, 0.86, 0.95) : vec3(0.84, 0.88, 0.98), uSnow.z), M);
+  if ( uSnow.z > 0.0 ) f = tint(f, mix(vec3(0.99), mix(vec3(0.84, 0.88, 0.98), vec3(0.82, 0.86, 0.95), water), uSnow.z), M);
   if ( uSand.w > 0.0 ) f = tint(f, mix(vec3(1.0), vec3(1.0, 0.88, 0.70) * 0.86, uSand.w), M);
   if ( uDust.y > 0.0 ) f = tint(f, mix(vec3(1.0), vec3(1.04, 1.0, 0.90), uDust.y), M);
   if ( uEmb.z > 0.0 ) {
@@ -246,89 +283,142 @@ vec4 cellGround(vec2 c) {
     f = tint(f, mix(vec3(1.0), mix(vec3(1.02, 0.98, 0.94), lit, uEmb.y), uEmb.z), M);
   }
   if ( uWindG.x > 0.0 ) {
-    // wind: an overall dim and (from level 2) cloud shadows, one darker step with a dithered rim, on roofs too
-    bool cl = uWindG.z > 0.0 && gCl - 0.56 > (dz - 0.5) * 0.014;
-    vec3 mul = vec3(1.0 - (1.0 - uWindG.w) * uWindG.x) * (cl ? mix(vec3(1.0), vec3(0.80, 0.82, 0.88), uWindG.z) : vec3(1.0));
+    // wind: an overall dim and (from level 2) cloud shadows, one darker step with a soft ragged rim, on roofs too
+    float cl = uWindG.z > 0.0 ? sst(gCl - 0.56 - (nz - 0.5) * 0.014, 0.012) : 0.0;
+    vec3 mul = vec3(1.0 - (1.0 - uWindG.w) * uWindG.x) * mix(vec3(1.0), mix(vec3(1.0), vec3(0.80, 0.82, 0.88), uWindG.z), cl);
     if ( mul != vec3(1.0) ) f = tint(f, mul, M);
   }
-  if ( !open ) return f;
+  if ( op <= 0.0 ) return f;
+  vec4 f0 = f;
   if ( uWindG.x > 0.0 ) {
-    vec2 wd = uWindV.xy;
-    float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
-    // GRASS combing: gusts sweep over the green as bands of lighter cells (the blades' undersides), broken into blade streaks
-    bool green = M.g > M.r * 1.08 && M.g > M.b * 1.15 && !water;
-    if ( green ) {
-      if ( smoothstep(0.35, 0.75, gComb) * gWg * (0.3 + gNn) > uWindG.y + (dz - 0.5) * 0.06 ) f.rgb += (M * 0.18 + 0.05) * uWindG.x;
+    // GRASS combing: gusts sweep over the green as bands of lighter blades (their undersides), broken into blade streaks
+    float green = sst(M.g - M.r * 1.08, 0.015) * sst(M.g - M.b * 1.15, 0.015) * (1.0 - water);
+    if ( green > 0.0 ) {
+      float x = smoothstep(0.35, 0.75, gComb) * gWg * (0.3 + gNn) - uWindG.y - (nz - 0.5) * 0.06;
+      f.rgb += (M * 0.18 + 0.05) * uWindG.x * green * sst(x, 0.08);
     }
     // WATER ruffle: darker cat's paws running with the gusts, broken light dashes along the wind inside them
-    if ( water && uWindV.w > 0.0 ) {
-      float paw = smoothstep(0.5, 0.7, gRuf) * clamp(gWg * 1.1, 0.0, 1.0);
+    if ( water > 0.0 && uWindV.w > 0.0 ) {
+      float paw = smoothstep(0.5, 0.7, gRuf) * clamp(gWg * 1.1, 0.0, 1.0) * water;
       f = vec4(f.rgb * (1.0 - 0.08 * paw * uWindV.w), f.a * (1.0 - 0.08 * paw * uWindV.w));
-      if ( paw > 0.2 ) {
-        if ( gGl > 0.80 - 0.10 * paw ) f.rgb += 0.13 * uSky * uWindV.w;
-      }
+      f.rgb += 0.13 * uSky * uWindV.w * sst(paw - 0.2, 0.05) * sst(gGl - (0.80 - 0.10 * paw), 0.08);
     }
   }
   // ---- SNOW cover: where the score is over the threshold, the snow ramp replaces the map (its lines print through)
-  if ( uSnow.x < 8.0 && !water ) {
+  if ( uSnow.x < 8.0 ) {
     float d = snowScore(c, lum, con) - uSnow.x;
-    if ( d > (dz - 0.5) * 0.06 ) {
-      int idx = int(clamp(floor(lum * 3.2 + 1.2 + (dz - 0.5) * 0.7), 0.0, 3.0));
-      if ( con > 0.09 ) idx = max(idx - 2, 0);
-      if ( hc(c, uSeed + 45) < 0.14 ) idx = max(idx - 1, 0);
-      if ( d < 0.025 ) idx = max(idx - 1, 0);
-      vec3 full = snowRamp(idx) * 0.76 + 0.02, dust_ = snowRamp(max(idx - 1, 0)) * 0.55 + 0.03;
-      f = vec4(mix(dust_, full, uSnow.y), mix(0.45, 0.24, uSnow.y));
-      if ( lum > 0.4 && uSnow.w > 0.0 ) { float e = glint(c, uSnow.w, 46); if ( e > 0.0 ) f = mix(f, vec4(1.0, 1.0, 1.0, 0.0), e); }
+    float sc = sst(d - (nz - 0.5) * 0.06, 0.03) * (1.0 - water);
+    if ( sc > 0.0 ) {
+      float ix = lum * 3.2 + 1.2 + (nz - 0.5) * 0.7 - 0.5;
+      ix -= 2.0 * smoothstep(0.07, 0.11, con);                                   // the map's lines print through
+      ix -= 1.0 - smoothstep(0.18, 0.32, vnoise(c / 2.2, uSeed + 45));                 // a few darker flecks
+      ix -= 1.0 - smoothstep(0.0, 0.05, d);                                      // the rim thins out
+      vec3 full = snowRampF(ix) * 0.76 + 0.02, dust_ = snowRampF(ix - 1.0) * 0.55 + 0.03;
+      f = mix(f, vec4(mix(dust_, full, uSnow.y), mix(0.45, 0.24, uSnow.y)), sc);
     }
   }
   // ---- SAND: drifts in the lee, streamers racing along the ground in the waves
-  if ( uSandW.w > 0.0 && !water ) {
+  if ( uSandW.w > 0.0 ) {
     vec2 wd = uSandW.xy;
-    if ( uSand.z < 8.0 && driftScore(c, con, wd) - uSand.z > (dz - 0.5) * 0.04 ) f = vec4(OCHRE * 0.72, 0.35);
+    float dry = 1.0 - water;
+    if ( uSand.z < 8.0 ) f = mix(f, vec4(OCHRE * 0.72, 0.35), dry * sst(driftScore(c, con, wd) - uSand.z - (nz - 0.5) * 0.04, 0.03));
     float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x, fr = gFr;
     float s1 = drift2a(vec2(pr / 34.0, ac / 3.2), vec2(uSandW.z / 34.0, 0.0), uTime, 40.0, uSeed + 111);
-    if ( s1 > uSand.x - uSand.y * fr + (dz - 0.5) * 0.04 ) f = mix(f, vec4(OCHRE * 0.85 + 0.04, 0.3), uSandW.w);
+    f = mix(f, vec4(OCHRE * 0.85 + 0.04, 0.3), uSandW.w * dry * sst(s1 - (uSand.x - uSand.y * fr) - (nz - 0.5) * 0.04, 0.12));
   }
-  // ---- DUST: faint sun shafts (additive, flat steps)
+  // ---- DUST: faint sun shafts (additive, two soft steps)
   if ( uDust.x > 0.0 ) {
     float sh = gSh;
-    f.rgb += ((sh > 0.74 ? 0.05 : 0.0) + (sh > 0.88 ? 0.04 : 0.0)) * uDust.x * vec3(1.0, 0.93, 0.75);
+    f.rgb += (0.05 * sst(sh - 0.74, 0.02) + 0.04 * sst(sh - 0.88, 0.02)) * uDust.x * vec3(1.0, 0.93, 0.75);
+  }
+  return op >= 1.0 ? f : mix(f0, f, op);
+}
+
+// GLINTS per screen px (never cached: a glint is smaller than a cell): soft round sparks at jittered spots on a 3-cell lattice, each
+// spot with its own cycle (a few cycles hold a glint that rises and falls over 0.4 s; rate = lit share at a moment), shown only
+// where the ground there takes a glint (flat bright wet ground; snow cover), a small cross flare at their peak
+float glintAt(vec2 c, float aa, float rate, int s, out vec2 at) {
+  vec2 id = floor(c / 3.0);
+  int ix = int(id.x), iy = int(id.y);
+  float h = hu(ix, iy, uSeed + s), P = 1.5 + 1.5 * h;
+  float u = (uTime + h * P) / P, cyc = floor(u), ph = (u - cyc) * P;
+  at = (id + 0.2 + 0.6 * vec2(hu(ix, iy, uSeed + s + 2), hu(ix, iy, uSeed + s + 3))) * 3.0;
+  if ( ph >= 0.4 || hu(ix * 7 + int(mod(cyc, 4096.0)), iy, uSeed + s + 1) >= rate * P / 0.4 ) return 0.0;
+  float e = sin(3.14159 * ph / 0.4);
+  vec2 d = c - at;
+  float r = 0.45 + 0.25 * e;
+  float core = clamp(0.5 - (length(d) - r) / max(aa, 0.35), 0.0, 1.0);
+  float fl = max(1.0 - abs(d.y) / max(aa, 0.18), 0.0) * max(1.0 - abs(d.x) / (1.6 * e + 0.01), 0.0)
+           + max(1.0 - abs(d.x) / max(aa, 0.18), 0.0) * max(1.0 - abs(d.y) / (1.2 * e + 0.01), 0.0);
+  return e * max(core, 0.6 * clamp(fl, 0.0, 1.0) * e);
+}
+vec4 groundGlints(vec2 c, float aa, vec4 f) {
+  if ( uAny == 0 ) return f;
+  vec2 at;
+  if ( uWet > 0.0005 && uSheen > 0.0 ) {
+    float e = glintAt(c, aa, uSheen * min(uWet, 1.0), 3, at);
+    if ( e > 0.0 ) {
+      vec4 inf = infoAt(at);
+      float con = inf.a * 0.25, lum = lumOf(inf.rgb);
+      bool pud = uPuddle < 1.3 && puddleAt(floor(at), inf, uPuddle + (1.0 - min(uWet, 1.0)) * 0.35);
+      if ( !waterOf(inf) && lum > 0.5 && con < 0.05 && !pud && openAt(at, true) > 0.5 ) {
+        e *= 0.6; f = vec4(f.rgb * (1.0 - e) + e * mix(uSky, vec3(1.0), 0.3), f.a * (1.0 - e));
+      }
+    }
+  }
+  if ( uSnow.x < 8.0 && uSnow.w > 0.0 ) {
+    float e = glintAt(c, aa, uSnow.w, 46, at);
+    if ( e > 0.0 ) {
+      vec4 inf = infoAt(at);
+      float lum = lumOf(inf.rgb);
+      if ( lum > 0.4 && !waterOf(inf) && snowScore(at, lum, inf.a * 0.25) - uSnow.x > 0.03 && openAt(at, true) > 0.5 ) f = mix(f, vec4(1.0, 1.0, 1.0, 0.0), e);
+    }
   }
   return f;
 }
 
-void axisW(float t, float w, out float i0, out vec3 a) {
-  float lo = t - 0.5 * w, hi = t + 0.5 * w;
-  i0 = floor(lo);
-  a.x = min(i0 + 1.0, hi) - lo;
-  a.y = clamp(min(i0 + 2.0, hi) - (i0 + 1.0), 0.0, 1.0);
-  a.z = max(0.0, hi - (i0 + 2.0));
-  a /= w;
-}
+// ---- main (the direct pass: one evaluation per screen px; cells.mjs makes the cached cell pass and its show pass from the above)
 void main() {
-  vec2 w = fwidth(vCell) * uK;
-  vec4 c;
-  if ( uAny != 0 ) groundFields(floor(vCell));
-  if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) c = cellGround(floor(vCell));
-  else {
-    w = clamp(w, vec2(0.01), vec2(2.0));
-    float ix, iy; vec3 ax, ay;
-    axisW(vCell.x, w.x, ix, ax); axisW(vCell.y, w.y, iy, ay);
-    c = vec4(0.0);
-    for ( int j = 0; j < 3; j++ ) {
-      float wy = ay[j]; if ( wy <= 0.0 ) continue;
-      for ( int i = 0; i < 3; i++ ) {
-        float wx = ax[i]; if ( wx <= 0.0 ) continue;
-        c += wx * wy * cellGround(vec2(ix + float(i), iy + float(j)));
-      }
-    }
-  }
+  vec2 c = vCell;
+  vec2 fw = fwidth(vCell);
+  gW = max(1.3, max(fw.x, fw.y));
+  if ( uAny != 0 ) groundFields(c);
+  vec4 f = groundGlints(c, max(max(fw.x, fw.y), 1e-3), cellGround(c));
   // (a fading layer: toward "no change")
-  fragColor = vec4(c.rgb * uAlpha, 1.0 - uAlpha * (1.0 - c.a));
+  fragColor = vec4(f.rgb * uAlpha, 1.0 - uAlpha * (1.0 - f.a));
 }`;
 
+
 /* ================================================================== RAIN (instanced drops: streaks in the air, splashes on the ground) */
+
+
+/**
+ * SHAPES drawn per screen pixel (the rain, the particles, the steam): `AA` = art px per device px at the fragment (set from fwidth
+ * before use); `cov(sd, r, soft)` = coverage of a shape of size r at signed distance sd (art px, < 0 inside), its edge soft over a
+ * device px or `soft` art px, whichever is wider; a shape smaller than a device px is widened to one and keeps its weight (r / width),
+ * so it neither flickers nor vanishes zoomed out. `lay(o, col)` lays a shape (opacity o, colour col) over the ones before it, building
+ * the weather blend (dst x K_ + A_). Needs `hu` declared before it.
+ */
+export const GLSL_SHAPES = `
+float n1(float x, int s) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hu(int(i), 7, s), hu(int(i) + 1, 7, s), f); }
+float AA = 1.0;
+float cov(float sd, float r, float soft) {
+  float s = max(AA, soft), we = max(r, 0.5 * AA);
+  return clamp(0.5 - (sd - (we - r)) / s, 0.0, 1.0) * min(1.0, r / we);
+}
+float segT(vec2 p, vec2 a, vec2 b, out float t) {
+  vec2 ab = b - a; float L = dot(ab, ab);
+  t = L > 1e-6 ? clamp(dot(p - a, ab) / L, 0.0, 1.0) : 1.0;
+  return length(p - a - ab * t);
+}
+vec3 A_ = vec3(0.0); float K_ = 1.0;
+void lay(float o, vec3 col) { o = clamp(o, 0.0, 1.0); A_ = A_ * (1.0 - o) + col * o; K_ *= 1.0 - o; }
+void glow(vec3 a) { A_ += a; }   // (light added: dst unchanged under it)
+`;
+//
+// Drawn per SCREEN pixel at any zoom: the drop's path and landing point are continuous (art px, not whole cells); a streak is an
+// antialiased capsule along its path, a splash soft rings, a crown and droplets. AA = art px per device px (from fwidth): a feature
+// thinner than a device px keeps its weight (coverage x width) instead of flickering. uPx (the same, from the CPU) widens the quads.
 
 export const RAIN_VERT = `#version 300 es
 precision highp float;
@@ -353,11 +443,15 @@ uniform float uPuddle;
 uniform float uWetP;         // wetness for the puddle threshold
 uniform float uI;            // intensity scale (presence x performance)
 uniform int uMode;           // 0 air (streaks), 1 ground (splashes, ripples)
+uniform float uPx;           // art px per device px now (the quads' antialiasing margin)
 out vec2 vArt;
 out vec2 vScr;
-flat out vec4 vSeg;          // air: tail xy, head xy (art); ground: landing cell xy, time since landing, hash
-flat out ivec2 vKind;        // layer, sub-kind (ground: 0 splash, 1 ripple)
+flat out vec4 vSeg;          // air: tail xy, head xy (art); ground: landing point xy, time since landing, -
+flat out ivec2 vKind;        // layer, sub-kind (ground: 0 splash, 1 ripple, 2 crown)
 flat out float vH;
+flat out vec4 vDa;           // crown: the rim droplets' angles 0-3; droplet 4's angle, the two arc droplets' hashes, droplet 4's height
+flat out vec4 vDb;
+flat out vec4 vDc;           // crown: the rim droplets' heights 0-3
 ${GLSL_COMMON}
 
 float intensityAt(vec2 g, float t) {
@@ -367,7 +461,15 @@ float intensityAt(vec2 g, float t) {
   return clamp((0.25 + 1.05 * smoothstep(0.25, 0.8, p)) * swell * (0.85 + 0.3 * clamp(G, 0.0, 1.0)), 0.0, 1.15);
 }
 
-void hide() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); vArt = vec2(0.0); vScr = vec2(0.0); vSeg = vec4(0.0); vKind = ivec2(0); vH = 0.0; }
+void hide() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); vArt = vec2(0.0); vScr = vec2(0.0); vSeg = vec4(0.0); vKind = ivec2(0); vH = 0.0; vDa = vDb = vDc = vec4(0.0); }
+// the corner at art point a
+void place(vec2 a) {
+  vArt = a;
+  vec2 world = uOrigin.xy + a * uOrigin.z;
+  vec3 tp = translationMatrix * vec3(world, 1.0);
+  vScr = tp.xy / uScreen;
+  gl_Position = vec4((projectionMatrix * tp).xy, 0.0, 1.0);
+}
 
 void main() {
   int per = int(uPer.x + uPer.y + uPer.z);
@@ -389,7 +491,7 @@ void main() {
   vec2 g = vec2(float(tx) + h1, float(ty) + h2) * 64.0;        // the ground point (art cells from the scene origin)
   if ( g.x < 0.0 || g.y < 0.0 || g.x >= uArtSize.x || g.y >= uArtSize.y ) { hide(); return; }
   // the phase first (a few hashes): the air draws a drop only while it falls, the ground only in the 0.62 s after it lands (every
-  // splash, dash and ripple is over by then), so most slots are hidden before the intensity and gust fields are evaluated
+  // splash, crown and ripple is over by then), so most slots are hidden before the intensity and gust fields are evaluated
   vec2 zr = layer == 0 ? vec2(34.0, 62.0) : layer == 1 ? vec2(18.0, 34.0) : vec2(70.0, 110.0);
   float z0 = zr.x + h3 * (zr.y - zr.x), vf = (layer == 0 ? uVF.x : layer == 1 ? uVF.y : uVF.z) * (0.88 + 0.24 * h4), Df = z0 / vf;
   if ( uMode == 0 ? tau >= Df : (layer == 2 || tau < Df || tau - Df >= 0.62) ) { hide(); return; }
@@ -399,7 +501,9 @@ void main() {
   float on = hu(key, ty * 31 + ci, sd + 6);
   if ( hu(key, ty * 53 + ci, sd + 8) >= gateD || on >= intensityAt(g, birth) * uI * (layer == 2 ? 1.0 : 0.8) ) { hide(); return; }
   vH = hu(key, ty * 13 + ci, sd + 9);
+  vDa = vDb = vDc = vec4(0.0);
   vec2 lo, hi;
+  float m = 0.2 + 1.2 * uPx;                                 // (the antialiasing margin: a shape reaches at most a device px past its edge)
   if ( uMode == 0 ) {
     if ( openAt(g, false) < 0.5 ) { hide(); return; }
     float G = gustAt(g / uOrigin.w, uWindDir, uTime, uSeed);   // (the wind moves a drop in the air only)
@@ -411,7 +515,13 @@ void main() {
     vec2 p0 = g - W * (Df - t0) - vec2(0.0, uView.x * z0 * (1.0 - t0 / Df));
     vSeg = vec4(p0, p1);
     vKind = ivec2(layer, 0);
-    lo = floor(min(p0, p1)) - 1.0; hi = floor(max(p0, p1)) + 2.0 + (layer == 2 ? vec2(1.0, 0.0) : vec2(0.0));
+    float mm = m + (layer == 2 ? 1.3 : 0.65);                 // (the streak's half width and soft edge)
+    // the quad along the streak (a slanted streak's bounding box would be mostly empty)
+    vec2 ax = p1 - p0; float L = length(ax); ax = L > 1e-4 ? ax / L : vec2(0.0, 1.0);
+    lo = vec2(-mm); hi = vec2(L + mm, mm);
+    vec2 q = mix(lo, hi, aCorner), a = p0 + ax * q.x + vec2(-ax.y, ax.x) * q.y;
+    place(a);
+    return;
   } else {
     if ( layer == 2 || tau < Df ) { hide(); return; }
     float ts = tau - Df;
@@ -422,20 +532,30 @@ void main() {
     if ( wat ) {
       if ( layer != 0 || ts >= 0.62 || vH >= uSplash.y ) { hide(); return; }
       vKind = ivec2(layer, 1);
-      lo = gc - vec2(10.0, 9.0); hi = gc + vec2(11.0, 10.0);
+      float R = 3.3 + ts * 10.0;                             // (the ring's reach now: it grows)
+      lo = g - vec2(R, R * uView.y) - m; hi = g + vec2(R, R * uView.y) + m;
     } else {
-      if ( layer == 1 ? ts >= 0.17 : ts >= 0.36 ) { hide(); return; }
-      vKind = ivec2(layer, layer == 0 && hu(key, ty * 7 + ci, sd + 10) < uSplash.x ? 2 : 0);
-      lo = gc - vec2(6.0, 5.0); hi = gc + vec2(7.0, 4.0);
+      bool crown = layer == 0 && hu(key, ty * 7 + ci, sd + 10) < uSplash.x;
+      // (each kind's quad only as large as what it draws: a far hit for 0.17 s, a plain splash 0.16 s, a crown and its droplets 0.36 s)
+      if ( layer == 1 ? ts >= 0.17 : ts >= (crown ? 0.36 : 0.16) ) { hide(); return; }
+      vKind = ivec2(layer, crown ? 2 : 0);
+      vec2 r0 = layer == 1 ? vec2(0.9) : vec2(2.0, 1.2), r1 = r0;
+      if ( crown ) {
+        // the crown's droplets, once per drop (not per pixel): angles round the rim, heights, the arc droplets' lives
+        int hv = int(vH * 4093.0), hw = int(vH * 997.0);
+        float A[5], Hh[5];
+        for ( int q = 0; q < 5; q++ ) { A[q] = (float(q) + 0.5 * hu(q, hv, uSeed + 408)) * 1.2566 + vH * 6.283; Hh[q] = 0.6 + 0.6 * hu(q, hw, uSeed + 409); }
+        vDa = vec4(A[0], A[1], A[2], A[3]); vDb = vec4(A[4], hu(0, hv, uSeed + 405), hu(1, hv, uSeed + 405), Hh[4]); vDc = vec4(Hh[0], Hh[1], Hh[2], Hh[3]);
+        // its reach now: the ring and rim droplets (radius 1.3 .. 3.3), the arc droplets (out to 2.8 + 3.5 x their flight)
+        float f = clamp((ts - 0.04) / 0.24, 0.0, 1.0), sa = clamp((ts - 0.08) / 0.28, 0.0, 1.0);
+        float rx = max(2.1 + 2.0 * f, ts >= 0.08 ? 3.5 + 3.5 * sa : 0.0);
+        r0 = vec2(rx, 5.5); r1 = vec2(rx, 3.0);
+      }
+      lo = g - r0 - m; hi = g + r1 + m;
     }
-    vSeg = vec4(gc, ts, 0.0);
+    vSeg = vec4(g, ts, 0.0);
   }
-  vec2 a = mix(lo, hi, aCorner);
-  vArt = a;
-  vec2 world = uOrigin.xy + a * uOrigin.z;
-  vec3 tp = translationMatrix * vec3(world, 1.0);
-  vScr = tp.xy / uScreen;
-  gl_Position = vec4((projectionMatrix * tp).xy, 0.0, 1.0);
+  place(mix(lo, hi, aCorner));
 }`;
 
 export const RAIN_FRAG = `#version 300 es
@@ -446,6 +566,9 @@ in vec2 vScr;
 flat in vec4 vSeg;
 flat in ivec2 vKind;
 flat in float vH;
+flat in vec4 vDa;
+flat in vec4 vDb;
+flat in vec4 vDc;
 uniform vec3 uSky;
 uniform float uAlpha;
 uniform vec2 uView;
@@ -461,80 +584,99 @@ float hu(int x, int y, int s) {
   h = h ^ (h >> 16u);
   return float(h) / 4294967296.0;
 }
-float hc(vec2 c, int s) { return hu(int(floor(c.x)), int(floor(c.y)), s); }
-
-// is art cell c on the 1-px line a -> b (rasterised along its major axis)? returns the fraction along it, or -1
-float onLine(vec2 c, vec2 a, vec2 b) {
-  vec2 d = b - a;
-  if ( abs(d.y) >= abs(d.x) ) {
-    float y = c.y + 0.5;
-    if ( y < min(a.y, b.y) - 0.01 || y > max(a.y, b.y) + 0.99 ) return -1.0;
-    float f = abs(d.y) < 1e-4 ? 1.0 : clamp((y - a.y) / d.y, 0.0, 1.0);
-    return floor(a.x + d.x * f) == c.x ? f : -1.0;
-  }
-  float x = c.x + 0.5;
-  if ( x < min(a.x, b.x) - 0.01 || x > max(a.x, b.x) + 0.99 ) return -1.0;
-  float f = clamp((x - a.x) / d.x, 0.0, 1.0);
-  return floor(a.y + d.y * f) == c.y ? f : -1.0;
-}
-
-void out_(float k, vec3 add) { fragColor = vec4(add * uAlpha, 1.0 - uAlpha * (1.0 - k)); }
+${GLSL_SHAPES}
+void out_() { if ( K_ > 0.9995 ) discard; fragColor = vec4(A_ * uAlpha, 1.0 - uAlpha * (1.0 - K_)); }
 
 void main() {
-  vec2 c = floor(vArt);
+  vec2 p = vArt;
+  vec2 fw = fwidth(vArt);
+  AA = max(max(fw.x, fw.y), 1e-3);
   int layer = vKind.x;
   if ( uMode == 0 ) {
     if ( uHasDepth == 1 && step(uDepthElev, (254.5 / 255.0) - texture(uDepth, vScr).b) < 0.5 ) discard;
-    vec2 a = floor(vSeg.xy) + 0.5, b = floor(vSeg.zw) + 0.5;
-    float f = onLine(c, a, b);
-    float f2 = layer == 2 ? onLine(c - vec2(1.0, 0.0), a, b) : -1.0;
-    if ( f < 0.0 && f2 < 0.0 ) discard;
-    if ( layer == 0 ) { if ( f > 0.55 ) out_(0.35, 0.75 * uSky); else out_(0.6, 0.45 * uSky); return; }
-    if ( layer == 1 ) { if ( hc(c, uSeed + 401) >= 0.6 ) discard; out_(0.7, 0.32 * uSky); return; }
-    float hh = hc(c, uSeed + 402);
-    if ( (f >= 0.0 && hh < 0.5) || (f < 0.0 && hh < 0.35) ) { out_(0.45, 0.6 * uSky); return; }
-    discard;
+    // a falling streak: a capsule from its tail to its head, thinner and fainter toward the tail (the drop is at the head)
+    float t, d = segT(p, vSeg.xy, vSeg.zw, t);
+    float hd = smoothstep(0.15, 0.85, t);
+    if ( layer == 0 ) {
+      float w = mix(0.36, 0.5, hd);
+      lay(cov(d - w, w, 0.25) * mix(0.42, 0.68, hd), 1.12 * uSky);
+    } else if ( layer == 1 ) {
+      float w = mix(0.26, 0.34, hd);
+      lay(cov(d - w, w, 0.25) * mix(0.16, 0.24, hd), 1.05 * uSky);
+    } else {
+      // near the camera: wider, out of focus, see-through
+      float w = mix(0.7, 0.95, hd);
+      lay(cov(d - w, w, 0.7) * mix(0.30, 0.46, hd), 1.12 * uSky);
+    }
+    out_(); return;
   }
-  // ground: the splash at the landing cell, continuous in time (pixels come and go by a hashed dropout, never by a frame step)
-  vec2 d = c - vSeg.xy;
+  // ground: the hit at its landing point, continuous in time (shapes grow, thin and fade; nothing pops on a frame step)
+  vec2 d = p - vSeg.xy;
   float ts = vSeg.z, sq = uView.y;
-  float drop = hc(c + vec2(vH * 61.0, 0.0), uSeed + 403);
+  float e = length(vec2(d.x, d.y / sq));                     // distance on the ground (the view squashes y)
   if ( vKind.y == 1 ) {
-    // a ripple on water or a puddle: a squashed broken ring growing for 0.62 s, thinning by dropout
-    float r = 3.0 + ts * 10.0;
-    float e = length(vec2(d.x + 0.5, (d.y + 0.5) / sq));
-    if ( abs(e - r) > 0.55 ) discard;
-    float ang = atan(d.y + 0.5, d.x + 0.5) / 6.283185 + 0.5;
-    float seg = floor(ang * 28.0);
-    if ( hu(int(seg), int(vH * 997.0), uSeed + 404) < 0.15 + ts / 0.62 * 0.8 ) discard;
-    if ( mod(seg + floor(vH * 7.0), 7.0) <= 1.0 ) discard;
-    out_(0.9, 0.3 * uSky); return;
+    // a ripple on water or a puddle: a squashed ring growing for 0.62 s, thinning and breaking up along its round; a second,
+    // fainter ring inside it once the first has spread
+    float f = ts / 0.62, fade = (1.0 - f) * (1.0 - f);
+    float r = 2.6 + ts * 10.0, w = mix(0.42, 0.22, f);
+    // (most of the quad is off both rings: nothing to draw there, no noise to evaluate)
+    float r2_ = 1.2 + (ts - 0.14) * 7.0;
+    if ( abs(e - r) - w > 0.3 + AA && (ts <= 0.14 || abs(e - r2_) - 0.25 > 0.3 + AA) ) discard;
+    float ang = atan(d.y / sq, d.x);
+    float brk = smoothstep(0.18 + 0.55 * f, 0.38 + 0.55 * f, n1(ang * 4.456 + vH * 40.0, uSeed + 404));
+    lay(cov(abs(e - r) - w, w, 0.3) * 0.34 * fade * brk, uSky);
+    if ( ts > 0.14 ) {
+      float r2 = 1.2 + (ts - 0.14) * 7.0, f2 = (ts - 0.14) / 0.48;
+      float brk2 = smoothstep(0.3 + 0.5 * f2, 0.5 + 0.5 * f2, n1(ang * 3.18 + vH * 71.0, uSeed + 406));
+      lay(cov(abs(e - r2) - 0.25, 0.25, 0.3) * 0.2 * (1.0 - f2) * brk2, uSky);
+    }
+    out_(); return;
   }
   if ( layer == 1 ) {
-    // far drops: a 1-px hit for a moment
-    if ( d != vec2(0.0) || drop < ts / 0.17 ) discard;
-    out_(0.8, 0.3 * uSky); return;
+    // far drops: a small soft hit for a moment
+    float f = ts / 0.17;
+    lay(cov(e - 0.45, 0.45, 0.4) * 0.24 * (1.0 - f) * (1.0 - f), 1.4 * uSky);
+    out_(); return;
   }
-  // the first moment: a 2-px dash where it hits
-  if ( ts < 0.08 && d.y == 0.0 && (d.x == 0.0 || d.x == 1.0) ) { out_(0.75, 0.42 * uSky); return; }
+  // the first moment: a bright little smear where it hits, spreading sideways as it fades
+  if ( ts < 0.1 ) {
+    float f = ts / 0.1;
+    vec2 q = vec2(d.x / (0.8 + 0.9 * f), d.y / (0.45 + 0.2 * f));
+    lay(cov((length(q) - 1.0) * (0.45 + 0.2 * f), 0.45, 0.4) * 0.5 * (1.0 - f * f), 1.3 * uSky);
+  }
   if ( vKind.y != 2 ) {
-    if ( ts < 0.12 && d == vec2(0.0) && drop > ts / 0.12 ) { out_(0.8, 0.3 * uSky); return; }
-    discard;
+    // a plain splash: a faint wet dot that fades
+    if ( ts < 0.16 ) lay(cov(e - 0.6, 0.6, 0.5) * 0.22 * (1.0 - ts / 0.16), 1.2 * uSky);
+    out_(); return;
   }
-  // the crown: a hollow squashed ellipse that widens, then breaks up
-  if ( ts >= 0.05 && ts < 0.26 ) {
-    float r = 1.4 + (ts - 0.05) / 0.21 * 1.8;
-    float e = length(vec2(d.x, d.y / sq));
-    if ( abs(e - r) < 0.5 && d.y <= 1.0 && drop > smoothstep(0.14, 0.26, ts) ) { out_(0.75, 0.42 * uSky); return; }
+  // the CROWN: a thin squashed ring that widens and breaks up (its near rim brighter), droplets standing on the rim, lifted and
+  // falling back
+  if ( ts >= 0.04 && ts < 0.28 ) {
+    float f = (ts - 0.04) / 0.24;
+    float r = 1.3 + f * 2.0, w = mix(0.38, 0.2, f);
+    if ( abs(e - r) - w < 0.3 + AA ) {
+      float ang = atan(d.y / sq, d.x);
+      float nearRim = mix(0.55, 1.0, smoothstep(-0.6, 0.6, d.y));
+      float brk = smoothstep(0.1 + 0.7 * f, 0.3 + 0.7 * f, n1(ang * 2.546 + vH * 33.0, uSeed + 407));
+      lay(cov(abs(e - r) - w, w, 0.3) * 0.5 * nearRim * brk * (1.0 - f * f), 1.25 * uSky);
+    }
+    float top = 8.8 * 0.25 * 1.2 * uView.x, rch = r + 0.55 + 0.32 + 0.3 + AA;     // (where the rim droplets can be)
+    if ( abs(d.x) < rch && d.y < rch * sq && d.y > -(rch * sq + top) ) for ( int q = 0; q < 5; q++ ) {
+      float a = q < 4 ? vDa[q] : vDb.x;
+      float hgt = 8.8 * f * (1.0 - f) * (q < 4 ? vDc[q] : vDb.w) * uView.x;
+      vec2 c = vec2(cos(a), sin(a) * sq) * (r + 0.2) - vec2(0.0, hgt);
+      lay(cov(length(d - c) - 0.32, 0.32, 0.3) * 0.55 * (1.0 - f), 1.3 * uSky);
+    }
   }
   // two droplets thrown out on arcs, falling back
   if ( ts >= 0.08 && ts < 0.36 ) {
     float s = (ts - 0.08) / 0.28;
-    float dx = 2.0 + 3.5 * s + step(0.5, vH), dy = -3.2 * 4.0 * s * (1.0 - s);
     for ( int q = 0; q < 2; q++ ) {
-      float sx = q == 0 ? -1.0 : 1.0;
-      if ( floor(sx * dx) == d.x && floor(dy) == d.y && s < 0.7 + 0.3 * hu(q, int(vH * 4093.0), uSeed + 405) ) { out_(0.9, 0.2 * uSky); return; }
+      float sx = q == 0 ? -1.0 : 1.0, k = q == 0 ? vDb.y : vDb.z;
+      if ( s >= 0.7 + 0.3 * k ) continue;
+      vec2 c = vec2(sx * (2.0 + 3.5 * s + 0.8 * step(0.5, vH)), -3.2 * 4.0 * s * (1.0 - s));
+      lay(cov(length(d - c) - 0.36, 0.36, 0.3) * 0.5 * (1.0 - smoothstep(0.5, 1.0, s / (0.7 + 0.3 * k))), 1.2 * uSky);
     }
   }
-  discard;
+  out_();
 }`;

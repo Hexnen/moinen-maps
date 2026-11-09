@@ -3,7 +3,7 @@ import { GROUND_VERT, GROUND_FRAG, RAIN_VERT, RAIN_FRAG } from "./glsl.mjs";
 import { PART_VERT, PART_FRAG, HAZE_FRAG } from "./fx-glsl.mjs";
 import { snowScore, driftScore, sortedScores, quantileThr } from "./fields.mjs";
 import { footprintK } from "../fire/shader.mjs";
-import { CellCache, CELL_VERT, SHOW_FRAG as CELL_SHOW_FRAG, cellFrag } from "./cells.mjs";
+import { CellCache, CELL_VERT, cellFrag, showFrag } from "./cells.mjs";
 import { weatherQ } from "./guard.mjs";
 import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
 
@@ -61,9 +61,12 @@ const WHITE = () => PIXI.Texture.WHITE;
 /** The display's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
 export function displayPrograms() {
   return [prog("ground", GROUND_VERT, GROUND_FRAG), prog("rain", RAIN_VERT, RAIN_FRAG), prog("part", PART_VERT, PART_FRAG), prog("haze", GROUND_VERT, HAZE_FRAG),
-    prog("cellShow", GROUND_VERT, CELL_SHOW_FRAG), prog("groundCell", CELL_VERT, cellFrag(GROUND_FRAG, "groundFields", "cellGround")),
-    prog("hazeCell", CELL_VERT, cellFrag(HAZE_FRAG, "smoothFields", "cellHaze"))];
+    ...cellProgs()];
 }
+// the cached passes (cells.mjs): per source its cell pass and its show pass (the ground's adds its glints per screen px)
+const GLINTS = "vec2 fw = fwidth(c); f = groundGlints(c, max(max(fw.x, fw.y), 1e-3), f);";
+const cellProgs = () => [prog("groundCell", CELL_VERT, cellFrag(GROUND_FRAG, "groundFields", "cellGround")), prog("groundShow", GROUND_VERT, showFrag(GROUND_FRAG, GLINTS)),
+  prog("hazeCell", CELL_VERT, cellFrag(HAZE_FRAG, "smoothFields", "cellHaze")), prog("hazeShow", GROUND_VERT, showFrag(HAZE_FRAG))];
 
 function place(obj, sortLayer, elevation = 0) {
   obj.eventMode = "none";
@@ -123,7 +126,7 @@ export class WeatherDisplay {
       uDens: new Float32Array([0, 0, 0]), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]), uWindDir: new Float32Array([1, 0]),
       uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array([235, 170, 420]), uExpK: 1,
       uSplash: new Float32Array([1, 0.5]), uPuddle: 2, uWetP: 0, uI: 1, uSky: new Float32Array(SKY), uAlpha: 1,
-      uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, translationMatrix: new PIXI.Matrix().toArray(true) });
+      uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, uPx: 1, translationMatrix: new PIXI.Matrix().toArray(true) });
     this.splash = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(1))), 253);
     this.air = place(new PIXI.Mesh(rg, new PIXI.Shader(prog("rain", RAIN_VERT, RAIN_FRAG), ru(0))), 995, Infinity);
     this.rainMeshes = [this.splash, this.air];
@@ -139,7 +142,7 @@ export class WeatherDisplay {
       this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0,
         uTiles: new Float32Array([0, 0, 1, 1]), uTileSz: ts, uPer: new Float32Array(4), uDens: new Float32Array(4), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]),
         uWindDir: new Float32Array([1, 0]), uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array(4), uI: 1, uAlpha: 1,
-        uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, translationMatrix: new PIXI.Matrix().toArray(true) })), 995, Infinity);
+        uScreen: new Float32Array([1, 1]), uDepth: WHITE(), uDepthElev: 1, uHasDepth: 0, uPx: 1, translationMatrix: new PIXI.Matrix().toArray(true) })), 995, Infinity);
     }
     // haze: one quad over the scene, above tokens
     this.haze = place(new PIXI.Mesh(gg, new PIXI.Shader(prog("haze", GROUND_VERT, HAZE_FRAG), { ...this.common(seed), uTime: 0, uK: footprintK(), uAlpha: 1,
@@ -152,9 +155,9 @@ export class WeatherDisplay {
       this.meshes.push(m);
     }
     // the per-cell caches of the ground and the haze (cells.mjs)
-    const show = prog("cellShow", GROUND_VERT, CELL_SHOW_FRAG);
-    this.groundCells = new CellCache(this.ground, prog("groundCell", CELL_VERT, cellFrag(GROUND_FRAG, "groundFields", "cellGround")), show);
-    this.hazeCells = new CellCache(this.haze, prog("hazeCell", CELL_VERT, cellFrag(HAZE_FRAG, "smoothFields", "cellHaze")), show);
+    const [gc, gs, hc, hs] = cellProgs();
+    this.groundCells = new CellCache(this.ground, gc, gs, { smooth: true });
+    this.hazeCells = new CellCache(this.haze, hc, hs, { smooth: true });
   }
 
   /** New ground info / shelter textures (the owner built them): rebind. */
@@ -319,6 +322,7 @@ export class WeatherDisplay {
     const n = sum > 0 ? tiles * sum : 0;
     this.rainGeom.instanceCount = n;
     const scr = canvas.screenDimensions ?? [canvas.app.renderer.screen.width, canvas.app.renderer.screen.height];
+    const px = 1 / Math.max(1e-6, Math.abs(canvas.stage.worldTransform.a) * ap * (canvas.app.renderer.resolution || 1));   // art px per device px
     const depth = canvas.masks?.depth?.renderTexture ?? null;
     for ( const m of this.rainMeshes ) {
       const u = m.shader.uniforms;
@@ -326,7 +330,7 @@ export class WeatherDisplay {
       u.uTiles[0] = tx0; u.uTiles[1] = ty0; u.uTiles[2] = Math.max(1, ntx); u.uTiles[3] = Math.max(1, nty);
       u.uPer[0] = per[0]; u.uPer[1] = per[1]; u.uPer[2] = per[2];
       u.uDens[0] = dens[0]; u.uDens[1] = dens[1]; u.uDens[2] = dens[2];
-      u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1];
+      u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1]; u.uPx = px;
       m.visible = n > 0;
     }
     const au = this.air.shader.uniforms;
@@ -348,7 +352,7 @@ export class WeatherDisplay {
       const pn = ps > 0 ? pt * ps : 0;
       m.geometry.instanceCount = pn;
       u.uTime = T; u.uTiles[0] = px0; u.uTiles[1] = py0; u.uTiles[2] = Math.max(1, pnx); u.uTiles[3] = Math.max(1, pny);
-      u.uPer.set(pp); u.uDens.set(dd); u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1];
+      u.uPer.set(pp); u.uDens.set(dd); u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1]; u.uPx = px;
       if ( depth ) { u.uDepth = depth; u.uHasDepth = 1; u.uDepthElev = au.uDepthElev; } else u.uHasDepth = 0;
       m.visible = pn > 0;
       partN += pn;

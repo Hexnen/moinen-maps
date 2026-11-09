@@ -32,7 +32,7 @@ export function snowScore(x, y, lum, con, seed) {
   const warp = fbm2(x / 31, y / 31, seed + 41);
   const n = fbm3(x / 19 + 4 * warp, y / 19 - 3 * warp, seed + 42);
   const flat = 1 - ss(0.02, 0.14, con), fine = fbm2(x / 6.3, y / 6.3, seed + 44);
-  return 0.42 * n + 0.22 * fine + 0.26 * flat + 0.13 * lum + (hu(Math.floor(x), Math.floor(y), seed + 43) - 0.5) * 0.07;
+  return 0.42 * n + 0.22 * fine + 0.26 * flat + 0.13 * lum + (vnoise(x / 2.0, y / 2.0, seed + 43) - 0.5) * 0.1;
 }
 /** Settled sand in the lee at art cell (x, y), wind unit vector (dx, dy) (glsl.mjs driftScore). */
 export function driftScore(x, y, con, seed, dx, dy) {
