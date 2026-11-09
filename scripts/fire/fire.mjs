@@ -7,12 +7,17 @@ import { sharedNow } from "../shared-clock.mjs";
 import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import { reducedMotion } from "../config.mjs";
+import { warmPrograms } from "../gl-warm.mjs";
+import { artPrograms } from "./art.mjs";
+import { fireballProgram } from "./shader.mjs";
+import { damperProgram } from "./rain-damp.mjs";
+import { fireWet } from "../wind.mjs";
 
 /**
  * FIRE AND SMOKE, the engine: the strokes of the open scene (scene flags, model.mjs), the display (display.mjs), the GM's edits
  * (each stroke one flag key; undo / redo of whole strokes; a clear), other clients' saves followed. Nothing is baked, published or
  * uploaded: every client computes the same areas and fields from the same strokes, and the same frame from the shared clock.
- * The fields are computed in a worker (raster-worker.mjs; the main thread only lays out the areas): an area whose new field is not
+ * The fields are computed in workers (raster-worker.mjs; the main thread only lays out the areas): an area whose new field is not
  * ready yet keeps showing the previous one of the same place, so painting, releasing, undo / redo and remote strokes never stall.
  * Public API: `game.modules.get("moinen-maps").api.fire`. Hook fired: "moinenMapsFire" ("loaded" | "edited" | "params" | "brush").
  */
@@ -55,15 +60,53 @@ function onCanvasReady() {
   teardown();
   if ( !canvas.scene ) return;
   load();
+  prewarm();
   draw();
   tell("loaded");
 }
 
+/**
+ * The fire is about to be painted (the GM picked the fire or smoke tool, or opened the fire panel): its programs are warmed now, in
+ * the background, if they are not yet - a scene that opened without fire no longer compiles them on the first stroke. Never blocks;
+ * never twice (prewarm).
+ */
+export function warmUp() { prewarm(true); }
+
+/**
+ * PRE-WARM (gl-warm.mjs): when the scene opens with fire or smoke this client shows, every fire program it will draw with is compiled
+ * and linked in the background (KHR_parallel_shader_compile; else one per idle callback) - the first fire draw of a session no longer
+ * blocks on the GPU process for the links (seconds on a program-cache miss). Meanwhile the fire's first display waits for it (draw):
+ * the fire shows when its programs are ready - the same picture, a moment later, never a frozen frame. Only the programs: no pixel
+ * changes. `CONFIG.moinenMaps.firePrewarm = false` turns it off.
+ */
+let warmJob = 0, warming = null;
+function prewarm(force = false) {
+  if ( warming ) return;                                              // (one at a time: a second ask while it runs is the same warm-up)
+  if ( CONFIG.moinenMaps?.firePrewarm === false || !canvas.ready || !shown() || (!force && !strokes.size && !draft) ) return;
+  const list = [...artPrograms()];
+  const ball = [...strokes.values()].some((s) => s.st === "fireball") || draft?.st === "fireball"
+    || (force && game.user.isGM && (() => { try { return game.settings.get(MODULE_ID, "fireStyle") === "fireball"; } catch { return false; } })());
+  if ( ball ) list.push(fireballProgram());
+  const wet = fireWet(); if ( wet && (wet.dim > 0.001 || wet.steam > 0.001) ) list.push(damperProgram());
+  const uid = canvas.app.renderer.CONTEXT_UID;
+  if ( list.every((p) => p.glPrograms?.[uid]) ) return;              // (already warm: compiled earlier this session)
+  const job = ++warmJob;
+  const live = () => job === warmJob && canvas.ready;
+  const tl = timing(), t0 = performance.now();
+  warming = warmPrograms(list, live).catch(() => {}).finally(() => {
+    if ( job !== warmJob ) return;
+    warming = null;
+    if ( tl ) tl.push({ warm: +(performance.now() - t0).toFixed(1), programs: list.length, at: +t0.toFixed(1) });
+    scheduleDraw();
+  });
+}
+
 function teardown() {
+  warmJob++; warming = null;
   cancelAnimationFrame(drawFrame); drawFrame = 0;
   clearTimeout(phaseTimer); phaseTimer = 0;
   display?.destroy(); display = null;
-  fields.clear(); lastAreas = []; lastItems = []; draft = null; ready.clear(); queued.clear(); inflight.clear();
+  fields.clear(); lastAreas = []; lastItems = []; draft = null; ready.clear(); queued.clear();
   undoStack.length = redoStack.length = 0;
 }
 
@@ -72,46 +115,70 @@ function onUpdateScene(scene, changed) {
   const f = changed?.flags?.[MODULE_ID]; if ( !f ) return;
   if ( ![M.FLAG, M.STROKES, `-=${M.STROKES}`, `-=${M.FLAG}`].some((k) => k in f) ) return;
   load(scene);
+  // (the first fire on a scene that had none, painted by another client: its programs warmed as the edit arrives - the new areas'
+  // adoption waits for them, the page stays responsive)
+  if ( !display ) prewarm();
   scheduleDraw();
   tell(M.FLAG in f ? "params" : "edited");
 }
 
 /* ---------------------------------------------------------------- the field worker */
 
-// An area's field is computed in a worker (raster-worker.mjs; ~20-150 ms for a big area, more with torn edges): at most one job per
-// area in flight, a newer request for the same area replaces the queued one (painting asks ~12 times a second), and a finished field
+// An area's field is computed in a worker (raster-worker.mjs; ~20-150 ms for a big area, more with torn edges), and a finished field
 // waits in `ready` until the next draw adopts it. Without a worker (it failed to start) the field is computed here, as before.
+// A12c - a small POOL (two workers on a 4-core CPU or more, one below; the second started only when the first is busy), each given
+// ONE job at a time: the newest request of an area replaces its queued one until a worker is free (painting asks ~12 times a second),
+// and a newer request of an area whose older field is still being computed starts at once on a free worker - the field of a release
+// no longer waits behind the last draft's (a big area takes ~300 ms on a fast CPU, three times that on an old one).
 // (localStorage "mm-fire-worker" = "off": fields on the main thread, for comparing / debugging)
-let worker = null, workerOff = (() => { try { return globalThis.localStorage?.getItem("mm-fire-worker") === "off"; } catch { return false; } })();
-const ready = new Map(), queued = new Map(), inflight = new Map();   // key -> field; area id -> job; area id -> key
+let workers = null, workerOff = (() => { try { return globalThis.localStorage?.getItem("mm-fire-worker") === "off"; } catch { return false; } })();
+const ready = new Map(), queued = new Map(), running = new Set();   // key -> field; area id -> job (the newest asked); keys in work
 const failed = new Set();           // keys the worker could not do (computed here then)
+const POOL = Math.max(1, Math.min(2, (globalThis.navigator?.hardwareConcurrency ?? 2) - 2));
 const route = () => new URL("./raster-worker.mjs", import.meta.url);
-function startWorker() {
-  if ( worker || workerOff ) return !!worker;
-  try {
-    worker = new Worker(route(), { type: "module" });
-    worker.onmessage = (ev) => {
-      const { key, field, err } = ev.data;
-      for ( const [id, k] of inflight ) if ( k === key ) { inflight.delete(id); next(id); }
-      if ( field ) ready.set(key, field); else { failed.add(key); console.warn(`${MODULE_ID} | fire: field worker`, err); }
-      scheduleDraw();
-    };
-    worker.onerror = (e) => { console.warn(`${MODULE_ID} | fire: field worker off, fields on the main thread`, e?.message ?? e); stopWorker(true); scheduleDraw(); };
-  } catch { workerOff = true; worker = null; }
-  return !!worker;
+// DEV TIMING (off unless `CONFIG.moinenMaps.fireTiming` is an array; then each field job and each draw appends a record to it):
+// { job: key, post (ms, performance.now), work (ms in the worker), back (ms posted -> received) } / { draw: ms, areas: ms, sync: ms,
+// n: areas, built: new meshes }. Off it costs one property read per job and per draw.
+const timing = () => globalThis.CONFIG?.moinenMaps?.fireTiming;
+const posted = new Map();           // key -> performance.now() at post (only while timing)
+function spawn() {
+  const slot = { w: new Worker(route(), { type: "module" }), key: null };
+  slot.w.onmessage = (ev) => {
+    const { key, field, err, ms } = ev.data;
+    const tl = timing(); if ( tl && posted.has(key) ) { tl.push({ job: key, post: posted.get(key), work: ms, back: performance.now() - posted.get(key) }); posted.delete(key); }
+    slot.key = null; running.delete(key);
+    if ( field ) ready.set(key, field); else { failed.add(key); console.warn(`${MODULE_ID} | fire: field worker`, err); }
+    pump();
+    scheduleDraw();
+  };
+  slot.w.onerror = (e) => { console.warn(`${MODULE_ID} | fire: field worker off, fields on the main thread`, e?.message ?? e); stopWorker(true); scheduleDraw(); };
+  workers.push(slot);
+  return slot;
 }
-function stopWorker(off = false) { worker?.terminate(); worker = null; workerOff ||= off; queued.clear(); inflight.clear(); }
-function next(id) {
-  const job = queued.get(id); if ( !job ) return;
-  queued.delete(id); inflight.set(id, job.key);
-  worker.postMessage(job);
+function startWorker() {
+  if ( workers || workerOff ) return !!workers;
+  try { workers = []; spawn(); } catch { workerOff = true; workers = null; }
+  return !!workers;
+}
+function stopWorker(off = false) { for ( const s of workers ?? [] ) s.w.terminate(); workers = null; workerOff ||= off; queued.clear(); running.clear(); }
+/** Hand the queued jobs (oldest area first) to free workers, a second worker started when the first is busy. */
+function pump() {
+  if ( !workers ) return;
+  for ( const [id, job] of queued ) {
+    let slot = workers.find((s) => !s.key);
+    if ( !slot && workers.length < POOL ) { try { slot = spawn(); } catch { slot = null; } }
+    if ( !slot ) return;
+    queued.delete(id); slot.key = job.key; running.add(job.key);
+    if ( timing() ) { posted.set(job.key, performance.now()); job.t = true; }
+    slot.w.postMessage(job);
+  }
 }
 /** Ask for an area's field; false when there is no worker (the caller rasterizes it itself). */
 function request(a, g) {
   if ( !startWorker() ) return false;
-  if ( [...inflight.values()].includes(a.key) ) return true;
+  if ( running.has(a.key) || ready.has(a.key) ) return true;
   queued.set(a.id, { key: a.key, area: a, geo: g, P: params });
-  if ( !inflight.has(a.id) ) next(a.id);
+  pump();
   return true;
 }
 const overlap = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
@@ -130,6 +197,7 @@ export function scheduleDraw() {
  */
 export function draw() {
   if ( !canvas.ready || !canvas.scene ) return;
+  const tl = timing(), t0 = tl ? performance.now() : 0;
   const all = [...strokes.values()]; if ( draft ) all.push(draft);
   const now = sharedNow(), still = reducedMotion(), g = geo();
   clearTimeout(phaseTimer); phaseTimer = 0;
@@ -137,6 +205,7 @@ export function draw() {
   if ( Number.isFinite(next) ) phaseTimer = setTimeout(() => { phaseTimer = 0; draw(); }, Math.min(2 ** 31 - 1, Math.max(16, next - now + 20)));
   purge(now, g);
   const areas = shown() ? M.areasOf(all.sort(M.byOrder), g, params, now, still) : [];
+  const t1 = tl ? performance.now() : 0;
   const has = areas.length > 0 || (shown() && extra.size > 0);
   if ( !has ) { if ( display ) { display.destroy(); display = null; } lastAreas = []; lastItems = []; fields.clear(); ready.clear(); return; }
   const keep = new Map(), items = [], used = new Set();
@@ -162,8 +231,11 @@ export function draw() {
   lastItems = items.slice();
   for ( const it of extra.values() ) items.push(it);
   fields = keep; lastAreas = areas;
+  if ( !display && warming ) return;                                  // (the first display waits for the pre-warm: prewarm)
   display ??= new FireDisplay();
+  const t2 = tl ? performance.now() : 0, b0 = tl ? display.stats.built : 0;
   display.sync(items, g, params);
+  if ( tl ) { const t3 = performance.now(); tl.push({ draw: t3 - t0, areas: t1 - t0, sync: t3 - t2, n: areas.length, built: display.stats.built - b0, at: t0 }); }
 }
 
 /* ---------------------------------------------------------------- edits (GM) */
@@ -193,6 +265,7 @@ function fresh(raw) {
 let draftAt = 0, draftTimer = 0;
 export function setDraft(st) {
   draft = st ? M.cleanStroke({ ...fresh(st), id: "draft", q: st.q ?? sharedNow() }) : null;
+  if ( draft && !display ) prewarm();                                 // (a stroke begun before any warm-up: now - the tool usually did it)
   // (a big area takes ~25 ms to rasterize: while painting, at most ~12 redraws a second)
   clearTimeout(draftTimer);
   const wait = 80 - (performance.now() - draftAt);
@@ -335,7 +408,7 @@ export const fireApi = {
   list: () => list().map((s) => ({ ...s, p: [...s.p] })),
   params: () => ({ ...params }), setParams,
   /** How it stands: strokes, areas, what is drawn, particles, lights, the last tick's ms. */
-  status: () => ({ pending: inflight.size + queued.size, strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
+  status: () => ({ pending: running.size + queued.size + (display?.pending?.size ?? 0), adopting: display?.pending?.size ?? 0, strokes: strokes.size, out: [...strokes.values()].filter((s) => s.o !== undefined).length, animating: lastAreas.filter((a) => Object.values(a.phases ?? {}).some((p) => p !== "on")).length, areas: lastAreas.length, shown: shown(), on: params.on, who: params.who, ...(display?.stats ?? { visible: 0, particles: 0, lights: 0, tickMs: 0 }), display: !!display }),
   display: () => display,
   geo, setExtra, model: M
 };
