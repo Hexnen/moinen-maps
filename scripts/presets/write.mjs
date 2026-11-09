@@ -6,6 +6,8 @@ import * as D from "../destruction/destruction.mjs";
 import * as FModel from "../fire/model.mjs";
 import { prepare as firePrepare } from "../fire/fire.mjs";
 import * as R from "./runtime-core.mjs";
+import { mapPixels } from "../destruction/source.mjs";
+import { wetOf } from "./gun-fx.mjs";
 
 /**
  * DESTRUCTION PRESETS, the GM's writer (P1 / P6 of dev/presets-design.md): one firing = the plan of core.mjs written into the layers
@@ -44,6 +46,34 @@ export function envOf(scene = canvas.scene) {
   return { grid: canvas.grid?.size ?? 100, rect: { x: r.x, y: r.y, width: r.width, height: r.height }, now: Math.round(sharedNow()), wind: { dir, speed } };
 }
 
+/**
+ * Is a point of the map dry ground (not water)? For a gun's walk (core.mjs expand env.dry): read once, lazily, from one box of the
+ * scene map round the gesture (4 squares of margin), the colour of ~0.1 square round the point (gun-fx.mjs wetOf) - the same map
+ * every client's accents read, so the damage and the splashes agree. Outside the box, or with no map: dry.
+ */
+function dryOf(gesture) {
+  let box = null, px = null;
+  return (p) => {
+    try {
+      const ap = D.state()?.ap ?? DModel.artPx(), r = DModel.sceneRect(), g = canvas.grid?.size ?? 100;
+      if ( !box ) {
+        const xs = [gesture.a?.[0], gesture.b?.[0]].filter(Number.isFinite), ys = [gesture.a?.[1], gesture.b?.[1]].filter(Number.isFinite), m = 4 * g;
+        const x0 = Math.floor((Math.min(...xs) - m - r.x) / ap), y0 = Math.floor((Math.min(...ys) - m - r.y) / ap);
+        const w = Math.ceil((Math.max(...xs) - Math.min(...xs) + 2 * m) / ap), h = Math.ceil((Math.max(...ys) - Math.min(...ys) + 2 * m) / ap);
+        box = { x0, y0, w: Math.max(1, Math.min(4096, w)), h: Math.max(1, Math.min(4096, h)) };
+        px = mapPixels(ap, box);
+      }
+      const k = Math.max(1, Math.round(0.1 * g / ap)), cx = Math.floor((p.x - r.x) / ap) - box.x0, cy = Math.floor((p.y - r.y) / ap) - box.y0;
+      let R = 0, G = 0, B = 0, n = 0;
+      for ( let y = cy - k; y <= cy + k; y++ ) for ( let x = cx - k; x <= cx + k; x++ ) {
+        if ( x < 0 || y < 0 || x >= box.w || y >= box.h ) continue;
+        const o = (y * box.w + x) * 4; R += px[o]; G += px[o + 1]; B += px[o + 2]; n++;
+      }
+      return !n || !wetOf((Math.round(R / n) << 16) | (Math.round(G / n) << 8) | Math.round(B / n));
+    } catch { return true; }
+  };
+}
+
 /** A destruction record of the plan -> the layer's paint call (destruction.mjs paintStroke): timed at T0 + its offset, owned by the firing. */
 export const paintSpec = (rec, id, fid, t0) => ({ id, discs: rec.discs, type: rec.type, cause: DModel.causeOf(rec.cause), path: rec.path ?? null,
   pr: rec.pr ?? null, a: rec.a, b: rec.b ?? null, at: Math.round(t0 + (rec.at ?? 0)), ps: fid });
@@ -58,7 +88,7 @@ export async function fire(def, gesture, opts = {}) {
   if ( !scene ) return null;
   if ( !game.modules.get(MODULE_ID)?.api?.destruction ) { ui.notifications?.warn(T("DPreset.noDestruction")); return null; }
   const seed = Number.isFinite(opts.seed) ? opts.seed >>> 0 : (Math.random() * 4294967296) >>> 0;
-  const plan = Core.expand(def, gesture, { ...opts, seed }, envOf(scene));
+  const plan = Core.expand(def, gesture, { ...opts, seed }, { ...envOf(scene), dry: dryOf(gesture) });
   const fid = foundry.utils.randomID(12);
   D.ensureState();
   // ids first: the record names every stroke from the start
@@ -84,7 +114,7 @@ export async function fire(def, gesture, opts = {}) {
   for ( const b of plan.pending.burst ?? [] ) {
     const q = Math.round(plan.t0 + (b.at ?? 0));
     const db = debris.filter((r) => r.q >= q).map((r) => [r.p[0] - b.x, r.p[1] - b.y, r.q - q]).flat();
-    const st = firePrepare({ k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, q, wd: plan.fire[0]?.wd ?? envOf(scene).wind.dir, ws: plan.fire[0]?.ws ?? envOf(scene).wind.speed, ...(db.length ? { db } : {}) });
+    const st = firePrepare({ k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, ...(b.bv === 3 ? { bv: 3 } : {}), q, wd: plan.fire[0]?.wd ?? envOf(scene).wind.dir, ws: plan.fire[0]?.ws ?? envOf(scene).wind.speed, ...(db.length ? { db } : {}) });
     if ( st ) { fStrokes.push(st); fKeys.push(`burst.${b.id}`); }
   }
   const upd = {};

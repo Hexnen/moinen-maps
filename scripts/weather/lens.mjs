@@ -45,8 +45,13 @@ const LENS_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
 in vec2 vP;
+#if LENS_OUT == 2
+layout(location = 0) out vec4 dispColor;   // a big drop's refraction: (its centre - this px) / 32 + 0.5, radius / 16, image share
+vec4 fragColor;                            // (ONE output per program: lensFrag)
+#else
 layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec4 dispColor;   // a big drop's refraction: (its centre - this px) / 32 + 0.5, radius / 16, image share
+vec4 dispColor;
+#endif
 uniform vec2 uLens;          // lens size in lens px
 uniform float uAA;           // one px of this pass in lens px (the pass draws SUB px per lens px: shapes are smooth, never whole lens px)
 uniform float uT;            // the step time (s, mod 1 h)
@@ -738,16 +743,24 @@ void main() {
 }
 #endif`;
 
-let lensProg = null, runProg = null, beadProg = null;
+let lensProg = null, dispProg = null, runProg = null, beadProg = null;
 // the pass (PRE 0) and its two pre-passes (1: the runners per column, 2: the beads per cell), one source
 // (INLINE 1: no float targets; the pass makes each px's runners and beads itself, as before the pre-passes: ~2-3 x its cost)
-const lensFrag = (n, inl = 0) => LENS_FRAG.replace("#version 300 es", `#version 300 es
+// ONE OUTPUT PER PROGRAM (`out` 1: the shade, 2: the refraction; 2026-11-09, scene-entry stall): on D3D11 (ANGLE) a program that
+// writes two targets has its real pixel shader compiled at its FIRST DRAW, on the GPU process's main thread - the link (and with it
+// the background pre-warm) only builds a one-target variant. That draw-time compile of the 44 kB pass froze every frame for 2.4-2.8 s
+// on the first rainy scene of a session (Electron 146, warehouse). Two one-target programs link completely in the background; the
+// pass draws each band twice (shade, then refraction) with the same uniforms: the same two textures, the same pixels.
+const lensFrag = (n, inl = 0, out = 1) => LENS_FRAG.replace("#version 300 es", `#version 300 es
 #define PRE ${n}
-#define INLINE ${inl}`);
-let inlineProg = null;
+#define INLINE ${inl}
+#define LENS_OUT ${out}`);
+let inlineProg = null, inlineDisp = null;
 function makeLensProgs() {
   lensProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0), "moinen-maps-weather-lens");
+  dispProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 0, 2), "moinen-maps-weather-lens-disp");
   inlineProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1), "moinen-maps-weather-lens-inline");
+  inlineDisp ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1, 2), "moinen-maps-weather-lens-inline-disp");
   runProg ??= PIXI.Program.from(LENS_VERT, lensFrag(1), "moinen-maps-weather-lens-runners");
   beadProg ??= PIXI.Program.from(LENS_VERT, lensFrag(2), "moinen-maps-weather-lens-beads");
 }
@@ -810,7 +823,7 @@ let showProg = null;
 export function lensPrograms() {
   makeLensProgs();
   showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
-  return [lensProg, runProg, beadProg, showProg];
+  return [lensProg, dispProg, runProg, beadProg, showProg];
 }
 
 /**
@@ -904,10 +917,9 @@ export class WeatherLens {
     // two sets of targets (shown / being drawn): the pass draws a step in bands over a few frames into the hidden set, then they swap
     this.bufs = [0, 1].map(() => {
       const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
-      // the second target of the pass (drawBuffers 1): where a big drop samples the frame (read px by px: NEAREST)
-      const disp = new PIXI.BaseTexture(null, { width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
-      rt.framebuffer.addColorTexture(1, disp);
-      return { rt, disp, dispTex: new PIXI.Texture(disp) };
+      // the pass's refraction target (its own one-target program, lensFrag): where a big drop samples the frame (read px by px: NEAREST)
+      const disp = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
+      return { rt, disp, dispTex: disp, dispClear: true };   // (a new texture is all zero)
     });
     this.front = 0; this.pend = null; this.fresh = true;
     // the full-resolution copy of the frame under the glass (device px)
@@ -937,14 +949,16 @@ export class WeatherLens {
       this.runMesh = new PIXI.Mesh(quad(RW, 10), rs, state); this.beadMesh = new PIXI.Mesh(quad(CW, CH * 3), bs, state);
       this.shaders.push(rs, bs);
     }
-    const shader = new PIXI.Shader(this.pre ? lensProg : inlineProg, U);
+    // (the shade and the refraction programs share ONE uniform group: every value set on one is the other's)
+    const UG = new PIXI.UniformGroup(U), shader = new PIXI.Shader(this.pre ? lensProg : inlineProg, UG), dshader = new PIXI.Shader(this.pre ? dispProg : inlineDisp, UG);
     this.shaders.push(shader);
     // the pass in BANDS of rows (each a quad of its own; a band overwrites its rows whole)
-    this.slices = [];
+    this.slices = []; this.dslices = [];
     for ( let b = 0; b < BANDS; b++ ) {
       const y0 = Math.round(H * b / BANDS), y1 = Math.round(H * (b + 1) / BANDS);
       const g = new PIXI.Geometry().addAttribute("aVertexPosition", [0, y0, W, y0, W, y1, 0, y1], 2).addIndex([0, 1, 2, 0, 2, 3]);
       this.slices.push(new PIXI.Mesh(g, shader, state));
+      this.dslices.push(new PIXI.Mesh(g, dshader, state));
     }
     showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
     const sg = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
@@ -970,7 +984,7 @@ export class WeatherLens {
     if ( this.sprite.parent !== canvas.stage || ch.at(-1) !== this.sprite ) canvas.stage.addChild(this.sprite);   // (drawn last)
     const T = ((this.now?.() ?? Date.now()) / 1000) % 3600, q = Math.floor(T * 12);
     this.q = weatherQ();
-    this.copyWanted = (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0;   // (big drops: rain beads and runners, melted crystals)
+    this.copyWanted = this.bigDrops();
     const fix = CONFIG.moinenMaps?.weatherLensBands, fps = canvas.app.ticker.FPS || 60;
     const k = [1, 2, 4].includes(fix) ? fix : fps >= 48 ? 4 : fps >= 24 ? 2 : 1, per = BANDS / k;
     if ( q !== this.key ) {
@@ -996,6 +1010,9 @@ export class WeatherLens {
     r[11] = mx;
   }
 
+  /** Can this state make big drops (rain beads and runners, melted crystals)? Without them the refraction is empty everywhere. */
+  bigDrops() { return (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0; }
+
   /** The uniforms of the step at time t (s); its bands follow. */
   begin(t) {
     const t0 = performance.now(), u = this.slices[0].shader.uniforms, [bead, big, run, mist, film] = this.gates ?? [0, 0, 0, 0, 0];
@@ -1018,14 +1035,21 @@ export class WeatherLens {
       R.render(this.runMesh, { renderTexture: this.runRT, clear: false });
       R.render(this.beadMesh, { renderTexture: this.beadRT, clear: false });
     }
-    this.pend = { next: 0, ms: performance.now() - t0 };
+    this.pend = { next: 0, ms: performance.now() - t0, disp: this.bigDrops() };
   }
 
   /** Draw up to n more bands of the pending step into the hidden targets; when all are drawn, show them. */
   draw(n) {
     const P = this.pend; if ( !P ) return;
     const t0 = performance.now(), R = canvas.app.renderer, back = this.bufs[1 - this.front];
-    for ( let i = 0; i < n && P.next < BANDS; i++ ) R.render(this.slices[P.next++], { renderTexture: back.rt, clear: false });
+    // (the refraction half only while big drops can exist; without them it is empty: cleared once, the show reads no drop - as the
+    // two-target pass, which wrote a zero share there)
+    if ( !P.disp && !back.dispClear ) { R.render(this.none ??= new PIXI.Container(), { renderTexture: back.disp, clear: true }); back.dispClear = true; }
+    for ( let i = 0; i < n && P.next < BANDS; i++ ) {
+      R.render(this.slices[P.next], { renderTexture: back.rt, clear: false });
+      if ( P.disp ) { R.render(this.dslices[P.next], { renderTexture: back.disp, clear: false }); back.dispClear = false; }
+      P.next++;
+    }
     P.ms += performance.now() - t0;
     if ( P.next < BANDS ) return;
     this.front = 1 - this.front;
@@ -1040,10 +1064,11 @@ export class WeatherLens {
     this.sprite?.parent?.removeChild(this.sprite); this.sprite?.geometry?.destroy(); this.sprite?.destroy(); this.sprite = null;
     this.frameRT?.destroy(true); this.frameRT = null;
     for ( const m of [...this.slices ?? [], this.runMesh, this.beadMesh] ) { m?.geometry?.destroy(); m?.destroy(); }
-    this.slices = null; this.runMesh = null; this.beadMesh = null; this.shaders = null;
+    for ( const m of this.dslices ?? [] ) m.destroy();   // (their geometry is the band's, gone above)
+    this.slices = null; this.dslices = null; this.runMesh = null; this.beadMesh = null; this.shaders = null;
     this.runRT?.destroy(true); this.beadRT?.destroy(true); this.runRT = null; this.beadRT = null;
-    for ( const b of this.bufs ?? [] ) { b.disp.destroy(); b.rt.destroy(true); }
-    this.bufs = null; this.pend = null;
+    for ( const b of this.bufs ?? [] ) { b.disp.destroy(true); b.rt.destroy(true); }
+    this.bufs = null; this.pend = null; this.none?.destroy(); this.none = null;
   }
 
   destroy() {

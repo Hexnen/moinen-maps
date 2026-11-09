@@ -10,6 +10,34 @@
 const TAU = Math.PI * 2;
 const WASH_MAX = 1600;
 
+/**
+ * Fill discs [x, y, r] (radius + grow) as their union, like one path of arcs, with at most ARC_CHUNK arcs per path.
+ * Skia rasterises one path superlinearly in its size (Electron 146: 8k arcs 47 ms, 16k arcs 980 ms, a big zone's border
+ * of lobes minutes), while chunks stay linear (16k arcs in 2k chunks: 22 ms). A path that fits one chunk is drawn
+ * exactly as before. When it must split and the fill is translucent, the chunks are unioned at full alpha on a scratch
+ * layer (same transform, no clip of its own: the target's clip applies once, when it is laid on with the alpha), so overlaps
+ * still blend once.
+ */
+export const ARC_CHUNK = 1500;
+let arcScratch = null;
+export function fillArcs(c, arcs, grow, fill, alpha) {
+  const draw = (t) => {
+    t.fillStyle = fill;
+    for ( let i = 0; i < arcs.length; i += ARC_CHUNK ) {
+      t.beginPath();
+      for ( let j = i, e = Math.min(arcs.length, i + ARC_CHUNK); j < e; j++ ) { const [x, y, r] = arcs[j]; t.moveTo(x + r + grow, y); t.arc(x, y, r + grow, 0, TAU); }
+      t.fill();
+    }
+  };
+  if ( arcs.length <= ARC_CHUNK || alpha >= 1 ) { c.globalAlpha = alpha; draw(c); return; }
+  const cv = c.canvas, s = (arcScratch ??= document.createElement("canvas"));
+  if ( s.width !== cv.width || s.height !== cv.height ) { s.width = cv.width; s.height = cv.height; }
+  const t = s.getContext("2d");
+  t.setTransform(1, 0, 0, 1, 0, 0); t.clearRect(0, 0, s.width, s.height);
+  t.save(); t.setTransform(c.getTransform()); t.globalAlpha = 1; draw(t); t.restore();
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = alpha; c.drawImage(s, 0, 0); c.restore();
+}
+
 /* ---------------------------------------------------------------- small helpers */
 
 /** A stable pseudo-random number in [0, 1) for an integer-ish seed. */
@@ -531,8 +559,7 @@ export const THEMES = {
             }
           }
           c.save(); c.clip(it.path, "evenodd");
-          const blob = (grow, fill) => { c.fillStyle = fill; c.beginPath(); for ( const [x, y, rr] of lobes ) { c.moveTo(x + rr + grow, y); c.arc(x, y, rr + grow, 0, TAU); } c.fill(); };
-          c.globalAlpha = Math.min(1, ink);
+          const blob = (grow, fill) => fillArcs(c, lobes, grow, fill, Math.min(1, ink));
           blob(1.8 * u, "#5c3a0c");
           const gr = c.createLinearGradient(bx0, by0, bx1, by1);
           [[0, "#d9a83c"], [0.22, "#f6d985"], [0.38, "#dcac44"], [0.6, "#f1cf72"], [0.8, "#cf9c33"], [1, "#eccb6c"]].forEach(([t, col]) => gr.addColorStop(t, col));
@@ -551,9 +578,9 @@ export const THEMES = {
         c.globalCompositeOperation = "source-over"; c.globalAlpha = 0.9;
         c.setTransform(k, 0, 0, k, 1 - x0 * k, 1 - y0 * k);
         for ( const [zi, it] of zs.entries() ) {
-          c.save(); c.clip(it.path, "evenodd"); c.fillStyle = "#e9c463"; c.beginPath();
-          for ( const [di, x, y, r] of dust ) if ( di === zi ) { c.moveTo(x + r, y); c.arc(x, y, r, 0, TAU); }
-          c.fill(); c.restore();
+          c.save(); c.clip(it.path, "evenodd");
+          fillArcs(c, dust.filter((d) => d[0] === zi).map((d) => d.slice(1)), 0, "#e9c463", 0.9);
+          c.restore();
         }
         c0.save(); c0.setTransform(1, 0, 0, 1, 0, 0); c0.globalAlpha = 0.95; c0.drawImage(lay, 0, 0); c0.restore();
       } }

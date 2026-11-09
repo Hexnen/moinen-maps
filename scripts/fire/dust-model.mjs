@@ -106,9 +106,9 @@ export const KIND = {
   // (hits: `back` is the radial throw - an emitter's heading points back at its hit, so the throw sends the puff outwards; `rise` the
   // geyser's height, risen fast (riseK / s), its young jet - the column from the ground up to the cloud - lasting longer (jetK);
   // `per` emitters a hit, the first one nearly straight up)
-  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.12, 0.15, 0.2], out: [0, 0.04, 0.06, 0.1], back: [0, 0.2, 0.26, 0.34],
-    rise: [0, 0.32, 0.5, 0.78], life: [0, 1.3, 1.7, 2.0], lin: [0, 0.02, 0.03, 0.035], chips: [0, 3, 4, 6], chipD: 0.6, chipH: 0.55, chipSz: 2,
-    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] },
+  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.11, 0.14, 0.18], out: [0, 0.04, 0.06, 0.1], back: [0, 0.16, 0.2, 0.26],
+    rise: [0, 0.12, 0.17, 0.26], life: [0, 1.7, 2.1, 2.5], lin: [0, 0.02, 0.03, 0.035], chips: [0, 1, 1, 2], chipD: 0.5, chipH: 0.3, chipSz: 1,
+    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 2.4, jetK: 7, per: [0, 2, 2, 3] },
   // (shock: the emitters lie on rings round the centre (`fr` of the reach, `sp` apart along each), the heading points back at the
   // centre so `back` is the outward throw; low and rolling (small rise), `tau` the front's slowing - see shockAt)
   shock: { v: 1, lanes: (hw) => [hw], sp: 0.22, pr: [0, 0.17, 0.27, 0.31], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
@@ -311,6 +311,8 @@ export function dustRaster(area, geo, P) {
       if ( back ) { back[o] = bk ? bk[1] : NONE; back[o + 1] = bk ? out : NONE; }
       cell[o + 2] = d; cell[o + 3] = A;
     }
+    // (np: no puffs - a burst of look 3 rolls its own ground surge over the ring; the stroke keeps its grit, aura and haze)
+    if ( st.np ) return;
     const sp = L.sp * g, fr = KIND.shock.fr;
     let n = 0;
     fr.forEach((f, ri) => {

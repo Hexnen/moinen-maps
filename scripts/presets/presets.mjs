@@ -8,6 +8,7 @@ import { registerAccents } from "./accents-wire.mjs";
 import { registerLightning } from "./lightning-wire.mjs";
 import { registerRocket } from "./rocket-wire.mjs";
 import { registerMeteor } from "./meteor-wire.mjs";
+import { registerBlast } from "./blast-wire.mjs";
 
 /**
  * DESTRUCTION PRESETS: the public API, `game.modules.get("moinen-maps").api.presets` (dev/presets-design.md; P1 the data format, the
@@ -70,4 +71,5 @@ registerAccents();
 registerLightning();
 registerRocket();
 registerMeteor();
+registerBlast();
 
