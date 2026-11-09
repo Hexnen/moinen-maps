@@ -8,8 +8,9 @@ import { geo as fireGeo } from "../fire/fire.mjs";
 import * as A from "./accents-core.mjs";
 
 /**
- * DESTRUCTION PRESETS, the gun ACCENTS on every client (the pure drawing rules: accents-core.mjs): tracers, hit flashes and sparks,
- * the muzzle flash and bullet streaks, a short ground glow round each hit at night and a rumble of the screen under a heavy gun.
+ * DESTRUCTION PRESETS, the ACCENTS on every client (the pure drawing rules: accents-core.mjs): tracers, hit flashes and sparks,
+ * the muzzle flash and bullet streaks, a short ground glow round each hit at night and a rumble of the screen under a heavy gun; a
+ * falling bomb and its shadow, a thrown grenade's flight and bounce; the firings' CUES - a screen shake and flash, a light.
  * Loaded by presets.mjs on the first firing record a client takes up that has gun accents; it listens to the firings runtime
  * (runtime.mjs: "firing" / "gone"), draws while one of its firings has anything in flight, then removes its ticker - a scene without
  * gun firings runs nothing of this.
@@ -17,20 +18,24 @@ import * as A from "./accents-core.mjs";
  *    (sortLayer 820): they are in the air or flashing on the ground, never under a token.
  *  - NIGHT: the same pixels, as their emission, in Foundry's illumination (MAX_COLOR, as the fire's glow): they are lit by
  *    themselves, and a short warm glow round each hit lights the ground for a moment; vision and fog apply as to the fire.
- *  - RUMBLE: a heavy gun's hits near the view shake the screen a little (the stage offset as the cinematic shake: StageShaker),
- *    never for a player who opted out of shake (or wants reduced motion).
+ *  - SHADOWS (a bomb's, a grenade's): two dithered steps of a dark tone at low alpha, under the colour pixels.
+ *  - RUMBLE / SHAKE: a heavy gun's hits near the view shake the screen a little, a blast's screen cue more (decaying; the stage offset
+ *    as the cinematic shake: StageShaker) - weaker the farther from the view, never for a player who opted out of shake (or wants
+ *    reduced motion).
+ *  - FLASH: a blast's screen cue whitens the screen for a moment (a warm overlay over the board, its alpha by the cue and the
+ *    distance from the view), never for a player who opted out of flashes (or wants reduced motion).
  *  - Reduced motion: nothing is drawn (the damage and the settled dust are the result). The client's frame guard thins the sparks.
  */
 const SORT_LAYER = 820;
 const live = new Map();             // fid -> { t0, items, end, seed }
-let root = null, colG = null, glowBox = null, glowG = null, glowPool = [], ticking = false, hookL = 0, shaker = null, glowTex = null;
+let root = null, shadeG = null, flashEl = null, colG = null, glowBox = null, glowG = null, glowPool = [], ticking = false, hookL = 0, shaker = null, glowTex = null;
 const F = A.newFrame();
 
 /** Records with gun accents (what this layer draws). */
 export const gunItems = (rec) => (rec?.pending?.accent ?? []).filter((a) => a && (a.kind === "tracer" || a.kind === "hitFx" || a.kind === "muzzle"));
 
 export function take(rec) {
-  const items = gunItems(rec);
+  const items = A.itemsOf(rec);
   if ( !items.length || reducedMotion() ) return;
   let end = -Infinity;
   for ( const it of items ) { const s = A.spanOf(it); if ( s ) end = Math.max(end, rec.t0 + s[1]); }
@@ -45,7 +50,7 @@ function mount() {
   root = new PIXI.Container();
   root.eventMode = "none"; root.interactiveChildren = false;
   Object.assign(root, { elevation: 0, sortLayer: SORT_LAYER, sort: 0, _lastSortedIndex: 0 });
-  colG = new PIXI.Graphics(); root.addChild(colG);
+  shadeG = new PIXI.Graphics(); colG = new PIXI.Graphics(); root.addChild(shadeG, colG);
   canvas.primary.addChild(root);
   glowBox = new PIXI.Container(); glowBox.eventMode = "none";
   glowG = new PIXI.Graphics(); glowG.blendMode = PIXI.BLEND_MODES.MAX_COLOR; glowBox.addChild(glowG);
@@ -67,6 +72,8 @@ function stop() {
   shaker?.restore(); shaker = null;
   guardOff("presets");
   if ( colG && !colG.destroyed ) colG.clear();
+  if ( shadeG && !shadeG.destroyed ) shadeG.clear();
+  if ( flashEl ) flashEl.style.opacity = "0";
   if ( glowG && !glowG.destroyed ) glowG.clear();
   for ( const s of glowPool ) s.visible = false;
 }
@@ -76,7 +83,8 @@ export function reset() {
   if ( hookL ) Hooks.off("lightingRefresh", hookL); hookL = 0;
   if ( root && !root.destroyed ) root.destroy({ children: true });
   if ( glowBox && !glowBox.destroyed ) { glowBox.parent?.removeChild(glowBox); glowBox.destroy({ children: true }); }
-  root = colG = glowBox = glowG = null; glowPool = [];
+  flashEl?.remove();
+  root = colG = shadeG = glowBox = glowG = flashEl = null; glowPool = [];
 }
 
 /** A soft-stepped round glow (pixel-art: 4 flat rings with dithered edges, 32 x 32), white: tinted and scaled per hit. */
@@ -104,13 +112,20 @@ function tick() {
   }
   if ( !live.size ) { stop(); return; }
   // colour (dim first: a brighter pixel drawn later wins) and its emission
-  colG.clear(); glowG.clear();
+  colG.clear(); glowG.clear(); shadeG.clear();
   const ap = g.ap;
+  F.shade.forEach((L, k) => {
+    if ( !L.length ) return;
+    shadeG.beginFill(A.SHADE, A.SHADE_A[k]);
+    for ( let i = 0; i < L.length; i += 2 ) shadeG.drawRect(g.ox + L[i] * ap, g.oy + L[i + 1] * ap, ap, ap);
+    shadeG.endFill();
+  });
   for ( let c = A.PAL.length - 1; c >= 0; c-- ) {
     const L = F.px[c]; if ( !L.length ) continue;
-    colG.beginFill(A.PAL[c], 1); glowG.beginFill(mul(0xffffff, A.GLOW[c]), 1);
-    for ( let i = 0; i < L.length; i += 2 ) { const x = g.ox + L[i] * ap, y = g.oy + L[i + 1] * ap; colG.drawRect(x, y, ap, ap); glowG.drawRect(x, y, ap, ap); }
-    colG.endFill(); glowG.endFill();
+    const em = A.GLOW[c] > 0;
+    colG.beginFill(A.PAL[c], 1); if ( em ) glowG.beginFill(mul(0xffffff, A.GLOW[c]), 1);
+    for ( let i = 0; i < L.length; i += 2 ) { const x = g.ox + L[i] * ap, y = g.oy + L[i + 1] * ap; colG.drawRect(x, y, ap, ap); if ( em ) glowG.drawRect(x, y, ap, ap); }
+    colG.endFill(); if ( em ) glowG.endFill();
   }
   // the ground glows (night light round the hits / the muzzle): pooled sprites in the emission container
   const G = F.glows, tex = glowTexture();
@@ -123,19 +138,49 @@ function tick() {
     s.tint = mul(A.PAL[G[i + 4]], Math.min(1, G[i + 3])); s.visible = true;
   }
   for ( let k = n; k < glowPool.length; k++ ) glowPool[k].visible = false;
-  rumble(F.kicks, now);
+  rumble(F.kicks, F.shakes, now);
+  flash(F.flashes);
 }
 
-/** The screen shake of the heavy hits near the view: a small jitter, at most a few screen px, never for an opted-out client. */
-function rumble(K, now) {
-  if ( !K.length && !shaker ) return;
+/** How much of a cue at (x, y) reaches this client's view: 1 on screen, falling off past it (NaN: everywhere). */
+function nearView(x, y) {
+  if ( !Number.isFinite(x) || !Number.isFinite(y) ) return 1;
+  const st = canvas.stage, sc = st.scale.x, vw = canvas.app.screen.width / sc, vh = canvas.app.screen.height / sc;
+  const d = Math.hypot((x - st.pivot.x) / (vw / 2), (y - st.pivot.y) / (vh / 2));
+  return d <= 1 ? 1 : Math.max(0, 1 - (d - 1) / 1.5);
+}
+
+/** A blast's FLASH: a warm overlay over the board for a moment (never for an opted-out client). */
+function flash(L) {
+  if ( !L.length && !flashEl ) return;
+  let a = 0;
+  if ( L.length ) {
+    let opts = null; try { opts = clientOpts(); } catch { /* not ready */ }
+    if ( !opts?.noFlash && !opts?.reduced ) for ( let i = 0; i < L.length; i += 3 ) a = Math.max(a, L[i + 2] * nearView(L[i], L[i + 1]));
+  }
+  if ( !flashEl ) {
+    if ( a < 0.005 ) return;
+    flashEl = document.createElement("div");
+    Object.assign(flashEl.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "1", background: "#fff3dc", opacity: "0", mixBlendMode: "screen" });
+    flashEl.className = "mm-preset-flash";
+    document.body.appendChild(flashEl);
+  }
+  flashEl.style.opacity = String(Math.round(Math.min(0.6, 0.55 * a) * 1000) / 1000);
+}
+
+/** The screen shake of the heavy hits near the view (a small jitter, at most a few screen px) and of a blast's screen cue (up to
+ * SHAKE_PX, decaying), never for an opted-out client. */
+function rumble(K, S, now) {
+  if ( !K.length && !S.length && !shaker ) return;
   let opts = null; try { opts = clientOpts(); } catch { /* not ready */ }
   if ( opts?.noShake || opts?.reduced ) return;
   const st = canvas.stage, sc = st.scale.x, vw = canvas.app.screen.width / sc, vh = canvas.app.screen.height / sc;
   const cx = st.pivot.x, cy = st.pivot.y, R = 0.6 * Math.hypot(vw, vh);
   let e = 0;
   for ( let i = 0; i < K.length; i += 3 ) { const d = Math.hypot(K[i] - cx, K[i + 1] - cy); e += K[i + 2] * Math.max(0, 1 - d / R); }
-  const amp = Math.min(3.2, 2.2 * e);
+  let b = 0;
+  for ( let i = 0; i < S.length; i += 3 ) b = Math.max(b, S[i + 2] * (0.35 + 0.65 * nearView(S[i], S[i + 1])));
+  const amp = Math.min(3.2, 2.2 * e) + Math.min(A.SHAKE_PX, b);
   if ( amp < 0.05 ) { shaker?.restore(); shaker = null; return; }
   shaker ??= new StageShaker(st);
   const k = Math.floor(now / 33);

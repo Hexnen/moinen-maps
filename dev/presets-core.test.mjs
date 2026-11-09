@@ -99,10 +99,10 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
   ok(rim.length >= 2 && rim.every((f) => f.q >= p.t0 + 900 && f.q <= p.t0 + 1300 && f.o > f.q && f.o - f.q <= 60000 && f.o - f.q >= 30000), "E rim fires: their moment, each its share of the aftermath");
   ok(new Set(rim.map((f) => f.o - f.q)).size === rim.length, "E rim fires die out one by one");
   const none = fireAt(d, 7, { aftermath: null });
-  ok(none.aftermath === null && none.fire.every((f) => f.o === undefined), "E no end: no fire or smoke of the aftermath goes out by itself");
+  ok(none.aftermath === null && none.fire.every((f) => f.k === "dust" || f.o === undefined), "E no end: no fire or smoke of the aftermath goes out by itself");
   const short = fireAt(d, 7, { aftermath: 1 }), long = fireAt(d, 7, { aftermath: 99999 });
   ok(short.aftermath === C.AFTERMATH.min && long.aftermath === C.AFTERMATH.max, "E the firing's aftermath clamped");
-  ok(fireAt(d, 7, { aftermath: 30 }).fire.every((f) => f.o - f.q <= 30000), "E the firing's aftermath overrides the preset's");
+  ok(fireAt(d, 7, { aftermath: 30 }).fire.every((f) => f.k === "dust" || f.o - f.q <= 30000), "E the firing's aftermath overrides the preset's");
   const g = fireAt(get("grenade"), 3, { aftermath: null }), wisps = g.fire.find((f) => f.key.startsWith("wisps"));
   ok(wisps && wisps.o - wisps.q === 8000, "E transient smoke ends even with no-end aftermath");
   ok(p.fire.every((f) => f.q - ENV.now < 5000), "E every moment within the shared clock's future slack (5 s)");
@@ -178,7 +178,7 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
   }
   ok(fireBad === 0 && nF > 100, `I fire / smoke records pass the fire layer's cleaning unchanged (${fireBad} of ${nF})`);
   const b = fireAt(get("bomb"));
-  ok(b.pending.burst.length === 1 && b.pending.dust.length === 1 && b.pending.cue.length === 2 && b.pending.accent[0].kind === "fallShadow", "I bomb: the parts no layer plays yet are kept as pending");
+  ok(b.pending.burst.length === 1 && b.pending.dust.length === 0 && b.fire.filter((f) => f.k === "dust" && f.dk === "shock").length === 1 && b.pending.cue.length === 2 && b.pending.accent[0].kind === "fallShadow", "I bomb: the parts no layer plays yet are kept as pending (the shock dust is a fire-layer stroke)");
   const h = fireAt(get("heliHmg"));
   const tr = h.pending.accent.find((a) => a.kind === "tracer");
   ok(tr && tr.hits.length === Math.floor(h.walk.hits.length / 4), "I heli: every 4th hit a tracer");

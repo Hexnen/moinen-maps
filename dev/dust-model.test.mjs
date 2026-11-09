@@ -122,7 +122,7 @@ const dust = (id, dk, lv, p, extra = {}) => M.cleanStroke({ id, k: "dust", dk, l
 /* E */
 {
   const T = D.kindTable();
-  ok(T.length === 5 && T.every((a) => a.length === D.CODES * 4) && D.CODES >= D.DUST_KINDS.length * 4, `${D.CODES} codes x 5 vec4`);
+  ok(T.length === 6 && T.every((a) => a.length === D.CODES * 4) && D.CODES >= D.DUST_KINDS.length * 4, `${D.CODES} codes x 6 vec4`);
   // (the kinds that travel keep their old rise / jet rates: their look is unchanged by the hits kind)
   ok(["bike", "car", "drag", "heavy"].every((dk, ki) => [1, 2, 3].every((lv) => T[4][(ki * 4 + lv) * 4] === Math.fround(1.1) && T[4][(ki * 4 + lv) * 4 + 1] === 4 && T[4][(ki * 4 + lv) * 4 + 2] === 0)), "old kinds: rise 1.1, jet 4, not hits");
   ok(T[4][(4 * 4 + 3) * 4 + 2] === 1, "hits flagged in the table");

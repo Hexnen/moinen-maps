@@ -41,7 +41,24 @@
  */
 import { hash4, hashStr, vnoise, windVec, litTime } from "./model.mjs";
 
-export const DUST_KINDS = ["bike", "car", "drag", "heavy", "hits"];
+export const DUST_KINDS = ["bike", "car", "drag", "heavy", "hits", "shock"];
+/**
+ * SHOCK (the bomb / grenade presets, dev/presets-design.md G3): no path - the stroke's one point is a blast's centre and `r` the reach
+ * of its shock wave. A ragged front of the ground's own dust tears outward from the centre at a decaying speed (it reaches a radius d
+ * at shockAt(d): fast at first, slowing with drag, the rim at about 2.2 tau), each puff thrown out ahead of it, chips skittering out
+ * low, then grit and a low haze over the whole swept disc that thins to a veil and drifts. Level 1 a grenade, 2 a shell, 3 a bomb.
+ */
+export const SHOCK_OVER = 1.12;
+/**
+ * The HAZE a blast leaves (shock only): its aura does not thin to a veil and stop there - it hangs over the swept disc as a low pall
+ * of the ground's own dust for minutes (KIND.shock haze s by level: a bomb's ~5 min), slowly SPREADS (its reach past the rim grows by
+ * up to HAZE_GROW x the aura over the first minutes), churns and drifts with the wind (the aura's drifting noise), and THINS over the
+ * second half of its life: its pixel bands shrink and break into patches until nothing is left (no pop: the stroke's own out `o`
+ * comes after). The lingering puffs stop after linW s, so for the minutes of the haze the art pass skips the emitters (puffEnd).
+ */
+export const HAZE_GROW = 0.9;
+/** When the shock front of stroke-look L reaches the distance d (cells) from its centre, R its reach (cells): s after its paint time. */
+export const shockAt = (L, d, R) => -L.tau * Math.log(1 - Math.min(d, R) / (SHOCK_OVER * R)) + Math.max(0, d - R) / Math.max(1e-6, R / L.tau);
 /**
  * HITS (the gun presets, dev/presets-design.md G4): no source travels the path - its points are BULLET IMPACTS in time order, the
  * first at the stroke's paint time (q), each next one hitDt ms later (the stroke's `s` holds the shot interval in HIT_DT ms: a gun's
@@ -91,7 +108,13 @@ export const KIND = {
   // `per` emitters a hit, the first one nearly straight up)
   hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.11, 0.13, 0.15], out: [0, 0.04, 0.05, 0.06], back: [0, 0.2, 0.26, 0.34],
     rise: [0, 0.32, 0.5, 0.78], life: [0, 1.3, 1.7, 2.0], lin: [0, 0.02, 0.03, 0.035], chips: [0, 3, 4, 6], chipD: 0.6, chipH: 0.55, chipSz: 2,
-    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] }
+    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] },
+  // (shock: the emitters lie on rings round the centre (`fr` of the reach, `sp` apart along each), the heading points back at the
+  // centre so `back` is the outward throw; low and rolling (small rise), `tau` the front's slowing - see shockAt)
+  shock: { v: 1, lanes: (hw) => [hw], sp: 0.3, pr: [0, 0.15, 0.22, 0.3], out: [0, 0.06, 0.08, 0.1], back: [0, 0.3, 0.5, 0.75],
+    rise: [0, 0.06, 0.1, 0.15], life: [0, 1.6, 2.3, 3.2], lin: [0, 0.12, 0.2, 0.28], chips: [0, 2, 3, 4], chipD: 0.5, chipH: 0.2, chipSz: 1,
+    grit: [0, 0.1, 0.16, 0.24], aura: [0, 0.25, 0.4, 0.55], auraA: [0, 0.45, 0.6, 0.75], mark: 0, trackW: 0, riseK: 1.4, jetK: 3.0,
+    tau: [0, 0.2, 0.28, 0.38], fr: [0.18, 0.38, 0.58, 0.76, 0.92], linW: [0, 10, 14, 18], haze: [0, 150, 240, 300] }
 };
 /** The puffs' rise rate (1 / s) and the young jet's decay (1 / s) of the kinds that travel (hits has its own). */
 export const RISE_K = 1.1, JET_K = 4.0;
@@ -101,19 +124,22 @@ export function look(st) {
   const dk = DUST_KINDS.includes(st.dk) ? st.dk : "car", lv = Math.min(3, Math.max(1, st.lv | 0 || 2)), K = KIND[dk];
   return { dk, lv, code: DUST_KINDS.indexOf(dk) * 4 + lv, v: K.v, lanes: K.lanes, sp: K.sp, pr: K.pr[lv], out: K.out[lv], back: K.back[lv], rise: K.rise[lv],
     life: K.life[lv], lin: K.lin[lv], chips: K.chips[lv], chipD: K.chipD, chipH: K.chipH, chipSz: K.chipSz, grit: K.grit[lv], aura: K.aura[lv],
-    auraA: K.auraA[lv], mark: K.mark, trackW: K.trackW, riseK: K.riseK ?? RISE_K, jetK: K.jetK ?? JET_K, hits: dk === "hits", per: K.per?.[lv] ?? 0 };
+    auraA: K.auraA[lv], mark: K.mark, trackW: K.trackW, riseK: K.riseK ?? RISE_K, jetK: K.jetK ?? JET_K, hits: dk === "hits", per: K.per?.[lv] ?? 0,
+    shock: dk === "shock", tau: K.tau?.[lv] ?? 0, linW: K.linW?.[lv] ?? 0, haze: K.haze?.[lv] ?? 0 };
 }
 
-/** The art pass's per-code table (CODES codes = kind * 4 + level), five vec4 arrays: [pr, out, back, rise], [life, lin, chips, chipD],
- * [chipH, chipSz, grit, aura], [auraA, mark, trackW, v], [riseK, jetK, hits 0 / 1, 0]. */
+/** The art pass's per-code table (CODES codes = kind * 4 + level), six vec4 arrays: [pr, out, back, rise], [life, lin, chips, chipD],
+ * [chipH, chipSz, grit, aura], [auraA, mark, trackW, v], [riseK, jetK, radial 0 / 1 (hits, shock: thrown out from a centre), 0],
+ * [linW (s: lingering puffs only this long after the kick; 0 = until put out), haze (s: the long HAZE's life; 0 = none), HAZE_GROW, 0]. */
 export const CODES = 24;
 export function kindTable() {
-  const T = [0, 1, 2, 3, 4].map(() => new Float32Array(CODES * 4));
+  const T = [0, 1, 2, 3, 4, 5].map(() => new Float32Array(CODES * 4));
   DUST_KINDS.forEach((dk, ki) => { for ( let lv = 1; lv <= 3; lv++ ) {
     const L = look({ dk, lv }), o = (ki * 4 + lv) * 4;
     T[0].set([L.pr, L.out, L.back, L.rise], o); T[1].set([L.life, L.lin, L.chips, L.chipD], o);
     T[2].set([L.chipH, L.chipSz, L.grit, L.aura], o); T[3].set([L.auraA, L.mark, L.trackW, L.v], o);
-    T[4].set([L.riseK, L.jetK, L.hits ? 1 : 0, 0], o);
+    T[4].set([L.riseK, L.jetK, L.hits || L.shock ? 1 : 0, 0], o);
+    T[5].set([L.linW, L.haze, L.haze ? HAZE_GROW : 0, 0], o);
   } });
   return T;
 }
@@ -133,7 +159,7 @@ export function reachCells(st, geo) {
   const [wx, wy] = windVec(st.wd, st.ws), drift = (Math.hypot(wx, wy) * DRIFT + SDRIFT) * TAU * g;
   const puff = lane + (L.out + L.back) * g + 2.6 * L.pr * g * 1.5 + L.rise * g + drift;
   const chip = lane + (L.chipD + L.chipH) * g + 2;
-  const aura = (hw + L.aura * g) * 1.35;
+  const aura = (hw + L.aura * g * (1 + (L.haze ? HAZE_GROW : 0))) * 1.35;
   return Math.ceil(Math.max(puff, chip, aura)) + 3;
 }
 
@@ -156,6 +182,7 @@ export function dustCore(st, geo) {
 export function passMs(st, geo) {
   const g = geo.grid / geo.ap, { pts } = pathOf(st, geo), L = look(st);
   if ( L.hits ) return Math.max(0, pts.length - 1) * hitDt(st);   // (hits: the last one's moment)
+  if ( L.shock ) { const R = Math.max(1, st.r / geo.ap); return 1000 * shockAt(L, R, R); }   // (shock: the front at its reach)
   return 1000 * pathLen(pts) / (L.v * g);
 }
 /** When a dust stroke's current animation ends (ms): its last burst puff died (painted), or its last puff after a put-out. */
@@ -265,11 +292,48 @@ export function dustRaster(area, geo, P) {
       }
     });
   };
+  // SHOCK: every cell of the swept disc (and its haze past the rim) kicked when the front reaches it, the distance from the centre in z;
+  // the emitters on rings round the centre, each kicked as the front passes it and thrown outward (the heading points back at the centre)
+  const shockOf = (st, L, [cx, cy], R, t0, oSt, seed, A) => {
+    const Rc = (R + L.aura * g * (1 + (L.haze ? HAZE_GROW : 0))) * 1.35 + 2;
+    const [wx, wy] = windVec(st.wd, st.ws), drift = (Math.hypot(wx, wy) * DRIFT + SDRIFT) * TAU * g;
+    const reach = Math.max((L.out + L.back) * g * 1.2 + 2.6 * L.pr * g * 1.5 + L.rise * g + drift, (L.chipD + L.chipH) * g + 2) + 2;
+    const xa = Math.max(rect.x0, Math.floor(cx - Rc)), xb = Math.min(rect.x1, Math.ceil(cx + Rc));
+    const ya = Math.max(rect.y0, Math.floor(cy - Rc)), yb = Math.min(rect.y1, Math.ceil(cy + Rc));
+    for ( let y = ya; y < yb; y++ ) for ( let x = xa; x < xb; x++ ) {
+      const px = x + 0.5, py = y + 0.5, d = Math.hypot(px - cx, py - cy);
+      if ( d > Rc ) continue;
+      const i = (y - rect.y0) * W + (x - rect.x0), nd = d / R * warp(px, py, g, seed);
+      if ( nd >= best[i] ) continue;
+      best[i] = nd;
+      const o = i * 4, out = Math.min(oSt, erasedAt(i, t0)), bk = back ? backOf(i, t0, out) : null;
+      cell[o] = t0 + shockAt(L, d * warp(px, py, g, seed + 3), R); cell[o + 1] = bk ? bk[0] : out;
+      if ( back ) { back[o] = bk ? bk[1] : NONE; back[o + 1] = bk ? out : NONE; }
+      cell[o + 2] = d; cell[o + 3] = A;
+    }
+    const sp = L.sp * g, fr = KIND.shock.fr;
+    let n = 0;
+    fr.forEach((f, ri) => {
+      const rr = f * R, m = Math.max(5, Math.round(2 * Math.PI * rr / sp)), a0 = hash4(seed, ri, 51) * Math.PI * 2;
+      for ( let k = 0; k < m; k++ ) {
+        const a = a0 + (k + (hash4(seed, ri, k, 52) - 0.5) * 0.6) / m * Math.PI * 2, rj = rr * (1 + (hash4(seed, ri, k, 53) - 0.5) * 0.16);
+        const hx = Math.cos(a), hy = Math.sin(a), x = cx + hx * rj, y = cy + hy * rj * 0.97, len = 0.55 + 0.65 * f * (0.7 + 0.6 * hash4(seed, ri, k, 54));
+        const es = (Math.imul(seed, 31) + n * 7919) >>> 0, i = cellOf(x, y);
+        const out = Math.min(oSt, i >= 0 ? erasedAt(i, t0) : NONE), bk = back ? backOf(i, t0, out) : null;
+        ems.push([x - rect.x0, y - rect.y0, t0 + shockAt(L, rj, R) + 0.03 * hash4(seed, ri, k, 55), es % 1000003, -hx * len, -hy * len, hash4(seed, ri, k, 56) < 0.5 ? -1 : 1, L.code,
+          bk ? bk[0] : out, reach, bk ? bk[1] : NONE, bk ? out : NONE]);
+        n++;
+      }
+    });
+  };
+  let pEnd = -Infinity, allShock = true;
   for ( const st of members ) {
     const L = look(st), { pts: raw, hw } = pathOf(st, geo), t0 = sec(litTime(st)), v = L.v * g, oSt = st.o !== undefined ? sec(st.o) : NONE;
     const seed = hashStr(st.id), A = L.code + CODE_N * Math.round(hw * 4);
     const pts = raw.length ? raw : [[0, 0]];
-    if ( L.hits ) { hitsOf(st, L, pts, hw, t0, oSt, seed, A); continue; }
+    if ( L.hits ) { allShock = false; hitsOf(st, L, pts, hw, t0, oSt, seed, A); continue; }
+    if ( L.shock ) { shockOf(st, L, pts[0], hw, t0, oSt, seed, A); if ( L.linW > 0 ) pEnd = Math.max(pEnd, t0 + shockAt(L, hw * 1.2, hw) + 0.2 + L.linW + LIN_P * 0.5 + LIN_L * 1.15 + L.life * 1.15); else allShock = false; continue; }
+    allShock = false;
     // 1. the CELLS: the nearest path point of the nearest stroke (by distance over its band, warped organic)
     const Rc = (hw + L.aura * g) * 1.35 + 2;
     let s0 = 0;
@@ -357,6 +421,8 @@ export function dustRaster(area, geo, P) {
   keep.forEach((e, i) => tilesOf(e, (t) => { idx[fill[t]++] = i; }));
   let maxKick = 0; for ( const e of keep ) if ( e[2] > maxKick ) maxKick = e[2];
   for ( let i = 0; i < N; i++ ) { const k = cell[i * 4]; if ( k < NONE && k > maxKick ) maxKick = k; }
-  return { style: "dust", w: W, h: H, ref, cell, back, em, emW, emH: emRows, emN: E, thin, tileH, tw: TW, th: TH, idx, idxH: idxRows, maxKick,
+  // (an area of blasts only: after its last puff can live, the art pass skips the emitters - the minutes of the haze cost the ground only)
+  const puffEnd = allShock && !undone && members.length ? pEnd + 1 : NONE;
+  return { style: "dust", w: W, h: H, ref, cell, back, em, emW, emH: emRows, emN: E, thin, tileH, tw: TW, th: TH, idx, idxH: idxRows, maxKick, puffEnd,
     emit: { fire: [], smoke: [] }, anim: true, wind: area.wind ?? [0, 0] };
 }
