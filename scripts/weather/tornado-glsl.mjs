@@ -22,7 +22,8 @@
  *   GROUND   storm light, the deck's shadow, the funnel's shadow, the scoured track (stage, under tokens, weather blend)
  *   GPARTS   inflow streaks, chunk shadows, scars where chunks were torn out (stage, under tokens)
  */
-import { GLSL_COMMON } from "./glsl.mjs";
+import { GLSL_COMMON, GLSL_SHAPES } from "./glsl.mjs";
+import { GLSL_BSPLINE } from "./cells.mjs";
 
 const HEAD = `#version 300 es
 precision highp float;
@@ -582,6 +583,14 @@ float hu(int x, int y, int s) {
 }
 // the dissolve threshold of an art px: hashed (a regular ordered dither would show a grid)
 float bayerP(vec2 p) { return hu(int(floor(p.x)) + 911, int(floor(p.y)) + 577, 4243); }
+${GLSL_SHAPES}
+// smooth 2-D value noise (the marks on the stage: no per-cell hash)
+float vn2(vec2 p, int s) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  int x = int(i.x), y = int(i.y);
+  return mix(mix(hu(x, y, s), hu(x + 1, y, s), f.x), mix(hu(x, y + 1, s), hu(x + 1, y + 1, s), f.x), f.y);
+}
+vec2 rot2(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
 void out_(vec3 c, float a) {
   if ( a <= 0.002 ) discard;
   fragColor = uStage == 1 ? vec4(c * a, 1.0 - a) : vec4(c * a, a);
@@ -605,6 +614,30 @@ bool chunkIn(vec2 q, int sd, float rr) {
   }
   return c;
 }
+// ... the same chunk's outline as a signed distance (art px, < 0 inside) at the continuous point q: the stage's scars, drawn per
+// screen px with an antialiased edge
+float chunkSd(vec2 q, int sd, float rr) {
+  int n = 3 + int(pow(hu(sd, 2, 801), 1.3) * 4.0);
+  float asp = 0.55 + 0.45 * hu(sd, 3, 801);
+  bool fl = hu(sd, 4, 801) < 0.5;
+  vec2 rad = vec2(rr * (fl ? asp : 1.0), rr * (fl ? 1.0 : asp)) * (n == 3 ? 1.4 : 1.2);
+  float a0 = hu(sd, 5, 801) * 6.283;
+  bool c = false;
+  float dm = 1e4;
+  vec2 pj = vec2(0.0);
+  for ( int i = 0; i <= 6; i++ ) {
+    int ii = i == n ? 0 : i;
+    float a = a0 + (float(ii) + (hu(sd, ii, 802) - 0.5) * 0.55) / float(n) * 6.283, r = 0.6 + 0.5 * hu(sd, ii, 803);
+    vec2 pi = vec2(cos(a), sin(a)) * rad * r;
+    if ( i > 0 ) {
+      if ( ((pi.y > q.y) != (pj.y > q.y)) && q.x < (pj.x - pi.x) * (q.y - pi.y) / (pj.y - pi.y) + pi.x ) c = !c;
+      float t; dm = min(dm, segT(q, pj, pi, t));
+    }
+    pj = pi;
+    if ( i == n ) break;
+  }
+  return c ? -dm : dm;
+}
 vec3 mapAt(vec2 a) {
   if ( uHasMap == 0 ) return vec3(0.45, 0.4, 0.35);
   vec2 sc = uOrigin.xy + (a + 0.5) * uOrigin.z;
@@ -616,9 +649,43 @@ vec2 cellOf(vec2 p) { vec2 o = p - vA.xy; float c = cos(-vB.x), s = sin(-vB.x); 
 vec2 cellT(vec2 p, float fa) { vec2 o = p - vA.xy; float c = cos(-vB.x), s = sin(-vB.x); vec2 l = vec2(c * o.x - s * o.y, s * o.x + c * o.y); return floor(vec2(l.x, l.y / fa) + 0.5); }
 
 void main() {
-  vec2 p = floor(vP) + 0.5;
   int kind = int(vB.y + 0.5), sd = int(vB.z);
   float al = vB.w;
+  if ( uStage == 1 ) {
+    // the MARKS on the stage, drawn per screen px at the continuous point (antialiased; no whole art cells, no dithered dissolve)
+    vec2 fw = fwidth(vP);
+    AA = max(max(fw.x, fw.y), 1e-3);
+    vec2 o = vP - vA.xy;
+    vec2 l = rot2(o, -vB.x);
+    if ( kind == 10 ) {
+      // an inflow streak: a thin capsule along its velocity, brighter and stronger toward its head
+      float f = vA.z > 0.6 ? clamp((l.x + vA.z) / (2.0 * vA.z), 0.0, 1.0) : 1.0, hw = max(vA.w, 0.3);
+      float d = length(vec2(max(abs(l.x) - vA.z, 0.0), l.y));
+      out_(vC.rgb * (0.82 + 0.25 * f), al * f * cov(d - hw, hw, 0.3));
+      return;
+    }
+    if ( kind == 11 ) {
+      // a chunk's shadow: a soft ellipse
+      vec2 ax = max(vA.zw, vec2(0.5));
+      float r = min(ax.x, ax.y);
+      out_(vec3(0.0), al * 0.4 * cov((length(o / ax) - 1.0) * r, r, 0.8));
+      return;
+    }
+    if ( kind == 12 ) {
+      // a scar: dark torn earth with darker patches, a rim of lighter crumbs where it broke, fading out through smooth noise
+      float rr = vD.w, d = chunkSd(l + 0.5, sd, rr);
+      float m = cov(d, rr, 0.35);
+      float dn = vn2(vP / 1.7, 4243) * 0.82 + 0.18;
+      m *= smoothstep(vC.a, vC.a + 0.18, dn);
+      if ( m <= 0.002 ) discard;
+      float rim = smoothstep(-1.5, -0.6, d);
+      vec3 e = mix(vec3(0.15, 0.11, 0.08), vec3(0.24, 0.18, 0.12), smoothstep(0.68, 0.85, vn2(l / 1.6 + 9.0, sd)));
+      e = mix(e, vec3(0.42, 0.34, 0.25), rim);
+      out_(e, al * mix(0.8, 0.55, rim) * m);
+      return;
+    }
+  }
+  vec2 p = floor(vP) + 0.5;
   vec2 o = p - vA.xy;
   float c = cos(-vB.x), s = sin(-vB.x);
   vec2 l = vec2(c * o.x - s * o.y, s * o.x + c * o.y);
@@ -730,7 +797,7 @@ uniform float uAlpha;
 out vec4 fragColor;
 ${TCOMMON}
 void main() {
-  vec2 c = floor(vP) + 0.5;
+  vec2 c = vP;
   float k = 1.0;
   // storm light under the deck, fading out beyond it (one smooth falloff, two flat steps of the deck's shadow inside)
   vec2 d = c - uGc.xy; d.y /= uView.y;
@@ -739,8 +806,8 @@ void main() {
     float fall = 1.0 - smoothstep(0.55, 1.8, r);
     k *= mix(1.0, uG.x, fall * uG.z);
     float n = fbm2(rot(d, uGc.z) / (40.0 * uU), uSd + 201);
-    float lv = step(r + 0.35 * (n - 0.5), 0.7) + step(r + 0.35 * (n - 0.5), 0.42);
-    k *= mix(1.0, lv > 1.5 ? 0.76 : lv > 0.5 ? 0.88 : 1.0, uG.z);
+    float rn = r + 0.35 * (n - 0.5), w = 1.2 / uG.y;                   // (the steps' edges soft over ~1.5 art px)
+    k *= mix(1.0, 1.0 - 0.12 * sst(0.7 - rn, w) - 0.12 * sst(0.42 - rn, w), uG.z);
   }
   // the funnel's shadow (the light comes from the up-left: it falls down-right of the axis)
   if ( uG.w > 0.001 ) {
@@ -750,7 +817,7 @@ void main() {
       vec2 g = vec2(a.x + 0.16 * a.w, a.y + uView.x * a.w + 0.08 * a.w);
       sd = min(sd, length((c - g) * vec2(1.0, 1.0 / uView.y)) - a.z * 0.75);
     }
-    if ( sd < 0.0 ) k *= mix(1.0, 0.78, uG.w);
+    k *= mix(1.0, 0.78, uG.w * sst(-sd, 1.2));
   }
   // the scoured track of the last seconds (its ragged edge: one noise per cell, the same for every segment)
   float best = 1e4, rag = 3.0 * uU * (fbm2(c / (6.0 * uU), uSd + 202) - 0.5);
@@ -764,13 +831,13 @@ void main() {
     best = min(best, length((c - q) * vec2(1.0, 1.0 / uView.y)) - w - rag);
   }
   vec3 add = vec3(0.0);
-  if ( best < 0.0 ) k *= 0.84;
+  k *= 1.0 - 0.16 * sst(-best, 1.2);
   k = mix(1.0, k, uAlpha);
   fragColor = vec4(add, k);
 }`;
 
 /** The ground's cell pass (weather/cells.mjs): the same cell function, one fragment per art cell of a float texture. */
-export const GROUND_CELL_FRAG = GROUND_FRAG.replace("void main() {\n  vec2 c = floor(vP) + 0.5;", "uniform vec2 uCellO;\nvoid main() {\n  vec2 c = uCellO + floor(gl_FragCoord.xy) + 0.5;");
+export const GROUND_CELL_FRAG = GROUND_FRAG.replace("void main() {\n  vec2 c = vP;", "uniform vec2 uCellO;\nvoid main() {\n  vec2 c = uCellO + floor(gl_FragCoord.xy) + 0.5;");
 
 /* ================================================================== show the art texture (stage, above the tokens) */
 
@@ -780,12 +847,18 @@ uniform sampler2D uArt;
 uniform vec4 uRect;
 uniform float uAlpha;
 out vec4 fragColor;
+${GLSL_BSPLINE}
+// the art texture (one texel per art px, LINEAR) read smoothly: bilinear while an art px is about a screen px or smaller, a cubic
+// B-spline as it is magnified (no art px shows as a square at any zoom); a smooth fade over the rect's outer 24 art px
 void main() {
-  ivec2 q = ivec2(floor(vP - uRect.xy));
-  if ( q.x < 0 || q.y < 0 || q.x >= int(uRect.z) || q.y >= int(uRect.w) ) discard;
-  vec4 a = texelFetch(uArt, q, 0) * uAlpha;
-  float edge = float(min(min(q.x, q.y), min(int(uRect.z) - 1 - q.x, int(uRect.w) - 1 - q.y)));
-  if ( edge < 24.0 && (edge + 0.5) / 24.0 < 0.0 + fract(52.9829189 * fract(0.06711056 * float(q.x) + 0.00583715 * float(q.y))) ) discard;
+  vec2 u = vP - uRect.xy, ts = vec2(textureSize(uArt, 0));
+  if ( u.x < 0.0 || u.y < 0.0 || u.x > uRect.z || u.y > uRect.w ) discard;
+  vec2 fw = fwidth(vP);
+  float mg = smoothstep(0.95, 0.5, max(fw.x, fw.y));
+  vec4 a = texture(uArt, u / ts);
+  if ( mg > 0.0 ) a = mix(a, bspline(uArt, u, ts), mg);
+  float edge = min(min(u.x, u.y), min(uRect.z - u.x, uRect.w - u.y));
+  a *= uAlpha * smoothstep(0.0, 24.0, edge);
   if ( a.a <= 0.002 ) discard;
   fragColor = vec4(a.rgb, 1.0 - a.a);
 }`;

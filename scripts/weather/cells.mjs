@@ -1,35 +1,54 @@
 /**
- * CELL CACHE for a weather pass whose look is one value per ART CELL (the ground, the haze; research 7, cost 2026-11-08).
+ * CELL CACHE for a weather pass whose look is a smooth field at ART resolution (the ground, the haze; research 7, cost 2026-11-08).
  *
- * Such a pass ran its whole cell function for every SCREEN pixel: at zoom 3 and DPR 2 one art cell covers ~56 device px, all of them
- * computing the same value. Instead, while a cell is bigger than CELL_MIN device px across, each frame:
- *   CELL PASS  the cell function once per art cell over the view (+ a margin) into a float render texture (RGBA32F, blend off: the
- *              value stored is the fragment's value exactly), in the ticker, before the stage renders;
- *   SHOW PASS  the stage mesh as before, its cell function replaced by a texel fetch (the same footprint filter at cell edges).
- * Zoomed out (a cell smaller than that) the pass draws directly, as it always did.
+ * Such a pass ran its whole function for every SCREEN pixel: at zoom 3 and DPR 2 one art cell covers ~56 device px. Instead, while a
+ * cell is bigger than CELL_MIN device px across, each frame:
+ *   CELL PASS  the function once per art cell (at the cell's CENTRE) over the view (+ a margin) into a render texture (blend off), in the
+ *              ticker, before the stage renders;
+ *   SHOW PASS  the stage mesh as before, its function replaced by a SMOOTH read of the cached cells (a cubic B-spline: the weather's
+ *              fields are smooth, so is their magnification; no cell corner shows), plus what the source draws per screen px on top
+ *              (`extra`: the ground's glints). (`smooth: false`, the tornado's ground: one value per cell, a texelFetch.)
+ * Zoomed out (a cell smaller than that) the pass draws directly: the same function once per screen px at the px's own point.
  *
- * EXACTNESS: a pixel inside one cell gets exactly the value the direct pass computed (same expression, float storage). A pixel on a
- * cell edge (the footprint filter mixes up to 2 x 2 cells) mixes each neighbour's OWN value; the direct pass evaluated a neighbour
- * with the smooth fields of the pixel's own cell (a shortcut), so the two can differ where a smooth field crosses a threshold
- * exactly between two cells, by part of one band step on that edge pixel (measured: dev/weather-cost.mjs `ab`).
+ * Since 2026-11-09 the functions are band-limited (soft thresholds, smooth noise instead of per-cell dithers), so a bilinear read of
+ * their cell values and the direct pass agree to within the interpolation of a smooth field (no longer bit-exact: the old pixel-art
+ * look had one value per cell, now nothing is drawn in cells).
  *
- * The source shader must have: `in vec2 vCell`, a fields function `F(c)` filling globals, a cell function `vec4 G(c)`, and its
- * footprint `main()` starting at `void axisW(` (glsl.mjs GROUND_FRAG, fx-glsl.mjs HAZE_FRAG).
+ * The source shader must have: `in vec2 vCell`, a fields function `F(c)` filling globals, a function `vec4 G(c)`, and its direct
+ * `main()` after a line `// ---- main` (glsl.mjs GROUND_FRAG, fx-glsl.mjs HAZE_FRAG).
  * CONFIG.moinenMaps.weatherCells: false = always direct (the A/B switch); a number = the CELL_MIN override.
  */
 export const CELL_MIN = 1.6;
 /** At most this many cells cached (16 bytes each: ~48 MB; a 4K window at DPR 1 zoomed to just over CELL_MIN): more draws directly. */
 export const MAX_CELLS = 3e6;
 
-/** The cell pass: the source's prefix (everything before its footprint code) and a main that evaluates one cell per fragment. */
+const headOf = (src) => src.slice(0, src.indexOf("// ---- main"));
+
+/** The cell pass: the source's functions and a main that evaluates one cell (at its centre) per fragment. */
 export function cellFrag(src, fields, cell) {
-  const head = src.slice(0, src.indexOf("void axisW("));
-  return `${head}
+  return `${headOf(src)}
 uniform vec2 uCellO;         // the art cell of texel (0, 0)
 void main() {
-  vec2 c = uCellO + floor(gl_FragCoord.xy);
+  vec2 c = uCellO + floor(gl_FragCoord.xy) + 0.5;
   ${fields}(c);
   fragColor = ${cell}(c);
+}`;
+}
+
+/** The show pass of a cached source: a smooth (cubic B-spline) read of the cells (texel centres = cell centres; four bilinear taps of
+ * the half-float texture), then `extra` (GLSL statements on `vec4 f` at `vec2 c`, the px's art point), then the layer's fade. A bilinear
+ * read alone still showed the cells as soft diamonds where a field turns within a cell or two; the B-spline has no such corners. */
+export function showFrag(src, extra = "") {
+  return `${headOf(src)}
+uniform sampler2D uCells;
+uniform vec2 uCellO;
+uniform vec2 uCellSz;        // the cache texture's size (texels)
+${BSP}
+void main() {
+  vec2 c = vCell;
+  vec4 f = bspline(uCells, c - uCellO, uCellSz);
+  ${extra}
+  fragColor = vec4(f.rgb * uAlpha, 1.0 - uAlpha * (1.0 - f.a));
 }`;
 }
 
@@ -44,48 +63,35 @@ ${v ? `out vec2 ${v};` : ""}
 void main() { gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);${v ? ` ${v} = aVertexPosition;` : ""} }`;
 export const CELL_VERT = cellVert();
 
-/** The show pass: the footprint filter of the direct pass over the cached cells (the same arithmetic). */
-export const SHOW_FRAG = `#version 300 es
+const BSP = `vec4 bsp(float v) {
+  vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v, s = n * n * n;
+  float x = s.x, y = s.y - 4.0 * s.x, z = s.z - 4.0 * s.y + 6.0 * s.x;
+  return vec4(x, y, z, 6.0 - x - y - z) / 6.0;
+}
+// a cubic B-spline read of texture t at texel-space point u (texel i's centre at i + 0.5), size sz: four bilinear taps
+vec4 bspline(sampler2D t, vec2 u, vec2 sz) {
+  vec2 g = u - 0.5, i = floor(g), w = g - i;
+  vec4 xc = bsp(w.x), yc = bsp(w.y);
+  vec4 s = vec4(xc.xz + xc.yw, yc.xz + yc.yw);
+  vec4 o = (i.xxyy + vec2(-0.5, 1.5).xyxy + vec4(xc.yw, yc.yw) / s) / sz.xxyy;
+  float sx = s.x / (s.x + s.y), sy = s.z / (s.z + s.w);
+  return mix(mix(texture(t, o.yw), texture(t, o.xw), sx), mix(texture(t, o.yz), texture(t, o.xz), sx), sy);
+}`;
+export const GLSL_BSPLINE = BSP;
+
+/** The smooth show pass of a pass whose cached value is its final colour (the tornado's ground): a B-spline read of the cells. */
+export function showSmooth(v) {
+  return `#version 300 es
 precision highp float;
 precision highp int;
-in vec2 vCell;
-uniform float uK;
-uniform float uAlpha;
+in vec2 ${v};
 uniform sampler2D uCells;
 uniform vec2 uCellO;
-uniform vec2 uCellN;
+uniform vec2 uCellSz;
 out vec4 fragColor;
-vec4 cellAt(vec2 c) {
-  ivec2 q = clamp(ivec2(c - uCellO), ivec2(0), ivec2(uCellN) - 1);
-  return texelFetch(uCells, q, 0);
+${BSP}
+void main() { fragColor = bspline(uCells, ${v} - uCellO, uCellSz); }`;
 }
-void axisW(float t, float w, out float i0, out vec3 a) {
-  float lo = t - 0.5 * w, hi = t + 0.5 * w;
-  i0 = floor(lo);
-  a.x = min(i0 + 1.0, hi) - lo;
-  a.y = clamp(min(i0 + 2.0, hi) - (i0 + 1.0), 0.0, 1.0);
-  a.z = max(0.0, hi - (i0 + 2.0));
-  a /= w;
-}
-void main() {
-  vec2 w = fwidth(vCell) * uK;
-  vec4 c;
-  if ( uK <= 0.0 || max(w.x, w.y) < 0.01 ) c = cellAt(floor(vCell));
-  else {
-    w = clamp(w, vec2(0.01), vec2(2.0));
-    float ix, iy; vec3 ax, ay;
-    axisW(vCell.x, w.x, ix, ax); axisW(vCell.y, w.y, iy, ay);
-    c = vec4(0.0);
-    for ( int j = 0; j < 3; j++ ) {
-      float wy = ay[j]; if ( wy <= 0.0 ) continue;
-      for ( int i = 0; i < 3; i++ ) {
-        float wx = ax[i]; if ( wx <= 0.0 ) continue;
-        c += wx * wy * cellAt(vec2(ix + float(i), iy + float(j)));
-      }
-    }
-  }
-  fragColor = vec4(c.rgb * uAlpha, 1.0 - uAlpha * (1.0 - c.a));
-}`;
 
 /** The show pass of a pass with NO footprint filter (one value per cell, e.g. the tornado's ground): a fetch of the cell under the
  * pixel (`v` = the source's cell varying). The cached value is the source's final colour. */
@@ -113,10 +119,11 @@ const STEP = 128;    // the texture grows in steps of this (never shrinks while 
  * The three shaders share ONE uniforms object (the mesh's): whatever the display sets reaches all of them.
  */
 export class CellCache {
-  constructor(mesh, cellProg, showProg) {
+  constructor(mesh, cellProg, showProg, { smooth = false } = {}) {
+    this.smooth = smooth;   // (a smooth show pass: a half-float texture read LINEAR; else float32 read by texelFetch)
     this.mesh = mesh; this.direct = mesh.shader;
     const u = this.direct.uniforms;
-    u.uCellO = new Float32Array(2); u.uCellN = new Float32Array([1, 1]); u.uCells = PIXI.Texture.WHITE;
+    u.uCellO = new Float32Array(2); u.uCellN = new Float32Array([1, 1]); u.uCellSz = new Float32Array([1, 1]); u.uCells = PIXI.Texture.WHITE;
     this.cellShader = new PIXI.Shader(cellProg, u);
     this.showShader = new PIXI.Shader(showProg, u);
     this.quad = new PIXI.Geometry().addAttribute("aVertexPosition", new Float32Array(8), 2).addIndex([0, 1, 2, 0, 2, 3]);
@@ -150,11 +157,11 @@ export class CellCache {
     if ( !this.rt || this.rt.width < w || this.rt.height < h ) {
       const W = Math.max(this.rt?.width ?? 0, Math.ceil(w / STEP) * STEP), H = Math.max(this.rt?.height ?? 0, Math.ceil(h / STEP) * STEP);
       this.rt?.destroy(true);
-      this.rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, type: PIXI.TYPES.FLOAT, format: PIXI.FORMATS.RGBA,
-        scaleMode: PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF });
+      this.rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, type: this.smooth ? PIXI.TYPES.HALF_FLOAT : PIXI.TYPES.FLOAT,
+        format: PIXI.FORMATS.RGBA, scaleMode: this.smooth ? PIXI.SCALE_MODES.LINEAR : PIXI.SCALE_MODES.NEAREST, mipmap: PIXI.MIPMAP_MODES.OFF });
     }
     const u = this.direct.uniforms;
-    u.uCellO[0] = x0; u.uCellO[1] = y0; u.uCellN[0] = w; u.uCellN[1] = h; u.uCells = this.rt;
+    u.uCellO[0] = x0; u.uCellO[1] = y0; u.uCellN[0] = w; u.uCellN[1] = h; u.uCellSz[0] = this.rt.width; u.uCellSz[1] = this.rt.height; u.uCells = this.rt;
     const qb = this.quad.getBuffer("aVertexPosition"), b = qb.data;
     b[0] = 0; b[1] = 0; b[2] = w; b[3] = 0; b[4] = w; b[5] = h; b[6] = 0; b[7] = h; qb.update();
     this.draw();
