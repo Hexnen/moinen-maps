@@ -7,6 +7,7 @@
 //   E. wind: the hash is the shared integer hash, gusts deterministic, periodic in an hour (seamless wrap), asymmetric attack / decay,
 //      travel along the wind, vectors
 //   F. view angle: presets, clamps
+//   I. clouds: the layer kept through other changes, its look switches fade, the drift (the wind integrated: steady, continuous, folds)
 import * as M from "../scripts/weather/model.mjs";
 import * as W from "../scripts/wind.mjs";
 import * as V from "../scripts/view-angle.mjs";
@@ -196,6 +197,74 @@ const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
   let jump = 0, prev = M.fireWet(M.resolve(P, 9000));
   for ( let t = 9050; t < 32000; t += 50 ) { const w = M.fireWet(M.resolve(P, t)); jump = Math.max(jump, Math.abs(w.dim - prev.dim), Math.abs(w.steam - prev.steam)); prev = w; }
   ok(jump < 0.02 && prev.dim > 0.7, `fire damping follows the transition smoothly (largest 50 ms step ${jump.toFixed(4)})`);
+}
+
+/* I: clouds (the cloud layer: a key effect kept through other changes, its look switches, its drift) */
+{
+  const C0 = M.cleanParams().clouds;
+  ok(C0.mode === "sky" && C0.rays === true && C0.modeT === 0 && C0.raysT === 0, "clouds: defaults (bodies + shadows, godrays on)");
+  const J = M.cleanParams({ clouds: { mode: "nope", rays: "no", modeT: -5, raysT: "x" } }).clouds;
+  ok(J.mode === "sky" && J.rays === true && J.modeT === 0 && J.raysT === 0, "clouds: junk cleaned");
+  ok(M.cleanParams({ clouds: { mode: "shadows", rays: false, raysT: 1234.4 } }).clouds.raysT === 1234 && M.cleanParams({ clouds: { rays: false } }).clouds.rays === false, "clouds: values kept");
+  ok(M.cloudSwitch(true, 1000, 999) === 0 && M.cloudSwitch(true, 1000, 1000 + M.CLOUD_FADE) === 1 && M.cloudSwitch(false, 1000, 999) === 1, "switch: the ends");
+  let jump = 0; for ( let t = 900; t < 1100 + M.CLOUD_FADE; t += 16 ) jump = Math.max(jump, Math.abs(M.cloudSwitch(true, 1000, t + 16) - M.cloudSwitch(true, 1000, t)));
+  ok(jump < 0.01, `switch: a smooth fade (largest 16 ms step ${jump.toFixed(4)})`);
+  // the layer is kept through other changes
+  const t0 = 1_700_000_000_000;
+  let P = M.cleanParams();
+  P = { ...P, ...M.withKey(P, { preset: "clouds", level: 2 }, t0, { lead: 0 }) };
+  ok(P.keys[0].fx.clouds?.l === 2 && Object.keys(P.keys[0].fx).length === 1, "preset clouds: only clouds at the level");
+  P = { ...P, ...M.withKey(P, { preset: "rain", level: 3 }, t0 + 1000, { lead: 0 }) };
+  ok(P.keys[1].fx.clouds?.l === 2 && P.keys[1].fx.rain?.l === 3, "rain keeps the clouds");
+  P = { ...P, ...M.withKey(P, { level: 1 }, t0 + 2000, { lead: 0 }) };
+  P = { ...P, ...M.withKey(P, { wind: { str: 0.8 } }, t0 + 3000, { lead: 0 }) };
+  ok(P.keys[3].fx.clouds?.l === 2 && P.keys[3].fx.rain?.l === 1, "level and wind changes keep the clouds");
+  P = { ...P, ...M.withKey(P, { clouds: 3 }, t0 + 4000, { lead: 0 }) };
+  ok(P.keys[4].fx.clouds?.l === 3 && P.keys[4].fx.rain?.l === 1 && P.keys[4].preset === "rain", "clouds row: level 3 under the rain");
+  P = { ...P, ...M.withKey(P, { clouds: 0 }, t0 + 5000, { lead: 0 }) };
+  ok(!P.keys[5].fx.clouds && P.keys[5].fx.rain, "clouds row: off");
+  P = { ...P, ...M.withKey(P, { clouds: 1 }, t0 + 6000, { lead: 0 }) };
+  P = { ...P, ...M.withKey(P, { preset: "clear" }, t0 + 7000, { lead: 0 }) };
+  ok(Object.keys(P.keys.at(-1).fx).length === 0, "clear sky clears the clouds");
+  let Q = M.cleanParams();
+  Q = { ...Q, ...M.withKey(Q, { preset: "clouds", level: 1 }, t0, { lead: 0 }) };
+  Q = { ...Q, ...M.withKey(Q, { clouds: 3 }, t0 + 1000, { lead: 0 }) };
+  ok(Q.keys[1].preset === "clouds" && Q.keys[1].level === 3 && Q.keys[1].fx.clouds.l === 3, "clouds row on the clouds preset: its level");
+  Q = { ...Q, ...M.withKey(Q, { clouds: 0 }, t0 + 2000, { lead: 0 }) };
+  ok(Q.keys[2].preset === "clear" && !Q.keys[2].fx.clouds, "clouds row off on the clouds preset: clear");
+  // the presence ramps (switch on, level change, off): continuous, the level s too
+  let R = M.cleanParams();
+  R = { ...R, ...M.withKey(R, { clouds: 1 }, t0, { dur: 10000, lead: 0 }) };
+  R = { ...R, ...M.withKey(R, { clouds: 3 }, t0 + 15000, { dur: 10000, lead: 0 }) };
+  R = { ...R, ...M.withKey(R, { clouds: 0 }, t0 + 30000, { dur: 10000, lead: 0 }) };
+  let w = 0, prev = M.resolve(R, t0 - 50).fx.clouds ?? { p: 0, s: 0 };
+  for ( let t = t0; t < t0 + 42000; t += 50 ) { const c = M.resolve(R, t).fx.clouds ?? { p: 0, s: prev.s }; w = Math.max(w, Math.abs(c.p - prev.p), Math.abs(c.s - prev.s)); prev = c; }
+  ok(w < 0.02 && !M.resolve(R, t0 + 41000).fx.clouds, `clouds fade in, change level and fade out smoothly (largest 50 ms step ${w.toFixed(4)})`);
+  // the drift: the wind integrated (steady: its speed; a wind change ramps the speed; no jump; folding keys keeps it)
+  let D = M.cleanParams();
+  D = { ...D, ...M.withKey(D, { preset: "clouds", wind: { dir: 0, str: 0.5 } }, t0, { dur: 0, lead: 0 }) };
+  const v = M.cloudVel({ wind: { dir: 0, str: 0.5 } });
+  const a = M.cloudDrift(D, t0 + 10000), b = M.cloudDrift(D, t0 + 20000);
+  ok(near(b[0] - a[0], v[0] * 10, 1e-6) && near(b[1] - a[1], 0, 1e-6) && v[0] > 0, "drift: steady at the wind's speed (x the share)");
+  ok(M.cloudVel({ wind: { dir: 90, str: 0 } })[1] > 0, "drift: a breeze even in calm air, along the wind's direction");
+  D = { ...D, ...M.withKey(D, { wind: { dir: 90, str: 1 } }, t0 + 30000, { dur: 20000, lead: 0 }) };
+  let dj = 0, dp = M.cloudDrift(D, t0 + 29000), maxV = 0;
+  for ( let t = t0 + 29050; t < t0 + 60000; t += 50 ) { const d = M.cloudDrift(D, t); const s = Math.hypot(d[0] - dp[0], d[1] - dp[1]); maxV = Math.max(maxV, s / 0.05); dj = Math.max(dj, s); dp = d; }
+  const vmax = Math.hypot(...M.cloudVel({ wind: { dir: 90, str: 1 } }));
+  ok(maxV <= vmax * 1.001 && dj < vmax * 0.05 * 1.01, `drift: continuous through a wind change (largest 50 ms move ${dj.toFixed(4)} sq)`);
+  const late = M.cleanParams(JSON.parse(JSON.stringify(D)));
+  ok(near(M.cloudDrift(late, t0 + 45000)[0], M.cloudDrift(D, t0 + 45000)[0], 1e-6), "drift: deterministic (a late joiner computes the same)");
+  // many keys: the oldest fold into the base with the drift there (no jump at the fold)
+  let F = D, before = null, after = null;
+  for ( let k = 0; k < 12; k++ ) {
+    const t = t0 + 70000 + k * 5000;
+    before = M.cloudDrift(F, t + 2500);
+    F = { ...F, ...M.withKey(F, { wind: { dir: k * 30, str: 0.3 + 0.05 * k } }, t + 2500, { dur: 2000, lead: 0 }) };
+    after = M.cloudDrift(F, t + 2500);
+    if ( !near(before[0], after[0], 1e-6) || !near(before[1], after[1], 1e-6) ) break;
+  }
+  ok(F.base?.drift && near(before[0], after[0], 1e-6) && near(before[1], after[1], 1e-6), "drift: folding keys into the base keeps the drift");
+  ok(M.cleanParams(JSON.parse(JSON.stringify(F))).base.drift.length === 2, "drift: stored in the base (round trip)");
 }
 
 console.log(`${fails ? "FAIL" : "ok"} weather model: ${n - fails}/${n} checks`);

@@ -16,7 +16,7 @@ const med = (a) => { const s = [...a].sort((x, y) => x - y); return s.length ? s
 
 /** Every weather object worth timing: [key, object, method] (GPU: render; CPU: tick). */
 export function targets() {
-  const out = [], d = W().display(), L = W().lensDisplay(), T = W().tornadoDisplay?.(), S = W().steamDisplay?.();
+  const out = [], d = W().display(), L = W().lensDisplay(), T = W().tornadoDisplay?.(), S = W().steamDisplay?.(), K = W().cloudDisplay?.();
   if ( d?.ground ) {
     out.push(["ground", d.ground], ["splash", d.splash], ["air", d.air], ["haze", d.haze]);
     for ( const [k, m] of Object.entries(d.parts ?? {}) ) out.push([`part.${k}`, m]);
@@ -29,6 +29,7 @@ export function targets() {
   }
   else if ( L?.pass ) out.push(["lens.pass", L.pass], ["lens.show", L.sprite]);
   if ( S?.root ) out.push(["steam", S.root]);
+  if ( K?.body ) out.push(["clouds.tex", K, "draw"], ["clouds.shadow", K.shadow], ["clouds.rays", K.rays], ["clouds.body", K.body]);   // (tex: the field + light passes)
   for ( const v of T?.views?.values?.() ?? [] ) {
     for ( const k of ["curtain", "skirt", "back", "debB", "wallB", "column", "debF", "wallF", "front", "curtainF", "deck"] ) if ( v[k] ) out.push([`torn.art.${k}`, v[k]]);
     for ( const k of ["debB", "wallB", "debF", "wallF"] ) if ( v[k]?.march ) out.push([`torn.march.${k}`, v[k].march.mesh]);   // (the volumes' coarse ray march)
@@ -37,7 +38,7 @@ export function targets() {
   }
   return out;
 }
-const tickers = () => [["cpu.weather", W().display()], ["cpu.lens", W().lensDisplay()], ["cpu.tornado", W().tornadoDisplay?.()], ["cpu.steam", W().steamDisplay?.()]].filter((x) => x[1]);
+const tickers = () => [["cpu.weather", W().display()], ["cpu.lens", W().lensDisplay()], ["cpu.tornado", W().tornadoDisplay?.()], ["cpu.steam", W().steamDisplay?.()], ["cpu.clouds", W().cloudDisplay?.()]].filter((x) => x[1]);
 
 /** Step the shared clock n frames at 60 Hz from `t0` (ms, default now), rendering each; `each(i)` after each render. */
 export function run(n, { t0 = Date.now(), each = null } = {}) {
@@ -109,11 +110,14 @@ export async function frame({ n = 120, warm = 20, t0 = Date.now() } = {}) {
 /**
  * The weather for a case: effect (a preset, "tornado", or "off"), level 1-3, lens "auto"/false, started at shared ms `t` (default now:
  * pass a fixed `t` to get the same weather after a reload). A tornado stands at `at` (scene px; default the view centre, 2 squares down).
+ * "<effect>+clouds" adds the cloud layer at the same level (`clouds`: { mode, rays } its look, default as the scene has it).
  */
-export async function setCase(effect, level, { lens = "auto", at = null, t = null, wind = { dir: 20, str: 0.45, gust: 0.7 }, path = null } = {}) {
+export async function setCase(effect, level, { lens = "auto", at = null, t = null, wind = { dir: 20, str: 0.45, gust: 0.7 }, path = null, clouds = null } = {}) {
   const now = t ?? Date.now(), M = W().model, P0 = W().params();
+  const withClouds = String(effect).endsWith("+clouds"); effect = String(effect).replace(/\+clouds$/, "");
   const preset = effect === "off" || effect === "tornado" ? "clear" : effect, fx = M.PRESETS[preset] ?? {}, sl = level - 1;
   const key = M.cleanKey({ t: now - 60000, dur: 0, preset, level, i: 0.5, wind });
+  if ( withClouds ) key.fx.clouds = { l: level, i: 0.5 };
   const base = { t: now - 60000, fx: {}, wind, wet: "rain" in fx ? M.wetCeil(sl) : 0, cover: "snow" in fx ? M.coverCeil(sl) : 0 };
   const lon = preset !== "clear" && lens !== false;
   // a tornado written with the rest (a fixed id: its seed is the hash of its id, so the same tornado after a reload)
@@ -122,7 +126,8 @@ export async function setCase(effect, level, { lens = "auto", at = null, t = nul
     const TM = await import("../scripts/weather/tornado-model.mjs"), c = at ?? [canvas.stage.pivot.x, canvas.stage.pivot.y + 80], t0 = now - 20000;
     tornadoes = [TM.cleanTornado({ id: "abTornado1", path: path ?? [c], t0, level, lv0: level, lvT: t0, speed: 0.001, size: TM.DEFAULTS.size, wander: 0, end: "stop" })];
   }
-  await canvas.scene.update({ "flags.moinen-maps.weather": { ...P0, keys: [key], base, tornadoes, lens: { ...P0.lens, on: lon, level: lon ? lens : P0.lens.level } } });
+  const cl = P0.clouds ? { clouds: { ...P0.clouds, ...(clouds ?? {}), modeT: 0, raysT: 0 } } : {};
+  await canvas.scene.update({ "flags.moinen-maps.weather": { ...P0, keys: [key], base, tornadoes, lens: { ...P0.lens, on: lon, level: lon ? lens : P0.lens.level }, ...cl } });
   await wait(1200); W().refresh();
   await wait(600);
 }

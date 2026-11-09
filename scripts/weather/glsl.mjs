@@ -179,7 +179,7 @@ uniform vec4 uSand;         // streamer threshold, the wave's push, drift thresh
 uniform vec4 uSandW;        // wind unit x, y; streamer speed (art px / s); presence
 uniform vec2 uDust;         // shafts, warm tint (x presence)
 uniform vec4 uEmb;          // source share, dim (fire-lit evening), presence, -
-uniform vec4 uWindG;        // visible wind: presence, grass-combing threshold, cloud shadows (share), overall dim
+uniform vec4 uWindG;        // visible wind: presence, grass-combing threshold, - (its cloud shadows: clouds.mjs), overall dim
 uniform vec4 uWindV;        // the wind's unit direction x, y; its speed (art px / s); water ruffle (x presence)
 uniform float uCps;         // art cells per grid square
 uniform int uAny;           // anything to draw (else every cell is "no change")
@@ -206,15 +206,14 @@ float puddleField(vec2 c) {
 }
 
 // the smooth fields once per evaluation point (scales of 6+ cells); gPd/gPdY: the puddle field and its slope down the screen
-float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gCl = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0, gPd = 0.0, gPdY = 0.0;
+float gWv = 0.0, gFr = 0.0, gSh = 0.0, gWg = 0.0, gComb = 0.0, gRuf = 0.0, gNn = 0.0, gGl = 0.0, gPd = 0.0, gPdY = 0.0;
 void groundFields(vec2 c) {
   if ( uWindG.x > 0.0 ) {
     // VISIBLE WIND: the gust at this place (fronts travel along the wind), combing bands carried downwind (crests across the wind,
-    // a field that never loops), cloud shadows drifting at about half the speed, cat's-paw patches on water
+    // a field that never loops), cat's-paw patches on water (its cloud shadows: the cloud layer, clouds.mjs)
     vec2 wd = uWindV.xy;
     float pr = dot(c, wd), ac = -c.x * wd.y + c.y * wd.x;
     gWg = clamp(gustEnv(uTime - pr / (uCps * 4.0), uSeed), 0.0, 1.2);
-    if ( uWindG.z > 0.0 ) gCl = drift2a(c / 120.0, wd * uWindV.z * 0.55 / 120.0, uTime, 90.0, uSeed + 203);
     // the surface terms only where the map is grass or water (the rest of the map pays nothing for them)
     vec4 I = infoS(c);
     vec3 M = I.rgb;
@@ -283,9 +282,8 @@ vec4 cellGround(vec2 c) {
     f = tint(f, mix(vec3(1.0), mix(vec3(1.02, 0.98, 0.94), lit, uEmb.y), uEmb.z), M);
   }
   if ( uWindG.x > 0.0 ) {
-    // wind: an overall dim and (from level 2) cloud shadows, one darker step with a soft ragged rim, on roofs too
-    float cl = uWindG.z > 0.0 ? sst(gCl - 0.56 - (nz - 0.5) * 0.014, 0.012) : 0.0;
-    vec3 mul = vec3(1.0 - (1.0 - uWindG.w) * uWindG.x) * mix(vec3(1.0), mix(vec3(1.0), vec3(0.80, 0.82, 0.88), uWindG.z), cl);
+    // wind: an overall dim (its cloud shadows from level 2: the cloud layer, clouds.mjs)
+    vec3 mul = vec3(1.0 - (1.0 - uWindG.w) * uWindG.x);
     if ( mul != vec3(1.0) ) f = tint(f, mul, M);
   }
   if ( op <= 0.0 ) return f;

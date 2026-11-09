@@ -8,7 +8,9 @@
  *     ground: { wetRate, dryRate, puddles },             (seconds to wet / dry the ground; puddles on / off)
  *     lens: { on, level: "auto" | 1 | 2 | 3, strength },
  *     tornadoes: [ { id, path, t0, speed, wander, size, level, ... } ] },  (weather OBJECTS on their own paths: tornado-model.mjs)
- *     fire: { out } }                                    (rain puts fire areas out: off by default, research D9)
+ *     fire: { out },                                     (rain puts fire areas out: off by default, research D9)
+ *     clouds: { mode: "sky" | "shadows", modeT, rays, raysT } }  (the cloud layer's look: bodies + shadows or shadows only, godrays;
+ *                                                        each switch fades over CLOUD_FADE ms from its shared time)
  *
  * THE STATE AT A MOMENT is a pure function of the flag and the shared clock (`resolve`): every key cross-fades from the state at its
  * start to its target along a smoothstep over its `dur`, so a change of preset, level or wind is a smooth ramp, never a cut, and a
@@ -20,7 +22,7 @@
  * WET GROUND (and SNOW COVER) accumulates: it rises toward the rain's ceiling (30 / 65 / 100 % of the full wet tint at levels 1 / 2 / 3) with time
  * constant wetRate and dries with dryRate, integrated in closed form between transitions (1 s steps inside them): deterministic.
  */
-import { WIND_DEFAULT } from "../wind.mjs";
+import { WIND_DEFAULT, SPEED_SQ, dirVec } from "../wind.mjs";
 import { cleanTornadoes } from "./tornado-model.mjs";
 
 export const FLAG = "weather";
@@ -31,7 +33,7 @@ export const DEFAULT_DUR = 20000;       // ms
 export const MIN_DUR = 0;
 
 /** The effects drawn by this build, in draw order. */
-export const EFFECTS = ["rain", "snow", "sand", "dust", "embers", "wind"];
+export const EFFECTS = ["rain", "snow", "sand", "dust", "embers", "wind", "clouds"];
 /** The GM's presets: which effects at which level (null = the chosen level). */
 export const PRESETS = {
   clear: {},
@@ -42,15 +44,19 @@ export const PRESETS = {
   embers: { embers: null },
   wind: { wind: null },
   storm: { rain: null, wind: null },
-  blizzard: { snow: null, wind: null }
+  blizzard: { snow: null, wind: null },
+  clouds: { clouds: null }
 };
 export const PRESET_ICONS = { clear: "fa-solid fa-sun", rain: "fa-solid fa-cloud-rain", snow: "fa-solid fa-snowflake", sand: "fa-solid fa-wind",
   dust: "fa-solid fa-sun-haze", embers: "fa-solid fa-fire-flame-curved", wind: "fa-solid fa-leaf", storm: "fa-solid fa-cloud-showers-heavy",
-  blizzard: "fa-solid fa-icicles" };
+  blizzard: "fa-solid fa-icicles", clouds: "fa-solid fa-cloud-sun" };
 
 export const LIMITS = { wetRate: [5, 600], dryRate: [10, 3600], snowRate: [5, 1800], meltRate: [10, 7200], strength: [0, 1], str: [0, 1], gust: [0, 1], dur: [0, 600000] };
 export const GROUND_DEFAULT = { wetRate: 60, dryRate: 300, puddles: true, snowRate: 120, meltRate: 600 };
 export const LENS_DEFAULT = { on: true, level: "auto", strength: 1, heat: false };
+export const CLOUDS_DEFAULT = { mode: "sky", modeT: 0, rays: true, raysT: 0 };
+export const CLOUD_MODES = ["sky", "shadows"];
+export const CLOUD_FADE = 4000;         // ms: a switch of the cloud mode or the godrays fades in / out over this
 
 const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const lvl = (v, d = 2) => { const n = Math.round(Number(v)); return n >= 1 && n <= 3 ? n : d; };
@@ -88,7 +94,8 @@ function cleanBase(b) {
   if ( !b || typeof b !== "object" || !Number.isFinite(Number(b.t)) ) return null;
   const fx = {};
   for ( const e of EFFECTS ) { const f = b.fx?.[e]; if ( f ) fx[e] = { p: num(f.p, 0, 1, 0), s: num(f.s, -0.35, 2.35, 1) }; }
-  return { t: Math.round(Number(b.t)), fx, wind: cleanWind(b.wind), wet: num(b.wet, 0, 1.2, 0), cover: num(b.cover, 0, 1.2, 0) };
+  const d = Array.isArray(b.drift) && b.drift.length === 2 && b.drift.every((v) => Number.isFinite(Number(v))) ? [Number(b.drift[0]), Number(b.drift[1])] : null;
+  return { t: Math.round(Number(b.t)), fx, wind: cleanWind(b.wind), wet: num(b.wet, 0, 1.2, 0), cover: num(b.cover, 0, 1.2, 0), ...(d ? { drift: d } : {}) };
 }
 
 export function cleanParams(raw) {
@@ -102,8 +109,20 @@ export function cleanParams(raw) {
       snowRate: num(g.snowRate, ...LIMITS.snowRate, GROUND_DEFAULT.snowRate), meltRate: num(g.meltRate, ...LIMITS.meltRate, GROUND_DEFAULT.meltRate) },
     lens: { on: l.on !== false, level: l.level === "auto" || l.level === undefined ? "auto" : lvl(l.level), strength: num(l.strength, 0, 1, LENS_DEFAULT.strength), heat: l.heat === true },
     tornadoes: cleanTornadoes(r.tornadoes),
-    fire: { out: r.fire?.out === true }
+    fire: { out: r.fire?.out === true },
+    clouds: cleanClouds(r.clouds)
   };
+}
+
+const msT = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 ? n : 0; };
+export function cleanClouds(c) {
+  const o = c && typeof c === "object" ? c : {};
+  return { mode: CLOUD_MODES.includes(o.mode) ? o.mode : CLOUDS_DEFAULT.mode, modeT: msT(o.modeT), rays: o.rays !== false, raysT: msT(o.raysT) };
+}
+/** A switch's weight at `now` (0..1, smooth): on = the switched-to state, fading from its shared time t over CLOUD_FADE. */
+export function cloudSwitch(on, t, now) {
+  const x = Math.min(1, Math.max(0, (now - t) / CLOUD_FADE)), f = x * x * (3 - 2 * x);
+  return on ? f : 1 - f;
 }
 
 /* ---------------------------------------------------------------- level tables (research 3.3 / 4.4) */
@@ -154,8 +173,16 @@ export const TABLES = {
     ruffle: [0.35, 0.65, 1],                                                    // cat's paws and glints on water
     cloud: [0, 0.6, 1], dim: [1, 0.985, 0.97],                                  // cloud shadows (share of the full look); overall dim
     haze: [0, 0, 0.5]                                                           // blown dust drifting along the wind
+  },
+  clouds: {                                                                     // the cloud layer (clouds.mjs): scattered, broken, overcast
+    cover: [0.30, 0.56, 0.86],                                                  // the share of the sky covered (the field's quantile)
+    body: [0.92, 0.86, 0.68],                                                   // a thick cloud's opacity (overcast: a thinner sheet, the map stays readable)
+    shade: [0.36, 0.36, 0.30],                                                  // how much a cloud's shadow darkens the ground
+    rays: [0.75, 1, 1]                                                          // godrays through the gaps
   }
 };
+/** The wind's cloud shadows as cover of the one cloud field (shadows only, no bodies): its TABLES.wind.cloud share x this. */
+export const WIND_CLOUD_COVER = 0.32;
 const DENS = new Set(["mid", "far", "near", "bead", "grit", "motes", "spark", "crystals", "impacts", "flecks", "lines", "debris"]);
 
 /** One gate at level-continuum s: piecewise linear through the table at s = 0, 1, 2. */
@@ -306,9 +333,18 @@ export function resolve(P, now) {
  */
 export function withKey(P, change, now, { dur = DEFAULT_DUR, lead = LEAD_MS } = {}) {
   const last = P.keys[P.keys.length - 1] ?? null;
-  const preset = change.preset ?? last?.preset ?? "clear";
-  const level = change.level ?? last?.level ?? 2, i = change.i ?? last?.i ?? 0.5;
-  const fx = change.fx ? cleanFx(change.fx) : preset === "custom" && last ? last.fx : presetFx(preset, level, i);
+  let preset = change.preset ?? last?.preset ?? "clear";
+  let level = change.level ?? last?.level ?? 2;
+  const i = change.i ?? last?.i ?? 0.5;
+  // CLOUDS are a layer of their own: a change of preset, level or wind keeps them (clear sky clears them); `clouds` 0..3 sets them
+  const cl = change.clouds === undefined ? undefined : lvl(change.clouds, 0);
+  if ( cl !== undefined && preset === "clouds" ) { if ( cl ) level = cl; else preset = "clear"; }
+  const fx = change.fx ? cleanFx(change.fx) : preset === "custom" && last ? { ...last.fx } : presetFx(preset, level, i);
+  if ( !change.fx && !("clouds" in (PRESETS[preset] ?? {})) ) {
+    if ( cl ) fx.clouds = { l: cl, i: 0.5 };
+    else if ( cl === 0 || (preset === "clear" && change.preset === "clear") ) delete fx.clouds;
+    else if ( last?.fx?.clouds ) fx.clouds = { ...last.fx.clouds };
+  }
   const wind = cleanWind({ ...(last?.wind ?? WIND_DEFAULT), ...(change.wind ?? {}) });
   const t = Math.round(now + lead);
   // keys that start after the new one are dropped (the newest change wins)
@@ -318,7 +354,8 @@ export function withKey(P, change, now, { dur = DEFAULT_DUR, lead = LEAD_MS } = 
   if ( keys.length > KEEP_KEYS ) {
     const drop = keys.length - KEEP_KEYS, at = keys[drop].t, Pt = { ...P, keys: P.keys.filter((k) => k.t < t) };
     const s = stateAt(Pt, at);
-    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, f]) => [e, { p: +f.p.toFixed(4), s: +f.s.toFixed(4) }])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4), cover: +wetAt(Pt, at, undefined, "cover").toFixed(4) };
+    base = { t: at, fx: Object.fromEntries(Object.entries(s.fx).map(([e, f]) => [e, { p: +f.p.toFixed(4), s: +f.s.toFixed(4) }])), wind: s.wind, wet: +wetAt(Pt, at).toFixed(4), cover: +wetAt(Pt, at, undefined, "cover").toFixed(4),
+      drift: cloudDrift(Pt, at) };
     keys = keys.slice(drop);
   }
   return { keys, base };
@@ -336,4 +373,48 @@ export function lensS(P, s, cap = 3) {
 /** The levels table of a preset, for UIs and generators: [{ level, effects: { eff: gates } }]. */
 export function levels(preset) {
   return [1, 2, 3].map((level) => ({ level, effects: Object.fromEntries(Object.keys(presetFx(preset, level)).map((e) => [e, gates(e, level - 1)])) }));
+}
+
+/* ---------------------------------------------------------------- the cloud drift */
+
+/** Clouds drift with the scene wind at this share of its speed, at least a light breeze (as wind str). */
+export const CLOUD_SPEED = 0.55, CLOUD_BREEZE = 0.35;
+/** The clouds' velocity (squares / s) in a state. */
+export function cloudVel(st) {
+  const w = st.wind ?? WIND_DEFAULT, v = Math.max(w.str ?? 0, CLOUD_BREEZE) * SPEED_SQ * CLOUD_SPEED, d = dirVec(w.dir ?? 0);
+  return [d[0] * v, d[1] * v];
+}
+const DRIFT_MEMO = new WeakMap();
+/**
+ * THE CLOUD DRIFT at shared ms `now`: how far (squares) the cloud field has moved, the wind's velocity integrated along the timeline
+ * from the base (its stored drift; or from shared time 0) - so the clouds follow every change of the wind smoothly, never loop and
+ * never jump, and every client computes the same. Between ramps the velocity is constant (closed form); inside a ramp Simpson's rule
+ * with a fixed 32 steps (a smooth function of `now`). Folding keys into the base stores the drift there (continuous).
+ */
+export function cloudDrift(P, now, _starts = starts(P)) {
+  let x = P.base?.drift?.[0] ?? 0, y = P.base?.drift?.[1] ?? 0, t = P.base?.t ?? 0;
+  if ( now <= t ) { const v = cloudVel(stateAt(P, now, _starts)); return [x - v[0] * (t - now) / 1000, y - v[1] * (t - now) / 1000]; }
+  const marks = [];
+  for ( const k of P.keys ) marks.push(k.t, k.t + k.dur);
+  const ms = [...new Set(marks)].filter((m) => m > t).sort((a, b) => a - b);
+  let memo = DRIFT_MEMO.get(P); if ( !memo ) DRIFT_MEMO.set(P, memo = new Map());
+  for ( const m of ms ) if ( m <= now && memo.has(m) ) { t = m; [x, y] = memo.get(m); }
+  const seg = (a, b) => {
+    const va = cloudVel(stateAt(P, a + 0.5, _starts)), vb = cloudVel(stateAt(P, b - 0.5, _starts));
+    if ( Math.abs(va[0] - vb[0]) + Math.abs(va[1] - vb[1]) < 1e-9 ) { const dt = (b - a) / 1000; return [va[0] * dt, va[1] * dt]; }
+    const N = 32, h = (b - a) / N; let sx = 0, sy = 0;
+    for ( let i = 0; i <= N; i++ ) {
+      const w = i === 0 || i === N ? 1 : i % 2 ? 4 : 2, v = cloudVel(stateAt(P, Math.min(b - 0.5, Math.max(a + 0.5, a + i * h)), _starts));
+      sx += w * v[0]; sy += w * v[1];
+    }
+    return [sx * h / 3000, sy * h / 3000];
+  };
+  for ( const m of [...ms, Infinity] ) {
+    const end = Math.min(m, now);
+    if ( end <= t ) continue;
+    const d = seg(t, end); x += d[0]; y += d[1]; t = end;
+    if ( end === m && m < now ) memo.set(m, [x, y]);
+    if ( t >= now ) break;
+  }
+  return [x, y];
 }
