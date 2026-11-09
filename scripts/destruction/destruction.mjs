@@ -2063,10 +2063,11 @@ function flushSave() {
   scene.update(upd).catch((err) => console.warn(`${MODULE_ID} | destruction: could not save`, err));
 }
 
-export async function save() {
+export async function save(extra = null) {
   if ( !S || !game.user.isGM || !canvas.scene ) return;
   clearTimeout(saveTimer); saveTimer = 0;
-  const upd = Store.flagUpdate(S, canvas.scene);
+  // (`extra`: other keys written in the SAME update - a preset firing writes its fire strokes, its record and its damage at once)
+  const upd = extra ? { ...Store.flagUpdate(S, canvas.scene), ...extra } : Store.flagUpdate(S, canvas.scene);
   if ( !Object.keys(upd).length ) return;                            // nothing changed: no write
   await canvas.scene.update(upd);
   if ( Store.snapshotIn(upd) ) integrity(canvas.scene);               // a drop nobody asked for: say it (the snapshot is in the scene)
@@ -2180,7 +2181,7 @@ export const destructionApi = {
   /** Undo / redo the last stroke (the editor's Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y). */
   undo: () => undoLast(), redo: () => redoLast(),
   /** Presets (scripts/presets, timed-core.mjs): paint a stroke from code (its entry at `at` on the shared clock, `ps` its firing), take strokes away with a fade, write now. */
-  paintStroke: (spec) => paintStroke(spec), removeStrokes: (ids) => removeStrokes(ids), saveNow: () => save(),
+  paintStroke: (spec) => paintStroke(spec), removeStrokes: (ids) => removeStrokes(ids), saveNow: (extra = null) => save(extra),
   setParams, newVariation, setEnabled, clear: clearAll, detonate, save,
   /** Bake again; `{ force: true }` ignores the cache and the published file (determinism check). */
   rebake: ({ force = false } = {}) => rebake({ awaitPublish: false, force }),

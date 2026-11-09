@@ -577,3 +577,68 @@ The four questions asked here were answered by the user; P1 is built on these an
   - the remote host;
   - a GTX 1080;
   - the fire layer's going-out after `undo` (written as data, not watched).
+
+## 13. P6 as built (the firings runtime, G9)
+
+- **One-update write:** `D.save(extra)` (destruction.mjs, `saveNow(extra)`) merges the destruction flag update with extra keys.
+  `fire()` paints the destruction strokes, then writes destruction + fire strokes + the firing record in ONE `scene.update`.
+- **Firing record** `flags.moinen-maps.presetFirings.<fid>`: `{ id, v, preset, t0, seed, size, power, aftermath, at, dir, gesture,
+  walk, by, d: [{ id, key, at }], f: [{ id, key }], pending: { burst, dust, accent, cue } }`. `by` = the GM who fired it.
+- **Runtime on every client** (`scripts/presets/runtime.mjs`; the pure rules in `runtime-core.mjs`): from the records and the shared
+  clock it calls `Hooks.callAll("moinenMapsPresets", kind, data)`:
+  - `("firing", { fid, rec, late })` when a record is here (written now, or found on load / late join; `late` = ms past T0);
+  - `("impact", { fid, rec, t })` at T0, never after the fact;
+  - `("part", { fid, rec, part, i, item, t, late })` for each pending part at its moment; a part still running on a late join comes
+    with `late > 0`, a finished one is dropped, past cues are dropped;
+  - `("gone", { fid })` when the record goes (undo, settle, purge).
+  P3-P5 layers (burst, dust kinds, accents, cues) listen to it. Fire, smoke, dust strokes and timed damage play by their own
+  `q` / `o` / `at`, so they need nothing from the runtime.
+- **Nothing on an unused scene:** four hooks (`canvasReady`, `canvasTearDown`, `updateScene`, `userConnected`), each returning at
+  once without records; no setting, no ticker, no flag.
+- **Purge:** a record goes once everything it named is over (`purgeState`): every named fire has an `o` and is past it + 10 s, and
+  every part and damage entry is over + 10 s (entry 8 s). A fire without `o` ("no end" aftermath) keeps the record. All finished
+  records go in one `scene.update` of `-=fid` keys. The writer is the record's own GM (`by`) while connected, else the active GM
+  (a second GM on the lane must not race it). Purged strokes keep their `ps`, so the layers' own undo still skips them.
+- **Settle** `api.presets.settle(id)`: deletes the record only; the damage and fires stay as ordinary scene content.
+- **Undo / redo** (per user, 50 deep): `undo(id = null)` takes the live record, or the stack copy after a purge, and writes in one
+  update: fires not caught yet are deleted, burning ones get `o = now` (the fire layer's own going-out), the destruction strokes
+  are removed with the P2 dissolve, and the record goes. `redo()` fires the same definition, gesture and opts with the same seed and
+  a new T0. A new `fire()` clears the redo stack.
+- **Timed fires through the record:** `api.presets.fires()` lists the burning / waiting preset fires (`{ id, fid, preset, k, o, q }`),
+  `clearFires()` puts them out (`o = now`, or deletes those not caught yet), `firings()` gives each record with its state
+  (`coming`, `playing`, `burning`, `settled`) and a `partial` flag.
+- **API:** `api.presets` = `VERSION, AFTERMATH, HOOK, list, get, validate, expand, fire, undo, redo, settle, clearFires, firings,
+  fires` (+ `_status` for tests).
+
+### Hook needed in the fire files (not touched by P6)
+
+- **fire/fire.mjs `clear()` / `list()` and the Fire panel (fire/section.mjs):** they still see only strokes without `o`. A timed
+  preset fire has a future `o` from its first write, so the panel's list and its Clear button do not reach it. The panel calls the
+  internal functions directly, so wrapping `api.fire` does not help. Ask the fire agent for one of:
+  - `list()` / `clear()` also take strokes whose `o` is in the future (put out = `o = now`); or
+  - `clear()` calls `Hooks.callAll("moinenMapsFire", "clear")` (and the list asks `Hooks.call("moinenMapsFire", "list", out)`), so
+    presets can answer with `clearFires()` / `fires()`.
+  Until then the presets' own `fires()` / `clearFires()` (and P7's firings list) are the way to reach them.
+
+### P6 checks (2026-11-09, lane 2, RTX 3070 Ti)
+
+- `node dev/run-all.mjs` 75/75, with the new `dev/presets-runtime.test.mjs` (36 checks: timeline, late join, purge rules, undo
+  of fires, burning / state, the runtime simulated with stubbed Hooks / canvas / game incl. the purge owner, the built-in plans).
+  The core test checks the four hooks and the early returns.
+- **Unused = unchanged, hash A/B** against 7a150de (the baseline build really loaded: no runtime in its API):
+  - empty scene: frame hash `k2c4fq` on both, 91 settings, 15 ticker listeners;
+  - the brush-painted scene: records `cd5i5kb` and stored strokes `8908yg` on both. (Its pixel hashes `px` / `bm` differ between
+    two runs of the same build, so they are not an A/B measure.)
+- **A real player (Test Gracz 1) against the GM:**
+  - uzi: the player got destruction, paths and the record in ONE update; `impact` at −4 ms; purged about 18 s after T0
+    (8 s entry + 10 s tail), the player got `gone`;
+  - bomb (aftermath 20 s), player reloaded 0.79 s after T0: `firing` (late 789), `burst` and `dust` late; no impact, no cues; the
+    crater entered; 13 fires;
+  - player reloaded at T0 + 11.7 s: only `dust` (late); the crater shown settled; the timed fires listed by `fires()`;
+  - `settle`: the record went, the player got `gone`, the damage stayed;
+  - **undo of a burning bomb (aftermath 60 s), recorded on the player:** the flames shrink and the smoke fades within about 2 s
+    (the fire layer's going-out), the crater dissolves; afterwards no records, no damage, and the fire layer purged its strokes.
+- **GM:** redo after undo: same seed, same damage keys, new T0 (+7.0 s), stacks `undo: [new fid]`, `redo: []`. `clearFires()` on
+  a bomb with aftermath 60: 16 timed fires → `o = now`, `fires()` empty, the record stays `playing` until its dust is over.
+- **Not checked:** the remote host; a GTX 1080; the purge of a bomb after its 90 s dust (rule tested in node only); two GMs firing
+  at once live.

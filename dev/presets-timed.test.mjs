@@ -134,10 +134,10 @@ const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   ok(ds.includes("const at = Timed.cleanAt(stroke.at), ps = Timed.cleanPs(stroke.ps);") && ds.includes("if ( at !== null && !ob.k ) ob.at = at;") && ds.includes("if ( ps && !ob.k ) ob.ps = ps;"),
     "F the brush's entry: at / ps only when the stroke brings them");
   ok(ds.includes("if ( tob && !tob.cin && Timed.isTimed(tob) ) { timedEnter(") && ds.includes("const held = (o) => Cine.holds(o) || holdsTimed(o);"), "F the display holds and enters only timed strokes by their at");
-  ok(/paintStroke: \(spec\) => paintStroke\(spec\), removeStrokes: \(ids\) => removeStrokes\(ids\), saveNow: \(\) => save\(\)/.test(ds), "F the API: paintStroke, removeStrokes, saveNow");
+  ok(/paintStroke: \(spec\) => paintStroke\(spec\), removeStrokes: \(ids\) => removeStrokes\(ids\), saveNow: \(extra = null\) => save\(extra\)/.test(ds), "F the API: paintStroke, removeStrokes, saveNow");
   ok(ds.includes("const i = Timed.lastUndoable(S.objects);"), "F the brush's undo skips a preset's strokes");
   const w = code(read("scripts/presets/write.mjs"));
-  ok(!/presetLead|LEAD\b|setTimeout/.test(w) && w.includes("D.paintStroke(paintSpec(") && w.includes("await D.save()") && /ps: fid/.test(w) && /at: Math\.round\(t0 \+ \(rec\.at \?\? 0\)\)/.test(w),
+  ok(!/presetLead|LEAD\b|setTimeout/.test(w) && w.includes("D.paintStroke(paintSpec(") && w.includes("await D.save(upd)") && /ps: fid/.test(w) && /at: Math\.round\(t0 \+ \(rec\.at \?\? 0\)\)/.test(w),
     "F the writer: no LEAD stand-in; timed strokes with their firing, saved at once");
   const src = code(read("scripts/director/sources.mjs"));
   ok(src.includes("if ( o.ps || owned.has(id) ) { dIds?.add(id); continue; }") && src.includes("if ( owned.has(id) ) { fIds.add(id); continue; }") && /id: `p-\$\{id\}`/.test(src)
