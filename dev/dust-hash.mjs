@@ -94,3 +94,10 @@ export function compare(a, b, box = null, aa = null) {
 }
 
 export async function hashes(o) { const r = await shots(o); return r.shots.map(({ t, hash }) => ({ t, hash })); }
+
+// ACROSS BUILDS: a shot set kept in this origin's IndexedDB survives a page reload onto another build (`save` on the old build,
+// `load` on the new one, then `compare(old, new, null, newAgain)`: only pixels stable a/a on the new build count)
+const db = () => new Promise((res, rej) => { const r = indexedDB.open("mm-dust-hash", 1); r.onupgradeneeded = () => r.result.createObjectStore("s"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+export async function save(name, px) { const d = await db(); await new Promise((res, rej) => { const t = d.transaction("s", "readwrite"); t.objectStore("s").put(px, name); t.oncomplete = res; t.onerror = () => rej(t.error); }); d.close(); }
+export async function load(name) { const d = await db(); const v = await new Promise((res, rej) => { const r = d.transaction("s").objectStore("s").get(name); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); d.close(); return v; }
+export async function drop() { await new Promise((res) => { const r = indexedDB.deleteDatabase("mm-dust-hash"); r.onsuccess = r.onerror = r.onblocked = () => res(); }); }
