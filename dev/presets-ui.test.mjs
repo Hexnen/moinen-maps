@@ -90,7 +90,7 @@ const env = { grid: 100, rect: { x: 0, y: 0, width: 4000, height: 3000 }, now: 1
 
 /* E */
 {
-  const G = { point: { a: [2000, 1500], b: null }, throw: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600] }, line: { a: [1500, 1500], b: [2200, 1500] }, run: { a: [1200, 1300], b: [2400, 1700] } };
+  const G = { point: { a: [2000, 1500], b: null }, throw: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600] }, line: { a: [1500, 1500], b: [2200, 1500] }, run: { a: [1200, 1300], b: [2400, 1700] }, shot: { a: [1500, 1600], b: [2000, 1500], from: [1500, 1600], fr: 50 } };
   const sumA = U.FEATHER.reduce((s, f) => s + f[1], 0);
   ok(U.RING_FEATHER.reduce((s, f) => s + f[1], 0) <= 1.0001, "E ring feather: never past the ring's alpha");
   ok(sumA <= 1.0001 && U.FEATHER.every((f, i) => i === 0 || f[0] < U.FEATHER[i - 1][0]), "E feather: rings shrink inwards and never add up past the shape's alpha");
