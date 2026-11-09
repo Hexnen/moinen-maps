@@ -6,8 +6,7 @@
 // Writes dev/out/guard/<label>-dpr<k>.json. Chrome is started and stopped here (its profile deleted unless --profile is given).
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import { spawn } from "node:child_process";
+import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -22,17 +21,12 @@ const DISP = { 60: { hz: 60, k: 1 }, 144: { hz: 144, k: 1 }, 165: { hz: 165, cap
 const LAYERS = { fire: { fire: 20 }, "fire+rain": { fire: 20, weather: "rain" } };
 
 async function startChrome(dpr) {
-  const prof = arg("profile", path.join(os.tmpdir(), `mm-guard-chrome-${PORT}`));
-  const p = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${prof}`, "--window-size=1600,900", "--enable-gpu",
-    "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { stdio: "ignore" });
-  for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return { p, prof }; } catch {} }
+  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--window-size=1600,900", "--enable-gpu",
+    "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { kind: "guard-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
+  for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");
 }
-async function stopChrome({ p, prof }) {
-  try { const b = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); const ws = new WebSocket(b.webSocketDebuggerUrl); await new Promise((r) => ws.addEventListener("open", r)); ws.send(JSON.stringify({ id: 1, method: "Browser.close" })); } catch {}
-  await sleep(2500); try { p.kill(); } catch {}
-  await sleep(1000); if ( !arg("profile") ) try { fs.rmSync(prof, { recursive: true, force: true }); } catch {}
-}
+async function stopChrome(ch) { await closeBrowser(ch, { port: PORT }); }
 
 const SB = `const S = await import("/modules/moinen-maps/dev/stack-bench.mjs");`, GL = `const E = await import("/modules/moinen-maps/dev/guard-live.mjs");`;
 for ( const dpr of DPRS ) {

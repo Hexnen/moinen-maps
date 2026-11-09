@@ -4,8 +4,7 @@
 //   node dev/hitch-trace.mjs [--case full] [--who GM|player] [--dpr 1] [--secs 60] [--min 90] [--label trace] [--profile <dir>]
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import { spawn } from "node:child_process";
+import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -24,9 +23,8 @@ const CASE = {
 };
 const CATS = ["toplevel", "gpu", "gpu.service", "viz", "cc", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "devtools.timeline", "disabled-by-default-devtools.timeline", "benchmark", "renderer.scheduler", "ipc", "mojom", "memory"].join(",");
 
-const prof = arg("profile", path.join(os.tmpdir(), `mm-trace-chrome-${PORT}`));
-const p = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${prof}`, "--window-size=1600,900", "--enable-gpu",
-  "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${DPR}`, "--enable-precise-memory-info", "about:blank"], { stdio: "ignore" });
+const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--window-size=1600,900", "--enable-gpu",
+  "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${DPR}`, "--enable-precise-memory-info", "about:blank"], { kind: "trace-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
 for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); break; } catch {} }
 const SB = `const S = await import("/modules/moinen-maps/dev/stack-bench.mjs");`, HP = `const H = await import("/modules/moinen-maps/dev/hitch-probe.mjs");`;
 try {
@@ -74,8 +72,6 @@ try {
   console.log(`\n${res.label}: ${r.frames} frames, ${r.hitches.length} over 34 ms, ${big.length} over ${MIN} ms, ${events.length} trace events, aligned ${res.aligned}`);
   gm.close();
 } finally {
-  try { const b = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); const w = new WebSocket(b.webSocketDebuggerUrl); await new Promise((r) => w.addEventListener("open", r)); w.send(JSON.stringify({ id: 1, method: "Browser.close" })); } catch {}
-  await sleep(2500); try { p.kill(); } catch {}
-  await sleep(1000); if ( !arg("profile") ) try { fs.rmSync(prof, { recursive: true, force: true }); } catch {}
+  await closeBrowser(ch, { port: PORT });
 }
 process.exit(0);
