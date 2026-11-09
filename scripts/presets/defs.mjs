@@ -41,7 +41,8 @@ export const BUILTIN = Object.freeze([
   {
     // UZI: a ragged stitch of small hits walking along the line - each a sharp pock with chips (the damage), a quick spit of the
     // ground's own dust (dust "hits" L1), a spark star and sparks; the shooter's muzzle flash and pale bullet streaks when a shooter
-    // is given (gesture.from: the burst then starts a little way out from them)
+    // is given (gesture.from: the GM's chosen source token; with none chosen, a drag started on a token makes it the shooter for
+    // that burst - it then starts a little way out from them); no shooter, no muzzle flash
     id: "uzi", v: 1, set: "military", name: "MOINENMAPS.DPreset.uzi", hint: "MOINENMAPS.DPreset.uziHint", icon: "fa-solid fa-gun",
     gesture: "line", preroll: 600, aftermath: null,
     walk: { rate: 14, speed: 5, dur: [0.6, 2.5], lanes: [0], sigma: [0.18, 0.36], drift: 0.3, sway: { amp: 0.15, wave: 3 }, stray: { p: 0.15, k: 1.5 }, maxHits: 25 },
@@ -56,7 +57,9 @@ export const BUILTIN = Object.freeze([
   {
     // THE CLASSIC TWIN HEAVY MACHINE GUN FROM A HELICOPTER: two lanes of heavy hits racing along the run side by side, out of step -
     // each a chewed pock (now and then a small crater), a tall geyser of the ground's dust with chips flying high (dust "hits" L3), a
-    // flash and a spray of sparks, every 4th round of each gun a tracer streaking in from above along the run; the screen rumbles
+    // flash and a spray of sparks, every 4th round of each gun a tracer streaking in from above along the run; the screen rumbles.
+    // With a SHOOTER (a gunship token the GM chose; a run started on a token never makes it one): both barrels flash at its edge with every round and
+    // the tracers fly out of them; without one the gunship is off the map - no muzzle flash, the tracers come in from above
     id: "heliHmg", v: 1, set: "military", name: "MOINENMAPS.DPreset.heliHmg", hint: "MOINENMAPS.DPreset.heliHmgHint", icon: "fa-solid fa-helicopter",
     gesture: "run", preroll: 1500, aftermath: null,
     walk: { rate: 9, speed: 8, dur: [0.6, 3], lanes: [-0.35, 0.35], phase: [0, 0.5], sigma: [0.3, 0.3], sway: { amp: 0.3, wave: 5 }, wobble: { amp: 0.1, wave: 2 },
@@ -64,6 +67,8 @@ export const BUILTIN = Object.freeze([
     layers: [
       { l: "accent", id: "tracers", kind: "tracer", at: -250, dur: 200, every: 4, lv: 3 },
       { l: "accent", id: "hits", kind: "hitFx", at: 0, dur: 300, lv: 3, shake: 0.6 },
+      // (after the tracers and hits: their accents keep their order, so without a shooter the heli draws exactly as before)
+      { l: "accent", id: "muzzle", kind: "muzzle", at: -300, dur: 300, lv: 3 },
       { l: "destruction", id: "lanes", at: 0, type: "blast", cause: "impact", lvMix: [0.7, 0.3, 0], place: { m: "walk" }, lanes: "each", r: [0.18, 0.26],
         pr: { rubble: 0.15, debris: 0.25, scatter: 0.35, halo: 0.2, edge: 0.55, jagged: true, jag: 0.55 } },
       { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.06 }, lanes: "all", r: [0.3, 0.36],

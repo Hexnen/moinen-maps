@@ -884,3 +884,33 @@ small fire catching in the grass.
 - **Unused = unchanged (A/B vs eb85f59 on the lane, ZZ-ltn wiped):** the same blank frame hash, ticker listeners (14), settings (93),
   stage nodes (157) and scene flags; the only difference is one more listener on moinenMapsPresets and on canvasTearDown (the wire,
   returning at once without a strike record). lightning.mjs / lightning-core.mjs are not loaded until a strike firing arrives.
+
+## 19. The shooter (the guns' source token: presets-source)
+
+The user (2026-11-09): for firearms show the muzzle flash at the SOURCE token; the GM picks it; no source, no muzzle flash; the uzi's
+pointless flash where the first bullet lands goes.
+
+- **Firearm** = a preset with a walk (`ui-core isFirearm`): the uzi, the heliHmg and any copy of them. The bomb and grenade are not.
+- **Choosing**, in the bar (only for a firearm): the "Shooter" block shows the chosen token (its picture and name) or "None";
+  the button arms PICK mode (`aim.setPicking`: the next click on a token takes it, hover ring on the candidate, Esc or a click
+  off the tokens cancels); the person-check button takes the selected token; the x clears it. On the map: **S over a token**
+  makes it the armed gun's shooter (S over the shooter again: none). Each gun remembers its own shooter on each scene
+  (`presetBar.src["scene:pad"] = tokenId`, client setting, at most SRC_MAX = 40, the oldest dropped). A deleted token = none.
+- **Precedence**: the chosen shooter wins over a token the drag starts on (a target). With none chosen, a LINE dragged out of a
+  token makes it the shooter for that burst (the old behaviour); a RUN never takes a token (only a chosen gunship).
+- **Shown**: a soft feathered orange ring (#ffb347) round the shooter while the tool is in hand (fades in, follows the token);
+  the ghost adds a fainter line of fire from the shooter's edge to the first hit.
+- **The look** (`accents-core muzzleOf`): the barrel sits at the shooter's edge toward each hit (0.85 x its radius, never past half
+  way); every round flashes (the heli: a heavier, longer star, both barrels side by side, `twin`); the rounds fly from the barrel
+  as short streaks (BULLET_MAX 400 ms of flight); the heli's tracers leave the gunship. Without a shooter the heli is an
+  off-map gunship as before (tracers from above, no muzzle). The heli's muzzle layer sits AFTER its tracers / hits so their
+  per-item seeds are unchanged.
+- **The "flash at the first bullet"** was not the muzzle: the destruction stroke's fract starburst (cause-fx, the area's radius,
+  centred on the gun stroke's origin = the first pock) and its pale front particles. Both are skipped for gun strokes
+  (`isGun`, commits 6457d70, 5b4448d); each pock keeps its own hit flash and chips.
+- **Checked:** offline A/B vs eb85f59 (dev/out/src/ab-offline.mjs, not committed): without a shooter every built-in plan, accent
+  frame (t -1.2..6 s), ghost and the cleaned bar identical (4729/4729); live hash A/B on a blank ZZ scene (frame, ticker count,
+  settings count, scene flags) identical. Live on lane 3: pick mode, S key, the x, the ring, the ghost's line of fire; uzi with
+  and without a shooter, heli with the gunship (fired from it even when the drag starts on another token) and without; a real
+  player (Test Gracz 1) sees the uzi's muzzle flash at the shooter. Custom copies saved before this keep their own layers (a
+  heli copy has no muzzle layer: its tracers still fly from a chosen gunship).
