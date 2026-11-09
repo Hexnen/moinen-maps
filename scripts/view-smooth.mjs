@@ -12,9 +12,14 @@
  *    fps counter says ~58. "Even" keeps about the cap but draws on every k-th vsync with k fixed (165 Hz / 60 -> every 3rd: 55 fps, all
  *    frames 18.2 ms apart); with no cap (performance mode Maximum) or a cap of 90+ it draws every vsync, so it never lowers an
  *    uncapped Foundry's frame rate; "Display" draws on every vsync (165 fps); "Foundry" leaves PIXI's cap as it is. The vsync period is read
- *    from the requestAnimationFrame timestamps themselves (trimmed mean of the last 31 intervals).
+ *    from the requestAnimationFrame timestamps themselves (trimmed mean of the last 31 intervals), held to the display's STABLE period
+ *    (2026-11-09, frame-guard.mjs stickyVsync: the shortest recurring interval, kept while the frames' own work explains longer ones):
+ *    under an overload the intervals stretch and their mean climbed to the overloaded frame time (27-30 ms on a 6.05 ms display), so k
+ *    fell from 3 to 2 or 1 and the cadence went uneven, at times over the cap. A trimmed mean more than 8 % over the stable period is
+ *    replaced by it; otherwise (no load) it is used as before. `CONFIG.moinenMaps.viewStable = false`: the old estimate (A/B).
  */
 const MODULE_ID = "moinen-maps";   // (no import of config.mjs: the pacing rules are node-tested without Foundry)
+import { stickyVsync, vsyncFloor, STICK } from "./frame-guard.mjs";
 
 export const TAU_MS = 55;
 const read = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
@@ -60,7 +65,26 @@ export function pacingFor(mode, cap, hz) {
  */
 export const due = (time, lastRun, period, k) => lastRun === null || time - lastRun >= k * period - period * 0.5;
 
+/** The period the gate paces with: the trimmed mean `P0`, unless it is more than 8 % over the display's stable period `S`. */
+export const gatePeriod = (P0, S) => (P0 && S && P0 > S * 1.08 ? S : P0);
+
+/**
+ * The display's STABLE period, re-read at most once a second from the last 120 rAF intervals and the drawn frames' work (ms: the
+ * ticker's step and render); state { period, longAt, at, iv, busy } (one per gate; a pure function of what it is fed: node-tested).
+ */
+export const stableState = () => ({ period: null, longAt: null, at: -1e9, iv: [], busy: [] });
+export function stablePeriod(st, time) {
+  if ( time - st.at >= 1000 ) {
+    st.at = time;
+    const b = st.busy.length >= 8 ? [...st.busy].sort((x, y) => x - y)[st.busy.length >> 1] : null;
+    stickyVsync(st, vsyncFloor(st.iv, STICK.min), b, time);
+  }
+  return st.period;
+}
+
 let cap = 60, ivs = [], lastRaf = null, lastRun = null, gated = null;
+const stable = stableState();
+const push = (a, v) => { a.push(v); if ( a.length > 120 ) a.shift(); };
 
 /* Ticker listeners that throw: logged (each message once a minute) instead of freezing the canvas. */
 const errSeen = new Map();
@@ -95,15 +119,16 @@ function gate(ticker) {
   const orig = ticker._tick;
   ticker._mmGate = { orig };
   ticker._tick = (time) => {
-    if ( lastRaf !== null ) { const d = time - lastRaf; if ( d > 2 && d < 60 ) { ivs.push(d); if ( ivs.length > 31 ) ivs.shift(); } }
+    if ( lastRaf !== null ) { const d = time - lastRaf; if ( d > 2 && d < 60 ) { ivs.push(d); if ( ivs.length > 31 ) ivs.shift(); push(stable.iv, d); } }
     lastRaf = time;
-    const mode = get("framePacing", "even"), P = vsyncPeriod(ivs);
+    const mode = get("framePacing", "even"), P = periodNow(time);
     if ( mode !== "foundry" && P ) {
       const k = vsyncsPerFrame(mode, cap, P);
       if ( !due(time, lastRun, P, k) ) { ticker._requestId = requestAnimationFrame(ticker._tick); return; }
     }
     lastRun = time;
-    try { orig(time); }
+    const w0 = performance.now();
+    try { orig(time); push(stable.busy, performance.now() - w0); }
     catch ( err ) {
       // PIXI asks for the next frame only after every listener ran: a throw would leave the canvas frozen until something
       // adds a listener. Report it and keep the loop going.
@@ -112,6 +137,12 @@ function gate(ticker) {
     }
   };
   gated = ticker;
+}
+
+/** The vsync period paced with now (the trimmed mean, held to the stable period; the old estimate alone with CONFIG viewStable false). */
+function periodNow(time) {
+  const P0 = vsyncPeriod(ivs);
+  return globalThis.CONFIG?.moinenMaps?.viewStable === false ? P0 : gatePeriod(P0, stablePeriod(stable, time));
 }
 
 /** Foundry set the ticker's cap (performance mode / max fps): remember it, and take the pacing over unless the mode is "foundry". */
@@ -125,7 +156,7 @@ export function applyPacing() {
 
 /** The pacing now: mode, Foundry's cap (0 = none), the measured display rate, k and the frame rate it gives (api.view.pacing()). */
 export function pacingInfo() {
-  const mode = get("framePacing", "even"), P = vsyncPeriod(ivs), hz = P ? Math.round(1000 / P) : null;
+  const mode = get("framePacing", "even"), P = periodNow(performance.now()), hz = P ? Math.round(1000 / P) : null;
   return { mode, cap, period: P, gated: !!gated?._mmGate, ...(hz ? pacingFor(mode, cap, hz) : { hz: null, k: null, fps: null }) };
 }
 const describe = (i) => i.hz ? `${i.mode}: ${i.fps} fps on this display (${i.hz} Hz) with Foundry's cap ${i.cap || "none"}${i.k ? `, every ${i.k === 1 ? "refresh" : `${i.k}. refresh`}` : ""}` : `${i.mode} (display rate not measured yet)`;
