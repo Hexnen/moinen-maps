@@ -7,8 +7,8 @@
  *     when read): the dust takes THE GROUND'S OWN COLOUR (destruction's rule: dust in the ground's tone, never pale flecks on a dark map)
  *  1. ART PASS (12 fps, the cells near the view): one fragment per art cell, RGBA8 -
  *       R = 1 + the ground row (art px, mod 255) of the puff / chip drawn there (its depth against the tokens, fire's rule), 0 = none
- *       G = a puff cell: 1 + band (0 light, 1 mid, 2 shadow, 3 rim) + 4 x (level - 1) + 12 x fresh (just kicked up: darker, denser);
- *           a flying chip: 32 + tone (0 dark, 1 mid, 2 glint)
+ *       G = a puff cell: 1 + band (0 light, 1 mid, 2 shadow, 3 rim) + 4 x (level - 1) + 12 x fresh (just kicked up: darker, denser)
+ *           (+ 24 aged, + 36 old: thinner as it fades); a flying chip: 64 + tone (0 dark, 1 mid, 2 glint)
  *       B = the ground: aura band (0..2) + 4 x grit tone (0 none, 1 dark, 2 mid, 3 glint) + 16 film + 32 a chip's shadow + 64 / 128 the
  *           puffs' ground shadow (light / dense: the cloud's mass over the ground)
  *       A = the ground marks: darkening 0..2 + 4 a light scuff
@@ -100,21 +100,31 @@ void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0
   vec2 qs = p - g - vec2(0.42, 0.3) * hgt - vec2(0.0, r * 0.1);
   float ws = 1.0 - dot(qs, qs) / (r * r * 1.1);
   if ( ws > 0.0 ) FS += ws * str * (1.0 - smoothstep(0.15, 0.8, f));
+  // YOUNG: the body is still a jet from where it was kicked - a capsule from its centre back toward the source (P0), shrinking as it
+  // slows: the newest puffs read as one spray streaming off the source (speed), never a row of separate balls
+  float yth = exp(-4.0 * a);
+  vec2 tl = (P0 - c) * yth;
+  // (its depth: the body's BOTTOM - one per puff, as a token's feet: a puff never sinks below its own depth line, so a token's
+  // square never cuts it - the whole puff is in front of a token or behind it)
+  float dep = max(c.y + 0.85 * r, c.y + tl.y + 0.6 * r);
   vec2 q0 = p - c;
-  if ( dot(q0, q0) > 3.3 * r * r ) return;                             // (beyond every lobe: offset <= 0.8 r, radius <= r)
+  float hq = clamp(dot(q0, tl) / max(dot(tl, tl), 1e-4), 0.0, 1.0);
+  vec2 qt = q0 - tl * hq;
+  if ( dot(qt, qt) > 3.3 * r * r ) return;                             // (beyond every lobe: offset <= 0.8 r, radius <= r; and the jet)
   for ( int j = 0; j < 3; j++ ) {
     // (lobe 0 the body; 1 and 2 smaller billows on its upper side: a cauliflower top, never a tube)
     float aj = h3(s, 5, j) * 6.2832, dj = j == 0 ? r * 0.15 * E : r * (0.45 + 0.4 * E) * (0.7 + 0.3 * h3(s, 6, j));
     vec2 o = j == 0 ? vec2(cos(aj), sin(aj)) * dj : vec2(cos(aj), -0.35 - 0.65 * abs(sin(aj))) * dj;
     float rj = r * (j == 0 ? 0.85 + 0.15 * h3(s, 7, j) : 0.5 + 0.25 * h3(s, 7, j));
     vec2 q = p - c - o;
+    if ( j == 0 && yth > 0.03 ) { float h = clamp(dot(q, tl) / max(dot(tl, tl), 1e-4), 0.0, 1.0); q -= tl * h; rj *= 1.0 - 0.35 * h; }
     float w = 1.0 - dot(q, q) / (rj * rj);
     if ( w <= 0.0 ) continue;
     float wv = w * w * str;
     F += wv;
     bn += wv * vec3(q / rj, sqrt(w));                                  // (the body's normal: every lobe's, weighted - one surface...
     FA += wv * f;
-    if ( wv > best ) { best = wv; dn0 = vec3(q / rj, sqrt(w)); bgy = g.y + o.y * 0.5; blv = lv; ba = a; }   // (... with its strongest billow's bump)
+    if ( wv > best ) { best = wv; dn0 = vec3(q / rj, sqrt(w)); bgy = dep; blv = lv; ba = a; }   // (... with its strongest billow's bump)
   }
 }
 
@@ -139,11 +149,14 @@ void main() {
       float edge = dn + (n - 0.5) * 0.7;
       float env = smoothstep(0.0, 1.0, a) * mix(1.0, 0.42, smoothstep(1.5, 8.0, a));
       float dens = (1.0 - smoothstep(0.3 * reach, reach, edge)) * env * fo * k3.x * (0.6 + 0.5 * n);
-      float dz = (h3(c.x >> 1, c.y >> 1, 77) - 0.5) * 0.16;
+      // (the bands' edges: a small-scale smooth noise - blobby pixel contours, never a salt-and-pepper dither over a big fading area)
+      float dz = 0.0;
+      if ( dens > 0.05 && dens < 0.8 ) dz = (vn(p / (2.0 * max(uU, 0.25)), uSeed + 31) - 0.5) * 0.3;
       int band = dens + dz > 0.52 ? 2 : dens + dz > 0.2 ? 1 : 0;
       // the FILM: settled dust in patches over the band
       float fil = smoothstep(0.6, 3.5, a) * fo;
-      bool film = edge < 0.95 && h3(c.x >> 1, c.y >> 1, 91) < 0.55 * fil * (0.4 + 0.6 * n);
+      bool film = false;
+      if ( edge < 0.95 && fil > 0.0 ) film = vn(p / (2.5 * max(uU, 0.25)), uSeed + 33) < 0.62 * fil * (0.4 + 0.6 * n);   // (in patches, not specks)
       // MARKS: wheel tracks (a tread rhythm along the path) / a scraped groove with streaks along the drag
       float along = C.x * k3.w * uG;                                   // (cells along the path: the source's travel)
       int mk = 0; bool scuff = false;
@@ -229,23 +242,26 @@ void main() {
       }
     }
   }
-  if ( chip > 0 ) { G = 32 + chip - 1; R = 1 + int(mod(floor(chipGy / uq), 255.0)); }
+  if ( chip > 0 ) { G = 64 + chip - 1; R = 1 + int(mod(floor(chipGy / uq), 255.0)); }
   else {
     float dz = (h3(c.x >> 1, c.y >> 1, 61) - 0.5) * 0.12;
     // (old dust breaks up: whole 2 x 2 clusters drop out as the puffs here age - destruction's dropout, never a soft fade)
     float age = FA / max(F, 1e-4);
     // (holes that open and grow as blobs: a coarse noise with a 2 x 2 grain, not a salt-and-pepper sieve)
-    float hole = 0.72 * vn(p / (5.0 * uU), uSeed + 21) + 0.28 * h3(c.x >> 1, c.y >> 1, 63);
-    float er = smoothstep(0.35, 1.0, age) * 0.9;
-    bool drop = hole < er;
-    if ( F > TH + dz && !drop ) {
+    // (only where there is a body: the noises cost nothing elsewhere)
+    float hole = 1.0, er = 0.0;
+    if ( F > TH + dz ) { hole = 0.72 * vn(p / (5.0 * uU), uSeed + 21) + 0.28 * vn(p / (1.7 * max(uU, 0.25)), uSeed + 22); er = smoothstep(0.35, 1.0, age) * 0.9; }
+    if ( F > TH + dz && hole >= er ) {
       vec3 n = normalize(mix(normalize(bn), dn0, 0.45) * vec3(1.0, 1.0, 1.1));
       float lum = dot(n, normalize(vec3(-0.55, -0.7, 0.6))) + (h3(c.x >> 1, c.y >> 1, 62) - 0.5) * 0.06;
       int band = lum > 0.55 ? 0 : lum > 0.12 ? 1 : 2;
       if ( F < TH + 0.045 + dz || (er > 0.0 && hole < er + 0.09) ) band = 3;   // (the rim - and round the holes that open as it ages: they erode, never punch)
       // FRESH: a puff in its first moments is the soil just kicked up - darker, denser; it pales as it spreads and dries
-      int fresh = ba < 0.55 + 0.25 * h3(c.x >> 1, c.y >> 1, 64) ? 1 : 0;
-      G = 1 + band + 4 * (blv - 1) + 12 * fresh;
+      // ...and as it ages it THINS in two steps before its holes open (aged, old): a fading cloud is a calm veil, never a busy
+      // high-contrast camo over a dark ground (the steps' edges in the same blobby noise as the holes)
+      float hv = hole * 0.16;
+      int cls = ba < 0.55 + 0.25 * h3(c.x >> 1, c.y >> 1, 64) ? 1 : age > 0.62 + hv ? 3 : age > 0.4 + hv ? 2 : 0;
+      G = 1 + band + 4 * (blv - 1) + 12 * cls;
       R = 1 + int(mod(floor(bgy / uq), 255.0));
     }
   }
@@ -284,9 +300,10 @@ vec3 toneAt(vec2 cf) { return texture(uTone, (cf + 0.5) / (8.0 * uToneN)).rgb; }
 // the dust's own colour from the ground's: desaturated toward soil; WATER (and any cold blue / teal ground) gives no blue dust - what
 // rises over a bridge, a quay or a flooded street is the soil and grime of the road, so a cool tone hands over to the soil tone; a very
 // dark ground still makes a dust a little lighter than it (dust scatters light: it reads lighter than dark earth)
+float coldOf(vec3 T) { return clamp(smoothstep(0.02, 0.12, T.b - max(T.r, 0.85 * T.g)) + smoothstep(0.04, 0.16, min(T.g, T.b) - T.r) * 0.8, 0.0, 1.0); }
 vec3 baseOf(vec3 T) {
   float l = dot(T, vec3(0.3, 0.59, 0.11));
-  float cold = smoothstep(0.02, 0.12, T.b - max(T.r, 0.85 * T.g)) + smoothstep(0.04, 0.16, min(T.g, T.b) - T.r) * 0.8;
+  float cold = coldOf(T);
   vec3 b = mix(mix(T, vec3(l), 0.6), SOIL * (0.75 + 0.5 * l), 0.6);
   b = mix(b, SOIL * (0.78 + 0.35 * l), clamp(cold, 0.0, 1.0));
   return max(b, SOIL * 0.5);
@@ -305,6 +322,7 @@ const DDEPTH = `
 uniform vec4 uTok[16];
 uniform int uTokN;
 uniform float uU;
+${HASH}
 bool inFront(vec2 cf, int r) {
   if ( r <= 0 || uTokN == 0 ) return false;
   float uq = max(uU, 0.25); vec2 q = cf + 0.5; int lo = int(floor(q.y / uq)) - 24;
@@ -312,7 +330,12 @@ bool inFront(vec2 cf, int r) {
   for ( int k = 0; k < 16; k++ ) {
     if ( k >= uTokN ) break;
     vec4 T = uTok[k];
-    if ( q.x >= T.x && q.x < T.z && q.y >= T.y && q.y < T.w && by > T.w ) return true;
+    if ( q.x < T.x || q.x >= T.z || q.y < T.y || q.y >= T.w ) continue;
+    if ( by > T.w ) return true;
+    // (dust just behind a token curls round its edges: along its sides and top, a ragged blobby band of the dust behind is drawn over
+    // it - an opaque square token image never cuts the cloud with a straight square edge; its feet stay the depth line)
+    float tw = T.z - T.x, de = min(min(q.x - T.x, T.z - q.x), q.y - T.y);
+    if ( de < 0.17 * tw && de < 0.17 * tw * vn(q / max(1.0, 0.08 * tw), 57) ) return true;
   }
   return false;
 }
@@ -329,17 +352,19 @@ vec4 puffColor(vec2 cf) {
   ivec4 a = art(p);
   if ( a.g == 0 ) return vec4(0.0);
   vec3 b = baseOf(toneAt(cf));
-  if ( a.g >= 32 ) {
-    int k = a.g - 32; vec3 c = k == 0 ? b * 0.42 : k == 1 ? b * 0.68 : mix(b, vec3(1.0), 0.35);
+  if ( a.g >= 64 ) {
+    int k = a.g - 64; vec3 c = k == 0 ? b * 0.42 : k == 1 ? b * 0.68 : mix(b, vec3(1.0), 0.35);
     if ( uDark > 0.0 ) c = mix(c, k == 2 ? mix(c, vec3(0.85, 0.88, 0.95), 0.5) * uLift : c * 0.9, uDark);
     return vec4(min(c, vec3(1.0)), 1.0);
   }
-  int v = a.g - 1, fresh = v / 12, w = v - 12 * fresh, lv = clamp(w / 4 + 1, 1, 3), band = w & 3;
+  int v = a.g - 1, cls = v / 12, w = v - 12 * cls, lv = clamp(w / 4 + 1, 1, 3), band = w & 3;
   // light / mid / shadow / rim; a FRESH puff (just kicked up) richer and darker, an older one paler and thinner
   vec3 rgb = band == 0 ? min(b * 1.22 + 0.05, vec3(1.0)) : band == 1 ? b + 0.02 : band == 2 ? b * 0.7 : min(b * 1.12 + 0.04, vec3(1.0));
   float al = PA[lv][band];
-  if ( fresh == 1 ) { rgb *= band == 0 ? 0.95 : 0.9; al = min(0.97, al * 1.08 + 0.03); }
+  if ( cls == 1 ) { rgb *= band == 0 ? 0.95 : 0.9; al = min(0.97, al * 1.08 + 0.03); }
   else if ( band != 2 ) rgb = min(rgb * 1.04 + 0.01, vec3(1.0));
+  // (aged / old: thinner, and its light / shadow closer together - the form softens as it spreads)
+  if ( cls >= 2 ) { float k = cls == 2 ? 0.72 : 0.48; rgb = mix(b * 1.05 + 0.02, rgb, cls == 2 ? 0.7 : 0.45); al *= k; }
   if ( uDark > 0.0 ) {
     bool edge = art(p + ivec2(0, -1)).g == 0 || art(p + ivec2(-1, 0)).g == 0 || art(p + ivec2(-1, -1)).g == 0;
     rgb = mix(rgb, nightOf(rgb, band, edge), uDark);
@@ -378,12 +403,15 @@ vec4 cellColor(vec2 cf) {
   vec3 T = toneAt(cf), b = baseOf(T), lit = min(b * 1.2 + 0.05, vec3(1.0));
   if ( uDark > 0.0 ) lit = mix(lit, nightOf(lit, 0, false), uDark);
   vec4 o = vec4(0.0);
+  // (over WATER nothing is scraped and grit sinks: the marks and grains go, the film floats thin - a fading cloud over water leaves a
+  // calm veil, not a field of specks)
+  float wet = 1.0 - coldOf(T);
   int mk = a.a & 3;
-  if ( mk > 0 ) o = over(o, T * 0.45, mk == 1 ? 0.18 : 0.34);
-  if ( (a.a & 4) != 0 ) o = over(o, lit, 0.24);
+  if ( mk > 0 ) o = over(o, T * 0.45, (mk == 1 ? 0.18 : 0.34) * wet);
+  if ( (a.a & 4) != 0 ) o = over(o, lit, 0.24 * wet);
   // the settled FILM: a dust coat that dulls the ground under it
-  if ( (a.b & 16) != 0 ) o = over(o, lit, 0.17);
-  int gt = (a.b >> 2) & 3;
+  if ( (a.b & 16) != 0 ) o = over(o, lit, 0.17 * (0.45 + 0.55 * wet));
+  int gt = wet < 0.5 ? 0 : (a.b >> 2) & 3;
   // (grains in the soil's own dark / mid tone, not black: they read as grit on any ground, never as specks of ink)
   if ( gt > 0 ) o = over(o, gt == 1 ? mix(T * 0.5, b * 0.55, 0.5) : gt == 2 ? mix(T, b, 0.5) * 0.78 : mix(lit, vec3(1.0), 0.25), gt == 1 ? 0.8 : 0.72);
   if ( (a.b & 32) != 0 ) o = over(o, T * 0.3, 0.35);
