@@ -20,7 +20,7 @@ uniform vec4 uTiles;         // first tile x, y; tiles across, down
 uniform float uTileSz;       // art px per tile (embers: the source cell)
 uniform vec4 uPer;           // slots per tile per layer (snow: mid, far, near, spindrift)
 uniform vec4 uDens;          // live slots per tile per layer (fractional)
-uniform vec4 uDensR[12];     // per layer: the density then / now at ages 0..10 s ([11]: the largest), exactly 1 when steady (D7); embers .w: the big-spark share then
+uniform vec4 uDensR[14];     // per layer: the density then / now at the whole seconds A - i, i = 0..11 ([12]: the largest; [13].x: A - uTime), exactly 1 when steady (D7); embers .w: the big-spark share then
 uniform vec4 uOrigin;        // scene rect x, y; art px (scene px); art cells per grid square
 uniform vec2 uWindDir;       // unit (sand: the sand's direction)
 uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust amount
@@ -39,7 +39,8 @@ ${GLSL_COMMON}
 void hide() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); vArt = vec2(0.0); vScr = vec2(0.0); vA = vec4(0.0); vB = vec4(0.0); vK = ivec2(0); vFade = 0.0; }
 // D7: a slot is gated by the density at its BIRTH (a strength ramp turns no particle on or off mid-life); one born denser than now
 // fades with the ratio (rB), so a falling density thins the air smoothly. Steady: every ratio is exactly 1 (the same gates, alpha)
-vec4 agoR(float tau) { float a = clamp(tau, 0.0, 9.999); int i = int(a); return uDensR[i] + (uDensR[i + 1] - uDensR[i]) * (a - float(i)); }
+// (the samples sit at fixed whole seconds of the clock, so a particle's birth density is the same on every frame of its life)
+vec4 agoR(float tau) { float a = clamp(tau + uDensR[13].x, 0.0, 10.999); int i = int(a); return uDensR[i] + (uDensR[i + 1] - uDensR[i]) * (a - float(i)); }
 float rB = 1.0;
 float bornDens(float dens, int layer, float tau) { vec4 r = agoR(tau); rB = layer == 0 ? r.x : layer == 1 ? r.y : layer == 2 ? r.z : r.w; return dens * rB; }
 float gateOf(int j, float dens, int key, int ty, int ci, int sd) {

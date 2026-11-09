@@ -157,7 +157,7 @@ export class WeatherDisplay {
         .addIndex([0, 1, 2, 0, 2, 3]);
       pg.instanced = true; pg.instanceCount = 0;
       this.partGeoms.push(pg);
-      this.densR[name] = new Float32Array(48).fill(1);
+      this.densR[name] = new Float32Array(56).fill(1);
       this.parts[name] = place(new PIXI.Mesh(pg, new PIXI.Shader(prog("part", PART_VERT, PART_FRAG), { ...this.common(seed), uKind: kind, uTime: 0, uDensR: this.densR[name],
         uTiles: new Float32Array([0, 0, 1, 1]), uTileSz: ts, uPer: new Float32Array(4), uDens: new Float32Array(4), uOrigin: new Float32Array([ox, oy, ap, geo.grid / ap]),
         uWindDir: new Float32Array([1, 0]), uWindK: new Float32Array([0, 0.5]), uView: new Float32Array([0.5, 0.8]), uVF: new Float32Array(4), uI: 1, uAlpha: 1,
@@ -294,26 +294,28 @@ export class WeatherDisplay {
   }
 
   /**
-   * D7: each particle kind's layer densities then / now at ages 0..10 s of now (uDensR; [11]: the largest; embers .w: the big-spark
-   * share then), from the client state at those times (`stAt`, set by weather.mjs): the shader gates a slot by the density at its
-   * birth, so a strength ramp turns no particle on or off mid-life. All exactly 1 (not computed) once the weather has been steady for
-   * a particle's whole life (10 s): the steady weather is unchanged.
+   * D7: each particle kind's layer densities then / now at the whole seconds A - i (i = 0..11, A = floor(clock) + 1 at this step; uDensR;
+   * [12]: the largest; [13].x: A - the frame's clock, set per frame; embers .w: the big-spark share then), from the client state at those
+   * times (`stAt`, set by weather.mjs; A itself is the planned state): the shader gates a slot by the density at its birth, so a
+   * strength ramp turns no particle on or off mid-life; fixed whole seconds, so that birth density is the same on every frame of its
+   * life. All exactly 1 (not computed) once the weather has been steady for 11 s: the steady weather is unchanged.
    */
   densHist() {
     const st = this.state; if ( !this.densR || !st ) return;
-    const now = this.now?.() ?? Date.now(), k = st.key, cur = partDensOf(st);
-    const ramp = !!this.stAt && !!k && now - (k.t + (k.dur ?? 0)) <= 10500, past = [cur];
-    if ( ramp ) for ( let a = 1; a <= 10; a++ ) past.push(partDensOf(this.stAt(now - a * 1000)));
+    const now = this.now?.() ?? Date.now(), k = st.key, cur = partDensOf(st), Tc = this.clock(), x0 = Math.floor(Tc) + 1 - Tc;
+    this.densA = Tc + x0;
+    const ramp = !!this.stAt && !!k && now - (k.t + (k.dur ?? 0)) <= 11500, past = [];
+    if ( ramp ) for ( let a = 0; a <= 11; a++ ) past.push(partDensOf(this.stAt(now + (x0 - a) * 1000)));
     for ( const [name] of KINDS ) {
       const R = this.densR[name], c = cur[name];
       if ( !R ) continue;
       if ( !ramp ) R.fill(1);
       else for ( let i = 0; i < 4; i++ ) {
         let mx = 1;
-        for ( let a = 0; a <= 10; a++ ) { const d = past[a][name]?.[i] ?? 0, c0 = c?.[i] ?? 0, r = c0 > 0 ? Math.min(d / c0, 1e3) : d > 0 ? 1e3 : 1; R[a * 4 + i] = r; mx = Math.max(mx, r); }
-        R[44 + i] = mx;
+        for ( let a = 0; a <= 11; a++ ) { const d = past[a][name]?.[i] ?? 0, c0 = c?.[i] ?? 0, r = c0 > 0 ? Math.min(d / c0, 1e3) : d > 0 ? 1e3 : 1; R[a * 4 + i] = r; mx = Math.max(mx, r); }
+        R[48 + i] = mx;
       }
-      if ( name === "embers" ) for ( let a = 0; a < 12; a++ ) R[a * 4 + 3] = ramp ? past[Math.min(a, 10)].embBig : cur.embBig;
+      if ( name === "embers" ) for ( let a = 0; a < 12; a++ ) R[a * 4 + 3] = ramp ? past[a].embBig : cur.embBig;
     }
   }
 
@@ -390,13 +392,15 @@ export class WeatherDisplay {
       const px1 = Math.min(Math.ceil(g.aw / TS) - 1, Math.floor((ax1 - R[0]) / TS)), py1 = Math.min(Math.ceil(g.ah / TS) - 1, Math.floor((ay1 - R[2]) / TS));
       const pnx = Math.max(0, px1 - px0 + 1), pny = Math.max(0, py1 - py0 + 1), pt = pnx * pny;
       const dd = this._d4, pp = this._pp, DR = this.densR[name];   // (D7: a layer keeps the slots of the densest birth still alive: x its largest ratio)
-      let want = 0; for ( let i = 0; i < 4; i++ ) { dd[i] = d0[i] * gq; want += Math.ceil(dd[i] * Math.max(1, DR[44 + i])); }
+      let want = 0; for ( let i = 0; i < 4; i++ ) { dd[i] = d0[i] * gq; want += Math.ceil(dd[i] * Math.max(1, DR[48 + i])); }
       want *= pt;
       if ( want > PART_MAX ) { const f = PART_MAX / want; for ( let i = 0; i < 4; i++ ) dd[i] *= f; }
-      for ( let i = 0; i < 4; i++ ) pp[i] = Math.ceil(dd[i] * Math.max(1, DR[44 + i]) - 1e-6);
+      for ( let i = 0; i < 4; i++ ) pp[i] = Math.ceil(dd[i] * Math.max(1, DR[48 + i]) - 1e-6);
       const ps = pp[0] + pp[1] + pp[2] + pp[3];
       const pn = ps > 0 ? pt * ps : 0;
       m.geometry.instanceCount = pn;
+      let dA = (this.densA ?? T) - T; if ( dA > 1800 ) dA -= 3600; else if ( dA < -1800 ) dA += 3600;   // (the clock wraps at 3600 s)
+      DR[52] = dA;
       u.uTime = T; u.uTiles[0] = px0; u.uTiles[1] = py0; u.uTiles[2] = Math.max(1, pnx); u.uTiles[3] = Math.max(1, pny);
       u.uPer.set(pp); u.uDens.set(dd); u.uScreen[0] = scr[0]; u.uScreen[1] = scr[1]; u.uPx = px;
       if ( depth ) { u.uDepth = depth; u.uHasDepth = 1; u.uDepthElev = au.uDepthElev; } else u.uHasDepth = 0;

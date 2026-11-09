@@ -62,7 +62,7 @@ uniform vec3 uWind;          // unit direction (x, y), strength 0..1
 uniform float uSlant;        // runner slant (x per y) from the wind
 uniform float uG[121];       // the gust envelope over the last 10 s (12 Hz, oldest first): rain intensity, sand waves, fire gusts
 uniform vec4 uSnowL;         // frost reach, frost breathing, crystals per lens-area, presence
-uniform float uCrR[12];      // the crystal count then / now at ages 0..10 s ([11]: the largest); all exactly 1 when steady
+uniform float uCrR[14];      // the crystal count then / now at the whole seconds floor(uT) + 1 - i, i = 0..11 ([12]: the largest; [13]: floor(uT) + 1 - uT); all 1 when steady
 uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, presence
 uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts (a float count: the last ghost fades in by its fraction)
 uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
@@ -337,17 +337,18 @@ void frost(vec2 p) {
 vec3 star = vec3(0.0);   // the coverage of a crystal's halo, arms, core (antialiased)
 void crystals(vec2 p) {
   float e = slotsOf(uSnowL.z * uSnowL.w, 64.0);
-  if ( e * uCrR[11] <= 0.0 ) return;
+  if ( e * uCrR[12] <= 0.0 ) return;
   ivec2 ce = ivec2(floor(p / 64.0));
   float prog = frostProg();
   for ( int j = 0; j < 3; j++ ) {
-    if ( float(j) >= ceil(e * uCrR[11]) ) continue;
+    if ( float(j) >= ceil(e * uCrR[12]) ) continue;
     int key = (ce.x * 64 + ce.y) * 4 + j;
     float L, tau; int c;
     cyc4(key, 0, 410, vec4(1.0, 2.0, 2.0, 3.0), L, c, tau);
     // (gated by the count at its BIRTH: a strength ramp turns no crystal on or off mid-life; while the count falls below the one it
-    // was born with it shrinks with it. Steady: r is exactly 1)
-    float a = min(tau, 9.999); int ia = int(a);
+    // was born with it shrinks with it. The samples sit at fixed whole seconds of the clock, so a crystal's birth count is the same on
+    // every step of its life (samples at "now - age" moved under it: at the onset of the count one popped in at full size). Steady: r is 1)
+    float a = min(tau + uCrR[13], 10.999); int ia = int(a);
     float r = uCrR[ia] + (uCrR[ia + 1] - uCrR[ia]) * (a - float(ia));
     if ( !slotOn(j, e * r, ce, 420) ) continue;
     float h[6];
@@ -881,7 +882,7 @@ export class WeatherLens {
     this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, copies: 0 };
     this.copyWanted = false;
     this.now = null; this.state = null; this.P = null;
-    this.key = ""; this.int = new Float32Array(121); this.crR = new Float32Array(12).fill(1);
+    this.key = ""; this.int = new Float32Array(121); this.crR = new Float32Array(14).fill(1);
     this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
@@ -1000,16 +1001,17 @@ export class WeatherLens {
 
   /**
    * Snow crystals are gated by the count at their BIRTH (a strength ramp turns none on or off mid-life): the count's ratio then / now
-   * at ages 0..10 s of the step at t ([11]: the largest), from the client state at those times (`stAt`, set by weather.mjs). Exactly 1
-   * when the weather has been steady for a crystal's whole life (10 s), so the steady lens is unchanged; only computed while snow is on.
+   * at the whole seconds floor(t) + 1 - i (i = 0..11) of the step at t ([12]: the largest; [13]: floor(t) + 1 - t, so the shader finds a
+   * birth between two fixed samples), from the client state at those times (`stAt`, set by weather.mjs; the next whole second is the
+   * planned state). Exactly 1 when the weather has been steady for 11 s, so the steady lens is unchanged; only computed while snow is on.
    */
   crystalHist(t) {
     const r = this.crR, k = this.state?.key, now = this.now?.() ?? Date.now(), base = now - ((now / 1000) % 3600 - t) * 1000;
-    if ( !(this.fx.snow[3] > 0) || !this.stAt || !k || base - (k.t + (k.dur ?? 0)) > 10500 ) { if ( r[0] !== 1 || r[11] !== 1 ) r.fill(1); return; }
+    if ( !(this.fx.snow[3] > 0) || !this.stAt || !k || base - (k.t + (k.dur ?? 0)) > 11500 ) { if ( r[0] !== 1 || r[12] !== 1 ) r.fill(1); return; }
     const at = (ms) => { const st = this.stAt(ms), f = st?.fx?.snow; return f ? M.lensGates("snow", M.lensS(this.P, f.s, st.lensCap)).crystals * f.p : 0; };
-    const c0 = at(base); let mx = 1;
-    for ( let a = 0; a <= 10; a++ ) { const c = a ? at(base - a * 1000) : c0; r[a] = c0 > 0 ? Math.min(c / c0, 1e3) : c > 0 ? 1e3 : 1; mx = Math.max(mx, r[a]); }
-    r[11] = mx;
+    const c0 = at(base), x0 = Math.floor(t) + 1 - t; let mx = 1;
+    for ( let i = 0; i <= 11; i++ ) { const c = at(base + (x0 - i) * 1000); r[i] = c0 > 0 ? Math.min(c / c0, 1e3) : c > 0 ? 1e3 : 1; mx = Math.max(mx, r[i]); }
+    r[12] = mx; r[13] = x0;
   }
 
   /** Can this state make big drops (rain beads and runners, melted crystals)? Without them the refraction is empty everywhere. */
