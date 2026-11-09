@@ -89,9 +89,9 @@ export const KIND = {
   // (hits: `back` is the radial throw - an emitter's heading points back at its hit, so the throw sends the puff outwards; `rise` the
   // geyser's height, risen fast (riseK / s), its young jet - the column from the ground up to the cloud - lasting longer (jetK);
   // `per` emitters a hit, the first one nearly straight up)
-  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.12, 0.15, 0.18], out: [0, 0.04, 0.05, 0.06], back: [0, 0.2, 0.26, 0.34],
-    rise: [0, 0.32, 0.5, 0.78], life: [0, 1.5, 2.1, 2.7], lin: [0, 0.03, 0.05, 0.07], chips: [0, 3, 4, 6], chipD: 0.6, chipH: 0.55, chipSz: 2,
-    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.28, 0.36, 0.45], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] }
+  hits: { v: 1, lanes: () => [0], sp: 1, pr: [0, 0.11, 0.13, 0.15], out: [0, 0.04, 0.05, 0.06], back: [0, 0.2, 0.26, 0.34],
+    rise: [0, 0.32, 0.5, 0.78], life: [0, 1.3, 1.7, 2.0], lin: [0, 0.02, 0.03, 0.035], chips: [0, 3, 4, 6], chipD: 0.6, chipH: 0.55, chipSz: 2,
+    grit: [0, 0.1, 0.15, 0.22], aura: [0, 0.26, 0.3, 0.35], auraA: [0, 0.4, 0.5, 0.6], mark: 0, trackW: 0, riseK: 5.5, jetK: 2.2, per: [0, 2, 3, 4] }
 };
 /** The puffs' rise rate (1 / s) and the young jet's decay (1 / s) of the kinds that travel (hits has its own). */
 export const RISE_K = 1.1, JET_K = 4.0;

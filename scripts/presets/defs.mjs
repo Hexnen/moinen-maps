@@ -68,7 +68,7 @@ export const BUILTIN = Object.freeze([
         pr: { rubble: 0.15, debris: 0.25, scatter: 0.35, halo: 0.2, edge: 0.55, jagged: true, jag: 0.55 } },
       { l: "destruction", id: "minis", at: 0, type: "blast", level: 2, cause: "impact", place: { m: "walk", pick: 0.06 }, lanes: "all", r: [0.3, 0.36],
         pr: { rubble: 0.3, debris: 0.4, scatter: 0.5, halo: 0.25, jagged: true, jag: 0.6 } },
-      { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 8000 }
+      { l: "dust", id: "geysers", dk: "hits", at: 0, lv: 3, r: 0.22, place: { m: "walk" }, life: 6000 }
     ]
   }
 ]);

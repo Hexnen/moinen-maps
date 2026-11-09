@@ -142,5 +142,7 @@ function rumble(K, now) {
   shaker.apply(Math.round((A.h3(k, 1, 77) - 0.5) * 2 * amp), Math.round((A.h3(k, 2, 77) - 0.5) * 2 * amp));
 }
 
+/** Tools (dev/guns-cost.mjs): the drawing containers, for a weak-GPU emulation that draws them more than once. */
+export const roots = () => ({ root, glowBox });
 /** Tests / tools: what is live and drawn. */
 export const status = () => ({ live: [...live.keys()], ticking, px: F.px.reduce((a, l) => a + l.length / 2, 0), glows: F.glows.length / 5 });
