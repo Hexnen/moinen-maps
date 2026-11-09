@@ -45,7 +45,7 @@ export const GESTURES = ["point", "throw", "line", "run"];
 export const KINDS = ["destruction", "fire", "smoke", "burst", "dust", "accent", "cue"];
 export const PENDING = ["burst", "dust", "accent", "cue"];
 export const PLACES = ["centre", "ring", "scatter", "walk"];
-export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer"];
+export const ACCENTS = ["fallShadow", "throwArc", "bounce", "muzzle", "hitFx", "tracer", "strike"];
 export const CUES = ["screen", "light"];
 /** A blast's lingering HAZE (s) by shock level - fire/dust-model.mjs KIND.shock.haze (the same numbers: dev/presets-boom.test checks). */
 export const SHOCK_HAZE = [0, 150, 240, 300];
