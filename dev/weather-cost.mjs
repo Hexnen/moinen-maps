@@ -31,6 +31,7 @@ export function targets() {
   }
   if ( L?.slices ) {   // (the pass in bands, its two pre-passes)
     L.slices.forEach((m, i) => out.push([`lens.band${i}`, m]));
+    L.dslices?.forEach((m, i) => out.push([`lens.disp${i}`, m]));   // (the refraction half of each band: one output per program)
     if ( L.runMesh ) out.push(["lens.pre1", L.runMesh], ["lens.pre2", L.beadMesh]);
     out.push(["lens.show", L.sprite]);
   }
