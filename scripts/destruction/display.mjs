@@ -1005,7 +1005,9 @@ export class DestructionDisplay {
     const spd = T > 0 ? slow / (T / Math.min(2200, Math.max(350, T))) : this.look.speed;
     const info = g.info, pw = this.look.power, pathFront = this.pathFront(path, g, (1 / (spd || 1)) * slow);
     lapE("unflat");
-    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: spd, pathFront, simul });
+    // (a gun preset's pocks, cause-fx.mjs isGun: a tight clock - no pixel of a pock before its bullet lands)
+    const tight = !!path && !!g.objId && !!this.dropsOut?.(g.objId);
+    const C = clockOf({ info, hash: g.hash, o, dir, path, spine, speed: spd, pathFront, simul, tight });
     if ( T > 0 && pathFront && !C.tear && info.type !== "collapse" ) start -= C.delay;
     const { CL, L, k, ox, oy, Rmax, tear, seed, noise, atOnce } = C;
     const r = info.rect;
@@ -1017,7 +1019,7 @@ export class DestructionDisplay {
     const arrive = coll ? coll.arrive : C.arrive;
     const pixelTime = coll ? coll.pixelTime : C.pixelTime;
     // what the clock worker needs to make the same clock (clock-worker.mjs)
-    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: spd, simul, coll: null };
+    const spec = { info: plainInfo(info), hash: g.hash, o, dir, path, spine, speed: spd, simul, tight, coll: null };
     // 1. the ruin's own clock: one moment per pixel, sorted (time << 20 | pixel)
     // PERF: the clocks are not computed here but a slice per frame (clockSlice: on-screen areas first, then by start), so a Detonate
     // of every area no longer holds the page for ~2 s before its first frame; until its clock is in, nothing of the ruin shows (as at
@@ -1091,7 +1093,8 @@ export class DestructionDisplay {
       const hA = hash2(n, 1, seed), hB = hash2(n, 2, seed), hC = hash2(n, 3, seed);
       // its frame's size (p.w x p.h): a flattened area has no sprites when it enters, and a default here changed every piece's timing
       const size = p.w ? Math.sqrt(p.w * p.h) : p.spr ? Math.sqrt(p.spr.texture.frame.width * p.spr.texture.frame.height) : 6;
-      const t1 = start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * (atOnce ? ATONCE_JITTER : 90) * k;
+      const t1 = C.tight ? start + arrive(p.sx, p.sy) + noise(p.sx, p.sy) * band * 0.8 + hA * 40 * k
+        : start + arrive(p.sx, p.sy) + (noise(p.sx, p.sy) - 0.5) * band * 0.8 + (hA - 0.5) * (atOnce ? ATONCE_JITTER : 90) * k;
       const t0 = strict ? Math.max(start, t1) : t1;
       const dur = (p.thrown ? 380 + Math.min(460, dd * 14) : 260 + Math.min(220, dd * 30)) * L.flight * k * (0.8 + 0.45 * hB) * (0.85 + Math.min(0.5, size / 40));
       const arc = (p.thrown ? Math.max(4, dd * 0.55) : 1.5 + dd * 0.4) * L.arc * pw * (0.7 + 0.6 * hC) + (info.type === "cracks" ? 1.5 : 0);

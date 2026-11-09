@@ -141,7 +141,9 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
   const [C0, D0, A0] = await Promise.all([imp("core.mjs"), imp("defs.mjs"), imp("accents-core.mjs")]);
   const g = { point: { a: [600, 500] }, throw: { a: [400, 500], b: [600, 520] }, line: { a: [300, 300], b: [600, 420], from: [280, 290] }, run: { a: [200, 700], b: [900, 600] } };
   let same = true, frames = true;
-  const RETUNED = new Set(["bomb", "grenade"]), noSoft = (F) => { const { soft, ...o } = F; o.px = o.px.slice(0, 10).concat(o.px.slice(10).filter((l) => l.length)); return o; };   // (and the palette's two new grenade olives, empty for these)
+  // (re-tuned since: the bomb / grenade by the boom polish, the guns - uzi, heliHmg - by the guns polish rounds, their hit spurts and
+  // glows new: dev/presets-guns.test.mjs and dev/presets-gunfx.test.mjs hold them; the other older presets must stay exactly as they were)
+  const RETUNED = new Set(["bomb", "grenade", "uzi", "heliHmg"]), noSoft = (F) => { const { soft, ...o } = F; o.px = o.px.slice(0, 10).concat(o.px.slice(10).filter((l) => l.length)); return o; };   // (and the palette's two new grenade olives, empty for these)
   for ( const d0 of D0.BUILTIN.filter((d) => !RETUNED.has(d.id)) ) {
     const d1 = BUILTIN.find((d) => d.id === d0.id);
     if ( J(d0) !== J(d1) ) same = false;
@@ -153,9 +155,9 @@ const fire = (g, o = {}, env = ENV) => C.expand(def, g, { seed: 5, ...o }, env);
       for ( let t = -1600; t < 3000; t += 70 ) if ( J(noSoft(A0.draw(i0, 0, t, env, A0.newFrame()))) !== J(noSoft(A.draw(i1, 0, t, env, A.newFrame()))) ) frames = false;
     }
   }
-  ok(same, `F the ${D0.BUILTIN.length - RETUNED.size} older presets (not the re-tuned bomb / grenade): definitions and plans unchanged`);
+  ok(same, `F the ${D0.BUILTIN.length - RETUNED.size} older presets (not the re-tuned bomb / grenade / guns): definitions and plans unchanged`);
   ok(frames, "F their accents draw the same frames");
-  ok(J(C0.cleanDef(D0.BUILTIN.find((d) => d.id === "uzi"))) === J(C.cleanDef(BUILTIN.find((d) => d.id === "uzi"))), "F cleanDef of the uzi unchanged");
+  ok(J(C0.cleanDef(D0.BUILTIN.find((d) => d.id === "lightning"))) === J(C.cleanDef(BUILTIN.find((d) => d.id === "lightning"))), "F cleanDef of the lightning unchanged (the bomb, grenade and guns are re-tuned)");
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
