@@ -557,7 +557,7 @@ The four questions asked here were answered by the user; P1 is built on these an
 
 ### P2 checks (2026-11-09, lane 2, RTX 3070 Ti)
 
-- `node dev/run-all.mjs` 75/75, with the new `dev/presets-timed.test.mjs` (31 checks: phases, old strokes unchanged, signatures
+- `node dev/run-all.mjs` 74/74, with the new `dev/presets-timed.test.mjs` (31 checks: phases, old strokes unchanged, signatures
   with and without `at` / `ps`, undo / redo order, the dissolve's timing, walk runs, wiring).
 - **Unused = unchanged, hash A/B** against 8b0f9d7, two runs per build:
   - empty scene: the whole frame's hash is identical (`k2c4fq`);
