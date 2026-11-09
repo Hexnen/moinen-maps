@@ -4,7 +4,7 @@
 //      done kicking up its dust does not rebuild its area) but follows the strokes
 //   C. the field: deterministic bytes, kick times follow the path at the kind's speed, out times from a put-out and from an eraser
 //      painted after the dust (not one painted before), every emitter inside the area with its whole reach (nothing is ever cut by the
-//      rectangle), tile lists hold every emitter whose reach touches the tile, the per-tile bound holds (even thinning)
+//      rectangle), an undone eraser gives a back time (the dust eases back in), tile lists hold every emitter whose reach touches the tile, the per-tile bound holds (even thinning)
 //   D. time: phases grow -> on -> out -> gone, the end after a put-out leaves every puff dead
 //   E. the art table: 16 codes, the levels grade (L1 < L2 < L3 puff size, grit, aura)
 import * as M from "../scripts/fire/model.mjs";
@@ -87,6 +87,15 @@ const dust = (id, dk, lv, p, extra = {}) => M.cleanStroke({ id, k: "dust", dk, l
   const fb = M.raster(M.areasOf([d, eB], geo, P, 4100).find((a) => a.style === "dust"), geo, P);
   ok(Math.abs(fa.cell[cellAt(500, 330) + 1] - 3) < 1e-3 && fa.cell[cellAt(200, 300) + 1] >= D.NONE, "an eraser after the dust puts out only what it covers");
   ok(fb.cell[cellAt(500, 330) + 1] >= D.NONE, "an eraser painted before the dust does not");
+  // an undone eraser (o set): the dust went out at its paint time and eases back at its undo - no out time from it, a back time
+  const eU = { ...eA, o: 6000 };
+  const fu = M.raster(M.areasOf([d, eU], geo, P, 6100).find((a) => a.style === "dust"), geo, P), iu = cellAt(500, 330);
+  ok(fu.back && Math.abs(fu.cell[iu + 1] - 3) < 1e-3 && Math.abs(fu.back[iu] - 5) < 1e-3 && fu.back[iu + 1] >= D.NONE, "an undone eraser: out at its paint, back at its undo, then on");
+  ok(fu.cell[cellAt(200, 300) + 1] >= D.NONE && fu.back[cellAt(200, 300)] >= D.NONE, "an undone eraser leaves the dust it never covered alone");
+  ok(!fa.back, "no back plane without an undone eraser");
+  let eBack = 0;
+  for ( let i = 0; i < fu.emN; i++ ) { const o = ((i >> 10) * fu.emW + (i & 1023) * 3) * 4 + 8; if ( Math.abs(fu.em[o + 1] - 5) < 1e-3 ) eBack++; }
+  ok(eBack > 0, `emitters under the undone eraser carry its back time (${eBack})`);
   // thinning keeps the bound for a dense heavy drag over itself
   const zig = [];
   for ( let i = 0; i < 40; i++ ) zig.push(300 + (i % 2) * 40, 300 + i * 6);

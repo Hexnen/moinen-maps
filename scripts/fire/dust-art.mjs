@@ -7,8 +7,10 @@
  *     when read): the dust takes THE GROUND'S OWN COLOUR (destruction's rule: dust in the ground's tone, never pale flecks on a dark map)
  *  1. ART PASS (12 fps, the cells near the view): one fragment per art cell, RGBA8 -
  *       R = 1 + the ground row (art px, mod 255) of the puff / chip drawn there (its depth against the tokens, fire's rule), 0 = none
- *       G = a puff cell: 1 + band (0 light, 1 mid, 2 shadow) + 3 x rim + 8 x (level - 1); a flying chip: 32 + tone (0 dark, 1 mid, 2 glint)
- *       B = the ground: aura band (0..2) + 4 x grit tone (0 none, 1 dark, 2 mid, 3 glint) + 16 film + 32 a chip's shadow
+ *       G = a puff cell: 1 + band (0 light, 1 mid, 2 shadow, 3 rim) + 4 x (level - 1) + 12 x fresh (just kicked up: darker, denser);
+ *           a flying chip: 32 + tone (0 dark, 1 mid, 2 glint)
+ *       B = the ground: aura band (0..2) + 4 x grit tone (0 none, 1 dark, 2 mid, 3 glint) + 16 film + 32 a chip's shadow + 64 / 128 the
+ *           puffs' ground shadow (light / dense: the cloud's mass over the ground)
  *       A = the ground marks: darkening 0..2 + 4 a light scuff
  *     PUFFS: the tile's emitters (dust-model tile lists), each a BURST puff when the source passes and lazy lingering puffs after; 3
  *     lobes a puff, every lobe of every puff in ONE metaball field (a rolling trail, never a row of balls), shaded from the strongest
@@ -20,7 +22,9 @@
  *  2. GROUND (every frame, under the tokens): marks, film, grit, chip shadows, aura - premultiplied, NORMAL blend
  *  3. DUST (every frame, under the tokens) and FRONT (above them): the puffs and flying chips, split per screen pixel by depth exactly
  *     as the fire's tongues (a puff whose ground point lies in front of a token's feet is drawn over that token)
- * No emission (dust is not a light: it dims with the scene; at night its lit edges keep a pale rim, as the fire's smoke).
+ * No emission (dust is not a light: it dims with the scene; at night its lit tops and edges turn a pale moonlit value, lifted against
+ * Foundry's ambience by FireArt's rule, its cores stay dark - contrast by form). Over water / any cold ground the dust takes the soil
+ * tone (no blue dust). An UNDONE eraser over the dust: the dust eases back in from what was left (no pop), lingering puffs resume.
  * Everything is a function of (cell, the field, the shared clock): every client draws the same frames.
  */
 import { VERT, VERT_B, SHOW_COMMON, FOOTPRINT, blocks, quad, texOf, renderPass } from "./art.mjs";
@@ -53,6 +57,8 @@ uniform highp sampler2D uCell;
 uniform highp sampler2D uEm;
 uniform highp sampler2D uTileH;
 uniform highp sampler2D uIdx;
+uniform highp sampler2D uBack;  // (an undone eraser: [back, out2] per cell; uHasBack 0 = none)
+uniform int uHasBack;
 uniform float uNow;       // s since the area's ref (whole 12 fps frames)
 uniform vec2 uWind;       // the area's wind drift (cells / s)
 uniform vec2 uSWind;      // the scene's wind drift (cells / s)
@@ -67,7 +73,11 @@ out vec4 oArt;
 ${HASH}
 const float RY = 0.8, TAU = ${TAU.toFixed(1)}, LIN_P = ${LIN_P.toFixed(2)}, LIN_L = ${LIN_L.toFixed(2)};
 const float TH = 0.13;    // the metaball body's edge
-float F = 0.0, best = 0.0, FA = 0.0; vec3 bn = vec3(0.0), dn0 = vec3(0.0, 0.0, 1.0); float bgy = 0.0; int blv = 1;
+float F = 0.0, best = 0.0, FA = 0.0, FS = 0.0; vec3 bn = vec3(0.0), dn0 = vec3(0.0, 0.0, 1.0); float bgy = 0.0, ba = 9.0; int blv = 1;
+// the dust at a cell going out at o (s): 1 -> 0 over 2.8 s
+float fadeOut(float o, float t) { return 1.0 - smoothstep(o, o + 2.8, t); }
+// ...and with an undone eraser: from bk on it eases back from what was left, then goes out again at o2
+float fadeAt(float o, float bk, float o2, float t) { return t < bk ? fadeOut(o, t) : mix(fadeOut(o, bk), 1.0, smoothstep(bk, bk + 1.5, t)) * fadeOut(o2, t); }
 
 // one puff, a s old: life L, size scale sc, throw scale so, rise scale sr
 void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0, vec2 Hd, vec2 N, vec4 k0, int lv) {
@@ -84,6 +94,12 @@ void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0
   vec2 c = g - vec2(0.0, rise);
   // (it grows from a small puff to its size fast, then keeps spreading slowly as it thins)
   float r = k0.x * uG * sc * (0.35 + 0.65 * (1.0 - exp(-2.2 * a)) + 0.35 * f) * (0.6 + 0.8 * hD * hD);
+  // its SHADOW on the ground: the body's footprint under it, cast down-right by the light (top-left) by its height - what gives the
+  // cloud its mass over the ground in the oblique view; densest under the young dense body, gone as it thins
+  float hgt = rise + r * 0.55;
+  vec2 qs = p - g - vec2(0.42, 0.3) * hgt - vec2(0.0, r * 0.1);
+  float ws = 1.0 - dot(qs, qs) / (r * r * 1.1);
+  if ( ws > 0.0 ) FS += ws * str * (1.0 - smoothstep(0.15, 0.8, f));
   vec2 q0 = p - c;
   if ( dot(q0, q0) > 3.3 * r * r ) return;                             // (beyond every lobe: offset <= 0.8 r, radius <= r)
   for ( int j = 0; j < 3; j++ ) {
@@ -98,7 +114,7 @@ void puff(vec2 p, float a, float L, float sc, float so, float sr, int s, vec2 P0
     F += wv;
     bn += wv * vec3(q / rj, sqrt(w));                                  // (the body's normal: every lobe's, weighted - one surface...
     FA += wv * f;
-    if ( wv > best ) { best = wv; dn0 = vec3(q / rj, sqrt(w)); bgy = g.y + o.y * 0.5; blv = lv; }   // (... with its strongest billow's bump)
+    if ( wv > best ) { best = wv; dn0 = vec3(q / rj, sqrt(w)); bgy = g.y + o.y * 0.5; blv = lv; ba = a; }   // (... with its strongest billow's bump)
   }
 }
 
@@ -113,7 +129,8 @@ void main() {
     int code = int(mod(C.w, 16.0)), lv = code & 3;
     float hw = floor(C.w / 16.0) * 0.25;
     vec4 k1 = uK1[code], k2 = uK2[code], k3 = uK3[code];
-    float a = t - C.x, fo = 1.0 - smoothstep(C.y, C.y + 2.8, t), dn = abs(C.z) / hw;
+    vec4 Bk = uHasBack == 1 ? texelFetch(uBack, c, 0) : vec4(1e9);
+    float a = t - C.x, fo = fadeAt(C.y, Bk.x, Bk.y, t), dn = abs(C.z) / hw;
     if ( a > 0.0 && fo > 0.0 ) {
       // the AURA: a haze that rises as the source passes, thins to a lingering veil, drifts downwind; organic outline from the noise
       vec2 dr = (uWind + uSWind) * 0.35 * t, q = (p - dr) / (0.55 * uG);
@@ -171,13 +188,13 @@ void main() {
     int code = int(e1.w), lv = code & 3, es = int(e0.w);
     vec4 k0 = uK0[code], k1 = uK1[code], k2 = uK2[code];
     vec2 P0 = e0.xy, Hd = e1.xy, N = vec2(-Hd.y, Hd.x) * e1.z;
-    float eo = e2.x;
+    float eo = e2.x, ebk = e2.y, eo2 = e2.z;
     // CHIPS: a few frames of flight right after the kick (none if it was put out before)
     float ac = t - ke;
     if ( ac < 1.0 && ke < eo ) {
       int nC = int(k1.z);
       vec2 thr = normalize(N + (-Hd) * (code < 8 ? 1.2 : 0.3));
-      for ( int j = 0; j < 5; j++ ) {
+      for ( int j = 0; j < 8; j++ ) {
         if ( j >= nC ) break;
         float hj = h3(es, j, 21), hk = h3(es, j, 22), hl = h3(es, j, 23);
         float Tf = 0.3 + 0.35 * hj, a2 = ac - 0.03 * float(j);
@@ -205,7 +222,7 @@ void main() {
         int ik = int(kk), sl = es * 7 + ik * 131 + 17;
         if ( h3(es, ik, 41) > k1.y ) continue;
         float b = t0 + kk * LIN_P + h3(es, ik, 42) * LIN_P * 0.5;
-        if ( b > eo ) continue;
+        if ( b > eo && !(b > ebk && b < eo2) ) continue;            // (none after the put-out - or again after an undone eraser)
         float al = t - b, Ll = LIN_L * (0.85 + 0.3 * h3(es, ik, 43));
         if ( al < 0.0 || al > Ll ) continue;
         puff(p, al, Ll, 0.62, 0.4, 0.6, sl, P0, Hd, N, k0, lv);
@@ -219,17 +236,23 @@ void main() {
     float age = FA / max(F, 1e-4);
     // (holes that open and grow as blobs: a coarse noise with a 2 x 2 grain, not a salt-and-pepper sieve)
     float hole = 0.72 * vn(p / (5.0 * uU), uSeed + 21) + 0.28 * h3(c.x >> 1, c.y >> 1, 63);
-    bool drop = hole < smoothstep(0.35, 1.0, age) * 0.9;
+    float er = smoothstep(0.35, 1.0, age) * 0.9;
+    bool drop = hole < er;
     if ( F > TH + dz && !drop ) {
       vec3 n = normalize(mix(normalize(bn), dn0, 0.45) * vec3(1.0, 1.0, 1.1));
       float lum = dot(n, normalize(vec3(-0.55, -0.7, 0.6))) + (h3(c.x >> 1, c.y >> 1, 62) - 0.5) * 0.06;
       int band = lum > 0.55 ? 0 : lum > 0.12 ? 1 : 2;
-      int rim = F < TH + 0.045 + dz ? 1 : 0;
-      G = 1 + band + 3 * rim + 8 * (blv - 1);
+      if ( F < TH + 0.045 + dz || (er > 0.0 && hole < er + 0.09) ) band = 3;   // (the rim - and round the holes that open as it ages: they erode, never punch)
+      // FRESH: a puff in its first moments is the soil just kicked up - darker, denser; it pales as it spreads and dries
+      int fresh = ba < 0.55 + 0.25 * h3(c.x >> 1, c.y >> 1, 64) ? 1 : 0;
+      G = 1 + band + 4 * (blv - 1) + 12 * fresh;
       R = 1 + int(mod(floor(bgy / uq), 255.0));
     }
   }
   if ( shadow ) B |= 32;
+  // the puffs' ground SHADOW (two steps, a dithered 2 x 2 edge): under the ground layer's haze, over its marks
+  float sz = FS + (h3(c.x >> 1, c.y >> 1, 66) - 0.5) * 0.1;
+  if ( sz > 0.55 ) B |= 128; else if ( sz > 0.22 ) B |= 64;
   oArt = vec4(float(R), float(G), float(B), float(A)) / 255.0;
 }`;
 
@@ -258,9 +281,25 @@ uniform sampler2D uTone;
 uniform vec2 uToneN;      // tone texels (8 cells each)
 const vec3 SOIL = vec3(0.66, 0.58, 0.47);
 vec3 toneAt(vec2 cf) { return texture(uTone, (cf + 0.5) / (8.0 * uToneN)).rgb; }
-vec3 baseOf(vec3 T) { float l = dot(T, vec3(0.3, 0.59, 0.11)); return mix(mix(T, vec3(l), 0.6), SOIL * (0.75 + 0.5 * l), 0.6); }
-const vec3 PA[4] = vec3[4](vec3(0.0), vec3(0.50, 0.58, 0.64), vec3(0.66, 0.75, 0.82), vec3(0.80, 0.88, 0.93));   // puff alpha by level: light, mid, shadow
-const float PRIM[4] = float[4](0.0, 0.26, 0.34, 0.44);`;
+// the dust's own colour from the ground's: desaturated toward soil; WATER (and any cold blue / teal ground) gives no blue dust - what
+// rises over a bridge, a quay or a flooded street is the soil and grime of the road, so a cool tone hands over to the soil tone; a very
+// dark ground still makes a dust a little lighter than it (dust scatters light: it reads lighter than dark earth)
+vec3 baseOf(vec3 T) {
+  float l = dot(T, vec3(0.3, 0.59, 0.11));
+  float cold = smoothstep(0.02, 0.12, T.b - max(T.r, 0.85 * T.g)) + smoothstep(0.04, 0.16, min(T.g, T.b) - T.r) * 0.8;
+  vec3 b = mix(mix(T, vec3(l), 0.6), SOIL * (0.75 + 0.5 * l), 0.6);
+  b = mix(b, SOIL * (0.78 + 0.35 * l), clamp(cold, 0.0, 1.0));
+  return max(b, SOIL * 0.5);
+}
+// AT NIGHT (dust is not a light: the scene's darkness dims it with the map) it is a pale MOONLIT haze: its lit tops and the edges facing
+// the light lift toward a cool pale value against the dimmed map, the cores and the shadow side stay dark - contrast by form, not glow
+vec3 nightOf(vec3 rgb, int band, bool edge) {
+  vec3 moon = vec3(0.78, 0.82, 0.92);
+  vec3 c = band == 2 ? rgb * vec3(0.82, 0.86, 0.95) : band == 0 || band == 3 || edge ? mix(rgb * 1.2, moon, edge || band == 3 ? 0.6 : 0.42) : mix(rgb * 1.1, moon, 0.18);
+  return min(c * mix(1.0, uLift, band == 2 ? 0.3 : 0.8), vec3(1.0));
+}
+// puff alpha by level (light, mid, shadow, rim) - and a fresh puff denser
+const vec4 PA[4] = vec4[4](vec4(0.0), vec4(0.52, 0.60, 0.66, 0.28), vec4(0.68, 0.77, 0.84, 0.36), vec4(0.82, 0.89, 0.94, 0.46));`;
 
 const DDEPTH = `
 uniform vec4 uTok[16];
@@ -290,16 +329,21 @@ vec4 puffColor(vec2 cf) {
   ivec4 a = art(p);
   if ( a.g == 0 ) return vec4(0.0);
   vec3 b = baseOf(toneAt(cf));
-  if ( a.g >= 32 ) { int k = a.g - 32; vec3 c = k == 0 ? b * 0.45 : k == 1 ? b * 0.7 : mix(b, vec3(1.0), 0.35); return vec4(c, 1.0); }
-  int v = a.g - 1, lv = clamp(v / 8 + 1, 1, 3), w = v & 7, band = w % 3, rim = w / 3;
-  vec3 rgb = band == 0 ? min(b * 1.24 + 0.05, vec3(1.0)) : band == 1 ? b * 1.0 + 0.02 : b * 0.72;
-  float al = rim == 1 ? PRIM[lv] : PA[lv][band];
+  if ( a.g >= 32 ) {
+    int k = a.g - 32; vec3 c = k == 0 ? b * 0.42 : k == 1 ? b * 0.68 : mix(b, vec3(1.0), 0.35);
+    if ( uDark > 0.0 ) c = mix(c, k == 2 ? mix(c, vec3(0.85, 0.88, 0.95), 0.5) * uLift : c * 0.9, uDark);
+    return vec4(min(c, vec3(1.0)), 1.0);
+  }
+  int v = a.g - 1, fresh = v / 12, w = v - 12 * fresh, lv = clamp(w / 4 + 1, 1, 3), band = w & 3;
+  // light / mid / shadow / rim; a FRESH puff (just kicked up) richer and darker, an older one paler and thinner
+  vec3 rgb = band == 0 ? min(b * 1.22 + 0.05, vec3(1.0)) : band == 1 ? b + 0.02 : band == 2 ? b * 0.7 : min(b * 1.12 + 0.04, vec3(1.0));
+  float al = PA[lv][band];
+  if ( fresh == 1 ) { rgb *= band == 0 ? 0.95 : 0.9; al = min(0.97, al * 1.08 + 0.03); }
+  else if ( band != 2 ) rgb = min(rgb * 1.04 + 0.01, vec3(1.0));
   if ( uDark > 0.0 ) {
-    // at night it keeps its own value, cooled by the ambient; the edges facing the light (top-left) catch a pale rim
-    vec3 cool = rgb * vec3(0.9, 0.95, 1.06);
-    bool edge = art(p + ivec2(0, -1)).g == 0 || art(p + ivec2(-1, 0)).g == 0;
-    if ( edge ) cool = mix(cool, vec3(0.80, 0.83, 0.90), 0.45);
-    rgb = mix(rgb, cool, uDark);
+    bool edge = art(p + ivec2(0, -1)).g == 0 || art(p + ivec2(-1, 0)).g == 0 || art(p + ivec2(-1, -1)).g == 0;
+    rgb = mix(rgb, nightOf(rgb, band, edge), uDark);
+    al = mix(al, min(0.97, al * (edge ? 1.18 : 1.08)), uDark);
   }
   return vec4(rgb * al, al);
 }`;
@@ -323,26 +367,31 @@ vec4 cellColor(vec2 cf) { return puffColor(cf); }
 #define OCC 0
 ${FOOTPRINT}`;
 
-// the GROUND under the tokens: marks, film, grit, chip shadows, then the aura over them (premultiplied, composited here)
+// the GROUND under the tokens: marks, film, grit, chip shadows, the puffs' shadows, then the aura over them (premultiplied)
 const GROUND = `${SHOW_COMMON}
 ${PAL}
-const float AURA[3] = float[3](0.0, 0.13, 0.24);
+const float AURA[3] = float[3](0.0, 0.15, 0.27);
 vec4 over(vec4 dst, vec3 c, float a) { return vec4(c * a + dst.rgb * (1.0 - a), a + dst.a * (1.0 - a)); }
 vec4 cellColor(vec2 cf) {
   ivec4 a = art(ivec2(cf));
   if ( a.b == 0 && a.a == 0 ) return vec4(0.0);
-  vec3 T = toneAt(cf), b = baseOf(T);
+  vec3 T = toneAt(cf), b = baseOf(T), lit = min(b * 1.2 + 0.05, vec3(1.0));
+  if ( uDark > 0.0 ) lit = mix(lit, nightOf(lit, 0, false), uDark);
   vec4 o = vec4(0.0);
   int mk = a.a & 3;
-  if ( mk > 0 ) o = over(o, T * 0.5, mk == 1 ? 0.16 : 0.3);
-  if ( (a.a & 4) != 0 ) o = over(o, min(b * 1.2 + 0.05, vec3(1.0)), 0.2);
-  if ( (a.b & 16) != 0 ) o = over(o, min(b * 1.2 + 0.05, vec3(1.0)), 0.1);
+  if ( mk > 0 ) o = over(o, T * 0.45, mk == 1 ? 0.18 : 0.34);
+  if ( (a.a & 4) != 0 ) o = over(o, lit, 0.24);
+  // the settled FILM: a dust coat that dulls the ground under it
+  if ( (a.b & 16) != 0 ) o = over(o, lit, 0.17);
   int gt = (a.b >> 2) & 3;
   // (grains in the soil's own dark / mid tone, not black: they read as grit on any ground, never as specks of ink)
-  if ( gt > 0 ) o = over(o, gt == 1 ? mix(T * 0.5, b * 0.55, 0.5) : gt == 2 ? mix(T, b, 0.5) * 0.78 : mix(b, vec3(1.0), 0.3), gt == 1 ? 0.8 : 0.7);
+  if ( gt > 0 ) o = over(o, gt == 1 ? mix(T * 0.5, b * 0.55, 0.5) : gt == 2 ? mix(T, b, 0.5) * 0.78 : mix(lit, vec3(1.0), 0.25), gt == 1 ? 0.8 : 0.72);
   if ( (a.b & 32) != 0 ) o = over(o, T * 0.3, 0.35);
+  // the puffs' SHADOW: the cloud sits over the ground (weaker at night: no sun to cast it)
+  int sh = (a.b >> 6) & 3;
+  if ( sh > 0 ) o = over(o, T * 0.32, (sh == 2 ? 0.3 : 0.16) * (1.0 - 0.6 * uDark));
   int au = a.b & 3;
-  if ( au > 0 ) o = over(o, min(b * 1.18 + 0.05, vec3(1.0)), AURA[au]);
+  if ( au > 0 ) o = over(o, lit, AURA[au] * (1.0 + 0.25 * uDark));
   return o;
 }
 #define OUT(c) ((c) * uAlpha)
@@ -368,12 +417,12 @@ void main() {
 
 let progs = null;
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART, "moinen-maps-dust-art-v1"),
-  tone: PIXI.Program.from(VERT, TONE, "moinen-maps-dust-tone-v1"),
-  occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-dust-occ-v1"),
-  ground: PIXI.Program.from(VERT_B(2), GROUND, "moinen-maps-dust-ground-v1"),
-  show: PIXI.Program.from(VERT_B(0), SHOW, "moinen-maps-dust-show-v1"),
-  front: PIXI.Program.from(VERT_B(0), FRONT, "moinen-maps-dust-front-v1")
+  art: PIXI.Program.from(VERT, ART, "moinen-maps-dust-art-v2"),
+  tone: PIXI.Program.from(VERT, TONE, "moinen-maps-dust-tone-v2"),
+  occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-dust-occ-v2"),
+  ground: PIXI.Program.from(VERT_B(2), GROUND, "moinen-maps-dust-ground-v2"),
+  show: PIXI.Program.from(VERT_B(0), SHOW, "moinen-maps-dust-show-v2"),
+  front: PIXI.Program.from(VERT_B(0), FRONT, "moinen-maps-dust-front-v2")
 };
 /** Every dust program (the pre-warm links them in the background: fire.mjs). */
 export const dustPrograms = () => Object.values(programs());
@@ -400,12 +449,14 @@ export class DustArt extends PIXI.Container {
     this.emTex = fTex(field.em, field.emW, field.emH);
     this.tileTex = fTex(field.tileH, field.tw, field.th);
     this.idxTex = fTex(field.idx, 1024, field.idxH);
+    // (an undone eraser over the dust: when it comes back per cell; none: a 1 x 1 stand-in, never read)
+    this.backTex = field.back ? fTex(field.back, W, H) : fTex(new Float32Array([1e9, 1e9, 0, 0]), 1, 1);
     this.rt = rtOf(W, H);
     KT ??= kindTable();
     const wind = field.wind ?? [0, 0], g = grid;
     this.pass = null;   // (no fire `pass`: the tornado lean and the rain damper leave dust alone)
     this.dpass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
-      uCell: this.cellTex, uEm: this.emTex, uTileH: this.tileTex, uIdx: this.idxTex, uNow: 0,
+      uCell: this.cellTex, uEm: this.emTex, uTileH: this.tileTex, uIdx: this.idxTex, uBack: this.backTex, uHasBack: field.back ? 1 : 0, uNow: 0,
       uWind: new Float32Array([wind[0] * 0.25 * g, wind[1] * 0.25 * g]), uSWind: new Float32Array(2), uG: g, uU: g / 32, uSeed: (seed % 65536) | 0,
       uK0: KT[0], uK1: KT[1], uK2: KT[2], uK3: KT[3], translationMatrix: new PIXI.Matrix().toArray(true) }));
     // the tone map (pass 0): one texel per 8 x 8 cells, from the scene's map (none: a plain soil tone)
@@ -451,7 +502,13 @@ export class DustArt extends PIXI.Container {
   setBirths() {}
   /** The scene's wind (weather): the puffs and the haze drift with it too (cells / s). */
   setSceneWind(x, y) { const u = this.dpass.shader.uniforms.uSWind; u[0] = x; u[1] = y; }
-  setDark(d) { this.show.shader.uniforms.uDark = d; this.front.shader.uniforms.uDark = d; this.ground.shader.uniforms.uDark = d; }
+  setDark(d) {
+    // (the lift: the inverse of Foundry's ambience filter luminosity at this darkness - FireArt.setDark's A7 rule - so the moonlit tops
+    // of the dust keep their value against the dimmed map)
+    const env = canvas.scene?.environment, cyc = env?.cycle !== false, bl = env?.base?.luminosity ?? 0, dl = env?.dark?.luminosity ?? 0;
+    const lb = cyc ? bl + (dl - bl) * d : bl, lum = lb * (lb >= 0 ? 1.2 : 0.8), lift = 1 / Math.max(0.2, 1 + lum);
+    for ( const m of [this.show, this.front, this.ground] ) { m.shader.uniforms.uDark = d; m.shader.uniforms.uLift = lift; }
+  }
   setTokens(list) {
     const { ap, ox, oy } = this.geo, r = this.rect, n = Math.min(16, list.length);
     for ( let k = 0; k < n; k++ ) { const [a, b, c, d] = list[k]; this.tok.set([(a - ox) / ap - r.x0, (b - oy) / ap - r.y0, (c - ox) / ap - r.x0, (d - oy) / ap - r.y0], k * 4); }
@@ -545,7 +602,7 @@ export class DustArt extends PIXI.Container {
     this.job = null;
   }
   uploadStep(renderer, maxBytes) {
-    const q = this._up ??= [this.cellTex, this.emTex, this.tileTex, this.idxTex];
+    const q = this._up ??= [this.cellTex, this.emTex, this.tileTex, this.idxTex, this.backTex];
     let sent = 0;
     while ( q.length && (sent === 0 || sent + q[0].baseTexture.width * q[0].baseTexture.height * 16 <= maxBytes) ) {
       const b = q.shift().baseTexture; renderer.texture.bind(b, 0); sent += b.width * b.height * 16;
@@ -555,7 +612,7 @@ export class DustArt extends PIXI.Container {
   get uploaded() { return !!this._up && !this._up.length; }
   covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
   destroy() {
-    const tx = [this.cellTex, this.emTex, this.tileTex, this.idxTex, this.soil];
+    const tx = [this.cellTex, this.emTex, this.tileTex, this.idxTex, this.backTex, this.soil];
     const ownF = this.front.parent === this;
     if ( !ownF ) this.front.parent?.removeChild(this.front);
     for ( const g of new Set([this.dpass, this.tonePass, this.occPass, this.ground].filter(Boolean).map((m) => m.geometry)) ) g?.destroy();
