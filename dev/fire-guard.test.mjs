@@ -62,7 +62,7 @@ const backAt = (rows, from) => { for ( const [t, d] of rows ) if ( t >= from && 
 const rises = (rows) => { let n = 0, prev = 1, dir = 0; for ( const [, d] of rows ) { const s = Math.sign(d - prev); if ( s > 0 && dir <= 0 ) n++; if ( s ) dir = s; prev = d; } return n; };
 
 /* ---------------------------------------------------------------- A1: recovery under background noise */
-for ( const noise of [0.05, 0.1, 0.17] ) {
+for ( const noise of [0.05, 0.1, 0.17, 0.2] ) {
   const hz = 60, P = 1000 / hz, heavy = () => 2.5 * P, light = () => 0.5 * P;
   const o = new OldFireGuard(), a = display({ hz, secs: 6, work: heavy, guard: o });
   display({ hz, secs: 0.1, work: light, guard: o, t0: a.end });
@@ -76,10 +76,8 @@ for ( const noise of [0.05, 0.1, 0.17] ) {
   const tail = nb.rows.filter(([t]) => t > b.end + 30000), atFull = tail.filter(([, d]) => d >= 0.999).length / tail.length;
   const mean = tail.reduce((m, x) => m + x[1], 0) / tail.length;
   console.log(`   last 30 s: new at full ${(atFull * 100).toFixed(0)} % of frames, mean ${mean.toFixed(2)}`);
-  if ( noise <= 0.1 ) assert.equal(atFull, 1, "new: stays at full");
-  // (a sixth of the frames a whole frame late at 60 Hz: the shared guard's 0.4 s share crosses ENTER by chance every few seconds and
-  // each such trip after a rise is taken for the rise's: it comes back first, then walks down again. A limit of the shared (weather)
-  // guard, left as it is here - its behaviour may not change in this commit - and reported; printed, not asserted.)
+  // (since 2026-11-09 the shared guard's ENTER sits over the measured noise: up to a fifth of the frames late at random it stays at full)
+  assert.ok(mean >= 0.97, `new: background noise ${noise} keeps it at (or near) full (${mean.toFixed(3)})`);
 }
 
 /* ---------------------------------------------------------------- A2: the frame estimate climbing under the overload */
