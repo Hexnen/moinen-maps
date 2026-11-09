@@ -11,7 +11,8 @@ import { VIEW_PRESETS } from "../view-angle.mjs";
  *  - tools: the pointer (the map as usual), the WIND ARROW (drag on the map: the wind blows along the arrow, its length is the
  *    strength; a pixel arrow shows while you drag) and the TORNADO (click: one that stays and wanders there; drag: its path - it
  *    travels along it with the dock's level, speed and end);
- *  - bar: the weather (Clear / Rain / ...), its LEVEL 1 / 2 / 3 (keys 1-3 while the section is open), the fine intensity within the
+ *  - bar: the weather (Clear / Rain / ...), its LEVEL 1 / 2 / 3 (keys 1-3 while the section is open), the CLOUDS (off / scattered /
+ *    broken / overcast: a layer kept through preset changes; their look: clouds with shadows or shadows only; godrays), the fine intensity within the
  *    level, the wind (eight directions + strength), how long a change takes ("over N s"), the lens on / off and its level;
  *  - dock: Weather (status, on / off, who sees it, the layers and their levels), Wind (direction, strength, gusts), Tornadoes (the
  *    next one's level / speed / end, the list with each one's level and rope-out, rope out all), Ground (how fast it
@@ -21,7 +22,8 @@ import { VIEW_PRESETS } from "../view-angle.mjs";
  */
 const DIRS = [270, 315, 0, 45, 90, 135, 180, 225];
 const LEVEL_COLOR = ["", "#9fd0f5", "#4f9de0", "#2a5fb8"];
-const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0", snow: "#e8f1fb", sand: "#d9a55b", dust: "#e6d3a3", embers: "#f07a2a", wind: "#9fd38a", storm: "#5b7fa8", blizzard: "#cfe3f5" };
+const PRESET_COLOR = { clear: "#f2c14e", rain: "#4f9de0", snow: "#e8f1fb", sand: "#d9a55b", dust: "#e6d3a3", embers: "#f07a2a", wind: "#9fd38a", storm: "#5b7fa8", blizzard: "#cfe3f5", clouds: "#c9d6e3" };
+const CLOUD_COLOR = ["#f2c14e", "#dfe8f1", "#b9c8d8", "#8b9bb0"];
 const TOOLS = { "mm-wx-pick": null, "mm-wx-wind": "wind", "mm-wx-tornado": "tornado" };
 
 const over = () => Math.max(0, Number(setting("weatherOver")) || 0) * 1000;
@@ -42,6 +44,13 @@ const dirRow = () => {
   const w = curWind();
   return `<div class="mm-ws-opt"><span class="mm-ws-label">${esc(T("Weather.windDir"))}</span><div class="mm-ws-tools" role="group" aria-label="${esc(T("Weather.windDir"))}">${DIRS.map((d) => `<button type="button" class="mm-ws-toolbtn" data-wx-dir="${d}" aria-pressed="${w.str > 0 && Math.abs(((w.dir - d + 540) % 360) - 180) < 1}" aria-label="${esc(T(`Fire.dir.${d}`))}" data-tooltip="${esc(T(`Fire.dir.${d}`))}"><i class="fa-solid fa-arrow-right fa-rotate-by" style="--fa-rotate-angle:${d}deg" inert></i></button>`).join("")}</div></div>`;
 };
+// the cloud layer: off / scattered / broken / overcast (kept through preset changes), its look (bodies + shadows or shadows only), godrays
+const curClouds = () => cur()?.fx?.clouds?.l ?? 0;
+const cloudRow = () => {
+  const C = Wx.params0().clouds, b = (attr, on, icon, label, hint) => `<button type="button" class="mm-ws-toolbtn" data-${attr} aria-pressed="${on}" aria-label="${esc(T(label))}" data-tooltip="${esc(T(hint))}"><i class="${icon}" inert></i></button>`;
+  return btnRow("Weather.clouds", "wx-clouds", [0, 1, 2, 3], (v) => v === curClouds(), (v) => T(`Weather.cl.${v}`), (v) => T(`Weather.clh.${v}`), (v) => CLOUD_COLOR[v], (v) => v ? "fa-solid fa-cloud" : "fa-solid fa-sun")
+    + `<div class="mm-ws-opt"><div class="mm-ws-tools" role="group" aria-label="${esc(T("Weather.cloudLook"))}">${b("wx-cmode=\"sky\"", C.mode === "sky", "fa-solid fa-cloud-sun", "Weather.cm.sky", "Weather.cmh.sky")}${b("wx-cmode=\"shadows\"", C.mode === "shadows", "fa-solid fa-circle-half-stroke", "Weather.cm.shadows", "Weather.cmh.shadows")}${b("wx-rays", C.rays, "fa-solid fa-sun-bright", "Weather.rays", "Weather.raysHint")}</div></div>`;
+};
 const lensRow = () => {
   const L = Wx.params0().lens;
   return `<div class="mm-ws-opt"><div class="mm-ws-tools" role="group"><button type="button" class="mm-ws-toolbtn" data-wx-lens aria-pressed="${L.on}" aria-label="${esc(T("Weather.lensOn"))}" data-tooltip="${esc(T("Weather.lensOnHint"))}"><i class="fa-solid fa-glasses" inert></i></button></div>
@@ -52,7 +61,7 @@ const lensRow = () => {
 
 function bar(host, ctx) {
   const render = () => {
-    host.innerHTML = `${presetRow()}${levelRow()}
+    host.innerHTML = `${presetRow()}${levelRow()}${cloudRow()}
       ${optRange({ name: "wx.i", label: T("Weather.intensity"), value: curI(), min: 0, max: 1, step: 0.05, hint: T("Weather.intensityHint") })}
       ${dirRow()}
       ${optRange({ name: "wx.str", label: T("Weather.windStr"), value: curWind().str, min: 0, max: 1, step: 0.05, hint: T("Weather.windStrHint") })}
@@ -66,6 +75,9 @@ function bar(host, ctx) {
     const t = ev.target;
     const p = t.closest?.("[data-wx-preset]"); if ( p ) { Wx.change({ preset: p.dataset.wxPreset }, { over: over() }); return; }
     const l = t.closest?.("[data-wx-level]"); if ( l ) { if ( Number(l.dataset.wxLevel) !== curLevel() ) Wx.change({ level: Number(l.dataset.wxLevel) }, { over: over() }); return; }
+    const c = t.closest?.("[data-wx-clouds]"); if ( c ) { if ( Number(c.dataset.wxClouds) !== curClouds() ) Wx.change({ clouds: Number(c.dataset.wxClouds) }, { over: over() }); return; }
+    const cm = t.closest?.("[data-wx-cmode]"); if ( cm ) { Wx.setCloudLook({ mode: cm.dataset.wxCmode }); return; }
+    if ( t.closest?.("[data-wx-rays]") ) { Wx.setCloudLook({ rays: !Wx.params0().clouds.rays }); return; }
     const d = t.closest?.("[data-wx-dir]"); if ( d ) { const w = curWind(); Wx.change({ wind: { dir: Number(d.dataset.wxDir), str: w.str > 0 ? w.str : 0.4 } }, { over: Math.min(over(), 5000) }); return; }
     if ( t.closest?.("[data-wx-lens]") ) { Wx.setParams({ lens: { on: !Wx.params0().lens.on } }); }
   };
@@ -93,6 +105,10 @@ function bar(host, ctx) {
   const sync = () => {
     for ( const b of host.querySelectorAll("[data-wx-preset]") ) b.setAttribute("aria-pressed", String(b.dataset.wxPreset === curPreset()));
     for ( const b of host.querySelectorAll("[data-wx-level]") ) b.setAttribute("aria-pressed", String(Number(b.dataset.wxLevel) === curLevel()));
+    for ( const b of host.querySelectorAll("[data-wx-clouds]") ) b.setAttribute("aria-pressed", String(Number(b.dataset.wxClouds) === curClouds()));
+    const C = Wx.params0().clouds;
+    for ( const b of host.querySelectorAll("[data-wx-cmode]") ) b.setAttribute("aria-pressed", String(b.dataset.wxCmode === C.mode));
+    for ( const b of host.querySelectorAll("[data-wx-rays]") ) b.setAttribute("aria-pressed", String(C.rays));
   };
   // keys 1-3: the level, while the section is open (not while typing)
   const key = (e) => {

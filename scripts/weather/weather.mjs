@@ -14,6 +14,7 @@ import { TornadoDisplay, tornadoPrograms } from "./tornado.mjs";
 import { SteamLayer } from "./steam.mjs";
 import { guardInfo } from "./guard.mjs";
 import { warmPrograms } from "../gl-warm.mjs";
+import { CloudDisplay, cloudPrograms } from "./clouds.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -23,7 +24,7 @@ import { warmPrograms } from "../gl-warm.mjs";
  * COST WHEN OFF: no display object, no ticker, no texture: only these hooks. A future key (a change scheduled ahead) is one timer.
  */
 let P = M.cleanParams();
-let display = null, lens = null, tornado = null, tornadoTimer = 0, steam = null;
+let display = null, lens = null, tornado = null, tornadoTimer = 0, steam = null, clouds = null;
 let info = null, shelter = null, infoKey = "", shelterKey = "", infoJob = 0;
 let timer = 0, shelterTimer = 0;
 let lastState = null;
@@ -92,7 +93,7 @@ let warmJob = 0;
 async function prewarm() {
   const job = ++warmJob;
   if ( globalThis.CONFIG?.moinenMaps?.weatherPrewarm === false || !shown() ) return;
-  const list = [...displayPrograms(), ...tornadoPrograms()];
+  const list = [...displayPrograms(), ...cloudPrograms(), ...tornadoPrograms()];
   if ( P.lens?.on ) try { list.push(...(await import("./lens.mjs")).lensPrograms()); } catch { /* compiled on first use */ }
   await warmPrograms(list, () => job === warmJob && canvas.ready);
 }
@@ -104,6 +105,7 @@ export function teardown() {
   cancelIdle();
   display?.destroy(); display = null;
   steam?.destroy(); steam = null;
+  clouds?.destroy(); clouds = null;
   lens?.destroy?.(); lens = null;
   info?.texture?.destroy(true); info = null; infoKey = "";
   shelter?.texture?.destroy(true); shelter = null; shelterKey = "";
@@ -135,8 +137,10 @@ export function refresh() {
     if ( display ) { display.destroy(); display = null; }
     if ( lens ) { lens.destroy(); lens = null; }
     if ( steam ) { steam.destroy(); steam = null; }
-    const next = P.keys.find((k) => k.t > now);
-    if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t - now + 20)));
+    if ( clouds ) { clouds.destroy(); clouds = null; }
+    // (a key that has just started fades in from nothing: its first few ms are below the presence cut, so look again shortly)
+    const next = P.keys.find((k) => k.t + k.dur > now && Object.keys(k.fx ?? {}).length);
+    if ( next && shown() ) timer = setTimeout(() => { timer = 0; refresh(); }, Math.min(2 ** 31 - 1, Math.max(16, next.t > now ? next.t - now + 20 : 100)));
     return;
   }
   const g = geo();
@@ -149,6 +153,18 @@ export function refresh() {
   display.setState(st);
   syncLens(st);
   syncSteam();
+  syncClouds(st);
+}
+
+/** The cloud layer (clouds.mjs): the Clouds weather and the wind's cloud shadows, one field; no cover -> no display. */
+function syncClouds(st) {
+  const want = !!st && (!!st.fx.clouds || (st.fx.wind?.p > 0 && st.fx.wind.s > 0.02));
+  if ( !want ) { if ( clouds ) { clouds.destroy(); clouds = null; } return; }
+  try {
+    clouds ??= new CloudDisplay();
+    clouds.now = sharedNow;
+    clouds.setState(st, P, sharedNow());
+  } catch ( err ) { console.warn(`${MODULE_ID} | weather: clouds`, err); clouds?.destroy(); clouds = null; }
 }
 
 /** Steam over fire (steam.mjs): while the weather is live; its ticker returns at once when no fire is under rain or snow. */
@@ -298,6 +314,7 @@ function step() {
   if ( !Object.keys(st.fx).length && st.wet <= 0.002 && st.cover <= 0.002 && st.steady ) { refresh(); return; }
   display.setState(st);
   syncLens(st);
+  syncClouds(st);
   fireOutCheck();
   const s1 = Math.floor(Date.now() / 1000);
   if ( s1 !== stateTold ) { stateTold = s1; tell("state"); }   // (the dock's status line, once a second)
@@ -390,10 +407,24 @@ export function dryNow() {
 /** Layer settings (GM): { on, who, ground: {...}, lens: {...}, seed }. */
 export function setParams(patch) {
   if ( !game.user.isGM ) return;
-  P = M.cleanParams({ ...P, ...patch, ground: { ...P.ground, ...(patch.ground ?? {}) }, lens: { ...P.lens, ...(patch.lens ?? {}) }, fire: { ...P.fire, ...(patch.fire ?? {}) } });
+  P = M.cleanParams({ ...P, ...patch, ground: { ...P.ground, ...(patch.ground ?? {}) }, lens: { ...P.lens, ...(patch.lens ?? {}) }, fire: { ...P.fire, ...(patch.fire ?? {}) },
+    clouds: { ...P.clouds, ...(patch.clouds ?? {}) } });
   refresh(); tell("params");
   save();
 }
+
+/** The cloud layer's look (GM): { mode "sky" | "shadows", rays }; each switch fades on the shared clock from a moment just ahead. */
+export function setCloudLook({ mode, rays } = {}) {
+  if ( !game.user.isGM ) return;
+  const C = { ...P.clouds }, t = Math.round(sharedNow() + M.LEAD_MS);
+  // (a switch back during a running fade starts from where the fade is: the new fade's start is moved so the weight is continuous)
+  const flip = (on, T) => { const w = M.cloudSwitch(on, T, t); return t - Math.round(M.CLOUD_FADE * inv(on ? 1 - w : w)); };
+  if ( mode !== undefined && M.CLOUD_MODES.includes(mode) && mode !== C.mode ) { C.modeT = flip(C.mode === "sky", C.modeT); C.mode = mode; }
+  if ( rays !== undefined && !!rays !== C.rays ) { C.raysT = flip(C.rays, C.raysT); C.rays = !!rays; }
+  setParams({ clouds: C });
+}
+/** The inverse of the smoothstep on 0..1 (the fade's progress for a weight). */
+const inv = (y) => { y = Math.min(1, Math.max(0, y)); return 0.5 - Math.sin(Math.asin(1 - 2 * y) / 3); };
 
 /** The scene's view angle (shared with fire): a preset name or { lift, squash }. */
 export function setView(v) {
@@ -436,8 +467,14 @@ export const weatherApi = {
   rainAt() { const r = M.resolve(P, sharedNow()).fx.rain; return r ? r.p * M.gate([0.35, 0.7, 1], r.s) : 0; },
   /** How it stands on this client: what is drawn, instances, last tick ms, lens. */
   status: () => ({ on: P.on, who: P.who, shown: shown(), display: !!display, ticking: !!display?.ticking, lens: !!lens, detail: detailCap(), lensCap: lensCap(),
-    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, fireWet: fireWetNow(), state: lastState }),
-  display: () => display, lensDisplay: () => lens, tornadoDisplay: () => tornado, steamDisplay: () => steam, guard: guardInfo, refresh, model: M, geo,
+    info: !!info, shelter: !!shelter, ...(display?.stats ?? {}), lensStats: lens?.stats ?? null, tornado: tornado ? { ...tornado.stats } : null, steam: steam ? { ...steam.stats } : null, clouds: clouds ? { ...clouds.stats, on: clouds.ticking } : null, fireWet: fireWetNow(), state: lastState }),
+  /** The cloud layer: { level 0 (off) .. 3, mode "sky" | "shadows", rays true | false }, { over ms } (GM). */
+  clouds({ level, mode, rays } = {}, { over = M.DEFAULT_DUR } = {}) {
+    if ( mode !== undefined || rays !== undefined ) setCloudLook({ mode, rays });
+    if ( level !== undefined ) change({ clouds: Math.max(0, Math.min(3, Math.round(Number(level)) || 0)) }, { over });
+    return { level: M.current(P)?.fx?.clouds?.l ?? 0, ...P.clouds };
+  },
+  display: () => display, lensDisplay: () => lens, cloudDisplay: () => clouds, tornadoDisplay: () => tornado, steamDisplay: () => steam, guard: guardInfo, refresh, model: M, geo,
   tornado: tornadoApi
 };
 

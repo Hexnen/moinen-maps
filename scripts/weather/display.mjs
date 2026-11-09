@@ -26,8 +26,8 @@ import { SPEED_SQ, dirVec, vortices } from "../wind.mjs";
  *   PARTS   sortLayer 995, elevation Infinity: one instanced draw per kind (snow flakes + spindrift, sand grit, dust motes, ember
  *           sparks, wind lines + debris), the same tiles-of-slots scheme as the rain; a kind that is not on is not drawn.
  *   HAZE    sortLayer 990 (above tokens, below the air): sand haze, dust haze, ember smoke in flat dithered bands (map mixed per cell).
- *   The ground pass also carries snow cover, sand drifts and streamers, dust sun shafts, the wind's grass combing, water ruffle and
- *   cloud shadows, and every effect's tint (cold, ochre, warm, the fire-lit evening, the wind's dim); cover and drift shares come from the scene's own score quantiles (fields.mjs).
+ *   The ground pass also carries snow cover, sand drifts and streamers, dust sun shafts, the wind's grass combing and water ruffle,
+ *   and every effect's tint (cold, ochre, warm, the fire-lit evening, the wind's dim); cover and drift shares come from the scene's own score quantiles (fields.mjs).
  *
  * COST: no weather -> this display does not exist (no object, no ticker). With weather: one ticker listener (a few uniforms; the
  * state is resolved at most 12 times a second), one draw call per pass that has something to draw. The ground and the haze are one
@@ -261,7 +261,8 @@ export class WeatherDisplay {
       const R = windSp * 1.4 * 3.4 * 1.2 * 0.5 + 24;
       this.reach.wind = [-Math.abs(wd[0]) * R - 24, Math.abs(wd[0]) * R + 24, -Math.abs(wd[1]) * R - lift * 30 - 24, Math.abs(wd[1]) * R + 24];
     }
-    gu2.uWindG[0] = on("wind") ? wp : 0; gu2.uWindG[1] = WG.comb; gu2.uWindG[2] = on("wind") ? WG.cloud * wp : 0; gu2.uWindG[3] = WG.dim;
+    // (the wind's cloud shadows are drawn by the one cloud layer, clouds.mjs: uWindG.z stays 0)
+    gu2.uWindG[0] = on("wind") ? wp : 0; gu2.uWindG[1] = WG.comb; gu2.uWindG[2] = 0; gu2.uWindG[3] = WG.dim;
     gu2.uWindV[0] = wd[0]; gu2.uWindV[1] = wd[1]; gu2.uWindV[2] = windSp; gu2.uWindV[3] = on("wind") ? WG.ruffle * wp : 0;
     const wHaze = on("wind") ? WG.haze * wp : 0;
     if ( wHaze > hz.uDustH[0] ) { hz.uDustH[0] = wHaze; hz.uDustH[1] = wd[0] * windSp * 0.8; hz.uDustH[2] = wd[1] * windSp * 0.8; }

@@ -30,7 +30,7 @@ export function recorder() {
   }
   const crt = count("rtMade"); wrap(PIXI.RenderTexture, "create", function(f, a) { return crt(f, a, this); });
   // the weather tickers (their listeners call the instance's tick)
-  const wx = [["display", W().display()], ["lens", W().lensDisplay()], ["tornado", W().tornadoDisplay?.()], ["steam", W().steamDisplay?.()]];
+  const wx = [["display", W().display()], ["lens", W().lensDisplay()], ["tornado", W().tornadoDisplay?.()], ["steam", W().steamDisplay?.()], ["clouds", W().cloudDisplay?.()]];
   for ( const [n, o] of wx ) if ( o?.tick ) {
     const f = o.tick; o.tick = function(...a) { const t = performance.now(); try { return f.apply(this, a); } finally { if ( rec.cur ) rec.cur.wx = (rec.cur.wx ?? 0) + performance.now() - t; } };
     undo.push(() => { delete o.tick; if ( o.tick !== f ) o.tick = f; });
