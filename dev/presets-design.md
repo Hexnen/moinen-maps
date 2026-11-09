@@ -759,6 +759,24 @@ distinct hits opening in sequence along the walk, a believable spread, a slightl
 - **Not checked:** a GTX 1080 (only the weak-2 emulation); the remote host; two guns fired at once; a run across a
   scene edge.
 
+### Guns polish round 2 (2026-11-09, lane 4, headless Chrome DPR 2)
+
+- **Hit spurts** (`scripts/presets/gun-fx.mjs`, pure): a baked pixel sprite per hit (a jet column into a crown that erodes, clods,
+  grains; light 580 ms / heavy 850 ms, 30 fps, 4 variants), drawn by `accents.mjs` in the accent layer, tinted by the ground under the
+  hit (one `mapPixels` box per run), lifted toward moonlight at night. A heavy gun mixes about a third light spurts. The dust layer's
+  `hits` kind is now only a low lingering haze.
+- **Pocks**: a gun stroke's entry uses a **tight clock** (`entry-clock.mjs` `tight`, display passes it for a preset's path stroke):
+  a narrow band (70 ms) that only trails the walk, so no pock pixel shows before its bullet lands (the old band of a long walk showed
+  specks up to ~500 ms early). Calmer pock params (uzi and heli: no debris, no halo, low scatter); heli `minis` dropped (they had the
+  impact's falling-blow shock ring and ring pebbles). A gun's small pocks get a 30 % night rim (`destruction.mjs` gunSeen, cause-fx).
+- **Night glow** round each hit: a smooth dithered 64 px falloff to zero (the old 4 flat rings ended on a 14 % step: a blocky disc).
+- Tests: `dev/presets-gunfx.test.mjs` (bake, timing, frame, tone, tight clock); CAUSE_COMMITS takes `dc990b7`.
+- Cost (`dev/guns-cost.mjs` matrix, ZZ scene, GPU median / p95 ms, before f2b669d -> after): see the round-2 report; within noise
+  of before at z1 and z3, weak 1 and 2.
+- Blind judge (one, round-1 scale): uzi 4 -> 5, heli 5 -> 6. **Not at the bar (8).** Open: dark clods hanging in the spurts, stamped
+  identical columns, lanes read as a scatter, pock decals grey/ring pebbles/white night speckle and left on water, the muzzle flash
+  a thin cross with its light cut at the token edge, ruled tracers, the uzi near invisible at zoom 1.
+
 ## 17. The blasts as built (bomb, grenade: presets-boom)
 
 The bar: the whole firing reads as ONE natural explosion, from the click to the settled ground, and the ground keeps a dust haze
