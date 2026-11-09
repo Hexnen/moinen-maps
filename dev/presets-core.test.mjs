@@ -190,7 +190,13 @@ for ( const id of ["uzi", "heliHmg", "grenade", "bomb"] ) {
 {
   const api = readFileSync(new URL("../scripts/presets/presets.mjs", import.meta.url), "utf8");
   const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-  ok(!/Hooks\.(on|once)|settings\.register|ticker|\.update\(|setFlag/.test(code(api)), "J the API file registers nothing and writes nothing");
+  ok(!/Hooks\.(on|once)|settings\.register|ticker|\.update\(|setFlag/.test(code(api)), "J the API file registers nothing itself and writes nothing");
+  const run = readFileSync(new URL("../scripts/presets/runtime.mjs", import.meta.url), "utf8");
+  ok(!/settings\.register|ticker|setFlag/.test(code(run)) && (code(run).match(/Hooks\.on\(/g) ?? []).length === 4 && code(api).includes("Run.registerRuntime()"),
+    "J the runtime: four hooks (canvasReady, canvasTearDown, updateScene, userConnected), no setting, ticker or flag");
+  ok(/function onCanvasReady\(\) \{\s*reset\(\);\s*const scene = canvas\?\.scene;\s*if \( !recordsOf\(scene\)\.length \) return;/.test(code(run))
+    && /const recs = FLAG in f \|\| `-=\$\{FLAG\}` in f;\s*if \( recs \) sync\(scene\);\s*if \( \(recs \|\| FIRE in f \|\| `-=\$\{FIRE\}` in f\) && \(recs \|\| known\.size\) \)/.test(code(run)),
+    "J the runtime: nothing happens on a scene without firing records");
   const w = readFileSync(new URL("../scripts/presets/write.mjs", import.meta.url), "utf8");
   ok(!/^\s*Hooks\.(on|once)/m.test(w) && !/settings\.register/.test(w), "J the writer has no top-level hook or setting");
   const main = readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8");
