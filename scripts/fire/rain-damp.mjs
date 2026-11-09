@@ -47,6 +47,10 @@ export function dampArea(a, wet) {
   const m = a.mesh; if ( !m?.isArt || !m.fuelPass || !m.show ) return;
   const dim = wet.dim, steam = wet.steam;
   if ( !(dim > 0.001 || steam > 0.001) && !a.wxOn ) return;
+  // (the same wetness as last frame on the same meshes: everything below would write the same values again - the stack bench,
+  // dev/stack-bench.mjs, found this at ~0.05 ms a frame for 20 areas under steady rain; the wetness only moves in a transition)
+  if ( a.wxDim === dim && a.wxSteam === steam && a.wxMesh === m.show ) return;
+  a.wxDim = dim; a.wxSteam = steam; a.wxMesh = m.show;
   const meshes = [m.show, m.front, m.smoke, m.glow].filter((x) => x?.shader?.uniforms?.uRamp);
   if ( !a.wx ) a.wx = { ramp: Float32Array.from(m.show.shader.uniforms.uRamp), tint: Float32Array.from(m.show.shader.uniforms.uSmokeTint) };
   const R = a.wx.ramp, T0 = a.wx.tint;
