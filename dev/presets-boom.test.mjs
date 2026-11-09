@@ -139,6 +139,13 @@ const count = (F) => F.px.reduce((a, l) => a + l.length / 2, 0);
   ok(hasAccents(P) && hasAccents(Gn) && !hasGun(P), "blast records load the accents (not as guns)");
   ok(!hasAccents({ pending: { accent: [], cue: [] } }), "nothing to play: not loaded");
   const ac = readFileSync(new URL("../scripts/presets/accents.mjs", import.meta.url), "utf8");
+  const da = readFileSync(new URL("../scripts/fire/dust-art.mjs", import.meta.url), "utf8"), ba = readFileSync(new URL("../scripts/fire/burst-art.mjs", import.meta.url), "utf8");
+  ok(/int st = int\(th\.x\), cnt = t > uPuffEnd \? 0 : int\(th\.y\);/.test(da) && /uPuffEnd: field\.puffEnd \?\? 1e9/.test(da), "the haze's minutes skip the emitters (puffEnd)");
+  ok(/if \( k5\.x > 0\.0 && b > ke \+ k5\.x \) continue;/.test(da), "a blast's lazy puffs stop after linW");
+  ok(/hl = 1\.0 - smoothstep\(0\.42 \* k5\.y, k5\.y, a\)/.test(da) && /\(hz > 0\.0 && band > 0 \? 8 : 0\)/.test(da) && /HAZE\[au\]/.test(da), "the haze thins over its second half, its own veil (A bit 8)");
+  ok(/MOTES of a blast's HAZE/.test(da) && /if \( mD > 0\.03 && G == 0 && chip == 0 \)/.test(da), "the haze's motes (the weather dust's way)");
+  ok(/this\.puffEnd < 1e8 \? Math\.max\(this\.maxKick \+ 30/.test(da), "reduced motion: a blast's haze still thins on the clock");
+  ok(/float pool = uAge < 0\.0 \? -1\.0 :/.test(ba), "burst: no heat pool before the impact");
   ok(/A\.itemsOf\(rec\)/.test(ac) && /shadeG\.beginFill\(A\.SHADE/.test(ac) && /function flash\(/.test(ac) && /noFlash/.test(ac) && /rumble\(F\.kicks, F\.shakes/.test(ac), "accents.mjs takes itemsOf, draws shadows, flash (opt-out), shake");
 }
 

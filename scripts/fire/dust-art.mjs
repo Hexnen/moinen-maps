@@ -136,6 +136,7 @@ void main() {
   vec2 p = vec2(c) + 0.5;
   float t = uNow;
   int R = 0, G = 0, B = 0, A = 0;
+  float mD = 0.0;                                                      // (a blast's haze here: its motes' density)
   // ---------------------------------------------------------------- the ground: aura, film, marks, grit
   vec4 C = texelFetch(uCell, c, 0);
   if ( C.x < 1e8 ) {
@@ -155,6 +156,7 @@ void main() {
       float edge = dn + (n - 0.5) * 0.7;
       float env = smoothstep(0.0, 1.0, a) * mix(1.0, hz > 0.0 ? 0.62 : 0.42, smoothstep(1.5, hz > 0.0 ? 20.0 : 8.0, a)) * hl;
       float dens = (1.0 - smoothstep(0.3 * reach, reach, edge)) * env * fo * k3.x * (0.6 + 0.5 * n);
+      if ( hz > 0.0 ) { mD = dens * smoothstep(1.5, 6.0, a); dens *= 1.45; }   // (a blast's haze: a fuller pall, its own veil - A bit 8)
       // (the bands' edges: a small-scale smooth noise - blobby pixel contours, never a salt-and-pepper dither over a big fading area)
       float dz = 0.0;
       if ( dens > 0.05 && dens < 0.8 ) dz = (vn(p / (2.0 * max(uU, 0.25)), uSeed + 31) - 0.5) * 0.3;
@@ -187,7 +189,7 @@ void main() {
         if ( (g1 || g2) && h3(c.x, c.y, 14) < fo * (hz > 0.0 ? smoothstep(0.0, 0.35, hl) : 1.0) ) { float ht = h3(c.x, c.y, 15); gt = ht < 0.5 ? 1 : ht < 0.88 ? 2 : 3; }
       }
       B = band + 4 * gt + (film ? 16 : 0);
-      A = mk + (scuff ? 4 : 0);
+      A = mk + (scuff ? 4 : 0) + (hz > 0.0 && band > 0 ? 8 : 0);
     }
   }
   // ---------------------------------------------------------------- puffs and chips: the tile's emitters
@@ -271,6 +273,34 @@ void main() {
       int cls = ba < 0.55 + 0.25 * h3(c.x >> 1, c.y >> 1, 64) ? 1 : age > 0.62 + hv ? 3 : age > 0.4 + hv ? 2 : 0;
       G = 1 + band + 4 * (blv - 1) + 12 * cls;
       R = 1 + int(mod(floor(bgy / uq), 255.0));
+    }
+  }
+  // MOTES of a blast's HAZE (the weather dust's way - weather/fx-glsl.mjs motes: hashed slots per world tile, whole-cycle lives of
+  // 6 .. 10 s, a slow Brownian sway of a few sines, riding the wind - here one art pixel each, in the dust's own tones): specks of
+  // the dust that hang in the air over the swept ground, lit (glint) in their prime and mid-tone as they come and go, fewer as the
+  // haze thins; a slot looks at its 3 x 3 tiles only (the sway < a tile), so the cost is nine hashes a haze cell
+  if ( mD > 0.03 && G == 0 && chip == 0 ) {
+    const float MT = 10.0;
+    vec2 q = p - (uWind + uSWind) * 0.5 * t;
+    ivec2 tq = ivec2(floor(q / MT)), cq = ivec2(floor(q));
+    for ( int j = -1; j <= 1 && G == 0; j++ ) for ( int i = -1; i <= 1; i++ ) {
+      ivec2 tt = tq + ivec2(i, j);
+      float L = 6.0 + 4.0 * h3(tt.x, tt.y, 71), ph = h3(tt.x, tt.y, 72) * L, cyc = floor((t + ph) / L), age = (t + ph - cyc * L) / L;
+      int ci = int(cyc);
+      float hk = h3(tt.x * 7 + ci, tt.y, 73);
+      if ( hk > 1.3 * mD ) continue;                                  // (fewer where the haze is thin, none past it)
+      float ha = h3(tt.x, tt.y * 3 + ci, 76), hb = h3(tt.x + ci * 5, tt.y, 77);
+      if ( age < 0.04 + 0.12 * ha || age > 0.96 - 0.12 * hb ) continue;
+      vec2 b = (vec2(tt) + vec2(h3(tt.x, tt.y + ci * 13, 74), h3(tt.x + ci * 17, tt.y, 75))) * MT;
+      float T6 = t * 6.283, hs = h3(tt.x, tt.y, 78);
+      vec2 sw = vec2(2.6 * sin(T6 * (0.05 + 0.04 * hs) + 6.28 * ha) + 1.1 * sin(T6 * (0.17 + 0.1 * hb) + 6.28 * hs),
+                     1.8 * sin(T6 * (0.06 + 0.05 * hb) + 6.28 * hs) + 0.8 * sin(T6 * (0.19 + 0.08 * ha) + 6.28 * hb));
+      float z = (2.0 + 6.0 * hb + 1.2 * sin(T6 * (0.08 + 0.05 * ha) + 6.28 * hk)) * uU;
+      vec2 gp = b + sw;                                               // (its ground point; drawn lifted by its height)
+      if ( ivec2(floor(gp - vec2(0.0, z * RY))) != cq ) continue;
+      bool prime = age > 0.16 + 0.12 * ha && age < 0.84 - 0.12 * hb;
+      G = 64 + (prime ? 2 : 1); R = 1 + int(mod(floor((gp.y + (p.y - q.y)) / uq), 255.0));
+      break;
     }
   }
   if ( shadow ) B |= 32;
@@ -404,6 +434,8 @@ ${FOOTPRINT}`;
 const GROUND = `${SHOW_COMMON}
 ${PAL}
 const float AURA[3] = float[3](0.0, 0.15, 0.27);
+// a blast's HAZE (A bit 8): a denser veil, a little paler and greyer than the soil - hanging dust that softens the map under it
+const float HAZE[3] = float[3](0.0, 0.24, 0.42);
 vec4 over(vec4 dst, vec3 c, float a) { return vec4(c * a + dst.rgb * (1.0 - a), a + dst.a * (1.0 - a)); }
 vec4 cellColor(vec2 cf) {
   ivec4 a = art(ivec2(cf));
@@ -427,7 +459,9 @@ vec4 cellColor(vec2 cf) {
   int sh = (a.b >> 6) & 3;
   if ( sh > 0 ) o = over(o, T * 0.32, (sh == 2 ? 0.3 : 0.16) * (1.0 - 0.6 * uDark));
   int au = a.b & 3;
-  if ( au > 0 ) o = over(o, lit, AURA[au] * (1.0 + 0.25 * uDark));
+  // (by day a pale dust over the soil's own tone - it reads on a light ground as on a dark one; at night the moonlit soil tone)
+  if ( au > 0 && (a.a & 8) != 0 ) o = over(o, mix(mix(lit, vec3(0.88, 0.85, 0.79), 0.5), lit, 0.8 * uDark), HAZE[au] * (1.0 + 0.25 * uDark));
+  else if ( au > 0 ) o = over(o, lit, AURA[au] * (1.0 + 0.25 * uDark));
   return o;
 }
 #define OUT(c) ((c) * uAlpha)

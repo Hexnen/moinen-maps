@@ -247,10 +247,9 @@ function muzzle(it, t, env, F, seed) {
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const smooth = (a, b, v) => { const x = clamp01((v - a) / (b - a)); return x * x * (3 - 2 * x); };
-/** The ordered dither's threshold of a 2 x 2 cluster (destruction's dropout grain): anchored to the art grid, so a growing shadow only
- * ever adds clusters (no crawl). */
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-const bayer = (x, y) => (BAYER[((y >> 1) & 3) * 4 + ((x >> 1) & 3)] + 0.5) / 16;
+/** The dither's threshold of a 2 x 2 cluster (destruction's dropout grain, hashed: no ordered halftone grid), anchored to the art grid,
+ * so a growing shadow only ever adds clusters (no crawl). */
+const bayer = (x, y) => h3(x >> 1, y >> 1, 91);
 
 /** A soft ground shadow at (x, y): an ellipse of radius r (scene px, squashed by the view), its density `dens` (0..1) highest in the
  * middle and dithered out to the rim in two steps - dark in the core, a light penumbra round it. */
@@ -274,7 +273,7 @@ function fallShadow(it, t, env, F, seed) {
   const g = env.grid, u = clamp01((t - it.at) / Math.max(1, it.dur)); if ( u >= 1 ) return;
   const k = 1 - u, d = Array.isArray(it.from) ? it.from : [0, 0], D = BOMB_D * g;
   const x = it.x - d[0] * D * k, y = it.y - d[1] * D * k, z = BOMB_Z * g * k * k;
-  shadow(F, env, x, y, g * (SHADOW_R[1] + (SHADOW_R[0] - SHADOW_R[1]) * k), smooth(0, 0.18, u) * (0.12 + 0.74 * Math.pow(u, 1.6)));
+  shadow(F, env, x, y, g * (SHADOW_R[1] + (SHADOW_R[0] - SHADOW_R[1]) * k), smooth(0, 0.18, u) * (0.2 + 0.68 * Math.pow(u, 1.4)));
   if ( z > BOMB_SHOW * g ) return;
   // (its screen velocity: the drift along the direction, squashed, and the fall, lifted - the body's axis and the streak's way)
   const sq = env.squash ?? 0.8, dur = Math.max(1, it.dur), vx = d[0] * D / dur, vy = d[1] * D * sq / dur + (env.lift ?? 0.5) * 2 * BOMB_Z * g * k / dur;

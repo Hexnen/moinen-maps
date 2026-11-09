@@ -171,7 +171,8 @@ void main() {
   }
   // ---------------------------------------------------------------- the ground: a heat pool under the flash, the cloud's shadow
   vec2 g = (p - uC) / vec2(uR * 1.5, uR * 1.2);
-  float pool = (1.0 - dot(g, g)) * exp(-uAge / 0.45) * (1.0 - put);
+  // (nothing before the impact: uAge < 0 in the pre-roll - exp() of it grew the pool over the map before the bomb had landed)
+  float pool = uAge < 0.0 ? -1.0 : (1.0 - dot(g, g)) * exp(-uAge / 0.45) * (1.0 - put);
   pool += (h3(c.x >> 1, c.y >> 1, 67) - 0.5) * 0.12;
   if ( pool > 0.55 ) B |= 3; else if ( pool > 0.3 ) B |= 2; else if ( pool > 0.12 ) B |= 1;
   float sh = FS + (h3(c.x >> 1, c.y >> 1, 66) - 0.5) * 0.1;
