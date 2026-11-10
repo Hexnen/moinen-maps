@@ -143,8 +143,18 @@ function relink() {
 function onLayer(kind) {
   if ( !S || !["edited", "loaded", "gone"].includes(kind) ) return;
   clearTimeout(linkTimer);
-  linkTimer = setTimeout(() => { linkTimer = 0; if ( !S ) return; relink(); refresh(); tell("linked"); }, 150);
+  linkTimer = setTimeout(() => {
+    linkTimer = 0;
+    if ( !S ) return;
+    // PERF (ultra1-zones): fire, smoke, dust and destruction change many times a second under heavy use, the zone states they give
+    // seldom do: when the layers say the same as before, nothing to draw or tell (the marks M are made again only from the same parts)
+    const before = mapKey(MAP), Mb = M;
+    relink();
+    if ( Mb && mapKey(MAP) === before ) { M = Mb; return; }
+    refresh(); tell("linked");
+  }, 150);
 }
+const mapKey = (m) => JSON.stringify([...m]);
 
 /** The burning fire strokes that lie (mostly) in a zone: their ids. A stroke reaching into other zones stays unless half of it is here. */
 function fireStrokesIn(id) {
