@@ -733,6 +733,9 @@ export class DestructionDisplay {
   /** A later object covers what lies under it: the plain map, masked by the object's own pixels, drawn first in its container. */
   addPatch(g) {
     const ms = this.mapSprite(); if ( !ms ) return;
+    // (an area that let go of its atlas - freeAtlas - has no cover to copy: its pixels are asked for and the patch follows them,
+    // restoreAtlas; masking with the freed atlas' frame drew no patch at all)
+    if ( !g.coverTex && g.atlasFree && this.pixelSource ) { g.patchWait = true; (this.pixelAsks ??= new Set()).add(g); return; }
     const c = g.coverFrame, ap = this.ap, o = this.origin;
     const mask = new PIXI.Sprite(this.coverTexture(g));
     mask.eventMode = "none"; mask.scale.set(ap); mask.position.set(o.x + c.x * ap, o.y + c.y * ap);
@@ -1201,7 +1204,10 @@ export class DestructionDisplay {
     const Q = this.restoreQ, t0 = performance.now();
     while ( Q?.length && performance.now() - t0 < budget ) {
       const { g, sprites, data } = Q.shift();
-      if ( !g.dead && (data ? this.restoreAtlasData(g, data) : this.restoreAtlas(g, sprites)) ) this.stats.restored = (this.stats.restored ?? 0) + 1;
+      if ( !g.dead && (data ? this.restoreAtlasData(g, data) : this.restoreAtlas(g, sprites)) ) {
+        this.stats.restored = (this.stats.restored ?? 0) + 1;
+        if ( g.patchWait ) { g.patchWait = false; if ( !g.patch ) this.addPatch(g); if ( g.flat && !g.anim && !this.pending?.has(g) ) this.afterFlatten?.(g); }
+      }
     }
     const P = this.pending; if ( !P?.size ) return;
     let entered = 0;

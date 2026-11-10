@@ -462,6 +462,15 @@ function repaintStep() {
   if ( !repaintQ.size && repaintFn ) { canvas.app?.ticker?.remove(repaintFn); repaintFn = null; }
 }
 
+/**
+ * MEMORY (ultra soak): a hole's fill staging - the texture the rising water is painted into and two buffers of its size, ~2 MB of CPU
+ * and its GPU copy for a big hole - stayed for the whole session after the fill. It is made again if the hole fills again (a Detonate
+ * replays the break: `if ( !e.fillTex )` below); at rest the loop's own frames are shown.
+ */
+function fillDone(e) {
+  e.fillTex?.destroy(true); e.fillTex = null; e.fillBuf = null; e.stage = null; e.job = null;
+}
+
 function freeTextures(e) {
   for ( const q of e.tex ) q.t.destroy(true);
   e.tex = [];
@@ -554,11 +563,11 @@ function tick() {
       if ( reducedMotion() ) {
         e.sprite.alpha = Math.min(1, el / 300);
         e.sprite.texture = e.tex[idx].t;
-        if ( el >= 300 ) { e.fillAt = null; e.sprite.alpha = 1; }
+        if ( el >= 300 ) { e.fillAt = null; e.sprite.alpha = 1; fillDone(e); }
         continue;
       }
       const u = el / e.fillDur;
-      if ( u >= 1 + FC.BAND ) { e.fillAt = null; }
+      if ( u >= 1 + FC.BAND ) { e.fillAt = null; fillDone(e); }
       else {
         const step = Math.floor(el / STEP_MS);
         // PERF: every hole of a Detonate repaints on the same step boundary (a whole-scene fill: ~25-40 ms in one frame, every STEP_MS).
