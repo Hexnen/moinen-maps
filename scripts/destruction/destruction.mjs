@@ -226,8 +226,15 @@ const followsPath = (id) => { const o = id && S?.objects?.find((q) => q.id === i
 /** The entry options a Detonate gives an area: its stroke's own path when it follows it, otherwise everything goes off at once. */
 const entryOptsFor = (g) => { const on = followsPath(g.objId); return { simul: !on, path: on ? pathOfObj(g.objId) : null }; };
 /** The stroke objects as the bake and the display take them (their level bytes decoded, their paths as pairs). */
-const objectsIn = () => (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, c: o.c | 0, pr: o.pr, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
-  path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }));
+// (PERF: one record per stroke object, kept while the object lives - a stroke never changes in place once loaded (attachPaths runs before
+// any pass): every pass rebuilt every stroke's record and unflattened every path, O(all strokes) after each new stroke)
+const objIn = new WeakMap();
+const objectsIn = () => (S.objects ?? []).map((o) => {
+  let r = objIn.get(o);
+  if ( !r || r.p !== o.p ) { r = { rec: { id: o.id, k: o.k, t: o.t, c: o.c | 0, pr: o.pr, x0: o.x0, y0: o.y0, w: o.w, h: o.h, bytes: Model.objBytes(o),
+    path: o.p ? unflat(o.p).map(([x, y]) => [x, y]) : null }, p: o.p }; objIn.set(o, r); }
+  return r.rec;
+});
 const toArt = (p) => { const r = Model.sceneRect(); return [(p.x - r.x) / S.ap, (p.y - r.y) / S.ap]; };
 
 /* ---------------------------------------------------------------- a token carried by a stroke (tokens/carry.mjs) */
@@ -555,7 +562,16 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       const inputOf = (list, plain = false) => {
         const need = new Set(list.map((w) => w.index)), under = {};
         if ( !plain ) for ( const w of list ) for ( const j of w.deps ) { if ( need.has(j) || objs[j].k || under[j] ) continue; const pl = plainFor(j); if ( pl ) under[j] = pl; }
-        return { objects: objs.map((o, i) => need.has(i) || o.k ? o : { ...o, skip: 1 }), under, plain, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
+        // PERF: only the strokes baked here and the strokes they read (w.deps: exactly what the bake reads, substrate.mjs) go into the
+        // job; every other place is a hole (same indices). All strokes with their pixels were cloned into the worker on every stroke:
+        // megabytes on a grown scene, on the page. The same bytes come out (dev/destruction-sparse-input.test.mjs).
+        const objects = new Array(objs.length);
+        if ( globalThis.CONFIG?.moinenMaps?.fullBakeInput ) objs.forEach((o, i) => { objects[i] = need.has(i) || o.k ? o : { ...o, skip: 1 }; });   // (dev knob: the old input)
+        else {
+          for ( const w of list ) for ( const j of w.deps ) if ( !need.has(j) && objects[j] === undefined ) objects[j] = objs[j].k ? objs[j] : { ...objs[j], skip: 1 };
+          for ( const i of need ) objects[i] = objs[i];
+        }
+        return { objects, under, plain, mw: S.mw, mh: S.mh, K: Model.K, aw: S.aw, ah: S.ah, seed: S.seed, params: S.params };
       };
       const take = (list, res, plain = false) => {
         const t0 = performance.now();
@@ -1959,7 +1975,9 @@ export function redoLast() {
   // (after the strokes placed before it: with a preset's strokes painted since the undo it goes under them, as a reload would put it)
   const at = Timed.redoIndex(S.objects, o);
   if ( at === S.objects.length ) { S.objects = [...S.objects, o]; Model.compositeOver(S, o); }
-  else { S.objects = [...S.objects.slice(0, at), o, ...S.objects.slice(at)]; Model.composite(S); }
+  // (PERF: under later strokes only its own box changes - compositeBox redraws exactly that box in order, the same mask as a full
+  // composite; a full one per redo made 40 redos ~9x slower than 40 undos)
+  else { S.objects = [...S.objects.slice(0, at), o, ...S.objects.slice(at)]; Model.compositeBox(S, { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }); }
   const box = { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }, ab = artBox(box);
   if ( !o.k ) strokes.push({ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null, path: null, id: o.id });
   S.rev = Model.nextRev(); editedHere = true;

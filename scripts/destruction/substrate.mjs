@@ -85,9 +85,13 @@ export const maxLevel = (o, bytes = o?.bytes) => { if ( !bytes ) return 1; let m
  * the digest covers exactly what the bake reads.
  */
 export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
-  const own = objects.map((o) => ownBox(o, P, K)), spr = objects.map((o) => spriteBox(o, P, K));
-  const lv = objects.map((o) => o.k ? 0 : maxLevel(o, bytesOf(o)));
-  const mar = objects.map((o) => o.k ? 0 : outlineMargin(o, P, K));
+  // (each stroke's boxes, level and margin made when first asked: a bake job holds only the strokes it bakes and reads - the others
+  // are holes, destruction.mjs inputOf - and an incremental fullSigs asks for few pairs)
+  const n = objects.length, OWN = new Array(n), SPR = new Array(n), LV = new Array(n), MAR = new Array(n);
+  const own = (j) => OWN[j] ?? (OWN[j] = ownBox(objects[j], P, K));
+  const spr = (j) => SPR[j] ?? (SPR[j] = spriteBox(objects[j], P, K));
+  const lv = (j) => LV[j] ?? (LV[j] = objects[j].k ? 0 : maxLevel(objects[j], bytesOf(objects[j])));
+  const mar = (j) => MAR[j] ?? (MAR[j] = objects[j].k ? 0 : outlineMargin(objects[j], P, K));
   const memo = new Map();
   return (j, i) => {
     const key = j * 65536 + i; let v = memo.get(key);
@@ -96,11 +100,11 @@ export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
   };
   function reads(j, i) {
     const a = objects[j];
-    if ( a.k ) return meets(own[j], spr[i]);
-    if ( lv[j] > lv[i] && meets(own[j], spr[i]) ) return true;
+    if ( a.k ) return meets(own(j), spr(i));
+    if ( lv(j) > lv(i) && meets(own(j), spr(i)) ) return true;
     // own pixels against own pixels, at mask resolution: their torn outlines can only touch where the masks lie closer than the two
     // outline margins (boxes alone chain every long diagonal stroke to everything near it)
-    return meets(own[j], own[i]) && masksNear(a, bytesOf(a), objects[i], bytesOf(objects[i]), (mar[j] + mar[i]) / K);
+    return meets(own(j), own(i)) && masksNear(a, bytesOf(a), objects[i], bytesOf(objects[i]), (mar(j) + mar(i)) / K);
   }
 }
 
