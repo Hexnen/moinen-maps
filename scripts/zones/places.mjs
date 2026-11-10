@@ -1,5 +1,7 @@
-import { ARMOR, pairKey, floorsOf, stopped, isWater, moveDistances, tagsOf, wreckOf } from "./marks.mjs";
+import { pairKey, floorsOf, stopped, isWater, moveDistances, tagsOf, wreckOf } from "./marks.mjs";
 import { distances } from "./geometry.mjs";
+import { OPEN, partsOf } from "./borders.mjs";
+import { listStates } from "./states.mjs";
 
 /**
  * Where something is, in three dimensions, and how far apart two such places are (pure, no Foundry). The zones on the map are flat;
@@ -96,9 +98,11 @@ export function heightOf(M, p) {
 /**
  * The lookups of one state of the zones and marks, worked out as they are asked for. Make a new one whenever Z or M changes
  * (zones.mjs keeps one per zones version); everything in it is read-only.
+ * `X` (optional) is what the registry adds to this state (states.mjs): { states: Map id -> [state], own: Map id -> the GM's own
+ * props, map: Map id -> what the layers show, links: Map id -> [{ to, edge }] the temporary edges }.
  */
-export function makeCache(Z, M) {
-  return { Z, M, range: new Map(), moves: new Map(), pairs: null };
+export function makeCache(Z, M, X = null) {
+  return { Z, M, X, range: new Map(), moves: new Map(), pairs: null, steps: new Map() };
 }
 /** Borders from a zone to every zone, blocked borders counted like any other (the "range" distance). */
 export function rangeFrom(C, from) {
@@ -134,26 +138,36 @@ export const borderKey = (ka, kb) => (ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`);
 
 /**
  * The border between two zones (ids), or null when they are not neighbours:
- *   { key, zones: [keyA, keyB], ids: [a, b], kind, armor, door, stops: { walk, air, through }, length, x, y }
- * kind: open | door | locked | wall | outer | reinforced (marks.mjs); armor: what a breach has to beat (0: nothing to breach);
- * stops: whom it stops; x, y: the GM's mark on it, else the middle of its longest stretch.
+ *   { key, zones: [keyA, keyB], ids: [a, b], kind, armor, door, stops: { walk, air, through }, length, x, y,
+ *     base, wall: { armor, state, outer, temp } | null, doorway: { armor, state, built } | null }
+ * kind: what the border amounts to now - open | door | locked | wall | outer | reinforced (borders.mjs: a breached wall is "open");
+ * armor: what a breach has to beat now (0: nothing to breach); door: whether there is a door in a standing wall;
+ * stops: whom it stops now; x, y: the GM's mark on it, else the middle of its longest stretch;
+ * base: the kind as built; wall / doorway: the wall and the door with their own Armor and state (borders.mjs).
  */
 export function borderInfo(C, keyOf, a, b) {
   const pk = pairKey(a, b), p = pairsOf(C).get(pk);
   if ( !p ) return null;
-  const mark = C.M?.borders.get(pk), kind = mark?.kind ?? "open", ka = keyOf(a), kb = keyOf(b);
+  const mark = C.M?.borders.get(pk), m = mark?.wall ? mark : null, kind = mark?.kind ?? "open", ka = keyOf(a), kb = keyOf(b);
+  const parts = partsOf(m);
   return {
-    key: borderKey(ka, kb), zones: [ka, kb], ids: [a, b], kind, armor: ARMOR[kind] ?? 0, door: kind === "door" || kind === "locked",
+    key: borderKey(ka, kb), zones: [ka, kb], ids: [a, b], kind, armor: m ? m.armor : mark ? (LEGACY_ARMOR[kind] ?? 0) : 0,
+    door: m ? !!m.door && m.wall.state === "intact" : kind === "door" || kind === "locked",
     stops: { walk: stopped(C.M, a, b, "walk"), air: stopped(C.M, a, b, "air"), through: false },
-    length: p.len, x: mark?.x ?? p.x, y: mark?.y ?? p.y
+    length: p.len, x: mark?.x ?? p.x, y: mark?.y ?? p.y,
+    base: mark?.base ?? (mark ? kind : OPEN.base), wall: parts.wall, doorway: parts.door
   };
 }
+// (a border resolved without the wall-and-door model: hand-made marks in tests and older callers)
+const LEGACY_ARMOR = { door: 1, locked: 2, wall: 2, outer: 3, reinforced: 4 };
 
 /**
  * A zone as data for the rules:
  *   { key, id, center: { x, y }, area (px²), neighbours: [key], building, floors, rooftop, terrain, wreck: { can, strength, bonus, why },
- *     empty, tags: [..], states: { wrecked, fire, dark, ice, flooded, lowgrav }, props }
- * rooftop: an elevated position to stand on (a standing building: book-dump 2254, 2457); props: the raw merged marks (read-only).
+ *     empty, tags: [..], states: { wrecked, fire, dark, ice, flooded, lowgrav }, records: [state, ...], props }
+ * rooftop: an elevated position to stand on (a standing building: book-dump 2254, 2457); props: the raw merged marks (read-only);
+ * records: every state as a record with owner, level, end and exemptions (states.mjs listStates: the registry's, the GM's marks,
+ * the map's layers).
  */
 export function zoneInfo(C, keyOf, id) {
   const z = C.Z?.zones[id];
@@ -165,6 +179,7 @@ export function zoneInfo(C, keyOf, id) {
     building: !!p.building, floors: floorsOf(C.M, id), rooftop: !!p.building && !p.wrecked,
     terrain: p.terrain ?? "", wreck: wreckOf(p), empty: !!p.empty, tags: tagsOf(p),
     states: { wrecked: !!p.wrecked, fire: p.fire ?? 0, dark: !!p.dark, ice: !!p.ice, flooded: !!p.flooded, lowgrav: !!p.lowgrav },
+    records: listStates(C.X?.states?.get(id), C.X?.own?.get(id), C.X?.map?.get(id)),
     props: p
   };
 }
@@ -201,7 +216,7 @@ function levelGap(M, A, B) {
  *    (our reading, as in marks.mjs vertical()).
  * @returns {number|null}   null: this way of moving cannot be at / get to that place
  */
-function climb(M, p, way) {
+export function climb(M, p, way) {
   if ( p.level === "underground" ) return way === "through" ? 0 : null;       // only burrowing goes underground (1995)
   if ( way !== "walk" && way !== "swim" ) return 0;
   if ( p.level === "elevated" ) return p.roof ? floorsOf(M, p.id) + 1 : null;
@@ -273,7 +288,22 @@ export function path(C, keyOf, A, B, way = "walk") {
   if ( !len || A.area || B.area ) return null;
   const ids = chain(C, A.id, B.id, way);
   if ( !ids ) return null;
+  const P = pathAlong(C, keyOf, A, B, way, ids);
+  return P && { way, total: len.total, borders: len.borders, levels: len.levels, zones: P.zones, steps: P.steps, crossed: P.crossed };
+}
+
+/**
+ * The steps along a given chain of zone ids from place A to place B (the first id A's zone, the last B's):
+ *   { way, total, borders, edges, levels, zones, steps, crossed }      (total = the number of steps)
+ * `links[i]` (optional): the temporary edge that joins ids[i - 1] and ids[i] instead of their border (a step of kind "edge").
+ * `stairs: false`: no stairs are walked at the ends (a forced move: the mover goes where it is thrown).
+ * A border on the chain that stops this way of moving is marked `blocked: true` (only a chain the route finder did not make can
+ * have one: a forced move, a crash through a wall, a chain the GM edited). null: two ids on the chain are joined by nothing.
+ */
+export function pathAlong(C, keyOf, A, B, way, ids, { links = null, stairs: climbs = true } = {}) {
+  if ( !ids?.length ) return null;
   const steps = [], crossed = [], M = C.M;
+  const stopWay = way === "swim" || way === "range" ? "walk" : way === "swing" ? "air" : way;
   const spot = (id, level, floor = 0) => spotOf(keyOf(id), level, floor);
   // the levels inside a building, one vertical zone a step: floors, then the rooftop above the top floor
   const rung = (id, h) => { const n = floorsOf(M, id); return h <= 0 ? ["ground", 0] : h > n ? ["elevated", 0] : ["floor", h]; };
@@ -284,7 +314,7 @@ export function path(C, keyOf, A, B, way = "walk") {
     }
   };
   const hop = (p, to) => steps.push({ kind: "level", zone: p.zone, from: p.spot, to: to.spot, level: to.level, floor: to.floor });
-  const walks = way === "walk" || way === "swim";
+  const walks = climbs && (way === "walk" || way === "swim");
   if ( ids.length === 1 ) {
     if ( A.spot !== B.spot ) { if ( walks ) stairs(A.id, climb(M, A, way), climb(M, B, way)); else hop(A, B); }
   } else {
@@ -293,18 +323,25 @@ export function path(C, keyOf, A, B, way = "walk") {
     let at = walks ? spot(A.id, "ground") : A.spot;
     for ( let i = 1; i < ids.length; i++ ) {
       const a = ids[i - 1], b = ids[i], last = i === ids.length - 1;
-      const br = borderInfo(C, keyOf, a, b);
-      if ( way === "range" ) { if ( br.stops.walk ) br.blocked = true; }
-      else if ( (way === "air" || way === "swing") && br.stops.walk ) br.over = true;
-      crossed.push(br);
       const level = last && !walks ? B.level : (travel ?? "ground"), floor = last && !walks ? B.floor : 0;
       const to = last && !walks ? B.spot : spot(b, level);
-      steps.push({ kind: "border", from: at, to, zone: keyOf(b), level, floor, border: br });
+      const link = links?.[i] ?? null;
+      if ( link ) steps.push({ kind: "edge", from: at, to, zone: keyOf(b), level, floor, edge: link });
+      else {
+        const br = borderInfo(C, keyOf, a, b);
+        if ( !br ) return null;
+        if ( br.stops[stopWay] ) br.blocked = true;
+        else if ( (way === "air" || way === "swing") && br.stops.walk ) br.over = true;
+        crossed.push(br);
+        steps.push({ kind: "border", from: at, to, zone: keyOf(b), level, floor, border: br });
+      }
       at = to;
     }
     if ( walks ) stairs(B.id, 0, climb(M, B, way));
   }
-  return { way, total: len.total, borders: len.borders, levels: len.levels, zones: ids.map(keyOf), steps, crossed };
+  let borders = 0, edges = 0;
+  for ( const s of steps ) { if ( s.kind === "border" ) borders++; else if ( s.kind === "edge" ) edges++; }
+  return { way, total: steps.length, borders, edges, levels: steps.length - borders - edges, zones: ids.map(keyOf), steps, crossed };
 }
 
 /** Zones within `n` of a zone: [{ id, d }] nearest first (way "range" or a way of moving; horizontal borders only). */

@@ -10,7 +10,11 @@
  *    someone under: book-dump 2438) and RESOURCE TAGS - what a power or a stunt may need to find in the zone (plan 5.7 item 8).
  * Marks are stored as points (a border mark: a point on the border; a zone mark: a point inside the zone), so they keep to their
  * border or zone while the pencil lines change and the zones are numbered anew. Pure functions: no Foundry here.
+ *
+ * A border mark's kind is the short form of the wall-plus-door model (borders.mjs): every resolved border carries its wall, its
+ * door, their Armor and states, and `kind` / `stops` say what it amounts to now (a breached wall reads as "open").
  */
+import * as Borders from "./borders.mjs";
 
 export const BORDER_KINDS = ["open", "door", "locked", "wall", "outer", "reinforced"];
 export const ARMOR = { door: 1, locked: 2, wall: 2, outer: 3, reinforced: 4 };
@@ -34,6 +38,8 @@ const STOPS = {
 };
 
 export const pairKey = (a, b) => (a > b ? `${a}|${b}` : `${b}|${a}`);
+/** Whether a resolved border stops a way of moving (walk, air, through): by its wall and door now (borders.mjs), else by its kind. */
+const stopsWay = (m, way) => !!m && (m.stops ? !!m.stops[way] : STOPS[way].has(m.kind));
 
 /** A clean zone-mark props object (only what is set). */
 export function cleanProps(p = {}) {
@@ -81,16 +87,22 @@ export function nearestBorder(Z, x, y, tol) {
 }
 
 /**
- * The marks laid onto the zones as they are now: borders (pair -> { kind, x, y }) and zone props (id -> props).
+ * The marks laid onto the zones as they are now: borders (pair -> { kind, base, wall, door, armor, look, stops, x, y, a, b }:
+ * borders.mjs model()) and zone props (id -> props).
  * `zoneAt(x, y)` finds a zone; a border mark farther than `tol` from every border is dropped (its border was erased).
+ * `walls`: [x, y, kind, ext?] as built; `plays`: [x, y, play] what happened to a border in play (a point on it, like a mark).
  */
-export function resolve(Z, walls, marks, zoneAt, tol) {
+export function resolve(Z, walls, marks, zoneAt, tol, plays = null) {
   const borders = new Map(), zones = new Map();
   if ( !Z ) return { borders, zones };
-  for ( const [x, y, kind] of walls ?? [] ) {
+  const play = new Map();
+  for ( const [x, y, p] of plays ?? [] ) { const nb = nearestBorder(Z, x, y, tol); if ( nb ) play.set(pairKey(nb.a, nb.b), p); }
+  for ( const [x, y, kind, ext] of walls ?? [] ) {
     if ( !BORDER_KINDS.includes(kind) || kind === "open" ) continue;
     const nb = nearestBorder(Z, x, y, tol);
-    if ( nb ) borders.set(pairKey(nb.a, nb.b), { kind, x: nb.x, y: nb.y, a: nb.a, b: nb.b });
+    if ( !nb ) continue;
+    const pk = pairKey(nb.a, nb.b);
+    borders.set(pk, { ...Borders.model(kind, ext, play.get(pk)), x: nb.x, y: nb.y, a: nb.a, b: nb.b });
   }
   for ( const [x, y, p] of marks ?? [] ) {
     const id = zoneAt(x, y);
@@ -101,13 +113,13 @@ export function resolve(Z, walls, marks, zoneAt, tol) {
 }
 
 /** Whether the border between two adjacent zones stops this way of moving (walk, air, through). */
-export const stopped = (M, a, b, way) => { const kind = M?.borders.get(pairKey(a, b))?.kind; return !!kind && STOPS[way].has(kind); };
+export const stopped = (M, a, b, way) => stopsWay(M?.borders.get(pairKey(a, b)), way);
 /** A zone one can swim through: water or flooded. */
 export const isWater = (M, id) => { const p = M?.zones.get(id); return !!(p?.water || p?.flooded); };
 
 /** Zones reachable from `from` with the borders that stop this way of moving; `onlyThrough(id)` limits the zones passed (water). */
 function bfs(Z, from, M, way, onlyThrough = null) {
-  const stops = STOPS[way], d = new Map();
+  const d = new Map();
   if ( !Z || from < 0 || !Z.adj.has(from) ) return d;
   d.set(from, 0);
   const q = [from];
@@ -115,8 +127,7 @@ function bfs(Z, from, M, way, onlyThrough = null) {
     const a = q[k];
     for ( const b of Z.adj.get(a).keys() ) {
       if ( d.has(b) ) continue;
-      const kind = M?.borders.get(pairKey(a, b))?.kind;
-      if ( kind && stops.has(kind) ) continue;
+      if ( stopsWay(M?.borders.get(pairKey(a, b)), way) ) continue;
       if ( onlyThrough && !onlyThrough(b) ) continue;
       d.set(b, d.get(a) + 1); q.push(b);
     }
@@ -176,7 +187,9 @@ export function fireRound(Z, M, rnd = Math.random) {
     if ( roll <= 2 ) { delete next.get(id).fire; row.out = true; }
     else if ( roll >= 5 ) {
       const can = [...(Z.adj.get(id)?.keys() ?? [])].filter((b) => {
-        if ( M.borders.get(pairKey(id, b)) ) return false;          // any wall or door blocks the border
+        // any standing wall or door blocks the border (a wall that was breached or removed no longer does)
+        const m = M.borders.get(pairKey(id, b));
+        if ( m && m.kind !== "open" ) return false;
         const q = next.get(b) ?? {};
         return !q.fire && !q.water && !q.flooded && !(M.zones.get(b)?.fire);
       });

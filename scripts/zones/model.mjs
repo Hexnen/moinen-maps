@@ -1,6 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import { BORDER_KINDS, cleanProps } from "./marks.mjs";
 import { cleanAnchors } from "./keys.mjs";
+import { cleanExt, cleanPlay } from "./borders.mjs";
+import { cleanStates, cleanEdges } from "./states.mjs";
 
 /**
  * The zones of a scene, stored in one scene flag `flags.moinen-maps.zones` (written by the GM, read by everyone):
@@ -12,6 +14,16 @@ import { cleanAnchors } from "./keys.mjs";
  *     smooth: 0.3,                      how much the lines are smoothed before the zones are worked out (0..1; the lines stay as drawn)
  *     snap: 0.25,                       an end of a line this close to another line (in grid squares) is joined to it
  *     w: [[x, y, kind], ...]           border marks (a point on the border: door, locked, wall, outer, reinforced; scripts/zones/marks.mjs)
+ *        [x, y, kind, ext]             a border built otherwise than its kind says (scripts/zones/borders.mjs): ext = { wall: { armor,
+ *                                       outer }, door: null | { armor, state } } - only what differs from the kind
+ *     bs: [[x, y, play], ...]          what happened to a border in play (a point on it): play = { w: "breached" | "removed", t: 1
+ *                                       (removed for a while), d: the door's state now }; absent: every border is as built
+ *     q: [[x, y, state], ...]          the zone-state registry (a point inside the zone; scripts/zones/states.mjs): state = { id, kind,
+ *                                       at, level, owner, ends, except, data }
+ *     e: [edge, ...]                   temporary edges: { id, kind: "portal" | "tunnel", a: spot, b: spot, owner, ends, ways, data }
+ *     pn: counter                      the number of the next state / edge id ("s7", "e8"); never goes back
+ *                                       (bs, q, e, pn are play state: written by the active GM's client for a combat module, never part
+ *                                       of the editor's undo; absent until something is stored, so an older scene encodes as it did)
  *     m: [[x, y, props], ...]          zone marks (a point inside the zone: features building/tall/water/terrain, attributes empty/tags, states wrecked/fire/...)
  *     k: [[key, x, y], ...]            stable zone keys (a point inside the zone that carries the key; scripts/zones/keys.mjs)
  *     kn: key counter                  the number of the next new key (absent in scenes saved before keys: 1)
@@ -64,7 +76,9 @@ export function cleanLook(l = {}) {
 }
 
 // preset null = the world's default movement preset; lookFrom null = the world's default look preset, "custom" = this scene's own look
-export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook(), walls: [], marks: [], keys: [], keyNext: 1 });
+export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook(), walls: [], marks: [], keys: [], keyNext: 1, plays: [], states: [], edges: [], playNext: 1 });
+/** The play state of a set of zones (what the editor's undo leaves alone). */
+export const PLAY_FIELDS = ["plays", "states", "edges", "playNext"];
 
 /** The scene's stored zones, decoded (an empty set when nothing is stored). */
 export function load(scene) {
@@ -83,7 +97,15 @@ export function load(scene) {
   S.snap = num(f.snap, 0.25, ...LIMITS.snap);
   S.smooth = num(f.smooth, 0.3, ...LIMITS.smooth);
   S.look = cleanLook(f.look);
-  for ( const [x, y, k] of Array.isArray(f.w) ? f.w.filter(Array.isArray) : [] ) if ( Number.isFinite(x) && Number.isFinite(y) && BORDER_KINDS.includes(k) && k !== "open" ) S.walls.push([x, y, k]);
+  for ( const [x, y, k, ext] of Array.isArray(f.w) ? f.w.filter(Array.isArray) : [] ) {
+    if ( !Number.isFinite(x) || !Number.isFinite(y) || !BORDER_KINDS.includes(k) || k === "open" ) continue;
+    const e = cleanExt(k, ext);
+    S.walls.push(e ? [x, y, k, e] : [x, y, k]);
+  }
+  for ( const [x, y, p] of Array.isArray(f.bs) ? f.bs.filter(Array.isArray) : [] ) { const c = cleanPlay(p); if ( Number.isFinite(x) && Number.isFinite(y) && c ) S.plays.push([x, y, c]); }
+  S.states = cleanStates(f.q);
+  S.edges = cleanEdges(f.e);
+  S.playNext = Math.max(1, Math.floor(Number(f.pn) || 1));
   for ( const [x, y, p] of Array.isArray(f.m) ? f.m.filter(Array.isArray) : [] ) {
     const c = cleanProps(p && typeof p === "object" ? p : {});
     if ( Number.isFinite(x) && Number.isFinite(y) && Object.keys(c).length ) S.marks.push([x, y, c]);
@@ -100,10 +122,15 @@ export function encode(S) {
     s: [...S.strokes].map(([id, p]) => [id, p.map(r1)]),
     next: S.next, preset: S.preset, lookFrom: S.lookFrom, snap: S.snap, smooth: S.smooth,
     look: { ...S.look },
-    w: S.walls.map(([x, y, k]) => [r1(x), r1(y), k]),
+    w: S.walls.map(([x, y, k, ext]) => (ext ? [r1(x), r1(y), k, JSON.parse(JSON.stringify(ext))] : [r1(x), r1(y), k])),
     m: S.marks.map(([x, y, p]) => [r1(x), r1(y), { ...p }]),
     // (a scene that never got keys keeps the flag it had: nothing new is written until the GM edits its zones)
-    ...(S.keys?.length || S.keyNext > 1 ? { k: S.keys.map(([key, x, y]) => [key, r1(x), r1(y)]), kn: S.keyNext } : {})
+    ...(S.keys?.length || S.keyNext > 1 ? { k: S.keys.map(([key, x, y]) => [key, r1(x), r1(y)]), kn: S.keyNext } : {}),
+    // (play state: only what there is, so a scene nothing happened in encodes as it always did)
+    ...(S.plays?.length ? { bs: S.plays.map(([x, y, p]) => [r1(x), r1(y), { ...p }]) } : {}),
+    ...(S.states?.length ? { q: S.states.map(([x, y, r]) => [r1(x), r1(y), JSON.parse(JSON.stringify(r))]) } : {}),
+    ...(S.edges?.length ? { e: S.edges.map((ed) => JSON.parse(JSON.stringify(ed))) } : {}),
+    ...(S.playNext > 1 ? { pn: S.playNext } : {})
   };
 }
 
