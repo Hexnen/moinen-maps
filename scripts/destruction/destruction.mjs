@@ -1,7 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
-import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION } from "./core.mjs";
+import { readMeta, LIVE_PARAMS, META_FIELDS, CORE_VERSION, workOf } from "./core.mjs";
+import * as Progress from "../progress.mjs";
 import * as Pin from "./stroke-params.mjs";
 import { runBake, runBakePool, disposeBaker } from "./bake.mjs";
 import { unpackLook } from "./look-pack.mjs";
@@ -151,6 +152,7 @@ function integrity(scene) {
 function teardown() {
   flushSave();
   gen++;
+  Progress.end("destruction", false);
   for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer, rimsTimer, warmTimer, warmHold, darkTimer] ) clearTimeout(t);
   rimsTimer = warmTimer = warmHold = darkTimer = 0; persisting = null;
   rebakeQueue = []; status.rebake = null; status.olderLook = null;
@@ -292,6 +294,8 @@ export async function rebake(opts = {}) {
     // the status never stays on "baking" after a pass ended (an early return, an error, a superseded state)
     if ( gen === g0 && status.baking && !inflight ) { status.baking = false; tell("status"); }
   }
+  // the progress line: this run of passes is over when nothing follows it (a stroke painted meanwhile, a wait, a Rebake all go on)
+  if ( gen === g0 && !again && !bakeTimer && !status.rebake && !inflight ) Progress.end("destruction");
   if ( again && S ) { const o = again; again = null; rebake(o); }
   else if ( S && gen === g0 ) warmCheck(100);          // (a pass that was on its way when the GM republished may have kept an older chunk)
 }
@@ -328,6 +332,10 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   if ( force ) for ( const w of want ) recs.delete(w.rk);
   // Rebake (all or one stroke): these strokes are baked again with the current code; their pinned look stays on screen meanwhile
   const redoSet = new Set(redo ?? []);
+  // PROGRESS (progress.mjs): what this pass does, in work units (core.mjs workOf: the bake's pixels; a chunk is a unit of its own);
+  // a background pass (idle) says nothing - the look on screen stays until it is replaced
+  const PJ = () => (idle ? null : Progress.job("destruction", { title: status.rebake ? "MOINENMAPS.Prog.title.rebake" : "MOINENMAPS.Prog.title.destruction" }));
+  const unitsOf = (list) => list.reduce((a, w) => a + workOf(objs[w.index], Model.K), 0);
   for ( const w of want ) if ( redoSet.has(w.objId) ) recs.delete(w.rk);
   // (a Rebake bakes over the plain looks the CURRENT code gives the older strokes only - never over a look an older version baked, which
   // the stroke's own pass may replace in a later batch: the result must not depend on the order of the batches, plainOf)
@@ -428,6 +436,10 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     if ( fetch.length ) {
       const t = performance.now();
       status.waiting = true; status.loading = fetch.length; tell("status");
+      const pj = PJ(), pr = pj?.run("chunk", fetch.length, { grain: Math.min(4, fetch.length) });
+      let landed = 0;
+      const said = () => pj?.stage("MOINENMAPS.Prog.st.load", { done: landed, total: fetch.length });
+      said();
       netAbort ??= new AbortController();
       let timer = 0;
       // a few chunks landing together: one sync; while the scene's reveal is held back nothing is shown piece by piece (all of it goes
@@ -440,7 +452,9 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio, signal: netAbort?.signal });
         if ( got?.sprites && got.F === META_FIELDS ) { recs.set(w.rk, { rk: w.rk, objId: w.objId, own: w.own, id: w.id, ver: w.ver, dir: M.dir, sprites: got.sprites }); src.chunk++; status.loading--; soon(); early(); }
         else failed.push(w);
+        landed++; pr?.add(1); said();
       }));
+      pr?.end();
       clearTimeout(timer);
       T.fetch = performance.now() - t;
       if ( my !== gen ) return;
@@ -454,10 +468,15 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     if ( old.length ) {
       const t = performance.now();
       if ( firstLoad ) Reveal.progressive("destruction", 1500);   // the scene waits for the older look (not the water alone)
+      const pj = PJ(), pr = pj?.run("chunk", old.length, { grain: Math.min(4, old.length) });
+      let landed = 0;
+      pj?.stage("MOINENMAPS.Prog.st.load", { done: 0, total: old.length });
       await Promise.all(prioritise(old, objs).map(async (w) => {
         const got = await Net.getChunk(M.dir, w.id, { prio: w.prio });
         if ( got?.sprites && got.F === META_FIELDS ) { staleRecs.set(w.objId, { rk: `${M.base}|${w.objId}|${w.sig}`, objId: w.objId, id: w.id, dir: M.dir, sprites: got.sprites, stale: true }); src.stale = (src.stale ?? 0) + 1; }
+        landed++; pr?.add(1); pj?.stage("MOINENMAPS.Prog.st.load", { done: landed, total: old.length });
       }));
+      pr?.end();
       T.stale = performance.now() - t;
       if ( my !== gen ) return;
       Trace.markOnce("damage:stale", { n: src.stale ?? 0, of: old.length });
@@ -510,6 +529,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       const next = Math.min(...toBake.filter((w) => !late.includes(w)).map(due)) - t;
       clearTimeout(bakeTimer);
       bakeTimer = setTimeout(() => { bakeTimer = 0; rebake(); }, Math.max(50, next));
+      if ( !late.length ) PJ()?.stage("MOINENMAPS.Prog.st.wait", null, { indeterminate: true });
     }
     toBake = late;
   }
@@ -584,8 +604,15 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         }
         status.stats = res.stats;
       };
+      // (a Rebake all planned its strokes' work when it started: a pass only adds what it bakes beyond them)
+      const pre = (list) => (redoSet.size ? unitsOf(list.filter((w) => redoSet.has(w.objId))) : 0);
+      const pj = PJ();
       if ( !bigBake ) {
-        const res = await runBake(inputOf(toBake), getMap, { onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } } });
+        const U = unitsOf(toBake), pr = pj?.run("bake", U, { grain: U * 0.1, preplanned: pre(toBake) });
+        pj?.stage("MOINENMAPS.Prog.st.bake", { n: toBake.length });
+        let res;
+        try { res = await runBake(inputOf(toBake), getMap, { onProgress: (p) => { if ( my === gen ) { status.progress = p; pr?.set(p * U); } } }); }   // (the panels follow on progress.mjs's own slow hook, never rebuilt per report)
+        finally { pr?.end(); }
         if ( my !== gen ) return;
         take(toBake, res);
         // (a background rebake: taking the result and putting it on screen go in separate tasks, each well under a frame)
@@ -605,10 +632,19 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         let timer = 0;
         const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 80); };
         Reveal.whenRevealed(() => soon());
-        for ( const [wave, list, plain] of [[0, [...plainNeed.values()], true], [1, toBake.filter((w) => w.deps.length), false]] ) {
+        const waves = [[0, [...plainNeed.values()], true], [1, toBake.filter((w) => w.deps.length), false]];
+        pj?.plan("bake", Math.max(0, unitsOf(waves[1][1]) - pre(waves[1][1])));   // (the second wave planned now: the bar does not stand still when it starts)
+        for ( const [wave, list, plain] of waves ) {
           const order = prioritise(list, objs);
           const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [], tw = performance.now();
           for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
+          // this wave's progress: each job's share by its work, as far as its worker has got
+          const Uj = jobs.map(unitsOf), UW = Uj.reduce((a, b) => a + b, 0), jp = new Float64Array(jobs.length);
+          const pr = pj?.run("bake", UW, { grain: UW / Math.max(1, Math.min(jobs.length, lanes)) * 0.15, preplanned: wave ? UW : pre(list) });
+          let strokesDone = 0;
+          const stageOf = () => pj?.stage(plain ? "MOINENMAPS.Prog.st.plain" : "MOINENMAPS.Prog.st.strokes", { done: strokesDone, total: list.length });
+          stageOf();
+          const jobProgress = (i, p) => { if ( my !== gen || !pr ) return; jp[i] = Math.max(jp[i], p); let u = 0; for ( let k = 0; k < jp.length; k++ ) u += jp[k] * Uj[k]; pr.set(u); };
           // results are taken on the page a slice at a time (~8 ms, then a pause): many lanes finishing together never make a long task
           const queue = [];
           let draining = null;
@@ -640,7 +676,8 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
             slow("inputs+prime", tIn, { looks: prime.length });
             Trace.event("rebake-prime", { looks: prime.length, mpx: Math.round(prime.reduce((a, p) => a + p.sprites.reduce((q, s) => q + s.w * s.h, 0), 0) / 1e5) / 10 });
           }
-          await runBakePool(inputs, getMap, { n: lanes, prime, onDone: (i, res) => {
+          await runBakePool(inputs, getMap, { n: lanes, prime, onProgress: jobProgress, onDone: (i, res) => {
+            jobProgress(i, 1); strokesDone += jobs[i].length; stageOf();
             // (a stroke's sprites are made from their packed buffers one stroke a step - a whole job at once was 240 ms of one task)
             const made = new Map(res.parts ?? []);
             for ( const pair of res.packs ?? [] ) queue.push(() => { if ( my === gen ) made.set(pair[0], unpackLook(pair[1], true)); pair[1] = null; });      // (the packed buffers go as soon as their sprites are made)
@@ -656,6 +693,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
             drain();
           } });
           while ( queue.length || draining ) await (draining ?? drain());
+          pr?.end();
           Trace.event("bake-wave", { wave, plain, n: order.length, jobs: jobs.length, ms: Math.round(performance.now() - tw) });
           if ( my !== gen ) break;
         }
@@ -671,6 +709,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
       bakeFail = { key, n: (bakeFail?.key === key ? bakeFail.n : 0) + 1, at: Date.now() };
       Trace.event("bake-failed", { n: bakeFail.n, error: String(err?.message ?? err).slice(0, 160) });
       Object.assign(status, { baking: false, error: String(err?.message ?? err) }); tell("status");
+      Progress.end("destruction", false);
       return;
     }
     // a setting changed while this baked (clicking through toggles): the bake for the final state follows, this one is not shown
@@ -678,9 +717,13 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   }
 
   // 3. on screen: everything we have (on a scene load, hidden until the reveal: every shard made, every texture uploaded)
-  await show();
-  if ( my !== gen ) return;
-  if ( firstLoad && Reveal.holding("destruction") && display ) await (prepping ?? prepareReveal(my));
+  const pjShow = idle ? null : Progress.current("destruction"), prShow = pjShow?.run("show", 1);
+  pjShow?.stage("MOINENMAPS.Prog.st.show");
+  try {
+    await show();
+    if ( my !== gen ) return;
+    if ( firstLoad && Reveal.holding("destruction") && display ) await (prepping ?? prepareReveal(my));
+  } finally { prShow?.end(); }
   const complete = want.every((w) => recs.has(w.rk));
   // on screen in full - some strokes perhaps in a compatible older look that stands until its background re-bake
   const shownFull = complete || want.every((w) => recs.has(w.rk) || (deferred.has(w.objId) && (staleRecs.has(w.objId) || shownRecs.get(w.objId)?.stale)));
@@ -1441,6 +1484,8 @@ export function rebakeStrokes(ids = null) {
   void base;
   rebakeQueue = Policy.rebakeOrder(entries);
   status.rebake = { total: rebakeQueue.length, done: 0, paused: false };
+  // (the progress line plans the whole Rebake now: its passes add only the plain looks they bake beyond these strokes)
+  { const at = new Map(S.objects.map((o, i) => [o.id, i])); Progress.job("destruction", { title: "MOINENMAPS.Prog.title.rebake" }).plan("bake", rebakeQueue.reduce((a, id) => a + workOf(objs[at.get(id)], Model.K), 0)); }
   Trace.event("rebake-start", { n: rebakeQueue.length });
   tell("status");
   pumpRebake(50);
@@ -1451,20 +1496,20 @@ function pumpRebake(ms = REBAKE_EVERY) {
     rebakeTimer = 0;
     const R = status.rebake;
     if ( !S || !R || R.paused ) return;
-    if ( !rebakeQueue.length ) { trimPlain(); status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); return; }
+    if ( !rebakeQueue.length ) { trimPlain(); status.rebake = null; Trace.event("rebake-done", { n: R.total }); tell("status"); schedulePersist(0); Progress.end("destruction"); return; }
     if ( inflight || document.visibilityState !== "visible" ) return pumpRebake(REBAKE_EVERY);
     const batch = rebakeQueue.splice(0, Number.isInteger(globalThis.CONFIG?.moinenMaps?.rebakeBatch) ? globalThis.CONFIG.moinenMaps.rebakeBatch : REBAKE_BATCH);
     await rebake({ awaitPublish: false, redo: batch });
     // a pass that failed (an error, a backoff) stops the Rebake all and says so: never "done" with strokes not baked
-    if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); return; }
+    if ( status.error || bakeFail ) { Trace.event("rebake-failed", { error: status.error, left: rebakeQueue.length + batch.length }); rebakeQueue = []; status.rebake = null; tell("status"); Progress.end("destruction", false); return; }
     if ( status.rebake ) { status.rebake.done += batch.length; status.rebake.live = 0; tell("status"); }
     trimPlain();
     await flushRebaked(batch);
     pumpRebake(REBAKE_EVERY);
   }, ms);
 }
-export function rebakePause(paused = true) { if ( status.rebake ) { status.rebake.paused = paused; tell("status"); if ( !paused ) pumpRebake(50); } }
-export function rebakeCancel() { rebakeQueue = []; clearTimeout(rebakeTimer); if ( status.rebake ) { Trace.event("rebake-cancel", status.rebake); status.rebake = null; tell("status"); schedulePersist(0); } }
+export function rebakePause(paused = true) { if ( status.rebake ) { status.rebake.paused = paused; Progress.current("destruction")?.stage(paused ? "MOINENMAPS.Prog.st.paused" : "", null, { indeterminate: paused }); tell("status"); if ( !paused ) pumpRebake(50); } }
+export function rebakeCancel() { rebakeQueue = []; clearTimeout(rebakeTimer); if ( status.rebake ) { Trace.event("rebake-cancel", status.rebake); status.rebake = null; tell("status"); schedulePersist(0); Progress.end("destruction", false); } }
 
 /* ---------------------------------------------------------------- the player's bands once a warm update has settled */
 

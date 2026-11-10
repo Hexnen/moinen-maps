@@ -9,6 +9,7 @@ import { markOnce } from "../net/trace.mjs";
 import * as Reveal from "../net/reveal.mjs";
 import "../net/preload.mjs";   // reads a scene's chunks ahead (canvasInit) and warms the codec workers
 import { CODES } from "./codes-table.mjs";
+import * as Progress from "../progress.mjs";
 
 /**
  * The water of the open scene: loads its masks and settings from the scene flag, bakes them in the worker, plays the result, and
@@ -245,10 +246,23 @@ export async function rebake({ awaitPublish = true } = {}) {
   clearTimeout(releaseTimer);
   status.baking = true; status.progress = 0; status.error = ""; tell("status");
   const frames = [];
+  // PROGRESS (progress.mjs): the engine's preparation (one long step: the bar creeps on at its learned length), then its frames
+  Progress.current("water")?.drop();   // (a bake this one supersedes: its work is no longer to do)
+  const pj = Progress.job("water", { title: "MOINENMAPS.Prog.title.water" }), guess = Math.max(1, Number(S.params?.frames) || 24);
+  pj.plan("waterFrame", guess);
+  const prep = pj.run("waterPrep", 1);
+  let fr = null, nFrames = guess;
+  pj.stage("MOINENMAPS.Prog.st.waterPrep");
   try {
     const res = await bake({ W: S.w, H: S.h, masks: S.masks, maskKey: `${scene.id}:${S.px}:${S.rev}`, params: S.params }, {
-      onBegin: (b) => { if ( my === gen ) display.begin(b.box, S.px, origin, b.ms ?? S.params.ms); },
-      onFrame: (i, levels) => { if ( my === gen ) { display.addFrame(i, levels); frames[i - 1] = levels; } },
+      onBegin: (b) => {
+        if ( my !== gen ) return;
+        display.begin(b.box, S.px, origin, b.ms ?? S.params.ms);
+        prep.end(); nFrames = b.frames || guess;
+        fr = pj.run("waterFrame", nFrames, { preplanned: Math.min(nFrames, guess) });
+        pj.stage("MOINENMAPS.Prog.st.waterFrames", { done: 0, total: nFrames });
+      },
+      onFrame: (i, levels) => { if ( my === gen ) { display.addFrame(i, levels); frames[i - 1] = levels; fr?.set(i); pj.stage("MOINENMAPS.Prog.st.waterFrames", { done: i, total: nFrames }); } },
       onProgress: (p) => { if ( my === gen ) { status.progress = p; tell("status"); } }
     });
     if ( my !== gen || res?.superseded ) return;
@@ -266,6 +280,7 @@ export async function rebake({ awaitPublish = true } = {}) {
     if ( my === gen ) disposeEngine();     // a failed bake may leave the engine broken: the next bake starts a fresh one
   }
   if ( my === gen ) { status.baking = false; status.progress = 1; tell("status"); }
+  if ( my === gen ) Progress.end("water", !status.error); else if ( Progress.current("water") === pj ) Progress.end("water", false);
   if ( my === gen ) releaseWorker();
 }
 

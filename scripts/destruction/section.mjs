@@ -5,6 +5,7 @@ import * as Model from "./model.mjs";
 import * as Editor from "./editor.mjs";
 import * as D from "./destruction.mjs";
 import * as Cui from "./cinematic-ui.mjs";
+import * as Progress from "../progress.mjs";
 
 /**
  * Destruction as a workspace section (takes over the "destruction" placeholder of workspace/soon.mjs).
@@ -150,6 +151,8 @@ function statusLine() {
   if ( st.warning ) return `${T("Destr.warning")}: ${st.warning}`;
   if ( !S || !Model.hasPaint(S) ) return T("Destr.empty");
   if ( st.error ) return `${T("Destr.error")}: ${st.error}`;
+  // a job running (a bake, chunks coming, a wait for the GM's bake): what it does, how far, how long (progress.mjs)
+  if ( (st.baking || st.waiting) && !st.rebake && Progress.current("destruction") ) return Progress.line("destruction");
   if ( st.baking ) {
     const line = game.i18n.format("MOINENMAPS.Destr.baking", { pct: Math.round(st.progress * 100) });
     // strokes baked of how many, and about how long is left (from the pace so far)
@@ -171,7 +174,10 @@ function statusLine() {
   // strokes still in a compatible older look (their new look is baked later: in the background, or on Rebake all)
   if ( st.compat ) parts.push(game.i18n.format(`MOINENMAPS.Destr.oldLook.${st.compat.mode === "ask" ? "ask" : "background"}`, { v: st.compat.from, n: st.compat.left }));
   // a Rebake all running, or the strokes pinned to the look of an older version (about half a second each to bake again)
-  if ( st.rebake ) parts.push(game.i18n.format(st.rebake.paused ? "MOINENMAPS.Destr.rebakePaused" : "MOINENMAPS.Destr.rebaking", { done: st.rebake.done + (st.rebake.live ?? 0), total: st.rebake.total }));
+  if ( st.rebake ) {
+    parts.push(game.i18n.format(st.rebake.paused ? "MOINENMAPS.Destr.rebakePaused" : "MOINENMAPS.Destr.rebaking", { done: st.rebake.done + (st.rebake.live ?? 0), total: st.rebake.total }));
+    if ( !st.rebake.paused && Progress.current("destruction") ) parts.push(Progress.line("destruction"));
+  }
   else if ( st.olderLook ) parts.push(game.i18n.format("MOINENMAPS.Destr.olderLook", { n: st.olderLook.n, from: st.olderLook.from, to: st.olderLook.to, eta: Math.max(1, Math.round(st.olderLook.n * 0.6)) }));
   return parts.join(" · ");
 }
@@ -193,7 +199,7 @@ function mountDamage(host) {
       return `<li data-obj="${esc(o.id)}"><i class="${TYPE_ICON[t] ?? TYPE_ICON.blast}" inert></i><span class="mm-d-kind" data-tooltip="${esc(tip)}">${esc(kind)}</span>
         <span class="mm-d-cause"${CAUSE_INK[eff] ? ` style="--mm-tool:${CAUSE_INK[eff]}"` : ""}><i class="${CAUSE_ICON[eff]}" inert></i><select data-cause-of="${esc(o.id)}" aria-label="${esc(T("Destr.causeOf"))}"${gm ? "" : " disabled"}>${opts}</select></span>${gm && older.has(o.id) && !st.rebake ? `<button type="button" class="mm-d-rebake" data-act="rebakeOne" data-obj="${esc(o.id)}" data-tooltip="${esc(T("Destr.rebakeOne"))}" aria-label="${esc(T("Destr.rebakeOne"))}"><i class="fa-solid fa-rotate" inert></i></button>` : ""}</li>`;
     }).join("");
-    host.innerHTML = `<div class="mm-ws-form mm-d-panel"><p class="mm-d-status" role="status">${esc(statusLine())}</p>
+    host.innerHTML = `<div class="mm-ws-form mm-d-panel"><p class="mm-d-status" role="status">${esc(statusLine())}</p>${Progress.barHtml("destruction")}
       ${rows ? `<ul class="mm-d-areas mm-d-objs" aria-label="${esc(T("Destr.strokesLabel"))}">${rows}</ul>` : ""}
       <div class="mm-d-actions">
         <button type="button" class="mm-ws-btn" data-act="detonate"${S && Model.hasPaint(S) ? "" : " disabled"}><i class="fa-solid fa-explosion" inert></i> ${esc(T("Destr.detonate"))}</button>
@@ -232,7 +238,9 @@ function mountDamage(host) {
   host.addEventListener("click", onClick); host.addEventListener("change", onChange);
   let frame = 0;
   const id = Hooks.on("moinenMapsDestruction", () => { if ( frame ) return; frame = requestAnimationFrame(() => { frame = 0; if ( !host.contains(document.activeElement) || document.activeElement === document.body ) render(); else host.querySelector(".mm-d-status").textContent = statusLine(); Cui.sync(host); }); });
-  return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off("moinenMapsDestruction", id); cancelAnimationFrame(frame); };
+  // (the progress: the status line and its bar only, 4 times a second while a job runs)
+  const pid = Hooks.on("moinenMapsProgress", () => { const p = host.querySelector(".mm-d-status"); if ( p && host.querySelector(".mm-d-panel") ) { const t = statusLine(); if ( p.textContent !== t ) p.textContent = t; Progress.paintBar(host); } });
+  return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); Hooks.off("moinenMapsDestruction", id); Hooks.off("moinenMapsProgress", pid); cancelAnimationFrame(frame); };
 }
 
 // which folding groups of the Look panel are open (kept while the panel is mounted again)

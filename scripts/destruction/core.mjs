@@ -567,7 +567,6 @@ export function bake(I, cache = null) {
   // job neither bakes nor reads, left out of the message - destruction.mjs inputOf)
   (I.objects ?? []).forEach((ob, index) => { if ( ob && !ob.k && !ob.skip ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
   if ( !comps.length ) return assemble([], stats, t0, progress);
-  progress(0.2);
 
   function partsOf(ob) {
     const P = effP(ob, PG), jag = jagOf(P), edge = clamp(P.edge ?? 0.7, 0, 1);
@@ -704,14 +703,44 @@ export function bake(I, cache = null) {
   const plainOf = new Map();
   // (I.under: index -> sprites of plain looks the caller already has; I.plain: bake the requested strokes' plain looks only)
   const src = new SubstrateSource(I.objects, I.under, PG, K, (j) => {
-    if ( !plainOf.has(j) ) { const ob = I.objects[j], out = []; for ( const c of partsOf(ob) ) { const r = areaOf({ ...c, index: j, ob }, false); if ( r ) out.push(r); } plainOf.set(j, out); }
+    if ( !plainOf.has(j) ) {
+      const ob = I.objects[j], out = [];
+      meter.begin(meter.plainWork?.get(j) ?? meter.extra(workOf(ob, K)));
+      for ( const c of partsOf(ob) ) { const r = areaOf({ ...c, index: j, ob }, false); if ( r ) out.push(r); }
+      meter.end();
+      plainOf.set(j, out);
+    }
     return plainOf.get(j);
   });
-  comps.forEach((c, k) => {
-    const res = areaOf(c, !I.plain);
-    if ( res ) results.push({ ...res, index: c.index });
-    progress(0.2 + 0.75 * (k + 1) / comps.length);
-  });
+  // the work: each part's window (its stroke's share by pixels), and the plain look of every older stroke a part reads that nobody
+  // handed in (baked here once); the outlines above were ~1% of it, packing the sheet ~1%
+  const meter = workMeter(progress);
+  {
+    const ownPx = new Map();
+    for ( const c of comps ) ownPx.set(c.index, (ownPx.get(c.index) ?? 0) + c.px.length);
+    for ( const c of comps ) c.work = workOf(c.ob, K) * c.px.length / (ownPx.get(c.index) || 1);
+    let total = comps.reduce((a, c) => a + c.work, 0);
+    if ( !I.plain ) {
+      const plainWork = new Map();
+      for ( const i of ownPx.keys() ) for ( let j = 0; j < i; j++ ) {
+        const o = I.objects[j];
+        if ( !o || o.k || plainWork.has(j) || I.under?.[j] || !src.reads(j, i) ) continue;
+        plainWork.set(j, workOf(o, K));
+      }
+      for ( const w of plainWork.values() ) total += w;
+      meter.plainWork = plainWork;
+    }
+    meter.start(total * 1.02, total * 0.01);
+  }
+  pulse = meter.at;
+  try {
+    for ( const c of comps ) {
+      meter.begin(c.work);
+      const res = areaOf(c, !I.plain);
+      meter.end();
+      if ( res ) results.push({ ...res, index: c.index });
+    }
+  } finally { pulse = null; }
   return assemble(results, stats, t0, progress);
 
   /** One part in its window: cached or baked; `withSub`: over its substrate (false: its plain look, for newer strokes' substrates). */
@@ -821,11 +850,55 @@ function overlayOutside(img, win) {
   }
 }
 
+/** A stroke's bake work in units: the pixels of the window its parts are baked in (art px, with the margin areaOf gives them). */
+export function workOf(ob, K) {
+  const span = Math.max(ob.w, ob.h) * K, m = Math.min(256, Math.max(14, span * 0.6 + 17));
+  return (ob.w * K + 2 * m) * (ob.h * K + 2 * m);
+}
+
+/**
+ * The bake's progress 0..1 in work units: `begin(w)` a unit (nested: a plain look baked inside a part's substrate), `at(f)` how far
+ * the innermost unit is (the area's stages), `end()`. Monotonic; reported at most every PULSE_MS (and at the end, by assemble).
+ */
+function workMeter(progress) {
+  let total = 1, done = 0, last = 0, sent = 0;
+  const stack = [];
+  const emit = () => {
+    let p = done;
+    for ( const u of stack ) p += u.w * u.f;
+    p = Math.min(0.995, p / total);
+    if ( p <= sent ) return;
+    const now = Date.now();
+    if ( now - last < PULSE_MS ) return;
+    last = now; sent = p; progress(p);
+  };
+  return {
+    plainWork: null,
+    start(t, d) { total = Math.max(1, t); done = d; emit(); },
+    /** A unit nobody planned (a plain look the estimate missed): the total grows with it. */
+    extra(w) { total += w; return w; },
+    begin(w) { stack.push({ w, f: 0 }); },
+    at: (f) => { const u = stack.at(-1); if ( u && f > u.f ) { u.f = Math.min(1, f); emit(); } },
+    end() { const u = stack.pop(); if ( u ) done += u.w; emit(); }
+  };
+}
+
 function cropMap(map, RX, RY, W, H) {
   const out = new Uint8ClampedArray(W * H * 4);
   for ( let y = 0; y < H; y++ ) out.set(map.data.subarray(((RY + y) * map.w + RX) * 4, ((RY + y) * map.w + RX + W) * 4), y * W * 4);
   return out;
 }
+
+/**
+ * PROGRESS of a bake (the Damage panel's line, the progress line, progress.mjs): its work is counted in estimated work units (the
+ * pixels of the windows the parts are baked in: the bake is per pixel all the way), not in parts - one big stroke was ONE part, and
+ * the bar sat on 20% for its whole bake (10 s) and then jumped to 100%. The plain looks of older strokes a part reads are units of
+ * their own. Inside an area the bake reports its stages (`pulse`, weighted by their measured share of an area's time). Only reports:
+ * nothing it computes depends on them (the bytes are the same), and they are sent at most every PULSE_MS.
+ */
+let pulse = null;
+const PULSE_MS = 120;
+const beat = (f) => { if ( pulse ) pulse(f); };
 
 const CACHE_BYTES = 160 * 1048576;
 function trimCache(cache) {
@@ -884,16 +957,21 @@ function bakeArea(A, P, seed, uid, jag) {
   const din = new Float32Array(N), dout = new Float32Array(N);
   for ( let i = 0; i < N; i++ ) { din[i] = inside[i] ? 1e6 : 0; dout[i] = inside[i] ? 0 : 1e6; }
   chamfer(din, W, H); chamfer(dout, W, H);
+  beat(0.09);
   const occ = new Uint8Array(N);
   const stats = { shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [] };
   const C = { id: 0, uid, px: A.px, path: pickPath(A.paths) };
   analyse(C);
+  beat(0.21);
   C.sub = A.sub ?? null; C.clean = A.clean ?? null;   // the older damage under its own pixels (substrate.mjs), for the tear too
   // a tear is its own bake (tear.mjs): an opening ripped along the stroke, not a fracture into plates
   if ( C.type === T_GASH ) return bakeTear({ W, H, RX, RY, map, own, sev, px: C.px, C, P, seed, uid, jag, mat: MATS[C.cls.mat], matIndex: C.cls.mat, type: T_GASH, stats, metaFields: META_FIELDS, din, cz: C.cz, cause: C.cause, causeKit, softLight, chamfer });
   fracture(C);
+  beat(0.32);
   fates(C);
+  beat(0.55);
   drawBase(C);
+  beat(1);
 
   /* ---------------------------------------------------------------- the brush path (follows the stroke) */
   /** The stroke that made this area: the path with most points on it (window coordinates), when it is long enough to matter. */
@@ -1393,10 +1471,14 @@ function bakeArea(A, P, seed, uid, jag) {
     C.shards.sort((a, b) => (a.cy + a.dy + (a.chip ? 0.5 + a.z0 * 0.1 : 0)) - (b.cy + b.dy + (b.chip ? 0.5 + b.z0 * 0.1 : 0)));
     // a plate that did not move is not drawn at all: the real map shows there, at full resolution
     C.keep = new Set();
-    for ( const s of C.shards ) {
+    beat(0.39);
+    const nS = C.shards.length;
+    for ( let k = 0; k < nS; k++ ) {
+      const s = C.shards[k];
       s.static = !s.chip && !s.dx && !s.dy && !s.th && !s.tx && !s.ty && !s.z0;
       if ( s.static ) { s.skip = true; for ( const i of s.px ) C.keep.add(i); }
       else renderShard(C, s);
+      if ( (k & 15) === 15 ) beat(0.39 + 0.16 * k / nS);
     }
     stats.shards += C.shards.length;
     // hairline cracks out into the intact map
@@ -1848,6 +1930,7 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( isIn(x, sy2) ) put(x, sy2, rp[0]);
       if ( wide && isIn(x + 1, sy2) ) put(x + 1, sy2, rp[0]);
     }
+    beat(0.78);
     // 3. halos on the intact map: scorch (1-bit dither of char), dust
     if ( haloR > 0.5 ) for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
       const i = y * W + x; if ( inside[i] ) continue;
@@ -1886,6 +1969,7 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( !dep && f < 0.4 ) { const q = i + W; if ( y + 1 < H && !inside[q] ) put(x, y + 1, mix(mapAt(q), pal.ink, f < 0.2 ? 0.75 : 0.5)); }
       const j = i - W; if ( j >= 0 && !inside[j] && h2(x, y, seed + 81) < 0.5 ) put(x, y - 1, mul(mapAt(j), 1.14));
     }
+    beat(0.98);
     // 6. shard shadows: one flat colour, alpha ~100
     const shadowCol = mul(pal.ramp[0], 0.7);
     const shadowSeen = new Set();
@@ -1894,6 +1978,7 @@ function bakeArea(A, P, seed, uid, jag) {
       if ( shadowSeen.has(key) ) continue; shadowSeen.add(key);
       put(x, y, shadowCol, 100);
     }
+    beat(0.99);
     // 7. the torn lip's ink, broken and of varying weight (never an even inked lasso round the hole); cracks keep their full ink
     if ( !C.cz && type !== T_CRACKS ) for ( let y = r.y0; y <= r.y1; y++ ) for ( let x = r.x0; x <= r.x1; x++ ) {
       const i = y * W + x; if ( inside[i] || dout[i] > 1.01 ) continue;
