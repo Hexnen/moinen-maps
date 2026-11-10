@@ -976,6 +976,10 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-vram-src { font-size: 0.72rem; opacity: 0.75; }
 .mm-vram-lost { font-size: 0.74rem; color: var(--mm-v-over); font-weight: 700; }
 .mm-vram-hint { font-size: 0.7rem; opacity: 0.6; }
+/* the card stays dark in the light theme (like the pin filter): keep its field and button dark too, else their dark text vanishes */
+body.theme-light .mm-vram-gbin input { color: #e7d1b1; background: #302831; border-color: rgb(255 255 255 / 0.18); }
+body.theme-light .mm-vram-budget button { color: #e7d1b1; background: #0b0a13; border-color: rgb(255 255 255 / 0.18); }
+body.theme-light .mm-vram-budget button:disabled { color: #9f8475; }
 .mm-vram :where(button, input):focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .mm-vram { animation: none; } .mm-vram-bar > i { transition: none; } }
 

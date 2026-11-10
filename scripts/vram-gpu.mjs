@@ -49,6 +49,7 @@ export function modelOf(renderer) {
   let s = String(renderer ?? "").trim();
   const a = /^ANGLE \((.*)\)$/.exec(s);
   if ( a ) { const parts = a[1].split(", "); s = parts.length >= 3 ? parts.slice(1, -1).join(", ") : parts.at(-1); }
+  s = s.replace(/^ANGLE\s+Metal\s+Renderer:\s*/i, "");   // Safari/Chrome on a Mac: "ANGLE Metal Renderer: Apple M2" -> "Apple M2"
   return s.replace(/\s*\(0x[0-9a-f]+\)/i, "").replace(/\s+(Direct3D|OpenGL|Vulkan|Metal|vs_|ps_).*$/i, "").trim();
 }
 
