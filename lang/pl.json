@@ -1795,6 +1795,218 @@
   "MOINENMAPS.Zones.h.link": "Ogień namalowany na warstwie ognia podpala strefę (a pożary stref malują się tam); ćwierć strefy rozbitej na warstwie zniszczeń czyni ją zniszczoną (zniszczenia typu powódź: zalaną); ćwierć pod wodą daje jej wodę.",
   "MOINENMAPS.Zones.fromMap": "mapa",
   "MOINENMAPS.Zones.fromMapHint": "Odczytane z warstw mapy (ogień, zniszczenia, woda): zmienia się razem z malowaniem.",
+
+  "MOINENMAPS.Zones.tab.features": "Strefa",
+
+  "MOINENMAPS.Zones.tab.states": "Stany",
+
+  "MOINENMAPS.Zones.tab.passages": "Przejścia",
+
+  "MOINENMAPS.Zones.grp.rules": "Dla zasad",
+
+  "MOINENMAPS.Zones.grp.tags": "W tej strefie",
+
+  "MOINENMAPS.Zones.grp.registry": "Stany śledzone",
+
+  "MOINENMAPS.Zones.grp.passages": "Przejścia",
+
+  "MOINENMAPS.Zones.attr.empty": "Pusta strefa",
+
+  "MOINENMAPS.Zones.attr.emptyHint": "Nie ma tu nic, co mogłoby na kogoś spaść albo go przygnieść.",
+
+  "MOINENMAPS.Zones.tag.power": "Prąd",
+
+  "MOINENMAPS.Zones.tag.metal": "Metal",
+
+  "MOINENMAPS.Zones.tag.plants": "Rośliny",
+
+  "MOINENMAPS.Zones.tag.throwables": "Rzeczy do rzucania",
+
+  "MOINENMAPS.Zones.tag.flammable": "Coś palnego",
+
+  "MOINENMAPS.Zones.tag.vacuum": "Próżnia",
+
+  "MOINENMAPS.Zones.tag.bystanders": "Postronni",
+
+  "MOINENMAPS.Zones.bord.built": "Zbudowana jako",
+
+  "MOINENMAPS.Zones.bord.wall": "Ściana",
+
+  "MOINENMAPS.Zones.bord.door": "Drzwi",
+
+  "MOINENMAPS.Zones.bord.armor": "Pancerz",
+
+  "MOINENMAPS.Zones.bord.outer": "Ściana zewnętrzna (latający przechodzą nad nią)",
+
+  "MOINENMAPS.Zones.bord.hasDoor": "Ma drzwi",
+
+  "MOINENMAPS.Zones.bord.doorBuilt": "Zbudowane",
+
+  "MOINENMAPS.Zones.bord.now": "Teraz, w grze",
+
+  "MOINENMAPS.Zones.bord.temp": "na jakiś czas",
+
+  "MOINENMAPS.Zones.wallSt.intact": "cała",
+
+  "MOINENMAPS.Zones.wallSt.breached": "przebita",
+
+  "MOINENMAPS.Zones.wallSt.removed": "usunięta",
+
+  "MOINENMAPS.Zones.doorSt.open": "otwarte",
+
+  "MOINENMAPS.Zones.doorSt.closed": "niezamknięte na klucz",
+
+  "MOINENMAPS.Zones.doorSt.locked": "zamknięte na klucz",
+
+  "MOINENMAPS.Zones.doorSt.sealed": "zamknięte elektronicznie",
+
+  "MOINENMAPS.Zones.doorSt.breached": "wyważone",
+
+  "MOINENMAPS.Zones.reg.kind.wrecked": "Zniszczona",
+
+  "MOINENMAPS.Zones.reg.kind.fire": "Ogień",
+
+  "MOINENMAPS.Zones.reg.kind.dark": "Ciemność",
+
+  "MOINENMAPS.Zones.reg.kind.smoke": "Dym",
+
+  "MOINENMAPS.Zones.reg.kind.gravity": "Grawitacja",
+
+  "MOINENMAPS.Zones.reg.kind.weather": "Pogoda",
+
+  "MOINENMAPS.Zones.reg.kind.flooded": "Zalana",
+
+  "MOINENMAPS.Zones.reg.kind.toxic": "Toksyczna",
+
+  "MOINENMAPS.Zones.reg.kind.ice": "Lód",
+
+  "MOINENMAPS.Zones.reg.kind.other": "Inny…",
+
+  "MOINENMAPS.Zones.reg.kindLabel": "Rodzaj stanu",
+
+  "MOINENMAPS.Zones.reg.level": "Poziom",
+
+  "MOINENMAPS.Zones.reg.intensity": "Intensywność",
+
+  "MOINENMAPS.Zones.reg.atLabel": "Gdzie w strefie",
+
+  "MOINENMAPS.Zones.reg.at.any": "cała strefa",
+
+  "MOINENMAPS.Zones.reg.at.ground": "ziemia",
+
+  "MOINENMAPS.Zones.reg.at.elevated": "wyniesienie",
+
+  "MOINENMAPS.Zones.reg.at.underground": "pod ziemią",
+
+  "MOINENMAPS.Zones.reg.mode.unset": "nie ustawiono",
+
+  "MOINENMAPS.Zones.reg.mode.low": "niska",
+
+  "MOINENMAPS.Zones.reg.mode.high": "wysoka",
+
+  "MOINENMAPS.Zones.reg.owner": "od: {who}",
+
+  "MOINENMAPS.Zones.reg.ends": "do: {when}",
+
+  "MOINENMAPS.Zones.reg.except": "omija: {n}",
+
+  "MOINENMAPS.Zones.reg.set": "ustawiono",
+
+  "MOINENMAPS.Zones.reg.add": "Dodaj",
+
+  "MOINENMAPS.Zones.reg.remove": "Usuń",
+
+  "MOINENMAPS.Zones.reg.none": "W tej strefie nie ma śledzonych stanów.",
+
+  "MOINENMAPS.Zones.reg.hint": "Stany z poziomem, właścicielem i końcem. Mapa je przechowuje i pokazuje; co robią, rozstrzyga stół albo moduł walki.",
+
+  "MOINENMAPS.Zones.reg.name": "Nazwa",
+
+  "MOINENMAPS.Zones.reg.namePh": "litery i cyfry",
+
+  "MOINENMAPS.Zones.reg.badName": "Nazwa stanu zaczyna się małą literą i ma tylko litery, cyfry, - i _.",
+
+  "MOINENMAPS.Zones.edge.kind.portal": "Portal",
+
+  "MOINENMAPS.Zones.edge.kind.tunnel": "Tunel",
+
+  "MOINENMAPS.Zones.edge.kindLabel": "Rodzaj przejścia",
+
+  "MOINENMAPS.Zones.edge.pick": "Wskaż drugi koniec",
+
+  "MOINENMAPS.Zones.edge.pickTitle": "{kind} ze strefy {n}: wskaż drugi koniec",
+
+  "MOINENMAPS.Zones.edge.none": "Z tej strefy nie ma przejść.",
+
+  "MOINENMAPS.Zones.edge.hint": "Przejście łączy dwie strefy, które nie sąsiadują, albo prowadzi pod ścianą, dopóki nie zostanie usunięte.",
+
+  "MOINENMAPS.Zones.edge.asleep": "jego strefy teraz nie ma",
+
+  "MOINENMAPS.Zones.edge.gone": "strefa, której już nie ma",
+
+  "MOINENMAPS.Zones.area.sky": "Wysoko w niebie",
+
+  "MOINENMAPS.Zones.area.orbit": "Orbita",
+
+  "MOINENMAPS.Zones.area.dimension": "inny wymiar",
+
+  "MOINENMAPS.Zones.area.chase": "pościg",
+
+  "MOINENMAPS.Zones.activeOnly": "Zmiany w grze wprowadza się na ekranie {gm} (aktywny MG). Budowanie mapy nadal należy do ciebie.",
+
+  "MOINENMAPS.Zones.refused.notGM": "To może zmienić tylko MG.",
+
+  "MOINENMAPS.Zones.refused.notActiveGM": "Nie zmieniono: stan gry zapisuje ekran {gm} (aktywny MG). Poproś tę osobę albo poczekaj, aż aktywnym MG będziesz ty.",
+
+  "MOINENMAPS.Zones.refused.noZones": "Nie zmieniono: ta scena nie ma stref.",
+
+  "MOINENMAPS.Zones.refused.noBorder": "Nie zmieniono: te dwie strefy już nie sąsiadują.",
+
+  "MOINENMAPS.Zones.refused.noWall": "Nie zmieniono: otwarta granica nie ma ściany do przebicia ani usunięcia. Najpierw zbuduj ścianę.",
+
+  "MOINENMAPS.Zones.refused.noDoor": "Nie zmieniono: ta ściana nie ma drzwi. Najpierw je dodaj.",
+
+  "MOINENMAPS.Zones.refused.noZone": "Nie zmieniono: tej strefy już nie ma.",
+
+  "MOINENMAPS.Zones.refused.noState": "Nie zmieniono: tego stanu już nie ma.",
+
+  "MOINENMAPS.Zones.refused.noEdge": "Nie zmieniono: tego przejścia już nie ma.",
+
+  "MOINENMAPS.Zones.refused.badEdge": "Nie utworzono przejścia: potrzebne są dwie różne strefy.",
+
+  "MOINENMAPS.Zones.refused.badState": "Nie zmieniono: tego stanu nie da się zapisać.",
+
+  "MOINENMAPS.Zones.refused.other": "Nie zmieniono ({reason}).",
+
+  "MOINENMAPS.Zones.pick.title": "Wskaż strefę",
+
+  "MOINENMAPS.Zones.pick.hint": "Kliknij podświetloną strefę. Prawy przycisk albo Esc anuluje.",
+
+  "MOINENMAPS.Zones.pick.cancel": "Anuluj",
+
+  "MOINENMAPS.Zones.pick.notHere": "Niedostępna",
+
+  "MOINENMAPS.Zones.driven.fire": "Rundę ognia prowadzi {by}, nie mapa.",
+
+  "MOINENMAPS.Zones.driven.note": "Pokazane poglądowo: zasady prowadzi {by}.",
+
+  "MOINENMAPS.Zones.driven.by": "Zasady prowadzi {by}. Mapa przechowuje i pokazuje; niczym nie rzuca.",
+
+  "MOINENMAPS.Zones.act.fireRoundBy": "Runda ognia ({by})",
+
+  "MOINENMAPS.Zones.sec.play": "W grze",
+
+  "MOINENMAPS.Zones.play.borders": "Ściany i drzwi",
+
+  "MOINENMAPS.Zones.play.noBorders": "Wszystkie ściany i drzwi są w stanie wyjściowym.",
+
+  "MOINENMAPS.Zones.play.noStates": "Na tej mapie nie ma śledzonych stanów.",
+
+  "MOINENMAPS.Zones.play.noEdges": "Na tej mapie nie ma portali ani tuneli.",
+
+  "MOINENMAPS.Zones.play.noZones": "Ta scena nie ma jeszcze stref.",
+
+  "MOINENMAPS.Zones.play.hint": "Kliknij prawym przyciskiem strefę albo granicę na mapie, żeby to zmienić.",
   "MOINENMAPS.Zones.altCost.here": "jesteś tutaj",
   "MOINENMAPS.Zones.altCost.quick": "akcja szybka (albo w ramach ruchu)",
   "MOINENMAPS.Zones.altCost.full": "jedna akcja pełna",

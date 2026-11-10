@@ -1795,6 +1795,218 @@
   "MOINENMAPS.Zones.h.link": "Fire painted on the fire layer makes a zone burn (and fires of the zones are painted there); a quarter of a zone broken on the destruction layer makes it wrecked (flood damage: flooded); a quarter under water gives it water.",
   "MOINENMAPS.Zones.fromMap": "map",
   "MOINENMAPS.Zones.fromMapHint": "Read from the map's layers (fire, destruction, water): it changes with the painting.",
+
+  "MOINENMAPS.Zones.tab.features": "Zone",
+
+  "MOINENMAPS.Zones.tab.states": "States",
+
+  "MOINENMAPS.Zones.tab.passages": "Passages",
+
+  "MOINENMAPS.Zones.grp.rules": "For the rules",
+
+  "MOINENMAPS.Zones.grp.tags": "In this zone",
+
+  "MOINENMAPS.Zones.grp.registry": "Tracked states",
+
+  "MOINENMAPS.Zones.grp.passages": "Passages",
+
+  "MOINENMAPS.Zones.attr.empty": "Empty zone",
+
+  "MOINENMAPS.Zones.attr.emptyHint": "Nothing here that could fall on anyone or trap them.",
+
+  "MOINENMAPS.Zones.tag.power": "Power",
+
+  "MOINENMAPS.Zones.tag.metal": "Metal",
+
+  "MOINENMAPS.Zones.tag.plants": "Plants",
+
+  "MOINENMAPS.Zones.tag.throwables": "Things to throw",
+
+  "MOINENMAPS.Zones.tag.flammable": "Flammable",
+
+  "MOINENMAPS.Zones.tag.vacuum": "Vacuum",
+
+  "MOINENMAPS.Zones.tag.bystanders": "Bystanders",
+
+  "MOINENMAPS.Zones.bord.built": "Built as",
+
+  "MOINENMAPS.Zones.bord.wall": "Wall",
+
+  "MOINENMAPS.Zones.bord.door": "Door",
+
+  "MOINENMAPS.Zones.bord.armor": "Armor",
+
+  "MOINENMAPS.Zones.bord.outer": "Exterior wall (flyers pass over it)",
+
+  "MOINENMAPS.Zones.bord.hasDoor": "Has a door",
+
+  "MOINENMAPS.Zones.bord.doorBuilt": "Built",
+
+  "MOINENMAPS.Zones.bord.now": "Now, in play",
+
+  "MOINENMAPS.Zones.bord.temp": "for a while",
+
+  "MOINENMAPS.Zones.wallSt.intact": "intact",
+
+  "MOINENMAPS.Zones.wallSt.breached": "breached",
+
+  "MOINENMAPS.Zones.wallSt.removed": "removed",
+
+  "MOINENMAPS.Zones.doorSt.open": "open",
+
+  "MOINENMAPS.Zones.doorSt.closed": "unlocked",
+
+  "MOINENMAPS.Zones.doorSt.locked": "locked",
+
+  "MOINENMAPS.Zones.doorSt.sealed": "sealed electronically",
+
+  "MOINENMAPS.Zones.doorSt.breached": "breached",
+
+  "MOINENMAPS.Zones.reg.kind.wrecked": "Wrecked",
+
+  "MOINENMAPS.Zones.reg.kind.fire": "Fire",
+
+  "MOINENMAPS.Zones.reg.kind.dark": "Darkness",
+
+  "MOINENMAPS.Zones.reg.kind.smoke": "Smoke",
+
+  "MOINENMAPS.Zones.reg.kind.gravity": "Gravity",
+
+  "MOINENMAPS.Zones.reg.kind.weather": "Weather",
+
+  "MOINENMAPS.Zones.reg.kind.flooded": "Flooded",
+
+  "MOINENMAPS.Zones.reg.kind.toxic": "Toxic",
+
+  "MOINENMAPS.Zones.reg.kind.ice": "Ice",
+
+  "MOINENMAPS.Zones.reg.kind.other": "Other…",
+
+  "MOINENMAPS.Zones.reg.kindLabel": "Kind of state",
+
+  "MOINENMAPS.Zones.reg.level": "Level",
+
+  "MOINENMAPS.Zones.reg.intensity": "Intensity",
+
+  "MOINENMAPS.Zones.reg.atLabel": "Where in the zone",
+
+  "MOINENMAPS.Zones.reg.at.any": "whole zone",
+
+  "MOINENMAPS.Zones.reg.at.ground": "ground",
+
+  "MOINENMAPS.Zones.reg.at.elevated": "elevated",
+
+  "MOINENMAPS.Zones.reg.at.underground": "underground",
+
+  "MOINENMAPS.Zones.reg.mode.unset": "not set",
+
+  "MOINENMAPS.Zones.reg.mode.low": "low",
+
+  "MOINENMAPS.Zones.reg.mode.high": "high",
+
+  "MOINENMAPS.Zones.reg.owner": "by {who}",
+
+  "MOINENMAPS.Zones.reg.ends": "until {when}",
+
+  "MOINENMAPS.Zones.reg.except": "spares {n}",
+
+  "MOINENMAPS.Zones.reg.set": "set",
+
+  "MOINENMAPS.Zones.reg.add": "Add",
+
+  "MOINENMAPS.Zones.reg.remove": "Remove",
+
+  "MOINENMAPS.Zones.reg.none": "No tracked states in this zone.",
+
+  "MOINENMAPS.Zones.reg.hint": "States with a level, an owner and an end. The map stores and shows them; what they do is decided at the table or by a combat module.",
+
+  "MOINENMAPS.Zones.reg.name": "Name",
+
+  "MOINENMAPS.Zones.reg.namePh": "letters and digits",
+
+  "MOINENMAPS.Zones.reg.badName": "A state's name starts with a small letter and has only letters, digits, - and _.",
+
+  "MOINENMAPS.Zones.edge.kind.portal": "Portal",
+
+  "MOINENMAPS.Zones.edge.kind.tunnel": "Tunnel",
+
+  "MOINENMAPS.Zones.edge.kindLabel": "Kind of passage",
+
+  "MOINENMAPS.Zones.edge.pick": "Pick the other end",
+
+  "MOINENMAPS.Zones.edge.pickTitle": "{kind} from zone {n}: pick the other end",
+
+  "MOINENMAPS.Zones.edge.none": "No passages from this zone.",
+
+  "MOINENMAPS.Zones.edge.hint": "A passage joins two zones that are not neighbours, or leads under a wall, until it is removed.",
+
+  "MOINENMAPS.Zones.edge.asleep": "its zone is gone for now",
+
+  "MOINENMAPS.Zones.edge.gone": "a zone that is gone",
+
+  "MOINENMAPS.Zones.area.sky": "Sky High",
+
+  "MOINENMAPS.Zones.area.orbit": "Orbit",
+
+  "MOINENMAPS.Zones.area.dimension": "another dimension",
+
+  "MOINENMAPS.Zones.area.chase": "a chase",
+
+  "MOINENMAPS.Zones.activeOnly": "Changes in play are made on {gm}'s screen (the active GM). Building the map is still yours.",
+
+  "MOINENMAPS.Zones.refused.notGM": "Only a GM can change this.",
+
+  "MOINENMAPS.Zones.refused.notActiveGM": "Not changed: play state is written on {gm}'s screen (the active GM). Ask them, or wait until you are the active GM.",
+
+  "MOINENMAPS.Zones.refused.noZones": "Not changed: this scene has no zones.",
+
+  "MOINENMAPS.Zones.refused.noBorder": "Not changed: these two zones are not neighbours any more.",
+
+  "MOINENMAPS.Zones.refused.noWall": "Not changed: an open border has no wall to breach or remove. Build a wall first.",
+
+  "MOINENMAPS.Zones.refused.noDoor": "Not changed: this wall has no door. Give it one first.",
+
+  "MOINENMAPS.Zones.refused.noZone": "Not changed: that zone is gone.",
+
+  "MOINENMAPS.Zones.refused.noState": "Not changed: that state is already gone.",
+
+  "MOINENMAPS.Zones.refused.noEdge": "Not changed: that passage is already gone.",
+
+  "MOINENMAPS.Zones.refused.badEdge": "No passage made: it needs two different zones.",
+
+  "MOINENMAPS.Zones.refused.badState": "Not changed: the state could not be stored.",
+
+  "MOINENMAPS.Zones.refused.other": "Not changed ({reason}).",
+
+  "MOINENMAPS.Zones.pick.title": "Pick a zone",
+
+  "MOINENMAPS.Zones.pick.hint": "Click a highlighted zone. Right-click or Esc to cancel.",
+
+  "MOINENMAPS.Zones.pick.cancel": "Cancel",
+
+  "MOINENMAPS.Zones.pick.notHere": "Not available",
+
+  "MOINENMAPS.Zones.driven.fire": "The fire round is run by {by}, not by the map.",
+
+  "MOINENMAPS.Zones.driven.note": "Shown for reference: the rules are run by {by}.",
+
+  "MOINENMAPS.Zones.driven.by": "The rules are run by {by}. The map stores and shows; it does not roll.",
+
+  "MOINENMAPS.Zones.act.fireRoundBy": "Fire round ({by})",
+
+  "MOINENMAPS.Zones.sec.play": "In play",
+
+  "MOINENMAPS.Zones.play.borders": "Walls and doors",
+
+  "MOINENMAPS.Zones.play.noBorders": "Every wall and door is as built.",
+
+  "MOINENMAPS.Zones.play.noStates": "No tracked states on this map.",
+
+  "MOINENMAPS.Zones.play.noEdges": "No portals or tunnels on this map.",
+
+  "MOINENMAPS.Zones.play.noZones": "This scene has no zones yet.",
+
+  "MOINENMAPS.Zones.play.hint": "Right-click a zone or a border on the map to change these.",
   "MOINENMAPS.Zones.altCost.here": "you are here",
   "MOINENMAPS.Zones.altCost.quick": "a quick action (or as part of a move)",
   "MOINENMAPS.Zones.altCost.full": "one full action",

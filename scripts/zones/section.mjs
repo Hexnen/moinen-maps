@@ -5,6 +5,7 @@ import * as Editor from "./editor.mjs";
 import { presets } from "./presets.mjs";
 import * as Styles from "./styles.mjs";
 import * as Model from "./model.mjs";
+import { playPanel } from "./play-panel.mjs";
 
 /**
  * Zones as a workspace section (takes over the "zones" placeholder of soon.mjs). Tools: the hand, the pencil, the eraser; actions:
@@ -37,17 +38,19 @@ function statusText() {
 function bar(host, ctx) {
   const mode = TOOLS[ctx?.tool] ?? null;
   const S = Zones.state();
-  const btn = (act, icon, title, disabled = false, label = "") => `<button type="button" class="mm-ws-btn" data-act="${act}" aria-label="${esc(Z(title))}" data-tooltip="${esc(Z(title))}"${disabled ? " disabled" : ""}><i class="${icon}" inert></i>${label ? ` ${esc(label)}` : ""}</button>`;
+  const btn = (act, icon, title, disabled = false, label = "", d = null) => `<button type="button" class="mm-ws-btn" data-act="${act}" aria-label="${esc(Z(title, d))}" data-tooltip="${esc(Z(title, d))}"${disabled ? " disabled" : ""}><i class="${icon}" inert></i>${label ? ` ${esc(label)}` : ""}</button>`;
   const render = () => {
     const size = mode === "erase"
       ? optRange({ name: "eraser", label: Z("f.eraser"), value: setting("zonesEraser") ?? 0.5, min: 0.1, max: 4, step: 0.1, hint: Z("h.eraser") })
       : mode === "draw" ? optRange({ name: "snap", label: Z("f.snap"), value: S?.snap ?? 0.25, min: 0, max: 1, step: 0.05, hint: Z("h.snap") }) : "";
     const zs = [...(Zones.marks()?.zones.values() ?? [])];
-    const fire = zs.some((p) => p.fire), states = zs.some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
+    // (the fire round is the map's own only while no combat module runs the rules: zones.mjs rulesDriver)
+    const by = Zones.drivenBy();
+    const fire = zs.some((p) => p.fire) && Zones.fireRoundOn(), states = zs.some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
     const smooth = optRange({ name: "smooth", label: Z("f.smooth"), value: S?.smooth ?? 0.3, min: 0, max: 1, step: 0.05, hint: Z("h.smooth") });
     host.innerHTML = `${btn("undo", "fa-solid fa-rotate-left", "undo", !Zones.canUndo())}${btn("redo", "fa-solid fa-rotate-right", "redo", !Zones.canRedo())}
       ${btn("trim", "fa-solid fa-scissors", "trimHint", !Zones.zones(), Z("trim"))}
-      ${fire ? btn("fireRound", "fa-solid fa-fire", "act.fireRound") : ""}${states ? btn("endScene", "fa-solid fa-broom", "act.endScene") : ""}
+      ${fire ? (by ? btn("fireRound", "fa-solid fa-fire", "act.fireRoundBy", false, "", { by: by.title }) : btn("fireRound", "fa-solid fa-fire", "act.fireRound")) : ""}${states ? btn("endScene", "fa-solid fa-broom", "act.endScene") : ""}
       ${smooth}${size}<span class="mm-ws-hint mm-z-status">${esc(statusText())}</span>
       ${optHint(`${Z(mode === "erase" ? "hintErase" : mode === "draw" ? "hintDraw" : "hintPick")} ${Z("h.rclick")}`)}`;
   };
@@ -68,7 +71,7 @@ function bar(host, ctx) {
   host.addEventListener("change", onChange);
   const off = bindSettings(host, { eraser: { key: "zonesEraser", read: (c) => Math.min(4, Math.max(0.1, Number(c.value) || 0.5)) } });
   // the counts and undo buttons follow every edit (re-rendered unless a slider is in hand)
-  const hook = Hooks.on("moinenMapsZones", (kind) => { if ( kind === "edited" || kind === "loaded" || kind === "linked" ) { if ( !host.contains(document.activeElement) ) render(); else host.querySelector(".mm-z-status")?.replaceChildren(statusText()); } });
+  const hook = Hooks.on("moinenMapsZones", (kind) => { if ( kind === "edited" || kind === "loaded" || kind === "linked" || kind === "params" ) { if ( !host.contains(document.activeElement) ) render(); else host.querySelector(".mm-z-status")?.replaceChildren(statusText()); } });
   return () => { host.removeEventListener("click", onClick); host.removeEventListener("change", onChange); off(); Hooks.off("moinenMapsZones", hook); };
 }
 
@@ -196,7 +199,9 @@ export function zonesSection() {
     onToolChange: (tool, active) => { if ( tool in TOOLS ) Editor.setMode(active ? TOOLS[tool] : null); },
     bar,
     panels: [
-      { id: "settings", title: "MOINENMAPS.Zones.sec.settings", icon: "fa-solid fa-person-running", mount: (host) => settingsPanel(host) }
+      { id: "settings", title: "MOINENMAPS.Zones.sec.settings", icon: "fa-solid fa-person-running", mount: (host) => settingsPanel(host) },
+      // what happened on the map during play: walls and doors not as built, tracked states, passages
+      { id: "play", title: "MOINENMAPS.Zones.sec.play", icon: "fa-solid fa-chess-board", open: false, mount: (host) => playPanel(host) }
     ]
   };
 }

@@ -978,3 +978,70 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-vram-hint { font-size: 0.7rem; opacity: 0.6; }
 .mm-vram :where(button, input):focus-visible { outline: 2px solid var(--mm-accent, #e5322d); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .mm-vram { animation: none; } .mm-vram-bar > i { transition: none; } }
+
+/* zones: the wall and the door of a border, zone attributes, tracked states and passages in the right-click menu */
+.mm-z-menu { max-width: 21rem; max-height: calc(100vh - 12px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #5a4c3c transparent; }
+.mm-z-menu :is(button, select, input):focus-visible { outline: 2px solid #f3e7c9; outline-offset: 1px; }
+.mm-z-menu .mm-z-tabs { display: flex; gap: 0.1rem; margin: 0 0 0.2rem; border-bottom: 1px solid #4a3f33; }
+.mm-z-menu .mm-z-tabs button { flex: 1 1 0; width: auto; justify-content: center; gap: 0.35rem; padding: 0.3rem 0.3rem 0.35rem; border-radius: 5px 5px 0 0; opacity: 0.7; box-shadow: inset 0 -2px 0 transparent; }
+.mm-z-menu .mm-z-tabs button[aria-selected="true"] { opacity: 1; font-weight: 700; box-shadow: inset 0 -2px 0 #f3e7c9; }
+.mm-z-menu .mm-z-tabs button em { margin: 0; min-width: 1.1rem; padding: 0 0.25rem; border-radius: 0.6rem; background: #5cc8ff26; color: #9fdcff; font-size: 0.68rem; font-weight: 700; opacity: 1; text-align: center; }
+/* what is built reads in the menu's own ink; what happened in play carries the blue the map's own states use */
+.mm-z-menu-play { display: flex; align-items: center; gap: 0.35rem; color: #9fdcff; opacity: 1; }
+.mm-z-menu-play::before { content: ""; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: #5cc8ff; }
+.mm-z-menu-lock, .mm-z-lock { display: flex; align-items: baseline; gap: 0.45rem; margin: 0.15rem 0.25rem 0.3rem; padding: 0.3rem 0.45rem; border-radius: 5px; background: #f2c14e1f; color: #f6d98a; font-size: 0.76rem; line-height: 1.3; }
+.mm-z-lock { margin: 0 0 0.5rem; }
+.mm-z-lock.mm-z-driven { background: #5cc8ff1c; color: #9fdcff; }
+.mm-z-menu :is(select, input[type="checkbox"]):disabled, .mm-z-menu .mm-z-x:disabled { opacity: 0.45; cursor: default; }
+.mm-z-menu input[type="text"] { flex: 0 1 10rem; min-width: 0; height: 1.6rem; font-size: 0.8rem; }
+.mm-z-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0.15rem 0.4rem 0.2rem; }
+.mm-z-menu .mm-z-chip { width: auto; gap: 0.35rem; padding: 0.16rem 0.5rem; border: 1px solid #5a4c3c; border-radius: 1rem; font-size: 0.78rem; opacity: 0.75; }
+.mm-z-menu .mm-z-chip i { font-size: 0.72rem; opacity: 0.8; }
+.mm-z-menu .mm-z-chip[aria-pressed="true"] { opacity: 1; border-color: #f3e7c9; background: #f3e7c924; font-weight: 600; }
+.mm-z-rec { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 0.4rem; row-gap: 0.15rem; padding: 0.22rem 0.25rem 0.22rem 0.4rem; border-radius: 5px; }
+.mm-z-rec + .mm-z-rec { border-top: 1px solid #4a3f3380; }
+.mm-z-rec-name { display: flex; align-items: center; gap: 0.4rem; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-z-rec-name > i:first-child { flex: none; width: 1rem; text-align: center; color: #9fdcff; }
+.mm-z-rec-name .mm-z-rec-to { font-size: 0.66rem; opacity: 0.55; }
+.mm-z-rec-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.45rem; padding-left: 1.4rem; }
+.mm-z-rec-more select { flex: 0 1 8.5rem; min-width: 0; height: 1.5rem; font-size: 0.76rem; }
+.mm-z-rec-more small { font-size: 0.72rem; opacity: 0.65; }
+.mm-z-menu .mm-z-x, .mm-z-plist .mm-z-x { flex: none; width: 1.5rem; height: 1.5rem; justify-content: center; padding: 0; opacity: 0.7; }
+.mm-z-menu .mm-z-x:hover:not(:disabled), .mm-z-plist .mm-z-x:hover:not(:disabled) { opacity: 1; background: #e0666633; color: #ffb3a8; }
+.mm-z-add { display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.4rem 0.15rem; }
+.mm-z-add select { flex: 1 1 auto; min-width: 0; height: 1.6rem; font-size: 0.8rem; }
+.mm-z-menu .mm-z-add button { flex: none; width: auto; padding: 0.22rem 0.55rem; background: #ffffff12; white-space: nowrap; }
+.mm-z-menu .mm-z-recname[hidden] { display: none; }
+
+/* zones: the "In play" panel of the dock */
+.mm-z-play h4 em { margin-left: 0.3rem; padding: 0 0.35rem; border-radius: 0.6rem; background: color-mix(in srgb, currentColor 16%, transparent); font-style: normal; font-size: 0.72rem; letter-spacing: 0; }
+.mm-z-plist { list-style: none; margin: 0 0 0.35rem; padding: 0; }
+.mm-z-plist li { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.2rem 0.25rem 0.3rem; border-radius: 5px; }
+.mm-z-plist li + li { border-top: 1px solid var(--mm-edge, #4a3f33); }
+.mm-z-plist li:hover, .mm-z-plist li:focus-within { background: color-mix(in srgb, currentColor 8%, transparent); }
+.mm-z-plist li > i { flex: none; width: 1.1rem; text-align: center; opacity: 0.75; }
+.mm-z-plist li > span { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.mm-z-plist li small { font-size: 0.74rem; opacity: 0.7; overflow-wrap: anywhere; }
+.mm-z-plist .mm-z-x { display: grid; place-items: center; margin: 0; border: 0; border-radius: 5px; background: none; color: inherit; cursor: pointer; }
+.mm-z-plist .mm-z-x:disabled { opacity: 0.35; cursor: default; }
+.mm-z-play .mm-ws-btn { width: 100%; justify-content: center; }
+
+/* zones: picking a zone on the map (api.zones.pick) - the banner under the top bar, the tip beside the cursor, the cursor itself */
+.mm-z-pick { position: fixed; z-index: 1000; left: 50%; top: 4.5rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.7rem;
+  max-width: min(36rem, calc(100vw - 2rem)); padding: 0.45rem 0.5rem 0.45rem 0.8rem; border-radius: 8px;
+  background: #1d1916f2; border: 1px solid #5a4c3c; box-shadow: 0 6px 22px #000a; color: #eadfc8; font-size: 0.86rem; animation: mm-z-pick-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.mm-z-pick > i { flex: none; color: #5cc8ff; font-size: 1.05rem; }
+.mm-z-pick-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.mm-z-pick-text b { font-weight: 700; overflow-wrap: anywhere; }
+.mm-z-pick-text small { font-size: 0.76rem; opacity: 0.72; }
+.mm-z-pick button { flex: none; display: flex; align-items: center; gap: 0.45rem; width: auto; height: auto; margin: 0; padding: 0.3rem 0.6rem; border: 1px solid #5a4c3c; border-radius: 6px; background: #ffffff10; color: inherit; font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
+.mm-z-pick button:hover { background: #ffffff20; }
+.mm-z-pick button:focus-visible { outline: 2px solid #f3e7c9; outline-offset: 1px; }
+.mm-z-pick kbd { padding: 0 0.3rem; border: 1px solid #5a4c3c; border-radius: 4px; background: #15110f; font: inherit; font-size: 0.7rem; opacity: 0.85; }
+@keyframes mm-z-pick-in { from { opacity: 0; transform: translate(-50%, -0.4rem); } }
+@media (prefers-reduced-motion: reduce) { .mm-z-pick { animation: none; } }
+.mm-z-pick-tip { white-space: normal; max-width: 18rem; }
+.mm-z-pick-tip small { display: block; font-size: 0.74rem; opacity: 0.75; }
+.mm-z-pick-tip.no { opacity: 0.8; color: #c9bfae; }
+body.mm-z-pick-ok canvas#board { cursor: pointer !important; }
+body.mm-z-pick-no canvas#board { cursor: not-allowed !important; }
