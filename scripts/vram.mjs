@@ -17,7 +17,7 @@
  * classified (the first frame from this module's scripts/<dir>/ names the layer; no frame of ours = Foundry and other modules)
  * and the trace dropped. Nothing is tagged on existing objects except `_mmV` (the layer key) on BaseTextures.
  *
- * COST: nothing per frame. A sample walks the three lists (~0.8 us a texture) in idle slices of 1500 textures every few seconds
+ * COST: nothing per frame. A sample walks the three lists (~0.8 us a texture) in idle slices of at most ~2 ms every few seconds
  * while the meter is on screen (vram-ui.mjs), or when `api.vram.sample()` / `api.diag.vram()` asks.
  */
 import { MODULE_ID } from "./config.mjs";
@@ -66,13 +66,29 @@ const pending = [];
 let drainQueued = false;
 const idle = (fn, timeout) => globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout }) : setTimeout(() => fn({ timeRemaining: () => 8, didTimeout: true }), 50);
 
+/**
+ * The file names of a trace, one per line, and nothing else: V8 hands the frames to Error.prepareStackTrace on the first read, and
+ * asking only getFileName() skips the line/column lookups of the usual text (the slow part of reading a stack).
+ */
+const fileNames = (e, sites) => sites.map((c) => c.getFileName?.() ?? "").join("\n");
+function filesOf(err) {
+  const prev = Error.prepareStackTrace;
+  Error.prepareStackTrace = fileNames;
+  try { return String(err.stack ?? ""); } finally { Error.prepareStackTrace = prev; }
+}
+/** At most this long per idle slice (classifying, walking). */
+const SLICE_MS = 2;
+
 /** Classify the queued textures (at idle, a few ms at most per call). */
-function drain(deadline) {
+function drain() {
   drainQueued = false;
+  const t0 = performance.now();
   let i = 0;
   for ( ; i < pending.length; i++ ) {
-    if ( (i & 31) === 31 && deadline && !deadline.didTimeout && deadline.timeRemaining() < 1 ) break;
-    classify(pending[i]);
+    if ( (i & 31) === 31 && performance.now() - t0 > SLICE_MS ) break;
+    const bt = pending[i];
+    if ( bt.destroyed ) { if ( typeof bt._mmV !== "string" ) bt._mmV = "foundry"; continue; }   // gone before it was counted: never read its trace
+    classify(bt);
   }
   pending.splice(0, i);
   if ( pending.length ) queueDrain();
@@ -82,7 +98,7 @@ function classify(bt) {
   const v = bt._mmV;
   if ( typeof v === "string" ) return v;
   let o = { layer: "foundry", file: "" };
-  try { if ( v ) o = originOfStack(v.stack); } catch { /* keep foundry */ }
+  try { if ( v ) o = originOfStack(filesOf(v)); } catch { /* keep foundry */ }
   bt._mmV = o.layer; bt._mmF = o.file;
   return o.layer;
 }
@@ -159,6 +175,7 @@ const listeners = new Set();
  */
 export function sample() {
   const st = begin(); if ( !st ) return last;
+  if ( pending.length ) drain();
   step(st, Infinity);
   return finish(st);
 }
@@ -167,11 +184,12 @@ export function sample() {
 function begin() {
   const R = canvas?.app?.renderer;
   if ( !R?.texture ) return null;
-  return { R, uid: R.CONTEXT_UID, i: 0, ms: 0, textures: 0, layers: Object.fromEntries(LAYERS.map((k) => [k, { bytes: 0, n: 0 }])) };
+  return { R, uid: R.CONTEXT_UID, i: 0, ms: 0, maxSlice: 0, slices: 0, textures: 0, layers: Object.fromEntries(LAYERS.map((k) => [k, { bytes: 0, n: 0 }])) };
 }
-function step(st, count) {
-  const t0 = performance.now(), list = st.R.texture.managedTextures, uid = st.uid, layers = st.layers, end = Math.min(list.length, st.i + count);
-  for ( ; st.i < end; st.i++ ) {
+function step(st, maxMs) {
+  const t0 = performance.now(), list = st.R.texture.managedTextures, uid = st.uid, layers = st.layers;
+  for ( let k = 0; st.i < list.length; st.i++, k++ ) {
+    if ( (k & 63) === 63 && performance.now() - t0 > maxMs ) break;
     const bt = list[st.i], gt = bt._glTextures?.[uid]; if ( !gt ) continue;
     const w = gt.width || 0, h = gt.height || 0; if ( !w || !h ) continue;
     let b = w * h * bytesPerTexel(gt.internalFormat, gt.type);
@@ -180,11 +198,13 @@ function step(st, count) {
     const L = layers[classify(bt)] ?? layers.foundry;
     L.bytes += b; L.n++; st.textures++;
   }
-  st.ms += performance.now() - t0;
+  const d = performance.now() - t0;
+  st.ms += d; st.maxSlice = Math.max(st.maxSlice, d); st.slices++;
   return st.i >= list.length;
 }
 function finish(st) {
   const t0 = performance.now(), { R, uid, layers } = st;
+  if ( pending.length ) drain();
   for ( const fb of R.framebuffer?.managedFramebuffers ?? [] ) {
     const g = fb.glFramebuffers?.[uid]; if ( !g ) continue;
     const px = (fb.width || 0) * (fb.height || 0), s = Math.max(1, g.multisample || 0);
@@ -207,16 +227,16 @@ function finish(st) {
   const bud = budget(), ratio = bud.bytes ? total / bud.bytes : 0;
   if ( total > peak ) { peak = total; peakAt = Date.now(); }
   last = { at: Date.now(), ms: +(st.ms + performance.now() - t0).toFixed(2), total, counted, estimated: est, budget: bud, ratio,
-    level: ratio >= OVER ? "over" : ratio >= WARN ? "warn" : "ok", layers, textures: st.textures, backing: [bw, bh], peak, peakAt, contextLost, lostAt, unclassified: pending.length };
+    level: ratio >= OVER ? "over" : ratio >= WARN ? "warn" : "ok", layers, textures: st.textures,
+    slices: st.slices, maxSliceMs: +Math.max(st.maxSlice, performance.now() - t0).toFixed(2), backing: [bw, bh], peak, peakAt, contextLost, lostAt, unclassified: pending.length };
   for ( const fn of listeners ) { try { fn(last); } catch ( err ) { console.error(`${MODULE_ID} | vram`, err); } }
   return last;
 }
 
-/** The clock's walk: 1500 textures per idle slice (~1 ms each), so 12 000 textures never make one long task. */
-const SLICE = 1500;
+/** The clock's walk: idle slices of at most ~2 ms each, so 12 000 textures never make one long task. */
 function sampleInParts(done) {
   const st = begin(); if ( !st ) return done();
-  const go = () => { try { if ( !canvas?.ready || st.R !== canvas.app?.renderer ) return done(); if ( step(st, SLICE) ) { finish(st); return done(); } } catch ( err ) { console.error(`${MODULE_ID} | vram`, err); return done(); } idle(go, 1000); };
+  const go = () => { try { if ( !canvas?.ready || st.R !== canvas.app?.renderer ) return done(); if ( step(st, SLICE_MS) ) { finish(st); return done(); } } catch ( err ) { console.error(`${MODULE_ID} | vram`, err); return done(); } idle(go, 1000); };
   idle(go, 1000);
 }
 
@@ -225,7 +245,7 @@ export function summaryMB(s = last ?? sample()) {
   if ( !s ) return null;
   const mb = (b) => Math.round(b / MB);
   return { totalMB: mb(s.total), countedMB: mb(s.counted), estimatedMB: mb(s.estimated), budgetMB: mb(s.budget.bytes), budgetSource: s.budget.source,
-    model: s.budget.model, pct: Math.round(s.ratio * 100), level: s.level, textures: s.textures, peakMB: mb(s.peak), contextLost: s.contextLost, sampleMs: s.ms,
+    model: s.budget.model, pct: Math.round(s.ratio * 100), level: s.level, textures: s.textures, peakMB: mb(s.peak), contextLost: s.contextLost, sampleMs: s.ms, slices: s.slices, maxSliceMs: s.maxSliceMs,
     layersMB: Object.fromEntries(Object.entries(s.layers).map(([k, v]) => [k, mb(v.bytes)])), counts: Object.fromEntries(Object.entries(s.layers).map(([k, v]) => [k, v.n])) };
 }
 
