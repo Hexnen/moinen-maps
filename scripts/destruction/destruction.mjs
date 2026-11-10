@@ -1698,8 +1698,8 @@ async function persistOnce(partialAsked = false) {
   if ( partial && !partialAsked ) return;
   // (a manifest of 0.4.1 with the same settings counts as the same: its entries stay, rewritten with the version they were baked at)
   const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg));
-  // (a partial publish only adds to a manifest of this bake: a first one, or one of other settings, waits for the complete pass)
-  if ( partial && (!same || M.base !== base) ) return;
+  // (partial: a stroke not on screen keeps its stored entry - only one of this folder and these settings: another's names other chunks)
+  const keepOld = (id) => { if ( same && typeof M.c[id] === "string" ) c[id] = M.c[id]; };
   // (versions no longer decide who may publish: every entry carries the version it was baked with, and an entry is only replaced by a
   // record of the same stroke baked with a newer version, or by a changed stroke - never downgraded)
   seedKnown(scene);
@@ -1708,9 +1708,9 @@ async function persistOnce(partialAsked = false) {
     if ( o.k ) continue;
     const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
     // should not happen once complete (a later run publishes); partial: the stored entry stays as it is
-    if ( !r ) { if ( !partial ) return; if ( typeof M.c[o.id] === "string" ) c[o.id] = M.c[o.id]; continue; }
+    if ( !r ) { if ( !partial ) return; keepOld(o.id); continue; }
     // (partial: only what is on screen now - a record baked for a pass not shown yet waits)
-    if ( partial && shownRecs.get(o.id) !== r ) { if ( typeof M.c[o.id] === "string" ) c[o.id] = M.c[o.id]; continue; }
+    if ( partial && shownRecs.get(o.id) !== r ) { keepOld(o.id); continue; }
     const e = same ? Store.entryOf(M, o.id) : null, pick = Policy.entryChoice(e, sig, r, (id) => Net.known(dir).has(id));
     if ( pick.keep ) {
       c[o.id] = Policy.entryString(sig, e.id, e.ver);
@@ -1760,7 +1760,7 @@ async function persistOnce(partialAsked = false) {
       return;
     }
     // (partial: the stored key stays - it names the state the manifest was complete for; the full publish writes the key of the moment)
-    const baked = { v: 2, dir, base, key: partial ? M.key : key, at: now(), c, path: null, metaRows: null };
+    const baked = { v: 2, dir, base, key: partial ? (same ? M.key : "") : key, at: now(), c, path: null, metaRows: null };
     // the entries that played since: everybody here plays them a moment after the upload, at the same server time
     const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
     for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
