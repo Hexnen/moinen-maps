@@ -1734,6 +1734,30 @@ export class DestructionDisplay {
     return { x0: (tl.x - o.x) / ap - m, y0: (tl.y - o.y) / ap - m, x1: (br.x - o.x) / ap + m, y1: (br.y - o.y) / ap + m };
   }
 
+  /**
+   * PERF: the cause lights' and night rims' pools (cause-fx.mjs, in the scene's illumination) far off the screen are not drawn
+   * (`renderable`; their `visible` keeps its meaning): at night every damage has its rim there, ~2000 sprites batched and drawn in every
+   * frame of a grown scene though a few dozen are in view. Culled only past half a view of margin on every side, so nothing that could
+   * reach the screen is left out (the same pixels). `CONFIG.moinenMaps.noLightCull = true`: all drawn (A/B).
+   */
+  cullLights() {
+    const L = this.causeLights; if ( !L?.groups.size ) return;
+    const st = canvas.stage, v = canvas.app?.renderer?.screen;
+    let cv = null;
+    if ( st && v && !globalThis.CONFIG?.moinenMaps?.noLightCull && !st.rotation ) {
+      const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
+      const x0 = Math.min(tl.x, br.x), x1 = Math.max(tl.x, br.x), y0 = Math.min(tl.y, br.y), y1 = Math.max(tl.y, br.y), mx = (x1 - x0) / 2, my = (y1 - y0) / 2;
+      cv = { x0: x0 - mx, y0: y0 - my, x1: x1 + mx, y1: y1 + my };
+    }
+    const cull = (spr) => {
+      if ( !spr || spr.destroyed ) return;
+      if ( !cv || !spr.visible ) { spr.renderable = true; return; }
+      const t = spr.texture, w = (t?.width ?? 0) * Math.abs(spr.scale.x), h = (t?.height ?? 0) * Math.abs(spr.scale.y);
+      spr.renderable = !(spr.x > cv.x1 || spr.y > cv.y1 || spr.x + w < cv.x0 || spr.y + h < cv.y0);
+    };
+    for ( const g of L.groups ) { cull(g.rim?.pool); cull(g.light?.pool); }
+  }
+
   /** Is the live layer sampled by the one sampler (edge mode and the plugin installed)? */
   sharpLive() {
     const m = globalThis.CONFIG?.moinenMaps?.zoomAA;
@@ -1834,6 +1858,7 @@ export class DestructionDisplay {
     this.prepSlice(t0);
     lap("idle");
     Cause.tickLights(this, t0);
+    this.cullLights();
     lap("lights");
     this.debris.tick(t0, vw);
     lap("debris");
