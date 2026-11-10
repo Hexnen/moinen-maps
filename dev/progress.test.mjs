@@ -44,7 +44,7 @@ const TICK = 250;
   P.resetRates();
   const total = 12000, units = 1e6, j = new P.Job("b");
   T = 0;
-  const r = j.run("bake", units, { grain: units * 0.1 });
+  const r = j.run("bakeOne", units, { grain: units * 0.1 });
   let worst = 0, jumpUp = 0, prevEta = null, prevF = 0, back = false;
   for ( T = 0; T < total; T += TICK ) {
     // reports every ~120 ms, the pace wobbling +-30% around linear

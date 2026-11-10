@@ -2224,6 +2224,7 @@
   "MOINENMAPS.Prog.st.plain": "Wypiekam podłoże pod pociągnięciami: {done}/{total}",
   "MOINENMAPS.Prog.st.strokes": "Wypiekam pociągnięcia: {done}/{total}",
   "MOINENMAPS.Prog.st.show": "Nakładam na mapę…",
+  "MOINENMAPS.Prog.st.prepare": "Przygotowuję pociągnięcia…",
   "MOINENMAPS.Prog.st.paused": "Wstrzymane",
   "MOINENMAPS.Prog.st.waterPrep": "Przygotowuję wodę…",
   "MOINENMAPS.Prog.st.waterFrames": "Klatki wody: {done}/{total}",

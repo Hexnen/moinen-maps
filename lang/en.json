@@ -2224,6 +2224,7 @@
   "MOINENMAPS.Prog.st.plain": "Baking the ground under the strokes: {done}/{total}",
   "MOINENMAPS.Prog.st.strokes": "Baking the strokes: {done}/{total}",
   "MOINENMAPS.Prog.st.show": "Putting it on the map…",
+  "MOINENMAPS.Prog.st.prepare": "Getting the strokes ready…",
   "MOINENMAPS.Prog.st.paused": "Paused",
   "MOINENMAPS.Prog.st.waterPrep": "Preparing the water…",
   "MOINENMAPS.Prog.st.waterFrames": "Water frames: {done}/{total}",

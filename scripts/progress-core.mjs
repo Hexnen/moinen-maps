@@ -13,7 +13,9 @@
  * Cost: a few numbers per report; the UI reads `view()` on its own slow timer (4 per second), never per frame.
  */
 
-const DEFAULT_RATES = { chunk: 25, bake: 0.004, show: 250, waterPrep: 1500, waterFrame: 120, wait: 0 };
+// (bake work units: core.mjs workOf - a window pixel; bakeOne: a bake of a few strokes in one job, bakePlain: plain looks (a stroke
+// from its own data), bakeSub: strokes baked over the older ones they read - about 3x slower per pixel)
+const DEFAULT_RATES = { chunk: 25, bakeOne: 0.004, bakePlain: 0.002, bakeSub: 0.006, show: 250, waterPrep: 1500, waterFrame: 120, wait: 0 };
 const STORE = "mm-progress-rates";
 let rates = null;
 
@@ -47,14 +49,15 @@ export class Job {
     this.ended = 0; this.ok = true; this.indeterminate = false;
   }
   /** Work planned ahead (estimated ms of `units` of `kind`). */
-  plan(kind, units) { if ( units > 0 ) this.planned += units * rateOf(kind); }
+  plan(kind, units, par = 1) { if ( units > 0 ) this.planned += units * rateOf(kind) / Math.max(1, par); }
   /**
    * A stretch of work: `set(units done)` (monotonic), `end()` (all of it done). `grain`: the units one report may lag behind (how far the
    * bar may creep on its own); `preplanned`: units of it already in `plan`.
    */
-  run(kind, units, { grain = 1, preplanned = 0 } = {}) {
-    const rate = rateOf(kind), job = this;
-    (this.learn ??= new Set()).add(kind);
+  run(kind, units, { grain = 1, preplanned = 0, par = 1 } = {}) {
+    // (`par`: the run is spread over that many workers - the rates are per worker, the wall time is shorter)
+    const rate = rateOf(kind) / Math.max(1, par), job = this;
+    const t0 = clock();
     this.planned += Math.max(0, units - preplanned) * rate;
     const r = {
       kind, units, rate, grain: Math.min(units, grain), at: 0, open: true,
@@ -67,7 +70,13 @@ export class Job {
       add(u = 1) { r.set(r.at + u); },
       /** More units of this run (more strokes painted while it bakes). */
       grow(u) { if ( u > 0 && r.open ) { r.units += u; job.planned += u * rate; } },
-      end() { if ( !r.open ) return; r.set(r.units); r.open = false; job.runs.delete(r); job.#active(); }
+      end() {
+        if ( !r.open ) return;
+        r.set(r.units); r.open = false; job.runs.delete(r); job.#active();
+        // what this kind really took (the time this run was open) against its estimate: the rate is learned per kind
+        const k = (job.learn ??= new Map()).get(kind) ?? { ms: 0, est: 0 };
+        k.ms += clock() - t0; k.est += r.units * rate; job.learn.set(kind, k);
+      }
     };
     this.runs.add(r); this.#active();
     return r;
@@ -86,11 +95,13 @@ export class Job {
   }
   /** Time spent working (waits with nothing in flight do not count for the pace). */
   activeTime(t = clock()) { return this.activeMs + (this.activeFrom !== null ? t - this.activeFrom : 0); }
+  /** How much of the pace is measured (0..1): a sixth of the work done, or 1.5 s of it, whichever comes later. */
+  confidence(t = clock()) { return this.planned > 0 ? Math.min(1, (this.done / this.planned) * 6, this.activeTime(t) / 1500) : 0; }
   /** The pace: real ms per estimated ms, measured, blended (in log) with 1 while little is done. */
   pace(t = clock()) {
     const a = this.activeTime(t);
     if ( this.done <= 0 || a <= 0 || this.planned <= 0 ) return 1;
-    const s = Math.min(50, Math.max(0.02, a / this.done)), c = Math.min(1, (this.done / this.planned) * 4, a / 2500);
+    const s = Math.min(50, Math.max(0.02, a / this.done)), c = this.confidence(t);
     return Math.exp(c * Math.log(s));
   }
   /**
@@ -115,7 +126,8 @@ export class Job {
     else if ( target > this.shown ) this.shown += (target - this.shown) * (1 - Math.exp(-dt / 220));
     // the time left: the work left at the pace; its end point eased (a countdown, not a jumping number)
     let etaMs = null;
-    const sure = this.runs.size && this.planned > 0 && (this.activeTime(t) >= 700 && this.done / P >= 0.03);
+    // (said only once half of the pace is measured: an unlearned prior was 15x off on a first Rebake all)
+    const sure = this.runs.size && this.planned > 0 && this.confidence(t) >= 0.5;
     if ( sure ) {
       const end = t + Math.max(0, P - this.done - creep) * pace;
       this.endEst = this.endEst ? this.endEst + (end - this.endEst) * (1 - Math.exp(-dt / 1200)) : end;
@@ -123,16 +135,19 @@ export class Job {
     } else this.endEst = 0;
     return { key: this.key, frac: this.indeterminate && !this.runs.size ? null : this.shown, etaMs, elapsedMs, ended: false, job: this };
   }
-  /** Done: what was measured teaches the rates of the kinds it ran (one pace for all of them, eased). */
+  /** Done: what was measured teaches the rate of each kind it ran (the time its runs were open against their estimate, eased). */
   finish(ok = true) {
     if ( this.ended ) return;
     for ( const r of [...this.runs] ) ok ? r.end() : (r.open = false);
     this.runs.clear(); this.#active();
     this.ended = clock(); this.ok = ok;
-    if ( ok && this.learn && this.done > 0 && this.activeMs >= 400 ) {
-      const s = Math.min(8, Math.max(0.125, this.activeMs / this.done));
+    if ( ok && this.learn ) {
       loadRates();
-      for ( const k of this.learn ) if ( rates[k] ) rates[k] = Math.exp(Math.log(rates[k]) * 0.65 + Math.log(rates[k] * s) * 0.35);
+      for ( const [k, m] of this.learn ) {
+        if ( !rates[k] || m.est <= 0 || m.ms < 300 ) continue;
+        const s = Math.min(16, Math.max(1 / 16, m.ms / m.est));
+        rates[k] = Math.exp(Math.log(rates[k]) * 0.45 + Math.log(rates[k] * s) * 0.55);
+      }
       saveRates();
     }
   }

@@ -552,6 +552,7 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
     // fades in stroke by stroke as it is baked, nearest to the view first)
     // (a Rebake all of many strokes too: two waves on the lane pool, the plain looks they read baked once, with the current code)
     const bigBake = (firstLoad || redoSet.size) && toBake.length >= BIG_BAKE;
+    PJ()?.stage("MOINENMAPS.Prog.st.prepare", null, { indeterminate: true });
     if ( bigBake ) Reveal.progressive("destruction", 1500);
     // the plain looks these strokes are baked over, from records whose pixels were let go: back from their chunks (memory, IndexedDB)
     // - a few ms each, where the worker would bake each again from its data
@@ -605,10 +606,11 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         status.stats = res.stats;
       };
       // (a Rebake all planned its strokes' work when it started: a pass only adds what it bakes beyond them)
-      const pre = (list) => (redoSet.size ? unitsOf(list.filter((w) => redoSet.has(w.objId))) : 0);
+      // (only strokes that read others: those are the second wave a Rebake planned)
+      const pre = (list) => (redoSet.size ? unitsOf(list.filter((w) => redoSet.has(w.objId) && w.deps.length)) : 0);
       const pj = PJ();
       if ( !bigBake ) {
-        const U = unitsOf(toBake), pr = pj?.run("bake", U, { grain: U * 0.1, preplanned: pre(toBake) });
+        const U = unitsOf(toBake), pr = pj?.run("bakeOne", U, { grain: U * 0.1, preplanned: pre(toBake) });
         pj?.stage("MOINENMAPS.Prog.st.bake", { n: toBake.length });
         let res;
         try { res = await runBake(inputOf(toBake), getMap, { onProgress: (p) => { if ( my === gen ) { status.progress = p; pr?.set(p * U); } } }); }   // (the panels follow on progress.mjs's own slow hook, never rebuilt per report)
@@ -633,14 +635,16 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
         const soon = () => { if ( !timer && !Reveal.holding("destruction") ) timer = setTimeout(() => { timer = 0; show(); }, 80); };
         Reveal.whenRevealed(() => soon());
         const waves = [[0, [...plainNeed.values()], true], [1, toBake.filter((w) => w.deps.length), false]];
-        pj?.plan("bake", Math.max(0, unitsOf(waves[1][1]) - pre(waves[1][1])));   // (the second wave planned now: the bar does not stand still when it starts)
+        pj?.plan("bakeSub", Math.max(0, unitsOf(waves[1][1]) - pre(waves[1][1])), lanes);   // (the second wave planned now: the bar does not stand still when it starts)
         for ( const [wave, list, plain] of waves ) {
           const order = prioritise(list, objs);
           const size = Math.max(2, Math.ceil(order.length / (lanes * 4))), jobs = [], tw = performance.now();
           for ( let i = 0; i < order.length; i += size ) jobs.push(order.slice(i, i + size));
           // this wave's progress: each job's share by its work, as far as its worker has got
           const Uj = jobs.map(unitsOf), UW = Uj.reduce((a, b) => a + b, 0), jp = new Float64Array(jobs.length);
-          const pr = pj?.run("bake", UW, { grain: UW / Math.max(1, Math.min(jobs.length, lanes)) * 0.15, preplanned: wave ? UW : pre(list) });
+          // (the plain wave is never planned ahead - a Rebake planned its strokes over their substrates, the second wave)
+          const par = Math.max(1, Math.min(jobs.length, lanes));
+          const pr = pj?.run(plain ? "bakePlain" : "bakeSub", UW, { grain: UW / par * 0.15, preplanned: plain ? 0 : UW, par });
           let strokesDone = 0;
           const stageOf = () => pj?.stage(plain ? "MOINENMAPS.Prog.st.plain" : "MOINENMAPS.Prog.st.strokes", { done: strokesDone, total: list.length });
           stageOf();
@@ -1485,7 +1489,7 @@ export function rebakeStrokes(ids = null) {
   rebakeQueue = Policy.rebakeOrder(entries);
   status.rebake = { total: rebakeQueue.length, done: 0, paused: false };
   // (the progress line plans the whole Rebake now: its passes add only the plain looks they bake beyond these strokes)
-  { const at = new Map(S.objects.map((o, i) => [o.id, i])); Progress.job("destruction", { title: "MOINENMAPS.Prog.title.rebake" }).plan("bake", rebakeQueue.reduce((a, id) => a + workOf(objs[at.get(id)], Model.K), 0)); }
+  { const at = new Map(S.objects.map((o, i) => [o.id, i])); Progress.job("destruction", { title: "MOINENMAPS.Prog.title.rebake" }).plan("bakeSub", rebakeQueue.reduce((a, id) => { const i = at.get(id); return a + (FS[i]?.deps?.length ? workOf(objs[i], Model.K) : 0); }, 0), Math.min(4, bakeLanes())); }
   Trace.event("rebake-start", { n: rebakeQueue.length });
   tell("status");
   pumpRebake(50);

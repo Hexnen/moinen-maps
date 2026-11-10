@@ -928,7 +928,7 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 
 /* ---- progress of long jobs (progress.mjs): the floating line (GM and players) and the panels' thin bars ---- */
 #mm-progress {
-  position: fixed; z-index: calc(var(--z-index-ui, 30) - 1); left: 50%; bottom: 84px; transform: translateX(-50%); width: min(30rem, calc(100vw - 2rem));
+  position: fixed; z-index: calc(var(--z-index-ui, 30) - 1); left: 50%; bottom: 84px; transform: translateX(-50%); width: min(36rem, calc(100vw - 2rem));
   display: flex; flex-direction: column; gap: 0.3rem; padding: 0.4rem 0.6rem 0.45rem; border-radius: 8px; pointer-events: none;
   background: var(--color-cool-5-90, rgb(24 24 32 / 0.92)); color: var(--color-light-1, #eee);
   border: 1px solid var(--color-cool-4, rgb(255 255 255 / 0.18)); box-shadow: 0 4px 16px rgb(0 0 0 / 0.45);
@@ -941,6 +941,7 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-prog-row.is-done .mm-prog-text > i::before { content: "\f00c"; }
 .mm-prog-text b { flex: none; font-weight: 700; letter-spacing: 0.03em; }
 .mm-prog-stage { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
+.mm-prog-pct { flex: none; min-width: 2.6em; text-align: right; font-weight: 700; }
 .mm-prog-time { flex: none; opacity: 0.7; white-space: nowrap; }
 .mm-prog-bar { position: relative; height: 0.3rem; border-radius: 2px; overflow: hidden; background: rgb(255 255 255 / 0.1); }
 .mm-prog-bar[hidden] { display: none; }
