@@ -17,7 +17,7 @@ const pending = new Map();
 
 function fail(err) {
   worker?.terminate(); worker = null; workerMap = "";
-  for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(err); }
+  for ( const p of pending.values() ) { p.watchdog?.(); p.reject(err); }
   pending.clear();
 }
 
@@ -28,11 +28,23 @@ function start() {
   worker.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
     if ( m.progress !== undefined ) { p.rearm?.(); return p.onProgress?.(m.progress); }
-    pending.delete(m.id); clearTimeout(p.watchdog);
+    pending.delete(m.id); p.watchdog?.();
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
   };
   worker.onerror = (e) => { console.error(`${MODULE_ID} | destruction worker`, e); fail(new Error("the destruction worker failed")); };
   return worker;
+}
+
+/**
+ * The watchdog's timer: `expire()` after `ms` without progress. A timer that fires LATE (the page was held by a long task meanwhile) waits
+ * again: the worker's progress may be queued behind that task - the soak's 13 s stalls at ~1800 strokes failed bakes that were running
+ * fine ("the destruction bake took too long"). -> a function that stops it.
+ */
+function watch(ms, expire) {
+  let at = performance.now(), t = 0, more = 4;
+  const tick = () => { const now = performance.now(); if ( now - at > ms + 1000 && more-- > 0 ) { at = now; t = setTimeout(tick, ms); } else expire(); };
+  t = setTimeout(tick, ms);
+  return () => clearTimeout(t);
 }
 
 function release() {
@@ -46,8 +58,8 @@ function call(msg, transfer = [], onProgress = null) {
     let w;
     try { w = start(); } catch ( err ) { reject(err); return; }
     const id = nextId++;
-    const arm = () => setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
-    const entry = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: arm(), rearm: () => { clearTimeout(entry.watchdog); entry.watchdog = arm(); } };
+    const arm = () => watch(WATCHDOG, () => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); });
+    const entry = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: arm(), rearm: () => { entry.watchdog(); entry.watchdog = arm(); } };
     pending.set(id, entry);
     w.postMessage({ id, ...msg }, transfer);
   });
@@ -155,10 +167,10 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     w.onerror = (e) => { e.preventDefault?.(); ln.fail(new Error(`an extra bake worker failed (${e.message ?? "load"})`)); };
     const ask = (msg, transfer = []) => new Promise((resolve, reject) => {
       if ( dead ) return reject(dead);
-      const my = ++id, arm = () => setTimeout(() => stop(new Error("the destruction bake took too long")), WATCHDOG);
+      const my = ++id, arm = () => watch(WATCHDOG, () => stop(new Error("the destruction bake took too long")));
       let timer = arm();
-      const stop = (err) => { clearTimeout(timer); fails.delete(stop); w.removeEventListener("message", on); reject(err); };
-      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { clearTimeout(timer); timer = arm(); return; } w.removeEventListener("message", on); clearTimeout(timer); fails.delete(stop); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      const stop = (err) => { timer(); fails.delete(stop); w.removeEventListener("message", on); reject(err); };
+      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { timer(); timer = arm(); return; } w.removeEventListener("message", on); timer(); fails.delete(stop); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
       fails.add(stop);
       w.addEventListener("message", on);
       w.postMessage({ id: my, ...msg }, transfer);
@@ -207,6 +219,6 @@ export function disposeBaker() {
   worker?.terminate(); worker = null; workerMap = ""; clearTimeout(idleTimer);
   for ( const ln of [...extraLanes] ) { ln.w.terminate(); ln.fail(new Error("the destruction worker was let go")); }
   extraLanes.clear();
-  for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(new Error("the destruction worker was let go")); }
+  for ( const p of pending.values() ) { p.watchdog?.(); p.reject(new Error("the destruction worker was let go")); }
   pending.clear();
 }

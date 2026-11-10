@@ -1,7 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { CORE_VERSION, LIVE_PARAMS } from "./core.mjs";
 import { decodePng } from "./png.mjs";
-import { fullSigs, SUBSTRATE_VERSION } from "./substrate.mjs";
+import { fullSigsFrom, SUBSTRATE_VERSION } from "./substrate.mjs";
 import * as Model from "./model.mjs";
 import { PIN_DEFAULTS } from "./stroke-params.mjs";
 import { setChanged, syncMap } from "../flag-diff.mjs";
@@ -100,24 +100,48 @@ export function sigsOf(S) {
   // with warm caches, ~660 ms on a scene's first load - so they are also kept by their inputs' digest, and in IndexedDB across loads)
   const memo = sigMemo.get(S), pj = pjOf(S);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return memo.out;
-  const key = sigsKey(S, pj);
+  const strs = strsOf(S), key = sigsKey(S, pj, strs);
   let out = sigStore.get(key);
   if ( !out ) {
-    // (a stroke's levels decoded once: the dependency test asks for them per pair, 236 ms of the 290 on a 269-stroke scene)
-    const bytes = new Map(), bytesOf = (o) => o.bytes ?? bytes.get(o) ?? bytes.set(o, Model.objBytes(o)).get(o);
-    out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, bytesOf);
+    out = sigsHere(S, pj, strs);
     rememberSigs(key, out);
     onSigs?.(key, out);
   }
+  keepLast(pj, strs, out);
   sigMemo.set(S, { objects: S.objects, pj, out });
   return out;
 }
+/**
+ * PERF: the signatures computed on the page FROM THE LAST ONES (substrate.mjs fullSigsFrom, the same result): a stroke painted, undone
+ * or re-caused tests only the pairs of strokes it changes - every pair again held the page 1-13 s per stroke on a scene of 300-1800
+ * strokes (in the codec worker's "sigs" answer, when the strokes had changed again while the worker computed).
+ */
+let lastSigs = null;               // { pj, K, keys: [objStr], out, known: Set|null }
+const keepLast = (pj, keys, out) => { if ( lastSigs?.keys !== keys ) lastSigs = { pj, K: Model.K, keys, out, known: null }; };
+const lastFor = (pj) => (lastSigs?.pj === pj && lastSigs.K === Model.K ? lastSigs : null);
+const strsOf = (S) => (S.objects ?? []).map((o) => objStr(S, o));
+function sigsHere(S, pj, strs) {
+  // (a stroke's levels decoded once: the dependency test asks for them per pair, 236 ms of the 290 on a 269-stroke scene)
+  const bytes = new Map(), bytesOf = (o) => o.bytes ?? bytes.get(o) ?? bytes.set(o, Model.objBytes(o)).get(o);
+  return fullSigsFrom(lastFor(pj), strs, S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, bytesOf);
+}
+/** How many strokes the last signatures do not know (each is tested against every older stroke; Infinity: none to start from). */
+function unknownOf(pj, strs) {
+  const L = lastFor(pj);
+  if ( !L ) return Infinity;
+  const known = L.known ??= new Set(L.keys);
+  let n = 0;
+  for ( const k of strs ) if ( !known.has(k) ) n++;
+  return n;
+}
+/** At most this many new strokes are tested on the page (each against every older one, ~1 ms per 2000 pairs); more go to the worker. */
+const HERE_MAX = 16;
 const sigMemo = new WeakMap();
 /** Signatures by the digest of everything they are made of (the strokes' own inputs, their order, the settings, the grid). */
 const sigStore = new Map();
 const rememberSigs = (key, out) => { sigStore.delete(key); sigStore.set(key, out); while ( sigStore.size > 6 ) sigStore.delete(sigStore.keys().next().value); };
-export function sigsKey(S, pj = pjOf(S)) {
-  const b = enc(`${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|${(S.objects ?? []).map((o) => objStr(S, o)).join(";")}`);
+export function sigsKey(S, pj = pjOf(S), strs = strsOf(S)) {
+  const b = enc(`${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|${strs.join(";")}`);
   return `sg1:${S.mw}x${S.mh}:${fnv(b).toString(36)}${fnv(b, 0x9747b28c).toString(36)}:${(S.objects ?? []).length}`;
 }
 /**
@@ -128,27 +152,34 @@ export const hasSigs = (S) => { const m = sigMemo.get(S); return !!m && m.object
 export async function warmSigs(S, get, compute = null) {
   const memo = sigMemo.get(S), pj = pjOf(S);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return true;
-  const key = sigsKey(S, pj);
+  const strs = strsOf(S), key = sigsKey(S, pj, strs);
   if ( sigStore.has(key) ) return true;
   // (one read / job per digest: the read-ahead at canvasInit and the load's own pass ask for the same)
-  if ( !sigsPending.has(key) ) sigsPending.set(key, readSigs(S, key, get, compute).finally(() => sigsPending.delete(key)));
+  if ( !sigsPending.has(key) ) sigsPending.set(key, readSigs(S, key, get, compute, pj, strs).finally(() => sigsPending.delete(key)));
   return sigsPending.get(key);
 }
 const sigsPending = new Map();
-async function readSigs(S, key, get, compute) {
-  const n = (S.objects ?? []).length;
+async function readSigs(S, key, get, compute, pj, strs) {
+  // (the strokes as they are NOW: the state may change while IndexedDB answers, and the answer is kept under this key)
+  const objects = S.objects ?? [], n = objects.length;
   const whole = (out) => Array.isArray(out) && out.length === n
     && out.every((f) => f && typeof f.own === "string" && typeof f.sig === "string" && Array.isArray(f.deps));
+  // a few strokes more or less than the last signatures (a stroke painted, undone, re-caused): from those, here (milliseconds)
+  if ( unknownOf(pj, strs) <= HERE_MAX ) {
+    const out = sigsHere(S, pj, strs);
+    rememberSigs(key, out); keepLast(pj, strs, out); onSigs?.(key, out);
+    return true;
+  }
   let out = null;
   try { out = await get(key); } catch { out = null; }
-  if ( whole(out) ) { rememberSigs(key, out); return true; }
+  if ( whole(out) ) { rememberSigs(key, out); keepLast(pj, strs, out); return true; }
   // not kept (a client's first load of this state): computed off the page (`compute(msg)`: the codec worker's "sigs" job) - the
   // dependency test over every pair of strokes held the page 220-650 ms
   if ( !compute ) return false;
-  const objs = (S.objects ?? []).map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, pr: o.pr, own: objSig(S, o), bytes: o.k ? null : Model.objBytes(o) }));
+  const objs = objects.map((o) => ({ id: o.id, k: o.k, t: o.t, x0: o.x0, y0: o.y0, w: o.w, h: o.h, pr: o.pr, own: objSig(S, o), bytes: o.k ? null : Model.objBytes(o) }));
   try { out = await compute({ kind: "sigs", objs, P: S.params, K: Model.K }); } catch { out = null; }
   if ( !whole(out) ) return false;
-  rememberSigs(key, out);
+  rememberSigs(key, out); keepLast(pj, strs, out);
   onSigs?.(key, out);
   return true;
 }

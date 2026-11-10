@@ -26,6 +26,18 @@ const root = () => `worlds/${game.world.id}/${MODULE_ID}`;
 export const chunkDir = (sceneId) => `${root()}/c/${sceneId}`;
 const fileOf = (dir, id) => `${dir}/${id}.png`;
 
+/**
+ * `fire()` after `ms`; a timer that fires LATE (the page was held by a long task meanwhile) waits again, `more` times at most: the answer
+ * it waits for may be queued behind that task (giving up then sent a joining player's cached chunks to the network, and failed jobs that
+ * were running fine). -> a function that stops it.
+ */
+function limit(ms, fire, more = 2, slack = 250) {
+  let at = performance.now(), t = 0;
+  const tick = () => { const now = performance.now(); if ( now - at > ms + slack && more-- > 0 ) { at = now; t = setTimeout(tick, ms); } else fire(); };
+  t = setTimeout(tick, ms);
+  return () => clearTimeout(t);
+}
+
 /* ---------------------------------------------------------------- the codec worker */
 
 /*
@@ -47,7 +59,7 @@ function spawn() {
   const slot = { w, busy: 0 };
   w.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
-    pending.delete(m.id); clearTimeout(p.watchdog); slot.busy--;
+    pending.delete(m.id); p.watchdog(); slot.busy--;
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
     if ( !pending.size ) { clearTimeout(idleTimer); idleTimer = setTimeout(stopWorkers, IDLE); }
   };
@@ -55,7 +67,7 @@ function spawn() {
     console.warn(`${MODULE_ID} | chunk worker failed`, e?.message ?? e);
     w.terminate();
     workers.splice(workers.indexOf(slot), 1);
-    for ( const [id, p] of pending ) if ( p.slot === slot ) { clearTimeout(p.watchdog); pending.delete(id); p.reject(new Error("chunk worker failed")); }
+    for ( const [id, p] of pending ) if ( p.slot === slot ) { p.watchdog(); pending.delete(id); p.reject(new Error("chunk worker failed")); }
   };
   workers.push(slot);
   return slot;
@@ -89,7 +101,7 @@ export function job(msg, transfer = []) {
   if ( !slot ) return work(msg).then((r) => r.result);
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    const watchdog = setTimeout(() => { if ( pending.delete(id) ) { slot.busy--; reject(new Error("chunk job took too long")); } }, WATCHDOG);
+    const watchdog = limit(WATCHDOG, () => { if ( pending.delete(id) ) { slot.busy--; reject(new Error("chunk job took too long")); } }, 4, 1000);
     pending.set(id, { resolve, reject, watchdog, slot });
     slot.busy++;
     slot.w.postMessage({ ...msg, id }, transfer);
@@ -109,7 +121,7 @@ function db() {
   }).catch(() => null);
   return dbp;
 }
-const timeout = (p, ms = 1500) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+const timeout = (p, ms = 1500) => Promise.race([p, new Promise((r) => limit(ms, () => r(null)))]);
 async function tx(stores, mode, fn) {
   if ( Date.now() < downUntil ) return null;
   const d = await timeout(db(), 1200);
@@ -216,7 +228,9 @@ async function idbGetMany(ids) {
   if ( !ids.length ) return out;
   const reqs = [];
   await tx(["chunks"], "readonly", (s) => { for ( const id of ids ) { const r = s.get(id); reqs.push([id, r]); } return null; });
-  for ( const [id, r] of reqs ) { const v = r.result; if ( v?.bytes ) out.set(id, view(v.bytes)); }
+  // (a read past tx's time limit - a busy page, a player joining during play - is still running: its result cannot be read yet and
+  // those chunks simply come the other way; reading it threw an unhandled InvalidStateError)
+  for ( const [id, r] of reqs ) { if ( r.readyState !== "done" ) continue; let v = null; try { v = r.result; } catch { v = null; } if ( v?.bytes ) out.set(id, view(v.bytes)); }
   if ( out.size ) tx(["lru"], "readwrite", (l) => { const at = Date.now(); for ( const [id, b] of out ) l.put({ id, at, size: b.byteLength }); return null; });
   return out;
 }

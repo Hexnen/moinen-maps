@@ -179,6 +179,58 @@ export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes) {
   return out;
 }
 
+/**
+ * `fullSigs` from an earlier result, with exactly the same output (PERF: one stroke painted on a scene of ~1800 tested every pair of
+ * strokes again, 1-13 s on the page). Whether B reads A depends on the two strokes alone (their data, `P`, `K`), so a stroke whose older
+ * strokes now were all older strokes of it before keeps its reads (less the strokes gone since); only the others are tested against
+ * every older stroke. `prev`: { keys, out } - an earlier `fullSigs` output for the SAME `P` and `K` with each stroke's key; `keys`: each
+ * stroke's key now (a key names a stroke's own inputs: equal keys, equal stroke). `fresh` (optional object): `.n` strokes and `.pairs` pairs
+ * tested.
+ */
+export function fullSigsFrom(prev, keys, objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes, fresh = null) {
+  const at = new Map(), now = new Map();
+  if ( prev?.keys ) prev.keys.forEach((k, i) => at.set(k, i));
+  keys.forEach((k, i) => now.set(k, i));
+  // (a key twice, or no usable earlier result: the full test)
+  if ( !prev?.keys || !Array.isArray(prev.out) || at.size !== prev.keys.length || prev.out.length !== prev.keys.length || now.size !== keys.length || keys.length !== objects.length ) {
+    if ( fresh ) fresh.n = objects.length;
+    return fullSigs(objects, ownSig, P, K, bytesOf);
+  }
+  const digest = (own, d, out) => d.length ? `${own}~${fnvStr(`${SUBSTRATE_VERSION}|` + d.map((j) => `${objects[j].id}:${out[j].own}`).join("|")).toString(36)}` : own;
+  let reads = null, maxPrev = -1, n = 0, pairs = 0;
+  const out = [], unknown = [], pidx = [];     // (strokes not in the earlier result; each stroke's place in it)
+  const test = (j, i) => { pairs++; return (reads ??= readsOf(objects, P, K, bytesOf))(j, i); };
+  objects.forEach((o, i) => {
+    const pi = at.get(keys[i]);
+    if ( pi === undefined ) {
+      // a stroke the earlier result does not know: tested against every older stroke
+      n++;
+      const own = ownSig(o), d = [];
+      if ( !o.k ) for ( let j = 0; j < i; j++ ) if ( test(j, i) ) d.push(j);
+      out.push({ own, sig: digest(own, d, out), deps: d });
+    }
+    else {
+      // its reads among the older strokes that were older than it before too are known (its earlier reads still here); only the
+      // other older strokes (new ones, or newer than it before) are tested
+      const was = prev.out[pi], d = [];
+      let sorted = true, more = false;
+      for ( const j of was.deps ) { const k = now.get(prev.keys[j]); if ( k === undefined || k >= i ) continue; if ( d.length && k < d[d.length - 1] ) sorted = false; d.push(k); }
+      if ( !o.k ) {
+        const odd = maxPrev < pi ? unknown : pidx.map((p, j) => (p === undefined || p > pi ? j : -1)).filter((j) => j >= 0);
+        if ( odd.length ) n++;
+        for ( const j of odd ) if ( test(j, i) ) { d.push(j); more = true; }
+      }
+      if ( !sorted || more ) d.sort((a, b) => a - b);
+      // (the same strokes in the same order: the same digest)
+      out.push({ own: was.own, sig: sorted && !more && d.length === was.deps.length ? was.sig : digest(was.own, d, out), deps: d });
+    }
+    pidx.push(pi);
+    if ( pi === undefined ) unknown.push(i); else maxPrev = Math.max(maxPrev, pi);
+  });
+  if ( fresh ) { fresh.n = n; fresh.pairs = pairs; }
+  return out;
+}
+
 /* ================================================================ composing the substrate (the bake worker) */
 
 /** One stroke's sprites -> its parts as the display lays them: [{ type, cover, base, pieces }] (lights left out). */
