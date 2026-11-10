@@ -65,6 +65,13 @@ check(J(B.contractOf(B.model("locked", null, { w: "breached" }))) === J({ wall: 
 check(J(B.drawOf(B.model("locked"))) === J({ wall: "wall", wallState: "intact", temp: false, door: "locked" }) && B.drawOf(B.model("door", null, { w: "breached" })).door === null && B.drawOf(null) === null && B.drawOf(B.OPEN) === null, "what is drawn: the wall's look and state, the door's sign while the wall stands");
 check(B.sigOf(B.model("door")) !== B.sigOf(B.model("door", null, { d: "open" })) && B.sigOf(B.model("wall")) !== B.sigOf(B.model("wall", { wall: { armor: 3 } })) && B.sigOf(null) === "open", "a signature that moves with every change");
 
+// the hole drawn in a breached wall
+check(J(B.cutSegment([0, 0, 100, 0], 50, 0, 10)) === J([[0, 0, 40, 0], [60, 0, 100, 0]]) && J(B.cutSegment([0, 0, 100, 0], 0, 0, 10)) === J([[10, 0, 100, 0]]) && B.cutSegment([45, 0, 55, 0], 50, 0, 10).length === 0
+  && B.cutSegment([0, 0, 100, 0], 50, 30, 10).length === 1 && B.cutSegment([0, 0, 100, 0], 200, 0, 10).length === 1 && B.cutSegment([5, 5, 5, 5], 5, 5, 1).length === 0, "a segment with a hole cut out of it: two pieces, one, none, or untouched");
+check(J(B.normPlay(B.model("locked"), { d: "locked", w: "breached" })) === J({ w: "breached" }) && B.normPlay(B.model("wall"), { d: "open" }) === null && B.normPlay(null, { w: "breached" }) === null, "a play record made to fit its border");
+check(J(B.buildFrom(null, { kind: "outer", door: { state: "sealed" } })) === J(["outer", { door: { state: "sealed" } }]) && J(B.buildFrom(B.model("locked"), { wall: { armor: 5 } })) === J(["locked", { wall: { armor: 5 } }]) && J(B.buildFrom(B.model("door"), { door: null })) === J(["door", { door: null }])
+  && B.buildFrom(B.model("door"), { wall: null }) === null && B.buildFrom(null, { kind: "open" }) === null && B.buildFrom(null, { kind: "moat" }) === undefined && B.buildFrom(null, { door: { state: "breached" } }) === undefined && J(B.buildFrom(null, {})) === J(["wall"]), "building a border anew: a kind and what differs from it; open; refused");
+
 /* ---- on the zones: a row of four zones 0 | 1 | 2 | 3, keys a b c d */
 const Z = G.buildZones([[-20, 0, 420, 0], [-20, 100, 420, 100], [0, -20, 0, 120], [400, -20, 400, 120], [100, -20, 100, 120], [200, -20, 200, 120], [300, -20, 300, 120]], { snap: 5, minArea: 100 });
 const zoneAt = (x, y) => G.zoneAt(Z, x, y);

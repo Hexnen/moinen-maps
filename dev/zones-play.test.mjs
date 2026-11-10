@@ -412,5 +412,21 @@ check(m2.x === 250 && confirms.length === 3, "the GM's own drags are not asked u
 api.tactical(false);
 check(api.tacticalOn() === false, "off again");
 
+/* ---- drawing: every wall and door state goes through the border drawing without an error (stand-in graphics: what is drawn is
+   not looked at here - that needs a live canvas) */
+const drawn = [];
+const G = () => new Proxy({}, { get: (t, k) => (k === "destroyed" ? false : typeof k === "symbol" ? undefined : (...a) => { if ( k === "drawPolygon" || k === "lineTo" || k === "drawRect" || k === "drawCircle" ) drawn.push(k); return G(); }) });
+const D = await imp("scripts/zones/display.mjs");
+const Mk = await imp("scripts/zones/marks.mjs"), Geo = await imp("scripts/zones/geometry.mjs");
+const Zd = api.zones();
+const walls = [[200, 100, "wall"], [400, 100, "locked"], [600, 100, "outer", { door: { state: "sealed" } }], [800, 100, "door"]];
+const drawWalls = Object.getOwnPropertyNames(D.ZoneDisplay.prototype).includes("drawWalls") ? D.ZoneDisplay.prototype.drawWalls : null;
+let threw = null;
+for ( const plays of [[], [[200, 100, { w: "breached" }], [400, 100, { d: "open" }], [800, 100, { d: "breached" }]], [[200, 100, { w: "removed", t: 1 }], [400, 100, { d: "sealed" }], [600, 100, { w: "breached" }]]] ) {
+  const Md = Mk.resolve(Zd, walls, [], (x, y) => Geo.zoneAt(Zd, x, y), 35, plays);
+  try { drawWalls.call({ M: Md, Z: Zd }, G(), 1, 4, 0xffffff); } catch ( err ) { threw = err; }
+}
+check(drawWalls && !threw && drawn.includes("drawPolygon") && drawn.includes("drawRect") && drawn.includes("drawCircle"), `every wall and door state draws without an error${threw ? `: ${threw.message}` : ""}`);
+
 console.log(failed ? `${failed} failed` : "all zones play checks passed");
 process.exit(failed ? 1 : 0);

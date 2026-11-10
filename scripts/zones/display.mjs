@@ -8,6 +8,7 @@
 
 import { cornerPoint } from "./geometry.mjs";
 import { pairKey } from "./marks.mjs";
+import { drawOf, cutSegment } from "./borders.mjs";
 import { THEMES, BADGES, BADGE_SCALE, bakeWash } from "./themes.mjs";
 import { drawDots, drawPetals } from "./hover-pattern.mjs";
 
@@ -350,7 +351,7 @@ export class ZoneDisplay {
     const theme = THEMES[look.lineStyle];
     if ( theme?.lines ) {
       theme.lines({ Ln, Gw, Z, px, w, ink, a, col, look, g: this.g ?? 100, zoom, stroke, trace, pattern, wobble, hex });
-      this.#walls(Ln, px, w, col);
+      this.drawWalls(Ln, px, w, col);
       return;
     }
     switch ( look.lineStyle ) {
@@ -414,11 +415,16 @@ export class ZoneDisplay {
       }
       default: under(); stroke(w * 0.45, col, a, (p) => pattern(Ln, p, [11 * px, 7 * px]));
     }
-    this.#walls(Ln, px, w, col);
+    this.drawWalls(Ln, px, w, col);
   }
 
-  /** Walls over the borders the GM marked (thicker, solid), and a door symbol across a door; sizes on screen like the lines. */
-  #walls(Ln, px, w, col) {
+  /**
+   * Walls over the borders the GM marked (thicker, solid), and a door symbol across a door; sizes on screen like the lines.
+   * The wall and the door each show their state (borders.mjs drawOf), with the look they always had: a breached wall has a hole
+   * where its mark sits, a removed one is faint; a door is a plank across the wall - closed brown, locked red with a keyhole,
+   * sealed red with a square lock, open swung out of the wall, breached an empty frame.
+   */
+  drawWalls(Ln, px, w, col) {
     const M = this.M, Z = this.Z;
     if ( !M?.borders.size ) return;
     const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
@@ -430,25 +436,38 @@ export class ZoneDisplay {
     }
     // walls stand out from the plain borders whatever the line width is set to
     const bw = Math.max(w, 7 * px);
+    // (a border resolved without the wall-and-door model draws by its kind, as before)
+    const drawn = new Map();
+    const D = (m) => { let d = drawn.get(m); if ( !d ) drawn.set(m, d = drawOf(m) ?? { wall: WALL[m.kind] && m.kind !== "door" && m.kind !== "locked" ? m.kind : "wall", wallState: "intact", temp: false, door: m.kind === "door" ? "closed" : m.kind === "locked" ? "locked" : null }); return d; };
     for ( const pass of [0, 1, 2] ) {
       for ( const [m, list] of segs ) {
-        const k = WALL[m.kind][pass];
+        const d = D(m), k = WALL[d.wall][pass];
         if ( !k ) continue;
-        Ln.lineStyle({ width: bw * k, color: pass === 1 ? (m.kind === "reinforced" ? 0xcfd6dc : col) : 0x15110f, alpha: pass === 0 ? 0.8 : 1, ...R });
-        for ( const s of list ) { Ln.moveTo(s[0], s[1]); Ln.lineTo(s[2], s[3]); }
+        const fade = d.wallState === "removed" ? 0.3 : 1;
+        Ln.lineStyle({ width: bw * k, color: pass === 1 ? (d.wall === "reinforced" ? 0xcfd6dc : col) : 0x15110f, alpha: (pass === 0 ? 0.8 : 1) * fade, ...R });
+        for ( const s of list ) {
+          // a breached wall: a hole around its mark
+          for ( const q of d.wallState === "breached" ? cutSegment(s, m.x, m.y, 12 * px) : [s] ) { Ln.moveTo(q[0], q[1]); Ln.lineTo(q[2], q[3]); }
+        }
       }
     }
-    // doors: a short plank across the wall where the mark sits, a locked one red with a keyhole
+    // doors: a short plank across the wall where the mark sits
     for ( const [m, list] of segs ) {
-      if ( m.kind !== "door" && m.kind !== "locked" ) continue;
+      const door = D(m).door;
+      if ( !door ) continue;
       let best = list[0], bd = Infinity;
       for ( const s of list ) { const d = Math.hypot((s[0] + s[2]) / 2 - m.x, (s[1] + s[3]) / 2 - m.y); if ( d < bd ) { bd = d; best = s; } }
       const ux0 = best[2] - best[0], uy0 = best[3] - best[1], L = Math.hypot(ux0, uy0) || 1, ux = ux0 / L, uy = uy0 / L;
       const hl = 9 * px, hw = 4.5 * px, x = m.x, y = m.y;
-      const quad = [x - ux * hl - uy * hw, y - uy * hl + ux * hw, x + ux * hl - uy * hw, y + uy * hl + ux * hw, x + ux * hl + uy * hw, y + uy * hl - ux * hw, x - ux * hl + uy * hw, y - uy * hl - ux * hw];
+      // an open door stands out of the wall, hinged at one end of its frame
+      const [ax, ay, hx, hy] = door === "open" ? [-uy, ux, x - ux * hl + -uy * hl, y - uy * hl + ux * hl] : [ux, uy, x, y];
+      const nx = -ay, ny = ax;
+      const quad = [hx - ax * hl - nx * hw, hy - ay * hl - ny * hw, hx + ax * hl - nx * hw, hy + ay * hl - ny * hw, hx + ax * hl + nx * hw, hy + ay * hl + ny * hw, hx - ax * hl + nx * hw, hy - ay * hl + ny * hw];
+      const shut = door === "locked" || door === "sealed";
       Ln.lineStyle({ width: 2 * px, color: 0x15110f, alpha: 1, ...R });
-      Ln.beginFill(m.kind === "locked" ? 0xb8402e : 0x9a6a3a, 1).drawPolygon(quad).endFill();
-      if ( m.kind === "locked" ) { Ln.lineStyle(0); Ln.beginFill(0xf3e7c9, 1).drawCircle(x, y, 1.8 * px).endFill(); }
+      Ln.beginFill(shut ? 0xb8402e : 0x9a6a3a, door === "breached" ? 0.15 : 1).drawPolygon(quad).endFill();
+      if ( door === "locked" ) { Ln.lineStyle(0); Ln.beginFill(0xf3e7c9, 1).drawCircle(x, y, 1.8 * px).endFill(); }
+      else if ( door === "sealed" ) { Ln.lineStyle(0); Ln.beginFill(0x5cc8ff, 1).drawRect(x - 1.9 * px, y - 1.9 * px, 3.8 * px, 3.8 * px).endFill(); }
     }
   }
 

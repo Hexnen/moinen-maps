@@ -52,6 +52,9 @@ export function open(client, at) {
     else if ( a === "clearZone" ) { Zones.clearStates(zone); draw("zone"); }
     else if ( a === "fireRound" ) { Zones.fireRound(); close(); }
     else if ( a === "endScene" ) { Zones.clearStates(); close(); }
+    // borders go back as built only when the GM says so (never on their own)
+    else if ( a === "restoreBorder" ) { const q = Zones.borderAt(at.x, at.y, tol); if ( q ) Zones.restoreBorders([q.a, q.b]); close(); }
+    else if ( a === "restoreBorders" ) { Zones.restoreBorders(); close(); }
   });
   el.addEventListener("change", (ev) => {
     const c = ev.target, name = c.getAttribute("name");
@@ -78,18 +81,25 @@ function place(client) {
 const num = (id) => Zones.zoneName(id);
 const sceneActs = () => {
   const zs = Zones.marks()?.zones ?? new Map();
-  const fire = [...zs.values()].some((p) => p.fire), states = [...zs.values()].some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
+  const fire = [...zs.values()].some((p) => p.fire), states = [...zs.values()].some((p) => p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav) || Zones.zoneStates().length > 0;
   return `${fire ? `<button type="button" data-act="fireRound"><i class="fa-solid fa-dice-six" inert></i> ${esc(Z("act.fireRound"))}</button>` : ""}
-    ${states ? `<button type="button" data-act="endScene"><i class="fa-solid fa-broom" inert></i> ${esc(Z("act.endScene"))}</button>` : ""}`;
+    ${states ? `<button type="button" data-act="endScene"><i class="fa-solid fa-broom" inert></i> ${esc(Z("act.endScene"))}</button>` : ""}
+    ${Zones.bordersChanged() ? `<button type="button" data-act="restoreBorders"><i class="fa-solid fa-trowel-bricks" inert></i> ${esc(Z("act.restoreBorders"))}</button>` : ""}`;
 };
 
 function borderHtml(b, hasZone) {
   if ( !b ) return "";
+  // what happened to this border in play (its wall, its door), in words
+  const changed = [];
+  if ( b.wall && b.wall.state !== "intact" ) changed.push(Z(`border.wallState.${b.wall.state}`));
+  if ( b.door && b.door.state !== b.door.built ) changed.push(Z(`border.doorState.${b.door.state}`));
   const items = BORDER_KINDS.map((k) => `<button type="button" data-act="kind" data-kind="${k}" class="${b.kind === k ? "on" : ""}">
       <span class="mm-z-sw mm-z-sw-${k}" inert></span>${esc(Z(`border.${k}`))}${ARMOR[k] ? `<em>${esc(Z("armor", { n: ARMOR[k] + (k === "reinforced" ? "+" : "") }))}</em>` : ""}</button>`).join("");
   return `<header>${esc(Z("border.title", { a: num(b.b), b: num(b.a) }))}</header>
     <div class="mm-z-menu-list">${items}</div>
     <p class="mm-z-menu-hint">${esc(Z("border.hint"))}</p>
+    ${changed.length ? `<p class="mm-z-menu-hint">${esc(Z("border.now", { what: changed.join(", ") }))}</p>
+      <footer><button type="button" data-act="restoreBorder"><i class="fa-solid fa-trowel-bricks" inert></i> ${esc(Z("act.restoreBorder"))}</button></footer>` : ""}
     ${hasZone ? `<footer><button type="button" data-act="toZone"><i class="fa-solid fa-draw-polygon" inert></i> ${esc(Z("act.toZone"))}</button></footer>` : ""}`;
 }
 

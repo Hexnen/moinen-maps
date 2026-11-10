@@ -199,3 +199,21 @@ export function buildFrom(m, spec = {}) {
   const ext = cleanExt(kind, { wall, door });
   return ext ? [kind, ext] : [kind];
 }
+
+/**
+ * A segment [x0, y0, x1, y1] with the part inside a circle taken out (the hole drawn in a breached wall): the pieces left, each
+ * [x0, y0, x1, y1] (none, one or two).
+ */
+export function cutSegment(s, cx, cy, r) {
+  const dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy;
+  if ( !(L2 > 0) ) return Math.hypot(s[0] - cx, s[1] - cy) < r ? [] : [s];
+  // where the line meets the circle: |p0 + t d - c|² = r²
+  const fx = s[0] - cx, fy = s[1] - cy, bq = 2 * (fx * dx + fy * dy), cq = fx * fx + fy * fy - r * r, disc = bq * bq - 4 * L2 * cq;
+  if ( disc <= 0 ) return [s];
+  const q = Math.sqrt(disc), t0 = (-bq - q) / (2 * L2), t1 = (-bq + q) / (2 * L2);
+  if ( t1 <= 0 || t0 >= 1 ) return [s];
+  const out = [], at = (t) => [s[0] + dx * t, s[1] + dy * t];
+  if ( t0 > 1e-6 ) out.push([s[0], s[1], ...at(t0)]);
+  if ( t1 < 1 - 1e-6 ) out.push([...at(t1), s[2], s[3]]);
+  return out;
+}

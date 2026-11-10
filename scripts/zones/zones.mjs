@@ -1555,11 +1555,11 @@ async function askDrag(doc, from, to, drop) {
 }
 /** The map's own question when no combat module asks: the zones and the actions the move takes. */
 async function askCost(ctx) {
-  const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.drag.${k}`, d ?? {});
-  if ( !ctx.plan ) { ui.notifications.warn(L("noWay", { name: ctx.token.name })); return false; }
+  const DL = (k, d) => game.i18n.format(`MOINENMAPS.Zones.drag.${k}`, d ?? {});
+  if ( !ctx.plan ) { ui.notifications.warn(DL("noWay", { name: ctx.token.name })); return false; }
   const c = ctx.cost;
-  const text = c.stressActions != null && c.stressActions < c.actions ? L("costStress", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions, s: c.stressActions }) : L("cost", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions });
-  try { return (await foundry.applications.api.DialogV2.confirm({ window: { title: L("title") }, content: `<p>${esc(text)}</p>`, rejectClose: false })) === true; }
+  const text = c.stressActions != null && c.stressActions < c.actions ? DL("costStress", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions, s: c.stressActions }) : DL("cost", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions });
+  try { return (await foundry.applications.api.DialogV2.confirm({ window: { title: DL("title") }, content: `<p>${esc(text)}</p>`, rejectClose: false })) === true; }
   catch { return false; }
 }
 
