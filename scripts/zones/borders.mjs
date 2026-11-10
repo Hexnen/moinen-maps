@@ -172,3 +172,30 @@ export function drawOf(m) {
   if ( !m?.wall ) return null;
   return { wall: m.look, wallState: m.wall.state, temp: m.wall.temp, door: m.door && m.wall.state === "intact" ? m.door.state : null };
 }
+
+/** A play record made to fit a border: what equals the border as built is dropped. null: as built (or no wall to have a state). */
+export function normPlay(m, play) {
+  const p = cleanPlay(play);
+  if ( !p || !m?.wall ) return null;
+  if ( p.d != null && (!m.door || p.d === m.door.built) ) delete p.d;
+  return Object.keys(p).length ? p : null;
+}
+
+/**
+ * What a border mark stores when the border is built anew: spec = { kind?, wall?: null | { armor, outer }, door?: null | { armor,
+ * state } } laid over the border as it is built now (`m`, null: open). Returns [kind] | [kind, ext], or null for an open border
+ * (`wall: null` or `kind: "open"`). A part the spec does not name stays as it is; a new `kind` starts from that kind's wall and door.
+ */
+export function buildFrom(m, spec = {}) {
+  if ( spec.kind === "open" || spec.wall === null ) return null;
+  if ( spec.kind != null && !KINDS[spec.kind] ) return undefined;
+  const now = m?.wall ? { wall: { armor: m.wall.armor, outer: m.wall.outer }, door: m.door ? { armor: m.door.armor, state: m.door.built } : null } : null;
+  const from = spec.kind ? built(spec.kind) : (now ?? built("wall"));
+  const wall = { ...from.wall, ...(spec.wall && typeof spec.wall === "object" ? spec.wall : {}) };
+  let door = from.door;
+  if ( "door" in spec ) door = spec.door ? { ...(from.door ?? { armor: doorArmorFor(wall), state: "closed" }), ...spec.door } : null;
+  if ( door && !DOOR_BUILT.includes(door.state) ) return undefined;
+  const kind = spec.kind ?? m?.base ?? (door ? "door" : lookOf(wall));
+  const ext = cleanExt(kind, { wall, door });
+  return ext ? [kind, ext] : [kind];
+}

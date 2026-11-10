@@ -10,6 +10,9 @@ import * as Marks from "./marks.mjs";
 import * as Link from "./link.mjs";
 import * as Keys from "./keys.mjs";
 import * as Places from "./places.mjs";
+import * as Borders from "./borders.mjs";
+import * as States from "./states.mjs";
+import * as Moves from "./moves.mjs";
 import { quake, stopQuakes } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
@@ -27,6 +30,12 @@ import * as DestMod from "../destruction/destruction.mjs";
  * For other modules (a combat engine): stable zone keys (keys.mjs), places in three dimensions, the two distances, routes and
  * borders as data (places.mjs), and the hook "moinenMapsZoneEvent" (type, payload) - a token entered / left a zone, a zone's or a
  * border's state changed. All of it is described in dev/zones-api.md.
+ *
+ * Package M2 (same file, "play state" and "movement" below): borders as a wall with an optional door, each with its own Armor and
+ * state (borders.mjs); the zone-state registry and temporary edges (states.mjs); a write path for the active GM's client where
+ * every write returns its inverse (`apply`); movement from a mover profile, a listener asked before every step of a move, group
+ * and forced moves, free spots, cost confirmation on a dragged token (moves.mjs). The map stores, reports and draws; what a state,
+ * a wall or a step DOES to a character is the combat module's.
  */
 
 let wreckedBefore = null;   // the zones wrecked at the last relink (null: just loaded - nothing quakes)
@@ -35,7 +44,8 @@ let saveSceneId = null, lastSaved = "";
 // K: the zones' stable keys now (keys.mjs resolve); ver: counts every change of the zones or their marks (what caches hang on);
 // QC: the lookups of this state (places.mjs makeCache); TP: token id -> { stamp, place }; LAST: token id -> the place last told;
 // SNAP: the zone and border states last told
-let K = null, ver = 0, QC = null, SNAP = null;
+// RS: the registry's states laid onto the zones (zone id -> [state]); ED: the temporary edges that join zones now ({ live, links })
+let K = null, ver = 0, QC = null, SNAP = null, RS = new Map(), ED = { live: [], links: new Map() }, GR = null;
 const TP = new Map(), LAST = new Map();
 export const EVENT_HOOK = "moinenMapsZoneEvent";
 const undo = [], redo = [];
@@ -110,11 +120,20 @@ function rebuild() {
     if ( key ) { built.set(key, hit = { Z, LS: null }); if ( built.size > BUILT_MAX ) built.delete(built.keys().next().value); }
   }
   // walls and zone marks keep to the border / zone their point lies on, whatever the zones are numbered now
-  M0 = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
   LS = hit?.LS ?? null;
-  K = Keys.resolve(Z, S?.keys, S?.keyNext, zoneAtNow);
-  relink();
+  remark();
   if ( hit && LS && hit.Z === Z ) hit.LS = LS;
+}
+/**
+ * The marks, keys, registry states and edges laid onto the zones as they are (no geometry is worked out again). `readLayers` false:
+ * what the map's layers show is kept as it was read last (a change of play state does not change the layers).
+ */
+function remark(readLayers = true) {
+  M0 = Marks.resolve(Z, S?.walls, S?.marks, zoneAtNow, markTol(), S?.plays);
+  K = Keys.resolve(Z, S?.keys, S?.keyNext, zoneAtNow);
+  RS = Z ? States.resolveStates(S?.states, zoneAtNow) : new Map();
+  ED = Z ? States.resolveEdges(S?.edges, (key) => K.idOf.get(key) ?? -1) : { live: [], links: new Map() };
+  relink(readLayers);
 }
 
 /* ---------------------------------------------------------------- states from the map's layers (fire, destruction, water) */
@@ -130,14 +149,16 @@ function layers() {
 }
 export const linkOn = () => setting("zonesLink", true) !== false;
 /** The GM's marks with the layers' states on top. */
-function relink() {
+function relink(readLayers = true) {
   ver++;
-  MAP = new Map();
-  if ( Z && linkOn() ) {
+  if ( readLayers ) MAP = new Map();
+  if ( readLayers && Z && linkOn() ) {
     LS ??= Link.samplesOf(Z, (x, y) => Geo.zoneAt(Z, x, y), gridSize() / 4);
     try { MAP = Link.derive(LS, layers()); } catch ( err ) { console.warn(`${MODULE_ID} | zones: reading the layers`, err); }
   }
   const zones = new Map(M0?.zones ?? []);
+  // the registry's states that the map knows how to show read as zone properties (states.mjs propsOf)
+  for ( const [id, recs] of RS ) { const p = States.propsOf(recs); if ( Object.keys(p).length ) zones.set(id, States.mergeProps(zones.get(id), p)); }
   for ( const [id, p] of MAP ) zones.set(id, Link.merge(zones.get(id), p));
   M = { borders: M0?.borders ?? new Map(), zones };
   // a zone that has just become wrecked quakes (on every client: each one sees the marks or the layer change)
@@ -317,7 +338,7 @@ function teardown() {
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   clearTimeout(linkTimer); linkTimer = 0;
-  S = Z = M = M0 = LS = K = QC = SNAP = null; MAP = new Map(); wreckedBefore = null; stopQuakes();
+  S = Z = M = M0 = LS = K = QC = SNAP = GR = null; MAP = new Map(); RS = new Map(); ED = { live: [], links: new Map() }; wreckedBefore = null; stopQuakes();
   TP.clear(); LAST.clear();
   undo.length = redo.length = 0;
 }
@@ -335,7 +356,12 @@ function onUpdateScene(scene, changed, _o, userId) {
 /* ---------------------------------------------------------------- editing (GM) */
 
 const snapshot = () => JSON.stringify(Model.encode(S));
-const restore = (text) => { S = Model.load({ flags: { [MODULE_ID]: { [Model.FLAG]: JSON.parse(text) } } }); };
+// (the play state - border states, registry states, edges - is not the editor's to undo: it stays as it is now)
+const restore = (text) => {
+  const now = S;
+  S = Model.load({ flags: { [MODULE_ID]: { [Model.FLAG]: JSON.parse(text) } } });
+  if ( now ) for ( const k of Model.PLAY_FIELDS ) S[k] = now[k];
+};
 
 /**
  * Change the lines: `fn(strokes, S)` edits a copy (a Map id -> points) and returns true when it changed something. One undo step.
@@ -542,7 +568,10 @@ const pairAt = (x, y) => { const nb = Marks.nearestBorder(Z, x, y, markTol()); r
 /** The border between two zones near a scene point (`tol` scene px), with its kind: { a, b, x, y, kind } or null. */
 export function borderAt(x, y, tol = markTol()) {
   const nb = Marks.nearestBorder(Z, x, y, tol);
-  return nb ? { ...nb, kind: M?.borders.get(Marks.pairKey(nb.a, nb.b))?.kind ?? "open" } : null;
+  if ( !nb ) return null;
+  // (kind: the border as built, what the menu marks; now: what it amounts to at the moment - borders.mjs)
+  const m = M?.borders.get(Marks.pairKey(nb.a, nb.b));
+  return { ...nb, kind: m?.base ?? m?.kind ?? "open", now: m?.kind ?? "open", ...Borders.partsOf(m?.wall ? m : null) };
 }
 
 /** Mark the border nearest to a scene point: open, door, locked, wall, outer, reinforced. One undo step. */
@@ -555,7 +584,10 @@ export function setBorder(x, y, kind) {
     const before = JSON.stringify(s.walls);
     s.walls = s.walls.filter(([wx, wy]) => pairAt(wx, wy) !== key);
     if ( kind !== "open" ) s.walls.push([nb.x, nb.y, kind]);
-    return JSON.stringify(s.walls) !== before;
+    if ( JSON.stringify(s.walls) === before ) return false;
+    // a border marked anew is as built: what happened to the old one in play goes with it
+    s.plays = s.plays.filter(([px, py]) => pairAt(px, py) !== key);
+    return true;
   });
 }
 
@@ -567,20 +599,21 @@ function zonePoint(id, prefer) {
   return z ? [z.label.x, z.label.y] : null;
 }
 
-/** Write the props of some zones (id -> props; empty props drop the mark). One undo step. */
-function writeZones(map, prefer) {
+/** Write the props of some zones (id -> props; empty props drop the mark). One undo step (`via` play: none, a combat module's write). */
+function writeZones(map, prefer, via = edit) {
   if ( !Z || !map.size ) return false;
   const at = new Map([...map.keys()].map((id) => [id, zonePoint(id, prefer)]));
-  return edit((_st, s) => {
+  const body = (s) => {
     const before = JSON.stringify(s.marks);
     s.marks = s.marks.filter(([x, y]) => !map.has(Geo.zoneAt(Z, x, y)));
     for ( const [id, p] of map ) { const c = Marks.cleanProps(p); if ( Object.keys(c).length && at.get(id) ) s.marks.push([...at.get(id), c]); }
     return JSON.stringify(s.marks) !== before;
-  });
+  };
+  return via === edit ? edit((_st, s) => body(s)) : via(body);
 }
 
 /** Change a zone's features / attributes / states: { building, floors, tall, water, terrain, empty, tags: [..], wrecked, fire (0..12), dark, ice, flooded, lowgrav }. GM only. */
-export function setZone(id, patch, at = null) {
+export function setZone(id, patch, at = null, via = edit) {
   // the GM check comes first: the fire below is painted on / put out of the fire layer before the marks are written
   if ( !game.user.isGM || !S || !Z || id < 0 ) return false;
   // fire set from the menu: a new fire is painted on the fire layer too, a fire put out goes out there as well
@@ -592,10 +625,11 @@ export function setZone(id, patch, at = null) {
     // again no higher than the new Intensity (below 6 only the zone's own mark stays)
     else if ( onMap > now ) { putOutMap(id); if ( now >= 6 ) paintMap(id, now); }
   }
-  return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at);
+  return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at, via);
 }
 
-/** Clear the states (not the features) of one zone, or of every zone (end of the scene). */
+/** Clear the states (not the features) of one zone, or of every zone (end of the scene): the GM's marks, the fires painted on the
+ *  map, and the registry's states (a GM action; nothing clears them on its own). */
 export function clearStates(id = null) {
   // (the GM check comes before the fires on the map are put out)
   if ( !game.user.isGM || !S || !Z ) return false;
@@ -604,7 +638,13 @@ export function clearStates(id = null) {
   // the fires painted on the map go out with the states (wreckage and water stay: they are the map)
   let out = 0;
   if ( linkOn() ) for ( const [zid, p] of M?.zones ?? [] ) if ( (id == null || zid === id) && p.fire ) out += putOutMap(zid);
-  return writeZones(map) || out > 0;
+  const marks = writeZones(map);
+  const reg = play((s) => {
+    const keep = s.states.filter(([x, y]) => id != null && zoneAtNow(x, y) !== id);
+    if ( keep.length === s.states.length ) return false;
+    s.states = keep; return true;
+  });
+  return marks || reg || out > 0;
 }
 
 /** One round of fire (book: Fire Spreading): a D6 for every burning zone, the result written and told in the chat. */
@@ -771,7 +811,7 @@ function onTokenHUD(hud, html) {
 const zoneAtNow = (x, y) => Geo.zoneAt(Z, x, y);
 const keyOfId = (id) => K?.keyOf.get(id) ?? null;
 /** The lookups of the zones as they are now (kept until the zones or their marks change). */
-function cache() { if ( !QC || QC.Z !== Z || QC.M !== M ) QC = Places.makeCache(Z, M); return QC; }
+function cache() { if ( !QC || QC.Z !== Z || QC.M !== M ) QC = Places.makeCache(Z, M, { states: RS, own: M0?.zones, map: MAP, links: ED.links }); return QC; }
 const mkPlace = (o) => Object.freeze(Places.makePlace(M, keyOfId, o));
 
 /** A token's place (its document's position and flags, not the animation); null for a token of another scene. Kept per token. */
@@ -874,14 +914,14 @@ export async function setLevel(token, to) {
 const emit = (type, payload) => Hooks.callAll(EVENT_HOOK, type, { type, scene: canvas.scene?.id ?? null, version: ver, ...payload });
 
 /** Tell where a token is now, if that is not where it was last told to be: "tokenLeft" then "tokenEntered". */
-function syncToken(doc, cause, userId = null) {
+function syncToken(doc, cause, userId = null, move = null) {
   const to = placeOfDoc(doc);
   if ( !to ) return;
   const from = LAST.get(doc.id) ?? null;
   LAST.set(doc.id, to);
   if ( Places.placeSig(from) === Places.placeSig(to) ) return;
   if ( !from && cause !== "create" ) return;          // first sight of a token that was already there
-  const d = { token: doc.id, uuid: doc.uuid, actor: doc.actorId ?? null, from, to, zoneChanged: from?.zone !== to.zone, levelChanged: !from || from.level !== to.level || from.floor !== to.floor || from.airborne !== to.airborne, cause, userId };
+  const d = { token: doc.id, uuid: doc.uuid, actor: doc.actorId ?? null, from, to, zoneChanged: from?.zone !== to.zone, levelChanged: !from || from.level !== to.level || from.floor !== to.floor || from.airborne !== to.airborne, cause, userId, move };
   if ( from ) emit("tokenLeft", d);
   emit("tokenEntered", d);
 }
@@ -895,14 +935,16 @@ function dropToken(doc, userId = null) {
 function stateSnap() {
   const zs = new Map(), bs = new Map();
   if ( Z && K ) {
-    for ( const z of Z.zones ) zs.set(K.keyOf.get(z.id), { id: z.id, props: M?.zones.get(z.id) ?? {} });
+    for ( const z of Z.zones ) { const recs = RS.get(z.id) ?? NONE; zs.set(K.keyOf.get(z.id), { id: z.id, props: M?.zones.get(z.id) ?? {}, recs, sig: States.statesSig(recs) }); }
     for ( const [pk, p] of Places.pairsOf(cache()) ) {
-      const ka = K.keyOf.get(p.a), kb = K.keyOf.get(p.b);
-      bs.set(Places.borderKey(ka, kb), { zones: [ka, kb], kind: M?.borders.get(pk)?.kind ?? "open" });
+      const ka = K.keyOf.get(p.a), kb = K.keyOf.get(p.b), m = M?.borders.get(pk);
+      bs.set(Places.borderKey(ka, kb), { zones: [ka, kb], kind: m?.kind ?? "open", sig: Borders.sigOf(m), m: m?.wall ? m : null });
     }
   }
-  return { zs, bs };
+  const es = new Map((S?.edges ?? []).map((e) => [e.id, e]));
+  return { zs, bs, es };
 }
+const NONE = Object.freeze([]);
 const propKeys = (a, b) => {
   const out = [];
   for ( const k of new Set([...Object.keys(a), ...Object.keys(b)]) ) if ( (Array.isArray(a[k]) ? a[k].join() : a[k]) !== (Array.isArray(b[k]) ? b[k].join() : b[k]) ) out.push(k);
@@ -921,20 +963,604 @@ function prime() {
  */
 function announce(source) {
   if ( !S ) return;
-  const was = SNAP ?? { zs: new Map(), bs: new Map() }, now = SNAP = stateSnap();
+  const was = SNAP ?? { zs: new Map(), bs: new Map(), es: new Map() }, now = SNAP = stateSnap();
   for ( const [key, n] of now.zs ) {
     const o = was.zs.get(key);
     const changed = o ? propKeys(o.props, n.props) : Object.keys(n.props);
+    // ("states": the registry's records of the zone changed - one came, went, or had its level, end or exemptions changed)
+    if ( (o?.sig ?? "") !== n.sig ) changed.push("states");
     if ( o && !changed.length ) continue;
-    emit("zoneChanged", { zone: key, id: n.id, before: o ? o.props : null, after: n.props, changed, added: !o, removed: false, source });
+    emit("zoneChanged", { zone: key, id: n.id, before: o ? o.props : null, after: n.props, changed, added: !o, removed: false, source, statesBefore: o ? o.recs : NONE, statesAfter: n.recs });
   }
-  for ( const [key, o] of was.zs ) if ( !now.zs.has(key) ) emit("zoneChanged", { zone: key, id: -1, before: o.props, after: null, changed: Object.keys(o.props), added: false, removed: true, source });
+  for ( const [key, o] of was.zs ) if ( !now.zs.has(key) ) emit("zoneChanged", { zone: key, id: -1, before: o.props, after: null, changed: Object.keys(o.props), added: false, removed: true, source, statesBefore: o.recs, statesAfter: NONE });
   for ( const [key, n] of now.bs ) {
     const o = was.bs.get(key);
-    if ( o?.kind !== n.kind ) emit("borderChanged", { border: key, zones: n.zones, before: o?.kind ?? null, after: n.kind, source });
+    // (before / after: what the border amounts to, as always; was / now: its wall and door - told too when only those changed)
+    if ( o?.kind !== n.kind || (o && o.sig !== n.sig) ) emit("borderChanged", { border: key, zones: n.zones, before: o?.kind ?? null, after: n.kind, source, was: o ? Borders.partsOf(o.m) : null, now: Borders.partsOf(n.m) });
   }
-  for ( const [key, o] of was.bs ) if ( !now.bs.has(key) ) emit("borderChanged", { border: key, zones: o.zones, before: o.kind, after: null, source });
+  for ( const [key, o] of was.bs ) if ( !now.bs.has(key) ) emit("borderChanged", { border: key, zones: o.zones, before: o.kind, after: null, source, was: Borders.partsOf(o.m), now: null });
+  for ( const [id, e] of now.es ) { const o = was.es.get(id); if ( !o || JSON.stringify(o) !== JSON.stringify(e) ) emit("edgeChanged", { edge: id, before: o ?? null, after: e, source }); }
+  for ( const [id, o] of was.es ) if ( !now.es.has(id) ) emit("edgeChanged", { edge: id, before: o, after: null, source });
   for ( const doc of canvas.scene?.tokens ?? [] ) syncToken(doc, "zones");
+}
+
+/* ---------------------------------------------------------------- play state: writes for a combat module (dev/zones-api.md 9-12) */
+
+const r1 = (v) => Math.round(v * 10) / 10;
+const copy = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
+const fail = (reason, more = {}) => ({ ok: false, reason, ...more });
+let playDepth = 0, playDirty = false;
+
+/** Whether this client may write play state: the GM, and where several GMs are connected the active one (it alone executes combat). */
+export function canWrite() {
+  return !!game.user?.isGM && !!S && !!Z && (!game.users?.activeGM || game.users.activeGM.id === game.user.id);
+}
+
+/**
+ * Change the play state (border states, registry states, edges; also marks and walls on behalf of a combat action): `fn(s)` gets a
+ * copy whose arrays it may replace (never change an entry in place) and returns true when it changed something. No undo step: the
+ * editor's undo leaves play state alone, the caller keeps the inverse. Nothing is worked out from the lines again.
+ */
+function play(fn) {
+  if ( !game.user.isGM || !S ) return false;
+  const next = { ...S, walls: S.walls.slice(), marks: S.marks.slice(), plays: S.plays.slice(), states: S.states.slice(), edges: S.edges.slice() };
+  // (edges and inverses name zones by key: the keys are written down before the first play write, as before an edit)
+  pinKeys(next);
+  if ( !fn(next) ) return false;
+  S = next;
+  remark(false);
+  if ( playDepth ) playDirty = true; else playDone();
+  return true;
+}
+function playDone() { refresh(); scheduleSave(); tell("edited"); announce("play"); }
+
+/** A border named by its key ("z1|z2"), a border object, or two places: { a, b, pk, key } (ids) - null when they are not neighbours. */
+function pairOf(b) {
+  let ka, kb;
+  if ( typeof b === "string" ) [ka, kb] = b.split("|");
+  else if ( Array.isArray(b) ) { ka = placeOf(b[0])?.zone; kb = placeOf(b[1])?.zone; }
+  else if ( b && typeof b.key === "string" ) [ka, kb] = b.key.split("|");
+  const a = K?.idOf.get(ka), c = K?.idOf.get(kb);
+  if ( a == null || c == null || a === c ) return null;
+  const pk = Marks.pairKey(a, c);
+  return Places.pairsOf(cache()).has(pk) ? { a, b: c, pk, key: Places.borderKey(ka, kb) } : null;
+}
+const wallRow = (pk) => S.walls.find(([x, y]) => pairAt(x, y) === pk) ?? null;
+
+function opBorder(o) {
+  const P = pairOf(o.border);
+  if ( !P ) return fail("noBorder");
+  const m = M0?.borders.get(P.pk) ?? null, prev = Borders.playOf(m);
+  let next;
+  if ( "play" in o || o.restore ) {
+    if ( o.play && !m ) return fail("noWall");
+    if ( o.play?.d != null && !m.door ) return fail("noDoor");
+    next = o.restore ? null : Borders.normPlay(m, o.play);
+  } else {
+    const r = Borders.patchPlay(m, o);
+    if ( r.error ) return fail(r.error);
+    next = r.play;
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(prev);
+  if ( changed ) play((s) => {
+    s.plays = s.plays.filter(([x, y]) => pairAt(x, y) !== P.pk);
+    if ( next ) s.plays.push([r1(m.x), r1(m.y), next]);
+    return true;
+  });
+  return { ok: true, changed, inverse: { op: "border", border: P.key, play: prev }, result: borderBetween(...P.key.split("|")) };
+}
+
+function opBorderBuild(o) {
+  const P = pairOf(o.border);
+  if ( !P ) return fail("noBorder");
+  const m = M0?.borders.get(P.pk) ?? null, row = wallRow(P.pk);
+  const prevRaw = row ? copy(row.slice(2)) : null, prevPlay = Borders.playOf(m);
+  let raw, nextPlay = null;
+  if ( "raw" in o ) {
+    raw = o.raw;
+    if ( raw != null && (!Array.isArray(raw) || !Borders.KINDS[raw[0]]) ) return fail("badBorder");
+    if ( raw ) { const e = Borders.cleanExt(raw[0], raw[1]); raw = e ? [raw[0], e] : [raw[0]]; }
+    nextPlay = raw ? Borders.normPlay({ ...Borders.model(...raw) }, o.play) : null;
+  } else {
+    raw = Borders.buildFrom(m, o);
+    if ( raw === undefined ) return fail("badBorder");
+  }
+  const changed = JSON.stringify(raw) !== JSON.stringify(prevRaw) || JSON.stringify(nextPlay) !== JSON.stringify(prevPlay);
+  const at = m ?? Places.pairsOf(cache()).get(P.pk);
+  if ( changed ) play((s) => {
+    s.walls = s.walls.filter(([x, y]) => pairAt(x, y) !== P.pk);
+    s.plays = s.plays.filter(([x, y]) => pairAt(x, y) !== P.pk);
+    if ( raw ) s.walls.push([r1(at.x), r1(at.y), ...raw]);
+    if ( raw && nextPlay ) s.plays.push([r1(at.x), r1(at.y), nextPlay]);
+    return true;
+  });
+  return { ok: true, changed, inverse: { op: "borderBuild", border: P.key, raw: prevRaw, play: prevPlay }, result: borderBetween(...P.key.split("|")) };
+}
+
+const stateRow = (id) => S.states.find((row) => row[2].id === id) ?? null;
+/** Give a new record its id from the scene counter ("s7", "e8"); a record that comes back with its id keeps it, and the counter
+ *  stays ahead of it - an id is never given twice. */
+function takeId(s, rec, letter) {
+  if ( !rec.id ) rec.id = `${letter}${s.playNext++}`;
+  else { const m = /^[se](d+)$/.exec(rec.id); if ( m ) s.playNext = Math.max(s.playNext, Number(m[1]) + 1); }
+}
+/** A registry row as it is told: the state with the key of its zone (null: its zone is gone for now). */
+const stateOut = ([x, y, r]) => ({ ...copy(r), zone: keyOfId(zoneAtNow(x, y)) });
+
+function opStateAdd(o) {
+  const st = o.state;
+  if ( !st || typeof st !== "object" ) return fail("badState");
+  let point = Array.isArray(o.point) && o.point.every(Number.isFinite) ? [o.point[0], o.point[1]] : null, at = st.at;
+  if ( o.zone != null ) {
+    const p = placeOf(o.zone);
+    if ( !p || p.id < 0 ) return fail("noZone");
+    // a spot string names the level the state holds on; a bare key names none
+    if ( at == null && typeof o.zone === "string" && o.zone.includes(":") ) at = States.atOfSpot(p.spot);
+    if ( !point || zoneAtNow(point[0], point[1]) !== p.id ) point = zonePoint(p.id);
+  }
+  if ( !point ) return fail("noZone");
+  const rec = States.cleanState({ ...st, at });
+  if ( !rec ) return fail("badState");
+  if ( rec.id && stateRow(rec.id) ) return fail("idTaken");
+  play((s) => {
+    takeId(s, rec, "s");
+    s.states.push([r1(point[0]), r1(point[1]), rec]);
+    return true;
+  });
+  return { ok: true, changed: true, inverse: { op: "zoneState.remove", id: rec.id }, result: stateOut(stateRow(rec.id)) };
+}
+function opStateRemove(o) {
+  const row = stateRow(o.id);
+  if ( !row ) return fail("noState");
+  const out = stateOut(row);
+  play((s) => { s.states = s.states.filter((q) => q !== row); return true; });
+  return { ok: true, changed: true, inverse: { op: "zoneState.add", zone: null, point: [row[0], row[1]], state: copy(row[2]) }, result: out };
+}
+function opStateUpdate(o) {
+  const row = stateRow(o.id), patch = o.patch;
+  if ( !row ) return fail("noState");
+  if ( !patch || typeof patch !== "object" ) return fail("badState");
+  const merged = { ...row[2] }, before = {};
+  for ( const k of ["at", "level", "owner", "ends", "except", "data"] ) {
+    if ( !(k in patch) ) continue;
+    before[k] = copy(row[2][k]) ?? null;
+    if ( patch[k] == null ) delete merged[k]; else merged[k] = patch[k];
+  }
+  const rec = States.cleanState(merged);
+  if ( !rec ) return fail("badState");
+  const changed = JSON.stringify(rec) !== JSON.stringify(row[2]);
+  if ( changed ) play((s) => { s.states = s.states.map((q) => (q === row ? [q[0], q[1], rec] : q)); return true; });
+  return { ok: true, changed, inverse: { op: "zoneState.update", id: o.id, patch: before }, result: stateOut(stateRow(o.id)) };
+}
+
+/** A stored edge as it is told: with `live` (it joins two zones of the map now). */
+const edgeOut = (e) => ({ ...copy(e), live: ED.live.some((l) => l.id === e.id) });
+function opEdgeAdd(o) {
+  const e = o.edge;
+  if ( !e || typeof e !== "object" ) return fail("badEdge");
+  // the ends as spots: anything that names a place; `raw` keeps the spot strings as given (putting back an edge whose zone sleeps)
+  const end = (w) => (o.raw && typeof w === "string" ? w : placeOf(w)?.spot ?? null);
+  const a = end(e.a), b = end(e.b);
+  if ( !a || !b ) return fail("noZone");
+  const rec = States.cleanEdge({ ...e, a, b });
+  if ( !rec ) return fail("badEdge");
+  if ( rec.id && S.edges.some((q) => q.id === rec.id) ) return fail("idTaken");
+  play((s) => {
+    takeId(s, rec, "e");
+    s.edges.push(rec);
+    return true;
+  });
+  return { ok: true, changed: true, inverse: { op: "edge.remove", id: rec.id }, result: edgeOut(rec) };
+}
+function opEdgeRemove(o) {
+  const e = S.edges.find((q) => q.id === o.id);
+  if ( !e ) return fail("noEdge");
+  const out = edgeOut(e);
+  play((s) => { s.edges = s.edges.filter((q) => q !== e); return true; });
+  return { ok: true, changed: true, inverse: { op: "edge.add", raw: true, edge: copy(e) }, result: out };
+}
+
+/** A zone's own marks changed for a combat action (as setZone, with the fire it paints or puts out), without an undo step. */
+function opZone(o) {
+  const p = placeOf(o.zone), patch = o.patch;
+  if ( !p || p.id < 0 ) return fail("noZone");
+  if ( !patch || typeof patch !== "object" ) return fail("badPatch");
+  const own = M0?.zones.get(p.id) ?? {}, before = {};
+  for ( const k of Object.keys(patch) ) before[k] = copy(own[k]) ?? null;
+  const changed = setZone(p.id, patch, null, play);
+  return { ok: true, changed, inverse: { op: "zone", zone: p.zone, patch: before }, result: zoneInfo(p.zone) };
+}
+
+/* ---- tokens: rows { id, x, y, alt, floor, air } (alt / floor / air: this module's token flags; null: not set) */
+
+const tokenRow = (doc) => { const f = doc.flags?.[MODULE_ID] ?? {}; return { id: doc.id, x: doc.x, y: doc.y, alt: f.alt ?? null, floor: f.floor ?? null, air: f.air === true ? true : null }; };
+function tokenUpdate(row) {
+  const k = `flags.${MODULE_ID}`, u = { _id: row.id };
+  if ( Number.isFinite(row.x) ) u.x = row.x;
+  if ( Number.isFinite(row.y) ) u.y = row.y;
+  for ( const n of ["alt", "floor", "air"] ) { if ( !(n in row) ) continue; if ( row[n] == null ) u[`${k}.-=${n}`] = null; else u[`${k}.${n}`] = row[n]; }
+  return u;
+}
+const mayMove = (doc) => !!doc && (doc.canUserModify?.(game.user, "update") ?? doc.isOwner ?? false);
+async function writeTokens(rows, options = {}) {
+  const docs = rows.map((r) => canvas.scene?.tokens.get?.(r.id) ?? [...(canvas.scene?.tokens ?? [])].find((d) => d.id === r.id));
+  if ( docs.some((d) => !d) ) return fail("noToken");
+  if ( !docs.every(mayMove) ) return fail("notOwner");
+  const before = docs.map(tokenRow);
+  await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), options);
+  return { ok: true, changed: true, inverse: { op: "tokens", rows: before }, result: docs.map((d) => placeOfDoc(d)) };
+}
+
+const OPS = {
+  border: opBorder, borderBuild: opBorderBuild,
+  "zoneState.add": opStateAdd, "zoneState.remove": opStateRemove, "zoneState.update": opStateUpdate,
+  "edge.add": opEdgeAdd, "edge.remove": opEdgeRemove, zone: opZone
+};
+async function applyOne(op) {
+  if ( !op || typeof op !== "object" ) return fail("badOp");
+  if ( op.op === "batch" ) {
+    const inv = [], results = [];
+    for ( let i = 0; i < (op.ops?.length ?? 0); i++ ) {
+      const r = await applyOne(op.ops[i]);
+      if ( !r.ok ) {
+        // all or nothing: what was done is taken back, last first
+        for ( const u of inv.reverse() ) await applyOne(u);
+        return fail(r.reason, { at: i });
+      }
+      inv.push(r.inverse); results.push(r.result);
+    }
+    return { ok: true, changed: true, inverse: { op: "batch", ops: inv.reverse() }, result: results };
+  }
+  if ( op.op === "tokens" ) return Array.isArray(op.rows) ? writeTokens(op.rows, { mmMove: op.move ?? "restore", ...(op.options ?? {}) }) : fail("badOp");
+  const fn = OPS[op.op];
+  return fn ? fn(op) : fail("badOp");
+}
+
+/**
+ * One write of play state for a combat action (the active GM's client): { ok, inverse, result, changed } or { ok: false, reason }.
+ * `inverse` is an op that undoes exactly this write when given back to apply() - plain data, for an undo journal. Ops:
+ *   { op: "border", border, wall?: { state, temp }, door?: { state } }        a border's state ({ restore: true }: as built)
+ *   { op: "borderBuild", border, kind?, wall?: null | { armor, outer }, door?: null | { armor, state } }   build it anew
+ *   { op: "zoneState.add", zone, state } | { op: "zoneState.update", id, patch } | { op: "zoneState.remove", id }
+ *   { op: "edge.add", edge } | { op: "edge.remove", id }
+ *   { op: "zone", zone, patch }                                               a zone's own marks (as setZone)
+ *   { op: "tokens", rows: [{ id, x, y, alt, floor, air }] }                   put tokens somewhere (the inverse of a move)
+ *   { op: "batch", ops: [...] }                                               all or nothing, told and saved once
+ * The scene is saved before the promise resolves (`save: false`: with the next save).
+ */
+export async function apply(op, { save: flush = true } = {}) {
+  if ( !canWrite() ) return fail(!game.user?.isGM ? "notGM" : !S || !Z ? "noZones" : "notActiveGM");
+  let r;
+  playDepth++;
+  try { r = await applyOne(op); }
+  finally { playDepth--; if ( !playDepth && playDirty ) { playDirty = false; playDone(); } }
+  if ( r.ok && flush && saveTimer ) { clearTimeout(saveTimer); saveTimer = 0; await save(); }
+  return r;
+}
+
+export const setBorderState = (border, patch = {}) => apply({ op: "border", border, ...patch });
+export const buildBorder = (border, spec = {}) => apply({ op: "borderBuild", border, ...spec });
+/** Put a border (or, with none named, every border) back as built: a GM action - nothing does this on its own (combat-plan 5.7 item 4). */
+export function restoreBorders(border = null) {
+  if ( border != null ) return apply({ op: "border", border, restore: true });
+  const ops = [];
+  for ( const m of M0?.borders.values() ?? [] ) if ( Borders.playOf(m) ) ops.push({ op: "border", border: Places.borderKey(keyOfId(m.a), keyOfId(m.b)), restore: true });
+  return apply({ op: "batch", ops });
+}
+/** Whether any border is not as built (the menu offers "restore" then). */
+export const bordersChanged = () => { for ( const m of M0?.borders.values() ?? [] ) if ( Borders.playOf(m) ) return true; return false; };
+
+export const addZoneState = (zone, state) => apply({ op: "zoneState.add", zone, state });
+export const updateZoneState = (id, patch) => apply({ op: "zoneState.update", id, patch });
+export const removeZoneState = (id) => apply({ op: "zoneState.remove", id });
+/**
+ * The states of a zone as records (states.mjs): the registry's, the GM's own marks, what the map's layers show. A bare key or id:
+ * every level; a spot, a place or a token: that level and the states that name no level. No argument: the registry's states of
+ * the whole scene (each with `zone`, the key of its zone).
+ */
+export function zoneStates(w = undefined) {
+  if ( !S ) return [];
+  if ( w === undefined ) return S.states.map(stateOut);
+  const p = placeOf(w);
+  if ( !p || p.id < 0 ) return [];
+  const bare = typeof w === "number" || (typeof w === "string" && !w.includes(":"));
+  const at = bare ? null : States.atOfSpot(p.spot);
+  return States.listStates(RS.get(p.id), M0?.zones.get(p.id), MAP.get(p.id), at).map((r) => ({ ...copy(r), zone: p.zone }));
+}
+export const zoneState = (id) => { const row = S ? stateRow(id) : null; return row ? stateOut(row) : null; };
+
+export const addEdge = (edge) => apply({ op: "edge.add", edge });
+export const removeEdge = (id) => apply({ op: "edge.remove", id });
+/** Every stored edge, with `live` (it joins two zones now). The edges at a zone. */
+export const edgeList = () => (S ? S.edges.map(edgeOut) : []);
+export function edgesOf(w) {
+  const p = placeOf(w);
+  return p && p.id >= 0 ? ED.live.filter((e) => e.ids.includes(p.id)).map((e) => { const { ids, ...rest } = e; return { ...copy(rest), live: true }; }) : [];
+}
+
+/**
+ * The zones and borders in the shape the combat rules library takes (C:/ipu-tactics scripts/rules/CONTRACT.md, "Zone graph"):
+ *   { zones: [{ id (key), level: 0, terrain, rooftop, empty, wrecked, flammable, wreck, tags }],
+ *     borders: [{ id (border key), a, b, wall: null | { armor, state }, door: null | { armor, state } }],
+ *     edges: [{ id, kind, a, b (zone keys), spots: [a, b], ways }] }
+ * `wreck`, `tags` and `edges` are more than the contract names. Kept until the zones change.
+ */
+export function graph() {
+  if ( GR?.ver === ver ) return GR.data;
+  const data = { zones: [], borders: [], edges: [] };
+  if ( Z && K ) {
+    for ( const z of Z.zones ) {
+      const p = M?.zones.get(z.id) ?? {};
+      data.zones.push({ id: keyOfId(z.id), level: 0, terrain: Marks.WRECK[p.terrain] ? p.terrain : null, rooftop: !!p.building && !p.wrecked, empty: !!p.empty, wrecked: !!p.wrecked, flammable: !!p.tags?.includes("flammable"), wreck: Marks.wreckOf(p), tags: Marks.tagsOf(p) });
+    }
+    for ( const [pk, pr] of Places.pairsOf(cache()) ) {
+      const id = Places.borderKey(keyOfId(pr.a), keyOfId(pr.b)), [ka, kb] = id.split("|"), m = M?.borders.get(pk);
+      data.borders.push({ id, a: ka, b: kb, ...Borders.contractOf(m?.wall ? m : null) });
+    }
+    for ( const e of ED.live ) data.edges.push({ id: e.id, kind: e.kind, a: keyOfId(e.ids[0]), b: keyOfId(e.ids[1]), spots: [e.a, e.b], ways: e.ways ? e.ways.slice() : null });
+  }
+  GR = { ver, data };
+  return data;
+}
+
+/* ---------------------------------------------------------------- movement (dev/zones-api.md 13-14) */
+
+const BEFORE = [];
+let moveSeq = 0, TACT = null;
+
+/**
+ * Ask to be asked before every step of every move made through `move()` on this client: fn(ctx) -> nothing | false |
+ * { stop: true, reason, data } | { pass: true }, or a promise of one (moves.mjs runSteps). Returns the function that stops asking.
+ */
+export function beforeStep(fn) {
+  if ( typeof fn !== "function" ) return () => {};
+  BEFORE.push(fn);
+  return () => { const i = BEFORE.indexOf(fn); if ( i >= 0 ) BEFORE.splice(i, 1); };
+}
+
+const docOf = (t) => { const d = t?.document ?? t; return d?.documentName === "Token" ? d : null; };
+const centerOf = (doc) => { const g = gridSize(); return { x: doc.x + (doc.width * g) / 2, y: doc.y + (doc.height * g) / 2 }; };
+/** A scene point for whatever names one: a token (its middle), { x, y }, or a place / key / spot (the middle of its zone). */
+function pointOf(w) {
+  const d = docOf(w);
+  if ( d ) return centerOf(d);
+  if ( w && typeof w === "object" && Number.isFinite(w.x) && Number.isFinite(w.y) ) return { x: w.x, y: w.y };
+  const p = placeOf(w), z = p && p.id >= 0 ? Z.zones[p.id] : null;
+  return z ? { x: z.label.x, y: z.label.y } : null;
+}
+
+/** What getting from one place to another costs a mover: { plan, cost, reachable } (moves.mjs plan / costOf). */
+export function moveCost(a, b, profile = {}) {
+  const pl = plan(a, b, profile);
+  return { reachable: !!pl, plan: pl, cost: pl?.cost ?? null };
+}
+/** The move of a mover from a to b, step by step (temporary edges included), with its cost; null: no way. */
+export function plan(a, b, profile = {}) {
+  const p = placeOf(a), q = placeOf(b), prof = Moves.profileOf(profile);
+  return p && q && prof ? Moves.plan(cache(), keyOfId, p, q, prof) : null;
+}
+/** Where a mover can get to from a place: [{ zone, id, d, cost }] nearest first (`max`: no farther than this many steps). */
+export function reach(w, profile = {}, { max = Infinity } = {}) {
+  const p = placeOf(w), prof = Moves.profileOf(profile);
+  if ( !p || p.id < 0 || !prof ) return [];
+  return Moves.reach(cache(), p.id, prof, max).map((r) => ({ zone: keyOfId(r.id), id: r.id, d: r.d, cost: r.cost }));
+}
+/** The level a thrown or pushed mover keeps: elevated stays up (in the air), everything else comes out on the ground. */
+const forcedEnd = (A, id) => mkPlace(A.level === "elevated" ? { id, alt: "elevated", air: true } : A.level === "underground" ? { id, alt: "underground" } : { id });
+/**
+ * The steps along a chain of zones somebody chose (keys, the first the mover's own zone): a forced move the GM edited, a route
+ * picked by hand. `end`: { level, floor, airborne } of the last place (default: the ground; `forced`: the level the mover is on).
+ * null: the chain does not hang together.
+ */
+export function planAlong(from, zoneKeys, { profile = null, end = null, forced = false } = {}) {
+  const A = placeOf(from);
+  if ( !A || A.id < 0 || !Array.isArray(zoneKeys) || !zoneKeys.length ) return null;
+  const ids = zoneKeys.map((k) => K?.idOf.get(k) ?? -1);
+  if ( ids.some((i) => i < 0) ) return null;
+  const last = ids[ids.length - 1];
+  const prof = Moves.profileOf(profile ?? { way: forced && A.level === "elevated" ? "air" : "walk" });
+  if ( !prof ) return null;
+  const B = end ? placeOf({ id: last, ...end }) : forced ? forcedEnd(A, last) : mkPlace({ id: last });
+  const pl = Moves.planAlong(cache(), keyOfId, A, ids, prof, B, { stairs: !forced });
+  return pl && (forced ? { ...pl, forced: true } : pl);
+}
+/**
+ * The chain of zones, levels and borders a forced move takes (Knockback, Slam, a throw): from where the mover is, `distance` zones
+ * along a direction. The direction: `direction: { dx, dy }` or `{ angle }` (degrees, 0 = east, 90 = south), `awayFrom` (a token, a
+ * point or a place: straight away from it) or `toward`. The result is a plan (as planAlong, `forced: true`) with
+ * `ray: { dx, dy, end: "distance" | "edge", points }`; its borders that stop the mover carry `blocked: true` with their wall and
+ * door - what hitting one does is the combat module's (answer the step). A GM who wants another chain: planAlong(from, keys, { forced: true }).
+ * null: no direction (the two are on the same point), or the mover is in no zone.
+ */
+export function forcedChain(who, { direction = null, awayFrom = null, toward = null, distance = 1, profile = null } = {}) {
+  const A = placeOf(who), from = pointOf(who);
+  if ( !A || A.id < 0 || !from ) return null;
+  let dir = null;
+  if ( direction && Number.isFinite(direction.angle) ) { const r = (direction.angle * Math.PI) / 180; dir = { dx: Math.cos(r), dy: Math.sin(r) }; }
+  else if ( direction && Number.isFinite(direction.dx) && Number.isFinite(direction.dy) ) dir = { dx: direction.dx, dy: direction.dy };
+  else if ( awayFrom != null ) { const p = pointOf(awayFrom); if ( p ) dir = { dx: from.x - p.x, dy: from.y - p.y }; }
+  else if ( toward != null ) { const p = pointOf(toward); if ( p ) dir = { dx: p.x - from.x, dy: p.y - from.y }; }
+  const L = dir ? Math.hypot(dir.dx, dir.dy) : 0;
+  if ( !(L > 1e-6) ) return null;
+  const g = gridSize(), dm = canvas.dimensions ?? {};
+  const R = Moves.rayChain(cache(), zoneAtNow, from, dir, Math.max(0, Math.floor(Number(distance) || 0)), g / 4, Math.hypot(dm.width ?? 0, dm.height ?? 0) || 1e5);
+  if ( !R ) return null;
+  const pl = planAlong(A, R.ids.map(keyOfId), { profile, forced: true });
+  return pl && { ...pl, ray: { dx: dir.dx / L, dy: dir.dy / L, end: R.end, points: R.points } };
+}
+
+/** The tokens of the scene as rectangles, without some of them. */
+function takenRects(skip) {
+  const g = gridSize(), out = [];
+  for ( const d of canvas.scene?.tokens ?? [] ) if ( !skip.has(d.id) ) out.push({ x: d.x, y: d.y, w: d.width * g, h: d.height * g });
+  return out;
+}
+/**
+ * A free spot for a token inside a zone: { x, y, crowded } - the token's top-left corner (moves.mjs freeSpot). `token`: whose size
+ * to fit and who not to count as in the way; `near`: a point to stay close to (default: the middle of the zone).
+ */
+export function freeSpot(w, { token = null, near = null, skip = null } = {}) {
+  const p = placeOf(w), z = p && p.id >= 0 ? Z.zones[p.id] : null;
+  if ( !z ) return null;
+  const doc = docOf(token), g = gridSize();
+  const out = new Set(skip ?? []); if ( doc ) out.add(doc.id);
+  return Moves.freeSpot(z, { w: (doc?.width ?? 1) * g, h: (doc?.height ?? 1) * g, taken: takenRects(out), near, grid: g });
+}
+
+/** The token rows that put some tokens into a zone on a level: each on a free spot of its own near a point. */
+function rowsInto(docs, zid, flags, near) {
+  const g = gridSize(), z = Z.zones[zid], taken = takenRects(new Set(docs.map((d) => d.id))), rows = [];
+  for ( const d of docs ) {
+    const w = d.width * g, h = d.height * g;
+    // a token that already stands in the zone stays where it is (a change of level only)
+    const here = zoneAtNow(d.x + w / 2, d.y + h / 2) === zid;
+    const sp = here ? { x: d.x, y: d.y } : Moves.freeSpot(z, { w, h, taken, near, grid: g });
+    taken.push({ x: sp.x, y: sp.y, w, h });
+    rows.push({ id: d.id, x: sp.x, y: sp.y, ...flags });
+  }
+  return rows;
+}
+const levelFlags = (alt, floor, air) => ({ alt: alt === "ground" ? null : alt, floor: floor > 0 ? floor : null, air: air ? true : null });
+
+/**
+ * Put a token (with `group`: several) into a free spot of a zone, on the level the place names - no route, no steps, nobody
+ * asked (a teleport, a GM's placement, a return from the sky). Off-map areas change the level only. Returns { ok, inverse, place }.
+ */
+export async function moveToZone(token, w, { group = [], near = null, options = {} } = {}) {
+  const doc = docOf(token), p = placeOf(w);
+  if ( !doc || !S || doc.parent !== canvas.scene ) return fail("noToken");
+  if ( !p || (!p.area && p.id < 0) ) return fail("noZone");
+  const docs = [doc, ...group.map(docOf).filter((d) => d && d !== doc && d.parent === canvas.scene)];
+  const rows = p.area ? docs.map((d) => ({ id: d.id, alt: p.area, floor: null, air: null })) : rowsInto(docs, p.id, levelFlags(p.level === "floor" ? "ground" : p.level, p.floor, p.airborne), near);
+  const r = await writeTokens(rows, { mmMove: `put${++moveSeq}`, ...options });
+  return r.ok ? { ok: true, inverse: r.inverse, place: placeOfDoc(doc) } : r;
+}
+
+const stopWayOf = (way) => (way === "swim" || way === "range" ? "walk" : way === "swing" ? "air" : way);
+/** When the tokens' movement has played (best effort: a token without a canvas object has nothing to wait for). */
+async function settled(docs) {
+  const waits = docs.map((d) => d.object?.movementAnimationPromise).filter((p) => p && typeof p.then === "function");
+  if ( waits.length ) await Promise.race([Promise.allSettled(waits), new Promise((r) => setTimeout(r, 4000))]);
+}
+
+/**
+ * Move a token step by step: to a place (`to`, the route worked out from `profile`) or along a plan made before (`plan`: from
+ * plan(), planAlong(), forcedChain()). Before every step the beforeStep listeners are asked and may stop the move (moves.mjs
+ * runSteps); a border that stops the mover and that nobody opened or passed stops it too. Every step is ONE write of all the
+ * movers (`group`: tokens that go along - carried, pulled, passengers, a group of minions - each to a free spot of its own in the
+ * same zone and on the same level), so a group moves as one operation.
+ *   opts: { profile, plan, group, drop: { x, y } (where in the last zone to end up near), forced, data (handed to the listeners),
+ *           wait (default true: each step waits for the tokens to get there), options (for the token updates) }
+ * The context a listener gets: { op, index, last, step, remaining, token, group, profile, plan, forced, data, from, to (places),
+ *   border (as it is now) | edge, statesFrom, statesTo (the states of the zone left and of the zone entered) }.
+ * Returns { ok, op, done, total, stopped: null | { index, reason, data, step }, place, inverse } - `inverse`: a "tokens" op that
+ * puts every mover back where it started (null when no step was taken).
+ * Runs on the client that calls it (a combat engine: the active GM's); the tokens must be the caller's to move.
+ */
+export async function move(token, to, o = {}) {
+  const doc = docOf(token);
+  if ( !doc || !S || !Z || doc.parent !== canvas.scene ) return fail("noToken");
+  const group = [...new Set((o.group ?? []).map(docOf).filter((d) => d && d !== doc && d.parent === canvas.scene))], all = [doc, ...group];
+  if ( !all.every(mayMove) ) return fail("notOwner");
+  const A = placeOfDoc(doc), prof = Moves.profileOf(o.profile ?? (o.plan ? { way: o.plan.way === "range" ? "walk" : o.plan.way } : {}));
+  if ( !prof ) return fail("badProfile");
+  let pl = o.plan ?? null;
+  if ( pl ) { if ( !Array.isArray(pl.steps) || (pl.from && pl.from.spot !== A.spot) ) return fail("stalePlan"); }
+  else { const B = placeOf(to); pl = B ? Moves.plan(cache(), keyOfId, A, B, prof) : null; }
+  if ( !pl ) return fail("noRoute");
+  const op = `mv${++moveSeq}`, forced = !!(o.forced ?? pl.forced), steps = pl.steps, start = all.map(tokenRow), stopWay = stopWayOf(pl.way);
+  const ids = all.map((d) => d.id), base = { op, token: doc.id, uuid: doc.uuid, group: ids.slice(1), forced };
+  const idOfSpot = (spot) => { const s = Places.parseSpot(spot); return s ? { ...s, id: K?.idOf.get(s.key) ?? -1 } : null; };
+  // the border of a step as it is NOW (a listener may have breached it; the GM may have redrawn the map under a long move)
+  const liveBorder = (step) => { const a = idOfSpot(step.from), b = idOfSpot(step.to); return a && b && a.id >= 0 && b.id >= 0 ? Places.borderInfo(cache(), keyOfId, a.id, b.id) : null; };
+  emit("moveStarted", { ...base, way: pl.way, total: steps.length, zones: pl.zones?.slice() ?? [] });
+  const R = await Moves.runSteps({
+    steps, listeners: BEFORE,
+    context: (step, index) => {
+      const a = idOfSpot(step.from), b = idOfSpot(step.to);
+      return {
+        op, index, last: index === steps.length - 1, step, remaining: steps.slice(index), token: doc, group, profile: prof, plan: pl, forced, data: o.data ?? null,
+        from: placeOfDoc(doc), to: placeOf(step.to),
+        border: step.kind === "border" ? liveBorder(step) : null, edge: step.kind === "edge" ? step.edge : null,
+        statesFrom: a && a.id >= 0 ? zoneStates(step.from) : [], statesTo: b && b.id >= 0 ? zoneStates(step.to) : []
+      };
+    },
+    blocked: (step) => {
+      const b = idOfSpot(step.to);
+      if ( !b || b.id < 0 ) return true;                                   // the zone is gone
+      if ( step.kind === "border" ) { const br = liveBorder(step); return !br || !!br.stops[stopWay]; }
+      if ( step.kind === "edge" ) return !ED.live.some((e) => e.id === step.edge?.id);
+      return false;
+    },
+    perform: async (step, index) => {
+      const s = idOfSpot(step.to), last = index === steps.length - 1;
+      // in the air while passing; at the end as the plan's end says (a rooftop is stood on)
+      const air = s.alt === "elevated" && (last ? !!pl.end?.airborne : true);
+      const flags = levelFlags(s.alt, s.floor, air);
+      let rows;
+      if ( step.kind === "level" ) rows = all.map((d) => ({ id: d.id, ...flags }));
+      else {
+        const drop = last && o.drop && zoneAtNow(o.drop.x, o.drop.y) === s.id ? o.drop : null;
+        rows = rowsInto(all, s.id, flags, drop ?? (step.kind === "border" && step.border ? { x: step.border.x, y: step.border.y } : null));
+      }
+      await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), { ...(o.options ?? {}), mmMove: op });
+      if ( o.wait !== false ) await settled(all);
+    },
+    after: (step, index) => emit("moveStep", { ...base, index, step, place: placeOfDoc(doc) })
+  });
+  emit("moveEnded", { ...base, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc) });
+  return { ok: true, op, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc), inverse: R.done ? { op: "tokens", rows: start } : null };
+}
+
+/**
+ * Cost confirmation when a token is dragged during tactical play (combat-plan 5.7 item 16). While it is on, a drag of a token
+ * into ANOTHER zone by this client's user is not taken as it is: the route and its cost are worked out for the mover's profile
+ * and `confirm(ctx)` is asked. A drag inside the zone goes through (moving inside a zone is free: book-dump 2383).
+ *   tactical({ profile(tokenDoc) -> profile, confirm(ctx) -> true | false | Promise, when(tokenDoc) -> bool, gm: false })
+ *   tactical(false)      off
+ * ctx: { token, from, to (places), drop: { x, y } (the middle of where it was dropped), profile, plan, cost, reachable }.
+ * confirm answers true: the map moves the token along the plan with move() (step by step, the listeners asked) - for a client
+ * that may move it; anything else: the token stays (a combat module that sends the move to the GM as an intent answers false
+ * after sending it). No `confirm`: a yes / no dialog with the cost. `gm: true` asks the GM's own drags too.
+ */
+export function tactical(opts) {
+  TACT = opts === false || opts == null ? null : { profile: opts.profile ?? null, confirm: opts.confirm ?? null, when: opts.when ?? null, gm: opts.gm === true };
+  return !!TACT;
+}
+function onPreUpdateToken(doc, changed, options, userId) {
+  if ( !TACT || !S || !Z || userId !== game.user.id || options?.mmMove || doc.parent !== canvas.scene ) return;
+  if ( !("x" in changed || "y" in changed) || (game.user.isGM && !TACT.gm) ) return;
+  try {
+    if ( TACT.when && !TACT.when(doc) ) return;
+    const g = gridSize(), drop = { x: (changed.x ?? doc.x) + (doc.width * g) / 2, y: (changed.y ?? doc.y) + (doc.height * g) / 2 };
+    const from = placeOfDoc(doc), id = zoneAtNow(drop.x, drop.y);
+    // only a move from one zone into another is a move that costs; off the map there is nothing to count
+    if ( !from || from.area || from.id < 0 || id < 0 || id === from.id ) return;
+    const fl = doc.flags?.[MODULE_ID] ?? {};
+    const to = mkPlace({ id, alt: rawAlt(doc) === "underground" ? "underground" : rawAlt(doc) === "elevated" ? "elevated" : "ground", air: fl.air === true });
+    askDrag(doc, from, to, drop);
+    return false;
+  } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }
+}
+async function askDrag(doc, from, to, drop) {
+  const T = TACT;
+  if ( !T ) return;
+  try {
+    const prof = Moves.profileOf(T.profile?.(doc) ?? {}) ?? Moves.profileOf({});
+    const pl = Moves.plan(cache(), keyOfId, from, to, prof);
+    const ctx = { token: doc, from, to, drop, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl };
+    const yes = T.confirm ? await T.confirm(ctx) : await askCost(ctx);
+    if ( yes === true && pl ) await move(doc, to, { profile: prof, plan: pl, drop });
+  } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }
+}
+/** The map's own question when no combat module asks: the zones and the actions the move takes. */
+async function askCost(ctx) {
+  const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.drag.${k}`, d ?? {});
+  if ( !ctx.plan ) { ui.notifications.warn(L("noWay", { name: ctx.token.name })); return false; }
+  const c = ctx.cost;
+  const text = c.stressActions != null && c.stressActions < c.actions ? L("costStress", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions, s: c.stressActions }) : L("cost", { name: ctx.token.name, zones: zonesText(c.total), n: c.actions });
+  try { return (await foundry.applications.api.DialogV2.confirm({ window: { title: L("title") }, content: `<p>${esc(text)}</p>`, rejectClose: false })) === true; }
+  catch { return false; }
 }
 
 /* ---------------------------------------------------------------- public API */
@@ -997,8 +1623,26 @@ export const zonesApi = {
   /** The route step by step: zones, levels and borders crossed (way: "range" or a way of moving); null when there is none. */
   path: (a, b, { way = "walk" } = {}) => { const p = placeOf(a), q = placeOf(b); return p && q ? Places.path(cache(), keyOfId, p, q, way) : null; },
   setLevel,
+
+  /* ---- package M2 (dev/zones-api.md sections 9-14) */
+  WALL_STATES: Borders.WALL_STATES, DOOR_STATES: Borders.DOOR_STATES, STATE_KINDS: States.STATE_KINDS, EDGE_KINDS: States.EDGE_KINDS,
+  /** One write for a combat module (the active GM's client): { ok, inverse, result } - the inverse is an op that undoes it. */
+  apply, canWrite,
+  setBorderState, buildBorder, restoreBorders,
+  /** The zone-state registry: every state of a zone (or of the scene), one by id; add / change / remove (each returns its inverse). */
+  zoneStates, zoneState, addZoneState, updateZoneState, removeZoneState,
+  /** Temporary edges (portals, tunnels). */
+  edges: edgeList, edgesOf, addEdge, removeEdge,
+  /** The zones and borders in the shape the combat rules take (rules CONTRACT.md "Zone graph"). */
+  graph,
+  /** Movement: a mover profile, what a route costs it, where it can get to, its route step by step (temporary edges included). */
+  profile: (p) => Moves.profileOf(p), moveCost, reach, plan, planAlong, forcedChain,
+  /** A free spot for a token in a zone; put a token there; move a token (or a group) step by step, the listeners asked before each. */
+  freeSpot, moveToZone, move, beforeStep,
+  /** Cost confirmation when a token is dragged during tactical play. */
+  tactical, tacticalOn: () => !!TACT,
   /** The pure parts, for tests and other modules. */
-  places: Places, keysLib: Keys
+  places: Places, keysLib: Keys, borders: Borders, statesLib: States, moves: Moves
 };
 
 export function registerZones() {
@@ -1023,8 +1667,9 @@ export function registerZones() {
     if ( !S || doc.parent !== canvas.scene ) return;
     // (any change of this module's token flags is looked at: the place is only told when it really differs)
     const level = !!changed.flags?.[MODULE_ID];
-    if ( level || "x" in changed || "y" in changed || "width" in changed || "height" in changed ) syncToken(doc, level && !("x" in changed || "y" in changed) ? "level" : "move", userId);
+    if ( level || "x" in changed || "y" in changed || "width" in changed || "height" in changed ) syncToken(doc, level && !("x" in changed || "y" in changed) ? "level" : "move", userId, _o?.mmMove ?? null);
   });
+  Hooks.on("preUpdateToken", onPreUpdateToken);
   Hooks.on("createToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) syncToken(doc, "create", userId); });
   Hooks.on("deleteToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) dropToken(doc, userId); });
   Hooks.on("drawToken", (t) => altBadge(t));
