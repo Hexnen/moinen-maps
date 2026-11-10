@@ -24,13 +24,22 @@ const getState = () => { try { return game.settings.get(MODULE_ID, "vramMeterSta
 const saveState = (patch) => { try { return game.settings.set(MODULE_ID, "vramMeterState", { ...getState(), ...patch }); } catch { return null; } };
 const mode = () => { try { return game.settings.get(MODULE_ID, "vramMeter"); } catch { return "off"; } };
 
-/** "2.3 GB" / "640 MB" in the user's language. */
-function size(b) {
+/** "2.3 GB" / "640 MB" in the user's language (the number formats are made once per language). */
+let nf = null;
+function fmt() {
   const lang = game.i18n.lang;
-  if ( b >= GB ) return `${(b / GB).toLocaleString(lang, { maximumFractionDigits: b >= 10 * GB ? 0 : 1, minimumFractionDigits: b >= 10 * GB ? 0 : 1 })} GB`;
-  return `${Math.round(b / 1048576).toLocaleString(lang)} MB`;
+  if ( nf?.lang !== lang ) {
+    const mk = (d) => new Intl.NumberFormat(lang, { maximumFractionDigits: d, minimumFractionDigits: d });
+    nf = { lang, f0: mk(0), f1: mk(1), g: new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }) };
+  }
+  return nf;
 }
-const gbOf = (b) => (b / GB).toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
+function size(b) {
+  const f = fmt();
+  if ( b >= GB ) return `${(b >= 10 * GB ? f.f0 : f.f1).format(b / GB)} GB`;
+  return `${f.f0.format(Math.round(b / 1048576))} MB`;
+}
+const gbOf = (b) => fmt().g.format(b / GB);
 
 /** Show, hide or re-time the meter to match the setting and the last sample. */
 function sync() {
@@ -115,7 +124,7 @@ function update(s) {
     row.querySelector(".mm-vram-n").textContent = k === "canvas" ? T("Vram.est") : k === "buffers" ? "" : String(L.n);
     row.classList.toggle("is-empty", !L.bytes);
   }
-  el.querySelector(".mm-vram-sum").textContent = F("Vram.sum", { counted: size(s.counted), est: size(s.estimated), n: s.textures.toLocaleString(game.i18n.lang), peak: size(s.peak) });
+  el.querySelector(".mm-vram-sum").textContent = F("Vram.sum", { counted: size(s.counted), est: size(s.estimated), n: fmt().f0.format(s.textures), peak: size(s.peak) });
   const B = s.budget;
   const src = B.source === "manual" ? T("Vram.src.manual") : B.source === "table" ? F(B.alt ? "Vram.src.tableAlt" : "Vram.src.table", { model: B.model, alt: B.alt })
     : B.source === "shared" ? F("Vram.src.shared", { model: B.model }) : F("Vram.src.unknown", { model: B.model || T("Vram.masked") });
@@ -144,6 +153,8 @@ function onSampled(s) {
 async function onClick(ev) {
   const b = ev.target.closest("button[data-act]"); if ( !b ) return;
   if ( b.dataset.act === "open" ) {
+    const st = getState();
+    if ( Number.isFinite(st.x) && !("bottom" in st) ) await remember();   // anchor a dragged card before it changes height
     await saveState({ open: !getState().open });
     build(); show();
     el?.querySelector('[data-act="open"]')?.focus();
@@ -163,12 +174,29 @@ function clamp(left, top) {
   const w = el?.offsetWidth ?? 200, h = el?.offsetHeight ?? 50;
   return [Math.max(MARGIN, Math.min(left, innerWidth - w - MARGIN)), Math.max(MARGIN, Math.min(top, innerHeight - h - MARGIN))];
 }
+/**
+ * The card's place: where the user dragged it, else low on the left just above the players list. It grows and shrinks from its
+ * bottom edge when it sits in the lower half of the screen (opening the details never pushes it under the players list), else from
+ * its top edge.
+ */
 function place() {
   if ( !el ) return;
-  const s = getState();
-  // first time: low on the left, clear of the scene controls and above the players list
-  const [x, y] = clamp(s.x ?? 96, s.y ?? innerHeight - 260);
+  const s = getState(), h = el.offsetHeight;
+  let x = s.x, y = s.y;
+  if ( !Number.isFinite(x) || !Number.isFinite(y) ) {
+    const p = document.getElementById("players")?.getBoundingClientRect();
+    x = p?.width ? p.left : 16;
+    y = (p?.height ? p.top : innerHeight - 120) - MARGIN - h;
+  } else if ( Number.isFinite(s.bottom) ) y = innerHeight - s.bottom - h;
+  [x, y] = clamp(x, y);
   el.style.left = `${x}px`; el.style.top = `${y}px`;
+}
+
+/** Remember where the card is; `bottom` (distance of its bottom edge to the screen's) when it sits in the lower half. */
+function remember() {
+  if ( !el ) return;
+  const r = el.getBoundingClientRect(), low = r.top + r.height / 2 > innerHeight / 2;
+  return saveState({ x: Math.round(r.left), y: Math.round(r.top), bottom: low ? Math.round(innerHeight - r.bottom) : null });
 }
 
 function onDragStart(ev) {
@@ -180,7 +208,7 @@ function onDragStart(ev) {
   const move = (e) => { const [x, y] = clamp(e.clientX - dx, e.clientY - dy); el.style.left = `${x}px`; el.style.top = `${y}px`; };
   const up = () => {
     head.removeEventListener("pointermove", move); head.removeEventListener("pointerup", up); head.removeEventListener("pointercancel", up);
-    if ( el ) saveState({ x: Math.round(parseFloat(el.style.left)), y: Math.round(parseFloat(el.style.top)) });
+    remember();
   };
   head.addEventListener("pointermove", move); head.addEventListener("pointerup", up); head.addEventListener("pointercancel", up);
 }

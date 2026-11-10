@@ -44,6 +44,7 @@ ok(V.layerOfStack(st(at("fire/display.mjs"))) === "fire", "fire -> fire");
 ok(V.layerOfStack(st(at("weather/clouds.mjs?v=3"))) === "weather", "weather (with a query) -> weather");
 ok(V.layerOfStack(st(at("zones/display.mjs"))) === "zones", "zones -> zones");
 ok(V.layerOfStack(st(at("water/reflect.mjs"))) === "water", "water -> water");
+ok(V.layerOfStack(st(at("districts.mjs"))) === "districts", "districts.mjs -> districts");
 ok(V.layerOfStack(st(at("warmup.mjs"))) === "module", "scripts/warmup.mjs -> other Moinen Maps");
 ok(V.layerOfStack(st("    at Canvas.draw (http://h/scripts/foundry.mjs:5:5)")) === "foundry", "no frame of ours -> foundry");
 ok(V.layerOfStack(st("    at y (http://h/modules/other-mod/scripts/fire/x.mjs:1:1)")) === "foundry", "another module's scripts/fire -> foundry");

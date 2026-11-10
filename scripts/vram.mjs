@@ -17,15 +17,15 @@
  * classified (the first frame from this module's scripts/<dir>/ names the layer; no frame of ours = Foundry and other modules)
  * and the trace dropped. Nothing is tagged on existing objects except `_mmV` (the layer key) on BaseTextures.
  *
- * COST: nothing per frame. A sample walks the three lists (12 000 textures ~ 1-2 ms) in an idle callback every few seconds while
- * the meter is on screen (vram-ui.mjs), or when `api.vram.sample()` / `api.diag.vram()` asks.
+ * COST: nothing per frame. A sample walks the three lists (~0.8 us a texture) in idle slices of 1500 textures every few seconds
+ * while the meter is on screen (vram-ui.mjs), or when `api.vram.sample()` / `api.diag.vram()` asks.
  */
 import { MODULE_ID } from "./config.mjs";
 import { api as moduleApi } from "./attrs.mjs";
 import { cardOf } from "./vram-gpu.mjs";
 
 /** Layers in display order; "canvas" (estimated) and "buffers" (geometry) are added by the sample. */
-export const LAYERS = ["destruction", "fire", "weather", "water", "zones", "module", "foundry"];
+export const LAYERS = ["destruction", "fire", "weather", "water", "zones", "districts", "module", "foundry"];
 export const WARN = 0.75, OVER = 0.9;
 const GB = 1024 ** 3, MB = 1024 ** 2;
 
@@ -56,6 +56,7 @@ export function originOfStack(stack) {
     const [dir, file = ""] = p.split("/");
     if ( dir === "destruction" ) return { layer: /^flood/.test(file) ? "water" : "destruction", file: p };
     if ( ["fire", "weather", "water", "zones"].includes(dir) ) return { layer: dir, file: p };
+    if ( /^districts/.test(dir) ) return { layer: "districts", file: p };
     return { layer: "module", file: p };
   }
   return { layer: "foundry", file: "" };
@@ -157,20 +158,33 @@ const listeners = new Set();
  *     textures (count), peak, peakAt, contextLost, lostAt, unclassified }
  */
 export function sample() {
+  const st = begin(); if ( !st ) return last;
+  step(st, Infinity);
+  return finish(st);
+}
+
+/** A walk in parts: begin, step (some textures), finish (framebuffers, buffers, canvas, totals). */
+function begin() {
   const R = canvas?.app?.renderer;
-  if ( !R?.texture ) return last;
-  const t0 = performance.now(), uid = R.CONTEXT_UID;
-  const layers = Object.fromEntries(LAYERS.map((k) => [k, { bytes: 0, n: 0 }]));
-  let textures = 0;
-  for ( const bt of R.texture.managedTextures ) {
-    const gt = bt._glTextures?.[uid]; if ( !gt ) continue;
+  if ( !R?.texture ) return null;
+  return { R, uid: R.CONTEXT_UID, i: 0, ms: 0, textures: 0, layers: Object.fromEntries(LAYERS.map((k) => [k, { bytes: 0, n: 0 }])) };
+}
+function step(st, count) {
+  const t0 = performance.now(), list = st.R.texture.managedTextures, uid = st.uid, layers = st.layers, end = Math.min(list.length, st.i + count);
+  for ( ; st.i < end; st.i++ ) {
+    const bt = list[st.i], gt = bt._glTextures?.[uid]; if ( !gt ) continue;
     const w = gt.width || 0, h = gt.height || 0; if ( !w || !h ) continue;
     let b = w * h * bytesPerTexel(gt.internalFormat, gt.type);
     if ( gt.mipmap ) b *= 4 / 3;
     if ( bt.target === 0x8513 ) b *= 6;   // cube map
     const L = layers[classify(bt)] ?? layers.foundry;
-    L.bytes += b; L.n++; textures++;
+    L.bytes += b; L.n++; st.textures++;
   }
+  st.ms += performance.now() - t0;
+  return st.i >= list.length;
+}
+function finish(st) {
+  const t0 = performance.now(), { R, uid, layers } = st;
   for ( const fb of R.framebuffer?.managedFramebuffers ?? [] ) {
     const g = fb.glFramebuffers?.[uid]; if ( !g ) continue;
     const px = (fb.width || 0) * (fb.height || 0), s = Math.max(1, g.multisample || 0);
@@ -182,7 +196,8 @@ export function sample() {
     (layers[bt ? classify(bt) : "foundry"] ?? layers.foundry).bytes += b;
   }
   let buf = 0, nb = 0;
-  for ( const k in R.buffer?.managedBuffers ?? {} ) { const g = R.buffer.managedBuffers[k]?._glBuffers?.[uid]; if ( g ) { buf += g.byteLength || 0; nb++; } }
+  const mb = R.buffer?.managedBuffers ?? {};
+  for ( const k in mb ) { const g = mb[k]?._glBuffers?.[uid]; if ( g ) { buf += g.byteLength || 0; nb++; } }
   layers.buffers = { bytes: buf, n: nb };
   const gl = R.gl, attr = gl?.getContextAttributes?.() ?? {};
   const bw = gl?.drawingBufferWidth ?? 0, bh = gl?.drawingBufferHeight ?? 0, aa = attr.antialias ? Math.max(1, gl.getParameter(gl.SAMPLES) || 4) : 1;
@@ -191,10 +206,18 @@ export function sample() {
   const counted = Object.entries(layers).reduce((a, [k, v]) => a + (k === "canvas" ? 0 : v.bytes), 0), total = counted + est;
   const bud = budget(), ratio = bud.bytes ? total / bud.bytes : 0;
   if ( total > peak ) { peak = total; peakAt = Date.now(); }
-  last = { at: Date.now(), ms: +(performance.now() - t0).toFixed(2), total, counted, estimated: est, budget: bud, ratio,
-    level: ratio >= OVER ? "over" : ratio >= WARN ? "warn" : "ok", layers, textures, backing: [bw, bh], peak, peakAt, contextLost, lostAt, unclassified: pending.length };
+  last = { at: Date.now(), ms: +(st.ms + performance.now() - t0).toFixed(2), total, counted, estimated: est, budget: bud, ratio,
+    level: ratio >= OVER ? "over" : ratio >= WARN ? "warn" : "ok", layers, textures: st.textures, backing: [bw, bh], peak, peakAt, contextLost, lostAt, unclassified: pending.length };
   for ( const fn of listeners ) { try { fn(last); } catch ( err ) { console.error(`${MODULE_ID} | vram`, err); } }
   return last;
+}
+
+/** The clock's walk: 1500 textures per idle slice (~1 ms each), so 12 000 textures never make one long task. */
+const SLICE = 1500;
+function sampleInParts(done) {
+  const st = begin(); if ( !st ) return done();
+  const go = () => { try { if ( !canvas?.ready || st.R !== canvas.app?.renderer ) return done(); if ( step(st, SLICE) ) { finish(st); return done(); } } catch ( err ) { console.error(`${MODULE_ID} | vram`, err); return done(); } idle(go, 1000); };
+  idle(go, 1000);
 }
 
 /** The same sample in MB (rounded), for logs and tests. */
@@ -222,10 +245,11 @@ function reschedule() {
   if ( p ) tick(gen);
 }
 function tick(g) {
-  timer = setTimeout(() => idle(() => {
+  timer = setTimeout(() => {
     if ( g !== gen ) return;
-    try { if ( canvas?.ready ) sample(); } finally { if ( period && g === gen ) tick(g); }
-  }, 1000), period);
+    if ( !canvas?.ready ) return tick(g);
+    sampleInParts(() => { if ( period && g === gen ) tick(g); });
+  }, period);
 }
 /** Run `fn(sample)` after every sample; returns the release. */
 export function onSample(fn) { listeners.add(fn); return () => listeners.delete(fn); }

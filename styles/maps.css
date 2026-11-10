@@ -928,9 +928,9 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 
 /* ---- VRAM meter (vram-ui.mjs): a small draggable card like the pin filter; a bar split by layer, amber from 75 % of the budget, red from 90 % ---- */
 .mm-vram {
-  --mm-v-destruction: #e5322d; --mm-v-fire: #ff9a3c; --mm-v-weather: #9aa8ff; --mm-v-water: #3fb6c6; --mm-v-zones: #d9b23a; --mm-v-module: #c07ad8;
+  --mm-v-destruction: #e5322d; --mm-v-fire: #ff9a3c; --mm-v-weather: #9aa8ff; --mm-v-water: #3fb6c6; --mm-v-zones: #d9b23a; --mm-v-districts: #5fbf72; --mm-v-module: #c07ad8;
   --mm-v-foundry: #9a958c; --mm-v-buffers: #6d6a64; --mm-v-canvas: #4f4c47; --mm-v-warn: #f0a83a; --mm-v-over: #ff4a3d;
-  position: fixed; z-index: calc(var(--z-index-ui, 30) - 1); width: 15.5rem; border-radius: 8px; overflow: hidden;
+  position: fixed; z-index: calc(var(--z-index-ui, 30) - 1); width: 16.5rem; border-radius: 8px; overflow: hidden;
   background: var(--color-cool-5-90, rgb(24 24 32 / 0.92)); color: var(--color-light-1, #eee);
   border: 1px solid var(--color-cool-4, rgb(255 255 255 / 0.18)); box-shadow: 0 4px 16px rgb(0 0 0 / 0.45);
   font-size: 0.8rem; animation: mm-pal-in 0.18s var(--mm-ease-out, ease-out) both;
@@ -952,7 +952,7 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-vram-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgb(255 255 255 / 0.55); }
 .mm-vram [data-layer="destruction"] { --c: var(--mm-v-destruction); } .mm-vram [data-layer="fire"] { --c: var(--mm-v-fire); }
 .mm-vram [data-layer="weather"] { --c: var(--mm-v-weather); } .mm-vram [data-layer="water"] { --c: var(--mm-v-water); }
-.mm-vram [data-layer="zones"] { --c: var(--mm-v-zones); } .mm-vram [data-layer="module"] { --c: var(--mm-v-module); }
+.mm-vram [data-layer="zones"] { --c: var(--mm-v-zones); } .mm-vram [data-layer="districts"] { --c: var(--mm-v-districts); } .mm-vram [data-layer="module"] { --c: var(--mm-v-module); }
 .mm-vram [data-layer="foundry"] { --c: var(--mm-v-foundry); } .mm-vram [data-layer="buffers"] { --c: var(--mm-v-buffers); }
 .mm-vram [data-layer="canvas"] { --c: var(--mm-v-canvas); }
 .mm-vram-bar > i { background: var(--c); }

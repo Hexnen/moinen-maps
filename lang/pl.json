@@ -2242,8 +2242,9 @@
   "MOINENMAPS.Vram.layer.weather": "Pogoda",
   "MOINENMAPS.Vram.layer.water": "Woda",
   "MOINENMAPS.Vram.layer.zones": "Strefy",
+  "MOINENMAPS.Vram.layer.districts": "Dzielnice",
   "MOINENMAPS.Vram.layer.module": "Reszta Moinen Maps",
-  "MOINENMAPS.Vram.layer.foundry": "Foundry i inne moduły",
+  "MOINENMAPS.Vram.layer.foundry": "Foundry i moduły",
   "MOINENMAPS.Vram.layer.buffers": "Bufory geometrii",
   "MOINENMAPS.Vram.layer.canvas": "Canvas (ekran)"
 }
