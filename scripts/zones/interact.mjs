@@ -135,9 +135,11 @@ function resolveInset(spec) {
 export function uiInset(id, spec = null) {
   id = String(id ?? "");
   if ( !id ) return () => {};
+  // (a running pick lays itself out again: its banner and its chips keep clear of what was just declared)
+  const again = () => { const p = PICK; if ( p ) setTimeout(() => layoutPick(p), 0); };
   if ( spec == null || spec === false ) INSETS.delete(id); else INSETS.set(id, spec);
-  if ( PICK ) scheduleWay(PICK, 0);
-  return () => { if ( INSETS.get(id) === spec ) { INSETS.delete(id); if ( PICK ) scheduleWay(PICK, 0); } };
+  again();
+  return () => { if ( INSETS.get(id) === spec ) { INSETS.delete(id); again(); } };
 }
 /** The declared insets now, as one: { top, right, bottom, left } in px (`extra`: one more, counted with them). */
 export const uiInsets = (extra = null) => View.sumInsets([...[...INSETS.values()].map(resolveInset), View.cleanInsets(extra)]);

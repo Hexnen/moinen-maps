@@ -836,7 +836,8 @@ const r = await api.reveal(where | [where, ...], { inset, margin, fit = false, a
 ```
 
 - **Declared** insets are per client and last until reload: a module declares its bars once on `ready` (an element or a
-  function keeps the number current by itself). Use one id per bar; the same id again replaces it.
+  function keeps the number current by itself). Use one id per bar; the same id again replaces it. Declaring or taking back
+  an inset while a pick runs lays that pick out again at once (banner, chips).
 - **Found by looking**: `safeArea()` and a running pick test what lies over the map's canvas on a 40 px grid
   (`document.elementFromPoint`, about 900 points for a 1600 x 900 window) and take the largest free rectangle. So a bar
   nobody declared is kept clear of as well. An element with `pointer-events: none` is not seen: declare it. When windows lie

@@ -529,6 +529,15 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   // ---- the banner keeps clear of the tracker; nothing hidden: no chip, the view is left alone
   let p0 = pans, pk = api.pick({ zones: all5, title: "Where to?" });
   check(banner()?.style.top === "128px" && chips().length === 0 && pans === p0, `the banner sits below the tracker it would lie on (${banner()?.style.top}); every zone in reach: no chip, no move`);
+  // ---- an inset declared while the pick runs: the banner moves at once, and back when it is taken
+  {
+    const offTop = api.uiInset("t.top", { top: 200 });
+    await wait(20);
+    const moved = banner()?.style.top;
+    offTop();
+    await wait(20);
+    check(moved === "208px" && banner()?.style.top === "128px", `an inset declared during a pick lays it out again (${moved}, then ${banner()?.style.top})`);
+  }
   // ---- the zones go under the dock: one chip at the bottom edge of the free stretch, with their number
   await under();
   let cs = chips();
