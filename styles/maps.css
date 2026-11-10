@@ -372,6 +372,9 @@ body.mm-painting-water #board, body.mm-painting-rods #board { cursor: crosshair;
 .mm-ws-opt > label, .mm-ws-label { color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
 .mm-ws-opt > label[data-tooltip] { cursor: help; }
 .mm-ws-opt select { width: auto; max-width: 9rem; }
+.mm-ws-opts > .mm-ws-opt:has(> .mm-d-levels) { max-width: 100%; min-width: 0; }
+/* the weather preset row wraps inside the bar on narrow screens (it was clipped at 1280 px and below) */
+.mm-ws-opts > .mm-ws-opt > .mm-d-levels { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; row-gap: 3px; }
 .mm-ws-range range-picker { width: 10rem; }
 .mm-ws-range range-picker input[type="number"] { flex: 0 0 3rem; }
 /* the GM's marker opacity (workspace/markers.mjs): a small slider at the start of the bar's right side */
@@ -538,6 +541,9 @@ body.mm-painting-destruction #board { cursor: crosshair; }
 .mm-wx-str > label > i { grid-row: 1 / 3; text-align: center; color: color-mix(in srgb, var(--mm-tool) 85%, #fff); filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.45)); }
 .mm-wx-str.mm-wx-off > label { opacity: 0.55; }
 .mm-wx-str.mm-wx-off > label > i { filter: grayscale(1); }
+/* light theme: the type tints are made for a dark bar (snow, clouds, dust are near-white): darken them so they read on the light one */
+#interface.theme-light .mm-wx-str > label > i, body.theme-light .mm-wx-str > label > i { color: color-mix(in srgb, var(--mm-tool) 55%, #15110f); }
+#interface.theme-light .mm-ws-toolbtn.mm-d-level, body.theme-light .mm-ws-toolbtn.mm-d-level { color: color-mix(in srgb, var(--mm-tool) 55%, #15110f); }
 .mm-wx-str.mm-wx-last > label > span:first-of-type { text-decoration: underline 1px color-mix(in srgb, var(--mm-tool) 80%, transparent); text-underline-offset: 3px; }
 .mm-wx-live { grid-column: 2; color: color-mix(in srgb, var(--mm-tool) 65%, var(--mm-ws-text)); font-size: 0.65rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mm-wx-live:empty { display: none; }

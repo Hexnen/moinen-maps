@@ -160,8 +160,10 @@ export class CloudDisplay {
     }
     // shadow: the clouds' own darkness, the wind's lighter shadows where they make the cover
     const CG = this.CG, cc = this.cover > 0 ? Math.min(1, (CG.cover * ss(this.cp * 1.15)) / this.cover) : 0;
+    // (the wind's shadows darken in with their cover: at a thin cover the threshold falls fastest, and a patch appeared within one or
+    // two 12 Hz steps as the wind passed strength ~1; full from cover 0.06, so the steady levels 2 and 3 are unchanged)
     const su = this.shadow.shader.uniforms;
-    su.uShade[0] = (cc * CG.shade + (1 - cc) * 0.2) * (1 - 0.6 * night); su.uShade[1] = 1;
+    su.uShade[0] = (cc * CG.shade + (1 - cc) * 0.2 * ss(this.wc / 0.06)) * (1 - 0.6 * night); su.uShade[1] = 1;
     this.shadow.visible = true;
     const ru = this.rays.shader.uniforms;
     ru.uRay[0] = raysOn ? this.cp * CG.rays * raysK : 0; ru.uRay[1] = this.cover; ru.uRay[2] = thr; ru.uRay[3] = Math.min(1, CG.body * ss(this.cp * 1.4) * sky);

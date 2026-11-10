@@ -656,3 +656,145 @@ life; at a settled level the fast path draws exactly what the full path draws.
 **Not verified (T6, live):** the look of the fades (a speck / wisp / clump / streak fading over a 5 s ramp, day and night), that the big
 fragments' share ramp reads naturally on 1 -> 2, the rope-out with fragments finishing their flight, and the CPU time of the 50-slot
 path during a ramp (expected: microseconds).
+
+## 12. T6 verification (branch `weather-slider-t6`, 2026-11-09)
+
+Live on lane 5 (port 30005), own headless Chrome, scene `ZZ-t6-plain` of the test world, GM tab plus the real player Test Gracz 1.
+Recorder: fixed virtual clock (`Date.now` = virtual time, the shared clock held, the ticker stepped), 60 fps, VP9 CBR 10M. Proof
+videos, logs and tools: `dev/out/t6/` (not committed). Detectors (`dev/out/t6/tools`): `steps.mjs` (a 12 x 8 block's brightness
+jumping in one frame, > 4 grey and > 6 x its local median), `persist.mjs` (px that pop in and STAY for 6 frames: a mid-life gate
+flip, not motion), `cuts.mjs` (rain-lens runner vanish events).
+
+**Scratchpad loss.** Another agent cleared the shared session scratchpad mid-run: every T6 script and the first A/B JSONs (the 120 / 120
+identical hashes of 12602f2 vs 0a1dbf7) were lost. The tools were rebuilt in `dev/out/t6/tools` and every A/B re-run (below). The first
+set of "pre-merge" ramp videos (`dev/out/t6/pre/`) is NOT evidence: orphaned recorder processes drove the same tab in parallel then
+(e.g. the dust 0 -> 3 video already shows a full dust field at 0.5 s), so no before/after numbers below use it.
+
+### 12.1 Fixes made in T6 (all on the branch)
+
+1. **Rain lens runner trails (user report: "the trails end with a hard cut")** — 5ef5f86, merged into the one-output split (c4e9e26). A
+   runner's trail was cut where its fade passed 0.3 and its head was a hard-edged disc: now a soft gate (`gon`) instead of the cut, the
+   head shrinks with the fade, the trail's top is rounded and its pieces fade with the runner, so a trail thins out at the head, along
+   the tail and at the end of its life, day and night. Same program sizes (weather-link caps hold), same passes (no new texture or
+   pass; the disp pass still only while big drops fall). Lens-only day video, 16 s steady rain 3: tall vanish groups 94 -> 70, vanish
+   events 37 -> 26 (the rest: drops that merge or leave the glass). See 12.4 for the re-record on the merged head.
+2. **Bar layout**: the preset row was clipped at 1280 px and below (pre-existing) -> it wraps inside the bar (5ef5f86, css only).
+   **Light theme**: the near-white type tints (snow, clouds, dust) on the preset buttons and slider icons were unreadable -> darkened
+   (4fc6062).
+3. **Lens snow crystals popped** (seen in the snow ramps): (a) slots flipping on / off during a ramp -> gated by the count at their
+   birth (36ae2d2); (b) a frost edge moving over a melted crystal brought it back at full size in one step, steady weather too ->
+   the frost brings it back gradually (8d15992).
+4. **D7 done** (ee943fa): flakes, grit, motes, sparks and wind lines / debris turned on mid-life during a ramp (persistent pop-ins in
+   the dust ramp well above the steady rate; snow similar). Now every particle slot is gated by the density at its BIRTH
+   (`uDensR`: per kind and layer the density then / now, `display.densHist()` from the client state `stAt` = `weather.clientState`),
+   and one born denser than now fades with the ratio, so a falling strength thins the air smoothly; the embers' big-spark share is
+   also taken at birth. Steady: every ratio is exactly 1 and the history is not computed (identity: 12.2).
+5. **Birth samples at fixed whole seconds** (5c8154d): the history was sampled at "now - age", so a slot's interpolated birth
+   density moved from step to step; at the onset of a layer (0 -> something) a crystal born half a second earlier switched on at full
+   size (one step left in the snow 0 -> 3 ramp at 9.12 s). Now the 12 samples sit at the whole seconds A - i of the clock (A = the next
+   one: the planned state) and the shader adds A - clock to the age, so a slot's birth density is the same for its whole life. Both
+   the D7 particles and the lens crystals.
+6. **Wind cloud shadows popped** (3fcfb25): in a wind ramp the cloud display is born as the wind passes strength ~1.02 with cover
+   0.006, and the cover threshold falls fastest at a thin cover (0.044 in one 12 Hz step, more than the 0.035 soft edge): a shadow
+   patch appeared within one or two steps (measured live: display born 8.2 s after the ramp began, thr 0.901 -> 0.858 on the next step).
+   Now the wind's shadows darken in with their cover (x smoothstep(cover / 0.06)); full from cover 0.06, so levels 2 and 3 unchanged.
+
+### 12.2 Ramps (20 s, `W.strength({type: v}, {over: 20000})` at 1 s; day and night; `dev/out/t6/ramp-*.webm`)
+
+Every final ramp video: **0 steps** (`steps.mjs`), day and night: rain 0 -> 3, snow 0 -> 3 and 3 -> 0 (also at zoom 2), sand 2 -> 3,
+dust 0 -> 3 (also zoom 2), embers 1 -> 2, wind 0 -> 3, tornado 1 -> 3 -> 1, tornado rope-out, rain 0 -> 3 re-released to 1 at 9 s
+(over 10 s); clouds 0 -> 3 (day) shows a fast but continuous condensation around 6 s (block changes of 4-6 grey over many frames,
+no one-frame jump). Persistent pop-ins (`persist.mjs`, per s) follow the density: dust 0 -> 3 passes v 1.5 at ~11 s with 205-225 /s
+against 155-240 /s in the steady dust 1.5 video; snow 0 -> 3 at v 1.5 ~226-270 /s against 70-250 /s steady 1.5 (the flakes' own
+motion); embers 0-4 /s throughout (they are born and die by pixel dropout). Sand 2 -> 3 thickens smoothly on the lit and shadow sides
+(sheet checked day and night). Tornado: debris counts grow and shrink without a jump, big fragments finish their flight; rope-out
+dissolves. The day rain, clouds, tornado and re-release videos were recorded on 8d15992 (their paths are unchanged since); all others
+on 5c8154d.
+### 12.4 The runner-trail fix on the merged head (one-output lens split)
+
+Re-recorded after merging main's lens split (`lensonly-head-{day,night}.webm`: the lens alone, display meshes hidden, 16 s of steady
+rain 3): every piece of the fix is in the shared lens source and both programs (shade, disp) compile from it (gl-one-output ok).
+`cuts.mjs` now also classifies the vanish groups: a "revert" is a tall thin group that went back to what was there 2 s before (a trail
+gone at once); the rest are runners starting or sliding within one 12 Hz lens step. Day: reverts 21 before -> 11 on the merged head
+(15 on the pre-merge fix). The 11 left were inspected frame by frame: drops merging into a bigger drop, the refraction moving under
+a passing drop, and a drop at the map's edge; none is a trail ending in a cut. Night: 7 reverts, the same kinds. Side by side:
+`runner-trails-ab-head-day-crop.webm` (before | merged head), `runner-trails-ab-{day,night}-crop.webm` (before | pre-merge fix).
+
+### 12.5 Layout
+
+Shots in `dev/out/t6/layout/` at 1024, 1280, 1600 and 1920 px, dark and light theme. Before: the preset row (11 buttons) ran out
+of the bar at 1280 px and below; now it wraps inside the bar (two rows at 1024 and 1280). The light theme's near-white tints (snow,
+clouds, dust) were unreadable on the light buttons; now darkened toward the ink colour. Not this module: another module's HUD (ORBIT /
+Kid Thor) floats over the tool row at the top.
+### 12.3 Pixel A/B (`dev/out/t6/ab/`, hashes of the whole canvas at T0 + 5000 and T0 + 5900, guard off, fixed clock)
+
+Every case is written as a steady key 60 s old, so it is steady weather at v 1, 2 and 3. Lane 5 was switched between builds by its
+junction, and every run printed a build fingerprint (`partDensOf` exists only with D7, `W.strength` only from the slider on), so each
+run is proven to be the build it is labelled. The lens runs pin `CONFIG.moinenMaps.weatherLensBands = 1`: with the default, the band
+count follows the measured fps, and two runs of the same build differed (4 / 36 snow rows).
+
+**Reproducibility first (the same build twice).** Lens on: 35 / 36 identical (night snow 3 differs: not reproducible). Lens off: the
+cloud layer is not reproducible when the case order changes (clouds 1 / 3, tornado 3, wind 3 night, storm 3 day differ between runs
+of one build: its render targets only grow, so their size depends on the earlier cases). Those rows are inconclusive below.
+
+| build A vs build B | lens | identical | the rows that differ |
+|---|---|---|---|
+| 12602f2 (pre-slider) vs 0a1dbf7 (T1-T5) | off, 10 types x 1/2/3, day + night | 58 / 60 | clouds 1, tornado 3 (day): the non-reproducible set |
+| 0a1dbf7 vs 2a59411 (main) | off, wind / storm / blizzard | 17 / 18 | blizzard 3 day (cloud set) |
+| 2a59411 vs head (same case order) | off, wind / storm / blizzard | 12 / 18 | wind / storm / blizzard 3, day and night: first shot only, 4 px by 1 / 255 (below) |
+| 2a59411 vs head | on, rain / snow / sand / dust / storm / blizzard | 16 / 36 | rain 1-3, storm 1-3 (runner trails), snow 2-3, blizzard 2-3 (frost-edge crystals): by design |
+| 12602f2 vs 0a1dbf7 | on, the same 6 types | 32 / 36 | blizzard 2 day, rain / snow / storm 3 night |
+| 12602f2 vs 2a59411 | on | 31 / 36 | snow 2-3, sand 3 (day), rain / storm 3 (night) |
+
+**Steady identity of D7: not to the bit.** Bisected by commit (c4e9e26 = main's hash, ee943fa = head's), the wind 3 first shot differs
+in 4 px by 1 / 255 (max channel 1; saved PNGs, `ab/main-wind3-0.png` vs `ab/head-wind3-0.png`); the second shot is identical. Every
+history ratio is exactly 1 while steady and b95047c makes the shader take the pre-D7 arithmetic then (no history reads), yet the hash
+stays: the cause is the changed program text (ANGLE / D3D11 compiles the unchanged arithmetic around it differently), not the D7 math.
+Invisible, but not identical; stated as such.
+
+**The lens rows that differ between the three older builds** (12602f2, 0a1dbf7, main) with the bands pinned are not explained by any
+T6 change; they may be T1-T5 / main lens changes or residual non-reproducibility (one run each). Not resolved in T6.
+### 12.6 Players, v1 scenes, lens settings
+
+**Sync (real player).** Test Gracz 1 (PLAYER) on its own origin (127.0.0.45) and the GM on 127.0.0.35, scene activated for both:
+rain 3 + snow 1.5 + wind 2 over 20 s, then rain changed to 1 over 6 s mid-ramp. At 6 shared times (3.5 s apart, across the
+ramp, the mid-ramp change and the settled state) `W.state(T)` was identical on both clients (`logs/sync.json`); no error or weather
+warning on either (`logs/sync-*-errors.json`, the clouds:243 "null resolution" included: not seen in this run).
+
+**Old v1 scene.** A raw version-1 flag (storm keys with `{l, i}`, lens level 3, an integer tornado level) written on 12602f2 and on
+head: both resolve the same state at T0 + 5 s (rain / wind p 1, s 1.4864; clouds p 1, s 0; head adds `v`), and neither rewrites
+the flag on load (`ab/v1-*.json`). Pixel hashes differ, as expected for this storm: rain lens (runner fix), clouds and a tornado
+(the non-reproducible set).
+### 12.7 Cost (`dev/out/t6/cost/`, weather-opt costStart: GPU ms per frame by timer queries, CPU ms per frame; 60 frames, one rep)
+
+GPU ms / frame (the weather's passes), DPR 1 and 2, weak 1 and weak 2 (`weak 2`: the GTX 1080 emulation, every pass drawn twice):
+
+| case | DPR 1 | DPR 1 weak 2 | DPR 2 | DPR 2 weak 2 |
+|---|---|---|---|---|
+| rain 0.5 / 1 / 1.5 / 2 / 2.5 / 3 / 3.35 | 0.49 / 0.51 / 0.45 / 0.80 / 0.68 / 1.21 / 1.41 | 0.94 / 0.67 / 0.92 / 1.09 / 1.38 / 1.66 / 2.02 | 0.54 / 0.58 / 0.97 / 0.98 / 0.88 / 1.04 / 1.16 | 0.80 / 0.85 / 1.23 / 1.45 / 1.76 / 2.03 / 2.44 |
+| snow | 0.21 / 0.46 / 0.32 / 0.32 / 0.68 / 0.38 / 0.65 | 0.43 / 0.41 / 0.61 / 0.70 / 0.67 / 0.70 / 0.74 | 0.57 / 0.64 / 0.75 / 0.50 / 0.52 / 0.54 / 1.00 | 0.67 / 0.68 / 0.85 / 0.89 / 1.04 / 1.05 / 1.10 |
+| sand (+ 2.25 between 2 and 2.5) | 0.26 / 0.48 / 0.65 / 0.45 / 0.47 / 0.56 / 0.71; 2.25: 0.78 | 0.59 / 0.74 / 1.82 / 0.80 / 0.91 / 1.10 / 0.99; 0.96 | 0.55 / 0.39 / 0.78 / 0.87 / 0.60 / 0.62 / 0.60; 0.68 | 0.70 / 0.71 / 1.08 / 1.01 / 1.15 / 1.10 / 1.35; 1.25 |
+| dust | 0.13 / 0.23 / 0.19 / 0.32 / 0.44 / 0.30 / 0.48 | 0.27 / 0.30 / 0.46 / 0.53 / 0.79 / 0.55 / 0.59 | 0.30 / 0.35 / 0.50 / 0.52 / 0.79 / 0.67 / 0.73 | 0.46 / 0.46 / 0.53 / 0.53 / 0.86 / 0.78 / 0.80 |
+| embers | 0.06 / 0.06 / 0.24 / 0.35 / 0.32 / 0.16 / 0.37 | 0.21 / 0.12 / 0.50 / 0.56 / 0.31 / 0.33 / 0.44 | 0.26 / 0.16 / 0.30 / 0.32 / 0.56 / 0.56 / 0.39 | 0.24 / 0.46 / 0.55 / 0.57 / 0.59 / 0.68 / 0.70 |
+| wind | 0.44 / 0.13 / 0.25 / 0.18 / 0.55 / 0.29 / 0.30 | 0.27 / 0.34 / 0.46 / 0.39 / 0.52 / 0.56 / 0.70 | 0.20 / 0.38 / 0.63 / 0.48 / 0.46 / 0.62 / 0.60 | 0.41 / 0.41 / 0.53 / 0.54 / 0.89 / 0.93 / 1.15 |
+| clouds | 0.21 / 0.21 / 0.27 / 0.25 / 0.26 / 0.27 / 0.19 | 0.35 / 0.27 / 0.58 / 0.29 / 0.40 / 0.52 / 0.42 | 0.25 / 0.47 / 0.31 / 0.52 / 0.50 / 0.59 / 0.38 | 0.50 / 0.55 / 0.62 / 0.65 / 0.65 / 0.67 / 0.69 |
+| storm | 0.34 / 0.60 / 0.57 / 1.00 / 0.87 / 0.95 / 1.16 | 0.72 / 0.80 / 1.05 / 1.23 / 1.70 / 1.91 / 2.39 | 0.53 / 0.53 / 0.74 / 0.88 / 1.33 / 1.46 / 1.63 | 1.03 / 1.11 / 1.53 / 1.64 / 2.36 / 2.49 / 2.91 |
+| tornado 1 / 1.5 / 2 / 2.5 / 3 | 0.47 / 0.64 / 0.77 / 0.77 / 0.61 | 0.50 / 0.70 / 0.75 / 0.77 / 1.28 | 0.53 / 0.57 / 1.12 / 0.80 / 1.02 | 0.47 / 0.78 / 1.05 / 1.42 / 1.85 |
+
+One rep, so +-0.3 ms of noise between neighbours (the weak-2 column is the steadier trend); the costs grow with v and none jumps
+between whole levels. CPU ~0.1-0.2 ms per frame (tornado ~1 ms); single spikes in one view only (sand 1.5 17 ms, storm 3.35 8 ms,
+tornado 1.5 6 ms, embers 1.5 4 ms; the other three views of the same case 0.1-0.4 ms): first-use compiles / GC, not the steady cost.
+**Clients capped** (`weatherDetail` 1 / 2, restored to 3 after): sand 2.25 / 3 and storm 3 at detail 1: 0.43 / 0.42 / 0.80 ms (DPR 1),
+1.14 / 1.06 / 1.39 (DPR 2 weak 2); detail 2: 0.92 / 0.49 / 1.15 and 1.18 / 1.28 / 2.11; detail 3 (above): 0.78 / 0.56 / 0.95 and
+1.25 / 1.10 / 2.49. **D7 histories during a ramp** (snow, dust, wind and sand ramping together, 300 calls): `display.densHist()`
+0.158 ms per 12 Hz step, `lens.crystalHist()` 0.081 ms per lens step; nothing while steady.
+
+**Lens settings.** Fixed lens 0: no lens display at all, the frame identical to lens off (0 px). Fixed 0.5: the lens is made, at
+`lensP` 0.5; against lens off it changes 32 % of the px and 30 % of the mean that fixed 1 changes (rain 3, two shots).
+
+### 12.8 Verified / not verified
+
+Verified (a tool exercised it): every item in 12.1-12.7 as stated, on lane 5 with the headless Chrome (ANGLE D3D11) of this machine.
+Not verified: the look on a real GTX 1080 (only the weak-2 emulation); other browsers / GPUs; the lens rows that differ between the
+three older builds (12.3, last paragraph); a player at DPR 2; the clouds:243 "null resolution" error (not reproduced in T6, not
+fixed here: main's f64d681 bindBack covers it); tornado debris counts were judged from the videos, not counted.

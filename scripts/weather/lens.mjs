@@ -62,6 +62,7 @@ uniform vec3 uWind;          // unit direction (x, y), strength 0..1
 uniform float uSlant;        // runner slant (x per y) from the wind
 uniform float uG[121];       // the gust envelope over the last 10 s (12 Hz, oldest first): rain intensity, sand waves, fire gusts
 uniform vec4 uSnowL;         // frost reach, frost breathing, crystals per lens-area, presence
+uniform float uCrR[14];      // the crystal count then / now at the whole seconds floor(uT) + 1 - i, i = 0..11 ([12]: the largest; [13]: floor(uT) + 1 - uT); all 1 when steady
 uniform vec4 uSandL;         // deposit, scratches per area, impacts per area, presence
 uniform vec4 uDustL;         // specks share, discs per area, glare, ghosts (a float count: the last ghost fades in by its fraction)
 uniform vec4 uDustL2;        // ghost strength, smudge, presence, -
@@ -177,7 +178,10 @@ void runner(int layer, int ci, float Wc, float off, int seed) {
   float h[12];
   for ( int q = 0; q < 12; q++ ) h[q] = hu(key, layer, seed + 10 + q);
   float colx = off + (float(ci) + 0.5) * Wc + (h[0] - 0.5) * Wc * 0.4;
-  if ( h[1] > (0.4 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z ) return;
+  float thr = (0.4 + 0.6 * dens(vec2(colx, uLens.y * 0.5)) * intensityAgo(tau)) * uRainA.z;
+  if ( h[1] > thr ) return;
+  // (a rain strength change mid-life moves thr across h1: the runner and its trail fade over that, never vanish at once)
+  float gon = ss(0.0, 0.04, thr - h[1]);
   float y0 = -4.0 + h[2] * uLens.y * 0.62, r0 = 3.6 + 5.0 * pow(h[3], 0.8), ta = 0.5 + 1.8 * h[4];
   bool stall = h[5] > 0.8;
   float dist = stall ? 22.0 + 70.0 * h[6] : uLens.y + 24.0 - y0;
@@ -187,8 +191,9 @@ void runner(int layer, int ci, float Wc, float off, int seed) {
   q.a = vec4(colx, y0, V, max(0.0, tau - ta));
   q.b = vec4(PI2 / (0.35 + 0.5 * h[8]), PI2 / (0.9 + 0.8 * h[9]), dist, uSlant * (0.7 + 0.6 * h[9]));
   q.c = vec4(h[10] * 6.28, h[11] * 6.28, h[8] * 6.28, r0);
-  float yh = yOf(q, q.a.w), prog = min(1.0, (yh - y0) / 160.0), grow = 0.4 + 0.6 * ss(0.0, ta, tau), fade = 1.0 - ss(L - 1.2, L, tau);
-  q.d = vec4(0.0, yh, r0 * grow * (1.0 - 0.32 * prog) * (0.25 + 0.75 * fade), fade);
+  float yh = yOf(q, q.a.w), prog = min(1.0, (yh - y0) / 160.0), grow = 0.4 + 0.6 * ss(0.0, ta, tau), fade = (1.0 - ss(L - 1.2, L, tau)) * gon;
+  // (the head shrinks to nothing as it fades: at a quarter size it used to vanish at the end of its life)
+  q.d = vec4(0.0, yh, r0 * grow * (1.0 - 0.32 * prog) * (0.25 + 0.75 * fade) * min(1.0, 4.0 * fade), fade);
   q.d.x = xOf(q, yh);
   R_[nR] = q; Rmov[nR] = (q.a.w > 0.0 && yh < y0 + dist - 0.5) ? 1.0 : 0.0; Rkey[nR] = key * 2 + layer;
   nR++;
@@ -332,14 +337,20 @@ void frost(vec2 p) {
 vec3 star = vec3(0.0);   // the coverage of a crystal's halo, arms, core (antialiased)
 void crystals(vec2 p) {
   float e = slotsOf(uSnowL.z * uSnowL.w, 64.0);
-  if ( e <= 0.0 ) return;
+  if ( e * uCrR[12] <= 0.0 ) return;
   ivec2 ce = ivec2(floor(p / 64.0));
   float prog = frostProg();
   for ( int j = 0; j < 3; j++ ) {
-    if ( !slotOn(j, e, ce, 420) ) continue;
+    if ( float(j) >= ceil(e * uCrR[12]) ) continue;
     int key = (ce.x * 64 + ce.y) * 4 + j;
     float L, tau; int c;
     cyc4(key, 0, 410, vec4(1.0, 2.0, 2.0, 3.0), L, c, tau);
+    // (gated by the count at its BIRTH: a strength ramp turns no crystal on or off mid-life; while the count falls below the one it
+    // was born with it shrinks with it. The samples sit at fixed whole seconds of the clock, so a crystal's birth count is the same on
+    // every step of its life (samples at "now - age" moved under it: at the onset of the count one popped in at full size). Steady: r is 1)
+    float a = min(tau + uCrR[13], 10.999); int ia = int(a);
+    float r = uCrR[ia] + (uCrR[ia + 1] - uCrR[ia]) * (a - float(ia));
+    if ( !slotOn(j, e * r, ce, 420) ) continue;
     float h[6];
     for ( int q = 0; q < 6; q++ ) h[q] = hu(key * 31 + c, 1, 411 + q);
     vec2 x = vec2(ce) * 64.0 + vec2(10.0 + 44.0 * h[0], 10.0 + 38.0 * h[1]);
@@ -347,11 +358,13 @@ void crystals(vec2 p) {
     vec2 d = p - x;
     if ( abs(d.x) > 10.0 || d.y < -10.0 || d.y > 16.0 ) continue;
     float fid, cr;
-    bool inf = prog > 0.0 && frostAt(x, prog, fid, cr) < 0.0;
-    float melt = inf ? 0.0 : ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
+    // (in the frost it does not melt: by the frost's own cover there, so a frost edge moving over a melted crystal (its breathing, a
+    // strength ramp) brings it back gradually, never at full size in one step)
+    float inF = prog > 0.0 ? clamp(-frostAt(x, prog, fid, cr) / 0.08, 0.0, 1.0) : 0.0;
+    float melt = (1.0 - inF) * ss(hold, hold + 1.2, tau), gone = ss(L - 0.8, L, tau);
     // lands: grows from a speck over 0.3 s (a little overshoot), then holds; melts or fades by shrinking
     float land = ss(0.0, 0.3, tau) * (1.0 + 0.15 * (1.0 - ss(0.3, 0.6, tau)));
-    float R = R0 * land * (1.0 - melt) * (1.0 - gone);
+    float R = R0 * land * (1.0 - melt) * (1.0 - gone) * min(1.0, 1.0 / r);
     // the core: a small soft bright point (in whole lens px it was a white square)
     if ( R > 0.4 ) star.z = max(star.z, soft(d, 0.8) * ss(0.4, 0.6, R));
     if ( R > 0.8 ) {
@@ -637,20 +650,24 @@ void main() {
     if ( abs(dxp) > r0 + 6.0 ) continue;
     float age = ageAt(q, p.y);
     bool fresh = age < 1e8 && p.y < q.d.y - rh * 0.6;
-    float wide = 0.55 + 0.10 * r0, br = clamp((age - 0.7) / 1.6, 0.0, 1.0);
-    if ( fresh && fade > 0.3 ) {
+    float wide = 0.55 + 0.10 * r0, br = clamp((age - 0.7) / 1.6, 0.0, 1.25);
+    // (the trail's top end, where the drop sat before it ran: rounded off over the drop's size, not a straight cut)
+    float top = ss(q.a.y - 1.0, q.a.y + 0.8 * r0, p.y);
+    if ( fresh && fade > 0.0 ) {
       // THE WET TRAIL: a thin film of water left down the runner's path. Its width wavers along it; as it ages it pulls apart into
       // pieces (where a smooth noise along the path falls under the age); its edge toward the light catches a thin line of light,
       // broken here and there. All along the path, never per lens px (a hash per lens px made it a stair of 3 x 3 blocks).
-      float ky = float(rk % 4096) * 5.0;
-      float w = wide * (0.8 + 0.4 * vnoise(vec2(p.y / 2.6, ky), 341));
-      float on = ss(br - 0.06, br + 0.06, 0.04 + 0.92 * vnoise(vec2(p.y / 1.9, ky), 340));
+      // Every end is soft: a piece thins and fades toward its ends (the softer the older), the pieces dry out completely (br runs
+      // past 1), the top end is rounded and the whole trail fades with the runner (it was cut at once at 30 % of the fade).
+      float ky = float(rk % 4096) * 5.0, kb = 0.06 + 0.12 * min(br, 1.0);
+      float on = ss(br - kb, br + kb, 0.04 + 0.92 * vnoise(vec2(p.y / 1.9, ky), 340)) * fade * top;
+      float w = wide * (0.8 + 0.4 * vnoise(vec2(p.y / 2.6, ky), 341)) * (0.45 + 0.55 * on);
       wet = max(wet, cov(abs(dxp) - w) * on);
       float le = abs(dxp + w + 0.4);
       lit = max(lit, (1.0 - ss(0.12, 0.5, le)) * on * ss(0.36, 0.5, vnoise(vec2(p.y / 3.0, ky), 345)));
     }
     // (the cleared path fades out to its sides, so it never shows a straight-edged band)
-    if ( fresh && abs(dxp) < r0 * 0.9 + 1.0 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade * (1.0 - ss(r0 * 0.3, r0 * 0.9 + 1.0, abs(dxp))));
+    if ( fresh && abs(dxp) < r0 * 0.9 + 1.0 ) clear = max(clear, (1.0 - clamp(age / 4.0, 0.0, 1.0)) * fade * top * (1.0 - ss(r0 * 0.3, r0 * 0.9 + 1.0, abs(dxp))));
     // trail beads at jittered spacing (4.5-9 px) behind the head
     float j0 = floor((p.y - q.a.y) / 6.75);
     for ( int dj = -1; dj <= 1; dj++ ) {
@@ -865,7 +882,7 @@ export class WeatherLens {
     this.stats = { lw: 0, lh: 0, lpx: 0, renders: 0, passMs: 0, copies: 0 };
     this.copyWanted = false;
     this.now = null; this.state = null; this.P = null;
-    this.key = ""; this.int = new Float32Array(121);
+    this.key = ""; this.int = new Float32Array(121); this.crR = new Float32Array(14).fill(1);
     this.fx = { snow: [0, 0, 0, 0], sand: [0, 0, 0, 0], dust: [0, 0, 0, 0], dust2: [0, 0, 0, 0], heat: [0, 0, 0, 0] };
     this._tick = () => this.tick();
     canvas.app.ticker.add(this._tick);
@@ -914,7 +931,7 @@ export class WeatherLens {
     makeLensProgs();
     const U = {
       uLens: new Float32Array([lw, lh]), uAA: 1 / SUB, uVS: 1 / SUB, uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
-      uG: this.int, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
+      uG: this.int, uCrR: this.crR, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
       uLight: 1, uRun: PIXI.Texture.WHITE, uBead: PIXI.Texture.WHITE, uRunC0: new Int32Array(2), uCell0: new Int32Array(2), translationMatrix: new PIXI.Matrix().toArray(true)
     };
     const state = PIXI.State.for2d(); state.blend = false;
@@ -982,6 +999,21 @@ export class WeatherLens {
     } else if ( this.pend ) this.draw(per);
   }
 
+  /**
+   * Snow crystals are gated by the count at their BIRTH (a strength ramp turns none on or off mid-life): the count's ratio then / now
+   * at the whole seconds floor(t) + 1 - i (i = 0..11) of the step at t ([12]: the largest; [13]: floor(t) + 1 - t, so the shader finds a
+   * birth between two fixed samples), from the client state at those times (`stAt`, set by weather.mjs; the next whole second is the
+   * planned state). Exactly 1 when the weather has been steady for 11 s, so the steady lens is unchanged; only computed while snow is on.
+   */
+  crystalHist(t) {
+    const r = this.crR, k = this.state?.key, now = this.now?.() ?? Date.now(), base = now - ((now / 1000) % 3600 - t) * 1000;
+    if ( !(this.fx.snow[3] > 0) || !this.stAt || !k || base - (k.t + (k.dur ?? 0)) > 11500 ) { if ( r[0] !== 1 || r[12] !== 1 ) r.fill(1); return; }
+    const at = (ms) => { const st = this.stAt(ms), f = st?.fx?.snow; return f ? M.lensGates("snow", M.lensS(this.P, f.s, st.lensCap)).crystals * f.p : 0; };
+    const c0 = at(base), x0 = Math.floor(t) + 1 - t; let mx = 1;
+    for ( let i = 0; i <= 11; i++ ) { const c = at(base + (x0 - i) * 1000); r[i] = c0 > 0 ? Math.min(c / c0, 1e3) : c > 0 ? 1e3 : 1; mx = Math.max(mx, r[i]); }
+    r[12] = mx; r[13] = x0;
+  }
+
   /** Can this state make big drops (rain beads and runners, melted crystals)? Without them the refraction is empty everywhere. */
   bigDrops() { return (this.gates?.[0] ?? 0) > 0 || (this.fx.snow[2] ?? 0) > 0; }
 
@@ -1000,6 +1032,7 @@ export class WeatherLens {
     if ( Math.abs(t * 12 - k) > 1e-6 ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv(t - 10 + i / 12, sd); this.gk = null; }
     else if ( this.gk === k - 1 && this.gs === sd ) { this.int.copyWithin(0, 1); this.int[120] = gustEnv(k / 12, sd); this.gk = k; }
     else if ( this.gk !== k || this.gs !== sd ) { for ( let i = 0; i <= 120; i++ ) this.int[i] = gustEnv((k - 120 + i) / 12, sd); this.gk = k; this.gs = sd; }
+    this.crystalHist(t);
     u.uSnowL.set(this.fx.snow); u.uSandL.set(this.fx.sand); u.uDustL.set(this.fx.dust); u.uDustL2.set(this.fx.dust2); u.uHeatL.set(this.fx.heat);
     if ( this.pre ) {   // (the runners first: the beads read them; tiny, so every step, never stale)
       const R = canvas.app.renderer;

@@ -20,6 +20,7 @@ uniform vec4 uTiles;         // first tile x, y; tiles across, down
 uniform float uTileSz;       // art px per tile (embers: the source cell)
 uniform vec4 uPer;           // slots per tile per layer (snow: mid, far, near, spindrift)
 uniform vec4 uDens;          // live slots per tile per layer (fractional)
+uniform vec4 uDensR[14];     // per layer: the density then / now at the whole seconds A - i, i = 0..11 ([12]: the largest; [13].x: A - uTime; [13].y: 1 while a history is live, else 0: steady), (D7); embers .w: the big-spark share then
 uniform vec4 uOrigin;        // scene rect x, y; art px (scene px); art cells per grid square
 uniform vec2 uWindDir;       // unit (sand: the sand's direction)
 uniform vec2 uWindK;         // art px / s at factor 1 (this kind's speed), gust amount
@@ -36,6 +37,13 @@ flat out float vFade;
 ${GLSL_COMMON}
 
 void hide() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); vArt = vec2(0.0); vScr = vec2(0.0); vA = vec4(0.0); vB = vec4(0.0); vK = ivec2(0); vFade = 0.0; }
+// D7: a slot is gated by the density at its BIRTH (a strength ramp turns no particle on or off mid-life); one born denser than now
+// fades with the ratio (rB), so a falling density thins the air smoothly. Steady: every ratio is exactly 1 (the same gates, alpha)
+// (the samples sit at fixed whole seconds of the clock, so a particle's birth density is the same on every frame of its life)
+vec4 agoR(float tau) { float a = clamp(tau + uDensR[13].x, 0.0, 10.999); int i = int(a); return uDensR[i] + (uDensR[i + 1] - uDensR[i]) * (a - float(i)); }
+float rB = 1.0;
+// (steady: the code before D7 exactly, so the steady weather is the same to the bit: the extra arithmetic, though x 1, moved a few px by 1 / 255)
+float bornDens(float dens, int layer, float tau) { if ( uDensR[13].y < 0.5 ) { rB = 1.0; return dens; } vec4 r = agoR(tau); rB = layer == 0 ? r.x : layer == 1 ? r.y : layer == 2 ? r.z : r.w; return dens * rB; }
 float gateOf(int j, float dens, int key, int ty, int ci, int sd) {
   if ( float(j) >= ceil(dens) ) return 0.0;
   float g = float(j) < floor(dens) ? 1.0 : fract(dens);
@@ -75,7 +83,7 @@ void main() {
   if ( uKind == 1 && layer < 3 ) {
     // SNOW flakes: 2 .. 3.3 s lives, falling with sway and a swirl, carried by the wind (lag 0.6 s)
     float tau = lifeOf(key, tx, ty, j, sd, 1080.0, 721.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float h0 = hu(key, ty * 977 + ci, sd + 2), h1 = hu(key, ty * 977 + ci, sd + 3), h2 = hu(key, ty * 977 + ci, sd + 4);
     float h3 = hu(key, ty * 977 + ci, sd + 5), h4 = hu(key, ty * 977 + ci, sd + 6), h5 = hu(key, ty * 977 + ci, sd + 7);
     vec2 g = (vec2(float(tx), float(ty)) + vec2(h0, h1)) * TS;
@@ -99,7 +107,7 @@ void main() {
   } else if ( uKind == 1 ) {
     // SPINDRIFT: snow blown along the ground in strong gusts, thin low runs
     float tau = lifeOf(key, tx, ty, j, sd, 2160.0, 1441.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 || tau >= 0.9 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 || tau >= 0.9 ) { hide(); return; }
     vec2 g = (vec2(float(tx), float(ty)) + vec2(hu(key, ty * 7 + ci, sd + 2), hu(key, ty * 7 + ci, sd + 3))) * TS;
     float G = gustAt(g / uOrigin.w, uWindDir, uTime - 0.2, uSeed);
     if ( G <= 0.45 || openAt(g, true) < 0.5 ) { hide(); return; }
@@ -113,7 +121,7 @@ void main() {
   } else if ( uKind == 2 ) {
     // GRIT: sand hopping along the ground (saltation), fast, in the waves
     float tau = lifeOf(key, tx, ty, j, sd, 4320.0, 3241.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float h0 = hu(key, ty * 977 + ci, sd + 2), h1 = hu(key, ty * 977 + ci, sd + 3), h2 = hu(key, ty * 977 + ci, sd + 4);
     float h3 = hu(key, ty * 977 + ci, sd + 5), h4 = hu(key, ty * 977 + ci, sd + 6);
     vec2 s = (vec2(float(tx), float(ty)) + vec2(h0, h1)) * TS;
@@ -131,7 +139,7 @@ void main() {
   } else if ( uKind == 3 ) {
     // DUST motes: 5 .. 10 s lives, slow Brownian drift in calm air, glinting in the sun shafts
     float tau = lifeOf(key, tx, ty, j, sd, 360.0, 361.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float h[9];
     for ( int q = 0; q < 9; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
     vec2 s = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
@@ -153,7 +161,7 @@ void main() {
     // WIND LINES: in a gust, a light 1-px stroke runs downwind from its slot, curving (two sines), drawn over the last 0.45-0.75 s
     // of its path; it grows from its start and in its last half retracts from the tail, the head fading last. Only where the gust at its birth is strong enough.
     float tau = lifeOf(key, tx, ty, j, sd, 1440.0, 961.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float h[6];
     for ( int q = 0; q < 6; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
     float ll = 0.7 + 0.5 * h[2];
@@ -172,7 +180,7 @@ void main() {
     // DEBRIS: leaves and bits tumbling with the wind, bouncing more in the gusts, flipping (light / dark side), each with its ground
     // shadow; anchored at mid-life like the sparks, so they come in from upwind and from everywhere, born and gone by pixel dropout
     float tau = lifeOf(key, tx, ty, j, sd, 1200.0, 1201.0, life, ci);
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float h[8];
     for ( int q = 0; q < 8; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
     float age = tau / life;
@@ -200,7 +208,7 @@ void main() {
     for ( int q = 0; q < 9; q++ ) h[q] = hu(key, ty * 977 + ci, sd + 2 + q);
     vec2 a0 = (vec2(float(tx), float(ty)) + vec2(h[0], h[1])) * TS;
     // (the cheap tests first: the density gate and the dropout; the swarm and gust fields only for the slots left)
-    if ( gateOf(j, dens, key, ty, ci, sd) < 0.5 ) { hide(); return; }
+    if ( gateOf(j, bornDens(dens, layer, tau), key, ty, ci, sd) < 0.5 ) { hide(); return; }
     float age = tau / life;
     if ( hu(key, int(floor(uTime * 15.0)), sd + 21) <= smoothstep(0.7, 1.0, age) ) { hide(); return; }    // dies by pixel dropout
     if ( hu(key, int(floor(uTime * 15.0)), sd + 22) >= smoothstep(0.0, 0.15, age) ) { hide(); return; }   // and is born the same way
@@ -226,11 +234,12 @@ void main() {
     float fl = hu(key, int(floor(uTime * 10.0)), sd + 20);
     float cI = clamp(floor(age * 2.6 + fl * 1.2 + h[8] * 0.8 - 0.4), 0.0, 4.0);
     // big sparks: the share grows 0 -> 15 % with uVF.y 0 -> 1 (the threshold is exactly 1.0 at 0, which no hash passes, and 0.85 at 1)
-    float big = h[7] > 0.85 + 0.15 * (1.0 - uVF.y) && cI < 2.0 && dp > 0.6 ? 1.0 : 0.0;
+    float big = h[7] > 0.85 + 0.15 * (1.0 - (uDensR[13].y < 0.5 ? uVF.y : agoR(tau).w)) && cI < 2.0 && dp > 0.6 ? 1.0 : 0.0;
     float low = z * par < 22.0 && cI < 3.0 && dp > 0.5 ? 2.0 : 0.0;
     vA = vec4(P, Pp); vB = vec4(Xg, cI, big + low + 4.0 * floor(dp * 15.99));   // flags + 4 x depth (0..15)
     lo = min(min(P, Pp), Xg) - M_ - 2.3; hi = max(max(P, Pp), Xg) + M_ + 2.3;
   }
+  if ( rB != 1.0 ) vFade *= min(1.0, 1.0 / rB);
   vec2 a = mix(lo, hi, aCorner);
   vArt = a;
   vec2 world = uOrigin.xy + a * uOrigin.z;
