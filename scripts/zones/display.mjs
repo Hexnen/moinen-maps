@@ -37,13 +37,33 @@ const WALL = { door: [1.7, 1.0, 0], locked: [1.7, 1.0, 0], wall: [1.7, 1.0, 0], 
 const BADGE_R = 19;
 
 /**
- * Passages (temporary edges: a portal, a tunnel): a small round mark in each zone they join - the sign the menus use for the kind,
- * in the kind's colour on the badges' dark - and a thin line between the two marks, dotted for a portal (a jump), dashed for a
- * tunnel (the way maps draw what runs underground). [colour, Font Awesome glyph, emoji, the line's pattern in screen px]
+ * Passages (temporary edges: a portal, a tunnel): a small round mark beside the badge of each zone they join - a sign for the kind
+ * in the kind's colour on the badges' dark - and a bowed line between the two marks, dotted for a portal (a jump), dashed for a
+ * tunnel (the way maps draw what runs underground). [colour, the line's pattern in screen px, the line's width]
  */
-const PASS = { portal: [0xc9a2ff, "\ue4e2", "🌀", [0.01, 6.5]], tunnel: [0xdcbb8c, "\uf6d9", "🕳", [8, 6]] };
-const PASS_OTHER = [0xf3e7c9, "\uf0c1", "🔗", [8, 6]];
-const PASS_R = 11;
+const PASS = { portal: [0xc9a2ff, [0.01, 8.5], 3.8], tunnel: [0xe0bd8a, [10, 7], 3] };
+const PASS_OTHER = [0xf3e7c9, [10, 7], 3];
+const PASS_R = 12;
+/**
+ * The sign in a passage's mark (drawn, so it is sharp at this size and needs no font): a swirl, an arched mouth, a link. (Not a
+ * ring: beside a zone's number it read as a zero.)
+ */
+function passSign(G, kind, color) {
+  if ( kind === "portal" ) {
+    G.lineStyle({ width: 2, color, alpha: 1, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+    for ( let i = 0; i <= 44; i++ ) {
+      const t = i / 44, a = -0.6 + t * 3.6 * Math.PI, r = 0.6 + t * 6.6, x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if ( i ) G.lineTo(x, y); else G.moveTo(x, y);
+    }
+  }
+  else if ( kind === "tunnel" ) {
+    G.lineStyle(0).beginFill(color, 1).moveTo(-6.2, 5.4).lineTo(-6.2, -0.6).arc(0, -0.6, 6.2, Math.PI, 0).lineTo(6.2, 5.4).closePath().endFill();
+    G.beginFill(0x15110f, 1).moveTo(-2.9, 5.4).lineTo(-2.9, 0.4).arc(0, 0.4, 2.9, Math.PI, 0).lineTo(2.9, 5.4).closePath().endFill();
+  }
+  else {
+    G.lineStyle({ width: 2, color, alpha: 1 }).drawCircle(-3, 0, 3.2).drawCircle(3, 0, 3.2);
+  }
+}
 
 const TINTS = [0xd9a441, 0x5aa9c9, 0x9bc46b, 0xc97b9b, 0x8c7bd1, 0xd47a4a, 0x6fc2b0];
 
@@ -286,8 +306,8 @@ export class ZoneDisplay {
     // the icons keep one spot: under the badge's place whenever a badge can show there (numbers always / on hover, distances),
     // so a number appearing on hover never pushes them down
     this.#icons(Z, marks, res, () => !!dist || look.numbers !== "never", oldIcons);
-    // a badge can show on a zone's middle (numbers always / on hover, distances; not when the badges sit in the corners)
-    this.canBadge = (!!dist || look.numbers !== "never") && look.place !== "corner";
+    // a badge can show on a zone's spot (numbers always / on hover, distances)
+    this.canBadge = !!dist || look.numbers !== "never";
     this.#passMarks(Z, res, oldPass);
     if ( look.numbers === "never" && !dist ) { dropOld(); this.#passLayout(); this.follow(zoom, true); this.drawPass(zoom); return; }
     for ( const z of Z.zones ) {
@@ -354,30 +374,32 @@ export class ZoneDisplay {
   /** A mark per end of a passage (kept by its key like the badges: made again only when the passage or the font changed). */
   #passMarks(Z, res, old) {
     if ( !this.P?.length ) return;
-    const fa = iconFont(), byId = new Map(Z.zones.map((z) => [z.id, z]));
+    const byId = new Map(Z.zones.map((z) => [z.id, z]));
     for ( const p of this.P ) p.ends.forEach((end, i) => {
       const z = byId.get(end.zone);
       if ( !z ) return;
-      const key = JSON.stringify([p.id, i, p.kind, fa, res]);
+      const key = JSON.stringify([p.id, i, p.kind]);
       let kept = old.get(key);
       if ( kept ) old.delete(key);
       else {
-        const [color, glyph, emoji] = PASS[p.kind] ?? PASS_OTHER;
-        const b = new PIXI.Container(), G = new PIXI.Graphics();
-        G.lineStyle({ width: 1.6, color, alpha: 1 }).beginFill(0x15110f, 0.88).drawCircle(0, 0, PASS_R).endFill();
+        const [color] = PASS[p.kind] ?? PASS_OTHER;
+        const b = new PIXI.Container(), G = new PIXI.Graphics(), sign = new PIXI.Graphics();
+        G.lineStyle({ width: 1.6, color, alpha: 1 }).beginFill(0x15110f, 0.9).drawCircle(0, 0, PASS_R).endFill();
         G.mmKey = "passage";
-        const t = new PIXI.Text(fa ? glyph : emoji, { fontFamily: fa ? `"${fa}"` : "sans-serif", fontWeight: "900", fontSize: 11, fill: color });
-        t.resolution = res; t.anchor.set(0.5, 0.5);
-        b.addChild(G, t);
+        passSign(sign, p.kind, color);
+        b.addChild(G, sign);
         kept = { b };
       }
       this.#passCache.set(key, kept);
       this.badges.addChild(kept.b);
-      this.items.push({ b: kept.b, z, at: null, dx: 0, dy: 0, pass: p, end, mid: true });
+      this.items.push({ b: kept.b, z, at: null, dx: 0, dy: 0, pass: p, end });
     });
   }
 
-  /** The passages' marks take their places beside what sits on the zone's middle (the badge, or the icons where no badge shows). */
+  /**
+   * The passages' marks take their places beside what sits on the zone's spot (the badge, or the icons where no badge shows): in
+   * the middle of the zone on the side of the passage's other end, in the zone's corner all to the right (the corner is its top left).
+   */
   #passLayout() {
     const by = new Map();
     for ( const it of this.items ) if ( it.pass ) (by.get(it.z.id) ?? by.set(it.z.id, []).get(it.z.id)).push(it);
@@ -386,8 +408,8 @@ export class ZoneDisplay {
     for ( const [id, list] of by ) {
       let clear = 0;
       if ( this.canBadge ) clear = BADGE_R * (this.half.get(id) ?? hd);
-      else if ( !corner ) { const row = this.items.find((it) => it.icons && it.z.id === id); if ( row ) clear = (row.b.mmW ?? 40) / 2; }
-      const dx = markOffsets(list.map((it) => it.end), clear, PASS_R);
+      else { const row = this.items.find((it) => it.icons && it.z.id === id); if ( row ) clear = (row.b.mmW ?? 40) / 2; }
+      const dx = markOffsets(list.map((it) => it.end), clear, PASS_R, 4, corner);
       list.forEach((it, i) => { it.dx = dx[i]; });
     }
   }
@@ -404,18 +426,20 @@ export class ZoneDisplay {
     G.clear();
     if ( !marks.length ) return;
     const px = 1 / Math.max(0.05, zoom), R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
-    const at = (it) => ({ x: it.z.label.x + it.dx * this.#scaleOf(it.z, px), y: it.z.label.y });
+    const at = (it) => ({ x: (it.at ?? it.z.label).x + it.dx * this.#scaleOf(it.z, px), y: (it.at ?? it.z.label).y });
     const lines = [];
     for ( const p of this.P ?? [] ) {
       if ( !p.joined ) continue;
       const two = marks.filter((it) => it.pass === p);
-      if ( two.length === 2 ) lines.push([p, arc(at(two[0]), at(two[1]))]);
+      if ( two.length === 2 ) lines.push([p, arc(at(two[0]), at(two[1]), 0.16, 28)]);
     }
-    G.lineStyle({ width: 5 * px, color: 0x15110f, alpha: 0.5, ...R });
-    for ( const [, pts] of lines ) trace(G, pts);
     for ( const [p, pts] of lines ) {
-      const [color, , , pat] = PASS[p.kind] ?? PASS_OTHER;
-      G.lineStyle({ width: 2.4 * px, color, alpha: 0.95, ...R });
+      G.lineStyle({ width: ((PASS[p.kind] ?? PASS_OTHER)[2] + 3.4) * px, color: 0x15110f, alpha: 0.62, ...R });
+      trace(G, pts);
+    }
+    for ( const [p, pts] of lines ) {
+      const [color, pat, w] = PASS[p.kind] ?? PASS_OTHER;
+      G.lineStyle({ width: w * px, color, alpha: 1, ...R });
       pattern(G, pts, pat.map((d) => d * px));
     }
   }
@@ -829,8 +853,7 @@ export class ZoneDisplay {
     for ( const it of this.items ?? [] ) {
       const s = this.#scaleOf(it.z, px);                                          // (a badge's radius in scene pixels: BADGE_R * s)
       it.b.scale.set(s);
-      // (a passage's mark stays by the zone's middle wherever the badges sit)
-      if ( snap || !it.at ) it.at = corner && !it.mid ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
+      if ( snap || !it.at ) it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
       it.b.position.set(it.at.x + (it.dx ?? 0) * s, it.at.y + (it.dy ?? 0) * s);
     }
   }
@@ -850,7 +873,7 @@ export class ZoneDisplay {
       if ( !it.pass && !it.icons ) seen.add(it.z.id);
       out.push({ zone: it.z.id, kind: it.pass ? "pass" : it.icons ? "icons" : "badge", x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh });
     }
-    if ( this.canBadge && this.look?.numbers === "hover" ) {
+    if ( this.canBadge && this.look?.numbers === "hover" && this.look.place !== "corner" ) {
       const px = 1 / Math.max(0.05, this.zoom ?? 1);
       for ( const z of this.Z.zones ) {
         if ( seen.has(z.id) ) continue;

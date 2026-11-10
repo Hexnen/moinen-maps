@@ -386,8 +386,13 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     (k) => ({ z1: 0, z2: 1, z3: 2 })[k] ?? -1, (id) => mid[id]);
   check(J(pm.map((p) => [p.id, p.joined, p.ends.map((e) => [e.zone, e.side, e.slot])])) === J([["e1", true, [[0, 1, 0], [2, -1, 0]]], ["e2", true, [[2, -1, 1], [0, 1, 1]]], ["e3", false, [[1, 1, 0]]], ["e5", false, [[1, 1, 1]]]]) && pm[0].ends[0].far === "z3:elevated",
     "passages: a mark in each zone they join, on the side of the other end, one after another; one mark where the other end is off the map or in the same zone; none for a passage with no end on the map");
-  check(J(Place.markOffsets([{ side: 1, slot: 0 }, { side: 1, slot: 1 }, { side: -1, slot: 0 }], 20)) === J([38, 64, -38]) && J(Place.markOffsets([{ side: 1, slot: 0 }, { side: -1, slot: 0 }], 0)) === J([13, -13]) && J(Place.markOffsets([{ side: 1, slot: 0 }], 0)) === J([0]), "the marks stand beside the badge; in one row across the middle where nothing sits there");
-  check(Place.thin(200) === 1 && Place.thin(32) === 0.5 && Place.thin(3) === 0.42, "a band thins with the room its zone has on screen, down to a floor");
+  check(J(Place.markOffsets([{ side: 1, slot: 0 }, { side: 1, slot: 1 }, { side: -1, slot: 0 }], 20)) === J([39, 67, -39]) && J(Place.markOffsets([{ side: 1, slot: 0 }, { side: -1, slot: 0 }], 0)) === J([14, -14]) && J(Place.markOffsets([{ side: 1, slot: 0 }], 0)) === J([0]), "the marks stand beside the badge; in one row across the middle where nothing sits there");
+  check(J(Place.markOffsets([{ side: -1, slot: 0 }, { side: 1, slot: 0 }], 20, 12, 4, true)) === J([39, 67]) && J(Place.markOffsets([{ side: -1, slot: 0 }, { side: 1, slot: 0 }], 0, 12, 4, true)) === J([0, 28]), "beside a badge in the zone's corner they all stand to its right");
+  check(Place.thin(200) === 1 && Place.thin(32) === 0.5 && Place.thin(3) === 0.4 && Place.thin(200, 18) === 0.55 && Place.thin(200, 9) === 0.55 && Place.thin(48, 27) === 0.5625 && Place.thin(200, 40) === 1, "a band thins with the room its zone has on screen and with how far out the map is seen, down to a floor");
+  const big = { x0: 40, y0: 0, x1: 160, y1: 100 };
+  const around = Place.spotsAround({ x: 100, y: 50 }, { w: 15, h: 10 }, [big, { x0: 900, y0: 900, x1: 950, y1: 950 }], 80);
+  check(around.length === 4 && J(around[0]) === J({ dx: 0, dy: -64 }) && J(around[2]) === J({ dx: 79, dy: 0 }) && Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, [...spots, ...around], [{ ...big, w: 3 }]) === 3, "a token bigger than the label's own steps: the label goes just outside it");
+  check(Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [], null, { dx: 40, dy: 0 }) === 2 && Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [], null, { dx: 77, dy: 0 }) === 0, "the spot it has may be named by its offset; one that is no longer on offer is forgotten");
 
   // wired: a label and the tokens
   const dispRoot = () => canvas.primary.children.find((c) => c.sortLayer === 258 && c.sort === 0);
@@ -429,7 +434,7 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   calls.length = 0;
   canvas.stage.scale.x = 0.1; for ( const fn of canvas.app.ticker.fns ) fn();
   const far = bandW();
-  check(near === 7.5 && far < near * 0.5 && far >= near * 0.4, "a zone small on screen gets a thinner band (the same band at a normal zoom)");
+  check(near === 7.5 && far < near * 0.5 && far >= near * 0.4 - 1e-9, "a zone small on screen gets a thinner band (the same band at a normal zoom)");
   canvas.stage.scale.x = 1; for ( const fn of canvas.app.ticker.fns ) fn();
   api.clearHighlights();
 

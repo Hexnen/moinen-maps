@@ -15,13 +15,14 @@ const overlap = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0
 export function spotCost(box, blocks, inside = null) {
   const area = Math.max(1e-9, (box.x1 - box.x0) * (box.y1 - box.y0));
   let c = 0;
-  for ( const b of blocks ) { const o = overlap(box, b); if ( o > 0 ) c += (o / area) * (b.w ?? 1) + 0.25 * (b.w ?? 1); }
+  // (what counts is how much of the label is covered: far zoomed out a token is a dot on it; any touch still counts a little)
+  for ( const b of blocks ) { const o = overlap(box, b); if ( o > 0 ) c += (o / area + 0.1) * (b.w ?? 1); }
   if ( inside ) {
-    // out of its zone a label reads as the neighbour's: its middle and its two ends are asked
+    // out of its zone a label reads as the neighbour's (as bad as being hidden): its middle and its two ends are asked
     const my = (box.y0 + box.y1) / 2, mx = (box.x0 + box.x1) / 2;
     let out = 0;
     for ( const [x, y] of [[mx, my], [box.x0, my], [box.x1, my]] ) if ( !inside(x, y) ) out++;
-    c += out * 0.5;
+    c += out;
   }
   return c;
 }
@@ -33,10 +34,11 @@ export function spotCost(box, blocks, inside = null) {
  * @param {Array<{dx: number, dy: number}>} cands   offsets of the label's middle from the anchor (scene px), the preferred first
  * @param {Array<{x0, y0, x1, y1, w?}>} blocks      what it should not cover (`w`: how much it matters)
  * @param {(x: number, y: number) => boolean} [inside]   is a scene point in the label's own zone
- * @param {number} [prev]                    the spot it has now (-1: none): kept unless another is clearly better, so a label does
- *                                           not hop about while tokens move
+ * @param {number|{dx, dy}} [prev]           the spot it has now (its index or its offset; -1: none): kept unless another is clearly
+ *                                           better, so a label does not hop about while tokens move
  */
 export function pickSpot(at, half, cands, blocks, inside = null, prev = -1) {
+  if ( prev && typeof prev === "object" ) prev = cands.findIndex((c) => Math.abs(c.dx - prev.dx) < 0.5 && Math.abs(c.dy - prev.dy) < 0.5);
   let best = 0, bc = Infinity;
   const costs = cands.map((c, i) => {
     const x = at.x + c.dx, y = at.y + c.dy;
@@ -109,12 +111,14 @@ export function passageMarks(edges, idOf, midOf) {
 /**
  * Where the marks of one zone sit: the offsets of their middles from the zone's middle along the screen's x (mark units), for the
  * marks' `side` and `slot`. `clear`: half the width of what sits on the zone's middle (0: nothing - the marks take the middle
- * itself, in one row); `r`: a mark's radius; `gap`: between two marks.
+ * itself, in one row); `r`: a mark's radius; `gap`: between two marks; `oneSide`: all to the right, in the order given (the
+ * zone's things sit in its top left corner: to the left is the neighbour).
  * @param {Array<{side: -1|1, slot: number}>} ends   the marks of ONE zone
  * @returns {number[]}   dx per mark, in the order given
  */
-export function markOffsets(ends, clear = 0, r = 11, gap = 4) {
+export function markOffsets(ends, clear = 0, r = 12, gap = 4, oneSide = false) {
   const step = 2 * r + gap;
+  if ( oneSide ) return ends.map((e, i) => (clear > 0 ? clear + 7 + r : 0) + i * step);
   if ( clear > 0 ) return ends.map((e) => e.side * (clear + 7 + r + e.slot * step));
   // nothing in the middle: one row across it, the left side's marks first (the farthest slot outermost)
   const order = ends.map((e, i) => ({ i, k: e.side < 0 ? -1 - e.slot : e.slot })).sort((a, b) => a.k - b.k);
@@ -130,5 +134,22 @@ export function arc(a, b, bow = 0.12, n = 20) {
   return out;
 }
 
-/** How much thinner a highlight's band is drawn in a zone that is small on screen: 1 at `full` screen px of room and more, never under `min`. */
-export const thin = (rScreen, full = 64, min = 0.42) => Math.max(min, Math.min(1, rScreen / full));
+/**
+ * Spots for a label just outside each thing that hides it and stands near (a token is far bigger than a label's usual steps):
+ * above, under, right and left of the thing. `near`: boxes ({ x0, y0, x1, y1 }), `reach`: how far from the anchor a thing counts,
+ * `gap`: between the thing and the label. Offsets like `cands` of pickSpot.
+ */
+export function spotsAround(at, half, near, reach, gap = 4) {
+  const out = [];
+  for ( const t of near ) {
+    if ( t.x1 < at.x - reach || t.x0 > at.x + reach || t.y1 < at.y - reach || t.y0 > at.y + reach ) continue;
+    out.push({ dx: 0, dy: t.y0 - gap - half.h - at.y }, { dx: 0, dy: t.y1 + gap + half.h - at.y }, { dx: t.x1 + gap + half.w - at.x, dy: 0 }, { dx: t.x0 - gap - half.w - at.x, dy: 0 });
+  }
+  return out;
+}
+
+/**
+ * How much thinner a highlight's band is drawn: by the room its zone has on screen (`rScreen`: 1 at `full` screen px and more) and
+ * by how far out the map is seen (`cell`: a grid square in screen px; 1 at `cellFull` and more), never under `min`.
+ */
+export const thin = (rScreen, cell = Infinity, full = 64, cellFull = 36, min = 0.4) => Math.max(min, Math.min(1, rScreen / full) * Math.max(0.55, Math.min(1, cell / cellFull)));

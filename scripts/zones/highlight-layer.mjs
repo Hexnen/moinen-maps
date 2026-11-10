@@ -19,7 +19,7 @@
 import { pairKey } from "./marks.mjs";
 import { pattern } from "./display.mjs";
 import { groups, shortLabel } from "./highlight.mjs";
-import { pickSpot, zoneSpots, borderSpots, thin } from "./place.mjs";
+import { pickSpot, zoneSpots, borderSpots, spotsAround, thin } from "./place.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9;
 /** A badge's radius on screen (display.mjs BADGE_R): a zone's label shrinks with the zone as its badge does. */
@@ -54,7 +54,7 @@ export class ZoneHighlightLayer {
     this.root.visible = false;
     canvas.primary.addChild(this.root);
     this.items = [];
-    /** The spot each label has now (label key -> index of its spot): kept while tokens move, so a label does not hop about. */
+    /** The spot each label has now (label key -> its offset): kept while tokens move, so a label does not hop about. */
     this.spots = new Map();
     this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom ) this.onZoom(z); };
     this.watching = false;
@@ -71,8 +71,10 @@ export class ZoneHighlightLayer {
    * @param {() => {boxes: Array, tokens: Array}} o.blocks   what the labels keep clear of, asked when they are placed: `boxes` what
    *        sits on the zones (display.mjs boxes(): { zone, kind, x0, y0, x1, y1 }), `tokens` the tokens this user sees ({ x0, y0, x1, y1 })
    * @param {(x: number, y: number) => number} o.zoneAt   the zone at a scene point (-1: none)
+   * @param {number} o.grid        a grid square in scene pixels (how far out the map is seen)
    */
-  render(Z, shown, { zoom = 1, key = "", pick = null, marks = null, blocks = null, zoneAt = null } = {}) {
+  render(Z, shown, { zoom = 1, key = "", pick = null, marks = null, blocks = null, zoneAt = null, grid = 100 } = {}) {
+    this.grid = grid;
     const any = !!Z && (shown.zones.size > 0 || shown.borders.size > 0 || !!pick);
     if ( Z !== this.Z ) this.spots.clear();
     this.Z = Z; this.shown = shown; this.pick = pick; this.marks = marks; this.key = key; this.blocks = blocks; this.zoneAt = zoneAt;
@@ -100,8 +102,8 @@ export class ZoneHighlightLayer {
     this.#clear();
     const Z = this.Z, px = 1 / Math.max(0.05, zoom), byId = new Map(Z.zones.map((z) => [z.id, z]));
     const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
-    // how much thinner the bands of a zone are drawn: by the room it has on screen
-    const kOf = (z) => thin(z.label.r * zoom);
+    // how much thinner the bands of a zone are drawn: by the room it has on screen and by how far out the map is seen
+    const kOf = (z) => thin(z.label.r * zoom, this.grid * zoom);
 
     // picking: what cannot be picked steps back
     if ( this.pick ) for ( const z of Z.zones ) if ( !this.pick.has(z.id) ) fillZone(this.veil, z, INK, 0.34);
@@ -182,8 +184,8 @@ export class ZoneHighlightLayer {
     if ( !this.items.length ) return;
     const zoom = this.zoom ?? 1, px = 1 / Math.max(0.05, zoom);
     const B = this.blocks?.() ?? {}, boxes = B.boxes ?? [], zoneAt = this.zoneAt;
-    // a token hides a label; a badge, an icon row, a passage's mark or another label only makes both hard to read
-    const blocks = [...(B.tokens ?? []).map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: 2 }))];
+    // a token hides a label and a label hides the zone.s number; an icon row, a passage.s mark or another label makes both hard to read
+    const tokens = B.tokens ?? [], blocks = [...tokens.map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: b.kind === "badge" ? 3 : 2 }))];
     for ( const it of [...this.items].sort((a, b) => (b.zoneId >= 0) - (a.zoneId >= 0)) ) {
       const s = this.#scale(it, px), half = { w: (it.w / 2) * s, h: (LABEL_H / 2) * s };
       let cands;
@@ -196,9 +198,12 @@ export class ZoneHighlightLayer {
       }
       else cands = borderSpots(it.w, it.u);
       const inside = it.zoneId >= 0 && zoneAt ? (x, y) => zoneAt(x, y) === it.zoneId : null;
-      const i = pickSpot(it.at, half, cands.map((c) => ({ dx: c.dx * s, dy: c.dy * s })), blocks, inside, this.spots.get(it.key) ?? -1);
-      this.spots.set(it.key, i);
-      it.dx = cands[i].dx; it.dy = cands[i].dy;
+      // (in scene pixels; with the spots just outside the tokens that stand near: a token is bigger than the label's own steps)
+      cands = cands.map((c) => ({ dx: c.dx * s, dy: c.dy * s }));
+      cands.push(...spotsAround(it.at, half, tokens, Math.max(...cands.map((c) => Math.hypot(c.dx, c.dy))) + half.w, 4 * px));
+      const was = this.spots.get(it.key), i = pickSpot(it.at, half, cands, blocks, inside, was ? { dx: was.dx * s, dy: was.dy * s } : -1);
+      it.dx = cands[i].dx / s; it.dy = cands[i].dy / s;
+      this.spots.set(it.key, { dx: it.dx, dy: it.dy });
       const x = it.at.x + it.dx * s, y = it.at.y + it.dy * s;
       blocks.push({ x0: x - half.w, y0: y - half.h, x1: x + half.w, y1: y + half.h, w: 2 });
     }
@@ -244,7 +249,7 @@ export class ZoneHighlightLayer {
     H.clear();
     const z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null, e = z ? this.pick?.get(id) : null;
     if ( z && e ) {
-      const zoom = this.lineZoom ?? this.zoom ?? 1, px = 1 / Math.max(0.05, zoom), J = { join: PIXI.LINE_JOIN.ROUND }, k = Math.max(0.6, thin(z.label.r * zoom));
+      const zoom = this.lineZoom ?? this.zoom ?? 1, px = 1 / Math.max(0.05, zoom), J = { join: PIXI.LINE_JOIN.ROUND }, k = Math.max(0.6, thin(z.label.r * zoom, this.grid * zoom));
       fillZone(H, z, e.color, 0.34);
       const rings = z.parts.flatMap((part) => part);
       for ( const [w, col, a] of [[10, INK, 0.7], [6, e.color, 1], [2, 0xffffff, 0.95]] ) { H.lineStyle({ width: w * px * k, color: col, alpha: a, ...J }); for ( const r of rings ) ring(H, r); }

@@ -64,7 +64,7 @@ export function redraw() {
     pick: PICK?.allowed ?? null, marks,
     // (a label keeps clear of the badges, icons and passage marks the zones show to this user, and of the tokens this user sees)
     blocks: () => ({ boxes: look && Zones.visibleToMe() ? Zones.displayBoxes() : [], tokens: tokenBoxes() }),
-    zoneAt: (x, y) => Zones.zonesApi.zoneAt(x, y)
+    zoneAt: (x, y) => Zones.zonesApi.zoneAt(x, y), grid: Zones.gridSize()
   });
 }
 
