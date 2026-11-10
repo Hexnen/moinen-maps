@@ -8,7 +8,7 @@ import * as DModel from "../destruction/model.mjs";
 import * as D from "../destruction/destruction.mjs";
 import { reducedMotion } from "../config.mjs";
 import { warmPrograms } from "../gl-warm.mjs";
-import { artPrograms } from "./art.mjs";
+import { artPrograms, lvcArtPrograms } from "./art.mjs";
 import { dustPrograms } from "./dust-art.mjs";
 import { burstPrograms } from "./burst-art.mjs";
 import { fireballProgram } from "./shader.mjs";
@@ -127,7 +127,7 @@ function prewarm(force = false) {
   if ( ball ) list.push(fireballProgram());
   const wet = fireWet(); if ( wet && (wet.dim > 0.001 || wet.steam > 0.001) ) list.push(damperProgram());
   const uid = canvas.app.renderer.CONTEXT_UID;
-  if ( list.every((p) => p.glPrograms?.[uid]) ) return;              // (already warm: compiled earlier this session)
+  if ( list.every((p) => p.glPrograms?.[uid]) ) { warmLvc(); return; }   // (already warm: compiled earlier this session)
   const job = ++warmJob;
   const live = () => job === warmJob && canvas.ready;
   const tl = timing(), t0 = performance.now();
@@ -136,11 +136,25 @@ function prewarm(force = false) {
     warming = null;
     if ( tl ) tl.push({ warm: +(performance.now() - t0).toFixed(1), programs: list.length, at: +t0.toFixed(1) });
     scheduleDraw();
+    warmLvc();
   });
 }
 
+/**
+ * F1: the CONTINUOUS-LEVEL art programs (art.mjs lvcArtPrograms: an area with a fractional level or a level ramp) warmed AFTER the
+ * whole-level ones, so the first fire never waits for them. Until they are linked, such an area waits (draw: it shows what was there
+ * before, as an area whose field is computing) instead of linking them on the frame - seconds on a cache miss.
+ */
+let lvcWarming = null;
+const lvcReady = () => { const uid = canvas.app?.renderer?.CONTEXT_UID; return lvcArtPrograms().every((p) => p.glPrograms?.[uid]); };
+function warmLvc() {
+  if ( lvcWarming || CONFIG.moinenMaps?.firePrewarm === false || !canvas.ready || lvcReady() ) return;
+  const job = warmJob, live = () => job === warmJob && canvas.ready;
+  lvcWarming = warmPrograms(lvcArtPrograms(), live).catch(() => {}).finally(() => { lvcWarming = null; if ( job === warmJob ) scheduleDraw(); });
+}
+
 function teardown() {
-  warmJob++; warming = null; clearTimeout(idleTimer); idleTimer = 0;
+  warmJob++; warming = null; lvcWarming = null; clearTimeout(idleTimer); idleTimer = 0;
   cancelAnimationFrame(drawFrame); drawFrame = 0;
   clearTimeout(phaseTimer); phaseTimer = 0;
   display?.destroy(); display = null;
@@ -247,8 +261,10 @@ export function draw() {
   const has = areas.length > 0 || (shown() && extra.size > 0);
   if ( !has ) { if ( display ) { display.destroy(); display = null; } lastAreas = []; lastItems = []; fields.clear(); ready.clear(); return; }
   const keep = new Map(), items = [], used = new Set();
-  const waiting = [];
+  const waiting = [], lvcWait = CONFIG.moinenMaps?.firePrewarm !== false && areas.some((a) => M.areaLvc(a)) && !lvcReady();
+  if ( lvcWait ) { if ( warming ) { /* (warmLvc follows the pre-warm) */ } else warmLvc(); }
   for ( const a of areas ) {
+    if ( lvcWait && M.areaLvc(a) ) { waiting.push(a); continue; }   // (F1: its programs are still linking - warmLvc)
     let f = fields.get(a.key) ?? ready.get(a.key);
     if ( !f && (failed.has(a.key) || !request(a, g)) ) f = M.raster(a, g, params);
     if ( f ) { keep.set(a.key, f); items.push({ area: a, field: f }); } else waiting.push(a);
@@ -398,12 +414,27 @@ function relight(list) {
   write(upd);
 }
 
-/** Change a stroke's fire / smoke level afterwards (the dock list): one write, the area is drawn again (no animation). */
-export function setLevels(id, { lv, sm } = {}) {
+/**
+ * Change a stroke's fire / smoke level afterwards (the dock list, the API): one write. F1: a fire stroke's new level (1..3, steps of
+ * 0.05) RAMPS from the level it shows now along a smoothstep over `over` ms (default model.LV_RAMP_MS; 0 = at once), starting
+ * LV_LEAD_MS from now so every client gets the write before it begins; the smoke level changes at once.
+ */
+export function setLevels(id, { lv, sm, over } = {}) {
   const s = strokes.get(id); if ( !s || !game.user.isGM || !M.burningAt(s, sharedNow()) ) return null;
-  const st = M.cleanStroke({ ...s, ...(lv !== undefined ? { lv } : {}), ...(sm !== undefined ? { sm } : {}) });
+  const now = Math.round(sharedNow()), { l0: _a, lt: _b, lr: _c, p0: _d, pv: _e, pt: _f, pr: _g, ...rest } = s;
+  const nlv = lv !== undefined && lv !== null ? M.cleanStroke({ ...s, lv }).lv : s.lv;
+  const ms = over === undefined || over === null ? M.LV_RAMP_MS : Math.min(25000, Math.max(0, Number(over) || 0));
+  const from = s.k === "fire" ? M.levelNow(s, now) : s.lv;
+  // (a ramp still showing - running, or in its tail: puffs, sparks and blobs born during it - is kept as the new one's history: p0 -> pv
+  // from pt over pr, so everything born before the change keeps the level it was born with)
+  const live = s.k === "fire" && s.l0 !== undefined && s.lt !== undefined && now < s.lt + M.rampMs(s) + M.LV_TAIL_MS;
+  const prev = live ? { p0: s.l0, pv: s.lv, pt: s.lt, pr: M.rampMs(s) / 1000 } : {};
+  const ramp = s.k === "fire" && Math.abs(nlv - from) > 1e-6 && ms > 0 ? { l0: from, lt: now + M.LV_LEAD_MS, lr: ms / 1000, ...prev }
+    : s.k === "fire" && nlv === s.lv && s.l0 !== undefined && M.levelNow(s, now) !== s.lv ? { l0: s.l0, lt: s.lt, lr: s.lr, p0: s.p0, pv: s.pv, pt: s.pt, pr: s.pr } : {};   // (same level: a running ramp runs on)
+  const st = M.cleanStroke({ ...rest, lv: nlv, ...(sm !== undefined ? { sm } : {}), ...ramp });
   strokes.set(id, st); draw(); tell("edited");
-  write({ [sKey(id)]: st });
+  const drop = {}; for ( const k of ["l0", "lt", "lr", "p0", "pv", "pt", "pr"] ) if ( s[k] !== undefined && st[k] === undefined ) drop[`${sKey(id)}.-=${k}`] = null;
+  write({ [sKey(id)]: st, ...drop });
   return st;
 }
 
@@ -488,8 +519,8 @@ export const fireApi = {
   addMany: (raws, opts) => addMany(raws, opts), prepare,
   /** Torn edges for one stroke afterwards: true (the scene's tearing), an amount 0.1..1, or false. */
   setTorn: (id, amount) => setTorn(id, amount),
-  /** Change a stroke's levels afterwards: `{ level, smoke }`. */
-  setLevels: (id, { level, smoke } = {}) => setLevels(id, { lv: level, sm: smoke }),
+  /** Change a stroke's levels afterwards: `{ level, smoke, over }` - a fire level 1..3 (steps of 0.05) eases there over `over` ms (default 4000, 0 = at once). */
+  setLevels: (id, { level, smoke, over } = {}) => setLevels(id, { lv: level, sm: smoke, over }),
   /** Change a stroke's fire colour afterwards ("#rrggbb", a preset name; null = the scene's). */
   setColor: (id, color) => setColor(id, color),
   /** The colour presets and the palette rule (look.mjs). */

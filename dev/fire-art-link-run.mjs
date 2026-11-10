@@ -19,12 +19,12 @@ const TIMES = Number(arg("times", 40));
 const gm = await connect(PORT, GM);
 await gm.front();
 
-const LINK = (mode) => `
+const LINK = (mode, set = "whole") => `
   const A = await import("/modules/moinen-maps/scripts/fire/art.mjs");
   const gl = canvas.app.renderer.gl, ext = gl.getExtension("KHR_parallel_shader_compile");
   if ( !ext ) return JSON.stringify({ error: "no KHR_parallel_shader_compile" });
   const salt = "#define MM_SALT_" + Math.floor(Math.random() * 1e9) + "\\n";
-  const P = A.artPrograms(), names = A.artProgramKeys?.() ?? P.map((p, i) => "p" + i);
+  const C = "${set}" === "lvc", P = C ? A.lvcArtPrograms() : A.artPrograms(), names = C ? ["lvcArt", "lvcArtS", "lvcEmb"] : A.artProgramKeys?.() ?? P.map((p, i) => "p" + i);
   const start = (p) => { const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s.replace("\\n", "\\n" + salt)); gl.compileShader(o); return o; };
     const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, p.vertexSrc)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, p.fragmentSrc)); gl.linkProgram(pr); return { pr, t0: performance.now() }; };
   const wait = async (jobs) => { const out = {}; let open = jobs.slice();
@@ -41,6 +41,10 @@ console.log("link, one after another (ms):", JSON.stringify(one));
 console.log("link, all at once (ms):      ", JSON.stringify(all));
 let failed = all.error || all.wall > LIMIT || Object.keys(all).some((k) => k.endsWith(":FAILED"));
 console.log(`${failed ? "FAIL" : "PASS"} link wall ${all.wall} ms (limit ${LIMIT})`);
+// (F1: the continuous-level variants - linked after the whole-level ones by the pre-warm; only an area with a fractional level or a
+// ramp draws with them)
+const lvcAll = await gm.ev(`const A = await import("/modules/moinen-maps/scripts/fire/art.mjs"); return !!A.lvcArtPrograms`, 60000) ? JSON.parse(await gm.ev(LINK("all", "lvc"), 900000)) : null;
+if ( lvcAll ) console.log("link, continuous-level variants all at once (ms):", JSON.stringify(lvcAll));
 
 if ( REF ) {
   await gm.ev(`const S = await import("/modules/moinen-maps/dev/stack-bench.mjs"); await S.ensureScene(); await S.setLayers({ fire: 20, smoke: 4 });

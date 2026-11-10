@@ -164,6 +164,7 @@ void main() {
 const ART_HEAD = `#version 300 es
 precision highp float;
 precision highp int;
+#define LVC 1
 in vec2 vCell;
 uniform sampler2D uField;   // model.raster: R heat, G plume, B burning ground, A 1 + (fire level - 1) * 4 + smoke level
 uniform sampler2D uAux;     // R distance inside the bed, G outside, B smoke source, A source smoke level (+4: a fire's)
@@ -191,6 +192,13 @@ uniform vec4 uPuffQ;        // ... their step and offset (rows), then B / A (the
 uniform int uBirths;        // blobs per emitter (Performance: 8 / 6 / 4)
 uniform sampler2D uFuel;    // pass 0: R fuel (how hard the fire burns here), G the beds' variety (bilinear, one texel per FUEL_K cells)
 uniform vec2 uFuelSize;
+uniform sampler2D uLvRamp;  // F1 (see FireArt)
+uniform int uHasRamp;
+uniform vec3 uRampT;
+uniform vec4 uLvTop;
+uniform sampler2D uLvRamp2;
+uniform int uHasRamp2;
+uniform vec2 uRampP;
 out vec4 oArt;
 
 /* ---------------- the LOOK TABLES (research section 6; index = level 1..3) ---------------- */
@@ -208,12 +216,26 @@ float SPK_V(int i) { return (i <= 1 ? (i <= 0 ? 34.0 : 20.0) : (i <= 2 ? 15.0 : 
 float SPK_L(int i) { return (i <= 1 ? (i <= 0 ? 1.0 : 1.8) : (i <= 2 ? 1.4 : 0.45)); }
 float SPK_H(int i) { return (i <= 1 ? (i <= 0 ? 0.7 : 0.4) : (i <= 2 ? 0.3 : 0.0)); }
 float SPK_D(int i) { return (i <= 7 ? (i <= 3 ? (i <= 1 ? (i <= 0 ? 0.0 : 0.08) : (i <= 2 ? 0.34 : 0.7)) : (i <= 5 ? (i <= 4 ? 0.0 : 0.07) : (i <= 6 ? 0.28 : 0.55))) : (i <= 11 ? (i <= 9 ? (i <= 8 ? 0.0 : 0.04) : (i <= 10 ? 0.16 : 0.34)) : (i <= 13 ? (i <= 12 ? 0.0 : 0.08) : (i <= 14 ? 0.18 : 0.3)))); }
+float L_HEAT(int i) { return i <= 1 ? (i <= 0 ? 0.0 : 0.74) : 1.0; }
 float L_TINT(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 0.2) : (i <= 2 ? 0.3 : 0.4)); }      // heat-tint ring (squares)
 float S_RATE(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 6.0) : (i <= 2 ? 6.0 : 9.0)); }      // puffs a second per 3.6 squares of source
 float S_R0(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 4.0) : (i <= 2 ? 6.0 : 8.0)); }      // puff radius at birth (art px)
 float S_R1(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 11.0) : (i <= 2 ? 17.0 : 21.0)); }    // ... at its largest
 float S_LIFE(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 2.4) : (i <= 2 ? 3.6 : 4.6)); }      // puff life (s)
 float S_V0(int i) { return (i <= 1 ? (i <= 0 ? 0.0 : 16.0) : (i <= 2 ? 20.0 : 24.0)); }   // rise speed at birth (art px / s, x plume / 2.5 x 1.5)
+// F1: a table at a level 1..3 (exact at a whole one)
+// (LVC 0: the WHOLE-LEVEL programs - an area of whole levels, no ramp: every F1 path folds away, the old code's cost; LVC 1 the
+// continuous ones - lvcPrograms)
+#if LVC
+float lvMix(float a, float b, float f) { return f <= 0.0 ? a : mix(a, b, f); }
+#define LVF(T, x) lvMix(T(int(floor(x))), T(int(floor(x)) + 1), (x) - floor(x))
+float SPK_Df(int L, float x) { int i = int(floor(x)); return lvMix(SPK_D(L * 4 + i), SPK_D(L * 4 + i + 1), x - float(i)); }
+int lvDith(float x, float r) { return fract(x) > 0.0 ? clamp(int(floor(x - r)) + 1, 1, 3) : int(x); }
+#else
+#define LVF(T, x) T(int(x))
+float SPK_Df(int L, float x) { return SPK_D(L * 4 + int(x)); }
+int lvDith(float x, float r) { return int(x); }
+#endif
 const bool EXIT = true;
 const float TAU = 1.3;                                     // the smoke cools: rise speed v0 e^(-age / tau)
 uniform int uVC[64];                                       // the 16 x 16 blue-noise ranks (look.VC16), 4 bytes an int (VC_PACKED)
@@ -284,7 +306,74 @@ float dBed(ivec2 p, float d) {
   float g = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0);
   return mix(dO, d, g * g * (3.0 - 2.0 * g));
 }
-int levelAt(ivec2 p) { int code = int(fF(p).a * 255.0 + 0.5) - 1; return code < 0 ? 2 : clamp(code / 4 + 1, 1, 3); }
+float levelAt(ivec2 p) {
+  int code = int(fF(p).a * 255.0 + 0.5) - 1;
+  if ( code < 12 ) return code < 0 ? 2.0 : float(clamp(code / 4 + 1, 1, 3));
+  int q = (code - 12) / 4; return 1.0 + float(q + 1 + q / 19) * 0.05;
+}
+float wrapS(float a) { return mod(a + 500.0, 1000.0) - 500.0; }
+float lvDec(float c) { return 1.0 + (c - 1.0) / 127.0; }
+#if LVC
+vec4 rampTx(ivec2 p) { return uHasRamp == 1 ? texelFetch(uLvRamp, Lc(p), 0) * 255.0 : vec4(0.0); }
+vec4 rampPx(ivec2 p) { return uHasRamp2 == 1 ? texelFetch(uLvRamp2, Lc(p), 0) * 255.0 : vec4(0.0); }
+#else
+vec4 rampTx(ivec2 p) { return vec4(0.0); }
+vec4 rampPx(ivec2 p) { return vec4(0.0); }
+#endif
+float rampAg(vec4 r, vec2 q, float back) { return wrapS(uTime - back - q.x - r.g / 254.0 * q.y); }
+float rampE(vec4 r, float x) { float d = r.a * 0.1 * uRampT.z; x = d > 0.0 ? clamp(x / d, 0.0, 1.0) : step(0.0, x); return x * x * (3.0 - 2.0 * x); }
+float rampK(vec4 r, float back) { return rampE(r, rampAg(r, uRampT.xy, back)); }
+float lvRamp(float lv, vec4 r, vec4 p, float back) {
+  if ( r.r < 0.5 ) return lv;
+  float x = rampAg(r, uRampT.xy, back);
+  if ( p.r > 0.5 && x < -0.3 * uRampT.z ) return mix(lvDec(p.r), lvDec(p.b), rampE(p, rampAg(p, uRampP, back)));
+  float k = rampE(r, x); return k >= 1.0 ? lv : mix(lvDec(r.r), lv, k);
+}
+float lvAt(ivec2 p, float back) { return lvRamp(levelAt(p), rampTx(p), rampPx(p), back); }
+// (now: the history before the ramp never shows - the bed, char, glow and coals)
+float lvNow(ivec2 p) { float lv = levelAt(p); vec4 r = rampTx(p); if ( r.r < 0.5 ) return lv; float k = rampK(r, 0.0); return k >= 1.0 ? lv : mix(lvDec(r.r), lv, k); }
+float srcAt(float b, vec4 r, vec4 p, float back, float lb) {
+  float s = b / 255.0; if ( r.r < 0.5 ) return s;
+  float x = rampAg(r, uRampT.xy, back);
+  if ( p.r > 0.5 && x < -0.3 * uRampT.z ) return min(1.0, r.b / 255.0 * LVF(L_HEAT, lb) / LVF(L_HEAT, lvDec(r.r)));
+  float k = rampE(r, x); return k >= 1.0 ? s : mix(r.b / 255.0, s, k);
+}
+float lvTopNow() {
+  float x = uLvTop.w > uLvTop.z ? clamp(wrapS(uTime - uLvTop.z) / (uLvTop.w - uLvTop.z), 0.0, 1.0) : 1.0;
+  return x >= 1.0 ? uLvTop.y : mix(uLvTop.x, uLvTop.y, x * x * (3.0 - 2.0 * x));
+}
+void emLevel(ivec2 ei, int i, int j, out float lv, out float lvO, out float kL, out int lvI, out int lvH, out float tH) {
+  lv = levelAt(ei); lvO = lv; kL = 1.0; lvI = int(lv); lvH = 0; tH = 0.0;
+  if ( uHasOld == 1 ) {
+    int oc = int(texelFetch(uAuxOld, Lc(ei), 0).g * 255.0 + 0.5); float o = oc <= 3 ? float(oc) : 1.0 + float(oc - 4) / 100.0;
+    if ( oc > 0 && o != lv ) { lvO = o; kL = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0); kL *= kL * (3.0 - 2.0 * kL); }
+  }
+#if LVC
+  vec4 r = rampTx(ei);
+  float l0 = r.r > 0.5 ? lvDec(r.r) : lv;
+  if ( fract(lv) <= 0.0 && l0 == lv ) return;
+  float h = max(hb(i, j, 3).x, 1e-3), lvT = lv, d = r.a * 0.1 * uRampT.z, ag = 0.0;
+  if ( r.r > 0.5 ) {
+    ag = rampAg(r, uRampT.xy, 0.0);
+    float k = rampE(r, ag); if ( k < 1.0 ) { lv = mix(l0, lvT, k); lvO = lv; kL = 1.0; }
+  }
+  lvI = clamp(int(floor(lv - h)) + 1, 1, 3);
+  int i0 = clamp(int(floor(l0 - h)) + 1, 1, 3);
+  if ( l0 != lvT && lvI != i0 ) {
+    bool up = lvT > l0; lvH = up ? lvI - 1 : lvI + 1;
+    float th = float(up ? lvI - 1 : lvI) + h, xs = clamp((th - l0) / (lvT - l0), 0.0, 1.0);
+    tH = uTime - ag + d * (0.5 - sin(asin(1.0 - 2.0 * xs) / 3.0));
+  } else if ( r.r > 0.5 ) {
+    vec4 p = rampPx(ei); float a0 = lvDec(p.r), a1 = lvDec(p.b);
+    if ( p.r > 0.5 && a1 != a0 && clamp(int(floor(a0 - h)) + 1, 1, 3) != i0 ) {
+      bool up = l0 > a0; lvH = up ? i0 - 1 : i0 + 1;
+      float th = float(up ? i0 - 1 : i0) + h, xs = clamp((th - a0) / (a1 - a0), 0.0, 1.0);
+      tH = uTime - rampAg(p, uRampP, 0.0) + p.a * 0.1 * uRampT.z * (0.5 - sin(asin(1.0 - 2.0 * xs) / 3.0));
+    }
+  }
+  if ( lvH != 0 && uTime - tH > 3.0 ) lvH = 0;
+#endif
+}
 // a puff centred at q (WORLD cells) reaching h either way: 1 well inside the area, 0 once its extent touches the rectangle
 float edgeFade(vec2 q, vec2 h, float u) {
   vec2 l = q - uOrg, d2 = min(l - h, uSize - l - h);
@@ -336,12 +425,12 @@ void main() {
   float u = uU, t = uTime, gdir = uWind.x < -0.05 ? -1.0 : 1.0;
   vec4 aux = fA(ic) * 255.0;
   vec4 fld = texelFetch(uPuff, Lc(ic), 0);         // (only the puff mask: the field's own bytes are not needed per cell)
-  // (off the puff mask, outside the fire box (no tongue, no spark) and beyond the heat ring, nothing is drawn: the room the rectangle
-  // keeps for the smoke costs two fetches a cell there. aux.g: the ground-plane chamfer distance to the bed, at least the true one)
+  // (off the puff mask, outside the fire box and beyond the heat ring nothing is drawn; aux.g: the ground chamfer distance to the bed)
   bool inBox = c.x >= uBox.x && c.y >= uBox.y && c.x < uBox.z && c.y < uBox.w;
   if ( EXIT && fld.g == 0.0 && !inBox && aux.g > 0.8 * 32.0 * u / RY + 4.0 ) { oArt = vec4(0.0); return; }
   float rk = rank(c);
-  int lvMax = clamp(uLvMax, 1, 3);
+  int lvMax = clamp(uLvMax, 1, 3);      // (the culls' bound: whole, the top level a ramp passes)
+  float lvT = lvTopNow();
   int R = 0, G = 0, B = 0, A = 0;
 `;
 const ART_TILES = `  // (A8: this tile's lattice ranges - flame rows, columns; smoke rows, columns - absolute indices; no tile pass: everything)
@@ -367,7 +456,7 @@ const ART_F = `${ART_HEAD}${ART_TOP}
   }
   // ONE BODY: every emitter's roots and blobs add into one field (a metaball union across all rows), so neighbouring tongues
   // fuse at their bases and often mid-height; the bands are computed on the merged field (they flow across tongue boundaries)
-  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0, BF = -1.0, CT = 0.0; int lvL = 1;
+  float F = 0.0, HT = 0.0, BASE = 0.0, WS = 0.0, TR = 1.0, BY = 0.0, BF = -1.0, CT = 0.0, lvL = 1.0;
 ${ART_TILES}
   if ( nearBed && tlF.x <= tlF.y ) {
     int jHi = int(floor((c.y + reachUp) / spy)), jLo = int(floor((c.y - reachDn) / spy)) - 1;
@@ -392,40 +481,34 @@ ${ART_TILES}
         if ( d < 0.5 ) continue;
         d = dBed(ei, d);                                       // not on the burning ground
         vec4 E2 = hb(i, j, 2);
-        int lv = levelAt(ei), lvO = lv;
-        // (a long-burning cell raised to a higher level by a stroke added onto it: its tongues move to the new size while the new
-        // ground catches, never at once - model.auxOldOf G = its old level)
-        float kL = 1.0;
-        if ( uHasOld == 1 ) {
-          int o = int(texelFetch(uAuxOld, Lc(ei), 0).g * 255.0 + 0.5);
-          if ( o > 0 && o != lv ) { lvO = o; kL = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0); kL *= kL * (3.0 - 2.0 * kL); }
-        }
-        if ( E2.y >= max(L_DENS(lv), L_DENS(lvO)) / L_DENS(3) * 1.44 ) continue;   // (cheap: this level's density never reaches it)
-        float LD = mix(L_DENS(lvO), L_DENS(lv), kL), LR = mix(L_R(lvO), L_R(lv), kL), LRI = mix(L_RISE(lvO), L_RISE(lv), kL);
+        float lv, lvO, kL, tH; int lvI, lvH;
+        emLevel(ei, i, j, lv, lvO, kL, lvI, lvH, tH);
+        // (a cell raised by a stroke added onto it grows while the new ground catches - model.auxOldOf G = its old level)
+        if ( E2.y >= max(LVF(L_DENS, lv), LVF(L_DENS, lvO)) / L_DENS(3) * 1.44 ) continue;   // (cheap: this level's density never reaches it)
+        float LD = mix(LVF(L_DENS, lvO), LVF(L_DENS, lv), kL), LR = mix(LVF(L_R, lvO), LVF(L_R, lv), kL), LRI = mix(LVF(L_RISE, lvO), LVF(L_RISE, lv), kL);
         float ramp = clamp(d / (0.35 * 32.0 * u), 0.0, 1.0);            // the coverage ramp at the bed's edge (0.35 square)
-        // the FUEL here decides how hard this stretch burns: big merged masses in hot patches, single tongues in weak ones, gaps
-        // with only embers between; it wanders and evolves, so the clumps swell, die back, creep and merge over seconds
+        // the FUEL decides how hard this stretch burns (merged masses, single tongues, ember gaps); it wanders over seconds
         float r0 = LR * u;
         // (cheap cull before the fuel fetch: even at full fuel this emitter's tallest tongue and its roots must reach the cell)
         float es1 = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * 1.3 * 1.25, hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0);
         float eh0 = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(E1.w, 1.6)) * (E2.x < 0.12 ? 1.25 : 1.0);
         if ( c.y < e.y - (LRI * u * 2.1 * es1 * eh0 * 1.38 * 1.15 + (E2.x < 0.16 ? 12.3 : 7.0) * r0 * es1) - 1.0 || c.y > e.y + (E2.x < 0.16 ? 7.0 : 5.6) * r0 * es1 + 2.0 * u ) continue;   // (A7: x the sheet's crest, a leader's width and torn piece)
-        float fz = max(fuelAt(e).x, 0.07 * float(lv - 1));   // (higher levels: fewer fully dead patches)
+        float fz = max(fuelAt(e).x, 0.07 * (lv - 1.0));   // (higher levels: fewer fully dead patches)
         float thr = LD / L_DENS(3) * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
         float on = clamp((thr - E2.y) / 0.14, 0.0, 1.0);               // (an emitter fading in or out shrinks: it never pops)
         if ( on <= 0.0 ) continue;
         float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.4 + 0.9 * fz) * (on * (2.0 - on)) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
         // tongue heights vary: taller towards the heart of the fire, a few tall leaders, many short ones (never a picket fence)
         float eh = eh0 * (0.5 + 0.88 * fz) * (0.15 + 0.85 * on);   // (a dying patch's tongues SINK into the bed and thin out, never cut; A7: a weak patch's narrow more than they sink - never round drops)
-        // SHEETS (A7): a slow lick wave runs along the bed (incommensurate waves, no hash: cheap), so neighbouring emitters rise and
-        // fall TOGETHER - broad sheets that lick up and sink back, never a comb of equal spikes; LEADERS (a few emitters, taller, wider,
-        // slower) carry the sheet's crest, fork at the top and tear pieces off; the others stay in the body
+        // SHEETS (A7): a lick wave along the bed makes neighbours rise and fall TOGETHER (never a comb); LEADERS (taller, wider,
+        // slower) carry the crest, fork and tear pieces off
         float lw = sheetAt(t, e.x);
-        bool lead = E2.x < 0.16 && lv >= 2;
-        float shH = lv >= 2 ? (lead ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw;
-        float shW = (lead ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
+        bool leadN = E2.x < 0.16 && lvI >= 2, leadH = E2.x < 0.16 && lvH >= 2;
+        float shHN = lvI >= 2 ? (leadN ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw, shWN = (leadN ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
+        float shHH = lvH >= 2 ? (leadH ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw, shWH = (leadH ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
         // (exact cull: this emitter's tongue - its sheet height, a leader's torn piece - and its roots must reach the cell)
-        if ( c.y < e.y - (LRI * u * es * eh * shH * 2.3 + r0 * es * shW * (lead ? 7.8 : 5.8)) - 1.0 || c.y > e.y + 4.5 * r0 * es * shW + 2.0 * u ) continue;
+        float shHc = lvH != 0 ? max(shHN, shHH) : shHN, shWc = lvH != 0 ? max(shWN, shWH) : shWN;
+        if ( c.y < e.y - (LRI * u * es * eh * shHc * 2.3 + r0 * es * shWc * (leadN || leadH ? 7.8 : 5.8)) - 1.0 || c.y > e.y + 4.5 * r0 * es * shWc + 2.0 * u ) continue;
         float rate = 0.8 + 0.5 * E2.z;
         int id = i * 131 + j * 7919;
         vec4 ag = ages(ei);
@@ -453,13 +536,17 @@ ${ART_TILES}
           if ( q > 0.0 ) { q *= q; rF += q; rY += q * e.y; rH += q * (0.6 + 0.5 * fz) * (0.5 + 0.5 * q) * (0.3 + 0.7 * outS); rB += q * (0.5 + 0.7 * fz) * outS; lvL = max(lvL, lv); }   // (sinking roots cool)
         }
         // the BLOBS: born every life / 5 / rate s (jittered), uneven lives, accelerating up, leaning, swaying, swelling then shrinking
-        float life0 = L_LIFE(lv) * (lead ? 1.3 : 1.0), iv = life0 / 5.0 / rate;
-        int n0 = int(floor(t / iv));
-        for ( int k = 0; k < 8; k++ ) {
-          if ( k >= uBirths ) break;
-          int n = n0 - k;
+        float lifeN = L_LIFE(lvI) * (leadN ? 1.3 : 1.0), lifeH = lvH != 0 ? L_LIFE(lvH) * (leadH ? 1.3 : 1.0) : lifeN;
+
+        for ( int kk = 0; kk < 16; kk++ ) {
+          if ( kk == 8 && lvH == 0 ) break;
+          int k = kk & 7; if ( k >= uBirths ) continue;
+          bool hs = kk >= 8, lead = hs ? leadH : leadN; float shH = hs ? shHH : shHN, shW = hs ? shWH : shWN;
+          float life0 = hs ? lifeH : lifeN, iv = life0 / 5.0 / rate;
+          int n = int(floor(t / iv)) - k;
           vec4 B1 = hb(id, n, 11);
           float tb = (float(n) + 0.6 * B1.x) * iv;
+          if ( lvH != 0 && (hs ? tb >= tH : tb < tH) ) continue;
           if ( tb < t - ageI ) continue;                                  // born before the emitter caught
           if ( ageO > -1e3 && tb > t - ageO ) continue;                   // born after it went out: the last ones finish their lives
           float life = life0 * (0.6 + 0.8 * B1.y) * (0.8 + 0.4 * br);
@@ -504,9 +591,7 @@ ${ART_TILES}
       // the union (silhouette) is the plain sum; the COLOUR is seen front first: a row further back shows through where the rows in
       // front are thin (between and above their tongues), so the bands flow across the body without per-tongue outlines
       F += rF; HT += TR * rH; BASE += TR * rB; WS += TR * rF; BY += TR * rY; TR *= exp(-2.2 * rF);
-      // (DEPTH: the bed row where the TONGUES (blobs, not the flat roots) seen front to back first cover this cell - a depth test on
-      // their silhouettes, not a blend of the rows: so the line between the tongues in front of a token and those behind it follows
-      // their outlines, never a straight column split)
+      // (DEPTH: the bed row whose TONGUES (not roots) first cover this cell front to back - a test on silhouettes, not a blend)
       CT += tF; if ( BF < 0.0 && CT >= 0.34 ) BF = tY / max(tF, 1e-4);
       if ( TR < 0.25 ) break;                                         // (opaque: the rows further back change nothing)
     }
@@ -521,27 +606,22 @@ ${ART_TILES}
       // BANDS on the merged field: the hot core is a continuous band low in the body (the fused roots: BASE), cooling upwards (the
       // blobs' heat falls with age = height); rising lick streaks break the values so no band is a smooth slab
       float heat = HT / max(WS, 1e-4), base = clamp(BASE / max(WS, 1e-4), 0.0, 1.0);
-      // (core: how deep inside the merged body - the tongues' own cores and the fused base are hot, the silhouette cools: the
-      // value breaks follow the tongue shapes, without outlines)
-      // (from the body's own field, not the eroded one: the erosion only frays the silhouette, the inside stays in clean planes)
-      // (A7: saturating - the metaball valleys between overlapping blobs no longer draw contour lines through the body; only near the
-      // silhouette does the body cool)
+      // (core: how deep inside the un-eroded body; saturating (A7), so blob valleys draw no contour lines - only the silhouette cools)
       float core = smoothstep(0.34, 0.8, F);
       // A7 PALETTE: the body runs through four steps (red, orange, amber, yellow) by heat, depth and HEIGHT above its bed (the tops
       // cool to red, the base glows yellow); the outline (show pass) adds the dark red; the cream-white core only right over the embers
       float bedY = BF >= 0.0 ? BF : BY / max(WS, 1e-4), hAb = max(0.0, bedY - c.y);
-      float hgt = clamp(hAb / (L_RISE(lvL) * u * 1.5), 0.0, 1.0);
+      float hgt = clamp(hAb / (LVF(L_RISE, lvL) * u * 1.5), 0.0, 1.0);
       float st = vn(vec2(c.x / (5.0 * u) + 0.35 * sin(t * 0.9 + c.y / (17.0 * u)), (c.y + t * 24.0 * u) / (13.0 * u)), 41);   // (A7: one continuous field rising and swaying - it used to re-seed 3 times a second, a pop)
       // (rising lick streaks, stronger up the body: no flat slab on top; smaller fires burn redder)
-      float v = 0.42 * heat + 0.3 * core + 0.2 * base + 0.2 - 0.5 * hgt + (st - 0.5) * (0.16 + 0.36 * hgt) - 0.1 * float(3 - lvL);
+      float v = 0.42 * heat + 0.3 * core + 0.2 * base + 0.2 - 0.5 * hgt + (st - 0.5) * (0.16 + 0.36 * hgt) - 0.1 * (3.0 - lvL);
       int band = 2 + int(clamp(v, 0.0, 0.999) * 4.0);                  // 2 red .. 5 yellow
       // (the body's floor is red, step 2: the dark red is the outline's alone)
-      if ( lvL >= 2 && band == 5 && hAb < 5.0 * u && base > 0.6 && core > 0.7 && st > 0.4 ) band = 6;   // (white only over the embers)
-      // R: where this cell's flame STANDS - the bed row of the tongues that cover it first (else the rows' blend), in whole art px
-      // (u cells), stored ABSOLUTE mod 255 (+1: 0 = no flame), so every cell of one tongue holds the same value (a code relative to
-      // the cell rounds differently row by row: a tongue standing level with a token's feet would flip in stripes); the screen passes
-      // unwrap it around the cell (DEPTH) and sort it against the tokens' feet
-      R = 1 + int(mod(floor(((BF >= 0.0 ? BF : BY / max(WS, 1e-4)) - uOrg.y) / max(u, 0.25) + 0.5), 255.0)); G = band + 1 + 8 * (lvL - 1);   // (R: area-local rows)                             // (one layer: the outline is the merged silhouette only)
+      int lvLd = lvDith(lvL, rank(c + vec2(9.0, 5.0)));
+      if ( lvLd >= 2 && band == 5 && hAb < 5.0 * u && base > 0.6 && core > 0.7 && st > 0.4 ) band = 6;   // (white only over the embers)
+      // R: the bed row where this cell's flame STANDS (DEPTH), whole art px, ABSOLUTE mod 255 (+1; 0 = none) so a tongue holds one
+      // value; the screen passes unwrap it and sort it against the tokens' feet
+      R = 1 + int(mod(floor(((BF >= 0.0 ? BF : BY / max(WS, 1e-4)) - uOrg.y) / max(u, 0.25) + 0.5), 255.0)); G = band + 1 + 8 * (lvLd - 1);   // (R: area-local rows)                             // (one layer: the outline is the merged silhouette only)
     }
   }
 
@@ -550,20 +630,20 @@ ${ART_TILES}
   float dIn = aux.r > 0.5 ? dBed(ic, aux.r) : aux.r, dOut = aux.g;
   // (outside the bed: the clock and level of the NEAREST bed, probed across the gap - never the whole area's, which restarts when
   // any stroke of the area changes)
-  vec4 agN = vec4(1e4, -1e4, 1e4, -1e4); int lvN = lvMax;
+  vec4 agN = vec4(1e4, -1e4, 1e4, -1e4); float lvN = lvT;
   if ( dIn <= 0.5 && dOut > 0.5 && dOut < 0.8 * 32.0 * u ) {
     bool any = false; int dd = int(dOut + 1.5);
     for ( int k = 0; k < 8; k++ ) {
       float an = float(k) * 0.7854; ivec2 q = ic + ivec2(round(vec2(cos(an), sin(an)) * float(dd) * (k % 2 == 1 ? 1.42 : 1.0)));
       if ( !inArea(q) || fA(q).r <= 0.0 ) continue;
-      vec4 aq = ages(q); int lq = levelAt(q);
+      vec4 aq = ages(q); float lq = lvNow(q);
       if ( !any ) { agN = aq; lvN = lq; any = true; } else { agN.x = max(agN.x, aq.x); agN.y = max(agN.y, aq.y); lvN = max(lvN, lq); }
     }
   }
   // (the beds differ: brighter and fuller in hot patches, broken in weak ones, some spilling wider - the fuel map and its G)
   vec2 fc = dIn > 0.5 || dOut < 0.75 * 32.0 * u ? fuelAt(c) : vec2(0.5);
   if ( dIn > 0.5 ) {
-    int lv = levelAt(ic);
+    float lvB = lvNow(ic); int lv = lvDith(lvB, rank(c + vec2(3.0, 11.0)));
     float growC = clamp(ag.x / max(0.3 * uDur.x, 0.01), 0.0, 1.0);    // the scorch spreads first, cluster by cluster
     float outA = ag.y;
     float endFade = outA > -1e3 ? clamp((outA - (uDur.z - 1.4)) / 1.2, 0.0, 1.0) : 0.0;   // the scar goes only at the very end
@@ -573,7 +653,7 @@ ${ART_TILES}
     if ( G == 0 ) {
       int cl = int(floor(c.x / (96.0 * u))) * 7 + int(floor(c.y / (96.0 * u))) * 13 + uSeed;
       float br = breath(t, cl);
-      float share = L_EMB(lv) * br * growC * (0.35 + 0.85 * fc.x + 0.6 * (fc.y - 0.5));
+      float share = LVF(L_EMB, lvB) * br * growC * (0.35 + 0.85 * fc.x + 0.6 * (fc.y - 0.5));
       if ( outA > -1e3 ) {
         share = mix(share, L_EMB(1) * br, clamp(outA / max(uDur.y, 0.01), 0.0, 1.0));          // the bed glows on, dimmer...
         if ( rk < clamp((outA - uDur.y - 0.8) / 1.2, 0.0, 1.0) ) share = 0.0;                 // ...then goes dark, cluster by cluster
@@ -584,7 +664,7 @@ ${ART_TILES}
       if ( dIn > 1.0 && share > 0.0 && ev > 1.0 - share * 0.9 && rk < rampC * (0.7 + fc.y) + 0.1 ) G = ev > 1.0 - share * 0.4 ? 26 : ev > 1.0 - share * 0.7 ? 25 : 24;
     }
   } else if ( dOut > 0.5 ) {
-    float wT = L_TINT(lvN) * 32.0 * u;
+    float wT = LVF(L_TINT, lvN) * 32.0 * u;
     float tk = clamp(agN.x / max(uDur.x, 0.01), 0.0, 1.0) * (agN.y > -1e3 ? 1.0 - clamp((agN.y - 0.7 * uDur.z) / (0.3 * uDur.z), 0.0, 1.0) : 1.0);
     // A7 CREEPING CHAR: the scorch eats outwards from the bed while it burns (to ~0.45 square over ~15 s, a ragged front, slower where
     // the fire is weak), and stays as a scar until the very end of a go-out
@@ -599,7 +679,7 @@ ${ART_TILES}
   int glowL = 0;
   if ( dIn > 0.5 || (dOut > 0.5 && dOut < 0.7 * 32.0 * u) ) {
     int clG = int(floor(c.x / (96.0 * u))) * 7 + int(floor(c.y / (96.0 * u))) * 13 + uSeed;
-    float brG = breath(t, clG), lvG = float(dIn > 0.5 ? levelAt(ic) : lvN);
+    float brG = breath(t, clG), lvG = dIn > 0.5 ? lvNow(ic) : lvN;
     float on = dIn > 0.5 ? clamp(ag.x / max(uDur.x, 0.01), 0.0, 1.0) * (ag.y > -1e3 ? 1.0 - clamp(ag.y / max(uDur.y, 0.01), 0.0, 1.0) : 1.0)
                          : clamp(agN.x / max(uDur.x, 0.01), 0.0, 1.0) * (agN.y > -1e3 ? 1.0 - clamp(agN.y / max(uDur.y, 0.01), 0.0, 1.0) : 1.0);
     float kG = on * (0.35 + 0.75 * fc.x) * (0.55 + 0.45 * brG) * (0.6 + 0.2 * lvG);
@@ -618,8 +698,8 @@ ${ART_TILES}
     vec2 cp = (vec2(gc) + 0.2 + 0.6 * C1.xy) * Sc;
     bool big = C1.z < 0.22;
     if ( abs(c.x - cp.x) <= (big ? 1.0 : 0.5) && abs(c.y - cp.y) <= 0.5 ) {
-      int lvC = dIn > 0.5 ? levelAt(ic) : lvN;
-      float pC = L_COAL(lvC) * (dIn > 0.5 ? 1.5 - 0.9 * fc.x : 1.0 - dOut / wC) * clamp((dIn > 0.5 ? ag.x : agN.x) / max(0.6 * uDur.x, 0.01), 0.0, 1.0);
+      float lvC = dIn > 0.5 ? lvNow(ic) : lvN;
+      float pC = LVF(L_COAL, lvC) * (dIn > 0.5 ? 1.5 - 0.9 * fc.x : 1.0 - dOut / wC) * clamp((dIn > 0.5 ? ag.x : agN.x) / max(0.6 * uDur.x, 0.01), 0.0, 1.0);
       vec4 C2 = hb(gc.x, gc.y, 401);
       float outC = dIn > 0.5 ? ag.y : agN.y;
       bool alive = C1.w < pC && fract(t * 0.07 + C2.w) < 0.86;                       // (some flicker out for a while)
@@ -636,8 +716,7 @@ ${ART_TILES}
   }
 
   /* ---------------- SPARKS in the air: specks that ride the heat up, drift and swirl, and cool through the ramp ---------------- */
-  // (a rising frame per layer: each spark sits in one cell of a grid that moves up with it, so a cell finds its spark in O(1); its
-  // birth place, below along its path, must be burning ground - denser over the heart of the fire and in gusts)
+  // (a rising grid per layer: a cell finds its spark in O(1); its birth place below must be burning ground)
   bool nearSp = nearBed || dIn > 0.5;
   for ( int s = 1; s <= 3 && !nearSp && inBox && t > 0.0; s++ ) {                     // (sparks rise higher than the flames reach)
     ivec2 p = ivec2(floor(c + vec2(-(uLean + 0.6 * uWind.x), 1.0) * float(s) * 22.0 * u));
@@ -662,17 +741,17 @@ ${ART_TILES}
       vec2 q = (vec2(g) + 0.15 + 0.7 * J.xy) * S;
       float hs = (L == 2 || (L == 0 && J.z > 0.8)) ? 1.0 : 0.5;                          // (a few 2 px sparks)
       if ( abs(xq - q.x) > hs || abs(yq - q.y) > hs ) continue;
-      ivec2 sb = ivec2(floor(vec2(c.x - Wd * V * age, c.y + V * age + SPK_H(L) * L_RISE(lvMax) * u)));
+      ivec2 sb = ivec2(floor(vec2(c.x - Wd * V * age, c.y + V * age + SPK_H(L) * LVF(L_RISE, lvT) * u)));
       if ( !inArea(sb) ) continue;
       float dB = fA(sb).r * 255.0;
       if ( dB < 0.5 ) continue;
       dB = dBed(sb, dB);
-      int lvS = levelAt(sb);
+      float lvS = lvAt(sb, age);
       vec4 agS = ages(sb);
       if ( agS.x < age + 0.3 || (agS.y > -1e3 && agS.y > age) ) continue;             // (born while that ground burned)
       float heatK = 0.35 + 0.65 * clamp(dB / (0.6 * 32.0 * u), 0.0, 1.0);
       float gustK = 0.7 + 1.6 * gust(t - age, c.x);
-      if ( J.w > SPK_D(L * 4 + lvS) * heatK * gustK * float(uBirths) / 8.0 ) continue;
+      if ( J.w > SPK_Df(L, lvS) * heatK * gustK * float(uBirths) / 8.0 ) continue;
       float a = age / life, s0 = H.y < 0.25 ? 6.0 : H.y < 0.7 ? 5.0 : 4.0;
       int step = int(floor((s0 + 0.99) * (1.0 - a * a * 0.55 - a * 0.15)));              // (white / yellow, orange, red, dark, gone)
       if ( a < 0.12 ) step = min(step, 1 + int(floor(s0 * a / 0.12)));                    // (it IGNITES: dark red up to its flare)
@@ -682,9 +761,8 @@ ${ART_TILES}
     }
   }
   if ( gS > 0 ) G = gS;
-  // A7 SPARK BURSTS: now and then a HOT SPOT pops - a fan of sparks thrown up and out at once, slowed by the air, then riding the heat
-  // up as they cool. Burst sites on a coarse world lattice, each with its own uneven slots (a burst in ~40 % of them, only where the
-  // ground burns hot); a cell looks at the few sites a burst could reach it from
+  // A7 SPARK BURSTS: a HOT SPOT pops a fan of sparks that slow, then ride the heat up; sites on a coarse lattice, uneven slots
+  // (~40 % burst, hot ground only); a cell looks at the few sites that could reach it
   if ( t > 0.0 && inBox && nearSp && (G == 0 || (R > 0 && ((G - 1) & 7) <= 2)) ) {
     float SX = 36.0 * u, SY = 28.0 * u, PB = 2.6, Wd = uLean + 0.6 * uWind.x;
     int sx0 = int(floor((c.x - 18.0 * u) / SX)), sx1 = int(floor((c.x + 18.0 * u) / SX));
@@ -704,7 +782,7 @@ ${ART_TILES}
         vec4 agB = ages(oi);
         if ( agB.x < age + 0.3 || (agB.y > -1e3 && agB.y > age) ) continue;
         if ( fuelAt(o).x < 0.5 ) continue;                               // (hot spots only)
-        int nS = 5 + 2 * levelAt(oi);
+        float lvB2 = lvAt(oi, age); int nS = 7 + int(floor(2.0 * (lvB2 - 1.0) + (fract(lvB2) > 0.0 ? fract(S0.z + float(k) * 0.618) : 0.0)));
         for ( int m = 0; m < 11; m++ ) {
           if ( m >= nS ) break;
           vec4 M1 = hb(sx * 31 + m, sy + int(k) * 131, 522);
@@ -726,7 +804,7 @@ ${ART_TILES}
   // (refraction read as pixel art), strongest just above the tongues, fading upwards and at the sides; only on empty cells
   int shim = 0;
   if ( t > 0.0 && inBox && G == 0 && R == 0 && dIn <= 0.5 ) {
-    float Hs = L_RISE(lvMax) * u * 2.6, dyB = -1.0; float Wd = uLean + 0.4 * uWind.x;
+    float Hs = LVF(L_RISE, lvT) * u * 2.6, dyB = -1.0; float Wd = uLean + 0.4 * uWind.x;
     for ( int s = 1; s <= 3 && dyB < 0.0; s++ ) {
       float dy = Hs * float(s) / 3.0;
       ivec2 p = ivec2(floor(c + vec2(-Wd * dy, dy)));
@@ -736,7 +814,7 @@ ${ART_TILES}
       float h = dyB / Hs, fz = fuelAt(c + vec2(0.0, dyB)).x;
       float k = smoothstep(0.2, 0.45, h) * (1.0 - smoothstep(0.7, 1.0, h)) * (0.4 + 0.6 * fz);
       float xw = c.x + 1.8 * u * sin(c.y / (5.0 * u) + t * 9.0) + 0.9 * u * sin(c.y / (2.3 * u) - t * 13.0);
-      float sf = fract(xw / (7.0 * u) + 0.13 * float(lvMax));
+      float sf = fract(xw / (7.0 * u) + 0.13 * lvT);
       float seg = vn(vec2(c.x / (6.0 * u), (c.y + t * 30.0 * u) / (8.0 * u)), 55);
       if ( seg > 1.0 - 0.75 * k ) shim = sf < 0.16 ? 1 : (sf > 0.5 && sf < 0.6) ? 2 : 0;
     }
@@ -797,14 +875,16 @@ ${ART_TILES}
         bool fromFire = code >= 4;
         float src = sa.b / 255.0;
         float rate = S_RATE(ls) / 3.6 * (sps * spys) / (1024.0 * u * u), iv = 1.0 / max(rate, 0.05);
-        float z0 = fromFire ? 1.0 * L_RISE(levelAt(ei)) * u : 2.0 * u;
+        float lvE = levelAt(ei); vec4 rq = rampTx(ei), rpq = rampPx(ei); float l0E = rq.r > 0.5 ? lvDec(rq.r) : lvE, lHi = max(lvE, l0E), lLo = min(lvE, l0E);
+        if ( rpq.r > 0.5 ) { lHi = max(lHi, max(lvDec(rpq.r), lvDec(rpq.b))); lLo = min(lLo, min(lvDec(rpq.r), lvDec(rpq.b))); }
+        float z0 = fromFire ? 1.0 * LVF(L_RISE, lHi) * u : 2.0 * u, z0m = fromFire ? 1.0 * LVF(L_RISE, lLo) * u : 2.0 * u;
         float lifeS = S_LIFE(ls);
         float v0 = S_V0(ls) * u * Hk * 1.5;
         vec4 ag2 = ages(ei);
         // which births can be at this height now: invert z(age) (the rise only depends on the age)
         float rr1 = S_R1(ls) * u * 1.35 + 4.5 * u, dz = e.y - c.y;
         // (a fire's smoke is not only above its flames: some puffs rise from BETWEEN the tongues, from low over the bed)
-        float z0lo = fromFire ? 0.2 * z0 : z0;
+        float z0lo = fromFire ? 0.2 * z0m : z0;
         float zl = max(z0lo, dz - rr1 - spys), zh = dz + rr1 + spys;
         float zMax = z0 + v0 * 1.35 * TAU * 0.999;
         if ( zl > zMax ) continue;
@@ -821,9 +901,10 @@ ${ART_TILES}
           vec4 pb = boxDec(texelFetch(uEmb, ivec2(uEN.x + uEN.z + et.x * 16 + (n & 15), et.y), 0), Ls, QS * u);
           if ( cw.x < pb.x || cw.x > pb.z || cw.y < pb.y || cw.y > pb.w ) continue;
           vec4 P1 = hb(eid, n, 59);
-          if ( P1.x > src ) continue;                                    // a weak source: fewer puffs (whole shapes, never holes)
-          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
+          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb, lB = rq.r > 0.5 ? lvRamp(lvE, rq, rpq, age) : lvE;   // (lB: its level at birth)
+          if ( P1.x > (rq.r > 0.5 ? srcAt(sa.b, rq, rpq, age, lB) : src) ) continue;                                    // a weak source: fewer puffs (whole shapes, never holes)
           if ( age < 0.0 ) continue;
+          float z0p = rq.r > 0.5 && fromFire ? LVF(L_RISE, lB) * u : z0;
           if ( tb < t - ag2.z ) continue;                                 // before the smoke started
           // after it stopped the last puffs drift off - and the source does not stop all at once: each puff has its own last moment
           // (up to 1.8 s early) and the last ones are smaller, so the column's foot frays out instead of lifting off as a flat line
@@ -833,7 +914,7 @@ ${ART_TILES}
           if ( a >= 1.0 ) continue;
           float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);            // the first puffs are wisps, building up over ~2 s
           float vj = v0 * (0.65 + 0.7 * P1.w);                // every puff its own speed: no flat ceiling
-          float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0 * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0;   // (low puffs: among the tongues)
+          float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0p * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0p;   // (low puffs: among the tongues)
           bool front = fract(P1.z * 11.1) < 0.45;                         // (some smoke curls in front of the flames, some behind)
           // (a few of the front puffs are DENSE DRIFTS: they really cover the flames for a moment as they pass, lit from below)
           bool drift = front && fract(P1.w * 17.3) < 0.4;
@@ -862,10 +943,10 @@ ${ART_TILES}
           // (wisps stretch along the wind and the gust as they age: shear, not round puffs)
 
           // (lit warm from below only while the flames under it still burn: a dead fire lights nothing)
-          bool low = fromFire && z < z0 + 0.8 * L_RISE(2) * u && a < 0.5 && (ag2.y < -1e3 || ag2.y < 0.4 * uDur.y);
+          bool low = fromFire && z < z0p + 0.8 * L_RISE(2) * u && a < 0.5 && (ag2.y < -1e3 || ag2.y < 0.4 * uDur.y);
           // (AT NIGHT the fire is the light: its smoke is lit from below while the flames under it burn, the more the lower it is)
           bool fLit = fromFire && (ag2.y < -1e3 || ag2.y < 0.6 * uDur.y);
-          float hz = fLit ? clamp(1.0 - (z - z0) / (2.2 * L_RISE(2) * u), 0.0, 1.0) : 0.0;
+          float hz = fLit ? clamp(1.0 - (z - z0p) / (2.2 * L_RISE(2) * u), 0.0, 1.0) : 0.0;
           for ( int k = 0; k < 4; k++ ) {
             if ( k >= nl ) break;
             float ang = P3[k] * 6.2832 + a * (1.5 + p75);
@@ -931,17 +1012,19 @@ ${ART_TILES}
         int eid = i * 977 + j * 3163, nH = int(floor(t / iv));
         vec4 ag2 = ages(ei);
         bool fromFire = int(sa.a + 0.5) >= 4;
-        float z0 = fromFire ? 1.0 * L_RISE(levelAt(ei)) * u : 2.0 * u;
+        float lvE = levelAt(ei); vec4 rq = rampTx(ei), rpq = rampPx(ei); float l0E = rq.r > 0.5 ? lvDec(rq.r) : lvE, lHi = max(lvE, l0E), lLo = min(lvE, l0E);
+        if ( rpq.r > 0.5 ) { lHi = max(lHi, max(lvDec(rpq.r), lvDec(rpq.b))); lLo = min(lLo, min(lvDec(rpq.r), lvDec(rpq.b))); }
+        float z0 = fromFire ? 1.0 * LVF(L_RISE, lHi) * u : 2.0 * u, z0m = fromFire ? 1.0 * LVF(L_RISE, lLo) * u : 2.0 * u;
         float v0 = S_V0(ls) * u * Hk * 1.5;
         for ( int k = 0; k < 6; k++ ) {
           int n = nH - k;
           vec4 P1 = hb(eid, n, 59);
-          if ( P1.x > src ) continue;
-          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
+          float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb, lB = rq.r > 0.5 ? lvRamp(lvE, rq, rpq, age) : lvE;   // (lB: its level at birth)
+          if ( P1.x > (rq.r > 0.5 ? srcAt(sa.b, rq, rpq, age, lB) : src) ) continue;
           if ( age < 0.0 || tb < t - ag2.z || (ag2.w > -1e3 && t - ag2.w - tb < 1.8 * fract(P1.y * 7.31 + P1.z * 3.17)) ) continue;
           float life = S_LIFE(ls) * (0.7 + 0.6 * P1.z), a = age / life;
           if ( a >= 1.0 ) continue;
-          float z = z0 + v0 * (0.65 + 0.7 * P1.w) * TAU * (1.0 - exp(-age / TAU));
+          float z = (rq.r > 0.5 && fromFire ? LVF(L_RISE, lB) * u : z0) + v0 * (0.65 + 0.7 * P1.w) * TAU * (1.0 - exp(-age / TAU));
           vec4 P2 = hb(eid, n, 62);
           vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
           float x = o0.x + z * (0.6 * uWind.x + 0.12 * gdir) + z * 0.25;
@@ -982,28 +1065,24 @@ vec4 boxFlame(int i, int j) {
   if ( d < 0.5 ) return NOBOX;
   d = dBed(ei, d);
   vec4 E2 = hb(i, j, 2);
-  int lv = levelAt(ei), lvO = lv;
-  float kL = 1.0;
-  if ( uHasOld == 1 ) {
-    int o = int(texelFetch(uAuxOld, Lc(ei), 0).g * 255.0 + 0.5);
-    if ( o > 0 && o != lv ) { lvO = o; kL = clamp(uI.x / max(uDur.x, 0.01), 0.0, 1.0); kL *= kL * (3.0 - 2.0 * kL); }
-  }
-  if ( E2.y >= max(L_DENS(lv), L_DENS(lvO)) / L_DENS(3) * 1.44 ) return NOBOX;
-  float LD = mix(L_DENS(lvO), L_DENS(lv), kL), LR = mix(L_R(lvO), L_R(lv), kL), LRI = mix(L_RISE(lvO), L_RISE(lv), kL);
+  float lv, lvO, kL, tH; int lvI, lvH;
+  emLevel(ei, i, j, lv, lvO, kL, lvI, lvH, tH);
+  if ( E2.y >= max(LVF(L_DENS, lv), LVF(L_DENS, lvO)) / L_DENS(3) * 1.44 ) return NOBOX;
+  float LD = mix(LVF(L_DENS, lvO), LVF(L_DENS, lv), kL), LR = mix(LVF(L_R, lvO), LVF(L_R, lv), kL), LRI = mix(LVF(L_RISE, lvO), LVF(L_RISE, lv), kL);
   float ramp = clamp(d / (0.35 * 32.0 * u), 0.0, 1.0);
   float r0 = LR * u;
   float hR = clamp(d / (0.9 * 32.0 * u), 0.0, 1.0);
   float eh0 = (0.5 + 0.65 * hR) * (0.55 + 0.95 * pow(E1.w, 1.6)) * (E2.x < 0.12 ? 1.25 : 1.0);
-  float fz = max(fuelAt(e).x, 0.07 * float(lv - 1));
+  float fz = max(fuelAt(e).x, 0.07 * (lv - 1.0));
   float thr = LD / L_DENS(3) * (0.25 + 0.75 * ramp) * (0.04 + 1.4 * fz);
   float on = clamp((thr - E2.y) / 0.14, 0.0, 1.0);
   if ( on <= 0.0 ) return NOBOX;
   float es = (0.55 + 0.45 * ramp) * (0.7 + 0.6 * E1.z) * (0.4 + 0.9 * fz) * (on * (2.0 - on)) * (0.92 + 0.6 * (gust(t, e.x) - 0.06));
   float eh = eh0 * (0.5 + 0.88 * fz) * (0.15 + 0.85 * on);
   float lw = sheetAt(t, e.x);
-  bool lead = E2.x < 0.16 && lv >= 2;
-  float shH = lv >= 2 ? (lead ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw;
-  float shW = (lead ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
+  bool leadN = E2.x < 0.16 && lvI >= 2, leadH = E2.x < 0.16 && lvH >= 2;
+  float shHN = lvI >= 2 ? (leadN ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw, shWN = (leadN ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
+  float shHH = lvH >= 2 ? (leadH ? 0.75 + 0.4 * lw : 0.4 + 0.65 * lw) : 0.75 + 0.4 * lw, shWH = (leadH ? 1.3 : 1.0) * (0.9 + 0.3 * lw);
   float rate = 0.8 + 0.5 * E2.z;
   int id = i * 131 + j * 7919;
   vec4 ag = ages(ei);
@@ -1027,13 +1106,17 @@ vec4 boxFlame(int i, int j) {
     float hx = 1.4833 * (0.95 + 0.75 * E1.z) * rr, hy = 1.4833 * 0.9 * rr;      // (q > 0: dx^2 + dy^2 < 2.2; below, dy x 1.5)
     bb = grow(bb, p.x - hx, p.y - hy, p.x + hx, p.y + hy / 1.5);
   }
-  float life0 = L_LIFE(lv) * (lead ? 1.3 : 1.0), iv = life0 / 5.0 / rate;
-  int n0 = int(floor(t / iv));
-  for ( int k = 0; k < 8; k++ ) {
-    if ( k >= uBirths ) break;
-    int n = n0 - k;
+  float lifeN = L_LIFE(lvI) * (leadN ? 1.3 : 1.0), lifeH = lvH != 0 ? L_LIFE(lvH) * (leadH ? 1.3 : 1.0) : lifeN;
+
+  for ( int kk = 0; kk < 16; kk++ ) {
+    if ( kk == 8 && lvH == 0 ) break;
+    int k = kk & 7; if ( k >= uBirths ) continue;
+    bool hs = kk >= 8, lead = hs ? leadH : leadN; float shH = hs ? shHH : shHN, shW = hs ? shWH : shWN;
+    float life0 = hs ? lifeH : lifeN, iv = life0 / 5.0 / rate;
+    int n = int(floor(t / iv)) - k;
     vec4 B1 = hb(id, n, 11);
     float tb = (float(n) + 0.6 * B1.x) * iv;
+    if ( lvH != 0 && (hs ? tb >= tH : tb < tH) ) continue;
     if ( tb < t - ageI ) continue;
     if ( ageO > -1e3 && tb > t - ageO ) continue;
     float life = life0 * (0.6 + 0.8 * B1.y) * (0.8 + 0.4 * br);
@@ -1071,7 +1154,9 @@ vec4 boxSmoke(int i, int j, int slot) {
   bool fromFire = code >= 4;
   float src = sa.b / 255.0;
   float rate = S_RATE(ls) / 3.6 * (sps * spys) / (1024.0 * u * u), iv = 1.0 / max(rate, 0.05);
-  float z0 = fromFire ? 1.0 * L_RISE(levelAt(ei)) * u : 2.0 * u;
+  float lvE = levelAt(ei); vec4 rq = rampTx(ei), rpq = rampPx(ei); float l0E = rq.r > 0.5 ? lvDec(rq.r) : lvE, lHi = max(lvE, l0E), lLo = min(lvE, l0E);
+  if ( rpq.r > 0.5 ) { lHi = max(lHi, max(lvDec(rpq.r), lvDec(rpq.b))); lLo = min(lLo, min(lvDec(rpq.r), lvDec(rpq.b))); }
+  float z0 = fromFire ? 1.0 * LVF(L_RISE, lHi) * u : 2.0 * u, z0m = fromFire ? 1.0 * LVF(L_RISE, lLo) * u : 2.0 * u;
   float lifeS = S_LIFE(ls);
   float v0 = S_V0(ls) * u * Hk * 1.5;
   vec4 ag2 = ages(ei);
@@ -1085,9 +1170,10 @@ vec4 boxSmoke(int i, int j, int slot) {
     int n = nHi - kk2; if ( n < nLo ) break;
     if ( slot >= 0 && (n & 15) != slot ) continue;
     vec4 P1 = hb(eid, n, 59);
-    if ( P1.x > src ) continue;
-    float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb;
+    float tb = (float(n) + 0.7 * P1.y) * iv, age = t - tb, lB = rq.r > 0.5 ? lvRamp(lvE, rq, rpq, age) : lvE;   // (lB: its level at birth)
+    if ( P1.x > (rq.r > 0.5 ? srcAt(sa.b, rq, rpq, age, lB) : src) ) continue;
     if ( age < 0.0 ) continue;
+    float z0p = rq.r > 0.5 && fromFire ? LVF(L_RISE, lB) * u : z0;
     if ( tb < t - ag2.z ) continue;
     float dS = ag2.w > -1e3 ? t - ag2.w - tb : 1e4;
     if ( dS < 1.8 * fract(P1.y * 7.31 + P1.z * 3.17) ) continue;
@@ -1095,7 +1181,7 @@ vec4 boxSmoke(int i, int j, int slot) {
     if ( a >= 1.0 ) continue;
     float build = clamp((ag2.z - age) / 2.0, 0.0, 1.0);
     float vj = v0 * (0.65 + 0.7 * P1.w);
-    float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0 * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0;
+    float zb = fromFire && fract(P1.x * 13.7) < 0.4 ? z0p * (0.2 + 0.6 * fract(P1.y * 7.3)) : z0p;
     float z = zb + vj * TAU * (1.0 - exp(-age / TAU));
     vec4 P2 = hb(eid, n, 62);
     vec2 o0 = e + (P2.xy - 0.5) * vec2(sps, spys);
@@ -1461,11 +1547,12 @@ void main() {
   oOcc = vec4(fl, sm, gr, fl || em);
 }`;
 
-let progs = null;
+let progs = null, progsC = null;
+const whole = (src) => src.replace("#define LVC 1\n", "#define LVC 0\n");
 const programs = () => progs ??= {
-  art: PIXI.Program.from(VERT, ART_F, "moinen-maps-fire-art-v15"),
-  artS: PIXI.Program.from(VERT, ART_S, "moinen-maps-fire-art-smoke-v1"),
-  emb: PIXI.Program.from(VERT, EMB, "moinen-maps-fire-emb-v1"),
+  art: PIXI.Program.from(VERT, whole(ART_F), "moinen-maps-fire-art-v15"),
+  artS: PIXI.Program.from(VERT, whole(ART_S), "moinen-maps-fire-art-smoke-v1"),
+  emb: PIXI.Program.from(VERT, whole(EMB), "moinen-maps-fire-emb-v1"),
   tile: PIXI.Program.from(TILE_V, TILE_F, "moinen-maps-fire-tile-v2"),
   fuel: PIXI.Program.from(VERT, FUEL, "moinen-maps-fire-fuel-v3"),
   show: PIXI.Program.from(VERT_B(0), SHOW, "moinen-maps-fire-show-v9"),
@@ -1475,6 +1562,16 @@ const programs = () => progs ??= {
   emit: PIXI.Program.from(VERT_B(3), EMIT, "moinen-maps-fire-emit-v5"),
   occ: PIXI.Program.from(VERT, OCC_F, "moinen-maps-fire-occ-v1")
 };
+/**
+ * F1: the CONTINUOUS-LEVEL art programs (LVC 1: fractional levels, ramps) - only an area that has one draws with them; the whole-level
+ * ones above link as fast as before F1 (a cache-miss link of these is ~1.6x theirs, so they are warmed after them: fire.mjs).
+ */
+const lvcPrograms = () => progsC ??= {
+  art: PIXI.Program.from(VERT, ART_F, "moinen-maps-fire-lvc-art-v1"),
+  artS: PIXI.Program.from(VERT, ART_S, "moinen-maps-fire-lvc-art-smoke-v1"),
+  emb: PIXI.Program.from(VERT, EMB, "moinen-maps-fire-lvc-emb-v1")
+};
+export const lvcArtPrograms = () => Object.values(lvcPrograms());
 /** Every art-style program (the pre-warm compiles them in the background after a scene with fire opens: fire.mjs). */
 export const artPrograms = () => Object.values(programs());
 /** Their keys, in the same order (art, artS, emb, ...: dev/fire-art-link-run.mjs). */
@@ -1499,6 +1596,20 @@ const quad = (x0, y0, x1, y1, W, H) => new PIXI.Geometry()
   .addIndex([0, 1, 2, 0, 2, 3]);
 
 /** Blobs per emitter by Performance mode (research 13: 7 -> 5 -> 3, here 8 / 6 / 4). */
+/*
+ * F1 - A CONTINUOUS FIRE LEVEL in the art programs (dev/fire-slider-design.md). levelAt() decodes model.levelCode (a whole level's
+ * old code, a fractional one 13 + 4 q + smoke) to a float; every look table goes through LVF (linear between, the entry itself at a
+ * whole level: the old look bit for bit). What cannot be continuous stays whole and changes cell by cell or blob by blob:
+ *   - the blob SCHEDULE (its birth interval, a leader, the sheet height): emLevel gives each emitter a whole schedule level
+ *     floor(lv - h) + 1 by its own hash h; while a ramp has moved it, the blobs of the schedule before (born before tH, the moment the
+ *     eased ramp crossed lv = level + h) finish their lives in a second loop - a hand-off, never a re-seed;
+ *   - the char code, the white core and the outer bands' alpha: lvDith, a static blue-noise dither (rank at offset cells);
+ *   - sparks, bursts and puffs take the level of their BIRTH (lvAt(p, age)): a live one never changes mid-life.
+ * A RAMP (a level change over `over` ms, model.rampAt): uLvRamp per cell R = 1 + (from-level - 1) x 127, G its start (steps of
+ * uRampT.y from uRampT.x, shader s mod 1000), B the smoke source at the from-level, A its length (0.1 s; x uRampT.z the speed); the
+ * level eases along a smoothstep (rampK). uLvTop is the area's top level (from, to, over shader s z .. w): the spark search, the
+ * shimmer, the tint ring. uLvMax stays the culls' whole bound (the top level a ramp passes).
+ */
 export const BIRTHS = { high: 8, medium: 6, low: 4 };
 
 /**
@@ -1507,16 +1618,18 @@ export const BIRTHS = { high: 8, medium: 6, low: 4 };
  * frame. Same contract as shader.mjs FireMesh for the display (anim, visible, destroy).
  */
 export class FireArt extends PIXI.Container {
-  constructor(field, rect, geo, { above = null, front = null, box = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, smokeTint = 0, births = 8 } = {}) {
+  constructor(field, rect, geo, { above = null, front = null, box = null, seed = 1, grid = 32, lean = 0, wind = [0, 0], dur = [1.6, 2.2, 10], plume = 2.5, lvMax = 2, lvTop = null, rampT = null, rampP = null, lvc = false, smokeTint = 0, births = 8 } = {}) {
     super();
     this.eventMode = "none"; this.interactiveChildren = false;
-    const { ap, ox, oy } = geo, W = field.w, H = field.h, P = programs();
+    const { ap, ox, oy } = geo, W = field.w, H = field.h, P0 = programs(), P = lvc ? { ...P0, ...lvcPrograms() } : P0;
     const x0 = ox + rect.x0 * ap, y0 = oy + rect.y0 * ap, x1 = x0 + W * ap, y1 = y0 + H * ap;
     this.fieldTex = texOf(field.data, W, H);
     this.auxTex = texOf(field.aux ?? new Uint8Array(W * H * 4), W, H);
     this.timesTex = field.times ? texOf(field.times, W, H) : null;
     this.auxOldTex = field.auxOld && field.times ? texOf(field.auxOld, W, H) : null;
     this.puffTex = field.puff ? texOf(field.puff, W, H) : null;
+    this.rampTex = field.ramp ? texOf(field.ramp, W, H) : null;      // (F1: a level ramp's cells; model.rampTex)
+    this.ramp2Tex = field.ramp2 ? texOf(field.ramp2, W, H) : null;   // (the ramps they interrupted)
     this.rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
     this.rt.baseTexture.mipmap = PIXI.MIPMAP_MODES.OFF;
     this.anim = field.anim; this.W = W; this.H = H;
@@ -1531,7 +1644,9 @@ export class FireArt extends PIXI.Container {
     this.pass = new PIXI.Mesh(quad(0, 0, W, H, W, H), new PIXI.Shader(P.art, {
       uField: this.fieldTex, uAux: this.auxTex, uAuxOld: this.auxOldTex ?? this.auxTex, uHasOld: this.auxOldTex ? 1 : 0, uPuff: this.puffTex ?? this.fieldTex, uTimes: this.timesTex ?? this.fieldTex, uAnim: this.timesTex ? 1 : 0,
       uI: new Float32Array([0, 1]), uO: new Float32Array([0, 1]), uDur: new Float32Array(dur),
-      uSize: new Float32Array([W, H]), uTime: 0, uSeed: seed % 65536, uU: grid / 32, uLvMax: lvMax, uLean: lean,
+      uSize: new Float32Array([W, H]), uTime: 0, uSeed: seed % 65536, uU: grid / 32, uLvMax: Math.ceil(lvMax), uLean: lean,
+      uLvRamp: this.rampTex ?? this.fieldTex, uHasRamp: this.rampTex ? 1 : 0, uRampT: new Float32Array(rampT ?? [0, 1, 1]), uLvTop: new Float32Array(lvTop ?? [lvMax, lvMax, 0, 0]),
+      uLvRamp2: this.ramp2Tex ?? this.fieldTex, uHasRamp2: this.ramp2Tex ? 1 : 0, uRampP: new Float32Array(rampP ?? [0, 1]),
       uWind: new Float32Array(wind), uPlume: plume, uPuffQ: new Float32Array(field.puff ? field.puffQ : [0, 0, 0, 0]),
       uBox: new Float32Array(box ? [box.x0, box.y0, box.x1, box.y1] : [rect.x0, rect.y0, rect.x1, rect.y1]), uBirths: births, uVC: VC_PACKED, uFuel: this.fuelRt, uFuelSize: new Float32Array([FW, FH]), uOrg: new Float32Array([rect.x0, rect.y0]),
       translationMatrix: new PIXI.Matrix().toArray(true) }));
@@ -1817,7 +1932,7 @@ export class FireArt extends PIXI.Container {
    * area's ~15 MB no longer lands in the frame that first draws it. The very texels the first draw would upload. Returns the bytes sent.
    */
   uploadStep(renderer, maxBytes) {
-    const q = this._up ??= [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex].filter(Boolean);
+    const q = this._up ??= [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex, this.rampTex, this.ramp2Tex].filter(Boolean);
     let sent = 0;
     while ( q.length && (sent === 0 || sent + q[0].baseTexture.width * q[0].baseTexture.height * 4 <= maxBytes) ) {
       const b = q.shift().baseTexture; renderer.texture.bind(b, 0); sent += b.width * b.height * 4;
@@ -1828,8 +1943,8 @@ export class FireArt extends PIXI.Container {
   /** Do the drawn cells (this art frame) hold the window `w` (cells)? */
   covers(w) { const a = this.artWin; return !!a && w[0] >= a[0] && w[1] >= a[1] && w[2] <= a[2] && w[3] <= a[3]; }
   destroy() {
-    const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex];
-    this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = this.puffTex = null;
+    const tx = [this.fieldTex, this.auxTex, this.timesTex, this.auxOldTex, this.puffTex, this.rampTex, this.ramp2Tex];
+    this.fieldTex = this.auxTex = this.timesTex = this.auxOldTex = this.puffTex = this.rampTex = this.ramp2Tex = null;
     this.glow.parent?.removeChild(this.glow);
     const own = this.smoke.parent === this, ownF = this.front.parent === this;
     if ( !own ) this.smoke.parent?.removeChild(this.smoke);
