@@ -17,6 +17,7 @@ import { quake, stopQuakes } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
+import { interactApi, registerInteract } from "./interact.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -243,7 +244,7 @@ export function refresh() {
   display.visible = visibleToMe();
   if ( !display.root.visible ) return;
   let dist = null, bands = null, here = -1;
-  const t = setting("zonesDistances", true) ? selectedToken() : null;
+  const t = setting("zonesDistances", true) && DRIVER?.distances !== false ? selectedToken() : null;
   // Sky High and Orbit are off the map (one zone of their own): no distances on the map from there
   if ( t && Z && !Places.AREAS.includes(rawAlt(t.document)) ) {
     const c = tokenCenter(t);
@@ -262,7 +263,7 @@ export function refresh() {
     }
   }
   display.hoverId = hover;
-  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M });
+  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M, terrainText: wreckText });
 }
 
 /* ---------------------------------------------------------------- numbers on hover */
@@ -301,7 +302,7 @@ function iconTip(hit, at) {
   if ( !hit ) { tipEl?.remove(); tipEl = null; return; }
   const p = M?.zones.get(hit.z.id) ?? {}, ZL = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
   const text = hit.key === "fire" ? `${ZL("state.fire")}: ${p.fire}`
-    : hit.key === "terrain" ? `${ZL("terrain.label")}: ${ZL(`terrain.${p.terrain}`)}${Marks.WRECK[p.terrain] ? ` (${Marks.WRECK[p.terrain][0]}/+${Marks.WRECK[p.terrain][1]})` : ""}`
+    : hit.key === "terrain" ? `${ZL("terrain.label")}: ${ZL(`terrain.${p.terrain}`)}${wreckText(p.terrain) && p.terrain !== "none" ? ` (${wreckText(p.terrain)})` : ""}`
     : hit.key === "building" && p.floors && !p.wrecked ? `${ZL("feat.building")} · ${game.i18n.format("MOINENMAPS.Zones.floorsTip", { n: p.floors + 1 })}`
     : ZL(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
   if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip"; document.body.append(tipEl); }
@@ -547,7 +548,7 @@ function patchRuler() {
   proto._getWaypointLabelContext = function(waypoint, state) {
     const ctx = orig.call(this, waypoint, state);
     try {
-      if ( !ctx || !Z || !setting("zonesRuler", true) || !visibleToMe() || !waypoint.previous ) return ctx;
+      if ( !ctx || !Z || !setting("zonesRuler", true) || DRIVER?.distances === false || !visibleToMe() || !waypoint.previous ) return ctx;
       const dd = legsInZones(waypoint);
       if ( dd == null ) return ctx;
       const band = preset(movePreset())?.band(dd, movesOf(this.token?.actor));
@@ -588,6 +589,30 @@ export function setBorder(x, y, kind) {
     // a border marked anew is as built: what happened to the old one in play goes with it
     s.plays = s.plays.filter(([px, py]) => pairAt(px, py) !== key);
     return true;
+  });
+}
+
+/**
+ * Build a border from the GM's editor: spec = { kind?, wall?: null | { armor, outer }, door?: null | { armor, state } } laid over
+ * the border as it is built (borders.mjs buildFrom). One undo step, like every other mark the GM makes on the map (the combat
+ * module's buildBorder() goes through apply() instead: no undo step, an inverse). What happened to the border in play stays where
+ * it still fits (an Armor changed under a breached wall leaves it breached). `border`: a border key, a border object or [a, b].
+ */
+export function editBorder(border, spec = {}) {
+  if ( !game.user.isGM || !S || !Z ) return false;
+  const P = pairOf(border);
+  if ( !P ) return false;
+  const m = M0?.borders.get(P.pk) ?? null, raw = Borders.buildFrom(m, spec);
+  if ( raw === undefined ) return false;
+  const at = m ?? Places.pairsOf(cache()).get(P.pk), prev = Borders.playOf(m);
+  const nextPlay = raw ? Borders.normPlay(Borders.model(...raw), prev) : null;
+  return edit((_st, s) => {
+    const before = JSON.stringify([s.walls, s.plays]);
+    s.walls = s.walls.filter(([x, y]) => pairAt(x, y) !== P.pk);
+    s.plays = s.plays.filter(([x, y]) => pairAt(x, y) !== P.pk);
+    if ( raw ) s.walls.push([r1(at.x), r1(at.y), ...raw]);
+    if ( raw && nextPlay ) s.plays.push([r1(at.x), r1(at.y), nextPlay]);
+    return JSON.stringify([s.walls, s.plays]) !== before;
   });
 }
 
@@ -650,6 +675,12 @@ export function clearStates(id = null) {
 /** One round of fire (book: Fire Spreading): a D6 for every burning zone, the result written and told in the chat. */
 export async function fireRound() {
   if ( !game.user.isGM || !Z || !M ) return null;
+  // a combat module that runs the rules runs the fire too (dev/zones-api.md 19): the map rolls, writes and posts nothing
+  if ( DRIVER ) {
+    if ( typeof DRIVER.fireRound === "function" ) return DRIVER.fireRound();
+    ui.notifications.info(game.i18n.format("MOINENMAPS.Zones.driven.fire", { by: DRIVER.title }));
+    return null;
+  }
   const { log } = Marks.fireRound(Z, M);
   const L = (k, d) => game.i18n.format(`MOINENMAPS.Zones.fire.${k}`, d ?? {});
   if ( !log.length ) { ui.notifications.info(L("none")); return log; }
@@ -671,6 +702,43 @@ export async function fireRound() {
   });
   await ChatMessage.create({ speaker: { alias: game.i18n.localize("MOINENMAPS.Zones.fire.title") }, content: `<ul class="mm-z-fire">${rows.join("")}</ul>` });
   return log;
+}
+
+/* ---------------------------------------------------------------- who runs the rules (dev/zones-api.md 19; combat-spec gap G-Z9) */
+
+/**
+ * The map keeps a few rule mechanics of its own for tables that play without a combat module: the fire round (it rolls a D6 per
+ * burning zone, writes the result and posts it), the wrecking table shown beside a zone's terrain, and the distance badges that
+ * say what a move costs. A combat module that runs the rules takes them over on its client:
+ *   rulesDriver({ id, title, fireRound?: async () => any, wreck?: { terrain: [strength, bonus] } | (terrain) => string | null, distances?: bool })
+ *   rulesDriver(false)       back to the map's own (also: rulesDriver(false, id) - only when that driver is the one in charge)
+ * While one is set: fireRound() and its buttons run the driver's `fireRound` (no such function: the buttons go and a call does
+ * nothing but say who runs the fire); the numbers beside a terrain are the driver's `wreck` (none given: the map's table, as a
+ * reference only); `distances: false` takes the map's own distance badges and ruler label away (the driver highlights instead).
+ * Per client, not stored. Nothing else changes: what the map stores, reports and draws stays as it is.
+ */
+let DRIVER = null;
+export function rulesDriver(opts, only = null) {
+  if ( opts === false || opts == null ) { if ( only != null && DRIVER?.id !== only ) return false; DRIVER = null; }
+  else {
+    const id = String(opts.id ?? "driver");
+    DRIVER = { id, title: String(opts.title ?? game.modules?.get?.(id)?.title ?? id), fireRound: typeof opts.fireRound === "function" ? opts.fireRound : null, wreck: opts.wreck ?? null, distances: opts.distances !== false };
+  }
+  if ( S ) { refresh(); tell("params"); }
+  return !!DRIVER;
+}
+/** Who runs the rules on this client: { id, title, fireRound: bool, distances: bool } or null (the map's own mechanics). */
+export const drivenBy = () => (DRIVER ? { id: DRIVER.id, title: DRIVER.title, fireRound: !!DRIVER.fireRound, distances: DRIVER.distances } : null);
+/** Whether the fire round can be run from the map's buttons: always without a driver, with one only when it gave the routine. */
+export const fireRoundOn = () => !DRIVER || !!DRIVER.fireRound;
+/** What is written beside a terrain: "4/+1" (minimum Strength / attack bonus) - the driver's table when it gave one, else the map's. */
+export function wreckText(terrain) {
+  if ( !terrain ) return "";
+  const W = DRIVER?.wreck;
+  if ( typeof W === "function" ) { try { const s = W(terrain); return s == null ? "" : String(s); } catch { return ""; } }
+  const row = W && typeof W === "object" ? W[terrain] : Marks.WRECK[terrain];
+  if ( Array.isArray(row) ) return `${row[0]}/+${row[1]}`;
+  return terrain === "none" ? "\u2014" : "";
 }
 
 /* ---------------------------------------------------------------- token altitude (Invincible: ground, elevated, Sky High, Orbit) */
@@ -995,6 +1063,16 @@ let playDepth = 0, playDirty = false;
 export function canWrite() {
   return !!game.user?.isGM && !!S && !!Z && (!game.users?.activeGM || game.users.activeGM.id === game.user.id);
 }
+
+/** The active GM's name (the one whose client writes play state); "" when none is connected. */
+export const activeGmName = () => game.users?.activeGM?.name ?? "";
+/** Why a write was refused, in words for the one who tried (a result of apply() or one of its reasons). */
+export function refusalText(r) {
+  const reason = typeof r === "string" ? r : r?.reason ?? "other";
+  const key = `MOINENMAPS.Zones.refused.${REFUSALS.includes(reason) ? reason : "other"}`;
+  return game.i18n.format(key, { gm: activeGmName() || "?", reason });
+}
+const REFUSALS = ["notGM", "notActiveGM", "noZones", "noBorder", "noWall", "noDoor", "noZone", "noState", "noEdge", "badEdge", "badState"];
 
 /**
  * Change the play state (border states, registry states, edges; also marks and walls on behalf of a combat action): `fn(s)` gets a
@@ -1582,7 +1660,7 @@ export const zonesApi = {
   presets: () => presets().map((p) => ({ id: p.id, title: game.i18n.localize(p.title) })),
   addStroke, erase: eraseAlong, trim, clear: clearAll, undo: undoEdit, redo: redoEdit, setParams,
   /** Walls and doors, zone features and states (marks.mjs), fire, token altitude. */
-  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, floor: floorOf, setFloor, rules: Marks,
+  marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, editBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, floor: floorOf, setFloor, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
   geometry: Geo,
@@ -1641,11 +1719,18 @@ export const zonesApi = {
   freeSpot, moveToZone, move, beforeStep,
   /** Cost confirmation when a token is dragged during tactical play. */
   tactical, tacticalOn: () => !!TACT,
+  /** Who runs the rules: a combat module takes the map's own mechanics over (fire round, wrecking numbers, distance badges). */
+  rulesDriver, drivenBy, wreckText,
+  /** Why a write was refused, in the user's language; the active GM's name. */
+  refusalText, activeGmName,
   /** The pure parts, for tests and other modules. */
   places: Places, keysLib: Keys, borders: Borders, statesLib: States, moves: Moves
 };
 
 export function registerZones() {
+  // highlights and zone picking (interact.mjs): api.highlight, clearHighlights, highlights, showReach, pick, cancelPick, picking
+  Object.assign(zonesApi, interactApi);
+  registerInteract();
   moduleApi.zones = zonesApi;
   Hooks.once("init", registerSettings);
   Hooks.once("setup", patchRuler);

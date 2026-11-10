@@ -42,7 +42,7 @@ function trace(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i +=
 function ring(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); G.closePath(); }
 
 /** A polyline drawn as a repeating pattern of on/off lengths: [on, off] dashes, [0.01, gap] dots (round caps), [a, b, c, d] dash-dot. */
-function pattern(G, p, pat) {
+export function pattern(G, p, pat) {
   let k = 0, on = true, left = pat[0];
   G.moveTo(p[0], p[1]);
   for ( let i = 2; i < p.length; i += 2 ) {
@@ -198,7 +198,7 @@ export class ZoneDisplay {
    * @param {boolean} [o.editing]              the GM is drawing: stronger tints so new zones show at once
    * @param {object} [o.marks]                 Marks.resolve(): borders (walls, doors) and zone features / states
    */
-  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null } = {}) {
+  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null, terrainText = null } = {}) {
     const F = this.fill;
     // PERF (ultra1-zones, 2026-11-10): every layer change, hover and step of the selected token called this, and it cleared every
     // Graphics and destroyed and made again every badge and icon (a PIXI.Text each: a canvas, a measure, a texture upload; destroying
@@ -207,7 +207,7 @@ export class ZoneDisplay {
     // same draw calls from the same inputs, so nothing on screen changes.
     const lookKey = JSON.stringify(look ?? null);
     if ( Z !== this.Z || g !== this.g ) this.#drawnKeys = {};
-    this.M = marks; this.editing = editing;
+    this.M = marks; this.editing = editing; this.terrainText = terrainText;
     const oldBadges = this.#badgeCache, oldIcons = this.#iconCache;
     this.#badgeCache = new Map(); this.#iconCache = new Map();
     this.badges.removeChildren();
@@ -480,9 +480,11 @@ export class ZoneDisplay {
       if ( !p ) continue;
       const parts = ICONS.filter(([k]) => p[k]).map(([k, g, e]) => ({ k, s: fa ? g : e }));
       const terrain = this.editing && p.terrain ? p.terrain : null;
-      if ( !parts.length && !terrain ) continue;
+      // (the numbers beside a terrain: the map's own table, or the one of the combat module that runs the rules - zones.mjs wreckText)
+      const terrainLabel = terrain ? (this.terrainText ? this.terrainText(terrain) : game.i18n.localize(`MOINENMAPS.Zones.terrainShort.${terrain}`)) : "";
+      if ( !parts.length && !terrainLabel ) continue;
       // the same icons (and the numbers on them) at the same resolution: keep the row
-      const key = JSON.stringify([z.id, parts.map((it) => it.k), fa, p.floors ?? null, !!p.wrecked, p.fire ?? null, terrain, res, game.i18n?.lang]);
+      const key = JSON.stringify([z.id, parts.map((it) => it.k), fa, p.floors ?? null, !!p.wrecked, p.fire ?? null, terrainLabel, res, game.i18n?.lang]);
       const kept = old.get(key);
       if ( kept ) {
         old.delete(key); this.#iconCache.set(key, kept);
@@ -510,8 +512,8 @@ export class ZoneDisplay {
           n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x - 2, 1); row.addChild(n); x += n.width + gap;
         }
       }
-      if ( terrain ) {
-        const n = new PIXI.Text(game.i18n.localize(`MOINENMAPS.Zones.terrainShort.${terrain}`), { fontFamily: "Signika, sans-serif", fontWeight: "600", fontSize: 11, fill: 0xd8ccb0 });
+      if ( terrainLabel ) {
+        const n = new PIXI.Text(terrainLabel, { fontFamily: "Signika, sans-serif", fontWeight: "600", fontSize: 11, fill: 0xd8ccb0 });
         n.mmKey = "terrain";
         n.resolution = res; n.anchor.set(0, 0.5); n.position.set(x, 0); row.addChild(n); x += n.width + gap;
       }
