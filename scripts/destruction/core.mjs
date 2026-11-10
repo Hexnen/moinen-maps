@@ -563,8 +563,9 @@ export function bake(I, cache = null) {
   // and their first pixel.
   const stats = { areas: 0, shards: 0, chips: 0, pulverised: 0, culled: 0, materials: [], baked: 0, reused: 0 };
   const comps = [];
-  // (`skip`: a stroke the caller does not want baked this time - its record is elsewhere; `k`: an erase stroke)
-  (I.objects ?? []).forEach((ob, index) => { if ( !ob.k && !ob.skip ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
+  // (`skip`: a stroke the caller does not want baked this time - its record is elsewhere; `k`: an erase stroke; a hole: a stroke this
+  // job neither bakes nor reads, left out of the message - destruction.mjs inputOf)
+  (I.objects ?? []).forEach((ob, index) => { if ( ob && !ob.k && !ob.skip ) for ( const c of partsOf(ob) ) comps.push({ ...c, index, ob }); });
   if ( !comps.length ) return assemble([], stats, t0, progress);
   progress(0.2);
 

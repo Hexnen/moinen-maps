@@ -34,11 +34,32 @@ const paramStr = (S) => { const P = keyParams(S); return Object.keys(P).filter((
 const objStr = (S, o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${((S.params.pin ? o.pr?.directional : S.params.directional) || Model.TYPES[o.t] === "gash") && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}${o.c ? ",c" + o.c : ""}${o.pr ? ",r" + prStr(o.pr) : ""}`;
 const prStr = (pr) => Object.keys(pr).sort().map((k) => `${k}=${JSON.stringify(pr[k])}`).join("&");
 
+/**
+ * PERF (makeKey): fnv(enc(strs.join(";"))) computed as a chain: the state after each stroke's string is kept, so a list that only grew
+ * (or changed near its end) hashes its new strings only. The same number as the one-shot hash (UTF-8 of a concatenation is the
+ * concatenation of the UTF-8s; fnv runs byte by byte). Every bake pass hashed every stroke's pixels again: megabytes on a grown scene.
+ */
+const keyChain = { strs: [], hs: [] };
+const KEY_SEMI = enc(";");
+function keyChainFnv(strs) {
+  const c = keyChain, L = Math.min(c.strs.length, strs.length);
+  let p = 0;
+  while ( p < L && c.strs[p] === strs[p] ) p++;
+  c.strs.length = p; c.hs.length = p;
+  let h = p ? c.hs[p - 1] : 2166136261 | 0;
+  for ( let i = p; i < strs.length; i++ ) {
+    if ( i ) h = fnv(KEY_SEMI, h) | 0;
+    h = fnv(enc(strs[i]), h) | 0;
+    c.strs.push(strs[i]); c.hs.push(h);
+  }
+  return h >>> 0;
+}
+
 export function makeKey(scene, S, bgPath) {
   // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke; their cause when they have one)
-  const objs = (S.objects ?? []).map((o) => objStr(S, o)).join(";");
+  const objs = keyChainFnv((S.objects ?? []).map((o) => objStr(S, o)));
   const extra = fnv(enc(`${paramStr(S)}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`));
-  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(objs)).toString(36)}:${extra.toString(36)}`;
+  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${objs.toString(36)}:${extra.toString(36)}`;
 }
 
 /**
