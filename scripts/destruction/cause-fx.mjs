@@ -481,18 +481,32 @@ export function tickLights(d, now) {
   const dark = Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0)), bloomK = dark * dark;
   // the rims of non-glowing damage: none by day, from a darkness of 0.5 up to full at 0.85
   const rimK = Math.min(1, Math.max(0, (dark - 0.5) / 0.35));
+  // PERF: a pool far off the screen is not drawn (renderable; its `visible` keeps its meaning): at night every damage has its rim in the
+  // scene's illumination, ~2000 sprites batched and drawn in every frame of a grown scene though a few dozen are in view. Culled only
+  // past half a view of margin on every side, so nothing that could reach the screen is left out (the same pixels).
+  const cv = cullView(), cull = (spr) => { if ( !cv ) { spr.renderable = true; return; } const t = spr.texture, w = (t?.width ?? 0) * spr.scale.x, h = (t?.height ?? 0) * spr.scale.y;
+    spr.renderable = !(spr.x > cv.x1 || spr.y > cv.y1 || spr.x + w < cv.x0 || spr.y + h < cv.y0); };
   for ( const g of L.groups ) {
     const shown = !!g.cont.parent && !g.dead && g.cont.visible !== false;
     // (a gun's walked pocks: no night rim - full, their many small lips read as white speckle round every pock at night, and even
     // at 30 % (round 2) as pale dotted outlines; a gouge stays a dark hole)
     const gk = g.objId && d.gunPocks?.(g.objId) ? 0 : 1;
-    if ( g.rim ) { const a = shown ? gk * rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; if ( a > 0.01 && !g.rim.tex ) rimTexture(g.rim); g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); }
+    if ( g.rim ) { const a = shown ? gk * rimK * g.cont.alpha * (g.anim ? (g.glowIn ?? clamp01((now - g.anim.start - g.anim.delay) / Math.max(1, g.anim.reveal))) : 1) : 0; if ( a > 0.01 && !g.rim.tex ) rimTexture(g.rim); g.rim.pool.visible = a > 0.01; g.rim.pool.alpha = Math.min(1, a); if ( g.rim.pool.visible ) cull(g.rim.pool); }
     const lt = g.light; if ( !lt ) continue;
     let a = shown ? g.cont.alpha * (g.anim ? (g.glowIn ?? 0) : 1) : 0;
     if ( a > 0 && !still ) a *= pulse(causeLook(g.info.cause)?.pulse, now, lt.seed);
-    lt.pool.visible = a > 0.01; lt.pool.alpha = Math.min(1, a) * 0.85;
+    lt.pool.visible = a > 0.01; lt.pool.alpha = Math.min(1, a) * 0.85; if ( lt.pool.visible ) cull(lt.pool);
     lt.bloom.alpha = Math.min(1, a) * lt.base * bloomK;
   }
+}
+
+/** The view in canvas px grown by half its size on every side (null: unknown, or `CONFIG.moinenMaps.noLightCull`). */
+function cullView() {
+  const st = canvas.stage, v = canvas.app?.renderer?.screen;
+  if ( !st || !v || globalThis.CONFIG?.moinenMaps?.noLightCull || st.rotation ) return null;
+  const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
+  const x0 = Math.min(tl.x, br.x), x1 = Math.max(tl.x, br.x), y0 = Math.min(tl.y, br.y), y1 = Math.max(tl.y, br.y), mx = (x1 - x0) / 2, my = (y1 - y0) / 2;
+  return { x0: x0 - mx, y0: y0 - my, x1: x1 + mx, y1: y1 + my };
 }
 
 function pulse(kind, t, s) {

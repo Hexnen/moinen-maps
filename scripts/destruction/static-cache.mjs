@@ -54,6 +54,37 @@ const cidOf = (o) => o._mmCid ?? (o._mmCid = ++CID);
  * live units odd ones; a unit is never below an earlier unit it overlaps (strictly above across parities). O(n^2) rectangle tests.
  */
 export function levels(units) {
+  // PERF: the earlier units each one overlaps are found through a coarse grid (every unit filed under the cells of its box grown by its
+  // own margin: two units that meet with the larger of their margins always share a cell), not by testing every earlier unit - O(n^2)
+  // was ~2M rectangle tests in every frame of a busy scene of 2000 objects. The same levels: the exact test decides, and a level is the
+  // max over the units found, in any order. `CONFIG.moinenMaps.levelsN2 = true`: the old loop (A/B).
+  if ( globalThis.CONFIG?.moinenMaps?.levelsN2 || units.length < 48 ) return levelsN2(units);
+  const lv = new Array(units.length), C = 128, grid = new Map(), wide = [], stamp = new Int32Array(units.length).fill(-1);
+  const span = (u) => {
+    const m = u.m ?? 0, x0 = Math.floor((u.r.x0 - m) / C), x1 = Math.floor((u.r.x1 + m) / C), y0 = Math.floor((u.r.y0 - m) / C), y1 = Math.floor((u.r.y1 + m) / C);
+    return (x1 >= x0 && y1 >= y0 && (x1 - x0 + 1) * (y1 - y0 + 1) <= 1024) ? [x0, y0, x1, y1] : null;      // (null: huge or odd - kept apart, tested with everything)
+  };
+  for ( let i = 0; i < units.length; i++ ) {
+    const u = units[i], par = u.live ? 1 : 0;
+    let L = par;
+    const test = (j) => {
+      if ( stamp[j] === i ) return; stamp[j] = i;
+      const q = units[j], m = Math.max(u.m ?? 0, q.m ?? 0);
+      if ( q.r.x0 >= u.r.x1 + m || q.r.x1 <= u.r.x0 - m || q.r.y0 >= u.r.y1 + m || q.r.y1 <= u.r.y0 - m ) return;
+      const need = lv[j] + ((lv[j] & 1) === par ? 0 : 1);
+      if ( need > L ) L = need;
+    };
+    const sp = span(u);
+    for ( const j of wide ) test(j);
+    if ( sp ) { for ( let y = sp[1]; y <= sp[3]; y++ ) for ( let x = sp[0]; x <= sp[2]; x++ ) { const b = grid.get(y * 1048576 + x); if ( b ) for ( const j of b ) test(j); } }
+    else for ( let j = 0; j < i; j++ ) test(j);
+    lv[i] = L;
+    if ( sp ) { for ( let y = sp[1]; y <= sp[3]; y++ ) for ( let x = sp[0]; x <= sp[2]; x++ ) { const k = y * 1048576 + x; let b = grid.get(k); if ( !b ) grid.set(k, b = []); b.push(i); } }
+    else wide.push(i);
+  }
+  return lv;
+}
+function levelsN2(units) {
   const lv = new Array(units.length);
   for ( let i = 0; i < units.length; i++ ) {
     const u = units[i], par = u.live ? 1 : 0;
