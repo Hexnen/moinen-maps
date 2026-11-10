@@ -6,8 +6,17 @@ routes, borders and zones as data, and events. Pure parts: `scripts/zones/keys.m
 `scripts/zones/marks.mjs`; wiring: `scripts/zones/zones.mjs`. Tests: `dev/zones-keys.test.mjs`, `dev/zones-places.test.mjs`,
 `dev/zones-api.test.mjs`.
 
-Not in M1 (later packages): drawing or highlighting anything new, picking a zone by click, editing UI for the new zone
-attributes, the wall-plus-door border model and border states, movement interception, moving tokens.
+Package M2 (sections 9-15) added: borders as a wall with an optional door, each with its own Armor and state; the zone-state
+registry; temporary edges; a write path where every write returns its inverse; movement from a mover profile with a listener
+asked before every step, group and forced moves, free spots, cost confirmation on a dragged token. Pure parts:
+`scripts/zones/borders.mjs`, `scripts/zones/states.mjs`, `scripts/zones/moves.mjs`. Tests: `dev/zones-borders.test.mjs`,
+`dev/zones-moves.test.mjs`, `dev/zones-play.test.mjs`.
+
+Still not there (a later task): highlighting sets of zones and borders, picking a zone by click, editing UI for the zone
+attributes, the registry and the wall-plus-door model (the GM's menu still marks the six border kinds).
+
+The map **stores, reports and draws**. It computes no Invincible rule effect: what a state, a wall or a step does to a character
+is the combat module's.
 
 Book references are line numbers of `invincible-plus-ultra/dev/book-dump.txt`.
 
@@ -150,9 +159,10 @@ are M2.
 ```
 api.borderBetween(a, b) -> null | {        // null: not neighbours (or the same zone)
   key: "z1|z2", zones: [key, key], ids: [id, id],
-  kind: "open" | "door" | "locked" | "wall" | "outer" | "reinforced",
-  armor,                                   // 0 open, door 1, locked 2, wall 2, outer 3, reinforced 4 (table after 2405)
-  door: bool, stops: { walk, air, through }, length (px), x, y   // the GM's mark, else the middle of the longest stretch
+  kind: "open" | "door" | "locked" | "wall" | "outer" | "reinforced",   // what it amounts to NOW (section 9)
+  armor,                                   // what a breach has to beat now: 0 open, door 1, locked 2, wall 2, outer 3, reinforced 4 (table after 2405)
+  door: bool, stops: { walk, air, through }, length (px), x, y,   // the GM's mark, else the middle of the longest stretch
+  base, wall, doorway                      // M2: the kind as built, the wall and the door with their own Armor and state (section 9)
 }
 api.bordersOf(where) -> [border, ...]
 
@@ -165,6 +175,7 @@ api.zone(where) -> null | {
   tags: [...],                             // "water", "tall" (the features) + stored: power, metal, plants,
                                            // throwables, flammable, vacuum, bystanders
   states: { wrecked, fire, dark, ice, flooded, lowgrav },
+  records: [state, ...],                   // M2: every state as a record (section 10)
   props                                    // the raw merged marks (read-only)
 }
 api.zoneList() -> [zone, ...]
@@ -173,7 +184,7 @@ api.zoneList() -> [zone, ...]
 Stored attributes are written with the existing `api.setZone(id, patch)` (GM): `{ empty: true, tags: ["metal", ...],
 terrain: "none", building, floors, ... }`. There is no editing UI for `empty` and `tags` yet (later task); `terrain`,
 `building`, `floors`, `tall`, `water` already have theirs. `setZone` takes a zone **id**: use `api.idOf(key)`.
-Zone states stay as they were (the registry with owner / level / end condition is M2).
+The states with owner / level / end condition / exemptions are the registry's (section 10).
 
 ## 6. Events
 
@@ -188,15 +199,21 @@ Every payload has `{ type, scene: sceneId, version }`.
 | `tokenLeft` | `token` (id), `uuid`, `actor` (id), `from`, `to` (places; `to` null: deleted), `zoneChanged`, `levelChanged`, `cause`, `userId` | the token's place stopped being `from` |
 | `tokenEntered` | the same; `from` null: created | the token's place became `to`; always follows its `tokenLeft` |
 | `zoneChanged` | `zone` (key), `id`, `before`, `after` (props; null = no such zone), `changed: [prop, ...]`, `added`, `removed`, `source` | a zone's features, attributes or states changed, a zone appeared or went |
-| `borderChanged` | `border` (key), `zones: [key, key]`, `before`, `after` (kind; null = no such border), `source` | a border's kind changed, a border appeared or went |
+| `borderChanged` | `border` (key), `zones: [key, key]`, `before`, `after` (kind; null = no such border), `source`; M2: `was`, `now` (`{ wall, door }`, null = no such border) | a border's kind, wall or door changed (Armor, state), a border appeared or went |
+| `edgeChanged` (M2) | `edge` (id), `before`, `after` (the edge record; null = none), `source` | a temporary edge was added, changed or removed |
+| `moveStarted`, `moveStep`, `moveEnded` (M2) | section 14 | a move made through `api.move()` - **only on the client that runs it** |
 
 - `cause`: `"move"` (x / y), `"level"` (altitude, floor, airborne), `"zones"` (the zones were redrawn or a building's
   floors changed under the token), `"create"`, `"delete"`. `userId`: who made the change (null for `"zones"`).
 - A token event is told when the token's **document** changes (the start of the move), not when its animation ends, and
-  after the fact: nothing here can stop or answer a move (that is M2, item 14).
+  after the fact: nothing here can stop or answer a move (for that: `api.beforeStep`, section 14).
 - `levelChanged` is also true when only standing / flying changed (rooftop to airborne): `from.spot === to.spot` then.
 - `source`: `"edit"` (this client's GM changed the zones), `"sync"` (another client's change arrived with the scene
-  flag), `"layers"` (the fire, destruction or water layer changed what a zone reads as).
+  flag), `"layers"` (the fire, destruction or water layer changed what a zone reads as), `"play"` (M2: a write through
+  `api.apply()` on this client).
+- M2: `zoneChanged` also carries `statesBefore` / `statesAfter` (the zone's registry records) and lists `"states"` in
+  `changed` when they differ; a state the map does not draw (smoke, toxic, ...) changes nothing else.
+- M2: token events carry `move`: the id of the `api.move()` operation that made the change (null otherwise).
 - Opening a scene tells nothing: read the state with `zoneList()` / `tokensInZone()` on the existing hook
   `moinenMapsZones` `"loaded"`.
 - The old hook `moinenMapsZones` (`"loaded" | "edited" | "params" | "section" | "linked"`) is unchanged.
@@ -213,7 +230,7 @@ Every payload has `{ type, scene: sceneId, version }`.
 | What a move passes | `api.path(token, target, { way })` -> `steps`, `crossed` |
 | The wall between two zones, its Armor | `api.borderBetween(a, b)` -> `kind`, `armor` |
 | Knockback / slam chain | `api.path(from, to, { way: "range" })` -> `crossed` (barriers in order, `blocked`) |
-| Wrecking the zone | `api.zone(where).wreck`; mark it: `api.setZone(api.idOf(key), { wrecked: true })` (GM) |
+| Wrecking the zone | `api.zone(where).wreck`; mark it: `api.addZoneState(key, { kind: "wrecked", owner })` (keep `inverse`) |
 | Trap stunt allowed | `!api.zone(where).empty` |
 | A power needs water / metal / ... | `api.zone(where).tags.includes("metal")` |
 | Burning zone, darkness | `api.zone(where).states` |
@@ -231,3 +248,338 @@ Every payload has `{ type, scene: sceneId, version }`.
 - The distance badges and the ruler label read the per-way distances from the cache of the current zones state instead
   of working them out on every redraw (same numbers).
 - A token whose `alt` is `dimension` or `chase` shows no distance badges, like sky high and orbit.
+
+## 9. Borders: a wall with an optional door (M2)
+
+Book 2254: a border is open or blocked, and a blocked border can have a door. Table after 2405: interior door 1, interior
+wall 2, exterior door 2, exterior wall 3, reinforced door / wall 4+. 2418: an unlocked door does not affect movement, a
+locked one is breached, an electronically sealed one is opened. 2419: a door or a wall can be crashed through. What a breach
+takes, who may try and what failing costs is the combat module's; the map holds the wall, the door, their Armor and states.
+
+```
+border.wall    = null (an open border) | { armor, state: "intact" | "breached" | "removed", outer: bool, temp: bool }
+border.doorway = null (no door)        | { armor, state: "open" | "closed" | "locked" | "sealed" | "breached", built }
+border.base    = the kind the border was built as ("open" | "door" | "locked" | "wall" | "outer" | "reinforced")
+```
+
+- `outer`: a building's exterior wall (flyers pass over it: `stops.air` is false). `temp`: the wall was removed *for a while*
+  (the one who removed it says so; nothing puts it back). `built`: the state the door was built in (what restoring returns to).
+- `closed` is an unlocked door. A door is never built `breached`.
+- `kind`, `armor`, `door`, `stops` (section 5) now say what the border **amounts to at the moment**: a wall that is breached or
+  removed is `kind: "open"`, `armor: 0`, stops nobody; an intact wall with a door one can pass (`open`, `closed`, `breached`)
+  is `"door"`; with a door one cannot (`locked`, `sealed`) is `"locked"`; without a door it is `"wall"`, `"outer"` or
+  `"reinforced"` (Armor 4+). `armor` is the door's where there is one in a standing wall, else the wall's.
+- **Built** and **in play** are stored apart. What the map maker built: the wall, its Armor, whether it is exterior, the door,
+  its Armor and built state (`w` in the flag). What happened to it during play: the wall breached or removed, the door opened,
+  locked, sealed, breached (`bs` in the flag).
+- **Restoring is a GM action, never automatic**: `api.restoreBorders()` / the GM's border menu ("Restore as built", "Restore
+  all walls and doors as built"). `clearStates()` (the menu's end-of-scene broom) does not touch borders.
+- The GM's menu still marks the six kinds; marking a border anew drops its play record.
+
+Old scenes: the one-kind marks are still what a plain border stores (`[x, y, kind]`) and read as this model with no write:
+
+| old kind | wall | door | as before |
+|---|---|---|---|
+| `door` | Armor 2 | Armor 1, closed | kind door, Armor 1, stops nobody |
+| `locked` | Armor 2 | Armor 2, locked | kind locked, Armor 2, stops walk and air |
+| `wall` | Armor 2 | - | stops walk and air |
+| `outer` | Armor 3, exterior | - | stops walk |
+| `reinforced` | Armor 4 | - | stops walk and air |
+
+The Armor 2 of the wall around an old door mark is **our reading** (the old mark had one Armor for the whole border). An
+untouched scene's flag encodes byte for byte as before (`bs`, `q`, `e`, `pn` appear only when something is stored).
+
+```
+api.setBorderState(border, { wall?: { state, temp }, door?: { state } }) -> Promise<result>     play state
+api.buildBorder(border, { kind?, wall?: null | { armor, outer }, door?: null | { armor, state } }) -> Promise<result>
+        builds the border anew (as built, play record dropped): `wall: null` or `kind: "open"` opens it; a part not named stays;
+        a new `kind` starts from that kind's wall and door; a door put into a wall takes the table's Armor unless given
+api.restoreBorders(border?) -> Promise<result>           one border, or all of them, back as built (GM action)
+api.borderAt(x, y, tol)  -> { a, b, x, y, kind (as built), now (what it amounts to), wall, door } | null     (as before + now, wall, door)
+api.WALL_STATES, api.DOOR_STATES
+```
+
+`border`: a border key (`"z1|z2"`), a border object, or `[placeA, placeB]`. `result` is section 12's. Reasons a write is
+refused: `noBorder` (not neighbours), `noWall` (an open border has no state), `noDoor`, `wallState`, `doorState`, `badBorder`.
+
+Drawing (the existing border look, no new design; **not seen on a live canvas yet**): a breached wall has a hole where its
+mark sits, a removed wall is faint; the door is the plank across the wall - closed brown, locked red with the keyhole, sealed
+red with a square blue lock, open swung out of the wall, breached an empty frame.
+
+## 10. The zone-state registry (M2)
+
+```
+state = {
+  id,        // unique in the scene, never reused: "s7"
+  kind,      // "wrecked" | "fire" | "dark" | "smoke" | "gravity" | "weather" | "flooded" | "toxic" | "ice" | any other name
+             //   ([a-z][A-Za-z0-9_-]{0,31}); api.STATE_KINDS lists the known ones
+  at?,       // the level it holds on: "ground" | "elevated" | "underground" | "f<n>"; absent: the zone, no level named
+  level?,    // how strong (a number): a fire's Intensity (2925), a power's level value
+  owner?,    // who or what made it - opaque (a combatant id, an effect source object)
+  ends?,     // when it ends - opaque (the combat module's end condition; nothing here ends a state)
+  except?,   // ids it does not touch (1654, 1841: never one's own darkness or storm) - opaque strings
+  data?,     // anything else: gravity { mode: "low" | "high" } (1703-1704), weather { type: "storm" } (1841)
+  zone,      // (reported) the key of its zone now
+  source     // (reported by zoneStates(where) / zone().records) "registry" | "mark" | "map"
+}
+```
+
+- The registry **stores and reports**; `owner`, `ends`, `except`, `data` are kept as given (each at most 2000 characters of
+  JSON, `except` at most 64 ids). Nothing ends or clears a state on its own; `clearStates()` (a GM action) removes the
+  registry's states with the GM's marks.
+- Where the book gives a state its content (for the reader, not computed here): fire 2925-2927, darkness 1654, gravity
+  1702-1704, storm 1841, toxic area 2889, smoke 2646, flooding 1832, wrecking 2454-2457. Ice has none.
+- **What is drawn**: a state the map already showed reads as the zone property the icons, the tints, the routes and the older
+  API use: `wrecked`, `fire` (needs `level` >= 1: its Intensity, capped at 12), `dark`, `ice`, `flooded` (a flooded zone can be
+  swum), `gravity` with `data.mode: "low"`. So `api.zone(z).states`, `rooftop`, `wreck`, the quake on wrecking and the fire
+  icon follow a registry state. `smoke`, `toxic`, `weather`, high gravity and custom kinds are stored and reported only.
+  A registry fire is **not** painted on the fire layer (the GM's own fire mark and `{ op: "zone", patch: { fire } }` are).
+- `at`: by the book an elevated position is a zone of its own above the ground (2258) and changed gravity takes both (1702);
+  which levels a state reaches is its maker's to say. A state with no `at` is returned for every level.
+- Stored as a point inside the zone (like the marks): it keeps to its zone while lines are redrawn.
+
+```
+api.addZoneState(zone, state) -> Promise<result>         zone: a key or id (no level named) or a spot string ("z3:elevated": that level);
+                                                         `state.at` says it outright. result.result = the stored state
+api.updateZoneState(id, { at, level, owner, ends, except, data }) -> Promise<result>     null drops a field
+api.removeZoneState(id) -> Promise<result>
+api.zoneStates() -> [state, ...]                         the registry's states of the whole scene
+api.zoneStates(where) -> [state, ...]                    every state of a zone as records: the registry's, the GM's own marks
+        (id "mark:fire", source "mark"), what the map's layers show (id "map:wrecked", source "map"). A bare key or id: every
+        level; a spot, a place or a token: that level and the states that name none
+api.zoneState(id) -> state | null
+api.zone(where).records                                  the same list for every level
+```
+
+Refused: `noZone`, `badState` (no kind, a value that cannot be stored), `idTaken`, `noState`.
+
+## 11. Temporary edges (M2)
+
+```
+edge = { id ("e8"), kind: "portal" | "tunnel" | other name, a, b (spot strings), owner?, ends?, ways?: [way, ...], data?, live }
+```
+
+- A portal joins two places that are not neighbours (book 1666, 2040: two-way, lasts a few minutes); a tunnel is a passage
+  others can follow, for example under a wall (1996). Both are two-way. `ways`: the ways of moving that may use it (route names
+  `walk` / `air` / `through` / `swim` / `swing` or the profile's own name, such as `flight`); absent: every way.
+- `a`, `b`: anything that names a place when adding (a key, a spot, a token); an end may be an off-map area (`"@dimension"`):
+  such an edge is stored and listed and joins nothing on the map (`live: false`), as does one whose zone is gone for now.
+- **How far an edge counts and who fits through it is not in the book.** `api.plan` / `reach` / `moveCost` / `move` count one
+  step for an edge (our reading; a mover's profile can switch edges off or pick kinds). `range`, `route`, `path`, `distances`,
+  `zonesWithin` (sections 3-4) never use edges. The levels of an edge's ends are reported, not enforced.
+- Nothing removes an edge on its own.
+
+```
+api.addEdge(edge) -> Promise<result>     api.removeEdge(id) -> Promise<result>
+api.edges() -> [edge, ...]               api.edgesOf(where) -> [edge, ...] (the live edges at a zone)
+api.EDGE_KINDS
+```
+
+Refused: `noZone`, `badEdge` (no kind, the same spot twice), `idTaken`, `noEdge`.
+
+## 12. Writing for a combat action: `apply` and inverses (M2)
+
+Only the **active GM's client** writes (`api.canWrite()`: a GM, and where several are connected the one Foundry calls active).
+
+```
+api.apply(op, { save = true }) -> Promise<{ ok: true, changed, inverse, result } | { ok: false, reason, at? }>
+```
+
+`inverse` is an op - plain data, storable in an undo journal - that undoes exactly this write when given back to `apply`.
+The scene is saved before the promise resolves; events (section 6, `source: "play"`) fire once per `apply`.
+
+| op | does | result | inverse |
+|---|---|---|---|
+| `{ op: "border", border, wall?: { state, temp }, door?: { state } }` or `{ ..., restore: true }` | a border's state in play | the border (section 5) | `{ op: "border", border, play }` (the play record before) |
+| `{ op: "borderBuild", border, kind?, wall?, door? }` | builds it anew (section 9) | the border | `{ op: "borderBuild", border, raw, play }` (how it was built, what had happened to it) |
+| `{ op: "zoneState.add", zone, state }` | section 10 | the state | `{ op: "zoneState.remove", id }` |
+| `{ op: "zoneState.update", id, patch }` | | the state | the same op with the fields as they were |
+| `{ op: "zoneState.remove", id }` | | the state removed | `{ op: "zoneState.add", ... }` with the same record and id |
+| `{ op: "edge.add", edge }` / `{ op: "edge.remove", id }` | section 11 | the edge | the other one |
+| `{ op: "zone", zone, patch }` | the zone's own marks, as `setZone` (attributes, features, the GM's state marks; a fire is painted / put out on the fire layer) | zone data | `{ op: "zone", zone, patch }` with the own values before |
+| `{ op: "tokens", rows: [{ id, x, y, alt, floor, air }] }` | puts tokens somewhere (position and this module's level flags) | their places | the same op with where they were |
+| `{ op: "batch", ops: [...] }` | all or nothing (a failure takes back what was done, `at`: its index); told and saved once | the results | a batch of the inverses, last first |
+
+- The shorthand calls (`setBorderState`, `buildBorder`, `restoreBorders`, `addZoneState`, `updateZoneState`, `removeZoneState`,
+  `addEdge`, `removeEdge`) are `apply` with one op and return the same.
+- `changed: false`: the write asked for what already was (nothing told, nothing saved); the inverse is still valid.
+- Play state (`bs`, `q`, `e`, `pn`) is **not part of the Zones editor's undo**: the GM's Ctrl+Z over the pencil lines leaves it as
+  it is now. Zone marks written through `{ op: "zone" }` are the GM's marks (`m`) and are in the editor's undo like any other.
+- Refused before anything: `notGM`, `notActiveGM`, `noZones`, `badOp`.
+- `api.move` and `api.moveToZone` (section 14) return an inverse of the `tokens` kind; they are not GM-only (a token's owner may
+  move it), but only the active GM can `apply` an inverse.
+
+## 13. The zone graph for the rules library (M2)
+
+```
+api.graph() -> {
+  zones:   [{ id (key), level: 0, terrain: "office" | ... | null, rooftop, empty, wrecked, flammable, wreck, tags }],
+  borders: [{ id (border key), a, b, wall: null | { armor, state }, door: null | { armor, state } }],
+  edges:   [{ id, kind, a, b (zone keys), spots: [a, b], ways }]
+}
+```
+
+The shape `zones.makeGraph(data)` of the rules library takes (`C:/ipu-tactics/scripts/rules/CONTRACT.md`, "Zone graph");
+`wreck`, `tags` and `edges` are more than it names. The same object is returned until the zones change (`api.version()`).
+Differences to know about:
+- floors are not zones of the graph: a building with floors is one graph zone (`level: 0`); the levels are in places and plans;
+- `terrain: null` is both "cannot be wrecked" and "not set" here; `wreck.why` tells them apart (`"terrain"` / `"unset"`);
+- the contract's flyers cross a blocked border when one of its zones has a rooftop (its reading 4); the map's routes let flyers
+  over **exterior** walls only (`wall.outer`, section 3). The graph carries no `outer`: a rules-side air route can differ from
+  `api.route(a, b, "air")`. Use the map's routes for movement and the graph for the rules' own questions.
+
+## 14. Movement (M2)
+
+### Mover profile and cost
+
+```
+profile = { way, speed = 1, stress, actions = 1, hover, force, edges, conditions }
+api.profile(profile) -> the profile filled in | null (an unknown way)
+```
+
+| field | meaning |
+|---|---|
+| `way` | `walk` / `ground`; `air` / `flight` / `leap` / `superspeed`; `through` / `burrow` / `teleport` / `phase`; `swim`; `swing` - the route it counts (section 3) |
+| `speed` | zones in one movement action (on foot 1: book 2383; the movement powers 2 / 4 / 8 / 16: 1995-2034) |
+| `stress` | the stress option: `true` doubles the speed (as every movement power of the book), a number or `stressSpeed` says it outright |
+| `actions` | how many movement actions the mover may spend now (what `within` is measured against) |
+| `hover` | may end in the air (air only): default true, false for `leap` and `superspeed` (2007, 2013: the ground or a rooftop) |
+| `force` | may try borders that stop it (crashing through: 2419): the route counts every border and marks the blocked ones |
+| `edges` | `true` (default), `false`, or a list of edge kinds it may use |
+| `conditions` | the mover's conditions as given: the map does not read them, the step listeners get them |
+
+Which power gives which speed, what a condition does to a move (movement as a full action: 2745, 1574, 1841, 1704), whether a
+level change costs: the combat module's. The map counts.
+
+```
+cost = { total, speed, actions, stressSpeed, stressActions, within: "free" | "plain" | "stress" | "no" }
+        actions: movement actions needed without stress; stressActions: with it (null: no option);
+        within: against profile.actions - free (no step), plain, only with stress, not at all
+
+api.moveCost(a, b, profile) -> { reachable, plan, cost }
+api.reach(where, profile, { max }) -> [{ zone, id, d, cost }]        nearest first, the mover's own zone first (d 0); horizontal steps
+api.plan(a, b, profile) -> null | { way, name, total, borders, edges, levels, zones, steps, crossed, cost, from, end }
+```
+
+`plan` is `path` (section 4) for a profile: the same steps, plus steps of kind `"edge"` (`{ kind: "edge", from, to, zone, level,
+floor, edge }`), `cost`, and the two places `from` / `end`. With no usable edge and no `force` it is step for step what `path`
+gives. With `force` a border that stops the mover is on the route with `border.blocked: true` (its `wall` and `doorway` say
+what stands there). null: no route, an off-map end (that is a level change: `setLevel`, `moveToZone`), an end in the air for a
+mover that must land, a place this way of moving cannot be at.
+
+### Forced moves
+
+```
+api.forcedChain(who, { direction: { dx, dy } | { angle }, awayFrom, toward, distance = 1, profile }) -> plan | null
+api.planAlong(from, [zoneKey, ...], { profile, end: { level, floor, airborne }, forced }) -> plan | null
+```
+
+- `forcedChain`: from where the mover is, `distance` zones along a straight line: `direction` (`angle` in degrees, 0 = east,
+  90 = south), or `awayFrom` / `toward` a token, a point or a place. The result is a plan with `forced: true` and
+  `ray: { dx, dy, end: "distance" | "edge", points }` (`end: "edge"`: the line left the zones before the distance was used
+  up). Every border on it that stops the mover has `blocked: true` with its wall and door, in order (plan rule 8, book 2435).
+- A mover on the ground (or on a floor) is thrown along the ground and a border counts as blocked when it stops walking; an
+  elevated mover stays at rooftop height (passes over exterior walls, `border.over`) and ends in the air. Both are **our
+  reading**: the book does not say at which level a thrown character travels, nor whether it then falls.
+- The GM edits the chain by naming the zones: `planAlong(from, keys, { forced: true })` lays any chain of neighbouring zones
+  (or zones joined by an edge) out the same way. The editing UI is the combat module's GM desk.
+- null: no direction (both on the same point), the mover is in no zone, a chain that does not hang together.
+
+### Moving tokens
+
+```
+api.freeSpot(where, { token, near, skip }) -> { x, y, crowded } | null      a token's top-left corner inside the zone
+api.moveToZone(token, where, { group, near, options }) -> Promise<{ ok, inverse, place } | { ok: false, reason }>
+api.move(token, to, { profile, plan, group, drop, forced, data, wait, options }) -> Promise<{ ok, op, done, total, stopped, place, inverse }>
+api.beforeStep(fn) -> off()
+```
+
+- `freeSpot`: a grid square inside the zone not covered by another token, nearest to `near` (default: the middle of the zone);
+  wholly inside when one is; `crowded: true` when every square is taken (the least covered one is given).
+- `moveToZone`: into a free spot of a zone on the level the place names; no route, no steps, nobody asked (a teleport's arrival,
+  a GM's placement, the return from the sky: plan rule 16). An off-map area changes the level only.
+- `move`: to a place (`to`, the route from `profile`) or along a plan made before (`plan`: from `plan`, `planAlong`,
+  `forcedChain`; refused as `stalePlan` when the mover is no longer where the plan starts). **Before every step** every
+  `beforeStep` listener is asked, one after another, and may answer later (a promise: a roll, a prompt, a change of the map):
+
+  | answer | effect |
+  |---|---|
+  | nothing / `true` | go on |
+  | `false` or `{ stop: true, reason, data }` | the step is not taken, the move ends there |
+  | `{ pass: true }` | take the step although its border is blocked |
+  | throws | the move stops (`reason: "error"`) |
+
+  After the listeners the step's border is read **again as it is now**: a listener that breached the wall (`setBorderState`)
+  lets the move go on; a border that still stops the mover and that nobody passed stops the move (`reason: "blocked"`).
+  ```
+  ctx = { op, index, last, step, remaining, token, group, profile, plan, forced, data,
+          from, to,                 // places: where the mover is, where the step leads
+          border | edge,            // the border as it is now (section 5 + 9) or the edge
+          statesFrom, statesTo }    // the states of the zone left and of the zone entered (section 10)
+  ```
+  Entering fire (2925), leaving darkness (1654), a wall on the way (2418-2419), a ward's zone (2876): the listener looks at
+  `statesTo` / `statesFrom` / `border`, does what the rules say and answers.
+- **Group moves** (`group`: tokens that go along - carried 2392, pulled in a grapple 2497, passengers, a group of minions
+  2826, Teleport Allies 2038): every step is one write of all the movers, each to a free spot of its own in the same zone and
+  on the same level; one `op`, one inverse.
+- `drop: { x, y }`: where in the last zone to end up near. `wait` (default true): each step waits for the tokens to get there.
+  `data`: handed to the listeners (the action it belongs to). `options`: for the token updates.
+- Result: `done` steps taken of `total`; `stopped: null | { index, reason, data, step }`; `place`: where the mover is;
+  `inverse`: a `tokens` op that puts every mover back where it started (null when no step was taken).
+- Events on the client that runs the move: `moveStarted { op, token, uuid, group, forced, way, total, zones }`, `moveStep
+  { ..., index, step, place }`, `moveEnded { ..., done, total, stopped, place }`. Every client still gets `tokenLeft` /
+  `tokenEntered` per step, with `move: op`.
+- Runs on the client that calls it; the tokens must be the caller's to move (`notOwner`). Other refusals: `noToken`,
+  `badProfile`, `noRoute`, `stalePlan`.
+
+### Cost confirmation on a dragged token
+
+```
+api.tactical({ profile(tokenDoc) -> profile, confirm(ctx) -> true | false | Promise, when(tokenDoc) -> bool, gm = false }) -> true
+api.tactical(false)          api.tacticalOn() -> bool
+```
+
+Per client, off by default (the combat module turns it on where and while tactical play runs). While on, a drag of a token
+into **another zone** by this client's user is held back: the route and its cost are worked out for the mover's profile and
+`confirm(ctx)` is asked with `{ token, from, to, drop, profile, plan, cost, reachable }`. A drag inside the zone goes through
+(free: 2383). `confirm` answers `true`: the map moves the token along the plan with `move()` (so the listeners are asked);
+anything else: the token stays - a combat module that sends the move to the GM as an intent sends it and answers `false`.
+Without `confirm` the map asks a yes / no question with the zones and actions. `gm: true` asks the GM's own drags too;
+`when` limits it (a token of the combat, the mover's turn).
+
+## 15. What a combat module calls (M2)
+
+| Need | Call |
+|---|---|
+| The wall / door between two zones, their Armor and state | `api.borderBetween(a, b)` -> `wall`, `doorway` |
+| Breach a wall, open / lock / seal / breach a door | `api.setBorderState(key, { wall: { state: "breached" } })`, `{ door: { state: "open" } }` -> keep `inverse` |
+| Remove a wall for a while | `api.setBorderState(key, { wall: { state: "removed", temp: true } })` |
+| Zone state with owner, level, end, exemptions | `api.addZoneState(zone, { kind, level, owner, ends, except, data })`; read: `api.zoneStates(where)` |
+| A portal, a tunnel | `api.addEdge({ kind: "portal", a, b, owner, ends })` |
+| Several changes of one action as one journal entry | `api.apply({ op: "batch", ops })` -> one `inverse` |
+| Undo | `api.apply(inverse)` |
+| The rules library's graph | `api.graph()` |
+| Reachable zones and their cost | `api.reach(token, profile)` |
+| Cost of one move | `api.moveCost(token, target, profile)` -> `cost.within`, `cost.actions`, `cost.stressActions` |
+| Move with rolls on the way | `api.beforeStep(listener)` once; `api.move(token, target, { profile, data })` |
+| Crash through a wall | profile `{ force: true }`; the listener rolls and calls `setBorderState` or answers `{ stop: true }` |
+| Carry, pull, passengers, minions | `api.move(token, target, { profile, group: [tokens] })` |
+| Knockback / Slam chain | `api.forcedChain(target, { awayFrom: attacker, distance })` -> the GM edits -> `api.planAlong(target, keys, { forced: true })` -> `api.move(target, null, { plan })` |
+| Put a token into a zone | `api.moveToZone(token, where)` |
+| Player drags a token | `api.tactical({ profile, confirm })` on the player's client |
+
+## 16. Limits and open points (M2)
+
+- Nothing of M2 has run in Foundry: `preUpdateToken` cancelling a v14 drag, `updateEmbeddedDocuments` with `x` / `y` for a
+  group, waiting for `movementAnimationPromise`, `DialogV2.confirm`, the drawing of walls and doors, and what a second client
+  sees are verified against a stand-in only (`dev/zones-play.test.mjs`).
+- The planner treats an edge as joining two zones; the levels of its ends are reported, not enforced.
+- A forced chain follows the map's surface: no vertical direction (up into the air, down a floor).
+- `freeSpot` treats tokens of every level as in the way (they share the map).
+- The GM's menu marks only the six kinds; a border built otherwise (`buildBorder`) shows its base kind there and is replaced
+  by a plain kind when the GM marks it again.
+- Differences from `combat-spec.md` section 7.1 as it stood when this was written: a door also has the states `closed`
+  (unlocked) and `breached` (as the rules contract); a place is `{ zone, level, floor, ... }` with a spot string, not
+  `{ key, level: "floor:<n>" }`; a temporary edge and a zone state carry `owner` / `ends` (the spec's edge says `source` /
+  `until`); the spec's state kind `storm` is `weather` with `data.type: "storm"`; `unwreckable` is `terrain: "none"`; the
+  resource flags are `tags`.
