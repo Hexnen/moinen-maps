@@ -151,7 +151,8 @@ function integrity(scene) {
 function teardown() {
   flushSave();
   gen++;
-  for ( const t of [bakeTimer, saveTimer, persistTimer, checkTimer, idleTimer, rebakeTimer, rimsTimer, warmTimer, warmHold, darkTimer] ) clearTimeout(t);
+  for ( const t of [bakeTimer, saveTimer, persistTimer, partialTimer, checkTimer, idleTimer, rebakeTimer, rimsTimer, warmTimer, warmHold, darkTimer] ) clearTimeout(t);
+  partialTimer = 0;
   rimsTimer = warmTimer = warmHold = darkTimer = 0; persisting = null;
   rebakeQueue = []; status.rebake = null; status.olderLook = null;
   inflight = null; publishBackoff = 0; publishRetryAt = 0; editedHere = false;
@@ -704,12 +705,19 @@ async function bakeOnce({ awaitPublish = true, force = false, idle = false, all 
   const live = new Set([...want.map((w) => w.rk), ...[...shownRecs.values()].map((r) => r.rk)]);
   for ( const k of recs.keys() ) if ( !live.has(k) ) recs.delete(k);
   { const keep = new Set(want.map((w) => `${base}|${w.objId}|${w.own}`)); for ( const k of plainRecs.keys() ) if ( !keep.has(k) ) plainRecs.delete(k); }
+  // MEMORY (ultra soak): a plain look LENT from a chunk (a shell's, a dried record's - not the record's own sprites) was kept for the whole
+  // session, ~1 MB a stroke (946 MB at 986 strokes after a reload). It only saves the next bake a chunk read (Net memo / IndexedDB,
+  // a few ms) - the same pixels either way - so it goes once the pass that read it is done. Not while a Rebake all runs (trimPlain).
+  if ( !rebakeQueue.length ) for ( const [k, sp] of plainRecs ) if ( sp.lean || recs.get(k)?.sprites !== sp ) plainRecs.delete(k);
   T.total = performance.now() - T.t0;
   const source = Object.entries(src).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(", ") || "memory";
   Object.assign(status, { baking: false, waiting: !complete, loading: 0, progress: 1, source, hash: "", error: "", perf: Object.fromEntries(Object.entries(T).filter(([k]) => k !== "t0").map(([k, v]) => [k, Math.round(v * 10) / 10])) });
   tell("status");
   // (during a Rebake all the manifest is written once, at its end)
   if ( game.user.isGM && complete && !status.rebake ) schedulePersist(src.baked + src.legacy);
+  // (strokes keep coming - a long fight: the manifest of the whole state is never written, shownKey never meets the key of the moment -
+  // so what is baked is published as it is, PARTIAL_MS after it was baked: its records let go of their pixels, a late player loads it)
+  else if ( game.user.isGM && !complete && src.baked && !status.rebake ) schedulePartial();
   maybeBlast(firstLoad);
   if ( !firstLoad && (src.chunk || src.baked || src.legacy) ) scheduleSettleRedraw();
 }
@@ -986,6 +994,19 @@ function afterFlatten(g) {
     for ( const q of atlasQueue ) { const r = shownRecs.get(q.objId); if ( !q.dead && r?.id && r.dir ) { display?.prepCollapse?.(q); display?.freeAtlas(q); } }   // (a cave-in's pit grid and plate tones first, while its pixels are there: display.prepCollapse)
     atlasQueue.clear();
   }, 0);
+}
+/**
+ * MEMORY (ultra soak): the areas the GM baked himself were flattened before their stroke had a chunk, so afterFlatten kept their atlas -
+ * and nothing asked again once the chunk was published: ~1 MB of CPU copy an area for the whole session. After a publish the
+ * flattened areas of strokes that have a chunk now let go of it (the same path as a loaded scene's: restoreAtlas from the chunk).
+ */
+function freeAtlases() {
+  if ( !display || globalThis.CONFIG?.moinenMaps?.keepAtlas ) return;
+  for ( const g of display.groups.values() ) {
+    if ( !g.flat || g.atlasFree || g.dead || g.shell || !g.tex?.resource?.data ) continue;
+    const r = shownRecs.get(g.objId);
+    if ( r?.id && r.dir ) afterFlatten(g);
+  }
 }
 /** A record's sprites of one area (by its base row's hash) as display.build laid them out: base, shards in order, cover, light. */
 function areaSprites(r, hash) {
@@ -1658,25 +1679,44 @@ function pauseBaking(kind, why) {
   tell("status");
 }
 
+/**
+ * PARTIAL PUBLISH (ultra soak, MEMORY + late join): while strokes keep coming faster than they bake, a pass never ends complete, the
+ * manifest was never written and every record baked here kept its pixels (and its areas their atlases) until the fight stopped: ~2 MB a
+ * stroke, and a player joining then baked all of it himself. A partial publish names the chunks of the strokes on screen now and keeps
+ * the stored entries of the others; the manifest's key stays the stored one (it is not the whole state), so the full publish follows
+ * as before once a pass completes. At most every PARTIAL_MS.
+ */
+const PARTIAL_MS = 4000;
+let partialTimer = 0;
+function schedulePartial() {
+  if ( partialTimer || globalThis.CONFIG?.moinenMaps?.noPartialPublish ) return;
+  partialTimer = setTimeout(() => { partialTimer = 0; persist({ partial: true }); }, Math.max(PARTIAL_MS, publishRetryAt - Date.now()));
+}
+
 function schedulePersist(fresh = 0) {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistTimer = 0; persist(); }, Math.max(fresh <= 2 ? 300 : 900, publishRetryAt - Date.now()));
 }
 
-async function persist() {
-  if ( persisting ) { persistAgain = true; return; }
+async function persist({ partial = false } = {}) {
+  if ( persisting ) { if ( !partial ) persistAgain = true; else schedulePartial(); return; }
   // one GM publishes: the one who painted here, or the active GM (two GMs never race on the files and the flag)
   if ( !S || !canvas.scene || !game.user.isGM || !(editedHere || game.users.activeGM?.isSelf) ) return;
-  persisting = persistOnce().finally(() => { persisting = null; if ( persistAgain ) { persistAgain = false; schedulePersist(0); } });
+  persisting = persistOnce(partial).finally(() => { persisting = null; if ( persistAgain ) { persistAgain = false; schedulePersist(0); } });
   return persisting;
 }
 
-async function persistOnce() {
+async function persistOnce(partialAsked = false) {
   const my = gen, scene = canvas.scene, bg = backgroundInfo()?.path ?? "";
   const base = Store.baseKey(scene, S, bg), key = Store.makeKey(scene, S, bg);
-  if ( shownKey !== key ) return;                   // not all on screen yet: the bake that completes it asks again
+  // not all on screen yet: the bake that completes it asks again (a partial publish - schedulePartial - names what is there)
+  const partial = shownKey !== key;
+  // (a complete pass's publish that a newer stroke overtook - the usual case in a long fight: the partial one names what is there)
+  if ( partial && !partialAsked ) { if ( game.user.isGM ) schedulePartial(); return; }
   // (a manifest of 0.4.1 with the same settings counts as the same: its entries stay, rewritten with the version they were baked at)
   const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg));
+  // (partial: a stroke not on screen keeps its stored entry - only one of this folder and these settings: another's names other chunks)
+  const keepOld = (id) => { if ( same && typeof M.c[id] === "string" ) c[id] = M.c[id]; };
   // (versions no longer decide who may publish: every entry carries the version it was baked with, and an entry is only replaced by a
   // record of the same stroke baked with a newer version, or by a changed stroke - never downgraded)
   seedKnown(scene);
@@ -1684,7 +1724,10 @@ async function persistOnce() {
   for ( const [index, o] of S.objects.entries() ) {
     if ( o.k ) continue;
     const sig = FS[index].sig, r = recs.get(`${base}|${o.id}|${sig}`);
-    if ( !r ) return;                                // should not happen once complete; a later run publishes
+    // should not happen once complete (a later run publishes); partial: the stored entry stays as it is
+    if ( !r ) { if ( !partial ) return; keepOld(o.id); continue; }
+    // (partial: only what is on screen now - a record baked for a pass not shown yet waits)
+    if ( partial && shownRecs.get(o.id) !== r ) { keepOld(o.id); continue; }
     const e = same ? Store.entryOf(M, o.id) : null, pick = Policy.entryChoice(e, sig, r, (id) => Net.known(dir).has(id));
     if ( pick.keep ) {
       c[o.id] = Policy.entryString(sig, e.id, e.ver);
@@ -1695,8 +1738,8 @@ async function persistOnce() {
     else todo.push({ o, sig, r, same: pick.encode, e });
   }
   const stale = M ? Object.keys(M.c).filter((id) => !(id in c) && !todo.some((q) => q.o.id === id)) : [];
-  if ( !todo.length && same && !stale.length && Object.keys(c).every((id) => M.c[id] === c[id]) && M.key === key ) return;
-  if ( !breaker.hit("publish", key) ) { pauseBaking("publish", "manifest keeps changing"); return; }
+  if ( !todo.length && same && !stale.length && Object.keys(c).every((id) => M.c[id] === c[id]) && (M.key === key || partial) ) return;
+  if ( !breaker.hit("publish", partial ? `partial:${key}:${todo.map((q) => q.o.id).join()}` : key) ) { pauseBaking("publish", "manifest keeps changing"); return; }
   Trace.event("publish", { n: todo.length, of: Object.keys(c).length + todo.length, over: M?.base ?? null })
   try {
     if ( Date.now() < publishRetryAt ) { schedulePersist(0); return; }
@@ -1724,6 +1767,7 @@ async function persistOnce() {
     }
     if ( my !== gen || !S ) return;
     await save();                                    // the strokes first, so the signatures mean the same to everyone
+    freeAtlases();
     // every chunk this pass encoded is the one its entry names (a Rebake all of what nothing changed): the manifest is not written again
     // (its `at` alone would reach every client as an echo; entries that played since still go out)
     if ( same && !stale.length && M.key === key && Object.keys(M.c).length === Object.keys(c).length && Object.keys(c).every((id) => M.c[id] === c[id]) && ![...entryLog.values()].some((e) => !e.t) ) {
@@ -1732,7 +1776,8 @@ async function persistOnce() {
       tell("status");
       return;
     }
-    const baked = { v: 2, dir, base, key, at: now(), c, path: null, metaRows: null };
+    // (partial: the stored key stays - it names the state the manifest was complete for; the full publish writes the key of the moment)
+    const baked = { v: 2, dir, base, key: partial ? (same ? M.key : "") : key, at: now(), c, path: null, metaRows: null };
     // the entries that played since: everybody here plays them a moment after the upload, at the same server time
     const at = now() + 700, keep = new Set(display?.groups.keys() ?? []);
     for ( const e of entryLog.values() ) if ( !e.t ) e.t = at;
@@ -1747,7 +1792,7 @@ async function persistOnce() {
     if ( S ) S.baked = { ...baked, c };
     publishBackoff = 0; publishRetryAt = 0;
     Net.scheduleGc(scene.id);
-    scheduleComposite(800);      // (soon: players whose shells lost their bands with this change take the new composite)
+    if ( !partial ) scheduleComposite(800);      // (soon: players whose shells lost their bands with this change take the new composite)
     tell("status");
   } catch ( err ) {
     // try again later (15 s, 30 s, 1 min, ... 8 min); warn once
@@ -1797,6 +1842,7 @@ async function flushRebaked(ids) {
     await Net.upload(dir, out.map((e) => ({ id: e.id, bytes: e.bytes })));
     // (a record is only dried once its chunk is on the server: the publish finds it there)
     for ( const q of todo ) if ( my === gen && q.r.id && Net.known(dir).has(q.r.id) && !q.r.sprites.lean && onScreen(q.r) ) dry(q.r);
+    if ( my === gen ) freeAtlases();
   } catch ( err ) { console.warn(`${MODULE_ID} | destruction: a Rebake pass could not be stored early (the publish does it)`, err); for ( const q of todo ) if ( q.r.id && !Net.known(dir).has(q.r.id) ) q.r.id = null; }
 }
 
@@ -2218,7 +2264,9 @@ export const destructionApi = {
   /** (bench) the pixels the records hold, in Mpx of RGBA (x4 bytes): by map, and the stream's memory. */
   memory: () => {
     const px = (list) => { const seen = new Set(); let n = 0; for ( const sp of list ) for ( const s of sp ) { if ( !s.img || seen.has(s.img) ) continue; seen.add(s.img); n += s.w * s.h; } return Math.round(n / 1e5) / 10; };
-    return { recs: px([...recs.values()].map((r) => r.sprites)), plain: px([...plainRecs.values()]), shown: px([...shownRecs.values()].map((r) => r.sprites)), stale: px([...staleRecs.values()].map((r) => r.sprites)), counts: [recs.size, plainRecs.size, shownRecs.size, staleRecs.size], net: Net.debug() };
+    return { recs: px([...recs.values()].map((r) => r.sprites)), plain: px([...plainRecs.values()]), shown: px([...shownRecs.values()].map((r) => r.sprites)), stale: px([...staleRecs.values()].map((r) => r.sprites)), counts: [recs.size, plainRecs.size, shownRecs.size, staleRecs.size], net: Net.debug(),
+      // (what keeps pixels: shown records with pixels, by whether they have a chunk and are on screen)
+      held: (() => { const c = { lean: 0, shell: 0, px: 0, pxId: 0, pxOn: 0, pxIdOn: 0 }; for ( const r of shownRecs.values() ) { if ( r.shell ) c.shell++; else if ( r.sprites.lean ) c.lean++; else { c.px++; const on = onScreen(r); if ( r.id && r.dir ) c.pxId++; if ( on ) c.pxOn++; if ( on && r.id && r.dir ) c.pxIdOn++; } } return c; })() };
   },
   net: { reveal: () => ({ ...Reveal.stats }), trace: Trace.report, film: Trace.showFilm, stats: () => ({ ...Net.stats }), reset: Net.resetStats, debug: Net.debug, gc: (opts) => canvas.scene && Net.collectGarbage(canvas.scene.id, opts) },
   /** Every area enters again, locally. */
