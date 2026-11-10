@@ -1003,6 +1003,8 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-z-rec-name { display: flex; align-items: center; gap: 0.4rem; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mm-z-rec-name > i:first-child { flex: none; width: 1rem; text-align: center; color: #9fdcff; }
 .mm-z-rec-name .mm-z-rec-to { font-size: 0.66rem; opacity: 0.55; }
+/* (the remove button keeps its column in a row that has no stepper) */
+.mm-z-rec > .mm-z-x { grid-column: 3; }
 .mm-z-rec-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.45rem; padding-left: 1.4rem; }
 .mm-z-rec-more select { flex: 0 1 8.5rem; min-width: 0; height: 1.5rem; font-size: 0.76rem; }
 .mm-z-rec-more small { font-size: 0.72rem; opacity: 0.65; }

@@ -288,9 +288,11 @@ function statesHtml(id, key) {
   const rows = recs.map((r) => {
     const meta = [r.owner != null ? Z("reg.owner", { who: brief(r.owner) }) : "", r.ends != null ? Z("reg.ends", { when: brief(r.ends) }) : "", r.except?.length ? Z("reg.except", { n: r.except.length }) : ""].filter(Boolean).join(" · ");
     const at = ats.includes(r.at ?? "") ? ats : [...ats, r.at];
+    // gravity is said by its mode (low / high), not by a number: a level stepper shows only when somebody gave it one
+    const stepped = r.kind !== "gravity" || r.level != null;
     return `<div class="mm-z-rec" data-rec="${esc(r.id)}">
       <span class="mm-z-rec-name"><i class="fa-solid ${KIND_ICON[r.kind] ?? "fa-circle-dot"}" inert></i> ${esc(kindName(r.kind))}</span>
-      <span class="mm-z-step" data-tooltip="${esc(Z(r.kind === "fire" ? "reg.intensity" : "reg.level"))}"><button type="button" data-act="recLevel-" data-focus="l-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} −"${off || (r.level == null ? " disabled" : "")}>−</button><b>${r.level ?? "·"}</b><button type="button" data-act="recLevel+" data-focus="L-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} +"${off}>+</button></span>
+      ${!stepped ? "" : `<span class="mm-z-step" data-tooltip="${esc(Z(r.kind === "fire" ? "reg.intensity" : "reg.level"))}"><button type="button" data-act="recLevel-" data-focus="l-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} −"${off || (r.level == null ? " disabled" : "")}>−</button><b>${r.level ?? "·"}</b><button type="button" data-act="recLevel+" data-focus="L-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} +"${off}>+</button></span>`}
       <button type="button" class="mm-z-x" data-act="recDel" aria-label="${esc(Z("reg.remove"))}" data-tooltip="${esc(Z("reg.remove"))}"${off}><i class="fa-solid fa-xmark" inert></i></button>
       <span class="mm-z-rec-more">
         <select name="recAt" data-focus="at-${esc(r.id)}" aria-label="${esc(Z("reg.atLabel"))}"${off}>${at.map((a) => opt(a, atName(a), r.at ?? "")).join("")}</select>
