@@ -53,6 +53,8 @@ for ( let run = 0; run < 40; run++ ) {
     const x0 = rnd() * 4000, y0 = rnd() * 4000, w = 50 + rnd() * 900, h = 50 + rnd() * 900, pts = [];
     for ( let y = y0 + step / 2; y < y0 + h; y += step ) for ( let x = x0 + step / 2; x < x0 + w; x += step ) if ( rnd() < 0.8 ) pts.push(x, y);
     if ( !pts.length ) pts.push(x0, y0);
+    // some zones' samples out of row order (the row search is only taken for rows in order)
+    if ( id % 7 === 3 ) for ( let i = pts.length - 2; i > 0; i -= 2 ) { const j = 2 * Math.floor(rnd() * (i / 2 + 1)); [pts[i], pts[j]] = [pts[j], pts[i]]; [pts[i + 1], pts[j + 1]] = [pts[j + 1], pts[i + 1]]; }
     zones.set(id, pts);
   }
   const fire = [];

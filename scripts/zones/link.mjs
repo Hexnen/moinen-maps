@@ -118,18 +118,34 @@ const burning = (s) => s.k === "fire" && s.o === undefined && !!s.p?.length;
 /** The burning fire strokes that cover samples of a zone: [{ s, hits }] (erasers ignored: the fire layer keeps them as strokes of their own). */
 export function fireIn(samples, fire) {
   const out = [];
+  const rows = rowSorted(samples);
   for ( const s of fire ?? [] ) {
     if ( !burning(s) ) continue;
     const q = prepOf(s), [x0, y0, x1, y1] = q.box;
     let hits = 0;
-    for ( let i = 0; i < samples.length; i += 2 ) {
+    // samples ordered by row (samplesOf): start at the first row inside the box, stop past its last (the rows skipped fail y0 / y1)
+    let i = 0, end = samples.length;
+    if ( rows ) {
+      let lo = 0, hi = samples.length / 2;
+      while ( lo < hi ) { const m = (lo + hi) >> 1; if ( samples[2 * m + 1] < y0 ) lo = m + 1; else hi = m; }
+      i = 2 * lo;
+    }
+    for ( ; i < end; i += 2 ) {
       const x = samples[i], y = samples[i + 1];
+      if ( y > y1 && rows ) break;
       if ( x < x0 || x > x1 || y < y0 || y > y1 ) continue;
       if ( covers(s, q, x, y) ) hits++;
     }
     if ( hits ) out.push({ s, hits });
   }
   return out;
+}
+/** Are the samples' y never decreasing (row after row, as samplesOf lays them)? Kept per samples array. */
+const sorted = new WeakMap();
+function rowSorted(pts) {
+  let v = sorted.get(pts);
+  if ( v === undefined ) { v = true; for ( let i = 3; i < pts.length; i += 2 ) if ( !(pts[i] >= pts[i - 2]) ) { v = false; break; } sorted.set(pts, v); }
+  return v;
 }
 /** The box of a zone's samples [x0, y0, x1, y1] (kept per samples array). */
 const sboxes = new WeakMap();
