@@ -349,8 +349,13 @@ zh = Menu.html("zone", { zone: 1, tab: "features" });
 check(has(zh, "5/+2", "driven.note") && !zh.includes("4/+1"), "a combat module runs the rules: its numbers beside the terrains, and a line saying so");
 api.rulesDriver(false);
 const sm = await api.addZoneState("z2:elevated", { kind: "smoke", level: 2, owner: { name: "Kid Thor" }, ends: "end of scene" });
-await api.addZoneState("z2", { kind: "gravity", data: { mode: "high" } });
+const gv = await api.addZoneState("z2", { kind: "gravity", data: { mode: "high" } });
 zh = Menu.html("zone", { zone: 1, tab: "states" });
+const steppers = (h) => (h.match(/data-act="recLevel\+"/g) ?? []).length;
+check(steppers(zh) === 1 && has(zh, `data-rec="${gv.result.id}"`), "gravity is said by its mode: its record shows no empty level stepper (the smoke's level keeps its own)");
+await api.updateZoneState(gv.result.id, { level: 3 });
+check(steppers(Menu.html("zone", { zone: 1, tab: "states" })) === 2, "a gravity state that was given a level shows it");
+await api.updateZoneState(gv.result.id, { level: null });
 check(has(zh, `data-rec="${sm.result.id}"`, "reg.kind.smoke", "Kid Thor", "end of scene", 'name="recAt"', 'name="recMode"', 'data-act="recAdd"', 'name="wrecked"') && /<option value="elevated" selected>/.test(zh) && /<option value="high" selected>/.test(zh) && /data-tab="states"[^>]*>[^<]*<em>2<\/em>/.test(zh), "the states page: the quick marks, every tracked state with its level, where it holds, who made it and until when; the tab counts them");
 const ed = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });
 zh = Menu.html("zone", { zone: 1, tab: "passages" });
@@ -362,6 +367,97 @@ game.users.activeGM = users.get("gm");
 notes.length = 0;
 check(Menu.told({ ok: true }) === true && Menu.told({ ok: false, reason: "notActiveGM" }) === false && notes.length === 1 && notes[0][0] === "warn" && notes[0][1].includes("refused.notActiveGM"), "a refused write is told in a notice");
 await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
+
+/* ================================================================ the look: labels that can be read, passages on the map, thin bands far out */
+
+{
+  const Place = await imp("scripts/zones/place.mjs");
+  // the pure part
+  const tok = { x0: 90, y0: 40, x1: 110, y1: 60, w: 3 };
+  const spots = [{ dx: 0, dy: 0 }, { dx: 0, dy: -30 }, { dx: 40, dy: 0 }];
+  check(Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, []) === 0 && Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [tok]) === 1, "a label takes its first spot when nothing is there, the next free one when a token stands on it");
+  check(Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [], null, 2) === 2 && Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [{ x0: 125, y0: 40, x1: 160, y1: 60, w: 3 }], null, 2) === 0, "it keeps the spot it has while that is as good as free (no hopping), and leaves it when something comes to stand there");
+  check(Place.pickSpot({ x: 100, y: 50 }, { w: 15, h: 10 }, spots, [tok], (x, y) => y > 30) === 2, "a spot out of the label's own zone is taken last");
+  check(Place.zoneSpots(30, 0)[0].dy === 0 && Place.zoneSpots(30, 20)[0].dy === -34 && Place.zoneSpots(30, 20, 45)[1].dy === 59 && Place.zoneSpots(30, 20).every((c) => Math.abs(c.dx) >= 43 || Math.abs(c.dy) >= 34), "a zone's label: on the middle when nothing sits there, else around the badge and under the icons - never on them");
+  const bs = Place.borderSpots(40, { x: 0, y: 1 });
+  check(bs[0].dx === 0 && bs[0].dy === 0 && Math.abs(bs[1].dx) === 26 && bs[1].dy === 0 && bs[3].dx === 0 && Math.abs(bs[3].dy) === 50, "a border's label: on the line, then beside it, then along it");
+  const mid = { 0: { x: 100, y: 0 }, 1: { x: 300, y: 0 }, 2: { x: 500, y: 0 } };
+  const pm = Place.passageMarks([{ id: "e1", kind: "portal", a: "z1", b: "z3:elevated" }, { id: "e2", kind: "tunnel", a: "z3", b: "z1" }, { id: "e3", kind: "portal", a: "z2", b: "@dimension" }, { id: "e4", kind: "portal", a: "z9", b: "@sky" }, { id: "e5", kind: "tunnel", a: "z2:f1", b: "z2" }],
+    (k) => ({ z1: 0, z2: 1, z3: 2 })[k] ?? -1, (id) => mid[id]);
+  check(J(pm.map((p) => [p.id, p.joined, p.ends.map((e) => [e.zone, e.side, e.slot])])) === J([["e1", true, [[0, 1, 0], [2, -1, 0]]], ["e2", true, [[2, -1, 1], [0, 1, 1]]], ["e3", false, [[1, 1, 0]]], ["e5", false, [[1, 1, 1]]]]) && pm[0].ends[0].far === "z3:elevated",
+    "passages: a mark in each zone they join, on the side of the other end, one after another; one mark where the other end is off the map or in the same zone; none for a passage with no end on the map");
+  check(J(Place.markOffsets([{ side: 1, slot: 0 }, { side: 1, slot: 1 }, { side: -1, slot: 0 }], 20)) === J([38, 64, -38]) && J(Place.markOffsets([{ side: 1, slot: 0 }, { side: -1, slot: 0 }], 0)) === J([13, -13]) && J(Place.markOffsets([{ side: 1, slot: 0 }], 0)) === J([0]), "the marks stand beside the badge; in one row across the middle where nothing sits there");
+  check(Place.thin(200) === 1 && Place.thin(32) === 0.5 && Place.thin(3) === 0.42, "a band thins with the room its zone has on screen, down to a floor");
+
+  // wired: a label and the tokens
+  const dispRoot = () => canvas.primary.children.find((c) => c.sortLayer === 258 && c.sort === 0);
+  const labels = () => layerRoot().children[4].children;
+  const g3 = Zones.zones().zones.find((z) => z.id === 2).label;
+  api.highlight({ id: "lab", zones: [{ zone: "z3", label: "2" }], borders: [{ border: "z4|z5", label: "Armor 2", color: "danger" }] });
+  const zl = () => labels().find((c) => c.children[1].text === "2"), bl = () => labels().find((c) => c.children[1].text === "Armor 2");
+  const at0 = { x: zl().position.x, y: zl().position.y };
+  check(Math.abs(at0.x - g3.x) < 1e-6 && at0.y < g3.y - 19 && Math.abs(bl().position.x - 800) < 1e-6, "a zone's label sits above its number badge, a border's label on the border");
+  const boxOf = (c, w) => ({ x0: c.position.x - w / 2, x1: c.position.x + w / 2, y0: c.position.y - 10.5, y1: c.position.y + 10.5 });
+  const hits = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  // a token comes to stand on the label, another on the border's label
+  const tk = (x, y) => ({ visible: true, document: { x, y, width: 1, height: 1, parent: sc } });
+  canvas.tokens.placeables = [tk(at0.x - 50, at0.y - 50), tk(750, 50)];
+  Hooks.callAll("updateToken", canvas.tokens.placeables[0].document, { x: 1 });
+  await tick(90);
+  const tb = (t) => ({ x0: t.document.x, y0: t.document.y, x1: t.document.x + 100, y1: t.document.y + 100 });
+  check(!hits(boxOf(zl(), 22), tb(canvas.tokens.placeables[0])) && Zones.zonesApi.zoneAt(zl().position.x, zl().position.y) === 2, "a token comes to stand on a zone's label: the label steps aside, still in its zone");
+  check(!hits(boxOf(bl(), bl().children[1].width + 14), tb(canvas.tokens.placeables[1])), "a border's label steps off a token too");
+  check(!Zones.displayBoxes().filter((b) => b.zone === 2).some((b) => hits(boxOf(zl(), 22), b)), "... and not onto the zone's badge or icons");
+  const moved = { x: zl().position.x, y: zl().position.y };
+  canvas.tokens.placeables[0].visible = false;                      // (a token this user does not see hides nothing)
+  Hooks.callAll("updateToken", canvas.tokens.placeables[0].document, { hidden: true });
+  Hooks.callAll("updateToken", canvas.tokens.placeables[0].document, { name: "x" });
+  await tick(90);
+  check(zl().position.y === moved.y && zl().position.x === moved.x, "the token is gone from sight: the label stays where it is (it does not hop back)");
+  canvas.tokens.placeables = [];
+  calls.length = 0;
+  Hooks.callAll("deleteToken", { parent: sc });
+  await tick(90);
+  check(calls.filter((c) => c[0] === "beginFill").length === 0, "placing labels draws nothing again");
+  api.clearHighlights();
+
+  // far zoomed out the bands thin
+  const bandW = () => Math.max(...calls.filter((c) => c[0] === "lineStyle" && c[1].color === 0x5cc8ff && c[1].alpha === 1).map((c) => c[1].width * canvas.stage.scale.x));
+  calls.length = 0;
+  api.highlight({ id: "far", zones: ["z3"] });
+  const near = bandW();
+  calls.length = 0;
+  canvas.stage.scale.x = 0.1; for ( const fn of canvas.app.ticker.fns ) fn();
+  const far = bandW();
+  check(near === 7.5 && far < near * 0.5 && far >= near * 0.4, "a zone small on screen gets a thinner band (the same band at a normal zoom)");
+  canvas.stage.scale.x = 1; for ( const fn of canvas.app.ticker.fns ) fn();
+  api.clearHighlights();
+
+  // passages on the map
+  const marks = () => dispRoot().children[7].children.filter((c) => c.children?.[0]?.mmKey === "passage");
+  check(marks().length === 0 && Zones.displayBoxes().every((b) => b.kind !== "pass"), "no passage: no mark");
+  calls.length = 0;
+  const e1 = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });
+  const z2 = Zones.zones().zones.find((z) => z.id === 1).label, z5 = Zones.zones().zones.find((z) => z.id === 4).label;
+  let mk = marks();
+  check(mk.length === 2 && mk[0].position.x > z2.x + 19 && mk[0].position.y === z2.y && mk[1].position.x < z5.x - 19 && calls.some((c) => c[0] === "lineStyle" && c[1].color === 0xc9a2ff) && Zones.displayBoxes().filter((b) => b.kind === "pass").map((b) => b.zone).join() === "1,4",
+    "a portal: a mark beside the badge of each zone it joins, each on the side of the other, and a line between them");
+  calls.length = 0;
+  const e2 = await api.addEdge({ kind: "tunnel", a: "z2", b: "@dimension" });
+  mk = marks();
+  check(mk.length === 3 && mk[2].position.x > mk[0].position.x + 22 && !calls.some((c) => c[0] === "lineStyle" && c[1].color === 0xdcbb8c && c[1].alpha !== 1), "a passage that leaves the map: one mark, next in the row, and no line");
+  game.user = users.get("p1");
+  Zones.refresh();
+  check(marks().length === 3 && dispRoot().visible === true, "a player who sees the zones sees the passages");
+  game.user = users.get("gm");
+  Zones.refresh();
+  api.highlight({ id: "lab2", zones: [{ zone: "z2", label: "1" }] });
+  const l2 = labels().find((c) => c.children[1].text === "1");
+  check(!Zones.displayBoxes().filter((b) => b.zone === 1).some((b) => hits(boxOf(l2, 22), b)), "a label keeps clear of the passages' marks");
+  api.clearHighlights();
+  await api.removeEdge(e1.result.id); await api.removeEdge(e2.result.id);
+  check(marks().length === 0, "the passages are removed: their marks go");
+}
 
 /* ================================================================ the words */
 

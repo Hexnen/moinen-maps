@@ -5,7 +5,12 @@
  * are dimmed and the one under the cursor lights up.
  *
  * Every coloured line lies on a dark one, the same two tones the zone borders and badges use, so it reads on light and on dark
- * maps. Line widths and labels keep their size on screen (drawn again when the zoom moved by ~8 %, labels scaled every step).
+ * maps. Line widths and labels keep their size on screen (drawn again when the zoom moved by ~8 %, labels scaled every step); in a
+ * zone that is small on screen (far zoomed out) the bands get thinner with it, so they frame the zone instead of filling it.
+ *
+ * A label takes the spot where it can be read (place.mjs): beside the zone's number badge and icons wherever those sit, clear of
+ * the tokens standing in the zone (the highlights are drawn under the tokens), of the passages' marks and of the other labels, in
+ * its own zone if it can. It is placed when the highlights are drawn and again when a token moved (place()), not while panning.
  *
  * PERF: nothing is drawn or watched while there is nothing to show (the container is hidden, the ticker callback removed). A
  * redraw happens only when the highlights, the zones, the pick or the zoom step changed (one key), never on a pan.
@@ -14,10 +19,13 @@
 import { pairKey } from "./marks.mjs";
 import { pattern } from "./display.mjs";
 import { groups, shortLabel } from "./highlight.mjs";
+import { pickSpot, zoneSpots, borderSpots, thin } from "./place.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9;
-/** A badge's radius on screen (display.mjs BADGE_R): a label sits just above the zone's badge. */
+/** A badge's radius on screen (display.mjs BADGE_R): a zone's label shrinks with the zone as its badge does. */
 const BADGE_R = 19;
+/** A label's height on screen. */
+const LABEL_H = 21;
 
 function ring(G, p) { G.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) G.lineTo(p[i], p[i + 1]); G.closePath(); }
 function fillZone(G, z, color, alpha) {
@@ -46,6 +54,8 @@ export class ZoneHighlightLayer {
     this.root.visible = false;
     canvas.primary.addChild(this.root);
     this.items = [];
+    /** The spot each label has now (label key -> index of its spot): kept while tokens move, so a label does not hop about. */
+    this.spots = new Map();
     this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom ) this.onZoom(z); };
     this.watching = false;
   }
@@ -56,13 +66,16 @@ export class ZoneHighlightLayer {
    * @param {object} o
    * @param {number} o.zoom
    * @param {string} o.key         changes whenever the zones or the highlights do
-   * @param {boolean} o.badge      a number badge sits on the zone's label spot (the label goes above it)
    * @param {Map<number, object>|null} o.pick   while a zone is being picked: the zones that can be (id -> entry); every other is dimmed
    * @param {Map<string, {x, y}>} o.marks   pair key -> where a border's label sits (the GM's mark on it)
+   * @param {() => {boxes: Array, tokens: Array}} o.blocks   what the labels keep clear of, asked when they are placed: `boxes` what
+   *        sits on the zones (display.mjs boxes(): { zone, kind, x0, y0, x1, y1 }), `tokens` the tokens this user sees ({ x0, y0, x1, y1 })
+   * @param {(x: number, y: number) => number} o.zoneAt   the zone at a scene point (-1: none)
    */
-  render(Z, shown, { zoom = 1, key = "", badge = true, pick = null, marks = null } = {}) {
+  render(Z, shown, { zoom = 1, key = "", pick = null, marks = null, blocks = null, zoneAt = null } = {}) {
     const any = !!Z && (shown.zones.size > 0 || shown.borders.size > 0 || !!pick);
-    this.Z = Z; this.shown = shown; this.badge = badge; this.pick = pick; this.marks = marks; this.key = key;
+    if ( Z !== this.Z ) this.spots.clear();
+    this.Z = Z; this.shown = shown; this.pick = pick; this.marks = marks; this.key = key; this.blocks = blocks; this.zoneAt = zoneAt;
     this.root.visible = any;
     if ( any && !this.watching ) { canvas.app.ticker.add(this.watch); this.watching = true; }
     else if ( !any && this.watching ) { canvas.app.ticker.remove(this.watch); this.watching = false; }
@@ -79,14 +92,16 @@ export class ZoneHighlightLayer {
 
   /** Everything, at this zoom (line widths are screen pixels). */
   draw(zoom) {
-    const dk = `${this.key}|${zoom}|${this.badge}`;
+    const dk = `${this.key}|${zoom}`;
     this.lineZoom = zoom;
-    if ( dk === this.drawnKey ) { this.follow(zoom); return; }
+    if ( dk === this.drawnKey ) { this.zoom = zoom; this.place(); return; }
     this.drawnKey = dk;
     const hov = this.hoverId ?? -1;
     this.#clear();
     const Z = this.Z, px = 1 / Math.max(0.05, zoom), byId = new Map(Z.zones.map((z) => [z.id, z]));
     const R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
+    // how much thinner the bands of a zone are drawn: by the room it has on screen
+    const kOf = (z) => thin(z.label.r * zoom);
 
     // picking: what cannot be picked steps back
     if ( this.pick ) for ( const z of Z.zones ) if ( !this.pick.has(z.id) ) fillZone(this.veil, z, INK, 0.34);
@@ -100,10 +115,13 @@ export class ZoneHighlightLayer {
       band.mask = mask;
       for ( const z of zs ) fillZone(mask, z, 0xffffff, 1);
       if ( grp.style === "fill" ) for ( const z of zs ) fillZone(fill, z, grp.color, 0.2);
-      const rings = zs.flatMap((z) => z.parts.flatMap((part) => part));
+      const rings = zs.map((z) => [kOf(z), z.parts.flatMap((part) => part)]);
       const stroke = (w, color, alpha, dash = null) => {
-        band.lineStyle({ width: w * px, color, alpha, ...R });
-        for ( const r of rings ) { if ( dash ) pattern(band, closed(r), dash.map((d) => d * px)); else ring(band, r); }
+        for ( const [k, list] of rings ) {
+          band.lineStyle({ width: w * px * k, color, alpha, ...R });
+          // (dashes shorten less than the band thins: they stay dashes)
+          for ( const r of list ) { if ( dash ) pattern(band, closed(r), dash.map((d) => d * px * Math.max(0.65, k))); else ring(band, r); }
+        }
       };
       // (widths are doubled: the mask keeps the half inside the zone)
       if ( grp.style === "fill" ) { stroke(34, grp.color, 0.1); stroke(20, grp.color, 0.16); }
@@ -121,44 +139,84 @@ export class ZoneHighlightLayer {
         if ( e ) (segs.get(e) ?? segs.set(e, []).get(e)).push(br.pts);
       }
       const L = this.lines;
+      // (a border is a thing to look at: it thins with its smaller zone, but less than a zone's band)
+      const kB = new Map([...segs.keys()].map((e) => [e, Math.max(0.6, Math.min(kOf(byId.get(e.a)), kOf(byId.get(e.b))))]));
       for ( const [w, col, a] of [[12, null, 0.8], [6.5, 1, 1], [1.6, PAPER, 0.75]] ) {
         for ( const [e, list] of segs ) {
           if ( e.style === "dashed" && col === PAPER ) continue;
-          L.lineStyle({ width: w * px, color: col === 1 ? e.color : col ?? INK, alpha: a, ...R });
+          const k = kB.get(e);
+          L.lineStyle({ width: w * px * k, color: col === 1 ? e.color : col ?? INK, alpha: a, ...R });
           for ( const s of list ) {
-            if ( e.style === "dashed" && col === 1 ) pattern(L, s, [9 * px, 9 * px]);
+            if ( e.style === "dashed" && col === 1 ) pattern(L, s, [9 * px * k, 9 * px * k]);
             else { L.moveTo(s[0], s[1]); L.lineTo(s[2], s[3]); }
           }
         }
       }
       for ( const [e, list] of segs ) {
         if ( !e.label ) continue;
-        // where the GM's mark sits, else the middle of the longest stretch
-        let at = this.marks?.get(pairKey(e.a, e.b)) ?? null;
-        if ( !at ) { let best = 0; for ( const s of list ) { const d = Math.hypot(s[2] - s[0], s[3] - s[1]); if ( d >= best ) { best = d; at = { x: (s[0] + s[2]) / 2, y: (s[1] + s[3]) / 2 }; } } }
-        if ( at ) this.#label(e, at, 0, 0);
+        // where the GM's mark sits, else the middle of the longest stretch; `u`: which way the border runs there
+        let at = this.marks?.get(pairKey(e.a, e.b)) ?? null, u = null, bd = Infinity;
+        if ( at ) { for ( const s of list ) { const d = Math.hypot((s[0] + s[2]) / 2 - at.x, (s[1] + s[3]) / 2 - at.y); if ( d < bd ) { bd = d; u = s; } } }
+        else { let best = 0; for ( const s of list ) { const d = Math.hypot(s[2] - s[0], s[3] - s[1]); if ( d >= best ) { best = d; u = s; at = { x: (s[0] + s[2]) / 2, y: (s[1] + s[3]) / 2 }; } } }
+        if ( !at ) continue;
+        const len = u ? Math.hypot(u[2] - u[0], u[3] - u[1]) : 0;
+        this.#label(e, at, 0, -1, `b${pairKey(e.a, e.b)}`, len > 1e-6 ? { x: (u[2] - u[0]) / len, y: (u[3] - u[1]) / len } : { x: 1, y: 0 });
       }
     }
 
     for ( const e of this.shown.zones.values() ) {
       const z = byId.get(e.id);
-      if ( z && e.label ) this.#label(e, z.label, this.badge ? -(BADGE_R + 14) : 0, z.label.r, z.id);
+      if ( z && e.label ) this.#label(e, z.label, z.label.r, z.id, `z${z.id}`);
     }
-    this.follow(zoom);
+    for ( const k of [...this.spots.keys()] ) if ( !this.items.some((it) => it.key === k) ) this.spots.delete(k);
+    this.zoom = zoom;
+    this.place();
     this.setHover(hov, true);
   }
 
+  /**
+   * Every label takes its spot (place.mjs): the zones' labels first, then the borders'. Called when the highlights are drawn and
+   * when what they must keep clear of moved (a token); cheap, and nothing is drawn again.
+   */
+  place() {
+    if ( !this.items.length ) return;
+    const zoom = this.zoom ?? 1, px = 1 / Math.max(0.05, zoom);
+    const B = this.blocks?.() ?? {}, boxes = B.boxes ?? [], zoneAt = this.zoneAt;
+    // a token hides a label; a badge, an icon row, a passage's mark or another label only makes both hard to read
+    const blocks = [...(B.tokens ?? []).map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: 2 }))];
+    for ( const it of [...this.items].sort((a, b) => (b.zoneId >= 0) - (a.zoneId >= 0)) ) {
+      const s = this.#scale(it, px), half = { w: (it.w / 2) * s, h: (LABEL_H / 2) * s };
+      let cands;
+      if ( it.zoneId >= 0 ) {
+        // what sits on the zone's middle (its badge - or its icons where no badge shows), and how far the icons reach under it
+        const mine = boxes.filter((b) => b.zone === it.zoneId && b.kind !== "pass"), on = (b) => b.x0 <= it.at.x && b.x1 >= it.at.x && b.y0 <= it.at.y && b.y1 >= it.at.y;
+        const mid = mine.filter(on), clear = mid.length ? Math.max(...mid.map((b) => (b.y1 - b.y0) / 2)) / s : 0;
+        const under = mine.filter((b) => !on(b) && b.x0 <= it.at.x && b.x1 >= it.at.x && b.y0 > it.at.y), below = under.length ? (Math.max(...under.map((b) => b.y1)) - it.at.y) / s : 0;
+        cands = zoneSpots(it.w, clear, below);
+      }
+      else cands = borderSpots(it.w, it.u);
+      const inside = it.zoneId >= 0 && zoneAt ? (x, y) => zoneAt(x, y) === it.zoneId : null;
+      const i = pickSpot(it.at, half, cands.map((c) => ({ dx: c.dx * s, dy: c.dy * s })), blocks, inside, this.spots.get(it.key) ?? -1);
+      this.spots.set(it.key, i);
+      it.dx = cands[i].dx; it.dy = cands[i].dy;
+      const x = it.at.x + it.dx * s, y = it.at.y + it.dy * s;
+      blocks.push({ x0: x - half.w, y0: y - half.h, x1: x + half.w, y1: y + half.h, w: 2 });
+    }
+    this.follow(zoom);
+  }
+  #scale(it, px) { return it.r > 0 ? Math.min(BADGE_R * px, Math.max(8 * px, it.r * 0.8)) / BADGE_R : px; }
+
   /** A label: light text on a dark pill rimmed in the highlight's colour (the look of the altitude tag on a token). */
-  #label(e, at, dy, r, zoneId = -1) {
+  #label(e, at, r, zoneId, key, u = null) {
     const c = new PIXI.Container(), G = new PIXI.Graphics();
     const T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 14, fill: PAPER });
     T.resolution = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
     T.anchor.set(0.5, 0.52);
     const w = Math.max(22, T.width + 14);
-    G.lineStyle({ width: 1.6, color: e.color, alpha: 1 }).beginFill(INK, 0.9).drawRoundedRect(-w / 2, -10.5, w, 21, 10).endFill();
+    G.lineStyle({ width: 1.6, color: e.color, alpha: 1 }).beginFill(INK, 0.9).drawRoundedRect(-w / 2, -LABEL_H / 2, w, LABEL_H, 10).endFill();
     c.addChild(G, T);
     this.labels.addChild(c);
-    this.items.push({ c, at, dy, r, zoneId });
+    this.items.push({ c, at, dx: 0, dy: 0, r, zoneId, key, w, u });
   }
 
   /** Labels keep their size on screen; in a zone smaller than a badge they shrink with it (as the badges do). */
@@ -166,9 +224,9 @@ export class ZoneHighlightLayer {
     this.zoom = zoom;
     const px = 1 / Math.max(0.05, zoom);
     for ( const it of this.items ) {
-      const s = it.r ? Math.min(BADGE_R * px, Math.max(8 * px, it.r * 0.8)) / BADGE_R : px;
+      const s = this.#scale(it, px);
       it.c.scale.set(s * (it.zoneId >= 0 && it.zoneId === this.hoverId ? 1.18 : 1));
-      it.c.position.set(it.at.x, it.at.y + it.dy * s);
+      it.c.position.set(it.at.x + it.dx * s, it.at.y + it.dy * s);
     }
   }
 
@@ -186,10 +244,10 @@ export class ZoneHighlightLayer {
     H.clear();
     const z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null, e = z ? this.pick?.get(id) : null;
     if ( z && e ) {
-      const px = 1 / Math.max(0.05, this.lineZoom ?? this.zoom ?? 1), J = { join: PIXI.LINE_JOIN.ROUND };
+      const zoom = this.lineZoom ?? this.zoom ?? 1, px = 1 / Math.max(0.05, zoom), J = { join: PIXI.LINE_JOIN.ROUND }, k = Math.max(0.6, thin(z.label.r * zoom));
       fillZone(H, z, e.color, 0.34);
       const rings = z.parts.flatMap((part) => part);
-      for ( const [w, col, a] of [[10, INK, 0.7], [6, e.color, 1], [2, 0xffffff, 0.95]] ) { H.lineStyle({ width: w * px, color: col, alpha: a, ...J }); for ( const r of rings ) ring(H, r); }
+      for ( const [w, col, a] of [[10, INK, 0.7], [6, e.color, 1], [2, 0xffffff, 0.95]] ) { H.lineStyle({ width: w * px * k, color: col, alpha: a, ...J }); for ( const r of rings ) ring(H, r); }
     }
     this.follow(this.zoom ?? 1);
   }

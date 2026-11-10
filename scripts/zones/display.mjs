@@ -11,6 +11,7 @@ import { pairKey } from "./marks.mjs";
 import { drawOf, cutSegment } from "./borders.mjs";
 import { THEMES, BADGES, BADGE_SCALE, bakeWash } from "./themes.mjs";
 import { drawDots, drawPetals } from "./hover-pattern.mjs";
+import { markOffsets, arc } from "./place.mjs";
 
 /** Zone states as a tint over the zone (colour, alpha). */
 const STATE_TINT = { fire: [0xff5a1f, 0.3], dark: [0x05050a, 0.45], ice: [0xbfe8ff, 0.3], flooded: [0x2f7fd6, 0.32], wrecked: [0x6b5b4b, 0.32], lowgrav: [0xb48cff, 0.2], water: [0x2f7fd6, 0.18] };
@@ -34,6 +35,15 @@ const WALL = { door: [1.7, 1.0, 0], locked: [1.7, 1.0, 0], wall: [1.7, 1.0, 0], 
 
 /** A badge's radius on screen (CSS pixels): drawn once at this size, scaled by 1 / zoom. */
 const BADGE_R = 19;
+
+/**
+ * Passages (temporary edges: a portal, a tunnel): a small round mark in each zone they join - the sign the menus use for the kind,
+ * in the kind's colour on the badges' dark - and a thin line between the two marks, dotted for a portal (a jump), dashed for a
+ * tunnel (the way maps draw what runs underground). [colour, Font Awesome glyph, emoji, the line's pattern in screen px]
+ */
+const PASS = { portal: [0xc9a2ff, "\ue4e2", "🌀", [0.01, 6.5]], tunnel: [0xdcbb8c, "\uf6d9", "🕳", [8, 6]] };
+const PASS_OTHER = [0xf3e7c9, "\uf0c1", "🔗", [8, 6]];
+const PASS_R = 11;
 
 const TINTS = [0xd9a441, 0x5aa9c9, 0x9bc46b, 0xc97b9b, 0x8c7bd1, 0xd47a4a, 0x6fc2b0];
 
@@ -168,6 +178,8 @@ export class ZoneDisplay {
     this.glow = new PIXI.Graphics();
     this.glow.blendMode = PIXI.BLEND_MODES.ADD;
     this.lines = new PIXI.Graphics();
+    // the lines of the passages (over the borders, under the badges and the passages' own marks)
+    this.pass = new PIXI.Graphics();
     this.badges = new PIXI.Container();
     // the zone under the cursor: an effect inside it (masked to the zone) and its bright border
     this.hi = new PIXI.Container();
@@ -178,7 +190,7 @@ export class ZoneDisplay {
     this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
     this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
-    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.badges);
+    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.pass, this.badges);
     this.hoverId = -1;
     canvas.primary.addChild(this.root);
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
@@ -197,8 +209,9 @@ export class ZoneDisplay {
    * @param {number} [o.hover]                the zone under the cursor (numbers "hover")
    * @param {boolean} [o.editing]              the GM is drawing: stronger tints so new zones show at once
    * @param {object} [o.marks]                 Marks.resolve(): borders (walls, doors) and zone features / states
+   * @param {Array} [o.passages]               place.mjs passageMarks(): the passages that have an end on this map
    */
-  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null, terrainText = null } = {}) {
+  render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null, terrainText = null, passages = null } = {}) {
     const F = this.fill;
     // PERF (ultra1-zones, 2026-11-10): every layer change, hover and step of the selected token called this, and it cleared every
     // Graphics and destroyed and made again every badge and icon (a PIXI.Text each: a canvas, a measure, a texture upload; destroying
@@ -207,18 +220,18 @@ export class ZoneDisplay {
     // same draw calls from the same inputs, so nothing on screen changes.
     const lookKey = JSON.stringify(look ?? null);
     if ( Z !== this.Z || g !== this.g ) this.#drawnKeys = {};
-    this.M = marks; this.editing = editing; this.terrainText = terrainText;
-    const oldBadges = this.#badgeCache, oldIcons = this.#iconCache;
-    this.#badgeCache = new Map(); this.#iconCache = new Map();
+    this.M = marks; this.editing = editing; this.terrainText = terrainText; this.P = passages;
+    const oldBadges = this.#badgeCache, oldIcons = this.#iconCache, oldPass = this.#passCache;
+    this.#badgeCache = new Map(); this.#iconCache = new Map(); this.#passCache = new Map();
     this.badges.removeChildren();
-    const dropOld = () => { for ( const m of [oldBadges, oldIcons] ) for ( const v of m.values() ) v.b.destroy({ children: true }); m0clear(); };
-    const m0clear = () => { oldBadges.clear(); oldIcons.clear(); };
+    const dropOld = () => { for ( const m of [oldBadges, oldIcons, oldPass] ) for ( const v of m.values() ) v.b.destroy({ children: true }); m0clear(); };
+    const m0clear = () => { oldBadges.clear(); oldIcons.clear(); oldPass.clear(); };
     this.items = [];
     this.half = new Map();
     this.g = g;
     this.Z = Z; this.look = look; this.#lookKey = lookKey;
     this.drawHover(this.hoverId, zoom);
-    if ( !Z || !Z.zones.length ) { F.clear(); this.lines.clear(); this.glow.clear(); this.states.clear(); this.#drawnKeys = {}; this.#dropWash(); dropOld(); return; }
+    if ( !Z || !Z.zones.length ) { F.clear(); this.lines.clear(); this.pass.clear(); this.glow.clear(); this.states.clear(); this.#drawnKeys = {}; this.#dropWash(); dropOld(); return; }
     const tint = tints(Z), light = hex(look.color), theme = THEMES[look.lineStyle] ?? null, pal = theme?.palette ?? TINTS;
     this.tintOf = (id) => pal[(tint.get(id) ?? 0) % pal.length];
     // a style with a wash of its own shows its zones through it: the flat tint stays for distances, the token's zone and editing
@@ -273,7 +286,10 @@ export class ZoneDisplay {
     // the icons keep one spot: under the badge's place whenever a badge can show there (numbers always / on hover, distances),
     // so a number appearing on hover never pushes them down
     this.#icons(Z, marks, res, () => !!dist || look.numbers !== "never", oldIcons);
-    if ( look.numbers === "never" && !dist ) { dropOld(); this.follow(zoom, true); return; }
+    // a badge can show on a zone's middle (numbers always / on hover, distances; not when the badges sit in the corners)
+    this.canBadge = (!!dist || look.numbers !== "never") && look.place !== "corner";
+    this.#passMarks(Z, res, oldPass);
+    if ( look.numbers === "never" && !dist ) { dropOld(); this.#passLayout(); this.follow(zoom, true); this.drawPass(zoom); return; }
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
       const band = bands?.get(z.id), blocked = band?.key === "blocked";
@@ -330,7 +346,78 @@ export class ZoneDisplay {
     // icons sit under the badge, whatever its height
     const hd = this.half.values().next().value ?? 1;
     for ( const it of this.items ) if ( it.icons && it.dy ) it.dy = BADGE_R * (this.half.get(it.z.id) ?? hd) + 15;
+    this.#passLayout();
     this.follow(zoom, true);
+    this.drawPass(zoom);
+  }
+
+  /** A mark per end of a passage (kept by its key like the badges: made again only when the passage or the font changed). */
+  #passMarks(Z, res, old) {
+    if ( !this.P?.length ) return;
+    const fa = iconFont(), byId = new Map(Z.zones.map((z) => [z.id, z]));
+    for ( const p of this.P ) p.ends.forEach((end, i) => {
+      const z = byId.get(end.zone);
+      if ( !z ) return;
+      const key = JSON.stringify([p.id, i, p.kind, fa, res]);
+      let kept = old.get(key);
+      if ( kept ) old.delete(key);
+      else {
+        const [color, glyph, emoji] = PASS[p.kind] ?? PASS_OTHER;
+        const b = new PIXI.Container(), G = new PIXI.Graphics();
+        G.lineStyle({ width: 1.6, color, alpha: 1 }).beginFill(0x15110f, 0.88).drawCircle(0, 0, PASS_R).endFill();
+        G.mmKey = "passage";
+        const t = new PIXI.Text(fa ? glyph : emoji, { fontFamily: fa ? `"${fa}"` : "sans-serif", fontWeight: "900", fontSize: 11, fill: color });
+        t.resolution = res; t.anchor.set(0.5, 0.5);
+        b.addChild(G, t);
+        kept = { b };
+      }
+      this.#passCache.set(key, kept);
+      this.badges.addChild(kept.b);
+      this.items.push({ b: kept.b, z, at: null, dx: 0, dy: 0, pass: p, end, mid: true });
+    });
+  }
+
+  /** The passages' marks take their places beside what sits on the zone's middle (the badge, or the icons where no badge shows). */
+  #passLayout() {
+    const by = new Map();
+    for ( const it of this.items ) if ( it.pass ) (by.get(it.z.id) ?? by.set(it.z.id, []).get(it.z.id)).push(it);
+    if ( !by.size ) return;
+    const hd = this.half.values().next().value ?? 1, corner = this.look?.place === "corner";
+    for ( const [id, list] of by ) {
+      let clear = 0;
+      if ( this.canBadge ) clear = BADGE_R * (this.half.get(id) ?? hd);
+      else if ( !corner ) { const row = this.items.find((it) => it.icons && it.z.id === id); if ( row ) clear = (row.b.mmW ?? 40) / 2; }
+      const dx = markOffsets(list.map((it) => it.end), clear, PASS_R);
+      list.forEach((it, i) => { it.dx = dx[i]; });
+    }
+  }
+
+  /** A zone's things keep their size on screen, down to the zone's own size: the scale of a thing drawn in screen pixels. */
+  #scaleOf(z, px) { return Math.min(BADGE_R * px, Math.max(8 * px, z.label.r * 0.8)) / BADGE_R; }
+
+  /** The lines between the two marks of each passage; widths on screen (drawn again with the border lines when the zoom moved). */
+  drawPass(zoom) {
+    const G = this.pass, marks = (this.items ?? []).filter((it) => it.pass);
+    const key = marks.length ? JSON.stringify([zoom, marks.map((it) => [it.pass.id, it.pass.kind, it.z.id, it.dx])]) : "";
+    if ( this.#drawnKeys.pass === key ) return;
+    this.#drawnKeys.pass = key;
+    G.clear();
+    if ( !marks.length ) return;
+    const px = 1 / Math.max(0.05, zoom), R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
+    const at = (it) => ({ x: it.z.label.x + it.dx * this.#scaleOf(it.z, px), y: it.z.label.y });
+    const lines = [];
+    for ( const p of this.P ?? [] ) {
+      if ( !p.joined ) continue;
+      const two = marks.filter((it) => it.pass === p);
+      if ( two.length === 2 ) lines.push([p, arc(at(two[0]), at(two[1]))]);
+    }
+    G.lineStyle({ width: 5 * px, color: 0x15110f, alpha: 0.5, ...R });
+    for ( const [, pts] of lines ) trace(G, pts);
+    for ( const [p, pts] of lines ) {
+      const [color, , , pat] = PASS[p.kind] ?? PASS_OTHER;
+      G.lineStyle({ width: 2.4 * px, color, alpha: 0.95, ...R });
+      pattern(G, pts, pat.map((d) => d * px));
+    }
   }
 
   /** Borders: dark under-line, light dots on top; widths in screen pixels (drawn again when the zoom moved, see onZoom). */
@@ -519,6 +606,7 @@ export class ZoneDisplay {
       }
       x -= gap;
       back.beginFill(0x15110f, 0.7).drawRoundedRect(-5, -11, x + 10, 22, 8).endFill();
+      row.mmW = x + 10;
       for ( const c of row.children ) c.x -= x / 2;
       this.badges.addChild(row);
       this.#iconCache.set(key, { b: row });
@@ -531,7 +619,7 @@ export class ZoneDisplay {
   onZoom(zoom) {
     if ( !this.items?.length && !this.Z ) return;
     this.follow(zoom, false);
-    if ( this.lineZoom && Math.abs(Math.log(zoom / this.lineZoom)) > 0.08 ) { this.drawLines(zoom); this.drawHover(this.hoverId, zoom); }
+    if ( this.lineZoom && Math.abs(Math.log(zoom / this.lineZoom)) > 0.08 ) { this.drawLines(zoom); this.drawPass(zoom); this.drawHover(this.hoverId, zoom); }
   }
 
   /**
@@ -603,6 +691,7 @@ export class ZoneDisplay {
   /** Badges and icon rows kept by their key: { b: Container, half }. */
   #badgeCache = new Map();
   #iconCache = new Map();
+  #passCache = new Map();
 
   /** The style's wash for these zones (themes.mjs): baked again only when the zones or what the wash depends on changed. */
   #washKey = null;
@@ -738,23 +827,49 @@ export class ZoneDisplay {
     this.zoom = zoom;
     const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner", g = this.g ?? 100;
     for ( const it of this.items ?? [] ) {
-      const rw = Math.min(BADGE_R * px, Math.max(8 * px, it.z.label.r * 0.8));     // the badge's radius in scene pixels
-      const s = rw / BADGE_R;
+      const s = this.#scaleOf(it.z, px);                                          // (a badge's radius in scene pixels: BADGE_R * s)
       it.b.scale.set(s);
-      if ( snap || !it.at ) it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
-      it.b.position.set(it.at.x, it.at.y + (it.dy ?? 0) * s);
+      // (a passage's mark stays by the zone's middle wherever the badges sit)
+      if ( snap || !it.at ) it.at = corner && !it.mid ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
+      it.b.position.set(it.at.x + (it.dx ?? 0) * s, it.at.y + (it.dy ?? 0) * s);
     }
+  }
+
+  /**
+   * What sits on the zones now, as boxes in scene pixels: [{ zone, kind: "badge" | "icons" | "pass", x0, y0, x1, y1 }] - also the
+   * middle of a zone whose number shows only under the pointer. For what is laid over the zones later (a highlight's label).
+   */
+  boxes() {
+    const out = [];
+    if ( !this.root.visible || !this.Z ) return out;
+    const seen = new Set();
+    for ( const it of this.items ?? [] ) {
+      if ( !it.at ) continue;
+      const s = it.b.scale.x, x = it.b.position.x, y = it.b.position.y;
+      const hw = (it.pass ? PASS_R + 1 : it.icons ? (it.b.mmW ?? 40) / 2 : BADGE_R * (this.half.get(it.z.id) ?? 1) * 1.05) * s, hh = it.pass || !it.icons ? hw : 11 * s;
+      if ( !it.pass && !it.icons ) seen.add(it.z.id);
+      out.push({ zone: it.z.id, kind: it.pass ? "pass" : it.icons ? "icons" : "badge", x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh });
+    }
+    if ( this.canBadge && this.look?.numbers === "hover" ) {
+      const px = 1 / Math.max(0.05, this.zoom ?? 1);
+      for ( const z of this.Z.zones ) {
+        if ( seen.has(z.id) ) continue;
+        const r = BADGE_R * this.#scaleOf(z, px);
+        out.push({ zone: z.id, kind: "badge", x0: z.label.x - r, y0: z.label.y - r, x1: z.label.x + r, y1: z.label.y + r });
+      }
+    }
+    return out;
   }
 
   /** The icon under a point of the canvas view (CSS px from its top left): { key, z } or null. */
   iconAt(x, y) {
     if ( !this.root.visible ) return null;
     for ( const it of this.items ?? [] ) {
-      if ( !it.icons || !it.b.visible ) continue;
+      if ( !(it.icons || it.pass) || !it.b.visible ) continue;
       for ( const c of it.b.children ) {
         if ( !c.mmKey ) continue;
         const r = c.getBounds();
-        if ( x >= r.x - 2 && x <= r.x + r.width + 2 && y >= r.y - 2 && y <= r.y + r.height + 2 ) return { key: c.mmKey, z: it.z };
+        if ( x >= r.x - 2 && x <= r.x + r.width + 2 && y >= r.y - 2 && y <= r.y + r.height + 2 ) return { key: c.mmKey, z: it.z, pass: it.pass ?? null, end: it.end ?? null };
       }
     }
     return null;

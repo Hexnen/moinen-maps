@@ -61,10 +61,33 @@ export function redraw() {
   for ( const [pk, m] of Zones.marks()?.borders ?? [] ) if ( Number.isFinite(m.x) ) marks.set(pk, { x: m.x, y: m.y });
   layer.render(Z, Z ? shown() : { zones: new Map(), borders: new Map() }, {
     zoom: canvas.stage?.scale.x ?? 1, key: `${STORE.version}|${Zones.zonesApi.version()}|${PICK?.seq ?? 0}`,
-    // (a zone's label goes above its number badge when one shows in the middle of the zone)
-    badge: !!look && Zones.visibleToMe() && look.numbers !== "never" && look.place !== "corner",
-    pick: PICK?.allowed ?? null, marks
+    pick: PICK?.allowed ?? null, marks,
+    // (a label keeps clear of the badges, icons and passage marks the zones show to this user, and of the tokens this user sees)
+    blocks: () => ({ boxes: look && Zones.visibleToMe() ? Zones.displayBoxes() : [], tokens: tokenBoxes() }),
+    zoneAt: (x, y) => Zones.zonesApi.zoneAt(x, y)
   });
+}
+
+/** The tokens this user sees, as boxes in scene pixels, where they stand (their documents: not where an animation has them now). */
+function tokenBoxes() {
+  const g = Zones.gridSize(), out = [];
+  for ( const t of canvas.tokens?.placeables ?? [] ) {
+    const d = t.document;
+    if ( !d || !(t.visible || t.controlled) ) continue;
+    out.push({ x0: d.x, y0: d.y, x1: d.x + (d.width ?? 1) * g, y1: d.y + (d.height ?? 1) * g });
+  }
+  return out;
+}
+/**
+ * A token came, went or moved: the labels take their spots again - once the change is known and once more when the move's animation
+ * and the sight that follows it are over. Nothing while no label shows.
+ */
+let placeTimers = [];
+function onTokens(doc, change = null) {
+  if ( !layer?.items.length || doc?.parent !== canvas.scene ) return;
+  if ( change && !["x", "y", "width", "height", "hidden"].some((k) => k in change) ) return;
+  for ( const t of placeTimers ) clearTimeout(t);
+  placeTimers = [60, 900].map((ms) => setTimeout(() => layer?.place(), ms));
 }
 
 /* ---------------------------------------------------------------- highlights */
@@ -346,6 +369,8 @@ function onTearDown() {
   for ( const [id, s] of SENT ) emit({ op: "hl", del: [id] }, s.remote === "all" ? null : s.remote);
   SENT.clear();
   STORE.remove({});
+  for ( const t of placeTimers ) clearTimeout(t);
+  placeTimers = [];
   layer?.destroy(); layer = null;
 }
 
@@ -371,6 +396,10 @@ export function registerInteract() {
     }
     redraw();
   });
+  // tokens hide what lies under them: the labels step aside
+  Hooks.on("updateToken", (doc, change) => onTokens(doc, change));
+  Hooks.on("createToken", (doc) => onTokens(doc));
+  Hooks.on("deleteToken", (doc) => onTokens(doc));
   // a user who was asked to pick left
   Hooks.on("userConnected", (user, connected) => { if ( connected ) return; for ( const [rid, a] of [...ASKED] ) if ( a.user === user.id ) answer(rid, { ok: false, reason: "userGone" }); });
 }

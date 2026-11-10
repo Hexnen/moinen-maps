@@ -3,6 +3,7 @@ import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import * as Geo from "./geometry.mjs";
 import { ZoneDisplay, numeral } from "./display.mjs";
+import { passageMarks } from "./place.mjs";
 import { preset, presets, zonesText } from "./presets.mjs";
 import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
@@ -263,8 +264,16 @@ export function refresh() {
     }
   }
   display.hoverId = hover;
-  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M, terrainText: wreckText });
+  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M, terrainText: wreckText, passages: passages() });
 }
+/** The passages (temporary edges) as the display marks them: every end that lies in a zone of the map now. */
+function passages() {
+  if ( !S?.edges.length || !Z ) return null;
+  const byId = new Map(Z.zones.map((z) => [z.id, z]));
+  return passageMarks(S.edges, (key) => K.idOf.get(key) ?? -1, (id) => byId.get(id)?.label ?? null);
+}
+/** What sits on the zones now (badges, icon rows, passage marks), as boxes in scene pixels (display.mjs boxes): for the highlights' labels. */
+export const displayBoxes = () => display?.boxes() ?? [];
 
 /* ---------------------------------------------------------------- numbers on hover */
 
@@ -288,7 +297,7 @@ const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); ico
 /** What a zone icon means, shown next to the cursor while it rests on the icon. */
 let tipEl = null, tipRaf = 0, tipAt = null;
 function onIconMove(ev) {
-  if ( !display?.root.visible || !M?.zones.size ) { if ( tipEl ) iconTip(null); return; }
+  if ( !display?.root.visible || !(M?.zones.size || S?.edges.length) ) { if ( tipEl ) iconTip(null); return; }
   tipAt = { x: ev.clientX, y: ev.clientY };
   if ( tipRaf ) return;
   tipRaf = requestAnimationFrame(() => {
@@ -301,13 +310,23 @@ function onIconMove(ev) {
 function iconTip(hit, at) {
   if ( !hit ) { tipEl?.remove(); tipEl = null; return; }
   const p = M?.zones.get(hit.z.id) ?? {}, ZL = (k) => game.i18n.localize(`MOINENMAPS.Zones.${k}`);
-  const text = hit.key === "fire" ? `${ZL("state.fire")}: ${p.fire}`
+  const text = hit.key === "passage" ? `${States.EDGE_KINDS.includes(hit.pass.kind) ? ZL(`edge.kind.${hit.pass.kind}`) : hit.pass.kind} ↔ ${spotText(hit.end.far)}`
+    : hit.key === "fire" ? `${ZL("state.fire")}: ${p.fire}`
     : hit.key === "terrain" ? `${ZL("terrain.label")}: ${ZL(`terrain.${p.terrain}`)}${wreckText(p.terrain) && p.terrain !== "none" ? ` (${wreckText(p.terrain)})` : ""}`
     : hit.key === "building" && p.floors && !p.wrecked ? `${ZL("feat.building")} · ${game.i18n.format("MOINENMAPS.Zones.floorsTip", { n: p.floors + 1 })}`
     : ZL(Marks.FEATURES.includes(hit.key) ? `feat.${hit.key}` : `state.${hit.key}`);
   if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip"; document.body.append(tipEl); }
   tipEl.textContent = `${zoneName(hit.z.id)} · ${text}`;
   tipEl.style.left = `${at.x + 14}px`; tipEl.style.top = `${at.y + 16}px`;
+}
+
+/** A spot in words: "Zone 5", "Zone 5, elevated", an off-map area, or a zone that is gone. */
+function spotText(spot) {
+  const [k, lvl] = String(spot ?? "").split(":"), ZL = (key) => game.i18n.localize(`MOINENMAPS.Zones.${key}`);
+  if ( k[0] === "@" ) return ZL(`area.${k.slice(1)}`);
+  const id = K?.idOf.get(k) ?? -1;
+  const where = id >= 0 ? game.i18n.format("MOINENMAPS.Zones.zone.title", { n: zoneName(id) }) : ZL("edge.gone");
+  return lvl ? `${where}, ${/^fd+$/.test(lvl) ? game.i18n.format("MOINENMAPS.Zones.floorN", { n: lvl.slice(1) }) : ZL(`reg.at.${lvl}`)}` : where;
 }
 
 /* ---------------------------------------------------------------- lifecycle */
