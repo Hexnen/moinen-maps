@@ -199,22 +199,36 @@ export class ZoneDisplay {
    */
   render(Z, look, g, { dist = null, bands = null, here = -1, hover = -1, editing = false, zoom = 1, marks = null } = {}) {
     const F = this.fill;
-    F.clear(); this.lines.clear(); this.states.clear();
+    // PERF (ultra1-zones, 2026-11-10): every layer change, hover and step of the selected token called this, and it cleared every
+    // Graphics and destroyed and made again every badge and icon (a PIXI.Text each: a canvas, a measure, a texture upload; destroying
+    // them was the biggest single cost): 50-200 ms, 1 s with 3 users in the ultra test. Now each part is drawn again only when what it
+    // is drawn from changed (its key), and badges / icon rows are kept per zone by their key: only changed ones are made again. The
+    // same draw calls from the same inputs, so nothing on screen changes.
+    const lookKey = JSON.stringify(look ?? null);
+    if ( Z !== this.Z || g !== this.g ) this.#drawnKeys = {};
     this.M = marks; this.editing = editing;
-    for ( const c of this.badges.removeChildren() ) c.destroy({ children: true });
+    const oldBadges = this.#badgeCache, oldIcons = this.#iconCache;
+    this.#badgeCache = new Map(); this.#iconCache = new Map();
+    this.badges.removeChildren();
+    const dropOld = () => { for ( const m of [oldBadges, oldIcons] ) for ( const v of m.values() ) v.b.destroy({ children: true }); m0clear(); };
+    const m0clear = () => { oldBadges.clear(); oldIcons.clear(); };
     this.items = [];
     this.half = new Map();
     this.g = g;
-    this.Z = Z; this.look = look;
+    this.Z = Z; this.look = look; this.#lookKey = lookKey;
     this.drawHover(this.hoverId, zoom);
-    if ( !Z || !Z.zones.length ) { this.#dropWash(); return; }
+    if ( !Z || !Z.zones.length ) { F.clear(); this.lines.clear(); this.glow.clear(); this.states.clear(); this.#drawnKeys = {}; this.#dropWash(); dropOld(); return; }
     const tint = tints(Z), light = hex(look.color), theme = THEMES[look.lineStyle] ?? null, pal = theme?.palette ?? TINTS;
     this.tintOf = (id) => pal[(tint.get(id) ?? 0) % pal.length];
     // a style with a wash of its own shows its zones through it: the flat tint stays for distances, the token's zone and editing
     const washed = this.#washFor(Z, look, theme, g);
     const fillA = washed && !editing && !theme.keepFill ? 0 : Math.min(1, look.fill * (editing ? 0.75 : 0.6));
+    const K = this.#drawnKeys;
 
     // tints (holes cut out), and the reach of the selected token
+    const fillKey = JSON.stringify([lookKey, editing, here, washed, bands ? [...bands] : null]);
+    if ( K.fill !== fillKey ) {
+    K.fill = fillKey; F.clear();
     for ( const z of Z.zones ) {
       const band = bands?.get(z.id);
       const color = band ? band.color : this.tintOf(z.id);
@@ -227,11 +241,16 @@ export class ZoneDisplay {
         F.endFill();
       }
     }
+    }
     // zone states (and water) as a tint of their own over the zone
+    const STK = ["water", "flooded", "wrecked", "ice", "lowgrav", "fire", "dark"];
+    const statesKey = JSON.stringify(Z.zones.map((z) => { const p = marks?.zones.get(z.id); return p ? STK.map((k) => (p[k] ? (k === "fire" ? p.fire : 1) : 0)) : 0; }));
+    if ( K.states !== statesKey ) {
+    K.states = statesKey; this.states.clear();
     for ( const z of Z.zones ) {
       const p = marks?.zones.get(z.id);
       if ( !p ) continue;
-      for ( const k of ["water", "flooded", "wrecked", "ice", "lowgrav", "fire", "dark"] ) {
+      for ( const k of STK ) {
         if ( !p[k] ) continue;
         const [c, a] = STATE_TINT[k];
         for ( const part of z.parts ) {
@@ -242,6 +261,8 @@ export class ZoneDisplay {
         }
       }
     }
+    }
+    // the borders (drawLines keeps its own key: drawn again only for another zoom, look or walls)
     this.drawLines(zoom);
 
     // badges: the zone's number, or its distance from the selected token. Each badge is drawn once at its size ON SCREEN and scaled
@@ -250,13 +271,24 @@ export class ZoneDisplay {
     const res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
     // the icons keep one spot: under the badge's place whenever a badge can show there (numbers always / on hover, distances),
     // so a number appearing on hover never pushes them down
-    this.#icons(Z, marks, res, () => !!dist || look.numbers !== "never");
-    if ( look.numbers === "never" && !dist ) { this.follow(zoom, true); return; }
+    this.#icons(Z, marks, res, () => !!dist || look.numbers !== "never", oldIcons);
+    if ( look.numbers === "never" && !dist ) { dropOld(); this.follow(zoom, true); return; }
     for ( const z of Z.zones ) {
       const d = dist ? dist.get(z.id) : null;
       const band = bands?.get(z.id), blocked = band?.key === "blocked";
       if ( d == null && !blocked && !numbered(z.id) ) continue;
       const text = blocked ? "×" : d != null ? String(d) : numeral(z.id + 1, look.numFormat);
+      // the same zone, text, look, band, tint and resolution draw the same badge: keep it
+      const bKey = JSON.stringify([z.id, text, lookKey, band ?? null, d != null, blocked, res, this.tintOf(z.id)]);
+      const kept = oldBadges.get(bKey);
+      if ( kept ) {
+        oldBadges.delete(bKey); this.#badgeCache.set(bKey, kept);
+        kept.b.alpha = d == null && dist && !blocked ? 0.45 : 1;
+        this.badges.addChild(kept.b);
+        this.half.set(z.id, kept.half);
+        this.items.push({ b: kept.b, z, at: null });
+        continue;
+      }
       const b = new PIXI.Container();
       const G = new PIXI.Graphics();
       b.addChild(G);
@@ -290,8 +322,10 @@ export class ZoneDisplay {
       b.alpha = d == null && dist && !blocked ? 0.45 : 1;
       this.badges.addChild(b);
       this.half.set(z.id, half);
+      this.#badgeCache.set(bKey, { b, half });
       this.items.push({ b, z, at: null });
     }
+    dropOld();
     // icons sit under the badge, whatever its height
     const hd = this.half.values().next().value ?? 1;
     for ( const it of this.items ) if ( it.icons && it.dy ) it.dy = BADGE_R * (this.half.get(it.z.id) ?? hd) + 15;
@@ -301,8 +335,12 @@ export class ZoneDisplay {
   /** Borders: dark under-line, light dots on top; widths in screen pixels (drawn again when the zoom moved, see onZoom). */
   drawLines(zoom) {
     const Ln = this.lines, Z = this.Z, look = this.look, Gw = this.glow;
-    Ln.clear(); Gw.clear();
     this.lineZoom = zoom;
+    // the same zones, look, zoom and walls draw the same lines: keep them (render() runs on every layer change)
+    const key = JSON.stringify([this.#lookKey, zoom, this.g ?? 100, this.M?.borders.size ? [...this.M.borders] : null]);
+    if ( this.#drawnKeys.lines === key && this.#drawnKeys.linesZ === Z ) return;
+    this.#drawnKeys.lines = key; this.#drawnKeys.linesZ = Z;
+    Ln.clear(); Gw.clear();
     if ( !Z || !look || look.ink <= 0 ) return;
     Ln.alpha = Gw.alpha = look.lineAlpha ?? 1;
     const px = 1 / Math.max(0.05, zoom), ink = look.ink, w = 5.5 * px * ink, col = hex(look.color), a = Math.min(1, 0.95 * ink);
@@ -415,7 +453,7 @@ export class ZoneDisplay {
   }
 
   /** A row of small icons under a zone's number: its features and states (the terrain only for the GM while editing). */
-  #icons(Z, M, res, hasBadge) {
+  #icons(Z, M, res, hasBadge, old = new Map()) {
     if ( !M?.zones.size ) return;
     const fa = iconFont();
     for ( const z of Z.zones ) {
@@ -424,6 +462,15 @@ export class ZoneDisplay {
       const parts = ICONS.filter(([k]) => p[k]).map(([k, g, e]) => ({ k, s: fa ? g : e }));
       const terrain = this.editing && p.terrain ? p.terrain : null;
       if ( !parts.length && !terrain ) continue;
+      // the same icons (and the numbers on them) at the same resolution: keep the row
+      const key = JSON.stringify([z.id, parts.map((it) => it.k), fa, p.floors ?? null, !!p.wrecked, p.fire ?? null, terrain, res, game.i18n?.lang]);
+      const kept = old.get(key);
+      if ( kept ) {
+        old.delete(key); this.#iconCache.set(key, kept);
+        this.badges.addChild(kept.b);
+        this.items.push({ b: kept.b, z, at: null, dy: hasBadge(z.id) ? BADGE_R + 15 : 0, icons: true });
+        continue;
+      }
       const row = new PIXI.Container();
       const size = 15, gap = 4;
       let x = 0;
@@ -453,6 +500,7 @@ export class ZoneDisplay {
       back.beginFill(0x15110f, 0.7).drawRoundedRect(-5, -11, x + 10, 22, 8).endFill();
       for ( const c of row.children ) c.x -= x / 2;
       this.badges.addChild(row);
+      this.#iconCache.set(key, { b: row });
       // under the badge when there is one, else on the zone's spot
       this.items.push({ b: row, z, at: null, dy: hasBadge(z.id) ? BADGE_R + 15 : 0, icons: true });
     }
@@ -472,6 +520,10 @@ export class ZoneDisplay {
   drawHover(id, zoom = this.zoom ?? 1) {
     this.hoverId = id;
     const F = this.hiFx, M = this.hiMask, L = this.hiLine;
+    // the same zone, zoom, look and tint as last time: what is drawn stays (render() calls this on every layer change)
+    const hKey = JSON.stringify([id, zoom, this.#lookKey, this.g ?? 100, id >= 0 ? this.tintOf?.(id) ?? null : null]);
+    if ( this.#hoverKey === hKey && this.#hoverZ === this.Z ) return;
+    this.#hoverKey = hKey; this.#hoverZ = this.Z;
     F.clear(); M.clear(); L.clear();
     const look = this.look, z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null;
     if ( !look?.hoverHi || !z ) { this.#softTex(); return; }
@@ -521,6 +573,15 @@ export class ZoneDisplay {
     for ( const r of rings ) ring(L, r);
     theme?.hover?.({ L, F, px, rings, light, bbox: [x0, y0, x1, y1], z, look });
   }
+
+  /** What each part was last drawn from: render / drawLines / drawHover skip a part whose inputs did not change. */
+  #drawnKeys = {};
+  #lookKey = null;
+  #hoverKey = null;
+  #hoverZ = null;
+  /** Badges and icon rows kept by their key: { b: Container, half }. */
+  #badgeCache = new Map();
+  #iconCache = new Map();
 
   /** The style's wash for these zones (themes.mjs): baked again only when the zones or what the wash depends on changed. */
   #washKey = null;

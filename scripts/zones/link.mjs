@@ -83,21 +83,79 @@ export function strokeCovers(s, x, y) {
 }
 const boxOf = (s) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for ( let i = 0; i < s.p.length; i += 2 ) { x0 = Math.min(x0, s.p[i]); x1 = Math.max(x1, s.p[i]); y0 = Math.min(y0, s.p[i + 1]); y1 = Math.max(y1, s.p[i + 1]); } return [x0 - s.r, y0 - s.r, x1 + s.r, y1 + s.r]; };
 
+/**
+ * PERF (ultra1-zones, 2026-11-10): a stroke's box and the box of each of its segments (grown by the radius and a hair), kept per
+ * stroke while its path and radius stay. A point outside a segment's grown box lies further than r from it (the nearest point of a
+ * segment lies in its box), so strokeCovers' answer is the same when only the segments whose box holds the point are measured
+ * (the same segDist2, the same <= test). Long strokes over big zones measured every segment for every sample.
+ */
+const preps = new WeakMap();
+function prepOf(s) {
+  let q = preps.get(s);
+  if ( q && q.p === s.p && q.r === s.r ) return q;
+  const p = s.p, r = s.r, m = r + 1e-6 * (1 + Math.abs(r));
+  const n = p.length >= 4 ? p.length / 2 - 1 : 0, seg = new Float64Array(n * 4);
+  for ( let k = 0, i = 2; i < p.length; i += 2, k += 4 ) {
+    const ax = p[i - 2], ay = p[i - 1], bx = p[i], by = p[i + 1];
+    seg[k] = Math.min(ax, bx) - m; seg[k + 1] = Math.min(ay, by) - m; seg[k + 2] = Math.max(ax, bx) + m; seg[k + 3] = Math.max(ay, by) + m;
+  }
+  q = { p, r, box: boxOf(s), seg };
+  preps.set(s, q);
+  return q;
+}
+function covers(s, q, x, y) {
+  const p = s.p, r2 = s.r * s.r;
+  if ( p.length === 2 ) return (p[0] - x) ** 2 + (p[1] - y) ** 2 <= r2;
+  const seg = q.seg;
+  for ( let i = 2, k = 0; i < p.length; i += 2, k += 4 ) {
+    if ( x < seg[k] || y < seg[k + 1] || x > seg[k + 2] || y > seg[k + 3] ) continue;
+    if ( segDist2(x, y, p[i - 2], p[i - 1], p[i], p[i + 1]) <= r2 ) return true;
+  }
+  return false;
+}
+const burning = (s) => s.k === "fire" && s.o === undefined && !!s.p?.length;
+
 /** The burning fire strokes that cover samples of a zone: [{ s, hits }] (erasers ignored: the fire layer keeps them as strokes of their own). */
 export function fireIn(samples, fire) {
   const out = [];
+  const rows = rowSorted(samples);
   for ( const s of fire ?? [] ) {
-    if ( s.k !== "fire" || s.o !== undefined || !s.p?.length ) continue;
-    const [x0, y0, x1, y1] = boxOf(s);
+    if ( !burning(s) ) continue;
+    const q = prepOf(s), [x0, y0, x1, y1] = q.box;
     let hits = 0;
-    for ( let i = 0; i < samples.length; i += 2 ) {
+    // samples ordered by row (samplesOf): start at the first row inside the box, stop past its last (the rows skipped fail y0 / y1)
+    let i = 0, end = samples.length;
+    if ( rows ) {
+      let lo = 0, hi = samples.length / 2;
+      while ( lo < hi ) { const m = (lo + hi) >> 1; if ( samples[2 * m + 1] < y0 ) lo = m + 1; else hi = m; }
+      i = 2 * lo;
+    }
+    for ( ; i < end; i += 2 ) {
       const x = samples[i], y = samples[i + 1];
+      if ( y > y1 && rows ) break;
       if ( x < x0 || x > x1 || y < y0 || y > y1 ) continue;
-      if ( strokeCovers(s, x, y) ) hits++;
+      if ( covers(s, q, x, y) ) hits++;
     }
     if ( hits ) out.push({ s, hits });
   }
   return out;
+}
+/** Are the samples' y never decreasing (row after row, as samplesOf lays them)? Kept per samples array. */
+const sorted = new WeakMap();
+function rowSorted(pts) {
+  let v = sorted.get(pts);
+  if ( v === undefined ) { v = true; for ( let i = 3; i < pts.length; i += 2 ) if ( !(pts[i] >= pts[i - 2]) ) { v = false; break; } sorted.set(pts, v); }
+  return v;
+}
+/** The box of a zone's samples [x0, y0, x1, y1] (kept per samples array). */
+const sboxes = new WeakMap();
+function samplesBox(pts) {
+  let b = sboxes.get(pts);
+  if ( b ) return b;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for ( let i = 0; i < pts.length; i += 2 ) { const x = pts[i], y = pts[i + 1]; if ( x < x0 ) x0 = x; if ( x > x1 ) x1 = x; if ( y < y0 ) y0 = y; if ( y > y1 ) y1 = y; }
+  sboxes.set(pts, b = [x0, y0, x1, y1]);
+  return b;
 }
 
 /**
@@ -108,10 +166,14 @@ export function fireIn(samples, fire) {
  */
 export function derive(samplesById, { fire = null, water = null, dest = null } = {}) {
   const out = new Map();
+  // only the burning strokes, and per zone only those whose box meets the box of its samples (the others cover none of them)
+  const live = fire?.length ? fire.filter(burning) : null;
   for ( const [id, pts] of samplesById ) {
     const n = pts.length / 2, o = {};
     if ( fire?.length ) {
-      const f = fireIn(pts, fire);
+      const [zx0, zy0, zx1, zy1] = samplesBox(pts);
+      const near = live.filter((s) => { const b = prepOf(s).box; return !(b[2] < zx0 || b[0] > zx1 || b[3] < zy0 || b[1] > zy1); });
+      const f = fireIn(pts, near);
       const hit = f.reduce((m, x) => Math.max(m, x.hits), 0);
       if ( f.length && (hit / n >= FIRE_SHARE || hit >= 2) ) o.fire = Math.max(...f.map((x) => LEVEL_INTENSITY[x.s.lv ?? 2] ?? 8));
     }
