@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import { BORDER_KINDS, cleanProps } from "./marks.mjs";
+import { cleanAnchors } from "./keys.mjs";
 
 /**
  * The zones of a scene, stored in one scene flag `flags.moinen-maps.zones` (written by the GM, read by everyone):
@@ -11,7 +12,9 @@ import { BORDER_KINDS, cleanProps } from "./marks.mjs";
  *     smooth: 0.3,                      how much the lines are smoothed before the zones are worked out (0..1; the lines stay as drawn)
  *     snap: 0.25,                       an end of a line this close to another line (in grid squares) is joined to it
  *     w: [[x, y, kind], ...]           border marks (a point on the border: door, locked, wall, outer, reinforced; scripts/zones/marks.mjs)
- *     m: [[x, y, props], ...]          zone marks (a point inside the zone: features building/tall/water/terrain, states wrecked/fire/...)
+ *     m: [[x, y, props], ...]          zone marks (a point inside the zone: features building/tall/water/terrain, attributes empty/tags, states wrecked/fire/...)
+ *     k: [[key, x, y], ...]            stable zone keys (a point inside the zone that carries the key; scripts/zones/keys.mjs)
+ *     kn: key counter                  the number of the next new key (absent in scenes saved before keys: 1)
  *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"; place: "center" | "corner" (top left);
  *                                       hoverHi: the zone under the cursor lights its border; hoverFx: none | glow | hatch | crosshatch | dots inside it
  *
@@ -61,7 +64,7 @@ export function cleanLook(l = {}) {
 }
 
 // preset null = the world's default movement preset; lookFrom null = the world's default look preset, "custom" = this scene's own look
-export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook(), walls: [], marks: [] });
+export const blank = () => ({ strokes: new Map(), next: 1, preset: null, lookFrom: null, snap: 0.25, smooth: 0.3, look: cleanLook(), walls: [], marks: [], keys: [], keyNext: 1 });
 
 /** The scene's stored zones, decoded (an empty set when nothing is stored). */
 export function load(scene) {
@@ -85,6 +88,8 @@ export function load(scene) {
     const c = cleanProps(p && typeof p === "object" ? p : {});
     if ( Number.isFinite(x) && Number.isFinite(y) && Object.keys(c).length ) S.marks.push([x, y, c]);
   }
+  S.keys = cleanAnchors(f.k);
+  S.keyNext = Math.max(1, Math.floor(Number(f.kn) || 1));
   S.next = Math.max(Number(f.next) || 1, ...[...S.strokes.keys()].map((k) => k + 1), 1);
   return S;
 }
@@ -96,7 +101,9 @@ export function encode(S) {
     next: S.next, preset: S.preset, lookFrom: S.lookFrom, snap: S.snap, smooth: S.smooth,
     look: { ...S.look },
     w: S.walls.map(([x, y, k]) => [r1(x), r1(y), k]),
-    m: S.marks.map(([x, y, p]) => [r1(x), r1(y), { ...p }])
+    m: S.marks.map(([x, y, p]) => [r1(x), r1(y), { ...p }]),
+    // (a scene that never got keys keeps the flag it had: nothing new is written until the GM edits its zones)
+    ...(S.keys?.length || S.keyNext > 1 ? { k: S.keys.map(([key, x, y]) => [key, r1(x), r1(y)]), kn: S.keyNext } : {})
   };
 }
 

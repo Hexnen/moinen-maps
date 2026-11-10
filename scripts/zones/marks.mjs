@@ -6,6 +6,8 @@
  *    end there), water (SWIMMING), and the terrain that sets what wrecking it takes (office 4/+1 ... cliffs 9/+6, or "cannot be
  *    wrecked": a flat field, open air);
  *  - zone STATES (during a scene): wrecked, burning (Intensity), darkness, ice, flooded, low gravity.
+ *  - zone ATTRIBUTES the rules read (stored only; a combat module works out what they do): an EMPTY zone (nothing in it to trap
+ *    someone under: book-dump 2438) and RESOURCE TAGS - what a power or a stunt may need to find in the zone (plan 5.7 item 8).
  * Marks are stored as points (a border mark: a point on the border; a zone mark: a point inside the zone), so they keep to their
  * border or zone while the pencil lines change and the zones are numbered anew. Pure functions: no Foundry here.
  */
@@ -16,6 +18,8 @@ export const FEATURES = ["building", "tall", "water"];
 export const TERRAINS = ["", "office", "warehouse", "street", "woods", "building", "cliffs", "none"];
 /** Wrecking a zone: minimum STRENGTH and attack bonus by terrain ("none": cannot be wrecked). */
 export const WRECK = { office: [4, 1], warehouse: [5, 2], street: [6, 3], woods: [7, 4], building: [8, 5], cliffs: [9, 6] };
+/** What a zone may hold that powers and stunts ask for (stored as `tags`; "water" and "tall" are the features above, see tagsOf). */
+export const TAGS = ["power", "metal", "plants", "throwables", "flammable", "vacuum", "bystanders"];
 export const STATES = ["wrecked", "fire", "dark", "ice", "flooded", "lowgrav"];
 export const FIRE_MAX = 12;
 /** Floors above the ground floor a building may have (book: each floor of a large building is a vertical zone of its own). */
@@ -34,13 +38,26 @@ export const pairKey = (a, b) => (a > b ? `${a}|${b}` : `${b}|${a}`);
 /** A clean zone-mark props object (only what is set). */
 export function cleanProps(p = {}) {
   const o = {};
-  for ( const k of ["building", "tall", "water", "wrecked", "dark", "ice", "flooded", "lowgrav"] ) if ( p[k] === true ) o[k] = true;
+  for ( const k of ["building", "tall", "water", "empty", "wrecked", "dark", "ice", "flooded", "lowgrav"] ) if ( p[k] === true ) o[k] = true;
+  if ( Array.isArray(p.tags) ) { const t = TAGS.filter((k) => p.tags.includes(k)); if ( t.length ) o.tags = t; }
   if ( TERRAINS.includes(p.terrain) && p.terrain ) o.terrain = p.terrain;
   const f = Math.round(Number(p.fire) || 0);
   if ( f > 0 ) o.fire = Math.min(FIRE_MAX, f);
   const fl = Math.round(Number(p.floors) || 0);
   if ( fl > 0 ) o.floors = Math.min(FLOORS_MAX, fl);
   return o;
+}
+/** Every resource tag of a zone: the stored ones with the features that are resources too (water, tall features). */
+export const tagsOf = (p) => [...(p?.water || p?.flooded ? ["water"] : []), ...(p?.tall ? ["tall"] : []), ...(p?.tags ?? [])];
+/**
+ * What wrecking a zone takes (book-dump 2454-2457 and the table after 2458): { can, strength, bonus, why }. `can` false: already
+ * wrecked ("wrecked") or terrain that cannot be wrecked ("terrain"); null: no terrain set, the GM decides ("unset").
+ */
+export function wreckOf(p) {
+  if ( p?.wrecked ) return { can: false, strength: null, bonus: null, why: "wrecked" };
+  if ( p?.terrain === "none" ) return { can: false, strength: null, bonus: null, why: "terrain" };
+  const w = WRECK[p?.terrain];
+  return w ? { can: true, strength: w[0], bonus: w[1], why: null } : { can: null, strength: null, bonus: null, why: "unset" };
 }
 export const hasStates = (p) => !!(p.wrecked || p.fire || p.dark || p.ice || p.flooded || p.lowgrav);
 export const withoutStates = (p) => { const o = { ...p }; for ( const k of STATES ) delete o[k]; return o; };
@@ -82,6 +99,11 @@ export function resolve(Z, walls, marks, zoneAt, tol) {
   }
   return { borders, zones };
 }
+
+/** Whether the border between two adjacent zones stops this way of moving (walk, air, through). */
+export const stopped = (M, a, b, way) => { const kind = M?.borders.get(pairKey(a, b))?.kind; return !!kind && STOPS[way].has(kind); };
+/** A zone one can swim through: water or flooded. */
+export const isWater = (M, id) => { const p = M?.zones.get(id); return !!(p?.water || p?.flooded); };
 
 /** Zones reachable from `from` with the borders that stop this way of moving; `onlyThrough(id)` limits the zones passed (water). */
 function bfs(Z, from, M, way, onlyThrough = null) {
