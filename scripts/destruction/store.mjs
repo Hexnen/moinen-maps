@@ -159,6 +159,7 @@ export function sigsOf(S) {
   return out;
 }
 let lastSigs = null;
+const INCREMENTAL_MAX = 48;      // (new or changed strokes at the end of the list computed on the page; more: IndexedDB / the worker)
 const sigMemo = new WeakMap();
 /** Signatures by the digest of everything they are made of (the strokes' own inputs, their order, the settings, the grid). */
 const sigStore = new Map();
@@ -178,6 +179,15 @@ export async function warmSigs(S, get, compute = null) {
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return true;
   const key = sigsKey(S, pj);
   if ( sigStore.has(key) ) return true;
+  // PERF: the last computed list shares all but a few strokes with this one (a stroke painted, undone, redone): the few are computed
+  // here at once (sigsOf, incremental: ~1 ms) - not a round trip through IndexedDB and the codec worker, which got every stroke's
+  // pixels and computed every pair again (seconds on a grown scene, after every stroke)
+  if ( lastSigs && lastSigs.pj === pj ) {
+    const strs = strsOf(S), L = Math.min(lastSigs.strs.length, strs.length);
+    let from = 0;
+    while ( from < L && lastSigs.strs[from] === strs[from] ) from++;
+    if ( strs.length - from <= INCREMENTAL_MAX ) { sigsOf(S); return true; }
+  }
   // (one read / job per digest: the read-ahead at canvasInit and the load's own pass ask for the same)
   if ( !sigsPending.has(key) ) sigsPending.set(key, readSigs(S, key, get, compute).finally(() => sigsPending.delete(key)));
   return sigsPending.get(key);
