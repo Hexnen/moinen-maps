@@ -12,8 +12,11 @@ asked before every step, group and forced moves, free spots, cost confirmation o
 `scripts/zones/borders.mjs`, `scripts/zones/states.mjs`, `scripts/zones/moves.mjs`. Tests: `dev/zones-borders.test.mjs`,
 `dev/zones-moves.test.mjs`, `dev/zones-play.test.mjs`.
 
-Still not there (a later task): highlighting sets of zones and borders, picking a zone by click, editing UI for the zone
-attributes, the registry and the wall-plus-door model (the GM's menu still marks the six border kinds).
+The interface part (sections 17-21) added: highlights of zones and borders for chosen users, picking a zone by click, the
+GM's editing of the wall-plus-door model, zone attributes, the registry and temporary edges in the menus and the Zones dock,
+and a rules driver that turns the map's own fire round and wrecking numbers into display. Pure part:
+`scripts/zones/highlight.mjs`; drawing: `scripts/zones/highlight-layer.mjs`; wiring: `scripts/zones/interact.mjs`; UI:
+`scripts/zones/menu.mjs`, `scripts/zones/play-panel.mjs`. Test: `dev/zones-interact.test.mjs`.
 
 The map **stores, reports and draws**. It computes no Invincible rule effect: what a state, a wall or a step does to a character
 is the combat module's.
@@ -576,10 +579,133 @@ Without `confirm` the map asks a yes / no question with the zones and actions. `
 - The planner treats an edge as joining two zones; the levels of its ends are reported, not enforced.
 - A forced chain follows the map's surface: no vertical direction (up into the air, down a floor).
 - `freeSpot` treats tokens of every level as in the way (they share the map).
-- The GM's menu marks only the six kinds; a border built otherwise (`buildBorder`) shows its base kind there and is replaced
-  by a plain kind when the GM marks it again.
+- (Was: the GM's menu marks only the six kinds. Section 20 replaced that: the menu edits the wall and the door apart; the six
+  kinds stay as quick choices under "Built as".)
 - Differences from `combat-spec.md` section 7.1 as it stood when this was written: a door also has the states `closed`
   (unlocked) and `breached` (as the rules contract); a place is `{ zone, level, floor, ... }` with a spot string, not
   `{ key, level: "floor:<n>" }`; a temporary edge and a zone state carry `owner` / `ends` (the spec's edge says `source` /
   `until`); the spec's state kind `storm` is `weather` with `data.type: "storm"`; `unwreckable` is `terrain: "none"`; the
   resource flags are `tags`.
+
+## 17. Highlights (interface part)
+
+A highlight is a **show, not a state**: nothing is stored, it belongs to the scene it was made on and is gone when that scene
+closes or the page reloads. It is drawn whatever the scene's "who sees the zones" setting says, under fog and vision like the
+zone display itself.
+
+```js
+const id = api.highlight({
+  id: "ipu.reach",                    // optional; the same id again replaces what it showed, for everyone it was shown to
+  zones: ["z3", "z4:elevated", { zone: "z7", color: "stress", style: "dashed", label: "2", tip: "2 actions" }],
+  borders: ["z3|z4", ["z3", "z7"], { border: "z3|z9", color: "danger", style: "dashed", label: "Armor 5" }],
+  color: "move", style: "fill",       // defaults for zones
+  borderColor: "danger", borderStyle: "solid",
+  users: [userId],                    // absent: this client only; "all"; "gm"; a user id or a list
+  order: 0                            // higher wins where two highlights name the same zone or border
+});                                   // -> the id, or null when the spec names nothing that exists
+api.clearHighlights(id);              // also ({ id }), ({ prefix: "ipu." }), () everything this client made,
+                                      // ({ all: true }) also what others showed here (this client's screen only) -> how many went
+api.highlights();                     // what is on this client's screen: [{ id, zones, borders, order, from }]
+api.showReach(token, profile, { id: "reach", users, max, beyond: false, labels: true, order });
+```
+
+- **Colours**: a name of `api.HIGHLIGHT_COLORS` (`move`, `free`, `stress`, `range`, `danger`, `target`, `info`, `here`,
+  `blocked`), a number (`0xff9d4d`) or `"#rrggbb"`. **Zone styles**: `fill` (a wash and an inner band), `outline` (the band
+  only), `dashed` (a dashed band: "possible, at a price"). **Border styles**: `solid`, `dashed`. Every band and line has a dark
+  line under the colour, so it reads on light and on dark maps; labels are dark pills rimmed in the colour and keep their size
+  on screen at every zoom.
+- A zone entry may be a spot (`"z4:elevated"`): the zone is what gets highlighted. `label` is short (cut at 28 characters),
+  `tip` is the text under the pointer.
+- **Who sees it.** Without `users` only the calling client. With `users` (a GM's call only; a player's highlight stays on the
+  player's own client) the highlight goes over the module socket **to those users alone** - the server honours the recipient
+  list, so another player's browser never receives it. A client that opens the scene later asks and gets what is meant for it.
+  Clearing takes it from their screens too. Clients take highlights from GM senders only.
+- `showReach` is `api.reach` drawn: zones within one movement action in `move`, zones that need the stress option in
+  `stress`, the mover's own zone outlined, farther zones left out unless `beyond: true` (grey, dashed). The label is the
+  number of actions. It does not decide anything.
+- Limits: 600 zones and 600 borders per highlight; an id is up to 64 characters of letters, digits and `_ . : -`.
+- Cost: redrawn only when the set, the zones or the zoom step change; nothing runs per frame or per pan while nothing shows.
+
+## 18. Picking a zone (interface part)
+
+```js
+const r = await api.pick({
+  zones: ["z3", "z4:elevated", { zone: "z7", label: "2", tip: "2 actions", color: "stress" }],   // absent: any zone
+  title: "Kid Thor: where to?", hint: "...", color: "target",
+  timeout: 0,                         // ms; 0: none
+  user: userId                        // a GM's call: ask that user; absent: this client's user
+});
+// { ok: true, zone: "z4", id: 3, spot: "z4:elevated", place: {...}, x, y }     (x, y: the scene point clicked)
+// { ok: false, reason: "cancelled" | "replaced" | "noZones" | "sceneChanged" | "timeout" | "userGone" | "notGM" | "noScene" }
+api.picking();                        // is a pick running on this client
+api.cancelPick();                     // give it up; ({ user }) the pick a GM asked of that user
+```
+
+- The promise always resolves, never rejects. A spot in `zones` is the place the answer carries; a bare key answers with the
+  zone's ground level.
+- While picking: the zones on offer show in their colour with their label, the rest of the map is dimmed, a banner at the top
+  carries the title, the hint and a Cancel button, the pointer says whether the zone under it can be picked and shows its
+  `tip`, the zone under the pointer is lit. A click on a zone on offer picks it; Escape, a right-click or Cancel gives up; a
+  right-drag still pans and the wheel still zooms. A new pick replaces the running one (`replaced`).
+- The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick.
+- Asked of another user, the request goes to that user alone and the answer comes back to the asker alone; the user leaving
+  resolves with `userGone`. A pick request is taken from a GM only.
+
+## 19. The rules driver: the map's rule mechanics as display (gap G-Z9)
+
+Two things in the map act like rules: the **fire round** (rolls, spreads the fire, posts to chat) and the **wrecking
+numbers** shown beside a terrain. A combat module takes them over:
+
+```js
+api.rulesDriver({ id: "invincible-plus-ultra", title: "Invincible Plus Ultra",
+  fireRound: async () => { ... },     // optional: what the map's "fire round" button and api.fireRound() run
+  wreck: { office: [5, 2] } | (terrain) => "5/+2",   // optional: what is shown beside a terrain
+  distances: false });                // optional: the map's distance bands and ruler off
+api.drivenBy();                       // { id, title, fireRound: bool, distances: bool } or null
+api.rulesDriver(false);               // step down (rulesDriver(false, id): only if that id is in charge)
+api.wreckText("office");              // the text shown beside a terrain now
+```
+
+- **No driver: everything as before.** The fire round rolls and posts, the map's table shows.
+- With a driver and no `fireRound`: the map's fire-round buttons go, `api.fireRound()` writes and rolls nothing, tells the
+  GM who runs the fire and returns null. With `fireRound`: the button (labelled with the driver's title) and the call run it.
+- `api.zone(k).wreck` stays the map's table: data, as before. The driver changes what is **shown**.
+- The registration is per client and lasts until reload; a combat module registers on `ready` on every client.
+- Left as display in both cases: the cost and life-support hints of the altitude HUD.
+
+## 20. The GM's editing (interface part)
+
+- **Border menu** (right-click a border): "Built as" (the six kinds as quick choices), the wall (Armor, exterior or not), the
+  door (has one, Armor, the state it is built in), and under "Now, in play" the wall's state (intact / breached / removed,
+  "for a while") and the door's state; restore this border / all borders.
+- **Zone menu** (right-click a zone), three pages: *Zone* (features, floors, terrain incl. unwreckable with the numbers shown,
+  empty zone, the resource tags), *States* (the quick marks; every registry record with its level, where in the zone it
+  holds, gravity's mode, who made it and until when; add / remove), *Passages* (portals and tunnels from this zone; a new one
+  picks its other end on the map with `pick`).
+- **Zones dock, "In play"**: every wall and door that is not as built, every tracked state, every passage; a row can be taken
+  back; pointing at a row outlines its zone or border on the map.
+- **Who may what.** Building (the wall, the door, attributes) is the editor's path: any GM, one undo step, the play record of
+  the border kept. Play state (wall / door state, registry, edges) is `apply()`: the active GM only. A GM who is not the
+  active one sees a line saying on whose screen play changes are made, the play controls are off, and a refused write
+  shows a notice.
+
+```js
+api.editBorder("z1|z2", { wall: { armor: 5, outer: true }, door: { armor: 2, state: "locked" } });   // door: null takes it out; wall: null opens the border
+// -> true when the map changed; false: not a GM, no zones, no such border, a spec that cannot be built, nothing to change
+api.refusalText(result);              // the localized sentence for a refused write ({ ok: false, reason })
+api.activeGmName();                   // the active GM's name ("" when none)
+```
+
+## 21. Limits and open points (interface part)
+
+- Only `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI) stands behind these sections unless the report of the task
+  says what was looked at in Foundry.
+- A highlight is covered by fog and vision like the zone display (it is in the primary group). A combat module that wants a
+  player to see reach into unexplored zones needs a decision here.
+- A registry state added in the menu gets no level unless the GM sets one (the map invents no default).
+- A passage made in the menu joins ground levels; `addEdge` takes any spot.
+- Players cannot send highlights or pick requests to others (only a GM's client can); a combat module that wants a player's
+  aim shown to the table relays through the GM's client.
+- The refusal notice is shown by the menus and the panel; `apply()` called by a module returns `{ ok: false, reason }` and
+  shows nothing (`api.refusalText` gives the words).
+
