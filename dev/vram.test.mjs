@@ -50,8 +50,7 @@ ok(V.layerOfStack(st("    at Canvas.draw (http://h/scripts/foundry.mjs:5:5)")) =
 ok(V.layerOfStack(st("    at y (http://h/modules/other-mod/scripts/fire/x.mjs:1:1)")) === "foundry", "another module's scripts/fire -> foundry");
 ok(V.layerOfStack(st("    at Canvas.render (http://h/scripts/foundry.mjs:5:5)", at("view-smooth.mjs"))) === "foundry", "Foundry code closer than our wrapper -> foundry");
 ok(V.layerOfStack(st(at("destruction/static-cache.mjs"), "    at Canvas.render (http://h/scripts/foundry.mjs:5:5)")) === "destruction", "our code closer than Foundry -> ours");
-ok(V.layerOfStack(["", "http://h/modules/moinen-maps/scripts/vram.mjs", "http://h/scripts/vendor.mjs", "http://h/modules/moinen-maps/scripts/weather/lens.mjs"].join("
-")) === "weather", "file names only (the cheap trace form) -> weather");
+ok(V.layerOfStack(["", "http://h/modules/moinen-maps/scripts/vram.mjs", "http://h/scripts/vendor.mjs", "http://h/modules/moinen-maps/scripts/weather/lens.mjs"].join("\n")) === "weather", "file names only (the cheap trace form) -> weather");
 ok(V.originOfStack(st(at("fire/display.mjs"))).file === "fire/display.mjs", "the file of origin is kept");
 
 // 3. texel sizes
