@@ -1986,6 +1986,34 @@
 
   "MOINENMAPS.Zones.pick.notHere": "Niedostępna",
 
+  "MOINENMAPS.Zones.pick.more": "jeszcze {n}",
+
+  "MOINENMAPS.Zones.pick.way.top": "Więcej do wskazania wyżej: {n}. Kliknij, aby pokazać.",
+
+  "MOINENMAPS.Zones.pick.way.bottom": "Więcej do wskazania niżej: {n}. Kliknij, aby pokazać.",
+
+  "MOINENMAPS.Zones.pick.way.left": "Więcej do wskazania po lewej: {n}. Kliknij, aby pokazać.",
+
+  "MOINENMAPS.Zones.pick.way.right": "Więcej do wskazania po prawej: {n}. Kliknij, aby pokazać.",
+
+  "MOINENMAPS.Zones.place.at": "{zone}, {level}",
+
+  "MOINENMAPS.Zones.place.floor": "piętro {n}",
+
+  "MOINENMAPS.Zones.place.roof": "dach",
+
+  "MOINENMAPS.Zones.place.air": "w powietrzu",
+
+  "MOINENMAPS.Zones.place.underground": "pod ziemią",
+
+  "MOINENMAPS.Zones.place.sky": "Wysoko w niebie",
+
+  "MOINENMAPS.Zones.place.orbit": "Orbita",
+
+  "MOINENMAPS.Zones.place.dimension": "Inny wymiar",
+
+  "MOINENMAPS.Zones.place.chase": "Pościg",
+
   "MOINENMAPS.Zones.driven.fire": "Rundę ognia prowadzi {by}, nie mapa.",
 
   "MOINENMAPS.Zones.driven.note": "Pokazane poglądowo: zasady prowadzi {by}.",

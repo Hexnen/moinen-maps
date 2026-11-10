@@ -63,6 +63,10 @@ export const ownMarks = () => M0;
 export const mapStates = () => MAP;
 /** A zone's name as the map writes it (1, I or A: the look's numeral format). */
 export const zoneName = (id) => numeral(id + 1, look()?.numFormat ?? "arabic");
+/** The numeral format the map writes zone numbers in now: "arabic" | "padded" | "roman" | "letters" | "kanji". */
+export const numberFormat = () => look()?.numFormat ?? "arabic";
+/** A number as the map writes zone numbers (`format`: one of Model.NUM_FORMATS; default: the format in force). null: not a number from 1. */
+export const numeralOf = (n, format = null) => { const v = Math.floor(Number(n)); return Number.isFinite(v) && v >= 1 ? numeral(v, Model.NUM_FORMATS.includes(format) ? format : numberFormat()) : null; };
 export const editing = () => inSection && !!game.user?.isGM;
 export const gridSize = () => canvas.dimensions?.size ?? canvas.grid?.size ?? 100;
 const sceneRect = () => { const r = canvas.dimensions?.sceneRect; return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null; };
@@ -940,6 +944,26 @@ export function placeOf(w) {
   return mkPlace({ id, alt, floor: w.floor, air: w.airborne === true });
 }
 
+/** The number of a zone as its badge shows it ("3", "III", "C", "03"), for whatever names a place; null: no such zone. */
+export function nameOf(w) {
+  const p = placeOf(w);
+  return p && p.id >= 0 ? zoneName(p.id) : null;
+}
+/**
+ * A zone named in words, as the map's own tips and menus name it: "Zone 3" in the user's language with the badge's numeral.
+ * `level: true` adds the level of a place that is not on the ground ("Zone 3, floor 2"). An off-map area: its name. null: no such zone.
+ */
+export function titleOf(w, { level = false } = {}) {
+  const p = placeOf(w);
+  if ( !p ) return null;
+  const ZL = (k, d) => (d ? game.i18n.format(`MOINENMAPS.Zones.${k}`, d) : game.i18n.localize(`MOINENMAPS.Zones.${k}`));
+  if ( p.area ) return ZL(`place.${p.area}`);
+  if ( p.id < 0 ) return null;
+  const title = ZL("zone.title", { n: zoneName(p.id) });
+  if ( !level || p.level === "ground" ) return title;
+  return ZL("place.at", { zone: title, level: p.level === "floor" ? ZL("place.floor", { n: p.floor }) : ZL(`place.${p.level === "elevated" ? (p.roof ? "roof" : "air") : p.level}`) });
+}
+
 /** The tokens in a zone: [{ token: TokenDocument, place }]. A bare zone key or id means every level of it; a place, a spot or a
  *  token means that level only (the book's "same zone"), unless `anyLevel`. */
 function tokensInZone(w, { anyLevel = null } = {}) {
@@ -1278,13 +1302,30 @@ function tokenUpdate(row) {
   for ( const n of ["alt", "floor", "air"] ) { if ( !(n in row) ) continue; if ( row[n] == null ) u[`${k}.-=${n}`] = null; else u[`${k}.${n}`] = row[n]; }
   return u;
 }
+/**
+ * Whether this client draws frames now. A tab in the background, a minimised window or a hidden pane draws none: a token's
+ * movement animation never ends there, so a move made on such a client is not animated and is not waited for. The answer is
+ * kept for `maxAge` ms. (No requestAnimationFrame at all: nothing to ask, taken as yes.)
+ */
+let framesAt = -Infinity, framesOk = true;
+export async function drawsFrames(maxAge = 1000) {
+  if ( typeof requestAnimationFrame !== "function" ) return true;
+  if ( Date.now() - framesAt < maxAge ) return framesOk;
+  framesOk = globalThis.document?.hidden === true ? false : await Promise.race([new Promise((r) => requestAnimationFrame(() => r(true))), new Promise((r) => setTimeout(() => r(false), 250))]);
+  framesAt = Date.now();
+  return framesOk;
+}
+/** The options of a token write: without animation on a client that draws no frames (unless the caller said `animate` itself). */
+async function drawOptions(options = {}) {
+  return "animate" in options || (await drawsFrames()) ? options : { ...options, animate: false };
+}
 const mayMove = (doc) => !!doc && (doc.canUserModify?.(game.user, "update") ?? doc.isOwner ?? false);
 async function writeTokens(rows, options = {}) {
   const docs = rows.map((r) => canvas.scene?.tokens.get?.(r.id) ?? [...(canvas.scene?.tokens ?? [])].find((d) => d.id === r.id));
   if ( docs.some((d) => !d) ) return fail("noToken");
   if ( !docs.every(mayMove) ) return fail("notOwner");
   const before = docs.map(tokenRow);
-  await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), options);
+  await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), await drawOptions(options));
   return { ok: true, changed: true, inverse: { op: "tokens", rows: before }, result: docs.map((d) => placeOfDoc(d)) };
 }
 
@@ -1458,6 +1499,11 @@ export function planAlong(from, zoneKeys, { profile = null, end = null, forced =
   const prof = Moves.profileOf(profile ?? { way: forced && A.level === "elevated" ? "air" : "walk" });
   if ( !prof ) return null;
   const B = end ? placeOf({ id: last, ...end }) : forced ? forcedEnd(A, last) : mkPlace({ id: last });
+  // a forced chain that stays in the mover's zone goes straight up or down, one vertical zone a step
+  if ( forced && end && ids.length === 1 && ids[0] === A.id && B ) {
+    const steps = Moves.levelSteps(M, keyOfId, A, Moves.rungOf(M, B));
+    return { ...Moves.planOfLevels(keyOfId, A, B, prof, steps), forced: true, vertical: true };
+  }
   const pl = Moves.planAlong(cache(), keyOfId, A, ids, prof, B, { stairs: !forced });
   return pl && (forced ? { ...pl, forced: true } : pl);
 }
@@ -1472,6 +1518,8 @@ export function planAlong(from, zoneKeys, { profile = null, end = null, forced =
 export function forcedChain(who, { direction = null, awayFrom = null, toward = null, distance = 1, profile = null } = {}) {
   const A = placeOf(who), from = pointOf(who);
   if ( !A || A.id < 0 || !from ) return null;
+  const dz = vertical(direction);
+  if ( dz ) return risePlan(A, from, dz, distance, profile);
   let dir = null;
   if ( direction && Number.isFinite(direction.angle) ) { const r = (direction.angle * Math.PI) / 180; dir = { dx: Math.cos(r), dy: Math.sin(r) }; }
   else if ( direction && Number.isFinite(direction.dx) && Number.isFinite(direction.dy) ) dir = { dx: direction.dx, dy: direction.dy };
@@ -1484,6 +1532,26 @@ export function forcedChain(who, { direction = null, awayFrom = null, toward = n
   if ( !R ) return null;
   const pl = planAlong(A, R.ids.map(keyOfId), { profile, forced: true });
   return pl && { ...pl, ray: { dx: dir.dx / L, dy: dir.dy / L, end: R.end, points: R.points } };
+}
+
+/** A direction that is straight up or down: "up" | "down", { vertical: "up" | "down" }, { dz } with no dx / dy. -> 1 | -1 | 0 */
+function vertical(d) {
+  const v = typeof d === "string" ? d : d && typeof d === "object" ? (d.vertical ?? (Number.isFinite(d.dz) && !Number(d.dx) && !Number(d.dy) ? d.dz : null)) : null;
+  return v === "up" || v > 0 ? 1 : v === "down" || v < 0 ? -1 : 0;
+}
+/**
+ * The chain of a forced move straight up or down (moves.mjs riseChain): a plan with `forced: true`, `vertical: true` and
+ * `ray: { dx: 0, dy: 0, dz, end: "distance" | "top" | "ground", points }`. Up ends in the air (above a building: over its
+ * rooftop), down ends where it stops; every step says what it passes through (`slab`).
+ */
+function risePlan(A, from, dz, distance, profile) {
+  const prof = Moves.profileOf(profile ?? { way: A.level === "elevated" ? "air" : "walk" });
+  const R = prof ? Moves.riseChain(M, keyOfId, A, dz, Math.max(0, Math.floor(Number(distance) || 0))) : null;
+  if ( !R ) return null;
+  const n = Marks.floorsOf(M, A.id), h = R.rung;
+  // (where no step is taken the mover stays as it is: standing on a rooftop is not turned into flying)
+  const B = !R.steps.length ? A : mkPlace(h < 0 ? { id: A.id, alt: "underground" } : h > n ? { id: A.id, alt: "elevated", air: true } : { id: A.id, floor: h });
+  return { ...Moves.planOfLevels(keyOfId, A, B, prof, R.steps), forced: true, vertical: true, ray: { dx: 0, dy: 0, dz, end: R.end, points: [{ x: from.x, y: from.y }] } };
 }
 
 /** The tokens of the scene as rectangles, without some of them. */
@@ -1534,10 +1602,17 @@ export async function moveToZone(token, w, { group = [], near = null, options = 
 }
 
 const stopWayOf = (way) => (way === "swim" || way === "range" ? "walk" : way === "swing" ? "air" : way);
-/** When the tokens' movement has played (best effort: a token without a canvas object has nothing to wait for). */
+/**
+ * When the tokens' movement has played (best effort: a token without a canvas object has nothing to wait for). It stops waiting
+ * when the client stops drawing frames (the animation would never end) and after 4 s at the latest.
+ */
 async function settled(docs) {
   const waits = docs.map((d) => d.object?.movementAnimationPromise).filter((p) => p && typeof p.then === "function");
-  if ( waits.length ) await Promise.race([Promise.allSettled(waits), new Promise((r) => setTimeout(r, 4000))]);
+  if ( !waits.length ) return;
+  let over = false, timer = 0;
+  const frozen = (async () => { while ( !over && (await drawsFrames(0)) ) await new Promise((r) => setTimeout(r, 200)); })();
+  await Promise.race([Promise.allSettled(waits), frozen, new Promise((r) => { timer = setTimeout(r, 4000); })]);
+  over = true; clearTimeout(timer);
 }
 
 /**
@@ -1570,6 +1645,7 @@ export async function move(token, to, o = {}) {
   const idOfSpot = (spot) => { const s = Places.parseSpot(spot); return s ? { ...s, id: K?.idOf.get(s.key) ?? -1 } : null; };
   // the border of a step as it is NOW (a listener may have breached it; the GM may have redrawn the map under a long move)
   const liveBorder = (step) => { const a = idOfSpot(step.from), b = idOfSpot(step.to); return a && b && a.id >= 0 && b.id >= 0 ? Places.borderInfo(cache(), keyOfId, a.id, b.id) : null; };
+  let still = false;
   emit("moveStarted", { ...base, way: pl.way, total: steps.length, zones: pl.zones?.slice() ?? [] });
   const R = await Moves.runSteps({
     steps, listeners: BEFORE,
@@ -1600,13 +1676,15 @@ export async function move(token, to, o = {}) {
         const drop = last && o.drop && zoneAtNow(o.drop.x, o.drop.y) === s.id ? o.drop : null;
         rows = rowsInto(all, s.id, flags, drop ?? (step.kind === "border" && step.border ? { x: step.border.x, y: step.border.y } : null));
       }
-      await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), { ...(o.options ?? {}), mmMove: op });
-      if ( o.wait !== false ) await settled(all);
+      const opts = await drawOptions({ ...(o.options ?? {}), mmMove: op });
+      if ( opts.animate === false ) still = true;
+      await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), opts);
+      if ( o.wait !== false && opts.animate !== false ) await settled(all);
     },
     after: (step, index) => emit("moveStep", { ...base, index, step, place: placeOfDoc(doc) })
   });
   emit("moveEnded", { ...base, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc) });
-  return { ok: true, op, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc), inverse: R.done ? { op: "tokens", rows: start } : null };
+  return { ok: true, op, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc), inverse: R.done ? { op: "tokens", rows: start } : null, animated: R.done > 0 && !still };
 }
 
 /**
@@ -1692,6 +1770,8 @@ export const zonesApi = {
   keyOf: keyOfId,
   idOf: (key) => K?.idOf.get(key) ?? -1,
   keys: () => (Z ? Z.zones.map((z) => keyOfId(z.id)) : []),
+  /** A zone's number as its badge shows it, a zone named in words, the numeral format in force, any number in that format. */
+  zoneName: nameOf, zoneTitle: titleOf, numberFormat, numeral: numeralOf, NUM_FORMATS: Model.NUM_FORMATS,
   /** A place (zone key + level) from a token, a key, a spot string, an id, a point or a place; the place at a scene point. */
   place: placeOf,
   placeAt: (x, y, o = {}) => placeOf({ ...o, x, y, zone: undefined }),
@@ -1735,7 +1815,7 @@ export const zonesApi = {
   /** Movement: a mover profile, what a route costs it, where it can get to, its route step by step (temporary edges included). */
   profile: (p) => Moves.profileOf(p), moveCost, reach, plan, planAlong, forcedChain,
   /** A free spot for a token in a zone; put a token there; move a token (or a group) step by step, the listeners asked before each. */
-  freeSpot, moveToZone, move, beforeStep,
+  freeSpot, moveToZone, move, beforeStep, drawsFrames,
   /** Cost confirmation when a token is dragged during tactical play. */
   tactical, tacticalOn: () => !!TACT,
   /** Who runs the rules: a combat module takes the map's own mechanics over (fire round, wrecking numbers, distance badges). */

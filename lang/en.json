@@ -1986,6 +1986,34 @@
 
   "MOINENMAPS.Zones.pick.notHere": "Not available",
 
+  "MOINENMAPS.Zones.pick.more": "{n} more",
+
+  "MOINENMAPS.Zones.pick.way.top": "More to pick further up: {n}. Click to show.",
+
+  "MOINENMAPS.Zones.pick.way.bottom": "More to pick further down: {n}. Click to show.",
+
+  "MOINENMAPS.Zones.pick.way.left": "More to pick to the left: {n}. Click to show.",
+
+  "MOINENMAPS.Zones.pick.way.right": "More to pick to the right: {n}. Click to show.",
+
+  "MOINENMAPS.Zones.place.at": "{zone}, {level}",
+
+  "MOINENMAPS.Zones.place.floor": "floor {n}",
+
+  "MOINENMAPS.Zones.place.roof": "rooftop",
+
+  "MOINENMAPS.Zones.place.air": "in the air",
+
+  "MOINENMAPS.Zones.place.underground": "underground",
+
+  "MOINENMAPS.Zones.place.sky": "Sky High",
+
+  "MOINENMAPS.Zones.place.orbit": "Orbit",
+
+  "MOINENMAPS.Zones.place.dimension": "Another dimension",
+
+  "MOINENMAPS.Zones.place.chase": "Chase",
+
   "MOINENMAPS.Zones.driven.fire": "The fire round is run by {by}, not by the map.",
 
   "MOINENMAPS.Zones.driven.note": "Shown for reference: the rules are run by {by}.",

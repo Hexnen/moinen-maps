@@ -14,6 +14,8 @@
  *   order        = a number: where several highlights name the same zone, the highest shows (then the one set last)
  */
 
+import { cleanInsets } from "./view.mjs";
+
 /** The named colours (the ones the distance badges already use, so a highlight reads like the rest of the zones). */
 export const COLORS = Object.freeze({
   move: 0x5cc8ff,       // reachable
@@ -175,7 +177,8 @@ export function groups(zones) {
 
 /**
  * A request to pick a zone, cleaned:
- *   { zones: null (any zone) | [{ zone, spot, label, tip, color }], title, hint, color, timeout (ms, 0: none) }
+ *   { zones: null (any zone) | [{ zone, spot, label, tip, color }], title, hint, color, timeout (ms, 0: none),
+ *     reveal (true | "fit" | false: how zones no click can reach are brought into view), edgePan (bool), inset ({ top, right, bottom, left } px | null) }
  * `zones` entries: a key or spot string ("z3", "z3:elevated": the place the pick answers with), or { zone | spot, label, tip, color }.
  * null: a list was given and none of it names a zone (nothing could be picked).
  */
@@ -197,7 +200,10 @@ export function cleanPick(o = {}) {
     if ( !zones.length ) return null;
   }
   const t = Number(o.timeout);
-  return { zones, title: text(o.title, LIMITS.title), hint: text(o.hint, LIMITS.tip), color, timeout: Number.isFinite(t) && t > 0 ? Math.min(t, 3600000) : 0 };
+  return {
+    zones, title: text(o.title, LIMITS.title), hint: text(o.hint, LIMITS.tip), color, timeout: Number.isFinite(t) && t > 0 ? Math.min(t, 3600000) : 0,
+    reveal: o.reveal === false ? false : o.reveal === "fit" ? "fit" : true, edgePan: o.edgePan !== false, inset: cleanInsets(o.inset)
+  };
 }
 
 /** A label as it is written on the map: at most `max` characters, the rest cut with an ellipsis. */

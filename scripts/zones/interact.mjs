@@ -3,6 +3,7 @@ import * as Zones from "./zones.mjs";
 import * as HL from "./highlight.mjs";
 import { ZoneHighlightLayer } from "./highlight-layer.mjs";
 import { pairKey } from "./marks.mjs";
+import * as View from "./view.mjs";
 
 /**
  * Highlights and zone picking, wired (dev/zones-api.md 17-18): the public calls a combat module makes, the module socket that
@@ -14,6 +15,11 @@ import { pairKey } from "./marks.mjs";
  *    closes; a client that opens the scene later asks for what is meant for it.
  *  - api.pick(opts) lets this client's user - or, asked by a GM, another user - click one of the allowed zones; the call resolves
  *    with the chosen place, or with why none was chosen.
+ *
+ *  - The free part of the screen: other interface parts say which edges of the window their bars cover (api.uiInset), the rest
+ *    is found by looking (what lies over the map's canvas). The pick's banner keeps clear of what is at the top, zones on offer
+ *    that no click can reach (under a bar, off the screen) are counted at the edge they lie beyond and brought in on request
+ *    (api.reveal).
  *
  * Highlights and picks are not stored anywhere: they are a show, not a state. Nothing here reads a rule.
  */
@@ -88,6 +94,148 @@ function onTokens(doc, change = null) {
   if ( change && !["x", "y", "width", "height", "hidden"].some((k) => k in change) ) return;
   for ( const t of placeTimers ) clearTimeout(t);
   placeTimers = [60, 900].map((ms) => setTimeout(() => layer?.place(), ms));
+}
+
+/* ---------------------------------------------------------------- the free part of the screen */
+
+/** What other interface parts declared: id -> spec ({ top, right, bottom, left }, each px | Element | selector | () => px; or a function giving that). */
+const INSETS = new Map();
+const vw = () => Number(globalThis.innerWidth), vh = () => Number(globalThis.innerHeight);
+const hasDom = () => Number.isFinite(vw()) && Number.isFinite(vh()) && typeof globalThis.document?.elementFromPoint === "function" && typeof canvas?.clientCoordinatesFromCanvas === "function";
+/** How far an element reaches in from a side of the window (0: not there, not shown). */
+function reachOf(side, el) {
+  if ( typeof el === "string" ) { try { el = document.querySelector(el); } catch { el = null; } }
+  if ( typeof el?.getBoundingClientRect !== "function" ) return 0;
+  const r = el.getBoundingClientRect();
+  if ( !(r.width > 0 && r.height > 0) ) return 0;
+  try { const cs = getComputedStyle(el); if ( cs.visibility === "hidden" || cs.display === "none" ) return 0; } catch {}
+  return side === "top" ? r.bottom : side === "bottom" ? vh() - r.top : side === "left" ? r.right : vw() - r.left;
+}
+function resolveInset(spec) {
+  let o = spec;
+  if ( typeof o === "function" ) { try { o = o(); } catch { o = null; } }
+  if ( !o || typeof o !== "object" ) return null;
+  const out = {};
+  for ( const s of View.SIDES ) {
+    let v = o[s];
+    if ( typeof v === "function" ) { try { v = v(); } catch { v = 0; } }
+    out[s] = typeof v === "number" ? v : v ? reachOf(s, v) : 0;
+  }
+  return View.cleanInsets(out);
+}
+/**
+ * Say which edges of the window an interface part covers, so the map's own interface keeps clear of it (the pick's banner, the
+ * zones a pick has to bring into view):
+ *   uiInset("my-module.dock", { bottom: 180 })                 px in from that side
+ *   uiInset("my-module.dock", { bottom: "#my-dock" })          an element (or a selector): measured whenever it is asked, 0 while it is not shown
+ *   uiInset("my-module.dock", () => ({ bottom: n }))           worked out whenever it is asked
+ *   uiInset("my-module.dock", null)                            taken back
+ * Per client, until reload. Returns the function that takes it back.
+ */
+export function uiInset(id, spec = null) {
+  id = String(id ?? "");
+  if ( !id ) return () => {};
+  if ( spec == null || spec === false ) INSETS.delete(id); else INSETS.set(id, spec);
+  if ( PICK ) scheduleWay(PICK, 0);
+  return () => { if ( INSETS.get(id) === spec ) { INSETS.delete(id); if ( PICK ) scheduleWay(PICK, 0); } };
+}
+/** The declared insets now, as one: { top, right, bottom, left } in px (`extra`: one more, counted with them). */
+export const uiInsets = (extra = null) => View.sumInsets([...[...INSETS.values()].map(resolveInset), View.cleanInsets(extra)]);
+
+const CELL = 40;
+const ours = (e) => !!e?.closest?.(".mm-z-pickway");
+/** The largest stretch of the window with nothing over the map's canvas, found by looking: { x, y, w, h } (to 40 px). null: cannot look. */
+function measureFree() {
+  if ( !hasDom() || !canvas?.app?.view ) return null;
+  const view = canvas.app.view, W = vw(), H = vh(), cols = Math.floor(W / CELL), rows = Math.floor(H / CELL);
+  if ( cols < 2 || rows < 2 ) return null;
+  const free = new Uint8Array(cols * rows);
+  for ( let r = 0; r < rows; r++ ) for ( let c = 0; c < cols; c++ ) {
+    const e = document.elementFromPoint((c + 0.5) * CELL, (r + 0.5) * CELL);
+    free[r * cols + c] = e === view || ours(e) ? 1 : 0;
+  }
+  const R = View.largestRect(free, cols, rows);
+  if ( !R ) return null;
+  const x = R.c0 * CELL, y = R.r0 * CELL;
+  return { x, y, w: (R.c1 === cols - 1 ? W : (R.c1 + 1) * CELL) - x, h: (R.r1 === rows - 1 ? H : (R.r1 + 1) * CELL) - y };
+}
+/** The free stretch: the declared insets, narrowed by what was found by looking. */
+const safeNow = (extra = null, free = null) => View.safeRect(vw(), vh(), uiInsets(extra), free);
+/**
+ * The part of the window the map can be seen and clicked in: { x, y, width, height } in client px - the window less the declared
+ * insets (uiInset; `inset`: one more for this call), narrowed to the largest stretch nothing lies over (`measure: false`: the
+ * declared insets only). null: no window to measure.
+ */
+export function safeArea({ inset = null, measure = true } = {}) {
+  if ( !Number.isFinite(vw()) || !Number.isFinite(vh()) ) return null;
+  const r = safeNow(inset, measure ? measureFree() : null);
+  return { x: r.x, y: r.y, width: r.w, height: r.h };
+}
+
+const toClient = (pt) => canvas.clientCoordinatesFromCanvas(pt);
+/** A zone's box in scene px (kept with the zone). */
+const BOXES = new WeakMap();
+function boxOf(z) {
+  let b = BOXES.get(z);
+  if ( b ) return b;
+  b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for ( const part of z.parts ) for ( let i = 0, r = part[0]; i < r.length; i += 2 ) { b.x0 = Math.min(b.x0, r[i]); b.x1 = Math.max(b.x1, r[i]); b.y0 = Math.min(b.y0, r[i + 1]); b.y1 = Math.max(b.y1, r[i + 1]); }
+  BOXES.set(z, b);
+  return b;
+}
+/** Whether a click can reach a zone as the screen is now: some point of it is in the window with nothing over the map there. */
+function reachable(z) {
+  const view = canvas.app.view, W = vw(), H = vh();
+  const hit = (c) => c.x >= 0 && c.y >= 0 && c.x < W && c.y < H && document.elementFromPoint(c.x, c.y) === view;
+  if ( hit(toClient(z.label)) ) return true;
+  const b = boxOf(z), p = toClient({ x: b.x0, y: b.y0 }), q = toClient({ x: b.x1, y: b.y1 });
+  const x0 = Math.max(0, p.x), y0 = Math.max(0, p.y), x1 = Math.min(W, q.x), y1 = Math.min(H, q.y);
+  if ( !(x1 - x0 > 4 && y1 - y0 > 4) ) return false;
+  const N = 6;
+  for ( let j = 0; j < N; j++ ) for ( let i = 0; i < N; i++ ) {
+    const c = { x: x0 + ((i + 0.5) * (x1 - x0)) / N, y: y0 + ((j + 0.5) * (y1 - y0)) / N };
+    const s = canvas.canvasCoordinatesFromClient(c);
+    if ( Zones.zonesApi.zoneAt(s.x, s.y) === z.id && hit(c) ) return true;
+  }
+  return false;
+}
+
+/** Move the view so that what is on the screen shifts by (dx, dy) client px, scaled by k around the client point `about`. */
+async function shiftView(dx, dy, k = 1, about = null, animate = true) {
+  const st = canvas.stage, s = st.scale.x, vc = { x: st.position?.x ?? vw() / 2, y: st.position?.y ?? vh() / 2 };
+  const c = about ?? vc, s2 = s * k;
+  // the scene point under `about` stays under it (scaling), then everything shifts
+  const wx = st.pivot.x + (c.x - vc.x) / s, wy = st.pivot.y + (c.y - vc.y) / s;
+  const to = { x: wx - (c.x + dx - vc.x) / s2, y: wy - (c.y + dy - vc.y) / s2, scale: s2 };
+  if ( animate && typeof canvas.animatePan === "function" && (await Zones.drawsFrames()) ) { try { await canvas.animatePan({ ...to, duration: 320 }); return; } catch {} }
+  canvas.pan(to);
+}
+
+/**
+ * Bring zones into the free part of the screen (the declared insets and what lies over the map counted): the view slides - and
+ * with `fit`, zooms out when they do not fit as it is - by the least that puts their label points there. One place or a list
+ * (anything that names a place). opts: { inset (one more inset for this call), margin (px kept to the edge of the free stretch;
+ * default a fifth of it, 140 at most), fit = false, animate = true }. Several zones that do not fit without `fit`: the first is
+ * brought in. Resolves with { ok: true, moved } or { ok: false, reason: "noZones" | "noScene" }.
+ */
+export async function reveal(where, { inset = null, margin = null, fit = false, animate = true } = {}) {
+  const Z = Zones.zones();
+  if ( !Z || !canvas?.ready || !hasDom() ) return { ok: false, reason: "noScene" };
+  const pts = [];
+  for ( const w of Array.isArray(where) ? where : [where] ) {
+    const p = Zones.placeOf(w && typeof w === "object" && typeof w.spot === "string" && !("level" in w) ? w.spot : w), z = p && p.id >= 0 ? Z.zones[p.id] : null;
+    if ( z ) pts.push(toClient(z.label));
+  }
+  if ( !pts.length ) return { ok: false, reason: "noZones" };
+  const safe = safeNow(inset, PICK?.way?.free ?? measureFree());
+  const m = Number.isFinite(margin) && margin >= 0 ? margin : Math.min(140, Math.min(safe.w, safe.h) / 5);
+  let box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for ( const p of pts ) box = { x0: Math.min(box.x0, p.x), y0: Math.min(box.y0, p.y), x1: Math.max(box.x1, p.x), y1: Math.max(box.y1, p.y) };
+  let f = View.fitBox(box, safe, m);
+  if ( f.k < 1 && !fit ) f = { ...View.nudge(pts[0], safe, m), k: 1 };
+  const moved = Math.abs(f.dx) > 0.5 || Math.abs(f.dy) > 0.5 || f.k < 1;
+  if ( moved ) await shiftView(f.dx, f.dy, f.k, { x: safe.x + safe.w / 2, y: safe.y + safe.h / 2 }, animate);
+  return { ok: true, moved };
 }
 
 /* ---------------------------------------------------------------- highlights */
@@ -166,7 +314,11 @@ export function showReach(where, profile = {}, { id = "reach", users = null, max
  *   { ok: true, zone (key), id, spot, place, x, y }                       the place picked and the scene point of the click
  *   { ok: false, reason: "cancelled" | "replaced" | "noZones" | "sceneChanged" | "timeout" | "userGone" | "notGM" | "noScene" }
  * opts: { zones: [key | spot | { zone | spot, label, tip, color }] (absent: any zone), title, hint, color, timeout (ms),
- *         user (a user or user id: ask that user - a GM's call; absent: this client's user) }
+ *         user (a user or user id: ask that user - a GM's call; absent: this client's user),
+ *         inset ({ top, right, bottom, left } px: covered edges of the window, on top of what uiInset declared),
+ *         reveal (true: zones on offer no click can reach are counted at the edge they lie beyond and brought in on a click there,
+ *                 and when none is in reach at the start the nearest comes into view; "fit": at the start the view moves so that all
+ *                 of them are in reach; false: the view is left alone), edgePan (false: resting the pointer at such an edge does not slide the map) }
  * A spot string in `zones` ("z3:elevated", "z3:f2") is the place the answer carries; a bare key answers with the zone's ground
  * level. The zones on offer are shown in their colour with their label (a highlight already on a zone stays, unless the entry
  * brings a label of its own); the others are dimmed. A click on a zone on offer picks it; Escape, a right-click or the Cancel
@@ -208,7 +360,9 @@ function pickHere(P) {
   const allowed = allowedOf(P);
   if ( !allowed.size ) return Promise.resolve({ ok: false, reason: "noZones" });
   return new Promise((resolve) => {
-    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null };
+    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null,
+      // the way to zones no click can reach: the free stretch found by looking, the zones hidden per side, their chips, the slide
+      way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, push: null, first: true } };
     startPick();
     redraw();
   });
@@ -220,6 +374,9 @@ function endPick(result) {
   PICK = null;
   for ( const off of p.offs ) { try { off(); } catch {} }
   cancelAnimationFrame(p.raf);
+  clearTimeout(p.way.timer); if ( p.way.push ) cancelAnimationFrame(p.way.push.raf); p.way.push = null;
+  for ( const c of p.way.chips.values() ) c.remove();
+  p.way.chips.clear();
   p.banner?.remove(); p.tip?.remove();
   document.body.classList.remove("mm-z-picking", "mm-z-pick-ok", "mm-z-pick-no");
   layer?.setHover(-1);
@@ -228,6 +385,153 @@ function endPick(result) {
 }
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+const BANNER_TOP = 72, GAP = 8;
+/** The interface part an element belongs to, as a box: the piece that sits directly on the page (a bar, a panel), else the element itself. */
+function partBox(e) {
+  let w = e;
+  while ( w.parentElement && w.parentElement !== document.body && w.parentElement.id !== "interface" ) w = w.parentElement;
+  const r = w.getBoundingClientRect();
+  return r.height > vh() * 0.45 ? e.getBoundingClientRect() : r;
+}
+/**
+ * Put the banner where nothing else is: under the declared top inset, and below whatever interface part lies at the top middle
+ * of the window (a combat tracker, a strip of chips). It stays in the upper half.
+ */
+function placeBanner(p) {
+  const el = p.banner;
+  if ( !el || !hasDom() || typeof document.elementsFromPoint !== "function" || typeof el.getBoundingClientRect !== "function" ) return;
+  const r = el.getBoundingClientRect(), w = r.width, h = r.height, x0 = (vw() - w) / 2, view = canvas.app.view;
+  if ( !(w > 0 && h > 0) ) return;
+  const start = Math.max(BANNER_TOP, uiInsets(p.P.inset).top + GAP), maxY = vh() * 0.5;
+  let y = start;
+  for ( let n = 0; n < 8; n++ ) {
+    const boxes = [];
+    for ( let j = 0; j < 3; j++ ) for ( let i = 0; i < 7; i++ ) {
+      const px = x0 + 2 + ((w - 4) * i) / 6, py = y + 2 + ((h - 4) * j) / 2;
+      for ( const e of document.elementsFromPoint(px, py) ) {
+        if ( e === view || e === document.body || e === document.documentElement ) break;
+        if ( el.contains(e) || ours(e) || e.classList?.contains("mm-z-tip") ) continue;
+        const b = partBox(e); boxes.push({ top: b.top, bottom: b.bottom });
+        break;
+      }
+    }
+    const next = View.clearY(y, h, boxes, GAP, maxY);
+    if ( next === y ) break;
+    y = next;
+  }
+  el.style.top = `${Math.round(y)}px`;
+}
+
+const CHEVRON = { top: "fa-chevron-up", bottom: "fa-chevron-down", left: "fa-chevron-left", right: "fa-chevron-right" };
+/** Count the zones on offer no click can reach, per side of the free stretch, and show a chip at each such side. */
+function updateWay(p) {
+  const w = p.way;
+  clearTimeout(w.timer); w.timer = 0;
+  if ( PICK !== p || !hasDom() ) return;
+  const Z = Zones.zones();
+  w.safe = safeNow(p.P.inset, w.free);
+  w.hidden = [];
+  // (any zone may be picked: there is always one in reach - nothing to lead to)
+  if ( Z && p.P.zones && p.P.reveal !== false ) for ( const id of p.allowed.keys() ) {
+    const z = Z.zones[id];
+    if ( !z || reachable(z) ) continue;
+    // (its side: the edge of the free stretch its label lies beyond - under a window inside the stretch: the edge it is nearest to)
+    const at = toClient(z.label);
+    w.hidden.push({ id, at, side: View.sideOf(at, w.safe, true) });
+  }
+  const count = { top: 0, right: 0, bottom: 0, left: 0 };
+  for ( const hd of w.hidden ) count[hd.side]++;
+  const s = w.safe, br = p.banner?.getBoundingClientRect?.() ?? null;
+  for ( const side of View.SIDES ) {
+    let chip = w.chips.get(side);
+    if ( !count[side] ) { if ( chip ) { chip.remove(); w.chips.delete(side); } continue; }
+    if ( !chip ) {
+      chip = document.createElement("button");
+      chip.type = "button"; chip.className = `mm-z-pickway mm-z-pickway-${side}`;
+      chip.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); leadTo(p, side); });
+      document.body.append(chip);
+      w.chips.set(side, chip);
+    }
+    const text = L(`pick.way.${side}`, { n: count[side] });
+    if ( chip.dataset.n !== String(count[side]) ) {
+      chip.dataset.n = String(count[side]);
+      chip.innerHTML = `<i class="fa-solid ${CHEVRON[side]}" inert></i><span>${esc(L("pick.more", { n: count[side] }))}</span>`;
+      chip.setAttribute("aria-label", text); chip.dataset.tooltip = text; chip.dataset.tooltipDirection = side === "bottom" ? "UP" : side === "top" ? "DOWN" : side === "left" ? "RIGHT" : "LEFT";
+    }
+    // on its edge of the free stretch, as near the middle of the window as the stretch lets it; the top one under the banner when that lies there
+    const mid = (c, a, len) => Math.min(Math.max(c, a + Math.min(70, len / 2)), a + len - Math.min(70, len / 2));
+    let x = mid(vw() / 2, s.x, s.w), y = mid(vh() / 2, s.y, s.h);
+    if ( side === "top" ) y = Math.max(s.y, br && br.right > x - 40 && br.left < x + 40 ? br.bottom : 0) + GAP;
+    else if ( side === "bottom" ) y = s.y + s.h - GAP;
+    else if ( side === "left" ) x = s.x + GAP;
+    else x = s.x + s.w - GAP;
+    chip.style.left = `${Math.round(x)}px`; chip.style.top = `${Math.round(y)}px`;
+  }
+  // nothing on offer is in reach when the pick starts: the nearest comes into view (`reveal: "fit"`: all of them, as far as they fit)
+  if ( w.first ) {
+    w.first = false;
+    if ( p.P.zones && p.P.reveal === "fit" ) reveal([...p.allowed.values()].map((e) => e.zone), { inset: p.P.inset, fit: true });
+    else if ( w.hidden.length && w.hidden.length === p.allowed.size ) leadTo(p, null);
+  }
+}
+/** Look again a little later (a pan, a bar that opened): once per `ms`, however often it is asked. */
+function scheduleWay(p, ms = 150) {
+  if ( PICK !== p || p.way.timer || !hasDom() ) return;
+  p.way.timer = setTimeout(() => { p.way.timer = 0; updateWay(p); }, ms);
+}
+/** Bring the nearest hidden zone of a side (null: of any side) into the free stretch. */
+function leadTo(p, side) {
+  const w = p.way, s = w.safe;
+  if ( !s ) return;
+  const c = { x: s.x + s.w / 2, y: s.y + s.h / 2 };
+  let best = null;
+  for ( const hd of w.hidden ) {
+    if ( side && hd.side !== side ) continue;
+    const d = Math.hypot(hd.at.x - c.x, hd.at.y - c.y);
+    if ( !best || d < best.d ) best = { hd, d };
+  }
+  const key = best ? Zones.zonesApi.keyOf(best.hd.id) : null;
+  if ( key ) reveal(key, { inset: p.P.inset }).then(() => scheduleWay(p, 0));
+}
+/** The banner, the free stretch and the chips, laid out for the screen as it is now. */
+function layoutPick(p) {
+  if ( PICK !== p || !hasDom() ) return;
+  placeBanner(p);
+  p.way.free = measureFree();
+  updateWay(p);
+}
+/**
+ * The pointer rests at an edge of the free stretch beyond which zones on offer lie hidden: after a moment the map slides that
+ * way, slowly at first, for as long as the pointer stays and something is still hidden there.
+ */
+const PUSH = { band: 44, dwell: 450, ramp: 400, speed: 620 };
+function pushAt(p, at) {
+  const w = p.way;
+  let dir = null;
+  if ( at && w.safe && p.P.edgePan !== false && w.hidden.length ) {
+    const d = View.pushOf(at, w.safe, PUSH.band), has = (side) => w.hidden.some((hd) => hd.side === side);
+    const x = d.x < 0 && has("left") ? -1 : d.x > 0 && has("right") ? 1 : 0, y = d.y < 0 && has("top") ? -1 : d.y > 0 && has("bottom") ? 1 : 0;
+    if ( x || y ) dir = { x, y };
+  }
+  if ( !dir ) { if ( w.push ) { cancelAnimationFrame(w.push.raf); w.push = null; } return; }
+  if ( w.push ) { w.push.x = dir.x; w.push.y = dir.y; return; }
+  const now = () => globalThis.performance?.now?.() ?? Date.now();
+  const st = w.push = { x: dir.x, y: dir.y, since: now(), last: now(), raf: 0 };
+  const step = () => {
+    if ( PICK !== p || w.push !== st || !canvas?.ready ) return;
+    const t = now(), dt = Math.min(50, t - st.last), held = t - st.since - PUSH.dwell;
+    st.last = t;
+    if ( held > 0 ) {
+      const k = Math.min(1, held / PUSH.ramp), px = (PUSH.speed * k * k * dt) / 1000, s = canvas.stage.scale.x;
+      canvas.pan({ x: canvas.stage.pivot.x + (st.x * px) / s, y: canvas.stage.pivot.y + (st.y * px) / s });
+      scheduleWay(p, 120);
+      if ( !w.hidden.some((hd) => (st.x < 0 && hd.side === "left") || (st.x > 0 && hd.side === "right") || (st.y < 0 && hd.side === "top") || (st.y > 0 && hd.side === "bottom")) ) { w.push = null; return; }
+    }
+    st.raf = requestAnimationFrame(step);
+  };
+  st.raf = requestAnimationFrame(step);
+}
 
 function startPick() {
   const p = PICK, view = canvas.app.view;
@@ -241,6 +545,18 @@ function startPick() {
   el.querySelector("button").addEventListener("click", () => endPick({ ok: false, reason: "cancelled" }));
   document.body.append(el);
   document.body.classList.add("mm-z-picking");
+  // where the banner has room, which zones no click can reach: now, once more when the other interface parts have answered the
+  // pick (a panel that opened), whenever the view or the window changes, and when a look now and then finds the free stretch
+  // changed (a panel that opened or closed later)
+  if ( hasDom() ) {
+    layoutPick(p);
+    const again = setTimeout(() => layoutPick(p), 420);
+    const watch = setInterval(() => { const f = measureFree(), o = p.way.free; if ( !f !== !o || (f && (f.x !== o.x || f.y !== o.y || f.w !== o.w || f.h !== o.h)) ) layoutPick(p); }, 1500);
+    const onPan = () => scheduleWay(p), onSize = () => layoutPick(p);
+    Hooks.on("canvasPan", onPan);
+    window.addEventListener("resize", onSize);
+    p.offs.push(() => clearTimeout(again), () => clearInterval(watch), () => Hooks.off("canvasPan", onPan), () => window.removeEventListener("resize", onSize));
+  }
 
   const world = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
   const zoneAt = (pt) => Zones.zonesApi.zoneAt(pt.x, pt.y);
@@ -263,9 +579,13 @@ function startPick() {
   const onMove = (ev) => {
     p.at = { x: ev.clientX, y: ev.clientY };
     if ( p.raf ) return;
-    p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); });
+    p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); pushAt(p, p.at); });
   };
-  const onLeave = () => { p.at = null; setHover(-1, { x: 0, y: 0 }); };
+  const onLeave = () => { p.at = null; setHover(-1, { x: 0, y: 0 }); pushAt(p, null); };
+  // (the map slid under a pointer that did not move: what is under it now)
+  const onSlid = () => { if ( p.way.push && p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y }); };
+  Hooks.on("canvasPan", onSlid);
+  p.offs.push(() => Hooks.off("canvasPan", onSlid));
   // a left press is the pick's (no token is selected or dragged under it); a right press still pans when dragged
   const onDown = (ev) => {
     if ( ev.button === 2 ) { p.rdown = { x: ev.clientX, y: ev.clientY }; return; }
@@ -314,7 +634,7 @@ function askUser(user, opts) {
     // (the asked client runs the timeout too; this one a little later, in case the answer never comes)
     if ( Number.isFinite(t) && t > 0 ) a.timer = setTimeout(() => answer(rid, { ok: false, reason: "timeout" }), t + 3000);
     ASKED.set(rid, a);
-    emit({ op: "pick", rid, pick: { zones: opts.zones ?? null, title: opts.title ?? null, hint: opts.hint ?? null, color: opts.color ?? null, timeout: opts.timeout ?? 0 } }, [user]);
+    emit({ op: "pick", rid, pick: { zones: opts.zones ?? null, title: opts.title ?? null, hint: opts.hint ?? null, color: opts.color ?? null, timeout: opts.timeout ?? 0, reveal: opts.reveal ?? null, edgePan: opts.edgePan ?? null, inset: View.cleanInsets(opts.inset) } }, [user]);
   });
 }
 function answer(rid, result) {
@@ -379,6 +699,8 @@ export const interactApi = {
   highlight, clearHighlights, highlights, showReach,
   /** Let a user pick a zone by click (resolves with the place), give a pick up, whether one runs here. */
   pick, cancelPick, picking,
+  /** Which edges of the window another interface part covers; the declared insets; the free part of the window; bring zones into it. */
+  uiInset, uiInsets, safeArea, reveal,
   HIGHLIGHT_COLORS: HL.COLORS, highlightLib: HL
 };
 

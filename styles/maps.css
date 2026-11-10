@@ -1042,6 +1042,20 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-z-pick kbd { padding: 0 0.3rem; border: 1px solid #5a4c3c; border-radius: 4px; background: #15110f; font: inherit; font-size: 0.7rem; opacity: 0.85; }
 @keyframes mm-z-pick-in { from { opacity: 0; transform: translate(-50%, -0.4rem); } }
 @media (prefers-reduced-motion: reduce) { .mm-z-pick { animation: none; } }
+/* (zones on offer no click can reach: a chip on the edge of the free part of the screen they lie beyond - how many, which way) */
+.mm-z-pickway { position: fixed; z-index: 1000; display: flex; align-items: center; gap: 0.4rem; width: auto; min-width: 2.75rem; height: 2.25rem; margin: 0; padding: 0 0.7rem;
+  border: 1px solid #5a4c3c; border-radius: 999px; background: #1d1916f2; box-shadow: 0 4px 14px #000a; color: #eadfc8; font-size: 0.86rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; cursor: pointer;
+  animation: mm-z-pickway-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.mm-z-pickway > i { color: #5cc8ff; font-size: 0.8rem; }
+.mm-z-pickway:hover { background: #2a241ff2; border-color: #5cc8ff; }
+.mm-z-pickway:active { background: #332b24f2; }
+.mm-z-pickway:focus-visible { outline: 2px solid #f3e7c9; outline-offset: 2px; }
+.mm-z-pickway-top { transform: translate(-50%, 0); }
+.mm-z-pickway-bottom { transform: translate(-50%, -100%); flex-direction: row-reverse; }
+.mm-z-pickway-left { transform: translate(0, -50%); }
+.mm-z-pickway-right { transform: translate(-100%, -50%); flex-direction: row-reverse; }
+@keyframes mm-z-pickway-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mm-z-pickway { animation: none; } }
 .mm-z-pick-tip { white-space: normal; max-width: 18rem; }
 .mm-z-pick-tip small { display: block; font-size: 0.74rem; opacity: 0.75; }
 .mm-z-pick-tip.no { opacity: 0.8; color: #c9bfae; }

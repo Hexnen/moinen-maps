@@ -1,4 +1,4 @@
-import { stopped, isWater } from "./marks.mjs";
+import { stopped, isWater, floorsOf } from "./marks.mjs";
 import { pointInRing } from "./geometry.mjs";
 import { WAYS, climb, chain, pathAlong, rangeFrom } from "./places.mjs";
 
@@ -232,6 +232,64 @@ export function rayChain(C, zoneAt, from, dir, n, step, reachPx) {
 
 /** How many borders lie between the zones of a chain and the start (the range count: a check for an edited chain). */
 export const chainRange = (C, ids) => (ids?.length ? (rangeFrom(C, ids[0]).get(ids[ids.length - 1]) ?? null) : null);
+
+/* ---------------------------------------------------------------- a chain up or down (a forced move between levels) */
+
+/**
+ * The rungs of one zone, bottom to top: underground (-1), the ground (0), the floors of a standing building (1..n), the elevated
+ * position above it (n + 1: the rooftop, or the air at that height). The rung a place is on:
+ */
+export function rungOf(M, p) {
+  if ( !p || p.area || p.id < 0 ) return null;
+  return p.level === "underground" ? -1 : p.level === "floor" ? p.floor : p.level === "elevated" ? floorsOf(M, p.id) + 1 : 0;
+}
+/** The top rung of a zone (the elevated position). */
+export const topRung = (M, id) => floorsOf(M, id) + 1;
+const rungSpot = (key, n, h) => (h < 0 ? `${key}:underground` : h === 0 ? key : h > n ? `${key}:elevated` : `${key}:f${h}`);
+/**
+ * What lies between two neighbouring rungs of a zone: "ground" (between underground and the surface), "floor" (a storey's floor
+ * inside a standing building), "roof" (between the top storey - or the ground of a plain building - and its rooftop), null (open
+ * air: no building, or a wrecked one).
+ */
+export function slabOf(M, id, lo) {
+  if ( lo < 0 ) return "ground";
+  const p = M?.zones.get(id);
+  if ( !p?.building || p.wrecked ) return null;
+  return lo >= floorsOf(M, id) ? "roof" : "floor";
+}
+/**
+ * The steps from a place straight up or down inside its own zone to another rung, one vertical zone a step:
+ *   [{ kind: "level", zone, from: spot, to: spot, level, floor, dir: 1 | -1, slab }]
+ * `slab`: what the step passes through (slabOf). The map only says it is there: what it does to the mover is the listeners'.
+ */
+export function levelSteps(M, keyOf, A, target) {
+  const h0 = rungOf(M, A), steps = [];
+  if ( h0 == null ) return steps;
+  const n = floorsOf(M, A.id), key = keyOf(A.id), dir = target > h0 ? 1 : -1;
+  for ( let h = h0; h !== target; h += dir ) {
+    const to = h + dir;
+    steps.push({ kind: "level", zone: key, from: rungSpot(key, n, h), to: rungSpot(key, n, to), level: to < 0 ? "underground" : to === 0 ? "ground" : to > n ? "elevated" : "floor", floor: to > 0 && to <= n ? to : 0, dir, slab: slabOf(M, A.id, Math.min(h, to)) });
+  }
+  return steps;
+}
+/**
+ * A chain straight up or down from a place, `n` vertical zones at most: { steps, rung, end }.
+ *   end   "distance" (n zones passed) | "top" (nothing above the elevated position: sky high is off the map - book-dump 2259) |
+ *         "ground" (down ends on the ground: nobody is thrown underground - our reading; only burrowing goes there, 1995)
+ * Up from underground comes out on the ground and goes on. null: the place is in no zone, or no direction.
+ */
+export function riseChain(M, keyOf, A, dir, n) {
+  const h0 = rungOf(M, A);
+  if ( h0 == null || !(dir === 1 || dir === -1) || !(n >= 0) ) return null;
+  const limit = dir > 0 ? topRung(M, A.id) : Math.min(h0, 0);
+  const target = dir > 0 ? Math.min(limit, h0 + n) : Math.max(limit, h0 - n);
+  const steps = levelSteps(M, keyOf, A, target);
+  return { steps, rung: target, end: steps.length >= n ? "distance" : dir > 0 ? "top" : "ground" };
+}
+/** A plan out of level steps inside one zone (the shape plan() gives), for a mover profile. */
+export function planOfLevels(keyOf, A, B, prof, steps) {
+  return { way: prof.way, name: prof.name, total: steps.length, borders: 0, edges: 0, levels: steps.length, zones: [keyOf(A.id)], steps, crossed: [], cost: costOf(steps.length, prof), from: A, end: B };
+}
 
 /* ---------------------------------------------------------------- a free spot inside a zone */
 
