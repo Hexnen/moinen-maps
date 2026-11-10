@@ -624,6 +624,14 @@ api.showReach(token, profile, { id: "reach", users, max, beyond: false, labels: 
   `stress`, the mover's own zone outlined, farther zones left out unless `beyond: true` (grey, dashed). The label is the
   number of actions. It does not decide anything.
 - Limits: 600 zones and 600 borders per highlight; an id is up to 64 characters of letters, digits and `_ . : -`.
+- **Where a label sits.** A zone's label starts at the zone's label point (under the number badge when that sits there) and
+  takes the nearest spot where it is not covered: tokens, the zone's number badge, its state icons, passage marks and labels
+  already placed count against a spot, and so does leaving its own zone. It also tries the spots just beside the tokens near
+  it. A label keeps its spot until another is clearly better, so it does not jump. A border's label slides along and off its
+  border the same way. Placement is counted when the highlight is drawn, at a zoom step and shortly after a token is moved,
+  made, hidden or deleted; never per frame or per pan. Pure part: `scripts/zones/place.mjs`.
+- **Thin far out.** Bands, dashes and border lines get thinner in a zone that is small on screen and when the grid square
+  gets small on screen (down to 0.4 of the width), so a whole map seen from far away is not covered in paint.
 - Cost: redrawn only when the set, the zones or the zoom step change; nothing runs per frame or per pan while nothing shows.
 
 ## 18. Picking a zone (interface part)
@@ -682,6 +690,11 @@ api.wreckText("office");              // the text shown beside a terrain now
   empty zone, the resource tags), *States* (the quick marks; every registry record with its level, where in the zone it
   holds, gravity's mode, who made it and until when; add / remove), *Passages* (portals and tunnels from this zone; a new one
   picks its other end on the map with `pick`).
+- **Passages on the map.** Every passage shows to whoever sees the zones display (GM and players alike): a round mark beside
+  the number badge of each zone it joins (a swirl: portal, an arch: tunnel, two links: another kind; an end off the map has
+  only the one mark) and a thin dotted (portal) or dashed (tunnel) arc between the two marks, dark line under the colour.
+  Marks keep their size on screen; the arcs are redrawn at a zoom step. Pointing at a mark says the kind and where it leads.
+- A gravity record shows its mode and no level stepper (it has no level unless one was given through the API).
 - **Zones dock, "In play"**: every wall and door that is not as built, every tracked state, every passage; a row can be taken
   back; pointing at a row outlines its zone or border on the map.
 - **Who may what.** Building (the wall, the door, attributes) is the editor's path: any GM, one undo step, the play record of
@@ -700,10 +713,16 @@ api.activeGmName();                   // the active GM's name ("" when none)
 
 - Looked at in Foundry (v14, a GM and a real player on a lane server): highlights on a light and a dark map at two zooms, a
   highlight sent to one player only, a pick on the GM's own client and one asked of a player, the border menu, the three pages
-  of the zone menu, the In play panel. Not looked at: a second GM (the refusal notice and the locked controls), the rules
+  of the zone menu, the In play panel; label placement, passage marks and thin bands on a light and a dark map, close, far
+  and in a small crowded zone, as a GM and as a player. Not looked at: the tip of a passage mark and a label moving aside
+  when a token is dragged onto it (both stand on the node test), a second GM (the refusal notice and the locked controls), the rules
   driver with a real combat module, touch input. The rest stands on `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI).
 - Highlights are lit like the map (they are in the primary group, under the tokens): on a dark scene or under a coloured
-  light their colours are tinted, and a label can sit behind a token (the tip under the pointer still says it).
+  light their colours are tinted (passage marks and badges too). A label moves out from under tokens; where a zone has no free
+  room at all (a tiny zone far zoomed out) it can still overlap a token or the badge (the tip under the pointer still says it).
+- Passage marks sit in a row beside the badge: three or more passages in one small zone seen from far away run past the zone.
+  A mark in the middle of a zone (badges placed in the middle) can be behind a token, like the badge itself.
+- A passage has no visibility of its own: whoever sees the zones display sees every passage.
 - A highlight is covered by fog and vision like the zone display (it is in the primary group). A combat module that wants a
   player to see reach into unexplored zones needs a decision here.
 - A registry state added in the menu gets no level unless the GM sets one (the map invents no default).
