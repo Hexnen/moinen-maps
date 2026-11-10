@@ -8,6 +8,8 @@ import * as Editor from "./editor.mjs";
 import * as Styles from "./styles.mjs";
 import * as Marks from "./marks.mjs";
 import * as Link from "./link.mjs";
+import * as Keys from "./keys.mjs";
+import * as Places from "./places.mjs";
 import { quake, stopQuakes } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
@@ -21,11 +23,21 @@ import * as DestMod from "../destruction/destruction.mjs";
  *
  * Inside the Zones workspace section the GM sees the raw pencil lines; everywhere else (and for players) only the finished zones.
  * Public API: `game.modules.get("moinen-maps").api.zones`. Hook "moinenMapsZones" with ("loaded" | "edited" | "params" | "section").
+ *
+ * For other modules (a combat engine): stable zone keys (keys.mjs), places in three dimensions, the two distances, routes and
+ * borders as data (places.mjs), and the hook "moinenMapsZoneEvent" (type, payload) - a token entered / left a zone, a zone's or a
+ * border's state changed. All of it is described in dev/zones-api.md.
  */
 
 let wreckedBefore = null;   // the zones wrecked at the last relink (null: just loaded - nothing quakes)
 let S = null, Z = null, M = null, M0 = null, LS = null, MAP = new Map(), linkTimer = 0, display = null, saveTimer = 0, inSection = false, hover = -1, hoverRaf = 0, hoverAt = null;
 let saveSceneId = null, lastSaved = "";
+// K: the zones' stable keys now (keys.mjs resolve); ver: counts every change of the zones or their marks (what caches hang on);
+// QC: the lookups of this state (places.mjs makeCache); TP: token id -> { stamp, place }; LAST: token id -> the place last told;
+// SNAP: the zone and border states last told
+let K = null, ver = 0, QC = null, SNAP = null;
+const TP = new Map(), LAST = new Map();
+export const EVENT_HOOK = "moinenMapsZoneEvent";
 const undo = [], redo = [];
 const UNDO_MAX = 60;
 
@@ -57,7 +69,7 @@ function registerSettings() {
   W("zonesStyleDefault", String, "classic");
   W("zonesPresetDefault", String, "invincible");
   // zone states read from the fire, destruction and water layers (and fires of the zones painted on the fire layer)
-  game.settings.register(MODULE_ID, "zonesLink", { scope: "world", config: false, type: Boolean, default: true, onChange: () => { relink(); refresh(); tell("params"); } });
+  game.settings.register(MODULE_ID, "zonesLink", { scope: "world", config: false, type: Boolean, default: true, onChange: () => { relink(); refresh(); tell("params"); announce("layers"); } });
 }
 export const setting = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
 
@@ -100,6 +112,7 @@ function rebuild() {
   // walls and zone marks keep to the border / zone their point lies on, whatever the zones are numbered now
   M0 = Marks.resolve(Z, S?.walls, S?.marks, (x, y) => Geo.zoneAt(Z, x, y), markTol());
   LS = hit?.LS ?? null;
+  K = Keys.resolve(Z, S?.keys, S?.keyNext, zoneAtNow);
   relink();
   if ( hit && LS && hit.Z === Z ) hit.LS = LS;
 }
@@ -118,6 +131,7 @@ function layers() {
 export const linkOn = () => setting("zonesLink", true) !== false;
 /** The GM's marks with the layers' states on top. */
 function relink() {
+  ver++;
   MAP = new Map();
   if ( Z && linkOn() ) {
     LS ??= Link.samplesOf(Z, (x, y) => Geo.zoneAt(Z, x, y), gridSize() / 4);
@@ -148,10 +162,10 @@ function onLayer(kind) {
     if ( !S ) return;
     // PERF (ultra1-zones): fire, smoke, dust and destruction change many times a second under heavy use, the zone states they give
     // seldom do: when the layers say the same as before, nothing to draw or tell (the marks M are made again only from the same parts)
-    const before = mapKey(MAP), Mb = M;
+    const before = mapKey(MAP), Mb = M, vb = ver;
     relink();
-    if ( Mb && mapKey(MAP) === before ) { M = Mb; return; }
-    refresh(); tell("linked");
+    if ( Mb && mapKey(MAP) === before ) { M = Mb; ver = vb; return; }
+    refresh(); tell("linked"); announce("layers");
   }, 150);
 }
 const mapKey = (m) => JSON.stringify([...m]);
@@ -210,12 +224,12 @@ export function refresh() {
   let dist = null, bands = null, here = -1;
   const t = setting("zonesDistances", true) ? selectedToken() : null;
   // Sky High and Orbit are off the map (one zone of their own): no distances on the map from there
-  if ( t && Z && !OFF_MAP.has(altOf(t.document)) ) {
+  if ( t && Z && !Places.AREAS.includes(rawAlt(t.document)) ) {
     const c = tokenCenter(t);
     here = Geo.zoneAt(Z, c.x, c.y);
     if ( here >= 0 ) {
       // each way of moving counts its own route past the walls (marks.mjs); the preset picks the cheapest and says what it costs
-      const D = Marks.moveDistances(Z, here, M), p = preset(movePreset()), moves = movesOf(t.actor);
+      const D = Places.movesFrom(cache(), here), p = preset(movePreset()), moves = movesOf(t.actor);
       // a token up on a floor (or on the roof of a building with floors) walks down first
       const v = Marks.vertical(M, here, t.document.getFlag(MODULE_ID, "floor"), altOf(t.document));
       dist = new Map(); bands = p ? new Map() : null;
@@ -289,6 +303,7 @@ function onCanvasReady() {
   rebuild(); refresh();
   Editor.onCanvasReady();
   tell("loaded");
+  prime();
 }
 
 function teardown() {
@@ -302,7 +317,8 @@ function teardown() {
   cancelAnimationFrame(hoverRaf); hoverRaf = 0; hoverAt = null; hover = -1;
   display?.destroy(); display = null;
   clearTimeout(linkTimer); linkTimer = 0;
-  S = Z = M = M0 = LS = null; MAP = new Map(); wreckedBefore = null; stopQuakes();
+  S = Z = M = M0 = LS = K = QC = SNAP = null; MAP = new Map(); wreckedBefore = null; stopQuakes();
+  TP.clear(); LAST.clear();
   undo.length = redo.length = 0;
 }
 
@@ -313,7 +329,7 @@ function onUpdateScene(scene, changed, _o, userId) {
   if ( userId === game.user.id ) return;
   S = Model.load(scene);
   lastSaved = JSON.stringify(Model.encode(S));
-  rebuild(); refresh(); tell("loaded");
+  rebuild(); refresh(); tell("loaded"); announce("sync");
 }
 
 /* ---------------------------------------------------------------- editing (GM) */
@@ -328,16 +344,26 @@ export function edit(fn) {
   if ( !game.user.isGM || !S ) return false;
   const before = snapshot();
   const next = Model.canonical(S);
+  // the zones as they are keep their keys through whatever this edit does to the lines (keys.mjs)
+  pinKeys(next);
   if ( !fn(next.strokes, next) ) return false;
   undo.push(before); if ( undo.length > UNDO_MAX ) undo.shift();
   redo.length = 0;
   S = Model.canonical(next);
-  rebuild(); refresh(); scheduleSave(); tell("edited");
+  rebuild(); pinKeys(S); refresh(); scheduleSave(); tell("edited"); announce("edit");
   return true;
 }
 
-export function undoEdit() { const s = undo.pop(); if ( !s || !S ) return false; redo.push(snapshot()); restore(s); rebuild(); refresh(); scheduleSave(); tell("edited"); return true; }
-export function redoEdit() { const s = redo.pop(); if ( !s || !S ) return false; undo.push(snapshot()); restore(s); rebuild(); refresh(); scheduleSave(); tell("edited"); return true; }
+/** Write the keys of the zones as they are now into a state (GM; saved with it). */
+function pinKeys(st) {
+  if ( !Z ) return;
+  const r = Keys.pin(Z, st.keys, st.keyNext, zoneAtNow);
+  st.keys = r.anchors; st.keyNext = r.next;
+  if ( st === S ) K = Keys.resolve(Z, S.keys, S.keyNext, zoneAtNow);
+}
+
+export function undoEdit() { const s = undo.pop(); if ( !s || !S ) return false; redo.push(snapshot()); restore(s); rebuild(); refresh(); scheduleSave(); tell("edited"); announce("edit"); return true; }
+export function redoEdit() { const s = redo.pop(); if ( !s || !S ) return false; undo.push(snapshot()); restore(s); rebuild(); refresh(); scheduleSave(); tell("edited"); announce("edit"); return true; }
 export const canUndo = () => undo.length > 0;
 export const canRedo = () => redo.length > 0;
 
@@ -429,9 +455,12 @@ export function setParams(patch) {
   }
   if ( JSON.stringify(Model.encode(next)) === snapshot() ) return;
   const snapChanged = next.snap !== S.snap || next.smooth !== S.smooth;
+  // joining and smoothing move the zones' outlines: their keys are written down first, and again for what comes out
+  if ( snapChanged ) pinKeys(next);
   S = Model.canonical(next);
-  if ( snapChanged ) rebuild();
+  if ( snapChanged ) { rebuild(); pinKeys(S); }
   refresh(); scheduleSave(); tell("params");
+  if ( snapChanged ) announce("edit");
 }
 
 function lookOf(st) { const keep = S; S = st; try { return look(); } finally { S = keep; } }
@@ -477,7 +506,7 @@ function legsInZones(waypoint) {
   for ( let i = 1; i < pts.length; i++ ) {
     const a = Geo.zoneAt(Z, pts[i - 1].x, pts[i - 1].y), b = Geo.zoneAt(Z, pts[i].x, pts[i].y);
     if ( a < 0 || b < 0 ) return null;
-    const dd = Marks.distancesTo(Marks.moveDistances(Z, a, M), b);
+    const dd = Marks.distancesTo(Places.movesFrom(cache(), a), b);
     for ( const k in tot ) tot[k] = tot[k] == null || dd[k] == null ? undefined : tot[k] + dd[k];
   }
   return tot;
@@ -550,9 +579,10 @@ function writeZones(map, prefer) {
   });
 }
 
-/** Change a zone's features / states: { building, tall, water, terrain, wrecked, fire (0..12), dark, ice, flooded, lowgrav }. */
+/** Change a zone's features / attributes / states: { building, floors, tall, water, terrain, empty, tags: [..], wrecked, fire (0..12), dark, ice, flooded, lowgrav }. GM only. */
 export function setZone(id, patch, at = null) {
-  if ( !Z || id < 0 ) return false;
+  // the GM check comes first: the fire below is painted on / put out of the fire layer before the marks are written
+  if ( !game.user.isGM || !S || !Z || id < 0 ) return false;
   // fire set from the menu: a new fire is painted on the fire layer too, a fire put out goes out there as well
   if ( "fire" in patch && linkOn() ) {
     const was = M?.zones.get(id)?.fire ?? 0, onMap = MAP.get(id)?.fire ?? 0, now = Number(patch.fire) || 0;
@@ -567,6 +597,8 @@ export function setZone(id, patch, at = null) {
 
 /** Clear the states (not the features) of one zone, or of every zone (end of the scene). */
 export function clearStates(id = null) {
+  // (the GM check comes before the fires on the map are put out)
+  if ( !game.user.isGM || !S || !Z ) return false;
   const map = new Map();
   for ( const [zid, p] of M0?.zones ?? [] ) if ( (id == null || zid === id) && Marks.hasStates(p) ) map.set(zid, Marks.withoutStates(p));
   // the fires painted on the map go out with the states (wreckage and water stay: they are the map)
@@ -607,10 +639,14 @@ export const ALTS = ["ground", "elevated", "sky", "orbit"];
 const OFF_MAP = new Set(["sky", "orbit"]);
 /** A token's altitude (its flag; "ground" when unset). */
 export const altOf = (doc) => { const a = doc?.getFlag?.(MODULE_ID, "alt"); return ALTS.includes(a) ? a : "ground"; };
+/** What the token's `alt` flag says, the values the HUD does not offer included (underground, another dimension, a chase: places.mjs). */
+function rawAlt(doc) { const a = doc?.getFlag?.(MODULE_ID, "alt"); return Places.ALT_VALUES.includes(a) ? a : "ground"; }
 export async function setAltitude(token, alt) {
   const doc = token?.document ?? token;
   if ( !doc?.isOwner || !ALTS.includes(alt) ) return;
-  return alt === "ground" ? doc.unsetFlag(MODULE_ID, "alt") : doc.setFlag(MODULE_ID, "alt", alt);
+  const k = `flags.${MODULE_ID}`;
+  // (the "in the air above a rooftop" note belongs to the altitude it was set for: setLevel)
+  return doc.update({ [`${k}.-=air`]: null, ...(alt === "ground" ? { [`${k}.-=alt`]: null } : { [`${k}.alt`]: alt }) });
 }
 
 /**
@@ -665,9 +701,9 @@ export async function setFloor(token, f) {
   const t = doc.object, n = t ? Marks.floorsOf(M, zoneOfToken(t)) : 0;
   f = Math.max(0, Math.min(n + 1, Math.round(Number(f) || 0)));
   const k = `flags.${MODULE_ID}`;
-  if ( f === 0 ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.-=alt`]: null });
-  if ( f > n ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.alt`]: "elevated" });
-  return doc.update({ [`${k}.floor`]: f, [`${k}.-=alt`]: null });
+  if ( f === 0 ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.-=alt`]: null, [`${k}.-=air`]: null });
+  if ( f > n ) return doc.update({ [`${k}.-=floor`]: null, [`${k}.alt`]: "elevated", [`${k}.-=air`]: null });
+  return doc.update({ [`${k}.floor`]: f, [`${k}.-=alt`]: null, [`${k}.-=air`]: null });
 }
 
 /** Token HUD: a button that cycles the altitude (only where the zones show). */
@@ -730,6 +766,177 @@ function onTokenHUD(hud, html) {
   col.append(btn);
 }
 
+/* ---------------------------------------------------------------- places, distances and events for other modules (dev/zones-api.md) */
+
+const zoneAtNow = (x, y) => Geo.zoneAt(Z, x, y);
+const keyOfId = (id) => K?.keyOf.get(id) ?? null;
+/** The lookups of the zones as they are now (kept until the zones or their marks change). */
+function cache() { if ( !QC || QC.Z !== Z || QC.M !== M ) QC = Places.makeCache(Z, M); return QC; }
+const mkPlace = (o) => Object.freeze(Places.makePlace(M, keyOfId, o));
+
+/** A token's place (its document's position and flags, not the animation); null for a token of another scene. Kept per token. */
+function placeOfDoc(doc) {
+  if ( !doc || !S || doc.parent !== canvas.scene ) return null;
+  const fl = doc.flags?.[MODULE_ID] ?? {};
+  const stamp = `${ver}|${doc.x}|${doc.y}|${doc.width}|${doc.height}|${fl.alt ?? ""}|${fl.floor ?? ""}|${fl.air === true ? 1 : 0}`;
+  const hit = TP.get(doc.id);
+  if ( hit?.stamp === stamp ) return hit.place;
+  const g = gridSize();
+  const place = mkPlace({ id: Geo.zoneAt(Z, doc.x + (doc.width * g) / 2, doc.y + (doc.height * g) / 2), alt: rawAlt(doc), floor: fl.floor, air: fl.air === true });
+  TP.set(doc.id, { stamp, place });
+  return place;
+}
+
+/**
+ * A place from whatever a caller has: a token (placeable or document), a zone key or spot string ("z3", "z3:elevated", "z3:f2",
+ * "@sky"), a zone id (its ground level), a place, or { x, y, level, floor, airborne } / { zone, level, floor, area, airborne }.
+ * null when it names nothing (an unknown key).
+ */
+export function placeOf(w) {
+  if ( w == null || !S ) return null;
+  if ( typeof w === "number" ) return mkPlace({ id: Z?.zones[w] ? w : -1 });
+  if ( typeof w === "string" ) {
+    const s = Places.parseSpot(w);
+    if ( !s ) return null;
+    if ( s.key[0] === "@" ) return mkPlace({ alt: s.alt });
+    const id = K?.idOf.get(s.key);
+    return id == null ? null : mkPlace({ id, alt: s.alt, floor: s.floor });
+  }
+  if ( typeof w !== "object" ) return null;
+  const doc = w.document ?? w;
+  if ( doc.documentName === "Token" ) return placeOfDoc(doc);
+  const alt = Places.AREAS.includes(w.area) ? w.area : w.level === "floor" ? "ground" : (w.level ?? "ground");
+  let id = -1;
+  if ( typeof w.zone === "string" && w.zone[0] !== "@" ) { id = K?.idOf.get(w.zone) ?? -1; if ( id < 0 ) return null; }
+  else if ( Number.isFinite(w.x) && Number.isFinite(w.y) ) id = Geo.zoneAt(Z, w.x, w.y);
+  else if ( Number.isInteger(w.id) && Z?.zones[w.id] ) id = w.id;
+  return mkPlace({ id, alt, floor: w.floor, air: w.airborne === true });
+}
+
+/** The tokens in a zone: [{ token: TokenDocument, place }]. A bare zone key or id means every level of it; a place, a spot or a
+ *  token means that level only (the book's "same zone"), unless `anyLevel`. */
+function tokensInZone(w, { anyLevel = null } = {}) {
+  const at = placeOf(w);
+  if ( !at || at.zone == null ) return [];
+  const bare = typeof w === "number" || (typeof w === "string" && w[0] !== "@" && !w.includes(":"));
+  const all = at.area ? false : (anyLevel ?? bare);
+  const out = [];
+  for ( const doc of canvas.scene?.tokens ?? [] ) {
+    const p = placeOfDoc(doc);
+    if ( p && (all ? !p.area && p.zone === at.zone : p.spot === at.spot) ) out.push({ token: doc, place: p });
+  }
+  return out;
+}
+
+function zonesWithin(w, n, { way = "range" } = {}) {
+  const at = placeOf(w);
+  if ( !at || at.id < 0 ) return [];
+  return Places.within(cache(), at.id, n, way).map((r) => ({ zone: keyOfId(r.id), id: r.id, d: r.d }));
+}
+function borderBetween(a, b) {
+  const p = placeOf(a), q = placeOf(b);
+  return p && q && p.id >= 0 && q.id >= 0 && p.id !== q.id ? Places.borderInfo(cache(), keyOfId, p.id, q.id) : null;
+}
+function bordersOf(w) {
+  const p = placeOf(w);
+  if ( !p || p.id < 0 ) return [];
+  return [...(Z.adj.get(p.id)?.keys() ?? [])].map((b) => Places.borderInfo(cache(), keyOfId, p.id, b));
+}
+function zoneInfo(w) { const p = placeOf(w); return p && p.id >= 0 ? Places.zoneInfo(cache(), keyOfId, p.id) : null; }
+
+/**
+ * Put a token on a level without moving it on the map: { level: "ground" | "underground" | "elevated" | "floor", floor, airborne }
+ * or { area: "sky" | "orbit" | "dimension" | "chase" } (or a spot string; its zone part is not used). Elevated above a standing
+ * building is its rooftop unless `airborne: true`. Owners only. (Orbit through the orbit scene: api.orbit.send, as the HUD does.)
+ */
+export async function setLevel(token, to) {
+  const doc = token?.document ?? token;
+  if ( !doc?.isOwner || to == null ) return;
+  const s = typeof to === "string" ? Places.parseSpot(to) : null;
+  const o = typeof to === "string" ? (s ? { area: Places.areaOfKey(s.key), level: s.floor ? "floor" : s.alt, floor: s.floor } : null) : to;
+  if ( !o ) return;
+  const k = `flags.${MODULE_ID}`, set = {};
+  const put = (name, v) => { if ( v == null ) set[`${k}.-=${name}`] = null; else set[`${k}.${name}`] = v; };
+  let alt = null, floor = null, air = null;
+  if ( Places.AREAS.includes(o.area) ) alt = o.area;
+  else if ( o.level === "underground" ) alt = "underground";
+  else if ( o.level === "elevated" ) { alt = "elevated"; if ( o.airborne === true ) air = true; }
+  else if ( o.level === "floor" ) {
+    const n = placeOfDoc(doc)?.id >= 0 ? Marks.floorsOf(M, placeOfDoc(doc).id) : 0, f = Math.round(Number(o.floor) || 0);
+    if ( f > 0 && f <= n ) floor = f;
+  } else if ( o.level !== "ground" && o.level != null ) return;
+  put("alt", alt); put("floor", floor); put("air", air);
+  return doc.update(set);
+}
+
+/* ---- events: Hooks.on("moinenMapsZoneEvent", (type, payload) => ...) on every client */
+
+const emit = (type, payload) => Hooks.callAll(EVENT_HOOK, type, { type, scene: canvas.scene?.id ?? null, version: ver, ...payload });
+
+/** Tell where a token is now, if that is not where it was last told to be: "tokenLeft" then "tokenEntered". */
+function syncToken(doc, cause, userId = null) {
+  const to = placeOfDoc(doc);
+  if ( !to ) return;
+  const from = LAST.get(doc.id) ?? null;
+  LAST.set(doc.id, to);
+  if ( Places.placeSig(from) === Places.placeSig(to) ) return;
+  if ( !from && cause !== "create" ) return;          // first sight of a token that was already there
+  const d = { token: doc.id, uuid: doc.uuid, actor: doc.actorId ?? null, from, to, zoneChanged: from?.zone !== to.zone, levelChanged: !from || from.level !== to.level || from.floor !== to.floor || from.airborne !== to.airborne, cause, userId };
+  if ( from ) emit("tokenLeft", d);
+  emit("tokenEntered", d);
+}
+function dropToken(doc, userId = null) {
+  const from = LAST.get(doc.id) ?? null;
+  LAST.delete(doc.id); TP.delete(doc.id);
+  if ( from ) emit("tokenLeft", { token: doc.id, uuid: doc.uuid, actor: doc.actorId ?? null, from, to: null, zoneChanged: true, levelChanged: true, cause: "delete", userId });
+}
+
+/** The states of the zones and borders now, by stable key. */
+function stateSnap() {
+  const zs = new Map(), bs = new Map();
+  if ( Z && K ) {
+    for ( const z of Z.zones ) zs.set(K.keyOf.get(z.id), { id: z.id, props: M?.zones.get(z.id) ?? {} });
+    for ( const [pk, p] of Places.pairsOf(cache()) ) {
+      const ka = K.keyOf.get(p.a), kb = K.keyOf.get(p.b);
+      bs.set(Places.borderKey(ka, kb), { zones: [ka, kb], kind: M?.borders.get(pk)?.kind ?? "open" });
+    }
+  }
+  return { zs, bs };
+}
+const propKeys = (a, b) => {
+  const out = [];
+  for ( const k of new Set([...Object.keys(a), ...Object.keys(b)]) ) if ( (Array.isArray(a[k]) ? a[k].join() : a[k]) !== (Array.isArray(b[k]) ? b[k].join() : b[k]) ) out.push(k);
+  return out;
+};
+/** Take the first picture of a scene (nothing is told: it has just been opened). */
+function prime() {
+  SNAP = stateSnap();
+  LAST.clear();
+  for ( const doc of canvas.scene?.tokens ?? [] ) { const p = placeOfDoc(doc); if ( p ) LAST.set(doc.id, p); }
+}
+/**
+ * The zones or their marks changed (`source`: "edit" this GM's own change, "sync" the scene flag written by another client,
+ * "layers" the fire / destruction / water layers): tell every zone and border whose state is not what it was, then every token
+ * that is not where it was.
+ */
+function announce(source) {
+  if ( !S ) return;
+  const was = SNAP ?? { zs: new Map(), bs: new Map() }, now = SNAP = stateSnap();
+  for ( const [key, n] of now.zs ) {
+    const o = was.zs.get(key);
+    const changed = o ? propKeys(o.props, n.props) : Object.keys(n.props);
+    if ( o && !changed.length ) continue;
+    emit("zoneChanged", { zone: key, id: n.id, before: o ? o.props : null, after: n.props, changed, added: !o, removed: false, source });
+  }
+  for ( const [key, o] of was.zs ) if ( !now.zs.has(key) ) emit("zoneChanged", { zone: key, id: -1, before: o.props, after: null, changed: Object.keys(o.props), added: false, removed: true, source });
+  for ( const [key, n] of now.bs ) {
+    const o = was.bs.get(key);
+    if ( o?.kind !== n.kind ) emit("borderChanged", { border: key, zones: n.zones, before: o?.kind ?? null, after: n.kind, source });
+  }
+  for ( const [key, o] of was.bs ) if ( !now.bs.has(key) ) emit("borderChanged", { border: key, zones: o.zones, before: o.kind, after: null, source });
+  for ( const doc of canvas.scene?.tokens ?? [] ) syncToken(doc, "zones");
+}
+
 /* ---------------------------------------------------------------- public API */
 
 export const zonesApi = {
@@ -752,7 +959,46 @@ export const zonesApi = {
   marks: () => M, ownMarks: () => M0, mapStates: () => MAP, borderAt, altCost, hasLifeSupport, setBorder, setZone, clearStates, fireRound, altitude: altOf, setAltitude, floor: floorOf, setFloor, rules: Marks,
   refresh,
   /** Pure geometry, for tests and other modules. */
-  geometry: Geo
+  geometry: Geo,
+
+  /* ---- for a combat module (dev/zones-api.md): everything below takes and gives stable keys and places with their level */
+  /** Counts every change of the zones or their marks: a cache built on these answers is good while it stays the same. */
+  version: () => ver,
+  LEVELS: Places.LEVELS, AREAS: Places.AREAS, WAYS: Places.WAYS, TAGS: Marks.TAGS, EVENT_HOOK,
+  /** Stable keys: of a zone id (null: no such zone), the id of a key (-1), every key in id order. */
+  keyOf: keyOfId,
+  idOf: (key) => K?.idOf.get(key) ?? -1,
+  keys: () => (Z ? Z.zones.map((z) => keyOfId(z.id)) : []),
+  /** A place (zone key + level) from a token, a key, a spot string, an id, a point or a place; the place at a scene point. */
+  place: placeOf,
+  placeAt: (x, y, o = {}) => placeOf({ ...o, x, y, zone: undefined }),
+  zoneOfToken: (token) => placeOf(token?.document ?? token),
+  tokensInZone, zonesWithin,
+  /** A zone / every zone as data for the rules (terrain and wrecking, building, empty, resource tags, states). */
+  zone: zoneInfo,
+  zoneList: () => (Z ? Z.zones.map((z) => Places.zoneInfo(cache(), keyOfId, z.id)) : []),
+  /** The border between two neighbouring zones (null: not neighbours), the borders of a zone. */
+  borderBetween, bordersOf,
+  /** Range: borders on the shortest route, blocked ones too, and the levels between: { borders, levels, total } | null. */
+  range: (a, b) => { const p = placeOf(a), q = placeOf(b); return p && q ? Places.range(cache(), p, q) : null; },
+  /** The horizontal count alone (number | null). */
+  borderDistance: (a, b) => { const p = placeOf(a), q = placeOf(b); return (p && q ? Places.range(cache(), p, q)?.borders : null) ?? null; },
+  /** The route one way of moving can take (walk | air | through | swim | swing): { borders, levels, total } | null. */
+  route: (a, b, way = "walk") => { const p = placeOf(a), q = placeOf(b); return p && q ? Places.routeLength(cache(), p, q, way) : null; },
+  /** Both distances at once: { range, walk, air, through, swim, swing } (totals; null: no way). */
+  distances(a, b) {
+    const p = placeOf(a), q = placeOf(b), out = { range: null };
+    for ( const w of Places.WAYS ) out[w] = null;
+    if ( !p || !q ) return out;
+    out.range = Places.range(cache(), p, q)?.total ?? null;
+    for ( const w of Places.WAYS ) out[w] = Places.routeLength(cache(), p, q, w)?.total ?? null;
+    return out;
+  },
+  /** The route step by step: zones, levels and borders crossed (way: "range" or a way of moving); null when there is none. */
+  path: (a, b, { way = "walk" } = {}) => { const p = placeOf(a), q = placeOf(b); return p && q ? Places.path(cache(), keyOfId, p, q, way) : null; },
+  setLevel,
+  /** The pure parts, for tests and other modules. */
+  places: Places, keysLib: Keys
 };
 
 export function registerZones() {
@@ -772,6 +1018,15 @@ export function registerZones() {
     if ( alt || "x" in changed || "y" in changed ) altBadge(doc.object);
     if ( ("x" in changed || "y" in changed || alt) && doc.object?.controlled ) refresh();
   });
+  // where every token is, for "moinenMapsZoneEvent" (the document's position: told when the move is made, not when it has played)
+  Hooks.on("updateToken", (doc, changed, _o, userId) => {
+    if ( !S || doc.parent !== canvas.scene ) return;
+    // (any change of this module's token flags is looked at: the place is only told when it really differs)
+    const level = !!changed.flags?.[MODULE_ID];
+    if ( level || "x" in changed || "y" in changed || "width" in changed || "height" in changed ) syncToken(doc, level && !("x" in changed || "y" in changed) ? "level" : "move", userId);
+  });
+  Hooks.on("createToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) syncToken(doc, "create", userId); });
+  Hooks.on("deleteToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) dropToken(doc, userId); });
   Hooks.on("drawToken", (t) => altBadge(t));
   Hooks.on("refreshToken", (t) => { if ( t._mmAlt || altOf(t.document) !== "ground" ) altBadge(t); });
   // a token that walks out of its building leaves its floor behind (the client that moved it clears the flag)
