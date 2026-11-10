@@ -85,8 +85,8 @@ export const maxLevel = (o, bytes = o?.bytes) => { if ( !bytes ) return 1; let m
  * the digest covers exactly what the bake reads.
  */
 export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
-  // (each stroke's boxes, level and margin made when first asked: an incremental fullSigs asks for the new strokes against all, not
-  // every stroke's pixels decoded for nothing)
+  // (each stroke's boxes, level and margin made when first asked: a bake job holds only the strokes it bakes and reads - the others
+  // are holes, destruction.mjs inputOf - and an incremental fullSigs asks for few pairs)
   const n = objects.length, OWN = new Array(n), SPR = new Array(n), LV = new Array(n), MAR = new Array(n);
   const own = (j) => OWN[j] ?? (OWN[j] = ownBox(objects[j], P, K));
   const spr = (j) => SPR[j] ?? (SPR[j] = spriteBox(objects[j], P, K));
@@ -171,18 +171,10 @@ export function criticalPath(deps) {
  * substrates), else own + "~" + a digest of those older strokes' ids and full signatures (so a change anywhere down the chain reaches
  * the strokes above it, and only those). Returns [{ own, sig, deps }].
  */
-export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes, prev = null, from = 0) {
-  // PERF: `prev` = the result for a list whose first `from` strokes are these same strokes (same own inputs, same settings): those
-  // entries are taken as they are - an entry depends only on the strokes up to it (an older stroke never reads a newer one) - and only
-  // the strokes from `from` on are computed (one new stroke on a scene of 2000 was every pair of strokes again)
-  from = prev ? Math.max(0, Math.min(from, prev.length, objects.length)) : 0;
-  const reads = from ? readsOf(objects, P, K, bytesOf) : null;
-  const deps = from ? null : depsOf(objects, P, K, bytesOf), out = from ? prev.slice(0, from) : [];
+export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes) {
+  const deps = depsOf(objects, P, K, bytesOf), out = [];
   objects.forEach((o, i) => {
-    if ( i < from ) return;
-    const own = ownSig(o);
-    let d = deps?.[i];
-    if ( !d ) { d = []; if ( !o.k ) for ( let j = 0; j < i; j++ ) if ( reads(j, i) ) d.push(j); }
+    const own = ownSig(o), d = deps[i];
     // (the digest names the older strokes' OWN signatures: B reads their plain looks, made from their own data alone - a change further
     // down never reaches B unless B reads that stroke itself)
     const sig = d.length ? `${own}~${fnvStr(`${SUBSTRATE_VERSION}|` + d.map((j) => `${objects[j].id}:${out[j].own}`).join("|")).toString(36)}` : own;
