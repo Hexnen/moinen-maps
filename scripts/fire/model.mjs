@@ -422,6 +422,22 @@ export function reachOf(st, geo, P, puffs = true) {
   return cells(r, marginOf(st, geo));
 }
 
+/**
+ * ultra 1: a stroke's rectangles for areasOf - { reach, core, box } = reachOf, coreOf, reachOf without the puffs - kept per stroke object
+ * (a stroke is never changed in place: an edit stores a new object) for the same settings object and grid; every redraw used to make
+ * them again for every stroke of the scene. Returns the lookup for (geo, P). The rectangles are shared: never changed by the caller.
+ */
+const RECTS = new WeakMap();
+function rectCache(geo, P) {
+  const gk = `${geo.ap}|${geo.ox}|${geo.oy}|${geo.grid}`;
+  return (s) => {
+    let e = RECTS.get(s);
+    if ( !e || e.P !== P || e.gk !== gk ) RECTS.set(s, e = { P, gk, reach: reachOf(s, geo, P), core: coreOf(s, geo, P), box: null });
+    return e;
+  };
+}
+const boxOf = (pc, s, geo, P) => { const e = pc(s); return e.box ??= reachOf(s, geo, P, false); };
+
 const overlaps = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 const union = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
 
@@ -535,19 +551,26 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
   const style = (s) => (s.k === "dust" ? "dust" : s.k === "burst" ? "burst" : s.st === "fireball" ? "fireball" : "fire"), color = (s) => (s.k === "dust" ? "" : colorOf(s, P));
   // (strokes with their own grow / out times share an area only with strokes timed the same: an area is drawn with one timing)
   const tm = (s) => (s.gr === undefined && s.ot === undefined ? "" : `${s.gr ?? ""}/${s.ot ?? ""}`);
-  const reach = list.map((s) => reachOf(s, geo, P)), rects = list.map((s) => coreOf(s, geo, P));
+  const pc = rectCache(geo, P);
+  const reach = list.map((s) => pc(s).reach), rects = list.map((s) => pc(s).core);
   const parent = list.map((_, i) => i);
   const find = (i) => { while ( parent[i] !== i ) i = parent[i] = parent[parent[i]]; return i; };
   // (merge until no two groups' core rectangles overlap: a merged rectangle can reach a third stroke)
-  let changed = true;
-  while ( changed ) {
-    changed = false;
-    for ( let i = 0; i < list.length; i++ ) for ( let j = i + 1; j < list.length; j++ ) {
-      const a = find(i), b = find(j); if ( a === b || style(list[a]) !== style(list[b]) || color(list[a]) !== color(list[b]) || tm(list[a]) !== tm(list[b]) || style(list[a]) === "burst" ) continue;
-      if ( overlaps(rects[a], rects[b]) ) {
-        const lo = Math.min(a, b), hi = Math.max(a, b);
-        parent[hi] = lo; rects[lo] = union(rects[a], rects[b]);
-        changed = true;
+  // (ultra 1: only strokes of one style, colour and timing can share an area - a burst never: each such class merged on its own, over
+  // its groups' roots alone. The groups are the same as the all-pairs loop gave - the fixpoint of "two groups whose rectangles
+  // overlap are one" does not depend on the order of the merges - each group's root its first stroke, its rectangle the union.)
+  const cls = new Map();
+  for ( let i = 0; i < list.length; i++ ) {
+    const s = list[i]; if ( style(s) === "burst" ) continue;
+    const k = `${style(s)}|${color(s)}|${tm(s)}`; let c = cls.get(k); if ( !c ) cls.set(k, c = []); c.push(i);
+  }
+  for ( const roots of cls.values() ) {
+    let changed = true;
+    while ( changed ) {
+      changed = false;
+      for ( let x = 0; x < roots.length; x++ ) for ( let y = x + 1; y < roots.length; y++ ) {
+        const a = roots[x], b = roots[y];
+        if ( overlaps(rects[a], rects[b]) ) { parent[b] = a; rects[a] = union(rects[a], rects[b]); roots.splice(y--, 1); changed = true; }
       }
     }
   }
@@ -559,9 +582,9 @@ export function areasOf(strokes, geo, P, now = undefined, still = false) {
     const members = idx.map((i) => list[i]);
     let rect = reach[idx[0]]; for ( const i of idx ) rect = union(rect, reach[i]);
     rect = { ...rect, x1: Math.min(rect.x1, rect.x0 + MAX_SIDE), y1: Math.min(rect.y1, rect.y0 + MAX_SIDE) };
-    let box = reachOf(members[0], geo, P, false); for ( const s of members ) box = union(box, reachOf(s, geo, P, false));
+    let box = boxOf(pc, members[0], geo, P); for ( const s of members ) box = union(box, boxOf(pc, s, geo, P));
     box = { x0: Math.max(box.x0, rect.x0), y0: Math.max(box.y0, rect.y0), x1: Math.min(box.x1, rect.x1), y1: Math.min(box.y1, rect.y1) };
-    const er = style(members[0]) === "burst" ? [] : erasers.filter((e) => overlaps(reachOf(e, geo, P), rect));
+    const er = style(members[0]) === "burst" ? [] : erasers.filter((e) => overlaps(pc(e).reach, rect));
     const all = [...members, ...er].sort(byOrder);
     // the area's wind: the strength-weighted mean of its strokes' (an area is one plume direction)
     let wx = 0, wy = 0, wsum = 0;
@@ -1167,7 +1190,7 @@ function lightsMerge(cl, geo, P, B, G, max, samples) {
   const merge = (a, b) => {
     const m = a.m + b.m;
     const out = { m, col: a.m >= b.m ? a.col : b.col, n: a.n + b.n, cx: (a.cx * a.m + b.cx * b.m) / m, cy: (a.cy * a.m + b.cy * b.m) / m, lv: a.lv + b.lv,
-      im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow, subs: [...a.subs, ...b.subs],
+      im: a.im + b.im, iw: a.iw + b.iw, om: a.om + b.om, ow: a.ow + b.ow, subs: { l: a.subs, r: b.subs },   // (joined once, at the end: subsOf)
       x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), seed: (a.seed ^ b.seed) >>> 0 };
     // (F1: the fractional levels' masses, and the ramp's start levels and clock, merged too)
     const sum = (p, q) => { if ( !p && !q ) return undefined; const r = { ...p }; for ( const k in q ) r[k] = (r[k] ?? 0) + q[k]; return r; };
@@ -1180,6 +1203,9 @@ function lightsMerge(cl, geo, P, B, G, max, samples) {
   };
   const gapOf = (a, b) => Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1), Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
   const compact = (a, b) => Math.hypot(Math.max(a.x1, b.x1) - Math.min(a.x0, b.x0), Math.max(a.y1, b.y1) - Math.min(a.y0, b.y0)) <= B * 2.2;
+  // (ultra 1: OVER THE CAP - the closest pair merged until `max` are left - with each cluster's nearest later neighbour kept, not every
+  // pair scanned again per merge: the same pairs in the same order (the first closest in the scan's order), O(n^2) instead of O(n^3))
+  if ( cl.length > max && cl.length > 2 ) cl = closestDown(cl, max, merge);
   for ( ;; ) {
     let bi = -1, bj = -1, bd = Infinity, fi = -1, fj = -1, fd = Infinity;
     for ( let i = 0; i < cl.length; i++ ) for ( let j = i + 1; j < cl.length; j++ ) {
@@ -1201,9 +1227,56 @@ function lightsMerge(cl, geo, P, B, G, max, samples) {
       strength: Math.min(1, c.m / c.n / lvLerp(FIRE_LV.heat, level)), level, ignite: c.iw > c.m * 0.25 ? Math.round(c.im / c.iw) : null,
       out: c.ow > c.m * 0.5 ? Math.round(c.om / c.ow) : null, seed: (c.seed + i * 7919) >>> 0, fire: c.col, color: rampOf(c.col).light,
       // (the heaviest one-square samples, at most `samples`, in scene px and world art cells)
-      samples: [...c.subs].sort((a, b) => b.w - a.w || a.cy - b.cy || a.cx - b.cx).slice(0, samples)
+      samples: subsOf(c.subs).sort((a, b) => b.w - a.w || a.cy - b.cy || a.cx - b.cx).slice(0, samples)
         .map((s) => ({ ...s, x: geo.ox + s.cx * geo.ap, y: geo.oy + s.cy * geo.ap })) };
   });
+}
+
+/** A cluster's one-square samples in their order (merge joins them as { l, r }: left first, as [...a.subs, ...b.subs] did). */
+function subsOf(s) {
+  if ( Array.isArray(s) ) return [...s];
+  const out = [], stack = [s];
+  while ( stack.length ) {
+    const n = stack.pop();
+    if ( Array.isArray(n) ) { for ( const x of n ) out.push(x); continue; }
+    stack.push(n.r, n.l);
+  }
+  return out;
+}
+
+/**
+ * lightsMerge's cap pass, exactly: while more than `max` clusters are left, the closest pair (the first in the scan order i < j - the
+ * lowest i, then the lowest j - among the pairs at the least distance) merged into the first, the second taken out. Each live cluster
+ * keeps its nearest later neighbour (first in order on a tie); a merge recomputes only the rows that pointed at the pair. The distances
+ * are the loop's own expression (Math.hypot(a.cx - b.cx, a.cy - b.cy), a before b). Returns the clusters left, in their order.
+ */
+function closestDown(cl, max, merge) {
+  const n = cl.length, alive = new Uint8Array(n).fill(1), nnd = new Float64Array(n), nnj = new Int32Array(n);
+  const dist = (i, j) => Math.hypot(cl[i].cx - cl[j].cx, cl[i].cy - cl[j].cy);
+  const row = (i) => {
+    let bd = Infinity, bj = -1;
+    for ( let j = i + 1; j < n; j++ ) { if ( !alive[j] ) continue; const d = dist(i, j); if ( d < bd ) { bd = d; bj = j; } }
+    nnd[i] = bd; nnj[i] = bj;
+  };
+  for ( let i = 0; i < n; i++ ) row(i);
+  let left = n;
+  while ( left > max ) {
+    let fi = -1, fd = Infinity;
+    for ( let i = 0; i < n; i++ ) if ( alive[i] && nnj[i] >= 0 && nnd[i] < fd ) { fd = nnd[i]; fi = i; }
+    if ( fi < 0 ) break;
+    const fj = nnj[fi];
+    cl[fi] = merge(cl[fi], cl[fj]); alive[fj] = 0; cl[fj] = null; left--;
+    for ( let i = 0; i < fi; i++ ) {
+      if ( !alive[i] ) continue;
+      if ( nnj[i] === fi || nnj[i] === fj ) { row(i); continue; }
+      const d = dist(i, fi);
+      if ( d < nnd[i] || (d === nnd[i] && fi < nnj[i]) ) { nnd[i] = d; nnj[i] = fi; }
+    }
+    row(fi);
+    for ( let i = fi + 1; i < fj; i++ ) if ( alive[i] && nnj[i] === fj ) row(i);
+  }
+  const out = []; for ( let i = 0; i < n; i++ ) if ( alive[i] ) out.push(cl[i]);
+  return out;
 }
 
 /**

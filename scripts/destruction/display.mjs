@@ -336,7 +336,7 @@ export class DestructionDisplay {
     // creation order (stroke index, then the sheet's order inside a stroke), on top of whatever is fading out
     const all = [...next, ...this.erasers.values()].map((g, k) => ({ g, k })).sort((a, b) => (a.g.objIndex - b.g.objIndex) || (a.k - b.k)).map((q) => q.g);
     this.order = next;
-    for ( const g of all ) this.live.addChild(g.cont);
+    this.orderLive(all);
     // an object that lies over older ones gets its map patch (once: unchanged objects never change)
     this.patchPass(all);
     this.stats.groups = next.length;
@@ -344,13 +344,47 @@ export class DestructionDisplay {
     return { added, removed };
   }
 
+  /**
+   * `all`'s containers on top of `live`, in that order (whatever else is in it - an area fading out - below them): the same children
+   * as an addChild of every one in order. PERF: an addChild of a child already there is an indexOf + splice of the whole list, so
+   * that was O(n^2) per sync (2000 areas: 4M steps after every stroke); when the list is already in that order apart from new
+   * containers (a stroke on top, a redo under later ones), only those are put in at their places.
+   */
+  orderLive(all) {
+    const live = this.live, ch = live.children, D = all.map((g) => g.cont), inD = new Set(D);
+    let k = 0;
+    while ( k < ch.length && !inD.has(ch[k]) ) k++;               // what is not in `all` must all lie below it
+    let ok = !globalThis.CONFIG?.moinenMaps?.noFastOrder, di = 0;   // (noFastOrder: dev knob, the old loop)
+    for ( let i = k; ok && i < ch.length; i++ ) {
+      const c = ch[i];
+      if ( !inD.has(c) ) { ok = false; break; }
+      while ( di < D.length && D[di] !== c ) di++;
+      if ( di === D.length ) ok = false; else di++;
+    }
+    if ( !ok ) { for ( const c of D ) live.addChild(c); return; }
+    for ( let j = 0; j < D.length; j++ ) if ( ch[k + j] !== D[j] ) live.addChildAt(D[j], k + j);
+  }
+
   /** The map patches of the objects that lie over older ones (`all`: groups and erasers in creation order; once per object: `patch`). */
   patchPass(all) {
-    const rects = [];
+    // (PERF: "does it overlap any earlier one" through a coarse grid of the earlier rectangles, not a walk of all of them per object:
+    // O(n^2) per sync on a grown scene; the same answer)
+    const C = 128, grid = new Map(), cells = (r, fn) => {
+      const x0 = Math.floor(r.x0 / C), x1 = Math.floor(r.x1 / C), y0 = Math.floor(r.y0 / C), y1 = Math.floor(r.y1 / C);
+      if ( !(x1 >= x0 && y1 >= y0) || (x1 - x0 + 1) * (y1 - y0 + 1) > 4096 ) return fn(null);     // (a huge or odd rectangle: the one list for those)
+      for ( let y = y0; y <= y1; y++ ) for ( let x = x0; x <= x1; x++ ) if ( fn(y * 65536 + x) ) return true;
+      return false;
+    };
+    const hit = (r) => (q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0;
+    const big = [], rects = [];
     for ( const g of all ) {
       const r = g.info.rect;
-      if ( !g.erase && !g.patch && g.coverFrame && rects.some((q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0) ) this.addPatch(g);
+      if ( !g.erase && !g.patch && g.coverFrame ) {
+        const h = hit(r);
+        if ( big.some(h) || cells(r, (key) => key === null ? rects.some(h) : !!grid.get(key)?.some(h)) ) this.addPatch(g);
+      }
       rects.push(r);
+      cells(r, (key) => { if ( key === null ) big.push(r); else { let b = grid.get(key); if ( !b ) grid.set(key, b = []); b.push(r); } return false; });
     }
   }
 
@@ -1706,6 +1740,30 @@ export class DestructionDisplay {
     return { x0: (tl.x - o.x) / ap - m, y0: (tl.y - o.y) / ap - m, x1: (br.x - o.x) / ap + m, y1: (br.y - o.y) / ap + m };
   }
 
+  /**
+   * PERF: the cause lights' and night rims' pools (cause-fx.mjs, in the scene's illumination) far off the screen are not drawn
+   * (`renderable`; their `visible` keeps its meaning): at night every damage has its rim there, ~2000 sprites batched and drawn in every
+   * frame of a grown scene though a few dozen are in view. Culled only past half a view of margin on every side, so nothing that could
+   * reach the screen is left out (the same pixels). `CONFIG.moinenMaps.noLightCull = true`: all drawn (A/B).
+   */
+  cullLights() {
+    const L = this.causeLights; if ( !L?.groups.size ) return;
+    const st = canvas.stage, v = canvas.app?.renderer?.screen;
+    let cv = null;
+    if ( st && v && !globalThis.CONFIG?.moinenMaps?.noLightCull && !st.rotation ) {
+      const tl = st.toLocal({ x: 0, y: 0 }), br = st.toLocal({ x: v.width, y: v.height });
+      const x0 = Math.min(tl.x, br.x), x1 = Math.max(tl.x, br.x), y0 = Math.min(tl.y, br.y), y1 = Math.max(tl.y, br.y), mx = (x1 - x0) / 2, my = (y1 - y0) / 2;
+      cv = { x0: x0 - mx, y0: y0 - my, x1: x1 + mx, y1: y1 + my };
+    }
+    const cull = (spr) => {
+      if ( !spr || spr.destroyed ) return;
+      if ( !cv || !spr.visible ) { spr.renderable = true; return; }
+      const t = spr.texture, w = (t?.width ?? 0) * Math.abs(spr.scale.x), h = (t?.height ?? 0) * Math.abs(spr.scale.y);
+      spr.renderable = !(spr.x > cv.x1 || spr.y > cv.y1 || spr.x + w < cv.x0 || spr.y + h < cv.y0);
+    };
+    for ( const g of L.groups ) { cull(g.rim?.pool); cull(g.light?.pool); }
+  }
+
   /** Is the live layer sampled by the one sampler (edge mode and the plugin installed)? */
   sharpLive() {
     const m = globalThis.CONFIG?.moinenMaps?.zoomAA;
@@ -1806,6 +1864,7 @@ export class DestructionDisplay {
     this.prepSlice(t0);
     lap("idle");
     Cause.tickLights(this, t0);
+    this.cullLights();
     lap("lights");
     this.debris.tick(t0, vw);
     lap("debris");
