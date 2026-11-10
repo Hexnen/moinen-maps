@@ -18,6 +18,13 @@ and a rules driver that turns the map's own fire round and wrecking numbers into
 `scripts/zones/highlight.mjs`; drawing: `scripts/zones/highlight-layer.mjs`; wiring: `scripts/zones/interact.mjs`; UI:
 `scripts/zones/menu.mjs`, `scripts/zones/play-panel.mjs`. Test: `dev/zones-interact.test.mjs`.
 
+The integration part (sections 22-24) added what the combat module's surfaces asked for: a zone's name as its badge shows it,
+the free part of the screen (insets other interface parts declare, the stretch found by looking), a pick whose banner keeps
+clear of what lies at the top and whose zones under a bar or off the screen can be brought into view, a forced chain straight
+up or down, and moves that do not wait for an animation on a client that draws no frames. Pure parts:
+`scripts/zones/view.mjs`, `scripts/zones/moves.mjs` (`riseChain`); tests: `dev/zones-view.test.mjs` and new sections of
+`dev/zones-moves.test.mjs`, `dev/zones-play.test.mjs`, `dev/zones-interact.test.mjs`.
+
 The map **stores, reports and draws**. It computes no Invincible rule effect: what a state, a wall or a step does to a character
 is the combat module's.
 
@@ -488,6 +495,31 @@ api.planAlong(from, [zoneKey, ...], { profile, end: { level, floor, airborne }, 
   (or zones joined by an edge) out the same way. The editing UI is the combat module's GM desk.
 - null: no direction (both on the same point), the mover is in no zone, a chain that does not hang together.
 
+**Straight up or down** (a forced move between levels): `direction: "up" | "down"`, `{ vertical: "up" | "down" }` or `{ dz }`
+with no `dx` / `dy`.
+
+```
+api.forcedChain(who, { direction: "up", distance: 3 }) -> plan with forced: true, vertical: true,
+    steps: [{ kind: "level", zone, from: spot, to: spot, level, floor, dir: 1 | -1, slab: "floor" | "roof" | "ground" | null }],
+    ray: { dx: 0, dy: 0, dz: 1 | -1, end: "distance" | "top" | "ground", points: [start] }, zones: [the mover's zone], borders: 0
+```
+
+- The rungs of one zone, bottom to top: underground, the ground, the floors of a standing building (1..n), the elevated position
+  above it (the rooftop, or the air at that height). One rung is one vertical zone (2258, 2262, 2419) and one step.
+- **Up** ends at the elevated position at the latest (`end: "top"`): sky high is off the map (2259), reaching it is not a
+  step of a chain. The mover ends **in the air** there (`plan.end.airborne`), above a building over its rooftop.
+- **Down** ends on the ground (`end: "ground"`): nobody is thrown underground. **Our reading**: only burrowing goes there (1995).
+  Up from underground comes out through the ground and goes on.
+- `slab` says what the step passes through: `"floor"` (a storey's floor inside a standing building), `"roof"` (between the top
+  storey - or the ground of a plain building - and its rooftop), `"ground"` (between underground and the surface), `null` (open
+  air: no building, or a wrecked one). The map holds no Armor for a floor or a roof and never stops a level step by itself:
+  whether a slab stops the mover, and what it costs, is the step listener's (`ctx.step.slab`, answer `{ stop: true }`).
+- Where no step can be taken (up from the elevated position, down from the ground) the plan has `total: 0` and the mover's
+  own place as its end.
+- The GM's edited chain inside one zone: `planAlong(from, [ownZoneKey], { forced: true, end: { level, floor, airborne } })`
+  goes rung by rung the same way (`vertical: true`, no `ray`).
+- A chain is either along the map or vertical; one that does both is two chains, moved one after the other.
+
 ### Moving tokens
 
 ```
@@ -528,7 +560,14 @@ api.beforeStep(fn) -> off()
 - `drop: { x, y }`: where in the last zone to end up near. `wait` (default true): each step waits for the tokens to get there.
   `data`: handed to the listeners (the action it belongs to). `options`: for the token updates.
 - Result: `done` steps taken of `total`; `stopped: null | { index, reason, data, step }`; `place`: where the mover is;
-  `inverse`: a `tokens` op that puts every mover back where it started (null when no step was taken).
+  `inverse`: a `tokens` op that puts every mover back where it started (null when no step was taken); `animated`: whether
+  the steps were animated.
+- **A client that draws no frames** (a tab in the background, a minimised window, a hidden pane) never finishes a token's
+  movement animation. There every token write of `move`, `moveToZone` and `apply({ op: "tokens" })` (so every undo of a move)
+  is made with `animate: false` and is not waited for; a step that is being waited for stops waiting when the frames stop.
+  A caller that passes `options.animate` itself is left alone. `api.drawsFrames(maxAge = 1000) -> Promise<bool>` is the
+  check (one frame asked for, 250 ms at most; the answer is kept for `maxAge` ms). A combat module needs no workaround of
+  its own.
 - Events on the client that runs the move: `moveStarted { op, token, uuid, group, forced, way, total, zones }`, `moveStep
   { ..., index, step, place }`, `moveEnded { ..., done, total, stopped, place }`. Every client still gets `tokenLeft` /
   `tokenEntered` per step, with `move: op`.
@@ -570,6 +609,10 @@ Without `confirm` the map asks a yes / no question with the zones and actions. `
 | Knockback / Slam chain | `api.forcedChain(target, { awayFrom: attacker, distance })` -> the GM edits -> `api.planAlong(target, keys, { forced: true })` -> `api.move(target, null, { plan })` |
 | Put a token into a zone | `api.moveToZone(token, where)` |
 | Player drags a token | `api.tactical({ profile, confirm })` on the player's client |
+| Thrown or dropped between levels | `api.forcedChain(target, { direction: "up" | "down", distance })` -> `api.move(target, null, { plan })`; the listener reads `ctx.step.slab` |
+| A zone's number in a text | `api.zoneName(where)`, `api.zoneTitle(where, { level: true })`; a chain: `keys.map(api.zoneName).join(" → ")` (section 22) |
+| Keep the map's interface clear of own bars | `api.uiInset("id", { bottom: "#dock", top: "#tracker" })` once on `ready` (section 23) |
+| Show a zone that lies under a bar | `api.reveal(where)`; while picking it is offered by itself (section 18) |
 
 ## 16. Limits and open points (M2)
 
@@ -577,7 +620,8 @@ Without `confirm` the map asks a yes / no question with the zones and actions. `
   group, waiting for `movementAnimationPromise`, `DialogV2.confirm`, the drawing of walls and doors, and what a second client
   sees are verified against a stand-in only (`dev/zones-play.test.mjs`).
 - The planner treats an edge as joining two zones; the levels of its ends are reported, not enforced.
-- A forced chain follows the map's surface: no vertical direction (up into the air, down a floor).
+- (Was: a forced chain follows the map's surface. Section 14 now has the chain straight up or down; one chain is still either
+  along the map or vertical, never diagonal.)
 - `freeSpot` treats tokens of every level as in the way (they share the map).
 - (Was: the GM's menu marks only the six kinds. Section 20 replaced that: the menu edits the wall and the door apart; the six
   kinds stay as quick choices under "Built as".)
@@ -641,7 +685,10 @@ const r = await api.pick({
   zones: ["z3", "z4:elevated", { zone: "z7", label: "2", tip: "2 actions", color: "stress" }],   // absent: any zone
   title: "Kid Thor: where to?", hint: "...", color: "target",
   timeout: 0,                         // ms; 0: none
-  user: userId                        // a GM's call: ask that user; absent: this client's user
+  user: userId,                       // a GM's call: ask that user; absent: this client's user
+  inset: { bottom: 180 },             // px of the window's edges this pick should keep clear of, on top of api.uiInset (section 23)
+  reveal: true,                       // true | "fit" | false: how zones no click can reach are brought into view (below)
+  edgePan: true                       // false: resting the pointer at an edge does not slide the map
 });
 // { ok: true, zone: "z4", id: 3, spot: "z4:elevated", place: {...}, x, y }     (x, y: the scene point clicked)
 // { ok: false, reason: "cancelled" | "replaced" | "noZones" | "sceneChanged" | "timeout" | "userGone" | "notGM" | "noScene" }
@@ -657,7 +704,23 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
   right-drag still pans and the wheel still zooms. A new pick replaces the running one (`replaced`).
 - The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick.
 - Asked of another user, the request goes to that user alone and the answer comes back to the asker alone; the user leaving
-  resolves with `userGone`. A pick request is taken from a GM only.
+  resolves with `userGone`. A pick request is taken from a GM only. `inset`, `reveal` and `edgePan` go along (the insets
+  declared with `api.uiInset` are each client's own).
+- **The banner keeps clear.** It sits at the top middle, below the declared top inset (`api.uiInset`, the pick's `inset`) and
+  below whatever interface part it would lie on there (a combat tracker, a strip of chips): found by looking at what is over
+  the map at that spot, so a module that declares nothing is avoided too. It stays in the upper half of the window. It is
+  placed when the pick starts, again 0.4 s later, on a window resize and when the free stretch is found changed.
+- **Zones no click can reach.** A zone on offer is in reach when some point of it is in the window with nothing over the map's
+  canvas there (part of a large zone showing beside a bar is enough). The others - under a bar, a panel or a window, or off
+  the screen - are counted per side of the free stretch (section 23) on a small chip at that edge: an arrow and "2 more". A
+  click on the chip slides the view by the least that brings the nearest of them into the free stretch. Resting the pointer
+  at such an edge (within 44 px of it, 0.45 s) slides the map that way, slowly at first, until nothing is hidden there or the
+  pointer leaves (`edgePan: false` turns it off). When **nothing** on offer is in reach as the pick starts, the nearest comes
+  into view at once. `reveal: "fit"`: as the pick starts the view moves - and zooms out when it has to - so that every zone on
+  offer is in the free stretch. `reveal: false`: no chips, the view is never moved. A pick of any zone (`zones` absent)
+  shows no chips.
+- Nothing runs per frame: reach is counted when the pick starts, 0.15 s after a pan or zoom, and when a look every 1.5 s
+  finds the free stretch changed (a panel opened or closed).
 
 ## 19. The rules driver: the map's rule mechanics as display (gap G-Z9)
 
@@ -732,3 +795,73 @@ api.activeGmName();                   // the active GM's name ("" when none)
 - The refusal notice is shown by the menus and the panel; `apply()` called by a module returns `{ ok: false, reason }` and
   shows nothing (`api.refusalText` gives the words).
 
+
+## 22. A zone's name (integration part)
+
+The number on a zone's badge is its id + 1 written in the look's numeral format (arabic, padded "03", roman, letters, kanji:
+the GM's choice per scene or the world's default look). Texts that name a zone should read like the badge:
+
+```
+api.zoneName(where) -> "3" | "III" | "C" | "03" | "三" | null     the text on the zone's badge; null: `where` names no zone
+api.zoneTitle(where, { level = false }) -> "Zone III" | null       the zone in words, in the user's language, as the map's own
+        tips and menus say it; level: true adds the level of a place off the ground ("Zone III, floor 2", "..., rooftop",
+        "..., in the air", "..., underground"); an off-map area gives its name ("Sky High", "Orbit", ...)
+api.numberFormat() -> "arabic" | "padded" | "roman" | "letters" | "kanji"     the format in force on this scene
+api.numeral(n, format = api.numberFormat()) -> string | null       any number from 1 in that format (a chain "IV → VII")
+api.NUM_FORMATS
+```
+
+- `where`: anything that names a place (section 2): a key, a spot, an id, a place, a token, `{ x, y }`.
+- The name follows the **id**, so it changes when the GM redraws lines (like the badge). Store keys, show names; work the
+  name out when the text is shown.
+- A change of the format tells `moinenMapsZones` `"params"`; a change of the zones `"edited"` / `"loaded"`.
+- With the map's distance display on, a badge shows a distance instead of its number while a token is selected; `zoneName` is
+  always the number.
+
+## 23. The free part of the screen (integration part)
+
+Other interface parts cover the map: a combat tracker at the top, an action dock at the bottom, panels at the sides. The map's
+own interface (the pick's banner, bringing zones into view) works with **the free stretch**: the window less the insets that
+were declared, narrowed to the largest rectangle nothing lies over.
+
+```js
+const off = api.uiInset("my-module.dock", { bottom: 180 });            // px in from that side of the window
+api.uiInset("my-module.dock", { bottom: "#my-dock", top: barElement }); // an element or a selector: measured whenever it is
+                                                                        // asked; 0 while it is absent, display: none or visibility: hidden
+api.uiInset("my-module.dock", () => ({ bottom: dockHeight() }));       // worked out whenever it is asked (also per side)
+api.uiInset("my-module.dock", null);  off();                           // taken back (either way)
+api.uiInsets(extra?) -> { top, right, bottom, left }                   // the declared insets now, the largest per side
+api.safeArea({ inset, measure = true }) -> { x, y, width, height } | null   // the free stretch in client px
+const r = await api.reveal(where | [where, ...], { inset, margin, fit = false, animate = true });   // { ok: true, moved } | { ok: false, reason: "noZones" | "noScene" }
+```
+
+- **Declared** insets are per client and last until reload: a module declares its bars once on `ready` (an element or a
+  function keeps the number current by itself). Use one id per bar; the same id again replaces it.
+- **Found by looking**: `safeArea()` and a running pick test what lies over the map's canvas on a 40 px grid
+  (`document.elementFromPoint`, about 900 points for a 1600 x 900 window) and take the largest free rectangle. So a bar
+  nobody declared is kept clear of as well. An element with `pointer-events: none` is not seen: declare it. When windows lie
+  all over the map and the largest rectangle is under 15 % of the declared stretch in a direction, the declared stretch
+  stands. `measure: false`: the declared insets only.
+- `reveal` slides the view by the least that puts the label points of the named zones inside the free stretch, `margin` px
+  from its edge (default: a fifth of the stretch, 140 at most). Several zones that fit are brought in together; when they do
+  not fit, `fit: true` zooms out until they do (never in), else the first named is brought in. `animate`: a 0.32 s slide
+  (none on a client that draws no frames). `moved: false`: they were there already. It moves this client's view only.
+- Foundry keeps the view inside the scene's padding: a zone at the very edge of the scene may not come all the way in.
+
+## 24. Limits and open points (integration part)
+
+- Looked at in Foundry (v14, lane server, a GM at 1600 x 900 with the combat module's tracker, dock, desk and party panel on
+  screen): the banner below the tracker and the map's own orbit strip instead of over them; under a declared top inset; the
+  chips at the top and above the dock with their tip; a click on a chip bringing a zone out from under the dock; the slide
+  when the pointer rests at the edge; names in arabic, roman and letters; a chain up through a building with two floors
+  stopped under the roof by a listener, and down again; a move and its undo on a client whose frames were stopped (16 ms,
+  not animated). What a player's screen shows and the rest are in the report of the package that made this; otherwise it
+  stands on the node tests.
+- The free stretch is one rectangle. On a screen covered in panels it is small (830 x 260 on that GM's screen) and the chips
+  sit on its edges, which can be well inside the window.
+- A zone partly showing beside a bar counts as in reach although its label may lie under the bar (the highlight labels step
+  aside for tokens and badges, not for other modules' interface).
+- Zones are in reach or not as seen by `elementFromPoint`: an overlay that lets clicks through counts as nothing.
+- The banner is placed by what is there when the pick starts; a tracker that appears later moves it only when the free
+  stretch changes.
+- Touch: the chips work by tap; there is no resting pointer, so no slide.

@@ -348,6 +348,62 @@ const stale = api.plan(m1, "z1");
 await m1.update({ x: 0, y: 100 });
 check((await api.move(m3, null, { plan: api.plan("z1", "z1") })).reason === "stalePlan" && stale !== null, "a plan made for another place is refused");
 off();
+
+/* ---- a forced chain straight up or down (z3: a building with two floors) */
+{
+  const put = await api.moveToZone(m3, "z3");
+  const up = api.forcedChain(m3, { direction: "up", distance: 5 });
+  check(up.forced && up.vertical && up.steps.map((s) => s.to).join() === "z3:f1,z3:f2,z3:elevated" && up.steps.map((s) => s.slab).join() === "floor,floor,roof" && up.steps.every((s) => s.kind === "level" && s.dir === 1)
+    && up.ray.end === "top" && up.ray.dz === 1 && up.ray.dx === 0 && up.end.airborne === true && up.total === 3 && up.borders === 0 && up.zones.join() === "z3" && up.from.spot === "z3",
+    "forcedChain up inside a building: its floors and its roof in order, ending in the air above it; nothing above that");
+  const two = api.forcedChain(m3, { direction: { vertical: "up" }, distance: 2 }), dz = api.forcedChain(m3, { direction: { dz: 1 }, distance: 1 });
+  check(two.total === 2 && two.ray.end === "distance" && two.end.spot === "z3:f2" && two.end.level === "floor" && dz.end.spot === "z3:f1" && api.forcedChain(m3, { direction: { dx: 1, dy: 0, dz: 1 }, distance: 1 }).vertical !== true,
+    "a distance shorter than the building ends on a floor; { vertical }, { dz } and \"up\" say the same; with dx / dy it is a chain along the map");
+  const open = api.forcedChain(m2, { direction: "up", distance: 3 }), none = api.forcedChain(m2, { direction: "down", distance: 2 }), fall = api.forcedChain(m4, { direction: "down", distance: 3 });
+  check(open.total === 1 && open.steps[0].to === "z1:elevated" && open.steps[0].slab === null && open.ray.end === "top" && open.way === "walk" && none.total === 0 && none.ray.end === "ground" && none.end.spot === "z1"
+    && fall.total === 1 && fall.steps[0].to === "z5" && fall.ray.end === "ground" && fall.way === "air", "open ground: one zone up into the air, nowhere down; an airborne mover comes down to the ground");
+  check(api.forcedChain("z1:underground", { direction: "up", distance: 2 }).steps.map((s) => `${s.to}/${s.slab}`).join() === "z1/ground,z1:elevated/null", "from underground: out through the ground first");
+  // moving along it: the listeners get what each step passes through and may stop it there
+  const heard = [];
+  const offV = api.beforeStep((ctx) => { heard.push([ctx.step.to, ctx.step.slab, ctx.forced]); return ctx.step.slab === "roof" ? { stop: true, reason: "roof" } : undefined; });
+  take();
+  let mvV = await api.move(m3, null, { plan: up });
+  const evV = take();
+  check(mvV.ok && mvV.done === 2 && mvV.stopped.reason === "roof" && api.zoneOfToken(m3).spot === "z3:f2" && J(heard) === J([["z3:f1", "floor", true], ["z3:f2", "floor", true], ["z3:elevated", "roof", true]]) && evV.filter((e) => e.type === "tokenEntered").every((e) => e.levelChanged && !e.zoneChanged),
+    "moved up floor by floor; a listener stopped it under the roof; every step is a change of level, not of zone");
+  offV();
+  const edV = api.planAlong(m3, ["z3"], { forced: true, end: { level: "elevated", airborne: true } });
+  check(edV.forced && edV.vertical && edV.steps.map((s) => s.to).join() === "z3:elevated" && edV.steps[0].slab === "roof" && api.planAlong(m3, ["z3"], { forced: true, end: { level: "ground" } }).steps.map((s) => s.to).join() === "z3:f1,z3",
+    "a chain the GM edited inside one zone goes rung by rung too");
+  const down = api.forcedChain(m3, { direction: "down", distance: 9 });
+  const mvD = await api.move(m3, null, { plan: down });
+  check(down.steps.map((s) => s.to).join() === "z3:f1,z3" && down.ray.end === "ground" && mvD.done === 2 && api.zoneOfToken(m3).spot === "z3", "and down again to the ground, where it ends");
+  await api.apply(mvD.inverse); await api.apply(mvV.inverse); await api.apply(put.inverse);
+  check(api.zoneOfToken(m3).spot === "z2" && m3.x === 200 && m3.y === 0, "all of it taken back");
+}
+
+/* ---- a client that draws no frames (this test's requestAnimationFrame never calls back): no animation, nothing waited for */
+{
+  const raf0 = globalThis.requestAnimationFrame;
+  check((await api.drawsFrames(0)) === false, "drawsFrames(): no frame came - none are drawn");
+  writes.length = 0;
+  let t0 = Date.now();
+  let mvF = await api.move(m3, "z1", { profile: { way: "burrow" } });
+  check(mvF.ok && mvF.done === 1 && mvF.animated === false && writes.at(-1).options.animate === false && Date.now() - t0 < 1500, "a move there is written without animation and says so");
+  let un = await api.apply(mvF.inverse);
+  check(un.ok && writes.at(-1).options.animate === false && api.zoneOfToken(m3).spot === "z2", "its undo too");
+  mvF = await api.move(m3, "z1", { profile: { way: "burrow" }, options: { animate: true } });
+  check(writes.at(-1).options.animate === true, "a caller that says `animate` itself is left alone");
+  await api.apply(mvF.inverse);
+  globalThis.requestAnimationFrame = (fn) => { setTimeout(fn, 1); return 1; };
+  await new Promise((res) => setTimeout(res, 1100));
+  writes.length = 0;
+  mvF = await api.move(m3, "z1", { profile: { way: "burrow" } });
+  check((await api.drawsFrames()) === true && mvF.animated === true && !("animate" in writes.at(-1).options), "frames are drawn again: the move is animated as before");
+  await api.apply(mvF.inverse);
+  globalThis.requestAnimationFrame = raf0;
+  await new Promise((res) => setTimeout(res, 1100));
+}
 mv = await api.move(m2, "z1", {});
 check(asked.length === 0, "a listener that stopped asking is not asked");
 

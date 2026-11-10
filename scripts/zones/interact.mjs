@@ -362,7 +362,7 @@ function pickHere(P) {
   return new Promise((resolve) => {
     PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null,
       // the way to zones no click can reach: the free stretch found by looking, the zones hidden per side, their chips, the slide
-      way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, push: null, first: true } };
+      way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, due: 0, push: null, first: true } };
     startPick();
     redraw();
   });
@@ -475,9 +475,13 @@ function updateWay(p) {
     else if ( w.hidden.length && w.hidden.length === p.allowed.size ) leadTo(p, null);
   }
 }
-/** Look again a little later (a pan, a bar that opened): once per `ms`, however often it is asked. */
+/** Look again a little later (a pan, a bar that opened): once per `ms`, however often it is asked (a sooner asking wins). */
 function scheduleWay(p, ms = 150) {
-  if ( PICK !== p || p.way.timer || !hasDom() ) return;
+  if ( PICK !== p || !hasDom() ) return;
+  const due = Date.now() + ms;
+  if ( p.way.timer && p.way.due <= due ) return;
+  clearTimeout(p.way.timer);
+  p.way.due = due;
   p.way.timer = setTimeout(() => { p.way.timer = 0; updateWay(p); }, ms);
 }
 /** Bring the nearest hidden zone of a side (null: of any side) into the free stretch. */

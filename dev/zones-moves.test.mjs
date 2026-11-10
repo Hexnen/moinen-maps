@@ -147,5 +147,31 @@ ls.push(() => { ls.length = 0; });                                   // a listen
 res = await Mv.runSteps({ steps: [{ n: 0 }], listeners: ls, context: () => ({}), perform: async () => { log.push("go"); } });
 check(res.done === 1 && log.join() === "go", "listeners may come and go during a move");
 
+/* ---- a chain straight up or down: the rungs of one zone */
+{
+  // zone c (2) a building with two floors, zone d (3) a plain building, zone e (4) a wrecked building with floors, zone a (0) open ground
+  const V = world([], [[250, 50, { building: true, floors: 2 }], [350, 50, { building: true }], [450, 50, { building: true, floors: 3, wrecked: true }]]);
+  const rung = (i, o) => Mv.rungOf(V.M, V.at(i, o));
+  check(rung(0) === 0 && rung(0, { alt: "underground" }) === -1 && rung(0, { alt: "elevated" }) === 1 && rung(2, { floor: 2 }) === 2 && rung(2, { alt: "elevated" }) === 3 && rung(4, { alt: "elevated" }) === 1 && Mv.rungOf(V.M, V.at(-1)) === null && Mv.topRung(V.M, 2) === 3,
+    "rungs: underground -1, the ground 0, floors, the elevated position one above the top floor (one above the ground without floors)");
+  check(Mv.slabOf(V.M, 2, 0) === "floor" && Mv.slabOf(V.M, 2, 1) === "floor" && Mv.slabOf(V.M, 2, 2) === "roof" && Mv.slabOf(V.M, 3, 0) === "roof" && Mv.slabOf(V.M, 0, 0) === null && Mv.slabOf(V.M, 4, 0) === null && Mv.slabOf(V.M, 0, -1) === "ground",
+    "what lies between two rungs: a storey's floor, the roof, the ground over the underground; open air and a wrecked building: nothing");
+  let rc = Mv.riseChain(V.M, keyOf, V.at(2), 1, 5);
+  check(rc.end === "top" && rc.rung === 3 && J(rc.steps.map((s) => [s.from, s.to, s.level, s.floor, s.dir, s.slab])) === J([["c", "c:f1", "floor", 1, 1, "floor"], ["c:f1", "c:f2", "floor", 2, 1, "floor"], ["c:f2", "c:elevated", "elevated", 0, 1, "roof"]]) && rc.steps.every((s) => s.kind === "level" && s.zone === "c"),
+    "up through a building with two floors: floor, floor, roof - then nothing above (sky high is off the map)");
+  rc = Mv.riseChain(V.M, keyOf, V.at(2, { floor: 1 }), 1, 1);
+  check(rc.end === "distance" && rc.rung === 2 && rc.steps.length === 1 && rc.steps[0].to === "c:f2", "one zone up from the first floor: the second");
+  rc = Mv.riseChain(V.M, keyOf, V.at(2, { alt: "elevated" }), -1, 9);
+  check(rc.end === "ground" && rc.rung === 0 && J(rc.steps.map((s) => [s.to, s.slab, s.dir])) === J([["c:f2", "roof", -1], ["c:f1", "floor", -1], ["c", "floor", -1]]), "down from the rooftop: through the roof and the floors to the ground, and no farther");
+  rc = Mv.riseChain(V.M, keyOf, V.at(0), 1, 3);
+  check(rc.end === "top" && rc.steps.length === 1 && rc.steps[0].to === "a:elevated" && rc.steps[0].slab === null, "up from open ground: one zone, into the air");
+  rc = Mv.riseChain(V.M, keyOf, V.at(0, { alt: "underground" }), 1, 2);
+  check(rc.end === "distance" && J(rc.steps.map((s) => [s.to, s.slab])) === J([["a", "ground"], ["a:elevated", null]]), "up from underground: out through the ground, then into the air");
+  check(Mv.riseChain(V.M, keyOf, V.at(0), -1, 2).steps.length === 0 && Mv.riseChain(V.M, keyOf, V.at(0), -1, 2).end === "ground" && Mv.riseChain(V.M, keyOf, V.at(0, { alt: "underground" }), -1, 1).steps.length === 0, "down from the ground or from underground: nowhere (nobody is thrown underground)");
+  check(Mv.riseChain(V.M, keyOf, V.at(2), 1, 0).steps.length === 0 && Mv.riseChain(V.M, keyOf, V.at(2), 1, 0).end === "distance" && Mv.riseChain(V.M, keyOf, V.at(-1), 1, 1) === null && Mv.riseChain(V.M, keyOf, V.at(2), 0, 1) === null, "no distance: no step; no zone or no direction: null");
+  const pl2 = Mv.planOfLevels(keyOf, V.at(2), V.at(2, { alt: "elevated", air: true }), walk, Mv.levelSteps(V.M, keyOf, V.at(2), 3));
+  check(pl2.total === 3 && pl2.levels === 3 && pl2.borders === 0 && pl2.zones.join() === "c" && pl2.cost.actions === 3 && pl2.from.spot === "c" && pl2.end.airborne === true && pl2.crossed.length === 0, "the chain as a plan: the shape plan() gives");
+}
+
 console.log(failed ? `${failed} failed` : "all zones moves checks passed");
 process.exit(failed ? 1 : 0);

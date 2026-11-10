@@ -464,6 +464,151 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   check(marks().length === 0, "the passages are removed: their marks go");
 }
 
+/* ================================================================ names, and the free part of the screen */
+
+{
+  game.user = users.get("gm");
+  open(makeScene(JSON.parse(J(flag)), [["t1", 0, 0]]));
+  takeSent();
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---- a zone's name as its badge shows it
+  check(api.zoneName("z3") === "3" && api.zoneName(2) === "3" && api.zoneName("z3:f2") === "3" && api.zoneName(scene.tokens[0]) === "1" && api.zoneName({ x: 900, y: 100 }) === "5" && api.zoneName("zz") === null && api.zoneName("@sky") === null && api.zoneName(null) === null,
+    "zoneName: the number on the badge, for a key, an id, a spot, a token or a point; nothing for what names no zone");
+  check(api.numberFormat() === "arabic" && api.numeral(14) === "14" && api.numeral(14, "roman") === "XIV" && api.numeral(3, "letters") === "C" && api.numeral(7, "padded") === "07" && api.numeral(0) === null && api.numeral("x") === null && api.NUM_FORMATS.includes("roman"),
+    "numberFormat and numeral: the format in force, any number in it or in a named format");
+  check(api.zoneTitle("z3") === `MOINENMAPS.Zones.zone.title${J({ n: "3" })}` && api.zoneTitle("z3:elevated") === api.zoneTitle("z3") && api.zoneTitle("z3:elevated", { level: true }).startsWith("MOINENMAPS.Zones.place.at") && api.zoneTitle("z3:elevated", { level: true }).includes("place.roof")
+    && api.zoneTitle("z1:elevated", { level: true }).includes("place.air") && api.zoneTitle("z1:underground", { level: true }).includes("place.underground") && api.zoneTitle("@orbit") === "MOINENMAPS.Zones.place.orbit" && api.zoneTitle("zz") === null,
+    "zoneTitle: the zone in words, with its level on request; an off-map area by its name");
+  api.setParams({ lookFrom: "custom", look: { numFormat: "roman" } });
+  check(api.numberFormat() === "roman" && api.zoneName("z4") === "IV" && api.zoneTitle("z4").includes(J({ n: "IV" })) && api.numeral(9) === "IX", `another numeral format on the map: the names follow it (${api.numberFormat()}, ${api.zoneName("z4")})`);
+  api.setParams({ look: { numFormat: "arabic" } });
+
+  // ---- a window of 1000 x 600 with a tracker at the top middle and a dock along the bottom; the view maps scene to screen
+  globalThis.innerWidth = 1000; globalThis.innerHeight = 600;
+  globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 4); globalThis.cancelAnimationFrame = (t) => clearTimeout(t);
+  globalThis.getComputedStyle = (e) => ({ visibility: e.hidden ? "hidden" : "visible", display: "block" });
+  const cam = canvas.stage = { pivot: { x: 500, y: 100 }, position: { x: 500, y: 300 }, scale: { x: 1 } };
+  canvas.clientCoordinatesFromCanvas = (p) => ({ x: (p.x - cam.pivot.x) * cam.scale.x + cam.position.x, y: (p.y - cam.pivot.y) * cam.scale.x + cam.position.y });
+  canvas.canvasCoordinatesFromClient = (p) => ({ x: (p.x - cam.position.x) / cam.scale.x + cam.pivot.x, y: (p.y - cam.position.y) / cam.scale.x + cam.pivot.y });
+  let pans = 0;
+  canvas.pan = (o) => { if ( o.x != null ) cam.pivot.x = o.x; if ( o.y != null ) cam.pivot.y = o.y; if ( o.scale != null ) cam.scale.x = o.scale; pans++; Hooks.callAll("canvasPan", canvas, o); };
+  canvas.animatePan = async (o) => canvas.pan(o);
+  const part = (id, x0, y0, x1, y1) => ({ id, hidden: false, parentElement: document.body, classList: { contains: () => false }, closest: () => null, getBoundingClientRect: () => ({ left: x0, top: y0, right: x1, bottom: y1, width: x1 - x0, height: y1 - y0 }), box: [x0, y0, x1, y1] });
+  const parts = [part("tracker", 300, 0, 700, 120), part("dock", 0, 400, 1000, 600)];
+  const hitAt = (x, y) => parts.find((p) => x >= p.box[0] && x < p.box[2] && y >= p.box[1] && y < p.box[3]) ?? view;
+  document.elementFromPoint = hitAt;
+  document.elementsFromPoint = (x, y) => { const e = hitAt(x, y); return e === view ? [view] : [e, view]; };
+  document.documentElement = {};
+  const made = [];
+  document.createElement = () => {
+    const e = makeEl(); e.dataset = {};
+    e.getBoundingClientRect = () => { const pick = e.className === "mm-z-pick", top = parseFloat(e.style.top) || 72, left = pick ? 350 : parseFloat(e.style.left) || 0, w = pick ? 300 : 60, h = pick ? 50 : 30; return { left, top, right: left + w, bottom: top + h, width: w, height: h }; };
+    e.closest = (sel) => (sel.includes("mm-z-pickway") && e.className.includes("mm-z-pickway") ? e : null);
+    made.push(e); return e;
+  };
+  const banner = () => made.filter((e) => e.className === "mm-z-pick" && !e.gone).pop() ?? null;
+  const chips = () => made.filter((e) => e.className.includes("mm-z-pickway") && !e.gone);
+  const all5 = ["z1", "z2", "z3", "z4", "z5"];
+  const under = async () => { canvas.pan({ x: 500, y: -100, scale: 1 }); await wait(220); };          // every zone lies under the dock
+
+  check(J(api.safeArea()) === J({ x: 0, y: 120, width: 1000, height: 280 }) && J(api.safeArea({ measure: false })) === J({ x: 0, y: 0, width: 1000, height: 600 }) && J(api.uiInsets()) === J({ top: 0, right: 0, bottom: 0, left: 0 }),
+    `safeArea: found by looking - the band between the tracker and the dock (${J(api.safeArea())}); nothing declared: the window`);
+  const offDock = api.uiInset("t.dock", { bottom: 250 });
+  check(api.uiInsets().bottom === 250 && J(api.safeArea({ measure: false })) === J({ x: 0, y: 0, width: 1000, height: 350 }) && J(api.safeArea()) === J({ x: 0, y: 120, width: 1000, height: 230 }) && api.safeArea({ inset: { top: 200 } }).y === 200, "a declared inset cuts the free stretch, with what is found by looking and with one given for the call");
+  api.uiInset("t.el", { bottom: parts[1], top: () => 30 }); api.uiInset("t.fn", () => ({ left: 80 }));
+  check(J(api.uiInsets({ right: 20 })) === J({ top: 30, right: 20, bottom: 250, left: 80 }), "an inset may be an element (measured), a function, or a function giving all of it; on one side the largest counts");
+  offDock();
+  parts[1].hidden = true;
+  check(api.uiInsets().bottom === 0, "an element that is not shown covers nothing");
+  parts[1].hidden = false;
+  check(api.uiInsets().bottom === 200, "... and what it covers when it is");
+  api.uiInset("t.el", null); api.uiInset("t.fn", null); api.uiInset("", { top: 5 });
+  check(J(api.uiInsets()) === J({ top: 0, right: 0, bottom: 0, left: 0 }), "insets are taken back by name");
+
+  // ---- the banner keeps clear of the tracker; nothing hidden: no chip, the view is left alone
+  let p0 = pans, pk = api.pick({ zones: all5, title: "Where to?" });
+  check(banner()?.style.top === "128px" && chips().length === 0 && pans === p0, `the banner sits below the tracker it would lie on (${banner()?.style.top}); every zone in reach: no chip, no move`);
+  // ---- the zones go under the dock: one chip at the bottom edge of the free stretch, with their number
+  await under();
+  let cs = chips();
+  check(cs.length === 1 && cs[0].className === "mm-z-pickway mm-z-pickway-bottom" && cs[0].dataset.n === "5" && cs[0].style.top === "392px" && cs[0].style.left === "500px" && cs[0].innerHTML.includes("pick.more") && cs[0].innerHTML.includes("fa-chevron-down") && cs[0].dataset.tooltip.includes("pick.way.bottom"),
+    `zones no click can reach are counted on a chip at the edge they lie beyond (${cs.map((c) => [c.className, c.dataset.n, c.style.left, c.style.top])})`);
+  // ---- a click on the chip brings the nearest of them into the free stretch
+  p0 = pans;
+  cs[0].fire("click");
+  await wait(120);
+  check(cam.pivot.y === 56 && cam.pivot.x === 500 && pans === p0 + 1 && chips().length === 0 && cs[0].gone === true, `a click on the chip slides the view by the least that brings the nearest in (pivot y ${cam.pivot.y}); the chip goes`);
+  // ---- resting the pointer at that edge slides the map after a moment
+  await under();
+  view.fire("pointermove", { clientX: 800, clientY: 380 });
+  await wait(250);
+  const early = cam.pivot.y;
+  await wait(1500);
+  const slid = cam.pivot.y;
+  await wait(300);
+  check(early === -100 && slid > -100 && slid < 60 && chips().length === 0 && cam.pivot.y === slid, `the pointer rests at the edge: nothing at first, then the map slides until nothing is hidden there, and stops (${early} -> ${slid})`);
+  const c3 = canvas.clientCoordinatesFromCanvas(api.zone("z3").center);
+  click(c3.x, c3.y);
+  check((await pk).ok === true && chips().length === 0 && banner() === null, "the pick ends: the banner and the chips are gone");
+
+  // ---- nothing on offer in reach when a pick starts: the nearest comes into view
+  await under();
+  pk = api.pick({ zones: ["z2", "z3"] });
+  await wait(120);
+  check(cam.pivot.y === 56 && chips().length === 0, `a pick that starts with nothing in reach brings the nearest zone into view (pivot y ${cam.pivot.y})`);
+  api.cancelPick(); await pk;
+  // ---- reveal: false leaves the view and shows no chip; edgePan: false keeps the chip and does not slide
+  await under();
+  pk = api.pick({ zones: all5, reveal: false });
+  view.fire("pointermove", { clientX: 800, clientY: 380 });
+  await wait(900);
+  check(cam.pivot.y === -100 && chips().length === 0, "reveal: false - no chip, the view is left alone");
+  api.cancelPick(); await pk;
+  canvas.pan({ x: 500, y: -70, scale: 1 }); await wait(50);          // some zones' edges show: the pick starts without moving
+  pk = api.pick({ zones: all5, edgePan: false });
+  await under();
+  view.fire("pointermove", { clientX: 800, clientY: 380 });
+  await wait(900);
+  check(cam.pivot.y === -100 && chips().length === 1, "edgePan: false - the chip is there, resting at the edge does not slide the map");
+  api.cancelPick(); await pk;
+  // ---- reveal: "fit" moves - and zooms out - so that everything on offer is in reach
+  canvas.pan({ x: 500, y: 100, scale: 2 }); await wait(50);
+  pk = api.pick({ zones: all5, reveal: "fit" });
+  await wait(320);
+  const safe = api.safeArea(), pts = all5.map((k) => canvas.clientCoordinatesFromCanvas(api.zone(k).center));
+  check(cam.scale.x < 2 && pts.every((q) => q.x >= safe.x && q.x <= safe.x + safe.width && q.y >= safe.y && q.y <= safe.y + safe.height) && chips().length === 0, `reveal: "fit" - the view zooms out and moves until every zone on offer is in the free stretch (scale ${cam.scale.x.toFixed(2)})`);
+  api.cancelPick(); await pk;
+  // ---- an inset for one pick; the options of a pick asked of another user
+  canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(50);
+  pk = api.pick({ zones: ["z1"], inset: { top: 200 } });
+  check(banner()?.style.top === "208px", `an inset given with the pick: the banner goes under it (${banner()?.style.top})`);
+  api.cancelPick(); await pk;
+  takeSent();
+  const asked = api.pick({ user: "p1", zones: ["z2"], reveal: "fit", edgePan: false, inset: { bottom: 100, left: -4 } });
+  const msg = takeSent()[0].msg;
+  check(msg.pick.reveal === "fit" && msg.pick.edgePan === false && J(msg.pick.inset) === J({ top: 0, right: 0, bottom: 100, left: 0 }), "a pick asked of another user carries how its zones are brought into view");
+  onSocket({ t: "zones", op: "picked", rid: msg.rid, result: { ok: false, reason: "cancelled" } }, "p1"); await asked;
+  let cp = HL.cleanPick({ zones: ["z1"] });
+  check(cp.reveal === true && cp.edgePan === true && cp.inset === null && HL.cleanPick({ reveal: "fit", edgePan: 0, inset: { top: 9 } }).reveal === "fit" && HL.cleanPick({ reveal: false }).reveal === false && HL.cleanPick({ inset: { top: 9 } }).inset.top === 9, "a pick request: reveal and edgePan are on unless said otherwise");
+  // ---- reveal() on its own
+  p0 = pans;
+  let rv = await api.reveal("z3");
+  check(rv.ok && rv.moved === false && pans === p0 && (await api.reveal("zz")).reason === "noZones" && (await api.reveal([])).reason === "noZones", "reveal: a zone already in the free stretch moves nothing; no zone named: refused");
+  canvas.pan({ x: 2000, y: 100, scale: 1 });
+  rv = await api.reveal(["z5", "z4"], { animate: false });
+  const q5 = canvas.clientCoordinatesFromCanvas(api.zone("z5").center), q4 = canvas.clientCoordinatesFromCanvas(api.zone("z4").center);
+  check(rv.ok && rv.moved && q5.x >= 56 && q4.x >= 56 && q5.x <= 944 && cam.scale.x === 1, `reveal: several zones that fit are brought in together, by the least (z4 at ${q4.x}, z5 at ${q5.x})`);
+  canvas.pan({ x: 500, y: 100, scale: 4 });
+  rv = await api.reveal(["z5", "z1"], { animate: false });
+  const q1 = canvas.clientCoordinatesFromCanvas(api.zone("z1").center);
+  check(rv.moved && cam.scale.x === 4 && canvas.clientCoordinatesFromCanvas(api.zone("z5").center).x <= 944 && q1.x < 0, "several that do not fit, without `fit`: the first is brought in, the zoom is left alone");
+  rv = await api.reveal(["z5", "z1"], { animate: false, fit: true });
+  check(rv.moved && cam.scale.x < 4 && canvas.clientCoordinatesFromCanvas(api.zone("z1").center).x >= 56 - 1e-6 && canvas.clientCoordinatesFromCanvas(api.zone("z5").center).x <= 944 + 1e-6, `with \`fit\`: zoomed out until both are in (scale ${cam.scale.x.toFixed(2)})`);
+  canvas.pan({ x: 500, y: 100, scale: 1 });
+  globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
+}
+
 /* ================================================================ the words */
 
 // every key the menus, the panel and the pick banner ask for through their own helper (Z / L: the lang audit does not follow those)
