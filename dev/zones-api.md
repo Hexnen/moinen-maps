@@ -698,8 +698,12 @@ api.activeGmName();                   // the active GM's name ("" when none)
 
 ## 21. Limits and open points (interface part)
 
-- Only `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI) stands behind these sections unless the report of the task
-  says what was looked at in Foundry.
+- Looked at in Foundry (v14, a GM and a real player on a lane server): highlights on a light and a dark map at two zooms, a
+  highlight sent to one player only, a pick on the GM's own client and one asked of a player, the border menu, the three pages
+  of the zone menu, the In play panel. Not looked at: a second GM (the refusal notice and the locked controls), the rules
+  driver with a real combat module, touch input. The rest stands on `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI).
+- Highlights are lit like the map (they are in the primary group, under the tokens): on a dark scene or under a coloured
+  light their colours are tinted, and a label can sit behind a token (the tip under the pointer still says it).
 - A highlight is covered by fog and vision like the zone display (it is in the primary group). A combat module that wants a
   player to see reach into unexplored zones needs a decision here.
 - A registry state added in the menu gets no level unless the GM sets one (the map invents no default).

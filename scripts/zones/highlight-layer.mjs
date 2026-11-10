@@ -151,7 +151,7 @@ export class ZoneHighlightLayer {
   /** A label: light text on a dark pill rimmed in the highlight's colour (the look of the altitude tag on a token). */
   #label(e, at, dy, r, zoneId = -1) {
     const c = new PIXI.Container(), G = new PIXI.Graphics();
-    const T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 13, fill: PAPER });
+    const T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 14, fill: PAPER });
     T.resolution = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
     T.anchor.set(0.5, 0.52);
     const w = Math.max(22, T.width + 14);
@@ -187,7 +187,7 @@ export class ZoneHighlightLayer {
     const z = id >= 0 ? this.Z?.zones.find((q) => q.id === id) : null, e = z ? this.pick?.get(id) : null;
     if ( z && e ) {
       const px = 1 / Math.max(0.05, this.lineZoom ?? this.zoom ?? 1), J = { join: PIXI.LINE_JOIN.ROUND };
-      fillZone(H, z, e.color, 0.26);
+      fillZone(H, z, e.color, 0.34);
       const rings = z.parts.flatMap((part) => part);
       for ( const [w, col, a] of [[10, INK, 0.7], [6, e.color, 1], [2, 0xffffff, 0.95]] ) { H.lineStyle({ width: w * px, color: col, alpha: a, ...J }); for ( const r of rings ) ring(H, r); }
     }
