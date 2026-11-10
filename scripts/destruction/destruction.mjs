@@ -73,7 +73,9 @@ const BIG_BAKE = 6;
 /** Shells filled (their chunks' areas built) per step at first; the steps then adapt to what one cost (fill()). */
 const FILL_STEP = 2;
 // freshly computed stroke signatures are kept in IndexedDB (a moment later, off the pass) so the next load of this state reads them
-Store.setSigsSink((key, out) => setTimeout(() => Net.putMeta(key, out), 1500));
+// (only the last state of a burst: strokes every second wrote every state's signatures, a JSON of the whole scene each)
+let sigsPut = null;
+Store.setSigsSink((key, out) => { const first = !sigsPut; sigsPut = { key, out }; if ( first ) setTimeout(() => { const p = sigsPut; sigsPut = null; Net.putMeta(p.key, p.out); }, 1500); });
 /** Strokes put on screen per step of a scene load (a pause for the page between steps). */
 const SHOW_BATCH = 12, SHOW_PX = 1.2e6;     // (SHOW_PX: pixels of new looks one background step puts on screen)
 /** Strokes re-baked per idle pass in the background (a compatible older look being replaced). */

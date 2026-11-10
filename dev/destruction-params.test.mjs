@@ -84,6 +84,6 @@ ok(/redoStack\.push\(\{ S, o: gone \}\)/.test(D), "an undo puts the stroke on th
 ok(/S\.objects = \[\.\.\.\(S\.objects \?\? \[\]\), ob\];\s*redoStack\.length = 0;/.test(D), "a new stroke empties the redo stack");
 ok(/export function clearAll\(\) \{\s*if \( !S \) return;\s*redoStack\.length = 0;/.test(D), "Clear all empties the redo stack");
 ok(/k === "y" \|\| e\.shiftKey \) redoStroke\(\); else undoStroke\(\)/.test(E) && /redo: redoLast/.test(D), "Ctrl+Shift+Z and Ctrl+Y redo in the editor");
-ok(/p\.rearm\?\.\(\)/.test(B) && /m\.progress !== undefined \) \{ clearTimeout\(timer\); timer = arm\(\)/.test(B), "a bake that reports progress re-arms the watchdog (own worker and the pool's lanes)");
+ok(/p\.rearm\?\.\(\)/.test(B) && /m\.progress !== undefined \) \{ (clearTimeout\(timer\)|timer\(\)); timer = arm\(\)/.test(B), "a bake that reports progress re-arms the watchdog (own worker and the pool's lanes)");
 ok(/const live = changed\.every\(\(k\) => LIVE_PARAMS\.has\(k\) \|\| \(S\.params\.pin && Pin\.PIN_SET\.has\(k\)\)\)/.test(D), "changing a pinned setting bakes nothing");
 console.log(`destruction-params: ${n} checks ok`);
