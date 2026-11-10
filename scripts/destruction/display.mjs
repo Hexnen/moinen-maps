@@ -336,7 +336,7 @@ export class DestructionDisplay {
     // creation order (stroke index, then the sheet's order inside a stroke), on top of whatever is fading out
     const all = [...next, ...this.erasers.values()].map((g, k) => ({ g, k })).sort((a, b) => (a.g.objIndex - b.g.objIndex) || (a.k - b.k)).map((q) => q.g);
     this.order = next;
-    for ( const g of all ) this.live.addChild(g.cont);
+    this.orderLive(all);
     // an object that lies over older ones gets its map patch (once: unchanged objects never change)
     this.patchPass(all);
     this.stats.groups = next.length;
@@ -344,13 +344,47 @@ export class DestructionDisplay {
     return { added, removed };
   }
 
+  /**
+   * `all`'s containers on top of `live`, in that order (whatever else is in it - an area fading out - below them): the same children
+   * as an addChild of every one in order. PERF: an addChild of a child already there is an indexOf + splice of the whole list, so
+   * that was O(n^2) per sync (2000 areas: 4M steps after every stroke); when the list is already in that order apart from new
+   * containers (a stroke on top, a redo under later ones), only those are put in at their places.
+   */
+  orderLive(all) {
+    const live = this.live, ch = live.children, D = all.map((g) => g.cont), inD = new Set(D);
+    let k = 0;
+    while ( k < ch.length && !inD.has(ch[k]) ) k++;               // what is not in `all` must all lie below it
+    let ok = !globalThis.CONFIG?.moinenMaps?.noFastOrder, di = 0;   // (noFastOrder: dev knob, the old loop)
+    for ( let i = k; ok && i < ch.length; i++ ) {
+      const c = ch[i];
+      if ( !inD.has(c) ) { ok = false; break; }
+      while ( di < D.length && D[di] !== c ) di++;
+      if ( di === D.length ) ok = false; else di++;
+    }
+    if ( !ok ) { for ( const c of D ) live.addChild(c); return; }
+    for ( let j = 0; j < D.length; j++ ) if ( ch[k + j] !== D[j] ) live.addChildAt(D[j], k + j);
+  }
+
   /** The map patches of the objects that lie over older ones (`all`: groups and erasers in creation order; once per object: `patch`). */
   patchPass(all) {
-    const rects = [];
+    // (PERF: "does it overlap any earlier one" through a coarse grid of the earlier rectangles, not a walk of all of them per object:
+    // O(n^2) per sync on a grown scene; the same answer)
+    const C = 128, grid = new Map(), cells = (r, fn) => {
+      const x0 = Math.floor(r.x0 / C), x1 = Math.floor(r.x1 / C), y0 = Math.floor(r.y0 / C), y1 = Math.floor(r.y1 / C);
+      if ( !(x1 >= x0 && y1 >= y0) || (x1 - x0 + 1) * (y1 - y0 + 1) > 4096 ) return fn(null);     // (a huge or odd rectangle: the one list for those)
+      for ( let y = y0; y <= y1; y++ ) for ( let x = x0; x <= x1; x++ ) if ( fn(y * 65536 + x) ) return true;
+      return false;
+    };
+    const hit = (r) => (q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0;
+    const big = [], rects = [];
     for ( const g of all ) {
       const r = g.info.rect;
-      if ( !g.erase && !g.patch && g.coverFrame && rects.some((q) => q.x0 < r.x1 && q.x1 > r.x0 && q.y0 < r.y1 && q.y1 > r.y0) ) this.addPatch(g);
+      if ( !g.erase && !g.patch && g.coverFrame ) {
+        const h = hit(r);
+        if ( big.some(h) || cells(r, (key) => key === null ? rects.some(h) : !!grid.get(key)?.some(h)) ) this.addPatch(g);
+      }
       rects.push(r);
+      cells(r, (key) => { if ( key === null ) big.push(r); else { let b = grid.get(key); if ( !b ) grid.set(key, b = []); b.push(r); } return false; });
     }
   }
 

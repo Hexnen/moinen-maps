@@ -85,9 +85,13 @@ export const maxLevel = (o, bytes = o?.bytes) => { if ( !bytes ) return 1; let m
  * the digest covers exactly what the bake reads.
  */
 export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
-  const own = objects.map((o) => ownBox(o, P, K)), spr = objects.map((o) => spriteBox(o, P, K));
-  const lv = objects.map((o) => o.k ? 0 : maxLevel(o, bytesOf(o)));
-  const mar = objects.map((o) => o.k ? 0 : outlineMargin(o, P, K));
+  // (each stroke's boxes, level and margin made when first asked: an incremental fullSigs asks for the new strokes against all, not
+  // every stroke's pixels decoded for nothing)
+  const n = objects.length, OWN = new Array(n), SPR = new Array(n), LV = new Array(n), MAR = new Array(n);
+  const own = (j) => OWN[j] ?? (OWN[j] = ownBox(objects[j], P, K));
+  const spr = (j) => SPR[j] ?? (SPR[j] = spriteBox(objects[j], P, K));
+  const lv = (j) => LV[j] ?? (LV[j] = objects[j].k ? 0 : maxLevel(objects[j], bytesOf(objects[j])));
+  const mar = (j) => MAR[j] ?? (MAR[j] = objects[j].k ? 0 : outlineMargin(objects[j], P, K));
   const memo = new Map();
   return (j, i) => {
     const key = j * 65536 + i; let v = memo.get(key);
@@ -96,11 +100,11 @@ export function readsOf(objects, P, K = 2, bytesOf = (o) => o.bytes) {
   };
   function reads(j, i) {
     const a = objects[j];
-    if ( a.k ) return meets(own[j], spr[i]);
-    if ( lv[j] > lv[i] && meets(own[j], spr[i]) ) return true;
+    if ( a.k ) return meets(own(j), spr(i));
+    if ( lv(j) > lv(i) && meets(own(j), spr(i)) ) return true;
     // own pixels against own pixels, at mask resolution: their torn outlines can only touch where the masks lie closer than the two
     // outline margins (boxes alone chain every long diagonal stroke to everything near it)
-    return meets(own[j], own[i]) && masksNear(a, bytesOf(a), objects[i], bytesOf(objects[i]), (mar[j] + mar[i]) / K);
+    return meets(own(j), own(i)) && masksNear(a, bytesOf(a), objects[i], bytesOf(objects[i]), (mar(j) + mar(i)) / K);
   }
 }
 
@@ -167,10 +171,18 @@ export function criticalPath(deps) {
  * substrates), else own + "~" + a digest of those older strokes' ids and full signatures (so a change anywhere down the chain reaches
  * the strokes above it, and only those). Returns [{ own, sig, deps }].
  */
-export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes) {
-  const deps = depsOf(objects, P, K, bytesOf), out = [];
+export function fullSigs(objects, ownSig, P, K = 2, bytesOf = (o) => o.bytes, prev = null, from = 0) {
+  // PERF: `prev` = the result for a list whose first `from` strokes are these same strokes (same own inputs, same settings): those
+  // entries are taken as they are - an entry depends only on the strokes up to it (an older stroke never reads a newer one) - and only
+  // the strokes from `from` on are computed (one new stroke on a scene of 2000 was every pair of strokes again)
+  from = prev ? Math.max(0, Math.min(from, prev.length, objects.length)) : 0;
+  const reads = from ? readsOf(objects, P, K, bytesOf) : null;
+  const deps = from ? null : depsOf(objects, P, K, bytesOf), out = from ? prev.slice(0, from) : [];
   objects.forEach((o, i) => {
-    const own = ownSig(o), d = deps[i];
+    if ( i < from ) return;
+    const own = ownSig(o);
+    let d = deps?.[i];
+    if ( !d ) { d = []; if ( !o.k ) for ( let j = 0; j < i; j++ ) if ( reads(j, i) ) d.push(j); }
     // (the digest names the older strokes' OWN signatures: B reads their plain looks, made from their own data alone - a change further
     // down never reaches B unless B reads that stroke itself)
     const sig = d.length ? `${own}~${fnvStr(`${SUBSTRATE_VERSION}|` + d.map((j) => `${objects[j].id}:${out[j].own}`).join("|")).toString(36)}` : own;

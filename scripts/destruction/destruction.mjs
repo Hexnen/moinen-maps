@@ -1957,7 +1957,9 @@ export function redoLast() {
   // (after the strokes placed before it: with a preset's strokes painted since the undo it goes under them, as a reload would put it)
   const at = Timed.redoIndex(S.objects, o);
   if ( at === S.objects.length ) { S.objects = [...S.objects, o]; Model.compositeOver(S, o); }
-  else { S.objects = [...S.objects.slice(0, at), o, ...S.objects.slice(at)]; Model.composite(S); }
+  // (PERF: under later strokes only its own box changes - compositeBox redraws exactly that box in order, the same mask as a full
+  // composite; a full one per redo made 40 redos ~9x slower than 40 undos)
+  else { S.objects = [...S.objects.slice(0, at), o, ...S.objects.slice(at)]; Model.compositeBox(S, { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }); }
   const box = { x0: o.x0, y0: o.y0, x1: o.x0 + o.w - 1, y1: o.y0 + o.h - 1 }, ab = artBox(box);
   if ( !o.k ) strokes.push({ box: ab, a: [(ab.x0 + ab.x1) / 2, (ab.y0 + ab.y1) / 2], b: null, path: null, id: o.id });
   S.rev = Model.nextRev(); editedHere = true;

@@ -34,11 +34,48 @@ const paramStr = (S) => { const P = keyParams(S); return Object.keys(P).filter((
 const objStr = (S, o) => `${o.id},${o.k},${o.t},${o.x0},${o.y0},${o.w},${o.h},${o.m}${((S.params.pin ? o.pr?.directional : S.params.directional) || Model.TYPES[o.t] === "gash") && o.p ? "," + o.p.filter((v, i) => i % 3 !== 2).join(".") : ""}${o.c ? ",c" + o.c : ""}${o.pr ? ",r" + prStr(o.pr) : ""}`;
 const prStr = (pr) => Object.keys(pr).sort().map((k) => `${k}=${JSON.stringify(pr[k])}`).join("&");
 
+/**
+ * PERF: every stroke's objStr, kept per state while its strokes array is the same (bakeOnce asks makeKey, sigsOf and sigsKey for them
+ * in one pass). Not cached per stroke: a stroke's path may be attached to it later (attachPaths).
+ */
+const strsMemo = new WeakMap();
+function strsOf(S) {
+  const objs = S.objects ?? [], pin = !!S.params.pin, dir = !!S.params.directional, m = strsMemo.get(S);
+  if ( m && m.objs === objs && m.pin === pin && m.dir === dir && m.n === objs.length ) return m.strs;
+  const strs = objs.map((o) => objStr(S, o));
+  strsMemo.set(S, { objs, pin, dir, n: objs.length, strs });
+  return strs;
+}
+/**
+ * fnv(enc(header + strs.join(";")), seed), computed as a chain: the state after each string is kept (per `slot`), so a list that only
+ * grew (or changed near its end) hashes its new strings only. The same number as the one-shot hash (UTF-8 of a concatenation is the
+ * concatenation of the UTF-8s; fnv runs byte by byte).
+ */
+const chains = new Map();
+const SEMI = enc(";");
+function chainFnv(slot, header, strs, seed = 2166136261) {
+  let c = chains.get(slot);
+  if ( !c || c.header !== header || c.seed !== seed ) { c = { header, seed, h0: fnv(enc(header), seed) | 0, strs: [], hs: [] }; chains.set(slot, c); }
+  const L = Math.min(c.strs.length, strs.length);
+  let p = 0;
+  while ( p < L && c.strs[p] === strs[p] ) p++;
+  c.strs.length = p; c.hs.length = p;
+  let h = p ? c.hs[p - 1] : c.h0;
+  for ( let i = p; i < strs.length; i++ ) {
+    if ( i ) h = fnv(SEMI, h) | 0;
+    h = fnv(enc(strs[i]), h) | 0;
+    c.strs.push(strs[i]); c.hs.push(h);
+  }
+  return h >>> 0;
+}
+
 export function makeKey(scene, S, bgPath) {
   // the stroke objects (id, kind, type, box, pixels; their paths only when the damage follows the stroke; their cause when they have one)
-  const objs = (S.objects ?? []).map((o) => objStr(S, o)).join(";");
+  // (PERF: hashed as a chain over the strokes' strings, the part shared with the last call kept: the same number as fnv of the joined
+  // string, for the new strokes' bytes only - every bake pass hashed every stroke's pixels again, megabytes on a grown scene)
+  const objs = chainFnv("mk", "", strsOf(S));
   const extra = fnv(enc(`${paramStr(S)}|${bgPath}|${scene.width}x${scene.height}|${S.seed}`));
-  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${fnv(enc(objs)).toString(36)}:${extra.toString(36)}`;
+  return `${CORE_VERSION}:${scene.id}:${S.ap}:${S.mw}x${S.mh}:${objs.toString(36)}:${extra.toString(36)}`;
 }
 
 /**
@@ -100,25 +137,36 @@ export function sigsOf(S) {
   // with warm caches, ~660 ms on a scene's first load - so they are also kept by their inputs' digest, and in IndexedDB across loads)
   const memo = sigMemo.get(S), pj = pjOf(S);
   if ( memo && memo.objects === S.objects && memo.pj === pj ) return memo.out;
-  const key = sigsKey(S, pj);
+  const key = sigsKey(S, pj), strs = strsOf(S);
   let out = sigStore.get(key);
   if ( !out ) {
     // (a stroke's levels decoded once: the dependency test asks for them per pair, 236 ms of the 290 on a 269-stroke scene)
     const bytes = new Map(), bytesOf = (o) => o.bytes ?? bytes.get(o) ?? bytes.set(o, Model.objBytes(o)).get(o);
-    out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, bytesOf);
+    // PERF: the strokes the last computed list shares with this one (same own inputs, same settings, from the first on) keep their
+    // entries (fullSigs `prev`): a new stroke computes its own dependencies only, not every pair of the scene again
+    let prev = null, from = 0;
+    if ( lastSigs && lastSigs.pj === pj ) {
+      const L = Math.min(lastSigs.strs.length, strs.length);
+      while ( from < L && lastSigs.strs[from] === strs[from] ) from++;
+      prev = lastSigs.out;
+    }
+    out = fullSigs(S.objects ?? [], (o) => objSig(S, o), S.params, Model.K, bytesOf, prev, from);
     rememberSigs(key, out);
     onSigs?.(key, out);
   }
+  lastSigs = { pj, strs, out };
   sigMemo.set(S, { objects: S.objects, pj, out });
   return out;
 }
+let lastSigs = null;
 const sigMemo = new WeakMap();
 /** Signatures by the digest of everything they are made of (the strokes' own inputs, their order, the settings, the grid). */
 const sigStore = new Map();
 const rememberSigs = (key, out) => { sigStore.delete(key); sigStore.set(key, out); while ( sigStore.size > 6 ) sigStore.delete(sigStore.keys().next().value); };
 export function sigsKey(S, pj = pjOf(S)) {
-  const b = enc(`${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|${(S.objects ?? []).map((o) => objStr(S, o)).join(";")}`);
-  return `sg1:${S.mw}x${S.mh}:${fnv(b).toString(36)}${fnv(b, 0x9747b28c).toString(36)}:${(S.objects ?? []).length}`;
+  // (chained: the same two numbers as fnv of the whole string, for the changed strokes' bytes only - chainFnv)
+  const head = `${pj}|${Model.K}|${SUBSTRATE_VERSION}|${CORE_VERSION}|`, strs = strsOf(S);
+  return `sg1:${S.mw}x${S.mh}:${chainFnv("sg-a", head, strs).toString(36)}${chainFnv("sg-b", head, strs, 0x9747b28c).toString(36)}:${(S.objects ?? []).length}`;
 }
 /**
  * Read the state's signatures ahead from a store (`get(key)` -> the array or null; IndexedDB in the page) so `sigsOf` finds them
