@@ -1695,7 +1695,8 @@ async function persistOnce(partialAsked = false) {
   const base = Store.baseKey(scene, S, bg), key = Store.makeKey(scene, S, bg);
   // not all on screen yet: the bake that completes it asks again (a partial publish - schedulePartial - names what is there)
   const partial = shownKey !== key;
-  if ( partial && !partialAsked ) return;
+  // (a complete pass's publish that a newer stroke overtook - the usual case in a long fight: the partial one names what is there)
+  if ( partial && !partialAsked ) { if ( game.user.isGM ) schedulePartial(); return; }
   // (a manifest of 0.4.1 with the same settings counts as the same: its entries stay, rewritten with the version they were baked at)
   const M = Store.manifestOf(S), dir = Net.chunkDir(scene.id), same = M?.dir === dir && Store.sameBase(M.base, base, Store.legacyBaseKey(scene, S, bg));
   // (partial: a stroke not on screen keeps its stored entry - only one of this folder and these settings: another's names other chunks)
