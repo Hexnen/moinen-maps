@@ -30,7 +30,7 @@ const me = () => game.user?.id ?? null;
 const sceneId = () => canvas.scene?.id ?? null;
 const isGM = (id) => !!game.users?.get?.(id)?.isGM;
 const gmIds = () => (game.users?.filter?.((u) => u.isGM) ?? []).map((u) => u.id);
-const emit = (msg, recipients = null) => { try { game.socket?.emit(CHANNEL, { t: "board", scene: sceneId(), ...msg }, ...(recipients ? [{ recipients }] : [])); } catch ( err ) { console.warn(`${MODULE_ID} | zones: socket`, err); } };
+const emit = (msg, recipients = null) => { try { game.socket?.emit(CHANNEL, { t: "board", scene: sceneId(), b: HL.BOOT, ...msg }, ...(recipients ? [{ recipients }] : [])); } catch ( err ) { console.warn(`${MODULE_ID} | zones: socket`, err); } };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const docOf = (w) => { const id = BC.tokenIdOf(w); return id ? canvas.scene?.tokens?.get(id) ?? null : null; };
 const objOf = (id) => { const t = canvas.scene?.tokens?.get(id)?.object; return t && !t.destroyed ? t : null; };
@@ -67,7 +67,8 @@ class Kept {
   }
   /** Take sets away (as clearHighlights): an id, { id }, { prefix }, nothing (what this client made), { all: true }. How many went here. */
   clear(o = {}) {
-    const f = typeof o === "string" ? { id: o } : (o ?? {});
+    const f = HL.clearFilter(o);
+    if ( !f ) return 0;                                                 // what names no set (null, an id of nothing) takes nothing away
     const match = (id) => (f.id == null || id === f.id) && (f.prefix == null || id.startsWith(f.prefix));
     for ( const [id, s] of [...this.sent] ) { if ( !match(id) ) continue; emit({ op: this.op, del: [id] }, s.remote === "all" ? null : s.remote); this.sent.delete(id); }
     let n = 0;
@@ -79,7 +80,15 @@ class Kept {
   take(msg, sender, clean) {
     let any = false;
     for ( const id of Array.isArray(msg.del) ? msg.del : [] ) { const r = this.map.get(String(id)); if ( r && r.from != null ) { this.map.delete(String(id)); any = true; } }
-    for ( const raw of Array.isArray(msg.set) ? msg.set : [] ) { const s = clean(raw, me()); if ( !s?.id ) continue; s.users = null; this.map.set(s.id, { spec: s, from: sender, seq: ++this.seq }); any = true; }
+    for ( const raw of Array.isArray(msg.set) ? msg.set : [] ) { const s = clean(raw, me()); if ( !s?.id ) continue; s.users = null; this.map.set(s.id, { spec: s, from: sender, boot: msg.b ?? null, seq: ++this.seq }); any = true; }
+    return any;
+  }
+  /** A user's client reloaded or left: what it showed here goes (it can no longer take it away itself). `keep`: the page load
+   *  whose sets stay (the one that has just said hello: what it sent before its hello is its own). True when something went. */
+  dropFrom(uid, keep = undefined) {
+    let any = false;
+    // (an intention is kept by its own clock: takeIntent)
+    for ( const [id, r] of [...this.map] ) if ( r.from === uid && !id.startsWith("~intent.") && (keep === undefined || r.boot !== keep) ) { this.map.delete(id); any = true; }
     return any;
   }
   /** A client opened this scene: it gets again what was meant for it. */
@@ -174,16 +183,18 @@ function setHoverTok(id, at) {
  *   markTokens({ id?, tokens: [{ token, state: "in" | "out" | "chosen" | "caught", label, tip, color, marks: [name | { icon, color, tip }],
  *                               bar: { value, max, loss, lossMax, gain, color, text }, hover: { label, tip, bar } }], color, users, order })
  * `users` as for highlights (a GM's call; a player's marks stay on the player's own client). The same id again replaces what it
- * showed. Returns the id, or null when the spec names no token.
+ * showed - with no token left, nothing shows under that id any more. Returns the id, or null when the spec names no token.
  */
 export function markTokens(spec) {
   const s = BC.cleanTokenMarks(spec, me());
-  if ( !s ) return null;
+  // (the same id with no token left replaces the set too: what stood under it goes, here and where it was sent)
+  if ( !s ) { const id = HL.idOf(spec); if ( id != null && MARKS.clear(id) ) applyMarks(); return null; }
   const id = MARKS.put(s);
   applyMarks();
   return id;
 }
-/** Take token marks away: (id), ({ id }), ({ prefix }), () what this client made, ({ all: true }). Returns how many sets went here. */
+/** Take token marks away: (id), ({ id }), ({ prefix }), () what this client made, ({ all: true }). Returns how many sets went here.
+ *  Anything else (null, { id: null }: the id of a set that was never made) names no set and takes nothing away. */
 export function clearTokenMarks(o = {}) { const n = MARKS.clear(o); if ( n ) applyMarks(); return n; }
 /** The token marks on this client's screen: [{ id, tokens, order, from }]. */
 export const tokenMarks = () => MARKS.rows().map((r) => ({ id: r.spec.id, tokens: r.spec.tokens.map((e) => ({ ...e })), order: r.spec.order, from: r.from }));
@@ -227,7 +238,7 @@ function linksSoon() { if ( linkRaf || !LINKS.map.size ) return; linkRaf = reque
  */
 export function link(spec) {
   const s = BC.cleanLinks(spec, me());
-  if ( !s ) return null;
+  if ( !s ) { const id = HL.idOf(spec); if ( id != null && LINKS.clear(id) ) drawLinks(); return null; }
   const id = LINKS.put(s);
   drawLinks();
   return id;
@@ -259,7 +270,8 @@ function planFor(tok, raw, spot, profile) {
       }
       return steps.length ? { zones, steps } : null;
     }
-    return Zones.zonesApi.plan(tok, spot, { ...(profile ?? {}), force: true }) ?? Zones.zonesApi.plan(tok, spot, profile ?? {});
+    // the map's own route (api.plan: what the price is counted on); only where this mover has none, the way that tries every border
+    return Zones.zonesApi.plan(tok, spot, profile ?? {}) ?? Zones.zonesApi.plan(tok, spot, { ...(profile ?? {}), force: true });
   } catch { return null; }
 }
 /** What waits on a route as the map itself knows it (a caller that names hazards replaces these): blocked borders, burning zones. */
@@ -330,7 +342,7 @@ function showRoute(tok, plan, hazards, color) {
  *                        Absent: what api.reach gives for the profile, priced in movement actions.
  *   intent               true | { label }: the GMs see where this user points (section 32)
  * Resolves like api.pick; a yes also carries `alt` (true: the user asked for another way), `route` (the zones entered) and `entry`
- * (the caller's own entry).
+ * (the caller's own entry). The mover deleted while the pick runs ends it: { ok: false, reason: "noToken" }.
  */
 export function pickMove(opts = {}) {
   const tok = docOf(opts.token);
@@ -362,6 +374,10 @@ export function pickMove(opts = {}) {
       return `${raw.cost ? `<span class="mm-z-cost">${esc(String(raw.cost).slice(0, 60))}</span>` : ""}${hz.filter((h) => h.text).map((h) => `<small class="mm-z-haz"><i class="fa-solid fa-triangle-exclamation" inert></i> ${esc(String(h.tip ?? h.text).slice(0, 120))}</small>`).join("")}${raw.more ? `<small class="mm-z-alt">${esc(L("move.alt"))}</small>` : ""}`;
     },
     alt: (e) => raws.get(e.zone)?.more === true,
+    // (whose pick this is: it ends when that token is deleted)
+    token: tok.id,
+    // (said only once the pick runs: a pick with nothing to offer shows the GMs nothing)
+    start() { if ( wantIntent ) intent({ token: tok.id, label: ilabel ?? opts.title ?? null }); },
     end(result) {
       layer?.setRoute(null);
       if ( wantIntent ) intent(null);
@@ -370,7 +386,6 @@ export function pickMove(opts = {}) {
       return { ...result, alt: result.alt === true, route: pl?.zones?.slice(1) ?? null, entry: raws.get(result.zone) ?? null };
     }
   };
-  if ( wantIntent ) intent({ token: tok.id, label: ilabel ?? opts.title ?? null });
   return Interact.pick({ color: "move", ...opts, zones: entries, user: null, _ext: ext });
 }
 
@@ -391,6 +406,25 @@ function tokensIn(keys, place = null) {
   }
   return out;
 }
+/**
+ * The level an area catches tokens on, from what a caller names: a token (also its id or uuid), a place, a spot ("z3:f2"), or a
+ * level in a word ("ground", "elevated", "underground", "f2"). null: every level (nothing named). undefined: it names no level
+ * (an unknown id, a token that is gone) - nobody is caught rather than everybody.
+ */
+function levelOf(w) {
+  if ( w == null ) return null;
+  if ( typeof w === "string" ) {
+    if ( w === "ground" || w === "elevated" || w === "underground" ) return { level: w, floor: 0 };
+    const f = /^f(\d+)$/.exec(w);
+    if ( f ) return { level: "floor", floor: Number(f[1]) };
+    const d = docOf(w);
+    return Zones.zonesApi.place(w) ?? (d ? Zones.zonesApi.place(d) : null) ?? undefined;
+  }
+  if ( typeof w !== "object" ) return undefined;
+  // (a place that names no zone keeps the level it says: { level: "floor", floor: 2 })
+  if ( !w.documentName && !w.document && typeof w.level === "string" ) return { level: w.level, floor: Math.round(Number(w.floor) || 0) };
+  return Zones.zonesApi.place(w) ?? undefined;
+}
 /** Entries of token marks for the tokens an area catches. `tokens`: true | (tokenDoc) => false | true | { label, color, tip }. */
 function caughtMarks(docs, tokens, color) {
   const out = [];
@@ -408,7 +442,7 @@ function caughtMarks(docs, tokens, color) {
  *   areaPreview({ id = "area", zones: [key | spot | { zone, label, tip, color }] | at + radius, color = "range", style, users, order,
  *                 tokens = true | false | (tokenDoc) => false | true | { label, color, tip }, level: place | token })
  * `at` + `radius`: the zones within `radius` borders of `at` (api.zonesWithin). `level`: only the tokens on that level are caught
- * (a token, a place, a spot); absent: every level. Returns { id, zones: [key], tokens: [tokenId] } or null. Take it away with
+ * (a token or its id, a place, a spot, a level word: levelOf above); absent: every level; something that names no level: nobody. Returns { id, zones: [key], tokens: [tokenId] } or null. Take it away with
  * api.clearArea(id). Sent to `users` like a highlight; what names a token hidden from players does not go to players.
  */
 export function areaPreview(spec = {}) {
@@ -418,8 +452,8 @@ export function areaPreview(spec = {}) {
   if ( !zones?.length ) return null;
   const hid = Interact.highlight({ id, zones, color, style: spec.style ?? "fill", users: spec.users, order: spec.order ?? 20 });
   if ( !hid ) return null;
-  const keys = [...new Set(zones.map(HL.zoneKeyOf).filter(Boolean))], place = spec.level != null ? Zones.zonesApi.place(spec.level) : null;
-  const docs = spec.tokens === false ? [] : tokensIn(keys, place), rows = caughtMarks(docs, spec.tokens ?? true, color);
+  const keys = [...new Set(zones.map(HL.zoneKeyOf).filter(Boolean))], place = levelOf(spec.level);
+  const docs = spec.tokens === false || place === undefined ? [] : tokensIn(keys, place), rows = caughtMarks(docs, spec.tokens ?? true, color);
   if ( rows.length ) markTokens({ id, tokens: rows, users: spec.users, order: spec.order ?? 20 }); else clearTokenMarks(id);
   return { id, zones: keys, tokens: rows.map((r) => r.token) };
 }
@@ -432,7 +466,8 @@ export function clearArea(id = "area") { return Interact.clearHighlights(String(
  *   area      (zoneKey, place) => [zoneKey, ...]: the caller's own shape (replaces `radius`)
  *   areaColor "range"; tokens: as areaPreview; token + intent: as pickMove (the GMs see where it is being put)
  *   anyLevel  true: tokens on every level of the covered zones are caught; default: those on the level the area is put on
- * A yes also carries `area: [key]` and `caught: [tokenId]` (as this user sees them).
+ * A yes also carries `area: [key]` and `caught: [tokenId]` (as this user sees them), counted for the zone that was clicked.
+ * With a `token`: that token deleted while the pick runs ends it ({ ok: false, reason: "noToken" }).
  */
 export function pickArea(opts = {}) {
   const color = opts.areaColor ?? "range", n = Math.max(0, Number(opts.radius) || 0);
@@ -446,18 +481,32 @@ export function pickArea(opts = {}) {
   };
   const tok = docOf(opts.token), wantIntent = !!opts.intent && !!tok, ilabel = opts.intent && typeof opts.intent === "object" ? opts.intent.label : null;
   const clear = () => { Interact.clearHighlights("~area"); clearTokenMarks("~area"); };
+  /** The zones an area put on this entry covers and the marks of the tokens it catches. */
+  const cover = (e) => {
+    const { keys, place } = areaOf(e);
+    const docs = opts.tokens === false ? [] : tokensIn(keys, opts.anyLevel === true ? null : place);
+    return { keys, rows: caughtMarks(docs, opts.tokens ?? true, color) };
+  };
   const ext = {
+    token: tok?.id ?? null,
+    start() { if ( wantIntent ) intent({ token: tok.id, label: ilabel ?? opts.title ?? null }); },
     hover(e) {
       if ( !e ) { clear(); last = { area: [], caught: [] }; if ( wantIntent ) intent({ token: tok.id, label: ilabel ?? opts.title ?? null }); return; }
-      const { keys, place } = areaOf(e);
-      const docs = opts.tokens === false ? [] : tokensIn(keys, opts.anyLevel === true ? null : place), rows = caughtMarks(docs, opts.tokens ?? true, color);
+      const { keys, rows } = cover(e);
       Interact.highlight({ id: "~area", zones: keys, color, style: "fill", order: 1000 });
       if ( rows.length ) markTokens({ id: "~area", tokens: rows, order: 1000 }); else clearTokenMarks("~area");
       last = { area: keys, caught: rows.map((r) => r.token) };
       if ( wantIntent ) intent({ token: tok.id, to: { zone: e.zone }, zones: keys, label: ilabel ?? opts.title ?? null, color });
     },
     tip: () => (last.caught.length ? `<small class="mm-z-haz">${esc(L("area.caught", { n: last.caught.length }))}</small>` : ""),
-    end(result) { const got = last; clear(); if ( wantIntent ) intent(null); return result?.ok ? { ...result, area: got.area, caught: got.caught } : result; }
+    // (the answer is counted for the zone that was clicked: the last frame drawn under the pointer may be of another zone, or of none - a tap)
+    end(result) {
+      clear();
+      if ( wantIntent ) intent(null);
+      if ( !result?.ok ) return result;
+      const c = cover({ zone: result.zone, spot: result.spot });
+      return { ...result, area: c.keys, caught: c.rows.map((r) => r.token) };
+    }
   };
   return Interact.pick({ color: "target", ...opts, user: null, _ext: ext });
 }
@@ -469,9 +518,11 @@ export function pickArea(opts = {}) {
  * api.clearHighlights(id). Returns the id or null.
  */
 export function warn(spec = {}) {
+  if ( !spec || typeof spec !== "object" ) return null;
+  const list = (v) => (Array.isArray(v) ? v : []);
   const row = (k) => (e) => (e && typeof e === "object" && !Array.isArray(e) ? { ...e, label: e.label ?? e.text ?? null, icon: e.icon ?? "warn" } : { [k]: e, icon: "warn" });
   return Interact.highlight({
-    id: spec.id == null ? "warn" : spec.id, zones: (spec.zones ?? []).map(row("zone")), borders: (spec.borders ?? []).map(row("border")),
+    id: spec.id == null ? "warn" : spec.id, zones: list(spec.zones).map(row("zone")), borders: list(spec.borders).map(row("border")),
     color: spec.color ?? "danger", style: "dashed", borderColor: spec.color ?? "danger", borderStyle: "dashed", users: spec.users, order: spec.order ?? 50
   });
 }
@@ -502,7 +553,8 @@ function anchorBox(a) {
  *             | { id, label, icon, toggle: true, on, onToggle(on) -> on? } | { separator: true }] });
  *   // { ok: true, id, index }  |  { ok: false, reason: "cancelled" | "replaced" | "noItems" | "noAnchor" | "sceneChanged" }
  * A plain entry closes the menu (its `run()` is called, the promise resolves with its id); a stepper and a toggle keep it open and
- * tell the caller each change. It stands beside the thing, follows the map, and closes on Escape, a click elsewhere or a new menu.
+ * tell the caller each change. It stands beside the thing, follows the map, and closes on Escape, a click elsewhere or a new menu;
+ * a menu at a token closes when that token is deleted ("noAnchor").
  * This client only. Digits 1-9 pick the plain entries in order.
  */
 export function menu(spec = {}) {
@@ -579,7 +631,7 @@ export function menu(spec = {}) {
     window.addEventListener("keydown", onKey, true);
     const arm = setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
     Hooks.on("canvasPan", onPan);
-    MENU = { el, resolve, off: () => { clearTimeout(arm); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
+    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { clearTimeout(arm); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
     place();
   });
 }
@@ -598,7 +650,8 @@ export const menuOpen = () => !!MENU;
 /* ---------------------------------------------------------------- a right click on a thing of the map */
 
 const CONTEXT = new Set();
-let ctxOn = false, CTX = null;
+// (epoch: counts the scenes this client has closed - an answer that comes after the scene changed belongs to a map that is gone)
+let ctxOn = false, CTX = null, epoch = 0;
 /** What lies under a client point: the topmost token this user sees, else a border near it, else the zone. */
 function thingAt(client) {
   const p = canvas.canvasCoordinatesFromClient(client), Z = Zones.zones();
@@ -651,8 +704,10 @@ function onCtxUp(ev) {
   window.removeEventListener("pointerup", onCtxUp, true);
   ev.stopImmediatePropagation?.(); ev.preventDefault?.();
   if ( c.drag || c.got === true ) return;
+  const ep = epoch;
   Promise.resolve(c.got).then((spec) => {
     if ( !spec || spec === true || typeof spec !== "object" ) return;
+    if ( ep !== epoch ) { try { spec.done?.({ ok: false, reason: "sceneChanged" }, c.ctx); } catch ( err ) { console.warn(`${MODULE_ID} | zones: context`, err); } return; }
     const anchor = c.ctx.kind === "token" ? { token: c.ctx.token } : c.ctx.kind === "border" ? { border: c.ctx.border.key } : { x: c.ctx.x, y: c.ctx.y };
     return menu({ ...anchor, ...spec }).then((r) => { try { spec.done?.(r, c.ctx); } catch ( err ) { console.warn(`${MODULE_ID} | zones: context`, err); } });
   }).catch((err) => console.warn(`${MODULE_ID} | zones: context`, err));
@@ -663,7 +718,8 @@ function onCtxUp(ev) {
  *   ctx = { kind: "token" | "border" | "zone", token (TokenDocument), border (section 5 object), zone (key), place, x, y, client, shift, alt, ctrl }
  * Answer at once (the click is claimed or not while the button goes down): nothing - not mine, Foundry and the map do what they
  * always did (the token HUD, the GM's zone menu); `true` - handled by the caller; a menu spec (api.menu's, without the anchor; or a
- * promise of one) - the map opens that menu at the thing when the button comes up, `spec.done(result, ctx)` is told the answer.
+ * promise of one) - the map opens that menu at the thing when the button comes up, `spec.done(result, ctx)` is told the answer
+ * (a promise that answers after the scene changed opens nothing: `done` is told { ok: false, reason: "sceneChanged" }).
  * Not asked while a zone is being picked or the GM edits the zones. A right DRAG that starts on a claimed thing still pans.
  */
 export function onContext(fn) {
@@ -677,7 +733,8 @@ export function onContext(fn) {
 
 /** userId -> { intent, timer } on a GM's client. */
 const INTENTS = new Map();
-let showIntents = true, intentTimer = 0, intentNext = undefined, intentSent = null;
+// intentLive: the intention this client last sent and when ({ it, at }), null: none stands (taken away, or never said)
+let showIntents = true, intentTimer = 0, intentNext = undefined, intentLive = null;
 function drawIntent(uid) {
   const id = `~intent.${uid}`, r = INTENTS.get(uid), it = showIntents ? r?.intent : null;
   if ( !it ) { LINKS.map.delete(id); MARKS.map.delete(id); Interact.clearHighlights(id); drawLinks(); applyMarks(); return; }
@@ -702,21 +759,25 @@ function takeIntent(uid, raw) {
  * Tell the GMs what this user has armed, before anything is declared:
  *   api.intent({ token (the actor's own), to: token | { zone } | { x, y }, zones: [key], border, label, color, ttl = 20000 })     api.intent(null)
  * It goes to the GMs' clients alone (never to another player) and shows there as a dashed line from the token to what is aimed at,
- * dashed outlines on the zones, and the user's name with the label. It fades by itself after `ttl` ms unless said again; null
- * takes it away. Sent at most every 150 ms. It is not drawn on the sender's own screen (a GM's goes to the other GMs). Returns true
- * when it was (or will be) sent.
+ * dashed outlines on the zones, and the user's name with the label. It fades by itself `ttl` ms after it was last said; null
+ * takes it away. EVERY call with a spec is sent, the same content as before too: on each GM's client the ttl starts again from
+ * that message, so an intention said again before its ttl is over stands without a gap (said later, it shows again from then).
+ * One message per 150 ms at most: of what was said in between only the last goes, at the end of that time. A GM's client that
+ * opens the scene later (joined, reloaded, came from another scene) is sent what stands at once, with the ttl that is left.
+ * null with nothing standing sends nothing. It is not drawn on the sender's own screen (a GM's goes to the other GMs). Returns
+ * true when it was (or will be) sent or there was nothing to send, false for a spec that names nothing.
  */
 export function intent(spec) {
   const it = spec ? BC.cleanIntent(spec) : null;
   if ( spec && !it ) return false;
-  const key = JSON.stringify(it);
-  if ( key === intentSent && intentNext === undefined ) return true;
+  if ( !it && !intentLive && intentNext === undefined ) return true;          // nothing stands, nothing waits: nothing to take away
   intentNext = it;
   if ( intentTimer ) return true;
   const go = () => {
     intentTimer = 0;
     if ( intentNext === undefined ) return;
-    const now = intentNext; intentNext = undefined; intentSent = JSON.stringify(now);
+    const now = intentNext; intentNext = undefined;
+    intentLive = now ? { it: now, at: Date.now(), scene: sceneId() } : null;
     const gms = gmIds().filter((id) => id !== me());
     if ( gms.length ) emit({ op: "intent", intent: now }, gms);
     intentTimer = setTimeout(go, 150);
@@ -746,17 +807,40 @@ function onSocket(msg, sender) {
   if ( !msg || msg.t !== "board" ) return;
   const from = sender ? game.users?.get?.(sender) : null, gm = !!from?.isGM;
   if ( msg.op === "intent" ) { if ( game.user?.isGM && sender && msg.scene === sceneId() ) takeIntent(sender, msg.intent); return; }
-  if ( msg.op === "hello" ) { if ( sender && msg.scene === sceneId() ) { MARKS.hello(sender); LINKS.hello(sender); } return; }
+  if ( msg.op === "hello" ) {
+    if ( !sender ) return;
+    // its client has just opened the scene: whatever it showed here before, it no longer knows (a reload) - that goes first
+    dropFrom(sender, msg.b ?? null);
+    if ( msg.scene !== sceneId() ) return;
+    MARKS.hello(sender); LINKS.hello(sender);
+    // a GM who opens the scene later gets the intention that stands, for the time it has left
+    if ( gm && sender !== me() && intentLive ) {
+      const left = intentLive.it.ttl - (Date.now() - intentLive.at);
+      if ( left > 0 ) emit({ op: "intent", intent: { ...intentLive.it, ttl: left } }, [sender]); else intentLive = null;
+    }
+    return;
+  }
   if ( !gm || msg.scene !== sceneId() ) return;
   if ( msg.op === "tm" ) { if ( MARKS.take(msg, sender, BC.cleanTokenMarks) ) applyMarks(); }
   else if ( msg.op === "ln" ) { if ( LINKS.take(msg, sender, BC.cleanLinks) ) drawLinks(); }
 }
 
+/** Take away what a user's client showed here (token marks, lines): it reloaded or left. */
+function dropFrom(uid, keep = undefined) {
+  if ( MARKS.dropFrom(uid, keep) ) applyMarks();
+  if ( LINKS.dropFrom(uid, keep) ) drawLinks();
+}
+
 function onTearDown() {
+  epoch++;
+  if ( CTX ) { CTX = null; window.removeEventListener("pointermove", onCtxMove, true); window.removeEventListener("pointerup", onCtxUp, true); }
   closeMenu("sceneChanged");
   MARKS.drop(); LINKS.drop();
   for ( const r of INTENTS.values() ) clearTimeout(r.timer);
   INTENTS.clear();
+  // what this client had armed belonged to the scene it leaves: the GMs still there are told it is over
+  if ( intentLive ) { const gms = gmIds().filter((id) => id !== me()); if ( gms.length ) emit({ op: "intent", intent: null, scene: intentLive.scene }, gms); }
+  intentLive = null; intentNext = undefined;
   ON = new Map(); hoverTok = null; tipEl?.remove(); tipEl = null; watch(false);
   layer?.destroy(); layer = null;
 }
@@ -781,12 +865,18 @@ export function registerBoard() {
   Hooks.on("canvasTearDown", onTearDown);
   Hooks.on("drawToken", onTokenRefresh);
   Hooks.on("refreshToken", (t) => { onTokenRefresh(t); if ( involved.has(t.id) ) linksSoon(); });
-  Hooks.on("deleteToken", (doc) => { if ( doc.parent === canvas.scene && (ON.has(doc.id) || involved.has(doc.id)) ) { linksSoon(); } });
+  Hooks.on("deleteToken", (doc) => {
+    if ( doc.parent !== canvas.scene ) return;
+    if ( ON.has(doc.id) || involved.has(doc.id) ) linksSoon();
+    // a menu at that token, a pick for that token: the thing they are about is gone
+    if ( MENU?.token === doc.id ) closeMenu("noAnchor");
+    Interact.endPickIf((ext) => ext?.token === doc.id, { ok: false, reason: "noToken" });
+  });
   Hooks.on("sightRefresh", () => linksSoon());
   Hooks.on("canvasPan", () => {
     layer?.onZoom();
     if ( ON.size ) for ( const id of ON.keys() ) { const t = objOf(id); if ( t ) layoutToken(t); }
   });
   Hooks.on("moinenMapsZones", (kind) => { if ( kind !== "section" && LINKS.map.size ) linksSoon(); });
-  Hooks.on("userConnected", (user, connected) => { if ( !connected && INTENTS.has(user.id) ) takeIntent(user.id, null); });
+  Hooks.on("userConnected", (user, connected) => { if ( connected ) return; if ( INTENTS.has(user.id) ) takeIntent(user.id, null); dropFrom(user.id); });
 }

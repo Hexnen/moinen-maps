@@ -76,6 +76,27 @@ export function cleanUsers(u, me = null) {
 }
 
 /**
+ * This page load, as every message of the map's shows names it (`b`): a client that says hello with another one has reloaded, and
+ * what its earlier page showed elsewhere is dropped there (it can no longer take it away itself).
+ */
+export const BOOT = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+/** The id a spec carries, when it is one (a set is named by it even when nothing else of the spec is of use); else null. */
+export const idOf = (spec) => { const id = spec && typeof spec === "object" && spec.id != null ? String(spec.id) : null; return id != null && ID_RE.test(id) ? id : null; };
+/**
+ * What a clear call names (clearHighlights, clearTokenMarks, clearLinks): nothing given - {} (what this client made); an id; an
+ * object { id, prefix, all }. null: it names no set - null, a number, { id: null } (the id of a set that was never made):
+ * nothing is to go.
+ */
+export function clearFilter(o) {
+  if ( o === undefined ) return {};
+  if ( typeof o === "string" ) return { id: o };
+  if ( !o || typeof o !== "object" || Array.isArray(o) ) return null;
+  if ( ("id" in o && o.id == null) || ("prefix" in o && o.prefix == null) ) return o.all === true ? { all: true } : null;
+  return { id: o.id == null ? null : String(o.id), prefix: o.prefix == null ? null : String(o.prefix), all: o.all === true };
+}
+
+/**
  * A highlight, cleaned (see the top). `spec.color`, `spec.style` are the defaults of its entries; an entry is a key / spot string
  * or an object with its own colour, style, label and tip. null: nothing to show (no id that can be kept, no entry that names
  * anything).
