@@ -415,6 +415,34 @@ function relight(list) {
 }
 
 /**
+ * GIVE BACK strokes a caller kept the records of before it put them out (the zones' inverse of a fire put out for a combat action,
+ * zones.mjs opZone): each comes back AS IT WAS - its id, path, radius, levels, colour, torn edge and place in the paint order - and
+ * grows again from now, like an undo of a delete in this layer (the record may be gone from the scene by now: its going-out is over
+ * and it was purged). Left alone: a stroke that burns now (never went out, or is back already), one whose own out time has passed
+ * meanwhile (it would be out by now anyway), a burst (it happens once). One write, one undo step. -> the ids brought back.
+ */
+export function giveBack(records, { undoable = true } = {}) {
+  if ( !game.user.isGM ) return [];
+  const now = Math.round(sharedNow()), back = [], upd = {};
+  for ( const raw of Array.isArray(records) ? records : [] ) {
+    const s = M.cleanStroke(raw);
+    if ( !s || s.k === "burst" || (s.o !== undefined && s.o <= now) ) continue;
+    const cur = strokes.get(s.id);
+    if ( cur && M.burningAt(cur, now) ) continue;
+    // (not caught yet when it was taken away: as it was, it catches at its own time; else it is lit again now)
+    const st = s.q > now && s.g === undefined ? s : M.cleanStroke({ ...s, g: now });
+    strokes.set(st.id, st); upd[sKey(st.id)] = st; back.push(st);
+    // (a scene update MERGES the stored object: an out time the record never had is deleted explicitly)
+    if ( st.o === undefined ) upd[`${sKey(st.id)}.-=o`] = null;
+  }
+  if ( !back.length ) return [];
+  if ( undoable ) { undoStack.push({ add: back }); if ( undoStack.length > UNDO_MAX ) undoStack.shift(); redoStack.length = 0; }
+  draw(); tell("edited");
+  write(upd);
+  return back.map((st) => st.id);
+}
+
+/**
  * Change a stroke's fire / smoke level afterwards (the dock list, the API): one write. F1: a fire stroke's new level (1..3, steps of
  * 0.05) RAMPS from the level it shows now along a smoothstep over `over` ms (default model.LV_RAMP_MS; 0 = at once), starting
  * LV_LEAD_MS from now so every client gets the write before it begins; the smoke level changes at once.

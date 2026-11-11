@@ -420,7 +420,7 @@ The scene is saved before the promise resolves; events (section 6, `source: "pla
 | `{ op: "zoneState.update", id, patch }` | | the state | the same op with the fields as they were |
 | `{ op: "zoneState.remove", id }` | | the state removed | `{ op: "zoneState.add", ... }` with the same record and id |
 | `{ op: "edge.add", edge }` / `{ op: "edge.remove", id }` | section 11 | the edge | the other one |
-| `{ op: "zone", zone, patch }` | the zone's own marks, as `setZone` (attributes, features, the GM's state marks; a fire is painted / put out on the fire layer) | zone data | `{ op: "zone", zone, patch }` with the own values before |
+| `{ op: "zone", zone, patch }` | the zone's own marks, as `setZone` (attributes, features, the GM's state marks; a fire is painted / put out on the fire layer) | zone data | `{ op: "zone", zone, patch }` with the own values before; when the write painted or put out fire on the fire layer, also `fireLayer` (below) |
 | `{ op: "tokens", rows: [{ id, x, y, alt, floor, air }], skipMissing? }` | puts tokens somewhere (position and this module's level flags) | their places | `{ op: "tokens", rows: (where they were), skipMissing: true }` |
 | `{ op: "batch", ops: [...] }` | all or nothing (a failure takes back what was done, `at`: its index); told and saved once | the results | a batch of the inverses, last first |
 
@@ -439,6 +439,29 @@ The scene is saved before the promise resolves; events (section 6, `source: "pla
   ops, an op that is no object (inside a batch: refused with `at`, what was done is taken back).
 - A new zone state, edge or the like that asks for an id already in use, or gets one made for it, never takes the place of
   another: the id made by the map skips those in use (after a delete and an undo as well).
+- **A fire write and the fire layer (M5).** `{ op: "zone", patch: { fire } }` also paints a fire on the fire layer or puts
+  the painted fire of the zone out. What it did there is in its inverse:
+  `fireLayer: { back: [stroke, ...], out: [strokeId, ...] }` - `back`: the strokes it put out, as they were (plain data: id,
+  path, radius, levels, colour, torn edge, seed, place in the paint order); `out`: the ids of the strokes it painted. An op
+  that carries `fireLayer` does exactly that on the layer and nothing by guessing: it puts `out` out, gives `back` back and
+  writes the marks of `patch` as given, without painting anything of its own; its own inverse carries the mirror
+  (`fireLayer` always, the lists may be empty). So:
+  - a fire that existed **only as painted strokes** (no mark of the GM: `states` of source `"map"`) and is put out with
+    `{ fire: null }` comes back on undo as **those strokes** - the same ids, shapes, levels and colours, in the same paint
+    order, growing again from the moment of the undo (as the fire layer's own undo does). Before M5 the inverse was
+    `{ fire: null }` and repainted nothing;
+  - the inverse of a new fire puts out the stroke that write painted, not whatever burns in the zone by then (a fire the
+    GM painted there by hand since stays); the inverse of that gives the same stroke back, not a new one;
+  - a fire lowered below what was painted (the old strokes out, a smaller one painted) is swapped back whole.
+  The records travel in the inverse, so it stays true after the strokes' records have left the scene (their going-out is
+  over). A stroke that burns anyway is left alone (the same inverse twice: `changed: false`); one whose own out time has
+  passed meanwhile is not brought back. An inverse without `fireLayer` (a write that touched no fire on the layer, the
+  zones not linked to the layers, an inverse stored before M5) works as it always did. `fireLayer` is the map's to hand
+  out: do not build or edit one, and **do not add a fire to the patch of such an inverse** (the strokes are the fire; a
+  `fire` in the patch is written as a mark of the GM that was not there). Anything that is not `{ back: [...], out: [...] }`:
+  `badOp`. `changed` is true when the marks **or** the fire layer changed (before M5 putting out a painted-only fire said
+  `changed: false`, the marks being the same). `clearStates` and the map's own fire round are not `apply` and have no
+  inverse.
 - Play state (`bs`, `q`, `e`, `pn`) is **not part of the Zones editor's undo**: the GM's Ctrl+Z over the pencil lines leaves it as
   it is now. Zone marks written through `{ op: "zone" }` are the GM's marks (`m`) and are in the editor's undo like any other.
 - Refused before anything: `notGM`, `notActiveGM`, `noZones`, `badOp`.
@@ -927,6 +950,14 @@ const r = await api.reveal(where | [where, ...], { inset, margin, fit = false, a
   not fit, `fit: true` zooms out until they do (never in), else the first named is brought in. `animate`: a 0.32 s slide
   (none on a client that draws no frames). `moved: false`: they were there already. It moves this client's view only.
 - Foundry keeps the view inside the scene's padding: a zone at the very edge of the scene may not come all the way in.
+- **The director reads the declared insets too (M5).** Its camera frames a subject, and its "My view" chip stands, inside
+  Foundry's middle column less the navigation, the hotbar and the declared insets (`scripts/director/core.mjs safeBox`).
+  A declared inset counts **however large it is**: before M5 a bottom inset of 60 % of the window or more (and a top, left
+  or right one of half the window) was dropped whole, so a dock with its panel open was framed under and the chip stood on
+  it. Only when the declared insets of one direction leave less than 300 px across or 240 px down are they given up, by
+  what that least stretch needs and in proportion (the stretch stays between the bars; it is never the whole window
+  again). The chip is drawn above other interface parts on purpose (it must stay clickable while a bar grows under it; it
+  is placed again every 300 ms while it shows).
 
 ## 24. Limits and open points (integration part)
 
@@ -1136,7 +1167,10 @@ Hooks.on("moinenMapsIntent", (userId, intent | null) => {});   // a GM's client
 ```
 
 It goes to the GMs' clients alone, never to another player. There it shows as a dashed line from the token to what is aimed
-at, dashed outlines on the zones, and the user's name with the label. Only about a token the sender owns. It is not drawn
+at with "user: label" on it (whole), and dashed outlines on the zones. While nothing is aimed at yet, a pill stands over
+the token instead: it carries **the label alone** (M5; who armed it is in the pill's tip, "user: label", whole). A label
+of up to 18 characters is drawn as it came, a longer one ends in an ellipsis inside 18; with no label the pill says the
+user's name. (Before M5 the pill said "user: label" cut to 18 characters, which lost the action's name.) Only about a token the sender owns. It is not drawn
 on the sender's own screen (a GM's goes to the other GMs). `pickMove` and `pickArea` send it by themselves with
 `intent: true | { label }`, from the moment the pick runs until it ends.
 
@@ -1262,3 +1296,27 @@ Limits that stay:
   several selected tokens (each token's update is asked on its own); `present` while the GM stands on another scene; the
   cost under the pointer of `pickMove` on a scene with very many zones now that `reach` plans per zone for movers off the
   ground (ground movers are unchanged).
+
+## 37. Three requests of the combat side (M5)
+
+Rows U76, U70, U72 of `invincible-plus-ultra/dev/combat-usability.md`. Checks: `dev/zones-board.test.mjs` (U76),
+`dev/director.test.mjs` (U70), `dev/zones-fire-inverse.test.mjs` (U72).
+
+| | Before | Now |
+| --- | --- | --- |
+| the pill of an intention over a token (section 32) | "user: label" cut to 18 characters | the label alone (an ellipsis when over 18), the user's name when there is no label; "user: label" whole in the tip and on the line |
+| a declared inset of 60 % of the window (bottom; half for the other sides) or more, for the director (section 23) | dropped whole: the camera framed under the dock, the "My view" chip stood on it | counts; given up only as far as a 300 x 240 px stretch needs |
+| declared insets that left under 300 x 240 px, for the director | the whole window (Foundry's own columns dropped too) | the least stretch between the bars |
+| `changed` of a zone write that only put out / painted fire on the layer | false (the marks were the same) | true |
+| the inverse of `{ op: "zone", patch: { fire } }` (section 12) | the own marks before only: a painted-only fire did not come back, the inverse of a new fire put out everything painted in the zone | also `fireLayer: { back, out }`: the same strokes back, the painted stroke out |
+
+For the caller: nothing it calls changed its shape. An inverse may now carry `fireLayer`; give it back to `apply` as it
+came. The combat module's own way round the old empty inverse (the layer's Intensity put into the inverse's patch) is no
+longer needed and should go where the inverse carries `fireLayer`: with it the strokes still come back once and nothing
+is painted beside them, but the zone gets a mark of the GM it did not have.
+
+**Not looked at in Foundry (node only):** all three. Worth a look: the pill of a player's armed action on the GM's
+screen (the label whole, the tip with the name); the "My view" chip and a take-over's framing with the combat dock, its
+panel and a question open at 1366 x 768 (with the combat module's own stylesheet rule for the chip switched off, to see
+the map's placement); a painted fire put out by a combat action and undone (the flames grow in again in the same shapes
+and colours, on a player's client too), also after waiting until the smoke of the put-out is gone.

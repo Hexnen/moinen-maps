@@ -162,6 +162,18 @@ export function cleanIntent(o) {
   const ttl = num(o.ttl);
   return { token, to, zones, border, label: text(o.label, LIMITS.label), color: colorOf(o.color, COLORS.info), ttl: ttl > 0 ? Math.min(ttl, BOARD_LIMITS.intentMax) : BOARD_LIMITS.intentTtl };
 }
+/**
+ * What the pill over the token of an intention says (a GM's client; nothing aimed at yet): the action's own label, never the user's
+ * name glued before it (who armed it is in the pill's tip, "user: label", whole). A label that fits the pill (BOARD_LIMITS.label
+ * characters: the sender's business) is shown as it came; a longer one ends in an ellipsis inside that length. No label: the
+ * user's name, cut the same way. Neither: null (no pill).
+ */
+export function intentPill(label, userName) {
+  const s = text(label, LIMITS.label) ?? text(userName, 80), max = BOARD_LIMITS.label;
+  if ( !s ) return null;
+  const cps = [...s];
+  return cps.length <= max ? s : `${cps.slice(0, max - 1).join("").trimEnd()}…`;
+}
 
 /**
  * A menu at a thing on the map, cleaned:
