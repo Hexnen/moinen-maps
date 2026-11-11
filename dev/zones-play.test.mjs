@@ -487,6 +487,28 @@ api.tactical({ confirm: async () => { confirms.push("gm"); return true; } });
 await m2.update({ x: 250, y: 0 });
 check(m2.x === 250 && confirms.length === 3, "the GM's own drags are not asked unless told to");
 
+/* ---- a GM places a token free of cost: Alt held while it is dropped (tactical({ gm: true, place })) */
+{
+  let altHeld = false; const placed = [], asked = [];
+  game.keyboard = { isModifierActive: (k) => k === "Alt" && altHeld };
+  api.tactical({ gm: true, confirm: async (ctx) => { asked.push(ctx); return false; }, place: (ctx) => placed.push(ctx) });
+  const n0 = 0, x0 = m2.x, y0 = m2.y, z0 = api.zoneOfToken(m2).zone;
+  await m2.update({ x: 850, y: 0 });
+  await new Promise((x) => setTimeout(x, 20));
+  check(asked.length === n0 + 1 && m2.x === x0 && placed.length === 0, "without Alt the GM's drag is held and priced as before");
+  altHeld = true;
+  await m2.update({ x: 850, y: 0 });
+  check(asked.length === n0 + 1 && m2.x === 850 && api.zoneOfToken(m2).zone === "z5" && placed.length === 1 && placed[0].free === true && placed[0].from.zone === z0 && placed[0].to.zone === "z5" && placed[0].token === m2, "Alt held: the token is placed, nobody is asked, the combat module is told where from and where to");
+  check(placed[0].inverse.op === "tokens" && placed[0].inverse.rows[0].id === m2.id && placed[0].inverse.rows[0].x === x0 && placed[0].inverse.rows[0].y === y0, "the placement comes with the op that puts the token back");
+  const back = await api.apply(placed[0].inverse);
+  check(back.ok && m2.x === x0 && api.zoneOfToken(m2).zone === z0 && placed.length === 1, "applying it puts the token back (a write of the map is never held)");
+  api.tactical({ gm: true, free: false, confirm: async (ctx) => { asked.push(ctx); return false; }, place: (ctx) => placed.push(ctx) });
+  await m2.update({ x: 850, y: 0 });
+  await new Promise((x) => setTimeout(x, 20));
+  check(m2.x === x0 && placed.length === 1 && asked.length === n0 + 2, "free: false switches the gesture off");
+  altHeld = false; delete game.keyboard;
+}
+
 /* ---- a change of level outside a move (the token HUD's altitude button, setAltitude / setFloor / setLevel): tactical({ levels: true }) */
 const tick = () => new Promise((x) => setTimeout(x, 20));
 const spotNow = () => api.zoneOfToken(m2).spot, home = api.zoneOfToken(m2).zone;

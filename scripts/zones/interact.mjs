@@ -49,6 +49,8 @@ function shown() {
   const out = STORE.compose(idOf, pairOfIds);
   if ( PICK ) for ( const [id, e] of PICK.allowed ) {
     const has = out.zones.get(id);
+    // (an area shown under the pointer - board.mjs pickArea - stays on top of what is on offer)
+    if ( has?.of?.startsWith("~area") ) continue;
     if ( !has || e.label ) out.zones.set(id, { zone: e.zone, id, color: e.color, style: "fill", label: e.label ?? has?.label ?? null, tip: e.tip ?? has?.tip ?? null, of: "~pick" });
   }
   return out;
@@ -331,6 +333,8 @@ export function pick(opts = {}) {
   if ( user && user !== me() ) return askUser(user, opts);
   const P = HL.cleanPick(opts);
   if ( !P ) return Promise.resolve({ ok: false, reason: "noZones" });
+  // (board.mjs: what a move or an area pick adds under the pointer - this client's own picks only)
+  if ( opts?._ext && typeof opts._ext === "object" ) P.ext = opts._ext;
   return pickHere(P);
 }
 export const picking = () => !!PICK;
@@ -382,6 +386,7 @@ function endPick(result) {
   p.banner?.remove(); p.tip?.remove();
   document.body.classList.remove("mm-z-picking", "mm-z-pick-ok", "mm-z-pick-no");
   layer?.setHover(-1);
+  try { result = p.P.ext?.end?.(result) ?? result; } catch ( err ) { console.warn(`${MODULE_ID} | zones: pick`, err); }
   redraw();
   p.resolve(result);
 }
@@ -577,14 +582,17 @@ function pushAt(p, at) {
 function startPick() {
   const p = PICK, view = canvas.app.view;
   // the banner: what is asked, how to answer, a way out
-  const el = p.banner = document.createElement("div");
-  el.className = "mm-z-pick";
-  el.setAttribute("role", "status");
-  el.innerHTML = `<i class="fa-solid fa-location-crosshairs" inert></i>
-    <span class="mm-z-pick-text"><b>${esc(p.P.title ?? L("pick.title"))}</b><small>${esc(p.P.hint ?? L("pick.hint"))}</small></span>
-    <button type="button" data-act="cancel">${esc(L("pick.cancel"))} <kbd>Esc</kbd></button>`;
-  el.querySelector("button").addEventListener("click", () => endPick({ ok: false, reason: "cancelled" }));
-  document.body.append(el);
+  // (`banner: false`: the caller's own bar says what is asked - an armed action on its dock)
+  if ( p.P.banner !== false ) {
+    const el = p.banner = document.createElement("div");
+    el.className = "mm-z-pick";
+    el.setAttribute("role", "status");
+    el.innerHTML = `<i class="fa-solid fa-location-crosshairs" inert></i>
+      <span class="mm-z-pick-text"><b>${esc(p.P.title ?? L("pick.title"))}</b><small>${esc(p.P.hint ?? L("pick.hint"))}</small></span>
+      <button type="button" data-act="cancel">${esc(L("pick.cancel"))} <kbd>Esc</kbd></button>`;
+    el.querySelector("button").addEventListener("click", () => endPick({ ok: false, reason: "cancelled" }));
+    document.body.append(el);
+  }
   document.body.classList.add("mm-z-picking");
   // where the banner has room, which zones no click can reach: now, once more when the other interface parts have answered the
   // pick (a panel that opened), whenever the view or the window changes, and when a look now and then finds the free stretch
@@ -605,7 +613,8 @@ function startPick() {
     const ok = p.allowed.has(id);
     document.body.classList.toggle("mm-z-pick-ok", ok);
     document.body.classList.toggle("mm-z-pick-no", !ok && id >= 0);
-    if ( id < 0 ) { p.hover = -1; layer?.setHover(-1); p.tip?.remove(); p.tip = null; return; }
+    const ext = p.P.ext;
+    if ( id < 0 ) { if ( p.hover !== -1 ) { try { ext?.hover?.(null, null); } catch {} } p.hover = -1; layer?.setHover(-1); p.tip?.remove(); p.tip = null; return; }
     if ( !p.tip ) { p.tip = document.createElement("div"); p.tip.className = "mm-z-tip mm-z-pick-tip"; document.body.append(p.tip); p.hover = -2; }
     if ( id !== p.hover ) {
       p.hover = id; layer?.setHover(ok ? id : -1);
@@ -613,8 +622,11 @@ function startPick() {
       const e = ok ? p.allowed.get(id) : null, sh = e ? shown().zones.get(id) : null;
       const label = e?.label ?? sh?.label ?? null, tip = e?.tip ?? sh?.tip ?? null;
       p.tip.classList.toggle("no", !e);
-      p.tip.innerHTML = e ? `<b>${esc(L("zone.title", { n: Zones.zoneName(id) }))}</b>${label ? ` · ${esc(label)}` : ""}${tip ? `<small>${esc(tip)}</small>` : ""}` : esc(L("pick.notHere"));
+      let more = "";
+      try { ext?.hover?.(e, at); more = e ? ext?.tip?.(e) ?? "" : ""; } catch ( err ) { console.warn(`${MODULE_ID} | zones: pick`, err); }
+      p.tip.innerHTML = e ? `<b>${esc(L("zone.title", { n: Zones.zoneName(id) }))}</b>${label ? ` · ${esc(label)}` : ""}${tip ? `<small>${esc(tip)}</small>` : ""}${more}` : esc(L("pick.notHere"));
     }
+    else if ( ok && ext?.move ) { try { ext.move(p.allowed.get(id), at); } catch {} }
     p.tip.style.left = `${at.x + 16}px`; p.tip.style.top = `${at.y + 18}px`;
   };
   const onMove = (ev) => {
@@ -637,7 +649,12 @@ function startPick() {
   const onUp = (ev) => {
     if ( ev.button === 2 ) {
       const r = p.rdown; p.rdown = null;
-      if ( r && Math.hypot(ev.clientX - r.x, ev.clientY - r.y) < 5 && ev.target === view ) endPick({ ok: false, reason: "cancelled" });
+      if ( r && Math.hypot(ev.clientX - r.x, ev.clientY - r.y) < 5 && ev.target === view ) {
+        // (a right-click on a zone on offer that has another way: the caller is told so - board.mjs pickMove; anywhere else it gives up)
+        const pt = world(ev), id = zoneAt(pt), e = p.allowed.get(id);
+        if ( e && p.P.ext?.alt?.(e) ) { const place = Zones.placeOf(e.spot) ?? Zones.placeOf(e.zone); endPick({ ok: true, zone: e.zone, id, spot: place?.spot ?? e.zone, place, x: pt.x, y: pt.y, alt: true }); }
+        else endPick({ ok: false, reason: "cancelled" });
+      }
       return;
     }
     if ( ev.button !== 0 || !p.down ) return;
@@ -675,7 +692,7 @@ function askUser(user, opts) {
     // (the asked client runs the timeout too; this one a little later, in case the answer never comes)
     if ( Number.isFinite(t) && t > 0 ) a.timer = setTimeout(() => answer(rid, { ok: false, reason: "timeout" }), t + 3000);
     ASKED.set(rid, a);
-    emit({ op: "pick", rid, pick: { zones: opts.zones ?? null, title: opts.title ?? null, hint: opts.hint ?? null, color: opts.color ?? null, timeout: opts.timeout ?? 0, reveal: opts.reveal ?? null, edgePan: opts.edgePan ?? null, inset: View.cleanInsets(opts.inset) } }, [user]);
+    emit({ op: "pick", rid, pick: { zones: opts.zones ?? null, title: opts.title ?? null, hint: opts.hint ?? null, color: opts.color ?? null, timeout: opts.timeout ?? 0, banner: opts.banner ?? null, reveal: opts.reveal ?? null, edgePan: opts.edgePan ?? null, inset: View.cleanInsets(opts.inset) } }, [user]);
   });
 }
 function answer(rid, result) {

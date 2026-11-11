@@ -22,7 +22,7 @@ const ICONS = [
 ];
 const ICON_COLOR = { fire: 0xffa25a, dark: 0xb9b3d6, ice: 0xbfe8ff, flooded: 0x8cc4ff, water: 0x8cc4ff, wrecked: 0xc9b69a, lowgrav: 0xd2b8ff };
 let faFamily;
-function iconFont() {
+export function iconFont() {
   if ( faFamily !== undefined ) return faFamily;
   faFamily = null;
   for ( const f of ["Font Awesome 6 Pro", "Font Awesome 6 Free", "Font Awesome 7 Pro", "Font Awesome 7 Free"] ) {
