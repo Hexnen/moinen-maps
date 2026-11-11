@@ -382,6 +382,15 @@ off();
   check(api.zoneOfToken(m3).spot === "z2" && m3.x === 200 && m3.y === 0, "all of it taken back");
 }
 
+/* ---- while a move plays the document's own x / y slide with the picture (Foundry v14): the place is read from the stored position */
+{
+  const was = api.zoneOfToken(m3).spot, x0 = m3.x, y0 = m3.y;
+  m3._source = { x: m3.x, y: m3.y };
+  m3.x = 0; m3.y = 0;                                                      // the picture is somewhere on its way
+  check(api.zoneOfToken(m3).spot === was && was === "z2", "a token's zone is where it was written to, not where its picture is passing");
+  m3.x = x0; m3.y = y0; delete m3._source;
+}
+
 /* ---- a client that draws no frames (this test's requestAnimationFrame never calls back): no animation, nothing waited for */
 {
   const raf0 = globalThis.requestAnimationFrame;

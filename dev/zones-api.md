@@ -95,7 +95,9 @@ a Token or TokenDocument, a key (`"z3"`), a spot string (`"z3:f2"`, `"@sky"`), a
 ```
 api.place(where) -> place | null                      null: an unknown key
 api.placeAt(x, y, { level, floor, airborne }) -> place
-api.zoneOfToken(token) -> place | null                null: a token of a scene that is not open
+api.zoneOfToken(token) -> place | null                null: a token of a scene that is not open; the place it was written
+                                                      to (while a move plays, Foundry slides the document's own x / y through
+                                                      other zones: those are not read)
 api.tokensInZone(where, { anyLevel }) -> [{ token: TokenDocument, place }]
         a bare key or id: every level of the zone; a spot, a place or a token: that level only (the book's "same zone");
         anyLevel: true / false overrides. "@sky" etc.: everyone in that area.
@@ -708,7 +710,8 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
   declared with `api.uiInset` are each client's own).
 - **The banner keeps clear.** It sits at the top middle, below the declared top inset (`api.uiInset`, the pick's `inset`) and
   below whatever interface part it would lie on there (a combat tracker, a strip of chips): found by looking at what is over
-  the map at that spot, so a module that declares nothing is avoided too. It stays in the upper half of the window. It is
+  the map at that spot, so a module that declares nothing is avoided too. A bar that lets clicks through (`pointer-events:
+  none`, as a tracker on a player's screen) is avoided by what it draws there. It stays in the upper half of the window. It is
   placed when the pick starts, again 0.4 s later, on a window resize and when the free stretch is found changed.
 - **Zones no click can reach.** A zone on offer is in reach when some point of it is in the window with nothing over the map's
   canvas there (part of a large zone showing beside a bar is enough). The others - under a bar, a panel or a window, or off
@@ -862,7 +865,8 @@ const r = await api.reveal(where | [where, ...], { inset, margin, fit = false, a
   sit on its edges, which can be well inside the window.
 - A zone partly showing beside a bar counts as in reach although its label may lie under the bar (the highlight labels step
   aside for tokens and badges, not for other modules' interface).
-- Zones are in reach or not as seen by `elementFromPoint`: an overlay that lets clicks through counts as nothing.
+- Zones are in reach or not as seen by `elementFromPoint`: an overlay that lets clicks through counts as nothing (a click
+  does reach the zone under it). The banner does avoid such a bar, by its drawn pieces under 45 % of the window's height.
 - The banner is placed by what is there when the pick starts; a tracker that appears later moves it only when the free
   stretch changes.
 - Touch: the chips work by tap; there is no resting pointer, so no slide.

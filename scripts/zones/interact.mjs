@@ -396,6 +396,40 @@ function partBox(e) {
   const r = w.getBoundingClientRect();
   return r.height > vh() * 0.45 ? e.getBoundingClientRect() : r;
 }
+/** Does this element draw anything of its own (a fill, an image, a border, a picture, words)? */
+function painted(e, cs) {
+  if ( /^(img|svg|canvas|video)$/i.test(e.tagName ?? "") ) return true;
+  const bg = cs.backgroundColor ?? "";
+  if ( bg && bg !== "transparent" && !/,\s*0\)$/.test(bg) ) return true;
+  if ( (cs.backgroundImage ?? "none") !== "none" ) return true;
+  if ( parseFloat(cs.borderTopWidth) > 0 || parseFloat(cs.borderBottomWidth) > 0 ) return true;
+  for ( const n of e.childNodes ?? [] ) if ( n.nodeType === 3 && n.nodeValue.trim() ) return true;
+  return false;
+}
+/**
+ * The boxes of what is drawn inside a stretch of the window but lets clicks through (pointer-events: none: a tracker bar on a
+ * player's screen) - a look by points cannot find those. Whole-window overlays (weather, tints) are left out.
+ */
+function unseenBoxes(x0, y0, x1, y1, skip) {
+  const out = [];
+  if ( typeof getComputedStyle !== "function" || !document.body?.children ) return out;
+  const view = canvas.app.view, tall = vh() * 0.45;
+  let left = 3000;
+  const walk = (e) => {
+    for ( const c of e.children ?? [] ) {
+      if ( --left < 0 ) return;
+      if ( c === view || skip(c) ) continue;
+      const cs = getComputedStyle(c);
+      if ( cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0 ) continue;
+      const r = c.getBoundingClientRect();
+      const hit = r.width > 0 && r.height > 0 && r.right > x0 && r.left < x1 && r.bottom > y0 && r.top < y1;
+      if ( hit && cs.pointerEvents === "none" && r.height < tall && painted(c, cs) ) out.push({ top: r.top, bottom: r.bottom });
+      if ( hit || !(r.width > 0 && r.height > 0) ) walk(c);          // a part without a size of its own may still hold placed pieces
+    }
+  };
+  walk(document.body);
+  return out;
+}
 /**
  * Put the banner where nothing else is: under the declared top inset, and below whatever interface part lies at the top middle
  * of the window (a combat tracker, a strip of chips). It stays in the upper half.
@@ -406,11 +440,12 @@ function placeBanner(p) {
   const r = el.getBoundingClientRect(), w = r.width, h = r.height, x0 = (vw() - w) / 2, view = canvas.app.view;
   if ( !(w > 0 && h > 0) ) return;
   const start = Math.max(BANNER_TOP, uiInsets(p.P.inset).top + GAP), maxY = vh() * 0.5;
+  const unseen = unseenBoxes(x0, start - GAP, x0 + w, maxY + h, (e) => e === el || ours(e) || e.classList?.contains("mm-z-tip"));
   let y = start;
   for ( let n = 0; n < 8; n++ ) {
-    const boxes = [];
+    const boxes = [...unseen];
     for ( let j = 0; j < 3; j++ ) for ( let i = 0; i < 7; i++ ) {
-      const px = x0 + 2 + ((w - 4) * i) / 6, py = y + 2 + ((h - 4) * j) / 2;
+      const px = x0 + 2 + ((w - 4) * i) / 6, py = y - GAP + 1 + ((h + 2 * GAP - 2) * j) / 2;      // the gap around it is looked at too
       for ( const e of document.elementsFromPoint(px, py) ) {
         if ( e === view || e === document.body || e === document.documentElement ) break;
         if ( el.contains(e) || ours(e) || e.classList?.contains("mm-z-tip") ) continue;

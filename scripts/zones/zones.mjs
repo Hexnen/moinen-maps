@@ -232,10 +232,15 @@ function selectedToken() {
   return c.length === 1 && c[0].isOwner ? c[0] : null;
 }
 
+/**
+ * Where a token document stands: its stored position. While a move plays, Foundry v14 slides the document's own x / y along
+ * with the picture (they pass through other zones on the way), so everything that asks "where is it" reads the stored one.
+ */
+const sx = (d) => d._source?.x ?? d.x, sy = (d) => d._source?.y ?? d.y;
 /** A token's centre where it stands (its document, not the animation). */
 export function tokenCenter(t) {
   const d = t.document, g = gridSize();
-  return { x: d.x + (d.width * g) / 2, y: d.y + (d.height * g) / 2 };
+  return { x: sx(d) + (d.width * g) / 2, y: sy(d) + (d.height * g) / 2 };
 }
 
 export function movesOf(actor) {
@@ -909,11 +914,11 @@ const mkPlace = (o) => Object.freeze(Places.makePlace(M, keyOfId, o));
 function placeOfDoc(doc) {
   if ( !doc || !S || doc.parent !== canvas.scene ) return null;
   const fl = doc.flags?.[MODULE_ID] ?? {};
-  const stamp = `${ver}|${doc.x}|${doc.y}|${doc.width}|${doc.height}|${fl.alt ?? ""}|${fl.floor ?? ""}|${fl.air === true ? 1 : 0}`;
+  const stamp = `${ver}|${sx(doc)}|${sy(doc)}|${doc.width}|${doc.height}|${fl.alt ?? ""}|${fl.floor ?? ""}|${fl.air === true ? 1 : 0}`;
   const hit = TP.get(doc.id);
   if ( hit?.stamp === stamp ) return hit.place;
   const g = gridSize();
-  const place = mkPlace({ id: Geo.zoneAt(Z, doc.x + (doc.width * g) / 2, doc.y + (doc.height * g) / 2), alt: rawAlt(doc), floor: fl.floor, air: fl.air === true });
+  const place = mkPlace({ id: Geo.zoneAt(Z, sx(doc) + (doc.width * g) / 2, sy(doc) + (doc.height * g) / 2), alt: rawAlt(doc), floor: fl.floor, air: fl.air === true });
   TP.set(doc.id, { stamp, place });
   return place;
 }
@@ -1294,7 +1299,7 @@ function opZone(o) {
 
 /* ---- tokens: rows { id, x, y, alt, floor, air } (alt / floor / air: this module's token flags; null: not set) */
 
-const tokenRow = (doc) => { const f = doc.flags?.[MODULE_ID] ?? {}; return { id: doc.id, x: doc.x, y: doc.y, alt: f.alt ?? null, floor: f.floor ?? null, air: f.air === true ? true : null }; };
+const tokenRow = (doc) => { const f = doc.flags?.[MODULE_ID] ?? {}; return { id: doc.id, x: sx(doc), y: sy(doc), alt: f.alt ?? null, floor: f.floor ?? null, air: f.air === true ? true : null }; };
 function tokenUpdate(row) {
   const k = `flags.${MODULE_ID}`, u = { _id: row.id };
   if ( Number.isFinite(row.x) ) u.x = row.x;
@@ -1457,7 +1462,7 @@ export function beforeStep(fn) {
 }
 
 const docOf = (t) => { const d = t?.document ?? t; return d?.documentName === "Token" ? d : null; };
-const centerOf = (doc) => { const g = gridSize(); return { x: doc.x + (doc.width * g) / 2, y: doc.y + (doc.height * g) / 2 }; };
+const centerOf = (doc) => { const g = gridSize(); return { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }; };
 /** A scene point for whatever names one: a token (its middle), { x, y }, or a place / key / spot (the middle of its zone). */
 function pointOf(w) {
   const d = docOf(w);
@@ -1557,7 +1562,7 @@ function risePlan(A, from, dz, distance, profile) {
 /** The tokens of the scene as rectangles, without some of them. */
 function takenRects(skip) {
   const g = gridSize(), out = [];
-  for ( const d of canvas.scene?.tokens ?? [] ) if ( !skip.has(d.id) ) out.push({ x: d.x, y: d.y, w: d.width * g, h: d.height * g });
+  for ( const d of canvas.scene?.tokens ?? [] ) if ( !skip.has(d.id) ) out.push({ x: sx(d), y: sy(d), w: d.width * g, h: d.height * g });
   return out;
 }
 /**
@@ -1578,8 +1583,8 @@ function rowsInto(docs, zid, flags, near) {
   for ( const d of docs ) {
     const w = d.width * g, h = d.height * g;
     // a token that already stands in the zone stays where it is (a change of level only)
-    const here = zoneAtNow(d.x + w / 2, d.y + h / 2) === zid;
-    const sp = here ? { x: d.x, y: d.y } : Moves.freeSpot(z, { w, h, taken, near, grid: g });
+    const here = zoneAtNow(sx(d) + w / 2, sy(d) + h / 2) === zid;
+    const sp = here ? { x: sx(d), y: sy(d) } : Moves.freeSpot(z, { w, h, taken, near, grid: g });
     taken.push({ x: sp.x, y: sp.y, w, h });
     rows.push({ id: d.id, x: sp.x, y: sp.y, ...flags });
   }

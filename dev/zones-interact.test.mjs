@@ -529,6 +529,22 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   // ---- the banner keeps clear of the tracker; nothing hidden: no chip, the view is left alone
   let p0 = pans, pk = api.pick({ zones: all5, title: "Where to?" });
   check(banner()?.style.top === "128px" && chips().length === 0 && pans === p0, `the banner sits below the tracker it would lie on (${banner()?.style.top}); every zone in reach: no chip, no move`);
+  // ---- a bar that lets clicks through (a player's tracker): no point finds it, the banner still keeps clear of what it draws
+  {
+    const gcs0 = globalThis.getComputedStyle, kid = (o) => ({ classList: { contains: () => false }, closest: () => null, children: [], childNodes: [], ...o });
+    const box = (x0, y0, x1, y1) => () => ({ left: x0, top: y0, right: x1, bottom: y1, width: x1 - x0, height: y1 - y0 });
+    const strip = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgb(10, 20, 40)" }, getBoundingClientRect: box(380, 120, 640, 150) });
+    const tint = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgba(255, 0, 0, 0.2)" }, getBoundingClientRect: box(0, 0, 1000, 600) });
+    const wrap = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgba(0, 0, 0, 0)" }, getBoundingClientRect: box(300, 0, 700, 150), children: [strip] });
+    globalThis.getComputedStyle = (e) => ({ visibility: e.hidden ? "hidden" : "visible", display: "block", opacity: "1", pointerEvents: "auto", backgroundColor: "rgba(0, 0, 0, 0)", backgroundImage: "none", borderTopWidth: "0px", borderBottomWidth: "0px", ...(e.css ?? {}) });
+    document.body.children = [wrap, tint];
+    api.uiInset("t.again", null); await wait(20);
+    const sunk = banner()?.style.top;
+    strip.hidden = true;
+    api.uiInset("t.again", null); await wait(20);
+    check(sunk === "158px" && banner()?.style.top === "128px", `a drawn piece that lets clicks through pushes the banner down; an empty wrapper and a whole-window tint do not (${sunk}, then ${banner()?.style.top})`);
+    delete document.body.children; globalThis.getComputedStyle = gcs0;
+  }
   // ---- an inset declared while the pick runs: the banner moves at once, and back when it is taken
   {
     const offTop = api.uiInset("t.top", { top: 200 });
