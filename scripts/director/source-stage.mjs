@@ -7,6 +7,7 @@ import { freeRect } from "./overlay.mjs";
 import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
+import { FOLLOW, followOf } from "../zones/board-core.mjs";
 
 /**
  * COMBAT STAGE (every client; the leader's events and shots are the director's as before: turn, the active combatant's move, its attack,
@@ -36,6 +37,34 @@ export const stageSettings = () => (setCache ??= SC.sanitizeStage((() => { try {
 const grid = () => canvas?.dimensions?.size ?? canvas?.grid?.size ?? 100;
 /** Where the stage frames: the map less Foundry's interface AND the open windows (a sheet, a roll dialog): never a combatant under a window. */
 const stageRect = () => { const r = freeRect(); return { x: r.x, y: r.y, w: r.w, h: r.h }; };
+
+/**
+ * HOW MUCH THE CAMERA FOLLOWS, per client (the player's own switch; dev/zones-api.md 30):
+ *   "all"   every beat of the fight as described above
+ *   "turn"  only the START OF A TURN, and only when the active combatant is OFF SCREEN: the view slides by the least that brings it
+ *           in, at the zoom the player has; moves and attacks come as markers; on the player's own turn the same for their own token
+ *   "off"   the camera is never moved; every beat comes as a marker
+ * The client setting `dirFollow` holds the user's choice; "auto" (its default) means what a combat module said with camera({ default })
+ * on this client, and "all" when none did.
+ */
+const FOLLOW_KEY = "dirFollow";
+let followDefault = "all";
+const followChoice = () => { try { const v = game.settings.get(MODULE_ID, FOLLOW_KEY); return FOLLOW.includes(v) ? v : "auto"; } catch { return "auto"; } };
+export const follow = () => followOf(followChoice(), followDefault);
+/**
+ * camera()                          -> { follow (in force), choice (the user's: "auto" | "all" | "turn" | "off"), default }
+ * camera({ follow: "turn" })        the user's choice, kept in the client setting (a switch on a combat module's dock calls this)
+ * camera({ default: "turn" })       what "auto" means on this client until reload (a combat module says it on `ready`)
+ */
+export function camera(o = null) {
+  if ( o && typeof o === "object" ) {
+    if ( o.default === "all" || o.default === "turn" || o.default === "off" ) followDefault = o.default;
+    if ( FOLLOW.includes(o.follow) && o.follow !== followChoice() ) { try { game.settings.set(MODULE_ID, FOLLOW_KEY, o.follow); } catch { /* not registered */ } }
+    if ( follow() === "off" && (st.parked || st.home) ) { st.parked = null; sync(); }
+    tell();
+  }
+  return { follow: follow(), choice: o && FOLLOW.includes(o.follow) ? o.follow : followChoice(), default: followDefault };
+}
 
 const st = SC.newStage();
 let beat = null;                         // the stage beat on screen here: { id, own }
@@ -76,6 +105,7 @@ function styleOf(shot) {
   let cam = null;                        // a turn's calm camera (null: it stays)
   let away = false;                      // the player's own attack off screen: the camera goes to the hit and RETURNS
   const take = () => { SC.beatStart(st, viewNow(), !!beat); claimed.set(shot.id, { own: false }); return "take"; };
+  const fw = follow();
   function check0(form, ph) {
     if ( own ) {
       // the player's own turn: the camera is theirs. Their own turn shot does nothing (the stage went home on the turn change), their
@@ -86,7 +116,7 @@ function styleOf(shot) {
       // (in place when the tokens' middles are on screen: the box shrunk by a third of a square, no margin)
       const rect = stageRect(), v = viewNow(), q = grid() * 0.35, b = shot.box, inner = { x0: b.x0 + q, y0: b.y0 + q, x1: Math.max(b.x0 + q, b.x1 - q), y1: Math.max(b.y0 + q, b.y1 - q) };
       if ( !SC.comfortable(inner, v, rect, 0) ) {
-        if ( kind !== "attack" ) return ["soft", "own, off screen"];
+        if ( kind !== "attack" || fw !== "all" ) return ["soft", fw === "all" ? "own, off screen" : `own, off screen (follow ${fw})`];
         away = true;
         claimed.set(shot.id, { own: true });
         return ["take", "own attack, there and back"];
@@ -97,13 +127,24 @@ function styleOf(shot) {
     if ( kind === "turn" ) {
       const t = seenTok(shot.play?.turn);
       if ( !t ) return ["none", "not in sight"];                                // (the camera stays where it is)
+      if ( fw === "off" ) return ["soft", "follow off"];
       if ( SC.beatForm(st, performance.now(), S.back * 1000) === "soft" ) return ["soft", outWhy()];
+      if ( fw === "turn" ) {
+        // only when the active combatant is off screen: the least slide that brings it in, at the zoom the player has
+        const v = viewNow(), rect = stageRect(), b = tokenBox(t, 0);
+        if ( SC.comfortable(b, v, rect, 0) ) return ["none", "on screen (follow turn)"];
+        const to = SC.ownHome(v, tokenBox(t, grid() * 0.5), rect, v, 0.12);
+        const screens = Math.hypot(to.x - v.x, to.y - v.y) * v.scale / Math.max(1, Math.hypot(v.vw, v.vh)), lead = R().lead;
+        cam = { ...to, ms: Math.round(SC.clamp(lead * (0.85 + 0.6 * screens), lead * 0.8, lead * 1.6)) };
+        return [take(), "glide (follow turn)"];
+      }
       // (the stage zoom: the zoom now while it is near the player's own - no re-zoom after an attack - else theirs)
       const v = viewNow(), scale = st.parked && st.home ? SC.stageZoom(v.scale, st.home.scale) : v.scale;
       cam = SC.turnCamera(tokenBox(t, grid() * 0.5), v, stageRect(), scale, R().lead);
       return cam ? [take(), "glide"] : ["none", "on screen"];                  // (comfortably on screen: nothing moves)
     }
     if ( ph?.check ) { const f = ph.check(shot, form); if ( f === "none" ) return ["none", "play check"]; if ( f === "soft" ) return ["soft", "play check"]; }
+    if ( fw !== "all" ) return ["soft", `follow ${fw}`];
     if ( SC.beatForm(st, performance.now(), S.back * 1000) === "soft" ) return ["soft", outWhy()];
     return [take(), "beat"];
   }
@@ -240,8 +281,17 @@ function onUpdateCombat(combat, changed) {
   if ( st.combat !== combat.id ) { if ( st.combat ) endStage(); st.combat = combat.id; }
   const key = turnKey(combat);
   if ( key === st.turn ) return;
-  const own = ownTurn(combat), act = SC.turnChange(st, key, own, !!beat && !beat.own);
-  if ( act?.home ) {
+  const own = ownTurn(combat), act = SC.turnChange(st, key, own, !!beat && !beat.own), fw = follow();
+  if ( fw !== "all" ) {
+    // the player's switch: the view is theirs. On their own turn it moves only when their token is off screen ("turn"), by the least
+    // that brings it in; it never goes back to an earlier view by itself
+    if ( own && fw === "turn" ) {
+      const t = seenTok(combat.combatant?.tokenId), v = viewNow(), rect = stageRect();
+      if ( t && !SC.comfortable(tokenBox(t, 0), v, rect, 0) ) { const to = SC.ownHome(v, tokenBox(t, grid() * 0.5), rect, v, 0.12); if ( beat ) pendingHome = { to, force: true }; else afterScreen(() => goHome(to)); st.home = { ...to }; }
+    }
+    if ( own || fw === "off" ) st.parked = null;
+  }
+  else if ( act?.home ) {
     // own turn: home, with the player's own token comfortably on screen; after the beat on screen (an attack's result) when one plays
     const t = seenTok(combat.combatant?.tokenId), to = SC.ownHome(st.home, t ? tokenBox(t, grid() * 0.5) : null, stageRect(), viewNow());
     if ( beat ) pendingHome = { to, force: true }; else afterScreen(() => goHome(to));
@@ -316,6 +366,10 @@ function sync() {
 
 function registerSettings() {
   game.settings.register(MODULE_ID, KEY, { scope: "world", config: false, type: Object, default: { ...SC.STAGE_DEFAULTS }, onChange: () => { setCache = null; if ( !stageSettings().on ) endStage(); } });
+  game.settings.register(MODULE_ID, FOLLOW_KEY, {
+    name: T("DirStage.follow"), hint: T("DirStage.followHint"), scope: "client", config: true, type: String, default: "auto",
+    choices: Object.fromEntries(FOLLOW.map((v) => [v, T(`DirStage.follow_${v}`)])), onChange: () => { if ( follow() === "off" ) { st.parked = null; } sync(); }
+  });
 }
 function renderPanel(hostEl) {
   const s0 = stageSettings();
@@ -342,7 +396,7 @@ function renderPanel(hostEl) {
 /* ---------------------------------------------------------------- wiring */
 
 export function status() {
-  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip };
+  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip, follow: follow() };
 }
 Hooks.once("init", registerSettings);
 Hooks.once("ready", () => {
@@ -358,5 +412,5 @@ Hooks.once("ready", () => {
 });
 extendSection("director", { panels: [{ id: "dirStage", title: "MOINENMAPS.DirStage.title", icon: "fa-solid fa-clapperboard", open: false, mount: (h) => renderPanel(h) }] });
 
-export const stageSource = { settings: stageSettings, status, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
+export const stageSource = { settings: stageSettings, status, camera, follow, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
 moduleApi.directorStage = stageSource;

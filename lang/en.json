@@ -1996,6 +1996,22 @@
 
   "MOINENMAPS.Zones.pick.way.right": "More to pick to the right: {n}. Click to show.",
 
+  "MOINENMAPS.Zones.board.haz.wall": "Wall, Armor {armor}",
+
+  "MOINENMAPS.Zones.board.haz.locked": "Locked door, Armor {armor}",
+
+  "MOINENMAPS.Zones.board.haz.fire": "Fire {n}",
+
+  "MOINENMAPS.Zones.board.move.cost": "Movement actions: {n}",
+
+  "MOINENMAPS.Zones.board.move.costStress": "Movement actions: {n}, with stress",
+
+  "MOINENMAPS.Zones.board.move.alt": "Right-click: another way",
+
+  "MOINENMAPS.Zones.board.area.caught": "Caught in it: {n}",
+
+  "MOINENMAPS.Zones.board.free": "No cost",
+
   "MOINENMAPS.Zones.place.at": "{zone}, {level}",
 
   "MOINENMAPS.Zones.place.floor": "floor {n}",
@@ -2289,6 +2305,18 @@
   "MOINENMAPS.DirStage.backHint": "A player who moves the camera themselves keeps it: the rest of that turn and at least this long they get markers instead of camera moves; the stage picks them up again with a later turn.",
   "MOINENMAPS.DirStage.panelHint": "On their own turn a player's own beats never move their camera (in place when on screen, else a marker). Combatants a player cannot see do not move that player's camera.",
   "MOINENMAPS.DirStage.chip": "My view",
+
+  "MOINENMAPS.DirStage.follow": "Combat camera: how much it follows",
+
+  "MOINENMAPS.DirStage.followHint": "Every beat: turns, moves and attacks move your view. Turn start only: your view moves only when a turn begins and the active character is off your screen. Never: your view is never moved; you get markers instead.",
+
+  "MOINENMAPS.DirStage.follow_auto": "As the game sets it",
+
+  "MOINENMAPS.DirStage.follow_all": "Every beat",
+
+  "MOINENMAPS.DirStage.follow_turn": "Turn start only, when off screen",
+
+  "MOINENMAPS.DirStage.follow_off": "Never",
   "MOINENMAPS.Dir.arr.panel": "Scene transitions",
   "MOINENMAPS.Dir.arr.on": "Arrival on a new scene",
   "MOINENMAPS.Dir.arr.dip": "Dip to dark between scenes",

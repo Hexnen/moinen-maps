@@ -67,7 +67,8 @@ globalThis.ui = { notifications: { info: (m) => notes.push(["info", m]), warn: (
 const chats = [];
 globalThis.ChatMessage = { create: async (d) => { chats.push(d); } };
 const sent = [];                                                       // every socket message: { msg, to }
-let onSocket = null;
+const socketFns = [];
+const onSocket = (msg, sender) => { for ( const fn of socketFns ) fn(msg, sender); };   // (every part of the module listens on the one channel)
 const users = new Map([["gm", { id: "gm", isGM: true, active: true, name: "Ada" }], ["gm2", { id: "gm2", isGM: true, active: true, name: "Bo" }], ["p1", { id: "p1", isGM: false, active: true, name: "Test Gracz 1" }], ["p2", { id: "p2", isGM: false, active: true, name: "Test Gracz 2" }]]);
 globalThis.game = {
   user: users.get("gm"),
@@ -76,7 +77,7 @@ globalThis.game = {
   settings: { register: (m, k, o) => settings.set(k, o.default), get: (m, k) => { if ( !settings.has(k) ) throw new Error(`no setting ${k}`); return settings.get(k); } },
   scenes: { get: () => scene },
   modules: { get: () => ({ title: "Plus Ultra" }) },
-  socket: { emit: (ch, msg, o) => sent.push({ msg, to: o?.recipients ?? null }), on: (ch, fn) => { onSocket = fn; } }
+  socket: { emit: (ch, msg, o) => sent.push({ msg, to: o?.recipients ?? null }), on: (ch, fn) => { socketFns.push(fn); } }
 };
 const takeSent = () => sent.splice(0);
 

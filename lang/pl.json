@@ -1996,6 +1996,22 @@
 
   "MOINENMAPS.Zones.pick.way.right": "Więcej do wskazania po prawej: {n}. Kliknij, aby pokazać.",
 
+  "MOINENMAPS.Zones.board.haz.wall": "Ściana, Pancerz {armor}",
+
+  "MOINENMAPS.Zones.board.haz.locked": "Zamknięte drzwi, Pancerz {armor}",
+
+  "MOINENMAPS.Zones.board.haz.fire": "Ogień {n}",
+
+  "MOINENMAPS.Zones.board.move.cost": "Akcje ruchu: {n}",
+
+  "MOINENMAPS.Zones.board.move.costStress": "Akcje ruchu: {n}, ze stresem",
+
+  "MOINENMAPS.Zones.board.move.alt": "Prawy przycisk: inny sposób",
+
+  "MOINENMAPS.Zones.board.area.caught": "W zasięgu efektu: {n}",
+
+  "MOINENMAPS.Zones.board.free": "Bez kosztu",
+
   "MOINENMAPS.Zones.place.at": "{zone}, {level}",
 
   "MOINENMAPS.Zones.place.floor": "piętro {n}",
@@ -2289,6 +2305,18 @@
   "MOINENMAPS.DirStage.backHint": "Gracz, który sam ruszy kamerą, zatrzymuje ją: do końca tej tury i co najmniej tyle sekund dostaje znaczniki zamiast ruchów kamery; scena zabiera go znowu w jednej z kolejnych tur.",
   "MOINENMAPS.DirStage.panelHint": "W swojej turze własne momenty gracza nigdy nie ruszają jego kamery (na miejscu, gdy są na ekranie, inaczej znacznik). Uczestnicy, których gracz nie widzi, nie ruszają jego kamery.",
   "MOINENMAPS.DirStage.chip": "Mój widok",
+
+  "MOINENMAPS.DirStage.follow": "Kamera w walce: jak bardzo podąża",
+
+  "MOINENMAPS.DirStage.followHint": "Każdy moment: tury, ruchy i ataki przesuwają twój widok. Tylko początek tury: widok przesuwa się tylko wtedy, gdy zaczyna się tura, a aktywnej postaci nie ma na twoim ekranie. Nigdy: widok nigdy się nie przesuwa; dostajesz znaczniki.",
+
+  "MOINENMAPS.DirStage.follow_auto": "Jak ustawia gra",
+
+  "MOINENMAPS.DirStage.follow_all": "Każdy moment",
+
+  "MOINENMAPS.DirStage.follow_turn": "Tylko początek tury, gdy poza ekranem",
+
+  "MOINENMAPS.DirStage.follow_off": "Nigdy",
   "MOINENMAPS.Dir.arr.panel": "Przejścia scen",
   "MOINENMAPS.Dir.arr.on": "Wejście na nową scenę",
   "MOINENMAPS.Dir.arr.dip": "Przyciemnienie między scenami",

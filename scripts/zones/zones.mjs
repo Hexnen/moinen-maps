@@ -19,6 +19,7 @@ import * as FireMod from "../fire/fire.mjs";
 import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
 import { interactApi, registerInteract } from "./interact.mjs";
+import { boardApi, registerBoard, flashToken } from "./board.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -218,10 +219,31 @@ function paintMap(id, intensity) {
 }
 const markTol = () => gridSize() * 0.35;
 
+/**
+ * One language of zones for the table (dev/zones-api.md 31), per client until reload: what a combat module asks the zones to
+ * show while it runs, on top of the scene's look - `numbers: "always"` (every zone carries its number badge, whatever the look
+ * says), `distances: false` (no distance badges or bands around a selected token: a badge is always the zone's number),
+ * `show: true` (the zones show on this client even where the scene keeps them to the GM).
+ *   present({ numbers, distances, show })     present(null): as the scene says     present(): what is in force (or null)
+ */
+let PRESENT = null;
+export function present(o) {
+  if ( o === undefined ) return PRESENT ? { ...PRESENT } : null;
+  const next = o && typeof o === "object" ? { numbers: ["always", "hover", "never"].includes(o.numbers) ? o.numbers : null, distances: o.distances === false ? false : null, show: o.show === true } : null;
+  const none = !next || (next.numbers == null && next.distances == null && !next.show);
+  if ( JSON.stringify(none ? null : next) === JSON.stringify(PRESENT) ) return present();
+  PRESENT = none ? null : next;
+  altBadges(); refresh(); tell("params");
+  return present();
+}
+/** The look as it is drawn on this client: the look in force with what present() asks on top. */
+const shownLook = () => { const l = look(); return l && PRESENT?.numbers ? { ...l, numbers: PRESENT.numbers } : l; };
+
 /** Who sees the finished zones: always the GM drawing them, else as the scene says. */
 export function visibleToMe() {
   if ( !S || !Z ) return false;
   if ( editing() ) return true;
+  if ( PRESENT?.show ) return true;
   const who = look().who;
   return who === "all" || (who === "gm" && game.user.isGM);
 }
@@ -254,7 +276,7 @@ export function refresh() {
   display.visible = visibleToMe();
   if ( !display.root.visible ) return;
   let dist = null, bands = null, here = -1;
-  const t = setting("zonesDistances", true) && DRIVER?.distances !== false ? selectedToken() : null;
+  const t = setting("zonesDistances", true) && DRIVER?.distances !== false && PRESENT?.distances !== false ? selectedToken() : null;
   // Sky High and Orbit are off the map (one zone of their own): no distances on the map from there
   if ( t && Z && !Places.AREAS.includes(rawAlt(t.document)) ) {
     const c = tokenCenter(t);
@@ -273,7 +295,7 @@ export function refresh() {
     }
   }
   display.hoverId = hover;
-  display.render(Z, look(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M, terrainText: wreckText, passages: passages() });
+  display.render(Z, shownLook(), gridSize(), { dist, bands, here, hover, editing: editing(), zoom: canvas.stage.scale.x, marks: M, terrainText: wreckText, passages: passages() });
 }
 /** The passages (temporary edges) as the display marks them: every end that lies in a zone of the map now. */
 function passages() {
@@ -288,7 +310,7 @@ export const displayBoxes = () => display?.boxes() ?? [];
 
 /** The zone under the cursor (numbers "hover", border highlight): one check per frame at most, a redraw only when it changes. */
 function onHoverMove(ev) {
-  const L = look();
+  const L = shownLook();
   if ( !(L?.numbers === "hover" || L?.hoverHi) || !display?.root.visible ) return;
   hoverAt = { x: ev.clientX, y: ev.clientY };
   if ( hoverRaf ) return;
@@ -300,7 +322,7 @@ function onHoverMove(ev) {
   });
 }
 // numbers on hover need the badges again; the highlight alone only redraws its own layer
-function setHover(id) { if ( id === hover ) return; hover = id; if ( look()?.numbers === "hover" ) refresh(); else display?.drawHover(id); }
+function setHover(id) { if ( id === hover ) return; hover = id; if ( shownLook()?.numbers === "hover" ) refresh(); else display?.drawHover(id); }
 const onHoverLeave = () => { hoverAt = null; if ( hover >= 0 ) setHover(-1); iconTip(null); };
 
 /** What a zone icon means, shown next to the cursor while it rests on the icon. */
@@ -1717,7 +1739,8 @@ export async function move(token, to, o = {}) {
  * are never held.
  */
 export function tactical(opts) {
-  TACT = opts === false || opts == null ? null : { profile: opts.profile ?? null, confirm: opts.confirm ?? null, when: opts.when ?? null, gm: opts.gm === true, levels: opts.levels === true };
+  TACT = opts === false || opts == null ? null : { profile: opts.profile ?? null, confirm: opts.confirm ?? null, when: opts.when ?? null, gm: opts.gm === true, levels: opts.levels === true,
+    free: opts.free === false ? false : true, place: typeof opts.place === "function" ? opts.place : null };
   return !!TACT;
 }
 /** Does tactical play hold a change of level of this token by this client's user (tactical({ levels: true, confirm }))? */
@@ -1773,6 +1796,13 @@ function onPreUpdateToken(doc, changed, options, userId) {
   if ( game.user.isGM && !TACT.gm ) return;
   try {
     if ( TACT.when && !TACT.when(doc) ) return;
+    // a GM who holds Alt while dropping the token PLACES it: no route, no price, nobody asked; the caller is told afterwards
+    if ( game.user.isGM && TACT.free && altDown() ) {
+      const from = placeOfDoc(doc);
+      FREE.set(doc.id, { from, row: { id: doc.id, x: sx(doc), y: sy(doc), alt: doc.flags?.[MODULE_ID]?.alt ?? null, floor: doc.flags?.[MODULE_ID]?.floor ?? null, air: doc.flags?.[MODULE_ID]?.air === true ? true : null } });
+      if ( options && typeof options === "object" ) options.mmFree = true;
+      return;
+    }
     const g = gridSize(), drop = { x: (changed.x ?? doc.x) + (doc.width * g) / 2, y: (changed.y ?? doc.y) + (doc.height * g) / 2 };
     const from = placeOfDoc(doc), id = zoneAtNow(drop.x, drop.y);
     // only a move from one zone into another is a move that costs; off the map there is nothing to count
@@ -1782,6 +1812,24 @@ function onPreUpdateToken(doc, changed, options, userId) {
     askDrag(doc, from, to, drop);
     return false;
   } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }
+}
+/** Is Alt held on this client (Foundry's keyboard, else the last key event seen)? */
+let altKey = false;
+function altDown() {
+  try { const k = game.keyboard; if ( typeof k?.isModifierActive === "function" ) return !!k.isModifierActive("Alt") || altKey; } catch {}
+  return altKey;
+}
+/** Tokens a GM is placing free of cost right now: token id -> { from (place), row (where it stood, for the inverse) }. */
+const FREE = new Map();
+/** A GM's free placement was written: say so on the token and tell the combat module (tactical({ place })). */
+function onFreePlaced(doc, options) {
+  const f = FREE.get(doc.id);
+  if ( !f || !options?.mmFree ) return;
+  FREE.delete(doc.id);
+  const g = gridSize(), to = placeOfDoc(doc);
+  try { flashToken(doc, game.i18n.localize("MOINENMAPS.Zones.board.free")); } catch {}
+  try { TACT?.place?.({ token: doc, from: f.from, to, drop: { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }, free: true, inverse: { op: "tokens", rows: [f.row] } }); }
+  catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical placement`, err); }
 }
 async function askDrag(doc, from, to, drop) {
   const T = TACT;
@@ -1884,6 +1932,10 @@ export const zonesApi = {
   freeSpot, moveToZone, move, beforeStep, drawsFrames,
   /** Cost confirmation when a token is dragged during tactical play. */
   tactical, tacticalOn: () => !!TACT,
+  /** One language of zones while a combat module runs: numbers on every zone, no distance badges, zones shown to this client. */
+  present,
+  /** How much the camera follows a fight on this client (the director's combat stage): the user's switch and a combat module's default. */
+  camera: (o) => moduleApi.directorStage?.camera?.(o) ?? null,
   /** Who runs the rules: a combat module takes the map's own mechanics over (fire round, wrecking numbers, distance badges). */
   rulesDriver, drivenBy, wreckText,
   /** Why a write was refused, in the user's language; the active GM's name. */
@@ -1896,6 +1948,9 @@ export function registerZones() {
   // highlights and zone picking (interact.mjs): api.highlight, clearHighlights, highlights, showReach, pick, cancelPick, picking
   Object.assign(zonesApi, interactApi);
   registerInteract();
+  // interaction on the map (board.mjs): token marks, lines, a move and an area under the pointer, menus, intentions
+  Object.assign(zonesApi, boardApi);
+  registerBoard();
   moduleApi.zones = zonesApi;
   Hooks.once("init", registerSettings);
   Hooks.once("setup", patchRuler);
@@ -1920,6 +1975,8 @@ export function registerZones() {
     if ( level || "x" in changed || "y" in changed || "width" in changed || "height" in changed ) syncToken(doc, level && !("x" in changed || "y" in changed) ? "level" : "move", userId, _o?.mmMove ?? null);
   });
   Hooks.on("preUpdateToken", onPreUpdateToken);
+  Hooks.on("updateToken", (doc, changed, options, userId) => { if ( FREE.size && userId === game.user.id ) onFreePlaced(doc, options); });
+  if ( typeof window?.addEventListener === "function" ) for ( const ev of ["keydown", "keyup"] ) window.addEventListener(ev, (e) => { altKey = !!e.altKey; }, true);
   Hooks.on("createToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) syncToken(doc, "create", userId); });
   Hooks.on("deleteToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) dropToken(doc, userId); });
   Hooks.on("drawToken", (t) => altBadge(t));

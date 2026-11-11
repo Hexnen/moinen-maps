@@ -20,6 +20,7 @@ import { pairKey } from "./marks.mjs";
 import { pattern } from "./display.mjs";
 import { groups, shortLabel } from "./highlight.mjs";
 import { pickSpot, zoneSpots, borderSpots, spotsAround, thin } from "./place.mjs";
+import { glyphOf } from "./board-layer.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9;
 /** A badge's radius on screen (display.mjs BADGE_R): a zone's label shrinks with the zone as its badge does. */
@@ -155,7 +156,7 @@ export class ZoneHighlightLayer {
         }
       }
       for ( const [e, list] of segs ) {
-        if ( !e.label ) continue;
+        if ( !e.label && !e.icon ) continue;
         // where the GM's mark sits, else the middle of the longest stretch; `u`: which way the border runs there
         let at = this.marks?.get(pairKey(e.a, e.b)) ?? null, u = null, bd = Infinity;
         if ( at ) { for ( const s of list ) { const d = Math.hypot((s[0] + s[2]) / 2 - at.x, (s[1] + s[3]) / 2 - at.y); if ( d < bd ) { bd = d; u = s; } } }
@@ -168,7 +169,7 @@ export class ZoneHighlightLayer {
 
     for ( const e of this.shown.zones.values() ) {
       const z = byId.get(e.id);
-      if ( z && e.label ) this.#label(e, z.label, z.label.r, z.id, `z${z.id}`);
+      if ( z && (e.label || e.icon) ) this.#label(e, z.label, z.label.r, z.id, `z${z.id}`);
     }
     for ( const k of [...this.spots.keys()] ) if ( !this.items.some((it) => it.key === k) ) this.spots.delete(k);
     this.zoom = zoom;
@@ -217,9 +218,18 @@ export class ZoneHighlightLayer {
     const T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 14, fill: PAPER });
     T.resolution = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
     T.anchor.set(0.5, 0.52);
-    const w = Math.max(22, T.width + 14);
+    // (an entry's icon - a warning, a hazard - stands before its words, in the entry's colour)
+    let I = null, iw = 0;
+    if ( e.icon ) {
+      const [g, font] = glyphOf(e.icon);
+      I = new PIXI.Text(g, { fontFamily: font ? `"${font}"` : "Signika, sans-serif", fontWeight: "900", fontSize: 12, fill: e.color });
+      I.resolution = T.resolution; I.anchor.set(0.5, 0.52);
+      iw = I.width + (e.label ? 5 : 0);
+    }
+    const w = Math.max(22, (e.label ? T.width : 0) + iw + 14);
     G.lineStyle({ width: 1.6, color: e.color, alpha: 1 }).beginFill(INK, 0.9).drawRoundedRect(-w / 2, -LABEL_H / 2, w, LABEL_H, 10).endFill();
     c.addChild(G, T);
+    if ( I ) { I.position.set(-w / 2 + 7 + I.width / 2, 0); T.position.set(iw / 2, 0); c.addChild(I); }
     this.labels.addChild(c);
     this.items.push({ c, at, dx: 0, dy: 0, r, zoneId, key, w, u });
   }

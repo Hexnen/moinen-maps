@@ -31,7 +31,7 @@ export const COLORS = Object.freeze({
 export const ZONE_STYLES = ["fill", "outline", "dashed"];
 export const BORDER_STYLES = ["solid", "dashed"];
 export const LIMITS = Object.freeze({ id: 64, label: 28, tip: 160, entries: 600, title: 80 });
-const ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const ID_RE = /^[A-Za-z0-9_.:~-]{1,64}$/;      // ("~": the map's own shows - an area under the pointer, a player's intention)
 
 /** A colour as a number: a name of COLORS, "#rrggbb" / "#rgb", or a number; `fallback` when it is none of these. */
 export function colorOf(c, fallback = COLORS.move) {
@@ -90,14 +90,14 @@ export function cleanHighlight(spec, me = null) {
     const zone = zoneKeyOf(e), o = e && typeof e === "object" ? e : {};
     if ( !zone || seenZ.has(zone) ) continue;
     seenZ.add(zone);
-    zones.push({ zone, color: colorOf(o.color, color), style: ZONE_STYLES.includes(o.style) ? o.style : style, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip) });
+    zones.push({ zone, color: colorOf(o.color, color), style: ZONE_STYLES.includes(o.style) ? o.style : style, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}) });
   }
   const bstyle = BORDER_STYLES.includes(spec.borderStyle) ? spec.borderStyle : spec.style === "dashed" ? "dashed" : "solid";
   for ( const e of Array.isArray(spec.borders) ? spec.borders.slice(0, LIMITS.entries) : [] ) {
     const border = borderKeyOf(e), o = e && typeof e === "object" && !Array.isArray(e) ? e : {};
     if ( !border || seenB.has(border) ) continue;
     seenB.add(border);
-    borders.push({ border, color: colorOf(o.color, colorOf(spec.borderColor, color)), style: BORDER_STYLES.includes(o.style) ? o.style : bstyle, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip) });
+    borders.push({ border, color: colorOf(o.color, colorOf(spec.borderColor, color)), style: BORDER_STYLES.includes(o.style) ? o.style : bstyle, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}) });
   }
   if ( !zones.length && !borders.length ) return null;
   const order = Number.isFinite(Number(spec.order)) ? Number(spec.order) : 0;
@@ -202,7 +202,8 @@ export function cleanPick(o = {}) {
   const t = Number(o.timeout);
   return {
     zones, title: text(o.title, LIMITS.title), hint: text(o.hint, LIMITS.tip), color, timeout: Number.isFinite(t) && t > 0 ? Math.min(t, 3600000) : 0,
-    reveal: o.reveal === false ? false : o.reveal === "fit" ? "fit" : true, edgePan: o.edgePan !== false, inset: cleanInsets(o.inset)
+    reveal: o.reveal === false ? false : o.reveal === "fit" ? "fit" : true, edgePan: o.edgePan !== false, inset: cleanInsets(o.inset),
+    ...(o.banner === false ? { banner: false } : {})
   };
 }
 
