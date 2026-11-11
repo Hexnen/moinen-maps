@@ -334,6 +334,9 @@ export async function frame(spec = {}) {
     const gate = () => SC.frameGate(st, { follow: follow(), level, hand, now: performance.now(), backMs: stageSettings().back * 1000, busy: busy(), held: cameraHeld(), screen: !!Screen.owner && !homing });
     let g = gate(); if ( g ) return no(g);
     if ( spec.after ) { await settled(idOf(spec.after)); if ( mine !== frameSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); g = gate(); if ( g ) return no(g); }
+    /* what calls for a frame (a turn change, a card) usually redraws the surfaces in the same moment: a glide begun inside that
+       hitch loses its first frames. Wait until the page draws evenly again (two even frames; at most CALM_MS), then look again. */
+    if ( !clientOpts().reduced ) { await calm(); if ( mine !== frameSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); g = gate(); if ( g ) return no(g); }
     const ids = (Array.isArray(spec.tokens) ? spec.tokens : []).map(idOf).filter(Boolean).slice(0, 12), pad = grid() * 0.5;
     const boxes = SC.frameSubjects(ids, (id) => { const t = seenTok(id); return t ? tokenBox(t, pad) : null; });
     if ( !boxes ) return no("unseen");
@@ -359,6 +362,17 @@ export async function frame(spec = {}) {
     sync();
     return say({ ok: true, moved: true, whole: !!plan.whole, arrived });
   } catch ( err ) { console.error(`${MODULE_ID} | frame`, err); return no("error"); }
+}
+/** Resolves once two animation frames in a row came evenly (under CALM_FRAME ms apart), or after CALM_MS. */
+const CALM_MS = 700, CALM_FRAME = 50;
+function calm() {
+  return new Promise((res) => {
+    const t0 = performance.now(); let last = t0, even = 0, done = false;
+    const end = () => { if ( !done ) { done = true; clearTimeout(tm); res(); } };
+    const tm = setTimeout(end, CALM_MS + 300);                                    // (a hidden tab draws no frames)
+    const step = () => { if ( done ) return; const now = performance.now(); even = now - last < CALM_FRAME ? even + 1 : 0; last = now; if ( even >= 2 || now - t0 > CALM_MS ) end(); else requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
 }
 /** The view to `to` in a calm move that the user's wheel / click / key stops; no motion for a user who asked for reduced motion. -> arrived */
 async function glideTo(to, ms) {

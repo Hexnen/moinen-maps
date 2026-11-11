@@ -1353,6 +1353,8 @@ What it does, always:
   declared `uiInset`s and windows), 5 % inside its edge;
 - otherwise **the least slide** that puts the subject 14 % inside the free stretch; several subjects come in together when
   they fit at the user's zoom, else the focus whole and the frame leaning toward the others;
+- before it glides it waits until the page draws evenly again (two even frames, at most 0.7 s): what calls for a frame (a
+  turn change, a card) redraws the surfaces in the same moment, and a glide begun inside that hitch would lose its start;
 - the glide: 420 ms x (0.75 + 1.6 x screens travelled), within 0.75 .. 2.2 x; a jump under reduced motion; the user's
   wheel, drag or pan keys stop it at once (the screen engine's guard) and the camera is then the user's;
 - **never goes back by itself.** After a move that was not the user's own act the "My view" chip (and Esc) stands for 8 s:
