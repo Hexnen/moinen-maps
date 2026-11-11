@@ -109,6 +109,8 @@ check(api.zoneOfToken(t1) === api.zoneOfToken(t1) && Object.isFrozen(api.zoneOfT
 check(api.place("z2:f2").floor === 2 && api.place(1).spot === "z2" && api.place("@orbit").area === "orbit" && api.place("zz") === null && api.placeAt(450, 50, { level: "elevated" }).spot === "z3:elevated" && api.place({ zone: "z2", level: "floor", floor: 1 }).spot === "z2:f1" && api.place(api.zoneOfToken(t4)).airborne, "place(): keys, spots, ids, points, places");
 const ids = (l) => l.map((r) => r.token.id).join();
 check(ids(api.tokensInZone("z2")) === "t2" && ids(api.tokensInZone("z2:f2")) === "t2" && ids(api.tokensInZone("z2:f1")) === "" && ids(api.tokensInZone(api.place("z2"))) === "" && ids(api.tokensInZone("z2", { anyLevel: false })) === "", "tokensInZone: a bare key is every level, a spot only that level");
+check(ids(api.tokensInZone("z2:ground")) === "" && api.place("z2:ground").spot === "z2" && ids(api.tokensInZone("z1:ground")) === ids(api.tokensInZone(api.place("z1"))) && ids(api.tokensInZone("z1:ground")).split(",").includes("t1"),
+  "tokensInZone: the ground level alone is \"z:ground\" (the ground spot is the bare key, which means every level)");
 check(ids(api.tokensInZone("@sky")) === "t3" && ids(api.tokensInZone("z3")) === "" && ids(api.tokensInZone(t4)) === "t4" && ids(api.tokensInZone("z4:elevated")) === "t4" && ids(api.tokensInZone("z4", { anyLevel: true })) === "t4", "tokensInZone: off the map is its own zone; a token's own zone");
 
 /* ---- distances, routes, borders, zone data */

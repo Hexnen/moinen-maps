@@ -101,6 +101,10 @@ api.zoneOfToken(token) -> place | null                null: a token of a scene t
 api.tokensInZone(where, { anyLevel }) -> [{ token: TokenDocument, place }]
         a bare key or id: every level of the zone; a spot, a place or a token: that level only (the book's "same zone");
         anyLevel: true / false overrides. "@sky" etc.: everyone in that area.
+        THE GROUND LEVEL: the spot string of a place on the ground is the bare key (`place.spot === "z3"`), so a ground spot
+        handed on as a string asks for every level. To ask for the ground alone say it: `"z3:ground"` (accepted wherever a
+        spot string is; `place("z3:ground").spot` is `"z3"`), a place, a token, or `{ anyLevel: false }`. The same holds for
+        `zoneStates(where)` (section 10).
 api.setLevel(token, { level, floor, airborne } | { area } | spotString) -> Promise
         changes the level only, never the position on the map (owners of the token). Flags written on the token:
         alt ("elevated" | "underground" | "sky" | "orbit" | "dimension" | "chase"), floor (1..n), air (true).
@@ -356,9 +360,10 @@ api.addZoneState(zone, state) -> Promise<result>         zone: a key or id (no l
 api.updateZoneState(id, { at, level, owner, ends, except, data }) -> Promise<result>     null drops a field
 api.removeZoneState(id) -> Promise<result>
 api.zoneStates() -> [state, ...]                         the registry's states of the whole scene
-api.zoneStates(where) -> [state, ...]                    every state of a zone as records: the registry's, the GM's own marks
+api.zoneStates(where, { anyLevel }) -> [state, ...]      every state of a zone as records: the registry's, the GM's own marks
         (id "mark:fire", source "mark"), what the map's layers show (id "map:wrecked", source "map"). A bare key or id: every
-        level; a spot, a place or a token: that level and the states that name none
+        level; a spot, a place or a token: that level and the states that name none; anyLevel: true / false overrides.
+        The ground level alone: "z3:ground", a place, a token or { anyLevel: false } (the ground spot is the bare key: section 2)
 api.zoneState(id) -> state | null
 api.zone(where).records                                  the same list for every level
 ```
@@ -552,7 +557,8 @@ api.beforeStep(fn) -> off()
   ctx = { op, index, last, step, remaining, token, group, profile, plan, forced, data,
           from, to,                 // places: where the mover is, where the step leads
           border | edge,            // the border as it is now (section 5 + 9) or the edge
-          statesFrom, statesTo }    // the states of the zone left and of the zone entered (section 10)
+          statesFrom, statesTo }    // the states of the zone left and of the zone entered (section 10), on the level of
+                                    // the step's own spots (a step on the ground: the ground and the states naming no level)
   ```
   Entering fire (2925), leaving darkness (1654), a wall on the way (2418-2419), a ward's zone (2876): the listener looks at
   `statesTo` / `statesFrom` / `border`, does what the rules say and answers.
@@ -590,6 +596,24 @@ into **another zone** by this client's user is held back: the route and its cost
 anything else: the token stays - a combat module that sends the move to the GM as an intent sends it and answers `false`.
 Without `confirm` the map asks a yes / no question with the zones and actions. `gm: true` asks the GM's own drags too;
 `when` limits it (a token of the combat, the mover's turn).
+
+**Level changes** (`levels: true`, off by default so an older caller sees no change):
+
+```
+api.tactical({ levels: true, confirm(ctx), when, gm, profile })
+```
+
+A change of level is movement with a price (2386-2388), and the map's token HUD offers one to every owner of a token. With
+`levels: true` and a `confirm`, a change of the level flags (`alt`, `floor`, `air`) of a token made by this client's user
+**outside a move** is held back like a drag: the HUD's altitude button (its menu, its right click, Orbit through the orbit
+scene), `setAltitude`, `setFloor`, `setLevel`, any plain update of those flags. `confirm(ctx)` is asked with
+`{ token, from, to, level: true, drop: null, profile, plan, cost, reachable }`: `from` / `to` are the two places (same
+position on the map), `plan` / `cost` as for a drag when both are on the map (`null` to or from an off-map area, where
+`reachable` is true and the price is the caller's: `altCost`). `true`: the level is written as it was asked for; anything
+else: the token stays (the combat module sends the change to the GM as an intent and answers `false`). An update that leaves
+the token in the same place is not asked about. Never held: `move()`, `moveToZone()`, `apply()` (the combat module's own
+writes), another user's update, a token `when` refuses, the GM's own changes without `gm: true`. Without a `confirm` nothing
+is held: the map has no price of its own to ask about.
 
 ## 15. What a combat module calls (M2)
 

@@ -892,7 +892,11 @@ function onTokenHUD(hud, html) {
       if ( k === "orbit" && !hasLifeSupport(t.actor) ) ui.notifications.warn(game.i18n.format("MOINENMAPS.Zones.altNoLifeWarn", { name: t.name }));
       if ( t.document.getFlag(MODULE_ID, "floor") ) await t.document.unsetFlag(MODULE_ID, "floor");
       // Orbit goes through the orbit module when it is on (a request that never sticks; the token really moves)
-      if ( k === "orbit" && moduleApi.orbit && game.settings.get(MODULE_ID, "orbit") !== false ) { await moduleApi.orbit.send(t); show(); return; }
+      if ( k === "orbit" && moduleApi.orbit && game.settings.get(MODULE_ID, "orbit") !== false ) {
+        // (it changes no flag here, so the hold of tactical play is asked by hand: tactical({ levels: true }))
+        if ( levelHeld(t.document) ) { askLevel(t.document, { alt: "orbit", floor: null, air: null }, () => moduleApi.orbit.send(t)); return; }
+        await moduleApi.orbit.send(t); show(); return;
+      }
       await setAltitude(t, k);
       show();
     });
@@ -970,7 +974,8 @@ export function titleOf(w, { level = false } = {}) {
 }
 
 /** The tokens in a zone: [{ token: TokenDocument, place }]. A bare zone key or id means every level of it; a place, a spot or a
- *  token means that level only (the book's "same zone"), unless `anyLevel`. */
+ *  token means that level only (the book's "same zone"), unless `anyLevel`. The ground level alone: "z3:ground" (the ground
+ *  spot "z3" is the bare key), a place, or { anyLevel: false }. */
 function tokensInZone(w, { anyLevel = null } = {}) {
   const at = placeOf(w);
   if ( !at || at.zone == null ) return [];
@@ -1398,16 +1403,18 @@ export const updateZoneState = (id, patch) => apply({ op: "zoneState.update", id
 export const removeZoneState = (id) => apply({ op: "zoneState.remove", id });
 /**
  * The states of a zone as records (states.mjs): the registry's, the GM's own marks, what the map's layers show. A bare key or id:
- * every level; a spot, a place or a token: that level and the states that name no level. No argument: the registry's states of
- * the whole scene (each with `zone`, the key of its zone).
+ * every level; a spot, a place or a token: that level and the states that name no level; `anyLevel` true / false says it outright
+ * (as tokensInZone). The spot string of the ground level is the bare key, so the ground level alone is asked for with
+ * "z3:ground", a place, a token or { anyLevel: false }. No argument: the registry's states of the whole scene (each with `zone`,
+ * the key of its zone).
  */
-export function zoneStates(w = undefined) {
+export function zoneStates(w = undefined, { anyLevel = null } = {}) {
   if ( !S ) return [];
   if ( w === undefined ) return S.states.map(stateOut);
   const p = placeOf(w);
   if ( !p || p.id < 0 ) return [];
   const bare = typeof w === "number" || (typeof w === "string" && !w.includes(":"));
-  const at = bare ? null : States.atOfSpot(p.spot);
+  const at = (anyLevel ?? bare) ? null : States.atOfSpot(p.spot);
   return States.listStates(RS.get(p.id), M0?.zones.get(p.id), MAP.get(p.id), at).map((r) => ({ ...copy(r), zone: p.zone }));
 }
 export const zoneState = (id) => { const row = S ? stateRow(id) : null; return row ? stateOut(row) : null; };
@@ -1660,7 +1667,7 @@ export async function move(token, to, o = {}) {
         op, index, last: index === steps.length - 1, step, remaining: steps.slice(index), token: doc, group, profile: prof, plan: pl, forced, data: o.data ?? null,
         from: placeOfDoc(doc), to: placeOf(step.to),
         border: step.kind === "border" ? liveBorder(step) : null, edge: step.kind === "edge" ? step.edge : null,
-        statesFrom: a && a.id >= 0 ? zoneStates(step.from) : [], statesTo: b && b.id >= 0 ? zoneStates(step.to) : []
+        statesFrom: a && a.id >= 0 ? zoneStates(step.from, { anyLevel: false }) : [], statesTo: b && b.id >= 0 ? zoneStates(step.to, { anyLevel: false }) : []      // a step's ends are spots: that level (a ground spot is the bare key)
       };
     },
     blocked: (step) => {
@@ -1702,14 +1709,68 @@ export async function move(token, to, o = {}) {
  * confirm answers true: the map moves the token along the plan with move() (step by step, the listeners asked) - for a client
  * that may move it; anything else: the token stays (a combat module that sends the move to the GM as an intent answers false
  * after sending it). No `confirm`: a yes / no dialog with the cost. `gm: true` asks the GM's own drags too.
+ * `levels: true` (with a `confirm`): a change of LEVEL this client's user makes outside a move - the token HUD's altitude button,
+ * setAltitude / setFloor / setLevel - is held back the same way (book-dump 2386-2388: changing altitude is movement and has a
+ * price, which is the combat module's to name). ctx: { token, from, to, level: true, drop: null, profile, plan, cost, reachable }
+ * (`plan` null to or from an off-map area, or when this way of moving cannot be there). confirm answers true: the level is
+ * written as it was asked for; anything else: the token stays where it is. Moves made through move() / moveToZone() / apply()
+ * are never held.
  */
 export function tactical(opts) {
-  TACT = opts === false || opts == null ? null : { profile: opts.profile ?? null, confirm: opts.confirm ?? null, when: opts.when ?? null, gm: opts.gm === true };
+  TACT = opts === false || opts == null ? null : { profile: opts.profile ?? null, confirm: opts.confirm ?? null, when: opts.when ?? null, gm: opts.gm === true, levels: opts.levels === true };
   return !!TACT;
+}
+/** Does tactical play hold a change of level of this token by this client's user (tactical({ levels: true, confirm }))? */
+function levelHeld(doc) {
+  if ( !TACT?.levels || !TACT.confirm || !S || !Z || !doc || doc.parent !== canvas.scene || (game.user.isGM && !TACT.gm) ) return false;
+  try { return !TACT.when || !!TACT.when(doc); } catch { return false; }
+}
+/** The level flags an update would leave on a token: { alt, floor, air } (null: not set), or null when it touches none of them. */
+function levelAfter(doc, changed) {
+  const fm = changed?.flags?.[MODULE_ID];
+  if ( !fm || typeof fm !== "object" ) return null;
+  const cur = doc.flags?.[MODULE_ID] ?? {}, out = { alt: cur.alt ?? null, floor: cur.floor ?? null, air: cur.air === true ? true : null };
+  let any = false;
+  for ( const n of ["alt", "floor", "air"] ) {
+    // (a value that is no plain string, number or true is a deletion, however this Foundry writes one)
+    if ( n in fm ) { const v = fm[n]; out[n] = typeof v === "string" || typeof v === "number" || v === true ? v : null; any = true; }
+    else if ( `-=${n}` in fm ) { out[n] = null; any = true; }
+  }
+  return any ? out : null;
+}
+/** Ask the combat module about a level change that was held back; a yes writes it (`write`: another way to make it, the orbit scene). */
+async function askLevel(doc, lv, write = null) {
+  const T = TACT;
+  if ( !T?.confirm ) return;
+  try {
+    const g = gridSize(), from = placeOfDoc(doc);
+    const to = mkPlace({ id: Geo.zoneAt(Z, sx(doc) + (doc.width * g) / 2, sy(doc) + (doc.height * g) / 2), alt: Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground", floor: lv.floor, air: lv.air === true });
+    if ( !from || Places.placeSig(from) === Places.placeSig(to) ) return;
+    const prof = Moves.profileOf(T.profile?.(doc) ?? {}) ?? Moves.profileOf({});
+    let pl = null;
+    try { pl = from.area || to.area ? null : Moves.plan(cache(), keyOfId, from, to, prof); } catch { pl = null; }
+    const yes = await T.confirm({ token: doc, from, to, level: true, drop: null, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl || !!from.area || !!to.area });
+    if ( yes !== true ) return;
+    if ( write ) await write();
+    else { const { _id, ...flat } = tokenUpdate({ id: doc.id, alt: lv.alt ?? null, floor: lv.floor ?? null, air: lv.air === true ? true : null }); await doc.update(flat, { mmMove: `lv${++moveSeq}` }); }
+  } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical level change`, err); }
 }
 function onPreUpdateToken(doc, changed, options, userId) {
   if ( !TACT || !S || !Z || userId !== game.user.id || options?.mmMove || doc.parent !== canvas.scene ) return;
-  if ( !("x" in changed || "y" in changed) || (game.user.isGM && !TACT.gm) ) return;
+  if ( !("x" in changed || "y" in changed) ) {
+    // a change of level alone (the HUD's altitude button, setLevel): held while tactical play asks for it
+    try {
+      const lv = levelAfter(doc, changed);
+      if ( !lv || !levelHeld(doc) ) return;
+      const g = gridSize(), from = placeOfDoc(doc);
+      const to = mkPlace({ id: Geo.zoneAt(Z, sx(doc) + (doc.width * g) / 2, sy(doc) + (doc.height * g) / 2), alt: Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground", floor: lv.floor, air: lv.air === true });
+      if ( !from || Places.placeSig(from) === Places.placeSig(to) ) return;      // the same place (a stale flag cleared): nothing to price
+      askLevel(doc, lv);
+      return false;
+    } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical level change`, err); }
+    return;
+  }
+  if ( game.user.isGM && !TACT.gm ) return;
   try {
     if ( TACT.when && !TACT.when(doc) ) return;
     const g = gridSize(), drop = { x: (changed.x ?? doc.x) + (doc.width * g) / 2, y: (changed.y ?? doc.y) + (doc.height * g) / 2 };

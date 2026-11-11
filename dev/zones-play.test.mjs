@@ -202,6 +202,8 @@ check(r.ok && r.result.id === "s2" && api.zone("z2").states.dark === false && J(
 r = await api.addZoneState("z2:elevated", { kind: "gravity", data: { mode: "low" }, owner: "c2" });
 check(r.ok && r.result.at === "elevated" && api.zone("z2").states.lowgrav === true, "a state on a level (a spot string names it); low gravity reads as the map's low-gravity mark");
 check(api.zoneStates("z2").map((s) => s.id).join() === "s2,s3" && api.zoneStates("z2:elevated").map((s) => s.id).join() === "s2,s3" && api.zoneStates(api.place("z2")).map((s) => s.id).join() === "s2" && api.zoneStates(t3).map((s) => s.id).join() === "s2" && api.zoneStates(t4).length === 0, "zoneStates: a bare key every level; a place that level and the states that name none; a token its own zone");
+check(api.zoneStates("z2:ground").map((s) => s.id).join() === "s2" && api.zoneStates("z2", { anyLevel: false }).map((s) => s.id).join() === "s2" && api.zoneStates(api.place("z2"), { anyLevel: true }).map((s) => s.id).join() === "s2,s3" && api.zoneStates("z2:elevated", { anyLevel: true }).length === 2,
+  "zoneStates: the ground level alone is \"z:ground\" or anyLevel: false (the ground spot is the bare key); anyLevel: true is every level");
 check(api.zoneStates().length === 3 && api.zoneStates().every((s) => s.zone) && api.zoneState("s3").zone === "z2" && api.zoneState("nope") === null, "every registry state of the scene; one by id");
 r = await api.addZoneState("z3", { kind: "fire", level: 8, owner: "c1" });
 check(r.ok && api.zone("z3").states.fire === 8 && painted === 0, "a fire in the registry reads as Intensity 8; nothing is painted on the fire layer for it");
@@ -415,6 +417,16 @@ off();
 }
 mv = await api.move(m2, "z1", {});
 check(asked.length === 0, "a listener that stopped asking is not asked");
+{
+  // the states a listener is given are those of the step's own level: a ground spot is the bare key, which alone would mean every level
+  const up = await api.addZoneState("z1:elevated", { kind: "toxic" }), all = await api.addZoneState("z1", { kind: "smoke" });
+  const seen = [], offS = api.beforeStep((ctx) => { seen.push({ from: ctx.step.from, kinds: ctx.statesFrom.map((s) => s.id) }); });
+  const there = await api.move(m2, "z2", { profile: { way: "through" } });
+  offS();
+  const row = seen.find((x) => x.from === "z1");
+  check(there.ok && !!row && row.kinds.includes(all.result.id) && !row.kinds.includes(up.result.id), "a step on the ground is told the ground's states and those that name no level, not the ones stored on \"elevated\"");
+  await api.apply(there.inverse); await api.apply(all.inverse); await api.apply(up.inverse); take();
+}
 
 /* ---- levels, groups */
 await api.setBorderState("z2|z3", { door: { state: "open" } }); take();
@@ -474,6 +486,43 @@ check(confirms.length === 3 && confirms[2].reachable === false && confirms[2].pl
 api.tactical({ confirm: async () => { confirms.push("gm"); return true; } });
 await m2.update({ x: 250, y: 0 });
 check(m2.x === 250 && confirms.length === 3, "the GM's own drags are not asked unless told to");
+
+/* ---- a change of level outside a move (the token HUD's altitude button, setAltitude / setFloor / setLevel): tactical({ levels: true }) */
+const tick = () => new Promise((x) => setTimeout(x, 20));
+const spotNow = () => api.zoneOfToken(m2).spot, home = api.zoneOfToken(m2).zone;
+api.tactical({ gm: true, confirm: async (ctx) => { confirms.push(ctx); return say; } });
+await api.setAltitude(m2, "elevated"); await tick();
+check(spotNow() === `${home}:elevated` && confirms.length === 3, "without `levels` a level change is written unasked, as before");
+await api.setAltitude(m2, "ground");
+api.tactical({ gm: true, levels: true, when: (doc) => doc.id === "t2", profile: () => ({ way: "flight", speed: 2 }), confirm: async (ctx) => { confirms.push(ctx); return say; } });
+say = false; writes.length = 0;
+res = await api.setAltitude(m2, "elevated"); await tick();
+let lc = confirms[3];
+check(res === undefined && confirms.length === 4 && lc.level === true && lc.token === m2 && lc.from.spot === home && lc.to.spot === `${home}:elevated` && lc.drop === null && lc.profile.way === "air" && lc.reachable === true && lc.plan?.total === 1,
+  "levels: a level change by this client's user is held and confirm() is asked with the two places");
+check(spotNow() === home && !m2.flags[MOD].alt && writes.length === 0, "refused (or sent on as an intent): the token stays on its level");
+say = true;
+await api.setLevel(m2, { area: "sky" }); await tick();
+lc = confirms[4];
+check(confirms.length === 5 && lc.level === true && lc.to.spot === "@sky" && lc.plan === null && lc.reachable === true && spotNow() === "@sky", "confirmed: the level is written as it was asked for (off the map: no plan, the price is the combat module's)");
+await api.setLevel(m2, { area: "sky" }); await tick();
+check(confirms.length === 5 && spotNow() === "@sky", "an update that leaves the token where it is asks nothing");
+r = await api.apply({ op: "tokens", rows: [{ id: m2.id, alt: null, floor: null, air: null }] }); await tick();
+check(r.ok && confirms.length === 5 && spotNow() === home, "a write of the combat module itself (apply, move, moveToZone) is never held");
+say = false;
+await api.setAltitude(m1, "elevated"); await tick();
+check(confirms.length === 5 && api.zoneOfToken(m1).level === "elevated", "`when` limits it: a token outside the fight changes level freely");
+await api.setAltitude(m1, "ground");
+await m2.update({ [`flags.${MOD}.alt`]: "elevated", [`flags.${MOD}.air`]: true }); await tick();
+check(confirms.length === 6 && confirms[5].to.airborne === true && spotNow() === home, "any update of the level flags by this client counts, not only the HUD's");
+api.tactical({ levels: true, confirm: async (ctx) => { confirms.push(ctx); return false; } });
+await api.setAltitude(m2, "elevated"); await tick();
+check(confirms.length === 6 && spotNow() === `${home}:elevated`, "the GM's own level changes are held only with `gm: true`, as the drags");
+await api.setAltitude(m2, "ground");
+api.tactical({ gm: true, levels: true });
+await api.setAltitude(m2, "elevated"); await tick();
+check(spotNow() === `${home}:elevated`, "no confirm(): a level change is not held (the map has no price to ask about)");
+await api.setAltitude(m2, "ground");
 api.tactical(false);
 check(api.tacticalOn() === false, "off again");
 
