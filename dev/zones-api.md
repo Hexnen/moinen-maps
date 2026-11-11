@@ -25,6 +25,13 @@ up or down, and moves that do not wait for an animation on a client that draws n
 `scripts/zones/view.mjs`, `scripts/zones/moves.mjs` (`riseChain`); tests: `dev/zones-view.test.mjs` and new sections of
 `dev/zones-moves.test.mjs`, `dev/zones-play.test.mjs`, `dev/zones-interact.test.mjs`.
 
+Package M3 (sections 25-35) moved interaction from panels onto the map: marks on tokens (in reach with a label, out of reach
+dimmed with a reason, the one chosen, caught in an area, state chips, a bar, parts shown under the pointer), lines between
+tokens, a move and an area previewed under the pointer and confirmed with one click, warnings, a menu at a token / door / wall /
+zone, right clicks sensed, a player's armed intention shown to the GMs, one language of zones, the camera's follow mode, a GM's
+free placement. Pure part: `scripts/zones/board-core.mjs`; drawing: `scripts/zones/board-layer.mjs`; wiring:
+`scripts/zones/board.mjs`. Test: `dev/zones-board.test.mjs`.
+
 The map **stores, reports and draws**. It computes no Invincible rule effect: what a state, a wall or a step does to a character
 is the combat module's.
 
@@ -894,3 +901,220 @@ const r = await api.reveal(where | [where, ...], { inset, margin, fit = false, a
 - The banner is placed by what is there when the pick starts; a tracker that appears later moves it only when the free
   stretch changes.
 - Touch: the chips work by tap; there is no resting pointer, so no slide.
+
+## 25. Interaction on the map: marks on tokens (M3)
+
+Package M3 puts what a combat module used to show in panels onto the map. The map draws and senses; it reads no rule: every
+text, number and colour is the caller's. Nothing here is stored (a show, like highlights). Pure part
+`scripts/zones/board-core.mjs`, drawing `scripts/zones/board-layer.mjs`, wiring `scripts/zones/board.mjs`; tests
+`dev/zones-board.test.mjs`.
+
+**Who sees what** is the caller's, as for highlights (section 17): `users` absent = this client only; `users: [ids]` or
+`"all"` works from a GM's client only and goes to those users alone (a player's `users` is dropped, the show stays local).
+A client that opens the scene later is sent again what was meant for it. On its own the map only **holds back**: an entry
+that names a token with `TokenDocument.hidden` never goes to a player's client (a mark on it; a line to it; of a line FROM
+it the target end alone is sent), and no client draws a line from or to a token its user does not see. Any other kind of
+"this player must not know" (a token hidden by a rule, not by Foundry) is the caller's: leave the user out of `users`.
+
+```js
+const id = api.markTokens({
+  id: "ipu.targets",                    // the same id again replaces the set; absent: a fresh id
+  users: [userId],                      // absent: this client
+  order: 0,                             // a higher set wins part by part where two name one token; state chips add up
+  color: "target",                      // default colour of the entries (named colour of section 17 or a number)
+  tokens: [
+    { token, state: "in", label: "72%", tip: "Hit chance 72%", hover: { label: "~3", tip: "Expected damage 3", bar: { value: 7, max: 9, loss: 3, lossMax: 5 } } },
+    { token, state: "out", tip: "Out of range (2 zones, weapon reaches 1)" },
+    { token, state: "chosen" },
+    { token, marks: ["broken", "held", { icon: "fa-solid fa-ghost", color: "info", tip: "Phased" }], bar: { value: 4, max: 9, text: "4/9" } }
+  ]
+});
+api.clearTokenMarks(id | { id } | { prefix } | { all: true });   // () = what this client made; returns how many sets went here
+api.tokenMarks() -> [{ id, tokens, order, from }]                // what is on this client's screen
+```
+
+- `token`: an id, a uuid, a Token, a TokenDocument.
+- `state`: `"in"` a ring in the colour (in reach); `"out"` the token's picture is dimmed, a no-entry sign above it, the
+  caller's `tip` beside the pointer in the "no" look (why it cannot be chosen); `"chosen"` a heavier ring with four ticks;
+  `"caught"` a dashed ring (inside an area, not aimed at). Absent: no ring (chips, bar, label alone).
+- `label` (18 characters) a pill above the token; `tip` (240) beside the pointer while it is on the token.
+- `marks`: state chips down the token's right edge (Foundry's own effect icons run down the left). Known names
+  (`api.STATE_MARKS`): `broken`, `held`, `airborne`, `barrier`, `reaction`, `down`, `burning`, `hidden`, `stunned`, `warn`;
+  or `{ icon: "<Font Awesome class>", color, tip }`. Six at most; a chip's `tip` joins the pointer tip.
+- `bar`: `{ value, max, loss, lossMax, gain, color, text }` - a bar above the token: what stays, what is expected to go
+  (`loss`, full red), what may go at most (`lossMax`, paler), what would be gained. `{ text }` alone: a word.
+- `hover: { label, tip, bar }`: shown instead of `label` / `tip` / `bar` only while the pointer is on that token (the
+  caller's preview: expected damage, expected fall of health). No round trip: the caller sends it with the set.
+- `Hooks.on("moinenMapsTokenHover", (tokenDoc | null, entry) => {})` fires on this client when the pointer comes onto or
+  leaves a marked token, for a caller that would rather work its preview out late and call `markTokens` again.
+- Limits: 200 tokens a set. Marks live as children of the token, so they move with it; they keep their size on screen and
+  shrink with a token that is small on screen. They are put back when Foundry redraws the token.
+
+## 26. Lines between things (M3)
+
+```js
+const id = api.link({ id: "ipu.aim", from: attackerToken, to: targetToken, color: "danger", style: "solid", label: "Strike", users: "all" });
+api.link({ id, links: [{ from, to, label }, { from, to: { zone: "z7" } }, { to: targetToken }] });   // several; `from` absent: the target alone is marked
+api.clearLinks(id | { id } | { prefix } | { all: true });   api.links() -> [{ id, links, order, from }]
+```
+
+An end is a token, `{ zone }` (or a bare zone key) or `{ x, y }`. Drawn: a gently bowed line with an arrow head from the
+rim of the source to a reticle (a ring with four ticks) around the target, the label on a pill half way. `style: "dashed"`
+for something not yet declared. The line follows its tokens while they move. Sending and holding back: section 25.
+
+## 27. A move under the pointer: `pickMove` (M3)
+
+```js
+const r = await api.pickMove({
+  token,                                   // the mover (required)
+  profile,                                 // its mover profile (section 14)
+  zones: [{ zone: "z7", label: "1", cost: "Movement action", color: "move" },
+          { zone: "z9", label: "2", cost: "Quick action · 1 stress", color: "stress", route: ["z7", "z9"], more: true,
+            hazards: [{ border: "z7|z9", text: "Wall, Armor 3" }, { zone: "z9", text: "Fire 2" }] }],
+  intent: { label: "Move" },               // the GMs see where this user points (section 32)
+  title, hint, banner, ...                 // everything api.pick takes (section 18)
+});
+// { ok: true, zone, spot, place, button, alt, route: [zoneKey, ...], entry }  |  { ok: false, reason }
+```
+
+- While the pointer is on an offered zone: the **route** from the token through the place each border is crossed at (a
+  dot there) to the zone, with an arrow head; **what waits on the way** as chips on the route; beside the pointer the
+  zone's tip, the **price** (`cost`, the caller's words) and one line per hazard. **One click confirms**; there is no
+  second question.
+- `zones` absent: what `api.reach(token, profile)` gives, labelled with the distance and priced in movement actions
+  (the map's own default; works with no combat module).
+- `route`: the zones entered in order (or a plan of section 14) when the move is not the map's own shortest. Absent: the
+  map's route (`api.plan`).
+- `hazards`: absent = what the map itself knows on that route (a blocked border with its Armor, a zone burning);
+  `[]` = nothing; a list = the caller's (reactions waiting, a guarded zone, ...). `{ zone | border, text, color, icon, tip }`.
+- `more: true`: the move can be made another way (through a wall, at a higher price). The tip says "Right-click: another
+  way"; a right click on that zone resolves `{ ok: true, alt: true, ... }` and the caller opens its own choice (for
+  instance `api.menu`, section 29). A right click anywhere else cancels as before.
+- Runs on this client. A GM asks a player with the combat module's own message; the pick itself must run on the client
+  whose pointer it is.
+
+## 28. Areas and warnings (M3)
+
+```js
+const r = await api.pickArea({ zones: [...], radius: 1, token, intent: true, tokens: (doc) => ({ label: "62%" }) });
+// a yes also carries area: [zoneKey], caught: [tokenId]
+const a = api.areaPreview({ id: "ipu.blast", at: "z7", radius: 1, users: "all", tokens: true, level });   // { id, zones, tokens } | null
+api.clearArea(id);
+api.warn({ id: "ipu.warn", zones: [{ zone: "z4", text: "Ends in fire" }], borders: [{ border: "z4|z5", text: "Held" }], users });
+api.clearHighlights("ipu.warn");
+```
+
+- `pickArea`: everything `api.pick` takes (`zones` = where it may be put) plus `radius` (borders out from the zone under
+  the pointer; 0 = that zone) or `area: (zoneKey, place) => [zoneKey]` (the caller's own shape), `areaColor`, `tokens`,
+  `anyLevel`, `token` + `intent`. Under the pointer the covered zones fill and **every token standing in them gets the
+  dashed "caught" ring, allies too**; the tip counts them. `tokens`: `false` none, a function per TokenDocument returning
+  `false` (not caught), `true`, or `{ label, color, tip }` (the caller's number over it).
+- Tokens are caught **on the level the area is put on** (ground when the picked place is ground); `anyLevel: true` catches
+  every level of the covered zones. A player's client catches only the tokens that player sees.
+- `areaPreview`: the same as a standing show, sent to `users` like a highlight and a set of token marks under one id.
+  `level` (a token, a place, a spot): only tokens on that level; absent: every level.
+- `warn`: a dashed band in the danger colour with a chip (a warning sign and the caller's words) on zones and borders. It
+  is a highlight (section 17): the same `users`, taken away with `clearHighlights(id)`. Highlight entries may now carry
+  `icon` (a name of `STATE_MARKS` or a Font Awesome class) drawn in front of the label.
+
+## 29. A menu at a thing; right clicks (M3)
+
+```js
+const r = await api.menu({
+  token | border: "z3|z4" | zone: "z7" | x, y | client: { x, y },
+  title: "Door", sub: "Armor 3",
+  items: [
+    { id: "open", label: "Open", icon: "door-open", hint: "Quick", run() {} },
+    { id: "break", label: "Break through", icon: "hammer", disabled: "No actions left" },
+    { separator: true },
+    { id: "fate", label: "Fate points", icon: "star", stepper: { value: 0, min: 0, max: 3 }, onStep(value, delta) {} },
+    { id: "aid", label: "Accept help", toggle: true, on: false, onToggle(on) {} }
+  ]
+});
+// { ok: true, id, index }  |  { ok: false, reason: "cancelled" | "replaced" | "noItems" | "noAnchor" | "sceneChanged" }
+api.closeMenu();   api.menuOpen() -> bool
+
+const off = api.onContext((ctx) => null | true | menuSpec | Promise<menuSpec | null>);
+// ctx = { kind: "token" | "border" | "zone", token, border, zone, place, x, y, client, shift, alt, ctrl }
+```
+
+- The menu stands beside the thing (right of it, else left), stays inside the window and follows the map. A plain entry
+  closes it (`run()` is called and the promise resolves); a **stepper** (− value +) and a **toggle** keep it open and tell
+  the caller each change (`onStep` may return the value to show, or `false` to refuse; `onToggle` may return the state).
+  Escape, a click elsewhere or a new menu closes it. Digits 1-9 pick the plain entries in order. This client only.
+- `onContext`: asked about every right click on a token, on a border that carries a wall or a door, or on a zone. Answer
+  **at once**: nothing = not mine (Foundry's token HUD and the map's own menus do what they always did); `true` = handled;
+  a menu spec without an anchor (or a promise of one) = the map opens it at the thing when the button comes up, and
+  `spec.done(result, ctx)` is told the answer. A right **drag** that starts on a claimed thing still pans the map. Not asked
+  while a zone is being picked or the GM edits the zones. With no listener registered nothing changes.
+
+## 30. The camera: how much it follows (M3)
+
+The director's combat stage moved every client's view on every beat. Now each user has a switch (client setting "Combat
+camera: how much it follows", also `api.camera`):
+
+```js
+api.camera() -> { follow: "all" | "turn" | "off", choice: "auto" | "all" | "turn" | "off", default }
+api.camera({ follow: "turn" });      // this user's choice (kept in the client setting; a switch on a dock calls this)
+api.camera({ default: "turn" });     // what "auto" means on this client until reload (a combat module says it on `ready`)
+```
+
+- `"all"`: as before. `"turn"`: the view moves only when a turn starts and the active combatant is **off this user's
+  screen**; it slides by the least that brings it in, at the zoom the user has; moves and attacks come as the soft markers;
+  on the user's own turn the same for their own token; the view never goes back to an earlier one by itself. `"off"`: the
+  view is never moved.
+- Without a call the default stays `"all"` (nothing changes for a table that has no combat module). Null when the
+  director's stage is not loaded.
+
+## 31. One language of zones: `present` (M3)
+
+```js
+api.present({ numbers: "always", distances: false, show: true });   api.present(null);   api.present() -> what is in force | null
+```
+
+Per client until reload, on top of the scene's look: `numbers: "always"` every zone carries its number badge;
+`distances: false` no distance badges or bands around a selected token (a badge is always the zone's number, so a label on
+the map, a chat line and a tooltip all name the same thing: `api.zoneName(key)`, section 22); `show: true` the zones show on
+this client even where the scene keeps them to the GM. A combat module calls it on every client when a fight starts and
+`present(null)` when it ends.
+
+## 32. What a user has armed, for the GMs (M3)
+
+```js
+api.intent({ token, to: targetToken | { zone } | { x, y }, zones: [key], border, label: "Strike", color, ttl: 20000 });   api.intent(null);
+api.intents() -> [{ user, intent }]     api.intents(false)     // a GM's client: what is on screen; hide / show them here
+Hooks.on("moinenMapsIntent", (userId, intent | null) => {});   // a GM's client
+```
+
+It goes to the GMs' clients alone, never to another player. There it shows as a dashed line from the token to what is aimed
+at, dashed outlines on the zones, and the user's name with the label. Only about a token the sender owns. It fades after
+`ttl` ms unless said again (at most one message per 150 ms); `null` takes it away; a user who disconnects takes theirs
+along. `pickMove` and `pickArea` send it by themselves with `intent: true | { label }`.
+
+## 33. The GM's gestures (M3)
+
+- **A free placement.** While `api.tactical` is on with `gm: true`, a GM who holds **Alt** while dropping a token places
+  it: no route, no price, nobody is asked, the token flashes "No cost". The caller is told afterwards:
+  `api.tactical({ ..., place(ctx) {} })` with `ctx = { token, from, to, drop, free: true, inverse: { op: "tokens", rows } }`
+  (`inverse` goes to `api.apply` to take the placement back). `free: false` switches the gesture off. The update carries
+  `options.mmFree === true`.
+- **Giving a hit to someone else, forcing a result** are the caller's rules: the map gives the gesture. Register
+  `api.onContext` on the GM's client and answer a token with a menu (section 29) whose entries are the caller's ("Hit this
+  one instead", "Set the result" with a stepper).
+
+## 34. What a combat module calls (M3), row by row
+
+| Ledger row | Call |
+| --- | --- |
+| U32 a move seen before it is made | `api.pickMove({ token, profile, zones: [{ zone, cost, route, hazards, more }], intent })`; one click resolves; `alt: true` on a right click of a `more` zone |
+| U33 who can be hit | `api.markTokens({ id, users, tokens: [{ token, state: "in", label: "72%" }, { token, state: "out", tip: "why not" }] })`, `clearTokenMarks(id)`; picking a token stays the caller's click handling (Foundry's `targetToken` or its own) |
+| U34 what a hit would do | `hover: { label, tip, bar: { value, max, loss, lossMax } }` in the same entry; or `Hooks.on("moinenMapsTokenHover")` + `markTokens` again |
+| U35 acting on the thing | `api.onContext(fn)` answering a menu spec; `api.menu({ token | border | zone, items })` |
+| U36 an area before it is thrown | `api.pickArea({ zones, radius | area, tokens })` -> `area`, `caught`; `api.areaPreview({ at, radius, users })` to show it to the table |
+| U37 one language of zones | `api.present({ numbers: "always", distances: false, show: true })`; names by `api.zoneName(key)` |
+| U38 state on the token | `marks: [...]` and `bar` in `api.markTokens` (a set per token state, `users: "all"` minus what a player must not know) |
+| U39 who aims at whom | `api.link({ id, from, to, label, users })`, `clearLinks(id)` |
+| U40 a warning where it bites | `api.warn({ id, zones: [{ zone, text }], borders, users })`; hazards of `pickMove` |
+| U42 the camera is the player's | `api.camera({ default: "turn" })` on `ready`; a switch calls `api.camera({ follow })` |
+| U43 the GM sees what is armed | `api.intent({ token, to, zones, label })` from the player's client; `intent: true` in `pickMove` / `pickArea`; `moinenMapsIntent` hook |
+| U44 the GM overrides on the map | Alt-drop -> `tactical({ gm: true, place(ctx) })`; `api.onContext` + `api.menu` on the GM's client for the rest |
