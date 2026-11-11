@@ -356,6 +356,20 @@ export class ZoneDisplay {
         t.resolution = res; t.anchor.set(0.5, 0.52);
         b.addChild(t);
       }
+      // a badge that shows a distance (or "blocked") instead of the zone's number carries the number as a small tag at its lower
+      // right: texts and cards name a zone by its number ("Zone 5"), so the number must be findable while distances show
+      if ( d != null || blocked ) {
+        const tag = new PIXI.Container(), tg = new PIXI.Graphics();
+        const tt = new PIXI.Text(numeral(z.id + 1, look.numFormat), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: Math.round(BADGE_R * 0.8), fill: 0xf4efe6, align: "center" });
+        tt.resolution = res; tt.anchor.set(0.5, 0.52);
+        const tw = Math.max(BADGE_R * 1.1, tt.width + BADGE_R * 0.5), th = BADGE_R * 1.08;
+        tg.lineStyle({ width: 1, color: 0xf4efe6, alpha: 0.6 });
+        tg.beginFill(0x15110f, 0.9); tg.drawRoundedRect(-tw / 2, -th / 2, tw, th, th * 0.3); tg.endFill();
+        tag.addChild(tg, tt);
+        tag.position.set(BADGE_R * half * 1.05, BADGE_R * half * 0.92);
+        tag.mmNumTag = true;
+        b.addChild(tag);
+      }
       b.alpha = d == null && dist && !blocked ? 0.45 : 1;
       this.badges.addChild(b);
       this.half.set(z.id, half);

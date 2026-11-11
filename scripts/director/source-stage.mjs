@@ -268,16 +268,22 @@ const CSS = `
 .mm-dst-chip kbd { font: inherit; font-size: 0.62rem; letter-spacing: 0.08em; padding: 0 0.35em; border: 1px solid rgba(244, 239, 230, 0.4); border-radius: 3px; }
 `;
 let chip = null, keyOn = false;
+/** Bottom centre of the free stage: above whatever is declared at the bottom (an action dock), never on it. */
+function placeChip() {
+  if ( !chip ) return;
+  const r = stageRect();
+  chip.style.left = `${Math.round(r.x + r.w / 2)}px`; chip.style.top = `${Math.round(r.y + r.h - 40)}px`;
+}
 function showChip() {
-  if ( chip?.isConnected ) return;
+  if ( chip?.isConnected ) { placeChip(); return; }
   if ( !document.querySelector("style[data-mm-dst]") ) { const s = document.createElement("style"); s.textContent = CSS; s.dataset.mmDst = ""; document.head.appendChild(s); }
   const r = stageRect();
   chip = document.createElement("div");
   chip.className = "mm-dst-chip"; chip.dataset.mmDst = ""; chip.setAttribute("role", "button");
   chip.innerHTML = `<i class="fa-solid fa-house" inert></i><span>${esc(T("DirStage.chip"))}</span><kbd>Esc</kbd>`;
-  chip.style.left = `${Math.round(r.x + r.w / 2)}px`; chip.style.top = `${Math.round(r.y + r.h - 40)}px`;
   chip.addEventListener("pointerdown", (ev) => { ev.preventDefault(); ev.stopPropagation(); backHome(); });
   document.body.appendChild(chip);
+  placeChip();
   restyle(chip); chip.classList.add("is-in");
 }
 function hideChip() { const c = chip; chip = null; c?.remove(); }
