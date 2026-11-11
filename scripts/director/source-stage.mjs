@@ -26,7 +26,7 @@ import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } fro
  *    turn and at least `back` seconds; on their own turn their own beats never move the camera (in place when on screen, else a marker);
  *  - what a player may see is decided as before (the director's decide(): hidden, GM-only, vision, strict tokens; the move source's check
  *    for moves); a turn of a combatant this player cannot see does nothing here (the camera stays where it is).
- * Idle: hooks only; no ticker, no timer. While the camera is parked away: a keydown listener and the chip.
+ * Idle: hooks only; no ticker, no timer. While the camera is parked away: a keydown listener and the chip (placed again on a 300 ms timer while it shows).
  */
 
 const T = (k) => game.i18n.localize(`MOINENMAPS.${k}`);
@@ -267,7 +267,7 @@ const CSS = `
 .mm-dst-chip i { color: #e9c46a; }
 .mm-dst-chip kbd { font: inherit; font-size: 0.62rem; letter-spacing: 0.08em; padding: 0 0.35em; border: 1px solid rgba(244, 239, 230, 0.4); border-radius: 3px; }
 `;
-let chip = null, keyOn = false;
+let chip = null, keyOn = false, chipTick = null;
 /** Bottom centre of the free stage: above whatever is declared at the bottom (an action dock), never on it. */
 function placeChip() {
   if ( !chip ) return;
@@ -285,8 +285,11 @@ function showChip() {
   document.body.appendChild(chip);
   placeChip();
   restyle(chip); chip.classList.add("is-in");
+  // a declared bar may grow under the chip while it shows (an action dock that opens): it is placed again a few times a second, only
+  // while it is on screen (the stage stays hooks-only when the camera is not parked away)
+  clearInterval(chipTick); chipTick = setInterval(placeChip, 300);
 }
-function hideChip() { const c = chip; chip = null; c?.remove(); }
+function hideChip() { const c = chip; chip = null; c?.remove(); clearInterval(chipTick); chipTick = null; }
 /** Esc while parked: only when nothing else wants it (a focused text field, an open window). */
 function onKey(ev) {
   if ( ev.key !== "Escape" || !st.parked || beat || homing || cameraHeld() ) return;
