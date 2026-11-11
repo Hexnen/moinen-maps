@@ -978,13 +978,14 @@ const r = await api.pickMove({
 ```
 
 - While the pointer is on an offered zone: the **route** from the token through the place each border is crossed at (a
-  dot there) to the zone, with an arrow head; **what waits on the way** as chips on the route; beside the pointer the
+  dot there: the door or wall mark of a border that has one, else where the straight way passes the border) to the zone,
+  with an arrow head; **what waits on the way** as chips on the route; beside the pointer the
   zone's tip, the **price** (`cost`, the caller's words) and one line per hazard. **One click confirms**; there is no
   second question.
 - `zones` absent: what `api.reach(token, profile)` gives, labelled with the distance and priced in movement actions
   (the map's own default; works with no combat module).
 - `route`: the zones entered in order (or a plan of section 14) when the move is not the map's own shortest. Absent: the
-  map's route (`api.plan`).
+  map's route (`api.plan`). A way the map itself would not walk (through a standing wall) is still drawn, border by border.
 - `hazards`: absent = what the map itself knows on that route (a blocked border with its Armor, a zone burning);
   `[]` = nothing; a list = the caller's (reactions waiting, a guarded zone, ...). `{ zone | border, text, color, icon, tip }`.
 - `more: true`: the move can be made another way (through a wall, at a higher price). The tip says "Right-click: another
@@ -1089,7 +1090,7 @@ Hooks.on("moinenMapsIntent", (userId, intent | null) => {});   // a GM's client
 It goes to the GMs' clients alone, never to another player. There it shows as a dashed line from the token to what is aimed
 at, dashed outlines on the zones, and the user's name with the label. Only about a token the sender owns. It fades after
 `ttl` ms unless said again (at most one message per 150 ms); `null` takes it away; a user who disconnects takes theirs
-along. `pickMove` and `pickArea` send it by themselves with `intent: true | { label }`.
+along. It is not drawn on the sender's own screen (a GM's goes to the other GMs). `pickMove` and `pickArea` send it by themselves with `intent: true | { label }`.
 
 ## 33. The GM's gestures (M3)
 
@@ -1118,3 +1119,34 @@ along. `pickMove` and `pickArea` send it by themselves with `intent: true | { la
 | U42 the camera is the player's | `api.camera({ default: "turn" })` on `ready`; a switch calls `api.camera({ follow })` |
 | U43 the GM sees what is armed | `api.intent({ token, to, zones, label })` from the player's client; `intent: true` in `pickMove` / `pickArea`; `moinenMapsIntent` hook |
 | U44 the GM overrides on the map | Alt-drop -> `tactical({ gm: true, place(ctx) })`; `api.onContext` + `api.menu` on the GM's client for the rest |
+
+## 35. Limits and open points (M3)
+
+- **Kept cheap.** A token's marks are children of the token, built when its entry changes and laid out again only when the
+  zoom changes; lines and the route are one `Graphics` each, drawn again when they change, at a zoom step of about 8 %, and
+  (lines) on a frame in which one of their tokens moved. Nothing runs per frame while nothing moves: no ticker, no filter,
+  no mask, no texture of its own. Dimming is a tint on the token's own mesh. The pointer is read once per frame at most and
+  only while marks are on screen. Not benchmarked (by order).
+- **Looked at in Foundry** (v14, lane server, the test world's running fight with the combat module's tracker, dock and desk
+  on screen; headless Edge, pointer events sent to the canvas): as the GM at 1600 x 900 and 1366 x 768 - token marks in all
+  four states, chips, bar, the hover parts and both tips; lines (solid, dashed, to a zone, side by side tokens); `pickMove`
+  with the map's own entries and with the caller's (price, a wall on the way, another way by right click); `pickArea`;
+  `warn`; `areaPreview`; the menu at a token (stepper, toggle, digit) and at a door; `onContext` on a token (the menu opened,
+  Foundry's HUD did not); `present`; the Alt placement with its flash, callback and inverse; `camera`. As a real player
+  (Test Gracz 1) at 1366 x 768 and 1600 x 900 with the GM in a second browser: marks, lines, a warning and an area sent by
+  the GM arrived; the entries naming a hidden turret did not, and the line from it arrived as the target mark alone; the
+  player's own `users: "all"` stayed on the player's screen; the player's `pickMove` and `pickArea` showed on the GM's map
+  as the dashed line with "Test Gracz 1: Ruch" and went away when the pick ended; an area caught only the tokens the
+  player sees.
+- **Not looked at:** the camera's "turn" mode during a real change of turn (node only: the director's own tests and the
+  switch); a real mouse drag with Alt (the placement was written with Alt reported held); a real right-button drag on a
+  claimed token; `onContext` on a border and on a zone (node only); touch; a late joiner being sent the marks again (node
+  only); an English and a Polish client side by side (the texts are the caller's; the map's own eight are in both files).
+- Marks on two tokens that stand side by side overlap each other's rings and chips (the scene's tokens touch). The label
+  pill of a token under a top bar of another module can be covered by that bar; `api.reveal` brings a token's zone in.
+- A token out of reach is still clickable: refusing is the caller's.
+- `present({ distances: false })` also hides the distance bands for the GM; the labels of `pickMove` are then the only
+  place a distance shows.
+- The warning band on a very large zone is thin against a busy map; the chip is what reads. A caller that wants more
+  passes `style: "fill"` through `api.highlight` with the same id.
+- An intention is drawn to a zone's label point, which may lie far from the pointer in a large zone.
