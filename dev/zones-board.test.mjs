@@ -306,6 +306,21 @@ onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t2", to:
 check(api.intents().length === 0 && !api.links().length, "an intention about a token the sender does not own is not shown");
 onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Aiming" } }, "p1");
 check(api.tokenMarks().some((m) => m.id === "~intent.p1" && m.tokens[0].tip === "Test Gracz 1: Aiming"), "nothing aimed at yet: the label stands on the player's token");
+// U76: the pill carries the action's label alone (the user's name used to be glued before it and the sum cut to 18: "Test Gracz 1: Slug")
+{
+  const pill = () => api.tokenMarks().find((m) => m.id === "~intent.p1")?.tokens[0];
+  check(pill().label === "Aiming" && pill().tip === "Test Gracz 1: Aiming", "U76: the pill over the token says the action's label, who armed it is in the tip");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Slugfest: Omni-Man" } }, "p1");
+  check(pill().label === "Slugfest: Omni-Man" && pill().label.length === BC.BOARD_LIMITS.label && pill().tip === "Test Gracz 1: Slugfest: Omni-Man", "U76: a label that fits the pill by itself (18 characters) is drawn whole");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Uderzenie z rozbiegu w mur" } }, "p1");
+  check(pill().label === "Uderzenie z rozbi…" && [...pill().label].length === BC.BOARD_LIMITS.label && pill().tip === "Test Gracz 1: Uderzenie z rozbiegu w mur", "U76: a longer label ends in an ellipsis inside the pill's length; the tip keeps it whole");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1" } }, "p1");
+  check(pill().label === "Test Gracz 1" && pill().tip === "Test Gracz 1", "U76: no label: the pill says who");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", to: "t2", label: "Slugfest: Omni-Man" } }, "p1");
+  check(!pill() && api.links().find((l) => l.id === "~intent.p1")?.links[0].label === "Test Gracz 1: Slugfest: Omni-Man", "U76: aimed at something: the line carries \"user: label\", uncut, and no pill stands");
+  check(BC.intentPill(null, null) === null && BC.intentPill("  ", "") === null && BC.intentPill(null, "A very long user name indeed") === "A very long user…", "U76: intentPill: nothing to say is null; a long name is cut the same way");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Aiming" } }, "p1");
+}
 check(api.intents(false).length === 1 && !api.tokenMarks().length && api.intents(true).length === 1 && api.tokenMarks().length === 1, "a GM can hide the intentions on their own screen and show them again");
 onSocket({ t: "board", op: "intent", scene: "scene1", intent: null }, "p1");
 check(!api.tokenMarks().length && api.intents().length === 0, "taken back by the player");

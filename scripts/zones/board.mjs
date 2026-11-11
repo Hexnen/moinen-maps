@@ -739,10 +739,11 @@ function drawIntent(uid) {
   const id = `~intent.${uid}`, r = INTENTS.get(uid), it = showIntents ? r?.intent : null;
   if ( !it ) { LINKS.map.delete(id); MARKS.map.delete(id); Interact.clearHighlights(id); drawLinks(); applyMarks(); return; }
   const name = game.users?.get?.(uid)?.name ?? "", label = it.label ? (name ? `${name}: ${it.label}` : it.label) : name || null;
+  // (`label`, "user: label", whole: the line's text and the tip of the pill. The pill itself carries the action's label alone, U76)
   if ( it.zones.length || it.border ) Interact.highlight({ id, zones: it.zones, borders: it.border ? [it.border] : [], color: it.color, style: "dashed", borderColor: it.color, borderStyle: "dashed", order: 900 });
   else Interact.clearHighlights(id);
   if ( it.to ) { LINKS.map.set(id, { spec: { id, links: [{ from: it.token ? { token: it.token } : null, to: it.to, color: it.color, style: "dashed", label, head: true }], order: 900 }, from: uid, seq: ++LINKS.seq }); MARKS.map.delete(id); }
-  else { LINKS.map.delete(id); if ( it.token && label ) MARKS.map.set(id, { spec: { id, tokens: [{ token: it.token, state: null, color: it.color, label: label.slice(0, BC.BOARD_LIMITS.label), tip: label, marks: [], bar: null, hover: null }], order: 900 }, from: uid, seq: ++MARKS.seq }); else MARKS.map.delete(id); }
+  else { LINKS.map.delete(id); if ( it.token && label ) MARKS.map.set(id, { spec: { id, tokens: [{ token: it.token, state: null, color: it.color, label: BC.intentPill(it.label, name), tip: label, marks: [], bar: null, hover: null }], order: 900 }, from: uid, seq: ++MARKS.seq }); else MARKS.map.delete(id); }
   drawLinks(); applyMarks();
 }
 function takeIntent(uid, raw) {

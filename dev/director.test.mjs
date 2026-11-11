@@ -131,6 +131,31 @@ const ev = (o) => D.normEvent({ scene: "s", ...o });
   ok(D.lookFor(C.DEFAULTS, 0.5).shIntensity === C.DEFAULTS.shIntensity * 0.5, "intensity scales the shake");
 }
 {
+  // ---- the safe rect (overlay.measureSafe -> core.safeBox): Foundry's own columns, the insets declared to the zones API (U70)
+  const ui = { mid: { left: 110, right: 1050 }, top: 40, bot: 700 };
+  eq(D.safeBox(1366, 768), { x: 0, y: 0, w: 1366, h: 768 }, "safe rect: nothing measured, nothing declared: the window");
+  eq(D.safeBox(1366, 768, ui), { x: 110, y: 40, w: 940, h: 660 }, "safe rect: Foundry's middle column less the navigation and the hotbar");
+  eq(D.safeBox(1366, 768, { mid: null, top: 300, bot: 400 }), { x: 0, y: 0, w: 1366, h: 768 }, "safe rect: a navigation below the upper third / a hotbar above the lower third is not a bar");
+  eq(D.safeBox(1366, 768, { mid: { left: 600, right: 800 }, top: 250, bot: 520 }), { x: 0, y: 250, w: 1366, h: 270 }, "safe rect: a middle column narrower than the least stretch is not counted (as before)");
+  eq(D.safeBox(1366, 768, ui, { top: 130, bottom: 180, left: 0, right: 0 }), { x: 110, y: 130, w: 940, h: 458 }, "safe rect: declared bars cut it (the same as before U70)");
+  eq(D.safeBox(1366, 768, ui, { top: 0, bottom: 30, left: 60, right: 200 }), { x: 110, y: 40, w: 940, h: 660 }, "safe rect: a declared bar inside Foundry's own takes nothing more");
+  // U70: the dock with a panel and a question open, 480 of 768 px (62 %): it used to be dropped (the stretch ran down to the hotbar,
+  // the chip stood on the dock); now the stretch ends where the dock begins
+  const tall = D.safeBox(1366, 768, ui, { top: 0, bottom: 480, left: 0, right: 0 });
+  eq(tall, { x: 110, y: 40, w: 940, h: 248 }, "U70: a declared bottom bar of 60 % of the window or more still counts");
+  ok(tall.y + tall.h === 768 - 480 && tall.y + tall.h - 40 < 768 - 480, "U70: the My view chip (40 px above the stretch's lower edge) stands above that dock");
+  eq(D.safeBox(1366, 768, null, { top: 500, bottom: 0, left: 800, right: 0 }), { x: 800, y: 500, w: 566, h: 268 }, "U70: a large top / left inset counts the same way");
+  // the declared bars leave less than the director can work with: given up only by what the least stretch needs, in proportion
+  const tight = D.safeBox(1366, 768, ui, { top: 130, bottom: 480, left: 0, right: 0 });
+  ok(tight.h === 240 && tight.y >= 40 && tight.y < 130 && tight.y + tight.h > 288 && tight.y + tight.h < 700 && tight.x === 110 && tight.w === 940, `U70: bars leaving under 240 px: a 240 px stretch between them, not the whole window (y ${tight.y})`);
+  const over = D.safeBox(1366, 768, null, { top: 0, bottom: 900, left: 0, right: 0 });
+  eq(over, { x: 0, y: 0, w: 1366, h: 240 }, "U70: a bar as tall as the window: the least stretch at the far side");
+  const both = D.safeBox(1000, 600, null, { top: 0, bottom: 0, left: 700, right: 700 });
+  ok(both.w === 300 && both.x === 350 && both.h === 600, "U70: insets that cross: the least stretch in the middle of them");
+  eq(D.safeBox(280, 200, null, { top: 150, bottom: 0, left: 0, right: 250 }), { x: 0, y: 0, w: 280, h: 200 }, "safe rect: a window smaller than the least stretch: the window");
+  eq(D.safeBox(1366, 768, ui, { top: NaN, bottom: -5, left: "x", right: null }), { x: 110, y: 40, w: 940, h: 660 }, "safe rect: junk insets count as none");
+}
+{
   eq(D.edgeSpot({ x: 500, y: 400 }, 1000, 800), { on: true, x: 500, y: 400, a: 0 }, "on screen");
   const e = D.edgeSpot({ x: 3000, y: 400 }, 1000, 800, 50);
   ok(!e.on && e.x === 950 && e.y === 400 && Math.abs(e.a) < 1e-9, "off to the right: right edge");

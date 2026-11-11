@@ -369,6 +369,39 @@ export function edgeSpot(p, w, h, m = 56) {
   return { on: false, x: cx + dx * s, y: cy + dy * s, a: Math.atan2(dy, dx) };
 }
 
+/**
+ * The safe rect of the screen, worked out (overlay.safeRect measures, this decides): { x, y, w, h } in client px.
+ *   vw, vh   the window
+ *   ui       Foundry's own interface as measured: { mid: { left, right } | null (#ui-middle), top (the navigation's bottom edge | null),
+ *            bot (the hotbar's top edge | null) } - the navigation counts while it ends in the upper third, the hotbar while it starts
+ *            in the lower third; a column / row pair that leaves less than the least stretch is not counted (the whole window)
+ *   insets   what other modules declared to the zones API ({ top, right, bottom, left } px in from that side of the window)
+ * A DECLARED inset always counts, however large (U70: a bottom inset of 60 % of the window or more used to be dropped whole, so the
+ * camera framed its subject under an action dock with its panels open and the "My view" chip stood on the dock). Only when the
+ * declared insets of one direction leave less than the least stretch the director can work with (`minW` x `minH`) are they given
+ * up, and only by what that stretch needs, each side in proportion to what it took: the stretch stays between the declared bars, as
+ * clear of them as the window allows, and is never the whole window again.
+ */
+export function safeBox(vw, vh, ui = null, insets = null, { minW = 300, minH = 240 } = {}) {
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  const mid = ui?.mid && n(ui.mid.right) - n(ui.mid.left) > 0 ? ui.mid : null;
+  let x0 = mid ? Math.max(0, n(mid.left)) : 0, x1 = mid ? Math.min(vw, n(mid.right)) : vw, y0 = 0, y1 = vh;
+  if ( ui?.top != null && n(ui.top) < vh / 3 ) y0 = Math.max(y0, n(ui.top));
+  if ( ui?.bot != null && n(ui.bot) > vh * 2 / 3 ) y1 = Math.min(y1, n(ui.bot));
+  if ( x1 - x0 < minW ) { x0 = 0; x1 = vw; }
+  if ( y1 - y0 < minH ) { y0 = 0; y1 = vh; }
+  const fit = (lo, hi, a, b, size, min) => {
+    let p = Math.max(lo, Math.min(a, size)), q = Math.min(hi, Math.max(size - b, 0));
+    if ( q - p >= min || hi - lo <= min ) return q - p >= min ? [p, q] : [lo, hi];
+    const ca = p - lo, cb = hi - q, give = min - (q - p);                 // (ca + cb >= give: the stretch without them is over min)
+    p -= give * ca / (ca + cb); q = p + min;
+    return [Math.round(p), Math.round(q)];
+  };
+  [x0, x1] = fit(x0, x1, n(insets?.left), n(insets?.right), vw, minW);
+  [y0, y1] = fit(y0, y1, n(insets?.top), n(insets?.bottom), vh, minH);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 /** The phase of a shot at `now`: "wait" | "lead" | "hold" | "back" | "over". */
 export function phaseAt(s, now) {
   const t = now - s.t0;

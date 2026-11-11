@@ -1,4 +1,4 @@
-import { edgeSpot } from "./core.mjs";
+import { edgeSpot, safeBox } from "./core.mjs";
 import { restyle } from "./screen.mjs";
 
 /**
@@ -87,25 +87,14 @@ export function safeRect() {
 }
 function measureSafe() {
   const mid = document.getElementById("ui-middle")?.getBoundingClientRect?.();
-  let x0 = mid?.width ? mid.left : 0, x1 = mid?.width ? mid.right : innerWidth, y0 = 0, y1 = innerHeight;
   const top = document.getElementById("navigation")?.getBoundingClientRect?.(), bot = document.getElementById("hotbar")?.getBoundingClientRect?.();
-  if ( top?.height && top.bottom < innerHeight / 3 ) y0 = Math.max(y0, top.bottom);
-  if ( bot?.height && bot.top > innerHeight * 2 / 3 ) y1 = Math.min(y1, bot.top);
   // the bars another module declared to the zones API (api.zones.uiInset: a combat tracker on top, an action dock at the bottom): the
   // camera frames its subject clear of them and the "My view" chip stands above the dock, not on it (reached through the module's
-  // API, not imported: the zones' interface part is not loaded for the director alone)
-  try {
-    const ins = globalThis.game?.modules?.get?.("moinen-maps")?.api?.zones?.uiInsets?.();
-    if ( ins ) {
-      if ( ins.top > 0 && ins.top < innerHeight / 2 ) y0 = Math.max(y0, ins.top);
-      if ( ins.bottom > 0 && ins.bottom < innerHeight * 0.6 ) y1 = Math.min(y1, innerHeight - ins.bottom);
-      if ( ins.left > 0 && ins.left < innerWidth / 2 ) x0 = Math.max(x0, ins.left);
-      if ( ins.right > 0 && ins.right < innerWidth / 2 ) x1 = Math.min(x1, innerWidth - ins.right);
-    }
-  } catch { /* no zones API: Foundry's own columns only */ }
-  if ( x1 - x0 < 300 ) { x0 = 0; x1 = innerWidth; }
-  if ( y1 - y0 < 240 ) { y0 = 0; y1 = innerHeight; }
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  // API, not imported: the zones' interface part is not loaded for the director alone). A declared inset counts however large it
+  // is (core.safeBox, U70): a dock with its panel and a question open is still a dock.
+  let ins = null;
+  try { ins = globalThis.game?.modules?.get?.("moinen-maps")?.api?.zones?.uiInsets?.() ?? null; } catch { /* no zones API: Foundry's own columns only */ }
+  return safeBox(innerWidth, innerHeight, { mid: mid?.width ? { left: mid.left, right: mid.right } : null, top: top?.height ? top.bottom : null, bot: bot?.height ? bot.top : null }, ins);
 }
 /** The screen rects of the open windows (framed ApplicationV2 and the old Application windows), minimised ones left out. */
 export function windowRects() {

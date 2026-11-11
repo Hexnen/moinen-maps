@@ -208,8 +208,18 @@ function fireStrokesIn(id) {
   for ( const pts of LS.values() ) for ( const f of Link.fireIn(pts, here.map((h) => h.s)) ) total.set(f.s.id, (total.get(f.s.id) ?? 0) + f.hits);
   return here.filter((h) => h.hits / (total.get(h.s.id) || 1) >= 0.5).map((h) => h.s.id);
 }
-/** Put out the fire painted in a zone (the fire layer lets it sink and smoke away). */
-function putOutMap(id) { const ids = fireStrokesIn(id); if ( ids.length ) { try { FireMod.remove(ids); } catch {} } return ids.length; }
+/** Put out the fire painted in a zone (the fire layer lets it sink and smoke away). `kept` (a list): the strokes as they were, added. */
+function putOutMap(id, kept = null) { return putOutStrokes(fireStrokesIn(id), kept); }
+/** Put out strokes of the fire layer by id; `kept` (a list) gets the records of the ones that went, as they were before. -> how many */
+function putOutStrokes(ids, kept = null) {
+  if ( !ids.length ) return 0;
+  try {
+    const want = new Set(ids), recs = kept ? FireMod.list().filter((s) => want.has(s.id)).map(copy) : null;
+    const n = FireMod.remove(ids);
+    if ( n && recs ) kept.push(...recs);
+    return n;
+  } catch { return 0; }
+}
 /** Paint a fire into a zone on the fire layer: one blob around its middle, its level from the Intensity. */
 function paintMap(id, intensity) {
   const z = Z?.zones.find((q) => q.id === id), api = moduleApi.fire;
@@ -688,17 +698,20 @@ function writeZones(map, prefer, via = edit) {
 }
 
 /** Change a zone's features / attributes / states: { building, floors, tall, water, terrain, empty, tags: [..], wrecked, fire (0..12), dark, ice, flooded, lowgrav }. GM only. */
-export function setZone(id, patch, at = null, via = edit) {
+export function setZone(id, patch, at = null, via = edit, layer = null) {
   // the GM check comes first: the fire below is painted on / put out of the fire layer before the marks are written
   if ( !game.user.isGM || !S || !Z || id < 0 ) return false;
   // fire set from the menu: a new fire is painted on the fire layer too, a fire put out goes out there as well
   if ( "fire" in patch && linkOn() ) {
     const was = M?.zones.get(id)?.fire ?? 0, onMap = MAP.get(id)?.fire ?? 0, now = Number(patch.fire) || 0;
-    if ( !was && now ) paintMap(id, now);
-    else if ( was && !now ) putOutMap(id);
+    // (`layer`: what was done on the fire layer, for the inverse of a combat action - { back: the strokes put out, as they were,
+    // out: the ids of the strokes painted })
+    const paint = () => { const st = paintMap(id, now); if ( layer && typeof st?.id === "string" ) layer.out.push(st.id); };
+    if ( !was && now ) paint();
+    else if ( was && !now ) putOutMap(id, layer?.back);
     // lowered below what the painted fire reads as: the zone shows the higher of the two, so put that fire out and paint it
     // again no higher than the new Intensity (below 6 only the zone's own mark stays)
-    else if ( onMap > now ) { putOutMap(id); if ( now >= 6 ) paintMap(id, now); }
+    else if ( onMap > now ) { putOutMap(id, layer?.back); if ( now >= 6 ) paint(); }
   }
   return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at, via);
 }
@@ -1321,8 +1334,26 @@ function opZone(o) {
   if ( !patch || typeof patch !== "object" ) return fail("badPatch");
   const own = M0?.zones.get(p.id) ?? {}, before = {};
   for ( const k of Object.keys(patch) ) before[k] = copy(own[k]) ?? null;
-  const changed = setZone(p.id, patch, null, play);
-  return { ok: true, changed, inverse: { op: "zone", zone: p.zone, patch: before }, result: zoneInfo(p.zone) };
+  // THE FIRE LAYER IN THE INVERSE (U72). A fire write also paints / puts out strokes on the fire layer; the own marks before say
+  // nothing of them (a fire that was only painted has no mark: its inverse used to be { fire: null }, which repaints nothing, and
+  // the inverse of a new fire put out whatever burned in the zone by then). The inverse now carries what was done there:
+  //   fireLayer: { back: [the strokes put out, as they were], out: [the ids of the strokes painted] }
+  // and an op that carries `fireLayer` (only the map hands those out) does exactly that on the layer - puts `out` out, gives `back`
+  // back (fire.giveBack: the same strokes, growing again) - and writes the marks as given, with no painting of its own.
+  if ( o.fireLayer !== undefined ) {
+    const fl = o.fireLayer;
+    if ( !fl || typeof fl !== "object" || !Array.isArray(fl.back ?? []) || !Array.isArray(fl.out ?? []) ) return fail("badOp");
+    if ( !game.user.isGM || !S || !Z ) return fail("noZones");
+    const done = { back: [], out: [] };
+    putOutStrokes((fl.out ?? []).filter((id) => typeof id === "string"), done.back);
+    try { done.out = FireMod.giveBack(fl.back ?? []); } catch ( err ) { console.warn(`${MODULE_ID} | zones: giving a fire back`, err); }
+    const wrote = writeZones(new Map([[p.id, { ...own, ...patch }]]), null, play);
+    return { ok: true, changed: wrote || done.back.length + done.out.length > 0, inverse: { op: "zone", zone: p.zone, patch: before, fireLayer: done }, result: zoneInfo(p.zone) };
+  }
+  const layer = { back: [], out: [] };
+  const changed = setZone(p.id, patch, null, play, layer);
+  const touched = layer.back.length + layer.out.length > 0;
+  return { ok: true, changed: changed || touched, inverse: { op: "zone", zone: p.zone, patch: before, ...(touched ? { fireLayer: layer } : {}) }, result: zoneInfo(p.zone) };
 }
 
 /* ---- tokens: rows { id, x, y, alt, floor, air } (alt / floor / air: this module's token flags; null: not set) */
