@@ -36,7 +36,7 @@ const L = (k, d) => (d ? game.i18n.format(`MOINENMAPS.Zones.${k}`, d) : game.i18
 const me = () => game.user?.id ?? null;
 const sceneId = () => canvas.scene?.id ?? null;
 const gmIds = () => (game.users?.filter?.((u) => u.isGM) ?? []).map((u) => u.id);
-const emit = (msg, recipients = null) => { try { game.socket?.emit(CHANNEL, { t: "zones", scene: sceneId(), ...msg }, ...(recipients ? [{ recipients }] : [])); } catch ( err ) { console.warn(`${MODULE_ID} | zones: socket`, err); } };
+const emit = (msg, recipients = null) => { try { game.socket?.emit(CHANNEL, { t: "zones", scene: sceneId(), b: HL.BOOT, ...msg }, ...(recipients ? [{ recipients }] : [])); } catch ( err ) { console.warn(`${MODULE_ID} | zones: socket`, err); } };
 const wire = (h) => ({ id: h.id, zones: h.zones, borders: h.borders, order: h.order });
 
 /* ---------------------------------------------------------------- drawing */
@@ -254,7 +254,8 @@ export async function reveal(where, { inset = null, margin = null, fit = false, 
  */
 export function highlight(spec) {
   const h = HL.cleanHighlight(spec, me());
-  if ( !h ) return null;
+  // (the same id with nothing left to show replaces the set too: what stood under it goes, here and where it was sent)
+  if ( !h ) { const id = HL.idOf(spec); if ( id != null ) clearHighlights(id); return null; }
   if ( h.users && !game.user?.isGM ) h.users = null;
   h.id ??= `${me() ?? "x"}.${++autoId}`;
   const aud = HL.audience(h.users, me(), gmIds());
@@ -277,9 +278,11 @@ export function highlight(spec) {
  * Take highlights away: clearHighlights(id), clearHighlights({ id }), clearHighlights({ prefix }) (every id that starts with it),
  * clearHighlights() (everything this client made), clearHighlights({ all: true }) (also what others showed here - on this client
  * only). What this client sent to other users goes from their screens too. Returns how many went from this client's screen.
+ * Anything else (null, a number, { id: null }) names no set: nothing goes, 0.
  */
 export function clearHighlights(o = {}) {
-  const f = typeof o === "string" ? { id: o } : (o ?? {});
+  const f = HL.clearFilter(o);
+  if ( !f ) return 0;                                                   // what names no set (null, an id of nothing) takes nothing away
   const match = (id) => (f.id == null || id === f.id) && (f.prefix == null || id.startsWith(f.prefix));
   for ( const [id, s] of [...SENT] ) {
     if ( !match(id) ) continue;
@@ -375,12 +378,22 @@ function pickHere(P) {
   const allowed = allowedOf(P);
   if ( !allowed.size ) return Promise.resolve({ ok: false, reason: "noZones" });
   return new Promise((resolve) => {
-    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null,
+    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null, rid: null, from: null,
       // the way to zones no click can reach: the free stretch found by looking, the zones hidden per side, their chips, the slide
       way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, due: 0, push: null, first: true } };
     startPick();
     redraw();
+    // (board.mjs: the pick runs - only now is anything said about it to others)
+    try { P.ext?.start?.(); } catch ( err ) { console.warn(`${MODULE_ID} | zones: pick`, err); }
   });
+}
+/** End the pick running on this client when `test(ext)` says so (board.mjs: the mover of a move pick was deleted). True when it ended. */
+export function endPickIf(test, result) {
+  if ( !PICK ) return false;
+  let hit = false;
+  try { hit = !!test(PICK.P.ext ?? null); } catch { hit = false; }
+  if ( hit ) endPick(result);
+  return hit;
 }
 
 function endPick(result) {
@@ -725,13 +738,15 @@ function onSocket(msg, sender) {
     for ( const raw of Array.isArray(msg.set) ? msg.set : [] ) {
       const h = HL.cleanHighlight(raw, me());
       if ( !h?.id ) continue;
-      h.users = null;
+      h.users = null; h.boot = msg.b ?? null;
       STORE.set(h, sender); any = true;
     }
     if ( any ) redraw();
   }
   // a client opened this scene: it gets again what was meant for it
   else if ( msg.op === "hello" ) {
+    // (its client has just opened the scene: what an earlier page load of it showed here, it no longer knows - a reload)
+    if ( sender && dropFrom(sender, msg.b ?? null) ) redraw();
     if ( !sender || msg.scene !== sceneId() || !SENT.size ) return;
     const set = [...SENT.values()].filter((s) => s.remote === "all" || s.remote.includes(sender)).map((s) => wire(s.h));
     if ( set.length ) emit({ op: "hl", set }, [sender]);
@@ -741,17 +756,28 @@ function onSocket(msg, sender) {
     const reply = (result) => emit({ op: "picked", rid: msg.rid, result }, [sender]);
     const P = msg.scene === sceneId() ? HL.cleanPick(msg.pick) : null;
     if ( !P ) { reply({ ok: false, reason: msg.scene === sceneId() ? "noZones" : "noScene" }); return; }
+    const before = PICK;
     pickHere(P).then((r) => { if ( PICK?.rid === msg.rid ) PICK.rid = null; reply(r); });
-    if ( PICK ) PICK.rid = msg.rid;
+    if ( PICK && PICK !== before ) { PICK.rid = msg.rid; PICK.from = sender; }
   }
   else if ( msg.op === "pickCancel" ) { if ( gm && PICK && PICK.rid === msg.rid ) endPick({ ok: false, reason: "cancelled" }); }
   else if ( msg.op === "picked" ) { const a = ASKED.get(msg.rid); if ( a && a.user === sender ) answer(msg.rid, msg.result && typeof msg.result === "object" ? msg.result : { ok: false, reason: "cancelled" }); }
+}
+
+/** Take away the highlights a user's client showed here (it reloaded or left: it can no longer take them away itself). `keep`:
+ *  the page load whose highlights stay (the one that has just said hello). True when something went. */
+function dropFrom(uid, keep = undefined) {
+  let any = false;
+  for ( const h of STORE.list() ) if ( h.from === uid && (keep === undefined || h.boot !== keep) ) { STORE.remove({ id: h.id }); any = true; }
+  return any;
 }
 
 /* ---------------------------------------------------------------- lifecycle */
 
 function onTearDown() {
   if ( PICK ) endPick({ ok: false, reason: "sceneChanged" });
+  // the picks this client asked of other users belonged to this scene: they are told to stop, a late answer is not taken
+  for ( const [rid, a] of [...ASKED] ) { emit({ op: "pickCancel", rid }, [a.user]); answer(rid, { ok: false, reason: "sceneChanged" }); }
   // what this client showed to others belonged to this scene
   for ( const [id, s] of SENT ) emit({ op: "hl", del: [id] }, s.remote === "all" ? null : s.remote);
   SENT.clear();
@@ -789,6 +815,11 @@ export function registerInteract() {
   Hooks.on("updateToken", (doc, change) => onTokens(doc, change));
   Hooks.on("createToken", (doc) => onTokens(doc));
   Hooks.on("deleteToken", (doc) => onTokens(doc));
-  // a user who was asked to pick left
-  Hooks.on("userConnected", (user, connected) => { if ( connected ) return; for ( const [rid, a] of [...ASKED] ) if ( a.user === user.id ) answer(rid, { ok: false, reason: "userGone" }); });
+  // a user who was asked to pick left; the GM who asked this user left (nobody to answer to); what a user showed here goes with them
+  Hooks.on("userConnected", (user, connected) => {
+    if ( connected ) return;
+    for ( const [rid, a] of [...ASKED] ) if ( a.user === user.id ) answer(rid, { ok: false, reason: "userGone" });
+    if ( PICK?.rid && PICK.from === user.id ) endPick({ ok: false, reason: "userGone" });
+    if ( dropFrom(user.id) ) redraw();
+  });
 }

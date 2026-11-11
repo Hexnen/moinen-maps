@@ -421,12 +421,24 @@ The scene is saved before the promise resolves; events (section 6, `source: "pla
 | `{ op: "zoneState.remove", id }` | | the state removed | `{ op: "zoneState.add", ... }` with the same record and id |
 | `{ op: "edge.add", edge }` / `{ op: "edge.remove", id }` | section 11 | the edge | the other one |
 | `{ op: "zone", zone, patch }` | the zone's own marks, as `setZone` (attributes, features, the GM's state marks; a fire is painted / put out on the fire layer) | zone data | `{ op: "zone", zone, patch }` with the own values before |
-| `{ op: "tokens", rows: [{ id, x, y, alt, floor, air }] }` | puts tokens somewhere (position and this module's level flags) | their places | the same op with where they were |
+| `{ op: "tokens", rows: [{ id, x, y, alt, floor, air }], skipMissing? }` | puts tokens somewhere (position and this module's level flags) | their places | `{ op: "tokens", rows: (where they were), skipMissing: true }` |
 | `{ op: "batch", ops: [...] }` | all or nothing (a failure takes back what was done, `at`: its index); told and saved once | the results | a batch of the inverses, last first |
 
 - The shorthand calls (`setBorderState`, `buildBorder`, `restoreBorders`, `addZoneState`, `updateZoneState`, `removeZoneState`,
   `addEdge`, `removeEdge`) are `apply` with one op and return the same.
-- `changed: false`: the write asked for what already was (nothing told, nothing saved); the inverse is still valid.
+- `changed: false`: the write asked for what already was (nothing told, nothing saved); the inverse is still valid. A batch
+  says `changed: true` only when one of its ops changed something (a batch of nothing, `restoreBorders` with nothing to
+  restore: `ok`, `changed: false`).
+- **Tokens that are gone (M4).** A `tokens` op naming a token the scene no longer has is refused before anything is written:
+  `{ ok: false, reason: "noToken", missing: [id, ...] }`. With `skipMissing: true` those rows are left out instead and the
+  rest is written: `{ ok: true, changed, missing: [id, ...], ... }` (`changed: false` when every row was left out). Every
+  inverse the map hands out for a token write (`apply`, `move`, `moveToZone`, the GM's placement) carries `skipMissing: true`,
+  so an undo journal can always be played back: a token deleted since is skipped, the others go back. A write Foundry
+  refuses or throws on answers `{ ok: false, reason: "error" }`; `apply` never rejects.
+- `badOp` also: rows that are no list, a row without an id or with a position that is no number, a batch without a list of
+  ops, an op that is no object (inside a batch: refused with `at`, what was done is taken back).
+- A new zone state, edge or the like that asks for an id already in use, or gets one made for it, never takes the place of
+  another: the id made by the map skips those in use (after a delete and an undo as well).
 - Play state (`bs`, `q`, `e`, `pn`) is **not part of the Zones editor's undo**: the GM's Ctrl+Z over the pencil lines leaves it as
   it is now. Zone marks written through `{ op: "zone" }` are the GM's marks (`m`) and are in the editor's undo like any other.
 - Refused before anything: `notGM`, `notActiveGM`, `noZones`, `badOp`.
@@ -481,7 +493,7 @@ cost = { total, speed, actions, stressSpeed, stressActions, within: "free" | "pl
         within: against profile.actions - free (no step), plain, only with stress, not at all
 
 api.moveCost(a, b, profile) -> { reachable, plan, cost }
-api.reach(where, profile, { max }) -> [{ zone, id, d, cost }]        nearest first, the mover's own zone first (d 0); horizontal steps
+api.reach(where, profile, { max, flat }) -> [{ zone, id, d, cost }]  nearest first, the mover's own zone first (d 0); see below
 api.plan(a, b, profile) -> null | { way, name, total, borders, edges, levels, zones, steps, crossed, cost, from, end }
 ```
 
@@ -490,6 +502,17 @@ floor, edge }`), `cost`, and the two places `from` / `end`. With no usable edge 
 gives. With `force` a border that stops the mover is on the route with `border.blocked: true` (its `wall` and `doorway` say
 what stands there). null: no route, an off-map end (that is a level change: `setLevel`, `moveToZone`), an end in the air for a
 mover that must land, a place this way of moving cannot be at.
+
+**`reach` and levels (M4).** For a mover on plain ground (or with `flat: true`) a row is the horizontal walk: `d` the
+steps over borders and edges, `cost` their price. For a mover that is **not** on plain ground (on a floor, underground,
+elevated, airborne) every row is what `api.plan(where, zone, profile)` gives to that zone's ground: `d` is the plan's
+`total` (the levels it climbs or descends are in it) and `cost` its `cost`; a zone to which there is no plan is not listed;
+the mover's own zone stays first with `d: 0`. So a row of `reach` and `plan` to the same zone never disagree. `max` limits
+the horizontal steps (borders and edges) in both cases, not the levels.
+
+`planAlong` answers null also for: an `end` that is no place in the last zone of the chain (`end` is read as a level of that
+zone: its `zone`, `x`, `y` are ignored), an end in the air for a mover that must land, a level the last zone does not have.
+It always returns (a chain that asks for a climb which cannot be counted gives null, it does not hang).
 
 ### Forced moves
 
@@ -588,6 +611,11 @@ api.beforeStep(fn) -> off()
   `tokenEntered` per step, with `move: op`.
 - Runs on the client that calls it; the tokens must be the caller's to move (`notOwner`). Other refusals: `noToken`,
   `badProfile`, `noRoute`, `stalePlan`.
+- **A token deleted on the way (M4).** The mover gone: the move ends after the steps taken with `stopped: true,
+  reason: "noToken"` (`moveEnded` is told, the promise resolves). A token of the group gone: it is left out, the move goes
+  on. A write Foundry refuses: `stopped: true, reason: "error"`. The inverse of a move carries `skipMissing: true`.
+- The steps a profile can take are kept per profile **name** as soon as edges count: two movers with different ways over
+  the same edges never get each other's answer.
 
 ### Cost confirmation on a dragged token
 
@@ -603,6 +631,19 @@ into **another zone** by this client's user is held back: the route and its cost
 anything else: the token stays - a combat module that sends the move to the GM as an intent sends it and answers `false`.
 Without `confirm` the map asks a yes / no question with the zones and actions. `gm: true` asks the GM's own drags too;
 `when` limits it (a token of the combat, the mover's turn).
+
+**What counts as another zone (M4).** The drop is read where the token's centre lands, as the update names it (a
+straight line across a zone that was never entered is still a move into the zone it ends in). A drop **outside every
+zone**, and a drop into a zone from outside them, is a change of zone too: `confirm(ctx)` is asked with `plan: null`,
+`cost: null`, `reachable: false` and the place outside as `to` / `from` (`zone: null`, `spot: null`, `id: -1`); a yes moves
+nothing, there is no plan (a combat module that needs such a move makes it with `apply`). Otherwise two free drags, out of
+the zones and back in, would pass every wall. The **GM's own** such drop (`gm: true`, the free placement not switched off:
+section 33) is a placement: written, and `place(ctx)` is told with its inverse, as after an Alt-drop. Not asked: a drag
+that stays outside the zones, a drag inside one zone and level, a token on an off-map level (sky, orbit).
+
+One update that changes **both the position and the level** inside one zone (with `levels: true`) is held like a level
+change: `confirm(ctx)` with `level: true`, `drop` the new position; `true` writes the whole update. With a position in
+another zone it is asked as a drag whose `to` is the place on the level asked for.
 
 **Level changes** (`levels: true`, off by default so an older caller sees no change):
 
@@ -680,6 +721,8 @@ const id = api.highlight({
   users: [userId],                    // absent: this client only; "all"; "gm"; a user id or a list
   order: 0                            // higher wins where two highlights name the same zone or border
 });                                   // -> the id, or null when the spec names nothing that exists
+// (M4) the same id with nothing to show (`zones: []`, no borders, no tokens) takes that set away, here and where it was sent
+// (M4) clearHighlights(null), (7), ({ id: null }), ({ prefix: undefined }) name no set: nothing goes, 0 - also clearTokenMarks, clearLinks
 api.clearHighlights(id);              // also ({ id }), ({ prefix: "ipu." }), () everything this client made,
                                       // ({ all: true }) also what others showed here (this client's screen only) -> how many went
 api.highlights();                     // what is on this client's screen: [{ id, zones, borders, order, from }]
@@ -735,7 +778,9 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
   carries the title, the hint and a Cancel button, the pointer says whether the zone under it can be picked and shows its
   `tip`, the zone under the pointer is lit. A click on a zone on offer picks it; Escape, a right-click or Cancel gives up; a
   right-drag still pans and the wheel still zooms. A new pick replaces the running one (`replaced`).
-- The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick.
+- The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick -
+  also the pick this client asked of another user (`sceneChanged`; that user's client is told to stop), and a pick asked
+  by a GM who disconnects ends on the asked client (`userGone`). One zone is offered on one level at a time (section 36).
 - Asked of another user, the request goes to that user alone and the answer comes back to the asker alone; the user leaving
   resolves with `userGone`. A pick request is taken from a GM only. `inset`, `reveal` and `edgePan` go along (the insets
   declared with `api.uiInset` are each client's own).
@@ -918,7 +963,7 @@ it the target end alone is sent), and no client draws a line from or to a token 
 
 ```js
 const id = api.markTokens({
-  id: "ipu.targets",                    // the same id again replaces the set; absent: a fresh id
+  id: "ipu.targets",                    // the same id again replaces the set (with `tokens: []`: takes it away); absent: a fresh id
   users: [userId],                      // absent: this client
   order: 0,                             // a higher set wins part by part where two name one token; state chips add up
   color: "target",                      // default colour of the entries (named colour of section 17 or a number)
@@ -985,7 +1030,8 @@ const r = await api.pickMove({
 - `zones` absent: what `api.reach(token, profile)` gives, labelled with the distance and priced in movement actions
   (the map's own default; works with no combat module).
 - `route`: the zones entered in order (or a plan of section 14) when the move is not the map's own shortest. Absent: the
-  map's route (`api.plan`). A way the map itself would not walk (through a standing wall) is still drawn, border by border.
+  map's route (`api.plan` for the profile: the way round a wall, as it is priced); only where the profile has no route at
+  all, the forced way. A way the map itself would not walk (through a standing wall) is still drawn, border by border.
 - `hazards`: absent = what the map itself knows on that route (a blocked border with its Armor, a zone burning);
   `[]` = nothing; a list = the caller's (reactions waiting, a guarded zone, ...). `{ zone | border, text, color, icon, tip }`.
 - `more: true`: the move can be made another way (through a wall, at a higher price). The tip says "Right-click: another
@@ -1013,7 +1059,9 @@ api.clearHighlights("ipu.warn");
 - Tokens are caught **on the level the area is put on** (ground when the picked place is ground); `anyLevel: true` catches
   every level of the covered zones. A player's client catches only the tokens that player sees.
 - `areaPreview`: the same as a standing show, sent to `users` like a highlight and a set of token marks under one id.
-  `level` (a token, a place, a spot): only tokens on that level; absent: every level.
+  `level` (a token - document, id or uuid -, a place, a spot, or a level word: `"ground"`, `"elevated"`,
+  `"underground"`, `"f2"`, `{ level: "floor", floor: n }`): only tokens on that level; absent: every level; a level that cannot be
+  read (a token that is gone) catches nobody.
 - `warn`: a dashed band in the danger colour with a chip (a warning sign and the caller's words) on zones and borders. It
   is a highlight (section 17): the same `users`, taken away with `clearHighlights(id)`. Highlight entries may now carry
   `icon` (a name of `STATE_MARKS` or a Font Awesome class) drawn in front of the label.
@@ -1088,17 +1136,38 @@ Hooks.on("moinenMapsIntent", (userId, intent | null) => {});   // a GM's client
 ```
 
 It goes to the GMs' clients alone, never to another player. There it shows as a dashed line from the token to what is aimed
-at, dashed outlines on the zones, and the user's name with the label. Only about a token the sender owns. It fades after
-`ttl` ms unless said again (at most one message per 150 ms); `null` takes it away; a user who disconnects takes theirs
-along. It is not drawn on the sender's own screen (a GM's goes to the other GMs). `pickMove` and `pickArea` send it by themselves with `intent: true | { label }`.
+at, dashed outlines on the zones, and the user's name with the label. Only about a token the sender owns. It is not drawn
+on the sender's own screen (a GM's goes to the other GMs). `pickMove` and `pickArea` send it by themselves with
+`intent: true | { label }`, from the moment the pick runs until it ends.
+
+**The contract, exactly (M4):**
+
+- **Every call with a spec is sent**, also when it says the same as the last one. Each message that arrives **starts the
+  `ttl` anew** on that GM's client: an intention said again before its `ttl` ran out stands without a gap, for as long as
+  the caller keeps saying it. Saying it again every `ttl` minus a margin (the combat module: `ttl` 120 s, said every
+  100 s) is enough; nothing else is needed to keep it up.
+- At most one message leaves per 150 ms; of several calls inside that window the **last** one wins (a `null` too).
+- **A GM who opens the scene later** (joins, reloads, comes over from another scene) is sent what stands on this client at
+  once, with the `ttl` that is left of the last say; from the caller's next say on it runs like on every other GM's client.
+  A GM on another scene is not shown it (an intention belongs to the scene it was said on).
+- `ttl` runs on each GM's client from the message's arrival; when it ends there, the intention goes there
+  (`moinenMapsIntent(userId, null)`). `ttl`: 20 s when absent, 120 s at most (a longer one is cut to it).
+- `intent(null)` takes it away on every GM's client. With nothing standing and nothing waiting it sends nothing (calling
+  it on every frame of an idle pick costs no message).
+- A user who disconnects takes theirs along; when the sender's client leaves the scene, the GMs are told it is over.
+- Returns `true` when taken (sent, waiting to be sent, or nothing to send), `false` for a spec that names nothing that can
+  be shown. An intention about a token the sender does not own is dropped on the GM's client.
 
 ## 33. The GM's gestures (M3)
 
 - **A free placement.** While `api.tactical` is on with `gm: true`, a GM who holds **Alt** while dropping a token places
   it: no route, no price, nobody is asked, the token flashes "No cost". The caller is told afterwards:
   `api.tactical({ ..., place(ctx) {} })` with `ctx = { token, from, to, drop, free: true, inverse: { op: "tokens", rows } }`
-  (`inverse` goes to `api.apply` to take the placement back). `free: false` switches the gesture off. The update carries
-  `options.mmFree === true`.
+  (`inverse` goes to `api.apply` to take the placement back; it carries `skipMissing: true`). `free: false` switches the
+  gesture off. The update carries `options.mmFree === true`. (M4) Alt is read from the key **and** from every pointer
+  press and release on the page, and is forgotten when the window loses focus: an Alt let go in another window (Alt+Tab)
+  does not make the next plain drop a placement. (M4) The GM's drop out of the zones or into them from outside is a
+  placement too, without Alt (section 14): `to.zone` or `from.zone` is then null.
 - **Giving a hit to someone else, forcing a result** are the caller's rules: the map gives the gesture. Register
   `api.onContext` on the GM's client and answer a token with a menu (section 29) whose entries are the caller's ("Hit this
   one instead", "Set the result" with a stepper).
@@ -1150,3 +1219,46 @@ along. It is not drawn on the sender's own screen (a GM's goes to the other GMs)
 - The warning band on a very large zone is thin against a busy map; the chip is what reads. A caller that wants more
   passes `style: "fill"` through `api.highlight` with the same id.
 - An intention is drawn to a zone's label point, which may lie far from the pointer in a large zone.
+
+## 36. Corrections after the seventh adversary round (M4)
+
+What changed for a caller, in one list (each is also said where it belongs above; the checks are `dev/zones-adv7.test.mjs`).
+
+| | Before | Now |
+| --- | --- | --- |
+| `planAlong` with an `end` outside the chain's last zone | a plan that ended in another zone | null (`end` is a level of the last zone) |
+| `planAlong` over a climb that cannot be counted | never returned | null |
+| `reach` for a mover off the ground | horizontal steps only: disagreed with `plan` | the plan's `total` and `cost`; zones without a plan left out; `{ flat: true }` gives the old rows |
+| a drag out of the zones / into them from outside | passed (two drags crossed any wall) | asked (`plan: null`, `reachable: false`, `zone: null`); the GM's own is a placement |
+| one update with position and level | passed unasked | held (`level: true`) |
+| Alt let go in another window | the next drop was a placement | read from pointer events too, cleared on blur |
+| `tokens` op / inverse naming a deleted token | threw or half wrote | `noToken` with `missing`; inverses carry `skipMissing: true` and skip it |
+| `move` with the mover deleted on the way | rejected, `moveEnded` never told | ends `stopped`, `reason: "noToken"` |
+| malformed `tokens` / `batch` op | threw | `badOp` |
+| a batch that changed nothing | `changed: true` | `changed: false` |
+| ids made by the map after a delete | could repeat one in use | skip those in use |
+| a profile's steps over edges | kept per way: one mover's answer given to another | kept per profile name |
+| `pickMove` with no `route` in an entry | forced way (through walls) | `api.plan(profile)`; the forced way only when there is no other |
+| `pickArea` on a zone offered on two levels | answer for the first level | the answer and `caught` are counted for the place clicked |
+| `areaPreview({ level })` | a level word only | also a token (id, uuid, document: its level), a place; a level that cannot be read catches nobody |
+| `intent` said again | dropped as a repeat: faded on the GMs' screens, a late GM never saw it | section 32 |
+| `pickMove` / `pickArea` `intent` | said before the pick ran (stood after a refused pick) | said when the pick runs |
+| a show under an id with an empty list | ignored: the old set stayed | takes the set away |
+| `clear...(null)` and the like | cleared everything this client made | nothing |
+| a pick asked of a user, the asking GM changes scene or leaves | ran on with nobody to answer | ends: `sceneChanged` (told to the user's client) / `userGone` |
+| a mover or anchor deleted under a pick / menu | pick and menu stayed | `pickMove` / `pickArea` resolve `{ ok: false, reason: "noToken" }`; the menu `noAnchor` |
+| `onContext` spec answered after a scene change | menu opened on the new scene | not opened; the spec's `done` gets `{ ok: false, reason: "sceneChanged" }` |
+| marks, lines, highlights of a client that reloaded or left | stayed on the others' screens for good | dropped when that user disconnects, and when its next page load says hello (what the new page sent before its hello stays) |
+| `warn` with `zones` / `borders` that are no list | threw | null |
+
+Limits that stay:
+
+- One zone can be offered by a pick on **one level at a time**: a second entry for the same zone on another level is
+  dropped (the pick is made by clicking the zone's ground).
+- A line (section 26) from a token the viewer cannot see arrives as the target's mark alone, its label with it: the same
+  rule as for a hidden token (what one user is shown never names what they cannot see).
+- **Not looked at in Foundry (node only):** everything in this section. Worth a look with a real mouse: a drag out of
+  the zones as a player and as the GM; Alt held, Alt+Tab away and back, then a plain drop (macOS Option as well); a drag of
+  several selected tokens (each token's update is asked on its own); `present` while the GM stands on another scene; the
+  cost under the pointer of `pickMove` on a scene with very many zones now that `reach` plans per zone for movers off the
+  ground (ground movers are unchanged).

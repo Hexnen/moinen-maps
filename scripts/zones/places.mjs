@@ -307,6 +307,11 @@ export function pathAlong(C, keyOf, A, B, way, ids, { links = null, stairs: clim
   const spot = (id, level, floor = 0) => spotOf(keyOf(id), level, floor);
   // the levels inside a building, one vertical zone a step: floors, then the rooftop above the top floor
   const rung = (id, h) => { const n = floorsOf(M, id); return h <= 0 ? ["ground", 0] : h > n ? ["elevated", 0] : ["floor", h]; };
+  const walks = climbs && (way === "walk" || way === "swim");
+  // a place this way of moving cannot be at (a walker in the air, anybody but a burrower underground) has no stairs to it: no
+  // plan, as plan() says (the loop below would never end on a climb of null)
+  const up = walks ? climb(M, A, way) : 0, down = walks ? climb(M, B, way) : 0;
+  if ( !Number.isFinite(up) || !Number.isFinite(down) ) return null;
   const stairs = (id, h0, h1) => {
     for ( let h = h0; h !== h1; ) {
       const [l0, f0] = rung(id, h); h += h1 > h ? 1 : -1; const [l1, f1] = rung(id, h);
@@ -314,11 +319,10 @@ export function pathAlong(C, keyOf, A, B, way, ids, { links = null, stairs: clim
     }
   };
   const hop = (p, to) => steps.push({ kind: "level", zone: p.zone, from: p.spot, to: to.spot, level: to.level, floor: to.floor });
-  const walks = climbs && (way === "walk" || way === "swim");
   if ( ids.length === 1 ) {
-    if ( A.spot !== B.spot ) { if ( walks ) stairs(A.id, climb(M, A, way), climb(M, B, way)); else hop(A, B); }
+    if ( A.spot !== B.spot ) { if ( walks ) stairs(A.id, up, down); else hop(A, B); }
   } else {
-    if ( walks ) stairs(A.id, climb(M, A, way), 0);
+    if ( walks ) stairs(A.id, up, 0);
     const travel = TRAVEL[way];
     let at = walks ? spot(A.id, "ground") : A.spot;
     for ( let i = 1; i < ids.length; i++ ) {
@@ -337,7 +341,7 @@ export function pathAlong(C, keyOf, A, B, way, ids, { links = null, stairs: clim
       }
       at = to;
     }
-    if ( walks ) stairs(B.id, 0, climb(M, B, way));
+    if ( walks ) stairs(B.id, 0, down);
   }
   let borders = 0, edges = 0;
   for ( const s of steps ) { if ( s.kind === "border" ) borders++; else if ( s.kind === "edge" ) edges++; }
