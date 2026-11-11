@@ -1320,3 +1320,79 @@ screen (the label whole, the tip with the name); the "My view" chip and a take-o
 panel and a question open at 1366 x 768 (with the combat module's own stylesheet rule for the chip switched off, to see
 the map's placement); a painted fire put out by a combat action and undone (the flames grow in again in the same shapes
 and colours, on a player's client too), also after waiting until the smoke of the put-out is gone.
+
+## 38. Framing what a combat module names, and a driven fight (U94)
+
+Row U94 of `invincible-plus-ultra/dev/combat-usability.md` ("how the camera works together with tactics, XCOM style").
+Checks: `dev/director-frame.test.mjs` (the pure parts in `scripts/director/stage-core.mjs`). Code:
+`scripts/director/source-stage.mjs` (`frame`, `camera({ driver })`), `scripts/director/director.mjs` (`registerVeto`).
+
+The director is led by one client and knows two audiences (the GMs, everybody). A tactical fight has a third thing: every
+user holds an own view of the fight (somebody hidden from one player is not hidden from another). So the camera of a
+tactical fight is not sent: every client asks for its own, locally, and the map decides whether and how the view moves.
+
+### `api.frame(spec)` -> `Promise<{ ok: true, moved, whole?, arrived? } | { ok: false, reason }>`
+
+Local to the calling client. Nothing is sent to anybody.
+
+| field | |
+| --- | --- |
+| `tokens` | token ids of the viewed scene, the FOCUS first. A token this client's canvas does not show to this user (hidden, out of sight, gone) is left out; when the focus is not shown nothing is framed (`reason: "unseen"`) |
+| `zones` | zone keys to bring in with the tokens when they fit |
+| `points` | `[{ x, y }]` scene points, the same |
+| `fit` | `false`: the focus alone (default: everything named, when it fits at the user's zoom) |
+| `level` | `"turn"` (default) or `"all"`: the least setting of the user's switch (section 23, `camera({ follow })`) at which this plays |
+| `hand` | `true`: this answers the user's own act (a unit chosen, a target walked to): the quiet time after the user's own camera move and a "My view" of this turn do not stop it. `off` still does |
+| `after` | a token id: wait until that token has stopped moving, then frame |
+| `why` | a word for the trace (`_debug().frames`) |
+
+What it does, always:
+
+- **never changes the zoom**; the zoom is the user's;
+- **nothing moves** when the focus stands in the free stretch of the screen (section 23: Foundry's middle column less the
+  declared `uiInset`s and windows), 5 % inside its edge;
+- otherwise **the least slide** that puts the subject 14 % inside the free stretch; several subjects come in together when
+  they fit at the user's zoom, else the focus whole and the frame leaning toward the others;
+- the glide: 420 ms x (0.75 + 1.6 x screens travelled), within 0.75 .. 2.2 x; a jump under reduced motion; the user's
+  wheel, drag or pan keys stop it at once (the screen engine's guard) and the camera is then the user's;
+- **never goes back by itself.** After a move that was not the user's own act the "My view" chip (and Esc) stands for 8 s:
+  it glides back to where the user was and no further automatic move comes that turn. Not asked for in 8 s: the view
+  is the user's as it stands;
+- answers `{ ok: false, reason }` and moves nothing for: `off` (the user's switch), `level`, `held` (another module holds
+  the camera: LockView, Hot Pan), `busy` (a take-over runs), `hand` (the user's hand is on the map, or moved the camera
+  within the stage's "leave a player alone" seconds, or took the view back this turn), `unseen`, `noSubject`, `noScene`,
+  `covered` (no free stretch), `replaced` (a newer frame came while this one waited), `noStage`, `error`.
+
+It works whether the world's director switch is on or off and whatever the GM's director mode is; it obeys the kill
+switch `CONFIG.moinenMaps.noDirector`. `api.frameBack()` is the chip's click.
+
+### `api.camera({ driver })`
+
+`driver: "<module id>"` while a fight of that module runs on this client; `driver: null` when it is over. `camera()`
+and `status()` answer `driver`. While driven, on this client only:
+
+| | Without a driver (as before) | Driven |
+| --- | --- | --- |
+| the director's turn, attack, roll and damage shots of the fight | played | stand down (a veto, `director.registerVeto`) |
+| a move shot of a combatant's token | played | stands down; a bystander's plays |
+| the map's own events (destruction, fire, a cinematic the GM starts) | played | played |
+| the stage's own glide to the active combatant, its return at the end of the fight | yes | no: the driver's `frame` calls are the fight's camera, and nothing returns by itself |
+| the letterbox on a hit | by the stage's setting | none (the shots that carried it stand down) |
+
+A table without a driving module is untouched: no veto is registered until `camera({ driver })` is called.
+
+### For the caller
+
+| the combat module wants | it calls |
+| --- | --- |
+| to be the camera of its fight on this client | `camera({ driver: id })` at the first redraw with a fight, `camera({ driver: null })` without |
+| the view on somebody (a turn, a question, a target) | `frame({ tokens: [focus, ...others], level, hand, why })` |
+| the view on somebody who walks | `frame({ tokens: [id], zones: [to] })`, then `frame({ tokens: [id], after: id })` |
+| to know it can | `typeof api.frame === "function"` |
+
+Hand over only what this user may know: `frame` drops what the canvas does not show, but a token visible on the map and
+concealed in the fight (a disguise) is the caller's to leave out.
+
+**Limits.** One frame at a time: a newer one takes the move over. The letterbox "action camera" of a hit is not part of
+a driven fight (a next step: a driver-side call that asks for the bars). `frame` does not follow a moving token
+continuously; it frames where the token started and where it stopped.
