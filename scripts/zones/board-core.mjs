@@ -216,6 +216,27 @@ export function routeRuns(start, steps, end, at) {
   return runs;
 }
 
+/**
+ * Where a route crosses a border: the point of the border's stretches (`segs`: [[x0, y0, x1, y1], ...]) that the straight way from
+ * `a` to `b` passes through, else the point of them nearest to that way. null: no stretch.
+ */
+export function crossing(a, b, segs) {
+  const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+  const toWay = (p) => { const t = len2 > 1e-9 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0; return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t)); };
+  const onSeg = (s, p) => { const ex = s[2] - s[0], ey = s[3] - s[1], l2 = ex * ex + ey * ey, t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((p.x - s[0]) * ex + (p.y - s[1]) * ey) / l2)) : 0; return { x: s[0] + ex * t, y: s[1] + ey * t }; };
+  let best = null, bd = Infinity, hit = null, ht = Infinity;
+  for ( const s of segs ?? [] ) {
+    if ( !s || s.length < 4 ) continue;
+    const ex = s[2] - s[0], ey = s[3] - s[1], den = dx * ey - dy * ex;
+    if ( Math.abs(den) > 1e-9 ) {
+      const t = ((s[0] - a.x) * ey - (s[1] - a.y) * ex) / den, v = ((s[0] - a.x) * dy - (s[1] - a.y) * dx) / den;
+      if ( t >= 0 && t <= 1 && v >= 0 && v <= 1 && t < ht ) { ht = t; hit = { x: a.x + dx * t, y: a.y + dy * t }; }
+    }
+    for ( const q of [a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }] ) { const p = onSeg(s, q), d = toWay(p); if ( d < bd ) { bd = d; best = p; } }
+  }
+  return hit ?? best;
+}
+
 /** The end of a segment pulled in by `d` (so an arrow stops at a token's rim): [x, y]. */
 export function pullIn(ax, ay, bx, by, d) {
   const len = Math.hypot(bx - ax, by - ay);

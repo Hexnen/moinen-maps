@@ -166,7 +166,7 @@ function setHoverTok(id, at) {
     }
     try { Hooks.callAll("moinenMapsTokenHover", id ? canvas.scene?.tokens?.get(id) ?? null : null, e ?? null); } catch {}
   }
-  if ( tipEl && at ) { tipEl.style.left = `${at.x + 16}px`; tipEl.style.top = `${at.y + 18}px`; }
+  if ( tipEl && at ) Interact.placeTip(tipEl, at);
 }
 
 /**
@@ -244,7 +244,21 @@ const zoomU = () => 1 / Math.max(0.05, canvas.stage?.scale.x ?? 1);
 function planFor(tok, raw, spot, profile) {
   try {
     if ( raw?.route && typeof raw.route === "object" && Array.isArray(raw.route.steps) ) return raw.route;
-    if ( Array.isArray(raw?.route) && raw.route.length ) return Zones.zonesApi.planAlong(tok, raw.route, { profile });
+    if ( Array.isArray(raw?.route) && raw.route.length ) {
+      const pl = Zones.zonesApi.planAlong(tok, raw.route, { profile });
+      if ( pl ) return pl;
+      // the caller's way is the caller's: where the map would not walk it (through a wall), it is still drawn, border by border
+      const start = Zones.zonesApi.zoneOfToken(tok)?.zone ?? null, zones = [start], steps = [];
+      for ( const w of raw.route ) {
+        const k = HL.zoneKeyOf(w), prev = zones[zones.length - 1];
+        if ( !k || !prev ) return null;
+        if ( k === prev ) continue;
+        const br = Zones.zonesApi.borderBetween(prev, k);
+        steps.push({ kind: br ? "border" : "edge", zone: k, border: br });
+        zones.push(k);
+      }
+      return steps.length ? { zones, steps } : null;
+    }
     return Zones.zonesApi.plan(tok, spot, { ...(profile ?? {}), force: true }) ?? Zones.zonesApi.plan(tok, spot, profile ?? {});
   } catch { return null; }
 }
@@ -266,15 +280,32 @@ function showRoute(tok, plan, hazards, color) {
   if ( !lay ) return;
   if ( !plan?.steps?.length ) { lay.setRoute(null); return; }
   const t = tok.object, start = t ? Zones.tokenCenter(t) : { x: tok.x, y: tok.y }, endKey = plan.zones?.[plan.zones.length - 1] ?? null, end = endKey ? at(endKey) : null, u = zoomU();
-  const runs = BC.routeRuns(start, plan.steps, end, at), marks = plan.steps.filter((s) => s.kind === "border" && s.border && Number.isFinite(s.border.x)).map((s) => ({ x: s.border.x, y: s.border.y }));
+  // where each border is crossed: at its door or wall mark when it has one (that is the way through), else where the straight way
+  // to the next zone passes it (a long border's own label point may lie far off the way)
+  const Zs = Zones.zones(), cross = new Map();
+  let here = start;
+  const steps = plan.steps.map((s) => {
+    if ( s.kind === "edge" ) { const b = at(s.zone); if ( b ) here = b; return s; }
+    if ( s.kind !== "border" || !s.border?.key ) return s;
+    let p = Number.isFinite(s.border.x) ? { x: s.border.x, y: s.border.y } : null;
+    if ( !(s.border.wall || s.border.doorway) || !p ) {
+      const [ia, ib] = s.border.key.split("|").map((k) => Zones.zonesApi.idOf(k)), target = at(s.zone) ?? end;
+      const segs = (Zs?.borders ?? []).filter((br) => !br.edge && ((br.a === ia && br.b === ib) || (br.a === ib && br.b === ia))).map((br) => br.pts);
+      p = (target ? BC.crossing(here, target, segs) : null) ?? p;
+    }
+    if ( !p ) return s;
+    cross.set(s.border.key, p); here = p;
+    return { ...s, border: { ...s.border, x: p.x, y: p.y } };
+  });
+  const runs = BC.routeRuns(start, steps, end, at), marks = [...cross.values()];
   const chips = [], used = [];
   for ( const h of hazards ?? [] ) {
     let p = null;
     const bk = h.border != null ? HL.borderKeyOf(h.border) : null, zk = bk ? null : HL.zoneKeyOf(h.zone ?? h);
-    if ( bk ) { const [a, b] = bk.split("|"), br = Zones.zonesApi.borderBetween(a, b); if ( br ) p = { x: br.x, y: br.y - 17 * u }; }
+    if ( bk ) { const [a, b] = bk.split("|"), br = cross.get(bk) ?? cross.get(`${b}|${a}`) ?? Zones.zonesApi.borderBetween(a, b); if ( br && Number.isFinite(br.x) ) p = { x: br.x, y: br.y - 17 * u }; }
     else if ( zk ) {
       // on the route inside that zone: between where it is entered and where it is left (or the route's end)
-      const i = plan.steps.findIndex((s) => s.zone === zk && s.kind !== "level"), into = i >= 0 ? plan.steps[i] : null, next = plan.steps.slice(i + 1).find((s) => s.kind === "border" && s.border);
+      const i = steps.findIndex((s) => s.zone === zk && s.kind !== "level"), into = i >= 0 ? steps[i] : null, next = steps.slice(i + 1).find((s) => s.kind === "border" && s.border);
       const a = into?.border && Number.isFinite(into.border.x) ? into.border : at(zk), b = next?.border ?? at(zk);
       if ( a && b ) p = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 15 * u };
     }
@@ -672,7 +703,8 @@ function takeIntent(uid, raw) {
  *   api.intent({ token (the actor's own), to: token | { zone } | { x, y }, zones: [key], border, label, color, ttl = 20000 })     api.intent(null)
  * It goes to the GMs' clients alone (never to another player) and shows there as a dashed line from the token to what is aimed at,
  * dashed outlines on the zones, and the user's name with the label. It fades by itself after `ttl` ms unless said again; null
- * takes it away. Sent at most every 150 ms. A GM's own call shows on the GMs' screens too. Returns true when it was (or will be) sent.
+ * takes it away. Sent at most every 150 ms. It is not drawn on the sender's own screen (a GM's goes to the other GMs). Returns true
+ * when it was (or will be) sent.
  */
 export function intent(spec) {
   const it = spec ? BC.cleanIntent(spec) : null;
@@ -687,7 +719,6 @@ export function intent(spec) {
     const now = intentNext; intentNext = undefined; intentSent = JSON.stringify(now);
     const gms = gmIds().filter((id) => id !== me());
     if ( gms.length ) emit({ op: "intent", intent: now }, gms);
-    if ( game.user?.isGM ) takeIntent(me(), now);
     intentTimer = setTimeout(go, 150);
   };
   go();

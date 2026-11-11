@@ -143,6 +143,13 @@ const mid = { z1: { x: 100, y: 100 }, z2: { x: 300, y: 100 }, z9: { x: 900, y: 1
 let runs = BC.routeRuns({ x: 50, y: 50 }, [{ kind: "border", zone: "z2", border: { x: 200, y: 100 } }, { kind: "level", zone: "z2" }, { kind: "edge", zone: "z9" }, { kind: "border", zone: "z8", border: { x: 800, y: 100 } }], { x: 700, y: 100 }, (k) => mid[k]);
 check(runs.length === 3 && J(runs[0].pts) === J([50, 50, 200, 100]) && runs[1].jump === true && J(runs[1].pts) === J([200, 100, 900, 100]) && J(runs[2].pts) === J([900, 100, 800, 100, 700, 100]), "a route's line: from the mover through each border crossed to its end; a passage is a run of its own");
 check(J(BC.routeRuns({ x: 0, y: 0 }, [], { x: 0, y: 0 }, () => null)) === "[]", "no step: no line");
+{
+  // where a route crosses a border: where the straight way passes it, else the nearest point of the border to that way
+  const wall = [[100, 0, 100, 200]], c1 = BC.crossing({ x: 0, y: 50 }, { x: 200, y: 150 }, wall), c2 = BC.crossing({ x: 0, y: 300 }, { x: 200, y: 300 }, wall);
+  check(J(c1) === J({ x: 100, y: 100 }) && J(c2) === J({ x: 100, y: 200 }) && BC.crossing({ x: 0, y: 0 }, { x: 1, y: 1 }, []) === null, "a route crosses a border where the straight way passes it, else at the border's nearest point");
+  const two = BC.crossing({ x: 0, y: 10 }, { x: 300, y: 10 }, [[200, 0, 200, 20], [100, 0, 100, 20]]);
+  check(J(two) === J({ x: 100, y: 10 }), "of two stretches crossed the first on the way counts");
+}
 check(J(BC.pullIn(0, 0, 100, 0, 30)) === J([70, 0]) && J(BC.pullIn(0, 0, 10, 0, 30)) === J([5.5, 0]) && BC.bowed(0, 0, 100, 0, 0.1, 4).length === 10 && Math.abs(BC.bowed(0, 0, 100, 0, 0.1, 4)[5] + 5) < 1e-9, "a line stops at a token's rim (never more than under half of it) and bows a little");
 check(J(BC.menuSpot({ x0: 100, y0: 100, x1: 160, y1: 160 }, 200, 300, 1000, 600)) === J({ x: 170, y: 100 }) && BC.menuSpot({ x0: 850, y0: 100, x1: 910, y1: 160 }, 200, 300, 1000, 600).x === 640 && BC.menuSpot({ x0: 100, y0: 500, x1: 160, y1: 560 }, 200, 300, 1000, 600).y === 292, "a menu stands right of its thing, left when there is no room, and inside the window");
 check(BC.followOf("auto") === "all" && BC.followOf("auto", "turn") === "turn" && BC.followOf("off", "turn") === "off" && BC.followOf("all", "off") === "all" && BC.followOf("nonsense", "nonsense") === "all", "the camera's follow mode: the user's choice, else the combat module's default, else every beat");

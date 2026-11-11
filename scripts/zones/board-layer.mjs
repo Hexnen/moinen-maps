@@ -34,8 +34,9 @@ export function glyphOf(icon) {
       document.body.append(i);
       const c = getComputedStyle(i, "::before").content ?? "";
       i.remove();
-      const ch = c.replace(/^["']|["']$/g, "");
-      if ( ch && ch !== "none" && ch !== "normal" ) out = [ch, fa];
+      // (Font Awesome 6.7+ writes the glyph, a slash and its alternative text: "X" / "")
+      const m = /^\s*(["'])(.*?)\1/.exec(c), ch = m ? m[2] : "";
+      if ( ch ) out = [ch, fa];
     } catch {}
   }
   glyphs.set(icon, out);
@@ -212,8 +213,9 @@ export class BoardLayer {
         G.lineStyle({ width: 3.6 * u, color: l.color, alpha: 1, ...cap });
         if ( l.style === "dashed" ) pattern(G, pts, [10 * u, 8 * u]); else { G.moveTo(pts[0], pts[1]); for ( let i = 2; i < pts.length; i += 2 ) G.lineTo(pts[i], pts[i + 1]); }
         if ( l.head ) this.#head(G, pts, l.color, u);
+        // (the label rides the line; on a line too short to carry it - two tokens side by side - it goes under the target)
         const m = Math.floor(pts.length / 4) * 2;
-        mid = { x: pts[m], y: pts[m + 1] };
+        mid = Math.hypot(ex - sx, ey - sy) < 70 * u ? { x: b.x, y: b.y + b.r + 20 * u } : { x: pts[m], y: pts[m + 1] };
       }
       if ( l.label ) { const p = this.pills.addChild(pill(l.label, l.color, { size: 13 })); p.scale.set(u); p.position.set(mid.x, mid.y); }
     }

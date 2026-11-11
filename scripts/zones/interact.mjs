@@ -313,6 +313,15 @@ export function showReach(where, profile = {}, { id = "reach", users = null, max
 
 /* ---------------------------------------------------------------- picking a zone */
 
+/** Put a tip beside the pointer (client px), on the other side of it where it would leave the window. */
+export function placeTip(el, at) {
+  const r = el.getBoundingClientRect?.() ?? null, w = r?.width || 0, h = r?.height || 0, vw = Number(globalThis.innerWidth) || 1e9, vh = Number(globalThis.innerHeight) || 1e9;
+  let x = at.x + 16, y = at.y + 18;
+  if ( x + w > vw - 6 ) x = at.x - 12 - w;
+  if ( y + h > vh - 6 ) y = at.y - 12 - h;
+  el.style.left = `${Math.max(6, x)}px`; el.style.top = `${Math.max(6, y)}px`;
+}
+
 /**
  * Let a user pick a zone by clicking it. Resolves - never rejects - with
  *   { ok: true, zone (key), id, spot, place, x, y }                       the place picked and the scene point of the click
@@ -627,7 +636,7 @@ function startPick() {
       p.tip.innerHTML = e ? `<b>${esc(L("zone.title", { n: Zones.zoneName(id) }))}</b>${label ? ` · ${esc(label)}` : ""}${tip ? `<small>${esc(tip)}</small>` : ""}${more}` : esc(L("pick.notHere"));
     }
     else if ( ok && ext?.move ) { try { ext.move(p.allowed.get(id), at); } catch {} }
-    p.tip.style.left = `${at.x + 16}px`; p.tip.style.top = `${at.y + 18}px`;
+    placeTip(p.tip, at);
   };
   const onMove = (ev) => {
     p.at = { x: ev.clientX, y: ev.clientY };
