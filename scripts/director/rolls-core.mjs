@@ -68,7 +68,18 @@ export function rollEvent(f, { id, who, attacker = null, targets = [], what = ""
 }
 
 /**
- * The facts of a "Damage Taken" card: the system writes "<p><strong>Name</strong> took <strong>3</strong> damage.</p>" and a second
+ * The flavour of the system's damage card in every language it can be written in. The system stores the LOCALIZED label in the message, so a
+ * card written by a client in one language must still be recognised by a client in another (and after the language is changed): the
+ * label is compared with every known rendering, never with one localize() call. `now` = the label in this client's language.
+ */
+export const DAMAGE_FLAVORS = ["Damage Taken", "Otrzymane obrażenia"];
+export function isDamageFlavor(flavor, now = "") {
+  const fl = String(flavor ?? "").trim();
+  return !!fl && (DAMAGE_FLAVORS.includes(fl) || (!!now && fl === String(now).trim()));
+}
+
+/**
+ * The facts of a "Damage Taken" card: the system writes "<p><strong>Name</strong> took <strong>3</strong> damage.</p>" (any language: the LAST bold number of the first paragraph is the damage) and a second
  * <p> for a critical injury; Plus Ultra (when on) adds flags { from, to, max } of the Health. -> { dmg, from, to, max, crit, broken }.
  */
 export function damageFacts(content, puFlags = null) {

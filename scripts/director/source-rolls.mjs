@@ -1,6 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import { emit, isLeader, killed, isOn, publicName, registerCue } from "./director.mjs";
-import { audience, rollFacts, rollEvent, damageFacts, damageEvent } from "./rolls-core.mjs";
+import { audience, rollFacts, rollEvent, damageFacts, damageEvent, isDamageFlavor } from "./rolls-core.mjs";
 
 /**
  * ROLLS AND DAMAGE of the Invincible system, a source of the director (spec section 3: an attacker -> target shot, captions with the
@@ -109,7 +109,7 @@ function isDamageCard(message) {
   const fl = String(message.flavor ?? "").trim();
   if ( !fl ) return false;
   if ( message.flags?.["invincible-plus-ultra"]?.dmg ) return true;
-  return fl === game.i18n.localize("INVINCIBLE.Chat.DamageInfo.DamageTaken");
+  return isDamageFlavor(fl, game.i18n.localize("INVINCIBLE.Chat.DamageInfo.DamageTaken"));
 }
 
 /* ---------------------------------------------------------------- every client: the cue */
