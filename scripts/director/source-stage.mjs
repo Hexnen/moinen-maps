@@ -1,8 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as SC from "./stage-core.mjs";
-import { killed, isOn, myMode, R, HOOK, registerStager, cameraHeld, busy } from "./director.mjs";
-import { Screen } from "./stage.mjs";
+import { killed, isOn, myMode, R, HOOK, registerStager, registerVeto, cameraHeld, busy } from "./director.mjs";
+import { Screen, clientOpts } from "./stage.mjs";
 import { freeRect } from "./overlay.mjs";
 import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
@@ -58,13 +58,31 @@ export const follow = () => followOf(followChoice(), followDefault);
  */
 export function camera(o = null) {
   if ( o && typeof o === "object" ) {
+    if ( "driver" in o ) setDriver(o.driver);
     if ( o.default === "all" || o.default === "turn" || o.default === "off" ) followDefault = o.default;
     if ( FOLLOW.includes(o.follow) && o.follow !== followChoice() ) { try { game.settings.set(MODULE_ID, FOLLOW_KEY, o.follow); } catch { /* not registered */ } }
     if ( follow() === "off" && (st.parked || st.home) ) { st.parked = null; sync(); }
     tell();
   }
-  return { follow: follow(), choice: o && FOLLOW.includes(o.follow) ? o.follow : followChoice(), default: followDefault };
+  return { follow: follow(), choice: o && FOLLOW.includes(o.follow) ? o.follow : followChoice(), default: followDefault, driver };
 }
+
+/**
+ * A DRIVEN FIGHT (dev/zones-api.md 38): a combat module that runs the fight itself says so on each client (camera({ driver: id })) and
+ * names what to frame (frame()). While it is set and a started combat is on this scene, the director's own beats of that fight (the
+ * turn, the combatants' moves, rolls, attacks and damage) do not play on this client, and the stage's own turn handling stands down:
+ * one camera, the caller's. camera({ driver: null }) gives the fight back to the director.
+ */
+let driver = null;
+function setDriver(id) {
+  const next = typeof id === "string" && id ? id : null;
+  if ( next === driver ) return;
+  driver = next;
+  clearTimeout(lingerT); lingerT = 0;
+  if ( !beat && !homing ) { SC.frameSettle(st); sync(); }
+}
+const fightTokens = (c) => new Set((c?.combatants?.contents ?? [...(c?.combatants ?? [])]).map((cb) => cb.tokenId).filter(Boolean));
+const vetoShot = (shot) => { if ( !driver ) return false; const c = combatHere(); return !!c && SC.drivenShot(shot, c.id, fightTokens(c)); };
 
 const st = SC.newStage();
 let beat = null;                         // the stage beat on screen here: { id, own }
@@ -265,18 +283,111 @@ function keepOwnInFrame(shot) {
   }, 250));
 }
 
+/* ---------------------------------------------------------------- frame(): what a combat module names (dev/zones-api.md 38) */
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const idOf = (w) => (typeof w === "string" ? w.split(".").pop() : w?.document?.id ?? w?.id ?? null);
+let frameSeq = 0, lingerT = 0, glides = 0;
+const frames = [];                       // the last frame decisions here (checks): [ms, why, answer]
+/** The scene box of a zone's label point (a zone is framed by where its badge stands), or null. */
+function zoneBox(key) {
+  try {
+    const zs = moduleApi.zones, p = zs?.place?.(key), z = p ? zs.zones?.()?.zones?.find((q) => q.id === p.id) : null;
+    const at = z ? { x: z.label?.x ?? z.cx, y: z.label?.y ?? z.cy } : null, g = grid();
+    return at && Number.isFinite(at.x) && Number.isFinite(at.y) ? { x0: at.x - g * 0.75, y0: at.y - g * 0.75, x1: at.x + g * 0.75, y1: at.y + g * 0.75 } : null;
+  } catch { return null; }
+}
+/** While the token walks (a move of several stretches too): resolves when it has stood still for a moment, 6 s at most. */
+async function settled(id) {
+  const t0 = performance.now();
+  await sleep(350);
+  let still = 0;
+  while ( performance.now() - t0 < 6000 && still < 2 ) {
+    const t = seenTok(id); if ( !t ) return;
+    if ( t.animationContexts?.has?.(t.movementAnimationName) ) { still = 0; await Promise.race([Promise.resolve(t.movementAnimationPromise ?? null).catch(() => null), sleep(2500)]); }
+    else still++;
+    await sleep(120);
+  }
+}
+/**
+ * frame({ tokens, zones, points, fit = true, level = "turn", hand = false, after, why })
+ *   tokens  token ids / documents / placeables, THE FOCUS FIRST (where it lands); one this client's canvas does not draw (hidden from
+ *           this user, out of its sight) is left out, and a frame whose focus is such a token does nothing ("unseen"): the view never
+ *           moves toward what this user cannot see, whatever the caller names
+ *   zones   zone keys (framed by their label point); points [{ x, y }] scene px
+ *   fit     bring all of them in when they fit at the user's zoom (the zoom is never changed); false: the focus alone
+ *   level   "turn" (plays for "turn" and "all") | "all" (only for a user who chose "all")
+ *   hand    it answers the user's own act on this client (a unit chosen, a target walked to): the quiet time after the user's own
+ *           camera move does not stop it, and it leaves no "My view" to go back to
+ *   after   a token (id): wait until it has stopped walking, then frame
+ * -> Promise<{ ok: true, moved, whole? } | { ok: false, reason: "off" | "level" | "held" | "busy" | "hand" | "unseen" | "noSubject" | "noScene" | "covered" | "replaced" }>
+ * This client's view only; nothing is sent to anybody.
+ */
+export async function frame(spec = {}) {
+  const mine = ++frameSeq, why = typeof spec?.why === "string" ? spec.why.slice(0, 24) : "";
+  const say = (r) => { frames.push([Math.round(performance.now()), why, r.ok ? (r.moved ? "moved" : "there") : r.reason]); if ( frames.length > 40 ) frames.shift(); return r; };
+  const no = (reason) => say({ ok: false, reason });
+  try {
+    if ( !spec || typeof spec !== "object" || !canvas?.ready || !canvas.scene ) return no("noScene");
+    if ( killed() ) return no("off");
+    const level = spec.level === "all" ? "all" : "turn", hand = spec.hand === true;
+    const gate = () => SC.frameGate(st, { follow: follow(), level, hand, now: performance.now(), backMs: stageSettings().back * 1000, busy: busy(), held: cameraHeld(), screen: !!Screen.owner && !homing });
+    let g = gate(); if ( g ) return no(g);
+    if ( spec.after ) { await settled(idOf(spec.after)); if ( mine !== frameSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); g = gate(); if ( g ) return no(g); }
+    const ids = (Array.isArray(spec.tokens) ? spec.tokens : []).map(idOf).filter(Boolean).slice(0, 12), pad = grid() * 0.5;
+    const boxes = SC.frameSubjects(ids, (id) => { const t = seenTok(id); return t ? tokenBox(t, pad) : null; });
+    if ( !boxes ) return no("unseen");
+    for ( const k of (Array.isArray(spec.zones) ? spec.zones : []).slice(0, 8) ) { const b = zoneBox(k); if ( b ) boxes.push(b); }
+    for ( const p of (Array.isArray(spec.points) ? spec.points : []).slice(0, 8) ) if ( Number.isFinite(p?.x) && Number.isFinite(p?.y) ) boxes.push({ x0: p.x - pad, y0: p.y - pad, x1: p.x + pad, y1: p.y + pad });
+    if ( !boxes.length ) return no("noSubject");
+    const rect = freeRect();
+    if ( rect.covered ) return no("covered");                                    // (a window covers the map: nothing is moved behind it)
+    const v = viewNow(), plan = SC.framePlan(boxes, v, rect, { fit: spec.fit !== false });
+    if ( !plan ) return no("noSubject");
+    if ( !plan.moved ) return say({ ok: true, moved: false });
+    const lim = typeof canvas._constrainView === "function" ? canvas._constrainView({ x: plan.x, y: plan.y, scale: plan.scale }) : plan;
+    const to = { x: lim.x, y: lim.y, scale: v.scale };
+    if ( SC.sameView(v, to, 2) ) return say({ ok: true, moved: false });         // (the scene's edge: it cannot come further in)
+    const c = combatHere();
+    st.combat ??= c?.id ?? "frame";
+    if ( c && st.turn === null ) st.turn = turnKey(c);
+    SC.frameStart(st, v, hand);
+    const arrived = await glideTo(to, plan.ms);
+    if ( mine === frameSeq || arrived ) SC.frameEnd(st, to, arrived, hand, performance.now());
+    clearTimeout(lingerT); lingerT = 0;
+    if ( st.parked ) lingerT = setTimeout(() => { lingerT = 0; if ( beat || homing ) return; SC.frameSettle(st); sync(); }, SC.LINGER_MS);
+    sync();
+    return say({ ok: true, moved: true, whole: !!plan.whole, arrived });
+  } catch ( err ) { console.error(`${MODULE_ID} | frame`, err); return no("error"); }
+}
+/** The view to `to` in a calm move that the user's wheel / click / key stops; no motion for a user who asked for reduced motion. -> arrived */
+async function glideTo(to, ms) {
+  if ( clientOpts().reduced ) { canvas.pan({ ...to }); return true; }
+  const look = { fx: true, camOn: true, camMode: "frame", lbOn: false, vgOn: false, shOn: false, flOn: false, smOn: false, camEase: 0.85 };
+  if ( !Screen.begin({ r: look }, { owner: "stage", guard: true, frame: false, home: { x: to.x, y: to.y, scale: to.scale }, opts: { noCamera: false, allow: ["camera"] } }) ) return false;
+  glides++; homing = true; sync();
+  try { await Screen.end({ backMs: ms, hold: 0 }); } finally { if ( --glides <= 0 ) { glides = 0; homing = false; } }   // (a newer frame may have taken the move over)
+  return SC.sameView(viewNow(), to, 12);
+}
+
 /** The stage is over here (the combat ended, the director or the stage was switched off): home if the camera is parked away. */
 function endStage() {
   if ( beat ) { pendingHome = { to: st.home ? { ...st.home } : null, force: true }; }
   const go = SC.stageEnd(st);
   claimed.clear();
-  if ( go && !beat ) afterScreen(() => goHome(go.to));
+  clearTimeout(lingerT); lingerT = 0;
+  if ( go && !beat && !driver ) afterScreen(() => goHome(go.to));       // (a driven fight never sends the view back by itself)
   sync();
 }
 
 function onUpdateCombat(combat, changed) {
   if ( !changed || !("turn" in changed || "round" in changed || "started" in changed) ) return;
   if ( st.combat === combat.id && !combat.started ) { endStage(); return; }
+  if ( driver ) {
+    // a driven fight: the caller frames the turn; here only the turn is kept (a "My view" asked for holds for the rest of that turn)
+    if ( combat === combatHere() ) { const key = turnKey(combat); if ( key !== st.turn ) { st.combat = combat.id; SC.turnChange(st, key, false, false); } }
+    return;
+  }
   if ( !on() || combat !== combatHere() ) return;
   if ( st.combat !== combat.id ) { if ( st.combat ) endStage(); st.combat = combat.id; }
   const key = turnKey(combat);
@@ -354,7 +465,7 @@ function backHome() { if ( cameraHeld() ) { sync(); return; } st.out = st.turn; 
 /** The parked-state UI follows the state: the chip and the Esc listener only while the camera is parked away and nothing plays. */
 let resync = 0;
 function sync() {
-  const want = !!st.parked && !!st.home && !beat && !homing && on() && !cameraHeld(), parked = want && !Screen.owner;
+  const want = !!st.parked && !!st.home && !beat && !homing && (on() || (!!driver && !killed())) && !cameraHeld(), parked = want && !Screen.owner;
   clearTimeout(resync); resync = 0;
   if ( want && !parked ) resync = setTimeout(sync, 150);        // (the beat's bars are still sliding out: once the screen is free)
   if ( parked ) { showChip(); if ( !keyOn ) { window.addEventListener("keydown", onKey, true); keyOn = true; } }
@@ -396,11 +507,12 @@ function renderPanel(hostEl) {
 /* ---------------------------------------------------------------- wiring */
 
 export function status() {
-  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip, follow: follow() };
+  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip, follow: follow(), driver };
 }
 Hooks.once("init", registerSettings);
 Hooks.once("ready", () => {
   registerStager(styleOf);
+  registerVeto(vetoShot);
   Hooks.on(HOOK, onDirector);
   Hooks.on("updateCombat", onUpdateCombat);
   Hooks.on("deleteCombat", onDeleteCombat);
@@ -412,5 +524,5 @@ Hooks.once("ready", () => {
 });
 extendSection("director", { panels: [{ id: "dirStage", title: "MOINENMAPS.DirStage.title", icon: "fa-solid fa-clapperboard", open: false, mount: (h) => renderPanel(h) }] });
 
-export const stageSource = { settings: stageSettings, status, camera, follow, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
+export const stageSource = { settings: stageSettings, status, camera, follow, frame, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), frames: frames.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
 moduleApi.directorStage = stageSource;

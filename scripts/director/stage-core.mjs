@@ -174,3 +174,98 @@ export function stageEnd(st) {
   Object.assign(st, newStage());
   return go;
 }
+
+/* ---------------------------------------------------------------- framing what a combat module names (dev/zones-api.md 38) */
+
+/**
+ * A combat module that runs the fight itself tells the map WHAT to frame (api.frame); the stage decides WHETHER and HOW on this client.
+ * The rules, all of them here:
+ *   - the zoom is the user's: a frame never changes it;
+ *   - a subject that is inside the free part of the screen already moves nothing (FRAME_F of the stretch in from every side);
+ *   - else the view slides by the LEAST that brings it FRAME_IN inside; several subjects that fit are brought in together; when they
+ *     do not fit at the user's zoom the FIRST one (the focus: where it lands) is kept whole and the frame leans toward the others;
+ *   - the user's hand wins (frameGate), and what the camera took the user takes back with "My view" for LINGER_MS after the move.
+ */
+export const FRAME_F = 0.05, FRAME_IN = 0.14, LINGER_MS = 8000;
+export const LEVELS = ["turn", "all"];
+const union = (a, b) => (!a ? b : { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
+const okBox = (b) => !!b && [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) && b.x1 >= b.x0 && b.y1 >= b.y0;
+
+/**
+ * The boxes of what a frame names, as THIS client's canvas draws it: boxOf(id) -> a scene box, or null for a token this user is not
+ * shown (hidden from it, out of its sight, gone). A token not shown is left out; when the FOCUS (the first) is not shown the answer
+ * is null: nothing is framed. So a view never moves toward, or because of, what this user cannot see, whatever the caller named.
+ */
+export function frameSubjects(ids, boxOf) {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => { try { return boxOf(id) ?? null; } catch { return null; } });
+  if ( list.length && !list[0] ) return null;
+  return list.filter(Boolean);
+}
+/**
+ * Where the view goes for `boxes` (scene boxes, the focus first): null (nothing to frame), { moved: false } (it is on screen), or
+ * { moved: true, x, y, scale (= the view's), whole (every box is in), ms }.
+ */
+export function framePlan(boxes, view, rect, { fit = true, base = 420 } = {}) {
+  const list = (Array.isArray(boxes) ? boxes : []).filter(okBox);
+  if ( !list.length || !view || !rect || !(view.scale > 0) ) return null;
+  const focus = list[0], all = fit ? list.reduce(union, null) : focus;
+  const done = (to, whole) => {
+    if ( sameView(to, view, 2) ) return { moved: false };
+    const screens = Math.hypot(to.x - view.x, to.y - view.y) * view.scale / Math.max(1, Math.hypot(view.vw, view.vh));
+    return { moved: true, x: to.x, y: to.y, scale: view.scale, whole, ms: Math.round(clamp(base * (0.75 + 1.6 * screens), base * 0.75, base * 2.2)) };
+  };
+  if ( comfortable(all, view, rect, FRAME_F) ) return { moved: false };
+  const fits = (b) => (b.x1 - b.x0) * view.scale <= rect.w * (1 - 2 * FRAME_IN) && (b.y1 - b.y0) * view.scale <= rect.h * (1 - 2 * FRAME_IN);
+  if ( fits(all) ) return done(ownHome(view, all, rect, view, FRAME_IN), true);
+  // they do not fit at the user's zoom: the focus alone decides whether anything moves; then it stays whole, the frame leans to the rest
+  if ( comfortable(focus, view, rect, FRAME_F) ) return { moved: false };
+  if ( !fits(focus) ) return done(centreFor({ x: (focus.x0 + focus.x1) / 2, y: (focus.y0 + focus.y1) / 2 }, rect, view, view.scale), false);
+  const lean = attackCamera(all, focus, view, rect, view.scale, [1, 1], FRAME_F);
+  const to = lean ? ownHome(lean, focus, rect, view, FRAME_F) : ownHome(view, focus, rect, view, FRAME_IN);
+  return done(to, false);
+}
+
+/**
+ * May a frame move this client's view now? null (yes) or the reason it may not:
+ *   "off"    the user's switch says never; "level" it is a beat for "all" and the user chose "turn";
+ *   "held"   another module holds the camera; "busy" a show or a take-over has the screen;
+ *   "hand"   the user is at work on the map, moved the camera a moment ago (`backMs`), or asked for their view back this turn.
+ * `hand: true` = the frame answers the user's own act (a unit chosen, a target walked to with Tab): only the switch, a held camera and
+ * a busy screen stop it. `out` is kept per turn (the stage's state).
+ */
+export function frameGate(st, { follow = "all", level = "turn", hand = false, now = 0, backMs = 5000, busy = false, held = false, screen = false } = {}) {
+  if ( follow === "off" ) return "off";
+  if ( !LEVELS.includes(level) ) return "level";
+  if ( level === "all" && follow !== "all" ) return "level";
+  if ( held ) return "held";
+  if ( screen ) return "busy";
+  if ( busy ) return "hand";
+  if ( hand ) return null;
+  if ( st.out && st.out === st.turn ) return "hand";
+  if ( now - st.ownAt < backMs ) return "hand";
+  return null;
+}
+/** A frame is about to move the view: the home is the user's view now unless the camera is already away from it. */
+export function frameStart(st, view, hand = false) {
+  if ( hand ) return;
+  if ( st.home && st.parked ) return;
+  st.home = { x: view.x, y: view.y, scale: view.scale }; st.parked = null;
+}
+/** The move ended: `arrived` false = the user stopped it (the camera is theirs). A hand frame leaves no home: it was the user's own move. */
+export function frameEnd(st, to, arrived, hand, now) {
+  if ( !arrived ) { ownMove(st, now); return; }
+  if ( hand ) { st.parked = null; st.home = null; return; }
+  st.parked = { x: to.x, y: to.y, scale: to.scale };
+}
+/** "My view" was not asked for in time: where the camera stands is the user's view now. */
+export function frameSettle(st) { st.parked = null; st.home = null; }
+
+/** A director shot that a driven fight replaces on this client (the combat module frames it itself): `tokens` = the fight's token ids. */
+export const DRIVEN_KINDS = Object.freeze(["turn", "attack", "roll", "damage"]);
+export function drivenShot(shot, combatId, tokens) {
+  if ( !shot || !combatId ) return false;
+  if ( shot.lane === `cbt-${combatId}` ) return true;
+  if ( DRIVEN_KINDS.includes(shot.kind) ) return true;
+  if ( shot.kind === "move" ) return (shot.tokens ?? []).some((id) => tokens.has(id));
+  return false;
+}
