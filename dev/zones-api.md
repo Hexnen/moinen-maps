@@ -778,7 +778,9 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
   carries the title, the hint and a Cancel button, the pointer says whether the zone under it can be picked and shows its
   `tip`, the zone under the pointer is lit. A click on a zone on offer picks it; Escape, a right-click or Cancel gives up; a
   right-drag still pans and the wheel still zooms. A new pick replaces the running one (`replaced`).
-- The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick.
+- The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick -
+  also the pick this client asked of another user (`sceneChanged`; that user's client is told to stop), and a pick asked
+  by a GM who disconnects ends on the asked client (`userGone`). One zone is offered on one level at a time (section 36).
 - Asked of another user, the request goes to that user alone and the answer comes back to the asker alone; the user leaving
   resolves with `userGone`. A pick request is taken from a GM only. `inset`, `reveal` and `edgePan` go along (the insets
   declared with `api.uiInset` are each client's own).
@@ -961,7 +963,7 @@ it the target end alone is sent), and no client draws a line from or to a token 
 
 ```js
 const id = api.markTokens({
-  id: "ipu.targets",                    // the same id again replaces the set; absent: a fresh id
+  id: "ipu.targets",                    // the same id again replaces the set (with `tokens: []`: takes it away); absent: a fresh id
   users: [userId],                      // absent: this client
   order: 0,                             // a higher set wins part by part where two name one token; state chips add up
   color: "target",                      // default colour of the entries (named colour of section 17 or a number)
@@ -1028,7 +1030,8 @@ const r = await api.pickMove({
 - `zones` absent: what `api.reach(token, profile)` gives, labelled with the distance and priced in movement actions
   (the map's own default; works with no combat module).
 - `route`: the zones entered in order (or a plan of section 14) when the move is not the map's own shortest. Absent: the
-  map's route (`api.plan`). A way the map itself would not walk (through a standing wall) is still drawn, border by border.
+  map's route (`api.plan` for the profile: the way round a wall, as it is priced); only where the profile has no route at
+  all, the forced way. A way the map itself would not walk (through a standing wall) is still drawn, border by border.
 - `hazards`: absent = what the map itself knows on that route (a blocked border with its Armor, a zone burning);
   `[]` = nothing; a list = the caller's (reactions waiting, a guarded zone, ...). `{ zone | border, text, color, icon, tip }`.
 - `more: true`: the move can be made another way (through a wall, at a higher price). The tip says "Right-click: another
@@ -1056,7 +1059,9 @@ api.clearHighlights("ipu.warn");
 - Tokens are caught **on the level the area is put on** (ground when the picked place is ground); `anyLevel: true` catches
   every level of the covered zones. A player's client catches only the tokens that player sees.
 - `areaPreview`: the same as a standing show, sent to `users` like a highlight and a set of token marks under one id.
-  `level` (a token, a place, a spot): only tokens on that level; absent: every level.
+  `level` (a token - document, id or uuid -, a place, a spot, or a level word: `"ground"`, `"elevated"`,
+  `"underground"`, `"f2"`, `{ level: "floor", floor: n }`): only tokens on that level; absent: every level; a level that cannot be
+  read (a token that is gone) catches nobody.
 - `warn`: a dashed band in the danger colour with a chip (a warning sign and the caller's words) on zones and borders. It
   is a highlight (section 17): the same `users`, taken away with `clearHighlights(id)`. Highlight entries may now carry
   `icon` (a name of `STATE_MARKS` or a Font Awesome class) drawn in front of the label.
