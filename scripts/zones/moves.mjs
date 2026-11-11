@@ -95,7 +95,8 @@ const usesEdges = (C, prof) => prof.edges !== false && !!C.X?.links?.size;
  * (our reading: the book gives a portal or a tunnel no length). Kept per zones state, start, way and what the profile lets through.
  */
 export function stepsFrom(C, from, prof) {
-  const key = `${from}|${prof.way}|${prof.force ? 1 : 0}|${prof.edges === false ? "-" : Array.isArray(prof.edges) ? prof.edges.join() : `*${prof.name}`}`;
+  // (an edge may name the ways it lets through by the profile's own name - "flight", "leap": the name is part of the key whenever edges count)
+  const key = `${from}|${prof.way}|${prof.force ? 1 : 0}|${prof.edges === false ? "-" : `${Array.isArray(prof.edges) ? JSON.stringify(prof.edges) : ""}*${prof.name}`}`;
   let d = C.steps.get(key);
   if ( d ) return d;
   C.steps.set(key, d = new Map());
@@ -342,7 +343,8 @@ export function freeSpot(zone, { w, h, taken = [], near = null, grid = 100, orig
  * @param {Function[]} o.listeners                   (ctx) => answer | Promise<answer>
  * @param {(step, index) => object} o.context        what the listeners get for a step (the caller adds token, profile, places)
  * @param {(step, index) => boolean} [o.blocked]     whether the step cannot be taken as the map is now
- * @param {(step, index) => Promise} o.perform       take the step (move the tokens)
+ * @param {(step, index) => Promise} o.perform       take the step (move the tokens); answering { stop: true, reason, data } or
+ *                                                   throwing (reason "error") ends the move there, the step not counted
  * @param {(step, index) => void} [o.after]          told after each step taken
  * @returns {Promise<{ done: number, stopped: null | { index, reason, data, step } }>}
  */
@@ -361,7 +363,11 @@ export async function runSteps({ steps, listeners = [], context, blocked = null,
     }
     if ( !stop && !pass && blocked?.(step, i) ) stop = { index: i, reason: "blocked", data: null, step };
     if ( stop ) return { done, stopped: stop };
-    await perform(step, i);
+    // (a step that cannot be taken after all - the mover is gone, the write was refused - ends the move like a stop: it never throws)
+    let took;
+    try { took = await perform(step, i); }
+    catch ( err ) { took = { stop: true, reason: "error", data: { error: String(err?.message ?? err) } }; }
+    if ( took?.stop ) return { done, stopped: { index: i, reason: took.reason ?? null, data: took.data ?? null, step } };
     done++;
     after?.(step, i);
   }

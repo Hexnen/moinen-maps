@@ -1232,10 +1232,11 @@ function opBorderBuild(o) {
 
 const stateRow = (id) => S.states.find((row) => row[2].id === id) ?? null;
 /** Give a new record its id from the scene counter ("s7", "e8"); a record that comes back with its id keeps it, and the counter
- *  stays ahead of it - an id is never given twice. */
+ *  stays ahead of it - an id is never given twice (an id in use is passed over: a scene saved while the counter lagged behind). */
 function takeId(s, rec, letter) {
-  if ( !rec.id ) rec.id = `${letter}${s.playNext++}`;
-  else { const m = /^[se](d+)$/.exec(rec.id); if ( m ) s.playNext = Math.max(s.playNext, Number(m[1]) + 1); }
+  const used = (id) => s.states.some((row) => row[2].id === id) || s.edges.some((e) => e.id === id);
+  if ( !rec.id ) { do rec.id = `${letter}${s.playNext++}`; while ( used(rec.id) ); }
+  else { const m = /^[se](\d+)$/.exec(rec.id); if ( m ) s.playNext = Math.max(s.playNext, Number(m[1]) + 1); }
 }
 /** A registry row as it is told: the state with the key of its zone (null: its zone is gone for now). */
 const stateOut = ([x, y, r]) => ({ ...copy(r), zone: keyOfId(zoneAtNow(x, y)) });
@@ -1352,13 +1353,24 @@ async function drawOptions(options = {}) {
   return "animate" in options || (await drawsFrames()) ? options : { ...options, animate: false };
 }
 const mayMove = (doc) => !!doc && (doc.canUserModify?.(game.user, "update") ?? doc.isOwner ?? false);
-async function writeTokens(rows, options = {}) {
-  const docs = rows.map((r) => canvas.scene?.tokens.get?.(r.id) ?? [...(canvas.scene?.tokens ?? [])].find((d) => d.id === r.id));
-  if ( docs.some((d) => !d) ) return fail("noToken");
+const tokenDoc = (id) => canvas.scene?.tokens.get?.(id) ?? [...(canvas.scene?.tokens ?? [])].find((d) => d.id === id) ?? null;
+/**
+ * Write token rows. `skipMissing`: a row whose token is no longer on the scene is left out and named in `missing` (an inverse: the
+ * tokens that still exist go back; with none of them left nothing is written, `changed: false`). Without it: all or nothing.
+ */
+async function writeTokens(rows, options = {}, { skipMissing = false } = {}) {
+  if ( !Array.isArray(rows) || !rows.every((r) => r && typeof r === "object" && typeof r.id === "string") ) return fail("badOp");
+  const missing = rows.filter((r) => !tokenDoc(r.id)).map((r) => r.id);
+  if ( missing.length && !skipMissing ) return fail("noToken", { missing });
+  if ( missing.length ) rows = rows.filter((r) => !missing.includes(r.id));
+  const docs = rows.map((r) => tokenDoc(r.id));
   if ( !docs.every(mayMove) ) return fail("notOwner");
   const before = docs.map(tokenRow);
-  await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), await drawOptions(options));
-  return { ok: true, changed: true, inverse: { op: "tokens", rows: before }, result: docs.map((d) => placeOfDoc(d)) };
+  if ( rows.length ) {
+    try { await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), await drawOptions(options)); }
+    catch ( err ) { console.warn(`${MODULE_ID} | zones: token write`, err); return fail("error"); }
+  }
+  return { ok: true, changed: rows.length > 0, inverse: { op: "tokens", rows: before, skipMissing: true }, result: docs.map((d) => placeOfDoc(d)), ...(missing.length ? { missing } : {}) };
 }
 
 const OPS = {
@@ -1369,8 +1381,10 @@ const OPS = {
 async function applyOne(op) {
   if ( !op || typeof op !== "object" ) return fail("badOp");
   if ( op.op === "batch" ) {
+    if ( !Array.isArray(op.ops) ) return fail("badOp");
     const inv = [], results = [];
-    for ( let i = 0; i < (op.ops?.length ?? 0); i++ ) {
+    let changed = false;
+    for ( let i = 0; i < op.ops.length; i++ ) {
       const r = await applyOne(op.ops[i]);
       if ( !r.ok ) {
         // all or nothing: what was done is taken back, last first
@@ -1378,10 +1392,11 @@ async function applyOne(op) {
         return fail(r.reason, { at: i });
       }
       inv.push(r.inverse); results.push(r.result);
+      if ( r.changed !== false ) changed = true;
     }
-    return { ok: true, changed: true, inverse: { op: "batch", ops: inv.reverse() }, result: results };
+    return { ok: true, changed, inverse: { op: "batch", ops: inv.reverse() }, result: results };
   }
-  if ( op.op === "tokens" ) return Array.isArray(op.rows) ? writeTokens(op.rows, { mmMove: op.move ?? "restore", ...(op.options ?? {}) }) : fail("badOp");
+  if ( op.op === "tokens" ) return writeTokens(op.rows, { mmMove: typeof op.move === "string" ? op.move : "restore", ...(op.options && typeof op.options === "object" ? op.options : {}) }, { skipMissing: op.skipMissing === true });
   const fn = OPS[op.op];
   return fn ? fn(op) : fail("badOp");
 }
@@ -1394,7 +1409,9 @@ async function applyOne(op) {
  *   { op: "zoneState.add", zone, state } | { op: "zoneState.update", id, patch } | { op: "zoneState.remove", id }
  *   { op: "edge.add", edge } | { op: "edge.remove", id }
  *   { op: "zone", zone, patch }                                               a zone's own marks (as setZone)
- *   { op: "tokens", rows: [{ id, x, y, alt, floor, air }] }                   put tokens somewhere (the inverse of a move)
+ *   { op: "tokens", rows: [{ id, x, y, alt, floor, air }], skipMissing? }     put tokens somewhere (the inverse of a move; the
+ *                                                                             inverses the map hands out carry `skipMissing: true`:
+ *                                                                             a token that is gone is left out and named in `missing`)
  *   { op: "batch", ops: [...] }                                               all or nothing, told and saved once
  * The scene is saved before the promise resolves (`save: false`: with the next save).
  */
@@ -1511,11 +1528,26 @@ export function plan(a, b, profile = {}) {
   const p = placeOf(a), q = placeOf(b), prof = Moves.profileOf(profile);
   return p && q && prof ? Moves.plan(cache(), keyOfId, p, q, prof) : null;
 }
-/** Where a mover can get to from a place: [{ zone, id, d, cost }] nearest first (`max`: no farther than this many steps). */
-export function reach(w, profile = {}, { max = Infinity } = {}) {
+/**
+ * Where a mover can get to from a place: [{ zone, id, d, cost }] nearest first (`max`: no farther than this many borders and edges).
+ * Counted from the level the mover is on, as plan() and moveCost() count it: `d` and `cost` are those of the plan to the zone's
+ * ground (the stairs down a building included), and a zone this mover has no plan to from there (a walker hanging in the air, a
+ * place its way of moving cannot be at) is left out. The mover's own zone is always the first row (d 0). `flat: true`: the borders
+ * and edges alone, from the ground of the mover's zone whatever level it is on.
+ */
+export function reach(w, profile = {}, { max = Infinity, flat = false } = {}) {
   const p = placeOf(w), prof = Moves.profileOf(profile);
   if ( !p || p.id < 0 || !prof ) return [];
-  return Moves.reach(cache(), p.id, prof, max).map((r) => ({ zone: keyOfId(r.id), id: r.id, d: r.d, cost: r.cost }));
+  const rows = Moves.reach(cache(), p.id, prof, max);
+  // (on the plain ground the plan to a zone has exactly the horizontal steps: nothing more to work out)
+  if ( flat === true || (p.level === "ground" && !p.airborne) ) return rows.map((r) => ({ zone: keyOfId(r.id), id: r.id, d: r.d, cost: r.cost }));
+  const out = [];
+  for ( const r of rows ) {
+    if ( r.id === p.id ) { out.push({ zone: keyOfId(r.id), id: r.id, d: 0, cost: Moves.costOf(0, prof) }); continue; }
+    const pl = Moves.plan(cache(), keyOfId, p, mkPlace({ id: r.id }), prof);
+    if ( pl ) out.push({ zone: keyOfId(r.id), id: r.id, d: pl.total, cost: pl.cost });
+  }
+  return out.sort((a, b) => a.d - b.d || a.id - b.id);
 }
 /** The level a thrown or pushed mover keeps: elevated stays up (in the air), everything else comes out on the ground. */
 const forcedEnd = (A, id) => mkPlace(A.level === "elevated" ? { id, alt: "elevated", air: true } : A.level === "underground" ? { id, alt: "underground" } : { id });
@@ -1532,7 +1564,8 @@ export function planAlong(from, zoneKeys, { profile = null, end = null, forced =
   const last = ids[ids.length - 1];
   const prof = Moves.profileOf(profile ?? { way: forced && A.level === "elevated" ? "air" : "walk" });
   if ( !prof ) return null;
-  const B = end ? placeOf({ id: last, ...end }) : forced ? forcedEnd(A, last) : mkPlace({ id: last });
+  const B = end && typeof end === "object" ? placeOf({ ...end, id: last, zone: undefined, x: undefined, y: undefined }) : forced ? forcedEnd(A, last) : mkPlace({ id: last });
+  if ( !B ) return null;
   // a forced chain that stays in the mover's zone goes straight up or down, one vertical zone a step
   if ( forced && end && ids.length === 1 && ids[0] === A.id && B ) {
     const steps = Moves.levelSteps(M, keyOfId, A, Moves.rungOf(M, B));
@@ -1711,20 +1744,26 @@ export async function move(token, to, o = {}) {
         rows = rowsInto(all, s.id, flags, drop ?? (step.kind === "border" && step.border ? { x: step.border.x, y: step.border.y } : null));
       }
       const opts = await drawOptions({ ...(o.options ?? {}), mmMove: op });
+      // a token deleted while the move runs: without the mover the move ends here; one that only went along is left behind
+      if ( !tokenDoc(doc.id) ) return { stop: true, reason: "noToken", data: { token: doc.id } };
+      rows = rows.filter((r) => tokenDoc(r.id));
       if ( opts.animate === false ) still = true;
       await canvas.scene.updateEmbeddedDocuments("Token", rows.map(tokenUpdate), opts);
-      if ( o.wait !== false && opts.animate !== false ) await settled(all);
+      if ( o.wait !== false && opts.animate !== false ) await settled(all.filter((d) => tokenDoc(d.id)));
     },
     after: (step, index) => emit("moveStep", { ...base, index, step, place: placeOfDoc(doc) })
   });
   emit("moveEnded", { ...base, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc) });
-  return { ok: true, op, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc), inverse: R.done ? { op: "tokens", rows: start } : null, animated: R.done > 0 && !still };
+  return { ok: true, op, done: R.done, total: steps.length, stopped: R.stopped, place: placeOfDoc(doc), inverse: R.done ? { op: "tokens", rows: start, skipMissing: true } : null, animated: R.done > 0 && !still };
 }
 
 /**
  * Cost confirmation when a token is dragged during tactical play (combat-plan 5.7 item 16). While it is on, a drag of a token
  * into ANOTHER zone by this client's user is not taken as it is: the route and its cost are worked out for the mover's profile
- * and `confirm(ctx)` is asked. A drag inside the zone goes through (moving inside a zone is free: book-dump 2383).
+ * and `confirm(ctx)` is asked. A drag inside the zone goes through (moving inside a zone is free: book-dump 2383). A drop
+ * outside every zone, and a drop into a zone from outside them, is a change of zone too: it is asked with `plan: null`,
+ * `reachable: false` and the place outside (`zone: null`) as `to` / `from`; a yes moves nothing (there is no plan). The GM's own
+ * such drop (`gm: true`, the free placement not switched off) is a placement like an Alt-drop: written, and `place(ctx)` told.
  *   tactical({ profile(tokenDoc) -> profile, confirm(ctx) -> true | false | Promise, when(tokenDoc) -> bool, gm: false })
  *   tactical(false)      off
  * ctx: { token, from, to (places), drop: { x, y } (the middle of where it was dropped), profile, plan, cost, reachable }.
@@ -1797,23 +1836,37 @@ function onPreUpdateToken(doc, changed, options, userId) {
   try {
     if ( TACT.when && !TACT.when(doc) ) return;
     // a GM who holds Alt while dropping the token PLACES it: no route, no price, nobody asked; the caller is told afterwards
-    if ( game.user.isGM && TACT.free && altDown() ) {
-      const from = placeOfDoc(doc);
-      FREE.set(doc.id, { from, row: { id: doc.id, x: sx(doc), y: sy(doc), alt: doc.flags?.[MODULE_ID]?.alt ?? null, floor: doc.flags?.[MODULE_ID]?.floor ?? null, air: doc.flags?.[MODULE_ID]?.air === true ? true : null } });
+    const placeFree = () => {
+      FREE.set(doc.id, { from: placeOfDoc(doc), row: { id: doc.id, x: sx(doc), y: sy(doc), alt: doc.flags?.[MODULE_ID]?.alt ?? null, floor: doc.flags?.[MODULE_ID]?.floor ?? null, air: doc.flags?.[MODULE_ID]?.air === true ? true : null } });
       if ( options && typeof options === "object" ) options.mmFree = true;
-      return;
-    }
-    const g = gridSize(), drop = { x: (changed.x ?? doc.x) + (doc.width * g) / 2, y: (changed.y ?? doc.y) + (doc.height * g) / 2 };
+    };
+    if ( game.user.isGM && TACT.free && altDown() ) { placeFree(); return; }
+    const g = gridSize(), drop = { x: (changed.x ?? sx(doc)) + (doc.width * g) / 2, y: (changed.y ?? sy(doc)) + (doc.height * g) / 2 };
     const from = placeOfDoc(doc), id = zoneAtNow(drop.x, drop.y);
-    // only a move from one zone into another is a move that costs; off the map there is nothing to count
-    if ( !from || from.area || from.id < 0 || id < 0 || id === from.id ) return;
-    const fl = doc.flags?.[MODULE_ID] ?? {};
-    const to = mkPlace({ id, alt: rawAlt(doc) === "underground" ? "underground" : rawAlt(doc) === "elevated" ? "elevated" : "ground", air: fl.air === true });
+    // a move from one zone into another is a move that costs - also out of the zones and back into one (two free drags would
+    // otherwise pass every wall); on an off-map level (sky, orbit) there is nothing to count
+    if ( !from || from.area ) return;
+    // (the GM's own drop out of the zones or into them from outside has no route to price: it is a placement, told like an Alt-drop)
+    if ( game.user.isGM && TACT.free && (from.id < 0) !== (id < 0) ) { placeFree(); return; }
+    const fl = doc.flags?.[MODULE_ID] ?? {}, lv = levelAfter(doc, changed);
+    if ( id === from.id ) {
+      // dropped where it stood (or outside the zones both times): free, unless the same update changes the level too
+      if ( !lv || !levelHeld(doc) ) return;
+      const to = mkPlace({ id, alt: Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground", floor: lv.floor, air: lv.air === true });
+      if ( Places.placeSig(from) === Places.placeSig(to) ) return;
+      const { _id, ...flat } = tokenUpdate({ id: doc.id, ...("x" in changed ? { x: changed.x } : {}), ...("y" in changed ? { y: changed.y } : {}), alt: lv.alt ?? null, floor: lv.floor ?? null, air: lv.air === true ? true : null });
+      askLevel(doc, lv, () => doc.update(flat, { mmMove: `lv${++moveSeq}` }));
+      return false;
+    }
+    // (a level written in the same update is where the mover asks to end up; else it keeps the level it travels on)
+    const alt = lv ? (Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground") : rawAlt(doc);
+    const to = mkPlace({ id, alt: alt === "underground" || alt === "elevated" || Places.AREAS.includes(alt) ? alt : "ground", floor: lv ? lv.floor : 0, air: lv ? lv.air === true : fl.air === true });
     askDrag(doc, from, to, drop);
     return false;
   } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }
 }
-/** Is Alt held on this client (Foundry's keyboard, else the last key event seen)? */
+/** Is Alt held on this client (Foundry's keyboard, else what the last key or pointer event of this window said; a window that
+ *  lost the focus holds no key: the key-up of an Alt+Tab never arrives). */
 let altKey = false;
 function altDown() {
   try { const k = game.keyboard; if ( typeof k?.isModifierActive === "function" ) return !!k.isModifierActive("Alt") || altKey; } catch {}
@@ -1828,7 +1881,7 @@ function onFreePlaced(doc, options) {
   FREE.delete(doc.id);
   const g = gridSize(), to = placeOfDoc(doc);
   try { flashToken(doc, game.i18n.localize("MOINENMAPS.Zones.board.free")); } catch {}
-  try { TACT?.place?.({ token: doc, from: f.from, to, drop: { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }, free: true, inverse: { op: "tokens", rows: [f.row] } }); }
+  try { TACT?.place?.({ token: doc, from: f.from, to, drop: { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }, free: true, inverse: { op: "tokens", rows: [f.row], skipMissing: true } }); }
   catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical placement`, err); }
 }
 async function askDrag(doc, from, to, drop) {
@@ -1976,7 +2029,11 @@ export function registerZones() {
   });
   Hooks.on("preUpdateToken", onPreUpdateToken);
   Hooks.on("updateToken", (doc, changed, options, userId) => { if ( FREE.size && userId === game.user.id ) onFreePlaced(doc, options); });
-  if ( typeof window?.addEventListener === "function" ) for ( const ev of ["keydown", "keyup"] ) window.addEventListener(ev, (e) => { altKey = !!e.altKey; }, true);
+  if ( typeof window?.addEventListener === "function" ) {
+    // (a press or a release of the pointer says it too: the drop of a drag is told before the token is written)
+    for ( const ev of ["keydown", "keyup", "pointerdown", "pointerup"] ) window.addEventListener(ev, (e) => { altKey = !!e.altKey; }, true);
+    window.addEventListener("blur", () => { altKey = false; });
+  }
   Hooks.on("createToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) syncToken(doc, "create", userId); });
   Hooks.on("deleteToken", (doc, _o, userId) => { if ( S && doc.parent === canvas.scene ) dropToken(doc, userId); });
   Hooks.on("drawToken", (t) => altBadge(t));
