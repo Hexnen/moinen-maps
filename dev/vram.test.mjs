@@ -62,5 +62,23 @@ ok(V.bytesPerTexel(0x8814, 0x1406) === 16, "RGBA32F = 16");
 ok(V.bytesPerTexel(0x8229, 0x1401) === 1, "R8 = 1");
 ok(V.bytesPerTexel(0x1906, 0x1401) === 1, "ALPHA = 1");
 
+
+// 4. U5-11 (fxw, Z45): the meter's default spot is high on the left in the stack of the map's cards, never the bottom-left corner
+{
+  globalThis.window ??= { addEventListener() {} };
+  const U = await import("../scripts/vram-ui.mjs");
+  const fs = await import("node:fs");
+  const box = (left, top, w, h) => ({ left, top, width: w, height: h, right: left + w, bottom: top + h });
+  const pins = box(96, 92, 224, 177);                                  // the pin filter as seen live at 1366x768 (96,92 - 320,269)
+  for ( const [vw, vh] of [[1366, 768], [1920, 1080], [1024, 768]] ) {
+    const s = U.defaultSpot(pins, 122, vw, vh);
+    ok(s.x === 96 && s.y === 277 && s.y < vh * 0.4, `U5-11 ${vw}x${vh}: under the pin filter, left edges aligned (96, 277); its top above 40 % of the height (where a party column counts what stands below it)`);
+  }
+  ok(JSON.stringify(U.defaultSpot(null, 122, 1366, 768)) === JSON.stringify({ x: 96, y: 130 }) && JSON.stringify(U.defaultSpot(null, 0, 1366, 768)) === JSON.stringify({ x: 96, y: 92 }), "U5-11: no pin filter: where the filter would stand, below a combat bar declared across the top");
+  ok(JSON.stringify(U.defaultSpot(box(900, 500, 224, 100), 0, 1366, 768)) === JSON.stringify({ x: 96, y: 92 }) && U.defaultSpot(box(96, 92, 224, 40), 0, 1366, 768).y === 140, "U5-11: a filter dragged away is not followed; a folded one keeps the card right under it");
+  const src = fs.readFileSync(new URL("../scripts/vram-ui.mjs", import.meta.url), "utf8"), fp = fs.readFileSync(new URL("../scripts/filter-panel.mjs", import.meta.url), "utf8");
+  ok(!/getElementById\("players"\)/.test(src) && /defaultSpot\(pins, insetTop, innerWidth, innerHeight\)/.test(src) && /Hooks\.on\("moinenMapsPinPanel"/.test(src) && (fp.match(/Hooks\.callAll\("moinenMapsPinPanel"\)/g) ?? []).length === 2, "U5-11: place() uses defaultSpot (no longer the players list's top) and follows the filter as it comes, goes, folds");
+}
+
 console.log(fails ? `${fails} failed` : "vram: all ok");
 process.exit(fails ? 1 : 0);

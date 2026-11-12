@@ -148,6 +148,7 @@ function onSampled(s) {
     if ( should !== !!el ) return sync();
   }
   update(s);
+  place();
 }
 
 async function onClick(ev) {
@@ -175,21 +176,44 @@ function clamp(left, top) {
   return [Math.max(MARGIN, Math.min(left, innerWidth - w - MARGIN)), Math.max(MARGIN, Math.min(top, innerHeight - h - MARGIN))];
 }
 /**
- * The card's place: where the user dragged it, else low on the left just above the players list. It grows and shrinks from its
- * bottom edge when it sits in the lower half of the screen (opening the details never pushes it under the players list), else from
- * its top edge.
+ * Where the card stands when the user never dragged it (U5-11): high on the left, in the stack of the map's own cards - right
+ * under the pin filter when that floats in the top-left quarter (left edges aligned), else where the filter would stand, below
+ * whatever the page declares across its top (zones uiInset: a combat bar). The bottom-left corner is left to the players list
+ * and to what other modules stack above it (a party column ended above the meter when it stood there, losing a card's height).
+ * Pure: `pins` is the filter's client box or null, `insetTop` px.
+ */
+export function defaultSpot(pins, insetTop, vw, vh) {
+  const x = 96, top = Math.max(92, (Number(insetTop) || 0) + MARGIN);
+  if ( pins && pins.width > 0 && pins.height > 0 && pins.left < vw / 4 && pins.top < vh / 2 ) return { x: Math.round(pins.left), y: Math.max(top, Math.round(pins.bottom + MARGIN)) };
+  return { x, y: top };
+}
+/**
+ * The card's place: where the user dragged it, else defaultSpot. It grows and shrinks from its bottom edge when a dragged card
+ * sits in the lower half of the screen (opening the details never pushes it under the players list), else from its top edge.
  */
 function place() {
   if ( !el ) return;
   const s = getState(), h = el.offsetHeight;
   let x = s.x, y = s.y;
   if ( !Number.isFinite(x) || !Number.isFinite(y) ) {
-    const p = document.getElementById("players")?.getBoundingClientRect();
-    x = p?.width ? p.left : 16;
-    y = (p?.height ? p.top : innerHeight - 120) - MARGIN - h;
+    let insetTop = 0;
+    try { insetTop = game.modules.get(MODULE_ID)?.api?.zones?.uiInsets?.()?.top ?? 0; } catch {}
+    const pins = document.getElementById("mm-filter")?.getBoundingClientRect() ?? null;
+    ({ x, y } = defaultSpot(pins, insetTop, innerWidth, innerHeight));
+    watchPins();
   } else if ( Number.isFinite(s.bottom) ) y = innerHeight - s.bottom - h;
   [x, y] = clamp(x, y);
   el.style.left = `${x}px`; el.style.top = `${y}px`;
+}
+/** The pin filter folds, unfolds, comes and goes: the card under it follows (only while the card stands at its default spot). */
+let pinsRo = null, pinsEl = null;
+function watchPins() {
+  const p = document.getElementById("mm-filter");
+  if ( p === pinsEl || typeof ResizeObserver !== "function" ) return;
+  pinsRo ??= new ResizeObserver(() => place());
+  if ( pinsEl ) pinsRo.unobserve(pinsEl);
+  pinsEl = p;
+  if ( p ) pinsRo.observe(p);
 }
 
 /** Remember where the card is; `bottom` (distance of its bottom edge to the screen's) when it sits in the lower half. */
@@ -217,3 +241,4 @@ window.addEventListener("resize", () => place());
 Hooks.once("init", () => registerVramSettings());
 Hooks.on("canvasReady", () => sync());
 Hooks.on("moinenMapsVram", () => { if ( el ) { build(); sigStatic = ""; } sync(); });
+Hooks.on("moinenMapsPinPanel", () => place());

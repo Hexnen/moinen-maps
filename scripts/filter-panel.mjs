@@ -19,7 +19,7 @@ export function schedulePanel() {
   raf = requestAnimationFrame(() => { raf = 0; refreshPanel(); });
 }
 
-export function removePanel() { el?.remove(); el = null; sig = ""; }
+export function removePanel() { const had = !!el; el?.remove(); el = null; sig = ""; if ( had ) Hooks.callAll("moinenMapsPinPanel"); }
 
 const typeOfCat = (id) => findPinType(id) ?? pinTypeOf({ flags: { [MODULE_ID]: { pin: id } } });
 
@@ -162,6 +162,7 @@ export function refreshPanel() {
     </div>`;
   const list = el.querySelector(".mm-filter-list"); if ( list ) list.scrollTop = keep;
   place();
+  if ( fresh ) Hooks.callAll("moinenMapsPinPanel");      // (the VRAM meter stands under it by default, vram-ui.mjs)
 }
 
 async function onClick(ev) {
