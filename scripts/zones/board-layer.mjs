@@ -14,6 +14,7 @@
 import { pattern, iconFont } from "./display.mjs";
 import { STATE_MARKS, pullIn, bowed } from "./board-core.mjs";
 import { shortLabel } from "./highlight.mjs";
+import { piecesRow } from "./signs-pixi.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9, DIM = 0x5d5a63;
 const res = () => Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
@@ -44,10 +45,12 @@ export function glyphOf(icon) {
 }
 
 /** A pill: light text on a dark ground rimmed in a colour. Returns the container (its middle at 0, 0) with `.w`, `.h`. */
-function pill(str, color, { size = 14, icon = null, h = 21 } = {}) {
+function pill(str, color, { size = 14, icon = null, h = 21, pieces = null } = {}) {
   const c = new PIXI.Container(), G = new PIXI.Graphics();
-  const T = new PIXI.Text(shortLabel(str ?? ""), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: size, fill: PAPER });
-  T.resolution = res(); T.anchor.set(0.5, 0.52);
+  // (section 40: the words as words and signs, when the caller gave them for these words)
+  let T;
+  if ( str && pieces?.length ) { const row = piecesRow(pieces, { fontSize: size, fill: PAPER, resolution: res(), glyph: Math.round(size * 0.9) }); T = row.c; T.pivot.x = row.w / 2; T.width0 = row.w; }
+  else { T = new PIXI.Text(shortLabel(str ?? ""), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: size, fill: PAPER }); T.resolution = res(); T.anchor.set(0.5, 0.52); }
   let iw = 0, I = null;
   if ( icon ) {
     const [g, font] = glyphOf(icon);
@@ -55,7 +58,7 @@ function pill(str, color, { size = 14, icon = null, h = 21 } = {}) {
     I.resolution = res(); I.anchor.set(0.5, 0.52);
     iw = I.width + (str ? 5 : 0);
   }
-  const w = Math.max(22, (str ? T.width : 0) + iw + 14);
+  const w = Math.max(22, (str ? T.width0 ?? T.width : 0) + iw + 14);
   G.lineStyle({ width: 1.6, color, alpha: 1 }).beginFill(INK, 0.92).drawRoundedRect(-w / 2, -h / 2, w, h, h / 2).endFill();
   c.addChild(G);
   if ( I ) { I.position.set(-w / 2 + 7 + I.width / 2, 0); c.addChild(I); }
@@ -83,8 +86,8 @@ export function markToken(t, e, hover = false) {
   const c = new PIXI.Container();
   c.eventMode = "none"; c.interactiveChildren = false; c.key = key; c.e = e;
   c.ring = c.addChild(new PIXI.Graphics());
-  const label = (hover && e.hover?.label) || e.label, bar = (hover && e.hover?.bar) || e.bar;
-  c.label = label ? c.addChild(pill(label, e.color, { size: 15, h: 23, icon: e.state === "out" ? "fa-solid fa-ban" : null })) : e.state === "out" ? c.addChild(pill("", e.color, { size: 14, icon: "fa-solid fa-ban" })) : null;
+  const hl = hover && e.hover?.label, label = hl || e.label, bar = (hover && e.hover?.bar) || e.bar, pieces = hl ? e.hover.signs?.label : e.signs?.label;
+  c.label = label ? c.addChild(pill(label, e.color, { size: 15, h: 23, icon: e.state === "out" ? "fa-solid fa-ban" : null, pieces })) : e.state === "out" ? c.addChild(pill("", e.color, { size: 14, icon: "fa-solid fa-ban" })) : null;
   if ( bar ) {
     const b = c.bar = c.addChild(new PIXI.Container());
     b.spec = bar; b.G = b.addChild(new PIXI.Graphics());
@@ -255,7 +258,7 @@ export class BoardLayer {
       if ( last ) this.#head(G, last.pts, r.color, u);
       G.lineStyle({ width: 1.6 * u, color: INK, alpha: 0.9 });
       for ( const m of r.marks ?? [] ) G.beginFill(PAPER, 1).drawCircle(m.x, m.y, 4.2 * u).endFill();
-      for ( const ch of r.chips ?? [] ) { const p = this.routePills.addChild(pill(ch.text, ch.color, { size: 13, icon: ch.icon ?? "warn" })); p.scale.set(u); p.position.set(ch.x, ch.y); }
+      for ( const ch of r.chips ?? [] ) { const p = this.routePills.addChild(pill(ch.text, ch.color, { size: 13, icon: ch.icon ?? "warn", pieces: ch.pieces })); p.scale.set(u); p.position.set(ch.x, ch.y); }
     }
     this.#show();
   }

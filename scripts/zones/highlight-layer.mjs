@@ -21,6 +21,7 @@ import { pattern } from "./display.mjs";
 import { groups, shortLabel } from "./highlight.mjs";
 import { pickSpot, zoneSpots, borderSpots, spotsAround, thin } from "./place.mjs";
 import { glyphOf } from "./board-layer.mjs";
+import { piecesRow } from "./signs-pixi.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9;
 /** A badge's radius on screen (display.mjs BADGE_R): a zone's label shrinks with the zone as its badge does. */
@@ -214,19 +215,25 @@ export class ZoneHighlightLayer {
 
   /** A label: light text on a dark pill rimmed in the highlight's colour (the look of the altitude tag on a token). */
   #label(e, at, r, zoneId, key, u = null) {
-    const c = new PIXI.Container(), G = new PIXI.Graphics();
-    const T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 14, fill: PAPER });
-    T.resolution = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
-    T.anchor.set(0.5, 0.52);
+    const c = new PIXI.Container(), G = new PIXI.Graphics(), res = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1)));
+    // (section 40: the label as words and signs, when the caller gave them; the row stands where the words would)
+    let T;
+    if ( e.label && e.signs?.label ) {
+      const row = piecesRow(e.signs.label, { fontSize: 14, fill: PAPER, resolution: res, glyph: 13 });
+      T = row.c; T.pivot.x = row.w / 2; T.width0 = row.w;
+    } else {
+      T = new PIXI.Text(shortLabel(e.label), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 14, fill: PAPER });
+      T.resolution = res; T.anchor.set(0.5, 0.52);
+    }
     // (an entry's icon - a warning, a hazard - stands before its words, in the entry's colour)
     let I = null, iw = 0;
     if ( e.icon ) {
       const [g, font] = glyphOf(e.icon);
       I = new PIXI.Text(g, { fontFamily: font ? `"${font}"` : "Signika, sans-serif", fontWeight: "900", fontSize: 12, fill: e.color });
-      I.resolution = T.resolution; I.anchor.set(0.5, 0.52);
+      I.resolution = res; I.anchor.set(0.5, 0.52);
       iw = I.width + (e.label ? 5 : 0);
     }
-    const w = Math.max(22, (e.label ? T.width : 0) + iw + 14);
+    const w = Math.max(22, (e.label ? T.width0 ?? T.width : 0) + iw + 14);
     G.lineStyle({ width: 1.6, color: e.color, alpha: 1 }).beginFill(INK, 0.9).drawRoundedRect(-w / 2, -LABEL_H / 2, w, LABEL_H, 10).endFill();
     c.addChild(G, T);
     if ( I ) { I.position.set(-w / 2 + 7 + I.width / 2, 0); T.position.set(iw / 2, 0); c.addChild(I); }

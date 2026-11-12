@@ -18,15 +18,16 @@ const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const calls = [];                                                      // every Graphics call: [name, ...args]
 const anyFn = () => new Proxy(class Any {}, { get: (t, k) => (typeof k === "symbol" ? undefined : k === "prototype" ? t.prototype : anyFn()), apply: () => anyFn(), construct: () => anyFn() });
 class Node {
-  constructor() { this.children = []; this.visible = true; this.destroyed = false; this.scale = { x: 1, set: (v) => { this.scale.x = v; } }; this.position = { x: 0, y: 0, set: (x, y) => { this.position.x = x; this.position.y = y; } }; this.anchor = { set() {} }; }
+  constructor() { this.children = []; this.visible = true; this.destroyed = false; this.scale = { x: 1, set: (v) => { this.scale.x = v; } }; this.position = { x: 0, y: 0, set: (x, y) => { this.position.x = x; this.position.y = y; } }; this.anchor = { set() {} }; this.pivot = { x: 0, y: 0 }; }
   addChild(...c) { this.children.push(...c); return c[0]; }
   removeChildren() { const c = this.children; this.children = []; return c; }
   destroy() { this.destroyed = true; }
   getBounds() { return { x: 0, y: 0, width: 0, height: 0 }; }
 }
+const sprites = [];
 const recorder = (kind) => class extends Node {
   constructor(...a) {
-    super(); this.kind = kind; this.args = a; this.texture = a[0]; this.width = 20; this.height = 12;
+    super(); this.kind = kind; if ( kind === "s" ) sprites.push(this); this.args = a; this.texture = a[0]; this.width = 20; this.height = 12;
     return new Proxy(this, { get: (t, k, r) => (k in t || typeof k === "symbol" ? Reflect.get(t, k, r) : (...args) => { calls.push([k, ...args]); return r; }) });
   }
 };
@@ -285,6 +286,21 @@ check(tip.innerHTML.includes("board.haz.wall"), "a wall on the way of a mover wh
 api.cancelPick(); await pr;
 // the GMs see where a player points
 game.user = users.get("p1"); takeSent();
+{ /* section 40: the price at a zone, its label and tip as signs */
+  const SV = "data:image/svg+xml,%3Csvg viewBox='0 0 12 12'%3E%3C/svg%3E", q = { name: "Quick action", el: { tag: "i", cls: "ipu-cost ipu-k-quick" }, img: SV, w: 12 };
+  sprites.length = 0; texts.length = 0;
+  const p40 = api.pickMove({ token: "t1", profile: { way: "air", speed: 2 }, banner: false, zones: [{ zone: "z3", label: "Quick", tip: "Run: Quick", cost: "Run: quick action", signs: { label: [q], tip: ["Run: ", q], cost: ["Run: ", q] },
+    hazards: [{ zone: "z3", text: "Wall, Armor 2", signs: { text: ["Wall, ", { name: "Armor: 2", n: 2, img: SV }] } }] }, { zone: "z5", label: "1", cost: "plain words" }] });
+  view.fire("pointermove", { clientX: 500, clientY: 150 });
+  const tp = els.find((e) => !e.gone && e.className.includes("mm-z-pick-tip") && !e.className.includes("board"));
+  check(tp.innerHTML.includes('<span class="mm-z-cost">Run: <i class="ipu-cost ipu-k-quick" role="img" aria-label="Quick action" data-tooltip="Quick action"></i></span>') && !tp.innerHTML.includes("Run: quick action"), "40: the price at a zone as words and the caller's sign");
+  check(tp.innerHTML.includes(' · <i class="ipu-cost ipu-k-quick"') && tp.innerHTML.includes('<small>Run: <i class="ipu-cost ipu-k-quick"') && tp.innerHTML.includes('Wall, <span class="mm-z-sign" role="img" aria-label="Armor: 2"'), "40: the zone's label and tip in the tooltip, and what waits on the way, as signs");
+  check(sprites.length >= 2 && texts.some((t) => t.text === "Wall, ") && !texts.some((t) => t.text === "Quick" || t.text === "Wall, Armor 2"), "40: on the map the zone's label and the hazard's chip draw the pictures (sprites), not the words");
+  view.fire("pointermove", { clientX: 900, clientY: 150 });
+  const tp2 = els.find((e) => !e.gone && e.className.includes("mm-z-pick-tip") && !e.className.includes("board"));
+  check(tp2.innerHTML.includes('<span class="mm-z-cost">plain words</span>'), "40: a zone without signs: its words as before");
+  api.cancelPick(); await p40;
+}
 pr = api.pickMove({ token: "t1", profile: { way: "walk", speed: 1 }, zones: ["z5"], intent: { label: "Move" } });
 view.fire("pointermove", { clientX: 900, clientY: 150 });
 await tick(200);
@@ -371,6 +387,14 @@ check(api.menuOpen(), "a disabled entry cannot be picked");
 menuEl().fire("click", rowOf(0).target);
 res = await pr;
 check(res.ok && res.id === "atk" && res.index === 0 && ran === 1 && !api.menuOpen() && !menuEl(), "picking an entry closes the menu, runs it and answers with its id");
+/* section 40: signs where the menu draws its text */
+const SIGN_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M0,0H12V12Z'/%3E%3C/svg%3E";
+const sQuick = { name: "Quick action", el: { tag: "i", cls: "ipu-cost ipu-k-quick" }, img: SIGN_SVG, w: 12 };
+pr = api.menu({ token: "t2", title: "Door", sub: "Locked, Armor 2", signs: { sub: ["Locked, ", { name: "Armor: 2", el: { tag: "span", cls: "ipu-sym", kids: [{ tag: "i", cls: "ipu-cost ipu-k-armor" }, { tag: "b", text: "2" }] } }] },
+  items: [{ id: "atk", label: "Attack", hint: "Quick · good", signs: { hint: [sQuick, " good"] } }, { id: "old", label: "Look", hint: "Free" }] });
+check(menuEl().innerHTML.includes('<span class="hint has-signs"><i class="ipu-cost ipu-k-quick" role="img" aria-label="Quick action" data-tooltip="Quick action"></i> good</span>') && menuEl().innerHTML.includes('<span class="hint">Free</span>'), "40: a row's hint as signs and words (the caller's classes, named); a row without signs keeps its words");
+check(menuEl().innerHTML.includes('<small>Locked, <span class="ipu-sym" role="img" aria-label="Armor: 2" data-tooltip="Armor: 2"><i class="ipu-cost ipu-k-armor"></i><b>2</b></span></small>') && !menuEl().innerHTML.includes("Locked, Armor 2"), "40: the sub line as words and a sign");
+
 const steps = [], togs = [];
 pr = api.menu({ token: "t2", items: [{ id: "hp", label: "Health", stepper: { value: 3, min: 0, max: 4 }, onStep: (v, d) => { steps.push([v, d]); } }, { id: "held", label: "Held", toggle: true, on: false, onToggle: (on) => { togs.push(on); } }, { id: "end", label: "End turn" }] });
 let r1 = rowOf(0, 1);
