@@ -558,6 +558,47 @@ api.tactical({ gm: true, levels: true });
 await api.setAltitude(m2, "elevated"); await tick();
 check(spotNow() === `${home}:elevated`, "no confirm(): a level change is not held (the map has no price to ask about)");
 await api.setAltitude(m2, "ground");
+/* ---- section 41: the map's own HUD says "hud" only for the token it is writing; another token moved while that write is still on
+   its way (a script, a drag) keeps its own answer */
+{
+  class FakeEl { constructor() { this.ls = {}; this.dataset = {}; this.classList = { toggle() {}, add() {} }; this.col = null; } addEventListener(t, f) { this.ls[t] = f; }
+    querySelector(q) { return q === ".col.right" ? this.col : null; } append() {} after() {} remove() {} }
+  const hadEl = globalThis.HTMLElement, mkEl = document.createElement;
+  globalThis.HTMLElement = FakeEl; document.createElement = () => new FakeEl();
+  // (the zones show here, so the HUD gets its button; the stand-in canvas cannot draw them, which is not looked at here)
+  try { Zones.present({ show: true }); } catch {}
+  const hudBtn = (tok) => {                                          // the altitude button the map puts on this token's HUD
+    const root = new FakeEl(), col = new FakeEl(); root.col = col; let btn = null; col.append = (b) => { btn = b; };
+    Hooks.callAll("renderTokenHUD", { object: { document: tok, actor: {}, name: tok.name } }, root);
+    return btn;
+  };
+  const rclick = { preventDefault() {}, stopPropagation() {} };
+  api.tactical(false);
+  await api.setAltitude(m1, "elevated"); await api.setAltitude(m2, "elevated");
+  const how = [];
+  api.tactical({ gm: true, levels: true, when: (doc) => doc.id === "t2", confirm: async (ctx) => { how.push(ctx); return false; } });
+  // the HUD of t1 (outside the fight: written at once) takes a while to be written - a server round trip
+  const own = m1.update; let letGo; const gate = new Promise((x) => { letGo = x; });
+  m1.update = async (...a) => { const r = await own(...a); await gate; return r; };
+  const b1 = hudBtn(m1);
+  check(!!b1?.ls?.contextmenu, "(the HUD has its altitude button)");
+  b1?.ls?.contextmenu?.(rclick);
+  await tick();
+  await api.setAltitude(m2, "ground"); await tick();               // meanwhile a script changes the level of t2
+  check(how.length === 1 && how[0].token === m2 && how[0].method === "api" && how[0].byHand === false, `section 41: another token changed while the HUD writes t1 is no hand: method api (got ${how[0]?.method})`);
+  letGo(); await tick(); m1.update = own;
+  check(api.zoneOfToken(m1).level !== "elevated", "(the HUD's write of t1 went through)");
+  // the HUD of t2 itself (in the fight): held, and told it is the HUD
+  hudBtn(m2)?.ls?.contextmenu?.(rclick); await tick();
+  check(how.length >= 2 && how.slice(1).every((c) => c.token === m2 && c.method === "hud" && c.byHand === true), "section 41: the HUD's own change of its token: method hud, byHand true");
+  await tick();
+  await api.setAltitude(m2, "ground"); await tick();               // the HUD's write is over: a script is a script again
+  check(how.at(-1).method === "api" && how.at(-1).byHand === false, "after the HUD's write a script's change is method api again");
+  api.tactical(false);
+  await api.setAltitude(m1, "ground"); await api.setAltitude(m2, "ground");
+  try { Zones.present(null); } catch {}
+  globalThis.HTMLElement = hadEl; document.createElement = mkEl;
+}
 api.tactical(false);
 check(api.tacticalOn() === false, "off again");
 
