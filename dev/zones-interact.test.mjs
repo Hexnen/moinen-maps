@@ -633,6 +633,28 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   rv = await api.reveal(["z5", "z1"], { animate: false, fit: true });
   check(rv.moved && cam.scale.x < 4 && canvas.clientCoordinatesFromCanvas(api.zone("z1").center).x >= 56 - 1e-6 && canvas.clientCoordinatesFromCanvas(api.zone("z5").center).x <= 944 + 1e-6, `with \`fit\`: zoomed out until both are in (scale ${cam.scale.x.toFixed(2)})`);
   canvas.pan({ x: 500, y: 100, scale: 1 });
+  // ---- perf3: the look now and then while a pick runs is spread over frames (a hit test costs ~0.5 ms on a page with a long chat
+  //      log: all the cells at once held the page for 400-700 ms every 1.5 s); a stretch that changed is still found and laid out
+  {
+    pk = api.pick({ zones: all5 });
+    await wait(500);                                                                  // past the second look at 420 ms
+    const top0 = banner()?.style.top, safe0 = J(api.safeArea());
+    let calls = 0;
+    const slices = [], raf0 = globalThis.requestAnimationFrame, efp0 = document.elementFromPoint;
+    document.elementFromPoint = (x, y) => { calls++; const a = performance.now(); while ( performance.now() - a < 0.3 ) { /* a slow page */ } return hitAt(x, y); };
+    globalThis.requestAnimationFrame = (fn) => setTimeout(() => { const a = calls; fn(); if ( calls > a ) slices.push(calls - a); }, 4);
+    await wait(1900);
+    const cells = Math.floor(1000 / 40) * Math.floor(600 / 40), looked = slices.reduce((a, b) => a + b, 0);
+    check(slices.length > 5 && Math.max(...slices) <= 20 && looked >= cells && banner()?.style.top === top0 && J(api.safeArea()) === safe0,
+      `the look now and then: every cell, a few per frame (${slices.length} frames, at most ${Math.max(...slices)} hit tests in one, ${looked} of ${cells}); nothing changed: nothing laid out again`);
+    parts.push(part("late", 0, 120, 1000, 200));                                         // a panel opens later, nothing declared
+    await wait(3500);
+    const moved = banner()?.style.top;
+    parts.pop();
+    document.elementFromPoint = efp0; globalThis.requestAnimationFrame = raf0;
+    api.cancelPick(); await pk;
+    check(top0 === "128px" && moved === "208px", `a panel that opened later is found by the look and the pick is laid out again (banner ${top0} -> ${moved})`);
+  }
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
 }
 
