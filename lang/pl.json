@@ -2308,9 +2308,10 @@
 
   "MOINENMAPS.DirStage.follow": "Kamera w walce: jak bardzo podąża",
 
-  "MOINENMAPS.DirStage.followHint": "Każdy moment: tury, ruchy i ataki przesuwają twój widok. Tylko początek tury: widok przesuwa się tylko wtedy, gdy zaczyna się tura, a aktywnej postaci nie ma na twoim ekranie. Nigdy: widok nigdy się nie przesuwa; dostajesz znaczniki.",
+  "MOINENMAPS.DirStage.followHint": "Kamera akcji: atak, trafienie, ujawnienie albo ruch poza twoim ekranem na chwilę zabiera twój widok i go oddaje (Esc lub klik pomija). Każdy moment: tury, ruchy i ataki przesuwają twój widok. Tylko początek tury: widok przesuwa się tylko wtedy, gdy zaczyna się tura, a aktywnej postaci nie ma na twoim ekranie. Nigdy: widok nigdy się nie przesuwa; dostajesz znaczniki.",
 
   "MOINENMAPS.DirStage.follow_auto": "Jak ustawia gra",
+  "MOINENMAPS.DirStage.follow_action": "Kamera akcji",
 
   "MOINENMAPS.DirStage.follow_all": "Każdy moment",
 

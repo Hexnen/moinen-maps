@@ -85,6 +85,13 @@ function lookValues() {
   return Cin.resolve({ preset: R().look, over: {} }, users);
 }
 
+/** The look of a take-over on this client now (the combat stage's action camera plays with the same one): { look, reduced, k }. */
+export function takeLook() {
+  const reduced = !!clientOpts().reduced, k = Dir.intensity(Number(setting("dirIntensity")), Number(gmState().k));
+  return { look: { ...Dir.lookFor(lookValues(), k, reduced), camMode: "frame", camHold: 0, camOn: true, fx: true }, reduced, k };
+}
+export const zoomLocked = () => zoomHeld();
+
 /* ---------------------------------------------------------------- the leader */
 
 const queue = new Dir.Queue();
