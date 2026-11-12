@@ -4,6 +4,7 @@ import * as BC from "./board-core.mjs";
 import * as HL from "./highlight.mjs";
 import * as Interact from "./interact.mjs";
 import { BoardLayer, markToken, layoutToken, dimToken } from "./board-layer.mjs";
+import { cleanSigns, piecesHtml } from "./signs-core.mjs";
 
 /**
  * Interaction on the map, wired (dev/zones-api.md 25-33): what a combat module shows and senses ON the map instead of in a panel.
@@ -110,6 +111,7 @@ function compose() {
     if ( !was ) { out.set(e.token, { ...e, marks: [...e.marks] }); continue; }
     out.set(e.token, {
       token: e.token, state: e.state ?? was.state, color: e.state ? e.color : was.color, label: e.label ?? was.label, tip: e.tip ?? was.tip,
+      ...((e.label ? e.signs : was.signs) ? { signs: e.label ? e.signs : was.signs } : {}),
       marks: [...was.marks, ...e.marks.filter((m) => !was.marks.some((q) => q.icon === m.icon))].slice(0, BC.BOARD_LIMITS.marks),
       bar: e.bar ?? was.bar, hover: e.hover ?? was.hover
     });
@@ -324,7 +326,8 @@ function showRoute(tok, plan, hazards, color) {
     if ( !p || !h.text ) continue;
     while ( used.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 20 * u) ) p = { x: p.x, y: p.y - 24 * u };
     used.push(p);
-    chips.push({ x: p.x, y: p.y, text: String(h.text).slice(0, 28), color: HL.colorOf(h.color, HL.COLORS.danger), icon: h.icon ?? "warn" });
+    const pieces = cleanSigns(h.signs, { text: 28 })?.text;
+    chips.push({ x: p.x, y: p.y, text: String(h.text).slice(0, 28), color: HL.colorOf(h.color, HL.COLORS.danger), icon: h.icon ?? "warn", ...(pieces ? { pieces } : {}) });
   }
   lay.setRoute({ runs, color, marks, chips });
 }
@@ -371,7 +374,8 @@ export function pickMove(opts = {}) {
     },
     tip(e) {
       const raw = raws.get(e.zone) ?? {}, hz = hazardsOf(e);
-      return `${raw.cost ? `<span class="mm-z-cost">${esc(String(raw.cost).slice(0, 60))}</span>` : ""}${hz.filter((h) => h.text).map((h) => `<small class="mm-z-haz"><i class="fa-solid fa-triangle-exclamation" inert></i> ${esc(String(h.tip ?? h.text).slice(0, 120))}</small>`).join("")}${raw.more ? `<small class="mm-z-alt">${esc(L("move.alt"))}</small>` : ""}`;
+      const cs = cleanSigns(raw.signs, { cost: 60 })?.cost;
+      return `${raw.cost || cs ? `<span class="mm-z-cost">${piecesHtml(cs, String(raw.cost ?? "").slice(0, 60))}</span>` : ""}${hz.filter((h) => h.text).map((h) => { const hs = h.tip ? null : cleanSigns(h.signs, { text: 120 })?.text; return `<small class="mm-z-haz"><i class="fa-solid fa-triangle-exclamation" inert></i> ${piecesHtml(hs, String(h.tip ?? h.text).slice(0, 120))}</small>`; }).join("")}${raw.more ? `<small class="mm-z-alt">${esc(L("move.alt"))}</small>` : ""}`;
     },
     alt: (e) => raws.get(e.zone)?.more === true,
     // (whose pick this is: it ends when that token is deleted)
@@ -578,9 +582,9 @@ export function menu(spec = {}) {
       if ( it.stepper ) return `<div class="mm-z-menu-row is-step" data-i="${it.i}"${tone}${tipA}>${icon}<span class="lb">${esc(it.label)}</span><button type="button" data-step="-1" aria-label="-">−</button><output>${esc(it.stepper.value)}</output><button type="button" data-step="1" aria-label="+">+</button></div>`;
       if ( it.toggle ) return `<button type="button" role="menuitemcheckbox" aria-checked="${it.on}" class="mm-z-menu-row is-toggle${it.on ? " is-on" : ""}" data-i="${it.i}"${tone}${tipA}${it.disabled ? " disabled" : ""}>${icon}<span class="lb">${esc(it.label)}${why}</span><i class="fa-solid fa-check ck" inert></i></button>`;
       const key = !it.disabled && n < 9 ? ++n : 0;
-      return `<button type="button" role="menuitem" class="mm-z-menu-row" data-i="${it.i}"${key ? ` data-key="${key}"` : ""}${tone}${tipA}${it.disabled ? ` disabled aria-disabled="true"` : ""}>${icon}<span class="lb">${esc(it.label)}${why}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${key ? `<kbd>${key}</kbd>` : ""}</button>`;
+      return `<button type="button" role="menuitem" class="mm-z-menu-row" data-i="${it.i}"${key ? ` data-key="${key}"` : ""}${tone}${tipA}${it.disabled ? ` disabled aria-disabled="true"` : ""}>${icon}<span class="lb">${esc(it.label)}${why}</span>${it.signs?.hint ? `<span class="hint has-signs">${piecesHtml(it.signs.hint)}</span>` : it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${key ? `<kbd>${key}</kbd>` : ""}</button>`;
     }).join("");
-    el.innerHTML = `${M.title ? `<header><b>${esc(M.title)}</b>${M.sub ? `<small>${esc(M.sub)}</small>` : ""}</header>` : ""}<div class="mm-z-menu-list">${rows}</div>`;
+    el.innerHTML = `${M.title ? `<header><b>${piecesHtml(M.signs?.title, M.title)}</b>${M.sub ? `<small>${piecesHtml(M.signs?.sub, M.sub)}</small>` : ""}</header>` : ""}<div class="mm-z-menu-list">${rows}</div>`;
     document.body.append(el);
     const place = () => {
       const b = anchorBox(anchor);

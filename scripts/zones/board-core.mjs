@@ -10,6 +10,7 @@
  */
 
 import { COLORS, colorOf, cleanUsers, zoneKeyOf, borderKeyOf, LIMITS } from "./highlight.mjs";
+import { cleanSigns } from "./signs-core.mjs";
 
 const ID_RE = /^[A-Za-z0-9_.:~-]{1,64}$/;
 const text = (v, max) => { if ( v == null || v === "" ) return null; const s = String(v).replace(/\s+/g, " ").trim(); return s ? s.slice(0, max) : null; };
@@ -64,13 +65,15 @@ function cleanMark(m) {
 function cleanHover(h) {
   if ( !h || typeof h !== "object" ) return null;
   const out = { label: text(h.label, BOARD_LIMITS.label), tip: text(h.tip, BOARD_LIMITS.tip), bar: cleanBar(h.bar) };
+  const signs = out.label ? cleanSigns(h.signs, { label: BOARD_LIMITS.label }) : null;
+  if ( signs ) out.signs = signs;
   return out.label || out.tip || out.bar ? out : null;
 }
 
 /**
  * A set of token marks, cleaned:
  *   { id, tokens: [{ token (id), state: "in" | "out" | "chosen" | "caught" | null, color, label, tip, marks: [{ icon, color, tip }],
- *                    bar, hover: { label, tip, bar } | null }], users, order }
+ *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40) }], users, order }
  * null: no id that can be kept, or no entry that names a token.
  */
 export function cleanTokenMarks(spec, me = null) {
@@ -87,7 +90,9 @@ export function cleanTokenMarks(spec, me = null) {
       token, state, color: colorOf(o.color ?? dcol, state === "out" ? COLORS.blocked : state === "caught" ? COLORS.range : COLORS.target),
       label: text(o.label, BOARD_LIMITS.label), tip: text(o.tip, BOARD_LIMITS.tip),
       marks: (Array.isArray(o.marks) ? o.marks : []).map(cleanMark).filter(Boolean).slice(0, BOARD_LIMITS.marks),
-      bar: cleanBar(o.bar), hover: cleanHover(o.hover)
+      bar: cleanBar(o.bar), hover: cleanHover(o.hover),
+      // (section 40: the label as words and signs; the pill shows them, the words stay for the rest)
+      ...(o.label && cleanSigns(o.signs, { label: BOARD_LIMITS.label }) ? { signs: cleanSigns(o.signs, { label: BOARD_LIMITS.label }) } : {})
     });
   }
   if ( !tokens.length ) return null;
@@ -191,15 +196,19 @@ export function cleanMenu(spec) {
     const label = text(e.label, 60);
     if ( !label ) return;
     const st = e.stepper && typeof e.stepper === "object" ? { value: num(e.stepper.value) ?? 0, min: num(e.stepper.min) ?? -Infinity, max: num(e.stepper.max) ?? Infinity } : null;
+    // (section 40: the hint as words and signs; its words cut to the hint's 24 characters, the drawing and the names never counted)
+    const signs = cleanSigns(e.signs, { hint: 24 });
     items.push({
       id: e.id == null ? `i${i}` : String(e.id).slice(0, 64), label, icon: text(e.icon, 60), hint: text(e.hint, 24), tip: text(e.tip, BOARD_LIMITS.tip),
       disabled: e.disabled === true ? true : text(e.disabled, 120) ?? false, tone: e.tone == null ? null : colorOf(e.tone, COLORS.info),
-      stepper: st, toggle: e.toggle === true, on: e.on === true, i
+      stepper: st, toggle: e.toggle === true, on: e.on === true, i,
+      ...(signs ? { signs } : {})
     });
   });
   while ( items.length && items[items.length - 1].separator ) items.pop();
   if ( !items.some((it) => !it.separator) ) return null;
-  return { title: text(spec.title, BOARD_LIMITS.title), sub: text(spec.sub, 80), items };
+  const top = cleanSigns(spec.signs, { title: BOARD_LIMITS.title, sub: 80 });
+  return { title: text(spec.title, BOARD_LIMITS.title), sub: text(spec.sub, 80), items, ...(top ? { signs: top } : {}) };
 }
 /** A stepper's next value: one step up or down inside its limits. */
 export const stepValue = (st, d) => Math.max(st.min, Math.min(st.max, st.value + (d > 0 ? 1 : -1)));

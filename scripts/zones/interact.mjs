@@ -4,6 +4,7 @@ import * as HL from "./highlight.mjs";
 import { ZoneHighlightLayer } from "./highlight-layer.mjs";
 import { pairKey } from "./marks.mjs";
 import * as View from "./view.mjs";
+import { piecesHtml } from "./signs-core.mjs";
 
 /**
  * Highlights and zone picking, wired (dev/zones-api.md 17-18): the public calls a combat module makes, the module socket that
@@ -51,7 +52,11 @@ function shown() {
     const has = out.zones.get(id);
     // (an area shown under the pointer - board.mjs pickArea - stays on top of what is on offer)
     if ( has?.of?.startsWith("~area") ) continue;
-    if ( !has || e.label ) out.zones.set(id, { zone: e.zone, id, color: e.color, style: "fill", label: e.label ?? has?.label ?? null, tip: e.tip ?? has?.tip ?? null, of: "~pick" });
+    if ( !has || e.label ) {
+      // (section 40: the signs go with the words they stand for - the label's with the label, the tip's with the tip)
+      const signs = { ...(e.label ? e.signs?.label ? { label: e.signs.label } : {} : has?.signs?.label ? { label: has.signs.label } : {}), ...(e.tip ? e.signs?.tip ? { tip: e.signs.tip } : {} : has?.signs?.tip ? { tip: has.signs.tip } : {}) };
+      out.zones.set(id, { zone: e.zone, id, color: e.color, style: "fill", label: e.label ?? has?.label ?? null, tip: e.tip ?? has?.tip ?? null, ...(Object.keys(signs).length ? { signs } : {}), of: "~pick" });
+    }
   }
   return out;
 }
@@ -643,10 +648,11 @@ function startPick() {
       // beside the cursor: the zone's name with what the caller said about it
       const e = ok ? p.allowed.get(id) : null, sh = e ? shown().zones.get(id) : null;
       const label = e?.label ?? sh?.label ?? null, tip = e?.tip ?? sh?.tip ?? null;
+      const ls = e?.label ? e.signs?.label : sh?.signs?.label, ts = e?.tip ? e.signs?.tip : sh?.signs?.tip;
       p.tip.classList.toggle("no", !e);
       let more = "";
       try { ext?.hover?.(e, at); more = e ? ext?.tip?.(e) ?? "" : ""; } catch ( err ) { console.warn(`${MODULE_ID} | zones: pick`, err); }
-      p.tip.innerHTML = e ? `<b>${esc(L("zone.title", { n: Zones.zoneName(id) }))}</b>${label ? ` · ${esc(label)}` : ""}${tip ? `<small>${esc(tip)}</small>` : ""}${more}` : esc(L("pick.notHere"));
+      p.tip.innerHTML = e ? `<b>${esc(L("zone.title", { n: Zones.zoneName(id) }))}</b>${label ? ` · ${piecesHtml(ls, label)}` : ""}${tip ? `<small>${piecesHtml(ts, tip)}</small>` : ""}${more}` : esc(L("pick.notHere"));
     }
     else if ( ok && ext?.move ) { try { ext.move(p.allowed.get(id), at); } catch {} }
     placeTip(p.tip, at);

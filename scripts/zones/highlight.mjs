@@ -8,13 +8,18 @@
  * to be breached). The map draws what it is given: it does not work out what to highlight.
  *
  *   highlight = { id, zones: [entry, ...], borders: [entry, ...], users, order }
- *   zone entry   = { zone (key), color (0xRRGGBB), style: "fill" | "outline" | "dashed", label: string | null, tip: string | null }
+ *   zone entry   = { zone (key), color (0xRRGGBB), style: "fill" | "outline" | "dashed", label: string | null, tip: string | null,
+ *                    signs: { label, tip } (section 40: the same as words and signs; optional) }
  *   border entry = { border ("z1|z2"), color, style: "solid" | "dashed", label, tip }
  *   users        = null (only the client that made it) | "all" | "gm" | [userId, ...]
  *   order        = a number: where several highlights name the same zone, the highest shows (then the one set last)
  */
 
 import { cleanInsets } from "./view.mjs";
+import { cleanSigns } from "./signs-core.mjs";
+
+/** section 40: the label and the tip of an entry as words and signs, each cut as its text is */
+const signsOf = (o) => { const s = cleanSigns(o?.signs, { label: LIMITS.label, tip: LIMITS.tip }); return s ? { signs: s } : {}; };
 
 /** The named colours (the ones the distance badges already use, so a highlight reads like the rest of the zones). */
 export const COLORS = Object.freeze({
@@ -111,14 +116,14 @@ export function cleanHighlight(spec, me = null) {
     const zone = zoneKeyOf(e), o = e && typeof e === "object" ? e : {};
     if ( !zone || seenZ.has(zone) ) continue;
     seenZ.add(zone);
-    zones.push({ zone, color: colorOf(o.color, color), style: ZONE_STYLES.includes(o.style) ? o.style : style, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}) });
+    zones.push({ zone, color: colorOf(o.color, color), style: ZONE_STYLES.includes(o.style) ? o.style : style, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}), ...signsOf(o) });
   }
   const bstyle = BORDER_STYLES.includes(spec.borderStyle) ? spec.borderStyle : spec.style === "dashed" ? "dashed" : "solid";
   for ( const e of Array.isArray(spec.borders) ? spec.borders.slice(0, LIMITS.entries) : [] ) {
     const border = borderKeyOf(e), o = e && typeof e === "object" && !Array.isArray(e) ? e : {};
     if ( !border || seenB.has(border) ) continue;
     seenB.add(border);
-    borders.push({ border, color: colorOf(o.color, colorOf(spec.borderColor, color)), style: BORDER_STYLES.includes(o.style) ? o.style : bstyle, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}) });
+    borders.push({ border, color: colorOf(o.color, colorOf(spec.borderColor, color)), style: BORDER_STYLES.includes(o.style) ? o.style : bstyle, label: text(o.label, LIMITS.label), tip: text(o.tip, LIMITS.tip), ...(text(o.icon, 60) ? { icon: text(o.icon, 60) } : {}), ...signsOf(o) });
   }
   if ( !zones.length && !borders.length ) return null;
   const order = Number.isFinite(Number(spec.order)) ? Number(spec.order) : 0;
@@ -216,7 +221,7 @@ export function cleanPick(o = {}) {
       const zone = zoneKeyOf(spot);
       if ( !zone || seen.has(zone) ) continue;
       seen.add(zone);
-      zones.push({ zone, spot, label: text(obj.label, LIMITS.label), tip: text(obj.tip, LIMITS.tip), color: colorOf(obj.color, color) });
+      zones.push({ zone, spot, label: text(obj.label, LIMITS.label), tip: text(obj.tip, LIMITS.tip), color: colorOf(obj.color, color), ...signsOf(obj) });
     }
     if ( !zones.length ) return null;
   }
