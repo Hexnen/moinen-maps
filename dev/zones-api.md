@@ -1761,3 +1761,10 @@ checks of `dev/zones-interact.test.mjs`, `dev/director-frame.test.mjs`, `dev/zon
 
 For the caller: nothing to change. A combat module that shows its own instruction for an armed action can still pass
 `banner: false`. There is no switch back to the top banner (provisional: plus-ultra `dev/combat-questions.md`, "UXD").
+
+### 43a. perf4: cheaper looks, and a hook when a pick starts or ends (P3-1, U140's cost)
+
+| | Before | Now |
+| --- | --- | --- |
+| a hit test while Foundry's chat panel lies wholly outside the window (the sidebar folded) | the panel's ~1000 positioned elements were walked by every hit test: a full look ~340 ms (101 chat cards, 1600x900) | for the length of each synchronous look the panel's contents are skipped (`content-visibility: hidden` on `#chat`, put back before the look returns: no frame in between, and no point of the window lies in the panel). A panel that reaches into the window, holds the focus or has a `content-visibility` of its own is left alone. `quietHits.skipOff = true` turns it off. Measured live: a full look ~68 ms |
+| `Hooks.on("moinenMapsPicking", (on) => {})` | - | NEW: on this client, synchronously, right after `<body>` gains `mm-z-picking` (before the pick's first look at the screen) and right after it loses it. For a module that keys something on the pick (plus-ultra: its panels step back and let the pointer through) and must have written it before the pick looks for the free stretch |

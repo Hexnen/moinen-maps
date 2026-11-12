@@ -746,6 +746,45 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     check(top0 === "342px" && opened === "302px" && closed === "342px", `a window opened / closed: laid out again within 0.4 s (${top0} -> ${opened} -> ${closed})`);
     globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
   }
+  // ---- perf4 (P3-1): Foundry's chat panel lying wholly outside the window (sidebar folded) has its contents skipped for the length of a
+  //      synchronous look only (cheaper hit tests); never one that reaches into the window, holds the focus, or with the switch off
+  {
+    const I = await imp("scripts/zones/interact.mjs");
+    const r = (left, top, w, h) => ({ left, top, right: left + w, bottom: top + h, width: w, height: h });
+    check(I.offWindow(r(1000, 0, 312, 600), 1000, 600) && I.offWindow(r(-400, 0, 400, 600), 1000, 600) && !I.offWindow(r(999, 0, 312, 600), 1000, 600) && !I.offWindow(r(0, 0, 0, 0), 1000, 600) && !I.offWindow(null, 1000, 600),
+      "off the window: wholly beyond an edge (a box that touches the window by one pixel, an empty box or none is not)");
+    const qsa0 = document.querySelectorAll, gcs0 = globalThis.getComputedStyle, efp0 = document.elementFromPoint;
+    const chat = { id: "chat", isConnected: true, at: r(1000, 0, 312, 600), getBoundingClientRect() { return this.at; }, contains: (e) => e === chat.kid, kid: {},
+      style: { contentVisibility: "", setProperty(k, v) { if ( k === "content-visibility" ) this.contentVisibility = v; }, removeProperty(k) { if ( k === "content-visibility" ) this.contentVisibility = ""; } } };
+    document.querySelectorAll = (sel) => (sel.includes("#chat") ? [chat] : []);
+    globalThis.getComputedStyle = () => ({ visibility: "visible", display: "block", position: "static" });
+    const seen = [];
+    document.elementFromPoint = (x, y) => { seen.push(chat.style.contentVisibility); return hitAt(x, y); };
+    const plain = J(api.safeArea());
+    const during = seen.slice(); seen.length = 0;
+    check(plain && during.length > 100 && during.every((v) => v === "hidden") && chat.style.contentVisibility === "" && I.quietHits.skipped === 1,
+      `a look with the chat panel off the window: its contents skipped for every hit test (${during.length}), put back after it`);
+    I.quietHits.skipOff = true; const off = J(api.safeArea()); I.quietHits.skipOff = false;
+    check(off === plain && seen.every((v) => v === ""), `the same free stretch without the skip (${off})`);
+    seen.length = 0; chat.at = r(700, 0, 312, 600); api.safeArea();
+    check(seen.length > 100 && seen.every((v) => v === "") && chat.style.contentVisibility === "", "a chat panel that reaches into the window is never touched");
+    seen.length = 0; chat.at = r(1000, 0, 312, 600); document.activeElement = chat.kid; api.safeArea(); document.activeElement = null;
+    check(seen.length > 100 && seen.every((v) => v === ""), "nor one that holds the keyboard focus");
+    seen.length = 0; chat.style.contentVisibility = "auto"; api.safeArea();
+    check(seen.length > 100 && seen.every((v) => v === "auto") && chat.style.contentVisibility === "auto", "nor one whose content-visibility someone else set");
+    chat.style.contentVisibility = "";
+    document.querySelectorAll = qsa0; globalThis.getComputedStyle = gcs0; document.elementFromPoint = efp0;
+    // the hook "moinenMapsPicking": said with the class, before the pick's first hit test, and again when it ends
+    const said = []; let hits = 0;
+    document.elementFromPoint = (x, y) => { hits++; return hitAt(x, y); };
+    Hooks.on("moinenMapsPicking", (on) => said.push([on, document.body.classList.contains("mm-z-picking"), hits]));
+    pk = api.pick({ zones: all5 });
+    const atStart = said.slice();
+    api.cancelPick(); await pk;
+    document.elementFromPoint = efp0;
+    check(atStart.length === 1 && atStart[0][0] === true && atStart[0][1] === true && atStart[0][2] === 0 && hits > 0 && said.length === 2 && said[1][0] === false && said[1][1] === false,
+      `"moinenMapsPicking": true with the class and before the first hit test, false when the pick ends (${J(said)}, ${hits} hit tests)`);
+  }
   // ---- BH4-5 (D130's guard): a right drag in a pick pans the map; when its release never reaches the page (Alt+Tab, the button let go
   //      over another window) the map must not go on following a pointer whose right button is up
   {

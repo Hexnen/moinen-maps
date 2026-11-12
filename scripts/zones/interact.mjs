@@ -251,6 +251,8 @@ export function highlightLabelBoxes() {
   });
 }
 
+/** perf4: "moinenMapsPicking" (on: true | false) on this client, synchronously, right after <body> gains or loses `mm-z-picking`. */
+const sayPicking = (on) => { try { globalThis.Hooks?.callAll?.("moinenMapsPicking", !!on); } catch ( err ) { console.warn(`${MODULE_ID} | zones: picking hook`, err); } };
 const CELL = 40;
 const ours = (e) => !!e?.closest?.(".mm-z-pickway, .mm-z-pick");
 /**
@@ -264,8 +266,42 @@ const ours = (e) => !!e?.closest?.(".mm-z-pickway, .mm-z-pick");
  * style recalculation of the hidden log (~300 ms forced layout) costs more than the cheaper hit tests save. Kept for a future try.
  */
 const QUIET_SEL = "#sidebar .chat-log, #chat .chat-log, #chat-log";
-export const quietHits = { off: true, last: 0 };
+export const quietHits = { off: true, last: 0, skipOff: false, skipped: 0 };
+/**
+ * perf4 (P3-1): a panel that lies WHOLLY OUTSIDE the window (Foundry's chat panel while the sidebar is folded: x >= the window's width,
+ * its log ~1000 positioned elements) still costs every hit test, wherever the point is. For the length of one SYNCHRONOUS look such a
+ * panel's contents are skipped (`content-visibility: hidden` on the panel, put back before the look returns: no frame is drawn in
+ * between, the panel cannot be seen anyway). Unlike the `visibility` try above this restyles nothing (~2 ms to set and to put back, the
+ * rendering state is kept) and does not change an answer: no point of the window lies in the panel (its log scrolls inside it, so
+ * nothing of it reaches into the window; checked live: the same free cells with and without it).
+ * Measured live (lane 5, 101 chat cards, 1600x900): 100 hit tests 40 -> 9 ms, a full look 336 -> 68 ms. `quietHits.skipOff = true`: off.
+ */
+const SKIP_SEL = ["#chat"];
+export const offWindow = (r, W, H) => !!r && r.width > 0 && r.height > 0 && (r.left >= W || r.right <= 0 || r.top >= H || r.bottom <= 0);
+function skipping(fn) {
+  if ( quietHits.skipOff || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
+  const done = [];
+  try {
+    const W = vw(), H = vh();
+    for ( const el of document.querySelectorAll(SKIP_SEL.join(", ")) ) {
+      if ( !el?.isConnected || el.style.contentVisibility || done.some((d) => d.el.contains?.(el) || el.contains?.(d.el)) ) continue;
+      if ( document.activeElement && el.contains?.(document.activeElement) ) continue;
+      if ( !offWindow(el.getBoundingClientRect?.(), W, H) ) continue;
+      const cs = getComputedStyle(el);
+      if ( cs.display === "none" || cs.position === "fixed" ) continue;
+      done.push({ el });
+      el.style.setProperty("content-visibility", "hidden");
+    }
+    quietHits.skipped = done.length;
+    return fn();
+  } finally {
+    for ( const d of done ) d.el.style.removeProperty("content-visibility");
+  }
+}
 function quietly(fn) {
+  return skipping(() => quietOld(fn));
+}
+function quietOld(fn) {
   if ( quietHits.off || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
   const hid = [];
   try {
@@ -591,6 +627,7 @@ function endPick(result) {
   p.way.chips.clear();
   p.banner?.remove(); p.tip?.remove();
   document.body.classList.remove("mm-z-picking", "mm-z-pick-ok", "mm-z-pick-no");
+  sayPicking(false);
   layer?.setHover(-1);
   try { result = p.P.ext?.end?.(result) ?? result; } catch ( err ) { console.warn(`${MODULE_ID} | zones: pick`, err); }
   redraw();
@@ -928,6 +965,9 @@ function startPick() {
     document.body.append(el);
   }
   document.body.classList.add("mm-z-picking");
+  // perf4: said right after the class, before the first look at the screen, so a module that keys something on it (a panel that steps
+  // back and lets the pointer through while this user picks) can write it in the same task (zones-api.md section 43)
+  sayPicking(true);
   // where the banner has room, which zones no click can reach: now, once more when the other interface parts have answered the
   // pick (a panel that opened), whenever the view or the window changes, and when a look now and then finds the free stretch
   // changed (a panel that opened or closed later)
