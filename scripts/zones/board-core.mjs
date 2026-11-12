@@ -17,7 +17,7 @@ const text = (v, max) => { if ( v == null || v === "" ) return null; const s = S
 const num = (v) => { const n = Number(v); return v != null && v !== "" && Number.isFinite(n) ? n : null; };
 
 export const TOKEN_STATES = ["in", "out", "chosen", "caught"];
-export const BOARD_LIMITS = Object.freeze({ tokens: 200, marks: 6, links: 40, items: 24, label: 18, tip: 240, title: 60, intentTtl: 20000, intentMax: 120000 });
+export const BOARD_LIMITS = Object.freeze({ tokens: 200, marks: 6, links: 40, items: 24, label: 18, intentPill: 28, tip: 240, title: 60, intentTtl: 20000, intentMax: 120000 });
 
 /**
  * The state marks the map knows how to draw: name -> [Font Awesome glyph, fallback sign, colour]. A caller may also name any
@@ -192,12 +192,13 @@ export function cleanIntent(o) {
 }
 /**
  * What the pill over the token of an intention says (a GM's client; nothing aimed at yet): the action's own label, never the user's
- * name glued before it (who armed it is in the pill's tip, "user: label", whole). A label that fits the pill (BOARD_LIMITS.label
- * characters: the sender's business) is shown as it came; a longer one ends in an ellipsis inside that length. No label: the
- * user's name, cut the same way. Neither: null (no pill).
+ * name glued before it (who armed it is in the pill's tip, "user: label", whole). The label is drawn as it came, up to
+ * BOARD_LIMITS.intentPill characters - as much as an intention carries at all (LIMITS.label), so the pill never cuts what the line
+ * and the tip say whole (W1-14: it used to cut at the token marks' 18, "Otrząśnij się z do…"). No label: the user's name, cut to
+ * that length with an ellipsis. Neither: null (no pill).
  */
 export function intentPill(label, userName) {
-  const s = text(label, LIMITS.label) ?? text(userName, 80), max = BOARD_LIMITS.label;
+  const s = text(label, LIMITS.label) ?? text(userName, 80), max = BOARD_LIMITS.intentPill;
   if ( !s ) return null;
   const cps = [...s];
   return cps.length <= max ? s : `${cps.slice(0, max - 1).join("").trimEnd()}…`;

@@ -693,6 +693,11 @@ export function menu(spec = {}) {
     };
     let tieEl = null;
     const byI = (i) => M.items.find((it) => it.i === i);
+    // (a stepper keeps the last number its caller stood by - stepOk - so a refused step goes back to it, P8f-8)
+    for ( const it of M.items ) if ( it.stepper ) { it.stepSeq = 0; it.stepOk = it.stepper.value; it.stepOkSeq = 0; }
+    const rowOf = (it) => el.querySelector?.(`[data-i="${it.i}"]`);
+    const showStep = (it, r = rowOf(it)) => { const o = r?.querySelector?.("output"); if ( o ) o.textContent = String(it.stepper.value); };
+    const showToggle = (it, r = rowOf(it)) => { r?.classList?.toggle?.("is-on", it.on); r?.setAttribute?.("aria-checked", String(it.on)); };
     const choose = (it) => { const src = raw[it.i]; closeMenu(null, { ok: true, id: it.id, index: it.i }); try { src?.run?.(); } catch ( err ) { console.warn(`${MODULE_ID} | zones: menu`, err); } };
     const onClick = async (ev) => {
       const rowEl = ev.target?.closest?.("[data-i]");
@@ -703,11 +708,20 @@ export function menu(spec = {}) {
       if ( it.stepper ) {
         const d = Number(ev.target.closest?.("[data-step]")?.dataset.step);
         if ( !d ) return;
-        let v = BC.stepValue(it.stepper, d);
+        const v = BC.stepValue(it.stepper, d);
         if ( v === it.stepper.value ) return;
-        try { const got = await src?.onStep?.(v, d); if ( Number.isFinite(Number(got)) && got !== true ) v = Number(got); else if ( got === false ) return; } catch ( err ) { console.warn(`${MODULE_ID} | zones: menu`, err); return; }
-        it.stepper.value = v;
-        const o = rowEl.querySelector?.("output"); if ( o ) o.textContent = String(v);
+        // P8f-8: the number shows at once (a click is never waited for, so a quick burst of clicks counts every one); what the
+        // caller answers settles it: a number - that number, false or a throw - back to the last number the caller stood by.
+        // A later answer of the caller (a request that failed after the clicking stopped) goes through api.menuSet.
+        const seq = ++it.stepSeq;
+        it.stepper.value = v; showStep(it, rowEl);
+        let got;
+        try { got = await src?.onStep?.(v, d); } catch ( err ) { console.warn(`${MODULE_ID} | zones: menu`, err); got = false; }
+        if ( MENU?.el !== el ) return;                                                   // (closed or replaced while the caller thought)
+        if ( got === false ) { if ( seq === it.stepSeq ) { it.stepper.value = it.stepOk; showStep(it, rowEl); } return; }
+        const n = typeof got === "number" || (typeof got === "string" && got.trim() !== "") ? Number(got) : NaN;
+        if ( seq > it.stepOkSeq ) { it.stepOk = Number.isFinite(n) ? n : v; it.stepOkSeq = seq; }
+        if ( seq === it.stepSeq && Number.isFinite(n) ) { it.stepper.value = n; showStep(it, rowEl); }
         return;
       }
       if ( it.toggle ) {
@@ -738,7 +752,19 @@ export function menu(spec = {}) {
     // (a declared bar or a box to keep clear of may grow while the menu is open - a dock's panel opens: it steps aside a few times a second)
     const again = setInterval(place, 400);
     again?.unref?.();
-    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { tieEl?.remove(); clearTimeout(arm); clearInterval(again); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
+    // P8f-8: the caller puts a number or a state back after the fact (api.menuSet)
+    const set = (id, patch) => {
+      const it = M.items.find((q) => !q.separator && q.id === id && (q.stepper || q.toggle));
+      if ( !it || !patch || typeof patch !== "object" ) return false;
+      if ( it.stepper && patch.value != null && Number.isFinite(Number(patch.value)) ) {
+        const v = Math.max(it.stepper.min, Math.min(it.stepper.max, Math.round(Number(patch.value))));
+        it.stepSeq++; it.stepOk = v; it.stepOkSeq = it.stepSeq; it.stepper.value = v; showStep(it);
+        return true;
+      }
+      if ( it.toggle && typeof patch.on === "boolean" ) { it.on = patch.on; showToggle(it); return true; }
+      return false;
+    };
+    MENU = { el, resolve, set, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { tieEl?.remove(); clearTimeout(arm); clearInterval(again); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
     place();
   });
 }
@@ -753,6 +779,13 @@ export function closeMenu(reason = "cancelled", result = null) {
   return true;
 }
 export const menuOpen = () => !!MENU;
+/**
+ * Put a number or a state of the open menu right after the fact (P8f-8): `menuSet(id, { value })` for a stepper (held inside
+ * its limits), `menuSet(id, { on })` for a toggle. For a caller whose request is sent after the clicking stops and fails then:
+ * the menu shows the number the character has again, without being opened anew. true: done; false: no open menu, no such
+ * entry, or nothing it can take. The caller's onStep / onToggle is not called.
+ */
+export const menuSet = (id, patch) => { try { return MENU?.set ? MENU.set(String(id ?? ""), patch) : false; } catch { return false; } };
 
 /* ---------------------------------------------------------------- a right click on a thing of the map */
 
@@ -962,7 +995,7 @@ export const boardApi = {
   /** Picking where to move with the route and the price under the pointer; picking where an area goes; an area shown; a warning. */
   pickMove, pickArea, areaPreview, clearArea, warn,
   /** A menu at a thing on the map; being asked about a right click on a token, a border or a zone. */
-  menu, closeMenu, menuOpen, onContext,
+  menu, closeMenu, menuOpen, menuSet, onContext,
   /** The map's labels on the board as client boxes (section 41). */
   mapLabels,
   /** What this user has armed, for the GMs; a GM's client: the intentions on screen. */

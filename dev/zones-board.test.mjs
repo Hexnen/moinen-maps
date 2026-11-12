@@ -41,7 +41,7 @@ const pixi = {
 globalThis.PIXI = new Proxy(pixi, { get: (t, k) => (k in t ? t[k] : typeof k === "symbol" ? undefined : anyFn()) });
 
 // (the chunk decoder says it has no Worker in node: not this test's business)
-const warn0 = console.warn; console.warn = (...a) => { if ( !/chunk worker|style wash/.test(String(a[0])) ) warn0(...a); };
+const warn0 = console.warn; console.warn = (...a) => { if ( !/chunk worker|style wash/.test(String(a[0])) && !/no executor/.test(String(a[1])) ) warn0(...a); };
 
 /* ---- a stand-in Foundry */
 const hooks = new Map();
@@ -333,12 +333,16 @@ check(api.tokenMarks().some((m) => m.id === "~intent.p1" && m.tokens[0].tip === 
   onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Slugfest: Omni-Man" } }, "p1");
   check(pill().label === "Slugfest: Omni-Man" && pill().label.length === BC.BOARD_LIMITS.label && pill().tip === "Test Gracz 1: Slugfest: Omni-Man", "U76: a label that fits the pill by itself (18 characters) is drawn whole");
   onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Uderzenie z rozbiegu w mur" } }, "p1");
-  check(pill().label === "Uderzenie z rozbi…" && [...pill().label].length === BC.BOARD_LIMITS.label && pill().tip === "Test Gracz 1: Uderzenie z rozbiegu w mur", "U76: a longer label ends in an ellipsis inside the pill's length; the tip keeps it whole");
+  check(pill().label === "Uderzenie z rozbiegu w mur" && pill().tip === "Test Gracz 1: Uderzenie z rozbiegu w mur", "W1-14: a label longer than a token mark's 18 characters is drawn whole in the intention's pill (it used to end \"Uderzenie z rozbi…\")");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Otrząśnij się z dolegliwości" } }, "p1");
+  check(pill().label === "Otrząśnij się z dolegliwości" && [...pill().label].length === 28 && BC.BOARD_LIMITS.intentPill === 28, "W1-14: the longest Polish action name of the combat module (28 characters) stands whole over the token");
+  onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Wyważ zamknięte drzwi do skarbca w podziemiach" } }, "p1");
+  check(pill().label === "Wyważ zamknięte drzwi do ska" && pill().tip === "Test Gracz 1: Wyważ zamknięte drzwi do ska", "W1-14: the pill never cuts more than the intention itself carries (28 characters, LIMITS.label): pill, tip and line say the same words");
   onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1" } }, "p1");
   check(pill().label === "Test Gracz 1" && pill().tip === "Test Gracz 1", "U76: no label: the pill says who");
   onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", to: "t2", label: "Slugfest: Omni-Man" } }, "p1");
   check(!pill() && api.links().find((l) => l.id === "~intent.p1")?.links[0].label === "Test Gracz 1: Slugfest: Omni-Man", "U76: aimed at something: the line carries \"user: label\", uncut, and no pill stands");
-  check(BC.intentPill(null, null) === null && BC.intentPill("  ", "") === null && BC.intentPill(null, "A very long user name indeed") === "A very long user…", "U76: intentPill: nothing to say is null; a long name is cut the same way");
+  check(BC.intentPill(null, null) === null && BC.intentPill("  ", "") === null && BC.intentPill(null, "A very long user name indeed, really") === "A very long user name indee…", "U76: intentPill: nothing to say is null; a long name is cut the same way");
   onSocket({ t: "board", op: "intent", scene: "scene1", intent: { token: "t1", label: "Aiming" } }, "p1");
 }
 check(api.intents(false).length === 1 && !api.tokenMarks().length && api.intents(true).length === 1 && api.tokenMarks().length === 1, "a GM can hide the intentions on their own screen and show them again");
@@ -417,6 +421,34 @@ const pr3 = api.menu({ border: "z2|z3", items: [{ label: "Open" }] });
 check((await pr).reason === "replaced" && menuEl().style.left === "424px", "a new menu replaces the open one; at a border it stands at the border's mark");
 window.fire("keydown", { key: "Escape" });
 check((await pr3).reason === "cancelled", "Escape closes it");
+/* P8f-8 (Z47): a step the caller refuses - at once, later, or after the clicking stopped - never leaves its number in the menu */
+{
+  const asked = [];
+  let pm = api.menu({ token: "t2", items: [{ id: "hp", label: "Health", stepper: { value: 3, min: 0, max: 9 }, onStep: (v) => { asked.push(v); return new Promise((r) => setTimeout(() => r(v !== 5), 20)); } }, { id: "res", label: "Resolve", stepper: { value: 2, min: 0, max: 4 }, onStep: () => { throw new Error("no executor"); } }, { id: "quick", label: "Quick", toggle: true, on: false }] });
+  const up = rowOf(0, 1);
+  menuEl().fire("click", up.target); menuEl().fire("click", up.target);                       // two quick clicks, nothing answered yet
+  check(J(asked) === J([4, 5]) && up.row.outEl.textContent === "5", "P8f-8: a burst of clicks counts every click and shows the number at once (the second click used to be lost while the first was asked)");
+  await tick(40);
+  check(up.row.outEl.textContent === "4", "P8f-8: the caller refuses the last step (false): the menu goes back to the last number the caller stood by");
+  const rs = rowOf(1, 1);
+  menuEl().fire("click", rs.target); await tick();
+  check(rs.row.outEl.textContent === "2", "P8f-8: a step whose caller throws goes back too");
+  menuEl().fire("click", rowOf(1, -1).target); await tick();
+  const shown = () => menuEl().btn.btn.textContent;                                            // (the stand-in DOM: every query answers the same element)
+  check(api.menuSet("hp", { value: 3 }) === true && shown() === "3" && api.menuSet("hp", { value: 99 }) === true && shown() === "9", "P8f-8: menuSet puts a stepper's number back after the fact (a request that failed after the clicking stopped), inside its limits");
+  check(api.menuSet("quick", { on: true }) === true && menuEl().btn.classList.s.has("is-on") && api.menuSet("nope", { value: 1 }) === false && api.menuSet("hp", { on: true }) === false && api.menuSet("hp", null) === false, "P8f-8: menuSet sets a toggle; an unknown entry or a patch it cannot take is refused");
+  window.fire("keydown", { key: "Escape" }); await pm;
+  check(api.menuSet("hp", { value: 1 }) === false, "P8f-8: no open menu: menuSet does nothing");
+  /* a debounced caller (the combat module: one request when the clicking stops) answers each click at once and fails later */
+  let later = null;
+  pm = api.menu({ token: "t2", items: [{ id: "hp", label: "Health", stepper: { value: 6, min: 0, max: 9 }, onStep: (v) => { clearTimeout(later); later = setTimeout(() => api.menuSet("hp", { value: 6 }), 15); return v; } }] });
+  const dn = rowOf(0, -1);
+  menuEl().fire("click", dn.target); menuEl().fire("click", dn.target); await tick();
+  check(dn.row.outEl.textContent === "4", "P8f-8: the debounced caller's clicks show 6 -> 4");
+  await tick(30);
+  check(shown() === "6" && api.menuOpen(), "P8f-8: its request failed: menuSet put 6 back and the menu stayed open (not opened anew)");
+  window.fire("keydown", { key: "Escape" }); await pm;
+}
 pr = api.menu({ x: 100, y: 100, items: [{ label: "Here" }] });
 Hooks.callAll("canvasTearDown");
 check((await pr).reason === "sceneChanged", "the scene closes under a menu: it ends");

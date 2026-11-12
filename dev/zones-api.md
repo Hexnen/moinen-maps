@@ -1116,6 +1116,7 @@ const r = await api.menu({
 });
 // { ok: true, id, index }  |  { ok: false, reason: "cancelled" | "replaced" | "noItems" | "noAnchor" | "sceneChanged" }
 api.closeMenu();   api.menuOpen() -> bool
+api.menuSet(id, { value } | { on }) -> bool       // put a stepper's number / a toggle's state back after the fact (P8f-8)
 
 const off = api.onContext((ctx) => null | true | menuSpec | Promise<menuSpec | null>);
 // ctx = { kind: "token" | "border" | "zone", token, border, zone, place, x, y, client, shift, alt, ctrl }
@@ -1124,6 +1125,13 @@ const off = api.onContext((ctx) => null | true | menuSpec | Promise<menuSpec | n
 - The menu stands beside the thing (right of it, else left), stays inside the window and follows the map. A plain entry
   closes it (`run()` is called and the promise resolves); a **stepper** (− value +) and a **toggle** keep it open and tell
   the caller each change (`onStep` may return the value to show, or `false` to refuse; `onToggle` may return the state).
+  A stepper's new number shows **at once** and the click is never waited for, so a quick burst counts every click (P8f-8,
+  fxw; it used to wait for `onStep`, and a second click while a promise was pending was lost). `onStep` may return a
+  promise: a number settles the shown number, `false` or a throw puts back the last number the caller stood by (the menu's
+  first one, or the last step it accepted). A caller that sends its request only after the clicking stops (and answers each
+  click with the value) puts the number back when that request fails with `api.menuSet(id, { value })`: the menu stays open
+  and shows it, held inside the stepper's limits; `menuSet(id, { on })` does the same for a toggle. `menuSet` calls neither
+  `onStep` nor `onToggle`; false when no menu is open or the entry is not a stepper / toggle with that id.
   Escape, a click elsewhere or a new menu closes it. Digits 1-9 pick the plain entries in order. This client only.
 - `onContext`: asked about every right click on a token, on a border that carries a wall or a door, or on a zone. Answer
   **at once**: nothing = not mine (Foundry's token HUD and the map's own menus do what they always did); `true` = handled;
@@ -1171,9 +1179,11 @@ Hooks.on("moinenMapsIntent", (userId, intent | null) => {});   // a GM's client
 
 It goes to the GMs' clients alone, never to another player. There it shows as a dashed line from the token to what is aimed
 at with "user: label" on it (whole), and dashed outlines on the zones. While nothing is aimed at yet, a pill stands over
-the token instead: it carries **the label alone** (M5; who armed it is in the pill's tip, "user: label", whole). A label
-of up to 18 characters is drawn as it came, a longer one ends in an ellipsis inside 18; with no label the pill says the
-user's name. (Before M5 the pill said "user: label" cut to 18 characters, which lost the action's name.) Only about a token the sender owns. It is not drawn
+the token instead: it carries **the label alone** (M5; who armed it is in the pill's tip, "user: label", whole). The label
+is drawn as it came, whole up to 28 characters (`BOARD_LIMITS.intentPill`; that is all an intention carries, so pill, tip
+and line say the same words); with no label the pill says the user's name, ending in an ellipsis past 28. (Before M5 the
+pill said "user: label" cut to 18 characters, which lost the action's name; until fxw (W1-14) the label alone was still cut
+at 18, "Otrząśnij się z do…". A caller that cuts its own label to 18 cuts it for nothing now.) Only about a token the sender owns. It is not drawn
 on the sender's own screen (a GM's goes to the other GMs). `pickMove` and `pickArea` send it by themselves with
 `intent: true | { label }`, from the moment the pick runs until it ends.
 
