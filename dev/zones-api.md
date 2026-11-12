@@ -1568,3 +1568,94 @@ and drawn exactly as before (`zones-signs.test.mjs` C2). An older map ignores `s
 **Limits.** A menu entry's `label`, a stepper's or a toggle's text, a `disabled` reason, a warning chip of section 28, the pill
 of an intention (section 32) and a link's label take no signs. The pick tooltip has no pointer events, so a sign's own tooltip
 does not open there (its name is still its screen-reader name).
+
+## 41. Room for the map's floating things, and how a token moved (U116, U106, U107)
+
+Rows U116, U106 and U107 of `invincible-plus-ultra/dev/combat-usability.md`. Pure part: `scripts/zones/room.mjs` (`spreadLabels`,
+`menuSpot`, `chipSpot`, `methodOf`); wiring: `board.mjs` (the labels' layout, the menu), `board-layer.mjs` (a label's shift and
+its tie line), `interact.mjs` (`uiAvoid`, the highlights' labels keeping clear of the board's), `zones.mjs` (`method` /
+`byHand` for `tactical`), `director/source-stage.mjs` (the "My view" chip). Checks: `dev/zones-room.test.mjs`, the "41:" checks
+of `dev/zones-board.test.mjs`, the "section 41" checks of `dev/zones-play.test.mjs`.
+
+| | Before | Now |
+| --- | --- | --- |
+| token labels (section 25) of tokens that stand close | each at its token: one lay over the other ("Spor" under "Spora szansa") | laid out together: a label that would cover another steps aside or up a row, as little as it can, tied to its token by a thin line in its colour |
+| a token label longer than 18 characters | cut with no sign of it | cut with an ellipsis; the whole label is the first line of the pointer's tip |
+| a zone's label or warning chip (sections 17, 28) | kept clear of tokens, badges, other zone labels | also of the tokens' labels and the lines' pills ("Even odds" no longer covers "Fire ⊘ round start") |
+| a menu (section 29) near an edge | inside the window | inside the window less the declared bars (section 23: a menu near the bottom stands above a declared dock), clear of the boxes asked for with `uiAvoid` when there is room; placed again while it is open |
+| the director's "My view" chip | bottom centre of the stage | the first free spot along the bottom of the stage (a row or two higher, else the top centre), clear of the `uiAvoid` boxes, the map's labels and Foundry's movement ruler |
+| `tactical` `confirm(ctx)` / `place(ctx)` | no word of how the token moved | `ctx.method`, `ctx.byHand` |
+
+### `api.uiAvoid(id, what)` -> `off()`
+
+```js
+const off = api.uiAvoid("my-module.desk", "#my-desk");           // an element or a selector (every match), measured whenever it is asked
+api.uiAvoid("my-module.note", { x, y, width, height });           // a box in client px (or { x0, y0, x1, y1 })
+api.uiAvoid("my-module.all", () => [el, "#bar", box]);            // worked out whenever it is asked; lists may mix all of these
+api.uiAvoid("my-module.desk", null);  off();                      // taken back (either way)
+api.uiAvoids(extra?) -> [{ id, x0, y0, x1, y1 }]                  // the boxes now; an absent element, display: none or visibility: hidden gives none
+```
+
+A part of the screen that is not a bar along an edge (`uiInset` stays for those): a panel at the side, a banner at the bottom
+centre, a desk. The map's **menus** (`api.menu` and the menus `api.onContext` opens) and the director's **"My view" chip** keep
+clear of these boxes when some spot is free; with none free they stand where they cover the least of them (never off the
+screen). Per client, until reload; one id per part, the same id again replaces it. Nothing else of the map reads them (the
+pick's banner and `reveal` still work with section 23).
+
+### `api.mapLabels()` -> `[{ x0, y0, x1, y1, kind }]`
+
+The labels the map draws on the board now, in client px: `kind` `"token"` (a token mark's pill, an intention's pill), `"line"` (a
+line's pill), `"zone"` (a highlight's label, a warning chip). For a caller that keeps its own floating things clear of them.
+
+### The labels' layout
+
+- One pass over every token label (section 25 marks, section 32 intention pills) on the next frame after the marks, the zoom, a
+  marked token or a line changed. The one `chosen` keeps its spot first; the others are taken from the top down and from the left.
+  A label that would lie on another is moved by the least: up a row at a time (up to four) or aside to the edge of the label in
+  the way (up to 0.8 of its own width). A moved label prefers a spot off other tokens' pictures; a label alone is never moved.
+  A label keeps the side it took while its token walks; once nothing is in the way it goes home.
+- A moved label (more than 4 screen px) is tied to the top middle of its token by a thin line in its colour with a dot.
+- The lines' pills (section 26) stand where they stand; the tokens' labels keep clear of them. Then the highlights' labels take
+  their spots clear of all of them (120 ms after the last change: while a marked token walks they follow when it stops).
+- The pointer moves nothing: the hover text of a label shows in the spot the label has.
+- Not done: a label is drawn as a child of its token, so a token drawn later can still cover a label that had to climb onto it
+  (a moved label avoids pictures when it can); a label is not kept clear of Foundry's own token names and effect icons.
+
+### The menu
+
+`menuSpot(anchor, w, h, vw, vh, { insets, avoid })`: the old spot (right of the thing, else left, level with its top) inside the
+window less the declared insets; then, while that spot covers a box asked for: right or left of the thing at its top or bottom,
+below or above it, left of the box in the way or above it. An axis whose declared bars leave less than the menu is given up for
+the whole window. With no insets declared and nothing asked for, the menu stands exactly where it stood (a table without a combat
+module looks unchanged). While open it is placed again on every pan and every 400 ms (a dock's panel that opens under it).
+
+### The "My view" chip
+
+`chipSpot(stage, w, h, avoid)` in the director's safe stretch (section 23): bottom centre 40 px up (where it always stood), then
+sideways along that row in 48 px steps, then one or two rows higher, then the top centre; the first spot clear of the `uiAvoid`
+boxes, the map's labels (`mapLabels`) and the labels of Foundry's movement ruler; else the least covered. Placed again every
+300 ms while it shows, as before. A caller's own stylesheet must not pin it (the combat module's old `!important` rule is gone).
+
+### `tactical`: how the token moved
+
+`confirm(ctx)` (a drag, a level change) and `place(ctx)` (a GM's free placement) carry:
+
+- `method`: Foundry's word for the move (`TokenMovementMethod`): `"dragging"`, `"keyboard"`, `"hud"`, `"config"`, `"api"`,
+  `"paste"`, `"undo"`. Read from the update's options as Foundry records them (`options._movement[id].method`, else
+  `options.movement[id].method`, else `options.method`); an update that says none is `"api"`. A change of level alone carries no
+  movement: the map's own token-HUD altitude button (its menu and its right click, Orbit through it) says `"hud"`, anything else
+  (`setLevel`, `setAltitude`, a macro, another module) `"api"`.
+- `byHand`: `true` for `dragging`, `keyboard`, `hud`, `config` (a user's own hand: a slow drag is a drag however long it was held);
+  `false` for `api`, `paste`, `undo` (a script, another module, an undo).
+
+The map itself does nothing different with them: the drag is held and asked as before. A combat module that opens a menu of ways
+for a drag skips it for `byHand: false` (a script's update is not a drag). A caller that reads neither field sees no change.
+
+### For the caller
+
+| Ledger row | Call |
+| --- | --- |
+| U116 labels on and near tokens overlap | nothing: the map lays its labels out; long labels end in an ellipsis on the pill, the tip has the whole |
+| U116 the "My view" chip over labels and the session banner | `api.uiAvoid("<mod>.notice", ".my-notice")`; drop any rule that pins `.mm-dst-chip` |
+| U106 a map menu over the dock | the dock declared with `uiInset({ bottom: "#dock" })` (section 23) now keeps menus above it; side panels with `uiAvoid` |
+| U107 a drag or a script's update | `confirm(ctx)`: `ctx.byHand` (`ctx.method` for more); an older map has no such field: keep a guess for it |

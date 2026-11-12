@@ -9,6 +9,7 @@ import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
 import { FOLLOW, followOf } from "../zones/board-core.mjs";
+import { chipSpot } from "../zones/room.mjs";
 
 /**
  * COMBAT STAGE (every client; the leader's events and shots are the director's as before: turn, the active combatant's move, its attack,
@@ -663,11 +664,26 @@ const CSS = `
 .mm-dst-chip kbd { font: inherit; font-size: 0.62rem; letter-spacing: 0.08em; padding: 0 0.35em; border: 1px solid rgba(244, 239, 230, 0.4); border-radius: 3px; }
 `;
 let chip = null, keyOn = false, chipTick = null;
-/** Bottom centre of the free stage: above whatever is declared at the bottom (an action dock), never on it. */
+/**
+ * Bottom centre of the free stage: above whatever is declared at the bottom (an action dock), never on it. Then (zones-api 41) clear
+ * of what another module asked the map's floating things to keep clear of (uiAvoid: a banner at the bottom centre, a panel), of the
+ * labels the map draws on the board (a target's pill, a zone's warning) and of Foundry's movement ruler: the first free spot along
+ * the bottom of the stage, a row or two higher, else the top centre (room.mjs chipSpot).
+ */
+function chipAvoid() {
+  const out = [];
+  try {
+    const z = globalThis.game?.modules?.get?.("moinen-maps")?.api?.zones;
+    out.push(...(z?.uiAvoids?.() ?? []), ...(z?.mapLabels?.() ?? []));
+  } catch { /* no zones API: the stage's own bottom centre */ }
+  try { for ( const e of document.querySelectorAll("#measurement > *, #measurement .waypoint-label") ) { const r = e.getBoundingClientRect(); if ( r.width > 0 && r.height > 0 ) out.push({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom }); } } catch { /* */ }
+  return out;
+}
 function placeChip() {
   if ( !chip ) return;
-  const r = stageRect();
-  chip.style.left = `${Math.round(r.x + r.w / 2)}px`; chip.style.top = `${Math.round(r.y + r.h - 40)}px`;
+  const r = stageRect(), box = chip.getBoundingClientRect?.(), w = box?.width || 150, h = box?.height || 24;
+  const s = chipSpot(r, w, h, chipAvoid());
+  chip.style.left = `${Math.round(s.x + w / 2)}px`; chip.style.top = `${Math.round(s.y)}px`;
 }
 function showChip() {
   if ( chip?.isConnected ) { placeChip(); return; }

@@ -62,9 +62,20 @@ function cleanMark(m) {
   if ( !icon ) return null;
   return { icon, color: colorOf(o.color, STATE_MARKS[icon]?.[2] ?? COLORS.info), tip: text(o.tip, BOARD_LIMITS.tip) };
 }
+/** A token's label as its pill shows it: up to BOARD_LIMITS.label characters, a longer one ending in an ellipsis inside that (U116:
+ *  a label cut with no sign of it read as another word - "Spor"). */
+export function pillText(v) {
+  const s = text(v, 400);
+  return s && s.length > BOARD_LIMITS.label ? `${s.slice(0, BOARD_LIMITS.label - 1).trimEnd()}…` : s;
+}
+/** The whole label when the pill cuts it ({ full }), for the pointer's tip (section 41); {} when it fits. */
+export function fullOf(v) {
+  const s = text(v, 120);
+  return s && s.length > BOARD_LIMITS.label ? { full: s } : {};
+}
 function cleanHover(h) {
   if ( !h || typeof h !== "object" ) return null;
-  const out = { label: text(h.label, BOARD_LIMITS.label), tip: text(h.tip, BOARD_LIMITS.tip), bar: cleanBar(h.bar) };
+  const out = { label: pillText(h.label), ...fullOf(h.label), tip: text(h.tip, BOARD_LIMITS.tip), bar: cleanBar(h.bar) };
   const signs = out.label ? cleanSigns(h.signs, { label: BOARD_LIMITS.label }) : null;
   if ( signs ) out.signs = signs;
   return out.label || out.tip || out.bar ? out : null;
@@ -88,7 +99,7 @@ export function cleanTokenMarks(spec, me = null) {
     const state = TOKEN_STATES.includes(o.state) ? o.state : null;
     tokens.push({
       token, state, color: colorOf(o.color ?? dcol, state === "out" ? COLORS.blocked : state === "caught" ? COLORS.range : COLORS.target),
-      label: text(o.label, BOARD_LIMITS.label), tip: text(o.tip, BOARD_LIMITS.tip),
+      label: pillText(o.label), ...fullOf(o.label), tip: text(o.tip, BOARD_LIMITS.tip),
       marks: (Array.isArray(o.marks) ? o.marks : []).map(cleanMark).filter(Boolean).slice(0, BOARD_LIMITS.marks),
       bar: cleanBar(o.bar), hover: cleanHover(o.hover),
       // (section 40: the label as words and signs; the pill shows them, the words stay for the rest)

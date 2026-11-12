@@ -4,6 +4,7 @@ import * as HL from "./highlight.mjs";
 import { ZoneHighlightLayer } from "./highlight-layer.mjs";
 import { pairKey } from "./marks.mjs";
 import * as View from "./view.mjs";
+import * as Room from "./room.mjs";
 import { piecesHtml } from "./signs-core.mjs";
 
 /**
@@ -76,11 +77,16 @@ export function redraw() {
     zoom: canvas.stage?.scale.x ?? 1, key: `${STORE.version}|${Zones.zonesApi.version()}|${PICK?.seq ?? 0}`,
     pick: PICK?.allowed ?? null, marks,
     // (a label keeps clear of the badges, icons and passage marks the zones show to this user, and of the tokens this user sees)
-    blocks: () => ({ boxes: look && Zones.visibleToMe() ? Zones.displayBoxes() : [], tokens: tokenBoxes() }),
+    // (section 41: and of the pills the board puts at tokens and on lines - a token's hit chance never lies under a zone's warning)
+    blocks: () => ({ boxes: [...(look && Zones.visibleToMe() ? Zones.displayBoxes() : []), ...boardLabelBlocks()], tokens: tokenBoxes() }),
     zoneAt: (x, y) => Zones.zonesApi.zoneAt(x, y), grid: Zones.gridSize()
   });
 }
 
+/** The board's pills as boxes the highlights' labels keep clear of (as hard as a token: a label under a label cannot be read). */
+function boardLabelBlocks() {
+  try { return (boardLabels() ?? []).map((b) => ({ zone: null, kind: "label", x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 })); } catch { return []; }
+}
 /** The tokens this user sees, as boxes in scene pixels, where they stand (their documents: not where an animation has them now). */
 function tokenBoxes() {
   const g = Zones.gridSize(), out = [];
@@ -150,6 +156,76 @@ export function uiInset(id, spec = null) {
 }
 /** The declared insets now, as one: { top, right, bottom, left } in px (`extra`: one more, counted with them). */
 export const uiInsets = (extra = null) => View.sumInsets([...[...INSETS.values()].map(resolveInset), View.cleanInsets(extra)]);
+
+/* ---------------------------------------------------------------- boxes the map's floating things keep clear of (section 41) */
+
+/** What other interface parts asked the map to keep clear of: id -> what (an element, a selector, a box, a function, a list of them). */
+const AVOIDS = new Map();
+/** One "what" as client boxes (an element or a selector: where it is now, nothing while it is absent or not shown). */
+function boxesOf(what, depth = 0) {
+  if ( what == null || what === false || depth > 3 ) return [];
+  if ( typeof what === "function" ) { let v; try { v = what(); } catch { v = null; } return boxesOf(v, depth + 1); }
+  if ( Array.isArray(what) ) return what.flatMap((w) => boxesOf(w, depth + 1));
+  if ( typeof what === "string" ) {
+    let els = [];
+    try { els = [...(document.querySelectorAll?.(what) ?? [])]; } catch { els = []; }
+    return els.flatMap((e) => boxesOf(e, depth + 1));
+  }
+  if ( typeof what.getBoundingClientRect === "function" ) {
+    if ( what.isConnected === false ) return [];
+    try { const cs = getComputedStyle(what); if ( cs.visibility === "hidden" || cs.display === "none" ) return []; } catch {}
+    const r = what.getBoundingClientRect();
+    const b = Room.cleanBox({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom });
+    return b ? [b] : [];
+  }
+  const b = Room.cleanBox(what);
+  return b ? [b] : [];
+}
+/**
+ * Ask the map's floating things - a menu at a thing (api.menu, the menus of api.onContext), the director's "My view" chip - to keep
+ * clear of a part of the screen that is not a bar along an edge (a panel at the side, a banner at the bottom centre, a desk):
+ *   uiAvoid("my-module.desk", "#my-desk")                 an element or a selector (every match): measured whenever it is asked
+ *   uiAvoid("my-module.note", { x, y, width, height })     a box in client px (also { x0, y0, x1, y1 })
+ *   uiAvoid("my-module.all", () => [el, box, ...])         worked out whenever it is asked
+ *   uiAvoid("my-module.desk", null)                        taken back
+ * Per client, until reload. Returns the function that takes it back. A box that leaves no room is given up as little as it can be:
+ * the thing stands where it covers the least of the boxes.
+ */
+export function uiAvoid(id, what = null) {
+  id = String(id ?? "");
+  if ( !id ) return () => {};
+  if ( what == null || what === false ) AVOIDS.delete(id); else AVOIDS.set(id, what);
+  return () => { if ( AVOIDS.get(id) === what ) AVOIDS.delete(id); };
+}
+/** The boxes asked for, as they are now: [{ id, x0, y0, x1, y1 }] in client px (`extra`: more of them, for this call). */
+export function uiAvoids(extra = null) {
+  const out = [];
+  for ( const [id, what] of AVOIDS ) for ( const b of boxesOf(what) ) out.push({ id, ...b });
+  for ( const b of boxesOf(extra) ) out.push({ id: null, ...b });
+  return out;
+}
+
+/* ---------------------------------------------------------------- the labels of the map, as one layout (section 41) */
+
+/** Where the board's labels stand (board.mjs: token marks' pills, lines' pills): () => [{ x0, y0, x1, y1 }] in scene px. */
+let boardLabels = () => [];
+export function setBoardLabels(fn) { boardLabels = typeof fn === "function" ? fn : () => []; }
+/** The board's labels moved: the highlights' labels take their spots again (soon, once). */
+// (after the last change of a burst: while a marked token walks its label moves on every frame; the highlights follow when it stops)
+let labelsTimer = 0;
+export function boardLabelsMoved() {
+  if ( !layer?.items.length ) return;
+  clearTimeout(labelsTimer);
+  labelsTimer = setTimeout(() => { labelsTimer = 0; try { layer?.place(); } catch {} }, 120);
+}
+/** The labels of the highlights as they stand now, in scene px: [{ x0, y0, x1, y1 }]. */
+export function highlightLabelBoxes() {
+  if ( !layer?.root?.visible || !layer.items.length ) return [];
+  return layer.items.map((it) => {
+    const s = it.c.scale?.x ?? 1, w = (it.w / 2) * s, h = 11 * s, x = it.c.position.x, y = it.c.position.y;
+    return { x0: x - w, y0: y - h, x1: x + w, y1: y + h };
+  });
+}
 
 const CELL = 40;
 const ours = (e) => !!e?.closest?.(".mm-z-pickway");
@@ -800,6 +876,8 @@ export const interactApi = {
   pick, cancelPick, picking,
   /** Which edges of the window another interface part covers; the declared insets; the free part of the window; bring zones into it. */
   uiInset, uiInsets, safeArea, reveal,
+  /** Parts of the screen the map's menus and its "My view" chip keep clear of (section 41). */
+  uiAvoid, uiAvoids,
   HIGHLIGHT_COLORS: HL.COLORS, highlightLib: HL
 };
 

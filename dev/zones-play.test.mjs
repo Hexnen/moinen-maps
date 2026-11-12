@@ -483,6 +483,18 @@ say = true;
 await m2.update({ x: 250, y: 0 });
 await new Promise((x) => setTimeout(x, 20));
 check(confirms.length === 3 && confirms[2].reachable === false && confirms[2].plan === null && api.zoneOfToken(m2).zone === "z3", "no way there: confirm() is told so, and a yes moves nothing");
+/* ---- section 41: confirm() is told how the token was moved - a hand on the map (Foundry's movement method) or a script */
+{
+  const how = [];
+  api.tactical({ gm: true, confirm: async (ctx) => { how.push(ctx); return false; } });
+  await m2.update({ x: 250, y: 0 }, { method: "dragging", movement: { [m2.id]: { method: "dragging" } } }); await new Promise((x) => setTimeout(x, 20));
+  await m2.update({ x: 250, y: 0 }, { _movement: { [m2.id]: { method: "keyboard" } } }); await new Promise((x) => setTimeout(x, 20));
+  await m2.update({ x: 250, y: 0 }); await new Promise((x) => setTimeout(x, 20));
+  await m2.update({ x: 250, y: 0 }, { method: "undo", isUndo: true }); await new Promise((x) => setTimeout(x, 20));
+  check(how.length === 4 && how[0].method === "dragging" && how[0].byHand === true && how[1].method === "keyboard" && how[1].byHand === true, "a drag and the arrow keys: method as Foundry says it, byHand true");
+  check(how[2].method === "api" && how[2].byHand === false && how[3].method === "undo" && how[3].byHand === false, "a plain update (a macro, another module) and an undo: byHand false");
+  check(m2.x !== 250, "(the token stayed: the answers were no)");
+}
 api.tactical({ confirm: async () => { confirms.push("gm"); return true; } });
 await m2.update({ x: 250, y: 0 });
 check(m2.x === 250 && confirms.length === 3, "the GM's own drags are not asked unless told to");
@@ -523,6 +535,7 @@ let lc = confirms[3];
 check(res === undefined && confirms.length === 4 && lc.level === true && lc.token === m2 && lc.from.spot === home && lc.to.spot === `${home}:elevated` && lc.drop === null && lc.profile.way === "air" && lc.reachable === true && lc.plan?.total === 1,
   "levels: a level change by this client's user is held and confirm() is asked with the two places");
 check(spotNow() === home && !m2.flags[MOD].alt && writes.length === 0, "refused (or sent on as an intent): the token stays on its level");
+check(lc.method === "api" && lc.byHand === false, "section 41: a level written by a call (setAltitude from a script) is no hand: method api");
 say = true;
 await api.setLevel(m2, { area: "sky" }); await tick();
 lc = confirms[4];

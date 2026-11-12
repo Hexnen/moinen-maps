@@ -187,7 +187,7 @@ export class ZoneHighlightLayer {
     const zoom = this.zoom ?? 1, px = 1 / Math.max(0.05, zoom);
     const B = this.blocks?.() ?? {}, boxes = B.boxes ?? [], zoneAt = this.zoneAt;
     // a token hides a label and a label hides the zone.s number; an icon row, a passage.s mark or another label makes both hard to read
-    const tokens = B.tokens ?? [], blocks = [...tokens.map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: b.kind === "badge" ? 3 : 2 }))];
+    const tokens = B.tokens ?? [], blocks = [...tokens.map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: b.kind === "badge" || b.kind === "label" ? 3 : 2 }))];
     for ( const it of [...this.items].sort((a, b) => (b.zoneId >= 0) - (a.zoneId >= 0)) ) {
       const s = this.#scale(it, px), half = { w: (it.w / 2) * s, h: (LABEL_H / 2) * s };
       let cands;
