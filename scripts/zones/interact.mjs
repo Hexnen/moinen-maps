@@ -255,19 +255,57 @@ const CELL = 40;
 const ours = (e) => !!e?.closest?.(".mm-z-pickway");
 /** The largest stretch of the window with nothing over the map's canvas, found by looking: { x, y, w, h } (to 40 px). null: cannot look. */
 function measureFree() {
+  const g = freeGrid();
+  if ( !g ) return null;
+  for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i);
+  return freeRect(g);
+}
+/** The cells looked at: one per CELL px of the window (null: cannot look). */
+function freeGrid() {
   if ( !hasDom() || !canvas?.app?.view ) return null;
-  const view = canvas.app.view, W = vw(), H = vh(), cols = Math.floor(W / CELL), rows = Math.floor(H / CELL);
+  const W = vw(), H = vh(), cols = Math.floor(W / CELL), rows = Math.floor(H / CELL);
   if ( cols < 2 || rows < 2 ) return null;
-  const free = new Uint8Array(cols * rows);
-  for ( let r = 0; r < rows; r++ ) for ( let c = 0; c < cols; c++ ) {
-    const e = document.elementFromPoint((c + 0.5) * CELL, (r + 0.5) * CELL);
-    free[r * cols + c] = e === view || ours(e) ? 1 : 0;
-  }
-  const R = View.largestRect(free, cols, rows);
+  return { view: canvas.app.view, W, H, cols, rows, free: new Uint8Array(cols * rows) };
+}
+/** Whether the map is what a click at the centre of cell `i` reaches (1) or something lies over it (0). */
+function freeCell(g, i) {
+  const e = document.elementFromPoint(((i % g.cols) + 0.5) * CELL, (Math.floor(i / g.cols) + 0.5) * CELL);
+  return e === g.view || ours(e) ? 1 : 0;
+}
+function freeRect(g) {
+  const { W, H, cols, rows } = g, R = View.largestRect(g.free, cols, rows);
   if ( !R ) return null;
   const x = R.c0 * CELL, y = R.r0 * CELL;
   return { x, y, w: (R.c1 === cols - 1 ? W : (R.c1 + 1) * CELL) - x, h: (R.r1 === rows - 1 ? H : (R.r1 + 1) * CELL) - y };
 }
+/**
+ * perf3: the same look as measureFree, spread over frames - at most FREE_SLICE_MS of hit tests per frame. A hit test costs about
+ * 0.5 ms on a page with a long chat log (every positioned element of every card is walked), so the ~880 cells of a 1600x900
+ * window at once held the page for 400-700 ms; this one is for the look now and then while a pick runs, where nothing waits on
+ * the answer. done(rect | null) as measureFree would answer for a window that did not change meanwhile; done(undefined): the window
+ * changed size while looking (that lays the pick out anyway). Returns a function that stops it (done is then never called).
+ */
+const FREE_SLICE_MS = 4;
+function measureFreeSoon(done) {
+  const g = freeGrid();
+  if ( !g ) { queueMicrotask(() => done(null)); return () => {}; }
+  let i = 0, stop = false, h = null;
+  const now = () => globalThis.performance?.now?.() ?? Date.now();
+  const later = (fn) => (globalThis.document?.visibilityState === "hidden" || typeof requestAnimationFrame !== "function" ? { t: setTimeout(fn, 0) } : { r: requestAnimationFrame(fn) });
+  const step = () => {
+    h = null;
+    if ( stop ) return;
+    if ( vw() !== g.W || vh() !== g.H ) { stop = true; done(undefined); return; }
+    const t0 = now();
+    while ( i < g.free.length ) { g.free[i] = freeCell(g, i); i++; if ( now() - t0 >= FREE_SLICE_MS ) break; }
+    if ( i < g.free.length ) { h = later(step); return; }
+    stop = true;
+    done(freeRect(g));
+  };
+  h = later(step);
+  return () => { stop = true; if ( h?.t ) clearTimeout(h.t); if ( h?.r && typeof cancelAnimationFrame === "function" ) cancelAnimationFrame(h.r); h = null; };
+}
+const sameFree = (f, o) => !(!f !== !o || (f && (f.x !== o.x || f.y !== o.y || f.w !== o.w || f.h !== o.h)));
 /** The free stretch: the declared insets, narrowed by what was found by looking. */
 const safeNow = (extra = null, free = null) => View.safeRect(vw(), vh(), uiInsets(extra), free);
 /**
@@ -727,11 +765,18 @@ function startPick() {
   if ( hasDom() ) {
     layoutPick(p);
     const again = setTimeout(() => layoutPick(p), 420);
-    const watch = setInterval(() => { const f = measureFree(), o = p.way.free; if ( !f !== !o || (f && (f.x !== o.x || f.y !== o.y || f.w !== o.w || f.h !== o.h)) ) layoutPick(p); }, 1500);
+    // (perf3: the look is spread over frames - measureFreeSoon; a stretch found changed is laid out at once, as before)
+    let looking = null;
+    const watch = setInterval(() => {
+      if ( looking ) return;
+      looking = { stop: null };
+      const me = looking;
+      me.stop = measureFreeSoon((f) => { if ( looking === me ) looking = null; if ( f === undefined || PICK !== p ) return; if ( !sameFree(f, p.way.free) ) layoutPick(p); });
+    }, 1500);
     const onPan = () => scheduleWay(p), onSize = () => layoutPick(p);
     Hooks.on("canvasPan", onPan);
     window.addEventListener("resize", onSize);
-    p.offs.push(() => clearTimeout(again), () => clearInterval(watch), () => Hooks.off("canvasPan", onPan), () => window.removeEventListener("resize", onSize));
+    p.offs.push(() => clearTimeout(again), () => clearInterval(watch), () => { looking?.stop?.(); looking = null; }, () => Hooks.off("canvasPan", onPan), () => window.removeEventListener("resize", onSize));
   }
 
   const world = (ev) => canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY });
