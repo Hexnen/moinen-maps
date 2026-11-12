@@ -1691,39 +1691,39 @@ for a drag skips it for `byHand: false` (a script's update is not a drag). A cal
 | U106 a map menu over the dock | the dock declared with `uiInset({ bottom: "#dock" })` (section 23) now keeps menus above it; side panels with `uiAvoid` |
 | U107 a drag or a script's update | `confirm(ctx)`: `ctx.byHand` (`ctx.method` for more); an older map has no such field: keep a guess for it |
 
-## 42. A sign on the token, and the ring as a meter (U133, TRIAL)
+## 42. The ring as a meter (U133)
 
 Row U133 of `invincible-plus-ultra/dev/combat-usability.md` (the owner: the odds words over targets become symbols, preferably on
-the token). Pure part `board-core.mjs` (`cleanBadge`, `cleanMeter`, `BADGE_SPOTS`); drawing `board-layer.mjs` (`badgeOf`,
-`meterRing`, `layoutToken`); the tip `board.mjs` (`setHoverTok`). Checks: the "42:" checks of `dev/zones-board.test.mjs`.
-Status: a trial: the combat module shows three looks behind a client switch until the owner picks one; the fields stay generic.
+the token; of three trial looks the owner chose "B", the ring in quarters, 2026-11-12). Pure part `board-core.mjs` (`cleanMeter`);
+drawing `board-layer.mjs` (`meterRing`, `meterRadius`, `layoutToken`); the tip `board.mjs` (`setHoverTok`). Checks: the "42:"
+checks of `dev/zones-board.test.mjs`.
 
-Two more fields of a token mark entry (section 25). Both are a show, merged like the others (a later or higher set wins), sent to
-users like the rest of the entry. The map does not know what they mean.
+One more field of a token mark entry (section 25). It is a show, merged like the others (a later or higher set wins), sent to users
+like the rest of the entry. The map learns only "n of m" and what it is called; it does not know what it means (a chance, a count).
 
 ```js
-api.markTokens({ id: "ipu.reach", tokens: [
-  { token, state: "in", tip: "Chance: Likely",                      // no label: no pill over the token
-    badge: { signs: [sign], name: "Likely", at: "ne", plate: true, size: 13 } },
+api.markTokens({ id: "ipu.reach", color: "target", tokens: [
+  { token, state: "in", tip: "Chance: Likely", meter: { n: 3, of: 4, name: "Likely" } },   // no label: no pill over the token
   { token, state: "chosen", meter: { n: 2, of: 4, name: "Even odds" } }
 ] });
 ```
 
 | field | |
 | --- | --- |
-| `badge.signs` | pieces of section 40 (signs, short words); at most 3 signs; nothing that draws: no badge |
-| `badge.name` | what it is called: said in the pointer's tip unless the tip already says it |
-| `badge.at` | its spot ON the token's ring: `n`, `ne` (default), `e`, `se`, `s`, `sw`, `w`, `nw`. A corner spot lies on the ring inside the token's corner (where the art is least), the others just outside the edge |
-| `badge.plate` | `true` (default): on the dark ground of the pills, rimmed in the entry's colour. `false`: the pictures alone with a dark rim of eight dark copies around them (no filter): reads on light and dark art |
-| `badge.size` | the picture's height in screen px at full size (8-28, default 14); it shrinks with a token small on screen as every mark does |
-| `meter` | `{ n, of, name }`: the ring of a state `in` / `chosen` / `caught` drawn in `of` parts (2-12) from the top, clockwise, `n` of them heavy and the rest a hairline; `chosen` adds ticks in the gaps, `caught` dashes the heavy parts. `name` as a badge's. No ring state: nothing |
+| `meter` | `{ n, of, name }`: the ring of a state `in` / `chosen` / `caught` drawn in `of` parts (2-12) from the top, clockwise, `n` of them full and the rest empty. No ring state: nothing |
+| `meter.name` | what it is called: said in the pointer's tip unless the tip already says it |
 
-- A badge is a child of the token (it follows it, like the chips); it is not a label, so it takes no part in the labels' layout
-  (section 41) and `mapLabels` does not list it. The badge stays while the pointer is on the token; a `hover.label` still shows its
-  pill over the token.
-- A badge at `ne` or `e` moves the state chips (section 25) down the right edge, below it.
-- Foundry's own parts around a token: effect icons down the left edge from the top, bar 2 along the inside of the top edge, bar 1
-  along the inside of the bottom edge, the nameplate under the token, the elevation tooltip over it. `ne` overlaps the right end of
-  bar 2 by a few px, `se` the right end of bar 1; neither touches the nameplate or the effect icons.
-- A table without such a caller is untouched (an entry without `badge` / `meter` is drawn exactly as before). An older map ignores
-  both: a caller that wants a fallback keeps a `label`.
+How it is drawn (the same at every `of`; the combat module uses 4):
+- INSIDE the token's square (the plain ring of section 25 stands just outside it): two tokens side by side, in a row or a crowd,
+  never cross rings. The gaps between the parts lie on the top, right, bottom and left, where two rings would meet edge to edge.
+- A full part: a heavy line in the entry's colour on a dark one. An empty part: a hairline on a thin dark one. How much of the ring
+  is heavy (a quarter, a half, three quarters, all of it) is the reading; one colour, never a colour alone.
+- `chosen`: the full parts heavier, with a light line along them, and a short tick pointing in from each gap (a reticle; the plain
+  chosen ring's ticks point out, which would reach into a neighbour). `caught`: the full parts dashed, two dashes each.
+- The meter ring is lifted with the label (section 41's container over the tokens): a neighbour's picture that overlaps the square
+  does not cover it. Foundry's bars inside the top and bottom edges are crossed by the ring near the top and bottom gaps only.
+- It is not a label: no part in the labels' layout (section 41), `mapLabels` does not list it. It stays while the pointer is on the
+  token; a `hover.label` still shows its pill over the token.
+- A table without such a caller is untouched (an entry without `meter` is drawn exactly as before). An older map ignores it: a
+  caller that wants a fallback keeps a `label`.
+- The trial's `badge` field (a sign on a token's corner, looks A and C) is gone: an entry's `badge` is dropped when it is cleaned.

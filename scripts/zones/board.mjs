@@ -116,8 +116,8 @@ function compose() {
       ...((e.label ? e.signs : was.signs) ? { signs: e.label ? e.signs : was.signs } : {}),
       marks: [...was.marks, ...e.marks.filter((m) => !was.marks.some((q) => q.icon === m.icon))].slice(0, BC.BOARD_LIMITS.marks),
       bar: e.bar ?? was.bar, hover: e.hover ?? was.hover,
-      // (section 42: a later set's badge or meter wins, as a label does)
-      ...((e.badge ?? was.badge) ? { badge: e.badge ?? was.badge } : {}), ...((e.meter ?? was.meter) ? { meter: e.meter ?? was.meter } : {})
+      // (section 42: a later set's meter wins, as a label does)
+      ...((e.meter ?? was.meter) ? { meter: e.meter ?? was.meter } : {})
     });
   }
   for ( const e of out.values() ) e.key = JSON.stringify(e);
@@ -253,8 +253,8 @@ function setHoverTok(id, at) {
     // (section 41: a label cut short on its pill is said whole first, unless the tip already says it)
     const cut = e ? (e.hover?.label ? e.hover.full : e.full) ?? null : null;
     const tip0 = e ? (e.hover?.tip ?? e.tip) : null;
-    // (section 42: what a badge or a meter on the token is called is said too, unless the tip already says it)
-    const named = e ? [e.badge?.name, e.meter?.name].filter((s) => s && !String(tip0 ?? "").includes(s)) : [];
+    // (section 42: what a meter on the token is called is said too, unless the tip already says it)
+    const named = e?.meter?.name && !String(tip0 ?? "").includes(e.meter.name) ? [e.meter.name] : [];
     const lines = e ? [...(cut && !String(tip0 ?? "").includes(cut) ? [cut] : []), ...named, tip0, ...e.marks.map((m) => m.tip)].filter(Boolean) : [];
     if ( !lines.length ) { tipEl?.remove(); tipEl = null; }
     else {

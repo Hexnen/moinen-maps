@@ -10,7 +10,7 @@
  */
 
 import { COLORS, colorOf, cleanUsers, zoneKeyOf, borderKeyOf, LIMITS } from "./highlight.mjs";
-import { cleanSigns, cleanPieces } from "./signs-core.mjs";
+import { cleanSigns } from "./signs-core.mjs";
 
 const ID_RE = /^[A-Za-z0-9_.:~-]{1,64}$/;
 const text = (v, max) => { if ( v == null || v === "" ) return null; const s = String(v).replace(/\s+/g, " ").trim(); return s ? s.slice(0, max) : null; };
@@ -81,23 +81,7 @@ function cleanHover(h) {
   return out.label || out.tip || out.bar ? out : null;
 }
 
-/* ---- section 42 (U133): a caller's sign ON the token, and the ring as a meter ---- */
-export const BADGE_SPOTS = Object.freeze({ n: -90, ne: -45, e: 0, se: 45, s: 90, sw: 135, w: 180, nw: -135 });
-/**
- * A badge on a token, cleaned: { pieces (section 40, signs and short words, at most 3 signs), name, at (a spot of BADGE_SPOTS on the
- * token's ring), plate (true: on a dark plate rimmed in the entry's colour; false: the drawing alone with a dark rim), size (the
- * picture's height in screen px at full size, 8..28) }. null: nothing that draws.
- */
-export function cleanBadge(b) {
-  if ( !b || typeof b !== "object" ) return null;
-  // (`pieces`: a set cleaned here once and sent on to another client is cleaned again there)
-  const pieces = cleanPieces(b.signs ?? b.pieces, 8);
-  if ( !pieces ) return null;
-  let n = 0;
-  const kept = pieces.filter((p) => typeof p === "string" || ++n <= 3);
-  const size = num(b.size);
-  return { pieces: kept, name: text(b.name, 120), at: Object.hasOwn(BADGE_SPOTS, b.at) ? b.at : "ne", plate: b.plate !== false, size: size == null ? 14 : Math.max(8, Math.min(28, size)) };
-}
+/* ---- section 42 (U133): the ring as a meter ---- */
 /** The ring as a meter, cleaned: { n, of, name } - `of` parts (2..12), `n` of them full (0..of). null: not one. */
 export function cleanMeter(m) {
   if ( !m || typeof m !== "object" ) return null;
@@ -109,7 +93,7 @@ export function cleanMeter(m) {
 /**
  * A set of token marks, cleaned:
  *   { id, tokens: [{ token (id), state: "in" | "out" | "chosen" | "caught" | null, color, label, tip, marks: [{ icon, color, tip }],
- *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40), badge?, meter? (section 42) }], users, order }
+ *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40), meter? (section 42) }], users, order }
  * null: no id that can be kept, or no entry that names a token.
  */
 export function cleanTokenMarks(spec, me = null) {
@@ -129,8 +113,7 @@ export function cleanTokenMarks(spec, me = null) {
       bar: cleanBar(o.bar), hover: cleanHover(o.hover),
       // (section 40: the label as words and signs; the pill shows them, the words stay for the rest)
       ...(o.label && cleanSigns(o.signs, { label: BOARD_LIMITS.label }) ? { signs: cleanSigns(o.signs, { label: BOARD_LIMITS.label }) } : {}),
-      // (section 42: a sign on the token, the ring as a meter; absent: nothing changes)
-      ...(cleanBadge(o.badge) ? { badge: cleanBadge(o.badge) } : {}),
+      // (section 42: the ring as a meter; absent: nothing changes)
       ...(cleanMeter(o.meter) ? { meter: cleanMeter(o.meter) } : {})
     });
   }

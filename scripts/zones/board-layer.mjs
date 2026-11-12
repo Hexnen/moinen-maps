@@ -12,7 +12,7 @@
  */
 
 import { pattern, iconFont } from "./display.mjs";
-import { STATE_MARKS, BADGE_SPOTS, pullIn, bowed } from "./board-core.mjs";
+import { STATE_MARKS, pullIn, bowed } from "./board-core.mjs";
 import { shortLabel } from "./highlight.mjs";
 import { piecesRow } from "./signs-pixi.mjs";
 
@@ -68,48 +68,38 @@ function pill(str, color, { size = 14, icon = null, h = 21, pieces = null } = {}
 }
 
 /**
- * Section 42: a caller's badge (board-core cleanBadge) as a container, its middle at 0, 0, with `.w`, `.h` (unscaled px). On a plate:
- * the pictures on the dark ground of the pills, rimmed in the entry's colour. Without: the pictures alone, each with a dark rim of
- * eight dark copies around it (no filter), so they read on light and dark token art alike.
+ * Section 42: THE RING AS A METER (U133: the chance of a target, "n of 4"). `of` parts from the top, clockwise, `n` of them full,
+ * the rest empty; drawn on G around (cx, cy) at radius r (meterRadius).
+ *  - INSIDE the token's square: two tokens side by side (a row, a crowd) never cross rings, and the parts' gaps fall on the top,
+ *    right, bottom and left, where two rings would meet edge to edge.
+ *  - full: a heavy line in the entry's colour on a dark one; empty: a hairline on a thin dark one. How much of the ring is heavy is
+ *    the reading (a quarter, a half, three quarters, all of it): one colour, never a colour alone.
+ *  - `chosen`: the full parts heavier with a light line along them and short ticks pointing in from the gaps (a reticle);
+ *    `caught` (in an area, not aimed at): the full parts dashed, two dashes each, so a part still reads as one.
  */
-function badgeOf(b, color) {
-  const c = new PIXI.Container(), size = b.size, style = { fontSize: Math.round(size * 0.95), fill: PAPER, resolution: res(), glyph: size };
-  const row = piecesRow(b.pieces, style), padX = b.plate ? 5 : 2, padY = b.plate ? 4 : 2, w = row.w + padX * 2, h = size + padY * 2;
-  if ( b.plate ) {
-    const G = new PIXI.Graphics();
-    G.lineStyle({ width: 1.5, color, alpha: 1 }).beginFill(INK, 0.92).drawRoundedRect(-w / 2, -h / 2, w, h, 4).endFill();
-    c.addChild(G);
-  } else {
-    const ink = b.pieces.map((p) => (typeof p === "string" ? p : { ...p, color: INK })), k = Math.max(1.6, size / 7);
-    for ( let i = 0; i < 8; i++ ) {
-      const a = (i / 8) * Math.PI * 2, r = piecesRow(ink, { ...style, fill: INK });
-      r.c.position.set(-row.w / 2 + Math.cos(a) * k, Math.sin(a) * k);
-      c.addChild(r.c);
-    }
-  }
-  row.c.position.set(-row.w / 2, 0);
-  c.addChild(row.c);
-  c.w = w; c.h = h;
-  return c;
-}
-/** Section 42: the ring as a meter: `of` arcs from the top, clockwise, `n` of them full (heavy), the rest a hairline; caught: the
- *  full ones dashed. Drawn on G around (cx, cy). */
+const meterHeavy = (e, u) => (e.state === "chosen" ? 8.5 : 7) * u;
+const meterRadius = (w, h, e, u) => Math.min(w, h) / 2 - (meterHeavy(e, u) + 4 * u) / 2 - 0.5 * u;
 function meterRing(G, cx, cy, r, m, e, u) {
-  const seg = (Math.PI * 2) / m.of, gap = Math.min(0.24, seg * 0.2), strong = e.state === "chosen", dashed = e.state === "caught";
-  const heavy = (strong ? 7 : 6) * u, thin = 1.4 * u;
+  const seg = (Math.PI * 2) / m.of, gap = Math.min(0.42, seg * 0.26), strong = e.state === "chosen", dashed = e.state === "caught";
+  const heavy = meterHeavy(e, u), thin = 1.6 * u;
+  const arc = (a0, a1) => { G.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r); G.arc(cx, cy, r, a0, a1); };
   const part = (i, width, col, alpha, dash) => {
     const a0 = -Math.PI / 2 + i * seg + gap / 2, a1 = a0 + seg - gap;
     G.lineStyle({ width, color: col, alpha, cap: PIXI.LINE_CAP.BUTT });
-    if ( !dash ) { G.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r); G.arc(cx, cy, r, a0, a1); return; }
-    const k = 3, step = (a1 - a0) / k;
-    for ( let j = 0; j < k; j++ ) { const b0 = a0 + j * step + step * 0.12, b1 = b0 + step * 0.76; G.moveTo(cx + Math.cos(b0) * r, cy + Math.sin(b0) * r); G.arc(cx, cy, r, b0, b1); }
+    if ( !dash ) { arc(a0, a1); return; }
+    const k = 2, step = (a1 - a0) / k;
+    for ( let j = 0; j < k; j++ ) arc(a0 + j * step + (j ? step * 0.14 : 0), a0 + (j + 1) * step - (j + 1 < k ? step * 0.14 : 0));
   };
-  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy + 4 * u : thin + 2.6 * u, INK, 0.75, false);
-  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy : thin, e.color, i < m.n ? 1 : 0.9, dashed && i < m.n);
+  // (the dark under everything first, then the colour: a dark line never cuts across a coloured one)
+  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy + 4 * u : thin + 2.4 * u, INK, i < m.n ? 0.85 : 0.6, false);
+  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy : thin, e.color, i < m.n ? 1 : 0.85, dashed && i < m.n);
   if ( strong ) {
-    // the one chosen: ticks pointing in, in the gaps between the parts
-    G.lineStyle({ width: 4.5 * u, color: e.color, alpha: 1, cap: PIXI.LINE_CAP.ROUND });
-    for ( let i = 0; i < m.of; i++ ) { const a = -Math.PI / 2 + i * seg, dx = Math.cos(a), dy = Math.sin(a); G.moveTo(cx + dx * (r + 2 * u), cy + dy * (r + 2 * u)); G.lineTo(cx + dx * (r + 9 * u), cy + dy * (r + 9 * u)); }
+    for ( let i = 0; i < m.n; i++ ) part(i, 1.4 * u, PAPER, 0.9, false);
+    const r0 = r - heavy / 2 + 1 * u, r1 = r0 - 7 * u, ticks = (width, color, alpha) => {
+      G.lineStyle({ width, color, alpha, cap: PIXI.LINE_CAP.ROUND });
+      for ( let i = 0; i < m.of; i++ ) { const a = -Math.PI / 2 + i * seg, dx = Math.cos(a), dy = Math.sin(a); G.moveTo(cx + dx * r0, cy + dy * r0); G.lineTo(cx + dx * r1, cy + dy * r1); }
+    };
+    ticks(7 * u, INK, 0.85); ticks(4 * u, e.color, 1);
   }
 }
 
@@ -144,8 +134,6 @@ export function markToken(t, e, hover = false) {
       b.T.resolution = res(); b.T.anchor.set(0.5, 0.5);
     }
   }
-  // (section 42: the caller's sign on the token, over the ring; it stays while the pointer is on the token)
-  c.badge = e.badge ? c.addChild(badgeOf(e.badge, e.color)) : null;
   c.chips = e.marks.map((m) => {
     const ch = new PIXI.Container(), G = new PIXI.Graphics(), [g, font] = glyphOf(m.icon);
     G.lineStyle({ width: 1.5, color: m.color, alpha: 1 }).beginFill(INK, 0.92).drawCircle(0, 0, 10).endFill();
@@ -155,9 +143,9 @@ export function markToken(t, e, hover = false) {
     return c.addChild(ch);
   });
   t._mmBoard = t.addChild(c);
-  // (section 42: a badge, and the ring when it is a meter, are lifted with the label: in a crowd the neighbours' pictures and
-  //  nameplates covered them. Without either, exactly as before: the ring stays with its token)
-  if ( c.label || c.badge || e.meter ) liftLabel(c, { ring: !!e.meter });
+  // (section 42: the ring when it is a meter is lifted with the label, over a neighbour's picture that overlaps the square. Without
+  //  a meter, exactly as before: the ring stays with its token)
+  if ( c.label || e.meter ) liftLabel(c, { ring: !!e.meter });
   layoutToken(t);
 }
 
@@ -186,9 +174,8 @@ function liftLabel(c, { ring = false } = {}) {
   if ( !root ) return;                                                                           // (no primary group: the label stays with its token)
   const L = c.lift = root.addChild(new PIXI.Container());
   L.eventMode = "none"; L.interactiveChildren = false;
-  // (bottom up: the ring as a meter, the badge, the pill)
+  // (bottom up: the ring as a meter, the pill)
   if ( ring && c.ring ) L.addChild(c.ring);
-  if ( c.badge ) L.addChild(c.badge);
   if ( c.label ) L.addChild(c.label);
   c.once?.("destroyed", () => dropLift(c));
   syncLift(c);
@@ -235,7 +222,7 @@ export function layoutToken(t) {
   c.u = u; c.tw = w; c.th = h; c.alt = !!t._mmAlt;
   const R = c.ring, cx = w / 2, cy = h / 2, r = Math.max(w, h) / 2 + 3 * u;
   R.clear();
-  if ( (e.state === "in" || e.state === "chosen" || e.state === "caught") && e.meter ) meterRing(R, cx, cy, r, e.meter, e, u);
+  if ( (e.state === "in" || e.state === "chosen" || e.state === "caught") && e.meter ) meterRing(R, cx, cy, meterRadius(w, h, e, u), e.meter, e, u);
   else if ( e.state === "in" || e.state === "chosen" || e.state === "caught" ) {
     const strong = e.state === "chosen";
     R.lineStyle({ width: (strong ? 8 : 6) * u, color: INK, alpha: 0.7 }).drawCircle(cx, cy, r);
@@ -277,17 +264,8 @@ export function layoutToken(t) {
     y -= (tall + 3) * u;
   }
   if ( c.label ) { c.label.scale.set(u); c.labelBase = { x: cx, y: y - (c.label.h / 2) * u, top: y }; placeLabel(c); }
-  // section 42: the badge on the ring at its spot (a corner spot lies inside the token's corner, where its picture is least)
-  let chip0 = 10 * u;
-  if ( c.badge ) {
-    const a = ((BADGE_SPOTS[e.badge.at] ?? -45) * Math.PI) / 180;
-    c.badge.scale.set(u);
-    c.badge.position.set(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-    // (the state chips run down the right edge below a badge that stands on it)
-    if ( e.badge.at === "ne" || e.badge.at === "e" ) chip0 = Math.max(chip0, c.badge.position.y + (c.badge.h / 2) * u + 12 * u);
-  }
   // state chips: down the right edge (Foundry's own effect icons run down the left)
-  c.chips.forEach((ch, i) => { ch.scale.set(u); ch.position.set(w - 1 * u, chip0 + i * 22 * u); });
+  c.chips.forEach((ch, i) => { ch.scale.set(u); ch.position.set(w - 1 * u, 10 * u + i * 22 * u); });
 }
 
 /**
