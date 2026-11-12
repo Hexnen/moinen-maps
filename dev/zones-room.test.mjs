@@ -71,6 +71,17 @@ const noOverlap = (items, res, fixed = []) => {
   const r9 = R.spreadLabels([{ ...p1, over: [] }], [], { gap: 3 }).get("p");
   check(J(r9) === J({ dx: 0, dy: 0 }), "nothing drawn above: the label stays (alt only tried when needed)");
   check(J(R.spreadLabels([{ ...p1, over: [null, { x0: 1 }], alt: [{ dy: NaN }, null] }]).get("p")) === J({ dx: 0, dy: 0 }), "junk over/alt: ignored");
+  // U125 (a): walls (panels over the map): a label under one goes round it, however far; one not under a panel is left alone
+  {
+    const q = { key: "q", x: 500, y: 300, w: 100, h: 22 }, wall = { x0: 380, y0: 200, x1: 700, y1: 420 };
+    const rq = R.spreadLabels([q], [], { gap: 3, walls: [wall] }).get("q");
+    const bq = boxOf(q, rq);
+    check(R.overlap(bq, wall) === 0, `a token under a panel: its label leaves the panel (${J(rq)})`);
+    check(Math.abs(rq.dx) + Math.abs(rq.dy) <= 160, "by the nearest side");
+    check(J(R.spreadLabels([{ ...q, x: 900 }], [], { gap: 3, walls: [wall] }).get("q")) === J({ dx: 0, dy: 0 }), "a label clear of the panels stays");
+    const two = [q, { key: "q2", x: 520, y: 300, w: 100, h: 22 }], r2w = R.spreadLabels(two, [], { gap: 3, walls: [wall] });
+    check(noOverlap(two, r2w, [wall]), "two labels under one panel: both out, not on each other");
+  }
   // junk in, nothing thrown
   check(R.spreadLabels(null).size === 0 && R.spreadLabels([{ key: "z", x: NaN, y: 0, w: 1, h: 1 }]).size === 0, "junk items: empty layout");
 }
@@ -79,7 +90,25 @@ const noOverlap = (items, res, fixed = []) => {
 {
   const old = (a, w, h, vw, vh) => BC.menuSpot(a, w, h, vw, vh);
   const anchors = [{ x0: 700, y0: 400, x1: 760, y1: 460 }, { x0: 1500, y0: 850, x1: 1560, y1: 890 }, { x0: 10, y0: 10, x1: 40, y1: 40 }, { x0: 700, y0: 820, x1: 760, y1: 880 }];
-  check(anchors.every((a) => J(R.menuSpot(a, 300, 220, 1600, 900)) === J(old(a, 300, 220, 1600, 900))), "no insets, nothing to avoid: the spot of old (board-core.menuSpot)");
+  const xy = (s) => J({ x: s.x, y: s.y });
+  check(anchors.every((a) => xy(R.menuSpot(a, 300, 220, 1600, 900)) === xy(old(a, 300, 220, 1600, 900)) && R.menuSpot(a, 300, 220, 1600, 900).far === false), "no insets, nothing to avoid: the spot of old (board-core.menuSpot), not tied");
+  // U125 (a): 1366 x 768, the token under the bottom right, a desk above it, the dock declared at the bottom: the menu takes the free
+  // spot NEAREST the token (not the first free one across the screen), and says when it stands away from it (the tie)
+  {
+    const tok = { x0: 1120, y0: 620, x1: 1250, y1: 750 }, desk = { x0: 820, y0: 290, x1: 1306, y1: 550 }, chat = { x0: 1310, y0: 0, x1: 1366, y1: 768 };
+    const dockB = { x0: 497, y0: 608, x1: 1102, y1: 688 };
+    const s5 = R.menuSpot(tok, 185, 165, 1366, 768, { insets: { bottom: 160 }, avoid: [desk, chat, dockB] });
+    const box5 = { x0: s5.x, y0: s5.y, x1: s5.x + 185, y1: s5.y + 165 };
+    check([desk, chat, dockB].every((b) => R.overlap(box5, b) === 0), `1366: clear of the desk, the chat and the dock (${J(s5)})`);
+    const gap5 = Math.hypot(Math.max(0, tok.x0 - box5.x1, box5.x0 - tok.x1), Math.max(0, tok.y0 - box5.y1, box5.y0 - tok.y1));
+    check(gap5 < 340 && s5.x > 497 - 185, `1366: the nearest free spot, not left of the dock (${Math.round(gap5)} px from the token)`);
+    check(s5.far === true && !!R.menuTie(tok, box5), "1366: away from its token: tied to it");
+    const t6 = R.menuTie({ x0: 100, y0: 100, x1: 160, y1: 160 }, { x0: 400, y0: 90, x1: 600, y1: 300 });
+    check(t6 && t6.x0 === 400 && t6.x1 === 160 && t6.y0 === 130 && t6.y1 === 130, `the tie runs from the menu's near edge to the thing's (${J(t6)})`);
+    check(R.menuTie({ x0: 100, y0: 100, x1: 160, y1: 160 }, { x0: 162, y0: 100, x1: 300, y1: 200 }) === null, "beside its thing: no tie");
+    const tl = { x0: 117, y0: 34, x1: 265, y1: 182 }, s7 = R.menuSpot(tl, 184, 168, 1366, 768, { insets: { top: 70 }, avoid: [desk] });
+    check(s7.x === 275 && s7.far === false, `a free spot of old (right of the thing) is kept with boxes declared elsewhere (${J(s7)})`);
+  }
   // U106: a menu near the bottom edge with a dock declared at the bottom stands above the dock
   const a = { x0: 840, y0: 610, x1: 900, y1: 670 }, dock = 110;
   const s = R.menuSpot(a, 300, 220, 1600, 900, { insets: { bottom: dock } });

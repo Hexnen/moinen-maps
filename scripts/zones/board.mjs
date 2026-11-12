@@ -3,7 +3,7 @@ import * as Zones from "./zones.mjs";
 import * as BC from "./board-core.mjs";
 import * as HL from "./highlight.mjs";
 import * as Interact from "./interact.mjs";
-import { BoardLayer, markToken, layoutToken, dimToken, shiftLabel, labelBoxOf } from "./board-layer.mjs";
+import { BoardLayer, markToken, layoutToken, dimToken, shiftLabel, labelBoxOf, followToken, syncLifted } from "./board-layer.mjs";
 import * as Room from "./room.mjs";
 import { cleanSigns, piecesHtml } from "./signs-core.mjs";
 
@@ -137,7 +137,7 @@ function applyMarks() {
 function onTokenRefresh(t) {
   if ( !ON.size && !t._mmBoard ) return;
   const e = ON.get(t.id) ?? null;
-  if ( e || t._mmBoard ) { markToken(t, e, hoverTok === t.id); if ( e?.state === "out" ) dimToken(t, true); }
+  if ( e || t._mmBoard ) { markToken(t, e, hoverTok === t.id); if ( e?.state === "out" ) dimToken(t, true); followToken(t); }
   if ( e?.label || e?.hover?.label || t._mmBoard?.label ) labelsSoon();
 }
 
@@ -159,8 +159,8 @@ function labelsSoon() {
  */
 function layoutLabels() {
   const items = [], soft = [], zoom = Math.max(0.05, canvas.stage?.scale.x ?? 1);
-  // (a token's pill is drawn with its token: a token whose picture is drawn later covers it - those pictures are hard for that pill)
-  const pics = drawOrder();
+  // (U125 a: the pills are drawn above every token's picture - board-layer liftLabel - so no picture covers one: another token's
+  //  picture is only soft, a spot off it is better. The panels of the interface over the map are hard: a pill under one is not seen)
   for ( const id of ON.keys() ) {
     const t = objOf(id);
     if ( !t || !(t.visible || t.controlled) ) continue;
@@ -168,16 +168,18 @@ function layoutLabels() {
     layoutToken(t);
     const b = labelBoxOf(t);
     if ( !b ) continue;
-    const e = ON.get(id), mine = pics.find((p) => p.t === t)?.i ?? -1;
-    const over = mine < 0 ? [] : pics.filter((p) => p.i > mine).map((p) => p.box);
+    const e = ON.get(id);
     // (and one more spot: just under its own token)
     const alt = [{ dy: t.y + t.h + b.h / 2 + 3 / zoom - b.y }];
-    items.push({ key: id, x: b.x, y: b.y, w: b.w, h: b.h, prio: e?.state === "chosen" ? 1 : 0, was: SHIFT.get(id) ?? null, over, alt });
+    items.push({ key: id, x: b.x, y: b.y, w: b.w, h: b.h, prio: e?.state === "chosen" ? 1 : 0, was: SHIFT.get(id) ?? null, alt });
   }
-  const res = Room.spreadLabels(items, layer?.pillBoxes() ?? [], { gap: 3 / zoom, soft });
+  let walls = [];
+  try { walls = Interact.uiBlocksScene(); } catch {}
+  const res = Room.spreadLabels(items, layer?.pillBoxes() ?? [], { gap: 3 / zoom, soft, walls });
   const next = new Map();
   for ( const it of items ) { const s = res.get(it.key) ?? { dx: 0, dy: 0 }; next.set(it.key, s); shiftLabel(objOf(it.key), s.dx, s.dy); }
   SHIFT = next;
+  syncLifted();
   labelsLaid = items.length > 0;
   Interact.boardLabelsMoved();
 }
@@ -676,7 +678,16 @@ export function menu(spec = {}) {
       try { insets = Interact.uiInsets(); avoid = Interact.uiAvoids(); } catch {}
       const r = el.getBoundingClientRect?.() ?? { width: 220, height: 200 }, s = Room.menuSpot(b, r.width || 220, r.height || 200, Number(globalThis.innerWidth) || 1600, Number(globalThis.innerHeight) || 900, { insets, avoid });
       el.style.left = `${s.x}px`; el.style.top = `${s.y}px`;
+      // U125 (a): a menu that found room only away from its thing is tied to it by a line in the menu's rim colour
+      const tie = s.far ? Room.menuTie(b, { x0: s.x, y0: s.y, x1: s.x + (r.width || 220), y1: s.y + (r.height || 200) }) : null;
+      if ( !tie ) { if ( tieEl ) tieEl.hidden = true; return; }
+      tieEl ??= Object.assign(document.createElement("div"), { className: "mm-z-menu-tie" });
+      if ( !tieEl.isConnected ) document.body.append(tieEl);
+      const len = Math.hypot(tie.x1 - tie.x0, tie.y1 - tie.y0), ang = Math.atan2(tie.y1 - tie.y0, tie.x1 - tie.x0);
+      tieEl.hidden = false;
+      tieEl.style.cssText = `left:${tie.x0}px;top:${tie.y0}px;width:${len}px;transform:rotate(${ang}rad)`;
     };
+    let tieEl = null;
     const byI = (i) => M.items.find((it) => it.i === i);
     const choose = (it) => { const src = raw[it.i]; closeMenu(null, { ok: true, id: it.id, index: it.i }); try { src?.run?.(); } catch ( err ) { console.warn(`${MODULE_ID} | zones: menu`, err); } };
     const onClick = async (ev) => {
@@ -723,7 +734,7 @@ export function menu(spec = {}) {
     // (a declared bar or a box to keep clear of may grow while the menu is open - a dock's panel opens: it steps aside a few times a second)
     const again = setInterval(place, 400);
     again?.unref?.();
-    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { clearTimeout(arm); clearInterval(again); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
+    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { tieEl?.remove(); clearTimeout(arm); clearInterval(again); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
     place();
   });
 }

@@ -36,8 +36,11 @@ const sumOver = (b, list) => { let s = 0; for ( const o of list ) s += overlap(b
  *           (a share of its own width)
  * -> Map key -> { dx, dy } (0, 0: where it would stand alone). In the units given (scene px for the map).
  */
-export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.8, soft = null } = {}) {
+export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.8, soft = null, walls = null } = {}) {
   const out = new Map(), placed = (fixed ?? []).map(cleanBox).filter(Boolean);
+  // (walls: panels of the interface over the map - uiAvoid boxes, uiInset bars - in the same units: a label under one cannot be seen. They
+  //  are as hard as another label, and a label they cover may go round them at any distance: just left, right, under or over the panel)
+  const wallList = (walls ?? []).map(cleanBox).filter(Boolean);
   // (soft: what a label had better not lie on - another token's picture - [{ key, x0, y0, x1, y1 }]: never its own token)
   const softs = (soft ?? []).map((b) => { const c = cleanBox(b); return c ? { ...c, key: b.key } : null; }).filter(Boolean);
   const list = (items ?? []).filter((it) => it && Number.isFinite(it.x) && Number.isFinite(it.y) && it.w > 0 && it.h > 0);
@@ -48,7 +51,7 @@ export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.
     const boxAt = (dx, dy) => ({ x0: it.x + dx - hw, y0: it.y + dy - hh, x1: it.x + dx + hw, y1: it.y + dy + hh });
     // (over: what is drawn ABOVE this label - a token whose picture is drawn after this label's token - as hard as another label: a
     //  pill under a picture cannot be read; alt: more spots the caller knows of, e.g. under its own token)
-    const over = (it.over ?? []).map(cleanBox).filter(Boolean), hard = [...placed, ...over];
+    const over = (it.over ?? []).map(cleanBox).filter(Boolean), hard = [...placed, ...over, ...wallList];
     const cands = [{ dx: 0, dy: 0, cost: 0 }];
     // (the shift it had: a little cheaper than the same shift found anew - it does not hop between two as good - but never cheaper
     //  than standing where it belongs once that is free)
@@ -64,6 +67,13 @@ export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.
         if ( !(Math.min(b.y1, p.y1) - Math.max(b.y0, p.y0) > 0) ) continue;
         for ( const dx of [p.x1 + gap - b.x0, p.x0 - gap - b.x1] ) if ( Math.abs(dx) <= it.w * reach ) cands.push({ dx, dy, cost: Math.abs(dx) + Math.abs(dy) * 1.25 });
       }
+    }
+    // round a panel that covers where it stands (U125 a): beside it or under / over it, however far that is
+    const home = boxAt(0, 0);
+    for ( const p of wallList ) {
+      if ( !overlap(home, p) ) continue;
+      for ( const dy of rows ) for ( const dx of [p.x0 - gap - home.x1, p.x1 + gap - home.x0] ) cands.push({ dx, dy, cost: Math.abs(dx) + Math.abs(dy) * 1.25 });
+      for ( const dy of [p.y1 + gap - home.y0, p.y0 - gap - home.y1] ) cands.push({ dx: 0, dy, cost: Math.abs(dy) * 1.25 });
     }
     // a spot on no other label wins; among those the cheapest, a spot on another token's picture costing as much as its own height
     // moved per share covered; with no free spot, the one that covers the least of the other labels
@@ -98,7 +108,7 @@ export function roomOf(vw, vh, insets = null, w = 0, h = 0, pad = 8) {
  * is; else the spot that covers the least of them. With no insets and nothing to avoid it is where it always stood.
  *   anchor { x0, y0, x1, y1 }, w x h the menu, vw x vh the window -> { x, y } (the menu's top left corner)
  */
-export function menuSpot(anchor, w, h, vw, vh, { gap = 10, pad = 8, insets = null, avoid = null } = {}) {
+export function menuSpot(anchor, w, h, vw, vh, { gap = 10, pad = 8, insets = null, avoid = null, step = 24, cover = 600 } = {}) {
   const R = roomOf(vw, vh, insets, w, h, pad), boxes = (avoid ?? []).map(cleanBox).filter(Boolean);
   const cx = (x) => Math.max(R.x0 + pad, Math.min(R.x1 - pad - w, x)), cy = (y) => Math.max(R.y0 + pad, Math.min(R.y1 - pad - h, y));
   const mid = (anchor.x0 + anchor.x1) / 2 - w / 2;
@@ -113,13 +123,38 @@ export function menuSpot(anchor, w, h, vw, vh, { gap = 10, pad = 8, insets = nul
     cands.push({ x: cx(mid), y: cy(anchor.y1 + gap) }, { x: cx(mid), y: cy(anchor.y0 - gap - h) });
     // beside the boxes in the way: just left of them, just above them (a panel at the side, a strip at the bottom)
     for ( const b of boxes ) cands.push({ x: cx(b.x0 - gap - w), y: cy(anchor.y0) }, { x: cx(right), y: cy(b.y0 - gap - h) }, { x: cx(left), y: cy(b.y0 - gap - h) });
+    // U125 (a): and every spot of the room on a grid a step apart, so the free spot NEAREST the thing is found (a menu that jumps
+    // across the screen to the first free spot it tries reads as nobody's); a few thousand boxes at most, while a menu is open
+    for ( let y = R.y0 + pad; y <= R.y1 - pad - h + 0.5; y += step ) for ( let x = R.x0 + pad; x <= R.x1 - pad - w + 0.5; x += step ) cands.push({ x, y });
+    for ( const sx of [right, left] ) for ( let k = -8; k <= 8; k++ ) cands.push({ x: cx(sx), y: cy(anchor.y0 + k * step) });
   }
-  let best = cands[0], bestOver = Infinity;
+  // U125 (a): what a spot costs is how far it is from the thing plus how much of the menu lies on the boxes asked for (all of it as much
+  // as `cover` px of distance) and on the thing itself (never: five times that). So a free spot beside the thing wins; a free spot
+  // across the screen loses to one beside the thing that covers a little of a panel's edge (a menu far from its token reads as
+  // nobody's, and it is open for a moment). A spot beside the thing counts as touching it: among those the order of old decides
+  // (right, left, then the others); nothing declared: it stands where it always stood.
+  const own = cleanBox(anchor), area = Math.max(1, w * h);
+  const gapTo = (c) => Math.hypot(Math.max(0, anchor.x0 - (c.x + w), c.x - anchor.x1), Math.max(0, anchor.y0 - (c.y + h), c.y - anchor.y1));
+  let best = cands[0], bestCost = Infinity;
   for ( const c of cands ) {
-    const o = sumOver({ x0: c.x, y0: c.y, x1: c.x + w, y1: c.y + h }, boxes);
-    if ( o < bestOver - 1e-9 ) { best = c; bestOver = o; if ( o === 0 ) break; }
+    const b = { x0: c.x, y0: c.y, x1: c.x + w, y1: c.y + h }, g = gapTo(c), d = g <= gap * 1.5 ? 0 : g;
+    const cost = d + (cover * sumOver(b, boxes) + (own && boxes.length ? cover * 5 * overlap(b, own) : 0)) / area;
+    if ( cost < bestCost - 0.5 ) { best = c; bestCost = cost; }
   }
-  return { x: Math.round(best.x), y: Math.round(best.y) };
+  return { x: Math.round(best.x), y: Math.round(best.y), far: gapTo(best) > gap * 3 };
+}
+/**
+ * U125 (a): the tie of a menu that could not stand beside its thing - from the menu's edge nearest the thing to the thing's edge
+ * nearest the menu (client px): { x0, y0, x1, y1 } or null when they touch.
+ */
+export function menuTie(anchor, m) {
+  const a = cleanBox(anchor), b = cleanBox(m);
+  if ( !a || !b ) return null;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const acx = (a.x0 + a.x1) / 2, acy = (a.y0 + a.y1) / 2;
+  const px = clamp(acx, b.x0, b.x1), py = clamp(acy, b.y0, b.y1);                 // the menu's point nearest the thing's middle
+  const qx = clamp(px, a.x0, a.x1), qy = clamp(py, a.y0, a.y1);                     // the thing's point nearest that
+  return Math.hypot(px - qx, py - qy) < 4 ? null : { x0: px, y0: py, x1: qx, y1: qy };
 }
 
 /**

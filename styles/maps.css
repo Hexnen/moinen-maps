@@ -1068,6 +1068,11 @@ body.mm-z-pick-no canvas#board { cursor: not-allowed !important; }
 .mm-z-pick-tip .mm-z-haz { color: #f0a08f; opacity: 1; }
 .mm-z-pick-tip .mm-z-haz i { margin-right: 0.2rem; font-size: 0.68rem; }
 .mm-z-pick-tip .mm-z-alt { margin-top: 0.2rem; padding-top: 0.2rem; border-top: 1px solid #5a4c3c; }
+/* U125 (a): the tie of a menu that stands away from its thing (room.mjs menuTie): the board's leader look, light on a dark edge, a dot on the thing.
+   Just over the board, under every panel: where the thing is under a panel the line runs in under it, never across the panel */
+.mm-z-menu-tie { position: fixed; z-index: 1; height: 2px; margin-top: -1px; transform-origin: 0 50%; background: #eadfc8; box-shadow: 0 0 0 1.5px #15110fb3; border-radius: 1px; pointer-events: none; }
+.mm-z-menu-tie::after { content: ""; position: absolute; right: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #eadfc8; box-shadow: 0 0 0 1.5px #15110fb3; }
+.mm-z-menu-tie[hidden] { display: none; }
 .mm-z-menu { position: fixed; z-index: 1002; min-width: 11.5rem; max-width: 19rem; max-height: calc(100vh - 16px); display: flex; flex-direction: column; padding: 0.3rem; border-radius: 9px;
   background: #1d1916f5; border: 1px solid #5a4c3c; box-shadow: 0 8px 26px #000b; color: #eadfc8; font-size: 0.84rem; animation: mm-z-menu-in 0.14s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .mm-z-menu > header { display: flex; flex-direction: column; gap: 0.05rem; padding: 0.2rem 0.45rem 0.35rem; margin-bottom: 0.2rem; border-bottom: 1px solid #5a4c3c; line-height: 1.2; }

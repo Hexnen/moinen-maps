@@ -109,6 +109,8 @@ function uiBlocks() {
   } catch {}
   return out;
 }
+/** U125 (a): the same panels for the board's token labels (scene px; nothing declared: none) */
+export const uiBlocksScene = () => uiBlocks().map(({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }));
 /** The tokens this user sees, as boxes in scene pixels, where they stand (their documents: not where an animation has them now). */
 function tokenBoxes() {
   const g = Zones.gridSize(), out = [];

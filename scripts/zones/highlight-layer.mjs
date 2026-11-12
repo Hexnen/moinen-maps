@@ -63,7 +63,11 @@ export class ZoneHighlightLayer {
     try { const v = foundry.canvas?.groups?.PrimaryCanvasGroup?.SORT_LAYERS?.TOKENS; if ( typeof v === "number" ) TOK = v; } catch {}
     Object.assign(this.labelRoot, { elevation: 0, sortLayer: TOK + 10, sort: 1, _lastSortedIndex: 0, visible: false });
     this.labelRoot.addChild(this.labels);
-    canvas.primary.addChild(this.labelRoot);
+    // U125 (a): in the interface group, above the token layer (zIndex 899: under the lines and the tokens' pills). In the primary group a
+    // token drawn higher (lifted, carried, above the ground) still covered a warning, and the scene's light dimmed it
+    this.labelRoot.zIndex = 899;
+    if ( canvas.interface ) { canvas.interface.addChild(this.labelRoot); canvas.interface.sortDirty = true; }
+    else canvas.primary.addChild(this.labelRoot);
     this.items = [];
     /** The spot each label has now (label key -> its offset): kept while tokens move, so a label does not hop about. */
     this.spots = new Map();
