@@ -418,6 +418,46 @@ Hooks.callAll("canvasTearDown");
 check((await pr).reason === "sceneChanged", "the scene closes under a menu: it ends");
 open(sc); tokObjs(); takeSent();
 
+/* ---- section 41: the labels laid out together; a menu above a declared bar and clear of a box asked for */
+{
+  const ov = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+  const y0 = T("h1").y; T("h1").y = 56;                                // two targets standing close: their pills would lie on each other
+  api.markTokens({ id: "ipu.lay", tokens: [{ token: "t2", state: "in", label: "Even odds" }, { token: "h1", state: "in", label: "Good chance" }] });
+  let L = api.mapLabels().filter((b) => b.kind === "token");
+  check(L.length === 2 && ov(L[0], L[1]) === 0, "41: two marked tokens side by side - their labels do not lie on each other");
+  const moved = ["t2", "h1"].filter((k) => { const s = boardOf(k)?.shift; return s && (s.dx || s.dy); });
+  check(moved.length === 1 && boardOf(moved[0]).leader?.visible === true, "41: one of them stepped aside and is tied to its token by a line");
+  api.link({ id: "ipu.aimL", from: "t1", to: "t2", label: "Strike" });
+  L = api.mapLabels();
+  check(L.filter((b) => b.kind === "line").length === 1 && L.filter((b) => b.kind === "token").every((b) => L.filter((q) => q.kind === "line").every((q) => ov(b, q) === 0)), "41: a line's pill is kept clear of too; mapLabels names each kind");
+  api.clearLinks("ipu.aimL");
+  T("h1").y = y0; Hooks.callAll("refreshToken", T("h1"));
+  L = api.mapLabels().filter((b) => b.kind === "token");
+  check(["t2", "h1"].every((k) => { const s = boardOf(k)?.shift; return !s || (!s.dx && !s.dy); }), "41: once apart again, both labels stand where they belong");
+  // a label cut short on its pill is said whole under the pointer
+  api.markTokens({ id: "ipu.lay", tokens: [{ token: "t2", state: "in", label: "Spora szansa · Obrażenia ~4", tip: "Hit 72%" }] });
+  view.fire("pointermove", { clientX: 880, clientY: 80 });
+  const tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
+  check(!!tipNow && tipNow.innerHTML.includes("<span>Spora szansa · Obrażenia ~4</span>") && tipNow.innerHTML.includes("Hit 72%"), "41: a cut label gets its full text first in the tip");
+  check(boardOf("t2").e.label === "Spora szansa · Ob…" && boardOf("t2").e.label.length === BC.BOARD_LIMITS.label, "41: the pill shows it cut with an ellipsis (no lone 'Spor')");
+  view.fire("pointerleave", {});
+  api.clearTokenMarks("ipu.lay");
+  check(api.mapLabels().filter((b) => b.kind === "token").length === 0, "41: marks gone, labels gone");
+
+  // U106: a menu near the bottom with a dock declared at the bottom stands above the dock; a desk asked for is kept clear of
+  const offI = api.uiInset("test.dock", { bottom: 300 });
+  pr = api.menu({ x: 900, y: 700, items: [{ label: "Here" }] });
+  check(parseFloat(menuEl().style.top) + 200 <= 900 - 300, "41: a menu opened near the bottom stands above the declared bar");
+  const offA = api.uiAvoid("test.desk", { x: 1100, y: 0, width: 500, height: 900 });
+  check(api.uiAvoids().length === 1 && api.uiAvoids()[0].id === "test.desk" && api.uiAvoids()[0].x0 === 1100, "41: uiAvoids gives the boxes asked for, measured now");
+  Hooks.callAll("canvasPan");
+  check(parseFloat(menuEl().style.left) + 220 <= 1100, "41: the open menu steps off a box asked for (left of its thing)");
+  offA(); offI();
+  check(api.uiAvoids().length === 0, "41: taken back");
+  window.fire("keydown", { key: "Escape" }); await pr;
+  check(api.uiAvoid("", {})() === undefined && api.uiAvoid("x", null) && api.uiAvoids().length === 0, "41: junk ids and null specs take nothing");
+}
+
 /* ---- a right click on a thing of the map */
 const seen = [];
 const downs = (x, y, o = {}) => { let stopped = false; window.fire("pointerdown", { button: 2, clientX: x, clientY: y, target: view, stopImmediatePropagation() { stopped = true; }, ...o }); return stopped; };

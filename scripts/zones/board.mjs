@@ -3,7 +3,8 @@ import * as Zones from "./zones.mjs";
 import * as BC from "./board-core.mjs";
 import * as HL from "./highlight.mjs";
 import * as Interact from "./interact.mjs";
-import { BoardLayer, markToken, layoutToken, dimToken } from "./board-layer.mjs";
+import { BoardLayer, markToken, layoutToken, dimToken, shiftLabel, labelBoxOf } from "./board-layer.mjs";
+import * as Room from "./room.mjs";
 import { cleanSigns, piecesHtml } from "./signs-core.mjs";
 
 /**
@@ -111,6 +112,7 @@ function compose() {
     if ( !was ) { out.set(e.token, { ...e, marks: [...e.marks] }); continue; }
     out.set(e.token, {
       token: e.token, state: e.state ?? was.state, color: e.state ? e.color : was.color, label: e.label ?? was.label, tip: e.tip ?? was.tip,
+      ...((e.label ? e.full : was.full) ? { full: e.label ? e.full : was.full } : {}),
       ...((e.label ? e.signs : was.signs) ? { signs: e.label ? e.signs : was.signs } : {}),
       marks: [...was.marks, ...e.marks.filter((m) => !was.marks.some((q) => q.icon === m.icon))].slice(0, BC.BOARD_LIMITS.marks),
       bar: e.bar ?? was.bar, hover: e.hover ?? was.hover
@@ -129,12 +131,87 @@ function applyMarks() {
   }
   if ( hoverTok && !ON.has(hoverTok) ) setHoverTok(null, null);
   watch(ON.size > 0);
+  labelsSoon();
 }
 /** One token was drawn or refreshed: its marks are put back / laid out (Foundry sets the picture's tint again on a refresh). */
 function onTokenRefresh(t) {
   if ( !ON.size && !t._mmBoard ) return;
   const e = ON.get(t.id) ?? null;
   if ( e || t._mmBoard ) { markToken(t, e, hoverTok === t.id); if ( e?.state === "out" ) dimToken(t, true); }
+  if ( e?.label || e?.hover?.label || t._mmBoard?.label ) labelsSoon();
+}
+
+/* ---------------------------------------------------------------- the labels laid out together (section 41) */
+
+/** token id -> the shift its label has now (scene px); kept so a label does not hop while its token walks. */
+let SHIFT = new Map(), labelRaf = 0, labelsLaid = false;
+/** The labels of the tokens and of the lines take their spots again on the next frame, once. */
+function labelsSoon() {
+  if ( labelRaf || (!ON.size && !labelsLaid) ) return;
+  const run = () => { labelRaf = 0; if ( canvas?.ready ) layoutLabels(); };
+  labelRaf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : setTimeout(run, 16);
+}
+/**
+ * Every token's label is laid out with the others (room.mjs spreadLabels): one that would lie over another is pushed aside or up a
+ * row, as little as it can, and tied to its token by a thin line; the one chosen keeps its spot first (the pointer moves nothing:
+ * a label under it keeps its spot while its hover text shows). The lines' pills stay where they are and are kept clear of. Then the highlights' labels (a zone's warning) take their
+ * spots clear of all of them. Runs when the marks, the zoom or a marked token changed; nothing while no label shows.
+ */
+function layoutLabels() {
+  const items = [], soft = [], zoom = Math.max(0.05, canvas.stage?.scale.x ?? 1);
+  // (a token's pill is drawn with its token: a token whose picture is drawn later covers it - those pictures are hard for that pill)
+  const pics = drawOrder();
+  for ( const id of ON.keys() ) {
+    const t = objOf(id);
+    if ( !t || !(t.visible || t.controlled) ) continue;
+    soft.push({ key: id, x0: t.x, y0: t.y, x1: t.x + t.w, y1: t.y + t.h });
+    layoutToken(t);
+    const b = labelBoxOf(t);
+    if ( !b ) continue;
+    const e = ON.get(id), mine = pics.find((p) => p.t === t)?.i ?? -1;
+    const over = mine < 0 ? [] : pics.filter((p) => p.i > mine).map((p) => p.box);
+    // (and one more spot: just under its own token)
+    const alt = [{ dy: t.y + t.h + b.h / 2 + 3 / zoom - b.y }];
+    items.push({ key: id, x: b.x, y: b.y, w: b.w, h: b.h, prio: e?.state === "chosen" ? 1 : 0, was: SHIFT.get(id) ?? null, over, alt });
+  }
+  const res = Room.spreadLabels(items, layer?.pillBoxes() ?? [], { gap: 3 / zoom, soft });
+  const next = new Map();
+  for ( const it of items ) { const s = res.get(it.key) ?? { dx: 0, dy: 0 }; next.set(it.key, s); shiftLabel(objOf(it.key), s.dx, s.dy); }
+  SHIFT = next;
+  labelsLaid = items.length > 0;
+  Interact.boardLabelsMoved();
+}
+/** The tokens this user sees in the order their pictures are drawn: [{ t, i, box }] (scene px; i: later = on top). */
+function drawOrder() {
+  const out = [], prim = canvas.primary?.children ?? [], objs = canvas.tokens?.objects?.children ?? [];
+  for ( const t of canvas.tokens?.placeables ?? [] ) {
+    if ( !(t.visible || t.controlled) ) continue;
+    const m = t.mesh && typeof prim.indexOf === "function" ? prim.indexOf(t.mesh) : -1;
+    const i = m >= 0 ? m : typeof objs.indexOf === "function" ? objs.indexOf(t) : -1;
+    if ( i >= 0 ) out.push({ t, i, box: { x0: t.x, y0: t.y, x1: t.x + t.w, y1: t.y + t.h } });
+  }
+  return out;
+}
+/** The labels the board shows now, in scene px (the highlights' labels and the director's chip keep clear of them). */
+export function boardLabelBoxes() {
+  const out = [];
+  for ( const id of ON.keys() ) { const b = labelBoxOf(objOf(id)); if ( b ) out.push({ x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 }); }
+  out.push(...(layer?.pillBoxes() ?? []));
+  return out;
+}
+/**
+ * The labels the map draws on the board now - the tokens' pills, the lines' pills, the highlights' labels (a warning on a zone) -
+ * as boxes in client px: [{ x0, y0, x1, y1, kind: "token" | "line" | "zone" }]. For a caller that keeps its own floating things clear
+ * of them (section 41); the director's "My view" chip does.
+ */
+export function mapLabels() {
+  if ( !canvas?.ready || typeof canvas.clientCoordinatesFromCanvas !== "function" ) return [];
+  const toC = (b, kind) => { const p = canvas.clientCoordinatesFromCanvas({ x: b.x0, y: b.y0 }), q = canvas.clientCoordinatesFromCanvas({ x: b.x1, y: b.y1 }); return { x0: p.x, y0: p.y, x1: q.x, y1: q.y, kind }; };
+  const out = [];
+  for ( const id of ON.keys() ) { const b = labelBoxOf(objOf(id)); if ( b ) out.push(toC(b, "token")); }
+  for ( const b of layer?.pillBoxes() ?? [] ) out.push(toC(b, "line"));
+  for ( const b of Interact.highlightLabelBoxes() ) out.push(toC(b, "zone"));
+  return out;
 }
 
 /** The pointer over the marked tokens: what an entry says about its token shows beside the cursor, hover parts show on the token. */
@@ -167,8 +244,12 @@ function setHoverTok(id, at) {
     const old = hoverTok;
     hoverTok = id;
     for ( const k of [old, id] ) { const t = k ? objOf(k) : null; if ( t ) markToken(t, ON.get(k) ?? null, k === id); }
+    labelsSoon();
     const e = id ? ON.get(id) : null;
-    const lines = e ? [(e.hover?.tip ?? e.tip), ...e.marks.map((m) => m.tip)].filter(Boolean) : [];
+    // (section 41: a label cut short on its pill is said whole first, unless the tip already says it)
+    const cut = e ? (e.hover?.label ? e.hover.full : e.full) ?? null : null;
+    const tip0 = e ? (e.hover?.tip ?? e.tip) : null;
+    const lines = e ? [...(cut && !String(tip0 ?? "").includes(cut) ? [cut] : []), tip0, ...e.marks.map((m) => m.tip)].filter(Boolean) : [];
     if ( !lines.length ) { tipEl?.remove(); tipEl = null; }
     else {
       if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip mm-z-pick-tip mm-z-board-tip"; document.body.append(tipEl); }
@@ -228,6 +309,7 @@ function drawLinks() {
   }
   if ( !out.length && !layer ) return;
   ensureLayer()?.setLinks(out);
+  labelsSoon();
 }
 /** A token of a line moved (or came into sight): the lines follow on the next frame, once. */
 function linksSoon() { if ( linkRaf || !LINKS.map.size ) return; linkRaf = requestAnimationFrame(() => { linkRaf = 0; if ( canvas?.ready ) drawLinks(); }); }
@@ -589,7 +671,10 @@ export function menu(spec = {}) {
     const place = () => {
       const b = anchorBox(anchor);
       if ( !b ) { closeMenu("cancelled"); return; }
-      const r = el.getBoundingClientRect?.() ?? { width: 220, height: 200 }, s = BC.menuSpot(b, r.width || 220, r.height || 200, Number(globalThis.innerWidth) || 1600, Number(globalThis.innerHeight) || 900);
+      // (section 41: inside the window less the bars declared with uiInset, clear of what uiAvoid names when there is room for it)
+      let insets = null, avoid = null;
+      try { insets = Interact.uiInsets(); avoid = Interact.uiAvoids(); } catch {}
+      const r = el.getBoundingClientRect?.() ?? { width: 220, height: 200 }, s = Room.menuSpot(b, r.width || 220, r.height || 200, Number(globalThis.innerWidth) || 1600, Number(globalThis.innerHeight) || 900, { insets, avoid });
       el.style.left = `${s.x}px`; el.style.top = `${s.y}px`;
     };
     const byI = (i) => M.items.find((it) => it.i === i);
@@ -635,7 +720,10 @@ export function menu(spec = {}) {
     window.addEventListener("keydown", onKey, true);
     const arm = setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
     Hooks.on("canvasPan", onPan);
-    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { clearTimeout(arm); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
+    // (a declared bar or a box to keep clear of may grow while the menu is open - a dock's panel opens: it steps aside a few times a second)
+    const again = setInterval(place, 400);
+    again?.unref?.();
+    MENU = { el, resolve, token: anchor.token != null ? BC.tokenIdOf(anchor.token) : null, off: () => { clearTimeout(arm); clearInterval(again); el.removeEventListener("click", onClick); window.removeEventListener("keydown", onKey, true); document.removeEventListener("pointerdown", outside, true); Hooks.off("canvasPan", onPan); } };
     place();
   });
 }
@@ -847,6 +935,7 @@ function onTearDown() {
   if ( intentLive ) { const gms = gmIds().filter((id) => id !== me()); if ( gms.length ) emit({ op: "intent", intent: null, scene: intentLive.scene }, gms); }
   intentLive = null; intentNext = undefined;
   ON = new Map(); hoverTok = null; tipEl?.remove(); tipEl = null; watch(false);
+  SHIFT = new Map(); labelsLaid = false;
   layer?.destroy(); layer = null;
 }
 
@@ -859,6 +948,8 @@ export const boardApi = {
   pickMove, pickArea, areaPreview, clearArea, warn,
   /** A menu at a thing on the map; being asked about a right click on a token, a border or a zone. */
   menu, closeMenu, menuOpen, onContext,
+  /** The map's labels on the board as client boxes (section 41). */
+  mapLabels,
   /** What this user has armed, for the GMs; a GM's client: the intentions on screen. */
   intent, intents,
   STATE_MARKS: BC.STATE_MARKS, TOKEN_STATES: BC.TOKEN_STATES, boardLib: BC
@@ -880,8 +971,9 @@ export function registerBoard() {
   Hooks.on("sightRefresh", () => linksSoon());
   Hooks.on("canvasPan", () => {
     layer?.onZoom();
-    if ( ON.size ) for ( const id of ON.keys() ) { const t = objOf(id); if ( t ) layoutToken(t); }
+    if ( ON.size ) { for ( const id of ON.keys() ) { const t = objOf(id); if ( t ) layoutToken(t); } labelsSoon(); }
   });
+  Interact.setBoardLabels(boardLabelBoxes);
   Hooks.on("moinenMapsZones", (kind) => { if ( kind !== "section" && LINKS.map.size ) linksSoon(); });
   Hooks.on("userConnected", (user, connected) => { if ( connected ) return; if ( INTENTS.has(user.id) ) takeIntent(user.id, null); dropFrom(user.id); });
 }

@@ -20,6 +20,7 @@ import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
 import { interactApi, registerInteract } from "./interact.mjs";
 import { boardApi, registerBoard, flashToken } from "./board.mjs";
+import { methodOf, byHandOf } from "./room.mjs";
 
 /**
  * Zones of the open scene. The GM draws loose pencil lines (scripts/zones/editor.mjs); every area the lines close off is a zone
@@ -918,7 +919,7 @@ function onTokenHUD(hud, html) {
     const pick = document.createElement("div");
     pick.className = "mm-z-altpick";
     pick.innerHTML = html;
-    pick.addEventListener("click", async (e) => {
+    pick.addEventListener("click", (e) => byHud(async () => {
       const b = e.target.closest("[data-alt]"); if ( !b ) return;
       e.preventDefault(); e.stopPropagation();
       const k = b.dataset.alt;
@@ -929,15 +930,15 @@ function onTokenHUD(hud, html) {
       // Orbit goes through the orbit module when it is on (a request that never sticks; the token really moves)
       if ( k === "orbit" && moduleApi.orbit && game.settings.get(MODULE_ID, "orbit") !== false ) {
         // (it changes no flag here, so the hold of tactical play is asked by hand: tactical({ levels: true }))
-        if ( levelHeld(t.document) ) { askLevel(t.document, { alt: "orbit", floor: null, air: null }, () => moduleApi.orbit.send(t)); return; }
+        if ( levelHeld(t.document) ) { askLevel(t.document, { alt: "orbit", floor: null, air: null }, () => moduleApi.orbit.send(t), "hud"); return; }
         await moduleApi.orbit.send(t); show(); return;
       }
       await setAltitude(t, k);
       show();
-    });
+    }));
     btn.after(pick);
   });
-  btn.addEventListener("contextmenu", async (ev) => { ev.preventDefault(); ev.stopPropagation(); await setFloor(t, 0); await setAltitude(t, "ground"); show(); });
+  btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); byHud(async () => { await setFloor(t, 0); await setAltitude(t, "ground"); show(); }); });
   col.append(btn);
 }
 
@@ -1831,8 +1832,17 @@ function levelAfter(doc, changed) {
   }
   return any ? out : null;
 }
+/** The map's own token HUD (its altitude button) is writing a level: an update made then is a user's hand, not a script (section 41). */
+let HUD_HAND = 0;
+async function byHud(fn) { HUD_HAND++; try { return await fn(); } finally { HUD_HAND--; } }
+/** How an update held by tactical play was made (zones-api 41): { method: Foundry's TokenMovementMethod, byHand }. A change of level
+ *  alone carries no movement: the map's own HUD says "hud", anything else is "api" (a script: setLevel, a macro). */
+function howMoved(doc, options, levelOnly = false) {
+  const method = HUD_HAND > 0 ? "hud" : (levelOnly ? null : methodOf(options, doc.id)) ?? "api";
+  return { method, byHand: byHandOf(method) };
+}
 /** Ask the combat module about a level change that was held back; a yes writes it (`write`: another way to make it, the orbit scene). */
-async function askLevel(doc, lv, write = null) {
+async function askLevel(doc, lv, write = null, how = null) {
   const T = TACT;
   if ( !T?.confirm ) return;
   try {
@@ -1842,7 +1852,8 @@ async function askLevel(doc, lv, write = null) {
     const prof = Moves.profileOf(T.profile?.(doc) ?? {}) ?? Moves.profileOf({});
     let pl = null;
     try { pl = from.area || to.area ? null : Moves.plan(cache(), keyOfId, from, to, prof); } catch { pl = null; }
-    const yes = await T.confirm({ token: doc, from, to, level: true, drop: null, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl || !!from.area || !!to.area });
+    const hw = typeof how === "string" ? { method: how, byHand: byHandOf(how) } : how ?? { method: "api", byHand: false };
+    const yes = await T.confirm({ token: doc, from, to, level: true, drop: null, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl || !!from.area || !!to.area, ...hw });
     if ( yes !== true ) return;
     if ( write ) await write();
     else { const { _id, ...flat } = tokenUpdate({ id: doc.id, alt: lv.alt ?? null, floor: lv.floor ?? null, air: lv.air === true ? true : null }); await doc.update(flat, { mmMove: `lv${++moveSeq}` }); }
@@ -1858,7 +1869,7 @@ function onPreUpdateToken(doc, changed, options, userId) {
       const g = gridSize(), from = placeOfDoc(doc);
       const to = mkPlace({ id: Geo.zoneAt(Z, sx(doc) + (doc.width * g) / 2, sy(doc) + (doc.height * g) / 2), alt: Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground", floor: lv.floor, air: lv.air === true });
       if ( !from || Places.placeSig(from) === Places.placeSig(to) ) return;      // the same place (a stale flag cleared): nothing to price
-      askLevel(doc, lv);
+      askLevel(doc, lv, null, howMoved(doc, options, true));
       return false;
     } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical level change`, err); }
     return;
@@ -1867,8 +1878,9 @@ function onPreUpdateToken(doc, changed, options, userId) {
   try {
     if ( TACT.when && !TACT.when(doc) ) return;
     // a GM who holds Alt while dropping the token PLACES it: no route, no price, nobody asked; the caller is told afterwards
+    const how = howMoved(doc, options);
     const placeFree = () => {
-      FREE.set(doc.id, { from: placeOfDoc(doc), row: { id: doc.id, x: sx(doc), y: sy(doc), alt: doc.flags?.[MODULE_ID]?.alt ?? null, floor: doc.flags?.[MODULE_ID]?.floor ?? null, air: doc.flags?.[MODULE_ID]?.air === true ? true : null } });
+      FREE.set(doc.id, { from: placeOfDoc(doc), how, row: { id: doc.id, x: sx(doc), y: sy(doc), alt: doc.flags?.[MODULE_ID]?.alt ?? null, floor: doc.flags?.[MODULE_ID]?.floor ?? null, air: doc.flags?.[MODULE_ID]?.air === true ? true : null } });
       if ( options && typeof options === "object" ) options.mmFree = true;
     };
     if ( game.user.isGM && TACT.free && altDown() ) { placeFree(); return; }
@@ -1886,13 +1898,13 @@ function onPreUpdateToken(doc, changed, options, userId) {
       const to = mkPlace({ id, alt: Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground", floor: lv.floor, air: lv.air === true });
       if ( Places.placeSig(from) === Places.placeSig(to) ) return;
       const { _id, ...flat } = tokenUpdate({ id: doc.id, ...("x" in changed ? { x: changed.x } : {}), ...("y" in changed ? { y: changed.y } : {}), alt: lv.alt ?? null, floor: lv.floor ?? null, air: lv.air === true ? true : null });
-      askLevel(doc, lv, () => doc.update(flat, { mmMove: `lv${++moveSeq}` }));
+      askLevel(doc, lv, () => doc.update(flat, { mmMove: `lv${++moveSeq}` }), how);
       return false;
     }
     // (a level written in the same update is where the mover asks to end up; else it keeps the level it travels on)
     const alt = lv ? (Places.ALT_VALUES.includes(lv.alt) ? lv.alt : "ground") : rawAlt(doc);
     const to = mkPlace({ id, alt: alt === "underground" || alt === "elevated" || Places.AREAS.includes(alt) ? alt : "ground", floor: lv ? lv.floor : 0, air: lv ? lv.air === true : fl.air === true });
-    askDrag(doc, from, to, drop);
+    askDrag(doc, from, to, drop, how);
     return false;
   } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }
 }
@@ -1912,16 +1924,17 @@ function onFreePlaced(doc, options) {
   FREE.delete(doc.id);
   const g = gridSize(), to = placeOfDoc(doc);
   try { flashToken(doc, game.i18n.localize("MOINENMAPS.Zones.board.free")); } catch {}
-  try { TACT?.place?.({ token: doc, from: f.from, to, drop: { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }, free: true, inverse: { op: "tokens", rows: [f.row], skipMissing: true } }); }
+  try { TACT?.place?.({ token: doc, from: f.from, to, drop: { x: sx(doc) + (doc.width * g) / 2, y: sy(doc) + (doc.height * g) / 2 }, free: true, inverse: { op: "tokens", rows: [f.row], skipMissing: true }, ...(f.how ?? {}) }); }
   catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical placement`, err); }
 }
-async function askDrag(doc, from, to, drop) {
+async function askDrag(doc, from, to, drop, how = null) {
   const T = TACT;
   if ( !T ) return;
   try {
     const prof = Moves.profileOf(T.profile?.(doc) ?? {}) ?? Moves.profileOf({});
     const pl = Moves.plan(cache(), keyOfId, from, to, prof);
-    const ctx = { token: doc, from, to, drop, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl };
+    // (`method` / `byHand`, section 41: a drag or the keys of this client's user, or an update a script made)
+    const ctx = { token: doc, from, to, drop, profile: prof, plan: pl, cost: pl?.cost ?? null, reachable: !!pl, ...(how ?? { method: "api", byHand: false }) };
     const yes = T.confirm ? await T.confirm(ctx) : await askCost(ctx);
     if ( yes === true && pl ) await move(doc, to, { profile: prof, plan: pl, drop });
   } catch ( err ) { console.warn(`${MODULE_ID} | zones: tactical drag`, err); }

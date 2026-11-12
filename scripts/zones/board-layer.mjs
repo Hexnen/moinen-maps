@@ -80,11 +80,13 @@ export function markToken(t, e, hover = false) {
   if ( !t || t.destroyed ) return;
   const key = e ? `${e.key}|${hover ? 1 : 0}` : null;
   if ( t._mmBoard && !t._mmBoard.destroyed && t._mmBoard.key === key ) { layoutToken(t); return; }
+  // (a label moved by the layout keeps its spot while the marks are built again - the pointer came onto the token - until the next layout)
+  const shift = t._mmBoard?.shift ?? null;
   if ( t._mmBoard ) { if ( !t._mmBoard.destroyed ) t._mmBoard.destroy({ children: true }); t._mmBoard = null; }
   dimToken(t, !!e && e.state === "out");
   if ( !e ) return;
   const c = new PIXI.Container();
-  c.eventMode = "none"; c.interactiveChildren = false; c.key = key; c.e = e;
+  c.eventMode = "none"; c.interactiveChildren = false; c.key = key; c.e = e; c.shift = shift;
   c.ring = c.addChild(new PIXI.Graphics());
   const hl = hover && e.hover?.label, label = hl || e.label, bar = (hover && e.hover?.bar) || e.bar, pieces = hl ? e.hover.signs?.label : e.signs?.label;
   c.label = label ? c.addChild(pill(label, e.color, { size: 15, h: 23, icon: e.state === "out" ? "fa-solid fa-ban" : null, pieces })) : e.state === "out" ? c.addChild(pill("", e.color, { size: 14, icon: "fa-solid fa-ban" })) : null;
@@ -165,9 +167,44 @@ export function layoutToken(t) {
     b.scale.set(u); b.position.set(cx, y - (bh / 2) * u);
     y -= (tall + 3) * u;
   }
-  if ( c.label ) { c.label.scale.set(u); c.label.position.set(cx, y - (c.label.h / 2) * u); }
+  if ( c.label ) { c.label.scale.set(u); c.labelBase = { x: cx, y: y - (c.label.h / 2) * u, top: y }; placeLabel(c); }
   // state chips: down the right edge (Foundry's own effect icons run down the left)
   c.chips.forEach((ch, i) => { ch.scale.set(u); ch.position.set(w - 1 * u, 10 * u + i * 22 * u); });
+}
+
+/**
+ * The label's spot after the layout of all the labels (board.mjs, room.mjs spreadLabels): moved by (dx, dy) scene px from where it
+ * stands alone. A label moved off its token is tied to it by a thin line in its colour (which token it speaks of stays plain).
+ */
+export function shiftLabel(t, dx = 0, dy = 0) {
+  const c = t?._mmBoard;
+  if ( !c || c.destroyed || !c.label ) return;
+  const s = c.shift ?? { dx: 0, dy: 0 };
+  if ( Math.abs(s.dx - dx) < 0.01 && Math.abs(s.dy - dy) < 0.01 ) return;
+  c.shift = { dx, dy };
+  placeLabel(c);
+}
+function placeLabel(c) {
+  const b = c.labelBase, s = c.shift ?? { dx: 0, dy: 0 }, u = c.u ?? 1;
+  if ( !b ) return;
+  c.label.position.set(b.x + s.dx, b.y + s.dy);
+  const far = Math.hypot(s.dx, s.dy) > 4 * u;
+  if ( !far ) { if ( c.leader ) c.leader.visible = false; return; }
+  const G = c.leader ??= typeof c.addChildAt === "function" ? c.addChildAt(new PIXI.Graphics(), 1) : c.addChild(new PIXI.Graphics());
+  G.visible = true; G.clear();
+  // from the pill's edge nearest the token's top middle to that point (a dot on the token's rim end)
+  const hw = (c.label.w / 2) * u, hh = (c.label.h / 2) * u, lx = b.x + s.dx, ly = b.y + s.dy;
+  const ex = b.x, ey = b.top, px = Math.max(lx - hw + hh, Math.min(lx + hw - hh, ex)), py = ly + hh;
+  G.lineStyle({ width: 4 * u, color: INK, alpha: 0.7, cap: PIXI.LINE_CAP.ROUND }).moveTo(px, py).lineTo(ex, ey);
+  G.lineStyle({ width: 1.8 * u, color: c.e.color, alpha: 1, cap: PIXI.LINE_CAP.ROUND }).moveTo(px, py).lineTo(ex, ey);
+  G.lineStyle(0).beginFill(c.e.color, 1).drawCircle(ex, ey, 2.6 * u).endFill();
+}
+/** Where a token's label stands now, in scene px (null: it has none): { x0, y0, x1, y1 } and where it would stand alone. */
+export function labelBoxOf(t) {
+  const c = t?._mmBoard;
+  if ( !c || c.destroyed || !c.label || !c.labelBase ) return null;
+  const u = c.u ?? 1, s = c.shift ?? { dx: 0, dy: 0 }, x = t.x + c.labelBase.x, y = t.y + c.labelBase.y, hw = (c.label.w / 2) * u, hh = (c.label.h / 2) * u;
+  return { x, y, w: hw * 2, h: hh * 2, x0: x + s.dx - hw, y0: y + s.dy - hh, x1: x + s.dx + hw, y1: y + s.dy + hh };
 }
 
 /** Take the marks off a token. */
@@ -223,6 +260,12 @@ export class BoardLayer {
       if ( l.label ) { const p = this.pills.addChild(pill(l.label, l.color, { size: 13 })); p.scale.set(u); p.position.set(mid.x, mid.y); }
     }
     this.#show();
+  }
+
+  /** The lines' pills as they stand, in scene px: [{ x0, y0, x1, y1 }] (the tokens' labels keep clear of them: room.mjs). */
+  pillBoxes() {
+    if ( !this.root.visible ) return [];
+    return this.pills.children.map((p) => { const s = p.scale?.x ?? 1, hw = ((p.w ?? 0) / 2) * s, hh = ((p.h ?? 0) / 2) * s; return { x0: p.position.x - hw, y0: p.position.y - hh, x1: p.position.x + hw, y1: p.position.y + hh }; });
   }
 
   /** An arrow head at the end of a polyline. */
