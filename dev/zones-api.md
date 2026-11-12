@@ -1688,3 +1688,40 @@ for a drag skips it for `byHand: false` (a script's update is not a drag). A cal
 | U116 the "My view" chip over labels and the session banner | `api.uiAvoid("<mod>.notice", ".my-notice")`; drop any rule that pins `.mm-dst-chip` |
 | U106 a map menu over the dock | the dock declared with `uiInset({ bottom: "#dock" })` (section 23) now keeps menus above it; side panels with `uiAvoid` |
 | U107 a drag or a script's update | `confirm(ctx)`: `ctx.byHand` (`ctx.method` for more); an older map has no such field: keep a guess for it |
+
+## 42. A sign on the token, and the ring as a meter (U133, TRIAL)
+
+Row U133 of `invincible-plus-ultra/dev/combat-usability.md` (the owner: the odds words over targets become symbols, preferably on
+the token). Pure part `board-core.mjs` (`cleanBadge`, `cleanMeter`, `BADGE_SPOTS`); drawing `board-layer.mjs` (`badgeOf`,
+`meterRing`, `layoutToken`); the tip `board.mjs` (`setHoverTok`). Checks: the "42:" checks of `dev/zones-board.test.mjs`.
+Status: a trial: the combat module shows three looks behind a client switch until the owner picks one; the fields stay generic.
+
+Two more fields of a token mark entry (section 25). Both are a show, merged like the others (a later or higher set wins), sent to
+users like the rest of the entry. The map does not know what they mean.
+
+```js
+api.markTokens({ id: "ipu.reach", tokens: [
+  { token, state: "in", tip: "Chance: Likely",                      // no label: no pill over the token
+    badge: { signs: [sign], name: "Likely", at: "ne", plate: true, size: 13 } },
+  { token, state: "chosen", meter: { n: 2, of: 4, name: "Even odds" } }
+] });
+```
+
+| field | |
+| --- | --- |
+| `badge.signs` | pieces of section 40 (signs, short words); at most 3 signs; nothing that draws: no badge |
+| `badge.name` | what it is called: said in the pointer's tip unless the tip already says it |
+| `badge.at` | its spot ON the token's ring: `n`, `ne` (default), `e`, `se`, `s`, `sw`, `w`, `nw`. A corner spot lies on the ring inside the token's corner (where the art is least), the others just outside the edge |
+| `badge.plate` | `true` (default): on the dark ground of the pills, rimmed in the entry's colour. `false`: the pictures alone with a dark rim of eight dark copies around them (no filter): reads on light and dark art |
+| `badge.size` | the picture's height in screen px at full size (8-28, default 14); it shrinks with a token small on screen as every mark does |
+| `meter` | `{ n, of, name }`: the ring of a state `in` / `chosen` / `caught` drawn in `of` parts (2-12) from the top, clockwise, `n` of them heavy and the rest a hairline; `chosen` adds ticks in the gaps, `caught` dashes the heavy parts. `name` as a badge's. No ring state: nothing |
+
+- A badge is a child of the token (it follows it, like the chips); it is not a label, so it takes no part in the labels' layout
+  (section 41) and `mapLabels` does not list it. The badge stays while the pointer is on the token; a `hover.label` still shows its
+  pill over the token.
+- A badge at `ne` or `e` moves the state chips (section 25) down the right edge, below it.
+- Foundry's own parts around a token: effect icons down the left edge from the top, bar 2 along the inside of the top edge, bar 1
+  along the inside of the bottom edge, the nameplate under the token, the elevation tooltip over it. `ne` overlaps the right end of
+  bar 2 by a few px, `se` the right end of bar 1; neither touches the nameplate or the effect icons.
+- A table without such a caller is untouched (an entry without `badge` / `meter` is drawn exactly as before). An older map ignores
+  both: a caller that wants a fallback keeps a `label`.
