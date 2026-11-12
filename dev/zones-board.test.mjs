@@ -248,7 +248,7 @@ api.clearLinks(); takeSent();
 check(api.link({ from: "t1" }) === null && api.links().length === 0, "a line without a target is none");
 
 /* ---- a move under the pointer */
-const click = (x, y, button = 0) => { view.fire("pointerdown", { button, clientX: x, clientY: y }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
+const click = (x, y, button = 0) => { window.fire("pointerdown", { button, clientX: x, clientY: y, target: view }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
 check((await api.pickMove({ token: "nobody" })).reason === "noToken", "no mover: refused");
 let pr = api.pickMove({ token: "t1", profile: { way: "air", speed: 2 }, banner: false, zones: [{ zone: "z5", label: "1", cost: "quick action", more: true }, { zone: "z3", label: "1", cost: "full action · 1 stress", hazards: [{ zone: "z3", text: "Fire 4" }], color: "stress" }] });
 check(api.picking() && !els.some((e) => !e.gone && e.className === "mm-z-pick"), "banner: false - the pick runs without the map's banner");

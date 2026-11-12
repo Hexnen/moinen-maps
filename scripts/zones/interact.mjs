@@ -1028,14 +1028,18 @@ function startPick() {
   };
   const onKey = (ev) => { if ( ev.key === "Escape" ) { ev.preventDefault(); ev.stopPropagation(); endPick({ ok: false, reason: "cancelled" }); } };
   const onCtx = (ev) => ev.preventDefault();
-  view.addEventListener("pointerdown", onDown, true);
+  // fxp (U184): the left press is taken on the WINDOW in the capture phase. PIXI listens for pointerdown on the canvas in the capture
+  // phase itself, registered long before any pick: on the canvas the pick came second, so a token under the click was selected (Foundry
+  // controls on the press) and the GM's desk jumped to that character. The window's capture phase runs before every listener on the canvas.
+  const onDownW = (ev) => { if ( ev.target === view ) onDown(ev); };
+  window.addEventListener("pointerdown", onDownW, true);
   view.addEventListener("pointermove", onMove, { passive: true });
   view.addEventListener("pointerleave", onLeave);
   view.addEventListener("contextmenu", onCtx);
   window.addEventListener("pointerup", onUp);
   window.addEventListener("keydown", onKey, true);
   p.offs.push(
-    () => view.removeEventListener("pointerdown", onDown, true), () => view.removeEventListener("pointermove", onMove), () => view.removeEventListener("pointerleave", onLeave),
+    () => window.removeEventListener("pointerdown", onDownW, true), () => view.removeEventListener("pointermove", onMove), () => view.removeEventListener("pointerleave", onLeave),
     () => view.removeEventListener("contextmenu", onCtx), () => window.removeEventListener("pointerup", onUp), () => window.removeEventListener("keydown", onKey, true)
   );
   if ( p.P.timeout ) { const t = setTimeout(() => { if ( PICK === p ) endPick({ ok: false, reason: "timeout" }); }, p.P.timeout); p.offs.push(() => clearTimeout(t)); }

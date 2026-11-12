@@ -151,7 +151,7 @@ export function open(s, dims = { size: 100, width: 1000, height: 400, sceneRect:
   });
   Hooks.callAll("canvasReady");
 }
-export const click = (x, y, button = 0) => { view.fire("pointerdown", { button, clientX: x, clientY: y, target: view }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
+export const click = (x, y, button = 0) => { window.fire("pointerdown", { button, clientX: x, clientY: y, target: view }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
 export const moveTo = (x, y) => view.fire("pointermove", { clientX: x, clientY: y });
 
 export const Zones = await imp("scripts/zones/zones.mjs");

@@ -215,7 +215,7 @@ api.clearHighlights("reach");
 
 /* ================================================================ wired: picking */
 
-const click = (x, y, button = 0) => { view.fire("pointerdown", { button, clientX: x, clientY: y }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
+const click = (x, y, button = 0) => { window.fire("pointerdown", { button, clientX: x, clientY: y, target: view }); window.fire("pointerup", { button, clientX: x, clientY: y, target: view }); };
 let pr = api.pick({ zones: ["z2", { spot: "z3:elevated", label: "2", tip: "with stress" }], title: "Where to?" });
 check(api.picking() === true && document.body.classList.contains("mm-z-picking") && els.some((e) => e.className === "mm-z-pick" && e.innerHTML.includes("Where to?")), "a pick shows its banner");
 calls.length = 0;
@@ -225,12 +225,15 @@ view.fire("pointermove", { clientX: 900, clientY: 100 });
 check(document.body.classList.contains("mm-z-pick-no") && !document.body.classList.contains("mm-z-pick-ok"), "hovering another zone: the cursor says no");
 click(900, 100);
 check(api.picking() === true, "a click on a zone that is not on offer picks nothing");
-view.fire("pointerdown", { button: 0, clientX: 500, clientY: 100 }); window.fire("pointerup", { button: 0, clientX: 560, clientY: 100, target: view });
+window.fire("pointerdown", { button: 0, clientX: 500, clientY: 100, target: view }); window.fire("pointerup", { button: 0, clientX: 560, clientY: 100, target: view });
 check(api.picking() === true, "a drag is not a click");
 click(500, 100);
 let res = await pr;
 check(res.ok === true && res.zone === "z3" && res.spot === "z3:elevated" && res.place.level === "elevated" && res.place.roof === true && res.x === 500 && res.id === 2, "a click on a zone on offer: the place the entry named (the rooftop of the building)");
 check(api.picking() === false && !document.body.classList.contains("mm-z-picking") && els.filter((e) => e.className === "mm-z-pick").every((e) => e.gone) && view.ls.get("pointerdown").length === (game.user.isGM ? 1 : 0), "the pick is over: banner, cursor and listeners are gone (the editor's own stay)");
+{ const src = (await import("node:fs")).readFileSync(new URL("../scripts/zones/interact.mjs", import.meta.url), "utf8");
+  check(/window\.addEventListener\("pointerdown", onDownW, true\)/.test(src) && !/view\.addEventListener\("pointerdown"/.test(src) && /const onDownW = \(ev\) => \{ if \( ev\.target === view \) onDown\(ev\); \};/.test(src),
+    "fxp (U184): the pick takes the left press on the window in the capture phase (PIXI listens on the canvas in the capture phase: a token under the click was selected)"); }
 pr = api.pick();
 window.fire("keydown", { key: "Escape" });
 check((await pr).reason === "cancelled", "any zone can be picked when none is listed; Escape gives it up");
@@ -616,7 +619,7 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     await wait(30);
     click(a3.x, a3.y);
     const during = api.picking();
-    view.fire("pointerdown", { button: 0, clientX: a3.x, clientY: a3.y }); await wait(320);  // pressed after it settled ...
+    window.fire("pointerdown", { button: 0, clientX: a3.x, clientY: a3.y, target: view }); await wait(320);  // pressed after it settled ...
     canvas.pan({ x: 500, y: 100 });                                      // ... but the map slides before the release
     window.fire("pointerup", { button: 0, clientX: a3.x, clientY: a3.y, target: view });
     const across = api.picking();
