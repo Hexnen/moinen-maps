@@ -67,6 +67,42 @@ function pill(str, color, { size = 14, icon = null, h = 21, pieces = null } = {}
   return c;
 }
 
+/**
+ * Section 42: THE RING AS A METER (U133: the chance of a target, "n of 4"). `of` parts from the top, clockwise, `n` of them full,
+ * the rest empty; drawn on G around (cx, cy) at radius r (meterRadius).
+ *  - INSIDE the token's square: two tokens side by side (a row, a crowd) never cross rings, and the parts' gaps fall on the top,
+ *    right, bottom and left, where two rings would meet edge to edge.
+ *  - full: a heavy line in the entry's colour on a dark one; empty: a hairline on a thin dark one. How much of the ring is heavy is
+ *    the reading (a quarter, a half, three quarters, all of it): one colour, never a colour alone.
+ *  - `chosen`: the full parts heavier with a light line along them and short ticks pointing in from the gaps (a reticle);
+ *    `caught` (in an area, not aimed at): the full parts dashed, two dashes each, so a part still reads as one.
+ */
+const meterHeavy = (e, u) => (e.state === "chosen" ? 8.5 : 7) * u;
+const meterRadius = (w, h, e, u) => Math.min(w, h) / 2 - (meterHeavy(e, u) + 4 * u) / 2 - 0.5 * u;
+function meterRing(G, cx, cy, r, m, e, u) {
+  const seg = (Math.PI * 2) / m.of, gap = Math.min(0.42, seg * 0.26), strong = e.state === "chosen", dashed = e.state === "caught";
+  const heavy = meterHeavy(e, u), thin = 1.6 * u;
+  const arc = (a0, a1) => { G.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r); G.arc(cx, cy, r, a0, a1); };
+  const part = (i, width, col, alpha, dash) => {
+    const a0 = -Math.PI / 2 + i * seg + gap / 2, a1 = a0 + seg - gap;
+    G.lineStyle({ width, color: col, alpha, cap: PIXI.LINE_CAP.BUTT });
+    if ( !dash ) { arc(a0, a1); return; }
+    const k = 2, step = (a1 - a0) / k;
+    for ( let j = 0; j < k; j++ ) arc(a0 + j * step + (j ? step * 0.14 : 0), a0 + (j + 1) * step - (j + 1 < k ? step * 0.14 : 0));
+  };
+  // (the dark under everything first, then the colour: a dark line never cuts across a coloured one)
+  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy + 4 * u : thin + 2.4 * u, INK, i < m.n ? 0.85 : 0.6, false);
+  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy : thin, e.color, i < m.n ? 1 : 0.85, dashed && i < m.n);
+  if ( strong ) {
+    for ( let i = 0; i < m.n; i++ ) part(i, 1.4 * u, PAPER, 0.9, false);
+    const r0 = r - heavy / 2 + 1 * u, r1 = r0 - 7 * u, ticks = (width, color, alpha) => {
+      G.lineStyle({ width, color, alpha, cap: PIXI.LINE_CAP.ROUND });
+      for ( let i = 0; i < m.of; i++ ) { const a = -Math.PI / 2 + i * seg, dx = Math.cos(a), dy = Math.sin(a); G.moveTo(cx + dx * r0, cy + dy * r0); G.lineTo(cx + dx * r1, cy + dy * r1); }
+    };
+    ticks(7 * u, INK, 0.85); ticks(4 * u, e.color, 1);
+  }
+}
+
 /* ---------------------------------------------------------------- marks on a token */
 
 /** How big one overlay unit is on this token, in scene px: a screen pixel, held between two shares of the token's width. */
@@ -107,7 +143,9 @@ export function markToken(t, e, hover = false) {
     return c.addChild(ch);
   });
   t._mmBoard = t.addChild(c);
-  if ( c.label ) liftLabel(c);
+  // (section 42: the ring when it is a meter is lifted with the label, over a neighbour's picture that overlaps the square. Without
+  //  a meter, exactly as before: the ring stays with its token)
+  if ( c.label || e.meter ) liftLabel(c, { ring: !!e.meter });
   layoutToken(t);
 }
 
@@ -131,12 +169,14 @@ function liftRoot() {
   ui.sortDirty = true;
   return LIFT;
 }
-function liftLabel(c) {
+function liftLabel(c, { ring = false } = {}) {
   const root = liftRoot();
   if ( !root ) return;                                                                           // (no primary group: the label stays with its token)
   const L = c.lift = root.addChild(new PIXI.Container());
   L.eventMode = "none"; L.interactiveChildren = false;
-  L.addChild(c.label);
+  // (bottom up: the ring as a meter, the pill)
+  if ( ring && c.ring ) L.addChild(c.ring);
+  if ( c.label ) L.addChild(c.label);
   c.once?.("destroyed", () => dropLift(c));
   syncLift(c);
 }
@@ -182,7 +222,8 @@ export function layoutToken(t) {
   c.u = u; c.tw = w; c.th = h; c.alt = !!t._mmAlt;
   const R = c.ring, cx = w / 2, cy = h / 2, r = Math.max(w, h) / 2 + 3 * u;
   R.clear();
-  if ( e.state === "in" || e.state === "chosen" || e.state === "caught" ) {
+  if ( (e.state === "in" || e.state === "chosen" || e.state === "caught") && e.meter ) meterRing(R, cx, cy, meterRadius(w, h, e, u), e.meter, e, u);
+  else if ( e.state === "in" || e.state === "chosen" || e.state === "caught" ) {
     const strong = e.state === "chosen";
     R.lineStyle({ width: (strong ? 8 : 6) * u, color: INK, alpha: 0.7 }).drawCircle(cx, cy, r);
     if ( e.state === "caught" ) {

@@ -81,10 +81,19 @@ function cleanHover(h) {
   return out.label || out.tip || out.bar ? out : null;
 }
 
+/* ---- section 42 (U133): the ring as a meter ---- */
+/** The ring as a meter, cleaned: { n, of, name } - `of` parts (2..12), `n` of them full (0..of). null: not one. */
+export function cleanMeter(m) {
+  if ( !m || typeof m !== "object" ) return null;
+  const of = Math.round(num(m.of) ?? NaN), n = Math.round(num(m.n) ?? NaN);
+  if ( !(of >= 2 && of <= 12) || !Number.isFinite(n) ) return null;
+  return { n: Math.max(0, Math.min(of, n)), of, name: text(m.name, 120) };
+}
+
 /**
  * A set of token marks, cleaned:
  *   { id, tokens: [{ token (id), state: "in" | "out" | "chosen" | "caught" | null, color, label, tip, marks: [{ icon, color, tip }],
- *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40) }], users, order }
+ *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40), meter? (section 42) }], users, order }
  * null: no id that can be kept, or no entry that names a token.
  */
 export function cleanTokenMarks(spec, me = null) {
@@ -103,7 +112,9 @@ export function cleanTokenMarks(spec, me = null) {
       marks: (Array.isArray(o.marks) ? o.marks : []).map(cleanMark).filter(Boolean).slice(0, BOARD_LIMITS.marks),
       bar: cleanBar(o.bar), hover: cleanHover(o.hover),
       // (section 40: the label as words and signs; the pill shows them, the words stay for the rest)
-      ...(o.label && cleanSigns(o.signs, { label: BOARD_LIMITS.label }) ? { signs: cleanSigns(o.signs, { label: BOARD_LIMITS.label }) } : {})
+      ...(o.label && cleanSigns(o.signs, { label: BOARD_LIMITS.label }) ? { signs: cleanSigns(o.signs, { label: BOARD_LIMITS.label }) } : {}),
+      // (section 42: the ring as a meter; absent: nothing changes)
+      ...(cleanMeter(o.meter) ? { meter: cleanMeter(o.meter) } : {})
     });
   }
   if ( !tokens.length ) return null;

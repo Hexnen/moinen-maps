@@ -458,6 +458,46 @@ open(sc); tokObjs(); takeSent();
   check(api.uiAvoid("", {})() === undefined && api.uiAvoid("x", null) && api.uiAvoids().length === 0, "41: junk ids and null specs take nothing");
 }
 
+/* ---- section 42 (U133): the ring as a meter ("n of m", inside the token's square, gaps where two rings would meet) */
+{
+  check(JSON.stringify(BC.cleanMeter({ n: 9, of: 4, name: "Near certain" })) === JSON.stringify({ n: 4, of: 4, name: "Near certain" }) && BC.cleanMeter({ n: 1, of: 1 }) === null && BC.cleanMeter({ of: 4 }) === null, "42: a meter is cleaned: n within 0..of, of 2..12");
+  const sign = { name: "Likely", img: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E", w: 18, color: 0xffe72a };
+  check(!("badge" in BC.cleanTokenMarks({ id: "x", tokens: [{ token: "t2", state: "in", badge: { signs: [sign] } }] }).tokens[0]) && !("cleanBadge" in BC) && !("BADGE_SPOTS" in BC), "42: no badge: a sign on the token is not part of the map's words (the trial's corner signs are gone)");
+  // (what the ring draws: every arc with the line style it was drawn in)
+  const arcs = () => { let st = null; const out = []; for ( const c of calls ) { if ( c[0] === "lineStyle" ) st = c[1]; else if ( c[0] === "arc" ) out.push({ cx: c[1], cy: c[2], r: c[3], a0: c[4], a1: c[5], ...st }); } return out; };
+  const meterOf = (state, n) => { calls.length = 0; api.markTokens({ id: "ipu.odds", color: "target", tokens: [{ token: "t2", state, tip: "Chance: x", meter: { n, of: 4, name: "Level " + n } }] }); return arcs(); };
+  const C2 = C.target, tw = T("t2").w, th = T("t2").h;
+  for ( const n of [1, 2, 3, 4] ) {
+    const a = meterOf("in", n), col = a.filter((x) => x.color === C2), heavy = Math.max(...col.map((x) => x.width));
+    check(col.length === 4 && col.filter((x) => x.width === heavy).length === n, `42: level ${n}: four parts in the entry's colour, ${n} of them heavy`);
+    check(a.every((x) => x.cx + x.r + x.width / 2 <= tw + 1e-6 && x.cx - x.r - x.width / 2 >= -1e-6 && x.cy + x.r + x.width / 2 <= th + 1e-6 && x.cy - x.r - x.width / 2 >= -1e-6), `42: level ${n}: the whole ring, its dark line too, lies inside the token's square (two tokens side by side never cross rings)`);
+    const cardinal = [-Math.PI / 2, 0, Math.PI / 2, Math.PI, Math.PI * 1.5];
+    check(a.every((x) => cardinal.every((k) => !(x.a0 < k - 0.15 && x.a1 > k + 0.15) && !(x.a0 < k && x.a1 > k))), `42: level ${n}: the gaps between the parts lie on the top, right, bottom and left, where two rings would meet`);
+    check(boardOf("t2") && !boardOf("t2").label && !boardOf("t2").e.label, `42: level ${n}: a meter needs no pill`);
+  }
+  const lit = meterOf("in", 1), first = lit.filter((x) => x.color === C2).sort((p, q) => q.width - p.width)[0];
+  check(first.a0 > -Math.PI / 2 && first.a1 < 0, "42: the first full part is the top right quarter (clockwise from the top)");
+  const ch = meterOf("chosen", 2), inC = meterOf("in", 2);
+  check(Math.max(...ch.filter((x) => x.color === C2).map((x) => x.width)) > Math.max(...inC.filter((x) => x.color === C2).map((x) => x.width)), "42: chosen: the full parts heavier");
+  meterOf("chosen", 2);
+  const ticks = calls.filter((c) => c[0] === "lineTo").length;
+  check(ticks === 8, "42: chosen: a tick in each of the four gaps (dark and colour), pointing in");
+  const cg = meterOf("caught", 2).filter((x) => x.color === C2);
+  check(cg.length === 2 * 2 + 2, "42: caught: the full parts dashed (two dashes each), the empty ones as they are");
+  check(api.mapLabels().filter((b) => b.kind === "token").length === 0, "42: a meter is not a label: nothing to lay out");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: Likely", meter: { n: 3, of: 4, name: "Likely" } }] });
+  view.fire("pointermove", { clientX: 880, clientY: 80 });
+  let tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
+  check(!!tipNow && tipNow.innerHTML.includes("Chance: Likely") && !tipNow.innerHTML.includes("<span>Likely</span>"), "42: a meter's name is not said twice when the tip says it");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: 72%", meter: { n: 3, of: 4, name: "Likely" } }] });
+  view.fire("pointerleave", {}); view.fire("pointermove", { clientX: 880, clientY: 80 });
+  tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
+  check(!!tipNow && tipNow.innerHTML.includes("Likely") && tipNow.innerHTML.includes("72%"), "42: a tip that does not name it (the GM's per cent): the meter's name is said too");
+  view.fire("pointerleave", {});
+  api.clearTokenMarks("ipu.odds");
+  check(!boardOf("t2"), "42: marks gone, meter gone");
+}
+
 /* ---- a right click on a thing of the map */
 const seen = [];
 const downs = (x, y, o = {}) => { let stopped = false; window.fire("pointerdown", { button: 2, clientX: x, clientY: y, target: view, stopImmediatePropagation() { stopped = true; }, ...o }); return stopped; };
