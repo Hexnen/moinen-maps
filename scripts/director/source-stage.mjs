@@ -1,7 +1,8 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as SC from "./stage-core.mjs";
-import { killed, isOn, myMode, R, HOOK, registerStager, registerVeto, cameraHeld, busy } from "./director.mjs";
+import * as AC from "./action-core.mjs";
+import { killed, isOn, myMode, R, HOOK, registerStager, registerVeto, cameraHeld, busy, holds, takeLook, zoomLocked, typing, escTaken } from "./director.mjs";
 import { Screen, clientOpts } from "./stage.mjs";
 import { freeRect } from "./overlay.mjs";
 import { restyle } from "./screen.mjs";
@@ -51,6 +52,8 @@ const FOLLOW_KEY = "dirFollow";
 let followDefault = "all";
 const followChoice = () => { try { const v = game.settings.get(MODULE_ID, FOLLOW_KEY); return FOLLOW.includes(v) ? v : "auto"; } catch { return "auto"; } };
 export const follow = () => followOf(followChoice(), followDefault);
+/** For the stage's own beats (a fight nobody drives) the action camera is the full stage: "all". */
+const stageFollow = () => { const f = follow(); return f === "action" ? "all" : f; };
 /**
  * camera()                          -> { follow (in force), choice (the user's: "auto" | "all" | "turn" | "off"), default }
  * camera({ follow: "turn" })        the user's choice, kept in the client setting (a switch on a combat module's dock calls this)
@@ -59,8 +62,9 @@ export const follow = () => followOf(followChoice(), followDefault);
 export function camera(o = null) {
   if ( o && typeof o === "object" ) {
     if ( "driver" in o ) setDriver(o.driver);
-    if ( o.default === "all" || o.default === "turn" || o.default === "off" ) followDefault = o.default;
+    if ( o.default === "action" || o.default === "all" || o.default === "turn" || o.default === "off" ) followDefault = o.default;
     if ( FOLLOW.includes(o.follow) && o.follow !== followChoice() ) { try { game.settings.set(MODULE_ID, FOLLOW_KEY, o.follow); } catch { /* not registered */ } }
+    if ( follow() !== "action" ) shotEnd();                                    // (the action camera was switched down or off: the view goes back)
     if ( follow() === "off" && (st.parked || st.home) ) { st.parked = null; sync(); }
     tell();
   }
@@ -78,6 +82,7 @@ function setDriver(id) {
   const next = typeof id === "string" && id ? id : null;
   if ( next === driver ) return;
   driver = next;
+  shotEnd();
   clearTimeout(lingerT); lingerT = 0;
   if ( !beat && !homing ) { SC.frameSettle(st); sync(); }
 }
@@ -123,7 +128,7 @@ function styleOf(shot) {
   let cam = null;                        // a turn's calm camera (null: it stays)
   let away = false;                      // the player's own attack off screen: the camera goes to the hit and RETURNS
   const take = () => { SC.beatStart(st, viewNow(), !!beat); claimed.set(shot.id, { own: false }); return "take"; };
-  const fw = follow();
+  const fw = stageFollow();
   function check0(form, ph) {
     if ( own ) {
       // the player's own turn: the camera is theirs. Their own turn shot does nothing (the stage went home on the turn change), their
@@ -235,6 +240,7 @@ function onPan(c, p) {
   // ~0.6 s fade swallowed it and the next turn took the camera anyway)
   if ( !moved || !st.combat || homing || beat ) return;
   if ( Screen.owner && Screen.debug?.()?.cameraOn ) return;
+  dropRest();
   if ( st.parked || st.home ) { SC.ownMove(st, performance.now()); sync(); } else st.ownAt = performance.now();
 }
 
@@ -256,8 +262,10 @@ function goHome(to, ms = null) {
   const look = { fx: true, camOn: true, camMode: "frame", lbOn: false, vgOn: false, shOn: false, flOn: false, smOn: false, camEase: 0.85 };
   if ( !Screen.begin({ r: look }, { owner: "stage", guard: true, frame: false, home: { x: to.x, y: to.y, scale: to.scale }, opts: { noCamera: false, allow: ["camera"] } }) ) return;
   homing = true; sync();
+  const seq = beginSeq;
   Screen.end({ backMs: dur, hold: 0 }).finally(() => {
     homing = false;
+    if ( seq !== beginSeq ) { sync(); return; }                                                // (a shot took the move over: not the player's hand)
     if ( st.combat && !SC.sameView(viewNow(), to, 12) ) SC.ownMove(st, performance.now());   // (the player stopped it: the camera is theirs)
     sync();
   });
@@ -332,6 +340,9 @@ export async function frame(spec = {}) {
     if ( killed() ) return no("off");
     const level = spec.level === "all" ? "all" : "turn", hand = spec.hand === true;
     const gate = () => SC.frameGate(st, { follow: follow(), level, hand, now: performance.now(), backMs: stageSettings().back * 1000, busy: busy(), held: cameraHeld(), screen: !!Screen.owner && !homing });
+    /* a shot on screen (the action camera, section 39): the user's own act ends it at once; anything else waits until the view is back */
+    if ( act && !act.done ) { if ( hand ) leave(act, "hand"); else { for ( let i = 0; i < 3 && act && !act.done; i++ ) await actIdle(); if ( mine !== frameSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); } }
+    if ( hand ) dropRest();
     let g = gate(); if ( g ) return no(g);
     if ( spec.after ) { await settled(idOf(spec.after)); if ( mine !== frameSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); g = gate(); if ( g ) return no(g); }
     /* what calls for a frame (a turn change, a card) usually redraws the surfaces in the same moment: a glide begun inside that
@@ -355,14 +366,210 @@ export async function frame(spec = {}) {
     st.combat ??= c?.id ?? "frame";
     if ( c && st.turn === null ) st.turn = turnKey(c);
     SC.frameStart(st, v, hand);
+    const seq0 = beginSeq;
     const arrived = await glideTo(to, plan.ms);
+    if ( seq0 !== beginSeq ) return no("replaced");                              // (a shot took the screen meanwhile: its own end settles the view)
     if ( mine === frameSeq || arrived ) SC.frameEnd(st, to, arrived, hand, performance.now());
     clearTimeout(lingerT); lingerT = 0;
-    if ( st.parked ) lingerT = setTimeout(() => { lingerT = 0; if ( beat || homing ) return; SC.frameSettle(st); sync(); }, SC.LINGER_MS);
+    if ( st.parked ) lingerT = setTimeout(() => { lingerT = 0; if ( beat || homing || rest || act ) return; SC.frameSettle(st); sync(); }, SC.LINGER_MS);
     sync();
     return say({ ok: true, moved: true, whole: !!plan.whole, arrived });
   } catch ( err ) { console.error(`${MODULE_ID} | frame`, err); return no("error"); }
 }
+/* ---------------------------------------------------------------- shot(): the action camera of a driven fight (dev/zones-api.md 39) */
+
+let act = null;                          // the beat on screen here: { key, beat, plan, home, away, phase: "go" | "hold" | "back", timers, done }
+let rest = null;                         // the camera waits at the pair for the result of exchange `key`: { key, timer }
+let beginSeq = 0, shotSeq = 0;
+const shots = [];                        // the last shot decisions here (checks): [ms, beat, key, answer]
+const idlers = [];                       // frame() calls that wait for the beat on screen to be over
+const actIdle = () => (act && !act.done ? new Promise((res) => { idlers.push(res); setTimeout(res, 6000); }) : Promise.resolve());
+function dropRest() { if ( rest ) { clearTimeout(rest.timer); rest = null; } }
+const handBusy = () => busy({ ignoreHolds: true }) || [...holds].some((h) => h !== "action");
+
+/** Everything of a beat taken off (listeners, timers); whoever waited for it goes on. Nothing of the screen is touched here. */
+function cleanup(a) {
+  a.done = true;
+  for ( const t of a.timers ) clearTimeout(t);
+  clearTimeout(a.endT); clearInterval(a.walk);
+  if ( a.onKey ) {
+    window.removeEventListener("keydown", a.onKey, true);
+    window.removeEventListener("pointerdown", a.onPtr, true);
+    window.removeEventListener("pointerup", a.onUp, true);
+    window.removeEventListener("wheel", a.onPtr, true);
+  }
+  if ( act === a ) { act = null; holds.delete("action"); }
+  for ( const r of idlers.splice(0) ) { try { r(); } catch { /* a waiter */ } }
+}
+/**
+ * The beat leaves the screen: "done" (its time: the view goes home, or waits at the pair when the result is still to come), "cut"
+ * (Esc / a click: home fast, nothing more this turn), "taken" (the user's wheel or drag: the camera is theirs where it stands),
+ * "hand" (the user's own act on the dock: it stops where it is), "end" (the caller: home fast), "lost" (the map's own take-over or
+ * the show took the screen: that one returns to the user's view), "scene".
+ */
+function leave(a, why) {
+  if ( !a || a.done || (a.phase === "back" && why !== "scene" && why !== "lost") ) return;
+  shots.push([Math.round(performance.now()), a.beat, a.key, `end:${why}`]); if ( shots.length > 40 ) shots.shift();
+  const mine = Screen.owner === "action";
+  if ( !mine || why === "lost" ) { cleanup(a); st.parked = null; st.home = null; sync(); return; }
+  if ( why === "scene" ) { cleanup(a); Screen.end({ immediate: true }); st.parked = null; st.home = null; sync(); return; }
+  if ( why === "taken" || why === "hand" ) {
+    Screen.stopCamera("player"); Screen.end({ backMs: 250, hold: 0 }); cleanup(a);
+    if ( why === "taken" ) SC.ownMove(st, performance.now()); else { st.parked = null; st.home = null; }
+    sync(); return;
+  }
+  if ( why === "done" && a.plan.rest ) {
+    // the result is still to come: the camera stays at the pair, the bars go, "My view" stands by; home by itself after TIMES.rest
+    Screen.stopCamera("stay"); Screen.end({ backMs: 300, hold: 0 }); cleanup(a);
+    const v = viewNow(); st.parked = { x: v.x, y: v.y, scale: v.scale };
+    dropRest();
+    rest = { key: a.key, timer: setTimeout(() => { rest = null; if ( !act && !beat && !homing && st.parked && st.home && !cameraHeld() ) goHome(st.home, AC.TIMES.back); }, AC.TIMES.rest) };
+    sync(); return;
+  }
+  if ( why === "cut" ) st.out = st.turn;
+  for ( const t of a.timers ) clearTimeout(t);
+  clearTimeout(a.endT); clearInterval(a.walk);
+  a.phase = "back";
+  const ms = !a.away ? 300 : why === "done" ? AC.TIMES.back : AC.TIMES.cut;
+  Screen.end({ backMs: ms, hold: 0 }).finally(() => {
+    if ( a.done ) return;                                                        // (a newer beat carried on from here)
+    cleanup(a);
+    if ( a.tookBack ) SC.ownMove(st, performance.now()); else { st.parked = null; st.home = null; }
+    sync();
+  });
+  sync();
+}
+/** The caller (or the stage) ends whatever shot plays or waits here: the view goes back to the user's, fast. Nothing is marked. */
+export function shotEnd() {
+  if ( act && !act.done ) { leave(act, "end"); return true; }
+  if ( rest ) { dropRest(); if ( st.parked && st.home && !beat && !homing ) goHome(st.home, AC.TIMES.cut); return true; }
+  return false;
+}
+/**
+ * shot({ key, beat, tokens, zones, still, why })   (dev/zones-api.md 39; the beats and how each is played: action-core.mjs)
+ *   key     the exchange the beat belongs to (the caller's id of it): beats of one key are one piece of staging
+ *   beat    "open" | "hit" | "miss" | "kill" | "reveal" | "move" | "close"
+ *   tokens  THE FOCUS FIRST (the target of a blow, the one revealed, the one who walks), then who else belongs in the frame (the
+ *           attacker); a token this client's canvas does not show to this user is left out, and a beat whose focus is such a token
+ *           does not play ("unseen"), exactly as frame()
+ *   zones   zone keys to hold in the frame with them (where a walk goes)
+ *   still   the user has something to answer: the beat plays its effects in place when its focus is on screen and moves nothing
+ * -> Promise<{ ok: true, played: "take" | "place" | "joined" | "back" | "none" } | { ok: false, reason: "off" | "level" | "held" |
+ *    "busy" | "covered" | "hand" | "unseen" | "noSubject" | "noScene" | "noBeat" | "replaced" | "error" }>
+ * This client's view only; nothing is sent to anybody.
+ */
+export async function shot(spec = {}) {
+  const name = AC.BEATS.includes(spec?.beat) ? spec.beat : null, key = typeof spec?.key === "string" ? spec.key.slice(0, 80) : "";
+  const say = (r) => { shots.push([Math.round(performance.now()), name, key, r.ok ? r.played : r.reason]); if ( shots.length > 40 ) shots.shift(); return r; };
+  const no = (reason) => say({ ok: false, reason });
+  try {
+    if ( !name ) return no("noBeat");
+    if ( !canvas?.ready || !canvas.scene ) return no("noScene");
+    if ( killed() ) return no("off");
+    if ( name === "close" ) {
+      if ( rest && rest.key === key && !act ) { shotEnd(); return say({ ok: true, played: "back" }); }
+      return say({ ok: true, played: "none" });
+    }
+    const joins = () => !!key && !!act && !act.done && act.key === key && act.phase !== "back";
+    const join = () => { if ( AC.RANK[name] > AC.RANK[act.beat] ) act.up(name); return say({ ok: true, played: "joined" }); };
+    if ( joins() ) return join();
+    const gate = () => AC.shotGate({ out: st.out, turn: st.turn }, { follow: follow(), held: cameraHeld(), screen: !!Screen.owner && Screen.owner !== "action" && !homing, covered: !!freeRect().covered });
+    let g = gate(); if ( g ) return no(g);
+    const mine = ++shotSeq, { look, reduced } = takeLook();
+    if ( !reduced ) { await calm(); if ( mine !== shotSeq ) return no("replaced"); if ( !canvas?.ready ) return no("noScene"); if ( joins() ) return join(); g = gate(); if ( g ) return no(g); }
+    const ids = (Array.isArray(spec.tokens) ? spec.tokens : []).map(idOf).filter(Boolean).slice(0, 12), pad = grid() * 0.5;
+    const boxes = SC.frameSubjects(ids, (id) => { const t = seenTok(id); return t ? tokenBox(t, pad) : null; });
+    if ( !boxes ) return no("unseen");
+    if ( !boxes.length ) return no("noSubject");
+    for ( const k of (Array.isArray(spec.zones) ? spec.zones : []).slice(0, 4) ) { const b = zoneBox(k); if ( b ) boxes.push(b); }
+    const rect = freeRect(), v = viewNow(), S = stageSettings();
+    const prev = act && !act.done ? act : null;
+    const resting = !prev && !!rest && !!st.parked && !!st.home && SC.sameView(v, st.parked, 12);
+    const home = prev?.home ?? (resting ? { ...st.home } : { x: v.x, y: v.y, scale: v.scale });
+    const noZoom = reduced || name === "move" || zoomLocked();
+    let cam = spec.still === true ? null : AC.shotCamera(boxes, v, rect, { base: home.scale, reduced: noZoom });
+    /* a beat that would move the view needs the user's hand free; else it plays in place when there is something to see */
+    const handFree = !handBusy() && performance.now() - st.ownAt >= S.back * 1000;
+    let quiet = spec.still === true;
+    if ( cam && !handFree ) { cam = null; quiet = true; }
+    if ( quiet && !resting && !prev && !AC.inSight(boxes[0], v, rect) ) return no("hand");
+    const away = !!cam || resting || !!prev?.away;
+    const planOf = (b) => AC.beatPlan(b, { bars: S.bars, away, still: quiet, reduced });
+    const plan = planOf(name);
+    if ( !cam && !away && !plan.bars && !plan.impact ) return say({ ok: true, played: "place" });      // it is on screen as it stands: nothing to add
+    /* the beat takes the screen */
+    if ( prev ) cleanup(prev);
+    dropRest(); clearTimeout(lingerT); lingerT = 0; beginSeq++;
+    const c = combatHere();
+    st.combat ??= c?.id ?? "frame";
+    if ( c && st.turn === null ) st.turn = turnKey(c);
+    if ( !Screen.begin({ r: look }, { owner: "action", guard: false, frame: false, home: away ? { ...home } : null, barsLater: true, opts: { noCamera: !away, allow: ["camera"] } }) ) return no("error");
+    st.home = away ? { ...home } : null;
+    st.parked = away ? (cam ? { x: cam.x, y: cam.y, scale: cam.scale } : { x: v.x, y: v.y, scale: v.scale }) : null;
+    holds.add("action");
+    const a = act = { key, beat: name, plan, home, away, phase: "go", timers: [], done: false, landed: false, focus: boxes[0] };
+    const live = () => act === a && !a.done && a.phase !== "back";
+    const guard = (fn) => () => { if ( !live() ) return; if ( Screen.owner !== "action" ) { leave(a, "lost"); return; } try { fn(); } catch ( err ) { console.error(`${MODULE_ID} | shot`, err); leave(a, "scene"); } };
+    const at = (ms, fn) => a.timers.push(setTimeout(guard(fn), Math.max(0, ms)));
+    const lim = [CONFIG.Canvas?.minZoom ?? 0.1, CONFIG.Canvas?.maxZoom ?? 3];
+    const walker = name === "move" ? ids[0] : null;
+    const land = () => {
+      const p = a.plan, f = a.focus;
+      a.landed = true; a.phase = "hold";
+      if ( p.bars ) Screen.revealBars?.();
+      if ( p.impact ) Screen.impact({ x: (f.x0 + f.x1) / 2, y: (f.y0 + f.y1) / 2, size: p.impact > 1 ? 1e6 : 0 });
+      if ( p.push && !zoomLocked() ) { const q = AC.pushCamera(f, viewNow(), lim); if ( q ) Screen.panTo({ ...q, duration: Math.round(p.hold * 0.85) }); }
+      clearTimeout(a.endT);
+      if ( p.follow && walker ) {
+        // somebody walks: the frame is kept on the token until it stands (a calm re-frame when it nears the edge), 8 s at most
+        let stood = 0; const t0 = performance.now();
+        clearInterval(a.walk);
+        a.walk = setInterval(guard(() => {
+          const t = seenTok(walker), moving = !!t && !!t.animationContexts?.has?.(t.movementAnimationName);
+          if ( t && a.away ) {
+            const o = t.center, half = Math.max(t.w ?? grid(), t.h ?? grid()) / 2 + pad, b = { x0: o.x - half, y0: o.y - half, x1: o.x + half, y1: o.y + half }, vv = viewNow();
+            if ( !SC.comfortable(b, vv, freeRect(), 0.1) ) { const to = SC.ownHome(vv, b, freeRect(), vv, 0.22); Screen.panTo({ x: to.x, y: to.y, scale: vv.scale, duration: 420 }); }
+          }
+          stood = moving ? 0 : stood + 1;
+          if ( !t || stood >= 3 || performance.now() - t0 > 8000 ) { clearInterval(a.walk); a.endT = setTimeout(guard(() => leave(a, "done")), p.hold); }
+        }), 160);
+      } else a.endT = setTimeout(guard(() => leave(a, "done")), p.hold);
+    };
+    a.up = (b) => { a.beat = b; a.plan = planOf(b); if ( a.landed ) land(); };
+    if ( cam ) Screen.panTo({ x: cam.x, y: cam.y, scale: cam.scale, duration: cam.ms });
+    if ( name === "open" && plan.bars ) at((cam?.ms ?? 0) * 0.6, () => Screen.revealBars?.());
+    at(cam ? Math.round(cam.ms * 0.92) : AC.TIMES.inPlace, land);
+    if ( away ) {
+      // the user: Esc or a click on the map cuts the shot (the view goes home, nothing more this turn); the wheel or a drag takes the
+      // camera (it stays where the user puts it). The input is never swallowed, as in the director's own take-overs.
+      a.onKey = (ev) => { if ( ev.key !== "Escape" || !live() || typing(ev) ) return; leave(a, "cut"); if ( !escTaken() ) { ev.preventDefault(); ev.stopImmediatePropagation(); } };
+      a.onPtr = (ev) => {
+        if ( a.done || ev.target !== document.getElementById("board") ) return;
+        if ( a.phase === "back" ) { a.tookBack = true; Screen.stopCamera("player"); return; }
+        if ( ev.type === "wheel" || ev.button !== 0 ) { leave(a, "taken"); return; }
+        a.press = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+        Screen.stopCamera("player");                                                            // (frozen under the pointer)
+      };
+      a.onUp = (ev) => {
+        const p = a.press; if ( a.done || !p || ev.button !== 0 || a.phase === "back" ) return;
+        a.press = null;
+        const click = Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 6 && performance.now() - p.t < 450;
+        if ( !click ) { leave(a, "taken"); return; }
+        const to = { ...a.home };
+        leave(a, "cut");
+        homing = true; const seq = beginSeq;                                                     // (the way home is the stage's, not the user's hand)
+        Promise.resolve(canvas.animatePan({ ...to, duration: AC.TIMES.cut })).catch(() => {}).finally(() => { if ( seq === beginSeq ) homing = false; sync(); });
+      };
+      window.addEventListener("keydown", a.onKey, true);
+      window.addEventListener("pointerdown", a.onPtr, true);
+      window.addEventListener("pointerup", a.onUp, true);
+      window.addEventListener("wheel", a.onPtr, { capture: true, passive: true });
+    }
+    sync();
+    return say({ ok: true, played: cam ? "take" : "place" });
+  } catch ( err ) { console.error(`${MODULE_ID} | shot`, err); return no("error"); }
+}
+
 /** Resolves once two animation frames in a row came evenly (under CALM_FRAME ms apart), or after CALM_MS. */
 const CALM_MS = 700, CALM_FRAME = 50;
 function calm() {
@@ -386,6 +593,7 @@ async function glideTo(to, ms) {
 
 /** The stage is over here (the combat ended, the director or the stage was switched off): home if the camera is parked away. */
 function endStage() {
+  shotEnd();                                                              // (a shot always gives the view back, also in a driven fight)
   if ( beat ) { pendingHome = { to: st.home ? { ...st.home } : null, force: true }; }
   const go = SC.stageEnd(st);
   claimed.clear();
@@ -406,7 +614,7 @@ function onUpdateCombat(combat, changed) {
   if ( st.combat !== combat.id ) { if ( st.combat ) endStage(); st.combat = combat.id; }
   const key = turnKey(combat);
   if ( key === st.turn ) return;
-  const own = ownTurn(combat), act = SC.turnChange(st, key, own, !!beat && !beat.own), fw = follow();
+  const own = ownTurn(combat), turned = SC.turnChange(st, key, own, !!beat && !beat.own), fw = stageFollow();
   if ( fw !== "all" ) {
     // the player's switch: the view is theirs. On their own turn it moves only when their token is off screen ("turn"), by the least
     // that brings it in; it never goes back to an earlier view by itself
@@ -416,7 +624,7 @@ function onUpdateCombat(combat, changed) {
     }
     if ( own || fw === "off" ) st.parked = null;
   }
-  else if ( act?.home ) {
+  else if ( turned?.home ) {
     // own turn: home, with the player's own token comfortably on screen; after the beat on screen (an attack's result) when one plays
     const t = seenTok(combat.combatant?.tokenId), to = SC.ownHome(st.home, t ? tokenBox(t, grid() * 0.5) : null, stageRect(), viewNow());
     if ( beat ) pendingHome = { to, force: true }; else afterScreen(() => goHome(to));
@@ -427,6 +635,8 @@ function onUpdateCombat(combat, changed) {
 function onDeleteCombat(combat) { if ( st.combat === combat?.id ) endStage(); }
 function onTearDown() {
   clearTimeout(resync); resync = 0;
+  if ( act ) leave(act, "scene");
+  dropRest();
   Object.assign(st, SC.newStage()); beat = null; pendingHome = null; homing = false; claimed.clear(); sync();
 }
 
@@ -475,7 +685,7 @@ function onKey(ev) {
   backHome();
 }
 /** The player asked for their view back: home now, the rest of this turn as markers. */
-function backHome() { if ( cameraHeld() ) { sync(); return; } st.out = st.turn; goHome(st.home); }
+function backHome() { if ( cameraHeld() ) { sync(); return; } dropRest(); st.out = st.turn; goHome(st.home); }
 /** The parked-state UI follows the state: the chip and the Esc listener only while the camera is parked away and nothing plays. */
 let resync = 0;
 function sync() {
@@ -521,7 +731,8 @@ function renderPanel(hostEl) {
 /* ---------------------------------------------------------------- wiring */
 
 export function status() {
-  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip, follow: follow(), driver };
+  return { on: on(), combat: st.combat, turn: st.turn, home: st.home, parked: st.parked, out: st.out, beat: beat?.id ?? null, homing, chip: !!chip, follow: follow(), driver,
+    shot: act && !act.done ? { key: act.key, beat: act.beat, phase: act.phase, away: act.away } : null, rest: rest?.key ?? null };
 }
 Hooks.once("init", registerSettings);
 Hooks.once("ready", () => {
@@ -538,5 +749,5 @@ Hooks.once("ready", () => {
 });
 extendSection("director", { panels: [{ id: "dirStage", title: "MOINENMAPS.DirStage.title", icon: "fa-solid fa-clapperboard", open: false, mount: (h) => renderPanel(h) }] });
 
-export const stageSource = { settings: stageSettings, status, camera, follow, frame, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), frames: frames.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
+export const stageSource = { settings: stageSettings, status, camera, follow, frame, shot, shotEnd, home: () => backHome(), _debug: () => ({ st: { ...st }, trace: trace.slice(), frames: frames.slice(), shots: shots.slice(), beat, pendingHome, homing, claimed: [...claimed.keys()] }) };
 moduleApi.directorStage = stageSource;

@@ -1398,3 +1398,102 @@ concealed in the fight (a disguise) is the caller's to leave out.
 **Limits.** One frame at a time: a newer one takes the move over. The letterbox "action camera" of a hit is not part of
 a driven fight (a next step: a driver-side call that asks for the bars). `frame` does not follow a moving token
 continuously; it frames where the token started and where it stopped.
+
+## 39. The action camera of a driven fight: `shot` (U98)
+
+Row U98 of `invincible-plus-ultra/dev/combat-usability.md` (the second stage of U94: "finish wiring the director camera ... XCOM
+style"). Checks: `dev/director-action.test.mjs` (the pure parts, `scripts/director/action-core.mjs`). Code:
+`scripts/director/source-stage.mjs` (`shot`, `shotEnd`), `scripts/director/director.mjs` (`takeLook`).
+
+Section 38 made a driven fight quiet: the director's own shots stand down and the caller frames by the least slide. This section
+gives the fight its shots back, as the caller's: the combat module names WHAT HAPPENED on this client (a beat of an exchange,
+with the tokens this user is shown), and the director shoots it with its own screen engine (the letterbox, the vignette, the
+flash and the shake of a take-over, the look and the intensity the user set for the director) and gives the view back.
+Like `frame`, it is local: nothing is sent to anybody, every client asks for its own.
+
+### The switch
+
+`camera({ follow })` and the client setting "Combat camera: how much it follows" know a fourth value, `"action"`:
+
+| follow | in a driven fight | in a fight nobody drives |
+| --- | --- | --- |
+| `"action"` | `shot` plays; `frame` plays its `"turn"` level | as `"all"` (the director's own stage) |
+| `"all"` | no shot (`reason: "level"`); `frame` plays both levels (section 38) | as before |
+| `"turn"` | no shot; `frame` plays its `"turn"` level | as before |
+| `"off"` | nothing moves (`reason: "off"`) | as before |
+
+`camera({ default: "action" })` makes it what "auto" means on this client (a combat module says it on `ready`).
+
+### `api.shot(spec)` -> `Promise<{ ok: true, played } | { ok: false, reason }>`
+
+| field | |
+| --- | --- |
+| `key` | the exchange the beat belongs to (the caller's id of it). Beats of one key are one piece of staging |
+| `beat` | `"open"`, `"hit"`, `"miss"`, `"kill"`, `"reveal"`, `"move"`, `"close"` |
+| `tokens` | token ids, THE FOCUS FIRST (the target of a blow, the one revealed, the one who walks), then who else belongs in the frame (the attacker). A token this client's canvas does not show to this user is left out; a beat whose focus is such a token does not play (`"unseen"`), exactly as `frame` |
+| `zones` | zone keys held in the frame with them (where a walk goes) |
+| `still` | `true`: the user has something to answer. The beat plays its effects in place when its focus is on screen, and moves nothing |
+
+`played` is `"take"` (the camera went there), `"place"` (in place), `"joined"` (it joined the shot on screen), `"back"` (a
+`close` sent a waiting camera home) or `"none"` (a `close` with nothing waiting).
+
+How each beat is played (the times are `action-core.mjs TIMES`):
+
+| beat | the camera | bars and blow | then |
+| --- | --- | --- | --- |
+| `open` | to the pair (0.4 to 1 s), inside 0.85 .. 1.12 x the user's zoom; nothing when the pair stands comfortably in the free stretch already | bars only when the stage's letterbox setting is "every attack" | WAITS there for the result, the "My view" chip standing by; after 12 s without one the view goes home by itself |
+| `hit` | in place when the camera waits there (or the pair is on screen), else to the pair | the bars and the vignette (not for "never"), the flash and the shake | holds 1.3 s, the view goes home (0.64 s) |
+| `miss` | the same | none (bars for "every attack") | holds 0.9 s, home |
+| `kill` | the same, then a slow push of 6 % toward the target (only when the camera is away anyway) | the bars, the strong flash and shake | holds 2.1 s, home |
+| `reveal` | to the one revealed | the bars | holds 1.7 s, home |
+| `move` | to the walker with the zone it goes to (never a zoom); kept on the token until it stands, 8 s at most; nothing when both are on screen | none | holds 0.5 s, home |
+| `close` | a camera still waiting for a result of that key goes home | | |
+
+Always:
+
+- **the view goes back** to where the user had it, place and zoom, unless the user took the camera meanwhile. A beat in place (no
+  camera move, nothing waiting) changes nothing of the view and leaves nothing to go back from;
+- a beat of the key on screen **joins** it (`played: "joined"`): the stronger one wins (kill over hit over miss over the opening);
+  a beat of another key carries on from where the camera is and keeps the home of the first;
+- **the user's hand wins.** A beat that would move the view needs it free: the user at work on the map, or having moved the
+  camera within the stage's "leave a player alone" seconds, gets the beat in place when its focus is on screen and else nothing
+  (`"hand"`). During a shot that is away from home: Esc or a click on the map cuts it (home in 0.42 s, and no further shot or
+  automatic frame that turn); the wheel or a drag takes the camera (it stays where the user puts it, the stage is quiet for the
+  "leave alone" seconds). While the camera waits for a result the "My view" chip (and Esc) does the same as after a frame.
+  Input is never swallowed. A beat in place listens to nothing (a click on the map then is the user's own work);
+- a `frame` with `hand: true` (the user's own act on the dock) ends a shot at once where it stands; any other `frame` waits
+  until the view is back and then plays from there;
+- before a glide it waits for an even frame rate like `frame`; under reduced motion: no zoom, no shake, no flash, no push;
+- answers `{ ok: false, reason }` and plays nothing for: `off`, `level` (the user's switch is not on the action camera: the
+  caller may then play its quiet `frame`), `held` (LockView's pan lock, Hot Pan: nothing plays; LockView's zoom lock: it plays
+  without a zoom), `busy` (the destruction show or a take-over of the map itself has the screen), `covered`, `hand`, `unseen`,
+  `noSubject`, `noScene`, `noBeat`, `replaced`, `noStage`, `error`;
+- the letterbox is the director's, drawn under the interface: no bar ever covers the caller's dock, tracker or cards.
+
+It works whether the world's director switch is on or off and whatever the user's director mode is (a GM too); it takes the
+look (the director's preset), the user's director intensity and the user's opt-outs (no letterbox, no vignette, no shake, no
+flash, reduced motion), and it obeys the kill switch `CONFIG.moinenMaps.noDirector`.
+
+`api.shotEnd()` -> `true` when something was on screen or waiting: the view goes back to the user's at once (0.42 s), nothing
+is marked. The caller says it when the user's own hand or a question takes the screen (an action armed, a card to answer). The
+stage says it itself when the fight ends, the driver is taken back, the scene goes, or the user turns the switch down.
+
+### For the caller
+
+| the combat module wants | it calls |
+| --- | --- |
+| the action camera as the fight's default | `camera({ default: "action" })` on `ready` (when `typeof api.shot === "function"`) |
+| a watcher's shot of an attack | `shot({ key, beat: "open", tokens: [target, attacker] })` |
+| its result | `shot({ key, beat: "hit" | "miss" | "kill", tokens: [target, attacker] })`; with `still: true` for a user with a card open |
+| somebody new in the user's view | `shot({ key: "reveal:<id>", beat: "reveal", tokens: [id] })` |
+| somebody else's walk | `shot({ key, beat: "move", tokens: [id], zones: [to] })` |
+| the exchange is over | `shot({ key, beat: "close" })` |
+| the user armed something or got a question | `shotEnd()` |
+| to fall back for a user who turned the camera down | on `reason: "level"`: its `frame` of section 38 |
+
+Hand over only what this user may know (the rule of section 38): `shot` drops what the canvas does not show, and a beat whose
+attacker the user's view does not hold should name the target alone.
+
+**Limits.** One shot at a time on a client. The numbers over a token are the caller's (the map shows none). No caption and no
+banner: the caller's own interface names who acts on whom. A `still` beat cannot be seen when its focus is off screen (it is
+then refused with `"hand"`). The walk is re-framed in steps (a calm slide when the token nears the edge), not by a spring.

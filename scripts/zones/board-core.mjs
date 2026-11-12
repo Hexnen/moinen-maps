@@ -278,6 +278,11 @@ export function menuSpot(anchor, w, h, vw, vh, gap = 10, pad = 8) {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
-/** How the camera follows a fight on one client: "all" | "turn" | "off" from the user's choice ("auto": the default in force). */
-export const FOLLOW = ["auto", "all", "turn", "off"];
-export const followOf = (choice, dflt = "all") => (choice === "all" || choice === "turn" || choice === "off" ? choice : dflt === "turn" || dflt === "off" ? dflt : "all");
+/**
+ * How the camera follows a fight on one client, from the user's choice ("auto": the default in force):
+ *   "action"  the action camera (zones-api 39): in a fight a combat module drives, its moments are shot; without one, as "all"
+ *   "all" | "turn" | "off"  zones-api 30 and 38.
+ */
+export const FOLLOW = ["auto", "action", "all", "turn", "off"];
+const FOLLOWS = ["action", "all", "turn", "off"];
+export const followOf = (choice, dflt = "all") => (FOLLOWS.includes(choice) ? choice : FOLLOWS.includes(dflt) ? dflt : "all");

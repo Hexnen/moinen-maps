@@ -2308,9 +2308,10 @@
 
   "MOINENMAPS.DirStage.follow": "Combat camera: how much it follows",
 
-  "MOINENMAPS.DirStage.followHint": "Every beat: turns, moves and attacks move your view. Turn start only: your view moves only when a turn begins and the active character is off your screen. Never: your view is never moved; you get markers instead.",
+  "MOINENMAPS.DirStage.followHint": "Action camera: an attack, a hit, somebody revealed or a walk off your screen takes your view for a moment and gives it back (Esc or a click skips). Every beat: turns, moves and attacks move your view. Turn start only: your view moves only when a turn begins and the active character is off your screen. Never: your view is never moved; you get markers instead.",
 
   "MOINENMAPS.DirStage.follow_auto": "As the game sets it",
+  "MOINENMAPS.DirStage.follow_action": "Action camera",
 
   "MOINENMAPS.DirStage.follow_all": "Every beat",
 
