@@ -259,10 +259,12 @@ const ours = (e) => !!e?.closest?.(".mm-z-pickway, .mm-z-pick");
  * points the same way (something that is not the map), so for the length of one SYNCHRONOUS look the log is taken out of hit testing
  * (`visibility: hidden` on the log list, put back before the look returns: no frame is drawn in between, nothing is seen) and each hit
  * test costs a fraction. Only a log that lies wholly inside an ancestor that itself answers hit tests (checked once per look, at the
- * log's middle: not the map) and holds no focus is taken out; otherwise the look runs as before. `quietHits.off = true` turns it off.
+ * log's middle: not the map) and holds no focus is taken out; otherwise the look runs as before. `quietHits.off = false` turns it on.
+ * OFF BY DEFAULT (uxd, measured live on lane 5, 100 chat cards, 1600x900): a full look took ~575 ms with it and ~408 ms without - the
+ * style recalculation of the hidden log (~300 ms forced layout) costs more than the cheaper hit tests save. Kept for a future try.
  */
 const QUIET_SEL = "#sidebar .chat-log, #chat .chat-log, #chat-log";
-export const quietHits = { off: false, last: 0 };
+export const quietHits = { off: true, last: 0 };
 function quietly(fn) {
   if ( quietHits.off || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
   const hid = [];
