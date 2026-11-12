@@ -874,6 +874,9 @@ function onGuardDown(ev) {
   const g = guard = { x: ev.clientX, y: ev.clientY, x0: ev.clientX, y0: ev.clientY, drag: false, off: null };
   const move = (e) => {
     if ( guard !== g ) return;
+    // bh4 (BH4-5): a release that never reached the page (Alt+Tab, the button let go over another window) - the right button is up: the
+    // drag is over, the map does not follow a pointer with no button held
+    if ( typeof e.buttons === "number" && !(e.buttons & 2) ) { g.off(); return; }
     if ( !g.drag && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) < 5 ) return;
     const dx = e.clientX - g.x, dy = e.clientY - g.y;
     g.drag = true;
@@ -891,9 +894,12 @@ function onGuardDown(ev) {
     setTimeout(() => window.removeEventListener("contextmenu", ctx, true), 400);
     if ( !g.drag && PICK === p ) rightClick(p, e);
   };
-  g.off = () => { if ( guard === g ) guard = null; window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); };
+  const lost = () => { if ( guard === g ) g.off(); };      // bh4 (BH4-5): the window lost the pointer or the focus: the drag is over
+  g.off = () => { if ( guard === g ) guard = null; window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); window.removeEventListener("pointercancel", lost, true); window.removeEventListener("blur", lost); };
   window.addEventListener("pointermove", move, true);
   window.addEventListener("pointerup", up, true);
+  window.addEventListener("pointercancel", lost, true);
+  window.addEventListener("blur", lost);
 }
 if ( typeof globalThis.window?.addEventListener === "function" ) globalThis.window.addEventListener("pointerdown", onGuardDown, true);
 

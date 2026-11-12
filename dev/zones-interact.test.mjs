@@ -696,6 +696,31 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     check(top0 === "342px" && opened === "302px" && closed === "342px", `a window opened / closed: laid out again within 0.4 s (${top0} -> ${opened} -> ${closed})`);
     globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
   }
+  // ---- BH4-5 (D130's guard): a right drag in a pick pans the map; when its release never reaches the page (Alt+Tab, the button let go
+  //      over another window) the map must not go on following a pointer whose right button is up
+  {
+    pk = api.pick({ zones: all5 });
+    await wait(20);
+    const x0 = cam.pivot.x;
+    window.fire("pointerdown", { button: 2, buttons: 2, clientX: 500, clientY: 300, target: view });
+    window.fire("pointermove", { buttons: 2, clientX: 540, clientY: 300 });
+    const dragged = cam.pivot.x;
+    window.fire("blur", {});
+    api.cancelPick(); await pk;
+    const after = cam.pivot.x, n0 = pans;
+    window.fire("pointermove", { buttons: 0, clientX: 800, clientY: 320 });
+    window.fire("pointermove", { buttons: 0, clientX: 900, clientY: 340 });
+    check(dragged === x0 - 40 && cam.pivot.x === after && pans === n0, `a right drag pans (${x0} -> ${dragged}); after its release is lost, moving the pointer with no button pans nothing (${after} -> ${cam.pivot.x}, ${pans - n0} pans)`);
+    pk = api.pick({ zones: all5 });
+    await wait(20);
+    const y0 = cam.pivot.x;
+    window.fire("pointerdown", { button: 2, buttons: 2, clientX: 500, clientY: 300, target: view });
+    window.fire("pointermove", { buttons: 2, clientX: 520, clientY: 300 });
+    window.fire("pointermove", { buttons: 0, clientX: 600, clientY: 300 });
+    window.fire("pointermove", { buttons: 2, clientX: 700, clientY: 300 });
+    check(cam.pivot.x === y0 - 20, `the drag ends at the first move with the right button up, also without blur (${y0} -> ${cam.pivot.x})`);
+    api.cancelPick(); await pk;
+  }
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
 }
 
