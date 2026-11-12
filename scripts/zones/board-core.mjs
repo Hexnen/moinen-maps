@@ -10,7 +10,7 @@
  */
 
 import { COLORS, colorOf, cleanUsers, zoneKeyOf, borderKeyOf, LIMITS } from "./highlight.mjs";
-import { cleanSigns } from "./signs-core.mjs";
+import { cleanSigns, cleanSign } from "./signs-core.mjs";
 
 const ID_RE = /^[A-Za-z0-9_.:~-]{1,64}$/;
 const text = (v, max) => { if ( v == null || v === "" ) return null; const s = String(v).replace(/\s+/g, " ").trim(); return s ? s.slice(0, max) : null; };
@@ -81,19 +81,20 @@ function cleanHover(h) {
   return out.label || out.tip || out.bar ? out : null;
 }
 
-/* ---- section 42 (U133): the ring as a meter ---- */
-/** The ring as a meter, cleaned: { n, of, name } - `of` parts (2..12), `n` of them full (0..of). null: not one. */
-export function cleanMeter(m) {
-  if ( !m || typeof m !== "object" ) return null;
-  const of = Math.round(num(m.of) ?? NaN), n = Math.round(num(m.n) ?? NaN);
-  if ( !(of >= 2 && of <= 12) || !Number.isFinite(n) ) return null;
-  return { n: Math.max(0, Math.min(of, n)), of, name: text(m.name, 120) };
+/* ---- section 42 (U133): a caller's sign in the token's corner ---- */
+/** A badge, cleaned: { sign (one sign of section 40, cleaned), name (what it is called: the sign's own name when not given) }. null:
+ *  no sign that draws. */
+export function cleanBadge(b) {
+  if ( !b || typeof b !== "object" ) return null;
+  const sign = cleanSign(b.sign);
+  if ( !sign ) return null;
+  return { sign, name: text(b.name, 120) ?? sign.name ?? null };
 }
 
 /**
  * A set of token marks, cleaned:
  *   { id, tokens: [{ token (id), state: "in" | "out" | "chosen" | "caught" | null, color, label, tip, marks: [{ icon, color, tip }],
- *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40), meter? (section 42) }], users, order }
+ *                    bar, hover: { label, tip, bar, signs? } | null, signs?: { label } (section 40), badge? (section 42) }], users, order }
  * null: no id that can be kept, or no entry that names a token.
  */
 export function cleanTokenMarks(spec, me = null) {
@@ -113,8 +114,8 @@ export function cleanTokenMarks(spec, me = null) {
       bar: cleanBar(o.bar), hover: cleanHover(o.hover),
       // (section 40: the label as words and signs; the pill shows them, the words stay for the rest)
       ...(o.label && cleanSigns(o.signs, { label: BOARD_LIMITS.label }) ? { signs: cleanSigns(o.signs, { label: BOARD_LIMITS.label }) } : {}),
-      // (section 42: the ring as a meter; absent: nothing changes)
-      ...(cleanMeter(o.meter) ? { meter: cleanMeter(o.meter) } : {})
+      // (section 42: a sign in the token's corner; absent: nothing changes)
+      ...(cleanBadge(o.badge) ? { badge: cleanBadge(o.badge) } : {})
     });
   }
   if ( !tokens.length ) return null;
