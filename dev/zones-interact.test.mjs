@@ -605,6 +605,56 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   await wait(120);
   check(cam.pivot.y === 56 && chips().length === 0, `a pick that starts with nothing in reach brings the nearest zone into view (pivot y ${cam.pivot.y})`);
   api.cancelPick(); await pk;
+  // ---- fxn (D134): the camera glides for the pick under a pointer that aimed before: a press while it slides (or just after) picks
+  // nothing, the tip follows the zone under the still pointer; once it has settled a click picks; the wheel's own zoom is the user's
+  {
+    canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(20);
+    pk = api.pick({ zones: all5 });
+    const a3 = canvas.clientCoordinatesFromCanvas(api.zone("z3").center);
+    view.fire("pointermove", { clientX: a3.x, clientY: a3.y }); await wait(30);
+    canvas.pan({ x: 500 + 200, y: 100 });                               // a glide the pointer did not make
+    await wait(30);
+    click(a3.x, a3.y);
+    const during = api.picking();
+    view.fire("pointerdown", { button: 0, clientX: a3.x, clientY: a3.y }); await wait(320);  // pressed after it settled ...
+    canvas.pan({ x: 500, y: 100 });                                      // ... but the map slides before the release
+    window.fire("pointerup", { button: 0, clientX: a3.x, clientY: a3.y, target: view });
+    const across = api.picking();
+    await wait(320);
+    click(a3.x, a3.y);
+    const res = await pk;
+    check(during === true && across === true && res.ok === true && res.zone === "z3",
+      `a press while the map slides picks nothing (${during}), nor one the map slid under before its release (${across}); a click once it settled picks the zone under the pointer (${res.zone})`);
+    // (the pointer resting at an edge, the edge slide not begun yet: a slide of somebody else's is still not the user's)
+    await under();
+    pk = api.pick({ zones: all5 });
+    view.fire("pointermove", { clientX: 800, clientY: 380 }); await wait(60);
+    canvas.pan({ x: 500, y: -100 });
+    const e3 = canvas.clientCoordinatesFromCanvas(api.zone("z3").center);
+    click(e3.x, e3.y);
+    check(api.picking() === true, "a press just after a slide the pointer did not make picks nothing, also with the pointer resting at an edge");
+    api.cancelPick(); await pk;
+    canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(320);
+    // (a camera move that runs but has not ticked for a while - a busy or throttled frame: the press still picks nothing)
+    {
+      const f0 = globalThis.foundry;
+      globalThis.foundry = { canvas: { animation: { CanvasAnimation: { getAnimation: (n) => (n === "canvas.animatePan" ? { duration: 900 } : undefined) } } } };
+      pk = api.pick({ zones: all5 });
+      click(a3.x, a3.y);
+      const still = api.picking();
+      globalThis.foundry = f0;
+      click(a3.x, a3.y);
+      const r2 = await Promise.race([pk, wait(60).then(() => null)]);
+      check(still === true && r2?.ok === true && r2.zone === "z3", `a press while a camera move runs picks nothing (${still}); once it is over a click picks (${r2?.zone})`);
+      if ( !r2 ) { api.cancelPick(); await pk; }
+    }
+    pk = api.pick({ zones: all5 });
+    view.fire("wheel", {}); canvas.pan({ x: 500, y: 100, scale: 1 });
+    click(a3.x, a3.y);
+    const wr = await Promise.race([pk, wait(60).then(() => null)]);
+    check(wr?.ok === true && wr.zone === "z3", "a zoom by the wheel is the user's own: a click right after it picks");
+    if ( !wr ) { api.cancelPick(); await pk; }
+  }
   // ---- reveal: false leaves the view and shows no chip; edgePan: false keeps the chip and does not slide
   await under();
   pk = api.pick({ zones: all5, reveal: false });

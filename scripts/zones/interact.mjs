@@ -562,7 +562,7 @@ function pickHere(P) {
   const allowed = allowedOf(P);
   if ( !allowed.size ) return Promise.resolve({ ok: false, reason: "noZones" });
   return new Promise((resolve) => {
-    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null, rid: null, from: null,
+    PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null, rid: null, from: null, slid: -Infinity, wheel: -Infinity,
       // the way to zones no click can reach: the free stretch found by looking, the zones hidden per side, their chips, the slide
       way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, due: 0, push: null, first: true } };
     startPick();
@@ -803,6 +803,16 @@ function layoutPick(p, free = undefined) {
  * way, slowly at first, for as long as the pointer stays and something is still hidden there.
  */
 const PUSH = { band: 44, dwell: 450, ramp: 400, speed: 620 };
+/** fxn (D134): a press this soon after a slide the pointer did not make picks nothing (ms); a pan this soon after the wheel is the user's. */
+const SLIDE = { settle: 300, wheel: 150 };
+const pickNow = () => globalThis.performance?.now?.() ?? Date.now();
+/** A slide the pointer makes (the edge slide, a right drag): the pick knows it as the user's own. */
+let panning = false;
+function ownPan(to) { panning = true; try { canvas.pan(to); } finally { panning = false; } }
+/** A camera move is running (Foundry's animatePan, the director's own under the same name): the map is gliding under the pointer. */
+function gliding() {
+  try { return typeof globalThis.foundry?.canvas?.animation?.CanvasAnimation?.getAnimation?.("canvas.animatePan")?.duration === "number"; } catch { return false; }
+}
 function pushAt(p, at) {
   const w = p.way;
   let dir = null;
@@ -821,7 +831,7 @@ function pushAt(p, at) {
     st.last = t;
     if ( held > 0 ) {
       const k = Math.min(1, held / PUSH.ramp), px = (PUSH.speed * k * k * dt) / 1000, s = canvas.stage.scale.x;
-      canvas.pan({ x: canvas.stage.pivot.x + (st.x * px) / s, y: canvas.stage.pivot.y + (st.y * px) / s });
+      ownPan({ x: canvas.stage.pivot.x + (st.x * px) / s, y: canvas.stage.pivot.y + (st.y * px) / s });
       scheduleWay(p, 120);
       if ( !w.hidden.some((hd) => (st.x < 0 && hd.side === "left") || (st.x > 0 && hd.side === "right") || (st.y < 0 && hd.side === "top") || (st.y > 0 && hd.side === "bottom")) ) { w.push = null; return; }
     }
@@ -881,7 +891,7 @@ function onGuardDown(ev) {
     const dx = e.clientX - g.x, dy = e.clientY - g.y;
     g.drag = true;
     const s = canvas.stage.scale.x;
-    canvas.pan({ x: canvas.stage.pivot.x - dx / s, y: canvas.stage.pivot.y - dy / s });
+    ownPan({ x: canvas.stage.pivot.x - dx / s, y: canvas.stage.pivot.y - dy / s });
     g.x = e.clientX; g.y = e.clientY;
   };
   const up = (e) => {
@@ -979,16 +989,26 @@ function startPick() {
     p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); pushAt(p, p.at); underBanner(p, p.at); });
   };
   const onLeave = () => { p.at = null; setHover(-1, { x: 0, y: 0 }); pushAt(p, null); underBanner(p, null); };
-  // (the map slid under a pointer that did not move: what is under it now)
-  const onSlid = () => { if ( p.way.push && p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y }); };
+  // (the map slid under a pointer that did not move: what is under it now - fxn (D134): after ANY slide, so the zone the tip names
+  // is the one under the pointer also while the camera glides for the pick. A slide the pointer did not make (the camera framing the
+  // pick, a reveal, another module's camera; not the edge slide, a right drag or the wheel) is noted: a press during it or just
+  // after it is not taken, the zone under the pointer was not the one the user aimed at)
+  const onSlid = () => {
+    if ( !panning && pickNow() - p.wheel > SLIDE.wheel ) p.slid = pickNow();
+    if ( p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y });
+  };
+  const onWheel = () => { p.wheel = pickNow(); };
   Hooks.on("canvasPan", onSlid);
-  p.offs.push(() => Hooks.off("canvasPan", onSlid));
+  view.addEventListener("wheel", onWheel, { passive: true });
+  p.offs.push(() => Hooks.off("canvasPan", onSlid), () => view.removeEventListener("wheel", onWheel));
   // a left press is the pick's (no token is selected or dragged under it); a right press still pans when dragged
   const onDown = (ev) => {
     if ( ev.button === 2 ) { p.rdown = { x: ev.clientX, y: ev.clientY }; return; }
     if ( ev.button !== 0 ) return;
     ev.stopImmediatePropagation(); ev.preventDefault();
-    p.down = { x: ev.clientX, y: ev.clientY };
+    // fxn (D134): the map is still sliding (a camera move runs, or a slide has just been made) under the pointer - the press picks
+    // nothing; the tip shows what is under the pointer now, a second click takes it
+    p.down = gliding() || pickNow() - p.slid < SLIDE.settle ? null : { x: ev.clientX, y: ev.clientY, t: pickNow() };
   };
   const onUp = (ev) => {
     if ( ev.button === 2 ) {
@@ -1000,6 +1020,7 @@ function startPick() {
     if ( ev.button !== 0 || !p.down ) return;
     const d = p.down; p.down = null;
     if ( Math.hypot(ev.clientX - d.x, ev.clientY - d.y) >= 6 ) return;
+    if ( p.slid >= d.t || gliding() ) return;                         // fxn (D134): the map slid (or glides) between the press and the release
     const pt = world(ev), id = zoneAt(pt), e = p.allowed.get(id);
     if ( !e ) return;
     const place = Zones.placeOf(e.spot) ?? Zones.placeOf(e.zone);
