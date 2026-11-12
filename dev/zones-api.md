@@ -1461,6 +1461,10 @@ Always:
   automatic frame that turn); the wheel or a drag takes the camera (it stays where the user puts it, the stage is quiet for the
   "leave alone" seconds). While the camera waits for a result the "My view" chip (and Esc) does the same as after a frame.
   Input is never swallowed. A beat in place listens to nothing (a click on the map then is the user's own work);
+- a result (`hit`, `miss`, `kill`) of the key the camera waits for lands at once, and a `close` of a key whose beat is on its way
+  to the screen does nothing (the engine closes an exchange in the same moment it gives the result);
+- in a driven fight the user's own pan is quiet for the "leave alone" seconds only, also while "My view" stands after a frame
+  (without a driver it still silences the turn, as before); the rest of a turn is silenced by "My view", Esc or a click alone;
 - a `frame` with `hand: true` (the user's own act on the dock) ends a shot at once where it stands; any other `frame` waits
   until the view is back and then plays from there;
 - before a glide it waits for an even frame rate like `frame`; under reduced motion: no zoom, no shake, no flash, no push;
