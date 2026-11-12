@@ -208,21 +208,44 @@ export function frameSubjects(ids, boxOf) {
 export function framePlan(boxes, view, rect, { fit = true, base = 420 } = {}) {
   const list = (Array.isArray(boxes) ? boxes : []).filter(okBox);
   if ( !list.length || !view || !rect || !(view.scale > 0) ) return null;
-  const focus = list[0], all = fit ? list.reduce(union, null) : focus;
+  const fits = (b) => (b.x1 - b.x0) * view.scale <= rect.w * (1 - 2 * FRAME_IN) && (b.y1 - b.y0) * view.scale <= rect.h * (1 - 2 * FRAME_IN);
+  // uxd (U142) fit "near": the focus and, in the order given (nearest first), as many of the others as still fit with it at the
+  // user's zoom - those are the subject; the rest is left out (a move pick: the mover and the zones on offer nearest to it)
+  const near = (l) => { let u = l[0]; for ( const b of l.slice(1) ) { const n = union(u, b); if ( fits(n) ) u = n; } return u; };
+  const focus = list[0], all = fit === "near" ? near(list) : fit ? list.reduce(union, null) : focus;
   const done = (to, whole) => {
     if ( sameView(to, view, 2) ) return { moved: false };
     const screens = Math.hypot(to.x - view.x, to.y - view.y) * view.scale / Math.max(1, Math.hypot(view.vw, view.vh));
     return { moved: true, x: to.x, y: to.y, scale: view.scale, whole, ms: Math.round(clamp(base * (0.75 + 1.6 * screens), base * 0.75, base * 2.2)) };
   };
   if ( comfortable(all, view, rect, FRAME_F) ) return { moved: false };
-  const fits = (b) => (b.x1 - b.x0) * view.scale <= rect.w * (1 - 2 * FRAME_IN) && (b.y1 - b.y0) * view.scale <= rect.h * (1 - 2 * FRAME_IN);
-  if ( fits(all) ) return done(ownHome(view, all, rect, view, FRAME_IN), true);
+  if ( fits(all) ) return done(ownHome(view, all, rect, view, FRAME_IN), fit !== "near" || fits(list.reduce(union, null)));
   // they do not fit at the user's zoom: the focus alone decides whether anything moves; then it stays whole, the frame leans to the rest
   if ( comfortable(focus, view, rect, FRAME_F) ) return { moved: false };
   if ( !fits(focus) ) return done(centreFor({ x: (focus.x0 + focus.x1) / 2, y: (focus.y0 + focus.y1) / 2 }, rect, view, view.scale), false);
   const lean = attackCamera(all, focus, view, rect, view.scale, [1, 1], FRAME_F);
   const to = lean ? ownHome(lean, focus, rect, view, FRAME_F) : ownHome(view, focus, rect, view, FRAME_IN);
   return done(to, false);
+}
+
+/**
+ * uxd (U142): the free stretch a frame works in, narrowed by the boxes other modules asked the map to keep clear of (`uiAvoid`: a GM's
+ * desk, a challenges band, a party panel) the way an open window narrows it: for each box that lies over the stretch (the largest
+ * first) the largest part of the stretch beside it, above or below it that is still at least `minW` x `minH`; a box that would leave
+ * no such part is passed over (the stretch is never given up for a panel). rect { x, y, w, h }, boxes [{ x0, y0, x1, y1 }] (client px).
+ */
+export function avoidRect(rect, boxes, { minW = 280, minH = 200 } = {}) {
+  if ( !rect || !Array.isArray(boxes) || !boxes.length ) return rect;
+  let r = { x0: rect.x, y0: rect.y, x1: rect.x + rect.w, y1: rect.y + rect.h };
+  const area = (q) => Math.max(0, q.x1 - q.x0) * Math.max(0, q.y1 - q.y0);
+  const list = boxes.filter(okBox).slice().sort((p, q) => area(q) - area(p));
+  for ( const b of list ) {
+    if ( b.x1 <= r.x0 || b.x0 >= r.x1 || b.y1 <= r.y0 || b.y0 >= r.y1 ) continue;
+    const parts = [{ ...r, x1: Math.min(r.x1, b.x0) }, { ...r, x0: Math.max(r.x0, b.x1) }, { ...r, y1: Math.min(r.y1, b.y0) }, { ...r, y0: Math.max(r.y0, b.y1) }]
+      .filter((q) => q.x1 - q.x0 >= minW && q.y1 - q.y0 >= minH).sort((p, q) => area(q) - area(p));
+    if ( parts.length ) r = parts[0];
+  }
+  return { ...rect, x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
 }
 
 /**

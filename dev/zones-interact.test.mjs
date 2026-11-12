@@ -237,6 +237,26 @@ check((await pr).reason === "cancelled", "any zone can be picked when none is li
 pr = api.pick({ zones: ["z1"] });
 click(100, 100, 2);
 check((await pr).reason === "cancelled", "a right-click gives it up");
+// uxd (D130): a right press on the map while a pick runs is the pick's alone - taken on the window before anybody else
+{
+  let stopped = false;
+  const rpress = (x, y) => { stopped = false; window.fire("pointerdown", { button: 2, clientX: x, clientY: y, target: view, stopImmediatePropagation() { stopped = true; } }); window.fire("pointerup", { button: 2, clientX: x, clientY: y, target: view, stopImmediatePropagation() {} }); };
+  pr = api.pick({ zones: ["z1"] });
+  rpress(100, 100);
+  check(stopped === true && (await pr).reason === "cancelled", "a right press on the map in a pick is stopped on the window (no other menu), and the click gives a plain pick up");
+  stopped = false; window.fire("pointerdown", { button: 2, clientX: 100, clientY: 100, target: view, stopImmediatePropagation() { stopped = true; } }); window.fire("pointerup", { button: 2, clientX: 100, clientY: 100, target: view });
+  check(stopped === false, "no pick: a right press is left alone");
+  // a move pick (`alt`): a zone on offer with no other way keeps the pick and says so; one with another way answers alt
+  pr = api.pick({ zones: ["z1", "z2"], _ext: { alt: (e) => e.zone === "z2" } });
+  rpress(100, 100);
+  check(api.picking() === true && els.some((e) => !e.gone && e.className.includes("mm-z-pick-tip") && e.innerHTML.includes("pick.oneWay")), "a right click on a zone on offer with one way only: the pick stays, the tip says a left click moves there");
+  rpress(900, 100);
+  check(api.picking() === false && (await pr).reason === "cancelled", "... a right click off the zones on offer gives it up");
+  pr = api.pick({ zones: ["z1", "z2"], _ext: { alt: (e) => e.zone === "z1" } });
+  rpress(100, 100);
+  res = await pr;
+  check(res.ok === true && res.alt === true && res.zone === "z1", "a right click on a zone with another way: answered with alt");
+}
 pr = api.pick({ zones: ["z1"] });
 const pr2 = api.pick({ zones: ["z5"] });
 check((await pr).reason === "replaced" && api.picking(), "a new pick replaces a running one");
@@ -528,38 +548,38 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   api.uiInset("t.el", null); api.uiInset("t.fn", null); api.uiInset("", { top: 5 });
   check(J(api.uiInsets()) === J({ top: 0, right: 0, bottom: 0, left: 0 }), "insets are taken back by name");
 
-  // ---- the banner keeps clear of the tracker; nothing hidden: no chip, the view is left alone
+  // ---- uxd (U160): the banner stands at the bottom, above the dock it would lie on; nothing hidden: no chip, the view is left alone
   let p0 = pans, pk = api.pick({ zones: all5, title: "Where to?" });
-  check(banner()?.style.top === "128px" && chips().length === 0 && pans === p0, `the banner sits below the tracker it would lie on (${banner()?.style.top}); every zone in reach: no chip, no move`);
+  check(banner()?.style.top === "342px" && banner()?.style.left === "500px" && chips().length === 0 && pans === p0, `the banner sits above the dock it would lie on, centred on the free stretch (${banner()?.style.top}, ${banner()?.style.left}); every zone in reach: no chip, no move`);
   // ---- a bar that lets clicks through (a player's tracker): no point finds it, the banner still keeps clear of what it draws
   {
     const gcs0 = globalThis.getComputedStyle, kid = (o) => ({ classList: { contains: () => false }, closest: () => null, children: [], childNodes: [], ...o });
     const box = (x0, y0, x1, y1) => () => ({ left: x0, top: y0, right: x1, bottom: y1, width: x1 - x0, height: y1 - y0 });
-    const strip = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgb(10, 20, 40)" }, getBoundingClientRect: box(380, 120, 640, 150) });
+    const strip = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgb(10, 20, 40)" }, getBoundingClientRect: box(380, 370, 640, 398) });
     const tint = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgba(255, 0, 0, 0.2)" }, getBoundingClientRect: box(0, 0, 1000, 600) });
-    const wrap = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgba(0, 0, 0, 0)" }, getBoundingClientRect: box(300, 0, 700, 150), children: [strip] });
+    const wrap = kid({ tagName: "DIV", css: { pointerEvents: "none", backgroundColor: "rgba(0, 0, 0, 0)" }, getBoundingClientRect: box(300, 300, 700, 400), children: [strip] });
     globalThis.getComputedStyle = (e) => ({ visibility: e.hidden ? "hidden" : "visible", display: "block", opacity: "1", pointerEvents: "auto", backgroundColor: "rgba(0, 0, 0, 0)", backgroundImage: "none", borderTopWidth: "0px", borderBottomWidth: "0px", ...(e.css ?? {}) });
     document.body.children = [wrap, tint];
     api.uiInset("t.again", null); await wait(20);
     const sunk = banner()?.style.top;
     strip.hidden = true;
     api.uiInset("t.again", null); await wait(20);
-    check(sunk === "158px" && banner()?.style.top === "128px", `a drawn piece that lets clicks through pushes the banner down; an empty wrapper and a whole-window tint do not (${sunk}, then ${banner()?.style.top})`);
+    check(sunk === "312px" && banner()?.style.top === "342px", `a drawn piece that lets clicks through pushes the banner up; an empty wrapper and a whole-window tint do not (${sunk}, then ${banner()?.style.top})`);
     delete document.body.children; globalThis.getComputedStyle = gcs0;
   }
   // ---- an inset declared while the pick runs: the banner moves at once, and back when it is taken
   {
-    const offTop = api.uiInset("t.top", { top: 200 });
+    const offBot = api.uiInset("t.bot", { bottom: 220 });
     await wait(20);
     const moved = banner()?.style.top;
-    offTop();
+    offBot();
     await wait(20);
-    check(moved === "208px" && banner()?.style.top === "128px", `an inset declared during a pick lays it out again (${moved}, then ${banner()?.style.top})`);
+    check(moved === "322px" && banner()?.style.top === "342px", `an inset declared during a pick lays it out again (${moved}, then ${banner()?.style.top})`);
   }
   // ---- the zones go under the dock: one chip at the bottom edge of the free stretch, with their number
   await under();
   let cs = chips();
-  check(cs.length === 1 && cs[0].className === "mm-z-pickway mm-z-pickway-bottom" && cs[0].dataset.n === "5" && cs[0].style.top === "392px" && cs[0].style.left === "500px" && cs[0].innerHTML.includes("pick.more") && cs[0].innerHTML.includes("fa-chevron-down") && cs[0].dataset.tooltip.includes("pick.way.bottom"),
+  check(cs.length === 1 && cs[0].className === "mm-z-pickway mm-z-pickway-bottom" && cs[0].dataset.n === "5" && cs[0].style.top === "334px" && cs[0].style.left === "500px" && cs[0].innerHTML.includes("pick.more") && cs[0].innerHTML.includes("fa-chevron-down") && cs[0].dataset.tooltip.includes("pick.way.bottom"),
     `zones no click can reach are counted on a chip at the edge they lie beyond (${cs.map((c) => [c.className, c.dataset.n, c.style.left, c.style.top])})`);
   // ---- a click on the chip brings the nearest of them into the free stretch
   p0 = pans;
@@ -608,8 +628,8 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   api.cancelPick(); await pk;
   // ---- an inset for one pick; the options of a pick asked of another user
   canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(50);
-  pk = api.pick({ zones: ["z1"], inset: { top: 200 } });
-  check(banner()?.style.top === "208px", `an inset given with the pick: the banner goes under it (${banner()?.style.top})`);
+  pk = api.pick({ zones: ["z1"], inset: { bottom: 220 } });
+  check(banner()?.style.top === "322px", `an inset given with the pick: the banner stands above it (${banner()?.style.top})`);
   api.cancelPick(); await pk;
   takeSent();
   const asked = api.pick({ user: "p1", zones: ["z2"], reveal: "fit", edgePan: false, inset: { bottom: 100, left: -4 } });
@@ -647,13 +667,34 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     const cells = Math.floor(1000 / 40) * Math.floor(600 / 40), looked = slices.reduce((a, b) => a + b, 0);
     check(slices.length > 5 && Math.max(...slices) <= 20 && looked >= cells && banner()?.style.top === top0 && J(api.safeArea()) === safe0,
       `the look now and then: every cell, a few per frame (${slices.length} frames, at most ${Math.max(...slices)} hit tests in one, ${looked} of ${cells}); nothing changed: nothing laid out again`);
-    parts.push(part("late", 0, 120, 1000, 200));                                         // a panel opens later, nothing declared
+    parts.push(part("late", 0, 360, 1000, 400));                                         // a panel opens later above the dock, nothing declared
     await wait(3500);
     const moved = banner()?.style.top;
     parts.pop();
     document.elementFromPoint = efp0; globalThis.requestAnimationFrame = raf0;
     api.cancelPick(); await pk;
-    check(top0 === "128px" && moved === "208px", `a panel that opened later is found by the look and the pick is laid out again (banner ${top0} -> ${moved})`);
+    check(top0 === "342px" && moved === "302px", `a panel that opened later is found by the look and the pick is laid out again (banner ${top0} -> ${moved})`);
+  }
+  // ---- uxd (U139): a window of Foundry's that opens or closes starts a look at once - no wait for the 1.5 s tick; the slice is a
+  //      share of the page's frame time (4 ms at 60 frames a second and more, up to 10 ms at 30)
+  {
+    const I = await imp("scripts/zones/interact.mjs");
+    check(I.freeSlice(0) === 4 && I.freeSlice(6.7) === 4 && I.freeSlice(16.7) === 4.175 && I.freeSlice(33.3) === 8.325 && I.freeSlice(100) === 10, "the slice: 4 ms, a quarter of a slow page's frame, at most 10 ms");
+    globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 4); globalThis.cancelAnimationFrame = (t) => clearTimeout(t);
+    pk = api.pick({ zones: all5 });
+    await wait(500);
+    const top0 = banner()?.style.top;
+    parts.push(part("sheet", 0, 360, 1000, 400));
+    Hooks.callAll("renderApplicationV2", {});
+    await wait(400);
+    const opened = banner()?.style.top;
+    parts.pop();
+    Hooks.callAll("closeApplicationV2", {});
+    await wait(400);
+    const closed = banner()?.style.top;
+    api.cancelPick(); await pk;
+    check(top0 === "342px" && opened === "302px" && closed === "342px", `a window opened / closed: laid out again within 0.4 s (${top0} -> ${opened} -> ${closed})`);
+    globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
   }
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; }; globalThis.cancelAnimationFrame = () => {};
 }

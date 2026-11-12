@@ -126,3 +126,19 @@ export function clearY(y, h, boxes, gap = 8, maxY = Infinity) {
   }
   return at;
 }
+
+/**
+ * The same upward (uxd, U160: the pick's banner stands above a bottom bar): where something of height `h` can sit at or ABOVE `y`
+ * without lying on any of the boxes in its column, never higher than `minY` (no room: it stays where it was).
+ */
+export function clearYUp(y, h, boxes, gap = 8, minY = -Infinity) {
+  let at = y;
+  for ( let i = 0; i < 12; i++ ) {
+    let next = at;
+    for ( const b of boxes ) if ( b.top < at + h + gap && b.bottom > at - gap ) next = Math.min(next, b.top - gap - h);
+    if ( next === at ) return at;
+    if ( next < minY ) return at;
+    at = next;
+  }
+  return at;
+}

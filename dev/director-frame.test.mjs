@@ -95,4 +95,27 @@ const toks = new Set(["t1", "t2"]);
 ok(SC.drivenShot({ kind: "turn", lane: "cbt-c1" }, "c1", toks) && SC.drivenShot({ kind: "attack" }, "c1", toks) && SC.drivenShot({ kind: "damage" }, "c1", toks) && SC.drivenShot({ kind: "roll" }, "c1", toks), "turn, attack, roll, damage stand down");
 ok(SC.drivenShot({ kind: "move", tokens: ["t2"] }, "c1", toks) && !SC.drivenShot({ kind: "move", tokens: ["zz"] }, "c1", toks), "a combatant's move stands down, a bystander's does not");
 ok(!SC.drivenShot({ kind: "destruction" }, "c1", toks) && !SC.drivenShot({ kind: "fire" }, "c1", toks) && !SC.drivenShot({ kind: "turn" }, null, toks), "the map's own events play as before; no fight: nothing stands down");
+/* uxd (U142) fit "near": the focus and, nearest first, as many of the others as fit with it at the user's zoom */
+{
+  const mover = box(850, 970), near1 = box(1450, 970), near2 = box(1650, 970), far = box(4000, 970);
+  const all = SC.framePlan([mover, near1, near2, far], view, rect);
+  ok(same(all, { moved: false }), "fit true, all of them too wide, the focus on screen: nothing moves (what U142 saw: zones off screen)");
+  const n0 = SC.framePlan([mover, near1, near2, far], view, rect, { fit: "near" });
+  const at = { ...view, x: n0.x, y: n0.y };
+  ok(n0.moved && SC.comfortable(mover, at, rect, 0) && SC.comfortable(near1, at, rect, 0) && SC.comfortable(near2, at, rect, 0) && !SC.comfortable(far, at, rect, 0) && n0.whole === false, "fit near: the mover and the two nearest zones come in, the far one is left out");
+  ok(same(SC.framePlan([mover, box(900, 900)], view, rect, { fit: "near" }), { moved: false }), "fit near, all of them on screen: nothing moves");
+  ok(SC.framePlan([mover, near1], view, rect, { fit: "near" }).whole === true, "fit near, all of them fit: whole");
+}
+/* uxd (U142) avoidRect: a panel narrows the free stretch like a window; a panel that would leave no room is passed over */
+{
+  const r = { x: 100, y: 80, w: 1150, h: 640 };
+  ok(SC.avoidRect(r, []) === r && SC.avoidRect(r, null) === r, "no panels: the stretch as it was");
+  const desk = { x0: 897, y0: 362, x1: 1240, y1: 675 }, band = { x0: 935, y0: 50, x1: 1240, y1: 275 };
+  const a = SC.avoidRect(r, [desk, band]);
+  ok(a.x === 100 && a.x + a.w === 897 && a.y === 80 && a.h === 640, `a GM's desk and challenges band at the right: the stretch left of them (${JSON.stringify(a)})`);
+  ok(same(SC.avoidRect(r, [{ x0: 0, y0: 0, x1: 2000, y1: 2000 }]), r), "a panel over everything: passed over, the stretch stands");
+  ok(same(SC.avoidRect(r, [{ x0: 2000, y0: 0, x1: 2100, y1: 50 }]), r), "a panel off the stretch: nothing changes");
+  const party = SC.avoidRect(r, [{ x0: 0, y0: 460, x1: 170, y1: 740 }]);
+  ok(party.x === 170 && party.w === 1080 && party.h === 640, "a party panel at the left: the stretch right of it");
+}
 console.log(`director-frame: ${n} checks passed`);
