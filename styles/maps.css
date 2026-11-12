@@ -1084,9 +1084,8 @@ body.mm-z-pick-no canvas#board { cursor: not-allowed !important; }
 .mm-z-menu-row kbd { flex: none; min-width: 1.05rem; padding: 0 0.25rem; border: 1px solid #5a4c3c; border-radius: 4px; background: #15110f; font: inherit; font-size: 0.66rem; text-align: center; opacity: 0.6; }
 /* SIGNS (zones-api.md section 40): a caller's words and pictures where the map draws its text. A sign with its own drawing (`el`)
    carries the caller's classes and look; one without is the map's: its picture a mask in the colour of the text, then its number. */
-.mm-z-menu-row .hint.has-signs, .mm-z-pick-tip .mm-z-cost, .mm-z-pick-tip small, .mm-z-pick-tip .mm-z-haz, .mm-z-menu header small { align-items: center; gap: 0.25rem; }
-.mm-z-menu-row .hint.has-signs { display: inline-flex; padding-block: 0.12rem; }
-.mm-z-pick-tip .mm-z-cost:has([role="img"], [aria-hidden="true"]) { display: flex; flex-wrap: wrap; }
+.mm-z-menu-row .hint.has-signs { display: inline-flex; align-items: center; gap: 0.25rem; padding-block: 0.12rem; }
+.mm-z-pick-tip .mm-z-cost:has([role="img"], [aria-hidden="true"]) { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
 .mm-z-sign { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; vertical-align: -1px; }
 .mm-z-sign[role="img"] { cursor: help; }
 .mm-z-sign > b { font-weight: 700; font-variant-numeric: tabular-nums; }

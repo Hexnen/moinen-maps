@@ -1501,3 +1501,70 @@ attacker the user's view does not hold should name the target alone.
 **Limits.** One shot at a time on a client. The numbers over a token are the caller's (the map shows none). No caption and no
 banner: the caller's own interface names who acts on whom. A `still` beat cannot be seen when its focus is off screen (it is
 then refused with `"hand"`). The walk is re-framed in steps (a calm slide when the token nears the edge), not by a spring.
+
+## 40. Signs: a caller's pictures where the map draws its text (U100)
+
+Row U100 of `invincible-plus-ultra/dev/combat-usability.md`. Checks: `dev/zones-signs.test.mjs` (the pure part,
+`scripts/zones/signs-core.mjs`), `dev/zones-board.test.mjs` (section 40 checks: what the menu and the move pick put in the page,
+what the canvas draws). Code: `signs-core.mjs` (clean, HTML), `signs-pixi.mjs` (the canvas row), and where the fields are drawn:
+`board.mjs` (menu, move pick tooltip, route chips), `board-core.mjs` (cleanMenu, cleanTokenMarks), `highlight.mjs` (cleanHighlight,
+cleanPick), `interact.mjs` (the pick tooltip), `highlight-layer.mjs` (a zone's label), `board-layer.mjs` (a token's pill, a chip).
+
+The map draws some texts on a caller's behalf, as plain text, escaped and cut. A caller that speaks in pictures (a combat module
+whose prices are bars and a bolt) gives, BESIDE the text, the same thing as **pieces**: words and **signs** in order. Where the
+map draws the text it draws the pieces instead. The text stays: it is what a map without this section draws, what the map draws
+when the pieces are bad, and the plain words of the thing. The map does not know what a sign means.
+
+### Where
+
+| the thing | its field(s) with text | `signs` on it |
+| --- | --- | --- |
+| a menu (section 29) | `title`, `sub` | `menu({ ..., signs: { title, sub } })` |
+| a menu's plain entry | `hint` (24 characters) | `items: [{ ..., hint, signs: { hint } }]` |
+| a move pick's zone (section 27) | `cost` (the tooltip), `label` (on the zone and in the tooltip), `tip` | `zones: [{ ..., signs: { cost, label, tip } }]` |
+| a hazard on a move's way (section 27) | `text` (the chip on the route and the tooltip line) | `hazards: [{ ..., text, signs: { text } }]` |
+| a pick's zone (section 18), a highlight's zone or border (17) | `label`, `tip` | `{ zone, label, tip, signs: { label, tip } }` |
+| a token mark (section 25) and its hover | `label` | `tokens: [{ ..., label, signs: { label }, hover: { label, signs: { label } } }]` |
+
+`signs.<field>` counts only when `<field>` has its text too (no text: nothing is drawn, as before). A hazard's `tip`, when given,
+is still drawn as words in the tooltip.
+
+### Pieces and a sign
+
+`pieces = [ "words", sign, " · ", sign, ... ]`, at most 10. The words of all pieces together are cut to the field's own length
+(24 for a hint, 18 for a token's pill, 28 for a zone's label, 60 for a move's price ...); a sign never counts. Pieces with no sign in
+them are ignored (the text is drawn). Two signs side by side get a little air; any other space is the caller's.
+
+| a sign's field | |
+| --- | --- |
+| `name` | its tooltip and its screen-reader name (`role="img"`, `aria-label`); none: it is silent (`aria-hidden`) |
+| `el` | the page: the caller's own drawing, a tree `{ tag: "i" \| "b" \| "span", cls, text, kids: [tree] }` (3 deep, 4 kids each, 8 classes, text 8 characters). The caller's classes and stylesheet give it its look; the map adds no style to it |
+| `img`, `w` | the canvas (and the page when there is no `el`): a picture used as a MASK, painted in one colour: a `data:image/svg+xml` / png / webp, or a path ending in .svg / .png / .webp; `w` its width when 12 high |
+| `icon` | a Font Awesome class instead of a picture |
+| `n` | a number or short text after the picture (8 characters) |
+| `color` | the canvas: the colour of the picture (`0xRRGGBB` or `"#rrggbb"`; default: the label's text colour) |
+
+A sign with no `el`, `img`, `icon` or `n` is dropped. Nothing of a sign can leave its drawing: tags other than i / b / span are
+drawn as `i`, classes are plain words, texts and names are escaped, a picture's address is percent-encoded where it could close
+its `url()`, an address that is not an image is dropped.
+
+In the page a sign with `el` is that tree with the name on its top element; without, the map's own `<span class="mm-z-sign">`
+(the picture as a mask in the colour of the text, then `<b>n</b>`). On the canvas (a zone's label, a token's pill, a chip on a
+route) a sign is its picture painted in `color`, or its icon, then its number; a sign with neither draws its number or its name.
+The width of a picture is known before it loads, so a label does not change size when it arrives.
+
+### For the caller
+
+| the combat module wants | it hands |
+| --- | --- |
+| a menu row's price as its marks | `{ hint: "Quick · 2 stress", signs: { hint: [quickSign, stressSign] } }` |
+| a door's Armor in the menu's sub line | `{ sub: "Locked, Armor 2", signs: { sub: ["Locked, ", armorSign] } }` |
+| the price at a zone of a move | `{ zone, label: "Quick", cost: "Run: quick action", signs: { label: [quickSign], cost: ["Run: ", quickSign] } }` |
+| a hit over a token | `{ label: "good", hover: { label: "good · -2", signs: { label: ["good · ", damageSign] } } }` |
+
+A table without such a caller is untouched: nothing of the map's own texts takes signs, and an entry without `signs` is cleaned
+and drawn exactly as before (`zones-signs.test.mjs` C2). An older map ignores `signs` and draws the words.
+
+**Limits.** A menu entry's `label`, a stepper's or a toggle's text, a `disabled` reason, a warning chip of section 28, the pill
+of an intention (section 32) and a link's label take no signs. The pick tooltip has no pointer events, so a sign's own tooltip
+does not open there (its name is still its screen-reader name).
