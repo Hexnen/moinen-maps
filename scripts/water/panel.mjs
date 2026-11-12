@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../config.mjs";
 import * as Water from "./water.mjs";
+import * as Progress from "../progress.mjs";
 import * as Model from "./model.mjs";
 import { TABS, SECTIONS, LOOK_GROUPS, COLOR_NAMES, FRAME_CHOICES, EXTRA_RANGE } from "./schema.mjs";
 import { ALPHA_GROUPS, ALPHA_START } from "./paint.mjs";
@@ -48,6 +49,7 @@ export function showWaterTab(tab) {
 class WaterSettings {
   tab = "look";
   #hook = null;
+  #progHook = null;
   #rodHook = null;
   #palTimer = 0;
   #listeners = null;
@@ -68,6 +70,8 @@ class WaterSettings {
     this.#rodHook = () => { if ( this.tab === "rods" ) this.render(); };
     Hooks.on("moinenMapsRods", this.#rodHook);
     Hooks.on("moinenMapsWater", this.#hook);
+    // (the bake's line follows its job 4 times a second: progress.mjs)
+    this.#progHook ??= Hooks.on("moinenMapsProgress", () => this.#updateStatus());
     this.render();
   }
 
@@ -80,6 +84,7 @@ class WaterSettings {
     }
     this.#offFolds?.(); this.#offFolds = null;
     if ( this.#hook ) Hooks.off("moinenMapsWater", this.#hook);
+    if ( this.#progHook ) { Hooks.off("moinenMapsProgress", this.#progHook); this.#progHook = null; }
     if ( this.#rodHook ) Hooks.off("moinenMapsRods", this.#rodHook);
     this.#hook = this.#rodHook = null;
     clearTimeout(this.#palTimer);
@@ -109,7 +114,7 @@ class WaterSettings {
     const st = Water.waterStatus(), S = Water.state();
     if ( st.error ) return `${T("Water.error")}: ${st.error}`;
     if ( !S || !Model.hasPaint(S) ) return T("Water.noPaint");
-    if ( st.baking ) return game.i18n.format("MOINENMAPS.Water.baking", { n: Math.round(st.progress * 100) });
+    if ( st.baking ) return Progress.current("water") ? Progress.line("water") : game.i18n.format("MOINENMAPS.Water.baking", { n: Math.round(st.progress * 100) });
     return T("Water.ready");
   }
 

@@ -24,7 +24,7 @@ const cases = [
   ["ANGLE (Intel, Intel(R) Arc(TM) A770 Graphics (0x000056A0) Direct3D11 vs_5_0 ps_5_0, D3D11)", 8, 16, false],
   ["ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)", 8, 0, true],
   ["ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638) Direct3D11 vs_5_0 ps_5_0, D3D11)", 8, 0, true],
-  ["ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", 8, 0, true],
+  ["ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)", 8, 0, true, "Apple M2"],
   ["NVIDIA GeForce GTX 970/PCIe/SSE2", 4, 0, false]
 ];
 for ( const [r, gb, alt, shared, model] of cases ) {

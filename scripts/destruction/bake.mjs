@@ -17,7 +17,7 @@ const pending = new Map();
 
 function fail(err) {
   worker?.terminate(); worker = null; workerMap = "";
-  for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(err); }
+  for ( const p of pending.values() ) { p.watchdog?.(); p.reject(err); }
   pending.clear();
 }
 
@@ -28,11 +28,23 @@ function start() {
   worker.onmessage = (ev) => {
     const m = ev.data, p = pending.get(m.id); if ( !p ) return;
     if ( m.progress !== undefined ) { p.rearm?.(); return p.onProgress?.(m.progress); }
-    pending.delete(m.id); clearTimeout(p.watchdog);
+    pending.delete(m.id); p.watchdog?.();
     m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
   };
   worker.onerror = (e) => { console.error(`${MODULE_ID} | destruction worker`, e); fail(new Error("the destruction worker failed")); };
   return worker;
+}
+
+/**
+ * The watchdog's timer: `expire()` after `ms` without progress. A timer that fires LATE (the page was held by a long task meanwhile) waits
+ * again: the worker's progress may be queued behind that task - the soak's 13 s stalls at ~1800 strokes failed bakes that were running
+ * fine ("the destruction bake took too long"). -> a function that stops it.
+ */
+function watch(ms, expire) {
+  let at = performance.now(), t = 0, more = 4;
+  const tick = () => { const now = performance.now(); if ( now - at > ms + 1000 && more-- > 0 ) { at = now; t = setTimeout(tick, ms); } else expire(); };
+  t = setTimeout(tick, ms);
+  return () => clearTimeout(t);
 }
 
 function release() {
@@ -46,8 +58,8 @@ function call(msg, transfer = [], onProgress = null) {
     let w;
     try { w = start(); } catch ( err ) { reject(err); return; }
     const id = nextId++;
-    const arm = () => setTimeout(() => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); }, WATCHDOG);
-    const entry = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: arm(), rearm: () => { clearTimeout(entry.watchdog); entry.watchdog = arm(); } };
+    const arm = () => watch(WATCHDOG, () => { if ( pending.has(id) && worker === w ) fail(new Error("the destruction bake took too long")); });
+    const entry = { resolve: (r) => { release(); resolve(r); }, reject: (e) => { release(); reject(e); }, onProgress, watchdog: arm(), rearm: () => { entry.watchdog(); entry.watchdog = arm(); } };
     pending.set(id, entry);
     w.postMessage({ id, ...msg }, transfer);
   });
@@ -79,9 +91,9 @@ export async function runBake(input, getMap, { onProgress, retried = false } = {
  * inputs (each a subset of the strokes, nearest to the view first); every job resolves `onDone(i, result)` as soon as it is baked, so
  * the visible strokes come first. Lane 0 is the usual worker (it keeps what it baked for the GM's next edit); the other lanes are
  * extra workers made for this bake (no area cache: up to 8 of them must not each hold ~160 MB) and let go after it. `n` lanes at most
- * (never more than the cores minus one).
+ * (never more than the cores minus one). `onProgress(i, p)`: job i is p (0..1) baked, as its worker reports it.
  */
-export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCache = false, prime = null } = {}) {
+export async function runBakePool(jobs, getMap, { n = 4, onDone = null, onProgress = null, keepCache = false, prime = null } = {}) {
   const lanes = Math.max(1, Math.min(n, jobs.length, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1));
   let next = 0, error = null;
   const retry = [];                  // jobs an extra lane took and could not finish: the main lane does them
@@ -138,7 +150,7 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
       if ( mainWorker !== worker ) { mainWorker = worker; mainLane.have.clear(); }
       await ensure(mainLane, i);
     }
-    return runBake(jobs[i], getMap);
+    return runBake(jobs[i], getMap, { onProgress: onProgress && ((p) => onProgress(i, p)) });
   };
   const laneMain = async () => {
     for ( let i = take(); i >= 0; i = take() ) finish(i, await runMain(i));
@@ -153,12 +165,12 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
     extraLanes.add(ln);
     // a worker script that does not load fails at once (it waited for the 30 s watchdog before)
     w.onerror = (e) => { e.preventDefault?.(); ln.fail(new Error(`an extra bake worker failed (${e.message ?? "load"})`)); };
-    const ask = (msg, transfer = []) => new Promise((resolve, reject) => {
+    const ask = (msg, transfer = [], onP = null) => new Promise((resolve, reject) => {
       if ( dead ) return reject(dead);
-      const my = ++id, arm = () => setTimeout(() => stop(new Error("the destruction bake took too long")), WATCHDOG);
+      const my = ++id, arm = () => watch(WATCHDOG, () => stop(new Error("the destruction bake took too long")));
       let timer = arm();
-      const stop = (err) => { clearTimeout(timer); fails.delete(stop); w.removeEventListener("message", on); reject(err); };
-      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { clearTimeout(timer); timer = arm(); return; } w.removeEventListener("message", on); clearTimeout(timer); fails.delete(stop); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
+      const stop = (err) => { timer(); fails.delete(stop); w.removeEventListener("message", on); reject(err); };
+      const on = (ev) => { const m = ev.data; if ( m.id !== my ) return; if ( m.progress !== undefined ) { timer(); timer = arm(); onP?.(m.progress); return; } w.removeEventListener("message", on); timer(); fails.delete(stop); m.ok ? resolve(m.result) : reject(new Error(m.error)); };
       fails.add(stop);
       w.addEventListener("message", on);
       w.postMessage({ id: my, ...msg }, transfer);
@@ -170,7 +182,7 @@ export async function runBakePool(jobs, getMap, { n = 4, onDone = null, keepCach
       let r;
       try {
         if ( l ) await ensure(l, i);
-        r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: !keepCache } });   // (an extra lane keeps no area cache - it goes after this bake - unless asked: a Rebake all's lanes keep the plain looks they baked for their next jobs)
+        r = await ask({ kind: "bake", input: { ...jobs[i], mapKey: m.key, noCache: !keepCache } }, [], onProgress && ((p) => onProgress(i, p)));   // (an extra lane keeps no area cache - it goes after this bake - unless asked: a Rebake all's lanes keep the plain looks they baked for their next jobs)
       } catch ( err ) { retry.push(i); throw err; }
       finish(i, r);
     }
@@ -207,6 +219,6 @@ export function disposeBaker() {
   worker?.terminate(); worker = null; workerMap = ""; clearTimeout(idleTimer);
   for ( const ln of [...extraLanes] ) { ln.w.terminate(); ln.fail(new Error("the destruction worker was let go")); }
   extraLanes.clear();
-  for ( const p of pending.values() ) { clearTimeout(p.watchdog); p.reject(new Error("the destruction worker was let go")); }
+  for ( const p of pending.values() ) { p.watchdog?.(); p.reject(new Error("the destruction worker was let go")); }
   pending.clear();
 }

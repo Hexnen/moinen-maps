@@ -274,7 +274,13 @@ export async function resolve(spec, ctx, next) { const r = await next(spec, ctx)
     const fresh = clone(S);   // a new state object: no per-state entry, found by its digest
     if ( !(await Store.warmSigs(fresh, async () => null)) ) problems.push("warmSigs: computed signatures were not found by their digest");
     const bad = clone(S); bad.objects = bad.objects.slice(0, 3);
-    if ( await Store.warmSigs(bad, async () => truth) ) problems.push("warmSigs took an entry of the wrong length");
+    // (three strokes: they come from the last signatures on the page now, never from the read-ahead entry; with nothing to start from, the
+    // entry of the wrong length is refused)
+    if ( await Store.warmSigs(bad, async () => truth) && Store.sigsOf(bad).length !== 3 ) problems.push("warmSigs took an entry of the wrong length");
+    { const sub = (await import(pathToFileURL(path.join(ROOT, "scripts/destruction/substrate.mjs")).href)).fullSigs(bad.objects, (o) => Store.objSig(bad, o), bad.params, Model.K, (o) => o.bytes ?? Model.objBytes(o));
+      if ( JSON.stringify(Store.sigsOf(bad)) !== JSON.stringify(sub) ) problems.push("signatures from the last ones differ from the computed ones"); }
+    const bad2 = clone(S); bad2.params.wrongLen = 1; bad2.objects = bad2.objects.slice(0, 3);
+    if ( await Store.warmSigs(bad2, async () => truth) ) problems.push("warmSigs took an entry of the wrong length");
     if ( JSON.stringify(Store.sigsOf(fresh)) !== JSON.stringify(truth) ) problems.push("sigsOf from the digest store differs from the computed one");
     // the codec worker's "sigs" job (a first load: off the page) gives exactly what the page computes
     const Chunks = await import(pathToFileURL(path.join(ROOT, "scripts/net/chunks.mjs")).href);
