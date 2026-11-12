@@ -80,7 +80,7 @@ function badgeOf(b, color) {
     G.lineStyle({ width: 1.5, color, alpha: 1 }).beginFill(INK, 0.92).drawRoundedRect(-w / 2, -h / 2, w, h, 4).endFill();
     c.addChild(G);
   } else {
-    const ink = b.pieces.map((p) => (typeof p === "string" ? p : { ...p, color: INK })), k = Math.max(1.4, size / 9);
+    const ink = b.pieces.map((p) => (typeof p === "string" ? p : { ...p, color: INK })), k = Math.max(1.6, size / 7);
     for ( let i = 0; i < 8; i++ ) {
       const a = (i / 8) * Math.PI * 2, r = piecesRow(ink, { ...style, fill: INK });
       r.c.position.set(-row.w / 2 + Math.cos(a) * k, Math.sin(a) * k);
@@ -96,7 +96,7 @@ function badgeOf(b, color) {
  *  full ones dashed. Drawn on G around (cx, cy). */
 function meterRing(G, cx, cy, r, m, e, u) {
   const seg = (Math.PI * 2) / m.of, gap = Math.min(0.24, seg * 0.2), strong = e.state === "chosen", dashed = e.state === "caught";
-  const heavy = (strong ? 4.6 : 3.6) * u, thin = 1.3 * u;
+  const heavy = (strong ? 7 : 6) * u, thin = 1.4 * u;
   const part = (i, width, col, alpha, dash) => {
     const a0 = -Math.PI / 2 + i * seg + gap / 2, a1 = a0 + seg - gap;
     G.lineStyle({ width, color: col, alpha, cap: PIXI.LINE_CAP.BUTT });
@@ -104,7 +104,7 @@ function meterRing(G, cx, cy, r, m, e, u) {
     const k = 3, step = (a1 - a0) / k;
     for ( let j = 0; j < k; j++ ) { const b0 = a0 + j * step + step * 0.12, b1 = b0 + step * 0.76; G.moveTo(cx + Math.cos(b0) * r, cy + Math.sin(b0) * r); G.arc(cx, cy, r, b0, b1); }
   };
-  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy + 3.4 * u : thin + 2.8 * u, INK, 0.7, false);
+  for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy + 4 * u : thin + 2.6 * u, INK, 0.75, false);
   for ( let i = 0; i < m.of; i++ ) part(i, i < m.n ? heavy : thin, e.color, i < m.n ? 1 : 0.9, dashed && i < m.n);
   if ( strong ) {
     // the one chosen: ticks pointing in, in the gaps between the parts
@@ -155,7 +155,9 @@ export function markToken(t, e, hover = false) {
     return c.addChild(ch);
   });
   t._mmBoard = t.addChild(c);
-  if ( c.label ) liftLabel(c);
+  // (section 42: a badge, and the ring when it is a meter, are lifted with the label: in a crowd the neighbours' pictures and
+  //  nameplates covered them. Without either, exactly as before: the ring stays with its token)
+  if ( c.label || c.badge || e.meter ) liftLabel(c, { ring: !!e.meter });
   layoutToken(t);
 }
 
@@ -179,12 +181,15 @@ function liftRoot() {
   ui.sortDirty = true;
   return LIFT;
 }
-function liftLabel(c) {
+function liftLabel(c, { ring = false } = {}) {
   const root = liftRoot();
   if ( !root ) return;                                                                           // (no primary group: the label stays with its token)
   const L = c.lift = root.addChild(new PIXI.Container());
   L.eventMode = "none"; L.interactiveChildren = false;
-  L.addChild(c.label);
+  // (bottom up: the ring as a meter, the badge, the pill)
+  if ( ring && c.ring ) L.addChild(c.ring);
+  if ( c.badge ) L.addChild(c.badge);
+  if ( c.label ) L.addChild(c.label);
   c.once?.("destroyed", () => dropLift(c));
   syncLift(c);
 }
