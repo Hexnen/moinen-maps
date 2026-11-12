@@ -62,6 +62,15 @@ const noOverlap = (items, res, fixed = []) => {
   check(noOverlap([k1, k2], r6), "with token pictures around, still no two labels on each other");
   const r7 = R.spreadLabels([k1], [], { gap: 3, soft });
   check(J(r7.get("k1")) === J({ dx: 0, dy: 0 }), "a label alone is never moved for a picture under it");
+  // over: a picture drawn ABOVE the label (a later token's) is hard - the label leaves it, here to the spot under its own token (alt)
+  // (the label at the top edge of its token 0..100, a token above covering y -100..0 and x 50..150 - the rows up are all under it)
+  const p1 = { key: "p", x: 100, y: 0, w: 90, h: 22, over: [{ x0: 20, y0: -150, x1: 180, y1: 5 }], alt: [{ dy: 114 }] };
+  const r8 = R.spreadLabels([p1], [], { gap: 3 }).get("p");
+  const b8 = { x0: 100 + r8.dx - 45, y0: r8.dy - 11, x1: 100 + r8.dx + 45, y1: r8.dy + 11 };
+  check(!(Math.min(b8.x1, 180) - Math.max(b8.x0, 20) > 0 && Math.min(b8.y1, 5) - Math.max(b8.y0, -150) > 0), `a label leaves a picture drawn above it (${J(r8)})`);
+  const r9 = R.spreadLabels([{ ...p1, over: [] }], [], { gap: 3 }).get("p");
+  check(J(r9) === J({ dx: 0, dy: 0 }), "nothing drawn above: the label stays (alt only tried when needed)");
+  check(J(R.spreadLabels([{ ...p1, over: [null, { x0: 1 }], alt: [{ dy: NaN }, null] }]).get("p")) === J({ dx: 0, dy: 0 }), "junk over/alt: ignored");
   // junk in, nothing thrown
   check(R.spreadLabels(null).size === 0 && R.spreadLabels([{ key: "z", x: NaN, y: 0, w: 1, h: 1 }]).size === 0, "junk items: empty layout");
 }

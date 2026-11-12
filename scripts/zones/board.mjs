@@ -159,6 +159,8 @@ function labelsSoon() {
  */
 function layoutLabels() {
   const items = [], soft = [], zoom = Math.max(0.05, canvas.stage?.scale.x ?? 1);
+  // (a token's pill is drawn with its token: a token whose picture is drawn later covers it - those pictures are hard for that pill)
+  const pics = drawOrder();
   for ( const id of ON.keys() ) {
     const t = objOf(id);
     if ( !t || !(t.visible || t.controlled) ) continue;
@@ -166,8 +168,11 @@ function layoutLabels() {
     layoutToken(t);
     const b = labelBoxOf(t);
     if ( !b ) continue;
-    const e = ON.get(id);
-    items.push({ key: id, x: b.x, y: b.y, w: b.w, h: b.h, prio: e?.state === "chosen" ? 1 : 0, was: SHIFT.get(id) ?? null });
+    const e = ON.get(id), mine = pics.find((p) => p.t === t)?.i ?? -1;
+    const over = mine < 0 ? [] : pics.filter((p) => p.i > mine).map((p) => p.box);
+    // (and one more spot: just under its own token)
+    const alt = [{ dy: t.y + t.h + b.h / 2 + 3 / zoom - b.y }];
+    items.push({ key: id, x: b.x, y: b.y, w: b.w, h: b.h, prio: e?.state === "chosen" ? 1 : 0, was: SHIFT.get(id) ?? null, over, alt });
   }
   const res = Room.spreadLabels(items, layer?.pillBoxes() ?? [], { gap: 3 / zoom, soft });
   const next = new Map();
@@ -175,6 +180,17 @@ function layoutLabels() {
   SHIFT = next;
   labelsLaid = items.length > 0;
   Interact.boardLabelsMoved();
+}
+/** The tokens this user sees in the order their pictures are drawn: [{ t, i, box }] (scene px; i: later = on top). */
+function drawOrder() {
+  const out = [], prim = canvas.primary?.children ?? [], objs = canvas.tokens?.objects?.children ?? [];
+  for ( const t of canvas.tokens?.placeables ?? [] ) {
+    if ( !(t.visible || t.controlled) ) continue;
+    const m = t.mesh && typeof prim.indexOf === "function" ? prim.indexOf(t.mesh) : -1;
+    const i = m >= 0 ? m : typeof objs.indexOf === "function" ? objs.indexOf(t) : -1;
+    if ( i >= 0 ) out.push({ t, i, box: { x0: t.x, y0: t.y, x1: t.x + t.w, y1: t.y + t.h } });
+  }
+  return out;
 }
 /** The labels the board shows now, in scene px (the highlights' labels and the director's chip keep clear of them). */
 export function boardLabelBoxes() {

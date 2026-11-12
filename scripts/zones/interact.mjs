@@ -78,7 +78,7 @@ export function redraw() {
     pick: PICK?.allowed ?? null, marks,
     // (a label keeps clear of the badges, icons and passage marks the zones show to this user, and of the tokens this user sees)
     // (section 41: and of the pills the board puts at tokens and on lines - a token's hit chance never lies under a zone's warning)
-    blocks: () => ({ boxes: [...(look && Zones.visibleToMe() ? Zones.displayBoxes() : []), ...boardLabelBlocks()], tokens: tokenBoxes() }),
+    blocks: () => ({ boxes: [...(look && Zones.visibleToMe() ? Zones.displayBoxes() : []), ...boardLabelBlocks(), ...uiBlocks()], tokens: tokenBoxes() }),
     zoneAt: (x, y) => Zones.zonesApi.zoneAt(x, y), grid: Zones.gridSize()
   });
 }
@@ -86,6 +86,28 @@ export function redraw() {
 /** The board's pills as boxes the highlights' labels keep clear of (as hard as a token: a label under a label cannot be read). */
 function boardLabelBlocks() {
   try { return (boardLabels() ?? []).map((b) => ({ zone: null, kind: "label", x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 })); } catch { return []; }
+}
+/**
+ * The panels other modules declared (uiAvoid boxes, uiInset bars) as boxes in scene pixels, kind "ui": a warning on a zone keeps
+ * out from under them where it can (section 41). Nothing declared: nothing (a table without such modules looks as before).
+ */
+function uiBlocks() {
+  if ( (!AVOIDS.size && !INSETS.size) || typeof canvas?.canvasCoordinatesFromClient !== "function" ) return [];
+  const out = [], toScene = (b) => {
+    const a = canvas.canvasCoordinatesFromClient({ x: b.x0, y: b.y0 }), c = canvas.canvasCoordinatesFromClient({ x: b.x1, y: b.y1 });
+    if ( [a.x, a.y, c.x, c.y].every(Number.isFinite) ) out.push({ zone: null, kind: "ui", x0: a.x, y0: a.y, x1: c.x, y1: c.y });
+  };
+  try {
+    for ( const b of uiAvoids() ) toScene(b);
+    const i = uiInsets(), W = vw(), H = vh();
+    if ( i && Number.isFinite(W) && Number.isFinite(H) ) {
+      if ( i.top > 0 ) toScene({ x0: 0, y0: 0, x1: W, y1: i.top });
+      if ( i.bottom > 0 ) toScene({ x0: 0, y0: H - i.bottom, x1: W, y1: H });
+      if ( i.left > 0 ) toScene({ x0: 0, y0: 0, x1: i.left, y1: H });
+      if ( i.right > 0 ) toScene({ x0: W - i.right, y0: 0, x1: W, y1: H });
+    }
+  } catch {}
+  return out;
 }
 /** The tokens this user sees, as boxes in scene pixels, where they stand (their documents: not where an animation has them now). */
 function tokenBoxes() {
@@ -899,6 +921,8 @@ export function registerInteract() {
   Hooks.on("updateToken", (doc, change) => onTokens(doc, change));
   Hooks.on("createToken", (doc) => onTokens(doc));
   Hooks.on("deleteToken", (doc) => onTokens(doc));
+  // (section 41: the panels stay where they are on the screen while the map slides under them - the labels look again once it stops)
+  Hooks.on("canvasPan", () => { if ( AVOIDS.size || INSETS.size ) boardLabelsMoved(); });
   // a user who was asked to pick left; the GM who asked this user left (nobody to answer to); what a user showed here goes with them
   Hooks.on("userConnected", (user, connected) => {
     if ( connected ) return;

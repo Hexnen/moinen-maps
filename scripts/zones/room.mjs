@@ -27,9 +27,10 @@ const sumOver = (b, list) => { let s = 0; for ( const o of list ) s += overlap(b
 
 /**
  * Lay labels out together.
- *   items   [{ key, x, y, w, h, prio = 0, was: { dx, dy } | null }]: each label's middle where it would stand alone, its size; a
- *           higher `prio` keeps its own spot first (the token under the pointer, the one chosen); `was`: the shift it had before
- *           (kept while it is still free, so a label does not hop about while a token walks)
+ *   items   [{ key, x, y, w, h, prio = 0, was: { dx, dy } | null, over: [box], alt: [{ dy }] }]: each label's middle where it
+ *           would stand alone, its size; a higher `prio` keeps its own spot first (the token under the pointer, the one chosen);
+ *           `was`: the shift it had before (kept while it is still free, so a label does not hop about while a token walks);
+ *           `over`: boxes drawn above this label (it must not lie under them); `alt`: more rows to try (under its own token)
  *   fixed   boxes nothing may cover (other labels of the map that stand where they stand)
  *   o.gap   room left between two labels; o.steps how many rows a label may climb; o.reach how far it may slide sideways
  *           (a share of its own width)
@@ -45,16 +46,20 @@ export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.
   for ( const it of list ) {
     const hw = it.w / 2, hh = it.h / 2;
     const boxAt = (dx, dy) => ({ x0: it.x + dx - hw, y0: it.y + dy - hh, x1: it.x + dx + hw, y1: it.y + dy + hh });
+    // (over: what is drawn ABOVE this label - a token whose picture is drawn after this label's token - as hard as another label: a
+    //  pill under a picture cannot be read; alt: more spots the caller knows of, e.g. under its own token)
+    const over = (it.over ?? []).map(cleanBox).filter(Boolean), hard = [...placed, ...over];
     const cands = [{ dx: 0, dy: 0, cost: 0 }];
     // (the shift it had: a little cheaper than the same shift found anew - it does not hop between two as good - but never cheaper
     //  than standing where it belongs once that is free)
     if ( it.was && Number.isFinite(it.was.dx) && Number.isFinite(it.was.dy) && (it.was.dx || it.was.dy) ) cands.push({ dx: it.was.dx, dy: it.was.dy, cost: (Math.abs(it.was.dx) + Math.abs(it.was.dy) * 1.25) * 0.9 });
-    // up a row at a time (a stack over the token), and aside by what the labels in the way need (left or right of them)
+    // up a row at a time (a stack over the token), the caller's own spots, and aside by what is in the way (left or right of it)
     const rows = [0];
     for ( let k = 1; k <= steps; k++ ) rows.push(-k * (it.h + gap));
+    for ( const a of it.alt ?? [] ) if ( Number.isFinite(a?.dy) && !rows.includes(a.dy) ) rows.push(a.dy);
     for ( const dy of rows ) {
       if ( dy ) cands.push({ dx: 0, dy, cost: Math.abs(dy) * 1.25 });
-      for ( const p of placed ) {
+      for ( const p of hard ) {
         const b = boxAt(0, dy);
         if ( !(Math.min(b.y1, p.y1) - Math.max(b.y0, p.y0) > 0) ) continue;
         for ( const dx of [p.x1 + gap - b.x0, p.x0 - gap - b.x1] ) if ( Math.abs(dx) <= it.w * reach ) cands.push({ dx, dy, cost: Math.abs(dx) + Math.abs(dy) * 1.25 });
@@ -65,7 +70,7 @@ export function spreadLabels(items, fixed = [], { gap = 2, steps = 4, reach = 0.
     const mine = softs.filter((b) => b.key !== it.key), area = it.w * it.h;
     let best = null, bestOver = Infinity, bestCost = Infinity;
     for ( const c of cands ) {
-      const b = boxAt(c.dx, c.dy), o = sumOver(b, placed), cost = c.cost + (mine.length && (c.dx || c.dy) ? (sumOver(b, mine) / area) * it.h * 2 : 0);
+      const b = boxAt(c.dx, c.dy), o = sumOver(b, hard), cost = c.cost + (mine.length && (c.dx || c.dy) ? (sumOver(b, mine) / area) * it.h * 2 : 0);
       if ( o < bestOver - 1e-9 || (Math.abs(o - bestOver) <= 1e-9 && cost < bestCost) ) { best = c; bestOver = o; bestCost = cost; }
     }
     const s = best ?? cands[0];

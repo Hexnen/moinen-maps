@@ -163,7 +163,8 @@ canvas.stage.scale.x = 1.02; for ( const f of canvas.app.ticker.fns ) f();
 const small = calls.filter((c) => c[0] === "beginFill").length;
 canvas.stage.scale.x = 2; for ( const f of canvas.app.ticker.fns ) f();
 check(small === 0 && calls.filter((c) => c[0] === "beginFill").length > 0, "a small zoom step only scales the labels; a big one draws the lines again at the new width");
-const lab = layerRoot().children[4].children[0];
+const labelRoot = () => canvas.primary.children.find((c) => c.sortLayer === 710 && c.sort === 1) ?? null; // (section 41: the labels above the tokens)
+const lab = labelRoot().children[0].children[0];
 check(Math.abs(lab.scale.x - 0.5) < 1e-9, "labels keep their size on screen");
 canvas.stage.scale.x = 1;
 
@@ -397,7 +398,7 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
 
   // wired: a label and the tokens
   const dispRoot = () => canvas.primary.children.find((c) => c.sortLayer === 258 && c.sort === 0);
-  const labels = () => layerRoot().children[4].children;
+  const labels = () => labelRoot().children[0].children;
   const g3 = Zones.zones().zones.find((z) => z.id === 2).label;
   api.highlight({ id: "lab", zones: [{ zone: "z3", label: "2" }], borders: [{ border: "z4|z5", label: "Armor 2", color: "danger" }] });
   const zl = () => labels().find((c) => c.children[1].text === "2"), bl = () => labels().find((c) => c.children[1].text === "Armor 2");

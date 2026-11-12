@@ -1618,8 +1618,16 @@ line's pill), `"zone"` (a highlight's label, a warning chip). For a caller that 
 - The lines' pills (section 26) stand where they stand; the tokens' labels keep clear of them. Then the highlights' labels take
   their spots clear of all of them (120 ms after the last change: while a marked token walks they follow when it stops).
 - The pointer moves nothing: the hover text of a label shows in the spot the label has.
-- Not done: a label is drawn as a child of its token, so a token drawn later can still cover a label that had to climb onto it
-  (a moved label avoids pictures when it can); a label is not kept clear of Foundry's own token names and effect icons.
+- A label is drawn with its token, so a token whose picture is drawn LATER would cover it: those pictures count as hard for that
+  label (as another label does) and it leaves them - up, aside, or to one more spot just under its own token. Measured live
+  (lane 5, 2026-11-12): Atom Eve's pill under Omni-Man's picture (Omni-Man drawn later) went from hidden to readable above him.
+- The highlights' labels (a warning on a zone) are drawn just above the tokens' pictures (primary group, sortLayer TOKENS + 10;
+  the washes and lines stay under them): a warning that found no free spot is half on a token, never under it. They also keep
+  clear of what other modules declared (`uiAvoid` boxes and `uiInset` bars, weight 6: twice a token) and look again 120 ms after
+  the map stops panning. Nothing declared: as before.
+- Not done: a token boxed in on every side lifts its label over a neighbour with a leader line that passes behind that neighbour
+  (readable, but it can be read as the neighbour's); a label is not kept clear of Foundry's own token names and effect icons; the
+  tokens' pills do not avoid the declared panels (a token under a panel has its pill under it).
 
 ### The menu
 

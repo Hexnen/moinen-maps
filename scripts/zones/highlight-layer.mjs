@@ -52,9 +52,18 @@ export class ZoneHighlightLayer {
     this.lines = new PIXI.Graphics();
     this.hover = new PIXI.Graphics();
     this.labels = new PIXI.Container();
-    this.root.addChild(this.veil, this.zonesC, this.lines, this.hover, this.labels);
+    this.root.addChild(this.veil, this.zonesC, this.lines, this.hover);
     this.root.visible = false;
     canvas.primary.addChild(this.root);
+    // (section 41: the labels just above the tokens' pictures - a warning that found no free spot is half on a token, never under it)
+    this.labelRoot = new PIXI.Container();
+    this.labelRoot.eventMode = "none";
+    this.labelRoot.interactiveChildren = false;
+    let TOK = 700;
+    try { const v = foundry.canvas?.groups?.PrimaryCanvasGroup?.SORT_LAYERS?.TOKENS; if ( typeof v === "number" ) TOK = v; } catch {}
+    Object.assign(this.labelRoot, { elevation: 0, sortLayer: TOK + 10, sort: 1, _lastSortedIndex: 0, visible: false });
+    this.labelRoot.addChild(this.labels);
+    canvas.primary.addChild(this.labelRoot);
     this.items = [];
     /** The spot each label has now (label key -> its offset): kept while tokens move, so a label does not hop about. */
     this.spots = new Map();
@@ -80,7 +89,7 @@ export class ZoneHighlightLayer {
     const any = !!Z && (shown.zones.size > 0 || shown.borders.size > 0 || !!pick);
     if ( Z !== this.Z ) this.spots.clear();
     this.Z = Z; this.shown = shown; this.pick = pick; this.marks = marks; this.key = key; this.blocks = blocks; this.zoneAt = zoneAt;
-    this.root.visible = any;
+    this.root.visible = any; this.labelRoot.visible = any;
     if ( any && !this.watching ) { canvas.app.ticker.add(this.watch); this.watching = true; }
     else if ( !any && this.watching ) { canvas.app.ticker.remove(this.watch); this.watching = false; }
     if ( !any ) { this.#clear(); this.drawnKey = null; return; }
@@ -187,7 +196,8 @@ export class ZoneHighlightLayer {
     const zoom = this.zoom ?? 1, px = 1 / Math.max(0.05, zoom);
     const B = this.blocks?.() ?? {}, boxes = B.boxes ?? [], zoneAt = this.zoneAt;
     // a token hides a label and a label hides the zone.s number; an icon row, a passage.s mark or another label makes both hard to read
-    const tokens = B.tokens ?? [], blocks = [...tokens.map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: b.kind === "badge" || b.kind === "label" ? 3 : 2 }))];
+    // (section 41: and the screen's panels other modules declared - kind "ui" - as hard: a warning under a panel cannot be read)
+    const tokens = B.tokens ?? [], blocks = [...tokens.map((t) => ({ ...t, w: 3 })), ...boxes.map((b) => ({ ...b, w: b.kind === "ui" ? 6 : b.kind === "badge" || b.kind === "label" ? 3 : 2 }))];
     for ( const it of [...this.items].sort((a, b) => (b.zoneId >= 0) - (a.zoneId >= 0)) ) {
       const s = this.#scale(it, px), half = { w: (it.w / 2) * s, h: (LABEL_H / 2) * s };
       let cands;
@@ -278,5 +288,6 @@ export class ZoneHighlightLayer {
     if ( this.watching ) canvas.app?.ticker?.remove(this.watch);
     this.watching = false;
     if ( !this.root.destroyed ) this.root.destroy({ children: true });
+    if ( !this.labelRoot.destroyed ) this.labelRoot.destroy({ children: true });
   }
 }
