@@ -477,7 +477,7 @@ export async function shot(spec = {}) {
       return say({ ok: true, played: "none" });
     }
     const joins = () => !!key && !!act && !act.done && act.key === key && act.phase !== "back";
-    const join = () => { if ( AC.RANK[name] > AC.RANK[act.beat] ) act.up(name); return say({ ok: true, played: "joined" }); };
+    const join = () => { if ( AC.RANK[name] > AC.RANK[act.beat] ) act.up(name); return say({ ok: true, played: "joined", lands: act.landed ? 0 : Math.max(0, Math.round((act.landAt ?? 0) - performance.now())) }); };
     if ( joins() ) return join();
     const gate = () => AC.shotGate({ out: st.out, turn: st.turn }, { follow: follow(), held: cameraHeld(), screen: !!Screen.owner && Screen.owner !== "action" && !homing, covered: !!freeRect().covered });
     let g = gate(); if ( g ) return no(g);
@@ -507,7 +507,7 @@ export async function shot(spec = {}) {
     const away = !!cam || resting || !!prev?.away;
     const planOf = (b) => AC.beatPlan(b, { bars: S.bars, away, still: quiet, reduced });
     const plan = planOf(name);
-    if ( !cam && !away && !plan.bars && !plan.impact ) return say({ ok: true, played: "place" });      // it is on screen as it stands: nothing to add
+    if ( !cam && !away && !plan.bars && !plan.impact ) return say({ ok: true, played: "place", lands: 0 });      // it is on screen as it stands: nothing to add
     /* the beat takes the screen */
     if ( prev ) cleanup(prev);
     dropRest(); clearTimeout(lingerT); lingerT = 0; beginSeq++;
@@ -549,7 +549,9 @@ export async function shot(spec = {}) {
     a.up = (b) => { a.beat = b; a.plan = planOf(b); if ( a.landed ) land(); };
     if ( cam ) Screen.panTo({ x: cam.x, y: cam.y, scale: cam.scale, duration: cam.ms });
     if ( name === "open" && plan.bars ) at((cam?.ms ?? 0) * 0.6, () => Screen.revealBars?.());
-    at(cam ? Math.round(cam.ms * 0.92) : AC.TIMES.inPlace, land);
+    const landMs = cam ? Math.round(cam.ms * 0.92) : AC.TIMES.inPlace;
+    a.landAt = performance.now() + landMs;                                                      // U125 (e): the caller is told when the blow lands (`lands`)
+    at(landMs, land);
     if ( away ) {
       // the user: Esc or a click on the map cuts the shot (the view goes home, nothing more this turn); the wheel or a drag takes the
       // camera (it stays where the user puts it). The input is never swallowed, as in the director's own take-overs.
@@ -577,7 +579,7 @@ export async function shot(spec = {}) {
       window.addEventListener("wheel", a.onPtr, { capture: true, passive: true });
     }
     sync();
-    return say({ ok: true, played: cam ? "take" : "place" });
+    return say({ ok: true, played: cam ? "take" : "place", lands: landMs });
   } catch ( err ) { console.error(`${MODULE_ID} | shot`, err); return no("error"); }
 }
 

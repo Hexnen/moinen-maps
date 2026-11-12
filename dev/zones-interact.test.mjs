@@ -163,7 +163,7 @@ canvas.stage.scale.x = 1.02; for ( const f of canvas.app.ticker.fns ) f();
 const small = calls.filter((c) => c[0] === "beginFill").length;
 canvas.stage.scale.x = 2; for ( const f of canvas.app.ticker.fns ) f();
 check(small === 0 && calls.filter((c) => c[0] === "beginFill").length > 0, "a small zoom step only scales the labels; a big one draws the lines again at the new width");
-const labelRoot = () => canvas.primary.children.find((c) => c.sortLayer === 710 && c.sort === 1) ?? null; // (section 41: the labels above the tokens)
+const labelRoot = () => canvas.interface.children.find((c) => c.zIndex === 899) ?? null; // (section 41 / U125 a: the labels above every token picture, interface group)
 const lab = labelRoot().children[0].children[0];
 check(Math.abs(lab.scale.x - 0.5) < 1e-9, "labels keep their size on screen");
 canvas.stage.scale.x = 1;

@@ -82,7 +82,7 @@ export function markToken(t, e, hover = false) {
   if ( t._mmBoard && !t._mmBoard.destroyed && t._mmBoard.key === key ) { layoutToken(t); return; }
   // (a label moved by the layout keeps its spot while the marks are built again - the pointer came onto the token - until the next layout)
   const shift = t._mmBoard?.shift ?? null;
-  if ( t._mmBoard ) { if ( !t._mmBoard.destroyed ) t._mmBoard.destroy({ children: true }); t._mmBoard = null; }
+  if ( t._mmBoard ) { dropLift(t._mmBoard); if ( !t._mmBoard.destroyed ) t._mmBoard.destroy({ children: true }); t._mmBoard = null; }
   dimToken(t, !!e && e.state === "out");
   if ( !e ) return;
   const c = new PIXI.Container();
@@ -107,7 +107,62 @@ export function markToken(t, e, hover = false) {
     return c.addChild(ch);
   });
   t._mmBoard = t.addChild(c);
+  if ( c.label ) liftLabel(c);
   layoutToken(t);
+}
+
+/* ---- U125 (a): the labels above every token's picture. A token's pill used to be drawn with its token, so a token drawn later
+   cut it away (a boxed-in token's label lifted over a neighbour, its tie line going under that neighbour's picture). The pill and
+   its tie line now live in one container of the interface group above the token layer (zIndex 901, over the lines' layer), placed
+   at the token's spot on every layout; the token's own container keeps the ring, the bar and the chips. A label is shown only while
+   its token is. */
+let LIFT = null;
+function liftRoot() {
+  const ui = canvas?.interface;
+  if ( !ui ) return null;
+  if ( LIFT && !LIFT.destroyed && LIFT.parent === ui ) return LIFT;
+  // (the interface group, after the token layer: a token object drawn later erases what lies under its shape in this group - its
+  //  void mesh lets the picture of the primary group show through - so a pill inside an earlier token was cut away; out here it is
+  //  not, and like the rest of the interface it is not lit, so it stays crisp in a dark or coloured scene. Just above the lines' layer)
+  LIFT = new PIXI.Container();
+  LIFT.eventMode = "none"; LIFT.interactiveChildren = false;
+  LIFT.zIndex = 901;
+  ui.addChild(LIFT);
+  ui.sortDirty = true;
+  return LIFT;
+}
+function liftLabel(c) {
+  const root = liftRoot();
+  if ( !root ) return;                                                                           // (no primary group: the label stays with its token)
+  const L = c.lift = root.addChild(new PIXI.Container());
+  L.eventMode = "none"; L.interactiveChildren = false;
+  L.addChild(c.label);
+  c.once?.("destroyed", () => dropLift(c));
+  syncLift(c);
+}
+function dropLift(c) {
+  const L = c?.lift;
+  if ( !L ) return;
+  c.lift = null;
+  if ( !L.destroyed ) L.destroy({ children: true });
+}
+/** The lifted label stands where its token stands now (the token's animated spot) and shows while the token and its marks do. */
+function syncLift(c) {
+  const L = c?.lift, t = c?.parent;
+  if ( !L || L.destroyed ) return;
+  if ( !t || t.destroyed || c.destroyed ) { dropLift(c); return; }
+  L.position.set(t.x, t.y);
+  L.visible = !!t.visible && c.visible !== false && t.renderable !== false;
+  L.alpha = t.alpha ?? 1;
+}
+/** One token's lifted label follows it (a refresh of the token: it walks, it is shown or hidden). */
+export const followToken = (t) => { if ( t?._mmBoard?.lift ) syncLift(t._mmBoard); };
+/** Every lifted label of every marked token, put back with its token (board.mjs: on each layout, after a pan, while tokens move). */
+export function syncLifted() {
+  if ( !LIFT || LIFT.destroyed ) return;
+  for ( const t of canvas.tokens?.placeables ?? [] ) if ( t._mmBoard?.lift ) syncLift(t._mmBoard);
+  // (a label whose token went without telling: its container was destroyed with the token)
+  for ( const L of [...LIFT.children] ) if ( L.destroyed || !L.children.length ) L.destroy?.({ children: true });
 }
 
 /** A token out of reach steps back: its picture is tinted dark (Foundry sets the tint again on a refresh: board.mjs re-applies). */
@@ -180,6 +235,7 @@ export function shiftLabel(t, dx = 0, dy = 0) {
   const c = t?._mmBoard;
   if ( !c || c.destroyed || !c.label ) return;
   const s = c.shift ?? { dx: 0, dy: 0 };
+  syncLift(c);
   if ( Math.abs(s.dx - dx) < 0.01 && Math.abs(s.dy - dy) < 0.01 ) return;
   c.shift = { dx, dy };
   placeLabel(c);
@@ -187,14 +243,29 @@ export function shiftLabel(t, dx = 0, dy = 0) {
 function placeLabel(c) {
   const b = c.labelBase, s = c.shift ?? { dx: 0, dy: 0 }, u = c.u ?? 1;
   if ( !b ) return;
+  syncLift(c);
   c.label.position.set(b.x + s.dx, b.y + s.dy);
   const far = Math.hypot(s.dx, s.dy) > 4 * u;
-  if ( !far ) { if ( c.leader ) c.leader.visible = false; return; }
-  const G = c.leader ??= typeof c.addChildAt === "function" ? c.addChildAt(new PIXI.Graphics(), 1) : c.addChild(new PIXI.Graphics());
+  // (the tie line goes with the label: lifted above the pictures it crosses, under the pill itself)
+  const host = c.lift && !c.lift.destroyed ? c.lift : c;
+  if ( c.leader && c.leader.parent !== host ) { c.leader.destroy?.(); c.leader = null; }
+  const G = c.leader ??= typeof host.addChildAt === "function" ? host.addChildAt(new PIXI.Graphics(), host === c ? 1 : 0) : host.addChild(new PIXI.Graphics());
   G.visible = true; G.clear();
-  // from the pill's edge nearest the token's top middle to that point (a dot on the token's rim end)
   const hw = (c.label.w / 2) * u, hh = (c.label.h / 2) * u, lx = b.x + s.dx, ly = b.y + s.dy;
-  const ex = b.x, ey = b.top, px = Math.max(lx - hw + hh, Math.min(lx + hw - hh, ex)), py = ly + hh;
+  if ( !far ) {
+    // U125 (a): at home a small tail under the pill points down at its own token (tokens that touch: the pill between two reads as
+    // the lower one's, the one it points at)
+    const tw = 5 * u, th = 5 * u, y0 = ly + hh - 1.2 * u;
+    G.lineStyle({ width: 1.6 * u, color: c.e.color, alpha: 1, join: PIXI.LINE_JOIN?.MITER }).beginFill(INK, 0.92).moveTo(lx - tw, y0).lineTo(lx, y0 + th).lineTo(lx + tw, y0).endFill();
+    G.lineStyle(0);
+    return;
+  }
+  // U125 (a): from the pill's edge nearest its token to the token's rim on the side that faces the pill (a dot there): a label moved
+  // up a row ties to the top, one beside a panel to the side that comes out from under it, one under its token to the bottom
+  const tw = c.tw ?? 0, th = c.th ?? 0, cx0 = tw / 2, cy0 = th / 2, R = Math.max(tw, th) / 2 + 3 * u;
+  const dl = Math.hypot(lx - cx0, ly - cy0) || 1;
+  const ex = cx0 + ((lx - cx0) / dl) * R, ey = Math.min(cy0 + ((ly - cy0) / dl) * R, ly > cy0 ? Infinity : b.top);
+  const px = Math.max(lx - hw + hh, Math.min(lx + hw - hh, ex)), py = Math.max(ly - hh, Math.min(ly + hh, ey));
   G.lineStyle({ width: 4 * u, color: INK, alpha: 0.7, cap: PIXI.LINE_CAP.ROUND }).moveTo(px, py).lineTo(ex, ey);
   G.lineStyle({ width: 1.8 * u, color: c.e.color, alpha: 1, cap: PIXI.LINE_CAP.ROUND }).moveTo(px, py).lineTo(ex, ey);
   G.lineStyle(0).beginFill(c.e.color, 1).drawCircle(ex, ey, 2.6 * u).endFill();
