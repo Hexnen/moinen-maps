@@ -113,7 +113,7 @@ async function onDown(ev) {
     ui.notifications.error(T("Water.engineFailed"));
     return;
   } finally { starting = null; }
-  if ( !active() ) return;
+  if ( !S || !active() ) return;
   if ( !overlay ) buildOverlay();
   const layer = layerOf();
   // a snapshot of what this stroke may change, for undo

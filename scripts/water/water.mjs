@@ -273,7 +273,10 @@ export async function rebake({ awaitPublish = true } = {}) {
 /** The editable water set, created (empty) when the scene has none yet. */
 export async function ensureState() {
   if ( S ) return S;
+  const my = life, sceneId = canvas.scene?.id;
   info ??= await engineInfo();
+  if ( S ) return S;                                   // loaded (or created by another caller) while the engine started
+  if ( my !== life || canvas.scene?.id !== sceneId ) return null;   // left the scene meanwhile: nothing to paint on
   S = Model.blank(info.defaults);
   tell("loaded");
   return S;
