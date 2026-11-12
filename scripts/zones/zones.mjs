@@ -919,7 +919,7 @@ function onTokenHUD(hud, html) {
     const pick = document.createElement("div");
     pick.className = "mm-z-altpick";
     pick.innerHTML = html;
-    pick.addEventListener("click", (e) => byHud(async () => {
+    pick.addEventListener("click", (e) => byHud(t.document, async () => {
       const b = e.target.closest("[data-alt]"); if ( !b ) return;
       e.preventDefault(); e.stopPropagation();
       const k = b.dataset.alt;
@@ -938,7 +938,7 @@ function onTokenHUD(hud, html) {
     }));
     btn.after(pick);
   });
-  btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); byHud(async () => { await setFloor(t, 0); await setAltitude(t, "ground"); show(); }); });
+  btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); ev.stopPropagation(); byHud(t.document, async () => { await setFloor(t, 0); await setAltitude(t, "ground"); show(); }); });
   col.append(btn);
 }
 
@@ -1832,13 +1832,18 @@ function levelAfter(doc, changed) {
   }
   return any ? out : null;
 }
-/** The map's own token HUD (its altitude button) is writing a level: an update made then is a user's hand, not a script (section 41). */
-let HUD_HAND = 0;
-async function byHud(fn) { HUD_HAND++; try { return await fn(); } finally { HUD_HAND--; } }
+/** The map's own token HUD (its altitude button) is writing a level of this token: an update of IT made then is a user's hand, not a
+ *  script (section 41). Kept per token: another token moved meanwhile (a drag, a script) keeps its own answer. */
+const HUD_HAND = new Map();                                          // token id -> HUD writes of it still running
+async function byHud(doc, fn) {
+  const id = doc?.id;
+  HUD_HAND.set(id, (HUD_HAND.get(id) ?? 0) + 1);
+  try { return await fn(); } finally { const n = HUD_HAND.get(id) - 1; if ( n > 0 ) HUD_HAND.set(id, n); else HUD_HAND.delete(id); }
+}
 /** How an update held by tactical play was made (zones-api 41): { method: Foundry's TokenMovementMethod, byHand }. A change of level
  *  alone carries no movement: the map's own HUD says "hud", anything else is "api" (a script: setLevel, a macro). */
 function howMoved(doc, options, levelOnly = false) {
-  const method = HUD_HAND > 0 ? "hud" : (levelOnly ? null : methodOf(options, doc.id)) ?? "api";
+  const method = HUD_HAND.has(doc.id) ? "hud" : (levelOnly ? null : methodOf(options, doc.id)) ?? "api";
   return { method, byHand: byHandOf(method) };
 }
 /** Ask the combat module about a level change that was held back; a yes writes it (`write`: another way to make it, the orbit scene). */
