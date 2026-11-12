@@ -1674,6 +1674,8 @@ boxes, the map's labels (`mapLabels`) and the labels of Foundry's movement ruler
   `options.movement[id].method`, else `options.method`); an update that says none is `"api"`. A change of level alone carries no
   movement: the map's own token-HUD altitude button (its menu and its right click, Orbit through it) says `"hud"`, anything else
   (`setLevel`, `setAltitude`, a macro, another module) `"api"`.
+  `"hud"` is told only for the token that HUD is writing: another token changed or moved while that write is on its way keeps its
+  own answer (its Foundry method, else `"api"`).
 - `byHand`: `true` for `dragging`, `keyboard`, `hud`, `config` (a user's own hand: a slow drag is a drag however long it was held);
   `false` for `api`, `paste`, `undo` (a script, another module, an undo).
 
