@@ -1437,6 +1437,10 @@ Like `frame`, it is local: nothing is sent to anybody, every client asks for its
 `played` is `"take"` (the camera went there), `"place"` (in place), `"joined"` (it joined the shot on screen), `"back"` (a
 `close` sent a waiting camera home) or `"none"` (a `close` with nothing waiting).
 
+`lands` (U125 e): the ms from now until the blow of this beat lands on screen, so a caller can time its own moment with it (the
+combat module's comic splash pops then): `"take"` the camera's move `ms * 0.92`; `"place"` `TIMES.inPlace` (0 when the beat adds
+nothing in place); `"joined"` what is left of the shot it joined (0 once it landed). Absent on `"back"`, `"none"` and the refusals.
+
 How each beat is played (the times are `action-core.mjs TIMES`):
 
 | beat | the camera | bars and blow | then |
@@ -1614,20 +1618,29 @@ line's pill), `"zone"` (a highlight's label, a warning chip). For a caller that 
   A label that would lie on another is moved by the least: up a row at a time (up to four) or aside to the edge of the label in
   the way (up to 0.8 of its own width). A moved label prefers a spot off other tokens' pictures; a label alone is never moved.
   A label keeps the side it took while its token walks; once nothing is in the way it goes home.
-- A moved label (more than 4 screen px) is tied to the top middle of its token by a thin line in its colour with a dot.
+- A label at home has a short tail pointing down at its token. A moved label (more than 4 screen px) is tied by a thin line in
+  its colour with a dot, from the label's nearest edge to the rim of its token on the side facing the label (U125 a: before, to
+  the top middle, so a label moved below or beside its token pointed across the picture).
 - The lines' pills (section 26) stand where they stand; the tokens' labels keep clear of them. Then the highlights' labels take
   their spots clear of all of them (120 ms after the last change: while a marked token walks they follow when it stops).
 - The pointer moves nothing: the hover text of a label shows in the spot the label has.
-- A label is drawn with its token, so a token whose picture is drawn LATER would cover it: those pictures count as hard for that
-  label (as another label does) and it leaves them - up, aside, or to one more spot just under its own token. Measured live
-  (lane 5, 2026-11-12): Atom Eve's pill under Omni-Man's picture (Omni-Man drawn later) went from hidden to readable above him.
-- The highlights' labels (a warning on a zone) are drawn just above the tokens' pictures (primary group, sortLayer TOKENS + 10;
-  the washes and lines stay under them): a warning that found no free spot is half on a token, never under it. They also keep
+- U125 a: the tokens' labels and their tails/ties are LIFTED out of the token into one container of the interface group
+  (zIndex 901: above every token's picture and the board's lines (900), under Foundry's controls (1000)), one child per token that
+  follows it (`refreshToken`: position, visibility, alpha). So no token's picture covers another's label any more, whatever the
+  draw order (before: a label was drawn with its token and a token drawn later erased it; a boxed-in token lifted its label over a
+  neighbour and its leader passed behind that neighbour). Lifted labels are crisp and unlit (the scene's darkness and weather do
+  not tint them). A token destroyed takes its lifted label with it.
+- U125 a: the `uiAvoid` boxes are walls for the tokens' labels (`spreadLabels(..., { walls })`, client boxes turned to scene
+  units): a label whose home lies under a panel goes to the nearest free side of that panel (left or right on its own row or the
+  rows around it, else just above or below the panel, no reach limit), tied to its token. A label clear of every panel stays
+  home. Measured live (lane 5, 2026-11-12, 1600x900 and 1366x768, interface 140 %): the crowd under the GM's desk keeps all nine
+  labels readable left of the desk.
+- The highlights' labels (a warning on a zone) are drawn in the interface group (zIndex 899: above every token picture, under the
+  tokens' labels and the lines; before: primary group, so a chip that found no free spot sat half under a picture). They also keep
   clear of what other modules declared (`uiAvoid` boxes and `uiInset` bars, weight 6: twice a token) and look again 120 ms after
   the map stops panning. Nothing declared: as before.
-- Not done: a token boxed in on every side lifts its label over a neighbour with a leader line that passes behind that neighbour
-  (readable, but it can be read as the neighbour's); a label is not kept clear of Foundry's own token names and effect icons; the
-  tokens' pills do not avoid the declared panels (a token under a panel has its pill under it).
+- Not done: a label is not kept clear of Foundry's own token names and effect icons; a lifted label lies over a neighbour's
+  picture when nothing else is free (readable, tied to its own token).
 
 ### The menu
 
@@ -1636,6 +1649,14 @@ window less the declared insets; then, while that spot covers a box asked for: r
 below or above it, left of the box in the way or above it. An axis whose declared bars leave less than the menu is given up for
 the whole window. With no insets declared and nothing asked for, the menu stands exactly where it stood (a table without a combat
 module looks unchanged). While open it is placed again on every pan and every 400 ms (a dock's panel that opens under it).
+
+U125 a (`menuSpot(..., { step = 24, cover = 600 })` -> `{ x, y, far }`): with boxes declared, the candidates also include a grid
+over the free window (24 px) and sweeps along both sides of the thing; each costs its distance from the thing (0 within 1.5 gaps)
+plus `cover` x the share of the menu over a declared box plus 5 x that over the thing itself. The old spot wins ties, so a free
+old spot is kept exactly. At 1366x768 with the GM's desk open (before: the menu went to the far side of the screen, 600+ px from
+its token) it now stands next to the token, at worst a little over a panel's edge. `far` (more than 3 gaps away): the map draws
+a tie from the token to the menu (`.mm-z-menu-tie`, a 2 px line with a dot, under the panels) and `menuTie(anchor, m)` gives its
+ends. Without declared boxes: exactly as before.
 
 ### The "My view" chip
 
