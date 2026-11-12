@@ -281,6 +281,13 @@ const playOf = (shot) => (shot?.play?.by ? plays.get(shot.play.by) ?? null : nul
  */
 let stager = null;
 export function registerStager(fn) { stager = typeof fn === "function" ? fn : null; }
+/**
+ * A VETO (source-stage.mjs: a fight a combat module frames itself): veto(shot) -> true = this shot does not play on this client at all
+ * (no take-over, no marker, nothing on the GM's bar). Asked for every shot before anything else is decided.
+ */
+let veto = null;
+export function registerVeto(fn) { veto = typeof fn === "function" ? fn : null; }
+const vetoed = (shot) => { try { return !!veto?.(shot); } catch ( err ) { console.error(`${MODULE_ID} | director veto`, err); return false; } };
 const styleOf = (shot) => { try { return stager?.(shot) ?? null; } catch ( err ) { console.error(`${MODULE_ID} | director stage`, err); return null; } };
 
 /* ---------------------------------------------------------------- one client: playing shots */
@@ -385,6 +392,7 @@ function ctxOf(shot) {
 function start(shot) {
   if ( killed() || !isOn() || !canvas?.ready || shot.scene !== canvas.scene?.id ) return;
   seen.add(shot.id); if ( seen.size > 200 ) seen.delete(seen.values().next().value);
+  if ( vetoed(shot) ) return;
   const ctx = ctxOf(shot);
   let form = Dir.decide(shot, ctx);
   const ph = playOf(shot), sg = form === "take" ? styleOf(shot) : null;
@@ -789,7 +797,7 @@ export function status() {
 /* ---------------------------------------------------------------- wiring */
 
 export const directorApi = {
-  emit: apiEmit, cutTo, skip, preview, setOn, isOn, cameraHeld, tokenName, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, registerStager, seeTokens,
+  emit: apiEmit, cutTo, skip, preview, setOn, isOn, cameraHeld, tokenName, setPaused, setGmIntensity, status, settings: R, captionText, canSee, busy, leaderId, isLeader, killed, registerPlay, registerCue, registerStager, registerVeto, seeTokens,
   /** For the checks: the overlays, the queue. */
   _debug: () => ({ overlay: Ov.debug(), queue: { buckets: queue.buckets.length, busyUntil: queue.busyUntil, history: queue.history.slice(-6) }, cur: cur ? { id: cur.shot.id, timers: cur.timers.length } : null, screen: Screen.debug?.() ?? null }),
   _receive: receive

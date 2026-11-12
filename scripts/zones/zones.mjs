@@ -2020,6 +2020,9 @@ export const zonesApi = {
   present,
   /** How much the camera follows a fight on this client (the director's combat stage): the user's switch and a combat module's default. */
   camera: (o) => moduleApi.directorStage?.camera?.(o) ?? null,
+  /** Bring what a combat module names into the free part of this client's screen (dev/zones-api.md 38); "My view" takes it back. */
+  frame: (spec) => moduleApi.directorStage?.frame?.(spec) ?? Promise.resolve({ ok: false, reason: "noStage" }),
+  frameBack: () => { moduleApi.directorStage?.home?.(); },
   /** Who runs the rules: a combat module takes the map's own mechanics over (fire round, wrecking numbers, distance badges). */
   rulesDriver, drivenBy, wreckText,
   /** Why a write was refused, in the user's language; the active GM's name. */
