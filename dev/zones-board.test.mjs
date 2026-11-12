@@ -458,44 +458,56 @@ open(sc); tokObjs(); takeSent();
   check(api.uiAvoid("", {})() === undefined && api.uiAvoid("x", null) && api.uiAvoids().length === 0, "41: junk ids and null specs take nothing");
 }
 
-/* ---- section 42 (U133): the ring as a meter ("n of m", inside the token's square, gaps where two rings would meet) */
+/* ---- section 42 (U133): a caller's sign in the token's corner, on a plate of its own */
 {
-  check(JSON.stringify(BC.cleanMeter({ n: 9, of: 4, name: "Near certain" })) === JSON.stringify({ n: 4, of: 4, name: "Near certain" }) && BC.cleanMeter({ n: 1, of: 1 }) === null && BC.cleanMeter({ of: 4 }) === null, "42: a meter is cleaned: n within 0..of, of 2..12");
-  const sign = { name: "Likely", img: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E", w: 18, color: 0xffe72a };
-  check(!("badge" in BC.cleanTokenMarks({ id: "x", tokens: [{ token: "t2", state: "in", badge: { signs: [sign] } }] }).tokens[0]) && !("cleanBadge" in BC) && !("BADGE_SPOTS" in BC), "42: no badge: a sign on the token is not part of the map's words (the trial's corner signs are gone)");
-  // (what the ring draws: every arc with the line style it was drawn in)
-  const arcs = () => { let st = null; const out = []; for ( const c of calls ) { if ( c[0] === "lineStyle" ) st = c[1]; else if ( c[0] === "arc" ) out.push({ cx: c[1], cy: c[2], r: c[3], a0: c[4], a1: c[5], ...st }); } return out; };
-  const meterOf = (state, n) => { calls.length = 0; api.markTokens({ id: "ipu.odds", color: "target", tokens: [{ token: "t2", state, tip: "Chance: x", meter: { n, of: 4, name: "Level " + n } }] }); return arcs(); };
-  const C2 = C.target, tw = T("t2").w, th = T("t2").h;
-  for ( const n of [1, 2, 3, 4] ) {
-    const a = meterOf("in", n), col = a.filter((x) => x.color === C2), heavy = Math.max(...col.map((x) => x.width));
-    check(col.length === 4 && col.filter((x) => x.width === heavy).length === n, `42: level ${n}: four parts in the entry's colour, ${n} of them heavy`);
-    check(a.every((x) => x.cx + x.r + x.width / 2 <= tw + 1e-6 && x.cx - x.r - x.width / 2 >= -1e-6 && x.cy + x.r + x.width / 2 <= th + 1e-6 && x.cy - x.r - x.width / 2 >= -1e-6), `42: level ${n}: the whole ring, its dark line too, lies inside the token's square (two tokens side by side never cross rings)`);
-    const cardinal = [-Math.PI / 2, 0, Math.PI / 2, Math.PI, Math.PI * 1.5];
-    check(a.every((x) => cardinal.every((k) => !(x.a0 < k - 0.15 && x.a1 > k + 0.15) && !(x.a0 < k && x.a1 > k))), `42: level ${n}: the gaps between the parts lie on the top, right, bottom and left, where two rings would meet`);
-    check(boardOf("t2") && !boardOf("t2").label && !boardOf("t2").e.label, `42: level ${n}: a meter needs no pill`);
+  const BL = await imp("scripts/zones/board-layer.mjs");
+  const sign = { name: "Likely", img: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E", w: 12, color: 0xffe72a };
+  const cb = BC.cleanBadge({ sign, name: "Spora szansa" });
+  check(!!cb && cb.sign.img === sign.img && cb.sign.color === 0xffe72a && cb.sign.w === 12 && cb.name === "Spora szansa" && BC.cleanBadge({ sign }).name === "Likely", "42: a badge is cleaned: one sign of section 40 and what it is called (the sign's own name when not given)");
+  check(BC.cleanBadge(null) === null && BC.cleanBadge({ name: "x" }) === null && BC.cleanBadge({ sign: { name: "nothing to draw" } }) === null, "42: a badge with nothing to draw is none");
+  check(J(BC.cleanBadge(cb)) === J(cb), "42: a badge cleaned again (sent on to another client) stays the same");
+  check(!("cleanMeter" in BC) && !("meter" in BC.cleanTokenMarks({ id: "x", tokens: [{ token: "t2", state: "in", meter: { n: 2, of: 4 } }] }).tokens[0]), "42: no ring meter: the ring in quarters is gone, an entry's `meter` is dropped");
+  check(BL.badgeSize(350, 350 / 77) === 24 && BL.badgeSize(350, 350 / 192) === 38 && BL.badgeSize(350, 1) === 40, "42: the plate is a fifth of the token on screen, 24 px at the least (a crowd far out), 40 at the most");
+  // (Foundry's first bar: 8 px x the scene's interface scale at the bottom of the token)
+  const d2 = sc.tokens.get("t2"), ui0 = canvas.dimensions.uiScale;
+  d2.displayBars = 50; d2.height = 1; canvas.dimensions.uiScale = 1.5; T("t2").bars = { bar1: { visible: true } };
+  const put = (state, tip = "Chance: Spora szansa") => { calls.length = 0; sprites.length = 0; api.markTokens({ id: "ipu.odds", color: "target", tokens: [{ token: "t2", state, tip, badge: { sign, name: "Spora szansa" } }] }); return boardOf("t2"); };
+  const plateOf = () => { let st = null, fill = null; const out = []; for ( const c of calls ) { if ( c[0] === "lineStyle" ) st = c[1]; else if ( c[0] === "beginFill" ) fill = c; else if ( c[0] === "endFill" ) fill = null; else if ( c[0] === "drawRoundedRect" ) out.push({ w: c[3], h: c[4], line: st?.color, fill: fill ? fill[2] : null }); } return out; };
+  const tw = T("t2").w, th = T("t2").h;
+  for ( const state of ["in", "chosen", "caught"] ) {
+    const b = put(state), bg = b?.badge, P = bg?.side, u = b?.u;
+    check(!!bg && !b.label && !b.e.label && b.e.badge?.name === "Spora szansa", `42 ${state}: the sign stands on the token, no pill over it`);
+    check(P >= 24 && P <= 40 && bg.position.x - (P / 2) * u > tw / 2 && bg.position.x + (P / 2 + 1.6) * u <= tw + 1e-6 && bg.position.y > th / 2, `42 ${state}: in the token's bottom right corner, inside its square`);
+    check(bg.position.y + (P / 2 + 1.6) * u <= th - 8 * 1.5 + 1e-6, `42 ${state}: above Foundry's first bar (its height: 8 x the scene's interface scale), never on it`);
+    const pl = plateOf().find((r) => r.w === P && r.h === P);
+    check(!!pl && pl.line === C.target && pl.fill >= 0.9 && plateOf().some((r) => r.w > P && r.fill === null), `42 ${state}: on a dark plate rimmed in the entry's colour, a thin dark line around the rim`);
+    check(sprites.length >= 1 && Math.abs(bg.pic.scale.x * 32 - P * 0.66) < 1e-6, `42 ${state}: the caller's picture on it, two thirds of the plate`);
+    check(state === "caught" ? calls.filter((c) => c[0] === "arc").length === 14 : calls.some((c) => c[0] === "drawCircle") && !calls.some((c) => c[0] === "arc"), `42 ${state}: the plain ring of section 25 around the token as before (no ring in parts)`);
   }
-  const lit = meterOf("in", 1), first = lit.filter((x) => x.color === C2).sort((p, q) => q.width - p.width)[0];
-  check(first.a0 > -Math.PI / 2 && first.a1 < 0, "42: the first full part is the top right quarter (clockwise from the top)");
-  const ch = meterOf("chosen", 2), inC = meterOf("in", 2);
-  check(Math.max(...ch.filter((x) => x.color === C2).map((x) => x.width)) > Math.max(...inC.filter((x) => x.color === C2).map((x) => x.width)), "42: chosen: the full parts heavier");
-  meterOf("chosen", 2);
-  const ticks = calls.filter((c) => c[0] === "lineTo").length;
-  check(ticks === 8, "42: chosen: a tick in each of the four gaps (dark and colour), pointing in");
-  const cg = meterOf("caught", 2).filter((x) => x.color === C2);
-  check(cg.length === 2 * 2 + 2, "42: caught: the full parts dashed (two dashes each), the empty ones as they are");
-  check(api.mapLabels().filter((b) => b.kind === "token").length === 0, "42: a meter is not a label: nothing to lay out");
-  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: Likely", meter: { n: 3, of: 4, name: "Likely" } }] });
+  // no first bar: the badge goes down to the corner
+  const withBar = put("in").badge.position.y;
+  d2.displayBars = 0;
+  const noBar = put("in", "Chance: Spora szansa.").badge.position.y;
+  check(noBar > withBar && Math.abs(noBar - withBar - 8 * 1.5) < 1e-6, "42: a token with no first bar: the badge in the very corner");
+  d2.displayBars = 50; T("t2").bars = { bar1: { visible: false } };
+  check(Math.abs(put("in", "Chance: Spora szansa!").badge.position.y - noBar) < 1e-6, "42: a token whose first bar shows nothing (no maximum): the very corner as well");
+  check(api.mapLabels().filter((b) => b.kind === "token").length === 0, "42: a badge is not a label: nothing to lay out");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: Likely", badge: { sign, name: "Likely" } }] });
   view.fire("pointermove", { clientX: 880, clientY: 80 });
   let tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
-  check(!!tipNow && tipNow.innerHTML.includes("Chance: Likely") && !tipNow.innerHTML.includes("<span>Likely</span>"), "42: a meter's name is not said twice when the tip says it");
-  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: 72%", meter: { n: 3, of: 4, name: "Likely" } }] });
+  check(!!tipNow && tipNow.innerHTML.includes("Chance: Likely") && !tipNow.innerHTML.includes("<span>Likely</span>") && !!boardOf("t2")?.badge, "42: under the pointer the badge stays; its name is not said twice when the tip says it");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: 72%", badge: { sign, name: "Likely" } }] });
   view.fire("pointerleave", {}); view.fire("pointermove", { clientX: 880, clientY: 80 });
   tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
-  check(!!tipNow && tipNow.innerHTML.includes("Likely") && tipNow.innerHTML.includes("72%"), "42: a tip that does not name it (the GM's per cent): the meter's name is said too");
+  check(!!tipNow && tipNow.innerHTML.includes("Likely") && tipNow.innerHTML.includes("72%"), "42: a tip that does not name it (the GM's per cent): the badge's name is said too");
   view.fire("pointerleave", {});
+  api.markTokens({ id: "ipu.a", order: 1, tokens: [{ token: "t2", state: "in", badge: { sign, name: "One" } }] });
+  api.markTokens({ id: "ipu.b", order: 2, tokens: [{ token: "t2", state: "in", label: "x" }] });
+  check(boardOf("t2")?.e.badge?.name === "One" && boardOf("t2").e.label === "x", "42: sets merge: a set without a badge keeps the other's");
+  api.clearTokenMarks("ipu.a"); api.clearTokenMarks("ipu.b");
   api.clearTokenMarks("ipu.odds");
-  check(!boardOf("t2"), "42: marks gone, meter gone");
+  check(!boardOf("t2"), "42: marks gone, badge gone");
+  delete d2.displayBars; delete T("t2").bars; canvas.dimensions.uiScale = ui0;
 }
 
 /* ---- a right click on a thing of the map */
