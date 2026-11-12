@@ -1,4 +1,4 @@
-import { edgeSpot, safeBox } from "./core.mjs";
+import { edgeSpot, safeBox, topEdge } from "./core.mjs";
 import { restyle } from "./screen.mjs";
 
 /**
@@ -94,7 +94,10 @@ function measureSafe() {
   // is (core.safeBox, U70): a dock with its panel and a question open is still a dock.
   let ins = null;
   try { ins = globalThis.game?.modules?.get?.("moinen-maps")?.api?.zones?.uiInsets?.() ?? null; } catch { /* no zones API: Foundry's own columns only */ }
-  return safeBox(innerWidth, innerHeight, { mid: mid?.width ? { left: mid.left, right: mid.right } : null, top: top?.height ? top.bottom : null, bot: bot?.height ? bot.top : null }, ins);
+  // fxz (U192): the map's own strip of who is in orbit ("ORBITA 1", GM only) hangs under the combat module's initiative bar, over the
+  // map's top: it counts with the navigation as Foundry's own top row, so nothing is framed under it
+  const orb = document.getElementById("mm-orbit-strip")?.getBoundingClientRect?.();
+  return safeBox(innerWidth, innerHeight, { mid: mid?.width ? { left: mid.left, right: mid.right } : null, top: topEdge(top, orb), bot: bot?.height ? bot.top : null }, ins);
 }
 /** The screen rects of the open windows (framed ApplicationV2 and the old Application windows), minimised ones left out. */
 export function windowRects() {

@@ -402,6 +402,39 @@ export function safeBox(vw, vh, ui = null, insets = null, { minW = 300, minH = 2
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+/**
+ * fxz: where the GM's director bar stands (bar.mjs measures, this decides): { x, bottom } in client px (left edge; distance of its
+ * bottom edge to the window's). Bottom left, right of Foundry's left column - and right of the players list where that list reaches
+ * the bar's row (#players lies in the left column but is wider than the scene controls, so the column's own edge put the bar over it);
+ * lifted above the hotbar when it would sit on it; kept left of the right column. A spot that would lie over a panel another module
+ * declared (zones uiAvoid: a tactics dock) is traded for the row right above the players list, at its left edge, when that one is clear.
+ *   env { vw, vh, w, h, col, players, right, hot (client rects or null), avoid [{ x0, y0, x1, y1 }] }
+ */
+export function barSpot({ vw, vh, w = 400, h = 32, col = null, players = null, right = null, hot = null, avoid = [] } = {}) {
+  const ok = (r) => r && r.width > 0 && r.height > 0;
+  const over = (x, bottom, b) => { const y1 = vh - bottom, y0 = y1 - h; return b.x0 < x + w && b.x1 > x && b.y0 < y1 && b.y1 > y0; };
+  const blocks = (Array.isArray(avoid) ? avoid : []).filter((b) => b && [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite));
+  const clear = (x, bottom) => !blocks.some((b) => over(x, bottom, b)) && !(ok(players) && over(x, bottom, { x0: players.left, y0: players.top, x1: players.right, y1: players.bottom }));
+  const keepLeft = (x) => (ok(right) ? Math.max(8, Math.min(x, Math.round(right.left) - w - 12)) : x);
+  let bottom = 10, x = ok(col) ? Math.round(col.right + 12) : 100;
+  if ( ok(players) && players.top < vh - bottom && players.bottom > vh - bottom - h ) x = Math.max(x, Math.round(players.right + 12));
+  x = keepLeft(x);
+  if ( ok(hot) && x < hot.right && x + w > hot.left && vh - bottom - h < hot.bottom ) {
+    bottom = Math.round(vh - hot.top + 8);
+    x = keepLeft(Math.max(8, Math.round(hot.left)));
+  }
+  if ( clear(x, bottom) || !ok(players) ) return { x, bottom };
+  const up = { x: keepLeft(Math.max(8, Math.round(players.left))), bottom: Math.round(vh - players.top + 8) };
+  return clear(up.x, up.bottom) ? up : { x, bottom };
+}
+
+/** fxz (U192): the bottom edge of the interface's top row for safeBox's `ui.top`: the navigation and the map's own orbit strip ("ORBITA",
+ * GM only, under a combat module's initiative bar), whichever reaches lower; null when neither shows. Rects: client boxes or null. */
+export function topEdge(...rects) {
+  const b = rects.filter((r) => r && r.height > 0 && r.width > 0 && Number.isFinite(r.bottom)).map((r) => r.bottom);
+  return b.length ? Math.max(...b) : null;
+}
+
 /** The phase of a shot at `now`: "wait" | "lead" | "hold" | "back" | "over". */
 export function phaseAt(s, now) {
   const t = now - s.t0;

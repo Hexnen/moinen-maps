@@ -77,7 +77,22 @@ ok(V.bytesPerTexel(0x1906, 0x1401) === 1, "ALPHA = 1");
   ok(JSON.stringify(U.defaultSpot(null, 122, 1366, 768)) === JSON.stringify({ x: 96, y: 130 }) && JSON.stringify(U.defaultSpot(null, 0, 1366, 768)) === JSON.stringify({ x: 96, y: 92 }), "U5-11: no pin filter: where the filter would stand, below a combat bar declared across the top");
   ok(JSON.stringify(U.defaultSpot(box(900, 500, 224, 100), 0, 1366, 768)) === JSON.stringify({ x: 96, y: 92 }) && U.defaultSpot(box(96, 92, 224, 40), 0, 1366, 768).y === 140, "U5-11: a filter dragged away is not followed; a folded one keeps the card right under it");
   const src = fs.readFileSync(new URL("../scripts/vram-ui.mjs", import.meta.url), "utf8"), fp = fs.readFileSync(new URL("../scripts/filter-panel.mjs", import.meta.url), "utf8");
-  ok(!/getElementById\("players"\)/.test(src) && /defaultSpot\(pins, insetTop, innerWidth, innerHeight\)/.test(src) && /Hooks\.on\("moinenMapsPinPanel"/.test(src) && (fp.match(/Hooks\.callAll\("moinenMapsPinPanel"\)/g) ?? []).length === 2, "U5-11: place() uses defaultSpot (no longer the players list's top) and follows the filter as it comes, goes, folds");
+  ok(/defaultSpot\(pins, insetTop, innerWidth, innerHeight\)/.test(src) && /Hooks\.on\("moinenMapsPinPanel"/.test(src) && (fp.match(/Hooks\.callAll\("moinenMapsPinPanel"\)/g) ?? []).length === 2, "U5-11: place() uses defaultSpot (no longer the players list's top) and follows the filter as it comes, goes, folds");
+}
+
+// 5. fxz (FXW-2): the card opened at its default spot moves right past the panels below it (party column, players list), keeping its top
+{
+  const U = await import("../scripts/vram-ui.mjs");
+  const fs = await import("node:fs");
+  const spot = { x: 96, y: 277 }, W = 264, H = 457;                     // open card as seen live at 1366x768 (277 -> 734)
+  const party = { x0: 0, y0: 380, x1: 170, y1: 664 }, players = { x0: 16, y0: 690, x1: 215, y1: 760 };
+  const o = U.openSpot(spot, W, H, [party, players], 1366, 768);
+  ok(o.moved && o.y === 277 && o.x === 223 && ![party, players].some((b) => b.x0 < o.x + W && b.x1 > o.x && b.y0 < o.y + H && b.y1 > o.y), `FXW-2: open card clears the party column and the players list, same top (x ${o.x})`);
+  ok(JSON.stringify(U.openSpot(spot, W, 90,[party, players], 1366, 768)) === JSON.stringify({ x: 96, y: 277, moved: false }), "FXW-2: a card that ends above the panels (folded) stays at its spot");
+  ok(JSON.stringify(U.openSpot(spot, W, H, [], 1366, 768)) === JSON.stringify({ x: 96, y: 277, moved: false }), "FXW-2: nothing declared, no players list: stays");
+  ok(U.openSpot(spot, W, H, [{ x0: 0, y0: 300, x1: 700, y1: 700 }], 1366, 768).moved === false, "FXW-2: a panel it cannot clear in the left half: stays where it is");
+  const src = fs.readFileSync(new URL("../scripts/vram-ui.mjs", import.meta.url), "utf8");
+  ok(/if \( s\.open \) \(\{ x, y \} = openSpot\(/.test(src) && /uiAvoids/.test(src), "FXW-2: place() uses openSpot for an open card at its default spot only (a dragged card is not moved)");
 }
 
 console.log(fails ? `${fails} failed` : "vram: all ok");

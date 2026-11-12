@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as D from "./director.mjs";
+import { barSpot } from "./core.mjs";
 
 /**
  * THE GM'S DIRECTOR BAR: a small strip at the bottom-left of the canvas during play (GMs only, while the director is on). It says what
@@ -73,7 +74,7 @@ function build() {
   (document.getElementById("interface") ?? document.body).appendChild(el);
   hookId = Hooks.on(D.HOOK, (kind) => { if ( kind !== "event" ) update(); });
   window.addEventListener("resize", place);
-  hotHook = [["renderHotbar", Hooks.on("renderHotbar", () => requestAnimationFrame(place))], ["collapseSidebar", Hooks.on("collapseSidebar", () => setTimeout(place, 300))]];
+  hotHook = [["renderHotbar", Hooks.on("renderHotbar", () => requestAnimationFrame(place))], ["renderPlayers", Hooks.on("renderPlayers", () => requestAnimationFrame(place))],["collapseSidebar", Hooks.on("collapseSidebar", () => setTimeout(place, 300))]];
 }
 export function removeBar() {
   if ( !el ) return;
@@ -82,22 +83,37 @@ export function removeBar() {
   if ( hookId !== null ) Hooks.off(D.HOOK, hookId); hookId = null;
   window.removeEventListener("resize", place);
   for ( const [n, id] of hotHook ?? [] ) Hooks.off(n, id); hotHook = null;
+  ro?.disconnect(); ro = null;
 }
-/** Bottom left, next to Foundry's left column (scene controls, players); lifted above the hotbar when it would sit on it, and kept
- * left of the right column (chat notifications, sidebar). */
+/** Bottom left, next to Foundry's left column (scene controls) and the players list; lifted above the hotbar when it would sit on it,
+ * kept left of the right column (chat notifications, sidebar) and off the panels other modules declared (core.barSpot). */
 function place() {
   if ( !el ) return;
   const rect = (id) => { const r = document.getElementById(id)?.getBoundingClientRect?.(); return r && r.width > 0 && r.height > 0 ? r : null; };
-  const col = rect("ui-left-column-1") ?? rect("scene-controls"), right = rect("ui-right"), hot = rect("hotbar");
-  const w = el.offsetWidth || 400, h = el.offsetHeight || 32;
-  let x = col ? Math.round(col.right + 12) : 100, bottom = 10;
-  if ( right ) x = Math.max(8, Math.min(x, Math.round(right.left) - w - 12));
-  if ( hot && x < hot.right && x + w > hot.left && innerHeight - bottom - h < hot.bottom ) {
-    bottom = Math.round(innerHeight - hot.top + 8);
-    x = Math.max(8, Math.round(hot.left));
-    if ( right ) x = Math.min(x, Math.round(right.left) - w - 12);
-  }
+  let avoid = [];
+  try { avoid = moduleApi.zones?.uiAvoids?.() ?? []; } catch { /* no zones API */ }
+  const { x, bottom } = barSpot({ vw: innerWidth, vh: innerHeight, w: el.offsetWidth || 400, h: el.offsetHeight || 32, col: rect("ui-left-column-1") ?? rect("scene-controls"),
+    players: playersRect(), right: rect("ui-right"), hot: rect("hotbar"), avoid });
   el.style.left = `${x}px`; el.style.bottom = `${bottom}px`;
+  watchPlayers();
+}
+/** fxz: what the players list covers: its element box is the left column's width (72 px at 1920x1080) while its rows - the names,
+ * the latency - stand out of it to ~216 px; the union of the list and its rows (a dozen elements), or null when it is not shown. */
+function playersRect() {
+  const p = document.getElementById("players"); if ( !p ) return null;
+  let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+  for ( const e of [p, ...p.querySelectorAll("li, #performance-stats, #latency, #fps")] ) {
+    const q = e.getBoundingClientRect(); if ( !(q.width > 0 && q.height > 0) ) continue;
+    l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+  }
+  return r > l ? { left: l, top: t, right: r, bottom: b, width: r - l, height: b - t } : null;
+}
+/** The players list grows and shrinks (expanded, a user comes or goes) and the hotbar folds: placed again. */
+let ro = null;
+function watchPlayers() {
+  if ( ro || typeof ResizeObserver !== "function" ) return;
+  ro = new ResizeObserver(() => requestAnimationFrame(place));
+  for ( const id of ["players", "hotbar"] ) { const n = document.getElementById(id); if ( n ) ro.observe(n); }
 }
 
 /** A combat on this scene with the combat stage on: the players' cameras may be parked with the action. */
@@ -170,6 +186,6 @@ export function registerBar() {
   Hooks.on("canvasReady", syncBar);
   Hooks.on("canvasTearDown", removeBar);
   Hooks.on(D.HOOK, (kind) => { if ( kind === "state" ) syncBar(); });
-  for ( const h of ["updateCombat", "deleteCombat", "createCombat"] ) Hooks.on(h, () => { if ( el ) update(); });
+  for ( const h of ["updateCombat", "deleteCombat", "createCombat"] ) Hooks.on(h, () => { if ( el ) { update(); setTimeout(place, 400); } });
   Hooks.on("collapseSidebar", () => setTimeout(place, 50));
 }

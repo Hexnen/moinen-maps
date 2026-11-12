@@ -1,5 +1,6 @@
 // The DIRECTOR's pure parts (scripts/director/core.mjs):   node dev/director.test.mjs
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const D = await import(pathToFileURL(path.join(root, "scripts/director/core.mjs")).href);
@@ -154,6 +155,23 @@ const ev = (o) => D.normEvent({ scene: "s", ...o });
   ok(both.w === 300 && both.x === 350 && both.h === 600, "U70: insets that cross: the least stretch in the middle of them");
   eq(D.safeBox(280, 200, null, { top: 150, bottom: 0, left: 0, right: 250 }), { x: 0, y: 0, w: 280, h: 200 }, "safe rect: a window smaller than the least stretch: the window");
   eq(D.safeBox(1366, 768, ui, { top: NaN, bottom: -5, left: "x", right: null }), { x: 110, y: 40, w: 940, h: 660 }, "safe rect: junk insets count as none");
+  // fxz (U192): the map's own orbit strip under the initiative bar (bar to 80, strip 88-140) is part of the top row: nothing is framed under it
+  const R = (top, bottom, w = 300) => ({ top, bottom, left: 500, right: 500 + w, width: w, height: bottom - top });
+  ok(D.topEdge(R(0, 40), R(88, 140)) === 140 && D.topEdge(R(0, 40), null) === 40 && D.topEdge(null, R(0, 0, 0)) === null, "U192: topEdge = the lower of the navigation and the orbit strip");
+  eq(D.safeBox(1366, 768, { ...ui, top: D.topEdge(R(0, 40), R(88, 140)) }, { top: 80, bottom: 180, left: 0, right: 0 }), { x: 110, y: 140, w: 940, h: 448 }, "U192: the stretch starts under the orbit strip, not under the bar it hangs from");
+  const ov = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../scripts/director/overlay.mjs"), "utf8");
+  // fxz: the director bar is not placed over the players list (1920x1080 GM: column 1 ends at 88, the list reaches 215)
+  const rc = (left, top, right, bottom) => ({ left, top, right, bottom, width: right - left, height: bottom - top });
+  const env = { vw: 1920, vh: 1080, w: 444, h: 32, col: rc(0, 0, 88, 1080), players: rc(16, 930, 215, 1070), right: rc(1600, 0, 1920, 1080), hot: null, avoid: [] };
+  const s1 = D.barSpot(env);
+  ok(s1.bottom === 10 && s1.x === 227, `fxz: right of the players list on the bottom row (x ${s1.x})`);
+  eq(D.barSpot({ ...env, players: rc(16, 700, 215, 900) }), { x: 100, bottom: 10 }, "fxz: a players list that ends above the bar's row does not push it");
+  const dock = { x0: 600, y0: 1000, x1: 1100, y1: 1080 };
+  eq(D.barSpot({ ...env, avoid: [dock] }), { x: 16, bottom: 158 }, "fxz: a declared dock in the way: the row above the players list, at its left edge");
+  eq(D.barSpot({ ...env, avoid: [dock, { x0: 0, y0: 800, x1: 300, y1: 925 }] }), { x: 227, bottom: 10 }, "fxz: nowhere clear: the bottom row beside the list stays");
+  const br = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../scripts/director/bar.mjs"), "utf8");
+  ok(/barSpot\(\{/.test(br) && /players: playersRect\(\)/.test(br) && /querySelectorAll\("li, /.test(br) && /ro\.observe\(n\)/.test(br) && /uiAvoids/.test(br) && /"renderPlayers"/.test(br), "fxz: bar.place() measures the players list and the declared panels");
+  ok(/getElementById\("mm-orbit-strip"\)/.test(ov) && /top: topEdge\(top, orb\)/.test(ov), "U192: overlay.measureSafe passes the orbit strip with the navigation");
 }
 {
   eq(D.edgeSpot({ x: 500, y: 400 }, 1000, 800), { on: true, x: 500, y: 400, a: 0 }, "on screen");

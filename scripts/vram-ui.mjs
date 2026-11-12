@@ -188,6 +188,33 @@ export function defaultSpot(pins, insetTop, vw, vh) {
   return { x, y: top };
 }
 /**
+ * fxz (FXW-2): where the OPEN card stands when it is at its default spot. The details grow down from the spot; when the card would
+ * then lie over a panel below it (the players list, a panel another module declared with zones `uiAvoid`: a party column), it moves
+ * right, past those panels, keeping its top (it stays high on the left, beside them, never over them); a card that cannot clear them
+ * in the left half of the screen stays where it is. Pure: `spot` {x, y}, the card's w / h, `blocks` [{ x0, y0, x1, y1 }] client px.
+ */
+export function openSpot(spot, w, h, blocks, vw, vh) {
+  const list = (Array.isArray(blocks) ? blocks : []).filter((b) => b && [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) && b.x1 > b.x0 && b.y1 > b.y0);
+  const y0 = spot.y, y1 = spot.y + h;
+  const hits = (x) => list.filter((b) => b.x0 < x + w && b.x1 > x && b.y0 < y1 && b.y1 > y0);
+  let x = spot.x;
+  for ( let i = 0; i < 6; i++ ) {
+    const on = hits(x);
+    if ( !on.length ) return { x, y: y0, moved: x !== spot.x };
+    x = Math.round(Math.max(...on.map((b) => b.x1)) + MARGIN);
+    if ( x + w > Math.min(vw - MARGIN, vw / 2 + w / 2) ) break;
+  }
+  return { x: spot.x, y: y0, moved: false };
+}
+/** The panels the open card keeps clear of: the players list and what other modules declared (zones uiAvoid). */
+function openBlocks() {
+  const out = [];
+  try { for ( const b of game.modules.get(MODULE_ID)?.api?.zones?.uiAvoids?.() ?? [] ) out.push(b); } catch {}
+  const p = document.getElementById("players")?.getBoundingClientRect?.();
+  if ( p && p.width > 0 && p.height > 0 ) out.push({ x0: p.left, y0: p.top, x1: p.right, y1: p.bottom });
+  return out;
+}
+/**
  * The card's place: where the user dragged it, else defaultSpot. It grows and shrinks from its bottom edge when a dragged card
  * sits in the lower half of the screen (opening the details never pushes it under the players list), else from its top edge.
  */
@@ -200,6 +227,7 @@ function place() {
     try { insetTop = game.modules.get(MODULE_ID)?.api?.zones?.uiInsets?.()?.top ?? 0; } catch {}
     const pins = document.getElementById("mm-filter")?.getBoundingClientRect() ?? null;
     ({ x, y } = defaultSpot(pins, insetTop, innerWidth, innerHeight));
+    if ( s.open ) ({ x, y } = openSpot({ x, y }, el.offsetWidth, h, openBlocks(), innerWidth, innerHeight));
     watchPins();
   } else if ( Number.isFinite(s.bottom) ) y = innerHeight - s.bottom - h;
   [x, y] = clamp(x, y);
