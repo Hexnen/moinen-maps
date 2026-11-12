@@ -458,6 +458,32 @@ open(sc); tokObjs(); takeSent();
   check(api.uiAvoid("", {})() === undefined && api.uiAvoid("x", null) && api.uiAvoids().length === 0, "41: junk ids and null specs take nothing");
 }
 
+/* ---- section 42 (U133): a caller's sign ON the token, the ring as a meter */
+{
+  const sign = { name: "Likely", img: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E", w: 18, color: 0xffe72a };
+  const cb = BC.cleanBadge({ signs: [sign, sign, sign, sign], at: "zz", size: 99, name: "Likely" });
+  check(cb && cb.pieces.length === 3 && cb.at === "ne" && cb.plate === true && cb.size === 28 && cb.name === "Likely", "42: a badge is cleaned: three signs at most, a spot it knows, a plate unless told, its size held");
+  check(BC.cleanBadge({ signs: ["words only"] }) === null && BC.cleanBadge(null) === null && BC.cleanBadge({ signs: [{ name: "x" }] }) === null, "42: a badge with nothing to draw is none");
+  check(JSON.stringify(BC.cleanBadge(cb)) === JSON.stringify(cb), "42: a badge cleaned again (sent on to another client) stays the same");
+  check(JSON.stringify(BC.cleanMeter({ n: 9, of: 4, name: "Near certain" })) === JSON.stringify({ n: 4, of: 4, name: "Near certain" }) && BC.cleanMeter({ n: 1, of: 1 }) === null && BC.cleanMeter({ of: 4 }) === null, "42: a meter is cleaned: n within 0..of, of 2..12");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", tip: "Chance: Likely", badge: { signs: [sign], name: "Likely", at: "ne" }, marks: ["broken"] }, { token: "h1", state: "chosen", meter: { n: 2, of: 4, name: "Even odds" } }] });
+  const b2 = boardOf("t2"), bh = boardOf("h1");
+  check(!!b2?.badge && !b2.label && b2.badge.position.x > T("t2").w / 2 && b2.badge.position.y < T("t2").h / 2, "42: the badge stands on the token's top right, no pill over the token");
+  check(b2.chips.length === 1 && b2.chips[0].position.y > b2.badge.position.y, "42: the state chips run down the right edge below a badge in the corner");
+  check(!!bh && !bh.badge && !bh.label && bh.e.meter?.n === 2, "42: a meter needs no pill and no badge");
+  check(api.mapLabels().filter((b) => b.kind === "token").length === 0, "42: badges and meters are not labels: nothing to lay out");
+  view.fire("pointermove", { clientX: 880, clientY: 80 });
+  let tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
+  check(!!tipNow && tipNow.innerHTML.includes("Chance: Likely") && !tipNow.innerHTML.includes("<span>Likely</span>"), "42: a badge's name is not said twice when the tip says it");
+  api.markTokens({ id: "ipu.odds", tokens: [{ token: "t2", state: "in", badge: { signs: [sign], name: "Likely" } }] });
+  view.fire("pointerleave", {}); view.fire("pointermove", { clientX: 880, clientY: 80 });
+  tipNow = els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop();
+  check(!!tipNow && tipNow.innerHTML.includes("Likely"), "42: with no tip, the badge's name is the pointer's tip");
+  view.fire("pointerleave", {});
+  api.clearTokenMarks("ipu.odds");
+  check(!boardOf("t2") && !boardOf("h1"), "42: marks gone, badge and meter gone");
+}
+
 /* ---- a right click on a thing of the map */
 const seen = [];
 const downs = (x, y, o = {}) => { let stopped = false; window.fire("pointerdown", { button: 2, clientX: x, clientY: y, target: view, stopImmediatePropagation() { stopped = true; }, ...o }); return stopped; };
