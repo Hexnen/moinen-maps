@@ -52,5 +52,10 @@ check(V.clearY(72, 50, []) === 72 && V.clearY(72, 50, [{ top: 0, bottom: 126 }])
 check(V.clearY(72, 50, [{ top: 0, bottom: 60 }]) === 72 && V.clearY(72, 50, [{ top: 130, bottom: 160 }]) === 72 && V.clearY(72, 50, [{ top: 125, bottom: 160 }]) === 168, "a box clear of it (with the gap) does not move it; one within the gap does");
 check(V.clearY(72, 50, [{ top: 0, bottom: 400 }], 8, 300) === 72, "no room in the upper part: it stays where it was");
 
+// uxd (U160): the banner above a bottom bar goes UP past what lies in its column
+check(V.clearYUp(800, 50, []) === 800 && V.clearYUp(800, 50, [{ top: 830, bottom: 900 }]) === 772 && V.clearYUp(800, 50, [{ top: 830, bottom: 900 }, { top: 700, bottom: 772 }]) === 642, "the banner goes above what it would lie on: a panel, and a panel above that");
+check(V.clearYUp(800, 50, [{ top: 870, bottom: 900 }]) === 800 && V.clearYUp(800, 50, [{ top: 855, bottom: 900 }]) === 797, "a box clear of it (with the gap) does not move it; one within the gap does");
+check(V.clearYUp(800, 50, [{ top: 300, bottom: 900 }], 8, 450) === 800, "no room in the lower part: it stays where it was");
+
 console.log(failed ? `${failed} failed` : "all zones view checks passed");
 process.exit(failed ? 1 : 0);

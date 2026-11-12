@@ -1985,6 +1985,8 @@
   "MOINENMAPS.Zones.pick.cancel": "Anuluj",
 
   "MOINENMAPS.Zones.pick.notHere": "Niedostępna",
+  "MOINENMAPS.Zones.pick.oneWay": "Tylko jeden sposób",
+  "MOINENMAPS.Zones.pick.oneWayHint": "Lewy przycisk: ruch tutaj",
 
   "MOINENMAPS.Zones.pick.more": "jeszcze {n}",
 

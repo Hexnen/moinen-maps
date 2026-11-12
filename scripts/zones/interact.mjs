@@ -252,12 +252,49 @@ export function highlightLabelBoxes() {
 }
 
 const CELL = 40;
-const ours = (e) => !!e?.closest?.(".mm-z-pickway");
+const ours = (e) => !!e?.closest?.(".mm-z-pickway, .mm-z-pick");
+/**
+ * uxd (P3-1, U139): a hit test (`elementFromPoint`) costs about 0.5 ms on a page with a long chat log, because the browser walks every
+ * positioned element of every chat card, wherever the point is. The chat log lies inside the sidebar, whose own boxes answer the same
+ * points the same way (something that is not the map), so for the length of one SYNCHRONOUS look the log is taken out of hit testing
+ * (`visibility: hidden` on the log list, put back before the look returns: no frame is drawn in between, nothing is seen) and each hit
+ * test costs a fraction. Only a log that lies wholly inside an ancestor that itself answers hit tests (checked once per look, at the
+ * log's middle: not the map) and holds no focus is taken out; otherwise the look runs as before. `quietHits.off = false` turns it on.
+ * OFF BY DEFAULT (uxd, measured live on lane 5, 100 chat cards, 1600x900): a full look took ~575 ms with it and ~408 ms without - the
+ * style recalculation of the hidden log (~300 ms forced layout) costs more than the cheaper hit tests save. Kept for a future try.
+ */
+const QUIET_SEL = "#sidebar .chat-log, #chat .chat-log, #chat-log";
+export const quietHits = { off: true, last: 0 };
+function quietly(fn) {
+  if ( quietHits.off || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
+  const hid = [];
+  try {
+    for ( const el of document.querySelectorAll(QUIET_SEL) ) {
+      if ( !el?.isConnected || hid.some((h) => h.el === el || h.el.contains?.(el)) ) continue;
+      if ( document.activeElement && el.contains?.(document.activeElement) ) continue;
+      const r = el.getBoundingClientRect?.();
+      if ( !(r?.width > 0 && r?.height > 0) || getComputedStyle(el).visibility === "hidden" ) continue;
+      hid.push({ el, was: el.style.visibility, prio: el.style.getPropertyPriority?.("visibility") ?? "", r });
+      el.style.setProperty("visibility", "hidden", "important");
+    }
+    // (a log whose place would answer "the map" once it is hidden is put back at once: hiding it must not change an answer)
+    const view = canvas?.app?.view;
+    for ( let i = hid.length - 1; i >= 0; i-- ) {
+      const { r } = hid[i], cx = Math.min(Math.max(r.left + r.width / 2, 0), vw() - 1), cy = Math.min(Math.max(r.top + Math.min(r.height / 2, 200), 0), vh() - 1);
+      const e = document.elementFromPoint(cx, cy);
+      if ( !e || e === view ) { const h = hid.splice(i, 1)[0]; h.el.style.setProperty("visibility", h.was, h.prio); }
+    }
+    quietHits.last = hid.length;
+    return fn();
+  } finally {
+    for ( const h of hid ) { if ( h.was ) h.el.style.setProperty("visibility", h.was, h.prio); else h.el.style.removeProperty("visibility"); }
+  }
+}
 /** The largest stretch of the window with nothing over the map's canvas, found by looking: { x, y, w, h } (to 40 px). null: cannot look. */
 function measureFree() {
   const g = freeGrid();
   if ( !g ) return null;
-  for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i);
+  quietly(() => { for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i); });
   return freeRect(g);
 }
 /** The cells looked at: one per CELL px of the window (null: cannot look). */
@@ -285,19 +322,23 @@ function freeRect(g) {
  * the answer. done(rect | null) as measureFree would answer for a window that did not change meanwhile; done(undefined): the window
  * changed size while looking (that lays the pick out anyway). Returns a function that stops it (done is then never called).
  */
-const FREE_SLICE_MS = 4;
+// uxd (U139): the slice is a share of the page's own frame time - 4 ms on a page that draws 60 frames a second or more, up to 10 ms on
+// one that draws 30 (where a fixed 4 ms made the look take 110 frames, 3.6-5.2 s) - so the look takes about as many frames everywhere
+const FREE_SLICE_MS = 4, FREE_SLICE_MAX = 10, FREE_SLICE_SHARE = 0.25;
+export const freeSlice = (frameMs) => Math.min(FREE_SLICE_MAX, Math.max(FREE_SLICE_MS, (Number(frameMs) || 0) * FREE_SLICE_SHARE));
 function measureFreeSoon(done) {
   const g = freeGrid();
   if ( !g ) { queueMicrotask(() => done(null)); return () => {}; }
-  let i = 0, stop = false, h = null;
+  let i = 0, stop = false, h = null, last = 0;
   const now = () => globalThis.performance?.now?.() ?? Date.now();
   const later = (fn) => (globalThis.document?.visibilityState === "hidden" || typeof requestAnimationFrame !== "function" ? { t: setTimeout(fn, 0) } : { r: requestAnimationFrame(fn) });
   const step = () => {
     h = null;
     if ( stop ) return;
     if ( vw() !== g.W || vh() !== g.H ) { stop = true; done(undefined); return; }
-    const t0 = now();
-    while ( i < g.free.length ) { g.free[i] = freeCell(g, i); i++; if ( now() - t0 >= FREE_SLICE_MS ) break; }
+    const t0 = now(), budget = freeSlice(last ? t0 - last : 0);
+    last = t0;
+    quietly(() => { while ( i < g.free.length ) { g.free[i] = freeCell(g, i); i++; if ( now() - t0 >= budget ) break; } });
     if ( i < g.free.length ) { h = later(step); return; }
     stop = true;
     done(freeRect(g));
@@ -558,7 +599,7 @@ function endPick(result) {
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-const BANNER_TOP = 72, GAP = 8;
+const GAP = 8;
 /** The interface part an element belongs to, as a box: the piece that sits directly on the page (a bar, a panel), else the element itself. */
 function partBox(e) {
   let w = e;
@@ -601,33 +642,43 @@ function unseenBoxes(x0, y0, x1, y1, skip) {
   return out;
 }
 /**
- * Put the banner where nothing else is: under the declared top inset, and below whatever interface part lies at the top middle
- * of the window (a combat tracker, a strip of chips). It stays in the upper half.
+ * Put the banner where nothing else is. uxd (U160, U140): at the BOTTOM of the window, centred on the free stretch, just above the
+ * declared bottom bar (a dock and the panel armed on it) - where the eye and the hand are when a pick starts (the button that armed
+ * it), one place for one action - and above whatever else lies in its column there (found by looking, as before: the armed panel
+ * over the dock, a strip that lets clicks through; not the places a panel keeps for itself while empty). It stays in the lower half
+ * (no room there: it stays where it was). It lets clicks through to the
+ * map (only its Cancel button takes them) and fades while the pointer is under it: a zone under it is seen and picked.
  */
 function placeBanner(p) {
   const el = p.banner;
   if ( !el || !hasDom() || typeof document.elementsFromPoint !== "function" || typeof el.getBoundingClientRect !== "function" ) return;
-  const r = el.getBoundingClientRect(), w = r.width, h = r.height, x0 = (vw() - w) / 2, view = canvas.app.view;
+  const r = el.getBoundingClientRect(), w = r.width, h = r.height, view = canvas.app.view;
   if ( !(w > 0 && h > 0) ) return;
-  const start = Math.max(BANNER_TOP, uiInsets(p.P.inset).top + GAP), maxY = vh() * 0.5;
-  const unseen = unseenBoxes(x0, start - GAP, x0 + w, maxY + h, (e) => e === el || ours(e) || e.classList?.contains("mm-z-tip"));
+  const s = safeNow(p.P.inset, p.way.free), cx = s.w >= w + 2 * GAP ? s.x + s.w / 2 : vw() / 2;
+  const x0 = Math.min(Math.max(cx - w / 2, GAP), Math.max(GAP, vw() - w - GAP));
+  const start = vh() - uiInsets(p.P.inset).bottom - GAP - h, minY = vh() * 0.5;
+  const skip = (e) => e === el || ours(e) || e.classList?.contains("mm-z-tip");
+  const unseen = unseenBoxes(x0, minY - GAP, x0 + w, start + h + GAP, skip);
   let y = start;
-  for ( let n = 0; n < 8; n++ ) {
-    const boxes = [...unseen];
-    for ( let j = 0; j < 3; j++ ) for ( let i = 0; i < 7; i++ ) {
-      const px = x0 + 2 + ((w - 4) * i) / 6, py = y - GAP + 1 + ((h + 2 * GAP - 2) * j) / 2;      // the gap around it is looked at too
-      for ( const e of document.elementsFromPoint(px, py) ) {
-        if ( e === view || e === document.body || e === document.documentElement ) break;
-        if ( el.contains(e) || ours(e) || e.classList?.contains("mm-z-tip") ) continue;
-        const b = partBox(e); boxes.push({ top: b.top, bottom: b.bottom });
-        break;
+  quietly(() => {
+    for ( let n = 0; n < 8; n++ ) {
+      const boxes = [...unseen];
+      for ( let j = 0; j < 3; j++ ) for ( let i = 0; i < 7; i++ ) {
+        const px = x0 + 2 + ((w - 4) * i) / 6, py = y - GAP + 1 + ((h + 2 * GAP - 2) * j) / 2;      // the gap around it is looked at too
+        for ( const e of document.elementsFromPoint(px, py) ) {
+          if ( e === view || e === document.body || e === document.documentElement ) break;
+          if ( el.contains(e) || skip(e) ) continue;
+          const b = partBox(e); boxes.push({ top: b.top, bottom: b.bottom });
+          break;
+        }
       }
+      const next = View.clearYUp(y, h, boxes, GAP, minY);
+      if ( next === y ) break;
+      y = next;
     }
-    const next = View.clearY(y, h, boxes, GAP, maxY);
-    if ( next === y ) break;
-    y = next;
-  }
-  el.style.top = `${Math.round(y)}px`;
+  });
+  el.style.left = `${Math.round(x0 + w / 2)}px`; el.style.top = `${Math.round(y)}px`;
+  p.bannerBox = { x0, y0: y, x1: x0 + w, y1: y + h };
 }
 
 const CHEVRON = { top: "fa-chevron-up", bottom: "fa-chevron-down", left: "fa-chevron-left", right: "fa-chevron-right" };
@@ -640,13 +691,13 @@ function updateWay(p) {
   w.safe = safeNow(p.P.inset, w.free);
   w.hidden = [];
   // (any zone may be picked: there is always one in reach - nothing to lead to)
-  if ( Z && p.P.zones && p.P.reveal !== false ) for ( const id of p.allowed.keys() ) {
+  if ( Z && p.P.zones && p.P.reveal !== false ) quietly(() => { for ( const id of p.allowed.keys() ) {
     const z = Z.zones[id];
     if ( !z || reachable(z) ) continue;
     // (its side: the edge of the free stretch its label lies beyond - under a window inside the stretch: the edge it is nearest to)
     const at = toClient(z.label);
     w.hidden.push({ id, at, side: View.sideOf(at, w.safe, true) });
-  }
+  } });
   const count = { top: 0, right: 0, bottom: 0, left: 0 };
   for ( const hd of w.hidden ) count[hd.side]++;
   const s = w.safe, br = p.banner?.getBoundingClientRect?.() ?? null;
@@ -666,11 +717,13 @@ function updateWay(p) {
       chip.innerHTML = `<i class="fa-solid ${CHEVRON[side]}" inert></i><span>${esc(L("pick.more", { n: count[side] }))}</span>`;
       chip.setAttribute("aria-label", text); chip.dataset.tooltip = text; chip.dataset.tooltipDirection = side === "bottom" ? "UP" : side === "top" ? "DOWN" : side === "left" ? "RIGHT" : "LEFT";
     }
-    // on its edge of the free stretch, as near the middle of the window as the stretch lets it; the top one under the banner when that lies there
+    // on its edge of the free stretch, as near the middle of the window as the stretch lets it; clear of the banner where that lies
+    // on the same edge (uxd: the banner stands at the bottom - the bottom chip goes above it)
     const mid = (c, a, len) => Math.min(Math.max(c, a + Math.min(70, len / 2)), a + len - Math.min(70, len / 2));
     let x = mid(vw() / 2, s.x, s.w), y = mid(vh() / 2, s.y, s.h);
-    if ( side === "top" ) y = Math.max(s.y, br && br.right > x - 40 && br.left < x + 40 ? br.bottom : 0) + GAP;
-    else if ( side === "bottom" ) y = s.y + s.h - GAP;
+    const onBanner = !!br && br.width > 0 && br.right > x - 60 && br.left < x + 60, half = s.y + s.h / 2;
+    if ( side === "top" ) y = Math.max(s.y, onBanner && br.top < half ? br.bottom : 0) + GAP;
+    else if ( side === "bottom" ) y = Math.min(s.y + s.h, onBanner && br.bottom > half ? br.top : Infinity) - GAP;
     else if ( side === "left" ) x = s.x + GAP;
     else x = s.x + s.w - GAP;
     chip.style.left = `${Math.round(x)}px`; chip.style.top = `${Math.round(y)}px`;
@@ -679,8 +732,40 @@ function updateWay(p) {
   if ( w.first ) {
     w.first = false;
     if ( p.P.zones && p.P.reveal === "fit" ) reveal([...p.allowed.values()].map((e) => e.zone), { inset: p.P.inset, fit: true });
+    // uxd (U142): a move pick whose zones lie partly out of reach - the camera frames the mover with the nearest of them (as many as
+    // fit at the user's zoom; the director's frame: the user's camera switch, the hand rule, never a zoom change), so the zones on
+    // offer show without a hunt for the "N more" chip. Nothing in reach at all and the camera did not move: the nearest, as before.
+    else if ( w.hidden.length && pickFocus(p) ) framePick(p).then((r) => { if ( PICK === p && !r?.ok && r?.reason !== "replaced" && w.hidden.length === p.allowed.size ) leadTo(p, null); });
     else if ( w.hidden.length && w.hidden.length === p.allowed.size ) leadTo(p, null);
   }
+}
+/** The mover of a move pick (board.mjs pickMove: `ext.token`), as a token this client draws, or null. */
+function pickFocus(p) {
+  const id = p?.P?.ext?.token ?? null, d = id ? canvas.scene?.tokens?.get?.(id) : null;
+  return d?.object && !d.object.destroyed ? d : null;
+}
+/** The zones a pick offers, nearest to its mover first (scene distance from the token's middle to the zone's label point): [key]. */
+function nearestZones(p, d) {
+  const Z = Zones.zones(), g = Zones.gridSize(), c = { x: d.x + ((d.width ?? 1) * g) / 2, y: d.y + ((d.height ?? 1) * g) / 2 };
+  const out = [];
+  for ( const [id, e] of p.allowed ) { const z = Z?.zones?.[id]; if ( z?.label ) out.push({ k: e.zone, d: Math.hypot(z.label.x - c.x, z.label.y - c.y) }); }
+  return out.sort((a, b) => a.d - b.d).map((o) => o.k);
+}
+/**
+ * What the director's `frame` adds while a move pick runs: a frame asked for the pick's mover with no zones of its own (a combat
+ * module showing "its" unit when Move is armed) takes the pick's nearest zones along, so both frames ask for the same view and the
+ * later one does not undo the earlier. null: nothing to add.
+ */
+export function pickFrame(focusId) {
+  const p = PICK, d = p ? pickFocus(p) : null;
+  if ( !d || d.id !== focusId || !p.P.zones || p.P.reveal === false || !p.way.hidden.length ) return null;
+  return { zones: nearestZones(p, d), fit: "near" };
+}
+function framePick(p) {
+  const d = pickFocus(p), frame = globalThis.game?.modules?.get?.(MODULE_ID)?.api?.zones?.frame;
+  if ( !d || typeof frame !== "function" ) return Promise.resolve(null);
+  return Promise.resolve(frame({ tokens: [d.id], zones: nearestZones(p, d), fit: "near", level: "turn", hand: true, why: "pick" })).catch(() => null)
+    .then((r) => { if ( PICK === p ) scheduleWay(p, 0); return r; });
 }
 /** Look again a little later (a pan, a bar that opened): once per `ms`, however often it is asked (a sooner asking wins). */
 function scheduleWay(p, ms = 150) {
@@ -706,10 +791,11 @@ function leadTo(p, side) {
   if ( key ) reveal(key, { inset: p.P.inset }).then(() => scheduleWay(p, 0));
 }
 /** The banner, the free stretch and the chips, laid out for the screen as it is now. */
-function layoutPick(p) {
+function layoutPick(p, free = undefined) {
   if ( PICK !== p || !hasDom() ) return;
+  // (the free stretch first: the banner is centred on it. `free`: a look spread over frames has just found it - not looked at again)
+  p.way.free = free === undefined ? measureFree() : free;
   placeBanner(p);
-  p.way.free = measureFree();
   updateWay(p);
 }
 /**
@@ -744,6 +830,73 @@ function pushAt(p, at) {
   st.raf = requestAnimationFrame(step);
 }
 
+/** uxd (U140): the banner lets clicks through; while the pointer is under it, it fades so the zone under it shows. */
+function underBanner(p, at) {
+  const el = p.banner, b = p.bannerBox;
+  if ( !el?.classList ) return;
+  el.classList.toggle("is-under", !!(at && b && at.x >= b.x0 - 4 && at.x <= b.x1 + 4 && at.y >= b.y0 - 4 && at.y <= b.y1 + 4));
+}
+/**
+ * A right click on the map while a pick runs (D130). On a zone on offer that has another way (board.mjs pickMove `alt`): the pick
+ * answers with `alt: true`. On a zone on offer with NO other way, in a pick that has other ways at all: the pick stays and the tip
+ * says that a left click makes the move (before: the pick was given up, and a menu of another module opened over the map). Anywhere
+ * else - and in a pick that knows no other ways (an area, a plain pick) - it gives the pick up, as Escape does.
+ */
+function rightClick(p, ev) {
+  if ( PICK !== p || !canvas?.ready ) return;
+  const pt = canvas.canvasCoordinatesFromClient({ x: ev.clientX, y: ev.clientY }), id = Zones.zonesApi.zoneAt(pt.x, pt.y), e = p.allowed.get(id);
+  const alt = p.P.ext?.alt;
+  if ( e && alt?.(e) ) { const place = Zones.placeOf(e.spot) ?? Zones.placeOf(e.zone); endPick({ ok: true, zone: e.zone, id, spot: place?.spot ?? e.zone, place, x: pt.x, y: pt.y, alt: true }); return; }
+  if ( e && typeof alt === "function" ) { oneWay(p, { x: ev.clientX, y: ev.clientY }); return; }
+  endPick({ ok: false, reason: "cancelled" });
+}
+/** The tip at the pointer says, for a moment, that this zone has one way only (a left click makes it). */
+function oneWay(p, at) {
+  if ( !p.tip ) { p.tip = document.createElement("div"); p.tip.className = "mm-z-tip mm-z-pick-tip"; document.body.append(p.tip); }
+  p.tip.classList.remove("no");
+  p.tip.innerHTML = `<b>${esc(L("pick.oneWay"))}</b><small>${esc(L("pick.oneWayHint"))}</small>`;
+  placeTip(p.tip, at);
+  // (the next pointer move shows the zone's own tip again)
+  p.hover = -2;
+}
+/**
+ * D130: while a pick runs, a right press on the map is the pick's ALONE - Foundry (the token HUD) and other modules listening on the
+ * window (a power menu opened by a right click on the map) never see it. A drag still pans the map (done here, as Foundry would); a
+ * click goes to rightClick. Listening on the window in the capture phase from the module's first moment, so it comes before any
+ * listener another module adds later; nothing is done while no pick runs.
+ */
+let guard = null;
+function onGuardDown(ev) {
+  const p = PICK;
+  if ( !p || ev.button !== 2 || !canvas?.ready || ev.target !== canvas.app?.view ) return;
+  ev.stopImmediatePropagation?.(); ev.preventDefault?.();
+  if ( guard ) guard.off();
+  const g = guard = { x: ev.clientX, y: ev.clientY, x0: ev.clientX, y0: ev.clientY, drag: false, off: null };
+  const move = (e) => {
+    if ( guard !== g ) return;
+    if ( !g.drag && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) < 5 ) return;
+    const dx = e.clientX - g.x, dy = e.clientY - g.y;
+    g.drag = true;
+    const s = canvas.stage.scale.x;
+    canvas.pan({ x: canvas.stage.pivot.x - dx / s, y: canvas.stage.pivot.y - dy / s });
+    g.x = e.clientX; g.y = e.clientY;
+  };
+  const up = (e) => {
+    if ( guard !== g || e.button !== 2 ) return;
+    g.off();
+    e.stopImmediatePropagation?.(); e.preventDefault?.();
+    // (the context menu event that follows the button coming up is the pick's too)
+    const ctx = (c) => { c.preventDefault?.(); c.stopImmediatePropagation?.(); };
+    window.addEventListener("contextmenu", ctx, true);
+    setTimeout(() => window.removeEventListener("contextmenu", ctx, true), 400);
+    if ( !g.drag && PICK === p ) rightClick(p, e);
+  };
+  g.off = () => { if ( guard === g ) guard = null; window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true); };
+  window.addEventListener("pointermove", move, true);
+  window.addEventListener("pointerup", up, true);
+}
+if ( typeof globalThis.window?.addEventListener === "function" ) globalThis.window.addEventListener("pointerdown", onGuardDown, true);
+
 function startPick() {
   const p = PICK, view = canvas.app.view;
   // the banner: what is asked, how to answer, a way out
@@ -765,14 +918,26 @@ function startPick() {
   if ( hasDom() ) {
     layoutPick(p);
     const again = setTimeout(() => layoutPick(p), 420);
-    // (perf3: the look is spread over frames - measureFreeSoon; a stretch found changed is laid out at once, as before)
-    let looking = null;
-    const watch = setInterval(() => {
-      if ( looking ) return;
-      looking = { stop: null };
-      const me = looking;
-      me.stop = measureFreeSoon((f) => { if ( looking === me ) looking = null; if ( f === undefined || PICK !== p ) return; if ( !sameFree(f, p.way.free) ) layoutPick(p); });
-    }, 1500);
+    // (perf3: the look is spread over frames - measureFreeSoon; a stretch found changed is laid out at once, as before. uxd, U139:
+    // with what that look found - not looked at again in one go - and a window of Foundry's that opens or closes, or the sidebar
+    // folding, starts a look at once (and once more when its animation is over) instead of waiting for the next 1.5 s tick)
+    let looking = null, more = false;
+    const look = () => {
+      if ( PICK !== p ) return;
+      if ( looking ) { more = true; return; }
+      const me = looking = { stop: null };
+      me.stop = measureFreeSoon((f) => {
+        if ( looking === me ) looking = null;
+        if ( PICK !== p ) return;
+        if ( f !== undefined && !sameFree(f, p.way.free) ) layoutPick(p, f);
+        if ( more ) { more = false; look(); }
+      });
+    };
+    const watch = setInterval(look, 1500);
+    const kicks = new Set(), kick = () => { if ( PICK !== p ) return; for ( const ms of [60, 450] ) { const t = setTimeout(() => { kicks.delete(t); look(); }, ms); kicks.add(t); } };
+    const KICKS = ["renderApplicationV2", "closeApplicationV2", "renderApplication", "closeApplication", "collapseSidebar", "changeSidebarTab"];
+    const kickIds = KICKS.map((k) => [k, Hooks.on(k, kick)]);
+    p.offs.push(() => { for ( const t of kicks ) clearTimeout(t); kicks.clear(); }, () => { for ( const [k, id] of kickIds ) Hooks.off(k, id); });
     const onPan = () => scheduleWay(p), onSize = () => layoutPick(p);
     Hooks.on("canvasPan", onPan);
     window.addEventListener("resize", onSize);
@@ -805,9 +970,9 @@ function startPick() {
   const onMove = (ev) => {
     p.at = { x: ev.clientX, y: ev.clientY };
     if ( p.raf ) return;
-    p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); pushAt(p, p.at); });
+    p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); pushAt(p, p.at); underBanner(p, p.at); });
   };
-  const onLeave = () => { p.at = null; setHover(-1, { x: 0, y: 0 }); pushAt(p, null); };
+  const onLeave = () => { p.at = null; setHover(-1, { x: 0, y: 0 }); pushAt(p, null); underBanner(p, null); };
   // (the map slid under a pointer that did not move: what is under it now)
   const onSlid = () => { if ( p.way.push && p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y }); };
   Hooks.on("canvasPan", onSlid);
@@ -821,13 +986,9 @@ function startPick() {
   };
   const onUp = (ev) => {
     if ( ev.button === 2 ) {
+      // (a right press the guard did not take - pickGuard: it always does on a page; this path stays for a press it never saw)
       const r = p.rdown; p.rdown = null;
-      if ( r && Math.hypot(ev.clientX - r.x, ev.clientY - r.y) < 5 && ev.target === view ) {
-        // (a right-click on a zone on offer that has another way: the caller is told so - board.mjs pickMove; anywhere else it gives up)
-        const pt = world(ev), id = zoneAt(pt), e = p.allowed.get(id);
-        if ( e && p.P.ext?.alt?.(e) ) { const place = Zones.placeOf(e.spot) ?? Zones.placeOf(e.zone); endPick({ ok: true, zone: e.zone, id, spot: place?.spot ?? e.zone, place, x: pt.x, y: pt.y, alt: true }); }
-        else endPick({ ok: false, reason: "cancelled" });
-      }
+      if ( r && Math.hypot(ev.clientX - r.x, ev.clientY - r.y) < 5 && ev.target === view ) rightClick(p, ev);
       return;
     }
     if ( ev.button !== 0 || !p.down ) return;
@@ -947,7 +1108,9 @@ export const interactApi = {
   uiInset, uiInsets, safeArea, reveal,
   /** Parts of the screen the map's menus and its "My view" chip keep clear of (section 41). */
   uiAvoid, uiAvoids,
-  HIGHLIGHT_COLORS: HL.COLORS, highlightLib: HL
+  HIGHLIGHT_COLORS: HL.COLORS, highlightLib: HL,
+  /** (internal, for the director's frame: what a running move pick adds to a frame of its mover - section 38) */
+  _pickFrame: pickFrame
 };
 
 export function registerInteract() {

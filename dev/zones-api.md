@@ -797,21 +797,23 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
 
 - The promise always resolves, never rejects. A spot in `zones` is the place the answer carries; a bare key answers with the
   zone's ground level.
-- While picking: the zones on offer show in their colour with their label, the rest of the map is dimmed, a banner at the top
-  carries the title, the hint and a Cancel button, the pointer says whether the zone under it can be picked and shows its
-  `tip`, the zone under the pointer is lit. A click on a zone on offer picks it; Escape, a right-click or Cancel gives up; a
-  right-drag still pans and the wheel still zooms. A new pick replaces the running one (`replaced`).
+- While picking: the zones on offer show in their colour with their label, the rest of the map is dimmed, a banner above the
+  bottom bar carries the title, the hint and a Cancel button, the pointer says whether the zone under it can be picked and
+  shows its `tip`, the zone under the pointer is lit. A click on a zone on offer picks it; Escape, a right-click or Cancel
+  gives up (in a move pick a right click on a zone with one way only keeps the pick: section 43); a right-drag still pans
+  and the wheel still zooms. While a pick runs no other module sees a right press on the map (section 43). A new pick replaces the running one (`replaced`).
 - The zones on offer follow the map: when lines change mid-pick the offer is counted again; a scene change ends the pick -
   also the pick this client asked of another user (`sceneChanged`; that user's client is told to stop), and a pick asked
   by a GM who disconnects ends on the asked client (`userGone`). One zone is offered on one level at a time (section 36).
 - Asked of another user, the request goes to that user alone and the answer comes back to the asker alone; the user leaving
   resolves with `userGone`. A pick request is taken from a GM only. `inset`, `reveal` and `edgePan` go along (the insets
   declared with `api.uiInset` are each client's own).
-- **The banner keeps clear.** It sits at the top middle, below the declared top inset (`api.uiInset`, the pick's `inset`) and
-  below whatever interface part it would lie on there (a combat tracker, a strip of chips): found by looking at what is over
-  the map at that spot, so a module that declares nothing is avoided too. A bar that lets clicks through (`pointer-events:
-  none`, as a tracker on a player's screen) is avoided by what it draws there. It stays in the upper half of the window. It is
-  placed when the pick starts, again 0.4 s later, on a window resize and when the free stretch is found changed.
+- **The banner keeps clear** (since section 43 at the bottom). It sits centred on the free stretch, above the declared bottom
+  inset (`api.uiInset`, the pick's `inset`) and above whatever interface part it would lie on there (an armed-action panel, a
+  dock): found by looking at what is over the map at that spot, so a module that declares nothing is avoided too. A bar that
+  lets clicks through (`pointer-events: none`) is avoided by what it draws there. It stays in the lower half of the window. It
+  lets clicks through to the map (only Cancel takes them) and fades to 14 % while the pointer is under it. It is placed when
+  the pick starts, again 0.4 s later, on a window resize and when the free stretch is found changed.
 - **Zones no click can reach.** A zone on offer is in reach when some point of it is in the window with nothing over the map's
   canvas there (part of a large zone showing beside a bar is enough). The others - under a bar, a panel or a window, or off
   the screen - are counted per side of the free stretch (section 23) on a small chip at that edge: an arrow and "2 more". A
@@ -821,8 +823,9 @@ api.cancelPick();                     // give it up; ({ user }) the pick a GM as
   into view at once. `reveal: "fit"`: as the pick starts the view moves - and zooms out when it has to - so that every zone on
   offer is in the free stretch. `reveal: false`: no chips, the view is never moved. A pick of any zone (`zones` absent)
   shows no chips.
-- Nothing runs per frame: reach is counted when the pick starts, 0.15 s after a pan or zoom, and when a look every 1.5 s
-  finds the free stretch changed (a panel opened or closed).
+- Nothing runs per frame: reach is counted when the pick starts, 0.15 s after a pan or zoom, and when a look (every 1.5 s,
+  and at once when a Foundry window opens or closes or the sidebar changes: section 43) finds the free stretch changed (a
+  panel opened or closed).
 
 ## 19. The rules driver: the map's rule mechanics as display (gap G-Z9)
 
@@ -1350,7 +1353,9 @@ What it does, always:
 
 - **never changes the zoom**; the zoom is the user's;
 - **nothing moves** when the focus stands in the free stretch of the screen (section 23: Foundry's middle column less the
-  declared `uiInset`s and windows), 5 % inside its edge;
+  declared `uiInset`s and windows, narrowed by the `uiAvoid` boxes as a window narrows it: section 43), 5 % inside its edge;
+- `fit: "near"` (given with `zones`, nearest first): the focus and as many of the first zones as fit at the user's zoom
+  (section 43: the move pick frames its mover this way);
 - otherwise **the least slide** that puts the subject 14 % inside the free stretch; several subjects come in together when
   they fit at the user's zoom, else the focus whole and the frame leaning toward the others;
 - before it glides it waits until the page draws evenly again (two even frames, at most 0.7 s): what calls for a frame (a
@@ -1734,3 +1739,25 @@ How it is drawn:
   caller that wants a fallback keeps a `label`.
 - The ring as a meter (`meter: { n, of, name }`, the look rolled out by mistake before) is gone: an entry's `meter` is dropped when
   it is cleaned.
+
+## 43. The map side of the first UX review (uxd: U142, D130, U139, P3-1, U140, U160)
+
+Rows U139-U142, U160, P3-1 of `invincible-plus-ultra/dev/combat-usability.md` and D130 of `combat-defects.md`. Wiring:
+`zones/interact.mjs` (the pick: banner, right clicks, looks, framing), `director/stage-core.mjs` (`avoidRect`, `framePlan`
+`fit: "near"`), `director/source-stage.mjs` (`frame`), `zones/view.mjs` (`clearYUp`), `styles/maps.css`. Checks: the "uxd"
+checks of `dev/zones-interact.test.mjs`, `dev/director-frame.test.mjs`, `dev/zones-view.test.mjs`.
+
+| | Before | Now |
+| --- | --- | --- |
+| `frame` (section 38) and a panel declared with `uiAvoid` (a GM's desk, a challenges band, a party panel) | the panel did not count: a token under the desk stood "in the free stretch", nothing moved (U142: an NPC's turn on the GM's seat left the NPC under the desk) | the free stretch is narrowed by the `uiAvoid` boxes the way a window narrows it (`avoidRect`: the largest part beside, above or below a box that is still 280 x 200 px; a box that leaves no such part is passed over) |
+| a move pick (`pickMove`) whose zones on offer lie partly out of reach | nothing moved unless NONE was in reach; the rest behind a "N more" chip | as it starts, `frame({ tokens: [mover], zones: nearest first, fit: "near", hand: true })`: the mover and as many of the nearest zones as fit at the user's zoom come into the free stretch (the user's camera switch, the hand rule, never a zoom change: section 38). Nothing in reach and the frame did not move: the nearest is brought in, as before |
+| a frame of the mover of a running move pick that names no zones (a combat module showing "its" unit when Move is armed) | framed the token alone and, coming later, undid the pick's view | takes the pick's nearest zones along (`fit: "near"`): one view |
+| a right press on the map while a pick runs | Foundry and other modules saw it too: a right click opened another module's menu over the pick (D130: the power menu of moinen-pixel-vfx) | the pick's alone: taken on the window in the capture phase from the module's first moment (before any listener added later); a drag pans the map (done by the map), a click goes to the pick |
+| a right click on a zone on offer with NO other way, in a move pick (`ext.alt`) | gave the pick up | the pick stays; the tip at the pointer says "One way only / Left click: move here" (`pick.oneWay`, `pick.oneWayHint`) |
+| a right click on a zone with another way / off the offer / in a pick without other ways | `alt: true` / gives up / gives up | the same |
+| the pick's banner | top middle under the top inset, took clicks (U140: it lay over a zone; U160: the instruction at the top, the armed panel at the bottom) | bottom, centred on the free stretch, just above the bottom inset and what lies there (the armed panel), lower half; lets clicks through (only Cancel takes them); fades to 14 % while the pointer is under it; the bottom "N more" chip stands above it |
+| the look for the free stretch while a pick runs (U139) | every 1.5 s, cut into fixed 4 ms slices (110 frames at 30 frames a second: 3.6-5.2 s; a stale chip stayed 7.6 s); a change found was measured AGAIN in one go | slices of a quarter of the page's frame time (4..10 ms); a Foundry window opened or closed (`renderApplicationV2`, `closeApplicationV2`, v1 `renderApplication` / `closeApplication`), the sidebar folded or its tab changed start a look at once (+60 ms, again at +450 ms); a change is laid out with what the look found |
+| a hit test with a long chat log (P3-1) | ~0.5 ms each: the browser walks every positioned element of every chat card | during each synchronous look (start, +0.42 s, each slice, the reach count, the banner's placing) the sidebar's chat log list is taken out of hit testing (`visibility: hidden !important`, put back before the look returns: no frame is drawn in between); a log that holds the focus, or whose place would then answer "the map", is left as it is. OFF BY DEFAULT: measured live (lane 5, 100 cards) a full look took ~575 ms with it and ~408 ms without (the hidden log's style recalculation, ~300 ms forced layout, costs more than the hit tests save); `quietHits.off = false` (exported from interact.mjs) turns it on for a future try |
+
+For the caller: nothing to change. A combat module that shows its own instruction for an armed action can still pass
+`banner: false`. There is no switch back to the top banner (provisional: plus-ultra `dev/combat-questions.md`, "UXD").

@@ -321,13 +321,18 @@ async function settled(id) {
     await sleep(120);
   }
 }
+/** The boxes other modules asked the map to keep clear of (zones api `uiAvoids`, client px), or none. */
+function avoidBoxes() { try { return moduleApi.zones?.uiAvoids?.() ?? []; } catch { return []; } }
+/** What a running move pick adds to a frame of its mover (zones api `_pickFrame`), or null. */
+function pickFrameFor(id) { try { return moduleApi.zones?._pickFrame?.(id) ?? null; } catch { return null; } }
 /**
  * frame({ tokens, zones, points, fit = true, level = "turn", hand = false, after, why })
  *   tokens  token ids / documents / placeables, THE FOCUS FIRST (where it lands); one this client's canvas does not draw (hidden from
  *           this user, out of its sight) is left out, and a frame whose focus is such a token does nothing ("unseen"): the view never
  *           moves toward what this user cannot see, whatever the caller names
  *   zones   zone keys (framed by their label point); points [{ x, y }] scene px
- *   fit     bring all of them in when they fit at the user's zoom (the zoom is never changed); false: the focus alone
+ *   fit     bring all of them in when they fit at the user's zoom (the zoom is never changed); false: the focus alone; "near": the
+ *           focus and as many of the others, in the order given, as fit with it
  *   level   "turn" (plays for "turn" and "all") | "all" (only for a user who chose "all")
  *   hand    it answers the user's own act on this client (a unit chosen, a target walked to): the quiet time after the user's own
  *           camera move does not stop it, and it leaves no "My view" to go back to
@@ -355,12 +360,18 @@ export async function frame(spec = {}) {
     const ids = (Array.isArray(spec.tokens) ? spec.tokens : []).map(idOf).filter(Boolean).slice(0, 12), pad = grid() * 0.5;
     const boxes = SC.frameSubjects(ids, (id) => { const t = seenTok(id); return t ? tokenBox(t, pad) : null; });
     if ( !boxes ) return no("unseen");
-    for ( const k of (Array.isArray(spec.zones) ? spec.zones : []).slice(0, 8) ) { const b = zoneBox(k); if ( b ) boxes.push(b); }
+    // uxd (U142): a frame of the mover of a running move pick that names no zones takes the pick's nearest zones along (zones/interact
+    // pickFrame), so a combat module's "show my unit" and the pick's own frame ask for one view
+    let zones = Array.isArray(spec.zones) ? spec.zones : [], fit = spec.fit === "near" ? "near" : spec.fit !== false;
+    if ( !zones.length && ids.length ) { const add = pickFrameFor(ids[0]); if ( add ) { zones = add.zones; fit = add.fit; } }
+    for ( const k of zones.slice(0, 8) ) { const b = zoneBox(k); if ( b ) boxes.push(b); }
     for ( const p of (Array.isArray(spec.points) ? spec.points : []).slice(0, 8) ) if ( Number.isFinite(p?.x) && Number.isFinite(p?.y) ) boxes.push({ x0: p.x - pad, y0: p.y - pad, x1: p.x + pad, y1: p.y + pad });
     if ( !boxes.length ) return no("noSubject");
-    const rect = freeRect();
-    if ( rect.covered ) return no("covered");                                    // (a window covers the map: nothing is moved behind it)
-    const v = viewNow(), plan = SC.framePlan(boxes, v, rect, { fit: spec.fit !== false });
+    const free = freeRect();
+    if ( free.covered ) return no("covered");                                    // (a window covers the map: nothing is moved behind it)
+    // uxd (U142): and not under a panel another module asked the map to keep clear of (a GM's desk, a challenges band)
+    const rect = SC.avoidRect(free, avoidBoxes());
+    const v = viewNow(), plan = SC.framePlan(boxes, v, rect, { fit });
     if ( !plan ) return no("noSubject");
     if ( !plan.moved ) return say({ ok: true, moved: false });
     const lim = typeof canvas._constrainView === "function" ? canvas._constrainView({ x: plan.x, y: plan.y, scale: plan.scale }) : plan;
