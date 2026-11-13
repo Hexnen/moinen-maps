@@ -699,6 +699,9 @@ export function isEcho(g, recent, grid = 100) {
   // (a PHASE of an explosion - its shock wave riding out, its debris landing - is the next beat of that sound's story, not an echo of
   // it: each reaches the gathering at its own moment, after the boom has played, and is lettered then)
   if ( g.members.every((e) => e.phase) ) return false;
+  // (a shooter's report at the muzzle is its own source, never an echo of its rounds' impacts landing a few ms after it - live: the
+  // impacts were gathered first and swallowed the report)
+  if ( g.main.voice === "muzzle" ) return false;
   // (fires going out one after another - a bomb's burning debris dying patch by patch - hiss once: the next hiss waits OUT_GAP_MS)
   if ( g.main.voice === "out" && recent.some((r) => r.voice === "out" && Math.abs(g.t - r.t) < OUT_GAP_MS) ) return true;
   return recent.some((r) => g.t - r.t >= -50 && g.t - r.t < ECHO_MS && r.prio >= p && Math.hypot(g.x - r.x, g.y - r.y) < r.reach + g.span * 0.5 + grid);

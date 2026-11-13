@@ -286,6 +286,7 @@ group("SHOT", () => {
   const hit = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, shot: true, key: "g", sid: "g" });
   const free = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, key: "g2", sid: "g2" });
   ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "ricochet" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
+  ok(!C.isEcho(C.cluster([me], G)[0], [{ x: me.x + 300, y: me.y, reach: 2000, t: me.t + 20, prio: 7, voice: "gunhit" }], G), "SHOT the report is never swallowed as an echo of its impacts (live: it was)");
   ok(C.planCluster(C.cluster([free], G)[0], { grid: G, known: KINDS })[0].kind === C.kindOf("gun", KINDS, null, C.gunKinds(walk)), "SHOT a gun with no shooter rattles in the gun kind of its own walk");
   ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /dir: Number\.isFinite\(w\.stream\.dir\)/.test(sfx),
     "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
