@@ -4,9 +4,9 @@
   "ATTRIBUTION.md": "9d41c8ce68b45df9",
   "README.md": "eb28ce4530114be3",
   "check-life.mjs": "25b5aa5a8f42e685",
-  "check.mjs": "3e2ca9bedef889f0",
+  "check.mjs": "55ee3b45f9a9baab",
   "design.mjs": "033130e2d2867f6b",
-  "engine.mjs": "10594e4b5848e309",
+  "engine.mjs": "dd517481418a0d91",
   "font.mjs": "4875afb1574b540a",
   "fontbank.mjs": "42997ad72f2809fc",
   "fonts/anton/Anton-Regular.ttf": "a4ba3a92350ebb03",
@@ -33,8 +33,8 @@
   "paint.mjs": "31ef1f11f38a9eb4",
   "rng.mjs": "f7587bf06711e496",
   "shape.mjs": "2b65ae47a335dbbc",
-  "size.mjs": "157c38f00004cb84",
-  "stamp.mjs": "4c69d78abb9d06da",
+  "size.mjs": "5ea9ba0712160e43",
+  "stamp.mjs": "1dce737cd07460f8",
   "sync.mjs": "0aaf5650bacd97ee",
   "testenv.mjs": "d58bfa07296e2971"
  }

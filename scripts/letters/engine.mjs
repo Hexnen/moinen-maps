@@ -272,7 +272,7 @@ export function createEngine(base) {
       space: h.space, size: h.opts.size, magnitude: h.opts.magnitude, area: world ? areaOf(h.opts.area) : 0, tokenSpan: world ? h.tokenSpan : 0,
       grid: globalThis.canvas?.grid?.size ?? 100, zoom: world ? (globalThis.canvas?.stage?.scale?.x || 1) : 1, vw: usableW(), vh: innerHeight,
       scale: h.opts.scale ?? 1, sizeK: h.plan.sizeK, aspect: h.plan._holdBox?.w ?? 3, fit: h.opts.fit ?? "legible",
-      alive: world ? h.worldAlive ?? 0 : 0, pixel: h.pixel ? artPx(h) : 0
+      alive: world ? h.worldAlive ?? 0 : 0, pixel: h.pixel ? artPx(h) : 0, ceilK: h.opts.ceilK
     };
   }
   /* sizes follow zoom and viewport live (pixel words keep the size they started with: whole art pixels) */
@@ -664,7 +664,7 @@ export function createEngine(base) {
           return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
         };
         const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
-        const h = play(word, { mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+        const h = play(word, { mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, ceilK: o.ceilK ?? 0.55, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
           in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
           zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation });
         emitted++;
