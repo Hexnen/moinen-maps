@@ -593,6 +593,25 @@ api.present(null);
 check(Zones.visibleToMe() === false && api.present() === null, "present(null): as the scene says again");
 game.user = users.get("gm");
 
+/* ---- SMOK-2: new marks on the token under a still pointer reword its open tip at once */
+{
+  const tipNow = () => els.filter((e) => !e.gone && /mm-z-board-tip/.test(e.className)).pop() ?? null;
+  api.markTokens({ id: "smok2", tokens: [{ token: "t2", state: "out", tip: "Not now: no attribute chosen" }] });
+  view.fire("pointermove", { clientX: 880, clientY: 80 });
+  await new Promise((r) => setTimeout(r, 40));
+  const t0 = tipNow();
+  check(t0?.innerHTML.includes("no attribute chosen"), "SMOK-2 setup: the pointer on the token shows its reason");
+  api.markTokens({ id: "smok2", tokens: [{ token: "t2", state: "in", tip: "Chance: near certain" }] });
+  const t1 = tipNow();
+  check(t1 && t1.innerHTML.includes("near certain") && !t1.innerHTML.includes("no attribute chosen"), "SMOK-2: the same token's new marks reword the open tip with no pointer move");
+  api.markTokens({ id: "smok2", tokens: [{ token: "t2", state: "in", label: "x" }] });
+  check(tipNow() === null || !tipNow().innerHTML.includes("near certain"), "SMOK-2: marks that say nothing about the token any more take the open tip away");
+  api.markTokens({ id: "smok2", tokens: [{ token: "t2", state: "in", tip: "Back again" }] });
+  check(tipNow()?.innerHTML.includes("Back again"), "SMOK-2: a tip comes back while the pointer stays on the token");
+  view.fire("pointerleave", {});
+  api.clearTokenMarks("smok2");
+}
+
 /* ---- nothing left behind */
 Hooks.callAll("canvasTearDown");
 check(api.tokenMarks().length === 0 && api.links().length === 0 && api.intents().length === 0 && !api.menuOpen(), "the scene closes: marks, lines, intentions and menus are gone");
