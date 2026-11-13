@@ -328,6 +328,54 @@ export async function run(ok, { bank, fontsApi }) {
     L.viewInset(null); E.setView(false);
     L.stopAll({ quick: true }); await E.tick(50);
   }
+  {
+    /* continuous sounds: a phrase score that stays interesting while the sound lasts and ends cleanly (sustain.mjs) */
+    let end; const until = new Promise((r) => (end = r));
+    let sx = 1700;
+    const s = L.sustain({ text: "FRRRSSHH", mood: "fire", space: "world", at: () => ({ x: sx, y: 1500 }), level: 0.7, until, seed: "fire1" });
+    let up = 0, samples = 0, follow = 0, follows = 0;
+    for ( let i = 0; i < 80; i++ ) {
+      await E.tick(100, 25); sx += 4;
+      if ( i > 4 ) { samples++; if ( s.handles.some((h) => h.isReady) ) up++; }
+      for ( const h of s.handles ) if ( h.lastPos && !h.travel ) { follows++; if ( Math.abs(h.lastPos.x - sx) < 160 ) follow++; }
+    }
+    const kinds = s.history.map((q) => q.kind);
+    ok(s.phrases >= 6 && up >= samples * 0.95, `sustain: a lasting sound is always lettered, phrase after phrase (${s.phrases} phrases, up ${up}/${samples})`);
+    ok(new Set(kinds).size >= 4 && kinds.every((k, i) => i === 0 || k !== kinds[i - 1]), `sustain: the phrases change treatment, never the same twice running (${kinds.join(" ")})`);
+    ok(new Set(s.history.map((q) => q.text)).size >= 2, `sustain: the word itself breathes (${[...new Set(s.history.map((q) => q.text))].join(" ")})`);
+    ok(follows > 0 && follow >= follows * 0.9, `sustain: the words follow a moving source (${follow}/${follows})`);
+    const n0 = s.phrases; s.level(0.1); await E.tick(3000, 25); const slow = s.phrases - n0; s.level(1); const n1 = s.phrases; await E.tick(3000, 25);
+    ok(s.phrases - n1 > slow, `sustain: louder = more often (${slow} quiet vs ${s.phrases - n1} loud phrases in 3 s)`);
+    end(); await E.tick(50, 25);
+    ok(!s.alive, "sustain: it stops when its Promise settles");
+    await E.tick(4000, 25);
+    ok(s.handles.length === 0 && L.count() === 0, `sustain: it ends cleanly (exits, a tail, then nothing: ${L.count()} words left)`);
+    const s2 = L.sustain({ text: "FRRRSSHH", mood: "fire", space: "world", at: { x: 1700, y: 1500 }, level: 0.7, seed: "fire1" });
+    await E.tick(4000, 25);
+    ok(JSON.stringify(s2.history) === JSON.stringify(s.history.slice(0, s2.history.length)), "sustain: the same seed gives the same score");
+    /* riding an orbit around a moving centre */
+    const so = L.sustain({ text: "WHUUUM", mood: "whoosh", space: "world", at: { x: 2000, y: 1500 }, orbit: { center: () => ({ x: sx, y: 1500 }), radius: 260 }, level: 0.6, seed: "orb" });
+    await E.tick(1500, 25);
+    ok(so.handles.length > 0 && so.handles.every((h) => !h.plan || h.travel?.kind === "orbit" || h.travel?.kind === "path"), "sustain: phrases ride an orbit");
+    L.stopAll(); await E.tick(3000, 25);
+    ok(!s2.alive && !so.alive && L.count() === 0, "sustain: stopAll ends continuous sounds");
+    /* ambient: the steady hiss of pipes all over a map: quiet, never more than a few at once, only where the view is */
+    E.setView(true);
+    const pipes = [];
+    for ( let i = 0; i < 12; i++ ) pipes.push(L.sustain({ mode: "ambient", text: "PSSSS", mood: "whoosh", space: "world", at: { x: 1300 + (i % 4) * 400, y: 1200 + Math.floor(i / 4) * 300 }, seed: `pipe${i}` }));
+    const far = L.sustain({ mode: "ambient", text: "PSSSS", space: "world", at: { x: 9000, y: 9000 }, seed: "pipeFar" });
+    let peak = 0, mags = [];
+    for ( let i = 0; i < 600; i++ ) { await E.tick(100, 100); peak = Math.max(peak, L.count({ space: "world" })); }
+    for ( const p of pipes ) for ( const q of p.history ) void q;
+    const spoke = pipes.filter((p) => p.phrases > 0).length;
+    ok(peak <= L.ambientMax.world + 2, `sustain ambient: at most ${L.ambientMax.world} hisses (plus their drifting wisps) at once on the whole map (peak ${peak})`);
+    ok(spoke >= 9, `sustain ambient: every pipe gets its turn in a minute (${spoke}/12)`);
+    ok(far.phrases === 0, "sustain ambient: a pipe out of view stays silent (costs nothing)");
+    ok(pipes.every((p) => p.history.every((q) => ["breath", "stretch", "shed"].includes(q.kind))), "sustain ambient: only quiet treatments");
+    E.Hooks.callAll("canvasTearDown"); await E.tick(3000, 50);
+    ok(pipes.every((p) => !p.alive) && L.count() === 0 && E.liveTex() === 0, "sustain ambient: a scene change ends every source, nothing left");
+    E.setView(false);
+  }
   /* the hand of a seeded word is the same with every motion option (escalation's merge pins it on purpose) */
   {
     const base = L.design("POW!", { mood: "impact", seed: "same" }).hand.id;

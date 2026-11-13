@@ -7,9 +7,10 @@ import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE, magnitudeOf } from "./size.mjs";
 import { onOf, stepT, easeOf, orientAngle, pathSpec, pathPoints, pathAt, orbitAt, bendLayout, addTrail, TICK_MS } from "./move.mjs";
 import { rng, hash } from "./rng.mjs";
+import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.4.0";   // MOVE: travel, choreography, frame rates, escalation, shards, push, glow (1.3.0 TOOL + WORD, 1.2.1 FXLE)
+export const VERSION = "1.5.0";   // MOVE (contract v7): travel, choreography, rates, escalation, shards, push, glow, continuous sounds
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -563,6 +564,15 @@ export function createEngine(base) {
     h.lastPos = { x: X, y: Y }; h.lastRot = h.rot + trot;
     let kr = 0, ks = 1;
     if ( h.knocks?.length ) { const q = knockOf(h, t); X += q.x; Y += q.y; kr = q.r; ks = q.s; }
+    /* ADVT 8 / ADVD 6: a held word keeps breathing: a slow sway, swell and bob over its whole hold (on the drawing grid), on top of
+       its hold drawings, so a 2-3 s hold is never a still picture at viewing size; not for reduced motion, travel or pixel words */
+    if ( !h.reducedMotion && !h.travel && !h.pixel && h.t0 != null && h.entMs != null ) {
+      const ag = ageOf(h, t) - h.entMs;
+      if ( ag > 0 ) {
+        const u = stepT(ag, h.plan.on || 2) / 1000, ph = (h.plan.seed % 628) / 100, f = Math.min(1, ag / 300) * (0.7 + 0.6 * (h.plan.sound?.loud ?? 0.5));
+        kr += f * 0.04 * Math.sin(u * 3.3 + ph); ks *= 1 + f * 0.035 * Math.sin(u * 4.6 + ph * 1.7); Y += f * 0.05 * k * Math.sin(u * 2.7 + ph * 0.6);
+      }
+    }
     const rot = h.rot + trot + kr;
     if ( h.space === "world" ) {
       h.sprite.visible = seen;
@@ -781,7 +791,7 @@ export function createEngine(base) {
     }
     if ( opts.push && !reduced ) {
       const q = typeof opts.push === "object" ? opts.push : {}, unit = h.size * h.plan.sizeK;
-      h.pushCfg = { radius: q.radius ?? Math.max(unit * 4.5, areaOf(opts.area) * 1.6), force: q.force ?? unit * 1.25, seed: opts.seed };
+      h.pushCfg = { radius: q.radius ?? Math.max(unit * 4.5, areaOf(opts.area) * 1.6), force: q.force ?? unit * 2, seed: opts.seed };
       /* at the contact: the first picture with an impact flash or a burst (else half-way through the entrance) */
       const ent = h.plan.timeline.ent; let a = 0, at = null;
       for ( const p of ent ) { if ( p.impact || p.fx?.some((f) => f.k === "burst") ) { at = a * TICK; break; } a += p.ticks; }
@@ -1175,6 +1185,10 @@ export function createEngine(base) {
     return h;
   }
 
+  /* continuous sounds (sustain.mjs, README "Motion: continuous sounds"): a phrase score over play(); stopAll and a scene change stop
+     them like streams */
+  const sustain = makeSustain({ play, now, streams, vocab: () => vocab, pointOf, syllablesOf,
+    inView: (space, p, pad = 0) => { const v = viewRect({ space }); return !v || !p || (p.x >= v.x0 - pad && p.x <= v.x1 + pad && p.y >= v.y0 - pad && p.y <= v.y1 + pad); } });
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
@@ -1183,6 +1197,7 @@ export function createEngine(base) {
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */
     viewInset(v) { if ( v !== undefined ) viewInset = v ?? { top: 8, right: 8, bottom: 8, left: 8 }; return viewInset; },
+    sustain, ambientMax: AMBIENT_MAX,
     push, escalation: { get: (key) => escMem.get(key)?.n ?? 0, clear: () => escMem.clear(), get size() { return escMem.size; } },
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */

@@ -136,11 +136,11 @@ export async function sizesDemo(L, o = {}) {
      const W = await import("/modules/moinen-maps/scripts/weather/weather.mjs"); const id = W.tornadoApi.list()[0]?.id;
      L.gallery({ part: "orbit", center: () => W.tornadoApi.positionAt(id) });
    Without it a stand-in centre crosses the view (drawn as a small swirl). World space when a scene is up, else screen. */
-export const MOVE_PARTS = ["orbit", "path", "choreo", "rate", "escalate", "shards", "glow"];
+export const MOVE_PARTS = ["orbit", "path", "choreo", "rate", "escalate", "shards", "glow", "sustain", "ambient"];
 export function moveDemo(L, o = {}) {
   const world = o.space ? o.space === "world" : !!globalThis.canvas?.ready;
   const space = world ? "world" : "screen";
-  const timers = [], handles = [], streams = [], marks = [];
+  const timers = [], handles = [], streams = [], marks = [], sus = [];
   let cancelled = false;
   const wait = (ms) => new Promise((r) => timers.push(setTimeout(r, ms)));
   /* the view in this space: x, y (top left), w, h, and a unit (one grid square or 8 % of the screen height) */
@@ -201,7 +201,7 @@ export function moveDemo(L, o = {}) {
       await wait(3400);
     },
     async rate() {
-      [1, 2, 3].forEach((on, i) => { P("THWACK!", { mood: "impact", on, at: at(0.2 + 0.3 * i, 0.42), seed: seed("r"), magnitude: 0.7, in: "slam", out: "shatter", holdKind: "shake", hold: 1200 }); lab(`on: ${on}`, at(0.2 + 0.3 * i, 0.58)); });
+      [1, 2, 3].forEach((on, i) => { P("THWACK!", { mood: "impact", on, at: at(0.2 + 0.3 * i, 0.42), seed: seed("r"), magnitude: 0.4, scale: 0.55, in: "slam", out: "shatter", holdKind: "shake", hold: 1200 }); lab(`on: ${on}`, at(0.2 + 0.3 * i, 0.58)); });
       [1, 2, 3].forEach((on, i) => P("ZIP", { mood: "whoosh", on, path: { from: at(0.07 + 0.3 * i, 0.85), to: at(0.3 + 0.3 * i, 0.8), arc: 0.4 }, seed: seed("r2"), magnitude: 0.4, hold: 900 }));
       await wait(3000);
     },
@@ -219,6 +219,24 @@ export function moveDemo(L, o = {}) {
       P("KABOOM!", { mood: "boom", push: true, at: at(0.5, 0.63), seed: seed("s3"), magnitude: 0.9, hold: 1000 });
       await wait(2600);
     },
+    async sustain() {
+      /* continuous sounds: a fire swelling then dying, an engine riding a moving source */
+      let endF, endE; const uF = new Promise((r) => (endF = r)), uE = new Promise((r) => (endE = r));
+      const t0 = performance.now(), v0 = view();
+      const car = () => { const u = Math.min(1, (performance.now() - t0) / 9000); return { x: v0.x + v0.w * (0.55 + 0.33 * u), y: v0.y + v0.h * (0.45 + 0.1 * Math.sin(u * 9)) }; };
+      marker(car);
+      if ( !cancelled ) sus.push(L.sustain({ space, text: "FRRSSHH", mood: "fire", at: at(0.28, 0.62), seed: seed("susF"), until: uF, level: (ms) => Math.min(1, 0.25 + ms / 5000) }));
+      if ( !cancelled ) sus.push(L.sustain({ space, text: "WRRRUMM", mood: "roar", at: car, seed: seed("susE"), until: uE, level: 0.55, dir: 180 }));
+      lab("sustain: fire (level rises)", at(0.28, 0.85)); lab("sustain: moving engine", at(0.72, 0.85));
+      await wait(7000); endF(); await wait(1500); endE(); await wait(2200);
+    },
+    async ambient() {
+      /* the steady hiss of pipes all over the view: quiet, hollow, a few at a time */
+      const pts = [[0.15, 0.3], [0.4, 0.22], [0.7, 0.3], [0.88, 0.5], [0.2, 0.7], [0.5, 0.6], [0.75, 0.8], [0.35, 0.88]];
+      for ( const [i, [x, y]] of pts.entries() ) if ( !cancelled ) sus.push(L.sustain({ space, mode: "ambient", text: "PSSSSS", mood: "whoosh", at: at(x, y), seed: seed(`pipe${i}`), gap: [2500, 6000] }));
+      await wait(13000);
+      for ( const s of sus ) s.stop();
+    },
     async glow() {
       [false, true].forEach((g, i) => {
         P("FWOOOSH", { mood: "fire", glow: g, at: at(0.27 + 0.45 * i, 0.35), seed: seed("g1"), magnitude: 0.6, hold: 2500 });
@@ -231,5 +249,5 @@ export function moveDemo(L, o = {}) {
   const list = o.part === "move" || !o.part ? MOVE_PARTS : [o.part];
   const clear = () => { for ( const m of marks ) { try { m.destroy?.(); m.remove?.(); } catch {} } };
   const done = (async () => { for ( const k of list ) { if ( cancelled ) break; await parts[k](); } clear(); })();
-  return { handles, streams, done, cancel() { cancelled = true; timers.forEach(clearTimeout); for ( const h of handles ) h?.stop({ quick: true }); for ( const s of streams ) s?.stop({ quick: true }); clear(); } };
+  return { handles, streams, done, cancel() { cancelled = true; timers.forEach(clearTimeout); for ( const h of handles ) h?.stop({ quick: true }); for ( const s of streams ) s?.stop({ quick: true }); for ( const s of sus ) s?.stop({ quick: true }); clear(); } };
 }

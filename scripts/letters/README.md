@@ -210,6 +210,62 @@ is drawn big. Screen words follow window resizes the same way.
 - Layers of an effect: primary = the word; secondary = lines, sparks, flames redrawn each picture; consequence = what the sound
   leaves behind (debris, dust, puffs, embers, drips) in the exit pictures.
 - `L.design(word, opts).timeline.tech` lists what a word got (`flash smear antic follow misreg heavy`), `kinds` the entrance, hold and exit.
+- (v6, MOVE) Holds live: hold drawings move visibly (shake, rattle, wobble, boil, throb), loud hits add a flicker of impact lines,
+  and every held word breathes slowly on top (a sway, a swell, a bob over the whole hold, on the drawing grid). The wind-up before a
+  slam is a crouch (wider, lower, about 0.8 of the size), not a squeezed blob. `shatter` breaks the real letters into pieces that
+  fly, fall and bounce (= `shards`); `burst` swells and blows the word apart from its middle in a puff cloud.
+- (v6) The picture clock: a word's drawings run on its own clock. No entrance or exit drawing is ever skipped, and a drawing shown
+  late starts from its beginning, so a slow client sees the same drawings for the same beats (it runs a few frames longer) instead
+  of a stretched wind-up or an exit that blinks out.
+- (v6) Words stay in the view: a word placed near an edge is moved in so that its hold and its entrance motion fit (exits may leave).
+  `L.viewInset({ top, right, bottom, left })` (px, or a function `(space) => insets`) reserves edges such as a letterbox; per word
+  `keepInView: false` turns it off. Travelling words keep their path.
+
+### Motion: travel (paths, thrown arcs, beams, orbits)
+- `path`: `{ from, to, arc, duration, ease, spin, loop, orient }` (a thrown arc: `arc` 0.2-0.5 bulges screen-up whichever way it
+  is thrown), `{ points: [...] }` (a smooth curve through them; `smooth: "line"` for straight legs), or `{ fn: (u) => ({x, y}) }`.
+  Ends may be points, tokens or functions (a moving target): the word arrives where the target IS. Duration defaults to the word's
+  entrance + hold; ease `linear` for arcs, else `inout`; `spin` turns; `orient` `lean` (default: a readable tilt toward the motion,
+  never upside down), `tangent`, `none`. Speed lines trail it.
+- `orbit`: `{ center, radius, period, dir, phase, turns, squash, breathe, orient }` circles a point, a token or a function (a
+  tornado: `center: () => W.tornadoApi.positionAt(id)`) for as long as `until` (a Promise) lasts; the word is bent along its ring
+  (`orient: "bend"`, tops outward when clockwise) and trails swirl lines. Radius defaults to the token's size, the `area`, or 2.6 units.
+- Travel steps on the word's drawing grid (twos by default), like everything else; reduced motion keeps the word still at its place.
+- Streams take `orbit` (every syllable joins one ring where the stream's head is) and `path` (each syllable rides it), and
+  `orient` for plain streams (syllables lean toward where they fly).
+
+### Motion: one word on several beats (choreography)
+- `parts: "prefix"` (KA- arrives small before the body), `"syllables"` (each on its own beat; `beat` ms, default 170), or a list
+  `["RAKA", "BOOM!"]` / `[{ text, at, scale, in }]` (`at: -1` = already there). A part landing knocks the parts before it.
+- `typeOn: true | ms` letters appear one by one; `countIn: true | { from, steps }` a number counts up into its value.
+- `echo: n | { n, every, gap, shrink, dir, hollow }` smaller hollow copies answer the word after it lands.
+
+### Motion: frame rate per call
+- `on: 1 | 2 | 3` (or `"ones" | "twos" | "threes"`, or `fps: 24 | 12 | 8`): ones redraw every tick (new drawings, not tweens),
+  threes hold each drawing 3 or 6 ticks; flash and smear frames stay one tick; entrance and exit keep their length. Default twos.
+
+### Motion: escalation, push, shards, glow
+- `escalate: true | key | { key, n, window, max, mode }`: the same word on the same source (a token, a spot, or your `key`/`source`)
+  within `window` ms (1600) grows, merges ("BAM! BAM!") up to `max` (3), then counts ("BAM! ×5"); the new word replaces the old one
+  in the same hand. Memory per client: pass `n` for a level decided by the caller (the same on every client). `L.escalation`.
+- `push: true | { radius, force }`: at its contact the word shoves the words around it aside (they swing out and settle);
+  `pushable: false` keeps a word in place; `L.push(at, { space, radius, force })`.
+- `out: "shards"` (or `shatter`): the real letters crack, break, fly, fall and bounce.
+- `glow: true | "auto" | { color, strength, light }`: a self-lit word (world: a light in the scene's illumination, so it shows in the
+  dark, plus a bloom; screen: a CSS glow). `"auto"` lights fire, zap and powerup words when the scene is dark (darkness >= 0.25).
+
+### Motion: continuous sounds (`L.sustain`)
+A sound that lasts an unknown time is lettered as a phrase score, not one still word and not one word replayed on a timer:
+overlapping phrases, each a different treatment of the same sound (breath, stretch: the word longer, split into its syllables on
+their beats, shed: fragments drift off along `dir`, accent: a bigger slam, echo), seeded and never the same twice in a row. When it
+stops, the words up play their exits and a small tail trails off.
+- `L.sustain({ text | kind, at, space, mood, level, until, seed, dir, orbit, path, words, treatments, mode, gap, max, ... })` ->
+  `{ stop({ quick }), level(v), alive, phrases, history, finished, handles }`. `level` 0..1 (or a function of ms) sets size, how
+  often and how busy; change it live with `s.level(v)`. `kind` takes its words from the vocabulary (WORD); `words(k, ms, level)`
+  supplies your own. Ends on `until`, `s.stop()`, `L.stopAll()` and (world) a scene change.
+- `mode: "ambient"`: the quiet, permanent case (the steady hiss of a pipe on a map). One small hollow word now and then (`gap`
+  [min, max] ms, default 4.5-11 s), only while its spot is in view, at most `L.ambientMax` (3 world, 2 screen) up at once for all
+  sources of a scene, slow and on threes. Hundreds of sources cost nothing while off view.
 
 ## Layers: where a word is drawn
 | layer | space | where | notes |

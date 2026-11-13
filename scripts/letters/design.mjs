@@ -412,7 +412,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       case "throb": p.g.s = [1, 1.08, 0.98, 1.05][i]; p.g.sy = [1, 1.05, 0.98, 1.01][i]; break;
       case "rattle": p.letters.forEach((l) => { l.x = R.f(-0.05, 0.05); l.y = R.f(-0.07, 0.07); l.r = R.f(-0.09, 0.09); }); break;
       case "wobble": p.letters.forEach((l, j) => { l.r = 0.1 * Math.sin(i * 2.1 + j); l.y = 0.05 * Math.cos(i * 2.1 + j); }); break;
-      case "boil": p.letters.forEach((l, j) => { l.y = 0.05 * Math.sin(i * 2.4 + j * 1.3); l.r = 0.05 * Math.cos(i * 1.9 + j); }); p.g.s = [1, 1.03, 0.99][i]; break;
+      case "boil": p.letters.forEach((l, j) => { l.y = 0.07 * Math.sin(i * 2.4 + j * 1.3); l.r = 0.06 * Math.cos(i * 1.9 + j); }); p.g.s = [1, 1.04, 0.99][i]; break;
       case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.misreg = [0.05, 0, 0.03, 0][i]; p.fx.push({ k: i % 2 ? "krackle" : "sparks", a: 0.7, seed: seeds() }); break;
       case "flicker": p.reseed = true; p.g.y = -0.03 * i; p.g.s = [1, 1.04, 0.98, 1.02][i]; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.7, seed: seeds() }); break;
       default: break;
