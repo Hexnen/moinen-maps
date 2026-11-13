@@ -49,6 +49,13 @@ function extents(plan, geo, p, back) {
     if ( f.k === "speed" ) { const L = Math.min(2.4, 0.6 + w * 0.5); if ( (f.dir ?? 1) > 0 ) x0 = Math.min(x0, b.x0 - L); else x1 = Math.max(x1, b.x1 + L); }
     if ( f.k === "swirl" ) for ( const [x, y] of swirlPoints(plan, f) ) { x0 = Math.min(x0, x - 0.1); x1 = Math.max(x1, x + 0.1); y0 = Math.min(y0, y - 0.1); y1 = Math.max(y1, y + 0.1); }
   }
+  /* LM: a smear frame's multiples (offset by dx/dy and zoomed toward the reader) are inside the picture, not cut at its edge */
+  if ( p.smear ) {
+    const z = Math.max(0, p.smear.zoom ?? 0), cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, sdx = p.smear.dx ?? 0, sdy = p.smear.dy ?? 0;
+    const hw = (w / 2 + outer) * (1 + z), hh = (h / 2 + outer) * (1 + z);
+    x0 = Math.min(x0, cx + Math.min(0, sdx) - hw); x1 = Math.max(x1, cx + Math.max(0, sdx) + hw);
+    y0 = Math.min(y0, cy + Math.min(0, sdy) - hh); y1 = Math.max(y1, cy + Math.max(0, sdy) + hh);
+  }
   return { x0, y0, x1, y1, b };
 }
 
@@ -503,9 +510,17 @@ export function paintPicture(plan, bank, p, S, make) {
       ctx.save();
       ctx.translate(ox + (cxw + (sm.dx ?? 0) * t) * S, oy + (cyw + (sm.dy ?? 0) * t) * S); ctx.scale(z, z); ctx.translate(-(ox + cxw * S), -(oy + cyw * S));
       ctx.beginPath(); path(ctx, all, S, ox, oy);
-      ctx.fillStyle = k % 2 ? H.pal.fill[0] : H.pal.fill[1]; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = outerW * 2 * S;
-      ctx.fill(); ctx.stroke();
-      if ( k === sm.n ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.02); ctx.stroke(); }
+      if ( H.style === "invincible" ) {
+        /* LM (LOOK's live artefact "large pale rectangles behind the letters"): the Invincible face is one flat pale colour, so its
+           multiples were pale slabs (blown up to 1.6x by a loud slam). Here they are ghosts in the block colour, fading with distance,
+           each with a thin ink line: they read as motion, never as a plate behind the word */
+        ctx.globalAlpha = 0.6 - 0.35 * t; ctx.fillStyle = H.pal.ext ?? H.ink; ctx.fill();
+        ctx.globalAlpha = Math.min(1, 0.95 - 0.4 * t); ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.016); ctx.stroke();
+      } else {
+        ctx.fillStyle = k % 2 ? H.pal.fill[0] : H.pal.fill[1]; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = outerW * 2 * S;
+        ctx.fill(); ctx.stroke();
+        if ( k === sm.n ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.02); ctx.stroke(); }
+      }
       ctx.restore();
     }
   }
