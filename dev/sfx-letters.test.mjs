@@ -112,6 +112,14 @@ const tiny = C.place([crack], { scale: 0.1, view: { x0: -5000, y0: -5000, x1: 50
 ok(tiny.size * C.loudScale(tiny.sound.loud) * 0.1 >= C.SCREEN.minMain - 1e-6, "zoomed far out a word stays readable");
 const huge = C.place([fallMain], { scale: 4, view: { x0: 0, y0: 0, x1: 400, y1: 250 }, tokens: [] })[0];
 ok(huge.size * C.loudScale(huge.sound.loud) * 4 <= C.SCREEN.maxMain * 250 * 4 + 1e-6, "zoomed far in a word never fills the screen");
+const engHuge = C.place([{ ...fallMain, engineSized: true, size: 900 }], { scale: 1, view: { x0: 0, y0: 0, x1: 1600, y1: 900 }, tokens: [] })[0];
+ok(engHuge.maxWidth <= 1600 * C.VIEW_W.main + 1e-6 && engHuge.box.x1 - engHuge.box.x0 <= 1600 * C.VIEW_W.main + 1e-6, "an engine-sized main word is capped to a share of the view width (a collapse never buries the map)");
+{
+  const vw = { x0: -4000, y0: -4000, x1: 4000, y1: 4000 };
+  const ph = C.place([{ ...fallMain, engineSized: true, size: 60, chars: 11, x: 0, y: 0 }, { ...fallMain, role: "sec", engineSized: true, size: 120, chars: 4, x: 0, y: 0 }], { scale: 1, view: vw, tokens: [] });
+  const hm = ph.find((w) => w.role === "main"), hs = ph.find((w) => w.role !== "main"), H = (w) => w.box.y1 - w.box.y0;
+  ok(hm && hs && (H(hs) <= C.SAT_H * H(hm) + 1e-6), "a satellite is never as tall as its main word");
+}
 const tok = { x0: -60, y0: -60, x1: 60, y1: 60 };
 const w0 = single({ voice: "boom", x: 0, y: 0, r: 60, m: 0.3 })[0];
 const p0 = C.place([w0], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [tok] })[0];

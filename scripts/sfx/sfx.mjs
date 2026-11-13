@@ -276,7 +276,11 @@ function teardown() {
 function refresh() {
   sfxBus.entry = mode() === "off" ? null : onEntry;
   if ( mode() === "off" ) { for ( const id of sched.values() ) clearTimeout(id); sched.clear(); pending = []; armAmbient(false); }
-  else if ( canvas?.ready ) { fireSeen = new Map([...(Fire.allStrokes?.() ?? new Map())].map(([k, v]) => [k, v])); onFire(true); }
+  else if ( canvas?.ready ) {
+    fireSeen = new Map([...(Fire.allStrokes?.() ?? new Map())].map(([k, v]) => [k, v])); onFire(true);
+    // the engine (and its fonts) loaded once the scene is up, off the load path: the first crash of a session is lettered on time
+    if ( !L ) setTimeout(engine, 2500);
+  }
 }
 
 export const sfxApi = {

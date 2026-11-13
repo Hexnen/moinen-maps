@@ -21,6 +21,9 @@ export const LEAD = { boom: 50, crash: 0, zap: 0, thud: 30, gun: 80, fire: 60, s
 export const CAPS = { high: { sec: 4, alive: 9 }, medium: { sec: 2, alive: 6 }, low: { sec: 0, alive: 3 } };
 /** screen-size limits (px) and the share of the view's short side a word may take */
 export const SCREEN = { minMain: 26, minSec: 18, maxMain: 0.2, maxSec: 0.11 };
+export const VIEW_W = { main: 0.36, sec: 0.2 };
+/** a satellite / pre-word at most this share of the main word's height */
+export const SAT_H = 0.72;
 
 /** FNV-1a of a string -> uint32 (the same everywhere). */
 export function hashStr(s, h = 2166136261) { s = String(s); for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
@@ -296,6 +299,7 @@ const OFFSETS = [[0, 0], [0, -0.75], [0.55, -0.6], [-0.55, -0.6], [0.7, 0], [-0.
 export function place(words, ctx) {
   const sc = ctx.scale || 1, v = ctx.view, short = v ? Math.min(v.x1 - v.x0, v.y1 - v.y0) : Infinity;
   const taken = [...(ctx.alive ?? [])], out = [];
+  let mainH = 0;
   const order = words.slice().sort((a, b) => (a.role === "main" ? -1 : b.role === "main" ? 1 : 0));
   for ( const w0 of order ) {
     const w = { ...w0 }, main = w.role === "main";
@@ -305,7 +309,13 @@ export function place(words, ctx) {
     // (the engine sized it - LETR v4 - with its own legibility clamp: kept; else this estimate's own clamp)
     if ( !w.engineSized && px < min ) w.size = min / (ls * sc);
     if ( !w.engineSized && w.size * ls * sc > max ) w.size = max / (ls * sc);
-    if ( w.maxWidth && v ) w.maxWidth = Math.min(w.maxWidth, (v.x1 - v.x0) * 0.7);
+    // never wider than a share of the view (the engine's own ceiling lets a huge event take most of the screen; a map page under a
+    // collapse must stay readable around the word: main word at most VIEW_W.main of the view width, a satellite VIEW_W.sec)
+    if ( v ) w.maxWidth = Math.min(w.maxWidth || Infinity, (v.x1 - v.x0) * (main ? VIEW_W.main : VIEW_W.sec));
+    // the hierarchy reads on the page: a satellite or a pre-word is never as tall as the main word (a long main word squeezed by
+    // the width cap would else look smaller than its own echoes)
+    if ( main ) mainH = boxOf(w).y1 - boxOf(w).y0;
+    else if ( mainH ) { const bx = boxOf(w), h = bx.y1 - bx.y0; if ( h > SAT_H * mainH ) w.maxWidth = Math.min(w.maxWidth || Infinity, (bx.x1 - bx.x0) * SAT_H * mainH / h); }
     let best = null;
     const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
     const cands = OFFSETS.map(([ox, oy]) => [w.x + ox * bw, w.y + oy * bh]);
