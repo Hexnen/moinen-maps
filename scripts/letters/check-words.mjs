@@ -6,7 +6,7 @@
 // separate from loudness (long-quiet / short-loud), the sustain rule (which letters repeat), and the per-letter accent for LOOK.
 import fs from "node:fs";
 import { createVocab, KINDS, KIND_IDS, BANK, expand, stretchText, formatNumber, formatRange, clean, renderable, langOf, MAX_LEN, MAX_RUN,
-  naming, NAMING, BORDERLINE, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND } from "./words.mjs";
+  naming, NAMING, DICT, ICONIC, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND } from "./words.mjs";
 import { REVIEWED } from "./words-reviewed.mjs";
 import { FONTS, FALLBACK, MOOD_IDS, makePlan } from "./design.mjs";
 
@@ -86,8 +86,26 @@ export function checkWords(ok, bank) {
   }
   ok(V.word("boom", { lang: "en", magnitude: "epic", seed: 1 }).tier === "l" && V.word("boom", { lang: "en", magnitude: "tiny", seed: 1 }).tier === "s", "words: magnitude words pick the tier");
   ok(V.word("boom", { lang: "en", seed: 1 }).play.magnitude === 0.5, "words: the default loudness is the engine's normal magnitude");
-  ok(/^(KA-|TRA-TA-)BU+M+!{1,3}$/.test(V.word("boom", { lang: "pl", loud: 1, prefix: true, template: "BUM!" }).text), `words: a prefix for the loudest (${V.word("boom", { lang: "pl", loud: 1, prefix: true, template: "BUM!" }).text})`);
+  ok(/^KA-BU+M+!{1,3}$/.test(V.word("boom", { lang: "pl", loud: 1, prefix: true, template: "BUM!" }).text), `words: a prefix for the loudest (${V.word("boom", { lang: "pl", loud: 1, prefix: true, template: "BUM!" }).text})`);
   ok(/^KA-BU{3,6}M{1,3}!$/.test(V.word("boom", { lang: "pl", loud: 1, long: 1, bangs: 1, prefix: "KA-", template: "BUM" }).text), `words: stretch and prefix, the prefix never stretches (${V.word("boom", { lang: "pl", loud: 1, long: 1, bangs: 1, prefix: "KA-", template: "BUM" }).text})`);
+  /* 4b. PREFIXES are the sound's own lead-in (the user: "Tra ta przed bombą?"): every prefix of every kind is on the PREFIXES
+     table for that kind, with its reason; no prefix is another sound's signature (a repeating kind's rattle syllable, or a whole
+     bank word of another kind); the loudest boom / series never gets a gun rattle in front */
+  { const bad = [], stSyl = {}, flat = (w) => clean(w).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean).map((x) => x.replace(/(\p{L})\1+/gu, "$1"));
+    for ( const lang of ["pl", "en"] ) { stSyl[lang] = new Map();
+      for ( const id of KIND_IDS ) if ( KINDS[id].repeat ) for ( const w of BANK[lang][id]?.st ?? [] ) for ( const x of flat(w) ) stSyl[lang].set(x, id); }
+    for ( const lang of ["pl", "en"] ) {
+      for ( const [pre, e] of Object.entries(PREFIXES[lang]) ) {
+        if ( !(typeof e.why === "string" && e.why.length >= 20 && Array.isArray(e.kinds) && e.kinds.length && e.kinds.every((id) => KINDS[id])) ) bad.push(`${lang} ${pre}: no reason or unknown kinds`);
+        for ( const x of flat(pre) ) if ( stSyl[lang].has(x) ) bad.push(`${lang} ${pre}: "${x}" is the rattle of ${stSyl[lang].get(x)}`);
+        const whole = flat(pre).join("");
+        for ( const id of KIND_IDS ) if ( !e.kinds.includes(id) && Object.values(BANK[lang][id]).flat().some((w) => flat(w).join("") === whole) ) bad.push(`${lang} ${pre}: a word of ${id}`);
+      }
+      for ( const id of KIND_IDS ) for ( const pre of KINDS[id].pre?.[lang] ?? [] ) if ( !PREFIXES[lang][pre]?.kinds.includes(id) ) bad.push(`${lang} ${id}: ${pre} is not its own lead-in`);
+    }
+    ok(bad.length === 0, `words: prefixes that do not belong to their sound: ${bad.slice(0, 8).join("; ")}`);
+    const tops = ["pl", "en"].flatMap((lang) => [...Array.from({ length: 12 }, (_, i) => V.word("boom", { lang, loud: 1, prefix: true, seed: i }).text), ...V.series("boom", 6, { lang, seed: "p", loud: 0.9 }).map((w) => w.text)]);
+    ok(tops.every((t) => !/^(TRA|RA|TA)-/.test(t)), `words: no gun rattle in front of a blast (${tops.filter((t) => /^(TRA|RA|TA)-/.test(t)).join(" ")})`); }
   /* 5. escalation (MOVE's seam): one sound repeated grows; never the same text twice in a row */
   for ( const grow of ["stretch", "vary"] ) for ( const id of ["crack", "boom", "punch", "zap", "gunshot", "pain"] ) for ( const lang of ["pl", "en"] ) {
     const s = V.series(id, 6, { lang, seed: "e", loud: 0.3, grow });
@@ -109,6 +127,9 @@ export function checkWords(ok, bank) {
   }
   ok(V.syllables("gunfire", { lang: "pl", seed: 1 }).length >= 3 && V.syllables("gunfire", { lang: "en", seed: 1 }).length >= 3, "words: gunfire rattles in syllables");
   /* 7. aliases, unknown kinds, languages */
+  { const seen = new Map(), dup = []; for ( const [id, k] of Object.entries(KINDS) ) for ( const x of [id, ...(k.alias ?? [])] ) { if ( seen.has(x) && seen.get(x) !== id ) dup.push(`${x}: ${seen.get(x)} / ${id}`); seen.set(x, id); }
+    ok(dup.length === 0, `words: an alias names two kinds: ${dup.join("; ")}`); }
+  ok(V.kindOf("sword") === "sword" && V.kindOf("grenade") === "grenade" && V.kindOf("snake") === "snakehiss" && V.kindOf("pipe") === "hiss" && V.kindOf("elephant") === "trumpet" && V.kindOf("twister") === "tornado", "words: the new kinds and their aliases");
   ok(V.kindOf("explosion") === "boom" && V.kindOf("Laser") === "beam" && V.kindOf("machinegun") === "gunfire" && V.kindOf("hit") === "punch", "words: aliases");
   { const w = console.warn; let n = 0; console.warn = () => n++; ok(V.word("no-such-sound", { seed: 1 }).kind === "punch", "words: an unknown kind falls back"); V.word("no-such-sound", { seed: 2 }); console.warn = w; ok(n === 1, "words: one warning per unknown kind"); }
   ok(langOf("pl") === "pl" && langOf("en-US") === "en" && langOf("de") === "en" && langOf("pl-PL") === "pl", "words: languages");
@@ -126,8 +147,8 @@ export function checkWords(ok, bank) {
     W.add("en", "webshot", { s: ["THWIP!", "THWP!"], m: ["THWI+P!", "THWIP-THWIP!"], l: ["THWI+I+P!", "KA-THWI+P!"] });
     ok(W.word("web", { lang: "en", seed: 1 }).kind === "webshot" && W.word("web", { lang: "pl", seed: 1 }).lang === "en", "words: a new kind, found by alias; a missing language falls back to English");
     ok(W.list("pl").some((k) => k.id === "webshot" && k.label === "sieć") && W.choices("pl").crack === "trzask", "words: list and choices for pickers, Polish labels");
-    ok(W.remove("pl", "punch", ["PAC!"]) === 1 && !W.all("punch", "pl").s.includes("PAC!"), "words: remove");
-    W.reset(); ok(W.all("punch", "pl").s.includes("PAC!") && !W.kinds.includes("webshot"), "words: reset");
+    ok(W.remove("pl", "punch", [BANK.pl.punch.s[0]]) === 1 && !W.all("punch", "pl").s.includes(BANK.pl.punch.s[0]), "words: remove");
+    W.reset(); ok(W.all("punch", "pl").s.includes(BANK.pl.punch.s[0]) && !W.kinds.includes("webshot"), "words: reset");
     ok(!createVocab().kinds.includes("webshot"), "words: each engine has its own vocabulary (tests do not leak)");
   }
   /* 9. numbers for callers that letter numbers (REQUESTS ldic 6) */
@@ -147,7 +168,8 @@ export function checkWords(ok, bank) {
   ok(/vocab, word: vocab\.word, sfx, number: vocab\.number, range: vocab\.range/.test(eng) && /function sfx\(kind, opts = \{\}\)/.test(eng) && /o\.kind != null && o\.text == null/.test(eng), "words: L.vocab / L.word / L.sfx / L.number / L.range and stream({ kind }) are on the engine");
   ok(/VOCAB_KEYS = \[[^\]]*"long", "duration", "bangs"\]/.test(eng), "words: L.sfx takes long / duration / bangs as vocabulary options (not as play options)");
 
-  /* 12. ONLY ONOMATOPOEIA: no bank word, stream syllable or prefix names a sound; every syllable was reviewed; add() refuses naming words */
+  /* 12. ONLY ONOMATOPOEIA, NO DICTIONARY WORDS (the user's ruling 2026-11-13): no bank word, stream syllable, prefix or flow segment is a
+     word of the language (whole or in a syllable) unless it is on the short ICONIC list; every syllable was reviewed; add() refuses them */
   const flat = (w) => clean(w).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean).map((x) => x.replace(/(\p{L})\1+/gu, "$1"));
   for ( const lang of ["pl", "en"] ) {
     const rev = new Set(REVIEWED[lang]), names = [], unreviewed = new Set();
@@ -160,13 +182,28 @@ export function checkWords(ok, bank) {
     }
     ok(names.length === 0, `words: ${lang} words that NAME a sound instead of imitating it: ${names.slice(0, 8).join("; ")}`);
     ok(unreviewed.size === 0, `words: ${lang} syllables not on the reviewed list (words-reviewed.mjs; read them against the onomatopoeia rule first): ${[...unreviewed].slice(0, 8).join("; ")}`);
-    ok(Object.values(BORDERLINE[lang]).every((r) => typeof r === "string" && r.length >= 8), `words: every ${lang} borderline word has a reason`);
+    ok(Object.entries(ICONIC[lang]).every(([w, r]) => typeof r === "string" && r.length >= 8 && [...w].length <= 5 && DICT[lang].includes(w)), `words: every ${lang} iconic exception is short, has a reason and is a real dictionary word`);
+    ok(Object.keys(ICONIC[lang]).length <= 8, `words: the ${lang} iconic exception list stays short`);
+    /* flows and stream syllables are built from the banks: no dictionary word may come back through them */
+    { const bad = [];
+      for ( const id of KIND_IDS ) {
+        const F = createVocab().flow(id, { lang, seed: "dict" }), seg = [F.onset, ...Array.from({ length: 24 }, (_, i) => F.at(i)), F.tail].filter(Boolean);
+        for ( const x of seg ) if ( naming(x.text, lang) ) bad.push(`${id}: ${x.text}`);
+        for ( const y of createVocab().syllables(id, { lang, seed: 3 }) ?? [] ) if ( naming(y, lang) ) bad.push(`${id} syllable: ${y}`);
+      }
+      ok(bad.length === 0, `words: ${lang} flows / stream syllables bring a dictionary word back: ${bad.slice(0, 8).join("; ")}`); }
   }
-  ok(naming("CHRZĘST!", "pl") && naming("CHRZĘĘĘST", "pl") && naming("KRA-ŁOMOT", "pl") && naming("GROWL!", "en") && naming("TAK!", "pl") && !naming("TIK-TAK", "pl") && !naming("KRAK!", "pl") && !naming("BOOM!", "en"),
-    "words: the naming test (named sounds, stretched or in a syllable, are caught; imitations pass; TAK alone is a word, TIK-TAK a clock)");
-  ok(NAMING.pl.includes("CHRZĘST") && NAMING.en.includes("ROAR"), "words: the deny lists hold the words the user ruled out");
-  { const W = createVocab(), warn = console.warn; console.warn = () => {}; const r = W.add("pl", "crumble", ["CHRZĘST!", "CHRUP!"]); console.warn = warn;
-    ok(r.refused.length === 1 && r.refused[0] === "CHRZĘST!", "words: add() refuses a word that names a sound"); }
+  ok(naming("CHRZĘST!", "pl") && naming("CHRZĘĘĘST", "pl") && naming("KRA-ŁOMOT", "pl") && naming("GROWL!", "en") && naming("TAK!", "pl") && !naming("KRAK!", "pl") && !naming("BOOM!", "en"),
+    "words: the naming test (named sounds, stretched or in a syllable, are caught; built sounds and iconic exceptions pass)");
+  /* the user's examples of plain words: dictionary interjections are out, stretched or not, alone or in a syllable */
+  ok(["CIACH!", "CIAAACH", "TRZASK!", "PLUSK", "SKRZYP", "BRZDĘK!", "CHRUP", "MLASK", "PSTRYK", "KŁAP", "SZUR", "CHLAST", "PRASK", "BĘC!", "ŁUP", "KA-TRZASK"].every((w) => naming(w, "pl")) &&
+    ["CRASH!", "SPLAASH", "SLAP", "CRACK", "SNAP", "CLICK", "SPLAT", "SMASH!", "KA-CRUNCH", "DOOM", "BROOM"].every((w) => naming(w, "en")),
+    "words: the dictionary interjections the user ruled out are caught (CIACH is a word)");
+  ok(["SZSZT!", "FSZSZT!", "ŚWISZK!", "KRAK!", "BUM!", "KA-BUM!"].every((w) => !naming(w, "pl")) && ["TWOOM!!", "WRAMM!!", "SKROOMM!!", "CHOOM!!", "POW!", "THUD!", "KA-BOOM!"].every((w) => !naming(w, "en")),
+    "words: built sounds and the iconic exceptions pass");
+  ok(NAMING === DICT && DICT.pl.includes("CHRZĘST") && DICT.pl.includes("CIACH") && DICT.en.includes("ROAR") && DICT.en.includes("CRASH"), "words: the deny lists hold the words the user ruled out");
+  { const W = createVocab(), warn = console.warn; console.warn = () => {}; const r = W.add("pl", "crumble", ["CHRZĘST!", "CHRUP!", "KRRUSZK!"]); console.warn = warn;
+    ok(r.refused.length === 2 && r.refused.includes("CHRZĘST!") && r.refused.includes("CHRUP!"), "words: add() refuses a dictionary word and keeps a built one"); }
 
   /* 13. the "!" scale 0..2 (the user: "stopniowanie wykrzykników do 2") is really used, rises with loudness, and is separate from length */
   { const used = new Set(), mono = [];
