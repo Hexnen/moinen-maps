@@ -34,6 +34,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | LETR core (renderer, layers, motion techniques, size model) | 1.2.0 | v1-v4 | `tactics-zones` | stable |
 | FXLE (lifecycle and safety fixes) | 1.2.1 | (fixes) | `tactics-zones` | stable |
 | WORD (vocabulary, 87 kinds, flows) | 1.3.1 | v5 | `tactics-zones` | changing (SPEC-WORDS, SPEC-KINDS: WORD2) |
+| KINDS1 (material, impact, debris, shock wave, fire ladder, chains + TAILS; 94 kinds) | 1.7.1 | - | `tactics-zones-kinds1` | pending merge |
 | TOOL (settings, authoring, designer, GM-only networking) | 1.4.1 | v6 | `tactics-zones` | stable |
 | MOVE (travel, choreography, rates, escalation, shards, push, glow, sustain, ambient) | 1.5.0 | v7 | `tactics-zones-move` | pending merge; then changing (SPEC-MOTION) |
 | LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
@@ -350,8 +351,8 @@ L.stream({ kind: "gunfire", lang: "auto", at: () => muzzle(), to: target, every:
   `KRRACK!!`) [V, example words are seed-dependent].
 - Only the sustain of a sound stretches (the R of a crack, the vowel and M of a boom, the S of a hiss); plosives, affricates and
   prefixes never repeat; no run over 6 letters. A caller's own word may mark stretch points with `+`. [R]
-- 87 kinds in 12 groups (hits, breaking, blasts, motion, elements, powers, devices, voices, animals, vehicles, weapons, weather)
-  [V]; aliases (`explosion` -> boom, `laser` -> beam, ...) in `L.vocab.aliases`; an unknown kind letters as
+- 94 kinds in 13 groups (hits, breaking, blasts, motion, elements, powers, devices, voices, animals, vehicles, weapons, weather,
+  impacts) [V on 1.7.1 KINDS1]; aliases (`explosion` -> boom, `laser` -> beam, ...) in `L.vocab.aliases`; an unknown kind letters as
   `punch` with one warning [V]. Kind list with labels: `L.vocab.list(lang)`; `L.vocab.choices(lang)` for settings [V].
 - Escalation of one sound: `L.vocab.series(kind, n, { seed, lang, grow: "stretch" | "vary" })` (one notch more each step; never
   the same text twice running, never shorter) [V]; `L.word(kind, { step: n, template: first.template, seed })` for the n-th repeat
@@ -367,6 +368,36 @@ L.stream({ kind: "gunfire", lang: "auto", at: () => muzzle(), to: target, every:
 - Adding (shared by every module using the engine): `L.vocab.add(lang, kind, words, { replace })` refuses dictionary words, words
   the fonts cannot letter and words over 22 letters (returned in `refused`, one warning) [V]; `L.vocab.define(kind, def)` adds or
   changes a kind [V]; namespace new ids (e.g. `pvfx-webshot`); `L.vocab.remove`, `L.vocab.reset`.
+
+### 9a. Material, fire ladder, tails and chains (1.7.1 KINDS1)
+Status: new, on branch `tactics-zones-kinds1` [V node: check-words section 20].
+- New kinds: `shockwave` (pressure wave: HWUUUMMF / VWOOOMMF), `sonicboom` (KDAKUUM / KDAKOOM), `concussion` (a blast WITHOUT fire:
+  KRUUM / KROOM, the owner's pick; BOOM / BUM only for blasts with fire), `impact` (a bullet or a blow landing; group `impact`),
+  `debris` (falling pieces, repeats its last syllable for more pieces), `whizz` (a near miss), `casings` (brass on the floor),
+  `dryfire` (an empty click), and `grenade` now has its own dry frag words (KDUMF, PDOOMF) instead of the boom's.
+- Call-time word options (vocabulary keys, never passed to `L.play`): `material` (`stone wood metal earth water glass flesh
+  shield`; aliases such as `concrete`, `steel`, `forcefield`; unknown = the kind's own words) picks the material's row for
+  `impact`, `punch smash slap thud`, `debris`, `boom`, `crack crash crumble` (glass -> the `shatter` words, earth -> `crumble`) and
+  sets `word.character.material`; `pieces` (`small medium large` or 0..1) picks the debris tier instead of loudness; `intensity`
+  (1..5 or `ember flame burning blaze inferno`) and `stage` (`ignite`, `out`; wins over intensity) pick the fire row, each with its
+  own flow style, envelope, sustain and "!" cap (an ember never shouts). The muzzle word of a gun never changes with material.
+  ```js
+  L.sfx("impact", { material: "metal", loud: 0.9, at: target, seed });          // KTRANNG-like, metal character
+  L.sfx("debris", { material: "wood", pieces: "large", at: wall, seed });
+  L.flow("fire", { intensity: "blaze", seed }); L.word("fire", { stage: "out" });
+  ```
+- `L.vocab.tails(kind, { material })`: the sounds that follow a sound by themselves (a blast -> shock wave + debris, a shot ->
+  casings at the shooter's feet, an impact -> small debris unless water / flesh / shield), each `{ kind, t, rel, place, why }`.
+- `L.vocab.chain(spec, { lang, seed, magnitude | loud, tempo, material, tails })`: an event told in order (build, peak, develop,
+  resolve). `spec` = a named chain (`L.vocab.chains`: `explosion grenade collapse sonicboom shot miss burst ignite fireout`), an
+  array of steps `{ kind, t, rel, role, place, material, pieces, intensity, stage, ...play options }`, or one kind (= that kind
+  plus its tails). Returns steps sorted by `t` (ms, divided by `tempo`) with `word` and `play`; loudness = base x `rel`; two steps
+  in a row never letter the same word; deterministic for a seed [V].
+- `L.chain(spec, { ...the above, places: { source, target, ring, around, feet, bounce, behind }, at, startAt | delay, ...play
+  options })` plays it: each step at `places[step.place]` (else `at`), seed `${seed}|${i}`; returns `{ steps, handles, stop() }`.
+  It is local, not networked: each client calls it from the shared event (or use `L.net` per word). The engine does not yet
+  have an "unlocated" placement for sounds whose source is hidden (requested in REQUESTS.md); pass a screen point until it does.
+- Pickers and sheets: `L.vocab.variants(kind, lang)` -> `{ table, rows }`, `L.vocab.hitMaterials`, `L.vocab.fireLevels`.
 
 The rules the words obey (only onomatopoeia, no dictionary words, prefixes, the comic's manner) are the owner's: section 14.
 
@@ -671,6 +702,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `prefs`, `settings`, `registerMood`, `registerPalette`, `registerFont`, `registerStyle`, `unregisterStyle`, `styles`, `style`, `saveStyle`, `deleteStyle`, `palettes`, `motionNames`, `net` (`play burst stream stop sharedNow local lead`), `letterNow`, `designer`, `openSettings`, `planFor` | v6 (1.4.x) | added by `tools.mjs` at setup; absent if the tools did not install [V] |
 | `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | |
+| `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -684,3 +716,5 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   rule to update this manual in the same turn as any lesson or ruling.
 - 2026-11-13 (later): changing one trait of a vocabulary word (section 5); `alt: " "` workaround for the announce leak and the
   remaining near-words / diacritics in the 1.6.0 banks (section 18).
+- 2026-11-14: KINDS1 (engine 1.7.1, branch `tactics-zones-kinds1`): section 9a (material, pieces, fire intensity and stage,
+  tails, chains, `L.chain`), kind count 94 in 13 groups, API index row.

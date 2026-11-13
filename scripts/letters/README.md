@@ -341,7 +341,7 @@ an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM
   letter opens a syllable only when it lasts (SSST, MMM, never VVRT), English never writes II (a long i is EE); a syllable without a
   vowel is one clear lasting sound (BZZT, PSST, HMM, GRRMM) or a tick or throat sound (TK, THK, SNF, CHK, PFT).
 - **Each kind its own words**: a word (repeated letters collapsed) used by two kinds must be on `SHARED` with both kinds and a reason
-  (a grenade's BOOM is a boom, a storm's word is its thunder, a mech walks with DUM-DUM stomps); any other sharing fails the checks,
+  (SKRAKT is a crack and an impact, a storm's word is its thunder, a mech walks with DUM-DUM stomps); any other sharing fails the checks,
   so a punch word on a plane cannot come back.
 - **The water family** is fixed by the owner: pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ SPLASZ, bubbles
   GLUB BLUB BULP; en PLOP PLOOP PLUNK SPLOOSH, bubbles GLUB BLUB. The laser pistol is ZAT, TZAT, ZARK, TZAK, FZAT, SKZARK, KTZAK,
@@ -434,12 +434,12 @@ is MOVE's (see API-CONTRACT v5).
   `12 500` (a space from 10 000), `2,5`, `1,2 MLN`, `12 TYS.`; English `12,500`, `2.5`, `1.2M`, `12K`; `3×` / `×3`; minus is `-`
   so the auto mood still reads pain / heal. `L.range(2, 4)` -> `2–4`. Every sign used has a glyph in every font (checked).
 
-### The sound kinds (86; PL and EN words for each, 3 tiers + stream syllables)
+### The sound kinds (94; PL and EN words for each, 3 tiers + stream syllables)
 | group | kinds |
 |---|---|
 | hits | punch (cios), smash (miażdżenie), slap (klaps), thud (łomot), stomp (tupnięcie), clang (brzęk), slash (cięcie), bite (ugryzienie) |
 | breaking | crack (trzask), shatter (stłuczenie), crash (łoskot), crumble (kruszenie), rumble (dudnienie), creak (skrzypienie), scrape (zgrzyt) |
-| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunfire (seria), ricochet (rykoszet) |
+| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunfire (seria), ricochet (rykoszet), shock wave (fala uderzeniowa), sonic boom (grom dźwiękowy), dry blast (suchy wybuch: `concussion`, a blast without fire, KROOM / KRUUM) |
 | motion | whoosh (świst), zoom (pęd), bounce (skok), teleport (teleport), wind (wiatr) |
 | elements | fire (ogień), crackle (trzaskanie), hiss (syk), splash (plusk), squish (plaśnięcie), drip (kapanie) |
 | powers | power-up (ładowanie), psychic (telepatia), chime (dzwonienie), fizzle (zgaśnięcie), whiff (pudło) |
@@ -450,8 +450,19 @@ is MOVE's (see API-CONTRACT v5).
 | weapons | pistol (pistolet; `gunshot`, `shot`, `gun` are its aliases since the review), rifle (karabin), shotgun (strzelba), minigun (działko), laser pistol (pistolet laserowy: short, high, electric, hard start, brief fizz: ZAT, TZAK, ZARK, ZZARKT; never PIU PIU or PEW), heavy blaster (ciężki blaster: low, thick energy blast), silenced (tłumik), sword (miecz), arrow (strzała), thrown (rzut), grenade (granat), rocket (rakieta), reload (przeładowanie) |
 | devices (more) | ambulance (karetka), police (policja), fire engine (straż pożarna): three different sirens; drill (wiertarka), hammer (młotek) |
 | weather | hail (grad), rain (deszcz), storm (burza, mix), tornado (tornado, mix) |
+| impacts | impact (trafienie: a bullet or blow landing), debris (odłamki: falling pieces) |
+| weapons (more) | whizz (świst kuli: a near miss), casings (łuski), dry fire (suchy strzał: an empty click) |
 Aliases (`explosion` -> boom, `laser` -> beam, `machinegun` -> gunfire, `hit` -> punch, `heal` -> relief, ...): `L.vocab.aliases`.
 An unknown kind letters as `punch` with one warning.
+
+### Material, fire ladder, tails and chains (1.7.1 KINDS1)
+Word options `material` (stone wood metal earth water glass flesh shield), `pieces` (debris size), `intensity` (fire 1..5) and
+`stage` (fire `ignite` / `out`) pick a row of `VARIANTS[lang][table]` (`VARY` names which kinds read which table; a string row
+borrows another kind's bank, e.g. glass -> `shatter`); `VARIANT_META` gives a fire row its own flow style, envelope, sustain and
+"!" cap; `MAT_CHAR` sets the word's character material. `TAILS` lists the sounds that follow a sound by themselves (the twin of
+`PREFIXES`, each with a reason); `CHAINS` are named events told in order (`build peak develop resolve`, places `source target
+ring around feet bounce behind`). `vocab.chain(spec, o)` makes the words, `L.chain(spec, o)` plays them (local, not networked).
+Manual section 9a.
 
 ### How the words were written
 Our own lists, nothing copied wholesale. Since the vocabulary review (2026-11-13, WORD2) the banks are written per kind with English
