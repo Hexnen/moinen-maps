@@ -50,7 +50,7 @@ export function makeSustain(E) {
     let flow = null;
     const flowOf = () => {
       if ( flow !== null ) return flow;
-      try { const V = E.vocab(); flow = o.kind != null && typeof V?.flow === "function" ? V.flow(o.kind, { lang: o.lang, seed, loud: level, magnitude: o.magnitude, style: o.style }) : false; } catch { flow = false; }
+      try { const V = E.vocab(); flow = o.kind != null && typeof V?.flow === "function" ? V.flow(o.kind, { lang: o.lang, seed, loud: level, magnitude: o.magnitude, style: o.style, material: o.material, intensity: o.intensity, stage: o.stage }) : false; } catch { flow = false; }
       return flow;
     };
     const seg = (q) => (q?.text ? { text: q.text, mood: q.mood, kmood: q.play?.mood, accent: q.accent, ms: q.ms, loud: q.loud } : null);
