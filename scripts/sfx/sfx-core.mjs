@@ -268,9 +268,11 @@ export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid
   if ( !Array.isArray(it?.from) || !(it.hits?.length) ) return null;
   const shots = it.hits.map((h) => { const q = muzzleOf(it, h, grid); return { x: q.x, y: q.y, ms: h[2] - flight(q.L), hx: h[0], hy: h[1] }; }).sort((a, b) => a.ms - b.ms);
   const s0 = shots[0].ms, walk = shots.map((q) => ({ x: q.x, y: q.y, ms: Math.round(q.ms - s0) }));
-  // (the report kicks back from the aim, away from where the rounds fly, so it never sits on the impact words)
-  const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y;
-  const dir = Math.round((Math.atan2(-ay, -ax) * 180) / Math.PI);
+  // (the report's syllables fly off square to the aim, on the screen-up side: not back across the shooter's own token - live, kicked
+  // back from the aim, they stacked on the shooter - and not along the rounds' way onto the impact words)
+  const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y, al = Math.hypot(ax, ay) || 1;
+  const [px, py] = -ax < 0 || (ax === 0 && ay > 0) ? [ay, -ax] : [-ay, ax];   // (the one of the two that points up the screen)
+  const dir = Math.round((Math.atan2(py, px) * 180) / Math.PI);
   const b = grid * 0.4, x = shots[0].x, y = shots[0].y;
   return { key, sid, obj: key, voice: "muzzle", kp: gunKinds(walk), x, y, r: grid * 0.45, t: t0 + s0, t0: t0 + s0, path: walk, dir, m: 0.45,
     ms: Math.max(300, walk.at(-1).ms + 300), box: { x0: x - b, y0: y - b, x1: x + b, y1: y + b } };

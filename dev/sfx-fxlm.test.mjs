@@ -273,7 +273,7 @@ group("SHOT", () => {
   const me = C.muzzleEvent(it, { t0: 10000, grid: G, muzzleOf: (a, h, g) => { const d = Math.hypot(h[0], h[1]), ux = h[0] / d, uy = h[1] / d, off = 0.85 * 50;
     return { x: ux * off, y: uy * off, L: d - off }; }, flight: fl, key: "m1", sid: "m1" });
   ok(me.voice === "muzzle" && Math.abs(me.x - 42.5) < 1e-9 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds at the barrel, when the first round leaves (hit time minus flight)");
-  ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180) + 1) < 0.05, "SHOT a syllable per round; the report kicks back away from the aim");
+  ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180)) < 0.05 && Math.sin(me.dir * Math.PI / 180) < 0, "SHOT a syllable per round; the report flies off square to the aim, screen-up (not back over the shooter, not onto the impacts)");
   const w = C.planCluster(C.cluster([me], G)[0], { grid: G, known: KINDS })[0];
   // (engine 1.7.0 WORD2 has the guns' own kinds - pistol, rifle, gunfire, minigun - in place of one "gunshot": the firing's rounds pick one)
   ok(KINDS.has(w.kind) && /^(pistol|rifle|gunfire|minigun)$/.test(w.kind) && w.kind === C.kindOf("muzzle", KINDS, null, C.gunKinds(me.path)) && w.stream && w.stream.dir === me.dir && w.stream.t0 === me.t0,
