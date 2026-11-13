@@ -13,6 +13,7 @@
 import { VERSION, createEngine } from "./engine.mjs";
 import { STAMP } from "./stamp.mjs";
 import * as tools from "./tools.mjs";
+import { attachImpact } from "./impact/index.mjs";   // IMPACT hook 1/3: impact frames (scripts/letters/impact/), L.impact
 
 const REG = (globalThis.MoinenLetters ??= {
   copies: [],
@@ -24,6 +25,7 @@ const REG = (globalThis.MoinenLetters ??= {
       const twin = this.copies.find((c) => c !== best && cmpVer(c.version, best.version) === 0 && c.stamp?.hash && best.stamp?.hash && c.stamp.hash !== best.stamp.hash);
       if ( twin ) console.warn(`LETR | two copies of engine ${best.version} differ; using the more recently synced one (${best.base}). Bump VERSION when the engine changes.`);
       this._engine = best.create(best.base);
+      try { best.impact?.(this._engine, best.tools); } catch ( e ) { console.warn("LETR | impact frames not attached", e); }   // IMPACT hook 2/3
     }
     await this._engine.ready();
     return this._engine;
@@ -39,7 +41,7 @@ function cmpVer(a, b) {
 
 const BASE = new URL("./", import.meta.url).href;
 if ( !REG.copies.some((c) => c.base === BASE) ) {
-  REG.copies.push({ version: VERSION, stamp: STAMP, base: BASE, create: createEngine, tools });
+  REG.copies.push({ version: VERSION, stamp: STAMP, base: BASE, create: createEngine, tools, impact: attachImpact });   // IMPACT hook 3/3
   if ( REG._engine && cmpVer(VERSION, REG._engine.version) > 0 ) console.warn(`LETR | engine ${VERSION} registered after ${REG._engine.version} was already in use; it is used after a reload`);
 }
 
