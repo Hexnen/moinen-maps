@@ -184,6 +184,9 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   ok(/redraws < MAX_REDRAWS/.test(eng) && /h\.retired/.test(eng) && !/if \( h\.shown === c \) h\.shown = null; dropPic\(c\)/.test(eng), "size: stale pictures are redrawn a few per frame and the shown texture is never freed under the sprite (F0/F1)");
 }
 
+/* 8c. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
+await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
+
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./sync.mjs", import.meta.url)), "--check"], { encoding: "utf8" });
