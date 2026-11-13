@@ -236,4 +236,13 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const names = [...forms.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]).filter((n) => SHADOW.includes(n));
     ok(forms.length > 0 && names.length === 0, `tools: form windows use no control name that shadows a form property (${names.join(", ") || "none"})`);
   }
+  /* LM: the screen-reader announcement respects visibility (1.6.0 read a hidden token's word to a player: announce ran before the
+     visibility check); the start hook runs after place() decided h.seen, and announce() leaves an unseen word out */
+  {
+    const tsrc = fs.readFileSync(new URL("./tools.mjs", import.meta.url), "utf8"), esrc = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
+    const body = tsrc.slice(tsrc.indexOf("function announce(h)"), tsrc.indexOf("state.liveQ.push"));
+    ok(body.includes("if ( h.seen === false ) return;"), "tools: announce leaves out a word this user does not see");
+    ok(/show\(h, c\); place\(h\);[^\n]*\n[^\n]*for \( const f of ext\.start \)/.test(esrc), "tools: start hooks run after place() decided the word's visibility");
+  }
+
 }

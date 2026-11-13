@@ -139,6 +139,9 @@ function mergeStrings() {
 /* ---------- accessibility: the word as text, for screen readers ---------- */
 function announce(h) {
   if ( !state.prefs.announce || h.opts?._stream === true ) return;
+  /* LM: a word this user does not see (a hidden token's word for a player, a token out of sight) is not read either: the engine
+     placed it (and decided h.seen) before this start hook runs */
+  if ( h.seen === false ) return;
   const text = String(h.opts?.alt ?? (typeof h.opts?._stream === "string" ? h.opts._stream : h.plan?.word ?? h.text)).trim();
   if ( !text ) return;
   if ( !state.live?.isConnected ) {
