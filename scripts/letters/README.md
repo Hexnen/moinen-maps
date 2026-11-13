@@ -127,14 +127,15 @@ and combines them, every animation frame. The model is `size.mjs` (pure; checked
 ### What the engine derives
 1. **Natural size** (world words, scene px of cap height): 0.55 grid squares; from a source of span S: 0.55 g x (S/g)^0.5 (a 4x4 titan
    gets 2x, not 4x); from a footprint of radius R: 0.55 g x (R / 0.5 g)^0.6 (a 10-square collapse is about 3 squares tall); times the
-   magnitude factor (0.7 at 0, 1.0 at 0.5, 1.5 at 1, 2.3 at 2). Screen words: 8.5 % of the viewport height x magnitude factor.
+   magnitude factor (0.7 at 0, 1.1 at 0.5, 1.5 at 1, 2.3 at 2). Screen words: 7.5 % of the viewport height x magnitude factor.
    Then the mood's own factor (a roar is drawn bigger than a click: `plan.sizeK`, 0.62-1.32).
 2. **On screen** (CSS px of cap height) = natural x mood factor x zoom (world) or as is (screen).
 3. **Legible range**, clamped softly (inside it nothing changes; outside it the size still follows zoom a little as a depth cue, then stops):
    - floor: 2.6 % of the viewport height, 15-30 px (0.8x for quiet sounds like ticks), lowered when more than 12 world words are up
      (sqrt, down to 0.7x) so a hundred far-away crashes do not bury the map; hard stop at 0.8x the floor;
-   - ceiling: the cap height stays under (9 % + 12 % x magnitude) of the viewport height and the word's width under (45 % + 30 % x
-     magnitude) of the usable width (viewport minus the sidebar); hard stop at 1.15x. Big events may fill a lot of the screen, never all.
+   - ceiling: the cap height stays under (7 % + 8 % x magnitude) of the viewport height and the word's width under (40 % + 25 % x
+     magnitude) of the usable width (viewport minus the sidebar); hard stop at 1.15x. With more than 2 world words up the ceiling
+     shrinks with sqrt(2 / n), to 0.4x at most: a crowd shares the screen. Big events may fill a lot of the screen, never all.
 4. **Pixel lettering** (`pixel`): the size is snapped to whole art pixels (7-40 per cap height, 32 art px per grid square) once, at the
    start, and kept: pixel art never scales by fractions.
 
@@ -147,11 +148,11 @@ is drawn big. Screen words follow window resizes the same way.
 ### What it means in the situations that matter (my reading, numbers at 1366x768)
 - **A tick on a small token, zoomed out** (0.2): the world size would be about 8 px; the floor holds it at about 15 px (a normal
   word about 19 px) - readable, never bigger than a normal word.
-- **A building coming down** (`area` 5-10 squares, `magnitude` 1): seen from far (0.2) about 80-120 px, the biggest thing on screen
-  but no wall; from zoom 0.5 on the ceiling (about 160-185 px cap height, width under 75 % of the usable width) stops it from burying
-  the scene.
-- **A roll result over the interface**: 8.5 % of the viewport height x magnitude: about 72 px on a 768 px laptop, about 100 px on a
-  1080 px screen (mood factor 1), the same share of the screen on both; a crit (`magnitude` 1) about 1.5x.
+- **A building coming down** (`area` 5-10 squares, `magnitude` 1): seen from far (0.2) about 80-115 px, the biggest thing on screen
+  but no wall; from zoom 0.5 on the ceiling (about 115-132 px cap height, width under 65 % of the usable width) stops it from burying
+  the scene; a dozen such words at once get about 54 px each.
+- **A roll result over the interface**: 7.5 % of the viewport height x magnitude: about 63 px on a 768 px laptop, about 89 px on a
+  1080 px screen (magnitude 0.5, mood factor 1), the same share of the screen on both; a crit (`magnitude` 1) about 1.5x.
 - **A stream along a shot**: each syllable 62 % of the stream's natural size (from `span`/`area`/`token`/`magnitude`), then clamped
   like any word, so a far-away burst of gunfire is still readable syllable by syllable.
 - **Pixel lettering beside pixel art**: whole art pixels from the same model at the start zoom; the floor of 7 art px keeps the

@@ -37,7 +37,7 @@ export function gallery(L, o = {}) {
         return { x: c.x - vw * 0.38 + vw * 0.24 * q + ((r % 2) ? vw * 0.06 : 0), y: c.y - vh * 0.3 + vh * 0.28 * r };
       })();
       const opts = { mood, at, space: onWorld ? "world" : "screen", hold: 1500 + 300 * (i % 3), seed: o.seed != null ? `${o.seed}:${k}` : undefined };
-      opts.magnitude = [0.35, 0.6, 0.9, 0.5][i % 4];   // sizes come from the model (README "Size"): viewport, zoom, grid, magnitude
+      opts.magnitude = [0.2, 0.4, 0.6, 0.3][i % 4];   // sizes come from the model (README "Size"): viewport, zoom, grid, magnitude
       timers.push(setTimeout(() => { const h = L.play(text, opts); handles.push(h); done.push(h.finished); }, w * 3600 + i * gap));
     }
   }

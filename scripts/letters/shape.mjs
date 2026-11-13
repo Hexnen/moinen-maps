@@ -11,8 +11,8 @@ export function treatLetter(gl, hand, sound, seed, i) {
   let cs = gl.contours.map((c) => resample(c, STEP));
   const extra = [];
   switch ( hand.treat ) {
-    case "jag": cs = cs.map((c) => jag(c, 0.035 + 0.035 * sound.sharp, 5, R)); break;
-    case "rough": cs = cs.map((c, j) => rough(c, 0.025 + 0.03 * sound.rough, 2.2, (seed + i * 31 + j) | 0)); break;
+    case "jag": cs = cs.map((c) => jag(c, 0.022 + 0.022 * sound.sharp, 5, R)); break;
+    case "rough": cs = cs.map((c, j) => rough(c, 0.016 + 0.018 * sound.rough, 2.2, (seed + i * 31 + j) | 0)); break;
     case "drip": extra.push(...drips(cs, R, 0.75, 0.32 + 0.25 * sound.long)); cs = cs.map((c, j) => rough(c, 0.012, 2, (seed + j) | 0)); break;
     case "flame": cs = cs.map((c, j) => rough(c, 0.02, 2.5, (seed + i * 7 + j) | 0)); extra.push(...flames(cs, R, 1, 0.35 + 0.3 * sound.long, (seed % 100) / 10)); break;
     default: break;
