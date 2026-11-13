@@ -210,7 +210,9 @@ let hs = api.highlights().find((x) => x.id === "reach");
 check(id === "reach" && J(hs.zones.map((e) => [e.zone, e.style, e.label])) === J([["z4", "outline", null], ["z5", "fill", "1"]]) && hs.zones[1].color === 0x5cc8ff, "showReach: the mover's zone outlined, what one action reaches in the move colour with its distance (walls stop it)");
 api.showReach("z4", { way: "air", speed: 1, stress: true }, { beyond: true });
 hs = api.highlights().find((x) => x.id === "reach");
-check(hs.zones.find((e) => e.zone === "z3")?.color === 0x5cc8ff && hs.zones.find((e) => e.zone === "z2") === undefined && api.highlights().length === 1, "a flyer passes the exterior wall; the same id replaces the old picture");
+// (A14, 2026-11-12: from outside a flyer passes over every building, by its roof - so z2 behind the building z3 is two zones off,
+//  reached with stress, not cut off by the locked door between them as before)
+check(hs.zones.find((e) => e.zone === "z3")?.color === 0x5cc8ff && hs.zones.find((e) => e.zone === "z2")?.label === "2" && hs.zones.find((e) => e.zone === "z2")?.color !== 0x5cc8ff && api.highlights().length === 1, "a flyer passes the exterior wall and over the building behind it (A14); the same id replaces the old picture");
 api.clearHighlights("reach");
 
 /* ================================================================ wired: picking */

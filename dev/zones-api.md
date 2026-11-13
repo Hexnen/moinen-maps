@@ -147,11 +147,17 @@ api.zonesWithin(where, n, { way = "range" }) -> [{ zone, id, d }]     nearest fi
 | way | stopped by | notes |
 |---|---|---|
 | `walk` | wall, exterior wall, reinforced wall, locked door | climbs floors: `levels` |
-| `air` | wall, reinforced wall, locked door | flight, leaping, super-speed: passes over exterior walls |
+| `air` | wall, reinforced wall, locked door - only inside a building or between two zones that are not buildings | flight, leaping, super-speed: passes over exterior walls, and from outside over every standing building (A14, below) |
 | `through` | nothing | burrowing, teleportation; the only way to or from `underground` |
 | `swim` | as walk | only into water or flooded zones |
 | `swing` | as air | can only end in a standing building or a zone with tall features |
 
+- **A14 (the user's answer of 2026-11-12, 2385 "over buildings")**: from outside a flyer passes over every building by its
+  roof. A border that stops `air` by its wall and door does not stop it when exactly one of its two zones is a standing
+  building (`building` and not `wrecked`): the flyer goes up over that building's roof, whatever the wall is marked as. Between
+  two standing buildings a wall is a wall inside a building and stops it, unless it is marked exterior (two buildings side by
+  side). Between two zones that are not buildings only an exterior mark lets it over (as before). `border.stops.air`,
+  `route`, `distances`, `plan` and the badges all use this rule.
 - `levels` for walk / swim: the vertical zones climbed inside the buildings at both ends (a floor its number, a rooftop
   one above the top floor, 1 for a plain building: 2404, 2419). An airborne place cannot be walked to or from: land or
   fall first (a level change the caller makes).
@@ -285,7 +291,8 @@ border.doorway = null (no door)        | { armor, state: "open" | "closed" | "lo
 border.base    = the kind the border was built as ("open" | "door" | "locked" | "wall" | "outer" | "reinforced")
 ```
 
-- `outer`: a building's exterior wall (flyers pass over it: `stops.air` is false). `temp`: the wall was removed *for a while*
+- `outer`: a building's exterior wall (flyers pass over it: `stops.air` is false). `stops.air` also reads the zones on both
+  sides (A14, section 5): a wall between a standing building and a zone that is not one never stops a flyer. `temp`: the wall was removed *for a while*
   (the one who removed it says so; nothing puts it back). `built`: the state the door was built in (what restoring returns to).
 - `closed` is an unlocked door. A door is never built `breached`.
 - `kind`, `armor`, `door`, `stops` (section 5) now say what the border **amounts to at the moment**: a wall that is breached or
@@ -304,10 +311,10 @@ Old scenes: the one-kind marks are still what a plain border stores (`[x, y, kin
 | old kind | wall | door | as before |
 |---|---|---|---|
 | `door` | Armor 2 | Armor 1, closed | kind door, Armor 1, stops nobody |
-| `locked` | Armor 2 | Armor 2, locked | kind locked, Armor 2, stops walk and air |
-| `wall` | Armor 2 | - | stops walk and air |
+| `locked` | Armor 2 | Armor 2, locked | kind locked, Armor 2, stops walk and air (air: see A14) |
+| `wall` | Armor 2 | - | stops walk and air (air: see A14) |
 | `outer` | Armor 3, exterior | - | stops walk |
-| `reinforced` | Armor 4 | - | stops walk and air |
+| `reinforced` | Armor 4 | - | stops walk and air (air: see A14) |
 
 The Armor 2 of the wall around an old door mark is **our reading** (the old mark had one Armor for the whole border). An
 untouched scene's flag encodes byte for byte as before (`bs`, `q`, `e`, `pn` appear only when something is stored).

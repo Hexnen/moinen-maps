@@ -29,8 +29,9 @@ export const FIRE_MAX = 12;
 /** Floors above the ground floor a building may have (book: each floor of a large building is a vertical zone of its own). */
 export const FLOORS_MAX = 40;
 
-/** Who a border stops. Walking: every wall and a locked door. Over the top (flight, leaping, super-speed, swinging): an exterior
- *  wall is a building's wall, so they pass over it; inner walls and locked doors still stop them. Burrowing and teleportation: nothing. */
+/** Who a border stops by itself. Walking: every wall and a locked door. Over the top (flight, leaping, super-speed, swinging): an
+ *  exterior wall is a building's wall, so they pass over it; inner walls and locked doors still stop them - unless the zones on
+ *  its two sides say it is a building's edge (stopped(): A14). Burrowing and teleportation: nothing. */
 const STOPS = {
   walk: new Set(["locked", "wall", "outer", "reinforced"]),
   air: new Set(["locked", "wall", "reinforced"]),
@@ -112,8 +113,21 @@ export function resolve(Z, walls, marks, zoneAt, tol, plays = null) {
   return { borders, zones };
 }
 
-/** Whether the border between two adjacent zones stops this way of moving (walk, air, through). */
-export const stopped = (M, a, b, way) => stopsWay(M?.borders.get(pairKey(a, b)), way);
+/** A standing building: a zone with a roof to pass over (a wrecked one has none left, book-dump 2457). */
+const roofed = (M, id) => { const p = M?.zones.get(id); return !!(p?.building && !p.wrecked); };
+/**
+ * Whether the border between two adjacent zones stops this way of moving (walk, air, through).
+ * Over the top (A14, the user's answer of 2026-11-12, book-dump 2385 "flyers pass over buildings"): from outside a flyer passes
+ * over every building, by its roof, whatever the wall between is marked as - a blocked border between a standing building and a
+ * zone that is not one does not stop it. A wall between two standing buildings is a wall inside a building and stops it, unless
+ * it is marked a building's exterior wall (two buildings side by side). A freestanding wall (neither zone a building) stops it
+ * unless it is marked exterior, as before.
+ */
+export function stopped(M, a, b, way) {
+  const m = M?.borders.get(pairKey(a, b));
+  if ( !stopsWay(m, way) ) return false;
+  return !(way === "air" && roofed(M, a) !== roofed(M, b));
+}
 /** A zone one can swim through: water or flooded. */
 export const isWater = (M, id) => { const p = M?.zones.get(id); return !!(p?.water || p?.flooded); };
 
@@ -127,7 +141,7 @@ function bfs(Z, from, M, way, onlyThrough = null) {
     const a = q[k];
     for ( const b of Z.adj.get(a).keys() ) {
       if ( d.has(b) ) continue;
-      if ( stopsWay(M?.borders.get(pairKey(a, b)), way) ) continue;
+      if ( stopped(M, a, b, way) ) continue;
       if ( onlyThrough && !onlyThrough(b) ) continue;
       d.set(b, d.get(a) + 1); q.push(b);
     }
@@ -136,8 +150,8 @@ function bfs(Z, from, M, way, onlyThrough = null) {
 }
 
 /**
- * Distances from a zone for each way of moving: walk (walls and locked doors stop it), air (over buildings: only inner walls and
- * locked doors stop it), through (burrowing, teleportation: nothing stops it), swim (only through water: water zones or flooded
+ * Distances from a zone for each way of moving: walk (walls and locked doors stop it), air (over buildings: only walls and locked
+ * doors inside a building or between two open zones stop it, see stopped()), through (burrowing, teleportation: nothing stops it), swim (only through water: water zones or flooded
  * ones), and swing (as air, but it can only END in a building or a zone with tall features).
  */
 export function moveDistances(Z, from, M) {

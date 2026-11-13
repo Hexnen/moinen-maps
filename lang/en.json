@@ -1721,7 +1721,7 @@
   "MOINENMAPS.Zones.inv.blocked": "no way there",
   "MOINENMAPS.Zones.noWay": "no way through",
   "MOINENMAPS.Zones.border.title": "Border {a} | {b}",
-  "MOINENMAPS.Zones.border.hint": "Walking stops at walls and locked doors; flight, leaping and super-speed pass over exterior walls; burrowing and teleportation ignore them all.",
+  "MOINENMAPS.Zones.border.hint": "Walking stops at walls and locked doors; flight, leaping and super-speed pass over exterior walls and, from outside, over every building (walls inside a building stop them); burrowing and teleportation ignore them all.",
   "MOINENMAPS.Zones.border.open": "Open",
   "MOINENMAPS.Zones.border.door": "Door",
   "MOINENMAPS.Zones.border.locked": "Locked door",

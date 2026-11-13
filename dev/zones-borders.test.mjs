@@ -90,6 +90,24 @@ check(P.borderInfo(W.C, keyOf, 0, 1).wall.state === "intact", "a caller cannot c
 W = world([[100, 50, "wall"], [200, 50, "locked"], [300, 50, "outer", { door: { state: "sealed" } }]], [], [[100, 20, { w: "breached" }], [200, 80, { d: "open" }], [150, 50, { w: "removed" }]]);
 check(P.borderInfo(W.C, keyOf, 0, 1).kind === "open" && P.borderInfo(W.C, keyOf, 0, 1).wall.state === "breached" && P.borderInfo(W.C, keyOf, 1, 2).kind === "door" && P.borderInfo(W.C, keyOf, 1, 2).doorway.state === "open", "play records find their border by a point on it; one far from every border is dropped");
 check(P.routeLength(W.C, W.at(0), W.at(2), "walk").total === 2 && P.routeLength(W.C, W.at(0), W.at(3), "walk") === null && P.path(W.C, keyOf, W.at(0), W.at(2), "walk").crossed.map((b) => b.kind).join() === "open,door", "walking goes through the breach and the opened door, not through the sealed one");
+/* ---- A14 (the user's answer of 2026-11-12): from outside a flyer passes over every building by its roof; walls inside a building stop it */
+{
+  const air = (Wd, x, y) => P.routeLength(Wd.C, Wd.at(x), Wd.at(y), "air");
+  // a | b building | c building | d: an inner wall a|b, an inner wall b|c, a locked door c|d
+  let A = world([[100, 50, "wall"], [200, 50, "wall"], [300, 50, "locked"]], [[150, 50, { building: true }], [250, 50, { building: true }]]);
+  check(air(A, 0, 1)?.total === 1 && air(A, 3, 2)?.total === 1 && P.borderInfo(A.C, keyOf, 0, 1).stops.air === false && P.borderInfo(A.C, keyOf, 0, 1).stops.walk === true,
+    "A14: open ground to a building over a wall marked interior - the flyer goes over its roof (borderInfo says so too), the walker does not");
+  check(air(A, 1, 2) === null && P.borderInfo(A.C, keyOf, 1, 2).stops.air === true && air(A, 0, 3) === null,
+    "A14: a wall between two zones of a building stops a flyer");
+  A = world([[100, 50, "wall"], [200, 50, "outer"], [300, 50, "locked"]], [[150, 50, { building: true }], [250, 50, { building: true }]]);
+  check(air(A, 1, 2)?.total === 1 && air(A, 0, 3)?.total === 3, "A14: two buildings side by side (their wall marked exterior): over both roofs, street to street");
+  A = world([[100, 50, "wall"], [200, 50, "wall"]], [[150, 50, { building: true, wrecked: true }], [250, 50, { building: true }]]);
+  check(air(A, 0, 1) === null && air(A, 1, 2)?.total === 1, "A14: a wrecked building has no roof to pass over (a wall between it and open ground stops a flyer); from it a standing building's roof is reached");
+  A = world([[100, 50, "wall"], [200, 50, "outer"]]);
+  check(air(A, 0, 1) === null && air(A, 1, 2)?.total === 1, "A14: a freestanding wall between open zones stops a flyer unless it is marked exterior (as before)");
+  const md = K.moveDistances(Z, 0, world([[100, 50, "wall"]], [[150, 50, { building: true }]]).M);
+  check(md.air.get(1) === 1 && md.walk.get(1) === undefined && md.swing.get(1) === 1, "A14: the distances the presets read agree (air and swing over the roof)");
+}
 // fire spreading: a standing wall blocks it, a breached one does not
 let fr = K.fireRound(Z, world([[100, 50, "wall"]], [[50, 50, { fire: 7 }]]).M, () => 0.99);
 check(fr.log[0].to === undefined, "fire does not spread through a standing wall");

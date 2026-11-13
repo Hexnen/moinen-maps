@@ -1721,7 +1721,7 @@
   "MOINENMAPS.Zones.inv.blocked": "brak drogi",
   "MOINENMAPS.Zones.noWay": "brak przejścia",
   "MOINENMAPS.Zones.border.title": "Granica {a} | {b}",
-  "MOINENMAPS.Zones.border.hint": "Pieszo zatrzymują ściany i zamknięte drzwi; lot, skoki i superszybkość przechodzą nad ścianą zewnętrzną; kopanie i teleportacja ignorują wszystkie.",
+  "MOINENMAPS.Zones.border.hint": "Pieszo zatrzymują ściany i zamknięte drzwi; lot, skoki i superszybkość przechodzą nad ścianą zewnętrzną, a z zewnątrz nad każdym budynkiem (ściany wewnątrz budynku je zatrzymują); kopanie i teleportacja ignorują wszystkie.",
   "MOINENMAPS.Zones.border.open": "Otwarta",
   "MOINENMAPS.Zones.border.door": "Drzwi",
   "MOINENMAPS.Zones.border.locked": "Zamknięte drzwi",

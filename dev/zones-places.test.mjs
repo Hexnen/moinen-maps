@@ -51,7 +51,8 @@ check(P.range(W.C, W.at(0, { alt: "sky" }), W.at(0)) === null && P.range(W.C, W.
 check(P.range(W.C, W.at(-1), W.at(0)) === null, "outside every zone: no range");
 
 /* ---- routes per way of moving */
-check(J(P.routeLength(W.C, W.at(0), W.at(3), "through")) === J({ borders: 3, levels: 0, total: 3 }) && P.routeLength(W.C, W.at(0), W.at(1), "air") === null, "burrowing passes every wall; an inner wall stops flight");
+check(J(P.routeLength(W.C, W.at(0), W.at(3), "through")) === J({ borders: 3, levels: 0, total: 3 }) && P.routeLength(W.C, W.at(0), W.at(1), "air").total === 1 && P.routeLength(W.C, W.at(1), W.at(2), "air") === null,
+  "burrowing passes every wall; from outside a flyer passes over a building whatever its wall (A14); a locked door between two buildings stops flight");
 W = world([[100, 50, "outer"], [200, 50, "door"]], [[150, 50, { building: true, floors: 3 }], [250, 50, { building: true }], [350, 50, { water: true }]]);
 check(P.routeLength(W.C, W.at(0), W.at(1), "walk") === null && P.routeLength(W.C, W.at(0), W.at(2), "air").total === 2, "an exterior wall: over the top by air only");
 check(J(P.routeLength(W.C, W.at(1, { floor: 2 }), W.at(3), "walk")) === J({ borders: 2, levels: 2, total: 4 }), "walking down from floor 2 first");
