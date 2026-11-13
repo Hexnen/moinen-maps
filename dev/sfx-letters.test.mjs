@@ -17,8 +17,8 @@ let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
 
 /* A. words */
-ok(expand("BO+M!", 0) === "BOM!" && expand("BO+M!", 3) === "BOOOOM!", "expand stretches the letter before +");
-ok(expand("KA-BO+O+M", 1) === "KA-BOOOOM", "two stretch marks");
+ok(expand("BO+M!", 0) === "BOOM!" && expand("BO+M!", 3) === "BOOOOM!" && expand("BAM!", 3) === "BAM!", "expand stretches the letter before + (at least once)");
+ok(expand("KA-BO+O+M", 3) === "KA-BOOOOOM" && expand("KA-BO+O+M", 5).length <= 14, "two stretch marks share the stretch");
 for ( const lang of ["en", "pl"] ) for ( const v of Object.keys(VOICES) ) for ( const t of ["s", "m", "l"] ) ok(WORDS[lang][v]?.[t]?.length >= 2, `${lang}/${v}/${t} has words`);
 ok(wordFor("boom", 1, 0, "en").length > wordFor("boom", 0.4, 0, "en").length || tierOf(1) !== tierOf(0.4), "a louder boom is a longer word");
 ok(/[ĄĆĘŁŃÓŚŹŻ]/.test(Object.values(WORDS.pl).flatMap((b) => [...b.s, ...b.m, ...b.l]).join("")), "the Polish set uses Polish letters");

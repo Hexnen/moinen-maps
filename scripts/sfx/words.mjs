@@ -21,11 +21,11 @@ export const VOICES = {
   crack:   { mood: "crack",   sound: { sharp: 0.95, long: 0.2,  pitch: 0.1,  rough: 0.55 }, prio: 4,  stretch: 1, motion: { in: "crackIn", hold: "shake", out: "shatter" } },
   rumble:  { mood: "crash",   sound: { sharp: 0.35, long: 0.95, pitch: -0.8, rough: 1 },    prio: 4,  stretch: 3, motion: { in: "grow", hold: "rattle", out: "fall" } },
   decay:   { mood: "crack",   sound: { sharp: 0.4,  long: 0.75, pitch: -0.5, rough: 1 },    prio: 3,  stretch: 3, motion: { in: "grow", hold: "wobble", out: "droop" } },
-  hiss:    { mood: "whoosh",  sound: { sharp: 0.2,  long: 0.8,  pitch: -0.8, rough: 0.55 }, prio: 3,  stretch: 4, motion: { in: "zip", hold: "boil", out: "dissolve" } },
+  hiss:    { mood: "whoosh",  sound: { sharp: 0.2,  long: 0.8,  pitch: -0.8, rough: 0.55 }, prio: 3,  stretch: 2, motion: { in: "zip", hold: "boil", out: "dissolve" } },
   drag:    { mood: "whoosh",  sound: { sharp: 0.6,  long: 0.85, pitch: -0.2, rough: 0.95 }, prio: 3,  stretch: 3, motion: { in: "zip", hold: "rattle", out: "zipout" } },
   engine:  { mood: "whoosh",  sound: { sharp: 0.4,  long: 0.8,  pitch: 0.1,  rough: 0.8 },  prio: 3,  stretch: 3, motion: { in: "zip", hold: "boil", out: "zipout" } },
   whump:   { mood: "boom",    sound: { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 },  prio: 2,  stretch: 2, motion: { in: "grow", hold: "throb", out: "dissolve" } },
-  roar:    { mood: "fire",    sound: { sharp: 0.35, long: 1,    pitch: 0.3,  rough: 0.85 }, prio: 2,  stretch: 4, motion: { in: "grow", hold: "flicker", out: "rise" } },
+  roar:    { mood: "fire",    sound: { sharp: 0.35, long: 1,    pitch: 0.3,  rough: 0.85 }, prio: 2,  stretch: 3, motion: { in: "grow", hold: "flicker", out: "rise" } },
   crackle: { mood: "fire",    sound: { sharp: 0.85, long: 0.1,  pitch: 0.4,  rough: 0.7 },  prio: 1,  stretch: 0, motion: { in: "pop", hold: "flicker", out: "dissolve" } }
 };
 
@@ -77,11 +77,12 @@ export const langOf = (setting, gameLang = "en") => (setting === "en" || setting
 
 /** A word template stretched: every "+" repeats the letter before it `extra` more times (BO+M, 2 -> BOOOM). */
 export function expand(tpl, extra) {
-  const n = Math.max(0, Math.min(6, Math.round(extra)));
-  let out = "";
+  // the stretch is SHARED by the word's "+" marks (KA-BO+O+M at 3 -> KA-BOOOOOM, not two letters stretched three times each)
+  const marks = (tpl.match(/\+/g) ?? []).length, total = Math.max(marks ? 1 : 0, Math.min(5, Math.round(extra)));
+  let out = "", k = 0, given = 0;
   for ( let i = 0; i < tpl.length; i++ ) {
     const c = tpl[i];
-    if ( c === "+" ) { const prev = out[out.length - 1]; if ( prev ) out += prev.repeat(n); continue; }
+    if ( c === "+" ) { k++; const n = Math.round((total * k) / marks) - given; given += n; const prev = out[out.length - 1]; if ( prev ) out += prev.repeat(n); continue; }
     out += c;
   }
   return out;
