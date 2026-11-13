@@ -1,6 +1,6 @@
 // LMAP (reworked by FXLM): the comic sound effects of the destruction and the fire (scripts/sfx/), the pure part:
 //  A. words: the engine's vocabulary writes them (no word table of the map's own); every voice resolves to a kind the engine knows,
-//     both languages, Polish letters;
+//     both languages, no Polish diacritics in sound words (owner's ruling 2026-11-13, engine WORD2);
 //  B. what a damage area / a fire stroke sounds like (voices, loudness): a small crack is not a building coming down, a fire going out
 //     is a quiet long hiss;
 //  C. events of fire strokes: catch (late when new here, waiting for its flames), flare, out, burst (+ shock and debris), dust, douse;
@@ -27,7 +27,10 @@ for ( const [v, d] of Object.entries(C.VOICES) ) {
   for ( const lang of ["en", "pl"] ) ok(V.word(C.kindOf(v, KINDS), { lang, loud: 0.6, seed: "x" }).text.length > 0, `${lang} word for ${v}`);
 }
 ok(C.kindOf("out", new Set(["hiss"])) === "hiss" && C.kindOf("out", null) === "fizzle", "a kind the engine does not know falls back to the next one listed");
-ok(/[ĄĆĘŁŃÓŚŹŻ]/.test(Object.keys(C.VOICES).flatMap((v) => Array.from({ length: 12 }, (_, i) => V.word(C.kindOf(v, KINDS), { lang: "pl", loud: (i % 4) / 3, seed: `p${i}` }).text)).join("")), "the Polish words use Polish letters");
+// (owner's ruling 2026-11-13: no Polish diacritics in sound words - the Polish set is spelled in plain letters, SZ / CZ / RZ for its sounds)
+const plWords = Object.keys(C.VOICES).flatMap((v) => Array.from({ length: 12 }, (_, i) => V.word(C.kindOf(v, KINDS), { lang: "pl", loud: (i % 4) / 3, seed: `p${i}` }).text));
+ok(plWords.length > 100 && !/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(plWords.join("")), "the Polish words carry no Polish diacritics");
+ok(plWords.join(" ") !== Object.keys(C.VOICES).flatMap((v) => Array.from({ length: 12 }, (_, i) => V.word(C.kindOf(v, KINDS), { lang: "en", loud: (i % 4) / 3, seed: `p${i}` }).text)).join(" "), "the Polish set is its own, not the English one");
 ok(C.langOf("auto", "pl") === "pl" && C.langOf("auto", "en") === "en" && C.langOf("en", "pl") === "en", "word set follows the setting / the game language");
 
 /* B. voices and loudness */

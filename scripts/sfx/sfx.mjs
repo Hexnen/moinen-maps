@@ -379,6 +379,9 @@ function optsOf(w) {
     ceilK: C.CEIL_K[w.role] ?? C.CEIL_K.sec,
     ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
+  // what was hit makes the sound: its material (the engine's look follows it: rock and timber in stone colours, metal in steel); the
+  // word's own character stays, only its material changes (a partial character would replace the whole one)
+  if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };
   // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
   if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
   // steam drifts up off what was put out

@@ -58,7 +58,7 @@ export const VOICES = {
   thud:    { kinds: ["thud", "punch"], prio: 7, w: 0.8, ms: 150, area: 0.8, cover: 0.2, stage: { in: "slam" } },
   gun:     { kinds: ["gunfire"], prio: 7, w: 0.75, ms: 600, area: 0.6, cover: 0.3, stream: true },
   // (a gun fired by a token on the map: its REPORT at the muzzle, and where its rounds land the IMPACT, by what they hit)
-  muzzle:  { kinds: ["gunshot", "gunfire"], prio: 7, w: 0.7, ms: 600, area: 0.5, cover: 0.3, stream: true },
+  muzzle:  { kinds: ["gunfire", "pistol"], prio: 7, w: 0.7, ms: 600, area: 0.5, cover: 0.3, stream: true },
   gunhit:  { kinds: ["ricochet", "thud"], prio: 7, w: 0.65, ms: 600, area: 0.5, cover: 0.3, stream: true },
   fire:    { kinds: ["fire"], prio: 6, w: 0.8, ms: 1600, area: 0.8, cover: 0.25, stage: { in: "rise", glow: "auto" } },
   flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
@@ -79,10 +79,26 @@ export const VOICES = {
   creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "pop", holdKind: "shake", out: "shards", on: 1 } }
 };
 /** The sound kind of a voice: the first of its kinds the engine knows (`known`: a Set / array of the engine's kind ids, or null). */
-export function kindOf(voice, known = null, mat = null) {
+export function kindOf(voice, known = null, mat = null, pref = null) {
   const V = VOICES[voice] ?? VOICES.crack, has = known ? (known instanceof Set ? (k) => known.has(k) : (k) => known.includes(k)) : () => true;
-  return MAT_KINDS[mat]?.[voice]?.find(has) ?? V.kinds.find(has) ?? V.kinds[0];
+  return (Array.isArray(pref) ? pref.find(has) : null) ?? MAT_KINDS[mat]?.[voice]?.find(has) ?? V.kinds.find(has) ?? V.kinds[0];
 }
+/** The engine's own gun kinds (LETR 1.7.0 WORD2): which one a firing sounds like follows how its rounds come (its walk: [{ms}...]):
+    one round a pistol's report, a few slow aimed rounds a rifle's, a steady burst the machine gun's rattle, a rip of many rounds a second
+    (a twin heavy gun) the rotary BRRRT. -> kinds in preference order (the voice's own kinds stay the fallback). */
+export function gunKinds(walk) {
+  const n = walk?.length ?? 0;
+  if ( n <= 1 ) return ["pistol", "rifle"];
+  const span = Math.max(1, (walk.at(-1).ms ?? 0) - (walk[0].ms ?? 0)), rate = ((n - 1) * 1000) / span;
+  if ( rate >= 24 ) return ["minigun", "gunfire"];
+  if ( rate >= 5 ) return ["gunfire"];
+  return n <= 4 ? ["rifle", "pistol"] : ["gunfire"];
+}
+/** The engine's own MATERIALS (words.mjs: what makes the sound; its look follows it - rock and timber in stone and bone colours, not ice
+    or neon) for a map material, for the voices where the thing HIT makes the sound; null: the kind's own. */
+export const ENGINE_MAT = { stone: "stone", earth: "stone", sand: "stone", wood: "wood", metal: "metal", water: "water" };
+const MAT_VOICES = new Set(["crack", "debris", "thud", "slash", "gunhit", "crash", "creak", "rumble", "decay", "gun"]);
+export const engineMatOf = (voice, mat) => (MAT_VOICES.has(voice) ? ENGINE_MAT[mat] ?? null : null);
 /** The destruction layer's ground / thing materials (destruction/model.mjs MATERIALS; an area's info.mat is the index minus one). */
 export const MATS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
 export const matOf = (i) => MATS[(Number.isInteger(i) ? i : -1) + 1] ?? "auto";
@@ -165,7 +181,7 @@ export function entryEvent(I, o, ap, start, { speed = 1, gun = null, ride = null
   const box = { x0: o.x + r.x0 * ap, y0: o.y + r.y0 * ap, x1: o.x + r.x1 * ap, y1: o.y + r.y1 * ap };
   return { key, sid, obj: objId, voice, mat: matOf(I.mat), x: o.x + cx * ap, y: o.y + cy * ap, r: 0.5 * Math.sqrt(w * h) * ap, box,
     t: start + lead, ...(lead ? { tPre: start } : {}), ms: (TYPE_MS[I.type] ?? 600) * k2, colors: causeColors(I.cause | 0),
-    from: from && (I.type !== "blast" || gun) ? from : null, ...(gun ? { path: gun, t0: start } : ride ? { path: ride, t0: start, ms: Math.max((TYPE_MS[I.type] ?? 600) * k2, ride.at(-1).ms + 300) } : {}) };
+    from: from && (I.type !== "blast" || gun) ? from : null, ...(gun ? { path: gun, t0: start, ...(shot ? {} : { kp: gunKinds(gun) }) } : ride ? { path: ride, t0: start, ms: Math.max((TYPE_MS[I.type] ?? 600) * k2, ride.at(-1).ms + 300) } : {}) };
 }
 
 /* ---------------------------------------------------------------- what fire sounds like */
@@ -256,7 +272,7 @@ export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid
   const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y;
   const dir = Math.round((Math.atan2(-ay, -ax) * 180) / Math.PI);
   const b = grid * 0.4, x = shots[0].x, y = shots[0].y;
-  return { key, sid, obj: key, voice: "muzzle", x, y, r: grid * 0.45, t: t0 + s0, t0: t0 + s0, path: walk, dir, m: 0.45,
+  return { key, sid, obj: key, voice: "muzzle", kp: gunKinds(walk), x, y, r: grid * 0.45, t: t0 + s0, t0: t0 + s0, path: walk, dir, m: 0.45,
     ms: Math.max(300, walk.at(-1).ms + 300), box: { x0: x - b, y0: y - b, x1: x + b, y1: y + b } };
 }
 export function strokeEvents(st, prev, from, to, ctx) {
@@ -268,7 +284,8 @@ export function strokeEvents(st, prev, from, to, ctx) {
     if ( prev || st.o !== undefined ) return out;
     const lv = st.lv ?? 2, m = burstM(lv, rG), r = st.r ?? 100;
     if ( inWin(st.q, ctx.newLate ?? NEW_LATE) ) {
-      push({ key: `${st.id}|burst`, voice: "boom", x: p[0], y: p[1], r, t: st.q, m, ms: 600 + 350 * lv, colors: ownFireColors(st.c),
+      // (a grenade's burst is the engine's grenade kind; a shell's or a bomb's the boom)
+      push({ key: `${st.id}|burst`, voice: "boom", ...(lv < 1.5 ? { kp: ["grenade", "boom"] } : {}), x: p[0], y: p[1], r, t: st.q, m, ms: 600 + 350 * lv, colors: ownFireColors(st.c),
         box: { x0: p[0] - r, y0: p[1] - r, x1: p[0] + r, y1: p[1] + r } });
       // a shell or a bomb: its shock wave rolls out and its debris comes down: satellites of the same moment (one sound, one page)
       if ( lv >= 2 ) {
@@ -424,7 +441,7 @@ export function planCluster(g, o = {}) {
       h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
   const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat });
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp });
   // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
   if ( VOICES[main.voice]?.stream && main.path?.length ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t, ...(Number.isFinite(main.dir) ? { dir: main.dir } : {}) };
   // a thing that travels: its word rides its path
@@ -458,7 +475,7 @@ export function planCluster(g, o = {}) {
     // (a satellite sounds when its own thing happens - debris as it lands, a wave as it rolls - else just after the main word)
     const ts = e.t > main.t + 50 ? e.t : Math.max(e.t, main.t) + 160 + i * 140;
     const sw = spec("sec", v, clamp(0.15 + 0.7 * m2, 0, 0.7), e.ms ?? VOICES[v]?.ms ?? 600, e.path?.length > 1 ? e.path[0] : at, ts, sd, centre,
-      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null, mat: e.mat ?? main.mat });
+      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null, mat: e.mat ?? main.mat, kp: v === e.voice ? e.kp : null });
     if ( e.path?.length > 1 ) sw.path = e.path;
     words.push(sw);
   });
@@ -471,7 +488,7 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
   // a small crash is a thud (it slams in); satellites and pre words do not shove the main word
   if ( voice === "crash" && loud < 0.45 ) stage.in = "slam";
   if ( role !== "main" ) delete stage.push;
-  return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null), mat: extra.mat ?? null, loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
+  return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null, extra.kp ?? null), mat: extra.mat ?? null, emat: engineMatOf(voice, extra.mat ?? null), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
     magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
     stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift };
 }

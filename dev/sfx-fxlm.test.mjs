@@ -275,11 +275,18 @@ group("SHOT", () => {
   ok(me.voice === "muzzle" && Math.abs(me.x - 42.5) < 1e-9 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds at the barrel, when the first round leaves (hit time minus flight)");
   ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180) + 1) < 0.05, "SHOT a syllable per round; the report kicks back away from the aim");
   const w = C.planCluster(C.cluster([me], G)[0], { grid: G, known: KINDS })[0];
-  ok(w.kind === "gunshot" && w.stream && w.stream.dir === me.dir && w.stream.t0 === me.t0, "SHOT one gunshot stream at the muzzle");
+  // (engine 1.7.0 WORD2 has the guns' own kinds - pistol, rifle, gunfire, minigun - in place of one "gunshot": the firing's rounds pick one)
+  ok(KINDS.has(w.kind) && /^(pistol|rifle|gunfire|minigun)$/.test(w.kind) && w.kind === C.kindOf("muzzle", KINDS, null, C.gunKinds(me.path)) && w.stream && w.stream.dir === me.dir && w.stream.t0 === me.t0,
+    "SHOT one gun stream at the muzzle, of the engine's gun kind");
+  const wk = (n, every) => Array.from({ length: n }, (_, i) => ({ x: i, y: 0, ms: i * every }));
+  ok(C.kindOf("muzzle", KINDS, null, C.gunKinds(wk(1, 0))) === "pistol" && C.kindOf("muzzle", KINDS, null, C.gunKinds(wk(3, 400))) === "rifle"
+    && C.kindOf("muzzle", KINDS, null, C.gunKinds(wk(12, 90))) === "gunfire" && C.kindOf("muzzle", KINDS, null, C.gunKinds(wk(40, 30))) === "minigun",
+    "SHOT the gun's kind follows how its rounds come: one round a pistol, slow aimed rounds a rifle, a burst the rattle, a rip the rotary");
   const walk = [{ x: 1600, y: 0, ms: 0 }, { x: 1600, y: 100, ms: 100 }];
   const hit = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, shot: true, key: "g", sid: "g" });
   const free = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, key: "g2", sid: "g2" });
   ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "ricochet" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
+  ok(C.planCluster(C.cluster([free], G)[0], { grid: G, known: KINDS })[0].kind === C.kindOf("gun", KINDS, null, C.gunKinds(walk)), "SHOT a gun with no shooter rattles in the gun kind of its own walk");
   ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /dir: Number\.isFinite\(w\.stream\.dir\)/.test(sfx),
     "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
 });
@@ -295,6 +302,19 @@ group("NOTES", () => {
   const walk = [0, 70, 90, 400, 410, 900].map((ms, i) => ({ x: i * 10, y: 0, ms: ms + 5000 }));
   ok(JSON.stringify(C.streamBeats(walk)) === JSON.stringify([0, 70, 90, 400, 410, 900]), "NOTES a gun's syllables fall on its rounds' own moments (shot-true), not evenly spread");
   ok(/get\("sfxWordsWorld", "auto"\)/.test(sfx) && /"sfxWordsWorld", \{[^}]*scope: "world"/.test(sfx) && /isActiveGM && get\("sfxWordsWorld"/.test(sfx), "NOTES 'game language' follows the world's word set (fixed once by the GM): a Polish and an English seat see the same word");
+});
+
+/* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
+group("WORD2", () => {
+  const gren = C.strokeEvents({ id: "g7", k: "burst", p: [500, 500], r: 80, q: 1000, lv: 1 }, null, 0, 3000, { grid: G });
+  const bomb = C.strokeEvents({ id: "b7", k: "burst", p: [500, 500], r: 200, q: 1000, lv: 3 }, null, 0, 3000, { grid: G });
+  const kOf = (evs) => C.planCluster(C.cluster(evs, G).find((g) => g.main.voice === "boom"), { grid: G, known: KINDS })[0].kind;
+  ok(kOf(gren) === "grenade" && kOf(bomb) === "boom", "WORD2 a grenade bursts in the engine's grenade kind, a bomb in the boom");
+  for ( const v of Object.keys(C.VOICES) ) ok(KINDS.has(C.kindOf(v, KINDS)) && C.VOICES[v].kinds.some((k) => KINDS.has(k)), `WORD2 voice ${v} has a kind the engine knows`);
+  const crack = (mat) => C.planCluster(C.cluster([C.entryEvent(area({ type: "cracks", mat }), { x: 0, y: 0 }, 1, 0, { key: "c" + mat, sid: "c" + mat })], G)[0], { grid: G, known: KINDS })[0];
+  ok(crack(2).emat === "stone" && crack(3).emat === "wood" && crack(7).emat === "metal" && crack(-1).emat === null, "WORD2 what is hit gives the word its material (stone, wood, metal; the kind's own elsewhere)");
+  ok(C.planCluster(C.cluster(bomb, G).find((g) => g.main.voice === "boom"), { grid: G, known: KINDS })[0].emat === null, "WORD2 a bomb's boom keeps its own (fire) character");
+  ok(sfx.includes("if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };"), "WORD2 the runtime changes only the material of the word's character");
 });
 
 if ( failed.length ) { console.log(failed.join(" | ")); console.log(`sfx-fxlm: ${failed.length} finding group(s) FAILED`); process.exit(1); }
