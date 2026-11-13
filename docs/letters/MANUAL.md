@@ -24,17 +24,20 @@ belongs to the paragraph's mark.
 2. edit only the sections the stage owns; flip their status lines; re-mark statements you re-checked;
 3. move points out of "What is about to change" when they land;
 4. add a line to the change log at the bottom.
+**Lessons and rulings too:** whoever learns something about the engine (a trap, a wrong assumption, a bug) or receives a ruling from
+the owner updates this manual (and the agent skill `moinen-letters`) in the same turn: rulings go to section 14, traps for callers
+to section 5, limits and bugs to section 18, planned work to section 19.
 Keep the section titles stable: other documents and the agent skill link to them.
 
 | stage | engine VERSION | contract | where | status |
 |---|---|---|---|---|
 | LETR core (renderer, layers, motion techniques, size model) | 1.2.0 | v1-v4 | `tactics-zones` | stable |
 | FXLE (lifecycle and safety fixes) | 1.2.1 | (fixes) | `tactics-zones` | stable |
-| WORD (vocabulary, 87 kinds, flows) | 1.3.1 | v5 | `tactics-zones` | stable; vocabulary review ordered (WORD2) |
+| WORD (vocabulary, 87 kinds, flows) | 1.3.1 | v5 | `tactics-zones` | changing (SPEC-WORDS, SPEC-KINDS: WORD2) |
 | TOOL (settings, authoring, designer, GM-only networking) | 1.4.1 | v6 | `tactics-zones` | stable |
 | MOVE (travel, choreography, rates, escalation, shards, push, glow, sustain, ambient) | 1.5.0 | v7 | `tactics-zones-move` | pending merge; then changing (SPEC-MOTION) |
 | LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
-| LM (MOVE + LOOK merged) | 1.7.0 (announced) | v7+v8 | being merged | planned |
+| LM (MOVE + LOOK merged) | 1.7.0 | v7+v8 | `tactics-zones-lm` (in progress, not on origin yet) | pending merge |
 | LOOK2, MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -225,6 +228,18 @@ no fixed pixel sizes.
 - Never derive a seed or a choice from hidden data (hidden Health, a hidden token): a player could read it back.
 - Give token-bound words their token (`at` = token or `token`), so hidden or unseen tokens are not revealed (section 7).
 
+**One language per world, not per client.** `lang: "auto"` follows each client's own interface language [C], so a GM in Polish and
+a player in English get different words from the same seed. When every client must see the same word, pass one language (a world
+setting of your module, or the GM's language sent with the event). English is first-class (section 14).
+
+**Destruction and effects: letter the phases, not one moment** (owner's rulings, section 14).
+- Order: the blast, then debris falling, then fire whose intensity changes; a shock wave is its own lettered event.
+- What is hit decides the sound: stone, wood, glass, metal, earth sound different; pass the material through the kind you pick.
+- A shot has two ends: the muzzle at the shooting token and the impact where the bullets land; letter both.
+- Cover every way the effect can start (presets, combinations, brush painting, directional, all at once) and test each one.
+- Analyse each effect on its own; one word for a bomb is too little, one recipe for all effects is wrong.
+- Words may repeat or be shared when it makes sense; do not force a new word for every event.
+
 **Numbers.** Format with `L.number` / `L.range` in the client's language (`2,5` in Polish, not `2.5`) [V]. The engine draws plain
 numbers (`-1`, `+4`, `x2`, `12%`) in a calm, even hand [R]; keep them big enough to read and attach them to the token (`at` =
 token) so they follow it.
@@ -308,7 +323,7 @@ Status: stable.
 - Transport: socket `module.<host>` (host = moinen-maps when active, else invincible-plus-ultra), messages `{ t: "letr", v: 1, op }`. [C]
 
 ## 9. The vocabulary: `L.word`, `L.sfx`, flows, numbers
-Status: stable (1.3.1); changing: vocabulary review WORD2 (section 19).
+Status: changing: vocabulary review WORD2 (SPEC-WORDS), missing kinds (SPEC-KINDS); the rules in section 14 already bind.
 
 The engine letters any text, but `words.mjs` knows WHAT to letter: a sound kind + loudness + duration + language -> a fitting
 onomatopoeia with its mood, sound, motions, accent and character, seeded.
@@ -414,6 +429,10 @@ Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then ch
   be refused as in section 8.
 - The vocabulary: the MOVE branch has 52 kinds and older words (its `L.sustain({ kind: "hiss" })` letters `HISSSSS`, a word that
   names the sound) [V]; `tactics-zones` has 87 kinds and the dictionary rule. Take `words.mjs` from `tactics-zones`.
+- Found by a dry-run merge read (`git merge-tree`, not built) [R]: conflicts in `design.mjs`, `engine.mjs`, `paint.mjs`, `shape.mjs`,
+  `check.mjs` (+ `MANIFEST.json`, `stamp.mjs`: regenerate); both sides declare `const R2` in `makePlan` (the merged file would not
+  load); MOVE brings back ember specks on held fire words (the clean-letters ruling removes them); LOOK's prefix sizing and MOVE's
+  `parts` scales must not shrink a prefix twice; LOOK's backdrop scale runs after MOVE's retiming.
 
 ## 13. Look
 Status: changing (SPEC-LOOK P1-P17, ordered: LOOK2, OUTL). [V] where marked, else [R].
@@ -456,37 +475,39 @@ palette (P11); "!!" too often (P12); Polish diacritics in sound words (P13); hai
 rectangles (P15); stepped motion reads as stutter in the invincible style (P16).
 
 ## 14. The owner's binding rulings
-Status: stable list; new rulings are appended with their date. The owner's own words were in Polish; they are given here in English.
+Status: stable list, append-only. Every new ruling is added here with its date in the same turn it is given (and to the agent skill's
+"Owner's rulings"). The owner's words were Polish; they are given in English. A ruling beats a review's recommendation: where a review
+(SPEC-*) says otherwise, the ruling wins and the conflict is noted.
 
-Vocabulary
-- Only onomatopoeia: a word imitates the sound, never names it (no "growl", "creak", "roar" as words). (2026-11-13)
-- No dictionary words at all, not even imitative interjections from the dictionary (CIACH, TRZASK, PLUSK; CRASH, SPLASH, CRACK) and no
-  ordinary word that happens to look like a sound. Words are BUILT from attack + lasting part + cut-off. The deny list is `DICT` in
-  words.mjs; `ICONIC` is the short exception list awaiting the owner's ruling (pl BUM BAM PAF; en POW THUD BAM BOOM BANG ZAP WHAM
-  SHH). (2026-11-13)
-- A prefix is the sound's own lead-in (KA-BUM, TRZA-KRUSZ, KRA-KA-BROOM), never another sound's signature (no gun rattle before a
-  bomb). (2026-11-13)
-- The comic's manner: an invented attack cluster, the lasting letters doubled or tripled (consonants too), one or two "!", short
-  sounds left short. Loudness and duration are separate. "!" ranges 0..2, never 3. (2026-11-13)
-- English must not be second-class; it may become the default language. The laser pistol word ("piu piu") is weak. (2026-11-13,
-  late; WORD2)
-- Avoid Polish diacritic letters in sound words, above all doubled ones and at the start of a word. (2026-11-13, late; WORD2)
-- Water sounds: pl PLUP / PLUMP / SPLOOSZ / GLUB, en PLOP / PLOOP / PLUNK / SPLOOSH / GLUB; PLUSK, CHLAP, TRZASK out. (2026-11-13)
+**For callers** (anyone who letters game events) and **for engine changers** alike:
 
-Look and motion
-- Clean letters: the flame teeth and drips were removed; no ember specks over held letters. (2026-11-13)
-- Backdrops are opt-in; the default is none. (2026-11-13)
-- The light/white outline must go around the whole word only, never over inner letters; still not fixed. (2026-11-13; OUTL / LOOK2 P2)
-- Keep the look from before the Invincible pass (today's `comic`) as a legacy style named `expressive`. (2026-11-13, confirmed)
-- Interlocked OO joins must meet better and be more artistically joined. (2026-11-13; P10)
-- Recordings are not smooth: find out why (recorder or engine) and fix. (2026-11-13; P16, SPEC-MOTION 4)
-- Provisional (orchestrator's pick, the owner may overrule): the invincible style gets interpolated smooth motion; stepped motion stays
-  in `expressive`.
-- Implement every point of SPEC-LOOK and SPEC-MOTION. (2026-11-13; section 19)
-
-Tools and scope
-- Networking is GM only. (TOOL-8)
-- Audio: default silent; later only an opt-in way to attach a sound to a word's clock; no sound content now. (2026-11-13)
+| date | ruling | callers must | engine changers must |
+|---|---|---|---|
+| 2026-11-13 | Only onomatopoeia: a word imitates the sound, never names it (no "growl", "creak", "roar") | take words from the vocabulary; no action names (HAYMAKER!, TRY AGAIN) | keep `naming()` / `DICT` checks over every bank word, prefix, syllable and flow segment |
+| 2026-11-13 | No dictionary words, not even imitative interjections from the dictionary (CIACH, TRZASK, PLUSK; CRASH, SPLASH, CRACK), and no near-words (a dictionary word with one letter changed, dropped, stuck on, or respelled: PLOSK, BLOSK, SPLAASK, WHOOSHK) | not hand-write sound words | build words from attack + lasting part + cut-off; extend the check to near-words (WORD2) |
+| 2026-11-13 | The ICONIC exception list (pl BUM BAM PAF; en POW THUD BAM BOOM BANG ZAP WHAM SHH) awaits the owner; nothing else is exempt | - | add an exception only with the owner's ruling and its reason |
+| 2026-11-13 | A prefix is the sound's own lead-in (KA-BUM, KRA-KA-BROOM), never another sound's signature (no gun rattle before a bomb) | - | every lead-in comes from `PREFIXES` |
+| 2026-11-13 | The comic's manner: an invented attack cluster, the lasting letters doubled or tripled (consonants too), one or two "!", short sounds short; loudness and duration separate; "!" 0..2 | pass `loud` and `long`/`duration` separately | keep the stretch rule (only the sustain repeats) |
+| 2026-11-13 | Letter play fits the event: an expressive onset and the lasting letter stretched (BTHOOM for a cave-in, KRRRRAK for a crack) | say what the event is (kind, material, phase) | let the kind and event choose the onset and which letter lasts |
+| 2026-11-13 | English is first-class and may become the default language; the laser pistol's "piu piu" is weak | do not assume Polish; pick one language per world (see section 5) | English is the master spelling (WORD2) |
+| 2026-11-13 | No Polish diacritic letters in sound words, above all doubled or word-initial | - | no Ą Ć Ę Ł Ń Ó Ś Ź Ż in banks or stretch classes; a check fails on them (WORD2) |
+| 2026-11-13 | Several variants per tier; words may repeat or be shared between kinds when that makes sense; no forced uniqueness | do not demand a different word for every event | do not add uniqueness rules for their own sake (overrides SPEC-WORDS rule 11 "do not share words") |
+| 2026-11-13 | Water words: pl PLUP, PLUMP, SPLOOSZ, GLUB (long PLUUUP, SPLOOOSZ, GLU-GLU-GLUP); en PLOP, PLOOP, PLUNK, SPLOOSH, GLUB; PLUSK, CHLAP, TRZASK out; CHLUP not an exception | - | use these pools |
+| 2026-11-13 | Clean letters: no flame teeth, drips or ember specks by default | - | keep `look.treat` / `wetpaint` opt-in only |
+| 2026-11-13 | Backdrops are opt-in; default none | pass `backdrop` only when wanted | keep the default off |
+| 2026-11-13 | The light/white outline never covers neighbouring letters inside a word; only around the whole word (still not fixed) | - | one keyline round the word's union, letters clipped (LOOK2 P2, OUTL) |
+| 2026-11-13 | Keep the look from before the Invincible pass (today's `comic`) as the legacy style `expressive` | may pick `style: "expressive"` once it exists | freeze it byte-identical for fixed seeds before changing anything (P17) |
+| 2026-11-13 | Interlocked OO must meet properly and look artistically joined | - | LOOK2 P10 |
+| 2026-11-13 | Animation must fit the sound: a motion table from the sound, not random picks | - | MOTION2 (SPEC-MOTION) |
+| 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
+| 2026-11-13 | Provisional (orchestrator, the owner may overrule): the invincible style moves smoothly (interpolated), stepped motion stays in `expressive` | - | LOOK2 P16 |
+| 2026-11-13 | Implement every point of SPEC-LOOK and SPEC-MOTION, plus the vocabulary review | - | section 19 |
+| 2026-11-13 | Destruction lettering covers presets, combinations, painting (brush), directional and all-at-once destruction | letter every path; test each | - |
+| 2026-11-13 | Effects have phases; lettering follows them: blast -> debris falling -> fire of varying intensity; shock waves are lettered; the ground or material changes the sound | one word per phase, timed to the phase, kind/material chosen from what is hit | kinds by material, shock wave, debris (WORD2 / SPEC-KINDS) |
+| 2026-11-13 | Shots have two sources: the muzzle at the shooting token AND the impact where the bullets land | letter both ends | - |
+| 2026-11-13 | Analyse each effect separately and sensibly; no one recipe for all | design per effect | - |
+| TOOL-8 | Networking is GM only | players letter locally only | keep the refusal on send and receive |
+| 2026-11-13 | Audio: default silent; later only an opt-in way to attach a sound to a word's clock | - | build no sound content |
 
 ## 15. Tools: settings, authoring, designer, accessibility
 Status: stable (TOOL, contract v6). [V] where marked, else [C].
@@ -606,6 +627,12 @@ Status: stable list; edit as items close.
 - `startAt` is per page; clock skew between machines remains even with `L.net`.
 - The vocabulary is shared by every caller: `L.vocab.add` / `define` from one module changes words for all.
 - `L.still` paints at `size` x the device pixel ratio, capped; pictures over 2048 px a side are capped.
+- BUG (verified under node, 2026-11-13, engine 1.6.0): a word on a HIDDEN token is not drawn for a player, but its text is still
+  read to screen readers (setting `announce`, default on): the announcement fires when the first picture counts as shown, before the
+  visibility check. A hidden token's damage number can leak this way. Until fixed: callers skip lettering for tokens this user cannot
+  see (`token.visible` / `document.hidden` on a player's client) before calling `play`.
+- `L.net` sends only its known option keys: MOVE's `path`, `orbit`, `orient` and choreography options, and `L.sustain`, do not travel
+  over the network [R: from a merge-plan read of `net.mjs` `OP_KEYS`, not run].
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -617,7 +644,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | LM merge (1.7.0) | MOVE 1.5.0 into `tactics-zones`; GM-only and 87 kinds kept | 1 (files), 4 (options), 11, 12 (status -> stable/changing), 10 (stream options), 20, stage table |
 | LOOK2 / OUTL | P17 freeze `comic` as `expressive`; P2 one keyline round the whole word; P1 one tall narrow face; P3-P5 thin even keyline, flat duplicate shadow, flat fills; P7-P8 small prefix, monotone accent; P9-P10 vertical setting, true interlocked rings (and maybe EE, UU); P6 true hollow; P11 wider palette by sound family; P12 fewer "!!"; P13-P14; P15 no fat smear copies; P16 smooth interpolated motion in the invincible style | 13 (most of it), 11 (style-dependent motion), 14 (rulings move from "to fix" to done), 16 (stills to re-shoot) |
 | MOTION2 | one shared drawing grid on twos; a deterministic motion table per sound family (no dice); hold envelopes (decay, rise, arc, pulse, steady); contradictions removed; exits by cut-off (cut, ring-out, trail-off, smoke-off, blow-away, power-down, sputter, crumble); a rhythm primitive (siren, heartbeat, rotor, beeps, mech steps); letter roles (only the sustained run moves); default travel per kind, scatter and walk emitters; streams and sustain take motion from the kind; boom burst-in entrance | 11 (all), 12, 10, 4 (`in`/`holdKind`/`out` names), 5 (timing advice may simplify) |
-| WORD2 | vocabulary review: no Polish diacritics in sound words (above all doubled and word-initial); English first-class, maybe default; a better laser pistol; ICONIC ruling | 9, 14 |
+| WORD2 (SPEC-WORDS) | dictionary leaks and near-words removed (PTAAK, PLOSK, DOIING, BRUUNCH ...); near-word check (one letter off, stuck-on letter, K respelling); no Polish diacritics (a check that fails on them); English as the master spelling, Polish derived; PH stretch bug; W not a lasting letter in English; percussive kinds lengthen by hits or echo, not vowels; "!" capped per kind; every lead-in from `PREFIXES`; sayable words; longer runs for steady sounds; roar stretches the vowel; siren as one morphing word; laser pistol attack-led (ZARK, TZAK); ICONIC ruling (candidates BLAM, BEEP, VROOM, HA, GRR, SZSZ). Owner's ruling overrides the review's "never share words" | 9, 14 |
+| SPEC-KINDS (being written) | missing kinds and dimensions: material of what is hit, phase (what follows what), source and impact of shots, distance, space/echo, approach-pass-recede, medium, wet/dry, size of source, cause-then-result combinations, tempo, silence, number of sources; kinds to split or merge | 9, 5 |
+| SPEC-EFFECTS (being written) | each map effect analysed separately: which words, which phases, which motion | 5 |
 | later queue | SCENE (occlusion, ground perspective), CROWD (placement solver, aggregation), TOKN (word + number as one lettering, stacking hits), HERO (panel freeze, full-frame flash), EXPO (frame strip / webm export, pause/seek), GOLD (golden-render checks), PERF, wiring into map weather/tornado and moinen-pixel-vfx | 5, 16, 18 |
 
 ## 20. API index
@@ -639,3 +668,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 ## 21. Change log of this manual
 - 2026-11-13: first version, written against `tactics-zones` @ aec4e4a (engine 1.6.0) and `tactics-zones-move` @ d299f61 (1.5.0,
   pending merge). API statements marked [V] were run under node on both; GM-only networking found missing on the MOVE branch.
+- 2026-11-13 (later): owner's rulings folded in as a dated table for callers and engine changers (section 14: English first-class,
+  no diacritics, no near-words, shared words allowed, letter play, expressive, outline, OO, motion table, smooth recordings,
+  destruction phases, material, two-ended shots, per-effect analysis); one language per world (section 5); destruction and effect
+  lettering advice (section 5); screen-reader leak of hidden tokens' words found and verified under node (section 18); L.net does not
+  carry MOVE options (section 18); WORD2 / SPEC-KINDS / SPEC-EFFECTS scope (section 19); LM merge branch noted (stage table); the
+  rule to update this manual in the same turn as any lesson or ruling.
