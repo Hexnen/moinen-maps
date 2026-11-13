@@ -7,7 +7,7 @@ import { barShown, setBarShown } from "./director/bar.mjs";
  * TOGL: three on/off toggles in the map's group of Foundry's left menu (the scene controls, tools.mjs) - the VRAM meter (#mm-vram,
  * vram-ui.mjs), the director's bar (#mm-dir-bar, director/bar.mjs) and the floating pin filter (#mm-filter, filter-panel.mjs). Each
  * toggle IS its panel's own client setting (this user, this browser, kept across reloads) - "vramMeter" (any mode but "off"),
- * "dirBarShown", "pinPanel" - so the settings window, the panel's own switches (the filter's X, the Pins dock's "floating" box) and the
+ * "dirBarShown", "pinPanel" (hidden by default since TOGL-4, filter.mjs) - so the settings window, the panel's own switches (the filter's X, the Pins dock's "floating" box) and the
  * toggle never disagree. Each goes to its panel's own audience: the meter's and the filter's to everyone (players see the meter in
  * "auto" while memory runs low, and the filter wherever pins are on), the director bar's to the GM, and only while the director exists
  * (CONFIG.moinenMaps.noDirector unset). A panel switched off leaves no box on the page (the meter and the filter are taken out; the

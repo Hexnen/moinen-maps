@@ -15,10 +15,27 @@ export function registerFilterSettings() {
   const S = game.settings;
   S.register(MODULE_ID, "pinFilter", { scope: "client", config: false, type: Object, default: {}, onChange: () => { cache = null; applyFilter(); } });
   S.register(MODULE_ID, "pinPanel", {
-    name: "MOINENMAPS.Setting.pinPanel", hint: "MOINENMAPS.Setting.pinPanelHint", scope: "client", config: true, type: Boolean, default: true,
+    name: "MOINENMAPS.Setting.pinPanel", hint: "MOINENMAPS.Setting.pinPanelHint", scope: "client", config: true, type: Boolean, default: false,
     onChange: () => { Hooks.callAll("moinenMapsPanel"); ui.controls?.render?.(); }
   });
   S.register(MODULE_ID, "pinPanelState", { scope: "client", config: false, type: Object, default: {} });
+  S.register(MODULE_ID, "pinPanelHiddenOnce", { scope: "client", config: false, type: Boolean, default: false });
+  hideLegendOnce();
+}
+
+/**
+ * TOGL-4 / PINS-1: the floating pin legend is hidden by default (the user's decision 2026-11-13). A browser that still holds "shown"
+ * from the time it was the default gets it hidden once, so the legend stops standing there on every seat; from then on the seat's own
+ * choice (menu toggle, the legend's X, the Pins dock's "floating" box, the settings window) is kept as before. The GM working with
+ * pins has the same filter in the Pins workspace dock either way.
+ */
+export function hideLegendOnce() {
+  const S = game.settings, warn = (e) => console.warn(`${MODULE_ID} | pin legend default`, e);
+  try {
+    if ( S.get(MODULE_ID, "pinPanelHiddenOnce") ) return;
+    if ( S.get(MODULE_ID, "pinPanel") ) Promise.resolve(S.set(MODULE_ID, "pinPanel", false)).catch(warn);
+    Promise.resolve(S.set(MODULE_ID, "pinPanelHiddenOnce", true)).catch(warn);
+  } catch (e) { warn(e); }
 }
 
 let cache = null;
