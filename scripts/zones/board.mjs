@@ -132,6 +132,8 @@ function applyMarks() {
     if ( e || before.has(t.id) || t._mmBoard ) markToken(t, e, hoverTok === t.id);
   }
   if ( hoverTok && !ON.has(hoverTok) ) setHoverTok(null, null);
+  // (SMOK-2: new marks on the token still under the pointer reword its open tip at once, not only when the pointer moves to another token)
+  else if ( hoverTok && before.get(hoverTok)?.key !== ON.get(hoverTok)?.key ) wordTip(ON.get(hoverTok));
   watch(ON.size > 0);
   labelsSoon();
 }
@@ -250,21 +252,26 @@ function setHoverTok(id, at) {
     for ( const k of [old, id] ) { const t = k ? objOf(k) : null; if ( t ) markToken(t, ON.get(k) ?? null, k === id); }
     labelsSoon();
     const e = id ? ON.get(id) : null;
-    // (section 41: a label cut short on its pill is said whole first, unless the tip already says it)
-    const cut = e ? (e.hover?.label ? e.hover.full : e.full) ?? null : null;
-    const tip0 = e ? (e.hover?.tip ?? e.tip) : null;
-    // (section 42: what the badge in the token's corner is called is said too, unless the tip already says it)
-    const named = e?.badge?.name && !String(tip0 ?? "").includes(e.badge.name) ? [e.badge.name] : [];
-    const lines = e ? [...(cut && !String(tip0 ?? "").includes(cut) ? [cut] : []), ...named, tip0, ...e.marks.map((m) => m.tip)].filter(Boolean) : [];
-    if ( !lines.length ) { tipEl?.remove(); tipEl = null; }
-    else {
-      if ( !tipEl ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip mm-z-pick-tip mm-z-board-tip"; document.body.append(tipEl); }
-      tipEl.classList?.toggle?.("no", e.state === "out");
-      tipEl.innerHTML = lines.map((s, i) => (i ? `<small>${esc(s)}</small>` : `<span>${esc(s)}</span>`)).join("");
-    }
+    wordTip(e);
     try { Hooks.callAll("moinenMapsTokenHover", id ? canvas.scene?.tokens?.get(id) ?? null : null, e ?? null); } catch {}
   }
   if ( tipEl && at ) Interact.placeTip(tipEl, at);
+}
+/** The tip beside the cursor says what entry `e` says about its token (none: the tip goes). A tip made here, while the pointer stands
+ *  still, takes the pointer's last spot. */
+function wordTip(e) {
+  // (section 41: a label cut short on its pill is said whole first, unless the tip already says it)
+  const cut = e ? (e.hover?.label ? e.hover.full : e.full) ?? null : null;
+  const tip0 = e ? (e.hover?.tip ?? e.tip) : null;
+  // (section 42: what the badge in the token's corner is called is said too, unless the tip already says it)
+  const named = e?.badge?.name && !String(tip0 ?? "").includes(e.badge.name) ? [e.badge.name] : [];
+  const lines = e ? [...(cut && !String(tip0 ?? "").includes(cut) ? [cut] : []), ...named, tip0, ...e.marks.map((m) => m.tip)].filter(Boolean) : [];
+  if ( !lines.length ) { tipEl?.remove(); tipEl = null; return; }
+  const made = !tipEl;
+  if ( made ) { tipEl = document.createElement("div"); tipEl.className = "mm-z-tip mm-z-pick-tip mm-z-board-tip"; document.body.append(tipEl); }
+  tipEl.classList?.toggle?.("no", e.state === "out");
+  tipEl.innerHTML = lines.map((s, i) => (i ? `<small>${esc(s)}</small>` : `<span>${esc(s)}</span>`)).join("");
+  if ( made && moveAt ) Interact.placeTip(tipEl, moveAt);
 }
 
 /**
