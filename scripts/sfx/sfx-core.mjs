@@ -368,6 +368,9 @@ export function planCluster(g, o = {}) {
   if ( VOICES[main.voice]?.stream && main.path?.length > 1 ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t };
   // a thing that travels: its word rides its path
   else if ( main.path?.length > 1 ) mw.path = main.path;
+  // (the WORD is written from the main sound alone - how loud it is, how long: the same on every seat even when the rest of its
+  // cluster reaches one seat a bake later; the cluster only makes it bigger)
+  mw.textLoud = clamp(0.2 + 0.8 * (main.m ?? magnitude(main.r / grid)), 0, 1);
   words.push(mw);
   if ( o.big || !(o.sec > 0) || single ) return words;
   // satellites: the biggest other members out at the edge, each its own voice, quieter, staggered

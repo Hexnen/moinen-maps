@@ -182,6 +182,13 @@ group("F14", () => {
   const a = JSON.stringify(C.planCluster(C.cluster(mk(1000), G)[0], { grid: G, sec: 4, seed: "s" }).map((w) => [w.role, w.kind, w.seed, w.loud, w.ms]));
   const b = JSON.stringify(C.planCluster(C.cluster(mk(98765), G)[0], { grid: G, sec: 4, seed: "s" }).map((w) => [w.role, w.kind, w.seed, w.loud, w.ms]));
   ok(a === b, "F14 the same damage arriving later on one seat gets the same words");
+  // live take (FXLM, GM + Test Gracz 1, 2026-11-13): six cave-ins reached the player in two bakes; its cluster was smaller, so the
+  // main word was written louder/quieter ("KRAAASH" on the GM, "KRAAASH!!" on the player). The text comes from the main sound alone.
+  const six = Array.from({ length: 6 }, (_, i) => ({ key: `d|c${i}|1`, sid: `d|c${i}`, t: 1000 + i * 5, voice: "crash", x: (i % 3) * 120, y: Math.floor(i / 3) * 120, r: 140 }));
+  const mainOf = (evs) => C.planCluster(C.cluster(evs, G)[0], { grid: G, sec: 4, seed: "s", known: KINDS }).find((w) => w.role === "main");
+  const full = mainOf(six), part = mainOf(six.slice(0, 2));
+  ok(full.seed === part.seed && full.textLoud === part.textLoud && full.ms === part.ms, "F14 a cave-in whose parts reach one seat a bake later is written the same (seed, loudness of the text, length)");
+  ok(/loud: w\.textLoud \?\? w\.loud/.test(sfx), "F14 the runtime writes the word from that loudness");
 });
 
 /* F15: a gun's rattle is a stream */

@@ -222,14 +222,14 @@ function reconcileBurn() {
   if ( burns.size || [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire") ) scheduleBurn(1000);
 }
 /** Where each spot's words must move to stay off this client's interface panels (their phrases hover around the spot, in two seats
-    one above the other, a little to either side: a box of about seven of their letters wide and three and a half high, mostly above
+    one above the other, a little to either side: a box of about nine of their letters wide (an echo trails beside it) and three and a half high, mostly above
     it). Measured once a second with the burn. */
 function burnOffsets(p, live) {
   try {
     const v = view(), ui = uiBoxes(), em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
     return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
       // (a spot off this screen stays where it is: its words are not pulled into view)
-      return inV ? C.clearOf({ x0: q.x - em * 3.4, y0: q.y - em * 2.5, x1: q.x + em * 3.4, y1: q.y + em * 0.9 }, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45) : { dx: 0, dy: 0 }; });
+      return inV ? C.clearOf({ x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45) : { dx: 0, dy: 0 }; });
   } catch { return []; }
 }
 /** The cap height (scene px) of a burning fire's words: a share of the screen height at this zoom (live: 3.5..6 %, by the fire's
@@ -328,7 +328,7 @@ function flush() {
 function write(w, taken) {
   if ( w.stream ) return;
   try {
-    const o = { seed: w.seed, lang: lang(), loud: w.loud, duration: w.ms, avoid: taken.slice() };
+    const o = { seed: w.seed, lang: lang(), loud: w.textLoud ?? w.loud, duration: w.ms, avoid: taken.slice() };
     const word = L.word(w.kind, o);
     if ( !word?.text ) return;
     w.word = word; w.text = word.text; w.chars = [...word.text].length;
