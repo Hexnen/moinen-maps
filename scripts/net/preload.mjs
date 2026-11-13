@@ -18,7 +18,7 @@ const K = 2;                       // mask pixels per art pixel (destruction mod
 const off = () => { try { return localStorage.getItem("mm-destruction") === "off"; } catch { return false; } };
 
 /** Every chunk the scene's flags name, nearest to `at` (scene px) first: water tiles and flooded loops (small), then the strokes. */
-export function chunksOf(scene, at = null) {
+export function chunksOf(scene, at = null, { composite = true } = {}) {
   const F = scene?.flags?.[MODULE_ID];
   if ( !F ) return [];
   const out = [], seen = new Set();
@@ -28,8 +28,8 @@ export function chunksOf(scene, at = null) {
   const mpx = (D?.ap ?? 1) * K, cx = at?.x ?? (scene.width ?? 0) / 2, cy = at?.y ?? (scene.height ?? 0) / 2;
   const dx = scene.dimensions?.sceneX ?? 0, dy = scene.dimensions?.sceneY ?? 0;
   // a settled composite of this bake (composite.mjs): its few files first, the strokes' own chunks not at all (fetched when needed)
-  const C = !off() && M?.v === 2 && Composite.enabled() && cacheEnabled() ? Composite.manifestOf(scene) : null;
-  if ( C && C.base === M.base ) {
+  const C = composite ? compositeOf(scene) : null;
+  if ( C ) {
     for ( const id of C.t ) if ( !seen.has(id) ) { seen.add(id); out.push({ dir: C.dir, id, prio: -1 }); }
     // ... and the flooded strokes' own chunks: their shells are filled right after the reveal (their water reads the areas)
     for ( const [oid, v] of Object.entries(M.c ?? {}) ) {
@@ -50,10 +50,35 @@ export function chunksOf(scene, at = null) {
       out.push({ dir: M.dir, id, prio: 1000 + d });
     }
   }
+  // (U232: the files of a composite this load will not use - stale, or of another bake - are not read: ~1 MB of tiles decoded for nothing)
+  const skip = new Set(Array.isArray(F.destructionComposite?.t) ? F.destructionComposite.t : []);
   for ( const r of chunkRecords(scene) ) {
-    for ( const id of r.ids ) if ( !seen.has(id) && !id.startsWith("b") ) { seen.add(id); out.push({ dir: r.dir, id, prio: id.startsWith("w") ? 0 : 2000 }); }   // (a bundle is read with its members)
+    for ( const id of r.ids ) if ( !seen.has(id) && !id.startsWith("b") && !skip.has(id) ) { seen.add(id); out.push({ dir: r.dir, id, prio: id.startsWith("w") ? 0 : 2000 }); }   // (a bundle is read with its members)
   }
   return out;
+}
+
+/** The scene's settled composite of this bake (composite.mjs) when the read-ahead may use it, else null. */
+function compositeOf(scene) {
+  const M = scene?.flags?.[MODULE_ID]?.destruction?.baked;
+  const C = !off() && M?.v === 2 && Composite.enabled() && cacheEnabled() ? Composite.manifestOf(scene) : null;
+  return C && C.base === M.base ? C : null;
+}
+
+/**
+ * U232: read a scene ahead. With a composite, its small index comes first and is checked against the scene's strokes (composite.mjs
+ * indexStale): a composite that no longer fits (a stroke gone or changed since the GM published it, and the GM could not publish it
+ * again) is not read ahead at all - its tiles would only be thrown away by the loader - and the strokes' own chunks are, nearest first.
+ */
+export async function readAhead(scene, at = null) {
+  const C = compositeOf(scene);
+  if ( C ) {
+    const ix = await Net.getChunk(C.dir, C.idx, { prio: -1 }).catch(() => null);
+    const F = scene.flags[MODULE_ID], M = F.destruction.baked;
+    const objs = F.destructionObjects && typeof F.destructionObjects === "object" ? F.destructionObjects : Object.fromEntries((F.destruction?.o ?? []).map((o) => [o?.id, o]));
+    if ( ix?.index && Composite.indexStale(ix.index, (id) => Store.entryOf(M, id), (id) => !!objs[id]) ) return Net.prefetch(chunksOf(scene, at, { composite: false }));
+  }
+  return Net.prefetch(chunksOf(scene, at));
 }
 
 /** The chunk ids of the scene's flooded strokes (their water reads their pixels: every load fetches them after the reveal). */
@@ -78,7 +103,7 @@ function registerPreload() {
   Hooks.on("canvasInit", () => {
     const scene = canvas.scene;
     if ( !scene ) return;
-    Net.prefetch(chunksOf(scene, viewOf(scene))).catch((err) => console.warn(`${MODULE_ID} | read ahead`, err));
+    readAhead(scene, viewOf(scene)).catch((err) => console.warn(`${MODULE_ID} | read ahead`, err));
     // the strokes' signatures too (IndexedDB, else the codec worker): the destruction's first pass needs them at canvasReady
     if ( !off() && scene.flags?.[MODULE_ID]?.destruction ) {
       try {
@@ -90,7 +115,7 @@ function registerPreload() {
   // a scene that becomes active: players are about to see it
   Hooks.on("updateScene", (scene, changed) => {
     if ( changed.active !== true || scene.id === canvas.scene?.id ) return;
-    Net.prefetch(chunksOf(scene, viewOf(scene))).catch(() => {});
+    readAhead(scene, viewOf(scene)).catch(() => {});
   });
 }
 

@@ -14,6 +14,9 @@
      scene is skipped there), functions and Promises (`at` as a function, `until`, `parent`) are refused with one warning;
      `reduced` never travels (each client follows its own motion setting);
    - a world word goes only to clients viewing the same scene.
+   - GM only (user ruling, TOOL-8): only a GM sends. On a player's client `L.net.play / burst / stream` refuse quietly (one console
+     line, no throw) and return a handle that is already over (`refused: "gm-only"`), `burst` returns []; every receiving client
+     also drops a message whose sender is not a GM user, so a modified client cannot push words to the table.
    Own sockets: `L.net.sharedNow()` is the shared clock, `L.net.local(sharedT)` -> { delay } | { startAt } for L.play. */
 
 export const OP_KEYS = ["mood", "sound", "space", "at", "size", "magnitude", "area", "span", "token", "scale", "fit", "maxWidth", "anchor", "from",
@@ -92,4 +95,13 @@ export function rateGate(n = 30) {
     if ( a.length >= n ) { seen.set(who, a); return false; }
     a.push(t); seen.set(who, a); return true;
   };
+}
+
+/* GM only (TOOL-8): a message counts only when its sender is a GM user of this world (`getUser(id)` -> the User or undefined) */
+export const senderIsGM = (senderId, getUser) => typeof senderId === "string" && senderId.length > 0 && !!getUser?.(senderId)?.isGM;
+
+/* what a refused send returns: a handle that is already over, shaped like the engine's (play) or a stream's */
+export function refusedHandle(text, netId = null) {
+  return { id: null, netId, text: String(text ?? ""), alive: false, off: true, refused: "gm-only", hand: null, isReady: false,
+    ready: Promise.resolve(false), finished: Promise.resolve("evicted"), handles: [], stop() {}, moveTo() {}, setLoud() {} };
 }

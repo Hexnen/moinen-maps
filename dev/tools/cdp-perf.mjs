@@ -6,7 +6,7 @@
 // trace_start (label), trace_end (label), prof_start, prof_end (label).
 // env FOUNDRY_USER=<user name>: URL is a Foundry /join page; that user joins, then window.ready is set after FOUNDRY_SETTLE s (4).
 import fs from "node:fs";
-import { startHeadless, closeBrowser, session, firstPage, EDGE } from "../lib/browser.mjs";
+import { startHeadless, closeBrowser, session, firstPage, EDGE, exeOf } from "../lib/browser.mjs";
 
 const flag = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const pos = []; for ( let i = 2; i < process.argv.length; i++ ) { if ( process.argv[i].startsWith("--") ) i++; else pos.push(process.argv[i]); }
@@ -16,7 +16,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = { url, W, H, dpr: DPR, traces: [], profiles: [] };
 
 const { b, port } = await startHeadless({
-  kind: "perf-edge", exe: flag("chrome", EDGE), port: Number(flag("port", 0)), profile: flag("profile", null),
+  kind: "perf-edge", exe: exeOf(flag("chrome", null), EDGE), port: Number(flag("port", 0)), profile: flag("profile", null),
   args: [`--window-size=${W},${H}`, "--hide-scrollbars", "--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist", "--enable-precise-memory-info",
     "--js-flags=--expose-gc", "about:blank"]
 });

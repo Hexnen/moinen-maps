@@ -10,7 +10,7 @@ import { rng, hash } from "./rng.mjs";
 import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.6.1";   // MOVE 1.5.0 + LOOK 1.6.0 merged (FXLM, moinen-maps): LOOK (contract v8): lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look; MOVE (contract v7): travel, choreography, rates, escalation, shards, push, glow, continuous sounds; 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.7.0";   // v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -294,7 +294,7 @@ export function createEngine(base) {
       space: h.space, size: h.opts.size, magnitude: h.opts.magnitude, area: world ? areaOf(h.opts.area) : 0, tokenSpan: world ? h.tokenSpan : 0,
       grid: globalThis.canvas?.grid?.size ?? 100, zoom: world ? (globalThis.canvas?.stage?.scale?.x || 1) : 1, vw: usableW(), vh: innerHeight,
       scale: h.opts.scale ?? 1, sizeK: h.plan.sizeK, aspect: h.plan._holdBox?.w ?? 3, fit: h.opts.fit ?? "legible",
-      alive: world ? h.worldAlive ?? 0 : 0, pixel: h.pixel ? artPx(h) : 0, ceilK: h.opts.ceilK
+      alive: world ? h.worldAlive ?? 0 : 0, pixel: h.pixel ? artPx(h) : 0
     };
   }
   /* sizes follow zoom and viewport live (pixel words keep the size they started with: whole art pixels) */
@@ -531,6 +531,12 @@ export function createEngine(base) {
     };
     for ( const p of tl.hold ) take(p, 3);
     for ( const p of tl.ent ) take(p, 1.2);
+    /* ADVM 7: letters that fall in or rise in from above / below (their own offsets, em) are kept inside the view from the first drawing */
+    for ( const p of tl.ent ) for ( const q of p.letters ?? [] ) {
+      if ( q.v === 0 || !Number.isFinite(q.y) ) continue;
+      const gy = p.g?.y ?? 0, y = Math.max(-3, Math.min(3, q.y + gy));
+      u = Math.max(u, hb.h / 2 - y); d = Math.max(d, hb.h / 2 + y);
+    }
     const pad = 0.18;
     return { l: l + pad, r: r + pad, u: u + pad, d: d + pad };
   }

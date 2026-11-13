@@ -6,9 +6,9 @@
    word is the biggest, jagged = sharp/harsh, round = soft/blunt, long sounds stretch and repeat letters, rising pitch climbs, falling
    pitch sags, the word grows away from where the sound comes from, warm colours for fire, cool for air and water. */
 import { rng, hash } from "./rng.mjs";
+import { characterOf } from "./words.mjs";
 import { onOf, retime } from "./move.mjs";
 import { groupsOf, letterScales, choreoEntrance, countFrames } from "./choreo.mjs";
-import { characterOf } from "./words.mjs";
 
 export const TICK = 1000 / 24;
 
@@ -498,12 +498,12 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     if ( hand.number ) s = 1;   // a number is even: a small sign or digit is a misread number (the rng below still advances)
     s *= 1 + R.f(-0.07, 0.07) * (hand.number ? 0 : 0.6 + sound.rough);
     if ( (chars[i] === "!" || chars[i] === "?") && !(look && accent) ) s *= 1.05;
-    if ( ls ) s *= ls[i];                                  // choreography: a part's own size (a small prefix before the body)
     sizes.push(Math.max(0.25, s));
   }
   /* LOOK: a small prefix before a huge body: the part before the first hyphen, a short first word, or the first syllable */
   let pre = 0;
-  if ( look && hand.prefix > 0 && !chars.includes("\n") && sound.peak >= 0.3 ) {
+  const partSized = !!ls && ls.some((v) => Math.abs(v - 1) > 1e-6);   // MOVE's parts size the word themselves
+  if ( look && !partSized && hand.prefix > 0 && !chars.includes("\n") && sound.peak >= 0.3 ) {
     const w = chars.join(""), hy = w.indexOf("-"), sp = w.indexOf(" ");
     if ( hy >= 1 && hy <= 5 && n - hy > 2 ) pre = hy + 1;
     else if ( sp >= 1 && sp <= 4 && n - sp > 2 ) pre = sp + 1;
@@ -538,6 +538,8 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     const body = Math.max(...sizes.slice(pre)); if ( sizes[i] < 0.76 * body ) sizes[i] = 0.76 * body;   // CRUNCH! read "cRUNCH!" (advm 12)
   }
   for ( let i = 0; i < n - 1; i++ ) if ( /[+\-−±]/u.test(chars[i]) && /\d/u.test(chars[i + 1]) ) sizes[i] = Math.max(sizes[i], sizes[i + 1]);
+  /* MOVE: choreography: a part's own size (a small prefix before the body), applied after LOOK's floors so an explicit part scale wins */
+  if ( ls ) for ( let i = 0; i < n; i++ ) sizes[i] *= ls[i];
   /* LOOK: interlocked rings: in a run of the same round letter each one passes through the one before it (paint.mjs draws the
      over-under); sizes alternate so the rings read as two, not as one blot */
   const linkTo = chars.map((c, i) => (look && hand.link && i > 0 && c === chars[i - 1] && RINGS.has(c) && !(i < pre) ? i - 1 : -1));
@@ -747,7 +749,8 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
     case "slam": {
       if ( tech.antic ) ent.push(P(beat, { s: 0.82, sx: 1.18, sy: 0.78, y: 0.08 }, (i) => ({ r: (i % 2 ? 1 : -1) * 0.04 })));   // a crouch: the blow winds up (still readable)
       if ( tech.flash ) ent.push(flashFrame({ s: 1.12 }));
-      const sm = P(1, { s: 1.6, sx: 1.08 });
+      /* ADVM 7: the smear's overshoot follows the loudness (a quiet satellite word never slams in bigger than the main word) */
+      const sm = P(1, { s: 1.12 + 0.48 * Math.max(0, Math.min(1, Number.isFinite(o.magnitude) ? o.magnitude : (sound.loud ?? 0.5))), sx: 1.08 });
       if ( tech.smear ) sm.smear = { dx: 0, dy: 0, zoom: 0.35, n: 3 };
       sm.fx.push({ k: "speed", a: 0.6, radial: true, seed: seeds() });
       ent.push(sm);
@@ -777,12 +780,13 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       break;
     }
     case "drop": {
-      const k = stag(4), steps = Math.ceil(n / k) + 4;
-      for ( let s = 0; s < steps; s++ ) ent.push(P(2, {}, (i) => {
-        const t = s - Math.floor(i / k);
-        if ( t < 0 ) return { v: 0 };
-        return [{ y: -2.4, sy: 1.25, sx: 0.85 }, { y: -0.9, sy: 1.15, sx: 0.9 }, { y: 0.07, sy: 0.74, sx: 1.22 }, { y: -0.14, sy: 1.06, sx: 0.97 }, { y: 0.02, sy: 0.97 }][Math.min(4, t)] ?? {};
-      }));
+      /* ADVM 7: the word falls as ONE word (every letter visible in every drawing, the same line), the letters only a little behind
+         each other (a ripple of at most 1.2 drawings across the word), from 1.4 em above: no fragments, no stair, no jump */
+      const POSE = [{ y: -1.4, sy: 1.2, sx: 0.88 }, { y: -0.55, sy: 1.12, sx: 0.92 }, { y: 0.07, sy: 0.76, sx: 1.2 }, { y: -0.1, sy: 1.05, sx: 0.97 }, { y: 0.02, sy: 0.98, sx: 1 }, { y: 0, sy: 1, sx: 1 }];
+      const at = (t) => { const c = Math.max(0, Math.min(POSE.length - 1, t)), a = Math.floor(c), b = Math.min(POSE.length - 1, a + 1), f = c - a;
+        return { y: POSE[a].y + (POSE[b].y - POSE[a].y) * f, sy: POSE[a].sy + (POSE[b].sy - POSE[a].sy) * f, sx: POSE[a].sx + (POSE[b].sx - POSE[a].sx) * f }; };
+      const lag = (i) => (n > 1 ? (i / (n - 1)) * 1.2 : 0);
+      for ( let s = 0; s < 6; s++ ) ent.push(P(2, {}, (i) => at(s - lag(i))));
       ent[Math.min(ent.length - 1, 2)].fx.push({ k: "dust", a: 0.8, seed: seeds() });
       ent.push(P(beat + 1));
       break;
@@ -831,7 +835,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       case "wobble": p.letters.forEach((l, j) => { l.r = 0.1 * Math.sin(i * 2.1 + j); l.y = 0.05 * Math.cos(i * 2.1 + j); }); break;
       case "boil": p.letters.forEach((l, j) => { l.y = 0.07 * Math.sin(i * 2.4 + j * 1.3); l.r = 0.06 * Math.cos(i * 1.9 + j); }); p.g.s = [1, 1.04, 0.99][i]; break;
       case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.misreg = [0.05, 0, 0.03, 0][i]; p.fx.push({ k: i % 2 ? "krackle" : "sparks", a: 0.7, seed: seeds() }); break;
-      case "flicker": p.reseed = true; p.g.y = -0.03 * i; p.g.s = [1, 1.04, 0.98, 1.02][i]; break;   // no ember specks over held letters (the user: clean letters)
+      case "flicker": p.reseed = true; p.g.y = -0.03 * i; p.g.s = [1, 1.04, 0.98, 1.02][i]; break;   // no ember specks over held letters (LOOK, the user: clean letters); MOVE's swell kept
       default: break;
     }
     if ( !reduced && M.fx?.rays && i % 2 === 0 ) p.fx.push({ k: "krackle", a: 0.6, seed: seeds() });
@@ -947,21 +951,22 @@ export function makePlan(text, opts, fonts, memory) {
   if ( capAt >= 0 ) lay.letters[capAt].font = hand.capFont;
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
   const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
-  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel };
+  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel, magnitude: opts.magnitude };
   const tl = buildTimeline(chars.length, mood, sound, hand, R, topts);
   const holdMs = Math.max(0, (opts.hold ?? MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long)) / (opts.tempo || 1));
   /* frame rate (move.mjs): ones / twos / threes for this word; motion of a travelling word steps on the same grid */
   const on = opts.reduced ? 0 : onOf(opts);
-  const R3 = rng((seed ^ 0x68e31da4) >>> 0), seed3 = () => R3.seed();
-  if ( on ) retime(tl, on, seed3);
-  const mk = (ticks) => { const p = pic(chars.length, ticks); p.misreg = tl.tech.misreg; p.boil = seed3(); return p; };
+  const Rm = rng((seed ^ 0x68e31da4) >>> 0), seed2 = () => Rm.seed();   // MOVE's generator (named apart from LOOK's R2)
+  if ( on ) retime(tl, on, seed2);
+  const mk = (ticks) => { const p = pic(chars.length, ticks); p.misreg = tl.tech.misreg; p.boil = seed2(); return p; };
   if ( groups ) {
     tl.ent = choreoEntrance(groups, lay, seed, (n, Rg, kind) => buildTimeline(n, mood, sound, hand, Rg, { ...topts, in: kind ?? opts.in ?? tl.kinds.in }), mk, { on });
     tl.kinds.choreo = groups[0].type ? "typeOn" : "parts";
   }
   const counted = !opts.reduced && opts.countIn ? countFrames(chars, opts, seed, mk, on || 2) : null;
   if ( counted ) { tl.ent = [...counted, ...tl.ent]; tl.kinds.choreo = "countIn"; }
-  /* the backdrop (opt-in) comes in with the word and leaves before it: its scale per picture */
+  /* the backdrop (opt-in) comes in with the word and leaves before it: its scale per picture (after MOVE's retiming / choreography,
+     which replace pictures) */
   for ( const [j, q] of tl.ent.entries() ) q.backS = j === 0 && tl.ent.length > 2 ? 0.55 : 1;
   for ( const q of tl.hold ) q.backS = 1;
   for ( const [j, q] of tl.exit.entries() ) q.backS = Math.max(0, 1 - (j + 1) / tl.exit.length) * (j === 0 ? 1.06 : 1);

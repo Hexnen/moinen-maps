@@ -1,16 +1,20 @@
 /* LETR vocabulary (WORD): from a sound kind, a loudness and a language to a fitting comic onomatopoeia. Pure: no DOM, no Foundry.
    The engine letters any text it is handed; this layer only DECIDES the text (and the mood / sound / motion that fit it):
-     const w = L.word("crack", { loud: 0.8, lang: "pl", seed });     // -> { text: "TRZAAASK!", mood: "crack", sound, play, ... }
+     const w = L.word("crack", { loud: 0.8, lang: "pl", seed });     // -> { text: "KRAKT!", mood: "crack", sound, play, ... }
      L.play(w.text, { ...w.play, space: "world", at });              // or simply: L.sfx("crack", { loud: 0.8, space: "world", at })
    Plain text keeps working exactly as before: L.play("KRAK!", ...) never goes through this file.
 
-   Words: our own lists (EN: the American comic idiom; PL: Polish comic and everyday onomatopoeia, written the Polish way: ŁUP, BĘC,
-   TRACH, ŁUBUDU, CIACH, ŚWIST, BRZDĘK, IJO-IJO, CIII). Template marks:
-     "+" after a letter = a stretch point: the louder the sound, the more of that letter (TRZA+SK -> TRZASK / TRZAAASK); several marks
-         share the stretch. A template without "+" is stretched on its last vowel (or its trailing R/S/Z/H/M/F run) when needed.
+   Words: our own, BUILT from the sound (attack + lasting part + cut-off), never a dictionary word nor one letter from one (DICT and
+   refusal() below; the short ICONIC list is the exception, ALLOW the comic's K-respellings, VOICE the voice kinds' interjections).
+   ENGLISH IS THE MASTER (THWAK, FWOOSH, SKROOMM, KA-THOOM); Polish follows it in Polish spelling (SZSZT, SZKLANG, WZIUUM, KRUNCZ).
+   NO Polish diacritics anywhere (the vocabulary review, 2026-11-13). Template marks:
+     "+" after a letter = a stretch point (callers' words only; the built-in banks have none).
      "-" joins syllables (KA-BUM, TRA-TA-TA); streams split on it.
-   Tiers: s (quiet: loud < 0.34), m (normal), l (loud: >= 0.67). On top of the tier: stretch grows with loudness; at the very top a
-   prefix (KA-, TRA-TA-) may be added; quiet words drop their "!". */
+   Tiers: s (quiet: loud < 0.34), m (normal), l (loud: >= 0.67). DURATION alone stretches a word, on its lasting letters only; at the
+   very top a prefix (the sound's own lead-in, PREFIXES: KA-BUM, KRA-KA-BUM) may be added; "!" goes 0..2 by loudness, capped per kind.
+   ADDING A KIND (the follow-up material / debris / shock-wave / fire-ladder kinds plug in here): a K() row in KINDS, its HOLD classes,
+   CHAR, KIND_ENV, FLOW style if it lasts, a BANK row in both languages (2-4 words per tier), its lead-in on PREFIXES, any shared word
+   on SHARED, and the perc / repeat / maxBangs / run lists if they apply; then words-reviewed.mjs and `node scripts/letters/check.mjs`. */
 import { rng } from "./rng.mjs";
 import { magnitudeOf } from "./size.mjs";
 
@@ -19,59 +23,58 @@ export const RENDERABLE = /^[A-Z0-9ĄĆĘŁŃÓŚŹŻ!?\-+\x27.,…×–%:/ ]+$/
 export const MAX_LEN = 22;
 
 /* ---------- sound kinds: what it is, the engine mood, the base sound (loud comes from the call), motion, stretch, prefixes ----------
-   group: hit | break | blast | motion | element | power | device | voice.  stretch = how many extra letters a full-loud word gets. */
+   group: hit | break | blast | motion | element | power | device | voice | animal | vehicle | weapon | weather.  stretch = how many extra letters a full-loud word gets. */
 const K = (group, pl, en, mood, sound, motion, stretch = 2, pre = null, alias = []) => ({ group, label: { pl, en }, mood, sound, motion, stretch, pre, alias });
 export const KINDS = {
   /* hits */
-  punch:   K("hit", "cios", "punch", "impact", { sharp: 0.8, long: 0.15, pitch: 0, rough: 0.35 }, { in: ["slam", "pop"], hold: ["shake", "boil"], out: ["shatter", "pop"] }, 2, { pl: ["TRA-"], en: ["KA-"] }, ["hit", "blow", "kick", "strike"]),
-  smash:   K("hit", "miażdżenie", "smash", "crash", { sharp: 0.9, long: 0.45, pitch: -0.2, rough: 0.75 }, { in: ["slam"], hold: ["rattle", "shake"], out: ["shatter", "burst"] }, 3, { pl: ["TRA-TA-"], en: ["KA-"] }, ["heavy", "slam", "crush"]),
+  punch:   K("hit", "cios", "punch", "impact", { sharp: 0.8, long: 0.15, pitch: 0, rough: 0.35 }, { in: ["slam", "pop"], hold: ["shake", "boil"], out: ["shatter", "pop"] }, 2, null, ["hit", "blow", "kick", "strike"]),
+  smash:   K("hit", "miażdżenie", "smash", "crash", { sharp: 0.9, long: 0.45, pitch: -0.2, rough: 0.75 }, { in: ["slam"], hold: ["rattle", "shake"], out: ["shatter", "burst"] }, 3, null, ["heavy", "slam", "crush"]),
   slap:    K("hit", "klaps", "slap", "impact", { sharp: 0.55, long: 0.2, pitch: 0.1, rough: 0.2 }, { in: ["pop", "slam"], hold: ["shake", "wobble"], out: ["pop"] }, 2),
   thud:    K("hit", "łomot", "thud", "impact", { sharp: 0.4, long: 0.1, pitch: -0.6, rough: 0.5 }, { in: ["drop", "slam"], hold: ["wobble", "rattle"], out: ["fall", "droop"] }, 2, null, ["fall", "down", "body"]),
   stomp:   K("hit", "tupnięcie", "stomp", "impact", { sharp: 0.35, long: 0.3, pitch: -0.7, rough: 0.6 }, { in: ["drop", "slam"], hold: ["rattle", "shake"], out: ["fall", "pop"] }, 2, null, ["step", "footstep"]),
-  clang:   K("hit", "brzęk", "clang", "crack", { sharp: 0.9, long: 0.4, pitch: 0.3, rough: 0.2 }, { in: ["slam", "pop"], hold: ["buzz", "shake"], out: ["pop", "dissolve"] }, 2, { en: ["KA-"] }, ["metal", "block", "shield", "parry"]),
-  slash:   K("hit", "cięcie", "slash", "crack", { sharp: 1, long: 0.3, pitch: 0.2, rough: 0.5 }, { in: ["zip", "crackIn"], hold: ["shake"], out: ["shatter", "zipout"] }, 2, null, ["cut", "blade", "claw", "sword"]),
+  clang:   K("hit", "brzęk", "clang", "crack", { sharp: 0.9, long: 0.4, pitch: 0.3, rough: 0.2 }, { in: ["slam", "pop"], hold: ["buzz", "shake"], out: ["pop", "dissolve"] }, 2, null, ["metal", "block", "shield", "parry"]),
+  slash:   K("hit", "cięcie", "slash", "crack", { sharp: 1, long: 0.3, pitch: 0.2, rough: 0.5 }, { in: ["zip", "crackIn"], hold: ["shake"], out: ["shatter", "zipout"] }, 2, null, ["cut", "claw"]),
   bite:    K("hit", "ugryzienie", "bite", "crack", { sharp: 0.7, long: 0.2, pitch: -0.1, rough: 0.6 }, { in: ["slam", "pop"], hold: ["shake", "rattle"], out: ["pop", "shatter"] }, 2, null, ["chomp", "crunch", "chew"]),
   /* breaking */
   crack:   K("break", "trzask", "crack", "crack", { sharp: 0.95, long: 0.2, pitch: 0.1, rough: 0.55 }, { in: ["crackIn", "slam"], hold: ["shake"], out: ["shatter"] }, 2, null, ["snap", "break"]),
   shatter: K("break", "stłuczenie", "shatter", "crack", { sharp: 1, long: 0.45, pitch: 0.4, rough: 0.4 }, { in: ["crackIn", "pop"], hold: ["buzz", "shake"], out: ["shatter"] }, 2, null, ["glass", "smash-glass"]),
-  crash:   K("break", "łoskot", "crash", "crash", { sharp: 0.7, long: 0.6, pitch: -0.6, rough: 0.85 }, { in: ["drop", "slam"], hold: ["rattle"], out: ["fall"] }, 3, { pl: ["TRA-TA-"], en: ["KA-", "KRA-"] }, ["collapse", "rubble", "wreck", "destroy"]),
+  crash:   K("break", "łoskot", "crash", "crash", { sharp: 0.7, long: 0.6, pitch: -0.6, rough: 0.85 }, { in: ["drop", "slam"], hold: ["rattle"], out: ["fall"] }, 3, null, ["collapse", "rubble", "wreck", "destroy"]),
   crumble: K("break", "kruszenie", "crumble", "crash", { sharp: 0.4, long: 0.75, pitch: -0.5, rough: 1 }, { in: ["grow", "drop"], hold: ["wobble", "rattle"], out: ["droop", "fall"] }, 3, null, ["decay", "erode", "grind"]),
   rumble:  K("break", "dudnienie", "rumble", "crash", { sharp: 0.35, long: 0.95, pitch: -0.8, rough: 1 }, { in: ["grow"], hold: ["rattle"], out: ["fall"] }, 3, null, ["quake", "earthquake", "tremor"]),
-  creak:   K("break", "skrzypienie", "creak", "tick", { sharp: 0.6, long: 0.7, pitch: 0.2, rough: 0.7 }, { in: ["pop", "grow"], hold: ["wobble"], out: ["dissolve"] }, 3, null, ["squeak", "door", "wood"]),
+  creak:   K("break", "skrzypienie", "creak", "tick", { sharp: 0.6, long: 0.7, pitch: 0.2, rough: 0.7 }, { in: ["pop", "grow"], hold: ["wobble"], out: ["dissolve"] }, 3, null, ["door", "wood"]),
   scrape:  K("break", "zgrzyt", "scrape", "whoosh", { sharp: 0.6, long: 0.85, pitch: -0.2, rough: 0.95 }, { in: ["zip"], hold: ["rattle"], out: ["zipout"] }, 3, null, ["drag", "screech", "grind-metal"]),
   /* blasts and shots */
-  boom:    K("blast", "wybuch", "boom", "boom", { sharp: 0.45, long: 0.55, pitch: -0.2, rough: 0.6 }, { in: ["slam"], hold: ["throb", "shake"], out: ["burst"] }, 3, { pl: ["KA-", "TRA-TA-"], en: ["KA-", "KRA-"] }, ["explosion", "blast", "explode", "bomb", "grenade"]),
+  boom:    K("blast", "wybuch", "boom", "boom", { sharp: 0.45, long: 0.55, pitch: -0.2, rough: 0.6 }, { in: ["slam"], hold: ["throb", "shake"], out: ["burst"] }, 3, null, ["explosion", "blast", "explode", "bomb"]),
   whump:   K("blast", "podmuch", "whump", "boom", { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 }, { in: ["grow"], hold: ["throb"], out: ["dissolve"] }, 2, null, ["gust", "shockwave", "pressure", "airblast"]),
-  thunder: K("blast", "grzmot", "thunder", "boom", { sharp: 0.7, long: 0.8, pitch: -0.4, rough: 0.8 }, { in: ["slam", "crackIn"], hold: ["rattle", "shake"], out: ["burst", "fall"] }, 3, { pl: ["TRA-TA-"], en: ["KRA-KA-"] }, ["storm", "lightning-strike"]),
-  zap:     K("blast", "porażenie", "zap", "zap", { sharp: 1, long: 0.3, pitch: 0.3, rough: 0.5 }, { in: ["pop"], hold: ["buzz"], out: ["dissolve"] }, 2, { en: ["KA-"] }, ["electric", "electricity", "lightning", "shock", "spark"]),
-  beam:    K("blast", "promień", "beam", "zap", { sharp: 0.8, long: 0.6, pitch: 0.4, rough: 0.3 }, { in: ["zip", "pop"], hold: ["buzz"], out: ["zipout", "dissolve"] }, 3, { en: ["KA-"] }, ["laser", "energy", "ray", "eyebeam", "blaster"]),
-  gunshot: K("blast", "strzał", "gunshot", "impact", { sharp: 0.9, long: 0.15, pitch: 0.1, rough: 0.4 }, { in: ["slam"], hold: ["shake"], out: ["pop"] }, 1, null, ["gun", "shot", "pistol", "rifle"]),
+  thunder: K("blast", "grzmot", "thunder", "boom", { sharp: 0.7, long: 0.8, pitch: -0.4, rough: 0.8 }, { in: ["slam", "crackIn"], hold: ["rattle", "shake"], out: ["burst", "fall"] }, 3, null, ["lightning-strike"]),
+  zap:     K("blast", "porażenie", "zap", "zap", { sharp: 1, long: 0.3, pitch: 0.3, rough: 0.5 }, { in: ["pop"], hold: ["buzz"], out: ["dissolve"] }, 2, null, ["electric", "electricity", "lightning", "shock", "spark"]),
+  beam:    K("blast", "promień", "beam", "zap", { sharp: 0.8, long: 0.6, pitch: 0.4, rough: 0.3 }, { in: ["zip", "pop"], hold: ["buzz"], out: ["zipout", "dissolve"] }, 3, null, ["laser", "energy", "ray", "eyebeam"]),
   gunfire: K("blast", "seria", "gunfire", "impact", { sharp: 0.9, long: 0.5, pitch: 0, rough: 0.5 }, { in: ["slam"], hold: ["shake", "rattle"], out: ["pop"] }, 2, null, ["burst", "autofire", "machinegun", "machine-gun", "rattle"]),
   ricochet:K("blast", "rykoszet", "ricochet", "whoosh", { sharp: 0.85, long: 0.6, pitch: 0.6, rough: 0.2 }, { in: ["zip", "pop"], hold: ["boil"], out: ["zipout"] }, 3, null, ["deflect", "bounce-off"]),
   /* motion */
-  whoosh:  K("motion", "świst", "whoosh", "whoosh", { sharp: 0.2, long: 0.8, pitch: 0, rough: 0.2 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, null, ["swing", "dash", "dodge", "swoosh", "throw"]),
-  zoom:    K("motion", "pęd", "zoom", "whoosh", { sharp: 0.35, long: 0.85, pitch: 0.3, rough: 0.35 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, { en: ["KA-"] }, ["fly", "flight", "flyby", "speed", "jet", "takeoff"]),
+  whoosh:  K("motion", "świst", "whoosh", "whoosh", { sharp: 0.2, long: 0.8, pitch: 0, rough: 0.2 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, null, ["swing", "dash", "dodge", "swoosh"]),
+  zoom:    K("motion", "pęd", "zoom", "whoosh", { sharp: 0.35, long: 0.85, pitch: 0.3, rough: 0.35 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, null, ["fly", "flight", "flyby", "speed"]),
   bounce:  K("motion", "skok", "bounce", "tick", { sharp: 0.2, long: 0.5, pitch: 0.7, rough: 0.1 }, { in: ["pop", "rise"], hold: ["wobble", "boil"], out: ["rise", "pop"] }, 3, null, ["jump", "leap", "spring", "boing"]),
   teleport:K("motion", "teleport", "teleport", "zap", { sharp: 0.5, long: 0.25, pitch: 0.5, rough: 0.2 }, { in: ["pop"], hold: ["buzz", "boil"], out: ["dissolve", "pop"] }, 2, null, ["blink", "vanish", "appear", "portal"]),
-  wind:    K("motion", "wiatr", "wind", "whoosh", { sharp: 0.1, long: 1, pitch: 0.1, rough: 0.3 }, { in: ["zip", "grow"], hold: ["boil"], out: ["zipout", "dissolve"] }, 3, null, ["gale", "howl", "breeze", "tornado"]),
+  wind:    K("motion", "wiatr", "wind", "whoosh", { sharp: 0.1, long: 1, pitch: 0.1, rough: 0.3 }, { in: ["zip", "grow"], hold: ["boil"], out: ["zipout", "dissolve"] }, 3, null, ["gale", "howl", "breeze"]),
   /* elements */
-  fire:    K("element", "ogień", "fire", "fire", { sharp: 0.3, long: 0.7, pitch: 0.6, rough: 0.45 }, { in: ["pop", "rise"], hold: ["flicker"], out: ["rise"] }, 3, { en: ["KA-"] }, ["flame", "flames", "burn", "ignite", "blaze", "fireball"]),
+  fire:    K("element", "ogień", "fire", "fire", { sharp: 0.3, long: 0.7, pitch: 0.6, rough: 0.45 }, { in: ["pop", "rise"], hold: ["flicker"], out: ["rise"] }, 3, null, ["flame", "flames", "burn", "ignite", "blaze", "fireball"]),
   crackle: K("element", "trzaskanie", "crackle", "fire", { sharp: 0.85, long: 0.3, pitch: 0.4, rough: 0.7 }, { in: ["pop"], hold: ["flicker"], out: ["dissolve"] }, 2, null, ["burning", "sizzle", "embers"]),
-  hiss:    K("element", "syk", "hiss", "whoosh", { sharp: 0.2, long: 0.8, pitch: -0.3, rough: 0.55 }, { in: ["zip", "pop"], hold: ["boil"], out: ["dissolve"] }, 3, null, ["steam", "gas", "snake", "leak", "spray"]),
+  hiss:    K("element", "syk", "hiss", "whoosh", { sharp: 0.2, long: 0.8, pitch: -0.3, rough: 0.55 }, { in: ["zip", "pop"], hold: ["boil"], out: ["dissolve"] }, 3, null, ["steam", "gas", "leak", "spray", "pipe"]),
   splash:  K("element", "plusk", "splash", "splash", { sharp: 0.25, long: 0.5, pitch: 0.2, rough: 0.3 }, { in: ["pop"], hold: ["wobble"], out: ["fall"] }, 2, null, ["water", "wave", "dive"]),
   squish:  K("element", "plaśnięcie", "squish", "splash", { sharp: 0.2, long: 0.4, pitch: -0.4, rough: 0.6 }, { in: ["pop", "slam"], hold: ["wobble"], out: ["fall", "droop"] }, 2, null, ["goo", "slime", "squelch", "gore", "mud"]),
   drip:    K("element", "kapanie", "drip", "splash", { sharp: 0.4, long: 0.2, pitch: 0.3, rough: 0 }, { in: ["drop", "pop"], hold: ["boil"], out: ["fall"] }, 2, null, ["drop", "leak-drop"]),
   /* powers */
-  powerup: K("power", "ładowanie", "power-up", "powerup", { sharp: 0.3, long: 0.8, pitch: 0.9, rough: 0.2 }, { in: ["grow", "rise"], hold: ["throb"], out: ["rise"] }, 3, { en: ["KA-"] }, ["charge", "power", "transform", "arcane", "hum"]),
+  powerup: K("power", "ładowanie", "power-up", "powerup", { sharp: 0.3, long: 0.8, pitch: 0.9, rough: 0.2 }, { in: ["grow", "rise"], hold: ["throb"], out: ["rise"] }, 3, null, ["charge", "power", "transform", "arcane", "hum"]),
   psychic: K("power", "telepatia", "psychic", "powerup", { sharp: 0.15, long: 0.9, pitch: 0.5, rough: 0.1 }, { in: ["grow"], hold: ["throb", "boil"], out: ["dissolve", "rise"] }, 3, null, ["mind", "telepathy", "telekinesis", "psionic"]),
   chime:   K("power", "dzwonienie", "chime", "heal", { sharp: 0.6, long: 0.5, pitch: 0.7, rough: 0 }, { in: ["pop", "rise"], hold: ["boil", "throb"], out: ["rise", "dissolve"] }, 2, null, ["magic", "sparkle", "shimmer", "idea", "ding", "bell"]),
   fizzle:  K("power", "zgaśnięcie", "fizzle", "fail", { sharp: 0.4, long: 0.5, pitch: -0.8, rough: 0.5 }, { in: ["pop"], hold: ["wobble", "buzz"], out: ["droop", "dissolve"] }, 3, null, ["fizz", "fail-power", "misfire", "dud", "fuse"]),
   whiff:   K("power", "pudło", "whiff", "fail", { sharp: 0.2, long: 0.5, pitch: -0.5, rough: 0.1 }, { in: ["zip", "pop"], hold: ["wobble"], out: ["droop", "zipout"] }, 3, null, ["miss", "fail", "flop"]),
   /* devices */
-  click:   K("device", "kliknięcie", "click", "tick", { sharp: 0.7, long: 0, pitch: 0, rough: 0.1 }, { in: ["pop"], hold: ["boil"], out: ["dissolve", "pop"] }, 1, null, ["tick", "switch", "trigger", "cock", "lock"]),
+  click:   K("device", "kliknięcie", "click", "tick", { sharp: 0.7, long: 0, pitch: 0, rough: 0.1 }, { in: ["pop"], hold: ["boil"], out: ["dissolve", "pop"] }, 1, null, ["tick", "switch", "trigger", "lock"]),
   beep:    K("device", "pikanie", "beep", "tick", { sharp: 0.5, long: 0.2, pitch: 0.4, rough: 0 }, { in: ["pop"], hold: ["boil", "buzz"], out: ["dissolve"] }, 2, null, ["blip", "alarm-beep", "computer"]),
   engine:  K("device", "silnik", "engine", "whoosh", { sharp: 0.4, long: 0.8, pitch: 0.1, rough: 0.8 }, { in: ["zip"], hold: ["rattle", "boil"], out: ["zipout"] }, 3, null, ["motor", "car", "vehicle", "rev"]),
-  siren:   K("device", "syrena", "siren", "zap", { sharp: 0.4, long: 0.9, pitch: 0.5, rough: 0.2 }, { in: ["pop", "grow"], hold: ["buzz", "throb"], out: ["dissolve"] }, 2, null, ["alarm", "police", "ambulance"]),
+  siren:   K("device", "syrena", "siren", "zap", { sharp: 0.4, long: 0.9, pitch: 0.5, rough: 0.2 }, { in: ["pop", "grow"], hold: ["buzz", "throb"], out: ["dissolve"] }, 2, null, ["alarm"]),
   /* voices */
   roar:    K("voice", "ryk", "roar", "roar", { sharp: 0.55, long: 0.9, pitch: 0.2, rough: 0.85 }, { in: ["grow"], hold: ["rattle", "shake"], out: ["shrink", "shatter"] }, 3, null, ["growl", "beast", "monster", "battlecry"]),
   pain:    K("voice", "ból", "pain", "pain", { sharp: 0.6, long: 0.45, pitch: -0.5, rough: 0.6 }, { in: ["slam", "pop"], hold: ["wobble", "shake"], out: ["fall", "droop"] }, 3, null, ["hurt", "scream", "ouch", "wound"]),
@@ -81,138 +84,362 @@ export const KINDS = {
   cheer:   K("voice", "wiwat", "cheer", "powerup", { sharp: 0.5, long: 0.4, pitch: 0.8, rough: 0.2 }, { in: ["grow", "rise"], hold: ["throb"], out: ["rise"] }, 3, null, ["triumph", "yes", "victory", "hooray"]),
   laugh:   K("voice", "śmiech", "laugh", "tick", { sharp: 0.4, long: 0.5, pitch: 0.3, rough: 0.3 }, { in: ["pop"], hold: ["wobble", "boil"], out: ["pop", "rise"] }, 1, null, ["giggle", "chuckle", "evil-laugh"]),
   shush:   K("voice", "uciszenie", "shush", "whoosh", { sharp: 0.3, long: 0.7, pitch: -0.2, rough: 0.2 }, { in: ["pop"], hold: ["boil"], out: ["dissolve"] }, 3, null, ["quiet", "silence", "hush", "whisper"]),
-  heartbeat:K("voice", "puls", "heartbeat", "impact", { sharp: 0.3, long: 0.3, pitch: -0.3, rough: 0.3 }, { in: ["pop"], hold: ["throb"], out: ["dissolve"] }, 1, null, ["heart", "pulse", "tension"])
+  heartbeat:K("voice", "puls", "heartbeat", "impact", { sharp: 0.3, long: 0.3, pitch: -0.3, rough: 0.3 }, { in: ["pop"], hold: ["throb"], out: ["dissolve"] }, 1, null, ["heart", "pulse", "tension"]),
+  /* animals (2026-11-13: the user asked for a dog, a cat, a rat, a snake, an elephant) */
+  bark:      K("animal", "szczekanie", "bark", "roar", { sharp: 0.8, long: 0.15, pitch: 0.1, rough: 0.6 }, { in: ["pop", "slam"], hold: ["shake"], out: ["pop"] }, 1, null, ["dog", "woof"]),
+  snarl:     K("animal", "warczenie", "snarl", "roar", { sharp: 0.3, long: 0.8, pitch: -0.6, rough: 0.9 }, { in: ["grow"], hold: ["rattle", "shake"], out: ["shrink"] }, 3, null, ["dog-growl", "growling", "warkot"]),
+  meow:      K("animal", "miauczenie", "meow", "heal", { sharp: 0.2, long: 0.5, pitch: 0.5, rough: 0.2 }, { in: ["rise", "pop"], hold: ["wobble"], out: ["droop"] }, 2, null, ["cat", "mew"]),
+  purr:      K("animal", "mruczenie", "purr", "heal", { sharp: 0.1, long: 0.95, pitch: -0.4, rough: 0.6 }, { in: ["grow"], hold: ["throb", "rattle"], out: ["dissolve"] }, 3, null, ["cat-purr"]),
+  cathiss:   K("animal", "prychanie", "cat hiss", "crack", { sharp: 0.7, long: 0.4, pitch: 0.4, rough: 0.7 }, { in: ["pop", "crackIn"], hold: ["shake"], out: ["pop"] }, 2, null, ["cat-hiss", "spit"]),
+  squeak:    K("animal", "pisk", "squeak", "tick", { sharp: 0.6, long: 0.2, pitch: 1, rough: 0.2 }, { in: ["pop"], hold: ["wobble"], out: ["pop"] }, 1, null, ["rat", "mouse"]),
+  snakehiss: K("animal", "syczenie", "snake hiss", "whoosh", { sharp: 0.3, long: 0.9, pitch: 0.3, rough: 0.5 }, { in: ["zip", "grow"], hold: ["wobble", "boil"], out: ["dissolve"] }, 3, null, ["snake", "serpent", "viper"]),
+  trumpet:   K("animal", "trąbienie", "trumpet", "roar", { sharp: 0.6, long: 0.7, pitch: 0.8, rough: 0.6 }, { in: ["grow", "rise"], hold: ["shake"], out: ["shrink"] }, 3, null, ["elephant"]),
+  /* vehicles */
+  plane:     K("vehicle", "samolot", "plane", "whoosh", { sharp: 0.1, long: 1, pitch: 0.2, rough: 0.4 }, { in: ["zip", "grow"], hold: ["buzz"], out: ["zipout"] }, 3, null, ["airplane", "aircraft", "jet", "takeoff"]),
+  helicopter:K("vehicle", "helikopter", "helicopter", "whoosh", { sharp: 0.5, long: 1, pitch: -0.2, rough: 0.6 }, { in: ["grow"], hold: ["rattle", "throb"], out: ["zipout"] }, 1, null, ["chopper", "rotor"]),
+  /* weapons (firearms of every size, energy, melee, thrown, explosive) */
+  pistol:    K("weapon", "pistolet", "pistol", "impact", { sharp: 0.95, long: 0.1, pitch: 0.2, rough: 0.3 }, { in: ["slam", "pop"], hold: ["shake"], out: ["pop"] }, 1, null, ["handgun", "revolver", "gunshot", "gun", "shot"]),   // the review (2026-11-13): gunshot merged into pistol
+  rifle:     K("weapon", "karabin", "rifle", "crack", { sharp: 1, long: 0.2, pitch: 0, rough: 0.4 }, { in: ["slam", "crackIn"], hold: ["shake"], out: ["pop", "shatter"] }, 1, null, ["sniper", "carbine"]),
+  shotgun:   K("weapon", "strzelba", "shotgun", "boom", { sharp: 0.8, long: 0.3, pitch: -0.4, rough: 0.7 }, { in: ["slam"], hold: ["shake"], out: ["burst"] }, 2, null, ["scattergun"]),
+  minigun:   K("weapon", "działko", "minigun", "impact", { sharp: 0.7, long: 1, pitch: 0.1, rough: 0.8 }, { in: ["slam"], hold: ["rattle", "shake"], out: ["pop"] }, 3, null, ["gatling", "chaingun", "rotary"]),
+  /* energy weapons: a laser pistol (a short, high, electric shot whose pitch falls: hard start, brief fizz) and a heavy blaster
+     (a low, thick, rough energy blast); the held beam stays "beam" */
+  laserpistol: K("weapon", "pistolet laserowy", "laser pistol", "zap", { sharp: 0.95, long: 0.2, pitch: 0.9, rough: 0.15 }, { in: ["zip", "pop"], hold: ["buzz"], out: ["zipout"] }, 1, null, ["laser-pistol", "raygun", "phaser", "pew"]),
+  blaster:   K("weapon", "ciężki blaster", "heavy blaster", "zap", { sharp: 0.6, long: 0.4, pitch: -0.3, rough: 0.6 }, { in: ["slam", "pop"], hold: ["buzz", "shake"], out: ["burst"] }, 2, null, ["plasma", "plasma-cannon", "railgun", "energy-cannon"]),
+  silenced:  K("weapon", "tłumik", "silenced", "tick", { sharp: 0.6, long: 0.1, pitch: 0.2, rough: 0.2 }, { in: ["pop"], hold: ["flicker"], out: ["pop"] }, 1, null, ["suppressed", "silencer"]),
+  sword:     K("weapon", "miecz", "sword", "crack", { sharp: 0.9, long: 0.5, pitch: 0.6, rough: 0.2 }, { in: ["zip", "crackIn"], hold: ["shake"], out: ["shatter", "zipout"] }, 2, null, ["blade", "katana"]),
+  arrow:     K("weapon", "strzała", "arrow", "whoosh", { sharp: 0.6, long: 0.3, pitch: 0.3, rough: 0.1 }, { in: ["zip"], hold: ["wobble"], out: ["zipout"] }, 2, null, ["bow", "bolt", "crossbow"]),
+  thrown:    K("weapon", "rzut", "thrown", "impact", { sharp: 0.7, long: 0.2, pitch: -0.2, rough: 0.3 }, { in: ["zip", "slam"], hold: ["wobble"], out: ["fall"] }, 1, null, ["throw", "knife", "shuriken", "dagger"]),
+  grenade:   K("weapon", "granat", "grenade", "boom", { sharp: 0.5, long: 0.6, pitch: -0.4, rough: 0.7 }, { in: ["slam"], hold: ["throb", "shake"], out: ["burst"] }, 3, null, ["frag", "mine"]),
+  rocket:    K("weapon", "rakieta", "rocket", "fire", { sharp: 0.3, long: 0.9, pitch: 0.2, rough: 0.7 }, { in: ["zip", "grow"], hold: ["boil", "shake"], out: ["burst", "zipout"] }, 3, null, ["missile", "launcher", "bazooka", "rpg"]),
+  reload:    K("weapon", "przeładowanie", "reload", "tick", { sharp: 0.9, long: 0.2, pitch: 0.2, rough: 0.2 }, { in: ["pop"], hold: ["flicker"], out: ["pop"] }, 1, null, ["cock", "rack", "magazine"]),
+  /* sirens, cars, a walking machine, tools (2026-11-13: the user's second list) */
+  ambulance: K("device", "karetka", "ambulance", "zap", { sharp: 0.4, long: 0.9, pitch: 0.6, rough: 0.2 }, { in: ["pop", "grow"], hold: ["buzz", "throb"], out: ["dissolve"] }, 2, null, ["ems", "medic"]),
+  police:    K("device", "policja", "police", "zap", { sharp: 0.4, long: 0.9, pitch: 0.7, rough: 0.2 }, { in: ["pop", "grow"], hold: ["buzz", "throb"], out: ["dissolve"] }, 2, null, ["cops", "patrol"]),
+  firetruck: K("device", "straż pożarna", "fire engine", "zap", { sharp: 0.5, long: 0.9, pitch: 0.3, rough: 0.4 }, { in: ["grow"], hold: ["throb", "shake"], out: ["dissolve"] }, 2, null, ["fire-engine", "firefighters", "firebrigade"]),
+  fastcar:   K("vehicle", "wyścigówka", "fast car", "whoosh", { sharp: 0.6, long: 0.6, pitch: 0.5, rough: 0.5 }, { in: ["zip"], hold: ["buzz"], out: ["zipout"] }, 3, null, ["racecar", "sportscar", "speeding"]),
+  clunker:   K("vehicle", "gruchot", "old clunker", "crash", { sharp: 0.5, long: 0.7, pitch: -0.3, rough: 1 }, { in: ["drop", "pop"], hold: ["rattle", "wobble"], out: ["droop", "fall"] }, 1, null, ["oldcar", "jalopy", "banger"]),
+  mech:      K("vehicle", "maszyna krocząca", "walking machine", "crash", { sharp: 0.6, long: 0.4, pitch: -0.6, rough: 0.7 }, { in: ["drop", "slam"], hold: ["shake"], out: ["fall"] }, 1, null, ["walker", "robot", "mecha"]),
+  drill:     K("device", "wiertarka", "drill", "zap", { sharp: 0.5, long: 1, pitch: 0.7, rough: 0.7 }, { in: ["grow"], hold: ["buzz", "rattle"], out: ["shrink"] }, 3, null, ["powerdrill", "boring"]),
+  hammer:    K("device", "młotek", "hammer", "impact", { sharp: 0.9, long: 0.15, pitch: 0.2, rough: 0.3 }, { in: ["slam"], hold: ["shake"], out: ["pop"] }, 1, null, ["hammering", "nail", "pound"]),
+  /* weather */
+  hail:      K("weather", "grad", "hail", "tick", { sharp: 0.8, long: 0.9, pitch: 0.3, rough: 0.6 }, { in: ["drop", "pop"], hold: ["rattle"], out: ["pop"] }, 1, null, ["hailstorm", "sleet"]),
+  rain:      K("weather", "deszcz", "rain", "splash", { sharp: 0.2, long: 1, pitch: 0, rough: 0.5 }, { in: ["drop"], hold: ["boil"], out: ["dissolve"] }, 3, null, ["downpour", "drizzle", "shower"]),
+  storm:     K("weather", "burza", "storm", "boom", { sharp: 0.5, long: 1, pitch: -0.3, rough: 0.8 }, { in: ["grow", "slam"], hold: ["shake", "throb"], out: ["burst", "dissolve"] }, 3, null, ["thunderstorm", "tempest"]),
+  tornado:   K("weather", "tornado", "tornado", "whoosh", { sharp: 0.3, long: 1, pitch: -0.2, rough: 0.9 }, { in: ["grow"], hold: ["shake", "boil"], out: ["zipout", "shrink"] }, 3, null, ["twister", "whirlwind", "cyclone"])
 };
 /* repeating sounds: an escalation adds a syllable (TRA-TA-TA -> TRA-TA-TA-TA) instead of stretching letters */
-for ( const id of ["gunfire", "laugh", "drip", "stomp", "beep"] ) KINDS[id].repeat = "last";     // one more of the last syllable
-for ( const id of ["siren", "heartbeat"] ) KINDS[id].repeat = "pair";                              // one more WEE-OO / BA-DUM
+for ( const id of ["gunfire", "laugh", "drip", "stomp", "beep", "bark", "squeak", "helicopter", "reload", "clunker", "mech", "hammer", "hail", "crackle", "siren", "ambulance", "police"] ) KINDS[id].repeat = "last";     // one more of the last syllable
+for ( const id of ["heartbeat", "firetruck"] ) KINDS[id].repeat = "pair";                              // one more BA-DUM
+/* PERCUSSIVE sounds (the review, rule 7): a click, a drip, a hammer, a reload, a heartbeat, a gun rattle, hail, a footstep, a shot.
+   Their length is MORE HITS, never a stretched vowel (no KLAAAK, no TONK-TOOONK): perc kinds are never stretched; a repeating one
+   gets more syllables when it lasts longer. */
+for ( const id of ["click", "drip", "hammer", "reload", "heartbeat", "gunfire", "hail", "stomp", "helicopter", "clunker", "mech", "pistol", "rifle", "silenced", "crackle", "squeak", "bark", "laugh", "beep"] ) KINDS[id].perc = true;
+/* the "!" cap per kind (the review, rule 8, and the look review: kinds that are never loud never get "!!"): 0 = never "!", 1 = at most one */
+for ( const [id, n] of Object.entries({ fizzle: 1, sigh: 0, relief: 0, purr: 0, silenced: 1, drip: 1, shush: 1, whiff: 1, hiss: 1, snakehiss: 1, psychic: 1, meow: 1, squeak: 1, click: 1, beep: 1, rain: 1, heartbeat: 1, creak: 1, reload: 1, crackle: 1 }) ) KINDS[id].maxBangs = n;
+/* the longest run of one letter (MAX_RUN 6 by default): long steady sounds need more (the review, rule 14: a long hiss must be longer
+   than a short loud one) */
+for ( const id of ["hiss", "shush", "snakehiss", "rain", "purr", "psychic", "rumble", "engine", "minigun", "drill", "powerup", "wind", "snarl"] ) KINDS[id].run = 10;
 /* the SUSTAIN of each sound (see "WHERE a word stretches" below): which letter classes may repeat, in order */
 const HOLD = {
   punch: "V F M", smash: "V M R", slap: "V S", thud: "V M", stomp: "V M", clang: "V M", slash: "V S H", bite: "V R",
   crack: "R V", shatter: "S Z V", crash: "V S H R", crumble: "R V S", rumble: "R M V", creak: "V R", scrape: "R Z S V",
-  boom: "V M", whump: "V M F", thunder: "R V M", zap: "Z V", beam: "Z V M", gunshot: "V M", gunfire: "V", ricochet: "V M",
+  boom: "V M", whump: "V M F", thunder: "R V M", zap: "Z V", beam: "Z V M", gunfire: "V", ricochet: "V M",
   whoosh: "V S Z F", zoom: "V R M", bounce: "V M", teleport: "V F", wind: "V S H",
   fire: "V R F", crackle: "S R V", hiss: "S Z F V", splash: "V S H", squish: "V S H", drip: "V",
   powerup: "M V Z", psychic: "M V", chime: "V M", fizzle: "Z S F V", whiff: "F V S",
   click: "V", beep: "V", engine: "R V M", siren: "V",
-  roar: "R V", pain: "V R", effort: "V M H", relief: "V F H", sigh: "V H", cheer: "V", laugh: "V", shush: "S H V", heartbeat: "V"
+  roar: "V R", pain: "V R", effort: "V M H", relief: "V F H", sigh: "V H", cheer: "V", laugh: "V", shush: "S H V", heartbeat: "V",
+  bark: "V R F", snarl: "R V", meow: "V M", purr: "R M", cathiss: "S H V", squeak: "V", snakehiss: "S Z V", trumpet: "V R M",
+  plane: "V R M", helicopter: "V", pistol: "V M", rifle: "V R", shotgun: "V M", minigun: "R V", blaster: "Z V M", laserpistol: "V R", silenced: "F S H V",
+  sword: "M V S", arrow: "F V M", thrown: "F V", grenade: "V M", rocket: "S V M", reload: "V",
+  ambulance: "V", police: "V", firetruck: "V M", fastcar: "R V M", clunker: "R V", mech: "V M", drill: "Z V R", hammer: "V",
+  hail: "V", rain: "S Z V", storm: "R V M", tornado: "V R S"
 };
 for ( const [id, h] of Object.entries(HOLD) ) KINDS[id].hold = h.split(" ");
+/* percussive kinds keep their HOLD for the accent (where the ring sits) but never stretch: `stretch` = the classes that may repeat */
+for ( const id of KIND_LIST() ) KINDS[id].stretchHold = KINDS[id].perc ? [] : KINDS[id].hold;
+function KIND_LIST() { return Object.keys(KINDS); }
+/* ---------- PREFIXES: the sound's OWN lead-in (the user, 2026-11-13: "Tra ta przed bombą?") ----------
+   A prefix is what is heard just before the main sound and belongs to it: the crack of the detonator before the boom (KA-BUM,
+   KA-THOOM), the tearing of the surface before a collapse (TRZA-KRUSZ, KA-KROOSH), the lightning's crack before the thunder's
+   roll. It is never another sound's signature: no gun rattle (TRA-TA-) in front of a blast, no crash word in front of a punch.
+   Each prefix lists why it belongs and the only kinds it may lead; KINDS[id].pre is filled from here and check-words.mjs ties
+   every prefix to this table. A kind without an own lead-in has no prefix (a whoosh, a hiss, a voice). */
+/* The review (2026-11-13, rules 9 and 10): every lead-in of a bank word is on this table too (a bank word "KA-BUUM" uses KA-, a
+   two-phase sound "CHK-CHK-BOOM" uses the pump CHK-CHK-); TRZA- is gone (it is the dictionary word TRZASK cut short), KA- no longer
+   leads a beam or a fire (not their own lead-in), the shotgun's own lead-in is its pump. */
+export const PREFIXES = {
+  pl: {
+    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash"] },
+    "KRA-":  { why: "the crack of a surface giving way before the crash", kinds: ["smash", "crash"] },
+    "KRA-KA-": { why: "the lightning's double crack before the thunder's roll", kinds: ["thunder", "storm"] },
+    "CZAK-CZAK-": { why: "the pump racked before the shotgun fires (a two-phase sound)", kinds: ["shotgun"] },
+    "PTYK-KA-": { why: "the pin's tick and the fuse's crack before the grenade goes off", kinds: ["grenade"] }
+  },
+  en: {
+    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash"] },
+    "KRA-":  { why: "the crack of a surface giving way before the crash", kinds: ["smash", "crash"] },
+    "KRA-KA-": { why: "the lightning's double crack before the thunder's roll", kinds: ["thunder", "storm"] },
+    "CHK-CHK-": { why: "the pump racked before the shotgun fires (a two-phase sound)", kinds: ["shotgun"] },
+    "PTIK-KA-": { why: "the pin's tick and the fuse's crack before the grenade goes off", kinds: ["grenade"] }
+  }
+};
+for ( const [lang, table] of Object.entries(PREFIXES) ) for ( const [pre, { kinds }] of Object.entries(table) ) for ( const id of kinds ) {
+  const k = KINDS[id]; k.pre ??= {}; (k.pre[lang] ??= []).push(pre);
+}
+
 export const KIND_IDS = Object.keys(KINDS);
 export const GROUPS = { hit: { pl: "uderzenia", en: "hits" }, break: { pl: "pękanie", en: "breaking" }, blast: { pl: "wybuchy", en: "blasts" },
   motion: { pl: "ruch", en: "motion" }, element: { pl: "żywioły", en: "elements" }, power: { pl: "moce", en: "powers" },
-  device: { pl: "urządzenia", en: "devices" }, voice: { pl: "głosy", en: "voices" } };
+  device: { pl: "urządzenia", en: "devices" }, voice: { pl: "głosy", en: "voices" },
+  animal: { pl: "zwierzęta", en: "animals" }, vehicle: { pl: "pojazdy", en: "vehicles" }, weapon: { pl: "broń", en: "weapons" },
+  weather: { pl: "pogoda", en: "weather" } };
 
-/* ---------- the word banks: tiers "a|b|c" (s quiet, m normal, l loud); st = stream syllables for repeating sounds ---------- */
-const B = (s, m, l, st = null) => ({ s: s.split("|"), m: m.split("|"), l: l.split("|"), ...(st ? { st: st.split("|") } : {}) });
-export const BANK = {
+/* ---------- the word banks: tiers "a|b|c" (s quiet, m normal, l loud); st = stream syllables (default: the quiet words in a row) ----------
+   Rewritten by the vocabulary review (2026-11-13, WORD2): ENGLISH IS THE MASTER, Polish follows it by spelling (OO -> UU, EE -> II,
+   SH -> SZ, CH -> CZ, V -> W, TH -> T) plus a short native list (BUM, PAF, IJO-IJO, SZSZT); NO Polish diacritics; every word built from
+   the sound (attack + lasting part + cut-off), not one letter away from a dictionary word; each kind its own words (SHARE below names
+   the only kinds that borrow another kind's words); 2-4 good words per tier, never padded. Length comes from stretching (duration),
+   so the banks hold the short forms. */
+const B = (s, m, l, st = null) => { const S = s.split("|"); return { s: S, m: m.split("|"), l: l.split("|"), st: st ? st.split("|") : [S.slice(0, 3).join("-")] }; };
+/* SHARED: words that several kinds may use, each with its reason (the owner's ruling, 2026-11-13: "napisy mogą się powielać jeśli
+   ma to sens albo byłoby na siłę"). The key is the word with repeated letters collapsed and hyphens removed (KRRAKK -> KRAK). Any
+   other word shared between kinds of one language fails the check, so a wrong borrowing (a punch word on a plane) cannot come back. */
+export const SHARED = {
   pl: {
-    punch:   B("PAC!|PAF!|ŁUP!|BACH!", "ŁUP!|BACH!|TRACH!|ŁUP-ŁUP!|BUCH!|BRAMM!|ŁUBDUMM!", "ŁUUP!|BAACH!|TRAACH!|ŁUP-BACH!|TRA-BRAMM!|BADUMM!", "ŁUP-BACH-PAC|PAC-PAC-ŁUP"),
-    smash:   B("ŁUP!|BUCH!|TRACH!", "ŁUBUDU!|TRACH!|BUCH!|GRUCH!|TRZAMM!|BRZDAMM!", "ŁU-BU-DU!|TRA-TA-TRACH!|BU-BUCH!|TRZA-ŁUP!|KA-TRZAMM!|BRZDA-DAMM!"),
-    slap:    B("PLASK!|PAC!|KLAP!", "PLASK!|PAC!|CHLAST!", "PLAASK!|CHLAAST!|PLASK-PLASK!"),
-    thud:    B("BĘC!|BUCH!|ŁUP!|PUF!|DUMM!", "BĘC!|BUCH!|ŁUBUDU!|GRUCH!|GŁUMM!|DŁUMM!", "BĘĘC!|ŁU-BU-DU!|GRUUCH!|BUUM!|GŁUUMM!"),
-    stomp:   B("TUP!|BUM!|TUP-TUP", "TUP!|BUM!|DUM!|ŁUP!", "BUUM!|DUUM!|ŁUUP!|TUP-BUM!", "TUP-TUP-BUM|BUM-BUM-ŁUP"),
-    clang:   B("DZYŃ!|BRZDĘK!|BRZDĄK!|DZYNG!", "DZYŃ!|BRZDĘ-DZYŃ!|BRZDĘK!|BRZDĄK!|DZYNG!", "DZYYŃ!|BRZDĘĘK!|BRZDĘK-DZYŃ!|DZY-DZYNG!"),
-    slash:   B("CIACH!|CHLAST!|ŚWIU!", "CIACH!|CHLAST!|ŚWIUU!|CIACH-CIACH!", "CIA-CIACH!|CHLAAST!|SZRRAK!|CIACH-CHLAST!"),
-    bite:    B("CHRUP!|KŁAP!|HAM!|MLASK!", "CHRUP!|KŁAP!|CHRUP-CHRUP!|MLASK!", "CHRUUP!|KŁAP-KŁAP!|CHRUP-CHRUP!|HAM-HAM!"),
-    crack:   B("KRAK!|TRZASK!|PRASK!|TRACH!", "KRAK!|TRZASK!|PRASK!|TRACH!|KRA-KAK!", "TRZA-TRZASK!|KRRA-KAK!|PRA-TRACH!|KRA-KA-TAK!"),
-    shatter: B("BRZDĘK!|DZYŃ!|BRZDĄK!", "BRZDĘK!|BRZDĄK!|DZYŃ-DZYŃ!|TRZASK!", "BRZDĘĘK!|TRZASK-BRZDĘK!|DZY-DZY-DZYŃ!|BRZDĄ-BRZDĘK!", "DZYŃ-BRZDĘK-DZYŃ"),
-    crash:   B("ŁUP!|GRUCH!|BĘC!|CHRUP!", "ŁUBUDU!|ŁUP-BĘC!|GRUCH!|TRZASK!", "ŁU-BU-DU!|ŁUBUDU-BUM!|GRU-GRUCH!|TRA-TA-ŁUP!", "ŁU-BU-DU|GRUCH-ŁUP-BĘC"),
-    crumble: B("KRR|CHRZ|CHRUP", "KRR|CHRRZ|CHRUP-CHRZ|SZURR", "KRR|CHRUP-CHRUP|KRR-CHRRZ", "KRR-CHRZ-KRR"),
-    rumble:  B("DUDU|GRRM|BRRUM", "DUDUDUU|GRRUM|BRRUM", "DUDUDUDUU|GRRUUM|BRRUUM|ŁUBUDUDUU", "DU-DU-DU|BRR-DU-DU"),
-    creak:   B("SKRZYP|KRRK|SKRZ", "SKRZYP|SKRRZYP|SKRZYP-SKRZYP", "SKRZYYP|SKRZY-SKRZYYP|SKRRZYYP"),
-    scrape:  B("SZUR|ZGRZ|SZURR", "SZURR|ZGRRZ|SZUR-SZUR", "SZUURR|ZGRRZ|SZRR", "SZUR-ZGRZ|ZGRZ-ZGRZ-ZGRZ"),
-    boom:    B("BUM!|BACH!|BUCH!|PAF!", "BUM!|KABUM!|BUCH!|TRACH!|DŁUMM!|BRUMM!", "KA-BUUM!|KA-BU-BUM!|TRA-TA-BUM!|BUUM!|TRZUUMM!|KA-BRUUMM!", "BUM-BUM-BACH|BACH-BUM-BUM"),
-    whump:   B("BUF|HUF|PUF", "BUF|HUF|PUFF", "BUUF!|HUUF!|WUUMF!"),
-    thunder: B("TRACH!|BRRUM!|BUM!", "TRACH!|BRRUM!|TRZASK!|ŁU-BU-DU!", "TRA-TA-TRACH!|KRA-BUUM!|BRRU-BU-BUM!|TRZA-BUUM!", "BRR-DU-DU-BUM"),
-    zap:     B("BZYK!|BZZT!|ZZYT!", "BZZT!|BZYK!|TRZASK!|ZZYT!|BZZAMM!|DZZYMM!", "BZZT!|TRZA-BZZT!|BZY-BZYK!|KRZZT!|TRZZAMM!", "BZT-BZT-BZZT|TRZ-BZT-TRZ"),
-    beam:    B("PIU!|ZIU!|WZIU!|FIU!", "WZIUU!|ZIUUT!|PIUU!|BZYYM!|WZZUMM!|FZZIUMM!", "WZIUUM!|BZZIUUM!|ZIUUT!|WZZYYM!|WZZIUUMM!", "PIU-PIU-PIU|ZIU-ZIU"),
-    gunshot: B("PAF!|PIF!|PIF-PAF!|PAC!", "PAF!|BACH!|PIF-PAF!|BUCH!", "BAACH!|PAAF!|BUCH-BACH!|BUUCH!", "PAF-PAF-PAF|PIF-PAF-PIF"),
-    gunfire: B("TA-TA!|PAF-PAF!|RA-TA!", "TRA-TA-TA!|RA-TA-TA!|TA-TA-TA-TA!", "TRA-TA-TA-TA-TA!|RA-TA-TA-TA-TA!|TRRA-TA-TA-TA!|BRRT!", "TRA-TA-TA-TA|RA-TA-TA-TA|TA-TA-TA-TA-TA"),
-    ricochet:B("PIU!|DZIU!|ZIU!", "PIUU!|DZIUŃ!|ZIUUM!", "PIUUŃ!|DZIUUŃ!|PTIUU!"),
-    whoosh:  B("ŚWIU!|FIU!|SZU!|WSZ!|FFRU!", "ŚWIUU!|FIUU!|SZUU!|WSZUU!|WZUUSZ!|FSZUUM!", "ŚWIUU!|FIUU!|WSZUU!|SZSZUUM!|FFRUUSZ!|WSZUUMM!"),
-    zoom:    B("WZIU!|ZIUT!|FRR!", "WZIUUM!|ZIUT!|FRUU!|WRRUM!", "WZIUUM!|WRRUUM!|ZZIUUT!|FRRUU!"),
-    bounce:  B("HOP!|HYC!|BOING!|BOINK!", "HOP!|BOING!|HYC-HYC!|HOP-SAA!", "BOIING!|HOOP!|HOP-SAA!|BO-BOING!"),
-    teleport:B("PUF!|PYK!|SZUP!|WIUP!", "PUF!|WIUP!|SZUP!|FRRT!", "PUUF!|WIUUP!|SZZUUP!|PYK-PUUF!"),
-    wind:    B("SZSZ|FIU|UU", "SZUU|WIUU|HUU|FIUU", "SZSZUU|WIUU|HUU|ŁUU", "SZU-SZU-SZU|WIU-WIU"),
-    fire:    B("BUCH!|FF!|PUF!|FRR!", "BUCH!|FRUM!|FFUM!|BUCH-FRR!|FRAMM!|FFUMM!", "BUUCH!|FRRUUM!|BU-BUCH!|FFRRUUM!|FFRAAMM!", "FRR-BUCH-FRR"),
-    crackle: B("TRZASK|TRZ|PSTRYK|TRZ-TRZ", "TRZASK|PSTRYK-TRZ|TRZ-TRZ-TRZ|PSTRYK", "TRZA-TRZASK|TRZ-PSTRYK|TRZ-TRZ-TRZASK", "TRZ-TRZ-TRZASK|TRZ-TRZ-PSTRYK|PSTRYK-TRZ-TRZ"),
-    hiss:    B("FSS|PSST|SS|TSS|SSS|TSS…", "FSS|PSST|TSS|SS|TSSS|FSSS…", "FSS|PSST|SS|PSSST|TSSS…", "SS-TSS-SS|FSS-SSS-PSST"),
-    splash:  B("PLUM!|PLUSK!|CHLUP!|CHLAP!", "PLUSK!|CHLUP!|CHLAP!|PLUM!", "PLUUSK!|CHLU-CHLUP!|CHLAAST!|KA-PLUUSK!"),
-    squish:  B("CIAP!|CHLAP!|PLAF!|MLASK!", "CIAP!|CHLAP!|MLASK!|CHLUP-CIAP!", "CIAAP!|CHLAAP!|MLAASK!|CIAP-CHLAP!"),
-    drip:    B("KAP|KAP-KAP|PLIM", "KAP-KAP-KAP|PLIM|KAP", "KAAP!|PLIM-PLIM!|KAP-KAP-PLUM!", "KAP-KAP-KAP|PLIM-KAP"),
-    powerup: B("WUM|BZYM|HMM", "WUUM|WZZUM|HMM|BZYYM|WMM|BZZUMM", "WUUM!|WZZUUM!|WRRUUM!|HAA!|WRRAAMM!", "WUM-WUM-WUM|BZY-BZY-BZYM"),
-    psychic: B("MM|WII|HMM", "MM|WII|IIŃ|WMM", "MM|WIIŃ|IIŃ"),
-    chime:   B("DZYŃ|DING|BIM|PLING", "DZYŃ|DING|BIM-BAM|DZYŃ-DZYŃ", "DZYYŃ!|DI-DING!|BIM-BAM-BOM|DZYŃ-DZYYŃ!"),
-    fizzle:  B("PFF|PSST|FSS|PYK", "PFF|PSST|FSST|PYK-PFF", "PFF|PSST|PFF-PSST"),
-    whiff:   B("FIU|FSZ|FF|ŚWIU", "FIUU|ŚWIUU|FFUU|FSZUU", "FIUU|ŚWIUU|FFUU"),
-    click:   B("KLIK|PSTRYK|PYK|TIK", "KLIK-KLIK|PSTRYK|CYK-CYK|TRYK", "KLIIK!|PSTRYYK!|KLIK-KLAK!", "TIK-TAK|KLIK-KLIK"),
-    beep:    B("PIP|PIK|BIP", "PIP|PIK-PIK|BIP", "PIIP!|PIK-PIK-PIK!|BI-BIIP!", "PIK-PIK-PIK|PIP-PIP"),
-    engine:  B("WRR|BRUM|WRUM", "WRRUM|BRRUM|WRR|BRUM-BRUM|WRRAMM|BRRAMM", "WRRUUM!|BRRUUM!|WRR!|WRRAAMM!|BRRUUMM!", "WRR-WRR-WRUM|BRUM-BRUM"),
-    siren:   B("IJO-IJO|UIU-UIU", "IJO-IJO-IJO|UIU-UIU-UIU|IIUU", "IJO-IJO-IJO-IJO!|UIU-UIU-UIU-UIU!|IIUU!", "IJO-IJO|UIU-UIU"),
-    roar:    B("GRR!|WRR!|RAA!", "GRR!|WRRAA!|RAA!|GRAAU!", "GRRAAU!|WRRAA!|RRAAU!|GRAAH!"),
-    pain:    B("AU!|AŁA!|AUĆ!|AJ!", "AA!|AUU!|AŁAA!|UGH!", "AA!|AARGH!|AUU!|AAUĆ!"),
-    effort:  B("UFF!|HYP!|NGH!|HYY!", "HYY!|NNGH!|UGHH!|HMMPF!", "HYY!|NNGHH!|AAGH!|HRRAA!"),
-    relief:  B("UFF|UF|ACH", "UFF|AACH|HAA|OCH", "UFF|AACH|HAA"),
-    sigh:    B("EH…|OCH…|UCH…", "EEH…|OCH…|UUCH…|HAA…", "EEH…|OOCH…|UUCH…"),
-    cheer:   B("HA!|JUHU!|JUPI!|HU-HA!", "HURA!|JUHUU!|HA-HA!", "HUURAA!|JUPII!|HURA-HURA!"),
-    laugh:   B("HA!|HI-HI|CHA!", "HA-HA!|CHA-CHA!|HI-HI-HI|HE-HE!", "HA-HA-HA-HA!|BUA-HA-HA!|CHA-CHA-CHA!|MUA-HA-HA!", "HA-HA-HA|CHA-CHA-CHA"),
-    shush:   B("CII!|SZ!|PSST!", "CII!|SZSZ!|PSST!", "CIII!|SZSZ!|PSSST!"),
-    heartbeat:B("PUK|TUK|BUM", "TUK-TUK|BU-BUM|PUK-PUK", "BU-BUM! BU-BUM!|TUK-TUK-TUK-TUK!|BUM-BUM-BUM!", "BU-BUM|TUK-TUK")
+    BUM: { kinds: ["boom", "grenade"], why: "a grenade is a boom; its own lead-in (PTYK-KA-) tells the loud ones apart" },
+    FUM: { kinds: ["boom", "grenade"], why: "the distant soft boom, the same for a grenade" },
+    TWUM: { kinds: ["boom", "grenade"], why: "the full boom, the same for a grenade" },
+    BATUM: { kinds: ["boom", "grenade"], why: "the rolling boom, the same for a grenade" },
+    BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
+    KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRAKUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRADUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    DUMDUM: { kinds: ["stomp", "mech"], why: "a mech's walk is heavy stomping" },
+    SZKLANG: { kinds: ["clang", "sword"], why: "a sword on metal is a clang" },
+    RM: { kinds: ["rumble", "engine"], why: "a low rolling hum: a rumble and an idling engine sound the same" },
+    WRUM: { kinds: ["rumble", "engine"], why: "a low rolling hum: a rumble and an idling engine sound the same" },
+    FZT: { kinds: ["zap", "fizzle"], why: "a fizzle is a small electric zap dying" },
+    WZM: { kinds: ["beam", "powerup"], why: "the energy hum of a beam and of a charge" },
+    ZM: { kinds: ["beam", "powerup"], why: "the energy hum of a beam and of a charge" },
+    WZAM: { kinds: ["beam", "powerup"], why: "the energy hum of a beam and of a charge" },
+    FSZ: { kinds: ["whoosh", "rocket"], why: "a rocket passing is a whoosh" },
+    ZWUM: { kinds: ["zoom", "powerup"], why: "a rising zoom: something passing fast and a charge rising" },
+    WZIUM: { kinds: ["zoom", "plane"], why: "the Polish fly-by (wziuum): a plane passing is a zoom" },
+    FST: { kinds: ["hiss", "fizzle", "cathiss"], why: "a short hiss of air: steam, a dying fuse, a cat" },
+    WN: { kinds: ["psychic", "fastcar"], why: "a thin whine: a mind's hum and a car going by" },
+    PFT: { kinds: ["fizzle", "silenced"], why: "a muffled puff: a dud and a silenced shot" },
+    WRM: { kinds: ["engine", "purr"], why: "a purr is a small idling engine" },
+    WR: { kinds: ["snarl", "purr", "minigun"], why: "a rolling R: a throat and a spinning barrel" },
+    FT: { kinds: ["cathiss", "arrow"], why: "a short puff of air: a cat's spit and an arrow's flight" },
+    SZ: { kinds: ["snakehiss", "rain"], why: "a steady hiss: a snake and falling rain" }
   },
   en: {
-    punch:   B("POW!|BAM!|WHAP!|WHAK!|BIFF!", "WHAM!|POW!|THWACK!|SMACK!|KA-POW!|KRAWW!|BWAMM!", "KA-POOW!|WHAAM!|THWAACK!|KA-WHAM!|PADOWW!|KA-BWAMM!", "POW-BAM-WHAP|BIFF-WHAK-POW"),
-    smash:   B("WHAM!|BLAM!|KRUNCH!", "KRAKOOM!|WHAMM!|SKRAKK!|KA-BLAM!|SKRAMM!|KRANNG!", "KA-KRAKOOM!|KA-WHAAM!|KRA-KA-BLAM!|SKRA-KA-THOOM!|KA-SKRAMM!"),
-    slap:    B("SLAP!|SMACK!|THWAP!", "SLAP!|SMACK!|THWAP!", "SLAAP!|SMAACK!|KA-SLAP!"),
-    thud:    B("THUD!|THUMP!|FLUMP!|BONK!|DWUM!", "THUD!|THUMP!|WHUMP!|KLUNK!|THWUMM!|DWUMM!", "THUUD!|KA-THUMP!|WHUUMP!|KA-THOOM!|THWUUMM!"),
-    stomp:   B("STOMP!|THMP!|TROMP!", "STOMP!|THOOM!|KROMP!", "STOOMP!|THOOM!|KA-STOMP!", "STOMP-STOMP|THOOM-THOOM"),
-    clang:   B("CLANG!|TINK!|KLANG!|CLINK!", "CLANG!|KLANG!|SPANG!|KLONG!", "CLAANG!|KA-KLANG!|SPAANNG!|KLA-DANG!"),
-    slash:   B("SHINK!|SLASH!|SWIK!", "SHING!|SLASH!|SKRITCH!|SHRAK!", "SHIING!|SLAASH!|SHRA-KAK!|KA-SHING!"),
-    bite:    B("CHOMP!|CRUNCH!|SNAP!", "CHOMP!|CRUNCH!|CHO-CHOMP!", "CHOOMP!|CRUUNCH!|CHOMP-CHOMP!"),
-    crack:   B("KRAK!|SNAP!|CRACK!|KRIK!", "KRAK!|SNAP!|CRACK!|SKRAK!", "KRRA-KAK!|KA-KRACK!|SKRA-KAK!|CRA-CRACK!"),
-    shatter: B("TINK-TINK|KSSH!|CRSSH!|SMASH!", "KRSSHH!|SMASH!|KISSHH!|TINKA-TINK!", "KRSSHH!|KA-SMAASH!|KRA-KSSHH!", "TINK-KSSH-TINK"),
-    crash:   B("CRASH!|CRUNCH!|KLUNK!", "CRASH!|KRASH!|CRUNCH!|KA-RASH!", "KRA-KA-THOOM!|KA-RAASH!|CRA-CRAASH!|KRAKATAK!", "KRASH-KLUNK-THUD"),
-    crumble: B("KRRK|KRSHK|SKRNCH", "KRR-KRUNK|KRUNK|SKRRNCH", "KRR-KRUUNK|KRUUNK|SKRRNCH", "KRK-KRNCH-KRK"),
-    rumble:  B("BRRM|GRMM|DRRM", "BRRUMM|RRUMM|GRROMM", "BRRUUMM|RROUUMM|GRROOMM", "RM-RM-RMM|DRM-DRM-DRM"),
-    creak:   B("SKREEK|KREEK|SKREK", "SKRIK|KREEK|SKREEK", "SKRIIK|KREEK|SKREEK"),
-    scrape:  B("SKRT|SKRRT|SKREE", "SKRRT|SKRAP|SKREE", "SKRRT|SKRAAP|SKREE", "SKRT-SKRT-SKREE"),
-    boom:    B("BOOM!|BAM!|BLAM!|FOOM!", "BOOM!|KABOOM!|BLAM!|KA-BLAM!|THROOMM!|BRWOOM!", "KA-BOOM!|KRA-KABOOM!|KA-BLAAM!|BA-DOOM!|VWAAMM!|KA-THROOMM!", "BOOM-BOOM-BLAM|BLAM-BOOM"),
-    whump:   B("FWUMP|WHUMP|PHUF", "WHUMP|FWUMP|WHOOMPH", "WHUUMP!|FWOOMPH!|KA-WHUMP!"),
-    thunder: B("KRAK!|BRRM!|BOOM!", "KRA-KOOM!|BRROOM!|KRA-KA-BOOM!", "KRA-KA-BOOM!|KRA-KA-THOOM!|BRRA-KOOM!", "BRR-RRM-BOOM"),
-    zap:     B("ZAP!|BZZT!|ZZT!|KZZT!", "ZZAP!|BZZT!|KRZZT!|ZZAKK!|ZWAMM!|TZZAMM!", "KA-ZZAAP!|BZZT!|ZZA-KRAK!|KRZZ-ZAP!|KZZAAMM!", "BZT-BZT-BZZT|ZAK-ZAK-ZAP"),
-    beam:    B("ZAP!|PEW!|ZWIP!|VZT!", "VWOOM!|ZZAP!|PEEW!|VRRZZT!|VZWOOMM!", "VWOOM!|SKRA-ZZT!|KA-VWOOM!|VRZZT!|VZWOOMM!|ZWAAMM!", "PEW-PEW-PEW|ZAP-ZAP"),
-    gunshot: B("BANG!|BLAM!|POP!|PAK!", "BLAM!|BANG!|KRAK!|BLAM-BLAM!", "BLAAM!|KA-BLAM!|BAANG!|KA-BANG!", "BLAM-BLAM-BLAM|BANG-BANG"),
-    gunfire: B("RAT-TAT!|BRAP!|BLAM-BLAM!", "RAT-A-TAT!|BRRAP!|BLAM-BLAM-BLAM!", "RAT-A-TAT-A-TAT!|BRRAT!|BUDDA-BUDDA-BUDDA!", "RAT-TAT-TAT-TAT|BRAT-AT-AT-AT|BUDDA-BUDDA-BUDDA"),
-    ricochet:B("PTANG!|PING!|TWANG!", "PTEEW!|PTING!|ZING!", "PTEEWW!|PTIING!|KA-ZIING!"),
-    whoosh:  B("WHOOSH|SWISH|FWIP|FWISH|ZWISH", "WHOOSH|SWISH|FWOOSH|SHWOOM|ZWOOSH|FWAASH", "WHOOSH|SWIISH|FWOOSH|SHWOOM|FWAASHH!|ZWOOSHH!"),
-    zoom:    B("ZOOM!|ZIP!|VROOM!", "ZOOM!|VROOM!|ZWOOSH!|NYEEW!", "ZOOM!|VROOM!|NYEEOWW!|KA-ZOOM!"),
-    bounce:  B("BOING!|BOINK!|HUP!|SPROING!", "BOING!|SPROING!|BOING-OING!|HUP!", "BOIING!|SPROIING!|KA-BOIING!"),
-    teleport:B("POP!|VWIP!|FZOOP!|BLIP!", "VWOP!|FZOOP!|SHWUP!|BLIP!", "VWOOP!|FZZOOP!|KA-VWOOP!|SHWUUP!"),
-    wind:    B("WHOO|FWSH|SHH", "WHOO|WHEEW|FWOOSH|HOOM", "WHOO|WHEEW|HOO|FWOOSH", "WHOO-WHOO|SHH-WHOO"),
-    fire:    B("FOOF!|FWIP!|FUMP!|FWOOSH!", "FWOOSH!|FOOM!|WHOOMF!|FWUMP!|FWAMM!|FRWOOM!", "FWOOSH!|FOOM!|KA-FWOOSH!|WHOOMPF!|FRWOOMM!", "FWUMP-FOOF-FWIP"),
-    crackle: B("KRSSH|KRAK-KRIK|SNAP-SNAP|KRK-KRK", "KRSSHH|KRIK-KRAK|SNAP-KRSSH|KRK-KRK-KRK", "KRSSHH|KRSSH-KRIK|SNAP-KRK-KRSSH", "KRK-KRK-SNAP|SNAP-KRIK-POP|KRSSH-KRK"),
-    hiss:    B("HISS|TSS|PSST|FSST|SSS|TSS…", "HISS|TSS|PSST|FSSHH|TSSS|FSSS…", "HISS|TSS|PSSHH|PSSST|TSSS…", "SS-TSS-SS|FSS-SSS-PSST"),
-    splash:  B("SPLASH!|SPLOSH!|SPLAT!|PLOP!", "SPLASH!|SPLOOSH!|SPLOOT!|SPLOP!", "SPLAASH!|KA-SPLOOSH!|SPLOORSH!|SPLA-SPLASH!"),
-    squish:  B("SPLUT!|SQUISH!|SPLORT!|GLORP!", "SQUISH!|SQUELCH!|SPLUT!|GLORP!", "SQUIISH!|SQUEELCH!|SPLOORT!|KA-SQUELCH!"),
-    drip:    B("DRIP|PLIP|PLINK", "DRIP-DRIP|PLIP|DRIP", "DRIP-DRIP-DRIP|PLIIP|DRIIP-PLOP", "DRIP-DRIP-DRIP|PLIP-PLINK"),
-    powerup: B("VMM|HMM|VWUM", "VWUM|VRRMM|HUMM|SHWAM|VMM|ZWUMM", "VWOOM!|VRRMM!|SHWAAM!|KA-VWOOM!|VWAAMM!", "VWUM-VWUM-VWUM|HMM-HMM-VMM"),
-    psychic: B("MM|VRMM|EE", "MM|VREE|WHUMM|EE", "MM|VREE|WHUMM"),
-    chime:   B("TING|DING|PLING|TINK", "TING|DING|SHING|TING-A-LING", "TIING!|DIING!|SHIING!|KA-SHING!"),
-    fizzle:  B("FZZT|PFFT|FIZZ|PSST", "FZZT|PFFT|FIZZ|SPUT-SPUT", "FZZT|PFFT|FIZZT|SPUT-SPUT-PFFT"),
-    whiff:   B("WHIFF|FWIP|SWISH|FFT", "WHIFF|FWIP|SWISH|FFT", "WHIIFF|FWIIP|SWIISH"),
-    click:   B("CLICK|KLIK|TIK|SNIK", "CLICK-CLACK|KLICK|TIK-TAK|KA-CHUNK", "KA-CHIINK!|CLICK-CLAACK!|KA-CHUNK!", "TIK-TOK|CLICK-CLICK"),
-    beep:    B("BEEP|BLIP|BIP", "BEEP|BEEP-BEEP|BLIP-BLIP", "BEEP!|BEEP-BEEP-BEEP!|BWEEP!", "BEEP-BEEP-BEEP|BLIP-BLIP"),
-    engine:  B("VRM|VROOM|BRAP", "VRROOM|BRRAP|NYEEOW|VROOM-VROOM|VRAMM|WRRAMM", "VRROOM!|BRRAAP!|NYEEOWW!|WRRAAMM!|VRRAAMM!", "VRM-VRM-VROOM|BRAP-BRAP"),
-    siren:   B("WEE-OO|WOO-WOO", "WEE-OO-WEE-OO|WEEOO|WOO-WOO-WOO", "WEE-OO-WEE-OO!|WEEOO!|WOO!", "WEE-OO|WOO-WOO"),
-    roar:    B("GRR!|RAWR!|GRAWR!", "GRR!|RAAH!|RAAWR!|GRAAH!", "GRRAAH!|RRAAUGH!|RAAWR!|HRRAAH!"),
-    pain:    B("OW!|OUCH!|OOF!|UNGH!", "ARGH!|AAH!|OWW!|UNGHH!", "AAH!|AARGHH!|AIEE!|NNGAAH!"),
-    effort:  B("HUP!|NGH!|HUFF!|HMPF!", "HNNGG!|HRRNGH!|UNNGHH!|HUFF-HUFF!", "HNNGG!|HRRAAH!|GRRAAH!|NNGAAH!"),
-    relief:  B("PHEW|AAH|HAH", "PHEW|AAH|HAA|WHEW", "PHEEW|AAH|HAAH"),
-    sigh:    B("HH…|UGH…|OOF…|PFF…", "HAAH…|UUGH…|OOF…|PFF…", "HAAH…|UUGH…"),
-    cheer:   B("HA!|YIP!|HUH!|WOO!", "WOO-HOO!|WOO!|HOO-HA!|YAHOO!", "YAHOO!|WOO!|YEE-HAAH!|HOO-RAAH!"),
-    laugh:   B("HA!|HEH|HEE", "HA-HA!|HEH-HEH|HEE-HEE|HO-HO!", "HA-HA-HA-HA!|BWA-HA-HA!|MWA-HA-HA!|HAW-HAW-HAW!", "HA-HA-HA|HO-HO-HO"),
-    shush:   B("SHH!|SHHT!|PSST!", "SHH!|SSHH!|PSST!", "SHH!|SSHH!|PSST!"),
-    heartbeat:B("BA-DUM|THUMP|DUB", "BA-DUMP|THUMP-THUMP|LUB-DUB", "BA-DUMP! BA-DUMP!|THUMP-THUMP-THUMP!|BA-BUM-BA-BUM!", "BA-DUM|LUB-DUB")
+    BOM: { kinds: ["boom", "grenade"], why: "a grenade is a boom; its own lead-in (PTIK-KA-) tells the loud ones apart" },
+    FOM: { kinds: ["boom", "grenade"], why: "the distant soft boom, the same for a grenade" },
+    TWOM: { kinds: ["boom", "grenade"], why: "the full boom, the same for a grenade" },
+    BADOM: { kinds: ["boom", "grenade"], why: "the rolling boom, the same for a grenade" },
+    BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
+    KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRAKOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRADOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    SHKLANG: { kinds: ["clang", "sword"], why: "a sword on metal is a clang" },
+    RM: { kinds: ["rumble", "engine"], why: "a low rolling hum: a rumble and an idling engine sound the same" },
+    FZT: { kinds: ["zap", "fizzle"], why: "a fizzle is a small electric zap dying" },
+    VZM: { kinds: ["beam", "powerup"], why: "the energy hum of a beam and of a charge" },
+    ZM: { kinds: ["beam", "powerup"], why: "the energy hum of a beam and of a charge" },
+    FSH: { kinds: ["whoosh", "wind", "hiss"], why: "moving air: a whoosh, the wind, a leak" },
+    FWUF: { kinds: ["fire", "whiff"], why: "a soft puff of air: a flame catching and a near miss" },
+    VN: { kinds: ["psychic", "fastcar"], why: "a thin whine: a mind's hum and a car going by" },
+    PFT: { kinds: ["fizzle", "silenced"], why: "a muffled puff: a dud and a silenced shot" },
+    KTAK: { kinds: ["click", "rifle"], why: "a dry tick: a switch and a rifle's bolt" },
+    HNH: { kinds: ["pain", "effort"], why: "a held breath through the teeth: pain and strain" },
+    PF: { kinds: ["relief", "sigh"], why: "a breath out: relief and a tired sigh" },
+    SH: { kinds: ["shush", "rain"], why: "a steady hiss: a hush and falling rain" },
+    FSHT: { kinds: ["cathiss", "thrown"], why: "a short hiss of air: a cat's spit and a thing flying by" },
+    SHROM: { kinds: ["plane", "rocket"], why: "a jet roar passing: a plane and a rocket" },
+    ZR: { kinds: ["minigun", "drill"], why: "a spinning whirr: a barrel and a drill" }
+  }
+};
+/** the key a word is compared under for sharing (repeated letters collapsed, marks and hyphens removed) */
+export const shareKey = (w) => clean(String(w)).replace(/[!?…\x27.,:+\s-]/g, "").replace(/(\p{L})\1+/gu, "$1");
+export const BANK = {
+  pl: {
+    punch:    B("TWAP|TWOP", "BAM|TWAK|BDAM", "TWAKK|KA-BAMM|KA-BDAMM"),
+    smash:    B("WRAM|KRUMCZ", "WRAMM|SKRUUM", "SKRUUMM|KA-WRAMM|KRA-WRAMM"),
+    slap:     B("PLAP|FLAP", "SPAK|SWAK|FLAPP", "SPAKK|SZWAKK"),
+    thud:     B("DUF|TUMF", "TUMP|GDUMP|GDUUMF", "GDUMMP|KA-DUMP"),
+    stomp:    B("DROMP|GDROMP", "DROMP-DROMP|GDROMP-GDROMP|DUM-DUM", "DROMP-DROMP-DROMP|GDROMP-GDROMP-GDROMP", "DROMP-DROMP-DROMP"),
+    clang:    B("KLANK|KTANG", "SZKLANG|TRANNG", "SZKLAANNG|TRAANNG|KA-KLANNK"),
+    slash:    B("SZIK|SWIK", "FSZSZT|SZLIKT", "SZRAKT|SWISZK"),
+    bite:     B("KLOMP|SZNAP", "GNAMP|KRONCZ|SZKLOMP", "KRONNCZ|GNARRMP"),
+    crack:    B("SKRIK|KRIKT", "KRAK|SKRAK", "KRRAKK|SKRRAKT|KA-KRAKK"),
+    shatter:  B("TSIK|KSZIN", "KSZINK|SKRISZ", "SKRAASZ|KSZRAKK"),
+    crash:    B("BRAKUM|GRUMSZ", "BRAKUUM|GRUUMSZ", "KA-BRAKUUM|KRA-GRUUMSZ"),
+    crumble:  B("SZKRUK|ZGRUK", "KRRUNCZ|ZGRRUK", "ZGRRAKK|SKRRUNCZ"),
+    rumble:   B("RRMM|GRMM", "WRRUMM|GRRYMM", "WRRRRUMM|GRRRYMMM"),
+    creak:    B("KRII|SKRII", "SKRYYK|KRRIII", "SKRYYYYK|KRRRIII"),
+    scrape:   B("SKRRT|KRRT", "SZRRRK|SKRRYT", "SZRRRAKK|SKRRRYT"),
+    boom:     B("BUM|FUUM", "TWUUM|BATUUM", "KA-BUUM|KA-TWUUMM|KA-GDUUM"),
+    whump:    B("FUMF|WUMF|BWUMF", "FWUMP|FUUMF", "FWUUMPF|FWUUMMF"),
+    thunder:  B("BRRMM|KRRMM", "KRAKUUM|KRADUUM", "KRA-KA-BUUM|KRA-KA-DUUMM"),
+    zap:      B("BZT|DZT|FZT", "BZZT|KZZT|DZZT", "BZZAKT|DZZAKT"),
+    beam:     B("WZZM|ZZMM", "WZZZMM|ZZAMM", "WZZAAMM|BZZAAMM"),
+    gunfire:  B("TRA-TA-TA|DRRT-DRRT", "TRA-TA-TA-TA|DRRT-DRRT-DRRT|RATATATA", "TRA-TA-TA-TA-TA|DRRT-DRRT-DRRT-DRRT|RATATATATA", "TRA-TA-TA|DRRT-DRRT-DRRT"),
+    ricochet: B("TSIJUU|PTIJU", "PTIIJUU|SPANNG", "SPAANNG|PTIIIJUUU"),
+    whoosh:   B("FSZ|FISZ", "FWUUSZ|FSZUUSZ|WUUSZ", "FWUUUSZ|SZFUUUSZ"),
+    zoom:     B("ZWISZ|WZIU", "ZWUUM|WZUUUM|WZIUUM", "ZWUUUMM|WZUUUMM"),
+    bounce:   B("BOIP|PONK", "BOINNG|SPROINNG", "BOJOJOINNG|SPROJOINNG"),
+    teleport: B("WZIP|FZIP", "WZORP|ZWAP|FWAMF", "WZAMFF|ZWAPP"),
+    wind:     B("FSZSZ|HWUU", "SZWUUU|HWUUSZ", "SZWUUUSZ|HWUUUUSZ"),
+    fire:     B("FUF|FOF", "FWUUM|FWOOM", "FWUUUMM|FAWUUUSZ"),
+    crackle:  B("KRIT-KRAT|TSYK-TSAK", "KRIT-KRAT-KRIT|TSYK-TSAK-TSYK", "KRITTA-KRAT-KRIT|TSYKKA-TSAK", "KRIT-KRAT-TSYK"),
+    hiss:     B("FSS|FSST", "PSSS|TSSS", "PFSSST|TSSSST"),
+    splash:   B("PLUP|BLUP|PLOP|GLUP", "PLUMP|BLUMP|SPLUMP", "SPLOOSZ|SPLASZ|KA-SPLOOSZ", "GLUB-BLUB-BULP|PLUP-BLUP-PLOP"),
+    squish:   B("SZLIP|SZLUP", "SZLORP|SPLORCZ|GLORP", "SZKLORCZ|SPLORRCZ"),
+    drip:     B("PLIP-PLIP|PLAP-PLAP", "PLIP-PLIP-PLIP|PLAP-PLIP-PLAP", "PLIP-PLIP-PLIP-PLIP|PLAP-PLAP-PLIP-PLAP", "PLIP-PLIP-PLIP"),
+    powerup:  B("WMM|ZMM", "WZMMM|BZMMM", "ZWUUUMM|WZAAMM"),
+    psychic:  B("MMNN|HMNN", "WNNNN|MNNNNG", "WNNNNNG|ZNNNNG"),
+    chime:    B("TLING|DZING", "DZINNG|TLINNG|TINNG", "DZIIINNG|TLIIINNG"),
+    fizzle:   B("PFFT…|FZZT…", "PFSZT…|FSST…", "PFFFT|FZZZT"),
+    whiff:    B("FIFF…|FWISZ…", "SWUUF…|FWUFF…", "FWUUUF|SWUUUF"),
+    click:    B("TYK|KTYK", "CZYK|KTYKK", "CZYKK|KTYKT"),
+    beep:     B("BIP|PIP", "BIP-BIP|PIP-PIP-PIP", "BIP-BIP-BIP|BIIP-BIIP-BIIP", "BIP-BIP-BIP"),
+    engine:   B("RRRM|WRRM", "WRRRMM|BRRRMM", "WRRRUUMM|WRRROOMM"),
+    siren:    B("IIUU|IJUU", "IIUU-IIUU|IJUU-IJUU", "IIUU-IIUU-IIUU|IIIUUUIIIUUU", "IIUU-IIUU"),
+    roar:     B("GRRAH|RRAH", "RRAAGH|GRRAAH|WRRAAH", "GRRAAARRH|WRRAAAGH|BWRRAAAGH"),
+    pain:     B("NNGH|HNN|OCH", "AAGH|AARGH|HNNGH", "GRAAAGH|AAARGH"),
+    effort:   B("HNH|NNH", "HRRGH|GNNH", "NNNRRAAH|HNNNRRGH"),
+    relief:   B("HFF…|FUH…", "PFFF…|FUUUH…", "HFAAH…|PFUUUH…"),
+    sigh:     B("HAH…|HOCH…", "HUCH…|HUUH…", "HAACH…|HUUUCH…"),
+    cheer:    B("JEEH|UUH", "JEEEA|WUUUH", "JEEEEAA|WUUUUUH"),
+    laugh:    B("HA-HA-HA|CHE-CHE", "HA-HA-HA-HA|CHE-CHE-CHE|HI-HI-HI", "BUA-HA-HA-HA|MUA-HA-HA-HA", "HA-HA-HA"),
+    shush:    B("SZSZ|PSZT", "SZSZT|PSZSZT", "SZSZSZT|PSSSSSZT"),
+    heartbeat:B("BA-DUM|DU-DUM", "BA-DUM-BA-DUM|DU-DUM-DU-DUM", "BA-DUM-BA-DUM-BA-DUM|DU-DUM-DU-DUM-DU-DUM", "BA-DUM"),
+    bark:     B("WAF-WAF|HRAU", "WAF-WAF-WAF|HRAU-HRAU|WRAF-WRAF", "WRRAF-WRRAF|WRRAF-WRRAF-WRRAF", "WAF-WAF-WAF"),
+    snarl:    B("GRRH|WRRR", "HRRRRR|GRRYYH", "GRRRRRH|HRRRRAGH"),
+    meow:     B("MRAOU|MIII", "MNIAOU|MRRAOU", "WRRAAAOU|MRRRAAAOU"),
+    purr:     B("MRRR|WRRR", "HRRRM|MRRRMM", "MRRRRRMM|WRRRRRMM"),
+    cathiss:  B("HSSS|KHH", "CHHSSS|FFFT", "KHSSSSZ|FFFSSST"),
+    squeak:   B("IIK|PII", "IIK-IIK|SKWII|PII-PII", "IIK-IIK-IIK|SKWII-SKWII", "IIK-IIK-IIK"),
+    snakehiss:B("SSS|SSSZ", "SSSSSS|SSSSSZ", "SSSSSSSS|SSSSSSSZ"),
+    trumpet:  B("PFRU|PRRT", "PFRRAAA|TRUUU|PRRUUU", "TRRUUUUT|PFRRUUUU"),
+    plane:    B("NIUM|WZIUM", "NIIIUUM|WZIIUUM", "NIIIIUUUMM|WZIIIUUUMM"),
+    helicopter:B("FUP-FUP|WUP-WUP", "FUP-FUP-FUP|WUP-WUP-WUP|TWOP-TWOP-TWOP", "FUP-FUP-FUP-FUP|TWOP-TWOP-TWOP-TWOP", "FUP-FUP-FUP"),
+    fastcar:  B("WNNN|WRIIN", "NIIIIAAM|ZRIIIN", "ZRRRIIIIN|NIIIIAAUUM"),
+    clunker:  B("PYR-PYR-PYRK|KLENK-KLONK", "PYR-PYR-PYR-PYRK|KLENK-KLONK-KLENK", "PYR-PYR-PYRK-PYRK|KLONK-KLENK-KLONK", "PYR-PYR-PYRK"),
+    mech:     B("DUUM-DUUM|WRRT-KLANK", "DUUM-DUUM-DUUM|WRRT-KLANK-WRRT|GDUUM-GDUUM", "GDUUM-GDUUM-GDUUM|WRRT-KLANK-GDUUM", "DUUM-DUUM"),
+    drill:    B("WZZZ|WRRZ", "WZZRRRR|WRRZZZT|BZZRRR", "WZZRRRRT|BZZRRRRT"),
+    hammer:   B("TONK-TONK|KTANK-KTANK", "TONK-TONK-TONK|KTANK-KTANK-KTANK", "TONK-TONK-TONK-TONK|KTANK-TONK-KTANK", "TONK-TONK-TONK"),
+    pistol:   B("PAF|POK", "BANG|BLAM|PAFF", "BLAMM|BANNG"),
+    rifle:    B("KTAK|TSZAK", "PTANG|KTAKK", "KTRAKK|PTRZAKK"),
+    shotgun:  B("BDUM|BWAMF", "BDUUMF|BRAWUUM", "CZAK-CZAK-BDUUM|CZAK-CZAK-BRAWUUM"),
+    minigun:  B("WRRRR|ZRRRR", "BRRRRT|WRRRRT", "DRRRRRRT|BRRRRRRRT"),
+    laserpistol:B("ZAT|TZAT", "ZARK|TZAK|FZAT", "SKZARK|KTZAK|ZZARKT", "ZAT-ZAT-ZAT"),
+    blaster:  B("FZUM|DZUM", "CZUUM|KZUUM", "KA-CZUUM|SKZAAMM"),
+    silenced: B("FUT|PFT", "PFYT|FWUT", "PFFYT|FWUTT"),
+    sword:    B("SZING|SZLING", "SZKLINNG|SZINNG", "SZRINNNG|SZKLAANNG"),
+    arrow:    B("FYT|FWIT", "TWIP|FFFT|SWIP", "SWIPP|TWIPP"),
+    thrown:   B("FWIP|SZWIT", "SZWIK|FSZT", "SZWIKKT|ZWUPP"),
+    grenade:  B("BUM|FUUM", "TWUUM|BATUUM", "PTYK-KA-BUUM|PTYK-KA-TWUUM"),
+    rocket:   B("FSSSZ|FSZUM", "FSZUUUM|FSSSZUM", "FSZRRUUUM|FFSZRRUUUM"),
+    reload:   B("TCZYK-TCZAK|KTYK-TCZAK", "TCZYK-TCZAK-TCZYK|KTYK-TCZAK-KTYK", "TCZAK-TCZYK-TCZAK|KTYK-TCZAK-KTYK-TCZAK", "TCZYK-TCZAK"),
+    ambulance:B("IJO-IJO|IJOO-IJOO", "IJO-IJO-IJO|IJOO-IJOO-IJOO", "IJO-IJO-IJO-IJO|IJOO-IJOO-IJOO-IJOO", "IJO-IJO"),
+    police:   B("WIIU-WIIU|UIIU-UIIU", "WIIU-WIIU-WIIU|UIIU-UIIU-UIIU", "WIIU-WIIU-WIIU-WIIU|UIIU-UIIU-UIIU-UIIU", "WIIU-WIIU"),
+    firetruck:B("BUAAP-UUIIUU|BUAAP-BUAAP", "BUAAP-UUIIUU-BUAAP|BUAAP-BUAAP-BUAAP", "UUIIUU-BUAAP-UUIIUU|BUAAAP-BUAAAP", "BUAAP-UUIIUU"),
+    hail:     B("TYK-TYK-TYK|PYK-PYK", "TYK-TYK-TYK|PYK-PYK-PYK|TYKATYKATYK", "TYK-TYK-TYK-TYK|PYK-PYK-PYK-PYK", "TYK-TYK-TYK"),
+    rain:     B("SZSZSZ|PSZSZ", "TSSSSZ|SSSSSZ", "SSSSSSSZ|PSSSSSSZ"),
+    storm:    B("BRRMM|KRRMM", "KRAKUUM|KRADUUM", "KRA-KA-WRRUMM|KRA-KA-PFRRUMM"),
+    tornado:  B("HWRUU|WRRUU", "WRRUUUUSZ|HWRRUUUU", "HWRRRUUUMM|WRRRUUUUSZ"),
+  },
+  en: {
+    punch:    B("THWAP|THOK|POW", "BAM|THWUP|WHAM", "THWAPP|WHAMM|KA-THWAPP"),
+    smash:    B("WRAM|KRUMPF", "WRAMM|SKROOSH", "SKROOMM|KA-WRAMM|KRA-WRAMM"),
+    slap:     B("FWAP|SHPLAK", "SWAK|SHPLAKK|FWAPP", "SHPLAAKK|SHPLAKK"),
+    thud:     B("THUD|THUB|DUMF", "FWUD|THOOM|GDOOMF", "KA-THOOM|THROOMF"),
+    stomp:    B("GDUMF|DROMF", "GDUMF-GDUMF|DROMF-DROMF|BDOMF", "GDUMF-GDUMF-GDUMF|BDOMF-BDOMF", "GDUMF-GDUMF-GDUMF"),
+    clang:    B("KLANK|KTANG", "KLANG|SHKLANG", "KLANNG|SKLAANNG|KA-KLANNG"),
+    slash:    B("SHWIK|SHNIK", "SHRIKT|SHNIKK|SHWIKT", "SHRAKKT|SHNIKKT"),
+    bite:     B("KLOMP|CHNAP", "GNAMP|SHKLOMP|GRONCH", "GNARRMP|SHKRONCH|GRONNCH"),
+    crack:    B("TSKRIK|TSKRAK", "KRAK|SKRAK|KRAKT", "KRRAKK|SKRRAKT|KA-KRAKK"),
+    shatter:  B("TSIK|TSHINK", "KSHINK|SKRISH", "SHKRAASH|KSHRAKK"),
+    crash:    B("GROOSH|KRUMF", "KROOSH|BRAKOOSH", "KA-KROOSH|KRA-KROOSH|BRAKKOOSH"),
+    crumble:  B("KRUSK|SKRUK", "KRRUNCH|GRRUSK", "GRRAKK|SKRRUNCH"),
+    rumble:   B("RRMM|GRMM", "GRROMM|KRROMM", "GRRRROMM|KRRROOMM"),
+    creak:    B("KREE|SKREE", "SKREEK|KRREE", "SKRREEK|KRRREE"),
+    scrape:   B("SKRRT|KRRT", "SHRRRK|SKRRAT", "SHKRRRAKK|SKRRRAT"),
+    boom:     B("BOOM|FOOM", "TWOOM|BADOOM|BTHOOM", "KA-BOOM|BATOOWW|KA-TWOOMM"),
+    whump:    B("WUMF|BWUMF", "FWUMP|FWUMF", "FWOOMPF|FWUUMFF"),
+    thunder:  B("BRRMM|KRMMM", "KRAKOOM|KRADOOM", "KRA-KA-THOOM|KRA-KA-BOOM|KRA-KA-BTHOOM"),
+    zap:      B("BZT|FZT", "ZAP|BZZT|KZZT", "BZZAKT|KZZRAKK|ZZAPP"),
+    beam:     B("VZZM|ZZMM", "VZZZMM|ZZAMM", "VZZAAMM|VZZAAMM"),
+    gunfire:  B("DRRT-DRRT|BUDDA-BUDDA", "DRRT-DRRT-DRRT|BUDDA-BUDDA-BUDDA|BRAKKA-BRAKKA", "BRAKKA-BRAKKA-BRAKKA|DRRT-DRRT-DRRT-DRRT", "DRRT-DRRT-DRRT|BUDDA-BUDDA"),
+    ricochet: B("PTWING|PTIK", "PTWEE|PEEYOW", "PTWEEOOW|PTEEYOOW"),
+    whoosh:   B("FSHH|VWISH", "FWOOSH|FWAASH", "FWOOOSHH|FSHWOOSH"),
+    zoom:     B("VSHOOM|VSHEEN", "ZWAAM|VSHOOM", "ZWAAAMM|VSHOOOM"),
+    bounce:   B("BOIP|DWOIP", "BOYOING|DOYOING", "BOYOYOING|DOYOYOING"),
+    teleport: B("FZIP|VZIP", "VWORP|ZWAP|FWAMF", "VWAMFF|ZWAPP"),
+    wind:     B("FSSHH|HWUU", "SHWOOOH|FWOOOOH", "SHWOOOOHH|FWHOOOOH"),
+    fire:     B("FOF|FWUF", "FWOOM|FOOMF", "FWOOOMM|FAWOOOSH"),
+    crackle:  B("TSIK-TSAK|KRITZ-KRATZ", "TSIK-TSAK-TSIK|KRITZ-KRATZ-KRITZ", "TSIKKA-TSAK-TSIK|KRITTA-KRATZ", "TSIK-TSAK-KRITZ"),
+    hiss:     B("TSSS|FSSH", "FSSSHH|TSSSHT", "TSSSSSHT|FSSSSSHH"),
+    splash:   B("PLOP|PLOOP|BLUP", "PLUNK|SPLUMP", "SPLOOSH|KA-SPLOOSH", "GLUB-BLUB-GLUB|PLOP-BLUP-PLOOP"),
+    squish:   B("SHLUP|GLURP", "SHLORP|SPLORCH|GLORP", "SPLORRCH|SHKLORCH"),
+    drip:     B("PLIP-PLIP|TLIP-PLIP", "PLIP-PLIP-PLIP|TLIP-PLIP-TLIP", "PLIP-PLIP-PLIP-PLIP|TLIP-TLIP-PLIP-PLIP", "PLIP-PLIP-PLIP"),
+    powerup:  B("VMM|ZMM", "VZMMM|BZMMM", "VWAAMMM|ZWOOOMM"),
+    psychic:  B("MMNN|HMNN", "VNNNN|MNNNNG", "VNNNNNG|ZNNNNG"),
+    chime:    B("TLEEN|DLEEN", "TLEENG|DLEENG|SHEENG", "KLEENNG|TLEENNNG"),
+    fizzle:   B("PFFT…|FZZT…", "PFZZT…|SZZT…", "PFFFT|SZZZT"),
+    whiff:    B("FWIFF…|FFWUF…", "FWOOF…|FWUFF…", "FWOOOF|FWUUFF"),
+    click:    B("TCHIK|KTIK", "KLAK|KTAK", "KLAKK|KTAKK"),
+    beep:     B("BEEP|BIP", "BEEP-BEEP|BIP-BIP-BIP", "BEEP-BEEP-BEEP|BIP-BIP-BIP-BIP", "BIP-BIP-BIP"),
+    engine:   B("RRRM|VRRM", "VRRRMM|VROOM|BRRRMM", "VRRAAMM|VROOOMM"),
+    siren:    B("WEEOO|WOOWEE", "WEEOO-WEEOO|WOOWEE-WOOWEE", "WEEOO-WEEOO-WEEOO|WEEEOOOWEEEOOO", "WEEOO-WEEOO"),
+    roar:     B("GRRAH|RRAH", "RRAAGH|GRRAAH|HRRAAGH", "GRRAAARRH|WRRAAAGH|BWRRAAGH"),
+    pain:     B("NNGH|HNNH|OOF", "AAGH|HNNGH|GHAA", "GRAAAGH|NNAAAGH|AARGH"),
+    effort:   B("HNH|NNH|UGH", "HRRGH|GNNH|HUNNGH", "NNNRRAAH|HUNNNRRGH"),
+    relief:   B("HFF…|FUH…", "PFFF…|FOOOH…", "HFAAH…|PFOOOH…"),
+    sigh:     B("FHUUU…|PFFFF…", "FHOOOH…|HUUUHF…", "FHAAAAH…|HFUUUUH…"),
+    cheer:    B("WOOH|YEEOH", "WOOOAH|HWAAAH", "WOOOOAH|YEEEEOOH"),
+    laugh:    B("HA-HA-HA|HEH-HEH", "HA-HA-HA-HA|HE-HE-HE|HO-HO-HO", "BWA-HA-HA-HA|MWA-HA-HA-HA", "HA-HA-HA"),
+    shush:    B("SHH|PSHT", "SHHHT|PSHHT", "SHHHHT|PSSSHHT"),
+    heartbeat:B("BA-DUM|BU-DUM", "BA-DUM-BA-DUM|BU-DUM-BU-DUM", "BA-DUM-BA-DUM-BA-DUM|BU-DUM-BU-DUM-BU-DUM", "BA-DUM"),
+    bark:     B("WRAF-WRAF|RRAUF", "WRAF-WRAF-WRAF|RRAUF-RRAUF", "WRRAFF-WRRAFF|GRRAUFF-GRRAUFF", "WRAF-WRAF-WRAF"),
+    snarl:    B("GRRH|HRRR", "GRRRRH|KHRRRR", "GRRRROGH|NGRRRAH"),
+    meow:     B("NYAOW|MRAU", "NYAAOW|REEOWR", "REEEOOWR|NYAAAAOOW"),
+    purr:     B("PRRR|MRRR", "PRRRMM|MRRRM", "PRRRRRMM|MRRRRRMM"),
+    cathiss:  B("HSSS|KHH", "KHHSS|FFSST", "KHSSSSH|FFSSSHT"),
+    squeak:   B("SKWEE-SKWEE|TSEE", "SKWEE-SKWEE-SKWEE|TSEE-TSEE", "SKWEE-TSEE-SKWEE|TSEE-TSEE-TSEE", "SKWEE-SKWEE-SKWEE"),
+    snakehiss:B("SSS|ZSSS", "SSSSSS|ZSSSSS", "SSSSSSSS|ZSSSSSSS"),
+    trumpet:  B("PFRU|PRRT", "PFRRAAA|PWAARR", "BWRRAAAAH|PFRRAAAAH"),
+    plane:    B("NYOOM|NYEEOW", "NYAAOOM|SHRROOM", "SHRROOOMM|NYEEAAOOMM"),
+    helicopter:B("THWUP-THWUP|WOKKA-WOKKA", "THWUP-THWUP-THWUP|WOKKA-WOKKA-WOKKA", "THWUP-WOKKA-THWUP|WOKKA-WOKKA-THWUP", "THWUP-THWUP-THWUP"),
+    fastcar:  B("VNNN|VREEN", "VRREEEE|ZREEEEN", "VRRREEEEE|ZRRREEEEOWW"),
+    clunker:  B("POTTA-POTTA|POTTA-PAKK", "POTTA-POTTA-POTTA|BRUTTA-PAKK", "POTTA-POTTA-PAKK|BRUTTA-BRUTTA-PAKK", "POTTA-POTTA-PAKK"),
+    mech:     B("VRRT-KLANK|KTHOOM", "VRRT-KLANK-VRRT|KTHOOM-KTHOOM", "KTHOOM-KTHOOM-KTHOOM|VRRRT-KLANK-KTHOOM", "VRRT-KLANK"),
+    drill:    B("VZZZ|VRRZ", "VZZRRRR|VRRZZZT|ZZRRRR", "VZZRRRRT|BZZRRRRT"),
+    hammer:   B("KTOK-KTOK|KTANG-KTANG", "KTOK-KTOK-KTOK|KTANG-KTANG-KTANG", "KTANG-KTOK-KTANG|KTOK-KTOK-KTOK-KTOK", "KTOK-KTOK-KTOK"),
+    pistol:   B("PAK|POK", "BANG|BLAM", "BLAMM|BANNG"),
+    rifle:    B("KTAK|PTAK", "KPANG|KTAKK", "KTRAKK|PTRAKK"),
+    shotgun:  B("BWAMF|BWOMF", "BRAWOOM|BWAAMMF", "CHK-CHK-BRAWOOM|CHK-CHK-BWAMMF"),
+    minigun:  B("VRRRR|ZRRRR", "BRRRRT|VRRRRT", "DRRRRRRT|BRRRRRRRT"),
+    laserpistol:B("ZAT|TZAT|TSAT", "ZARK|TZAK|FZAT", "SKZARK|KTZAK|ZZARKT", "ZAT-ZAT-ZAT"),
+    blaster:  B("FZOM|VZUM", "CHOOM|KSHOOM", "KA-CHOOM|SKZOOMM"),
+    silenced: B("FUT|PFT", "PFUT|FWUT", "PFFUT|FWUTT"),
+    sword:    B("SHING|SHLING", "SHINNG|SHKLINNG", "SHRINNNG|SHKLAANNG"),
+    arrow:    B("FWIP|TSIP", "THWIP|FFFT", "THWIPP|FWIPP"),
+    thrown:   B("FWUP|FSHT", "FSHHT|ZWUP", "FSHHHT|ZWUPP"),
+    grenade:  B("BOOM|FOOM", "TWOOM|BADOOM", "PTIK-KA-BOOM|PTIK-KA-TWOOM"),
+    rocket:   B("FSHOOM|SHHROOM", "SHRROOM|FSSHOOM", "SHHRROOOM|FSSHHROOM"),
+    reload:   B("TCHAK-TCHAK|SHLUK-KLAK", "TCHAK-TCHAK-TCHAK|SHLUK-KLAK-SHLUK", "TCHAK-SHLUK-TCHAK|SHLUK-KLAK-TCHAK", "TCHAK-TCHAK"),
+    ambulance:B("NEEO-WEEO|NAAO-WAAO", "WEEO-NEEO-WEEO|NAAO-WAAO-NAAO", "NEEO-WEEO-NEEO-WEEO|NAAO-WAAO-NAAO-WAAO", "NEEO-WEEO"),
+    police:   B("WUP-WUP|BWOOP", "WUP-WUP-WUP|BWOOP-BWOOP", "WUP-WUP-WUP-WUP|BWOOP-BWOOP-WUP", "WUP-WUP-WUP"),
+    firetruck:B("BWAAMP-HWAAA|BWAAP-BWAAP", "BWAAMP-HWAAA-BWAAMP|BWAAP-BWAAP-BWAAP", "HWAAA-BWAAMP-HWAAA|BWAAAP-BWAAAP", "BWAAMP-HWAAA"),
+    hail:     B("PAK-PAK|TSIK-TSIK", "PAK-PAK-PAK|TSIK-TSIK-TSIK|TAKATAKATAKA", "PAKK-KRAK-PAKK|TAKATAKATAKATAKA", "PAK-PAK-PAK"),
+    rain:     B("SHHHH|PSHHH", "KSSHHH|SHHHHHH", "KSSSHHHH|SHHHHHHH"),
+    storm:    B("BRRMM|KRMMM", "KRAKOOM|KRADOOM", "KRA-KA-BWROOMM|KRA-KA-GRROOMM"),
+    tornado:  B("HWRROO|VRROO", "VRROOOOSH|HWRROOOO", "SHWRRROOOOMM|VRRROOOOSHH"),
   }
 };
 
@@ -252,59 +479,269 @@ export function formatRange(a, b, o = {}) {
 }
 
 /* ---------- text helpers ---------- */
-const VOW = "AEIOUYĄĘÓ";
 /** normalise a word for the engine: NFC, Polish upper case, one line, single spaces */
 export const clean = (t) => String(t ?? "").normalize("NFC").toLocaleUpperCase("pl").replace(/\s+/g, " ").trim();
 /* ONLY ONOMATOPOEIA (the user's rule, 2026-11-13): every word must imitate the sound itself, never a noun, verb or other word
-   that names a sound ("CHRZĘST" names a crunch; it is not one). NAMING = words that only name a sound: refused in any syllable
-   (compared with repeated letters collapsed: ŚWIIIST -> ŚWIST). NAMING_WORD = refused only as a whole word (TAK is a word, but
-   TIK-TAK imitates a clock). check-words.mjs keeps them out of the banks; add() refuses them. BORDERLINE = words kept on purpose
-   because they are also used as interjections that imitate the sound (or are English imitative words); the user may rule on them. */
-export const NAMING = {
-  pl: ["CHRZĘST", "CHRZĘŚCI", "ŁOMOT", "ŁOSKOT", "ŚWIST", "ŚWISZCZ", "ZGRZYT", "TRZESZCZ", "SKWIERCZ", "SYK", "HUK", "SZUM", "SZELEST", "BRZĘK",
-    "BRZĘCZ", "ŚMIG", "GRZMOT", "SKOK", "KRACH", "PISK", "WYBUCH", "STUKOT", "TUPOT", "BULGOT", "CHLUPOT", "SZAST", "PRAST", "JĘK", "WRZASK",
-    "KRZYK", "ŚMIECH", "BICIE", "STRZAŁ", "CIĘCIE", "PĘKNIĘCIE", "TRZASKANIE"],
-  en: ["SIGH", "GASP", "GROAN", "GROWL", "CRACKLE", "CRUMBLE", "RUMBLE", "TINKLE", "SCRAPE", "CREAK", "SHUSH", "SPUTER", "SHATER", "SPARKLE",
-    "SHIMER", "SCREAM", "EXPLOSION", "GNASH", "SOCK", "WHIP", "CHUCKLE", "GIGLE", "SNORE", "SOB", "HOWL", "SHRIEK", "LAUGH", "CHEER", "PUNCH", "KICK", "ROAR", "RUMBL", "CRUMBL", "RMBL", "CRMBL", "KRMBL"]
+   that names a sound ("CHRZĘST" names a crunch; it is not one).
+   NO DICTIONARY WORDS (the user's ruling, 2026-11-13: "wiele z nich to po prostu słowa ... ciach to słowo"): a sound word must not be
+   a word of the language at all, not even an imitative interjection from the dictionary (CIACH, TRZASK, PLUSK, BĘC, CRACK, SPLASH),
+   nor an ordinary word that happens to look like a sound (BRAM, GROCH, DOOM, BROOM). It is BUILT from the sound in the comic's
+   manner: an attack, a lasting part, a cut-off (a blade: SZSZT, FSZSZT, SWISZK; a blow: TWOOM, WRAMM, SKROOSHH).
+   DICT = the deny list, checked on the whole word and on every syllable with repeated letters collapsed (CIAACH -> CIACH).
+   Short function syllables (TA, DA, NA, TO, A, I) are not on it: a gun's TA-TA-TA is not a pronoun.
+   ICONIC = the short, explicit exception list ("jako wyjątek, bo są ikoniczne i dobrze brzmią"): classic comic sounds kept although
+   they are dictionary words; every one has a reason; the user rules on this list. check-words.mjs keeps every other dictionary word
+   out of the banks, stream syllables, flows and prefixes; add() refuses them. NAMING is the old name of DICT (kept for callers). */
+export const DICT = {
+  pl: [
+    "ACH", "AHA", "AJ", "AJAJ", "AŁA", "AU", "AUĆ", "BACH", "BAM", "BĘC", "BIM", "BOM", "BRR", "BRUM", "BRZDĄK", "BRZDĘK",
+    "BUCH", "BUM", "BUMS", "BZIK", "BZYK", "CHLAP", "CHLAST", "CHLUP", "CHLUST", "CHRUP", "CHRUM", "CHRZĘST", "CIACH", "CII",
+    "CIT", "CMOK", "CYK", "CYT", "DING", "DONG", "DRYŃ", "DZYŃ", "DZYŃDZYŃ", "ECH", "EJ", "FIU", "FRR", "FRU", "HA", "HAU",
+    "HE", "HEJ", "HI", "HM", "HOP", "HOPSA", "HU", "HURA", "HYC", "JUHU", "JUPI", "KAP", "KLAP", "KLAPS", "KLIK", "KŁAP",
+    "KUKU", "ŁUBU", "ŁUBUDU", "ŁUP", "MIAU", "MLASK", "MU", "OCH", "OJ", "OJEJ", "PAC", "PAF", "PIF", "PIFPAF", "PIK",
+    "PLASK", "PLUM", "PLUSK", "PRASK", "PRAST", "PST", "PSTRYK", "PUF", "PUK", "SZAST", "SZUR", "ŚWIST", "ŚMIG", "TIK",
+    "TIKTAK", "TRACH", "TRZASK", "TRZESZCZ", "TRZEŚ", "TUP", "UCH", "UF", "UPS", "WIO", "ZGRZYT", "SKRZYP", "SYK", "HUK",
+    "ŁOMOT", "ŁOSKOT", "SZUM", "SZELEST", "BRZĘK", "PISK", "GWIZD", "JĘK", "KRZYK", "ŚMIECH", "WRZASK", "GRZMOT", "WYBUCH",
+    "STRZAŁ", "KRACH", "SKOK", "STUKOT", "TUPOT", "BULGOT", "CHLUPOT", "STUK", "TAK", "JEST", "NIE", "DOBRA", "BIJ", "BUJ",
+    "PUFF", "PŁASK", "KLEKS", "KWIK", "GDAK", "KWA", "BEE", "MEE", "IHAA", "PRR", "SZSZ", "PSYK", "TFU", "FE", "BLE", "BUU",
+    "BRAM", "BRAK", "KRAN", "TRAM", "GRAM", "DRAM", "KRAJ", "GRAD", "BRUD", "TRUP", "KRUK", "DRUK", "GRUBY", "GRUZ", "BRAT",
+    "BRAĆ", "PRAĆ", "KRAĆ", "TRAF", "TROP", "DRAP", "GRAB", "KRAB", "KRUP", "KRAM", "KIT", "KLIP", "FLET", "DRON", "GROM",
+    "RAM", "RAN", "RUM", "KROK", "SKRA", "TYP", "PIT", "DUMA", "BUDA", "DOM", "DYM", "TUM", "TOM", "DUP", "BUT", "KOT",
+    "KOK", "KUK", "TUK", "TOK", "BOK", "BAK", "PAK", "KIP", "TIP", "DŁUG", "GŁUP", "TŁUM", "BRUK", "MIAŁ", "PSIK", "KICZ",
+    "SYCZ", "GRA", "GRY", "GROCH", "KRY", "FOCH", "PUCH", "PRAŁ", "TRYK", "SZTUK", "PSU", "TLA", "WRON", "GRON", "BROM",
+    "TY", "WY", "BY", "NIM", "DRAN", "BRON"
+  ],
+  en: [
+    "BANG", "BOOM", "POW", "THUD", "WHAM", "ZAP", "BAM", "CRASH", "SMASH", "SPLASH", "CRUNCH", "CRACK", "SNAP", "SLAP",
+    "SLASH", "CLICK", "POP", "HISS", "WHOOSH", "SWISH", "SWOOSH", "THUMP", "STOMP", "CHOMP", "DRIP", "DROP", "FIZZ",
+    "FIZZLE", "SQUISH", "SQUELCH", "ZOOM", "CLANG", "CLINK", "CLANK", "CLUNK", "CLACK", "CLOCK", "WHIFF", "HUFF", "PUFF",
+    "SMACK", "SPLAT", "BEEP", "BLEEP", "HUP", "TROMP", "BONK", "BOING", "THWACK", "WHACK", "KNOCK", "TAP", "RAP", "BLIP",
+    "PING", "DING", "DONG", "TING", "TINK", "TWANG", "ZING", "ZIP", "VROOM", "PLAT", "PLASH", "SWASH", "FROM", "WHO", "SHOO",
+    "SHE", "FEE", "CHAMP", "BOOK", "SWOOP", "VIP", "ZOON", "FROSH", "HEW", "HOOF", "SNIT", "SNITCH", "RAM", "RAN", "BRR",
+    "GRR", "ARGH", "UGH", "OUCH", "OW", "OOF", "PHEW", "WHEW", "AHA", "HA", "HAH", "HEH", "HEE", "HO", "HOH", "HUH", "HMM",
+    "HM", "SHH", "SHUSH", "PSST", "PST", "TSK", "OOPS", "YES", "YEAH", "WOW", "YAY", "YIPPEE", "WOOHOO", "HOORAY", "YAHOO",
+    "PLOP", "PLONK", "THUNK", "SPLOSH", "SLOSH", "WHIZ", "WHIZZ", "WHIRR", "WHIR", "BUZZ", "HUM", "PURR", "ROAR", "GROWL",
+    "HOWL", "CREAK", "SQUEAK", "SCRAPE", "CRUMBLE", "RUMBLE", "TINKLE", "JINGLE", "CRACKLE", "SIZZLE", "SPUTTER", "WHIP",
+    "BLAST", "BURST", "KICK", "PUNCH", "HIT", "SOCK", "BIFF", "BOP", "CHUG", "GLUG", "GULP", "BURP", "SNORT", "SNORE", "SOB",
+    "SIGH", "GASP", "GROAN", "MOAN", "WAIL", "SCREAM", "SHRIEK", "GIGGLE", "CHUCKLE", "LAUGH", "CHEER", "BLARE", "HONK",
+    "TOOT", "CHIRP", "TWEET", "SPLUTTER", "PEW", "BAA", "BOO", "DOOM", "BROOM", "ROOM", "GLOOM", "BLOOM", "VOOM", "WHOMP",
+    "WHUMP", "THWOMP", "BLAM", "BRAP", "DRAG", "BRAG", "CRAG", "GRAB", "CRAB", "SCRAP", "STRAP", "STROP", "STUMP", "TRAMP",
+    "DUMP", "DAMP", "BUMP", "JUMP", "LUMP", "PUMP", "RUMP", "SLUMP", "WOMP", "CHOP", "SHOP", "SHOCK", "SHACK", "SHAM",
+    "SHIM", "SWIM", "SWAM", "WHIM", "DRUM", "DRAM", "TRAM", "CRAM", "SCRAM", "SCAM", "SLAM", "CLAM", "GRAM", "PRAM", "SHIP",
+    "SKIP", "SCREECH", "SCRITCH", "SCRATCH", "CRICK", "TRICK", "BRICK", "PRICK", "TICK", "LICK", "SLICK", "FLICK", "FLASH",
+    "FLESH", "PLUSH", "BLUSH", "BRUSH", "CRUSH", "GUSH", "HUSH", "MUSH", "RUSH", "SLUSH", "FLUSH", "WHOOP", "HOOP", "LOOP",
+    "POOP", "HOOT", "SHOOT", "BOOT", "ROOT", "FOOT", "SOOT", "ZOOT", "GOAT", "BOAT", "LOOM", "WOMB", "TOMB", "BOMB", "COMB",
+    "PLINK", "PLUNK", "DUNK", "BUNK", "SKUNK", "FUNK", "JUNK", "HUNK", "SPUNK", "CHUNK", "TRUNK", "DRUNK", "SHRUNK", "SUNK",
+    "STUNK", "DUB", "DUMB", "DUN", "DUD", "BUD", "MUD", "CUD", "SPUD", "STUD", "SCUD", "GLUM", "GUM", "SUM", "YUM", "RUM",
+    "TUM", "CHUM", "PLUM", "SLUM", "SCUM", "STRUM", "THRUM", "BRUM", "WEE", "WOO", "WAH", "YAH", "HAY", "HEY", "HOY", "OY",
+    "OH", "AH", "EH", "UH", "UM", "ER", "TAT", "RAT", "BAT", "CAT", "FAT", "HAT", "MAT", "PAT", "SAT", "VAT", "CHAT", "BRAT",
+    "DRAT", "GNAT", "SPAT", "FLAT", "SLAT", "THAT", "WHAT", "MEOW", "MEW", "MIAOW", "WOOF", "ARF", "BARK", "YAP", "YIP",
+    "HASH", "SIS", "PANG", "BONG", "BOSH", "SHANK", "PROW", "GROW", "TWIT", "CHEEP", "NEIGH", "TRUMP", "HAIL", "RAIN",
+    "PATTER", "DRILL", "WHIRL", "WHEE", "NEE", "NAH", "WOOT", "KAPOW", "ACH", "BRA", "BROW", "FOP", "HOW", "PONG", "POM",
+    "TROW", "WHEN", "WHOM", "WOE", "PAM", "FA", "MI", "GROOM", "BROOK", "CROOK", "POOT", "POT", "TOT", "BOT"
+  ]
 };
-export const NAMING_WORD = { pl: ["TAK", "JEST", "HEJ", "DOBRA", "NIE", "UPS"], en: ["YES", "YEAH", "NO", "MEH", "OOPS", "WOW"] };
-export const BORDERLINE = {
+/* the review (2026-11-13, section 0 A and the unfortunate readings): plain words found in the old banks, and words a sound must
+   never read as */
+DICT.pl.push("PTAK", "FACH", "BRACH", "TRIK", "TRAK", "TUF", "GIN", "WRYL", "PRUL", "SPI", "SWING", "PING", "LAL", "MRU", "CHE", "FU",
+  "FIK", "GRO", "NEF", "KROM", "CISZA", "GRUPA", "GRUSZA", "KUFA", "FUCHA", "PUPA", "FLASZA", "DRAKA", "BROSZA", "PACHA", "BRYT",
+  "KRUSZ", "KRZYCZ", "GRYZ", "PLASK", "KLAPS", "SZAST", "SWIST", "SZUM", "BRZDEK", "BRZEK", "BRUM", "FIU", "MIAU", "HAU", "AUC",
+  "BANG", "KAKA", "FUK", "KURWA", "CHUJ", "HUJ", "PIZDA", "JEB", "DUPA", "KUTAS", "CIPA", "SRA", "SZMATA", "KAL", "GOWNO",
+  "PLUSK", "CHLUST", "CHLAP", "TRZASK", "ZGRZYT", "SKRZYP", "KLAK", "KLIK", "TIK", "TAK", "BRZDAK", "DZWIEK", "STUK", "PUK",
+  "BULGOT", "SPLOT", "PLOT", "SKOK", "SKRAJ", "GRAM", "DRUM", "PROM", "BRAMA",
+  "KRAM", "BOMBA", "TAKT", "TEKST", "PUNKT", "BLASK", "WRZASK", "PISK", "KLANG");
+DICT.en.push("DOING", "BOINK", "BRUNCH", "SPLOTCH", "FEW", "TROOP", "TROP", "KLICK", "KLIK", "GROK", "DONK", "TAKA",
+  "YEOW", "HOOAH", "EEP", "THEE", "SHEESH", "CLIT", "COCK", "DICK", "SHIT", "FUCK", "DAMN", "PISS", "TWAT", "CUNT", "PRICK",
+  "KOOK", "TWERP", "PEW", "PLINK", "SPLASH", "SPLISH", "SPLOOSH", "PLUNK", "CHUNK", "CLUNK", "CHINK", "CLINK", "TICK", "TOCK",
+  "SKID", "SKIT", "SKUNK", "TRUNK", "STRUNK", "DRUNK", "SPANK", "SPRING", "TWANG", "TWING", "BROOK", "BLOCK",
+  "CLOCK", "FLOCK", "SMOCK", "STOCK", "SHOCK", "CROCK", "FROCK", "WHIRR", "VROOM", "BEEP", "BLAM", "PLOP", "GRR", "HA", "HE");
+export const NAMING = DICT;
+/* ICONIC: the short explicit exception list (the owner's ruling: "jako wyjątek, bo są ikoniczne i dobrze brzmią"), each with its
+   reason; raised to about 16 by the review (2026-11-13, provisional WORD2 questions): water, the comic gunshot, the beep, the engine,
+   the laugh and the growl cannot be lettered without them. TRACH, BACH and CHLUP are NOT exceptions (dictionary interjections). */
+export const ICONIC = {
   pl: {
-    TRZASK: "rzeczownik, ale też wykrzyknik naśladujący trzask (\"i drzwi trzask!\"), krótki i ostry jak sam dźwięk",
-    PLUSK: "rzeczownik, ale też wykrzyknik naśladujący wpadnięcie do wody (\"plusk!\")",
-    SKRZYP: "wykrzyknik naśladujący skrzypienie (\"skrzyp, skrzyp\"), zarazem rdzeń czasownika",
-    BRZDĘK: "wykrzyknik dźwiękonaśladowczy (brzdęk!), nie nazwa", BRZDĄK: "wykrzyknik dźwiękonaśladowczy (brzdąk! struny, metal)",
-    GRUCH: "wykrzyknik naśladujący głuche gruchnięcie (rdzeń czasownika gruchnąć)",
-    CHRUP: "wykrzyknik naśladujący chrupnięcie (\"chrup!\")", MLASK: "wykrzyknik naśladujący mlaśnięcie", PSTRYK: "wykrzyknik naśladujący pstryknięcie",
-    KŁAP: "wykrzyknik naśladujący kłapnięcie szczęk", KLAP: "wykrzyknik naśladujący klapnięcie", SZUR: "wykrzyknik naśladujący szuranie (\"szur, szur\")",
-    HOP: "wykrzyknik towarzyszący skokowi (\"hop!\"), nie naśladuje samego dźwięku", HYC: "wykrzyknik skoku (\"hyc!\")", SA: "\"hop-sa\": wykrzyknik skoku",
-    HURA: "okrzyk radości: sam dźwięk głosu wiwatu, nie jego nazwa", JUHU: "okrzyk radości (głos)", JUPI: "okrzyk radości (głos)",
-    CIACH: "wykrzyknik naśladujący cięcie (\"ciach!\")", CHLAST: "wykrzyknik naśladujący chlaśnięcie", PRASK: "wykrzyknik naśladujący trzaśnięcie",
-    BĘC: "wykrzyknik naśladujący upadek (\"bęc!\")", ŁUP: "wykrzyknik naśladujący uderzenie", ŁUBUDU: "wykrzyknik naśladujący łoskot upadku"
+    BUM: "the classic boom (BUM!, KA-BUM!), short and round",
+    BAM: "the classic hit",
+    PAF: "the classic shot / punch",
+    SZSZ: "the Polish hush, also the only way to letter a steady rush of rain or air (SZSZSZ)",
+    HA: "the laugh (HA-HA-HA): a laugh cannot be written otherwise",
+    BANG: "the comic gunshot, read the same in Polish comics"
   },
   en: {
-    CRASH: "imitative English word (the spelling is the sound), the standard comic effect", SMASH: "imitative, standard comic effect",
-    SPLASH: "imitative", CRUNCH: "imitative", CRACK: "imitative", SNAP: "imitative", SLAP: "imitative", SLASH: "imitative (blade swish)",
-    CLICK: "imitative", BANG: "imitative", BOOM: "imitative", POP: "imitative", HISS: "imitative", WHOOSH: "imitative", SWISH: "imitative",
-    THUD: "imitative", THUMP: "imitative", STOMP: "imitative stamp of a foot", CHOMP: "imitative bite", DRIP: "imitative", FIZ: "imitative (FIZZ)",
-    SQUISH: "imitative", SQUELCH: "imitative", ZAP: "comic imitative coinage", ZOM: "imitative (ZOOM)", CLANG: "imitative", CLINK: "imitative",
-    WHIF: "comic miss sound (WHIFF), also a noun 'a smell'", HUF: "breath sound (HUFF), also a verb", SMACK: "imitative", SPLAT: "imitative",
-    BEP: "imitative (BEEP)", HUP: "grunt of effort", TROMP: "imitative heavy step"
+    POW: "the classic punch (the owner's example)",
+    THUD: "the classic dull fall (the owner's example)",
+    BAM: "the classic hit",
+    BOOM: "the classic blast",
+    BANG: "the classic gunshot",
+    ZAP: "the classic electric shot",
+    WHAM: "the classic heavy blow",
+    SHH: "the classic hush; also the only way to letter a steady rush of rain or air (SHHHH)",
+    PLOP: "the small drop into water (the owner's water family)",
+    PLUNK: "the heavy drop into water (the owner's water family)",
+    SPLOOSH: "the big splash (the owner's water family)",
+    BLAM: "the real comic gunshot, more useful than BANG",
+    BEEP: "the device beep: every built substitute (BWEEP, PWEEP) reads worse",
+    VROOM: "the engine: every built substitute (VROON, ZROOM) reads worse",
+    HA: "the laugh (HA-HA-HA): a laugh cannot be written otherwise",
+    GRR: "the growl: a growl cannot be written otherwise"
   }
 };
-/* the syllables of a word with repeated letters collapsed (ŚWIIIST -> ŚWIST, BRZĘĘK -> BRZĘK) */
-const syllablesFlat = (w) => clean(String(w).replace(/\+/g, "")).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean).map((x) => x.replace(/(\p{L})\1+/gu, "$1"));
-/** is this a naming word (not an onomatopoeia)? -> the offending part or null */
-export function naming(word, lang = null) {
-  const langs = lang ? [lang] : Object.keys(NAMING);
-  const syl = syllablesFlat(word), whole = syl.join("-");
-  for ( const L of langs ) {
-    const deny = new Set((NAMING[L] ?? []).map((x) => x.replace(/(\p{L})\1+/gu, "$1")));
-    for ( const x of syl ) if ( deny.has(x) ) return x;
-    if ( (NAMING_WORD[L] ?? []).map((x) => x.replace(/(\p{L})\1+/gu, "$1")).includes(whole) ) return whole;
+/* VOICE: the short voice list (the review, section 4, provisional WORD2 question): a laugh, a cry of pain or effort is an interjection
+   by nature; these pass ONLY in the voice kinds (group "voice"), each with its reason */
+export const VOICE = {
+  pl: { HE: "a giggle (HE-HE-HE)", HI: "a high giggle (HI-HI-HI)", CHE: "a dry chuckle (CHE-CHE)", OCH: "a groan of effort or a sigh", UCH: "a sigh of relief or tiredness" },
+  en: { HE: "a giggle (HE-HE-HE)", HEH: "a dry chuckle (HEH-HEH)", HO: "a deep laugh (HO-HO-HO)", ARGH: "a cry of pain", UGH: "a grunt of effort", OOF: "a blow to the body" }
+};
+/* ALLOW: built sounds that the near-dictionary refusal below would catch: the comic's K-respellings of a sound (the owner's own KRAK and
+   FWOOOSH; provisional WORD2 question: allowed by explicit list) and a few built words that only happen to be one letter from a word */
+export const ALLOW = {
+  pl: {
+    KRAK: "the owner's own example; the comic's crack",
+    KLANK: "metal on metal, the comic's K-spelling",
+    KRUNCZ: "the crunch, the comic's K-spelling in Polish letters",
+    SKRAK: "a built crack (SK + RA + K), only one letter from SKRA",
+    GLUP: "the owner's water family (a bubble going under), although it is one letter from GŁUP",
+    PLUP: "the owner's water family (a small drop)",
+    PLUMP: "the owner's water family (a heavy drop)",
+    DZING: "the Polish comic chime (DZYN without its diacritic), one letter from the loan DING only",
+    BLAM: "the comic gunshot read the same in Polish comics (iconic in English), one letter from BRAM only"
+  },
+  en: {
+    KRAK: "the owner's own example; the comic's crack",
+    FWOOSH: "the owner's own example FWOOOSH",
+    KROOSH: "the comic's crash (KA-KROOSH, the owner's example)",
+    KRUNCH: "the comic's crunch",
+    KLANK: "the comic's clank",
+    KLANG: "the comic's clang",
+    SKRAK: "a built crack (SK + RA + K)",
+    SKREE: "the owner's own example SKREE-",
+    KLAK: "the comic's clack of a switch or a latch",
+    GLUB: "the owner's water family (a bubble)",
+    SPLUMP: "the owner's water family (a heavy drop)",
+    PLIP: "a single drip, one letter from the iconic PLOP",
+    THWIP: "the classic snap of a bowstring or a web line",
+    CHOOM: "the owner's own example CHOOM!! (a heavy energy blast)",
+    SKROOM: "the owner's own example SKROOMM!! (a heavy smash), one vowel from SCRAM only"
+  }
+};
+/* refused only as a whole word (also on DICT; kept for callers) */
+export const NAMING_WORD = { pl: ["TAK", "JEST", "HEJ", "DOBRA", "NIE", "UPS"], en: ["YES", "YEAH", "NO", "MEH", "OOPS", "WOW"] };
+/* ---------- the refusal: dictionary words, near-dictionary words, respellings (the review, rules 3 and 4) ----------
+   Every form is compared in a CANONICAL spelling: diacritics stripped (sound words never have them, the deny list may), English
+   respellings folded (CK -> K, C -> K, QU -> KW, WH -> HW, PH -> F: KRAK = CRACK, HWOOSH = WHOOSH), then:
+   1. EXACT: a syllable or the whole word equals a denied word. Repeated letters are collapsed (CIAAACH -> CIACH), except for a denied
+      word that is itself written with a double letter (BAA, BOOM, GRR, SHH): that one matches only the doubled spelling (runs capped at
+      two), so BAA no longer blocks every BA (BA-DUM) and GRR no longer blocks every GRRRR-free HRRO (the collapse side effects).
+   2. NEAR: a syllable or the whole word (4+ letters) one letter away from a denied word of 4+ letters as a reader sees it (near1
+      below: PLOSK ~ PLUSK, TRZAK ~ TRZASK, BWEEP ~ BEEP, THUM ~ THUMP, DLIP ~ DRIP), or a denied 3-letter word with a K or T stuck on
+      (DIKT ~ DICK). An ICONIC word with a cut-off added at its end (SZSZT) and the neighbours of the denied word an ALLOWed
+      respelling stands for (KRAKT, KRRAKK next to CRACK = KRAK) are the comic's own family and pass; a letter changed or put inside an
+      ICONIC word is still near (BWEEP ~ BEEP, BRANG ~ BANG).
+   ICONIC passes everywhere, VOICE only in voice kinds, ALLOW passes the respelling and NEAR tests (not a literal dictionary word). */
+const DIA = { "Ą": "A", "Ć": "C", "Ę": "E", "Ł": "L", "Ń": "N", "Ó": "O", "Ś": "S", "Ź": "Z", "Ż": "Z" };
+export const DIACRITICS = /[ĄĆĘŁŃÓŚŹŻ]/u;
+const strip = (s) => String(s).replace(/[ĄĆĘŁŃÓŚŹŻ]/gu, (c) => DIA[c]);
+const fold = (s, L) => (L === "en" ? strip(s).replace(/CK/g, "K").replace(/QU/g, "KW").replace(/C(?!H)/g, "K").replace(/WH/g, "HW").replace(/PH/g, "F") : strip(s));
+const cap2 = (s) => s.replace(/(\p{L})\1{2,}/gu, "$1$1");
+const one = (s) => s.replace(/(\p{L})\1+/gu, "$1");
+/* the syllables of a word, marks removed */
+const sylls = (w) => clean(String(w).replace(/\+/g, "")).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean);
+const syllablesFlat = (w) => sylls(w).map(one);
+const flat = (x) => one(clean(x));
+const CONS = /^[BCDFGHJKLMNPQRSTVWXZ]$/;
+/* one letter away IN THE WAY A READER STILL SEES THE WORD (PLOSK = PLUSK, TRZAK = TRZASK, DLIP = DRIP, THUM = THUMP, SPLASK = PLASK):
+   a vowel for a vowel (in a 4-letter word only one that sounds alike: KLYK = KLIK), R for L or a consonant for its voiced/voiceless
+   twin, a letter dropped or added inside or at the end, an S stuck in front. A changed or added first letter reads as another word
+   and is not "near" (WRAM is not TRAM, CZUM is not SZUM), nor is any other consonant swap (THWAP is not THWACK). */
+const VOWELS = "AEIOUY", ALIKE = new Set(["IY", "YI", "OU", "UO", "RL", "LR", "PB", "BP", "TD", "DT", "KG", "GK", "FV", "VF", "FW", "WF", "SZ", "ZS"]);
+function near1(a, b) {
+  if ( a === b ) return true;
+  const la = a.length, lb = b.length; if ( Math.abs(la - lb) > 1 ) return false;
+  let i = 0; while ( i < la && i < lb && a[i] === b[i] ) i++;
+  if ( la === lb ) {
+    if ( a.slice(i + 1) !== b.slice(i + 1) || i === 0 ) return false;
+    const x = a[i], y = b[i];
+    if ( VOWELS.includes(x) && VOWELS.includes(y) ) return la >= 5 || ALIKE.has(x + y);   // a short word: only a vowel that sounds alike (KLYK = KLIK)
+    return ALIKE.has(x + y);                                                              // R for L, a voiced for a voiceless twin
+  }
+  const [lo, sh] = la > lb ? [a, b] : [b, a];
+  if ( lo.slice(i + 1) !== sh.slice(i) ) return false;
+  return i > 0 || lo[0] === "S";
+}
+const TABLES = {};
+function tables(L) {
+  if ( TABLES[L] ) return TABLES[L];
+  const keys = (o) => new Set(Object.keys(o ?? {}).map((k) => one(fold(k, L))));
+  const icon = keys(ICONIC[L]);
+  const single = new Set(), dbl = new Set(), long = [], longD = [], three = new Set(), raw = new Set();
+  for ( const e of [...(DICT[L] ?? []), ...(NAMING_WORD[L] ?? [])] ) {
+    const f = fold(clean(e), L), c1 = one(f), c2 = cap2(f);
+    raw.add(one(clean(e)));
+    if ( c1 !== c2 ) dbl.add(c2); else single.add(c1);
+    if ( c1 !== c2 ) { if ( c2.length >= 4 ) longD.push(c2); }       // a doubled word is near only to its doubled spelling
+    else if ( c1.length >= 4 ) long.push(c1); else if ( c1.length === 3 ) three.add(c1);
+  }
+  const allow = keys(ALLOW[L]);
+  /* a denied word that an ALLOWed respelling stands for (CRACK for KRAK): its neighbours are the comic's family (KRAKT, KRRAKK) */
+  const allowNear = new Set(long.filter((d) => allow.has(d)));
+  return (TABLES[L] = { single, dbl, long, longD, three, raw, icon, voice: keys(VOICE[L]), allow, allowNear });
+}
+/** why a form (a syllable, or the syllables joined) is refused: { why: "word" | "near", like } | null */
+function refuse(x, L, T) {
+  const f = fold(x, L), c1 = one(f), c2 = cap2(f);
+  const exact = T.single.has(c1) || T.dbl.has(c2);
+  if ( exact && T.raw.has(one(x)) ) return { why: "word", like: c1 };   // literally a dictionary word (never allowed)
+  if ( T.allow.has(c1) ) return null;
+  if ( exact ) return { why: "word", like: c1 };                              // a respelling of one (KREEK, HWOOSH)
+  if ( c2.length >= 4 ) for ( const d of T.longD ) if ( near1(c2, d) && !(T.icon.has(one(d)) && c2.startsWith(d)) ) return { why: "near", like: d };
+  if ( c1.length >= 4 ) {
+    for ( const d of T.long ) if ( near1(c1, d) && !T.allowNear.has(d) && !(T.icon.has(d) && c1.startsWith(d)) ) return { why: "near", like: d };
+    const head = c1.slice(0, -1);
+    if ( c1.length === 4 && T.three.has(head) && /[KT]/.test(c1.at(-1)) ) return { why: "near", like: head };
   }
   return null;
 }
+function check(word, lang, o = {}) {
+  const langs = lang ? [lang] : Object.keys(DICT);
+  const raw = sylls(word);
+  if ( !raw.length ) return null;
+  const group = o.group ?? KINDS[o.kind]?.group;
+  for ( const L of langs ) {
+    const T = tables(L), ok = (x) => { const c = one(fold(x, L)); return T.icon.has(c) || (group === "voice" && T.voice.has(c)); };
+    const whole = raw.join("");
+    if ( ok(whole) || raw.every(ok) ) continue;                       // HA-HA-HA, SHHH-SHHHHH: iconic syllables only
+    if ( raw.length > 1 ) { const r = refuse(whole, L, T); if ( r ) return { part: raw.map(one).join("-"), ...r }; }
+    for ( const x of raw ) if ( !ok(x) ) { const r = refuse(x, L, T); if ( r ) return { part: one(x), ...r }; }
+  }
+  return null;
+}
+/** is this a dictionary word or a near-dictionary word (not a built onomatopoeia)? -> the offending part or null. Checks the whole
+    word (syllables joined) and every syllable. o.kind / o.group: the voice list passes in voice kinds. */
+export function naming(word, lang = null, o = {}) { return check(word, lang, o)?.part ?? null; }
+/** can the word be SAID (the review, rule 12, 13)? -> what is wrong, or null. Per syllable: no Polish diacritic; English never "II"
+    (a long i is EE); a doubled letter may open a syllable only when it lasts (SSST, MMM, RRMM; never VVRT, WWI, HHY); a syllable with
+    a vowel has no consonant pile of 5+ letters, no plosive-R/L-plosive (KRKAK, KRCH) and no three plosives in a row; a syllable without
+    a vowel is one clear lasting sound with at most two letters before and after it (BZZT, PSST, HMM, GRRMM, NNGH, PFFT, CHK). */
+export function sayable(word, lang = "en") {
+  for ( const raw of sylls(word) ) {
+    if ( DIACRITICS.test(raw) ) return `${raw}: a Polish diacritic`;
+    if ( lang === "en" && /II/.test(raw) ) return `${raw}: II (English writes a long i as EE)`;
+    const lead = raw.match(/^(\p{L})\1/u);
+    if ( lead && !/[SZRMNFAEIOUY]/.test(lead[1]) ) return `${raw}: opens with a doubled ${lead[1]}`;
+    const c = one(raw);
+    if ( /[AEIOUY]/.test(c) ) {
+      for ( const pile of c.split(/[AEIOUY]+/) ) {
+        if ( pile.length >= 5 ) return `${raw}: consonant pile ${pile}`;
+        if ( /[BDGKPT][RL][BCDGKPT]/.test(pile) ) return `${raw}: ${pile} cannot be said`;
+        if ( /[BDGKPT]{3}/.test(pile) ) return `${raw}: three plosives ${pile}`;
+      }
+    } else if ( !/^(?:CZ|SZ|SH|TS|[BCDFGHKPTVWS]){0,2}[RMNSZFH]{1,3}(?:CH|[KTPGH]){0,2}$/.test(c) && !/^[BCDFGHKNPST]{2,4}$/.test(c) ) return `${raw}: no vowel and no one clear lasting sound`;
+  }
+  return null;
+}
+/** the same refusal, with its reason, for sheets and checks: { part, why: "word" | "near" } or null */
+export function refusal(word, lang, o = {}) { return check(word, lang, o); }
 /** is every character of the word lettered by every font? (beyond this pure set, check.mjs proves it per font) */
 export const renderable = (t) => { const w = clean(t).replace(/\+/g, ""); return w.length > 0 && w.length <= MAX_LEN + 8 && RENDERABLE.test(w); };
 
@@ -313,37 +750,50 @@ export const renderable = (t) => { const w = clean(t).replace(/\+/g, ""); return
    of KRAK, the "T" of BZZT). Comic letterers lengthen only the sustain: BOOOOM (the resonance), BZZZZT (the buzz), GRRRR (the growl),
    SSSS (the hiss), HMMMM (the hum), FFFUUU (the air); never the attack or the cutoff (no KKKRAK, no BOOMMM-as-a-bang). So every
    letter belongs to a sustain CLASS and every sound kind lists, in order, which classes are its sustain:
-     V vowels (A E I O U Y Ą Ę Ó)  resonance, ringing, voice, open boom     R  rolling, growl, engine, grinding, rasp
-     Z buzz (Z Ż Ź, the Z of RZ)    electricity, insects, energy            S  hiss (S Ś, Polish SZ as a pair: SZSZSZ; English SH -> SHHH)
-     M hum (M N Ń, the N of NG)     drone, charge, mind, the tail of a boom  F  air (F W)   H  breath (H, the H of CH)
+     V vowels (A E I O U Y)         resonance, ringing, voice, open boom     R  rolling, growl, engine, grinding, rasp
+     Z buzz (Z, the Z of RZ)        electricity, insects, energy            S  hiss (S; Polish SZ as an S run: SSSSZ; English SH -> SHHH)
+     M hum (M N, the N of NG)       drone, charge, mind, the tail of a boom  F  air (F; W only at a syllable's end after a vowel: POOWW)
+     H  breath (H, the H of CH)     no diacritic letter is in any class (sound words have none)
    The stretch goes to the LAST run of the first listed class found in the word's LAST syllable (a prefix KA- or a first TRA- never
    stretches), up to MAX_RUN letters; what does not fit spills only FORWARD into the run right after it when that run is also one of
    the kind's classes (up to SPILL_RUN: BUUUMMM), never backward. Letters outside every class
    (plosives, affricates CZ DZ, L J) never repeat. A word with none of its kind's classes falls back to V R Z S M F H.
    A "+" in a CALLER's word (L.vocab.add) still marks an explicit stretch point and wins over the rule; the built-in banks have no "+". */
-export const CLASSES = { V: "AEIOUYĄĘÓ", R: "R", Z: "ZŻŹ", S: "SŚ", M: "MNŃ", F: "FW", H: "H" };
+/* the review (2026-11-13, rule 1): sound words have NO Polish diacritics, so no diacritic letter is a lasting class either */
+export const CLASSES = { V: "AEIOUY", R: "R", Z: "Z", S: "S", M: "MN", F: "FW", H: "H" };
 export const DEFAULT_HOLD = ["V", "R", "Z", "S", "M", "F", "H"];
-const DIGRAPHS = { pl: { SZ: { cls: "S", rep: "SZ" }, RZ: { cls: "Z", rep: "Z", lead: "R" }, CH: { cls: "H", rep: "H", lead: "C" }, CZ: { cls: null }, DZ: { cls: null }, DŹ: { cls: null }, DŻ: { cls: null } },
-  en: { SH: { cls: "S", rep: "H", lead: "S" }, NG: { cls: "M", rep: "N", tail: "G" }, CH: { cls: null }, TH: { cls: null }, CK: { cls: null }, PH: { cls: "F", rep: "F", lead: "P" }, WH: { cls: null } } };
-/** split a word into sound units (letters, or digraphs of the language) with their sustain class */
-export function units(text, lang = "pl") {
-  const D = DIGRAPHS[lang] ?? DIGRAPHS.pl, ch = [...String(text)], out = [];
+/* digraphs. Polish SZ lengthens as an S run with one SZ at its end (SSSSZ: the review, rule 14), never SZSZSZ; English PH is not a
+   lasting sound (the review, rule 5: PHAKK stretched to PFAAAAKK); English SH -> SHHH, NG -> NNNG */
+const DIGRAPHS = { pl: { SZ: { cls: "S", rep: "S", tail: "Z" }, RZ: { cls: "Z", rep: "Z", lead: "R" }, CH: { cls: "H", rep: "H", lead: "C" }, CZ: { cls: null }, DZ: { cls: null } },
+  en: { SH: { cls: "S", rep: "H", lead: "S" }, NG: { cls: "M", rep: "N", tail: "G" }, CH: { cls: null }, TH: { cls: null }, CK: { cls: null }, PH: { cls: null }, WH: { cls: null } } };
+/** split a word into sound units (letters, or digraphs of the language) with their sustain class. W is a lasting letter only at the end
+    of a syllable after a vowel (POOWW, BATOOWW: the review, rule 6), never THWWWIT or FWWWOOP. */
+export function units(text, lang = "en") {
+  const D = DIGRAPHS[lang] ?? DIGRAPHS.en, ch = [...String(text)], out = [];
   for ( let i = 0; i < ch.length; i++ ) {
     const two = ch[i] + (ch[i + 1] ?? "");
     if ( D[two] ) { out.push({ t: two, ...D[two], n: 1 }); i++; continue; }
-    const cls = Object.entries(CLASSES).find(([, s]) => s.includes(ch[i]))?.[0] ?? null;
+    let cls = Object.entries(CLASSES).find(([, s]) => s.includes(ch[i]))?.[0] ?? null;
+    if ( ch[i] === "W" ) {
+      let j = i; while ( ch[j] === "W" ) j++;
+      const end = j >= ch.length || /[^\p{L}]/u.test(ch[j]), afterVowel = i > 0 && CLASSES.V.includes(ch[i - 1]);
+      if ( !(end && afterVowel) ) cls = null;
+    }
+    if ( lang === "en" && ch[i] === "I" ) cls = null;   // English short I is clipped and a long one is written EE (never SHNIIIK)
     out.push({ t: ch[i], cls, rep: ch[i], n: 1 });
   }
   /* merge repeats of one unit into a run (UUU, SZSZ) */
   const runs = [];
   for ( const u of out ) { const r = runs.at(-1); if ( r && r.t === u.t ) r.n++; else runs.push({ ...u }); }
+  runs.forEach((r) => { r.n0 = r.n; });
   return runs;
 }
 const renderRun = (r) => {
   if ( !r.cls || r.rep === r.t ) return r.t.repeat(r.n);
-  if ( r.rep === "SZ" ) return "SZ".repeat(r.n);
-  if ( r.tail ) return r.rep.repeat(r.n) + r.tail;              // NG -> NNNG
-  if ( r.lead != null && r.rep ) return r.lead + r.rep.repeat(r.n);   // SH -> SHHH, RZ -> RZZZ, CH -> CHHH
+  const n0 = r.n0 ?? r.n, add = Math.max(0, r.n - n0);
+  if ( r.t === "SZ" ) return add ? "S".repeat(add + n0) + "Z" : "SZ".repeat(n0);  // SZ -> SSSSZ, a stretched SZSZ -> SSSSSZ
+  if ( r.tail ) return r.rep.repeat(add) + r.t.repeat(n0);         // NG -> NNNG
+  if ( r.lead != null && r.rep ) return r.t.repeat(n0) + r.rep.repeat(add);   // SH -> SHHH, RZ -> RZZZ, CH -> CHHH
   return r.t.repeat(r.n);
 };
 /** index of the sustain run: the last run of the first class of `hold` (then of the default order) in the last syllable, or -1 */
@@ -354,37 +804,37 @@ export function sustainOf(runs, last, hold = DEFAULT_HOLD) {
   return -1;
 }
 /** stretch a word by `extra` letters on its sustain (see above). hold = the kind's classes in order; lang picks the digraphs. */
-export function stretchText(text, extra, hold = DEFAULT_HOLD, lang = "pl") {
-  const pl = stretchPlan(text, extra, hold, lang);
+export function stretchText(text, extra, hold = DEFAULT_HOLD, lang = "en", maxRun = MAX_RUN) {
+  const pl = stretchPlan(text, extra, hold, lang, maxRun);
   return pl ? pl.runs.map(renderRun).join("") : String(text ?? "");
 }
 /** the stretch as sound units: { before, runs (after), last (first unit of the last syllable), target } or null (nothing to stretch);
-    check-words.mjs proves the rule on it (which units grew) */
-export function stretchPlan(text, extra, hold = DEFAULT_HOLD, lang = "pl") {
+    check-words.mjs proves the rule on it (which units grew). An EMPTY hold = a percussive sound: never stretched. */
+export function stretchPlan(text, extra, hold = DEFAULT_HOLD, lang = "en", maxRun = MAX_RUN) {
   let n = Math.max(0, Math.min(MAX_EXTRA, Math.round(extra)));
   const t = String(text ?? "");
-  if ( !n || /\d/.test(t) ) return null;
+  if ( !n || /\d/.test(t) || (Array.isArray(hold) && !hold.length) ) return null;
   const runs = units(t, lang), before = runs.map((r) => ({ ...r }));
   let last = 0; runs.forEach((r, i) => { if ( r.t === "-" || r.t === " " ) last = i + 1; });
   /* the target: the last run of the first listed class in the last syllable; what does not fit spills only FORWARD into the run
      right after it when that run is also a listed sustain class (BUUUMMM, SZUUUMMM), never backward (no FFFSSS, no WWRRR) */
   const target = sustainOf(runs, last, hold);
   if ( target < 0 ) return null;
-  const cap = (r, max) => Math.floor(max / (r.rep === "SZ" ? 2 : 1));
+  const cap = (r, max) => (r.t === "SZ" ? max - 1 : max);
   const r = runs[target], nx = runs[target + 1];
   const tail = nx?.cls && nx.cls !== "V" && r.cls === "V" && hold.includes(nx.cls);
   /* the comic's manner: a ringing vowel followed by a continuant of the sound (M N W R S Z...) shares the stretch with it, one
      letter in three goes to the consonant (TWOOMM, BAAMM, POOWW: the hum or the air after the ring); otherwise only the overflow */
   const share = tail ? Math.floor(n / 3) : 0;
-  const add = Math.max(0, Math.min(n - share, cap(r, MAX_RUN) - r.n)); r.n += add; n -= add;
+  const add = Math.max(0, Math.min(n - share, cap(r, maxRun) - r.n)); r.n += add; n -= add;
   if ( n > 0 && nx?.cls && hold.includes(nx.cls) ) nx.n += Math.max(0, Math.min(n, cap(nx, SPILL_RUN) - nx.n));
   return { before, runs, last, target };
 }
 /** stretch a template: a CALLER's "+" marks are explicit stretch points (shared stretch); without marks the sustain rule above */
-export function expand(tpl, extra, hold = DEFAULT_HOLD, lang = "pl") {
+export function expand(tpl, extra, hold = DEFAULT_HOLD, lang = "en", maxRun = MAX_RUN) {
   const marks = (tpl.match(/\+/g) ?? []).length;
   const total = Math.max(0, Math.min(MAX_EXTRA, Math.round(extra)));
-  if ( !marks ) return total > 0 ? stretchText(tpl, total, hold, lang) : tpl;
+  if ( !marks ) return total > 0 ? stretchText(tpl, total, hold, lang, maxRun) : tpl;
   let out = "", k = 0, given = 0, spill = 0;
   for ( const c of tpl ) {
     if ( c === "+" ) {
@@ -397,24 +847,26 @@ export function expand(tpl, extra, hold = DEFAULT_HOLD, lang = "pl") {
     }
     out += c;
   }
-  return spill > 0 ? stretchText(out, spill, hold, lang) : out;
+  return spill > 0 ? stretchText(out, spill, hold, lang, maxRun) : out;
 }
 /* ---------- the exclamation scale 0..2 (the user's rule: the number of "!" is part of how the word shows the sound; the comic
    grades them up to two: POW!  TWOOM!!  FWOOOSH!!) ----------
    0  quiet, or a soft sustained sound that is not loud (a hum, wind, a sigh, a pipe hissing)   SSSS   HMMM   UFF
-   1  an ordinary sound, or a loud one with a soft onset                                          KRAK!  ŁUP!   POW!
-   2  loud                                                                                        BUUMM!! TRACH!! SKRAMM!!
-   loud < 0.25 -> 0; < 0.6 -> 1; else 2; then one less for a soft onset (the kind's sharp < 0.35) unless very loud (>= 0.78), and
-   one less for a long sound that is not loud (long > 0.7 and loud < 0.6). A word ending in "…" trails off and keeps it (no "!").
-   bangs: 0..2 forces (a larger number is 2). */
+   1  an ordinary sound, or a loud one with a soft onset                                          KRAK!  PAF!   POW!
+   2  very loud with a sharp onset (the look review: "!!" only from about 0.85)                   BUUMM!! KRAKK!! SKRAMM!!
+   loud < 0.25 -> 0; < 0.85 -> 1; else 2 when the onset is sharp (the kind's sharp >= 0.5) or the sound is at the very top (>= 0.95),
+   else 1; one less for a soft onset (sharp < 0.35) or a long sound (long > 0.7) that is not loud (loud < 0.6). Then the kind's cap
+   (maxBangs: kinds that are never loud, a sigh, a purr, a drip, never "!!"). A word ending in "…" trails off and keeps it (no "!").
+   bangs: 0..2 forces (a larger number is 2; the kind's cap still holds). */
 export const MAX_BANGS = 2;
-export function bangsFor(loud, sharp, long, force = null) {
-  if ( Number.isFinite(force) ) return Math.max(0, Math.min(MAX_BANGS, Math.round(force)));
+export function bangsFor(loud, sharp, long, force = null, cap = MAX_BANGS) {
+  const top = Math.max(0, Math.min(MAX_BANGS, Number.isFinite(cap) ? cap : MAX_BANGS));
+  if ( Number.isFinite(force) ) return Math.max(0, Math.min(top, Math.round(force)));
   if ( loud < 0.25 ) return 0;
-  let n = loud < 0.6 ? 1 : 2;
-  if ( sharp < 0.35 && loud < 0.78 ) n--;
-  if ( long > 0.7 && loud < 0.6 ) n--;
-  return Math.max(0, Math.min(MAX_BANGS, n));
+  let n = loud < 0.85 ? 1 : (sharp >= 0.5 || loud >= 0.95 ? 2 : 1);
+  if ( sharp < 0.35 && loud < 0.6 ) n--;
+  else if ( long > 0.7 && loud < 0.6 ) n--;
+  return Math.max(0, Math.min(top, n));
 }
 /** duration 0..1 from the call: `long` (0 short .. 1 long) or `duration` (ms: 100 ms -> 0, 2 s -> 1); null = not given */
 export function longOf(o = {}) {
@@ -426,7 +878,10 @@ export function longOf(o = {}) {
 export const MAX_RUN = 6;
 export const MAX_EXTRA = 12;
 export const SPILL_RUN = 3;
-export const capRuns = (t) => String(t).replace(/(\p{L})\1{6,}/gu, (m, c) => c.repeat(MAX_RUN));
+export const capRuns = (t, max = MAX_RUN) => String(t).replace(new RegExp(`(\\p{L})\\1{${max},}`, "gu"), (m, c) => c.repeat(max));
+/* the stretch classes of a kind (empty for a percussive kind: never stretched) and its longest run */
+const holdOf = (k) => k?.stretchHold ?? k?.hold ?? DEFAULT_HOLD;
+const runOf = (k) => k?.run ?? MAX_RUN;
 const tierOf = (loud) => (loud < 0.34 ? "s" : loud < 0.67 ? "m" : "l");
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 /** loudness 0..1 from the call: `loud` wins, else `magnitude` (0..2 or tiny..epic, the engine's size input), else 0.4 */
@@ -447,7 +902,7 @@ export function langOf(lang, known = ["pl", "en"]) {
 /* ---------- ACCENT: where the sound is loud inside the word (the seam with LOOK's per-letter size) ----------
    accentOf(text, { kind | mood, lang }) -> { accent: number[] (one 0..1 weight per character of the engine's normalised word:
    NFC, Polish upper case, single spaces; the same characters as plan.chars), peak: 0..1 (where the loudest letter sits), env }.
-   1 = the loud peak, ~0.55 = a quiet lead-in (a prefix KA-, the first TRA- of TRA-TA-TRACH), lower = a fading tail; spaces 0.
+   1 = the loud peak, ~0.55 = a quiet lead-in (a prefix KA-, the first syllables of a repeat), lower = a fading tail; spaces 0.
    The shape follows the sound's envelope (ENV of the kind, or of the mood for plain text):
      hit    the attack and the start of the sustain are the peak, the stretched sustain decays (KRAK: K R A peak, K 0.7)
      swell  quiet attack, the sustain rises to the peak at its end (GRRRAAAH, WRRRUM: the growl/engine builds)
@@ -458,12 +913,18 @@ export function langOf(lang, known = ["pl", "en"]) {
    (sustainOf, the same rule as stretching), cutoff = the letters after it. */
 export const ENVS = ["hit", "swell", "fade", "arc", "beat"];
 /* CONTINUOUS sounds: the default flow style of a kind (see flow() in createVocab); a kind not listed: repeat -> cycle, long -> drone, else crackle */
-export const FLOW_STYLES = ["steady", "drone", "crackle", "gust", "cycle"];
+export const FLOW_STYLES = ["steady", "drone", "crackle", "gust", "cycle", "mix"];
 export const FLOW = { hiss: "steady", shush: "steady", fizzle: "steady", psychic: "steady",
   engine: "drone", rumble: "drone", powerup: "drone", beam: "drone", thunder: "drone", zoom: "drone",
   fire: "crackle", crackle: "crackle", scrape: "crackle", zap: "crackle", crumble: "crackle", creak: "crackle",
   wind: "gust", whoosh: "gust", sigh: "gust",
-  siren: "cycle", gunfire: "cycle", heartbeat: "cycle", laugh: "cycle", beep: "cycle", drip: "cycle", roar: "drone" };
+  siren: "cycle", gunfire: "cycle", heartbeat: "cycle", laugh: "cycle", beep: "cycle", drip: "cycle", roar: "drone",
+  purr: "steady", snakehiss: "steady", snarl: "drone", plane: "drone", minigun: "drone", rocket: "drone", trumpet: "gust",
+  helicopter: "cycle", laserpistol: "cycle", bark: "cycle", squeak: "cycle", meow: "gust", reload: "cycle",
+  ambulance: "cycle", police: "cycle", firetruck: "cycle", fastcar: "gust", clunker: "cycle", mech: "cycle", drill: "drone", hammer: "cycle",
+  hail: "crackle", rain: "steady", storm: "mix", tornado: "mix" };
+/* composite sounds (mix): the parts a storm or a tornado is made of, the first is the bed, the others come and go */
+export const MIX = { storm: ["rain", "wind", "thunder"], tornado: ["wind", "rumble", "crash"] };
 /* ---------- CHARACTER: what the sound is LIKE, so the lettering's look can fit it (the user: "napisy mają pasować wyglądem do
    dźwięków, które opisują"; the drawing is LOOK's, these are the facts it chooses from) ----------
    word.character = { hard, sharp, heavy, wet, metal, electric, heat, sustain, rough, pitch, contour, material, texture }
@@ -478,10 +939,10 @@ export const FLOW = { hiss: "steady", shush: "steady", fizzle: "steady", psychic
      rough    0 clean .. 1 gritty/noisy (sound.rough)
      pitch    -1 low .. 1 high          (sound.pitch)
      contour  "fall" | "rise" | "arc" | "pulse" | "steady"   (how it moves in time; from the accent envelope)
-     material one of MATERIALS: what makes the sound (stone wood glass metal water fire air flesh energy mind machine voice rubber)
+     material one of MATERIALS: what makes the sound (stone wood glass metal water fire air flesh energy mind machine voice rubber animal)
      texture  one of TEXTURES: its surface (crisp jagged gritty smooth ringing billowy bubbly shaky)
    Per kind in CHAR below (hard heavy wet metal electric heat material texture); plain text gets the character of its mood. */
-export const MATERIALS = ["stone", "wood", "glass", "metal", "water", "fire", "air", "flesh", "energy", "mind", "machine", "voice", "rubber"];
+export const MATERIALS = ["stone", "wood", "glass", "metal", "water", "fire", "air", "flesh", "energy", "mind", "machine", "voice", "rubber", "animal"];
 export const TEXTURES = ["crisp", "jagged", "gritty", "smooth", "ringing", "billowy", "bubbly", "shaky"];
 const CHAR = {
   punch: ".7 .6 0 0 0 0 flesh crisp", smash: ".9 .9 0 .2 0 0 stone jagged", slap: ".4 .3 .1 0 0 0 flesh crisp",
@@ -491,7 +952,7 @@ const CHAR = {
   crumble: ".6 .7 0 0 0 0 stone gritty", rumble: ".5 1 0 0 0 0 stone shaky", creak: ".6 .4 0 0 0 0 wood gritty",
   scrape: ".8 .5 0 .6 0 .1 metal gritty",
   boom: ".6 1 0 0 0 .7 fire billowy", whump: ".3 .8 0 0 0 .2 air billowy", thunder: ".6 1 .1 0 .5 0 air shaky",
-  zap: ".8 .2 0 .2 1 .2 energy jagged", beam: ".5 .4 0 0 .8 .4 energy smooth", gunshot: "1 .5 0 .7 0 .3 metal crisp",
+  zap: ".8 .2 0 .2 1 .2 energy jagged", beam: ".5 .4 0 0 .8 .4 energy smooth",
   gunfire: "1 .5 0 .7 0 .3 metal crisp", ricochet: "1 .2 0 1 0 0 metal ringing",
   whoosh: "0 .3 0 0 0 0 air smooth", zoom: ".2 .4 0 0 0 0 air smooth", bounce: ".2 .3 0 0 0 0 rubber bubbly",
   teleport: ".3 .1 0 0 .6 -.2 energy smooth", wind: "0 .2 0 0 0 -.5 air smooth",
@@ -503,7 +964,19 @@ const CHAR = {
   siren: ".5 .4 0 .4 .5 0 machine smooth",
   roar: ".4 .9 .1 0 0 .3 voice gritty", pain: ".4 .5 0 0 0 0 voice shaky", effort: ".5 .7 0 0 0 0 voice gritty",
   relief: "0 .3 0 0 0 0 voice smooth", sigh: "0 .2 0 0 0 0 voice smooth", cheer: ".3 .3 0 0 0 .2 voice bubbly",
-  laugh: ".3 .3 0 0 0 0 voice bubbly", shush: "0 .1 0 0 0 0 voice smooth", heartbeat: ".4 .6 .3 0 0 .2 flesh smooth"
+  laugh: ".3 .3 0 0 0 0 voice bubbly", shush: "0 .1 0 0 0 0 voice smooth", heartbeat: ".4 .6 .3 0 0 .2 flesh smooth",
+  bark: ".4 .5 .1 0 0 0 animal gritty", snarl: ".5 .6 .2 0 0 .2 animal gritty", meow: ".1 .1 0 0 0 0 animal smooth",
+  purr: "0 .2 0 0 0 .3 animal shaky", cathiss: ".3 .1 .1 0 0 0 animal jagged", squeak: ".2 0 0 0 0 0 animal crisp",
+  snakehiss: ".1 .1 .1 0 0 -.2 animal smooth", trumpet: ".3 .9 0 .2 0 0 animal ringing",
+  plane: ".4 .8 0 .6 0 .2 machine smooth", helicopter: ".5 .7 0 .6 0 0 machine shaky",
+  pistol: "1 .3 0 .7 0 .3 metal crisp", rifle: "1 .45 0 .7 0 .3 metal jagged", shotgun: "1 .8 0 .6 0 .4 metal jagged",
+  minigun: ".9 .7 0 .8 0 .5 machine shaky", blaster: ".8 .7 0 .2 .8 .6 energy jagged", laserpistol: ".5 .1 0 0 1 .3 energy crisp", silenced: ".6 .2 0 .5 0 0 metal smooth",
+  sword: ".9 .4 0 1 0 0 metal ringing", arrow: ".5 .1 0 0 0 0 wood crisp", thrown: ".6 .3 0 .3 0 0 wood crisp",
+  grenade: ".7 1 0 .3 0 .8 fire jagged", rocket: ".4 .7 0 .2 0 .9 fire billowy", reload: ".9 .2 0 1 0 0 machine crisp",
+  ambulance: ".5 .4 0 .45 .5 0 machine smooth", police: ".5 .4 0 .4 .6 .1 machine smooth", firetruck: ".6 .6 0 .5 .4 .2 machine ringing",
+  fastcar: ".6 .6 0 .7 0 .3 machine smooth", clunker: ".6 .6 0 .8 0 .1 machine shaky", mech: "1 1 0 1 .3 0 machine jagged",
+  drill: ".8 .3 0 .8 .4 .2 machine gritty", hammer: "1 .5 0 .9 0 0 metal ringing", hail: ".7 .2 .4 0 0 -.6 water crisp",
+  rain: "0 .3 1 0 0 -.3 water smooth", storm: ".5 1 .7 0 .5 -.2 air shaky", tornado: ".6 1 0 0 0 0 air billowy"
 };
 for ( const [id, s] of Object.entries(CHAR) ) {
   const [hard, heavy, wet, metal, electric, heat, material, texture] = s.split(" ");
@@ -525,12 +998,18 @@ export function characterOf(o = {}) {
     contour: (FLOW[o.kind] === "steady" || o.steady) ? "steady" : CONTOUR[env] ?? "fall", material: c.material, texture: c.texture };
 }
 const KIND_ENV = {
-  hit: "punch smash slap thud stomp clang slash bite crack shatter crash boom thunder zap gunshot splash squish drip click teleport bounce chime pain cheer",
+  hit: "punch smash slap thud stomp clang slash bite crack shatter crash boom thunder zap splash squish drip click teleport bounce chime pain cheer",
   swell: "rumble crumble powerup roar engine fire psychic effort",
   fade: "sigh fizzle whiff relief hiss shush whump",
   arc: "whoosh zoom ricochet wind beam scrape creak",
   beat: "gunfire laugh heartbeat beep siren crackle"
 };
+KIND_ENV.hit += " bark squeak pistol rifle shotgun blaster laserpistol silenced sword thrown grenade";
+KIND_ENV.swell += " snarl trumpet minigun rocket";
+KIND_ENV.fade += " cathiss snakehiss";
+KIND_ENV.arc += " meow plane arrow";
+KIND_ENV.beat += " purr helicopter reload ambulance police firetruck clunker mech hammer hail";
+KIND_ENV.arc += " fastcar"; KIND_ENV.swell += " drill storm tornado"; KIND_ENV.fade += " rain";
 for ( const [env, ids] of Object.entries(KIND_ENV) ) for ( const id of ids.split(" ") ) KINDS[id].env = env;
 /** the envelope of a plain text's mood (callers that pass their own text: the engine's mood decides) */
 export const MOOD_ENV = { impact: "hit", crack: "hit", crash: "hit", boom: "hit", zap: "hit", splash: "hit", pain: "hit", tick: "hit",
@@ -540,7 +1019,7 @@ export function accentOf(text, o = {}) {
   const word = clean(text), chars = [...word];
   const k = o.kind ? KINDS[o.kind] : null;
   const env = o.env ?? k?.env ?? MOOD_ENV[o.mood] ?? "hit";
-  const hold = o.hold ?? k?.hold ?? DEFAULT_HOLD, lang = o.lang === "en" ? "en" : "pl";
+  const hold = o.hold ?? k?.hold ?? DEFAULT_HOLD, lang = o.lang === "pl" ? "pl" : "en";
   const acc = new Array(chars.length).fill(0);
   /* syllables by character index (split on - and spaces) */
   const syl = []; let cur = null;
@@ -570,7 +1049,7 @@ export function accentOf(text, o = {}) {
   };
   if ( env === "beat" ) syl.forEach((s, j) => shape(s, j === syl.length - 1 ? 1 : 0.9, "beat"));
   else {
-    syl.slice(0, -1).forEach((s) => shape(s, 0.55, "hit"));                // lead-in syllables (a prefix, TRA- of TRA-TA-TRACH)
+    syl.slice(0, -1).forEach((s) => shape(s, 0.55, "hit"));                // lead-in syllables (a prefix KA-, the first syllables of a repeat)
     shape(syl.at(-1), 1, env);
   }
   /* trailing marks after the last syllable */
@@ -647,17 +1126,25 @@ export function createVocab() {
     /* stretch from DURATION only: nothing for a short sound (long <= 0.3: THUD!, POW!), up to (kind stretch + 1) extra letters for the
        longest; the templates already carry the comic's usual doubling (TWOOM-like OO, MM), so a normal sound stays near it */
     const extra = (k.stretch + 1) * Math.max(0, long - 0.3) / 0.7 + (Number.isFinite(o.stretchAdd) ? o.stretchAdd : 0);
-    let text = capRuns(clean(expand(core, o.stream ? 0 : extra, k.hold ?? DEFAULT_HOLD, usedLang)));
-    /* prefix at the very top (a seeded coin), or when asked */
+    let text = capRuns(clean(expand(core, o.stream ? 0 : extra, holdOf(k), usedLang, runOf(k))), runOf(k));
+    /* a percussive repeating sound lasts longer by MORE HITS (TOK-TOK -> TOK-TOK-TOK-TOK), never by a stretched vowel */
+    if ( k.perc && k.repeat && !o.stream ) {
+      const sy = core.split("-"), unit = k.repeat === "pair" && sy.length >= 2 ? sy.slice(-2).join("-") : sy.at(-1);   // a heartbeat adds BA-DUM, not DUM
+      const more = Math.round(2 * Math.max(0, long - 0.3) / 0.7) / (unit.includes("-") ? 2 : 1);
+      for ( let j = 0; j < more && (text + "-" + unit).length <= MAX_LEN; j++ ) text += "-" + unit;
+    }
+    /* prefix at the very top (a seeded coin), or when asked; never one that makes the final text a dictionary word (KA-POW = KAPOW) */
     const pres = k.pre?.[usedLang] ?? [];
-    const wantPre = o.prefix === false ? false : (typeof o.prefix === "string" ? o.prefix : (o.prefix === true || (loudEff >= 0.92 && R.chance(0.5))) && pres.length ? R.pick(pres) : false);
-    if ( wantPre && !o.stream && !text.includes("-") ) text = clean(wantPre) + text;
-    const bangs = o.stream ? 0 : (trails && !Number.isFinite(o.bangs) ? 0 : bangsFor(loud, k.sound.sharp, long, o.bangs));
+    let wantPre = o.prefix === false ? false : (typeof o.prefix === "string" ? o.prefix : (o.prefix === true || (loudEff >= 0.92 && R.chance(0.5))) && pres.length ? R.pick(pres) : false);
+    if ( wantPre && !o.stream && !text.includes("-") && typeof o.prefix !== "string" && naming(clean(wantPre) + text, usedLang, { group: k.group }) ) wantPre = false;
+    let usedPre = null;
+    if ( wantPre && !o.stream && !text.includes("-") ) { text = clean(wantPre) + text; usedPre = wantPre; }
+    const bangs = o.stream ? 0 : (trails && !Number.isFinite(o.bangs) ? 0 : bangsFor(loud, k.sound.sharp, long, o.bangs, k.maxBangs));
     if ( !o.stream ) text += trails && !bangs ? "…" : "!".repeat(bangs);
     if ( !seeded ) { const r = recent.get(mem) ?? []; r.push(clean(tpl), text); while ( r.length > 4 ) r.shift(); recent.set(mem, r); }
     const sound = { ...k.sound, loud: Math.max(0.1, Math.min(1, 0.15 + 0.85 * loud)), long };
     const motion = pickMotion(k, R);
-    const out = { text, kind: id, lang: usedLang, tier: usedTier, loud, long, bangs, step, template: tpl, prefix: wantPre && !o.stream && !text.startsWith(core.slice(0, 1)) ? wantPre : null, mood: k.mood, sound, motion,
+    const out = { text, kind: id, lang: usedLang, tier: usedTier, loud, long, bangs, step, template: tpl, prefix: usedPre, mood: k.mood, sound, motion,
       play: { mood: k.mood, sound, in: motion.in, holdKind: motion.holdKind, out: motion.out, magnitude: Math.round(Math.max(0, (loud - 0.1) / 0.6) * 100) / 100 } };
     if ( o.stream ) out.syllables = text.split(/[-\s]+/).filter(Boolean);
     return withAccent(out);
@@ -672,7 +1159,8 @@ export function createVocab() {
     const k = kinds[first.kind];
     const core0 = clean(first.template).replace(/[!?…]+$/, "");
     const pre0 = first.prefix ? [...clean(first.prefix)].length : 0;
-    let plain = (first.prefix ? clean(first.prefix) : "") + core0;
+    /* a percussive repeating sound may already have more hits than its template (a long one): grow from what was shown */
+    let plain = k.perc && k.repeat ? first.text.replace(/[!?…]+$/, "") : (first.prefix ? clean(first.prefix) : "") + core0;
     const add0 = Math.max(0, [...first.text.replace(/[!?…]+$/, "")].length - pre0 - [...core0].length);
     for ( let i = 1; i < Math.max(1, n); i++ ) {
       const prev = out[i - 1];
@@ -682,30 +1170,34 @@ export function createVocab() {
         const syls = clean(first.template).replace(/[!?…]+$/, "").split("-");
         const syl = syls.length === 1 ? syls[0] : k.repeat === "pair" && syls.at(-1) !== syls.at(-2) ? syls.slice(-2).join("-") : syls.at(-1);
         const grown = `${plain}-${syl}`;
-        const next = capRuns(clean(stretchText(grown, add0 + i, k.hold ?? DEFAULT_HOLD, first.lang))) + (end || (i >= 2 ? "!" : ""));
+        const tail = end || (i >= 2 && (k.maxBangs ?? MAX_BANGS) > 0 ? "!" : "");
+        let next = capRuns(clean(stretchText(grown, add0 + i, holdOf(k), first.lang, runOf(k))), runOf(k)) + tail;
+        if ( next.replace(/[!?…]/g, "").length > MAX_LEN ) next = clean(grown) + tail;   // one more syllable matters more than longer letters
         if ( next.replace(/[!?…]/g, "").length <= MAX_LEN ) { plain = grown; out.push(withAccent({ ...word(kind, { ...o, step: i, template: first.template }), text: next, prefix: null })); continue; }
       }
       if ( o.grow === "vary" ) {
         const w = word(kind, { ...o, seed: o.seed != null ? `${o.seed}:${i}` : undefined, step: i, avoid: [...(o.avoid ?? []), prev.template, prev.text] });
-        if ( w.text === prev.text ) w.text = capRuns(clean(stretchText(w.text, 1, k.hold ?? DEFAULT_HOLD, w.lang)));
+        if ( w.text === prev.text ) w.text = capRuns(clean(stretchText(w.text, 1, holdOf(k), w.lang, runOf(k))), runOf(k));
+        if ( w.text === prev.text ) { const m = (w.text.match(/[!?…]*$/) ?? [""])[0]; w.text = `${w.text.slice(0, w.text.length - m.length).split("-").at(-1)}-${w.text}`; }
         out.push(withAccent(w)); continue;
       }
       /* stretch mode: each step is ONE notch more than the last (so a long escalation keeps growing instead of jumping to the
          ceiling): one more sustain letter; when the sustain is full, one more "!" (at most 2); then the prefix (from step 2 on,
          when the kind has one); then an echo of the plain word in front (KRAK-KRAAAAAK!!!). Never shorter, never the same twice. */
       const w = word(kind, { ...o, step: i, template: first.template, prefix: false });
-      const hold = k.hold ?? DEFAULT_HOLD;
+      const hold = holdOf(k), maxB = Math.min(MAX_BANGS, k.maxBangs ?? MAX_BANGS);
       let pre = prev.prefix ? clean(prev.prefix) : "";
       const end = (prev.text.match(/[!?…]*$/) ?? [""])[0];
       let bangs = (end.match(/!/g) ?? []).length, body = prev.text.slice(pre.length, prev.text.length - end.length);
       const pres = k.pre?.[prev.lang] ?? [];
       let notch = false;
-      const longer = capRuns(clean(stretchText(body, 1, hold, prev.lang)));
-      if ( !pre && i >= 2 && o.prefix !== false && pres.length ) pre = clean(typeof o.prefix === "string" ? o.prefix : pres[i % pres.length]);
+      const longer = capRuns(clean(stretchText(body, 1, hold, prev.lang, runOf(k))), runOf(k));
+      const nextPre = !pre && i >= 2 && o.prefix !== false && pres.length ? clean(typeof o.prefix === "string" ? o.prefix : pres[i % pres.length]) : "";
+      if ( nextPre && !body.includes("-") && !naming(nextPre + body, prev.lang, { group: k.group }) ) pre = nextPre;
       else if ( longer !== body ) body = longer;
-      else if ( bangs < MAX_BANGS ) { bangs++; notch = true; }
+      else if ( bangs < maxB ) { bangs++; notch = true; }
       else if ( `${pre}${core0}-${body}`.length <= MAX_LEN ) body = `${core0}-${body}`;
-      if ( !notch && w.bangs > bangs ) bangs = Math.min(MAX_BANGS, bangs + 1);
+      if ( !notch && w.bangs > bangs ) bangs = Math.min(maxB, bangs + 1);
       w.text = pre + body + (bangs ? "!".repeat(bangs) : end === "…" ? "…" : "");
       w.prefix = pre || null; w.bangs = bangs;
       out.push(withAccent(w));
@@ -736,7 +1228,9 @@ export function createVocab() {
     const style = FLOW_STYLES.includes(o.style) ? o.style : (FLOW[id] ?? (k.repeat ? "cycle" : k.sound.long >= 0.6 ? "drone" : "crackle"));
     const seed = o.seed ?? ((Math.random() * 4294967296) >>> 0);
     const base = loudOf({ loud: o.loud ?? (style === "steady" ? 0.15 : undefined), magnitude: o.magnitude });
-    const hold = k.hold ?? DEFAULT_HOLD, phase = rng(`${seed}|phase`)() * 6.28;
+    const subs = {};
+    const hold = holdOf(k), mr = runOf(k), phase = rng(`${seed}|phase`)() * 6.28;
+    const S = (t, n) => capRuns(clean(stretchText(t, n, hold, lang, mr)), mr);
     const pool = (t) => { const b = bank[lang]?.[id] ?? bank.en?.[id] ?? {}; return [...(b[t] ?? [])]; };
     const plainOf = (t) => clean(t).replace(/[!?…]+$/, "");
     const seg = (phase, i, text, loud, long, bangs, ms) => withAccent({ phase, i, t: 0, ms: Math.round(ms), text, kind: id, lang, loud, long, bangs, style,
@@ -746,23 +1240,32 @@ export function createVocab() {
     const body = (i) => {
       const R = rng(`${seed}|flow|${id}|${lang}|${i}`);
       const wave = Math.sin(i * 0.9 + phase);
-      const fam = [...pool("m"), ...pool("s")].map(plainOf).filter((t) => !t.includes("-") || style === "cycle");
+      let fam = [...pool("m"), ...pool("s")].map(plainOf).filter((t) => !t.includes("-") || style === "cycle");
+      if ( !fam.length ) fam = [...new Set([...pool("m"), ...pool("s")].map((t) => plainOf(t).split("-")[0]))];   // a kind of hits only (KRIT-KRAT): one hit
       const st = [...pool("st"), ...pool("s")].map(plainOf);
+      if ( style === "mix" ) {
+        /* a composite sound: the bed part most of the time, the other parts come in turns, now and then a peak */
+        const parts = (MIX[id] ?? [id]).filter((x) => kinds[x]);
+        const pick = parts.length < 2 ? parts[0] : i % 4 === 3 ? parts[1 + R.i(0, parts.length - 2)] : i % 2 ? parts[1] : parts[0];
+        const sub = (subs[pick] ??= flow(pick, { lang, seed: `${seed}|${pick}`, loud: o.loud, magnitude: o.magnitude }));
+        const x = sub.at(i);
+        return withAccent({ ...x, phase: "body", i, of: id, part: pick, style: "mix" });
+      }
       if ( style === "steady" ) {
         const loud = clamp01(base + 0.05 * wave);
         if ( i % 5 === 4 ) { const t = R.pick(st.filter((x) => x.length <= 6)) ?? R.pick(fam); return seg("body", i, t.split("-")[0], loud, 0.2, 0, 500); }
         const t = R.pick(fam.filter((x) => !x.includes("-"))) ?? fam[0];
-        return seg("body", i, capRuns(clean(stretchText(t, 3 + Math.round(2 * (wave + 1)), hold, lang))), loud, 1, 0, 1100 + 250 * wave);
+        return seg("body", i, S(t, 3 + Math.round((mr > MAX_RUN ? 3 : 2) * (wave + 1))), loud, 1, 0, 1100 + 250 * wave);
       }
       if ( style === "drone" ) {
         const loud = clamp01(base + 0.18 * wave), t = fam[Math.floor(i / 3) % Math.max(1, fam.length)] ?? R.pick(fam);
         const bangs = wave > 0.85 && loud >= 0.45 ? 1 : 0;
-        return seg("body", i, capRuns(clean(stretchText(t, 1 + Math.round(2 * (wave + 1)), hold, lang))) + end(bangs, false), loud, 0.6 + 0.4 * (wave + 1) / 2, bangs, 800 + 200 * wave);
+        return seg("body", i, S(t, 1 + Math.round(2 * (wave + 1))) + end(bangs, false), loud, 0.6 + 0.4 * (wave + 1) / 2, bangs, 800 + 200 * wave);
       }
       if ( style === "gust" ) {
         const loud = clamp01(base + 0.25 * wave), t = R.pick(fam), crest = wave > 0.5, trough = wave < -0.5;
         const bangs = crest && loud >= 0.45 ? 1 : 0;
-        return seg("body", i, capRuns(clean(stretchText(t, crest ? 6 : trough ? 0 : 3, hold, lang))) + end(bangs, trough), loud, crest ? 1 : 0.5, bangs, crest ? 1300 : 800);
+        return seg("body", i, S(t, crest ? 6 : trough ? 0 : 3) + end(bangs, trough), loud, crest ? 1 : 0.5, bangs, crest ? 1300 : 800);
       }
       if ( style === "cycle" ) {
         const unit = plainOf(R.pick(pool("m")) ?? id).split("-"), syl = k.repeat === "pair" && unit.length >= 2 ? unit.slice(-2).join("-") : unit.at(-1);
@@ -772,21 +1275,25 @@ export function createVocab() {
         return seg("body", i, text + end(accent, false), loud, 0.3, accent, 160 * text.split("-").length + 200);
       }
       /* crackle: even segments a quiet bed, odd ones 1-3 pops */
-      if ( i % 2 === 0 ) { const t = R.pick(fam); return seg("body", i, capRuns(clean(stretchText(t, 2 + R.i(0, 2), hold, lang))) , clamp01(base - 0.1), 0.8, 0, 700); }
+      /* (the review, rule 16: a short hit kind's bed is not a long stretched word; only a lasting sound stretches its bed) */
+      if ( i % 2 === 0 ) { const t = R.pick(fam); return seg("body", i, S(t, k.sound.long >= 0.5 ? 2 + R.i(0, 2) : 0), clamp01(base - 0.1), k.sound.long >= 0.5 ? 0.8 : 0.3, 0, 700); }
       const pops = Array.from({ length: R.i(1, 3) }, () => R.pick(st).split("-")[0]).join("-"), loud = clamp01(base + R.f(0, 0.3));
       const bangs = loud >= 0.5 ? 1 : 0;
       return seg("body", i, pops + end(bangs, false), loud, 0.1, bangs, 300 + 120 * pops.split("-").length);
     };
     const cache = new Map();
+    let first = null;   // the onset: the first body segment must not repeat it either
     const at = (i) => {
       if ( cache.has(i) ) return cache.get(i);
-      const s0 = body(i), prev = i > 0 ? at(i - 1) : null;
+      const s0 = body(i), prev = i > 0 ? at(i - 1) : first;
       if ( prev && prev.text === s0.text ) {
         const m = (s0.text.match(/[!?…]*$/) ?? [""])[0], core = s0.text.slice(0, s0.text.length - m.length);
-        const alt = capRuns(clean(stretchText(core, 1, hold, lang)));
+        const alt = S(core, 1);
         /* the same text twice: one sustain letter more, else one less, else the neighbour word of the family */
         const less = core.replace(/(\p{L})\1{2,}/u, (r) => r.slice(1));
-        s0.text = (alt !== core ? alt : less !== core ? less : body(i + 1000).text.replace(/[!?…]+$/, "")) + m;
+        let other = alt !== core ? alt : less !== core ? less : null;
+        for ( let j = 1; other == null && j <= 6; j++ ) { const x = body(i + 1000 * j).text.replace(/[!?…]+$/, ""); if ( x !== core ) other = x; }
+        s0.text = (other ?? `${core.split("-").at(-1)}-${core}`) + m;
         withAccent(s0);
       }
       cache.set(i, s0); if ( cache.size > 64 ) cache.delete(cache.keys().next().value);
@@ -794,8 +1301,9 @@ export function createVocab() {
     };
     const w0 = word(id, { lang, seed: `${seed}|onset`, loud: clamp01(base + 0.15), long: 0.3, prefix: false });
     const onset = seg("onset", -1, w0.text, w0.loud, w0.long, w0.bangs, 450);
+    first = onset;
     const t0 = plainOf(R0(seed).pick(pool("s")) ?? w0.template);
-    const tail = seg("tail", -1, capRuns(clean(stretchText(t0, 3, hold, lang))) + "…", clamp01(base * 0.6), 1, 0, 900);
+    const tail = seg("tail", -1, S(t0, 3) + "…", clamp01(base * 0.6), 1, 0, 900);
     function take(ms = o.duration ?? 4000) {
       const out = [{ ...onset, t: 0 }]; let t = onset.ms;
       for ( let i = 0; t < ms - tail.ms || i < 1; i++ ) { const s1 = at(i); out.push({ ...s1, t }); t += s1.ms; if ( i > 2000 ) break; }
@@ -803,7 +1311,7 @@ export function createVocab() {
       /* the onset and the tail never repeat their neighbour either */
       for ( const j of [1, out.length - 1] ) if ( out[j] && out[j].text === out[j - 1].text ) {
         const m = (out[j].text.match(/[!?…]*$/) ?? [""])[0], core = out[j].text.slice(0, out[j].text.length - m.length);
-        const alt = capRuns(clean(stretchText(core, 1, hold, lang)));
+        const alt = S(core, 1);
         out[j] = withAccent({ ...out[j], text: (alt !== core ? alt : core.replace(/(\p{L})\1+/u, (r) => r.slice(1))) + m });
       }
       return out;
@@ -812,7 +1320,7 @@ export function createVocab() {
   }
   const R0 = (seed) => rng(`${seed}|tail`);
   /** grow a caller's own text for the n-th repeat (MOVE): its "+" marks, else its sustain (o.kind's classes, else V R Z S M F H) */
-  const grow = (text, step = 1, o = {}) => { const k = o.kind ? kinds[kindOf(o.kind)] : null; return capRuns(clean(expand(String(text).normalize("NFC").toLocaleUpperCase("pl"), Math.max(0, step) * (o.per ?? 1), k?.hold ?? DEFAULT_HOLD, langOf(o.lang, langs())))); };
+  const grow = (text, step = 1, o = {}) => { const k = o.kind ? kinds[kindOf(o.kind)] : null; return capRuns(clean(expand(String(text).normalize("NFC").toLocaleUpperCase("pl"), Math.max(0, step) * (o.per ?? 1), k ? holdOf(k) : DEFAULT_HOLD, langOf(o.lang, langs()), runOf(k))), runOf(k)); };
   /** the accent of any text: o.kind (its envelope and sustain classes), else o.mood (plain text), o.env / o.hold override */
   /** the character of a sound kind (or of a mood, for plain text): what the look should fit */
   const character = (o = {}) => characterOf({ ...o, def: o.kind ? kinds[kindOf(o.kind)] : undefined, kind: o.kind ? kindOf(o.kind) : undefined });
@@ -831,7 +1339,7 @@ export function createVocab() {
     const refused = [];
     const put = (tier, w) => {
       const t = clean(w);
-      if ( !renderable(t) || t.replace(/\+/g, "").length > MAX_LEN || naming(t) ) { refused.push(String(w)); return; }
+      if ( !renderable(t) || t.replace(/\+/g, "").length > MAX_LEN || DIACRITICS.test(t) || naming(t, DICT[L] ? L : null, { group: kinds[id]?.group }) ) { refused.push(String(w)); return; }
       (cur[tier] ??= []); if ( !cur[tier].includes(t) ) cur[tier].push(t);
     };
     if ( Array.isArray(words) ) {
@@ -839,7 +1347,7 @@ export function createVocab() {
       sorted.forEach((w, i) => put(sorted.length < 3 ? "m" : (["s", "m", "l"][Math.min(2, Math.floor((3 * i) / sorted.length))]), w));
     } else for ( const t of ["s", "m", "l", "st"] ) for ( const w of words?.[t] ?? [] ) put(t, w);
     B0[id] = cur;
-    if ( refused.length ) warn(`refused:${L}:${id}:${refused.join()}`, `refused words for ${L}/${id} (characters the fonts cannot letter, longer than ${MAX_LEN}, or a word that names a sound instead of imitating it): ${refused.join(", ")}`);
+    if ( refused.length ) warn(`refused:${L}:${id}:${refused.join()}`, `refused words for ${L}/${id} (characters the fonts cannot letter, longer than ${MAX_LEN}, a Polish diacritic, or a dictionary or near-dictionary word): ${refused.join(", ")}`);
     return { kind: id, lang: L, counts: { s: cur.s.length, m: cur.m.length, l: cur.l.length }, refused };
   }
   /** a new sound kind, or change an existing one: { group, label: { pl, en }, mood, sound, motion: { in:[], hold:[], out:[] }, stretch,

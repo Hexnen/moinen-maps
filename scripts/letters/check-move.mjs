@@ -158,6 +158,27 @@ export async function run(ok, { bank, fontsApi }) {
     const B = shardPieces(geo, 77, 0.7, null, "burst"), cx = geo.flatMap((l) => l.cs).reduce((a, c, _, A) => a + c[0] / A.length, 0);
     const outward = B.filter((q) => Math.sign(pieceAt(q, 0.2).dx) === Math.sign(q.cx - cx) || Math.abs(q.cx - cx) < 0.2).length;
     ok(outward >= B.length * 0.8, `ADVT 9: burst pieces fly outward from the middle (${outward}/${B.length})`);
+    /* ADVM 8: a big explosion's burst exit is a performance (>= 0.45 s), not two frames of halftone */
+    const big = plan("KABOOM!", { mood: "boom", seed: "advm8", magnitude: 1, out: "burst" });
+    const exMs = big.timeline.exit.reduce((a, q) => a + q.ticks, 0) * 1000 / 24;
+    ok(exMs >= 450, `ADVM 8: a big boom's burst exit lasts ${exMs | 0} ms (>= 450)`);
+    /* ADVM 7: the drop entrance keeps ONE word: every letter shows in every drawing, the letters stay near one line, no jump */
+    let bad = [];
+    for ( let i = 0; i < 10; i++ ) {
+      const p = plan(i % 2 ? "GRUUUCH!" : "ŁUP!", { mood: "crash", seed: `advm7${i}`, in: "drop", magnitude: 0.4 + 0.06 * i });
+      let prevMid = null;
+      for ( const [j, q] of p.timeline.ent.entries() ) {
+        const ys = q.letters.map((l) => (l.y ?? 0) + (q.g.y ?? 0)), mid = ys.reduce((a, y) => a + y, 0) / ys.length;
+        if ( q.letters.some((l) => l.v === 0) ) bad.push(`${i}.${j} hidden letter`);
+        if ( Math.max(...ys) - Math.min(...ys) > 1.3 ) bad.push(`${i}.${j} stair ${(Math.max(...ys) - Math.min(...ys)).toFixed(2)}`);
+        if ( prevMid !== null && Math.abs(mid - prevMid) > 1.0 ) bad.push(`${i}.${j} jump ${Math.abs(mid - prevMid).toFixed(2)}`);
+        prevMid = mid;
+      }
+    }
+    ok(bad.length === 0, `ADVM 7: the drop entrance is one coherent word across its drawings ${bad.slice(0, 5).join(", ")}`);
+    /* ADVM 7: a quiet word's slam never overshoots bigger than a loud one's */
+    const smearS = (m) => Math.max(...plan("TUP!", { mood: "impact", seed: "advm7s", in: "slam", magnitude: m }).timeline.ent.map((q) => q.g.s ?? 1));
+    ok(smearS(0.05) <= 1.35 && smearS(0.05) < smearS(1), `ADVM 7: a quiet slam overshoots less (${smearS(0.05).toFixed(2)} vs ${smearS(1).toFixed(2)})`);
   }
 
   /* ---------- 5. the engine: travel, push, echoes, escalation, glow, clean-up (fake browser + Foundry on a simulated clock) ---------- */

@@ -195,7 +195,7 @@ checkWords(ok, bank);
 checkLook(ok, bank);
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
-/* 8e. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
+/* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
 await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
