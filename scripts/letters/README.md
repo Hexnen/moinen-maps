@@ -219,30 +219,89 @@ L.sfx("crack", { loud: 0.8, lang: "pl", space: "world", at: token, seed: msg.id 
 const w = L.word("boom", { magnitude: "huge", lang: "auto", seed });                   // just the word: { text, mood, sound, play, ... }
 L.play(w.text, { ...w.play, space: "world", area });                                    // ... lettered by the caller
 L.stream({ kind: "gunfire", lang: "pl", at: () => muzzle(), to: target, every: 90 });  // syllables from the vocabulary
-L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, growing: TRZASK! > TRZAAASK! > TRZAAAASK! > TRZAAAAAASK!
+L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, one notch more each time: TRZASK! > TRZAASK! > TRZAAASK!! > ...
+L.flow("hiss", { lang: "pl", seed }).take(8000);            // a CONTINUOUS sound: onset, changing body words, tail (see below)
 L.vocab.grow("KRAK!", 2);                                  // grow a caller's own text: KRAAAK!
 L.number(12500, { lang: "pl" }); L.number(3, { times: true }); L.range(2, 4);   // "12 500", "3×", "2–4"
 ```
 
-- `L.word(kind, o)` -> `{ text, kind, lang, tier, loud, step, template, prefix, mood, sound, motion, play }`; `play` = `{ mood, sound,
-  in, holdKind, out, magnitude }` ready to spread into `L.play`. Options: `lang` (`pl`, `en`, a registered code, or `auto` = the
-  game's language), `loud` 0..1 or `magnitude` (0..2 or `tiny`..`epic`: the same input as the size model; default = the normal
-  magnitude 0.5), `seed` (same word on every client; unseeded words never repeat the last one of that kind), `avoid` (texts or
-  templates to skip: other words of the same moment), `step` (the n-th repeat: louder and longer), `template` (pin the word, only
-  its stretch follows loudness), `prefix` (true/false/"KA-"), `stream` (syllables).
-- `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; every play option works; `opts.sound` keys override per key;
-  the handle carries `h.word`.
-- Loudness picks the TIER (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), then STRETCHES the word (templates mark the stretch
-  points with `+`: `TRZA+SK` -> TRZASK / TRZAAASK; a word without marks stretches its last vowel, or a vowelless word its
-  R/S/Z/H/M/F run), at the very top may add a PREFIX (KA-BUM, TRA-TA-TRACH, KRA-KABOOM), quiet words lose their `!`, the loudest
-  gain one. No letter runs longer than 6; a prefix never stretches.
+- `L.word(kind, o)` -> `{ text, kind, lang, tier, loud, long, bangs, step, template, prefix, mood, sound, motion, play, accent, peak,
+  env }`; `play` = `{ mood, sound, in, holdKind, out, magnitude, accent }` ready to spread into `L.play`. Options: `lang` (`pl`, `en`,
+  a registered code, or `auto` = the game's language), `loud` 0..1 or `magnitude` (0..2 or `tiny`..`epic`: the same input as the
+  size model; default = the normal magnitude 0.5), `long` 0..1 or `duration` (ms) = HOW LONG the sound lasts, separate from how
+  loud; `bangs` 0..2 (force the "!" count), `seed` (same word on every client; unseeded words never repeat the last one of that
+  kind), `avoid`, `step` (the n-th repeat: louder and longer), `template` (pin the word), `prefix` (true/false/"KA-"), `stream`.
+- `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; `kind loud lang step template prefix long duration bangs` are
+  vocabulary options, every other play option works; `opts.sound` keys override per key; the handle carries `h.word`.
+
+#### Only onomatopoeia (the user's rule)
+Every word imitates the sound; none NAMES it (`CHRZĘST`, `SYK`, `ŁOMOT`, `GROWL`, `CREAK`, `ROAR` are names of sounds, not sounds).
+`NAMING` in words.mjs is the deny list (checked per syllable with repeated letters collapsed, so `CHRZĘĘĘST` is caught too; `TAK`,
+`JEST`, `YES`... are refused only as whole words, `TIK-TAK` is a clock). `L.vocab.add` refuses naming words. `BORDERLINE` lists words
+kept on purpose with the reason (interjections that are themselves imitations: TRZASK, PLUSK, BĘC, CIACH; English imitative words:
+CRASH, SPLASH, THUD). `words-reviewed.mjs` holds every syllable of the built-in banks as read against the rule: the checks fail on
+a new bank syllable that is not on it, so nothing slips in unreviewed.
+
+#### The comic's manner (examples the user gave from the Invincible comic)
+TWOOM!! WRAMM!! BATOOWWW! POW! FWOOOSH!! CHOOM!! SKROOMM!! THUD!: an invented consonant cluster at the attack (TW-, WR-, FW-,
+SKR-, CH-, THW-, BR-), the lasting letters doubled or tripled, consonants too (MM, WWW), not only vowels; one or two "!"; short
+sounds left short. The banks follow that manner with their own words (THROOMM!, BWAMM!, SKRAMM!, VWAAMM!, ZWOOSH; BRAMM!, TRZAMM!,
+DŁUMM!, WZUUSZ!, BRZDAMM!), not those examples.
+
+#### How loud, how long, and WHERE a word stretches
+- LOUDNESS picks the tier (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), the "!" count, a prefix at the very top (KA-BUM,
+  TRA-TA-TRACH) and the size. DURATION alone decides how much the word stretches: a long quiet sound is long without "!"
+  (`{ loud: 0.15, long: 1 }`: SSSSSST, HMMMM, UUUUUF), a short loud one is short with "!!" (`{ loud: 1, long: 0 }`: KRAK!!, POW!!).
+  Default duration = the kind's natural length (a crack is short, wind is long), a little longer when louder.
+- The "!" scale is 0..2: 0 quiet or a soft long sound that is not loud; 1 ordinary (or loud with a soft onset); 2 loud. Never 3.
+  A word written ending in "…" trails off (a sigh, a fade) and keeps "…" unless it is said loud.
+- WHERE it stretches: a sound has an attack (K of KRAK), a sustain (what lasts) and a cutoff (K of KRAK, T of BZZT). Only the
+  sustain repeats. Letter classes: V vowels (ringing, voice, the open boom), R (rolling, growl, engine), Z (buzz: Z Ż Ź, the Z of
+  RZ), S (hiss: S Ś, Polish SZ repeats as a pair SZSZSZ, English SH as SHHH), M (hum: M N Ń, the N of NG), F (air: F W), H (breath).
+  Each kind lists its sustain classes in order (`hold`): boom `V M` (the ring, then the hum), crack `R V` (the tearing rattle),
+  hiss `S Z F V`, engine `R V M`, whoosh `V S Z F`. The stretch goes to the LAST run of the first listed class in the LAST
+  syllable; a ringing vowel followed by a continuant of the kind shares the stretch with it, one letter in three going to the
+  consonant (TWOOOMM, BATOOOWW, SKROOOOOMMM); the overflow goes only forward. Plosives (K T P B D G C), affricates (CZ DZ) and a
+  prefix never repeat; no run is longer than 6. A caller's own word may mark stretch points with `+` (that wins over the rule).
+  Examples per group: hits POW > POOOWW, BAM > BAAAMM; breaking KRAK > KRRRRAK (crack holds R), SZUR > SZURRRR; blasts BUM >
+  BUUUMM, BZZT > BZZZZZT; motion WSZU > WSZUUUU, WHOOSH > WHOOOOSH; elements FSST > FSSSSST, KAP > KAAAP; powers WUM > WUMMMM (power-up holds the hum);
+  devices WRRUM > WRRRRRUM; voices UFF > UUUUFF, GRR > GRRRRR.
+
+#### Accent: where the sound is loud inside the word (the seam with LOOK's per-letter size)
+`word.accent` = one weight 0..1 per character of the word as the engine normalises it (`plan.chars`: NFC, Polish upper case, single
+spaces); `word.peak` = where the loudest letters sit (0..1), also put in `sound.peak`, so today's layout already makes those
+letters biggest; `play.accent` hands the weights to the layout. The shape follows the kind's envelope (`env`): `hit` (attack loud,
+the stretched ring decays: KRAAAK), `swell` (quiet attack, the sustain grows to the end: GRRRAAH, WRRRUM), `fade` (loud start,
+fading tail: UUUFFF…), `arc` (rises to the middle and falls: a fly-by WHOOOOSH), `beat` (every syllable has its own onset: TA-TA-TA).
+A prefix and earlier syllables are a quieter lead-in (~0.55); "!" carries the peak weight, "…" a tail weight, spaces 0. Plain text
+gets one too: `L.vocab.accent(text, { kind | mood })` (the mood decides the envelope).
+
+#### Character: what the sound is like (so the look can fit it)
+`word.character` (also `play.character` and on every flow segment) = `{ hard, sharp, heavy, wet, metal, electric, heat, sustain, rough,
+pitch, contour, material, texture }`: hard/soft, sharp/dull, heavy/light, wet/dry, metallic, electric, hot/cold (-1..1),
+short/sustained (this word's duration), clean/gritty, low/high, how it moves (fall rise arc pulse steady), what makes it (stone wood
+glass metal water fire air flesh energy mind machine voice rubber) and its surface (crisp jagged gritty smooth ringing billowy bubbly
+shaky). Each kind has its own (`CHAR` in words.mjs); plain text gets its mood's: `L.vocab.character({ kind | mood })`. LOOK draws
+from it (API-CONTRACT v5).
+
+#### Continuous sounds (a fire, an engine, a siren, a held beam, wind, a hum, a hail of bullets, a pipe hissing)
+`L.flow(kind, { lang, seed, loud, style })` -> `{ style, onset, at(i), tail, take(ms) }`: the onset word (the attack), body
+segments for as long as the sound lasts (`at(i)` forever, deterministic per seed, never the same text twice in a row, never one
+endless run of a letter) and a trailing tail word. Each segment: `{ phase, i, t, ms, text, loud, long, bangs, accent, peak, env, play }`.
+Styles: `steady` (a pipe hissing, a hum: long quiet words of the sustain whose length breathes slowly, SSSS TSSSSS FSSS…, no "!",
+a small sputter now and then), `drone` (engine, beam, power: one family of words whose sustain swells and sinks on a slow wave,
+the crest may get one "!"), `crackle` (fire, sparks, grinding: a quiet stretched bed word, then 1-3 irregular pops), `gust` (wind:
+long rising word at a crest, short trailing one at a trough), `cycle` (siren, gunfire, heartbeat, laughter: the kind's syllable in
+groups of 2-4 that vary in count and accent). The vocabulary says WHAT is lettered WHEN; how segments move, overlap and hand over
+is MOVE's (see API-CONTRACT v5).
+
 - Escalation (the seam with MOVE's growing word): `L.vocab.series(kind, n, { seed, lang, loud, grow })`: `grow: "stretch"` (default)
-  keeps one word and makes it longer each step (a prefix from step 2, then `!`, `!!`); repeating sounds (gunfire, laughter, siren,
-  heartbeat, drip, stomp, beep) add a syllable instead (TRA-TA > TRA-TA-TA > TRA-TA-TA-TA); `grow: "vary"` gives a different word
-  each step at rising loudness. Never the same text twice in a row; never shorter in stretch mode. For a caller's plain text:
-  `L.vocab.grow(text, step)`.
+  keeps one word and makes it ONE notch more each step: one more sustain letter; when full, one more "!" (up to 2); the prefix from
+  step 2; then an echo in front (KRAK-KRAAAAAK!!). Repeating sounds (gunfire, laughter, siren, heartbeat, drip, stomp, beep) add a
+  syllable instead (TA-TA > TA-TA-TAA > TA-TA-TA-TAAA); `grow: "vary"` gives a different word each step at rising loudness. Never
+  the same text twice in a row; never shorter in stretch mode. For a caller's plain text: `L.vocab.grow(text, step, { kind })`.
 - Adding and overriding (callers, moinen-pixel-vfx, world macros) on the shared engine: `L.vocab.add(lang, kind, words, { replace })`
-  (an array spread over tiers by length, or `{ s, m, l, st }`; `+` marks allowed; words the fonts cannot letter or longer than 22
+  (an array spread over tiers by length, or `{ s, m, l, st }`; `+` marks allowed; words the fonts cannot letter, longer than 22, or that name a sound
   are refused with one warning), `L.vocab.define(kind, { group, label: { pl, en }, mood, sound, motion, stretch, pre, alias, repeat })`
   (a new kind or a change), `L.vocab.remove(lang, kind, words)`, `L.vocab.reset()`. Pickers: `L.vocab.list(lang)` (id, label,
   group, mood, counts), `L.vocab.choices(lang)` (`{ id: label }` for `game.settings` choices), `L.vocab.all(kind, lang)`.
@@ -267,9 +326,9 @@ An unknown kind letters as `punch` with one warning.
 ### How the words were written
 Our own lists, nothing copied wholesale. English follows the American comic idiom (POW, THWACK, KRAKOOM, BLAM, FWOOSH, SPLOOSH).
 Polish follows how Polish comics and everyday speech write sounds rather than translating the English: hard Polish spellings
-(ŁUP, BĘC, TRACH, PRASK, BUCH, CHLAST, CIACH, ŚWIST, BRZDĘK, DZYŃ, CHRUP, KŁAP, PLUSK, CHLUP, SKRZYP, ZGRZYT, SZUR, SYK, PSST, CIII),
-its own idioms (ŁUBUDU for a tumble, SZAST-PRAST for a quick cut, HOP-SA for a jump, IJO-IJO for a siren, TRA-TA-TA for a gun,
-PIF-PAF for shots, AUĆ / AŁA for pain, UFF for relief, HURA / JEST! for a cheer, CHA-CHA / HI-HI for laughter). Comic conventions
+(ŁUP, BĘC, TRACH, PRASK, BUCH, CHLAST, CIACH, ŚWIU, BRZDĘK, DZYŃ, CHRUP, KŁAP, PLUSK, CHLUP, SKRZYP, ZGRZ, SZUR, FSSS, PSST, CIII),
+its own idioms (ŁUBUDU for a tumble, CIACH-CIACH for a quick cut, HOP-SA for a jump, IJO-IJO for a siren, TRA-TA-TA for a gun,
+PIF-PAF for shots, AUĆ / AŁA for pain, UFF for relief, HURA / JUPI for a cheer, CHA-CHA / HI-HI for laughter). Comic conventions
 used: letters repeated for length, size for loudness, hyphenated syllables for a sound made of parts (KA-BUM), a prefix for the
 biggest version. Sources read: Polish-English onomatopoeia tables (earlystage.pl blog), SDSU "The Sound of Comics" notes on
 lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomatopeja", the existing word sets of the three callers
