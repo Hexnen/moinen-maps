@@ -239,9 +239,14 @@ function reconcileBurn() {
     const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, P), levelNow: (s, t) => FM.levelNow(s, Number.isFinite(t) ? t : undefined) }))
       .sort((a, b) => b.prio - a.prio);
     let live = 0;
+    const spots = [];
     for ( const p of plans ) {
       const inView = p.points.some((q) => q.x > v.x0 - G && q.x < v.x1 + G && q.y > v.y0 - G && q.y < v.y1 + G);
       const isLive = p.live && inView && live < caps.live;
+      // (a smaller fire whose phrases would sit on a bigger one's: heard in the bigger one's phrases, not lettered on top of them)
+      const pts = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (L?.prefs?.scale ?? 1);
+      if ( C.burnCrowded(pts, spots, em) ) continue;
+      spots.push(...pts);
       if ( isLive ) live++;
       want.set(p.key, { plan: p, live: isLive });
     }

@@ -321,6 +321,19 @@ group("PHASES", () => {
   ok(gs.length === 2 && !C.isEcho(gs.find((q) => q.main === deb), recent, G), "PHASES a debris landing is not folded into the catch of the burning chunk's fire at the same spot and moment (live: both were swallowed)");
 });
 
+/* CROWD (live, FXLM2): a wave word riding out sets off clear of the boom word; burning fires' phrases do not stack */
+group("CROWD", () => {
+  const boomBox = { x0: 300, y0: 400, x1: 700, y1: 560 };
+  const wave = { role: "main", voice: "whump", x: 520, y: 470, t: 0, bw: 260, bh: 90, path: [{ x: 520, y: 470, ms: 0 }, { x: 900, y: 300, ms: 520 }] };
+  const [pw] = C.place([wave], { view: { x0: 0, y0: 0, x1: 2000, y1: 2000 }, alive: [boomBox] });
+  const inter = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+  ok(pw && inter(pw.box, boomBox) < 0.15 * 260 * 90 && pw.path[0].x - wave.path[0].x === pw.x - wave.x && pw.path.length === 2, "CROWD the wave word's whole path moves so it sets off clear of the boom word");
+  const [pf] = C.place([{ ...wave }], { view: { x0: 0, y0: 0, x1: 2000, y1: 2000 }, alive: [] });
+  ok(pf.x === wave.x && pf.y === wave.y, "CROWD with nothing up it sets off where the wave starts");
+  ok(C.burnCrowded([{ x: 100, y: 100 }], [{ x: 150, y: 120 }], 20) && !C.burnCrowded([{ x: 100, y: 100 }], [{ x: 400, y: 100 }], 20), "CROWD a fire's phrases next to a bigger fire's are left out; far apart both letter");
+  ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
+});
+
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
 group("WORD2", () => {
   const gren = C.strokeEvents({ id: "g7", k: "burst", p: [500, 500], r: 80, q: 1000, lv: 1 }, null, 0, 3000, { grid: G });

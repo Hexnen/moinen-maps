@@ -381,6 +381,11 @@ export function burnPlan(group, { grid = 100, catchMs = () => 0, levelNow = (s) 
       return { x: q.x, y: q.y };
     } };
 }
+/** Would a burning fire's phrase spots `pts` sit on the phrases of the fires already lettered (`taken`: their spots)? `em` = the
+    phrases' letter size (scene px): a phrase box is about nine letters wide and three and a half high. (Live: a bomb's scattered
+    debris fires each lettered their own sustain and the phrases stacked on each other; the nearby smaller fire is heard in the
+    bigger one's phrases.) */
+export const burnCrowded = (pts, taken, em) => pts.some((q) => taken.some((t) => Math.abs(q.x - t.x) < em * 8.8 && Math.abs(q.y - t.y) < em * 3.4));
 /** Fire strokes that burn together (paths within their radii plus a square): groups (deterministic order). */
 export function burnGroups(fires, grid = 100) {
   const list = fires.slice().sort((a, b) => (a.id < b.id ? -1 : 1)), parent = list.map((_, i) => i);
@@ -549,7 +554,13 @@ export function place(words, ctx) {
   const rank = (w) => (w.role === "main" ? 0 : w.role === "pre" ? 1 : 2);
   for ( const w0 of words.slice().sort((a, b) => rank(a) - rank(b)) ) {
     const w = { ...w0 }, main = w.role === "main";
-    if ( w.path || w.stream ) { if ( !v || inter(boxOf(w), v) > 0 || pathInView(w, v) ) { w.box = boxOf(w); out.push(w); } else if ( main ) return []; continue; }
+    if ( w.path || w.stream ) {
+      if ( v && !(inter(boxOf(w), v) > 0 || pathInView(w, v)) ) { if ( main ) return []; continue; }
+      // a word that rides a path (a shock wave rolling out, a car) starts clear of the words already up (live: the bomb's wave word
+      // set off on top of its boom word): its whole path moves a little further out along its way, or to one side
+      if ( w.path?.length > 1 && taken.length ) { const d = shiftPath(w, taken, v); if ( d.dx || d.dy ) { w.x += d.dx; w.y += d.dy; w.path = w.path.map((q) => ({ ...q, x: q.x + d.dx, y: q.y + d.dy })); } }
+      w.box = boxOf(w); out.push(w); if ( w.path ) taken.push(w.box); continue;
+    }
     const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
     const S = w.subject;
     const cands = [];
@@ -614,6 +625,19 @@ export function clearOf(box, ui = [], v = null, maxShift = Infinity) {
   }
   // (nowhere fully free within reach: the place that covers the least)
   return best ? { dx: best.dx, dy: best.dy } : { dx: part.dx, dy: part.dy };
+}
+/** The shift (scene px) that sets a path-riding word's start clear of the boxes `taken`: along its way (further out) or to either
+    side, the least covered place (inside the view `v`), the nearest of the free ones. -> { dx, dy } */
+export function shiftPath(w, taken, v = null) {
+  const p0 = w.path[0], p1 = w.path.at(-1), L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1, ux = (p1.x - p0.x) / L, uy = (p1.y - p0.y) / L;
+  const b0 = boxOf(w), bh = b0.y1 - b0.y0, A = area(b0) || 1;
+  let best = null;
+  for ( const k of [0, 0.5, 1, 1.5, 2] ) for ( const sd of [0, 1, -1] ) {
+    const dx = (ux * k - uy * sd) * bh, dy = (uy * k + ux * sd) * bh, b = boxOf(w, w.x + dx, w.y + dy);
+    const pen = taken.reduce((q, t) => q + inter(b, t), 0) / A + (v ? 1 - inter(b, v) / A : 0) + 0.04 * (k + Math.abs(sd));
+    if ( !best || pen < best.pen ) best = { dx, dy, pen };
+  }
+  return { dx: best.dx, dy: best.dy };
 }
 const pathInView = (w, v) => (w.path ?? w.stream?.walk ?? []).some((q) => q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
 
