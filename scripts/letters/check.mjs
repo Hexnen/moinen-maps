@@ -186,11 +186,12 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   ok(/redraws < MAX_REDRAWS/.test(eng) && /h\.retired/.test(eng) && !/if \( h\.shown === c \) h\.shown = null; dropPic\(c\)/.test(eng), "size: stale pictures are redrawn a few per frame and the shown texture is never freed under the sprite (F0/F1)");
 }
 
-/* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs) */
+/* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs); before the tools, whose authoring checks add moods */
 checkWords(ok, bank);
-
 /* 8d. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
+/* 8e. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
+await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {

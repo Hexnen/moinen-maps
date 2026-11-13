@@ -32,6 +32,14 @@ export function baseGeometry(plan, bank) {
   return base;
 }
 
+function altGlyph(plan, bank, i, ch) {
+  if ( ch === " " ) return null;
+  if ( !plan._alt ) Object.defineProperty(plan, "_alt", { value: new Map(), enumerable: false, configurable: true });
+  const k = `${i}:${ch}`;
+  if ( !plan._alt.has(k) ) { const gl = bank.glyph(plan.hand.font, ch); plan._alt.set(k, gl ? { gl, cs: treatLetter(gl, plan.hand, plan.sound, plan.seed, i) } : null); }
+  return plan._alt.get(k);
+}
+
 /* outlines of picture p: [{ i, cs: [contours], visible }], in word units, word centre at (0,0) of the HOLD layout */
 export function pictureGeometry(plan, bank, p) {
   const base = baseGeometry(plan, bank);
@@ -46,8 +54,12 @@ export function pictureGeometry(plan, bank, p) {
   for ( let i = 0; i < letters.length; i++ ) {
     const L = letters[i], A = p.letters[i] ?? { v: 1, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 };
     if ( !A.v || !base[i].gl ) continue;
-    const cs0 = p.reseed ? treatLetter(base[i].gl, plan.hand, plan.sound, p.boil, i) : base[i].cs;
-    const adv = base[i].gl.adv, px = adv / 2, py = -0.5;
+    /* a picture may draw another character in this slot (a number being counted in): its own treated outline, cached */
+    const alt = A.ch && A.ch !== plan.chars[i] ? altGlyph(plan, bank, i, A.ch) : null;
+    if ( A.ch && A.ch !== plan.chars[i] && !alt ) continue;
+    const gl = alt ? alt.gl : base[i].gl;
+    const cs0 = p.reseed ? treatLetter(gl, plan.hand, plan.sound, p.boil, i) : (alt ? alt.cs : base[i].cs);
+    const adv = gl.adv, px = adv / 2, py = -0.5;
     const s = L.s * A.s, sx = s * A.sx, sy = s * A.sy, rot = L.rot + A.r, c = Math.cos(rot), sn = Math.sin(rot);
     const tx = L.x + L.w / 2 + A.x, ty = -0.5 + L.dy + A.y;
     const cs = cs0.map((c0) => {

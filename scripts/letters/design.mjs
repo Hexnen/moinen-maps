@@ -6,6 +6,8 @@
    word is the biggest, jagged = sharp/harsh, round = soft/blunt, long sounds stretch and repeat letters, rising pitch climbs, falling
    pitch sags, the word grows away from where the sound comes from, warm colours for fire, cool for air and water. */
 import { rng, hash } from "./rng.mjs";
+import { onOf, retime } from "./move.mjs";
+import { groupsOf, letterScales, choreoEntrance, countFrames } from "./choreo.mjs";
 
 export const TICK = 1000 / 24;
 
@@ -205,7 +207,7 @@ export function chooseHand(mood, sound, R, avoid) {
 }
 
 /* ---------- layout: letters placed and sized; envelope warp params ---------- */
-export function layoutPlan(chars, widths, mood, sound, hand, R) {
+export function layoutPlan(chars, widths, mood, sound, hand, R, ls = null) {
   const n = chars.length;
   /* size curve: the loudest part of the word is the biggest (Comicraft's rule), peak from the sound */
   const amp = 0.18 + 0.5 * sound.loud * (hand.env === "flat" ? 0.3 : 1);
@@ -218,6 +220,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R) {
     if ( hand.env === "streak" ) s = 0.6 + 0.6 * u;
     s *= 1 + R.f(-0.07, 0.07) * (0.6 + sound.rough);
     if ( chars[i] === "!" || chars[i] === "?" ) s *= 1.05;
+    if ( ls ) s *= ls[i];                                  // choreography: a part's own size (a small prefix before the body)
     sizes.push(s);
   }
   const letters = [];
@@ -325,7 +328,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
   if ( reduced ) ent.push(P(3, { s: 0.94 }));
   else switch ( ein ) {
     case "slam": {
-      if ( tech.antic ) ent.push(P(beat, { s: 0.3, sx: 0.8, sy: 1.25 }));                      // a coiled small pose: the blow winds up
+      if ( tech.antic ) ent.push(P(beat, { s: 0.82, sx: 1.18, sy: 0.78, y: 0.08 }, (i) => ({ r: (i % 2 ? 1 : -1) * 0.04 })));   // a crouch: the blow winds up (still readable)
       if ( tech.flash ) ent.push(flashFrame({ s: 1.12 }));
       const sm = P(1, { s: 1.6, sx: 1.08 });
       if ( tech.smear ) sm.smear = { dx: 0, dy: 0, zoom: 0.35, n: 3 };
@@ -404,15 +407,19 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
     const p = P(ehold === "buzz" ? 2 : beat + 1);
     p.boil = seeds();
     if ( !reduced ) switch ( ehold ) {
-      case "shake": p.g.x = R.f(-0.05, 0.05) * (1 + sound.loud); p.g.y = R.f(-0.04, 0.04) * (1 + sound.loud); break;
-      case "throb": p.g.s = [1, 1.045, 0.99, 1.02][i]; p.g.sy = [1, 1.03, 0.99, 1][i]; break;
-      case "rattle": p.letters.forEach((l) => { l.x = R.f(-0.03, 0.03); l.y = R.f(-0.04, 0.04); l.r = R.f(-0.05, 0.05); }); break;
-      case "wobble": p.letters.forEach((l, j) => { l.r = 0.06 * Math.sin(i * 2.1 + j); l.y = 0.03 * Math.cos(i * 2.1 + j); }); break;
+      /* ADVT 8: a hold has to live (a held word is still being shouted): visible shakes, letters that keep moving */
+      case "shake": p.g.x = R.f(-0.09, 0.09) * (1 + sound.loud); p.g.y = R.f(-0.07, 0.07) * (1 + sound.loud); p.g.r = R.f(-0.03, 0.03); p.letters.forEach((l) => { l.y = R.f(-0.035, 0.035); }); break;
+      case "throb": p.g.s = [1, 1.08, 0.98, 1.05][i]; p.g.sy = [1, 1.05, 0.98, 1.01][i]; break;
+      case "rattle": p.letters.forEach((l) => { l.x = R.f(-0.05, 0.05); l.y = R.f(-0.07, 0.07); l.r = R.f(-0.09, 0.09); }); break;
+      case "wobble": p.letters.forEach((l, j) => { l.r = 0.1 * Math.sin(i * 2.1 + j); l.y = 0.05 * Math.cos(i * 2.1 + j); }); break;
+      case "boil": p.letters.forEach((l, j) => { l.y = 0.07 * Math.sin(i * 2.4 + j * 1.3); l.r = 0.06 * Math.cos(i * 1.9 + j); }); p.g.s = [1, 1.04, 0.99][i]; break;
       case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.misreg = [0.05, 0, 0.03, 0][i]; p.fx.push({ k: i % 2 ? "krackle" : "sparks", a: 0.7, seed: seeds() }); break;
-      case "flicker": p.reseed = true; p.g.y = -0.02 * i; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.7, seed: seeds() }); break;
+      case "flicker": p.reseed = true; p.g.y = -0.03 * i; p.g.s = [1, 1.04, 0.98, 1.02][i]; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.7, seed: seeds() }); break;
       default: break;
     }
     if ( !reduced && M.fx?.rays && i % 2 === 0 ) p.fx.push({ k: "krackle", a: 0.6, seed: seeds() });
+    /* secondary layer that flickers on the hold's drawings: impact lines around loud hits, sparks around sharp ones */
+    if ( !reduced && i % 2 === 0 && sound.loud > 0.6 && (M.fx?.burst || M.fx?.dust) && ehold !== "buzz" ) p.fx.push({ k: "burst", a: 0.45, seed: seeds() });
     if ( ehold !== "buzz" && ehold !== "flicker" && M.fx?.speed && i === 0 ) p.fx.push({ k: "speed", a: 0.35, dir, seed: seeds() });
     hold.push(p);
   }
@@ -421,21 +428,31 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
   const fly = []; for ( let i = 0; i < n; i++ ) { const u = n > 1 ? i / (n - 1) - 0.5 : R.f(-0.5, 0.5); fly.push({ x: u * R.f(1.2, 2.2) + R.f(-0.3, 0.3), y: R.f(-1, 0.4), r: R.f(-1, 1) }); }
   if ( reduced ) { exit.push(P(3), P(2)); exit[0].dissolve = 0.5; exit[1].dissolve = 0.85; }
   else switch ( eout ) {
-    case "shatter":
-      if ( tech.antic ) exit.push(P(2, { s: 1.04 }));                                                  // a held beat, swelling, before it breaks
-      if ( tech.flash && R.chance(0.5) ) exit.push(flashFrame({ s: 1.05 }));
-      [0.25, 0.6, 1].forEach((t, j) => { const p = P(2, {}, (i) => ({ x: fly[i].x * t, y: fly[i].y * t + 0.5 * t * t, r: fly[i].r * t, s: 1 - 0.35 * t, sx: 1 + 0.2 * t })); p.dissolve = [0, 0.3, 0.7][j]; p.fx.push({ k: "debris", a: 1 - 0.3 * j, t, seed: seeds() }); exit.push(p); });
+    case "shatter":   /* ADVT 9: the letters themselves break and fly (shards.mjs); "shards" is the same exit */
+    case "shards": {
+      /* the actual letters break: cracks run through the word (held), then its fragments fly, fall and bounce (paint: shards.mjs) */
+      const sd = seeds(), from = Number.isFinite(o.from) ? o.from : null;
+      if ( o.pixelArt ) { [0.25, 0.6, 1].forEach((t, j) => { const p = P(2, {}, (i) => ({ x: fly[i].x * t, y: fly[i].y * t + 0.5 * t * t, r: fly[i].r * t, s: 1 - 0.35 * t, sx: 1 + 0.2 * t })); p.dissolve = [0, 0.3, 0.7][j]; p.fx.push({ k: "debris", a: 1 - 0.3 * j, t, seed: seeds() }); exit.push(p); }); break; }
+      if ( tech.antic ) exit.push(P(2, { s: 1.035 }));
+      const c = P(beat + 1); c.shards = { t: 0, seed: sd, from }; exit.push(c);
+      if ( tech.flash ) { const f = flashFrame({ s: 1.04 }); exit.push(f); }
+      let tt = 0;
+      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, from, last: j === 5 }; p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
       break;
+    }
     case "pop":
       exit.push(P(2, { s: 0.9, sx: 1.06, sy: 0.9 }), P(1, { s: 1.18, sy: 1.08 }));                   // anticipation squash, then out
       exit[1].dissolve = 0.55; exit[1].fx.push({ k: "burst", a: 0.9, seed: seeds() });
       exit.push(P(2, { s: 1.24 })); exit[2].dissolve = 0.85; exit[2].fx.push({ k: "puff", a: 0.6, t: 0.6, seed: seeds() });
       break;
-    case "burst":
-      exit.push(P(2, { s: 0.94, sy: 0.92 }), P(2, { s: 1.28 }), P(2, { s: 1.38 }));
-      exit[1].fx.push({ k: "puff", a: 0.9, t: 0.4, seed: seeds() }); exit[2].fx.push({ k: "puff", a: 0.6, t: 0.8, seed: seeds() });
-      exit[1].dissolve = 0.35; exit[2].dissolve = 0.8;
+    case "burst": {
+      /* ADVT 9: it swells, then blows apart from its middle: its own pieces fly out radially in a puff cloud */
+      exit.push(P(2, { s: 0.94, sy: 0.92 }), P(2, { s: 1.12, sx: 1.06 }));
+      if ( o.pixelArt ) { exit.push(P(2, { s: 1.38 })); exit[2].fx.push({ k: "puff", a: 0.6, t: 0.8, seed: seeds() }); exit[2].dissolve = 0.8; break; }
+      const sd = seeds(); let tt = 0;
+      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, mode: "burst", last: j === 5 }; if ( j < 3 ) p.fx.push({ k: "puff", a: 0.85 - 0.2 * j, t: 0.3 + 0.2 * j, seed: seeds() }); p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
       break;
+    }
     case "fall": {
       exit.push(P(2, {}, () => ({ y: -0.08, sy: 1.04 })));                                              // a small lift before the drop
       const k = stag(4), steps = Math.ceil(n / k) + 3;
@@ -498,12 +515,31 @@ export function makePlan(text, opts, fonts, memory) {
   }
   const chars = [...word];
   const widths = chars.map((ch) => (ch === " " ? 0.32 : ch === "\n" ? 0 : fonts.adv(hand.font, ch)));
-  const lay = stackLines(layoutPlan(chars, widths, mood, sound, hand, R), chars, hand);
+  /* choreography (choreo.mjs): parts of the word on their own beats, typed on, counted in; reduced motion = all at once */
+  const groups = opts.reduced ? null : groupsOf(chars, opts, syllablesOf);
+  const lay = stackLines(layoutPlan(chars, widths, mood, sound, hand, R, letterScales(chars.length, groups)), chars, hand);
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
-  const tl = buildTimeline(chars.length, mood, sound, hand, R, { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind });
+  const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
+  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel };
+  const tl = buildTimeline(chars.length, mood, sound, hand, R, topts);
   const holdMs = Math.max(0, (opts.hold ?? MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long)) / (opts.tempo || 1));
-  return { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud,
+  /* frame rate (move.mjs): ones / twos / threes for this word; motion of a travelling word steps on the same grid */
+  const on = opts.reduced ? 0 : onOf(opts);
+  const R2 = rng((seed ^ 0x68e31da4) >>> 0), seed2 = () => R2.seed();
+  if ( on ) retime(tl, on, seed2);
+  const mk = (ticks) => { const p = pic(chars.length, ticks); p.misreg = tl.tech.misreg; p.boil = seed2(); return p; };
+  if ( groups ) {
+    tl.ent = choreoEntrance(groups, lay, seed, (n, Rg, kind) => buildTimeline(n, mood, sound, hand, Rg, { ...topts, in: kind ?? opts.in ?? tl.kinds.in }), mk, { on });
+    tl.kinds.choreo = groups[0].type ? "typeOn" : "parts";
+  }
+  const counted = !opts.reduced && opts.countIn ? countFrames(chars, opts, seed, mk, on || 2) : null;
+  if ( counted ) { tl.ent = [...counted, ...tl.ent]; tl.kinds.choreo = "countIn"; }
+  const plan = { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud,
     sizeK: 0.62 + 0.7 * sound.loud };
+  if ( on && on !== 2 ) plan.on = on;   // twos = the default timing (no change to the plan)
+  if ( groups ) plan.groups = groups.map((g) => ({ from: g.from, to: g.to, at: g.at, scale: g.scale, body: !!g.body }));
+  if ( opts.hollow ) plan.hollow = true;
+  return plan;
 }
 
 /* FXLE F12: lines of a word with "\n": each line is laid out by the hand like a word of its own, centred under the widest line, one

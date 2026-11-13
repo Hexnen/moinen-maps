@@ -51,8 +51,10 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const unguarded = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ prefs: { photosafe: false }, capPx: 700 }));
     ok(flashTimes(unguarded, TICK).length === flashTimes(f0, TICK).length, "tools: guard off keeps flash frames");
     /* rate: words started together cannot flash more than PHOTO.maxPerSec times a second on one client */
-    const log = []; let n = 0;
-    for ( let i = 0; i < 6; i++ ) { const q = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: i * 50 })); n += flashTimes(q, TICK).length; }
+    /* (MOVE: a word may also flash on its exit, a second or more later: count the flashes in the busiest second, not in all) */
+    const log = [], at = [];
+    for ( let i = 0; i < 6; i++ ) { const q = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: i * 50 })); for ( const f of flashTimes(q, TICK) ) at.push(i * 50 + f.t); }
+    const n = Math.max(0, ...at.map((a) => at.filter((b) => b >= a && b < a + PHOTO.windowMs).length));
     ok(n <= PHOTO.maxPerSec, `tools: at most ${PHOTO.maxPerSec} flashes a second (${n})`);
     const later = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: 5000 }));
     ok(flashTimes(later, TICK).length >= 1, "tools: the flash budget refills after a second");

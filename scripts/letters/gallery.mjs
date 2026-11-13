@@ -14,6 +14,7 @@ export const WORDS = [
 export function gallery(L, o = {}) {
   if ( o.part === "layers" ) return layersDemo(L, o);
   if ( o.part === "sizes" ) return sizesDemo(L, o);
+  if ( o.part === "move" || MOVE_PARTS.includes(o.part) ) return moveDemo(L, o);
   const hasCanvas = !!globalThis.canvas?.ready;
   const space = o.space ?? (hasCanvas ? "both" : "screen");
   const waves = o.waves ?? 3, gap = o.gap ?? 220, perWave = o.perWave ?? 12;
@@ -127,4 +128,126 @@ export async function sizesDemo(L, o = {}) {
   });
   const done = Promise.all(handles.map((h) => h.finished)).then(async () => { if ( view ) await canvas.animatePan({ ...view, duration: 300 }); });
   return { handles, done, cancel() { for ( const h of handles ) h.stop({ quick: true }); } };
+}
+
+/* ---------- motion (README "Motion: travel" .. "glow"): words that fly, one word on several beats, frame rates, escalation, shards,
+   push, self-lit words. part "move" plays them all in a row (about 30 s); "orbit" "path" "choreo" "rate" "escalate" "shards" "glow"
+   one each. `center`: a function returning the moving thing to circle, e.g. a map tornado:
+     const W = await import("/modules/moinen-maps/scripts/weather/weather.mjs"); const id = W.tornadoApi.list()[0]?.id;
+     L.gallery({ part: "orbit", center: () => W.tornadoApi.positionAt(id) });
+   Without it a stand-in centre crosses the view (drawn as a small swirl). World space when a scene is up, else screen. */
+export const MOVE_PARTS = ["orbit", "path", "choreo", "rate", "escalate", "shards", "glow", "sustain", "ambient"];
+export function moveDemo(L, o = {}) {
+  const world = o.space ? o.space === "world" : !!globalThis.canvas?.ready;
+  const space = world ? "world" : "screen";
+  const timers = [], handles = [], streams = [], marks = [], sus = [];
+  let cancelled = false;
+  const wait = (ms) => new Promise((r) => timers.push(setTimeout(r, ms)));
+  /* the view in this space: x, y (top left), w, h, and a unit (one grid square or 8 % of the screen height) */
+  const view = () => {
+    if ( !world ) { const W = innerWidth - (document.getElementById("sidebar")?.getBoundingClientRect().width ?? 0); return { x: 0, y: 0, w: W, h: innerHeight, u: innerHeight * 0.08 }; }
+    const s = canvas.stage.scale.x, c = canvas.stage.pivot, w = innerWidth / s, h = innerHeight / s;
+    return { x: c.x - w / 2, y: c.y - h / 2, w, h, u: canvas.grid.size };
+  };
+  const at = (fx, fy) => { const v = view(); return { x: v.x + v.w * fx, y: v.y + v.h * fy }; };
+  const seed = (k) => `${o.seed ?? "move"}:${k}`;
+  const P = (text, opts) => { if ( cancelled ) return null; const h = L.play(text, { space, ...opts }); handles.push(h); return h; };
+  const S = (opts) => { if ( cancelled ) return null; const s = L.stream({ space, ...opts }); streams.push(s); return s; };
+  const lab = (text, p) => P(text, { mood: "tick", at: p, fit: world ? "screen" : "legible", size: 14, seed: `lab:${text}`, hold: 2600, in: "pop", out: "pop", pushable: false });
+  /* a marker for a stand-in moving centre: a small grey swirl (world: PIXI graphics; screen: a div) */
+  function marker(fn) {
+    if ( world ) {
+      const g = new PIXI.Graphics(); g.eventMode = "none";
+      const r = canvas.grid.size * 0.45;
+      for ( let k = 0; k < 3; k++ ) { g.lineStyle(Math.max(2, r * 0.12), 0x55606a, 0.8); g.arc(0, 0, r * (0.4 + 0.3 * k), k, k + 4.2); }
+      canvas.interface.addChild(g); marks.push(g);
+      const tick = () => { if ( g.destroyed ) return; const p = fn(); if ( p ) { g.position.set(p.x, p.y); g.rotation += 0.35; } timers.push(setTimeout(tick, 1000 / 12)); };
+      tick();
+    } else {
+      const d = document.createElement("div");
+      Object.assign(d.style, { position: "fixed", width: "70px", height: "70px", margin: "-35px 0 0 -35px", borderRadius: "50%", border: "6px dotted #55606acc", zIndex: 999, pointerEvents: "none" });
+      document.body.appendChild(d); marks.push(d);
+      const tick = () => { if ( !d.isConnected ) return; const p = fn(); if ( p ) { d.style.left = `${p.x}px`; d.style.top = `${p.y}px`; d.style.transform = `rotate(${(performance.now() / 4) % 360}deg)`; } timers.push(setTimeout(tick, 1000 / 12)); };
+      tick();
+    }
+  }
+  const parts = {
+    async orbit() {
+      const t0 = performance.now(), v0 = view();
+      const center = o.center ?? (() => { const u = Math.min(1, (performance.now() - t0) / 6500); return { x: v0.x + v0.w * (0.28 + 0.44 * u), y: v0.y + v0.h * (0.5 + 0.06 * Math.sin(u * 7)) }; });
+      if ( !o.center ) marker(center);
+      let end; const until = new Promise((r) => (end = r));
+      P("WHOOOOOSH", { mood: "whoosh", orbit: { center, radius: v0.u * (world ? 1.7 : 1.6), period: 2300 }, until, seed: seed("orb1"), magnitude: 0.6 });
+      S({ text: "WHU-UU-UUM", orbit: { center, radius: v0.u * (world ? 2.9 : 2.7), period: 3400, dir: -1 }, every: 270, until, mood: "whoosh", seed: seed("orb2"), magnitude: 0.4, out: "pop" });
+      await wait(o.orbitMs ?? 6500); end(); await wait(900);
+    },
+    async path() {
+      const A = at(0.12, 0.78), B = at(0.62, 0.7);
+      P("BONK!", { mood: "impact", path: { from: A, to: B, arc: 0.35, spin: 1, ease: "linear" }, out: "shards", seed: seed("p1"), magnitude: 0.7, hold: 600 });
+      S({ text: "BZZ-ZZ-ZZT", mood: "zap", path: { from: at(0.15, 0.25), to: at(0.85, 0.42) }, every: 160, duration: 2600, seed: seed("p2"), magnitude: 0.4, glow: "auto" });
+      await wait(1200);
+      P("WHOOSH", { mood: "whoosh", path: { points: [at(0.9, 0.9), at(0.7, 0.55), at(0.85, 0.2)], duration: 1500 }, seed: seed("p3"), magnitude: 0.6 });
+      await wait(3000);
+    },
+    async choreo() {
+      P("RAKABOOM!", { mood: "boom", parts: "prefix", at: at(0.27, 0.24), seed: seed("c1"), magnitude: 0.7, hold: 1800 }); lab("parts: prefix", at(0.27, 0.38));
+      await wait(500);
+      P("BLAM BLAM BLAM", { mood: "impact", parts: "syllables", beat: 230, at: at(0.7, 0.24), seed: seed("c2"), magnitude: 0.6, hold: 1600 }); lab("parts: syllables", at(0.7, 0.38));
+      await wait(700);
+      P("KLIK-KLIK-KLIK", { mood: "tick", typeOn: true, at: at(0.25, 0.58), seed: seed("c3"), magnitude: 0.6, hold: 1400 }); lab("typeOn", at(0.25, 0.68));
+      P("12", { mood: "impact", countIn: true, at: at(0.7, 0.58), seed: seed("c4"), magnitude: 0.8, hold: 1400 }); lab("countIn", at(0.7, 0.7));
+      await wait(900);
+      P("BOOM", { mood: "boom", echo: 3, at: at(0.4, 0.8), seed: seed("c5"), magnitude: 0.5, hold: 700 }); lab("echo: 3", at(0.4, 0.94));
+      await wait(3400);
+    },
+    async rate() {
+      [1, 2, 3].forEach((on, i) => { P("THWACK!", { mood: "impact", on, at: at(0.2 + 0.3 * i, 0.42), seed: seed("r"), magnitude: 0.4, scale: 0.55, in: "slam", out: "shatter", holdKind: "shake", hold: 1200 }); lab(`on: ${on}`, at(0.2 + 0.3 * i, 0.58)); });
+      [1, 2, 3].forEach((on, i) => P("ZIP", { mood: "whoosh", on, path: { from: at(0.07 + 0.3 * i, 0.85), to: at(0.3 + 0.3 * i, 0.8), arc: 0.4 }, seed: seed("r2"), magnitude: 0.4, hold: 900 }));
+      await wait(3000);
+    },
+    async escalate() {
+      const p = at(0.5, 0.45);
+      for ( let i = 0; i < 6; i++ ) { P("BAM!", { mood: "impact", at: p, escalate: { key: seed("esc") }, seed: seed(`e${i}`), magnitude: 0.45, hold: 700 }); await wait(420); }
+      await wait(1800);
+    },
+    async shards() {
+      P("KRAK!", { mood: "crack", out: "shards", at: at(0.25, 0.3), seed: seed("s1"), magnitude: 0.8, hold: 500 });
+      P("CRASH!", { mood: "crash", out: "shards", at: at(0.68, 0.28), seed: seed("s2"), magnitude: 0.7, hold: 700 });
+      await wait(1900);
+      for ( const [t, x, y, m] of [["POW!", 0.22, 0.6, "impact"], ["ZAP!", 0.42, 0.8, "zap"], ["klik", 0.62, 0.55, "tick"], ["SPLASH!", 0.8, 0.76, "splash"], ["ŁUP!", 0.35, 0.44, "impact"]] ) P(t, { mood: m, at: at(x, y), seed: seed(t), magnitude: 0.45, hold: 2400 });
+      await wait(900);
+      P("KABOOM!", { mood: "boom", push: true, at: at(0.5, 0.63), seed: seed("s3"), magnitude: 0.9, hold: 1000 });
+      await wait(2600);
+    },
+    async sustain() {
+      /* continuous sounds: a fire swelling then dying, an engine riding a moving source */
+      let endF, endE; const uF = new Promise((r) => (endF = r)), uE = new Promise((r) => (endE = r));
+      const t0 = performance.now(), v0 = view();
+      const car = () => { const u = Math.min(1, (performance.now() - t0) / 9000); return { x: v0.x + v0.w * (0.55 + 0.33 * u), y: v0.y + v0.h * (0.45 + 0.1 * Math.sin(u * 9)) }; };
+      marker(car);
+      if ( !cancelled ) sus.push(L.sustain({ space, kind: "fire", at: at(0.28, 0.62), seed: seed("susF"), until: uF, level: (ms) => Math.min(1, 0.25 + ms / 5000) }));
+      if ( !cancelled ) sus.push(L.sustain({ space, kind: "engine", mood: "roar", at: car, seed: seed("susE"), until: uE, level: 0.55, dir: 180 }));
+      lab("sustain: fire (level rises)", at(0.28, 0.85)); lab("sustain: moving engine", at(0.72, 0.85));
+      await wait(7000); endF(); await wait(1500); endE(); await wait(2200);
+    },
+    async ambient() {
+      /* the steady hiss of pipes all over the view: quiet, hollow, a few at a time */
+      const pts = [[0.15, 0.3], [0.4, 0.22], [0.7, 0.3], [0.88, 0.5], [0.2, 0.7], [0.5, 0.6], [0.75, 0.8], [0.35, 0.88]];
+      for ( const [i, [x, y]] of pts.entries() ) if ( !cancelled ) sus.push(L.sustain({ space, mode: "ambient", kind: "hiss", mood: "whoosh", at: at(x, y), seed: seed(`pipe${i}`), gap: [2500, 6000] }));
+      await wait(13000);
+      for ( const s of sus ) s.stop();
+    },
+    async glow() {
+      [false, true].forEach((g, i) => {
+        P("FWOOOSH", { mood: "fire", glow: g, at: at(0.27 + 0.45 * i, 0.35), seed: seed("g1"), magnitude: 0.6, hold: 2500 });
+        P("BZZZT!", { mood: "zap", glow: g, at: at(0.27 + 0.45 * i, 0.7), seed: seed("g2"), magnitude: 0.6, hold: 2500 });
+        lab(g ? "glow: true" : "glow: off", at(0.27 + 0.45 * i, 0.88));
+      });
+      await wait(3800);
+    }
+  };
+  const list = o.part === "move" || !o.part ? MOVE_PARTS : [o.part];
+  const clear = () => { for ( const m of marks ) { try { m.destroy?.(); m.remove?.(); } catch {} } };
+  const done = (async () => { for ( const k of list ) { if ( cancelled ) break; await parts[k](); } clear(); })();
+  return { handles, streams, done, cancel() { cancelled = true; timers.forEach(clearTimeout); for ( const h of handles ) h?.stop({ quick: true }); for ( const s of streams ) s?.stop({ quick: true }); for ( const s of sus ) s?.stop({ quick: true }); clear(); } };
 }
