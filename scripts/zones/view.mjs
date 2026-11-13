@@ -45,6 +45,42 @@ export function largestRect(free, cols, rows) {
 }
 
 /**
+ * pfb (PERF5-2): the cells of a grid whose centre lies in a box - the box widened by `margin` on every side - marked in `cover`
+ * (one cell per `cell` px, centres at (c + 0.5) * cell). Cells outside the grid are left alone.
+ */
+export function markCells(cover, cols, rows, cell, box, margin = 0) {
+  if ( !box ) return;
+  const x0 = box.left - margin, y0 = box.top - margin, x1 = box.right + margin, y1 = box.bottom + margin;
+  if ( !(x1 > x0 && y1 > y0) ) return;
+  const c0 = Math.max(0, Math.ceil(x0 / cell - 0.5)), c1 = Math.min(cols - 1, Math.floor(x1 / cell - 0.5));
+  const r0 = Math.max(0, Math.ceil(y0 / cell - 0.5)), r1 = Math.min(rows - 1, Math.floor(y1 / cell - 0.5));
+  if ( c1 >= c0 ) for ( let r = r0; r <= r1; r++ ) cover.fill(1, r * cols + c0, r * cols + c1 + 1);
+}
+/**
+ * pfb (PERF5-2): the free cells of a grid found with as few looks as it takes. `cover[i]` truthy: something other than the map may
+ * lie at cell i's centre (a box of the page is there) - looked at; `look(i)` answers 1 (the map) or 0 (something over it). Every
+ * cell next to a covered cell found covered (the 8 around it) is looked at too, and so on outward from each one found covered, so
+ * what reaches beyond the boxes (a decoration, a line of text) is followed for as far as it reaches. The rest is the map (1).
+ * Fills `free` and returns how many cells were looked at.
+ */
+export function floodFree(free, cover, cols, rows, look) {
+  const n = cols * rows, seen = new Uint8Array(n), todo = [];
+  let looked = 0;
+  const at = (i) => { seen[i] = 1; looked++; return (free[i] = look(i) ? 1 : 0); };
+  const around = (i) => {
+    const c = i % cols, r = (i - c) / cols;
+    for ( let dr = -1; dr <= 1; dr++ ) for ( let dc = -1; dc <= 1; dc++ ) {
+      const cc = c + dc, rr = r + dr;
+      if ( (dr || dc) && cc >= 0 && rr >= 0 && cc < cols && rr < rows && !seen[rr * cols + cc] && !cover[rr * cols + cc] ) { seen[rr * cols + cc] = 1; todo.push(rr * cols + cc); }
+    }
+  };
+  for ( let i = 0; i < n; i++ ) if ( cover[i] && !at(i) ) around(i);
+  while ( todo.length ) { const i = todo.pop(); seen[i] = 0; if ( !at(i) ) around(i); }
+  for ( let i = 0; i < n; i++ ) if ( !seen[i] && !cover[i] ) free[i] = 1;
+  return looked;
+}
+
+/**
  * The stretch of the screen the map is free on: { x, y, w, h }.
  *   vw, vh    the window
  *   insets    what the bars declared ({ top, right, bottom, left })

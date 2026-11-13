@@ -23,6 +23,32 @@ check(J(lr(["..##..", "......", "......", "######"])) === J({ c0: 0, r0: 1, c1: 
 check(J(lr(["#.....", "#.....", "#...##", "#...##"])) === J({ c0: 1, r0: 0, c1: 3, r1: 3 }) && J(lr(["#.....", "#.....", "#....#", "######"])) === J({ c0: 1, r0: 0, c1: 4, r1: 2 }), "a column at the left and a panel in a corner: the larger of the stretches beside them");
 check(J(lr(["#.#", "...", "#.#"])) === J({ c0: 0, r0: 1, c1: 2, r1: 1 }), "a cross: the first of the equal stretches (the row before the column)");
 
+/* ---- pfb (PERF5-2): the cells a box lies over, and the look by as few hit tests as it takes */
+{
+  const box = (left, top, right, bottom) => ({ left, top, right, bottom });
+  const show = (a, cols) => Array.from({ length: a.length / cols }, (_, r) => Array.from(a.slice(r * cols, r * cols + cols)).map((v) => (v ? "#" : ".")).join("")).join("/");
+  let m = new Uint8Array(5 * 4); V.markCells(m, 5, 4, 40, box(30, 10, 90, 50));
+  check(show(m, 5) === ".#.../...../...../.....", `a box marks the cells whose centre lies in it (${show(m, 5)})`);
+  m = new Uint8Array(5 * 4); V.markCells(m, 5, 4, 40, box(22, 22, 58, 58), 0); const none = show(m, 5);
+  m = new Uint8Array(5 * 4); V.markCells(m, 5, 4, 40, box(22, 22, 58, 58), 2);
+  check(none === "...../...../...../....." && show(m, 5) === "##.../##.../...../.....", "a box between centres marks nothing; widened by the margin it reaches the centres at its edges (edges count)");
+  m = new Uint8Array(5 * 4); V.markCells(m, 5, 4, 40, box(-500, 130, 9000, 900)); V.markCells(m, 5, 4, 40, box(0, 0, 0, 30)); V.markCells(m, 5, 4, 40, null);
+  check(show(m, 5) === "...../...../...../#####", "a box beyond the window is cut to it; an empty box or none marks nothing");
+  // a page: '#' covered (what a hit test answers), boxes known for some of it; a decoration reaching out of its box to the right
+  const page = ["..........", ".###......", ".#####....", "..........", "......##..", "......####", ".........."];
+  const known = ["..........", ".###......", ".###......", "..........", "......##..", "......##..", ".........."];
+  const cols = 10, rows = page.length, truth = page.join("").split("").map((c) => (c === "#" ? 0 : 1));
+  const cover = Uint8Array.from(known.join("").split("").map((c) => (c === "#" ? 1 : 0)));
+  const asked = [], free = new Uint8Array(cols * rows);
+  const n = V.floodFree(free, cover, cols, rows, (i) => { asked.push(i); return truth[i]; });
+  check(J(Array.from(free)) === J(truth) && n === asked.length && new Set(asked).size === asked.length && n < cols * rows,
+    `the look: the same answers as a hit test at every cell, each cell asked once at most (${n} of ${cols * rows}), what reaches beyond its box followed outward`);
+  const empty = new Uint8Array(cols * rows); const n0 = V.floodFree(empty, new Uint8Array(cols * rows), cols, rows, () => 0);
+  check(n0 === 0 && empty.every((v) => v === 1), "no box anywhere: the map everywhere, nothing asked");
+  const all = new Uint8Array(cols * rows); const n1 = V.floodFree(all, new Uint8Array(cols * rows).fill(1), cols, rows, (i) => truth[i]);
+  check(n1 === cols * rows && J(Array.from(all)) === J(truth), "boxes everywhere: every cell asked, as before");
+}
+
 /* ---- the free stretch */
 check(J(V.safeRect(1600, 900)) === J({ x: 0, y: 0, w: 1600, h: 900 }) && J(V.safeRect(1600, 900, { top: 130, bottom: 400 })) === J({ x: 0, y: 130, w: 1600, h: 370 }), "no inset: the window; declared insets cut it");
 check(J(V.safeRect(1600, 900, { bottom: 400 }, { x: 320, y: 240, w: 840, h: 260 })) === J({ x: 320, y: 240, w: 840, h: 260 }) && J(V.safeRect(1600, 900, { bottom: 500 }, { x: 320, y: 240, w: 840, h: 400 })) === J({ x: 320, y: 240, w: 840, h: 160 }), "what was measured narrows it; a declared inset still counts where the look found nothing");

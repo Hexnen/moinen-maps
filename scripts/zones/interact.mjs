@@ -279,7 +279,7 @@ export const quietHits = { off: true, last: 0, skipOff: false, skipped: 0 };
 const SKIP_SEL = ["#chat"];
 export const offWindow = (r, W, H) => !!r && r.width > 0 && r.height > 0 && (r.left >= W || r.right <= 0 || r.top >= H || r.bottom <= 0);
 function skipping(fn) {
-  if ( quietHits.skipOff || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
+  if ( quietHits.skipOff || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn(new Set());
   const done = [];
   try {
     const W = vw(), H = vh();
@@ -293,13 +293,14 @@ function skipping(fn) {
       el.style.setProperty("content-visibility", "hidden");
     }
     quietHits.skipped = done.length;
-    return fn();
+    return fn(new Set(done.map((d) => d.el)));
   } finally {
     for ( const d of done ) d.el.style.removeProperty("content-visibility");
   }
 }
+/** fn(skipped): run for one synchronous look; `skipped` - the panels whose contents no hit test reaches while it runs. */
 function quietly(fn) {
-  return skipping(() => quietOld(fn));
+  return skipping((skipped) => quietOld(() => fn(skipped)));
 }
 function quietOld(fn) {
   if ( quietHits.off || typeof document?.querySelectorAll !== "function" || typeof getComputedStyle !== "function" ) return fn();
@@ -330,8 +331,70 @@ function quietOld(fn) {
 function measureFree() {
   const g = freeGrid();
   if ( !g ) return null;
-  quietly(() => { for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i); });
+  quietly((skipped) => lookAll(g, skipped));
   return freeRect(g);
+}
+/**
+ * pfb (PERF5-2): one synchronous look at every cell, with as few hit tests as it takes. A hit test costs as much as the page has
+ * positioned and transformed boxes ABOVE the map (every one is walked, wherever the point is: on a player's page in a fight ~70 us,
+ * the party cards and the dock alone ~40 of it), and most cells are the map itself, where nothing stops the walk early - so the
+ * ~880 cells of a 1600x900 window took 60-85 ms, twice when a pick starts. Now: the boxes of the page are read first (coverCells,
+ * a few ms) and only the cells a box lies over are hit-tested, plus every cell around one found covered, outward for as long as
+ * covered cells are found (View.floodFree: a decoration or a line of text that reaches beyond its box is followed). A cell no box
+ * comes near is the map - what a hit test there would answer. The answers are the ones the look by hit tests alone gives (checked
+ * live, both seats, every layout the pick knows: perf-notes PFB); `quietHits.coverOff = true` looks at every cell as before.
+ * quietHits.look: { cells, looked, cover, free (the cells: 1 the map), ms } of the last synchronous look.
+ */
+function lookAll(g, skipped) {
+  const t0 = globalThis.performance?.now?.() ?? Date.now();
+  let cover = null;
+  if ( !quietHits.coverOff ) { try { cover = coverCells(g, skipped); } catch ( err ) { cover = null; console.warn(`${MODULE_ID} | zones: cover`, err); } }
+  let looked = g.free.length;
+  if ( cover ) looked = View.floodFree(g.free, cover, g.cols, g.rows, (i) => freeCell(g, i));
+  else for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i);
+  quietHits.look = { cells: g.free.length, looked, cover: !!cover, free: g.free, ms:+((globalThis.performance?.now?.() ?? Date.now()) - t0).toFixed(2) };
+}
+/** What may answer a hit test instead of the map, as the cells it lies over (null: cannot tell - every cell is looked at). */
+const COVER = { margin: 2, big: 0.03, max: 30000 };
+function coverCells(g, skipped) {
+  const doc = globalThis.document, El = globalThis.Element;
+  if ( typeof El !== "function" || !(doc?.body instanceof El) || typeof doc.elementsFromPoint !== "function" || typeof getComputedStyle !== "function" ) return null;
+  const { W, H, cols, rows, view } = g, cover = new Uint8Array(cols * rows), big = W * H * COVER.big;
+  const inW = (r) => Math.max(0, Math.min(W, r.right) - Math.max(0, r.left)) * Math.max(0, Math.min(H, r.bottom) - Math.max(0, r.top));
+  const mid = (r) => [Math.min(Math.max((Math.max(0, r.left) + Math.min(W, r.right)) / 2, 0), W - 1), Math.min(Math.max((Math.max(0, r.top) + Math.min(H, r.bottom)) / 2, 0), H - 1)];
+  // the map takes the hit wherever nothing lies over it: it fills the window, takes hit tests, and the page itself is under it
+  const vr = view.getBoundingClientRect(), vcs = getComputedStyle(view);
+  if ( vcs.pointerEvents === "none" || vcs.visibility !== "visible" ) return null;
+  const order = doc.elementsFromPoint(...mid(vr)), iv = order.indexOf(view);
+  if ( iv < 0 || order.slice(0, iv).some((e) => e === doc.body || e === doc.documentElement) ) return null;
+  for ( let i = 0; i < cover.length; i++ ) {
+    const x = ((i % cols) + 0.5) * CELL, y = (Math.floor(i / cols) + 0.5) * CELL;
+    if ( !(x >= vr.left && x < vr.right && y >= vr.top && y < vr.bottom) ) cover[i] = 1;
+  }
+  // a pseudo-element that is drawn (content) and takes hit tests (its own pointer-events, visibility)
+  const pseudoHits = (e) => ["::before", "::after"].some((p) => { const s = getComputedStyle(e, p); return s.content !== "none" && s.content !== "normal" && s.display !== "none" && s.pointerEvents !== "none" && s.visibility === "visible"; });
+  // a large box of its own (a panel, a layer over the whole window) counts only when it can answer a hit test above the map: the
+  // order of the boxes at a point of it says (one per such box; the order of painting is the same at every point)
+  const ownCounts = (e, r) => {
+    const cs = getComputedStyle(e);
+    if ( (cs.pointerEvents === "none" || cs.visibility !== "visible") && !pseudoHits(e) ) return false;
+    const at = doc.elementsFromPoint(...mid(r)), ie = at.indexOf(e), i = at.indexOf(view);
+    return !(i >= 0 && ie > i);
+  };
+  let left = COVER.max;
+  const walk = (parent) => {
+    for ( const e of parent.children ?? [] ) {
+      if ( e === view || skipped?.has?.(e) ) continue;
+      if ( --left < 0 ) return false;
+      const r = e.getBoundingClientRect();
+      if ( !(r.width > 0 && r.height > 0) ) { if ( getComputedStyle(e).display === "none" ) continue; }
+      else if ( inW(r) <= big || ownCounts(e, r) ) View.markCells(cover, cols, rows, CELL, r, COVER.margin);
+      if ( !walk(e) ) return false;
+      if ( e.shadowRoot && !walk(e.shadowRoot) ) return false;
+    }
+    return true;
+  };
+  return walk(doc.body) ? cover : null;
 }
 /** The cells looked at: one per CELL px of the window (null: cannot look). */
 function freeGrid() {

@@ -788,6 +788,49 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     check(atStart.length === 1 && atStart[0][0] === true && atStart[0][1] === true && atStart[0][2] === 0 && hits > 0 && said.length === 2 && said[1][0] === false && said[1][1] === false,
       `"moinenMapsPicking": true with the class and before the first hit test, false when the pick ends (${J(said)}, ${hits} hit tests)`);
   }
+  // ---- pfb (PERF5-2): the look reads the page's boxes first and hit-tests only where a box lies (and around what it finds covered)
+  {
+    const I = await imp("scripts/zones/interact.mjs");
+    const efp0 = document.elementFromPoint, efps0 = document.elementsFromPoint, gcs0 = globalThis.getComputedStyle, El0 = globalThis.Element, body0 = document.body, vr0 = view.getBoundingClientRect;
+    class FakeEl {}
+    globalThis.Element = FakeEl;
+    const node = (id, box, kids = []) => Object.assign(new FakeEl(), { id, children: kids, getBoundingClientRect: () => (box ? { left: box[0], top: box[1], right: box[2], bottom: box[3], width: box[2] - box[0], height: box[3] - box[1] } : { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }), closest: () => null });
+    // the page: a tracker (with a decoration reaching 50 px out of its box on the right - a pseudo-element, not in the tree), a dock along
+    // the bottom, an interface layer over the whole window that lies UNDER the map (its own box never takes a hit), a hidden template
+    const tracker = node("tracker", [300, 0, 700, 120]), dock = node("dock", [0, 400, 1000, 600]);
+    const layer = node("interface", [0, 0, 1000, 600], [tracker]), gone = node("gone", null, [node("inner", [0, 0, 1000, 600])]);
+    gone.hidden = true;
+    const deco = { id: "deco", closest: () => null }, decoBox = [700, 40, 750, 100];
+    const body = Object.assign(new FakeEl(), { children: [layer, view, dock, gone], classList: body0.classList, append() {} });
+    document.body = body; document.documentElement = new FakeEl();
+    view.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 600, width: 1000, height: 600 });
+    globalThis.getComputedStyle = (e, p) => (p ? { content: "none", display: "none", pointerEvents: "auto", visibility: "visible" } : { visibility: "visible", display: e.hidden ? "none" : "block", pointerEvents: "auto", position: "static" });
+    const at = (x, y) => [tracker, dock].find((p) => { const b = p.getBoundingClientRect(); return x >= b.left && x < b.right && y >= b.top && y < b.bottom; })
+      ?? (x >= decoBox[0] && x < decoBox[2] && y >= decoBox[1] && y < decoBox[3] ? deco : view);
+    let hits = 0;
+    document.elementFromPoint = (x, y) => { hits++; return at(x, y); };
+    document.elementsFromPoint = (x, y) => { const e = at(x, y); return e === view ? [view, layer, body] : [e, view, layer, body]; };
+    I.quietHits.coverOff = true; hits = 0; const plain = J(api.safeArea()), plainHits = hits;
+    I.quietHits.coverOff = false; hits = 0; const fast = J(api.safeArea()), fastHits = hits, look = I.quietHits.look;
+    check(fast === plain && look?.cover === true && fastHits < plainHits * 0.6 && look.looked === fastHits,
+      `the look by the page's boxes: the same free stretch as a hit test at every cell (${fast}), ${fastHits} hit tests instead of ${plainHits}; the layer under the map, a hidden part: not counted`);
+    // the decoration reaching out of the tracker's box (its cell at 740, 60 lies in no box): found by following what is covered outward
+    const asked = []; document.elementFromPoint = (x, y) => { asked.push(`${x},${y}`); return at(x, y); };
+    api.safeArea();
+    check(asked.includes("740,60") && asked.includes("780,60") && !asked.includes("500,300"), "a decoration reaching out of its box: followed outward from what was found covered (the cell beyond it too); the open map is not looked at");
+    // the map not filling the window: what lies beyond it is looked at (the page answers there, not the map)
+    view.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 600, width: 600, height: 600 });
+    const at0 = at; document.elementFromPoint = (x, y) => { hits++; return x >= 600 ? body : at0(x, y); };
+    I.quietHits.coverOff = true; const p2 = J(api.safeArea()); I.quietHits.coverOff = false; const f2 = J(api.safeArea());
+    check(p2 === f2 && JSON.parse(f2).width <= 600, `the map short of the window's edge: the cells beyond it are looked at, the same answer (${f2})`);
+    // the page itself above the map (a canvas behind the page): no shortcut, every cell is looked at
+    view.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 600, width: 1000, height: 600 });
+    document.elementsFromPoint = () => [body, view];
+    hits = 0; api.safeArea();
+    check(I.quietHits.look?.cover === false && hits === Math.floor(1000 / 40) * Math.floor(600 / 40), "the page drawn over the map: every cell looked at, as before");
+    document.elementFromPoint = efp0; document.elementsFromPoint = efps0; globalThis.getComputedStyle = gcs0; globalThis.Element = El0; document.body = body0; delete document.documentElement; view.getBoundingClientRect = vr0;
+    document.documentElement = {};
+  }
   // ---- BH4-5 (D130's guard): a right drag in a pick pans the map; when its release never reaches the page (Alt+Tab, the button let go
   //      over another window) the map must not go on following a pointer whose right button is up
   {
