@@ -38,6 +38,7 @@ const CSS = `
 #mm-dir-bar.is-off > :not(.mm-dir-keep):not(.mm-dir-st) { display: none; }
 #mm-dir-bar.is-off { border-color: rgba(255,255,255,0.14); }
 #mm-dir-bar.is-off .mm-dir-st { opacity: 0.7; }
+#mm-dir-bar[hidden] { display: none; }
 `;
 let el = null, picking = null, hookId = null, hotHook = null, folded = false;
 
@@ -45,16 +46,20 @@ function ensureStyle() { if ( document.querySelector("style[data-mm-dir-bar]") )
 const btn = (act, icon, key, extra = "") => `<button type="button" data-act="${act}" aria-label="${esc(T(key))}" data-tooltip="${esc(T(key))}"${extra}><i class="${icon}" inert></i></button>`;
 
 // (shown to a GM also while the director is off: then it is the power button and "Off" only)
-function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed() && barShown(); }
+function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed(); }
 
-/** TOGL: the GM hides or shows the whole bar with a toggle in the map's group of the left menu (tools.mjs); one client setting,
- * "dirBarShown" (this user, this browser; default shown). Hidden = not in the page at all, so nothing keeps clear of it. */
+/** TOGL: the GM hides or shows the whole bar with a toggle in the map's group of the left menu (bar-toggles.mjs); one client setting,
+ * "dirBarShown" (this user, this browser; default shown). Hidden = the element stays in the page with display: none, so what keeps
+ * clear of it measures no box (it gives the bar no room) and a size observer on it (the combat dock's) sees it come back. */
 export function barShown() { try { return game.settings.get(MODULE_ID, "dirBarShown") !== false; } catch { return true; } }
 export function setBarShown(on) { if ( !!on === barShown() ) return null; try { return game.settings.set(MODULE_ID, "dirBarShown", !!on); } catch { return null; } }
 
 export function syncBar() {
   if ( !wanted() ) { removeBar(); return; }
   if ( !el ) build();
+  const shown = barShown();
+  el.hidden = !shown;
+  if ( !shown ) { stopPick(); return; }
   update();
   place();
 }

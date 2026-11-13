@@ -10,8 +10,9 @@ import { barShown, setBarShown } from "./director/bar.mjs";
  * "dirBarShown", "pinPanel" - so the settings window, the panel's own switches (the filter's X, the Pins dock's "floating" box) and the
  * toggle never disagree. Each goes to its panel's own audience: the meter's and the filter's to everyone (players see the meter in
  * "auto" while memory runs low, and the filter wherever pins are on), the director bar's to the GM, and only while the director exists
- * (CONFIG.moinenMaps.noDirector unset). A panel switched off is taken out of the page, so what keeps clear of it (the turn camera, the
- * folded Orbit button, the party column, the combat dock) stops giving it room.
+ * (CONFIG.moinenMaps.noDirector unset). A panel switched off leaves no box on the page (the meter and the filter are taken out; the
+ * director bar stays with display: none, so the combat dock's size observer sees it come back), so what keeps clear of it (the turn
+ * camera, the folded Orbit button, the party column, the combat dock) stops giving it room.
  */
 
 const VRAM = "mmVramBar", DIR = "mmDirBar", PINS = "mmPinBar";
@@ -48,8 +49,10 @@ function follow(name, on) {
 Hooks.once("init", () => Hooks.on("getSceneControlButtons", addToggles));
 Hooks.on("moinenMapsVram", () => {
   const t = ui.controls?.controls?.[GROUP]?.tools?.[VRAM];
-  if ( t ) t.title = vramTitle();
   follow(VRAM, vramOn());
+  // the mode changed between "Always" and "Only when memory runs low" (the settings window): the open menu shows the new tooltip
+  const title = vramTitle();
+  if ( t && t.title !== title ) { t.title = title; if ( ui.controls.control?.name === GROUP && ui.controls.rendered ) ui.controls.render(); }
 });
 Hooks.on("moinenMapsBarToggle", (which, on) => { if ( which === "dirBar" ) follow(DIR, on); });
 Hooks.on("moinenMapsPanel", () => follow(PINS, pinsOn()));

@@ -24,7 +24,8 @@ globalThis.game = {
 };
 globalThis.canvas = { ready: false };
 let activated = null;
-globalThis.ui = { controls: { controls: {}, control: null, rendered: true, activate: (o) => { activated = o; } } };
+let renders = 0;
+globalThis.ui = { controls: { controls: {}, control: null, rendered: true, activate: (o) => { activated = o; }, render: () => { renders++; } } };
 
 let fails = 0;
 const ok = (c, m) => { console.log(`${c ? "ok  " : "FAIL"} ${m}`); if ( !c ) fails++; };
@@ -97,6 +98,11 @@ await game.settings.set("moinen-maps", "pinPanel", false);            // what th
 ok(activated?.toggles?.mmPinBar === false, "the filter closed with its X: the toggle follows");
 game.user.isGM = false;
 ok(!!build().mmPinBar, "a player gets the pin filter's toggle too");
+// a player's meter set to "Always" in the settings window while the group is open: the tooltip loses "(when memory runs low)" at once
+t = build(); ui.controls.controls = { [GROUP]: { name: GROUP, tools: t } }; ui.controls.control = ui.controls.controls[GROUP];
+await game.settings.set("moinen-maps", "vramMeter", "auto"); t.mmVramBar.title = "MOINENMAPS.Tool.vramBarLow"; renders = 0;
+await game.settings.set("moinen-maps", "vramMeter", "always");
+ok(t.mmVramBar.title === "MOINENMAPS.Tool.vramBar" && renders === 1, "a player's meter set to Always: the open menu's tooltip follows (one render)");
 game.user.isGM = true;
 
 console.log(fails ? `${fails} failed` : "bar-toggles: all ok");
