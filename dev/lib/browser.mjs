@@ -8,11 +8,16 @@ import { launchBrowser, closeBrowser } from "./tmp.mjs";
 export const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 export const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Every headless browser that records or measures gets these three (measured 2026-11-13, one GM seat on a lane, Edge headless):
+// without them Edge starts its own background renderers (built-in extensions, component pages, network fetches) some 30-60 s after
+// launch and the process tree grows by about 1 GB (1.9-2.2 GB -> about 0.9 GB private working set at rest with them). Rendering, GPU
+// WebGL, screencast, touch and frame pacing were unchanged. Only these three: no --mute-audio, no wider set.
+export const LEAN_FLAGS = ["--disable-extensions", "--disable-component-extensions-with-background-pages", "--disable-background-networking"];
 
-/** Start a headless browser; resolves when its CDP endpoint answers. Returns { b, port } (b for closeBrowser). */
+/** Start a headless browser; resolves when its CDP endpoint answers. Returns { b, port } (b for closeBrowser). LEAN_FLAGS are always on. */
 export async function startHeadless({ kind, exe = CHROME, port = 0, profile = null, args = [], timeoutMs = 20000 }) {
   if ( profile && !port ) try { fs.rmSync(path.join(profile, "DevToolsActivePort"), { force: true }); } catch {}   // (a stale one of an earlier run)
-  const b = launchBrowser(exe, ["--headless=new", `--remote-debugging-port=${port}`, ...args], { kind, profile });
+  const b = launchBrowser(exe, ["--headless=new", `--remote-debugging-port=${port}`, ...LEAN_FLAGS, ...args], { kind, profile });
   const t0 = Date.now();
   while ( Date.now() - t0 < timeoutMs ) {
     await sleep(200);

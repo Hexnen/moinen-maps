@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
+import { LEAN_FLAGS } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 import { summary } from "./stack-bench-sum.mjs";
 
@@ -38,7 +39,7 @@ const QUICK = ["base", "F20", "S", "Wrain", "D", "all", "base2"];
 const MOVE = new Set(["base", "F20", "S", "Wrain", "D", "all"]);
 
 async function startChrome(dpr) {
-  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--window-size=1600,900", "--enable-gpu",
+  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
     `--use-angle=${ANGLE}`, "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { kind: "stack-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
   for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");

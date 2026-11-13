@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
+import { LEAN_FLAGS } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -23,7 +24,7 @@ const CASE = {
 };
 const CATS = ["toplevel", "gpu", "gpu.service", "viz", "cc", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "devtools.timeline", "disabled-by-default-devtools.timeline", "benchmark", "renderer.scheduler", "ipc", "mojom", "memory"].join(",");
 
-const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--window-size=1600,900", "--enable-gpu",
+const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
   "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${DPR}`, "--enable-precise-memory-info", "about:blank"], { kind: "trace-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
 for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); break; } catch {} }
 const SB = `const S = await import("/modules/moinen-maps/dev/stack-bench.mjs");`, HP = `const H = await import("/modules/moinen-maps/dev/hitch-probe.mjs");`;
