@@ -1,20 +1,20 @@
 // FRAME GUARD LIVE DRIVER (node): dev/guard-live.mjs emu() on a lane GM in headless Chrome at a real device scale factor, on the stack
 // bench scene: the fire alone (20 fires) and the fire + rain, each on an emulated 60 Hz, 144 Hz and 165 Hz (Foundry's 60 fps cap)
 // display: load off, a heavy load, off, a load the guard can relieve, off. Prints q / fire level / fps / late share per second.
-//   node dev/guard-live-run.mjs [--dpr 1,2] [--port 9444] [--gm http://127.0.0.14:30001] [--gmId 3dzfyqQ1n98OkCwE] [--profile <dir>]
+//   node dev/guard-live-run.mjs [--dpr 1,2] [--port 9444] [--gm http://127.0.0.14:30001] [--gmId 3dzfyqQ1n98OkCwE] [--profile <dir>] [--chrome chs|edge|chrome|<exe>]
 //        [--cases fire,fire+rain] [--hz 60,144,165] [--label guard] [--phases '[[3,0],[25,"mid"],[25,0]]'] [--vsync [--vsyncSecs 6]]
 // Writes dev/out/guard/<label>-dpr<k>.json. Chrome is started and stopped here (its profile deleted unless --profile is given).
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
-import { LEAN_FLAGS } from "./lib/browser.mjs";
+import { LEAN_FLAGS, exeOf, headlessArgs, CHROME as CHROME_EXE } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const PORT = Number(arg("port", 9444)), GM = arg("gm", "http://127.0.0.14:30001"), GMID = arg("gmId", "3dzfyqQ1n98OkCwE");
 const DPRS = arg("dpr", "1,2").split(",").map(Number), CASES = arg("cases", "fire,fire+rain").split(","), HZ = arg("hz", "60,144,165").split(",").map(Number);
 const PHASES = arg("phases", "") ? JSON.parse(arg("phases", "")) : null;   // e.g. [[3,0],[25,"mid"],[25,0]]
-const LABEL = arg("label", "guard"), CHROME = arg("chrome", "C:/Program Files/Google/Chrome/Application/chrome.exe");
+const LABEL = arg("label", "guard"), CHROME = exeOf(arg("chrome", null), CHROME_EXE);
 const OUT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "out", "guard");
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -22,7 +22,7 @@ const DISP = { 60: { hz: 60, k: 1 }, 144: { hz: 144, k: 1 }, 165: { hz: 165, cap
 const LAYERS = { fire: { fire: 20 }, "fire+rain": { fire: 20, weather: "rain" } };
 
 async function startChrome(dpr) {
-  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
+  const ch = launchBrowser(CHROME, [...headlessArgs(CHROME), `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
     "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { kind: "guard-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
   for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");
