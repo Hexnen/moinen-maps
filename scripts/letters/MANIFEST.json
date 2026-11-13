@@ -2,7 +2,7 @@
  "note": "LETR engine: identical in moinen-maps (canonical) and invincible-plus-ultra (vendored). Edit the canonical copy, then run sync.mjs.",
  "files": {
   "ATTRIBUTION.md": "24079fe027e38fa8",
-  "README.md": "17060cfe9f240067",
+  "README.md": "e89738594e5c3036",
   "author.mjs": "41bd787a96b03171",
   "check-life.mjs": "25b5aa5a8f42e685",
   "check-look.mjs": "7cdb85ace23faf5a",
@@ -50,7 +50,7 @@
   "shape.mjs": "1d73fdff8d6d8676",
   "shards.mjs": "6eb13472ea1f4980",
   "size.mjs": "5ea9ba0712160e43",
-  "stamp.mjs": "a34bb69272fad508",
+  "stamp.mjs": "6f71eb733e599e2e",
   "strings.mjs": "17259a1d576794e9",
   "sustain.mjs": "d7a83a6ac399bc87",
   "sync.mjs": "0aaf5650bacd97ee",
