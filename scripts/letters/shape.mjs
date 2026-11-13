@@ -204,7 +204,7 @@ export function pictureGeometry(plan, bank, p) {
         X *= g.s * g.sx; Y *= g.s * g.sy;
         o[k] = X * cg - Y * sg + g.x; o[k + 1] = X * sg + Y * cg + g.y;
       }
-      return boil(o, p.boil ? 0.006 + 0.006 * plan.sound.rough : 0, p.boil % 9973);
+      return boil(o, p.boil ? (plan.hand.style === "invincible" ? 0.0025 : 0.006 + 0.006 * plan.sound.rough) : 0, p.boil % 9973);   // the book's ink is clean: a faint boil only
     });
     out.push({ i, cs });
   }
