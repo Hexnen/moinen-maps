@@ -172,4 +172,18 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(/info\.size \* \(h\.opts\._k \?\? 1\)/.test(eng), "tools: the size setting applies after the legibility clamp");
     ok(/import \* as tools from "\.\/tools\.mjs"/.test(idx) && /REG\.toolsHooked/.test(idx), "tools: index registers the tools once (newest copy)");
   }
+  /* the windows never assign over an ApplicationV2 getter (Foundry v14: children classList element form hasFrame id minimized parent
+     rendered state title window are getters; `this.state = ...` threw in the live test while the fake env accepted it) */
+  {
+    const ui = fs.readFileSync(new URL("./ui.mjs", import.meta.url), "utf8");
+    const GETTERS = ["children", "classList", "element", "form", "hasFrame", "id", "minimized", "parent", "rendered", "state", "title", "window"];
+    const bad = GETTERS.filter((g) => new RegExp(`this\\.${g}\\s*=[^=]`).test(ui));
+    ok(bad.length === 0, `tools: windows do not assign ApplicationV2 getters (${bad.join(", ") || "none"})`);
+    /* a <form> window's control names shadow the form's own properties (LegacyOverrideBuiltIns): name="style" made Foundry's
+       element.style write into a select, and the "letter this now" box never moved to the mouse (live test) */
+    const SHADOW = ["style", "id", "action", "method", "target", "name", "elements", "length", "submit", "reset", "title", "hidden", "className", "dataset", "children", "parentNode", "classList", "focus", "contains"];
+    const forms = ui.split(/\n(?=class |\/\* =)/).filter((part) => /tag: "form"/.test(part)).join("\n");
+    const names = [...forms.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]).filter((n) => SHADOW.includes(n));
+    ok(forms.length > 0 && names.length === 0, `tools: form windows use no control name that shadows a form property (${names.join(", ") || "none"})`);
+  }
 }

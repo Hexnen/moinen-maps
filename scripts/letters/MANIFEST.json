@@ -5,7 +5,7 @@
   "README.md": "92790e515db5f547",
   "author.mjs": "aab42d53c8db710c",
   "check-life.mjs": "25b5aa5a8f42e685",
-  "check-tools.mjs": "3164efbcb9dc8e62",
+  "check-tools.mjs": "3040defc8ffb9e58",
   "check-words.mjs": "53589ac911dd9151",
   "check.mjs": "7430930a569c621e",
   "design.mjs": "033130e2d2867f6b",
@@ -39,13 +39,13 @@
   "rng.mjs": "f7587bf06711e496",
   "shape.mjs": "2b65ae47a335dbbc",
   "size.mjs": "157c38f00004cb84",
-  "stamp.mjs": "f7714f33a0fa305f",
+  "stamp.mjs": "41bbd9d065f3e3fa",
   "strings.mjs": "17259a1d576794e9",
   "sync.mjs": "0aaf5650bacd97ee",
   "testenv.mjs": "d58bfa07296e2971",
   "tools.css": "25094cddcf54f361",
   "tools.mjs": "d6b4abd8a98bfd4e",
-  "ui.mjs": "894047dbae6c3157",
+  "ui.mjs": "74690d840f1b621e",
   "words.mjs": "09f11e678f6170e1"
  }
 }
