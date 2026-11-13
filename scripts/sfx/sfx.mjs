@@ -99,7 +99,9 @@ function onEntry(d, g, opts, start) {
   const p0 = opts.path?.[0] ?? opts.o ?? null;
   // (a cave-in's crash lands after its anticipation: collapse-entry.mjs ~200 ms; a gun's rounds land along its path)
   const lead = (I.type === "collapse" ? 230 : 0) * k2;
-  add({ key: `d|${g.hash}|${Math.round(start)}`, obj: g.objId ? `d${g.objId}` : null, voice, x: o.x + cx * ap, y: o.y + cy * ap,
+  // a gun's rounds: its walk (the path's own hit moments, ms from the start) for a stream of syllables along it
+  const walk = gun && opts.path.length > 1 ? opts.path.map((q) => ({ x: o.x + q[0] * ap, y: o.y + q[1] * ap, ms: (q[2] || 0) * (opts.strict ? 1 : k2) })) : null;
+  add({ walk, t0: start, key: `d|${g.hash}|${Math.round(start)}`, obj: g.objId ? `d${g.objId}` : null, voice, x: o.x + cx * ap, y: o.y + cy * ap,
     r: 0.5 * Math.sqrt(w * h) * ap, t: start + lead, colors: C.causeColors(I.cause | 0),
     from: p0 && (I.type !== "blast" || gun) ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null });
 }
@@ -206,8 +208,9 @@ function play(w, ambient) {
     const red = reducedMotion();
     let h;
     try {
+      if ( w.stream && L.stream ) { h = playStream(w, red); stats.words++; const rec = { box: w.box, h, ambient }; alive.add(rec); Promise.resolve(h?.finished).finally(() => alive.delete(rec)); return; }
       h = L.play(w.text, { space: "world", mood: w.mood, sound: w.sound, at: { x: w.x, y: w.y }, size: w.size, seed: w.seed,
-        ...(w.maxWidth ? { maxWidth: w.maxWidth } : {}), ...(w.from ? { from: w.from } : {}), rotation: w.rotation,
+        ...(w.maxWidth ? { maxWidth: w.maxWidth } : {}), ...(w.from ? { from: w.from } : {}), rotation: w.rotation, startAt: Math.min(w.t, performance.now()),
         ...(w.colors ? { colors: w.colors } : {}), ...(w.hold ? { hold: w.hold } : {}), reduced: red });
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     stats.words++;
@@ -217,6 +220,20 @@ function play(w, ambient) {
   };
   const wait = w.t - performance.now();
   if ( wait > 4 ) { const id = setTimeout(() => { sched.delete(id); go(); }, wait); sched.set(id, id); } else go();
+}
+
+/** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (LETR stream). */
+function playStream(w, reduced) {
+  const W = w.stream.walk, T = W.at(-1).ms || 1, t0 = w.stream.t0;
+  const beats = [...new Set(Array.from({ length: Math.min(8, Math.max(3, W.length)) }, (_, i, a) => Math.round(T * (a.length > 1 ? i / (a.length - 1) : 0))))];
+  const at = () => {
+    const ms = performance.now() - t0;
+    let i = 1; while ( i < W.length - 1 && W[i].ms < ms ) i++;
+    const a = W[i - 1], b = W[i], f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+  };
+  return L.stream({ text: w.text.split("\n").join(" "), space: "world", at, dir: -90, beats, startAt: t0, mood: w.mood, size: w.size * 0.6, seed: w.seed,
+    ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.75 + 0.25 * Math.sin(i * 1.7), reduced });
 }
 
 /* ---------------------------------------------------------------- lifecycle */
