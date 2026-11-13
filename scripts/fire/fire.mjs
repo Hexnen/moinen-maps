@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as M from "./model.mjs";
 import * as Look from "./look.mjs";
@@ -507,7 +508,7 @@ export function setParams(patch) {
   params = M.cleanParams({ ...params, ...patch });
   fields.clear();   // (flame height, plume, smoke change the fields)
   draw(); tell("params");
-  write({ [`flags.${MODULE_ID}.${M.FLAG}`]: { v: M.VERSION, ...params } });
+  write(put({}, `flags.${MODULE_ID}.${M.FLAG}`, canvas.scene?.flags?.[MODULE_ID]?.[M.FLAG], { v: M.VERSION, ...params }));
 }
 
 /**

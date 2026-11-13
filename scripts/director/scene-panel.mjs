@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as SC from "./scene-core.mjs";
 import { extendSection } from "../workspace/registry.mjs";
 import { esc, T, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
@@ -52,7 +53,7 @@ export function renderArrivalPanel(host) {
       const sc = canvas?.scene; if ( !sc ) return;
       const f = SC.cleanSceneFlag(sc.getFlag(MODULE_ID, FLAG)), key = c.name.slice(2), next = SC.cleanSceneFlag({ ...f, [key]: read(c) });
       if ( JSON.stringify(next) === JSON.stringify(f) ) return;
-      await sc.setFlag(MODULE_ID, FLAG, next);
+      await sc.update(put({}, `flags.${MODULE_ID}.${FLAG}`, sc.flags?.[MODULE_ID]?.[FLAG], next));
       return;
     }
     if ( !(c.name in SC.DEFAULTS) ) return;

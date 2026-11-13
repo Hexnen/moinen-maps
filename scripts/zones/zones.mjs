@@ -566,7 +566,8 @@ export async function save() {
   const payload = Model.encode(S), text = JSON.stringify(payload);
   if ( text === lastSaved ) return;
   lastSaved = text;
-  try { await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: payload }); }
+  // (keys the set no longer has - the last door record, the last zone state - are deleted, not left to the merge: Model.saveUpdate)
+  try { await scene.update(Model.saveUpdate(S, scene)); }
   catch ( err ) { lastSaved = ""; console.warn(`${MODULE_ID} | could not save the zones`, err); }
 }
 

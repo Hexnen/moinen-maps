@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Trace from "../net/trace.mjs";
 
@@ -80,7 +81,8 @@ export async function publish(d, ctx) {
   else if ( P.empty ) return "none";
   const m = { v: 2, rv: RV, dir: ctx.dir, t: P.ids, h: P.h, at: Date.now() };
   if ( old && old.dir === m.dir && JSON.stringify(old.t) === JSON.stringify(m.t) && JSON.stringify(old.h) === JSON.stringify(m.h) ) return "same";
-  await ctx.scene.update({ [`flags.${MODULE_ID}.${KEY}`]: m });
+  // (put: chunk ids dropped from `h` are deleted - a merge kept them, the manifest never compared "same" again and was rewritten)
+  await ctx.scene.update(put({}, `flags.${MODULE_ID}.${KEY}`, ctx.scene.flags?.[MODULE_ID]?.[KEY], m));
   return "published";
 }
 

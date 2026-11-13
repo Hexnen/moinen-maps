@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as Net from "./stream.mjs";
 import { bundleBuckets, largeBuckets } from "./chunks.mjs";
 import { chunkRecords } from "../water/publish.mjs";
@@ -107,7 +108,7 @@ export async function publish(scene) {
     await Net.upload(dir, fresh);
     for ( const c of fresh ) Net.keep(c.id, c.bytes);
   }
-  await scene.update({ [`flags.${MODULE_ID}.${KEY}`]: rec });
+  await scene.update(put({}, `flags.${MODULE_ID}.${KEY}`, scene.flags?.[MODULE_ID]?.[KEY], rec));
   console.log(`${MODULE_ID} | bundles: ${next.length} for ${next.reduce((a, e) => a + e[1].length, 0)} chunks (${fresh.length} new, ${Math.round(fresh.reduce((a, c) => a + c.bytes.length, 0) / 1024)} kB, ${Math.round(performance.now() - t0)} ms)`);
   return "published";
 }

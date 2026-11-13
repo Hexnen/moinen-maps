@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as Model from "./model.mjs";
 import { engineInfo, bake, ramp, disposeEngine } from "./engine.mjs";
 import { WaterDisplay } from "./display.mjs";
@@ -127,7 +128,7 @@ function schedulePublish(key, bake) {
       if ( my !== life ) return;                                 // left the scene meanwhile
       const baked = await publishBake(scene.id, key, bake);
       if ( my === life ) S.baked = baked;                        // the upload belongs to that scene even when we have left it
-      await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}.baked`]: baked });
+      await scene.update(put({}, `flags.${MODULE_ID}.${Model.FLAG}.baked`, scene.flags?.[MODULE_ID]?.[Model.FLAG]?.baked, baked));
       publishBackoff = 0; publishRetryAt = 0;
       scheduleGc(scene.id);                                      // tiles no manifest names any more go, much later
 

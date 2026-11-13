@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as Net from "../net/stream.mjs";
 import * as Trace from "../net/trace.mjs";
 
@@ -252,7 +253,7 @@ export async function publish(d, ctx) {
   const up = [res.index, ...res.tiles].filter((c) => c.bytes);
   await Net.upload(ctx.dir, up.map((c) => ({ id: c.id, bytes: c.bytes })));
   for ( const c of up ) Net.keep(c.id, c.bytes);
-  await ctx.scene.update({ [`flags.${MODULE_ID}.${KEY}`]: m });
+  await ctx.scene.update(put({}, `flags.${MODULE_ID}.${KEY}`, ctx.scene.flags?.[MODULE_ID]?.[KEY], m));
   Trace.event("composite-published", { bands: out.length, tiles: ids.length - 1, uploaded: up.length, bytes: up.reduce((a, c) => a + c.bytes.length, 0), ms: Math.round(performance.now() - t0) });
   return "published";
 }

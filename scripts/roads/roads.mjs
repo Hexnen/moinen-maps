@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as Model from "./model.mjs";
 import * as Graph from "./graph.mjs";
@@ -212,7 +213,8 @@ export async function save() {
   const payload = Model.encode(R), text = JSON.stringify(payload);
   if ( text === lastSaved ) return;
   lastSaved = text;
-  try { await scene.update({ [`flags.${MODULE_ID}.${Model.FLAG}`]: payload }); }
+  // (put: the stored object is REPLACED - a key the new value lacks is deleted, not kept by the merge; flag-diff.mjs)
+  try { await scene.update(put({}, `flags.${MODULE_ID}.${Model.FLAG}`, scene.flags?.[MODULE_ID]?.[Model.FLAG], payload)); }
   catch ( err ) { lastSaved = ""; console.warn(`${MODULE_ID} | could not save the roads`, err); }
 }
 

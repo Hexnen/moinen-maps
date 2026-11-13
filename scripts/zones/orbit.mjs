@@ -14,6 +14,7 @@
  * - A player whose own character goes up or down follows it to the other scene (client setting `orbitFollow`).
  */
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { paintSpace, enlarge, lastLayout } from "./space.mjs";
 import { startAmbience, stopAmbience } from "./orbit-ambience.mjs";
@@ -85,7 +86,7 @@ export async function regenerate(seed = Math.floor(Math.random() * 2 ** 31)) {
   if ( !scene || !game.user.isGM ) return null;
   const src = await makeBackground(seed);
   // the flag first: the canvas redrawn for the new picture already finds the new planet (the live clouds paint that planet)
-  await scene.setFlag(MODULE_ID, "orbit", { seed, v: 2, layout: layoutOf.get(seed) ?? null });
+  await scene.update(put({}, `flags.${MODULE_ID}.orbit`, scene.flags?.[MODULE_ID]?.orbit, { seed, v: 2, layout: layoutOf.get(seed) ?? null }));
   await setBackground(scene, src);
   return src;
 }
@@ -143,7 +144,8 @@ export async function sendToOrbit(token, { thrown = false } = {}) {
   if ( !iAmTheGM() ) {
     if ( !doc.isOwner ) return null;
     if ( !game.users.activeGM ) ui.notifications.warn(T("noGM"));
-    return doc.setFlag(MODULE_ID, "orbitReq", { dir: "up", thrown: !!thrown, at: Date.now() });
+    // (put: a request still stored is REPLACED, never merged with this one - an old down request's scene / alt would stay on it)
+    return doc.update(put({}, `flags.${MODULE_ID}.orbitReq`, doc.flags?.[MODULE_ID]?.orbitReq, { dir: "up", thrown: !!thrown, at: Date.now() }));
   }
   if ( busyIds.has(doc.uuid) ) return null;
   busyIds.add(doc.uuid);
@@ -170,7 +172,7 @@ export async function bringBack(token, sceneId = null, alt = "ground") {
   if ( !iAmTheGM() ) {
     if ( !doc.isOwner ) return null;
     if ( !game.users.activeGM ) ui.notifications.warn(T("noGM"));
-    return doc.setFlag(MODULE_ID, "orbitReq", { dir: "down", scene: sceneId ?? null, alt, at: Date.now() });
+    return doc.update(put({}, `flags.${MODULE_ID}.orbitReq`, doc.flags?.[MODULE_ID]?.orbitReq, { dir: "down", scene: sceneId ?? null, alt, at: Date.now() }));
   }
   if ( busyIds.has(doc.uuid) ) return null;
   busyIds.add(doc.uuid);

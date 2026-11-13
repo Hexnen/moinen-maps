@@ -3,6 +3,7 @@ import { BORDER_KINDS, cleanProps } from "./marks.mjs";
 import { cleanAnchors } from "./keys.mjs";
 import { cleanExt, cleanPlay } from "./borders.mjs";
 import { cleanStates, cleanEdges } from "./states.mjs";
+import { replacing } from "../flag-diff.mjs";
 
 /**
  * The zones of a scene, stored in one scene flag `flags.moinen-maps.zones` (written by the GM, read by everyone):
@@ -30,7 +31,9 @@ import { cleanStates, cleanEdges } from "./states.mjs";
  *     look: { who, fill, ink, numbers, color } }     numbers: "always" | "hover" (only the zone under the cursor) | "never"; place: "center" | "corner" (top left);
  *                                       hoverHi: the zone under the cursor lights its border; hoverFx: none | glow | hatch | crosshatch | dots inside it
  *
- * Arrays replace each other on update, so a save never leaves stale lines behind.
+ * Arrays replace each other on update, so a save never leaves stale lines behind. The flag itself is an object and an update MERGES
+ * it: a key the new set no longer has (the last bs / q / e gone, ...) is deleted explicitly by saveUpdate, or it would come back on
+ * a reload and on every other client.
  */
 export const FLAG = "zones";
 export const VERSION = 1;
@@ -132,6 +135,11 @@ export function encode(S) {
     ...(S.edges?.length ? { e: S.edges.map((ed) => JSON.parse(JSON.stringify(ed))) } : {}),
     ...(S.playNext > 1 ? { pn: S.playNext } : {})
   };
+}
+
+/** The scene update that stores `S` on `scene`: the encoded set, with every key of the stored flag it no longer has deleted. */
+export function saveUpdate(S, scene) {
+  return { [`flags.${MODULE_ID}.${FLAG}`]: replacing(scene?.flags?.[MODULE_ID]?.[FLAG], encode(S)) };
 }
 
 /** A copy that is exactly what every client decodes from the flag. */

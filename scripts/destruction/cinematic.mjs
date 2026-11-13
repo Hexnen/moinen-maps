@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import * as Cin from "./cinematic-core.mjs";
 
 /**
@@ -149,7 +150,7 @@ export async function action() {
   await host.save();                                       // (the strokes first: every client has them, with their queue, before the record)
   const users = fx().userPresets?.() ?? {};
   const show = Cin.makeShow({ id: foundry.utils.randomID(8), by: game.user.id, at: sharedNow(), objs: st.objects, c: st.params.cinematic, users });
-  await canvas.scene.update({ [`flags.${MODULE_ID}.${FLAG}.${game.user.id}`]: show });
+  await canvas.scene.update(put({}, `flags.${MODULE_ID}.${FLAG}.${game.user.id}`, canvas.scene.flags?.[MODULE_ID]?.[FLAG]?.[game.user.id], show));
   consider("action");
   return show;
 }

@@ -36,10 +36,12 @@ function apply(doc, upd) {
   }
   return doc;
 }
+/** A new object value is stored without its deletions (nothing to delete in it). */
+function strip(v) { const o = {}; for ( const [k, x] of Object.entries(v) ) if ( !k.startsWith("-=") && !(x instanceof ForcedDeletion) ) o[k] = x && typeof x === "object" && !Array.isArray(x) ? strip(x) : x; return o; }
 function merge(o, k, v) {
   if ( v && typeof v === "object" && !Array.isArray(v) && o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) ) {
-    for ( const [kk, vv] of Object.entries(v) ) { if ( kk.startsWith("-=") ) delete o[k][kk.slice(2)]; else merge(o[k], kk, vv); }
-  } else o[k] = v;
+    for ( const [kk, vv] of Object.entries(v) ) { if ( kk.startsWith("-=") ) delete o[k][kk.slice(2)]; else if ( vv instanceof ForcedDeletion ) delete o[k][kk]; else merge(o[k], kk, vv); }
+  } else o[k] = v && typeof v === "object" && !Array.isArray(v) ? strip(v) : v;
 }
 
 /* ---------------------------------------------------------------- a layout-2 scene */

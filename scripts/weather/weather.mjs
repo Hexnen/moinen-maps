@@ -1,4 +1,5 @@
 import { MODULE_ID, reducedMotion } from "../config.mjs";
+import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as M from "./model.mjs";
 import { WeatherDisplay, displayPrograms } from "./display.mjs";
@@ -445,7 +446,8 @@ async function write(upd) {
   try { await canvas.scene.update(upd); return true; } catch ( err ) { console.warn(`${MODULE_ID} | weather: could not save`, err); return false; }
 }
 const flagKey = `flags.${MODULE_ID}.${M.FLAG}`;
-function save() { return write({ [flagKey]: { ...P, v: M.VERSION } }); }
+// (the stored params are REPLACED: a base without the drift or an effect the old one had, a storm gone - deleted, not kept by the merge)
+function save() { return write(put({}, flagKey, canvas.scene?.flags?.[MODULE_ID]?.[M.FLAG], { ...P, v: M.VERSION })); }
 
 /**
  * A CHANGE on the timeline (GM): `change` = M.withKey's { preset?, level?, fx? (a patch), clouds?, wind?, i? (v1) }; `over` ms (the transition), `at` shared ms (default
@@ -498,7 +500,7 @@ const inv = (y) => { y = Math.min(1, Math.max(0, y)); return 0.5 - Math.sin(Math
 export function setView(v) {
   if ( !game.user.isGM || !canvas.scene ) return;
   const cv = cleanView(typeof v === "string" ? { preset: v } : v);
-  write({ [`flags.${MODULE_ID}.${VIEW_FLAG}`]: { lift: cv.lift, squash: cv.squash } });
+  write(put({}, `flags.${MODULE_ID}.${VIEW_FLAG}`, canvas.scene?.flags?.[MODULE_ID]?.[VIEW_FLAG], { lift: cv.lift, squash: cv.squash }));
 }
 
 /* ---------------------------------------------------------------- the api */
