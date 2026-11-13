@@ -225,15 +225,15 @@ export function moveDemo(L, o = {}) {
       const t0 = performance.now(), v0 = view();
       const car = () => { const u = Math.min(1, (performance.now() - t0) / 9000); return { x: v0.x + v0.w * (0.55 + 0.33 * u), y: v0.y + v0.h * (0.45 + 0.1 * Math.sin(u * 9)) }; };
       marker(car);
-      if ( !cancelled ) sus.push(L.sustain({ space, text: "FRRSSHH", mood: "fire", at: at(0.28, 0.62), seed: seed("susF"), until: uF, level: (ms) => Math.min(1, 0.25 + ms / 5000) }));
-      if ( !cancelled ) sus.push(L.sustain({ space, text: "WRRRUMM", mood: "roar", at: car, seed: seed("susE"), until: uE, level: 0.55, dir: 180 }));
+      if ( !cancelled ) sus.push(L.sustain({ space, kind: "fire", at: at(0.28, 0.62), seed: seed("susF"), until: uF, level: (ms) => Math.min(1, 0.25 + ms / 5000) }));
+      if ( !cancelled ) sus.push(L.sustain({ space, kind: "engine", mood: "roar", at: car, seed: seed("susE"), until: uE, level: 0.55, dir: 180 }));
       lab("sustain: fire (level rises)", at(0.28, 0.85)); lab("sustain: moving engine", at(0.72, 0.85));
       await wait(7000); endF(); await wait(1500); endE(); await wait(2200);
     },
     async ambient() {
       /* the steady hiss of pipes all over the view: quiet, hollow, a few at a time */
       const pts = [[0.15, 0.3], [0.4, 0.22], [0.7, 0.3], [0.88, 0.5], [0.2, 0.7], [0.5, 0.6], [0.75, 0.8], [0.35, 0.88]];
-      for ( const [i, [x, y]] of pts.entries() ) if ( !cancelled ) sus.push(L.sustain({ space, mode: "ambient", text: "PSSSSS", mood: "whoosh", at: at(x, y), seed: seed(`pipe${i}`), gap: [2500, 6000] }));
+      for ( const [i, [x, y]] of pts.entries() ) if ( !cancelled ) sus.push(L.sustain({ space, mode: "ambient", kind: "hiss", mood: "whoosh", at: at(x, y), seed: seed(`pipe${i}`), gap: [2500, 6000] }));
       await wait(13000);
       for ( const s of sus ) s.stop();
     },
