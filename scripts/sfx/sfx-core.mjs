@@ -219,11 +219,11 @@ export function planCluster(g, o = {}) {
   // a big cave-in: the ground cracks first (its anticipation), then it comes down
   if ( main.voice === "crash" && m >= 0.55 && !o.big ) {
     const text = wordFor("crack", 0.2, hashStr(seed + "|pre"), lang, taken); taken.add(text);
-    words.push(word("pre", text, "crack", 0.3, { x: centre.x, y: centre.y - size * 0.15 }, size * 0.42, main.t - 200, seed + "|pre", null, h01(seed + "|pr") * 16 - 8, main.colors, o));
+    words.push(word("pre", text, "crack", 0.3, { x: centre.x, y: centre.y - size * 0.15 }, size * 0.42, main.t - 200, seed + "|pre", null, h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.25 }));
   }
   const text = wordFor(main.voice, m, h, lang, taken); taken.add(text);
   words.push(word("main", text, main.voice, loud, centre, size, main.t + (LEAD[main.voice] ?? 0) + (words.length ? 60 : 0), seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2.2, size * 4.5) }));
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2.2, size * 4.5), area: single ? main.r : g.span * 0.75 }));
   // a gun's rounds rattle along their walk (a LETR stream, one syllable a round) instead of one word
   if ( main.voice === "gun" && main.walk?.length > 1 ) words.at(-1).stream = { walk: main.walk, t0: main.t0 ?? main.t };
   if ( o.big || !(o.sec > 0) || single ) return words;
@@ -247,10 +247,13 @@ export function planCluster(g, o = {}) {
     const sd = `${o.seed ?? ""}|${e.key}`;
     const tx = wordFor(e.voice, m2, hashStr(sd), lang, taken); taken.add(tx);
     words.push(word("sec", tx, e.voice, clamp(0.2 + 0.7 * m2, 0, 0.9), at, s2, Math.max(e.t, main.t) + (LEAD[e.voice] ?? 0) + 140 + i * 130, sd, centre,
-      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o));
+      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7 }));
   });
   return words;
 }
+
+/** The engine's magnitude (LETR v4: 0..2, 0.5 normal) of a loudness 0..1: a crack ~0.4, a building coming down ~1.1, a bomb ~1.3. */
+export const engineMag = (loud) => Math.round((0.1 + 1.25 * clamp(loud, 0, 1)) * 100) / 100;
 
 function word(role, text, voice, loud, at, size, t, seed, from, rotation, colors, o, extra = {}) {
   const V = VOICES[voice] ?? VOICES.crack;
@@ -261,7 +264,8 @@ function word(role, text, voice, loud, at, size, t, seed, from, rotation, colors
   if ( role === "pre" ) Object.assign(motion, { in: "crackIn", hold: "shake", out: "shatter" });
   return { role, text, voice, mood: V.mood, motion, sound: { ...V.sound, loud, ...(extra.long !== undefined ? { long: clamp(extra.long, 0, 1) } : {}) },
     x: at.x, y: at.y, size, t, seed, from: from ?? null, rotation, colors: colors ?? null, lines: lines.length, chars: longest,
-    maxWidth: extra.maxWidth ?? null, hold: voice === "roar" || voice === "rumble" ? 1500 : undefined };
+    maxWidth: extra.maxWidth ?? null, area: extra.area ?? null, magnitude: extra.magnitude ?? engineMag(loud),
+    hold: voice === "roar" || voice === "rumble" ? 1500 : undefined };
 }
 
 /* ---------------------------------------------------------------- placement on this client's screen */
@@ -298,8 +302,9 @@ export function place(words, ctx) {
     // readable: at least minMain / minSec screen px tall, at most a share of the view
     const ls = w.sizeK ?? loudScale(w.sound.loud), px = w.size * ls * sc;
     const min = main ? SCREEN.minMain : SCREEN.minSec, max = (main ? SCREEN.maxMain : SCREEN.maxSec) * short * sc;
-    if ( px < min ) w.size = min / (ls * sc);
-    if ( w.size * ls * sc > max ) w.size = max / (ls * sc);
+    // (the engine sized it - LETR v4 - with its own legibility clamp: kept; else this estimate's own clamp)
+    if ( !w.engineSized && px < min ) w.size = min / (ls * sc);
+    if ( !w.engineSized && w.size * ls * sc > max ) w.size = max / (ls * sc);
     if ( w.maxWidth && v ) w.maxWidth = Math.min(w.maxWidth, (v.x1 - v.x0) * 0.7);
     let best = null;
     const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;

@@ -146,10 +146,11 @@ const main = fs.readFileSync(new URL("../scripts/main.mjs", import.meta.url), "u
 ok(main.includes("registerSfx();"), "main.mjs registers the sound effects");
 for ( const l of ["en", "pl"] ) {
   const j = JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
-  for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layerTop", "layerWeather", "layerTokens", "layerFire"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
+  for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layers.ground", "layers.tokens", "layers.weather", "layers.overlay", "layers.top"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
 }
 const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
-ok(/sfxLayer[\s\S]*choices: \{ top:[^}]*weather:[^}]*tokens:[^}]*fire:/.test(sfx) && sfx.includes("parent: layerC"), "the display layer is a setting (top / under weather / under tokens / under fire)");
+ok(/LAYER_IDS = \["ground", "tokens", "weather", "overlay", "top"\]/.test(sfx) && sfx.includes('register(MODULE_ID, "sfxLayer"') && /\.\.\.layerOpts\(\)/.test(sfx), "the display layer is a setting over the engine's world layers, passed with every word");
+ok(sfx.includes("area: w.area, magnitude: w.magnitude") && !/at: \{ x: w\.x, y: w\.y \}, size:/.test(sfx), "words pass their area and magnitude (the engine's size model), not a fixed size");
 ok(sfx.includes("in: w.motion.in, holdKind: w.motion.hold, out: w.motion.out"), "the motion goes to the engine");
 ok(sfx.includes('space: "world"') && sfx.includes("reduced: red"), "words are world-space and follow the module's reduced-motion rule");
 ok(!/from "[^"]*letters\/(?!index\.mjs)/.test(sfx) && sfx.includes('from "../letters/index.mjs"'), "the engine is used through its index only");

@@ -47,40 +47,19 @@ function registerSettings() {
   game.settings.register(MODULE_ID, "sfxLetters", { name: T("set"), hint: T("setHint"), scope: "client", config: true, type: String, default: "all",
     choices: { all: T("all"), big: T("big"), off: T("off") }, onChange: () => refresh() });
   game.settings.register(MODULE_ID, "sfxLettersWorld", { name: T("world"), hint: T("worldHint"), scope: "world", config: true, restricted: true, type: Boolean, default: true, onChange: () => refresh() });
-  game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "client", config: true, type: String, default: "top",
-    choices: { top: T("layerTop"), weather: T("layerWeather"), tokens: T("layerTokens"), fire: T("layerFire") }, onChange: () => dropLayer() });
+  // (the lettering engine's world layers, LETR contract v3: on the ground under tokens / over tokens under smoke and weather / over
+  // weather and smoke in the scene's light / over the whole scene and its lighting (the engine's default) / over everything)
+  game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "client", config: true, type: String, default: "overlay",
+    choices: Object.fromEntries(LAYER_IDS.map((k) => [k, T(`layers.${k}`)])) });
   game.settings.register(MODULE_ID, "sfxWords", { name: T("words"), hint: T("wordsHint"), scope: "client", config: true, type: String, default: "auto",
     choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") } });
 }
 
 /* ---------------------------------------------------------------- the display layer (setting "sfxLayer") */
 
-/*
- * Where the words are drawn, as the scene's layers stack (bottom to top): the map, the DAMAGE (primary sortLayer 247-248), the FIRE's
- * ground and smoke (256), weather on the ground (252-254), TOKENS (700) with the fire's flames in front of them (750-800), clouds and
- * rain (996-997, elevation Infinity), then LIGHTING / darkness, then the interface.
- *   top      over everything (canvas.interface, the engine's own layer): not dimmed by the night, never under rain or cloud
- *   weather  over tokens, the flames and roofs, under clouds and rain, and lit by the scene (the night darkens it)
- *   tokens   over the damage and the fire's ground, under tokens (and the flames in front of them)
- *   fire     over the damage, under the fire and its smoke
- */
-export const LAYERS = { weather: { sortLayer: 990, elevation: Infinity }, tokens: { sortLayer: 690, elevation: 0 }, fire: { sortLayer: 250, elevation: 0 } };
-let layerC = null, layerK = null;
-function layerOpts() {
-  const k = get("sfxLayer", "top"), spec = LAYERS[k];
-  if ( !spec || !canvas?.primary ) return {};
-  if ( !layerC || layerC.destroyed || layerK !== k || layerC.parent !== canvas.primary ) {
-    dropLayer();
-    layerC = new PIXI.Container(); layerC.eventMode = "none";
-    Object.assign(layerC, { elevation: spec.elevation, sortLayer: spec.sortLayer, sort: 0, _lastSortedIndex: 0 });
-    canvas.primary.addChild(layerC); canvas.primary.sortDirty = true; layerK = k;
-  }
-  return { parent: layerC };
-}
-function dropLayer() {
-  if ( layerC && !layerC.destroyed ) { layerC.parent?.removeChild(layerC); layerC.destroy({ children: false }); }
-  layerC = null; layerK = null;
-}
+/** The engine's world layers (LETR contract v3), bottom to top. */
+export const LAYER_IDS = ["ground", "tokens", "weather", "overlay", "top"];
+const layerOpts = () => { const k = get("sfxLayer", "overlay"); return { layer: LAYER_IDS.includes(k) ? k : "overlay" }; };
 
 /* ---------------------------------------------------------------- the engine */
 
@@ -235,11 +214,17 @@ function flush() {
   }
   stats.ms += performance.now() - t0;
 }
-/** The engine's own layout of a word (its width in cap heights, its loudness scale, its warp): the box placement keeps free. */
+/**
+ * The engine's own size and layout of a word as it would be drawn NOW (LETR v4 size model: from its area and magnitude, the grid,
+ * the zoom and the viewport, clamped legible): the box placement keeps free. Without the engine's answer the estimate stands.
+ */
 function measure(w) {
   try {
-    const d = L.design?.(w.text, { mood: w.mood, sound: w.sound, seed: w.seed, space: "world", size: w.size });
-    if ( Number.isFinite(d?.layout?.W) ) { w.wUnits = d.layout.W; w.sizeK = Number.isFinite(d.sizeK) ? d.sizeK : undefined; w.warp = d.layout.E?.kind ?? null; }
+    const o = { mood: w.mood, sound: w.sound, seed: w.seed, space: "world", area: w.area, magnitude: w.magnitude, at: { x: w.x, y: w.y } };
+    const z = L.sizeOf?.(w.text, o);
+    if ( Number.isFinite(z?.size) && z.size > 0 ) { w.size = z.size; w.sizeK = Number.isFinite(z.sizeK) ? z.sizeK : undefined; w.engineSized = true; }
+    const d = L.design?.(w.text, o);
+    if ( Number.isFinite(d?.layout?.W) ) { w.wUnits = d.layout.W; w.warp = d.layout.E?.kind ?? null; }
   } catch { /* the estimate stands */ }
 }
 const VOICE_PRIO = (g) => VOICES[g.main.voice]?.prio ?? 0;
@@ -252,7 +237,7 @@ function play(w, ambient) {
     let h;
     try {
       if ( w.stream && L.stream ) { h = playStream(w, red); stats.words++; const rec = { box: w.box, h, ambient }; alive.add(rec); Promise.resolve(h?.finished).finally(() => alive.delete(rec)); return; }
-      h = L.play(w.text, { space: "world", mood: w.mood, sound: w.sound, at: { x: w.x, y: w.y }, size: w.size, seed: w.seed,
+      h = L.play(w.text, { space: "world", mood: w.mood, sound: w.sound, at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed,
         ...(w.maxWidth ? { maxWidth: w.maxWidth } : {}), ...(w.from ? { from: w.from } : {}), rotation: w.rotation, startAt: Math.min(w.t, performance.now()),
         ...(w.colors ? { colors: w.colors } : {}), ...(w.hold ? { hold: w.hold } : {}), reduced: red,
         ...(w.motion?.in ? { in: w.motion.in, holdKind: w.motion.hold, out: w.motion.out } : {}), ...layerOpts() });
@@ -276,7 +261,7 @@ function playStream(w, reduced) {
     const a = W[i - 1], b = W[i], f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   };
-  return L.stream({ text: w.text.split("\n").join(" "), space: "world", at, dir: -90, beats, startAt: t0, mood: w.mood, size: w.size * 0.6, seed: w.seed,
+  return L.stream({ text: w.text.split("\n").join(" "), space: "world", at, dir: -90, beats, startAt: t0, mood: w.mood, area: w.area, magnitude: w.magnitude, seed: w.seed,
     ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.75 + 0.25 * Math.sin(i * 1.7), reduced, ...layerOpts() });
 }
 
@@ -287,7 +272,6 @@ function teardown() {
   for ( const id of sched.values() ) clearTimeout(id);
   sched.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map();
   armAmbient(false); ambientSlot = -1;
-  layerC = null; layerK = null;      // (the canvas tears it down with the primary group)
 }
 function refresh() {
   sfxBus.entry = mode() === "off" ? null : onEntry;

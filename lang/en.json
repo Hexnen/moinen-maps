@@ -2575,9 +2575,10 @@
   "MOINENMAPS.Sfx.wordsEn": "English",
   "MOINENMAPS.Sfx.wordsPl": "Polish",
   "MOINENMAPS.Sfx.layer": "Sound-effect layer",
-  "MOINENMAPS.Sfx.layerHint": "Where the sound-effect words are drawn. On top: over everything, the night and the rain too. Under the weather: over tokens and the flames, under clouds and rain, darkened at night. Under tokens: over the damage and the burning ground, under tokens. Under the fire: over the damage, under the flames and smoke.",
-  "MOINENMAPS.Sfx.layerTop": "On top of everything",
-  "MOINENMAPS.Sfx.layerWeather": "Under the weather",
-  "MOINENMAPS.Sfx.layerTokens": "Under tokens",
-  "MOINENMAPS.Sfx.layerFire": "Under the fire"
+  "MOINENMAPS.Sfx.layers.ground": "On the ground (under tokens)",
+  "MOINENMAPS.Sfx.layers.tokens": "Over tokens (under smoke and weather)",
+  "MOINENMAPS.Sfx.layers.weather": "Over weather and smoke (in the scene's light)",
+  "MOINENMAPS.Sfx.layers.overlay": "Over the whole scene and its lighting",
+  "MOINENMAPS.Sfx.layers.top": "Over everything on the canvas",
+  "MOINENMAPS.Sfx.layerHint": "Where the sound-effect words of damage and fire are drawn: on the ground under tokens, over tokens under the fire's smoke and the weather, over the weather but darkened by the night, over the whole scene and its lighting, or over everything on the canvas."
 }
