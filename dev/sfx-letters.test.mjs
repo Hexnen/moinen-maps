@@ -38,6 +38,12 @@ const crack = single({ voice: "crack", x: 0, y: 0, r: 25 }).find((w) => w.role =
 const fall = single({ voice: "crash", x: 0, y: 0, r: 400 });
 const fallMain = fall.find((w) => w.role === "main");
 ok(fallMain.size > crack.size * 2.5 && fallMain.sound.loud > crack.sound.loud + 0.4, "the crash of a building is far bigger and louder than a crack");
+{
+  // GM and player: the same areas enter at different local times (keys differ), the same `sid` -> the same words
+  const mk = (t, j) => [0, 1, 2, 3].map((i) => ({ key: `d|h${i}|${t + i * j}`, sid: `d|h${i}`, t: t + i * j, voice: "crash", x: i * 120, y: 0, r: 140 }));
+  const words = (evs) => C.cluster(evs, G).flatMap((g) => C.planCluster(g, { grid: G, sec: 4, seed: "scene" })).map((w) => `${w.role}:${w.text}`).sort().join(",");
+  ok([0, 1, 2, 3, 4, 5].every((i) => words(mk(1000, 30)) === words(mk(5000 + i * 777, 45))),"words of a synced destruction do not depend on this client's entry time");
+}
 ok(fallMain.mood === "crash" && crack.mood === "crack", "moods follow the voice");
 ok(fall.some((w) => w.role === "pre") && fall.find((w) => w.role === "pre").t < fallMain.t, "a big cave-in cracks first, then comes down");
 const burn = single({ voice: "roar", x: 0, y: 0, r: 200, m: 0.7 })[0], blast = single({ voice: "boom", x: 0, y: 0, r: 200, m: 0.7 })[0];
@@ -125,6 +131,12 @@ const w0 = single({ voice: "boom", x: 0, y: 0, r: 60, m: 0.3 })[0];
 const p0 = C.place([w0], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [tok] })[0];
 ok(ov(p0.box, tok) === 0, "a word moves off a token");
 ok(p0.y < 0, "...preferring up");
+{
+  const f = single({ voice: "fire", x: 0, y: -960, r: 60, m: 0.8 }).find((w) => w.role === "main"), b = C.boxOf(f, 0, 0), plain = C.boxOf({ ...f, voice: "crash" }, 0, 0);
+  ok(b.y1 - b.y0 > (plain.y1 - plain.y0) * 1.2, "a fire word's box counts its flame tongues");
+  const pf = C.place([f], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [] })[0];
+  ok(pf && pf.box.y0 >= -1000, "a fire word at the top edge is kept inside the view");
+}
 const edge = C.place([{ ...w0, x: -990, y: 0 }], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [] })[0];
 ok(edge.box.x0 >= -1000, "a word at the screen's edge moves inside");
 ok(!C.place([w0], { scale: 1, view: { x0: 5000, y0: 5000, x1: 6000, y1: 6000 }, tokens: [] }).length, "off this screen: not played here");

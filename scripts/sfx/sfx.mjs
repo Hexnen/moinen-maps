@@ -112,7 +112,7 @@ function onEntry(d, g, opts, start) {
   const lead = (I.type === "collapse" ? 230 : 0) * k2;
   // a gun's rounds: its walk (the path's own hit moments, ms from the start) for a stream of syllables along it
   const walk = gun && opts.path.length > 1 ? opts.path.map((q) => ({ x: o.x + q[0] * ap, y: o.y + q[1] * ap, ms: (q[2] || 0) * (opts.strict ? 1 : k2) })) : null;
-  add({ walk, t0: start, key: `d|${g.hash}|${Math.round(start)}`, obj: g.objId ? `d${g.objId}` : null, voice, x: o.x + cx * ap, y: o.y + cy * ap,
+  add({ walk, t0: start, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, obj: g.objId ? `d${g.objId}` : null, voice, x: o.x + cx * ap, y: o.y + cy * ap,
     r: 0.5 * Math.sqrt(w * h) * ap, t: start + lead, colors: C.causeColors(I.cause | 0),
     from: p0 && (I.type !== "blast" || gun) ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null });
 }

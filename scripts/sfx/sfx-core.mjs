@@ -21,6 +21,9 @@ export const LEAD = { boom: 50, crash: 0, zap: 0, thud: 30, gun: 80, fire: 60, s
 export const CAPS = { high: { sec: 4, alive: 9 }, medium: { sec: 2, alive: 6 }, low: { sec: 0, alive: 3 } };
 /** screen-size limits (px) and the share of the view's short side a word may take */
 export const SCREEN = { minMain: 26, minSec: 18, maxMain: 0.2, maxSec: 0.11 };
+/** what a word's seed is made of: `sid` when the event has one that is the same on every client (a destruction area's hash; its
+    `key` carries this client's own entry time), else its key */
+export const sidOf = (e) => e.sid ?? e.key;
 export const VIEW_W = { main: 0.36, sec: 0.2 };
 /** a satellite / pre-word at most this share of the main word's height */
 export const SAT_H = 0.72;
@@ -183,7 +186,7 @@ export function ambientEvent(slot, fires, { every = 6000, settle = 5000, grid = 
 
 /** Events -> clusters { members (loudest first), main, x, y (centre), rEq (combined size), span (reach from the centre), t }. */
 export function cluster(events, grid = 100) {
-  const ev = events.slice().sort((a, b) => ((VOICES[b.voice]?.prio ?? 0) - (VOICES[a.voice]?.prio ?? 0)) || (b.r - a.r) || (a.key < b.key ? -1 : 1));
+  const ev = events.slice().sort((a, b) => ((VOICES[b.voice]?.prio ?? 0) - (VOICES[a.voice]?.prio ?? 0)) || (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
   const groups = [];
   for ( const e of ev ) {
     let best = null;
@@ -214,7 +217,7 @@ export function planCluster(g, o = {}) {
   const single = g.members.length === 1;
   const m = single && main.m !== undefined ? main.m : Math.max(main.m ?? 0, magnitude(g.rEq / grid, main.voice));
   if ( o.big && (m < 0.34 || g.ambient) ) return [];
-  const seed = `${o.seed ?? ""}|${main.key}`, h = hashStr(seed), taken = new Set();
+  const seed = `${o.seed ?? ""}|${sidOf(main)}`, h = hashStr(seed), taken = new Set();
   const words = [];
   const loud = clamp(0.25 + 0.75 * m, 0, 1);
   const size = grid * (0.26 + 0.62 * m);
@@ -233,7 +236,7 @@ export function planCluster(g, o = {}) {
   // secondaries: the biggest other members out at the edge, each its own voice, quieter, staggered
   const nSec = Math.min(o.sec, g.members.length - 1, Math.round(m * 3.4));
   const cand = g.members.filter((e) => e !== main && Math.hypot(e.x - centre.x, e.y - centre.y) > size * 0.6)
-    .sort((a, b) => (b.r - a.r) || (a.key < b.key ? -1 : 1));
+    .sort((a, b) => (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
   const used = [];
   for ( const e of cand ) {
     if ( used.length >= nSec ) break;
@@ -247,7 +250,7 @@ export function planCluster(g, o = {}) {
     const dx = e.x - centre.x, dy = e.y - centre.y, d = Math.hypot(dx, dy) || 1;
     const at = { x: e.x + (dx / d) * e.r * 0.3, y: e.y + (dy / d) * e.r * 0.3 };
     const s2 = Math.min(size * 0.58, grid * (0.26 + 0.5 * m2));
-    const sd = `${o.seed ?? ""}|${e.key}`;
+    const sd = `${o.seed ?? ""}|${sidOf(e)}`;
     const tx = wordFor(e.voice, m2, hashStr(sd), lang, taken); taken.add(tx);
     words.push(word("sec", tx, e.voice, clamp(0.2 + 0.7 * m2, 0, 0.9), at, s2, Math.max(e.t, main.t) + (LEAD[e.voice] ?? 0) + 140 + i * 130, sd, centre,
       Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7 }));
@@ -280,7 +283,8 @@ export function boxOf(w, x = w.x, y = w.y) {
   // the engine's own layout when it was asked (sfx.mjs measure: L.design -> width in cap heights, its loudness scale, its warp);
   // else an estimate (letters with their outline and extrusion ~0.8 of the cap height wide). + the outline / extrusion / shake room
   const s = w.size * (w.sizeK ?? loudScale(w.sound.loud));
-  const tall = w.warp && /arc|fan|tumble|stair|wave|swell|zig|bulge/.test(w.warp) ? 1.85 : 1.55;
+  // (fire words carry flame tongues above the letters: as tall as a warped word - seen clipped at the view's top edge otherwise)
+  const tall = (w.warp && /arc|fan|tumble|stair|wave|swell|zig|bulge/.test(w.warp)) || /^(fire|roar|crackle)$/.test(w.voice) ? 1.95 : 1.55;
   let W = w.wUnits ? s * (w.wUnits + 0.7) : s * 0.8 * w.chars + s * 0.5, H = s * tall * w.lines;
   if ( w.maxWidth && W > w.maxWidth ) { const k = w.maxWidth / W; W *= k; H *= k; }
   return { x0: x - W / 2, y0: y - H / 2, x1: x + W / 2, y1: y + H / 2 };
