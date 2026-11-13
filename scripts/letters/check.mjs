@@ -12,6 +12,7 @@ import { normals, jag } from "./geom.mjs";
 import { area } from "./font.mjs";
 import { rng } from "./rng.mjs";
 import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
+import { checkWords } from "./check-words.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -187,6 +188,8 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
 
 /* 8c. tools (contract v5): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
+/* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs) */
+checkWords(ok, bank);
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {
