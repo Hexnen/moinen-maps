@@ -316,6 +316,9 @@ group("PHASES", () => {
   ok(C.isEcho(C.cluster(dust, G)[0], recent, G), "PHASES the shock dust of the same bomb, arriving alone, stays an echo (one wave, one word)");
   const crater = C.entryEvent({ type: "blast", cause: 1, rect: { x0: 400, y0: 400, x1: 600, y1: 600 }, w: 200, h: 200 }, { x: 0, y: 0 }, 1, 1200, { key: "cr", sid: "cr" });
   ok(C.isEcho(C.cluster([crater], G)[0], recent, G), "PHASES the bomb's crater entering a moment later stays an echo");
+  const deb = later.find((e) => e.voice === "debris"), lit = { key: "fc", obj: "f-deb", voice: "fire", x: deb.x + 5, y: deb.y, r: 60, t: deb.t, m: 0.3, ms: 1400 };
+  const gs = C.cluster([deb, lit], G);
+  ok(gs.length === 2 && !C.isEcho(gs.find((q) => q.main === deb), recent, G), "PHASES a debris landing is not folded into the catch of the burning chunk's fire at the same spot and moment (live: both were swallowed)");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */

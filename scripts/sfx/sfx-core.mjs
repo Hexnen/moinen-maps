@@ -402,13 +402,16 @@ export function cluster(events, grid = 100) {
     let best = null;
     for ( const g of groups ) {
       const dt = Math.abs(e.t - g.t);
+      // (an explosion's phase - its wave, its debris landing - is its own beat: never folded into what happens at the same spot and
+      // moment, e.g. the burning chunk's fire catching where it lands, whose cluster would be the boom's echo and take it along)
+      if ( !!e.phase !== g.phase && !(e.phase && e.obj && g.objs.has(e.obj)) ) continue;   // (with its own boom: its satellite)
       if ( e.obj && g.objs.has(e.obj) && dt <= SAME_OBJ_MS ) { best = g; break; }
       if ( dt > JOIN_MS || e.path || g.main.path ) continue;
       const d = Math.hypot(e.x - g.x, e.y - g.y);
       if ( d <= g.span + e.r + grid * 1.5 ) { best = g; break; }
     }
     const eb = e.box ?? { x0: e.x - e.r, y0: e.y - e.r, x1: e.x + e.r, y1: e.y + e.r };
-    if ( !best ) { groups.push({ members: [e], main: e, objs: new Set(e.obj ? [e.obj] : []), x: e.x, y: e.y, w: e.r * e.r, rEq: e.r, span: e.r, t: e.t, box: { ...eb } }); continue; }
+    if ( !best ) { groups.push({ phase: !!e.phase, members: [e], main: e, objs: new Set(e.obj ? [e.obj] : []), x: e.x, y: e.y, w: e.r * e.r, rEq: e.r, span: e.r, t: e.t, box: { ...eb } }); continue; }
     best.members.push(e); if ( e.obj ) best.objs.add(e.obj);
     const w = e.r * e.r, W = best.w + w;
     best.x = (best.x * best.w + e.x * w) / W; best.y = (best.y * best.w + e.y * w) / W; best.w = W;
