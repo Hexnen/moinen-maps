@@ -24,6 +24,7 @@ export const LAYERS = {
 const defaults = { world: "overlay", screen: "screen" };
 const warned = new Set();
 const BUDGET_MS = 4;          // pre-render budget per animation frame, shared by every live word
+const MAX_REDRAWS = 3;        // stale (zoomed / resized) pictures drawn again per frame, at most, also within the time budget
 const MEMORY_MS = 6000;       // a hand used this recently is avoided by unseeded words
 
 const now = () => performance.now();
@@ -177,15 +178,20 @@ export function createEngine(base) {
     const rs = renderScale(h);
     let c = h.cache[idx];
     /* drawn again when the wanted texel size drifted (zoom, resize): up by 15 % at most, so a small picture is never blown up */
-    if ( c && !h.pixel ) { const w = pxPerUnit(h, rs); if ( w > c.want * 1.15 || w < c.want * 0.5 ) { if ( h.shown === c ) h.shown = null; dropPic(c); c = h.cache[idx] = null; } }
-    if ( c ) return c;
+    /* F1: a drifted picture is only marked stale and stays on screen (scaled) until the frame budget lets it be drawn again,
+       so one zoom step never repaints every word in the same frame; the old texture is freed once the new one is shown (F0) */
+    if ( c && !h.pixel ) { const w = pxPerUnit(h, rs); c.stale = w > c.want * 1.15 || w < c.want * 0.5; }
+    if ( c && !(c.stale && sync) ) return c;
     if ( !sync ) return null;
+    const old = c;
     const p = h.pics[idx];
     const t0 = now();
     const want = pxPerUnit(h, rs);
     const r = paintPicture(h.plan, bank, p, want, makeCanvas);
     r.rs = rs * (r.S / want);          // texels per display unit actually used (lower when a huge word hit the side cap)
     r.want = want; r.size0 = h.size;   // drawn for this size; place() scales by h.size / size0 until it is drawn again
+    r.idx = idx;
+    if ( old ) { if ( h.shown === old ) (h.retired ??= []).push(old); else dropPic(old); }
     if ( h.pixel ) hardAlpha(r.canvas);
     r.ms = now() - t0;
     if ( h.space === "world" ) {
@@ -233,11 +239,17 @@ export function createEngine(base) {
     let a = exitStart; for ( let i = 0; i < tl.exit.length; i++ ) { a += tl.exit[i].ticks * TICK; if ( t < a ) return h.eN + h.hN + i; }
     return -1;
   }
-  function nextIdx(h, t) { const cur = picAt(h, t); for ( let dt = 40; dt < 600; dt += 40 ) { const n = picAt(h, t + dt); if ( n !== cur && n >= 0 && !h.cache[n] ) return n; } return -1; }
+  function nextIdx(h, t) { const cur = picAt(h, t); for ( let dt = 40; dt < 360; dt += 40 ) { const n = picAt(h, t + dt); if ( n !== cur && n >= 0 && !h.cache[n] ) return n; } return -1; }
 
   function show(h, c) {
     if ( h.shown === c ) return;
     h.shown = c;
+    /* F2: free what will not be shown again: the replaced (stale) picture, the entrance once the hold runs, everything before the
+       current picture once the exit runs (the hold cycle stays cached: it loops) */
+    if ( h.retired ) { for ( const o of h.retired ) if ( o !== c ) dropPic(o); h.retired = null; }
+    const i = c.idx ?? -1, exitFrom = h.eN + h.hN;
+    const upTo = i >= exitFrom ? i : Math.min(i, h.eN);   // entrance pictures go as soon as they are passed
+    for ( let j = 0; j < upTo; j++ ) { const o = h.cache[j]; if ( o && o !== c && (j < h.eN || i >= exitFrom) ) { dropPic(o); h.cache[j] = null; } }
     if ( h.space === "world" ) {
       h.sprite.texture = c.tex;
       h.sprite.anchor.set(c.ax / c.canvas.width, c.ay / c.canvas.height);
@@ -275,6 +287,7 @@ export function createEngine(base) {
     const t = now();
     let budget = BUDGET_MS;
     let worldN = 0; for ( const h of clips ) if ( h.space === "world" ) worldN++;
+    let redraws = 0;
     for ( const h of [...clips] ) {
       try {
         const idx = picAt(h, t - h.t0);
@@ -283,6 +296,7 @@ export function createEngine(base) {
         resize(h, false);
         place(h);
         let c = picture(h, idx, false);
+        if ( c?.stale && budget > 0 && redraws < MAX_REDRAWS ) { redraws++; const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }
         if ( !c ) {
           /* not pre-rendered: draw it now unless the frame is already over budget and an older picture is showing */
           if ( !h.shown || budget > 0 ) { const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }

@@ -181,6 +181,7 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   /* the engine never shows a picture enlarged by more than 15 % before drawing it again (source rule in engine.mjs) */
   const eng = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
   ok(/w > c\.want \* 1\.15/.test(eng) && /resize\(h, false\)/.test(eng), "size: re-draw on drift up (>15 %) and live resize are in the frame loop");
+  ok(/redraws < MAX_REDRAWS/.test(eng) && /h\.retired/.test(eng) && !/if \( h\.shown === c \) h\.shown = null; dropPic\(c\)/.test(eng), "size: stale pictures are redrawn a few per frame and the shown texture is never freed under the sprite (F0/F1)");
 }
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
