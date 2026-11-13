@@ -2,11 +2,13 @@
 // Coverage of every sound kind in both languages and tiers, every word renderable in every font (Polish letters included, F23: no
 // silent "?"), determinism and variation, loudness -> tier/stretch/prefix, escalation series, streams, additions and overrides,
 // number formatting (REQUESTS ldic 6), and the engine's public surface (L.word / L.sfx / L.vocab / stream kind).
-// v5 corrections (the user, 2026-11-13): only onomatopoeia (deny list + reviewed-syllable list), the 0..3 "!" scale, duration
+// v5 corrections (the user, 2026-11-13): only onomatopoeia (deny list + reviewed-syllable list), the 0..2 "!" scale, duration
 // separate from loudness (long-quiet / short-loud), the sustain rule (which letters repeat), and the per-letter accent for LOOK.
+// WORD2 (the vocabulary review, 2026-11-13): no Polish diacritics, the near-dictionary refusal, sayable words, lead-ins on the table,
+// sharing only by the SHARED list, "!" caps per kind, percussive kinds never stretched, long steady sounds long (section 19).
 import fs from "node:fs";
 import { createVocab, KINDS, KIND_IDS, BANK, expand, stretchText, formatNumber, formatRange, clean, renderable, langOf, MAX_LEN, MAX_RUN,
-  naming, NAMING, DICT, ICONIC, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND } from "./words.mjs";
+  naming, NAMING, DICT, ICONIC, VOICE, ALLOW, SHARED, shareKey, refusal, sayable, DIACRITICS, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND } from "./words.mjs";
 import { REVIEWED } from "./words-reviewed.mjs";
 import { FONTS, FALLBACK, MOOD_IDS, makePlan } from "./design.mjs";
 
@@ -30,8 +32,9 @@ export function checkWords(ok, bank) {
       const b = BANK[lang][id];
       ok(!!b, `words: ${id} has no ${lang} words`);
       if ( !b ) continue;
-      for ( const t of ["s", "m", "l"] ) ok(b[t]?.length >= 2, `words: ${lang}/${id}/${t} has fewer than 2 words`);
-      ok(b.s.length + b.m.length + b.l.length >= 8, `words: ${lang}/${id} has fewer than 8 words`);
+      /* the review (2026-11-13): 2-4 good words per tier, never padded */
+      for ( const t of ["s", "m", "l"] ) ok(b[t]?.length >= 2 && b[t].length <= 4, `words: ${lang}/${id}/${t} has ${b[t]?.length} words (2-4 good ones, never padded)`);
+      ok(b.s.length + b.m.length + b.l.length >= 6, `words: ${lang}/${id} has fewer than 6 words`);
     }
   }
   ok(Object.keys(BANK.pl).every((id) => KINDS[id]) && Object.keys(BANK.en).every((id) => KINDS[id]), "words: every bank entry is a defined kind");
@@ -51,10 +54,14 @@ export function checkWords(ok, bank) {
   }
   ok(bad.length === 0, `words: ${bad.length} word forms not lettered by every font: ${bad.slice(0, 6).join("; ")}`);
   ok(words > 1500, `words: only ${words} word forms checked`);
-  /* the Polish set really is Polish: its own letters appear, and it is not the English list */
-  const plAll = Object.values(BANK.pl).flatMap((b) => [...b.s, ...b.m, ...b.l]).join(" ");
-  ok([..."ĄĆĘŁŃÓŚŹŻ"].filter((c) => plAll.includes(c)).length >= 6, "words: the Polish set uses Polish letters");
-  let same = 0; for ( const id of KIND_IDS ) if ( JSON.stringify(BANK.pl[id].m) === JSON.stringify(BANK.en[id].m) ) same++;
+  /* the review (2026-11-13, rule 1): NO Polish diacritics in any sound word of either language; the Polish set is spelled with Polish
+     letters only (no V, Q, X), and it is not the English list */
+  const plAll = Object.values(BANK.pl).flatMap((b) => [...b.s, ...b.m, ...b.l, ...b.st]).join(" ");
+  const enAll = Object.values(BANK.en).flatMap((b) => [...b.s, ...b.m, ...b.l, ...b.st]).join(" ");
+  ok(!DIACRITICS.test(plAll) && !DIACRITICS.test(enAll) && !Object.keys(PREFIXES.pl).concat(Object.keys(PREFIXES.en)).some((p) => DIACRITICS.test(p)), "words: no Polish diacritic in any sound word or prefix (the review, rule 1)");
+  ok(!/[VQX]/.test(plAll) && !Object.keys(PREFIXES.pl).some((p) => /[VQX]/.test(p)), `words: the Polish set uses only Polish letters (${(plAll.match(/\S*[VQX]\S*/g) ?? []).slice(0, 6).join(" ")})`);
+  /* the laser pistol is the one exception: the review prescribed ZAT / TZAT / ZARK for both languages (section 2) */
+  let same = 0; for ( const id of KIND_IDS ) if ( id !== "laserpistol" && JSON.stringify(BANK.pl[id].m) === JSON.stringify(BANK.en[id].m) ) same++;
   ok(same === 0, `words: ${same} kinds have identical Polish and English words`);
 
   /* 3. determinism and variation */
@@ -81,8 +88,8 @@ export function checkWords(ok, bank) {
     ok(s.tier === "s" && l.tier === "l" && !/!$/.test(s.text), `words: ${lang}/${id} tiers by loudness`);
     ok(l.sound.loud > s.sound.loud && l.play.magnitude > s.play.magnitude, `words: ${lang}/${id} loudness reaches the engine`);
     const t = V.word(id, { lang, seed: 2, loud: 0.35 }).template;
-    ok(V.word(id, { lang, template: t, loud: 1, prefix: false }).text.length >= V.word(id, { lang, template: t, loud: 0.35, prefix: false }).text.length, `words: ${lang}/${id} a louder sound is not shorter`);
-    ok(!new RegExp(`(\\p{L})\\1{${MAX_RUN},}`, "u").test(V.word(id, { lang, seed: 3, loud: 1, step: 6 }).text), `words: ${lang}/${id} a letter repeated more than ${MAX_RUN} times`);
+    ok(V.word(id, { lang, template: t, loud: 1, prefix: false }).text.replace(/[!?…]+$/, "").length >= V.word(id, { lang, template: t, loud: 0.35, prefix: false }).text.replace(/[!?…]+$/, "").length, `words: ${lang}/${id} a louder sound is not shorter`);
+    ok(!new RegExp(`(\\p{L})\\1{${KINDS[id].run ?? MAX_RUN},}`, "u").test(V.word(id, { lang, seed: 3, loud: 1, step: 6 }).text), `words: ${lang}/${id} a letter repeated more than ${KINDS[id].run ?? MAX_RUN} times`);
   }
   ok(V.word("boom", { lang: "en", magnitude: "epic", seed: 1 }).tier === "l" && V.word("boom", { lang: "en", magnitude: "tiny", seed: 1 }).tier === "s", "words: magnitude words pick the tier");
   ok(V.word("boom", { lang: "en", seed: 1 }).play.magnitude === 0.5, "words: the default loudness is the engine's normal magnitude");
@@ -107,7 +114,7 @@ export function checkWords(ok, bank) {
     const tops = ["pl", "en"].flatMap((lang) => [...Array.from({ length: 12 }, (_, i) => V.word("boom", { lang, loud: 1, prefix: true, seed: i }).text), ...V.series("boom", 6, { lang, seed: "p", loud: 0.9 }).map((w) => w.text)]);
     ok(tops.every((t) => !/^(TRA|RA|TA)-/.test(t)), `words: no gun rattle in front of a blast (${tops.filter((t) => /^(TRA|RA|TA)-/.test(t)).join(" ")})`); }
   /* 5. escalation (MOVE's seam): one sound repeated grows; never the same text twice in a row */
-  for ( const grow of ["stretch", "vary"] ) for ( const id of ["crack", "boom", "punch", "zap", "gunshot", "pain"] ) for ( const lang of ["pl", "en"] ) {
+  for ( const grow of ["stretch", "vary"] ) for ( const id of ["crack", "boom", "punch", "zap", "pistol", "pain"] ) for ( const lang of ["pl", "en"] ) {
     const s = V.series(id, 6, { lang, seed: "e", loud: 0.3, grow });
     ok(s.length === 6 && s.every((w, i) => i === 0 || w.text !== s[i - 1].text), `words: ${grow} series ${lang}/${id} repeats a word: ${s.map((w) => w.text).join(" ")}`);
     ok(s.every((w, i) => i === 0 || w.sound.loud >= s[i - 1].sound.loud), `words: ${grow} series ${lang}/${id} gets quieter`);
@@ -118,7 +125,8 @@ export function checkWords(ok, bank) {
   ok(stretchText("TRA-TA-TA", 2) === "TRA-TA-TAAA" && stretchText("KA-BZZT", 3) === "KA-BZZZZZT", "words: only the last syllable stretches (never a prefix)");
   for ( const id of ["gunfire", "laugh", "siren"] ) for ( const lang of ["pl", "en"] ) {
     const s = V.series(id, 3, { lang, seed: "r", loud: 0.3 }), dash = (t) => (t.match(/-/g) ?? []).length;
-    ok(dash(s[1].text) > dash(s[0].text) && dash(s[2].text) > dash(s[1].text), `words: a repeating sound grows by syllables (${lang}/${id}: ${s.map((w) => w.text).join(" ")})`);
+    const full = (w) => w.text.replace(/[!?…]+$/, "").length + 1 + w.text.replace(/[!?…]+$/, "").split("-").at(-1).length > MAX_LEN;   // no room for one more syllable
+    ok((dash(s[1].text) > dash(s[0].text) || full(s[0])) && (dash(s[2].text) > dash(s[1].text) || full(s[1])), `words: a repeating sound grows by syllables (${lang}/${id}: ${s.map((w) => w.text).join(" ")})`);
   }
   /* 6. streams: syllables for L.stream */
   for ( const id of KIND_IDS ) for ( const lang of ["pl", "en"] ) {
@@ -176,20 +184,22 @@ export function checkWords(ok, bank) {
     for ( const id of KIND_IDS ) {
       const all = [...Object.values(BANK[lang][id]).flat(), ...(KINDS[id].pre?.[lang] ?? [])];
       for ( const w of all ) {
-        if ( naming(w, lang) ) names.push(`${id}: ${w} (${naming(w, lang)})`);
+        /* a word in its own kind (the voice list passes only in voice kinds); a lead-in syllable by syllable (it never stands alone) */
+        const bad = /-$/.test(w) ? flat(w).find((x) => naming(x, lang, { kind: id })) : naming(w, lang, { kind: id });
+        if ( bad ) names.push(`${id}: ${w} (${bad})`);
         for ( const x of flat(w) ) if ( !rev.has(x) ) unreviewed.add(`${id}: ${x}`);
       }
     }
     ok(names.length === 0, `words: ${lang} words that NAME a sound instead of imitating it: ${names.slice(0, 8).join("; ")}`);
     ok(unreviewed.size === 0, `words: ${lang} syllables not on the reviewed list (words-reviewed.mjs; read them against the onomatopoeia rule first): ${[...unreviewed].slice(0, 8).join("; ")}`);
-    ok(Object.entries(ICONIC[lang]).every(([w, r]) => typeof r === "string" && r.length >= 8 && [...w].length <= 5 && DICT[lang].includes(w)), `words: every ${lang} iconic exception is short, has a reason and is a real dictionary word`);
-    ok(Object.keys(ICONIC[lang]).length <= 8, `words: the ${lang} iconic exception list stays short`);
+    ok(Object.entries(ICONIC[lang]).every(([w, r]) => typeof r === "string" && r.length >= 8 && [...w].length <= 7 && DICT[lang].includes(w)), `words: every ${lang} iconic exception is short, has a reason and is a real dictionary word`);
+    ok(Object.keys(ICONIC[lang]).length <= 16, `words: the ${lang} iconic exception list stays short (at most 16, the review)`);
     /* flows and stream syllables are built from the banks: no dictionary word may come back through them */
     { const bad = [];
       for ( const id of KIND_IDS ) {
         const F = createVocab().flow(id, { lang, seed: "dict" }), seg = [F.onset, ...Array.from({ length: 24 }, (_, i) => F.at(i)), F.tail].filter(Boolean);
-        for ( const x of seg ) if ( naming(x.text, lang) ) bad.push(`${id}: ${x.text}`);
-        for ( const y of createVocab().syllables(id, { lang, seed: 3 }) ?? [] ) if ( naming(y, lang) ) bad.push(`${id} syllable: ${y}`);
+        for ( const x of seg ) if ( naming(x.text, lang, { kind: id }) ) bad.push(`${id}: ${x.text}`);
+        for ( const y of createVocab().syllables(id, { lang, seed: 3 }) ?? [] ) if ( naming(y, lang, { kind: id }) ) bad.push(`${id} syllable: ${y}`);
       }
       ok(bad.length === 0, `words: ${lang} flows / stream syllables bring a dictionary word back: ${bad.slice(0, 8).join("; ")}`); }
   }
@@ -199,10 +209,10 @@ export function checkWords(ok, bank) {
   ok(["CIACH!", "CIAAACH", "TRZASK!", "PLUSK", "SKRZYP", "BRZDĘK!", "CHRUP", "MLASK", "PSTRYK", "KŁAP", "SZUR", "CHLAST", "PRASK", "BĘC!", "ŁUP", "KA-TRZASK"].every((w) => naming(w, "pl")) &&
     ["CRASH!", "SPLAASH", "SLAP", "CRACK", "SNAP", "CLICK", "SPLAT", "SMASH!", "KA-CRUNCH", "DOOM", "BROOM"].every((w) => naming(w, "en")),
     "words: the dictionary interjections the user ruled out are caught (CIACH is a word)");
-  ok(["SZSZT!", "FSZSZT!", "ŚWISZK!", "KRAK!", "BUM!", "KA-BUM!"].every((w) => !naming(w, "pl")) && ["TWOOM!!", "WRAMM!!", "SKROOMM!!", "CHOOM!!", "POW!", "THUD!", "KA-BOOM!"].every((w) => !naming(w, "en")),
+  ok(["SZSZT!", "FSZSZT!", "SWISZK!", "KRAK!", "BUM!", "KA-BUM!"].every((w) => !naming(w, "pl")) && ["TWOOM!!", "WRAMM!!", "SKROOMM!!", "CHOOM!!", "POW!", "THUD!", "KA-BOOM!", "BATOOWWW!", "FWOOOSH!!", "KA-THOOM!", "KRAK!!", "SKREE-", "KA-KROOSH!"].every((w) => !naming(w, "en")),
     "words: built sounds and the iconic exceptions pass");
   ok(NAMING === DICT && DICT.pl.includes("CHRZĘST") && DICT.pl.includes("CIACH") && DICT.en.includes("ROAR") && DICT.en.includes("CRASH"), "words: the deny lists hold the words the user ruled out");
-  { const W = createVocab(), warn = console.warn; console.warn = () => {}; const r = W.add("pl", "crumble", ["CHRZĘST!", "CHRUP!", "KRRUSZK!"]); console.warn = warn;
+  { const W = createVocab(), warn = console.warn; console.warn = () => {}; const r = W.add("pl", "crumble", ["CHRZĘST!", "CHRUP!", "KRRUNCZ!"]); console.warn = warn;
     ok(r.refused.length === 2 && r.refused.includes("CHRZĘST!") && r.refused.includes("CHRUP!"), "words: add() refuses a dictionary word and keeps a built one"); }
 
   /* 13. the "!" scale 0..2 (the user: "stopniowanie wykrzykników do 2") is really used, rises with loudness, and is separate from length */
@@ -217,9 +227,9 @@ export function checkWords(ok, bank) {
     }
     ok([0, 1, 2].every((n) => used.has(n)) && !used.has(3), `words: the "!" scale uses 0, 1 and 2, never 3 (${[...used].sort()})`);
     ok(mono.length === 0, `words: louder never has fewer "!" (${mono.slice(0, 6).join(" ")})`);
-    ok(bangsFor(0.1, 1, 0) === 0 && bangsFor(0.4, 1, 0) === 1 && bangsFor(0.7, 1, 0) === 2 && bangsFor(1, 1, 0) === 2 && bangsFor(1, 0.2, 0) === 2 && bangsFor(0.7, 0.2, 0) === 1 && bangsFor(0.5, 1, 0.9) === 0 && bangsFor(1, 0, 0, 0) === 0 && bangsFor(0, 0, 0, 7) === 2,
-      "words: the scale (quiet 0, ordinary 1, loud 2; one less for a soft onset unless very loud, or a long sound that is not loud; bangs forces 0..2)");
-    ok(!/!/.test(V.word("punch", { lang: "pl", seed: 1, loud: 1, bangs: 0 }).text) && /[^!]!!$/.test(V.word("click", { lang: "pl", seed: 1, loud: 0.1, bangs: 3 }).text), "words: bangs: 0 and bangs: 2 are obeyed (3 is capped to 2)");
+    ok(bangsFor(0.1, 1, 0) === 0 && bangsFor(0.4, 1, 0) === 1 && bangsFor(0.7, 1, 0) === 1 && bangsFor(0.9, 1, 0) === 2 && bangsFor(0.9, 0.2, 0) === 1 && bangsFor(1, 0.2, 0) === 2 && bangsFor(0.5, 1, 0.9) === 0 && bangsFor(1, 0, 0, 0) === 0 && bangsFor(0, 0, 0, 7) === 2 && bangsFor(1, 1, 0, null, 1) === 1,
+      "words: the scale (quiet 0, ordinary 1, \"!!\" only from 0.85 loud with a sharp onset or from 0.95; one less for a soft onset or a long sound that is not loud; bangs forces 0..2; a kind's cap wins)");
+    ok(!/!/.test(V.word("punch", { lang: "pl", seed: 1, loud: 1, bangs: 0 }).text) && /[^!]!!$/.test(V.word("punch", { lang: "pl", seed: 1, loud: 0.1, bangs: 3 }).text) && /[^!]!$/.test(V.word("click", { lang: "pl", seed: 1, loud: 0.1, bangs: 3 }).text), "words: bangs: 0 and bangs: 2 are obeyed (3 is capped to 2, a never-loud kind to its cap)");
   }
 
   /* 14. DURATION is separate from loudness: long-quiet is stretched and has no "!", short-loud is not stretched and has 2 "!";
@@ -228,9 +238,12 @@ export function checkWords(ok, bank) {
   for ( const id of KIND_IDS ) for ( const lang of ["pl", "en"] ) {
     const t = V.word(id, { lang, seed: 5, loud: 0.5 }).template, core = clean(t).replace(/[!?…]+$/, "");
     const lq = V.word(id, { lang, template: t, loud: 0.15, long: 1 }), sq = V.word(id, { lang, template: t, loud: 0.15, long: 0 });
-    const sl = V.word(id, { lang, template: t, loud: 1, long: 0, prefix: false });
-    ok(lq.bangs === 0 && body(lq).length > body(sq).length, `words: ${lang}/${id} long-quiet is stretched and quiet (${lq.text} vs ${sq.text})`);
-    ok(sl.bangs === 2 && body(sl) === core, `words: ${lang}/${id} short-loud is unstretched and loud (${sl.text} from ${core})`);
+    const sl = V.word(id, { lang, template: t, loud: 1, long: 0, prefix: false }), k = KINDS[id];
+    const dash = (w) => (body(w).match(/-/g) ?? []).length, canStretch = !!stretchPlan(core, 4, k.stretchHold ?? k.hold, lang, k.run ?? MAX_RUN);
+    if ( k.perc && k.repeat ) ok(lq.bangs === 0 && (dash(lq) > dash(sq) || body(sq).length + 1 + body(sq).split("-").at(-1).length > MAX_LEN), `words: ${lang}/${id} a long percussive sound repeats more, never stretches (${lq.text} vs ${sq.text})`);
+    else if ( canStretch ) ok(lq.bangs === 0 && body(lq).length > body(sq).length, `words: ${lang}/${id} long-quiet is stretched and quiet (${lq.text} vs ${sq.text})`);
+    else ok(lq.bangs === 0 && body(lq) === body(sq), `words: ${lang}/${id} a word with nothing lasting is not stretched (${lq.text} vs ${sq.text})`);
+    ok(sl.bangs === Math.min(2, k.maxBangs ?? 2) && body(sl) === core, `words: ${lang}/${id} short-loud is unstretched and as loud as its kind allows (${sl.text} from ${core})`);
     const a = V.word(id, { lang, template: t, loud: 0.3, long: 0.6, prefix: false }), b = V.word(id, { lang, template: t, loud: 0.9, long: 0.6, prefix: false });
     ok(body(a) === body(b), `words: ${lang}/${id} loudness alone does not stretch (${a.text} / ${b.text})`);
     ok(V.word(id, { lang, template: t, duration: 2000 }).text === V.word(id, { lang, template: t, long: 1 }).text, `words: ${lang}/${id} duration in ms = long`);
@@ -239,8 +252,8 @@ export function checkWords(ok, bank) {
   /* 15. WHERE a word stretches: only the sustain (the kind's classes, in order), only in the last syllable, never a plosive or a prefix */
   { const bad = [];
     for ( const lang of ["pl", "en"] ) for ( const id of KIND_IDS ) {
-      const hold = KINDS[id].hold ?? DEFAULT_HOLD;
-      ok(hold.every((c) => CLASSES[c]), `words: ${id} hold names a sustain class`);
+      const hold = KINDS[id].stretchHold ?? KINDS[id].hold ?? DEFAULT_HOLD;
+      ok((KINDS[id].hold ?? DEFAULT_HOLD).every((c) => CLASSES[c]), `words: ${id} hold names a sustain class`);
       for ( const tpl of Object.values(BANK[lang][id]).flat() ) {
         const core = clean(tpl).replace(/[!?…]+$/, ""), st = stretchText(core, 4, hold, lang), pl = stretchPlan(core, 4, hold, lang);
         if ( !pl ) continue;
@@ -260,10 +273,10 @@ export function checkWords(ok, bank) {
     }
     ok(bad.length === 0, `words: the sustain rule: ${bad.length} wrong stretches: ${bad.slice(0, 6).join("; ")}`);
   }
-  ok(stretchText("KRAK", 3, ["V"]) === "KRAAAAK" && stretchText("KRAK", 3, ["R", "V"]) === "KRRRRAK" && stretchText("PSST", 3, ["S"]) === "PSSSSST" && stretchText("SZUM", 2, ["S"]) === "SZSZSZUM"
+  ok(stretchText("KRAK", 3, ["V"]) === "KRAAAAK" && stretchText("KRAK", 3, ["R", "V"]) === "KRRRRAK" && stretchText("PSST", 3, ["S"]) === "PSSSSST" && stretchText("SZUM", 2, ["S"], "pl") === "SSSZUM"
     && stretchText("WHOOSH", 2, ["S"], "en") === "WHOOSHHH" && stretchText("BUM", 7, ["V", "M"]) === "BUUUUUUMMM" && stretchText("KTP", 3) === "KTP" && stretchText("KA-BUM", 2, ["V"]) === "KA-BUUUM"
     && stretchText("TWOM", 3, ["V", "M"]) === "TWOOOMM" && stretchText("BATOW", 3, ["V", "F"], "en") === "BATOOOWW" && stretchText("SKROM", 6, ["V", "M"], "en") === "SKROOOOOMMM",
-    `words: the sustain rule examples (vowel ring, rolling R, hiss, SZ as a pair, English SH -> SHHH, overflow forward into the hum, plosives never, prefix never; the comic's manner: a vowel shares the stretch with the continuant after it, TWOOOMM, BATOOOWW)`);
+    `words: the sustain rule examples (vowel ring, rolling R, hiss, Polish SZ as an S run SSSZ, English SH -> SHHH, overflow forward into the hum, plosives never, prefix never; the comic's manner: a vowel shares the stretch with the continuant after it, TWOOOMM, BATOOOWW)`);
 
   /* 16. ACCENT for LOOK: one weight 0..1 per character of the engine's word, the peak in the main syllable, the kind's envelope */
   { const bad = [];
@@ -302,7 +315,7 @@ export function checkWords(ok, bank) {
       if ( segs.at(-1).t + segs.at(-1).ms < 8000 - 1 || segs.some((x, i) => i && x.t !== segs[i - 1].t + segs[i - 1].ms) ) bad.push(`${lang}/${id}: timing`);
       segs.forEach((x, i) => {
         if ( i && x.text === segs[i - 1].text ) bad.push(`${lang}/${id}: ${x.text} twice`);
-        if ( new RegExp(`(\\p{L})\\1{${MAX_RUN},}`, "u").test(x.text) ) bad.push(`${lang}/${id}: ${x.text} run too long`);
+        if ( new RegExp(`(\\p{L})\\1{${KINDS[x.part ?? id].run ?? MAX_RUN},}`, "u").test(x.text) ) bad.push(`${lang}/${id}: ${x.text} run too long`);   // a mixed flow: its part's limit
         if ( /!!!/.test(x.text) || x.bangs > 2 ) bad.push(`${lang}/${id}: ${x.text} more than 2 "!"`);
         if ( !renderable(x.text) || x.text.replace(/[!?…]/g, "").length > MAX_LEN ) bad.push(`${lang}/${id}: ${x.text} not letterable`);
         if ( x.accent.length !== [...x.text].length || !x.play?.mood ) bad.push(`${lang}/${id}: ${x.text} accent/play`);
@@ -354,5 +367,103 @@ export function checkWords(ok, bank) {
     ok(C("roar").contour === "rise" && C("crack").contour === "fall" && C("whoosh").contour === "arc" && C("gunfire").contour === "pulse" && V.flow("hiss", { seed: 1 }).at(0).character.contour === "steady", "words: contour from the envelope (steady for a steady flow)");
     ok(V.character({ mood: "fire" }).material === "fire" && V.character({ mood: "splash" }).wet === 1 && V.character({}).material === "flesh" && MOOD_IDS.every((m) => MOOD_KIND[m] && KINDS[MOOD_KIND[m]]), "words: plain text gets the character of its mood");
     { const W = createVocab(); W.define("pvfx-webshot", { mood: "whoosh" }); ok(W.word("pvfx-webshot", { lang: "en", seed: 1 }).character.material === "flesh", "words: a defined kind inherits a character"); }
+  }
+  /* 19. THE VOCABULARY REVIEW (WORD2, 2026-11-13): every rule of the review is enforced on the banks AND on the text the engine really
+         produces (prefix + stretched word + "!"), in both languages */
+  { const LOUDS = [0, 0.3, 0.6, 0.85, 1], LONGS = [0, 0.5, 1], SEEDS = [1, 2, 3, 4];
+    const gen = (lang, id, fn) => { for ( const loud of LOUDS ) for ( const long of LONGS ) for ( const seed of SEEDS ) for ( const prefix of [undefined, true] ) fn(V.word(id, { lang, loud, long, seed, prefix }), loud, long); };
+    const syl = (w) => clean(w).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean);
+    const bank = { refused: [], unsay: [], lead: [], shared: [] }, made = { refused: [], unsay: [], dia: [], bangs: [], perc: [], w: [], sz: [], ph: [], steady: [] };
+    for ( const lang of ["pl", "en"] ) {
+      const owner = new Map();
+      for ( const id of KIND_IDS ) {
+        const k = KINDS[id], b = BANK[lang][id];
+        for ( const [tier, list] of Object.entries(b) ) for ( const w of list ) {
+          /* rules 3, 4: no dictionary word, no word one letter from one (a respelling only by the ALLOW list) */
+          const r = refusal(w, lang, { kind: id }); if ( r ) bank.refused.push(`${lang}/${id} ${w} (${r.why} ${r.part} ~ ${r.like})`);
+          /* rules 12, 13: it can be said */
+          const s = sayable(w, lang); if ( s ) bank.unsay.push(`${lang}/${id} ${w}: ${s}`);
+          /* rule 7: a word with a lead-in uses its kind's own lead-in from the PREFIXES table */
+          if ( tier !== "st" && !k.repeat && w.includes("-") ) { const lead = w.split("-").slice(0, -1).join("-") + "-"; if ( !PREFIXES[lang][lead]?.kinds.includes(id) ) bank.lead.push(`${lang}/${id} ${w}`); }
+          /* each kind its own words; a word shared between kinds only by the SHARED list, with its reason */
+          if ( tier !== "st" ) { const key = shareKey(w); if ( !owner.has(key) ) owner.set(key, new Set()); owner.get(key).add(id); }
+        }
+      }
+      for ( const [key, ids] of owner ) if ( ids.size > 1 && !(SHARED[lang][key] && [...ids].every((i) => SHARED[lang][key].kinds.includes(i))) ) bank.shared.push(`${lang} ${key}: ${[...ids].join(", ")}`);
+      for ( const [key, e] of Object.entries(SHARED[lang]) ) if ( !(typeof e.why === "string" && e.why.length >= 15 && e.kinds.length >= 2 && e.kinds.every((i) => KINDS[i])) || key !== shareKey(key) ) bank.shared.push(`${lang} SHARED ${key}: no reason, unknown kind or not a share key`);
+
+      /* the text the engine produces */
+      for ( const id of KIND_IDS ) {
+        const k = KINDS[id], cap = Math.min(2, k.maxBangs ?? 2), bankSyl = new Set(Object.values(BANK[lang][id]).flat().flatMap(syl));
+        gen(lang, id, (w, loud) => {
+          const r = refusal(w.text, lang, { kind: id }); if ( r ) made.refused.push(`${lang}/${id} ${w.text} (${r.why} ${r.part})`);
+          const s = sayable(w.text, lang); if ( s ) made.unsay.push(`${lang}/${id} ${w.text}: ${s}`);
+          if ( DIACRITICS.test(w.text) ) made.dia.push(`${lang}/${id} ${w.text}`);
+          /* "!" by loudness: never above the kind's cap, "!!" only from 0.85 loud */
+          if ( w.bangs > cap || (w.bangs === 2 && loud < 0.85) ) made.bangs.push(`${lang}/${id} ${w.text} at ${loud}`);
+          /* rule 9: a percussive kind never stretches a letter; a long one repeats whole syllables of its own words */
+          const body = syl(w.text.slice(w.prefix ? clean(w.prefix).length : 0));
+          if ( k.perc && body.some((x) => !bankSyl.has(x)) ) made.perc.push(`${lang}/${id} ${w.text}`);
+          /* rule 6: W lasts only at a syllable's end after a vowel (POOWW), never THWWWIT or FWWWOOP */
+          if ( /W{2,}(?=\p{L})/u.test(w.text.replace(/[!?…]+$/, "")) && !Object.values(BANK[lang][id]).flat().some((b) => /W{2,}(?=\p{L})/u.test(b)) ) made.w.push(`${lang}/${id} ${w.text}`);
+          /* rule 14: a Polish SZ stretches as an S run (SSSSZ), never SZSZSZ unless the word itself is written so */
+          if ( lang === "pl" && /(SZ){3,}/.test(w.text) && !Object.values(BANK.pl[id]).flat().some((b) => /(SZ){3,}/.test(b)) ) made.sz.push(`${lang}/${id} ${w.text}`);
+          /* rule 5: English PH is no lasting sound (never PHHH, never PFAAAK from a PH) */
+          if ( lang === "en" && /PHH|PFA/.test(w.text) && !Object.values(BANK.en[id]).flat().some((b) => /PFA/.test(b)) ) made.ph.push(`${lang}/${id} ${w.text}`);
+        });
+        /* rule 10: a long steady sound is long enough to read as lasting (at full duration a run of 4+ letters, 5+ for the steady
+           hisses, hums and drones whose flows may run to 10) */
+        if ( !k.perc && k.sound.long >= 0.8 && !k.repeat ) {
+          const w = V.word(id, { lang, loud: 0.4, long: 1, seed: 1 }), run = Math.max(...(w.text.match(/(\p{L})\1*/gu) ?? [""]).map((x) => x.length));
+          if ( run < ((k.run ?? MAX_RUN) > MAX_RUN ? 5 : 4) ) made.steady.push(`${lang}/${id} ${w.text}`);
+        }
+      }
+      /* flows, series and stream syllables are refused the same way */
+      for ( const id of KIND_IDS ) {
+        const F = createVocab().flow(id, { lang, seed: "w2" }), seg = [F.onset, ...Array.from({ length: 16 }, (_, i) => F.at(i)), F.tail].filter(Boolean);
+        for ( const x of [...seg.map((s) => s.text), ...V.series(id, 5, { lang, seed: "w2", loud: 0.4 }).map((s) => s.text), ...V.series(id, 5, { lang, seed: "w2", loud: 0.4, grow: "vary" }).map((s) => s.text)] ) {
+          const r = refusal(x, lang, { kind: id }); if ( r ) made.refused.push(`${lang}/${id} flow/series ${x} (${r.why} ${r.part})`);
+          if ( DIACRITICS.test(x) ) made.dia.push(`${lang}/${id} flow/series ${x}`);
+          const s = sayable(x, lang); if ( s ) made.unsay.push(`${lang}/${id} flow/series ${x}: ${s}`);
+        }
+      }
+    }
+    ok(bank.refused.length === 0, `words: bank words refused as dictionary or near-dictionary words: ${bank.refused.slice(0, 8).join("; ")}`);
+    ok(bank.unsay.length === 0, `words: bank words that cannot be said: ${bank.unsay.slice(0, 8).join("; ")}`);
+    ok(bank.lead.length === 0, `words: bank words whose lead-in is not their kind's own on the PREFIXES table: ${bank.lead.slice(0, 8).join("; ")}`);
+    ok(bank.shared.length === 0, `words: words shared between kinds without a SHARED entry and reason: ${bank.shared.slice(0, 8).join("; ")}`);
+    ok(made.refused.length === 0, `words: produced text (prefix + word) refused: ${made.refused.slice(0, 8).join("; ")}`);
+    ok(made.unsay.length === 0, `words: produced text that cannot be said: ${made.unsay.slice(0, 8).join("; ")}`);
+    ok(made.dia.length === 0, `words: produced text with a Polish diacritic: ${made.dia.slice(0, 8).join("; ")}`);
+    ok(made.bangs.length === 0, `words: "!" above the kind's cap or "!!" below 0.85 loud: ${made.bangs.slice(0, 8).join("; ")}`);
+    ok(made.perc.length === 0, `words: a percussive kind stretched a letter: ${made.perc.slice(0, 8).join("; ")}`);
+    ok(made.w.length === 0, `words: W stretched inside a syllable: ${made.w.slice(0, 8).join("; ")}`);
+    ok(made.sz.length === 0, `words: Polish SZ stretched as SZSZSZ: ${made.sz.slice(0, 8).join("; ")}`);
+    ok(made.ph.length === 0, `words: English PH stretched: ${made.ph.slice(0, 8).join("; ")}`);
+    ok(made.steady.length === 0, `words: long steady sounds too short at full duration: ${made.steady.slice(0, 8).join("; ")}`);
+
+    /* the lists: ICONIC short with reasons (above), VOICE only in voice kinds, ALLOW and VOICE with reasons */
+    for ( const lang of ["pl", "en"] ) {
+      ok(Object.values(VOICE[lang]).every((r) => typeof r === "string" && r.length >= 8) && Object.keys(VOICE[lang]).length <= 8, `words: the ${lang} voice list is short and every entry has a reason`);
+      ok(Object.values(ALLOW[lang]).every((r) => typeof r === "string" && r.length >= 15) && Object.keys(ALLOW[lang]).length <= 20, `words: the ${lang} allow list is short and every entry has a reason`);
+      ok(Object.keys(VOICE[lang]).every((w) => refusal(`${w}-${w}`, lang, { kind: "punch" }) && !refusal(`${w}-${w}`, lang, { kind: "laugh" })), `words: ${lang} voice words pass only in the voice kinds`);
+      ok(Object.keys(ICONIC[lang]).every((w) => !refusal(w, lang, { kind: "punch" })) && Object.keys(ALLOW[lang]).every((w) => !refusal(w, lang, { kind: "punch" })), `words: ${lang} iconic and allowed words pass`);
+    }
+    /* the review's examples: plain words and near-words are caught, built sounds pass, the collapse side effects are gone */
+    ok(["PLUSK", "CHLUP", "TRACH", "BACH", "PTAK", "BRAM", "GROCH", "PLOSK", "TRZAK", "KLIK", "KLYK", "SZWUM", "BRUM"].every((w) => refusal(w, "pl")) &&
+      ["SPLASH", "CLICK", "WHIRR", "PEW", "SPLOTCH", "BWEEP", "THUM", "DLIP", "KREEK", "HWOOSH", "SCRAM"].every((w) => refusal(w, "en")),
+      "words: the review's plain words, near-words and respellings are refused (CHLUP is no exception)");
+    ok(["BA-DUM", "BADUM", "HRRO", "KRAKT", "BLAMM", "FWOOOSH"].every((w) => !refusal(w, "en")) && ["WRAM", "CZUM", "BA-DUM"].every((w) => !refusal(w, "pl")),
+      "words: no collapse side effects (BAA, GRR) and no first-letter near matches (WRAM is not TRAM)");
+    ok(["PLUP", "BLUP", "PLOP", "GLUP", "PLUMP", "BLUMP", "SPLUMP", "SPLOOSZ", "SPLASZ", "GLUB", "BLUB", "BULP"].every((w) => !refusal(w, "pl") && !sayable(w, "pl")) &&
+      ["PLOP", "PLOOP", "PLUNK", "SPLOOSH", "GLUB", "BLUB"].every((w) => !refusal(w, "en") && !sayable(w, "en")), "words: the owner's water family passes in both languages");
+    ok(["TK", "THK", "SNF", "CHK", "PFT", "BZZT", "PSST", "HMM", "GRRMM", "NNGH"].every((w) => !sayable(w, "en")) && ["KRKAK", "VVRT", "SHIIK", "PSZSZSZT"].every((w) => sayable(w, "en") || sayable(w, "pl")),
+      "words: vowel-less ticks and one-sound words can be said; consonant piles, doubled plosive openings and English II cannot");
+    ok(!["PIU", "PEW"].some((w) => Object.values(BANK.en.laserpistol).flat().concat(Object.values(BANK.pl.laserpistol).flat()).some((b) => syl(b).some((x) => x.replace(/(\p{L})\1+/gu, "$1") === w)))
+      && ["ZAT", "TZAT"].every((w) => BANK.en.laserpistol.s.includes(w) && BANK.pl.laserpistol.s.includes(w)), "words: the laser pistol is ZAT / TZAT, not PIU PIU or PEW");
+    ok(!KINDS.gunshot && V.kindOf("gunshot") === "pistol", "words: gunshot is merged into pistol (alias)");
+    ok(stretchText("PHAKK", 4, ["F", "V"], "en") === "PHAAAAAKK" && stretchText("THWIT", 3, ["F", "V"], "en") === "THWIT" && stretchText("POW", 3, ["F"], "en") === "POWWWW" && stretchText("SZSZ", 3, ["S"], "pl") === "SSSSSZ" && stretchText("SHNIK", 3, ["V"], "en") === "SHHHHNIK",
+      "words: the stretch rules of the review (PH is no sound of its own, W lasts only at the end after a vowel, SZ as an S run, English I never doubles)");
+    ok(KIND_IDS.filter((id) => KINDS[id].perc).every((id) => KINDS[id].stretchHold.length === 0) && ["click", "pistol", "rifle", "hammer", "gunfire"].every((id) => KINDS[id].perc), "words: percussive kinds have no lasting letter");
   }
 }

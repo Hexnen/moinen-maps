@@ -297,7 +297,7 @@ L.sfx("crack", { loud: 0.8, lang: "pl", space: "world", at: token, seed: msg.id 
 const w = L.word("boom", { magnitude: "huge", lang: "auto", seed });                   // just the word: { text, mood, sound, play, ... }
 L.play(w.text, { ...w.play, space: "world", area });                                    // ... lettered by the caller
 L.stream({ kind: "gunfire", lang: "pl", at: () => muzzle(), to: target, every: 90 });  // syllables from the vocabulary
-L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, one notch more each time: TRZASK! > TRZAASK! > TRZAAASK!! > ...
+L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, one notch more each time: KRAKT! > KRRAKT! > KA-KRRAKT! > ...
 L.flow("hiss", { lang: "pl", seed }).take(8000);            // a CONTINUOUS sound: onset, changing body words, tail (see below)
 L.vocab.grow("KRAK!", 2);                                  // grow a caller's own text: KRAAAK!
 L.number(12500, { lang: "pl" }); L.number(3, { times: true }); L.range(2, 4);   // "12 500", "3×", "2–4"
@@ -312,52 +312,83 @@ L.number(12500, { lang: "pl" }); L.number(3, { times: true }); L.range(2, 4);   
 - `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; `kind loud lang step template prefix long duration bangs` are
   vocabulary options, every other play option works; `opts.sound` keys override per key; the handle carries `h.word`.
 
-#### Only onomatopoeia (the user's rule)
+#### Only onomatopoeia (the owner's rules, and the vocabulary review of 2026-11-13)
 Every word imitates the sound; none NAMES it (`CHRZĘST`, `SYK`, `ŁOMOT`, `GROWL`, `CREAK`, `ROAR` are names of sounds, not sounds).
-No dictionary words at all (the user's ruling, 2026-11-13: "ciach to słowo"): not even an imitative interjection from the
-dictionary (CIACH, TRZASK, PLUSK, SKRZYP, BRZDĘK, CHRUP, MLASK, PSTRYK, KŁAP, SZUR, CHLAST, PRASK, BĘC, ŁUP; CRASH, SPLASH, SLAP,
-CRACK, CLICK) and no ordinary word that happens to look like a sound (BRAM, GROCH, KRY, DOOM, BROOM, GROOM). A sound word is BUILT
-from the sound: an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT, ŚWISZK; a blow TWOOM, WRAMM). `DICT` in words.mjs is
-the deny list (`NAMING` is its old name), checked on the whole word and on every syllable with repeated letters collapsed, so
-`CIAAACH` and `KA-TRZASK` are caught too. Short function syllables (TA, DA, NA) are not on it: TA-TA-TA is a gun. `ICONIC` is the
-short explicit exception list, each with its reason, for the user to rule on: pl BUM, BAM, PAF; en POW, THUD, BAM, BOOM, BANG, ZAP,
-WHAM, SHH. `L.vocab.add` refuses dictionary words. The checks run the rule over every bank word, prefix, stream syllable and flow
-segment. `words-reviewed.mjs` holds every syllable of the built-in banks as read against the rule: the checks fail on a new bank
-syllable that is not on it, so nothing slips in unreviewed.
+No dictionary words at all ("ciach to słowo"): not even an imitative interjection from the dictionary (CIACH, TRZASK, PLUSK,
+SKRZYP, CHRUP, MLASK, PSTRYK, SZUR, CHLAST, PRASK, TRACH, BACH, CHLUP; CRASH, SPLASH, SLAP, CRACK, CLICK, WHIRR, PEW) and no
+ordinary word that happens to look like a sound (BRAM, GROCH, PTAK, KRY, DOOM, BROOM, GROOM). A sound word is BUILT from the sound:
+an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM). Since the review:
+- **No Polish diacritics** in any sound word, prefix, stream syllable or flow segment, in either language (Ą Ć Ę Ł Ń Ó Ś Ź Ż never;
+  the Polish set is also written without V, Q, X). The deny list may hold diacritic words; they are compared with the marks stripped.
+- **English is the master**; Polish follows it in Polish spelling (OO -> UU, EE -> II, SH -> SZ, CH -> CZ, V -> W, TH -> T) plus a
+  short native list (PAF, IJO-IJO, SZSZT, DZING). 2-4 good words per tier, never padded.
+- **The refusal** (`refusal(word, lang, { kind })` in words.mjs, also behind `naming()` and `L.vocab.add`): every syllable and the
+  whole word are compared in a canonical spelling (diacritics stripped; English respellings folded CK -> K, C -> K, QU -> KW,
+  WH -> HW, PH -> F, so KREEK = CREAK and HWOOSH = WHOOSH). EXACT: equal to a denied word, repeated letters collapsed (CIAAACH ->
+  CIACH); a denied word written with a double letter (BAA, BOOM, GRR, SHH) matches only its doubled spelling, so BA-DUM and HRRO are
+  no longer caught by accident. NEAR: one letter from a denied word of 4+ letters as a reader sees it (a vowel for a vowel, in a
+  4-letter word only I/Y or O/U; R for L; a voiced for a voiceless twin; a letter dropped or added inside or at the end; an S in
+  front: PLOSK ~ PLUSK, TRZAK ~ TRZASK, KLYK ~ KLIK, SZWUM ~ SZUM, BWEEP ~ BEEP, THUM ~ THUMP, DLIP ~ DRIP), or a denied 3-letter
+  word with K or T stuck on. A changed or added FIRST letter is not near (WRAM is not TRAM, CZUM is not SZUM). The final text
+  (prefix + stretched word) goes through the same refusal, so a prefix cannot make a word (KA-POW = KAPOW is dropped).
+- **The exception lists**, each entry with its reason, for the owner to rule on: `ICONIC` (at most 16; pl BUM, BAM, PAF, SZSZ, HA,
+  BANG; en POW, THUD, BAM, BOOM, BANG, ZAP, WHAM, SHH, PLOP, PLUNK, SPLOOSH, BLAM, BEEP, VROOM, HA, GRR) pass everywhere, also with a
+  cut-off added at their end (SZSZT), but a letter changed or put inside one is near (BWEEP, BRANG); `VOICE` (pl HE, HI, CHE, OCH,
+  UCH; en HE, HEH, HO, ARGH, UGH, OOF) pass only in the voice kinds; `ALLOW` holds the comic's K-respellings and the few built words
+  that are one letter from a word (KRAK, KLANK, KRUNCZ, GLUP, PLUP, PLUMP, DZING, BLAM; KRAK, FWOOSH, KROOSH, KRUNCH, KLANK, KLANG,
+  SKREE, SKROOM, CHOOM, GLUB, SPLUMP, THWIP...). TRACH, BACH and CHLUP are not exceptions.
+- **Sayable** (`sayable(word, lang)`): no consonant pile of 5+, no plosive-R/L-plosive (KRKAK), no three plosives in a row, a doubled
+  letter opens a syllable only when it lasts (SSST, MMM, never VVRT), English never writes II (a long i is EE); a syllable without a
+  vowel is one clear lasting sound (BZZT, PSST, HMM, GRRMM) or a tick or throat sound (TK, THK, SNF, CHK, PFT).
+- **Each kind its own words**: a word (repeated letters collapsed) used by two kinds must be on `SHARED` with both kinds and a reason
+  (a grenade's BOOM is a boom, a storm's word is its thunder, a mech walks with DUM-DUM stomps); any other sharing fails the checks,
+  so a punch word on a plane cannot come back.
+- **The water family** is fixed by the owner: pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ SPLASZ, bubbles
+  GLUB BLUB BULP; en PLOP PLOOP PLUNK SPLOOSH, bubbles GLUB BLUB. The laser pistol is ZAT, TZAT, ZARK, TZAK, FZAT, SKZARK, KTZAK,
+  ZZARKT, ZAT-ZAT-ZAT (never PIU PIU). `gunshot` is merged into `pistol` (an alias).
+- **Playing with letters** where it fits the sound: muffled B-/G- onsets (BTHOOM, GDOOMF, BWUMF), hard K-/SK- (KTHOOM, SKROOMM),
+  airy F-/H- (FWOOSH, HWAAAH), wet SH-/SP- (SHPLAK, SPLORCH); the stretch goes to the letter that lasts (crack on R: KRRRRAK, boom on
+  OO and M, hiss on S).
+`DICT` is the deny list (`NAMING` its old name). The checks run every rule over every bank word, prefix, stream syllable, flow
+segment, series and the generated text in both languages; `words-reviewed.mjs` holds every syllable of the built-in banks as read
+against the rules, so nothing slips in unreviewed.
 
-#### Prefixes: the sound's own lead-in (the user: "Tra ta przed bombą?")
+#### Prefixes: the sound's own lead-in (the owner: "Tra ta przed bombą?")
 A prefix is what is heard just before the main sound and belongs to it: the detonator's crack before the boom (KA-BUM,
-KA-THOOM), the surface tearing before a collapse (TRZA-KRUSZ, KRA-KROOSH), the lightning's double crack before the thunder
-(KRA-KA-BROOM). It is never another sound's signature (no gun rattle TRA-TA- before a blast, no crash word before a punch).
-`PREFIXES` in words.mjs lists each prefix with its reason and the only kinds it may lead; the checks tie every kind's prefix to
-it and refuse a prefix that is a repeating kind's rattle syllable or another kind's word. pl: KA- (punch, boom, shotgun,
-grenade), TRZA- (smash, crash, thunder); en: KA- (punch, smash, clang, boom, zap, beam, fire, shotgun, grenade), KRA- (smash,
-crash), KRA-KA- (thunder).
+KA-THOOM), the surface tearing before a collapse (KRA-KROOSH), the lightning's double crack before the thunder (KRA-KA-BOOM).
+It is never another sound's signature (no gun rattle TRA-TA- before a blast). `PREFIXES` in words.mjs lists each prefix with its
+reason and the only kinds it may lead; every bank word with a lead-in and every kind's prefix must be on it, and a prefix is dropped
+when the final text would be a dictionary word. pl and en alike: KA- (punch, smash, clang, boom, crack, crash, thud, mech, blaster,
+splash), KRA- (smash, crash), KRA-KA- (thunder, storm); pl CZAK-CZAK- / en CHK-CHK- (shotgun: the pump), pl PTYK-KA- / en PTIK-KA-
+(grenade: the pin and the spoon).
 
-#### The comic's manner (examples the user gave from the Invincible comic)
-TWOOM!! WRAMM!! BATOOWWW! POW! FWOOOSH!! CHOOM!! SKROOMM!! THUD!: an invented consonant cluster at the attack (TW-, WR-, FW-,
-SKR-, CH-, THW-, BR-), the lasting letters doubled or tripled, consonants too (MM, WWW), not only vowels; one or two "!"; short
-sounds left short. The banks follow that manner with their own words (THROOMM!, BWAMM!, SKRAMM!, VWAAMM!, ZWOOSH; BRAMM!, TRZAMM!,
-DŁUMM!, WZUUSZ!, BRZDAMM!), not those examples.
+#### The comic's manner (examples the owner gave from the Invincible comic)
+TWOOM!! WRAMM!! BATOOWWW! POW! FWOOOSH!! CHOOM!! SKROOMM!! THUD! KA-THOOM! KRAK!! SKREE- KA-KROOSH!: an invented consonant cluster
+at the attack (TW-, WR-, FW-, SKR-, CH-, THW-, BR-), the lasting letters doubled or tripled, consonants too (MM, WWW), not only
+vowels; one or two "!"; short sounds left short. All of them pass the refusal (checked).
 
 #### How loud, how long, and WHERE a word stretches
-- LOUDNESS picks the tier (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), the "!" count, a prefix at the very top (KA-BUM,
-  TRZA-KRUSZ: the sound's own lead-in, see below) and the size. DURATION alone decides how much the word stretches: a long quiet sound is long without "!"
-  (`{ loud: 0.15, long: 1 }`: SSSSSST, HMMMM, UUUUUF), a short loud one is short with "!!" (`{ loud: 1, long: 0 }`: KRAK!!, POW!!).
-  Default duration = the kind's natural length (a crack is short, wind is long), a little longer when louder.
-- The "!" scale is 0..2: 0 quiet or a soft long sound that is not loud; 1 ordinary (or loud with a soft onset); 2 loud. Never 3.
-  A word written ending in "…" trails off (a sigh, a fade) and keeps "…" unless it is said loud.
+- LOUDNESS picks the tier (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), the "!" count, a prefix at the very top and the size.
+  DURATION alone decides how much the word stretches: a long quiet sound is long without "!" (`{ loud: 0.15, long: 1 }`: PSSSSSSS,
+  WZMMMMMMM), a short loud one is short with "!!" (`{ loud: 1, long: 0 }`: KRAK!!, POW!!). Default duration = the kind's natural
+  length (a crack is short, wind is long), a little longer when louder.
+- The "!" scale is 0..2: 0 below 0.25 loud; 1 ordinary; "!!" only from 0.85 loud with a sharp onset (or from 0.95); one less for a
+  soft onset that is not loud or a long sound that is not loud. Kinds that are never loud are capped (`maxBangs`: sigh, relief, purr
+  0; fizzle, silenced, drip, shush, whiff, hiss, snake hiss, psychic, meow, squeak, click, beep, rain, heartbeat, creak, reload,
+  crackle 1). A word written ending in "…" trails off (a sigh, a fade) and keeps "…" unless it is said loud.
 - WHERE it stretches: a sound has an attack (K of KRAK), a sustain (what lasts) and a cutoff (K of KRAK, T of BZZT). Only the
-  sustain repeats. Letter classes: V vowels (ringing, voice, the open boom), R (rolling, growl, engine), Z (buzz: Z Ż Ź, the Z of
-  RZ), S (hiss: S Ś, Polish SZ repeats as a pair SZSZSZ, English SH as SHHH), M (hum: M N Ń, the N of NG), F (air: F W), H (breath).
-  Each kind lists its sustain classes in order (`hold`): boom `V M` (the ring, then the hum), crack `R V` (the tearing rattle),
-  hiss `S Z F V`, engine `R V M`, whoosh `V S Z F`. The stretch goes to the LAST run of the first listed class in the LAST
-  syllable; a ringing vowel followed by a continuant of the kind shares the stretch with it, one letter in three going to the
-  consonant (TWOOOMM, BATOOOWW, SKROOOOOMMM); the overflow goes only forward. Plosives (K T P B D G C), affricates (CZ DZ) and a
-  prefix never repeat; no run is longer than 6. A caller's own word may mark stretch points with `+` (that wins over the rule).
-  Examples per group: hits POW > POOOWW, BAM > BAAAMM; breaking KRAK > KRRRRAK (crack holds R), SKRUT > SKRRRUT; blasts BUM >
-  BUUUMM, BZZT > BZZZZZT; motion WSZU > WSZUUUU, FWOOSH > FWOOOOSH; elements FSST > FSSSSST, PLIP > PLIIIP; powers WUM > WUMMMM (power-up holds the hum);
-  devices WRRUM > WRRRRRUM; voices HFUF > HFUUUF, WRROCH > WRRRROCH.
+  sustain repeats. Letter classes: V vowels (ringing, voice, the open boom; English I never: it is clipped, a long one is EE), R
+  (rolling, growl, engine), Z (buzz, the Z of RZ), S (hiss; Polish SZ lengthens as an S run with one SZ at its end, SSSSZ, never
+  SZSZSZ; English SH as SHHH), M (hum: M N, the N of NG), F (air: F; W only at a syllable's end after a vowel, POOWW, never THWWWIT),
+  H (breath). English PH is no lasting sound. Each kind lists its sustain classes in order (`hold`): boom `V M`, crack `R V`, hiss
+  `S Z F V`, engine `R V M`, sword `M V S` (the ring), laser pistol `V R`. The stretch goes to the LAST run of the first listed class
+  in the LAST syllable; a ringing vowel followed by a continuant of the kind shares the stretch with it (TWOOOMM, BATOOOWW,
+  SKROOOOOMMM); the overflow goes only forward. Plosives, affricates (CZ DZ) and a prefix never repeat.
+- PERCUSSIVE kinds (click, drip, hammer, reload, heartbeat, gunfire, hail, stomp, helicopter, clunker, mech, pistol, rifle,
+  silenced, crackle, squeak, bark, laugh, beep) never stretch a letter: a long one repeats whole hits (TOK-TOK -> TOK-TOK-TOK-TOK)
+  up to 22 letters. No run is longer than 6, except the steady hisses, hums and drones (hiss, shush, snake hiss, rain, purr, psychic,
+  rumble, engine, minigun, drill, power-up, wind, snarl) whose words and flows may run to 10.
+  Examples: POW > POOOWW, KRAK > KRRRRAK, BUM > BUUUMM, BZZT > BZZZZZT, FWOOSH > FWOOOOSH, PSST > PSSSSSST, SZUM > SSSZUM (pl).
 
 #### Accent: where the sound is loud inside the word (the seam with LOOK's per-letter size)
 `word.accent` = one weight 0..1 per character of the word as the engine normalises it (`plan.chars`: NFC, Polish upper case, single
@@ -403,12 +434,12 @@ is MOVE's (see API-CONTRACT v5).
   `12 500` (a space from 10 000), `2,5`, `1,2 MLN`, `12 TYS.`; English `12,500`, `2.5`, `1.2M`, `12K`; `3×` / `×3`; minus is `-`
   so the auto mood still reads pain / heal. `L.range(2, 4)` -> `2–4`. Every sign used has a glyph in every font (checked).
 
-### The sound kinds (87; PL and EN words for each, 3 tiers + stream syllables)
+### The sound kinds (86; PL and EN words for each, 3 tiers + stream syllables)
 | group | kinds |
 |---|---|
 | hits | punch (cios), smash (miażdżenie), slap (klaps), thud (łomot), stomp (tupnięcie), clang (brzęk), slash (cięcie), bite (ugryzienie) |
 | breaking | crack (trzask), shatter (stłuczenie), crash (łoskot), crumble (kruszenie), rumble (dudnienie), creak (skrzypienie), scrape (zgrzyt) |
-| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunshot (strzał), gunfire (seria), ricochet (rykoszet) |
+| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunfire (seria), ricochet (rykoszet) |
 | motion | whoosh (świst), zoom (pęd), bounce (skok), teleport (teleport), wind (wiatr) |
 | elements | fire (ogień), crackle (trzaskanie), hiss (syk), splash (plusk), squish (plaśnięcie), drip (kapanie) |
 | powers | power-up (ładowanie), psychic (telepatia), chime (dzwonienie), fizzle (zgaśnięcie), whiff (pudło) |
@@ -416,21 +447,26 @@ is MOVE's (see API-CONTRACT v5).
 | voices | roar (ryk), pain (ból), effort (wysiłek), relief (ulga), sigh (westchnienie), cheer (wiwat), laugh (śmiech), shush (uciszenie), heartbeat (puls) |
 | animals | bark (szczekanie), snarl (warczenie), meow (miauczenie), purr (mruczenie), cat hiss (prychanie), squeak (pisk: rat, mouse), snake hiss (syczenie), trumpet (trąbienie: elephant) |
 | vehicles | plane (samolot), helicopter (helikopter), fast car (wyścigówka), old clunker (gruchot), walking machine (maszyna krocząca) |
-| weapons | pistol (pistolet), rifle (karabin), shotgun (strzelba), minigun (działko), laser pistol (pistolet laserowy: short, high, electric, pitch falling, hard start, brief fizz), heavy blaster (ciężki blaster: low, thick energy blast), silenced (tłumik), sword (miecz), arrow (strzała), thrown (rzut), grenade (granat), rocket (rakieta), reload (przeładowanie) |
+| weapons | pistol (pistolet; `gunshot`, `shot`, `gun` are its aliases since the review), rifle (karabin), shotgun (strzelba), minigun (działko), laser pistol (pistolet laserowy: short, high, electric, hard start, brief fizz: ZAT, TZAK, ZARK, ZZARKT; never PIU PIU or PEW), heavy blaster (ciężki blaster: low, thick energy blast), silenced (tłumik), sword (miecz), arrow (strzała), thrown (rzut), grenade (granat), rocket (rakieta), reload (przeładowanie) |
 | devices (more) | ambulance (karetka), police (policja), fire engine (straż pożarna): three different sirens; drill (wiertarka), hammer (młotek) |
 | weather | hail (grad), rain (deszcz), storm (burza, mix), tornado (tornado, mix) |
 Aliases (`explosion` -> boom, `laser` -> beam, `machinegun` -> gunfire, `hit` -> punch, `heal` -> relief, ...): `L.vocab.aliases`.
 An unknown kind letters as `punch` with one warning.
 
 ### How the words were written
-Our own lists, nothing copied wholesale. Since the dictionary ruling (2026-11-13) the banks are BUILT per kind and language from
-a table of attacks, lasting parts and cut-offs (KR + A + K, SZ + _ + SZT, DZ + Ę + NK), filtered against `DICT`, then reviewed by
-hand for accidental words (GROCH, KRY, DRAN, GROOM, BROOK were caught and added to `DICT`). Polish uses Polish letters and
-clusters (SZ, CZ, RZ, DZ, Ł, Ś, Ę), English the American comic manner (THW-, KR-, FW-, SKR-). Comic conventions
-used: letters repeated for length, size for loudness, hyphenated syllables for a sound made of parts (KA-BUM), a prefix for the
-biggest version. Sources read: Polish-English onomatopoeia tables (earlystage.pl blog), SDSU "The Sound of Comics" notes on
-lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomatopeja", the existing word sets of the three callers
-(maps sfx/words.mjs, dice splash SAYS, token reactions) for which sounds are needed.
+Our own lists, nothing copied wholesale. Since the vocabulary review (2026-11-13, WORD2) the banks are written per kind with English
+as the master and Polish following in Polish spelling, every word built from attack + lasting part + cut-off, then run through the
+refusal, the sayable test, the lead-in table and the sharing list, and read by hand for accidental words (GROCH, PTAK, BRAM, DUH,
+PUTA, HUMF were caught). Comic conventions used: letters repeated for length, size for loudness, hyphenated syllables for a sound
+made of parts (KA-BUM), a prefix for the biggest version. Sources read: Polish-English onomatopoeia tables (earlystage.pl blog),
+SDSU "The Sound of Comics" notes on lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomatopeja", the
+existing word sets of the three callers (maps sfx/words.mjs, dice splash SAYS, token reactions) for which sounds are needed.
+
+Adding a kind (the material impacts, debris, shock wave, fire ladder and sequences planned next plug in here): a `K()` row in
+`KINDS`, its `HOLD` classes, `CHAR`, `KIND_ENV`, a `FLOW` style if it lasts, a `BANK` row in both languages (2-4 words per tier),
+its lead-in on `PREFIXES`, any shared word on `SHARED` with its reason, the `perc` / `repeat` / `maxBangs` / `run` lists if they
+apply; then the syllables into `words-reviewed.mjs` and `node scripts/letters/check.mjs` (section 19 of check-words.mjs runs every
+rule above on the new words and on the text the engine makes from them).
 
 ## For the builder of moinen-pixel-vfx (a power's effect carrying its sound)
 
