@@ -16,6 +16,7 @@ import * as States from "./states.mjs";
 import * as Moves from "./moves.mjs";
 import { quake, stopQuakes } from "./quake.mjs";
 import * as FireMod from "../fire/fire.mjs";
+import { sharedNow } from "../shared-clock.mjs";
 import * as WaterMod from "../water/water.mjs";
 import * as DestMod from "../destruction/destruction.mjs";
 import { interactApi, registerInteract } from "./interact.mjs";
@@ -199,18 +200,35 @@ function onLayer(kind) {
 }
 const mapKey = (m) => JSON.stringify([...m]);
 
-/** The burning fire strokes that lie (mostly) in a zone: their ids. A stroke reaching into other zones stays unless half of it is here. */
-function fireStrokesIn(id) {
-  if ( !LS ) return [];
-  const fire = (() => { try { return FireMod.list(); } catch { return []; } })();
-  const here = Link.fireIn(LS.get(id) ?? [], fire);
-  if ( !here.length ) return [];
-  const total = new Map();
-  for ( const pts of LS.values() ) for ( const f of Link.fireIn(pts, here.map((h) => h.s)) ) total.set(f.s.id, (total.get(f.s.id) ?? 0) + f.hits);
-  return here.filter((h) => h.hits / (total.get(h.s.id) || 1) >= 0.5).map((h) => h.s.id);
+/**
+ * Put out the fire painted in ONE zone (the fire layer lets it sink and smoke away), and only there (D205: the fire roll is per zone).
+ * A stroke burning only here goes out whole; a stroke that also makes other zones burn is cut with erasers over this zone (link.mjs
+ * putOutPlan). `layer` ({ back, out }, setZone): the strokes put out, as they were, go to `back`; the erasers painted to `out` (the
+ * inverse puts an eraser out: the fire under it grows back). -> how many strokes went out or were cut.
+ */
+function putOutMap(id, layer = null) {
+  if ( !LS ) return 0;
+  let plan;
+  try { plan = Link.putOutPlan(LS, id, FireMod.list(), gridSize() / 4); } catch ( err ) { console.warn(`${MODULE_ID} | zones: putting a fire out`, err); return 0; }
+  let n = putOutStrokes(plan.remove, layer?.back);
+  if ( plan.erase.length ) {
+    // (each eraser just before now in the paint order: a fire the same write paints into the zone afterwards - setZone lowering a
+    // fire - lies over it and burns)
+    const base = FireMod.newId(), q = Math.round(sharedNow()) - 1;
+    const raws = plan.erase.map((e, i) => ({ id: `${base}e${i.toString(36)}`, k: "erase", s: 1, r: e.r, p: e.p, q }));
+    try { FireMod.addMany(raws)?.catch?.(() => {}); n += plan.erase.length; layer?.out.push(...raws.map((r) => r.id)); }
+    catch ( err ) { console.warn(`${MODULE_ID} | zones: cutting a fire`, err); }
+  }
+  return n;
 }
-/** Put out the fire painted in a zone (the fire layer lets it sink and smoke away). `kept` (a list): the strokes as they were, added. */
-function putOutMap(id, kept = null) { return putOutStrokes(fireStrokesIn(id), kept); }
+/** Put out every fire stroke that burns in any zone, whole (the end of the scene: clearStates with no zone). */
+function putOutAllMap() {
+  if ( !LS ) return 0;
+  let fire; try { fire = FireMod.list(); } catch { return 0; }
+  const cuts = Link.erasersOf(fire), ids = new Set();
+  for ( const pts of LS.values() ) for ( const f of Link.fireIn(pts, fire, cuts) ) ids.add(f.s.id);
+  return putOutStrokes([...ids]);
+}
 /** Put out strokes of the fire layer by id; `kept` (a list) gets the records of the ones that went, as they were before. -> how many */
 function putOutStrokes(ids, kept = null) {
   if ( !ids.length ) return 0;
@@ -710,10 +728,10 @@ export function setZone(id, patch, at = null, via = edit, layer = null) {
     // out: the ids of the strokes painted })
     const paint = () => { const st = paintMap(id, now); if ( layer && typeof st?.id === "string" ) layer.out.push(st.id); };
     if ( !was && now ) paint();
-    else if ( was && !now ) putOutMap(id, layer?.back);
+    else if ( was && !now ) putOutMap(id, layer);
     // lowered below what the painted fire reads as: the zone shows the higher of the two, so put that fire out and paint it
     // again no higher than the new Intensity (below 6 only the zone's own mark stays)
-    else if ( onMap > now ) { putOutMap(id, layer?.back); if ( now >= 6 ) paint(); }
+    else if ( onMap > now ) { putOutMap(id, layer); if ( now >= 6 ) paint(); }
   }
   return writeZones(new Map([[id, { ...(M0?.zones.get(id) ?? {}), ...patch }]]), at, via);
 }
@@ -727,7 +745,10 @@ export function clearStates(id = null) {
   for ( const [zid, p] of M0?.zones ?? [] ) if ( (id == null || zid === id) && Marks.hasStates(p) ) map.set(zid, Marks.withoutStates(p));
   // the fires painted on the map go out with the states (wreckage and water stay: they are the map)
   let out = 0;
-  if ( linkOn() ) for ( const [zid, p] of M?.zones ?? [] ) if ( (id == null || zid === id) && p.fire ) out += putOutMap(zid);
+  if ( linkOn() ) {
+    if ( id == null ) out += putOutAllMap();
+    else if ( M?.zones.get(id)?.fire ) out += putOutMap(id);
+  }
   const marks = writeZones(map);
   const reg = play((s) => {
     const keep = s.states.filter(([x, y]) => id != null && zoneAtNow(x, y) !== id);

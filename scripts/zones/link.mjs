@@ -114,14 +114,26 @@ function covers(s, q, x, y) {
   return false;
 }
 const burning = (s) => s.k === "fire" && s.o === undefined && !!s.p?.length;
+/** An eraser that cuts (not undone): it puts out what was painted before it, where it lies (fire/model.mjs raster). */
+const cutting = (s) => s.k === "erase" && s.o === undefined && !!s.p?.length;
+/** Is stroke `e` later than `s` in the paint order (fire/model.mjs byOrder: q, then id)? */
+const later = (e, s) => ((e.q ?? 0) - (s.q ?? 0) || (e.id < s.id ? -1 : e.id > s.id ? 1 : 0)) > 0;
+/** The erasers of a list of strokes that cut (fireIn's third argument). */
+export const erasersOf = (strokes) => (strokes ?? []).filter(cutting);
+const meet = (a, b) => !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
 
-/** The burning fire strokes that cover samples of a zone: [{ s, hits }] (erasers ignored: the fire layer keeps them as strokes of their own). */
-export function fireIn(samples, fire) {
+/**
+ * The burning fire strokes that cover samples of a zone: [{ s, hits }]. `erasers` (erasersOf): a sample an eraser painted after the
+ * stroke lies over is put out there and is not counted (D205: the zones put out ONE zone of a stroke that reaches over several by
+ * cutting it there with an eraser - the fire layer's own way - and the zone must read that; the GM's own eraser strokes count the same).
+ */
+export function fireIn(samples, fire, erasers = null) {
   const out = [];
   const rows = rowSorted(samples);
   for ( const s of fire ?? [] ) {
     if ( !burning(s) ) continue;
     const q = prepOf(s), [x0, y0, x1, y1] = q.box;
+    const cut = erasers?.length ? erasers.filter((e) => later(e, s) && meet(prepOf(e).box, q.box)) : null;
     let hits = 0;
     // samples ordered by row (samplesOf): start at the first row inside the box, stop past its last (the rows skipped fail y0 / y1)
     let i = 0, end = samples.length;
@@ -134,9 +146,79 @@ export function fireIn(samples, fire) {
       const x = samples[i], y = samples[i + 1];
       if ( y > y1 && rows ) break;
       if ( x < x0 || x > x1 || y < y0 || y > y1 ) continue;
-      if ( covers(s, q, x, y) ) hits++;
+      if ( covers(s, q, x, y) && !(cut?.length && cut.some((e) => covers(e, prepOf(e), x, y))) ) hits++;
     }
     if ( hits ) out.push({ s, hits });
+  }
+  return out;
+}
+
+/** Does a zone read fire from these hits (derive's rule: a twentieth of its samples, or two of them)? */
+const readsFire = (hit, n) => hit / n >= FIRE_SHARE || hit >= 2;
+
+/**
+ * PUTTING OUT THE FIRE OF ONE ZONE (D205, the fire roll is per zone [B2927]): what to do on the fire layer so that zone `id` reads no
+ * fire and every other zone keeps what it reads. -> { remove: [ids of strokes to put out whole], erase: [{ p, r }] erasers to paint }.
+ *  - a stroke that burns in this zone and makes no other zone burn goes out whole (as before);
+ *  - a stroke that also makes another zone burn is CUT: erasers over the samples of this zone it covers, so the rest burns on. (Before,
+ *    a stroke went out whole when half of it lay in the zone - putting one zone out put out its neighbours too - and not at all
+ *    when less did - the zone burned on.)
+ * The erasers run along the zone's sample rows (`step` apart, the same grid as samplesOf): one path per run of covered samples,
+ * runs of the next row joined where a sample lies right below the run's end (a straight step down, inside the zone), radius
+ * 0.65 x step - it closes the gap between rows yet stays short of the next zone's samples (a step away).
+ */
+export function putOutPlan(samplesById, id, strokes, step) {
+  const pts = samplesById.get(id);
+  if ( !pts?.length ) return { remove: [], erase: [] };
+  const erasers = erasersOf(strokes), fire = (strokes ?? []).filter(burning);
+  const here = fireIn(pts, fire, erasers);
+  if ( !here.length ) return { remove: [], erase: [] };
+  const remove = [], cut = [];
+  for ( const h of here ) {
+    let elsewhere = false;
+    for ( const [zid, zp] of samplesById ) {
+      if ( zid === id ) continue;
+      const f = fireIn(zp, [h.s], erasers);
+      if ( f.length && readsFire(f[0].hits, zp.length / 2) ) { elsewhere = true; break; }
+    }
+    (elsewhere ? cut : remove).push(h.s);
+  }
+  return { remove: remove.map((s) => s.id), erase: cut.length ? erasePaths(pts, cut, erasers, step) : [] };
+}
+/** The eraser paths over the samples of a zone that the strokes `cut` cover (see putOutPlan). */
+function erasePaths(pts, cut, erasers, step) {
+  const r = Math.max(4, Math.round(step * 0.65)), eps = step * 0.01, rowsBy = new Map();
+  for ( let i = 0; i < pts.length; i += 2 ) {
+    const x = pts[i], y = pts[i + 1];
+    if ( !fireIn([x, y], cut, erasers).length ) continue;
+    if ( !rowsBy.has(y) ) rowsBy.set(y, []);
+    rowsBy.get(y).push(x);
+  }
+  const ys = [...rowsBy.keys()].sort((a, b) => a - b), runs = [];
+  for ( const y of ys ) {
+    const xs = rowsBy.get(y).sort((a, b) => a - b), row = [];
+    let a = xs[0], b = xs[0];
+    for ( let k = 1; k < xs.length; k++ ) { if ( xs[k] - b > step + eps ) { row.push({ y, a, b }); a = xs[k]; } b = xs[k]; }
+    row.push({ y, a, b });
+    runs.push(row);
+  }
+  const out = [];
+  for ( let ri = 0; ri < runs.length; ri++ ) for ( const start of runs[ri] ) {
+    if ( start.used ) continue;
+    start.used = true;
+    const p = [start.a, start.y, start.b, start.y];
+    let end = start.b, row = ri;
+    while ( row + 1 < runs.length && Math.abs(ys[row + 1] - ys[row] - step) <= eps && p.length < 1990 ) {
+      const next = runs[row + 1].find((n) => !n.used && n.a - eps <= end && end <= n.b + eps);
+      if ( !next ) break;
+      next.used = true;
+      const near = Math.abs(end - next.a) <= Math.abs(next.b - end) ? next.a : next.b, far = near === next.a ? next.b : next.a;
+      p.push(end, next.y, near, next.y, far, next.y);
+      end = far; row++;
+    }
+    const q = [];
+    for ( let k = 0; k < p.length; k += 2 ) if ( !q.length || q[q.length - 2] !== p[k] || q[q.length - 1] !== p[k + 1] ) q.push(p[k], p[k + 1]);
+    out.push({ p: q, r });
   }
   return out;
 }
@@ -167,13 +249,13 @@ function samplesBox(pts) {
 export function derive(samplesById, { fire = null, water = null, dest = null } = {}) {
   const out = new Map();
   // only the burning strokes, and per zone only those whose box meets the box of its samples (the others cover none of them)
-  const live = fire?.length ? fire.filter(burning) : null;
+  const live = fire?.length ? fire.filter(burning) : null, cuts = fire?.length ? erasersOf(fire) : null;
   for ( const [id, pts] of samplesById ) {
     const n = pts.length / 2, o = {};
     if ( fire?.length ) {
       const [zx0, zy0, zx1, zy1] = samplesBox(pts);
       const near = live.filter((s) => { const b = prepOf(s).box; return !(b[2] < zx0 || b[0] > zx1 || b[3] < zy0 || b[1] > zy1); });
-      const f = fireIn(pts, near);
+      const f = fireIn(pts, near, cuts);
       const hit = f.reduce((m, x) => Math.max(m, x.hits), 0);
       if ( f.length && (hit / n >= FIRE_SHARE || hit >= 2) ) o.fire = Math.max(...f.map((x) => LEVEL_INTENSITY[x.s.lv ?? 2] ?? 8));
     }
