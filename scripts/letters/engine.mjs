@@ -7,7 +7,7 @@ import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.4.0";   // LOOK v6 (lines, backdrops, deformation, fills, legibility, accent, styles); WORD v5; FXLE fixes
+export const VERSION = "1.5.0";   // LOOK (contract v7): lines, backdrops, deformation, fills, legibility, accent, look styles; 1.4.0 TOOL; 1.3.0 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -69,9 +69,14 @@ export function createEngine(base) {
   const memory = [];            // [{ id, t }]
   let raf = 0, seq = 0;
   const limits = { screen: 16, world: 48 };
+  /* v5 tools (tools.mjs): engine-wide preferences and saved styles. opts filters run on each call's options (null = lettering is
+     off on this client), plan filters on the planned word once its size is known (palette, motion, flash guard), start hooks once
+     a word is up */
+  const ext = { opts: [], plan: [], start: [] };
+  const filterOpts = (opts) => { for ( const f of ext.opts ) { const o = f(opts); if ( o === null ) return null; if ( o ) opts = o; } return opts; };
 
   function ready() {
-    readyP ??= Promise.all(Object.entries(FONTS).map(async ([id, f]) => {
+    readyP ??= Promise.all(Object.entries(FONTS).filter(([, f]) => !f.custom).map(async ([id, f]) => {
       try { const r = await fetch(new URL(f.file, base)); if ( !r.ok ) throw new Error(r.status); bank.add(id, await r.arrayBuffer()); }
       catch ( e ) { console.warn(`LETR | font ${id} not loaded`, e); }
     })).then(() => {
@@ -83,11 +88,16 @@ export function createEngine(base) {
     return readyP;
   }
   const fontsApi = { adv: (font, ch) => bank.adv(font, ch) };
-  /* LOOK: the lettering style every call gets unless it names one (opts.style): "invincible" in a world of the Invincible system
-     (the book's own lettering), "comic" elsewhere; L.style(name) changes it for this client */
-  let defStyle = globalThis.game?.system?.id === "invincible" ? "invincible" : "comic";
-  const mk = (t, o, f, m) => makePlan(t, { ...o, style: o?.style ?? defStyle }, f, m);
-  const style = (name) => { if ( STYLES.includes(name) ) defStyle = name; return defStyle; };
+  /* LOOK: the lettering tradition every call gets unless it names one (opts.look.style, or TOOL's built-in styles "invincible" /
+     "comic"): "invincible" in a world of the Invincible system (the book's own lettering), "comic" elsewhere; L.lookStyle(name)
+     changes it for this client */
+  let defLook = globalThis.game?.system?.id === "invincible" ? "invincible" : "comic";
+  const mk = (t, o, f, m) => {
+    if ( o?.look?.style ) return makePlan(t, o, f, m);
+    const ls = typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook;   // TOOL's built-in style names too
+    return makePlan(t, { ...o, look: { ...(o?.look ?? {}), style: ls } }, f, m);
+  };
+  const lookStyle = (name) => { if ( STYLES.includes(name) ) defLook = name; return defLook; };
 
   /* ---------- placement ---------- */
   /* a token reference: a Token, a TokenDocument or a token id (a string is always read as a token id) */
@@ -285,13 +295,13 @@ export function createEngine(base) {
   function resize(h, first) {
     if ( !first && (h.pixel || h.opts.fit === "exact") ) return;
     if ( h.opts.fit === "exact" ) {
-      h.size = (h.opts.size ?? (h.space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.6 : 72)) * (h.opts.scale ?? 1);
+      h.size = (h.opts.size ?? (h.space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.6 : 72)) * (h.opts.scale ?? 1) * (h.opts._k ?? 1);
       h.sizeInfo = { size: h.size, px: null, natural: h.size, clamp: null, fit: "exact" };
       return;
     }
     const info = sizeFor(sizeCtx(h));
     h.sizeInfo = info;
-    h.size = info.size;
+    h.size = info.size * (h.opts._k ?? 1);   // the user's size setting, after the legibility clamp (tools)
   }
 
   /* ---------- pictures ---------- */
@@ -437,6 +447,7 @@ export function createEngine(base) {
     h.tokenSpan = tokenSpanOf(h);
     h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
     resize(h, true);
+    if ( ext.plan.length ) { for ( const f of ext.plan ) f(h.plan, h); h.hand = h.plan.hand.id; }
     h.rot = ((opts.rotation ?? 0) * Math.PI) / 180;
     const anchor = opts.anchor ?? (isToken(h.at) ? "bottom" : "center");
     h.offset = { x: 0, y: anchor === "bottom" ? -(h.plan._holdBox.h / 2 + 0.1) : 0 };
@@ -500,7 +511,7 @@ export function createEngine(base) {
           first -= now() - t1; painted++;
           if ( h.t0 == null ) h.t0 = now();
           show(h, c); place(h);
-          if ( !h.isReady ) { h.isReady = true; h._ready(true); }
+          if ( !h.isReady ) { h.isReady = true; h._ready(true); for ( const f of ext.start ) { try { f(h); } catch ( e ) { console.warn("LETR | start hook", e); } } }
           continue;
         }
         const idx = picAt(h, t - h.t0);
@@ -547,7 +558,8 @@ export function createEngine(base) {
   const settle = (p, f) => { try { if ( p && typeof p.then === "function" ) p.then(f, f); } catch {} };
 
   function play(text, opts0 = {}) {
-    const opts = handOpt(cleanOpts(opts0));
+    const opts = filterOpts(handOpt(cleanOpts(opts0)));
+    if ( opts === null ) return offHandle(text, opts0);
     const space = opts.space === "world" ? "world" : "screen";
     if ( !readyP ) ready();
     let done, rdy;
@@ -604,12 +616,17 @@ export function createEngine(base) {
     if ( opts.delay > 0 ) h.timer = setTimeout(() => { h.timer = 0; if ( h.alive ) go(); }, opts.delay); else go();
     return h;
   }
+  /* lettering is off on this client (tools: the master switch): a handle that is already over */
+  function offHandle(text, opts) {
+    return { id: `letr${++seq}`, seq, text: textOf(text), space: opts?.space === "world" ? "world" : "screen", opts: opts ?? {}, alive: false, off: true, hand: null,
+      isReady: false, ready: Promise.resolve(false), finished: Promise.resolve("evicted"), stop() {}, moveTo() {} };
+  }
 
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
   function stream(o0 = {}) {
-    let o = { ...(o0 && typeof o0 === "object" ? o0 : {}) };
+    const o = { ...(o0 && typeof o0 === "object" ? o0 : {}) };
     /* WORD (v5): a sound kind instead of a text: the vocabulary gives the syllables and the mood */
-    if ( o.kind != null && o.text == null && !(Array.isArray(o.syllables) && o.syllables.length) ) { const w = vocab.word(o.kind, { ...o, stream: true }); o = { mood: w.mood, ...o, syllables: w.syllables }; }
+    if ( o.kind != null && o.text == null && !(Array.isArray(o.syllables) && o.syllables.length) ) { const w = vocab.word(o.kind, { ...o, stream: true }); Object.assign(o, { mood: o.mood ?? w.mood, syllables: w.syllables }); }
     /* FXLE F20: numbers checked; a bad one is ignored with one warning */
     const num = (k, ok, d) => {
       if ( o[k] == null ) return d;
@@ -672,7 +689,7 @@ export function createEngine(base) {
           return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
         };
         const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
-        const h = play(word, { mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+        const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
           in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
           zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation });
         emitted++;
@@ -726,8 +743,9 @@ export function createEngine(base) {
 
   async function still(text, opts0 = {}) {
     await ready();
-    const opts = handOpt(cleanOpts(opts0));
+    const opts = filterOpts(handOpt(cleanOpts({ ...opts0, force: true }))) ?? {};
     const plan = mk(textOf(text), { ...opts, reduced: true }, fontsApi, []);
+    for ( const f of ext.plan ) f(plan, { opts: { ...opts, reduced: true }, still: true });
     settleCenter(plan, bank);
     const dpr = opts.dpr ?? (globalThis.devicePixelRatio || 1);
     const S = Math.max(4, (opts.size ?? 72) * plan.sizeK * dpr);
@@ -742,7 +760,7 @@ export function createEngine(base) {
 
   /* the size a word would get right now, and why (for callers and tests): { size, px, natural, clamp, fit, sizeK } */
   function sizeOf(text, opts0 = {}) {
-    const opts = handOpt(cleanOpts(opts0));
+    const opts = filterOpts(handOpt(cleanOpts({ ...opts0, force: true }))) ?? {};
     const space = opts.space === "world" ? "world" : "screen";
     const plan = mk(textOf(text), { ...opts, reduced: true }, fontsApi, []);
     try { settleCenter(plan, bank); } catch {}
@@ -785,10 +803,11 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, style, styles: STYLES.slice(),
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(),
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
+    _ext: ext, _settle: (plan) => settleCenter(plan, bank),
     _bank: bank, _plan: (t, o = {}) => mk(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
   };
   return api;

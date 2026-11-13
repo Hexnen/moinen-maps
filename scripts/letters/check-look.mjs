@@ -1,6 +1,7 @@
 // LOOK: node checks of the look layer (lines, backdrops, bolder deformation, fills and treatments, legibility, accent, styles,
 // interlocked rings), called from check.mjs with its counter and the loaded font bank.
-import { makePlan, FONTS, MOOD_IDS, BACKDROPS, FILLS, TEXTURES, STYLES, accentOf, NUMBER_RE } from "./design.mjs";
+import { makePlan, FONTS, MOOD_IDS, BACKDROPS, FILLS, TEXTURES, STYLES, accentOf, NUMBER_RE, traitsOf } from "./design.mjs";
+import { createVocab, KIND_IDS, KINDS } from "./words.mjs";
 import { paintPicture } from "./paint.mjs";
 import { treatLetter, settleCenter, occlusionReport, baseGeometry } from "./shape.mjs";
 import { makeReader, ALPHABET } from "./legibility.mjs";
@@ -55,7 +56,7 @@ export function checkLook(ok, bank) {
   /* L4. the word settle: across moods, words and seeds almost every letter reads in its word (lean, overlap, cracks) */
   {
     let bad = 0, all = 0;
-    for ( const w of ["RAKABOOM", "KRAK!", "ŁUBUDU!", "DOBRA!", "BĘC!", "-1", "ŻĄDŁO"] ) for ( const m of MOOD_IDS ) for ( let s = 0; s < 3; s++ ) {
+    for ( const w of ["RAKABOOM", "KRAK!", "ŁUBUDU!", "DOBRA!", "BĘC!", "-1", "ŻĄDŁO", "CRUSH!", "FIZZLE!", "STRES +1"] ) for ( const m of MOOD_IDS ) for ( let s = 0; s < 3; s++ ) {
       const p = plan(w, { mood: m, seed: `w${w}${s}` }); settleCenter(p, bank);
       const r = occlusionReport(p, bank); bad += r.filter((x) => !x.ok).length; all += r.length;
     }
@@ -133,26 +134,73 @@ export function checkLook(ok, bank) {
   {
     ok(STYLES.includes("comic") && STYLES.includes("invincible"), "styles: comic and invincible");
     for ( const m of MOOD_IDS ) {
-      const p = plan("KA-BOOM!", { mood: m, seed: `s${m}`, style: "invincible" }), H = p.hand;
-      ok(["squada", "michroma"].includes(H.font) && H.treat === "plain" && H.tex === "none" && H.outline === "ink" && H.depth >= 0.1 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
+      const p = plan("KA-BOOM!", { mood: m, seed: `s${m}`, look: { style: "invincible" } }), H = p.hand;
+      ok(["squada", "michroma"].includes(H.font) && ["plain", "jag", "flame", "drip", "rough"].includes(H.treat) && H.tex === "none" && H.outline === "ink" && H.depth >= 0.07 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
       ok(p.layout.letters.every((l) => Math.abs(l.rot) < 0.035 || l.ring), `style invincible ${m}: upright`);
     }
-    const c = plan("KA-BOOM!", { mood: "boom", seed: 1 }), c2 = plan("KA-BOOM!", { mood: "boom", seed: 1, style: "comic" });
+    const c = plan("KA-BOOM!", { mood: "boom", seed: 1 }), c2 = plan("KA-BOOM!", { mood: "boom", seed: 1, look: { style: "comic" } });
     ok(c.hand.id === c2.hand.id, "styles: comic is the default and changes nothing");
-    ok(plan("KRAK", { mood: "crack", seed: 1, style: "invincible", look: { font: "bangers" } }).hand.font === "bangers", "styles: look still wins over the style");
+    ok(plan("KRAK", { mood: "crack", seed: 1, look: { style: "invincible", font: "bangers" } }).hand.font === "bangers", "styles: look still wins over the style");
   }
   /* L12. interlocked rings: a run of O's links as rings of alternating size, overlapping; the reader does not count the crossing */
   {
-    const p = plan("WHOOOOM", { mood: "whoosh", seed: 4, style: "invincible" }), L = p.layout.letters;
+    const p = plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible" } }), L = p.layout.letters;
     const os = L.map((l, i) => [l, i]).filter(([l]) => l.ring);
     ok(os.length === 4 && L[3].link === 2 && L[3].x < L[2].x + L[2].w, `rings: WHOOOOM links its O's (${os.length})`);
     ok(Math.abs(L[2].s - L[3].s) > 0.05, "rings: alternating size");
     const b = baseGeometry(p, bank); ok(b[2].ring && b[2].gl.contours.length === 2, "rings: drawn as a ring (outer + hole)");
-    ok(!plan("WHOOOOM", { mood: "whoosh", seed: 4, style: "invincible", look: { link: false } }).layout.letters.some((l) => l.ring), "rings: look.link false keeps O's apart");
+    ok(!plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible", link: false } }).layout.letters.some((l) => l.ring), "rings: look.link false keeps O's apart");
+  }
+  /* L16. the look says the sound: every vocabulary kind, both styles, the trait table holds (the user: "napisy pasowały wyglądem do dźwięków") */
+  {
+    const V = createVocab(), COLD = ["ice", "air", "mint", "water"], ROUND = ["titan", "patrick", "sigmar"];
+    const looks = new Set(); let n = 0;
+    for ( const id of KIND_IDS ) for ( const loud of [0.35, 0.8] ) for ( let k = 0; k < 3; k++ ) for ( const style of STYLES ) {
+      const w = V.word(id, { lang: "pl", loud, seed: `${id}${k}` });
+      const p = plan(w.text, { ...w.play, seed: `${id}${k}`, look: { style } }), H = p.hand, T = traitsOf(p.mood, p.sound), tag = `sound ${style} ${id} "${w.text}" ${H.id}`;
+      if ( NUMBER_RE.test(w.text) ) continue;
+      n++;
+      if ( style === "invincible" ) looks.add(`${KINDS[id].group}|${H.font}|${H.treat}|${H.env}|${H.fill}|${Math.sign(H.depthAng)}|${H.invPal}`);
+      if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style === "comic" || (H.font === "squada" && H.fill === "flat")), `${tag}: a hard sound gets a round or soft face`);
+      if ( T.soft ) ok(H.treat !== "jag" && !["blackops", "anton"].includes(H.font) && (style === "comic" || H.font === "michroma"), `${tag}: a soft sound gets spikes or a hard face`);
+      if ( T.hotMood ) ok(!COLD.includes(H.colorFam) && H.invPal !== "sky", `${tag}: a hot sound in a cold colour`);
+      if ( !T.wet ) ok(H.treat !== "drip", `${tag}: a dry sound drips`);
+      if ( T.heavy ) ok(H.depth >= 0.12 && (style === "comic" || Math.abs(H.depthAng - Math.PI / 2) < 1e-9), `${tag}: a heavy sound without a deep block`);
+      if ( T.light ) ok(H.depth <= 0.09 + 1e-9 || style === "comic" && H.depth <= 0.09, `${tag}: a high sound with a deep block (${H.depth})`);
+      if ( T.metallic ) ok(!["bubble", "rough", "drip"].includes(H.treat) && (style === "comic" ? ["stone", "ice"].includes(H.colorFam) || T.hotMood : H.invPal === "sky" && H.fill === "flat"), `${tag}: a metallic sound not cut and steel`);
+      if ( style === "invincible" ) {
+        ok(H.treat === (T.electric ? "jag" : T.hot ? "flame" : T.wet ? "drip" : T.gritty || T.sputter ? "rough" : "plain"), `${tag}: the edge does not say the matter`);
+        if ( T.light ) ok(H.depthAng < 0, `${tag}: a high sound's block not thrown up`);
+        if ( T.rising ) ok(H.env === "swell", `${tag}: a rising sound does not grow`);
+        else if ( T.fading ) ok(H.env === "shrink", `${tag}: a fading sound does not shrink`);
+      }
+      if ( T.sputter ) ok(!["swell", "stairUp", "arc", "fan", "bulge"].includes(H.env), `${tag}: a fizzle that rises`);
+    }
+    ok(n > 300 && looks.size >= 24, `sound: ${n} words, ${looks.size} different Invincible looks across the kinds`);
+    const same = (a, b) => { const x = plan("KRAK", { mood: "crack", seed: 9, sound: a }).hand.id, y = plan("KRAK", { mood: "crack", seed: 9, sound: a }).hand.id; return x === y; };
+    ok(same({ sharp: 0.9 }), "sound: the mapping draws nothing random");
+  }
+  /* L15. no letter turns lower case or vanishes by size (the dice review: CRUSH! read "cRUsh!", STRES +1 read "STRES !1") */
+  {
+    let dips = 0, small = 0;
+    for ( const w of ["CRUSH!", "SZUUUM", "WHOOSH", "SPLASH", "STRES +1", "-12", "BOOM", "ŚWIST"] ) for ( const m of MOOD_IDS ) for ( let s = 0; s < 4; s++ ) {
+      for ( const st of ["comic", "invincible"] ) {
+        const p = plan(w, { mood: m, seed: `k${w}${s}`, look: { style: st } }), L = p.layout.letters, ch = p.chars, pre = p.layout.pre ?? 0;
+        for ( let i = 0; i < L.length; i++ ) {
+          if ( /[COSUVWXZĆÓŚŹŻ]/u.test(ch[i]) && i >= pre && !L[i].ring ) {
+            const nb = Math.max(i > 0 && ch[i - 1] !== " " ? L[i - 1].s : 0, i < L.length - 1 && ch[i + 1] !== " " ? L[i + 1].s : 0);
+            if ( L[i].s < 0.79 * nb ) dips++;
+          }
+          if ( /[+\-]/.test(ch[i]) && /\d/.test(ch[i + 1] ?? "") && L[i].s < L[i + 1].s * 0.99 ) small++;
+        }
+      }
+    }
+    ok(dips === 0, `case: ${dips} look-alike capitals small enough to read as lower case`);
+    ok(small === 0, `case: ${small} signs smaller than their digit`);
   }
   /* L13. determinism with every look option */
   {
-    const o = { mood: "boom", seed: "det", look: { tilt: "wild", fill: "multi", tex: "spots", shadow: "long", counters: "ink" }, backdrop: "cloud", arrange: "stair", style: "invincible", accent: "2999" };
+    const o = { mood: "boom", seed: "det", look: { style: "invincible", tilt: "wild", fill: "multi", tex: "spots", shadow: "long", counters: "ink" }, backdrop: "cloud", arrange: "stair", accent: "2999" };
     ok(JSON.stringify(plan("BUM BUM", o)) === JSON.stringify(plan("BUM BUM", o)), "determinism: same options, same plan");
   }
   /* L14. cost: a plan with its settle stays in a few milliseconds on average */

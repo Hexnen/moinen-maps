@@ -192,6 +192,8 @@ checkWords(ok, bank);
 
 /* 8d. the look layer (LOOK; checks in check-look.mjs) */
 checkLook(ok, bank);
+/* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
+await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {
