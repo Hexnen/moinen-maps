@@ -239,6 +239,13 @@ setting of your module, or the GM's language sent with the event). English is fi
 - Cover every way the effect can start (presets, combinations, brush painting, directional, all at once) and test each one.
 - Analyse each effect on its own; one word for a bomb is too little, one recipe for all effects is wrong.
 - Words may repeat or be shared when it makes sense; do not force a new word for every event.
+- Phases arrive on their own clock: a caller that drops "echoes" (a sound right after a louder one nearby) must let the phases
+  through, or the wave and the debris vanish behind the boom; the same for a shot's muzzle report against its impacts (seen live
+  on the map, 2026-11-14; the map's node tests fed all events at once and missed it).
+- A lasting sound for a subject off this client's screen (a fire's sustain) needs `keepInView: false` on 1.7.0, else the engine
+  pulls it to the screen edge.
+- 1.7.0 has the guns' own kinds (`pistol`, `rifle`, `gunfire`, `minigun`, `shotgun`, ...) and `grenade` / `rocket`; there is no
+  `gunshot`. Pick from the event (the map picks the gun by the rate of its rounds).
 
 **Changing one trait of a vocabulary word.** `L.sfx(kind, { character: { material: "wood" } })` replaces the word's whole
 `character`, and the gaps are then filled from the mood's defaults, not the kind's [C]. To change one trait, take the word and merge:
@@ -684,3 +691,5 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   rule to update this manual in the same turn as any lesson or ruling.
 - 2026-11-13 (later): changing one trait of a vocabulary word (section 5); `alt: " "` workaround for the announce leak and the
   remaining near-words / diacritics in the 1.6.0 banks (section 18).
+- 2026-11-14 (FXLM2): section 5 - phases vs a caller's echo filter, `keepInView: false` for off-screen sustains, the 1.7.0 gun /
+  grenade / rocket kinds (no `gunshot`).
