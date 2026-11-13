@@ -326,6 +326,7 @@ export function paintPicture(plan, bank, p, S, make) {
       lc.fill();
     }
     ctx.globalAlpha = H.shadowStyle === "dots" ? Math.min(0.85, H.shadow.a + 0.35) : H.shadow.a; ctx.drawImage(lay, 0, 0); ctx.restore();
+    lay.width = 0; lay.height = 0;   // FXLE F2: the shadow layer is used once: its backing store goes now, not at the next GC
     void col;
   }
   /* 3D extrusion: inked block behind the letters */
@@ -417,10 +418,8 @@ export function paintPicture(plan, bank, p, S, make) {
 function paintShardPicture(plan, bank, p, S, make) {
   const rest = { ...plan.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, fx: [], dissolve: 0, smear: null, impact: false, shards: null, reseed: false, boil: p.boil, misreg: 0 };
   rest.letters = rest.letters.map((l) => ({ ...l, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1, v: 1, ch: undefined }));
-  if ( !plan._shardSrc ) Object.defineProperty(plan, "_shardSrc", { value: new Map(), enumerable: false, configurable: true });
-  const key = Math.round(S * 4);
-  let src = plan._shardSrc.get(key);
-  if ( !src ) { src = paintPicture(plan, bank, rest, S, make); plan._shardSrc.set(key, src); }
+  /* the word at rest, painted for this drawing and freed after it (F2: no canvas outlives its picture; 7 drawings per exit) */
+  const src = paintPicture(plan, bank, rest, S, make);
   const geo = pictureGeometry(plan, bank, rest);
   const b = bbox(geo.flatMap((l) => l.cs));
   const M = SHARD_MARGIN;
@@ -443,5 +442,6 @@ function paintShardPicture(plan, bank, p, S, make) {
     for ( let y = 0, row = 0; y < canvas.height + cell; y += cell * 0.86, row++ ) for ( let x = (row % 2) * cell / 2; x < canvas.width + cell; x += cell ) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.2832); }
     ctx.fill(); ctx.restore();
   }
+  src.canvas.width = 0; src.canvas.height = 0;
   return { canvas, ax: ox, ay: oy, S: Sd };
 }

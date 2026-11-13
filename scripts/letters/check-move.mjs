@@ -126,13 +126,13 @@ export async function run(ok, { bank, fontsApi }) {
     const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : (k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : () => { calls++; })), set: (t, k, v) => ((t[k] = v), true) });
     const make = (w, h) => ({ width: w, height: h, getContext: () => ctx });
     const pics = sh.map((q) => paintPicture(found, bank, q, 90, make));
-    ok(pics.every((r) => r.canvas.width > 50 && Number.isFinite(r.ax)) && found._shardSrc?.size === 1, "shards: pictures paint from one cached picture of the word at rest");
+    ok(pics.every((r) => r.canvas.width > 50 && Number.isFinite(r.ax)) && !found._shardSrc, "shards: pictures paint from the word at rest, which is not kept");
   }
 
   /* ---------- 4b. ADVT (token-reaction review): living holds, real exits, a readable anticipation ---------- */
   {
     let dead = [], antics = 0, blobs = 0, shat = 0, shatPieces = 0, bursts = 0, burstPieces = 0;
-    for ( const mood of ["impact", "boom", "crack", "crash", "zap", "fire", "whoosh", "growl", "splash"] ) for ( let i = 0; i < 12; i++ ) {
+    for ( const mood of ["impact", "boom", "crack", "crash", "zap", "fire", "whoosh", "roar", "splash"] ) for ( let i = 0; i < 12; i++ ) {
       const p = plan(i % 2 ? "BACH!" : "UFF!", { mood, seed: `advt${mood}${i}`, magnitude: 0.6 });
       /* consecutive hold drawings (the cycle wraps) must differ visibly: a move of 0.04 units or more, or another effect layer */
       const H = p.timeline.hold, d = (a, b) => Math.max(...["x", "y", "r", "s", "sx", "sy"].map((k) => Math.abs((a.g[k] ?? (k[0] === "s" ? 1 : 0)) - (b.g[k] ?? (k[0] === "s" ? 1 : 0)))),
@@ -176,7 +176,6 @@ export async function run(ok, { bank, fontsApi }) {
       const p = h.lastPos, k = h.size * h.plan.sizeK;
       const mid = { x: p.x - Math.cos(h.lastRot) * h.offset.x * k + Math.sin(h.lastRot) * h.offset.y * k, y: p.y - Math.sin(h.lastRot) * h.offset.x * k - Math.cos(h.lastRot) * h.offset.y * k };
       maxErr = Math.max(maxErr, Math.abs(Math.hypot(mid.x - cx, mid.y - 1500) - 300) / 300);
-      if ( process.env.DBG && Math.abs(Math.hypot(mid.x - cx, mid.y - 1500) - 300) > 30 ) console.log("orb", i, Math.hypot(mid.x - cx, mid.y - 1500).toFixed(1), h.offset, h.size.toFixed(1), h.plan.sizeK.toFixed(2), h.lastRot.toFixed(2));
       if ( last && (last.x !== p.x || last.y !== p.y) ) moved++;
       steps.add(Math.round(Math.atan2(mid.y - 1500, mid.x - cx) * 1000));
       last = { ...p };
@@ -223,7 +222,7 @@ export async function run(ok, { bank, fontsApi }) {
   {
     /* echoes: n smaller hollow copies after the landing, gone with the word */
     const h = L.play("BOOM", { mood: "boom", space: "world", at: { x: 2000, y: 1500 }, echo: 3, seed: "e1", hold: 500 });
-    await E.tick(h.entMs + 900);
+    await E.tick(50); await E.tick(h.entMs + 850);   // entMs is known once the word is prepared (the next frame)
     ok(h.echoes?.length === 3 && h.echoes.every((c) => c.isEcho && c.plan.hollow && c.plan.hand.id === h.plan.hand.id), "echo: three hollow echoes in the word's own hand");
     ok(h.echoes[1].size < h.echoes[0].size || h.echoes[1].opts.scale < h.echoes[0].opts.scale, "echo: each echo smaller than the one before");
     await E.tick(3000);
@@ -312,7 +311,7 @@ export async function run(ok, { bank, fontsApi }) {
     /* ADVT 1: words stay in the view (its insets too): a word at the very edge is moved in, a travelling word is not */
     E.setView(true);
     L.viewInset({ top: 60, right: 8, bottom: 60, left: 8 });
-    const edge = [L.play("RAAA!", { mood: "growl", space: "world", at: { x: 1200 + 5, y: 1050 + 5 }, seed: "v1", hold: 900 }),
+    const edge = [L.play("RAAA!", { mood: "roar", space: "world", at: { x: 1200 + 5, y: 1050 + 5 }, seed: "v1", hold: 900 }),
       L.play("BĘC!", { mood: "impact", space: "world", at: { x: 2790, y: 1940 }, seed: "v2", hold: 900 }),
       L.play("HUH", { mood: "tick", space: "screen", at: { x: 1595, y: 4 }, seed: "v3", hold: 900 })];
     const mid = L.play("POW!", { mood: "impact", space: "world", at: { x: 2000, y: 1500 }, seed: "v4", hold: 900 });
@@ -323,7 +322,7 @@ export async function run(ok, { bank, fontsApi }) {
     ok(edge.every(inside), `ADVT 1: a word at the view's edge is moved inside it, letterbox insets included (${edge.map((h) => `${h.lastPos.x | 0},${h.lastPos.y | 0}`).join(" ")})`);
     ok(mid.lastPos.x === 2000 && mid.lastPos.y === 1500, "ADVT 1: a word well inside the view stays where it was put");
     ok(trav.lastPos.x < 120 && trav.lastPos.y > -60, "ADVT 1: a travelling word keeps its path (may leave the view)");
-    const off = L.play("RAAA!", { mood: "growl", space: "world", at: { x: 1205, y: 1055 }, seed: "v6", hold: 900, keepInView: false });
+    const off = L.play("RAAA!", { mood: "roar", space: "world", at: { x: 1205, y: 1055 }, seed: "v6", hold: 900, keepInView: false });
     await E.tick(100);
     ok(off.lastPos.x === 1205, "ADVT 1: keepInView: false leaves the word where it was put");
     L.viewInset(null); E.setView(false);

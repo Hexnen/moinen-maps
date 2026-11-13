@@ -437,7 +437,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       const c = P(beat + 1); c.shards = { t: 0, seed: sd, from }; exit.push(c);
       if ( tech.flash ) { const f = flashFrame({ s: 1.04 }); exit.push(f); }
       let tt = 0;
-      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, from }; p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
+      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, from, last: j === 5 }; p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
       break;
     }
     case "pop":
@@ -450,7 +450,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       exit.push(P(2, { s: 0.94, sy: 0.92 }), P(2, { s: 1.12, sx: 1.06 }));
       if ( o.pixelArt ) { exit.push(P(2, { s: 1.38 })); exit[2].fx.push({ k: "puff", a: 0.6, t: 0.8, seed: seeds() }); exit[2].dissolve = 0.8; break; }
       const sd = seeds(); let tt = 0;
-      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, mode: "burst" }; if ( j < 3 ) p.fx.push({ k: "puff", a: 0.85 - 0.2 * j, t: 0.3 + 0.2 * j, seed: seeds() }); p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
+      for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / (o.tempo || 1); const p = P(2); p.shards = { t: tt, seed: sd, mode: "burst", last: j === 5 }; if ( j < 3 ) p.fx.push({ k: "puff", a: 0.85 - 0.2 * j, t: 0.3 + 0.2 * j, seed: seeds() }); p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
       break;
     }
     case "fall": {
@@ -486,9 +486,10 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
 /* ---------- the whole plan ---------- */
 export function makePlan(text, opts, fonts, memory) {
   const raw = String(text ?? "").normalize("NFC");
-  const word = raw.toLocaleUpperCase("pl").replace(/\s+/g, " ").trim() || "?";
+  /* FXLE F12: "\n" stacks lines (other white space folds to one space, empty lines go) */
+  const word = raw.toLocaleUpperCase("pl").split(/\r\n|\r|\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n") || "?";
   let mood = opts.mood && opts.mood !== "auto" ? opts.mood : null;
-  if ( mood && !MOODS[mood] ) mood = null;
+  if ( mood && !Object.hasOwn(MOODS, mood) ) mood = null;   // FXLE F15: "toString", "__proto__" ... are no moods
   if ( !mood ) mood = opts.sound && !opts.mood ? nearestMood(opts.sound) : guessMood(word);
   const sound = soundOf(word, mood, opts.sound);
   const seed = opts.seed != null ? hash(`${opts.seed}`) : (Math.random() * 4294967296) >>> 0;
@@ -500,7 +501,8 @@ export function makePlan(text, opts, fonts, memory) {
   }
   /* a caller may pin the hand of an earlier plan (a stream of syllables lettered by one hand); the rng still advances the same way */
   const chosen = chooseHand(mood, sound, R, avoid);
-  const hand = opts.hand ? { ...chosen, ...JSON.parse(JSON.stringify(opts.hand)) } : chosen;
+  const hand = opts.hand && typeof opts.hand === "object" ? { ...chosen, ...JSON.parse(JSON.stringify(opts.hand)) }
+    : typeof opts.hand === "string" ? handFromId(opts.hand, chosen) : chosen;
   if ( Array.isArray(opts.colors) && opts.colors.length ) {
     const cs = opts.colors.map(String);
     hand.pal.fill = [cs[0], cs[1] ?? cs[0], cs[2] ?? cs[1] ?? cs[0]];
@@ -512,10 +514,10 @@ export function makePlan(text, opts, fonts, memory) {
     hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   }
   const chars = [...word];
-  const widths = chars.map((ch) => (ch === " " ? 0.32 : fonts.adv(hand.font, ch)));
+  const widths = chars.map((ch) => (ch === " " ? 0.32 : ch === "\n" ? 0 : fonts.adv(hand.font, ch)));
   /* choreography (choreo.mjs): parts of the word on their own beats, typed on, counted in; reduced motion = all at once */
   const groups = opts.reduced ? null : groupsOf(chars, opts, syllablesOf);
-  const lay = layoutPlan(chars, widths, mood, sound, hand, R, letterScales(chars.length, groups));
+  const lay = stackLines(layoutPlan(chars, widths, mood, sound, hand, R, letterScales(chars.length, groups)), chars, hand);
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
   const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
   const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel };
@@ -538,6 +540,48 @@ export function makePlan(text, opts, fonts, memory) {
   if ( groups ) plan.groups = groups.map((g) => ({ from: g.from, to: g.to, at: g.at, scale: g.scale, body: !!g.body }));
   if ( opts.hollow ) plan.hollow = true;
   return plan;
+}
+
+/* FXLE F12: lines of a word with "\n": each line is laid out by the hand like a word of its own, centred under the widest line, one
+   line height (the biggest letter of the line above, plus a little lead) further down; the envelope warps the whole block */
+export function stackLines(lay, chars, hand) {
+  if ( !chars.includes("\n") ) return lay;
+  const lines = [[]];
+  lay.letters.forEach((l, i) => { if ( chars[i] === "\n" ) lines.push([]); else lines.at(-1).push(l); });
+  const widthOf = (ls) => (ls.length ? ls.at(-1).x + ls.at(-1).w - ls[0].x : 0);
+  const W = Math.max(0.3, ...lines.map(widthOf));
+  let dy = 0;
+  lines.forEach((ls, k) => {
+    if ( k > 0 ) dy += 1.12 * Math.max(1, ...lines[k - 1].map((l) => l.s)) + 0.08;
+    const x0 = ls[0]?.x ?? 0, off = (W - widthOf(ls)) / 2;
+    for ( const l of ls ) { l.x = l.x - x0 + off; l.dy += dy; }
+  });
+  /* the "\n" itself: no glyph, kept in place so per-letter animation stays aligned */
+  lay.letters.forEach((l, i) => { if ( chars[i] === "\n" ) { l.x = 0; l.w = 0; } });
+  lay.W = W; lay.E.W = W;
+  void hand;
+  return lay;
+}
+
+/* FXLE F18: a hand given as its id string ("font/treat/env/colorFam/outline/fill", a handle's `hand`): the known fields of the id
+   replace the chosen hand's (a palette of the id's colour family when it differs) */
+function handFromId(id, chosen) {
+  const [font, treat, env, colorFam, outline, fill] = String(id).split("/");
+  const known = (v, set) => v && set.has(v);
+  const all = (k) => new Set(Object.values(MOODS).flatMap((m) => Object.keys(m[k] ?? {})));
+  const h = { ...chosen, pal: { ...chosen.pal, fill: chosen.pal.fill.slice() } };
+  if ( known(font, new Set(Object.keys(FONTS))) ) h.font = font;
+  if ( known(treat, all("treat")) ) h.treat = treat;
+  if ( known(env, all("env")) ) h.env = env;
+  if ( known(outline, new Set(["ink", "sticker", "color", "inner"])) ) h.outline = outline;
+  if ( known(fill, new Set(["vgrad", "split", "hgrad", "letters", "radial", "flat"])) ) h.fill = fill;
+  if ( colorFam !== chosen.colorFam && Object.hasOwn(COLORS, colorFam ?? "") ) {
+    const R = rng(hash(String(id))), pal = R.pick(COLORS[colorFam]);
+    h.colorFam = colorFam; h.pal = { ...pal, fill: pal.fill.slice(), out2: R.pick(pal.out2) }; h.ink = pal.ink;
+  }
+  if ( h.outline === "ink" ) h.out2W = 0; else if ( !h.out2W ) h.out2W = 0.065;
+  h.id = [h.font, h.treat, h.env, h.colorFam, h.outline, h.fill].join("/");
+  return h;
 }
 
 /* a stream's syllables: "RA-TA-TA" splits on - and spaces; "RATATATA" splits after each vowel run */

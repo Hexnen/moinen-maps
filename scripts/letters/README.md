@@ -6,7 +6,10 @@ that keeps living (each picture is redrawn, the line "boils"), an exit. Over the
 (PIXI), any number at once within limits, deterministic for a seed so every client sees the same lettering.
 
 - Canonical copy: `moinen-maps/scripts/letters/`. Vendored copy: `invincible-plus-ultra/scripts/letters/`. Same files; `MANIFEST.json`
-  holds their hashes. Edit ONLY the canonical copy, then `node scripts/letters/sync.mjs <path to plus-ultra>/scripts/letters`.
+  holds their hashes and `stamp.mjs` a content hash with the time it last changed (two copies with the same VERSION but different
+  content: the more recently synced one serves; bump VERSION anyway). Edit ONLY the canonical copy, then
+  `node scripts/letters/sync.mjs <path to plus-ultra>/scripts/letters` (it only copies into an existing LETR copy or a new folder named
+  `scripts/letters`, never deletes a folder); `sync.mjs --check <other copy>` also compares the two copies.
 - Checks: `node scripts/letters/check.mjs` (maps runs it as `dev/letters.test.mjs`, plus-ultra as `scripts/sweep-checks/letters.mjs`).
 - Why here: moinen-maps is system-agnostic and the heaviest user (world space, zoom, a collapse throwing dozens of words), and
   plus-ultra must not need the map for its dice splash; so both carry the folder, and at runtime the copies register in
@@ -47,7 +50,21 @@ The complete option tables (play, stream, handle, limits) are in the contract ke
 | `colors`, `rotation`, `parent`, `zIndex`, `reduced` | palette override, tilt, own container, stacking, reduced motion (default: the OS setting) |
 
 Limits: 16 words at once over the interface, 48 on the canvas (`L.limits`); over a limit the oldest leaves at once ("evicted").
-A scene change evicts all world words. `L.stopAll({ space })`, `L.count({ space })`, `L.stats` (pictures rendered, ms spent).
+A scene change evicts all world words, also those still waiting for their `delay`, and stops every world stream; `L.stopAll({ space })`
+does the same for everything (words waiting included, streams included). `L.count({ space })` counts the words on screen, `L.stats`
+(pictures rendered, ms spent, the dearest picture).
+
+### Lifecycle (what a caller can rely on)
+- `play()` returns at once and never throws: the word is planned there (`h.hand`, `h.plan` are set unless it has a `delay`); its
+  geometry and first picture are made in the next animation frame(s), within a per-frame budget, so a burst of 48 words comes up over a
+  few frames instead of blocking the page. Without `startAt` a word's clock starts when its first picture shows (no entrance skipped).
+- `h.ready` resolves `true` when the first picture is on screen, `false` when the word ended without ever showing (stopped first,
+  evicted, its token not on this scene, its `startAt` long past). `h.finished` always resolves.
+- A bad option never throws: an unusable number (NaN, a negative size, tempo or hold, `Infinity`) is ignored with one warning and the
+  default is used; an unknown mood is `auto` with one warning; an `at` function that throws keeps the last point. Text is cut at 160
+  characters. A character no font has is drawn as "?" with one warning.
+- A word on a token (`at` = token / id / document) follows it; when the token goes away the word stays where it was and plays its exit.
+  A token id that is not on this scene is skipped.
 
 ## How the shape shows the sound
 
@@ -127,14 +144,15 @@ and combines them, every animation frame. The model is `size.mjs` (pure; checked
 ### What the engine derives
 1. **Natural size** (world words, scene px of cap height): 0.55 grid squares; from a source of span S: 0.55 g x (S/g)^0.5 (a 4x4 titan
    gets 2x, not 4x); from a footprint of radius R: 0.55 g x (R / 0.5 g)^0.6 (a 10-square collapse is about 3 squares tall); times the
-   magnitude factor (0.7 at 0, 1.0 at 0.5, 1.5 at 1, 2.3 at 2). Screen words: 8.5 % of the viewport height x magnitude factor.
+   magnitude factor (0.7 at 0, 1.1 at 0.5, 1.5 at 1, 2.3 at 2). Screen words: 7.5 % of the viewport height x magnitude factor.
    Then the mood's own factor (a roar is drawn bigger than a click: `plan.sizeK`, 0.62-1.32).
 2. **On screen** (CSS px of cap height) = natural x mood factor x zoom (world) or as is (screen).
 3. **Legible range**, clamped softly (inside it nothing changes; outside it the size still follows zoom a little as a depth cue, then stops):
    - floor: 2.6 % of the viewport height, 15-30 px (0.8x for quiet sounds like ticks), lowered when more than 12 world words are up
      (sqrt, down to 0.7x) so a hundred far-away crashes do not bury the map; hard stop at 0.8x the floor;
-   - ceiling: the cap height stays under (9 % + 12 % x magnitude) of the viewport height and the word's width under (45 % + 30 % x
-     magnitude) of the usable width (viewport minus the sidebar); hard stop at 1.15x. Big events may fill a lot of the screen, never all.
+   - ceiling: the cap height stays under (7 % + 8 % x magnitude) of the viewport height and the word's width under (40 % + 25 % x
+     magnitude) of the usable width (viewport minus the sidebar); hard stop at 1.15x. With more than 2 world words up the ceiling
+     shrinks with sqrt(2 / n), to 0.4x at most: a crowd shares the screen. Big events may fill a lot of the screen, never all.
 4. **Pixel lettering** (`pixel`): the size is snapped to whole art pixels (7-40 per cap height, 32 art px per grid square) once, at the
    start, and kept: pixel art never scales by fractions.
 
@@ -147,11 +165,11 @@ is drawn big. Screen words follow window resizes the same way.
 ### What it means in the situations that matter (my reading, numbers at 1366x768)
 - **A tick on a small token, zoomed out** (0.2): the world size would be about 8 px; the floor holds it at about 15 px (a normal
   word about 19 px) - readable, never bigger than a normal word.
-- **A building coming down** (`area` 5-10 squares, `magnitude` 1): seen from far (0.2) about 80-120 px, the biggest thing on screen
-  but no wall; from zoom 0.5 on the ceiling (about 160-185 px cap height, width under 75 % of the usable width) stops it from burying
-  the scene.
-- **A roll result over the interface**: 8.5 % of the viewport height x magnitude: about 72 px on a 768 px laptop, about 100 px on a
-  1080 px screen (mood factor 1), the same share of the screen on both; a crit (`magnitude` 1) about 1.5x.
+- **A building coming down** (`area` 5-10 squares, `magnitude` 1): seen from far (0.2) about 80-115 px, the biggest thing on screen
+  but no wall; from zoom 0.5 on the ceiling (about 115-132 px cap height, width under 65 % of the usable width) stops it from burying
+  the scene; a dozen such words at once get about 54 px each.
+- **A roll result over the interface**: 7.5 % of the viewport height x magnitude: about 63 px on a 768 px laptop, about 89 px on a
+  1080 px screen (magnitude 0.5, mood factor 1), the same share of the screen on both; a crit (`magnitude` 1) about 1.5x.
 - **A stream along a shot**: each syllable 62 % of the stream's natural size (from `span`/`area`/`token`/`magnitude`), then clamped
   like any word, so a far-away burst of gunfire is still readable syllable by syllable.
 - **Pixel lettering beside pixel art**: whole art pixels from the same model at the start zoom; the floor of 7 art px keeps the
@@ -204,10 +222,80 @@ is drawn big. Screen words follow window resizes the same way.
 | `hud` | screen | fixed layer, z-index 5 | over the map, under the sidebar, bars and windows |
 | `ui` | screen | z-index 80 | over the sidebar, chat, hotbar (UI 60), under app windows (100) |
 | `screen` | screen | z-index 1000 (DEFAULT) | over the whole interface; tooltips and notifications stay on top |
+Elevation (primary layers): never under the current v14 level's own background (the level's base elevation); `tokens` follows the
+`at` token's (or `token`'s) live elevation, and at a point takes the highest token covering that point; `elevation` overrides. The
+`screen` layer keeps above app windows whose z-index climbed past 1000 (under tooltips and notifications). A scene change removes the
+engine's layer containers (the `top` one lives on `canvas.stage`, which Foundry keeps).
 For a user setting: `game.settings.register(id, "letteringLayer", { scope: "client", config: true, type: String,
 choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.settings.get(id, "letteringLayer")` per call
 (register in the "ready" hook or with a static copy of the ids: `ground tokens weather overlay top` / `hud ui screen`).
 `L.gallery({ part: "layers" })` shows the same word on every layer.
+
+## Words: the vocabulary (what to letter for a sound)
+
+The engine letters any text it is handed (`L.play("KRAK!")` is unchanged). On top of that `words.mjs` knows WHAT to letter: give it
+a sound kind, a loudness and a language and it gives a fitting onomatopoeia, its mood, sound and motions, seeded and varied.
+
+```js
+L.sfx("crack", { loud: 0.8, lang: "pl", space: "world", at: token, seed: msg.id });   // word + lettering in one call
+const w = L.word("boom", { magnitude: "huge", lang: "auto", seed });                   // just the word: { text, mood, sound, play, ... }
+L.play(w.text, { ...w.play, space: "world", area });                                    // ... lettered by the caller
+L.stream({ kind: "gunfire", lang: "pl", at: () => muzzle(), to: target, every: 90 });  // syllables from the vocabulary
+L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, growing: TRZASK! > TRZAAASK! > TRZAAAASK! > TRZAAAAAASK!
+L.vocab.grow("KRAK!", 2);                                  // grow a caller's own text: KRAAAK!
+L.number(12500, { lang: "pl" }); L.number(3, { times: true }); L.range(2, 4);   // "12 500", "3×", "2–4"
+```
+
+- `L.word(kind, o)` -> `{ text, kind, lang, tier, loud, step, template, prefix, mood, sound, motion, play }`; `play` = `{ mood, sound,
+  in, holdKind, out, magnitude }` ready to spread into `L.play`. Options: `lang` (`pl`, `en`, a registered code, or `auto` = the
+  game's language), `loud` 0..1 or `magnitude` (0..2 or `tiny`..`epic`: the same input as the size model; default = the normal
+  magnitude 0.5), `seed` (same word on every client; unseeded words never repeat the last one of that kind), `avoid` (texts or
+  templates to skip: other words of the same moment), `step` (the n-th repeat: louder and longer), `template` (pin the word, only
+  its stretch follows loudness), `prefix` (true/false/"KA-"), `stream` (syllables).
+- `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; every play option works; `opts.sound` keys override per key;
+  the handle carries `h.word`.
+- Loudness picks the TIER (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), then STRETCHES the word (templates mark the stretch
+  points with `+`: `TRZA+SK` -> TRZASK / TRZAAASK; a word without marks stretches its last vowel, or a vowelless word its
+  R/S/Z/H/M/F run), at the very top may add a PREFIX (KA-BUM, TRA-TA-TRACH, KRA-KABOOM), quiet words lose their `!`, the loudest
+  gain one. No letter runs longer than 6; a prefix never stretches.
+- Escalation (the seam with MOVE's growing word): `L.vocab.series(kind, n, { seed, lang, loud, grow })`: `grow: "stretch"` (default)
+  keeps one word and makes it longer each step (a prefix from step 2, then `!`, `!!`); repeating sounds (gunfire, laughter, siren,
+  heartbeat, drip, stomp, beep) add a syllable instead (TRA-TA > TRA-TA-TA > TRA-TA-TA-TA); `grow: "vary"` gives a different word
+  each step at rising loudness. Never the same text twice in a row; never shorter in stretch mode. For a caller's plain text:
+  `L.vocab.grow(text, step)`.
+- Adding and overriding (callers, moinen-pixel-vfx, world macros) on the shared engine: `L.vocab.add(lang, kind, words, { replace })`
+  (an array spread over tiers by length, or `{ s, m, l, st }`; `+` marks allowed; words the fonts cannot letter or longer than 22
+  are refused with one warning), `L.vocab.define(kind, { group, label: { pl, en }, mood, sound, motion, stretch, pre, alias, repeat })`
+  (a new kind or a change), `L.vocab.remove(lang, kind, words)`, `L.vocab.reset()`. Pickers: `L.vocab.list(lang)` (id, label,
+  group, mood, counts), `L.vocab.choices(lang)` (`{ id: label }` for `game.settings` choices), `L.vocab.all(kind, lang)`.
+- Numbers: `L.number(n, { lang, sign: "auto"|"always"|"never", digits, group, compact, times: true|"before", percent })`: Polish
+  `12 500` (a space from 10 000), `2,5`, `1,2 MLN`, `12 TYS.`; English `12,500`, `2.5`, `1.2M`, `12K`; `3×` / `×3`; minus is `-`
+  so the auto mood still reads pain / heal. `L.range(2, 4)` -> `2–4`. Every sign used has a glyph in every font (checked).
+
+### The sound kinds (52; PL and EN words for each, 3 tiers + stream syllables)
+| group | kinds |
+|---|---|
+| hits | punch (cios), smash (miażdżenie), slap (klaps), thud (łomot), stomp (tupnięcie), clang (brzęk), slash (cięcie), bite (ugryzienie) |
+| breaking | crack (trzask), shatter (stłuczenie), crash (łoskot), crumble (kruszenie), rumble (dudnienie), creak (skrzypienie), scrape (zgrzyt) |
+| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunshot (strzał), gunfire (seria), ricochet (rykoszet) |
+| motion | whoosh (świst), zoom (pęd), bounce (skok), teleport (teleport), wind (wiatr) |
+| elements | fire (ogień), crackle (trzaskanie), hiss (syk), splash (plusk), squish (plaśnięcie), drip (kapanie) |
+| powers | power-up (ładowanie), psychic (telepatia), chime (dzwonienie), fizzle (zgaśnięcie), whiff (pudło) |
+| devices | click (kliknięcie), beep (pikanie), engine (silnik), siren (syrena) |
+| voices | roar (ryk), pain (ból), effort (wysiłek), relief (ulga), sigh (westchnienie), cheer (wiwat), laugh (śmiech), shush (uciszenie), heartbeat (puls) |
+Aliases (`explosion` -> boom, `laser` -> beam, `machinegun` -> gunfire, `hit` -> punch, `heal` -> relief, ...): `L.vocab.aliases`.
+An unknown kind letters as `punch` with one warning.
+
+### How the words were written
+Our own lists, nothing copied wholesale. English follows the American comic idiom (POW, THWACK, KRAKOOM, BLAM, FWOOSH, SPLOOSH).
+Polish follows how Polish comics and everyday speech write sounds rather than translating the English: hard Polish spellings
+(ŁUP, BĘC, TRACH, PRASK, BUCH, CHLAST, CIACH, ŚWIST, BRZDĘK, DZYŃ, CHRUP, KŁAP, PLUSK, CHLUP, SKRZYP, ZGRZYT, SZUR, SYK, PSST, CIII),
+its own idioms (ŁUBUDU for a tumble, SZAST-PRAST for a quick cut, HOP-SA for a jump, IJO-IJO for a siren, TRA-TA-TA for a gun,
+PIF-PAF for shots, AUĆ / AŁA for pain, UFF for relief, HURA / JEST! for a cheer, CHA-CHA / HI-HI for laughter). Comic conventions
+used: letters repeated for length, size for loudness, hyphenated syllables for a sound made of parts (KA-BUM), a prefix for the
+biggest version. Sources read: Polish-English onomatopoeia tables (earlystage.pl blog), SDSU "The Sound of Comics" notes on
+lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomatopeja", the existing word sets of the three callers
+(maps sfx/words.mjs, dice splash SAYS, token reactions) for which sounds are needed.
 
 ## For the builder of moinen-pixel-vfx (a power's effect carrying its sound)
 
@@ -216,15 +304,82 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
 - Bind lettering to the effect's timeline, not to an instant: pass `startAt` = the effect's `performance.now()` start (a word
   joins part-way through if it is late), `delay` for an offset, and `until: effectEndPromise` (or call `h.stop()` when the stage
   ends) so the word leaves with the effect. `loop: true` holds until stopped (a lasting fire, a charging aura).
+- The words for a power's sound: `L.word(kind, { magnitude, lang: "auto", seed: castId })` or `L.sfx(kind, ...)` (see "Words"), e.g.
+  a shooting power: `L.stream({ kind: "gunfire", lang: "auto", ... })` rattles TRA-TA-TA for Polish players, RAT-TAT-TAT for English.
 - Sounds that repeat (a gun's "ratatata", a crackling fire, a rumbling quake): `L.stream(...)`. Syllables pop at the source
   (`at`, may be a function for a moving muzzle or projectile), travel along `dir` or toward `to`, one hand for the whole burst;
   timing by `every`, by `beats` (exact ms of each shot on the effect's clock) or by calling `s.beat()` from each shot with
   `manual: true`. `loud: (i) => ...` shapes a swell or fade across the burst.
+  A stream keeps the effect's clock: with `startAt` in the past it skips the syllables whose life is already over and every syllable
+  joins its own due time (a duration counts from `startAt`); its hand is the first syllable's whenever it joins. `s.handles` holds the
+  syllables still alive, `s.emitted` counts all; `loud: 0` is the quietest syllable; `every` is at least 20 ms.
 - Pixel-art surroundings: `pixel: true` letters on the effect grid (1 texel = 1 art px = grid/32 scene px), hard 1-bit edges,
   nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas
   and a render budget of about 4 ms per frame; seed with the cast id so every client sees the same lettering.
-- Nothing is networked: run the call on every client from your own socket event, with the same seed and `startAt`.
+- Every client in step with one call: `L.net.play` / `L.net.stream` (README "Tools"). With your own socket, run the call on every
+  client with the same seed. `startAt` is THIS page's
+  `performance.now()` clock and differs on every client (each page counts from its own load): never send it as is. See "Several clients".
+
+## Several clients
+- The same `seed` gives the same hand, layout and timeline on every client (the per-client memory of recent hands and the reduced-motion
+  setting do not change a seeded hand). Pass `from` as an angle (degrees) to keep the look identical: a `from` point is turned into an
+  angle with this client's own pixels, so different window layouts may pick a different warp.
+- To start a word part-way on every client (an effect that began earlier), send a wall-clock time with your event, e.g.
+  `sentAt: Date.now()` at the effect's start, and on each client pass `startAt: performance.now() - (Date.now() - sentAt)` (clock skew
+  between machines remains). A `startAt` more than 60 s ahead of this page's clock is ignored with a warning.
+- Without clock skew: `L.net.play` / `L.net.burst` / `L.net.stream` do all of this (README "Tools"); with your own socket send
+  `L.net.sharedNow()` (Foundry's ping-synced server clock) and pass `L.net.local(sentShared)` (`{ delay }` or `{ startAt }`) to `L.play`.
+
+## Who sees a word (hidden and unseen tokens)
+A word that belongs to a token (`at` is a token, a TokenDocument or an id, or `token` is given) is shown only while that token is
+visible to this user: a hidden token's word is never shown to players, and neither is the word of a token this user cannot see (vision,
+fog of war). The GM sees what the GM sees on the canvas. `vision: "point"` also hides a world word whose point this user cannot see (an
+event in the dark or behind walls); `vision: "none"` always shows it. Streams pass `token` (or a token `at`) and `vision` to their
+syllables. A word at a plain point is shown by default even on the `overlay` layer (over fog): pass `token` or `vision: "point"`
+when the point must not give away where something happened.
+
+## Tools: settings, authoring, networking, accessibility, windows (contract v5, tools.mjs)
+One set for every caller, registered once by the newest copy at `init` (whichever module(s) are active).
+
+Settings, client (this computer), namespace `moinen-letters` (stable whichever module is active; the button "Lettering settings" in
+the host module's settings tab opens the engine's own window; host = moinen-maps when active, else invincible-plus-ultra):
+| key | values | what it does to every word |
+|---|---|---|
+| `enabled` | on / off | off: `play` returns a handle that is already over (`alive` false, `off` true, `finished` -> "evicted"); streams draw nothing |
+| `scale` | 0.5-2.5 | multiplies the size AFTER the legibility clamp (so words held at the floor grow too) |
+| `motion` | auto / full / gentle / reduced | the strongest reduction wins: the caller's `reduced: true`, this setting, the OS (auto, gentle); full = the caller decides; gentle = moves damped to 45 %, no smear frames |
+| `flashes` | on / off | the one-tick black/white impact frame (off: an ordinary drawing of the same length) |
+| `photosafe` | on (default) / off | at most 2 flash frames per second on this client, none on a word taller than 20 % of the viewport, colour plates (misregistration) held still across drawings |
+| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set, no green, no red-green pair (a caller's own `colors` stay) |
+| `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
+| `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
+
+Authoring (any client, this session; `L.saveStyle` also stores a style in the world):
+```js
+L.registerMood("frost", { extends: "crack", label: "ice", sound: { pitch: 0.3 }, colors: { ice: 4 }, in: { crackIn: 2, pop: 1 } });
+L.registerPalette("venom", [["#e8ffb0", "#9be22a", "#2f6e1f"]]);                   // or [{ fill, ext, out2: [...], ink }]
+await L.registerFont("grit", { url: "modules/x/fonts/Grit.ttf", sharp: 0.8 });     // Polish capitals synthesised when missing
+L.registerStyle("thor-hammer", { mood: "zap", palette: "volt", font: "bangers", in: "pop", magnitude: 0.9 });
+await L.saveStyle("Młot Thora", { ...style });   // GM: world-wide; L.deleteStyle(name); L.styles(); L.style(name)
+L.play("KRAKA-THOOM!", { style: "thor-hammer", space: "world", at: token });         // the call's own options win over the style's
+```
+Ids: a-z 0-9 _ -, starting with a letter; `toString`, `constructor`, `__proto__`, `auto` and other prototype names are refused.
+New play options: `style` (a name or a style object), `palette` (a colour family by name, the same palette on every client),
+`font` (a font id), `hand` as the handle's id string (`hand: h.hand`, F18) or a partial hand object, `alt` (the text read to
+screen readers instead of the word), `force` (play even when the master switch is off: tools only).
+
+Networking: `L.net.play(text, opts)`, `L.net.burst(items, common)`, `L.net.stream(opts)` play on every client in step (seed made
+once, start stamped on Foundry's ping-synced server clock `game.time.serverTime`, `lead` 120 ms so nobody joins late; tokens travel
+as ids, a word for a token not on a client's scene is skipped there; functions, Promises and elements do not travel, `reduced` is
+each client's own). Each returns the local handle(s) with `netId`; `L.net.stop(netId, { quick })` stops it everywhere.
+`L.net.sharedNow()`, `L.net.local(sharedT)` -> `{ delay }` | `{ startAt }` for callers with their own socket.
+
+GM: `L.letterNow(text, opts)` shows a word to everyone at the selected tokens (one each, different hands) or at a point (`point`,
+default the cursor); the keybinding "Letter this now" (Shift+L) opens a small box at the cursor for it. `L.designer({ text })`
+opens the designer window (also: the burst button in the token controls); `L.openSettings()` the settings window.
+`L.planFor(text, opts)` -> `{ plan, opts }`: the plan this client would show (style, settings and filters applied).
 
 ## Look and performance notes
 - Every picture is painted from font outlines (TrueType parsed by `font.mjs`) at the pixel size it is shown at; world words re-render
