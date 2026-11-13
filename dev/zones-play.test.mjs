@@ -297,7 +297,7 @@ const [m1, m2, m3, m4] = sm.tokens;
 // cost and reach from a profile
 check(api.profile({ way: "flight", speed: 2, stress: true }).stressSpeed === 4 && api.profile({ way: "hop" }) === null, "profile(): filled in, or null for an unknown way");
 let mc = api.moveCost(m3, "z3", { way: "walk" });
-check(mc.reachable === false && mc.cost === null && api.moveCost(m3, "z3", { way: "flight", speed: 2 }).reachable === false && api.moveCost(m3, "z4", { way: "burrow", speed: 2, stress: true }).cost.within === "plain", "moveCost: the locked door stops a walker and a flyer; burrowing two zones is one action");
+check(mc.reachable === false && mc.cost === null && api.moveCost(m3, "z3", { way: "flight", speed: 2 }).reachable === true && api.moveCost(m3, "z4", { way: "burrow", speed: 2, stress: true }).cost.within === "plain", "moveCost: the locked door stops a walker; a flyer passes over the building behind it (A14); burrowing two zones is one action");
 mc = api.moveCost(m3, "z5", { way: "teleport", speed: 2, stress: true });
 check(mc.cost.total === 3 && mc.cost.actions === 2 && mc.cost.stressActions === 1 && mc.cost.within === "stress", "three zones with a 2 / 4 power: one action only with stress");
 check(api.reach(m1, {}).map((x) => x.zone).join() === "z1" && api.reach("z4", { way: "walk" }, { max: 1 }).map((x) => x.zone).join() === "z4,z5" && api.reach(m1, { way: "burrow", speed: 2 }).find((x) => x.zone === "z3").cost.within === "plain", "reach(): walled in on foot; capped; by a power");

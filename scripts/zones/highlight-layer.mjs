@@ -22,6 +22,7 @@ import { groups, shortLabel } from "./highlight.mjs";
 import { pickSpot, zoneSpots, borderSpots, spotsAround, thin } from "./place.mjs";
 import { glyphOf } from "./board-layer.mjs";
 import { piecesRow } from "./signs-pixi.mjs";
+import * as Unlit from "./unlit.mjs";
 
 const INK = 0x15110f, PAPER = 0xf3e7c9;
 /** A badge's radius on screen (display.mjs BADGE_R): a zone's label shrinks with the zone as its badge does. */
@@ -45,7 +46,8 @@ export class ZoneHighlightLayer {
     this.root = new PIXI.Container();
     this.root.eventMode = "none";
     this.root.interactiveChildren = false;
-    // in the primary group just above the zones (display.mjs: 258), under tiles, drawings and tokens
+    // C1 (2026-11-12): above the scene's lighting, under the tokens and the fog (unlit.mjs); without that place, in the primary group
+    // just above the zones (display.mjs: 258), under tiles, drawings and tokens, as before
     Object.assign(this.root, { elevation: 0, sortLayer: 258, sort: 1, _lastSortedIndex: 0 });
     this.veil = new PIXI.Graphics();
     this.zonesC = new PIXI.Container();
@@ -54,7 +56,7 @@ export class ZoneHighlightLayer {
     this.labels = new PIXI.Container();
     this.root.addChild(this.veil, this.zonesC, this.lines, this.hover);
     this.root.visible = false;
-    canvas.primary.addChild(this.root);
+    Unlit.attach(this.root, Unlit.Z.highlights, (o) => canvas.primary.addChild(o));
     // (section 41: the labels just above the tokens' pictures - a warning that found no free spot is half on a token, never under it)
     this.labelRoot = new PIXI.Container();
     this.labelRoot.eventMode = "none";
@@ -63,11 +65,14 @@ export class ZoneHighlightLayer {
     try { const v = foundry.canvas?.groups?.PrimaryCanvasGroup?.SORT_LAYERS?.TOKENS; if ( typeof v === "number" ) TOK = v; } catch {}
     Object.assign(this.labelRoot, { elevation: 0, sortLayer: TOK + 10, sort: 1, _lastSortedIndex: 0, visible: false });
     this.labelRoot.addChild(this.labels);
-    // U125 (a): in the interface group, above the token layer (zIndex 899: under the lines and the tokens' pills). In the primary group a
-    // token drawn higher (lifted, carried, above the ground) still covered a warning, and the scene's light dimmed it
-    this.labelRoot.zIndex = 899;
-    if ( canvas.interface ) { canvas.interface.addChild(this.labelRoot); canvas.interface.sortDirty = true; }
-    else canvas.primary.addChild(this.labelRoot);
+    // C13 (the user's answer of 2026-11-12, over U125 a): with the highlights, above the scene's light and under the tokens and the fog
+    // (unlit.mjs) - a label that found no free spot is half under a token now, never lit by the scene. Without that place: in the
+    // interface group above the token layer (zIndex 899: under the lines and the tokens' pills), as before
+    Unlit.attach(this.labelRoot, Unlit.Z.labels, (o) => {
+      o.zIndex = 899;
+      if ( canvas.interface ) { canvas.interface.addChild(o); canvas.interface.sortDirty = true; }
+      else canvas.primary.addChild(o);
+    });
     this.items = [];
     /** The spot each label has now (label key -> its offset): kept while tokens move, so a label does not hop about. */
     this.spots = new Map();

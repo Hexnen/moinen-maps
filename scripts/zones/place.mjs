@@ -127,6 +127,19 @@ export function markOffsets(ends, clear = 0, r = 12, gap = 4, oneSide = false) {
   return out;
 }
 
+/**
+ * C14 (the user's answer of 2026-11-12): the marks of one zone's passages stand as ONE mark with a count when their row does not
+ * fit in the zone (a small zone, or the map seen from far out), instead of a row running out of it. `dx`: the marks' offsets
+ * (markOffsets, in a badge's units), `s`: scene pixels per unit now, `room`: how far the zone reaches from its spot (label.r),
+ * `r`: a mark's radius. Returns -1 (each mark its own) or the index of the mark that stands for all (the one nearest the spot).
+ */
+export function passGroup(dx, s, room, r = 12) {
+  if ( !(dx?.length > 1) ) return -1;
+  let far = 0, k = 0;
+  dx.forEach((d, i) => { far = Math.max(far, Math.abs(d)); if ( Math.abs(d) < Math.abs(dx[k]) ) k = i; });
+  return (far + r) * s > room ? k : -1;
+}
+
 /** A gentle arc from a to b as a polyline [x, y, ...] (`bow`: how far its middle leaves the straight line, as a share of its length). */
 export function arc(a, b, bow = 0.12, n = 20) {
   const dx = b.x - a.x, dy = b.y - a.y, cx = (a.x + b.x) / 2 - dy * bow, cy = (a.y + b.y) / 2 + dx * bow, out = [];

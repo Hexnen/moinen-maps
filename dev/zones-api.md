@@ -147,11 +147,17 @@ api.zonesWithin(where, n, { way = "range" }) -> [{ zone, id, d }]     nearest fi
 | way | stopped by | notes |
 |---|---|---|
 | `walk` | wall, exterior wall, reinforced wall, locked door | climbs floors: `levels` |
-| `air` | wall, reinforced wall, locked door | flight, leaping, super-speed: passes over exterior walls |
+| `air` | wall, reinforced wall, locked door - only inside a building or between two zones that are not buildings | flight, leaping, super-speed: passes over exterior walls, and from outside over every standing building (A14, below) |
 | `through` | nothing | burrowing, teleportation; the only way to or from `underground` |
 | `swim` | as walk | only into water or flooded zones |
 | `swing` | as air | can only end in a standing building or a zone with tall features |
 
+- **A14 (the user's answer of 2026-11-12, 2385 "over buildings")**: from outside a flyer passes over every building by its
+  roof. A border that stops `air` by its wall and door does not stop it when exactly one of its two zones is a standing
+  building (`building` and not `wrecked`): the flyer goes up over that building's roof, whatever the wall is marked as. Between
+  two standing buildings a wall is a wall inside a building and stops it, unless it is marked exterior (two buildings side by
+  side). Between two zones that are not buildings only an exterior mark lets it over (as before). `border.stops.air`,
+  `route`, `distances`, `plan` and the badges all use this rule.
 - `levels` for walk / swim: the vertical zones climbed inside the buildings at both ends (a floor its number, a rooftop
   one above the top floor, 1 for a plain building: 2404, 2419). An airborne place cannot be walked to or from: land or
   fall first (a level change the caller makes).
@@ -285,7 +291,8 @@ border.doorway = null (no door)        | { armor, state: "open" | "closed" | "lo
 border.base    = the kind the border was built as ("open" | "door" | "locked" | "wall" | "outer" | "reinforced")
 ```
 
-- `outer`: a building's exterior wall (flyers pass over it: `stops.air` is false). `temp`: the wall was removed *for a while*
+- `outer`: a building's exterior wall (flyers pass over it: `stops.air` is false). `stops.air` also reads the zones on both
+  sides (A14, section 5): a wall between a standing building and a zone that is not one never stops a flyer. `temp`: the wall was removed *for a while*
   (the one who removed it says so; nothing puts it back). `built`: the state the door was built in (what restoring returns to).
 - `closed` is an unlocked door. A door is never built `breached`.
 - `kind`, `armor`, `door`, `stops` (section 5) now say what the border **amounts to at the moment**: a wall that is breached or
@@ -304,10 +311,10 @@ Old scenes: the one-kind marks are still what a plain border stores (`[x, y, kin
 | old kind | wall | door | as before |
 |---|---|---|---|
 | `door` | Armor 2 | Armor 1, closed | kind door, Armor 1, stops nobody |
-| `locked` | Armor 2 | Armor 2, locked | kind locked, Armor 2, stops walk and air |
-| `wall` | Armor 2 | - | stops walk and air |
+| `locked` | Armor 2 | Armor 2, locked | kind locked, Armor 2, stops walk and air (air: see A14) |
+| `wall` | Armor 2 | - | stops walk and air (air: see A14) |
 | `outer` | Armor 3, exterior | - | stops walk |
-| `reinforced` | Armor 4 | - | stops walk and air |
+| `reinforced` | Armor 4 | - | stops walk and air (air: see A14) |
 
 The Armor 2 of the wall around an old door mark is **our reading** (the old mark had one Armor for the whole border). An
 untouched scene's flag encodes byte for byte as before (`bs`, `q`, `e`, `pn` appear only when something is stored).
@@ -862,7 +869,11 @@ api.wreckText("office");              // the text shown beside a terrain now
   the number badge of each zone it joins (a swirl: portal, an arch: tunnel, two links: another kind; an end off the map has
   only the one mark) and a thin dotted (portal) or dashed (tunnel) arc between the two marks, dark line under the colour.
   Marks keep their size on screen; the arcs are redrawn at a zoom step. Pointing at a mark says the kind and where it leads.
-- A gravity record shows its mode and no level stepper (it has no level unless one was given through the API).
+  C14 (2026-11-12): where a zone's row of marks does not fit in the zone (a small zone, or the map seen from far out), the
+  mark nearest the spot stands for all of them with a count tag (kept readable however small the mark), on the upper corner of
+  the number badge; the others hide, their arcs start at it; zooming in brings the row back (`place.mjs passGroup`).
+- A level stepper shows on a fire (its Intensity) and on any other record only when it was given a level (a power's level, through
+  the API): smoke, darkness, gravity (said by its mode) and the rest show none (Z38 / C15).
 - **Zones dock, "In play"**: every wall and door that is not as built, every tracked state, every passage; a row can be taken
   back; pointing at a row outlines its zone or border on the map.
 - **Who may what.** Building (the wall, the door, attributes) is the editor's path: any GM, one undo step, the play record of
@@ -885,13 +896,17 @@ api.activeGmName();                   // the active GM's name ("" when none)
   and in a small crowded zone, as a GM and as a player. Not looked at: the tip of a passage mark and a label moving aside
   when a token is dragged onto it (both stand on the node test), a second GM (the refusal notice and the locked controls), the rules
   driver with a real combat module, touch input. The rest stands on `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI).
-- Highlights are lit like the map (they are in the primary group, under the tokens): on a dark scene or under a coloured
-  light their colours are tinted (passage marks and badges too). A label moves out from under tokens; where a zone has no free
-  room at all (a tiny zone far zoomed out) it can still overlap a token or the badge (the tip under the pointer still says it).
-- Passage marks sit in a row beside the badge: three or more passages in one small zone seen from far away run past the zone.
-  A mark in the middle of a zone (badges placed in the middle) can be behind a token, like the badge itself.
+- C1 + C13 (2026-11-12, `unlit.mjs`): highlights (wash, lines, veil), their labels and the passages' marks are drawn ABOVE the
+  scene's lighting (a dark scene or a coloured light does not tint them), UNDER the tokens (one container at the end of the
+  effects group, drawn in one extra pass with every visible token's picture erased from it) and under the fog (the visibility
+  group is drawn after it: a highlight or label on an unseen part of the map is hidden from a player, as the map is; before,
+  the labels sat in the interface group and showed over the fog). They also lie above tiles, drawings and weather now. Zone
+  numbers, borders, tints and the passages' arcs stay lit in the primary group. A label moves out from under tokens; where a
+  zone has no free room at all it lies partly under a token. Without an effects group (an older core, the node tests) the
+  parts are where they were. Looked at live (lane 5, GM and Test Gracz 1, red light, darkness 0.85, a token moving through).
+- A mark in the middle of a zone (badges placed in the middle) can be behind a token, like the badge itself.
 - A passage has no visibility of its own: whoever sees the zones display sees every passage.
-- A highlight is covered by fog and vision like the zone display (it is in the primary group). A combat module that wants a
+- A highlight is covered by fog and vision like the zone display (above the light, under the fog: C1). A combat module that wants a
   player to see reach into unexplored zones needs a decision here.
 - A registry state added in the menu gets no level unless the GM sets one (the map invents no default).
 - A passage made in the menu joins ground levels; `addEdge` takes any spot.

@@ -288,8 +288,9 @@ function statesHtml(id, key) {
   const rows = recs.map((r) => {
     const meta = [r.owner != null ? Z("reg.owner", { who: brief(r.owner) }) : "", r.ends != null ? Z("reg.ends", { when: brief(r.ends) }) : "", r.except?.length ? Z("reg.except", { n: r.except.length }) : ""].filter(Boolean).join(" · ");
     const at = ats.includes(r.at ?? "") ? ats : [...ats, r.at];
-    // gravity is said by its mode (low / high), not by a number: a level stepper shows only when somebody gave it one
-    const stepped = r.kind !== "gravity" || r.level != null;
+    // only a fire is told by a number of its own (its Intensity); every other state (smoke, darkness, gravity by its mode...) shows
+    // a level stepper only when somebody gave it a level (a power's level value) - no empty stepper (C15 / Z38)
+    const stepped = r.kind === "fire" || r.level != null;
     return `<div class="mm-z-rec" data-rec="${esc(r.id)}">
       <span class="mm-z-rec-name"><i class="fa-solid ${KIND_ICON[r.kind] ?? "fa-circle-dot"}" inert></i> ${esc(kindName(r.kind))}</span>
       ${!stepped ? "" : `<span class="mm-z-step" data-tooltip="${esc(Z(r.kind === "fire" ? "reg.intensity" : "reg.level"))}"><button type="button" data-act="recLevel-" data-focus="l-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} −"${off || (r.level == null ? " disabled" : "")}>−</button><b>${r.level ?? "·"}</b><button type="button" data-act="recLevel+" data-focus="L-${esc(r.id)}" aria-label="${esc(Z("reg.level"))} +"${off}>+</button></span>`}

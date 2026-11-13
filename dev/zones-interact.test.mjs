@@ -210,7 +210,9 @@ let hs = api.highlights().find((x) => x.id === "reach");
 check(id === "reach" && J(hs.zones.map((e) => [e.zone, e.style, e.label])) === J([["z4", "outline", null], ["z5", "fill", "1"]]) && hs.zones[1].color === 0x5cc8ff, "showReach: the mover's zone outlined, what one action reaches in the move colour with its distance (walls stop it)");
 api.showReach("z4", { way: "air", speed: 1, stress: true }, { beyond: true });
 hs = api.highlights().find((x) => x.id === "reach");
-check(hs.zones.find((e) => e.zone === "z3")?.color === 0x5cc8ff && hs.zones.find((e) => e.zone === "z2") === undefined && api.highlights().length === 1, "a flyer passes the exterior wall; the same id replaces the old picture");
+// (A14, 2026-11-12: from outside a flyer passes over every building, by its roof - so z2 behind the building z3 is two zones off,
+//  reached with stress, not cut off by the locked door between them as before)
+check(hs.zones.find((e) => e.zone === "z3")?.color === 0x5cc8ff && hs.zones.find((e) => e.zone === "z2")?.label === "2" && hs.zones.find((e) => e.zone === "z2")?.color !== 0x5cc8ff && api.highlights().length === 1, "a flyer passes the exterior wall and over the building behind it (A14); the same id replaces the old picture");
 api.clearHighlights("reach");
 
 /* ================================================================ wired: picking */
@@ -381,6 +383,14 @@ check(steppers(zh) === 1 && has(zh, `data-rec="${gv.result.id}"`), "gravity is s
 await api.updateZoneState(gv.result.id, { level: 3 });
 check(steppers(Menu.html("zone", { zone: 1, tab: "states" })) === 2, "a gravity state that was given a level shows it");
 await api.updateZoneState(gv.result.id, { level: null });
+{
+  // Z38 / C15 (2026-11-12): no state but a fire shows an empty level stepper
+  const dk = await api.addZoneState("z2", { kind: "dark" }), tx = await api.addZoneState("z2", { kind: "toxic" }), fi = await api.addZoneState("z2", { kind: "fire" });
+  const h = Menu.html("zone", { zone: 1, tab: "states" }), rec = (id) => h.slice(h.indexOf(`data-rec="${id}"`), h.indexOf("mm-z-rec-more", h.indexOf(`data-rec="${id}"`)));
+  check(!rec(dk.result.id).includes("recLevel") && !rec(tx.result.id).includes("recLevel") && rec(fi.result.id).includes('data-act="recLevel+"') && rec(sm.result.id).includes('data-act="recLevel+"') && steppers(h) === 2,
+    "Z38: darkness and toxic without a level show no empty level stepper; a fire always has its Intensity stepper; smoke given a level keeps it");
+  for ( const r of [dk, tx, fi] ) await api.removeZoneState(r.result.id);
+}
 check(has(zh, `data-rec="${sm.result.id}"`, "reg.kind.smoke", "Kid Thor", "end of scene", 'name="recAt"', 'name="recMode"', 'data-act="recAdd"', 'name="wrecked"') && /<option value="elevated" selected>/.test(zh) && /<option value="high" selected>/.test(zh) && /data-tab="states"[^>]*>[^<]*<em>2<\/em>/.test(zh), "the states page: the quick marks, every tracked state with its level, where it holds, who made it and until when; the tab counts them");
 const ed = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });
 zh = Menu.html("zone", { zone: 1, tab: "passages" });
@@ -464,7 +474,8 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   api.clearHighlights();
 
   // passages on the map
-  const marks = () => dispRoot().children[7].children.filter((c) => c.children?.[0]?.mmKey === "passage");
+  // (C13: the marks have a container of their own, above the light where there is one; here, without an effects group, the last in the zones' own)
+  const marks = () => dispRoot().children.at(-1).children.filter((c) => c.children?.[0]?.mmKey === "passage");
   check(marks().length === 0 && Zones.displayBoxes().every((b) => b.kind !== "pass"), "no passage: no mark");
   calls.length = 0;
   const e1 = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });
@@ -485,6 +496,20 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   const l2 = labels().find((c) => c.children[1].text === "1");
   check(!Zones.displayBoxes().filter((b) => b.zone === 1).some((b) => hits(boxOf(l2, 22), b)), "a label keeps clear of the passages' marks");
   api.clearHighlights();
+  // C14 (2026-11-12): far out a zone's row of marks that does not fit in it is one mark with a count
+  check(Place.passGroup([38, 66], 1, 100) === -1 && Place.passGroup([38, 66], 4.2, 100) === 0 && Place.passGroup([-39, 39, 67], 3, 100) === 0 && Place.passGroup([66, 38], 3, 100) === 1 && Place.passGroup([38], 9, 10) === -1,
+    "C14: a row that fits stays a row; one that does not is the mark nearest the spot; a single mark is never folded");
+  const shown = () => marks().filter((c) => c.visible !== false), countOf = (c) => (c.mmCount?.visible ? c.mmCount.mmN : 0);
+  check(shown().length === 3 && marks().every((c) => !countOf(c)), "C14: at a normal zoom every passage has its own mark, no count");
+  calls.length = 0;
+  canvas.stage.scale.x = 0.1; for ( const fn of canvas.app.ticker.fns ) fn();
+  const z2m = marks().filter((c) => c.position.x > 200 && c.position.x < 400);
+  const one = z2m.filter((c) => c.visible !== false);
+  check(z2m.length === 2 && one.length === 1 && countOf(one[0]) === 2 && one[0].mmCount.scale.x > 1 && one[0].position.x - z2.x < 100 && one[0].position.y < z2.y && shown().length === 2 && calls.some((c) => c[0] === "lineStyle" && c[1].color === 0xc9a2ff),
+    "C14: far out the two marks of the small zone are one mark with the count 2 (kept readable), inside the zone; the portal's line is drawn again from it");
+  check(Zones.displayBoxes().filter((b) => b.kind === "pass" && b.zone === 1).length === 1, "C14: a folded mark is one box for the labels to keep clear of");
+  canvas.stage.scale.x = 1; for ( const fn of canvas.app.ticker.fns ) fn();
+  check(shown().length === 3 && marks().every((c) => !countOf(c)), "C14: back at a normal zoom the row comes back");
   await api.removeEdge(e1.result.id); await api.removeEdge(e2.result.id);
   check(marks().length === 0, "the passages are removed: their marks go");
 }
