@@ -5,8 +5,9 @@ import { FontBank } from "./fontbank.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
+import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -389,6 +390,8 @@ export function createEngine(base) {
 
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
   function stream(o = {}) {
+    /* WORD (v5): a sound kind instead of a text: the vocabulary gives the syllables and the mood */
+    if ( o.kind != null && o.text == null && !(Array.isArray(o.syllables) && o.syllables.length) ) { const w = vocab.word(o.kind, { ...o, stream: true }); o = { mood: w.mood, ...o, syllables: w.syllables }; }
     const space = o.space === "world" ? "world" : "screen";
     const syl = Array.isArray(o.syllables) && o.syllables.length ? o.syllables.map(String) : syllablesOf(o.text ?? "RA-TA-TA");
     const every = o.every ?? 110, life = o.life ?? 340, seedBase = o.seed ?? `s${(Math.random() * 1e9) | 0}`;
@@ -491,10 +494,22 @@ export function createEngine(base) {
   /* settings helpers: choices for game.settings.register, per space */
   const layerChoices = (space = "world", lang = globalThis.game?.i18n?.lang) => Object.fromEntries(Object.entries(LAYERS).filter(([, v]) => v.space === space).map(([k, v]) => [k, lang === "pl" ? v.pl : v.en]));
 
+  /* WORD (v5): the vocabulary layer (words.mjs): a sound kind + loudness + language -> a fitting word; sfx() letters it */
+  const vocab = createVocab();
+  const VOCAB_KEYS = ["kind", "loud", "lang", "step", "template", "prefix"];
+  function sfx(kind, opts = {}) {
+    const w = vocab.word(kind, opts);
+    const rest = Object.fromEntries(Object.entries(opts).filter(([k]) => !VOCAB_KEYS.includes(k)));
+    const h = play(w.text, { ...w.play, ...rest, sound: { ...w.play.sound, ...(opts.sound ?? {}) }, magnitude: opts.magnitude ?? w.play.magnitude });
+    h.word = w;
+    return h;
+  }
+
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
     ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE,
+    vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
     _bank: bank, _plan: (t, o = {}) => makePlan(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
