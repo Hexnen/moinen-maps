@@ -196,6 +196,9 @@ checkLook(ok, bank);
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 
+/* 8f. IMPACT: impact frames (impact/check-impact.mjs) */
+await (await import("./impact/check-impact.mjs")).run(ok);
+
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./sync.mjs", import.meta.url)), "--check"], { encoding: "utf8" });

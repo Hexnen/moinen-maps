@@ -7,7 +7,7 @@ import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.6.0";   // LOOK (contract v8; MOVE took v7 / 1.5.0): lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look; 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.6.1";   // 1.6.1 IMPACT (impact frames, impact/, L.impact); 1.6.0 LOOK (contract v8; MOVE took v7 / 1.5.0): lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look; 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
