@@ -383,6 +383,14 @@ check(steppers(zh) === 1 && has(zh, `data-rec="${gv.result.id}"`), "gravity is s
 await api.updateZoneState(gv.result.id, { level: 3 });
 check(steppers(Menu.html("zone", { zone: 1, tab: "states" })) === 2, "a gravity state that was given a level shows it");
 await api.updateZoneState(gv.result.id, { level: null });
+{
+  // Z38 / C15 (2026-11-12): no state but a fire shows an empty level stepper
+  const dk = await api.addZoneState("z2", { kind: "dark" }), tx = await api.addZoneState("z2", { kind: "toxic" }), fi = await api.addZoneState("z2", { kind: "fire" });
+  const h = Menu.html("zone", { zone: 1, tab: "states" }), rec = (id) => h.slice(h.indexOf(`data-rec="${id}"`), h.indexOf("mm-z-rec-more", h.indexOf(`data-rec="${id}"`)));
+  check(!rec(dk.result.id).includes("recLevel") && !rec(tx.result.id).includes("recLevel") && rec(fi.result.id).includes('data-act="recLevel+"') && rec(sm.result.id).includes('data-act="recLevel+"') && steppers(h) === 2,
+    "Z38: darkness and toxic without a level show no empty level stepper; a fire always has its Intensity stepper; smoke given a level keeps it");
+  for ( const r of [dk, tx, fi] ) await api.removeZoneState(r.result.id);
+}
 check(has(zh, `data-rec="${sm.result.id}"`, "reg.kind.smoke", "Kid Thor", "end of scene", 'name="recAt"', 'name="recMode"', 'data-act="recAdd"', 'name="wrecked"') && /<option value="elevated" selected>/.test(zh) && /<option value="high" selected>/.test(zh) && /data-tab="states"[^>]*>[^<]*<em>2<\/em>/.test(zh), "the states page: the quick marks, every tracked state with its level, where it holds, who made it and until when; the tab counts them");
 const ed = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });
 zh = Menu.html("zone", { zone: 1, tab: "passages" });
