@@ -3,12 +3,12 @@
 // worker / socket handlers) and by a CPU profile of the whole run (samples inside the hitch: GC, our files, Foundry, PIXI, other
 // modules, the browser itself).
 //   node dev/hitch-run.mjs [--dpr 1,2] [--secs 120] [--cases empty,fire-rain,clouds,full] [--who GM,player] [--label hitch]
-//        [--noprof] [--port 9444] [--gm http://127.0.0.14:30001] [--player http://127.0.0.13:30001] [--gmId ..] [--playerId ..] [--profile <dir>]
+//        [--noprof] [--port 9444] [--gm http://127.0.0.14:30001] [--player http://127.0.0.13:30001] [--gmId ..] [--playerId ..] [--profile <dir>] [--chrome chs|edge|chrome|<exe>]
 // Writes dev/out/hitch/<label>-<case>-<who>-dpr<k>.json (+ .cpuprofile) and prints a summary per run.
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
-import { LEAN_FLAGS } from "./lib/browser.mjs";
+import { LEAN_FLAGS, exeOf, headlessArgs, CHROME as CHROME_EXE } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -16,7 +16,7 @@ const PORT = Number(arg("port", 9444)), GM = arg("gm", "http://127.0.0.14:30001"
 const GMID = arg("gmId", "3dzfyqQ1n98OkCwE"), PLID = arg("playerId", "5gw9oNsrSdZuSUqQ"), SECS = Number(arg("secs", 120));
 const DPRS = arg("dpr", "1,2").split(",").map(Number), CASES = arg("cases", "empty,fire-rain,clouds,full").split(","), WHO = arg("who", "GM,player").split(",");
 const NOPROF = process.argv.includes("--noprof");   // (no CPU profile: the profiler itself adds hitches - counts without it)
-const LABEL = arg("label", "hitch"), CHROME = arg("chrome", "C:/Program Files/Google/Chrome/Application/chrome.exe");
+const LABEL = arg("label", "hitch"), CHROME = exeOf(arg("chrome", null), CHROME_EXE);
 const OUT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "out", "hitch");
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,7 +29,7 @@ const CASE = {
 };
 
 async function startChrome(dpr) {
-  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
+  const ch = launchBrowser(CHROME, [...headlessArgs(CHROME), `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
     "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "--enable-precise-memory-info", "about:blank"], { kind: "hitch-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
   for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");

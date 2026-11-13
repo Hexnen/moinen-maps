@@ -1,18 +1,18 @@
 // HITCH TRACE (node): a Chrome trace (all processes: renderer main, GPU, viz) over a hitch-probe run on a lane GM or player, then
 // for each frame over `--min` ms what ran longest on each thread while it lasted (the main thread can sit idle in a hitch: the GPU
 // process, the compositor or the browser hold the frame back).
-//   node dev/hitch-trace.mjs [--case full] [--who GM|player] [--dpr 1] [--secs 60] [--min 90] [--label trace] [--profile <dir>]
+//   node dev/hitch-trace.mjs [--case full] [--who GM|player] [--dpr 1] [--secs 60] [--min 90] [--label trace] [--profile <dir>] [--chrome chs|edge|chrome|<exe>]
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
-import { LEAN_FLAGS } from "./lib/browser.mjs";
+import { LEAN_FLAGS, exeOf, headlessArgs, CHROME as CHROME_EXE } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const PORT = Number(arg("port", 9444)), GM = arg("gm", "http://127.0.0.14:30001"), PL = arg("player", "http://127.0.0.13:30001");
 const GMID = arg("gmId", "3dzfyqQ1n98OkCwE"), PLID = arg("playerId", "5gw9oNsrSdZuSUqQ"), SECS = Number(arg("secs", 60)), MIN = Number(arg("min", 90));
 const CS = arg("case", "full"), WHO = arg("who", "GM"), DPR = Number(arg("dpr", 1)), LABEL = arg("label", "trace");
-const CHROME = arg("chrome", "C:/Program Files/Google/Chrome/Application/chrome.exe");
+const CHROME = exeOf(arg("chrome", null), CHROME_EXE);
 const OUT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "out", "hitch");
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -24,7 +24,7 @@ const CASE = {
 };
 const CATS = ["toplevel", "gpu", "gpu.service", "viz", "cc", "v8", "disabled-by-default-v8.gc", "blink.user_timing", "devtools.timeline", "disabled-by-default-devtools.timeline", "benchmark", "renderer.scheduler", "ipc", "mojom", "memory"].join(",");
 
-const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
+const ch = launchBrowser(CHROME, [...headlessArgs(CHROME), `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
   "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${DPR}`, "--enable-precise-memory-info", "about:blank"], { kind: "trace-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
 for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); break; } catch {} }
 const SB = `const S = await import("/modules/moinen-maps/dev/stack-bench.mjs");`, HP = `const H = await import("/modules/moinen-maps/dev/hitch-probe.mjs");`;

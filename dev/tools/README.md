@@ -19,6 +19,14 @@ Everything that is a test lives in `dev/*.test.mjs` (run by `node dev/run-all.mj
 | `cdp-perf.mjs` | `node dev/tools/cdp-perf.mjs URL BENCH.js OUT.json [W H DPR]` headless Edge perf driver (`cdp(op)` bridge: gc, metrics, throttle, trace, cpu profile); replaces the old scratch `perf.py` |
 | `cdp-drive.mjs` | `node dev/tools/cdp-drive.mjs BASE USER STEPS.json [W H] [--shots DIR]` join Foundry as USER in headless Edge, run JS steps, screenshots; replaces the old scratch `drive.py` |
 
+Browser (`--chrome chs|edge|chrome|<exe>` in cdp-drive, cdp-perf, chrome.mjs and the lane drivers guard-live-run, hitch-run, hitch-trace,
+stack-bench-run, view-pace-live-run; defaults unchanged: Edge for cdp-drive / cdp-perf, Chrome for chrome.mjs and the lane drivers).
+`chs` = chrome-headless-shell (C:/mmwt-ultra/chs): same WebGL2 GPU path, fonts, audio, touch emulation, two-seat contexts, screenshots,
+traces and profiles as Edge (checked 2026-11-13), lighter and much smoother to record, and it is given the OS colour scheme (Foundry's
+default app theme follows prefers-color-scheme). It is not the default because it renders on a fixed 60 Hz clock: anything that
+measures frame pacing at the real display rate (view-pace-live, guard-live --vsync, the real-ticker rows of hitch-run / stack-bench)
+measures a 60 Hz display there and is not comparable with Edge / Chrome numbers or what a player with a 144/165 Hz screen sees.
+
 Parallel Foundry servers for agents: `dev/multi-foundry.ps1` of the moinen-pixel-vfx module (ports 30001-30005). See the
 `moinen-maps-dev` skill for the whole workflow.
 
