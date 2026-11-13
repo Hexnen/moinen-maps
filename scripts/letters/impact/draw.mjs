@@ -20,7 +20,8 @@ function discs(ctx, list, color, grow = 0, dx = 0, dy = 0) {
 }
 const unit = (e) => Math.min(e.W, e.H);
 const gain = (e) => 0.6 + 0.4 * e.mag;
-const burstR = (e) => Math.max(e.R * 1.6, unit(e) * 0.13) * gain(e);
+/* the star of a drawing that is not a full-field frame stays inside a disc of a sixth of the picture, however big the subject (a word, a wide blast) */
+export const burstR = (e) => Math.min(Math.max(e.R * 1.6, unit(e) * 0.13) * gain(e), Math.sqrt(0.16 * e.W * e.H / Math.PI));
 
 /* ---------- the subject's silhouette ---------- */
 function tint(e, color) {
@@ -115,9 +116,13 @@ function splash(ctx, e, seed, o = {}) {
   discs(ctx, s.blobs, o.color ?? INK);
   fillPolys(ctx, s.drops, o.color ?? INK);
 }
+/* the halftone never fills the frame: its outer radius stays inside a disc of a quarter of the picture (a big subject, e.g. a word, would otherwise
+   turn the whole frame into the accent colour: a full-field frame the guard does not count) */
+export const dotsReach = (e, want) => Math.min(want, Math.sqrt(0.25 * e.W * e.H / Math.PI));
 function halftone(ctx, e, seed, o = {}) {
   const u = unit(e);
-  const d = G.dots(seed, { cx: o.cx ?? e.cx, cy: o.cy ?? e.cy, r0: o.r0 ?? e.R * 0.9, r1: o.r1 ?? burstR(e) * 3.2, pitch: o.pitch ?? Math.max(9, u * 0.021), ang: o.all ? null : e.dir, fan: o.fan ?? 1.15 });
+  const r1 = o.whole ? o.r1 : dotsReach(e, o.r1 ?? burstR(e) * 3.2), r0 = o.whole ? o.r0 : Math.min(o.r0 ?? e.R * 0.9, r1 * 0.45);   // whole: only the (rationed) swap frame
+  const d = G.dots(seed, { cx: o.cx ?? e.cx, cy: o.cy ?? e.cy, r0, r1, pitch: o.pitch ?? Math.max(9, u * 0.021), ang: o.all ? null : e.dir, fan: o.fan ?? 1.15 });
   if ( o.under !== null ) discs(ctx, d, o.under ?? INK, 0, u * 0.004, u * 0.004);
   discs(ctx, d, o.color ?? e.tone.a);
 }
@@ -127,6 +132,8 @@ function ringsOf(ctx, e, seed, o = {}) {
   const arc = (extra, color) => { ctx.strokeStyle = color; ctx.lineCap = "butt"; for ( const a of list ) { ctx.beginPath(); ctx.lineWidth = a.w + extra; ctx.ellipse(e.cx, e.cy, a.r, a.r * (o.flat ?? 1), 0, a.a0, a.a1); ctx.stroke(); } };
   arc(u * 0.01, o.key ?? PAPER); arc(0, o.color ?? INK);
 }
+/* the big burst of a frame-filling drawing: under the guard a saturated red accent moves to the small core, the wide star takes the second colour */
+export const bigTone = (e) => (!e.redOk && isRed(e.tone.a) && !isRed(e.tone.b) ? [e.tone.b, e.tone.a] : [e.tone.a, e.tone.b]);
 const fieldColor = (e, c) => (!e.redOk && isRed(c) ? (isRed(e.tone.b) ? PAPER : e.tone.b) : c);
 
 /* ---------- the frame types ---------- */
@@ -152,9 +159,10 @@ const PAINT = {
   shadow(ctx, e, f) {
     ctx.fillStyle = INK; ctx.fillRect(0, 0, e.W, e.H);
     const k = blowUp(e), u = unit(e);
-    lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: e.tone.b, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
+    const [big, small] = bigTone(e);
+    lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: small, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
     const r = Math.max(burstR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
-    burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: e.tone.a, stroke: PAPER, lw: u * 0.005, core: e.sil ? e.tone.b : PAPER, spikes: 19, long: 5, stretch: 1.4 });
+    burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4 });
     sil(ctx, e, { color: PAPER, outline: INK, outlineW: u * 0.008, scale: k, art: "bw" });
   },
   glare(ctx, e, f) {
@@ -167,7 +175,7 @@ const PAINT = {
   swap(ctx, e, f) {
     const k = blowUp(e), u = unit(e), bg = fieldColor(e, e.tone.a);
     ctx.fillStyle = bg; ctx.fillRect(0, 0, e.W, e.H);
-    halftone(ctx, e, f.seed, { color: INK, under: null, all: e.dir == null, r0: 0, r1: Math.hypot(e.W, e.H) * 0.62, pitch: Math.max(12, u * 0.03), fan: 1.25 });
+    halftone(ctx, e, f.seed, { color: INK, under: null, all: e.dir == null, whole: true, r0: 0, r1: Math.hypot(e.W, e.H) * 0.62, pitch: Math.max(12, u * 0.03), fan: 1.25 });
     lines(ctx, e, f.seed + 1, { n: 34, fat: 1.1, color: PAPER, second: null, gap: Math.max(1, k * 0.7) });
     if ( !sil(ctx, e, { color: INK, outline: PAPER, outlineW: u * 0.008, scale: k, art: "neg" }) ) burst(ctx, e, f.seed + 2, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.3, fill: INK, stroke: PAPER, long: 4 });
   },

@@ -96,7 +96,9 @@ Full-screen flashes and inversions can harm photosensitive viewers. The engine's
 | length of an impact | at most 12 ticks = 500 ms; one drawing at most 4 ticks | `planImpact` (also a caller's own `frames`) |
 | hit-stop | at most 4 ticks = 167 ms per impact | `planImpact` |
 | full-field frames, guard on (`photosafe`, the default) | at most 2 per impact AND at most 2 in any rolling second on this client, counted in the SAME log as the words' flash frames; a full frame over the budget becomes its quiet twin (`slam` -> `ink`, `shadow`/`window` -> `pop`, `glare` -> `lines`, `swap` -> `ink`, `tear` -> `rip`). The slam is kept first. Two full frames a second is at most two flashes a second: under the three of WCAG 2.3.1 | `safety` |
-| saturated red | never fills the frame while the guard is on (the `swap` frame takes the second accent or paper) | `draw.mjs` |
+| saturated red | never fills the frame while the guard is on: the `swap` field takes the second accent or paper, and the wide star of the `shadow` frame takes the second accent while the red moves to its small core (`bigTone`) | `draw.mjs` |
+| halftone | the `dots` drawing stays inside a disc of a quarter of the picture whatever the size of the subject (`dotsReach`); only the rationed `swap` frame may cover the frame with dots | `draw.mjs` |
+| not counted as full | `ink` and `shatter` turn the scene to hard black and white WITHOUT inverting it: the picture stays on the side of its own brightness (a dark scene goes darker, a pale map paler), so they are not rationed. Known boundary: on a mid-grey scene this is still a visible jump | `plan.mjs` |
 | `flashes` off, `motion: gentle`, or `impact: local` | the GENTLE variant: no full-field frame, no inverted scene, no hit-stop; every drawing is clipped to a jagged panel round the subject of at most 20 % of the viewport; the shove is halved (`gentle`: none, and no chromatic split) | `safety`, `draw.mjs` |
 | reduced motion (`motion: reduced`; `auto`/`gentle` with the OS switch; a caller's `reduced: true`) | ONE small still drawing (the star) for at most 4 ticks: nothing moves, nothing is done to the scene | `safety` |
 | off | `enabled` off (the lettering's master switch) or `impact: off`: nothing is created | `modeFor` |
@@ -118,11 +120,24 @@ here (and the lettering's `L.net` is GM only): the caller's own event carries ki
 
 ## Cost (measured)
 
-See the report of the build for the numbers on the test machine; the method: every drawing is painted once on a software 2D canvas
-(`paint`, timed in `I.stats.paintMs / paintMax`), the first one in the frame the impact starts, each next one during the drawing
-before it (or all of them ahead with `I.prepare` / while waiting for `startAt`); a drawing change is a style swap (`I.stats.showMax`);
-`I.stats.frameMax` is the longest animation-frame gap seen while an impact was up. A picture is at most 2.2 million pixels (a 4K view
-is painted at about 1080p). The freed canvases are released at each change; at the end nothing is left in the DOM.
+Method: every drawing is painted once on a software 2D canvas (`paint`, timed in `I.stats.paintMs / paintMax`), the first one in the
+frame the impact starts, each next one during the drawing before it (or all of them ahead with `I.prepare` / while waiting for
+`startAt`); a drawing change is a style swap (`I.stats.showMax`); `I.stats.frameMax` is the longest animation-frame gap seen while an
+impact was up. A picture is at most 2.2 million pixels (a 4K view is painted at about 1080p). The freed canvases are released at each
+change; at the end nothing is left in the DOM.
+
+Measured 2026-11-13 on the test machine (GTX 1080 class, 1600x900, one GM seat, a lit scene with tokens and weather, 60 Hz):
+
+| what | number |
+|---|---|
+| animation-frame gap, idle scene | avg 16.6 ms, max 19.1 ms |
+| the same while each of the 17 frame types is held | avg 16.0 to 16.7 ms, max 17.3 to 18.2 ms; no frame over 25 ms |
+| the same through 18 whole impacts (9 kinds, weak and strongest) | max 17.2 to 18.4 ms; no frame over 25 ms |
+| painting one drawing | 1.6 to 6.9 ms (average 2.5 ms; the dearest are `swap`, `smear`, `glare`, `shadow` with a token) |
+| painting a whole impact (4 to 7 drawings, spread over its frames) | 4 to 20 ms in total |
+| a drawing change | at most 0.2 ms |
+| `I.prepare` of the strongest critical | 15.7 ms once, then 0 ms of painting while it plays |
+| left behind | 0 elements, 0 canvases, `#board` style empty, ticker running |
 
 ## Integration recipes
 

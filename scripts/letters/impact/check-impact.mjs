@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { planImpact, safety, modeFor, frameAt, punchAt, pick, tierOf, localRadius, isRed, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES } from "./plan.mjs";
 import * as G from "./shapes.mjs";
-import { paintFrame, backClip, panelOf, blowUp, PAINTERS } from "./draw.mjs";
+import { bigTone, dotsReach, burstR, paintFrame, backClip, panelOf, blowUp, PAINTERS } from "./draw.mjs";
 
 export async function run(ok) {
   const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
@@ -196,6 +196,9 @@ export async function run(ok) {
     }
     /* red may fill the frame only with the guard off */
     { const ctx = mkCtx(); paintFrame(ctx, env({ redOk: true }), { type: "swap", seed: 1 }); ok(isRed(ctx.log.rects[0][4]), "impact: guard off: the swap frame takes the red accent"); }
+    ok(!isRed(bigTone(env())[0]) && isRed(bigTone(env())[1]) && isRed(bigTone(env({ redOk: true }))[0]) && bigTone(env({ tone: TONES.hero }))[0] === TONES.hero.a, "impact: under the guard the wide star of a frame-filling drawing is not saturated red (red moves to the core)");
+    ok(dotsReach(env(), 5000) ** 2 * Math.PI <= 0.2501 * 1600 * 900 && dotsReach(env(), 120) === 120, "impact: the halftone stays inside a quarter of the picture whatever the size of the subject");
+    ok(burstR(env({ R: 900, mag: 2 })) ** 2 * Math.PI <= 0.1601 * 1600 * 900 && burstR(env({ R: 50, mag: 1 })) < burstR(env({ R: 900, mag: 2 })), "impact: the star of a big subject stays inside a sixth of the picture");
     ok(backClip(env(), { type: "tear", seed: 4, back: "split" })?.length > 8 && backClip(env(), { type: "slam", seed: 4, back: "bwinv" }) === null && backClip(env(), { type: "pop", seed: 4, back: null }) === null, "impact: only the split frame clips the scene's change");
     /* the silhouette: enlarged to its share of the frame, never shrunk */
     ok(blowUp(env()) === 1 && blowUp(env({ sil: { w: 40, h: 40 } })) > 3 && blowUp(env({ sil: { w: 900, h: 900 } })) === 1 && blowUp(env({ sil: { w: 1, h: 1 } })) === 8, "impact: silhouette blow-up range");
