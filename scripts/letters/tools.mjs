@@ -8,6 +8,7 @@
      settings" in the HOST module's tab opens the engine's own settings window. Host = moinen-maps when active, else
      invincible-plus-ultra (same on every client: module activation is per world).
    - socket: the host module's channel ("module.<host>"), messages { t: "letr", ... } (the modules' own listeners ignore them).
+   - networking is GM only (TOOL-8): players' clients do not send and every client refuses a word from a non-GM sender.
    - keybinding "Letter this now" (GM, Shift+L, editable) and the designer button in the token controls: under the host module.
    Engine API added here (README "Tools"): L.prefs, L.settings(), L.registerMood/Palette/Font/Style, L.styles, L.saveStyle,
    L.deleteStyle, L.net.{play,burst,stream,stop,sharedNow,local}, L.letterNow, L.designer(), L.openSettings(), L.planFor. */
@@ -159,11 +160,18 @@ const sharedNow = () => { const s = game.time?.serverTime; return Number.isFinit
 function warnOnce(key) { if ( state.warned.has(key) ) return; state.warned.add(key); console.warn(`${LOG} net: "${key}" cannot travel to other clients (a function, a Promise or an element); it is left out there`); }
 const sceneId = () => globalThis.canvas?.scene?.id ?? null;
 function findToken(id) { return globalThis.canvas?.tokens?.get?.(id)?.document ?? null; }
+const isGM = () => !!globalThis.game?.user?.isGM;
+/* GM only (TOOL-8): a player's client never sends; it says so once on the console and gets a handle that is already over */
+function refuse(what) {
+  const k = `gm:${what}`; if ( state.warned.has(k) ) return; state.warned.add(k);
+  console.warn(`${LOG} ${what}: only a GM shows lettering to everyone; refused on this client (nothing sent). L.play shows a word on this client only.`);
+}
 function emit(msg) { try { game.socket.emit(channel(), msg); } catch ( e ) { console.warn(`${LOG} net`, e); } }
 
 function netApi(L) {
   const lead = (o) => (Number.isFinite(o?.lead) ? Math.max(0, Math.min(2000, o.lead)) : 120);
   const play = (text, opts = {}) => {
+    if ( !isGM() ) { refuse("L.net.play"); return N.refusedHandle(text); }
     const id = N.netId(), seed = opts.seed ?? `net:${id}`, at = sharedNow() + lead(opts) + (opts.delay > 0 ? opts.delay : 0);
     const wire = N.wireOpts({ ...opts, seed, delay: undefined }, N.OP_KEYS, warnOnce);
     emit({ t: "letr", v: 1, op: "play", id, at, scene: sceneId(), text: String(text ?? "").slice(0, N.MAX_TEXT), opts: wire });
@@ -172,6 +180,8 @@ function netApi(L) {
     return h;
   };
   const burst = (items, common = {}) => {
+    if ( !isGM() ) { refuse("L.net.burst"); return []; }
+    if ( !Array.isArray(items) ) return [];
     const id = N.netId(), at = sharedNow() + lead(common);
     const seeded = items.map((it, i) => ({ ...it, seed: it.seed ?? `net:${id}:${i}` }));
     emit({ t: "letr", v: 1, op: "burst", id, at, scene: sceneId(),
@@ -181,13 +191,14 @@ function netApi(L) {
     return hs;
   };
   const stream = (o = {}) => {
+    if ( !isGM() ) { refuse("L.net.stream"); return N.refusedHandle(o?.text); }
     const id = N.netId(), seed = o.seed ?? `net:${id}`, at = sharedNow() + lead(o);
     emit({ t: "letr", v: 1, op: "stream", id, at, scene: sceneId(), opts: N.wireOpts({ ...o, seed }, [...N.OP_KEYS, ...N.STREAM_KEYS], warnOnce) });
     const s = L.stream({ ...o, seed, delay: lead(o) });
     s.netId = id; keep(id, s);
     return s;
   };
-  const stop = (id, o = {}) => { emit({ t: "letr", v: 1, op: "stop", id, quick: !!o.quick }); stopLocal(id, o); };
+  const stop = (id, o = {}) => { if ( isGM() ) emit({ t: "letr", v: 1, op: "stop", id, quick: !!o.quick }); stopLocal(id, o); };
   return { play, burst, stream, stop, sharedNow, local: (sharedT) => N.localStart(sharedT, sharedNow(), performance.now()), lead: 120 };
 }
 function keep(id, x) {
@@ -201,7 +212,13 @@ function stopLocal(id, o) { const x = state.net.get(id); if ( !x ) return; if ( 
 function onSocket(raw, senderId) {
   const m = N.checkMsg(raw);
   if ( !m || !state.engine ) return;
-  if ( senderId && !state.gate(senderId, Date.now()) ) return;
+  /* GM only (TOOL-8): a word from a sender who is not a GM user is dropped (a modified client cannot push words) */
+  if ( !N.senderIsGM(senderId, (id) => globalThis.game?.users?.get?.(id)) ) {
+    const k = `from:${senderId}`;
+    if ( !state.warned.has(k) ) { state.warned.add(k); console.warn(`${LOG} net: a lettering message from a non-GM user (${senderId ?? "unknown"}) was refused`); }
+    return;
+  }
+  if ( !state.gate(senderId, Date.now()) ) return;
   const L = state.engine;
   if ( m.op === "stop" ) { stopLocal(m.id, { quick: !!m.quick }); return; }
   const when = N.localStart(m.at, sharedNow(), performance.now());
@@ -228,6 +245,9 @@ function onSocket(raw, senderId) {
     }
   } catch ( e ) { console.warn(`${LOG} net word failed`, e); }
 }
+
+/* for the node checks (check-tools.mjs): the sender and the receiver without Foundry */
+export const _net = { netApi, onSocket };
 
 /* ---------- GM: letter this now ---------- */
 /* at the selected tokens (one word each, different hands) or at a world point (the cursor), shown to everyone */
