@@ -4,7 +4,8 @@
 //   2. the VRAM toggle keeps the mode it had ("warn" survives off/on), "auto" when there was none;
 //   3. who gets which toggle: the GM both, a player the meter's only, the director's not when the director is killed;
 //   4. a setting changed elsewhere (the settings window) moves the toggle; the meter's tooltip says when a player's meter shows;
-//   5. the pin filter's toggle is "pinPanel" (default unchanged), for everyone; the filter's own X moves it.
+//   5. the pin filter's toggle is "pinPanel" (TOGL-4: hidden by default), for everyone; the filter's own X moves it;
+//   6. a browser still holding "shown" from the old default gets the legend hidden once (PINS-1), then keeps its own choice.
 const hooks = {};
 const on = (n, f) => { (hooks[n] ??= []).push(f); return hooks[n].length; };
 globalThis.Hooks = { on, once: on, off() {}, callAll: (n, ...a) => { for ( const f of hooks[n] ?? [] ) f(...a); } };
@@ -85,14 +86,17 @@ ui.controls.control = null;
 await game.settings.set("moinen-maps", "dirBarShown", false);
 ok(t.mmDirBar.active === false, "the bar hidden while another group is open: the stored toggle follows");
 
-// 5. the pin filter's toggle is the setting "pinPanel" (default unchanged: shown), for everyone; the filter's X moves it
-ok(defs.get("pinPanel")?.scope === "client" && defs.get("pinPanel").default === true, "pinPanel: client setting, default shown (unchanged)");
+// 5. the pin filter's toggle is the setting "pinPanel" (TOGL-4: hidden by default), for everyone; the filter's X moves it
+ok(defs.get("pinPanel")?.scope === "client" && defs.get("pinPanel").default === false, "pinPanel: client setting, default hidden (TOGL-4)");
 t = build();
-ok(t.mmPinBar?.toggle && t.mmPinBar.active === true && t.mmPinBar.icon === "fa-solid fa-map-pin", "GM: the pin filter's toggle, on");
+ok(t.mmPinBar?.toggle && t.mmPinBar.active === false && t.mmPinBar.icon === "fa-solid fa-map-pin", "GM, fresh browser: the pin filter's toggle, off");
+t.mmPinBar.onChange(null, true);
+ok(game.settings.get("moinen-maps", "pinPanel") === true && build().mmPinBar.active === true, "the pin toggle on: pinPanel = true, the rebuilt menu shows it on");
 t.mmPinBar.onChange(null, false);
 ok(game.settings.get("moinen-maps", "pinPanel") === false, "the pin toggle off: pinPanel = false");
 t.mmPinBar.onChange(null, true);
 ok(game.settings.get("moinen-maps", "pinPanel") === true, "and on again");
+t = build();                                                          // (the menu as drawn with the filter on)
 ui.controls.controls = { [GROUP]: { name: GROUP, tools: t } }; ui.controls.control = ui.controls.controls[GROUP]; activated = null;
 await game.settings.set("moinen-maps", "pinPanel", false);            // what the filter's X does
 ok(activated?.toggles?.mmPinBar === false, "the filter closed with its X: the toggle follows");
@@ -104,6 +108,23 @@ await game.settings.set("moinen-maps", "vramMeter", "auto"); t.mmVramBar.title =
 await game.settings.set("moinen-maps", "vramMeter", "always");
 ok(t.mmVramBar.title === "MOINENMAPS.Tool.vramBar" && renders === 1, "a player's meter set to Always: the open menu's tooltip follows (one render)");
 game.user.isGM = true;
+
+// 6. TOGL-4 / PINS-1: a browser still holding "shown" from the old default gets it hidden once; afterwards its own choice is kept
+const F = await import("../scripts/filter.mjs");
+store.set("pinPanel", true); store.delete("pinPanelHiddenOnce");      // a seat from before the change (any stored "shown")
+F.hideLegendOnce();
+ok(game.settings.get("moinen-maps", "pinPanel") === false && store.get("pinPanelHiddenOnce") === true, "old stored 'shown': hidden once, marked done");
+await game.settings.set("moinen-maps", "pinPanel", true);              // the seat turns it on again
+F.hideLegendOnce();
+ok(game.settings.get("moinen-maps", "pinPanel") === true, "after that the seat's own 'shown' is kept (next load does not hide it again)");
+store.delete("pinPanel"); store.delete("pinPanelHiddenOnce"); let sets = 0;
+const realSet = game.settings.set; game.settings.set = async (m, k, v) => { if ( k === "pinPanel" ) sets++; return realSet(m, k, v); };
+F.hideLegendOnce();
+ok(game.settings.get("moinen-maps", "pinPanel") === false && sets === 0 && store.get("pinPanelHiddenOnce") === true, "fresh browser: hidden, nothing rewritten");
+store.set("pinPanel", false); store.delete("pinPanelHiddenOnce");
+F.hideLegendOnce();
+ok(game.settings.get("moinen-maps", "pinPanel") === false && sets === 0, "old stored 'hidden': stays hidden, untouched");
+game.settings.set = realSet;
 
 console.log(fails ? `${fails} failed` : "bar-toggles: all ok");
 process.exit(fails ? 1 : 0);
