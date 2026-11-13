@@ -182,7 +182,8 @@ export function stageEnd(st) {
  * The rules, all of them here:
  *   - the zoom is the user's: a frame never changes it;
  *   - a subject that is inside the free part of the screen already moves nothing (FRAME_F of the stretch in from every side);
- *   - else the view slides by the LEAST that brings it FRAME_IN inside; several subjects that fit are brought in together; when they
+ *   - else the view slides by the LEAST that brings it FRAME_IN inside - and on toward showing the map instead of the void past its
+ *     edge, as far as the subject stays FRAME_IN inside (fxm2, U206: `scene`); several subjects that fit are brought in together; when they
  *     do not fit at the user's zoom the FIRST one (the focus: where it lands) is kept whole and the frame leans toward the others;
  *   - the user's hand wins (frameGate), and what the camera took the user takes back with "My view" for LINGER_MS after the move.
  */
@@ -205,9 +206,40 @@ export function frameSubjects(ids, boxOf) {
  * Where the view goes for `boxes` (scene boxes, the focus first): null (nothing to frame), { moved: false } (it is on screen), or
  * { moved: true, x, y, scale (= the view's), whole (every box is in), ms }.
  */
-export function framePlan(boxes, view, rect, { fit = true, base = 420 } = {}) {
+export function framePlan(boxes, view, rect, { fit = true, base = 420, scene = null } = {}) {
   const list = (Array.isArray(boxes) ? boxes : []).filter(okBox);
   if ( !list.length || !view || !rect || !(view.scale > 0) ) return null;
+  const { plan, subj } = framePlan0(list, view, rect, fit, base);
+  // fxm2 (U206): a frame that moves shows the MAP, not the void beyond its edge: the view slides on toward filling the free stretch with
+  // the scene as far as the subject stays FRAME_IN inside (the least slide alone left a turn's actor at the stretch's edge and most of
+  // the screen black when the actor stood near the scene's edge)
+  if ( !plan?.moved || !subj || !okBox(scene) ) return plan;
+  const to = fillScene({ x: plan.x, y: plan.y, scale: plan.scale }, subj, scene, rect, view);
+  if ( sameView(to, view, 2) ) return { moved: false };
+  const screens = Math.hypot(to.x - view.x, to.y - view.y) * view.scale / Math.max(1, Math.hypot(view.vw, view.vh));
+  return { ...plan, x: to.x, y: to.y, ms: Math.round(clamp(base * (0.75 + 1.6 * screens), base * 0.75, base * 2.2)) };
+}
+/**
+ * fxm2 (U206): the view `to` slid, per axis, toward the one that fills `rect` (screen px) with the `scene` box (scene px) - the nearest
+ * such view, or the scene centred in the stretch when it is smaller - but never so far that `subject` leaves the stretch shrunk by
+ * FRAME_IN (when the subject is too big for that, that axis stays as it was). Same zoom.
+ */
+export function fillScene(to, subject, scene, rect, view) {
+  const s = to.scale, out = { ...to };
+  for ( const [k, a0, a1, r0, len, half] of [["x", "x0", "x1", rect.x, rect.w, view.vw / 2], ["y", "y0", "y1", rect.y, rect.h, view.vh / 2]] ) {
+    const m = len * FRAME_IN, r1 = r0 + len;
+    // (pivot p shows scene coordinate X at screen px half + (X - p) * s)
+    const loF = scene[a0] - (r0 - half) / s, hiF = scene[a1] - (r1 - half) / s;
+    let t = loF <= hiF ? clamp(to[k], loF, hiF) : (loF + hiF) / 2;
+    if ( subject ) {
+      const loS = subject[a1] - (r1 - m - half) / s, hiS = subject[a0] - (r0 + m - half) / s;
+      t = loS <= hiS ? clamp(t, loS, hiS) : to[k];
+    }
+    out[k] = t;
+  }
+  return out;
+}
+function framePlan0(list, view, rect, fit, base) {
   const fits = (b) => (b.x1 - b.x0) * view.scale <= rect.w * (1 - 2 * FRAME_IN) && (b.y1 - b.y0) * view.scale <= rect.h * (1 - 2 * FRAME_IN);
   // uxd (U142) fit "near": the focus and, in the order given (nearest first), as many of the others as still fit with it at the
   // user's zoom - those are the subject; the rest is left out (a move pick: the mover and the zones on offer nearest to it)
@@ -218,14 +250,15 @@ export function framePlan(boxes, view, rect, { fit = true, base = 420 } = {}) {
     const screens = Math.hypot(to.x - view.x, to.y - view.y) * view.scale / Math.max(1, Math.hypot(view.vw, view.vh));
     return { moved: true, x: to.x, y: to.y, scale: view.scale, whole, ms: Math.round(clamp(base * (0.75 + 1.6 * screens), base * 0.75, base * 2.2)) };
   };
-  if ( comfortable(all, view, rect, FRAME_F) ) return { moved: false };
-  if ( fits(all) ) return done(ownHome(view, all, rect, view, FRAME_IN), fit !== "near" || fits(list.reduce(union, null)));
+  // (subj: what a scene fill keeps FRAME_IN inside; null when the frame leans or centres a subject too big: no fill then)
+  if ( comfortable(all, view, rect, FRAME_F) ) return { plan: { moved: false }, subj: null };
+  if ( fits(all) ) return { plan: done(ownHome(view, all, rect, view, FRAME_IN), fit !== "near" || fits(list.reduce(union, null))), subj: all };
   // they do not fit at the user's zoom: the focus alone decides whether anything moves; then it stays whole, the frame leans to the rest
-  if ( comfortable(focus, view, rect, FRAME_F) ) return { moved: false };
-  if ( !fits(focus) ) return done(centreFor({ x: (focus.x0 + focus.x1) / 2, y: (focus.y0 + focus.y1) / 2 }, rect, view, view.scale), false);
+  if ( comfortable(focus, view, rect, FRAME_F) ) return { plan: { moved: false }, subj: null };
+  if ( !fits(focus) ) return { plan: done(centreFor({ x: (focus.x0 + focus.x1) / 2, y: (focus.y0 + focus.y1) / 2 }, rect, view, view.scale), false), subj: null };
   const lean = attackCamera(all, focus, view, rect, view.scale, [1, 1], FRAME_F);
   const to = lean ? ownHome(lean, focus, rect, view, FRAME_F) : ownHome(view, focus, rect, view, FRAME_IN);
-  return done(to, false);
+  return { plan: done(to, false), subj: null };
 }
 
 /**

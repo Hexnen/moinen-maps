@@ -916,6 +916,20 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 #mm-orbit-strip .mm-orbit-chip.hid { opacity: 0.55; }
 #mm-orbit-strip .mm-orbit-chip span { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
 #token-hud .mm-orbit-pick { left: auto; right: calc(100% + 6px); }
+/* fxm2 (U201): in a fight on this map the strip folds to one button in the initiative bar's row (orbit.mjs places it, left / top);
+   the portraits and "show the Orbit scene" open under it on a click and close on a click anywhere else */
+#mm-orbit-strip.is-fight { left: 0; transform: none; padding: 3px; gap: 0; border-radius: 8px; flex-wrap: nowrap; }
+#mm-orbit-strip.is-fight .mm-orbit-head { gap: 6px; padding: 5px 7px; }
+#mm-orbit-strip.is-fight .mm-orbit-head i { font-size: 14px; }
+#mm-orbit-strip.is-fight.is-open .mm-orbit-head { background: #2a3f9a; border-color: #a9c8ff; }
+#mm-orbit-strip .mm-orbit-list { display: contents; }
+#mm-orbit-strip.is-fight .mm-orbit-list { display: none; position: absolute; top: calc(100% + 6px); right: 0; flex-direction: column; align-items: stretch; gap: 4px;
+  min-width: 11rem; padding: 6px; border-radius: 8px; background: linear-gradient(180deg, #0b0a26f5, #05040cf0); border: 1px solid #3a3a7a; box-shadow: 0 0 0 1px #000a, 0 8px 20px #000c; }
+#mm-orbit-strip.is-fight[data-where="left"] .mm-orbit-list { right: auto; left: 0; }
+#mm-orbit-strip.is-fight.is-open .mm-orbit-list { display: flex; }
+#mm-orbit-strip .mm-orbit-list .mm-orbit-view { justify-content: flex-start; padding: 6px 10px; border-radius: 6px; background: #1b2a6a; border-color: #5f7fff; }
+#mm-orbit-strip .mm-orbit-list .mm-orbit-view i { color: #a9dcff; }
+#mm-orbit-strip button:focus-visible { outline: 2px solid #ffd27a; outline-offset: 1px; }
 
 /* orbit: the "back to the last map" bar at the top of the Orbit scene */
 #mm-orbit-back { position: fixed; z-index: 31; top: 134px; left: 50%; transform: translateX(-50%); pointer-events: all; }

@@ -2105,6 +2105,8 @@
   "MOINENMAPS.Orbit.chipLand": "Klik: sprowadź na tę mapę",
   "MOINENMAPS.Orbit.head": "Orbita",
   "MOINENMAPS.Orbit.headTip": "Kto jest na orbicie (ze wszystkich map). Klik: pokaż scenę Orbita. Klik w portret sprowadza ten żeton tutaj.",
+  "MOINENMAPS.Orbit.fightTip": "Na orbicie: {names}. Klik: lista (walka trwa: scena zmienia się tylko z listy).",
+  "MOINENMAPS.Orbit.viewScene": "Pokaż scenę Orbita",
   "MOINENMAPS.Orbit.land": "Zejdź z orbity: wybierz mapę",
   "MOINENMAPS.Orbit.home": "mapa, z której przyleciał - ląduje tam, gdzie był",
   "MOINENMAPS.Orbit.active": "aktywna scena - ląduje przy górnej krawędzi",

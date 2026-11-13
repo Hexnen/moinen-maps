@@ -321,8 +321,21 @@ async function settled(id) {
     await sleep(120);
   }
 }
-/** The boxes other modules asked the map to keep clear of (zones api `uiAvoids`, client px), or none. */
-function avoidBoxes() { try { return moduleApi.zones?.uiAvoids?.() ?? []; } catch { return []; } }
+/** The boxes other modules asked the map to keep clear of (zones api `uiAvoids`, client px), or none - and the map's own floating
+    panels (fxm2, U206: the Pins panel and the VRAM meter high on the left; a turn's actor was framed under the Pins panel). */
+const OWN_PANELS = ["#mm-filter", "#mm-vram"];
+function avoidBoxes() {
+  let out = [];
+  try { out = moduleApi.zones?.uiAvoids?.() ?? []; } catch { out = []; }
+  for ( const sel of OWN_PANELS ) {
+    const el = document.querySelector(sel); if ( !el?.isConnected ) continue;
+    try { if ( getComputedStyle(el).display === "none" || getComputedStyle(el).visibility === "hidden" ) continue; } catch { continue; }
+    const r = el.getBoundingClientRect(); if ( r.width > 8 && r.height > 8 ) out = [...out, { id: sel, x0: r.left, y0: r.top, x1: r.right, y1: r.bottom }];
+  }
+  return out;
+}
+/** The scene's own rectangle (scene px, without the padding around it), or null. */
+function sceneBox() { const r = canvas?.dimensions?.sceneRect; return r?.width > 0 ? { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height } : null; }
 /** What a running move pick adds to a frame of its mover (zones api `_pickFrame`), or null. */
 function pickFrameFor(id) { try { return moduleApi.zones?._pickFrame?.(id) ?? null; } catch { return null; } }
 /**
@@ -371,7 +384,7 @@ export async function frame(spec = {}) {
     if ( free.covered ) return no("covered");                                    // (a window covers the map: nothing is moved behind it)
     // uxd (U142): and not under a panel another module asked the map to keep clear of (a GM's desk, a challenges band)
     const rect = SC.avoidRect(free, avoidBoxes());
-    const v = viewNow(), plan = SC.framePlan(boxes, v, rect, { fit });
+    const v = viewNow(), plan = SC.framePlan(boxes, v, rect, { fit, scene: sceneBox() });
     if ( !plan ) return no("noSubject");
     if ( !plan.moved ) return say({ ok: true, moved: false });
     const lim = typeof canvas._constrainView === "function" ? canvas._constrainView({ x: plan.x, y: plan.y, scale: plan.scale }) : plan;

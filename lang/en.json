@@ -2105,6 +2105,8 @@
   "MOINENMAPS.Orbit.chipLand": "Click: bring down onto this map",
   "MOINENMAPS.Orbit.head": "Orbit",
   "MOINENMAPS.Orbit.headTip": "Who is in orbit (from every map). Click: show the Orbit scene. Click a portrait to bring that token down here.",
+  "MOINENMAPS.Orbit.fightTip": "In orbit: {names}. Click: the list (a fight runs: the scene changes only from the list).",
+  "MOINENMAPS.Orbit.viewScene": "Show the Orbit scene",
   "MOINENMAPS.Orbit.land": "Come down from orbit: choose the map",
   "MOINENMAPS.Orbit.home": "the map it came from - lands where it was",
   "MOINENMAPS.Orbit.active": "the active scene - lands at the top edge",

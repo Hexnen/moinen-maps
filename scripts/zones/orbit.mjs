@@ -18,6 +18,7 @@ import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { paintSpace, enlarge, lastLayout } from "./space.mjs";
 import { startAmbience, stopAmbience } from "./orbit-ambience.mjs";
+import { fightSpot } from "./orbit-dock.mjs";
 
 const ART = 6;            // scene pixels per art pixel
 const GRID = 100, COLS = 30, ROWS = 18;
@@ -270,14 +271,39 @@ const back = {
  * is up at the top (it publishes its bottom edge as data-icbar-bottom on <html>, its centre / width as --icbar-cx / --icbar-maxw on
  * its root), the strip sits centred under it. dock() measures this only when something it depends on changes: the bar (a
  * MutationObserver), the sidebar / navigation size (a ResizeObserver: collapse, expand) and the window size. No camera, ticker or
- * per-frame work. */
+ * per-frame work.
+ * fxm2 (U201): WHILE A FIGHT RUNS on this map (a started combat of this scene) the strip folds to one small button - the globe and the
+ * count, the names in its tooltip - in the initiative bar's own row (orbit-dock.mjs fightSpot), never over the map, and a click on it
+ * only opens the list under it: the portraits (bring one down here) and "show the Orbit scene" are a second, deliberate click, and
+ * a right click does nothing. Outside a fight it is the strip as before. */
+const inFight = () => { try { const c = game.combats?.viewed ?? game.combat; return !!c?.started && (!c.scene || c.scene.id === canvas?.scene?.id); } catch { return false; } };
 const strip = {
-  el: null, mo: null, ro: null, bar: null, key: "",
+  el: null, mo: null, ro: null, bar: null, key: "", fight: false, open: false,
   onResize: () => strip.dock(),
+  onAway: (ev) => { if ( strip.open && strip.el && !strip.el.contains(ev.target) ) { strip.open = false; strip.el.classList.remove("is-open"); } },
   remove() {
-    this.mo?.disconnect(); this.ro?.disconnect(); this.mo = this.ro = this.bar = null; this.key = "";
+    this.mo?.disconnect(); this.ro?.disconnect(); this.mo = this.ro = this.bar = null; this.key = ""; this.open = false;
     window.removeEventListener("resize", this.onResize);
-    this.el?.remove(); this.el = null;
+    document.removeEventListener("pointerdown", this.onAway, true);
+    this.el?.remove(); this.el = null; this.html = "";
+  },
+  /** fxm2: the initiative bar as drawn - the union of its visible parts (its root may span more than it shows) - or null. */
+  barBox(bar) {
+    if ( !bar ) return null;
+    let u = null;
+    for ( const e of bar.querySelectorAll(":scope > *") ) {
+      const r = e.getBoundingClientRect(); if ( !(r.width > 0 && r.height > 0) ) continue;
+      u = u ? { x0: Math.min(u.x0, r.left), y0: Math.min(u.y0, r.top), x1: Math.max(u.x1, r.right), y1: Math.max(u.y1, r.bottom) } : { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom };
+    }
+    if ( !u ) { const r = bar.getBoundingClientRect(); if ( r.width > 0 && r.height > 0 ) u = { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom }; }
+    return u;
+  },
+  /** fxm2: what the folded button keeps clear of: Foundry's columns and top row, and the panels other modules declared. */
+  avoidBoxes() {
+    const out = [];
+    for ( const q of ["#sidebar", "#scene-controls", "#scene-navigation", "#players"] ) { const r = document.querySelector(q)?.getBoundingClientRect(); if ( r && r.width > 0 && r.height > 0 ) out.push({ x0: r.left, y0: r.top, x1: r.right, y1: r.bottom }); }
+    try { for ( const b of moduleApi.zones?.uiAvoids?.() ?? [] ) out.push(b); } catch { /* no zones api */ }
+    return out;
   },
   /** The free strip of screen at the top: right of the scene controls and the navigation, left of the sidebar. */
   freeArea() {
@@ -295,6 +321,15 @@ const strip = {
     if ( bar && bar !== this.bar ) { this.bar = bar; this.mo?.observe(bar, { attributes: true, attributeFilter: ["style"] }); }
     const under = Number(document.documentElement.dataset.icbarBottom) || 0;
     const bcx = under > 0 ? parseFloat(bar?.style.getPropertyValue("--icbar-cx")) : NaN, bw = parseFloat(bar?.style.getPropertyValue("--icbar-maxw"));
+    if ( this.fight ) {
+      const head = el.querySelector(".mm-orbit-head")?.getBoundingClientRect();
+      const at = fightSpot(this.barBox(bar), { w: head?.width || 48, h: head?.height || 30 }, this.avoidBoxes(), window.innerWidth, window.innerHeight);
+      const k = `f|${at.x}|${at.y}`;
+      if ( k === this.key ) return;
+      this.key = k; el.dataset.where = at.where;
+      el.style.top = `${at.y}px`; el.style.left = `${at.x}px`; el.style.maxWidth = "";
+      return;
+    }
     let top = 16, cx, w;
     if ( Number.isFinite(bcx) ) { top = under + 8; cx = bcx; w = bw > 0 ? bw : 480; }
     else { const { lo, hi } = this.freeArea(); cx = (lo + hi) / 2; w = hi - lo; }
@@ -314,7 +349,8 @@ const strip = {
       this.el = document.createElement("div");
       this.el.id = "mm-orbit-strip";
       this.el.addEventListener("click", (ev) => this.onClick(ev));
-      this.el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); orbitScene()?.view(); });
+      this.el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); if ( !this.fight ) orbitScene()?.view(); });   // (fxm2: never in a fight)
+      document.addEventListener("pointerdown", this.onAway, true);
       (document.getElementById("board") ?? document.body).after(this.el);
       this.mo = typeof MutationObserver === "function" ? new MutationObserver(() => this.dock()) : null;
       this.mo?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-icbar-bottom"] });
@@ -330,12 +366,29 @@ const strip = {
       return `<button type="button" class="mm-orbit-chip${t.hidden ? " hid" : ""}${t.getFlag(MODULE_ID, "orbitFrom")?.scene === here ? " home" : ""}" data-id="${t.id}" data-tooltip="${esc(tip)}">
         <img src="${esc(t.texture.src)}" alt=""><span>${esc(t.name)}</span></button>`;
     };
-    this.el.innerHTML = `<button type="button" class="mm-orbit-head" data-view="1" data-tooltip="${esc(T("headTip"))}"><i class="fa-solid fa-earth-europe" inert></i>
+    const fight = inFight();
+    if ( fight !== this.fight ) { this.fight = fight; this.key = ""; this.open = false; }
+    this.el.classList.toggle("is-fight", fight);
+    this.el.classList.toggle("is-open", fight && this.open);
+    let html;
+    if ( fight ) {
+      // (folded: the globe and the count; the names in the tooltip; the list - portraits and "show the Orbit scene" - opens under it)
+      const names = list.map((t) => esc(t.name)).join(", ");
+      html = `<button type="button" class="mm-orbit-head" data-toggle="1" aria-expanded="${this.open}" aria-label="${esc(T("head"))}: ${list.length}" data-tooltip="${esc(T("fightTip", { names }))}"><i class="fa-solid fa-earth-europe" inert></i><b>${list.length}</b></button>
+        <div class="mm-orbit-list">${list.map(chip).join("")}<button type="button" class="mm-orbit-view" data-view="1"><i class="fa-solid fa-arrow-right-to-bracket" inert></i><span>${esc(T("viewScene"))}</span></button></div>`;
+    } else {
+      html = `<button type="button" class="mm-orbit-head" data-view="1" data-tooltip="${esc(T("headTip"))}"><i class="fa-solid fa-earth-europe" inert></i>
       <span>${esc(T("head"))}</span><b>${list.length}</b></button>${list.map(chip).join("")}`;
+    }
+    // (written only when it changed: the tracker's renders refresh it often - a rewrite under the pointer would drop its tooltip)
+    if ( html !== this.html ) { this.html = html; this.el.innerHTML = html; this.key = ""; }
+    this.dock();
   },
   onClick(ev) {
     const b = ev.target.closest("button"); if ( !b ) return;
     ev.preventDefault();
+    if ( b.dataset.toggle ) { this.open = !this.open; this.el.classList.toggle("is-open", this.open); b.setAttribute("aria-expanded", String(this.open)); return; }
+    if ( this.fight ) { this.open = false; this.el.classList.remove("is-open"); }
     if ( b.dataset.view ) return void orbitScene()?.view();
     const t = orbitScene()?.tokens.get(b.dataset.id);
     if ( t && game.user.isGM ) bringBack(t, canvas.scene.id);
@@ -389,11 +442,15 @@ export function registerOrbit() {
     game.settings.register(MODULE_ID, "orbitFollow", { name: "MOINENMAPS.Orbit.follow", hint: "MOINENMAPS.Orbit.followHint", scope: "client", config: true, type: Boolean, default: true });
   });
   Hooks.once("ready", () => { const m = game.modules.get(MODULE_ID); if ( m ) { m.api ??= moduleApi; m.api.orbit ??= orbitApi; } setTimeout(sweep, 1500); });
-  Hooks.on("canvasReady", () => { readyCount++; rememberMap(canvas.scene); back.refresh(); strip.refresh(); if ( isOrbit(canvas.scene) ) { const f = canvas.scene.getFlag(MODULE_ID, "orbit"); startAmbience(canvas.scene, f?.seed ?? 1, f?.layout ?? null, f); } });
+  Hooks.on("canvasReady", () => { readyCount++; rememberMap(canvas.scene); back.refresh(); strip.refresh(); setTimeout(() => strip.refresh(), 1200); if ( isOrbit(canvas.scene) ) { const f = canvas.scene.getFlag(MODULE_ID, "orbit"); startAmbience(canvas.scene, f?.seed ?? 1, f?.layout ?? null, f); } });
   Hooks.on("canvasTearDown", () => { strip.remove(); back.remove(); stopAmbience(); });
   Hooks.on("createToken", onCreateToken);
   Hooks.on("updateToken", onUpdateToken);
   Hooks.on("deleteToken", (doc) => { if ( isOrbit(doc.parent) ) strip.refresh(); });
+  // fxm2 (U201): a fight starting or ending on this map folds or unfolds the strip
+  // (and the tracker's render: the combat a client views is settled only after the scene's canvasReady)
+  for ( const h of ["combatStart", "deleteCombat", "createCombat", "renderCombatTracker"] ) Hooks.on(h, () => strip.refresh());
+  Hooks.on("updateCombat", (c, changed) => { if ( "active" in changed || "scene" in changed || "round" in changed || "started" in changed ) strip.refresh(); });
   Hooks.on("updateScene", (scene, changed) => {
     if ( !isOrbit(scene) ) return;
     strip.refresh();
