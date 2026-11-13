@@ -8,7 +8,8 @@
 // sharing only by the SHARED list, "!" caps per kind, percussive kinds never stretched, long steady sounds long (section 19).
 import fs from "node:fs";
 import { createVocab, KINDS, KIND_IDS, BANK, expand, stretchText, formatNumber, formatRange, clean, renderable, langOf, MAX_LEN, MAX_RUN,
-  naming, NAMING, DICT, ICONIC, VOICE, ALLOW, SHARED, shareKey, refusal, sayable, DIACRITICS, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND } from "./words.mjs";
+  naming, NAMING, DICT, ICONIC, VOICE, ALLOW, SHARED, shareKey, refusal, sayable, DIACRITICS, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND,
+  GROUPS, MATS, materialOf, MAT_CHAR, piecesOf, intensityOf, FIRE_STAGES, VARIANTS, VARY, VARIANT_META, TAILS, CHAINS, ROLES, PLACES } from "./words.mjs";
 import { REVIEWED } from "./words-reviewed.mjs";
 import { FONTS, FALLBACK, MOOD_IDS, makePlan } from "./design.mjs";
 
@@ -466,4 +467,146 @@ export function checkWords(ok, bank) {
       "words: the stretch rules of the review (PH is no sound of its own, W lasts only at the end after a vowel, SZ as an S run, English I never doubles)");
     ok(KIND_IDS.filter((id) => KINDS[id].perc).every((id) => KINDS[id].stretchHold.length === 0) && ["click", "pistol", "rifle", "hammer", "gunfire"].every((id) => KINDS[id].perc), "words: percussive kinds have no lasting letter");
   }
+  checkKinds1(ok, bank, missing, eng);
+}
+
+/* 20. KINDS1 (2026-11-13, SPEC-KINDS items 1-6 + whizz, casings, dry fire, grenade): material as a call-time option, impact and debris
+       by material (and size), shock wave and sonic boom, the fire ladder with ignite and put-out, TAILS and chains. Every new kind x tier
+       x language x material yields a word that passes the same rules as the banks (no diacritic, no dictionary or near word, sayable,
+       reviewed syllables, lettered by every font); the owner's fixed picks hold; chains tell the event in order. */
+function checkKinds1(ok, bank, missing, eng) {
+  const V = createVocab(), LANGS = ["pl", "en"], TIERS = ["s", "m", "l"];
+  const NEW = ["shockwave", "sonicboom", "concussion", "impact", "debris", "whizz", "casings", "dryfire"];
+  const flat = (w) => clean(w).replace(/[!?…\x27.,:]/g, "").split(/[-\s]+/).filter(Boolean).map((x) => x.replace(/(\p{L})\1+/gu, "$1"));
+  ok(NEW.every((id) => KINDS[id]) && GROUPS.impact && KINDS.impact.group === "impact" && KINDS.debris.group === "impact", "kinds1: the new kinds and the impact group exist");
+  ok(V.kindOf("shockwave") === "shockwave" && V.kindOf("sonic-boom") === "sonicboom" && V.kindOf("fireless") === "concussion" && V.kindOf("near-miss") === "whizz" && V.kindOf("brass") === "casings" && V.kindOf("dry-fire") === "dryfire" && V.kindOf("gust") === "whump",
+    "kinds1: aliases (shockwave is its own kind now, the puff stays whump)");
+  /* the variant tables: shape, every word lettered and allowed */
+  { const bad = [], unrev = new Set();
+    for ( const lang of LANGS ) {
+      const rev = new Set(REVIEWED[lang]);
+      for ( const [table, rows] of Object.entries(VARIANTS[lang]) ) for ( const [key, b] of Object.entries(rows) ) {
+        if ( typeof b === "string" ) { if ( !KINDS[b] ) bad.push(`${lang} ${table}.${key}: names no kind`); continue; }
+        for ( const t of TIERS ) if ( !(b[t]?.length >= 2 && b[t].length <= 4) ) bad.push(`${lang} ${table}.${key}.${t}: ${b[t]?.length} words`);
+        const kind = VARY[table][0];
+        for ( const w of Object.values(b).flat() ) {
+          const r = refusal(w, lang, { kind }), s = sayable(w, lang);
+          if ( r ) bad.push(`${lang} ${table}.${key} ${w}: ${r.why} ${r.part}~${r.like}`);
+          if ( s ) bad.push(`${lang} ${table}.${key} ${w}: ${s}`);
+          if ( DIACRITICS.test(w) || (lang === "pl" && /[VQX]/.test(w)) ) bad.push(`${lang} ${table}.${key} ${w}: letters`);
+          if ( !renderable(w) || expand(w, 0).length > MAX_LEN ) bad.push(`${lang} ${table}.${key} ${w}: not letterable`);
+          for ( const f of Object.keys(FONTS) ) if ( missing(f, w).length ) bad.push(`${lang} ${table}.${key} ${w} in ${f}`);
+          for ( const x of flat(w) ) if ( !rev.has(x) ) unrev.add(`${lang} ${x}`);
+        }
+      }
+      ok(Object.keys(VARIANTS.pl).every((t) => VARIANTS.en[t]) && Object.keys(VARIANTS.en).every((t) => VARIANTS.pl[t] && Object.keys(VARIANTS.en[t]).every((k) => VARIANTS.pl[t][k])), "kinds1: every variant row exists in both languages");
+    }
+    ok(bad.length === 0, `kinds1: variant-table words: ${bad.length} problems: ${bad.slice(0, 8).join("; ")}`);
+    ok(unrev.size === 0, `kinds1: variant syllables not on the reviewed list: ${[...unrev].slice(0, 10).join(" ")}`);
+  }
+  /* every new kind x tier x language x material (and every fire row) yields a word, made by the same rules as the banks */
+  { const bad = [], used = [];
+    const runs = (k) => k.run ?? MAX_RUN;
+    for ( const lang of LANGS ) {
+      const combos = [];
+      for ( const id of [...NEW, "grenade"] ) combos.push([id, {}]);
+      for ( const [table, ids] of Object.entries(VARY) ) for ( const id of ids ) {
+        if ( table === "fire" ) { for ( const i of [1, 2, 3, 4, 5] ) combos.push([id, { intensity: i }]); for ( const st of FIRE_STAGES ) combos.push([id, { stage: st }]); }
+        else for ( const m of [...MATS, "concrete", "no-such"] ) combos.push([id, { material: m }]);
+      }
+      for ( const id of [...NEW, "grenade", "pistol", "crash"] ) for ( const m of MATS ) combos.push([id, { material: m }]);   // kinds without a table keep their words
+      for ( const p of ["small", "medium", "large", 0.9] ) combos.push(["debris", { pieces: p }], ["debris", { pieces: p, material: "glass" }]);
+      for ( const [id, o] of combos ) for ( const loud of [0.1, 0.5, 0.9, 1] ) for ( const long of [0, 0.5, 1] ) for ( const seed of [1, 2] ) {
+        const w = V.word(id, { lang, loud, long, seed, ...o }), tag = `${lang}/${id}${JSON.stringify(o)}@${loud}/${long}`;
+        if ( !w.text || !renderable(w.text) || w.text.replace(/[!?…]/g, "").length > MAX_LEN + 3 ) bad.push(`${tag} ${w.text}: not letterable`);
+        if ( DIACRITICS.test(w.text) ) bad.push(`${tag} ${w.text}: diacritic`);
+        const r = refusal(w.text, lang, { kind: id }); if ( r ) bad.push(`${tag} ${w.text}: ${r.why} ${r.part}`);
+        const s = sayable(w.text, lang); if ( s ) bad.push(`${tag} ${w.text}: ${s}`);
+        const k = KINDS[id], meta = w.variant != null ? VARIANT_META[k.vary]?.[w.variant] : null, cap = Math.min(2, meta?.maxBangs ?? k.maxBangs ?? 2);
+        if ( w.bangs > cap || (w.text.match(/!/g) ?? []).length !== w.bangs ) bad.push(`${tag} ${w.text}: "!" ${w.bangs} over ${cap}`);
+        if ( new RegExp(`(\\p{L})\\1{${meta?.run ?? runs(k)},}`, "u").test(w.text) ) bad.push(`${tag} ${w.text}: a run too long`);
+        for ( const f of Object.keys(FONTS) ) if ( missing(f, w.text).length ) bad.push(`${tag} ${w.text} in ${f}`);
+        const mat = materialOf(o.material);
+        if ( (o.material !== undefined && w.material !== mat) || (o.material === undefined && w.material !== null) ) bad.push(`${tag}: material ${w.material}`);
+        const row = k.vary ? (k.vary === "fire" ? (o.stage ?? (o.intensity != null ? String(o.intensity) : null)) : mat) : null;
+        const has = row != null && VARIANTS[lang][k.vary]?.[row];
+        if ( has && w.variant !== row ) bad.push(`${tag}: variant ${w.variant}, want ${row}`);
+        if ( !has && w.variant !== null ) bad.push(`${tag}: variant ${w.variant} without a row`);
+        if ( has ) {
+          const b = typeof VARIANTS[lang][k.vary][row] === "string" ? BANK[lang][VARIANTS[lang][k.vary][row]] : VARIANTS[lang][k.vary][row];
+          if ( !Object.values(b).flat().map(clean).includes(clean(w.template)) ) bad.push(`${tag}: ${w.template} is not a word of its row`);
+        }
+        if ( mat && MAT_CHAR[mat] && w.character.material !== MAT_CHAR[mat].material ) bad.push(`${tag}: character material ${w.character.material}`);
+        used.push(w.text);
+      }
+    }
+    ok(bad.length === 0, `kinds1: every new kind x tier x language x material: ${bad.length} problems: ${bad.slice(0, 8).join("; ")}`);
+    ok(used.length > 4000, `kinds1: only ${used.length} words made`);
+  }
+  /* the tiers of the tables are used: quiet / normal / loud pick s / m / l, pieces pick the debris size */
+  for ( const lang of LANGS ) {
+    ok(TIERS.every((t, i) => V.word("impact", { lang, seed: 1, loud: [0.1, 0.5, 0.9][i], material: "metal" }).tier === t), `kinds1: ${lang} impact tiers by loudness`);
+    ok(V.word("debris", { lang, seed: 1, loud: 0.1, pieces: "large", material: "stone" }).tier === "l" && V.word("debris", { lang, seed: 1, loud: 1, pieces: "small" }).tier === "s" && V.word("debris", { lang, seed: 1, loud: 1 }).tier === "l",
+      `kinds1: ${lang} debris pieces pick the tier, loudness only without them`);
+    ok(V.word("crack", { lang, seed: 1, material: "glass" }).template && BANK[lang].shatter.s.concat(BANK[lang].shatter.m, BANK[lang].shatter.l).includes(V.word("crack", { lang, seed: 1, material: "glass" }).template), `kinds1: ${lang} a crack on glass takes the shatter words`);
+    ok(V.word("pistol", { lang, seed: 1, material: "metal" }).variant === null && V.word("pistol", { lang, seed: 1, material: "metal" }).text === V.word("pistol", { lang, seed: 1 }).text, `kinds1: ${lang} the muzzle word does not change with the target's material`);
+  }
+  ok(materialOf("Concrete") === "stone" && materialOf("forcefield") === "shield" && materialOf("plasma") === null && intensityOf("blaze") === 4 && intensityOf(9) === 5 && piecesOf("huge") === "l" && piecesOf(0.1) === "s", "kinds1: material, intensity and pieces names");
+  /* the fire ladder: each row keeps its character */
+  for ( const lang of LANGS ) {
+    const e = V.word("fire", { lang, seed: 1, loud: 1, long: 1, intensity: 1 }), out = V.word("fire", { lang, seed: 1, loud: 1, intensity: 1, stage: "out" });
+    ok(e.bangs === 0 && !/(\p{L})\1{2,}/u.test(e.text.replace(/[!…]/g, "")), `kinds1: ${lang} an ember never shouts and never stretches (${e.text})`);
+    ok(out.variant === "out" && out.bangs === 0, `kinds1: ${lang} stage wins over intensity; put out has no "!" (${out.text})`);
+    const styles = [1, 2, 3, 4, 5].map((i) => V.flow("fire", { lang, seed: 2, intensity: i }).style);
+    ok(JSON.stringify(styles) === JSON.stringify(["crackle", "steady", "crackle", "gust", "drone"]) && V.flow("fire", { lang, seed: 2, stage: "out" }).style === "steady", `kinds1: ${lang} the fire rows flow in their own style (${styles})`);
+    const inf = V.flow("fire", { lang, seed: 2, intensity: 5 }).take(6000), emb = V.flow("fire", { lang, seed: 2, intensity: 1 }).take(6000);
+    ok(Math.max(...inf.map((x) => x.text.length)) > Math.max(...emb.map((x) => x.text.replace(/-/g, "").length)) - 2 && emb.every((x) => x.bangs === 0 && !/!/.test(x.text)), `kinds1: ${lang} an inferno drones long, embers tick without "!"`);
+    for ( const f of [V.flow("fire", { lang, seed: 3, intensity: 3 }), V.flow("debris", { lang, seed: 3, material: "metal" }), V.flow("impact", { lang, seed: 3, material: "glass" })] ) {
+      const seg = [f.onset, ...Array.from({ length: 16 }, (_, i) => f.at(i)), f.tail];
+      ok(seg.every((x) => x.text && !refusal(x.text, lang, { kind: f.kind }) && !DIACRITICS.test(x.text) && !sayable(x.text, lang)) && seg.every((x, i) => !i || x.text !== seg[i - 1].text), `kinds1: ${lang} a ${f.kind} flow (${f.variant}) stays allowed and never repeats (${seg.slice(0, 6).map((x) => x.text).join(" ")})`);
+    }
+  }
+  /* the owner's fixed picks (2026-11-13): BOOM / BUM only for blasts with fire, the fireless blast KROOM / KRUUM; the cave-in's BDUUM is
+     not a grenade's; a shock wave never reads as a boom */
+  { const words = (lang, id) => Object.values(BANK[lang][id]).flat().map(clean);
+    ok(words("en", "concussion").some((w) => /^(KA-)?KR+O+M+$/.test(w)) && words("pl", "concussion").some((w) => /^(KA-)?KR+U+M+$/.test(w)), "kinds1: the fireless blast is KROOM / KRUUM (the owner's pick)");
+    const noBoom = ["shockwave", "concussion", "debris", "impact", "sonicboom", "whizz", "casings", "dryfire"];
+    ok(noBoom.every((id) => LANGS.every((lang) => words(lang, id).every((w) => !flat(w).some((x) => x === "BOM" || x === "BUM")))), "kinds1: no BOOM / BUM outside blasts with fire");
+    ok(!words("pl", "grenade").some((w) => flat(w).includes("BDUM")) && !words("en", "grenade").some((w) => flat(w).includes("BTHOM")), "kinds1: the grenade does not take the cave-in's BDUUM / BTHOOM");
+    ok(LANGS.every((lang) => ["s", "m", "l"].every((t) => BANK[lang].grenade[t].every((w) => !BANK[lang].boom[t].includes(w)))), "kinds1: the grenade has its own words now (not the boom's)"); }
+  /* TAILS: the twin of PREFIXES, each with its reason */
+  { const bad = [];
+    for ( const [id, list] of Object.entries(TAILS) ) {
+      if ( !KINDS[id] ) bad.push(`${id}: no kind`);
+      for ( const x of list ) if ( !KINDS[x.kind] || !(typeof x.why === "string" && x.why.length >= 20) || !(x.t >= 0) || !(x.rel > 0 && x.rel <= 1) || !PLACES.includes(x.place) || x.kind === id ) bad.push(`${id} -> ${x.kind}: incomplete`);
+    }
+    ok(bad.length === 0, `kinds1: TAILS entries: ${bad.join("; ")}`);
+    ok(V.tails("boom").map((x) => x.kind).join() === "shockwave,debris" && V.tails("impact", { material: "water" }).length === 0 && V.tails("impact", { material: "wood" })[0].material === "wood" && V.tails("shatter")[0].material === "glass" && V.tails("hiss").length === 0,
+      "kinds1: tails() lists a sound's own aftermath, skips it where it does not happen, carries the material"); }
+  /* CHAINS: the story of an event in order (build, peak, develop, resolve) */
+  { const bad = [];
+    for ( const [name, c] of Object.entries(CHAINS) ) {
+      if ( !(typeof c.why === "string" && c.why.length >= 20) || !c.steps.every((s) => KINDS[s.kind] && ROLES.includes(s.role) && PLACES.includes(s.place)) ) bad.push(`${name}: steps`);
+      for ( const lang of LANGS ) {
+        const a = V.chain(name, { lang, seed: "c", magnitude: 1.2, material: "stone" }), b = V.chain(name, { lang, seed: "c", magnitude: 1.2, material: "stone" });
+        if ( JSON.stringify(a.map((s) => [s.t, s.word.text])) !== JSON.stringify(b.map((s) => [s.t, s.word.text])) ) bad.push(`${lang} ${name}: not deterministic`);
+        if ( a.some((s, i) => i && s.t < a[i - 1].t) ) bad.push(`${lang} ${name}: out of order`);
+        const peak = a.find((s) => s.role === "peak");
+        if ( !peak || a.some((s) => s.word.loud > peak.word.loud + 1e-9) ) bad.push(`${lang} ${name}: the peak is not the loudest`);
+        const last = a.at(-1); if ( last !== peak && last.word.loud >= peak.word.loud ) bad.push(`${lang} ${name}: it does not resolve`);
+        for ( const s of a ) { const r = refusal(s.word.text, lang, { kind: s.kind }); if ( r || DIACRITICS.test(s.word.text) || sayable(s.word.text, lang) ) bad.push(`${lang} ${name}: ${s.word.text}`); }
+        if ( a.some((s, i) => i && s.word.text === a[i - 1].word.text) ) bad.push(`${lang} ${name}: the same word twice in a row`);
+      }
+    }
+    ok(bad.length === 0, `kinds1: chains: ${bad.slice(0, 8).join("; ")}`);
+    const ex = V.chain("explosion", { lang: "en", seed: 1, magnitude: 1.5 }), fast = V.chain("explosion", { lang: "en", seed: 1, magnitude: 1.5, tempo: 2 });
+    ok(ex.map((s) => s.kind).join() === "boom,shockwave,debris,debris,debris" && ex.slice(2).map((s) => s.word.tier).join() === "l,m,s" && fast.at(-1).t === Math.round(ex.at(-1).t / 2), "kinds1: the explosion: blast, wave, debris big to small; tempo scales the times");
+    const one = V.chain("gunfire", { lang: "pl", seed: 1 }), steps = V.chain([{ kind: "punch", material: "metal", layer: "under" }, { kind: "debris", t: 200, rel: 0.5 }], { lang: "en", seed: 1, tails: true });
+    ok(one.length === 2 && one[1].kind === "casings" && one[1].tailOf === "gunfire" && one[1].place === "feet", "kinds1: one kind = the sound and its tails");
+    ok(steps[0].word.variant === "metal" && steps[0].play.layer === "under" && !("material" in steps[0].play) && steps[1].t === 200 && steps.length === 2, "kinds1: own steps keep their word options and pass the rest to L.play");
+    ok(V.chain("grenade", { lang: "en", seed: 1 }).some((s) => s.kind === "grenade" && s.role === "peak" && s.place === "target") && V.chain("burst", { lang: "en", seed: 1, material: "metal" }).find((s) => s.kind === "impact").word.variant === "metal", "kinds1: grenade and burst chains: the blast at the target, the impact by material");
+  }
+  /* the engine carries it: L.chain, the word options are not play options */
+  ok(/function chain\(spec, opts = \{\}\)/.test(eng) && /flow: vocab\.flow, chain,/.test(eng) && /VOCAB_KEYS = \[[^\]]*"material", "pieces", "intensity", "stage"/.test(eng), "kinds1: L.chain is on the engine and material / pieces / intensity / stage stay vocabulary options");
+  ok(Array.isArray(V.hitMaterials) && V.chains.includes("explosion") && V.variants("impact", "pl").rows.metal.l.length >= 2 && V.variants("crack", "en").rows.glass.from === "shatter" && V.variants("hiss") === null, "kinds1: L.vocab.variants / hitMaterials / chains for pickers and sheets");
 }

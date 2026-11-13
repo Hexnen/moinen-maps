@@ -45,12 +45,19 @@ export const KINDS = {
   scrape:  K("break", "zgrzyt", "scrape", "whoosh", { sharp: 0.6, long: 0.85, pitch: -0.2, rough: 0.95 }, { in: ["zip"], hold: ["rattle"], out: ["zipout"] }, 3, null, ["drag", "screech", "grind-metal"]),
   /* blasts and shots */
   boom:    K("blast", "wybuch", "boom", "boom", { sharp: 0.45, long: 0.55, pitch: -0.2, rough: 0.6 }, { in: ["slam"], hold: ["throb", "shake"], out: ["burst"] }, 3, null, ["explosion", "blast", "explode", "bomb"]),
-  whump:   K("blast", "podmuch", "whump", "boom", { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 }, { in: ["grow"], hold: ["throb"], out: ["dissolve"] }, 2, null, ["gust", "shockwave", "pressure", "airblast"]),
+  whump:   K("blast", "podmuch", "whump", "boom", { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 }, { in: ["grow"], hold: ["throb"], out: ["dissolve"] }, 2, null, ["gust", "pressure", "airblast"]),
   thunder: K("blast", "grzmot", "thunder", "boom", { sharp: 0.7, long: 0.8, pitch: -0.4, rough: 0.8 }, { in: ["slam", "crackIn"], hold: ["rattle", "shake"], out: ["burst", "fall"] }, 3, null, ["lightning-strike"]),
   zap:     K("blast", "porażenie", "zap", "zap", { sharp: 1, long: 0.3, pitch: 0.3, rough: 0.5 }, { in: ["pop"], hold: ["buzz"], out: ["dissolve"] }, 2, null, ["electric", "electricity", "lightning", "shock", "spark"]),
   beam:    K("blast", "promień", "beam", "zap", { sharp: 0.8, long: 0.6, pitch: 0.4, rough: 0.3 }, { in: ["zip", "pop"], hold: ["buzz"], out: ["zipout", "dissolve"] }, 3, null, ["laser", "energy", "ray", "eyebeam"]),
   gunfire: K("blast", "seria", "gunfire", "impact", { sharp: 0.9, long: 0.5, pitch: 0, rough: 0.5 }, { in: ["slam"], hold: ["shake", "rattle"], out: ["pop"] }, 2, null, ["burst", "autofire", "machinegun", "machine-gun", "rattle"]),
   ricochet:K("blast", "rykoszet", "ricochet", "whoosh", { sharp: 0.85, long: 0.6, pitch: 0.6, rough: 0.2 }, { in: ["zip", "pop"], hold: ["boil"], out: ["zipout"] }, 3, null, ["deflect", "bounce-off"]),
+  /* KINDS1 (2026-11-13): the blast's wave, the flier's sonic boom, a blast without fire (the owner's pick KROOM / KRUUM) */
+  shockwave: K("blast", "fala uderzeniowa", "shock wave", "boom", { sharp: 0.15, long: 0.6, pitch: -0.7, rough: 0.4 }, { in: ["grow"], hold: ["throb"], out: ["dissolve"] }, 3, null, ["shock-wave", "blastwave", "blast-wave", "pressure-wave"]),
+  sonicboom: K("blast", "grom dźwiękowy", "sonic boom", "boom", { sharp: 0.85, long: 0.5, pitch: -0.4, rough: 0.6 }, { in: ["slam", "crackIn"], hold: ["shake"], out: ["burst"] }, 3, null, ["sonic-boom", "sound-barrier", "supersonic"]),
+  concussion: K("blast", "suchy wybuch", "dry blast", "boom", { sharp: 0.5, long: 0.5, pitch: -0.5, rough: 0.7 }, { in: ["slam"], hold: ["shake", "throb"], out: ["burst", "dissolve"] }, 3, null, ["fireless", "fireless-blast", "dry-blast"]),
+  /* KINDS1: what arrives and what comes down: the impact at the target by material, debris by material and size */
+  impact:  K("impact", "trafienie", "impact", "impact", { sharp: 0.9, long: 0.1, pitch: 0.1, rough: 0.5 }, { in: ["slam", "pop"], hold: ["shake"], out: ["pop", "shatter"] }, 1, null, ["bullet-hit", "bullethit", "projectile-hit"]),
+  debris:  K("impact", "odłamki", "debris", "crash", { sharp: 0.6, long: 0.3, pitch: -0.2, rough: 0.9 }, { in: ["drop"], hold: ["rattle"], out: ["fall"] }, 1, null, ["chunks", "fragments", "falling-debris"]),
   /* motion */
   whoosh:  K("motion", "świst", "whoosh", "whoosh", { sharp: 0.2, long: 0.8, pitch: 0, rough: 0.2 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, null, ["swing", "dash", "dodge", "swoosh"]),
   zoom:    K("motion", "pęd", "zoom", "whoosh", { sharp: 0.35, long: 0.85, pitch: 0.3, rough: 0.35 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 3, null, ["fly", "flight", "flyby", "speed"]),
@@ -112,6 +119,10 @@ export const KINDS = {
   thrown:    K("weapon", "rzut", "thrown", "impact", { sharp: 0.7, long: 0.2, pitch: -0.2, rough: 0.3 }, { in: ["zip", "slam"], hold: ["wobble"], out: ["fall"] }, 1, null, ["throw", "knife", "shuriken", "dagger"]),
   grenade:   K("weapon", "granat", "grenade", "boom", { sharp: 0.5, long: 0.6, pitch: -0.4, rough: 0.7 }, { in: ["slam"], hold: ["throb", "shake"], out: ["burst"] }, 3, null, ["frag", "mine"]),
   rocket:    K("weapon", "rakieta", "rocket", "fire", { sharp: 0.3, long: 0.9, pitch: 0.2, rough: 0.7 }, { in: ["zip", "grow"], hold: ["boil", "shake"], out: ["burst", "zipout"] }, 3, null, ["missile", "launcher", "bazooka", "rpg"]),
+  /* KINDS1: the rest of a shot: the bullet passing a token (a near miss), spent casings, an empty or jammed gun */
+  whizz:     K("weapon", "świst kuli", "whizz", "whoosh", { sharp: 0.7, long: 0.2, pitch: 0.8, rough: 0.1 }, { in: ["zip"], hold: ["boil"], out: ["zipout"] }, 2, null, ["whiz", "near-miss", "nearmiss", "bullet-pass"]),
+  casings:   K("weapon", "łuski", "casings", "tick", { sharp: 0.7, long: 0.5, pitch: 0.8, rough: 0.1 }, { in: ["drop", "pop"], hold: ["rattle"], out: ["fall"] }, 1, null, ["casing", "brass", "shell-casings", "spent-shells"]),
+  dryfire:   K("weapon", "suchy strzał", "dry fire", "tick", { sharp: 0.6, long: 0, pitch: 0.1, rough: 0.1 }, { in: ["pop"], hold: ["flicker"], out: ["droop"] }, 1, null, ["dry-fire", "empty-gun", "jammed"]),
   reload:    K("weapon", "przeładowanie", "reload", "tick", { sharp: 0.9, long: 0.2, pitch: 0.2, rough: 0.2 }, { in: ["pop"], hold: ["flicker"], out: ["pop"] }, 1, null, ["cock", "rack", "magazine"]),
   /* sirens, cars, a walking machine, tools (2026-11-13: the user's second list) */
   ambulance: K("device", "karetka", "ambulance", "zap", { sharp: 0.4, long: 0.9, pitch: 0.6, rough: 0.2 }, { in: ["pop", "grow"], hold: ["buzz", "throb"], out: ["dissolve"] }, 2, null, ["ems", "medic"]),
@@ -129,14 +140,14 @@ export const KINDS = {
   tornado:   K("weather", "tornado", "tornado", "whoosh", { sharp: 0.3, long: 1, pitch: -0.2, rough: 0.9 }, { in: ["grow"], hold: ["shake", "boil"], out: ["zipout", "shrink"] }, 3, null, ["twister", "whirlwind", "cyclone"])
 };
 /* repeating sounds: an escalation adds a syllable (TRA-TA-TA -> TRA-TA-TA-TA) instead of stretching letters */
-for ( const id of ["gunfire", "laugh", "drip", "stomp", "beep", "bark", "squeak", "helicopter", "reload", "clunker", "mech", "hammer", "hail", "crackle", "siren", "ambulance", "police"] ) KINDS[id].repeat = "last";     // one more of the last syllable
+for ( const id of ["gunfire", "laugh", "drip", "stomp", "beep", "bark", "squeak", "helicopter", "reload", "clunker", "mech", "hammer", "hail", "crackle", "siren", "ambulance", "police", "debris", "casings", "dryfire"] ) KINDS[id].repeat = "last";     // one more of the last syllable
 for ( const id of ["heartbeat", "firetruck"] ) KINDS[id].repeat = "pair";                              // one more BA-DUM
 /* PERCUSSIVE sounds (the review, rule 7): a click, a drip, a hammer, a reload, a heartbeat, a gun rattle, hail, a footstep, a shot.
    Their length is MORE HITS, never a stretched vowel (no KLAAAK, no TONK-TOOONK): perc kinds are never stretched; a repeating one
    gets more syllables when it lasts longer. */
-for ( const id of ["click", "drip", "hammer", "reload", "heartbeat", "gunfire", "hail", "stomp", "helicopter", "clunker", "mech", "pistol", "rifle", "silenced", "crackle", "squeak", "bark", "laugh", "beep"] ) KINDS[id].perc = true;
+for ( const id of ["click", "drip", "hammer", "reload", "heartbeat", "gunfire", "hail", "stomp", "helicopter", "clunker", "mech", "pistol", "rifle", "silenced", "crackle", "squeak", "bark", "laugh", "beep", "impact", "debris", "casings", "dryfire"] ) KINDS[id].perc = true;
 /* the "!" cap per kind (the review, rule 8, and the look review: kinds that are never loud never get "!!"): 0 = never "!", 1 = at most one */
-for ( const [id, n] of Object.entries({ fizzle: 1, sigh: 0, relief: 0, purr: 0, silenced: 1, drip: 1, shush: 1, whiff: 1, hiss: 1, snakehiss: 1, psychic: 1, meow: 1, squeak: 1, click: 1, beep: 1, rain: 1, heartbeat: 1, creak: 1, reload: 1, crackle: 1 }) ) KINDS[id].maxBangs = n;
+for ( const [id, n] of Object.entries({ fizzle: 1, sigh: 0, relief: 0, purr: 0, silenced: 1, drip: 1, shush: 1, whiff: 1, hiss: 1, snakehiss: 1, psychic: 1, meow: 1, squeak: 1, click: 1, beep: 1, rain: 1, heartbeat: 1, creak: 1, reload: 1, crackle: 1, casings: 0, dryfire: 1 }) ) KINDS[id].maxBangs = n;
 /* the longest run of one letter (MAX_RUN 6 by default): long steady sounds need more (the review, rule 14: a long hiss must be longer
    than a short loud one) */
 for ( const id of ["hiss", "shush", "snakehiss", "rain", "purr", "psychic", "rumble", "engine", "minigun", "drill", "powerup", "wind", "snarl"] ) KINDS[id].run = 10;
@@ -154,7 +165,8 @@ const HOLD = {
   plane: "V R M", helicopter: "V", pistol: "V M", rifle: "V R", shotgun: "V M", minigun: "R V", blaster: "Z V M", laserpistol: "V R", silenced: "F S H V",
   sword: "M V S", arrow: "F V M", thrown: "F V", grenade: "V M", rocket: "S V M", reload: "V",
   ambulance: "V", police: "V", firetruck: "V M", fastcar: "R V M", clunker: "R V", mech: "V M", drill: "Z V R", hammer: "V",
-  hail: "V", rain: "S Z V", storm: "R V M", tornado: "V R S"
+  hail: "V", rain: "S Z V", storm: "R V M", tornado: "V R S",
+  shockwave: "V M F", sonicboom: "V M", concussion: "V M", impact: "V", debris: "V", whizz: "Z S V", casings: "V", dryfire: "V"
 };
 for ( const [id, h] of Object.entries(HOLD) ) KINDS[id].hold = h.split(" ");
 /* percussive kinds keep their HOLD for the accent (where the ring sits) but never stretch: `stretch` = the classes that may repeat */
@@ -171,14 +183,14 @@ function KIND_LIST() { return Object.keys(KINDS); }
    leads a beam or a fire (not their own lead-in), the shotgun's own lead-in is its pump. */
 export const PREFIXES = {
   pl: {
-    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash"] },
+    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash", "grenade", "concussion"] },
     "KRA-":  { why: "the crack of a surface giving way before the crash", kinds: ["smash", "crash"] },
     "KRA-KA-": { why: "the lightning's double crack before the thunder's roll", kinds: ["thunder", "storm"] },
     "CZAK-CZAK-": { why: "the pump racked before the shotgun fires (a two-phase sound)", kinds: ["shotgun"] },
     "PTYK-KA-": { why: "the pin's tick and the fuse's crack before the grenade goes off", kinds: ["grenade"] }
   },
   en: {
-    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash"] },
+    "KA-":   { why: "the dry crack that opens a heavy sound: the detonator before the boom, the knuckles before the blow, the impact before a heavy fall or a walking machine's step, the discharge before a heavy blast", kinds: ["punch", "smash", "clang", "boom", "crack", "crash", "thud", "mech", "blaster", "splash", "grenade", "concussion"] },
     "KRA-":  { why: "the crack of a surface giving way before the crash", kinds: ["smash", "crash"] },
     "KRA-KA-": { why: "the lightning's double crack before the thunder's roll", kinds: ["thunder", "storm"] },
     "CHK-CHK-": { why: "the pump racked before the shotgun fires (a two-phase sound)", kinds: ["shotgun"] },
@@ -194,7 +206,7 @@ export const GROUPS = { hit: { pl: "uderzenia", en: "hits" }, break: { pl: "pęk
   motion: { pl: "ruch", en: "motion" }, element: { pl: "żywioły", en: "elements" }, power: { pl: "moce", en: "powers" },
   device: { pl: "urządzenia", en: "devices" }, voice: { pl: "głosy", en: "voices" },
   animal: { pl: "zwierzęta", en: "animals" }, vehicle: { pl: "pojazdy", en: "vehicles" }, weapon: { pl: "broń", en: "weapons" },
-  weather: { pl: "pogoda", en: "weather" } };
+  weather: { pl: "pogoda", en: "weather" }, impact: { pl: "trafienia", en: "impacts" } };
 
 /* ---------- the word banks: tiers "a|b|c" (s quiet, m normal, l loud); st = stream syllables (default: the quiet words in a row) ----------
    Rewritten by the vocabulary review (2026-11-13, WORD2): ENGLISH IS THE MASTER, Polish follows it by spelling (OO -> UU, EE -> II,
@@ -208,10 +220,6 @@ const B = (s, m, l, st = null) => { const S = s.split("|"); return { s: S, m: m.
    other word shared between kinds of one language fails the check, so a wrong borrowing (a punch word on a plane) cannot come back. */
 export const SHARED = {
   pl: {
-    BUM: { kinds: ["boom", "grenade"], why: "a grenade is a boom; its own lead-in (PTYK-KA-) tells the loud ones apart" },
-    FUM: { kinds: ["boom", "grenade"], why: "the distant soft boom, the same for a grenade" },
-    TWUM: { kinds: ["boom", "grenade"], why: "the full boom, the same for a grenade" },
-    BATUM: { kinds: ["boom", "grenade"], why: "the rolling boom, the same for a grenade" },
     BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
     KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     KRAKUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
@@ -233,13 +241,10 @@ export const SHARED = {
     WRM: { kinds: ["engine", "purr"], why: "a purr is a small idling engine" },
     WR: { kinds: ["snarl", "purr", "minigun"], why: "a rolling R: a throat and a spinning barrel" },
     FT: { kinds: ["cathiss", "arrow"], why: "a short puff of air: a cat's spit and an arrow's flight" },
-    SZ: { kinds: ["snakehiss", "rain"], why: "a steady hiss: a snake and falling rain" }
+    SZ: { kinds: ["snakehiss", "rain"], why: "a steady hiss: a snake and falling rain" },
+    SKRAKT: { kinds: ["crack", "impact"], why: "a hard hit that splits what it strikes: the crack of the struck thing" }
   },
   en: {
-    BOM: { kinds: ["boom", "grenade"], why: "a grenade is a boom; its own lead-in (PTIK-KA-) tells the loud ones apart" },
-    FOM: { kinds: ["boom", "grenade"], why: "the distant soft boom, the same for a grenade" },
-    TWOM: { kinds: ["boom", "grenade"], why: "the full boom, the same for a grenade" },
-    BADOM: { kinds: ["boom", "grenade"], why: "the rolling boom, the same for a grenade" },
     BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
     KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     KRAKOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
@@ -254,12 +259,14 @@ export const SHARED = {
     VN: { kinds: ["psychic", "fastcar"], why: "a thin whine: a mind's hum and a car going by" },
     PFT: { kinds: ["fizzle", "silenced"], why: "a muffled puff: a dud and a silenced shot" },
     KTAK: { kinds: ["click", "rifle"], why: "a dry tick: a switch and a rifle's bolt" },
+    KROM: { kinds: ["rumble", "concussion"], why: "a low rolling KR-OM: a rumble and a blast without fire (the owner's pick KROOM)" },
     HNH: { kinds: ["pain", "effort"], why: "a held breath through the teeth: pain and strain" },
     PF: { kinds: ["relief", "sigh"], why: "a breath out: relief and a tired sigh" },
     SH: { kinds: ["shush", "rain"], why: "a steady hiss: a hush and falling rain" },
     FSHT: { kinds: ["cathiss", "thrown"], why: "a short hiss of air: a cat's spit and a thing flying by" },
     SHROM: { kinds: ["plane", "rocket"], why: "a jet roar passing: a plane and a rocket" },
-    ZR: { kinds: ["minigun", "drill"], why: "a spinning whirr: a barrel and a drill" }
+    ZR: { kinds: ["minigun", "drill"], why: "a spinning whirr: a barrel and a drill" },
+    SKRAKT: { kinds: ["crack", "impact"], why: "a hard hit that splits what it strikes: the crack of the struck thing" }
   }
 };
 /** the key a word is compared under for sharing (repeated letters collapsed, marks and hyphens removed) */
@@ -342,7 +349,7 @@ export const BANK = {
     sword:    B("SZING|SZLING", "SZKLINNG|SZINNG", "SZRINNNG|SZKLAANNG"),
     arrow:    B("FYT|FWIT", "TWIP|FFFT|SWIP", "SWIPP|TWIPP"),
     thrown:   B("FWIP|SZWIT", "SZWIK|FSZT", "SZWIKKT|ZWUPP"),
-    grenade:  B("BUM|FUUM", "TWUUM|BATUUM", "PTYK-KA-BUUM|PTYK-KA-TWUUM"),
+    grenade:  B("KDUMF|PDUMF", "PDUUM|KDUUMF", "PTYK-KA-PDUUM|KA-PDUUMF"),   // KINDS1: its own dry, short frag blast (BDUUM is the owner's cave-in)
     rocket:   B("FSSSZ|FSZUM", "FSZUUUM|FSSSZUM", "FSZRRUUUM|FFSZRRUUUM"),
     reload:   B("TCZYK-TCZAK|KTYK-TCZAK", "TCZYK-TCZAK-TCZYK|KTYK-TCZAK-KTYK", "TCZAK-TCZYK-TCZAK|KTYK-TCZAK-KTYK-TCZAK", "TCZYK-TCZAK"),
     ambulance:B("IJO-IJO|IJOO-IJOO", "IJO-IJO-IJO|IJOO-IJOO-IJOO", "IJO-IJO-IJO-IJO|IJOO-IJOO-IJOO-IJOO", "IJO-IJO"),
@@ -352,6 +359,15 @@ export const BANK = {
     rain:     B("SZSZSZ|PSZSZ", "TSSSSZ|SSSSSZ", "SSSSSSSZ|PSSSSSSZ"),
     storm:    B("BRRMM|KRRMM", "KRAKUUM|KRADUUM", "KRA-KA-WRRUMM|KRA-KA-PFRRUMM"),
     tornado:  B("HWRUU|WRRUU", "WRRUUUUSZ|HWRRUUUU", "HWRRRUUUMM|WRRRUUUUSZ"),
+    /* KINDS1 (2026-11-13) */
+    shockwave:B("HWUMF|FHUMF", "HWUUUMMF|FHUUUMMF", "HWUUUUMMFF|FHWUUUUMMFF"),
+    sonicboom:B("KDAKUM|TKAKUM", "KDAKUUM|TKRAKUUM", "KDAKUUUMM|KRABWUUMM"),
+    concussion:B("KRUMF|GRUMF", "KRUUM|KRRUUMF", "KRRUUUMM|KA-KRUUM"),
+    impact:   B("KTOK|TKAK", "KTOKK|PTOKK", "SKRAKKT|KTRAKKT"),
+    debris:   B("TK-KTYK-DUMF|TK-TK-DUMF", "KTAK-KTYK-TK-DUMF|KRAK-TK-DUMF", "KRAK-KLAKATA-DUMF|GDUMF-KRAK-DUMF", "TK-KTYK-TK"),
+    whizz:    B("PFWIT|TSIU", "FZWIT|PTSIU|ZWIPT", "TZWIPT|FZZWIPT|PTZIIU"),
+    casings:  B("TNK-TNK|KTNK-TK", "TNK-TNK-TNK|TNK-KTSZING|TK-TNK-TSZENG", "TNK-KTSZING-TNK-TK|KTSZING-TSZENG-TNK", "TNK-TNK-TNK"),
+    dryfire:  B("TK|KTK", "TCZK|TK-TCZK", "TCZK-TCZK|TK-TCZK-TK", "TK-TCZK"),
   },
   en: {
     punch:    B("THWAP|THOK|POW", "BAM|THWUP|WHAM", "THWAPP|WHAMM|KA-THWAPP"),
@@ -430,7 +446,7 @@ export const BANK = {
     sword:    B("SHING|SHLING", "SHINNG|SHKLINNG", "SHRINNNG|SHKLAANNG"),
     arrow:    B("FWIP|TSIP", "THWIP|FFFT", "THWIPP|FWIPP"),
     thrown:   B("FWUP|FSHT", "FSHHT|ZWUP", "FSHHHT|ZWUPP"),
-    grenade:  B("BOOM|FOOM", "TWOOM|BADOOM", "PTIK-KA-BOOM|PTIK-KA-TWOOM"),
+    grenade:  B("KDUMF|PDUMF", "KDOOMF|PDOOMF", "PTIK-KA-KDOOMF|KA-PDOOMF"),   // KINDS1: its own dry, short frag blast
     rocket:   B("FSHOOM|SHHROOM", "SHRROOM|FSSHOOM", "SHHRROOOM|FSSHHROOM"),
     reload:   B("TCHAK-TCHAK|SHLUK-KLAK", "TCHAK-TCHAK-TCHAK|SHLUK-KLAK-SHLUK", "TCHAK-SHLUK-TCHAK|SHLUK-KLAK-TCHAK", "TCHAK-TCHAK"),
     ambulance:B("NEEO-WEEO|NAAO-WAAO", "WEEO-NEEO-WEEO|NAAO-WAAO-NAAO", "NEEO-WEEO-NEEO-WEEO|NAAO-WAAO-NAAO-WAAO", "NEEO-WEEO"),
@@ -440,8 +456,249 @@ export const BANK = {
     rain:     B("SHHHH|PSHHH", "KSSHHH|SHHHHHH", "KSSSHHHH|SHHHHHHH"),
     storm:    B("BRRMM|KRMMM", "KRAKOOM|KRADOOM", "KRA-KA-BWROOMM|KRA-KA-GRROOMM"),
     tornado:  B("HWRROO|VRROO", "VRROOOOSH|HWRROOOO", "SHWRRROOOOMM|VRRROOOOSHH"),
+    /* KINDS1 (2026-11-13) */
+    shockwave:B("FHOMF|VWOMF", "VWOOOMMF|FHOOOMMF", "VWOOOOMMFF|FHWOOOOMMFF"),
+    sonicboom:B("KDAKOM|TKAKOM", "KDAKOOM|TKRAKOOM", "KDAKOOOMM|KRABWOOMM"),
+    concussion:B("KROMF|GDROMF", "KROOM|KRROOMF", "KRROOOMM|KA-KROOM"),
+    impact:   B("PTOK|TKAK", "KTAKT|PTOKK", "SKRAKKT|KTRAKKT"),
+    debris:   B("TK-KTOK-DOMF|TK-TK-DOMF", "KTAK-KTOK-TK-DOMF|KRAK-TK-DOMF", "KRAK-KLAKATA-DOMF|GDOMF-KRAK-DOMF", "TK-KTOK-TK"),
+    whizz:    B("PFWIT|TSIW", "FZWIT|PTSIW|ZWIPT", "TZWIPT|FZZWIPT|PTZEEW"),
+    casings:  B("TNK-TNK|KTNK-TK", "TNK-TNK-TNK|TNK-KTSHING|TK-TNK-TSHENG", "TNK-KTSHING-TNK-TK|KTSHING-TSHENG-TNK", "TNK-TNK-TNK"),
+    dryfire:  B("TK|KTK", "TCHK|TK-TCHK", "TCHK-TCHK|TK-TCHK-TK", "TK-TCHK"),
   }
 };
+
+/* ---------- KINDS1 (2026-11-13, SPEC-KINDS items 1-6): MATERIAL, PIECES, FIRE INTENSITY, TAILS and CHAINS ----------
+   MATERIAL is a call-time option (`material`): what is HIT, broken or blown up. It changes the cut-off and the tail of the word, the
+   kind keeps its attack. A kind takes it through its VARIANT table (KINDS[id].vary): impact (what arrives at a target), debris (what
+   comes down, by material and PIECES size), struck (a blow landing on it: punch smash slap thud), blast (the blast's lead-in from what
+   blows up: boom grenade), break (crack crash crumble: wood splinters, metal tears; glass = the shatter words, earth = crumble).
+   A material without a row keeps the kind's own words; the word's character (what LOOK draws from) still takes the material.
+   FIRE takes `intensity` 1..5 (ember, flame, burning, blaze, inferno) or `stage` "ignite" | "out" (catching fire, put out): each a
+   row of the fire table with its own flow style, "!" cap and stretch (the map's fire level picks the row; up = ignite, down = out).
+   Rules are the banks' (2-4 words per tier, no diacritic, no dictionary or near word, every syllable reviewed); a hyphenated word in
+   a table is one sound's sequence (KTOK-GDOK-KRAK) or the kind's own lead-in (KA-), never another sound's signature. */
+export const MATS = ["stone", "wood", "metal", "earth", "water", "glass", "flesh", "shield"];
+export const MATERIAL_ALIAS = { concrete: "stone", rock: "stone", brick: "stone", masonry: "stone", asphalt: "stone", tile: "stone",
+  timber: "wood", plank: "wood", tree: "wood", door: "wood", furniture: "wood", steel: "metal", iron: "metal", car: "metal", vehicle: "metal",
+  armor: "metal", armour: "metal", dirt: "earth", soil: "earth", sand: "earth", grass: "earth", ground: "earth", mud: "earth", snow: "earth",
+  liquid: "water", sea: "water", river: "water", lake: "water", window: "glass", ice: "glass", crystal: "glass", body: "flesh", meat: "flesh",
+  energy: "shield", forcefield: "shield", "force-field": "shield", barrier: "shield" };
+/** the material of a call (`material`: one of MATS or an alias) or null */
+export function materialOf(m) { const x = String(m ?? "").toLowerCase().trim(); return MATS.includes(x) ? x : MATERIAL_ALIAS[x] ?? null; }
+/* the character a material gives the word (LOOK reads character.material / metal / wet / hard / texture) */
+export const MAT_CHAR = { stone: { material: "stone", hard: 1, metal: 0, wet: 0, texture: "jagged" }, wood: { material: "wood", hard: 0.7, metal: 0, wet: 0, texture: "crisp" },
+  metal: { material: "metal", hard: 1, metal: 1, wet: 0, texture: "ringing" }, earth: { material: "stone", hard: 0.3, metal: 0, wet: 0, texture: "gritty" },
+  water: { material: "water", hard: 0.1, metal: 0, wet: 1, texture: "bubbly" }, glass: { material: "glass", hard: 1, metal: 0.2, wet: 0, texture: "jagged" },
+  flesh: { material: "flesh", hard: 0.3, metal: 0, wet: 0.5, texture: "smooth" }, shield: { material: "energy", hard: 0.5, metal: 0.3, electric: 0.8, wet: 0, texture: "ringing" } };
+/* PIECES (debris): the size of what comes down picks the tier (small grit and shards, medium bricks and planks, large slabs and beams);
+   without it the loudness does. A number 0..1 works as well. */
+export const PIECES = { small: "s", tiny: "s", medium: "m", large: "l", big: "l", huge: "l", s: "s", m: "m", l: "l" };
+export function piecesOf(p) { if ( Number.isFinite(p) ) return p < 0.34 ? "s" : p < 0.67 ? "m" : "l"; return PIECES[String(p ?? "").toLowerCase()] ?? null; }
+/* the fire ladder */
+export const FIRE_LEVELS = { ember: 1, flame: 2, burning: 3, blaze: 4, inferno: 5 };
+export const FIRE_STAGES = ["ignite", "out"];
+export function intensityOf(x) { if ( Number.isFinite(x) ) return Math.max(1, Math.min(5, Math.round(x))); return FIRE_LEVELS[String(x ?? "").toLowerCase()] ?? null; }
+/* the variant tables. A string instead of words = that kind's own bank (break on glass = the shatter words) */
+export const VARIANTS = {
+  en: {
+    impact: {
+      stone:  B("PTAK|TKAK", "KRAKT|PTAKT", "KRAKK-KRRK|KRAKKT"),
+      wood:   B("THOK|TWOK", "KTOKK|GDOKK", "KTOKK-KRRK|GDOKK-KRAK"),
+      metal:  B("TNNK|KTANG", "KTANNG|TSANNG", "SKRANNGG|KTRANNG"),
+      earth:  B("PFUT|TFUMF", "PFUMF|KFUMF", "GWUMFF|BWUMFF"),
+      water:  B("TSIPP|PSIP", "PSHLIP|TSHLUP", "SHPLOOMP|PSHLOOMP"),
+      glass:  B("TKSS|TSIK", "PTISSK|KTISSK", "KTISSHK|SKRISSHK"),
+      flesh:  B("THK|TWUK", "SHTUK|TWUKK", "THUKSH|SHWUKKSH"),
+      shield: B("BWOMM|VWOMM", "VWONNG|ZWONNG", "VWONNGG|ZWAONNGG")
+    },
+    debris: {
+      stone:  B("TK-TK-KTK|TKK-TK", "KTOK-GDOK-KRAK|KTAK-GDOK-TK", "GDOOM-KRRK-DOMF|GDOMF-KRAK-GDOMF", "TK-TK-KTK"),
+      wood:   B("KTOK-TK-KTOK|TK-KTOK", "KLOKATA-KTOK|KTOKATA-KTOK", "KRRAK-BDOKK|KRRAK-BDOKK-KTOK", "KTOK-TK-KTOK"),
+      metal:  B("TNK-TNNG-TK|TNK-TK-TNK", "KTANG-KLANGATA|KTANG-TNK-KTANG", "GDANNG-SKRREEE|GDANNG-KLANGATA-TNK", "TNK-TNNG-TK"),
+      earth:  B("PF-PFT-FUMF|PFT-PF", "FUMF-PFUT-SHHH|PFUT-FUMF", "GWUMF-FSSSHHH|GWUMF-PFUT-FSSHH", "PF-PFT-PF"),
+      water:  B("PLIP-PLIP-BLUP|PLIP-BLUP", "SHPLA-PLIP-PLIP|PLIP-BLUP-PLIP", "SHPLUMP-PLIP-PLIP|BLUP-SHPLUMP-PLIP", "PLIP-PLIP-BLUP"),
+      glass:  B("TSS-TSIK-TSS|TSIK-TSS", "KSSIK-TSIKKA-TSIK|TSIKKA-TSIK", "KRISSHATA-TSIK|SKRISH-TSIKKA-TSIK", "TSS-TSIK-TSS")
+    },
+    struck: {
+      stone:  B("TKAK|KRAKT", "THWAKRAK|SKRAKT", "KA-SKRAKKT|THWAKRAKK"),
+      wood:   B("THOK|GDOK", "TWOKK|KTOKK", "TWOKKT|KA-TWOKK"),
+      metal:  B("KTANG|TSANG", "PAKANNG|KWANNG", "SKRAANNGG|KA-KWANNG"),
+      earth:  B("TFUMF|PFUMF", "THWUMF|KFUMF", "GWUMMF|KA-THWUMF"),
+      water:  B("BLAPSH|TSHLAP", "SPLUMPSH|PLOOMSH", "KA-SPLOOSH|SPLOOMPSH"),
+      glass:  B("TKISH|PAKSH", "PAKSSH|KRISSHK", "THWAKRISSH|PAKRISSHK"),
+      flesh:  B("THUKSH|TWUKSH", "THWAKSH|WHAMSH", "THWAAKSH|KA-WHAMSH"),
+      shield: B("BWOMM|VWOMM", "VWONNG|ZWONNG", "VWONNGG|KA-VWONNG")
+    },
+    blast: {
+      stone:  B("SKRAKOM|KRAKOMF", "KRA-KOOM|SKRRAKOOM", "KA-SKRRAKOOM|SKRRAKOOMM"),
+      wood:   B("KRROKOM|BDOKOM", "KRRAKOKOOM|BDOKOOM", "KA-KRRAKOKOOM|BDOKOOMM"),
+      metal:  B("BWANGOM|KLANGOM", "BWANNGOOM|KLANGOOM", "KA-BWANNGOOM|BWANNGOOMM"),
+      earth:  B("FUMFOM|PFUMFOM", "FWUMFOOM|GWUMFOOM", "KA-FWUMFOOM|FWUMFOOMM"),
+      water:  B("PLOOMSH|SHPLOOM", "BWOOSHPLOOM|SHPLOOOM", "KA-BWOOSHPLOOM|SHPLOOMM"),
+      glass:  B("KSHRAKOM|TSKRAKOM", "KSSHRAKOOM|KSHRAKOOM", "KA-KSSHRAKOOM|KSSHRAKOOMM")
+    },
+    break: {
+      wood:   B("KRKK|KRRKT", "SKRRAKKT|SPRAKKT", "KRRIKSPRAKK|SKRRAKSPRAK"),
+      metal:  B("SHRRAP|SKRRANK", "SHRRRAPT|SKRRINNK", "SKRRREEENK|SHKRRAANNK"),
+      glass:  "shatter",
+      earth:  "crumble"
+    },
+    fire: {
+      1:      B("TSIK…|TS-TSIK", "TSIK-TS|TSIK-TSIK", "TS-TSIK-TSIK|TSIKKA-TSIK", "TS-TSIK-TS"),
+      2:      B("FUFF|FWUH…", "FWUFF|FHUUF", "FWUUFF|FHWUUF"),
+      3:      B("FWRR|KRITZ-FWRR", "FWRRR|KRITZ-FWRR-KRAK", "FWRRRR-KRAK|KRITZ-FWRRRR-KRAK"),
+      4:      B("FWOORR|HWRROSH", "FWOOORRR|HWRROOOSH", "HWRROOOOSH|FAWOOORRR"),
+      5:      B("GWRROOM|GHRROOM", "GWRROOOMM|GHRROOOMM", "GWRROOOOMMM|GHRROOOOMMM"),
+      ignite: B("FWUF|FUWOF", "FWOOFF|PFWOOFF", "FAWOOFF|KA-FWOOFF"),
+      out:    B("TSSS…|FSSST…", "FSSSHHT…|TSSSHHT…", "PSSSHHH…|PFSSSHHT…")
+    }
+  },
+  pl: {
+    impact: {
+      stone:  B("KTAK|TKAK", "KRAKT|SKRAKT", "KRAKK-KRRK|KTRAKK"),
+      wood:   B("TWOK|KTOK", "KTOKK|TWOKK", "TWOKK-KRRK|KTOKK-KRAK"),
+      metal:  B("TNNK|PTANG", "KTANNG|PTANNG", "SKRANNGG|KTRANNG"),
+      earth:  B("PFUT|TFUMF", "PFUMF|BFUMF", "GWUMFF|KFUMFF"),
+      water:  B("TSIPP|PSIP", "PSZLIP|TSZLUP", "SZPLUUMP|PSZLUUMP"),
+      glass:  B("TKSS|TSIK", "KTISSK|TKISSK", "KTISZK|SKRISZK"),
+      flesh:  B("TWUK|GWUK", "TWUKSZ|SZWUKK", "TWUKKSZ|SZWUKKSZ"),
+      shield: B("WZOMM|BWUMM", "WZONNG|WZANNG", "WZONNGG|WZAONNGG")
+    },
+    debris: {
+      stone:  B("TK-TK-KTK|TKK-TK", "KTOK-GDOK-KRAK|KTAK-GDOK-TK", "GDUUM-KRRK-DUMF|GDUMF-KRAK-GDUMF", "TK-TK-KTK"),
+      wood:   B("KTOK-TK-KTOK|TK-KTOK", "KLOKATA-KTOK|KTOKATA-KTOK", "KRRAK-BDOKK|KRRAK-BDOKK-KTOK", "KTOK-TK-KTOK"),
+      metal:  B("TNK-TNNG-TK|TNK-TK-TNK", "KTANG-KLANKATA|KTANG-TNK-KTANG", "GDANNG-SKRRIII|GDANNG-KLANKATA-TNK", "TNK-TNNG-TK"),
+      earth:  B("PF-PFT-FUMF|PFT-PF", "FUMF-PFUT-SSSZ|PFUT-FUMF", "GWUMF-FSSSSZ|GWUMF-PFUT-FSSZ", "PF-PFT-PF"),
+      water:  B("PLIP-PLIP-PLUP|PLIP-PLUP", "SZPLA-PLIP-PLIP|PLIP-PLUP-PLIP", "SZPLUMP-PLIP-PLIP|PLUP-SZPLUMP-PLIP", "PLIP-PLIP-PLUP"),
+      glass:  B("TSS-TSIK-TSS|TSIK-TSS", "KSSIK-TSIKKA-TSIK|TSIKKA-TSIK", "KRISZATA-TSIK|SKRISZ-TSIKKA-TSIK", "TSS-TSIK-TSS")
+    },
+    struck: {
+      stone:  B("TKAK|KRAKT", "TWAKRAK|SKRAKT", "KA-SKRAKKT|TWAKRAKK"),
+      wood:   B("TWOK|KTOK", "TWOKK|KTOKK", "TWOKKT|KA-TWOKK"),
+      metal:  B("KTANG|PTANNG", "PAKANNG|KTANNG", "SKRAANNGG|KA-PAKANNG"),
+      earth:  B("TUMF|PFUMF", "TWUMF|KFUMF", "GWUMMF|KA-TWUMF"),
+      water:  B("PLAPSZ|BLAPSZ", "SPLUMPSZ|PLUUMSZ", "KA-SPLOOSZ|SPLUUUMSZ"),
+      glass:  B("TKISZ|PAKSZ", "PAKSSZ|KRISZK", "TWAKRISZ|PAKRISZK"),
+      flesh:  B("TWUKSZ|TWAPSZ", "TWAKSZ|BAMSZ", "TWAAKSZ|KA-BAMSZ"),
+      shield: B("WZOMM|BWUMM", "WZONNG|WZANNG", "WZONNGG|KA-WZONNG")
+    },
+    blast: {
+      stone:  B("SKRAKUM|KRAKUMF", "KRRAKUUM|SKRRAKUUM", "KA-SKRRAKUUM|SKRRAKUUMM"),
+      wood:   B("KRROKUM|BDOKUM", "KRRAKOKUUM|BDOKUUM", "KA-KRRAKOKUUM|BDOKUUMM"),
+      metal:  B("BWANGUM|KLANKUM", "BWANNGUUM|KLANKUUM", "KA-BWANNGUUM|BWANNGUUMM"),
+      earth:  B("FUMFUM|PFUMFUM", "FWUMFUUM|GWUMFUUM", "KA-FWUMFUUM|FWUMFUUMM"),
+      water:  B("PLUUMSZ|SZPLUUM", "BWUUSZPLUUM|SZPLUUUM", "KA-BWUUSZPLUUM|SZPLUUMM"),
+      glass:  B("KSZRAKUM|TSKRAKUM", "KSSZRAKUUM|KSZRAKUUM", "KA-KSSZRAKUUM|KSZRAKUUMM")
+    },
+    break: {
+      wood:   B("KRKK|KRRKT", "SKRRAKKT|SPRAKKT", "KRRIKSPRAKK|SKRRAKSPRAK"),
+      metal:  B("SZRRIP|KRRINK", "HRRRAPT|SKRRINNK", "SKRRRIIINK|SZKRRAANNK"),
+      glass:  "shatter",
+      earth:  "crumble"
+    },
+    fire: {
+      1:      B("TSYK…|TS-TSYK", "TSYK-TS|TSYK-TSYK", "TS-TSYK-TSYK|TSYKKA-TSYK", "TS-TSYK-TS"),
+      2:      B("FUF|FWUH…", "FWUFF|FHUUF", "FWUUFF|FHWUUF"),
+      3:      B("FWRR|KRIT-FWRR", "FWRRR|KRIT-FWRR-KRAK", "FWRRRR-KRAK|KRIT-FWRRRR-KRAK"),
+      4:      B("FWUURR|HWRUSZ", "FWUUURRR|HWRRUUUSZ", "HWRRUUUUSZ|FAWUUURRR"),
+      5:      B("GWRRUUM|HRRWUUM", "GWRRUUUMM|HRRWUUUMM", "GWRRUUUUMMM|HRRWUUUUMMM"),
+      ignite: B("FWUF|FUWUF", "FWUUFF|PFWUUFF", "FAWUUFF|KA-FWUUFF"),
+      out:    B("TSSS…|FSSST…", "FSSSZT…|TSSSZT…", "PSSSZ…|PFSSSZT…")
+    }
+  }
+};
+/* which kinds take which table */
+export const VARY = { impact: ["impact"], debris: ["debris"], struck: ["punch", "smash", "slap", "thud"], blast: ["boom"], break: ["crack", "crash", "crumble"], fire: ["fire"] };
+for ( const [table, ids] of Object.entries(VARY) ) for ( const id of ids ) KINDS[id].vary = table;
+KINDS.debris.sized = true;
+/* a fire row behaves like its own sound: ember ticks (percussive, never "!"), a quiet steady flame, a crackling fire, a blaze in
+   gusts, an inferno's drone (long runs); catching fire swells, put out fades with no "!" */
+export const VARIANT_META = { fire: {
+  1: { perc: true, repeat: "last", maxBangs: 0, flow: "crackle", env: "beat", hold: ["V"] },
+  2: { maxBangs: 1, flow: "steady", env: "fade", hold: ["V", "H", "F"] },
+  3: { flow: "crackle", env: "swell", hold: ["R", "V"] },
+  4: { flow: "gust", env: "swell", hold: ["V", "R", "S"] },
+  5: { flow: "drone", env: "swell", hold: ["V", "R", "M"], run: 10 },
+  ignite: { env: "swell", hold: ["V", "F"] },
+  out: { maxBangs: 0, flow: "steady", env: "fade", hold: ["S", "H", "Z"], run: 10 }
+} };
+/* ---------- TAILS: the twin of PREFIXES. A sound's OWN aftermath, each with its reason: what follows it by itself (the wave and the
+   falling debris after a blast, the tinkle after glass, the casings after a burst, the chips knocked off a wall). `t` ms after the sound
+   starts, `rel` its loudness against the sound's, `place` where it belongs (source, target, ring, around, feet), `skip` materials where
+   it does not happen. L.vocab.tails(kind, o) lists them; L.chain(kind, { tails: true }) letters them in order. ---------- */
+export const TAILS = {
+  boom:      [{ kind: "shockwave", t: 60, rel: 0.75, place: "ring", why: "the pressure wave rolls out of every blast" },
+              { kind: "debris", t: 450, rel: 0.55, place: "around", why: "what the blast threw up comes down" }],
+  grenade:   [{ kind: "whizz", t: 150, rel: 0.5, place: "around", why: "a frag grenade's shrapnel flies past" },
+              { kind: "debris", t: 450, rel: 0.35, pieces: "small", place: "around", why: "grit and small stones thrown by the grenade land" }],
+  concussion:[{ kind: "shockwave", t: 50, rel: 0.8, place: "ring", why: "a blast without fire is mostly its pressure wave" },
+              { kind: "debris", t: 420, rel: 0.5, place: "around", why: "what the blast threw up comes down" }],
+  sonicboom: [{ kind: "shockwave", t: 90, rel: 0.7, place: "ring", why: "the sonic boom's front passes over as a wave" }],
+  crash:     [{ kind: "debris", t: 350, rel: 0.6, place: "around", why: "a collapse ends in falling rubble" }],
+  smash:     [{ kind: "debris", t: 300, rel: 0.45, pieces: "small", place: "around", why: "a smashed thing sheds pieces" }],
+  shatter:   [{ kind: "debris", t: 200, rel: 0.45, material: "glass", pieces: "small", place: "around", why: "broken glass tinkles down" }],
+  crumble:   [{ kind: "debris", t: 300, rel: 0.4, pieces: "small", place: "around", why: "crumbling masonry trickles down" }],
+  impact:    [{ kind: "debris", t: 120, rel: 0.35, pieces: "small", place: "target", skip: ["water", "flesh", "shield"], why: "a hit knocks chips off what it hits" }],
+  gunfire:   [{ kind: "casings", t: 150, rel: 0.4, place: "feet", why: "spent casings ring on the ground under the gun" }],
+  minigun:   [{ kind: "casings", t: 200, rel: 0.45, place: "feet", why: "a stream of spent casings pours from the gun" }],
+  rifle:     [{ kind: "casings", t: 350, rel: 0.3, place: "feet", why: "the spent casing ejected after the shot" }],
+  pistol:    [{ kind: "casings", t: 250, rel: 0.3, place: "feet", why: "the spent casing ejected after the shot" }]
+};
+/* ---------- CHAINS: an event told in order (the owner: the lettering tells the story of the event by tempo and character: it builds,
+   peaks, develops and resolves). Each step: kind, t (ms from the start), rel (loudness against the chain's), role (build | peak | develop
+   | resolve), place (source | target | ring | around | feet | bounce | behind: the caller maps each to a point with `places`), and any
+   word option (material, pieces, intensity, stage, long). L.chain(name | steps | kind, opts) letters one; L.vocab.chain plans one. */
+export const ROLES = ["build", "peak", "develop", "resolve"];
+export const PLACES = ["source", "target", "ring", "around", "feet", "bounce", "behind"];
+export const CHAINS = {
+  explosion: { why: "a blast on the map: the blast, its wave, then the debris coming down from big to small", steps: [
+    { kind: "boom", t: 0, rel: 1, role: "peak", place: "source" },
+    { kind: "shockwave", t: 60, rel: 0.75, role: "develop", place: "ring" },
+    { kind: "debris", t: 420, rel: 0.6, pieces: "large", role: "develop", place: "around" },
+    { kind: "debris", t: 760, rel: 0.45, pieces: "medium", role: "resolve", place: "around" },
+    { kind: "debris", t: 1150, rel: 0.3, pieces: "small", role: "resolve", place: "around" }] },
+  grenade: { why: "the pin, two bounces, the blast, its shrapnel, the grit coming down", steps: [
+    { kind: "click", t: 0, rel: 0.25, role: "build", place: "source" },
+    { kind: "impact", t: 500, rel: 0.3, role: "build", place: "bounce" },
+    { kind: "impact", t: 760, rel: 0.25, role: "build", place: "bounce" },
+    { kind: "grenade", t: 1000, rel: 1, role: "peak", place: "target" },
+    { kind: "whizz", t: 1150, rel: 0.5, role: "develop", place: "around" },
+    { kind: "debris", t: 1450, rel: 0.35, pieces: "small", role: "resolve", place: "around" }] },
+  collapse: { why: "a wall or a building gives way: the warning crumble, the crash, the rubble settling from big to small", steps: [
+    { kind: "crumble", t: 0, rel: 0.5, role: "build", place: "source" },
+    { kind: "crash", t: 500, rel: 1, role: "peak", place: "source" },
+    { kind: "debris", t: 900, rel: 0.65, pieces: "large", role: "develop", place: "around" },
+    { kind: "debris", t: 1300, rel: 0.45, pieces: "medium", role: "resolve", place: "around" },
+    { kind: "debris", t: 1800, rel: 0.3, pieces: "small", role: "resolve", place: "around" }] },
+  sonicboom: { why: "a flier passing the sound barrier: the approach, the double crack, the wave", steps: [
+    { kind: "zoom", t: 0, rel: 0.5, role: "build", place: "source" },
+    { kind: "sonicboom", t: 300, rel: 1, role: "peak", place: "source" },
+    { kind: "shockwave", t: 400, rel: 0.7, role: "develop", place: "ring" }] },
+  shot: { why: "one shot: the report at the muzzle, the impact at the target by its material", steps: [
+    { kind: "pistol", t: 0, rel: 1, role: "peak", place: "source" },
+    { kind: "impact", t: 80, rel: 0.55, role: "resolve", place: "target" }] },
+  miss: { why: "a missed shot: the report, the bullet passing the target, the impact on what is behind it", steps: [
+    { kind: "pistol", t: 0, rel: 1, role: "peak", place: "source" },
+    { kind: "whizz", t: 60, rel: 0.5, role: "develop", place: "target" },
+    { kind: "impact", t: 160, rel: 0.45, role: "resolve", place: "behind" }] },
+  burst: { why: "a burst of fire: the rattle at the muzzle, impacts at the target, casings at the shooter's feet", steps: [
+    { kind: "gunfire", t: 0, rel: 1, role: "peak", place: "source" },
+    { kind: "impact", t: 100, rel: 0.5, role: "develop", place: "target" },
+    { kind: "casings", t: 180, rel: 0.35, role: "resolve", place: "feet" }] },
+  ignite: { why: "a fire catching and growing to a blaze", steps: [
+    { kind: "fire", stage: "ignite", t: 0, rel: 0.7, role: "build", place: "source" },
+    { kind: "fire", intensity: 2, t: 450, rel: 0.5, role: "build", place: "source" },
+    { kind: "fire", intensity: 3, t: 1200, rel: 0.65, role: "develop", place: "source" },
+    { kind: "fire", intensity: 4, t: 2200, rel: 1, role: "peak", place: "source" }] },
+  fireout: { why: "a fire put out: it sinks, hisses, and leaves embers", steps: [
+    { kind: "fire", intensity: 3, t: 0, rel: 1, role: "peak", place: "source" },
+    { kind: "fire", intensity: 2, t: 900, rel: 0.6, role: "develop", place: "source" },
+    { kind: "fire", stage: "out", t: 1700, rel: 0.55, role: "resolve", place: "source" },
+    { kind: "fire", intensity: 1, t: 2700, rel: 0.3, role: "resolve", place: "source" }] }
+};
+/* the keys of a chain step that are word options or step data (the rest of a step goes to L.play) */
+export const STEP_KEYS = ["kind", "t", "rel", "loud", "long", "role", "place", "why", "material", "pieces", "intensity", "stage", "template", "prefix", "bangs", "skip"];
 
 /* ---------- numbers: quantities, multipliers, ranges (REQUESTS ldic 6) ---------- */
 const NUM = {
@@ -605,7 +862,8 @@ export const ALLOW = {
     PLUP: "the owner's water family (a small drop)",
     PLUMP: "the owner's water family (a heavy drop)",
     DZING: "the Polish comic chime (DZYN without its diacritic), one letter from the loan DING only",
-    BLAM: "the comic gunshot read the same in Polish comics (iconic in English), one letter from BRAM only"
+    BLAM: "the comic gunshot read the same in Polish comics (iconic in English), one letter from BRAM only",
+    KRUM: "the owner's fixed pick KRUUM for a blast without fire (2026-11-13), one vowel from the plain word KROM only"
   },
   en: {
     KRAK: "the owner's own example; the comic's crack",
@@ -922,7 +1180,8 @@ export const FLOW = { hiss: "steady", shush: "steady", fizzle: "steady", psychic
   purr: "steady", snakehiss: "steady", snarl: "drone", plane: "drone", minigun: "drone", rocket: "drone", trumpet: "gust",
   helicopter: "cycle", laserpistol: "cycle", bark: "cycle", squeak: "cycle", meow: "gust", reload: "cycle",
   ambulance: "cycle", police: "cycle", firetruck: "cycle", fastcar: "gust", clunker: "cycle", mech: "cycle", drill: "drone", hammer: "cycle",
-  hail: "crackle", rain: "steady", storm: "mix", tornado: "mix" };
+  hail: "crackle", rain: "steady", storm: "mix", tornado: "mix",
+  shockwave: "gust", debris: "crackle", casings: "cycle", dryfire: "cycle" };
 /* composite sounds (mix): the parts a storm or a tornado is made of, the first is the bed, the others come and go */
 export const MIX = { storm: ["rain", "wind", "thunder"], tornado: ["wind", "rumble", "crash"] };
 /* ---------- CHARACTER: what the sound is LIKE, so the lettering's look can fit it (the user: "napisy mają pasować wyglądem do
@@ -976,7 +1235,10 @@ const CHAR = {
   ambulance: ".5 .4 0 .45 .5 0 machine smooth", police: ".5 .4 0 .4 .6 .1 machine smooth", firetruck: ".6 .6 0 .5 .4 .2 machine ringing",
   fastcar: ".6 .6 0 .7 0 .3 machine smooth", clunker: ".6 .6 0 .8 0 .1 machine shaky", mech: "1 1 0 1 .3 0 machine jagged",
   drill: ".8 .3 0 .8 .4 .2 machine gritty", hammer: "1 .5 0 .9 0 0 metal ringing", hail: ".7 .2 .4 0 0 -.6 water crisp",
-  rain: "0 .3 1 0 0 -.3 water smooth", storm: ".5 1 .7 0 .5 -.2 air shaky", tornado: ".6 1 0 0 0 0 air billowy"
+  rain: "0 .3 1 0 0 -.3 water smooth", storm: ".5 1 .7 0 .5 -.2 air shaky", tornado: ".6 1 0 0 0 0 air billowy",
+  shockwave: ".2 1 0 0 0 .3 air billowy", sonicboom: ".7 1 0 0 0 0 air shaky", concussion: ".7 1 0 0 0 0 stone billowy",
+  impact: ".9 .5 0 .2 0 0 stone crisp", debris: ".8 .6 0 .2 0 0 stone gritty",
+  whizz: ".6 .05 0 .4 0 0 metal smooth", casings: ".7 .05 0 1 0 .2 metal ringing", dryfire: ".8 .05 0 .6 0 0 machine crisp"
 };
 for ( const [id, s] of Object.entries(CHAR) ) {
   const [hard, heavy, wet, metal, electric, heat, material, texture] = s.split(" ");
@@ -1010,6 +1272,7 @@ KIND_ENV.fade += " cathiss snakehiss";
 KIND_ENV.arc += " meow plane arrow";
 KIND_ENV.beat += " purr helicopter reload ambulance police firetruck clunker mech hammer hail";
 KIND_ENV.arc += " fastcar"; KIND_ENV.swell += " drill storm tornado"; KIND_ENV.fade += " rain";
+KIND_ENV.hit += " sonicboom concussion impact dryfire"; KIND_ENV.arc += " shockwave whizz"; KIND_ENV.beat += " debris casings";   // KINDS1
 for ( const [env, ids] of Object.entries(KIND_ENV) ) for ( const id of ids.split(" ") ) KINDS[id].env = env;
 /** the envelope of a plain text's mood (callers that pass their own text: the engine's mood decides) */
 export const MOOD_ENV = { impact: "hit", crack: "hit", crash: "hit", boom: "hit", zap: "hit", splash: "hit", pain: "hit", tick: "hit",
@@ -1079,18 +1342,33 @@ export function createVocab() {
     warn(`kind:${kind}`, `unknown sound kind "${kind}", using "punch"`);
     return "punch";
   }
-  /* a kind's templates in a language, falling back tier -> neighbour tiers -> English */
-  function listOf(id, lang, tier) {
-    const order = { s: ["s", "m", "l"], m: ["m", "s", "l"], l: ["l", "m", "s"], st: ["st"] }[tier];
-    for ( const L of [lang, "en"] ) { const b = bank[L]?.[id]; if ( !b ) continue; for ( const t of order ) if ( b[t]?.length ) return { list: b[t], lang: L, tier: t }; }
+  /* a kind's templates in a language, falling back tier -> neighbour tiers -> English; v = a variant row (KINDS1) instead of the bank */
+  const ORDER = { s: ["s", "m", "l"], m: ["m", "s", "l"], l: ["l", "m", "s"], st: ["st"] };
+  function listOf(id, lang, tier, v = null) {
+    if ( v?.words ) { for ( const t of ORDER[tier] ) if ( v.words[t]?.length ) return { list: v.words[t], lang: v.lang, tier: t }; }
+    for ( const L of [lang, "en"] ) { const b = bank[L]?.[id]; if ( !b ) continue; for ( const t of ORDER[tier] ) if ( b[t]?.length ) return { list: b[t], lang: L, tier: t }; }
     return { list: [], lang, tier };
   }
+  /* KINDS1: the variant of a call: a material row (impact, debris, struck, blast, break) or a fire row (intensity, stage) ->
+     { table, key, meta, words, lang } (words = a tier object in `lang`, or English when the language has no row) or null */
+  function variantOf(id, o, lang) {
+    const table = kinds[id]?.vary; if ( !table ) return null;
+    const key = table === "fire" ? (FIRE_STAGES.includes(o.stage) ? o.stage : intensityOf(o.intensity)) : materialOf(o.material);
+    if ( key == null ) return null;
+    const rowOf = (L) => { const r = VARIANTS[L]?.[table]?.[key]; return typeof r === "string" ? bank[L]?.[r] : r; };
+    const L = rowOf(lang) ? lang : rowOf("en") ? "en" : null;
+    return L ? { table, key: String(key), meta: VARIANT_META[table]?.[key] ?? null, words: rowOf(L), lang: L } : null;
+  }
+  /* the kind as a variant row makes it behave (an ember is percussive, an inferno drones) */
+  const effective = (k, meta) => (meta ? { ...k, ...meta, stretchHold: meta.perc ? [] : (meta.hold ?? k.stretchHold), hold: meta.hold ?? k.hold } : k);
+  const keOf = (w) => { const k = kinds[w.kind] ?? {}; return effective(k, w.variant != null ? VARIANT_META[k.vary]?.[w.variant] ?? null : null); };
   /* the accent of a word's FINAL text (after stretch, prefix, "!"): word.accent / word.peak, sound.peak and play.accent */
   const withAccent = (w) => {
-    const k = kinds[w.kind] ?? {};
+    const k = keOf(w);
     const a = accentOf(w.text, { env: k.env, hold: k.hold, lang: w.lang });
     const sound = { ...w.sound, peak: a.peak };
     const character = characterOf({ def: k, kind: w.kind, loud: w.loud, long: w.long, env: a.env, steady: w.style === "steady" });
+    if ( w.material && MAT_CHAR[w.material] ) Object.assign(character, MAT_CHAR[w.material]);   // KINDS1: what is hit shows
     return Object.assign(w, { accent: a.accent, peak: a.peak, env: a.env, character, sound, play: { ...w.play, sound, accent: a.accent, character } });
   };
   const pickMotion = (k, R) => ({ in: R.pick(k.motion.in), holdKind: R.pick(k.motion.hold), out: R.pick(k.motion.out) });
@@ -1101,7 +1379,8 @@ export function createVocab() {
       -> { text, kind, lang, tier, loud, long, bangs, step, template, prefix, syllables?, mood, sound, motion, play, accent, peak, env, character }
       Loudness picks the tier (the word), the "!" count, the prefix and the size; duration alone decides how much the word stretches. */
   function word(kind, o = {}) {
-    const id = kindOf(kind), k = kinds[id], lang = langOf(o.lang, langs());
+    const id = kindOf(kind), lang = langOf(o.lang, langs());
+    const v = variantOf(id, o, lang), k = effective(kinds[id], v?.meta), material = materialOf(o.material);
     const step = Math.max(0, Number.isFinite(o.step) ? Math.floor(o.step) : 0);
     const base = loudOf(o), loudEff = base + 0.15 * step, loud = clamp01(loudEff);
     /* duration: the caller's, else the kind's natural length (a crack is short, wind is long), a loud sound ringing a little longer */
@@ -1109,11 +1388,11 @@ export function createVocab() {
     const long = clamp01((asked ?? clamp01(k.sound.long + 0.15 * (loud - 0.4))) + 0.12 * step);
     const seeded = o.seed != null;
     const R = rng(seeded ? `${o.seed}|${id}|${lang}` : (Math.random() * 4294967296) >>> 0);
-    const tier = o.stream ? "st" : tierOf(loud);
-    let { list, lang: usedLang, tier: usedTier } = listOf(id, lang, tier);
-    if ( o.stream && !list.length ) ({ list, lang: usedLang, tier: usedTier } = listOf(id, lang, tierOf(loud)));
+    const tier = o.stream ? "st" : (k.sized && piecesOf(o.pieces)) || tierOf(loud);       // KINDS1: debris pieces pick the tier
+    let { list, lang: usedLang, tier: usedTier } = listOf(id, lang, tier, v);
+    if ( o.stream && !list.length ) ({ list, lang: usedLang, tier: usedTier } = listOf(id, lang, tierOf(loud), v));
     const avoid = new Set([...(o.avoid ?? [])].map((x) => clean(x)));
-    const mem = `${id}|${usedLang}`;
+    const mem = `${id}|${usedLang}|${v?.key ?? ""}`;
     if ( !seeded ) for ( const t of recent.get(mem) ?? [] ) avoid.add(t);
     let tpl = o.template != null ? clean(o.template) : null;
     if ( !tpl ) {
@@ -1144,7 +1423,7 @@ export function createVocab() {
     if ( !seeded ) { const r = recent.get(mem) ?? []; r.push(clean(tpl), text); while ( r.length > 4 ) r.shift(); recent.set(mem, r); }
     const sound = { ...k.sound, loud: Math.max(0.1, Math.min(1, 0.15 + 0.85 * loud)), long };
     const motion = pickMotion(k, R);
-    const out = { text, kind: id, lang: usedLang, tier: usedTier, loud, long, bangs, step, template: tpl, prefix: usedPre, mood: k.mood, sound, motion,
+    const out = { text, kind: id, lang: usedLang, tier: usedTier, loud, long, bangs, step, template: tpl, prefix: usedPre, material, variant: v?.key ?? null, mood: k.mood, sound, motion,
       play: { mood: k.mood, sound, in: motion.in, holdKind: motion.holdKind, out: motion.out, magnitude: Math.round(Math.max(0, (loud - 0.1) / 0.6) * 100) / 100 } };
     if ( o.stream ) out.syllables = text.split(/[-\s]+/).filter(Boolean);
     return withAccent(out);
@@ -1156,7 +1435,7 @@ export function createVocab() {
     const out = [];
     const first = word(kind, { ...o, step: 0 });
     out.push(first);
-    const k = kinds[first.kind];
+    const k = keOf(first);
     const core0 = clean(first.template).replace(/[!?…]+$/, "");
     const pre0 = first.prefix ? [...clean(first.prefix)].length : 0;
     /* a percussive repeating sound may already have more hits than its template (a long one): grow from what was shown */
@@ -1224,16 +1503,19 @@ export function createVocab() {
                 and accent (TA-TA-TA, TA-TA!, TA-TA-TA-TA), a siren alternating its rise and fall
       The vocabulary only says WHAT is lettered WHEN; how the segments move, overlap or cross-fade is MOVE's (API-CONTRACT v5). */
   function flow(kind, o = {}) {
-    const id = kindOf(kind), k = kinds[id], lang = langOf(o.lang, langs());
-    const style = FLOW_STYLES.includes(o.style) ? o.style : (FLOW[id] ?? (k.repeat ? "cycle" : k.sound.long >= 0.6 ? "drone" : "crackle"));
+    const id = kindOf(kind), lang = langOf(o.lang, langs());
+    const v = variantOf(id, o, lang), k = effective(kinds[id], v?.meta), material = materialOf(o.material);      // KINDS1: a material or fire row flows too
+    const style = FLOW_STYLES.includes(o.style) ? o.style : (v?.meta?.flow ?? FLOW[id] ?? (k.repeat ? "cycle" : k.sound.long >= 0.6 ? "drone" : "crackle"));
     const seed = o.seed ?? ((Math.random() * 4294967296) >>> 0);
     const base = loudOf({ loud: o.loud ?? (style === "steady" ? 0.15 : undefined), magnitude: o.magnitude });
     const subs = {};
     const hold = holdOf(k), mr = runOf(k), phase = rng(`${seed}|phase`)() * 6.28;
     const S = (t, n) => capRuns(clean(stretchText(t, n, hold, lang, mr)), mr);
-    const pool = (t) => { const b = bank[lang]?.[id] ?? bank.en?.[id] ?? {}; return [...(b[t] ?? [])]; };
+    const pool = (t) => { const b = v?.words ?? bank[lang]?.[id] ?? bank.en?.[id] ?? {}; return [...(b[t] ?? [])]; };
     const plainOf = (t) => clean(t).replace(/[!?…]+$/, "");
-    const seg = (phase, i, text, loud, long, bangs, ms) => withAccent({ phase, i, t: 0, ms: Math.round(ms), text, kind: id, lang, loud, long, bangs, style,
+    /* a kind's "!" cap holds in its flow too (KINDS1: an ember never shouts) */
+    const seg = (phase, i, text, loud, long, bangs, ms) => (Number.isFinite(k.maxBangs) && bangs > k.maxBangs ? seg0(phase, i, text.replace(/!+$/, "!".repeat(k.maxBangs)), loud, long, k.maxBangs, ms) : seg0(phase, i, text, loud, long, bangs, ms));
+    const seg0 = (phase, i, text, loud, long, bangs, ms) => withAccent({ phase, i, t: 0, ms: Math.round(ms), text, kind: id, lang, loud, long, bangs, style, material, variant: v?.key ?? null,
       mood: k.mood, sound: { ...k.sound, loud: Math.max(0.1, Math.min(1, 0.15 + 0.85 * loud)), long },
       play: { mood: k.mood, in: k.motion.in[0], holdKind: k.motion.hold[0], out: k.motion.out[0], magnitude: Math.round(Math.max(0, (loud - 0.1) / 0.6) * 100) / 100 } });
     const end = (b, trail) => (b ? "!".repeat(b) : trail ? "…" : "");
@@ -1299,7 +1581,7 @@ export function createVocab() {
       cache.set(i, s0); if ( cache.size > 64 ) cache.delete(cache.keys().next().value);
       return s0;
     };
-    const w0 = word(id, { lang, seed: `${seed}|onset`, loud: clamp01(base + 0.15), long: 0.3, prefix: false });
+    const w0 = word(id, { lang, seed: `${seed}|onset`, loud: clamp01(base + 0.15), long: 0.3, prefix: false, material: o.material, intensity: o.intensity, stage: o.stage });
     const onset = seg("onset", -1, w0.text, w0.loud, w0.long, w0.bangs, 450);
     first = onset;
     const t0 = plainOf(R0(seed).pick(pool("s")) ?? w0.template);
@@ -1316,7 +1598,47 @@ export function createVocab() {
       }
       return out;
     }
-    return { kind: id, lang, style, onset, tail, at, take };
+    return { kind: id, lang, style, material, variant: v?.key ?? null, onset, tail, at, take };
+  }
+  /** KINDS1: a sound's own aftermath (TAILS) for a call: [{ kind, t, rel, place, why, material, pieces? }] (skipped where it does not happen) */
+  function tails(kind, o = {}) {
+    const id = kindOf(kind), mat = materialOf(o.material);
+    return (TAILS[id] ?? []).filter((x) => !(mat && x.skip?.includes(mat))).map(({ skip, ...x }) => ({ ...x, material: x.material ?? o.material ?? null }));
+  }
+  /** KINDS1: an event told in order. spec: a CHAINS name ("explosion", "grenade", "collapse", "sonicboom", "shot", "miss", "burst",
+      "ignite", "fireout"), an array of steps ({ kind, t, rel | loud, role, place, material, pieces, intensity, stage, long, ...play
+      options }), or one kind (that sound and its TAILS). o: { lang, seed, loud | magnitude (the chain's loudness: a step's loud = rel x
+      it), tempo (2 = twice as fast), material (the default of every step), tails (true: each step's TAILS too) }.
+      -> [{ i, t, kind, role, place, why, tailOf, word, play }] sorted by t (play = the step's own L.play options). Pure and seeded. */
+  function chain(spec, o = {}) {
+    const one = typeof spec === "string" && !CHAINS[spec];
+    let steps = Array.isArray(spec) ? spec.map((s) => (typeof s === "string" ? { kind: s } : { ...s }))
+      : typeof spec === "string" && CHAINS[spec] ? CHAINS[spec].steps.map((s) => ({ ...s }))
+      : Array.isArray(spec?.steps) ? spec.steps.map((s) => ({ ...s }))
+      : spec != null ? [{ kind: String(spec), t: 0, rel: 1, role: "peak", place: "source" }] : [];
+    if ( o.tails === true || (one && o.tails !== false) ) steps = steps.flatMap((s) => [s, ...tails(s.kind, { material: s.material ?? o.material })
+      .map((x) => ({ ...x, t: (s.t ?? 0) + x.t, rel: (s.rel ?? 1) * x.rel, role: x.t >= 300 ? "resolve" : "develop", tailOf: kindOf(s.kind) }))]);
+    const tempo = Number.isFinite(o.tempo) && o.tempo > 0 ? o.tempo : 1, base = loudOf(o);
+    const order = steps.map((s, i) => ({ s, i, t: Math.max(0, Math.round((Number.isFinite(s.t) ? s.t : 0) / tempo)) })).sort((a, b) => a.t - b.t || a.i - b.i);
+    let prev = null;
+    return order.map(({ s, i, t }) => {
+      const loud = clamp01(Number.isFinite(s.loud) ? s.loud : base * (Number.isFinite(s.rel) ? s.rel : 1));
+      const make = (n) => word(s.kind, { lang: o.lang, seed: o.seed != null ? `${o.seed}|chain|${i}${n ? `|${n}` : ""}` : undefined, loud, long: s.long, material: s.material ?? o.material,
+        pieces: s.pieces, intensity: s.intensity, stage: s.stage, template: s.template, prefix: s.prefix, bangs: s.bangs });
+      let w = make(0);
+      for ( let n = 1; n < 6 && prev && w.text === prev && s.template == null; n++ ) w = make(n);   // two bounces in a row are two different words
+      prev = w.text;
+      const play = Object.fromEntries(Object.entries(s).filter(([key]) => !STEP_KEYS.includes(key) && key !== "tailOf"));
+      return { i, t, kind: w.kind, role: ROLES.includes(s.role) ? s.role : null,
+        place: PLACES.includes(s.place) ? s.place : "source", why: s.why ?? null, tailOf: s.tailOf ?? null, word: w, play };
+    });
+  }
+  /** KINDS1: the variant rows of a kind in a language, for sheets and pickers: { table, rows: { key: { s, m, l, st, from? } } } or null */
+  function variants(kind, lang = "en") {
+    const id = kindOf(kind), table = kinds[id]?.vary; if ( !table ) return null;
+    const L = VARIANTS[lang] ? lang : "en", rows = {};
+    for ( const [key, r] of Object.entries(VARIANTS[L][table] ?? {}) ) { const b = typeof r === "string" ? bank[L]?.[r] : r; if ( b ) rows[key] = { s: [...b.s], m: [...b.m], l: [...b.l], st: [...(b.st ?? [])], ...(typeof r === "string" ? { from: r } : {}) }; }
+    return { table, rows };
   }
   const R0 = (seed) => rng(`${seed}|tail`);
   /** grow a caller's own text for the n-th repeat (MOVE): its "+" marks, else its sustain (o.kind's classes, else V R Z S M F H) */
@@ -1377,7 +1699,8 @@ export function createVocab() {
   const choices = (lang) => Object.fromEntries(list(lang).map((k) => [k.id, k.label]));
   const reset = () => { Object.keys(kinds).forEach((k) => delete kinds[k]); Object.assign(kinds, JSON.parse(JSON.stringify(KINDS))); Object.keys(bank).forEach((k) => delete bank[k]); Object.assign(bank, JSON.parse(JSON.stringify(BANK))); recent.clear(); reAlias(); };
 
-  return { word, series, flow, grow, syllables, add, define, remove, list, all, choices, reset, kindOf, langs,
+  return { word, series, flow, grow, syllables, add, define, remove, list, all, choices, reset, kindOf, langs, tails, chain, variants,
+    hitMaterials: MATS, fireLevels: FIRE_LEVELS, chains: Object.keys(CHAINS),
     number: formatNumber, range: formatRange, stretch: stretchText, expand, renderable, naming, bangs: bangsFor, accent, character, envs: ENVS, materials: MATERIALS, textures: TEXTURES, groups: GROUPS, classes: CLASSES,
     get kinds() { return Object.keys(kinds); }, get aliases() { return Object.fromEntries(alias); } };
 }

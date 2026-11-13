@@ -10,7 +10,7 @@ import { rng, hash } from "./rng.mjs";
 import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.7.0";   // v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.7.1";   // 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -1192,13 +1192,31 @@ export function createEngine(base) {
 
   /* WORD (v5): the vocabulary layer (words.mjs): a sound kind + loudness + language -> a fitting word; sfx() letters it */
   const vocab = createVocab();
-  const VOCAB_KEYS = ["kind", "loud", "lang", "step", "template", "prefix", "long", "duration", "bangs"];
+  /* KINDS1: material (what is hit), pieces (debris size), intensity / stage (the fire ladder) are word options, not play options */
+  const VOCAB_KEYS = ["kind", "loud", "lang", "step", "template", "prefix", "material", "pieces", "intensity", "stage", "long", "duration", "bangs"];
   function sfx(kind, opts = {}) {
     const w = vocab.word(kind, opts);
     const rest = Object.fromEntries(Object.entries(opts).filter(([k]) => !VOCAB_KEYS.includes(k)));
     const h = play(w.text, { ...w.play, ...rest, sound: { ...w.play.sound, ...(opts.sound ?? {}) }, magnitude: opts.magnitude ?? w.play.magnitude });
     h.word = w;
     return h;
+  }
+  /* KINDS1: an event told in order (words.mjs CHAINS / TAILS): vocab.chain plans the words and times, each step is one play() on the
+     event's clock (startAt + t, else delay + t), placed by `places[step.place]` (source, target, ring, around, feet, bounce, behind),
+     else at `at`. Not networked: each client calls it with the same seed and startAt (L.net is for single words). */
+  const CHAIN_KEYS = ["places", "tempo", "tails"];
+  function chain(spec, opts = {}) {
+    const steps = vocab.chain(spec, opts);
+    const rest = Object.fromEntries(Object.entries(opts).filter(([k]) => !VOCAB_KEYS.includes(k) && !CHAIN_KEYS.includes(k) && k !== "magnitude" && k !== "delay" && k !== "startAt"));
+    const t0 = Number.isFinite(opts.startAt) ? opts.startAt : null, d0 = Number.isFinite(opts.delay) && opts.delay > 0 ? opts.delay : 0;
+    const handles = steps.map((s) => {
+      const at = opts.places?.[s.place] ?? rest.at;
+      const when = t0 != null ? { startAt: t0 + s.t } : (d0 + s.t > 0 ? { delay: d0 + s.t } : {});
+      const h = play(s.word.text, { ...s.word.play, ...rest, ...s.play, ...(at !== undefined ? { at } : {}), ...(opts.seed != null ? { seed: `${opts.seed}|${s.i}` } : {}), ...when });
+      h.word = s.word; h.step = s;
+      return h;
+    });
+    return { steps, handles, stop(o) { for ( const h of handles ) h.stop?.(o); } };
   }
 
   /* continuous sounds (sustain.mjs, README "Motion: continuous sounds"): a phrase score over play(); stopAll and a scene change stop
@@ -1209,7 +1227,7 @@ export function createEngine(base) {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
     ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(),
-    vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow,
+    vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow, chain,
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */
     viewInset(v) { if ( v !== undefined ) viewInset = v ?? { top: 8, right: 8, bottom: 8, left: 8 }; return viewInset; },
