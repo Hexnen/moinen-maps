@@ -271,17 +271,18 @@ const back = {
  * is up at the top (it publishes its bottom edge as data-icbar-bottom on <html>, its centre / width as --icbar-cx / --icbar-maxw on
  * its root), the strip sits centred under it. dock() measures this only when something it depends on changes: the bar (a
  * MutationObserver), the sidebar / navigation size (a ResizeObserver: collapse, expand) and the window size. No camera, ticker or
- * per-frame work.
+ * per-frame work (fxo2, U217: only while the folded button's list is open, a 300 ms check keeps the list clear of what came or went).
  * fxm2 (U201): WHILE A FIGHT RUNS on this map (a started combat of this scene) the strip folds to one small button - the globe and the
  * count, the names in its tooltip - in the initiative bar's own row (orbit-dock.mjs fightSpot), never over the map, and a click on it
  * only opens the list under it: the portraits (bring one down here) and "show the Orbit scene" are a second, deliberate click, and
  * a right click does nothing. Outside a fight it is the strip as before. */
 const inFight = () => { try { const c = game.combats?.viewed ?? game.combat; return !!c?.started && (!c.scene || c.scene.id === canvas?.scene?.id); } catch { return false; } };
 const strip = {
-  el: null, mo: null, ro: null, bar: null, key: "", fight: false, open: false,
+  el: null, mo: null, ro: null, bar: null, key: "", fight: false, open: false, watch: 0,
   onResize: () => strip.dock(),
   onAway: (ev) => { if ( strip.open && strip.el && !strip.el.contains(ev.target) ) strip.setOpen(false); },
   remove() {
+    this.unwatch();
     this.mo?.disconnect(); this.ro?.disconnect(); this.mo = this.ro = this.bar = null; this.key = ""; this.open = false;
     window.removeEventListener("resize", this.onResize);
     document.removeEventListener("pointerdown", this.onAway, true);
@@ -369,7 +370,7 @@ const strip = {
         <img src="${esc(t.texture.src)}" alt=""><span>${esc(t.name)}</span></button>`;
     };
     const fight = inFight();
-    if ( fight !== this.fight ) { this.fight = fight; this.key = ""; this.open = false; }
+    if ( fight !== this.fight ) { this.fight = fight; this.key = ""; this.open = false; this.unwatch(); }
     this.el.classList.toggle("is-fight", fight);
     this.el.classList.toggle("is-open", fight && this.open);
     let html;
@@ -409,18 +410,30 @@ const strip = {
       if ( this.open ) { head.removeAttribute("data-tooltip"); try { if ( game.tooltip?.element === head ) game.tooltip.deactivate(); } catch { /* none */ } }
       else if ( this.fight && this.headTip ) head.dataset.tooltip = this.headTip;
     }
+    if ( this.open && this.fight ) this.rewatch(); else this.unwatch();
     this.placeList();
   },
+  /** fxo2 (U217): what the list keeps clear of comes and goes on its own (the round's news line under the bar shows with the round
+   *  banner and goes a few seconds later; another module's panel opens or folds): nothing tells the map. So while the list is open
+   *  (and only then) its spot is worked out again every 300 ms - a few rects, written only when the spot changed - and it follows:
+   *  back up under the button when the line is gone, down past one that came. */
+  rewatch() {
+    if ( this.watch ) return;
+    this.watch = setInterval(() => { if ( this.el?.isConnected && this.open && this.fight ) this.placeList(); else this.unwatch(); }, 300);
+  },
+  unwatch() { if ( this.watch ) { clearInterval(this.watch); this.watch = 0; } },
   placeList() {
     const el = this.el, list = el?.querySelector(".mm-orbit-list");
     if ( !list || !this.fight || !this.open ) return;
     const lr = list.getBoundingClientRect(), hr = el.querySelector(".mm-orbit-head")?.getBoundingClientRect(), sr = el.getBoundingClientRect();
     if ( !hr || !(lr.width > 0) ) return;
     const at = listSpot({ x0: hr.left, y0: hr.top, x1: hr.right, y1: hr.bottom }, { w: lr.width, h: lr.height }, this.avoidBoxes(), this.barBox(this.bar), window.innerWidth, window.innerHeight);
+    const left = `${Math.round(at.x - sr.left)}px`, top = `${Math.round(at.y - sr.top)}px`;
+    if ( list.style.left === left && list.style.top === top && list.dataset.where === at.where ) return;   // (fxo2: the watch writes only a change)
     list.dataset.where = at.where;
     list.style.right = "auto";
-    list.style.left = `${Math.round(at.x - sr.left)}px`;
-    list.style.top = `${Math.round(at.y - sr.top)}px`;
+    list.style.left = left;
+    list.style.top = top;
   }
 };
 
