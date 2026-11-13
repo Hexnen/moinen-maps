@@ -196,7 +196,7 @@ export function chooseHand(mood, sound, R, avoid) {
     hatch: depthOn && R.chance(0.3),
     bevel: R.chance(0.35),
     shear: (F.slant + R.f(-0.06, 0.16)) * (mood === "whoosh" ? 2.2 : 1),
-    track: F.track + R.f(-0.05, 0.02) - 0.04 * sound.loud,
+    track: Math.max(-0.07, F.track + R.f(-0.04, 0.02) - 0.03 * sound.loud),
     hueJitter: R.f(-14, 14)
   };
   if ( mood === "tick" ) { hand.depth = 0; hand.shadow = hand.shadow && { ...hand.shadow, d: 0.06 }; hand.out2W = Math.min(hand.out2W, 0.05); }

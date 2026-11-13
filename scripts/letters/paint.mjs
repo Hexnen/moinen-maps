@@ -242,7 +242,7 @@ function impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas) {
   for ( let k = 0; k < n * 2; k++ ) { const a = (k / (n * 2)) * 6.2832, r = k % 2 ? R.f(0.62, 0.8) : R.f(1.05, 1.32); const x = cx + Math.cos(a) * hw * r, y = cy + Math.sin(a) * hh * r; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.closePath(); ctx.fillStyle = H.ink; ctx.fill();
   ctx.beginPath(); path(ctx, all, S, ox, oy);
-  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = (H.inflate + H.inkW * 0.6) * 2 * S; ctx.lineJoin = "round"; ctx.stroke();
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1, (H.inflate + 0.012) * 2 * S); ctx.lineJoin = "round"; ctx.stroke();
   ctx.fillStyle = "#ffffff"; ctx.fill();
   return { canvas, ax: ox, ay: oy, S };
 }
@@ -251,6 +251,12 @@ function impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas) {
    Returns { canvas, ax, ay, S }: (ax, ay) = where the word's centre is on the canvas. */
 export function paintPicture(plan, bank, p, S, make) {
   settleCenter(plan, bank);
+  /* small words: outlines in cap units would close the counters (a P turns into a blob below ~40 px), so they thin out with size,
+     keeping at least about 1.5 px of ink. Hand-letterers do the same: small lettering gets a lighter line. */
+  if ( S < 80 ) {
+    const H0 = plan.hand, k = Math.max(0.38, S / 80), ink = Math.max(H0.inkW * k, Math.min(H0.inkW, 1.6 / Math.max(1, S)));
+    plan = Object.create(plan, { hand: { value: { ...H0, inkW: ink, out2W: H0.out2W * k, inflate: H0.inflate * Math.max(0.6, k) } } });
+  }
   const geo = pictureGeometry(plan, bank, p);
   const ext = extents(plan, geo, p);
   let w = (ext.x1 - ext.x0) * S, h = (ext.y1 - ext.y0) * S;

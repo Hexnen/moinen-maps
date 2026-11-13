@@ -106,17 +106,25 @@ export function drips(contours, R, amount, len) {
 export function flames(contours, R, amount, len, phase = 0) {
   const out = [];
   const b = bbox(contours);
+  /* only the outer contours burn: a counter (hole, opposite winding) would grow a dark flame inside the letter */
+  let big = null; for ( const c of contours ) if ( !big || Math.abs(area(c)) > Math.abs(area(big)) ) big = c;
+  const outerSign = big && area(big) > 0 ? 1 : -1;
   for ( const c of contours ) {
-    if ( Math.abs(area(c)) < 0.02 ) continue;
+    if ( Math.abs(area(c)) < 0.02 || (area(c) > 0 ? 1 : -1) !== outerSign ) continue;
     const N = normals(c), n = c.length / 2, sgn = area(c) > 0 ? 1 : -1;
     const cands = [];
     for ( let i = 0; i < n; i++ ) if ( N[2 * i + 1] < -0.75 && c[2 * i + 1] < b.y0 + 0.25 ) cands.push(i);
     if ( !cands.length ) continue;
-    const k = Math.min(3, Math.max(1, Math.round(cands.length / 18 * amount)));
+    /* one or two tongues per letter, from its highest points (a flame on every arm turns F into I) */
+    cands.sort((a, b2) => c[2 * a + 1] - c[2 * b2 + 1]);
+    const picks = [cands[0]];
+    const far = cands.find((q) => Math.abs(c[2 * q] - c[2 * cands[0]]) > 0.35);
+    if ( far != null && amount > 0.6 && R.chance(0.5) ) picks.push(far);
+    const k = picks.length;
     for ( let j = 0; j < k; j++ ) {
-      const i = cands[Math.floor(((j + 0.5) / k) * cands.length)];
+      const i = picks[j];
       const x = c[2 * i], y = c[2 * i + 1] + 0.04;
-      const w = R.f(0.09, 0.16), L = len * R.f(0.5, 1.15), bend = R.f(-0.18, 0.18) + 0.08 * Math.sin(phase * 2.1 + j);
+      const w = R.f(0.06, 0.1), L = len * R.f(0.7, 1.25), bend = R.f(-0.18, 0.18) + 0.08 * Math.sin(phase * 2.1 + j);
       const pts = [];
       const steps = 10;
       for ( let s = 0; s <= steps; s++ ) { const t = s / steps; pts.push(x - w * (1 - t) ** 1.3 + bend * t * t * L, y - L * t); }

@@ -13,6 +13,7 @@ export const WORDS = [
 
 export function gallery(L, o = {}) {
   if ( o.part === "layers" ) return layersDemo(L, o);
+  if ( o.part === "sizes" ) return sizesDemo(L, o);
   const hasCanvas = !!globalThis.canvas?.ready;
   const space = o.space ?? (hasCanvas ? "both" : "screen");
   const waves = o.waves ?? 3, gap = o.gap ?? 220, perWave = o.perWave ?? 12;
@@ -71,15 +72,57 @@ export function layersDemo(L, o = {}) {
     world.forEach((layer, i) => {
       const t = toks[i];
       const at = t ? { x: t.center.x, y: t.center.y } : { x: canvas.stage.pivot.x + (i - 2) * canvas.grid.size * 2, y: canvas.stage.pivot.y };
-      handles.push(L.play(word, { mood: "impact", space: "world", layer, at, size: canvas.grid.size * 0.7, seed: `${o.seed ?? "layers"}:w`, hold: o.hold ?? 3000, in: "pop", out: "pop" }));
-      handles.push(L.play(layer, { mood: "tick", space: "world", layer: "overlay", at: { x: at.x, y: at.y + canvas.grid.size * 0.75 }, size: canvas.grid.size * 0.22, seed: `lbl${i}`, hold: o.hold ?? 3000 }));
+      handles.push(L.play(word, { mood: "impact", space: "world", layer, at, size: canvas.grid.size * 1.0, seed: `${o.seed ?? "layers"}:w`, hold: o.hold ?? 3000, in: "pop", out: "pop" }));
+      handles.push(L.play(layer, { mood: "tick", space: "world", layer: "overlay", at: { x: at.x, y: at.y + canvas.grid.size * 0.95 }, size: canvas.grid.size * 0.34, seed: `lbl${i}`, hold: o.hold ?? 3000 }));
     });
   }
   const sb = document.getElementById("sidebar")?.getBoundingClientRect(), hb = document.getElementById("hotbar")?.getBoundingClientRect();
   screen.forEach((layer, i) => {
     const at = i === 0 && hb ? { x: hb.left + hb.width * 0.3, y: hb.top + hb.height * 0.5 } : sb ? { x: sb.left, y: innerHeight * (0.3 + 0.2 * i) } : { x: innerWidth * (0.3 + 0.2 * i), y: innerHeight * 0.5 };
     handles.push(L.play(word, { mood: "impact", space: "screen", layer, at, size: 60, seed: `${o.seed ?? "layers"}:s`, hold: o.hold ?? 3000, in: "pop", out: "pop" }));
-    handles.push(L.play(layer, { mood: "tick", space: "screen", layer: "screen", at: { x: at.x, y: at.y + 52 }, size: 16, seed: `lbs${i}`, hold: o.hold ?? 3000 }));
+    handles.push(L.play(layer, { mood: "tick", space: "screen", layer: "screen", at: { x: at.x, y: at.y + 52 }, size: 22, seed: `lbs${i}`, hold: o.hold ?? 3000 }));
   });
   return { handles, done: Promise.all(handles.map((h) => h.finished)), cancel() { for ( const h of handles ) h.stop({ quick: true }); } };
+}
+
+/* the size model in action (README "Size"): one word from sources of growing size (span), growing footprints (area) and growing
+   magnitude, all held while the view zooms out far, in close and back; plus a screen row at magnitudes 0 .. 1.5. Labels name the input.
+   The view is put back where it was at the end. */
+export async function sizesDemo(L, o = {}) {
+  const handles = [];
+  const hold = o.hold ?? 9000;
+  const lab = (text, at, space = "world") => handles.push(L.play(text, { mood: "tick", space, at, fit: space === "world" ? "screen" : "legible", size: 15, seed: `sz-l-${text}`, hold, in: "pop", out: "pop" }));
+  let view = null;
+  if ( globalThis.canvas?.ready ) {
+    const g = canvas.grid.size, c = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y };
+    view = { x: c.x, y: c.y, scale: canvas.stage.scale.x };
+    const rows = [
+      ["span", [0.5, 1, 2, 4].map((k) => ({ span: g * k, label: `span ${k}` }))],
+      ["area", [0.5, 2, 5, 10].map((k) => ({ area: g * k, label: `area ${k}` }))],
+      ["magnitude", [0, 0.5, 1, 1.5].map((k) => ({ magnitude: k, label: `mag ${k}` }))]
+    ];
+    rows.forEach(([, items], r) => items.forEach((it, i) => {
+      const at = { x: c.x + (i - 1.5) * g * 3.2, y: c.y + (r - 1) * g * 2.6 };
+      const { label, ...size } = it;
+      handles.push(L.play(o.word ?? "ŁUBUDU!", { mood: "crash", space: "world", at, ...size, seed: `sz-${r}`, hold, in: "pop", out: "pop", holdKind: "boil" }));
+      lab(label, { x: at.x, y: at.y + g * 0.9 });
+    }));
+    /* zoom out far, in close, back (the words follow: world size inside the legible range, held at the floor / ceiling outside it) */
+    const pan = (scale, ms) => canvas.animatePan({ x: c.x, y: c.y, scale, duration: ms });
+    (async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+      await pan(Math.max(canvas.dimensions?.scale?.min ?? 0.1, 0.15), 2200);
+      await new Promise((r) => setTimeout(r, 700));
+      await pan(Math.min(canvas.dimensions?.scale?.max ?? 3, 2.2), 2600);
+      await new Promise((r) => setTimeout(r, 700));
+      await pan(view.scale, 1200);
+    })();
+  }
+  const W = innerWidth - (document.getElementById("sidebar")?.getBoundingClientRect().width ?? 0);
+  [0, 0.5, 1, 1.5].forEach((m, i) => {
+    const at = { x: W * (0.14 + 0.24 * i), y: innerHeight * 0.86 };
+    handles.push(L.play("POW!", { mood: "impact", space: "screen", layer: "ui", at, magnitude: m, seed: "sz-s", hold, in: "pop", out: "pop" }));
+  });
+  const done = Promise.all(handles.map((h) => h.finished)).then(async () => { if ( view ) await canvas.animatePan({ ...view, duration: 300 }); });
+  return { handles, done, cancel() { for ( const h of handles ) h.stop({ quick: true }); } };
 }

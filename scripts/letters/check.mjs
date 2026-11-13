@@ -1,5 +1,5 @@
 // LETR: node checks of the lettering engine's logic (fonts, Polish letters, intent -> shape, determinism, variety, timeline,
-// motion directions, streams, painting on a recording mock context, the copy manifest). Run: node scripts/letters/check.mjs
+// motion directions, streams, the size model, painting on a recording mock context, the copy manifest). Run: node scripts/letters/check.mjs
 // Prints "letters: N checks, F failed"; exit 1 on any failure. Both modules run it (maps: dev/letters.test.mjs, plus-ultra:
 // scripts/sweep-checks/letters.mjs).
 import fs from "node:fs";
@@ -11,6 +11,7 @@ import { paintPicture, MAX_SIDE } from "./paint.mjs";
 import { normals, jag } from "./geom.mjs";
 import { area } from "./font.mjs";
 import { rng } from "./rng.mjs";
+import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -124,6 +125,62 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   }
   ok(big === 0, `${big} pictures over the side cap`);
   ok(calls > pics * 10, "painting issues draw calls");
+}
+
+/* 8b. size model (size.mjs): legibility floor, viewport ceiling, monotonic zoom response, token / area / magnitude growth,
+   the explicit size, fit modes, pixel snapping, crowding, and no blow-up of small pictures (README "Size") */
+{
+  const base = { space: "world", grid: 100, vw: 1100, vh: 768, sizeK: 1, aspect: 3 };
+  const zooms = [0.1, 0.15, 0.2, 0.3, 0.45, 0.6, 0.8, 1, 1.5, 2, 3, 4];
+  for ( const ctx of [{}, { sizeK: 0.7 }, { area: 1000, magnitude: 1 }, { tokenSpan: 400 }, { magnitude: 0 }, { size: 30 }, { aspect: 9, magnitude: 1.5 }] ) {
+    let prev = 0;
+    for ( const z of zooms ) {
+      const r = sizeFor({ ...base, ...ctx, zoom: z }), L = sizeLimits({ ...base, ...ctx });
+      ok(r.px >= prev - 1e-9, `size: px falls while zooming in ${JSON.stringify(ctx)} @${z}`);
+      prev = r.px;
+      ok(r.px >= L.floor * SIZE.hardLo - 1e-6, `size: under the hard floor ${JSON.stringify(ctx)} @${z}: ${r.px}`);
+      ok(r.px <= L.ceil * SIZE.hardHi + 1e-6, `size: over the hard ceiling ${JSON.stringify(ctx)} @${z}: ${r.px}`);
+      ok(Math.abs(r.size * (ctx.sizeK ?? 1) * z - r.px) < 1e-6, `size: size and px disagree @${z}`);
+      ok(r.px * (ctx.aspect ?? 3) <= base.vw * (SIZE.widthVw + SIZE.widthVwMag) * SIZE.hardHi + 1, `size: word wider than the viewport allows @${z}`);
+    }
+  }
+  /* inside the legible range the word is simply its world size (zoom scales it like the map) */
+  const mid = sizeFor({ ...base, zoom: 1 });
+  ok(mid.clamp === null && Math.abs(mid.size - mid.natural) < 1e-9, "size: in range the world size is untouched");
+  /* far zoomed out a word is held at the floor (still slightly smaller than at the floor's own zoom: depth cue) */
+  const far = sizeFor({ ...base, zoom: 0.1 }), floorZ = sizeLimits(base).floor / (mid.natural);
+  ok(far.clamp === "floor" && far.px < sizeLimits(base).floor && far.px >= sizeLimits(base).floor * SIZE.hardLo, "size: zoomed out a word stays legible");
+  ok(sizeFor({ ...base, zoom: floorZ }).px > far.px, "size: the floor still lets zoom show a little");
+  /* growth: bigger token, bigger area, bigger magnitude -> bigger natural size; sub-linear */
+  const n1 = naturalSize({ ...base, tokenSpan: 100 }), n4 = naturalSize({ ...base, tokenSpan: 400 });
+  ok(n4 > n1 * 1.5 && n4 < n1 * 3, `size: a 4x4 token gets a bigger, not 4x bigger word (${(n4 / n1).toFixed(2)})`);
+  const a1 = naturalSize({ ...base, area: 100 }), a10 = naturalSize({ ...base, area: 1000 });
+  ok(a10 > a1 * 2.5 && a10 < a1 * 10, `size: a 10x footprint grows the word sub-linearly (${(a10 / a1).toFixed(2)})`);
+  ok(naturalSize({ ...base, magnitude: 1 }) > naturalSize({ ...base, magnitude: 0.5 }) && naturalSize({ ...base, magnitude: 0.5 }) > naturalSize({ ...base, magnitude: 0 }), "size: magnitude grows the word");
+  ok(magnitudeOf("huge") === 1 && magnitudeOf("tiny") === 0 && magnitudeOf(9) === 2 && magnitudeOf(undefined) === 0.5, "size: magnitude words and clamping");
+  ok(naturalSize({ ...base, size: 77 }) === 77 && naturalSize({ ...base, size: 77, scale: 2 }) === 154, "size: explicit size and scale");
+  /* a destruction seen from far reads bigger on screen than a tick seen from far; from close it is capped by the viewport */
+  ok(sizeFor({ ...base, zoom: 0.2, area: 1000, magnitude: 1 }).px > sizeFor({ ...base, zoom: 0.2, sizeK: 0.7 }).px * 1.5, "size: from far a collapse outranks a tick");
+  ok(sizeFor({ ...base, zoom: 3, area: 1000, magnitude: 1 }).clamp !== null, "size: from close a collapse is capped by the viewport");
+  /* fits */
+  ok(Math.abs(sizeFor({ ...base, zoom: 0.1, fit: "world" }).px - mid.natural * 0.1) < 1e-9, "size: fit world never clamps");
+  ok(Math.abs(sizeFor({ ...base, zoom: 0.1, size: 40, fit: "screen" }).px - 40) < 1e-9 && Math.abs(sizeFor({ ...base, zoom: 3, size: 40, fit: "screen" }).px - 40) < 1e-9, "size: fit screen = constant CSS px");
+  /* screen space follows the viewport */
+  const s1 = sizeFor({ space: "screen", vw: 1100, vh: 768, sizeK: 1, aspect: 3 }), s2 = sizeFor({ space: "screen", vw: 1700, vh: 1080, sizeK: 1, aspect: 3 });
+  ok(s2.px > s1.px * 1.3 && s2.px < s1.px * 1.5, `size: a bigger screen gets proportionally bigger screen words (${(s2.px / s1.px).toFixed(2)})`);
+  ok(sizeFor({ space: "screen", vw: 1100, vh: 768, sizeK: 1, aspect: 3, size: 900 }).clamp === "ceil" || sizeFor({ space: "screen", vw: 1100, vh: 768, sizeK: 1, aspect: 3, size: 900 }).clamp === "width", "size: a too big screen size is capped");
+  ok(sizeFor({ space: "screen", vw: 1100, vh: 768, sizeK: 1, aspect: 12 }).clamp === "width", "size: a long word is capped by the width");
+  /* pixel lettering: whole art pixels, at least 7 */
+  for ( const z of zooms ) {
+    const r = sizeFor({ ...base, zoom: z, pixel: 100 / 32 });
+    const art = r.size * 1 / (100 / 32);
+    ok(Math.abs(art - Math.round(art)) < 1e-6 && art >= SIZE.pixelMinArt && art <= SIZE.pixelMaxArt, `size: pixel word not in whole art px @${z}: ${art}`);
+  }
+  /* crowding lowers the floor (many words at once from far do not bury the scene) */
+  ok(sizeLimits({ ...base, alive: 48 }).floor < sizeLimits({ ...base, alive: 3 }).floor && sizeLimits({ ...base, alive: 480 }).floor >= sizeLimits(base).floor * SIZE.crowdMin - 1e-9, "size: crowding lowers the floor, bounded");
+  /* the engine never shows a picture enlarged by more than 15 % before drawing it again (source rule in engine.mjs) */
+  const eng = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
+  ok(/w > c\.want \* 1\.15/.test(eng) && /resize\(h, false\)/.test(eng), "size: re-draw on drift up (>15 %) and live resize are in the frame loop");
 }
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */

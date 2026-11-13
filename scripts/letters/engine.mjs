@@ -4,8 +4,9 @@ import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf } from "./design.mj
 import { FontBank } from "./fontbank.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
+import { sizeFor, SIZE } from "./size.mjs";
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -116,6 +117,47 @@ export function createEngine(base) {
     return c;
   }
 
+  /* ---------- size (README "Size"; the model is size.mjs) ---------- */
+  const usableW = () => { const sb = document.getElementById("sidebar")?.getBoundingClientRect(); return Math.max(320, innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0)); };
+  /* the radius (world units) of an event's footprint: a number, { radius }, { w, h }, or a placeable / document with bounds */
+  function areaOf(a) {
+    if ( a == null ) return 0;
+    if ( Number.isFinite(a) ) return Math.max(0, a);
+    if ( Number.isFinite(a.radius) ) return a.radius;
+    const b = a.bounds ?? a.object?.bounds ?? a;
+    if ( Number.isFinite(b.width) && Number.isFinite(b.height) ) return Math.max(b.width, b.height) / 2;
+    if ( Number.isFinite(b.w) && Number.isFinite(b.h) ) return Math.max(b.w, b.h) / 2;
+    return 0;
+  }
+  function tokenSpanOf(h) {
+    if ( Number.isFinite(h.opts.span) && h.opts.span > 0 ) return h.opts.span;   // the size of whatever makes the sound, world units
+    const a = h.opts.token ?? (typeof h.at === "function" ? null : h.at);
+    if ( !isToken(a) || !globalThis.canvas?.grid ) return 0;
+    const t = tokenObj(a), d = t?.document; if ( !d ) return 0;
+    return Math.max(d.width ?? 1, d.height ?? 1) * canvas.grid.size;
+  }
+  function sizeCtx(h) {
+    const world = h.space === "world";
+    return {
+      space: h.space, size: h.opts.size, magnitude: h.opts.magnitude, area: world ? areaOf(h.opts.area) : 0, tokenSpan: world ? h.tokenSpan : 0,
+      grid: globalThis.canvas?.grid?.size ?? 100, zoom: world ? (globalThis.canvas?.stage?.scale?.x || 1) : 1, vw: usableW(), vh: innerHeight,
+      scale: h.opts.scale ?? 1, sizeK: h.plan.sizeK, aspect: h.plan._holdBox?.w ?? 3, fit: h.opts.fit ?? "legible",
+      alive: world ? h.worldAlive ?? 0 : 0, pixel: h.pixel ? artPx(h) : 0
+    };
+  }
+  /* sizes follow zoom and viewport live (pixel words keep the size they started with: whole art pixels) */
+  function resize(h, first) {
+    if ( !first && (h.pixel || h.opts.fit === "exact") ) return;
+    if ( h.opts.fit === "exact" ) {
+      h.size = (h.opts.size ?? (h.space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.6 : 72)) * (h.opts.scale ?? 1);
+      h.sizeInfo = { size: h.size, px: null, natural: h.size, clamp: null, fit: "exact" };
+      return;
+    }
+    const info = sizeFor(sizeCtx(h));
+    h.sizeInfo = info;
+    h.size = info.size;
+  }
+
   /* ---------- pictures ---------- */
   /* pixel mode: one texel per art pixel (the pixel-vfx grid: 32 art px per grid square), shown with nearest-neighbour scaling */
   const artPx = (h) => (typeof h.opts.pixel === "number" ? h.opts.pixel : (canvas?.grid?.size ?? 100) / 32);
@@ -134,7 +176,8 @@ export function createEngine(base) {
   function picture(h, idx, sync) {
     const rs = renderScale(h);
     let c = h.cache[idx];
-    if ( c && h.space === "world" && !h.pixel && (rs > c.rs * 1.35 || rs < c.rs * 0.45) ) { dropPic(c); c = h.cache[idx] = null; }
+    /* drawn again when the wanted texel size drifted (zoom, resize): up by 15 % at most, so a small picture is never blown up */
+    if ( c && !h.pixel ) { const w = pxPerUnit(h, rs); if ( w > c.want * 1.15 || w < c.want * 0.5 ) { if ( h.shown === c ) h.shown = null; dropPic(c); c = h.cache[idx] = null; } }
     if ( c ) return c;
     if ( !sync ) return null;
     const p = h.pics[idx];
@@ -142,6 +185,7 @@ export function createEngine(base) {
     const want = pxPerUnit(h, rs);
     const r = paintPicture(h.plan, bank, p, want, makeCanvas);
     r.rs = rs * (r.S / want);          // texels per display unit actually used (lower when a huge word hit the side cap)
+    r.want = want; r.size0 = h.size;   // drawn for this size; place() scales by h.size / size0 until it is drawn again
     if ( h.pixel ) hardAlpha(r.canvas);
     r.ms = now() - t0;
     if ( h.space === "world" ) {
@@ -197,7 +241,6 @@ export function createEngine(base) {
     if ( h.space === "world" ) {
       h.sprite.texture = c.tex;
       h.sprite.anchor.set(c.ax / c.canvas.width, c.ay / c.canvas.height);
-      h.sprite.scale.set(1 / c.rs);
     } else {
       h.box.replaceChildren(c.canvas);
     }
@@ -206,10 +249,12 @@ export function createEngine(base) {
     if ( h.space === "world" ) {
       const p = worldPoint(h); if ( !p ) return;
       h.sprite.position.set(p.x + h.offset.x * (h.size * h.plan.sizeK), p.y + h.offset.y * (h.size * h.plan.sizeK));
+      if ( h.shown ) h.sprite.scale.set((1 / h.shown.rs) * (h.size / h.shown.size0));
     } else {
       const p = screenPoint(h); if ( !p ) return;
       const k = h.size * h.plan.sizeK;
-      h.box.style.transform = `translate(${(p.x + h.offset.x * k).toFixed(1)}px,${(p.y + h.offset.y * k).toFixed(1)}px) rotate(${h.rot}rad)`;
+      const f = h.shown ? h.size / h.shown.size0 : 1;
+      h.box.style.transform = `translate(${(p.x + h.offset.x * k).toFixed(1)}px,${(p.y + h.offset.y * k).toFixed(1)}px) rotate(${h.rot}rad)${Math.abs(f - 1) > 1e-3 ? ` scale(${f.toFixed(4)})` : ""}`;
     }
   }
 
@@ -229,17 +274,20 @@ export function createEngine(base) {
     raf = 0;
     const t = now();
     let budget = BUDGET_MS;
+    let worldN = 0; for ( const h of clips ) if ( h.space === "world" ) worldN++;
     for ( const h of [...clips] ) {
       try {
         const idx = picAt(h, t - h.t0);
         if ( idx < 0 ) { finish(h, h.stopWhy ?? "done"); continue; }
+        if ( h.space === "world" ) h.worldAlive = worldN;
+        resize(h, false);
         place(h);
         let c = picture(h, idx, false);
         if ( !c ) {
           /* not pre-rendered: draw it now unless the frame is already over budget and an older picture is showing */
           if ( !h.shown || budget > 0 ) { const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }
         }
-        if ( c ) { show(h, c); if ( !h.isReady ) { h.isReady = true; h._ready(); } }
+        if ( c ) { const was = h.shown; show(h, c); if ( was !== h.shown ) place(h); if ( !h.isReady ) { h.isReady = true; h._ready(); } }
       } catch ( e ) { console.warn("LETR | word failed", e); finish(h, "evicted"); }
     }
     /* pre-render what comes next, nearest first */
@@ -287,7 +335,9 @@ export function createEngine(base) {
       h.hand = h.plan.hand.id;
       settleCenter(h.plan, bank);
       h.loop = !!opts.loop;
-      h.size = opts.size ?? (space === "world" ? (canvas.grid?.size ?? 100) * 0.6 : 72);
+      h.tokenSpan = tokenSpanOf(h);
+      h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
+      resize(h, true);
       h.rot = ((opts.rotation ?? 0) * Math.PI) / 180;
       const tokenAt = isToken(h.at);
       const anchor = opts.anchor ?? (tokenAt ? "bottom" : "center");
@@ -314,8 +364,8 @@ export function createEngine(base) {
       /* startAt: a performance.now() time on the caller's clock (an effect's own t0): the word joins its timeline there */
       h.t0 = Number.isFinite(opts.startAt) ? opts.startAt : now();
       if ( opts.until?.then ) opts.until.then(() => h.stop(), () => h.stop());
-      place(h);
-      picture(h, 0, true);   // the first picture is ready in the same frame
+      const c0 = picture(h, 0, true);   // the first picture is ready in the same frame
+      show(h, c0); place(h);
       kick();
     };
     const go = () => { if ( bank.has("bangers") || bank.has("anton") ) start(); else readyP.then(start, (e) => { console.warn("LETR", e); finish(h, "evicted"); }); };
@@ -337,13 +387,21 @@ export function createEngine(base) {
       if ( to ) { const q = isToken(to) ? (space === "world" ? worldPoint({ at: to }) : screenPoint({ at: to })) : to; if ( q && p ) return Math.atan2(q.y - p.y, q.x - p.x); }
       return ((o.dir ?? -90) * Math.PI) / 180;
     };
+    /* one syllable's natural size: the model's size for this stream (token, area, magnitude), 62 % of a whole word; play() then
+       clamps every syllable to the legible range with the live zoom */
+    const streamUnit = () => {
+      const fake = { space, opts: { magnitude: o.magnitude, area: o.area, span: o.span, token: o.token ?? (isToken(o.at) ? o.at : null) }, at: o.at, pixel: false, plan: { sizeK: 1, _holdBox: { w: 1.2 } } };
+      fake.tokenSpan = space === "world" ? tokenSpanOf(fake) : 0;
+      const c = sizeCtx(fake); c.fit = "world";
+      return sizeFor(c).natural * 0.62;
+    };
     const beat = (text) => {
       if ( !alive ) return null;
       const i = k++;
       const word = text ?? syl[i === 0 ? 0 : 1 + ((i - 1) % Math.max(1, syl.length - 1))] ?? syl[0];
       const p0 = src(); if ( !p0 ) return null;
       const ang = dirAt(p0) + (((i % 2) ? 1 : -1) * (o.spread ?? 10) * Math.PI) / 180;
-      const unit = (o.size ?? (space === "world" ? (canvas.grid?.size ?? 100) * 0.35 : 40));
+      const unit = o.size ?? streamUnit();
       const travel = (o.travel ?? 1.6) * unit, side = ((i % 3) - 1) * unit * 0.25, t0 = now();
       const loud = o.loud ? (typeof o.loud === "function" ? o.loud(i) : o.loud) : 1;
       const at = () => {
@@ -352,7 +410,7 @@ export function createEngine(base) {
         return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
       };
       const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
-      const h = play(word, { mood: o.mood ?? "impact", space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), seed: `${seedBase}:${i}`, hand: hand ?? undefined,
+      const h = play(word, { mood: o.mood ?? "impact", space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: hand ?? undefined,
         in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (o.rotation ?? 0) + tilt + (((i * 7) % 5) - 2) * 3,
         zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer });
       if ( !hand && h.plan ) hand = h.plan.hand;
@@ -401,6 +459,17 @@ export function createEngine(base) {
     return JSON.parse(JSON.stringify(plan));
   }
 
+  /* the size a word would get right now, and why (for callers and tests): { size, px, natural, clamp, fit, sizeK } */
+  function sizeOf(text, opts = {}) {
+    const space = opts.space === "world" ? "world" : "screen";
+    const plan = makePlan(String(text ?? ""), { ...opts, reduced: true }, fontsApi, []);
+    try { settleCenter(plan, bank); } catch {}
+    const h = { space, opts, at: opts.at, plan, pixel: space === "world" && !!opts.pixel };
+    h.tokenSpan = space === "world" ? tokenSpanOf(h) : 0; h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
+    resize(h, true);
+    return { ...h.sizeInfo, size: h.size, sizeK: plan.sizeK };
+  }
+
   function stopAll(o = {}) { for ( const h of [...clips] ) if ( !o.space || h.space === o.space ) h.stop({ quick: o.quick ?? true }); }
   function count(o = {}) { let n = 0; for ( const h of clips ) if ( !o.space || h.space === o.space ) n++; return n; }
 
@@ -411,7 +480,7 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count,
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
     _bank: bank, _plan: (t, o = {}) => makePlan(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }

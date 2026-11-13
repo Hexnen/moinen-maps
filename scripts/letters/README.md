@@ -37,7 +37,8 @@ The complete option tables (play, stream, handle, limits) are in the contract ke
 |---|---|
 | `mood` | `impact crack crash boom roar fire whoosh zap tick pain powerup heal splash fail` or `auto` (read from the word) |
 | `sound` | `{ loud, sharp, long, pitch, rough, peak }`: fine intent over the mood (see "How the shape shows the sound") |
-| `space`, `at`, `size`, `maxWidth`, `anchor` | where and how big: screen px / scene px; `at` = point, token, or a function (moving source) |
+| `space`, `at`, `anchor` | where: screen or world (scene px); `at` = point, token, or a function (moving source) |
+| `magnitude`, `span`, `area`, `token`, `size`, `scale`, `fit`, `maxWidth` | how big: see "Size" below. Usually pass only what you know about the event (`magnitude` 0..2 or tiny/small/normal/big/huge/epic, `area` = its footprint, `span`/`token` = the thing making the sound) and let the engine do the rest |
 | `from` | direction (deg) or point the sound comes from: the word grows away from it |
 | `seed`, `avoid`, `hand` | same look everywhere / look different from these hands / pin an earlier hand |
 | `hold`, `tempo`, `loop`, `delay`, `startAt`, `until` | timing: hold ms, speed, until stop(), wait, join an effect's clock, leave when a Promise settles |
@@ -106,6 +107,59 @@ A scene change evicts all world words. `L.stopAll({ space })`, `L.count({ space 
 | splash | dripping or bubbly letters on a wave, droplets | pops; wobble; drips down | water |
 | fail | droopy bubbly letters sagging and shrinking | drops in small; wobble; droops and falls | dull |
 
+## Size: how big a word is (and why)
+
+A word's size is not one number. It comes from what makes the sound, how big the event is, where it is seen from and on what screen.
+The caller states what it knows about the EVENT; the engine knows the VIEW (zoom, viewport, grid, token sizes, how many words are up)
+and combines them, every animation frame. The model is `size.mjs` (pure; checked in node), numbers in `L.sizeModel`.
+
+### What the caller states (all optional)
+| option | meaning | example |
+|---|---|---|
+| `magnitude` | how big the event is, 0..2 (default 0.5) or `tiny small normal big huge epic` | a crit: 1; a scratch: 0.1; a building down: 1-1.5 |
+| `area` | the event's footprint: a radius in scene px, `{ radius }`, `{ w, h }` or a placeable/bounds | the destroyed area, a blast radius |
+| `span` | the size (scene px) of what makes the sound, when it is not a token | a pixel-vfx effect's width |
+| `token` | the token the sound belongs to (when `at` is a token it is used automatically) | a hurt token |
+| `size` | an explicit natural size (cap height: screen CSS px / scene px); replaces the derived one, still clamped | a fixed design |
+| `scale` | a multiplier on the natural size | a stream's syllables use 0.62 |
+| `fit` | `legible` (default): clamp to the legible range; `world`: pure world size, never clamped (it shrinks to nothing far out); `screen`: `size` is CSS px whatever the zoom (a label pinned to the map); `exact`: `size` as given, no model at all (old behaviour) |  |
+
+### What the engine derives
+1. **Natural size** (world words, scene px of cap height): 0.55 grid squares; from a source of span S: 0.55 g x (S/g)^0.5 (a 4x4 titan
+   gets 2x, not 4x); from a footprint of radius R: 0.55 g x (R / 0.5 g)^0.6 (a 10-square collapse is about 3 squares tall); times the
+   magnitude factor (0.7 at 0, 1.0 at 0.5, 1.5 at 1, 2.3 at 2). Screen words: 8.5 % of the viewport height x magnitude factor.
+   Then the mood's own factor (a roar is drawn bigger than a click: `plan.sizeK`, 0.62-1.32).
+2. **On screen** (CSS px of cap height) = natural x mood factor x zoom (world) or as is (screen).
+3. **Legible range**, clamped softly (inside it nothing changes; outside it the size still follows zoom a little as a depth cue, then stops):
+   - floor: 2.6 % of the viewport height, 15-30 px (0.8x for quiet sounds like ticks), lowered when more than 12 world words are up
+     (sqrt, down to 0.7x) so a hundred far-away crashes do not bury the map; hard stop at 0.8x the floor;
+   - ceiling: the cap height stays under (9 % + 12 % x magnitude) of the viewport height and the word's width under (45 % + 30 % x
+     magnitude) of the usable width (viewport minus the sidebar); hard stop at 1.15x. Big events may fill a lot of the screen, never all.
+4. **Pixel lettering** (`pixel`): the size is snapped to whole art pixels (7-40 per cap height, 32 art px per grid square) once, at the
+   start, and kept: pixel art never scales by fractions.
+
+### While the user zooms or resizes
+Every frame the engine recomputes the size with the live zoom and viewport (pixel words excepted) and scales the shown picture by
+new size / drawn size. As soon as the wanted texel size drifts up by more than 15 % or down to half, the picture is drawn again at the
+new size (the next pictures are drawn ahead within the frame budget): a small bitmap is never stretched into a big one, big lettering
+is drawn big. Screen words follow window resizes the same way.
+
+### What it means in the situations that matter (my reading, numbers at 1366x768)
+- **A tick on a small token, zoomed out** (0.2): the world size would be about 8 px; the floor holds it at about 15 px (a normal
+  word about 19 px) - readable, never bigger than a normal word.
+- **A building coming down** (`area` 5-10 squares, `magnitude` 1): seen from far (0.2) about 80-120 px, the biggest thing on screen
+  but no wall; from zoom 0.5 on the ceiling (about 160-185 px cap height, width under 75 % of the usable width) stops it from burying
+  the scene.
+- **A roll result over the interface**: 8.5 % of the viewport height x magnitude: about 72 px on a 768 px laptop, about 100 px on a
+  1080 px screen (mood factor 1), the same share of the screen on both; a crit (`magnitude` 1) about 1.5x.
+- **A stream along a shot**: each syllable 62 % of the stream's natural size (from `span`/`area`/`token`/`magnitude`), then clamped
+  like any word, so a far-away burst of gunfire is still readable syllable by syllable.
+- **Pixel lettering beside pixel art**: whole art pixels from the same model at the start zoom; the floor of 7 art px keeps the
+  letters readable as pixel letters.
+
+`L.sizeOf(text, opts)` returns what a word would get now: `{ size, px, natural, clamp: null|"floor"|"ceil"|"width", fit, sizeK }`.
+`L.gallery({ part: "sizes" })` shows one word across spans, footprints and magnitudes while the view zooms out, in and back.
+
 ## Motion: how the pictures move
 
 ### What the sources say (digest, with sources)
@@ -167,7 +221,7 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
   timing by `every`, by `beats` (exact ms of each shot on the effect's clock) or by calling `s.beat()` from each shot with
   `manual: true`. `loud: (i) => ...` shapes a swell or fade across the burst.
 - Pixel-art surroundings: `pixel: true` letters on the effect grid (1 texel = 1 art px = grid/32 scene px), hard 1-bit edges,
-  nearest-neighbour; the same moods and motions apply. A word's size is in scene px, so 0.35-0.5 of a grid square reads well.
+  nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas
   and a render budget of about 4 ms per frame; seed with the cast id so every client sees the same lettering.
 - Nothing is networked: run the call on every client from your own socket event, with the same seed and `startAt`.
