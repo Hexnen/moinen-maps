@@ -3,6 +3,7 @@
 // port 0 (the default) lets the browser pick a free port (read back from <profile>/DevToolsActivePort): no clash with other agents.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { launchBrowser, closeBrowser } from "./tmp.mjs";
 
 export const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
@@ -13,17 +14,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // launch and the process tree grows by about 1 GB (1.9-2.2 GB -> about 0.9 GB private working set at rest with them). Rendering, GPU
 // WebGL, screencast, touch and frame pacing were unchanged. Only these three: no --mute-audio, no wider set.
 export const LEAN_FLAGS = ["--disable-extensions", "--disable-component-extensions-with-background-pages", "--disable-background-networking"];
-// chrome-headless-shell (Chrome for Testing: the old headless mode as its own small binary; see C:/mmwt-ultra/chs/SOURCE.txt). Optional,
-// not the default: cdp-drive / cdp-perf take `--chrome chs`. It is headless by nature, so it gets no --headless=new.
+// chrome-headless-shell (Chrome for Testing: the old headless mode as its own small binary; see C:/mmwt-ultra/chs/SOURCE.txt). Selectable
+// in every tool that starts a browser (`--chrome chs`), NOT the default (checked 2026-11-13 against Edge / Chrome on lane 5): WebGL2 on
+// the GPU, extensions, fonts and text metrics, audio + codecs, touch emulation, two seats as contexts, screenshots, traces, CPU profiles
+// and Performance metrics all match, and it records far better (two seats at 60 fps, busy: 50 vs 33 pictures/s). But it runs a FIXED
+// 60 Hz frame clock while Edge / Chrome / a real player run at the display's rate (165 Hz here: Foundry's 60 fps cap then gives 55 fps,
+// k = 3 vsyncs), so view-pace-live and guard-live --vsync measure a different display and hitch-run / stack-bench's real-ticker pan
+// rows are not comparable with Edge / Chrome numbers. It is headless by nature, so it gets no --headless=new.
 export const CHS = "C:/mmwt-ultra/chs/chrome-headless-shell-win64/chrome-headless-shell.exe";
 export const isShell = (exe) => /headless[-_]shell/i.test(String(exe ?? ""));
+/** The default browser of every dev tool that starts one (cdp-drive, cdp-perf, chrome.mjs, the five lane drivers). */
+export const DEFAULT_EXE = EDGE;
 /** A `--chrome` value: "chs" = the headless shell, "edge", "chrome", or a path; null = the default `d`. */
-export const exeOf = (v, d = EDGE) => (v == null ? d : v === "chs" ? CHS : v === "edge" ? EDGE : v === "chrome" ? CHROME : v);
+export const exeOf = (v, d = DEFAULT_EXE) => (v == null ? d : v === "chs" ? CHS : v === "edge" ? EDGE : v === "chrome" ? CHROME : v);
+/** Windows "apps use dark theme" (HKCU Personalize AppsUseLightTheme = 0): what Edge / Chrome report as prefers-color-scheme. */
+let darkOs = null;
+export function osDark() {
+  if ( darkOs != null ) return darkOs;
+  try { darkOs = /AppsUseLightTheme\s+REG_DWORD\s+0x0\b/.test(execFileSync("reg", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "/v", "AppsUseLightTheme"], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] })); }
+  catch { darkOs = false; }
+  return darkOs;
+}
+/** The switches that make `exe` start headless like the others. Edge / Chrome: --headless=new. The shell is headless by nature, but it
+ *  always reports prefers-color-scheme: light, and Foundry picks its default app theme from that (game.configureUI: theme-light vs
+ *  theme-dark on <body>), so it gets the OS scheme the way Edge reads it (measured 2026-11-13: --force-dark-mode has no effect on it). */
+export const headlessArgs = (exe) => (isShell(exe) ? [`--blink-settings=preferredColorScheme=${osDark() ? 0 : 1}`] : ["--headless=new"]);
 
 /** Start a headless browser; resolves when its CDP endpoint answers. Returns { b, port } (b for closeBrowser). LEAN_FLAGS are always on. */
-export async function startHeadless({ kind, exe = CHROME, port = 0, profile = null, args = [], timeoutMs = 20000 }) {
+export async function startHeadless({ kind, exe = DEFAULT_EXE, port = 0, profile = null, args = [], timeoutMs = 20000 }) {
   if ( profile && !port ) try { fs.rmSync(path.join(profile, "DevToolsActivePort"), { force: true }); } catch {}   // (a stale one of an earlier run)
-  const b = launchBrowser(exe, [...(isShell(exe) ? [] : ["--headless=new"]), `--remote-debugging-port=${port}`, ...LEAN_FLAGS, ...args], { kind, profile });
+  const b = launchBrowser(exe, [...headlessArgs(exe), `--remote-debugging-port=${port}`, ...LEAN_FLAGS, ...args], { kind, profile });
   const t0 = Date.now();
   while ( Date.now() - t0 < timeoutMs ) {
     await sleep(200);

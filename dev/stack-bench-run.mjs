@@ -1,14 +1,14 @@
 // STACK BENCH DRIVER (node): the matrix of dev/stack-bench.mjs on a lane, GM + a real player, in headless Chrome at a REAL device scale
 // factor (--force-device-scale-factor: perf-harness setDPR only re-sizes the renderer; the page then reports what it got).
 //   node dev/stack-bench-run.mjs [--dpr 1,2] [--port 9444] [--gm http://127.0.0.14:30001] [--player http://127.0.0.13:30001]
-//        [--gmId 3dzfyqQ1n98OkCwE] [--playerId 5gw9oNsrSdZuSUqQ] [--profile <dir>] [--label name] [--quick] [--dark 0,1] [--zooms 1,3]
+//        [--gmId 3dzfyqQ1n98OkCwE] [--playerId 5gw9oNsrSdZuSUqQ] [--profile <dir>] [--chrome chs|edge|chrome|<exe>] [--label name] [--quick] [--dark 0,1] [--zooms 1,3]
 //        [--only GM|player] [--angle d3d11] [--states base,D,all,...] (a subset of STATES, in their order) [--noMove] [--noOwners]
 // Writes dev/out/stack/<label>-dpr<k>.json (rows) and prints the summary (dev/stack-bench-sum.mjs reads the files again).
 // Chrome is started and stopped by the driver (its own profile dir, deleted after), never another one.
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
-import { LEAN_FLAGS } from "./lib/browser.mjs";
+import { LEAN_FLAGS, exeOf, headlessArgs, CHROME as CHROME_EXE } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 import { summary } from "./stack-bench-sum.mjs";
 
@@ -21,7 +21,7 @@ const ONLY = arg("only", ""), ANGLE = arg("angle", "d3d11");
 const OUT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "out", "stack");
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CHROME = arg("chrome", "C:/Program Files/Google/Chrome/Application/chrome.exe");
+const CHROME = exeOf(arg("chrome", null), CHROME_EXE);
 
 // states: [name, { d, fire, smoke, weather }] - each layer alone, the pairs (fire 20, rain + lens), everything; the other variants
 // (fire 5, tornado, sand) alone and in the full stack
@@ -39,7 +39,7 @@ const QUICK = ["base", "F20", "S", "Wrain", "D", "all", "base2"];
 const MOVE = new Set(["base", "F20", "S", "Wrain", "D", "all"]);
 
 async function startChrome(dpr) {
-  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
+  const ch = launchBrowser(CHROME, [...headlessArgs(CHROME), `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
     `--use-angle=${ANGLE}`, "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { kind: "stack-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
   for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");
