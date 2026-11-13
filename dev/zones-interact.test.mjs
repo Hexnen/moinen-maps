@@ -474,7 +474,8 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   api.clearHighlights();
 
   // passages on the map
-  const marks = () => dispRoot().children[7].children.filter((c) => c.children?.[0]?.mmKey === "passage");
+  // (C13: the marks have a container of their own, above the light where there is one; here, without an effects group, the last in the zones' own)
+  const marks = () => dispRoot().children.at(-1).children.filter((c) => c.children?.[0]?.mmKey === "passage");
   check(marks().length === 0 && Zones.displayBoxes().every((b) => b.kind !== "pass"), "no passage: no mark");
   calls.length = 0;
   const e1 = await api.addEdge({ kind: "portal", a: "z2", b: "z5:elevated" });

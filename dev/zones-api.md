@@ -869,7 +869,11 @@ api.wreckText("office");              // the text shown beside a terrain now
   the number badge of each zone it joins (a swirl: portal, an arch: tunnel, two links: another kind; an end off the map has
   only the one mark) and a thin dotted (portal) or dashed (tunnel) arc between the two marks, dark line under the colour.
   Marks keep their size on screen; the arcs are redrawn at a zoom step. Pointing at a mark says the kind and where it leads.
-- A gravity record shows its mode and no level stepper (it has no level unless one was given through the API).
+  C14 (2026-11-12): where a zone's row of marks does not fit in the zone (a small zone, or the map seen from far out), the
+  mark nearest the spot stands for all of them with a count tag (kept readable however small the mark), on the upper corner of
+  the number badge; the others hide, their arcs start at it; zooming in brings the row back (`place.mjs passGroup`).
+- A level stepper shows on a fire (its Intensity) and on any other record only when it was given a level (a power's level, through
+  the API): smoke, darkness, gravity (said by its mode) and the rest show none (Z38 / C15).
 - **Zones dock, "In play"**: every wall and door that is not as built, every tracked state, every passage; a row can be taken
   back; pointing at a row outlines its zone or border on the map.
 - **Who may what.** Building (the wall, the door, attributes) is the editor's path: any GM, one undo step, the play record of
@@ -892,13 +896,17 @@ api.activeGmName();                   // the active GM's name ("" when none)
   and in a small crowded zone, as a GM and as a player. Not looked at: the tip of a passage mark and a label moving aside
   when a token is dragged onto it (both stand on the node test), a second GM (the refusal notice and the locked controls), the rules
   driver with a real combat module, touch input. The rest stands on `dev/zones-interact.test.mjs` (a stand-in Foundry and PIXI).
-- Highlights are lit like the map (they are in the primary group, under the tokens): on a dark scene or under a coloured
-  light their colours are tinted (passage marks and badges too). A label moves out from under tokens; where a zone has no free
-  room at all (a tiny zone far zoomed out) it can still overlap a token or the badge (the tip under the pointer still says it).
-- Passage marks sit in a row beside the badge: three or more passages in one small zone seen from far away run past the zone.
-  A mark in the middle of a zone (badges placed in the middle) can be behind a token, like the badge itself.
+- C1 + C13 (2026-11-12, `unlit.mjs`): highlights (wash, lines, veil), their labels and the passages' marks are drawn ABOVE the
+  scene's lighting (a dark scene or a coloured light does not tint them), UNDER the tokens (one container at the end of the
+  effects group, drawn in one extra pass with every visible token's picture erased from it) and under the fog (the visibility
+  group is drawn after it: a highlight or label on an unseen part of the map is hidden from a player, as the map is; before,
+  the labels sat in the interface group and showed over the fog). They also lie above tiles, drawings and weather now. Zone
+  numbers, borders, tints and the passages' arcs stay lit in the primary group. A label moves out from under tokens; where a
+  zone has no free room at all it lies partly under a token. Without an effects group (an older core, the node tests) the
+  parts are where they were. Looked at live (lane 5, GM and Test Gracz 1, red light, darkness 0.85, a token moving through).
+- A mark in the middle of a zone (badges placed in the middle) can be behind a token, like the badge itself.
 - A passage has no visibility of its own: whoever sees the zones display sees every passage.
-- A highlight is covered by fog and vision like the zone display (it is in the primary group). A combat module that wants a
+- A highlight is covered by fog and vision like the zone display (above the light, under the fog: C1). A combat module that wants a
   player to see reach into unexplored zones needs a decision here.
 - A registry state added in the menu gets no level unless the GM sets one (the map invents no default).
 - A passage made in the menu joins ground levels; `addEdge` takes any spot.

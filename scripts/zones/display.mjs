@@ -4,7 +4,7 @@
  * badges show how far each zone is from it and what reaching it costs (the scene's movement preset).
  *
  * One container in the primary group above the roads (245) and districts (250), under tiles, drawings and tokens. The passages'
- * lines and marks are drawn above the scene's light, under the tokens and the fog (C13, unlit.mjs), with the highlights.
+ * marks are drawn above the scene's light, under the tokens and the fog (C13, unlit.mjs), with the highlights.
  */
 
 import { cornerPoint } from "./geometry.mjs";
@@ -212,14 +212,14 @@ export class ZoneDisplay {
     this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
     this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
-    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.badges);
+    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.pass, this.badges);
     this.hoverId = -1;
     canvas.primary.addChild(this.root);
-    // the passages' lines and marks (C13): above the scene's light, under the tokens and the fog; without that place, over the badges
+    // the passages' marks (C13): above the scene's light, under the tokens and the fog; without that place, over the badges. (Their
+    // lines stay under the badges, lit: above them they ran across the zones' numbers)
     this.over = new PIXI.Container();
     this.over.eventMode = "none";
     this.over.interactiveChildren = false;
-    this.over.addChild(this.pass);
     Unlit.attach(this.over, Unlit.Z.passages, (o) => this.root.addChild(o));
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
     this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom && this.root.visible ) this.onZoom(z); };
@@ -252,7 +252,7 @@ export class ZoneDisplay {
     const oldBadges = this.#badgeCache, oldIcons = this.#iconCache, oldPass = this.#passCache;
     this.#badgeCache = new Map(); this.#iconCache = new Map(); this.#passCache = new Map();
     this.badges.removeChildren();
-    this.over.removeChildren(); this.over.addChild(this.pass);
+    this.over.removeChildren();
     const dropOld = () => { for ( const m of [oldBadges, oldIcons, oldPass] ) for ( const v of m.values() ) v.b.destroy({ children: true }); m0clear(); };
     const m0clear = () => { oldBadges.clear(); oldIcons.clear(); oldPass.clear(); };
     this.items = [];
@@ -455,7 +455,8 @@ export class ZoneDisplay {
     const sig = [];
     for ( const [id, list] of this.#passBy ) {
       const s = this.#scaleOf(list[0].z, px), k = passGroup(list.map((it) => it.dx ?? 0), s, list[0].z.label.r, PASS_R);
-      const c = (list.clear ?? 0) * 0.78, side = k >= 0 && list[k].dx < 0 ? -1 : 1;
+      // (the mark's middle just off the rim of what is on the spot, along the diagonal: the number stays clear)
+      const c = list.clear ? (list.clear + 5) * Math.SQRT1_2 : 0, side = k >= 0 && list[k].dx < 0 ? -1 : 1;
       const fold = k < 0 ? undefined : { dx: side * c, dy: -c };
       list.forEach((it, i) => { it.fold = fold; it.b.visible = k < 0 || i === k; if ( i !== k ) this.#count(it.b, 0, s / px); });
       if ( k >= 0 ) this.#count(list[k].b, list.length, s / px);
