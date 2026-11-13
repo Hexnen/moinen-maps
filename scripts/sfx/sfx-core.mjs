@@ -218,12 +218,11 @@ export function planCluster(g, o = {}) {
   // a big cave-in: the ground cracks first (its anticipation), then it comes down
   if ( main.voice === "crash" && m >= 0.55 && !o.big ) {
     const text = wordFor("crack", 0.2, hashStr(seed + "|pre"), lang, taken); taken.add(text);
-    words.push(word("pre", text, "crack", 0.3, { x: centre.x, y: centre.y - size * 0.15 }, size * 0.42, main.t - 40, seed + "|pre", null, h01(seed + "|pr") * 16 - 8, main.colors, o));
+    words.push(word("pre", text, "crack", 0.3, { x: centre.x, y: centre.y - size * 0.15 }, size * 0.42, main.t - 200, seed + "|pre", null, h01(seed + "|pr") * 16 - 8, main.colors, o));
   }
   const text = wordFor(main.voice, m, h, lang, taken); taken.add(text);
-  const mw = words.push(word("main", text, main.voice, loud, centre, size, main.t + (LEAD[main.voice] ?? 0) + (words.length ? 180 : 0), seed, main.from ?? null,
+  words.push(word("main", text, main.voice, loud, centre, size, main.t + (LEAD[main.voice] ?? 0) + (words.length ? 60 : 0), seed, main.from ?? null,
     (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2.6, size * 3.2) }));
-  void mw;
   if ( o.big || !(o.sec > 0) || single ) return words;
   // secondaries: the biggest other members out at the edge, each its own voice, quieter, staggered
   const nSec = Math.min(o.sec, g.members.length - 1, Math.round(1 + m * 4));
