@@ -32,9 +32,10 @@ const c = fightSpot(null, size, avoid, W, H);
 ok(fightSpot(full, size, avoid, W, H).where === "right", "nothing clear: right of the bar");
 ok(c.where === "corner" && c.x + size.w <= 1235 && !avoid.some((a) => meets(a, boxOf(c))), `no bar: the top right corner (${c.x})`);
 // always inside the window
+let seed = 3; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
 for ( let i = 0; i < 500; i++ ) {
-  const x0 = Math.random() * 1200, b = { x0, y0: Math.random() * 40, x1: x0 + 100 + Math.random() * 900, y1: 0 };
-  b.y1 = b.y0 + 30 + Math.random() * 60;
+  const x0 = rnd() * 1200, b = { x0, y0: rnd() * 40, x1: x0 + 100 + rnd() * 900, y1: 0 };
+  b.y1 = b.y0 + 30 + rnd() * 60;
   const p = fightSpot(b, size, avoid, W, H);
   ok(Number.isFinite(p.x) && Number.isFinite(p.y), "a spot always");
   if ( p.where !== "right" || !avoid.some((a) => meets(a, boxOf(p))) ) ok(p.x >= -size.w && p.y >= 0, "a sane spot");
