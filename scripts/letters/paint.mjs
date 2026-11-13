@@ -3,6 +3,7 @@
 import { bbox, crackLines } from "./geom.mjs";
 import { rng } from "./rng.mjs";
 import { pictureGeometry, settleCenter, CRACK_W, crackSeed } from "./shape.mjs";
+import { paintShards, SHARD_MARGIN } from "./shards.mjs";
 
 export const MAX_SIDE = 2048;
 
@@ -46,6 +47,7 @@ function extents(plan, geo, p, back) {
     const m = { krackle: 0.55, burst: 0.42, puff: 0.5, debris: 0.9, sparks: 0.45, embers: 0.6, rays: 0.5, droplets: 0.5, dust: 0.45 }[f.k];
     if ( m ) { x0 = Math.min(x0, b.x0 - m * Math.max(1, h)); x1 = Math.max(x1, b.x1 + m * Math.max(1, h)); y0 = Math.min(y0, b.y0 - m * Math.max(1, h) * (f.k === "embers" ? 1.6 : 1)); y1 = Math.max(y1, b.y1 + m * Math.max(1, h) * (f.k === "embers" ? 0.3 : 1)); }
     if ( f.k === "speed" ) { const L = Math.min(2.4, 0.6 + w * 0.5); if ( (f.dir ?? 1) > 0 ) x0 = Math.min(x0, b.x0 - L); else x1 = Math.max(x1, b.x1 + L); }
+    if ( f.k === "swirl" ) for ( const [x, y] of swirlPoints(plan, f) ) { x0 = Math.min(x0, x - 0.1); x1 = Math.max(x1, x + 0.1); y0 = Math.min(y0, y - 0.1); y1 = Math.max(y1, y + 0.1); }
   }
   return { x0, y0, x1, y1, b };
 }
@@ -175,6 +177,20 @@ function texture(ctx, plan, kind, box, S, ox, oy, seed, letters) {
   ctx.restore();
 }
 
+/* swirl: arcs along the circle a bent (orbiting) word lies on, trailing behind it (the word's own centre is the picture's origin) */
+function swirlGeom(plan, f) {
+  const c = plan._center ?? [plan.layout.W / 2, -0.5], W = plan.layout.W, R0 = f.R0, dir = f.dir;
+  const cx = W / 2 - c[0], cy = -0.5 + R0 - c[1], r = Math.abs(R0);
+  const thL = dir > 0 ? -Math.PI / 2 - W / (2 * R0) : Math.PI / 2 + W / (2 * Math.abs(R0));   // the word's back end
+  const span = Math.min(1.4, 2.2 / Math.max(0.6, r));                                             // about 2.2 cap heights of trail
+  return { cx, cy, r, thL, span, back: dir > 0 ? -1 : 1 };
+}
+function swirlPoints(plan, f) {
+  const g = swirlGeom(plan, f), pts = [];
+  for ( const dr of [-0.5, 0.5] ) for ( let k = 0; k <= 6; k++ ) { const a = g.thL + g.back * g.span * (k / 6) - g.back * 0.15; pts.push([g.cx + Math.cos(a) * (g.r + dr), g.cy + Math.sin(a) * (g.r + dr)]); }
+  return pts;
+}
+
 function effect(ctx, plan, f, wb, S, ox, oy, behind) {
   const H = plan.hand, R = rng(f.seed >>> 0);
   const cx = ox + (wb.x0 + wb.x1) / 2 * S, cy = oy + (wb.y0 + wb.y1) / 2 * S;
@@ -218,6 +234,18 @@ function effect(ctx, plan, f, wb, S, ox, oy, behind) {
         const xs = dir > 0 ? ox + wb.x0 * S + S * 0.3 : ox + wb.x1 * S - S * 0.3, len = L * R.f(0.4, 1);
         ctx.strokeStyle = R.chance(0.7) ? H.ink : H.pal.fill[0]; ctx.lineWidth = Math.max(1, S * R.f(0.015, 0.04));
         ctx.beginPath(); ctx.moveTo(xs, y); ctx.lineTo(xs - dir * len, y); ctx.stroke();
+      }
+      break;
+    }
+    case "swirl": if ( !behind ) break; {
+      const g = swirlGeom(plan, f), n = R.i(3, 4);
+      ctx.lineCap = "round";
+      for ( let k = 0; k < n; k++ ) {
+        const r = (g.r + R.f(-0.42, 0.42)) * S, len = g.span * R.f(0.45, 1), a0 = g.thL - g.back * R.f(0.05, 0.25);
+        const a1 = a0 + g.back * len;
+        const lo = Math.min(a0, a1), hi = Math.max(a0, a1), cx = ox + g.cx * S, cy = oy + g.cy * S;
+        ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1.5, S * R.f(0.05, 0.08)); ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, r), lo, hi); ctx.stroke();
+        ctx.strokeStyle = H.pal.fill[0]; ctx.lineWidth = Math.max(1, S * R.f(0.02, 0.035)); ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, r), lo + (g.back < 0 ? 0 : 0.04), hi - (g.back < 0 ? 0.04 : 0)); ctx.stroke();
       }
       break;
     }
@@ -396,6 +424,7 @@ function impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas) {
    Returns { canvas, ax, ay, S }: (ax, ay) = where the word's centre is on the canvas. */
 export function paintPicture(plan, bank, p, S, make) {
   settleCenter(plan, bank);
+  if ( p.shards ) return paintShardPicture(plan, bank, p, S, make);
   /* small words: outlines in cap units would close the counters (a P turns into a blob below ~40 px), so they thin out with size,
      keeping at least about 1.5 px of ink. Hand-letterers do the same: small lettering gets a lighter line. */
   if ( S < 80 ) {
@@ -509,6 +538,7 @@ export function paintPicture(plan, bank, p, S, make) {
       if ( H.outline === "sticker" ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.018); ctx.save(); ctx.lineWidth = (outerW * 2 + 0.03) * S; ctx.globalCompositeOperation = "destination-over"; ctx.stroke(); ctx.restore(); }
     }
     pathG(); ctx.strokeStyle = H.ink; ctx.lineWidth = (H.inflate + H.inkW) * 2 * S; ctx.stroke();
+    if ( plan.hollow ) { pathG(); ctx.save(); ctx.globalAlpha = 0.2; ctx.fillStyle = H.pal.fill[1]; ctx.fill(); ctx.restore(); return; }   // MOVE: an echo: the outline only
     const fp = perLetter && grp.i < 0 ? null : fillPaint(ctx, H, H.fill, perLetter ? box : fullBox, S, ox, oy, grp.i, n);
     if ( fp ) {
       pathG(); ctx.fillStyle = fp; ctx.fill();
@@ -562,4 +592,36 @@ export function paintPicture(plan, bank, p, S, make) {
     ctx.fill(); ctx.restore();
   }
   return { canvas, ax: ox, ay: oy, S };
+}
+
+/* a shards exit picture (shards.mjs): the word painted once at rest (cached per scale on the plan), then cut and thrown */
+function paintShardPicture(plan, bank, p, S, make) {
+  const rest = { ...plan.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, fx: [], dissolve: 0, smear: null, impact: false, shards: null, reseed: false, boil: p.boil, misreg: 0 };
+  rest.letters = rest.letters.map((l) => ({ ...l, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1, v: 1, ch: undefined }));
+  /* the word at rest, painted for this drawing and freed after it (F2: no canvas outlives its picture; 7 drawings per exit) */
+  const src = paintPicture(plan, bank, rest, S, make);
+  const geo = pictureGeometry(plan, bank, rest);
+  const b = bbox(geo.flatMap((l) => l.cs));
+  const M = SHARD_MARGIN;
+  let x0 = b.x0 - M.x, x1 = b.x1 + M.x, y0 = b.y0 - M.up, y1 = b.y1 + M.down;
+  /* the rest picture's own reach (shadow, 3D) must fit too */
+  x0 = Math.min(x0, -src.ax / src.S); y0 = Math.min(y0, -src.ay / src.S); x1 = Math.max(x1, (src.canvas.width - src.ax) / src.S); y1 = Math.max(y1, (src.canvas.height - src.ay) / src.S);
+  let w = (x1 - x0) * S, h = (y1 - y0) * S;
+  const k = Math.min(1, MAX_SIDE / Math.max(w, h, 1));
+  /* over the side cap: draw smaller (the rest picture is scaled with it) */
+  const Sd = S * k; w = Math.ceil(w * k) + 2; h = Math.ceil(h * k) + 2;
+  const canvas = make(Math.max(2, w), Math.max(2, h)), ctx = canvas.getContext("2d");
+  const ox = -x0 * Sd + 1, oy = -y0 * Sd + 1;
+  if ( k < 1 ) { ctx.save(); ctx.translate(ox, oy); ctx.scale(k, k); ctx.translate(-ox, -oy); }
+  paintShards(ctx, plan, p, geo, src, S, ox, oy, path);
+  for ( const f of p.fx ?? [] ) effect(ctx, plan, f, b, S, ox, oy, false);
+  if ( k < 1 ) ctx.restore();
+  if ( p.dissolve > 0 ) {
+    const cell = Math.max(5, Sd * 0.08), r = cell * 0.78 * Math.min(1, p.dissolve);
+    ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = "#000"; ctx.beginPath();
+    for ( let y = 0, row = 0; y < canvas.height + cell; y += cell * 0.86, row++ ) for ( let x = (row % 2) * cell / 2; x < canvas.width + cell; x += cell ) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.2832); }
+    ctx.fill(); ctx.restore();
+  }
+  src.canvas.width = 0; src.canvas.height = 0;
+  return { canvas, ax: ox, ay: oy, S: Sd };
 }
