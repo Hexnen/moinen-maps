@@ -144,10 +144,35 @@ export class Composite {
   }
 }
 
-/** Download and decode a composite (index and tiles, a few requests at the front of the queue). -> Composite, or null. */
-export async function load(m) {
+/**
+ * U232: is a composite's INDEX out of date against the scene's strokes, before any of its tiles is fetched? Pure. `entry(id)` -> the
+ * stroke's manifest entry { sig, id } (null: not baked / not in the manifest), `exists(id)` -> the stroke is still in the scene.
+ * -> null (it may fit; the loader checks the rest) or { stroke, why: "gone" | "signature" | "chunk" }.
+ */
+export function indexStale(index, entry, exists) {
+  for ( const [id, s] of Object.entries(index?.strokes ?? {}) ) {
+    if ( !exists(id) ) return { stroke: id, why: "gone" };
+    const e = entry(id);
+    if ( e && s?.sig && e.sig !== s.sig ) return { stroke: id, why: "signature" };
+    if ( s?.cid && s.cid !== e?.id ) return { stroke: id, why: "chunk" };
+  }
+  return null;
+}
+
+/**
+ * Download and decode a composite (index and tiles, a few requests at the front of the queue). -> Composite, or null.
+ * `check(index)` (optional): asked as soon as the small index is in, BEFORE the tiles are fetched; an answer other than null/false means
+ * the composite does not fit this scene any more and nothing more is fetched (U232: a stale composite's ~1 MB of tiles, downloaded and
+ * decoded only to be thrown away, held the download slots and the codec pool for seconds while the strokes' own chunks waited).
+ */
+export async function load(m, check = null) {
   const t0 = performance.now();
   const ids = m.t.filter((id) => id !== m.idx);
+  if ( check ) {
+    const ix = await Net.getChunk(m.dir, m.idx, { prio: -1 }).catch(() => null);
+    if ( !ix?.index ) { Trace.event("composite-unusable", { index: false, tiles: 0, of: ids.length }); return null; }
+    if ( check(ix.index) ) return null;
+  }
   const [ix, ...ts] = await Promise.all([m.idx, ...ids].map((id) => Net.getChunk(m.dir, id, { prio: -1 }).catch(() => null)));
   if ( !ix?.index || ts.some((t) => !t?.tile) ) { Trace.event("composite-unusable", { index: !!ix?.index, tiles: ts.filter((t) => t?.tile).length, of: ts.length }); return null; }
   const tiles = new Map(ids.map((id, k) => [id, ts[k].tile]));

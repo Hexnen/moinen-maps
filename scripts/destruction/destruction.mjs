@@ -963,18 +963,26 @@ async function compositeLoad(scene, base, want, M) {
   if ( !CM || !Store.sameBase(CM.base, base, Store.legacyBaseKey(scene, S, backgroundInfo()?.path ?? "")) ) return 0;
   // the composite IS the damage on this load: the scene's one reveal waits for it (a few files, read ahead since canvasInit)
   Reveal.progressive("destruction", 4000);
-  const c = await Composite.load(CM);
+  const byId = new Map(want.map((w) => [w.objId, w]));
+  let covered = [];
+  // (U232: judged from the small index alone, before its tiles are fetched: a stale composite costs one tiny request, and the strokes'
+  // own chunks are asked for at once instead of after ~1 MB of tiles that are thrown away)
+  const stale = (ix) => {
+    covered = [];
+    for ( const [id, s] of Object.entries(ix.strokes ?? {}) ) {
+      const w = byId.get(id);
+      // (the same inputs AND the same chunk: a stroke re-baked by newer code under the same signature has other areas - version pinning)
+      const e = M ? Store.entryOf(M, id) : null;
+      if ( !w || w.sig !== s.sig || (s.cid && s.cid !== e?.id) ) { Trace.event("composite-stale", { stroke: id, why: !w ? "gone" : w.sig !== s.sig ? "signature" : "chunk" }); return true; }
+      covered.push(w);
+    }
+    const last = Math.max(-1, ...covered.map((w) => w.index));
+    if ( want.some((w) => w.index < last && !ix.strokes[w.objId]) ) { Trace.event("composite-stale", { why: "an older stroke is not in it" }); return true; }
+    return false;
+  };
+  const c = await Composite.load(CM, stale);
   if ( !c ) return 0;
-  const ix = c.index, byId = new Map(want.map((w) => [w.objId, w])), covered = [];
-  for ( const [id, s] of Object.entries(ix.strokes ?? {}) ) {
-    const w = byId.get(id);
-    // (the same inputs AND the same chunk: a stroke re-baked by newer code under the same signature has other areas - version pinning)
-    const e = M ? Store.entryOf(M, id) : null;
-    if ( !w || w.sig !== s.sig || (s.cid && s.cid !== e?.id) ) { c.destroy(); Trace.event("composite-stale", { stroke: id, why: !w ? "gone" : w.sig !== s.sig ? "signature" : "chunk" }); return 0; }
-    covered.push(w);
-  }
-  const last = Math.max(-1, ...covered.map((w) => w.index));
-  if ( want.some((w) => w.index < last && !ix.strokes[w.objId]) ) { c.destroy(); Trace.event("composite-stale", { why: "an older stroke is not in it" }); return 0; }
+  const ix = c.index;
   compositeShown?.destroy(); compositeShown = c;
   for ( const w of covered ) {
     if ( recs.has(w.rk) ) continue;

@@ -114,6 +114,62 @@ await test("the manifest of a composite with a damaged shape is not a manifest",
   for ( const bad of [{ ...m, t: null }, { ...m, idx: 5 }, { ...m, bands: "x" }, { ...m, tv: 1 }, { ...m, dir: null }, null] ) assert.equal(Comp.manifestOf(scene(bad)), null);
 });
 
+/* ---------------------------------------------------------------- U232: a stale composite is judged by its index, tiles never fetched */
+
+await test("U232 indexStale: a stroke gone, a changed signature, another chunk; a fitting index and an unbaked stroke are not stale", () => {
+  const index = { strokes: { a: { sig: "s1", cid: "d1", hashes: [] }, b: { sig: "s2", hashes: [] } } };
+  const M = { a: { sig: "s1", id: "d1" }, b: { sig: "s2", id: "d2" } };
+  const entry = (m) => (id) => m[id] ?? null, all = () => true;
+  assert.equal(Comp.indexStale(index, entry(M), all), null);
+  assert.deepEqual(Comp.indexStale(index, entry(M), (id) => id !== "b"), { stroke: "b", why: "gone" });
+  assert.deepEqual(Comp.indexStale(index, entry({ ...M, a: { sig: "s9", id: "d1" } }), all), { stroke: "a", why: "signature" });
+  assert.deepEqual(Comp.indexStale(index, entry({ ...M, a: { sig: "s1", id: "d7" } }), all), { stroke: "a", why: "chunk" });
+  assert.equal(Comp.indexStale(index, entry({ a: M.a }), all), null, "b not baked yet (no entry, no cid): the loader decides");
+  assert.equal(Comp.indexStale(null, entry(M), all), null);
+});
+
+await test("U232 load(m, check): a stale index answers null after ONE small request; no tile is downloaded or decoded", async () => {
+  const ids = [await serve(tilePayload(7001), "k"), await serve(tilePayload(7002), "k")];
+  const idx = await serve(C.packIndex({ v: 1, base: "b", areas: {}, strokes: { gone1: { sig: "s", hashes: [0] } }, bands: ids.map((_, i) => ({ key: `u232-${i}`, hashes: [i] })) }), "x");
+  const m = { v: 2, tv: Comp.TILE_VERSION, dir: DIR, base: "b", idx, t: [idx, ...ids], at: 1,
+    bands: ids.map((id, i) => ({ key: `u232-${i}`, L: i, eff: 1, smp: 1, mips: 0, rect: [i, 0, i + 4, 4], tiles: [[i, 0, 4, 4, id]] })) };
+  const n0 = asked.length;
+  let seen = null;
+  const c = await Comp.load(m, (ix) => { seen = ix; return Comp.indexStale(ix, () => null, () => false); });
+  assert.equal(c, null);
+  assert.ok(seen?.strokes?.gone1, "the check got the decoded index");
+  const got = asked.slice(n0);
+  assert.deepEqual(got, [`${DIR}/${idx}.png`], `only the index was asked for, got ${JSON.stringify(got)}`);
+  // the same composite with a check that passes loads whole (the index from memory, the tiles now)
+  const ok = await Comp.load(m, () => null);
+  assert.ok(ok && ok.list.length === 2, "a fitting index: the tiles follow");
+  assert.ok(asked.slice(n0).includes(`${DIR}/${ids[0]}.png`) && !asked.slice(n0 + 1).includes(`${DIR}/${idx}.png`), "tiles fetched, the index not again");
+  ok.destroy();
+});
+
+await test("U232 readAhead: a stale composite is not read ahead (its index only); the strokes' own chunks are", async () => {
+  const Pre = await import("../scripts/net/preload.mjs");
+  const ids = [await serve(tilePayload(7101), "k"), await serve(tilePayload(7102), "k")];
+  const idx = await serve(C.packIndex({ v: 1, base: "b", areas: {}, strokes: { old: { sig: "s1", hashes: [0] } }, bands: ids.map((_, i) => ({ key: `ra-${i}`, hashes: [i] })) }), "x");
+  const comp = { v: 2, tv: Comp.TILE_VERSION, dir: DIR, base: "b", idx, t: [idx, ...ids], at: 1,
+    bands: ids.map((id, i) => ({ key: `ra-${i}`, L: i, eff: 1, smp: 1, mips: 0, rect: [i, 0, i + 4, 4], tiles: [[i, 0, 4, 4, id]] })) };
+  const stroke = "d0123456789abcd";
+  const scene = (strokes) => ({ id: "S", width: 100, height: 100, flags: { "moinen-maps": {
+    destruction: { ap: 1, baked: { v: 2, base: "b", dir: DIR, c: Object.fromEntries(strokes.map((s) => [s, `s1:${stroke}:55`])) } },
+    destructionObjects: Object.fromEntries(strokes.map((s) => [s, { t: 0, x0: 1, y0: 1, w: 2, h: 2 }])),
+    destructionComposite: comp } } });
+  let n0 = asked.length;
+  await Pre.readAhead(scene(["fresh"]));
+  let got = asked.slice(n0);
+  assert.ok(got.includes(`${DIR}/${idx}.png`) && got.includes(`${DIR}/${stroke}.png`), `index then the stroke's chunk: ${JSON.stringify(got)}`);
+  assert.ok(!ids.some((id) => got.includes(`${DIR}/${id}.png`)), `no tile of the stale composite: ${JSON.stringify(got)}`);
+  // the control: a composite whose strokes are all there is read ahead whole (its tiles), the strokes' own chunks not
+  n0 = asked.length;
+  await Pre.readAhead(scene(["old"]));
+  got = asked.slice(n0);
+  assert.ok(ids.every((id) => got.includes(`${DIR}/${id}.png`)), `a fitting composite: its tiles: ${JSON.stringify(got)}`);
+});
+
 /* ---------------------------------------------------------------- bundles that are missing or damaged */
 
 async function smallChunks(seed, n) {
