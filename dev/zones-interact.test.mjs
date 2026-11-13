@@ -495,6 +495,20 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
   const l2 = labels().find((c) => c.children[1].text === "1");
   check(!Zones.displayBoxes().filter((b) => b.zone === 1).some((b) => hits(boxOf(l2, 22), b)), "a label keeps clear of the passages' marks");
   api.clearHighlights();
+  // C14 (2026-11-12): far out a zone's row of marks that does not fit in it is one mark with a count
+  check(Place.passGroup([38, 66], 1, 100) === -1 && Place.passGroup([38, 66], 4.2, 100) === 0 && Place.passGroup([-39, 39, 67], 3, 100) === 0 && Place.passGroup([66, 38], 3, 100) === 1 && Place.passGroup([38], 9, 10) === -1,
+    "C14: a row that fits stays a row; one that does not is the mark nearest the spot; a single mark is never folded");
+  const shown = () => marks().filter((c) => c.visible !== false), countOf = (c) => (c.mmCount?.visible ? c.mmCount.mmN : 0);
+  check(shown().length === 3 && marks().every((c) => !countOf(c)), "C14: at a normal zoom every passage has its own mark, no count");
+  calls.length = 0;
+  canvas.stage.scale.x = 0.1; for ( const fn of canvas.app.ticker.fns ) fn();
+  const z2m = marks().filter((c) => c.position.x > 200 && c.position.x < 400);
+  const one = z2m.filter((c) => c.visible !== false);
+  check(z2m.length === 2 && one.length === 1 && countOf(one[0]) === 2 && one[0].mmCount.scale.x > 1 && one[0].position.x - z2.x < 100 && one[0].position.y < z2.y && shown().length === 2 && calls.some((c) => c[0] === "lineStyle" && c[1].color === 0xc9a2ff),
+    "C14: far out the two marks of the small zone are one mark with the count 2 (kept readable), inside the zone; the portal's line is drawn again from it");
+  check(Zones.displayBoxes().filter((b) => b.kind === "pass" && b.zone === 1).length === 1, "C14: a folded mark is one box for the labels to keep clear of");
+  canvas.stage.scale.x = 1; for ( const fn of canvas.app.ticker.fns ) fn();
+  check(shown().length === 3 && marks().every((c) => !countOf(c)), "C14: back at a normal zoom the row comes back");
   await api.removeEdge(e1.result.id); await api.removeEdge(e2.result.id);
   check(marks().length === 0, "the passages are removed: their marks go");
 }

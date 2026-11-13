@@ -3,7 +3,8 @@
  * line over it (the way printed action maps mark zone borders), and a numbered badge in each zone. While a token is selected the
  * badges show how far each zone is from it and what reaching it costs (the scene's movement preset).
  *
- * One container in the primary group above the roads (245) and districts (250), under tiles, drawings and tokens.
+ * One container in the primary group above the roads (245) and districts (250), under tiles, drawings and tokens. The passages'
+ * lines and marks are drawn above the scene's light, under the tokens and the fog (C13, unlit.mjs), with the highlights.
  */
 
 import { cornerPoint } from "./geometry.mjs";
@@ -11,7 +12,8 @@ import { pairKey } from "./marks.mjs";
 import { drawOf, cutSegment } from "./borders.mjs";
 import { THEMES, BADGES, BADGE_SCALE, bakeWash } from "./themes.mjs";
 import { drawDots, drawPetals } from "./hover-pattern.mjs";
-import { markOffsets, arc } from "./place.mjs";
+import { markOffsets, arc, passGroup } from "./place.mjs";
+import * as Unlit from "./unlit.mjs";
 
 /** Zone states as a tint over the zone (colour, alpha). */
 const STATE_TINT = { fire: [0xff5a1f, 0.3], dark: [0x05050a, 0.45], ice: [0xbfe8ff, 0.3], flooded: [0x2f7fd6, 0.32], wrecked: [0x6b5b4b, 0.32], lowgrav: [0xb48cff, 0.2], water: [0x2f7fd6, 0.18] };
@@ -210,9 +212,15 @@ export class ZoneDisplay {
     this.hiSoft = new PIXI.Sprite(PIXI.Texture.EMPTY);
     this.hi.addChild(this.hiFx, this.hiMask, this.hiSoft, this.hiLine);
     this.hiFx.mask = this.hiMask;
-    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.pass, this.badges);
+    this.root.addChild(this.fill, this.wash, this.states, this.hi, this.glow, this.lines, this.badges);
     this.hoverId = -1;
     canvas.primary.addChild(this.root);
+    // the passages' lines and marks (C13): above the scene's light, under the tokens and the fog; without that place, over the badges
+    this.over = new PIXI.Container();
+    this.over.eventMode = "none";
+    this.over.interactiveChildren = false;
+    this.over.addChild(this.pass);
+    Unlit.attach(this.over, Unlit.Z.passages, (o) => this.root.addChild(o));
     // any zoom (wheel, smooth zoom, pan animations): badges follow the same frame, whatever moved the stage
     this.watch = () => { const z = canvas.stage?.scale.x; if ( z && z !== this.zoom && this.root.visible ) this.onZoom(z); };
     canvas.app.ticker.add(this.watch);
@@ -244,9 +252,11 @@ export class ZoneDisplay {
     const oldBadges = this.#badgeCache, oldIcons = this.#iconCache, oldPass = this.#passCache;
     this.#badgeCache = new Map(); this.#iconCache = new Map(); this.#passCache = new Map();
     this.badges.removeChildren();
+    this.over.removeChildren(); this.over.addChild(this.pass);
     const dropOld = () => { for ( const m of [oldBadges, oldIcons, oldPass] ) for ( const v of m.values() ) v.b.destroy({ children: true }); m0clear(); };
     const m0clear = () => { oldBadges.clear(); oldIcons.clear(); oldPass.clear(); };
     this.items = [];
+    this.#passBy = new Map();
     this.half = new Map();
     this.g = g;
     this.Z = Z; this.look = look; this.#lookKey = lookKey;
@@ -405,7 +415,7 @@ export class ZoneDisplay {
         kept = { b };
       }
       this.#passCache.set(key, kept);
-      this.badges.addChild(kept.b);
+      this.over.addChild(kept.b);
       this.items.push({ b: kept.b, z, at: null, dx: 0, dy: 0, pass: p, end });
     });
   }
@@ -417,6 +427,7 @@ export class ZoneDisplay {
   #passLayout() {
     const by = new Map();
     for ( const it of this.items ) if ( it.pass ) (by.get(it.z.id) ?? by.set(it.z.id, []).get(it.z.id)).push(it);
+    this.#passBy = by; this.#foldSig = null;
     if ( !by.size ) return;
     const hd = this.half.values().next().value ?? 1, corner = this.look?.place === "corner";
     for ( const [id, list] of by ) {
@@ -425,7 +436,59 @@ export class ZoneDisplay {
       else { const row = this.items.find((it) => it.icons && it.z.id === id); if ( row ) clear = (row.b.mmW ?? 40) / 2; }
       const dx = markOffsets(list.map((it) => it.end), clear, PASS_R, 4, corner);
       list.forEach((it, i) => { it.dx = dx[i]; });
+      list.clear = clear;
     }
+  }
+
+  /** The passages' marks by zone (#passLayout) and what was folded last (#passFold). */
+  #passBy = new Map();
+  #foldSig = null;
+
+  /**
+   * C14: where a zone's row of passage marks does not fit in the zone at this zoom, the mark nearest its spot stands for all of
+   * them with their count (place.mjs passGroup); the others hide and their lines start at it. The one mark sits on the upper corner
+   * of what is on the zone's spot (its badge or icons) on the side of the row, like the number tag of a distance badge - beside it
+   * there is no room in such a zone - or on the spot itself when nothing is there. Sets `it.fold` ({ dx, dy }: where the mark is
+   * drawn, in a badge's units; undefined: its own place). Returns true when what is folded changed (the lines are drawn again).
+   */
+  #passFold(px) {
+    const sig = [];
+    for ( const [id, list] of this.#passBy ) {
+      const s = this.#scaleOf(list[0].z, px), k = passGroup(list.map((it) => it.dx ?? 0), s, list[0].z.label.r, PASS_R);
+      const c = (list.clear ?? 0) * 0.78, side = k >= 0 && list[k].dx < 0 ? -1 : 1;
+      const fold = k < 0 ? undefined : { dx: side * c, dy: -c };
+      list.forEach((it, i) => { it.fold = fold; it.b.visible = k < 0 || i === k; if ( i !== k ) this.#count(it.b, 0, s / px); });
+      if ( k >= 0 ) this.#count(list[k].b, list.length, s / px);
+      sig.push(`${id}:${k}`);
+    }
+    const key = sig.join();
+    if ( key === this.#foldSig ) return false;
+    this.#foldSig = key;
+    return true;
+  }
+
+  /**
+   * The count on a mark that stands for a zone's passages (0: none). The badges' small dark tag at its upper right; it keeps a size
+   * that can be read when the mark itself has shrunk with a small zone (`s`: the mark's scale on screen, 1: full size).
+   */
+  #count(b, n, s) {
+    let tag = b.mmCount;
+    if ( !n ) { if ( tag ) tag.visible = false; return; }
+    if ( !tag || tag.mmN !== n ) {
+      if ( tag ) tag.destroy({ children: true });
+      tag = b.mmCount = new PIXI.Container();
+      const G = new PIXI.Graphics(), T = new PIXI.Text(String(n), { fontFamily: "Signika, sans-serif", fontWeight: "700", fontSize: 12, fill: 0xf4efe6, align: "center" });
+      T.resolution = Math.min(4, Math.max(2, 2 * (globalThis.devicePixelRatio || 1))); T.anchor.set(0.5, 0.52);
+      const w = Math.max(15, T.width + 7), h = 15;
+      G.lineStyle({ width: 1, color: 0xf4efe6, alpha: 0.6 }).beginFill(0x15110f, 0.92).drawRoundedRect(-w / 2, -h / 2, w, h, h / 2).endFill();
+      tag.addChild(G, T);
+      tag.mmN = n; tag.mmCountTag = true;
+      b.addChild(tag);
+    }
+    tag.visible = true;
+    const k = Math.max(1, 0.8 / Math.max(0.05, s));
+    tag.scale.set(k);
+    tag.position.set(PASS_R * 0.95 + 4 * k, -PASS_R * 0.75 - 2 * k);
   }
 
   /** A zone's things keep their size on screen, down to the zone's own size: the scale of a thing drawn in screen pixels. */
@@ -434,13 +497,13 @@ export class ZoneDisplay {
   /** The lines between the two marks of each passage; widths on screen (drawn again with the border lines when the zoom moved). */
   drawPass(zoom) {
     const G = this.pass, marks = (this.items ?? []).filter((it) => it.pass);
-    const key = marks.length ? JSON.stringify([zoom, marks.map((it) => [it.pass.id, it.pass.kind, it.z.id, it.dx])]) : "";
+    const key = marks.length ? JSON.stringify([zoom, marks.map((it) => [it.pass.id, it.pass.kind, it.z.id, it.dx, it.fold ? [it.fold.dx, it.fold.dy] : null])]) : "";
     if ( this.#drawnKeys.pass === key ) return;
     this.#drawnKeys.pass = key;
     G.clear();
     if ( !marks.length ) return;
     const px = 1 / Math.max(0.05, zoom), R = { cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND };
-    const at = (it) => ({ x: (it.at ?? it.z.label).x + it.dx * this.#scaleOf(it.z, px), y: (it.at ?? it.z.label).y });
+    const at = (it) => { const k = this.#scaleOf(it.z, px), p = it.at ?? it.z.label; return { x: p.x + (it.fold ? it.fold.dx : it.dx) * k, y: p.y + (it.fold ? it.fold.dy : 0) * k }; };
     const lines = [];
     for ( const p of this.P ?? [] ) {
       if ( !p.joined ) continue;
@@ -864,12 +927,15 @@ export class ZoneDisplay {
   follow(zoom, snap) {
     this.zoom = zoom;
     const px = 1 / Math.max(0.05, zoom), corner = this.look?.place === "corner", g = this.g ?? 100;
+    const folded = this.#passFold(px);
     for ( const it of this.items ?? [] ) {
       const s = this.#scaleOf(it.z, px);                                          // (a badge's radius in scene pixels: BADGE_R * s)
       it.b.scale.set(s);
       if ( snap || !it.at ) it.at = corner ? cornerPoint(it.z, Math.min(it.z.label.r * 0.9, g * 0.55)) : it.z.label;
-      it.b.position.set(it.at.x + (it.dx ?? 0) * s, it.at.y + (it.dy ?? 0) * s);
+      it.b.position.set(it.at.x + (it.fold ? it.fold.dx : it.dx ?? 0) * s, it.at.y + (it.fold ? it.fold.dy : it.dy ?? 0) * s);
     }
+    // (a row folded into one mark, or unfolded: its lines start elsewhere now)
+    if ( folded && !snap ) this.drawPass(zoom);
   }
 
   /**
@@ -881,7 +947,7 @@ export class ZoneDisplay {
     if ( !this.root.visible || !this.Z ) return out;
     const seen = new Set();
     for ( const it of this.items ?? [] ) {
-      if ( !it.at ) continue;
+      if ( !it.at || (it.pass && !it.b.visible) ) continue;
       const s = it.b.scale.x, x = it.b.position.x, y = it.b.position.y;
       const hw = (it.pass ? PASS_R + 1 : it.icons ? (it.b.mmW ?? 40) / 2 : BADGE_R * (this.half.get(it.z.id) ?? 1) * 1.05) * s, hh = it.pass || !it.icons ? hw : 11 * s;
       if ( !it.pass && !it.icons ) seen.add(it.z.id);
@@ -912,7 +978,11 @@ export class ZoneDisplay {
     return null;
   }
 
-  set visible(v) { this.root.visible = v; }
+  set visible(v) { this.root.visible = v; this.over.visible = v; }
 
-  destroy() { canvas.app?.ticker?.remove(this.watch); if ( !this.root.destroyed ) { this.#softTex(); this.#dropWash(); this.root.destroy({ children: true }); } }
+  destroy() {
+    canvas.app?.ticker?.remove(this.watch);
+    if ( !this.root.destroyed ) { this.#softTex(); this.#dropWash(); this.root.destroy({ children: true }); }
+    if ( !this.over.destroyed ) this.over.destroy({ children: true });
+  }
 }
