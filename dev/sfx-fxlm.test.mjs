@@ -214,5 +214,75 @@ group("F16", () => {
   ok(!/loading\?\.then\(\(\) => \{ pending\.push/.test(sfx), "F16 events of the old scene are never pushed back after the engine loads");
 });
 
+/* PATHS (coordinator): presets / combinations / a painted directional stroke / all at once */
+const area = (o = {}) => ({ type: "collapse", cause: 0, rect: { x0: 0, y0: 0, x1: 200, y1: 200 }, w: 200, h: 200, ...o });
+group("PATH", () => {
+  // a directional stroke: its word rides the entry clock's front along the brush path, for as long as it runs
+  const pf = { pts: Array.from({ length: 60 }, (_, i) => [i * 10, 50]), tt: Array.from({ length: 60 }, (_, i) => i * 20) };
+  const ride = C.rideOf(pf, { x: 1000, y: 0 }, 2, 40);
+  ok(ride.length <= 25 && ride[0].x === 1000 && ride[0].ms === 40 && ride.at(-1).x === 1000 + 590 * 2 && ride.at(-1).ms === 40 + 59 * 20 && ride.every((q, i) => !i || q.ms > ride[i - 1].ms),
+    "PATH a painted stroke's ride: scene px along the brush, ms rising with the front, ending at its last point");
+  const e = C.entryEvent(area(), { x: 0, y: 0 }, 1, 5000, { ride, key: "k", sid: "s" });
+  ok(e.path === ride && e.t0 === 5000 && e.ms >= ride.at(-1).ms, "PATH the entry event carries the ride and lasts as long as the front runs");
+  const w = C.planCluster(C.cluster([e], G)[0], { grid: G, sec: 3, known: KINDS }).find((x) => x.role === "main");
+  ok(w.path === ride && !w.stream, "PATH the main word rides it (one word along the stroke, not one per stamp)");
+  ok(/!walk && !opts\.simul && Array\.isArray\(opts\.path\)/.test(sfx) && /pathTimes\(opts\.path/.test(sfx), "PATH only a directional stroke rides (all at once: no ride), on the pixels' own clock");
+  // all at once: one stroke's many areas at one moment -> one cluster, one main word
+  const many = Array.from({ length: 12 }, (_, i) => ({ ...C.entryEvent(area({ rect: { x0: i * 150, y0: 0, x1: i * 150 + 140, y1: 140 } }), { x: 0, y: 0 }, 1, 1000, { key: `a${i}`, sid: `a${i}`, objId: "d7" }) }));
+  const cl = C.cluster(many, G);
+  const mains = cl.flatMap((g) => C.planCluster(g, { grid: G, sec: 3, known: KINDS })).filter((x) => x.role === "main");
+  ok(cl.length === 1 && mains.length === 1, "PATH all at once: one big moment, one main word (not a flood)");
+  // a combination: a bomb (burst) + its crater -> one page: the boom leads, the rest are its satellites
+  const st = { id: "b1", k: "burst", p: [500, 500], r: 200, q: 1000, lv: 3 };
+  const evs = [...C.strokeEvents(st, null, 0, 2000, { grid: G }), { ...C.entryEvent(area({ type: "blast", rect: { x0: 350, y0: 350, x1: 650, y1: 650 } }), { x: 0, y: 0 }, 1, 1000, { key: "c", sid: "c" }) }];
+  const cl2 = C.cluster(evs, G), w2 = cl2.flatMap((g) => C.planCluster(g, { grid: G, sec: 3, known: KINDS }));
+  ok(cl2.length === 1 && w2.filter((x) => x.role === "main").length === 1 && w2.find((x) => x.role === "main").voice === "boom", "PATH a combination composes: one boom, the rest satellites");
+});
+
+/* ORDER (owner): blast first, then the shock wave rolling out, then the debris coming down; the fire after (its catch waits for flames) */
+group("ORDER", () => {
+  const st = { id: "b2", k: "burst", p: [500, 500], r: 200, q: 1000, lv: 3, db: [300, 40, 700, -260, 90, 1150, 120, -200, 900] };
+  const ev = C.strokeEvents(st, null, 0, 3000, { grid: G });
+  const boom = ev.find((e) => e.voice === "boom"), shock = ev.find((e) => e.voice === "whump"), deb = ev.filter((e) => e.voice === "debris");
+  ok(boom.t === 1000 && shock.t > boom.t && deb.every((d) => d.t > shock.t), "ORDER blast, then the wave, then the debris");
+  const d0 = Math.hypot(shock.path[0].x - 500, shock.path[0].y - 500), d1 = Math.hypot(shock.path.at(-1).x - 500, shock.path.at(-1).y - 500);
+  ok(shock.path.length === 2 && d1 > d0 * 2 && shock.path.at(-1).ms === C.SHOCK_MS[1], "ORDER the shock wave's word rides outwards with the wave (its own word, not a 2nd boom)");
+  ok(deb.length === 2 && deb[0].t === 1700 && deb[1].t === 2150 && deb[0].x === 800 && deb[1].x === 240, "ORDER the debris words land where and when the burst's thrown chunks land (st.db)");
+  const words = C.cluster(ev, G).flatMap((g) => C.planCluster(g, { grid: G, sec: 3, known: KINDS }));
+  const sw = words.find((w) => w.voice === "whump"), dw = words.filter((w) => w.voice === "debris");
+  ok(sw && sw.path && sw.t === shock.t && dw.length && dw.every((w) => deb.some((d) => d.t === w.t)), "ORDER the satellites keep their own moments (wave rolling, debris landing) and the wave's path");
+  const fire = C.strokeEvents({ id: "f1", k: "fire", p: [500, 500], r: 150, q: 1000, lv: 2 }, null, 0, 3000, { grid: G }).find((e) => e.voice === "fire");
+  ok(fire && fire.gate === "f1", "ORDER the fire's catch waits for its flames to show (after the blast); its burn follows its level (F5)");
+});
+
+/* MAT (owner): the ground / what breaks changes the sound */
+group("MAT", () => {
+  ok(C.matOf(-1) === "auto" && C.matOf(7) === "metal" && C.matOf(2) === "stone" && C.matOf(6) === "water", "MAT the layer's material index -> its name");
+  ok(C.kindOf("debris", KINDS, "metal") === "clang" && C.kindOf("debris", KINDS, "water") === "splash" && C.kindOf("debris", KINDS, "auto") === "crumble", "MAT metal clangs, water splashes, the rest crumbles");
+  ok(C.kindOf("gunhit", KINDS, "stone") === "ricochet" && C.kindOf("gunhit", KINDS, "earth") === "thud" && C.kindOf("gunhit", KINDS, "metal") === "clang", "MAT a round whines off stone, thuds into soil, clangs on metal");
+  ok(C.kindOf("crash", KINDS, "metal") === "crash" && C.kindOf("boom", KINDS, "water") === "boom", "MAT a building's crash and a bomb's boom stay themselves");
+  const e = C.entryEvent(area({ type: "cracks", mat: 7 }), { x: 0, y: 0 }, 1, 0, { key: "m", sid: "m" });
+  const w = C.planCluster(C.cluster([e], G)[0], { grid: G, known: KINDS })[0];
+  ok(e.mat === "metal" && w.kind === "clang", "MAT a crack in metal is lettered as a clang");
+});
+
+/* SHOT (owner): a gun fired by a token: its report at the muzzle when each round leaves, the impact where it lands */
+group("SHOT", () => {
+  const it = { kind: "muzzle", from: [0, 0], fr: 50, hits: [[1600, 0, 500, 0], [1600, 100, 600, 1], [1600, 200, 700, 0]] };
+  const fl = (L) => Math.min(400, Math.max(25, (L / G) / 160 * 1000));
+  const me = C.muzzleEvent(it, { t0: 10000, grid: G, muzzleOf: (a, h, g) => { const d = Math.hypot(h[0], h[1]), ux = h[0] / d, uy = h[1] / d, off = 0.85 * 50;
+    return { x: ux * off, y: uy * off, L: d - off }; }, flight: fl, key: "m1", sid: "m1" });
+  ok(me.voice === "muzzle" && Math.abs(me.x - 42.5) < 1e-9 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds at the barrel, when the first round leaves (hit time minus flight)");
+  ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180) + 1) < 0.05, "SHOT a syllable per round; the report kicks back away from the aim");
+  const w = C.planCluster(C.cluster([me], G)[0], { grid: G, known: KINDS })[0];
+  ok(w.kind === "gunshot" && w.stream && w.stream.dir === me.dir && w.stream.t0 === me.t0, "SHOT one gunshot stream at the muzzle");
+  const walk = [{ x: 1600, y: 0, ms: 0 }, { x: 1600, y: 100, ms: 100 }];
+  const hit = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, shot: true, key: "g", sid: "g" });
+  const free = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, key: "g2", sid: "g2" });
+  ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "ricochet" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
+  ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /dir: Number\.isFinite\(w\.stream\.dir\)/.test(sfx),
+    "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
+});
+
 if ( failed.length ) { console.log(failed.join(" | ")); console.log(`sfx-fxlm: ${failed.length} finding group(s) FAILED`); process.exit(1); }
 console.log(`sfx-fxlm: ${n} checks ok`);

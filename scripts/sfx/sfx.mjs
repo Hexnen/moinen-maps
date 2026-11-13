@@ -22,6 +22,9 @@ import * as C from "./sfx-core.mjs";
 import * as FM from "../fire/model.mjs";
 import * as DM from "../fire/dust-model.mjs";
 import * as Fire from "../fire/fire.mjs";
+import { pathTimes } from "../destruction/entry-clock.mjs";
+import { causeLook } from "../destruction/cause-fx.mjs";
+import * as A from "../presets/accents-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
@@ -42,6 +45,7 @@ let fireSeen = new Map();      // fire stroke id -> the stroke as last seen
 let burnTimer = 0;
 let lastPlaced = [];          // the last words placed here (for checks: text, role, scene box, penalties)
 let recent = [];               // main words played lately (an echo of one is not lettered again)
+let shooters = [];             // gun firings from a token here: { pts (where its rounds land, scene px), t1 (perf ms) }
 let uiCache = { t: -1e9, rects: [] };
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
@@ -155,8 +159,37 @@ function onEntry(d, g, opts, start) {
   const p0 = opts.path?.[0] ?? opts.o ?? null;
   // a gun's rounds: its walk (the path's own hit moments, ms from the start) for a stream of syllables along it
   const walk = isGun && opts.path.length > 1 ? opts.path.map((q) => ({ x: o.x + q[0] * ap, y: o.y + q[1] * ap, ms: (q[2] || 0) * (opts.strict ? 1 : k2) })) : null;
-  add(C.entryEvent(I, o, ap, start, { speed, gun: walk, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
+  // a stroke painted along its direction (directional on): its front runs the brush path at the drawing speed (entry-clock.mjs
+  // pathTimes, the same clock the pixels use) - its word rides that front, along the stroke, for as long as it runs
+  let ride = null;
+  if ( !walk && !opts.simul && Array.isArray(opts.path) && opts.path.length > 1 ) {
+    try { const pf = pathTimes(opts.path, k2 * (causeLook(I.cause)?.slow ?? 1)); if ( pf ) ride = C.rideOf(pf, o, ap, 40 * k2); } catch { ride = null; }
+  }
+  // (rounds fired by a token: its report sounds at the muzzle (onFiring); here, where they land, the impact on what they hit)
+  const shot = !!walk && hasShooter(walk, pn);
+  add(C.entryEvent(I, o, ap, start, { speed, gun: walk, ride, shot, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
     from: p0 ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null }));
+}
+
+/** A gun's pocks are a shooter's rounds (a firing from a token here, lately): its first hit lands on one of the shooter's hits. */
+function hasShooter(walk, now) {
+  shooters = shooters.filter((q) => q.t1 > now);
+  const g = grid(), w0 = walk[0];
+  return shooters.some((q) => q.pts.some((h) => Math.hypot(h[0] - w0.x, h[1] - w0.y) < g * 0.75));
+}
+/** Presets: a gun firing from a token on the map (accent "muzzle" with its shooter): its REPORT at the barrel, a syllable per round as
+    it leaves (hit time minus flight, presets/accents-core.mjs), and its rounds' pocks letter the IMPACT instead of the rattle. */
+function onFiring(rec) {
+  if ( mode() === "off" || !canvas?.ready || !rec ) return;
+  const G = grid(), flight = (L) => Math.min(A.BULLET_MAX, Math.max(A.BULLET_MIN, (L / G) / A.BULLET_SQ * 1000));
+  const t0 = toPerf(Number(rec.t0) || sharedNow());
+  (rec.pending?.accent ?? []).forEach((it, i) => {
+    if ( it?.kind !== "muzzle" || !Array.isArray(it.from) || !it.hits?.length ) return;
+    const last = Math.max(...it.hits.map((h) => h[2] || 0));
+    shooters.push({ pts: it.hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000 });
+    const e = C.muzzleEvent(it, { t0, grid: G, muzzleOf: A.muzzleOf, flight, key: `m|${rec.id}|${i}`, sid: `m|${rec.id}|${i}` });
+    if ( e ) add(e);
+  });
 }
 
 /** Fire: the layer's strokes changed (or the scene opened): the events of what is new or changed. */
@@ -398,7 +431,7 @@ function playStream(w) {
     const a = W[i - 1], b = W[i] ?? a, f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   };
-  return L.stream({ kind: w.kind, lang: lang(), space: "world", at, dir: -90, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
+  return L.stream({ kind: w.kind, lang: lang(), space: "world", at, dir: Number.isFinite(w.stream.dir) ? w.stream.dir : -90, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
     ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...layerOpts() });
 }
 
@@ -408,7 +441,7 @@ function teardown(full = true) {
   gen++;
   clearTimeout(gatherTimer); gatherTimer = 0; pending = [];
   for ( const s of sched.values() ) clearTimeout(s.id);
-  sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = [];
+  sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = []; shooters = [];
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
   burns.clear();
@@ -450,5 +483,6 @@ export function registerSfx() {
   // (canvasTearDown cleared the old scene; at canvasReady the new scene's fire may already have shown its flames: kept)
   Hooks.on("canvasReady", () => { teardown(false); refresh(); });
   Hooks.on("canvasTearDown", () => teardown(true));
+  Hooks.on("moinenMapsPresets", (kind, data) => { if ( kind === "firing" ) onFiring(data?.rec); });
   Hooks.on("moinenMapsFire", (kind) => { if ( kind === "edited" || kind === "loaded" ) { if ( kind === "loaded" ) { fireSeen = new Map(); onFire(true); } else onFire(false); } });
 }

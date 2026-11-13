@@ -57,6 +57,9 @@ export const VOICES = {
   zap:     { kinds: ["zap"], prio: 8, w: 0.85, ms: 350, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   thud:    { kinds: ["thud", "punch"], prio: 7, w: 0.8, ms: 150, area: 0.8, cover: 0.2, stage: { in: "slam" } },
   gun:     { kinds: ["gunfire"], prio: 7, w: 0.75, ms: 600, area: 0.6, cover: 0.3, stream: true },
+  // (a gun fired by a token on the map: its REPORT at the muzzle, and where its rounds land the IMPACT, by what they hit)
+  muzzle:  { kinds: ["gunshot", "gunfire"], prio: 7, w: 0.7, ms: 600, area: 0.5, cover: 0.3, stream: true },
+  gunhit:  { kinds: ["ricochet", "thud"], prio: 7, w: 0.65, ms: 600, area: 0.5, cover: 0.3, stream: true },
   fire:    { kinds: ["fire"], prio: 6, w: 0.8, ms: 1600, area: 0.8, cover: 0.25, stage: { in: "rise", glow: "auto" } },
   flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
   scorch:  { kinds: ["fire", "crackle"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
@@ -76,10 +79,25 @@ export const VOICES = {
   creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "crackIn", holdKind: "shake", out: "shards", on: 1 } }
 };
 /** The sound kind of a voice: the first of its kinds the engine knows (`known`: a Set / array of the engine's kind ids, or null). */
-export function kindOf(voice, known = null) {
+export function kindOf(voice, known = null, mat = null) {
   const V = VOICES[voice] ?? VOICES.crack, has = known ? (known instanceof Set ? (k) => known.has(k) : (k) => known.includes(k)) : () => true;
-  return V.kinds.find(has) ?? V.kinds[0];
+  return MAT_KINDS[mat]?.[voice]?.find(has) ?? V.kinds.find(has) ?? V.kinds[0];
 }
+/** The destruction layer's ground / thing materials (destruction/model.mjs MATERIALS; an area's info.mat is the index minus one). */
+export const MATS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
+export const matOf = (i) => MATS[(Number.isInteger(i) ? i : -1) + 1] ?? "auto";
+/** What breaks, or what the rounds hit, changes the sound (these kinds first, then the voice's own): metal clangs, water splashes,
+    wood snaps, a round whines off stone (ricochet) and is swallowed by soft ground (thud). A building's crash and a bomb's boom stay. */
+export const MAT_KINDS = {
+  metal: { crack: ["clang", "crack"], thud: ["clang", "thud"], debris: ["clang", "crumble"], slash: ["clang", "slash"], gunhit: ["clang", "ricochet"] },
+  stone: { gunhit: ["ricochet", "crack"] },
+  wood: { debris: ["crack", "crumble"], crack: ["crack", "creak"], gunhit: ["crack", "thud"] },
+  water: { crack: ["splash"], thud: ["splash"], debris: ["splash"], gunhit: ["splash"], whump: ["splash", "whump"] },
+  snow: { debris: ["thud", "crumble"], gunhit: ["thud"] },
+  earth: { gunhit: ["thud"] },
+  grass: { gunhit: ["thud"] },
+  sand: { debris: ["crumble", "thud"], gunhit: ["thud"] }
+};
 
 /** How big a sound is (0..1) from the size of what makes it, in grid squares (radius): ~0.25 sq -> 0.13, 1 sq -> 0.39, 5 sq -> 1. */
 export function magnitude(rGrid) { return clamp(Math.log1p(Math.max(0, rGrid)) / Math.log1p(5), 0.05, 1); }
@@ -128,16 +146,26 @@ export const causeColors = (cause) => CAUSE_COLORS[typeof cause === "number" ? D
  * anticipation's start (the pre word plays there), `t` = the crash.
  */
 export const COLLAPSE_LEAD = 230;
-export function entryEvent(I, o, ap, start, { speed = 1, gun = null, key, sid, objId = null, from = null } = {}) {
+/** A directional stroke's ride: the entry clock's path front (`pf` = entry-clock.mjs pathTimes: pts in art px, tt ms) -> [{ x, y, ms }]
+    scene px, ms after the entry's start (`delay` = the clock's own lead before the front sets off); at most 24 points. */
+export function rideOf(pf, o, ap = 1, delay = 0) {
+  const n = pf?.pts?.length ?? 0; if ( n < 2 ) return null;
+  const step = Math.max(1, Math.ceil(n / 24)), out = [];
+  for ( let i = 0; i < n; i += step ) out.push({ x: o.x + pf.pts[i][0] * ap, y: o.y + pf.pts[i][1] * ap, ms: Math.round(delay + pf.tt[i]) });
+  if ( out.at(-1).ms !== Math.round(delay + pf.tt[n - 1]) ) out.push({ x: o.x + pf.pts[n - 1][0] * ap, y: o.y + pf.pts[n - 1][1] * ap, ms: Math.round(delay + pf.tt[n - 1]) });
+  return out;
+}
+export function entryEvent(I, o, ap, start, { speed = 1, gun = null, ride = null, shot = false, key, sid, objId = null, from = null } = {}) {
   const r = I.rect, k2 = 1 / (speed || 1);
   const cx = Number.isFinite(I.ex) && (I.ex || I.ey) ? I.ex : (r.x0 + r.x1) / 2, cy = Number.isFinite(I.ey) && (I.ex || I.ey) ? I.ey : (r.y0 + r.y1) / 2;
   const w = Math.max(1, (I.w ?? r.x1 - r.x0)), h = Math.max(1, (I.h ?? r.y1 - r.y0));
-  const voice = destrVoice(I.type, I.cause | 0, !!gun);
+  // (a gun whose shooter is on the map has its report at the muzzle (muzzleEvent): here, where its rounds land, the impact)
+  const voice = gun && shot ? "gunhit" : destrVoice(I.type, I.cause | 0, !!gun);
   const lead = (I.type === "collapse" ? COLLAPSE_LEAD : 0) * k2;
   const box = { x0: o.x + r.x0 * ap, y0: o.y + r.y0 * ap, x1: o.x + r.x1 * ap, y1: o.y + r.y1 * ap };
-  return { key, sid, obj: objId, voice, x: o.x + cx * ap, y: o.y + cy * ap, r: 0.5 * Math.sqrt(w * h) * ap, box,
+  return { key, sid, obj: objId, voice, mat: matOf(I.mat), x: o.x + cx * ap, y: o.y + cy * ap, r: 0.5 * Math.sqrt(w * h) * ap, box,
     t: start + lead, ...(lead ? { tPre: start } : {}), ms: (TYPE_MS[I.type] ?? 600) * k2, colors: causeColors(I.cause | 0),
-    from: from && (I.type !== "blast" || gun) ? from : null, ...(gun ? { path: gun, t0: start } : {}) };
+    from: from && (I.type !== "blast" || gun) ? from : null, ...(gun ? { path: gun, t0: start } : ride ? { path: ride, t0: start, ms: Math.max((TYPE_MS[I.type] ?? 600) * k2, ride.at(-1).ms + 300) } : {}) };
 }
 
 /* ---------------------------------------------------------------- what fire sounds like */
@@ -203,6 +231,34 @@ export function pathBox(p, r = 50) {
  * flames take to die), passMs(st) (a dust source's run along its path), lifeMs(st) (a burst's life) }.
  */
 export const NEW_LATE = 6000;
+/** A shock wave's word sets off this long after the blast and rides out for this long (ms). */
+export const SHOCK_MS = [90, 520];
+/** Debris words land no earlier than this after the blast (the blast and its wave have the stage first). */
+export const DEBRIS_MIN_MS = 380;
+/** Where and when a burst's thrown debris lands (st.db = flat [dx, dy, ms, ...] from its centre): the first and the last landing,
+    scene px and ms after the blast. */
+export function debrisLandings(st, n = 2) {
+  const d = st.db ?? [], p = st.p ?? [0, 0], out = [];
+  for ( let i = 0; i + 2 < d.length; i += 3 ) if ( Number.isFinite(d[i + 2]) ) out.push({ x: p[0] + d[i], y: p[1] + d[i + 1], ms: d[i + 2] });
+  out.sort((a, b) => a.ms - b.ms);
+  return out.length <= n ? out : n === 1 ? [out[0]] : [out[0], out.at(-1)];
+}
+/**
+ * A shooter's MUZZLE REPORT (a gun preset fired from a token on the map: presets accent item "muzzle", `from` the shooter, `hits`
+ * [[x, y, t, lane]...] ms after the firing's t0): one stream at the barrel, a syllable per round as it LEAVES (its hit time minus its
+ * flight). `muzzleOf(it, h, grid)` -> {x, y, L} (presets/accents-core.mjs), `flight(L)` the round's flight over L px (ms). -> event | null
+ */
+export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid }) {
+  if ( !Array.isArray(it?.from) || !(it.hits?.length) ) return null;
+  const shots = it.hits.map((h) => { const q = muzzleOf(it, h, grid); return { x: q.x, y: q.y, ms: h[2] - flight(q.L), hx: h[0], hy: h[1] }; }).sort((a, b) => a.ms - b.ms);
+  const s0 = shots[0].ms, walk = shots.map((q) => ({ x: q.x, y: q.y, ms: Math.round(q.ms - s0) }));
+  // (the report kicks back from the aim, away from where the rounds fly, so it never sits on the impact words)
+  const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y;
+  const dir = Math.round((Math.atan2(-ay, -ax) * 180) / Math.PI);
+  const b = grid * 0.4, x = shots[0].x, y = shots[0].y;
+  return { key, sid, obj: key, voice: "muzzle", x, y, r: grid * 0.45, t: t0 + s0, t0: t0 + s0, path: walk, dir, m: 0.45,
+    ms: Math.max(300, walk.at(-1).ms + 300), box: { x0: x - b, y0: y - b, x1: x + b, y1: y + b } };
+}
 export function strokeEvents(st, prev, from, to, ctx) {
   const out = [], grid = ctx.grid || 100, late = ctx.late ?? 1500;
   const inWin = (t, lateMs = late) => t >= from - lateMs && t < to;
@@ -216,11 +272,16 @@ export function strokeEvents(st, prev, from, to, ctx) {
         box: { x0: p[0] - r, y0: p[1] - r, x1: p[0] + r, y1: p[1] + r } });
       // a shell or a bomb: its shock wave rolls out and its debris comes down: satellites of the same moment (one sound, one page)
       if ( lv >= 2 ) {
-        push({ key: `${st.id}|shock`, voice: "whump", x: p[0] + r * 1.1, y: p[1] + r * 0.35, r: r * 0.55, t: st.q + 160, m: m * 0.6, ms: 600 });
-        const n = lv >= 2.5 ? 2 : 1;
+        // the SHOCK WAVE: its own word rides out with the wave (from the fireball's rim outwards as the ring grows), not a 2nd boom
+        const sa = Math.PI * (-0.15 - 0.2 * h01(`${st.id}|sh`)), ux = Math.cos(sa), uy = Math.sin(sa);
+        push({ key: `${st.id}|shock`, voice: "whump", x: p[0] + ux * r * 0.8, y: p[1] + uy * r * 0.8, r: r * 0.55, t: st.q + SHOCK_MS[0], m: m * 0.6, ms: SHOCK_MS[1] + 200,
+          path: [{ x: p[0] + ux * r * 0.8, y: p[1] + uy * r * 0.8, ms: 0 }, { x: p[0] + ux * r * 2.1, y: p[1] + uy * r * 2.1, ms: SHOCK_MS[1] }] });
+        // the DEBRIS coming down after it: where and when the burst's thrown chunks land (st.db [dx, dy, ms]...), else two falls
+        const land = debrisLandings(st, 2), n = land.length || (lv >= 2.5 ? 2 : 1);
         for ( let i = 0; i < n; i++ ) {
           const a = Math.PI * (0.15 + 0.7 * h01(`${st.id}|deb${i}`)) + (i ? Math.PI : 0);
-          push({ key: `${st.id}|debris${i}`, voice: "debris", x: p[0] + Math.cos(a) * r * 1.05, y: p[1] + Math.sin(a) * r * 0.9, r: r * 0.4, t: st.q + 420 + 260 * i, m: m * 0.5, ms: 800 });
+          const q = land[i] ?? { x: p[0] + Math.cos(a) * r * 1.05, y: p[1] + Math.sin(a) * r * 0.9, ms: 420 + 260 * i };
+          push({ key: `${st.id}|debris${i}`, voice: "debris", x: q.x, y: q.y, r: r * 0.4, t: st.q + Math.max(DEBRIS_MIN_MS + 200 * i, q.ms), m: m * 0.5, ms: 800 });
         }
       }
     }
@@ -363,9 +424,9 @@ export function planCluster(g, o = {}) {
       h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
   const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box });
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat });
   // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
-  if ( VOICES[main.voice]?.stream && main.path?.length > 1 ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t };
+  if ( VOICES[main.voice]?.stream && main.path?.length ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t, ...(Number.isFinite(main.dir) ? { dir: main.dir } : {}) };
   // a thing that travels: its word rides its path
   else if ( main.path?.length > 1 ) mw.path = main.path;
   // (the WORD is written from the main sound alone - how loud it is, how long: the same on every seat even when the rest of its
@@ -391,8 +452,12 @@ export function planCluster(g, o = {}) {
     const dx = e.x - centre.x, dy = e.y - centre.y, d = Math.hypot(dx, dy) || 1;
     const at = { x: e.x + (dx / d) * e.r * 0.3, y: e.y + (dy / d) * e.r * 0.3 };
     const sd = `${o.seed ?? ""}|${sidOf(e)}`;
-    words.push(spec("sec", v, clamp(0.15 + 0.7 * m2, 0, 0.7), e.ms ?? VOICES[v]?.ms ?? 600, at, Math.max(e.t, main.t) + 160 + i * 140, sd, centre,
-      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null }));
+    // (a satellite sounds when its own thing happens - debris as it lands, a wave as it rolls - else just after the main word)
+    const ts = e.t > main.t + 50 ? e.t : Math.max(e.t, main.t) + 160 + i * 140;
+    const sw = spec("sec", v, clamp(0.15 + 0.7 * m2, 0, 0.7), e.ms ?? VOICES[v]?.ms ?? 600, e.path?.length > 1 ? e.path[0] : at, ts, sd, centre,
+      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null, mat: e.mat ?? main.mat });
+    if ( e.path?.length > 1 ) sw.path = e.path;
+    words.push(sw);
   });
   return words;
 }
@@ -403,7 +468,7 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
   // a small crash is a thud (it slams in); satellites and pre words do not shove the main word
   if ( voice === "crash" && loud < 0.45 ) stage.in = "slam";
   if ( role !== "main" ) delete stage.push;
-  return { role, voice, kind: kindOf(voice, o.known), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
+  return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null), mat: extra.mat ?? null, loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
     magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
     stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift };
 }
