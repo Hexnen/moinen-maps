@@ -17,6 +17,7 @@ import { LOOK, hash2, vnoise, latticeNoise, pathTimes, clockOf, ATONCE_JITTER, p
 import { ClockPool } from "./clock-pool.mjs";
 import { ErodeGPU, MAX_STAGES } from "./erode-gpu.mjs";
 import { dropTime, DROP_MS } from "./timed-core.mjs";
+import { sfxBus } from "../sfx/bus.mjs";
 
 /** Entering areas draw their pieces as one batched geometry each (piece-batch.mjs); `CONFIG.moinenMaps.noBatchRender = true`: sprites (A/B). */
 const batchOn = () => !globalThis.CONFIG?.moinenMaps?.noBatchRender;
@@ -1010,6 +1011,8 @@ export class DestructionDisplay {
   enter(g, { start = performance.now(), o = null, dir = null, under = [], path = null, spine = null, simul = false, strict = false } = {}) {
     this.enterQueue?.delete(g);
     this.endAnim(g);
+    // LMAP: the comic sound effect of this entry (scripts/sfx/sfx.mjs; null when they are off) - every path below, played or not
+    sfxBus.entry?.(this, g, arguments[1] ?? {}, start);
     const now = performance.now();
     // a stroke that carries a token: its entry runs along the carried path, and the token's carry starts with it (tokens/carry.mjs)
     if ( g.objId && this.carry && this.look.entry ) { const head = this.carry.frontOf?.(g.objId); if ( head ) path = head; else path ??= this.carry.pathOf(g.objId); this.carry.enter(g, start, (1 / (this.look.speed || 1)) * (Cause.causeLook(g.info.cause)?.slow ?? 1)); }

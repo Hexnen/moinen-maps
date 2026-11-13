@@ -26,6 +26,7 @@ import { registerOrbit } from "./zones/orbit.mjs";
 import "./diag.mjs";   // code-changed-on-disk notice + scene-switch log (api.diag)
 import "./vram-ui.mjs";   // the VRAM meter per client: what this page holds on the GPU vs the card (api.vram, api.diag.vram)
 import "./letters-api.mjs";   // LETR: the comic sound-effect lettering engine (scripts/letters/, shared with invincible-plus-ultra): api.letters()
+import { registerSfx } from "./sfx/sfx.mjs";   // LMAP: comic sound-effect lettering of the destruction and the fire (scripts/sfx): api.sfx
 import "./bar-toggles.mjs";   // TOGL: the VRAM meter's and the director bar's on/off toggles in the map's group of the left menu
 import { registerFlood } from "./destruction/flood.mjs";
 import { registerSmoothView } from "./view-smooth.mjs";
@@ -34,6 +35,7 @@ import { registerLoadWarm } from "./load-warm.mjs";
 registerRoads();   // roads and their traffic register their own hooks (scripts/roads)
 registerZones();   // zones drawn with a pencil, movement counted in zones (scripts/zones)
 registerOrbit();   // the shared Orbit scene: tokens thrown to orbit from any map, the strip of who is up there (scripts/zones/orbit.mjs)
+registerSfx();     // LMAP: the comic sound effects of the damage and the fire (their own hooks and settings)
 registerFlood();   // the water of the flooded holes (destruction kind "flood"): its own hooks (scripts/destruction/flood.mjs)
 registerSmoothView();   // smooth wheel zoom + even frame pacing on fast displays (client settings, scripts/view-smooth.mjs)
 registerWarmup();   // GPU objects the first zoom / pan would make, made at idle after the scene opens (scripts/warmup.mjs)
