@@ -462,6 +462,8 @@ export function paintPicture(plan, bank, p, S, make) {
     paintBackdrop(ctx, H, back, S, ox, oy);
   }
 
+  if ( H.keyline === "union" ) paintUnion(ctx, plan, geo, all, wb, S, ox, oy, canvas, make, p);
+  else {
   const silhouette = (dx, dy, width, style) => {
     ctx.save(); ctx.translate(dx * S, dy * S); ctx.beginPath(); path(ctx, all, S, ox, oy);
     ctx.fillStyle = style; ctx.strokeStyle = style; ctx.lineWidth = width * 2 * S; ctx.fill("nonzero"); if ( width > 0 ) ctx.stroke(); ctx.restore();
@@ -596,6 +598,7 @@ export function paintPicture(plan, bank, p, S, make) {
     const under = H.order === "left" ? g : other, b = bbox(under.cs), mid = (b.y0 + b.y1) / 2;
     const cy = Math.round(oy + mid * S); ctx.save(); ctx.beginPath(); ctx.rect(0, cy, canvas.width, canvas.height - cy); ctx.clip(); passes(under); ctx.restore();
   }
+  }
 
   for ( const f of p.fx ) effect(ctx, plan, f, wb, S, ox, oy, false);
 
@@ -607,6 +610,89 @@ export function paintPicture(plan, bank, p, S, make) {
     ctx.fill(); ctx.restore();
   }
   return { canvas, ax: ox, ay: oy, S };
+}
+
+/* ---------- LOOK2 (SPEC-LOOK P2-P6, P10, P15; the owner: the outline must never cover the neighbouring letters): the book's ink ----------
+   ONE keyline round the whole word, letters that never ink over each other:
+   1. the duplicate (P4): one flat copy of all letters at a fixed offset in the one dark colour, with a thin ink rim; for heavy sounds
+      the same copy swept into a solid block, still one flat colour (no shading, no soft shadow); never inside a ring's counter (P10);
+   2. a smear (P15) is 2-3 thin outline-only echoes in the duplicate colour (no filled copies, no pale slabs);
+   3. the keyline: every letter's outline stroked in ink (only its outer half survives: step 4 paints over the inner half);
+   4. letters back to front (a prefix behind its body, the left letter in front of the right one, an upper row in front of a lower
+      one): each CLIPPED to its own outline: flat face (or an open face: white with a rim in the word's colour, P6), then its own
+      ink line inside the clip only. Where a letter lies over another, the only line between them is the front letter's own inner
+      line: no letter's outline ever lands on another letter's face;
+   5. interlocked rings: the ring under at the top crossing is painted again over the lower half, so they pass through each other.
+   Line weights are in cap units with pixel floors (the keyline stays visible at token size). */
+const UNION_RIM = 0.6, UNION_INNER = 0.45;
+function paintUnion(ctx, plan, geo, all, wb, S, ox, oy, canvas, make, p) {
+  const H = plan.hand, Ls = plan.layout.letters, pre = plan.layout.pre ?? 0, vertical = plan.layout.arrange === "vertical";
+  const rim = Math.max(1, H.inkW * UNION_RIM * S), inner = Math.max(0.75, H.inkW * UNION_INNER * S);
+  const P = (c, cs) => { c.beginPath(); path(c, cs, S, ox, oy); };
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const isRing = (g) => !!Ls[g.i]?.ring;
+  const holesOf = (cs) => { let big = 0; for ( const c of cs ) if ( Math.abs(signedArea(c)) > Math.abs(big) ) big = signedArea(c); return cs.filter((c) => signedArea(c) * big < 0); };
+  /* 1. the duplicate / block */
+  if ( H.depth > 0 ) {
+    const ddx = Math.cos(H.depthAng) * H.depth, ddy = Math.sin(H.depthAng) * H.depth;
+    const rings = geo.filter(isRing);
+    const lay = rings.length ? make(canvas.width, canvas.height) : null, c = lay ? lay.getContext("2d") : ctx;
+    c.save(); c.lineJoin = "round"; c.lineCap = "round";
+    const steps = H.block === "heavy" ? Math.max(2, Math.min(28, Math.ceil(H.depth * S / 1.6))) : 1;
+    const at = (k, fn) => { c.save(); c.translate(ddx * k / steps * S, ddy * k / steps * S); P(c, all); fn(); c.restore(); };
+    c.fillStyle = H.ink; c.strokeStyle = H.ink; c.lineWidth = 2 * rim;
+    for ( let k = steps; k >= 1; k-- ) at(k, () => { c.fill("nonzero"); c.stroke(); });
+    c.fillStyle = H.pal.ext; c.strokeStyle = H.pal.ext; c.lineWidth = Math.max(1, S * 0.004);
+    for ( let k = steps; k >= 1; k-- ) at(k, () => { c.fill("nonzero"); if ( steps > 1 ) c.stroke(); });
+    if ( lay ) {
+      /* a ring's counter shows the scene, never the copy behind it */
+      c.globalCompositeOperation = "destination-out"; c.fillStyle = "#000";
+      for ( const g of rings ) { const hs = holesOf(g.cs); if ( hs.length ) { P(c, hs); c.fill("nonzero"); } }
+      c.restore(); ctx.drawImage(lay, 0, 0); lay.width = 0; lay.height = 0;
+    } else c.restore();
+  }
+  /* 2. smear echoes */
+  if ( p.smear ) {
+    const sm = p.smear, n = Math.min(3, sm.n ?? 3), cxw = (wb.x0 + wb.x1) / 2, cyw = (wb.y0 + wb.y1) / 2;
+    ctx.save(); ctx.strokeStyle = H.pal.ext ?? H.ink; ctx.lineWidth = Math.max(1, S * 0.02);
+    for ( let k = n; k >= 1; k-- ) {
+      const t = k / n, z = 1 + (sm.zoom ?? 0) * t;
+      ctx.save(); ctx.translate(ox + (cxw + (sm.dx ?? 0) * t) * S, oy + (cyw + (sm.dy ?? 0) * t) * S); ctx.scale(z, z); ctx.translate(-(ox + cxw * S), -(oy + cyw * S));
+      P(ctx, all); ctx.stroke(); ctx.restore();
+    }
+    ctx.restore();
+  }
+  /* an opt-in light outline (look.outline) round the whole word */
+  if ( H.out2W > 0 ) { P(ctx, all); ctx.strokeStyle = H.pal.out2 === "#1b1020" ? "#ffffff" : H.pal.out2; ctx.lineWidth = 2 * (rim + H.out2W * S); ctx.stroke(); }
+  /* 3. the keyline round the word */
+  P(ctx, all); ctx.strokeStyle = H.ink; ctx.lineWidth = 2 * rim; ctx.stroke();
+  /* 4. the letters, back to front, each inside its own outline */
+  const n = plan.chars.length, perLetter = H.fill === "letters" || H.fill === "alt", fullBox = { x0: wb.x0, y0: wb.y0, x1: wb.x1, y1: wb.y1 };
+  const dirSign = H.order === "right" ? 1 : -1;
+  const rank = (g) => (vertical ? -(Ls[g.i]?.row ?? 0) * 1e4 : (g.i < pre ? 0 : 1e4)) + dirSign * g.i;
+  const order = geo.slice().sort((a, b) => rank(a) - rank(b));
+  const letter = (g) => {
+    const hollow = H.fill === "hollow" || (H.hollowPre && g.i < pre);
+    ctx.save(); P(ctx, g.cs); ctx.clip("nonzero");
+    if ( plan.hollow ) { ctx.globalAlpha = 0.2; ctx.fillStyle = H.pal.fill[1]; P(ctx, g.cs); ctx.fill(); ctx.globalAlpha = 1; }   // MOVE: an echo
+    else if ( hollow ) {
+      P(ctx, g.cs); ctx.fillStyle = H.hollowPaper ?? "#ffffff"; ctx.fill();
+      ctx.strokeStyle = H.pal.fill[1]; ctx.lineWidth = Math.max(2, (H.rimW ?? 0.05) * 2 * S * (Ls[g.i]?.s ?? 1) ** 0.5); ctx.stroke();
+    } else {
+      P(ctx, g.cs); ctx.fillStyle = fillPaint(ctx, H, H.fill, perLetter ? bbox(g.cs) : fullBox, S, ox, oy, g.i, n); ctx.fill();
+      if ( H.tex && H.tex !== "none" ) texture(ctx, plan, H.tex, bbox(g.cs), S, ox, oy, (plan.seed ^ (g.i + 7) * 40503) >>> 0, [g]);
+    }
+    if ( H.join !== "merge" || hollow ) { P(ctx, g.cs); ctx.strokeStyle = H.ink; ctx.lineWidth = 2 * inner; ctx.stroke(); }
+    ctx.restore();
+  };
+  for ( const g of order ) letter(g);
+  /* 5. interlocked rings: over at the top crossing, under at the bottom one */
+  for ( const g of geo ) {
+    const j = Ls[g.i]?.link; if ( j == null ) continue;
+    const other = geo.find((q) => q.i === j); if ( !other ) continue;
+    const under = rank(g) < rank(other) ? g : other, b = bbox(under.cs), cy = Math.round(oy + (b.y0 + b.y1) / 2 * S);
+    ctx.save(); ctx.beginPath(); ctx.rect(0, cy, canvas.width, canvas.height - cy); ctx.clip(); letter(under); ctx.restore();
+  }
 }
 
 /* a shards exit picture (shards.mjs): the word painted once at rest (cached per scale on the plan), then cut and thrown */

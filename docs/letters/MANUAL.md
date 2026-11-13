@@ -39,7 +39,8 @@ Keep the section titles stable: other documents and the agent skill link to them
 | MOVE (travel, choreography, rates, escalation, shards, push, glow, sustain, ambient) | 1.5.0 | v7 | `tactics-zones-move` | pending merge; then changing (SPEC-MOTION) |
 | LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
 | LM (MOVE + LOOK merged) | 1.7.0 | v7+v8 | `tactics-zones-lm` (in progress, not on origin yet) | pending merge |
-| LOOK2, MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
+| LOOK2 (invincible rebuilt: SPEC-LOOK P1-P15, P17, P18; legacy look frozen as `expressive`) | 1.8.0 | v9 | `tactics-zones-look2` | pending merge |
+| MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
 1. What LETR is
@@ -470,13 +471,41 @@ Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then ch
   `parts` scales must not shrink a prefix twice; LOOK's backdrop scale runs after MOVE's retiming.
 
 ## 13. Look
-Status: changing (SPEC-LOOK P1-P17, ordered: LOOK2, OUTL). [V] where marked, else [R].
+Status: pending merge (LOOK2, 1.8.0, `tactics-zones-look2`); SPEC-LOOK P16 (smooth motion) belongs to MOTION2. [V] where marked,
+else [R].
 
-**Styles.** `L.lookStyles` = `["comic", "invincible"]` [V]. `invincible` (the book's manner: squared condensed face, black keyline,
-flat or two-tone face, solid block, upright, small lead-in before a big body, no texture, no backdrop) is the default when
-`game.system.id === "invincible"`, else `comic` [C]. Per call: `look: { style }` or `style: "invincible" | "comic"`; for later calls
-`L.lookStyle(name)` [V]. `look` keys still win over the style. Planned: `comic` is renamed/aliased `expressive` and frozen (section
-14).
+**Styles.** `L.lookStyles` = `["comic", "invincible", "expressive"]` [V]. `invincible` is the default when
+`game.system.id === "invincible"`, else `comic` [C]. Per call: `look: { style }` or `style: "invincible" | "comic" | "expressive"`;
+for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
+- `expressive` is the look from before the Invincible pass, frozen. For the same text and options it gives the same plan and the
+  same drawing as `comic`. Proof: 336 fixed-seed fingerprints (plan JSON + every draw call) identical before and after LOOK2, and
+  `check-look2.mjs` P17 compares the two styles on every run [V]. `comic` stays the general default and is unchanged.
+- `invincible` (LOOK2, SPEC-LOOK P1-P18; [V] by `check-look2.mjs` unless marked):
+  - **Face**: Anton for every word (tall, heavy, narrow; Polish letters present); `look.font` still wins (P1, P14).
+  - **One outline round the word** (owner): the word's union gets one ink keyline (`hand.keyline: "union"`); each letter is clipped
+    to itself and gets only a thin inner ink line where it meets a neighbour, so no outline lies on a neighbouring letter (P2). Even
+    weight, round joins, no boil (P3).
+  - **Block**: a flat duplicate down-right in one dark colour (`hand.block: "dup"`, offset 0.06-0.10 of the cap), or for heavy
+    sounds a straight-down solid block (`"heavy"`); the counters of linked rings are cut out of it; no soft shadow (P4).
+  - **Fills**: flat, one colour per word, no gradients, no misregistration (P5). Light or airy sounds get hollow letters (white face,
+    coloured rim; `hand.fill: "hollow"`); a loud solid body may get a hollow prefix (P6).
+  - **Prefix**: the hyphen lead-in before the body (KA-, RAKA-, KER-, KRA-KA-; each part at most five letters, the whole lead at
+    most eight characters; `invPrefix`) is small (0.32-0.38 of the body), on the top line and tucked into the first body letter. A
+    word whose parts repeat (BIP-BIP-BIP, BA-DUM-BA-DUM, THWUP-WOKKA-THWUP) is a rhythm and gets no prefix (P7).
+  - **Accent**: upright letters (word tilt at most 0.05 rad), one baseline, one size peak per word, neighbour ratio at least 0.85,
+    no letter under `INV_FLOOR` (0.82) of the word's biggest (a long tail would read as lower case), "!" as tall as the letter
+    before it (P8).
+  - **Vertical**: `arrange: "vertical"` stacks one letter per row, rows tucked by `TUCK` (0.14 of a row), the hyphen dropped, marks
+    beside the last letter (P9).
+  - **Joined OO**: a run of O / 0 becomes linked ovals made from the face's own O (`ovalRing`), all the same size, overlapping by one
+    stroke plus a gap, drawn over-under so each ring passes over and under its neighbour; the block keeps the counters open (P10).
+  - **Colour**: 11 flat palettes chosen from the sound (`hand.invPal`: yellow, orange, red, white, steel, cyan, blue, air, green,
+    violet, stone; `invPalette(mood, character, traits)`); no palette serves more than a quarter of the kinds (P11).
+  - **Spacing by letter pair**: `kernOptical` measures each pair's gap row by row over their common height and sets the mean gap to
+    `hand.kern.gap` (0.04-0.06 of the cap); no row comes closer than `KERN.touch`; doubles (AA, RR) a little tighter; AV / TA / LT
+    end up tighter than HN; vertical layouts are skipped (P18).
+  - **Smear**: outline echoes only, no pale filled copies (P15).
+  - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
 **The look says the sound.** `plan.traits` (`hard soft heavy light metallic electric hot warm cold earthy wet gritty sputter bubbly
 sustained short rising arc fading`) [V] is read from the word's `character` and sound; it picks face, edge, fill, block depth and
@@ -486,28 +515,25 @@ corrects a hand that contradicts the sound.
 **Per-call look keys** (`look: { ... }`, all optional, unknown values ignored): `style font tilt env warp2 overlap order outline fill
 tex counters capFont shadow prefix link arrange backdrop treat`. [R]
 
-- **Lines**: `\n` stacks lines; `arrange: "line" | "stack" | "stair" | "vertical" | "auto"`; `plan.layout.lines`, `plan.layout.arrange`
-  [V].
-- **Backdrops**: off by default (owner); `backdrop: "star" | "cloud" | "oval" | "plate" | true | "auto"` turns one on (`plan.hand.back`)
-  [V].
+- **Lines**: `\n` stacks lines; `arrange: "line" | "stack" | "stair" | "vertical" | "auto"`; `plan.layout.lines`,
+  `plan.layout.arrange` [V].
+- **Backdrops**: off by default (owner); `backdrop: "star" | "cloud" | "oval" | "plate" | true | "auto"` turns one on
+  (`plan.hand.back`) [V].
 - **Accent**: letter sizes follow the sound (small lead-in, biggest at the peak, shrinking tail); `opts.accent` from the vocabulary
   wins; plain text gets a guess; `plan.accent` [V].
-- **Interlocked rings**: a run of O / 0 is drawn as linked rings (`look.link`).
+- **Interlocked rings**: a run of O / 0 is drawn as linked rings (`look.link`): circles in `comic` / `expressive`, the face's own oval
+  in `invincible`.
 - **Numbers**: `-1`, `+4`, `x2`, `12%` get a calm, even hand.
 - **Legibility**: every treated letter is read against the font's plain letters (Polish marks and digits included) and turned,
-  pushed or opened until it reads (`legibility.mjs`, checks L1-L16 in `check-look.mjs`).
+  pushed or opened until it reads (`legibility.mjs`, checks in `check-look.mjs`; LOOK2's in `check-look2.mjs`).
 - **Clean letters** (owner): no flame teeth, drips or ember specks by default; `look.treat: "flame" | "drip" | "jag" | "rough"` and
   `look.font: "wetpaint"` are explicit opt-ins.
 - **Fonts**: eleven SIL OFL 1.1 faces (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet
-  Paint, Squada One, Michroma); Polish capitals synthesised where a font lacks them. `L.registerFont` adds one (section 15).
+  Paint, Squada One, Michroma); Polish capitals synthesised where a font lacks them. `L.registerFont` adds one (section 15). LOOK2
+  added no font: Anton was chosen from the bundled faces (nothing downloaded); the runners-up are in the owner's question list.
 - **Palettes**: `L.palettes()` [V]; `palette: "<name>"` per call (same on every client); `colors` overrides.
 
-Known faults this section will lose (SPEC-LOOK, seen in renders): Michroma (wide) chosen for O-words and soft sounds in the invincible
-style (P1); each letter's black outline covers its neighbour (P2, the owner's standing complaint); keyline heavy and wobbly (P3);
-swept, shaded 3D block plus soft shadow (P4); gradients and print-plate fringes (P5); "hollow" not hollow (P6); prefix rarely small
-(P7); accent reads as mixed case (P8); loose vertical setting (P9); rings are circles that do not meet well (P10); pale narrow
-palette (P11); "!!" too often (P12); Polish diacritics in sound words (P13); hairline Michroma at small sizes (P14); pale smear
-rectangles (P15); stepped motion reads as stutter in the invincible style (P16).
+Not done in LOOK2: joining other doubles (EE, UU) like OO; smooth interpolated motion in the invincible style (P16, MOTION2).
 
 ## 14. The owner's binding rulings
 Status: stable list, append-only. Every new ruling is added here with its date in the same turn it is given (and to the agent skill's
@@ -530,9 +556,10 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Water words: pl PLUP, PLUMP, SPLOOSZ, GLUB (long PLUUUP, SPLOOOSZ, GLU-GLU-GLUP); en PLOP, PLOOP, PLUNK, SPLOOSH, GLUB; PLUSK, CHLAP, TRZASK out; CHLUP not an exception | - | use these pools |
 | 2026-11-13 | Clean letters: no flame teeth, drips or ember specks by default | - | keep `look.treat` / `wetpaint` opt-in only |
 | 2026-11-13 | Backdrops are opt-in; default none | pass `backdrop` only when wanted | keep the default off |
-| 2026-11-13 | The light/white outline never covers neighbouring letters inside a word; only around the whole word (still not fixed) | - | one keyline round the word's union, letters clipped (LOOK2 P2, OUTL) |
-| 2026-11-13 | Keep the look from before the Invincible pass (today's `comic`) as the legacy style `expressive` | may pick `style: "expressive"` once it exists | freeze it byte-identical for fixed seeds before changing anything (P17) |
-| 2026-11-13 | Interlocked OO must meet properly and look artistically joined | - | LOOK2 P10 |
+| 2026-11-13 | The light/white outline never covers neighbouring letters inside a word; only around the whole word | - | one keyline round the word's union, letters clipped: done in `invincible` (LOOK2 1.8.0); `expressive` / `comic` keep per-letter outlines by the freeze (OUTL) |
+| 2026-11-13 | Keep the look from before the Invincible pass (today's `comic`) as the legacy style `expressive` | may pick `style: "expressive"` (1.8.0) | keep it identical to `comic` for the same options (`check-look2.mjs` P17) |
+| 2026-11-13 | Interlocked OO must meet properly and look artistically joined | - | done in `invincible` (LOOK2 P10: linked ovals from the face's own O) |
+| 2026-11-13 | Letter spacing in `invincible` is too loose and must depend on the letter pair | - | optical kerning by pair: done (LOOK2 P18, `kernOptical`) |
 | 2026-11-13 | Animation must fit the sound: a motion table from the sound, not random picks | - | MOTION2 (SPEC-MOTION) |
 | 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
 | 2026-11-13 | Provisional (orchestrator, the owner may overrule): the invincible style moves smoothly (interpolated), stepped motion stays in `expressive` | - | LOOK2 P16 |
@@ -681,7 +708,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | work | what | sections it invalidates |
 |---|---|---|
 | LM merge (1.7.0) | MOVE 1.5.0 into `tactics-zones`; GM-only and 87 kinds kept | 1 (files), 4 (options), 11, 12 (status -> stable/changing), 10 (stream options), 20, stage table |
-| LOOK2 / OUTL | P17 freeze `comic` as `expressive`; P2 one keyline round the whole word; P1 one tall narrow face; P3-P5 thin even keyline, flat duplicate shadow, flat fills; P7-P8 small prefix, monotone accent; P9-P10 vertical setting, true interlocked rings (and maybe EE, UU); P6 true hollow; P11 wider palette by sound family; P12 fewer "!!"; P13-P14; P15 no fat smear copies; P16 smooth interpolated motion in the invincible style | 13 (most of it), 11 (style-dependent motion), 14 (rulings move from "to fix" to done), 16 (stills to re-shoot) |
+| LOOK2 rest / OUTL | LOOK2 1.8.0 did P1-P15, P17, P18 (section 13). Left: joining other doubles (EE, UU) like OO; OUTL (one keyline round the word in `comic`); P16 smooth motion in the invincible style goes to MOTION2 | 13 |
 | MOTION2 | one shared drawing grid on twos; a deterministic motion table per sound family (no dice); hold envelopes (decay, rise, arc, pulse, steady); contradictions removed; exits by cut-off (cut, ring-out, trail-off, smoke-off, blow-away, power-down, sputter, crumble); a rhythm primitive (siren, heartbeat, rotor, beeps, mech steps); letter roles (only the sustained run moves); default travel per kind, scatter and walk emitters; streams and sustain take motion from the kind; boom burst-in entrance | 11 (all), 12, 10, 4 (`in`/`holdKind`/`out` names), 5 (timing advice may simplify) |
 | WORD2 (SPEC-WORDS) | dictionary leaks and near-words removed (PTAAK, PLOSK, DOIING, BRUUNCH ...); near-word check (one letter off, stuck-on letter, K respelling); no Polish diacritics (a check that fails on them); English as the master spelling, Polish derived; PH stretch bug; W not a lasting letter in English; percussive kinds lengthen by hits or echo, not vowels; "!" capped per kind; every lead-in from `PREFIXES`; sayable words; longer runs for steady sounds; roar stretches the vowel; siren as one morphing word; laser pistol attack-led (ZARK, TZAK); ICONIC ruling (candidates BLAM, BEEP, VROOM, HA, GRR, SZSZ). Owner's ruling overrides the review's "never share words" | 9, 14 |
 | SPEC-KINDS (being written) | missing kinds and dimensions: material of what is hit, phase (what follows what), source and impact of shots, distance, space/echo, approach-pass-recede, medium, wet/dry, size of source, cause-then-result combinations, tempo, silence, number of sources; kinds to split or merge | 9, 5 |
@@ -701,7 +728,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `flow` | v5 corrections (1.3.1) | |
 | `prefs`, `settings`, `registerMood`, `registerPalette`, `registerFont`, `registerStyle`, `unregisterStyle`, `styles`, `style`, `saveStyle`, `deleteStyle`, `palettes`, `motionNames`, `net` (`play burst stream stop sharedNow local lead`), `letterNow`, `designer`, `openSettings`, `planFor` | v6 (1.4.x) | added by `tools.mjs` at setup; absent if the tools did not install [V] |
 | `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
-| `lookStyle`, `lookStyles` | v8 (1.6.0) | |
+| `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
@@ -718,3 +745,5 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   remaining near-words / diacritics in the 1.6.0 banks (section 18).
 - 2026-11-14: KINDS1 (engine 1.7.1, branch `tactics-zones-kinds1`): section 9a (material, pieces, fire intensity and stage,
   tails, chains, `L.chain`), kind count 94 in 13 groups, API index row.
+- 2026-11-14: LOOK2 (1.8.0, `tactics-zones-look2`): section 13 rewritten for the rebuilt `invincible` style and the frozen
+  `expressive`; rulings on outline, expressive, OO and pair spacing marked done (section 14); stage table, section 19, API index.

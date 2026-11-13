@@ -89,7 +89,8 @@ export async function registerFont(id, def, bank) {
 /* named styles (looks) */
 export function makeStyles() {
   /* LOOK: two built-in styles name the engine's lettering traditions (design.mjs STYLES): the book's own and the general comic one */
-  const table = { invincible: { label: "Invincible", look: { style: "invincible" } }, comic: { label: "Comic", look: { style: "comic" } } };
+  /* LOOK2: "expressive" = the legacy look from before the Invincible pass (frozen; the same hand as "comic") */
+  const table = { invincible: { label: "Invincible", look: { style: "invincible" } }, comic: { label: "Comic", look: { style: "comic" } }, expressive: { label: "Expressive", look: { style: "expressive" } } };
   return {
     table,
     register(name, style) {

@@ -97,17 +97,41 @@ export const MOOD_IDS = Object.keys(MOODS);
 const C = (fill, ext, out2, ink = "#1b1020") => ({ fill, ext, out2, ink });
 /* LOOK: the Invincible book's sound effects: pale flat or two-tone faces, a thin black keyline, a solid block extrusion in one deep
    colour (teal under bone and lime, brown under amber, navy under the suit's yellow) */
+/* LOOK2 (SPEC-LOOK P11): flat saturated faces, each with ONE dark duplicate colour (the shadow copy behind the word); the three
+   fill stops are the same colour (a flat face). Picked by the sound's character (invPalette), never at random. */
+const F3 = (c) => [c, c, c];
 const INV = {
-  bone:    C(["#fbfbf3", "#f2f2e7", "#e2e2d4"], "#2a6466", ["#ffffff"], "#141414"),
-  lime:    C(["#f1f8c2", "#e0eea2", "#cbe08a"], "#2c6a66", ["#ffffff"], "#141414"),
-  amber:   C(["#ee9f3c", "#f5c56a", "#fbe6aa"], "#7a4a1c", ["#ffffff"], "#141414"),
-  sky:     C(["#eef9fd", "#cdebf6", "#a8d7ec"], "#233f6c", ["#ffffff"], "#141414"),
-  suit:    C(["#fff07a", "#ffd927", "#f2b300"], "#1c3b7a", ["#ffffff"], "#141414"),
-  blood:   C(["#ffe1d8", "#f6a594", "#e0644f"], "#57151e", ["#ffffff"], "#141414")
+  yellow:  C(F3("#ffd31a"), "#b8211b", ["#ffffff"], "#141414"),   // explosions, muzzle flashes
+  orange:  C(F3("#ff8a1f"), "#5c170b", ["#ffffff"], "#141414"),   // fire, heat
+  red:     C(F3("#ec2a2b"), "#3b0710", ["#ffffff"], "#141414"),   // voice, pain, beasts
+  white:   C(F3("#fbfaf3"), "#d0262a", ["#ffffff"], "#141414"),   // blows (red and white)
+  steel:   C(F3("#dbe5ee"), "#22344d", ["#ffffff"], "#141414"),   // metal, cuts, machines
+  cyan:    C(F3("#41d3ff"), "#0b2e6c", ["#ffffff"], "#141414"),   // electricity, energy
+  blue:    C(F3("#2f8bff"), "#0a1e4d", ["#ffffff"], "#141414"),   // water, cold
+  air:     C(F3("#eef8ff"), "#2363c8", ["#ffffff"], "#141414"),   // wind, fast motion
+  green:   C(F3("#8edb36"), "#18440e", ["#ffffff"], "#141414"),   // healing, relief, slime
+  violet:  C(F3("#b36dff"), "#2b0c5a", ["#ffffff"], "#141414"),   // power, mind
+  stone:   C(F3("#e7d5b2"), "#5a391b", ["#ffffff"], "#141414")    // rock, timber, rubble
 };
-const INV_BY_MOOD = { impact: { bone: 3, suit: 2, lime: 1 }, crash: { bone: 2, amber: 2 }, crack: { bone: 3, sky: 1 }, boom: { amber: 4, suit: 1 },
-  fire: { amber: 4 }, zap: { sky: 3, lime: 2 }, whoosh: { sky: 2, bone: 2, lime: 1 }, splash: { sky: 3 }, roar: { lime: 3, amber: 1 },
-  pain: { blood: 3, bone: 1 }, heal: { lime: 2, suit: 2 }, powerup: { suit: 3, sky: 1 }, tick: { bone: 3 }, fail: { bone: 2, sky: 1 } };
+/* the character -> colour table (SPEC-LOOK P11: explosions yellow/orange, blows red/white, cuts and metal white/steel, electricity
+   cyan/yellow, water blue, voice/pain red). Pure rules over the WORD character (words.mjs characterOf) and the mood. */
+export function invPalette(mood, c, T) {
+  const mat = c.material ?? "";
+  if ( T.wet || mat === "water" ) return "blue";
+  if ( T.electric || c.electric >= 0.6 ) return c.heat >= 0.5 ? "yellow" : "cyan";
+  if ( c.heat >= 0.8 ) return mood === "boom" ? "yellow" : "orange";
+  if ( mood === "boom" || (c.metal >= 0.5 && c.heat >= 0.3 && ["impact", "crack", "boom"].includes(mood)) ) return "yellow";   // blasts, gunfire
+  if ( T.cold ) return mat === "air" ? "air" : "blue";
+  if ( c.heat >= 0.5 ) return "orange";
+  if ( mood === "heal" && mat !== "metal" ) return "green";
+  if ( ["energy", "mind"].includes(mat) || mood === "powerup" ) return "violet";
+  if ( mat === "voice" || mat === "animal" || mood === "pain" || mood === "roar" ) return "red";
+  if ( mat === "metal" || mat === "machine" || mat === "glass" ) return "steel";
+  if ( mat === "stone" || mat === "wood" ) return "stone";
+  if ( mat === "air" ) return "air";
+  if ( mat === "rubber" || mood === "fail" ) return "green";
+  return "white";
+}
 export const COLORS = {
   inv:     Object.values(INV),
   hot:     [C(["#fff7b0", "#ffc928", "#f2561d"], "#7a1d10", ["#ffffff", "#1b1020"]), C(["#ffe45c", "#ff8a1a", "#d61f1f"], "#5e130d", ["#fff3c4"]), C(["#fffbe0", "#ffd84a", "#ff7a00"], "#9b2a12", ["#c8102e"])],
@@ -231,7 +255,9 @@ export function chooseHand(mood, sound, R, avoid, R2 = null) {
    squared engineered capitals, upright and even (no wobble, no edge treatment, no texture), a thin black keyline, pale flat or
    two-tone faces, a deep solid block extrusion in one dark colour, a small lead-in before a big body, round letters of a run drawn as
    interlocked rings. Decided on its own generator so the comic hand of a seed stays what it was. opts.look still wins over it. */
-export const STYLES = ["comic", "invincible"];
+/* LOOK2 (SPEC-LOOK P17, the owner's ruling): "expressive" is the legacy look from before the Invincible pass, frozen: it is the
+   "comic" hand byte for byte (makePlan maps it there; nothing below this line may change what a comic plan draws). */
+export const STYLES = ["comic", "invincible", "expressive"];
 const RINGS = new Set(["O", "0"]);
 const CASELIKE = /[COSUVWXZĆÓŚŹŻ]/u;   // capitals whose lower case is the same shape, smaller
 export const RING_W = 0.94;   // a ring's width in cap heights (a circle a little under the cap height wide)
@@ -300,47 +326,54 @@ export function fitSound(hand, T, sound, avoid = null) {
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   return hand;
 }
-export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(mood, sound)) {
+export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(mood, sound), character = null) {
   if ( style !== "invincible" ) return hand;
+  const ch = character ?? characterFor(mood, sound);
   const R3 = rng((seed ^ 0x1bad5eed) >>> 0);
-  const rings = /([OÓ0Q])\1/u.test(word);
-  /* weight and edge: hard = the squared condensed face; soft, bouncy (and rings to draw) = the wide round face */
-  hand.font = T.hard ? "squada" : T.soft || T.bubbly || rings ? "michroma" : R3.w({ squada: 3, michroma: 0.4 });
-  /* colour: steel for metal and cold sounds, amber for fire, warm for warm sounds, else the mood's */
-  const warmPick = { amber: 2, suit: 1, bone: 1, ...(INV_BY_MOOD[mood]?.blood ? { blood: 3 } : {}) };
-  const fam = T.metallic && !T.warm || T.cold ? "sky" : T.hot ? "amber" : R3.w(T.warm ? warmPick : T.earthy ? { bone: 3, amber: 1 } : INV_BY_MOOD[mood] ?? { bone: 1 });
+  /* LOOK2 (SPEC-LOOK P1): ONE tall narrow capital face for the whole style (Anton); the sound is said by size, colour, the duplicate,
+     spacing and the line, never by swapping to a wide or rounded face (Michroma and Squada One only on look.font) */
+  hand.font = "anton";
+  /* LOOK2 (P11): a flat saturated face with one dark duplicate colour, from the sound's character (no random draw) */
+  const fam = invPalette(mood, ch, T);
   const pal = INV[fam];
   hand.colorFam = "inv"; hand.invPal = fam;
   hand.pal = { ...pal, fill: pal.fill.slice(), out2: "#ffffff" }; hand.ink = pal.ink;
-  /* the edge says the matter: sparks for electricity, flame for heat, drips for wet, grit for grinding, a sputter for a fizzle */
   /* clean letters, as in the book (the user: flame teeth and drips removed, 2026-11-13): the matter is said by face, colour, block
      and line, never by an edge ornament; look.treat ("flame", "drip", "jag", "rough") stays an explicit opt-in */
   hand.treat = "plain";
   hand.tex = "none"; hand.outline = "ink"; hand.out2W = 0; hand.inflate = 0;
-  hand.inkW = hand.font === "michroma" ? 0.03 : 0.036;
-  if ( hand.font === "michroma" ) hand.inflate = 0.045;   // its strokes are hairlines at token size: thickened in the face colour
-  /* hard and metal: one flat colour, cut like a stencil; otherwise a two-tone face */
-  hand.fill = T.hard || T.metallic ? "flat" : "vgrad";
-  if ( hand.fill === "flat" ) hand.pal.fill = [pal.fill[1], pal.fill[1], pal.fill[1]];
-  /* the block: loud = deep, heavy = deeper and straight down, high = shallow and thrown up */
-  hand.depth = Math.min(T.light ? 0.09 : 0.24, 0.06 + 0.1 * sound.loud + (T.heavy ? 0.06 : 0) + (T.hard ? 0.02 : 0) + R3.f(0, 0.015));
-  hand.depthAng = Math.PI * (T.light ? -0.3 : T.heavy ? 0.5 : 0.28);
-  hand.shadow = { d: 0.05, ang: Math.PI * 0.3, a: 0.22 }; hand.shadowStyle = "flat";
+  /* LOOK2 (P2, P3): one thin keyline round the whole word (paint.mjs "union"): outside the word's outline and as a hairline inside
+     each letter where another letter overlaps it; never stroked across a neighbour */
+  hand.keyline = "union"; hand.inkW = 0.016; hand.join = "line";
+  /* LOOK2 (P5): flat faces always; (P6) an open letter for high, slight and airy sounds: white face, a rim in the word's colour */
+  hand.fill = T.light || (ch.material === "air" && !T.heavy && sound.loud < 0.75) ? "hollow" : "flat";
+  hand.hollowPaper = "#ffffff"; hand.rimW = 0.05;
+  /* LOOK2 (P4): ONE flat copy of the letters behind them (the duplicate), down-right; a deep swept block only for heavy sounds,
+     straight down, flat (no gradient, no soft shadow); a high sound's duplicate is thrown up */
+  hand.block = T.heavy ? "heavy" : "dup";
+  hand.depth = T.heavy ? 0.12 + 0.04 * sound.loud : T.light ? 0.07 : 0.07 + 0.025 * sound.loud;
+  hand.depthAng = Math.PI * (T.light ? -0.25 : T.heavy ? 0.5 : 0.25);
+  hand.shadow = null; hand.shadowStyle = "flat";
   hand.gloss = false; hand.hatch = false; hand.bevel = false; hand.hueJitter = 0;
   hand.shear = 0;
-  /* short = tight, sustained = looser (the sound has room) */
-  hand.track = FONTS[hand.font].track + (T.short ? -0.005 : T.sustained ? 0.03 : 0.005);
+  /* LOOK2 (P18): spacing is optical, pair by pair (shape.mjs kernOptical): the advance-based track is only the first guess;
+     short = tight, sustained = a little looser (the sound has room) */
+  hand.track = 0;
+  hand.kern = { gap: T.short ? 0.04 : T.sustained ? 0.06 : 0.05 };
   hand.stack = "stack"; hand.order = "left";
-  hand.tiltKind = "calm"; hand.tilt = R3.f(0, 1.5); hand.bob = 0; hand.upright = true;
+  hand.tiltKind = "calm"; hand.tilt = 0; hand.bob = 0; hand.upright = true; void R3;
   /* loud = a big contrast between the body and its lead-in */
   hand.contrast = 1.2 + 0.6 * sound.loud;
-  hand.prefix = sound.loud >= 0.6 && R3.chance(0.6) ? R3.f(0.32, 0.48) : 0;
-  /* the line: rising = grows to its end, fading = shrinks away, a fly-by = arc (streak when it lasts), heavy = perspective, bouncy = wave, a hit = flat */
-  hand.env = T.rising ? "swell" : T.fading ? "shrink" : T.sputter ? "sag" : T.arc ? (T.sustained ? "streak" : "arc") : T.heavy ? "persp" : T.bubbly ? "wave" : "flat";
+  /* LOOK2 (P7): every hyphen lead-in is a small prefix (about a third of the body), set on the body's top line; a loud body gets an
+     open (hollow) prefix against its solid face */
+  hand.prefix = 0.32 + 0.06 * Math.min(1, sound.loud);
+  hand.hollowPre = hand.fill !== "hollow" && sound.loud >= 0.75;
+  /* LOOK2 (P8): a straight baseline: rising = grows to its end, fading or a fizzle = shrinks away, everything else flat */
+  hand.env = T.rising ? "swell" : T.fading || T.sputter ? "shrink" : "flat";
   hand.warp2 = null; hand.profile2 = null;
   hand.counters = "none"; hand.capFont = null; hand.multi = "sweep";
-  hand.link = R3.chance(0.9);
-  hand.backPick = R3.w({ plate: 2, star: 1, cloud: mood === "boom" || mood === "fire" ? 2 : 0.3 });
+  hand.link = true;
+  hand.backPick = mood === "boom" || mood === "fire" ? "cloud" : mood === "impact" || mood === "crack" ? "star" : "plate";
   hand.style = "invincible";
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   return hand;
@@ -479,9 +512,32 @@ function shapeAround(cs, a, b, lead, tail, v0 = a, v1 = b) {
 }
 
 /* ---------- layout: letters placed and sized; envelope warp params ---------- */
+/* LOOK2 (P7): the invincible prefix = the hyphen lead-in before the body (KA-THOOM, RAKA-BOOM, KRA-KA-BOOM, KER-SPLAT): every lead
+   segment at most five letters, the whole lead at most eight characters. A word whose segments repeat (BIP-BIP-BIP, BA-DUM-BA-DUM,
+   WUP-WUP-WUUUP, THWUP-WOKKA-THWUP, doubled letters ignored) is a rhythm, not a lead-in: no prefix. Returns the prefix length. */
+export function invPrefix(chars, accent = null) {
+  const w = chars.join("");
+  if ( /\s/u.test(w) ) return 0;
+  const body = w.replace(/[!?]+$/u, "").replace(/-+$/u, "");
+  const segs = body.split("-");
+  if ( segs.length < 2 || segs.some((s) => !s) ) return 0;
+  const key = (s) => s.replace(/(.)\1+/gu, "$1");
+  const keys = segs.map(key);
+  if ( new Set(keys).size < keys.length ) return 0;
+  const lead = segs.slice(0, -1);
+  let m = lead.length;
+  if ( lead.some((s) => s.length > 5) || lead.join("-").length > 7 ) m = segs[0].length <= 5 ? 1 : 0;
+  if ( !m ) return 0;
+  const e = segs.slice(0, m).join("-").length + 1;
+  if ( chars.length - e <= 2 ) return 0;
+  if ( accent && Math.max(...accent.slice(0, e)) >= 0.95 ) return 0;   // the accent is in it: not a lead-in
+  return e;
+}
+
 export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accent = null, ls = null) {
   const n = chars.length;
   const look = !!R2 && hand.contrast != null;
+  const inv = hand.style === "invincible";   // LOOK2: the book's hand (straight baseline, monotone sizes, small top-set prefix)
   /* size curve: the loudest part of the word is the biggest (Comicraft's rule), peak from the sound; LOOK: a stronger contrast */
   const amp = (0.18 + 0.5 * sound.loud * (hand.env === "flat" ? 0.3 : 1)) * (look ? hand.contrast : 1);
   const sizes = [];
@@ -496,14 +552,16 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     if ( hand.profile2 === "swell" ) s *= 0.7 + 0.65 * u;
     if ( hand.profile2 === "shrink" ) s *= 1.3 - 0.6 * u;
     if ( hand.number ) s = 1;   // a number is even: a small sign or digit is a misread number (the rng below still advances)
-    s *= 1 + R.f(-0.07, 0.07) * (hand.number ? 0 : 0.6 + sound.rough);
+    s *= 1 + R.f(-0.07, 0.07) * (hand.number || inv ? 0 : 0.6 + sound.rough);
     if ( (chars[i] === "!" || chars[i] === "?") && !(look && accent) ) s *= 1.05;
     sizes.push(Math.max(0.25, s));
   }
   /* LOOK: a small prefix before a huge body: the part before the first hyphen, a short first word, or the first syllable */
   let pre = 0;
   const partSized = !!ls && ls.some((v) => Math.abs(v - 1) > 1e-6);   // MOVE's parts size the word themselves
-  if ( look && !partSized && hand.prefix > 0 && !chars.includes("\n") && sound.peak >= 0.3 ) {
+  if ( inv && !partSized && hand.prefix > 0 && !chars.includes("\n") ) {
+    pre = invPrefix(chars, accent);
+  } else if ( look && !partSized && hand.prefix > 0 && !chars.includes("\n") && sound.peak >= 0.3 ) {
     const w = chars.join(""), hy = w.indexOf("-"), sp = w.indexOf(" ");
     if ( hy >= 1 && hy <= 5 && n - hy > 2 ) pre = hy + 1;
     else if ( sp >= 1 && sp <= 4 && n - sp > 2 ) pre = sp + 1;
@@ -519,7 +577,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
   if ( pre ) {
     for ( let i = pre; i < n; i++ ) sizes[i] *= 1.12;
     const body = Math.max(...sizes.slice(pre));
-    for ( let i = 0; i < pre; i++ ) sizes[i] = body * hand.prefix * (0.92 + 0.16 * i / Math.max(1, pre - 1));   // the prefix a fraction of the body
+    for ( let i = 0; i < pre; i++ ) sizes[i] = body * hand.prefix * (inv ? 1 : 0.92 + 0.16 * i / Math.max(1, pre - 1));   // the prefix a fraction of the body
   }
   /* LOOK: a body letter far smaller than the body's biggest reads as lower case (KA-TRZAamm, DZYYYń: Squada's and most comic faces'
      lower case are small capitals): the accent's tail and lead-in shrink, but never under 0.66 of the body (the prefix is apart) */
@@ -543,13 +601,20 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
   /* LOOK: interlocked rings: in a run of the same round letter each one passes through the one before it (paint.mjs draws the
      over-under); sizes alternate so the rings read as two, not as one blot */
   const linkTo = chars.map((c, i) => (look && hand.link && i > 0 && c === chars[i - 1] && RINGS.has(c) && !(i < pre) ? i - 1 : -1));
-  for ( let i = 0, r = 0; i < n; i++ ) { r = linkTo[i] >= 0 ? r + 1 : 0; if ( r % 2 ) sizes[i] = 0.8 * Math.min(sizes[i], sizes[i - 1]); }   // against its neighbour: an accent or a growing line never evens them out
+  /* LOOK2 (P10): in the book's hand linked rings are one size (the run's biggest); then (P8) the word's sizes rise to one peak and fall,
+     no neighbour under 0.85 of the other; then (P7) the prefix is a fixed share of the body as it finally is */
+  if ( inv ) {
+    for ( let i = 0; i < n; i++ ) { if ( linkTo[i] < 0 ) continue; let a = i - 1; while ( a > 0 && linkTo[a] >= 0 ) a--; let b = i; while ( b + 1 < n && linkTo[b + 1] >= 0 ) b++; const m = Math.max(...sizes.slice(a, b + 1)); for ( let k = a; k <= b; k++ ) sizes[k] = m; }
+    if ( !hand.number && !partSized ) monotoneSizes(chars, sizes, pre);
+    if ( pre ) { const body = Math.max(...sizes.slice(pre)); for ( let i = 0; i < pre; i++ ) sizes[i] = body * hand.prefix; }
+  } else for ( let i = 0, r = 0; i < n; i++ ) { r = linkTo[i] >= 0 ? r + 1 : 0; if ( r % 2 ) sizes[i] = 0.8 * Math.min(sizes[i], sizes[i - 1]); }   // against its neighbour: an accent or a growing line never evens them out
   if ( linkTo.some((v) => v >= 0) && hand.stack === "merge" ) hand.stack = "stack";   // rings need each its own outline
   /* the linked letters are drawn as true rings (shape.mjs): round, whatever the font's O looks like */
   const ring = chars.map((c, i) => linkTo[i] >= 0 || linkTo[i + 1] === i);
-  widths = widths.map((w, i) => (ring[i] ? RING_W : w));
+  if ( !inv ) widths = widths.map((w, i) => (ring[i] ? RING_W : w));   // LOOK2: the book's rings are the face's own O, widened (shape.mjs)
   const bodyS = pre ? Math.max(...sizes.slice(pre)) : 1;
-  const preAlign = pre ? R2.pick(["mid", "top", "base"]) : "mid";
+  let preAlign = pre ? R2.pick(["mid", "top", "base"]) : "mid";
+  if ( inv && pre ) preAlign = "top";
   const letters = [];
   let x = 0;
   const split = hand.env === "split" ? Math.max(1, Math.min(n - 1, Math.round(n * R.f(0.35, 0.6)))) : -1;
@@ -567,12 +632,17 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
       dy += sign * hand.bob * R2.f(0.5, 1.1);
       if ( i < pre ) dy += preAlign === "base" ? 0.5 * (bodyS - s) : preAlign === "top" ? -0.5 * (bodyS - s) : 0;
     }
+    if ( inv ) {
+      /* LOOK2 (P8): upright letters standing on one straight baseline; the prefix hangs from the body's top line (P7) */
+      rot = 0;
+      dy = i < pre ? 0.5 - sizes[pre] + 0.5 * s : 0.5 * (1 - s);   // the prefix top = the first body letter's top
+    }
     if ( hand.env === "stairUp" ) dy -= i * 0.22;
     if ( hand.env === "stairDown" ) dy += i * 0.16;
     if ( hand.env === "tumble" ) dy += R.f(-0.12, 0.12) + i * 0.05;
     let gx = 0;
     if ( i === split ) gx = R.f(0.18, 0.32);
-    if ( linkTo[i] >= 0 ) {
+    if ( linkTo[i] >= 0 && !inv ) {
       /* a ring through the one before: pulled into it by half the smaller width, upright, the smaller one a little lower */
       const P = letters[i - 1];
       gx -= 0.5 * Math.min(w, P.w) + hand.track * P.s;   // deep enough that the strokes part at mid height (the over-under switches there)
@@ -602,6 +672,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     default: break;
   }
   if ( hand.env !== "slant" && hand.env !== "split" ) E.rot = (E.rot ?? 0) + R.f(-0.1, 0.1) + (sound.pitch > 0.6 ? -0.08 : sound.pitch < -0.6 ? 0.08 : 0);
+  if ( inv ) E.rot = Math.max(-0.05, Math.min(0.05, E.rot * 0.5));   // LOOK2 (P8): the whole word may lean a little; its letters stay upright on it
   /* LOOK: the second envelope */
   if ( look && hand.warp2 ) {
     const k = hand.warp2, w2 = { kind: k };
@@ -612,6 +683,33 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     E.w2 = w2;
   }
   return { letters, E, W, pre };
+}
+
+/* LOOK2 (P8): the book's sizes inside each word: one peak; the letters before it never shrink toward it and the letters after it
+   never grow away from it; no letter under 0.85 of its neighbour (no lower-case look, no step). A mark ("!", "?") stands as tall as
+   the letter before it, a hyphen as its smaller neighbour. The prefix (indices < pre) is apart. */
+/* LOOK2 (P8): no letter of an invincible word under this share of the word's biggest letter */
+export const INV_FLOOR = 0.82;
+export function monotoneSizes(chars, sizes, pre = 0) {
+  const n = chars.length, ink = (i) => /[\p{L}\p{N}]/u.test(chars[i]);
+  let from = pre;
+  for ( let i = pre; i <= n; i++ ) {
+    if ( i < n && chars[i] !== " " && chars[i] !== "\n" ) continue;
+    const idx = []; for ( let k = from; k < i; k++ ) if ( ink(k) ) idx.push(k);
+    if ( idx.length ) {
+      let p = 0; for ( let k = 1; k < idx.length; k++ ) if ( sizes[idx[k]] > sizes[idx[p]] + 1e-9 ) p = k;
+      for ( let k = p - 1; k >= 0; k-- ) { const a = idx[k], b = idx[k + 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
+      for ( let k = p + 1; k < idx.length; k++ ) { const a = idx[k], b = idx[k - 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
+      /* a floor under the whole word: a long tail ramped by 0.85 a step reads as lower case (THWApp, HFaaaah); clamping keeps it monotone */
+      const top = sizes[idx[p]]; for ( const k of idx ) sizes[k] = Math.max(sizes[k], INV_FLOOR * top);
+      for ( let k = from; k < i; k++ ) if ( !ink(k) ) {
+        const prev = idx.filter((j) => j < k).at(-1), next = idx.find((j) => j > k);
+        sizes[k] = /[!?]/.test(chars[k]) ? sizes[prev ?? next] : Math.min(sizes[prev ?? next], sizes[next ?? prev]);
+      }
+    }
+    from = i + 1;
+  }
+  return sizes;
 }
 
 /* LOOK: lines. "\n" breaks lines; arrange "stack" (centred lines), "stair" (each line stepped sideways), "vertical" (one letter per
@@ -625,6 +723,7 @@ export function arrangeLines(lay, chars, hand, sound, R2, mode = "auto") {
   let m = mode;
   if ( m === "auto" ) m = chars.includes("\n") ? (R2.chance(0.35) ? "stair" : "stack") : repeats ? (R2.chance(0.5) ? "stair" : "stack") : "line";
   if ( m === "line" ) return lay;
+  if ( m === "vertical" && hand.style === "invincible" ) return verticalInv(lay, chars);
   const breakAt = (i) => chars[i] === "\n" || ((m === "stack" || m === "stair") && !chars.includes("\n") && chars[i] === " ");
   const lines = [[]];
   if ( m === "vertical" ) { for ( let i = 0; i < chars.length; i++ ) { if ( chars[i] === "\n" ) continue; if ( lines.at(-1).length ) lines.push([]); lines.at(-1).push(i); } }
@@ -675,6 +774,49 @@ export function arrangeLines(lay, chars, hand, sound, R2, mode = "auto") {
   else if ( ["zig", "wave", "tumble", "split", "stairUp", "stairDown"].includes(lay.E.kind) ) lay.E = { kind: "flat", W: lay.W, cy, rot: lay.E.rot ?? 0, w2: lay.E.w2 };
   lay.lines = placed.map((p) => ({ from: p.r[0], to: p.r.at(-1), y: p.y, w: p.w }));
   lay.arrange = m;
+  return lay;
+}
+
+/* LOOK2 (SPEC-LOOK P9): the book's vertical setting: a tight column, not a loose ladder. One row per body letter, each row tucked
+   0.14 of its height under the row above (the upper letter in front: paint.mjs paints rows bottom first); the letters keep their
+   accent sizes and stand centred on one axis (no jitter); a hyphen lead-in becomes a small horizontal line on top (the hyphen is not
+   drawn); a "!" or "?" stands beside the letter before it; spaces and line breaks only start rows. */
+export const TUCK = 0.14;
+function verticalInv(lay, chars) {
+  const L = lay.letters, n = chars.length, pre = lay.pre ?? 0;
+  const ink = (i) => /[\p{L}\p{N}]/u.test(chars[i]);
+  const rows = [];
+  if ( pre ) rows.push([...Array(pre).keys()].filter((i) => chars[i] !== "-" && chars[i] !== " "));
+  for ( let i = pre; i < n; i++ ) {
+    if ( ink(i) ) rows.push([i]);
+    else if ( /[!?]/.test(chars[i]) && rows.length ) rows.at(-1).push(i);
+  }
+  const used = new Set(rows.flat());
+  for ( let i = 0; i < n; i++ ) if ( !used.has(i) ) { L[i].skip = true; L[i].w = 0; L[i].x = 0; }
+  const live = rows.filter((r) => r.length);
+  if ( live.length < 2 ) return lay;
+  const mx = Math.max(...live.flat().map((i) => L[i].s)), k1 = 1.25 / mx;
+  for ( const i of live.flat() ) { L[i].s *= k1; L[i].w *= k1; L[i].rot = 0; }
+  let y = 0, W = 0; const placed = [];
+  live.forEach((r, k) => {
+    const h = Math.max(...r.map((i) => L[i].s));
+    if ( k > 0 ) { const hp = placed[k - 1].h; y += 0.5 * hp + 0.5 * h - TUCK * 0.5 * (hp + h); }
+    let x = 0;
+    for ( const i of r ) { L[i].x = x; L[i].dy = y + 0.5 * (h - L[i].s); L[i].row = k; x += L[i].w + (/[!?]/.test(chars[i]) ? 0 : 0.02 * L[i].s); }
+    const w = Math.max(0.05, x);
+    placed.push({ r, w, h, y });
+    W = Math.max(W, w);
+  });
+  /* centre the rows on one axis; a row's mark hangs to the right of the axis (the letter stays centred) */
+  for ( const p of placed ) {
+    const body = p.r.filter((i) => !/[!?]/.test(chars[i])), bw = body.length ? body.reduce((a, i) => a + L[i].w, 0) : p.w;
+    const off = (W - bw) / 2;
+    for ( const i of p.r ) L[i].x += off;
+  }
+  const cy = -0.5 + (placed[0].y + placed.at(-1).y) / 2;
+  lay.W = Math.max(0.3, W); lay.E = { kind: "flat", W: lay.W, cy, rot: 0 };
+  lay.lines = placed.map((p) => ({ from: p.r[0], to: p.r.at(-1), y: p.y, w: p.w }));
+  lay.arrange = "vertical";
   return lay;
 }
 
@@ -921,9 +1063,10 @@ export function makePlan(text, opts, fonts, memory) {
     if ( f ) avoid.font.add(f); if ( e ) avoid.env.add(e); if ( c ) avoid.color.add(c); if ( t ) avoid.treat.add(t);
   }
   /* a caller may pin the hand of an earlier plan (a stream of syllables lettered by one hand); the rng still advances the same way */
-  const lstyle = STYLES.includes(opts.look?.style) ? opts.look.style : "comic";
+  /* LOOK2 (P17): "expressive" IS the comic hand (frozen legacy look): same plan, byte for byte */
+  const lstyle = STYLES.includes(opts.look?.style) ? (opts.look.style === "expressive" ? "comic" : opts.look.style) : "comic";
   const character = characterFor(mood, sound, opts.character), traits = traitsOf(mood, sound, character);
-  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), traits, sound, avoid) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed, traits);
+  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), traits, sound, avoid) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed, traits, character);
   const hand = opts.hand && typeof opts.hand === "object" ? { ...chosen, ...JSON.parse(JSON.stringify(opts.hand)) }
     : typeof opts.hand === "string" ? handFromId(opts.hand, chosen) : chosen;
   if ( Array.isArray(opts.colors) && opts.colors.length ) {
@@ -965,6 +1108,8 @@ export function makePlan(text, opts, fonts, memory) {
   }
   const counted = !opts.reduced && opts.countIn ? countFrames(chars, opts, seed, mk, on || 2) : null;
   if ( counted ) { tl.ent = [...counted, ...tl.ent]; tl.kinds.choreo = "countIn"; }
+  /* LOOK2 (P5): the book prints clean: no colour plates off register in the Invincible hand (kept in expressive) */
+  if ( hand.style === "invincible" ) { tl.tech.misreg = 0; for ( const q of [...tl.ent, ...tl.hold, ...tl.exit] ) q.misreg = 0; }
   /* the backdrop (opt-in) comes in with the word and leaves before it: its scale per picture (after MOVE's retiming / choreography,
      which replace pictures) */
   for ( const [j, q] of tl.ent.entries() ) q.backS = j === 0 && tl.ent.length > 2 ? 0.55 : 1;

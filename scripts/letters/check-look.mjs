@@ -3,7 +3,7 @@
 import { makePlan, FONTS, MOOD_IDS, BACKDROPS, FILLS, TEXTURES, STYLES, accentOf, NUMBER_RE, traitsOf } from "./design.mjs";
 import { createVocab, KIND_IDS, KINDS } from "./words.mjs";
 import { paintPicture } from "./paint.mjs";
-import { treatLetter, settleCenter, occlusionReport, baseGeometry } from "./shape.mjs";
+import { treatLetter, settleCenter, occlusionReport, baseGeometry, pictureGeometry } from "./shape.mjs";
 import { makeReader, ALPHABET } from "./legibility.mjs";
 import { jag } from "./geom.mjs";
 import { rng } from "./rng.mjs";
@@ -144,7 +144,7 @@ export function checkLook(ok, bank) {
     ok(STYLES.includes("comic") && STYLES.includes("invincible"), "styles: comic and invincible");
     for ( const m of MOOD_IDS ) {
       const p = plan("KA-BOOM!", { mood: m, seed: `s${m}`, look: { style: "invincible" } }), H = p.hand;
-      ok(["squada", "michroma"].includes(H.font) && ["plain", "jag", "flame", "drip", "rough"].includes(H.treat) && H.tex === "none" && H.outline === "ink" && H.depth >= 0.07 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
+      ok(H.font === "anton" && ["plain", "jag", "flame", "drip", "rough"].includes(H.treat) && H.tex === "none" && H.outline === "ink" && H.depth >= 0.07 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
       ok(p.layout.letters.every((l) => Math.abs(l.rot) < 0.035 || l.ring), `style invincible ${m}: upright`);
     }
     const c = plan("KA-BOOM!", { mood: "boom", seed: 1 }), c2 = plan("KA-BOOM!", { mood: "boom", seed: 1, look: { style: "comic" } });
@@ -154,9 +154,12 @@ export function checkLook(ok, bank) {
   /* L12. interlocked rings: a run of O's links as rings of alternating size, overlapping; the reader does not count the crossing */
   {
     const p = plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible" } }), L = p.layout.letters;
+    settleCenter(p, bank);   // LOOK2: the Invincible rings are set by the optical spacing pass (shape.mjs kernOptical)
     const os = L.map((l, i) => [l, i]).filter(([l]) => l.ring);
     ok(os.length === 4 && L[3].link === 2 && L[3].x < L[2].x + L[2].w, `rings: WHOOOOM links its O's (${os.length})`);
-    ok(Math.abs(L[2].s - L[3].s) > 0.05, "rings: alternating size");
+    ok(Math.abs(L[2].s - L[3].s) < 1e-9, "rings: one size in the Invincible hand (LOOK2 P10)");
+    const pe = plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "expressive", link: true } }), Le = pe.layout.letters;
+    ok(Math.abs(Le[2].s - Le[3].s) > 0.05, "rings: alternating size in the expressive hand (legacy)");
     const b = baseGeometry(p, bank); ok(b[2].ring && b[2].gl.contours.length === 2, "rings: drawn as a ring (outer + hole)");
     ok(!plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible", link: false } }).layout.letters.some((l) => l.ring), "rings: look.link false keeps O's apart");
   }
@@ -170,16 +173,18 @@ export function checkLook(ok, bank) {
       if ( NUMBER_RE.test(w.text) ) continue;
       n++;
       if ( style === "invincible" ) looks.add(`${KINDS[id].group}|${H.font}|${H.treat}|${H.env}|${H.fill}|${Math.sign(H.depthAng)}|${H.invPal}`);
-      if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style === "comic" || (H.font === "squada" && H.fill === "flat")), `${tag}: a hard sound gets a round or soft face`);
-      if ( T.soft ) ok(H.treat !== "jag" && !["blackops", "anton"].includes(H.font) && (style === "comic" || H.font === "michroma"), `${tag}: a soft sound gets spikes or a hard face`);
-      if ( T.warm ) ok((style === "comic" ? ["hot", "ember", "gold", "rust", "blood"].includes(H.colorFam) : !["sky", "lime"].includes(H.invPal)), `${tag}: a warm sound not in fire colours (advm 10)`);
+      /* LOOK2 (SPEC-LOOK P1, P11): the Invincible hand letters every sound in ONE narrow face (the sound is said by colour, the open
+         letter, the duplicate, size and spacing); its colours come from the character table (design.mjs invPalette) */
+      if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style !== "invincible" || (H.font === "anton" && ["flat", "hollow"].includes(H.fill))), `${tag}: a hard sound gets a round or soft face`);
+      if ( T.soft ) ok(H.treat !== "jag" && (style !== "invincible" ? !["blackops", "anton"].includes(H.font) : H.font === "anton" && H.treat === "plain"), `${tag}: a soft sound gets spikes or a hard face`);
+      if ( T.warm ) ok((style !== "invincible" ? ["hot", "ember", "gold", "rust", "blood"].includes(H.colorFam) : ["yellow", "orange"].includes(H.invPal) || (T.wet && H.invPal === "blue")), `${tag}: a warm sound not in fire colours (advm 10)`);
       if ( T.warm || T.earthy ) ok(H.fill !== "multi" || H.multi !== "sweep", `${tag}: a hue sweep on fire or rock (advm 10)`);
-      if ( T.earthy ) ok(!["ice", "air", "mint", "water", "toxic", "volt", "plasma", "pop", "soft"].includes(H.colorFam) && !["sky", "lime"].includes(H.invPal) || T.metallic, `${tag}: rock or timber in ice or neon (advm 10)`);
-      if ( T.cold && style === "invincible" ) ok(H.invPal === "sky", `${tag}: a cold sound not in a cold colour`);
+      if ( T.earthy ) ok(!["ice", "air", "mint", "water", "toxic", "volt", "plasma", "pop", "soft"].includes(H.colorFam) && !["cyan", "air", "violet", "green"].includes(H.invPal) && (H.invPal !== "blue" || T.wet) || T.metallic, `${tag}: rock or timber in ice or neon (advm 10)`);
+      if ( T.cold && style === "invincible" ) ok(["blue", "air", "cyan"].includes(H.invPal), `${tag}: a cold sound not in a cold colour`);
       ok(!["drip", "flame"].includes(H.treat), `${tag}: drips or flame teeth by default (the user removed them)`);
-      if ( T.heavy ) ok(H.depth >= 0.12 && (style === "comic" || Math.abs(H.depthAng - Math.PI / 2) < 1e-9), `${tag}: a heavy sound without a deep block`);
-      if ( T.light ) ok(H.depth <= 0.09 + 1e-9 || style === "comic" && H.depth <= 0.09, `${tag}: a high sound with a deep block (${H.depth})`);
-      if ( T.metallic ) ok(!["bubble", "drip"].includes(H.treat) && (H.treat !== "rough" || T.gritty) && (style === "comic" ? ["stone", "ice"].includes(H.colorFam) || T.warm : (H.invPal === "sky" || T.warm) && H.fill === "flat"), `${tag}: a metallic sound not cut and steel`);
+      if ( T.heavy ) ok(H.depth >= 0.12 && (style !== "invincible" || Math.abs(H.depthAng - Math.PI / 2) < 1e-9), `${tag}: a heavy sound without a deep block`);
+      if ( T.light ) ok(H.depth <= 0.09 + 1e-9 || style !== "invincible" && H.depth <= 0.09, `${tag}: a high sound with a deep block (${H.depth})`);
+      if ( T.metallic ) ok(!["bubble", "drip"].includes(H.treat) && (H.treat !== "rough" || T.gritty) && (style !== "invincible" ? ["stone", "ice"].includes(H.colorFam) || T.warm : ["steel", "yellow", "orange", "cyan", "blue"].includes(H.invPal) && ["flat", "hollow"].includes(H.fill)), `${tag}: a metallic sound not cut and steel`);
       if ( style === "invincible" ) {
         ok(H.treat === "plain", `${tag}: an edge ornament in the book's hand (letters stay clean)`);
         if ( T.light ) ok(H.depthAng < 0, `${tag}: a high sound's block not thrown up`);
@@ -250,20 +255,24 @@ export function checkLook(ok, bank) {
   /* L17 (LM): a smear frame in the Invincible style paints its multiples as see-through ghosts in the block colour, never as slabs in
      the flat pale face colour (LOOK's live "pale rectangles"); comic hands keep their smear; a smear's multiples fit in the picture */
   {
-    const rec = () => { const fills = [], st = []; const t = { globalAlpha: 1 }; const ctx = new Proxy(t, { get: (o, k) => (k in o ? o[k] : (k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (k === "getImageData" ? () => ({ data: new Uint8ClampedArray(4) }) : k === "fill" ? () => fills.push({ style: o.fillStyle, a: o.globalAlpha }) : k === "save" ? () => st.push([o.globalAlpha, o.fillStyle]) : k === "restore" ? () => { const v = st.pop(); if ( v ) [o.globalAlpha, o.fillStyle] = v; } : () => {}))), set: (o, k, v) => ((o[k] = v), true) }); return { fills, make: (w, h) => ({ width: w, height: h, getContext: () => ctx }) }; };
+    const rec = () => { const fills = [], st = []; fills.strokes = []; const t = { globalAlpha: 1 }; const ctx = new Proxy(t, { get: (o, k) => (k in o ? o[k] : (k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (k === "getImageData" ? () => ({ data: new Uint8ClampedArray(4) }) : k === "fill" ? () => fills.push({ style: o.fillStyle, a: o.globalAlpha }) : k === "stroke" ? () => fills.strokes.push({ style: o.strokeStyle, a: o.globalAlpha }) : k === "save" ? () => st.push([o.globalAlpha, o.fillStyle]) : k === "restore" ? () => { const v = st.pop(); if ( v ) [o.globalAlpha, o.fillStyle] = v; } : () => {}))), set: (o, k, v) => ((o[k] = v), true) }); return { fills, make: (w, h) => ({ width: w, height: h, getContext: () => ctx }) }; };
     const smearOf = (look) => { for ( let s = 0; s < 40; s++ ) { const p = plan("BRZDĘK-DZYYŃ!!", { mood: "crack", seed: `sm${s}`, in: "slam", magnitude: 1, look }); const q = p.timeline.ent.find((x) => x.smear); if ( q ) return { p, q }; } return null; };
     const inv = smearOf({ style: "invincible" }), com = smearOf({ style: "comic" });
     ok(!!inv && !!com, "smear: a slam smear frame exists in both styles");
     if ( inv ) {
       const r = rec(); const pic = paintPicture(inv.p, bank, inv.q, 80, r.make);
-      const ghosts = r.fills.filter((f) => f.style === inv.p.hand.pal.ext && f.a < 1).length;
-      ok(ghosts >= inv.q.smear.n, `smear (invincible): ${ghosts} see-through ghosts in the block colour (>= ${inv.q.smear.n})`);
+      /* LOOK2 (SPEC-LOOK P15): the Invincible smear is 2-3 thin OUTLINE-ONLY echoes in the duplicate colour: no filled copy at all */
+      const r0 = rec(); paintPicture(inv.p, bank, { ...inv.q, smear: null }, 80, r0.make);
+      const echoes = r.fills.strokes.filter((f) => f.style === inv.p.hand.pal.ext).length - r0.fills.strokes.filter((f) => f.style === inv.p.hand.pal.ext).length;
+      ok(echoes >= Math.min(3, inv.q.smear.n) && echoes <= 3, `smear (invincible): ${echoes} outline echoes in the duplicate colour (2-3)`);
+      ok(r.fills.length === r0.fills.length, `smear (invincible): ${r.fills.length - r0.fills.length} filled copies (none)`);
       const face = new Set(inv.p.hand.pal.fill), slabs = r.fills.filter((f) => face.has(f.style) && f.a >= 1).length;
       const r2 = rec(); paintPicture(inv.p, bank, { ...inv.q, smear: null }, 80, r2.make);
       const slabs0 = r2.fills.filter((f) => face.has(f.style) && f.a >= 1).length;
       ok(slabs === slabs0, `smear (invincible): no opaque face-colour multiples (${slabs} face fills, ${slabs0} without the smear)`);
       const hold = paintPicture(inv.p, bank, { ...inv.q, smear: null }, 80, rec().make);
-      ok(pic.canvas.width > hold.canvas.width * (1 + 0.4 * (inv.q.smear.zoom ?? 0)), `smear: the zoomed multiples fit in the picture (${pic.canvas.width} vs ${hold.canvas.width})`);
+      const gw = (() => { settleCenter(inv.p, bank); const g = pictureGeometry(inv.p, bank, inv.q).flatMap((l) => l.cs); const xs = g.flatMap((c) => c.filter((v, i) => i % 2 === 0)); return (Math.max(...xs) - Math.min(...xs)) * pic.S; })();
+      ok(pic.canvas.width >= gw * (1 + (inv.q.smear.zoom ?? 0)) && pic.canvas.width > hold.canvas.width, `smear: the zoomed multiples fit in the picture (${pic.canvas.width} vs word ${gw.toFixed(0)} x ${(1 + (inv.q.smear.zoom ?? 0)).toFixed(2)}, hold ${hold.canvas.width})`);
     }
     if ( com ) {
       const r = rec(); paintPicture(com.p, bank, com.q, 80, r.make);
