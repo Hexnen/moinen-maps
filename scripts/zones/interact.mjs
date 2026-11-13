@@ -341,14 +341,18 @@ function measureFree() {
  * ~880 cells of a 1600x900 window took 60-85 ms, twice when a pick starts. Now: the boxes of the page are read first (coverCells,
  * a few ms) and only the cells a box lies over are hit-tested, plus every cell around one found covered, outward for as long as
  * covered cells are found (View.floodFree: a decoration or a line of text that reaches beyond its box is followed). A cell no box
- * comes near is the map - what a hit test there would answer. The answers are the ones the look by hit tests alone gives (checked
- * live, both seats, every layout the pick knows: perf-notes PFB); `quietHits.coverOff = true` looks at every cell as before.
- * quietHits.look: { cells, looked, cover, free (the cells: 1 the map), ms } of the last synchronous look.
+ * comes near is the map - what a hit test there would answer; a cell found covered by a solid box answers for that box's other cells
+ * (solidBox). The answers are the ones the look by hit tests alone gives (checked live: GM and player, 1366x768 / 1600x900 / 1920x1080,
+ * sidebar open and folded, a sheet open, chat popped out - 24 of 24 the same grid, banner and chips). Known limit: something hit at a
+ * cell centre that lies in no element's box and is not joined to one through covered cell centres (a pseudo-element placed far from
+ * its element) is not seen. `quietHits.coverOff = true` looks at every cell as before; `quietHits.solidOff = true` without solid boxes.
+ * quietHits.look: { cells, looked, hits, cover, free (the cells: 1 the map), coverMs, ms } of the last synchronous look.
  */
 function lookAll(g, skipped) {
   const t0 = globalThis.performance?.now?.() ?? Date.now();
   let cover = null;
   if ( !quietHits.coverOff ) { try { cover = coverCells(g, skipped); } catch ( err ) { cover = null; console.warn(`${MODULE_ID} | zones: cover`, err); } }
+  const t1 = globalThis.performance?.now?.() ?? Date.now();
   let looked = g.free.length, hits = g.free.length;
   if ( cover ) {
     // (a cell found covered by a solid box: every other cell of that box is covered too - not hit-tested again; never where the
@@ -373,7 +377,7 @@ function lookAll(g, skipped) {
     });
   }
   else for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i);
-  quietHits.look = { cells: g.free.length, looked, hits, cover: !!cover, free: g.free, ms: +((globalThis.performance?.now?.() ?? Date.now()) - t0).toFixed(2) };
+  quietHits.look = { cells: g.free.length, looked, hits, cover: !!cover, free: g.free, coverMs: +(t1 - t0).toFixed(2), ms:+((globalThis.performance?.now?.() ?? Date.now()) - t0).toFixed(2) };
 }
 /** The element a click at the centre of cell `i` reaches. */
 const cellAt = (g, i) => document.elementFromPoint(((i % g.cols) + 0.5) * CELL, (Math.floor(i / g.cols) + 0.5) * CELL);
