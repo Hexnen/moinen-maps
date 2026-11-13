@@ -231,6 +231,72 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
 (register in the "ready" hook or with a static copy of the ids: `ground tokens weather overlay top` / `hud ui screen`).
 `L.gallery({ part: "layers" })` shows the same word on every layer.
 
+## Words: the vocabulary (what to letter for a sound)
+
+The engine letters any text it is handed (`L.play("KRAK!")` is unchanged). On top of that `words.mjs` knows WHAT to letter: give it
+a sound kind, a loudness and a language and it gives a fitting onomatopoeia, its mood, sound and motions, seeded and varied.
+
+```js
+L.sfx("crack", { loud: 0.8, lang: "pl", space: "world", at: token, seed: msg.id });   // word + lettering in one call
+const w = L.word("boom", { magnitude: "huge", lang: "auto", seed });                   // just the word: { text, mood, sound, play, ... }
+L.play(w.text, { ...w.play, space: "world", area });                                    // ... lettered by the caller
+L.stream({ kind: "gunfire", lang: "pl", at: () => muzzle(), to: target, every: 90 });  // syllables from the vocabulary
+L.vocab.series("crack", 4, { seed, lang: "pl" });          // one sound repeated, growing: TRZASK! > TRZAAASK! > TRZAAAASK! > TRZAAAAAASK!
+L.vocab.grow("KRAK!", 2);                                  // grow a caller's own text: KRAAAK!
+L.number(12500, { lang: "pl" }); L.number(3, { times: true }); L.range(2, 4);   // "12 500", "3×", "2–4"
+```
+
+- `L.word(kind, o)` -> `{ text, kind, lang, tier, loud, step, template, prefix, mood, sound, motion, play }`; `play` = `{ mood, sound,
+  in, holdKind, out, magnitude }` ready to spread into `L.play`. Options: `lang` (`pl`, `en`, a registered code, or `auto` = the
+  game's language), `loud` 0..1 or `magnitude` (0..2 or `tiny`..`epic`: the same input as the size model; default = the normal
+  magnitude 0.5), `seed` (same word on every client; unseeded words never repeat the last one of that kind), `avoid` (texts or
+  templates to skip: other words of the same moment), `step` (the n-th repeat: louder and longer), `template` (pin the word, only
+  its stretch follows loudness), `prefix` (true/false/"KA-"), `stream` (syllables).
+- `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; every play option works; `opts.sound` keys override per key;
+  the handle carries `h.word`.
+- Loudness picks the TIER (quiet `s` < 0.34 <= normal `m` < 0.67 <= loud `l`), then STRETCHES the word (templates mark the stretch
+  points with `+`: `TRZA+SK` -> TRZASK / TRZAAASK; a word without marks stretches its last vowel, or a vowelless word its
+  R/S/Z/H/M/F run), at the very top may add a PREFIX (KA-BUM, TRA-TA-TRACH, KRA-KABOOM), quiet words lose their `!`, the loudest
+  gain one. No letter runs longer than 6; a prefix never stretches.
+- Escalation (the seam with MOVE's growing word): `L.vocab.series(kind, n, { seed, lang, loud, grow })`: `grow: "stretch"` (default)
+  keeps one word and makes it longer each step (a prefix from step 2, then `!`, `!!`); repeating sounds (gunfire, laughter, siren,
+  heartbeat, drip, stomp, beep) add a syllable instead (TRA-TA > TRA-TA-TA > TRA-TA-TA-TA); `grow: "vary"` gives a different word
+  each step at rising loudness. Never the same text twice in a row; never shorter in stretch mode. For a caller's plain text:
+  `L.vocab.grow(text, step)`.
+- Adding and overriding (callers, moinen-pixel-vfx, world macros) on the shared engine: `L.vocab.add(lang, kind, words, { replace })`
+  (an array spread over tiers by length, or `{ s, m, l, st }`; `+` marks allowed; words the fonts cannot letter or longer than 22
+  are refused with one warning), `L.vocab.define(kind, { group, label: { pl, en }, mood, sound, motion, stretch, pre, alias, repeat })`
+  (a new kind or a change), `L.vocab.remove(lang, kind, words)`, `L.vocab.reset()`. Pickers: `L.vocab.list(lang)` (id, label,
+  group, mood, counts), `L.vocab.choices(lang)` (`{ id: label }` for `game.settings` choices), `L.vocab.all(kind, lang)`.
+- Numbers: `L.number(n, { lang, sign: "auto"|"always"|"never", digits, group, compact, times: true|"before", percent })`: Polish
+  `12 500` (a space from 10 000), `2,5`, `1,2 MLN`, `12 TYS.`; English `12,500`, `2.5`, `1.2M`, `12K`; `3×` / `×3`; minus is `-`
+  so the auto mood still reads pain / heal. `L.range(2, 4)` -> `2–4`. Every sign used has a glyph in every font (checked).
+
+### The sound kinds (52; PL and EN words for each, 3 tiers + stream syllables)
+| group | kinds |
+|---|---|
+| hits | punch (cios), smash (miażdżenie), slap (klaps), thud (łomot), stomp (tupnięcie), clang (brzęk), slash (cięcie), bite (ugryzienie) |
+| breaking | crack (trzask), shatter (stłuczenie), crash (łoskot), crumble (kruszenie), rumble (dudnienie), creak (skrzypienie), scrape (zgrzyt) |
+| blasts | boom (wybuch), whump (podmuch), thunder (grzmot), zap (porażenie), beam (promień), gunshot (strzał), gunfire (seria), ricochet (rykoszet) |
+| motion | whoosh (świst), zoom (pęd), bounce (skok), teleport (teleport), wind (wiatr) |
+| elements | fire (ogień), crackle (trzaskanie), hiss (syk), splash (plusk), squish (plaśnięcie), drip (kapanie) |
+| powers | power-up (ładowanie), psychic (telepatia), chime (dzwonienie), fizzle (zgaśnięcie), whiff (pudło) |
+| devices | click (kliknięcie), beep (pikanie), engine (silnik), siren (syrena) |
+| voices | roar (ryk), pain (ból), effort (wysiłek), relief (ulga), sigh (westchnienie), cheer (wiwat), laugh (śmiech), shush (uciszenie), heartbeat (puls) |
+Aliases (`explosion` -> boom, `laser` -> beam, `machinegun` -> gunfire, `hit` -> punch, `heal` -> relief, ...): `L.vocab.aliases`.
+An unknown kind letters as `punch` with one warning.
+
+### How the words were written
+Our own lists, nothing copied wholesale. English follows the American comic idiom (POW, THWACK, KRAKOOM, BLAM, FWOOSH, SPLOOSH).
+Polish follows how Polish comics and everyday speech write sounds rather than translating the English: hard Polish spellings
+(ŁUP, BĘC, TRACH, PRASK, BUCH, CHLAST, CIACH, ŚWIST, BRZDĘK, DZYŃ, CHRUP, KŁAP, PLUSK, CHLUP, SKRZYP, ZGRZYT, SZUR, SYK, PSST, CIII),
+its own idioms (ŁUBUDU for a tumble, SZAST-PRAST for a quick cut, HOP-SA for a jump, IJO-IJO for a siren, TRA-TA-TA for a gun,
+PIF-PAF for shots, AUĆ / AŁA for pain, UFF for relief, HURA / JEST! for a cheer, CHA-CHA / HI-HI for laughter). Comic conventions
+used: letters repeated for length, size for loudness, hyphenated syllables for a sound made of parts (KA-BUM), a prefix for the
+biggest version. Sources read: Polish-English onomatopoeia tables (earlystage.pl blog), SDSU "The Sound of Comics" notes on
+lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomatopeja", the existing word sets of the three callers
+(maps sfx/words.mjs, dice splash SAYS, token reactions) for which sounds are needed.
+
 ## For the builder of moinen-pixel-vfx (a power's effect carrying its sound)
 
 - Get the engine without depending on plus-ultra: `const L = globalThis.MoinenLetters ? await MoinenLetters.engine() : null`
@@ -238,6 +304,8 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
 - Bind lettering to the effect's timeline, not to an instant: pass `startAt` = the effect's `performance.now()` start (a word
   joins part-way through if it is late), `delay` for an offset, and `until: effectEndPromise` (or call `h.stop()` when the stage
   ends) so the word leaves with the effect. `loop: true` holds until stopped (a lasting fire, a charging aura).
+- The words for a power's sound: `L.word(kind, { magnitude, lang: "auto", seed: castId })` or `L.sfx(kind, ...)` (see "Words"), e.g.
+  a shooting power: `L.stream({ kind: "gunfire", lang: "auto", ... })` rattles TRA-TA-TA for Polish players, RAT-TAT-TAT for English.
 - Sounds that repeat (a gun's "ratatata", a crackling fire, a rumbling quake): `L.stream(...)`. Syllables pop at the source
   (`at`, may be a function for a moving muzzle or projectile), travel along `dir` or toward `to`, one hand for the whole burst;
   timing by `every`, by `beats` (exact ms of each shot on the effect's clock) or by calling `s.beat()` from each shot with
@@ -271,7 +339,7 @@ event in the dark or behind walls); `vision: "none"` always shows it. Streams pa
 syllables. A word at a plain point is shown by default even on the `overlay` layer (over fog): pass `token` or `vision: "point"`
 when the point must not give away where something happened.
 
-## Tools: settings, authoring, networking, accessibility, windows (contract v5, tools.mjs)
+## Tools: settings, authoring, networking, accessibility, windows (contract v6, tools.mjs)
 One set for every caller, registered once by the newest copy at `init` (whichever module(s) are active).
 
 Settings, client (this computer), namespace `moinen-letters` (stable whichever module is active; the button "Lettering settings" in

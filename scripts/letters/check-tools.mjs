@@ -1,4 +1,4 @@
-// LETR tools (contract v5): node checks of the engine-wide preferences, the plan filters (palette, motion, flash guard), the
+// LETR tools (contract v6): node checks of the engine-wide preferences, the plan filters (palette, motion, flash guard), the
 // authoring API, the networking helper and the i18n tables. Run by check.mjs (both modules); `run(ok, ctx)` with ctx = { plan, bank }.
 import fs from "node:fs";
 import { SETTINGS, DEFAULTS, clean, cleanAll, reducedFor, resolveOpts, filterPlan, flashTimes, handFrom, CONTRAST, CVD, PHOTO } from "./prefs.mjs";

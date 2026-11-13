@@ -12,6 +12,7 @@ import { normals, jag } from "./geom.mjs";
 import { area } from "./font.mjs";
 import { rng } from "./rng.mjs";
 import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
+import { checkWords } from "./check-words.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -185,7 +186,10 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   ok(/redraws < MAX_REDRAWS/.test(eng) && /h\.retired/.test(eng) && !/if \( h\.shown === c \) h\.shown = null; dropPic\(c\)/.test(eng), "size: stale pictures are redrawn a few per frame and the shown texture is never freed under the sprite (F0/F1)");
 }
 
-/* 8c. tools (contract v5): settings, plan filters, authoring, networking, words (check-tools.mjs) */
+/* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs) */
+checkWords(ok, bank);
+
+/* 8d. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
