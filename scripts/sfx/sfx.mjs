@@ -267,7 +267,8 @@ function reconcileBurn() {
     it). Measured once a second with the burn. */
 function burnOffsets(p, live) {
   try {
-    const v = view(), ui = uiBoxes(), em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
+    // (off the panels, and off the event words still up: a debris word that landed where the fire then catches)
+    const v = view(), ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
     return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
       // (a spot off this screen stays where it is: its words are not pulled into view)
       return inV ? C.clearOf({ x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45) : { dx: 0, dy: 0 }; });

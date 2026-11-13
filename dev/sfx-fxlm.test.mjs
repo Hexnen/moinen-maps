@@ -332,6 +332,7 @@ group("CROWD", () => {
   ok(pf.x === wave.x && pf.y === wave.y, "CROWD with nothing up it sets off where the wave starts");
   ok(C.burnCrowded([{ x: 100, y: 100 }], [{ x: 150, y: 120 }], 20) && !C.burnCrowded([{ x: 100, y: 100 }], [{ x: 400, y: 100 }], 20), "CROWD a fire's phrases next to a bigger fire's are left out; far apart both letter");
   ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
+  ok(sfx.includes("ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)]"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
