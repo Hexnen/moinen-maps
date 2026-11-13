@@ -39,13 +39,13 @@
   "rng.mjs": "f7587bf06711e496",
   "shape.mjs": "2b65ae47a335dbbc",
   "size.mjs": "157c38f00004cb84",
-  "stamp.mjs": "b0e39f907d51819c",
-  "strings.mjs": "b125873c80a25148",
+  "stamp.mjs": "f7714f33a0fa305f",
+  "strings.mjs": "17259a1d576794e9",
   "sync.mjs": "0aaf5650bacd97ee",
   "testenv.mjs": "d58bfa07296e2971",
   "tools.css": "25094cddcf54f361",
   "tools.mjs": "d6b4abd8a98bfd4e",
-  "ui.mjs": "87b026610c7fe464",
+  "ui.mjs": "894047dbae6c3157",
   "words.mjs": "09f11e678f6170e1"
  }
 }
