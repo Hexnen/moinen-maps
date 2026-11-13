@@ -284,5 +284,18 @@ group("SHOT", () => {
     "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
 });
 
+/* NOTES (readers of the branch): no double lettering, shot-true syllables, the same words on every seat */
+group("NOTES", () => {
+  const hits = C.strokeEvents({ id: "h1", k: "dust", dk: "hits", p: [100, 100, 300, 100], r: 40, q: 1000, lv: 2 }, null, 0, 3000, { grid: G });
+  ok(hits.length === 0, "NOTES a gun's / ejecta's hit spits letter nothing of their own (the gun or the blast letters the impact)");
+  const bomb = C.strokeEvents({ id: "b9", k: "burst", p: [500, 500], r: 200, q: 1000, lv: 3 }, null, 0, 3000, { grid: G });
+  const dust = C.strokeEvents({ id: "s9", k: "dust", dk: "shock", p: [500, 500], r: 300, q: 1000, lv: 3 }, null, 0, 3000, { grid: G });
+  const w = C.cluster([...bomb, ...dust], G).flatMap((g) => C.planCluster(g, { grid: G, sec: 4, known: KINDS }));
+  ok(w.filter((x) => x.voice === "whump").length === 1 && w.find((x) => x.voice === "whump").path, "NOTES one bomb, one wave word (the riding one), not a burst shock and a dust shock");
+  const walk = [0, 70, 90, 400, 410, 900].map((ms, i) => ({ x: i * 10, y: 0, ms: ms + 5000 }));
+  ok(JSON.stringify(C.streamBeats(walk)) === JSON.stringify([0, 70, 90, 400, 410, 900]), "NOTES a gun's syllables fall on its rounds' own moments (shot-true), not evenly spread");
+  ok(/get\("sfxWordsWorld", "auto"\)/.test(sfx) && /"sfxWordsWorld", \{[^}]*scope: "world"/.test(sfx) && /isActiveGM && get\("sfxWordsWorld"/.test(sfx), "NOTES 'game language' follows the world's word set (fixed once by the GM): a Polish and an English seat see the same word");
+});
+
 if ( failed.length ) { console.log(failed.join(" | ")); console.log(`sfx-fxlm: ${failed.length} finding group(s) FAILED`); process.exit(1); }
 console.log(`sfx-fxlm: ${n} checks ok`);

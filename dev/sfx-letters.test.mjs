@@ -139,7 +139,9 @@ const bp = C.burnPlan(groupsB.find((g) => g.length === 2), { grid: G, catchMs: (
 ok(JSON.stringify(bp.points) === JSON.stringify(C.burnPlan(groupsB.find((g) => g.length === 2).slice().reverse(), { grid: G, catchMs: () => 3000 }).points), "a fire's sound is the same everywhere");
 
 /* F2. staging fits the sound (asked of the engine on top of each kind's own motion) */
-ok(fallMain.stage.in === "drop" && fallMain.stage.out === "shards" && fall.find((w) => w.role === "pre").stage.in === "crackIn", "a cave-in drops and breaks after its crack cracks in");
+ok(fallMain.stage.in === "drop" && fallMain.stage.out === "shards" && fall.find((w) => w.role === "pre").stage.in === "pop", "a cave-in drops and breaks after its crack pops in");
+// (FXLM review notes: "crackIn" assembles the pieces - a break played backwards - and "burst" ends a boom in a second explosion)
+ok(Object.values(C.VOICES).every((v) => v.stage?.in !== "crackIn" && v.stage?.out !== "burst"), "no word assembles its pieces in or ends in a second blast");
 ok(boomW.stage.in === "slam" && boomW.stage.push === true && out.drift && out.stage.out === "dissolve", "a blast slams and shoves, a hiss drifts up and dissolves");
 ok(single({ voice: "crash", x: 0, y: 0, r: 20 })[0].stage.in === "slam", "a small crash is a thud: it slams in");
 ok(fall.filter((w) => w.role !== "main").every((w) => !w.stage.push), "only a main word shoves the words around it");

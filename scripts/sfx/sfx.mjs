@@ -53,7 +53,8 @@ const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0,
 
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
 export const mode = () => (get("sfxLettersWorld", true) === false ? "off" : get("sfxLetters", "all"));
-const lang = () => C.langOf(get("sfxWords", "auto"), game.i18n?.lang);
+// (every seat must see the same word for the same moment: "auto" follows the WORLD's word set, which the GM's language sets once)
+const lang = () => { const c = get("sfxWords", "auto"); return C.langOf(c !== "auto" ? c : get("sfxWordsWorld", "auto"), game.i18n?.lang); };
 
 function registerSettings() {
   const T = (k) => `MOINENMAPS.Sfx.${k}`;
@@ -64,6 +65,8 @@ function registerSettings() {
   game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "client", config: true, type: String, default: "overlay",
     choices: Object.fromEntries(LAYER_IDS.map((k) => [k, T(`layers.${k}`)])) });
   game.settings.register(MODULE_ID, "sfxWords", { name: T("words"), hint: T("wordsHint"), scope: "client", config: true, type: String, default: "auto",
+    choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") } });
+  game.settings.register(MODULE_ID, "sfxWordsWorld", { name: T("wordsWorld"), hint: T("wordsWorldHint"), scope: "world", config: true, restricted: true, type: String, default: "auto",
     choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") } });
 }
 
@@ -479,7 +482,11 @@ export const sfxApi = {
 export function registerSfx() {
   moduleApi.sfx = sfxApi;
   Hooks.once("init", registerSettings);
-  Hooks.once("ready", () => { refresh(); const m = game.modules.get(MODULE_ID); if ( m?.api ) m.api.sfx ??= sfxApi; });
+  Hooks.once("ready", () => {
+    refresh(); const m = game.modules.get(MODULE_ID); if ( m?.api ) m.api.sfx ??= sfxApi;
+    // the world's word set is fixed once, by the active GM's language (then every seat letters the same words)
+    if ( game.user?.isActiveGM && get("sfxWordsWorld", "auto") === "auto" ) game.settings.set(MODULE_ID, "sfxWordsWorld", C.langOf("auto", game.i18n?.lang)).catch(() => {});
+  });
   // (canvasTearDown cleared the old scene; at canvasReady the new scene's fire may already have shown its flames: kept)
   Hooks.on("canvasReady", () => { teardown(false); refresh(); });
   Hooks.on("canvasTearDown", () => teardown(true));

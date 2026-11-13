@@ -2573,6 +2573,8 @@
   "MOINENMAPS.Sfx.wordsHint": "The sound words the lettering uses: the game's language, English comic sounds (KRAK!, BOOM!) or Polish ones (TRZASK!, BUM!).",
   "MOINENMAPS.Sfx.wordsAuto": "Game language",
   "MOINENMAPS.Sfx.wordsEn": "English",
+  "MOINENMAPS.Sfx.wordsWorld": "Sound-effect words for everyone",
+  "MOINENMAPS.Sfx.wordsWorldHint": "The word set every seat uses when a player keeps \"Game language\": the same moment shows the same word on every screen. Set once from the GM's language.",
   "MOINENMAPS.Sfx.wordsPl": "Polish",
   "MOINENMAPS.Sfx.layer": "Sound-effect layer",
   "MOINENMAPS.Sfx.layers.ground": "On the ground (under tokens)",

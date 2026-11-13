@@ -2573,6 +2573,8 @@
   "MOINENMAPS.Sfx.wordsHint": "Jakich dźwięków używają napisy: języka gry, angielskich z komiksów (KRAK!, BOOM!) czy polskich (TRZASK!, BUM!).",
   "MOINENMAPS.Sfx.wordsAuto": "Język gry",
   "MOINENMAPS.Sfx.wordsEn": "Angielskie",
+  "MOINENMAPS.Sfx.wordsWorld": "Słowa dźwięków dla wszystkich",
+  "MOINENMAPS.Sfx.wordsWorldHint": "Zestaw słów na każdym ekranie, gdy gracz zostawia \"Język gry\": ta sama chwila daje to samo słowo u wszystkich. Ustawiany raz z języka MG.",
   "MOINENMAPS.Sfx.wordsPl": "Polskie",
   "MOINENMAPS.Sfx.layer": "Warstwa napisów dźwięków",
   "MOINENMAPS.Sfx.layers.ground": "Na ziemi (pod żetonami)",

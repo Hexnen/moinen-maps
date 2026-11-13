@@ -51,8 +51,8 @@ export const sidOf = (e) => e.sid ?? e.key;
  * per-kind motion), cover (how much a word may cover its own subject: 0 never, 1 does not care).
  */
 export const VOICES = {
-  boom:    { kinds: ["boom"], prio: 10, w: 1.3, ms: 900, area: 1, cover: 0.35, stage: { in: "slam", out: "burst", push: true, glow: "auto" } },
-  thunder: { kinds: ["thunder", "zap"], prio: 9, w: 1.15, ms: 900, area: 1, cover: 0.3, stage: { in: "crackIn", out: "burst", glow: "auto" } },
+  boom:    { kinds: ["boom"], prio: 10, w: 1.3, ms: 900, area: 1, cover: 0.35, stage: { in: "slam", push: true, glow: "auto" } },
+  thunder: { kinds: ["thunder", "zap"], prio: 9, w: 1.15, ms: 900, area: 1, cover: 0.3, stage: { in: "slam", glow: "auto" } },
   crash:   { kinds: ["crash"], prio: 9, w: 1.2, ms: 1500, area: 1, cover: 0.15, stage: { in: "drop", holdKind: "rattle", out: "shards", push: true, on: 3 } },
   zap:     { kinds: ["zap"], prio: 8, w: 0.85, ms: 350, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   thud:    { kinds: ["thud", "punch"], prio: 7, w: 0.8, ms: 150, area: 0.8, cover: 0.2, stage: { in: "slam" } },
@@ -66,7 +66,7 @@ export const VOICES = {
   splash:  { kinds: ["splash"], prio: 6, w: 0.75, ms: 700, area: 0.8, cover: 0.2, stage: {} },
   arcane:  { kinds: ["powerup", "psychic"], prio: 6, w: 0.75, ms: 1100, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   slash:   { kinds: ["slash"], prio: 5, w: 0.7, ms: 300, area: 0.7, cover: 0.15, stage: { in: "zip", out: "shards" } },
-  crack:   { kinds: ["crack"], prio: 4, w: 0.6, ms: 200, area: 0.6, cover: 0.1, stage: { in: "crackIn", out: "shards" } },
+  crack:   { kinds: ["crack"], prio: 4, w: 0.6, ms: 200, area: 0.6, cover: 0.1, stage: { in: "pop", out: "shards" } },
   rumble:  { kinds: ["rumble"], prio: 4, w: 0.8, ms: 2200, area: 0.8, cover: 0.3, stage: { holdKind: "rattle", on: 3 } },
   decay:   { kinds: ["crumble"], prio: 3, w: 0.6, ms: 1300, area: 0.7, cover: 0.2, stage: { out: "fall", on: 3 } },
   acid:    { kinds: ["hiss", "fizzle"], prio: 3, w: 0.55, ms: 1300, area: 0.6, cover: 0.2, stage: { holdKind: "boil", out: "dissolve" } },
@@ -76,7 +76,7 @@ export const VOICES = {
   engine:  { kinds: ["engine"], prio: 3, w: 0.75, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
   whump:   { kinds: ["whump"], prio: 2, w: 0.85, ms: 600, area: 0.7, cover: 0.4, stage: { in: "grow", push: { force: 1.2 } } },
   debris:  { kinds: ["crumble", "rumble"], prio: 1, w: 0.55, ms: 800, area: 0.5, cover: 0.25, stage: { in: "pop", out: "fall" } },
-  creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "crackIn", holdKind: "shake", out: "shards", on: 1 } }
+  creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "pop", holdKind: "shake", out: "shards", on: 1 } }
 };
 /** The sound kind of a voice: the first of its kinds the engine knows (`known`: a Set / array of the engine's kind ids, or null). */
 export function kindOf(voice, known = null, mat = null) {
@@ -191,7 +191,7 @@ export function ownFireColors(c) {
 export const fireM = (lv = 2, rGrid = 1) => clamp(0.12 + 0.26 * (lv - 1) + 0.18 * Math.log1p(rGrid), 0.1, 1);
 /** Loudness of an explosion: its level (1 grenade, 2 shell, 3 bomb) and its fireball's radius. */
 export const burstM = (lv = 2, rGrid = 1) => clamp(0.35 + 0.2 * (lv - 1) + 0.12 * Math.log1p(rGrid), 0.2, 1);
-export const DUST_VOICE = { shock: "whump", hits: "thud", heavy: "rumble", drag: "scrape", car: "engine", bike: "engine" };
+export const DUST_VOICE = { shock: "whump", hits: null, heavy: "rumble", drag: "scrape", car: "engine", bike: "engine" };
 
 /** Points along a flat path [x0, y0, x1, y1 ...] at fractions `fs` of its length: [{x, y, f}]. */
 export function alongPath(p, fs) {
@@ -288,7 +288,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
     return out;
   }
   if ( k === "dust" ) {
-    if ( prev || st.o !== undefined ) return out;
+    if ( prev || st.o !== undefined || DUST_VOICE[st.dk] === null ) return out;
     const v = DUST_VOICE[st.dk] ?? "rumble", len = pathLength(p) / grid;
     const at = st.dk === "shock" || st.dk === "hits" || p.length < 4 ? { x: p[0], y: p[1] } : alongPath(p, [0.5])[0];
     const pass = Math.max(400, ctx.passMs?.(st) ?? len * 400);
@@ -440,9 +440,12 @@ export function planCluster(g, o = {}) {
   const cand = g.members.filter((e) => e !== main && (Math.hypot(e.x - centre.x, e.y - centre.y) > minD || /^(whump|debris)$/.test(e.voice)))
     .sort((a, b) => ((VOICES[b.voice]?.prio ?? 0) === (VOICES[a.voice]?.prio ?? 0) ? 0 : /^(whump|debris)$/.test(a.voice) ? -1 : /^(whump|debris)$/.test(b.voice) ? 1 : 0) || (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
   const used = [];
+  // (one wave, one word: a bomb's burst shock and its shock dust are the same wave - the one riding out with it is kept)
+  const wave = cand.filter((e) => e.voice === "whump").sort((a, b) => (b.path ? 1 : 0) - (a.path ? 1 : 0))[0];
   for ( const e of cand ) {
     if ( used.length >= nSec ) break;
-    if ( used.some((u) => Math.hypot(u.x - e.x, u.y - e.y) < minD) ) continue;    // (two satellites close together are one sound)
+    if ( e.voice === "whump" && e !== wave ) continue;
+    if ( e !== wave && used.some((u) => Math.hypot(u.x - e.x, u.y - e.y) < minD) ) continue;    // (two satellites close together are one sound)
     used.push(e);
   }
   used.forEach((e, i) => {
@@ -475,8 +478,10 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
 
 /** A gun's rattle: the beats (ms from its first round) of its stream's syllables - 3 to 8, spread evenly over its walk. */
 export function streamBeats(walk) {
-  const T = Math.max(1, walk?.at?.(-1)?.ms || 1), n = Math.min(8, Math.max(3, walk?.length ?? 0));
-  return [...new Set(Array.from({ length: n }, (_, i) => Math.round((T * i) / (n - 1))))];
+  const N = walk?.length ?? 0;
+  if ( N < 3 ) { const T = Math.max(1, walk?.at?.(-1)?.ms || 1); return [...new Set([0, Math.round(T / 2), T])]; }
+  const n = Math.min(8, N), t0 = walk[0].ms || 0;
+  return [...new Set(Array.from({ length: n }, (_, i) => Math.round(walk[Math.round((i * (N - 1)) / (n - 1))].ms - t0)))];
 }
 
 /** The words a client keeps when it has room for `room` more: the main word first, then the pre word, then satellites (by time). */
