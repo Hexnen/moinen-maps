@@ -175,6 +175,14 @@ export function settleOcclusion(plan, bank) {
   return [...state.values()].sort((a, b) => a.i - b.i);
 }
 
+function altGlyph(plan, bank, i, ch) {
+  if ( ch === " " ) return null;
+  if ( !plan._alt ) Object.defineProperty(plan, "_alt", { value: new Map(), enumerable: false, configurable: true });
+  const k = `${i}:${ch}`;
+  if ( !plan._alt.has(k) ) { const font = plan.layout.letters[i]?.font ?? plan.hand.font, gl = bank.glyph(font, ch); plan._alt.set(k, gl ? { gl, cs: treatReadable(gl, ch, font, plan.hand, plan.sound, plan.seed, i, bank) } : null); }   // LOOK: read like any letter
+  return plan._alt.get(k);
+}
+
 /* outlines of picture p: [{ i, cs: [contours], visible }], in word units, word centre at (0,0) of the HOLD layout */
 export function pictureGeometry(plan, bank, p) {
   const base = baseGeometry(plan, bank);
@@ -189,8 +197,13 @@ export function pictureGeometry(plan, bank, p) {
   for ( let i = 0; i < letters.length; i++ ) {
     const L = letters[i], A = p.letters[i] ?? { v: 1, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 };
     if ( !A.v || !base[i].gl ) continue;
-    const cs0 = p.reseed && !base[i].ring ? treatReadable(base[i].gl, plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : base[i].cs;
-    const adv = base[i].gl.adv, px = adv / 2, py = -0.5;
+    /* MOVE: a picture may draw another character in this slot (a number being counted in): its own treated outline, cached */
+    const alt = A.ch && A.ch !== plan.chars[i] ? altGlyph(plan, bank, i, A.ch) : null;
+    if ( A.ch && A.ch !== plan.chars[i] && !alt ) continue;
+    const gl = alt ? alt.gl : base[i].gl;
+    /* LOOK: a redrawn letter is re-treated only as far as it still reads; a true ring is never re-treated */
+    const cs0 = p.reseed && (alt || !base[i].ring) ? treatReadable(gl, alt ? A.ch : plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : (alt ? alt.cs : base[i].cs);
+    const adv = gl.adv, px = adv / 2, py = -0.5;
     const s = L.s * A.s, sx = s * A.sx, sy = s * A.sy, rot = L.rot + A.r, c = Math.cos(rot), sn = Math.sin(rot);
     const tx = L.x + L.w / 2 + A.x, ty = -0.5 + L.dy + A.y;
     const cs = cs0.map((c0) => {

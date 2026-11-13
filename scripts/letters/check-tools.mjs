@@ -51,8 +51,10 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const unguarded = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ prefs: { photosafe: false }, capPx: 700 }));
     ok(flashTimes(unguarded, TICK).length === flashTimes(f0, TICK).length, "tools: guard off keeps flash frames");
     /* rate: words started together cannot flash more than PHOTO.maxPerSec times a second on one client */
-    const log = []; let n = 0;
-    for ( let i = 0; i < 6; i++ ) { const q = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: i * 50 })); n += flashTimes(q, TICK).length; }
+    /* (MOVE: a word may also flash on its exit, a second or more later: count the flashes in the busiest second, not in all) */
+    const log = [], at = [];
+    for ( let i = 0; i < 6; i++ ) { const q = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: i * 50 })); for ( const f of flashTimes(q, TICK) ) at.push(i * 50 + f.t); }
+    const n = Math.max(0, ...at.map((a) => at.filter((b) => b >= a && b < a + PHOTO.windowMs).length));
     ok(n <= PHOTO.maxPerSec, `tools: at most ${PHOTO.maxPerSec} flashes a second (${n})`);
     const later = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: 5000 }));
     ok(flashTimes(later, TICK).length >= 1, "tools: the flash budget refills after a second");
@@ -234,4 +236,13 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const names = [...forms.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]).filter((n) => SHADOW.includes(n));
     ok(forms.length > 0 && names.length === 0, `tools: form windows use no control name that shadows a form property (${names.join(", ") || "none"})`);
   }
+  /* LM: the screen-reader announcement respects visibility (1.6.0 read a hidden token's word to a player: announce ran before the
+     visibility check); the start hook runs after place() decided h.seen, and announce() leaves an unseen word out */
+  {
+    const tsrc = fs.readFileSync(new URL("./tools.mjs", import.meta.url), "utf8"), esrc = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
+    const body = tsrc.slice(tsrc.indexOf("function announce(h)"), tsrc.indexOf("state.liveQ.push"));
+    ok(body.includes("if ( h.seen === false ) return;"), "tools: announce leaves out a word this user does not see");
+    ok(/show\(h, c\); place\(h\);[^\n]*\n[^\n]*for \( const f of ext\.start \)/.test(esrc), "tools: start hooks run after place() decided the word's visibility");
+  }
+
 }

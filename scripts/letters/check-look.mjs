@@ -247,5 +247,28 @@ export function checkLook(ok, bank) {
     const per = (performance.now() - t0) / k;
     ok(per < 12, `cost: plan + settle ${per.toFixed(2)} ms on average (< 12)`);
   }
+  /* L17 (LM): a smear frame in the Invincible style paints its multiples as see-through ghosts in the block colour, never as slabs in
+     the flat pale face colour (LOOK's live "pale rectangles"); comic hands keep their smear; a smear's multiples fit in the picture */
+  {
+    const rec = () => { const fills = [], st = []; const t = { globalAlpha: 1 }; const ctx = new Proxy(t, { get: (o, k) => (k in o ? o[k] : (k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (k === "getImageData" ? () => ({ data: new Uint8ClampedArray(4) }) : k === "fill" ? () => fills.push({ style: o.fillStyle, a: o.globalAlpha }) : k === "save" ? () => st.push([o.globalAlpha, o.fillStyle]) : k === "restore" ? () => { const v = st.pop(); if ( v ) [o.globalAlpha, o.fillStyle] = v; } : () => {}))), set: (o, k, v) => ((o[k] = v), true) }); return { fills, make: (w, h) => ({ width: w, height: h, getContext: () => ctx }) }; };
+    const smearOf = (look) => { for ( let s = 0; s < 40; s++ ) { const p = plan("BRZDĘK-DZYYŃ!!", { mood: "crack", seed: `sm${s}`, in: "slam", magnitude: 1, look }); const q = p.timeline.ent.find((x) => x.smear); if ( q ) return { p, q }; } return null; };
+    const inv = smearOf({ style: "invincible" }), com = smearOf({ style: "comic" });
+    ok(!!inv && !!com, "smear: a slam smear frame exists in both styles");
+    if ( inv ) {
+      const r = rec(); const pic = paintPicture(inv.p, bank, inv.q, 80, r.make);
+      const ghosts = r.fills.filter((f) => f.style === inv.p.hand.pal.ext && f.a < 1).length;
+      ok(ghosts >= inv.q.smear.n, `smear (invincible): ${ghosts} see-through ghosts in the block colour (>= ${inv.q.smear.n})`);
+      const face = new Set(inv.p.hand.pal.fill), slabs = r.fills.filter((f) => face.has(f.style) && f.a >= 1).length;
+      const r2 = rec(); paintPicture(inv.p, bank, { ...inv.q, smear: null }, 80, r2.make);
+      const slabs0 = r2.fills.filter((f) => face.has(f.style) && f.a >= 1).length;
+      ok(slabs === slabs0, `smear (invincible): no opaque face-colour multiples (${slabs} face fills, ${slabs0} without the smear)`);
+      const hold = paintPicture(inv.p, bank, { ...inv.q, smear: null }, 80, rec().make);
+      ok(pic.canvas.width > hold.canvas.width * (1 + 0.4 * (inv.q.smear.zoom ?? 0)), `smear: the zoomed multiples fit in the picture (${pic.canvas.width} vs ${hold.canvas.width})`);
+    }
+    if ( com ) {
+      const r = rec(); paintPicture(com.p, bank, com.q, 80, r.make);
+      ok(r.fills.filter((f) => f.style === com.p.hand.pal.ext && f.a < 1).length === 0, "smear (comic): multiples painted as before (no ghosts)");
+    }
+  }
   void treatLetter; void sound;
 }
