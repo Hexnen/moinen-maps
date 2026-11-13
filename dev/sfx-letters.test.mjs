@@ -125,6 +125,12 @@ ok(am && JSON.stringify(am) === JSON.stringify(C.ambientEvent(10, [{ ...fire, id
 ok(!C.ambientEvent(10, [{ ...fire, q: 59000 }], { every: 6000 }), "a fire that just caught does not crackle yet");
 ok(C.ambientEvent(10, [fire], { every: 6000 }).ambient && C.ambientEvent(10, [fire]).m < 0.5, "the ambient crackle is quiet");
 
+/* F2. motion fits the sound (the engine's entrance / hold / exit named per voice) */
+ok(Object.values(VOICES).every((v) => v.motion?.in && v.motion?.hold && v.motion?.out), "every voice names its motion");
+ok(fallMain.motion.in === "drop" && fallMain.motion.out === "fall" && fall.find((w) => w.role === "pre").motion.in === "crackIn", "a cave-in drops and falls after its crack cracks in");
+ok(blast.motion.in === "slam" && burn.motion.hold === "flicker" && hiss.motion.out === "dissolve", "a blast slams, fire flickers, a hiss dissolves");
+ok(single({ voice: "crash", x: 0, y: 0, r: 20 })[0].motion.in === "slam", "a small crash is a thud: it slams in");
+
 /* G. wiring */
 const disp = fs.readFileSync(new URL("../scripts/destruction/display.mjs", import.meta.url), "utf8");
 ok(/enter\(g, \{[^\n]*\} = \{\}\) \{\n(?:.*\n){2}.*\n\s*sfxBus\.entry\?\.\(this, g, arguments\[1\] \?\? \{\}, start\);/.test(disp), "display.enter calls the sfx bus first (every entry path)");
@@ -132,9 +138,11 @@ const main = fs.readFileSync(new URL("../scripts/main.mjs", import.meta.url), "u
 ok(main.includes("registerSfx();"), "main.mjs registers the sound effects");
 for ( const l of ["en", "pl"] ) {
   const j = JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
-  for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
+  for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layerTop", "layerWeather", "layerTokens", "layerFire"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
 }
 const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+ok(/sfxLayer[\s\S]*choices: \{ top:[^}]*weather:[^}]*tokens:[^}]*fire:/.test(sfx) && sfx.includes("parent: layerC"), "the display layer is a setting (top / under weather / under tokens / under fire)");
+ok(sfx.includes("in: w.motion.in, holdKind: w.motion.hold, out: w.motion.out"), "the motion goes to the engine");
 ok(sfx.includes('space: "world"') && sfx.includes("reduced: red"), "words are world-space and follow the module's reduced-motion rule");
 ok(!/from "[^"]*letters\/(?!index\.mjs)/.test(sfx) && sfx.includes('from "../letters/index.mjs"'), "the engine is used through its index only");
 

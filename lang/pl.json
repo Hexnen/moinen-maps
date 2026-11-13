@@ -2573,5 +2573,11 @@
   "MOINENMAPS.Sfx.wordsHint": "Jakich słów używają napisy: języka gry, słów z komiksów anglojęzycznych (KRAK, BOOM) czy polskich (TRZASK, BUM).",
   "MOINENMAPS.Sfx.wordsAuto": "Język gry",
   "MOINENMAPS.Sfx.wordsEn": "Angielskie",
-  "MOINENMAPS.Sfx.wordsPl": "Polskie"
+  "MOINENMAPS.Sfx.wordsPl": "Polskie",
+  "MOINENMAPS.Sfx.layer": "Warstwa napisów dźwięków",
+  "MOINENMAPS.Sfx.layerHint": "Gdzie rysują się napisy dźwięków. Na wierzchu: nad wszystkim, także nad nocą i deszczem. Pod pogodą: nad tokenami i płomieniami, pod chmurami i deszczem, przyciemnione nocą. Pod tokenami: nad zniszczeniami i płonącą ziemią, pod tokenami. Pod ogniem: nad zniszczeniami, pod płomieniami i dymem.",
+  "MOINENMAPS.Sfx.layerTop": "Na wierzchu",
+  "MOINENMAPS.Sfx.layerWeather": "Pod pogodą",
+  "MOINENMAPS.Sfx.layerTokens": "Pod tokenami",
+  "MOINENMAPS.Sfx.layerFire": "Pod ogniem"
 }

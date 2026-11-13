@@ -6,25 +6,27 @@
 
 export const VOICES = {
   //            mood used by the lettering engine, its base sound (loud is set by the event's size), priority (a cluster's main word is
-  //            its loudest voice), how much a big sound stretches its word
-  boom:    { mood: "boom",    sound: { sharp: 0.55, long: 0.55, pitch: -0.2, rough: 0.7 },  prio: 10, stretch: 3 },
-  crash:   { mood: "crash",   sound: { sharp: 0.7,  long: 0.6,  pitch: -0.6, rough: 0.85 }, prio: 9,  stretch: 2 },
-  zap:     { mood: "zap",     sound: { sharp: 1,    long: 0.3,  pitch: 0.3,  rough: 0.5 },  prio: 8,  stretch: 2 },
-  thud:    { mood: "impact",  sound: { sharp: 0.45, long: 0.25, pitch: -0.5, rough: 0.5 },  prio: 7,  stretch: 2 },
-  gun:     { mood: "impact",  sound: { sharp: 0.9,  long: 0.15, pitch: 0.1,  rough: 0.4 },  prio: 7,  stretch: 0 },
-  fire:    { mood: "fire",    sound: { sharp: 0.3,  long: 0.7,  pitch: 0.6,  rough: 0.45 }, prio: 6,  stretch: 3 },
-  splash:  { mood: "splash",  sound: { sharp: 0.25, long: 0.5,  pitch: 0.2,  rough: 0.3 },  prio: 6,  stretch: 2 },
-  arcane:  { mood: "powerup", sound: { sharp: 0.3,  long: 0.75, pitch: 0.7,  rough: 0.2 },  prio: 6,  stretch: 3 },
-  slash:   { mood: "crack",   sound: { sharp: 1,    long: 0.35, pitch: 0.2,  rough: 0.6 },  prio: 5,  stretch: 2 },
-  crack:   { mood: "crack",   sound: { sharp: 0.95, long: 0.2,  pitch: 0.1,  rough: 0.55 }, prio: 4,  stretch: 1 },
-  rumble:  { mood: "crash",   sound: { sharp: 0.35, long: 0.95, pitch: -0.8, rough: 1 },    prio: 4,  stretch: 3 },
-  decay:   { mood: "crack",   sound: { sharp: 0.4,  long: 0.75, pitch: -0.5, rough: 1 },    prio: 3,  stretch: 3 },
-  hiss:    { mood: "whoosh",  sound: { sharp: 0.2,  long: 0.8,  pitch: -0.8, rough: 0.55 }, prio: 3,  stretch: 4 },
-  drag:    { mood: "whoosh",  sound: { sharp: 0.6,  long: 0.85, pitch: -0.2, rough: 0.95 }, prio: 3,  stretch: 3 },
-  engine:  { mood: "whoosh",  sound: { sharp: 0.4,  long: 0.8,  pitch: 0.1,  rough: 0.8 },  prio: 3,  stretch: 3 },
-  whump:   { mood: "boom",    sound: { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 },  prio: 2,  stretch: 2 },
-  roar:    { mood: "fire",    sound: { sharp: 0.35, long: 1,    pitch: 0.3,  rough: 0.85 }, prio: 2,  stretch: 4 },
-  crackle: { mood: "fire",    sound: { sharp: 0.85, long: 0.1,  pitch: 0.4,  rough: 0.7 },  prio: 1,  stretch: 0 }
+  //            its loudest voice), how much a big sound stretches its word, its MOTION (the engine's entrance / hold / exit chosen for
+  //            the sound: a blast slams in and bursts, a cave-in drops and falls, a crack cracks in and shatters, fire pops up, flickers
+  //            and rises away, a hiss zips in and dissolves)
+  boom:    { mood: "boom",    sound: { sharp: 0.55, long: 0.55, pitch: -0.2, rough: 0.7 },  prio: 10, stretch: 3, motion: { in: "slam", hold: "throb", out: "burst" } },
+  crash:   { mood: "crash",   sound: { sharp: 0.7,  long: 0.6,  pitch: -0.6, rough: 0.85 }, prio: 9,  stretch: 2, motion: { in: "drop", hold: "rattle", out: "fall" } },
+  zap:     { mood: "zap",     sound: { sharp: 1,    long: 0.3,  pitch: 0.3,  rough: 0.5 },  prio: 8,  stretch: 2, motion: { in: "pop", hold: "buzz", out: "dissolve" } },
+  thud:    { mood: "impact",  sound: { sharp: 0.45, long: 0.25, pitch: -0.5, rough: 0.5 },  prio: 7,  stretch: 2, motion: { in: "slam", hold: "shake", out: "pop" } },
+  gun:     { mood: "impact",  sound: { sharp: 0.9,  long: 0.15, pitch: 0.1,  rough: 0.4 },  prio: 7,  stretch: 0, motion: { in: "slam", hold: "shake", out: "pop" } },
+  fire:    { mood: "fire",    sound: { sharp: 0.3,  long: 0.7,  pitch: 0.6,  rough: 0.45 }, prio: 6,  stretch: 3, motion: { in: "pop", hold: "flicker", out: "rise" } },
+  splash:  { mood: "splash",  sound: { sharp: 0.25, long: 0.5,  pitch: 0.2,  rough: 0.3 },  prio: 6,  stretch: 2, motion: { in: "pop", hold: "wobble", out: "fall" } },
+  arcane:  { mood: "powerup", sound: { sharp: 0.3,  long: 0.75, pitch: 0.7,  rough: 0.2 },  prio: 6,  stretch: 3, motion: { in: "grow", hold: "throb", out: "rise" } },
+  slash:   { mood: "crack",   sound: { sharp: 1,    long: 0.35, pitch: 0.2,  rough: 0.6 },  prio: 5,  stretch: 2, motion: { in: "zip", hold: "shake", out: "shatter" } },
+  crack:   { mood: "crack",   sound: { sharp: 0.95, long: 0.2,  pitch: 0.1,  rough: 0.55 }, prio: 4,  stretch: 1, motion: { in: "crackIn", hold: "shake", out: "shatter" } },
+  rumble:  { mood: "crash",   sound: { sharp: 0.35, long: 0.95, pitch: -0.8, rough: 1 },    prio: 4,  stretch: 3, motion: { in: "grow", hold: "rattle", out: "fall" } },
+  decay:   { mood: "crack",   sound: { sharp: 0.4,  long: 0.75, pitch: -0.5, rough: 1 },    prio: 3,  stretch: 3, motion: { in: "grow", hold: "wobble", out: "droop" } },
+  hiss:    { mood: "whoosh",  sound: { sharp: 0.2,  long: 0.8,  pitch: -0.8, rough: 0.55 }, prio: 3,  stretch: 4, motion: { in: "zip", hold: "boil", out: "dissolve" } },
+  drag:    { mood: "whoosh",  sound: { sharp: 0.6,  long: 0.85, pitch: -0.2, rough: 0.95 }, prio: 3,  stretch: 3, motion: { in: "zip", hold: "rattle", out: "zipout" } },
+  engine:  { mood: "whoosh",  sound: { sharp: 0.4,  long: 0.8,  pitch: 0.1,  rough: 0.8 },  prio: 3,  stretch: 3, motion: { in: "zip", hold: "boil", out: "zipout" } },
+  whump:   { mood: "boom",    sound: { sharp: 0.15, long: 0.45, pitch: -0.7, rough: 0.4 },  prio: 2,  stretch: 2, motion: { in: "grow", hold: "throb", out: "dissolve" } },
+  roar:    { mood: "fire",    sound: { sharp: 0.35, long: 1,    pitch: 0.3,  rough: 0.85 }, prio: 2,  stretch: 4, motion: { in: "grow", hold: "flicker", out: "rise" } },
+  crackle: { mood: "fire",    sound: { sharp: 0.85, long: 0.1,  pitch: 0.4,  rough: 0.7 },  prio: 1,  stretch: 0, motion: { in: "pop", hold: "flicker", out: "dissolve" } }
 };
 
 export const WORDS = {

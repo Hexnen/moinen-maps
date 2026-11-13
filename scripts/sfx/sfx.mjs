@@ -46,8 +46,39 @@ function registerSettings() {
   game.settings.register(MODULE_ID, "sfxLetters", { name: T("set"), hint: T("setHint"), scope: "client", config: true, type: String, default: "all",
     choices: { all: T("all"), big: T("big"), off: T("off") }, onChange: () => refresh() });
   game.settings.register(MODULE_ID, "sfxLettersWorld", { name: T("world"), hint: T("worldHint"), scope: "world", config: true, restricted: true, type: Boolean, default: true, onChange: () => refresh() });
+  game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "client", config: true, type: String, default: "top",
+    choices: { top: T("layerTop"), weather: T("layerWeather"), tokens: T("layerTokens"), fire: T("layerFire") }, onChange: () => dropLayer() });
   game.settings.register(MODULE_ID, "sfxWords", { name: T("words"), hint: T("wordsHint"), scope: "client", config: true, type: String, default: "auto",
     choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") } });
+}
+
+/* ---------------------------------------------------------------- the display layer (setting "sfxLayer") */
+
+/*
+ * Where the words are drawn, as the scene's layers stack (bottom to top): the map, the DAMAGE (primary sortLayer 247-248), the FIRE's
+ * ground and smoke (256), weather on the ground (252-254), TOKENS (700) with the fire's flames in front of them (750-800), clouds and
+ * rain (996-997, elevation Infinity), then LIGHTING / darkness, then the interface.
+ *   top      over everything (canvas.interface, the engine's own layer): not dimmed by the night, never under rain or cloud
+ *   weather  over tokens, the flames and roofs, under clouds and rain, and lit by the scene (the night darkens it)
+ *   tokens   over the damage and the fire's ground, under tokens (and the flames in front of them)
+ *   fire     over the damage, under the fire and its smoke
+ */
+export const LAYERS = { weather: { sortLayer: 990, elevation: Infinity }, tokens: { sortLayer: 690, elevation: 0 }, fire: { sortLayer: 250, elevation: 0 } };
+let layerC = null, layerK = null;
+function layerOpts() {
+  const k = get("sfxLayer", "top"), spec = LAYERS[k];
+  if ( !spec || !canvas?.primary ) return {};
+  if ( !layerC || layerC.destroyed || layerK !== k || layerC.parent !== canvas.primary ) {
+    dropLayer();
+    layerC = new PIXI.Container(); layerC.eventMode = "none";
+    Object.assign(layerC, { elevation: spec.elevation, sortLayer: spec.sortLayer, sort: 0, _lastSortedIndex: 0 });
+    canvas.primary.addChild(layerC); canvas.primary.sortDirty = true; layerK = k;
+  }
+  return { parent: layerC };
+}
+function dropLayer() {
+  if ( layerC && !layerC.destroyed ) { layerC.parent?.removeChild(layerC); layerC.destroy({ children: false }); }
+  layerC = null; layerK = null;
 }
 
 /* ---------------------------------------------------------------- the engine */
@@ -211,7 +242,8 @@ function play(w, ambient) {
       if ( w.stream && L.stream ) { h = playStream(w, red); stats.words++; const rec = { box: w.box, h, ambient }; alive.add(rec); Promise.resolve(h?.finished).finally(() => alive.delete(rec)); return; }
       h = L.play(w.text, { space: "world", mood: w.mood, sound: w.sound, at: { x: w.x, y: w.y }, size: w.size, seed: w.seed,
         ...(w.maxWidth ? { maxWidth: w.maxWidth } : {}), ...(w.from ? { from: w.from } : {}), rotation: w.rotation, startAt: Math.min(w.t, performance.now()),
-        ...(w.colors ? { colors: w.colors } : {}), ...(w.hold ? { hold: w.hold } : {}), reduced: red });
+        ...(w.colors ? { colors: w.colors } : {}), ...(w.hold ? { hold: w.hold } : {}), reduced: red,
+        ...(w.motion?.in ? { in: w.motion.in, holdKind: w.motion.hold, out: w.motion.out } : {}), ...layerOpts() });
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     stats.words++;
     const rec = { box: w.box, h, ambient };
@@ -233,7 +265,7 @@ function playStream(w, reduced) {
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   };
   return L.stream({ text: w.text.split("\n").join(" "), space: "world", at, dir: -90, beats, startAt: t0, mood: w.mood, size: w.size * 0.6, seed: w.seed,
-    ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.75 + 0.25 * Math.sin(i * 1.7), reduced });
+    ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.75 + 0.25 * Math.sin(i * 1.7), reduced, ...layerOpts() });
 }
 
 /* ---------------------------------------------------------------- lifecycle */
@@ -243,6 +275,7 @@ function teardown() {
   for ( const id of sched.values() ) clearTimeout(id);
   sched.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map();
   armAmbient(false); ambientSlot = -1;
+  layerC = null; layerK = null;      // (the canvas tears it down with the primary group)
 }
 function refresh() {
   sfxBus.entry = mode() === "off" ? null : onEntry;

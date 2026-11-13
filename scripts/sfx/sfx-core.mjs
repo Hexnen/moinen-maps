@@ -253,7 +253,11 @@ export function planCluster(g, o = {}) {
 function word(role, text, voice, loud, at, size, t, seed, from, rotation, colors, o, extra = {}) {
   const V = VOICES[voice] ?? VOICES.crack;
   const lines = text.split("\n"), longest = Math.max(...lines.map((l) => l.length));
-  return { role, text, voice, mood: V.mood, sound: { ...V.sound, loud, ...(extra.long !== undefined ? { long: clamp(extra.long, 0, 1) } : {}) },
+  // the motion fits the sound: the voice's own; a small crash is a thud (slams in), a long hiss or roar keeps its slow grow
+  const motion = { ...(V.motion ?? {}) };
+  if ( voice === "crash" && loud < 0.45 ) motion.in = "slam";
+  if ( role === "pre" ) Object.assign(motion, { in: "crackIn", hold: "shake", out: "shatter" });
+  return { role, text, voice, mood: V.mood, motion, sound: { ...V.sound, loud, ...(extra.long !== undefined ? { long: clamp(extra.long, 0, 1) } : {}) },
     x: at.x, y: at.y, size, t, seed, from: from ?? null, rotation, colors: colors ?? null, lines: lines.length, chars: longest,
     maxWidth: extra.maxWidth ?? null, hold: voice === "roar" || voice === "rumble" ? 1500 : undefined };
 }

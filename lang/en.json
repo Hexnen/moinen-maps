@@ -2573,5 +2573,11 @@
   "MOINENMAPS.Sfx.wordsHint": "The words the lettering uses: the game's language, the comic-book words of English comics (KRAK, BOOM), or Polish ones (TRZASK, BUM).",
   "MOINENMAPS.Sfx.wordsAuto": "Game language",
   "MOINENMAPS.Sfx.wordsEn": "English",
-  "MOINENMAPS.Sfx.wordsPl": "Polish"
+  "MOINENMAPS.Sfx.wordsPl": "Polish",
+  "MOINENMAPS.Sfx.layer": "Sound-effect layer",
+  "MOINENMAPS.Sfx.layerHint": "Where the sound-effect words are drawn. On top: over everything, the night and the rain too. Under the weather: over tokens and the flames, under clouds and rain, darkened at night. Under tokens: over the damage and the burning ground, under tokens. Under the fire: over the damage, under the flames and smoke.",
+  "MOINENMAPS.Sfx.layerTop": "On top of everything",
+  "MOINENMAPS.Sfx.layerWeather": "Under the weather",
+  "MOINENMAPS.Sfx.layerTokens": "Under tokens",
+  "MOINENMAPS.Sfx.layerFire": "Under the fire"
 }
