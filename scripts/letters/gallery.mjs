@@ -12,6 +12,7 @@ export const WORDS = [
 ];
 
 export function gallery(L, o = {}) {
+  if ( o.part === "layers" ) return layersDemo(L, o);
   const hasCanvas = !!globalThis.canvas?.ready;
   const space = o.space ?? (hasCanvas ? "both" : "screen");
   const waves = o.waves ?? 3, gap = o.gap ?? 220, perWave = o.perWave ?? 12;
@@ -39,6 +40,46 @@ export function gallery(L, o = {}) {
       timers.push(setTimeout(() => { const h = L.play(text, opts); handles.push(h); done.push(h.finished); }, w * 3600 + i * gap));
     }
   }
+  /* a power's sound bound to its effect: a burst of gunfire travelling from a moving muzzle toward a target (stream) */
+  const streams = [];
+  if ( o.streams !== false ) timers.push(setTimeout(() => {
+    const t0 = performance.now();
+    if ( space !== "screen" && hasCanvas ) {
+      const s = canvas.stage.scale.x, c = canvas.stage.pivot, vw = innerWidth / s, vh = innerHeight / s;
+      const muzzle = () => { const u = Math.min(1, (performance.now() - t0) / 2400); return { x: c.x - vw * 0.42 + vw * 0.3 * u, y: c.y + vh * 0.36 }; };
+      streams.push(L.stream({ text: "RA-TA-TA-TA", space: "world", pixel: true, at: muzzle, to: { x: c.x + vw * 0.3, y: c.y - vh * 0.05 }, every: 95, duration: 2400, size: (canvas.grid?.size ?? 100) * 0.42, mood: "impact", seed: o.seed != null ? `${o.seed}:gun` : undefined }));
+    }
+    if ( space !== "world" ) {
+      const W = innerWidth - (document.getElementById("sidebar")?.getBoundingClientRect().width ?? 0);
+      const muzzle = () => { const u = Math.min(1, (performance.now() - t0) / 2400); return { x: W * (0.08 + 0.3 * u), y: innerHeight * 0.88 }; };
+      streams.push(L.stream({ text: "BRATATATAT", space: "screen", at: muzzle, dir: -35, every: 105, duration: 2400, size: 30, mood: "impact", seed: o.seed != null ? `${o.seed}:gun2` : undefined }));
+    }
+  }, (o.streamAt ?? 3600)));
   const all = new Promise((res) => timers.push(setTimeout(() => Promise.all(done).then(res), waves * 3600 + perWave * gap + 50)));
-  return { handles, done: all, cancel() { timers.forEach(clearTimeout); for ( const h of handles ) h.stop({ quick: true }); } };
+  return { handles, streams, done: all, cancel() { timers.forEach(clearTimeout); for ( const h of handles ) h.stop({ quick: true }); for ( const s of streams ) s.stop({ quick: true }); } };
+}
+
+/* the same word on every display layer: world copies sit on tokens (and the map's smoke and weather, if any), screen copies straddle
+   the sidebar and the hotbar so the stacking shows. Each copy carries a small label with its layer id. */
+export function layersDemo(L, o = {}) {
+  const handles = [];
+  const word = o.word ?? "ŁUP!";
+  const world = Object.entries(L.layers).filter(([, v]) => v.space === "world").map(([k]) => k);
+  const screen = Object.entries(L.layers).filter(([, v]) => v.space === "screen").map(([k]) => k);
+  if ( globalThis.canvas?.ready ) {
+    const toks = canvas.tokens.placeables.filter((t) => t.visible).slice(0, world.length);
+    world.forEach((layer, i) => {
+      const t = toks[i];
+      const at = t ? { x: t.center.x, y: t.center.y } : { x: canvas.stage.pivot.x + (i - 2) * canvas.grid.size * 2, y: canvas.stage.pivot.y };
+      handles.push(L.play(word, { mood: "impact", space: "world", layer, at, size: canvas.grid.size * 0.7, seed: `${o.seed ?? "layers"}:w`, hold: o.hold ?? 3000, in: "pop", out: "pop" }));
+      handles.push(L.play(layer, { mood: "tick", space: "world", layer: "overlay", at: { x: at.x, y: at.y + canvas.grid.size * 0.75 }, size: canvas.grid.size * 0.22, seed: `lbl${i}`, hold: o.hold ?? 3000 }));
+    });
+  }
+  const sb = document.getElementById("sidebar")?.getBoundingClientRect(), hb = document.getElementById("hotbar")?.getBoundingClientRect();
+  screen.forEach((layer, i) => {
+    const at = i === 0 && hb ? { x: hb.left + hb.width * 0.3, y: hb.top + hb.height * 0.5 } : sb ? { x: sb.left, y: innerHeight * (0.3 + 0.2 * i) } : { x: innerWidth * (0.3 + 0.2 * i), y: innerHeight * 0.5 };
+    handles.push(L.play(word, { mood: "impact", space: "screen", layer, at, size: 60, seed: `${o.seed ?? "layers"}:s`, hold: o.hold ?? 3000, in: "pop", out: "pop" }));
+    handles.push(L.play(layer, { mood: "tick", space: "screen", layer: "screen", at: { x: at.x, y: at.y + 52 }, size: 16, seed: `lbs${i}`, hold: o.hold ?? 3000 }));
+  });
+  return { handles, done: Promise.all(handles.map((h) => h.finished)), cancel() { for ( const h of handles ) h.stop({ quick: true }); } };
 }

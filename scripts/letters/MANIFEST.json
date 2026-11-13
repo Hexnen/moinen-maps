@@ -1,8 +1,11 @@
 {
  "note": "LETR engine: identical in moinen-maps (canonical) and invincible-plus-ultra (vendored). Edit the canonical copy, then run sync.mjs.",
  "files": {
-  "design.mjs": "c3efa93ed6623ed3",
-  "engine.mjs": "062bbb9c92a1caa6",
+  "ATTRIBUTION.md": "9d41c8ce68b45df9",
+  "README.md": "d29898eec8123c71",
+  "check.mjs": "140027f2746b9a53",
+  "design.mjs": "ae8d696f467649f5",
+  "engine.mjs": "e224e11894289cee",
   "font.mjs": "4875afb1574b540a",
   "fontbank.mjs": "3af111f7ec77b450",
   "fonts/anton/Anton-Regular.ttf": "a4ba3a92350ebb03",
@@ -23,10 +26,10 @@
   "fonts/sigmar/Sigmar-Regular.ttf": "0597d733ed4722af",
   "fonts/titanone/OFL.txt": "61be7c29f4835e2b",
   "fonts/titanone/TitanOne-Regular.ttf": "563ff6de179bbd44",
-  "gallery.mjs": "d59fb099c672e2e7",
-  "geom.mjs": "008665412f02f9f4",
+  "gallery.mjs": "a27016eaf3894d56",
+  "geom.mjs": "b73225534f7da066",
   "index.mjs": "6c4ed74168f2a224",
-  "paint.mjs": "3e5c55beef969cd8",
+  "paint.mjs": "897adf9e12dc5aab",
   "rng.mjs": "f7587bf06711e496",
   "shape.mjs": "4b87b705f7dc04e8",
   "sync.mjs": "3d63f84a740d6cd9"

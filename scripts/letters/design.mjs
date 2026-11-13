@@ -192,6 +192,8 @@ export function chooseHand(mood, sound, R, avoid) {
     depthAng: R.pick([Math.PI * 0.3, Math.PI * 0.25, Math.PI * 0.7, Math.PI * 0.6, Math.PI * 0.35]) + (sound.pitch > 0.5 ? -Math.PI * 0.5 : 0) * (R.chance(0.4) ? 1 : 0),
     shadow: R.chance(0.85) ? { d: R.f(0.07, 0.16), ang: R.f(0.2, 0.45) * Math.PI, a: R.f(0.3, 0.5) } : null,
     gloss: R.chance(fill === "flat" ? 0.7 : 0.35),
+    shadowStyle: R.w({ flat: 3, dots: 2 }),
+    hatch: depthOn && R.chance(0.3),
     bevel: R.chance(0.35),
     shear: (F.slant + R.f(-0.06, 0.16)) * (mood === "whoosh" ? 2.2 : 1),
     track: F.track + R.f(-0.05, 0.02) - 0.04 * sound.loud,
@@ -288,9 +290,14 @@ export function envelope(E) {
 const L0 = () => ({ v: 1, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 });
 function pic(n, ticks, g = {}, per = null) {
   const letters = []; for ( let i = 0; i < n; i++ ) letters.push({ ...L0(), ...(per ? per(i) : {}) });
-  return { ticks, g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1, ...g }, letters, boil: 0, fx: [], dissolve: 0 };
+  return { ticks, g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1, ...g }, letters, boil: 0, fx: [], dissolve: 0, misreg: 0, smear: null, impact: false };
 }
 
+/* Techniques (README "Motion"): stepped timing on twos (12 drawings/s) with ones only for smears and flash frames and threes for
+   weight; held key poses; anticipation before a big move; squash and stretch; smear frames with multiples; an impact (flash) frame on
+   contact; overlapping action / follow-through letter by letter; misregistered colour separations; line boil on every drawing;
+   primary (the word) / secondary (lines, sparks) / consequence (debris, dust, puffs, embers) layers. The mood and the sound pick which
+   techniques a word gets and how they are combined; the hand's randomness varies them. */
 export function buildTimeline(n, mood, sound, hand, R, o = {}) {
   const M = MOODS[mood];
   const reduced = !!o.reduced;
@@ -299,129 +306,164 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
   const ent = [], hold = [], exit = [];
   const seeds = () => R.seed();
   const stag = (k) => Math.max(1, Math.ceil(n / k));
-  /* entrances */
-  if ( reduced ) ent.push(pic(n, T(3), { s: 0.92 }));
+  const dir = o.dir ?? 1;
+  /* which techniques this word gets */
+  const tech = {
+    flash: !reduced && sound.sharp > 0.55 && sound.loud > 0.6 && R.chance(0.35 + 0.5 * sound.loud),   // impact frame on contact
+    smear: !reduced && R.chance(0.55 + 0.4 * (1 - sound.long)),                                        // smear frames on fast moves
+    antic: !reduced && R.chance(0.45 + 0.4 * sound.loud),                                              // anticipation before a big move
+    follow: !reduced && n > 2 && R.chance(0.4 + 0.5 * sound.long),                                     // letters settle one after another
+    misreg: R.chance(mood === "zap" ? 0.9 : 0.22) ? R.f(0.02, 0.045) : 0,                              // colour separations off register
+    heavy: (sound.loud > 0.8 && sound.sharp < 0.7) || mood === "crash" || mood === "fail"             // threes, longer holds
+  };
+  const beat = tech.heavy ? 3 : 2;
+  const P = (ticks, g = {}, per = null) => { const p = pic(n, T(ticks), g, per); p.misreg = tech.misreg; return p; };
+  const flashFrame = (g = {}) => { const p = P(1, g); p.impact = true; p.misreg = 0; return p; };
+  const settle = (k) => (i) => (tech.follow ? { x: -dir * 0.06 * Math.max(0, 1 - k) * (1 - i / n), y: 0.04 * Math.sin(i * 1.7) * Math.max(0, 1 - k), r: 0.05 * Math.max(0, 1 - k) * ((i % 2) ? 1 : -1) } : {});
+
+  /* ---------- entrances ---------- */
+  if ( reduced ) ent.push(P(3, { s: 0.94 }));
   else switch ( ein ) {
-    case "slam":
-      ent.push(pic(n, T(2), { s: 1.55, sx: 1.05 }, () => ({})));
-      ent.push(pic(n, T(2), { s: 0.88, x: 0.05 }));
-      ent.push(pic(n, T(2), { s: 1.06, x: -0.04 }));
-      ent[0].fx.push({ k: "speed", a: 0.6, seed: seeds() });
-      ent[1].fx.push({ k: "burst", a: 1, seed: seeds() });
-      ent[2].fx.push({ k: "burst", a: 0.6, seed: seeds() });
+    case "slam": {
+      if ( tech.antic ) ent.push(P(beat, { s: 0.3, sx: 0.8, sy: 1.25 }));                      // a coiled small pose: the blow winds up
+      if ( tech.flash ) ent.push(flashFrame({ s: 1.12 }));
+      const sm = P(1, { s: 1.6, sx: 1.08 });
+      if ( tech.smear ) sm.smear = { dx: 0, dy: 0, zoom: 0.35, n: 3 };
+      sm.fx.push({ k: "speed", a: 0.6, radial: true, seed: seeds() });
+      ent.push(sm);
+      ent.push(P(2, { s: 0.86, sx: 1.14, sy: 0.84 }, settle(0)));                               // squash on contact
+      ent[ent.length - 1].fx.push({ k: "burst", a: 1, seed: seeds() });
+      ent.push(P(2, { s: 1.05, sx: 0.95, sy: 1.07 }, settle(0.5)));                             // stretch back
+      ent.push(P(beat + 2, {}, settle(1)));                                                      // held key pose
       break;
-    case "pop":
-      ent.push(pic(n, T(2), { s: 0.4, r: R.f(-0.15, 0.15) }));
-      ent.push(pic(n, T(2), { s: 1.18 }));
-      ent.push(pic(n, T(2), { s: 0.95 }));
+    }
+    case "pop": {
+      ent.push(P(2, { s: 0.38, r: R.f(-0.15, 0.15) }));
+      ent.push(P(1, { s: 1.2, sx: 0.9, sy: 1.14 }));
+      if ( tech.flash ) ent.push(flashFrame({ s: 1.1 }));
+      ent.push(P(2, { s: 0.95, sx: 1.08, sy: 0.92 }, settle(0.3)));
+      ent.push(P(2, { s: 1.02 }, settle(0.8)));
       if ( M.fx?.burst || M.fx?.sparks ) ent[1].fx.push({ k: M.fx.sparks ? "sparks" : "burst", a: 0.7, seed: seeds() });
+      if ( M.fx?.droplets ) ent[ent.length - 1].fx.push({ k: "droplets", a: 1, seed: seeds() });
       break;
+    }
     case "crackIn": {
       const off = []; for ( let i = 0; i < n; i++ ) off.push({ x: R.f(-0.35, 0.35), y: R.f(-0.3, 0.3), r: R.f(-0.4, 0.4) });
-      ent.push(pic(n, T(2), { s: 1.12 }, (i) => ({ x: off[i].x, y: off[i].y, r: off[i].r })));
-      ent.push(pic(n, T(2), { s: 1.04 }, (i) => ({ x: off[i].x * 0.3, y: off[i].y * 0.3, r: off[i].r * 0.3 })));
-      ent[1].fx.push({ k: "burst", a: 0.8, seed: seeds() });
+      ent.push(P(beat, { s: 1.12 }, (i) => ({ x: off[i].x, y: off[i].y, r: off[i].r })));        // held: the pieces hang apart
+      ent.push(P(1, { s: 1.08 }, (i) => ({ x: off[i].x * 0.35, y: off[i].y * 0.35, r: off[i].r * 0.3 })));
+      if ( tech.flash || R.chance(0.6) ) ent.push(flashFrame({ s: 1.04 }));
+      ent.push(P(2, { s: 1.02, x: 0.03 }, settle(0.4)));
+      ent[ent.length - 1].fx.push({ k: "burst", a: 0.8, seed: seeds() });
       break;
     }
     case "drop": {
-      const k = stag(4), steps = Math.ceil(n / k) + 3;
-      for ( let s = 0; s < steps; s++ ) ent.push(pic(n, T(2), {}, (i) => {
+      const k = stag(4), steps = Math.ceil(n / k) + 4;
+      for ( let s = 0; s < steps; s++ ) ent.push(P(2, {}, (i) => {
         const t = s - Math.floor(i / k);
         if ( t < 0 ) return { v: 0 };
-        return [{ y: -2.4, sy: 1.15, sx: 0.9 }, { y: -0.9, sy: 1.1, sx: 0.92 }, { y: 0.06, sy: 0.78, sx: 1.18 }, { y: -0.12, sy: 1.04 }][Math.min(3, t)] ?? {};
+        return [{ y: -2.4, sy: 1.25, sx: 0.85 }, { y: -0.9, sy: 1.15, sx: 0.9 }, { y: 0.07, sy: 0.74, sx: 1.22 }, { y: -0.14, sy: 1.06, sx: 0.97 }, { y: 0.02, sy: 0.97 }][Math.min(4, t)] ?? {};
       }));
-      ent[ent.length - 2].fx.push({ k: "dust", a: 0.8, seed: seeds() });
+      ent[Math.min(ent.length - 1, 2)].fx.push({ k: "dust", a: 0.8, seed: seeds() });
+      ent.push(P(beat + 1));
       break;
     }
     case "rise": {
-      const k = stag(5), steps = Math.ceil(n / k) + 2;
-      for ( let s = 0; s < steps; s++ ) ent.push(pic(n, T(2), {}, (i) => {
+      const k = stag(5), steps = Math.ceil(n / k) + 3;
+      for ( let s = 0; s < steps; s++ ) ent.push(P(2, {}, (i) => {
         const t = s - Math.floor(i / k);
         if ( t < 0 ) return { v: 0 };
-        return [{ y: 1.1, s: 0.6 }, { y: 0.35, s: 0.9 }, { y: -0.08, s: 1.05 }][Math.min(2, t)] ?? {};
+        return [{ y: 1.1, s: 0.55, sy: 1.3, sx: 0.8 }, { y: 0.3, s: 0.92, sy: 1.12, sx: 0.92 }, { y: -0.1, s: 1.04, sy: 0.96 }, { y: 0.02 }][Math.min(3, t)] ?? {};
       }));
       break;
     }
     case "grow": {
-      const k = stag(5), steps = Math.ceil(n / k) + 2;
-      for ( let s = 0; s < steps; s++ ) ent.push(pic(n, T(2), { x: R.f(-0.04, 0.04), y: R.f(-0.04, 0.04) }, (i) => {
+      const k = stag(5), steps = Math.ceil(n / k) + 3;
+      for ( let s = 0; s < steps; s++ ) ent.push(P(2, { x: R.f(-0.04, 0.04), y: R.f(-0.04, 0.04) }, (i) => {
         const t = s - Math.floor(i / k);
         if ( t < 0 ) return { v: 0 };
-        return [{ s: 0.45 }, { s: 1.2 }, { s: 1 }][Math.min(2, t)];
+        return [{ s: 0.4, sy: 0.8 }, { s: 1.25, sy: 1.1 }, { s: 0.95 }, { s: 1 }][Math.min(3, t)];
       }));
+      if ( tech.flash ) ent.splice(Math.min(ent.length - 1, 3), 0, flashFrame());
       break;
     }
     case "zip": {
-      const dir = o.dir ?? 1;
-      ent.push(pic(n, T(2), { x: -2.6 * dir, sx: 1.7, sy: 0.82 }));
-      ent.push(pic(n, T(2), { x: 0.35 * dir, sx: 1.25, sy: 0.92 }));
-      ent.push(pic(n, T(2), { x: -0.08 * dir, sx: 0.94 }));
-      ent[0].fx.push({ k: "speed", a: 1, dir, seed: seeds() });
-      ent[1].fx.push({ k: "speed", a: 0.7, dir, seed: seeds() });
+      if ( tech.antic ) ent.push(P(2, { x: -3 * dir, sx: 0.7, sy: 1.1, s: 0.8 }));                // off to the side, gathered
+      const a = P(1, { x: -1.6 * dir, sx: 1.9, sy: 0.78 }); a.smear = { dx: -dir * 1.2, dy: 0, n: 4 }; a.fx.push({ k: "speed", a: 1, dir, seed: seeds() });
+      const b = P(1, { x: 0.32 * dir, sx: 1.3, sy: 0.9 }, (i) => ({ x: -dir * 0.15 * (1 - i / n) })); b.smear = tech.smear ? { dx: -dir * 0.6, dy: 0, n: 3 } : null; b.fx.push({ k: "speed", a: 0.7, dir, seed: seeds() });
+      ent.push(a, b);
+      ent.push(P(2, { x: -0.08 * dir, sx: 0.92, sy: 1.04 }, (i) => ({ x: dir * 0.1 * (i / n) })));   // the tail catches up: follow-through
+      ent.push(P(2, {}, settle(0.5)));
       break;
     }
-    default: ent.push(pic(n, T(2), { s: 0.9 }));
+    default: ent.push(P(2, { s: 0.9 }));
   }
-  /* hold: 3 or 4 redrawn pictures on threes, cycled */
+
+  /* ---------- hold: redrawn pictures cycled (line boil), with the hold's own motion ---------- */
   const holdN = ehold === "flicker" || ehold === "buzz" ? 4 : 3;
   for ( let i = 0; i < holdN; i++ ) {
-    const p = pic(n, T(ehold === "buzz" ? 2 : 3));
+    const p = P(ehold === "buzz" ? 2 : beat + 1);
     p.boil = seeds();
     if ( !reduced ) switch ( ehold ) {
       case "shake": p.g.x = R.f(-0.05, 0.05) * (1 + sound.loud); p.g.y = R.f(-0.04, 0.04) * (1 + sound.loud); break;
-      case "throb": p.g.s = [1, 1.045, 0.99, 1.02][i]; break;
+      case "throb": p.g.s = [1, 1.045, 0.99, 1.02][i]; p.g.sy = [1, 1.03, 0.99, 1][i]; break;
       case "rattle": p.letters.forEach((l) => { l.x = R.f(-0.03, 0.03); l.y = R.f(-0.04, 0.04); l.r = R.f(-0.05, 0.05); }); break;
       case "wobble": p.letters.forEach((l, j) => { l.r = 0.06 * Math.sin(i * 2.1 + j); l.y = 0.03 * Math.cos(i * 2.1 + j); }); break;
-      case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.fx.push({ k: "sparks", a: 0.6, seed: seeds() }); break;
+      case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.misreg = [0.05, 0, 0.03, 0][i]; p.fx.push({ k: i % 2 ? "krackle" : "sparks", a: 0.7, seed: seeds() }); break;
       case "flicker": p.reseed = true; p.g.y = -0.02 * i; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.7, seed: seeds() }); break;
       default: break;
     }
-    if ( ehold !== "buzz" && ehold !== "flicker" && M.fx?.speed && i === 0 ) p.fx.push({ k: "speed", a: 0.35, dir: o.dir ?? 1, seed: seeds() });
+    if ( !reduced && M.fx?.rays && i % 2 === 0 ) p.fx.push({ k: "krackle", a: 0.6, seed: seeds() });
+    if ( ehold !== "buzz" && ehold !== "flicker" && M.fx?.speed && i === 0 ) p.fx.push({ k: "speed", a: 0.35, dir, seed: seeds() });
     hold.push(p);
   }
-  /* exits */
+
+  /* ---------- exits ---------- */
   const fly = []; for ( let i = 0; i < n; i++ ) { const u = n > 1 ? i / (n - 1) - 0.5 : R.f(-0.5, 0.5); fly.push({ x: u * R.f(1.2, 2.2) + R.f(-0.3, 0.3), y: R.f(-1, 0.4), r: R.f(-1, 1) }); }
-  if ( reduced ) exit.push(pic(n, T(3), {}, () => ({})), pic(n, T(2))), exit[0].dissolve = 0.5, exit[1].dissolve = 0.85;
+  if ( reduced ) { exit.push(P(3), P(2)); exit[0].dissolve = 0.5; exit[1].dissolve = 0.85; }
   else switch ( eout ) {
     case "shatter":
-      [0.25, 0.6, 1].forEach((t, j) => { const p = pic(n, T(2), {}, (i) => ({ x: fly[i].x * t, y: fly[i].y * t + 0.5 * t * t, r: fly[i].r * t, s: 1 - 0.35 * t })); p.dissolve = [0, 0.3, 0.7][j]; p.fx.push({ k: "debris", a: 1 - 0.3 * j, t, seed: seeds() }); exit.push(p); });
+      if ( tech.antic ) exit.push(P(2, { s: 1.04 }));                                                  // a held beat, swelling, before it breaks
+      if ( tech.flash && R.chance(0.5) ) exit.push(flashFrame({ s: 1.05 }));
+      [0.25, 0.6, 1].forEach((t, j) => { const p = P(2, {}, (i) => ({ x: fly[i].x * t, y: fly[i].y * t + 0.5 * t * t, r: fly[i].r * t, s: 1 - 0.35 * t, sx: 1 + 0.2 * t })); p.dissolve = [0, 0.3, 0.7][j]; p.fx.push({ k: "debris", a: 1 - 0.3 * j, t, seed: seeds() }); exit.push(p); });
       break;
     case "pop":
-      exit.push(pic(n, T(2), { s: 1.1 }), pic(n, T(2), { s: 1.18 }));
-      exit[1].dissolve = 0.6; exit[1].fx.push({ k: "burst", a: 0.9, seed: seeds() });
+      exit.push(P(2, { s: 0.9, sx: 1.06, sy: 0.9 }), P(1, { s: 1.18, sy: 1.08 }));                   // anticipation squash, then out
+      exit[1].dissolve = 0.55; exit[1].fx.push({ k: "burst", a: 0.9, seed: seeds() });
+      exit.push(P(2, { s: 1.24 })); exit[2].dissolve = 0.85; exit[2].fx.push({ k: "puff", a: 0.6, t: 0.6, seed: seeds() });
       break;
     case "burst":
-      exit.push(pic(n, T(2), { s: 1.1 }), pic(n, T(2), { s: 1.28 }), pic(n, T(2), { s: 1.35 }));
+      exit.push(P(2, { s: 0.94, sy: 0.92 }), P(2, { s: 1.28 }), P(2, { s: 1.38 }));
       exit[1].fx.push({ k: "puff", a: 0.9, t: 0.4, seed: seeds() }); exit[2].fx.push({ k: "puff", a: 0.6, t: 0.8, seed: seeds() });
       exit[1].dissolve = 0.35; exit[2].dissolve = 0.8;
       break;
     case "fall": {
+      exit.push(P(2, {}, () => ({ y: -0.08, sy: 1.04 })));                                              // a small lift before the drop
       const k = stag(4), steps = Math.ceil(n / k) + 3;
-      for ( let s = 0; s < steps; s++ ) { const p = pic(n, T(2), {}, (i) => { const t = s - Math.floor(i / k); if ( t < 0 ) return {}; return { y: 0.25 * t * t + 0.1 * t, r: fly[i].r * 0.25 * t, x: fly[i].x * 0.08 * t }; }); p.dissolve = Math.max(0, (s - steps + 2) * 0.4); exit.push(p); }
+      for ( let s = 0; s < steps; s++ ) { const p = P(2, {}, (i) => { const t = s - Math.floor(i / k); if ( t < 0 ) return {}; return { y: 0.25 * t * t + 0.1 * t, r: fly[i].r * 0.25 * t, x: fly[i].x * 0.08 * t, sy: 1 + 0.06 * t, sx: 1 - 0.03 * t }; }); p.dissolve = Math.max(0, (s - steps + 2) * 0.4); exit.push(p); }
       break;
     }
     case "droop":
-      exit.push(pic(n, T(3), { r: 0.04 }, (i) => ({ y: 0.06 * i / n, r: 0.08 }))); exit.push(pic(n, T(3), { r: 0.08, y: 0.25 }, (i) => ({ y: 0.25 * i / n, r: 0.18 })));
-      exit.push(pic(n, T(2), { r: 0.1, y: 0.8 }, () => ({ r: 0.25 }))); exit[2].dissolve = 0.6;
+      exit.push(P(3, { r: 0.04 }, (i) => ({ y: 0.06 * i / n, r: 0.08, sy: 0.96 }))); exit.push(P(3, { r: 0.08, y: 0.25 }, (i) => ({ y: 0.25 * i / n, r: 0.18, sy: 0.9 })));
+      exit.push(P(2, { r: 0.1, y: 0.8, sy: 1.15 }, () => ({ r: 0.25 }))); exit[2].dissolve = 0.6;
       break;
     case "rise":
-      [0.3, 0.7, 1.15].forEach((t, j) => { const p = pic(n, T(2), { y: -0.45 * t, sy: 1 + 0.08 * t }, (i) => ({ y: -0.15 * t * Math.sin(i * 1.7), x: 0.04 * Math.sin(i + t * 3) })); p.dissolve = [0.2, 0.5, 0.8][j]; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.6, seed: seeds() }); exit.push(p); });
+      [0.3, 0.7, 1.15].forEach((t, j) => { const p = P(2, { y: -0.45 * t, sy: 1 + 0.08 * t }, (i) => ({ y: -0.15 * t * Math.sin(i * 1.7), x: 0.04 * Math.sin(i + t * 3) })); p.dissolve = [0.2, 0.5, 0.8][j]; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.6, seed: seeds() }); exit.push(p); });
       break;
     case "shrink":
-      [0.75, 0.5, 0.3].forEach((s, j) => { const p = pic(n, T(2), { s, y: -0.15 * (j + 1) }); p.dissolve = j === 2 ? 0.5 : 0; exit.push(p); });
+      [0.75, 0.5, 0.3].forEach((s, j) => { const p = P(2, { s, y: -0.15 * (j + 1) }); p.dissolve = j === 2 ? 0.5 : 0; exit.push(p); });
       break;
     case "zipout": {
-      const dir = o.dir ?? 1;
-      exit.push(pic(n, T(2), { x: -0.15 * dir, sx: 0.92 }), pic(n, T(2), { x: 1.2 * dir, sx: 1.5, sy: 0.85 }), pic(n, T(2), { x: 3.4 * dir, sx: 1.9, sy: 0.75 }));
-      exit[1].fx.push({ k: "speed", a: 1, dir: -dir, seed: seeds() }); exit[2].fx.push({ k: "speed", a: 0.7, dir: -dir, seed: seeds() }); exit[2].dissolve = 0.55;
+      exit.push(P(2, { x: -0.18 * dir, sx: 0.9, sy: 1.06 }));                                            // anticipation: pulled back
+      const a = P(1, { x: 1.2 * dir, sx: 1.6, sy: 0.84 }); a.smear = { dx: -dir * 1, dy: 0, n: 3 }; a.fx.push({ k: "speed", a: 1, dir: -dir, seed: seeds() });
+      const b = P(1, { x: 3.4 * dir, sx: 2, sy: 0.72 }); b.smear = { dx: -dir * 1.6, dy: 0, n: 4 }; b.fx.push({ k: "speed", a: 0.7, dir: -dir, seed: seeds() }); b.dissolve = 0.5;
+      exit.push(a, b);
       break;
     }
     default:
-      [0.35, 0.65, 0.9].forEach((d) => { const p = pic(n, T(2)); p.dissolve = d; exit.push(p); });
+      [0.35, 0.65, 0.9].forEach((d) => { const p = P(2); p.dissolve = d; exit.push(p); });
   }
-  /* the hold pictures carry the boil; entrance and exit pictures each get their own (every picture is a new drawing) */
   for ( const p of [...ent, ...exit] ) p.boil = seeds();
-  return { ent, hold, exit, kinds: { in: ein, hold: ehold, out: eout } };
+  return { ent, hold, exit, kinds: { in: ein, hold: ehold, out: eout }, tech };
 }
 
 /* ---------- the whole plan ---------- */
@@ -460,4 +502,15 @@ export function makePlan(text, opts, fonts, memory) {
   const holdMs = Math.max(0, (opts.hold ?? MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long)) / (opts.tempo || 1));
   return { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud,
     sizeK: 0.62 + 0.7 * sound.loud };
+}
+
+/* a stream's syllables: "RA-TA-TA" splits on - and spaces; "RATATATA" splits after each vowel run */
+export function syllablesOf(text) {
+  const t = String(text ?? "").toLocaleUpperCase("pl").trim();
+  if ( /[-\s]/.test(t) ) return t.split(/[-\s]+/).filter(Boolean);
+  const m = t.match(/[^AEIOUYĄĘÓ!?…]*[AEIOUYĄĘÓ]+[!?…]*/g);
+  if ( !m?.length ) return [t];
+  const rest = t.slice(m.join("").length);   // trailing consonants (BZZT) stay on the last syllable
+  if ( rest ) m[m.length - 1] += rest;
+  return m;
 }

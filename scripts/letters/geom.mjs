@@ -20,7 +20,7 @@ export function normals(c) {
     const p = (i - 1 + n) % n, q = (i + 1) % n;
     let tx = c[2 * q] - c[2 * p], ty = c[2 * q + 1] - c[2 * p + 1];
     const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
-    out[2 * i] = -ty * sgn; out[2 * i + 1] = tx * sgn;
+    out[2 * i] = ty * sgn; out[2 * i + 1] = -tx * sgn;
   }
   return out;
 }

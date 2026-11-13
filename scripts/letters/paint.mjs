@@ -40,7 +40,7 @@ function extents(plan, geo, p) {
   let y0 = b.y0 - outer + Math.min(0, dy, dy + sy), y1 = b.y1 + outer + Math.max(0, dy, dy + sy);
   const w = b.x1 - b.x0, h = b.y1 - b.y0;
   for ( const f of p.fx ) {
-    const m = { burst: 0.42, puff: 0.5, debris: 0.9, sparks: 0.45, embers: 0.6, rays: 0.5, droplets: 0.5, dust: 0.45 }[f.k];
+    const m = { krackle: 0.55, burst: 0.42, puff: 0.5, debris: 0.9, sparks: 0.45, embers: 0.6, rays: 0.5, droplets: 0.5, dust: 0.45 }[f.k];
     if ( m ) { x0 = Math.min(x0, b.x0 - m * Math.max(1, h)); x1 = Math.max(x1, b.x1 + m * Math.max(1, h)); y0 = Math.min(y0, b.y0 - m * Math.max(1, h) * (f.k === "embers" ? 1.6 : 1)); y1 = Math.max(y1, b.y1 + m * Math.max(1, h) * (f.k === "embers" ? 0.3 : 1)); }
     if ( f.k === "speed" ) { const L = Math.min(2.4, 0.6 + w * 0.5); if ( (f.dir ?? 1) > 0 ) x0 = Math.min(x0, b.x0 - L); else x1 = Math.max(x1, b.x1 + L); }
   }
@@ -137,7 +137,25 @@ function effect(ctx, plan, f, wb, S, ox, oy, behind) {
       }
       break;
     }
-    case "speed": if ( !behind ) break; {
+    case "krackle": if ( !behind ) break; {
+      /* Kirby krackle: clusters of black blobs in a halo of energy colour (cosmic power) */
+      const n = R.i(8, 13);
+      for ( let k = 0; k < n; k++ ) {
+        const a = R.f(0, 6.2832), d = R.f(0.95, 1.35), x0 = cx + Math.cos(a) * (hw + S * 0.15) * d, y0 = cy + Math.sin(a) * (hh + S * 0.15) * d;
+        const m = R.i(3, 6), r0 = S * R.f(0.05, 0.11);
+        ctx.fillStyle = H.pal.fill[0];
+        for ( let j = 0; j < m; j++ ) { ctx.beginPath(); ctx.arc(x0 + R.f(-1, 1) * r0 * 1.6, y0 + R.f(-1, 1) * r0 * 1.6, r0 * R.f(0.5, 1) * 1.45, 0, 6.2832); ctx.fill(); }
+        ctx.fillStyle = H.ink;
+        for ( let j = 0; j < m; j++ ) { ctx.beginPath(); ctx.arc(x0 + R.f(-1, 1) * r0 * 1.6, y0 + R.f(-1, 1) * r0 * 1.6, r0 * R.f(0.35, 1), 0, 6.2832); ctx.fill(); }
+      }
+      break;
+    }
+    case "speed": if ( !behind ) break; if ( f.radial ) {
+      /* zoom lines out of the word: the word comes at the reader */
+      const n = R.i(22, 34); ctx.strokeStyle = H.ink; ctx.lineCap = "round";
+      for ( let k = 0; k < n; k++ ) { const a = (k / n) * 6.2832 + R.f(-0.08, 0.08), r1 = R.f(0.75, 0.95), r2 = r1 + R.f(0.3, 0.7); ctx.lineWidth = Math.max(1, S * R.f(0.012, 0.035)); ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * hw * r1, cy + Math.sin(a) * hh * r1); ctx.lineTo(cx + Math.cos(a) * hw * r2, cy + Math.sin(a) * hh * r2); ctx.stroke(); }
+      break;
+    } else {
       const dir = f.dir ?? 1, L = Math.min(2.4, 0.6 + (wb.x1 - wb.x0) * 0.5) * S;
       ctx.lineCap = "round";
       for ( let y = oy + wb.y0 * S; y < oy + wb.y1 * S; y += S * R.f(0.07, 0.15) ) {
@@ -215,6 +233,20 @@ function effect(ctx, plan, f, wb, S, ox, oy, behind) {
   ctx.restore();
 }
 
+/* the impact (flash) frame: one tick of a negative, a black star and the word knocked out in white */
+function impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas) {
+  const H = plan.hand, R = rng((p.boil || 7) >>> 0);
+  const cx = ox + (wb.x0 + wb.x1) / 2 * S, cy = oy + (wb.y0 + wb.y1) / 2 * S, hw = (wb.x1 - wb.x0) / 2 * S + S * 0.35, hh = (wb.y1 - wb.y0) / 2 * S + S * 0.35;
+  const n = R.i(14, 22);
+  ctx.beginPath();
+  for ( let k = 0; k < n * 2; k++ ) { const a = (k / (n * 2)) * 6.2832, r = k % 2 ? R.f(0.62, 0.8) : R.f(1.05, 1.32); const x = cx + Math.cos(a) * hw * r, y = cy + Math.sin(a) * hh * r; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.closePath(); ctx.fillStyle = H.ink; ctx.fill();
+  ctx.beginPath(); path(ctx, all, S, ox, oy);
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = (H.inflate + H.inkW * 0.6) * 2 * S; ctx.lineJoin = "round"; ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.fill();
+  return { canvas, ax: ox, ay: oy, S };
+}
+
 /* Paint picture p (an entry of plan.timeline.ent/hold/exit) at S px per cap height. `make(w, h)` returns a fresh canvas.
    Returns { canvas, ax, ay, S }: (ax, ay) = where the word's centre is on the canvas. */
 export function paintPicture(plan, bank, p, S, make) {
@@ -235,6 +267,7 @@ export function paintPicture(plan, bank, p, S, make) {
   ctx.lineCap = "round";
   const outerW = H.inflate + H.inkW + H.out2W;
 
+  if ( p.impact ) return impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas);
   for ( const f of p.fx ) effect(ctx, plan, f, wb, S, ox, oy, true);
 
   const silhouette = (dx, dy, width, style) => {
@@ -251,7 +284,13 @@ export function paintPicture(plan, bank, p, S, make) {
     lc.lineJoin = ctx.lineJoin; lc.miterLimit = 2.2;
     const one = (dx, dy) => { lc.save(); lc.translate(dx * S, dy * S); lc.beginPath(); path(lc, all, S, ox, oy); lc.fillStyle = "#0e081a"; lc.strokeStyle = "#0e081a"; lc.lineWidth = (outerW + 0.02) * 2 * S; lc.fill(); lc.stroke(); lc.restore(); };
     one(sx, sy); if ( H.depth ) one(ddx + sx, ddy + sy);
-    ctx.globalAlpha = H.shadow.a; ctx.drawImage(lay, 0, 0); ctx.restore();
+    if ( H.shadowStyle === "dots" ) {   /* a printed halftone shadow instead of a flat one */
+      const cell = Math.max(3, S * 0.06), r = cell * 0.5;
+      lc.globalCompositeOperation = "destination-in"; lc.beginPath();
+      for ( let y = 0, row = 0; y < lay.height + cell; y += cell * 0.86, row++ ) for ( let x = (row % 2) * cell / 2; x < lay.width + cell; x += cell ) { lc.moveTo(x + r, y); lc.arc(x, y, r, 0, 6.2832); }
+      lc.fill();
+    }
+    ctx.globalAlpha = H.shadowStyle === "dots" ? Math.min(0.85, H.shadow.a + 0.35) : H.shadow.a; ctx.drawImage(lay, 0, 0); ctx.restore();
     void col;
   }
   /* 3D extrusion: inked block behind the letters */
@@ -260,6 +299,34 @@ export function paintPicture(plan, bank, p, S, make) {
     for ( let s = steps; s >= 0; s-- ) silhouette(ddx * s / steps, ddy * s / steps, outerW + 0.03, H.ink);
     const [eh, es, el] = hexToHsl(H.pal.ext);
     for ( let s = steps; s >= 1; s-- ) silhouette(ddx * s / steps, ddy * s / steps, outerW - 0.005, hsl(eh, es, el + 8 * (1 - s / steps)));
+    if ( H.hatch ) {   /* ink hatching on the block's sides (the letters cover the front) */
+      ctx.save(); ctx.beginPath();
+      for ( const k of [1, 0.66, 0.33] ) { ctx.save(); ctx.translate(ddx * k * S, ddy * k * S); path(ctx, all, S, ox, oy); ctx.restore(); }
+      ctx.clip(); ctx.strokeStyle = H.ink; ctx.globalAlpha = 0.55; ctx.lineWidth = Math.max(1, S * 0.012);
+      const gap = Math.max(3, S * 0.05); ctx.beginPath();
+      for ( let x = -canvas.height; x < canvas.width; x += gap ) { ctx.moveTo(x, 0); ctx.lineTo(x + canvas.height, canvas.height); }
+      ctx.stroke(); ctx.restore();
+    }
+  }
+  /* smear frame: multiples of the word trailing its motion (or exploding toward the reader with a zoom smear) */
+  if ( p.smear ) {
+    const sm = p.smear, cxw = (wb.x0 + wb.x1) / 2, cyw = (wb.y0 + wb.y1) / 2;
+    for ( let k = sm.n; k >= 1; k-- ) {
+      const t = k / sm.n, z = 1 + (sm.zoom ?? 0) * t;
+      ctx.save();
+      ctx.translate(ox + (cxw + (sm.dx ?? 0) * t) * S, oy + (cyw + (sm.dy ?? 0) * t) * S); ctx.scale(z, z); ctx.translate(-(ox + cxw * S), -(oy + cyw * S));
+      ctx.beginPath(); path(ctx, all, S, ox, oy);
+      ctx.fillStyle = k % 2 ? H.pal.fill[0] : H.pal.fill[1]; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = outerW * 2 * S;
+      ctx.fill(); ctx.stroke();
+      if ( k === sm.n ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.02); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
+  /* misregistered colour separations: cyan and magenta plates slipped off the key plate */
+  if ( p.misreg > 0 ) {
+    const m = p.misreg;
+    silhouette(m, -m * 0.35, outerW, "#00aeef");
+    silhouette(-m * 0.8, m * 0.45, outerW, "#ec008c");
   }
   /* letters: merged (one silhouette) or stacked (each letter its own sticker, later ones on top) */
   const groups = H.stack === "merge" ? [{ i: -1, cs: all }] : geo;

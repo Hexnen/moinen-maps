@@ -1,11 +1,27 @@
 /* LETR engine: fonts, the picture scheduler, the two players (screen = HTML layer over the interface, world = PIXI on the canvas)
    and the public API (see README.md). Works without Foundry for the screen space (gallery page, node-free browser tests). */
-import { makePlan, MOODS, MOOD_IDS, TICK, FONTS } from "./design.mjs";
+import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf } from "./design.mjs";
 import { FontBank } from "./fontbank.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
+/* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
+   primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
+   drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
+   zones 258, under-smoke 750, fire smoke 800, its weather 990-997. */
+export const LAYERS = {
+  ground:  { space: "world", group: "primary", sortLayer: 259, elevation: 0, pl: "Na ziemi (pod żetonami)", en: "On the ground (under tokens)" },
+  tokens:  { space: "world", group: "primary", sortLayer: 760, elevation: 0, pl: "Nad żetonami (pod dymem i pogodą)", en: "Over tokens (under smoke and weather)" },
+  weather: { space: "world", group: "primary", sortLayer: 1100, elevation: Infinity, pl: "Nad pogodą i dymem (w świetle sceny)", en: "Over weather and smoke (in the scene's light)" },
+  overlay: { space: "world", group: "interface", pl: "Nad całą sceną i oświetleniem", en: "Over the whole scene and its lighting" },
+  top:     { space: "world", group: "stage", pl: "Nad wszystkim na płótnie (też linijki, kursory)", en: "Over everything on the canvas (rulers, cursors too)" },
+  hud:     { space: "screen", z: 5, pl: "Nad mapą, pod paskami i oknami", en: "Over the map, under the bars and windows" },
+  ui:      { space: "screen", z: 80, pl: "Nad paskami (czat, makra), pod oknami", en: "Over the bars (chat, hotbar), under windows" },
+  screen:  { space: "screen", z: 1000, pl: "Nad całym interfejsem", en: "Over the whole interface" }
+};
+const defaults = { world: "overlay", screen: "screen" };
+const warned = new Set();
 const BUDGET_MS = 4;          // pre-render budget per animation frame, shared by every live word
 const MEMORY_MS = 6000;       // a hand used this recently is avoided by unseeded words
 
@@ -18,7 +34,7 @@ export function createEngine(base) {
   let readyP = null;
   const clips = new Set();
   const memory = [];            // [{ id, t }]
-  let raf = 0, layer = null, worldLayer = null, seq = 0;
+  let raf = 0, seq = 0;
   const limits = { screen: 16, world: 48 };
 
   function ready() {
@@ -56,29 +72,48 @@ export function createEngine(base) {
     return { x: innerWidth / 2, y: innerHeight * 0.42 };
   }
 
+  /* ---------- display layers (README "Layers") ---------- */
+  const screenLayers = new Map(), worldLayers = new Map();
+  const layerOf = (h) => {
+    const want = h.opts.layer ?? defaults[h.space];
+    const L = LAYERS[want];
+    if ( L && L.space === h.space ) return want;
+    if ( h.opts.layer && !warned.has(want) ) { warned.add(want); console.warn(`LETR | unknown ${h.space} layer "${want}", using "${defaults[h.space]}"`); }
+    return defaults[h.space];
+  };
   function ensureLayer(h) {
     if ( h.opts.parent instanceof HTMLElement ) return h.opts.parent;
-    if ( !layer?.isConnected ) {
-      layer = document.createElement("div");
-      layer.id = "moinen-letters-layer";
-      layer.setAttribute("aria-hidden", "true");
-      Object.assign(layer.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: "1000", overflow: "hidden", contain: "strict" });
-      document.body.appendChild(layer);
+    const key = layerOf(h);
+    let el = screenLayers.get(key);
+    if ( !el?.isConnected ) {
+      el = document.createElement("div");
+      el.id = `moinen-letters-${key}`;
+      el.className = "moinen-letters-layer";
+      el.setAttribute("aria-hidden", "true");
+      Object.assign(el.style, { position: "fixed", inset: "0", pointerEvents: "none", zIndex: String(LAYERS[key].z), overflow: "hidden", contain: "strict" });
+      document.body.appendChild(el);
+      screenLayers.set(key, el);
     }
-    return layer;
+    return el;
   }
   function ensureWorld(h) {
     if ( h.opts.parent && h.opts.parent.addChild ) return h.opts.parent;
-    if ( !worldLayer || worldLayer.destroyed || !worldLayer.parent ) {
-      worldLayer = new PIXI.Container();
-      worldLayer.name = "moinen-letters";
-      worldLayer.sortableChildren = true;
-      worldLayer.eventMode = "none";
-      worldLayer.zIndex = 900;
-      canvas.interface.addChild(worldLayer);
-      canvas.interface.sortChildren?.();
+    const key = layerOf(h), L = LAYERS[key];
+    const elev = key === "tokens" && isToken(h.at) ? (tokenObj(h.at)?.document?.elevation ?? 0) : L.elevation;
+    const id = `${key}@${elev}`;
+    let c = worldLayers.get(id);
+    if ( !c || c.destroyed || !c.parent ) {
+      c = new PIXI.Container();
+      c.name = `moinen-letters-${id}`;
+      c.sortableChildren = true;
+      c.eventMode = "none";
+      if ( L.group === "primary" ) { Object.assign(c, { elevation: elev, sortLayer: L.sortLayer, sort: 0, _lastSortedIndex: 0 }); canvas.primary.addChild(c); canvas.primary.sortDirty = true; }
+      else if ( L.group === "stage" ) { c.zIndex = 1e6; canvas.stage.addChild(c); }
+      else { c.zIndex = 900; canvas.interface.addChild(c); canvas.interface.sortChildren?.(); }
+      worldLayers.set(id, c);
     }
-    return worldLayer;
+    if ( L.group === "stage" && canvas.stage.children.at(-1) !== c ) canvas.stage.addChild(c);   // stays the last child (drawn last)
+    return c;
   }
 
   /* ---------- pictures ---------- */
@@ -289,12 +324,6 @@ export function createEngine(base) {
   }
 
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
-  function syllablesOf(text) {
-    const t = String(text ?? "").toLocaleUpperCase("pl").trim();
-    if ( /[-\s]/.test(t) ) return t.split(/[-\s]+/).filter(Boolean);
-    const m = t.match(/[^AEIOUYĄĘÓ!?…]*[AEIOUYĄĘÓ]+[!?…]*/g);
-    return m?.length ? m : [t];
-  }
   function stream(o = {}) {
     const space = o.space === "world" ? "world" : "screen";
     const syl = Array.isArray(o.syllables) && o.syllables.length ? o.syllables.map(String) : syllablesOf(o.text ?? "RA-TA-TA");
@@ -325,7 +354,7 @@ export function createEngine(base) {
       const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
       const h = play(word, { mood: o.mood ?? "impact", space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), seed: `${seedBase}:${i}`, hand: hand ?? undefined,
         in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (o.rotation ?? 0) + tilt + (((i * 7) % 5) - 2) * 3,
-        zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors });
+        zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer });
       if ( !hand && h.plan ) hand = h.plan.hand;
       handles.push(h);
       return h;
@@ -375,10 +404,12 @@ export function createEngine(base) {
   function stopAll(o = {}) { for ( const h of [...clips] ) if ( !o.space || h.space === o.space ) h.stop({ quick: o.quick ?? true }); }
   function count(o = {}) { let n = 0; for ( const h of clips ) if ( !o.space || h.space === o.space ) n++; return n; }
 
-  try { globalThis.Hooks?.on?.("canvasTearDown", () => { for ( const h of [...clips] ) if ( h.space === "world" ) h.stop({ quick: true, why: "evicted" }); worldLayer = null; }); } catch {}
+  try { globalThis.Hooks?.on?.("canvasTearDown", () => { for ( const h of [...clips] ) if ( h.space === "world" ) h.stop({ quick: true, why: "evicted" }); worldLayers.clear(); }); } catch {}
+  /* settings helpers: choices for game.settings.register, per space */
+  const layerChoices = (space = "world", lang = globalThis.game?.i18n?.lang) => Object.fromEntries(Object.entries(LAYERS).filter(([, v]) => v.space === space).map(([k, v]) => [k, lang === "pl" ? v.pl : v.en]));
 
   const api = {
-    version: VERSION, base, limits, stats,
+    version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
     ready, play, stream, burst, still, design, stopAll, count,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
