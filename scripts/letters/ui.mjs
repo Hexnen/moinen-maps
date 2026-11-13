@@ -41,7 +41,7 @@ class Designer extends ApplicationV2 {
 
   constructor(state, o = {}) {
     super(o);
-    this.state = state;
+    this.letr = state;
     this.L = state.engine;
     this.f = { text: o.text ?? "KRAK!", style: "", mood: "auto", own: false, sound: { loud: 0.7, sharp: 0.7, long: 0.3, pitch: 0, rough: 0.4, peak: 0.3 },
       font: "", palette: "", in: "", holdKind: "", out: "", tempo: 1, hold: "", space: "world", layer: "", kind: "", magnitude: 0.5, scale: 1,
@@ -70,7 +70,7 @@ class Designer extends ApplicationV2 {
   lookOpts() { const { seed, ...o } = this.opts(); return o; }
 
   async _renderHTML() {
-    ensureStyles(this.state);
+    ensureStyles(this.letr);
     const f = this.f, L = this.L;
     const sel = (name, items, cur, auto) => `<select name="${name}">${auto ? `<option value="">${esc(auto)}</option>` : ""}${items.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     const mn = L.motionNames();
@@ -196,11 +196,11 @@ class Designer extends ApplicationV2 {
     });
     const word = el.querySelector('input[name="text"]');
     word.addEventListener("keydown", (e) => { if ( e.key === "Enter" ) { e.preventDefault(); Designer.#playHere.call(this); } });
-    this.ro?.disconnect(); this.ro = new ResizeObserver(() => this.paint(true)); this.ro.observe(this.$("panel"));
+    this.ro?.disconnect(); this.ro = new ResizeObserver(() => { cancelAnimationFrame(this.rof); this.rof = requestAnimationFrame(() => this.paint(true)); }); this.ro.observe(this.$("panel"));
     this.replan();
     word.focus(); word.select();
   }
-  _onClose() { cancelAnimationFrame(this.raf); this.ro?.disconnect(); this.cache.clear(); }
+  _onClose() { cancelAnimationFrame(this.raf); cancelAnimationFrame(this.rof); this.ro?.disconnect(); this.cache.clear(); }
 
   #read(t) {
     const f = this.f, n = t.name;
@@ -230,7 +230,7 @@ class Designer extends ApplicationV2 {
   /* ---------- plan, pictures, timeline ---------- */
   replan() {
     const { plan } = this.L.planFor(this.f.text || "?", { ...this.opts() });
-    this.plan = plan; this.cache.clear();
+    this.plan = plan; this.cache.clear(); this.fit = null;
     const tl = plan.timeline;
     this.pics = [...tl.ent.map((p) => ({ p, part: "ent" })), ...tl.hold.map((p) => ({ p, part: "hold" })), ...tl.exit.map((p) => ({ p, part: "exit" }))];
     this.cells = this.pics.map((x, i) => ({ i, w: x.p.ticks, part: x.part, flash: !!x.p.impact, smear: !!x.p.smear }));
@@ -263,7 +263,7 @@ class Designer extends ApplicationV2 {
     const ms = Math.round(p.timeline.ent.reduce((a, q) => a + q.ticks * TICK, 0) + Math.max(p.holdMs, p.timeline.hold.reduce((a, q) => a + q.ticks * TICK, 0)));
     this.$("meta").innerHTML = `<span><b>${esc(moodLabel(p.mood))}</b> · ${esc(p.timeline.kinds.in)} → ${esc(p.timeline.kinds.hold)} → ${esc(p.timeline.kinds.out)} · ${esc(T("Designer.Timeline", { ms, n: this.pics.length }))}</span>
       <span><b>${esc(T("Designer.Hand"))}</b> <code>${esc(p.hand.id)}</code></span>${tech.length ? `<span><b>${esc(T("Designer.Tech"))}</b> ${esc(tech.join(", "))}</span>` : ""}`;
-    const red = this.state.prefs.motion === "reduced" || (this.state.prefs.motion !== "full" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const red = this.letr.prefs.motion === "reduced" || (this.letr.prefs.motion !== "full" && matchMedia("(prefers-reduced-motion: reduce)").matches);
     const note = this.$("note"); note.hidden = !red; note.textContent = red ? T("Designer.Reduced") : "";
   }
   picture(i) {
@@ -272,8 +272,14 @@ class Designer extends ApplicationV2 {
     const key = `${W}x${H}`;
     if ( c && c.key === key ) return c;
     const dpr = devicePixelRatio || 1, hb = this.plan._holdBox ?? { w: 3, h: 1 };
-    const cap = Math.min(H * 0.26, (W * 0.74) / Math.max(1, hb.w)) ;
-    const r = this.L._paint(this.plan, this.pics[i].p, cap * this.plan.sizeK * dpr);
+    const cap = Math.min(H * 0.26, (W * 0.74) / Math.max(1, hb.w)) * this.plan.sizeK * dpr;
+    /* the held word (outline, shadow and a big hand's size included) fits the panel with a margin: measured once per panel size */
+    if ( this.fit?.key !== key ) {
+      const h0 = this.pics.findIndex((x) => x.part === "hold");
+      const m = this.L._paint(this.plan, this.pics[Math.max(0, h0)].p, cap).canvas;
+      this.fit = { key, k: Math.min(1, (W * 0.9 * dpr) / Math.max(1, m.width), (H * 0.8 * dpr) / Math.max(1, m.height)) };
+    }
+    const r = this.L._paint(this.plan, this.pics[i].p, cap * this.fit.k);
     c = { ...r, dpr, key };
     c.canvas.style.width = `${c.canvas.width / dpr}px`; c.canvas.style.height = `${c.canvas.height / dpr}px`;
     c.canvas.style.left = `${W / 2 - c.ax / dpr}px`; c.canvas.style.top = `${H / 2 - c.ay / dpr}px`;
@@ -282,7 +288,7 @@ class Designer extends ApplicationV2 {
   }
   paint(resized) {
     if ( !this.pics ) return;
-    if ( resized ) this.cache.clear();
+    if ( resized ) { this.cache.clear(); this.fit = null; }
     const c = this.picture(this.pic);
     this.$("art").replaceChildren(c.canvas);
     const cells = this.$("strip").children;
@@ -336,7 +342,7 @@ class Designer extends ApplicationV2 {
   }
   static #playHere() {
     const where = this.target(); if ( !where ) return;
-    if ( !this.state.prefs.enabled ) ui.notifications.info(T("Settings.Off"));
+    if ( !this.letr.prefs.enabled ) ui.notifications.info(T("Settings.Off"));
     this.L.play(this.f.text || "?", { ...this.opts(), ...where });
   }
   static #showAll() {
@@ -416,9 +422,9 @@ class Settings extends ApplicationV2 {
     form: { handler: Settings.#save, submitOnChange: false, closeOnSubmit: true },
     actions: { reset: Settings.#reset, try: Settings.#try }
   };
-  constructor(state) { super(); this.state = state; this.v = { ...state.prefs }; }
+  constructor(state) { super(); this.letr = state; this.v = { ...state.prefs }; }
   async _renderHTML() {
-    ensureStyles(this.state);
+    ensureStyles(this.letr);
     const v = this.v, f = foundry.applications.fields;
     const group = (k) => {
       const d = SETTINGS[k];
@@ -452,8 +458,8 @@ class Settings extends ApplicationV2 {
   /* a sample with the values in the window (saved first: the sample is what the settings will do) */
   static async #try() {
     await setPrefs(this.values());
-    const L = this.state.engine;
-    if ( !this.state.prefs.enabled ) { ui.notifications.info(T("Settings.Off")); return; }
+    const L = this.letr.engine;
+    if ( !this.letr.prefs.enabled ) { ui.notifications.info(T("Settings.Off")); return; }
     L.burst([{ text: "KRAK!", mood: "crack", at: { x: innerWidth * 0.36, y: innerHeight * 0.4 } }, { text: "BUM!", mood: "boom", at: { x: innerWidth * 0.62, y: innerHeight * 0.46 }, delay: 260 }], { space: "screen" });
   }
 }
@@ -475,17 +481,16 @@ class Now extends ApplicationV2 {
     actions: { designer: Now.#designer }
   };
   constructor(state) {
-    super();
-    this.state = state;
+    /* the box opens next to the mouse (the position goes in through the options: ApplicationV2 copies it at construction) */
+    const m = state.mouse ?? { x: innerWidth / 2, y: innerHeight / 2 };
+    super({ position: { left: Math.max(8, Math.min(innerWidth - 348, m.x + 14)), top: Math.max(8, Math.min(innerHeight - 200, m.y + 14)) } });
+    this.letr = state;
     this.point = cursorPoint();
     this.tokens = (canvas?.tokens?.controlled ?? []).map((t) => t.document);
-    const m = state.mouse ?? { x: innerWidth / 2, y: innerHeight / 2 };
-    this.options.position.left = Math.max(8, Math.min(innerWidth - 348, m.x + 14));
-    this.options.position.top = Math.max(8, Math.min(innerHeight - 200, m.y + 14));
   }
   async _renderHTML() {
-    ensureStyles(this.state);
-    const s = this.state, last = s.nowLast ?? { text: "", mood: "auto", style: "" };
+    ensureStyles(this.letr);
+    const s = this.letr, last = s.nowLast ?? { text: "", mood: "auto", style: "" };
     const styles = s.engine.styles();
     const where = this.tokens.length ? T("Now.Where.picked", { n: this.tokens.length }) : T("Now.Where.cursor");
     const root = document.createElement("div");
@@ -494,7 +499,7 @@ class Now extends ApplicationV2 {
       <input type="text" name="text" class="letr-n-word" value="${esc(last.text)}" placeholder="${esc(T("Designer.WordPh"))}" maxlength="80" autocomplete="off" spellcheck="false" aria-label="${esc(T("Designer.Word"))}" required>
       <div class="letr-n-row">
         <select name="mood" aria-label="${esc(T("Designer.Mood"))}" data-tooltip="${esc(T("Designer.Mood"))}"><option value="auto">${esc(moodLabel("auto"))}</option>${MOOD_IDS.map((m) => `<option value="${m}"${m === last.mood ? " selected" : ""}>${esc(moodLabel(m))}</option>`).join("")}</select>
-        <select name="style" aria-label="${esc(T("Designer.Style"))}" data-tooltip="${esc(T("Designer.Style"))}"><option value="">${esc(T("Designer.StyleNone"))}</option>${styles.map((x) => `<option value="${esc(x.name)}"${x.name === last.style ? " selected" : ""}>${esc(x.label ?? x.name)}</option>`).join("")}</select>
+        <select name="styleName" aria-label="${esc(T("Designer.Style"))}" data-tooltip="${esc(T("Designer.Style"))}"><option value="">${esc(T("Designer.StyleNone"))}</option>${styles.map((x) => `<option value="${esc(x.name)}"${x.name === last.style ? " selected" : ""}>${esc(x.label ?? x.name)}</option>`).join("")}</select>
       </div>
       <div class="letr-n-foot">
         <span class="letr-n-where"><i class="fa-solid ${this.tokens.length ? "fa-users" : "fa-crosshairs"}" aria-hidden="true"></i> ${esc(where)}</span>
@@ -508,16 +513,16 @@ class Now extends ApplicationV2 {
   static #send(e, form, fd) {
     const o = fd.object, text = String(o.text ?? "").trim();
     if ( !text ) return;
-    this.state.nowLast = { text, mood: o.mood, style: o.style };
+    this.letr.nowLast = { text, mood: o.mood, style: o.styleName };
     const opts = {};
-    if ( o.style ) opts.style = o.style;
+    if ( o.styleName ) opts.style = o.styleName;
     if ( o.mood && o.mood !== "auto" ) opts.mood = o.mood;
-    this.state.engine.letterNow(text, { ...opts, tokens: this.tokens, point: this.point ?? undefined });
+    this.letr.engine.letterNow(text, { ...opts, tokens: this.tokens, point: this.point ?? undefined });
   }
   static #designer() {
     const text = this.element.querySelector('input[name="text"]').value.trim();
     this.close();
-    openDesigner(this.state, text ? { text } : {});
+    openDesigner(this.letr, text ? { text } : {});
   }
 }
 export function openNow(state) {
