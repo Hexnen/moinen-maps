@@ -330,7 +330,8 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
     case "slam": {
       if ( tech.antic ) ent.push(P(beat, { s: 0.82, sx: 1.18, sy: 0.78, y: 0.08 }, (i) => ({ r: (i % 2 ? 1 : -1) * 0.04 })));   // a crouch: the blow winds up (still readable)
       if ( tech.flash ) ent.push(flashFrame({ s: 1.12 }));
-      const sm = P(1, { s: 1.6, sx: 1.08 });
+      /* ADVM 7: the smear's overshoot follows the loudness (a quiet satellite word never slams in bigger than the main word) */
+      const sm = P(1, { s: 1.12 + 0.48 * Math.max(0, Math.min(1, Number.isFinite(o.magnitude) ? o.magnitude : (sound.loud ?? 0.5))), sx: 1.08 });
       if ( tech.smear ) sm.smear = { dx: 0, dy: 0, zoom: 0.35, n: 3 };
       sm.fx.push({ k: "speed", a: 0.6, radial: true, seed: seeds() });
       ent.push(sm);
@@ -360,12 +361,13 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       break;
     }
     case "drop": {
-      const k = stag(4), steps = Math.ceil(n / k) + 4;
-      for ( let s = 0; s < steps; s++ ) ent.push(P(2, {}, (i) => {
-        const t = s - Math.floor(i / k);
-        if ( t < 0 ) return { v: 0 };
-        return [{ y: -2.4, sy: 1.25, sx: 0.85 }, { y: -0.9, sy: 1.15, sx: 0.9 }, { y: 0.07, sy: 0.74, sx: 1.22 }, { y: -0.14, sy: 1.06, sx: 0.97 }, { y: 0.02, sy: 0.97 }][Math.min(4, t)] ?? {};
-      }));
+      /* ADVM 7: the word falls as ONE word (every letter visible in every drawing, the same line), the letters only a little behind
+         each other (a ripple of at most 1.2 drawings across the word), from 1.4 em above: no fragments, no stair, no jump */
+      const POSE = [{ y: -1.4, sy: 1.2, sx: 0.88 }, { y: -0.55, sy: 1.12, sx: 0.92 }, { y: 0.07, sy: 0.76, sx: 1.2 }, { y: -0.1, sy: 1.05, sx: 0.97 }, { y: 0.02, sy: 0.98, sx: 1 }, { y: 0, sy: 1, sx: 1 }];
+      const at = (t) => { const c = Math.max(0, Math.min(POSE.length - 1, t)), a = Math.floor(c), b = Math.min(POSE.length - 1, a + 1), f = c - a;
+        return { y: POSE[a].y + (POSE[b].y - POSE[a].y) * f, sy: POSE[a].sy + (POSE[b].sy - POSE[a].sy) * f, sx: POSE[a].sx + (POSE[b].sx - POSE[a].sx) * f }; };
+      const lag = (i) => (n > 1 ? (i / (n - 1)) * 1.2 : 0);
+      for ( let s = 0; s < 6; s++ ) ent.push(P(2, {}, (i) => at(s - lag(i))));
       ent[Math.min(ent.length - 1, 2)].fx.push({ k: "dust", a: 0.8, seed: seeds() });
       ent.push(P(beat + 1));
       break;
@@ -520,7 +522,7 @@ export function makePlan(text, opts, fonts, memory) {
   const lay = stackLines(layoutPlan(chars, widths, mood, sound, hand, R, letterScales(chars.length, groups)), chars, hand);
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
   const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
-  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel };
+  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel, magnitude: opts.magnitude };
   const tl = buildTimeline(chars.length, mood, sound, hand, R, topts);
   const holdMs = Math.max(0, (opts.hold ?? MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long)) / (opts.tempo || 1));
   /* frame rate (move.mjs): ones / twos / threes for this word; motion of a travelling word steps on the same grid */

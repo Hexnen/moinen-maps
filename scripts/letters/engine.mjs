@@ -521,6 +521,12 @@ export function createEngine(base) {
     };
     for ( const p of tl.hold ) take(p, 3);
     for ( const p of tl.ent ) take(p, 1.2);
+    /* ADVM 7: letters that fall in or rise in from above / below (their own offsets, em) are kept inside the view from the first drawing */
+    for ( const p of tl.ent ) for ( const q of p.letters ?? [] ) {
+      if ( q.v === 0 || !Number.isFinite(q.y) ) continue;
+      const gy = p.g?.y ?? 0, y = Math.max(-3, Math.min(3, q.y + gy));
+      u = Math.max(u, hb.h / 2 - y); d = Math.max(d, hb.h / 2 + y);
+    }
     const pad = 0.18;
     return { l: l + pad, r: r + pad, u: u + pad, d: d + pad };
   }
