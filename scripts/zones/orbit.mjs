@@ -18,7 +18,7 @@ import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { paintSpace, enlarge, lastLayout } from "./space.mjs";
 import { startAmbience, stopAmbience } from "./orbit-ambience.mjs";
-import { fightSpot } from "./orbit-dock.mjs";
+import { fightSpot, listSpot } from "./orbit-dock.mjs";
 
 const ART = 6;            // scene pixels per art pixel
 const GRID = 100, COLS = 30, ROWS = 18;
@@ -280,7 +280,7 @@ const inFight = () => { try { const c = game.combats?.viewed ?? game.combat; ret
 const strip = {
   el: null, mo: null, ro: null, bar: null, key: "", fight: false, open: false,
   onResize: () => strip.dock(),
-  onAway: (ev) => { if ( strip.open && strip.el && !strip.el.contains(ev.target) ) { strip.open = false; strip.el.classList.remove("is-open"); } },
+  onAway: (ev) => { if ( strip.open && strip.el && !strip.el.contains(ev.target) ) strip.setOpen(false); },
   remove() {
     this.mo?.disconnect(); this.ro?.disconnect(); this.mo = this.ro = this.bar = null; this.key = ""; this.open = false;
     window.removeEventListener("resize", this.onResize);
@@ -325,9 +325,11 @@ const strip = {
       const head = el.querySelector(".mm-orbit-head")?.getBoundingClientRect();
       const at = fightSpot(this.barBox(bar), { w: head?.width || 48, h: head?.height || 30 }, this.avoidBoxes(), window.innerWidth, window.innerHeight);
       const k = `f|${at.x}|${at.y}`;
-      if ( k === this.key ) return;
-      this.key = k; el.dataset.where = at.where;
-      el.style.top = `${at.y}px`; el.style.left = `${at.x}px`; el.style.maxWidth = "";
+      if ( k !== this.key ) {
+        this.key = k; el.dataset.where = at.where;
+        el.style.top = `${at.y}px`; el.style.left = `${at.x}px`; el.style.maxWidth = "";
+      }
+      this.placeList();
       return;
     }
     let top = 16, cx, w;
@@ -374,8 +376,10 @@ const strip = {
     if ( fight ) {
       // (folded: the globe and the count; the names in the tooltip; the list - portraits and "show the Orbit scene" - opens under it)
       const names = list.map((t) => esc(t.name)).join(", ");
-      html = `<button type="button" class="mm-orbit-head" data-toggle="1" aria-expanded="${this.open}" aria-label="${esc(T("head"))}: ${list.length}" data-tooltip="${esc(T("fightTip", { names }))}"><i class="fa-solid fa-earth-europe" inert></i><b>${list.length}</b></button>
-        <div class="mm-orbit-list">${list.map(chip).join("")}<button type="button" class="mm-orbit-view" data-view="1"><i class="fa-solid fa-arrow-right-to-bracket" inert></i><span>${esc(T("viewScene"))}</span></button></div>`;
+      // fxn2 (U210): no tooltip on the button while its list is open (it covered the list); the portraits' tips go to the left
+      this.headTip = T("fightTip", { names });
+      html = `<button type="button" class="mm-orbit-head" data-toggle="1" aria-expanded="${this.open}" aria-label="${esc(T("head"))}: ${list.length}"${this.open ? "" : ` data-tooltip="${esc(this.headTip)}"`}><i class="fa-solid fa-earth-europe" inert></i><b>${list.length}</b></button>
+        <div class="mm-orbit-list">${list.map(chip).join("").replaceAll('class="mm-orbit-chip', 'data-tooltip-direction="LEFT" class="mm-orbit-chip')}<button type="button" class="mm-orbit-view" data-view="1"><i class="fa-solid fa-arrow-right-to-bracket" inert></i><span>${esc(T("viewScene"))}</span></button></div>`;
     } else {
       html = `<button type="button" class="mm-orbit-head" data-view="1" data-tooltip="${esc(T("headTip"))}"><i class="fa-solid fa-earth-europe" inert></i>
       <span>${esc(T("head"))}</span><b>${list.length}</b></button>${list.map(chip).join("")}`;
@@ -387,11 +391,36 @@ const strip = {
   onClick(ev) {
     const b = ev.target.closest("button"); if ( !b ) return;
     ev.preventDefault();
-    if ( b.dataset.toggle ) { this.open = !this.open; this.el.classList.toggle("is-open", this.open); b.setAttribute("aria-expanded", String(this.open)); return; }
-    if ( this.fight ) { this.open = false; this.el.classList.remove("is-open"); }
+    if ( b.dataset.toggle ) return void this.setOpen(!this.open);
+    if ( this.fight ) this.setOpen(false);
     if ( b.dataset.view ) return void orbitScene()?.view();
     const t = orbitScene()?.tokens.get(b.dataset.id);
     if ( t && game.user.isGM ) bringBack(t, canvas.scene.id);
+  },
+  /** fxn2 (U210): open / close the folded button's list. Open: the button's tooltip goes (it lay over the list) and the list is placed
+   *  clear of the bar and the panels (orbit-dock.mjs listSpot); closed: the tooltip comes back. */
+  setOpen(open) {
+    const el = this.el; if ( !el ) return;
+    this.open = !!open;
+    el.classList.toggle("is-open", this.open);
+    const head = el.querySelector(".mm-orbit-head");
+    if ( head ) {
+      head.setAttribute("aria-expanded", String(this.open));
+      if ( this.open ) { head.removeAttribute("data-tooltip"); try { if ( game.tooltip?.element === head ) game.tooltip.deactivate(); } catch { /* none */ } }
+      else if ( this.fight && this.headTip ) head.dataset.tooltip = this.headTip;
+    }
+    this.placeList();
+  },
+  placeList() {
+    const el = this.el, list = el?.querySelector(".mm-orbit-list");
+    if ( !list || !this.fight || !this.open ) return;
+    const lr = list.getBoundingClientRect(), hr = el.querySelector(".mm-orbit-head")?.getBoundingClientRect(), sr = el.getBoundingClientRect();
+    if ( !hr || !(lr.width > 0) ) return;
+    const at = listSpot({ x0: hr.left, y0: hr.top, x1: hr.right, y1: hr.bottom }, { w: lr.width, h: lr.height }, this.avoidBoxes(), this.barBox(this.bar), window.innerWidth, window.innerHeight);
+    list.dataset.where = at.where;
+    list.style.right = "auto";
+    list.style.left = `${Math.round(at.x - sr.left)}px`;
+    list.style.top = `${Math.round(at.y - sr.top)}px`;
   }
 };
 

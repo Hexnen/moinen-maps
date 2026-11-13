@@ -36,3 +36,34 @@ export function fightSpot(bar, size, avoid = [], W = 1600, H = 900) {
   };
   return cands.find(clear) ?? cands[0];
 }
+
+/**
+ * fxn2 (U210, FF7): where the folded button's list opens (pure; client px, the list's top-left corner). Under the button, its right
+ * edge level with the button's, when that is clear; else the nearest clear spot to that one (touching no avoid box and not the bar):
+ * slid left or right just past what is in the way, lowered under the bar when it would lie on it. FF7: the list lay over the
+ * challenges card at the right end of the bar's row.
+ * listSpot(head, size, avoid, bar, W, H) -> { x, y, where: "under" | "slid" | "fallback" }
+ *   head  the button { x0, y0, x1, y1 };  size  the list { w, h };  avoid  as fightSpot;  bar  the initiative bar box or null
+ */
+export function listSpot(head, size, avoid = [], bar = null, W = 1600, H = 900) {
+  const w = Math.max(1, size?.w || 176), h = Math.max(1, size?.h || 80);
+  const boxes = (Array.isArray(avoid) ? avoid : []).filter(okBox);
+  const blocks = okBox(bar) ? [...boxes, bar] : boxes;
+  const x0 = Math.round(head.x1 - w), y0 = Math.round(head.y1 + GAP / 2 + 2);
+  const xs = [x0, Math.round(head.x0)];
+  for ( const b of blocks ) xs.push(Math.round(b.x0 - GAP - w), Math.round(b.x1 + GAP));
+  const ys = [y0];
+  for ( const b of blocks ) if ( b.y1 + GAP / 2 > y0 ) ys.push(Math.round(b.y1 + GAP / 2));
+  const clear = (x, y) => {
+    const b = { x0: x, y0: y, x1: x + w, y1: y + h };
+    return b.x0 >= 0 && b.y0 >= 0 && b.x1 <= W && b.y1 <= H && !blocks.some((a) => meets(a, b));
+  };
+  let best = null;
+  for ( const y of ys ) for ( const x of xs ) {
+    if ( !clear(x, y) ) continue;
+    const d = Math.abs(x - x0) + 2 * Math.abs(y - y0);   // (going down costs more than sideways: the list stays by the button's row)
+    if ( !best || d < best.d ) best = { x, y, d };
+  }
+  if ( !best ) return { x: x0, y: y0, where: "fallback" };
+  return { x: best.x, y: best.y, where: best.x === x0 && best.y === y0 ? "under" : "slid" };
+}

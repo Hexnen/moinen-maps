@@ -1,7 +1,7 @@
 // fxm2 (U201, FF6): in a fight the GM's orbit strip folds to one button in the initiative bar's row (scripts/zones/orbit-dock.mjs
 // fightSpot), never over the map below the bar, and clear of the sidebar and the panels other modules declared.
 import assert from "node:assert/strict";
-import { fightSpot } from "../scripts/zones/orbit-dock.mjs";
+import { fightSpot, listSpot } from "../scripts/zones/orbit-dock.mjs";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -39,5 +39,21 @@ for ( let i = 0; i < 500; i++ ) {
   const p = fightSpot(b, size, avoid, W, H);
   ok(Number.isFinite(p.x) && Number.isFinite(p.y), "a spot always");
   if ( p.where !== "right" || !avoid.some((a) => meets(a, boxOf(p))) ) ok(p.x >= -size.w && p.y >= 0, "a sane spot");
+}
+// fxn2 (U210, FF7): the list the button opens stays off the challenges card and off the bar, as near the button as it can
+{
+  const lsize = { w: 176, h: 80 };
+  const head = { x0: s.x, y0: s.y, x1: s.x + size.w, y1: s.y + size.h };
+  const L = listSpot(head, lsize, avoid, bar, W, H);
+  const lb = { x0: L.x, y0: L.y, x1: L.x + lsize.w, y1: L.y + lsize.h };
+  ok(!avoid.some((a) => meets(a, lb)), `list clear of the challenges card and the sidebar (${L.x},${L.y} ${L.where})`);
+  ok(!meets(lb, bar), "list not on the bar");
+  ok(lb.y0 >= head.y1 && lb.x1 >= head.x0 - 40 && lb.x0 <= head.x1, "list by the button (under it, near its column)");
+  // nothing in the way: right-aligned under the button
+  const free = listSpot(head, lsize, [], null, W, H);
+  ok(free.where === "under" && free.x === head.x1 - lsize.w && free.y > head.y1 && free.y - head.y1 < 12, `free: right under the button (${free.where})`);
+  // nothing clear anywhere: a spot anyway
+  const jam = listSpot(head, lsize, [{ x0: 0, y0: 0, x1: W, y1: H }], null, W, H);
+  ok(jam.where === "fallback" && Number.isFinite(jam.x), "no room: the plain spot under the button");
 }
 console.log(`orbit-dock: ${n} checks passed`);

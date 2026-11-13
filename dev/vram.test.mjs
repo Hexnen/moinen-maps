@@ -52,6 +52,16 @@ ok(V.layerOfStack(st("    at Canvas.render (http://h/scripts/foundry.mjs:5:5)", 
 ok(V.layerOfStack(st(at("destruction/static-cache.mjs"), "    at Canvas.render (http://h/scripts/foundry.mjs:5:5)")) === "destruction", "our code closer than Foundry -> ours");
 ok(V.layerOfStack(["", "http://h/modules/moinen-maps/scripts/vram.mjs", "http://h/scripts/vendor.mjs", "http://h/modules/moinen-maps/scripts/weather/lens.mjs"].join("\n")) === "weather", "file names only (the cheap trace form) -> weather");
 ok(V.originOfStack(st(at("fire/display.mjs"))).file === "fire/display.mjs", "the file of origin is kept");
+{ // D215: another module's / a system's file is named (layer stays foundry); Foundry's own code has no file
+  const o = V.originOfStack(st("    at bake (http://h/modules/invincible-plus-ultra/scripts/tokenhalo/halo.mjs:63:25)", at("fire/display.mjs")));
+  ok(o.layer === "foundry" && o.file === "invincible-plus-ultra/scripts/tokenhalo/halo.mjs", `another module's file is named (${o.file})`);
+  const sy = V.originOfStack(st("    at y (http://h/systems/invincible/module/x.mjs?v=2:1:1)"));
+  ok(sy.layer === "foundry" && sy.file === "invincible/module/x.mjs", `a system's file is named, without the query (${sy.file})`);
+  const fo = V.originOfStack(st("    at Canvas.draw (http://h/scripts/foundry.mjs:5:5)"));
+  ok(fo.layer === "foundry" && fo.file === "", "Foundry's own code: no file");
+  const fn = V.originOfStack(["", "http://h/modules/moinen-maps/scripts/vram.mjs", "http://h/scripts/vendor.mjs", "http://h/modules/other-mod/scripts/a.mjs"].join("\n"));
+  ok(fn.layer === "foundry" && fn.file === "other-mod/scripts/a.mjs", "file names only: another module named too");
+}
 
 // 3. texel sizes
 ok(V.bytesPerTexel(0x1908, 0x1401) === 4, "RGBA unsigned byte = 4");

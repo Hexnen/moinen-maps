@@ -48,7 +48,11 @@ export function originOfStack(stack) {
   for ( const line of String(stack ?? "").split("\n") ) {
     const i = line.indexOf(ours);
     if ( i < 0 ) {
-      if ( /\/scripts\/foundry\.mjs|\/modules\/[^/]+\/|\/systems\/[^/]+\//.test(line) ) return { layer: "foundry", file: "" };
+      // another module or a system: still "foundry" (not ours), but its file is named, so byFile()/top() point at who holds the memory
+      // (D215: a module's baked token rings held GBs and showed only as "foundry:-")
+      const other = /\/(?:modules|systems)\/([^/\s]+)\/([^\s:?)]+)/.exec(line);
+      if ( other ) return { layer: "foundry", file: `${other[1]}/${other[2]}` };
+      if ( /\/scripts\/foundry\.mjs/.test(line) ) return { layer: "foundry", file: "" };
       continue;
     }
     const p = /^[^\s:?)]+/.exec(line.slice(i + ours.length))?.[0] ?? "";
@@ -140,6 +144,13 @@ export function bytesPerTexel(internalFormat, type) {
   }
 }
 
+/** The bytes a framebuffer holds besides its colour texture: the stencil and the multisample buffers. */
+function fbExtraBytes(fb, uid) {
+  const g = fb.glFramebuffers?.[uid]; if ( !g ) return 0;
+  const px = (fb.width || 0) * (fb.height || 0), s = Math.max(1, g.multisample || 0);
+  return (g.stencil ? px * 4 * (g.msaaBuffer ? s : 1) : 0) + (g.msaaBuffer ? px * 4 * s : 0);
+}
+
 /* ---------------------------------------------------------------- the budget */
 
 let budgetCache = null;
@@ -206,12 +217,7 @@ function finish(st) {
   const t0 = performance.now(), { R, uid, layers } = st;
   if ( pending.length ) drain();
   for ( const fb of R.framebuffer?.managedFramebuffers ?? [] ) {
-    const g = fb.glFramebuffers?.[uid]; if ( !g ) continue;
-    const px = (fb.width || 0) * (fb.height || 0), s = Math.max(1, g.multisample || 0);
-    let b = 0;
-    if ( g.stencil ) b += px * 4 * (g.msaaBuffer ? s : 1);
-    if ( g.msaaBuffer ) b += px * 4 * s;
-    if ( !b ) continue;
+    const b = fbExtraBytes(fb, uid); if ( !b ) continue;
     const bt = fb.colorTextures?.[0];
     (layers[bt ? classify(bt) : "foundry"] ?? layers.foundry).bytes += b;
   }
@@ -322,6 +328,13 @@ export const vramApi = {
       const gt = bt._glTextures?.[uid]; if ( !gt?.width ) continue;
       const k = classify(bt), f = `${k}:${bt._mmF || "-"}`, e = m[f] ??= { mb: 0, n: 0 };
       e.mb += gt.width * gt.height * bytesPerTexel(gt.internalFormat, gt.type) * (gt.mipmap ? 4 / 3 : 1) / MB; e.n++;
+    }
+    // the render targets' extra buffers (multisample, stencil) go to the file that made their colour texture, as in the sample: an 8x
+    // multisampled target holds 8x its texture's bytes besides it, invisible in a texture-only list (D215)
+    for ( const fb of R?.framebuffer?.managedFramebuffers ?? [] ) {
+      const b = fbExtraBytes(fb, uid); if ( !b ) continue;
+      const bt = fb.colorTextures?.[0], k = bt ? classify(bt) : "foundry", f = `${k}:${bt?._mmF || "-"}`, e = m[f] ??= { mb: 0, n: 0 };
+      e.mb += b / MB;
     }
     return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, { mb: Math.round(v.mb), n: v.n }]).sort((a, b) => b[1].mb - a[1].mb));
   },
