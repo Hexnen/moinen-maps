@@ -444,6 +444,7 @@ export function paintPicture(plan, bank, p, S, make) {
       lc.fill();
     }
     ctx.globalAlpha = H.shadowStyle === "dots" ? Math.min(0.85, H.shadow.a + 0.35) : H.shadow.a; ctx.drawImage(lay, 0, 0); ctx.restore();
+    lay.width = 0; lay.height = 0;   // FXLE F2: the shadow layer is used once: its backing store goes now, not at the next GC
     void col;
   }
   /* 3D extrusion: inked block behind the letters */
@@ -522,6 +523,7 @@ export function paintPicture(plan, bank, p, S, make) {
     if ( H.counters && H.counters !== "none" ) {
       ctx.beginPath(); let any = false;
       for ( const l of grp.i < 0 ? geo : [grp] ) {
+        if ( plan.layout.letters[l.i]?.ring ) continue;   // a ring's hole shows the ring it holds
         let big = 0; for ( const c of l.cs ) if ( Math.abs(signedArea(c)) > Math.abs(big) ) big = signedArea(c);
         for ( const c of l.cs ) { const a = signedArea(c); if ( a * big < 0 && Math.abs(a) > 0.004 ) { path(ctx, [c], S, ox, oy); any = true; } }
       }
@@ -529,6 +531,14 @@ export function paintPicture(plan, bank, p, S, make) {
     }
   };
   for ( const grp of groups ) passes(grp);
+  /* LOOK: interlocked rings (design.mjs links a run of round letters): the ring painted under its neighbour is painted again over
+     it in the lower half, so one passes through the other: over at the top crossing, under at the bottom one */
+  if ( H.stack !== "merge" ) for ( const g of geo ) {
+    const j = plan.layout.letters[g.i]?.link; if ( j == null ) continue;
+    const other = geo.find((q) => q.i === j); if ( !other ) continue;
+    const under = H.order === "left" ? g : other, b = bbox(under.cs), mid = (b.y0 + b.y1) / 2;
+    const cy = Math.round(oy + mid * S); ctx.save(); ctx.beginPath(); ctx.rect(0, cy, canvas.width, canvas.height - cy); ctx.clip(); passes(under); ctx.restore();
+  }
 
   for ( const f of p.fx ) effect(ctx, plan, f, wb, S, ox, oy, false);
 

@@ -178,6 +178,7 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   }
   /* crowding lowers the floor (many words at once from far do not bury the scene) */
   ok(sizeLimits({ ...base, alive: 48 }).floor < sizeLimits({ ...base, alive: 3 }).floor && sizeLimits({ ...base, alive: 480 }).floor >= sizeLimits(base).floor * SIZE.crowdMin - 1e-9, "size: crowding lowers the floor, bounded");
+  ok(sizeLimits({ ...base, alive: 12, magnitude: 1 }).ceil < sizeLimits({ ...base, alive: 1, magnitude: 1 }).ceil * 0.6 && sizeLimits({ ...base, alive: 500, magnitude: 1 }).ceil >= Math.max(sizeLimits({ ...base, alive: 500 }).floor * 1.25, sizeLimits({ ...base, alive: 1, magnitude: 1 }).ceil * SIZE.crowdCeilMin) - 1e-9, "size: a crowd of world words shares the screen (lower ceiling, bounded)");
   /* the engine never shows a picture enlarged by more than 15 % before drawing it again (source rule in engine.mjs) */
   const eng = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
   ok(/w > c\.want \* 1\.15/.test(eng) && /resize\(h, false\)/.test(eng), "size: re-draw on drift up (>15 %) and live resize are in the frame loop");
@@ -188,6 +189,13 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
 {
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./sync.mjs", import.meta.url)), "--check"], { encoding: "utf8" });
   ok(r.status === 0, `manifest: ${r.stdout.trim()}`);
+}
+
+/* 10. FXLE: lifecycle, budgets, memory, safety (check-life.mjs on a fake browser and Foundry; its own process: it replaces globals) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-life.mjs", import.meta.url))], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 console.log(`letters: ${n} checks, ${failed} failed`);

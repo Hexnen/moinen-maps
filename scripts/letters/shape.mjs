@@ -1,6 +1,6 @@
 /* LETR: the outlines of one picture of a plan, in word units (cap height 1). Pure. */
 import { resample, jag, rough, boil, drips, flames, bbox, crackLines, strokeQuads } from "./geom.mjs";
-import { envelope } from "./design.mjs";
+import { envelope, RING_W } from "./design.mjs";
 import { rng } from "./rng.mjs";
 import { area } from "./font.mjs";
 import { makeReader } from "./legibility.mjs";
@@ -19,7 +19,7 @@ export function treatLetter(gl, hand, sound, seed, i, k = 1) {
       cs = cs.map((c) => jag(c, (0.045 + 0.04 * sound.sharp) * k * (Math.sign(area(c)) === sg ? 1 : 0.3), 8, R));
       break;
     }
-    case "rough": cs = cs.map((c, j) => rough(c, (0.025 + 0.03 * sound.rough) * k, 2.2, (seed + i * 31 + j) | 0)); break;
+    case "rough": cs = cs.map((c, j) => rough(c, (0.016 + 0.018 * sound.rough) * k, 2.2, (seed + i * 31 + j) | 0)); break;
     case "drip": extra.push(...drips(cs, R, 0.75 * k, (0.32 + 0.25 * sound.long) * k)); cs = cs.map((c, j) => rough(c, 0.012 * k, 2, (seed + j) | 0)); break;
     case "flame": cs = cs.map((c, j) => rough(c, 0.02 * k, 2.5, (seed + i * 7 + j) | 0)); extra.push(...flames(cs, R, k, (0.35 + 0.3 * sound.long) * k, (seed % 100) / 10)); break;
     default: break;
@@ -41,12 +41,32 @@ export function treatReadable(gl, ch, font, hand, sound, seed, i, bank) {
   return cs;
 }
 
+/* LOOK: a linked round letter is drawn as a true ring (KA-THOOM's interlocked OO): a circle as wide as RING_W, its stroke as heavy as
+   the font's own O (from its area), wound like the font's outlines */
+export function ringGlyph(font, bank) {
+  const key = `ring#${font}`;
+  if ( bank.cache.has(key) ) return bank.cache.get(key);
+  const o = bank.glyph(font, "O"), cs = o.contours ?? [];
+  const big = cs.reduce((a, c) => (Math.abs(area(c)) > Math.abs(area(a)) ? c : a), cs[0] ?? [0, 0, 1, 0, 1, -1]);
+  const ink = Math.abs(cs.reduce((a, c) => a + area(c), 0)), b = bbox(cs), ow = Math.max(0.3, b.x1 - b.x0);
+  /* stroke t of a ring of the O's box with the O's ink: ink ~ perimeter * t */
+  const t = Math.max(0.1, Math.min(0.17, 0.85 * ink / (Math.PI * (ow + 1) / 2)));   // rings a shade lighter than the letters (the reference)
+  const rx = RING_W / 2, ry = 0.5, cx = RING_W / 2, cy = -0.5, N = 56, sg = Math.sign(area(big)) || 1;
+  const ell = (ax, ay, dir) => { const c = []; for ( let k = 0; k < N; k++ ) { const a = dir * k * 2 * Math.PI / N; c.push(cx + ax * Math.cos(a), cy + ay * Math.sin(a)); } return c; };
+  let outer = ell(rx, ry, 1), inner = ell(rx - t, ry - t, -1);
+  if ( Math.sign(area(outer)) !== sg ) { outer = ell(rx, ry, -1); inner = ell(rx - t, ry - t, 1); }
+  const g = { adv: RING_W, contours: [outer, inner], font: o.font ?? font, ring: true };
+  bank.cache.set(key, g);
+  return g;
+}
+
 /* base geometry cache per plan: glyph per letter and treated outlines for the plan's own seed */
 export function baseGeometry(plan, bank) {
   if ( plan._base ) return plan._base;
   const base = plan.chars.map((ch, i) => {
-    if ( ch === " " || ch === "\n" ) return { gl: null, cs: [] };   // a line break has no glyph
+    if ( ch === " " || ch === "\n" ) return { gl: null, cs: [] };   // FXLE F12: a line break has no glyph
     const font = plan.layout.letters[i]?.font ?? plan.hand.font;
+    if ( plan.layout.letters[i]?.ring ) { const gl = ringGlyph(font, bank); return { gl, cs: gl.contours, ring: true }; }
     const gl = bank.glyph(font, ch);
     return { gl, cs: treatReadable(gl, ch, font, plan.hand, plan.sound, plan.seed, i, bank) };
   });
@@ -87,12 +107,13 @@ export function occlusionReport(plan, bank, only = null) {
   const out = [];
   for ( let i = 0; i < Ls.length; i++ ) {
     if ( only && !only.has(i) ) continue;
-    const ch = plan.chars[i]; if ( !base[i].gl || !reader.knows(ch) ) continue;
+    const ch = plan.chars[i]; if ( !base[i].gl || base[i].ring || !reader.knows(ch) ) continue;   // a ring is an O to anyone
     const lean = leanOf(plan, Ls[i]), Pi = placeOf(Ls[i], base[i].gl, lean), cut = [];
     const me = mapCs(mapCs(base[i].cs, Pi.fwd), Pi.upright), mb = bbox(me);
     for ( const j of [i - 1, i + 1] ) {
       if ( j < 0 || j >= Ls.length || !base[j].gl ) continue;
       if ( !(H.stack === "merge" || (H.order === "right" ? j > i : j < i)) ) continue;
+      if ( Ls[i].link === j || Ls[j].link === i ) continue;   // interlocked rings cross, they do not hide each other
       const Pj = placeOf(Ls[j], base[j].gl);
       /* stacked letters: the one in front covers with its outlines; merged ones flow into each other (no line between them) */
       const grow = H.stack === "merge" ? 0 : outer / Ls[i].s, cs = mapCs(mapCs(base[j].cs, Pj.fwd), Pi.upright), b = bbox(cs);
@@ -168,7 +189,7 @@ export function pictureGeometry(plan, bank, p) {
   for ( let i = 0; i < letters.length; i++ ) {
     const L = letters[i], A = p.letters[i] ?? { v: 1, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 };
     if ( !A.v || !base[i].gl ) continue;
-    const cs0 = p.reseed ? treatReadable(base[i].gl, plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : base[i].cs;
+    const cs0 = p.reseed && !base[i].ring ? treatReadable(base[i].gl, plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : base[i].cs;
     const adv = base[i].gl.adv, px = adv / 2, py = -0.5;
     const s = L.s * A.s, sx = s * A.sx, sy = s * A.sy, rot = L.rot + A.r, c = Math.cos(rot), sn = Math.sin(rot);
     const tx = L.x + L.w / 2 + A.x, ty = -0.5 + L.dy + A.y;
