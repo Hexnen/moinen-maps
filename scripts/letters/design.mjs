@@ -22,7 +22,7 @@ export const FONTS = {
   wetpaint: { file: "fonts/rubikwetpaint/RubikWetPaint-Regular.ttf", weight: 0.85, sharp: 0.3, track: -0.04, slant: 0.06 },
   patrick:  { file: "fonts/patrickhand/PatrickHand-Regular.ttf", weight: 0.25, sharp: 0.05, track: 0.02, slant: 0.06 },
   /* LOOK: the squared, engineered capitals of the Invincible book's lettering (style "invincible"; no mood picks them otherwise) */
-  squada:   { file: "fonts/squadaone/SquadaOne-Regular.ttf", weight: 0.8, sharp: 0.9, track: 0.01, slant: 0 },
+  squada:   { file: "fonts/squadaone/SquadaOne-Regular.ttf", weight: 0.8, sharp: 0.9, track: 0.01, slant: 0, recut: "MN" },   // its M/N look lower case: rebuilt (fontbank recut)
   michroma: { file: "fonts/michroma/Michroma-Regular.ttf", weight: 0.6, sharp: 0.6, track: -0.02, slant: 0 }
 };
 /* a font without a glyph falls back along this chain, letter by letter (Polish letters are synthesised first where possible) */
@@ -46,14 +46,14 @@ export const MOODS = {
     tex: { speckle: 3, cracks: 1.5, halftone: 1, brush: 1.5 }, in: { drop: 4, slam: 1 }, hold: { rattle: 3, shake: 1 }, out: { fall: 4 }, back: { none: 3, cloud: 2.2, plate: 1 }, hold_ms: 1100, fx: { dust: 0.8 } },
   boom: { label: "explosion, blast", sound: { loud: 1, sharp: 0.4, long: 0.5, pitch: 0, rough: 0.4, peak: 0.5 },
     fonts: { titan: 3, sigmar: 3, bangers: 2, bungee: 1 }, treat: { plain: 3, bubble: 2, rough: 1 },
-    env: { fan: 3, bulge: 3, arc: 1 }, colors: { hot: 5, toxic: 1 },
+    env: { fan: 3, bulge: 3, arc: 1 }, colors: { hot: 5, ember: 1.5 },
     tex: { halftone: 2, none: 1.5, speckle: 1, burstlines: 1.5, spots: 0.6 }, in: { slam: 3, pop: 1 }, hold: { throb: 2, shake: 2 }, out: { burst: 3, shatter: 1 }, back: { none: 2.2, cloud: 3, star: 2.5 }, hold_ms: 1000, fx: { burst: 1 } },
   roar: { label: "roar, growl, scream of a beast", sound: { loud: 0.85, sharp: 0.55, long: 0.9, pitch: 0.2, rough: 0.8, peak: 0.9 },
     fonts: { knewave: 3, bangers: 2, anton: 1, blackops: 1 }, treat: { jag: 2.5, rough: 2.5 },
     env: { swell: 4, fan: 1, wave: 1 }, colors: { beast: 3, punch: 1, toxic: 2 },
     tex: { speckle: 2, none: 1, halftone: 1, brush: 1.2, spots: 1 }, in: { grow: 4 }, hold: { rattle: 2, shake: 2 }, out: { shrink: 2, shatter: 1 }, back: { none: 3.5, star: 1, plate: 1 }, hold_ms: 1400, fx: {} },
   fire: { label: "flames, burning, whoosh of fire", sound: { loud: 0.55, sharp: 0.35, long: 0.8, pitch: 0.6, rough: 0.5, peak: 0.6 },
-    fonts: { knewave: 2.5, bangers: 2, sigmar: 1.5, titan: 1 }, treat: { flame: 4, rough: 1 },
+    fonts: { knewave: 2.5, bangers: 2, sigmar: 1.5, titan: 1 }, treat: { plain: 4, rough: 0.6 },
     env: { wave: 3, arc: 2, swell: 1 }, colors: { hot: 4, ember: 3 },
     tex: { none: 2, speckle: 1, brush: 0.8 }, in: { rise: 4, pop: 1 }, hold: { flicker: 5 }, out: { rise: 4 }, back: { none: 4, cloud: 1 }, hold_ms: 1400, fx: { embers: 0.8 } },
   whoosh: { label: "fast motion, wind, swing", sound: { loud: 0.5, sharp: 0.2, long: 0.8, pitch: 0, rough: 0.2, peak: 0.85 },
@@ -69,7 +69,7 @@ export const MOODS = {
     env: { slant: 3, flat: 2 }, colors: { soft: 3, pop: 1 },
     tex: { none: 4, spots: 0.5 }, in: { pop: 4 }, hold: { boil: 3 }, out: { dissolve: 3, pop: 1 }, back: { none: 3, oval: 2 }, hold_ms: 500, fx: {} },
   pain: { label: "hurt, wound, cry of pain", sound: { loud: 0.65, sharp: 0.6, long: 0.45, pitch: -0.5, rough: 0.6, peak: 0.25 },
-    fonts: { wetpaint: 2.5, knewave: 2, bangers: 2, anton: 1 }, treat: { drip: 3, jag: 1.5, rough: 1.5 },
+    fonts: { knewave: 2.5, bangers: 2, anton: 1.5, blackops: 1 }, treat: { plain: 2.5, jag: 1.5, rough: 1.5 },
     env: { sag: 3, wave: 1.5, tumble: 1 }, colors: { blood: 4, bruise: 2 },
     tex: { speckle: 1.5, none: 2, brush: 1.5 }, in: { slam: 2, pop: 2 }, hold: { wobble: 3, shake: 1 }, out: { fall: 3, droop: 2 }, back: { none: 3, star: 1.2, plate: 1.2 }, hold_ms: 1000, fx: {} },
   powerup: { label: "charging, rising power, transformation", sound: { loud: 0.75, sharp: 0.3, long: 0.8, pitch: 1, rough: 0.2, peak: 1 },
@@ -81,7 +81,7 @@ export const MOODS = {
     env: { arc: 3, wave: 2 }, colors: { mint: 4, gold: 1 },
     tex: { none: 3, halftone: 1, spots: 0.5 }, in: { rise: 3, pop: 2 }, hold: { throb: 2, boil: 2 }, out: { rise: 3, dissolve: 2 }, back: { none: 3, oval: 2, cloud: 1 }, hold_ms: 1100, fx: {} },
   splash: { label: "water, splash, goo, squelch", sound: { loud: 0.55, sharp: 0.15, long: 0.4, pitch: -0.2, rough: 0.2, peak: 0.4 },
-    fonts: { wetpaint: 3, titan: 2, sigmar: 1, patrick: 1 }, treat: { drip: 3, bubble: 2 },
+    fonts: { titan: 3, sigmar: 1.5, patrick: 1.5, bungee: 0.5 }, treat: { plain: 3, bubble: 2 },
     env: { wave: 3, bulge: 2, fan: 1 }, colors: { water: 4, toxic: 1 },
     tex: { none: 2, halftone: 1, spots: 1.5 }, in: { pop: 3, slam: 1 }, hold: { wobble: 2, boil: 2 }, out: { fall: 3, dissolve: 1 }, back: { none: 3, cloud: 2 }, hold_ms: 1000, fx: { droplets: 0.8 } },
   fail: { label: "miss, flop, deflating", sound: { loud: 0.25, sharp: 0.1, long: 0.45, pitch: -1, rough: 0.2, peak: 0 },
@@ -240,6 +240,8 @@ export const RING_W = 0.94;   // a ring's width in cap heights (a circle a littl
    traitsOf() names the traits; styleHand (invincible) builds the hand from them; fitSound corrects a comic hand that contradicts them.
    Pure rules, no random draws: the same sound always gets the same traits. check-look.mjs L16 checks the table over every kind. */
 const COLD = new Set(["ice", "air", "mint", "water"]);
+const WARM = new Set(["hot", "ember", "gold", "rust", "blood"]);
+const NEON_COLD = new Set(["ice", "air", "mint", "water", "toxic", "volt", "plasma", "pop", "soft"]);
 export function characterFor(mood, sound, given = null) {
   const c = given && typeof given === "object" ? { ...characterOf({ mood }), ...given } : characterOf({ mood, loud: sound.loud, long: sound.long });
   if ( !given ) Object.assign(c, { sharp: sound.sharp, rough: sound.rough, pitch: sound.pitch, sustain: sound.long });
@@ -255,7 +257,8 @@ export function traitsOf(mood, sound, character = null) {
     light: c.pitch >= 0.5 && c.heavy <= 0.5,                               // high and slight: a shallow block thrown up
     metallic: c.metal >= 0.6,                                              // a clang, a gun, a chime: steel, cut clean
     electric: c.electric >= 0.9 || (c.electric >= 0.6 && ["jagged", "shaky", "gritty"].includes(c.texture)),   // sparks
-    hot: c.heat >= 0.8, warm: c.heat >= 0.3, cold: c.heat <= -0.3,         // flames / never a cold colour / a cold colour fits
+    hot: c.heat >= 0.8, warm: c.heat >= 0.5, cold: c.heat <= -0.3,         // flames / only warm colours / a cold colour fits
+    earthy: ["stone", "wood"].includes(c.material) && c.heat > -0.3,      // rock and timber: stone and bone colours, never ice or neon
     wet: c.wet >= 0.7,                                                     // drips
     gritty: c.texture === "gritty" && c.rough >= 0.5,                      // crumbling, grinding: a rough edge
     sputter: mood === "fail",                                              // a fizzle: sags, sputters
@@ -285,7 +288,11 @@ export function fitSound(hand, T, sound, avoid = null) {
     if ( ["bubble", "drip"].includes(hand.treat) || hand.treat === "rough" && !T.gritty ) hand.treat = "plain";   // grinding metal keeps its grit
     if ( !T.warm && !["ice", "stone"].includes(hand.colorFam) ) setFam("stone", 1);
   }
-  if ( T.warm && COLD.has(hand.colorFam) ) setFam(T.hot ? "ember" : "hot");
+  /* colour by matter (advm 10: a lime fireball, an ice-blue stone crack): a warm sound only in fire colours, rock never in ice or neon */
+  if ( T.warm && !WARM.has(hand.colorFam) ) setFam(T.hot ? "ember" : "hot");
+  if ( (T.warm || T.earthy) && hand.multi === "sweep" ) hand.multi = "sunset";   // a hue sweep runs a fireball into lime (advm 10)
+  if ( T.earthy && NEON_COLD.has(hand.colorFam) ) setFam(COLORS.stone ? "stone" : "bone");
+  if ( T.wet && !["water", "ice", "toxic"].includes(hand.colorFam) ) setFam("water");   // wet in water colours (toxic: slime)
   if ( T.heavy ) hand.depth = Math.max(hand.depth, 0.12);
   if ( T.light && hand.depth > 0.09 ) hand.depth = 0.09;
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
@@ -299,12 +306,14 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   hand.font = T.hard ? "squada" : T.soft || T.bubbly || rings ? "michroma" : R3.w({ squada: 3, michroma: 0.4 });
   /* colour: steel for metal and cold sounds, amber for fire, warm for warm sounds, else the mood's */
   const warmPick = { amber: 2, suit: 1, bone: 1, ...(INV_BY_MOOD[mood]?.blood ? { blood: 3 } : {}) };
-  const fam = T.metallic && !T.warm || T.cold ? "sky" : T.hot ? "amber" : R3.w(T.warm ? warmPick : INV_BY_MOOD[mood] ?? { bone: 1 });
+  const fam = T.metallic && !T.warm || T.cold ? "sky" : T.hot ? "amber" : R3.w(T.warm ? warmPick : T.earthy ? { bone: 3, amber: 1 } : INV_BY_MOOD[mood] ?? { bone: 1 });
   const pal = INV[fam];
   hand.colorFam = "inv"; hand.invPal = fam;
   hand.pal = { ...pal, fill: pal.fill.slice(), out2: "#ffffff" }; hand.ink = pal.ink;
   /* the edge says the matter: sparks for electricity, flame for heat, drips for wet, grit for grinding, a sputter for a fizzle */
-  hand.treat = T.electric ? "jag" : T.hot ? "flame" : T.wet ? "drip" : T.gritty || T.sputter ? "rough" : "plain";
+  /* clean letters, as in the book (the user: flame teeth and drips removed, 2026-11-13): the matter is said by face, colour, block
+     and line, never by an edge ornament; look.treat ("flame", "drip", "jag", "rough") stays an explicit opt-in */
+  hand.treat = "plain";
   hand.tex = "none"; hand.outline = "ink"; hand.out2W = 0; hand.inflate = 0;
   hand.inkW = hand.font === "michroma" ? 0.03 : 0.036;
   if ( hand.font === "michroma" ) hand.inflate = 0.045;   // its strokes are hairlines at token size: thickened in the face colour
@@ -323,7 +332,7 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   hand.tiltKind = "calm"; hand.tilt = R3.f(0, 1.5); hand.bob = 0; hand.upright = true;
   /* loud = a big contrast between the body and its lead-in */
   hand.contrast = 1.2 + 0.6 * sound.loud;
-  hand.prefix = sound.loud >= 0.6 && R3.chance(0.6) ? R3.f(0.4, 0.55) : 0;
+  hand.prefix = sound.loud >= 0.6 && R3.chance(0.6) ? R3.f(0.32, 0.48) : 0;
   /* the line: rising = grows to its end, fading = shrinks away, a fly-by = arc (streak when it lasts), heavy = perspective, bouncy = wave, a hit = flat */
   hand.env = T.rising ? "swell" : T.fading ? "shrink" : T.sputter ? "sag" : T.arc ? (T.sustained ? "streak" : "arc") : T.heavy ? "persp" : T.bubbly ? "wave" : "flat";
   hand.warp2 = null; hand.profile2 = null;
@@ -354,7 +363,7 @@ export function lookHand(hand, mood, sound, R2) {
   hand.bob = { calm: 0.02, lively: R2.f(0.04, 0.07), wild: R2.f(0.07, 0.12) }[hand.tiltKind];
   /* size contrast between the loud and the quiet part, and a small prefix before a huge body (KA-BOOM, RAKA-BOOM) */
   hand.contrast = R2.f(1.1, 1.7);
-  hand.prefix = R2.chance(0.35 + 0.35 * sound.loud) ? R2.f(0.36, 0.52) : 0;
+  hand.prefix = R2.chance(0.35 + 0.35 * sound.loud) ? R2.f(0.28, 0.46) : 0;
   /* overlap: each letter tucked under the one to its left (the letterer's rule), or the later letter on top */
   const ov = R2.w({ none: 2, some: 2.5, heavy: hand.tiltKind === "wild" ? 0 : harsh ? 1.5 : 0.6 });   // wild leans and deep tucks together hide letters
   hand.track = Math.max(-0.16, hand.track - { none: 0, some: R2.f(0.02, 0.05), heavy: R2.f(0.06, 0.1) }[ov]);
@@ -509,6 +518,12 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     const body = Math.max(...sizes.slice(pre));
     for ( let i = 0; i < pre; i++ ) sizes[i] = body * hand.prefix * (0.92 + 0.16 * i / Math.max(1, pre - 1));   // the prefix a fraction of the body
   }
+  /* LOOK: a body letter far smaller than the body's biggest reads as lower case (KA-TRZAamm, DZYYYń: Squada's and most comic faces'
+     lower case are small capitals): the accent's tail and lead-in shrink, but never under 0.66 of the body (the prefix is apart) */
+  if ( look ) {
+    const body = Math.max(...sizes.slice(pre));
+    for ( let i = pre; i < n; i++ ) if ( chars[i] !== " " && chars[i] !== "\n" ) sizes[i] = Math.max(sizes[i], 0.66 * body);
+  }
   /* LOOK: case look-alikes: a C, O, S, U, V, W, X or Z much smaller than the letter beside it reads as lower case (CRUSH! as cRUsh!),
      so outside a lead-in they keep at least 0.8 of their bigger neighbour; a sign before a digit is as big as the digit (+1, not !1) */
   if ( look ) for ( let pass = 0; pass < 2; pass++ ) for ( let k = 0; k < n; k++ ) {
@@ -517,6 +532,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
     const inWord = (j) => j >= 0 && j < n && chars[j] !== " " && chars[j] !== "\n";
     const nb = Math.max(inWord(i - 1) ? sizes[i - 1] : 0, inWord(i + 1) ? sizes[i + 1] : 0);
     if ( sizes[i] < 0.8 * nb ) sizes[i] = 0.8 * nb;
+    const body = Math.max(...sizes.slice(pre)); if ( sizes[i] < 0.76 * body ) sizes[i] = 0.76 * body;   // CRUNCH! read "cRUNCH!" (advm 12)
   }
   for ( let i = 0; i < n - 1; i++ ) if ( /[+\-−±]/u.test(chars[i]) && /\d/u.test(chars[i + 1]) ) sizes[i] = Math.max(sizes[i], sizes[i + 1]);
   /* LOOK: interlocked rings: in a run of the same round letter each one passes through the one before it (paint.mjs draws the
@@ -810,7 +826,7 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
       case "rattle": p.letters.forEach((l) => { l.x = R.f(-0.03, 0.03); l.y = R.f(-0.04, 0.04); l.r = R.f(-0.05, 0.05); }); break;
       case "wobble": p.letters.forEach((l, j) => { l.r = 0.06 * Math.sin(i * 2.1 + j); l.y = 0.03 * Math.cos(i * 2.1 + j); }); break;
       case "buzz": p.g.x = R.f(-0.03, 0.03); p.reseed = true; p.misreg = [0.05, 0, 0.03, 0][i]; p.fx.push({ k: i % 2 ? "krackle" : "sparks", a: 0.7, seed: seeds() }); break;
-      case "flicker": p.reseed = true; p.g.y = -0.02 * i; if ( M.fx?.embers ) p.fx.push({ k: "embers", a: 0.7, seed: seeds() }); break;
+      case "flicker": p.reseed = true; p.g.y = -0.02 * i; break;   // no ember specks over held letters (the user: clean letters)
       default: break;
     }
     if ( !reduced && M.fx?.rays && i % 2 === 0 ) p.fx.push({ k: "krackle", a: 0.6, seed: seeds() });

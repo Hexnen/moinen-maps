@@ -460,19 +460,24 @@ The mapping (`traitsOf` in design.mjs, no random draws, checked over every vocab
 | heavy (crash, boom, rumble, stomp) | a deep block straight down; perspective line in the book's hand | weight falls |
 | high and slight (chime, bounce, beep) | a shallow block thrown up | it lifts off |
 | metal (clang, ricochet, gun, chime) | steel blue, one flat colour, a clean edge (grinding metal keeps grit) | a hard bright ring |
-| electric (zap, crackling energy) | the sparking jagged edge | sparks |
-| fire (fire, crackle) | the flame edge in amber; warm sounds never get a cold colour | heat |
+| electric (zap, crackling energy) | sky/lime colours, the squared face, a straight hit line (comic hand: a jagged edge) | sparks |
+| fire (fire, crackle) | amber, the line rising with the sound; warm sounds never get a cold colour | heat |
 | cold (wind, chime, fizzle) | a cold colour | cold |
-| wet (splash, squish, drip) | drips; a dry sound never drips | water |
-| grinding (stomp, crumble, scrape, roar) | a rough edge | grit |
-| a fizzle | rough edge, a sagging line | it fails |
+| wet (splash, squish, drip) | the round face, a cold colour, a wavy or shrinking line | water |
+| grinding (stomp, crumble, scrape, roar) | the squared face, a deep block (comic hand: a rough edge) | grit |
+| a fizzle | a sagging line, a cold colour | it fails |
 | rising (power-up, roar, engine, rumble) | the line grows toward its end | it builds |
 | dies away (sigh, whiff, relief, hiss) | the line shrinks | it fades |
 | a fly-by (whoosh, zoom, ricochet, wind) | an arc, or a streak when it lasts | it passes |
 | bouncy (bounce, laugh, splash) | a wavy line, round face | it bounces |
 | short / sustained | tight / loose letter spacing | the sound's length |
 
-In the comic hand the mapping only corrects what contradicts the sound (a swapped face keeps the recent-hands memory).
+Letters stay clean (the user, 2026-11-13: the flame teeth and the drips were removed): no edge ornament is chosen by default in
+either style, no ember specks over held letters, Rubik Wet Paint is no longer a mood default; `look.treat: "flame" | "drip" | "jag" |
+"rough"` and `look.font: "wetpaint"` remain explicit opt-ins. In the comic hand the mapping only corrects what contradicts the
+sound (a swapped face keeps the recent-hands memory). A body letter never shrinks under 0.66 of the body (it would read as
+lower case); the small lead-in carries the size contrast. Squada One's M and N (drawn with the arched tops of m and n) are rebuilt
+in memory with square shoulders.
 
 **Lines.** `
 ` stacks lines; `arrange: "line" | "stack" | "stair" | "vertical" | "auto"` (auto, the default, stacks or stairs repeated words); `plan.layout.lines`.

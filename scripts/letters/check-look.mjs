@@ -62,6 +62,15 @@ export function checkLook(ok, bank) {
     }
     ok(bad <= all * 0.01, `word settle: ${bad} of ${all} letters unreadable in their words`);
   }
+  /* L4b. the map review's cases (advm 12: Ł's bar detached, B read as U, UUU merged, a crushed "CH!", a slanted Y read as W), both styles */
+  {
+    let bad = 0, all = 0; const ex = [];
+    for ( const w of ["ŁUUUDU!", "ŁUBUDU!", "BUUUM!", "CRUNCH!", "TRZASK!", "BYYYK!", "ŁUP!", "KRACH!"] ) for ( const m of ["crash", "boom", "fire", "crack", "impact"] ) for ( let s = 0; s < 4; s++ ) for ( const style of STYLES ) {
+      const p = plan(w, { mood: m, seed: `m${w}${s}`, look: { style } }); settleCenter(p, bank);
+      for ( const x of occlusionReport(p, bank) ) { all++; if ( !x.ok ) { bad++; ex.push(`${w}/${m}/${style}`); } }
+    }
+    ok(bad <= all * 0.01, `map review words: ${bad} of ${all} letters unreadable (${ex.slice(0, 4).join(", ")})`);
+  }
   /* L5. numbers are lettered whole: plain, even, nearly upright, no texture; a caller's look still wins */
   {
     for ( const t of ["-1", "+4", "12", "X3", "10%"] ) ok(NUMBER_RE.test(t), `number: ${t} is a number`);
@@ -163,14 +172,16 @@ export function checkLook(ok, bank) {
       if ( style === "invincible" ) looks.add(`${KINDS[id].group}|${H.font}|${H.treat}|${H.env}|${H.fill}|${Math.sign(H.depthAng)}|${H.invPal}`);
       if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style === "comic" || (H.font === "squada" && H.fill === "flat")), `${tag}: a hard sound gets a round or soft face`);
       if ( T.soft ) ok(H.treat !== "jag" && !["blackops", "anton"].includes(H.font) && (style === "comic" || H.font === "michroma"), `${tag}: a soft sound gets spikes or a hard face`);
-      if ( T.warm ) ok(!COLD.includes(H.colorFam) && H.invPal !== "sky", `${tag}: a warm sound in a cold colour`);
+      if ( T.warm ) ok((style === "comic" ? ["hot", "ember", "gold", "rust", "blood"].includes(H.colorFam) : !["sky", "lime"].includes(H.invPal)), `${tag}: a warm sound not in fire colours (advm 10)`);
+      if ( T.warm || T.earthy ) ok(H.fill !== "multi" || H.multi !== "sweep", `${tag}: a hue sweep on fire or rock (advm 10)`);
+      if ( T.earthy ) ok(!["ice", "air", "mint", "water", "toxic", "volt", "plasma", "pop", "soft"].includes(H.colorFam) && !["sky", "lime"].includes(H.invPal) || T.metallic, `${tag}: rock or timber in ice or neon (advm 10)`);
       if ( T.cold && style === "invincible" ) ok(H.invPal === "sky", `${tag}: a cold sound not in a cold colour`);
-      if ( !T.wet ) ok(H.treat !== "drip", `${tag}: a dry sound drips`);
+      ok(!["drip", "flame"].includes(H.treat), `${tag}: drips or flame teeth by default (the user removed them)`);
       if ( T.heavy ) ok(H.depth >= 0.12 && (style === "comic" || Math.abs(H.depthAng - Math.PI / 2) < 1e-9), `${tag}: a heavy sound without a deep block`);
       if ( T.light ) ok(H.depth <= 0.09 + 1e-9 || style === "comic" && H.depth <= 0.09, `${tag}: a high sound with a deep block (${H.depth})`);
       if ( T.metallic ) ok(!["bubble", "drip"].includes(H.treat) && (H.treat !== "rough" || T.gritty) && (style === "comic" ? ["stone", "ice"].includes(H.colorFam) || T.warm : (H.invPal === "sky" || T.warm) && H.fill === "flat"), `${tag}: a metallic sound not cut and steel`);
       if ( style === "invincible" ) {
-        ok(H.treat === (T.electric ? "jag" : T.hot ? "flame" : T.wet ? "drip" : T.gritty || T.sputter ? "rough" : "plain"), `${tag}: the edge does not say the matter`);
+        ok(H.treat === "plain", `${tag}: an edge ornament in the book's hand (letters stay clean)`);
         if ( T.light ) ok(H.depthAng < 0, `${tag}: a high sound's block not thrown up`);
         if ( T.rising ) ok(H.env === "swell", `${tag}: a rising sound does not grow`);
         else if ( T.fading ) ok(H.env === "shrink", `${tag}: a fading sound does not shrink`);
@@ -180,9 +191,31 @@ export function checkLook(ok, bank) {
     ok(n > 300 && looks.size >= 24, `sound: ${n} words, ${looks.size} different Invincible looks across the kinds`);
     ok(KIND_IDS.every((id) => traitsOf(KINDS[id].mood, { ...KINDS[id].sound, loud: 0.8 }) && true), "sound: every kind has traits");
     const wet = plan("KRAK", { mood: "crack", seed: 9, character: { wet: 1 }, look: { style: "invincible" } });
-    ok(wet.traits.wet && wet.hand.treat === "drip", "sound: a caller's character drives the look (WORD's play.character)");
+    ok(wet.traits.wet && !plan("KRAK", { mood: "crack", seed: 9, look: { style: "invincible" } }).traits.wet, "sound: a caller's character drives the look (WORD's play.character)");
+    ok(plan("FOOM", { mood: "fire", seed: 2, look: { treat: "flame" } }).hand.treat === "flame", "sound: flame teeth stay an explicit opt-in");
     const c1 = plan("KRAK!", { mood: "crack", seed: 9 }), c2 = plan("KRAK!", { mood: "crack", seed: 9 });
     ok(c1.hand.id === c2.hand.id && JSON.stringify(c1.traits) === JSON.stringify(c2.traits), "sound: the mapping is deterministic");
+  }
+  /* L15c. capitals a face draws as its own lower case are rebuilt (Squada One's arched M and N read "BADUmm", "DZYYYń") */
+  for ( const [f, def] of Object.entries(FONTS) ) for ( const ch of def.recut ?? "" ) {
+    const g = bank.glyph(f, ch), y0 = Math.min(...g.contours.flatMap((c) => c.filter((v, i) => i % 2))), top = g.contours.flatMap((c) => c.map((v, i) => (i % 2 ? null : [c[i], c[i + 1]])).filter(Boolean)).filter(([, y]) => y < y0 + 0.02).length;
+    ok(g.contours.length && top >= 2 && JSON.stringify(g.contours) !== JSON.stringify(bank.raw ? bank.fonts.get(f).glyph(ch).contours : null), `case: ${f} ${ch} rebuilt with square shoulders`);
+  }
+  /* L15b. no body letter shrinks to a lower-case look (the vocabulary's own words with their accent, both styles) */
+  {
+    const V = createVocab(); let low = 0, n = 0, worst = "";
+    for ( const id of KIND_IDS ) for ( const loud of [0.4, 0.9] ) for ( let k = 0; k < 3; k++ ) for ( const style of STYLES ) {
+      const w = V.word(id, { lang: k ? "pl" : "en", loud, seed: `lc${id}${k}` });
+      if ( NUMBER_RE.test(w.text) ) continue;
+      const p = plan(w.text, { ...w.play, seed: `lc${id}${k}`, look: { style } }), L = p.layout.letters, pre = p.layout.pre ?? 0;
+      const line = (i) => L[i].line ?? 0;
+      for ( let i = pre; i < L.length; i++ ) {
+        if ( !/[\p{L}\p{N}]/u.test(p.chars[i]) || L[i].ring ) continue;
+        const big = Math.max(...L.filter((l, j) => j >= pre && line(j) === line(i) && /[\p{L}\p{N}]/u.test(p.chars[j])).map((l) => l.s));
+        n++; if ( L[i].s < 0.6 * big ) { low++; worst = `${style} ${w.text} ${p.chars[i]} ${(L[i].s / big).toFixed(2)}`; }
+      }
+    }
+    ok(low === 0, `case: ${low}/${n} body letters under 0.6 of the line's biggest (looks lower case), e.g. ${worst}`);
   }
   /* L15. no letter turns lower case or vanishes by size (the dice review: CRUSH! read "cRUsh!", STRES +1 read "STRES !1") */
   {
