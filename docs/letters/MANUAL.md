@@ -1,0 +1,641 @@
+# LETR manual: the comic sound-effect lettering engine
+
+For game masters, module authors and coding agents who call the engine or change it.
+The engine's own `scripts/letters/README.md` stays the design notebook (sources, reasoning, full option tables); this manual is the
+user's guide: how to call it, how to place and time words well, what is binding, how to test, what is about to change.
+
+## How to read and keep this manual
+
+**Stages.** The engine grows in named stages. Each section says which stage owns it and its status:
+
+| status | meaning |
+|---|---|
+| `stable` | on `tactics-zones` and not scheduled to change |
+| `changing` | on `tactics-zones`, but an ordered review (SPEC-LOOK / SPEC-MOTION / vocabulary review) will change it next; the section lists which points |
+| `pending merge` | written on its own branch, not on `tactics-zones` yet; the merge may still move details |
+| `planned` | ordered, not built |
+
+**Marks on statements.** `[V]` checked for this manual by running the code under node (the engine's fake Foundry, `testenv.mjs`);
+`[C]` read in the code; `[R]` carried over from the engine README or contract and not re-checked. A statement without a mark
+belongs to the paragraph's mark.
+
+**Updating.** One stage = one edit of this file in the same commit (or the same day) as the engine change:
+1. update the stage table below (version, branch, status);
+2. edit only the sections the stage owns; flip their status lines; re-mark statements you re-checked;
+3. move points out of "What is about to change" when they land;
+4. add a line to the change log at the bottom.
+Keep the section titles stable: other documents and the agent skill link to them.
+
+| stage | engine VERSION | contract | where | status |
+|---|---|---|---|---|
+| LETR core (renderer, layers, motion techniques, size model) | 1.2.0 | v1-v4 | `tactics-zones` | stable |
+| FXLE (lifecycle and safety fixes) | 1.2.1 | (fixes) | `tactics-zones` | stable |
+| WORD (vocabulary, 87 kinds, flows) | 1.3.1 | v5 | `tactics-zones` | stable; vocabulary review ordered (WORD2) |
+| TOOL (settings, authoring, designer, GM-only networking) | 1.4.1 | v6 | `tactics-zones` | stable |
+| MOVE (travel, choreography, rates, escalation, shards, push, glow, sustain, ambient) | 1.5.0 | v7 | `tactics-zones-move` | pending merge; then changing (SPEC-MOTION) |
+| LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
+| LM (MOVE + LOOK merged) | 1.7.0 (announced) | v7+v8 | being merged | planned |
+| LOOK2, MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
+
+Contents
+1. What LETR is
+2. Getting the engine
+3. Quick start
+4. `L.play`: options, handle, lifecycle
+5. Placing and timing words (lessons from three caller reviews)
+6. Size
+7. Layers and who sees a word
+8. Several clients and networking
+9. The vocabulary: `L.word`, `L.sfx`, flows, numbers
+10. Streams: repeating sounds
+11. Motion (core)
+12. Motion 1.5.0: travel, choreography, rates, escalation, sustain
+13. Look
+14. The owner's binding rulings
+15. Tools: settings, authoring, designer, accessibility
+16. Testing and rendering offline
+17. Changing the engine: the two copies, VERSION, sync, merges
+18. Known limits
+19. What is about to change
+20. API index
+21. Change log of this manual
+
+---
+
+## 1. What LETR is
+Status: stable.
+
+LETR letters a sound word the way comic letterers draw sound effects (own shape, size, colours, outline, 3D block per word) and
+animates it frame by frame on a 24-tick clock: an entrance, a hold that keeps living, an exit. It draws over the interface (HTML,
+`space: "screen"`) or on the canvas in scene coordinates (PIXI, `space: "world"`). The look of a word (its "hand") is
+deterministic for a `seed`, so every client can show the same lettering.
+
+Parts (all in `scripts/letters/`):
+
+| file | what |
+|---|---|
+| `index.mjs` | entry: registers this copy in `globalThis.MoinenLetters`, picks the newest copy, `letters()` |
+| `engine.mjs` | the runtime: play, stream, burst, still, scheduling, layers, visibility, size every frame, `VERSION` |
+| `design.mjs` | the plan: moods, hands, layout, timeline (pure) |
+| `paint.mjs`, `shape.mjs`, `geom.mjs`, `font.mjs`, `fontbank.mjs`, `legibility.mjs` | drawing from font outlines; letter readability |
+| `size.mjs` | the size model (pure) |
+| `words.mjs`, `words-reviewed.mjs` | the vocabulary (pure) and the list of reviewed syllables |
+| `tools.mjs`, `prefs.mjs`, `author.mjs`, `net.mjs`, `ui.mjs`, `strings.mjs`, `tools.css` | settings, authoring, networking, windows, texts |
+| `gallery.mjs` | the show-off wall |
+| `check*.mjs`, `testenv.mjs` | node checks and the fake Foundry they run in |
+| `sync.mjs`, `MANIFEST.json`, `stamp.mjs` | keeping the two copies identical |
+| `fonts/`, `ATTRIBUTION.md` | eleven SIL OFL 1.1 fonts and their notices |
+| (1.5.0, pending merge) `move.mjs`, `choreo.mjs`, `shards.mjs`, `sustain.mjs`, `check-move.mjs` | motion layer |
+
+The engine makes no sound. Audio is deferred by the owner: default silent; a later opt-in may attach a sound to a word's clock.
+
+## 2. Getting the engine
+Status: stable.
+
+The same folder `scripts/letters/` ships in two modules: **moinen-maps (canonical copy)** and **invincible-plus-ultra (vendored
+copy)**. Each loaded copy registers in `globalThis.MoinenLetters`; the highest VERSION wins (ties: the more recently synced content,
+from `stamp.mjs`, with a console warning) and every caller uses that ONE engine instance: one font cache, one limit on words at
+once, one memory of recent hands, one vocabulary. [C]
+
+```js
+// module code (either module): path relative to your file
+import { letters } from "../letters/index.mjs";
+const L = await letters();                                    // fonts loaded
+
+// macros, console, other modules
+const L = await game.modules.get("moinen-maps").api.letters();
+const L = await game.modules.get("invincible-plus-ultra").api.letters();   // attached just after "ready" [C]
+const L = await globalThis.MoinenLetters.engine();
+
+// a third module that must not depend on either: check first, skip lettering when absent
+const L = globalThis.MoinenLetters ? await MoinenLetters.engine() : null;
+```
+
+A copy registered after the engine was already created is used only after a reload (console warning). [C]
+
+## 3. Quick start
+Status: stable.
+
+```js
+const L = await MoinenLetters.engine();
+L.play("KRAK!", { mood: "crack", space: "world", at: { x: 2100, y: 1400 }, seed: message.id });   // on the map
+L.sfx("boom", { magnitude: "huge", lang: "auto", space: "world", at: token, seed: message.id });   // a word from the vocabulary
+L.play("-3", { mood: "pain", space: "world", at: token });                                         // above a token, follows it
+L.play("KABOOM!", { mood: "boom", magnitude: 1 });                                                  // over the interface, centre
+const cnv = await L.still("BAM!", { mood: "impact", size: 48 });                                   // one picture (chat card)
+L.gallery({ space: "both" });                                                                       // the show-off wall
+```
+
+Rules of thumb (sections 5, 6 and 9 explain them): state the EVENT (`magnitude`, `area`, `span`, `token`), not a pixel size; take
+the word from the vocabulary; seed with an id every client knows; give token-bound words their token; tie the word to the event's
+clock.
+
+## 4. `L.play`: options, handle, lifecycle
+Status: stable (option names); motion and look values: see sections 11-13.
+
+`L.play(text, opts) -> handle`, synchronous, never throws. [V]
+
+**Text.** Any string, upper-cased with Polish rules; Polish letters, digits, `! ? - + ' .` and spaces; `\n` stacks lines; cut at 160
+characters [V]; a character no font has is drawn as "?" with one warning [R].
+
+**Options** (all optional; full table in the engine README "Calling it"):
+
+| group | options |
+|---|---|
+| what it sounds like | `mood` (`impact crack crash boom roar fire whoosh zap tick pain powerup heal splash fail`, or `auto` = guessed from the letters) [V]; `sound` `{ loud, sharp, long, pitch, rough, peak }` fine intent; `character`, `accent` (given by the vocabulary, section 9) |
+| where | `space` (`screen` default, `world`); `at` (point; world: token, TokenDocument or id, or a function returning `{x, y}` called every frame); `anchor` (`center`, `bottom`; bottom on a token); `from` (angle in degrees or a point: letters grow away from the source); `layer` (section 7); `zIndex`; `parent`; `rotation`; `elevation`; `vision` |
+| how big | `magnitude`, `area`, `span`, `token`, `size`, `scale`, `fit`, `maxWidth` (section 6) |
+| when | `delay` (ms), `startAt` (this page's `performance.now()`), `until` (a Promise: the word leaves when it settles), `hold` (ms), `tempo`, `loop` (hold until `stop()`) |
+| which motion | `in`, `holdKind`, `out` (names: `L.motionNames()`), `reduced`, `pixel` (world only: pixel-art lettering) |
+| which look | `seed`, `avoid` (hand ids to differ from), `hand` (pin a hand: `h.hand` string or a partial hand object), `colors`, `palette`, `font`, `style`, `look`, `arrange`, `backdrop` (section 13) |
+| tools | `alt` (screen-reader text), `force` (play even when the master switch is off; tools only) |
+
+**Handle.** `id`, `hand` (string, set at once unless `delay`), `plan` (set at once unless `delay`) [V], `ready` (Promise: `true` when
+the first picture is on screen, `false` when the word ended without showing) [V], `finished` (Promise: `"done"`, `"stopped"` or
+`"evicted"`; always settles) [V], `alive`, `stop({ quick })` (quick false: play the exit now; true: remove at once) [V],
+`moveTo(at)`. Words from the vocabulary also carry `h.word` [V]; from the network `h.netId`; with the master switch off `h.off` [C].
+
+**Lifecycle you can rely on** [V unless marked]
+- The word is planned inside `play`; its geometry and first picture come in the next animation frame(s) within a per-frame budget
+  (about 6 ms for new words), so a burst of 48 comes up over a few frames. [C] Without `startAt` the clock starts when the first
+  picture shows.
+- Bad options never throw: an unusable number (NaN, Infinity, size or tempo <= 0, hold < 0) is ignored with one warning and the
+  default used; an unknown mood becomes `auto` with one warning; an `at` function that throws keeps the last point [C].
+- Limits: 16 words at once over the interface, 48 on the canvas (`L.limits`, settings `limitScreen`, `limitWorld`); over a limit the
+  oldest leaves at once (`"evicted"`).
+- A word on a token follows it; when the token goes away the word stays where it was and plays its exit. A token id not on this
+  scene: skipped (`ready` false, `finished` "evicted").
+- A scene change evicts every world word, also those waiting for their `delay`, and stops every world stream. `L.stopAll({ space,
+  quick })` does the same for everything. `L.count({ space })` counts words on screen.
+- `startAt` more than 60 s in the future is ignored with a warning (it must be this page's clock).
+- With the master switch (setting `enabled`) off, `play` returns a handle that is already over (`alive` false, `off` true,
+  `ready` false, `finished` "evicted") [C]: callers that hide their own fallback when a word is "playing" must check `h.off`.
+
+**Other calls.** `L.burst(items, common)` several words in one moment, every one a different hand; a `seed` in `common` becomes
+`<seed>:<index>` per item [V]. `L.still(text, opts)` -> Promise<canvas> of the hold drawing at `size` (default 72) [V].
+`L.design(text, opts)` -> the deterministic plan as plain data (`hand`, `layout`, `timeline` with `kinds` and `tech`, `mood`,
+`sound`, `character`, `traits`, `accent`, `sizeK` ...) [V]. `L.stats` = `{ rendered, ms, maxMs }` [V]. `L.version` [V].
+
+## 5. Placing and timing words (lessons from three caller reviews)
+Status: stable as advice; items marked (engine) change when MOVE merges.
+
+Three blind reviews watched the first callers (token reactions, the dice-roll splash, map destruction and fire) on recordings. Every
+mistake below happened. Avoid them in any new caller.
+
+**Stay in view and off the interface.**
+- On 1.6.0 the engine does NOT keep words inside the view [C]: a word placed at a token near the edge is cut. Clamp your own `at`
+  so the word's box fits. (engine) MOVE 1.5.0 adds keep-in-view (`keepInView`, default on) and `L.viewInset(...)` for edges such as
+  a letterbox; pending merge.
+- The engine knows only the viewport. Your module's panels (pins, combat HUD, portraits, hotbar, chat input, replay pills) are yours
+  to avoid: test placement against them, on the GM's and a player's screen (they differ).
+- A cinematic letterbox or caption must be checked when it starts, not only when the word starts.
+
+**Do not cover what you letter.** Put the word beside the event, not on its centre (a collapse word hid the rubble; a crack word hid
+the crack). On a token, letter above it; keep numbers off the token's face. Never put one token's word on another token.
+
+**Make the important thing the biggest.** Map severity onto `magnitude` across its whole range (0..2, normal 0.5, a crit 1, a
+building down 1-1.5). One caller sent every event at 0.1-0.4 and the legibility clamp flattened the rest, so a knock-down was
+smaller than a scratch. Quiet tails (a fire going out, a hiss) must be quieter than the event they follow. Let the size model work:
+no fixed pixel sizes.
+
+**Use sound words, not action names or dictionary words.** HAYMAKER!, TRY AGAIN, CRASH, SPLASH, TRZASK are not allowed (section
+14). Take words from the vocabulary (`L.word` / `L.sfx`), with loudness and duration set separately.
+
+**Bind timing to the event, not to timers.**
+- Pass `startAt` / `delay` / `until` from the effect's own clock. Pre-scheduled `setTimeout` words played after the fire was out.
+  Cancel your pending words when the event ends or is erased.
+- A lead-in word (the creak before a cave-in) must be computed from the moment the event arrives, or it plays together with the
+  main word and is hidden.
+- A number that should follow its word: start it after the word's entrance (await `h.ready`, or offset by the entrance length from
+  `h.plan.timeline`), not a fixed 110 ms.
+- A sound that lasts (fire, engine, hiss): `L.sustain` / `L.flow` (sections 9, 12), not one word on a slot timer.
+
+**One moment, one composition.**
+- Two changes on one token in one moment: do not let the lighter one stop the heavier one; merge them (one word, a number beside
+  it) or stack them.
+- An area attack: letter every visibly hit target the same way; numbers of one blast in one hand (pin `hand` or use one seed),
+  not confetti of fonts and tilts.
+- A room cap must keep the main word: sort by importance before you cut, not by time.
+- Word, number, sentence and odds of one roll are one composition: measure their boxes together; do not scatter labels around
+  the screen at fixed percentages.
+
+**Every client the same; nothing secret in a seed.**
+- Seeds and every input of the look must be identical on all clients: no per-client "last word", "seen", quiet windows or arrival
+  times in the seed.
+- Never derive a seed or a choice from hidden data (hidden Health, a hidden token): a player could read it back.
+- Give token-bound words their token (`at` = token or `token`), so hidden or unseen tokens are not revealed (section 7).
+
+**Numbers.** Format with `L.number` / `L.range` in the client's language (`2,5` in Polish, not `2.5`) [V]. The engine draws plain
+numbers (`-1`, `+4`, `x2`, `12%`) in a calm, even hand [R]; keep them big enough to read and attach them to the token (`at` =
+token) so they follow it.
+
+**Clean up.** On a scene change clear your own state (recent words, pending events) too; the engine clears only its own words.
+
+**Settings stack.** The engine's own `scale`, `motion`, `photosafe`, `palette` settings apply on top of a caller's settings; test both
+together.
+
+## 6. Size
+Status: stable. [R] unless marked; numbers in `L.sizeModel` [V].
+
+A word's size comes from the EVENT (stated by the caller) and the VIEW (known to the engine), recomputed every frame.
+
+| option | meaning |
+|---|---|
+| `magnitude` | 0..2 (default 0.5) or `tiny small normal big huge epic` |
+| `area` | the event's footprint: radius in scene px, `{ radius }`, `{ w, h }`, or a placeable/bounds |
+| `span` | size in scene px of what makes the sound, when it is not a token (a pixel-vfx effect's width) |
+| `token` | the token the sound belongs to (automatic when `at` is a token) |
+| `size` | an explicit NATURAL size (cap height: screen CSS px / scene px); still clamped |
+| `scale` | a multiplier |
+| `fit` | `legible` (default: soft clamp to a readable range), `world` (never clamped), `screen` (`size` = CSS px whatever the zoom), `exact` (no model at all) |
+
+- World words: 0.55 grid squares, grown by the token's span (power 0.5), the footprint (power 0.6) and the magnitude factor (0.7 at 0,
+  1.1 at 0.5, 1.5 at 1, 2.3 at 2), times the mood's factor (`plan.sizeK`, about 0.62-1.32). Screen words: 7.5 % of the viewport
+  height x magnitude factor.
+- Legible range: floor about 2.6 % of the viewport height (15-30 px; lower when many world words are up); ceiling grows with
+  magnitude (cap height 7 % + 8 % x magnitude of the viewport height; width 40 % + 25 % x magnitude of the usable width) and shrinks
+  when more than 2 world words are up.
+- Zoom and window resizes are followed live; a picture is redrawn when it would be shown much bigger than drawn.
+- `pixel` words snap to whole art pixels (7-40 per cap height) once and keep that size.
+- `L.sizeOf(text, opts)` -> `{ size, px, natural, clamp: null|"floor"|"ceil"|"width", fit, sizeK }` tells what a word would get now
+  [V]. `L.gallery({ part: "sizes" })` shows the model live.
+- The setting `scale` multiplies AFTER the clamp.
+
+What each kind of caller should pass: dice splash (screen) `magnitude` from the roll; token reactions `at: token` + `magnitude` from
+the damage relative to the track; map destruction and fire `area` + `magnitude`; pixel-vfx `span` or `area` + `magnitude` from the
+power level.
+
+## 7. Layers and who sees a word
+Status: stable. [R] for the draw order, [V] for the ids.
+
+| layer | space | where |
+|---|---|---|
+| `ground` | world | on the floor: over map water, roads, destruction, zones; under tiles and tokens; in the scene's light |
+| `tokens` | world | just over tokens (at a token's elevation when `at` is a token), under the map's smoke and weather |
+| `weather` | world | over core and map weather and smoke, still in the scene's light |
+| `overlay` | world | DEFAULT: over the whole scene and its lighting, under the HTML interface |
+| `top` | world | over everything on the canvas, rulers and cursors too |
+| `hud` | screen | over the map, under sidebar, bars and windows |
+| `ui` | screen | over sidebar, chat, hotbar; under app windows |
+| `screen` | screen | DEFAULT: over the whole interface (tooltips and notifications stay on top) |
+
+`L.layers`, `L.defaults` (`{ world: "overlay", screen: "screen" }`) [V], `L.layerChoices(space, lang)` -> `{ id: label }` for a
+`game.settings.register` `choices` [V]. Keep your own client setting and pass `layer` per call. An unknown or wrong-space layer falls
+back to the default with a warning.
+
+**Visibility.** A word that belongs to a token (`at` is a token, document or id, or `token` is given) is shown only while that token
+is visible to this user: hidden tokens never to players, tokens out of sight neither. `vision: "point"` also hides a world word whose
+point this user cannot see; `vision: "none"` always shows it. Plain point words are shown by default, even over fog on `overlay`:
+pass `token` or `vision: "point"` when the spot must not give away where something happened. [C]
+
+## 8. Several clients and networking
+Status: stable.
+
+- The same `seed` gives the same hand, layout and timeline on every client; the per-client memory of recent hands and the
+  reduced-motion setting do not change a seeded hand. [R] Pass `from` as an angle, not a point (a point is converted with this
+  client's pixels). [R]
+- `startAt` is THIS page's `performance.now()`; it differs per client: never send it. Send a shared time instead.
+- **`L.net` (GM only, binding owner ruling).** `L.net.play(text, opts)`, `L.net.burst(items, common)`, `L.net.stream(opts)` play on
+  every client in step: one seed, start stamped on Foundry's ping-synced server clock with a 120 ms lead, tokens travel as ids, a
+  client without that token skips the world word; functions, Promises, elements and `reduced` do not travel. Handles carry `netId`;
+  `L.net.stop(netId, { quick })` stops everywhere. [C]
+- On a player's client: `L.net.play` / `L.net.stream` return a handle already over (`refused: "gm-only"`, `alive` false),
+  `L.net.burst` returns `[]`, nothing is sent, nothing throws, one console line per call kind [V]. Every receiving client drops a
+  message whose sender is not a GM [C]. Players keep `L.play` / `burst` / `stream` / `sfx` on their own screen.
+- Module code that letters game events (a roll, a hit) usually runs on every client already and does not need `L.net`: call `L.play`
+  on each client with the same seed.
+- Own socket: send `L.net.sharedNow()` and pass `L.net.local(sentShared)` (`{ delay }` or `{ startAt }`) to `L.play`. [C]
+- Transport: socket `module.<host>` (host = moinen-maps when active, else invincible-plus-ultra), messages `{ t: "letr", v: 1, op }`. [C]
+
+## 9. The vocabulary: `L.word`, `L.sfx`, flows, numbers
+Status: stable (1.3.1); changing: vocabulary review WORD2 (section 19).
+
+The engine letters any text, but `words.mjs` knows WHAT to letter: a sound kind + loudness + duration + language -> a fitting
+onomatopoeia with its mood, sound, motions, accent and character, seeded.
+
+```js
+L.sfx("crack", { loud: 0.8, lang: "pl", space: "world", at: token, seed: msg.id });   // word + lettering in one call
+const w = L.word("boom", { magnitude: "huge", lang: "auto", seed });                   // just the word
+L.play(w.text, { ...w.play, space: "world", area });                                    // lettered by the caller
+L.stream({ kind: "gunfire", lang: "auto", at: () => muzzle(), to: target, every: 90 }); // syllables from the vocabulary
+```
+
+- `L.word(kind, o)` -> `{ text, kind, lang, tier, loud, long, bangs, step, template, prefix, mood, sound, motion, play, accent, peak,
+  env, character }`; `play` = `{ mood, sound, in, holdKind, out, magnitude, accent, character }`, ready to spread into `L.play` [V].
+  Options: `lang` (`pl`, `en`, a registered code, `auto` = the game's language); `loud` 0..1 or `magnitude`; `long` 0..1 or
+  `duration` (ms) = how long the sound lasts, separate from loudness; `bangs` 0..2; `seed`; `avoid`; `step`; `template`; `prefix`.
+- `L.sfx(kind, opts)` = `L.play(word.text, { ...word.play, ...opts })`; vocabulary keys (`kind loud lang step template prefix long
+  duration bangs`) are not passed to `play`; `opts.sound` overrides per key; `h.word` is the word [V].
+- Loudness picks the tier, the "!" count (0..2, never 3), a prefix at the top and the size; duration alone decides the stretch:
+  `{ loud: 0.15, long: 1 }` -> a long quiet word without "!" (e.g. `TSSSSSS`); `{ loud: 1, long: 0 }` -> short with "!!" (e.g.
+  `KRRACK!!`) [V, example words are seed-dependent].
+- Only the sustain of a sound stretches (the R of a crack, the vowel and M of a boom, the S of a hiss); plosives, affricates and
+  prefixes never repeat; no run over 6 letters. A caller's own word may mark stretch points with `+`. [R]
+- 87 kinds in 12 groups (hits, breaking, blasts, motion, elements, powers, devices, voices, animals, vehicles, weapons, weather)
+  [V]; aliases (`explosion` -> boom, `laser` -> beam, ...) in `L.vocab.aliases`; an unknown kind letters as
+  `punch` with one warning [V]. Kind list with labels: `L.vocab.list(lang)`; `L.vocab.choices(lang)` for settings [V].
+- Escalation of one sound: `L.vocab.series(kind, n, { seed, lang, grow: "stretch" | "vary" })` (one notch more each step; never
+  the same text twice running, never shorter) [V]; `L.word(kind, { step: n, template: first.template, seed })` for the n-th repeat
+  [V]; `L.vocab.grow(text, n)` for your own text [V].
+- Continuous sounds: `L.flow(kind, { lang, seed, loud, style })` -> `{ kind, lang, style, onset, at(i), tail, take(ms) }`; segments
+  carry `phase`, `t`, `ms`, `text`, `play` ...; styles `steady drone crackle gust cycle mix` [V members]. The flow says WHAT and WHEN;
+  how segments move is MOVE's `L.sustain` (section 12).
+- `word.accent` (one weight per character), `word.peak`, `word.env` (`hit swell fade arc beat`) and `word.character` (hard, sharp,
+  heavy, wet, metal, electric, heat, sustain, rough, pitch, contour, material, texture) feed the look [V]; for plain text
+  `L.vocab.accent(text, { kind | mood })` and `L.vocab.character({ kind | mood })`.
+- Numbers: `L.number(n, { lang, sign, digits, group, compact, times, percent })`: `12 500` / `12,500`, `2,5`, `1,2 MLN` / `12K`,
+  `3×` / `×3`, `+2`, minus stays `-` so the auto mood reads pain/heal; `L.range(2, 4)` -> `2–4` [V].
+- Adding (shared by every module using the engine): `L.vocab.add(lang, kind, words, { replace })` refuses dictionary words, words
+  the fonts cannot letter and words over 22 letters (returned in `refused`, one warning) [V]; `L.vocab.define(kind, def)` adds or
+  changes a kind [V]; namespace new ids (e.g. `pvfx-webshot`); `L.vocab.remove`, `L.vocab.reset`.
+
+The rules the words obey (only onomatopoeia, no dictionary words, prefixes, the comic's manner) are the owner's: section 14.
+
+## 10. Streams: repeating sounds
+Status: stable (1.2-1.4); changing: MOVE adds `orbit`/`path`/`orient`/`on`/`glow`, MOTION2 takes stream motion from the kind.
+
+`L.stream(opts)` -> `{ beat(text?), stop({ quick }), finished, handles, emitted, alive }` [V]: syllables popping at a (moving) source,
+travelling along `dir` or toward `to`, one hand for the whole stream.
+- Text: `text` ("RA-TA-TA", split on hyphens/spaces), `syllables` (array), or `kind` + `lang` from the vocabulary.
+- Timing: `every` ms (default 110; a value under 20 is ignored with a warning and the default used [C]), `beats` (exact ms of each
+  syllable), `manual: true` + `s.beat()` from each shot, `count` (default 6), `duration`, `until`, `startAt`, `delay`, `swing`.
+- `life` (ms per syllable, 340), `travel`, `spread`, `loud` (number or `(i) => 0..1`), and the play options for size, look, layer.
+- On an effect's clock: with `startAt` in the past the syllables whose life is over are skipped; `s.handles` holds only the living
+  syllables, `s.emitted` counts all [V]. A stream whose source token goes away stops. `L.stopAll()` and (world) a scene change stop
+  it.
+
+## 11. Motion (core)
+Status: changing (SPEC-MOTION, ordered: MOTION2). [R] unless marked.
+
+- One clock of 24 ticks a second; drawings on twos (about 12 a second), heavy words on threes; smears, flash and snap frames on
+  ones; a landed key pose is held 4-6 ticks. Every hold picture is a fresh drawing (the line "boils").
+- Techniques picked per word from its intent: impact flash frame, smear frames, speed/zoom lines, anticipation, squash and stretch,
+  follow-through, misregistered colour plates, Kirby krackle, halftone shadows. `L.design(...).timeline.tech` lists them (`flash
+  smear antic follow misreg heavy`), `timeline.kinds` the entrance, hold and exit [V].
+- Motion names (`L.motionNames()` [V]): in `crackIn drop grow pop rise slam zip`; hold `boil buzz flicker rattle shake throb wobble`;
+  out `burst dissolve droop fall pop rise shatter shrink zipout` (1.5.0 adds `shards`). Force them with `in`, `holdKind`, `out`.
+- Rising moods (fire, powerup, heal) leave screen-up; heavy ones (crash, pain, fail) fall screen-down. Nothing fades smoothly: words
+  leave through halftone or pieces.
+- Reduced motion (OS setting, setting `motion`, or `reduced: true`; the strongest wins): one entrance picture, no shake, a two-step
+  halftone exit.
+
+Known faults this section will lose (SPEC-MOTION, seen in frames): motions are random picks per word, not chosen from the sound;
+`buzz` adds sparks to non-electric sounds; `crackIn` assembles pieces (breaking played backwards); impact lines re-flash through the
+whole hold; a boom leaves by a second explosion; the wind-up shows the finished word before the sound; holds are 3 ticks (not on
+twos) and words do not share a beat, which reads as judder; the hold amplitude is constant. See section 19.
+
+## 12. Motion 1.5.0: travel, choreography, rates, escalation, sustain
+Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then changing (SPEC-MOTION).
+[V] = exercised under node on that branch; else [R].
+
+- **Keep in view**: words near an edge are moved in so their hold and entrance fit (exits may leave); `keepInView: false` per word;
+  `L.viewInset({ top, right, bottom, left } | (space) => insets | null)` reserves edges (default 8 px; a director's letterbox
+  should set it while shown) [V exists].
+- **Travel**: `path` (`{ from, to, arc, duration, ease, spin, loop, orient }`, `{ points }`, `{ fn }`; ends may be tokens or
+  functions); `orbit` (`{ center, radius, period, dir, phase, turns, squash, breathe, orient }`; with `until` it lasts as long as
+  the Promise); `orient` `lean | tangent | bend | none`.
+- **Choreography**: `parts` (`"prefix"`, `"syllables"`, or a list), `beat`, `typeOn`, `countIn`, `echo`.
+- **Frame rate per call**: `on: 1 | 2 | 3` or `fps: 24 | 12 | 8`.
+- **Escalation**: `escalate: true | key | { key, n, window, max, mode }` (the same word on the same source within `window` ms grows,
+  merges "BAM! BAM!", then counts "BAM! ×5"); `h.escalation` = `{ key, n, mode }` [V]; `L.escalation`.
+- **Push**: `push: true | { radius, force }`; `pushable: false`; `L.push(at, { space, radius, force, except })` -> how many words
+  moved [V].
+- **Shards and glow**: `out: "shards"` (or `shatter`) breaks the real letters into flying pieces; `glow: true | "auto" | { color,
+  strength, light }` makes a self-lit word (a scene light in world space).
+- **Continuous sounds**: `L.sustain({ text | kind, at, space, mood, level, until, seed, dir, orbit, path, words, treatments, mode, gap,
+  max, style, lang, delay, ... })` -> `{ stop({ quick }), level(v), alive, phrases, history, finished, handles, mode }` [V members].
+  Overlapping phrases, each a different treatment of the sound; `level` 0..1 (or a function of ms) live with `s.level(v)`.
+  `mode: "ambient"`: one small hollow word now and then while its spot is in view, at most `L.ambientMax` (`{ world: 3, screen: 2 }`)
+  up at once [V].
+- Gallery parts `move orbit path choreo rate escalate shards glow sustain ambient` [C].
+
+**Merge watch (checked for this manual).** The MOVE branch predates two things on `tactics-zones`; the merge must keep both:
+- GM-only networking: on the MOVE branch a player's `L.net.play` still sends and returns a live handle [V]. After the merge it must
+  be refused as in section 8.
+- The vocabulary: the MOVE branch has 52 kinds and older words (its `L.sustain({ kind: "hiss" })` letters `HISSSSS`, a word that
+  names the sound) [V]; `tactics-zones` has 87 kinds and the dictionary rule. Take `words.mjs` from `tactics-zones`.
+
+## 13. Look
+Status: changing (SPEC-LOOK P1-P17, ordered: LOOK2, OUTL). [V] where marked, else [R].
+
+**Styles.** `L.lookStyles` = `["comic", "invincible"]` [V]. `invincible` (the book's manner: squared condensed face, black keyline,
+flat or two-tone face, solid block, upright, small lead-in before a big body, no texture, no backdrop) is the default when
+`game.system.id === "invincible"`, else `comic` [C]. Per call: `look: { style }` or `style: "invincible" | "comic"`; for later calls
+`L.lookStyle(name)` [V]. `look` keys still win over the style. Planned: `comic` is renamed/aliased `expressive` and frozen (section
+14).
+
+**The look says the sound.** `plan.traits` (`hard soft heavy light metallic electric hot warm cold earthy wet gritty sputter bubbly
+sustained short rising arc fading`) [V] is read from the word's `character` and sound; it picks face, edge, fill, block depth and
+direction, colour, line and spacing (`traitsOf` in design.mjs; table in the engine README "Look"). In the comic style it only
+corrects a hand that contradicts the sound.
+
+**Per-call look keys** (`look: { ... }`, all optional, unknown values ignored): `style font tilt env warp2 overlap order outline fill
+tex counters capFont shadow prefix link arrange backdrop treat`. [R]
+
+- **Lines**: `\n` stacks lines; `arrange: "line" | "stack" | "stair" | "vertical" | "auto"`; `plan.layout.lines`, `plan.layout.arrange`
+  [V].
+- **Backdrops**: off by default (owner); `backdrop: "star" | "cloud" | "oval" | "plate" | true | "auto"` turns one on (`plan.hand.back`)
+  [V].
+- **Accent**: letter sizes follow the sound (small lead-in, biggest at the peak, shrinking tail); `opts.accent` from the vocabulary
+  wins; plain text gets a guess; `plan.accent` [V].
+- **Interlocked rings**: a run of O / 0 is drawn as linked rings (`look.link`).
+- **Numbers**: `-1`, `+4`, `x2`, `12%` get a calm, even hand.
+- **Legibility**: every treated letter is read against the font's plain letters (Polish marks and digits included) and turned,
+  pushed or opened until it reads (`legibility.mjs`, checks L1-L16 in `check-look.mjs`).
+- **Clean letters** (owner): no flame teeth, drips or ember specks by default; `look.treat: "flame" | "drip" | "jag" | "rough"` and
+  `look.font: "wetpaint"` are explicit opt-ins.
+- **Fonts**: eleven SIL OFL 1.1 faces (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet
+  Paint, Squada One, Michroma); Polish capitals synthesised where a font lacks them. `L.registerFont` adds one (section 15).
+- **Palettes**: `L.palettes()` [V]; `palette: "<name>"` per call (same on every client); `colors` overrides.
+
+Known faults this section will lose (SPEC-LOOK, seen in renders): Michroma (wide) chosen for O-words and soft sounds in the invincible
+style (P1); each letter's black outline covers its neighbour (P2, the owner's standing complaint); keyline heavy and wobbly (P3);
+swept, shaded 3D block plus soft shadow (P4); gradients and print-plate fringes (P5); "hollow" not hollow (P6); prefix rarely small
+(P7); accent reads as mixed case (P8); loose vertical setting (P9); rings are circles that do not meet well (P10); pale narrow
+palette (P11); "!!" too often (P12); Polish diacritics in sound words (P13); hairline Michroma at small sizes (P14); pale smear
+rectangles (P15); stepped motion reads as stutter in the invincible style (P16).
+
+## 14. The owner's binding rulings
+Status: stable list; new rulings are appended with their date. The owner's own words were in Polish; they are given here in English.
+
+Vocabulary
+- Only onomatopoeia: a word imitates the sound, never names it (no "growl", "creak", "roar" as words). (2026-11-13)
+- No dictionary words at all, not even imitative interjections from the dictionary (CIACH, TRZASK, PLUSK; CRASH, SPLASH, CRACK) and no
+  ordinary word that happens to look like a sound. Words are BUILT from attack + lasting part + cut-off. The deny list is `DICT` in
+  words.mjs; `ICONIC` is the short exception list awaiting the owner's ruling (pl BUM BAM PAF; en POW THUD BAM BOOM BANG ZAP WHAM
+  SHH). (2026-11-13)
+- A prefix is the sound's own lead-in (KA-BUM, TRZA-KRUSZ, KRA-KA-BROOM), never another sound's signature (no gun rattle before a
+  bomb). (2026-11-13)
+- The comic's manner: an invented attack cluster, the lasting letters doubled or tripled (consonants too), one or two "!", short
+  sounds left short. Loudness and duration are separate. "!" ranges 0..2, never 3. (2026-11-13)
+- English must not be second-class; it may become the default language. The laser pistol word ("piu piu") is weak. (2026-11-13,
+  late; WORD2)
+- Avoid Polish diacritic letters in sound words, above all doubled ones and at the start of a word. (2026-11-13, late; WORD2)
+- Water sounds: pl PLUP / PLUMP / SPLOOSZ / GLUB, en PLOP / PLOOP / PLUNK / SPLOOSH / GLUB; PLUSK, CHLAP, TRZASK out. (2026-11-13)
+
+Look and motion
+- Clean letters: the flame teeth and drips were removed; no ember specks over held letters. (2026-11-13)
+- Backdrops are opt-in; the default is none. (2026-11-13)
+- The light/white outline must go around the whole word only, never over inner letters; still not fixed. (2026-11-13; OUTL / LOOK2 P2)
+- Keep the look from before the Invincible pass (today's `comic`) as a legacy style named `expressive`. (2026-11-13, confirmed)
+- Interlocked OO joins must meet better and be more artistically joined. (2026-11-13; P10)
+- Recordings are not smooth: find out why (recorder or engine) and fix. (2026-11-13; P16, SPEC-MOTION 4)
+- Provisional (orchestrator's pick, the owner may overrule): the invincible style gets interpolated smooth motion; stepped motion stays
+  in `expressive`.
+- Implement every point of SPEC-LOOK and SPEC-MOTION. (2026-11-13; section 19)
+
+Tools and scope
+- Networking is GM only. (TOOL-8)
+- Audio: default silent; later only an opt-in way to attach a sound to a word's clock; no sound content now. (2026-11-13)
+
+## 15. Tools: settings, authoring, designer, accessibility
+Status: stable (TOOL, contract v6). [V] where marked, else [C].
+
+Registered once at `init` by the newest copy, whichever module(s) are active.
+
+**Client settings** (namespace `moinen-letters`; the button "Lettering settings" in the host module's settings tab opens the engine's
+window; `L.prefs` / `L.settings()` read them [V]):
+
+| key | values | effect on every word |
+|---|---|---|
+| `enabled` | on / off | off: `play` returns a handle already over; streams draw nothing |
+| `scale` | 0.5-2.5 | size multiplier after the legibility clamp |
+| `motion` | auto / full / gentle / reduced | the strongest reduction of caller, setting and OS wins; gentle = moves damped to 45 %, no smears |
+| `flashes` | on / off | the one-tick impact frame |
+| `photosafe` | on (default) / off | at most 2 flash frames per second, none on a word taller than 20 % of the viewport, colour plates held still |
+| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
+| `announce` | on / off | screen readers read each word (or `alt`) through one polite live region |
+| `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+
+World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.
+
+**Authoring** (this session; shared by every caller):
+```js
+L.registerMood("frost", { extends: "crack", label: "ice", sound: { pitch: 0.3 } });            // [V]
+L.registerPalette("venom", [["#e8ffb0", "#9be22a", "#2f6e1f"]]);                                 // [V]
+await L.registerFont("grit", { url: "modules/x/fonts/Grit.ttf", sharp: 0.8 });                   // [C]
+L.registerStyle("thor-hammer", { mood: "zap", palette: "volt", in: "pop", magnitude: 0.9 });     // [V]
+L.play("KRAKA-THOOM!", { style: "thor-hammer", space: "world", at: token });                     // call options win [V]
+await L.saveStyle("Thor's hammer", style);   // GM only: world-wide; a player gets an error [V]
+```
+Ids: `a-z 0-9 _ -`, starting with a letter; prototype names (`toString`, `__proto__` ...) and `auto` are refused [V]. Also
+`L.unregisterStyle`, `L.styles()`, `L.style(name)`, `L.deleteStyle(name)`, `L.palettes()`, `L.motionNames()`.
+
+**GM tools**: `L.letterNow(text, opts)` (selected tokens, else `point`, else the cursor; shown to everyone); keybinding "Letter this
+now" (Shift+L) opens a small box at the cursor; `L.designer({ text })` (also a button in the token controls) previews words, kinds
+from the vocabulary, styles; `L.openSettings()`; `L.planFor(text, opts)` -> `{ plan, opts }` = what this client would show [V].
+
+## 16. Testing and rendering offline
+Status: stable.
+
+**Node checks** (no browser, no Foundry):
+```
+node scripts/letters/check.mjs            # every suite; prints "letters: N checks, F failed" (about 15 000 checks, about a minute) [V]
+node scripts/letters/sync.mjs --check     # this copy matches MANIFEST.json and stamp.mjs [V]
+node scripts/letters/sync.mjs --check <other module>/scripts/letters    # and both copies are equal
+```
+Suites: `check.mjs` (core), `check-life.mjs` (lifecycle on a simulated clock), `check-words.mjs` (vocabulary rules incl. the
+dictionary rule and reviewed syllables), `check-tools.mjs`, `check-look.mjs` (L1-L16, legibility), (1.5.0) `check-move.mjs`.
+moinen-maps runs them as `dev/letters.test.mjs`, invincible-plus-ultra as `scripts/sweep-checks/letters.mjs` [C]. Never weaken a check
+to make it pass; add one for every behaviour you add.
+
+**Scripting the engine in node.** `testenv.mjs` builds a fake document, PIXI and Foundry canvas on a simulated clock around the real
+engine:
+```js
+import { setup, settled } from "./scripts/letters/testenv.mjs";
+const E = await setup({ gm: false });         // E.engine = a fresh engine, fonts loaded
+const h = E.engine.play("KRAK!", { space: "world", at: { x: 2100, y: 1400 } });
+await E.tick(200);                             // advance the clock: timers and animation frames run
+E.addToken("t1", 1000, 1000); E.delToken("t1"); E.warns;   // tokens, collected warnings
+```
+`L.design(...)` and `L.sizeOf(...)` work there too; pictures are painted into a stub canvas (no pixels). [V]
+
+**Looking at the result (real pixels).** Rendering needs a browser canvas, not Foundry: serve the `scripts/letters/` folder over
+HTTP, open a page that does `const { createEngine } = await import("<served>/engine.mjs"); const L = createEngine(<served base>);
+await L.ready();` and then
+- a still: `await L.still(text, { size, ...opts })` (the hold drawing) appended to the page;
+- a strip of every drawing: `const p = L._plan(text, opts); L._settle(p); for (const pic of [...p.timeline.ent, ...p.timeline.hold,
+  ...p.timeline.exit]) page.append(L._paint(p, pic, size * p.sizeK).canvas);` (`pic.ticks` = how long each is shown);
+- a film: replace `performance.now`, `setTimeout` and `requestAnimationFrame` with a clock you step 1000/24 ms per frame, screenshot
+  each frame from a headless browser, encode at 24 fps. This shows the engine's ideal timing; a real-time 30 fps screen recording
+  adds its own judder (a drawing on twos becomes 2 or 3 captured frames).
+Judge motion on a film, not on stills; record at 24 or 60 fps with words at least 150 px tall.
+
+**Live check in Foundry.** In a test world with either module active, from the console: `const L = await MoinenLetters.engine();
+L.gallery({ space: "both" })`, then the calls you changed, as the GM and as a real player login (visibility, GM-only networking and
+layers differ per user). Use a test world, never a world with real data.
+
+## 17. Changing the engine: the two copies, VERSION, sync, merges
+Status: stable.
+
+1. Edit ONLY the canonical copy: `moinen-maps/scripts/letters/`. Never edit the vendored copy in invincible-plus-ultra by hand.
+2. Bump `VERSION` in `engine.mjs` for every engine change (copies with the same VERSION but different content fall back to the more
+   recently synced one, with a warning; do not rely on it).
+3. Update the engine README (option tables), the API contract's change list, this manual (section map at the top), and add node
+   checks.
+4. `node scripts/letters/check.mjs` -> 0 failed.
+5. `node scripts/letters/sync.mjs` rewrites `stamp.mjs` (only when the content changed) and `MANIFEST.json`.
+6. `node scripts/letters/sync.mjs <invincible-plus-ultra>/scripts/letters` copies every file there (it refuses any target that is not
+   a LETR copy or a new `<module>/scripts/letters` folder, never deletes a folder, removes files that no longer exist) [C]; then
+   `sync.mjs --check <that folder>`.
+7. Run each module's full test runner; commit both repos.
+
+**Merging two engine branches.** Resolve the code files by hand (keep both sides' features, take the higher VERSION or a new one);
+never hand-merge `MANIFEST.json` or `stamp.mjs`: take either side, then run `node scripts/letters/sync.mjs` to regenerate them, then
+sync to the vendored copy. `sync.mjs --check` fails until you do.
+
+**Seams between stages** (who owns what): the vocabulary (`words.mjs`) owns WHAT is lettered and WHEN (text, loudness, duration,
+accent, character, flow segments); the look (`design.mjs` hand/layout, `paint.mjs`) owns how letters are drawn; motion (`move.mjs`,
+`choreo.mjs`, `sustain.mjs`, the timeline) owns how they move; tools (`tools.mjs`, `prefs.mjs`) filter every plan. A stage changes
+another stage's files only through the documented seam (e.g. `opts.accent`, `opts.character`).
+
+Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest translation, mood, sound, motion, hold classes, env,
+`CHAR`, flow style where it lasts, banks per language and tier, stream syllables), every new syllable reviewed into
+`words-reviewed.mjs`, no `DICT` hit, prefixes only from `PREFIXES`; `check-words.mjs` holds the rules. From another module at runtime:
+`L.vocab.define` + `L.vocab.add` with a namespaced id.
+
+## 18. Known limits
+Status: stable list; edit as items close.
+
+- Performance: a burst of 48 words still gives some 50-170 ms frames from cost outside the engine's paint budget (likely GPU upload of
+  new pictures; unverified). Queued (PERF).
+- No sound (deferred by the owner).
+- On 1.6.0 no keep-in-view (MOVE adds it); the engine knows nothing of a caller's UI panels.
+- Visibility needs the canvas; `vision: "point"` uses this client's sight only.
+- `from` as a point differs per client layout; use an angle.
+- `startAt` is per page; clock skew between machines remains even with `L.net`.
+- The vocabulary is shared by every caller: `L.vocab.add` / `define` from one module changes words for all.
+- `L.still` paints at `size` x the device pixel ratio, capped; pictures over 2048 px a side are capped.
+- Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
+  Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
+
+## 19. What is about to change
+Status: planned (the owner ordered all of it on 2026-11-13). Sections that will be invalid when each lands:
+
+| work | what | sections it invalidates |
+|---|---|---|
+| LM merge (1.7.0) | MOVE 1.5.0 into `tactics-zones`; GM-only and 87 kinds kept | 1 (files), 4 (options), 11, 12 (status -> stable/changing), 10 (stream options), 20, stage table |
+| LOOK2 / OUTL | P17 freeze `comic` as `expressive`; P2 one keyline round the whole word; P1 one tall narrow face; P3-P5 thin even keyline, flat duplicate shadow, flat fills; P7-P8 small prefix, monotone accent; P9-P10 vertical setting, true interlocked rings (and maybe EE, UU); P6 true hollow; P11 wider palette by sound family; P12 fewer "!!"; P13-P14; P15 no fat smear copies; P16 smooth interpolated motion in the invincible style | 13 (most of it), 11 (style-dependent motion), 14 (rulings move from "to fix" to done), 16 (stills to re-shoot) |
+| MOTION2 | one shared drawing grid on twos; a deterministic motion table per sound family (no dice); hold envelopes (decay, rise, arc, pulse, steady); contradictions removed; exits by cut-off (cut, ring-out, trail-off, smoke-off, blow-away, power-down, sputter, crumble); a rhythm primitive (siren, heartbeat, rotor, beeps, mech steps); letter roles (only the sustained run moves); default travel per kind, scatter and walk emitters; streams and sustain take motion from the kind; boom burst-in entrance | 11 (all), 12, 10, 4 (`in`/`holdKind`/`out` names), 5 (timing advice may simplify) |
+| WORD2 | vocabulary review: no Polish diacritics in sound words (above all doubled and word-initial); English first-class, maybe default; a better laser pistol; ICONIC ruling | 9, 14 |
+| later queue | SCENE (occlusion, ground perspective), CROWD (placement solver, aggregation), TOKN (word + number as one lettering, stacking hits), HERO (panel freeze, full-frame flash), EXPO (frame strip / webm export, pause/seek), GOLD (golden-render checks), PERF, wiring into map weather/tornado and moinen-pixel-vfx | 5, 16, 18 |
+
+## 20. API index
+`since` = the contract version that added it (engine VERSION in brackets); status as in the stage table.
+
+| member | since | notes |
+|---|---|---|
+| `play`, `burst`, `still`, `design`, `stopAll`, `count`, `limits`, `stats`, `moods`, `version`, `ready`, `base`, `gallery` | v1 | |
+| `stream` | v2 | |
+| `layers`, `defaults`, `layerChoices` | v3 | |
+| `sizeOf`, `sizeModel` | v4 (1.2.0) | |
+| `word`, `sfx`, `number`, `range`, `vocab` | v5 (1.3.0) | `vocab`: `accent add aliases all bangs character choices classes define envs expand flow groups grow kindOf kinds langs list materials naming number range remove renderable reset series stretch syllables textures word` [V] |
+| `flow` | v5 corrections (1.3.1) | |
+| `prefs`, `settings`, `registerMood`, `registerPalette`, `registerFont`, `registerStyle`, `unregisterStyle`, `styles`, `style`, `saveStyle`, `deleteStyle`, `palettes`, `motionNames`, `net` (`play burst stream stop sharedNow local lead`), `letterNow`, `designer`, `openSettings`, `planFor` | v6 (1.4.x) | added by `tools.mjs` at setup; absent if the tools did not install [V] |
+| `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
+| `lookStyle`, `lookStyles` | v8 (1.6.0) | |
+| `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
+
+## 21. Change log of this manual
+- 2026-11-13: first version, written against `tactics-zones` @ aec4e4a (engine 1.6.0) and `tactics-zones-move` @ d299f61 (1.5.0,
+  pending merge). API statements marked [V] were run under node on both; GM-only networking found missing on the MOVE branch.
