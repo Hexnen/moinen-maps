@@ -6,7 +6,7 @@ import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -38,9 +38,12 @@ export function createEngine(base) {
   const memory = [];            // [{ id, t }]
   let raf = 0, seq = 0;
   const limits = { screen: 16, world: 48 };
+  /* v5 tools (tools.mjs): engine-wide preferences and saved styles. opts filters run on each call's options (null = lettering is
+     off on this client), plan filters on the finished plan (palette, motion, flash guard), start hooks once a word is up */
+  const ext = { opts: [], plan: [], start: [] };
 
   function ready() {
-    readyP ??= Promise.all(Object.entries(FONTS).map(async ([id, f]) => {
+    readyP ??= Promise.all(Object.entries(FONTS).filter(([, f]) => !f.custom).map(async ([id, f]) => {
       try { const r = await fetch(new URL(f.file, base)); if ( !r.ok ) throw new Error(r.status); bank.add(id, await r.arrayBuffer()); }
       catch ( e ) { console.warn(`LETR | font ${id} not loaded`, e); }
     })).then(() => {
@@ -150,13 +153,13 @@ export function createEngine(base) {
   function resize(h, first) {
     if ( !first && (h.pixel || h.opts.fit === "exact") ) return;
     if ( h.opts.fit === "exact" ) {
-      h.size = (h.opts.size ?? (h.space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.6 : 72)) * (h.opts.scale ?? 1);
+      h.size = (h.opts.size ?? (h.space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.6 : 72)) * (h.opts.scale ?? 1) * (h.opts._k ?? 1);
       h.sizeInfo = { size: h.size, px: null, natural: h.size, clamp: null, fit: "exact" };
       return;
     }
     const info = sizeFor(sizeCtx(h));
     h.sizeInfo = info;
-    h.size = info.size;
+    h.size = info.size * (h.opts._k ?? 1);   // the user's size setting, after the legibility clamp (tools)
   }
 
   /* ---------- pictures ---------- */
@@ -316,6 +319,7 @@ export function createEngine(base) {
 
   /* ---------- API ---------- */
   function play(text, opts = {}) {
+    for ( const f of ext.opts ) { const o = f(opts); if ( o === null ) return offHandle(text, opts); if ( o ) opts = o; }
     const space = opts.space === "world" ? "world" : "screen";
     if ( !readyP ) ready();
     let done, rdy;
@@ -352,6 +356,8 @@ export function createEngine(base) {
       h.tokenSpan = tokenSpanOf(h);
       h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
       resize(h, true);
+      for ( const f of ext.plan ) f(h.plan, h);
+      h.hand = h.plan.hand.id;
       h.rot = ((opts.rotation ?? 0) * Math.PI) / 180;
       const tokenAt = isToken(h.at);
       const anchor = opts.anchor ?? (tokenAt ? "bottom" : "center");
@@ -380,11 +386,17 @@ export function createEngine(base) {
       if ( opts.until?.then ) opts.until.then(() => h.stop(), () => h.stop());
       const c0 = picture(h, 0, true);   // the first picture is ready in the same frame
       show(h, c0); place(h);
+      for ( const f of ext.start ) { try { f(h); } catch ( e ) { console.warn("LETR | start hook", e); } }
       kick();
     };
     const go = () => { if ( bank.has("bangers") || bank.has("anton") ) start(); else readyP.then(start, (e) => { console.warn("LETR", e); finish(h, "evicted"); }); };
     if ( opts.delay > 0 ) setTimeout(() => { if ( h.alive ) go(); }, opts.delay); else go();
     return h;
+  }
+  /* lettering is off on this client (tools: the master switch): a handle that is already over */
+  function offHandle(text, opts) {
+    return { id: `letr${++seq}`, text: String(text ?? ""), space: opts.space === "world" ? "world" : "screen", opts, alive: false, off: true, hand: null,
+      ready: Promise.resolve(), finished: Promise.resolve("evicted"), stop() {}, moveTo() {} };
   }
 
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
@@ -424,7 +436,7 @@ export function createEngine(base) {
         return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
       };
       const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
-      const h = play(word, { mood: o.mood ?? "impact", space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: hand ?? undefined,
+      const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, style: o.style, palette: o.palette, mood: o.mood ?? (o.style ? undefined : "impact"), space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: hand ?? undefined,
         in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (o.rotation ?? 0) + tilt + (((i * 7) % 5) - 2) * 3,
         zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer });
       if ( !hand && h.plan ) hand = h.plan.hand;
@@ -460,7 +472,9 @@ export function createEngine(base) {
 
   async function still(text, opts = {}) {
     await ready();
+    for ( const f of ext.opts ) { const o = f({ ...opts, force: true }); if ( o ) opts = o; }
     const plan = makePlan(text, { ...opts, reduced: true }, fontsApi, []);
+    for ( const f of ext.plan ) f(plan, { opts: { ...opts, reduced: true }, still: true });
     settleCenter(plan, bank);
     const dpr = opts.dpr ?? (globalThis.devicePixelRatio || 1);
     const S = Math.max(4, (opts.size ?? 72) * plan.sizeK * dpr);
@@ -497,6 +511,7 @@ export function createEngine(base) {
     ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
+    _ext: ext, _settle: (plan) => settleCenter(plan, bank),
     _bank: bank, _plan: (t, o = {}) => makePlan(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
   };
   return api;

@@ -224,7 +224,50 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
   nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas
   and a render budget of about 4 ms per frame; seed with the cast id so every client sees the same lettering.
-- Nothing is networked: run the call on every client from your own socket event, with the same seed and `startAt`.
+- Every client in step: `L.net.play` / `L.net.stream` (README "Tools"). With your own socket, never send `performance.now()` values
+  (BUGH F6: that clock is per page): send `L.net.sharedNow()` and turn it into `L.net.local(t)` -> `{ delay }` or `{ startAt }` on each client.
+
+## Tools: settings, authoring, networking, accessibility, windows (contract v5, tools.mjs)
+One set for every caller, registered once by the newest copy at `init` (whichever module(s) are active).
+
+Settings, client (this computer), namespace `moinen-letters` (stable whichever module is active; the button "Lettering settings" in
+the host module's settings tab opens the engine's own window; host = moinen-maps when active, else invincible-plus-ultra):
+| key | values | what it does to every word |
+|---|---|---|
+| `enabled` | on / off | off: `play` returns a handle that is already over (`alive` false, `off` true, `finished` -> "evicted"); streams draw nothing |
+| `scale` | 0.5-2.5 | multiplies the size AFTER the legibility clamp (so words held at the floor grow too) |
+| `motion` | auto / full / gentle / reduced | the strongest reduction wins: the caller's `reduced: true`, this setting, the OS (auto, gentle); full = the caller decides; gentle = moves damped to 45 %, no smear frames |
+| `flashes` | on / off | the one-tick black/white impact frame (off: an ordinary drawing of the same length) |
+| `photosafe` | on (default) / off | at most 2 flash frames per second on this client, none on a word taller than 20 % of the viewport, colour plates (misregistration) held still across drawings |
+| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set, no green, no red-green pair (a caller's own `colors` stay) |
+| `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
+| `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
+
+Authoring (any client, this session; `L.saveStyle` also stores a style in the world):
+```js
+L.registerMood("frost", { extends: "crack", label: "ice", sound: { pitch: 0.3 }, colors: { ice: 4 }, in: { crackIn: 2, pop: 1 } });
+L.registerPalette("venom", [["#e8ffb0", "#9be22a", "#2f6e1f"]]);                   // or [{ fill, ext, out2: [...], ink }]
+await L.registerFont("grit", { url: "modules/x/fonts/Grit.ttf", sharp: 0.8 });     // Polish capitals synthesised when missing
+L.registerStyle("thor-hammer", { mood: "zap", palette: "volt", font: "bangers", in: "pop", magnitude: 0.9 });
+await L.saveStyle("Młot Thora", { ...style });   // GM: world-wide; L.deleteStyle(name); L.styles(); L.style(name)
+L.play("KRAKA-THOOM!", { style: "thor-hammer", space: "world", at: token });         // the call's own options win over the style's
+```
+Ids: a-z 0-9 _ -, starting with a letter; `toString`, `constructor`, `__proto__`, `auto` and other prototype names are refused.
+New play options: `style` (a name or a style object), `palette` (a colour family by name, the same palette on every client),
+`font` (a font id), `hand` as the handle's id string (`hand: h.hand`, F18) or a partial hand object, `alt` (the text read to
+screen readers instead of the word), `force` (play even when the master switch is off: tools only).
+
+Networking: `L.net.play(text, opts)`, `L.net.burst(items, common)`, `L.net.stream(opts)` play on every client in step (seed made
+once, start stamped on Foundry's ping-synced server clock `game.time.serverTime`, `lead` 120 ms so nobody joins late; tokens travel
+as ids, a word for a token not on a client's scene is skipped there; functions, Promises and elements do not travel, `reduced` is
+each client's own). Each returns the local handle(s) with `netId`; `L.net.stop(netId, { quick })` stops it everywhere.
+`L.net.sharedNow()`, `L.net.local(sharedT)` -> `{ delay }` | `{ startAt }` for callers with their own socket.
+
+GM: `L.letterNow(text, opts)` shows a word to everyone at the selected tokens (one each, different hands) or at a point (`point`,
+default the cursor); the keybinding "Letter this now" (Shift+L) opens a small box at the cursor for it. `L.designer({ text })`
+opens the designer window (also: the burst button in the token controls); `L.openSettings()` the settings window.
+`L.planFor(text, opts)` -> `{ plan, opts }`: the plan this client would show (style, settings and filters applied).
 
 ## Look and performance notes
 - Every picture is painted from font outlines (TrueType parsed by `font.mjs`) at the pixel size it is shown at; world words re-render

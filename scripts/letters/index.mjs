@@ -11,6 +11,7 @@
 
    Full contract: scripts/letters/README.md. */
 import { VERSION, createEngine } from "./engine.mjs";
+import * as tools from "./tools.mjs";
 
 const REG = (globalThis.MoinenLetters ??= {
   copies: [],
@@ -34,7 +35,16 @@ function cmpVer(a, b) {
 }
 
 const BASE = new URL("./", import.meta.url).href;
-if ( !REG.copies.some((c) => c.base === BASE) ) REG.copies.push({ version: VERSION, base: BASE, create: createEngine });
+if ( !REG.copies.some((c) => c.base === BASE) ) REG.copies.push({ version: VERSION, base: BASE, create: createEngine, tools });
+
+/* v5 tools (settings, authoring, networking, accessibility, windows): registered once at init by the newest copy */
+if ( !REG.toolsHooked && globalThis.Hooks?.once ) {
+  REG.toolsHooked = true;
+  Hooks.once("init", () => {
+    const best = REG.copies.filter((c) => c.tools).sort((a, b) => cmpVer(b.version, a.version))[0];
+    try { best?.tools.init(REG); } catch ( e ) { console.warn("LETR | tools not registered", e); }
+  });
+}
 
 /* the shared engine, ready to play (fonts loaded) */
 export function letters() { return REG.engine(); }
