@@ -1987,6 +1987,8 @@
   "MOINENMAPS.Zones.pick.notHere": "Niedostępna",
   "MOINENMAPS.Zones.pick.oneWay": "Tylko jeden sposób",
   "MOINENMAPS.Zones.pick.oneWayHint": "Lewy przycisk: ruch tutaj",
+  "MOINENMAPS.Zones.pick.slid": "Mapa się przesunęła",
+  "MOINENMAPS.Zones.pick.slidHint": "Pod kursorem jest inna strefa: kliknij jeszcze raz, by tam iść",
 
   "MOINENMAPS.Zones.pick.more": "jeszcze {n}",
 
