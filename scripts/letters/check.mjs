@@ -190,5 +190,12 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   ok(r.status === 0, `manifest: ${r.stdout.trim()}`);
 }
 
+/* 10. FXLE: lifecycle, budgets, memory, safety (check-life.mjs on a fake browser and Foundry; its own process: it replaces globals) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-life.mjs", import.meta.url))], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
 console.log(`letters: ${n} checks, ${failed} failed`);
 process.exit(failed ? 1 : 0);

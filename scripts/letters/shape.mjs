@@ -24,7 +24,7 @@ export function treatLetter(gl, hand, sound, seed, i) {
 export function baseGeometry(plan, bank) {
   if ( plan._base ) return plan._base;
   const base = plan.chars.map((ch, i) => {
-    if ( ch === " " ) return { gl: null, cs: [] };
+    if ( ch === " " || ch === "\n" ) return { gl: null, cs: [] };   // FXLE F12: a line break has no glyph
     const gl = bank.glyph(plan.hand.font, ch);
     return { gl, cs: treatLetter(gl, plan.hand, plan.sound, plan.seed, i) };
   });
