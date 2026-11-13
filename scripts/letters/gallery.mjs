@@ -38,6 +38,8 @@ export function gallery(L, o = {}) {
       })();
       const opts = { mood, at, space: onWorld ? "world" : "screen", hold: 1500 + 300 * (i % 3), seed: o.seed != null ? `${o.seed}:${k}` : undefined };
       opts.magnitude = [0.2, 0.4, 0.6, 0.3][i % 4];   // sizes come from the model (README "Size"): viewport, zoom, grid, magnitude
+      /* a wall: each word keeps to its cell (maxWidth is in the word's own units: CSS px on screen, scene px in the world) */
+      { const W = innerWidth - (document.getElementById("sidebar")?.getBoundingClientRect().width ?? 0); opts.maxWidth = onWorld ? (W * 0.27) / canvas.stage.scale.x : W * 0.27; }
       timers.push(setTimeout(() => { const h = L.play(text, opts); handles.push(h); done.push(h.finished); }, w * 3600 + i * gap));
     }
   }
