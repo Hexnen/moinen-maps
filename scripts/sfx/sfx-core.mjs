@@ -291,14 +291,14 @@ export function strokeEvents(st, prev, from, to, ctx) {
       if ( lv >= 2 ) {
         // the SHOCK WAVE: its own word rides out with the wave (from the fireball's rim outwards as the ring grows), not a 2nd boom
         const sa = Math.PI * (-0.15 - 0.2 * h01(`${st.id}|sh`)), ux = Math.cos(sa), uy = Math.sin(sa);
-        push({ key: `${st.id}|shock`, voice: "whump", x: p[0] + ux * r * 0.8, y: p[1] + uy * r * 0.8, r: r * 0.55, t: st.q + SHOCK_MS[0], m: m * 0.6, ms: SHOCK_MS[1] + 200,
+        push({ key: `${st.id}|shock`, voice: "whump", phase: true, x: p[0] + ux * r * 0.8, y: p[1] + uy * r * 0.8, r: r * 0.55, t: st.q + SHOCK_MS[0], m: m * 0.6, ms: SHOCK_MS[1] + 200,
           path: [{ x: p[0] + ux * r * 0.8, y: p[1] + uy * r * 0.8, ms: 0 }, { x: p[0] + ux * r * 2.1, y: p[1] + uy * r * 2.1, ms: SHOCK_MS[1] }] });
         // the DEBRIS coming down after it: where and when the burst's thrown chunks land (st.db [dx, dy, ms]...), else two falls
         const land = debrisLandings(st, 2), n = land.length || (lv >= 2.5 ? 2 : 1);
         for ( let i = 0; i < n; i++ ) {
           const a = Math.PI * (0.15 + 0.7 * h01(`${st.id}|deb${i}`)) + (i ? Math.PI : 0);
           const q = land[i] ?? { x: p[0] + Math.cos(a) * r * 1.05, y: p[1] + Math.sin(a) * r * 0.9, ms: 420 + 260 * i };
-          push({ key: `${st.id}|debris${i}`, voice: "debris", x: q.x, y: q.y, r: r * 0.4, t: st.q + Math.max(DEBRIS_MIN_MS + 200 * i, q.ms), m: m * 0.5, ms: 800 });
+          push({ key: `${st.id}|debris${i}`, voice: "debris", phase: true, x: q.x, y: q.y, r: r * 0.4, t: st.q + Math.max(DEBRIS_MIN_MS + 200 * i, q.ms), m: m * 0.5, ms: 800 });
         }
       }
     }
@@ -669,6 +669,9 @@ export const toSceneBoxes = (rects, toScene) => rects.map((r) => { const a = toS
 export const ECHO_MS = 1600;
 export function isEcho(g, recent, grid = 100) {
   const p = VOICES[g.main.voice]?.prio ?? 0;
+  // (a PHASE of an explosion - its shock wave riding out, its debris landing - is the next beat of that sound's story, not an echo of
+  // it: each reaches the gathering at its own moment, after the boom has played, and is lettered then)
+  if ( g.members.every((e) => e.phase) ) return false;
   // (fires going out one after another - a bomb's burning debris dying patch by patch - hiss once: the next hiss waits OUT_GAP_MS)
   if ( g.main.voice === "out" && recent.some((r) => r.voice === "out" && Math.abs(g.t - r.t) < OUT_GAP_MS) ) return true;
   return recent.some((r) => g.t - r.t >= -50 && g.t - r.t < ECHO_MS && r.prio >= p && Math.hypot(g.x - r.x, g.y - r.y) < r.reach + g.span * 0.5 + grid);

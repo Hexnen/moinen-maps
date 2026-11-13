@@ -304,6 +304,20 @@ group("NOTES", () => {
   ok(/get\("sfxWordsWorld", "auto"\)/.test(sfx) && /"sfxWordsWorld", \{[^}]*scope: "world"/.test(sfx) && /isActiveGM && get\("sfxWordsWorld"/.test(sfx), "NOTES 'game language' follows the world's word set (fixed once by the GM): a Polish and an English seat see the same word");
 });
 
+/* PHASES (live, FXLM2): a bomb's shock wave and its debris reach the gathering at their own moments, after the boom played; they are
+   the next beats of the story, not echoes of the boom (they were swallowed as echoes live: the boom stood alone) */
+group("PHASES", () => {
+  const bomb = C.strokeEvents({ id: "b8", k: "burst", p: [500, 500], r: 200, q: 1000, lv: 3 }, null, 0, 3000, { grid: G });
+  const boom = bomb.find((e) => e.voice === "boom"), later = bomb.filter((e) => e !== boom);
+  const recent = [{ x: boom.x, y: boom.y, reach: 600, t: boom.t, prio: C.VOICES.boom.prio, voice: "boom" }];
+  ok(later.length >= 2 && later.every((e) => e.phase && e.t > boom.t), "PHASES the wave and the debris come after the boom, marked as its phases");
+  for ( const e of later ) ok(!C.isEcho(C.cluster([e], G)[0], recent, G), `PHASES the ${e.voice} beat is lettered on its own moment, not swallowed as an echo`);
+  const dust = C.strokeEvents({ id: "s8", k: "dust", dk: "shock", p: [500, 500], r: 300, q: 1030, lv: 3 }, null, 0, 3000, { grid: G });
+  ok(C.isEcho(C.cluster(dust, G)[0], recent, G), "PHASES the shock dust of the same bomb, arriving alone, stays an echo (one wave, one word)");
+  const crater = C.entryEvent({ type: "blast", cause: 1, rect: { x0: 400, y0: 400, x1: 600, y1: 600 }, w: 200, h: 200 }, { x: 0, y: 0 }, 1, 1200, { key: "cr", sid: "cr" });
+  ok(C.isEcho(C.cluster([crater], G)[0], recent, G), "PHASES the bomb's crater entering a moment later stays an echo");
+});
+
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
 group("WORD2", () => {
   const gren = C.strokeEvents({ id: "g7", k: "burst", p: [500, 500], r: 80, q: 1000, lv: 1 }, null, 0, 3000, { grid: G });
