@@ -32,6 +32,7 @@ const seenEvent = new Set();   // event keys already played or scheduled here
 const alive = new Set();       // { box, h } words of this module on screen
 let fireSeen = new Map();      // fire stroke id -> the stroke as last seen
 let ambientTimer = 0, ambientSlot = -1;
+let recent = [];               // main words played lately (echoes of them are not lettered again)
 const lastWord = new Map();    // voice -> the last text played here (the next one of that voice differs)
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, ms: 0 };
 
@@ -214,6 +215,9 @@ function flush() {
   const seed = canvas.scene?.id ?? "";
   for ( const g of groups ) {
     if ( g.ambient && [...alive].some((a) => a.ambient) ) { stats.dropped++; continue; }
+    // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
+    recent = recent.filter((r) => now - r.t < C.ECHO_MS);
+    if ( !g.ambient && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
     const words = C.planCluster(g, { lang: lang(), grid: G, sec: caps.sec, seed, big });
     // the same voice twice in a row here: the next word of its bank (the engine's hands differ anyway)
     const main = words.find((w) => w.role === "main");
@@ -221,14 +225,22 @@ function flush() {
       const alt = C.planCluster(g, { lang: lang(), grid: G, sec: caps.sec, seed: seed + "~", big }).find((w) => w.role === "main");
       if ( alt && alt.text !== main.text ) main.text = alt.text;
     }
+    for ( const w of words ) measure(w);
     const room = caps.alive - alive.size;
     if ( room <= 0 ) { stats.dropped += words.length; continue; }
     const placed = C.place(words, { scale, view: v, tokens, alive: [...alive].map((a) => a.box) }).slice(0, room);
     stats.dropped += words.length - placed.length;
     for ( const w of placed ) play(w, !!g.ambient);
-    if ( main ) lastWord.set(main.voice, main.text);
+    if ( main ) { lastWord.set(main.voice, main.text); if ( placed.some((w) => w.role === "main") ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, main.size * 2), t: g.t, prio: VOICE_PRIO(g) }); }
   }
   stats.ms += performance.now() - t0;
+}
+/** The engine's own layout of a word (its width in cap heights, its loudness scale, its warp): the box placement keeps free. */
+function measure(w) {
+  try {
+    const d = L.design?.(w.text, { mood: w.mood, sound: w.sound, seed: w.seed, space: "world", size: w.size });
+    if ( Number.isFinite(d?.layout?.W) ) { w.wUnits = d.layout.W; w.sizeK = Number.isFinite(d.sizeK) ? d.sizeK : undefined; w.warp = d.layout.E?.kind ?? null; }
+  } catch { /* the estimate stands */ }
 }
 const VOICE_PRIO = (g) => VOICES[g.main.voice]?.prio ?? 0;
 

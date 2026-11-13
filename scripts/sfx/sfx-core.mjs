@@ -20,7 +20,7 @@ export const LEAD = { boom: 50, crash: 0, zap: 0, thud: 30, gun: 80, fire: 60, s
 /** the per-perf-mode caps: secondary words per cluster, words of this module alive at once */
 export const CAPS = { high: { sec: 4, alive: 9 }, medium: { sec: 2, alive: 6 }, low: { sec: 0, alive: 3 } };
 /** screen-size limits (px) and the share of the view's short side a word may take */
-export const SCREEN = { minMain: 26, minSec: 18, maxMain: 0.3, maxSec: 0.15 };
+export const SCREEN = { minMain: 26, minSec: 18, maxMain: 0.2, maxSec: 0.11 };
 
 /** FNV-1a of a string -> uint32 (the same everywhere). */
 export function hashStr(s, h = 2166136261) { s = String(s); for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
@@ -108,6 +108,7 @@ export function pathCentre(p) {
  * a stroke seen for the first time plays its catch up to NEW_LATE late), burning(st) }.
  */
 export const NEW_LATE = 6000;
+export const SPREAD_GAP = 700;
 export function strokeEvents(st, prev, from, to, ctx) {
   const out = [], grid = ctx.grid || 100, late = ctx.late ?? 1500;
   const inWin = (t, lateMs = late) => t >= from - lateMs && t < to;
@@ -138,9 +139,9 @@ export function strokeEvents(st, prev, from, to, ctx) {
     // the catch: played late too when the stroke is new here (it reached this client after its painter released it)
     if ( inWin(lit, prev ? late : ctx.newLate ?? NEW_LATE) ) push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, colors });
     // the spread: a crackle every ~3 squares of a long path (at most 3), when the fire reaches it
-    const L = pathLength(p), n = Math.min(3, Math.floor(L / (grid * 3)));
+    // (crackles closer than SPREAD_GAP ms in time are one: a fire racing along its path in a moment letters its catch alone)
+    const L = pathLength(p), T = ctx.catchMs?.(st) ?? 0, n = Math.min(3, Math.floor(L / (grid * 3)), Math.floor(T / SPREAD_GAP));
     if ( n > 0 ) {
-      const T = ctx.catchMs?.(st) ?? 0;
       for ( const q of alongPath(p, Array.from({ length: n }, (_, i) => (i + 1) / (n + 0.4))) ) {
         const t = lit + q.f * T;
         if ( inWin(t) ) push({ key: `${st.id}|spread|${lit}|${q.f.toFixed(2)}`, voice: q.f > 0.9 && lv >= 2.5 ? "roar" : "crackle", x: q.x, y: q.y, r: (st.r ?? 50) * 0.6, t, m: m * 0.7, colors, from: { x: p[0], y: p[1] } });
@@ -213,7 +214,7 @@ export function planCluster(g, o = {}) {
   const seed = `${o.seed ?? ""}|${main.key}`, h = hashStr(seed), taken = new Set();
   const words = [];
   const loud = clamp(0.25 + 0.75 * m, 0, 1);
-  const size = grid * (0.5 + 1.3 * m);
+  const size = grid * (0.26 + 0.62 * m);
   const centre = single ? { x: main.x, y: main.y } : { x: g.x, y: g.y };
   // a big cave-in: the ground cracks first (its anticipation), then it comes down
   if ( main.voice === "crash" && m >= 0.55 && !o.big ) {
@@ -222,12 +223,12 @@ export function planCluster(g, o = {}) {
   }
   const text = wordFor(main.voice, m, h, lang, taken); taken.add(text);
   words.push(word("main", text, main.voice, loud, centre, size, main.t + (LEAD[main.voice] ?? 0) + (words.length ? 60 : 0), seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2.6, size * 3.2) }));
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2, size * 3.2) }));
   // a gun's rounds rattle along their walk (a LETR stream, one syllable a round) instead of one word
   if ( main.voice === "gun" && main.walk?.length > 1 ) words.at(-1).stream = { walk: main.walk, t0: main.t0 ?? main.t };
   if ( o.big || !(o.sec > 0) || single ) return words;
   // secondaries: the biggest other members out at the edge, each its own voice, quieter, staggered
-  const nSec = Math.min(o.sec, g.members.length - 1, Math.round(1 + m * 4));
+  const nSec = Math.min(o.sec, g.members.length - 1, Math.round(m * 3.4));
   const cand = g.members.filter((e) => e !== main && Math.hypot(e.x - centre.x, e.y - centre.y) > size * 0.6)
     .sort((a, b) => (b.r - a.r) || (a.key < b.key ? -1 : 1));
   const used = [];
@@ -238,10 +239,11 @@ export function planCluster(g, o = {}) {
     used.push(e);
   }
   used.forEach((e, i) => {
-    const m2 = Math.min(m * 0.8, Math.max(e.m ?? 0, magnitude(e.r / grid, e.voice)));
+    // (one size down from the main word: a satellite never competes with it, and its word is a shorter one of its voice)
+    const m2 = Math.min(m * 0.55, Math.max(e.m ?? 0, magnitude(e.r / grid, e.voice)));
     const dx = e.x - centre.x, dy = e.y - centre.y, d = Math.hypot(dx, dy) || 1;
     const at = { x: e.x + (dx / d) * e.r * 0.3, y: e.y + (dy / d) * e.r * 0.3 };
-    const s2 = Math.min(size * 0.62, grid * (0.4 + 0.9 * m2));
+    const s2 = Math.min(size * 0.58, grid * (0.26 + 0.5 * m2));
     const sd = `${o.seed ?? ""}|${e.key}`;
     const tx = wordFor(e.voice, m2, hashStr(sd), lang, taken); taken.add(tx);
     words.push(word("sec", tx, e.voice, clamp(0.2 + 0.7 * m2, 0, 0.9), at, s2, Math.max(e.t, main.t) + (LEAD[e.voice] ?? 0) + 140 + i * 130, sd, centre,
@@ -268,8 +270,11 @@ function word(role, text, voice, loud, at, size, t, seed, from, rotation, colors
 export const loudScale = (loud) => 0.6 + 0.7 * clamp(loud, 0, 1);
 /** A word's box (scene px) centred at (x, y): the size it will be drawn at, a letter about 0.62 of the cap height wide. */
 export function boxOf(w, x = w.x, y = w.y) {
-  const s = w.size * loudScale(w.sound.loud);
-  let W = s * 0.62 * w.chars * 1.08, H = s * 1.1 * w.lines;
+  // the engine's own layout when it was asked (sfx.mjs measure: L.design -> width in cap heights, its loudness scale, its warp);
+  // else an estimate (letters with their outline and extrusion ~0.8 of the cap height wide). + the outline / extrusion / shake room
+  const s = w.size * (w.sizeK ?? loudScale(w.sound.loud));
+  const tall = w.warp && /arc|fan|tumble|stair|wave|swell|zig|bulge/.test(w.warp) ? 1.85 : 1.55;
+  let W = w.wUnits ? s * (w.wUnits + 0.7) : s * 0.8 * w.chars + s * 0.5, H = s * tall * w.lines;
   if ( w.maxWidth && W > w.maxWidth ) { const k = w.maxWidth / W; W *= k; H *= k; }
   return { x0: x - W / 2, y0: y - H / 2, x1: x + W / 2, y1: y + H / 2 };
 }
@@ -291,15 +296,18 @@ export function place(words, ctx) {
   for ( const w0 of order ) {
     const w = { ...w0 }, main = w.role === "main";
     // readable: at least minMain / minSec screen px tall, at most a share of the view
-    const ls = loudScale(w.sound.loud), px = w.size * ls * sc;
+    const ls = w.sizeK ?? loudScale(w.sound.loud), px = w.size * ls * sc;
     const min = main ? SCREEN.minMain : SCREEN.minSec, max = (main ? SCREEN.maxMain : SCREEN.maxSec) * short * sc;
     if ( px < min ) w.size = min / (ls * sc);
     if ( w.size * ls * sc > max ) w.size = max / (ls * sc);
     if ( w.maxWidth && v ) w.maxWidth = Math.min(w.maxWidth, (v.x1 - v.x0) * 0.7);
     let best = null;
-    for ( const [ox, oy] of OFFSETS ) {
-      const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
-      const x = w.x + ox * bw, y = w.y + oy * bh, b = boxOf(w, x, y), A = area(b) || 1;
+    const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
+    const cands = OFFSETS.map(([ox, oy]) => [w.x + ox * bw, w.y + oy * bh]);
+    // just clear of a token it would cover: above it first, then beside it, then below
+    for ( const t of ctx.tokens ?? [] ) if ( inter(b0, t) > 0 ) cands.push([w.x, t.y0 - bh / 2 - 6], [t.x1 + bw / 2 + 6, w.y], [t.x0 - bw / 2 - 6, w.y], [w.x, t.y1 + bh / 2 + 6]);
+    for ( const [x, y] of cands ) {
+      const ox = (x - w.x) / bw, oy = (y - w.y) / bh, b = boxOf(w, x, y), A = area(b) || 1;
       const tok = (ctx.tokens ?? []).reduce((s, t) => s + inter(b, t), 0) / A;
       const wrd = taken.reduce((s, t) => s + inter(b, t), 0) / A;
       const off = v ? 1 - inter(b, v) / A : 0;
@@ -309,11 +317,32 @@ export function place(words, ctx) {
     }
     // (entirely off this screen: nobody here sees it - a main word off screen takes its cluster with it)
     if ( v && inter(boxOf(w), v) === 0 ) { if ( main ) return []; continue; }
-    if ( !main && (best.tok > 0 || best.wrd > 0.12 || best.off > 0.4) ) continue;
+    if ( !main && (best.tok > 0 || best.wrd > 0.03 || best.off > 0.3) ) continue;
+    // (kept inside the view where it fits: a word half off the screen edge is not read)
+    if ( v ) {
+      const m = 0.02 * short, b = best.b, dx = b.x0 < v.x0 + m ? v.x0 + m - b.x0 : b.x1 > v.x1 - m ? v.x1 - m - b.x1 : 0, dy = b.y0 < v.y0 + m ? v.y0 + m - b.y0 : b.y1 > v.y1 - m ? v.y1 - m - b.y1 : 0;
+      if ( (dx || dy) && b.x1 - b.x0 < v.x1 - v.x0 - 2 * m && b.y1 - b.y0 < v.y1 - v.y0 - 2 * m ) {
+        const nb = boxOf(w, best.x + dx, best.y + dy), A = area(nb) || 1;
+        const tok = (ctx.tokens ?? []).reduce((s2, t) => s2 + inter(nb, t), 0) / A, wrd = taken.reduce((s2, t) => s2 + inter(nb, t), 0) / A;
+        if ( tok <= best.tok && wrd <= Math.max(best.wrd, 0.03) ) Object.assign(best, { x: best.x + dx, y: best.y + dy, b: nb, off: 0 });
+      }
+    }
+    if ( !main && best.off > 0.15 ) continue;
     w.x = best.x; w.y = best.y; w.box = best.b;
     taken.push(best.b); out.push(w);
   }
   return out.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * An ECHO: a cluster that comes a moment after another one of the same family (a bomb's fireball, then its crater's entry a few
+ * hundred ms later; a collapse whose areas reach the screen in two bakes) inside its reach is part of that sound: not a second main
+ * word. `recent` = [{ x, y, reach, t, prio }] of main words played lately. -> true when `g` is such an echo.
+ */
+export const ECHO_MS = 1600;
+export function isEcho(g, recent, grid = 100) {
+  const p = VOICES[g.main.voice]?.prio ?? 0;
+  return recent.some((r) => g.t - r.t >= -50 && g.t - r.t < ECHO_MS && r.prio >= p && Math.hypot(g.x - r.x, g.y - r.y) < r.reach + g.span * 0.5 + grid);
 }
 
 export { tierOf };

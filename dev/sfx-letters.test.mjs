@@ -93,6 +93,12 @@ ok(groups.length === 1 && groups[0].main.voice === "boom", "a bomb's burst, shoc
 ok(C.cluster([{ key: "a", voice: "crack", x: 0, y: 0, r: 30, t: 0 }, { key: "b", voice: "crack", x: 3000, y: 0, r: 30, t: 0 }], G).length === 2, "far apart: two sounds");
 ok(C.cluster([{ key: "a", voice: "crack", x: 0, y: 0, r: 30, t: 0 }, { key: "b", voice: "crack", x: 10, y: 0, r: 30, t: 2000 }], G).length === 2, "a moment later: two sounds");
 
+const fb = C.cluster([{ key: "fb", voice: "boom", x: 0, y: 0, r: 200, t: 1000 }], G)[0], crater = C.cluster([{ key: "cr", voice: "boom", x: 20, y: 10, r: 150, t: 1450 }], G)[0];
+ok(C.isEcho(crater, [{ x: 0, y: 0, reach: 300, t: 1000, prio: 10 }], G), "a bomb's crater entering after its fireball is an echo, not a second boom");
+ok(!C.isEcho(crater, [{ x: 0, y: 0, reach: 300, t: -2000, prio: 10 }], G) && !C.isEcho(C.cluster([{ key: "z", voice: "boom", x: 3000, y: 0, r: 150, t: 1450 }], G)[0], [{ x: 0, y: 0, reach: 300, t: 1000, prio: 10 }], G), "later or elsewhere: its own sound");
+ok(!C.isEcho(fb, [{ x: 0, y: 0, reach: 300, t: 900, prio: 4 }], G), "a louder sound after a quiet one is its own");
+ok(C.strokeEvents({ ...fire, id: "fast" }, null, 10000, 20000, { ...ctx, catchMs: () => 400 }).filter((e) => e.key.includes("spread")).length === 0, "a fire that races along its path in a moment: its catch alone");
+
 /* E. placement */
 const view = { x0: -200, y0: -200, x1: 1800, y1: 1300 };
 groups = C.cluster(areas, G);
@@ -111,6 +117,8 @@ const w0 = single({ voice: "boom", x: 0, y: 0, r: 60, m: 0.3 })[0];
 const p0 = C.place([w0], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [tok] })[0];
 ok(ov(p0.box, tok) === 0, "a word moves off a token");
 ok(p0.y < 0, "...preferring up");
+const edge = C.place([{ ...w0, x: -990, y: 0 }], { scale: 1, view: { x0: -1000, y0: -1000, x1: 1000, y1: 1000 }, tokens: [] })[0];
+ok(edge.box.x0 >= -1000, "a word at the screen's edge moves inside");
 ok(!C.place([w0], { scale: 1, view: { x0: 5000, y0: 5000, x1: 6000, y1: 6000 }, tokens: [] }).length, "off this screen: not played here");
 
 /* F. determinism and variety */
