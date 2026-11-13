@@ -24,6 +24,22 @@ const getState = () => { try { return game.settings.get(MODULE_ID, "vramMeterSta
 const saveState = (patch) => { try { return game.settings.set(MODULE_ID, "vramMeterState", { ...getState(), ...patch }); } catch { return null; } };
 const mode = () => { try { return game.settings.get(MODULE_ID, "vramMeter"); } catch { return "off"; } };
 
+/**
+ * TOGL: the meter's toggle in the map's group of the left menu (tools.mjs) is the setting "vramMeter" itself (client: this user,
+ * this browser): on = any mode but "off". Switched off it remembers the mode it had (vramMeterState.onMode) and switched on it
+ * goes back to it ("auto" when there was none), so a "Only when memory runs low" chosen in the settings survives the toggle.
+ */
+const ON_MODES = ["auto", "always", "warn"];
+export const vramOn = () => mode() !== "off";
+/** The mode the meter is in or would come back to: "always" shows it, "warn" and a player's "auto" only while memory runs low. */
+export const vramOnMode = () => { const m = mode(); if ( m !== "off" ) return m; const b = getState().onMode; return ON_MODES.includes(b) ? b : "auto"; };
+export async function setVramOn(on) {
+  const m = mode();
+  if ( !!on === (m !== "off") ) return null;
+  if ( !on ) { await saveState({ onMode: m }); return game.settings.set(MODULE_ID, "vramMeter", "off"); }
+  return game.settings.set(MODULE_ID, "vramMeter", vramOnMode());
+}
+
 /** "2.3 GB" / "640 MB" in the user's language (the number formats are made once per language). */
 let nf = null;
 function fmt() {

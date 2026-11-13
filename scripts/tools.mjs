@@ -39,10 +39,10 @@ export function registerSettings() {
 export function onGetSceneControlButtons(controls) {
   const base = { name: GROUP, order: 8.5, title: "MOINENMAPS.WS.group", icon: "fa-solid fa-location-dot", layer: "notes" };
   if ( !game.user.isGM ) {
-    // players only get a read-only list of revealed districts, and only when the scene allows it
-    if ( !playersMayList() ) return;
-    controls[GROUP] = { ...base, tools: {
-      districtsList: { name: "districtsList", order: 1, title: "MOINENMAPS.Tool.districtsList", icon: "fa-solid fa-list-ul", button: true, onChange: () => toggleDistrictsPanel() } } };
+    // players get a read-only list of revealed districts, only when the scene allows it, and the VRAM meter's toggle (bar-toggles.mjs)
+    const tools = {};
+    if ( playersMayList() ) tools.districtsList = { name: "districtsList", order: 1, title: "MOINENMAPS.Tool.districtsList", icon: "fa-solid fa-list-ul", button: true, onChange: () => toggleDistrictsPanel() };
+    controls[GROUP] = { ...base, tools };
     return;
   }
   const tools = {};

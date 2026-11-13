@@ -45,7 +45,12 @@ function ensureStyle() { if ( document.querySelector("style[data-mm-dir-bar]") )
 const btn = (act, icon, key, extra = "") => `<button type="button" data-act="${act}" aria-label="${esc(T(key))}" data-tooltip="${esc(T(key))}"${extra}><i class="${icon}" inert></i></button>`;
 
 // (shown to a GM also while the director is off: then it is the power button and "Off" only)
-function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed(); }
+function wanted() { return !!game.user?.isGM && canvas?.ready && !D.killed() && barShown(); }
+
+/** TOGL: the GM hides or shows the whole bar with a toggle in the map's group of the left menu (tools.mjs); one client setting,
+ * "dirBarShown" (this user, this browser; default shown). Hidden = not in the page at all, so nothing keeps clear of it. */
+export function barShown() { try { return game.settings.get(MODULE_ID, "dirBarShown") !== false; } catch { return true; } }
+export function setBarShown(on) { if ( !!on === barShown() ) return null; try { return game.settings.set(MODULE_ID, "dirBarShown", !!on); } catch { return null; } }
 
 export function syncBar() {
   if ( !wanted() ) { removeBar(); return; }
@@ -182,7 +187,11 @@ function startPick() {
 function stopPick() { picking?.(); picking = null; }
 
 export function registerBar() {
-  Hooks.once("init", () => game.settings.register(MODULE_ID, "dirBarFolded", { scope: "client", config: false, type: Boolean, default: false }));
+  Hooks.once("init", () => {
+    game.settings.register(MODULE_ID, "dirBarFolded", { scope: "client", config: false, type: Boolean, default: false });
+    game.settings.register(MODULE_ID, "dirBarShown", { scope: "client", config: false, type: Boolean, default: true,
+      onChange: (v) => { syncBar(); Hooks.callAll("moinenMapsBarToggle", "dirBar", !!v); } });
+  });
   Hooks.on("canvasReady", syncBar);
   Hooks.on("canvasTearDown", removeBar);
   Hooks.on(D.HOOK, (kind) => { if ( kind === "state" ) syncBar(); });

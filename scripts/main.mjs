@@ -25,6 +25,7 @@ import { registerZones } from "./zones/zones.mjs";
 import { registerOrbit } from "./zones/orbit.mjs";
 import "./diag.mjs";   // code-changed-on-disk notice + scene-switch log (api.diag)
 import "./vram-ui.mjs";   // the VRAM meter per client: what this page holds on the GPU vs the card (api.vram, api.diag.vram)
+import "./bar-toggles.mjs";   // TOGL: the VRAM meter's and the director bar's on/off toggles in the map's group of the left menu
 import { registerFlood } from "./destruction/flood.mjs";
 import { registerSmoothView } from "./view-smooth.mjs";
 import { registerWarmup } from "./warmup.mjs";
