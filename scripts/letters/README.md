@@ -395,7 +395,7 @@ event in the dark or behind walls); `vision: "none"` always shows it. Streams pa
 syllables. A word at a plain point is shown by default even on the `overlay` layer (over fog): pass `token` or `vision: "point"`
 when the point must not give away where something happened.
 
-## Tools: settings, authoring, networking, accessibility, windows (contract v5, tools.mjs)
+## Tools: settings, authoring, networking, accessibility, windows (contract v6, tools.mjs)
 One set for every caller, registered once by the newest copy at `init` (whichever module(s) are active).
 
 Settings, client (this computer), namespace `moinen-letters` (stable whichever module is active; the button "Lettering settings" in

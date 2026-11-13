@@ -33,7 +33,7 @@ class Designer extends ApplicationV2 {
     window: { title: "LETR.Designer.Title", icon: "fa-solid fa-burst", resizable: true },
     position: { width: 940, height: 660 },
     actions: {
-      prev: Designer.#prev, next: Designer.#next, play: Designer.#togglePlay, reroll: Designer.#reroll, backdrop: Designer.#backdrop,
+      prev: Designer.#prev, next: Designer.#next, play: Designer.#togglePlay, reroll: Designer.#reroll, drawWord: Designer.#drawWord, backdrop: Designer.#backdrop,
       playHere: Designer.#playHere, showAll: Designer.#showAll, saveStyle: Designer.#saveStyle, deleteStyle: Designer.#deleteStyle,
       macro: Designer.#macro, copy: Designer.#copy, pal: Designer.#pal
     }
@@ -44,7 +44,7 @@ class Designer extends ApplicationV2 {
     this.state = state;
     this.L = state.engine;
     this.f = { text: o.text ?? "KRAK!", style: "", mood: "auto", own: false, sound: { loud: 0.7, sharp: 0.7, long: 0.3, pitch: 0, rough: 0.4, peak: 0.3 },
-      font: "", palette: "", in: "", holdKind: "", out: "", tempo: 1, hold: "", space: "world", layer: "", magnitude: 0.5, scale: 1,
+      font: "", palette: "", in: "", holdKind: "", out: "", tempo: 1, hold: "", space: "world", layer: "", kind: "", magnitude: 0.5, scale: 1,
       seed: rndSeed(), ...(o.form ?? {}) };
     this.pic = 0; this.playing = true; this.paper = true; this.cache = new Map(); this.t0 = 0; this.raf = 0;
   }
@@ -98,6 +98,8 @@ class Designer extends ApplicationV2 {
       <section class="letr-d-form">
         <div class="letr-word"><label for="letr-word-in">${esc(T("Designer.Word"))}</label>
           <input id="letr-word-in" type="text" name="text" value="${esc(f.text)}" placeholder="${esc(T("Designer.WordPh"))}" maxlength="80" spellcheck="false" autocomplete="off"></div>
+        <div class="letr-row letr-style-row"><label>${esc(T("Designer.Kind"))}</label>${this.kindSelect()}
+          <button type="button" class="letr-ib" data-action="drawWord" data-el="draw" data-tooltip="${esc(T("Designer.DrawWord"))}" aria-label="${esc(T("Designer.DrawWord"))}"${f.kind ? "" : " disabled"}><i class="fa-solid fa-shuffle"></i></button></div>
         <div class="letr-row letr-style-row"><label>${esc(T("Designer.Style"))}</label>${sel("style", styles.map((s) => [s.name, s.label ?? s.name]), f.style, T("Designer.StyleNone"))}
           <button type="button" class="letr-ib" data-action="saveStyle" data-tooltip="${esc(T("Designer.SaveStyleHint"))}" aria-label="${esc(T("Designer.SaveStyle"))}"><i class="fa-solid fa-floppy-disk"></i></button>
           <button type="button" class="letr-ib letr-danger" data-action="deleteStyle" data-el="delstyle" data-tooltip="${esc(T("Designer.DeleteStyle"))}" aria-label="${esc(T("Designer.DeleteStyle"))}"${f.style ? "" : " disabled"}><i class="fa-solid fa-trash"></i></button></div>
@@ -145,6 +147,31 @@ class Designer extends ApplicationV2 {
   }
   _replaceHTML(result, content) { content.replaceChildren(result); }
 
+  /* WORD's vocabulary: a sound kind gives a fitting word (in the table's language) and its mood */
+  kindSelect() {
+    const list = this.L.vocab?.list?.(game.i18n.lang) ?? [];
+    const groups = new Map();
+    for ( const k of list ) { if ( !groups.has(k.groupLabel) ) groups.set(k.groupLabel, []); groups.get(k.groupLabel).push(k); }
+    return `<select name="kind"><option value="">${esc(T("Designer.KindNone"))}</option>${[...groups].map(([g, ks]) => `<optgroup label="${esc(g)}">${ks.map((k) => `<option value="${esc(k.id)}"${k.id === this.f.kind ? " selected" : ""}>${esc(k.label)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+  }
+  drawWord() {
+    const f = this.f;
+    if ( !f.kind || !this.L.word ) return;
+    try {
+      const w = this.L.word(f.kind, { lang: game.i18n.lang, loud: f.own ? f.sound.loud : undefined, avoid: [f.text] });
+      f.text = w.text;
+      const mood = w.play?.mood ?? w.mood;
+      if ( MOOD_IDS.includes(mood) ) f.mood = mood;
+      if ( Number.isFinite(w.play?.magnitude) ) f.magnitude = w.play.magnitude;
+      const el = this.element;
+      el.querySelector('input[name="text"]').value = f.text;
+      el.querySelector('select[name="mood"]').value = f.mood;
+      const mg = el.querySelector('input[name="magnitude"], range-picker[name="magnitude"]');
+      if ( mg ) { mg.value = f.magnitude; const out = mg.closest(".letr-range")?.querySelector("output"); if ( out ) out.textContent = fmt(f.magnitude); }
+      this.replan();
+    } catch ( e ) { console.warn("LETR | word of a kind", e); }
+  }
+
   layerSelect() {
     const ch = this.L.layerChoices(this.f.space, game.i18n.lang);
     const def = this.L.defaults[this.f.space];
@@ -182,6 +209,7 @@ class Designer extends ApplicationV2 {
     else if ( n === "own" ) f.own = t.checked;
     else if ( ["tempo", "magnitude", "scale"].includes(n) ) f[n] = Number(t.value);
     else if ( n === "space" ) { if ( !t.checked ) return; f.space = t.value; this.$("layer").innerHTML = this.layerSelect(); }
+    else if ( n === "kind" ) { f.kind = t.value; this.$("draw").disabled = !f.kind; if ( f.kind ) return this.drawWord(); return; }
     else if ( n === "style" ) { f.style = t.value; this.$("delstyle").disabled = !f.style; this.applyStyle(t.value); }
     else f[n] = t.value;
     const out = t.closest(".letr-range")?.querySelector("output"); if ( out ) out.textContent = fmt(t.value);
@@ -292,6 +320,7 @@ class Designer extends ApplicationV2 {
   static #prev() { this.pause(); this.go(this.pic - 1); }
   static #next() { this.pause(); this.go(this.pic + 1); }
   static #togglePlay() { this.togglePlay(); }
+  static #drawWord() { this.drawWord(); }
   static #reroll() { this.f.seed = rndSeed(); this.element.querySelector('input[name="seed"]').value = this.f.seed; this.replan(); }
   static #backdrop() { this.paper = !this.paper; this.$("panel").classList.toggle("is-map", !this.paper); }
   static #pal(e, btn) {

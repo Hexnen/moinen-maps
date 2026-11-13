@@ -1,4 +1,4 @@
-/* LETR tools (contract v5): the engine's own settings, authoring API, networking helper, accessibility and windows, ONCE for every
+/* LETR tools (contract v6): the engine's own settings, authoring API, networking helper, accessibility and windows, ONCE for every
    caller, whichever module(s) carry the engine. Both copies of scripts/letters/ import this file (index.mjs); at `init` the copy with
    the highest VERSION wins (one registration), exactly like the engine itself.
 

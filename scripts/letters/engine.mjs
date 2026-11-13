@@ -992,6 +992,8 @@ export function createEngine(base) {
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
   function stream(o0 = {}) {
     const o = { ...(o0 && typeof o0 === "object" ? o0 : {}) };
+    /* WORD (v5): a sound kind instead of a text: the vocabulary gives the syllables and the mood */
+    if ( o.kind != null && o.text == null && !(Array.isArray(o.syllables) && o.syllables.length) ) { const w = vocab.word(o.kind, { ...o, stream: true }); Object.assign(o, { mood: o.mood ?? w.mood, syllables: w.syllables }); }
     /* FXLE F20: numbers checked; a bad one is ignored with one warning */
     const num = (k, ok, d) => {
       if ( o[k] == null ) return d;
@@ -999,8 +1001,6 @@ export function createEngine(base) {
       warnOnce(`stream:${k}`, `LETR | stream option ${k} = ${String(o[k])} ignored (not a usable number)`);
       return d;
     };
-    /* WORD (v5): a sound kind instead of a text: the vocabulary gives the syllables and the mood */
-    if ( o.kind != null && o.text == null && !(Array.isArray(o.syllables) && o.syllables.length) ) { const w = vocab.word(o.kind, { ...o, stream: true }); Object.assign(o, { mood: o.mood ?? w.mood, syllables: w.syllables }); }
     const space = o.space === "world" ? "world" : "screen";
     const syl = Array.isArray(o.syllables) && o.syllables.length ? o.syllables.map(String) : syllablesOf(o.text ?? "RA-TA-TA");
     const every = num("every", (v) => v >= 20, 110), life = num("life", (v) => v > 0, o.orbit ? 720 : o.path ? 520 : 340);
