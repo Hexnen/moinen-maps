@@ -40,6 +40,10 @@ let purging = false;
 
 export const tell = (kind) => Hooks.callAll("moinenMapsFire", kind);
 export const params0 = () => params;
+/** Every stroke of the layer as this client holds it (LMAP sfx.mjs reads it: bursts, dust and put-out fires too; read only). */
+export const allStrokes = () => strokes;
+/** Does this client show the layer? (LMAP sfx.mjs) */
+export const shownHere = () => !!canvas?.scene && shown();
 // (the panel's list: every stroke still burning - a preset's timed fire too, whose out time is still to come: model.burningAt)
 export const list = () => { const now = sharedNow(); return [...strokes.values()].filter((s) => M.burningAt(s, now)).sort(M.byOrder); };
 
