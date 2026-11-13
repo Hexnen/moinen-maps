@@ -16,3 +16,5 @@ from invincible-plus-ultra's fonts/ofl (Anton, Bangers, Patrick Hand, which came
 | fonts/sigmar/Sigmar-Regular.ttf | Sigmar | The Sigmar One Project Authors | github.com/google/fonts/tree/main/ofl/sigmar | 209084 |
 | fonts/knewave/Knewave-Regular.ttf | Knewave (Reserved Font Name "Knewave") | Tyler Finck | github.com/google/fonts/tree/main/ofl/knewave | 32460 |
 | fonts/rubikwetpaint/RubikWetPaint-Regular.ttf | Rubik Wet Paint | The Rubik Filtered Project Authors | github.com/google/fonts/tree/main/ofl/rubikwetpaint | 442628 |
+| fonts/squadaone/SquadaOne-Regular.ttf | Squada One (Reserved Font Names "Squada", "Squada One") | Admix Designs (2011) | github.com/google/fonts/tree/main/ofl/squadaone | 19072 |
+| fonts/michroma/Michroma-Regular.ttf | Michroma | The Michroma Project Authors | github.com/google/fonts/tree/main/ofl/michroma | 64344 |

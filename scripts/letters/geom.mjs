@@ -134,3 +134,33 @@ export function flames(contours, R, amount, len, phase = 0) {
   }
   return out;
 }
+
+/* LOOK: ink cracks of a letter, as polylines: they start on the outline and run inward, scale-free (lengths in parts of the letter's
+   height), so the same cracks come out of the glyph (legibility check) and of the placed letter (painting) */
+export function crackLines(contours, seed, n = 2) {
+  const out = [];
+  if ( !contours.length ) return out;
+  let big = contours[0]; for ( const c of contours ) if ( Math.abs(area(c)) > Math.abs(area(big)) ) big = c;
+  const b = bbox(contours), h = Math.max(0.1, b.y1 - b.y0);
+  let s = seed >>> 0; const r = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+  const N = normals(big), q = big.length / 2;
+  for ( let k = 0; k < n; k++ ) {
+    const i = Math.floor(((k + r() * 0.6) / n) * q) % q;
+    let x = big[2 * i], y = big[2 * i + 1], a = Math.atan2(-N[2 * i + 1], -N[2 * i]);
+    const line = [x, y], steps = 3 + Math.floor(r() * 2);
+    for ( let t = 0; t < steps; t++ ) { a += (r() - 0.5) * 1.1; x += Math.cos(a) * h * 0.075; y += Math.sin(a) * h * 0.075; line.push(x, y); }
+    out.push(line);
+    if ( r() < 0.5 ) { const m = 2 + 2 * Math.floor(r() * (steps - 1)); let bx = line[m], by = line[m + 1], ba = a + (r() < 0.5 ? 1 : -1) * 0.9; const br = [bx, by]; for ( let t = 0; t < 2; t++ ) { bx += Math.cos(ba) * h * 0.06; by += Math.sin(ba) * h * 0.06; br.push(bx, by); } out.push(br); }
+  }
+  return out;
+}
+/* thin closed quads along polylines (to cut strokes out of a raster) */
+export function strokeQuads(lines, w) {
+  const out = [];
+  for ( const l of lines ) for ( let i = 0; i + 3 < l.length; i += 2 ) {
+    const ax = l[i], ay = l[i + 1], bx = l[i + 2], by = l[i + 3], len = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / len * w / 2, ny = (bx - ax) / len * w / 2;
+    const qd = [ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny, ax - nx, ay - ny];
+    out.push(area(qd) < 0 ? [qd[6], qd[7], qd[4], qd[5], qd[2], qd[3], qd[0], qd[1]] : qd);   // one winding: overlaps add up, never cancel
+  }
+  return out;
+}

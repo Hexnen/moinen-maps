@@ -13,6 +13,7 @@ import { area } from "./font.mjs";
 import { rng } from "./rng.mjs";
 import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
 import { checkWords } from "./check-words.mjs";
+import { checkLook } from "./check-look.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -189,7 +190,10 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
 
 /* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs); before the tools, whose authoring checks add moods */
 checkWords(ok, bank);
-/* 8d. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
+
+/* 8d. the look layer (LOOK; checks in check-look.mjs) */
+checkLook(ok, bank);
+/* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8e. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
 await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
