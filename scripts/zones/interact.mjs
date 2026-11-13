@@ -349,10 +349,97 @@ function lookAll(g, skipped) {
   const t0 = globalThis.performance?.now?.() ?? Date.now();
   let cover = null;
   if ( !quietHits.coverOff ) { try { cover = coverCells(g, skipped); } catch ( err ) { cover = null; console.warn(`${MODULE_ID} | zones: cover`, err); } }
-  let looked = g.free.length;
-  if ( cover ) looked = View.floodFree(g.free, cover, g.cols, g.rows, (i) => freeCell(g, i));
+  let looked = g.free.length, hits = g.free.length;
+  if ( cover ) {
+    // (a cell found covered by a solid box: every other cell of that box is covered too - not hit-tested again; never where the
+    // pick's own banner or chips lie, which answer "the map")
+    const known = new Int8Array(g.free.length).fill(-1), boxes = new Map(), clips = new Map(), mine = oursCells(g);
+    hits = 0;
+    looked = View.floodFree(g.free, cover, g.cols, g.rows, (i) => {
+      if ( known[i] >= 0 ) return known[i];
+      hits++;
+      const e = cellAt(g, i);
+      if ( e === g.view || ours(e) ) return 1;
+      if ( quietHits.solidOff || !e ) return 0;
+      let s = boxes.get(e);
+      if ( s === undefined ) { try { s = solidBox(e, clips); } catch { s = null; } boxes.set(e, s); }
+      if ( s ) {
+        const c0 = Math.max(0, Math.ceil(s.left / CELL - 0.5)), c1 = Math.min(g.cols - 1, Math.floor(s.right / CELL - 0.5));
+        const r0 = Math.max(0, Math.ceil(s.top / CELL - 0.5)), r1 = Math.min(g.rows - 1, Math.floor(s.bottom / CELL - 0.5));
+        for ( let r = r0; r <= r1; r++ ) for ( let c = c0; c <= c1; c++ ) { const j = r * g.cols + c, x = (c + 0.5) * CELL, y = (r + 0.5) * CELL;
+          if ( !mine[j] && x > s.left && x < s.right && y > s.top && y < s.bottom ) known[j] = 0; }
+      }
+      return 0;
+    });
+  }
   else for ( let i = 0; i < g.free.length; i++ ) g.free[i] = freeCell(g, i);
-  quietHits.look = { cells: g.free.length, looked, cover: !!cover, free: g.free, ms:+((globalThis.performance?.now?.() ?? Date.now()) - t0).toFixed(2) };
+  quietHits.look = { cells: g.free.length, looked, hits, cover: !!cover, free: g.free, ms: +((globalThis.performance?.now?.() ?? Date.now()) - t0).toFixed(2) };
+}
+/** The element a click at the centre of cell `i` reaches. */
+const cellAt = (g, i) => document.elementFromPoint(((i % g.cols) + 0.5) * CELL, (Math.floor(i / g.cols) + 0.5) * CELL);
+/** The cells the pick's own banner and chips lie over (with a margin): they answer "the map", nothing is inferred there. */
+function oursCells(g) {
+  const out = new Uint8Array(g.free.length);
+  for ( const e of document.querySelectorAll?.(".mm-z-pickway, .mm-z-pick") ?? [] ) View.markCells(out, g.cols, g.rows, CELL, e.getBoundingClientRect(), CELL);
+  return out;
+}
+/**
+ * pfb: the part of the window where an element that a hit test just reached answers every hit test (or something above it does) - so
+ * no cell there is the map: { left, top, right, bottom }, or null when that cannot be told for sure. A hit test reached its box (or
+ * its words or an in-flow pseudo-element, painted with the box), so that box lies above the map, at every point (the order of
+ * painting is one for the whole page). Only an HTML box that takes hit tests all over: one rectangle (not a run of text across lines,
+ * a table part), not turned or skewed (itself and every ancestor: translated only), no clip-path, mask or clip, no positioned or
+ * transformed pseudo-element (that one could have been what was hit), no shadow root; less its rounded corners; cut to every ancestor
+ * that clips (its padding box, less its rounded corners). Smaller than the truth is always safe: those cells are hit-tested.
+ */
+const MATRIX = /^matrix\(\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),/;
+function flat(cs) {
+  if ( (cs.rotate && cs.rotate !== "none") || (cs.scale && cs.scale !== "none") || (cs.perspective && cs.perspective !== "none") ) return false;
+  if ( cs.transform === "none" || !cs.transform ) return true;
+  const m = MATRIX.exec(cs.transform);
+  return !!m && Number(m[1]) === 1 && Number(m[2]) === 0 && Number(m[3]) === 0 && Number(m[4]) === 1;
+}
+const unclipped = (cs) => (cs.clipPath ?? "none") === "none" && (cs.maskImage ?? "none") === "none" && (cs.webkitMaskImage ?? "none") === "none" && (cs.clip ?? "auto") === "auto";
+function radiusOf(cs, w, h) {
+  let r = 0;
+  for ( const k of ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomRightRadius", "borderBottomLeftRadius"] ) {
+    const v = String(cs[k] ?? "0");
+    if ( v.includes("%") ) return Math.max(w, h);
+    for ( const p of v.split(/\s+/) ) r = Math.max(r, parseFloat(p) || 0);
+  }
+  return r;
+}
+function clipOf(a, clips) {
+  if ( clips.has(a) ) return clips.get(a);
+  const cs = getComputedStyle(a);
+  let k = { ok: flat(cs) && unclipped(cs), box: null };
+  if ( k.ok && (cs.overflowX !== "visible" || cs.overflowY !== "visible" || /paint|strict|content/.test(cs.contain ?? "") || (cs.contentVisibility ?? "visible") !== "visible") ) {
+    // (client sizes are in the element's own px: scaled to the window's by its box - a zoomed interface)
+    const r = a.getBoundingClientRect(), sx = a.offsetWidth > 0 ? r.width / a.offsetWidth : 1, sy = a.offsetHeight > 0 ? r.height / a.offsetHeight : 1;
+    const x0 = r.left + a.clientLeft * sx, y0 = r.top + a.clientTop * sy, rad = radiusOf(cs, r.width, r.height) * Math.max(sx, sy, 1);
+    k.box = a.offsetWidth > 0 || a.offsetHeight > 0 ? { left: x0 + rad, top: y0 + rad, right: x0 + a.clientWidth * sx - rad, bottom: y0 + a.clientHeight * sy - rad } : { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+  clips.set(a, k);
+  return k;
+}
+function solidBox(e, clips) {
+  const HE = globalThis.HTMLElement;
+  if ( typeof HE !== "function" || !(e instanceof HE) || e.shadowRoot || e.getRootNode?.() !== document || /^(img|area|map)$/i.test(e.tagName) ) return null;
+  const cs = getComputedStyle(e);
+  if ( cs.pointerEvents === "none" || cs.visibility !== "visible" || cs.display === "inline" || /contents|table|ruby/.test(cs.display) || !flat(cs) || !unclipped(cs) ) return null;
+  for ( const p of ["::before", "::after"] ) {
+    const s = getComputedStyle(e, p);
+    if ( s.content !== "none" && s.content !== "normal" && s.display !== "none" && (s.position !== "static" || !flat(s)) ) return null;
+  }
+  if ( e.getClientRects().length !== 1 ) return null;
+  const r = e.getBoundingClientRect(), rad = radiusOf(cs, r.width, r.height) * Math.max(e.offsetWidth > 0 ? r.width / e.offsetWidth : 1, e.offsetHeight > 0 ? r.height / e.offsetHeight : 1, 1);
+  let x0 = r.left + rad, y0 = r.top + rad, x1 = r.right - rad, y1 = r.bottom - rad;
+  for ( let a = e.parentElement; a && a !== document.documentElement; a = a.parentElement ) {
+    const k = clipOf(a, clips);
+    if ( !k.ok ) return null;
+    if ( k.box ) { x0 = Math.max(x0, k.box.left); y0 = Math.max(y0, k.box.top); x1 = Math.min(x1, k.box.right); y1 = Math.min(y1, k.box.bottom); }
+  }
+  return x1 - x0 > 1 && y1 - y0 > 1 ? { left: x0, top: y0, right: x1, bottom: y1 } : null;
 }
 /** What may answer a hit test instead of the map, as the cells it lies over (null: cannot tell - every cell is looked at). */
 const COVER = { margin: 2, big: 0.03, max: 30000 };

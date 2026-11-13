@@ -818,6 +818,16 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     const asked = []; document.elementFromPoint = (x, y) => { asked.push(`${x},${y}`); return at(x, y); };
     api.safeArea();
     check(asked.includes("740,60") && asked.includes("780,60") && !asked.includes("500,300"), "a decoration reaching out of its box: followed outward from what was found covered (the cell beyond it too); the open map is not looked at");
+    // a solid box a hit test reached answers for every cell of it; a skewed one does not (its box is not where its corners are)
+    const HE0 = globalThis.HTMLElement; globalThis.HTMLElement = FakeEl;
+    for ( const p of [tracker, dock] ) Object.assign(p, { tagName: "DIV", getClientRects: () => [p.getBoundingClientRect()], getRootNode: () => document, parentElement: null, offsetWidth: 0, offsetHeight: 0 });
+    document.elementFromPoint = (x, y) => { hits++; return at(x, y); };
+    hits = 0; const solid = J(api.safeArea()), solidHits = hits;
+    const gcs1 = globalThis.getComputedStyle; globalThis.getComputedStyle = (e, p) => (!p && e === dock ? { ...gcs1(e), transform: "matrix(1, 0, -0.07, 1, 0, 0)" } : gcs1(e, p));
+    hits = 0; const skew = J(api.safeArea()), skewHits = hits;
+    globalThis.getComputedStyle = gcs1; globalThis.HTMLElement = HE0;
+    check(solid === plain && skew === plain && solidHits < fastHits && skewHits > solidHits,
+      `solid boxes: the cells of a box a hit test reached are not hit-tested again (${solidHits} hit tests, ${fastHits} without); a skewed box is (${skewHits}); the same free stretch`);
     // the map not filling the window: what lies beyond it is looked at (the page answers there, not the map)
     view.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 600, width: 600, height: 600 });
     const at0 = at; document.elementFromPoint = (x, y) => { hits++; return x >= 600 ? body : at0(x, y); };
