@@ -7,7 +7,7 @@ import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.5.0";   // LOOK (contract v7): lines, backdrops, deformation, fills, legibility, accent, look styles; 1.4.0 TOOL; 1.3.0 WORD; 1.2.1 FXLE
+export const VERSION = "1.5.0";   // LOOK (contract v7): lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look; 1.4.0 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -791,7 +791,7 @@ export function createEngine(base) {
 
   /* WORD (v5): the vocabulary layer (words.mjs): a sound kind + loudness + language -> a fitting word; sfx() letters it */
   const vocab = createVocab();
-  const VOCAB_KEYS = ["kind", "loud", "lang", "step", "template", "prefix"];
+  const VOCAB_KEYS = ["kind", "loud", "lang", "step", "template", "prefix", "long", "duration", "bangs"];
   function sfx(kind, opts = {}) {
     const w = vocab.word(kind, opts);
     const rest = Object.fromEntries(Object.entries(opts).filter(([k]) => !VOCAB_KEYS.includes(k)));
@@ -804,7 +804,7 @@ export function createEngine(base) {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
     ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(),
-    vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range,
+    vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
     _ext: ext, _settle: (plan) => settleCenter(plan, bank),

@@ -6,6 +6,7 @@
    word is the biggest, jagged = sharp/harsh, round = soft/blunt, long sounds stretch and repeat letters, rising pitch climbs, falling
    pitch sags, the word grows away from where the sound comes from, warm colours for fire, cool for air and water. */
 import { rng, hash } from "./rng.mjs";
+import { characterOf } from "./words.mjs";
 
 export const TICK = 1000 / 24;
 
@@ -232,25 +233,85 @@ export const STYLES = ["comic", "invincible"];
 const RINGS = new Set(["O", "0"]);
 const CASELIKE = /[COSUVWXZĆÓŚŹŻ]/u;   // capitals whose lower case is the same shape, smaller
 export const RING_W = 0.94;   // a ring's width in cap heights (a circle a little under the cap height wide)
-export function styleHand(hand, style, mood, sound, word, seed) {
+/* ---------- LOOK: the look says the sound (the user: «napisy pasowały wyglądem do dźwięków które opisują») ----------
+   One deliberate mapping from the sound's CHARACTER to the lettering. The character is WORD's (words.mjs characterOf: hard, heavy, wet,
+   metal, electric, heat, material, texture, contour per kind; L.word(...).play.character carries it); plain text gets its mood's. The
+   plan's own sound (sharp, rough, pitch, long: the caller's overrides and the word's stretch) wins over the kind's base values.
+   traitsOf() names the traits; styleHand (invincible) builds the hand from them; fitSound corrects a comic hand that contradicts them.
+   Pure rules, no random draws: the same sound always gets the same traits. check-look.mjs L16 checks the table over every kind. */
+const COLD = new Set(["ice", "air", "mint", "water"]);
+export function characterFor(mood, sound, given = null) {
+  const c = given && typeof given === "object" ? { ...characterOf({ mood }), ...given } : characterOf({ mood, loud: sound.loud, long: sound.long });
+  if ( !given ) Object.assign(c, { sharp: sound.sharp, rough: sound.rough, pitch: sound.pitch, sustain: sound.long });
+  return c;
+}
+export function traitsOf(mood, sound, character = null) {
+  const c = character ?? characterFor(mood, sound);
+  const loud = sound.loud;
+  return {
+    hard: c.hard >= 0.7 && loud >= 0.45,                                   // a blow, a crack: the squared heavy face, cut flat, a deep block
+    soft: c.hard <= 0.3,                                                   // a whump, a sigh, a splash: the wide round face, light, no spikes
+    heavy: c.heavy >= 0.85,                                                // a falling wall, a blast: a deep block straight down
+    light: c.pitch >= 0.5 && c.heavy <= 0.5,                               // high and slight: a shallow block thrown up
+    metallic: c.metal >= 0.6,                                              // a clang, a gun, a chime: steel, cut clean
+    electric: c.electric >= 0.9 || (c.electric >= 0.6 && ["jagged", "shaky", "gritty"].includes(c.texture)),   // sparks
+    hot: c.heat >= 0.8, warm: c.heat >= 0.3, cold: c.heat <= -0.3,         // flames / never a cold colour / a cold colour fits
+    wet: c.wet >= 0.7,                                                     // drips
+    gritty: c.texture === "gritty" && c.rough >= 0.5,                      // crumbling, grinding: a rough edge
+    sputter: mood === "fail",                                              // a fizzle: sags, sputters
+    bubbly: c.texture === "bubbly",                                        // bounces: a wavy line
+    sustained: c.sustain >= 0.7, short: c.sustain <= 0.25,                 // spacing: tight for a hit, loose for what lasts
+    rising: c.contour === "rise", arc: c.contour === "arc",                // the line: grows to its end / flies by in an arc
+    fading: c.contour === "fall" && c.sustain >= 0.5 && c.hard <= 0.4      // dies away: shrinks
+  };
+}
+/* the comic hands: change only what contradicts the sound (no new random draws: a seed keeps everything else) */
+export function fitSound(hand, T, sound, avoid = null) {
+  /* a swapped font keeps the recent-hands memory: the first fitting face the words on screen do not use */
+  const used = avoid?.font ?? new Set();
+  const swap = (list) => list.find((f) => !used.has(f)) ?? list[0];
+  if ( T.hard ) {
+    if ( hand.treat === "bubble" ) hand.treat = "plain";
+    if ( ["titan", "patrick", "sigmar"].includes(hand.font) ) hand.font = swap(sound.long < 0.4 ? ["anton", "blackops", "bangers"] : ["bangers", "anton", "bungee"]);
+  }
+  if ( T.soft ) {
+    if ( hand.treat === "jag" ) hand.treat = "plain";
+    if ( ["blackops", "anton"].includes(hand.font) ) hand.font = swap(["titan", "sigmar", "patrick"]);
+  }
+  if ( T.sputter ) { if ( ["swell", "stairUp", "arc", "fan", "bulge"].includes(hand.env) ) hand.env = "sag"; if ( hand.treat === "plain" ) hand.treat = "rough"; }
+  if ( !T.wet && hand.treat === "drip" ) hand.treat = "plain";
+  const setFam = (fam, i = 0) => { const pal = COLORS[fam][i]; hand.colorFam = fam; hand.pal = { ...pal, fill: pal.fill.slice(), out2: pal.out2[0] }; hand.ink = pal.ink; };
+  if ( T.metallic ) {
+    if ( ["bubble", "drip"].includes(hand.treat) || hand.treat === "rough" && !T.gritty ) hand.treat = "plain";   // grinding metal keeps its grit
+    if ( !T.warm && !["ice", "stone"].includes(hand.colorFam) ) setFam("stone", 1);
+  }
+  if ( T.warm && COLD.has(hand.colorFam) ) setFam(T.hot ? "ember" : "hot");
+  if ( T.heavy ) hand.depth = Math.max(hand.depth, 0.12);
+  if ( T.light && hand.depth > 0.09 ) hand.depth = 0.09;
+  hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
+  return hand;
+}
+export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(mood, sound)) {
   if ( style !== "invincible" ) return hand;
-  const R3 = rng((seed ^ 0x1bad5eed) >>> 0), T = traitsOf(mood, sound);
+  const R3 = rng((seed ^ 0x1bad5eed) >>> 0);
   const rings = /([OÓ0Q])\1/u.test(word);
-  /* weight and edge: hard = the squared condensed face; soft (and rings to draw) = the wide round face, lighter */
-  hand.font = T.hard ? "squada" : T.soft || rings ? "michroma" : R3.w({ squada: 3, michroma: 0.4 });
-  const fam = T.metallic ? "sky" : R3.w(INV_BY_MOOD[mood] ?? { bone: 1 });
+  /* weight and edge: hard = the squared condensed face; soft, bouncy (and rings to draw) = the wide round face */
+  hand.font = T.hard ? "squada" : T.soft || T.bubbly || rings ? "michroma" : R3.w({ squada: 3, michroma: 0.4 });
+  /* colour: steel for metal and cold sounds, amber for fire, warm for warm sounds, else the mood's */
+  const warmPick = { amber: 2, suit: 1, bone: 1, ...(INV_BY_MOOD[mood]?.blood ? { blood: 3 } : {}) };
+  const fam = T.metallic && !T.warm || T.cold ? "sky" : T.hot ? "amber" : R3.w(T.warm ? warmPick : INV_BY_MOOD[mood] ?? { bone: 1 });
   const pal = INV[fam];
   hand.colorFam = "inv"; hand.invPal = fam;
   hand.pal = { ...pal, fill: pal.fill.slice(), out2: "#ffffff" }; hand.ink = pal.ink;
-  /* the edge says the matter: sparks for electricity, flame for heat, drips for wet, grit for a crumbling crash, a sputter for a fizzle */
+  /* the edge says the matter: sparks for electricity, flame for heat, drips for wet, grit for grinding, a sputter for a fizzle */
   hand.treat = T.electric ? "jag" : T.hot ? "flame" : T.wet ? "drip" : T.gritty || T.sputter ? "rough" : "plain";
   hand.tex = "none"; hand.outline = "ink"; hand.out2W = 0; hand.inflate = 0;
   hand.inkW = hand.font === "michroma" ? 0.03 : 0.036;
   if ( hand.font === "michroma" ) hand.inflate = 0.045;   // its strokes are hairlines at token size: thickened in the face colour
-  /* hard: one flat colour, cut like a stencil; otherwise a two-tone face */
+  /* hard and metal: one flat colour, cut like a stencil; otherwise a two-tone face */
   hand.fill = T.hard || T.metallic ? "flat" : "vgrad";
   if ( hand.fill === "flat" ) hand.pal.fill = [pal.fill[1], pal.fill[1], pal.fill[1]];
-  /* the block: loud = deep, low = deeper and straight down (heavy), high = shallow and thrown up (lifting) */
+  /* the block: loud = deep, heavy = deeper and straight down, high = shallow and thrown up */
   hand.depth = Math.min(T.light ? 0.09 : 0.24, 0.06 + 0.1 * sound.loud + (T.heavy ? 0.06 : 0) + (T.hard ? 0.02 : 0) + R3.f(0, 0.015));
   hand.depthAng = Math.PI * (T.light ? -0.3 : T.heavy ? 0.5 : 0.28);
   hand.shadow = { d: 0.05, ang: Math.PI * 0.3, a: 0.22 }; hand.shadowStyle = "flat";
@@ -263,64 +324,13 @@ export function styleHand(hand, style, mood, sound, word, seed) {
   /* loud = a big contrast between the body and its lead-in */
   hand.contrast = 1.2 + 0.6 * sound.loud;
   hand.prefix = sound.loud >= 0.6 && R3.chance(0.6) ? R3.f(0.4, 0.55) : 0;
-  /* the line: rising = grows toward its end, fading = shrinks away, a fly-by = streak, heavy and near = perspective, a hit = flat */
-  hand.env = T.rising ? "swell" : T.fading ? "shrink" : T.sustained && mood === "whoosh" ? "streak" : T.heavy ? "persp" : T.sputter ? "sag" : "flat";
+  /* the line: rising = grows to its end, fading = shrinks away, a fly-by = arc (streak when it lasts), heavy = perspective, bouncy = wave, a hit = flat */
+  hand.env = T.rising ? "swell" : T.fading ? "shrink" : T.sputter ? "sag" : T.arc ? (T.sustained ? "streak" : "arc") : T.heavy ? "persp" : T.bubbly ? "wave" : "flat";
   hand.warp2 = null; hand.profile2 = null;
   hand.counters = "none"; hand.capFont = null; hand.multi = "sweep";
   hand.link = R3.chance(0.9);
   hand.backPick = R3.w({ plate: 2, star: 1, cloud: mood === "boom" || mood === "fire" ? 2 : 0.3 });
   hand.style = "invincible";
-  hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
-  return hand;
-}
-
-/* ---------- LOOK: the look says the sound (the user's order: "the shapes fit and depict the sound") ----------
-   One deliberate mapping from a sound's character to the letterforms, read from the plan's sound (loud, sharp, long, pitch, rough,
-   peak; the vocabulary's kinds carry it, a mood gives it for plain text) and the mood. Pure rules, no random draws: the same sound
-   always gets the same traits. traitsOf() names them; styleHand (invincible) builds the hand from them; fitSound corrects a comic
-   hand that contradicts them. check-look.mjs checks the table. */
-const COLD = new Set(["ice", "air", "mint", "water"]);
-const HOT_MOODS = new Set(["fire", "pain", "roar", "boom", "impact", "crash"]);   // a cold colour never letters these
-export function traitsOf(mood, sound) {
-  const s = sound;
-  return {
-    hard: s.sharp >= 0.7 && s.loud >= 0.5,          // a blow, a crack: angular, heavy, cut edges, a deep block
-    soft: s.sharp <= 0.3,                           // a whump, a sigh, a splash: round, light, no spikes
-    heavy: s.pitch <= -0.4 && s.loud >= 0.5,        // low and loud: a deep block straight down, the word close to the reader
-    light: s.pitch >= 0.5,                          // high: a shallow block thrown upward, lifting
-    sustained: s.long >= 0.7,                       // lasts: a looser, travelling setting
-    short: s.long <= 0.25,                          // over at once: tight, compact
-    rising: s.peak >= 0.65, fading: s.peak <= 0.3 && s.long >= 0.5,
-    electric: mood === "zap", hot: mood === "fire", wet: mood === "splash",
-    gritty: s.rough >= 0.85 && (mood === "crash" || mood === "roar"),
-    sputter: mood === "fail",
-    metallic: s.sharp >= 0.8 && s.rough <= 0.3 && s.pitch >= 0.2 && mood !== "zap",   // a clang, glass: hard, bright, ringing
-    hotMood: HOT_MOODS.has(mood)
-  };
-}
-/* the comic hands: change only what contradicts the sound (no new random draws: a seed keeps everything else) */
-export function fitSound(hand, mood, sound) {
-  const T = traitsOf(mood, sound);
-  if ( T.hard ) {
-    if ( hand.treat === "bubble" ) hand.treat = "plain";
-    if ( ["titan", "patrick", "sigmar"].includes(hand.font) ) hand.font = sound.long < 0.4 ? "anton" : "bangers";
-  }
-  if ( T.soft ) {
-    if ( hand.treat === "jag" ) hand.treat = "plain";
-    if ( ["blackops", "anton"].includes(hand.font) ) hand.font = "titan";
-  }
-  if ( T.sputter ) { if ( ["swell", "stairUp", "arc", "fan", "bulge"].includes(hand.env) ) hand.env = "sag"; if ( hand.treat === "plain" ) hand.treat = "rough"; }
-  if ( T.hotMood && COLD.has(hand.colorFam) ) {
-    const fam = mood === "pain" ? "blood" : mood === "roar" ? "beast" : mood === "fire" ? "ember" : "hot";
-    const pal = COLORS[fam][0]; hand.colorFam = fam; hand.pal = { ...pal, fill: pal.fill.slice(), out2: pal.out2[0] }; hand.ink = pal.ink;
-  }
-  if ( !T.wet && hand.treat === "drip" ) hand.treat = "plain";
-  if ( T.metallic ) {
-    if ( ["bubble", "rough", "drip"].includes(hand.treat) ) hand.treat = "plain";
-    if ( !T.hotMood && !["ice", "stone"].includes(hand.colorFam) ) { const pal = COLORS.stone[1]; hand.colorFam = "stone"; hand.pal = { ...pal, fill: pal.fill.slice(), out2: pal.out2[0] }; hand.ink = pal.ink; }
-  }
-  if ( T.heavy ) hand.depth = Math.max(hand.depth, 0.12);
-  if ( T.light && hand.depth > 0.09 ) hand.depth = 0.09;
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   return hand;
 }
@@ -512,7 +522,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
   /* LOOK: interlocked rings: in a run of the same round letter each one passes through the one before it (paint.mjs draws the
      over-under); sizes alternate so the rings read as two, not as one blot */
   const linkTo = chars.map((c, i) => (look && hand.link && i > 0 && c === chars[i - 1] && RINGS.has(c) && !(i < pre) ? i - 1 : -1));
-  for ( let i = 0, r = 0; i < n; i++ ) { r = linkTo[i] >= 0 ? r + 1 : 0; if ( r % 2 ) sizes[i] *= 0.82; }
+  for ( let i = 0, r = 0; i < n; i++ ) { r = linkTo[i] >= 0 ? r + 1 : 0; if ( r % 2 ) sizes[i] = 0.8 * Math.min(sizes[i], sizes[i - 1]); }   // against its neighbour: an accent or a growing line never evens them out
   if ( linkTo.some((v) => v >= 0) && hand.stack === "merge" ) hand.stack = "stack";   // rings need each its own outline
   /* the linked letters are drawn as true rings (shape.mjs): round, whatever the font's O looks like */
   const ring = chars.map((c, i) => linkTo[i] >= 0 || linkTo[i + 1] === i);
@@ -875,7 +885,8 @@ export function makePlan(text, opts, fonts, memory) {
   }
   /* a caller may pin the hand of an earlier plan (a stream of syllables lettered by one hand); the rng still advances the same way */
   const lstyle = STYLES.includes(opts.look?.style) ? opts.look.style : "comic";
-  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), mood, sound) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed);
+  const character = characterFor(mood, sound, opts.character), traits = traitsOf(mood, sound, character);
+  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), traits, sound, avoid) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed, traits);
   const hand = opts.hand && typeof opts.hand === "object" ? { ...chosen, ...JSON.parse(JSON.stringify(opts.hand)) }
     : typeof opts.hand === "string" ? handFromId(opts.hand, chosen) : chosen;
   if ( Array.isArray(opts.colors) && opts.colors.length ) {
@@ -909,7 +920,7 @@ export function makePlan(text, opts, fonts, memory) {
   /* stacked lines and columns: the cap height shrinks so the block, not one line, gets the word's size */
   const nl = lay.lines?.length ?? 1;
   const blockK = lay.arrange === "vertical" ? 0.62 : 1 / (1 + 0.3 * (nl - 1));
-  return { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud, accent,
+  return { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud, accent, character, traits,
     sizeK: (0.62 + 0.7 * sound.loud) * blockK };
 }
 

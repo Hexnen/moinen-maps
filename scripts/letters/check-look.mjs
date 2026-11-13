@@ -157,17 +157,18 @@ export function checkLook(ok, bank) {
     const looks = new Set(); let n = 0;
     for ( const id of KIND_IDS ) for ( const loud of [0.35, 0.8] ) for ( let k = 0; k < 3; k++ ) for ( const style of STYLES ) {
       const w = V.word(id, { lang: "pl", loud, seed: `${id}${k}` });
-      const p = plan(w.text, { ...w.play, seed: `${id}${k}`, look: { style } }), H = p.hand, T = traitsOf(p.mood, p.sound), tag = `sound ${style} ${id} "${w.text}" ${H.id}`;
+      const p = plan(w.text, { ...w.play, seed: `${id}${k}`, look: { style } }), H = p.hand, T = p.traits, tag = `sound ${style} ${id} "${w.text}" ${H.id}`;
       if ( NUMBER_RE.test(w.text) ) continue;
       n++;
       if ( style === "invincible" ) looks.add(`${KINDS[id].group}|${H.font}|${H.treat}|${H.env}|${H.fill}|${Math.sign(H.depthAng)}|${H.invPal}`);
       if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style === "comic" || (H.font === "squada" && H.fill === "flat")), `${tag}: a hard sound gets a round or soft face`);
       if ( T.soft ) ok(H.treat !== "jag" && !["blackops", "anton"].includes(H.font) && (style === "comic" || H.font === "michroma"), `${tag}: a soft sound gets spikes or a hard face`);
-      if ( T.hotMood ) ok(!COLD.includes(H.colorFam) && H.invPal !== "sky", `${tag}: a hot sound in a cold colour`);
+      if ( T.warm ) ok(!COLD.includes(H.colorFam) && H.invPal !== "sky", `${tag}: a warm sound in a cold colour`);
+      if ( T.cold && style === "invincible" ) ok(H.invPal === "sky", `${tag}: a cold sound not in a cold colour`);
       if ( !T.wet ) ok(H.treat !== "drip", `${tag}: a dry sound drips`);
       if ( T.heavy ) ok(H.depth >= 0.12 && (style === "comic" || Math.abs(H.depthAng - Math.PI / 2) < 1e-9), `${tag}: a heavy sound without a deep block`);
       if ( T.light ) ok(H.depth <= 0.09 + 1e-9 || style === "comic" && H.depth <= 0.09, `${tag}: a high sound with a deep block (${H.depth})`);
-      if ( T.metallic ) ok(!["bubble", "rough", "drip"].includes(H.treat) && (style === "comic" ? ["stone", "ice"].includes(H.colorFam) || T.hotMood : H.invPal === "sky" && H.fill === "flat"), `${tag}: a metallic sound not cut and steel`);
+      if ( T.metallic ) ok(!["bubble", "drip"].includes(H.treat) && (H.treat !== "rough" || T.gritty) && (style === "comic" ? ["stone", "ice"].includes(H.colorFam) || T.warm : (H.invPal === "sky" || T.warm) && H.fill === "flat"), `${tag}: a metallic sound not cut and steel`);
       if ( style === "invincible" ) {
         ok(H.treat === (T.electric ? "jag" : T.hot ? "flame" : T.wet ? "drip" : T.gritty || T.sputter ? "rough" : "plain"), `${tag}: the edge does not say the matter`);
         if ( T.light ) ok(H.depthAng < 0, `${tag}: a high sound's block not thrown up`);
@@ -177,8 +178,11 @@ export function checkLook(ok, bank) {
       if ( T.sputter ) ok(!["swell", "stairUp", "arc", "fan", "bulge"].includes(H.env), `${tag}: a fizzle that rises`);
     }
     ok(n > 300 && looks.size >= 24, `sound: ${n} words, ${looks.size} different Invincible looks across the kinds`);
-    const same = (a, b) => { const x = plan("KRAK", { mood: "crack", seed: 9, sound: a }).hand.id, y = plan("KRAK", { mood: "crack", seed: 9, sound: a }).hand.id; return x === y; };
-    ok(same({ sharp: 0.9 }), "sound: the mapping draws nothing random");
+    ok(KIND_IDS.every((id) => traitsOf(KINDS[id].mood, { ...KINDS[id].sound, loud: 0.8 }) && true), "sound: every kind has traits");
+    const wet = plan("KRAK", { mood: "crack", seed: 9, character: { wet: 1 }, look: { style: "invincible" } });
+    ok(wet.traits.wet && wet.hand.treat === "drip", "sound: a caller's character drives the look (WORD's play.character)");
+    const c1 = plan("KRAK!", { mood: "crack", seed: 9 }), c2 = plan("KRAK!", { mood: "crack", seed: 9 });
+    ok(c1.hand.id === c2.hand.id && JSON.stringify(c1.traits) === JSON.stringify(c2.traits), "sound: the mapping is deterministic");
   }
   /* L15. no letter turns lower case or vanishes by size (the dice review: CRUSH! read "cRUsh!", STRES +1 read "STRES !1") */
   {
