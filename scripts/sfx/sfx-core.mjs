@@ -28,6 +28,10 @@ export const GATHER_MS = 70;         // events of one moment are gathered this l
 export const CAPS = { high: { sec: 4, alive: 12, live: 3 }, medium: { sec: 2, alive: 8, live: 2 }, low: { sec: 0, alive: 4, live: 1 } };
 /** a word's moment this far gone (ms past the end of its own sound) is not played any more (its event is over) */
 export const LATE_MS = 700;
+/** the share of the engine's size ceiling (its `ceilK`) a map word may use: the main word of the biggest cave-in stays under about
+    two fifths of the screen width so the destruction it letters and the panels around it stay readable; pre words and satellites
+    under a quarter (they are parts of the sound) */
+export const CEIL_K = { main: 0.6, pre: 0.38, sec: 0.38 };
 /** a fire word waiting for its flames to show waits at most this long (a client whose fire never draws: no word) */
 export const GATE_MAX_MS = 6000;
 
@@ -57,7 +61,7 @@ export const VOICES = {
   flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
   scorch:  { kinds: ["fire", "crackle"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
   splash:  { kinds: ["splash"], prio: 6, w: 0.75, ms: 700, area: 0.8, cover: 0.2, stage: {} },
-  arcane:  { kinds: ["psychic", "powerup"], prio: 6, w: 0.75, ms: 1100, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
+  arcane:  { kinds: ["powerup", "psychic"], prio: 6, w: 0.75, ms: 1100, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   slash:   { kinds: ["slash"], prio: 5, w: 0.7, ms: 300, area: 0.7, cover: 0.15, stage: { in: "zip", out: "shards" } },
   crack:   { kinds: ["crack"], prio: 4, w: 0.6, ms: 200, area: 0.6, cover: 0.1, stage: { in: "crackIn", out: "shards" } },
   rumble:  { kinds: ["rumble"], prio: 4, w: 0.8, ms: 2200, area: 0.8, cover: 0.3, stage: { holdKind: "rattle", on: 3 } },
@@ -401,6 +405,12 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
     stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift };
 }
 
+/** A gun's rattle: the beats (ms from its first round) of its stream's syllables - 3 to 8, spread evenly over its walk. */
+export function streamBeats(walk) {
+  const T = Math.max(1, walk?.at?.(-1)?.ms || 1), n = Math.min(8, Math.max(3, walk?.length ?? 0));
+  return [...new Set(Array.from({ length: n }, (_, i) => Math.round((T * i) / (n - 1))))];
+}
+
 /** The words a client keeps when it has room for `room` more: the main word first, then the pre word, then satellites (by time). */
 export function capWords(words, room) {
   if ( !(room > 0) ) return [];
@@ -418,7 +428,9 @@ export const tooLate = (w, now) => now - w.t > Math.max(LATE_MS, (w.ms ?? 0) * 0
 /** A word's box (scene px) centred at (x, y): its measured width / height (sfx.mjs: the engine's hold picture), else an estimate. */
 export function boxOf(w, x = w.x, y = w.y) {
   const W = w.bw ?? (w.size ?? 60) * (0.75 * (w.chars ?? 6) + 0.6), H = w.bh ?? (w.size ?? 60) * 1.6;
-  return { x0: x - W / 2, y0: y - H / 2, x1: x + W / 2, y1: y + H / 2 };
+  // (a word that rises off its place - steam off what was put out - needs its whole way up free: `rise` scene px, `riseX` sideways)
+  const R = w.rise > 0 ? w.rise : 0, RX = w.riseX ?? 0;
+  return { x0: x - W / 2 + Math.min(0, RX), y0: y - H / 2 - R, x1: x + W / 2 + Math.max(0, RX), y1: y + H / 2 };
 }
 const area = (b) => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
 const inter = (a, b) => area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) });
@@ -481,6 +493,35 @@ export function place(words, ctx) {
   }
   return out.sort((a, b) => a.t - b.t);
 }
+/**
+ * The smallest shift (scene px) that takes `box` off every interface panel in `ui` and inside the view `v` (a fire's continuous words
+ * hover over its flames: when the flames lie under a panel, the words move just clear of it). Tries the shifts that clear each panel
+ * it touches (and combinations, three passes), keeps the shortest one that is free, else the one that covers least. -> { dx, dy }
+ * ({ 0, 0 } when it is free already).
+ */
+export function clearOf(box, ui = [], v = null, maxShift = Infinity) {
+  const hits = (b) => ui.reduce((s, t) => s + inter(b, t), 0) + (v ? area(b) - inter(b, v) : 0);
+  const mv = (b, dx, dy) => ({ x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy });
+  if ( !(hits(box) > 0) ) return { dx: 0, dy: 0 };
+  let frontier = [{ dx: 0, dy: 0 }], best = null, part = { dx: 0, dy: 0, d: 0, h: hits(box) };
+  for ( let pass = 0; pass < 3 && !best; pass++ ) {
+    const next = [];
+    for ( const s of frontier ) {
+      const b = mv(box, s.dx, s.dy), opts = [];
+      for ( const t of ui ) if ( inter(b, t) > 0 ) opts.push([t.x0 - b.x1 - 4, 0], [t.x1 - b.x0 + 4, 0], [0, t.y0 - b.y1 - 4], [0, t.y1 - b.y0 + 4]);
+      if ( v ) { if ( b.x0 < v.x0 ) opts.push([v.x0 - b.x0, 0]); if ( b.x1 > v.x1 ) opts.push([v.x1 - b.x1, 0]); if ( b.y0 < v.y0 ) opts.push([0, v.y0 - b.y0]); if ( b.y1 > v.y1 ) opts.push([0, v.y1 - b.y1]); }
+      for ( const [ox, oy] of opts ) {
+        const c = { dx: s.dx + ox, dy: s.dy + oy }, d = Math.hypot(c.dx, c.dy);
+        if ( d > maxShift ) continue;
+        const hc = hits(mv(box, c.dx, c.dy));
+        if ( hc <= 0 ) { if ( !best || d < best.d ) best = { ...c, d }; } else { next.push(c); if ( !part || hc < part.h - 1e-6 || (Math.abs(hc - part.h) < 1e-6 && d < part.d) ) part = { ...c, d, h: hc }; }
+      }
+    }
+    frontier = next.sort((a, b) => Math.hypot(a.dx, a.dy) - Math.hypot(b.dx, b.dy)).slice(0, 12);
+  }
+  // (nowhere fully free within reach: the place that covers the least)
+  return best ? { dx: best.dx, dy: best.dy } : { dx: part.dx, dy: part.dy };
+}
 const pathInView = (w, v) => (w.path ?? w.stream?.walk ?? []).some((q) => q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
 
 /* ---------------------------------------------------------------- the interface over the canvas (pure over a DOM-like tree) */
@@ -538,8 +579,12 @@ export const toSceneBoxes = (rects, toScene) => rects.map((r) => { const a = toS
 export const ECHO_MS = 1600;
 export function isEcho(g, recent, grid = 100) {
   const p = VOICES[g.main.voice]?.prio ?? 0;
+  // (fires going out one after another - a bomb's burning debris dying patch by patch - hiss once: the next hiss waits OUT_GAP_MS)
+  if ( g.main.voice === "out" && recent.some((r) => r.voice === "out" && Math.abs(g.t - r.t) < OUT_GAP_MS) ) return true;
   return recent.some((r) => g.t - r.t >= -50 && g.t - r.t < ECHO_MS && r.prio >= p && Math.hypot(g.x - r.x, g.y - r.y) < r.reach + g.span * 0.5 + grid);
 }
+/** ms between two fire-out hisses anywhere on the scene */
+export const OUT_GAP_MS = 2600;
 
 /** The word set for a language setting: "en" / "pl", or "auto" (the game's language: Polish -> "pl", any other -> "en"). */
 export const langOf = (setting, gameLang = "en") => (setting === "en" || setting === "pl" ? setting : String(gameLang).toLowerCase().startsWith("pl") ? "pl" : "en");

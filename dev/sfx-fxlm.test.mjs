@@ -58,6 +58,21 @@ group("F2", () => {
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
   ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /place\(.*\{ view: v, ui, tokens/.test(sfx), "F2 the runtime measures this client's panels and places around them");
+  // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
+  // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
+  const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
+  const sh = C.clearOf(fireBox, ui, { x0: 0, y0: 0, x1: 3200, y1: 1800 });
+  const moved = { x0: fireBox.x0 + sh.dx, y0: fireBox.y0 + sh.dy, x1: fireBox.x1 + sh.dx, y1: fireBox.y1 + sh.dy };
+  ok((sh.dx || sh.dy) && ui.every((b) => ov(moved, b) === 0) && Math.hypot(sh.dx, sh.dy) < 600, "F2 a burning fire's words move just clear of a panel over its flames");
+  ok(C.clearOf({ x0: 1000, y0: 1000, x1: 1200, y1: 1100 }, ui, { x0: 0, y0: 0, x1: 3200, y1: 1800 }).dx === 0, "F2 ... and stay put where nothing covers them");
+  ok(/burnOffsets\(/.test(sfx) && /o \? \{ x: q\.x \+ o\.dx, y: q\.y \+ o\.dy \}/.test(sfx), "F2 the runtime moves the burning fire's phrase spots by those shifts");
+  const steam = { role: "main", voice: "out", x: 2600, y: 400, bw: 300, bh: 80, rise: 90 * 2, t: 0, subject: { x0: 2580, y0: 380, x1: 2620, y1: 420 }, cover: 0.4 };
+  const ps = C.place([steam], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] })[0];
+  ok(ps && ps.box.y0 <= ps.y - 40 - 180 + 1 && ui.every((b) => ov(ps.box, b) === 0), "F2 a word that rises (steam) keeps its whole way up off the panels");
+  ok(/w\.rise = grid\(\) \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
+  ok(C.CEIL_K.main < 1 && C.CEIL_K.sec < C.CEIL_K.main && /ceilK: C\.CEIL_K\[w\.role\]/.test(sfx), "F2 the map's words take a share of the engine's size ceiling (a main word leaves room around it)");
+  ok(sizeFor({ space: "world", grid: 100, zoom: 1, vw: 1600, vh: 900, area: 900, magnitude: 1.5, aspect: 6, ceilK: C.CEIL_K.main }).px * 6 < 1600 * 0.45, "F2 ... the biggest main word stays under about two fifths of the width");
+  ok(/el\.id === "pause"/.test(sfx), "F2 the game-paused banner is not a panel (it would push every word off the middle)");
 });
 
 /* F3: beside its subject */
@@ -101,6 +116,14 @@ group("F5", () => {
 });
 
 /* F6: the pre word leads */
+/* F5 (live take): a bomb's burning debris dies patch by patch - one hiss, not a chorus of identical ones */
+group("F5b", () => {
+  const out = (t, x) => ({ members: [{ voice: "out" }], main: { voice: "out", t }, x, y: 0, span: 50, t });
+  ok(C.isEcho(out(1000, 3000), [{ x: 0, y: 0, reach: 100, t: 0, prio: 3, voice: "out" }], 100), "F5 a second fire going out soon after another, anywhere, does not hiss again");
+  ok(!C.isEcho(out(C.OUT_GAP_MS + 10, 3000), [{ x: 0, y: 0, reach: 100, t: 0, prio: 3, voice: "out" }], 100), "F5 ... later it does");
+  ok(/voice: g\.main\.voice \}\);/.test(sfx), "F5 the runtime remembers which sound each played word was");
+});
+
 group("F6", () => {
   const I = { type: "collapse", cause: 0, rect: { x0: 0, y0: 0, x1: 40, y1: 30 } };
   const e = C.entryEvent(I, { x: 1000, y: 1000 }, 4, 5000, { key: "d|h|5000", sid: "d|h" });
@@ -168,6 +191,13 @@ group("F15", () => {
   const w = C.planCluster(C.cluster([e], G)[0], { grid: G, sec: 4, seed: "s", known: KINDS })[0];
   ok(e.voice === "gun" && w.stream?.walk === walk && w.kind === "gunfire" && !("text" in w), "F15 a gun's pocks are the engine's gunfire stream along its walk (no stacked words)");
   ok(/L\.stream\(\{ kind: w\.kind/.test(sfx), "F15 the runtime streams the kind (the engine's syllables)");
+  // live take (FXLM, 2026-11-13): the stream never started - its beats were built with a map callback that read a third argument
+  // Array.from does not pass ("a word did not play: Cannot read properties of undefined"); the beats are a pure function now
+  const b = C.streamBeats(walk);
+  ok(b.length === 3 && b[0] === 0 && b[2] === 240 && b.every((x, i) => i === 0 || x > b[i - 1]), "F15 a three-round walk rattles on three beats over its length");
+  const long = Array.from({ length: 20 }, (_, i) => ({ x: i, y: 0, ms: i * 90 }));
+  ok(C.streamBeats(long).length === 8 && C.streamBeats(long).at(-1) === 1710 && C.streamBeats([{ x: 0, y: 0, ms: 0 }]).length >= 1, "F15 a long burst: at most eight syllables to its last round; a single round still sounds");
+  ok(/const beats = C\.streamBeats\(W\)/.test(sfx), "F15 the runtime uses them");
 });
 
 /* F16: a scene change leaves nothing behind */

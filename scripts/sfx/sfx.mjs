@@ -25,7 +25,8 @@ import * as Fire from "../fire/fire.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
-const UI_MS = 400;             // the interface rectangles are measured at most this often
+const UI_MS = 400;
+const DRIFT = [0.15, 0.9];      // steam's way up off what was put out (grid squares: sideways, up)             // the interface rectangles are measured at most this often
 
 let L = null, loading = null, gen = 0;      // gen: the scene's generation (a scene change makes every waiting callback stale)
 let known = null;              // the engine's sound kinds
@@ -39,6 +40,7 @@ const alive = new Set();       // { box, h, obj } words of this module on screen
 const burns = new Map();       // burn key -> { plan, live, subs: [sustain] }
 let fireSeen = new Map();      // fire stroke id -> the stroke as last seen
 let burnTimer = 0;
+let lastPlaced = [];          // the last words placed here (for checks: text, role, scene box, penalties)
 let recent = [];               // main words played lately (an echo of one is not lettered again)
 let uiCache = { t: -1e9, rects: [] };
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
@@ -210,22 +212,42 @@ function reconcileBurn() {
   }
   for ( const [k, b] of burns ) {
     const w = want.get(k);
-    if ( w && w.live === b.live ) { b.plan = w.plan; continue; }
+    if ( w && w.live === b.live ) { b.plan = w.plan; b.off = burnOffsets(w.plan, w.live); continue; }
     // gone out / removed: its words play their exits (the fire's last breath before the hiss); switched mode: at once
     for ( const s of b.subs ) { try { s.stop({ quick: !!w }); } catch {} }
     burns.delete(k);
   }
-  for ( const [k, w] of want ) if ( !burns.has(k) ) burns.set(k, { plan: w.plan, live: w.live, subs: startBurn(w.plan, w.live) });
+  for ( const [k, w] of want ) if ( !burns.has(k) ) { const b = { plan: w.plan, live: w.live, off: burnOffsets(w.plan, w.live), subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live); }
   stats.burns = burns.size;
   if ( burns.size || [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire") ) scheduleBurn(1000);
+}
+/** Where each spot's words must move to stay off this client's interface panels (their phrases hover around the spot, in two seats
+    one above the other, a little to either side: a box of about seven of their letters wide and three and a half high, mostly above
+    it). Measured once a second with the burn. */
+function burnOffsets(p, live) {
+  try {
+    const v = view(), ui = uiBoxes(), em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
+    return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
+      // (a spot off this screen stays where it is: its words are not pulled into view)
+      return inV ? C.clearOf({ x0: q.x - em * 3.4, y0: q.y - em * 2.5, x1: q.x + em * 3.4, y1: q.y + em * 0.9 }, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45) : { dx: 0, dy: 0 }; });
+  } catch { return []; }
+}
+/** The cap height (scene px) of a burning fire's words: a share of the screen height at this zoom (live: 3.5..6 %, by the fire's
+    level; ambient: 3 %), never more than the engine's own size for it - its phrases sit over the flames for as long as they burn,
+    so they stay a size under the event words (the engine's ceiling share, ceilK, does not reach continuous sounds: REQUESTS lmap) */
+function burnSize(p, live) {
+  const zoom = canvas.stage?.scale?.x || 1, lv = p.level(sharedNow());
+  const px = innerHeight * (live ? 0.035 + 0.03 * Math.min(1, lv / 0.9) : 0.03);
+  return Math.max(4, px / zoom);
 }
 function startBurn(p, live) {
   const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), G = grid();
   const kind = C.kindOf("fire", known);
   return p.points.map((q, i) => {
     try {
-      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key); return (b?.plan ?? p).at(i, sharedNow()); },
-        level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90,
+      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
+          return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
+        level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size: burnSize(p, live),
         ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts() });
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's sound did not start`, err); return null; }
   }).filter(Boolean);
@@ -257,7 +279,7 @@ function uiBoxes() {
   let rects = [];
   try {
     rects = C.uiRects([...document.body.children], { style: (el) => getComputedStyle(el), vw: innerWidth, vh: innerHeight,
-      skip: (el) => el === board || el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === "LINK" || el.classList?.contains("moinen-letters-layer") || el.classList?.contains("moinen-letter") || el.id === "tooltip" || el.classList?.contains("tooltip") });
+      skip: (el) => el === board || el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === "LINK" || el.classList?.contains("moinen-letters-layer") || el.classList?.contains("moinen-letter") || el.id === "tooltip" || el.classList?.contains("tooltip") || el.id === "pause" });
   } catch ( err ) { rects = []; }
   const st = canvas.stage;
   const boxes = C.toSceneBoxes(rects, (p) => st.toLocal({ x: p.x - rect.left, y: p.y - rect.top }));
@@ -282,7 +304,7 @@ function flush() {
   const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
-  recent = recent.filter((r) => now - r.t < C.ECHO_MS);
+  recent = recent.filter((r) => now - r.t < Math.max(C.ECHO_MS, C.OUT_GAP_MS));
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
     if ( C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
@@ -295,9 +317,10 @@ function flush() {
     const room = caps.alive - alive.size;
     const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...alive].map((a) => a.box) }), room);
     stats.dropped += specs.length - placed.length;
-    for ( const w of placed ) play(w);
+    for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
+    if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
     const main = placed.find((w) => w.role === "main");
-    if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0 });
+    if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
   }
   stats.ms += performance.now() - t0;
 }
@@ -317,12 +340,13 @@ function optsOf(w) {
   const G = grid(), red = reducedMotion();
   const st = w.stage ?? {};
   const o = { ...(w.word?.play ?? {}), space: "world", at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed, rotation: w.rotation, reduced: red,
+    ceilK: C.CEIL_K[w.role] ?? C.CEIL_K.sec,
     ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
   // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
   if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
   // steam drifts up off what was put out
-  if ( w.drift && !red ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * 0.15, y: w.y - G * 0.9 }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
+  if ( w.drift && !red ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
   // a thing that travels: its word rides along with it
   if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
   return o;
@@ -338,6 +362,7 @@ function measure(w) {
     w.size = u;
     w.bw = (hb?.w ?? 0.8 * w.chars + 0.6) * u * 1.08 + u * 0.3;
     w.bh = (hb?.h ?? 1.35) * u * 1.12 + u * 0.25;
+    if ( w.drift && !reducedMotion() ) { w.rise = grid() * DRIFT[1]; w.riseX = grid() * DRIFT[0]; }
   } catch { /* the estimate stands */ }
 }
 const G0 = () => grid() * 0.5;
@@ -365,8 +390,8 @@ function play(w) {
 
 /** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (the engine's stream). */
 function playStream(w) {
-  const W = w.stream.walk, T = W.at(-1).ms || 1, t0 = w.stream.t0;
-  const beats = [...new Set(Array.from({ length: Math.min(8, Math.max(3, W.length)) }, (_, i, a) => Math.round(T * (a.length > 1 ? i / (a.length - 1) : 0))))];
+  const W = w.stream.walk, t0 = w.stream.t0;
+  const beats = C.streamBeats(W);
   const at = () => {
     const ms = performance.now() - t0;
     let i = 1; while ( i < W.length - 1 && W[i].ms < ms ) i++;
@@ -414,7 +439,7 @@ export const sfxApi = {
   /** Play events now (scene px): `api.sfx.test([{ voice: "crash", x, y, r: 300 }])`. */
   test: (events) => { const t = performance.now() + 30; for ( const [i, e] of events.entries() ) add({ key: `test|${Date.now()}|${i}`, t, ...e }); },
   /** The interface panels this client keeps words off (client px), and the fire sounds burning. */
-  ui: () => uiCache.rects, burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length })),
+  ui: () => uiCache.rects, placed: () => lastPlaced.slice(), burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length })),
   core: C
 };
 
