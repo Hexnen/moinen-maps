@@ -86,6 +86,9 @@ function fillPaint(ctx, H, kind, box, S, ox, oy, i, n) {
 function texture(ctx, plan, kind, box, S, ox, oy, seed, letters) {
   const H = plan.hand, R = rng(seed >>> 0);
   const X0 = ox + box.x0 * S, X1 = ox + box.x1 * S, Y0 = oy + box.y0 * S, Y1 = oy + box.y1 * S;
+  /* LOOK: small lettering stays clean: below about 40 px of cap height a texture inside the strokes is only grain that muddies the
+     letter (a letterer leaves it out at that size); cracks stay (the reader counted them in), halftone keeps its own minimum cell */
+  if ( S < 40 && kind !== "cracks" && kind !== "halftone" ) return;
   ctx.save();
   switch ( kind ) {
     case "halftone": {
@@ -100,10 +103,11 @@ function texture(ctx, plan, kind, box, S, ox, oy, seed, letters) {
       break;
     }
     case "speckle": {
-      const n = Math.min(500, Math.round((X1 - X0) * (Y1 - Y0) / Math.max(30, S * S * 0.012)));
+      /* LOOK: fewer, firmer specks (a spatter, not sensor noise) */
+      const n = Math.min(220, Math.round((X1 - X0) * (Y1 - Y0) / Math.max(60, S * S * 0.03)));
       for ( let k = 0; k < n; k++ ) {
-        ctx.fillStyle = R.chance(0.6) ? H.pal.fill[2] : H.pal.fill[0]; ctx.globalAlpha = R.f(0.35, 0.8);
-        const r = R.f(0.008, 0.022) * S; ctx.beginPath(); ctx.arc(R.f(X0, X1), R.f(Y0, Y1), Math.max(0.6, r), 0, 6.2832); ctx.fill();
+        ctx.fillStyle = R.chance(0.6) ? H.pal.fill[2] : H.pal.fill[0]; ctx.globalAlpha = R.f(0.5, 0.85);
+        const r = R.f(0.012, 0.03) * S; ctx.beginPath(); ctx.arc(R.f(X0, X1), R.f(Y0, Y1), Math.max(1.1, r), 0, 6.2832); ctx.fill();
       }
       break;
     }
@@ -488,10 +492,18 @@ export function paintPicture(plan, bank, p, S, make) {
   const perLetter = H.fill === "letters" || H.fill === "alt";
   const n = plan.chars.length;
   const fullBox = { x0: wb.x0, y0: wb.y0, x1: wb.x1, y1: wb.y1 };
+  /* LOOK (user, 2026-11-13): the light outline goes round the word as a whole; inside the word a letter's own outline would only
+     hide its neighbour, so stacked letters keep just their ink line */
+  if ( H.out2W > 0 && groups.length > 1 ) {
+    ctx.beginPath(); path(ctx, all, S, ox, oy);
+    ctx.strokeStyle = H.outline === "sticker" ? (H.pal.out2 === "#1b1020" ? "#ffffff" : H.pal.out2) : H.pal.out2;
+    ctx.lineWidth = outerW * 2 * S; ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.fill("nonzero");
+    if ( H.outline === "sticker" ) { ctx.strokeStyle = H.ink; ctx.save(); ctx.lineWidth = (outerW * 2 + 0.03) * S; ctx.globalCompositeOperation = "destination-over"; ctx.stroke(); ctx.restore(); }
+  }
   const passes = (grp) => {
     const box = grp.i < 0 ? fullBox : bbox(grp.cs);
     const pathG = () => { ctx.beginPath(); path(ctx, grp.cs, S, ox, oy); };
-    if ( H.out2W > 0 ) {
+    if ( H.out2W > 0 && groups.length === 1 ) {
       pathG(); ctx.strokeStyle = H.outline === "sticker" ? (H.pal.out2 === "#1b1020" ? "#ffffff" : H.pal.out2) : H.pal.out2;
       ctx.lineWidth = outerW * 2 * S; ctx.stroke();
       if ( H.outline === "sticker" ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.018); ctx.save(); ctx.lineWidth = (outerW * 2 + 0.03) * S; ctx.globalCompositeOperation = "destination-over"; ctx.stroke(); ctx.restore(); }

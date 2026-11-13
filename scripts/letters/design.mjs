@@ -193,10 +193,11 @@ export function chooseHand(mood, sound, R, avoid, R2 = null) {
   const pal = R.pick(COLORS[colorFam]);
   const tex = R.w(M.tex);
   /* outline scheme: ink only, ink + light sticker outline (the refs' white cut edge), ink + coloured outline, light inner line */
-  const outline = R.w({ ink: 2, sticker: 3, color: pal.out2.some((c) => c !== "#ffffff") ? 2 : 0.5, inner: 1.5 });
+  /* LOOK (user, 2026-11-13): a word is set off more often by its duplicated block (depth) than by a light outline */
+  const outline = R.w({ ink: 4, sticker: 1.2, color: pal.out2.some((c) => c !== "#ffffff") ? 1 : 0.3, inner: 1.5 });
   const fill = R.w({ vgrad: 4, split: 1.5, hgrad: 1.5, letters: sound.long > 0.6 ? 2.5 : 1, radial: mood === "boom" ? 3 : 0.8, flat: 0.6, multi: 1.6, hollow: mood === "tick" || mood === "whoosh" ? 1.2 : 0.6, alt: sound.long > 0.6 ? 1.2 : 0.7 });
   const stack = R.w({ stack: F.sharp > 0.6 ? 2 : 3, merge: 2 });
-  const depthOn = R.chance(0.35 + 0.5 * sound.loud);
+  const depthOn = R.chance(0.6 + 0.35 * sound.loud);
   const loud = sound.loud;
   const hand = {
     font, treat, env, colorFam, tex, outline, fill, stack,
@@ -233,15 +234,15 @@ export const RING_W = 0.94;   // a ring's width in cap heights (a circle a littl
 export function styleHand(hand, style, mood, sound, word, seed) {
   if ( style !== "invincible" ) return hand;
   const R3 = rng((seed ^ 0x1bad5eed) >>> 0);
-  const round = /([OÓ0Q])/u.test(word), long = sound.long > 0.6 || /(.)/u.test(word);
-  hand.font = R3.w({ squada: 3, michroma: round || long ? 1.6 : 0.5 });
+  const round = /([OÓ0Q])/u.test(word);
+  hand.font = R3.w({ squada: 3, michroma: round ? 1.6 : 0.25 });   // the wide round face where there are rings to draw (CHOOM)
   const fam = R3.w(INV_BY_MOOD[mood] ?? { bone: 1 });
   const pal = INV[fam];
   hand.colorFam = "inv"; hand.invPal = fam;
   hand.pal = { ...pal, fill: pal.fill.slice(), out2: "#ffffff" }; hand.ink = pal.ink;
   hand.treat = "plain"; hand.tex = "none"; hand.outline = "ink"; hand.out2W = 0; hand.inflate = 0;
   hand.inkW = hand.font === "michroma" ? 0.03 : 0.036;
-  if ( hand.font === "michroma" ) hand.inflate = 0.03;   // its strokes are hairlines at token size: thickened in the face colour
+  if ( hand.font === "michroma" ) hand.inflate = 0.045;   // its strokes are hairlines at token size: thickened in the face colour
   hand.fill = R3.w({ vgrad: 3, flat: 2 });
   if ( hand.fill === "flat" ) hand.pal.fill = [pal.fill[1], pal.fill[1], pal.fill[1]];
   hand.depth = R3.f(0.1, 0.13 + 0.06 * sound.loud);
