@@ -58,7 +58,8 @@ export function limits(c) {
   /* a crowd shares the screen: with more than crowdCeil world words up, each one's ceiling shrinks (sqrt, down to crowdCeilMin), so
      a dozen words zoomed in close stay a pile of sounds instead of a wall over the scene */
   const share = c.space === "world" && c.alive > SIZE.crowdCeil ? Math.max(SIZE.crowdCeilMin, Math.sqrt(SIZE.crowdCeil / c.alive)) : 1;
-  const ceil = Math.max(floor * 1.25, Math.min(ceilH, ceilW) * share);
+  const part = Number.isFinite(c.ceilK) && c.ceilK > 0 ? c.ceilK : 1;   // a part of a sound (a stream's syllable) gets a share of the ceiling
+  const ceil = Math.max(floor * 1.25, Math.min(ceilH, ceilW) * share * part);
   return { floor, ceil, by: ceilW < ceilH ? "width" : "height" };
 }
 

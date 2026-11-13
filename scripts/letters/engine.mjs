@@ -1057,6 +1057,7 @@ export function createEngine(base) {
           const e = 1 - (1 - u) * (1 - u);
           return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
         };
+<<<<<<< HEAD
         /* upright by default (to read); `orient: "lean"` tilts each syllable toward where it flies, "tangent" lays it along */
         const tilt = o.orient && !o.orbit && !o.path ? (orientAngle(ang, o.orient) * 180) / Math.PI : 0;
         /* orbit: each syllable joins the ring where the stream's head is now and rides it; path: each rides the path over its life */
@@ -1068,6 +1069,10 @@ export function createEngine(base) {
           travel2 = { orbit: { ...ob, center: ob.center ?? o.at, radius: orbitR, phase: (Number.isFinite(ob.phase) ? ob.phase : -90) + (dir * 360 * tb) / period } };
         } else if ( o.path ) travel2 = { path: o.path };
         const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+=======
+        const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
+        const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, ceilK: o.ceilK ?? 0.55, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+>>>>>>> origin/tactics-zones
           in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
           zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation,
           on: o.on, fps: o.fps, glow: o.glow, ...travel2 });
