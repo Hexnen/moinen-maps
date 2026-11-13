@@ -2,11 +2,11 @@
  "note": "LETR engine: identical in moinen-maps (canonical) and invincible-plus-ultra (vendored). Edit the canonical copy, then run sync.mjs.",
  "files": {
   "ATTRIBUTION.md": "9d41c8ce68b45df9",
-  "README.md": "52275ecffdfdbc22",
+  "README.md": "147ef3675005c033",
   "author.mjs": "aab42d53c8db710c",
   "check-life.mjs": "25b5aa5a8f42e685",
   "check-tools.mjs": "3040defc8ffb9e58",
-  "check-words.mjs": "53f231dfb0123a0f",
+  "check-words.mjs": "80f5bfc9ffd378c7",
   "check.mjs": "8c417a100ad3b469",
   "design.mjs": "033130e2d2867f6b",
   "engine.mjs": "bb3e8733ddb0f5d8",
@@ -39,14 +39,14 @@
   "rng.mjs": "f7587bf06711e496",
   "shape.mjs": "2b65ae47a335dbbc",
   "size.mjs": "5ea9ba0712160e43",
-  "stamp.mjs": "f56a77eedde6cc20",
+  "stamp.mjs": "de4172acd951b13d",
   "strings.mjs": "17259a1d576794e9",
   "sync.mjs": "0aaf5650bacd97ee",
   "testenv.mjs": "d58bfa07296e2971",
   "tools.css": "25094cddcf54f361",
   "tools.mjs": "d6b4abd8a98bfd4e",
   "ui.mjs": "74690d840f1b621e",
-  "words-reviewed.mjs": "71d12790cc698953",
-  "words.mjs": "4ae31ba841a95f8f"
+  "words-reviewed.mjs": "9dea4657954795fd",
+  "words.mjs": "6727976f4bdab651"
  }
 }
