@@ -1,6 +1,6 @@
 // Join Foundry as USER in a headless Edge and run JS steps: the repo's version of the old scratch drive.py, with a temp profile that
 // is always cleaned up (dev/lib/tmp.mjs; drive.py leaked its drvprof* profile whenever Edge still held it or the run was killed).
-//   node dev/tools/cdp-drive.mjs BASE USER STEPS.json [W H] [--shots DIR] [--reduced] [--chrome <exe>] [--port N] [--profile <dir>] [--seat2 USER2]
+//   node dev/tools/cdp-drive.mjs BASE USER STEPS.json [W H] [--shots DIR] [--reduced] [--chrome <exe>|chs|edge] [--port N] [--profile <dir>] [--seat2 USER2]
 // STEPS.json: [{"js": "...async body returning value...", "wait": seconds_after, "shot": "name.png", "shotAfter": "name.png", "seat": 2}]
 // --seat2 USER2: a second seat as an isolated browser context (own cookies) of the SAME browser, joined as USER2 after the first;
 // a step with "seat": 2 runs there (its shots get a "s2-" prefix). Measured 2026-11-13: cheaper than a second browser. Without
@@ -8,7 +8,7 @@
 // Each step's value is printed (JSON). window.__log and the page errors (window.__errs) are printed at the end.
 import fs from "node:fs";
 import path from "node:path";
-import { startHeadless, closeBrowser, session, firstPage, EDGE } from "../lib/browser.mjs";
+import { startHeadless, closeBrowser, session, firstPage, EDGE, exeOf } from "../lib/browser.mjs";
 
 const flag = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const pos = []; for ( let i = 2; i < process.argv.length; i++ ) { const a = process.argv[i]; if ( a === "--reduced" ) continue; if ( a.startsWith("--") ) i++; else pos.push(a); }
@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const user2 = flag("seat2", null);
 const { b, port } = await startHeadless({
-  kind: "drive-edge", exe: flag("chrome", EDGE), port: Number(flag("port", 0)), profile: flag("profile", null),
+  kind: "drive-edge", exe: exeOf(flag("chrome", null), EDGE), port: Number(flag("port", 0)), profile: flag("profile", null),
   args: [`--window-size=${W},${H}`, "--hide-scrollbars", "--autoplay-policy=no-user-gesture-required", "--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist", "--lang=pl", "about:blank"]
 });
 const seats = [];

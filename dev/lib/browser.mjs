@@ -13,11 +13,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // launch and the process tree grows by about 1 GB (1.9-2.2 GB -> about 0.9 GB private working set at rest with them). Rendering, GPU
 // WebGL, screencast, touch and frame pacing were unchanged. Only these three: no --mute-audio, no wider set.
 export const LEAN_FLAGS = ["--disable-extensions", "--disable-component-extensions-with-background-pages", "--disable-background-networking"];
+// chrome-headless-shell (Chrome for Testing: the old headless mode as its own small binary; see C:/mmwt-ultra/chs/SOURCE.txt). Optional,
+// not the default: cdp-drive / cdp-perf take `--chrome chs`. It is headless by nature, so it gets no --headless=new.
+export const CHS = "C:/mmwt-ultra/chs/chrome-headless-shell-win64/chrome-headless-shell.exe";
+export const isShell = (exe) => /headless[-_]shell/i.test(String(exe ?? ""));
+/** A `--chrome` value: "chs" = the headless shell, "edge", "chrome", or a path; null = the default `d`. */
+export const exeOf = (v, d = EDGE) => (v == null ? d : v === "chs" ? CHS : v === "edge" ? EDGE : v === "chrome" ? CHROME : v);
 
 /** Start a headless browser; resolves when its CDP endpoint answers. Returns { b, port } (b for closeBrowser). LEAN_FLAGS are always on. */
 export async function startHeadless({ kind, exe = CHROME, port = 0, profile = null, args = [], timeoutMs = 20000 }) {
   if ( profile && !port ) try { fs.rmSync(path.join(profile, "DevToolsActivePort"), { force: true }); } catch {}   // (a stale one of an earlier run)
-  const b = launchBrowser(exe, ["--headless=new", `--remote-debugging-port=${port}`, ...LEAN_FLAGS, ...args], { kind, profile });
+  const b = launchBrowser(exe, [...(isShell(exe) ? [] : ["--headless=new"]), `--remote-debugging-port=${port}`, ...LEAN_FLAGS, ...args], { kind, profile });
   const t0 = Date.now();
   while ( Date.now() - t0 < timeoutMs ) {
     await sleep(200);
