@@ -753,6 +753,8 @@ function pickHere(P) {
   if ( !allowed.size ) return Promise.resolve({ ok: false, reason: "noZones" });
   return new Promise((resolve) => {
     PICK = { P, allowed, resolve, seq: ++pickSeq, offs: [], hover: -1, down: null, rdown: null, raf: 0, at: null, banner: null, tip: null, rid: null, from: null, slid: -Infinity, wheel: -Infinity,
+      // fxl2 (U211): where the user last aimed - the scene point under the pointer at its last own move (or at a refused press), and when
+      aimW: null, aimT: -Infinity, aimWait: -Infinity,
       // the way to zones no click can reach: the free stretch found by looking, the zones hidden per side, their chips, the slide
       way: { free: null, safe: null, hidden: [], chips: new Map(), timer: 0, due: 0, push: null, first: true } };
     startPick();
@@ -994,8 +996,25 @@ function layoutPick(p, free = undefined) {
  * way, slowly at first, for as long as the pointer stays and something is still hidden there.
  */
 const PUSH = { band: 44, dwell: 450, ramp: 400, speed: 620 };
-/** fxn (D134): a press this soon after a slide the pointer did not make picks nothing (ms); a pan this soon after the wheel is the user's. */
-const SLIDE = { settle: 300, wheel: 150 };
+/** fxn (D134): a press this soon after a slide the pointer did not make picks nothing (ms); a pan this soon after the wheel is the user's.
+ *  fxl2 (U211): `again` - a click refused because the map slid away from the user's aim is taken at the same place only this long after the
+ *  refusal (a second click meant after reading the tip, not the second half of a double click). */
+const SLIDE = { settle: 300, wheel: 150, again: 450 };
+/**
+ * fxl2 (U211): the zone under the pointer is the one the user aimed at? After a slide the pointer did not make (the camera framing the
+ * pick's mover once Move is armed, a reveal, another module's camera) the zone now under a still pointer is not the one the user saw
+ * there: FF7 - a click aimed before the camera re-centred walked a hero into a burning zone. A press is taken when no such slide came
+ * since the user last aimed (a pointer move, or a refused press `again` ms back), or when the zone under the scene point aimed at is the
+ * zone under the pointer now (the slide did not change what is under it). Pure: `zoneAt(point) -> id`.
+ * -> true: take the press
+ */
+export function aimHolds({ slid = -Infinity, aimT = -Infinity, aimW = null, now = 0, at = null, zoneAt = () => -1, wait = -Infinity } = {}) {
+  if ( now < wait ) return false;                                   // just refused: the second half of a double click is not a new aim
+  if ( !(slid > aimT) ) return true;                                // nothing slid since the user aimed
+  if ( !aimW || !at ) return false;                                 // never aimed (the pointer rested since the pick began) and the map slid
+  const was = zoneAt(aimW);
+  return was >= 0 && was === zoneAt(at);
+}
 const pickNow = () => globalThis.performance?.now?.() ?? Date.now();
 /** A slide the pointer makes (the edge slide, a right drag): the pick knows it as the user's own. */
 let panning = false;
@@ -1058,6 +1077,16 @@ function oneWay(p, at) {
   p.tip.innerHTML = `<b>${esc(L("pick.oneWay"))}</b><small>${esc(L("pick.oneWayHint"))}</small>`;
   placeTip(p.tip, at);
   // (the next pointer move shows the zone's own tip again)
+  p.hover = -2;
+}
+/** fxl2 (U211): the tip at the pointer says, for a moment, that the map moved under it and the click was not taken (the next pointer move
+ *  shows the zone's own tip again). */
+function slidAway(p, at) {
+  if ( typeof globalThis.document?.createElement !== "function" ) return;
+  if ( !p.tip ) { p.tip = document.createElement("div"); p.tip.className = "mm-z-tip mm-z-pick-tip"; document.body.append(p.tip); }
+  p.tip.classList.add("no");
+  p.tip.innerHTML = `<b>${esc(L("pick.slid"))}</b><small>${esc(L("pick.slidHint"))}</small>`;
+  placeTip(p.tip, at);
   p.hover = -2;
 }
 /**
@@ -1177,7 +1206,10 @@ function startPick() {
     else if ( ok && ext?.move ) { try { ext.move(p.allowed.get(id), at); } catch {} }
     placeTip(p.tip, at);
   };
-  const onMove = (ev) => {
+  const onMove = (ev, own = true) => {
+    // fxl2 (U211): a move of the pointer itself is an aim (a pointer event at the same place - the browser's own after a change under
+    // it - is not); the slide's own call below is not one either
+    if ( own && !(p.at && p.at.x === ev.clientX && p.at.y === ev.clientY) && canvas?.ready ) { p.aimW = world(ev); p.aimT = pickNow(); p.aimWait = -Infinity; }
     p.at = { x: ev.clientX, y: ev.clientY };
     if ( p.raf ) return;
     p.raf = requestAnimationFrame(() => { p.raf = 0; if ( PICK !== p || !p.at || !canvas.ready ) return; setHover(zoneAt(canvas.canvasCoordinatesFromClient(p.at)), p.at); pushAt(p, p.at); underBanner(p, p.at); });
@@ -1189,7 +1221,7 @@ function startPick() {
   // after it is not taken, the zone under the pointer was not the one the user aimed at)
   const onSlid = () => {
     if ( !panning && pickNow() - p.wheel > SLIDE.wheel ) p.slid = pickNow();
-    if ( p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y });
+    if ( p.at && !p.raf ) onMove({ clientX: p.at.x, clientY: p.at.y }, false);
   };
   const onWheel = () => { p.wheel = pickNow(); };
   Hooks.on("canvasPan", onSlid);
@@ -1203,6 +1235,7 @@ function startPick() {
     // fxn (D134): the map is still sliding (a camera move runs, or a slide has just been made) under the pointer - the press picks
     // nothing; the tip shows what is under the pointer now, a second click takes it
     p.down = gliding() || pickNow() - p.slid < SLIDE.settle ? null : { x: ev.clientX, y: ev.clientY, t: pickNow() };
+    if ( !p.down ) slidAway(p, { x: ev.clientX, y: ev.clientY });       // fxl2 (U211): the tip says why nothing happened
   };
   const onUp = (ev) => {
     if ( ev.button === 2 ) {
@@ -1217,6 +1250,14 @@ function startPick() {
     if ( p.slid >= d.t || gliding() ) return;                         // fxn (D134): the map slid (or glides) between the press and the release
     const pt = world(ev), id = zoneAt(pt), e = p.allowed.get(id);
     if ( !e ) return;
+    // fxl2 (U211): the map slid since the user aimed and another zone lies under the pointer now - not taken; the tip says so, and the
+    // place clicked counts as aimed at for a click a moment later
+    const now = pickNow();
+    if ( !aimHolds({ slid: p.slid, aimT: p.aimT, aimW: p.aimW, now, at: pt, zoneAt, wait: p.aimWait }) ) {
+      if ( now >= p.aimWait ) { p.aimW = pt; p.aimT = now; p.aimWait = now + SLIDE.again; }
+      slidAway(p, { x: ev.clientX, y: ev.clientY });
+      return;
+    }
     const place = Zones.placeOf(e.spot) ?? Zones.placeOf(e.zone);
     endPick({ ok: true, zone: e.zone, id, spot: place?.spot ?? e.zone, place, x: pt.x, y: pt.y });
   };

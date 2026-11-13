@@ -682,6 +682,56 @@ await api.removeZoneState(sm.result.id); await api.removeEdge(ed.result.id);
     const wr = await Promise.race([pk, wait(60).then(() => null)]);
     check(wr?.ok === true && wr.zone === "z3", "a zoom by the wheel is the user's own: a click right after it picks");
     if ( !wr ) { api.cancelPick(); await pk; }
+    // ---- fxl2 (U211): the camera re-centred after the user aimed and another zone lies under the still pointer: a click once it settled
+    // is not taken either (FF7: a hero walked into a burning zone); the tip says the map moved; a second click a moment later is taken,
+    // a pointer move first makes the click count at once; a slide that leaves the same zone under the pointer changes nothing (above)
+    {
+      const { aimHolds } = await imp("scripts/zones/interact.mjs");
+      const zf = (p) => (p.x < 100 ? 1 : 2);
+      check(aimHolds({ slid: -Infinity, aimT: -Infinity, now: 5 }) === true && aimHolds({ slid: 10, aimT: 20, now: 30 }) === true
+        && aimHolds({ slid: 30, aimT: 20, aimW: { x: 50 }, at: { x: 150 }, now: 40, zoneAt: zf }) === false && aimHolds({ slid: 30, aimT: 20, aimW: { x: 50 }, at: { x: 60 }, now: 40, zoneAt: zf }) === true
+        && aimHolds({ slid: 30, aimT: -Infinity, aimW: null, at: { x: 60 }, now: 40, zoneAt: zf }) === false && aimHolds({ slid: 10, aimT: 20, now: 30, wait: 35 }) === false,
+        "aimHolds: no slide since the aim takes the press; a slide that changed the zone under the pointer, or no aim at all, does not; a refusal's wait holds");
+      canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(320);
+      pk = api.pick({ zones: all5 });
+      const a3b = canvas.clientCoordinatesFromCanvas(api.zone("z3").center);
+      view.fire("pointermove", { clientX: a3b.x, clientY: a3b.y }); await wait(30);
+      canvas.pan({ x: 500 + 200, y: 100 }); await wait(340);             // the camera re-centres (not the user's slide) and settles
+      const nowZ = api.zoneName(canvas.canvasCoordinatesFromClient(a3b));
+      const slidTip = () => made.some((e) => e.className.includes("mm-z-pick-tip") && !e.gone && e.innerHTML.includes("pick.slid") && e.innerHTML.includes("pick.slidHint"));
+      const tipBefore = slidTip();
+      click(a3b.x, a3b.y);
+      const refused = api.picking(), told = slidTip();
+      click(a3b.x, a3b.y);                                                // the second half of a double click
+      const dbl = api.picking();
+      await wait(450 + 20);                                               // SLIDE.again in interact.mjs
+      click(a3b.x, a3b.y);                                                // a second click meant after the tip
+      const r1 = await Promise.race([pk, wait(60).then(() => null)]);
+      check(nowZ && nowZ !== "3" && !tipBefore && refused === true && told && dbl === true && r1?.ok === true && api.zoneName(r1.zone) === nowZ,
+        `a click after the camera slid another zone (${nowZ}) under the aim (3) picks nothing and the tip says the map moved (${refused}, ${told}); a double click neither (${dbl}); a click a moment later takes the zone under the pointer (${r1?.zone})`);
+      if ( !r1 ) { api.cancelPick(); await pk; }
+      canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(320);
+      pk = api.pick({ zones: all5 });
+      view.fire("pointermove", { clientX: a3b.x, clientY: a3b.y }); await wait(30);
+      canvas.pan({ x: 500 + 200, y: 100 }); await wait(340);
+      view.fire("pointermove", { clientX: a3b.x + 2, clientY: a3b.y }); await wait(20);      // the user aims again (a nudge)
+      click(a3b.x + 2, a3b.y);
+      const r2 = await Promise.race([pk, wait(60).then(() => null)]);
+      check(r2?.ok === true && api.zoneName(r2.zone) === nowZ, `a pointer move after the slide is a new aim: one click takes the zone under it (${r2?.zone})`);
+      if ( !r2 ) { api.cancelPick(); await pk; }
+      canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(320);
+      pk = api.pick({ zones: all5 });
+      canvas.pan({ x: 500 + 200, y: 100 }); await wait(340);             // the pointer never moved since the pick began and the map slid
+      click(a3b.x, a3b.y);
+      check(api.picking() === true, "no aim since the pick began and the map slid: the first click picks nothing");
+      api.cancelPick(); await pk;
+      canvas.pan({ x: 500, y: 100, scale: 1 }); await wait(320);
+      pk = api.pick({ zones: all5 });
+      click(a3b.x, a3b.y);
+      const r3 = await Promise.race([pk, wait(60).then(() => null)]);
+      check(r3?.ok === true && r3.zone === "z3", "no slide at all: one click picks at once, the pointer need not move first (an intended move is not slower)");
+      if ( !r3 ) { api.cancelPick(); await pk; }
+    }
   }
   // ---- reveal: false leaves the view and shows no chip; edgePan: false keeps the chip and does not slide
   await under();

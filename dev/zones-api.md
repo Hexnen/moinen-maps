@@ -1076,6 +1076,11 @@ const r = await api.pickMove({
   with an arrow head; **what waits on the way** as chips on the route; beside the pointer the
   zone's tip, the **price** (`cost`, the caller's words) and one line per hazard. **One click confirms**; there is no
   second question.
+- **The aim (fxl2, U211; every pick).** A slide the pointer did not make (the camera framing the mover when Move is armed, a
+  reveal, another module's camera) moves the map under a still pointer. A press while it glides or within 300 ms after it picks
+  nothing (D134). After that, a click is taken only when the user aimed since the slide (moved the pointer) or the zone under the
+  scene point aimed at is still the zone under the pointer; otherwise the tip says the map moved and nothing is picked, and a
+  click at the same place at least 450 ms later is taken (a double click is not). With no slide nothing changes: one click.
 - `zones` absent: what `api.reach(token, profile)` gives, labelled with the distance and priced in movement actions
   (the map's own default; works with no combat module).
 - `route`: the zones entered in order (or a plan of section 14) when the move is not the map's own shortest. Absent: the
