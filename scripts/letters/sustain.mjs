@@ -53,7 +53,7 @@ export function makeSustain(E) {
       try { const V = E.vocab(); flow = o.kind != null && typeof V?.flow === "function" ? V.flow(o.kind, { lang: o.lang, seed, loud: level, magnitude: o.magnitude, style: o.style }) : false; } catch { flow = false; }
       return flow;
     };
-    const seg = (q) => (q?.text ? { text: q.text, mood: q.mood, accent: q.accent, ms: q.ms, loud: q.loud } : null);
+    const seg = (q) => (q?.text ? { text: q.text, mood: q.mood, kmood: q.play?.mood, accent: q.accent, ms: q.ms, loud: q.loud } : null);
     /* the text of phrase i: the caller's function, WORD's flow, a vocabulary word, or the caller's text breathing */
     const textAt = (i, L, extra) => {
       if ( typeof o.words === "function" ) { try { const w = o.words(i, E.now() - t0, L); if ( w ) return typeof w === "string" ? { text: w } : w; } catch {} }
@@ -64,7 +64,7 @@ export function makeSustain(E) {
         try {
           if ( typeof V.sustain === "function" ) { const w = V.sustain(o.kind, { seed, lang: o.lang, level: L, k: i, t: E.now() - t0 }); if ( w?.text ) return w; }
           const w = V.word(o.kind, { seed: `${seed}:${i % 3}`, lang: o.lang, loud: L });
-          return { text: extra && V.stretch ? V.stretch(w.text, extra) : w.text, mood: w.mood };
+          return { text: extra && V.stretch ? V.stretch(w.text, extra) : w.text, kmood: w.mood };
         } catch {}
       }
       const t = String(o.text ?? "SSSS");
@@ -103,10 +103,14 @@ export function makeSustain(E) {
       const w = textAt(i, L, kind === "stretch" ? 1 + Math.round(2 * L) : 0);
       const side = i % 2 ? 1 : -1, u = U();
       const tr = travel();
-      const dx = tr ? 0 : side * R.f(0.1, 0.6) * u, dy = tr ? 0 : -R.f(0.05, 0.45) * u;
+      /* two seats, one above the other, taken in turn: the phrase that leaves plays its exit in one while the next one enters in the
+         other (live sounds; ambient phrases come one at a time after long gaps) */
+      const em = Number.isFinite(cur?.size) && cur.size > 0 ? cur.size : 1.6 * u;   // the height of the words up (their em, px)
+      const dy0 = ambient ? -R.f(0.05, 0.45) * u : (i % 2 ? -1.05 : 0.1) * em - R.f(0, 0.12) * u;
+      const dx = tr ? 0 : side * R.f(0.1, 0.6) * u, dy = tr ? 0 : dy0;
       const segMs = Number.isFinite(w.ms) && w.ms > 0 ? Math.max(500, Math.min(4000, w.ms)) : null;   // WORD's "current for" time
       const life = ambient ? R.f(1500, 2400) : segMs ? Math.round(segMs * 1.35) : Math.round((1300 + 1100 * (1 - L)) * R.f(0.85, 1.15));
-      const base = { ...common(), ...(tr ?? { at: near(dx, dy) }), seed: `${seed}:${i}`, mood: w.mood ?? o.mood, hold: life, rotation: side * R.f(1, 6), accent: w.accent };
+      const base = { ...common(), ...(tr ?? { at: near(dx, dy) }), seed: `${seed}:${i}`, mood: w.mood ?? o.mood ?? w.kmood, hold: life, rotation: side * R.f(1, 6), accent: w.accent };
       let h = null;
       switch ( kind ) {
         case "breath":
