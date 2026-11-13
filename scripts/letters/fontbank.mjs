@@ -43,7 +43,10 @@ export class FontBank {
     if ( g ) g = { ...g, font: id };
     if ( !g && DECOMP[ch] ) g = this.synth(id, ch);
     if ( !g ) for ( const fb of FALLBACK ) { const x = this.raw(fb, ch) ?? (DECOMP[ch] ? this.synth(fb, ch) : null); if ( x ) { g = { ...x, font: fb }; break; } }
-    if ( !g ) { const q = this.raw(id, "?") ?? this.raw(FALLBACK[0], "?"); g = q ? { ...q, font: id } : { adv: 0.5, contours: [], font: id }; }
+    if ( !g ) {
+      if ( this.fonts.size && ch !== "\n" ) (this.missing ??= new Set()).add(ch);   // FXLE F23: the engine says so once per character
+      const q = this.raw(id, "?") ?? this.raw(FALLBACK[0], "?"); g = q ? { ...q, font: id } : { adv: 0.5, contours: [], font: id };
+    }
     this.cache.set(key, g);
     return g;
   }

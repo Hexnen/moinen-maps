@@ -6,7 +6,10 @@ that keeps living (each picture is redrawn, the line "boils"), an exit. Over the
 (PIXI), any number at once within limits, deterministic for a seed so every client sees the same lettering.
 
 - Canonical copy: `moinen-maps/scripts/letters/`. Vendored copy: `invincible-plus-ultra/scripts/letters/`. Same files; `MANIFEST.json`
-  holds their hashes. Edit ONLY the canonical copy, then `node scripts/letters/sync.mjs <path to plus-ultra>/scripts/letters`.
+  holds their hashes and `stamp.mjs` a content hash with the time it last changed (two copies with the same VERSION but different
+  content: the more recently synced one serves; bump VERSION anyway). Edit ONLY the canonical copy, then
+  `node scripts/letters/sync.mjs <path to plus-ultra>/scripts/letters` (it only copies into an existing LETR copy or a new folder named
+  `scripts/letters`, never deletes a folder); `sync.mjs --check <other copy>` also compares the two copies.
 - Checks: `node scripts/letters/check.mjs` (maps runs it as `dev/letters.test.mjs`, plus-ultra as `scripts/sweep-checks/letters.mjs`).
 - Why here: moinen-maps is system-agnostic and the heaviest user (world space, zoom, a collapse throwing dozens of words), and
   plus-ultra must not need the map for its dice splash; so both carry the folder, and at runtime the copies register in
@@ -47,7 +50,21 @@ The complete option tables (play, stream, handle, limits) are in the contract ke
 | `colors`, `rotation`, `parent`, `zIndex`, `reduced` | palette override, tilt, own container, stacking, reduced motion (default: the OS setting) |
 
 Limits: 16 words at once over the interface, 48 on the canvas (`L.limits`); over a limit the oldest leaves at once ("evicted").
-A scene change evicts all world words. `L.stopAll({ space })`, `L.count({ space })`, `L.stats` (pictures rendered, ms spent).
+A scene change evicts all world words, also those still waiting for their `delay`, and stops every world stream; `L.stopAll({ space })`
+does the same for everything (words waiting included, streams included). `L.count({ space })` counts the words on screen, `L.stats`
+(pictures rendered, ms spent, the dearest picture).
+
+### Lifecycle (what a caller can rely on)
+- `play()` returns at once and never throws: the word is planned there (`h.hand`, `h.plan` are set unless it has a `delay`); its
+  geometry and first picture are made in the next animation frame(s), within a per-frame budget, so a burst of 48 words comes up over a
+  few frames instead of blocking the page. Without `startAt` a word's clock starts when its first picture shows (no entrance skipped).
+- `h.ready` resolves `true` when the first picture is on screen, `false` when the word ended without ever showing (stopped first,
+  evicted, its token not on this scene, its `startAt` long past). `h.finished` always resolves.
+- A bad option never throws: an unusable number (NaN, a negative size, tempo or hold, `Infinity`) is ignored with one warning and the
+  default is used; an unknown mood is `auto` with one warning; an `at` function that throws keeps the last point. Text is cut at 160
+  characters. A character no font has is drawn as "?" with one warning.
+- A word on a token (`at` = token / id / document) follows it; when the token goes away the word stays where it was and plays its exit.
+  A token id that is not on this scene is skipped.
 
 ## How the shape shows the sound
 
@@ -205,6 +222,10 @@ is drawn big. Screen words follow window resizes the same way.
 | `hud` | screen | fixed layer, z-index 5 | over the map, under the sidebar, bars and windows |
 | `ui` | screen | z-index 80 | over the sidebar, chat, hotbar (UI 60), under app windows (100) |
 | `screen` | screen | z-index 1000 (DEFAULT) | over the whole interface; tooltips and notifications stay on top |
+Elevation (primary layers): never under the current v14 level's own background (the level's base elevation); `tokens` follows the
+`at` token's (or `token`'s) live elevation, and at a point takes the highest token covering that point; `elevation` overrides. The
+`screen` layer keeps above app windows whose z-index climbed past 1000 (under tooltips and notifications). A scene change removes the
+engine's layer containers (the `top` one lives on `canvas.stage`, which Foundry keeps).
 For a user setting: `game.settings.register(id, "letteringLayer", { scope: "client", config: true, type: String,
 choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.settings.get(id, "letteringLayer")` per call
 (register in the "ready" hook or with a static copy of the ids: `ground tokens weather overlay top` / `hud ui screen`).
@@ -221,11 +242,31 @@ choices: L.layerChoices("world"), default: "overlay" })` and pass `layer: game.s
   (`at`, may be a function for a moving muzzle or projectile), travel along `dir` or toward `to`, one hand for the whole burst;
   timing by `every`, by `beats` (exact ms of each shot on the effect's clock) or by calling `s.beat()` from each shot with
   `manual: true`. `loud: (i) => ...` shapes a swell or fade across the burst.
+  A stream keeps the effect's clock: with `startAt` in the past it skips the syllables whose life is already over and every syllable
+  joins its own due time (a duration counts from `startAt`); its hand is the first syllable's whenever it joins. `s.handles` holds the
+  syllables still alive, `s.emitted` counts all; `loud: 0` is the quietest syllable; `every` is at least 20 ms.
 - Pixel-art surroundings: `pixel: true` letters on the effect grid (1 texel = 1 art px = grid/32 scene px), hard 1-bit edges,
   nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas
   and a render budget of about 4 ms per frame; seed with the cast id so every client sees the same lettering.
-- Nothing is networked: run the call on every client from your own socket event, with the same seed and `startAt`.
+- Nothing is networked: run the call on every client from your own socket event, with the same seed. `startAt` is THIS page's
+  `performance.now()` clock and differs on every client (each page counts from its own load): never send it as is. See "Several clients".
+
+## Several clients
+- The same `seed` gives the same hand, layout and timeline on every client (the per-client memory of recent hands and the reduced-motion
+  setting do not change a seeded hand). Pass `from` as an angle (degrees) to keep the look identical: a `from` point is turned into an
+  angle with this client's own pixels, so different window layouts may pick a different warp.
+- To start a word part-way on every client (an effect that began earlier), send a wall-clock time with your event, e.g.
+  `sentAt: Date.now()` at the effect's start, and on each client pass `startAt: performance.now() - (Date.now() - sentAt)` (clock skew
+  between machines remains). A `startAt` more than 60 s ahead of this page's clock is ignored with a warning.
+
+## Who sees a word (hidden and unseen tokens)
+A word that belongs to a token (`at` is a token, a TokenDocument or an id, or `token` is given) is shown only while that token is
+visible to this user: a hidden token's word is never shown to players, and neither is the word of a token this user cannot see (vision,
+fog of war). The GM sees what the GM sees on the canvas. `vision: "point"` also hides a world word whose point this user cannot see (an
+event in the dark or behind walls); `vision: "none"` always shows it. Streams pass `token` (or a token `at`) and `vision` to their
+syllables. A word at a plain point is shown by default even on the `overlay` layer (over fog): pass `token` or `vision: "point"`
+when the point must not give away where something happened.
 
 ## Look and performance notes
 - Every picture is painted from font outlines (TrueType parsed by `font.mjs`) at the pixel size it is shown at; world words re-render

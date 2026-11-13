@@ -6,7 +6,7 @@ import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 
-export const VERSION = "1.2.0";
+export const VERSION = "1.2.1";   // FXLE: lifecycle and safety fixes
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -23,6 +23,32 @@ export const LAYERS = {
 };
 const defaults = { world: "overlay", screen: "screen" };
 const warned = new Set();
+const warnOnce = (key, ...msg) => { if ( warned.has(key) ) return; warned.add(key); console.warn(...msg); };
+const FIRST_MS = 6;           // FXLE F3: new words are prepared and get their first picture within this much per frame (at least one)
+const MAX_CHARS = 160;        // FXLE F3: longer text is cut (a word that long is unreadable and costs seconds to letter)
+const FUTURE_MS = 60000;      // FXLE F6: a startAt further ahead than this is another clock's time: ignored, with a warning
+/* FXLE F19/F20: options checked before use; a bad number is dropped (default used) with one warning per option */
+function cleanOpts(o) {
+  const c = { ...(o && typeof o === "object" ? o : {}) };
+  const fix = (k, ok) => {
+    if ( c[k] === undefined || c[k] === null ) { delete c[k]; return; }
+    if ( typeof c[k] === "number" && Number.isFinite(c[k]) && ok(c[k]) ) return;
+    warnOnce(`opt:${k}`, `LETR | option ${k} = ${String(c[k])} ignored (not a usable number)`);
+    delete c[k];
+  };
+  fix("size", (v) => v > 0); fix("hold", (v) => v >= 0); fix("tempo", (v) => v > 0); fix("rotation", () => true); fix("maxWidth", (v) => v > 0);
+  fix("delay", (v) => v >= 0); fix("startAt", () => true); fix("scale", (v) => v > 0); fix("span", (v) => v > 0); fix("zIndex", () => true);
+  fix("elevation", () => true);
+  if ( c.pixel != null && typeof c.pixel !== "boolean" ) {
+    if ( !(typeof c.pixel === "number" && Number.isFinite(c.pixel) && c.pixel >= 0.25) ) { warnOnce("opt:pixel", `LETR | option pixel = ${String(c.pixel)} ignored (art px size must be >= 0.25 scene px); using the grid's art pixel`); c.pixel = !!c.pixel; }
+  }
+  if ( Number.isFinite(c.startAt) && c.startAt > performance.now() + FUTURE_MS ) {
+    warnOnce("opt:startAt", "LETR | startAt is far in the future: it must be this page's performance.now() (see README 'Several clients'); ignored");
+    delete c.startAt;
+  }
+  if ( c.mood != null && c.mood !== "auto" && !Object.hasOwn(MOODS, c.mood) ) { warnOnce(`mood:${c.mood}`, `LETR | unknown mood "${String(c.mood)}", using auto`); c.mood = "auto"; }
+  return c;
+}
 const BUDGET_MS = 4;          // pre-render budget per animation frame, shared by every live word
 const MAX_REDRAWS = 3;        // stale (zoomed / resized) pictures drawn again per frame, at most, also within the time budget
 const MEMORY_MS = 6000;       // a hand used this recently is avoided by unseeded words
@@ -35,6 +61,10 @@ export function createEngine(base) {
   const bank = new FontBank();
   let readyP = null;
   const clips = new Set();
+  const pending = new Set();    // FXLE F4: words not live yet (waiting for `delay` or fonts, or queued for the frame loop)
+  const queue = [];             // FXLE F3: planned words waiting to be prepared in the frame loop, oldest first
+  const streams = new Set();    // FXLE F4: running streams (stopAll and a scene change stop them)
+  const hands = new Map();      // FXLE F18: recent hands by id, so `hand: h.hand` (the string) pins the exact look
   const memory = [];            // [{ id, t }]
   let raf = 0, seq = 0;
   const limits = { screen: 16, world: 48 };
@@ -54,24 +84,83 @@ export function createEngine(base) {
   const fontsApi = { adv: (font, ch) => bank.adv(font, ch) };
 
   /* ---------- placement ---------- */
-  const isToken = (a) => a && (a.document?.documentName === "Token" || a.documentName === "Token" || (typeof a === "string" && globalThis.canvas?.tokens?.get?.(a)));
-  const tokenObj = (a) => (typeof a === "string" ? canvas.tokens.get(a) : (a.object ?? a));
+  /* a token reference: a Token, a TokenDocument or a token id (a string is always read as a token id) */
+  const isToken = (a) => !!a && (typeof a === "string" || a.document?.documentName === "Token" || a.documentName === "Token");
+  /* FXLE F11: the token's placeable on this scene, or null when it is gone (deleted, another scene, destroyed) */
+  const tokenObj = (a) => {
+    let t = null;
+    if ( typeof a === "string" ) t = globalThis.canvas?.tokens?.get?.(a) ?? null;
+    else if ( a?.documentName === "Token" ) t = a.object ?? null;
+    else t = a ?? null;
+    return t && !t.destroyed && t.center && t.document ? t : null;
+  };
+  /* the point a word sits at; FXLE F11/F19: a token that is gone keeps the last known point (h.gone is set and the word leaves),
+     an `at` function that throws or returns nothing keeps the last point too */
+  function atOf(h) {
+    if ( typeof h.at !== "function" ) return h.at;
+    try { return h.at(); } catch ( e ) { warnOnce("at-throws", "LETR | an `at` function threw; the word keeps its last point", e); return null; }
+  }
   function worldPoint(h) {
-    const a = typeof h.at === "function" ? h.at() : h.at;
-    if ( isToken(a) ) { const t = tokenObj(a); if ( !t ) return null; const d = t.document; return { x: t.center.x, y: (d.y ?? t.y) - (canvas.grid?.size ?? 100) * 0.08 }; }
-    if ( a && Number.isFinite(a.x) ) return { x: a.x, y: a.y };
-    const r = canvas?.stage ? canvas.stage.pivot : { x: 0, y: 0 };
+    const a = atOf(h);
+    if ( isToken(a) ) {
+      const t = tokenObj(a);
+      if ( !t ) { h.gone = true; return h.lastP ?? null; }
+      const d = t.document;
+      return (h.lastP = { x: t.center.x, y: (d.y ?? t.y) - (canvas.grid?.size ?? 100) * 0.08 });
+    }
+    if ( a && Number.isFinite(a.x) && Number.isFinite(a.y) ) return (h.lastP = { x: a.x, y: a.y });
+    if ( h.lastP ) return h.lastP;
+    const r = globalThis.canvas?.stage ? canvas.stage.pivot : { x: 0, y: 0 };
     return { x: r.x, y: r.y };
   }
   function screenPoint(h) {
-    const a = typeof h.at === "function" ? h.at() : h.at;
-    if ( isToken(a) && globalThis.canvas?.stage ) {
-      const w = worldPoint({ at: a }); if ( !w ) return null;
+    const a = atOf(h);
+    if ( isToken(a) ) {
+      if ( !globalThis.canvas?.stage ) { h.gone = true; return h.lastS ?? null; }
+      const w = worldPoint({ at: a }); if ( !w ) { h.gone = true; return h.lastS ?? null; }
       const g = canvas.stage.toGlobal(w), r = canvas.app.view.getBoundingClientRect();
-      return { x: r.left + g.x, y: r.top + g.y };
+      return (h.lastS = { x: r.left + g.x, y: r.top + g.y });
     }
-    if ( a && Number.isFinite(a.x) ) return { x: a.x, y: a.y };
+    if ( a && Number.isFinite(a.x) && Number.isFinite(a.y) ) return (h.lastS = { x: a.x, y: a.y });
+    if ( h.lastS ) return h.lastS;
     return { x: innerWidth / 2, y: innerHeight * 0.42 };
+  }
+
+  /* ---------- who may see a word (FXLE F13) ----------
+     A word that belongs to a token (`at` = a token, or `token`) is shown only while that token is visible to this user: a hidden
+     token's word is never shown to players, nor one whose token this user cannot see (vision, fog). `vision: "point"` also hides a
+     world word whose point this user cannot see; `vision: "none"` shows it always. The GM sees what the GM sees on the canvas. */
+  const SEEN_MS = 120;
+  function wordToken(h) {
+    const a = h.opts.token ?? (typeof h.at === "function" ? null : h.at);
+    return isToken(a) ? a : null;
+  }
+  function computeSeen(h) {
+    const C = globalThis.canvas, user = globalThis.game?.user;
+    if ( h.opts.vision === "none" || !C?.ready || !user ) return true;
+    const gm = !!user.isGM;
+    const noVision = () => !C.visibility?.tokenVision || (gm && !C.effects?.visionSources?.some?.((s) => s.active));
+    const ref = wordToken(h);
+    if ( ref ) {
+      const t = tokenObj(ref);
+      if ( !t ) return h.seen ?? false;              // gone: keep the last answer (the word is leaving)
+      const d = t.document;
+      if ( t.controlled || t.isPreview ) return true;
+      if ( d.hidden && !gm ) return false;
+      if ( noVision() ) return true;
+      if ( t.vision?.active ) return true;
+      try { return !!C.visibility.testVisibility(d.getVisibilityTestPoints?.() ?? t.center, { tolerance: 0, object: t }); } catch { return true; }
+    }
+    if ( h.opts.vision === "point" && h.space === "world" && h.lastP ) {
+      if ( noVision() ) return true;
+      try { return !!C.visibility.testVisibility(h.lastP, { tolerance: (C.grid?.size ?? 100) * 0.25 }); } catch { return true; }
+    }
+    return true;
+  }
+  function seenOf(h, t) {
+    if ( h.seenAt != null && t - h.seenAt < SEEN_MS ) return h.seen;
+    h.seenAt = t; h.seen = computeSeen(h);
+    return h.seen;
   }
 
   /* ---------- display layers (README "Layers") ---------- */
@@ -96,12 +185,52 @@ export function createEngine(base) {
       document.body.appendChild(el);
       screenLayers.set(key, el);
     }
+    if ( key === "screen" ) screenZ(el);
     return el;
+  }
+  /* FXLE F22: app windows climb in z-index (ApplicationV2._maxZ + 1 per bring-to-front, from 100): the `screen` layer stays above
+     the highest window, under tooltips (9999) and notifications */
+  function screenZ(el = screenLayers.get("screen")) {
+    if ( !el ) return;
+    const top = Number(globalThis.foundry?.applications?.api?.ApplicationV2?._maxZ) || 0;
+    const z = String(Math.min(9990, Math.max(LAYERS.screen.z, top + 1)));
+    if ( el.style.zIndex !== z ) el.style.zIndex = z;
+  }
+  /* FXLE F22: the elevation a primary-group word sorts at: never under the current v14 level's own background (level base elevation);
+     `tokens` at the token's live elevation (the `at` token, or `token`), at a point the highest token covering that point; `elevation`
+     overrides */
+  function elevationOf(h, key, L) {
+    if ( L.group !== "primary" ) return 0;
+    if ( Number.isFinite(h.opts.elevation) ) return h.opts.elevation;
+    if ( L.elevation === Infinity ) return Infinity;
+    const base = Number(globalThis.canvas?.level?.elevation?.base) || 0;
+    if ( key !== "tokens" ) return Math.max(base, L.elevation ?? 0);
+    const ref = wordToken(h);
+    if ( ref ) { const t = tokenObj(ref); if ( t ) return Math.max(base, Number(t.document.elevation) || 0); }
+    const p = h.lastP;
+    let e = base;
+    if ( p ) for ( const t of globalThis.canvas?.tokens?.placeables ?? [] ) {
+      const b = t.bounds; if ( !b || !(Number(t.document?.elevation) > e) ) continue;
+      if ( p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height ) e = Number(t.document.elevation);
+    }
+    return e;
+  }
+  /* a primary-group word moves to the container of its new elevation when that changes (token climbs, level switch); checked every few frames */
+  function refreshElevation(h, t) {
+    if ( h.space !== "world" || !h.sprite || (h.opts.parent && h.opts.parent.addChild) ) return;
+    if ( h.elevAt != null && t - h.elevAt < 250 ) return;
+    h.elevAt = t;
+    const key = layerOf(h), L = LAYERS[key];
+    if ( L.group !== "primary" ) return;
+    if ( elevationOf(h, key, L) === h.elev ) return;
+    const parent = ensureWorld(h);
+    if ( h.sprite.parent !== parent ) parent.addChild(h.sprite);
   }
   function ensureWorld(h) {
     if ( h.opts.parent && h.opts.parent.addChild ) return h.opts.parent;
     const key = layerOf(h), L = LAYERS[key];
-    const elev = key === "tokens" && isToken(h.at) ? (tokenObj(h.at)?.document?.elevation ?? 0) : L.elevation;
+    const elev = elevationOf(h, key, L);
+    h.elev = elev;
     const id = `${key}@${elev}`;
     let c = worldLayers.get(id);
     if ( !c || c.destroyed || !c.parent ) {
@@ -204,7 +333,7 @@ export function createEngine(base) {
       if ( h.pixel ) r.canvas.style.imageRendering = "pixelated";
     }
     h.cache[idx] = r;
-    stats.rendered++; stats.ms += r.ms;
+    stats.rendered++; stats.ms += r.ms; if ( r.ms > stats.maxMs ) stats.maxMs = r.ms;
     return r;
   }
   /* 1-bit alpha for pixel art (no soft edge between art pixels) */
@@ -214,7 +343,7 @@ export function createEngine(base) {
     ctx.putImageData(d, 0, 0);
   }
   function dropPic(c) { try { c.tex?.destroy(true); } catch {} if ( c.canvas ) { c.canvas.width = 0; c.canvas.height = 0; c.canvas.remove?.(); } }
-  const stats = { rendered: 0, ms: 0 };
+  const stats = { rendered: 0, ms: 0, maxMs: 0 };
 
   /* ---------- schedule of one word ---------- */
   function scheduleOf(h) {
@@ -258,209 +387,339 @@ export function createEngine(base) {
     }
   }
   function place(h) {
+    const seen = seenOf(h, now());
     if ( h.space === "world" ) {
       const p = worldPoint(h); if ( !p ) return;
+      h.sprite.visible = seen;
       h.sprite.position.set(p.x + h.offset.x * (h.size * h.plan.sizeK), p.y + h.offset.y * (h.size * h.plan.sizeK));
       if ( h.shown ) h.sprite.scale.set((1 / h.shown.rs) * (h.size / h.shown.size0));
     } else {
       const p = screenPoint(h); if ( !p ) return;
+      const vis = seen ? "" : "hidden";
+      if ( h.box.style.visibility !== vis ) h.box.style.visibility = vis;
       const k = h.size * h.plan.sizeK;
       const f = h.shown ? h.size / h.shown.size0 : 1;
       h.box.style.transform = `translate(${(p.x + h.offset.x * k).toFixed(1)}px,${(p.y + h.offset.y * k).toFixed(1)}px) rotate(${h.rot}rad)${Math.abs(f - 1) > 1e-3 ? ` scale(${f.toFixed(4)})` : ""}`;
     }
   }
 
+  /* FXLE F4/F8: every way a word ends goes through here: it leaves the live set AND the waiting/queued set, its timer is cleared,
+     every picture (cached and retired) is freed, and BOTH promises settle (ready with false when it never showed) */
   function finish(h, why) {
     if ( !h.alive ) return;
     h.alive = false;
-    clips.delete(h);
+    clips.delete(h); pending.delete(h);
+    if ( h.timer ) { clearTimeout(h.timer); h.timer = 0; }
     for ( const c of h.cache ) if ( c ) dropPic(c);
     h.cache.length = 0;
-    if ( h.space === "world" ) { try { h.sprite.destroy({ children: true, texture: false }); } catch {} }
+    if ( h.retired ) { for ( const c of h.retired ) dropPic(c); h.retired = null; }
+    if ( h.space === "world" ) { try { h.sprite?.destroy({ children: true, texture: false }); } catch {} }
     else h.box?.remove();
+    if ( !h.isReady ) h._ready(false);
     h._done(why);
+  }
+
+  /* FXLE F3: a new word gets ready here, in the frame loop and within the first-picture budget: its geometry, size, schedule, sprite
+     or box, the limit; then its first picture is painted when it is due. A big burst so comes up over a few frames instead of
+     blocking the page in one call. Without `startAt` a word's clock starts when its first picture is shown (no entrance is skipped). */
+  function prepare(h) {
+    const opts = h.opts, space = h.space;
+    if ( space === "world" && !globalThis.canvas?.ready ) { finish(h, "evicted"); return; }
+    if ( isToken(h.at) && !tokenObj(h.at) ) { warnOnce("tok-missing", "LETR | a word's token is not on this scene; the word is skipped"); finish(h, "evicted"); return; }
+    settleCenter(h.plan, bank);
+    h.loop = !!opts.loop;
+    h.tokenSpan = tokenSpanOf(h);
+    h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
+    resize(h, true);
+    h.rot = ((opts.rotation ?? 0) * Math.PI) / 180;
+    const anchor = opts.anchor ?? (isToken(h.at) ? "bottom" : "center");
+    h.offset = { x: 0, y: anchor === "bottom" ? -(h.plan._holdBox.h / 2 + 0.1) : 0 };
+    scheduleOf(h);
+    if ( space === "world" ) worldPoint(h); else screenPoint(h);   // first known point (elevation at a point, F11)
+    /* the limit: the oldest word of the same space leaves at once (a limit under 1 lets no word in) */
+    const lim = Math.max(0, Math.floor(Number(limits[space]) || 0));
+    if ( lim < 1 ) { finish(h, "evicted"); return; }
+    const same = [...clips].filter((c) => c.space === space);
+    while ( same.length && same.length >= lim ) same.shift().stop({ quick: true, why: "evicted" });
+    if ( space === "world" ) {
+      const parent = ensureWorld(h);
+      h.sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
+      h.sprite.eventMode = "none";
+      h.sprite.zIndex = opts.zIndex ?? h.seq;
+      h.sprite.rotation = h.rot;
+      parent.addChild(h.sprite);
+    } else {
+      const lay = ensureLayer(h);
+      h.box = document.createElement("div");
+      h.box.className = "moinen-letter";
+      Object.assign(h.box.style, { position: "absolute", left: "0", top: "0", width: "0", height: "0", zIndex: String(opts.zIndex ?? h.seq), willChange: "transform" });
+      lay.appendChild(h.box);
+    }
+    pending.delete(h);
+    clips.add(h);
+    /* startAt: a performance.now() time on this page's clock (an effect's own t0): the word joins its timeline there */
+    h.t0 = Number.isFinite(opts.startAt) ? opts.startAt : null;
   }
 
   /* ---------- the one animation loop ---------- */
   function frame() {
     raf = 0;
     const t = now();
-    let budget = BUDGET_MS;
+    let budget = BUDGET_MS, first = FIRST_MS, firstN = 0;
+    const firstOk = () => first > 0 || firstN === 0;
+    /* new words, oldest first */
+    while ( queue.length && firstOk() ) {
+      const h = queue.shift(); if ( !h.alive ) continue;
+      const t1 = now();
+      try { prepare(h); } catch ( e ) { console.warn("LETR | word failed", e); finish(h, "evicted"); }
+      first -= now() - t1;
+      if ( !h.alive ) continue;
+      firstN++;   // its first picture is painted below in this frame when it is due (charged to the same budget)
+    }
     let worldN = 0; for ( const h of clips ) if ( h.space === "world" ) worldN++;
-    let redraws = 0;
+    let redraws = 0, painted = 0;
+    if ( clips.size ) screenZ();
     for ( const h of [...clips] ) {
       try {
+        if ( !h.shown ) {
+          /* FXLE F7: a word with a future startAt shows nothing (and is not ready) until its time; its first picture is drawn ahead */
+          if ( h.t0 != null && t < h.t0 ) { if ( !h.cache[0] && budget > 0 ) { const t1 = now(); picture(h, 0, true); budget -= now() - t1; } continue; }
+          if ( !(first > 0 || painted === 0) ) continue;
+          const idx = h.t0 == null ? 0 : picAt(h, t - h.t0);
+          if ( idx < 0 ) { finish(h, h.stopWhy ?? "done"); continue; }
+          if ( h.space === "world" ) h.worldAlive = worldN;
+          resize(h, false);
+          const t1 = now();
+          const c = picture(h, idx, true);
+          first -= now() - t1; painted++;
+          if ( h.t0 == null ) h.t0 = now();
+          show(h, c); place(h);
+          if ( !h.isReady ) { h.isReady = true; h._ready(true); }
+          continue;
+        }
         const idx = picAt(h, t - h.t0);
         if ( idx < 0 ) { finish(h, h.stopWhy ?? "done"); continue; }
         if ( h.space === "world" ) h.worldAlive = worldN;
         resize(h, false);
+        refreshElevation(h, t);
         place(h);
+        if ( h.gone && h.stopWhy == null ) h.stop();   // F11: its token went away: the word plays its exit where it last was
         let c = picture(h, idx, false);
         if ( c?.stale && budget > 0 && redraws < MAX_REDRAWS ) { redraws++; const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }
-        if ( !c ) {
-          /* not pre-rendered: draw it now unless the frame is already over budget and an older picture is showing */
-          if ( !h.shown || budget > 0 ) { const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }
-        }
-        if ( c ) { const was = h.shown; show(h, c); if ( was !== h.shown ) place(h); if ( !h.isReady ) { h.isReady = true; h._ready(); } }
+        if ( !c && budget > 0 ) { const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }   // over budget: the older picture stays
+        if ( c ) { const was = h.shown; show(h, c); if ( was !== h.shown ) place(h); }
       } catch ( e ) { console.warn("LETR | word failed", e); finish(h, "evicted"); }
     }
     /* pre-render what comes next, nearest first */
     for ( const h of clips ) {
       if ( budget <= 0 ) break;
+      if ( h.t0 == null ) continue;
       const n = nextIdx(h, t - h.t0);
       if ( n >= 0 ) { const t1 = now(); picture(h, n, true); budget -= now() - t1; }
     }
-    if ( clips.size ) raf = requestAnimationFrame(frame);
+    if ( clips.size || queue.length ) raf = requestAnimationFrame(frame);
   }
   const kick = () => { if ( !raf ) raf = requestAnimationFrame(frame); };
 
   /* ---------- API ---------- */
-  function play(text, opts = {}) {
+  /* FXLE F3: a text longer than MAX_CHARS is cut (with an ellipsis) */
+  function textOf(text) {
+    const s = String(text ?? ""), cps = [...s];
+    if ( cps.length <= MAX_CHARS ) return s;
+    warnOnce("long-text", `LETR | text longer than ${MAX_CHARS} characters is cut`);
+    return cps.slice(0, MAX_CHARS - 1).join("") + "…";
+  }
+  /* FXLE F18: `hand` may be a handle's `hand` string: the recent hand of that id (the exact look), else design.mjs reads the id */
+  function handOpt(o) {
+    if ( typeof o.hand === "string" ) { const x = hands.get(o.hand); return x ? { ...o, hand: x } : o; }
+    if ( o.hand != null && typeof o.hand !== "object" ) { const c = { ...o }; delete c.hand; return c; }
+    return o;
+  }
+  function remember(hand) { hands.delete(hand.id); hands.set(hand.id, hand); if ( hands.size > 128 ) hands.delete(hands.keys().next().value); }
+  /* FXLE F23: a character no font can letter is drawn as "?": say so once per character */
+  function warnGlyphs() { if ( bank.missing?.size ) for ( const ch of bank.missing ) warnOnce(`glyph:${ch}`, `LETR | no font has "${ch}" (U+${ch.codePointAt(0).toString(16).toUpperCase()}); drawn as "?"`); }
+  const settle = (p, f) => { try { if ( p && typeof p.then === "function" ) p.then(f, f); } catch {} };
+
+  function play(text, opts0 = {}) {
+    const opts = handOpt(cleanOpts(opts0));
     const space = opts.space === "world" ? "world" : "screen";
     if ( !readyP ) ready();
     let done, rdy;
     const h = {
-      id: `letr${++seq}`, text: String(text ?? ""), space, opts, alive: true, isReady: false, cache: [], shown: null,
+      id: `letr${++seq}`, seq, text: textOf(text), space, opts, alive: true, isReady: false, cache: [], shown: null, timer: 0,
       ready: new Promise((r) => (rdy = r)), finished: new Promise((r) => (done = r)),
       stop(o = {}) {
         if ( !h.alive ) return;
         h.stopWhy = o.why ?? "stopped";
-        if ( o.quick || !h.plan ) { finish(h, h.stopWhy); return; }
+        if ( o.quick || !h.shown || h.t0 == null ) { finish(h, h.stopWhy); return; }   // nothing on screen yet: it simply ends
         const t = now() - h.t0, natural = h.loop ? Infinity : h.entMs + h.holdMs;
         if ( !(h.exitAt != null && h.exitAt <= t) && t < natural ) h.exitAt = t;
         h.loop = false;
         kick();
       },
-      moveTo(at) { h.at = at; }
+      moveTo(at) { h.at = at; h.gone = false; }
     };
     h._done = done; h._ready = rdy;
     h.at = opts.at;
     h.pixel = space === "world" && !!opts.pixel;
+    /* plan the word (cheap, synchronous when it starts now: `hand` and `plan` are set on return); the heavy part waits for the frame loop */
     const start = () => {
+      h.timer = 0;
       if ( !h.alive ) return;
-      if ( space === "world" && !globalThis.canvas?.ready ) { finish(h, "evicted"); return; }
-      const reduced = opts.reduced ?? reducedPref();
-      let from = opts.from;
-      if ( from && typeof from === "object" && Number.isFinite(from.x) ) { const p = space === "world" ? worldPoint(h) : screenPoint(h); from = p ? Math.atan2(from.y - p.y, from.x - p.x) * 180 / Math.PI : null; }
-      for ( let i = memory.length - 1; i >= 0; i-- ) if ( now() - memory[i].t > MEMORY_MS ) memory.splice(i, 1);
-      const mem = opts.seed == null ? memory.map((m) => m.id) : [];
-      h.plan = makePlan(h.text, { ...opts, reduced, from }, fontsApi, mem);
-      if ( opts.seed == null ) memory.push({ id: h.plan.hand.id, t: now() });
-      h.hand = h.plan.hand.id;
-      settleCenter(h.plan, bank);
-      h.loop = !!opts.loop;
-      h.tokenSpan = tokenSpanOf(h);
-      h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
-      resize(h, true);
-      h.rot = ((opts.rotation ?? 0) * Math.PI) / 180;
-      const tokenAt = isToken(h.at);
-      const anchor = opts.anchor ?? (tokenAt ? "bottom" : "center");
-      h.offset = { x: 0, y: anchor === "bottom" ? -(h.plan._holdBox.h / 2 + 0.1) : 0 };
-      scheduleOf(h);
-      if ( space === "world" ) {
-        const parent = ensureWorld(h);
-        h.sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
-        h.sprite.eventMode = "none";
-        h.sprite.zIndex = opts.zIndex ?? seq;
-        h.sprite.rotation = h.rot;
-        parent.addChild(h.sprite);
-      } else {
-        const lay = ensureLayer(h);
-        h.box = document.createElement("div");
-        h.box.className = "moinen-letter";
-        Object.assign(h.box.style, { position: "absolute", left: "0", top: "0", width: "0", height: "0", zIndex: String(opts.zIndex ?? seq), willChange: "transform" });
-        lay.appendChild(h.box);
-      }
-      /* the limit: the oldest word of the same space leaves at once */
-      const same = [...clips].filter((c) => c.space === space);
-      while ( same.length >= limits[space] ) same.shift().stop({ quick: true, why: "evicted" });
-      clips.add(h);
-      /* startAt: a performance.now() time on the caller's clock (an effect's own t0): the word joins its timeline there */
-      h.t0 = Number.isFinite(opts.startAt) ? opts.startAt : now();
-      if ( opts.until?.then ) opts.until.then(() => h.stop(), () => h.stop());
-      const c0 = picture(h, 0, true);   // the first picture is ready in the same frame
-      show(h, c0); place(h);
-      kick();
+      try {
+        if ( space === "world" && !globalThis.canvas?.ready ) { finish(h, "evicted"); return; }
+        const reduced = opts.reduced ?? reducedPref();
+        let from = opts.from;
+        if ( from && typeof from === "object" ) {
+          if ( Number.isFinite(from.x) && Number.isFinite(from.y) ) { const p = space === "world" ? worldPoint(h) : screenPoint(h); from = p ? Math.atan2(from.y - p.y, from.x - p.x) * 180 / Math.PI : null; }
+          else from = null;
+        } else if ( from != null && !Number.isFinite(from) ) from = null;
+        for ( let i = memory.length - 1; i >= 0; i-- ) if ( now() - memory[i].t > MEMORY_MS ) memory.splice(i, 1);
+        const mem = opts.seed == null ? memory.map((m) => m.id) : [];
+        const grp = opts._group;
+        const avoid = [...(Array.isArray(opts.avoid) ? opts.avoid : []), ...(grp?.used ?? [])];
+        let plan = makePlan(h.text, { ...opts, avoid, reduced, from }, fontsApi, mem);
+        /* FXLE F16: a burst guarantees a different hand per word, also when its items have delays or share one seed */
+        for ( let r = 1; grp && grp.used.includes(plan.hand.id) && r <= 6; r++ )
+          plan = makePlan(h.text, { ...opts, avoid, reduced, from, seed: opts.seed != null ? `${opts.seed}~${r}` : undefined }, fontsApi, mem);
+        if ( grp ) grp.used.push(plan.hand.id);
+        h.plan = plan;
+        if ( opts.seed == null ) memory.push({ id: plan.hand.id, t: now() });
+        h.hand = plan.hand.id;
+        remember(plan.hand);
+        warnGlyphs();
+        queue.push(h);
+        kick();
+      } catch ( e ) { console.warn("LETR | word failed", e); finish(h, "evicted"); }
     };
+    pending.add(h);
+    settle(opts.until, () => h.stop());
     const go = () => { if ( bank.has("bangers") || bank.has("anton") ) start(); else readyP.then(start, (e) => { console.warn("LETR", e); finish(h, "evicted"); }); };
-    if ( opts.delay > 0 ) setTimeout(() => { if ( h.alive ) go(); }, opts.delay); else go();
+    if ( opts.delay > 0 ) h.timer = setTimeout(() => { h.timer = 0; if ( h.alive ) go(); }, opts.delay); else go();
     return h;
   }
 
   /* ---------- streams: a sound that repeats or lasts as long as an effect (ratatata of a gun, a crackling fire) ---------- */
-  function stream(o = {}) {
+  function stream(o0 = {}) {
+    const o = { ...(o0 && typeof o0 === "object" ? o0 : {}) };
+    /* FXLE F20: numbers checked; a bad one is ignored with one warning */
+    const num = (k, ok, d) => {
+      if ( o[k] == null ) return d;
+      if ( typeof o[k] === "number" && Number.isFinite(o[k]) && ok(o[k]) ) return o[k];
+      warnOnce(`stream:${k}`, `LETR | stream option ${k} = ${String(o[k])} ignored (not a usable number)`);
+      return d;
+    };
     const space = o.space === "world" ? "world" : "screen";
     const syl = Array.isArray(o.syllables) && o.syllables.length ? o.syllables.map(String) : syllablesOf(o.text ?? "RA-TA-TA");
-    const every = o.every ?? 110, life = o.life ?? 340, seedBase = o.seed ?? `s${(Math.random() * 1e9) | 0}`;
-    const handles = [], timers = [];
-    let k = 0, hand = null, alive = true, done;
+    const every = num("every", (v) => v >= 20, 110), life = num("life", (v) => v > 0, 340);
+    const cnt = num("count", (v) => v >= 0, undefined), duration = num("duration", (v) => v > 0, undefined), delay = num("delay", (v) => v >= 0, 0);
+    const fixedSize = num("size", (v) => v > 0, undefined);
+    let startAt = num("startAt", () => true, undefined);
+    if ( startAt > now() + FUTURE_MS ) { warnOnce("opt:startAt", "LETR | startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = undefined; }
+    const mood = cleanOpts({ mood: o.mood ?? "impact" }).mood;
+    const seedBase = o.seed ?? `s${(Math.random() * 1e9) | 0}`;
+    const handles = [], timers = new Set();
+    let k = 0, emitted = 0, hand = null, alive = true, done;
     const finished = new Promise((r) => (done = r));
-    const src = () => { const a = typeof o.at === "function" ? o.at() : o.at; const fake = { at: a }; return space === "world" ? worldPoint(fake) : screenPoint(fake); };
+    const srcH = { at: o.at };   // keeps the last point of a moving source, and notices a source token that went away (F11)
+    const src = () => (space === "world" ? worldPoint(srcH) : screenPoint(srcH));
     const dirAt = (p) => {
-      const to = typeof o.to === "function" ? o.to() : o.to;
-      if ( to ) { const q = isToken(to) ? (space === "world" ? worldPoint({ at: to }) : screenPoint({ at: to })) : to; if ( q && p ) return Math.atan2(q.y - p.y, q.x - p.x); }
-      return ((o.dir ?? -90) * Math.PI) / 180;
+      let to = null;
+      try { to = typeof o.to === "function" ? o.to() : o.to; } catch { to = null; }
+      if ( to ) { const q = isToken(to) ? (space === "world" ? worldPoint({ at: to }) : screenPoint({ at: to })) : to; if ( q && p && Number.isFinite(q.x) && Number.isFinite(q.y) ) return Math.atan2(q.y - p.y, q.x - p.x); }
+      return ((Number.isFinite(o.dir) ? o.dir : -90) * Math.PI) / 180;
     };
+    const tokenRef = o.token ?? (isToken(o.at) ? o.at : undefined);
     /* one syllable's natural size: the model's size for this stream (token, area, magnitude), 62 % of a whole word; play() then
        clamps every syllable to the legible range with the live zoom */
     const streamUnit = () => {
-      const fake = { space, opts: { magnitude: o.magnitude, area: o.area, span: o.span, token: o.token ?? (isToken(o.at) ? o.at : null) }, at: o.at, pixel: false, plan: { sizeK: 1, _holdBox: { w: 1.2 } } };
+      const fake = { space, opts: { magnitude: o.magnitude, area: o.area, span: o.span, token: tokenRef ?? null }, at: o.at, pixel: false, plan: { sizeK: 1, _holdBox: { w: 1.2 } } };
       fake.tokenSpan = space === "world" ? tokenSpanOf(fake) : 0;
       const c = sizeCtx(fake); c.fit = "world";
       return sizeFor(c).natural * 0.62;
     };
-    const beat = (text) => {
-      if ( !alive ) return null;
-      const i = k++;
-      const word = text ?? syl[i === 0 ? 0 : 1 + ((i - 1) % Math.max(1, syl.length - 1))] ?? syl[0];
-      const p0 = src(); if ( !p0 ) return null;
-      const ang = dirAt(p0) + (((i % 2) ? 1 : -1) * (o.spread ?? 10) * Math.PI) / 180;
-      const unit = o.size ?? streamUnit();
-      const travel = (o.travel ?? 1.6) * unit, side = ((i % 3) - 1) * unit * 0.25, t0 = now();
-      const loud = o.loud ? (typeof o.loud === "function" ? o.loud(i) : o.loud) : 1;
-      const at = () => {
-        const p = src() ?? p0, u = Math.min(1, (now() - t0) / (life + 200));
-        const e = 1 - (1 - u) * (1 - u);
-        return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
-      };
-      const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
-      const h = play(word, { mood: o.mood ?? "impact", space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: hand ?? undefined,
-        in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (o.rotation ?? 0) + tilt + (((i * 7) % 5) - 2) * 3,
-        zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer });
-      if ( !hand && h.plan ) hand = h.plan.hand;
-      handles.push(h);
-      return h;
+    /* the stream's one hand = the first syllable's, the same on every client whenever it joins (FXLE F9) */
+    const handOf = () => {
+      if ( hand ) return hand;
+      try { hand = makePlan(syl[0], { mood, seed: `${seedBase}:0`, colors: o.colors }, fontsApi, []).hand; remember(hand); } catch { hand = null; }
+      return hand;
     };
+    const beat = (text, when, idx) => {
+      if ( !alive ) return null;
+      try {
+        const i = idx ?? k; k = i + 1;
+        const word = text != null ? String(text) : (syl[i === 0 ? 0 : 1 + ((i - 1) % Math.max(1, syl.length - 1))] ?? syl[0]);
+        const p0 = src();
+        if ( srcH.gone || !p0 ) { if ( srcH.gone ) stop(); return null; }
+        const ang = dirAt(p0) + (((i % 2) ? 1 : -1) * (Number.isFinite(o.spread) ? o.spread : 10) * Math.PI) / 180;
+        const unit = fixedSize ?? streamUnit();
+        const travel = (Number.isFinite(o.travel) ? o.travel : 1.6) * unit, side = ((i % 3) - 1) * unit * 0.25, t0 = when ?? now();
+        /* FXLE F17: loud 0 is quiet (it was read as "not given") */
+        let lv = 1;
+        if ( typeof o.loud === "function" ) { try { lv = o.loud(i); } catch { lv = 1; } } else if ( o.loud != null ) lv = o.loud;
+        const loud = Number.isFinite(lv) ? Math.max(0, Math.min(1, lv)) : 1;
+        const at = () => {
+          const p = src() ?? p0, u = Math.min(1, Math.max(0, now() - t0) / (life + 200));
+          const e = 1 - (1 - u) * (1 - u);
+          return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
+        };
+        const tilt = 0;   // syllables stay upright to read; the travel direction shows in where they go, not in their tilt
+        const h = play(word, { mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+          in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
+          zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation });
+        emitted++;
+        /* FXLE F10: only the syllables still alive are kept */
+        handles.push(h);
+        h.finished.then(() => { const j = handles.indexOf(h); if ( j >= 0 ) handles.splice(j, 1); });
+        return h;
+      } catch ( e ) { warnOnce("stream-beat", "LETR | a stream syllable failed", e); return null; }
+    };
+    const later = (fn, when) => { const id = setTimeout(() => { timers.delete(id); fn(); }, Math.max(0, when - now())); timers.add(id); };
     const stop = (q = {}) => {
-      if ( !alive ) return; alive = false; timers.forEach(clearTimeout);
-      if ( q.quick ) for ( const h of handles ) h.stop({ quick: true });
+      if ( !alive ) return;
+      alive = false; streams.delete(s);
+      for ( const id of timers ) clearTimeout(id);
+      timers.clear();
+      if ( q.quick ) for ( const h of [...handles] ) h.stop({ quick: true });
       Promise.all(handles.map((h) => h.finished)).then(() => done(q.quick ? "stopped" : "done"));
     };
-    const tStart = Number.isFinite(o.startAt) ? o.startAt : now() + (o.delay ?? 0);
-    if ( Array.isArray(o.beats) ) for ( const ms of o.beats ) timers.push(setTimeout(() => beat(), Math.max(0, tStart + ms - now())));
-    else if ( !o.manual ) {
-      const n = o.count ?? (o.duration ? Math.max(1, Math.floor(o.duration / every)) : o.until ? Infinity : 6);
-      const tick = () => { if ( !alive ) return; if ( k >= n ) { stop(); return; } beat(); timers.push(setTimeout(tick, every * (o.swing ? (k % 2 ? 1.15 : 0.85) : 1))); };
-      timers.push(setTimeout(tick, Math.max(0, tStart - now())));
+    const s = { space, handles, finished, beat: (text) => beat(text), stop, get alive() { return alive; }, get emitted() { return emitted; } };
+    streams.add(s);
+    /* FXLE F9: on the effect's clock: a stream joined late skips the syllables whose life is already over and each syllable joins
+       its own timeline at its due time; a duration counts from startAt */
+    const tStart = Number.isFinite(startAt) ? startAt : now() + delay;
+    const over = (when) => when + life + 200 < now();
+    if ( Array.isArray(o.beats) ) {
+      const bs = o.beats.filter((ms) => Number.isFinite(ms) && ms >= 0).sort((a, b) => a - b);
+      bs.forEach((ms, j) => { const when = tStart + ms; if ( !over(when) ) later(() => beat(undefined, when, j), when); });
+      later(() => stop(), tStart + (bs.at(-1) ?? 0) + 20);
+    } else if ( !o.manual ) {
+      const n = cnt != null ? Math.floor(cnt) : (duration ? Math.max(1, Math.floor(duration / every)) : o.until ? Infinity : 6);
+      const timeOf = (j) => tStart + every * (j + (o.swing && j % 2 ? 0.15 : 0));
+      let j = Math.max(0, Math.floor((now() - life - 200 - tStart) / every) - 1);
+      while ( j < n && over(timeOf(j)) ) j++;
+      const tick = (i) => { if ( !alive ) return; if ( i >= n ) { stop(); return; } beat(undefined, timeOf(i), i); later(() => tick(i + 1), timeOf(i + 1)); };
+      later(() => tick(j), timeOf(j));
     }
-    if ( Array.isArray(o.beats) ) timers.push(setTimeout(() => stop(), Math.max(0, tStart + Math.max(...o.beats, 0) + 20 - now())));
-    if ( o.until?.then ) o.until.then(() => stop(), () => stop());
-    return { handles, finished, beat, stop, get alive() { return alive; } };
+    settle(o.until, () => stop());
+    return s;
   }
 
   function burst(items, common = {}) {
-    const used = [];
-    return items.map((it) => {
-      const h = play(it.text, { ...common, ...it, avoid: [...(common.avoid ?? []), ...(it.avoid ?? []), ...used] });
-      const note = () => { if ( h.hand ) used.push(h.hand); };
-      note();
-      return h;
+    const group = { used: [] };
+    const c = common && typeof common === "object" ? common : {};
+    return (Array.isArray(items) ? items : []).map((it, i) => {
+      const item = it && typeof it === "object" ? it : { text: it };
+      /* FXLE F16: a shared seed gives each item its own (still identical on every client) */
+      const seed = item.seed ?? (c.seed != null ? `${c.seed}:${i}` : undefined);
+      return play(item.text, { ...c, ...item, seed, avoid: [...(Array.isArray(c.avoid) ? c.avoid : []), ...(Array.isArray(item.avoid) ? item.avoid : [])], _group: group });
     });
   }
 
-  async function still(text, opts = {}) {
+  async function still(text, opts0 = {}) {
     await ready();
-    const plan = makePlan(text, { ...opts, reduced: true }, fontsApi, []);
+    const opts = handOpt(cleanOpts(opts0));
+    const plan = makePlan(textOf(text), { ...opts, reduced: true }, fontsApi, []);
     settleCenter(plan, bank);
     const dpr = opts.dpr ?? (globalThis.devicePixelRatio || 1);
     const S = Math.max(4, (opts.size ?? 72) * plan.sizeK * dpr);
@@ -469,14 +728,15 @@ export function createEngine(base) {
   }
 
   function design(text, opts = {}) {
-    const plan = makePlan(text, opts, fontsApi, []);
+    const plan = makePlan(textOf(text), handOpt(cleanOpts(opts)), fontsApi, []);
     return JSON.parse(JSON.stringify(plan));
   }
 
   /* the size a word would get right now, and why (for callers and tests): { size, px, natural, clamp, fit, sizeK } */
-  function sizeOf(text, opts = {}) {
+  function sizeOf(text, opts0 = {}) {
+    const opts = handOpt(cleanOpts(opts0));
     const space = opts.space === "world" ? "world" : "screen";
-    const plan = makePlan(String(text ?? ""), { ...opts, reduced: true }, fontsApi, []);
+    const plan = makePlan(textOf(text), { ...opts, reduced: true }, fontsApi, []);
     try { settleCenter(plan, bank); } catch {}
     const h = { space, opts, at: opts.at, plan, pixel: space === "world" && !!opts.pixel };
     h.tokenSpan = space === "world" ? tokenSpanOf(h) : 0; h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
@@ -484,10 +744,22 @@ export function createEngine(base) {
     return { ...h.sizeInfo, size: h.size, sizeK: plan.sizeK };
   }
 
-  function stopAll(o = {}) { for ( const h of [...clips] ) if ( !o.space || h.space === o.space ) h.stop({ quick: o.quick ?? true }); }
+  /* FXLE F4: stopAll and a scene change reach every word, also those still waiting (delay, fonts, queued), and every stream */
+  function stopAll(o = {}) {
+    const quick = o.quick ?? true;
+    for ( const s of [...streams] ) if ( !o.space || s.space === o.space ) s.stop({ quick });
+    for ( const h of [...clips, ...pending] ) if ( !o.space || h.space === o.space ) h.stop({ quick });
+  }
   function count(o = {}) { let n = 0; for ( const h of clips ) if ( !o.space || h.space === o.space ) n++; return n; }
 
-  try { globalThis.Hooks?.on?.("canvasTearDown", () => { for ( const h of [...clips] ) if ( h.space === "world" ) h.stop({ quick: true, why: "evicted" }); worldLayers.clear(); }); } catch {}
+  /* FXLE F22: on a scene change our layer containers go too (the `top` one lives on canvas.stage, which Foundry keeps) */
+  function tearDown() {
+    for ( const s of [...streams] ) if ( s.space === "world" ) s.stop({ quick: true });
+    for ( const h of [...clips, ...pending] ) if ( h.space === "world" ) h.stop({ quick: true, why: "evicted" });
+    for ( const c of worldLayers.values() ) { try { if ( !c.destroyed ) { c.parent?.removeChild(c); c.destroy({ children: true }); } } catch {} }
+    worldLayers.clear();
+  }
+  try { globalThis.Hooks?.on?.("canvasTearDown", tearDown); } catch {}
   /* settings helpers: choices for game.settings.register, per space */
   const layerChoices = (space = "world", lang = globalThis.game?.i18n?.lang) => Object.fromEntries(Object.entries(LAYERS).filter(([, v]) => v.space === space).map(([k, v]) => [k, lang === "pl" ? v.pl : v.en]));
 
