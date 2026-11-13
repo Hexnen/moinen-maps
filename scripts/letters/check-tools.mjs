@@ -119,7 +119,7 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(pg.hand.font === "grit" && r.canvas.width > 4, "tools: a registered font paints");
     const S = makeStyles();
     S.register("Młot Thora", { mood: "frost", palette: "venom", font: "grit", in: "pop", junk: 1 });
-    ok(S.get("Młot Thora").junk === undefined && S.list()[0].name === "Młot Thora", "tools: a style keeps only known keys, Polish names work");
+    ok(S.get("Młot Thora").junk === undefined && S.list().some((s) => s.name === "Młot Thora")   /* LOOK: built-in styles come first */, "tools: a style keeps only known keys, Polish names work");
     let bad = 0; for ( const [n, s] of [["x", { mood: "nomood" }], ["y", { palette: "nopal" }], ["z", { font: "nofont" }], ["", {}], ["toString", {}]] ) { try { S.register(n, s); } catch { bad++; } }
     ok(bad === 5, "tools: styles with unknown moods, palettes, fonts or bad names are refused");
     const fromWorld = new Set();

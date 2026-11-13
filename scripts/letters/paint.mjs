@@ -1,8 +1,8 @@
 /* LETR: paints one picture of a plan with Canvas 2D: shadow, 3D extrusion, outlines, fill, texture, shine, effects, dissolve.
    Works on any 2D context (HTMLCanvas, OffscreenCanvas). Everything is drawn from outlines at the final pixel size. */
-import { bbox } from "./geom.mjs";
+import { bbox, crackLines } from "./geom.mjs";
 import { rng } from "./rng.mjs";
-import { pictureGeometry, settleCenter } from "./shape.mjs";
+import { pictureGeometry, settleCenter, CRACK_W, crackSeed } from "./shape.mjs";
 
 export const MAX_SIDE = 2048;
 
@@ -13,6 +13,8 @@ function path(ctx, cs, S, ox, oy) {
     ctx.closePath();
   }
 }
+
+const signedArea = (c) => { let a = 0; for ( let i = 0, n = c.length; i < n; i += 2 ) { const j = (i + 2) % n; a += c[i] * c[j + 1] - c[j] * c[i + 1]; } return a / 2; };
 
 /* colour helpers */
 export function hexToHsl(h) {
@@ -31,7 +33,7 @@ const hsl = (h, s, l, a = 1) => `hsla(${((h % 360) + 360) % 360},${Math.max(0, M
 const rot = (hex, dh, dl = 0) => { const [h, s, l] = hexToHsl(hex); return hsl(h + dh, s, l + dl); };
 
 /* the extents (word units) a picture needs around its letters */
-function extents(plan, geo, p) {
+function extents(plan, geo, p, back) {
   const H = plan.hand, b = bbox(geo.flatMap((l) => l.cs));
   const outer = H.inflate + H.inkW + H.out2W + 0.05;
   const dx = Math.cos(H.depthAng) * H.depth, dy = Math.sin(H.depthAng) * H.depth;
@@ -39,6 +41,7 @@ function extents(plan, geo, p) {
   let x0 = b.x0 - outer + Math.min(0, dx, dx + sx), x1 = b.x1 + outer + Math.max(0, dx, dx + sx);
   let y0 = b.y0 - outer + Math.min(0, dy, dy + sy), y1 = b.y1 + outer + Math.max(0, dy, dy + sy);
   const w = b.x1 - b.x0, h = b.y1 - b.y0;
+  if ( back ) { const m = H.inkW * 2 + 0.06 + (H.shadow ? H.shadow.d : 0); x0 = Math.min(x0, back.box.x0 - m); y0 = Math.min(y0, back.box.y0 - m); x1 = Math.max(x1, back.box.x1 + m); y1 = Math.max(y1, back.box.y1 + m); }
   for ( const f of p.fx ) {
     const m = { krackle: 0.55, burst: 0.42, puff: 0.5, debris: 0.9, sparks: 0.45, embers: 0.6, rays: 0.5, droplets: 0.5, dust: 0.45 }[f.k];
     if ( m ) { x0 = Math.min(x0, b.x0 - m * Math.max(1, h)); x1 = Math.max(x1, b.x1 + m * Math.max(1, h)); y0 = Math.min(y0, b.y0 - m * Math.max(1, h) * (f.k === "embers" ? 1.6 : 1)); y1 = Math.max(y1, b.y1 + m * Math.max(1, h) * (f.k === "embers" ? 0.3 : 1)); }
@@ -61,13 +64,31 @@ function fillPaint(ctx, H, kind, box, S, ox, oy, i, n) {
       const dh = (n > 1 ? (i / (n - 1) - 0.5) : 0) * 70;
       g = ctx.createLinearGradient(0, Y0, 0, Y1); g.addColorStop(0, rot(F[0], dh)); g.addColorStop(0.55, rot(F[1], dh)); g.addColorStop(1, rot(F[2], dh)); return g;
     }
+    case "alt": {   /* LOOK: deliberate per-letter colours, each letter its own colour with a light top */
+      const c = (H.alt ?? F)[Math.max(0, i) % (H.alt ?? F).length];
+      g = ctx.createLinearGradient(0, Y0, 0, Y1); g.addColorStop(0, rot(c, 0, 22)); g.addColorStop(0.5, c); g.addColorStop(1, rot(c, 0, -14)); return g;
+    }
+    case "multi": {   /* LOOK: more than three stops: a sunset down the letters, or a hue sweep across the word */
+      if ( H.multi === "sweep" ) {
+        g = ctx.createLinearGradient(X0, 0, X1, 0);
+        [0, 0.2, 0.4, 0.6, 0.8, 1].forEach((t, k) => g.addColorStop(t, rot(F[1], -50 + 20 * k, k % 2 ? 6 : -2)));
+        return g;
+      }
+      g = ctx.createLinearGradient(0, Y0, 0, Y1);
+      g.addColorStop(0, F[0]); g.addColorStop(0.28, rot(F[0], 18, -6)); g.addColorStop(0.5, F[1]); g.addColorStop(0.72, rot(F[1], -22, -8)); g.addColorStop(1, F[2]);
+      return g;
+    }
+    case "hollow": return H.hollowPaper ?? "#fffdf2";
     default: g = ctx.createLinearGradient(0, Y0, 0, Y1); g.addColorStop(0, F[0]); g.addColorStop(0.55, F[1]); g.addColorStop(1, F[2]); return g;
   }
 }
 
-function texture(ctx, plan, kind, box, S, ox, oy, seed) {
+function texture(ctx, plan, kind, box, S, ox, oy, seed, letters) {
   const H = plan.hand, R = rng(seed >>> 0);
   const X0 = ox + box.x0 * S, X1 = ox + box.x1 * S, Y0 = oy + box.y0 * S, Y1 = oy + box.y1 * S;
+  /* LOOK: small lettering stays clean: below about 40 px of cap height a texture inside the strokes is only grain that muddies the
+     letter (a letterer leaves it out at that size); cracks stay (the reader counted them in), halftone keeps its own minimum cell */
+  if ( S < 40 && kind !== "cracks" && kind !== "halftone" ) return;
   ctx.save();
   switch ( kind ) {
     case "halftone": {
@@ -82,25 +103,60 @@ function texture(ctx, plan, kind, box, S, ox, oy, seed) {
       break;
     }
     case "speckle": {
-      const n = Math.min(500, Math.round((X1 - X0) * (Y1 - Y0) / Math.max(30, S * S * 0.012)));
+      /* LOOK: fewer, firmer specks (a spatter, not sensor noise) */
+      const n = Math.min(220, Math.round((X1 - X0) * (Y1 - Y0) / Math.max(60, S * S * 0.03)));
       for ( let k = 0; k < n; k++ ) {
-        ctx.fillStyle = R.chance(0.6) ? H.pal.fill[2] : H.pal.fill[0]; ctx.globalAlpha = R.f(0.35, 0.8);
-        const r = R.f(0.008, 0.022) * S; ctx.beginPath(); ctx.arc(R.f(X0, X1), R.f(Y0, Y1), Math.max(0.6, r), 0, 6.2832); ctx.fill();
+        ctx.fillStyle = R.chance(0.6) ? H.pal.fill[2] : H.pal.fill[0]; ctx.globalAlpha = R.f(0.5, 0.85);
+        const r = R.f(0.012, 0.03) * S; ctx.beginPath(); ctx.arc(R.f(X0, X1), R.f(Y0, Y1), Math.max(1.1, r), 0, 6.2832); ctx.fill();
       }
       break;
     }
     case "cracks": {
-      ctx.strokeStyle = H.ink; ctx.lineJoin = "miter"; ctx.lineCap = "round";
-      const n = 2 + Math.round((X1 - X0) / S * 1.3);
-      for ( let k = 0; k < n; k++ ) {
-        let x = R.f(X0, X1), y = R.f(Y0, Y0 + (Y1 - Y0) * 0.4), a = R.f(0.9, 2.2), w = Math.max(1.2, S * 0.03);
-        const walk = (x, y, a, w, len, depth) => {
-          ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y);
-          for ( let s = 0; s < len; s++ ) { a += R.f(-0.7, 0.7); x += Math.cos(a) * S * 0.09; y += Math.sin(a) * S * 0.09; ctx.lineTo(x, y); if ( depth < 2 && R.chance(0.25) ) { ctx.stroke(); walk(x, y, a + R.sign() * R.f(0.6, 1.2), w * 0.6, Math.round(len * 0.5), depth + 1); ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x, y); } }
+      /* LOOK: cracks start on a letter's edge and run a little way in (geom.crackLines, the same lines the legibility check reads),
+         an ink line with a light edge beside it; they no longer cross a letter (a crack down an S made it a $) */
+      ctx.lineJoin = "miter"; ctx.lineCap = "round";
+      for ( const l of letters ?? [] ) {
+        const lb = bbox(l.cs), h = Math.max(0.1, lb.y1 - lb.y0);
+        const lines = crackLines(l.cs, crackSeed(plan, l.i), H.crackN ?? 2);
+        for ( const [col, w, dx] of [[H.pal.fill[0], 0.6, 0.012], [H.ink, 1, 0]] ) {
+          ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, CRACK_W * h * S * w); ctx.beginPath();
+          for ( const ln of lines ) { ctx.moveTo(ox + (ln[0] + dx * h) * S, oy + (ln[1] + dx * h) * S); for ( let q = 2; q < ln.length; q += 2 ) ctx.lineTo(ox + (ln[q] + dx * h) * S, oy + (ln[q + 1] + dx * h) * S); }
           ctx.stroke();
-        };
-        walk(x, y, a, w, R.i(4, 9), 0);
+        }
       }
+      break;
+    }
+    case "brush": {   /* LOOK: brush hatching inside the letters: tapered strokes in the dark of the palette, a few light ones */
+      const a = H.brushAng ?? -1, ca = Math.cos(a), sa = Math.sin(a), gap = Math.max(3, S * 0.1);
+      for ( let t = -(Y1 - Y0) - (X1 - X0); t < (X1 - X0) + (Y1 - Y0); t += gap * R.f(0.8, 1.3) ) {
+        const len = S * R.f(0.25, 0.6), w = Math.max(1, S * R.f(0.025, 0.055));
+        const px = X0 + (X1 - X0) / 2 + t * -sa + R.f(-0.3, 0.3) * len * ca, py = Y0 + (Y1 - Y0) / 2 + t * ca + R.f(-1, 1) * (Y1 - Y0) * 0.4;
+        const light = R.chance(0.22);
+        ctx.fillStyle = light ? H.pal.fill[0] : H.pal.fill[2]; ctx.globalAlpha = light ? 0.75 : 0.8;
+        ctx.beginPath(); ctx.moveTo(px - ca * len / 2, py - sa * len / 2);
+        ctx.quadraticCurveTo(px - sa * w, py + ca * w, px + ca * len / 2, py + sa * len / 2);
+        ctx.quadraticCurveTo(px + sa * w * 0.4, py - ca * w * 0.4, px - ca * len / 2, py - sa * len / 2); ctx.fill();
+      }
+      break;
+    }
+    case "burstlines": {   /* LOOK: light rays bursting inside the letters from a point low in the word */
+      const cx = (X0 + X1) / 2 + R.f(-0.15, 0.15) * (X1 - X0), cy = Y1 - (Y1 - Y0) * R.f(0.15, 0.4), r = Math.hypot(X1 - X0, Y1 - Y0);
+      const n = R.i(20, 30), r0 = (Y1 - Y0) * 0.12;
+      ctx.fillStyle = H.pal.fill[0]; ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      for ( let k = 0; k < n; k++ ) { const a = (k / n) * 6.2832 + R.f(-0.05, 0.05), w = R.f(0.02, 0.05); ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); ctx.lineTo(cx + Math.cos(a - w) * r, cy + Math.sin(a - w) * r); ctx.lineTo(cx + Math.cos(a + w) * r, cy + Math.sin(a + w) * r); ctx.closePath(); }
+      ctx.fill();
+      break;
+    }
+    case "spots": {   /* LOOK: polka spots */
+      const cell = Math.max(5, S * 0.24);
+      ctx.fillStyle = H.pal.fill[2]; ctx.globalAlpha = 0.9; ctx.beginPath();
+      for ( let y = Y0, row = 0; y < Y1 + cell; y += cell * 0.87, row++ ) for ( let x = X0 + (row % 2) * cell / 2; x < X1 + cell; x += cell ) {
+        if ( R.chance(0.25) ) continue;
+        const r = cell * R.f(0.17, 0.3), px = x + R.f(-0.2, 0.2) * cell, py = y + R.f(-0.2, 0.2) * cell;
+        ctx.moveTo(px + r, py); ctx.arc(px, py, r, 0, 6.2832);
+      }
+      ctx.fill();
       break;
     }
     case "speed": {
@@ -233,6 +289,95 @@ function effect(ctx, plan, f, wb, S, ox, oy, behind) {
   ctx.restore();
 }
 
+/* ---------- LOOK: backdrops (opt-in): a jagged starburst, an explosion cloud, a double-oval balloon, a colour plate ----------
+   Shapes in word units around the hold box, made once per plan (from the hand's backSeed), then moved with the picture's own
+   transform (scale, squash, tilt, shake) and the timeline's backdrop scale (it pops in with the word and leaves before it). */
+function backBase(plan) {
+  if ( plan._back !== undefined ) return plan._back;
+  const H = plan.hand, hb = plan._holdBox ?? { w: 3, h: 1 };
+  let v = null;
+  if ( H.back ) {
+    const R = rng((H.backSeed ?? plan.seed) >>> 0);
+    const rx = hb.w / 2 + 0.3, ry = hb.h / 2 + 0.28;
+    const ell = (a, kx = 1, ky = 1) => [Math.cos(a) * rx * kx, Math.sin(a) * ry * ky];
+    const nrm = (a) => { const x = Math.cos(a) / rx, y = Math.sin(a) / ry, l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+    v = { kind: H.back, polys: [], circles: [] };
+    if ( H.back === "star" ) {
+      const n = Math.max(12, Math.min(26, Math.round((rx + ry) * 3.2))), outer = [], inner = [];
+      for ( let k = 0; k < n * 2; k++ ) {
+        const a = (k / (n * 2)) * 6.2832 + R.f(-0.04, 0.04);
+        const [ex, ey] = ell(a), [nx, ny] = nrm(a), L = k % 2 ? R.f(-0.12, 0.02) : R.f(0.4, 0.85);
+        outer.push(ex + nx * L, ey + ny * L);
+        const Li = k % 2 ? R.f(-0.2, -0.1) : L * 0.55;
+        inner.push(ex + nx * Li, ey + ny * Li);
+      }
+      v.polys = [outer, inner];
+    } else if ( H.back === "cloud" ) {
+      const per = Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry))), n = Math.max(7, Math.round(per / 0.62));
+      for ( let k = 0; k < n; k++ ) { const a = (k / n) * 6.2832 + R.f(-0.1, 0.1), [x, y] = ell(a, 0.9, 0.86); v.circles.push([x, y, R.f(0.32, 0.52) * Math.max(0.8, Math.min(1.3, ry))]); }
+      const e = []; for ( let k = 0; k < 40; k++ ) { const [x, y] = ell((k / 40) * 6.2832, 0.95, 0.92); e.push(x, y); }
+      v.polys = [e];
+    } else if ( H.back === "oval" ) {
+      const e1 = [], e2 = [], dx = R.f(0.1, 0.18) * R.sign(), dy = R.f(0.08, 0.14);
+      for ( let k = 0; k < 48; k++ ) { const a = (k / 48) * 6.2832, [x, y] = ell(a, 1.08, 1.18); e1.push(x, y); e2.push(x * 1.04 + dx, y * 1.06 + dy); }
+      v.polys = [e2, e1];
+    } else {
+      const sk = R.f(0.12, 0.3) * R.sign(), j = () => R.f(-0.07, 0.07);
+      const q = [-rx - sk + j(), -ry + j(), rx - sk + j(), -ry + j(), rx + sk + j(), ry + j(), -rx + sk + j(), ry + j()];
+      const r = R.f(-0.08, 0.08), c = Math.cos(r), sn = Math.sin(r), rq = []; for ( let i = 0; i < 8; i += 2 ) rq.push(q[i] * c - q[i + 1] * sn, q[i] * sn + q[i + 1] * c);
+      const off = rq.map((t, i) => t + (i % 2 ? 0.1 : 0.12));
+      v.polys = [off, rq];
+    }
+    /* colours: a strong ground against the word's own fill */
+    const [hh, ss, ll] = hexToHsl(H.pal.fill[1]);
+    const light = ll > 55;
+    const cands = light ? [hsl(hh + 180, 70, 38), H.pal.ext, "#d8262b", "#1f4fc0", "#1b1020"] : ["#fff3a0", "#ffffff", hsl(hh + 180, 80, 72)];
+    v.a = R.pick(cands); v.b = light ? R.pick(["#ffd84a", "#ffffff", hsl(hh + 180, 70, 58)]) : R.pick(["#ffffff", "#ffe98a"]);
+    if ( v.a === v.b ) v.b = "#ffffff";
+    void ss;
+  }
+  Object.defineProperty(plan, "_back", { value: v, enumerable: false, configurable: true, writable: true });
+  return v;
+}
+function backdropOf(plan, p) {
+  const B = backBase(plan); if ( !B ) return null;
+  const k = p.backS ?? 1; if ( k <= 0.02 ) return null;
+  const g = p.g, cg = Math.cos(g.r), sg = Math.sin(g.r), R = rng((p.boil || 3) >>> 0), jit = p.boil ? 0.012 : 0;
+  const T = (x, y) => { const X = x * g.s * g.sx * k, Y = y * g.s * g.sy * k; return [X * cg - Y * sg + g.x + R.f(-jit, jit), X * sg + Y * cg + g.y + R.f(-jit, jit)]; };
+  const polys = B.polys.map((c) => { const o = []; for ( let i = 0; i < c.length; i += 2 ) o.push(...T(c[i], c[i + 1])); return o; });
+  const circles = B.circles.map(([x, y, r]) => [...T(x, y), r * g.s * k]);
+  const all = [...polys, ...circles.map(([x, y, r]) => [x - r, y - r, x + r, y + r])];
+  return { kind: B.kind, a: B.a, b: B.b, polys, circles, box: bbox(all) };
+}
+function paintBackdrop(ctx, H, bk, S, ox, oy, shadowOnly = false) {
+  const P = (c) => { ctx.moveTo(ox + c[0] * S, oy + c[1] * S); for ( let i = 2; i < c.length; i += 2 ) ctx.lineTo(ox + c[i] * S, oy + c[i + 1] * S); ctx.closePath(); };
+  const ink = Math.max(1.2, H.inkW * 1.6 * S);
+  ctx.save(); ctx.lineJoin = "miter"; ctx.miterLimit = 4;
+  if ( shadowOnly ) {
+    ctx.beginPath();
+    if ( bk.kind === "cloud" ) { for ( const [x, y, r] of bk.circles ) { ctx.moveTo(ox + (x + r) * S, oy + y * S); ctx.arc(ox + x * S, oy + y * S, r * S, 0, 6.2832); } P(bk.polys[0]); }
+    else P(bk.polys[0]);
+    ctx.fill(); ctx.lineWidth = ink; ctx.stroke(); ctx.restore(); return;
+  }
+  if ( bk.kind === "star" ) {
+    ctx.beginPath(); P(bk.polys[0]); ctx.fillStyle = bk.a; ctx.fill(); ctx.strokeStyle = H.ink; ctx.lineWidth = ink; ctx.stroke();
+    ctx.beginPath(); P(bk.polys[1]); ctx.fillStyle = bk.b; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
+  } else if ( bk.kind === "cloud" ) {
+    const all = () => { ctx.beginPath(); for ( const [x, y, r] of bk.circles ) { ctx.moveTo(ox + (x + r) * S, oy + y * S); ctx.arc(ox + x * S, oy + y * S, r * S, 0, 6.2832); } P(bk.polys[0]); };
+    all(); ctx.strokeStyle = H.ink; ctx.lineWidth = ink * 2; ctx.stroke();
+    all(); ctx.fillStyle = bk.a; ctx.fill("nonzero");
+    ctx.beginPath(); for ( const [x, y, r] of bk.circles ) { const cx = x - r * 0.18, cy = y - r * 0.2, rr = r * 0.62; ctx.moveTo(ox + (cx + rr) * S, oy + cy * S); ctx.arc(ox + cx * S, oy + cy * S, rr * S, 0, 6.2832); }
+    ctx.fillStyle = bk.b; ctx.globalAlpha = 0.55; ctx.fill(); ctx.globalAlpha = 1;
+  } else if ( bk.kind === "oval" ) {
+    ctx.beginPath(); P(bk.polys[0]); ctx.fillStyle = bk.a; ctx.fill(); ctx.strokeStyle = H.ink; ctx.lineWidth = ink; ctx.stroke();
+    ctx.beginPath(); P(bk.polys[1]); ctx.fillStyle = "#fffdf4"; ctx.fill(); ctx.stroke();
+  } else {
+    ctx.beginPath(); P(bk.polys[0]); ctx.fillStyle = bk.b; ctx.fill();
+    ctx.beginPath(); P(bk.polys[1]); ctx.fillStyle = bk.a; ctx.fill(); ctx.strokeStyle = H.ink; ctx.lineWidth = ink * 0.8; ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /* the impact (flash) frame: one tick of a negative, a black star and the word knocked out in white */
 function impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas) {
   const H = plan.hand, R = rng((p.boil || 7) >>> 0);
@@ -258,7 +403,8 @@ export function paintPicture(plan, bank, p, S, make) {
     plan = Object.create(plan, { hand: { value: { ...H0, inkW: ink, out2W: H0.out2W * k, inflate: H0.inflate * Math.max(0.6, k) } } });
   }
   const geo = pictureGeometry(plan, bank, p);
-  const ext = extents(plan, geo, p);
+  const back = p.impact ? null : backdropOf(plan, p);
+  const ext = extents(plan, geo, p, back);
   let w = (ext.x1 - ext.x0) * S, h = (ext.y1 - ext.y0) * S;
   const k = Math.min(1, MAX_SIDE / Math.max(w, h, 1));
   S *= k; w = Math.ceil(w * k) + 2; h = Math.ceil(h * k) + 2;
@@ -275,6 +421,10 @@ export function paintPicture(plan, bank, p, S, make) {
 
   if ( p.impact ) return impactFrame(ctx, plan, all, wb, S, ox, oy, outerW, p, canvas);
   for ( const f of p.fx ) effect(ctx, plan, f, wb, S, ox, oy, true);
+  if ( back ) {
+    if ( H.shadow ) { ctx.save(); ctx.translate(Math.cos(H.shadow.ang) * Math.min(0.2, H.shadow.d) * S, Math.sin(H.shadow.ang) * Math.min(0.2, H.shadow.d) * S); ctx.fillStyle = `rgba(14,8,26,${H.shadow.a})`; ctx.strokeStyle = ctx.fillStyle; paintBackdrop(ctx, H, back, S, ox, oy, true); ctx.restore(); }
+    paintBackdrop(ctx, H, back, S, ox, oy);
+  }
 
   const silhouette = (dx, dy, width, style) => {
     ctx.save(); ctx.translate(dx * S, dy * S); ctx.beginPath(); path(ctx, all, S, ox, oy);
@@ -289,7 +439,8 @@ export function paintPicture(plan, bank, p, S, make) {
     const lay = make(canvas.width, canvas.height), lc = lay.getContext("2d");
     lc.lineJoin = ctx.lineJoin; lc.miterLimit = 2.2;
     const one = (dx, dy) => { lc.save(); lc.translate(dx * S, dy * S); lc.beginPath(); path(lc, all, S, ox, oy); lc.fillStyle = "#0e081a"; lc.strokeStyle = "#0e081a"; lc.lineWidth = (outerW + 0.02) * 2 * S; lc.fill(); lc.stroke(); lc.restore(); };
-    one(sx, sy); if ( H.depth ) one(ddx + sx, ddy + sy);
+    if ( H.shadow.long ) { const n = Math.max(3, Math.min(24, Math.ceil(H.shadow.d * S / 2))); for ( let k = 1; k <= n; k++ ) { one(sx * k / n, sy * k / n); if ( H.depth ) one(ddx + sx * k / n, ddy + sy * k / n); } }
+    else { one(sx, sy); if ( H.depth ) one(ddx + sx, ddy + sy); }
     if ( H.shadowStyle === "dots" ) {   /* a printed halftone shadow instead of a flat one */
       const cell = Math.max(3, S * 0.06), r = cell * 0.5;
       lc.globalCompositeOperation = "destination-in"; lc.beginPath();
@@ -336,32 +487,43 @@ export function paintPicture(plan, bank, p, S, make) {
     silhouette(-m * 0.8, m * 0.45, outerW, "#ec008c");
   }
   /* letters: merged (one silhouette) or stacked (each letter its own sticker, later ones on top) */
-  const groups = H.stack === "merge" ? [{ i: -1, cs: all }] : geo;
+  /* LOOK: each letter in front of the one to its right (the letterer's rule): painted right to left */
+  const groups = H.stack === "merge" ? [{ i: -1, cs: all }] : (H.order === "left" ? geo.slice().reverse() : geo);
+  const perLetter = H.fill === "letters" || H.fill === "alt";
   const n = plan.chars.length;
   const fullBox = { x0: wb.x0, y0: wb.y0, x1: wb.x1, y1: wb.y1 };
+  /* LOOK (user, 2026-11-13): the light outline goes round the word as a whole; inside the word a letter's own outline would only
+     hide its neighbour, so stacked letters keep just their ink line */
+  if ( H.out2W > 0 && groups.length > 1 ) {
+    ctx.beginPath(); path(ctx, all, S, ox, oy);
+    ctx.strokeStyle = H.outline === "sticker" ? (H.pal.out2 === "#1b1020" ? "#ffffff" : H.pal.out2) : H.pal.out2;
+    ctx.lineWidth = outerW * 2 * S; ctx.stroke(); ctx.fillStyle = ctx.strokeStyle; ctx.fill("nonzero");
+    if ( H.outline === "sticker" ) { ctx.strokeStyle = H.ink; ctx.save(); ctx.lineWidth = (outerW * 2 + 0.03) * S; ctx.globalCompositeOperation = "destination-over"; ctx.stroke(); ctx.restore(); }
+  }
   const passes = (grp) => {
     const box = grp.i < 0 ? fullBox : bbox(grp.cs);
     const pathG = () => { ctx.beginPath(); path(ctx, grp.cs, S, ox, oy); };
-    if ( H.out2W > 0 ) {
+    if ( H.out2W > 0 && groups.length === 1 ) {
       pathG(); ctx.strokeStyle = H.outline === "sticker" ? (H.pal.out2 === "#1b1020" ? "#ffffff" : H.pal.out2) : H.pal.out2;
       ctx.lineWidth = outerW * 2 * S; ctx.stroke();
       if ( H.outline === "sticker" ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, S * 0.018); ctx.save(); ctx.lineWidth = (outerW * 2 + 0.03) * S; ctx.globalCompositeOperation = "destination-over"; ctx.stroke(); ctx.restore(); }
     }
     pathG(); ctx.strokeStyle = H.ink; ctx.lineWidth = (H.inflate + H.inkW) * 2 * S; ctx.stroke();
-    const fp = H.fill === "letters" && grp.i < 0 ? null : fillPaint(ctx, H, H.fill, H.fill === "letters" ? box : fullBox, S, ox, oy, grp.i, n);
+    const fp = perLetter && grp.i < 0 ? null : fillPaint(ctx, H, H.fill, perLetter ? box : fullBox, S, ox, oy, grp.i, n);
     if ( fp ) {
       pathG(); ctx.fillStyle = fp; ctx.fill();
       if ( H.inflate > 0 ) { ctx.strokeStyle = fp; ctx.lineWidth = H.inflate * 2 * S; ctx.lineJoin = "round"; ctx.stroke(); }
     } else for ( const l of geo ) {
       const b = bbox(l.cs); ctx.beginPath(); path(ctx, l.cs, S, ox, oy);
-      const f2 = fillPaint(ctx, H, "letters", b, S, ox, oy, l.i, n); ctx.fillStyle = f2; ctx.fill();
+      const f2 = fillPaint(ctx, H, H.fill, b, S, ox, oy, l.i, n); ctx.fillStyle = f2; ctx.fill();
       if ( H.inflate > 0 ) { ctx.strokeStyle = f2; ctx.lineWidth = H.inflate * 2 * S; ctx.lineJoin = "round"; ctx.stroke(); }
     }
     /* inside the letter: texture, shine, inner line */
     ctx.save(); pathG();
     if ( H.inflate > 0 ) { /* clip includes the inflated rim: approximate by stroking into a mask is costly; clip to the core outline */ }
     ctx.clip();
-    if ( H.tex !== "none" ) texture(ctx, plan, H.tex, box, S, ox, oy, (plan.seed ^ (grp.i + 7) * 40503) >>> 0);
+    if ( H.fill === "hollow" ) { pathG(); ctx.strokeStyle = H.pal.fill[1]; ctx.lineWidth = Math.max(2, (H.rimW ?? 0.09) * 2 * S); ctx.stroke(); }
+    else if ( H.tex !== "none" ) texture(ctx, plan, H.tex, box, S, ox, oy, (plan.seed ^ (grp.i + 7) * 40503) >>> 0, grp.i < 0 ? geo : [grp]);
     if ( H.gloss ) {
       const Y0 = oy + box.y0 * S, Y1 = oy + box.y1 * S, g = ctx.createLinearGradient(0, Y0, 0, Y0 + (Y1 - Y0) * 0.5);
       g.addColorStop(0, "rgba(255,255,255,0.55)"); g.addColorStop(1, "rgba(255,255,255,0)"); ctx.fillStyle = g; ctx.fillRect(ox + box.x0 * S - 4, Y0 - 4, (box.x1 - box.x0) * S + 8, (Y1 - Y0) * 0.5 + 4);
@@ -369,8 +531,26 @@ export function paintPicture(plan, bank, p, S, make) {
     if ( H.bevel ) { ctx.save(); ctx.translate(S * 0.035, S * 0.035); pathG(); ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = S * 0.05; ctx.stroke(); ctx.restore(); ctx.save(); ctx.translate(-S * 0.03, -S * 0.03); pathG(); ctx.strokeStyle = "rgba(10,0,20,0.28)"; ctx.lineWidth = S * 0.05; ctx.stroke(); ctx.restore(); }
     if ( H.outline === "inner" ) { pathG(); ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = Math.max(1.2, S * 0.05); ctx.stroke(); pathG(); ctx.strokeStyle = fp ?? H.pal.fill[1]; ctx.lineWidth = Math.max(0.6, S * 0.022); ctx.stroke(); }
     ctx.restore();
+    /* LOOK: counters (the holes of O, A, B, R ...) filled solid black or in a colour */
+    if ( H.counters && H.counters !== "none" ) {
+      ctx.beginPath(); let any = false;
+      for ( const l of grp.i < 0 ? geo : [grp] ) {
+        if ( plan.layout.letters[l.i]?.ring ) continue;   // a ring's hole shows the ring it holds
+        let big = 0; for ( const c of l.cs ) if ( Math.abs(signedArea(c)) > Math.abs(big) ) big = signedArea(c);
+        for ( const c of l.cs ) { const a = signedArea(c); if ( a * big < 0 && Math.abs(a) > 0.004 ) { path(ctx, [c], S, ox, oy); any = true; } }
+      }
+      if ( any ) { ctx.fillStyle = H.counters === "ink" ? H.ink : (H.counterCol ?? H.pal.fill[2]); ctx.fill("evenodd"); if ( H.counters === "color" ) { ctx.strokeStyle = H.ink; ctx.lineWidth = Math.max(1, H.inkW * S); ctx.stroke(); } }
+    }
   };
   for ( const grp of groups ) passes(grp);
+  /* LOOK: interlocked rings (design.mjs links a run of round letters): the ring painted under its neighbour is painted again over
+     it in the lower half, so one passes through the other: over at the top crossing, under at the bottom one */
+  if ( H.stack !== "merge" ) for ( const g of geo ) {
+    const j = plan.layout.letters[g.i]?.link; if ( j == null ) continue;
+    const other = geo.find((q) => q.i === j); if ( !other ) continue;
+    const under = H.order === "left" ? g : other, b = bbox(under.cs), mid = (b.y0 + b.y1) / 2;
+    const cy = Math.round(oy + mid * S); ctx.save(); ctx.beginPath(); ctx.rect(0, cy, canvas.width, canvas.height - cy); ctx.clip(); passes(under); ctx.restore();
+  }
 
   for ( const f of p.fx ) effect(ctx, plan, f, wb, S, ox, oy, false);
 

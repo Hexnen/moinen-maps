@@ -92,7 +92,8 @@ export const CVD = {
   plasma: cv(["#f5e0ff", OI.pink, "#5a2a8a"], "#200a40"), gold: cv(["#fffbe0", OI.yellow, "#b88a00"], "#4a3000"),
   soft: cv(["#ffffff", "#ececf2", "#bcbccc"], "#3a3a50"), blood: cv(["#ffc9a8", OI.red, "#7a2a00"], "#2a0a00"),
   bruise: cv(["#e8d8ff", "#9a7ad8", "#4a2a8a"], "#1e0a34"), mint: cv(["#e0f3ff", OI.sky, OI.blue], "#002a4a"),
-  water: cv(["#e8f6ff", OI.sky, OI.blue], "#002a4a"), dull: cv(["#ececec", "#a6a6a6", "#666666"], "#2a2a2a")
+  water: cv(["#e8f6ff", OI.sky, OI.blue], "#002a4a"), dull: cv(["#ececec", "#a6a6a6", "#666666"], "#2a2a2a"),
+  inv: cv(["#fffdf2", "#f0ead0", "#d8cfa8"], "#1c3b7a")   // LOOK: the Invincible style's family (pale faces, a deep block)
 };
 const CVD_FALLBACK = cv(["#ffffff", OI.sky, OI.blue], "#002a4a");
 
@@ -186,7 +187,7 @@ export function filterPlan(plan, opts, ctx) {
 
 /* ---------- styles (named saved looks): what a style may carry ---------- */
 export const STYLE_KEYS = ["label", "mood", "sound", "palette", "colors", "font", "hand", "in", "out", "holdKind", "tempo", "hold", "magnitude",
-  "scale", "space", "layer", "fit", "rotation", "pixel"];
+  "scale", "space", "layer", "fit", "rotation", "pixel", "look", "backdrop", "arrange"];   // LOOK: look (incl. look.style), backdrop, arrange
 export function cleanStyle(s) {
   if ( !s || typeof s !== "object" ) return null;
   const o = {};

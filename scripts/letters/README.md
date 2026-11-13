@@ -460,6 +460,59 @@ default the cursor); the keybinding "Letter this now" (Shift+L) opens a small bo
 opens the designer window (also: the burst button in the token controls); `L.openSettings()` the settings window.
 `L.planFor(text, opts)` -> `{ plan, opts }`: the plan this client would show (style, settings and filters applied).
 
+## Look (contract v8, LOOK): styles, sound -> look, lines, backdrops, accent, legibility
+**Styles.** Two whole hands, `L.lookStyles` = `["comic", "invincible"]`.
+- `invincible` (the book's manner): a squared condensed face (Squada One) or, for soft, bouncy and ring words, a wide round face
+  (Michroma), a black ink keyline, a pale two-tone or flat face, a solid block extrusion in a darker shade, upright letters,
+  a small lead-in before a big body, no texture, no backdrop. **It is the default when `game.system.id === "invincible"`.**
+- `comic` (the earlier mixed hand): the default elsewhere.
+- Select per call with `look: { style: "invincible" }` or `style: "invincible"` (also a TOOL style name); for every later call
+  `L.lookStyle("invincible" | "comic")`. `look` keys still win over the style (`look: { style: "invincible", font: "bangers" }`).
+
+**The look says the sound.** `plan.traits` names what the sound is like, read from WORD's character (`L.word(...).play.character`:
+hard, heavy, wet, metal, electric, heat, texture, contour) and the plan's sound (sharp, rough, pitch, long); plain text gets its mood's.
+The mapping (`traitsOf` in design.mjs, no random draws, checked over every vocabulary kind in check-look.mjs L16):
+
+| the sound | the look | why |
+|---|---|---|
+| hard (crack, smash, punch, a gun) | squared heavy face, flat cut fill, deeper block; never bubble or a round face | a blow has corners |
+| soft (whump, sigh, splash, whoosh) | the wide round face, two-tone, no spikes | nothing in it cuts |
+| heavy (crash, boom, rumble, stomp) | a deep block straight down; perspective line in the book's hand | weight falls |
+| high and slight (chime, bounce, beep) | a shallow block thrown up | it lifts off |
+| metal (clang, ricochet, gun, chime) | steel blue, one flat colour, a clean edge (grinding metal keeps grit) | a hard bright ring |
+| electric (zap, crackling energy) | sky/lime colours, the squared face, a straight hit line (comic hand: a jagged edge) | sparks |
+| fire (fire, crackle) | amber, the line rising with the sound; warm sounds never get a cold colour | heat |
+| cold (wind, chime, fizzle) | a cold colour | cold |
+| wet (splash, squish, drip) | the round face, a cold colour, a wavy or shrinking line | water |
+| grinding (stomp, crumble, scrape, roar) | the squared face, a deep block (comic hand: a rough edge) | grit |
+| a fizzle | a sagging line, a cold colour | it fails |
+| rising (power-up, roar, engine, rumble) | the line grows toward its end | it builds |
+| dies away (sigh, whiff, relief, hiss) | the line shrinks | it fades |
+| a fly-by (whoosh, zoom, ricochet, wind) | an arc, or a streak when it lasts | it passes |
+| bouncy (bounce, laugh, splash) | a wavy line, round face | it bounces |
+| short / sustained | tight / loose letter spacing | the sound's length |
+
+Letters stay clean (the user, 2026-11-13: the flame teeth and the drips were removed): no edge ornament is chosen by default in
+either style, no ember specks over held letters, Rubik Wet Paint is no longer a mood default; `look.treat: "flame" | "drip" | "jag" |
+"rough"` and `look.font: "wetpaint"` remain explicit opt-ins. In the comic hand the mapping only corrects what contradicts the
+sound (a swapped face keeps the recent-hands memory). A body letter never shrinks under 0.66 of the body (it would read as
+lower case); the small lead-in carries the size contrast. Squada One's M and N (drawn with the arched tops of m and n) are rebuilt
+in memory with square shoulders.
+
+**Lines.** `
+` stacks lines; `arrange: "line" | "stack" | "stair" | "vertical" | "auto"` (auto, the default, stacks or stairs repeated words); `plan.layout.lines`.
+**Backdrops.** Opt-in per call (`backdrop: "star" | "cloud" | "oval" | "plate"`, or `true` / `"auto"` for the mood's pick); the default is none (the user's decision).
+**Accent.** Letter sizes follow the sound: a small lead-in, the biggest letters where the sound peaks, a shrinking tail. WORD's
+`play.accent` (one weight per character) wins; plain text gets a guess (the longest vowel run, else the last hyphen syllable, else
+the penultimate syllable). `plan.accent` reports it.
+**Interlocked rings.** A run of O / 0 links as true rings of alternating size, each passing through the one before it (`look.link`).
+**Numbers.** `-1`, `+4`, `x2`, `12%` get a calm, even, untreated hand so digits and signs always read.
+**Outline.** The light outer outline goes around the whole word only, never between overlapping letters; a duplicated block
+(extrusion) is used more often than the outline; the outline stays a style (`look.outline: "sticker"`).
+**Legibility.** legibility.mjs reads every treated letter against the font's plain letters (Polish marks and digits included:
+Ł keeps its bar, Ę its ogonek, a covered 1 is caught, $ is not S, lower-case look-alikes are caught); the settle step turns,
+pushes or opens letters until each reads. check-look.mjs L1-L16 hold this (ADVT and dice-review cases among them).
+
 ## Look and performance notes
 - Every picture is painted from font outlines (TrueType parsed by `font.mjs`) at the pixel size it is shown at; world words re-render
   when the zoom changes a lot (x1.35 in, x0.45 out) so nothing is a small bitmap blown up. Pictures over 2048 px on a side are capped.
@@ -468,7 +521,8 @@ opens the designer window (also: the burst button in the token controls); `L.ope
 - Reduced motion (OS setting or `reduced: true`): one entrance picture, no shake, a two-step halftone exit.
 
 ## Fonts
-Nine SIL OFL 1.1 fonts (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet Paint): files,
+Eleven SIL OFL 1.1 fonts (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet Paint,
+Squada One, Michroma; the last two for the Invincible style): files,
 holders, sources and sizes in ATTRIBUTION.md. Knewave has no Polish letters of its own: the engine builds Ą Ć Ę Ł Ń Ś Ź Ż in memory
 from its own outlines plus accents (its own Ó acute and period, a drawn Ł bar, the ogonek from a fallback font). Every font's
 Polish capitals were checked by rendering them (letr gallery stills), not only by the character map.

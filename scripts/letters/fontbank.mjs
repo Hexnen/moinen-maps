@@ -33,7 +33,41 @@ export class FontBank {
     return r;
   }
 
-  raw(id, ch) { const f = this.fonts.get(id); if ( !f ) return null; const g = f.has(ch) ? f.glyph(ch) : null; return g?.contours?.length || ch === " " ? g : null; }
+  raw(id, ch) {
+    const f = this.fonts.get(id); if ( !f ) return null;
+    if ( FONTS[id]?.recut?.includes(ch) ) return this.recut(id, ch);
+    const g = f.has(ch) ? f.glyph(ch) : null; return g?.contours?.length || ch === " " ? g : null;
+  }
+
+  /* LOOK: a few faces draw a capital as its own lower case (Squada One's M and N have the arched tops of m and n: BADUMM read
+     "BADUmm", DZYYYŃ read "DZYYYń"). Those capitals are rebuilt in memory from the same font: M = its W turned upside down,
+     N = straight stems as wide as its I plus a diagonal, in its cap height and N width. No font file is changed. */
+  recut(id, ch) {
+    const key = `${id}|recut|${ch}`;
+    if ( this.cache.has(key) ) return this.cache.get(key);
+    const f = this.fonts.get(id), get = (c) => (f.has(c) ? f.glyph(c) : null);
+    let g = null;
+    const H = get("H"), I = get("I");
+    if ( H?.contours?.length ) {
+      const hb = glyphBox(H), sign = Math.sign(area(H.contours[0])) || 1;
+      if ( ch === "M" && get("W")?.contours?.length ) {
+        const W = get("W"), wb = glyphBox(W);
+        /* flip vertically inside the cap box (reverses the winding: reverse the points back) */
+        const cs = W.contours.map((c) => { const o = []; for ( let i = c.length - 2; i >= 0; i -= 2 ) o.push(c[i], hb.y0 + hb.y1 - c[i + 1] - (wb.y1 - hb.y1) - (wb.y0 - hb.y0)); return o; });
+        g = { adv: W.adv, contours: cs };
+      }
+      if ( ch === "N" ) {
+        const N = get("N"), nb = N ? glyphBox(N) : hb, s = I?.contours?.length ? (glyphBox(I).x1 - glyphBox(I).x0) : (hb.x1 - hb.x0) * 0.28;
+        const x0 = nb.x0, x1 = nb.x1, y0 = hb.y0, y1 = hb.y1, d = s * 0.35, k = (y1 - y0) * 0.32;
+        let p = [x0, y1, x0, y0, x0 + s + d, y0, x1 - s, y1 - k, x1 - s, y0, x1, y0, x1, y1, x1 - s - d, y1, x0 + s, y0 + k, x0 + s, y1];
+        if ( Math.sign(area(p)) !== sign ) { const r = []; for ( let i = p.length - 2; i >= 0; i -= 2 ) r.push(p[i], p[i + 1]); p = r; }
+        g = { adv: N?.adv ?? H.adv, contours: [p] };
+      }
+    }
+    if ( !g ) { const o = get(ch); g = o?.contours?.length ? o : null; }
+    this.cache.set(key, g);
+    return g;
+  }
 
   /* glyph {adv, contours, font} for a letter in font `id`: own glyph, synthesised Polish letter, or a fallback font's */
   glyph(id, ch) {

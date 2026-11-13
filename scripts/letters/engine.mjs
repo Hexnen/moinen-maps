@@ -1,13 +1,13 @@
 /* LETR engine: fonts, the picture scheduler, the two players (screen = HTML layer over the interface, world = PIXI on the canvas)
    and the public API (see README.md). Works without Foundry for the screen space (gallery page, node-free browser tests). */
-import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf } from "./design.mjs";
+import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf, STYLES } from "./design.mjs";
 import { FontBank } from "./fontbank.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE } from "./size.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.4.1";   // TOOL: engine-wide settings, authoring, networking, accessibility (1.3.1 WORD: vocabulary; 1.2.1 FXLE: lifecycle and safety fixes)
+export const VERSION = "1.6.0";   // LOOK (contract v8; MOVE took v7 / 1.5.0): lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look; 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -88,6 +88,16 @@ export function createEngine(base) {
     return readyP;
   }
   const fontsApi = { adv: (font, ch) => bank.adv(font, ch) };
+  /* LOOK: the lettering tradition every call gets unless it names one (opts.look.style, or TOOL's built-in styles "invincible" /
+     "comic"): "invincible" in a world of the Invincible system (the book's own lettering), "comic" elsewhere; L.lookStyle(name)
+     changes it for this client */
+  let defLook = globalThis.game?.system?.id === "invincible" ? "invincible" : "comic";
+  const mk = (t, o, f, m) => {
+    if ( o?.look?.style ) return makePlan(t, o, f, m);
+    const ls = typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook;   // TOOL's built-in style names too
+    return makePlan(t, { ...o, look: { ...(o?.look ?? {}), style: ls } }, f, m);
+  };
+  const lookStyle = (name) => { if ( STYLES.includes(name) ) defLook = name; return defLook; };
 
   /* ---------- placement ---------- */
   /* a token reference: a Token, a TokenDocument or a token id (a string is always read as a token id) */
@@ -586,10 +596,10 @@ export function createEngine(base) {
         const mem = opts.seed == null ? memory.map((m) => m.id) : [];
         const grp = opts._group;
         const avoid = [...(Array.isArray(opts.avoid) ? opts.avoid : []), ...(grp?.used ?? [])];
-        let plan = makePlan(h.text, { ...opts, avoid, reduced, from }, fontsApi, mem);
+        let plan = mk(h.text, { ...opts, avoid, reduced, from }, fontsApi, mem);
         /* FXLE F16: a burst guarantees a different hand per word, also when its items have delays or share one seed */
         for ( let r = 1; grp && grp.used.includes(plan.hand.id) && r <= 6; r++ )
-          plan = makePlan(h.text, { ...opts, avoid, reduced, from, seed: opts.seed != null ? `${opts.seed}~${r}` : undefined }, fontsApi, mem);
+          plan = mk(h.text, { ...opts, avoid, reduced, from, seed: opts.seed != null ? `${opts.seed}~${r}` : undefined }, fontsApi, mem);
         if ( grp ) grp.used.push(plan.hand.id);
         h.plan = plan;
         if ( opts.seed == null ) memory.push({ id: plan.hand.id, t: now() });
@@ -656,7 +666,7 @@ export function createEngine(base) {
     /* the stream's one hand = the first syllable's, the same on every client whenever it joins (FXLE F9) */
     const handOf = () => {
       if ( hand ) return hand;
-      try { hand = makePlan(syl[0], { mood, seed: `${seedBase}:0`, colors: o.colors }, fontsApi, []).hand; remember(hand); } catch { hand = null; }
+      try { hand = mk(syl[0], { mood, seed: `${seedBase}:0`, colors: o.colors, style: o.style, look: o.look }, fontsApi, []).hand; remember(hand); } catch { hand = null; }
       return hand;
     };
     const beat = (text, when, idx) => {
@@ -734,7 +744,7 @@ export function createEngine(base) {
   async function still(text, opts0 = {}) {
     await ready();
     const opts = filterOpts(handOpt(cleanOpts({ ...opts0, force: true }))) ?? {};
-    const plan = makePlan(textOf(text), { ...opts, reduced: true }, fontsApi, []);
+    const plan = mk(textOf(text), { ...opts, reduced: true }, fontsApi, []);
     for ( const f of ext.plan ) f(plan, { opts: { ...opts, reduced: true }, still: true });
     settleCenter(plan, bank);
     const dpr = opts.dpr ?? (globalThis.devicePixelRatio || 1);
@@ -744,7 +754,7 @@ export function createEngine(base) {
   }
 
   function design(text, opts = {}) {
-    const plan = makePlan(textOf(text), handOpt(cleanOpts(opts)), fontsApi, []);
+    const plan = mk(textOf(text), handOpt(cleanOpts(opts)), fontsApi, []);
     return JSON.parse(JSON.stringify(plan));
   }
 
@@ -752,7 +762,7 @@ export function createEngine(base) {
   function sizeOf(text, opts0 = {}) {
     const opts = filterOpts(handOpt(cleanOpts({ ...opts0, force: true }))) ?? {};
     const space = opts.space === "world" ? "world" : "screen";
-    const plan = makePlan(textOf(text), { ...opts, reduced: true }, fontsApi, []);
+    const plan = mk(textOf(text), { ...opts, reduced: true }, fontsApi, []);
     try { settleCenter(plan, bank); } catch {}
     const h = { space, opts, at: opts.at, plan, pixel: space === "world" && !!opts.pixel };
     h.tokenSpan = space === "world" ? tokenSpanOf(h) : 0; h.worldAlive = space === "world" ? count({ space: "world" }) : 0;
@@ -793,12 +803,12 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE,
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(),
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow,
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); },
     /* for tests and the gallery page */
     _ext: ext, _settle: (plan) => settleCenter(plan, bank),
-    _bank: bank, _plan: (t, o = {}) => makePlan(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
+    _bank: bank, _plan: (t, o = {}) => mk(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
   };
   return api;
 }

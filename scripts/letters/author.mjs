@@ -88,7 +88,8 @@ export async function registerFont(id, def, bank) {
 
 /* named styles (looks) */
 export function makeStyles() {
-  const table = {};
+  /* LOOK: two built-in styles name the engine's lettering traditions (design.mjs STYLES): the book's own and the general comic one */
+  const table = { invincible: { label: "Invincible", look: { style: "invincible" } }, comic: { label: "Comic", look: { style: "comic" } } };
   return {
     table,
     register(name, style) {
