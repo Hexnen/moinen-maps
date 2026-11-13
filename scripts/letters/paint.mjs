@@ -297,6 +297,7 @@ export function paintPicture(plan, bank, p, S, make) {
       lc.fill();
     }
     ctx.globalAlpha = H.shadowStyle === "dots" ? Math.min(0.85, H.shadow.a + 0.35) : H.shadow.a; ctx.drawImage(lay, 0, 0); ctx.restore();
+    lay.width = 0; lay.height = 0;   // FXLE F2: the shadow layer is used once: its backing store goes now, not at the next GC
     void col;
   }
   /* 3D extrusion: inked block behind the letters */

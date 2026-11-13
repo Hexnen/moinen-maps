@@ -18,7 +18,7 @@
 
 export const OP_KEYS = ["mood", "sound", "space", "at", "size", "magnitude", "area", "span", "token", "scale", "fit", "maxWidth", "anchor", "from",
   "seed", "hold", "tempo", "rotation", "colors", "palette", "style", "font", "hand", "avoid", "layer", "zIndex", "loop", "in", "out", "holdKind",
-  "pixel", "alt", "dir", "delay"];
+  "pixel", "alt", "dir", "delay", "vision", "elevation"];
 export const STREAM_KEYS = ["text", "syllables", "to", "every", "beats", "count", "duration", "life", "travel", "spread", "loud", "swing", "manual"];
 export const MAX_TEXT = 160;
 

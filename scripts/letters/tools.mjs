@@ -45,6 +45,14 @@ export function install(L, base) {
       capPx, vh, preview: !!h?.still });
   });
   ext.start.push(announce);
+  /* a stream with a style: the style's mood, palette, colours and motion under the stream's own options (one hand for all syllables) */
+  const stream0 = L.stream;
+  L.stream = (o = {}) => {
+    const st = typeof o?.style === "string" ? state.styles.get(o.style) : null;
+    if ( !st ) return stream0(o);
+    const { label, hand, font, sound, ...rest } = st;
+    return stream0({ ...rest, ...o, style: undefined });
+  };
   applyLimits();
   Object.defineProperty(L, "moods", { configurable: true, enumerable: true, get: () => MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound }, custom: !!MOODS[id].custom })) });
   Object.defineProperty(L, "prefs", { configurable: true, enumerable: true, get: () => ({ ...state.prefs }) });
