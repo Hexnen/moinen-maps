@@ -458,10 +458,12 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     sounds a straight-down solid block (`"heavy"`); the counters of linked rings are cut out of it; no soft shadow (P4).
   - **Fills**: flat, one colour per word, no gradients, no misregistration (P5). Light or airy sounds get hollow letters (white face,
     coloured rim; `hand.fill: "hollow"`); a loud solid body may get a hollow prefix (P6).
-  - **Prefix**: any short lead-in before a hyphen (KA-, RAKA-, KER-) is small (0.32-0.38 of the body), on the top line and tucked
-    into the first body letter (P7).
+  - **Prefix**: the hyphen lead-in before the body (KA-, RAKA-, KER-, KRA-KA-; each part at most five letters, the whole lead at
+    most eight characters; `invPrefix`) is small (0.32-0.38 of the body), on the top line and tucked into the first body letter. A
+    word whose parts repeat (BIP-BIP-BIP, BA-DUM-BA-DUM, THWUP-WOKKA-THWUP) is a rhythm and gets no prefix (P7).
   - **Accent**: upright letters (word tilt at most 0.05 rad), one baseline, one size peak per word, neighbour ratio at least 0.85,
-    "!" as tall as the letter before it (P8).
+    no letter under `INV_FLOOR` (0.82) of the word's biggest (a long tail would read as lower case), "!" as tall as the letter
+    before it (P8).
   - **Vertical**: `arrange: "vertical"` stacks one letter per row, rows tucked by `TUCK` (0.14 of a row), the hyphen dropped, marks
     beside the last letter (P9).
   - **Joined OO**: a run of O / 0 becomes linked ovals made from the face's own O (`ovalRing`), all the same size, overlapping by one

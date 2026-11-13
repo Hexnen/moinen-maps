@@ -1,7 +1,7 @@
 // LOOK2: node checks of the Invincible hand after SPEC-LOOK P1-P18 (the face, one keyline round the word, the duplicate, flat faces,
 // prefix, sizes and baseline, the vertical column, interlocked rings, colours, optical spacing) and of the frozen legacy look
 // "expressive". Called from check.mjs with its counter and the loaded font bank.
-import { makePlan, STYLES, NUMBER_RE, TUCK } from "./design.mjs";
+import { makePlan, STYLES, NUMBER_RE, TUCK, invPrefix, INV_FLOOR, monotoneSizes } from "./design.mjs";
 import { createVocab, KIND_IDS, KINDS } from "./words.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter, occlusionReport, baseGeometry, pictureGeometry, placedShape, pairGaps, ovalRing, KERN } from "./shape.mjs";
@@ -163,13 +163,14 @@ export function checkLook2(ok, bank) {
     let n = 0, big = 0, top = 0, over = 0, worst = 0; const ex = [];
     const texts = vocab.map((v) => [v.w.text, v.w.play, v.id]).concat([["KA-THOOM!", { mood: "boom" }], ["RAKA-BOOM", { mood: "boom" }], ["BA-DUMM", { mood: "impact" }]]);
     for ( const [t, play] of texts ) {
-      const hy = t.indexOf("-");
-      if ( hy < 1 || hy > 5 || t.length - hy <= 2 || t.slice(0, hy).includes(" ") ) continue;
+      const want = invPrefix([...t]);
+      if ( !want ) continue;
       const p = inv(t, { ...play, seed: `pf${t}` });
       if ( p.groups ) continue;   // a caller's own parts size the word (MOVE)
       settleCenter(p, bank); n++;
       const L = p.layout.letters, pre = p.layout.pre ?? 0;
-      if ( pre !== hy + 1 ) { big++; ex.push(`${t}: no prefix`); continue; }
+      if ( pre !== want && !(pre === 0 && Math.max(...p.accent.slice(0, want)) >= 0.95) ) { big++; ex.push(`${t}: no prefix`); continue; }
+      if ( !pre ) continue;
       const body = Math.max(...L.slice(pre).map((l) => l.s)), r = Math.max(...L.slice(0, pre).map((l) => l.s)) / body;
       worst = Math.max(worst, r); if ( r > 0.42 ) { big++; ex.push(`${t} ${r.toFixed(2)}`); }
       const topOf = (l) => -0.5 + l.dy - 0.5 * l.s;
@@ -180,6 +181,30 @@ export function checkLook2(ok, bank) {
     ok(n >= 6 && big === 0, `prefix: ${big} of ${n} hyphen lead-ins not small (max ratio ${worst.toFixed(2)}; ${ex.slice(0, 3).join(", ")})`);
     ok(top === 0, `prefix: ${top} prefixes not on the body's top line`);
     ok(over === 0, `prefix: ${over} prefixes not tucked under the first body letter (${ex.slice(-3).join(", ")})`);
+  }
+  /* P8: a tail never drops so far that it reads as lower case (floor under the word's peak) */
+  {
+    const sz = monotoneSizes([..."THWAPPPP!"], [0.7, 0.8, 0.9, 1, 0.6, 0.5, 0.4, 0.3, 1]);
+    ok(Math.min(...sz.slice(0, 8)) >= INV_FLOOR - 1e-9 && INV_FLOOR >= 0.78 && INV_FLOOR <= 0.86, `P8 floor: ${sz.map((v) => v.toFixed(2)).join(" ")}`);
+    let low = 0, nn = 0;
+    for ( const v of vocab ) {
+      const p = inv(v.w.text, { ...v.w.play, seed: `fl${v.id}` }); if ( p.groups || p.hand.number ) continue;
+      const L = p.layout.letters, pre = p.layout.pre ?? 0, ch = p.chars;
+      const idx = [...L.keys()].filter((i) => i >= pre && /[\p{L}\p{N}]/u.test(ch[i]));
+      if ( !idx.length ) continue; nn++;
+      const top = Math.max(...idx.map((i) => L[i].s));
+      if ( idx.some((i) => L[i].s < (INV_FLOOR - 0.01) * top) ) low++;
+    }
+    ok(nn > 50 && low === 0, `P8 floor: ${low} of ${nn} vocabulary words have a body letter under ${INV_FLOOR} of the peak`);
+  }
+  /* P7: a rhythm (repeated segments) is not a lead-in; a multi-part lead-in is one prefix */
+  {
+    const want = { "BIP-BIP-BIP-BIP!": 0, "BA-DUM-BA-DUM!": 0, "WUP-WUP-WUUUP!": 0, "THWUP-WOKKA-THWUP": 0, "BWA-HA-HA-HA!": 0,
+      "NEEO-WEEO-WEEOO!": 0, "BDOMF-BDOMF": 0, "KRA-KA-BOOOMM!": 7, "KA-THOOM!": 3, "RAKA-BOOM": 5, "KER-SPLAT": 4, "SKREE-": 0,
+      "TSIKKA-TSAK-TSIK!": 0, "PTIK-KA-BOOM!": 8 };
+    for ( const [t, e] of Object.entries(want) ) ok(invPrefix([...t]) === e, `prefix rule ${t}: ${invPrefix([...t])}, want ${e}`);
+    const p = inv("BIP-BIP-BIP-BIP!", { mood: "zap", seed: 3 });
+    ok((p.layout.pre ?? 0) === 0, "prefix: a rhythm word gets no small first part");
   }
 
   /* P8: one straight baseline, sizes rise to one peak and fall, no letter under 0.85 of its neighbour, upright; "!" as tall as its letter */

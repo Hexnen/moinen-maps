@@ -565,7 +565,8 @@ opens the designer window (also: the burst button in the token controls); `L.ope
   a neighbour (no outline lies on a neighbour); a flat duplicate block down-right in one dark colour, or a straight-down solid block
   for heavy sounds; flat fills (no gradient, no soft shadow, no misregistration, no boil); hollow letters for light or airy sounds;
   11 flat palettes chosen from the sound (`invPalette`); upright letters, one size peak per word, neighbour ratio at least 0.85;
-  any short lead-in before a hyphen small, on the top line, tucked into the body; doubled O as linked ovals made from Anton's own O;
+  the hyphen lead-in (KA-, RAKA-, KRA-KA-; not a rhythm like BIP-BIP-BIP, `invPrefix`) small, on the top line, tucked into the
+  body; no letter under 0.82 of the word's biggest (`INV_FLOOR`); doubled O as linked ovals made from Anton's own O;
   letter spacing by pair (`kernOptical`, below). **It is the default when `game.system.id === "invincible"`.**
 - `comic` (the earlier mixed hand): the default elsewhere.
 - `expressive`: the look from before the Invincible pass, kept for the owner. It is the `comic` hand under its own name: the same

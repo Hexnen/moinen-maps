@@ -512,6 +512,28 @@ function shapeAround(cs, a, b, lead, tail, v0 = a, v1 = b) {
 }
 
 /* ---------- layout: letters placed and sized; envelope warp params ---------- */
+/* LOOK2 (P7): the invincible prefix = the hyphen lead-in before the body (KA-THOOM, RAKA-BOOM, KRA-KA-BOOM, KER-SPLAT): every lead
+   segment at most five letters, the whole lead at most eight characters. A word whose segments repeat (BIP-BIP-BIP, BA-DUM-BA-DUM,
+   WUP-WUP-WUUUP, THWUP-WOKKA-THWUP, doubled letters ignored) is a rhythm, not a lead-in: no prefix. Returns the prefix length. */
+export function invPrefix(chars, accent = null) {
+  const w = chars.join("");
+  if ( /\s/u.test(w) ) return 0;
+  const body = w.replace(/[!?]+$/u, "").replace(/-+$/u, "");
+  const segs = body.split("-");
+  if ( segs.length < 2 || segs.some((s) => !s) ) return 0;
+  const key = (s) => s.replace(/(.)\1+/gu, "$1");
+  const keys = segs.map(key);
+  if ( new Set(keys).size < keys.length ) return 0;
+  const lead = segs.slice(0, -1);
+  let m = lead.length;
+  if ( lead.some((s) => s.length > 5) || lead.join("-").length > 7 ) m = segs[0].length <= 5 ? 1 : 0;
+  if ( !m ) return 0;
+  const e = segs.slice(0, m).join("-").length + 1;
+  if ( chars.length - e <= 2 ) return 0;
+  if ( accent && Math.max(...accent.slice(0, e)) >= 0.95 ) return 0;   // the accent is in it: not a lead-in
+  return e;
+}
+
 export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accent = null, ls = null) {
   const n = chars.length;
   const look = !!R2 && hand.contrast != null;
@@ -538,9 +560,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
   let pre = 0;
   const partSized = !!ls && ls.some((v) => Math.abs(v - 1) > 1e-6);   // MOVE's parts size the word themselves
   if ( inv && !partSized && hand.prefix > 0 && !chars.includes("\n") ) {
-    /* LOOK2 (P7): ANY hyphen lead-in of at most five letters before a body of two or more is a prefix (KA-THOOM, RAKA-BOOM) */
-    const hy = chars.indexOf("-");
-    if ( hy >= 1 && hy <= 5 && n - hy > 2 && !chars.slice(0, hy).includes(" ") ) pre = hy + 1;
+    pre = invPrefix(chars, accent);
   } else if ( look && !partSized && hand.prefix > 0 && !chars.includes("\n") && sound.peak >= 0.3 ) {
     const w = chars.join(""), hy = w.indexOf("-"), sp = w.indexOf(" ");
     if ( hy >= 1 && hy <= 5 && n - hy > 2 ) pre = hy + 1;
@@ -668,6 +688,8 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
 /* LOOK2 (P8): the book's sizes inside each word: one peak; the letters before it never shrink toward it and the letters after it
    never grow away from it; no letter under 0.85 of its neighbour (no lower-case look, no step). A mark ("!", "?") stands as tall as
    the letter before it, a hyphen as its smaller neighbour. The prefix (indices < pre) is apart. */
+/* LOOK2 (P8): no letter of an invincible word under this share of the word's biggest letter */
+export const INV_FLOOR = 0.82;
 export function monotoneSizes(chars, sizes, pre = 0) {
   const n = chars.length, ink = (i) => /[\p{L}\p{N}]/u.test(chars[i]);
   let from = pre;
@@ -678,6 +700,8 @@ export function monotoneSizes(chars, sizes, pre = 0) {
       let p = 0; for ( let k = 1; k < idx.length; k++ ) if ( sizes[idx[k]] > sizes[idx[p]] + 1e-9 ) p = k;
       for ( let k = p - 1; k >= 0; k-- ) { const a = idx[k], b = idx[k + 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
       for ( let k = p + 1; k < idx.length; k++ ) { const a = idx[k], b = idx[k - 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
+      /* a floor under the whole word: a long tail ramped by 0.85 a step reads as lower case (THWApp, HFaaaah); clamping keeps it monotone */
+      const top = sizes[idx[p]]; for ( const k of idx ) sizes[k] = Math.max(sizes[k], INV_FLOOR * top);
       for ( let k = from; k < i; k++ ) if ( !ink(k) ) {
         const prev = idx.filter((j) => j < k).at(-1), next = idx.find((j) => j > k);
         sizes[k] = /[!?]/.test(chars[k]) ? sizes[prev ?? next] : Math.min(sizes[prev ?? next], sizes[next ?? prev]);
