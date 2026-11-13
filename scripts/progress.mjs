@@ -1,5 +1,5 @@
 import { MODULE_ID } from "./config.mjs";
-import { Job, splitTime } from "./progress-core.mjs";
+import { Job, splitTime, lineBottom } from "./progress-core.mjs";
 
 /**
  * The long jobs' progress (progress-core.mjs) for everyone: the panels' status lines read `line(key)` / `bar(...)`, and a small
@@ -96,6 +96,7 @@ function render(t) {
     (document.getElementById("interface") ?? document.body).appendChild(el);
     place();
   }
+  place();      // fxs2: what stands across the bottom may come or go while the line shows (a combat dock drawn after a reload)
   const rows = list.map((j) => {
     const d = describe(j.key);
     return { key: j.key, d };
@@ -124,12 +125,14 @@ function render(t) {
   }
 }
 
-/** Above the hotbar, in the middle of the map's column. */
+/** Above the hotbar and above what other modules declared across the bottom (fxs2: a combat dock), in the middle of the map's column. */
 function place() {
   if ( !el ) return;
   const hot = document.getElementById("hotbar")?.getBoundingClientRect?.();
-  const bottom = hot && hot.height > 0 ? Math.round(innerHeight - hot.top + 10) : 84;
-  el.style.bottom = `${bottom}px`;
+  let ins = 0;
+  try { ins = game.modules.get(MODULE_ID)?.api?.zones?.uiInsets?.()?.bottom ?? 0; } catch {}
+  const bottom = `${lineBottom(hot && hot.height > 0 ? hot.top : null, innerHeight, ins)}px`;
+  if ( el.style.bottom !== bottom ) el.style.bottom = bottom;
 }
 
 Hooks.once("init", () => {

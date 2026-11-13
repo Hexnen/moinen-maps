@@ -102,5 +102,13 @@ P.setClock(null);
   ok(quiet <= Math.max(400, ms * 0.2), `bake: no silence over 400 ms (max ${quiet} ms; before: one report at 20% and nothing until the end)`);
 }
 
+/* 5. fxs2 (U232): the floating line stands over the hotbar AND over a declared bottom inset (a combat dock) */
+{
+  ok(P.lineBottom(700, 768, 0) === 78, "no inset: over the hotbar, as before");
+  ok(P.lineBottom(null, 768, 0) === 84, "no hotbar, no inset: the old 84 px");
+  ok(P.lineBottom(700, 768, 180) === 190, "a dock declared 180 px up from the bottom: the line stands over it");
+  ok(P.lineBottom(600, 768, 100) === 178, "a hotbar higher than the inset: over the hotbar");
+  ok(P.lineBottom(700, 768, NaN) === 78 && P.lineBottom(700, 768, -5) === 78, "a broken inset is ignored");
+}
 console.log(fails ? `${fails} FAILED` : "progress: all ok");
 process.exit(fails ? 1 : 0);

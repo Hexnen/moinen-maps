@@ -158,3 +158,15 @@ export function splitTime(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   return { m: Math.floor(s / 60), s: s % 60, total: s };
 }
+
+/**
+ * fxs2 (U232 of invincible-plus-ultra): where the floating progress line stands, as its distance from the bottom of the window: over
+ * the hotbar (as before) AND over what other modules declared across the bottom (zones uiInset: a combat dock and its armed panel), so
+ * a scene opening after a reload in the middle of a fight never lies over the dock. Pure: `hotTop` the hotbar's top (null: none shown),
+ * `vh` the window's height, `insetBottom` the declared bottom inset (px from the bottom). -> px from the bottom
+ */
+export function lineBottom(hotTop, vh, insetBottom = 0, gap = 10) {
+  const hot = Number.isFinite(hotTop) && hotTop > 0 && hotTop < vh ? Math.round(vh - hotTop + gap) : 84;
+  const ins = Number.isFinite(insetBottom) && insetBottom > 0 ? Math.round(insetBottom + gap) : 0;
+  return Math.max(hot, ins);
+}
