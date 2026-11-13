@@ -284,7 +284,10 @@ function startBurn(p, live) {
       return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
           return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
         level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size: burnSize(p, live),
-        ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts() });
+        ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts(),
+        // (engine 1.7.0 pulls world words into the view by default: a fire burning off this screen must not letter at its edge; the
+        // spots on screen are kept in view and off the panels by burnOffsets)
+        keepInView: false });
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's sound did not start`, err); return null; }
   }).filter(Boolean);
 }

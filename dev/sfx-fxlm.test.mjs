@@ -315,6 +315,7 @@ group("WORD2", () => {
   ok(crack(2).emat === "stone" && crack(3).emat === "wood" && crack(7).emat === "metal" && crack(-1).emat === null, "WORD2 what is hit gives the word its material (stone, wood, metal; the kind's own elsewhere)");
   ok(C.planCluster(C.cluster(bomb, G).find((g) => g.main.voice === "boom"), { grid: G, known: KINDS })[0].emat === null, "WORD2 a bomb's boom keeps its own (fire) character");
   ok(sfx.includes("if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };"), "WORD2 the runtime changes only the material of the word's character");
+  ok(/L\.sustain\(\{[\s\S]*?keepInView: false \}\)/.test(sfx), "WORD2 a burning fire off this screen is not pulled to its edge (engine 1.7.0 keeps world words in view by default)");
 });
 
 if ( failed.length ) { console.log(failed.join(" | ")); console.log(`sfx-fxlm: ${failed.length} finding group(s) FAILED`); process.exit(1); }
