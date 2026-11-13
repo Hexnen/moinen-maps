@@ -10,7 +10,7 @@ import { rng, hash } from "./rng.mjs";
 import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
 
-export const VERSION = "1.7.0";   // v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.8.0";   // LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,

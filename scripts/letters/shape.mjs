@@ -60,13 +60,112 @@ export function ringGlyph(font, bank) {
   return g;
 }
 
+/* LOOK2 (SPEC-LOOK P10, the owner: «bardziej połączone artystyczne OO»): the book's interlocked O is the face's OWN O (a tall oval or
+   stadium, the same stroke weight as every letter), widened at its middle only (its sides keep their curve and weight) until its
+   counter can hold the neighbour's stroke with clear air on both sides: width >= 3 strokes + 2 gaps. `link` = how far the next
+   ring's left edge stands from this one's (stroke + gap), so the strokes cross with even air around them. */
+export function ovalRing(font, bank) {
+  const key = `oval#${font}`;
+  if ( bank.cache.has(key) ) return bank.cache.get(key);
+  const o = bank.glyph(font, "O"), cs = o.contours ?? [];
+  const big = cs.reduce((a, c) => (Math.abs(area(c)) > Math.abs(area(a)) ? c : a), cs[0] ?? [0, 0, 1, 0, 1, -1]);
+  const b = bbox(cs), holes = cs.filter((c) => c !== big && Math.sign(area(c)) !== Math.sign(area(big)));
+  const hb = holes.length ? bbox(holes) : { x0: b.x0 + 0.15, x1: b.x1 - 0.15 };
+  const ow = b.x1 - b.x0, t = Math.max(0.06, (ow - (hb.x1 - hb.x0)) / 2), gap = Math.max(0.06, 0.5 * t);
+  const D = Math.max(0, 3 * t + 2 * gap - ow), cx = (b.x0 + b.x1) / 2;
+  const contours = cs.map((c) => { const q = c.slice(); for ( let k = 0; k < q.length; k += 2 ) if ( q[k] > cx ) q[k] += D; return q; });
+  const g = { adv: o.adv + D, contours, font: o.font ?? font, ring: true, link: t + gap, stroke: t, gap };
+  bank.cache.set(key, g);
+  return g;
+}
+
+/* LOOK2 (SPEC-LOOK P18, the owner: «odstępy ... za duże, ale to zależy od litery»): optical spacing, pair by pair. Each pair is set
+   by the white between the two SHAPES (not their advance boxes) over the height they share: the mean gap, counting at most
+   KERN.open cap heights of air per row (so T-A, A-V, L-T tuck in and round pairs sit closest), equals the hand's gap, and no row
+   comes closer than KERN.touch (letters may just touch: the word's one keyline closes such joins). The last prefix letter is
+   overlapped by the first body letter (P7); a ring stands at its link distance from the ring it holds (P10); a run of one letter
+   keeps one, slightly tighter rhythm. Sizes, the baseline and the prefix are already set (layoutPlan); the words of a line keep
+   their word gap. Deterministic, pure. */
+export const KERN = { rows: 40, open: 0.12, touch: -0.02, preOverlap: 0.015, same: 0.85 };
+function rowExtents(cs, ys) {
+  const mn = ys.map(() => Infinity), mx = ys.map(() => -Infinity);
+  for ( const c of cs ) for ( let i = 0, n = c.length; i < n; i += 2 ) {
+    const j = (i + 2) % n, x1 = c[i], y1 = c[i + 1], x2 = c[j], y2 = c[j + 1];
+    if ( y1 === y2 ) continue;
+    const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+    for ( let k = 0; k < ys.length; k++ ) { const y = ys[k]; if ( y < lo || y >= hi ) continue; const x = x1 + (y - y1) * (x2 - x1) / (y2 - y1); if ( x < mn[k] ) mn[k] = x; if ( x > mx[k] ) mx[k] = x; }
+  }
+  return { mn, mx };
+}
+/* letter i's outline placed in the line (before the envelope), its advance box starting at x */
+export function placedShape(plan, bank, i, x = 0) {
+  const L = plan.layout.letters[i], base = baseGeometry(plan, bank)[i];
+  if ( !base?.gl || L.skip ) return null;
+  const s = L.s, c = Math.cos(L.rot), sn = Math.sin(L.rot), px = base.gl.adv / 2, py = -0.5, tx = x + L.w / 2, ty = -0.5 + L.dy;
+  return mapCs(base.cs, (X, Y) => [(X - px) * s * c - (Y - py) * s * sn + tx, (X - px) * s * sn + (Y - py) * s * c + ty]);
+}
+/* the gap per row of the height two placed shapes share (null where one of them has no ink on that row) */
+export function pairGaps(a, b, rows = KERN.rows) {
+  const ba = bbox(a), bb = bbox(b), y0 = Math.max(ba.y0, bb.y0), y1 = Math.min(ba.y1, bb.y1);
+  if ( y1 - y0 < 1e-3 ) return { rows: [], y0, y1 };
+  const ys = []; for ( let k = 0; k < rows; k++ ) ys.push(y0 + (y1 - y0) * (k + 0.5) / rows);
+  const ea = rowExtents(a, ys), eb = rowExtents(b, ys);
+  return { rows: ys.map((y, k) => (Number.isFinite(ea.mx[k]) && Number.isFinite(eb.mn[k]) ? eb.mn[k] - ea.mx[k] : null)), y0, y1 };
+}
+export function kernOptical(plan, bank) {
+  const H = plan.hand, lay = plan.layout, Ls = lay.letters, chars = plan.chars;
+  if ( !H.kern || lay.arrange === "vertical" || lay._kerned ) return;
+  Object.defineProperty(lay, "_kerned", { value: true, enumerable: false, configurable: true });
+  const base = baseGeometry(plan, bank), pre = lay.pre ?? 0;
+  for ( let i = 0; i < Ls.length; i++ ) if ( base[i].ring && base[i].gl ) Ls[i].w = base[i].gl.adv * Ls[i].s;
+  const lines = lay.lines ?? [{ from: 0, to: Ls.length - 1 }];
+  const old = Ls.map((l) => l.x);
+  for ( const line of lines ) {
+    let prev = -1;
+    for ( let i = line.from; i <= line.to; i++ ) {
+      const me = base[i].gl && !Ls[i].skip ? placedShape(plan, bank, i, 0) : null;
+      if ( !me ) { if ( prev >= 0 ) Ls[i].x = Ls[prev].x + (old[i] - old[prev]); continue; }
+      if ( prev < 0 ) { prev = i; continue; }
+      const spaced = chars.slice(prev + 1, i).some((c) => c === " " || c === "\n");
+      if ( spaced ) { Ls[i].x = Ls[prev].x + (old[i] - old[prev]); prev = i; continue; }
+      const a = placedShape(plan, bank, prev, Ls[prev].x), h = Math.min(Ls[prev].s, Ls[i].s);
+      let X;
+      if ( Ls[i].link === prev && base[i].gl.link ) X = bbox(a).x0 + base[prev].gl.link * Ls[prev].s - bbox(me).x0;
+      else {
+        const g = pairGaps(a, me), live = g.rows.filter((d) => d != null);
+        if ( !live.length ) X = bbox(a).x1 - bbox(me).x0 + H.kern.gap * h;
+        else {
+          const need = Math.max(...live.map((d) => -d));   // the offset at which the closest row just touches
+          if ( pre && i === pre ) X = need - KERN.preOverlap * Ls[i].s;
+          else {
+            const G = H.kern.gap * h * (chars[i] === chars[prev] ? KERN.same : 1), open = KERN.open * h;
+            const f = (x) => g.rows.reduce((acc, d) => acc + (d == null ? open : Math.min(open, d + x)), 0) / g.rows.length;
+            let lo = need - open, hi = need + open;
+            for ( let it = 0; it < 32; it++ ) { const m = (lo + hi) / 2; if ( f(m) < G ) lo = m; else hi = m; }
+            X = Math.max((lo + hi) / 2, need + KERN.touch * h);
+          }
+        }
+      }
+      Ls[i].x = X; prev = i;
+    }
+  }
+  /* the block: stacked lines centred again on the widest line */
+  const right = (ln) => Math.max(...Ls.slice(ln.from, ln.to + 1).map((l) => l.x + l.w));
+  if ( lay.lines && lay.arrange === "stack" ) {
+    const ws = lay.lines.map((ln) => right(ln) - Ls[ln.from].x), W = Math.max(...ws);
+    lay.lines.forEach((ln, k) => { const off = (W - ws[k]) / 2 - Ls[ln.from].x; for ( let i = ln.from; i <= ln.to; i++ ) Ls[i].x += off; ln.w = ws[k]; });
+  }
+  const W = Math.max(0.3, ...Ls.map((l) => l.x + l.w));
+  lay.W = W; lay.E.W = W; plan._env = null;
+}
+
 /* base geometry cache per plan: glyph per letter and treated outlines for the plan's own seed */
 export function baseGeometry(plan, bank) {
   if ( plan._base ) return plan._base;
   const base = plan.chars.map((ch, i) => {
-    if ( ch === " " || ch === "\n" ) return { gl: null, cs: [] };   // FXLE F12: a line break has no glyph
+    if ( ch === " " || ch === "\n" || plan.layout.letters[i]?.skip ) return { gl: null, cs: [] };   // FXLE F12: a line break has no glyph (LOOK2: nor a hyphen a column drops)
     const font = plan.layout.letters[i]?.font ?? plan.hand.font;
-    if ( plan.layout.letters[i]?.ring ) { const gl = ringGlyph(font, bank); return { gl, cs: gl.contours, ring: true }; }
+    if ( plan.layout.letters[i]?.ring ) { const gl = plan.hand.style === "invincible" ? ovalRing(font, bank) : ringGlyph(font, bank); return { gl, cs: gl.contours, ring: true }; }
     const gl = bank.glyph(font, ch);
     return { gl, cs: treatReadable(gl, ch, font, plan.hand, plan.sound, plan.seed, i, bank) };
   });
@@ -217,7 +316,7 @@ export function pictureGeometry(plan, bank, p) {
         X *= g.s * g.sx; Y *= g.s * g.sy;
         o[k] = X * cg - Y * sg + g.x; o[k + 1] = X * sg + Y * cg + g.y;
       }
-      return boil(o, p.boil ? (plan.hand.style === "invincible" ? 0.0025 : 0.006 + 0.006 * plan.sound.rough) : 0, p.boil % 9973);   // the book's ink is clean: a faint boil only
+      return boil(o, p.boil && plan.hand.style !== "invincible" ? 0.006 + 0.006 * plan.sound.rough : 0, p.boil % 9973);   // LOOK2 (P3): the book's ink is clean: no boil at all
     });
     out.push({ i, cs });
   }
@@ -228,6 +327,7 @@ export function pictureGeometry(plan, bank, p) {
 export function settleCenter(plan, bank) {
   if ( plan._center ) return plan._center;
   Object.defineProperty(plan, "_center", { value: [0, 0], enumerable: false, configurable: true, writable: true });
+  if ( plan.hand.kern ) kernOptical(plan, bank);   // LOOK2 (P18): pair-aware spacing before the reader checks the word
   if ( plan.hand.legible !== false ) settleOcclusion(plan, bank);
   const p0 = { ...plan.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, boil: 0, reseed: false };
   const geo = pictureGeometry(plan, bank, p0);

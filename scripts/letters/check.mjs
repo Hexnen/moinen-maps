@@ -14,6 +14,7 @@ import { rng } from "./rng.mjs";
 import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
 import { checkWords } from "./check-words.mjs";
 import { checkLook } from "./check-look.mjs";
+import { checkLook2 } from "./check-look2.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -193,6 +194,8 @@ checkWords(ok, bank);
 
 /* 8d. the look layer (LOOK; checks in check-look.mjs) */
 checkLook(ok, bank);
+/* 8d2. LOOK2: the Invincible hand after SPEC-LOOK P1-P18 and the frozen legacy look "expressive" (check-look2.mjs) */
+checkLook2(ok, bank);
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
