@@ -396,7 +396,7 @@ lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomat
   nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas
   and a render budget of about 4 ms per frame; seed with the cast id so every client sees the same lettering.
-- Every client in step with one call: `L.net.play` / `L.net.stream` (README "Tools"). With your own socket, run the call on every
+- Every client in step with one call (GM clients only): `L.net.play` / `L.net.stream` (README "Tools"). With your own socket, run the call on every
   client with the same seed. `startAt` is THIS page's
   `performance.now()` clock and differs on every client (each page counts from its own load): never send it as is. See "Several clients".
 
@@ -407,7 +407,7 @@ lettering conventions, Wikipedia lists of onomatopoeia, Polish Wikipedia "Onomat
 - To start a word part-way on every client (an effect that began earlier), send a wall-clock time with your event, e.g.
   `sentAt: Date.now()` at the effect's start, and on each client pass `startAt: performance.now() - (Date.now() - sentAt)` (clock skew
   between machines remains). A `startAt` more than 60 s ahead of this page's clock is ignored with a warning.
-- Without clock skew: `L.net.play` / `L.net.burst` / `L.net.stream` do all of this (README "Tools"); with your own socket send
+- Without clock skew: `L.net.play` / `L.net.burst` / `L.net.stream` do all of this from a GM's client (README "Tools"); with your own socket send
   `L.net.sharedNow()` (Foundry's ping-synced server clock) and pass `L.net.local(sentShared)` (`{ delay }` or `{ startAt }`) to `L.play`.
 
 ## Who sees a word (hidden and unseen tokens)
@@ -454,6 +454,12 @@ once, start stamped on Foundry's ping-synced server clock `game.time.serverTime`
 as ids, a word for a token not on a client's scene is skipped there; functions, Promises and elements do not travel, `reduced` is
 each client's own). Each returns the local handle(s) with `netId`; `L.net.stop(netId, { quick })` stops it everywhere.
 `L.net.sharedNow()`, `L.net.local(sharedT)` -> `{ delay }` | `{ startAt }` for callers with their own socket.
+GM only (user ruling TOOL-8): only a GM sends. On a player's client `L.net.play` / `L.net.stream` return a handle that is already
+over (`refused: "gm-only"`, `alive` false), `L.net.burst` returns `[]`, `L.net.stop` only stops local words; nothing is sent, nothing
+throws, one console line per call kind says why. Every receiving client drops a message whose sender (stamped by Foundry's server) is
+not a GM user. A player can still letter on their own screen: `L.play` / `L.burst` / `L.stream` / `L.sfx` are unchanged (module code
+that letters game events runs them on every client itself and does not need `L.net`). The designer, "Letter this now", its key and
+the token-controls button are GM only.
 
 GM: `L.letterNow(text, opts)` shows a word to everyone at the selected tokens (one each, different hands) or at a point (`point`,
 default the cursor); the keybinding "Letter this now" (Shift+L) opens a small box at the cursor for it. `L.designer({ text })`

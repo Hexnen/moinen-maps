@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import { SETTINGS, DEFAULTS, clean, cleanAll, reducedFor, resolveOpts, filterPlan, flashTimes, handFrom, CONTRAST, CVD, PHOTO } from "./prefs.mjs";
 import { registerMood, registerPalette, registerFont, makeStyles, motionNames, shade } from "./author.mjs";
-import { wireOpts, wireValue, unwire, missingToken, localStart, checkMsg, rateGate, OP_KEYS } from "./net.mjs";
+import { wireOpts, wireValue, unwire, missingToken, localStart, checkMsg, rateGate, OP_KEYS, senderIsGM, refusedHandle } from "./net.mjs";
 import { STRINGS } from "./strings.mjs";
 import { MOODS, MOOD_IDS, COLORS, FONTS, TICK, makePlan } from "./design.mjs";
 import { paintPicture } from "./paint.mjs";
@@ -146,6 +146,54 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(checkMsg({ t: "letr", id: "a", op: "play", at: 1, text: "x".repeat(999) }).text.length === 160 && !checkMsg({ t: "letr", id: "a", op: "rm -rf", at: 1 }) && !checkMsg({ t: "x" }) && !checkMsg({ t: "letr", id: "a", op: "play" }), "tools: net: messages are checked and capped");
     const g = rateGate(3);
     ok([g("u", 0), g("u", 10), g("u", 20), g("u", 30), g("v", 30), g("u", 1100)].join() === "true,true,true,false,true,true", "tools: net: per-sender rate gate");
+  }
+
+  /* networking is GM only (TOOL-8, user ruling): a player's client never sends and fails quietly; every client refuses a word whose
+     sender is not a GM. Foundry's server stamps the sender: custom socket events reach listeners as (data, senderUserId). */
+  {
+    const users = new Map([["gm1", { id: "gm1", isGM: true }], ["pl1", { id: "pl1", isGM: false }]]);
+    ok(senderIsGM("gm1", (id) => users.get(id)) && !senderIsGM("pl1", (id) => users.get(id)) && !senderIsGM("nobody", (id) => users.get(id))
+      && !senderIsGM(undefined, (id) => users.get(id)) && !senderIsGM("gm1", undefined), "tools: net: only a GM user of this world counts as a sender");
+    const rh = refusedHandle("KRAK!");
+    ok(rh.alive === false && rh.off === true && rh.refused === "gm-only" && typeof rh.stop === "function" && rh.finished instanceof Promise, "tools: net: a refused send returns a handle that is already over");
+
+    const T = await import("./tools.mjs");
+    const saved = { game: globalThis.game, warn: console.warn };
+    const emitted = [], played = [], warns = [];
+    const handle = () => ({ alive: true, stop() {}, finished: new Promise(() => {}) });
+    const fakeL = { play: (text, o) => { played.push(["play", text, o]); return handle(); }, burst: (items) => { played.push(["burst", items.length]); return items.map(handle); },
+      stream: (o) => { played.push(["stream", o?.text]); return handle(); } };
+    const user = { id: "pl1", isGM: false };
+    globalThis.game = { user, users: { get: (id) => users.get(id) }, time: { serverTime: 1e12 }, socket: { emit: (...a) => emitted.push(a) } };
+    console.warn = (...a) => warns.push(a.join(" "));
+    const st = T.state, keep = { engine: st.engine, host: st.host };
+    try {
+      st.host = "moinen-maps"; st.engine = fakeL;
+      const net = T._net.netApi(fakeL);
+      let threw = false, r = {};
+      try {
+        r.play = net.play("KRAK!", { mood: "boom" }); r.play2 = net.play("BUM!");
+        r.burst = net.burst([{ text: "A" }, { text: "B" }], {}); r.stream = net.stream({ text: "RA-TA-TA" }); net.stop("x");
+      } catch { threw = true; }
+      ok(!threw && emitted.length === 0 && played.length === 0, "tools: net: a player's client sends nothing and does not throw (play, burst, stream, stop)");
+      ok(r.play?.refused === "gm-only" && Array.isArray(r.burst) && r.burst.length === 0 && r.stream?.refused === "gm-only", "tools: net: a player gets handles that are already over (burst: [])");
+      ok(warns.filter((w) => /only a GM shows lettering/.test(w)).length === 3, "tools: net: a player is told once per call kind on the console");
+      user.isGM = true; user.id = "gm1";
+      const h = net.play("KRAK!", { mood: "boom" });
+      ok(emitted.length === 1 && emitted[0][0] === "module.moinen-maps" && emitted[0][1].op === "play" && played.length === 1 && h.netId, "tools: net: a GM sends and plays it locally");
+      /* the receiving side */
+      played.length = 0; warns.length = 0;
+      const msg = { t: "letr", v: 1, op: "play", id: "n1", at: 1e12 + 100, scene: null, text: "ŁUP!", opts: { mood: "crash", space: "screen" } };
+      T._net.onSocket(msg, "pl1");
+      T._net.onSocket({ ...msg, id: "n2" }, undefined);
+      T._net.onSocket({ ...msg, id: "n3" }, "stranger");
+      T._net.onSocket({ ...msg, op: "stop", id: "n1" }, "pl1");
+      ok(played.length === 0 && warns.some((w) => /non-GM user \(pl1\)/.test(w)), "tools: net: a client refuses a word (and a stop) from a player, an unknown or a missing sender");
+      T._net.onSocket({ ...msg, id: "n4" }, "gm1");
+      ok(played.length === 1 && played[0][1] === "ŁUP!" && played[0][2].delay > 0, "tools: net: a client plays a GM's word in step");
+    } finally {
+      globalThis.game = saved.game; console.warn = saved.warn; st.engine = keep.engine; st.host = keep.host;
+    }
   }
 
   /* i18n: both languages carry every key; every key the windows use exists */
