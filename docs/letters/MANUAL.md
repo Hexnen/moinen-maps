@@ -240,6 +240,10 @@ setting of your module, or the GM's language sent with the event). English is fi
 - Analyse each effect on its own; one word for a bomb is too little, one recipe for all effects is wrong.
 - Words may repeat or be shared when it makes sense; do not force a new word for every event.
 
+**Changing one trait of a vocabulary word.** `L.sfx(kind, { character: { material: "wood" } })` replaces the word's whole
+`character`, and the gaps are then filled from the mood's defaults, not the kind's [C]. To change one trait, take the word and merge:
+`const w = L.word("crash", o); L.play(w.text, { ...w.play, character: { ...w.play.character, material: "wood" }, ...placement })`.
+
 **Numbers.** Format with `L.number` / `L.range` in the client's language (`2,5` in Polish, not `2.5`) [V]. The engine draws plain
 numbers (`-1`, `+4`, `x2`, `12%`) in a calm, even hand [R]; keep them big enough to read and attach them to the token (`at` =
 token) so they follow it.
@@ -630,7 +634,11 @@ Status: stable list; edit as items close.
 - BUG (verified under node, 2026-11-13, engine 1.6.0): a word on a HIDDEN token is not drawn for a player, but its text is still
   read to screen readers (setting `announce`, default on): the announcement fires when the first picture counts as shown, before the
   visibility check. A hidden token's damage number can leak this way. Until fixed: callers skip lettering for tokens this user cannot
-  see (`token.visible` / `document.hidden` on a player's client) before calling `play`.
+  see (`token.visible` / `document.hidden` on a player's client) before calling `play`, or pass `alt: " "` (an empty announcement is
+  skipped) [C].
+- 1.6.0 word banks still contain near-words and Polish diacritics in some kinds (e.g. en `creak` SKWEEK, `crumble` SKRRUNCH; pl
+  `thud`, `ricochet` with Ł / Ń) [R: skill test reading]; WORD2 removes them. `check-words.mjs` still requires Polish letters in the
+  set, against the no-diacritics ruling; WORD2 inverts that check.
 - `L.net` sends only its known option keys: MOVE's `path`, `orbit`, `orient` and choreography options, and `L.sustain`, do not travel
   over the network [R: from a merge-plan read of `net.mjs` `OP_KEYS`, not run].
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
@@ -674,3 +682,5 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   lettering advice (section 5); screen-reader leak of hidden tokens' words found and verified under node (section 18); L.net does not
   carry MOVE options (section 18); WORD2 / SPEC-KINDS / SPEC-EFFECTS scope (section 19); LM merge branch noted (stage table); the
   rule to update this manual in the same turn as any lesson or ruling.
+- 2026-11-13 (later): changing one trait of a vocabulary word (section 5); `alt: " "` workaround for the announce leak and the
+  remaining near-words / diacritics in the 1.6.0 banks (section 18).
