@@ -2,6 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { put } from "../flag-diff.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import * as M from "./model.mjs";
+import { sfxBus } from "../sfx/bus.mjs";
 import * as Look from "./look.mjs";
 import { FireDisplay } from "./display.mjs";
 import { sharedNow } from "../shared-clock.mjs";
@@ -294,6 +295,9 @@ export function draw() {
   display ??= new FireDisplay();
   const t2 = tl ? performance.now() : 0, b0 = tl ? display.stats.built : 0;
   display.sync(items, g, params);
+  // FXLM: the comic sound effects letter a fire's catch when its flames SHOW here (its field comes from a worker, a big one a second or
+  // two after it was lit), not when it was lit (scripts/sfx/sfx.mjs; null when they are off)
+  if ( sfxBus.fireShown ) { const ids = []; for ( const it of items ) for ( const s of it.area?.strokes ?? [] ) if ( s?.k === "fire" && s.id ) ids.push(s.id); sfxBus.fireShown(ids); }
   if ( tl ) { const t3 = performance.now(); tl.push({ draw: t3 - t0, areas: t1 - t0, sync: t3 - t2, n: areas.length, built: display.stats.built - b0, at: t0 }); }
 }
 

@@ -1,88 +1,165 @@
-/* LMAP: COMIC SOUND EFFECTS of the map's destruction and fire, the pure part (no Foundry, no PIXI: node-tested in
-   dev/sfx-letters.test.mjs). sfx.mjs feeds it EVENTS (a damage area entering, a fire catching, spreading, flaring up, going out, an
-   explosion, ground dust) and plays the WORDS it plans through the shared lettering engine (scripts/letters/, LETR contract v1).
+/* LMAP / FXLM: COMIC SOUND EFFECTS of the map's destruction and fire, the pure part (no Foundry, no PIXI, no DOM: node-tested in
+   dev/sfx-letters.test.mjs and dev/sfx-fxlm.test.mjs). sfx.mjs feeds it EVENTS (a damage area entering, a fire catching, flaring up,
+   going out, an explosion, ground dust, an eraser dousing fire) and plays the WORD SPECS it plans through the shared lettering
+   engine (scripts/letters/, LETR): the engine's own vocabulary (WORD: `L.word(kind, { loud, duration, seed })`) writes the text, its
+   look follows the sound (LOOK), its motion the staging asked here (MOVE). This file holds NO words: only which sound KIND an event
+   makes, how loud and how long it is, when, where on this client's screen, and how it is staged.
 
-   An EVENT: { key (stable, the same on every client), voice (words.mjs VOICES), x, y (scene px), r (scene px: how big the thing
-               that makes the sound is), t (ms, when it sounds), m? (magnitude 0..1; else from r), obj? (a stroke id: the areas of one
-               stroke always join), from? ({x, y}: where the sound comes from), colors? }
-   A CLUSTER: events of one moment (JOIN_MS) close together (their reach plus a square and a half) - a big cave-in made of thirty
-               areas, a bomb's burst + its shock dust + its crater - read as ONE sound: one MAIN word (the loudest voice, sized by
-               everything together) and a few smaller SECONDARY words out at its edges (the comic page's satellites), staggered in
-               time. A small anticipation word comes before a big cave-in's crash.
-   PLACEMENT: words are laid out in world space but kept readable on this client's screen (a minimum and a maximum size in screen
-               px), never over a token if they can move off it, never over another word; secondaries that do not fit are dropped
-               (they are a deterministic list, so a client zoomed in shows a prefix of what a client zoomed out shows). */
-import { VOICES, wordFor, tierOf } from "./words.mjs";
+   Why a caller-side table stays (VOICES below): the engine knows sound kinds, not map events. Which kind a collapse, a scorch or an
+   acid gash makes, how big it reads against the other sounds of the map (the size hierarchy), and how it is staged against the
+   destruction (a cave-in drops onto its rubble, a bomb's word blows the words around it aside) is the map's knowledge. Kinds are
+   listed in preference order and resolved against the engine's own kind list at play time, so the vocabulary may grow or rename.
+
+   An EVENT: { key (stable, the same on every client), sid? (the seed id when the key carries this client's own time), voice (VOICES),
+               x, y (scene px), r (scene px: how big the thing that makes the sound is), box? ({x0,y0,x1,y1} scene px: what it
+               letters, kept visible), t (ms, when it sounds), tPre? (ms: when its anticipation starts, before t), m? (0..1 loudness;
+               else from r), ms? (how long the sound lasts), obj? (a stroke id: the areas of one stroke join; a fire's word is checked
+               against its stroke when it plays), gate? (a fire stroke id: the word waits until its flames are on screen),
+               from? ({x, y}), colors?, path? ([{x, y, ms}]: a sound that travels: a car, a drag; a gun's walk) }
+   A CLUSTER: events of one moment (JOIN_MS) close together read as ONE sound: one MAIN word (the loudest voice) and a few smaller
+               SATELLITES at its edges, staggered; a big cave-in cracks first (its PRE word, at the anticipation's start).
+   PLACEMENT: beside what it letters (never on it if it can sit at its edge), off tokens, off this client's interface panels
+               (sidebar, bars, the module's and other modules' panels: their screen rectangles), off other words, inside the view. */
 
 export const JOIN_MS = 500;          // events this close in time can join one cluster
 export const SAME_OBJ_MS = 1500;     // ... the areas of one stroke join even when further apart in time
-export const LEAD = { boom: 50, crash: 0, zap: 0, thud: 30, gun: 80, fire: 60, splash: 120, arcane: 40, slash: 40, crack: 0, rumble: 0, decay: 60, hiss: 0, drag: 0, engine: 0, whump: 0, roar: 0, crackle: 0 };
-/** the per-perf-mode caps: secondary words per cluster, words of this module alive at once */
-export const CAPS = { high: { sec: 4, alive: 9 }, medium: { sec: 2, alive: 6 }, low: { sec: 0, alive: 3 } };
-/** screen-size limits (px) and the share of the view's short side a word may take */
-export const SCREEN = { minMain: 26, minSec: 18, maxMain: 0.2, maxSec: 0.11 };
-/** what a word's seed is made of: `sid` when the event has one that is the same on every client (a destruction area's hash; its
-    `key` carries this client's own entry time), else its key */
-export const sidOf = (e) => e.sid ?? e.key;
-export const VIEW_W = { main: 0.36, sec: 0.2 };
-/** a satellite / pre-word at most this share of the main word's height */
-export const SAT_H = 0.72;
+export const GATHER_MS = 70;         // events of one moment are gathered this long (a Detonate's entries come a slice a frame)
+/** per perf mode: satellites per cluster, words of this module alive at once, live (non-ambient) fire sounds at once */
+export const CAPS = { high: { sec: 4, alive: 12, live: 3 }, medium: { sec: 2, alive: 8, live: 2 }, low: { sec: 0, alive: 4, live: 1 } };
+/** a word's moment this far gone (ms past the end of its own sound) is not played any more (its event is over) */
+export const LATE_MS = 700;
+/** a fire word waiting for its flames to show waits at most this long (a client whose fire never draws: no word) */
+export const GATE_MAX_MS = 6000;
 
 /** FNV-1a of a string -> uint32 (the same everywhere). */
 export function hashStr(s, h = 2166136261) { s = String(s); for ( let i = 0; i < s.length; i++ ) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
-const h01 = (s) => hashStr(s) / 4294967296;
+export const h01 = (s) => hashStr(s) / 4294967296;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+export const sidOf = (e) => e.sid ?? e.key;
+
+/* ---------------------------------------------------------------- voices: what each event sounds like and how it is staged */
+
+/**
+ * VOICES: kinds (engine sound kinds, first known wins), prio (a cluster's main word is its loudest voice), w (its weight in the size
+ * hierarchy of the map: the engine magnitude is loudness x w; a building coming down and a bomb are the biggest sounds, a hiss of
+ * steam the smallest), ms (natural length of the sound), area (share of the event's radius given to the engine's size model), stage
+ * (motion asked of the engine on top of the word's own: entrance / hold / exit, frame rate `on`, push, glow; the rest is WORD's
+ * per-kind motion), cover (how much a word may cover its own subject: 0 never, 1 does not care).
+ */
+export const VOICES = {
+  boom:    { kinds: ["boom"], prio: 10, w: 1.3, ms: 900, area: 1, cover: 0.35, stage: { in: "slam", out: "burst", push: true, glow: "auto" } },
+  thunder: { kinds: ["thunder", "zap"], prio: 9, w: 1.15, ms: 900, area: 1, cover: 0.3, stage: { in: "crackIn", out: "burst", glow: "auto" } },
+  crash:   { kinds: ["crash"], prio: 9, w: 1.2, ms: 1500, area: 1, cover: 0.15, stage: { in: "drop", holdKind: "rattle", out: "shards", push: true, on: 3 } },
+  zap:     { kinds: ["zap"], prio: 8, w: 0.85, ms: 350, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
+  thud:    { kinds: ["thud", "punch"], prio: 7, w: 0.8, ms: 150, area: 0.8, cover: 0.2, stage: { in: "slam" } },
+  gun:     { kinds: ["gunfire"], prio: 7, w: 0.75, ms: 600, area: 0.6, cover: 0.3, stream: true },
+  fire:    { kinds: ["fire"], prio: 6, w: 0.8, ms: 1600, area: 0.8, cover: 0.25, stage: { in: "rise", glow: "auto" } },
+  flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
+  scorch:  { kinds: ["fire", "crackle"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
+  splash:  { kinds: ["splash"], prio: 6, w: 0.75, ms: 700, area: 0.8, cover: 0.2, stage: {} },
+  arcane:  { kinds: ["psychic", "powerup"], prio: 6, w: 0.75, ms: 1100, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
+  slash:   { kinds: ["slash"], prio: 5, w: 0.7, ms: 300, area: 0.7, cover: 0.15, stage: { in: "zip", out: "shards" } },
+  crack:   { kinds: ["crack"], prio: 4, w: 0.6, ms: 200, area: 0.6, cover: 0.1, stage: { in: "crackIn", out: "shards" } },
+  rumble:  { kinds: ["rumble"], prio: 4, w: 0.8, ms: 2200, area: 0.8, cover: 0.3, stage: { holdKind: "rattle", on: 3 } },
+  decay:   { kinds: ["crumble"], prio: 3, w: 0.6, ms: 1300, area: 0.7, cover: 0.2, stage: { out: "fall", on: 3 } },
+  acid:    { kinds: ["hiss", "fizzle"], prio: 3, w: 0.55, ms: 1300, area: 0.6, cover: 0.2, stage: { holdKind: "boil", out: "dissolve" } },
+  douse:   { kinds: ["hiss"], prio: 3, w: 0.45, ms: 1100, area: 0.45, cover: 0.3, stage: { in: "pop", holdKind: "boil", out: "dissolve" }, drift: true },
+  out:     { kinds: ["fizzle", "hiss"], prio: 3, w: 0.4, ms: 3500, area: 0.4, cover: 0.4, stage: { in: "pop", holdKind: "boil", out: "dissolve", on: 3 }, drift: true },
+  scrape:  { kinds: ["scrape"], prio: 3, w: 0.7, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
+  engine:  { kinds: ["engine"], prio: 3, w: 0.75, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
+  whump:   { kinds: ["whump"], prio: 2, w: 0.85, ms: 600, area: 0.7, cover: 0.4, stage: { in: "grow", push: { force: 1.2 } } },
+  debris:  { kinds: ["crumble", "rumble"], prio: 1, w: 0.55, ms: 800, area: 0.5, cover: 0.25, stage: { in: "pop", out: "fall" } },
+  creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "crackIn", holdKind: "shake", out: "shards", on: 1 } }
+};
+/** The sound kind of a voice: the first of its kinds the engine knows (`known`: a Set / array of the engine's kind ids, or null). */
+export function kindOf(voice, known = null) {
+  const V = VOICES[voice] ?? VOICES.crack, has = known ? (known instanceof Set ? (k) => known.has(k) : (k) => known.includes(k)) : () => true;
+  return V.kinds.find(has) ?? V.kinds[0];
+}
 
 /** How big a sound is (0..1) from the size of what makes it, in grid squares (radius): ~0.25 sq -> 0.13, 1 sq -> 0.39, 5 sq -> 1. */
-export const VOICE_GAIN = { crack: 0.85, crackle: 0.5, hiss: 0.85, decay: 0.85, whump: 0.8, drag: 0.85, engine: 0.85, gun: 0.9, boom: 1.1, crash: 1.05 };
-export function magnitude(rGrid, voice = "boom") {
-  const m = Math.log1p(Math.max(0, rGrid)) / Math.log1p(5);
-  return clamp(m * (VOICE_GAIN[voice] ?? 1), 0.05, 1);
-}
+export function magnitude(rGrid) { return clamp(Math.log1p(Math.max(0, rGrid)) / Math.log1p(5), 0.05, 1); }
+/**
+ * The engine's magnitude (LETR v4: 0..2) of a word: its loudness times its voice's weight in the map's hierarchy. A bomb or a building
+ * coming down ~1.4-1.6, a crack ~0.4, a fire going out ~0.25 whatever the fire's size (the hiss is quiet; its LENGTH is the fire's).
+ */
+export const engineMag = (loud, voice) => Math.round(clamp((0.12 + 1.1 * clamp(loud, 0, 1)) * (VOICES[voice]?.w ?? 0.7), 0.06, 2) * 100) / 100;
+/** The engine's `area` (scene px radius) of a word: the subject's radius, shrunk for quiet voices (a hiss over a big fire is small). */
+export const engineArea = (r, voice, grid = 100) => Math.max(grid * 0.15, Math.min(r * (VOICES[voice]?.area ?? 0.7), grid * 4 * (VOICES[voice]?.area ?? 0.7)));
 
 /* ---------------------------------------------------------------- what a damage area sounds like */
 
 export const DESTR_TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const DESTR_CAUSES = ["none", "fire", "acid", "lightning", "arcane", "impact", "claws", "water", "decay", "frost"];
-const TYPE_VOICE = { blast: "boom", collapse: "crash", scorch: "fire", flood: "splash", cracks: "crack", gash: "slash" };
-/** palettes (light -> dark) for causes whose look has its own colour; null: the engine's palette for the mood */
+const TYPE_VOICE = { blast: "boom", collapse: "crash", scorch: "scorch", flood: "splash", cracks: "crack", gash: "slash" };
+/** how long each damage type's entry sounds (ms at the destruction's speed 1) */
+export const TYPE_MS = { blast: 900, collapse: 1500, scorch: 700, flood: 1200, cracks: 220, gash: 320 };
+/** palettes (light -> dark) only where the cause IS the colour of the sound (acid, arcane, frost); else the engine's look (LOOK) */
 export const CAUSE_COLORS = {
-  frost: ["#f2fdff", "#8fd6ff", "#2f6ea6"], acid: ["#f6ffb8", "#a7e030", "#3c7412"], arcane: ["#f7e6ff", "#c27cff", "#5b2aa0"],
-  decay: ["#ece2b4", "#9c8b48", "#4b3d1c"], lightning: ["#ffffff", "#a8e8ff", "#3a58c8"], water: ["#effcff", "#62c4f0", "#1d5c96"]
+  frost: ["#f2fdff", "#8fd6ff", "#2f6ea6"], acid: ["#f6ffb8", "#a7e030", "#3c7412"], arcane: ["#f7e6ff", "#c27cff", "#5b2aa0"]
 };
 /** The voice of an entering damage area: its type, coloured by its cause; a gun's pocks rattle. */
 export function destrVoice(type, cause = 0, gun = false) {
   if ( gun ) return "gun";
   const c = typeof cause === "number" ? DESTR_CAUSES[cause] ?? "none" : cause;
   switch ( c ) {
-    case "lightning": return "zap";
-    case "acid": return "hiss";
+    case "lightning": return type === "blast" || type === "collapse" ? "thunder" : "zap";
+    case "acid": return "acid";
     case "arcane": return "arcane";
     case "water": return "splash";
-    case "decay": return "decay";
+    case "decay": return type === "collapse" ? "crash" : "decay";
     case "claws": return "slash";
     case "frost": return type === "blast" || type === "collapse" ? TYPE_VOICE[type] : "crack";
     case "impact": return type === "blast" ? "thud" : TYPE_VOICE[type] ?? "thud";
-    case "fire": return type === "blast" ? "boom" : "fire";
+    case "fire": return type === "blast" ? "boom" : "scorch";
     default: return TYPE_VOICE[type] ?? "crack";
   }
 }
 export const causeColors = (cause) => CAUSE_COLORS[typeof cause === "number" ? DESTR_CAUSES[cause] : cause] ?? null;
 
+/**
+ * The EVENT of a damage area entering (display.enter): `I` its info (type, cause, rect, w, h, ex, ey), `o` the stroke origin, `ap`
+ * art px, `start` the entry's start (this client's clock), `speed` the destruction's speed, `gun` (its walk when the area is a gun's
+ * pocks: [{x, y, ms}]), `key`/`sid`. A cave-in's crash lands after its anticipation (collapse-entry.mjs ~230 ms): `tPre` = the
+ * anticipation's start (the pre word plays there), `t` = the crash.
+ */
+export const COLLAPSE_LEAD = 230;
+export function entryEvent(I, o, ap, start, { speed = 1, gun = null, key, sid, objId = null, from = null } = {}) {
+  const r = I.rect, k2 = 1 / (speed || 1);
+  const cx = Number.isFinite(I.ex) && (I.ex || I.ey) ? I.ex : (r.x0 + r.x1) / 2, cy = Number.isFinite(I.ey) && (I.ex || I.ey) ? I.ey : (r.y0 + r.y1) / 2;
+  const w = Math.max(1, (I.w ?? r.x1 - r.x0)), h = Math.max(1, (I.h ?? r.y1 - r.y0));
+  const voice = destrVoice(I.type, I.cause | 0, !!gun);
+  const lead = (I.type === "collapse" ? COLLAPSE_LEAD : 0) * k2;
+  const box = { x0: o.x + r.x0 * ap, y0: o.y + r.y0 * ap, x1: o.x + r.x1 * ap, y1: o.y + r.y1 * ap };
+  return { key, sid, obj: objId, voice, x: o.x + cx * ap, y: o.y + cy * ap, r: 0.5 * Math.sqrt(w * h) * ap, box,
+    t: start + lead, ...(lead ? { tPre: start } : {}), ms: (TYPE_MS[I.type] ?? 600) * k2, colors: causeColors(I.cause | 0),
+    from: from && (I.type !== "blast" || gun) ? from : null, ...(gun ? { path: gun, t0: start } : {}) };
+}
+
 /* ---------------------------------------------------------------- what fire sounds like */
 
-/** A fire's own colour as a lettering palette (light, the colour, dark); null for the natural fire (the engine's fire palette). */
+/** A fire's own colour as a lettering palette (light, the colour, dark); null for the natural fire (the engine's look). */
 export function fireColors(c) {
   if ( typeof c !== "string" || !/^#[0-9a-f]{6}$/i.test(c) ) return null;
   const n = parseInt(c.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   const hex = (k, to) => "#" + [r, g, b].map((v) => Math.round(v + (to - v) * k).toString(16).padStart(2, "0")).join("");
   return [hex(0.65, 255), c.toLowerCase(), hex(0.55, 0)];
 }
-/** Magnitude of a fire stroke's sound: its level (1 smouldering .. 3 a blaze) and its width. */
+/** natural (orange-red-yellow) fire is lettered in the engine's own fire look; only a fire painted in another colour (a blue, a green
+    fire) letters in its colour */
+export function ownFireColors(c) {
+  if ( typeof c !== "string" || !/^#[0-9a-f]{6}$/i.test(c) ) return null;
+  const n = parseInt(c.slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if ( d < 0.15 ) return fireColors(c);                       // (a white / grey fire: its own)
+  const h = (mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60, hue = (h + 360) % 360;
+  return hue <= 58 || hue >= 345 ? null : fireColors(c);
+}
+/** Loudness of a fire stroke's sound: its level (1 smouldering .. 3 a blaze) and its width. */
 export const fireM = (lv = 2, rGrid = 1) => clamp(0.12 + 0.26 * (lv - 1) + 0.18 * Math.log1p(rGrid), 0.1, 1);
-/** Magnitude of an explosion: its level (1 grenade, 2 shell, 3 bomb) and its fireball's radius. */
-export const burstM = (lv = 2, rGrid = 1) => clamp(0.3 + 0.2 * (lv - 1) + 0.12 * Math.log1p(rGrid), 0.2, 1);
-export const DUST_VOICE = { shock: "whump", hits: "thud", heavy: "rumble", drag: "drag", car: "engine", bike: "engine" };
+/** Loudness of an explosion: its level (1 grenade, 2 shell, 3 bomb) and its fireball's radius. */
+export const burstM = (lv = 2, rGrid = 1) => clamp(0.35 + 0.2 * (lv - 1) + 0.12 * Math.log1p(rGrid), 0.2, 1);
+export const DUST_VOICE = { shock: "whump", hits: "thud", heavy: "rumble", drag: "scrape", car: "engine", bike: "engine" };
 
 /** Points along a flat path [x0, y0, x1, y1 ...] at fractions `fs` of its length: [{x, y, f}]. */
 export function alongPath(p, fs) {
@@ -92,7 +169,7 @@ export function alongPath(p, fs) {
   const L = cum.at(-1);
   return fs.map((f) => {
     if ( !(L > 0) ) return { x: pts[0][0], y: pts[0][1], f };
-    const d = f * L; let i = 1; while ( i < cum.length - 1 && cum[i] < d ) i++;
+    const d = clamp(f, 0, 1) * L; let i = 1; while ( i < cum.length - 1 && cum[i] < d ) i++;
     const s = (d - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
     return { x: pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * s, y: pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * s, f };
   });
@@ -102,19 +179,26 @@ export function pathCentre(p) {
   let x = 0, y = 0, n = 0; for ( let i = 0; i + 1 < p.length; i += 2 ) { x += p[i]; y += p[i + 1]; n++; }
   return n ? { x: x / n, y: y / n } : { x: 0, y: 0 };
 }
+/** The box of a stroke's path with its radius (scene px). */
+export function pathBox(p, r = 50) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for ( let i = 0; i + 1 < p.length; i += 2 ) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
+  if ( !Number.isFinite(x0) ) return null;
+  return { x0: x0 - r, y0: y0 - r, x1: x1 + r, y1: y1 + r };
+}
 
 /**
  * The SOUND EVENTS of one fire-layer stroke (fire / smoke / dust / burst / erase) between `from` and `to` (shared-clock ms), given
  * its state before (`prev`: the stroke as last seen, or null when new) - pure, the same on every client.
- *   fire: catches (its path start, at its lit time), spreads (a few crackles along a long path as the fire reaches them), flares up (a
- *         raised level, at the ramp's start), goes out (a hiss at its middle, at `o`);
- *   burst: the explosion at q; dust: a shock wave's whump, a heavy thing's rumble, a drag's scrape, an engine, hits;
- *   erase: a hiss where it puts out burning fire (`burning(stroke)` tells; the caller knows the other strokes).
- * `ctx` = { grid (scene px), catchMs(st) (how long the fire takes to run its path), late (ms an event may be late and still play:
- * a stroke seen for the first time plays its catch up to NEW_LATE late), burning(st) }.
+ *   fire: catches (its path start: the word waits until the flames SHOW here: `gate`), flares up (a raised level, at the ramp's
+ *         start), goes out (a quiet hiss at its middle at `o`, lasting as long as the flames die: `ms`); while it burns its sound is a
+ *         CONTINUOUS one (burnPlan, played by sfx.mjs as the engine's sustain), not a timer of words;
+ *   burst: the explosion at q (and, for a bomb, its shock and its debris as satellites); dust: a shock wave's whump, a heavy thing's
+ *         rumble riding its path, a drag's scrape, an engine riding its path, hits; erase: a hiss where it puts out burning fire.
+ * `ctx` = { grid (scene px), late (ms an event may be late and still play), newLate (a stroke new here), burning(st), outMs (ms the
+ * flames take to die), passMs(st) (a dust source's run along its path), lifeMs(st) (a burst's life) }.
  */
 export const NEW_LATE = 6000;
-export const SPREAD_GAP = 700;
 export function strokeEvents(st, prev, from, to, ctx) {
   const out = [], grid = ctx.grid || 100, late = ctx.late ?? 1500;
   const inWin = (t, lateMs = late) => t >= from - lateMs && t < to;
@@ -122,69 +206,113 @@ export function strokeEvents(st, prev, from, to, ctx) {
   const push = (e) => out.push({ obj: st.id, ...e });
   if ( k === "burst" ) {
     if ( prev || st.o !== undefined ) return out;
-    if ( inWin(st.q, ctx.newLate ?? NEW_LATE) ) push({ key: `${st.id}|burst`, voice: "boom", x: p[0], y: p[1], r: st.r ?? 100, t: st.q, m: burstM(st.lv ?? 2, rG), colors: fireColors(st.c) });
+    const lv = st.lv ?? 2, m = burstM(lv, rG), r = st.r ?? 100;
+    if ( inWin(st.q, ctx.newLate ?? NEW_LATE) ) {
+      push({ key: `${st.id}|burst`, voice: "boom", x: p[0], y: p[1], r, t: st.q, m, ms: 600 + 350 * lv, colors: ownFireColors(st.c),
+        box: { x0: p[0] - r, y0: p[1] - r, x1: p[0] + r, y1: p[1] + r } });
+      // a shell or a bomb: its shock wave rolls out and its debris comes down: satellites of the same moment (one sound, one page)
+      if ( lv >= 2 ) {
+        push({ key: `${st.id}|shock`, voice: "whump", x: p[0] + r * 1.1, y: p[1] + r * 0.35, r: r * 0.55, t: st.q + 160, m: m * 0.6, ms: 600 });
+        const n = lv >= 2.5 ? 2 : 1;
+        for ( let i = 0; i < n; i++ ) {
+          const a = Math.PI * (0.15 + 0.7 * h01(`${st.id}|deb${i}`)) + (i ? Math.PI : 0);
+          push({ key: `${st.id}|debris${i}`, voice: "debris", x: p[0] + Math.cos(a) * r * 1.05, y: p[1] + Math.sin(a) * r * 0.9, r: r * 0.4, t: st.q + 420 + 260 * i, m: m * 0.5, ms: 800 });
+        }
+      }
+    }
     return out;
   }
   if ( k === "dust" ) {
     if ( prev || st.o !== undefined ) return out;
-    const v = DUST_VOICE[st.dk] ?? "rumble", at = st.dk === "shock" || p.length < 4 ? { x: p[0], y: p[1] } : alongPath(p, [0.5])[0];
-    const len = pathLength(p) / grid;
-    if ( inWin(st.q, ctx.newLate ?? NEW_LATE) ) push({ key: `${st.id}|dust`, voice: v, x: at.x, y: at.y, r: (st.r ?? 50) * (st.dk === "shock" ? 1 : 1 + 0.15 * len), t: st.q,
-      m: clamp(0.15 + 0.2 * (st.lv ?? 2) + 0.06 * len, 0.1, st.dk === "shock" ? 0.8 : 0.75), from: p.length >= 4 ? { x: p[0], y: p[1] } : null });
+    const v = DUST_VOICE[st.dk] ?? "rumble", len = pathLength(p) / grid;
+    const at = st.dk === "shock" || st.dk === "hits" || p.length < 4 ? { x: p[0], y: p[1] } : alongPath(p, [0.5])[0];
+    const pass = Math.max(400, ctx.passMs?.(st) ?? len * 400);
+    const r = (st.r ?? 50) * (st.dk === "shock" ? 1 : 1 + 0.15 * len);
+    if ( inWin(st.q, ctx.newLate ?? NEW_LATE) ) {
+      const e = { key: `${st.id}|dust`, voice: v, x: at.x, y: at.y, r, t: st.q, ms: st.dk === "shock" ? 700 : pass,
+        m: clamp(0.15 + 0.2 * (st.lv ?? 2) + 0.06 * len, 0.1, st.dk === "shock" ? 0.8 : 0.75), from: p.length >= 4 ? { x: p[0], y: p[1] } : null, box: pathBox(p, st.r ?? 50) };
+      // a thing that travels (a car, a bike, a drag, a heavy thing pushed along): its word rides the path with it
+      if ( VOICES[v]?.ride || v === "rumble" ) if ( p.length >= 4 ) e.path = alongPath(p, Array.from({ length: 9 }, (_, i) => i / 8)).map((q) => ({ x: q.x, y: q.y, ms: q.f * pass }));
+      push(e);
+    }
     return out;
   }
   if ( k === "erase" ) {
     if ( prev || st.o !== undefined || !ctx.burning?.(st) ) return out;
-    if ( inWin(st.g ?? st.q) ) push({ key: `${st.id}|douse`, voice: "hiss", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(st.g ?? st.q, from), m: clamp(0.2 + 0.25 * Math.log1p(rG), 0.15, 0.7) });
+    if ( inWin(st.g ?? st.q) ) push({ key: `${st.id}|douse`, voice: "douse", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(st.g ?? st.q, from),
+      m: clamp(0.25 + 0.2 * Math.log1p(rG), 0.15, 0.6), ms: 1100, box: pathBox(p, st.r ?? 50) });
     return out;
   }
   if ( k !== "fire" ) return out;                 // (smoke makes no sound of its own)
-  const lit = st.g ?? st.q, lv = st.lv ?? 2, m = fireM(lv, rG), colors = fireColors(st.c);
+  const lit = st.g ?? st.q, lv = st.lv ?? 2, m = fireM(lv, rG), colors = ownFireColors(st.c), box = pathBox(p, st.r ?? 50);
   const relit = !prev || (prev.g ?? prev.q) !== lit;
-  if ( relit ) {
-    // the catch: played late too when the stroke is new here (it reached this client after its painter released it)
-    if ( inWin(lit, prev ? late : ctx.newLate ?? NEW_LATE) ) push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, colors });
-    // the spread: a crackle every ~3 squares of a long path (at most 3), when the fire reaches it
-    // (crackles closer than SPREAD_GAP ms in time are one: a fire racing along its path in a moment letters its catch alone)
-    const L = pathLength(p), T = ctx.catchMs?.(st) ?? 0, n = Math.min(3, Math.floor(L / (grid * 3)), Math.floor(T / SPREAD_GAP));
-    if ( n > 0 ) {
-      for ( const q of alongPath(p, Array.from({ length: n }, (_, i) => (i + 1) / (n + 0.4))) ) {
-        const t = lit + q.f * T;
-        if ( inWin(t) ) push({ key: `${st.id}|spread|${lit}|${q.f.toFixed(2)}`, voice: q.f > 0.9 && lv >= 2.5 ? "roar" : "crackle", x: q.x, y: q.y, r: (st.r ?? 50) * 0.6, t, m: m * 0.7, colors, from: { x: p[0], y: p[1] } });
-      }
-    }
-  }
+  // the catch: when its flames show here (gate), played late too when the stroke is new here (it reached this client on release)
+  if ( relit && (st.o === undefined || st.o > lit + 400) && inWin(lit, prev ? late : ctx.newLate ?? NEW_LATE) )
+    push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, ms: 1400, colors, gate: st.id, box });
   // a level raised: the fire flares up (at the ramp's start)
   if ( prev && st.lt !== undefined && st.lt !== prev.lt && (st.lv ?? 2) > (st.l0 ?? prev.lv ?? 2) + 0.2 && inWin(st.lt) ) {
     const c = pathCentre(p);
-    push({ key: `${st.id}|flare|${st.lt}`, voice: (st.lv ?? 2) >= 2.5 ? "roar" : "fire", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), colors });
+    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box });
   }
-  // put out (or a preset's fire whose out time comes): a hiss at its middle
+  // put out (or a preset's fire whose out time comes): a quiet hiss at its middle, as long as its flames take to die
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
-    const c = pathCentre(p), L = pathLength(p) / grid;
-    push({ key: `${st.id}|out|${st.o}`, voice: "hiss", x: c.x, y: c.y, r: (st.r ?? 50) * (1 + 0.25 * L), t: Math.max(st.o, from), m: clamp(0.18 + 0.15 * lv + 0.05 * L, 0.15, 0.8) });
+    const c = pathCentre(p);
+    push({ key: `${st.id}|out|${st.o}`, voice: "out", x: c.x, y: c.y, r: st.r ?? 50, t: Math.max(st.o, from), ms: Math.max(1200, ctx.outMs ?? 3500),
+      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box });
   }
   return out;
 }
 
+/** Is a fire event still worth lettering at `now` (shared clock): its stroke still there and (for a catch / flare) still burning. */
+export function fireEventLive(e, st, now) {
+  if ( !e.obj || !/^(fire|flare)$/.test(e.voice) ) return true;
+  if ( !st ) return false;
+  return st.o === undefined || st.o > now;
+}
+
 /**
- * The AMBIENT crackle of burning fires: one slot every `every` ms of the shared clock; in each slot one of the burning fires (a hash
- * of the slot picks it, the same everywhere; fires of level >= 1.5, lit at least `settle` ms before) crackles at a point of its path.
- * -> event or null.
+ * A burning fire's CONTINUOUS sound (sfx.mjs plays it with the engine's sustain for as long as it burns): `group` = fire strokes
+ * burning together (overlapping), `now` shared ms. -> { key, seed id, kind, points (a few fixed spots along the biggest stroke where
+ * its phrases sound; the first rides the flame front while it still catches), level(now) 0..1 (from the fires' levels), live
+ * (a blaze: a phrase score; a smoulder: the engine's quiet ambient mode), r, colors, prio }.
  */
-export function ambientEvent(slot, fires, { every = 6000, settle = 5000, grid = 100 } = {}) {
-  const t = slot * every + Math.floor(h01(`amb|${slot}`) * every * 0.8);
-  const list = fires.filter((s) => s.k === "fire" && (s.lv ?? 2) >= 1.5 && (s.o === undefined || s.o > t) && t - (s.g ?? s.q) >= settle).sort((a, b) => (a.id < b.id ? -1 : 1));
-  if ( !list.length ) return null;
-  const st = list[hashStr(`amb|${slot}|pick`) % list.length], p = st.p ?? [];
-  const at = alongPath(p, [h01(`amb|${slot}|at`)])[0] ?? { x: p[0], y: p[1] };
-  return { key: `amb|${slot}`, obj: st.id, voice: (st.lv ?? 2) >= 2.6 && h01(`amb|${slot}|roar`) < 0.35 ? "roar" : "crackle", x: at.x, y: at.y, r: (st.r ?? 50) * 0.5, t,
-    m: fireM(st.lv ?? 2, (st.r ?? 50) / grid) * 0.55, colors: fireColors(st.c), ambient: true };
+export function burnPlan(group, { grid = 100, catchMs = () => 0, levelNow = (s) => s.lv ?? 2 } = {}) {
+  const list = group.slice().sort((a, b) => ((b.r ?? 50) * (b.lv ?? 2) - (a.r ?? 50) * (a.lv ?? 2)) || (a.id < b.id ? -1 : 1));
+  const st = list[0], p = st.p ?? [], L = pathLength(p) / grid, lit = st.g ?? st.q;
+  const parts = Math.max(1, Math.min(3, Math.round(L / 6) + (list.length > 2 ? 1 : 0)));
+  const T = catchMs(st);
+  const points = Array.from({ length: parts }, (_, i) => {
+    // (spot 0 rides the flame front and rests where its part of the path ends: the farthest spot; the others wait along the path)
+    const f = parts === 1 ? 0.45 + 0.2 * h01(`${st.id}|bp`) : (i === 0 ? parts - 0.5 : i - 0.5) / parts;
+    const at = alongPath(p, [f])[0] ?? { x: p[0], y: p[1] };
+    return { f, x: at.x, y: at.y };
+  });
+  const lvOf = (now) => Math.max(...list.map((s) => levelNow(s, now)));
+  const level = (now) => clamp(0.12 + 0.3 * (lvOf(now) - 1) + 0.04 * Math.min(3, list.length - 1), 0.08, 0.9);
+  const r = Math.max(...list.map((s) => s.r ?? 50));
+  return { key: list.map((s) => s.id).sort().join("+"), seedId: list.map((s) => s.id).sort()[0], kind: "fire", st, lit, catchMs: T, points, level,
+    live: lvOf(Infinity) >= 1.6, r, colors: ownFireColors(st.c), prio: r * lvOf(Infinity) * (1 + 0.3 * (list.length - 1)),
+    /** where phrase spot `i` is at shared time `now`: the first rides the flame front while the fire still runs along its path */
+    at: (i, now) => {
+      const q = points[i] ?? points[0];
+      if ( i === 0 && T > 300 && now - lit < T ) { const f = clamp((now - lit) / T, 0, 1); if ( f < q.f ) { const a = alongPath(p, [f])[0]; if ( a ) return { x: a.x, y: a.y }; } }
+      return { x: q.x, y: q.y };
+    } };
+}
+/** Fire strokes that burn together (paths within their radii plus a square): groups (deterministic order). */
+export function burnGroups(fires, grid = 100) {
+  const list = fires.slice().sort((a, b) => (a.id < b.id ? -1 : 1)), parent = list.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const near = (a, b) => { const A = a.p ?? [], B = b.p ?? [], d = (a.r ?? 50) + (b.r ?? 50) + grid;
+    for ( let i = 0; i + 1 < A.length; i += 2 ) for ( let j = 0; j + 1 < B.length; j += 2 ) if ( Math.hypot(A[i] - B[j], A[i + 1] - B[j + 1]) < d ) return true; return false; };
+  for ( let i = 0; i < list.length; i++ ) for ( let j = i + 1; j < list.length; j++ ) if ( find(i) !== find(j) && near(list[i], list[j]) ) parent[find(j)] = find(i);
+  const groups = new Map(); list.forEach((s, i) => { const r = find(i); if ( !groups.has(r) ) groups.set(r, []); groups.get(r).push(s); });
+  return [...groups.values()];
 }
 
 /* ---------------------------------------------------------------- clusters */
 
-/** Events -> clusters { members (loudest first), main, x, y (centre), rEq (combined size), span (reach from the centre), t }. */
+/** Events -> clusters { members (loudest first), main, x, y (centre), rEq (combined size), span (reach), t, box (all subjects) }. */
 export function cluster(events, grid = 100) {
   const ev = events.slice().sort((a, b) => ((VOICES[b.voice]?.prio ?? 0) - (VOICES[a.voice]?.prio ?? 0)) || (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
   const groups = [];
@@ -193,165 +321,214 @@ export function cluster(events, grid = 100) {
     for ( const g of groups ) {
       const dt = Math.abs(e.t - g.t);
       if ( e.obj && g.objs.has(e.obj) && dt <= SAME_OBJ_MS ) { best = g; break; }
-      if ( dt > JOIN_MS || e.ambient || g.ambient ) continue;
+      if ( dt > JOIN_MS || e.path || g.main.path ) continue;
       const d = Math.hypot(e.x - g.x, e.y - g.y);
       if ( d <= g.span + e.r + grid * 1.5 ) { best = g; break; }
     }
-    if ( !best ) { groups.push({ members: [e], main: e, objs: new Set(e.obj ? [e.obj] : []), x: e.x, y: e.y, w: e.r * e.r, rEq: e.r, span: e.r, t: e.t, ambient: !!e.ambient }); continue; }
+    const eb = e.box ?? { x0: e.x - e.r, y0: e.y - e.r, x1: e.x + e.r, y1: e.y + e.r };
+    if ( !best ) { groups.push({ members: [e], main: e, objs: new Set(e.obj ? [e.obj] : []), x: e.x, y: e.y, w: e.r * e.r, rEq: e.r, span: e.r, t: e.t, box: { ...eb } }); continue; }
     best.members.push(e); if ( e.obj ) best.objs.add(e.obj);
     const w = e.r * e.r, W = best.w + w;
     best.x = (best.x * best.w + e.x * w) / W; best.y = (best.y * best.w + e.y * w) / W; best.w = W;
     best.rEq = Math.sqrt(W);
     best.span = Math.max(...best.members.map((q) => Math.hypot(q.x - best.x, q.y - best.y) + q.r));
+    best.box = { x0: Math.min(best.box.x0, eb.x0), y0: Math.min(best.box.y0, eb.y0), x1: Math.max(best.box.x1, eb.x1), y1: Math.max(best.box.y1, eb.y1) };
   }
   return groups;
 }
 
 /**
- * The WORDS of a cluster (before placement): [{ role: "pre" | "main" | "sec", text, voice, mood, sound, x, y, size (scene px), t,
- * seed, from, rotation, colors, hold, maxWidth }]. `o` = { lang, grid, sec (max secondaries), seed (scene id), big (only main words
- * of medium or bigger sounds: the "big" setting) }.
+ * The WORD SPECS of a cluster (before the engine writes the text and before placement): [{ role: "pre" | "main" | "sec", voice, kind,
+ * loud 0..1, ms (how long the sound is: the engine's `duration`, which alone stretches the word), x, y (where it sounds), t (when),
+ * seed, from, rotation, colors, magnitude (engine), area (engine), stage (motion), subject (box it letters), cover, path?, stream? }].
+ * `o` = { grid, sec (max satellites), seed (scene id), big (only main words of big sounds), known (the engine's kind ids) }.
  */
 export function planCluster(g, o = {}) {
-  const grid = o.grid || 100, lang = o.lang ?? "en", main = g.main, V = VOICES[main.voice] ?? VOICES.crack;
+  const grid = o.grid || 100, main = g.main;
   const single = g.members.length === 1;
-  const m = single && main.m !== undefined ? main.m : Math.max(main.m ?? 0, magnitude(g.rEq / grid, main.voice));
-  if ( o.big && (m < 0.34 || g.ambient) ) return [];
-  const seed = `${o.seed ?? ""}|${sidOf(main)}`, h = hashStr(seed), taken = new Set();
+  const m = main.m !== undefined ? Math.max(main.m, single ? 0 : magnitude(g.rEq / grid)) : magnitude(g.rEq / grid);
+  if ( o.big && m < 0.34 ) return [];
+  const seed = `${o.seed ?? ""}|${sidOf(main)}`;
   const words = [];
-  const loud = clamp(0.25 + 0.75 * m, 0, 1);
-  const size = grid * (0.26 + 0.62 * m);
+  const loud = clamp(0.2 + 0.8 * m, 0, 1);
   const centre = single ? { x: main.x, y: main.y } : { x: g.x, y: g.y };
-  // a big cave-in: the ground cracks first (its anticipation), then it comes down
-  if ( main.voice === "crash" && m >= 0.55 && !o.big ) {
-    const text = wordFor("crack", 0.2, hashStr(seed + "|pre"), lang, taken); taken.add(text);
-    words.push(word("pre", text, "crack", 0.3, { x: centre.x, y: centre.y - size * 0.15 }, size * 0.42, main.t - 200, seed + "|pre", null, h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.25 }));
+  // a big cave-in: the ground cracks first (its anticipation, from tPre), then it comes down
+  if ( main.voice === "crash" && m >= 0.5 && !o.big ) {
+    const tPre = main.tPre ?? main.t - COLLAPSE_LEAD;
+    words.push(spec("pre", "creak", clamp(0.25 + 0.3 * m, 0, 0.6), Math.max(150, main.t - tPre), { x: centre.x, y: g.box.y0 + (g.box.y1 - g.box.y0) * 0.25 }, tPre, seed + "|pre", null,
+      h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
-  const text = wordFor(main.voice, m, h, lang, taken); taken.add(text);
-  words.push(word("main", text, main.voice, loud, centre, size, main.t + (LEAD[main.voice] ?? 0) + (words.length ? 60 : 0), seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { long: V.sound.long + (main.ambient ? 0 : 0.25 * m), maxWidth: Math.max(g.span * 2.2, size * 4.5), area: single ? main.r : g.span * 0.75 }));
-  // a gun's rounds rattle along their walk (a LETR stream, one syllable a round) instead of one word
-  if ( main.voice === "gun" && main.walk?.length > 1 ) words.at(-1).stream = { walk: main.walk, t0: main.t0 ?? main.t };
+  const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box });
+  // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
+  if ( VOICES[main.voice]?.stream && main.path?.length > 1 ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t };
+  // a thing that travels: its word rides its path
+  else if ( main.path?.length > 1 ) mw.path = main.path;
+  words.push(mw);
   if ( o.big || !(o.sec > 0) || single ) return words;
-  // secondaries: the biggest other members out at the edge, each its own voice, quieter, staggered
-  const nSec = Math.min(o.sec, g.members.length - 1, Math.round(m * 3.4));
-  const cand = g.members.filter((e) => e !== main && Math.hypot(e.x - centre.x, e.y - centre.y) > size * 0.6)
-    .sort((a, b) => (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
+  // satellites: the biggest other members out at the edge, each its own voice, quieter, staggered
+  const nSec = Math.min(o.sec, g.members.length - 1, Math.max(1, Math.round(m * 3.4)));
+  const minD = Math.max(grid * 0.6, Math.min(g.span * 0.35, grid * 2));
+  const cand = g.members.filter((e) => e !== main && (Math.hypot(e.x - centre.x, e.y - centre.y) > minD || /^(whump|debris)$/.test(e.voice)))
+    .sort((a, b) => ((VOICES[b.voice]?.prio ?? 0) === (VOICES[a.voice]?.prio ?? 0) ? 0 : /^(whump|debris)$/.test(a.voice) ? -1 : /^(whump|debris)$/.test(b.voice) ? 1 : 0) || (b.r - a.r) || (sidOf(a) < sidOf(b) ? -1 : 1));
   const used = [];
   for ( const e of cand ) {
     if ( used.length >= nSec ) break;
-    // (two secondaries close together are one sound)
-    if ( used.some((u) => Math.hypot(u.x - e.x, u.y - e.y) < size * 0.9) ) continue;
+    if ( used.some((u) => Math.hypot(u.x - e.x, u.y - e.y) < minD) ) continue;    // (two satellites close together are one sound)
     used.push(e);
   }
   used.forEach((e, i) => {
-    // (one size down from the main word: a satellite never competes with it, and its word is a shorter one of its voice)
-    const m2 = Math.min(m * 0.55, Math.max(e.m ?? 0, magnitude(e.r / grid, e.voice)));
+    // a cave-in's satellites are its debris landing; a bomb's are its shock and debris: one size down from the main word
+    const v = main.voice === "crash" && e.voice === "crash" ? "debris" : e.voice === main.voice ? "debris" : e.voice;
+    const m2 = Math.min(m * 0.55, e.m ?? magnitude(e.r / grid));
     const dx = e.x - centre.x, dy = e.y - centre.y, d = Math.hypot(dx, dy) || 1;
     const at = { x: e.x + (dx / d) * e.r * 0.3, y: e.y + (dy / d) * e.r * 0.3 };
-    const s2 = Math.min(size * 0.58, grid * (0.26 + 0.5 * m2));
     const sd = `${o.seed ?? ""}|${sidOf(e)}`;
-    const tx = wordFor(e.voice, m2, hashStr(sd), lang, taken); taken.add(tx);
-    words.push(word("sec", tx, e.voice, clamp(0.2 + 0.7 * m2, 0, 0.9), at, s2, Math.max(e.t, main.t) + (LEAD[e.voice] ?? 0) + 140 + i * 130, sd, centre,
-      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7 }));
+    words.push(spec("sec", v, clamp(0.15 + 0.7 * m2, 0, 0.7), e.ms ?? VOICES[v]?.ms ?? 600, at, Math.max(e.t, main.t) + 160 + i * 140, sd, centre,
+      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null }));
   });
   return words;
 }
 
-/** The engine's magnitude (LETR v4: 0..2, 0.5 normal) of a loudness 0..1: a crack ~0.4, a building coming down ~1.1, a bomb ~1.3. */
-export const engineMag = (loud) => Math.round((0.1 + 1.25 * clamp(loud, 0, 1)) * 100) / 100;
-
-function word(role, text, voice, loud, at, size, t, seed, from, rotation, colors, o, extra = {}) {
-  const V = VOICES[voice] ?? VOICES.crack;
-  const lines = text.split("\n"), longest = Math.max(...lines.map((l) => l.length));
-  // the motion fits the sound: the voice's own; a small crash is a thud (slams in), a long hiss or roar keeps its slow grow
-  const motion = { ...(V.motion ?? {}) };
-  if ( voice === "crash" && loud < 0.45 ) motion.in = "slam";
-  if ( role === "pre" ) Object.assign(motion, { in: "crackIn", hold: "shake", out: "shatter" });
-  return { role, text, voice, mood: V.mood, motion, sound: { ...V.sound, loud, ...(extra.long !== undefined ? { long: clamp(extra.long, 0, 1) } : {}) },
-    x: at.x, y: at.y, size, t, seed, from: from ?? null, rotation, colors: colors ?? null, lines: lines.length, chars: longest,
-    maxWidth: extra.maxWidth ?? null, area: extra.area ?? null, magnitude: extra.magnitude ?? engineMag(loud),
-    hold: voice === "roar" || voice === "rumble" ? 1500 : undefined };
+function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, extra = {}) {
+  const V = VOICES[voice] ?? VOICES.crack, grid = o.grid || 100;
+  const stage = { ...(V.stage ?? {}) };
+  // a small crash is a thud (it slams in); satellites and pre words do not shove the main word
+  if ( voice === "crash" && loud < 0.45 ) stage.in = "slam";
+  if ( role !== "main" ) delete stage.push;
+  return { role, voice, kind: kindOf(voice, o.known), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
+    magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
+    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift };
 }
+
+/** The words a client keeps when it has room for `room` more: the main word first, then the pre word, then satellites (by time). */
+export function capWords(words, room) {
+  if ( !(room > 0) ) return [];
+  const rank = (w) => (w.role === "main" ? 0 : w.role === "pre" ? 1 : 2);
+  return words.slice().sort((a, b) => rank(a) - rank(b) || a.t - b.t).slice(0, room).sort((a, b) => a.t - b.t);
+}
+
+/** When an event must be handed to the gathering so that its EARLIEST word (a cave-in's pre word at tPre) is played on time. */
+export const dueAt = (e) => Math.min(e.t, e.tPre ?? e.t) - GATHER_MS;
+/** Is a word too late to play at `now` (its sound, `ms` long, is over)? */
+export const tooLate = (w, now) => now - w.t > Math.max(LATE_MS, (w.ms ?? 0) * 0.6);
 
 /* ---------------------------------------------------------------- placement on this client's screen */
 
-/** The engine's loudness scale of the nominal size (contract: about 0.6x for a tick to 1.3x for a boom). */
-export const loudScale = (loud) => 0.6 + 0.7 * clamp(loud, 0, 1);
-/** A word's box (scene px) centred at (x, y): the size it will be drawn at, a letter about 0.62 of the cap height wide. */
+/** A word's box (scene px) centred at (x, y): its measured width / height (sfx.mjs: the engine's hold picture), else an estimate. */
 export function boxOf(w, x = w.x, y = w.y) {
-  // the engine's own layout when it was asked (sfx.mjs measure: L.design -> width in cap heights, its loudness scale, its warp);
-  // else an estimate (letters with their outline and extrusion ~0.8 of the cap height wide). + the outline / extrusion / shake room
-  const s = w.size * (w.sizeK ?? loudScale(w.sound.loud));
-  // (fire words carry flame tongues above the letters: as tall as a warped word - seen clipped at the view's top edge otherwise)
-  const tall = (w.warp && /arc|fan|tumble|stair|wave|swell|zig|bulge/.test(w.warp)) || /^(fire|roar|crackle)$/.test(w.voice) ? 1.95 : 1.55;
-  let W = w.wUnits ? s * (w.wUnits + 0.7) : s * 0.8 * w.chars + s * 0.5, H = s * tall * w.lines;
-  if ( w.maxWidth && W > w.maxWidth ) { const k = w.maxWidth / W; W *= k; H *= k; }
+  const W = w.bw ?? (w.size ?? 60) * (0.75 * (w.chars ?? 6) + 0.6), H = w.bh ?? (w.size ?? 60) * 1.6;
   return { x0: x - W / 2, y0: y - H / 2, x1: x + W / 2, y1: y + H / 2 };
 }
 const area = (b) => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
 const inter = (a, b) => area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) });
-/** where a word may move to get off a token or another word (box widths / heights): up first (screen-up reads as the sound rising) */
-const OFFSETS = [[0, 0], [0, -0.75], [0.55, -0.6], [-0.55, -0.6], [0.7, 0], [-0.7, 0], [0, 0.75], [0, -1.3]];
+/** where a word may go around its subject (unit offsets from the subject box's centre; the word box is added): above first (screen-up
+    reads as the sound rising off it), then the upper corners, the sides, below; the subject's own centre last */
+const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
+/** a word slightly overlaps the edge of its subject (the comic's sound word touches what makes it): share of the word height */
+export const TOUCH = 0.18;
+/** the penalties of a place: interface panel, token, other word, subject covered (beyond its voice's `cover`), outside the view,
+    distance from where it sounds (in word sizes) */
+export const PEN = { ui: 8, tok: 4, word: 3, subject: 2.5, off: 2, dist: 0.18 };
 
 /**
- * Sizes kept readable on this screen and positions kept off tokens and other words. `ctx` = { scale (screen px per scene px),
- * view ({x0, y0, x1, y1} scene px), tokens ([box]), alive ([box]: words already up) }. -> the words to play, with x, y, size and
- * box final; secondaries / pre-words that cannot find a free place are dropped, the main word always plays (the least covering
- * place), unless it is entirely off this screen.
+ * Places kept readable on this screen: beside what each word letters, off tokens, off this client's interface panels, off other words,
+ * inside the view. `ctx` = { view ({x0, y0, x1, y1} scene px), ui ([box] scene px: interface panels over the canvas), tokens ([box]),
+ * alive ([box]: words already up) }. Each word needs its box size (bw, bh scene px). -> the words to play with x, y, box set; a
+ * satellite or pre word that cannot find a free place is dropped; the main word always plays (the least bad place) unless its whole
+ * place is off this screen.
  */
 export function place(words, ctx) {
-  const sc = ctx.scale || 1, v = ctx.view, short = v ? Math.min(v.x1 - v.x0, v.y1 - v.y0) : Infinity;
+  const v = ctx.view, ui = ctx.ui ?? [], tokens = ctx.tokens ?? [];
   const taken = [...(ctx.alive ?? [])], out = [];
-  let mainH = 0;
-  const order = words.slice().sort((a, b) => (a.role === "main" ? -1 : b.role === "main" ? 1 : 0));
-  for ( const w0 of order ) {
+  const rank = (w) => (w.role === "main" ? 0 : w.role === "pre" ? 1 : 2);
+  for ( const w0 of words.slice().sort((a, b) => rank(a) - rank(b)) ) {
     const w = { ...w0 }, main = w.role === "main";
-    // readable: at least minMain / minSec screen px tall, at most a share of the view
-    const ls = w.sizeK ?? loudScale(w.sound.loud), px = w.size * ls * sc;
-    const min = main ? SCREEN.minMain : SCREEN.minSec, max = (main ? SCREEN.maxMain : SCREEN.maxSec) * short * sc;
-    // (the engine sized it - LETR v4 - with its own legibility clamp: kept; else this estimate's own clamp)
-    if ( !w.engineSized && px < min ) w.size = min / (ls * sc);
-    if ( !w.engineSized && w.size * ls * sc > max ) w.size = max / (ls * sc);
-    // never wider than a share of the view (the engine's own ceiling lets a huge event take most of the screen; a map page under a
-    // collapse must stay readable around the word: main word at most VIEW_W.main of the view width, a satellite VIEW_W.sec)
-    if ( v ) w.maxWidth = Math.min(w.maxWidth || Infinity, (v.x1 - v.x0) * (main ? VIEW_W.main : VIEW_W.sec));
-    // the hierarchy reads on the page: a satellite or a pre-word is never as tall as the main word (a long main word squeezed by
-    // the width cap would else look smaller than its own echoes)
-    if ( main ) mainH = boxOf(w).y1 - boxOf(w).y0;
-    else if ( mainH ) { const bx = boxOf(w), h = bx.y1 - bx.y0; if ( h > SAT_H * mainH ) w.maxWidth = Math.min(w.maxWidth || Infinity, (bx.x1 - bx.x0) * SAT_H * mainH / h); }
-    let best = null;
+    if ( w.path || w.stream ) { if ( !v || inter(boxOf(w), v) > 0 || pathInView(w, v) ) { w.box = boxOf(w); out.push(w); } else if ( main ) return []; continue; }
     const b0 = boxOf(w), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
-    const cands = OFFSETS.map(([ox, oy]) => [w.x + ox * bw, w.y + oy * bh]);
-    // just clear of a token it would cover: above it first, then beside it, then below
-    for ( const t of ctx.tokens ?? [] ) if ( inter(b0, t) > 0 ) cands.push([w.x, t.y0 - bh / 2 - 6], [t.x1 + bw / 2 + 6, w.y], [t.x0 - bw / 2 - 6, w.y], [w.x, t.y1 + bh / 2 + 6]);
-    for ( const [x, y] of cands ) {
-      const ox = (x - w.x) / bw, oy = (y - w.y) / bh, b = boxOf(w, x, y), A = area(b) || 1;
-      const tok = (ctx.tokens ?? []).reduce((s, t) => s + inter(b, t), 0) / A;
-      const wrd = taken.reduce((s, t) => s + inter(b, t), 0) / A;
-      const off = v ? 1 - inter(b, v) / A : 0;
-      const pen = tok * 4 + wrd * 3 + off * 1.5 + Math.hypot(ox, oy) * 0.25;
-      if ( !best || pen < best.pen ) best = { x, y, b, pen, tok, wrd, off };
-      if ( tok === 0 && wrd === 0 && off < 0.05 ) break;
+    const S = w.subject;
+    const cands = [];
+    if ( S ) {
+      const cx = (S.x0 + S.x1) / 2, cy = (S.y0 + S.y1) / 2, hw = (S.x1 - S.x0) / 2, hh = (S.y1 - S.y0) / 2;
+      for ( const [ox, oy] of AROUND ) cands.push([cx + ox * (hw + bw / 2 - TOUCH * bh), cy + oy * (hh + bh / 2 - TOUCH * bh)]);
     }
-    // (entirely off this screen: nobody here sees it - a main word off screen takes its cluster with it)
-    if ( v && inter(boxOf(w), v) === 0 ) { if ( main ) return []; continue; }
-    if ( !main && (best.tok > 0 || best.wrd > 0.03 || best.off > 0.3) ) continue;
-    // (kept inside the view where it fits: a word half off the screen edge is not read)
-    if ( v ) {
-      const m = 0.02 * short, b = best.b, dx = b.x0 < v.x0 + m ? v.x0 + m - b.x0 : b.x1 > v.x1 - m ? v.x1 - m - b.x1 : 0, dy = b.y0 < v.y0 + m ? v.y0 + m - b.y0 : b.y1 > v.y1 - m ? v.y1 - m - b.y1 : 0;
-      if ( (dx || dy) && b.x1 - b.x0 < v.x1 - v.x0 - 2 * m && b.y1 - b.y0 < v.y1 - v.y0 - 2 * m ) {
-        const nb = boxOf(w, best.x + dx, best.y + dy), A = area(nb) || 1;
-        const tok = (ctx.tokens ?? []).reduce((s2, t) => s2 + inter(nb, t), 0) / A, wrd = taken.reduce((s2, t) => s2 + inter(nb, t), 0) / A;
-        if ( tok <= best.tok && wrd <= Math.max(best.wrd, 0.03) ) Object.assign(best, { x: best.x + dx, y: best.y + dy, b: nb, off: 0 });
+    cands.push([w.x, w.y], [w.x, w.y - bh * 0.8], [w.x + bw * 0.6, w.y - bh * 0.5], [w.x - bw * 0.6, w.y - bh * 0.5]);
+    // just clear of a panel / token it would cover: above, beside, below it
+    for ( const t of [...ui, ...tokens] ) if ( inter(b0, t) > 0 ) cands.push([w.x, t.y0 - bh / 2 - 6], [t.x1 + bw / 2 + 6, w.y], [t.x0 - bw / 2 - 6, w.y], [w.x, t.y1 + bh / 2 + 6]);
+    let best = null;
+    for ( let [x, y] of cands ) {
+      // (inside the view where it fits: a word half off the screen edge is not read)
+      if ( v ) {
+        const m = 0.02 * Math.min(v.x1 - v.x0, v.y1 - v.y0);
+        if ( bw < v.x1 - v.x0 - 2 * m ) x = clamp(x, v.x0 + m + bw / 2, v.x1 - m - bw / 2);
+        if ( bh < v.y1 - v.y0 - 2 * m ) y = clamp(y, v.y0 + m + bh / 2, v.y1 - m - bh / 2);
       }
+      const b = boxOf(w, x, y), A = area(b) || 1;
+      const pui = ui.reduce((s, t) => s + inter(b, t), 0) / A;
+      const tok = tokens.reduce((s, t) => s + inter(b, t), 0) / A;
+      const wrd = taken.reduce((s, t) => s + inter(b, t), 0) / A;
+      const sub = S ? Math.max(0, inter(b, S) / Math.max(1, area(S)) - (w.cover ?? 0.25)) : 0;   // (the share of the subject it hides)
+      const off = v ? 1 - inter(b, v) / A : 0;
+      const dist = Math.hypot(x - w.x, y - w.y) / Math.max(1, bh);
+      const pen = pui * PEN.ui + tok * PEN.tok + wrd * PEN.word + sub * PEN.subject + off * PEN.off + dist * PEN.dist;
+      if ( !best || pen < best.pen ) best = { x, y, b, pen, pui, tok, wrd, off, sub };
     }
-    if ( !main && best.off > 0.15 ) continue;
-    w.x = best.x; w.y = best.y; w.box = best.b;
+    // (what it letters is entirely off this screen: nobody here sees it - a main word off screen takes its cluster with it)
+    if ( v && inter(S ?? boxOf(w), v) === 0 && inter(boxOf(w), v) === 0 ) { if ( main ) return []; continue; }
+    if ( !main && (best.pui > 0.02 || best.tok > 0 || best.wrd > 0.05 || best.off > 0.15) ) continue;
+    w.x = best.x; w.y = best.y; w.box = best.b; w.pen = best;
     taken.push(best.b); out.push(w);
   }
   return out.sort((a, b) => a.t - b.t);
 }
+const pathInView = (w, v) => (w.path ?? w.stream?.walk ?? []).some((q) => q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
+
+/* ---------------------------------------------------------------- the interface over the canvas (pure over a DOM-like tree) */
+
+/**
+ * The screen rectangles of this client's interface panels that cover the canvas: Foundry's sidebar, bars, controls, windows, and any
+ * module's panel (a pins list, a challenge HUD, party portraits). Walks the page from `roots`: a PAINTED element (a background, a
+ * border, an image, its own text) smaller than half the screen is a panel (its whole rectangle); a transparent container (a full-screen
+ * layer, #interface, #ui-middle) is looked into. `env` = { style(el) -> computed style, vw, vh, skip(el) -> true to leave it out (the
+ * canvas, the lettering's own layers), max (elements visited) }. -> [{ x0, y0, x1, y1 }] client px.
+ */
+export function uiRects(roots, env) {
+  const out = [], vw = env.vw, vh = env.vh, max = env.max ?? 900;
+  let n = 0;
+  const painted = (el, cs) => {
+    const tag = String(el.tagName ?? "").toUpperCase();
+    if ( /^(IMG|CANVAS|VIDEO|SVG|BUTTON|INPUT|SELECT|TEXTAREA)$/.test(tag) ) return true;
+    const bg = String(cs.backgroundColor ?? "");
+    if ( bg && !/^(transparent|rgba\([^)]*,\s*0\))$/.test(bg.replace(/\s+/g, " ")) && !/rgba\([^)]*,\s*0(\.0+)?\)$/.test(bg) ) return true;
+    if ( cs.backgroundImage && cs.backgroundImage !== "none" ) return true;
+    if ( parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== "none" && !/rgba\([^)]*,\s*0\)$/.test(String(cs.borderTopColor ?? "")) ) return true;
+    for ( const c of el.childNodes ?? [] ) if ( c.nodeType === 3 && /\S/.test(c.textContent ?? "") ) return true;
+    return false;
+  };
+  const visit = (el, depth) => {
+    if ( n++ > max || !el || el.nodeType !== 1 || env.skip?.(el) ) return;
+    const cs = env.style(el);
+    if ( !cs || cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || Number(cs.opacity) === 0 ) return;
+    const r = el.getBoundingClientRect?.();
+    const box = r && r.width > 0 && r.height > 0 ? { x0: Math.max(0, r.left), y0: Math.max(0, r.top), x1: Math.min(vw, r.right), y1: Math.min(vh, r.bottom) } : null;
+    const onScreen = box && box.x1 > box.x0 + 2 && box.y1 > box.y0 + 2;
+    if ( onScreen && painted(el, cs) && area(box) < 0.5 * vw * vh ) { out.push(box); return; }
+    if ( depth >= 9 ) return;
+    for ( const c of el.children ?? [] ) visit(c, depth + 1);
+  };
+  for ( const r of roots ) visit(r, 0);
+  return merge(out);
+}
+/** rectangles inside another one are dropped (a panel's own painted children) */
+function merge(list) {
+  const s = list.slice().sort((a, b) => area(b) - area(a)), out = [];
+  for ( const r of s ) if ( !out.some((o) => r.x0 >= o.x0 - 1 && r.y0 >= o.y0 - 1 && r.x1 <= o.x1 + 1 && r.y1 <= o.y1 + 1) ) out.push(r);
+  return out;
+}
+/** Client-px rectangles -> scene px (the canvas transform: `toScene({x, y})`). */
+export const toSceneBoxes = (rects, toScene) => rects.map((r) => { const a = toScene({ x: r.x0, y: r.y0 }), b = toScene({ x: r.x1, y: r.y1 }); return { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) }; });
+
+/* ---------------------------------------------------------------- echoes */
 
 /**
  * An ECHO: a cluster that comes a moment after another one of the same family (a bomb's fireball, then its crater's entry a few
@@ -364,4 +541,5 @@ export function isEcho(g, recent, grid = 100) {
   return recent.some((r) => g.t - r.t >= -50 && g.t - r.t < ECHO_MS && r.prio >= p && Math.hypot(g.x - r.x, g.y - r.y) < r.reach + g.span * 0.5 + grid);
 }
 
-export { tierOf };
+/** The word set for a language setting: "en" / "pl", or "auto" (the game's language: Polish -> "pl", any other -> "en"). */
+export const langOf = (setting, gameLang = "en") => (setting === "en" || setting === "pl" ? setting : String(gameLang).toLowerCase().startsWith("pl") ? "pl" : "en");

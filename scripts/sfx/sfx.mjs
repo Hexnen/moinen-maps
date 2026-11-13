@@ -1,14 +1,17 @@
-/* LMAP: COMIC SOUND EFFECTS of the map's destruction and fire, the runtime. What sounds (sfx-core.mjs plans the words):
-     - a damage area entering (destruction display.enter, through sfx/bus.mjs): every client plays the same entry at the same moment
-       (the scene flag's entries, a preset's shared clock, a cinematic show, a Detonate), so every client letters it too;
-     - the fire layer's strokes (fire.mjs; the same strokes and the same shared clock on every client): a fire catching, spreading,
-       flaring up, going out, an explosion (burst), ground dust (a shock wave, a heavy thing, a drag, an engine), an eraser dousing
-       fire, and now and then the crackle of what burns.
-   Nothing is networked: the same events with the same seeds (the scene id + the event's key) give the same lettering everywhere.
-   Events of one moment are gathered for a few frames and clustered (one sound, one main word and a few satellites), then laid out
-   readable on this client's screen and played in world space through the shared lettering engine (scripts/letters/, LETR).
+/* LMAP / FXLM: COMIC SOUND EFFECTS of the map's destruction and fire, the runtime. What sounds (sfx-core.mjs plans it):
+     - a damage area entering (destruction display.enter, through sfx/bus.mjs): every client plays the same entry (the scene flag's
+       entries, a preset's shared clock, a cinematic show, a Detonate), so every client letters it too;
+     - the fire layer's strokes (fire.mjs; the same strokes and the same shared clock on every client): a fire catching (when its
+       flames SHOW on this client: fire.mjs tells the bus), flaring up, going out, an explosion, ground dust, an eraser dousing fire;
+     - a burning fire's CONTINUOUS sound for as long as it burns: the engine's sustain (a phrase score; a smoulder: its quiet ambient
+       mode), riding the flame front while it runs along its path, its level following the fire's level.
+   Nothing is networked: the same events with the same seeds (the scene id + the event's key) give the same words everywhere; no
+   per-client memory changes a word (FXLM 14).
+   Words come from the engine's own vocabulary (L.word: the kind, loudness and duration of the sound), its look follows the sound, its
+   motion the staging asked by sfx-core (a cave-in drops, a bomb shoves the words around it aside, a car's word rides with the car).
+   Placement on THIS client's screen: beside what it letters, off tokens, off this client's interface panels, off other words.
    Settings: "sfxLetters" (client: all / big only / off), "sfxLettersWorld" (the GM's switch for everyone), "sfxWords" (client: the
-   word set, auto = the game's language). Reduced motion: the module's own rule (config.reducedMotion) is passed to the engine. */
+   word set, auto = the game's language), "sfxLayer". Reduced motion: the module's own rule (config.reducedMotion), passed on. */
 import { MODULE_ID, reducedMotion } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { perfMode } from "../perf-mode.mjs";
@@ -16,46 +19,47 @@ import { sharedNow } from "../shared-clock.mjs";
 import { letters } from "../letters/index.mjs";
 import { sfxBus } from "./bus.mjs";
 import * as C from "./sfx-core.mjs";
-import { langOf, VOICES } from "./words.mjs";
 import * as FM from "../fire/model.mjs";
+import * as DM from "../fire/dust-model.mjs";
 import * as Fire from "../fire/fire.mjs";
 
-const GATHER_MS = 70;          // events of one moment are gathered this long before they are clustered (a Detonate's entries come a slice a frame)
-const AMBIENT_EVERY = 6000;    // ms of the shared clock per ambient crackle slot
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
-const LATE_MS = 450;           // a word whose moment is this far gone is not played (its event is over)
+const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
+const UI_MS = 400;             // the interface rectangles are measured at most this often
 
-let L = null, loading = null;
-let pending = [], gatherTimer = 0, sched = new Map();     // key -> timer of an event scheduled ahead
+let L = null, loading = null, gen = 0;      // gen: the scene's generation (a scene change makes every waiting callback stale)
+let known = null;              // the engine's sound kinds
+let pending = [], gatherTimer = 0;
+const sched = new Map();       // key -> { id, obj, voice }: timers of events and words scheduled ahead
+const gated = new Map();       // fire stroke id -> [events waiting for its flames to show]
+const shownAt = new Map();     // fire stroke id -> performance.now() when its flames first showed here
 const seenEntry = new Map();   // area hash|start -> ms (an area waiting for its pixels enters twice)
 const seenEvent = new Set();   // event keys already played or scheduled here
-const alive = new Set();       // { box, h } words of this module on screen
+const alive = new Set();       // { box, h, obj } words of this module on screen
+const burns = new Map();       // burn key -> { plan, live, subs: [sustain] }
 let fireSeen = new Map();      // fire stroke id -> the stroke as last seen
-let ambientTimer = 0, ambientSlot = -1;
-let recent = [];               // main words played lately (echoes of them are not lettered again)
-const lastWord = new Map();    // voice -> the last text played here (the next one of that voice differs)
-const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, ms: 0 };
+let burnTimer = 0;
+let recent = [];               // main words played lately (an echo of one is not lettered again)
+let uiCache = { t: -1e9, rects: [] };
+const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
 /* ---------------------------------------------------------------- settings */
 
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
 export const mode = () => (get("sfxLettersWorld", true) === false ? "off" : get("sfxLetters", "all"));
-const lang = () => langOf(get("sfxWords", "auto"), game.i18n?.lang);
+const lang = () => C.langOf(get("sfxWords", "auto"), game.i18n?.lang);
 
 function registerSettings() {
   const T = (k) => `MOINENMAPS.Sfx.${k}`;
   game.settings.register(MODULE_ID, "sfxLetters", { name: T("set"), hint: T("setHint"), scope: "client", config: true, type: String, default: "all",
     choices: { all: T("all"), big: T("big"), off: T("off") }, onChange: () => refresh() });
   game.settings.register(MODULE_ID, "sfxLettersWorld", { name: T("world"), hint: T("worldHint"), scope: "world", config: true, restricted: true, type: Boolean, default: true, onChange: () => refresh() });
-  // (the lettering engine's world layers, LETR contract v3: on the ground under tokens / over tokens under smoke and weather / over
-  // weather and smoke in the scene's light / over the whole scene and its lighting (the engine's default) / over everything)
+  // (the lettering engine's world layers, LETR contract v3)
   game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "client", config: true, type: String, default: "overlay",
     choices: Object.fromEntries(LAYER_IDS.map((k) => [k, T(`layers.${k}`)])) });
   game.settings.register(MODULE_ID, "sfxWords", { name: T("words"), hint: T("wordsHint"), scope: "client", config: true, type: String, default: "auto",
     choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") } });
 }
-
-/* ---------------------------------------------------------------- the display layer (setting "sfxLayer") */
 
 /** The engine's world layers (LETR contract v3), bottom to top. */
 export const LAYER_IDS = ["ground", "tokens", "weather", "overlay", "top"];
@@ -65,7 +69,13 @@ const layerOpts = () => { const k = get("sfxLayer", "overlay"); return { layer: 
 
 function engine() {
   if ( L ) return L;
-  loading ??= letters().then((e) => (L = e)).catch((err) => { console.warn(`${MODULE_ID} | sfx: the lettering engine did not load`, err); loading = null; return null; });
+  // (once loaded: what waits in this scene is gathered at once; teardown empties `pending`, so another scene's events never come back)
+  loading ??= letters().then((e) => {
+    L = e; try { known = new Set((L.vocab?.list?.("en") ?? []).map((k) => k.id)); } catch { known = null; }
+    if ( pending.length && !gatherTimer ) gatherTimer = setTimeout(flush, 0);
+    scheduleBurn(0);
+    return e;
+  }).catch((err) => { console.warn(`${MODULE_ID} | sfx: the lettering engine did not load`, err); loading = null; return null; });
   return null;
 }
 
@@ -74,6 +84,20 @@ function engine() {
 const grid = () => canvas?.grid?.size || 100;
 /** a shared-clock moment -> this page's performance clock */
 const toPerf = (t) => performance.now() + (t - sharedNow());
+const later = (key, ms, fn, info = {}) => {
+  const g0 = gen;
+  const id = setTimeout(() => { sched.delete(key); if ( g0 === gen ) fn(); }, Math.max(0, ms));
+  const old = sched.get(key); if ( old ) clearTimeout(old.id);
+  sched.set(key, { id, ...info });
+};
+/** Cancel what is scheduled for a fire stroke (it went out, was erased or removed): its catch / flare words, never its out hiss. */
+function cancelObj(obj) {
+  for ( const [k, s] of sched ) if ( s.obj === obj && /^(fire|flare)$/.test(s.voice) ) { clearTimeout(s.id); sched.delete(k); }
+  gated.delete(obj);
+  pending = pending.filter((e) => !(e.obj === obj && /^(fire|flare)$/.test(e.voice)));
+  // a catch / flare word still up over a fire that is gone leaves now (its exit)
+  for ( const a of alive ) if ( a.obj === obj && /^(fire|flare)$/.test(a.voice) ) { try { a.h.stop(); } catch {} }
+}
 
 /** An event at performance-clock time `t` (sfx-core EVENT): scheduled, gathered with its moment's other events, then played. */
 export function add(e) {
@@ -82,15 +106,37 @@ export function add(e) {
   seenEvent.add(e.key);
   if ( seenEvent.size > 4000 ) { const it = seenEvent.values(); for ( let i = 0; i < 1000; i++ ) seenEvent.delete(it.next().value); }
   stats.events++;
-  const ahead = e.t - performance.now();
-  if ( ahead > MAX_AHEAD ) return;
-  if ( ahead > GATHER_MS + 30 ) { sched.set(e.key, setTimeout(() => { sched.delete(e.key); queue(e); }, ahead - GATHER_MS)); return; }
+  // a fire's catch waits until its flames show here (the field is computed in a worker: a big fire shows a second or two later)
+  if ( e.gate ) {
+    const at = shownAt.get(e.gate);
+    if ( at === undefined ) { const l = gated.get(e.gate) ?? []; l.push({ ...e, waitFrom: performance.now() }); gated.set(e.gate, l);
+      later(`gate|${e.key}`, C.GATE_MAX_MS, () => { const l2 = gated.get(e.gate); if ( l2 ) gated.set(e.gate, l2.filter((q) => q.key !== e.key)); }, { obj: e.obj, voice: e.voice }); return; }
+    e = { ...e, t: Math.max(e.t, at + 120) };
+  }
+  const due = C.dueAt(e) - performance.now();
+  if ( e.t - performance.now() > MAX_AHEAD ) return;
+  if ( due > 30 ) { later(e.key, due, () => queue(e), { obj: e.obj, voice: e.voice }); return; }
   queue(e);
 }
 function queue(e) {
   pending.push(e);
   engine();
-  if ( !gatherTimer ) gatherTimer = setTimeout(flush, GATHER_MS);
+  if ( !gatherTimer ) gatherTimer = setTimeout(flush, Math.max(0, Math.min(C.GATHER_MS, C.dueAt(e) + C.GATHER_MS - performance.now())));
+}
+
+/** Fire: a stroke's flames are on screen here (fire.mjs draw, through the bus): its waiting catch word goes, its sound may start. */
+function onFireShown(ids) {
+  const now = performance.now();
+  let fresh = false;
+  for ( const id of ids ) {
+    if ( shownAt.has(id) ) continue;
+    fresh = true;
+    shownAt.set(id, now);
+    const l = gated.get(id); gated.delete(id);
+    for ( const e of l ?? [] ) { seenEvent.delete(e.key); stats.events--; const k = sched.get(`gate|${e.key}`); if ( k ) { clearTimeout(k.id); sched.delete(`gate|${e.key}`); } add({ ...e, gate: e.gate }); }
+  }
+  if ( shownAt.size > 400 ) for ( const [k, t] of shownAt ) if ( now - t > 600000 && !(Fire.allStrokes?.() ?? new Map()).has(k) ) shownAt.delete(k);
+  if ( fresh ) scheduleBurn(BURN_AFTER + 50);
 }
 
 /** Destruction: a damage area enters (display.enter: any path, played, faded or off screen). */
@@ -101,20 +147,14 @@ function onEntry(d, g, opts, start) {
   const pn = performance.now();
   seenEntry.set(k, pn);
   if ( seenEntry.size > 600 ) for ( const [kk, t] of seenEntry ) if ( pn - t > 20000 ) seenEntry.delete(kk);
-  const ap = d.ap || 1, o = d.origin, r = I.rect;
-  const cx = Number.isFinite(I.ex) && (I.ex || I.ey) ? I.ex : (r.x0 + r.x1) / 2, cy = Number.isFinite(I.ey) && (I.ex || I.ey) ? I.ey : (r.y0 + r.y1) / 2;
-  const w = Math.max(1, (I.w ?? r.x1 - r.x0)), h = Math.max(1, (I.h ?? r.y1 - r.y0));
-  const gun = !!opts.path && !!g.objId && !!d.dropsOut?.(g.objId);
-  const voice = C.destrVoice(I.type, I.cause | 0, gun);
+  const ap = d.ap || 1, o = d.origin;
+  const isGun = !!opts.path && !!g.objId && !!d.dropsOut?.(g.objId);
   const speed = d.look?.speed || 1, k2 = 1 / speed;
   const p0 = opts.path?.[0] ?? opts.o ?? null;
-  // (a cave-in's crash lands after its anticipation: collapse-entry.mjs ~200 ms; a gun's rounds land along its path)
-  const lead = (I.type === "collapse" ? 230 : 0) * k2;
   // a gun's rounds: its walk (the path's own hit moments, ms from the start) for a stream of syllables along it
-  const walk = gun && opts.path.length > 1 ? opts.path.map((q) => ({ x: o.x + q[0] * ap, y: o.y + q[1] * ap, ms: (q[2] || 0) * (opts.strict ? 1 : k2) })) : null;
-  add({ walk, t0: start, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, obj: g.objId ? `d${g.objId}` : null, voice, x: o.x + cx * ap, y: o.y + cy * ap,
-    r: 0.5 * Math.sqrt(w * h) * ap, t: start + lead, colors: C.causeColors(I.cause | 0),
-    from: p0 && (I.type !== "blast" || gun) ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null });
+  const walk = isGun && opts.path.length > 1 ? opts.path.map((q) => ({ x: o.x + q[0] * ap, y: o.y + q[1] * ap, ms: (q[2] || 0) * (opts.strict ? 1 : k2) })) : null;
+  add(C.entryEvent(I, o, ap, start, { speed, gun: walk, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
+    from: p0 ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null }));
 }
 
 /** Fire: the layer's strokes changed (or the scene opened): the events of what is new or changed. */
@@ -124,19 +164,22 @@ function onFire(first = false) {
   const on = mode() !== "off" && Fire.shownHere?.();
   const geo = Fire.geo(), P = Fire.params0(), G = grid();
   const burningList = [...all.values()].filter((s) => s.k === "fire" && FM.burningAt(s, now));
-  const ctx = { grid: G, catchMs: (st) => FM.catchMs(st, geo, P),
-    burning: (er) => burningList.some((f) => overlapsStroke(f, er)), late: 1500, newLate: first ? 0 : C.NEW_LATE };
+  const T = FM.timing(geo, P);
+  const ctx = { grid: G, burning: (er) => burningList.some((f) => overlapsStroke(f, er)), late: 1500, newLate: first ? 0 : C.NEW_LATE,
+    outMs: 1.6 * T.O / Math.max(0.2, P.speed ?? 1), passMs: (st) => { try { return DM.passMs(st, geo); } catch { return 1500; } } };
   for ( const st of all.values() ) {
     const prev = fireSeen.get(st.id) ?? null;
     seen.set(st.id, st);
+    // a fire that went out (or was taken back): nothing it scheduled earlier may still letter it
+    if ( prev && st.k === "fire" && st.o !== undefined && prev.o !== st.o ) cancelObj(st.id);
     if ( !on ) continue;
-    // a scene that opens: the stroke counts as seen - only its moments still to come (a preset's timed fire: its catch, spread,
-    // out time); later, what is new or changed (a stroke new here plays its catch even when it reached this client late)
+    // a scene that opens: the stroke counts as seen - only its moments still to come; later, what is new or changed
     const evs = first ? C.strokeEvents(st, null, now + 1, now + MAX_AHEAD, { ...ctx, late: 0, newLate: 0 }) : C.strokeEvents(st, prev, now, now + MAX_AHEAD, ctx);
     for ( const e of evs ) add({ ...e, t: toPerf(e.t) });
   }
+  for ( const id of fireSeen.keys() ) if ( !seen.has(id) ) cancelObj(id);    // (removed: undone, cleared)
   fireSeen = seen;
-  armAmbient(burningList.length > 0 && on);
+  scheduleBurn(0);
 }
 function overlapsStroke(f, er) {
   const r = (f.r ?? 50) + (er.r ?? 50), p = f.p ?? [], ex = er.p?.[0], ey = er.p?.[1];
@@ -144,23 +187,51 @@ function overlapsStroke(f, er) {
   return false;
 }
 
-/** The ambient crackle of burning fires: a check a second while any burns. */
-function armAmbient(on) {
-  if ( !on || mode() !== "all" ) { clearInterval(ambientTimer); ambientTimer = 0; return; }
-  if ( ambientTimer ) return;
-  ambientTimer = setInterval(() => {
-    if ( mode() !== "all" || !Fire.shownHere?.() ) return;
-    const now = sharedNow(), slot = Math.floor((now + 1500) / AMBIENT_EVERY);
-    if ( slot === ambientSlot ) return;
-    ambientSlot = slot;
-    const fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now));
-    if ( !fires.length ) { armAmbient(false); return; }
-    const e = C.ambientEvent(slot, fires, { every: AMBIENT_EVERY, grid: grid() });
-    if ( e && e.t > now - 200 ) add({ ...e, t: toPerf(e.t) });
-  }, 1000);
+/* ---------------------------------------------------------------- a burning fire's continuous sound */
+
+function scheduleBurn(ms) { clearTimeout(burnTimer); const g0 = gen; burnTimer = setTimeout(() => { burnTimer = 0; if ( g0 === gen ) reconcileBurn(); }, ms); }
+/** Which fires burn and are shown here: each group gets its continuous sound (live for the biggest in view, ambient for the rest). */
+function reconcileBurn() {
+  const want = new Map();
+  const on = mode() === "all" && Fire.shownHere?.() && canvas?.ready;
+  if ( on && L?.sustain ) {
+    const now = sharedNow(), pn = performance.now(), G = grid(), v = view(), caps = C.CAPS[perfMode()] ?? C.CAPS.high;
+    const fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now) && shownAt.has(s.id) && pn - shownAt.get(s.id) >= BURN_AFTER);
+    const geo = Fire.geo(), P = Fire.params0();
+    const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, P), levelNow: (s, t) => FM.levelNow(s, Number.isFinite(t) ? t : undefined) }))
+      .sort((a, b) => b.prio - a.prio);
+    let live = 0;
+    for ( const p of plans ) {
+      const inView = p.points.some((q) => q.x > v.x0 - G && q.x < v.x1 + G && q.y > v.y0 - G && q.y < v.y1 + G);
+      const isLive = p.live && inView && live < caps.live;
+      if ( isLive ) live++;
+      want.set(p.key, { plan: p, live: isLive });
+    }
+  }
+  for ( const [k, b] of burns ) {
+    const w = want.get(k);
+    if ( w && w.live === b.live ) { b.plan = w.plan; continue; }
+    // gone out / removed: its words play their exits (the fire's last breath before the hiss); switched mode: at once
+    for ( const s of b.subs ) { try { s.stop({ quick: !!w }); } catch {} }
+    burns.delete(k);
+  }
+  for ( const [k, w] of want ) if ( !burns.has(k) ) burns.set(k, { plan: w.plan, live: w.live, subs: startBurn(w.plan, w.live) });
+  stats.burns = burns.size;
+  if ( burns.size || [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire") ) scheduleBurn(1000);
+}
+function startBurn(p, live) {
+  const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), G = grid();
+  const kind = C.kindOf("fire", known);
+  return p.points.map((q, i) => {
+    try {
+      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key); return (b?.plan ?? p).at(i, sharedNow()); },
+        level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90,
+        ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts() });
+    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's sound did not start`, err); return null; }
+  }).filter(Boolean);
 }
 
-/* ---------------------------------------------------------------- words out */
+/* ---------------------------------------------------------------- this client's screen */
 
 function view() {
   const v = canvas.app.renderer.screen, st = canvas.stage;
@@ -177,120 +248,173 @@ function tokenBoxes(v) {
   }
   return out;
 }
+/** The interface panels over the canvas on this client (Foundry's and any module's), in scene px. */
+function uiBoxes() {
+  const now = performance.now();
+  if ( now - uiCache.t < UI_MS ) return uiCache.boxes;
+  const t0 = now, board = canvas.app?.view ?? document.getElementById("board");
+  const rect = board?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
+  let rects = [];
+  try {
+    rects = C.uiRects([...document.body.children], { style: (el) => getComputedStyle(el), vw: innerWidth, vh: innerHeight,
+      skip: (el) => el === board || el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === "LINK" || el.classList?.contains("moinen-letters-layer") || el.classList?.contains("moinen-letter") || el.id === "tooltip" || el.classList?.contains("tooltip") });
+  } catch ( err ) { rects = []; }
+  const st = canvas.stage;
+  const boxes = C.toSceneBoxes(rects, (p) => st.toLocal({ x: p.x - rect.left, y: p.y - rect.top }));
+  uiCache = { t: now, rects, boxes };
+  stats.uiMs += performance.now() - t0;
+  return boxes;
+}
+
+/* ---------------------------------------------------------------- words out */
 
 function flush() {
   gatherTimer = 0;
   const now = performance.now();
-  const due = pending.filter((e) => e.t <= now + GATHER_MS + 20), rest = pending.filter((e) => e.t > now + GATHER_MS + 20);
+  const due = pending.filter((e) => C.dueAt(e) <= now + 20), rest = pending.filter((e) => C.dueAt(e) > now + 20);
   pending = rest;
-  if ( rest.length ) gatherTimer = setTimeout(flush, Math.max(10, Math.min(...rest.map((e) => e.t)) - now - GATHER_MS));
+  if ( rest.length ) gatherTimer = setTimeout(flush, Math.max(10, Math.min(...rest.map((e) => C.dueAt(e))) - now));
   if ( !due.length || mode() === "off" || !canvas?.ready ) return;
-  if ( !L ) { engine(); loading?.then(() => { pending.push(...due.filter((e) => performance.now() - e.t < LATE_MS)); if ( !gatherTimer ) gatherTimer = setTimeout(flush, 0); }); return; }
+  if ( !L ) { pending.push(...due); engine(); return; }      // (engine() flushes again once it is loaded, this scene only)
   const t0 = performance.now();
   const pm = perfMode(), caps = C.CAPS[pm] ?? C.CAPS.high, G = grid(), big = mode() === "big";
-  const v = view(), scale = canvas.stage.scale.x || 1, tokens = tokenBoxes(v);
-  const groups = C.cluster(due, G).sort((a, b) => (VOICE_PRIO(b) - VOICE_PRIO(a)) || (b.rEq - a.rEq));
+  const v = view(), tokens = tokenBoxes(v), ui = uiBoxes();
+  const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
+  recent = recent.filter((r) => now - r.t < C.ECHO_MS);
   for ( const g of groups ) {
-    if ( g.ambient && [...alive].some((a) => a.ambient) ) { stats.dropped++; continue; }
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
-    recent = recent.filter((r) => now - r.t < C.ECHO_MS);
-    if ( !g.ambient && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
-    const words = C.planCluster(g, { lang: lang(), grid: G, sec: caps.sec, seed, big });
-    // the same voice twice in a row here: the next word of its bank (the engine's hands differ anyway)
-    const main = words.find((w) => w.role === "main");
-    if ( main && lastWord.get(main.voice) === main.text && !g.ambient ) {
-      const alt = C.planCluster(g, { lang: lang(), grid: G, sec: caps.sec, seed: seed + "~", big }).find((w) => w.role === "main");
-      if ( alt && alt.text !== main.text ) main.text = alt.text;
-    }
-    for ( const w of words ) measure(w);
+    if ( C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
+    const specs = C.planCluster(g, { grid: G, sec: caps.sec, seed, big, known });
+    for ( const w of specs ) if ( w.role === "main" ) w.obj = g.main.obj;
+    // the engine writes each word (its vocabulary: the kind, how loud, how long; seeded, the same on every client); the words of one
+    // moment differ from each other (avoid), nothing else of this client's history changes them
+    const taken = [];
+    for ( const w of specs ) { write(w, taken); measure(w); }
     const room = caps.alive - alive.size;
-    if ( room <= 0 ) { stats.dropped += words.length; continue; }
-    const placed = C.place(words, { scale, view: v, tokens, alive: [...alive].map((a) => a.box) }).slice(0, room);
-    stats.dropped += words.length - placed.length;
-    for ( const w of placed ) play(w, !!g.ambient);
-    if ( main ) { lastWord.set(main.voice, main.text); if ( placed.some((w) => w.role === "main") ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, main.size * 2), t: g.t, prio: VOICE_PRIO(g) }); }
+    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...alive].map((a) => a.box) }), room);
+    stats.dropped += specs.length - placed.length;
+    for ( const w of placed ) play(w);
+    const main = placed.find((w) => w.role === "main");
+    if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0 });
   }
   stats.ms += performance.now() - t0;
 }
-/**
- * The engine's own size and layout of a word as it would be drawn NOW (LETR v4 size model: from its area and magnitude, the grid,
- * the zoom and the viewport, clamped legible): the box placement keeps free. Without the engine's answer the estimate stands.
- */
-function measure(w) {
+/** The engine's word for a spec (its vocabulary), different from the other words of the same moment. */
+function write(w, taken) {
+  if ( w.stream ) return;
   try {
-    const o = { mood: w.mood, sound: w.sound, seed: w.seed, space: "world", area: w.area, magnitude: w.magnitude, at: { x: w.x, y: w.y } };
-    const z = L.sizeOf?.(w.text, o);
-    if ( Number.isFinite(z?.size) && z.size > 0 ) { w.size = z.size; w.sizeK = Number.isFinite(z.sizeK) ? z.sizeK : undefined; w.engineSized = true; }
-    const d = L.design?.(w.text, o);
-    if ( Number.isFinite(d?.layout?.W) ) { w.wUnits = d.layout.W; w.warp = d.layout.E?.kind ?? null; }
+    const o = { seed: w.seed, lang: lang(), loud: w.loud, duration: w.ms, avoid: taken.slice() };
+    const word = L.word(w.kind, o);
+    if ( !word?.text ) return;
+    w.word = word; w.text = word.text; w.chars = [...word.text].length;
+    taken.push(word.text, word.template);
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); }
+}
+/** The options a word plays with (and is measured with). */
+function optsOf(w) {
+  const G = grid(), red = reducedMotion();
+  const st = w.stage ?? {};
+  const o = { ...(w.word?.play ?? {}), space: "world", at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed, rotation: w.rotation, reduced: red,
+    ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
+  for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
+  // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
+  if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
+  // steam drifts up off what was put out
+  if ( w.drift && !red ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * 0.15, y: w.y - G * 0.9 }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
+  // a thing that travels: its word rides along with it
+  if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
+  return o;
+}
+/** The word's box (scene px) as the engine will draw its hold picture now (its size model + its layout): placement keeps it free. */
+function measure(w) {
+  if ( !w.text ) return;
+  try {
+    const o = optsOf(w);
+    const z = L.sizeOf(w.text, o);
+    const pf = L.planFor?.(w.text, o), hb = pf?.plan?._holdBox, sk = pf?.plan?.sizeK ?? z?.sizeK ?? 1;
+    const u = (z?.size ?? G0()) * (L.prefs?.scale ?? 1) * sk;
+    w.size = u;
+    w.bw = (hb?.w ?? 0.8 * w.chars + 0.6) * u * 1.08 + u * 0.3;
+    w.bh = (hb?.h ?? 1.35) * u * 1.12 + u * 0.25;
   } catch { /* the estimate stands */ }
 }
-const VOICE_PRIO = (g) => VOICES[g.main.voice]?.prio ?? 0;
+const G0 = () => grid() * 0.5;
 
-function play(w, ambient) {
+function play(w) {
+  const g0 = gen;
   const go = () => {
-    if ( !L || mode() === "off" || !canvas?.ready ) return;
-    if ( performance.now() - w.t > LATE_MS ) { stats.late++; return; }
-    const red = reducedMotion();
+    if ( g0 !== gen || !L || mode() === "off" || !canvas?.ready ) return;
+    if ( C.tooLate(w, performance.now()) ) { stats.late++; return; }
+    // a fire's catch / flare word whose fire went out (or was taken back) meanwhile: not lettered (FXLM 4)
+    if ( w.obj && !C.fireEventLive({ obj: w.obj, voice: w.voice }, Fire.allStrokes?.()?.get(w.obj), sharedNow()) ) { stats.stale++; return; }
     let h;
     try {
-      if ( w.stream && L.stream ) { h = playStream(w, red); stats.words++; const rec = { box: w.box, h, ambient }; alive.add(rec); Promise.resolve(h?.finished).finally(() => alive.delete(rec)); return; }
-      h = L.play(w.text, { space: "world", mood: w.mood, sound: w.sound, at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed,
-        ...(w.maxWidth ? { maxWidth: w.maxWidth } : {}), ...(w.from ? { from: w.from } : {}), rotation: w.rotation, startAt: Math.min(w.t, performance.now()),
-        ...(w.colors ? { colors: w.colors } : {}), ...(w.hold ? { hold: w.hold } : {}), reduced: red,
-        ...(w.motion?.in ? { in: w.motion.in, holdKind: w.motion.hold, out: w.motion.out } : {}), ...layerOpts() });
+      h = w.stream ? playStream(w) : L.play(w.text, optsOf(w));
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
+    if ( !h ) return;
     stats.words++;
-    const rec = { box: w.box, h, ambient };
+    const rec = { box: w.box, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
-    Promise.resolve(h?.finished).finally(() => alive.delete(rec));
+    Promise.resolve(h.finished).finally(() => alive.delete(rec));
   };
   const wait = w.t - performance.now();
-  if ( wait > 4 ) { const id = setTimeout(() => { sched.delete(id); go(); }, wait); sched.set(id, id); } else go();
+  if ( wait > 4 ) later(`w|${w.seed}|${w.role}|${w.t}`, wait, go, { obj: w.obj, voice: w.voice }); else go();
 }
 
-/** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (LETR stream). */
-function playStream(w, reduced) {
+/** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (the engine's stream). */
+function playStream(w) {
   const W = w.stream.walk, T = W.at(-1).ms || 1, t0 = w.stream.t0;
   const beats = [...new Set(Array.from({ length: Math.min(8, Math.max(3, W.length)) }, (_, i, a) => Math.round(T * (a.length > 1 ? i / (a.length - 1) : 0))))];
   const at = () => {
     const ms = performance.now() - t0;
     let i = 1; while ( i < W.length - 1 && W[i].ms < ms ) i++;
-    const a = W[i - 1], b = W[i], f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
+    const a = W[i - 1], b = W[i] ?? a, f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   };
-  return L.stream({ text: w.text.split("\n").join(" "), space: "world", at, dir: -90, beats, startAt: t0, mood: w.mood, area: w.area, magnitude: w.magnitude, seed: w.seed,
-    ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.75 + 0.25 * Math.sin(i * 1.7), reduced, ...layerOpts() });
+  return L.stream({ kind: w.kind, lang: lang(), space: "world", at, dir: -90, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
+    ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...layerOpts() });
 }
 
 /* ---------------------------------------------------------------- lifecycle */
 
-function teardown() {
+function teardown(full = true) {
+  gen++;
   clearTimeout(gatherTimer); gatherTimer = 0; pending = [];
-  for ( const id of sched.values() ) clearTimeout(id);
-  sched.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map();
-  armAmbient(false); ambientSlot = -1;
+  for ( const s of sched.values() ) clearTimeout(s.id);
+  sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = [];
+  clearTimeout(burnTimer); burnTimer = 0;
+  for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
+  burns.clear();
+  uiCache = { t: -1e9, rects: [], boxes: [] };
 }
 function refresh() {
   sfxBus.entry = mode() === "off" ? null : onEntry;
-  if ( mode() === "off" ) { for ( const id of sched.values() ) clearTimeout(id); sched.clear(); pending = []; armAmbient(false); }
-  else if ( canvas?.ready ) {
-    fireSeen = new Map([...(Fire.allStrokes?.() ?? new Map())].map(([k, v]) => [k, v])); onFire(true);
+  sfxBus.fireShown = mode() === "off" ? null : onFireShown;
+  if ( mode() === "off" ) {
+    for ( const s of sched.values() ) clearTimeout(s.id);
+    sched.clear(); gated.clear(); pending = [];
+    for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
+    burns.clear();
+  } else if ( canvas?.ready ) {
+    fireSeen = new Map(Fire.allStrokes?.() ?? new Map()); onFire(true);
     // the engine (and its fonts) loaded once the scene is up, off the load path: the first crash of a session is lettered on time
-    if ( !L ) setTimeout(engine, 2500);
+    if ( !L ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) engine(); }, 2500); }
+    else scheduleBurn(0);
   }
 }
 
 export const sfxApi = {
-  /** How it stands: events seen, clusters, words played / dropped / late, planning ms in total, words alive. */
-  status: () => ({ mode: mode(), lang: lang(), engine: L?.version ?? null, alive: alive.size, ...stats }),
+  /** How it stands: events seen, clusters, words played / dropped / late / stale, planning ms, interface ms, burning sounds, words alive. */
+  status: () => ({ mode: mode(), lang: lang(), engine: L?.version ?? null, alive: alive.size, waiting: sched.size, gated: gated.size, ...stats }),
   /** Plan (no play) the words of events [{ voice, x, y, r, t?, key? }] here and now: for checks and the docs. */
   plan: (events) => C.cluster(events.map((e, i) => ({ key: `p${i}`, t: performance.now(), ...e })), grid())
-    .flatMap((g) => C.planCluster(g, { lang: lang(), grid: grid(), sec: (C.CAPS[perfMode()] ?? C.CAPS.high).sec, seed: canvas.scene?.id ?? "" })),
+    .flatMap((g) => C.planCluster(g, { grid: grid(), sec: (C.CAPS[perfMode()] ?? C.CAPS.high).sec, seed: canvas.scene?.id ?? "", known })),
   /** Play events now (scene px): `api.sfx.test([{ voice: "crash", x, y, r: 300 }])`. */
   test: (events) => { const t = performance.now() + 30; for ( const [i, e] of events.entries() ) add({ key: `test|${Date.now()}|${i}`, t, ...e }); },
+  /** The interface panels this client keeps words off (client px), and the fire sounds burning. */
+  ui: () => uiCache.rects, burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length })),
   core: C
 };
 
@@ -298,7 +422,8 @@ export function registerSfx() {
   moduleApi.sfx = sfxApi;
   Hooks.once("init", registerSettings);
   Hooks.once("ready", () => { refresh(); const m = game.modules.get(MODULE_ID); if ( m?.api ) m.api.sfx ??= sfxApi; });
-  Hooks.on("canvasReady", () => { teardown(); refresh(); });
-  Hooks.on("canvasTearDown", teardown);
+  // (canvasTearDown cleared the old scene; at canvasReady the new scene's fire may already have shown its flames: kept)
+  Hooks.on("canvasReady", () => { teardown(false); refresh(); });
+  Hooks.on("canvasTearDown", () => teardown(true));
   Hooks.on("moinenMapsFire", (kind) => { if ( kind === "edited" || kind === "loaded" ) { if ( kind === "loaded" ) { fireSeen = new Map(); onFire(true); } else onFire(false); } });
 }
