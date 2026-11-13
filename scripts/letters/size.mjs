@@ -7,15 +7,16 @@ export const SIZE = {
   tokenPow: 0.5,          // bigger tokens get bigger words, sub-linearly: a 4x4 titan's ouch is 2x, not 4x
   areaPow: 0.6,           // the footprint of an event (radius) grows the word sub-linearly too
   magLo: 0.7, magHi: 1.5, // magnitude 0 .. 1 maps to these factors (up to magnitude 2: 2.3)
-  screenVh: 0.085,        // a screen word with no size is 8.5 % of the viewport height (times magnitude and mood)
+  screenVh: 0.075,        // a screen word with no size is 7.5 % of the viewport height (times magnitude and mood)
   floorVh: 0.026, floorMin: 15, floorMax: 30,   // legibility floor of the cap height on screen, CSS px
   quietFloorK: 0.8,       // small sounds (ticks, clicks) may go a little under the floor
-  ceilVh: 0.09, ceilVhMag: 0.12,                // the cap height never goes over (9 % + 12 % x magnitude) of the viewport height
-  widthVw: 0.45, widthVwMag: 0.3,               // and the word's width never over (45 % + 30 % x magnitude) of the usable width
+  ceilVh: 0.07, ceilVhMag: 0.08,                // the cap height never goes over (7 % + 8 % x magnitude) of the viewport height
+  widthVw: 0.4, widthVwMag: 0.25,               // and the word's width never over (40 % + 25 % x magnitude) of the usable width
   softLo: 0.12, softHi: 0.2,                    // outside the range the size still follows zoom a little (depth cue), compressed
   hardLo: 0.8, hardHi: 1.15,                    // ... but never further than this from the floor / ceiling
   crowd: 12,              // more world words alive than this lowers the floor (sqrt), down to crowdMin of it
   crowdMin: 0.7,
+  crowdCeil: 2, crowdCeilMin: 0.4,              // more than 2 world words up: the ceiling shrinks with sqrt(2 / n), to 0.4x at most
   pixelMinArt: 7, pixelMaxArt: 40               // pixel lettering: cap height in whole art pixels, at least 7 (a legible pixel letter)
 };
 
@@ -54,7 +55,10 @@ export function limits(c) {
   const aspect = Math.max(0.3, c.aspect ?? 3);                     // word width / cap height
   const ceilH = vh * (SIZE.ceilVh + SIZE.ceilVhMag * m);
   const ceilW = (vw * (SIZE.widthVw + SIZE.widthVwMag * Math.min(1, m))) / aspect;
-  const ceil = Math.max(floor * 1.25, Math.min(ceilH, ceilW));
+  /* a crowd shares the screen: with more than crowdCeil world words up, each one's ceiling shrinks (sqrt, down to crowdCeilMin), so
+     a dozen words zoomed in close stay a pile of sounds instead of a wall over the scene */
+  const share = c.space === "world" && c.alive > SIZE.crowdCeil ? Math.max(SIZE.crowdCeilMin, Math.sqrt(SIZE.crowdCeil / c.alive)) : 1;
+  const ceil = Math.max(floor * 1.25, Math.min(ceilH, ceilW) * share);
   return { floor, ceil, by: ceilW < ceilH ? "width" : "height" };
 }
 

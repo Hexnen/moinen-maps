@@ -12,6 +12,7 @@ import { normals, jag } from "./geom.mjs";
 import { area } from "./font.mjs";
 import { rng } from "./rng.mjs";
 import { sizeFor, naturalSize, limits as sizeLimits, magnitudeOf, SIZE } from "./size.mjs";
+import { checkWords } from "./check-words.mjs";
 
 let n = 0, failed = 0;
 const ok = (c, msg) => { n++; if ( !c ) { failed++; console.log("FAIL", msg); } };
@@ -178,15 +179,30 @@ ok(JSON.stringify(syllablesOf("RA-TA-TA")) === '["RA","TA","TA"]' && JSON.string
   }
   /* crowding lowers the floor (many words at once from far do not bury the scene) */
   ok(sizeLimits({ ...base, alive: 48 }).floor < sizeLimits({ ...base, alive: 3 }).floor && sizeLimits({ ...base, alive: 480 }).floor >= sizeLimits(base).floor * SIZE.crowdMin - 1e-9, "size: crowding lowers the floor, bounded");
+  ok(sizeLimits({ ...base, alive: 12, magnitude: 1 }).ceil < sizeLimits({ ...base, alive: 1, magnitude: 1 }).ceil * 0.6 && sizeLimits({ ...base, alive: 500, magnitude: 1 }).ceil >= Math.max(sizeLimits({ ...base, alive: 500 }).floor * 1.25, sizeLimits({ ...base, alive: 1, magnitude: 1 }).ceil * SIZE.crowdCeilMin) - 1e-9, "size: a crowd of world words shares the screen (lower ceiling, bounded)");
   /* the engine never shows a picture enlarged by more than 15 % before drawing it again (source rule in engine.mjs) */
   const eng = fs.readFileSync(new URL("./engine.mjs", import.meta.url), "utf8");
   ok(/w > c\.want \* 1\.15/.test(eng) && /resize\(h, false\)/.test(eng), "size: re-draw on drift up (>15 %) and live resize are in the frame loop");
+  ok(/redraws < MAX_REDRAWS/.test(eng) && /h\.retired/.test(eng) && !/if \( h\.shown === c \) h\.shown = null; dropPic\(c\)/.test(eng), "size: stale pictures are redrawn a few per frame and the shown texture is never freed under the sprite (F0/F1)");
 }
+
+/* 8c. the vocabulary layer (words.mjs; checks in check-words.mjs) */
+checkWords(ok, bank);
+
+/* 8d. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
+await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 
 /* 9. the copy manifest (the two modules' copies are equal to it) */
 {
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./sync.mjs", import.meta.url)), "--check"], { encoding: "utf8" });
   ok(r.status === 0, `manifest: ${r.stdout.trim()}`);
+}
+
+/* 10. FXLE: lifecycle, budgets, memory, safety (check-life.mjs on a fake browser and Foundry; its own process: it replaces globals) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-life.mjs", import.meta.url))], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 console.log(`letters: ${n} checks, ${failed} failed`);

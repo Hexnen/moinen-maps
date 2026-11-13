@@ -11,14 +11,18 @@
 
    Full contract: scripts/letters/README.md. */
 import { VERSION, createEngine } from "./engine.mjs";
+import { STAMP } from "./stamp.mjs";
+import * as tools from "./tools.mjs";
 
 const REG = (globalThis.MoinenLetters ??= {
   copies: [],
   _engine: null,
-  /* the newest registered copy; created once, on first use */
+  /* the newest registered copy (VERSION, then FXLE F14: the more recently synced content); created once, on first use */
   async engine() {
     if ( !this._engine ) {
-      const best = this.copies.slice().sort((a, b) => cmpVer(b.version, a.version))[0];
+      const best = this.copies.slice().sort((a, b) => cmpVer(b.version, a.version) || String(b.stamp?.at ?? "").localeCompare(String(a.stamp?.at ?? "")))[0];
+      const twin = this.copies.find((c) => c !== best && cmpVer(c.version, best.version) === 0 && c.stamp?.hash && best.stamp?.hash && c.stamp.hash !== best.stamp.hash);
+      if ( twin ) console.warn(`LETR | two copies of engine ${best.version} differ; using the more recently synced one (${best.base}). Bump VERSION when the engine changes.`);
       this._engine = best.create(best.base);
     }
     await this._engine.ready();
@@ -34,7 +38,20 @@ function cmpVer(a, b) {
 }
 
 const BASE = new URL("./", import.meta.url).href;
-if ( !REG.copies.some((c) => c.base === BASE) ) REG.copies.push({ version: VERSION, base: BASE, create: createEngine });
+if ( !REG.copies.some((c) => c.base === BASE) ) {
+  REG.copies.push({ version: VERSION, stamp: STAMP, base: BASE, create: createEngine, tools });
+  if ( REG._engine && cmpVer(VERSION, REG._engine.version) > 0 ) console.warn(`LETR | engine ${VERSION} registered after ${REG._engine.version} was already in use; it is used after a reload`);
+}
+
+/* v5 tools (settings, authoring, networking, accessibility, windows): registered once at init by the newest copy (same order as the
+   engine: VERSION, then the more recently synced copy) */
+if ( !REG.toolsHooked && globalThis.Hooks?.once ) {
+  REG.toolsHooked = true;
+  Hooks.once("init", () => {
+    const best = REG.copies.filter((c) => c.tools).sort((a, b) => cmpVer(b.version, a.version) || String(b.stamp?.at ?? "").localeCompare(String(a.stamp?.at ?? "")))[0];
+    try { best?.tools.init(REG); } catch ( e ) { console.warn("LETR | tools not registered", e); }
+  });
+}
 
 /* the shared engine, ready to play (fonts loaded) */
 export function letters() { return REG.engine(); }
