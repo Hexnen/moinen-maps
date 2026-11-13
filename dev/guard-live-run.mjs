@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launchBrowser, closeBrowser } from "./lib/tmp.mjs";
+import { LEAN_FLAGS } from "./lib/browser.mjs";
 import { connect, join, targets } from "./tools/cdp-lane.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -21,7 +22,7 @@ const DISP = { 60: { hz: 60, k: 1 }, 144: { hz: 144, k: 1 }, 165: { hz: 165, cap
 const LAYERS = { fire: { fire: 20 }, "fire+rain": { fire: 20, weather: "rain" } };
 
 async function startChrome(dpr) {
-  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--window-size=1600,900", "--enable-gpu",
+  const ch = launchBrowser(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, ...LEAN_FLAGS, "--window-size=1600,900", "--enable-gpu",
     "--use-angle=d3d11", "--ignore-gpu-blocklist", `--force-device-scale-factor=${dpr}`, "about:blank"], { kind: "guard-chrome", profile: arg("profile") });   // temp profile: dev/lib/tmp.mjs
   for ( let i = 0; i < 40; i++ ) { await sleep(500); try { await targets(PORT); return ch; } catch {} }
   throw new Error("chrome did not start");
