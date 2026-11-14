@@ -304,6 +304,13 @@ export async function run(ok) {
     ok(blowUp(env()) === 1 && blowUp(env({ sil: { w: 40, h: 40 } })) > 3 && blowUp(env({ sil: { w: 900, h: 900 } })) === 1 && blowUp(env({ sil: { w: 1, h: 1 } })) === 8, "impact: silhouette blow-up range");
     { const src = fakeCanvas(64, 64); const ctx = mkCtx(); const e = env({ sil: { src, sx: 0, sy: 0, sw: 64, sh: 64, w: 80, h: 80, rot: 0 } });
       for ( const type of ["shadow", "glare", "swap", "slam", "smear", "chroma"] ) ok(paintFrame(ctx, e, { type, seed: 5 }) && ctx.log.depth === 0, `impact: ${type} with a silhouette`);
+      /* FIN-ENGINE: the figure (cut-out, tints) of one picture is worked out once and shared by every impact on it */
+      { const src2 = fakeCanvas(64, 64); let made = 0; const mk2 = (w, h) => { made++; return fakeCanvas(w, h); };
+        const ea = env({ makeCanvas: mk2, sil: { src: src2, sx: 0, sy: 0, sw: 64, sh: 64, w: 80, h: 80, rot: 0 } });
+        paintFrame(mkCtx(), ea, { type: "shadow", seed: 5 }); const first = made; made = 0;
+        const eb = env({ makeCanvas: mk2, sil: { src: src2, sx: 0, sy: 0, sw: 64, sh: 64, w: 80, h: 80, rot: 0 } });
+        paintFrame(mkCtx(), eb, { type: "shadow", seed: 5 });
+        ok(first > 1 && made <= 1, `impact: a second impact on the same picture reuses its figure (${first} canvases, then ${made})`); }
       ok(e._tints.size >= 3, "impact: silhouette tints are cached per colour"); }
     /* FXI-ENGINE (builder's list): a ROUND portrait token is not an inked disc: its background is cut away by the rim's colour, the
        head and shoulders stay; a figure with its own transparent background keeps its alpha; a busy picture keeps the disc */
@@ -486,6 +493,17 @@ async function life(ok) {
     const why = await Promise.all(hs.map((x) => x.finished));
     ok(why.every((w) => w === "done"), `impact life: every scheduled blow played (${why.join(",")})`);
     ok(kids() === 0 && liveCv() === 0 && started, "impact life: clean after a series"); }
+  /* FIN-ENGINE: painting ahead is shared out per display frame over every waiting impact (live: five blows called at once painted five
+     full-view drawings in one frame = a 70 ms frame) */
+  await E.tick(1500);
+  { const t0 = performance.now() + 2000, p0 = I.stats.painted;
+    const hs = [0.4, 0.7, 1.0, 1.3, 1.7].map((m, i) => I.play({ kind: "crit", magnitude: m, seed: 50 + i, startAt: t0 + i * 900, subject: { x: 400, y: 300 } }));
+    await E.tick(16);
+    const n1 = I.stats.painted - p0;
+    ok(hs.every((x) => x.alive) && n1 >= 1 && n1 <= 2, `impact life: at most two drawings painted ahead per frame over five waiting impacts (${n1})`);
+    await E.tick(1500);
+    ok(hs.every((x) => x.plan.frames.every((f) => f.cv)), "impact life: every waiting impact is still painted in time");
+    I.stopAll(); }
   /* FIN-ENGINE: blowAt = the instant of the blow: the impact starts peakMs earlier */
   await E.tick(1500);
   { const at = performance.now() + 300;

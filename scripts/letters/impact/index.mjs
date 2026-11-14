@@ -273,7 +273,12 @@ export function createImpact(L, tools = null) {
     if ( !h.isReady ) h._ready(false);
     h._done(why);
   }
-  function loop(h) {
+  /* FIN-ENGINE: painting ahead (an impact waiting for its shared start) is shared out: at most AHEAD_MS of it per display frame over every
+     waiting impact (live: five blows of a series called at once painted five full-view drawings in one frame, a 70 ms frame). The next
+     drawing of an impact that is PLAYING is always painted. */
+  const AHEAD_MS = 6, AHEAD_N = 2;
+  let aheadTs = null, aheadUsed = 0, aheadN = 0;
+  function loop(h, ts) {
     h.raf = 0;
     if ( !h.alive ) return;
     const t = now();
@@ -281,8 +286,10 @@ export function createImpact(L, tools = null) {
     h.lastT = t;
     if ( h.t0 == null ) { paint(h, 0); h.t0 = now(); }   // no shared start: the clock starts when the first drawing is ready
     const el = Math.max(t, h.t0 === h.spec.startAt ? t : h.t0) - h.t0;
-    if ( el < 0 ) {   // waiting for a shared start: paint ahead, one drawing per frame
-      const n = h.plan.frames.findIndex((f) => f.cv === undefined); if ( n >= 0 ) paint(h, n);
+    if ( el < 0 ) {   // waiting for a shared start: paint ahead, one drawing per frame, inside the frame's shared budget
+      const n = h.plan.frames.findIndex((f) => f.cv === undefined);
+      const fk = ts ?? Math.floor(now() / 8); if ( fk !== aheadTs ) { aheadTs = fk; aheadUsed = 0; aheadN = 0; }
+      if ( n >= 0 && aheadUsed < AHEAD_MS && aheadN < AHEAD_N ) { const p0 = now(); paint(h, n); aheadUsed += now() - p0; aheadN++; }
     } else {
       const i = frameAt(h.plan, Math.max(0, el));
       if ( i < 0 ) { finish(h, "done"); return; }
@@ -293,7 +300,7 @@ export function createImpact(L, tools = null) {
       if ( h.spec.keep ) applyKeep(h);
       if ( h.plan.frames[i + 1] && h.plan.frames[i + 1].cv === undefined ) paint(h, i + 1);
     }
-    h.raf = requestAnimationFrame(() => loop(h));
+    h.raf = requestAnimationFrame((x) => loop(h, x));
   }
   const ended = (plan, why, extra = {}) => ({ id: `imp${++seq}`, plan, mode: plan?.mode ?? "off", alive: false, off: why === "off", isReady: false,
     ready: Promise.resolve(false), finished: Promise.resolve(why), stop() {}, ...extra });
@@ -337,7 +344,7 @@ export function createImpact(L, tools = null) {
     lives.add(h); stats.played++;
     /* the watchdog: whatever happens to the frame loop (a hidden tab, an error), the impact is gone and the scene is free again */
     h.dog = setTimeout(() => finish(h, "done"), Math.max(0, (startAt ?? t) - t) + plan.ms + 300);
-    h.raf = requestAnimationFrame(() => loop(h));
+    h.raf = requestAnimationFrame((x) => loop(h, x));
     return h;
   }
   /* paint an impact ahead of the blow (the subject's silhouette and every drawing, for the view as it is now); play it with

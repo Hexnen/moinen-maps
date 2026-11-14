@@ -130,11 +130,18 @@ export function inkPixels(d, w, h, mask, neg = false) {
   return out;
 }
 const ctx2d = (e, c) => (e.ctx2d ? e.ctx2d(c) : c.getContext("2d"));
+/* FIN-ENGINE: the figure of a token picture (cut-out, inked art, tints) is worked out once per picture and shared by every impact on it
+   (before: once per impact; a series of five blows did the cut-out five times) */
+const SHARED = new WeakMap();
+const sharedOf = (s) => { if ( !s?.src || typeof s.src !== "object" ) return null; let m = SHARED.get(s.src); if ( !m ) { m = new Map(); SHARED.set(s.src, m); } return m; };
+const skey = (s, k) => `${s.sx},${s.sy},${s.sw},${s.sh}|${k}`;
 /* the figure of this env (cached): { w, h, mask (canvas, alpha = the figure), art: { bw, neg } (canvases) } or a fallback without pixels */
 function figureOf(e) {
   const s = e.sil; if ( !s ) return null;
   e._tints ??= new Map();
   if ( e._tints.has("fig") ) return e._tints.get("fig");
+  const sh = sharedOf(s), sk = skey(s, "fig");
+  if ( sh?.has(sk) ) { const f0 = sh.get(sk); e._tints.set("fig", f0); return f0; }
   const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
   const w = Math.max(2, Math.round(s.sw * k)), h = Math.max(2, Math.round(s.sh * k));
   let fig = { w, h, pixels: false };
@@ -151,7 +158,7 @@ function figureOf(e) {
       c.width = 0; c.height = 0;
     } else fig.src = c;
   } catch { fig = { w, h, pixels: false }; }
-  e._tints.set("fig", fig);
+  e._tints.set("fig", fig); sh?.set(sk, fig);
   return fig;
 }
 function tint(e, color) {
@@ -159,13 +166,15 @@ function tint(e, color) {
   e._tints ??= new Map();
   let c = e._tints.get(color);
   if ( c ) return c;
+  const sh = sharedOf(s), sk = skey(s, `tint:${color}`);
+  if ( sh?.has(sk) ) { c = sh.get(sk); e._tints.set(color, c); return c; }
   const f = figureOf(e);
   const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
   c = e.makeCanvas(f?.w ?? Math.max(2, Math.round(s.sw * k)), f?.h ?? Math.max(2, Math.round(s.sh * k)));
   const x = ctx2d(e, c);
   try { if ( f?.mask ) x.drawImage(f.mask, 0, 0, c.width, c.height); else x.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, 0, 0, c.width, c.height); } catch { return null; }
   x.globalCompositeOperation = "source-in"; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
-  e._tints.set(color, c);
+  e._tints.set(color, c); sh?.set(sk, c);
   return c;
 }
 /* the subject's own picture in hard black and white ("bw") or as its negative ("neg"): the struck figure, inked */
