@@ -19,8 +19,8 @@ const MODE = arg("mode", "full"), BG = arg("bg", "map");
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;overflow:hidden;background:#000} #board{position:fixed;inset:0;width:100vw;height:100vh;display:block}
-#tok,#tok2{position:fixed;pointer-events:none}
-</style></head><body><canvas id=board></canvas><canvas id=tok></canvas><canvas id=tok2></canvas><script>
+#tok,#tok2,#tok3{position:fixed;pointer-events:none}
+</style></head><body><canvas id=board></canvas><canvas id=tok></canvas><canvas id=tok2></canvas><canvas id=tok3></canvas><script>
 (() => {   /* the film clock: time moves only when the driver says so */
   let T = 0; const timers = []; let tid = 0; let raf = [];
   performance.now = () => T;
@@ -45,7 +45,7 @@ const B = document.getElementById("board"), W = innerWidth, H = innerHeight; B.w
 { const c = B.getContext("2d"), bg = q.get("bg");
   let s = 7; const R = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   c.fillStyle = bg === "dark" ? "#1a1c26" : bg === "light" ? "#d9d4c4" : "#5b6068"; c.fillRect(0, 0, W, H);
-  if ( bg === "map" || !bg ) {
+  if ( bg === "map" || bg === "night" || bg === "bright" || !bg ) {
     c.fillStyle = "#3f434b"; c.fillRect(0, H * 0.36, W, H * 0.26);
     c.fillStyle = "#e8d44a"; for ( let x = 20; x < W; x += 110 ) c.fillRect(x, H * 0.485, 60, 8);
     const roofs = ["#8c4a3a", "#566b7a", "#a08a5c", "#3d5a45", "#74586e"];
@@ -53,6 +53,9 @@ const B = document.getElementById("board"), W = innerWidth, H = innerHeight; B.w
       c.fillStyle = "rgba(255,255,255,.18)"; c.fillRect(x + 8, (top ? H * 0.02 : H * 0.68) + 8, w - 16, 10); c.fillStyle = "rgba(0,0,0,.35)"; c.fillRect(x, top ? H * 0.32 - 12 : H * 0.68, w, 12); }
     for ( let i = 0; i < 26; i++ ) { c.fillStyle = ["#c9c2a8", "#22242a", "#b23a2e", "#2f6fb0"][i % 4]; const x = R() * W, y = H * (0.36 + R() * 0.26); c.fillRect(x, y, 14 + R() * 30, 10 + R() * 18); }
     for ( let i = 0; i < 5; i++ ) { c.fillStyle = "#2c8a4a"; c.beginPath(); c.arc(R() * W, H * (i % 2 ? 0.34 : 0.64), 26 + R() * 18, 0, 7); c.fill(); }
+    /* night = the busy map in the dark (lamps left lit), bright = the busy map at noon */
+    if ( bg === "night" ) { c.fillStyle = "rgba(6,8,22,0.72)"; c.fillRect(0, 0, W, H); for ( let i = 0; i < 14; i++ ) { const x = R() * W, y = R() * H, g = c.createRadialGradient(x, y, 0, x, y, 60); g.addColorStop(0, "rgba(255,210,120,0.55)"); g.addColorStop(1, "rgba(255,210,120,0)"); c.fillStyle = g; c.fillRect(x - 60, y - 60, 120, 120); } }
+    if ( bg === "bright" ) { c.fillStyle = "rgba(255,250,235,0.55)"; c.fillRect(0, 0, W, H); }
   }
 }
 /* a test figure seen from above: cape, shoulders, head */
@@ -67,11 +70,23 @@ function figure(id, size, x, y, col) {
 }
 figure("tok", +(q.get("tok") ?? 120), W * 0.56, H * 0.5, ["#c8102e", "#f2c400", "#22242c"]);
 figure("tok2", 54, W * 0.24, H * 0.44, ["#1d4fa8", "#e7e7ea", "#5a3a22"]);
+/* a round portrait token (the usual token art: a head-and-shoulders picture in a disc with a rim); "tok3" in a spec */
+{ const t = document.getElementById("tok3"), size = +(q.get("tok") ?? 120); t.width = t.height = 256; Object.assign(t.style, { width: size + "px", height: size + "px", left: (W * 0.56 - size / 2) + "px", top: (H * 0.5 - size / 2) + "px", display: q.get("round") ? "block" : "none" });
+  const c = t.getContext("2d"); c.save(); c.beginPath(); c.arc(128, 128, 122, 0, 7); c.clip();
+  const g = c.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, "#6d8fb3"); g.addColorStop(1, "#2a3d55"); c.fillStyle = g; c.fillRect(0, 0, 256, 256);
+  c.fillStyle = "#7a1f2b"; c.beginPath(); c.ellipse(128, 262, 112, 80, 0, 0, 7); c.fill();            // shoulders
+  c.fillStyle = "#e0b08a"; c.fillRect(110, 150, 36, 40);                                               // neck
+  c.fillStyle = "#e9bf98"; c.beginPath(); c.ellipse(128, 118, 50, 60, 0, 0, 7); c.fill();               // face
+  c.fillStyle = "#2b1a12"; c.beginPath(); c.ellipse(128, 76, 56, 34, 0, Math.PI, 0); c.fill(); c.fillRect(72, 74, 16, 50); c.fillRect(168, 74, 16, 50);   // hair
+  c.fillStyle = "#1a1418"; c.fillRect(102, 112, 16, 7); c.fillRect(138, 112, 16, 7); c.fillRect(116, 150, 26, 5);   // eyes, mouth
+  c.fillStyle = "#c8102e"; c.fillRect(78, 98, 100, 12);                                               // mask band
+  c.restore(); c.lineWidth = 10; c.strokeStyle = "#d8c27a"; c.beginPath(); c.arc(128, 128, 122, 0, 7); c.stroke(); }
+if ( q.get("round") ) document.getElementById("tok").style.display = "none";
 const { createImpact } = await import("/eng/impact/index.mjs");
 const prefs = JSON.parse(q.get("prefs"));
 const I = createImpact({ get prefs() { return prefs; } }, null); window.I = I;
 await I.setMode(q.get("mode") ?? "full");
-const fx = (v) => (v === "tok" || v === "tok2" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
+const fx = (v) => (v === "tok" || v === "tok2" || v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
 window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( a.from ) a.from = fx(a.from); if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(); a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
   const h = it.fn === "show" ? I.show(it.type, a) : I.play(a); window.__h = h;
   return { alive: h.alive, mode: h.mode, ms: h.plan?.ms, frames: h.plan?.frames.map((f) => [f.type, f.ticks, f.full ? "F" : "", f.stop ? "s" : "", f.punch ? "p" : ""].join("")), guard: h.plan?.guard }; };
@@ -105,7 +120,7 @@ try {
   await s.send("Page.enable"); await s.send("Runtime.enable");
   const logs = []; s.on("Runtime.consoleAPICalled", (e) => { if ( e.type === "error" || e.type === "warning" ) logs.push(e.args.map((a) => a.value ?? a.description).join(" ")); });
   s.on("Runtime.exceptionThrown", (e) => logs.push("EXC " + (e.exceptionDetails?.exception?.description ?? e.exceptionDetails?.text)));
-  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
+  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
   const ev = async (x) => { const r = await s.send("Runtime.evaluate", { expression: x, awaitPromise: true, returnByValue: true }); if ( r.result?.exceptionDetails ) logs.push("EVAL " + r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
   for ( let i = 0; i < 80 && !(await ev("window.__done===true")); i++ ) await new Promise((r) => setTimeout(r, 250));
   const shot = async (f) => { const r = await s.send("Page.captureScreenshot", { format: "png" }); fs.writeFileSync(f, Buffer.from(r.result.data, "base64")); };

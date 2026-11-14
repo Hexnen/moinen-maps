@@ -11,6 +11,7 @@
                   flicker (colour plates that jump between drawings)
      palette      mood (the moods' own colours) | contrast (white / yellow letters, black ink, heavier outline, no texture) |
                   cvd (colour-blind safe: the colour families remapped to the Okabe-Ito set, no red-green pairs)
+     impact       impact frames (L.impact, impact/README.md): full | local (only inside a panel round the subject) | off
      announce     the lettered word is read to screen readers (a polite live region; the layers stay aria-hidden)
      limitScreen, limitWorld   words alive at once per space */
 
@@ -20,6 +21,7 @@ export const SETTINGS = {
   motion:      { type: "pick", default: "auto", choices: ["auto", "full", "gentle", "reduced"] },
   flashes:     { type: "bool", default: true },
   photosafe:   { type: "bool", default: true },
+  impact:      { type: "pick", default: "full", choices: ["full", "local", "off"] },   // FXI-ENGINE: impact frames (impact/), per client
   palette:     { type: "pick", default: "mood", choices: ["mood", "contrast", "cvd"] },
   announce:    { type: "bool", default: true },
   limitScreen: { type: "num", default: 16, min: 1, max: 32, step: 1 },

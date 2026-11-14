@@ -438,7 +438,7 @@ class Settings extends ApplicationV2 {
     root.className = "letr-s";
     root.innerHTML = `
       <fieldset><legend>${esc(T("Settings.Groups.Show"))}</legend>${["enabled", "scale", "motion"].map(group).join("")}</fieldset>
-      <fieldset><legend>${esc(T("Settings.Groups.Access"))}</legend>${["flashes", "photosafe", "palette", "announce"].map(group).join("")}</fieldset>
+      <fieldset><legend>${esc(T("Settings.Groups.Access"))}</legend>${["flashes", "photosafe", "impact", "palette", "announce"].map(group).join("")}</fieldset>
       <fieldset><legend>${esc(T("Settings.Groups.Limits"))}</legend>${["limitScreen", "limitWorld"].map(group).join("")}</fieldset>
       <footer class="form-footer">
         <button type="button" data-action="reset"><i class="fa-solid fa-arrow-rotate-left"></i> ${esc(T("Settings.Reset"))}</button>

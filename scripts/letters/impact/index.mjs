@@ -8,7 +8,7 @@
    ink (stars, lines, silhouettes, halftone, splashes) is painted ahead of time on 2D canvases, one per drawing, and a drawing change
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
-import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES } from "./plan.mjs";
+import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT } from "./plan.mjs";
 import { paintFrame, backClip } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
@@ -48,6 +48,8 @@ export function createImpact(L, tools = null) {
     if ( !(sw > 0 && sh > 0 && w > 0 && h > 0) ) return null;
     return { src, sx: frame?.x ?? 0, sy: frame?.y ?? 0, sw, sh, w, h, rot };
   }
+  /* may this user see that token? (the same rule for the struck token and for the attacker a `from` names) */
+  const seesToken = (t, spec) => spec.vision === "none" || (!!t.visible && !(t.document.hidden && !globalThis.game?.user?.isGM));
   /* -> { cx, cy, R, sil, hidden } in client px */
   function subjectOf(spec) {
     const a = spec.subject ?? spec.at, W = innerWidth, H = innerHeight;
@@ -55,7 +57,7 @@ export function createImpact(L, tools = null) {
     if ( isTokenRef(a) ) {
       const t = tokenObj(a);
       if ( !t || !globalThis.canvas?.ready ) return { hidden: true };
-      if ( spec.vision !== "none" && (!t.visible || (t.document.hidden && !globalThis.game?.user?.isGM)) ) return { hidden: true };
+      if ( !seesToken(t, spec) ) return { hidden: true };
       const c = toClient(t.center), m = t.mesh;
       const w = Math.abs(m?.width ?? t.w ?? 100) * zoom, h = Math.abs(m?.height ?? t.h ?? 100) * zoom;
       const tex = m?.texture;
@@ -90,18 +92,24 @@ export function createImpact(L, tools = null) {
     const from = spec.from;
     if ( dir == null && from ) {   // the blow comes from a token or a point: its direction on THIS screen
       try {
-        const p = isTokenRef(from) ? (tokenObj(from) ? toClient(tokenObj(from).center) : null) : (spec.space === "world" && globalThis.canvas?.ready ? toClient(from) : from);
+        /* a token this user cannot see gives no direction (it would tell where it stands): the blow is then radial */
+        const ft = isTokenRef(from) ? tokenObj(from) : null;
+        const p = isTokenRef(from) ? (ft && seesToken(ft, spec) ? toClient(ft.center) : null) : (spec.space === "world" && globalThis.canvas?.ready ? toClient(from) : from);
         if ( p && Number.isFinite(p.x) && Math.hypot(sub.cx - p.x, sub.cy - p.y) > 1 ) dir = Math.atan2(sub.cy - p.y, sub.cx - p.x);
       } catch {}
     }
-    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, tone: plan.tone, sil: sub.sil, redOk: prefs().photosafe === false,
+    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: prefs().photosafe === false,
       local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, Math.min(W, H) * 0.2)) },
       chromaBack: chromaOk !== false,
       /* pictures are painted once and shown once: a software canvas keeps the whole cost inside paint() (a GPU canvas defers the
          tessellation of thousands of halftone dots to the frame that first shows it: measured as a stall of several hundred ms) */
       makeCanvas: (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; },
       ctx2d: (c) => c.getContext("2d", { willReadFrequently: true }) };
-    e.hx = dir != null ? cx - Math.cos(dir) * R * 0.7 : cx; e.hy = dir != null ? cy - Math.sin(dir) * R * 0.7 : cy;
+    /* where the blow lands: on the struck figure's rim on the side it comes from; the weak steps put it right on the rim (the figure
+       stays in sight), a figure struck from nowhere in particular gets its rim spot from the seed */
+    const rim = sub.sil && plan.step <= 2 ? (plan.step <= 1 ? 0.95 : 0.85) : 0.7;
+    const ha = dir != null ? dir : (sub.sil && plan.step <= 2 ? -Math.PI * (0.2 + ((plan.seed >>> 3) % 60) / 100) : null);
+    e.hx = ha != null ? cx - Math.cos(ha) * R * rim : cx; e.hy = ha != null ? cy - Math.sin(ha) * R * rim : cy;
     return e;
   }
 
@@ -160,9 +168,10 @@ export function createImpact(L, tools = null) {
     if ( !f || f.cv !== undefined ) return;
     const t0 = now(), e = h.env;
     const q = Math.min(globalThis.devicePixelRatio || 1, Math.sqrt(MAX_PIX / (e.W * e.H)));
-    const c = e.makeCanvas(Math.max(1, Math.round(e.W * q)), Math.max(1, Math.round(e.H * q)));
+    const c = f.type === "rest" ? e.makeCanvas(1, 1) : e.makeCanvas(Math.max(1, Math.round(e.W * q)), Math.max(1, Math.round(e.H * q)));
     const ctx = e.ctx2d(c);
     ctx.setTransform?.(c.width / e.W, 0, 0, c.height / e.H, 0, 0);
+    if ( f.type === "rest" ) ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     try { paintFrame(ctx, e, f); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
     Object.assign(c.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "none" });
     f.cv = c;
@@ -236,7 +245,7 @@ export function createImpact(L, tools = null) {
     const armed = spec0?._armed ? spec0 : null;
     const spec = armed ? { ...armed.spec, ...over } : { ...(spec0 && typeof spec0 === "object" ? spec0 : {}) };
     const P = prefs();
-    if ( modeFor(P, { osReduced: osReduced(), callerReduced: spec.reduced }) === "off" ) return ended(null, "off");
+    if ( modeFor(P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle }) === "off" ) return ended(null, "off");
     const t = now();
     let startAt = Number.isFinite(spec.startAt) ? spec.startAt : null;
     if ( startAt != null && startAt > t + 60000 ) { console.warn("LETR | impact startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = null; }
@@ -246,7 +255,7 @@ export function createImpact(L, tools = null) {
     if ( sub.hidden ) return ended(plan, "hidden");
     /* one impact at a time: a stronger one takes over, a weaker one is not shown */
     if ( cur?.alive ) { if ( plan.magnitude > cur.plan.magnitude ) finish(cur, "replaced"); else return ended(plan, "busy"); }
-    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, flashLog: flashLog(), now: t, t0: startAt ?? t });
+    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: t, t0: startAt ?? t });
     if ( !plan.frames.length ) return ended(plan, "off");
     let done, rdy;
     const h = { id: `imp${++seq}`, spec, plan, mode: plan.mode, alive: true, isReady: false, idx: -1, t0: startAt, paintMs: 0, frameMax: 0,
@@ -276,7 +285,7 @@ export function createImpact(L, tools = null) {
   function prepare(spec0 = {}) {
     const spec = { ...(spec0 && typeof spec0 === "object" ? spec0 : {}) };
     const P = prefs(), plan = planImpact(spec), sub = subjectOf(spec);
-    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, flashLog: flashLog(), now: now(), t0: now(), preview: true });
+    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: now(), t0: now(), preview: true });
     const a = { _armed: true, spec, plan, sub, env: null, play: (o = {}) => play(a, o) };
     if ( !sub.hidden && plan.frames.length ) { a.env = envOf(spec, plan, sub); const h = { plan, env: a.env, wrap: null, paintMs: 0 }; for ( let i = 0; i < plan.frames.length; i++ ) paint(h, i); a.paintMs = h.paintMs; }
     return a;
@@ -284,7 +293,7 @@ export function createImpact(L, tools = null) {
   /* the plan this client would show (no flash budget used) */
   function planFor(spec = {}) {
     const plan = planImpact(spec);
-    return safety(plan, prefs(), { osReduced: osReduced(), callerReduced: spec.reduced, flashLog: flashLog(), now: now(), t0: now(), preview: true });
+    return safety(plan, prefs(), { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: now(), t0: now(), preview: true });
   }
   /* one frame type held to look at (gallery, design): at most LIMITS.galleryTicks */
   const show1 = (type, spec = {}) => play({ ...spec, frames: [{ type, ticks: Math.min(LIMITS.galleryTicks, spec.ticks ?? 12), punch: 0 }], demo: true });
@@ -295,7 +304,7 @@ export function createImpact(L, tools = null) {
     play, prepare, plan: planFor, show: show1, stopAll, pick, mode, setMode,
     kinds: KIND_IDS.map((id) => ({ id, pl: KINDS[id].pl, en: KINDS[id].en, tone: KINDS[id].tone })),
     frames: FRAME_IDS.map((id) => ({ id, pl: FRAMES[id].pl, en: FRAMES[id].en, full: FRAMES[id].full })),
-    tones: Object.keys(TONES), limits: LIMITS, stats,
+    tones: Object.keys(TONES), limits: LIMITS, steps: STEP_AT, stats,
     get busy() { return !!cur?.alive; },
     /* the chromatic split needs a backdrop filter that takes an SVG filter: false turns the scene's split off (the ink still splits) */
     set chroma(v) { chromaOk = v; }, get chroma() { return chromaOk; },

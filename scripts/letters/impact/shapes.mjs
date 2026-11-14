@@ -162,6 +162,46 @@ export function rings(seed, o) {
   return out;
 }
 
+/* what a shock ring throws off: small ragged chunks just outside its rim and short ticks running outward.
+   -> { chunks: [polygon], ticks: [[x1, y1, x2, y2, x3, y3]] } */
+export function chunks(seed, o) {
+  const R = rng(seed);
+  const n = o.n ?? 14, flat = o.flat ?? 1, out = { chunks: [], ticks: [] };
+  for ( let i = 0; i < n; i++ ) {
+    const a = R.f(0, TAU), d = o.r * R.f(1.0, 1.35), s = o.size * R.f(0.5, 1.4);
+    const x = o.cx + Math.cos(a) * d, y = o.cy + Math.sin(a) * d * flat, p = [], k = 3 + R.i(0, 2), t0 = R.f(0, TAU);
+    for ( let j = 0; j < k; j++ ) { const q = t0 + (j / k) * TAU + R.f(-0.4, 0.4); p.push(x + Math.cos(q) * s * R.f(0.5, 1.3), y + Math.sin(q) * s * R.f(0.5, 1.3)); }
+    out.chunks.push(p);
+  }
+  for ( let i = 0; i < Math.round(n * 1.4); i++ ) {
+    const a = R.f(0, TAU), r0 = o.r * R.f(1.08, 1.3), r1 = r0 + o.r * R.f(0.12, 0.3), w = R.f(0.008, 0.02);
+    out.ticks.push([o.cx + Math.cos(a - w) * r0, o.cy + Math.sin(a - w) * r0 * flat, o.cx + Math.cos(a + w) * r0, o.cy + Math.sin(a + w) * r0 * flat,
+      o.cx + Math.cos(a) * r1, o.cy + Math.sin(a) * r1 * flat]);
+  }
+  return out;
+}
+
+/* puffs of dust: little clusters of round lumps thrown mostly along `ang` (null = all round). -> [[[x, y, r], ...], ...] one list per puff */
+export function puffs(seed, o) {
+  const R = rng(seed);
+  const n = o.n ?? 6, spread = o.ang == null ? Math.PI : 1.1, out = [];
+  for ( let i = 0; i < n; i++ ) {
+    const a = (o.ang ?? 0) + R.f(-spread, spread), d = o.r * R.f(0.45, 1), s = o.size * R.f(0.6, 1.3);
+    const x = o.cx + Math.cos(a) * d, y = o.cy + Math.sin(a) * d, lumps = [];
+    for ( let k = 0; k < 4; k++ ) lumps.push([x + R.f(-0.6, 0.6) * s, y + R.f(-0.6, 0.6) * s, s * R.f(0.45, 0.8)]);
+    out.push(lumps);
+  }
+  return out;
+}
+
+/* a tapered streak from (x0, y0) to (x1, y1), widest at its front end. -> { outer, inner } polygons */
+export function streak(seed, o) {
+  const R = rng(seed);
+  const dx = o.x1 - o.x0, dy = o.y1 - o.y0, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, n = 9;
+  const side = (k) => { const up = [], dn = []; for ( let i = 0; i <= n; i++ ) { const t = i / n, w = o.w * k * Math.pow(t, 0.7) * R.f(0.85, 1.1), x = o.x0 + dx * t, y = o.y0 + dy * t; up.push(x - uy * w, y + ux * w); dn.push(x + uy * w, y - ux * w); } const rv = []; for ( let i = dn.length - 2; i >= 0; i -= 2 ) rv.push(dn[i], dn[i + 1]); return [...up, ...rv]; };
+  return { outer: side(1), inner: side(0.5) };
+}
+
 /* bounds of a flat polygon: { x0, y0, x1, y1 } */
 export function boundsOf(p) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
