@@ -309,6 +309,14 @@ export function waveRide(at, r0, reach, rim, { avoid = [], ui = [], v = null, wb
  * The spot a FALL / CATCH word letters on THIS client (pure): its own when it is in the view `v`, else the candidate (a landing, a
  * fire) in view nearest to its moment and not used yet by the page (`used`: a Set of "x,y"); null when none is in view. -> { x, y, ms,
  * gate? } */
+/** A riding word's way kept inside the view `v` (scene px) with room for its box `bw` x `bh` (pure): a sound coming from beyond the
+    edge (the meteor high up, the hero falling from above the screen) is lettered at the edge it comes through, never cut by it
+    (EFFECTS2: live, the meteor's far whine and the hero's fall rode in half off the top of the screen). Times are kept. */
+export function rideInView(path, v, bw = 0, bh = 0) {
+  if ( !v || !Array.isArray(path) ) return path;
+  const mx = Math.min(bw * 0.55, (v.x1 - v.x0) * 0.45), my = Math.min(bh * 0.75, (v.y1 - v.y0) * 0.45);
+  return path.map((q) => ({ ...q, x: clamp(q.x, v.x0 + mx, v.x1 - mx), y: clamp(q.y, v.y0 + my, v.y1 - my) }));
+}
 export function pickSpot(w, v, used = new Set(), T0 = 0) {
   return pickSpots(w, v, used, T0, 1)[0] ?? null;
 }

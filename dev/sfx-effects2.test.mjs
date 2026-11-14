@@ -158,6 +158,15 @@ group("WIRE", () => {
   ok(/else if \( w\.role === "pre" \) \{[\s\S]{0,400}spec\.stopAt = toPerf\(mw\.t\) \+ 40/.test(sfx), "a standing pre word yields when the main word lands");
 });
 
+group("RIDEVIEW", () => {
+  const v = { x0: 0, y0: 0, x1: 1000, y1: 600 };
+  const r = P.rideInView([{ x: 500, y: -400, ms: 0 }, { x: 520, y: 100, ms: 300 }, { x: 540, y: 300, ms: 600 }], v, 200, 60);
+  ok(r[0].y >= 45 && r[0].x === 500 && r[0].ms === 0, "a ride from above the screen starts at its top edge, whole");
+  ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
+  ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
+  ok(/PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "pre rides are kept in view where they play");
+});
+
 group("SPOTS", () => {
   const v = { x0: 0, y0: 0, x1: 1000, y1: 1000 };
   const w = { x: 500, y: 500, t: 1400, cands: [{ x: 100, y: 100, ms: 300 }, { x: 900, y: 900, ms: 420 }, { x: 5000, y: 0, ms: 400 }, { x: 500, y: 500, ms: 400 }] };
