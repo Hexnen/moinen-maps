@@ -785,7 +785,10 @@ function play(w) {
     stats.words++;
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
-    const rec = { box: w.box, h, obj: w.obj, voice: w.voice };
+    // (EFFECTS2: a cave-in's word sinks as it holds - live, the debris word after it was placed just under its box and drawn inside its
+    // letters - so what it covers here reaches half its height lower; REQUESTS EFFECTS2-4)
+    const bx = w.box && w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
+    const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
   };

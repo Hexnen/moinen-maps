@@ -165,6 +165,7 @@ group("RIDEVIEW", () => {
   ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
   ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
   ok(/PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "pre rides are kept in view where they play");
+  ok(/w\.voice === "cavein" \? \{ \.\.\.w\.box, y1: w\.box\.y1 \+ \(w\.box\.y1 - w\.box\.y0\) \* 0\.5 \}/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");
 });
 
 group("SPOTS", () => {
