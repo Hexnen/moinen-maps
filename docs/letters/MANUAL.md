@@ -47,6 +47,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | MODE (the invincible motion type as the GM's table setting `movement`; stepped grid on the shared clock, `L.gridClock`) | 1.9.2 | API-CONTRACT 1.9.2 (v12) | `tactics-zones-mode` | pending merge (sections 11a, 15) |
 | LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.4 | API-CONTRACT 1.9.4 (v13) | `tactics-zones-look3` | pending merge (section 13) |
 | FONTSEL (the invincible style in two faces: League Gothic, the default, and Anton; the GM's table setting `face`; each face tuned for its own shapes; optical sizes for small pictures) | 1.9.7 | API-CONTRACT 1.9.7 (v14) | `tactics-zones-fontsel` | pending merge (sections 13, 14, 15) |
+| KERNEX (punctuation never reads as a diacritic of its neighbour: a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; both faces) | 1.9.8 | API-CONTRACT 1.9.8 (v15) | `tactics-zones-kernex` | pending merge (sections 13, 18) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -675,6 +676,18 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     `hand.kern.gap` (Anton 0.04-0.06 of the cap, League Gothic 0.032-0.048); no row comes closer than `KERN.touch`; doubles (AA, RR)
     a little tighter; AV / TA / LT end up tighter than HN; vertical layouts are skipped except a row's mark in League Gothic (P18,
     FONTSEL).
+  - **Marks never read as diacritics** (KERNEX 1.9.8, `shape.mjs settleMarks`, [V] `check-marks.mjs`): in Polish a mark at a letter
+    changes the letter (a dot under E's foot = Ę, a hyphen into an L's stem = Ł, a dot over a Z = Ż). The optical spacing above set
+    a mark like a letter: it counted the mark's empty rows (between the bar and the dot of "!") and the letter's open side as air
+    and let the closest row touch, and the union keyline then made the touching mark part of the letter ("ZBURZENIE!" read
+    "ZBURZENIĘ!"; in 1.9.7 a "!" overlapped about 300 of 855 letter pairs by up to 0.02 cap, in both faces). Now every mark (`! ?
+    . , : ;`, the hyphen, the minus) keeps at least the hand's gap (`hand.kern.gap`) from each letter of its word: beside the letter
+    row by row (it may still tuck into an open side), above or below it (up to 0.3 cap) from the letter's whole width; measured on
+    the hold picture in the letter's own frame (lean included), the mark moves away along the line only as far as needed (every "!"
+    then stands exactly at the gap at its closest row). In the vertical column it also clears the letter of the row above (the rows
+    tuck). In small pictures a mark stands at least `MARK.px` (1.5 px) clear where it shares rows with its letter (the mark slides
+    out, the letters stay; 1.9.7 at 26 px: fused, down to -1 px). Kept as they were: the tucked lead-in's hyphen under the first
+    body letter (P7, the owner's prefix) and mark-to-mark pairs ("!!", "?!"). The legacy styles do not run it (frozen).
   - **Smear**: outline echoes only, no pale filled copies (P15).
   - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
@@ -912,6 +925,10 @@ Status: stable list; edit as items close.
   near a grid instant a clock error of a few ms can move one seat's contact by a whole tick (41.7 ms).
 - `plan.contactMs` of the legacy styles under reduced motion is the legacy reduced entrance's own (frozen look): a reduced legacy
   seat's contact is not aligned with a full one (FINE-3).
+- Marks (KERNEX 1.9.8): the clearance is measured on the hold picture; entrance and exit pictures are checked only for "no touch"
+  (a moving letter may come closer than the gap for a drawing). The tucked lead-in's hyphen still overlaps the first body letter by
+  design (P7); a body that starts with L would put that hyphen into the L's stem at the top (not seen in the vocabulary; question
+  KERNEX-1). [V node]
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -988,6 +1005,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-14 (FONTSEL, 1.9.7, `tactics-zones-fontsel`): the invincible style in two faces, League Gothic (default) and Anton:
   face, per-face tuning, optical sizes, minus, the column's mark (13), the owner's ruling (14), the table setting `face` (15), the
   API index (20), the stage table.
+- 2026-11-14 (KERNEX, 1.9.8, `tactics-zones-kernex`): marks never read as a diacritic of their letter (13: cause, rule, small
+  sizes, what keeps its setting), the trap in limits (18), the stage table; `check-marks.mjs` (16).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

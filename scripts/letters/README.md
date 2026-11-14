@@ -605,6 +605,11 @@ cap), and slides the right letter until the mean gap equals `hand.kern.gap` (0.0
 closer than `KERN.touch` (-0.02: a hair of overlap under the keyline). Doubles (RR, AA) use 0.85 of the gap; a prefix overlaps the
 body by `KERN.preOverlap`; linked rings keep their link distance. So AV, TA, LT, FW tuck in and HN, MN stay apart, as a letterer
 spaces by eye. Vertical layouts set their own rows (`TUCK` 0.14).
+Marks are not letters (KERNEX 1.9.8, `settleMarks` after the reader): a `! ? . , : ;`, hyphen or minus that touched a letter was
+joined to it by the union keyline and read as a Polish diacritic (the dot under E's foot = Ę). Each mark keeps at least
+`hand.kern.gap` from every letter of its word, beside it row by row and above / below it (up to `MARK.dz` 0.3 cap) from its whole
+width, measured on the hold picture in the letter's frame; in small pictures at least `MARK.px` (1.5 px) where they share rows.
+The tucked lead-in's hyphen and mark-to-mark pairs keep their setting; legacy styles never run it. Checked by `check-marks.mjs`.
 
 **The look says the sound.** `plan.traits` names what the sound is like, read from WORD's character (`L.word(...).play.character`:
 hard, heavy, wet, metal, electric, heat, texture, contour) and the plan's sound (sharp, rough, pitch, long); plain text gets its mood's.
