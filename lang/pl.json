@@ -2582,5 +2582,16 @@
   "MOINENMAPS.Sfx.layers.weather": "Nad pogodą i dymem (w świetle sceny)",
   "MOINENMAPS.Sfx.layers.overlay": "Nad całą sceną i oświetleniem",
   "MOINENMAPS.Sfx.layers.top": "Nad wszystkim na płótnie",
-  "MOINENMAPS.Sfx.layerHint": "Gdzie rysują się napisy dźwięków zniszczeń i ognia: na ziemi pod żetonami, nad żetonami pod dymem ognia i pogodą, nad pogodą, ale przyciemnione nocą, nad całą sceną i jej oświetleniem albo nad wszystkim na płótnie."
+  "MOINENMAPS.Sfx.layerHint": "Gdzie rysują się napisy dźwięków zniszczeń i ognia: na ziemi pod żetonami, nad żetonami pod dymem ognia i pogodą, nad pogodą, ale przyciemnione nocą, nad całą sceną i jej oświetleniem albo nad wszystkim na płótnie.",
+  "MOINENMAPS.Sfx.size.destruction": "Wielkość napisów zniszczeń",
+  "MOINENMAPS.Sfx.size.destructionHint": "Jak duże są komiksowe napisy dźwięków zniszczeń, wybuchów, strzałów i spadającego gruzu na każdym ekranie: 0 brak, 1 mniejsze, 2 zwykłe (domyślnie), 3 większe. Wybiera MG dla stołu.",
+  "MOINENMAPS.Sfx.size.fire": "Wielkość napisów ognia",
+  "MOINENMAPS.Sfx.size.fireHint": "Jak duże są komiksowe napisy dźwięków zajmującego się, płonącego i gasnącego ognia na każdym ekranie: 0 brak, 1 mniejsze, 2 zwykłe (domyślnie), 3 większe. Wybiera MG dla stołu.",
+  "MOINENMAPS.Sfx.size.weather": "Wielkość napisów pogody",
+  "MOINENMAPS.Sfx.size.weatherHint": "Jak duże są komiksowe napisy grzmotów burzy na każdym ekranie: 0 brak, 1 mniejsze, 2 zwykłe (domyślnie), 3 większe. Wybiera MG dla stołu.",
+  "MOINENMAPS.Sfx.size.step0": "brak",
+  "MOINENMAPS.Sfx.size.step1": "mniejsze",
+  "MOINENMAPS.Sfx.size.step2": "zwykłe",
+  "MOINENMAPS.Sfx.size.step3": "większe",
+  "MOINENMAPS.Sfx.size.gmOnly": "Wielkość napisów wybiera MG dla całego stołu."
 }

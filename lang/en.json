@@ -2582,5 +2582,16 @@
   "MOINENMAPS.Sfx.layers.weather": "Over weather and smoke (in the scene's light)",
   "MOINENMAPS.Sfx.layers.overlay": "Over the whole scene and its lighting",
   "MOINENMAPS.Sfx.layers.top": "Over everything on the canvas",
-  "MOINENMAPS.Sfx.layerHint": "Where the sound-effect words of damage and fire are drawn: on the ground under tokens, over tokens under the fire's smoke and the weather, over the weather but darkened by the night, over the whole scene and its lighting, or over everything on the canvas."
+  "MOINENMAPS.Sfx.layerHint": "Where the sound-effect words of damage and fire are drawn: on the ground under tokens, over tokens under the fire's smoke and the weather, over the weather but darkened by the night, over the whole scene and its lighting, or over everything on the canvas.",
+  "MOINENMAPS.Sfx.size.destruction": "Destruction lettering size",
+  "MOINENMAPS.Sfx.size.destructionHint": "How big the comic sound words of damage, blasts, guns and falling debris are on every screen: 0 none, 1 smaller, 2 normal (default), 3 bigger. The GM chooses it for the table.",
+  "MOINENMAPS.Sfx.size.fire": "Fire lettering size",
+  "MOINENMAPS.Sfx.size.fireHint": "How big the comic sound words of fire catching, burning and going out are on every screen: 0 none, 1 smaller, 2 normal (default), 3 bigger. The GM chooses it for the table.",
+  "MOINENMAPS.Sfx.size.weather": "Weather lettering size",
+  "MOINENMAPS.Sfx.size.weatherHint": "How big the comic sound words of the storm's thunder are on every screen: 0 none, 1 smaller, 2 normal (default), 3 bigger. The GM chooses it for the table.",
+  "MOINENMAPS.Sfx.size.step0": "none",
+  "MOINENMAPS.Sfx.size.step1": "smaller",
+  "MOINENMAPS.Sfx.size.step2": "normal",
+  "MOINENMAPS.Sfx.size.step3": "bigger",
+  "MOINENMAPS.Sfx.size.gmOnly": "The GM chooses the lettering sizes for the whole table."
 }

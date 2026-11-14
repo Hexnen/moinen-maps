@@ -1,0 +1,179 @@
+// SFXSIZE: the size sliders of the map's lettering (scripts/sfx/sfx-size.mjs + its wiring in sfx.mjs). Owner, 2026-11-15: destruction,
+// fire and weather lettering each get a table setting 0 (none) / 1 (smaller) / 2 (today's size, default) / 3 (bigger), chosen by the GM.
+// Each group fails on the build before SFXSIZE (no sfx-size.mjs: the import fails) and names what it holds. Sizes are measured with
+// the engine's own size model (scripts/letters/size.mjs, read only).
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import * as SZ from "../scripts/sfx/sfx-size.mjs";
+import * as C from "../scripts/sfx/sfx-core.mjs";
+import * as P from "../scripts/sfx/sfx-page.mjs";
+import * as EV from "../scripts/sfx/sfx-events.mjs";
+import * as PC from "../scripts/presets/core.mjs";
+import { BUILTIN } from "../scripts/presets/defs.mjs";
+import * as MC from "../scripts/presets/meteor-core.mjs";
+import { fallAt } from "../scripts/presets/landing-fx.mjs";
+import { sizeFor, limits, SIZE } from "../scripts/letters/size.mjs";
+
+let n = 0;
+const ok = (c, m) => { assert.ok(c, m); n++; };
+const failed = [];
+const group = (id, fn) => { try { fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
+const src = (p) => fs.readFileSync(new URL(`../scripts/${p}`, import.meta.url), "utf8");
+const sfx = src("sfx/sfx.mjs");
+
+/* ---- firing pages of the built-in presets (as dev/sfx-page.test.mjs builds them: the burst a fire-layer stroke with its debris) */
+const ENV = { grid: 100, rect: { x: 0, y: 0, width: 6000, height: 4000 }, now: 1_800_000_000_000, wind: { dir: 0, speed: 0.4 } };
+const GEST = { point: { a: [3000, 2000] }, throw: { a: [2400, 2000], b: [3000, 2100] }, shot: { a: [2400, 2000], b: [3000, 2200], from: [2400, 2000], fr: 50 }, line: { a: [2400, 1900], b: [3200, 2100] }, run: { a: [1600, 2000], b: [3400, 2000] } };
+function pageOf(id, seed = 11) {
+  const d = BUILTIN.find((q) => q.id === id); if ( !d ) return null;
+  const plan = PC.expand(d, GEST[d.gesture], { seed }, ENV), strokes = new Map(), f = [];
+  for ( const r of plan.fire ) { const st = { id: `f-${r.key}`, ...r }; strokes.set(st.id, st); f.push({ id: st.id, key: r.key }); }
+  for ( const b of plan.pending.burst ?? [] ) { const st = { id: `f-burst.${b.id}`, k: "burst", p: [b.x, b.y], r: b.r, lv: b.lv, q: Math.round(plan.t0 + (b.at ?? 0)), wd: 0, ws: 0.4 }; strokes.set(st.id, st); f.push({ id: st.id }); }
+  const rec = { id: `fid-${id}-${seed}`, preset: id, t0: plan.t0, seed: plan.seed, size: plan.size, power: plan.power, at: plan.at, dir: plan.dir,
+    d: plan.destruction.map((r, i) => ({ id: `d${i}`, key: r.key })), f, pending: { ...plan.pending, burst: [] } };
+  return P.firingPage(rec, { grid: 100, strokes, wayOf: MC.wayOf, headAt: MC.headAt, fallAt, lift: 0.5 });
+}
+const PRESETS = BUILTIN.map((d) => d.id);
+const pages = PRESETS.flatMap((id) => [11, 23, 97].map((s) => ({ id, s, pg: pageOf(id, s) }))).filter((q) => q.pg?.words?.length);
+
+/* ---- the engine's size model for a ranked map word (sfx.mjs optsOf: size = rankSize(rank, vh / zoom, shrink), ceilK 1) and a cluster
+   word (magnitude + area, ceilK = CEIL_K[role]) at a step: the cap height on screen, CSS px */
+const ranked = (rank, { vh, vw, zoom, sizeK = 1, shrink = 1, mag = 1 }, step) => {
+  const o = SZ.sizeOpts({ size: EV.rankSize(rank, vh / zoom, shrink), ceilK: 1, magnitude: mag }, step);
+  return sizeFor({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4, ...o });
+};
+const clustered = (role, { vh, vw, zoom, sizeK = 1, mag, area }, step) => {
+  const o = SZ.sizeOpts({ magnitude: mag, area, ceilK: C.CEIL_K[role] }, step);
+  return sizeFor({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4, ...o });
+};
+const SCREENS = [[1366, 600], [1366, 768], [1600, 900], [1920, 1080], [2560, 1440]];
+const ZOOMS = [0.25, 0.5, 1, 2, 3];
+
+// GROUPS: every map sound belongs to one group - fire is the burning (catch, flare, out, douse, a page's catch and hisses), weather the
+// storm's flashes (a story of its own), everything else destruction (damage, blasts, guns, debris, dust, ploughs, Detonate)
+group("GROUPS", () => {
+  ok(JSON.stringify(SZ.SIZE_GROUPS) === '["destruction","fire","weather"]', "three groups");
+  for ( const v of Object.keys(C.VOICES) ) ok(SZ.groupOfVoice(v) === (/^(fire|flare|out|douse)$/.test(v) ? "fire" : "destruction"), `voice ${v} -> ${SZ.groupOfVoice(v)}`);
+  ok(pages.length >= 10, `pages of the built-in presets: ${pages.length}`);
+  for ( const { id, pg } of pages ) for ( const w of pg.words ) {
+    const g = SZ.groupOfPageWord(w);
+    ok(g === (w.role === "catch" || w.role === "out" ? "fire" : "destruction"), `${id} ${w.key} -> ${g}`);
+  }
+  ok(SZ.groupOfPageWord({ role: "main" }, "weather") === "weather", "a storm's flash story is weather");
+  ok(/storyPage\(`flash\|\$\{id\}`[^\n]*, null, "weather"\);/.test(sfx), "sfx.mjs tells the storm's flash as a weather story");
+});
+
+// STEPS: the setting's values and today's size; step 2 passes the play options through UNTOUCHED (the same object), so a word at the
+// default is today's word to the byte: its plan, size and placement
+group("STEPS", () => {
+  ok(SZ.SIZE_DEFAULT === 2 && SZ.STEP_K[2] === 1 && SZ.STEP_K[0] === 0, "2 is today's size");
+  ok(SZ.STEP_K[1] < 0.8 && SZ.STEP_K[1] >= 0.6 && SZ.STEP_K[3] >= 1.25 && SZ.STEP_K[3] <= 1.5, `1 clearly smaller, 3 clearly bigger: ${SZ.STEP_K}`);
+  for ( const [v, s] of [[undefined, 2], [null, 2], ["", 2], ["x", 2], [0, 0], [1, 1], [2, 2], [3, 3], ["3", 3], [7, 3], [-1, 0], [1.4, 1]] ) ok(SZ.stepOf(v) === s, `stepOf(${v}) = ${s}`);
+  const samples = [{ magnitude: 0.8, area: 120, ceilK: 0.6 }, { size: 44, ceilK: 1 }, { scale: 0.7, size: 30 }, {}, { magnitude: 1.4, area: 400, ceilK: 0.38, path: { points: [] } }];
+  for ( const o of samples ) { const j = JSON.stringify(o); ok(SZ.sizeOpts(o, 2) === o && JSON.stringify(o) === j, "step 2: the same options object, unchanged"); }
+  ok(SZ.sizeAt(37.5, 2) === 37.5 && SZ.screenSizeAt(81, 2, 900) === 81 && Object.keys(SZ.streamOpts(55, 2)).length === 0, "step 2: sizes and streams untouched");
+  for ( const o of samples ) for ( const s of [1, 3] ) { const q = SZ.sizeOpts(o, s); ok(q !== o && q.scale === (o.scale ?? 1) * SZ.STEP_K[s], `step ${s} scales the natural size`); }
+  ok(SZ.ceilAt(0.6, 1) < 0.6 && SZ.ceilAt(0.6, 3) > 0.6 && SZ.ceilAt(1, 3) === 1 && SZ.ceilAt(0.38, 3) <= 1, "the ceiling share steps too, never past the engine's whole ceiling");
+  // (the stream's numbers mirror the engine's stream(): its syllable unit and ceiling share)
+  const eng = src("letters/engine.mjs");
+  ok(eng.includes(`sizeFor(c).natural * ${SZ.STREAM_UNIT};`) && eng.includes(`ceilK: o.ceilK ?? ${SZ.STREAM_CEIL}`), "STREAM_UNIT / STREAM_CEIL are the engine's stream numbers");
+});
+
+// SIZES (engine size model): at every screen and zoom a ranked story word and a cluster word step clearly down at 1 and up at 3,
+// 1 stays readable (on or a hair under the engine's legibility floor, never below its hard stop), 3 never goes past the engine's whole
+// ceiling (it cannot bury the scene), and inside one step the story's rank order holds (a lower rank never draws bigger)
+group("SIZES", () => {
+  let down = 0, up = 0, cases = 0;
+  for ( const [vw, vh] of SCREENS ) for ( const zoom of ZOOMS ) for ( const sizeK of [0.62, 1, 1.32] ) for ( const shrink of [0.75, 1] ) {
+    const ctx = { vw, vh, zoom, sizeK, shrink };
+    for ( let r = 1; r <= 5; r++ ) {
+      cases++;
+      const mag = P.RANK_MAG[r], a = ranked(r, { ...ctx, mag }, 1).px, b = ranked(r, { ...ctx, mag }, 2).px, c = ranked(r, { ...ctx, mag }, 3).px;
+      const L = limits({ space: "world", vh, vw, magnitude: mag, sizeK, aspect: 4, ceilK: 1 });
+      ok(a < b && b < c, `rank ${r} at ${vw}x${vh} zoom ${zoom} k${sizeK}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)}`);
+      // (readable as today's word: on the floor, or a hair under it where today's word is already held there; never past the hard stop)
+      ok(a >= Math.min(L.floor, b) * 0.95 && a >= L.floor * SIZE.hardLo - 1e-6, `rank ${r} step 1 readable: ${a.toFixed(1)} px vs floor ${L.floor.toFixed(1)} (today ${b.toFixed(1)})`);
+      ok(c <= L.ceil * SIZE.hardHi + 1e-6, `rank ${r} step 3 under the engine's whole ceiling: ${c.toFixed(1)} vs ${L.ceil.toFixed(1)}`);
+      if ( a / b <= 0.8 ) down++;
+      if ( c / b >= 1.2 ) up++;
+      if ( r < 5 ) for ( const s of [1, 2, 3] ) {
+        const lo = ranked(r, { ...ctx, mag }, s).px, hi = ranked(r + 1, { ...ctx, mag: P.RANK_MAG[r + 1] }, s).px;
+        ok(lo <= hi + 1e-6, `step ${s}: rank ${r} (${lo.toFixed(1)}) never bigger than rank ${r + 1} (${hi.toFixed(1)})`);
+      }
+    }
+    for ( const [role, mag, area] of [["main", 1.4, 500], ["main", 0.6, 120], ["sec", 0.4, 80], ["pre", 0.3, 60]] ) {
+      const L = limits({ space: "world", vh, vw, magnitude: mag, sizeK, aspect: 4, ceilK: 1 });
+      const a = clustered(role, { ...ctx, mag, area }, 1).px, b = clustered(role, { ...ctx, mag, area }, 2).px, c = clustered(role, { ...ctx, mag, area }, 3).px;
+      ok(a < b && b < c && c <= L.ceil * SIZE.hardHi + 1e-6, `cluster ${role} m${mag}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)} <= ${L.ceil.toFixed(1)}`);
+      ok(a >= L.floor * SIZE.hardLo - 1e-6, `cluster ${role} step 1 never under the engine's hard stop`);
+    }
+  }
+  ok(down / cases > 0.85 && up / cases > 0.6, `clearly smaller at 1 in ${(100 * down / cases).toFixed(0)} %, clearly bigger at 3 in ${(100 * up / cases).toFixed(0)} % of ${cases} cases`);
+  // a ranked word shown on the screen (unclamped by the engine): stepped, the biggest held under SCREEN_MAX of the screen height
+  for ( const vh of [600, 900, 1440] ) for ( let r = 1; r <= 5; r++ ) {
+    const s2 = EV.rankSize(r, vh), s1 = SZ.screenSizeAt(s2, 1, vh), s3 = SZ.screenSizeAt(s2, 3, vh);
+    ok(s1 < s2 && s3 >= s2 && s3 <= Math.max(s2, SZ.SCREEN_MAX * vh) + 1e-9 && s1 >= vh * SIZE.floorVh * 0.95, `screen rank ${r} at ${vh}: ${s1.toFixed(1)} / ${s2.toFixed(1)} / ${s3.toFixed(1)}`);
+  }
+});
+
+// PLACEMENT: the placement measures the stepped word; across subjects in the middle, at an edge and in a corner of the view, at the
+// sizes that occur on a map, a bigger main word still sits inside the view and off what it letters wherever today's word does; a
+// satellite that finds no free spot is dropped, never laid over another word
+group("PLACEMENT", () => {
+  const v = { x0: 0, y0: 0, x1: 1600, y1: 900 };
+  let both = 0, held = 0;
+  for ( const [cx, cy] of [[800, 450], [200, 450], [1450, 450], [800, 120], [800, 800], [150, 120], [1480, 820]] ) for ( const R of [60, 140, 260] ) for ( const u of [30, 55, 90] ) {
+    const S = { x0: cx - R, y0: cy - R, x1: cx + R, y1: cy + R };
+    const res = [1, 2, 3].map((s) => {
+      const k = SZ.STEP_K[s], w = { role: "main", text: "KA-BOOM!", chars: 8, x: cx, y: cy, t: 0, size: u * k, bw: u * k * 7, bh: u * k * 1.6, subject: S, cover: 0.3, around: C.besideOf(1) };
+      const sat = { role: "sec", text: "KRAK", chars: 4, x: cx + R, y: cy + R * 0.5, t: 100, size: u * k * 0.6, bw: u * k * 0.6 * 4, bh: u * k * 0.6 * 1.6, subject: null };
+      return C.place([w, sat], { view: v, ui: [{ x0: 1500, y0: 0, x1: 1600, y1: 900 }], tokens: [], alive: [] });
+    });
+    const m = res.map((r) => r.find((q) => q.role === "main"));
+    // (a satellite kept never lies on the main word)
+    for ( const r of res ) { const a = r.find((q) => q.role === "main")?.box, b = r.find((q) => q.role === "sec")?.box;
+      if ( a && b ) ok(Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)) <= 0.05 * (b.x1 - b.x0) * (b.y1 - b.y0) + 1e-6, "a satellite stays off the main word"); }
+    if ( !m[1] || m[1].pen.off > 1e-9 || m[1].pen.sub > 1e-9 || m[1].pen.pui > 1e-9 ) continue;
+    both++;
+    for ( const s of [0, 2] ) ok(m[s] && m[s].pen.off <= 1e-9, `step ${s + 1}: the main word stays in view (${cx},${cy} R${R} u${u})`);
+    // (the same placement rules at every step: a word touches its subject's edge by a share of its OWN height and may cover its voice's
+    // allowance of it, so a much bigger word next to a small subject may lie a little further over it - never more than a tenth of the
+    // subject beyond the allowance, never under a panel)
+    ok(m[2] && m[2].pen.pui <= 1e-9 && m[2].pen.sub <= 0.1, `step 3: the bigger main word stays off the panels and mostly off its subject (${cx},${cy} R${R} u${u}: ${m[2]?.pen.sub.toFixed(3)})`);
+    if ( m[2] && m[2].pen.sub <= 1e-9 && m[2].pen.pui <= 1e-9 ) held++;
+    else if ( process.env.SFXSIZE_VERBOSE ) console.log("step 3 not free:", cx, cy, R, u, JSON.stringify(m[2]?.pen));
+    // (the placement may let a small word lie a little over its subject rather than stand far from it - its cover allowance plus a
+    // share: the trade-off today's placement makes for any word of that size)
+    ok(m[0] && m[0].pen.off <= 1e-9 && m[0].pen.sub <= 0.1, `step 1: the smaller main word stays in view and mostly off its subject (${cx},${cy} R${R} u${u})`);
+  }
+  ok(both >= 30, `scenarios where today's word sits free: ${both}`);
+  ok(held / both >= 0.7, `the bigger word stays wholly within its subject allowance in ${held} of ${both}`);
+});
+
+// ZERO and LIVE (wiring in sfx.mjs): a group at 0 letters nothing and schedules nothing; every size is a WORLD setting of the GM's (the
+// window's slider 0..3, default 2), applied live (onChange) on every seat; the step reaches every way a word is drawn
+group("WIRING", () => {
+  ok(/for \( const g of SZ\.SIZE_GROUPS \) game\.settings\.register\(MODULE_ID, SZ\.SIZE_SETTING\[g\], \{[\s\S]{0,120}?scope: "world", config: true,\s*restricted: true, type: Number, default: SZ\.SIZE_DEFAULT, range: \{ min: 0, max: 3, step: 1 \}, onChange: \(\) => sizeChanged\(g\) \}\);/.test(sfx),
+    "three world settings, the GM's, slider 0..3, default 2, live");
+  ok(!/scope: "client"[^\n]*sfxSize/.test(sfx) && !/sfxSize\w*", \{[^}]*scope: "client"/.test(sfx), "no client setting for the sizes");
+  ok(/if \( stepFor\(SZ\.groupOfVoice\(e\.voice\)\) === 0 \) return;/.test(sfx), "an event of a group at 0 is not even scheduled");
+  ok(/if \( stepFor\(SZ\.groupOfPageWord\(w\)\) === 0 \) continue;/.test(sfx) && /const grp = SZ\.groupOfPageWord\(w, p\.grp\);\n\s*if \( stepFor\(grp\) === 0 \) return;/.test(sfx), "a page word of a group at 0 is not scheduled, nor played if the GM switched it off meanwhile");
+  ok(/stepFor\("weather"\) === 0 \) return again\(2000\)/.test(sfx), "weather at 0: the storm is not even read");
+  ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;\n\s*sfxBus\.entry = noDestr \? null : onEntry;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx), "destruction at 0: off the display's hooks");
+  ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), stepFor\("fire"\)\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
+  ok(/return raw \? o : SZ\.sizeOpts\(o, stepFor\(grpOf\(w\)\)\);/.test(sfx) && /const z = L\.sizeOf\(w\.text, o\);/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w\);/.test(sfx.slice(sfx.indexOf("function measure"))),
+    "the stepped options are what the word plays AND is measured with (placement sees the stepped size)");
+  ok(/o\.size = SZ\.screenSizeAt\(o\.size, step, innerHeight\); else o = SZ\.sizeOpts\(o, step\);/.test(sfx), "an unlocated word steps too");
+  ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
+  ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
+  ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");
+  ok(/Hooks\.on\("renderSettingsConfig", \(app, html\) => sizeRowsForPlayer\(app, html\)\);/.test(sfx) && /if \( game\.user\?\.can\?\.\("SETTINGS_MODIFY"\) \) return;/.test(sfx), "a player sees the sizes read-only");
+  // (the planners know nothing of the size: the story, its order and its placement rules are the same at every step)
+  for ( const f of ["sfx/sfx-core.mjs", "sfx/sfx-page.mjs", "sfx/sfx-events.mjs"] ) ok(!/sfxSize|sfx-size|STEP_K/.test(src(f)), `${f} plans the same page at every step`);
+  const lang = (l) => JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
+  for ( const l of ["en", "pl"] ) { const J = lang(l);
+    for ( const k of [...SZ.SIZE_GROUPS.flatMap((g) => [`size.${g}`, `size.${g}Hint`]), "size.step0", "size.step1", "size.step2", "size.step3", "size.gmOnly"] ) ok(typeof J[`MOINENMAPS.Sfx.${k}`] === "string" && J[`MOINENMAPS.Sfx.${k}`].length > 2, `${l} ${k}`); }
+});
+
+if ( failed.length ) { console.error(failed.join("\n")); console.error(`sfx-size: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }
+console.log(`sfx-size: ${n} checks passed`);
