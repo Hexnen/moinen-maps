@@ -690,7 +690,9 @@ function paintUnion(ctx, plan, geo, all, wb, S, ox, oy, canvas, make, p) {
   for ( const g of geo ) {
     const j = Ls[g.i]?.link; if ( j == null ) continue;
     const other = geo.find((q) => q.i === j); if ( !other ) continue;
-    const under = rank(g) < rank(other) ? g : other, b = bbox(under.cs), cy = Math.round(oy + (b.y0 + b.y1) / 2 * S);
+    /* LOOK3: the switch from over to under lies half way between the two rings' middles: with the rings staggered (one up, one down)
+       the two crossings are symmetric about that line, not about either ring's own middle (level rings: the same line as before) */
+    const under = rank(g) < rank(other) ? g : other, b = bbox(g.cs), bo = bbox(other.cs), cy = Math.round(oy + (b.y0 + b.y1 + bo.y0 + bo.y1) / 4 * S);
     ctx.save(); ctx.beginPath(); ctx.rect(0, cy, canvas.width, canvas.height - cy); ctx.clip(); letter(under); ctx.restore();
   }
 }

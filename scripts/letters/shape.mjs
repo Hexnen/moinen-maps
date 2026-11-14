@@ -215,7 +215,10 @@ export function occlusionReport(plan, bank, only = null) {
       if ( Ls[i].link === j || Ls[j].link === i ) continue;   // interlocked rings cross, they do not hide each other
       const Pj = placeOf(Ls[j], base[j].gl);
       /* stacked letters: the one in front covers with its outlines; merged ones flow into each other (no line between them) */
-      const grow = H.stack === "merge" ? 0 : outer / Ls[i].s, cs = mapCs(mapCs(base[j].cs, Pj.fwd), Pi.upright), b = bbox(cs);
+      /* LOOK3: the union keyline (invincible) draws no outline across a neighbour (only a hairline where they truly overlap), so the
+         neighbour covers with its bare shape: counting a keyline width there read a touching W as covering the H's stem (H -> N) and
+         pushed the last letter away ("CRUS H!") */
+      const grow = H.stack === "merge" || H.keyline === "union" ? 0 : outer / Ls[i].s, cs = mapCs(mapCs(base[j].cs, Pj.fwd), Pi.upright), b = bbox(cs);
       if ( b.x1 + grow < mb.x0 || b.x0 - grow > mb.x1 || b.y1 + grow < mb.y0 || b.y0 - grow > mb.y1 ) continue;   // not touching
       cut.push({ cs, grow });
     }
@@ -227,6 +230,7 @@ export function occlusionReport(plan, bank, only = null) {
   }
   return out;
 }
+const UNION_PART = 0.04;   // LOOK3: the most a union-keyline pair parts for the reader, in cap heights of the letter (a touch, never a hole)
 export function settleOcclusion(plan, bank) {
   const Ls = plan.layout.letters, lines = plan.layout.lines ?? [{ from: 0, to: Ls.length - 1 }];
   const state = new Map();
@@ -250,7 +254,18 @@ export function settleOcclusion(plan, bank) {
       const line = lines.find((l) => b.i >= l.from && b.i <= l.to) ?? lines[0];
       const from = Math.max(line.from + 1, b.i + (plan.hand.order === "right" ? 1 : 0));
       if ( from > line.to ) continue;
-      const d = 0.03 * Math.min(L.s, Ls[Math.max(line.from, from - 1)].s);
+      let d = 0.03 * Math.min(L.s, Ls[Math.max(line.from, from - 1)].s);
+      /* LOOK3: in the union-keyline hand (invincible) the optical spacing lets a pair just touch; when that touch hides a stroke
+         (a W's arm on an H's stem reads N) the pair parts by exactly its overlap, so it no longer touches: steps of 0.03 cap opened
+         a visible hole before the last letter ("CRUS H!", "SMAS H!"). The prefix tuck keeps the old steps. */
+      if ( plan.hand.keyline === "union" && from !== (plan.layout.pre ?? 0) && !Ls[from].link && Ls[from - 1] && !Ls[from - 1].skip ) {
+        const a = placedShape(plan, bank, from - 1, Ls[from - 1].x), c = placedShape(plan, bank, from, Ls[from].x);
+        const live = a && c ? pairGaps(a, c).rows.filter((v) => v != null) : [];
+        if ( !live.length ) continue;
+        const over = -Math.min(...live);
+        if ( (Ls[from].pushed ?? 0) >= UNION_PART * L.s ) continue;   // parted as far as a touch may: the letter reads as the eye does
+        d = Math.min(UNION_PART * L.s - (Ls[from].pushed ?? 0), over > 0.008 * L.s ? 0.5 * over : 0.008 * L.s);   // small steps: only as far as the reader needs
+      }
       if ( (Ls[from].pushed ?? 0) + d > 0.2 * L.s ) { open.add(line); continue; }
       Ls[from].pushed = (Ls[from].pushed ?? 0) + d;
       for ( let k = from; k <= line.to; k++ ) Ls[k].x += d;
