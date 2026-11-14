@@ -193,13 +193,22 @@ export function filterPlan(plan, opts, ctx) {
     const log = ctx.flashLog ?? [];
     for ( const f of fl ) {
       const p = all[f.i];
-      if ( !P.flashes || (P.photosafe && big) ) { unflash(p, steady); continue; }
-      if ( !P.photosafe || ctx.preview ) continue;
+      if ( !P.flashes ) { unflash(p, steady); continue; }
+      if ( !P.photosafe || ctx.preview ) { if ( P.photosafe && big ) unflash(p, steady); continue; }
       const at = (ctx.t0 ?? 0) + f.t;
+      /* KEEPBOX (ADVX 6): an impact frame's second belongs to the impact: a word's own flash accent inside it gives way (the impact IS the
+         flash). Before, a seat's private words (the GM's enemy numbers, a word only this seat draws big) took flash slots the other seat
+         did not have, and the impacts after them were thinned differently per seat. */
+      if ( (ctx.impacts ?? []).some((w) => at > w.a0 - PHOTO.windowMs && at < w.a1 + PHOTO.windowMs) ) { unflash(p, steady); continue; }
       const old = (ctx.now ?? at) - PHOTO.windowMs * 2;
       for ( let i = log.length - 1; i >= 0; i-- ) if ( log[i] < old ) log.splice(i, 1);
       if ( log.filter((x) => Math.abs(x - at) < PHOTO.windowMs).length >= PHOTO.maxPerSec ) unflash(p, steady);
-      else log.push(at);
+      else {
+        /* a word too big to flash on THIS seat still takes its slot (counted, not shown): the log then reads alike on every seat that
+           plays the same words, whatever size each draws them (stricter, never looser) */
+        log.push(at);
+        if ( big ) unflash(p, steady);
+      }
     }
   }
   return plan;

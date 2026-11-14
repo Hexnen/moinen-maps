@@ -358,6 +358,8 @@ export async function run(ok) {
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--life"], { encoding: "utf8", env: { ...process.env, LETR_IMPACT_LIFE: "1" }, timeout: 120000 });
     for ( const l of (r.stdout ?? "").split("\n").filter((x) => x.startsWith("FAIL")) ) console.log(l);
     ok(r.status === 0, `impact life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 400) : ""}`);
+    /* 10. KEEPBOX: seats with different frame timing, clocks, delays and private words draw the same pictures from the same calls */
+    await (await import("./check-seats.mjs")).run(ok);
   }
 }
 
@@ -417,6 +419,8 @@ async function life(ok) {
   const b = I.play({ kind: "hit", magnitude: 0.5, seed: 5 });
   ok(!b.alive && (await b.finished) === "busy" && a.alive, "impact life: a weaker impact during another is not shown");
   const c = I.play({ kind: "hit", magnitude: 1.8, seed: 6 });
+  /* KEEPBOX: the cut is a TIME (the stronger one's start), carried out by the cut one's own frame loop on the next display frame */
+  await E.tick(16);
   ok(c.alive && !a.alive && (await a.finished) === "replaced", "impact life: a stronger one takes over");
   await E.tick(700);
   ok(!c.alive && kids() === 0 && liveCv() === 0, "impact life: clean after a take-over");
@@ -442,6 +446,8 @@ async function life(ok) {
   ok(h.mode === "static" && h.plan.frames.filter((f) => f.type !== "rest").length === 1, "impact life: reduced motion = one drawing");
   stops = 0; await E.tick(400);
   ok(!h.alive && stops === 0 && board.style.translate === "1px 2px", "impact life: reduced motion never holds or shoves"); P.motion = "full";
+  /* KEEPBOX: one at a time reads the FULL plan's window on every seat (a reduced seat's still drawing ends earlier, its window does not) */
+  await E.tick(200);
   P.flashes = false; h = I.play({ kind: "crit", magnitude: 2, seed: 9 });
   ok(h.mode === "local" && h.plan.frames.every((f) => !f.full && !f.stop) && h.env.local.r <= localRadius(innerWidth, innerHeight) + 1e-6, "impact life: flashes off = the gentle variant in its panel");
   await E.tick(700); P.flashes = true;

@@ -8,7 +8,7 @@
    ink (stars, lines, silhouettes, halftone, splashes) is painted ahead of time on 2D canvases, one per drawing, and a drawing change
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
-import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX } from "./plan.mjs";
+import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER } from "./plan.mjs";
 import { paintFrame, backClip } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
@@ -27,6 +27,11 @@ export function createImpact(L, tools = null) {
   /* FIN-ENGINE: the impacts alive (playing or waiting for their shared start). One AT A TIME means: no two whose time windows overlap; a
      series planned ahead (blows 1.7 s apart, all called at once) plays every blow (before, each new call replaced the waiting one) */
   const lives = new Set();
+  /* KEEPBOX: the time windows of every impact planned on this page { a0, a1 (this page's clock, from the shared start), mag, at (its flash
+     instants in the log), h }; one at a time is decided on these. The engine's words read them too (tools.state.impactWins): a word's own
+     flash accent inside an impact's second gives way (prefs.filterPlan), so a seat's private words never change what the impacts draw. */
+  const wins = [];
+  if ( tools?.state ) tools.state.impactWins = wins;
   let seq = 0, localMode = "full", stopHeld = false, chromaOk = null;
 
   /* ---------- preferences ---------- */
@@ -191,11 +196,137 @@ export function createImpact(L, tools = null) {
     } catch {}
     return null;
   }
+  const isWord = (a) => !!a && !!(a.box || a.sprite) && !!a.finished;
+  const keepList = (spec) => (spec.keep ? (Array.isArray(spec.keep) ? spec.keep : [spec.keep]) : []);
+  /* the boxes cut out of the drawings: rectangles and elements only. A LETR word is not cut out (KEEPBOX, below) */
   function keepBoxes(spec) {
     if ( !spec.keep ) return null;
     const pad = Number.isFinite(spec.keepPad) ? Math.max(0, spec.keepPad) : 6, out = [];
-    for ( const a of Array.isArray(spec.keep) ? spec.keep : [spec.keep] ) { const b = boxOf(a, spec); if ( b && b.x1 > b.x0 && b.y1 > b.y0 ) out.push([b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad]); }
+    for ( const a of keepList(spec) ) { if ( isWord(a) ) continue; const b = boxOf(a, spec); if ( b && b.x1 > b.x0 && b.y1 > b.y0 ) out.push([b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad]); }
     return out;
+  }
+
+  /* ---------- KEEPBOX (ADVX 7): a kept WORD is drawn ON the impact, the way a letterer puts the sound effect over the panel ----------
+     Before, a kept word got a rectangular hole through every drawing and the scene's change: a hard box of un-inverted scene cut into the
+     drawing ("a crude dark rectangle" in the review). Now nothing is cut: the word's own current picture is copied onto the top of the
+     impact, at the word's exact place, turn and size on this screen (followed every frame), and while a drawing changes the scene (a black,
+     white or inverted field, a black-and-white panel, a colour split) it is knocked out of the drawing by a paper rim and a thin ink line
+     round the letters' own shape, with a short ink drop along the blow: readable on black, white and any scene, drawn, never a box.
+     The scene keeps the word too (under the copy), so the word never jumps when the impact ends. The rim follows the letters (an SVG
+     morphology filter on the copy: no pixel is read). `keepPad` does not apply to words. */
+  const RIM = { paper: 0.06, ink: 0.024, drop: 1.4, paperMin: 2.5, paperMax: 12, inkMin: 1.5, inkMax: 4 };
+  /* does this drawing change the scene behind the word? (then the word gets its rim) */
+  const changesScene = (f) => !!f && (!!f.full || !!f.back || f.cls !== "scene");
+  const mulM = (p, l) => ({ a: p.a * l.a + p.c * l.b, b: p.b * l.a + p.d * l.b, c: p.a * l.c + p.c * l.d, d: p.b * l.c + p.d * l.d, tx: p.a * l.tx + p.c * l.ty + p.tx, ty: p.b * l.tx + p.d * l.ty + p.ty });
+  /* where the word's picture stands on this screen: { src (its canvas), w, h (the picture's box in local units), m (local -> client px,
+     a CSS matrix), alpha, dim } or null when it is not shown */
+  function wordPose(a) {
+    try {
+      if ( !a.alive || !a.shown?.canvas ) return null;
+      const src = a.shown.canvas;
+      if ( a.sprite ) {
+        const sp = a.sprite;
+        if ( sp.destroyed || !sp.visible || !sp.parent ) return null;
+        const tw = sp.texture?.width || src.width, th = sp.texture?.height || src.height;
+        /* the transform the engine set THIS frame (its world transform is only updated at the canvas's next render) */
+        let l = null;
+        try { sp.transform?.updateLocalTransform?.(); l = sp.transform?.localTransform ?? null; } catch {}
+        const p = sp.parent.worldTransform, wt = l && p ? mulM(p, l) : sp.worldTransform;
+        if ( !wt ) return null;
+        const v = canvas.app.view, r = v.getBoundingClientRect(), kx = r.width / (v.clientWidth || r.width || 1), ky = r.height / (v.clientHeight || r.height || 1);
+        const x0 = -(sp.anchor?.x ?? 0) * tw, y0 = -(sp.anchor?.y ?? 0) * th;
+        const m = [kx * wt.a, ky * wt.b, kx * wt.c, ky * wt.d, r.left + kx * (wt.tx + wt.a * x0 + wt.c * y0), r.top + ky * (wt.ty + wt.b * x0 + wt.d * y0)];
+        const tint = Number.isFinite(sp.tint) ? sp.tint : 0xffffff;
+        return { src, w: tw, h: th, m, alpha: (sp.alpha ?? 1) * (sp.parent.worldAlpha ?? 1), dim: ((tint >> 16) & 255) / 255 };
+      }
+      const box = a.box;
+      if ( !box?.isConnected || box.firstElementChild !== src || box.style.visibility === "hidden" ) return null;
+      const st = src.style, w = parseFloat(st.width) || src.width, h = parseFloat(st.height) || src.height;
+      const pr = box.parentElement?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
+      let m;
+      if ( typeof DOMMatrix === "function" ) {
+        const M = new DOMMatrix().translate(pr.left || 0, pr.top || 0).multiply(new DOMMatrix(box.style.transform || "none")).translate(parseFloat(st.left) || 0, parseFloat(st.top) || 0);
+        m = [M.a, M.b, M.c, M.d, M.e, M.f];
+      } else { const r = src.getBoundingClientRect(); m = [r.width / w, 0, 0, r.height / h, r.left, r.top]; }
+      const br = /brightness\(([\d.]+)\)/.exec(box.style.filter ?? "");
+      return { src, w, h, m, alpha: Number(box.style.opacity || 1), dim: br ? Number(br[1]) : 1 };
+    } catch { return null; }
+  }
+  let keepSeq = 0;
+  function keepSvg() {
+    let svg = document.getElementById("moinen-impact-keep");
+    if ( !svg ) {
+      const ns = "http://www.w3.org/2000/svg";
+      svg = document.createElementNS(ns, "svg");
+      svg.id = "moinen-impact-keep"; svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.setAttribute("aria-hidden", "true");
+      Object.assign(svg.style, { position: "fixed", left: "0", top: "0", pointerEvents: "none" });
+      document.body.appendChild(svg);
+    }
+    return svg;
+  }
+  /* one rim filter per kept word (its widths follow the word's size on this screen) */
+  function rimFilter(c, paper, ink, dx, dy) {
+    const key = [paper, ink, dx, dy].map((v) => v.toFixed(2)).join(",");
+    if ( c.rimKey === key ) return;
+    c.rimKey = key;
+    if ( !c.fid ) {
+      c.fid = `moinen-impact-keep-${++keepSeq}`;
+      const f = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+      f.id = c.fid; f.setAttribute("x", "-40%"); f.setAttribute("y", "-80%"); f.setAttribute("width", "180%"); f.setAttribute("height", "260%");
+      f.setAttribute("color-interpolation-filters", "sRGB");
+      keepSvg().appendChild(f); c.filter = f;
+    }
+    c.filter.innerHTML = `<feMorphology in="SourceAlpha" operator="dilate" radius="${paper.toFixed(2)}" result="pa"/>
+<feFlood flood-color="${PAPER}"/><feComposite in2="pa" operator="in" result="paper"/>
+<feMorphology in="SourceAlpha" operator="dilate" radius="${(paper + ink).toFixed(2)}" result="ia"/>
+<feFlood flood-color="${INK}"/><feComposite in2="ia" operator="in" result="ink"/>
+<feOffset in="ink" dx="${dx.toFixed(2)}" dy="${dy.toFixed(2)}" result="drop"/>
+<feMerge><feMergeNode in="drop"/><feMergeNode in="ink"/><feMergeNode in="paper"/><feMergeNode in="SourceGraphic"/></feMerge>`;
+  }
+  function keepWords(h, f) {
+    const words = keepList(h.spec).filter(isWord);
+    if ( !words.length ) return 0;
+    h.copies ??= new Map();
+    if ( !h.top ) { h.top = document.createElement("div"); Object.assign(h.top.style, { position: "absolute", inset: "0", zIndex: "2", pointerEvents: "none" }); h.wrap.appendChild(h.top); }
+    const rim = changesScene(f);
+    let n = 0;
+    for ( const a of words ) {
+      let c = h.copies.get(a);
+      /* during the hit-stop the board is not redrawn: the copy stands still with it */
+      const pose = stopHeld && c?.pose ? c.pose : wordPose(a);
+      if ( !c ) {
+        const el = document.createElement("div"), cv = document.createElement("canvas");
+        Object.assign(el.style, { position: "absolute", left: "0", top: "0", transformOrigin: "0 0", pointerEvents: "none", display: "none" });
+        Object.assign(cv.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
+        el.appendChild(cv); h.top.appendChild(el);
+        c = { el, cv, src: null }; h.copies.set(a, c);
+      }
+      if ( !pose ) { if ( c.el.style.display !== "none" ) c.el.style.display = "none"; continue; }
+      c.pose = pose;
+      if ( c.src !== pose.src || c.srcW !== pose.src.width || c.srcH !== pose.src.height ) {
+        c.src = pose.src; c.srcW = pose.src.width; c.srcH = pose.src.height;
+        c.cv.width = pose.src.width; c.cv.height = pose.src.height;
+        try { const x = c.cv.getContext("2d"); x.clearRect(0, 0, c.cv.width, c.cv.height); x.drawImage(pose.src, 0, 0); } catch {}
+      }
+      const [ma, mb, mc, md, me, mf] = pose.m, s = Math.hypot(ma, mb) || 1;
+      Object.assign(c.el.style, { width: `${pose.w}px`, height: `${pose.h}px`, transform: `matrix(${[ma, mb, mc, md, me, mf].map((v) => +v.toFixed(4)).join(",")})`,
+        opacity: String(Math.max(0, Math.min(1, pose.alpha))), display: "block" });
+      const dim = pose.dim < 0.995 ? `brightness(${pose.dim.toFixed(3)})` : "";
+      if ( c.cv.style.filter !== dim ) c.cv.style.filter = dim;
+      if ( rim ) {
+        /* the rim in screen px from the word's height on this screen, then in the copy's own units */
+        const hs = pose.h * (Math.hypot(mc, md) || s);
+        const paper = Math.min(RIM.paperMax, Math.max(RIM.paperMin, hs * RIM.paper)) / s, ink = Math.min(RIM.inkMax, Math.max(RIM.inkMin, hs * RIM.ink)) / s;
+        /* the drop goes along the blow (in the copy's own frame), else down and right like a cast shadow */
+        const dir = h.env?.dir, ux = dir != null ? Math.cos(dir) : 0.6, uy = dir != null ? Math.sin(dir) : 0.8, det = ma * md - mb * mc || 1;
+        const lx = (md * ux - mc * uy) / det * s, ly = (-mb * ux + ma * uy) / det * s, ln = Math.hypot(lx, ly) || 1, k = (ink * RIM.drop) / ln;
+        rimFilter(c, paper, ink, lx * k, ly * k);
+        const want = `url(#${c.fid})`;
+        if ( c.el.style.filter !== want ) c.el.style.filter = want;
+      } else if ( c.el.style.filter ) c.el.style.filter = "";
+      n++;
+    }
+    return n;
   }
   const n1 = (v) => v.toFixed(1);
   /* the even-odd path of a shape with the boxes cut out (pts = a polygon in client px, null = the whole view) */
@@ -207,13 +338,14 @@ export function createImpact(L, tools = null) {
   function applyKeep(h) {
     const f = h.plan.frames[h.idx];
     if ( !f?.cv || !h.spec.keep ) return;
+    const words = keepWords(h, f);
     const boxes = keepBoxes(h.spec) ?? [];
+    h.kept = boxes.length + words;
     const key = boxes.map((b) => b.map(n1).join(",")).join(";") + "|" + h.idx;
     if ( key === h.keepKey ) return;
     h.keepKey = key;
     f.cv.style.clipPath = boxes.length ? holePath(null, boxes, h.env.W, h.env.H) : "";
     if ( h.back.style.display !== "none" ) h.back.style.clipPath = boxes.length ? holePath(f.clipPts, boxes, h.env.W, h.env.H) : (f.clip || "none");
-    h.kept = boxes.length;
   }
 
   /* ---------- one impact ---------- */
@@ -262,11 +394,14 @@ export function createImpact(L, tools = null) {
     if ( !h.alive ) return;
     h.alive = false;
     lives.delete(h);
+    /* KEEPBOX: a blow stopped by its caller (or a scene change) frees the rest of its window and the flash instants it will not show */
+    if ( why === "stopped" && h.win ) { const t = now(); cutAt(h.win, t, t); }
     if ( h.raf ) cancelAnimationFrame(h.raf);
     if ( h.dog ) clearTimeout(h.dog);
     try { setPunch(h, null); } catch {}
     setStop(false);
     for ( const f of h.plan.frames ) if ( f.cv ) { f.cv.remove?.(); f.cv.width = 0; f.cv.height = 0; f.cv = null; }
+    if ( h.copies ) { for ( const c of h.copies.values() ) { c.filter?.remove?.(); c.cv.width = 0; c.cv.height = 0; } h.copies = null; }
     h.wrap?.remove(); h.wrap = null;
     stats.last = { kind: h.plan.kind, mode: h.plan.mode, frames: h.plan.frames.length, ms: h.plan.ms, paintMs: +h.paintMs.toFixed(2), frameMax: +h.frameMax.toFixed(2), why };
     if ( h.frameMax > stats.frameMax ) stats.frameMax = h.frameMax;
@@ -277,6 +412,25 @@ export function createImpact(L, tools = null) {
      waiting impact (live: five blows of a series called at once painted five full-view drawings in one frame, a 70 ms frame). The next
      drawing of an impact that is PLAYING is always painted. */
   const AHEAD_MS = 6, AHEAD_N = 2;
+  /* KEEPBOX (ADVX 6): every seat shows every drawing. On the clock alone a seat at a low frame rate, or one that drops a frame, jumps
+     over a one-tick drawing (41.7 ms) that the other seat shows: one seat a star, the other nothing. The drawing that is due is shown,
+     but a drawing passed by less than CATCH_MS that this page never showed comes first, for one display frame; only a seat stalled for
+     longer (a hidden tab, a long freeze) skips. Nothing is added (same drawings, same flash count), a drawing only stands a frame late. */
+  const CATCH_MS = LIMITS.maxFrameTicks * TICK;
+  /* -> the drawing to show at `el` ms after the start, -1 = over. A blow cut by a stronger one (h.cutAt) keeps only the drawings that
+     began at least a tick before the cut, each ending at the cut at the latest: every seat keeps the same ones whatever its frame rate */
+  function nextDrawing(h, el) {
+    const fr = h.plan.frames, lim = h.cutAt != null && h.t0 != null ? h.cutAt - h.t0 : Infinity;
+    const span = [];
+    let a = 0;
+    for ( let j = 0; j < fr.length; j++ ) { const b = a + fr[j].ticks * TICK; if ( a > lim - TICK + 1e-6 ) break; span.push([a, Math.min(b, lim)]); a = b; }
+    let due = -1;
+    for ( let j = 0; j < span.length; j++ ) if ( el >= span[j][0] && el < span[j][1] ) { due = j; break; }
+    if ( due < 0 && el < (span[0]?.[0] ?? 0) ) due = 0;
+    const upTo = due < 0 ? span.length : due;
+    for ( let j = h.idx + 1; j < upTo; j++ ) if ( span[j][1] > el - CATCH_MS ) return j;   // passed, never shown here, not long ago: now
+    return due;
+  }
   let aheadTs = null, aheadUsed = 0, aheadN = 0;
   function loop(h, ts) {
     h.raf = 0;
@@ -293,8 +447,8 @@ export function createImpact(L, tools = null) {
       const fk = ts ?? Math.floor(now() / 8); if ( fk !== aheadTs ) { aheadTs = fk; aheadUsed = 0; aheadN = 0; }
       if ( n >= 0 && aheadUsed < AHEAD_MS && aheadN < AHEAD_N ) { const p0 = now(); paint(h, n); aheadUsed += now() - p0; aheadN++; }
     } else {
-      const i = frameAt(h.plan, Math.max(0, el));
-      if ( i < 0 ) { finish(h, "done"); return; }
+      const i = nextDrawing(h, Math.max(0, el));
+      if ( i < 0 ) { finish(h, h.cutAt != null ? "replaced" : "done"); return; }
       if ( i !== h.idx ) show(h, i);
       let a = 0; for ( let k = 0; k < i; k++ ) a += h.plan.frames[k].ticks * TICK;
       const p = punchAt(h.plan, i, Math.floor((el - a) / TICK));
@@ -303,6 +457,16 @@ export function createImpact(L, tools = null) {
       if ( h.plan.frames[i + 1] && h.plan.frames[i + 1].cv === undefined ) paint(h, i + 1);
     }
     h.raf = requestAnimationFrame((x) => loop(h, x));
+  }
+  /* KEEPBOX: a stronger blow cuts an earlier one at the stronger one's start (shared time); the flash instants the cut one will now never
+     show give their place in the log back (only those still ahead on this page: what may already have shown stays counted) */
+  function cutAt(w, at, t) {
+    w.a1 = Math.max(w.a0, Math.min(w.a1, at));
+    const log = flashLog(), gone = w.at.filter((x) => x >= w.a1 && x > t);
+    for ( const x of gone ) { const i = log.indexOf(x); if ( i >= 0 ) log.splice(i, 1); }
+    w.at = w.at.filter((x) => !gone.includes(x));
+    const h = w.h;
+    if ( h?.alive ) h.cutAt = w.a1;   // the frame loop ends it (nextDrawing), after the drawings it keeps
   }
   const ended = (plan, why, extra = {}) => ({ id: `imp${++seq}`, plan, mode: plan?.mode ?? "off", alive: false, off: why === "off", isReady: false,
     ready: Promise.resolve(false), finished: Promise.resolve(why), stop() {}, ...extra });
@@ -317,19 +481,28 @@ export function createImpact(L, tools = null) {
     /* FIN-ENGINE: blowAt = the instant of the blow itself (e.g. L.contactAt of the word it belongs to): the impact starts its lead-in earlier */
     let startAt = Number.isFinite(spec.startAt) ? spec.startAt : Number.isFinite(spec.blowAt) ? spec.blowAt - plan.peakMs : null;
     if ( startAt != null && startAt > t + 60000 ) { console.warn("LETR | impact startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = null; }
+    /* KEEPBOX (ADVX 6): every seat must decide alike from the same calls. One impact at a time is decided on the impacts' TIME WINDOWS on
+       the shared clock (`wins`: every call that was planned, also one this seat shows late or cannot see), never on what happens to be
+       alive on this page: before, a seat that got a call a little later (or dropped a frame) found the earlier blow already over and
+       showed both, while the other seat refused one. A stronger blow cuts the earlier one AT ITS OWN START (time), not at its arrival. */
+    const a0 = startAt ?? t, a1 = a0 + plan.ms;
+    for ( let i = wins.length - 1; i >= 0; i-- ) if ( wins[i].a1 < t - 5000 ) wins.splice(i, 1);
+    const clash = wins.filter((w) => w.a1 > w.a0 && a0 < w.a1 && w.a0 < a1);
+    if ( clash.length && !clash.every((w) => plan.magnitude > w.mag) ) return ended(plan, "busy");
+    for ( const w of clash ) cutAt(w, a0, t);
+    /* the guard runs for every planned call, shown here or not (late, hidden): a seat that cannot see one blow of a series thins the
+       next blows exactly like the seat that sees it (the photosensitivity budget is spent the same on both; never less than shown) */
+    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: t, t0: a0 });
+    if ( !plan.frames.length ) return ended(plan, "off");
+    const win = { a0, a1, mag: plan.magnitude, at: plan.guard?.at ?? [], h: null };
+    wins.push(win);
     if ( startAt != null && t > startAt + plan.ms ) return ended(plan, "late");
     const sub = armed && !over.subject ? armed.sub : subjectOf(spec);
     if ( sub.hidden ) return ended(plan, "hidden");
-    /* one impact at a time: a stronger one takes over, a weaker one is not shown */
-    const a0 = startAt ?? t, a1 = a0 + plan.ms;
-    const clash = [...lives].filter((x) => x.alive && a0 < (x.t0 ?? t) + x.plan.ms && (x.t0 ?? t) < a1);
-    if ( clash.length ) { if ( clash.every((x) => plan.magnitude > x.plan.magnitude) ) for ( const x of clash ) finish(x, "replaced"); else return ended(plan, "busy"); }
-    safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: t, t0: startAt ?? t });
-    if ( !plan.frames.length ) return ended(plan, "off");
     let done, rdy;
-    const h = { id: `imp${++seq}`, spec, plan, mode: plan.mode, alive: true, isReady: false, idx: -1, t0: startAt, shared: startAt != null, paintMs: 0, frameMax: 0,
+    const h = { id: `imp${++seq}`, spec, plan, mode: plan.mode, alive: true, isReady: false, idx: -1, t0: startAt, shared: startAt != null, paintMs: 0, frameMax: 0, win,
       ready: new Promise((r) => (rdy = r)), finished: new Promise((r) => (done = r)), stop: () => finish(h, "stopped") };
-    h._done = done; h._ready = rdy;
+    h._done = done; h._ready = rdy; win.h = h;
     h.env = envOf(spec, plan, sub);
     /* drawings painted by prepare() are kept when the view and the frame type are still the same */
     if ( armed?.env && armed.env.W === h.env.W && armed.env.H === h.env.H && Math.hypot(armed.env.cx - h.env.cx, armed.env.cy - h.env.cy) < 2 && armed.plan.mode === plan.mode ) {

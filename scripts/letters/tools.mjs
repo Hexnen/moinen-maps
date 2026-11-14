@@ -43,7 +43,7 @@ export function install(L, base) {
     const capPx = h?.size ? h.size * plan.sizeK * zoom : 0;
     const now = performance.now();
     filterPlan(plan, o, { prefs: state.prefs, colors: COLORS, TICK, flashLog: state.flashLog, now, t0: Number.isFinite(o.startAt) ? o.startAt : now + 0,
-      capPx, vh, preview: !!h?.still });
+      capPx, vh, preview: !!h?.still, impacts: state.impactWins });
   });
   ext.start.push(announce);
   /* a stream with a style: the style's mood, palette, colours and motion under the stream's own options (one hand for all syllables) */

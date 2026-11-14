@@ -299,7 +299,8 @@ export function safety(plan, prefs = {}, env = {}) {
     kept++; mine.push(x.at);
   }
   if ( !env.preview ) log.push(...mine);
-  plan.guard = { kept, dropped: flash.length - kept };
+  /* KEEPBOX: `at` = the shared instants this impact took in the log (the player gives back those of a blow cut short before they show) */
+  plan.guard = { kept, dropped: flash.length - kept, at: mine };
   return plan;
 }
 
