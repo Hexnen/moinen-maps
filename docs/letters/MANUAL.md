@@ -40,6 +40,8 @@ Keep the section titles stable: other documents and the agent skill link to them
 | LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
 | LM (MOVE + LOOK merged) | 1.7.0 | v7+v8 | `tactics-zones-lm` (in progress, not on origin yet) | pending merge |
 | LOOK2 (invincible rebuilt: SPEC-LOOK P1-P15, P17, P18; legacy look frozen as `expressive`) | 1.8.0 | v9 | `tactics-zones-look2` | pending merge |
+| IMPACT (impact frames, `L.impact`, folder `scripts/letters/impact/`) | 1.7.2 (in 1.8.1) | - | `tactics-zones` | stable (fixes below) |
+| FXI-ENGINE (impact frames: guard counts every scene change, six strengths, red-safe, `gentle`, settings row, drawings) | 1.8.2 | API-CONTRACT 1.8.2 | `tactics-zones-fxi-engine` | pending merge |
 | MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -64,6 +66,7 @@ Contents
 19. What is about to change
 20. API index
 21. Change log of this manual
+21a. Impact frames: `L.impact`
 
 ---
 
@@ -598,6 +601,8 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Analyse each effect separately and sensibly; no one recipe for all | design per effect | - |
 | TOOL-8 | Networking is GM only | players letter locally only | keep the refusal on send and receive |
 | 2026-11-13 | Audio: default silent; later only an opt-in way to attach a sound to a word's clock | - | build no sound content |
+| 2026-11-13 | Impact frames are the exception to the restraint: they may go all out and must be spectacular; a system other effects use (`L.impact`) | one `L.impact.play` per event, at its instant | keep it one call for every caller; section 21a |
+| 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
 
 ## 15. Tools: settings, authoring, designer, accessibility
 Status: stable (TOOL, contract v6). [V] where marked, else [C].
@@ -613,7 +618,8 @@ window; `L.prefs` / `L.settings()` read them [V]):
 | `scale` | 0.5-2.5 | size multiplier after the legibility clamp |
 | `motion` | auto / full / gentle / reduced | the strongest reduction of caller, setting and OS wins; gentle = moves damped to 45 %, no smears |
 | `flashes` | on / off | the one-tick impact frame |
-| `photosafe` | on (default) / off | at most 2 flash frames per second, none on a word taller than 20 % of the viewport, colour plates held still |
+| `photosafe` | on (default) / off | at most 2 flash frames per second, none on a word taller than 20 % of the viewport, colour plates held still; impact frames: every drawing that changes the scene counted, shared log, red at most 1 % of a drawing |
+| `impact` | full (default) / local / off | impact frames (`L.impact`, section 21a): all, only inside a panel round what is struck, or none; row "Impact frames" in the window since 1.8.2 [V node] |
 | `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
 | `announce` | on / off | screen readers read each word (or `alt`) through one polite live region |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
@@ -699,6 +705,9 @@ sync to the vendored copy. `sync.mjs --check` fails until you do.
 accent, character, flow segments); the look (`design.mjs` hand/layout, `paint.mjs`) owns how letters are drawn; motion (`move.mjs`,
 `choreo.mjs`, `sustain.mjs`, the timeline) owns how they move; tools (`tools.mjs`, `prefs.mjs`) filter every plan. A stage changes
 another stage's files only through the documented seam (e.g. `opts.accent`, `opts.character`).
+Impact frames live in `scripts/letters/impact/` and touch the engine in three lines of `index.mjs` marked `IMPACT hook 1/3..3/3`, one
+section (8f) of `check.mjs`, the VERSION line and (1.8.2) one settings row: `SETTINGS.impact` in `prefs.mjs`, its words in
+`strings.mjs`, its place in the Access group of `ui.mjs`. A merge keeps those lines and takes the folder whole.
 
 Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest translation, mood, sound, motion, hold classes, env,
 `CHAR`, flow style where it lasts, banks per language and tier, stream syllables), every new syllable reviewed into
@@ -732,6 +741,9 @@ Status: stable list; edit as items close.
   impact frame is the likely cost; no `L.prepare` for words yet (REQUESTS EFFECTS1-8).
 - No falling-pitch kind (a whistle), no size growth along a path ride, no Polish cave-in (BDUUM), no thunder restrike grammar
   (REQUESTS EFFECTS1-1..5).
+- Impact frames: no networking of their own (the caller's event carries the call); the hit-stop holds the whole canvas ticker (every
+  animation on the canvas, also other modules'); only the photosensitivity measures named in section 21a are enforced (a star or ring
+  of at most a sixth / a quarter of the picture appearing for a tick is not counted as a flash).
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -763,6 +775,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
+| `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2 |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -785,3 +798,74 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   unlocated sounds, muzzle clearance); section 18 frame time and the missing kinds.
 - 2026-11-14 (FXLM2): section 5 - phases vs a caller's echo filter, `keepInView: false` for off-screen sustains, the 1.7.0 gun /
   grenade / rocket kinds (no `gunshot`).
+- 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
+  table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
+
+## 21a. Impact frames: `L.impact`
+Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 `pending merge` (`tactics-zones-fxi-engine`). The reference is
+`scripts/letters/impact/README.md`; this section is the short guide. `[V]` = node (`check-impact.mjs`), `[V live]` = lane 5.
+
+**What it is.** The few drawings of full force at the instant of a hit, 2 to 12 ticks long (83 to 500 ms): the scene slammed to its
+black-and-white negative, a panel round the blow in hard black and white, the struck figure inked on a flat silhouette on a black,
+white or colour field, burst stars, speed and focus lines, a swept smear, the frame torn in two, halftone, ink splashes, a chromatic
+split, shock rings, a hold of the whole scene (hit-stop) and a shove of the frame. The lettering is restrained by ruling (section 14);
+the impact frame is the stated exception (owner: spectacular; it must BUILD with the event and never bury the action).
+
+**The call.** `[V]`
+```js
+const I = (await letters()).impact;
+const { kind, magnitude } = I.pick({ type: "damage", share: lost / max, crit, fatal });
+I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id}:${newValue}`, startAt: tHit });
+```
+- `kind`: `hit heavy crit blast slash landing ko shock word`; `magnitude` 0..2 picks one of SIX strengths (bounds 0.35, 0.6, 0.85,
+  1.35, 1.7; the first build's 0.35 / 0.85 / 1.35 are still bounds: under 0.85 no full-field frame except a critical, from 1.35 the
+  whole set). A scratch puts a small star on the struck figure's rim and leaves the scene alone; 0.6-0.85 turns a panel round it
+  black and white; above that the full-field frames, longer and held longer as the blow grows.
+- The ladder (pinned in `check-impact.mjs`): scratch hit 0.36 -> solid hit 0.69 -> heavy 1.24 -> knock-down ko 1.6 -> critical 1.73+;
+  every rung different, each with more force than the one before.
+- `subject`: a token (its live picture becomes the silhouette; a round portrait is cut out by its rim colour), a point
+  (`space: "world"`, `area`), a rectangle, an HTML element, a word's handle; `from` (attacker) or `dir` (degrees) gives the
+  direction, none = radial. A `from` token this user cannot see gives no direction on that client (1.8.2).
+- `seed` + `startAt` (this page's `performance.now()`): the same drawings change on the same instants on every seat.
+- `over: "scene"` (default: over the map, under the interface) or `"ui"` (over every window, one under the `screen` word layer).
+- A caller can only lower: `reduced: true`, `gentle: true` (1.8.2), `hitstop: false`, `punch: false`. `reduced: false` does not
+  overrule the OS switch (1.8.2).
+- `I.prepare(spec).play({ startAt })` paints ahead; `I.plan(spec)` previews; `I.show(type)` holds one frame type; `I.gallery()`.
+- The handle: `{ plan, mode, ready, finished, stop() }`; `finished` resolves `done | stopped | replaced | busy | hidden | late | off`.
+
+**Frame types** (18): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`. Full-field:
+`slam shadow glare swap window` and `tear` (half the frame inverted). `ink` and `shatter` change the scene only inside a jagged panel
+of at most 20 % of the view round the blow (1.8.2; before, the whole view).
+
+**Safety (enforced, not optional).** `[V]`
+- `photosafe` on (default): a FLASH is a full-field frame or any drawing that changes the scene's brightness, even in a panel. At most
+  2 per impact and 2 per rolling second on a client, in the same log as the words' flash frames; the others become quiet twins (a
+  twin that would still change the scene keeps its ink only). Under the guard saturated red (R/(R+G+B) >= 0.7) covers at most 1 % of
+  any drawing: red accents are drawn deep crimson. (Before 1.8.2 `ink` and `shatter` turned the whole view black and white uncounted on
+  every hit, and the knock-out threw red spikes over its black frame: ADVI 9 and 18.)
+- `flashes` off, `motion: gentle`, the client setting `moinen-letters.impact = local` or a caller's `gentle: true`: the gentle variant
+  (no full frame, no inverted scene, no hit-stop, everything inside a panel of at most 20 % of the viewport; its panels still counted).
+- reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
+  `enabled` off or `impact = off`: nothing.
+- an impact is at most 12 ticks, one drawing 4 ticks, hit-stop 4 ticks; a watchdog timer removes it even when the frame loop died.
+- one impact at a time; a second one is shown only when stronger.
+- The user can switch the guard off on their own client (`photosafe`); no caller option can.
+
+**Cost.** IMPACT measured live 2026-11-13 (1600x900, GM seat): no animation frame over 25 ms through any frame type or whole impact;
+one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.8.2 numbers: the impact
+README "Cost".
+
+**For callers (lessons).**
+- A map preset: `plan.t0` of `presets.fire` is the instant of the hit; convert with `performance.now() + (t0 - sharedNow())`.
+- `startAt` is the instant of the BLOW, the same on every seat; do not derive it from this seat's own word entrance (a reduced-motion
+  seat's word lands earlier: ADVI 14), or seats disagree by hundreds of ms.
+- One impact per event, on the worst hit; never in a loop; no flash or shake of your own on top.
+- Pass the token itself (visibility: a token this user cannot see gives no impact; a hidden attacker gives no direction), the shared
+  seed and the shared time.
+- The guard decides per client what is drawn; the timing is the same everywhere. Do not offer a setting that skips it; for a module's
+  own "fewer effects" pass `gentle: true`.
+- A world-space word under a slam is inverted with the scene; a word on the `screen` layer stays on top of an `over: "ui"` impact.
+
+**Looking at it.** Offline: `node dev/tools/impact-render.mjs --out <dir>` (moinen-maps; one headless browser, light slot; `--bg
+night|map|bright|dark|light`, `--round 1` = a round portrait token, `--spec`). Live: `L.impact.gallery({ subject: token, dir: 20 })`.
+Checks: `node scripts/letters/impact/check-impact.mjs` (section 8f of `check.mjs`).
