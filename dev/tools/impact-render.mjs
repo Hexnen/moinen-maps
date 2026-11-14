@@ -159,7 +159,8 @@ try {
   }
   try { execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-framerate", "24", "-i", path.join(all, "f%05d.png"), "-c:v", "libvpx-vp9", "-b:v", "3M", "-pix_fmt", "yuv420p", path.join(OUT, "film.webm")]); } catch (e) { console.log("ffmpeg film skipped:", String(e.message).split("\n")[0]); }
   fs.rmSync(all, { recursive: true, force: true });
-  fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify({ prefs: PREFS, mode: MODE, stats: JSON.parse(await ev("JSON.stringify(I.stats)")), items: report }, null, 1));
+  const keepRects = JSON.parse(await ev("JSON.stringify(window.__keep.map((h) => { const r = h.box?.firstElementChild?.getBoundingClientRect(); return r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null; }).filter(Boolean))") ?? "[]");
+  fs.writeFileSync(path.join(OUT, "report.json"), JSON.stringify({ prefs: PREFS, mode: MODE, keepRects, stats: JSON.parse(await ev("JSON.stringify(I.stats)")), items: report }, null, 1));
   console.log(`${items.length} items -> ${OUT}`);
   if ( logs.length ) console.log("console warnings/errors:", logs.length, [...new Set(logs)].slice(0, 8).join(" | "));
 } finally { await closeBrowser(b, { port }); srv.close(); }

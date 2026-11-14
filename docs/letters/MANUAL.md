@@ -48,6 +48,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.4 | API-CONTRACT 1.9.4 (v13) | `tactics-zones-look3` | pending merge (section 13) |
 | FONTSEL (the invincible style in two faces: League Gothic, the default, and Anton; the GM's table setting `face`; each face tuned for its own shapes; optical sizes for small pictures) | 1.9.7 | API-CONTRACT 1.9.7 (v14) | `tactics-zones-fontsel` | pending merge (sections 13, 14, 15) |
 | KERNEX (punctuation never reads as a diacritic of its neighbour: a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; both faces) | 1.9.8 | API-CONTRACT 1.9.8 (v15) | `tactics-zones-kernex` | pending merge (sections 13, 18) |
+| KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -1010,6 +1011,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   API index (20), the stage table.
 - 2026-11-14 (KERNEX, 1.9.8, `tactics-zones-kernex`): marks never read as a diacritic of their letter (13: cause, rule, small
   sizes, what keeps its setting), the trap in limits (18), the stage table; `check-marks.mjs` (16).
+- 2026-11-15 (KEEPBOX, 1.9.9, `tactics-zones-keepbox`): section 21a (the kept word drawn on the impact with a rim; one at a time on
+  time windows with a timed cut; the same pictures on every seat: the guard on every planned call, words' flashes giving way inside an
+  impact's second, no drawing skipped; `check-seats.mjs`; impact-render `--keep`), the stage table.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
@@ -1053,6 +1057,20 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   burst picture; their reduced motion is not aligned (frozen). `[V node, V live]`
 - (1.9.1) A series planned ahead: call every blow at once with its own time; windows apart all play (before: only the last, strongest
   one did); overlapping windows keep the old rule (stronger replaces, weaker is `busy`).
+- (1.9.9 KEEPBOX) `keep` with a WORD: nothing is cut out any more. The word's own current picture is drawn on top of the impact at
+  its exact place, turn and size (followed every frame; still during the hit-stop, like the board), and on every drawing that changes
+  the scene it gets a paper rim, a thin ink line and a short ink drop along the blow round its letters (an SVG morphology filter):
+  the letterer's knocked-out sound effect, readable on black, white and any map. Before, every drawing had a rectangular hole of
+  un-inverted scene round the word (ADVX 7: "a crude dark rectangle"). Elements and rectangles still get the hole. `[V node, V live]`
+- (1.9.9 KEEPBOX) The same pictures on every seat (ADVX 6: in a five-hit series the GM saw a star where the player saw nothing, and
+  halftone and white frames against debris, from identical calls). Causes and fixes: (1) the GM letters private enemy damage numbers
+  whose own flash accent took a slot in the GM's flash log, so the guard thinned the GM's next impacts differently: a word's flash
+  inside an impact's second now gives way (takes no slot), and a word too big to flash on one seat still takes its slot; (2) one at
+  a time was decided on what was alive on this page (arrival and frame timing): now on the time windows of every planned call, a
+  stronger blow cuts the earlier one at its own start; (3) a seat at a low frame rate or with a dropped frame skipped one-tick
+  drawings: now every drawing passed by less than 4 ticks shows for one frame; (4) the guard runs also for a call shown late or not
+  visible on this seat. `check-seats.mjs`: seats at 60 / 144 / 30 with stalls / 20 fps, different clocks and delays, the GM with
+  private numbers, agree on all 16 calls (before: 11 differed). Limits unchanged. `[V node]`
 
 **Frame types** (18): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`. Full-field:
 `slam shadow glare swap window` and `tear` (half the frame inverted). `ink` and `shatter` change the scene only inside a jagged panel
@@ -1069,7 +1087,8 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
 - reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
   `enabled` off or `impact = off`: nothing.
 - an impact is at most 12 ticks, one drawing 4 ticks, hit-stop 4 ticks; a watchdog timer removes it even when the frame loop died.
-- one impact at a time: an impact whose time window overlaps one playing or scheduled is shown only when stronger than all of them.
+- one impact at a time: an impact whose time window overlaps another's is shown only when stronger than all of them (1.9.9: decided on
+  the windows of every planned call, on every seat alike; the stronger one cuts the others at its start).
 - Film check (1.9.1): the five-blow ladder on dark, mid-grey and bright scenes gave at most 1.5 whole-picture flashes in any second
   (WCAG limit 3); reduced motion 0.5. `[V live]`
 - The user can switch the guard off on their own client (`photosafe`); no caller option can.
