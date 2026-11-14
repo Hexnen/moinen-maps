@@ -14,9 +14,11 @@
    3. Two modes for the invincible style (the owner chooses on the A/B film; MOTION2-1):
         smooth   every channel is interpolated per display frame (SPEC-LOOK P16): eased entrance with a small overshoot, a hold that
                  is still or one slow eased motion (a decaying recoil, a slow pulse), an eased exit; no letter vibration.
-        stepped  the drawn part (scale, squash, turn, the vibrating letters) changes on ONE shared grid of twos (every word changes on
-                 the same instants of performance.now(): SPEC-MOTION 4/5.1); translation and alpha stay smooth at the display rate;
-                 a smear multiple bridges a step that jumps more than 1.4x.
+        stepped  the drawn part (scale, squash, turn, the vibrating letters) changes on ONE shared grid (every word changes on the
+                 same instants of performance.now(): SPEC-MOTION 4/5.1): the entrance on ones (contact on ones), hold and exit on twos;
+                 translation and alpha stay smooth at the display rate; a smear multiple bridges the contact of a slam / burst-in.
+      Entrances keep the scale ratio between neighbouring drawings at or under 1.4 (SPEC-MOTION 5.10) at 60 fps and on ones, except
+      the contact tick a flash or smear picture covers.
       Default: smooth (MOTION2-1: the orchestrator's provisional ruling "invincible moves smoothly", and it paints the fewest pictures).
 
    Units: x, y in cap heights of the word (the engine multiplies by its px per unit), time in ms, angles in radians, dir = +1 / -1 (the
@@ -214,11 +216,11 @@ export function entranceKeys(m, W = 3, H = 1) {
   const d = m.dir, L = m.loud ?? 0.6;
   switch ( m.in ) {
     /* contact on the first frame: the word arrives big and fast and squashes on the surface; no wind-up showing the word */
-    case "slam": { const s0 = 1.28 + 0.22 * L; return [[0, { s: s0, sx: 0.96, sy: 1.04 }], [48, { s: 0.9, sx: 1.16, sy: 0.84 }, "in"], [120, { s: 1.05, sx: 0.97, sy: 1.04 }, "out"], [210, {}, "io"]]; }
+    case "slam": { const s0 = 1.24 + 0.16 * L; return [[0, { s: s0, sx: 0.97, sy: 1.03 }], [62, { s: 0.94, sx: 1.12, sy: 0.88 }, "io"], [130, { s: 1.04, sx: 0.97, sy: 1.03 }, "io"], [220, {}, "io"]]; }
     /* a small word that pops open: it grows at once (never stands small), overshoots, settles */
-    case "pop": return [[0, { s: 0.42 }], [70, { s: 1.16, sx: 0.94, sy: 1.08 }, "out"], [135, { s: 0.96, sx: 1.03, sy: 0.97 }, "io"], [210, {}, "io"]];
+    case "pop": return [[0, { s: 0.62 }], [90, { s: 1.14, sx: 0.95, sy: 1.06 }, "io"], [160, { s: 0.97, sx: 1.02, sy: 0.98 }, "io"], [240, {}, "io"]];
     /* a boom: the word expands from the centre (the flash, when allowed, is the first tick's picture) */
-    case "burstIn": return [[0, { s: 0.34 }], [70, { s: 1.24 }, "out3"], [160, { s: 0.95 }, "io"], [260, {}, "io"]];
+    case "burstIn": return [[0, { s: 0.55 }], [60, { s: 0.8 }, "lin"], [140, { s: 1.22 }, "io"], [230, { s: 0.96 }, "io"], [320, {}, "io"]];
     case "swell": return [[0, { s: 0.55, a: 0.35 }], [200, { s: 1.07, a: 1 }, "out"], [340, {}, "io"]];
     /* a real fall: from above, accelerating, squash on landing (the bottom stays planted), a small rebound */
     case "drop": return [[0, { y: -1.5, sy: 1.12, sx: 0.92 }], [170, { y: 0, sy: 0.76, sx: 1.2 }, "in"], [240, { y: -0.07, sy: 1.05, sx: 0.97 }, "out"], [330, {}, "io"]];
@@ -228,17 +230,17 @@ export function entranceKeys(m, W = 3, H = 1) {
     case "grow": return [[0, { s: 0.6, x: -0.35 * d, a: 0.15 }], [230, { s: 1.03, a: 1 }, "out"], [360, {}, "io"]];
     case "roarIn": return [[0, { s: 0.55, sx: 0.85, a: 0.3 }], [200, { s: 0.95, sx: 0.95, a: 1 }, "out"], [330, { s: 1.06, sx: 1.12, sy: 0.96 }, "out"], [470, {}, "io"]];
     case "rise": return [[0, { y: 0.8, s: 0.82, a: 0 }], [240, { y: -0.06, s: 1.02, a: 1 }, "out"], [360, {}, "io"]];
-    case "ignite": return [[0, { s: 0.5, y: 0.35 }], [80, { s: 0.9, y: 0.25 }, "out"], [260, { y: -0.06, sy: 1.06 }, "out"], [380, {}, "io"]];
+    case "ignite": return [[0, { s: 0.6, y: 0.35 }], [100, { s: 0.92, y: 0.25 }, "io"], [270, { y: -0.06, sy: 1.06 }, "out"], [390, {}, "io"]];
     /* a fly-by arrives along its direction, stretched, and the tail catches up */
     case "zip": return [[0, { x: -2.4 * d, sx: 1.5, sy: 0.84, a: 0.6 }], [130, { x: 0.14 * d, sx: 1.08, sy: 0.96, a: 1 }, "out"], [230, {}, "io"]];
     case "drag": return [[0, { x: -0.9 * d, sx: 1.08, a: 0.3 }], [420, { x: 0.03 * d, a: 1 }, "out"], [540, {}, "io"]];
     /* a beam stretches out from its muzzle side */
-    case "stretch": return [[0, { sx: 0.12, x: -W * 0.44 * d }], [150, { sx: 1.06, x: 0.02 * d }, "out"], [240, {}, "io"]];
+    case "stretch": return [[0, { sx: 0.4, x: -W * 0.3 * d }], [240, { sx: 1.05, x: 0.02 * d }, "io"], [320, {}, "io"]];
     /* a break: it lands whole; the cracked drawing takes over at the contact (pictures) */
     case "crackIn": return [[0, { s: 1.18 }], [55, { s: 0.95, sx: 1.06, sy: 0.95 }, "in"], [140, {}, "out"]];
-    case "falseStart": return [[0, { s: 0.6 }], [70, { s: 0.75 }, "out"], [150, { s: 0.45, a: 0.5 }, "in"], [240, { s: 0.8, a: 1 }, "out"], [330, { s: 0.55, a: 0.6 }, "in"], [460, { s: 1.06 }, "out"], [560, {}, "io"]];
+    case "falseStart": return [[0, { s: 0.6 }], [70, { s: 0.75 }, "out"], [150, { s: 0.5, a: 0.5 }, "in"], [250, { s: 0.74, a: 1 }, "io"], [340, { s: 0.58, a: 0.6 }, "in"], [520, { s: 1.06 }, "io"], [620, {}, "io"]];
     case "squeeze": return [[0, { sx: 0.82, sy: 1.08, s: 0.85 }], [380, { sx: 0.96, sy: 1.02, s: 1 }, "io"], [460, {}, "io"]];
-    case "sputterIn": return [[0, { s: 0.4 }], [90, { s: 1.1 }, "out"], [160, { s: 0.86, r: -0.05 * d }, "io"], [260, { s: 0.94, y: 0.04, r: -0.03 * d }, "io"]];
+    case "sputterIn": return [[0, { s: 0.62 }], [100, { s: 1.1 }, "io"], [170, { s: 0.88, r: -0.05 * d }, "io"], [270, { s: 0.94, y: 0.04, r: -0.03 * d }, "io"]];
     case "fade": return [[0, { a: 0 }], [140, {}, "lin"]];
     case "choreo": return [[0, {}]];   // the entrance is drawn (parts, count-in): no transform on top
     default: return [[0, { s: 0.42 }], [70, { s: 1.12 }, "out"], [180, {}, "io"]];

@@ -1141,7 +1141,7 @@ export function makePlan(text, opts, fonts, memory) {
   /* MOTION2: the invincible style moves by the sound's motion table (motion.mjs); the legacy style keeps its frozen timeline */
   const track = hand.style === "invincible";
   const choreoOn = !!groups || (!opts.reduced && !!opts.countIn);
-  const motion = track ? motionOf({ kind: opts.kind, mood, sound, character, chars, accent, dir, seed, reduced: opts.reduced, syllable: !!opts._stream,
+  const motion = track ? motionOf({ kind: opts.kind, mood: MOODS[mood]?.base ?? mood, sound, character, chars, accent, dir, seed, reduced: opts.reduced, syllable: !!opts._stream,
     mode: opts.look?.motion, pin: { in: opts.in, holdKind: opts.holdKind, out: opts.out } }) : null;
   if ( motion && choreoOn ) { motion.in = "choreo"; motion.flash = false; }
   const tl = track ? trackTimeline(chars.length, motion, R, topts) : buildTimeline(chars.length, mood, sound, hand, R, topts);

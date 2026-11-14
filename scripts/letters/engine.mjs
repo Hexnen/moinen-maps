@@ -629,7 +629,8 @@ export function createEngine(base) {
     /* MOTION2: a track word's pose (motion.mjs): smooth per display frame; stepped mode reads its drawn channels on the shared grid */
     if ( h.track && h.t0 != null ) {
       const age = ageOf(h, t), hb = h.plan._holdBox ?? { w: 3, h: 1 };
-      const tq = h.track.mode === "stepped" ? gridAge(h.t0 + (h.lag || 0), age, h.gridQ) : age;
+      /* stepped: the entrance on ones (the contact needs every drawing), the hold and exit on the shared grid of twos */
+      const tq = h.track.mode === "stepped" ? gridAge(h.t0 + (h.lag || 0), age, age < h.entMs ? TICK : h.gridQ) : age;
       const P = trackPose(h.track, Math.max(0, age), h.entMs, h.holdMs, h.exitAt, { W: hb.w, H: hb.h }, Math.max(0, tq));
       const r0 = h.rot + trot, cr = Math.cos(r0), sr = Math.sin(r0);
       X += (P.x * cr - P.y * sr) * k; Y += (P.x * sr + P.y * cr) * k;

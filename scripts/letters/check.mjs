@@ -201,6 +201,9 @@ await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
 await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
 
+/* 8g. MOTION2: the invincible style's motion table, tracks, envelopes, rhythm, roles, reduced fade, shared pictures (check-motion2.mjs) */
+await (await import("./check-motion2.mjs")).run(ok, { bank, fontsApi });
+
 /* 8f. IMPACT: impact frames (impact/check-impact.mjs) */
 await (await import("./impact/check-impact.mjs")).run(ok);
 
@@ -215,6 +218,13 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-life.mjs", import.meta.url))], { encoding: "utf8", timeout: 600000 });
   for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
   ok(r.status === 0, `life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
+/* 11. MOTION2 on the fake browser: paintings per word, the stepped grid on screen, mode switch, streams and sustain (own process) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-motion2.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `motion2 engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 console.log(`letters: ${n} checks, ${failed} failed`);
