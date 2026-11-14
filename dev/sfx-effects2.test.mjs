@@ -89,6 +89,10 @@ group("DETONATE", () => {
   ok(ten.length === 3, "at most three big words");
   const mix = E.detonateComposition([ev("c", "s1", 0, 0, 200, "crack"), ev("f", "s1", 300, 0, 150, "boom")], { prio });
   ok(mix.length === 1 && mix[0].voice === "boom", "one explosion speaks with its loudest sound");
+  // (the live Detonate: two fire blasts that overlap, a cave-in, a blast and cracks apart - chained into one word by their boxes)
+  const live = E.detonateComposition([ev("b1", "s1", 564, 446, 181, "boom"), ev("b2", "s2", 649, 464, 122, "boom"), ev("c", "s3", 960, 539, 112, "cavein"),
+    ev("d", "s4", 762, 676, 94), ev("e", "s5", 425, 618, 55, "crack")], { prio, grid: 40 });
+  ok(live.length === 3 && live[0].voice === "boom" && live.some((q) => q.voice === "cavein"), `separate explosions keep their own words (${live.map((q) => q.voice)})`);
 });
 
 // RANK: words sized by rank as a share of the view - monotone, readable at the bottom
@@ -165,6 +169,7 @@ group("RIDEVIEW", () => {
   ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
   ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
   ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "every story ride (pre, the plough's grind) is kept in view where it plays");
+  ok(/alive: \[\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\), \.\.\.thisFlush\]/.test(src("sfx/sfx.mjs")) && /thisFlush\.push\(/.test(src("sfx/sfx.mjs")), "clusters of one flush avoid each other's words");
   ok(/w\.voice === "cavein" \? \{ \.\.\.w\.box, y1: w\.box\.y1 \+ \(w\.box\.y1 - w\.box\.y0\) \* 0\.5 \}/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");
 });
 

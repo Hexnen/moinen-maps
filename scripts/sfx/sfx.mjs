@@ -65,6 +65,7 @@ let firingsSeen = null;        // the scene flag's firing records object last sc
 // the rain's lightning (flashes lettered here, the far ones counted from the storm's switch-on)
 let detonating = null;         // { start, until } (performance clock)
 const ploughs = new Set();     // stroke id|start of the ploughs lettered here
+let soon = [];                  // boxes of words placed, not started yet ({ box, until })
 let stormTimer = 0;
 const flashSeen = new Set();
 let farCount = { key: "", k: 0, n: 0, list: new Map() };
@@ -703,6 +704,10 @@ function flush() {
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
   recent = recent.filter((r) => now - r.t < Math.max(C.ECHO_MS, C.OUT_GAP_MS));
+  // (words placed but not started yet - a flush ahead of their moment - count as on screen: `alive` holds a word only once it plays, and
+  // live a Detonate's second word, flushed while the first still waited for its moment, was drawn over it)
+  soon = soon.filter((q) => q.until > now);
+  const thisFlush = soon.map((q) => q.box);
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
     if ( !g.main.det && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
@@ -713,7 +718,13 @@ function flush() {
     const taken = [];
     for ( const w of specs ) { write(w, taken); measure(w); }
     const room = caps.alive - alive.size;
-    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...alive].map((a) => a.box) }), room);
+    // (the words of this flush's earlier clusters count as on screen: they start a beat later, so `alive` does not hold them yet - live,
+    // a Detonate's second word was drawn over its first)
+    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...[...alive].map((a) => a.box), ...thisFlush] }), room);
+    for ( const w of placed ) if ( w.box ) {
+      const b = w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
+      thisFlush.push(b); soon.push({ box: b, until: (w.t ?? now) + 60 });
+    }
     stats.dropped += specs.length - placed.length;
     for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
@@ -821,7 +832,7 @@ function teardown(full = true) {
   for ( const s of sched.values() ) clearTimeout(s.id);
   sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = []; shooters = [];
   pages.clear(); owned = { d: new Set(), f: new Set(), catch: new Set(), out: new Map() }; firingsSeen = null;
-  detonating = null; ploughs.clear(); flashSeen.clear(); clearTimeout(stormTimer); stormTimer = 0;
+  detonating = null; ploughs.clear(); soon = []; flashSeen.clear(); clearTimeout(stormTimer); stormTimer = 0;
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
   burns.clear();

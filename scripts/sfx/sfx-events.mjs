@@ -122,6 +122,8 @@ export function flashWord(ev, place, view, seed = "") {
 export const DETONATE_MAX = { high: 3, medium: 2, low: 1 };
 /** the beat between two of its words (ms, largest first) */
 export const DETONATE_BEAT = 120;
+/** two areas touch when their centres are within this share of their two r plus a square (EFFECTS2, live Detonate) */
+export const DETONATE_TOUCH = 0.55;
 /**
  * The composition of a Detonate: `events` (sfx-core entryEvent of every area going off, `obj` its stroke, `voice`, x, y, r, box, t)
  * -> explosions (areas of one stroke, and strokes whose boxes touch within a square, are ONE explosion: owner's answer 6), the biggest
@@ -131,7 +133,10 @@ export const DETONATE_BEAT = 120;
 export function detonateComposition(events, { grid = 100, max = 3, prio = () => 0 } = {}) {
   const list = events.filter((e) => e && Number.isFinite(e.x)).slice().sort((a, b) => (String(a.key) < String(b.key) ? -1 : 1));
   const box = (e) => e.box ?? { x0: e.x - e.r, y0: e.y - e.r, x1: e.x + e.r, y1: e.y + e.r };
-  const near = (a, b) => (a.obj && a.obj === b.obj) || (Math.max(a.b.x0, b.b.x0) - Math.min(a.b.x1, b.b.x1) <= grid && Math.max(a.b.y0, b.b.y0) - Math.min(a.b.y1, b.b.y1) <= grid);
+  // (touching = the areas themselves meet, within a square: an entry's r is generous - about twice the painted radius - and its box
+  // bigger still, so comparing boxes chained five separate explosions of a live Detonate into one word; the centres are compared
+  // against a little over half the two r)
+  const near = (a, b) => (a.obj && a.obj === b.obj) || Math.hypot(a.e.x - b.e.x, a.e.y - b.e.y) <= DETONATE_TOUCH * ((a.e.r || 0) + (b.e.r || 0)) + grid;
   const items = list.map((e) => ({ e, b: box(e), obj: e.obj }));
   const parent = items.map((_, i) => i), find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   for ( let i = 0; i < items.length; i++ ) for ( let j = i + 1; j < items.length; j++ ) if ( find(i) !== find(j) && near(items[i], items[j]) ) parent[find(j)] = find(i);
