@@ -116,7 +116,7 @@ export function firingPage(rec, ctx = {}) {
   /* ---- PRE: what comes before, building to the MAIN; a travelling PRE word is gone PRE_GAP before the flash frame */
   const preRide = (pts, kind, wo, rank, extra = {}) => {
     const t = T0 + pts[0].ms;
-    W({ key: `pre|${kind}`, role: "pre", kind, wo, t, x: pts[0].x, y: pts[0].y, r: grid * 0.4, rank, ride: pts.map((q) => ({ x: q.x, y: q.y, ms: q.ms - pts[0].ms })),
+    W({ key: extra.key ?? `pre|${kind}`, role: "pre", kind, wo, t, x: pts[0].x, y: pts[0].y, r: grid * 0.4, rank, ride: pts.map((q) => ({ x: q.x, y: q.y, ms: q.ms - pts[0].ms })),
       ms: pts.at(-1).ms - pts[0].ms, stage: { in: "grow", out: "dissolve" }, ...extra });
   };
   if ( fall && !meteor ) {
@@ -143,12 +143,16 @@ export function firingPage(rec, ctx = {}) {
   }
   if ( meteor && ctx.wayOf && ctx.headAt ) {
     // the meteor's descent: riding behind the head down its way, growing fast in the last moments as the head rushes in
-    const Wy = ctx.wayOf(meteor, grid), lift = ctx.lift ?? 0.5, t0 = Math.max(Wy.at, -1700), t1 = -PRE_GAP - 30;
-    const pts = [0, 0.3, 0.55, 0.75, 0.9, 1].map((f) => { const t = t0 + (t1 - t0) * f, h = ctx.headAt(Wy, t);
+    // EFFECTS2: it BUILDS - first a high thin whine far up (a smaller word), then, as the head rushes in for its last stretch, the deep
+    // roar (a bigger word): the engine cannot grow a riding word (REQUESTS EFFECTS1-3), so the descent is two words, the second
+    // taking over from the first (on the film one riding word stayed tiny at the meteor's zoom and told nothing of the rush)
+    const Wy = ctx.wayOf(meteor, grid), lift = ctx.lift ?? 0.5, t0 = Math.max(Wy.at, -1900), t1 = -PRE_GAP - 30, tm = Math.round(t0 + (t1 - t0) * 0.55);
+    const seg = (a, b, fs) => fs.map((f) => { const t = a + (b - a) * f, h = ctx.headAt(Wy, t);
       return { x: h.gx - Wy.d[0] * grid * 0.6, y: h.gy - lift * h.z - Wy.d[1] * grid * 0.6, ms: Math.round(t) }; });
-    preRide(pts, "zoom", { loud: 0.7, long: 1 }, 3, { grow: [0.45, 1] });
+    preRide(seg(t0, tm, [0, 0.35, 0.7, 1]), "zoom", { loud: 0.2, long: 0.6 }, 2, { key: "pre|zoom-far", grow: [0.45, 0.7] });
+    preRide(seg(tm, t1, [0, 0.4, 0.75, 1]), "zoom", { loud: 0.75, long: 1 }, 3, { key: "pre|zoom", grow: [0.7, 1] });
     // the ground answering: a low rumble at the impact point in the last 900 ms, growing
-    W({ key: "pre|rumble", role: "pre", kind: "rumble", wo: { loud: 0.3, long: 0.7 }, t: T0 - 900, x: at.x, y: at.y + grid * 0.6, r: grid * 0.6, rank: 1, ms: 800,
+    W({ key: "pre|rumble", role: "pre", kind: "rumble", wo: { loud: 0.3, long: 0.7 }, t: T0 - 900, x: at.x, y: at.y + grid * 0.6, r: grid * 0.6, rank: 2, ms: 800,
       box: { x0: at.x - grid, y0: at.y - grid * 0.4, x1: at.x + grid, y1: at.y + grid * 0.8 }, stage: { holdKind: "rattle", out: "dissolve" } });
   }
   if ( land && ctx.fallAt ) {
@@ -214,7 +218,9 @@ export function firingPage(rec, ctx = {}) {
   let tPrev = -Infinity;
   falls.forEach((q, i) => W({ key: `fall${i}`, role: "fall", kind: q.kind, wo: { pieces: q.pieces, material: "@ground", loud: clamp(0.5 - 0.08 * i, 0.2, 0.5) },
     t: (tPrev = main.t + Math.max(380 + 160 * i, q.ms, tPrev - main.t + FALL_GAP)), x: q.x, y: q.y, r: grid * (q.pieces === "large" ? 0.5 : q.pieces === "medium" ? 0.38 : 0.28),
-    rank: q.pieces === "small" ? 1 : 2, shrink: 0.85 * Math.pow(0.88, i), ms: 700, stage: { in: "pop", out: "fall" }, cands: landCands }));
+    // (EFFECTS2: sized by rank as a share of the view (sfx-events rankSize), so a gentle step down keeps the last one readable - the
+    // old 0.85 x 0.88^i on the engine's magnitude put the meteor's last ejecta words under the legible floor; the first stays under the wave)
+    rank: q.pieces === "small" ? 1 : 2, shrink: Math.max(0.75, 0.85 * Math.pow(0.94, i)), ms: 700, stage: { in: "pop", out: "fall" }, cands: landCands }));
   if ( land ) {
     // the landing's cracks: ONE word for all the rays, riding out along one of them (the R run = the ray's time)
     const a = Math.PI * (side < 0 ? 0.25 : 0.75), ux = Math.cos(a), uy = Math.sin(a), r0 = main.r * 0.8, r1 = main.r * 2.6;
