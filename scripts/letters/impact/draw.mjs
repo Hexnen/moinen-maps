@@ -30,11 +30,16 @@ const gain = (e) => 0.5 + 0.5 * e.mag;
 const stepOfEnv = (e) => (Number.isFinite(e.step) ? e.step : 3);
 /* the star of a drawing that is not a full-field frame stays inside a disc of a sixth of the picture, however big the subject (a word, a
    wide blast); the weak steps draw it small, at the rim of the struck figure, so the figure stays in sight */
+/* FIN-ENGINE (FXIT-E2, ADVI 16): the floors that keep a drawing legible scale with the SUBJECT's size on screen: a token of 20 px at a far
+   zoom gets a star of a few token widths (at least LEGIBLE of the view's short side), not one sized for the viewport that covers its
+   neighbours; at an ordinary zoom (a token of ~100 px) the view's floor holds as before. No subject (R 0): the view's floor. */
+const LEGIBLE = 0.03;
+export const floorOf = (e, k, near) => (e.R > 0 ? Math.min(unit(e) * k, Math.max(e.R * near, unit(e) * LEGIBLE)) : unit(e) * k);
 export const burstR = (e) => {
   const st = stepOfEnv(e), cap = Math.sqrt(0.16 * e.W * e.H / Math.PI);
-  if ( e.sil && st <= 1 ) return Math.min(Math.max(e.R * 0.5, unit(e) * 0.04) * gain(e), cap);
-  if ( e.sil && st === 2 ) return Math.min(Math.max(e.R * 0.85, unit(e) * 0.07) * gain(e), cap);
-  return Math.min(Math.max(e.R * 1.6, unit(e) * 0.13) * gain(e), cap);
+  if ( e.sil && st <= 1 ) return Math.min(Math.max(e.R * 0.5, floorOf(e, 0.04, 1.5)) * gain(e), cap);
+  if ( e.sil && st === 2 ) return Math.min(Math.max(e.R * 0.85, floorOf(e, 0.07, 2.5)) * gain(e), cap);
+  return Math.min(Math.max(e.R * 1.6, floorOf(e, 0.13, 4)) * gain(e), cap);
 };
 
 /* ---------- the struck figure ----------
@@ -371,7 +376,7 @@ const PAINT = {
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.9, fill: e.tone.b, core: PAPER, key: PAPER });
   },
   shatter(ctx, e, f) {
-    const u = unit(e), c = G.cracks(f.seed, { cx: e.hx, cy: e.hy, r: u * 0.5 * gain(e), w: u * 0.022 * gain(e), n: 10 });
+    const u = unit(e), c = G.cracks(f.seed, { cx: e.hx, cy: e.hy, r: floorOf(e, 0.5, 9) * gain(e), w: Math.min(u * 0.022, Math.max(e.R > 0 ? e.R * 0.4 : u, u * 0.008)) * gain(e), n: 10 });
     for ( const p of c.cracks ) shape(ctx, p, PAPER, INK, u * 0.004);
     for ( const p of c.shards ) shape(ctx, p, INK, PAPER, u * 0.004);
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.7, fill: e.tone.a, core: PAPER });
@@ -410,7 +415,7 @@ const tearAngle = (e, f) => e.dir ?? ((f.seed % 180) * Math.PI) / 180;
 /* the gentle variant's panel: a jagged star of at most LIMITS.localArea of the viewport round the subject */
 export const panelOf = (e, f) => G.star(f.seed + 11, { cx: e.cx, cy: e.cy, r: e.local.r, spikes: 14, inner: 0.72, jitter: 0.12, stretch: 1, ang: 0, long: 0 });
 /* the panel of a drawing that changes the scene only round the blow (`local` frames: ink, shatter): never more than localArea */
-export const localPanelR = (e) => Math.min(Math.sqrt((LIMITS.localArea * e.W * e.H) / Math.PI), Math.max(e.R * 2.4, unit(e) * 0.17) * gain(e));
+export const localPanelR = (e) => Math.min(Math.sqrt((LIMITS.localArea * e.W * e.H) / Math.PI), Math.max(e.R * 2.4, floorOf(e, 0.17, 5)) * gain(e));
 export const panelPoly = (e, f) => (e.local ? panelOf(e, f) : G.star(f.seed + 13, { cx: e.cx, cy: e.cy, r: localPanelR(e), spikes: 13, inner: 0.74, jitter: 0.14, stretch: e.dir != null ? 1.12 : 1, ang: e.dir ?? 0, long: 0 }));
 
 /* the part of the picture whose scene is changed by the drawing's `back` (a polygon for the player's clip, null = all of it) */

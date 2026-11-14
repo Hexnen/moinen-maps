@@ -184,13 +184,17 @@ export function pick(e = {}) {
   return { kind, magnitude: clamp(0.25 + share * 2.2 + (e.crit ? 0.6 : 0), 0, 2) };
 }
 
+/* FIN-ENGINE (FXIT-E1 c): a blow's place in a series (0 = the first, up to SERIES_MAX) raises its strength by SERIES_STEP per place, so
+   every caller builds a series alike (a third blow on the same figure is drawn harder than the first) */
+export const SERIES_STEP = 0.15, SERIES_MAX = 4;
+export const seriesBoost = (n) => SERIES_STEP * clamp(Math.floor(Number(n) || 0), 0, SERIES_MAX);
 /* ---------- the plan ---------- */
-/* spec = { kind, magnitude, seed, dir (degrees the blow travels: 0 right, 90 down; null = no direction), tone | colors: [a, b],
+/* spec = { kind, magnitude, series (0..4), seed, dir (degrees the blow travels: 0 right, 90 down; null = no direction), tone | colors: [a, b],
             frames: [type | { type, ticks, stop, punch }] (a caller's own sequence instead of the kind's), hitstop, punch }
    -> { kind, tier, step, magnitude, seed, dir (radians | null), tone: { a, b }, frames: [{ type, ticks, stop, punch, seed, full, cls, back, local }], ticks, ms } */
 export function planImpact(spec = {}) {
   const kind = Object.hasOwn(KINDS, spec.kind) ? spec.kind : "hit";
-  const magnitude = clamp(Number.isFinite(spec.magnitude) ? spec.magnitude : 0.5, 0, 2);
+  const magnitude = clamp((Number.isFinite(spec.magnitude) ? spec.magnitude : 0.5) + seriesBoost(spec.series), 0, 2);
   const tier = tierOf(magnitude), step = stepOf(magnitude);
   const seed = spec.seed == null ? 1 : (typeof spec.seed === "number" ? spec.seed >>> 0 : hash(spec.seed));
   const R = rng(seed);
@@ -218,7 +222,11 @@ export function planImpact(spec = {}) {
   }
   const t = Array.isArray(spec.colors) && spec.colors.length ? { a: String(spec.colors[0]), b: String(spec.colors[1] ?? spec.colors[0]) } : (TONES[spec.tone] ?? TONES[K.tone]);
   const dir = Number.isFinite(spec.dir) ? (spec.dir * Math.PI) / 180 : null;
-  return { kind, tier, step, magnitude, seed, dir, tone: { a: t.a, b: t.b }, frames, ticks: total, ms: total * TICK, mode: "full" };
+  const plan = { kind, tier, step, magnitude, seed, dir, tone: { a: t.a, b: t.b }, frames, ticks: total, ms: total * TICK, mode: "full" };
+  /* FIN-ENGINE: when the blow itself shows, ms after the impact's start (the lead-ins before it: lines, a black frame); a caller that knows
+     the instant of the blow passes it as `blowAt` and the impact starts peakMs earlier */
+  plan.peakMs = peakOf(plan).tick * TICK;
+  return plan;
 }
 /* the drawing of a plan that IS the blow: the first one with the weight of a hit (a star, a panel, a full-field frame) after the
    lead-ins (lines, a colour split); without one, the strongest. -> its index and the tick it starts at */

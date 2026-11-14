@@ -9,7 +9,7 @@ import { rng, hash } from "./rng.mjs";
 import { characterOf } from "./words.mjs";
 import { onOf, retime } from "./move.mjs";
 import { groupsOf, letterScales, choreoEntrance, countFrames } from "./choreo.mjs";
-import { motionOf, entranceKeys, exitKeys, keysEnd, letterDrawings } from "./motion.mjs";
+import { motionOf, entranceKeys, exitKeys, keysEnd, letterDrawings, contactKey } from "./motion.mjs";
 
 export const TICK = 1000 / 24;
 
@@ -1056,9 +1056,18 @@ function trackTimeline(n, m, R, o = {}) {
   const tempo = o.tempo || 1;
   const sc = (keys) => keys.map(([t, p, e]) => [t / tempo, p, e]);
   m.entKeys = sc(entranceKeys(m)); m.exitKeys = sc(exitKeys(m));
+  /* FIN-ENGINE (FXIS-E4): under reduced motion the fade-in ends on the FULL entrance's contact (o.contact), so a reduced seat sees the
+     word land on the same instant as a full one (before: a 140 ms fade, the word ~0.1-0.4 s early) */
+  if ( o.reduced && m.in === "fade" && Number.isFinite(o.contact) ) {
+    const c = Math.max(0, o.contact), f = Math.min(140 / tempo, c);
+    m.entKeys = c > f ? [[0, { a: 0 }], [c - f, { a: 0 }, "lin"], [c, {}, "lin"]] : [[0, { a: 0 }], [Math.max(1, c), {}, "lin"]];
+  }
   /* the impact accent covers the first tick: the entrance's contact pose starts when the word shows (else the slam's big contact is
      spent under the accent and the word appears already settled: seen on the MOTION2 film) */
-  if ( m.flash && !o.reduced && m.in !== "choreo" ) { const d = TICK / tempo; m.entKeys = [[0, m.entKeys[0][1]], ...m.entKeys.map(([t, p, e]) => [t + d, p, e])]; }
+  const shifted = m.flash && !o.reduced && m.in !== "choreo";
+  if ( shifted ) { const d = TICK / tempo; m.entKeys = [[0, m.entKeys[0][1]], ...m.entKeys.map(([t, p, e]) => [t + d, p, e])]; }
+  /* FIN-ENGINE (FXIS-E1 / FXIT-E3): the word's contact, ms from its start (an impact frame a caller plays on the word belongs here) */
+  m.contactMs = m.in === "choreo" ? null : m.in === "fade" ? keysEnd(m.entKeys) : m.entKeys[contactKey(m, m.entKeys) + (shifted ? 1 : 0)][0];
   const ticks = (ms) => Math.max(1, Math.ceil(ms / TICK - 1e-6));
   const P = (t, key, extra = {}) => { const p = pic(n, t); p.key = key; p.boil = R.seed(); return Object.assign(p, extra); };
   const ent = [], hold = [], exit = [];
@@ -1088,6 +1097,22 @@ function trackTimeline(n, m, R, o = {}) {
     }
   } else exit.push(P(ticks(keysEnd(m.exitKeys)), "base"));
   return { ent, hold, exit, kinds: { in: m.in, hold: m.hold, out: m.out }, tech: { flash: !!m.flash, smear: ent.some((p) => p.smear), antic: false, follow: false, misreg: 0, heavy: m.rate === 3 }, track: true };
+}
+
+/* FIN-ENGINE (FXIS-E1 / FXIT-E3): the contact instant of a word, ms from its start. A track word (invincible): its entrance's contact key
+   (motion.contactMs). A drawn entrance (legacy style, choreography): the first picture with a burst or dust (the squash on contact), else
+   the first impact accent, else the biggest pose. Stepped motion shows it on the next 24 Hz grid instant (L.contactAt). */
+export function contactOf(tl, motion) {
+  if ( motion && Number.isFinite(motion.contactMs) ) return Math.round(motion.contactMs * 100) / 100;
+  let a = 0, big = -1, bigAt = 0, flashAt = null;
+  for ( const p of tl.ent ) {
+    if ( p.fx?.some((f) => f.k === "burst" || f.k === "dust") ) return Math.round(a * TICK * 100) / 100;
+    if ( p.impact && flashAt == null ) flashAt = a;
+    const g = p.g ?? {}, s = (g.s ?? 1) * Math.max(g.sx ?? 1, g.sy ?? 1);
+    if ( s > big + 1e-9 ) { big = s; bigAt = a; }
+    a += p.ticks;
+  }
+  return Math.round((flashAt ?? bigAt) * TICK * 100) / 100;
 }
 
 /* ---------- the whole plan ---------- */
@@ -1147,7 +1172,21 @@ export function makePlan(text, opts, fonts, memory) {
   const motion = track ? motionOf({ kind: opts.kind, mood: MOODS[mood]?.base ?? mood, sound, character, chars, accent, dir, seed, reduced: opts.reduced, syllable: !!opts._stream,
     mode: opts.look?.motion, pin: { in: opts.in, holdKind: opts.holdKind, out: opts.out } }) : null;
   if ( motion && choreoOn ) { motion.in = "choreo"; motion.flash = false; }
+  /* FIN-ENGINE (FXIS-E2 / FXIT-E4): flash: false = a caller plays its own impact frame on this word's contact: no accent of its own */
+  if ( motion && opts.flash === false ) motion.flash = false;
+  /* FIN-ENGINE (FXIS-E4): a reduced word lands on the contact a full seat would see (same table row, same accent rule) */
+  if ( motion && opts.reduced ) {
+    const full = !groupsOf(chars, { ...opts, reduced: false }, syllablesOf) && !opts.countIn ? motionOf({ kind: opts.kind, mood: MOODS[mood]?.base ?? mood, sound, character, chars, accent, dir, seed, syllable: !!opts._stream,
+      mode: opts.look?.motion, pin: { in: opts.in, holdKind: opts.holdKind, out: opts.out } }) : null;
+    if ( full ) {
+      if ( opts.flash === false ) full.flash = false;
+      const tp = opts.tempo || 1, k = entranceKeys(full).map(([t, p, e]) => [t / tp, p, e]);
+      topts.contact = k[contactKey(full, k)][0] + (full.flash && full.in !== "choreo" ? TICK / tp : 0);
+    }
+  }
   const tl = track ? trackTimeline(chars.length, motion, R, topts) : buildTimeline(chars.length, mood, sound, hand, R, topts);
+  /* legacy style: flash: false keeps the timing, the accent picture shows the word (like the photosensitivity guard's unflash) */
+  if ( !track && opts.flash === false ) for ( const p of [...tl.ent, ...tl.hold, ...tl.exit] ) if ( p.impact ) p.impact = false;
   const holdMs = Math.max(0, (opts.hold ?? (track ? motion.holdMs : MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long))) / (opts.tempo || 1));
   /* frame rate (move.mjs): ones / twos / threes for this word; motion of a travelling word steps on the same grid */
   const on = opts.reduced ? 0 : onOf(opts);
@@ -1174,6 +1213,7 @@ export function makePlan(text, opts, fonts, memory) {
     sizeK: (0.62 + 0.7 * sound.loud) * blockK };
   if ( on && on !== 2 ) plan.on = on;   // twos = the default timing (no change to the plan)
   if ( motion ) plan.motion = motion;
+  plan.contactMs = contactOf(tl, motion);
   if ( groups ) plan.groups = groups.map((g) => ({ from: g.from, to: g.to, at: g.at, scale: g.scale, body: !!g.body }));
   if ( opts.hollow ) plan.hollow = true;
   return plan;

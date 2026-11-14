@@ -1024,7 +1024,9 @@ export function createEngine(base) {
         h.loop = false;
         kick();
       },
-      moveTo(at) { h.at = at; h.gone = false; }
+      moveTo(at) { h.at = at; h.gone = false; },
+      /* FIN-ENGINE: this page's performance.now() of the word's contact (null until its start is known) */
+      get contactAt() { return contactAt(h); }
     };
     h._done = done; h._ready = rdy;
     h.at = opts.at;
@@ -1067,6 +1069,17 @@ export function createEngine(base) {
     const go = () => { if ( bank.has("bangers") || bank.has("anton") ) start(); else readyP.then(start, (e) => { console.warn("LETR", e); finish(h, "evicted"); }); };
     if ( opts.delay > 0 ) h.timer = setTimeout(() => { h.timer = 0; if ( h.alive ) go(); }, opts.delay); else go();
     return h;
+  }
+  /* FIN-ENGINE (FXIS-E1 / FXIT-E3): when a word's contact shows, on this page's performance.now() clock. x = a handle or a plan;
+     startAt = the word's start (default: the handle's own start once known). Smooth motion and the legacy pictures: start + contactMs;
+     stepped motion: the next instant of the shared 24 Hz grid at or after it (its entrance is drawn on ones). null when unknown. */
+  function contactAt(x, startAt) {
+    const plan = x?.plan ?? (x?.timeline ? x : null);
+    if ( !plan || !Number.isFinite(plan.contactMs) ) return null;
+    const t0 = Number.isFinite(startAt) ? startAt : x?.plan && Number.isFinite(x.t0) ? x.t0 + (x.lag || 0) : Number.isFinite(x?.opts?.startAt) ? x.opts.startAt : null;
+    if ( t0 == null ) return null;
+    const t = t0 + plan.contactMs;
+    return plan.motion?.mode === "stepped" && plan.motion.in !== "fade" ? Math.ceil(t / TICK - 1e-9) * TICK : t;
   }
   /* lettering is off on this client (tools: the master switch): a handle that is already over */
   function offHandle(text, opts) {
@@ -1298,7 +1311,7 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(),
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, contactAt, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(),
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow, chain,
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */

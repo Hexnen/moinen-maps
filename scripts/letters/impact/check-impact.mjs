@@ -3,9 +3,9 @@
 // (prints "impact: N checks, F failed"); scripts/letters/check.mjs runs it as section 8f.
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { planImpact, safety, modeFor, frameAt, punchAt, pick, tierOf, stepOf, STEP_AT, peakOf, isFlash, localRadius, isRed, safeColor, SAFE_RED, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES } from "./plan.mjs";
+import { planImpact, safety, modeFor, frameAt, punchAt, pick, tierOf, stepOf, STEP_AT, peakOf, SERIES_STEP, SERIES_MAX, isFlash, localRadius, isRed, safeColor, SAFE_RED, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES } from "./plan.mjs";
 import * as G from "./shapes.mjs";
-import { bigTone, dotsReach, burstR, paintFrame, backClip, panelOf, panelPoly, localPanelR, blowUp, figureMask, inkPixels, PAINTERS } from "./draw.mjs";
+import { bigTone, dotsReach, burstR, floorOf, paintFrame, backClip, panelOf, panelPoly, localPanelR, blowUp, figureMask, inkPixels, PAINTERS } from "./draw.mjs";
 
 export async function run(ok) {
   const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
@@ -85,6 +85,14 @@ export async function run(ok) {
   }
   ok(planImpact({ dir: 90 }).dir === Math.PI / 2 && planImpact({}).dir === null, "impact: dir in degrees -> radians, none = null");
   ok(planImpact({ colors: ["#123456", "#abcdef"] }).tone.a === "#123456" && planImpact({ tone: "volt" }).tone.a === TONES.volt.a && planImpact({ kind: "slash" }).tone.a === TONES.blood.a, "impact: colours from the call, a tone name, or the kind");
+
+  /* FIN-ENGINE (FXIT-E1 c): a blow's place in a series raises its strength (the same for every caller), capped; peakMs = the blow's tick */
+  {
+    const b = (s) => planImpact({ kind: "hit", magnitude: 0.4, seed: 2, series: s });
+    ok(Math.abs(b(2).magnitude - (0.4 + 2 * SERIES_STEP)) < 1e-9 && b(0).magnitude === 0.4 && b(99).magnitude === b(SERIES_MAX).magnitude && b(-3).magnitude === 0.4 && planImpact({ magnitude: 1.95, series: 4 }).magnitude === 2, "impact: series raises the strength by SERIES_STEP per place, capped");
+    ok(b(SERIES_MAX).step > b(0).step, "impact: a series climbs the steps");
+    for ( const kind of KIND_IDS ) for ( const m of [0.3, 1, 1.9] ) { const p = planImpact({ kind, magnitude: m, seed: 4 }); ok(p.peakMs === peakOf(p).tick * TICK && p.peakMs < p.ms, `impact: ${kind} m=${m} peakMs is the blow's tick`); }
+  }
 
   /* 3. modes */
   ok(modeFor({ ...P0, enabled: false }) === "off" && modeFor({ ...P0, impact: "off" }) === "off", "impact: the master switch and the own switch turn it off");
@@ -283,6 +291,15 @@ export async function run(ok) {
     { const pic = { w: 120, h: 120 };
       ok(burstR(env({ R: 60, sil: pic, step: 1, mag: 0.45 })) < 60 && burstR(env({ R: 60, sil: pic, step: 2, mag: 0.7 })) < burstR(env({ R: 60, sil: pic, step: 3, mag: 1 })), "impact: the star grows with the step, a scratch's star is smaller than the figure");
       ok(burstR(env({ R: 60, sil: pic, step: 2, mag: 0.62 })) < burstR(env({ R: 60, sil: pic, step: 2, mag: 0.84 })), "impact: inside one step a stronger blow draws a bigger star (a series builds)"); }
+    /* FIN-ENGINE (FXIT-E2, ADVI 16): sized from the subject on screen: a 20 px token at a far zoom gets a star of a few token widths, not one
+       sized for the viewport; an ordinary token (~100 px) keeps the view's floor; no subject keeps it too */
+    for ( const st of [1, 2, 4] ) {
+      const pic = { w: 20, h: 20 }, small = burstR(env({ R: 10, sil: pic, step: st, mag: 1 })), u = 900;
+      ok(small <= Math.max(10 * 4, u * 0.03) * 1.0001 && small >= u * 0.03 * 0.5 - 1e-9, `impact: step ${st}: a 20 px token's star radius ${small.toFixed(0)} px (a few token widths, legible)`);
+      ok(burstR(env({ R: 50, sil: { w: 100, h: 100 }, step: st, mag: 1 })) === Math.max(50 * (st <= 1 ? 0.5 : st === 2 ? 0.85 : 1.6), u * (st <= 1 ? 0.04 : st === 2 ? 0.07 : 0.13)), `impact: step ${st}: an ordinary token keeps the view's floor`);
+    }
+    ok(burstR(env({ R: 0, step: 4, mag: 1 })) === 900 * 0.13 && floorOf(env({ R: 0 }), 0.2, 9) === 900 * 0.2, "impact: no subject: the view's floor");
+    ok(localPanelR(env({ R: 10, mag: 1 })) < localPanelR(env({ R: 50, mag: 1 })) && localPanelR(env({ R: 10, mag: 1 })) <= Math.max(10 * 5, 27) + 1e-9, "impact: the black-and-white panel of a far-zoom token stays round it");
     /* the silhouette: enlarged to its share of the frame, never shrunk */
     ok(blowUp(env()) === 1 && blowUp(env({ sil: { w: 40, h: 40 } })) > 3 && blowUp(env({ sil: { w: 900, h: 900 } })) === 1 && blowUp(env({ sil: { w: 1, h: 1 } })) === 8, "impact: silhouette blow-up range");
     { const src = fakeCanvas(64, 64); const ctx = mkCtx(); const e = env({ sil: { src, sx: 0, sy: 0, sw: 64, sh: 64, w: 80, h: 80, rot: 0 } });
@@ -457,6 +474,32 @@ async function life(ok) {
     P.motion = "auto"; h = I.play({ kind: "crit", magnitude: 2, seed: 16, reduced: false });
     ok(h.mode === "static", "impact life: reduced: false does not overrule the OS reduced-motion switch"); h.stop();
     globalThis.matchMedia = mm; P.motion = "full"; }
+
+  /* FIN-ENGINE: blowAt = the instant of the blow: the impact starts peakMs earlier */
+  await E.tick(1500);
+  { const at = performance.now() + 300;
+    h = I.play({ kind: "hit", magnitude: 1.5, seed: 21, blowAt: at, subject: { x: 300, y: 300 } });
+    ok(h.alive && h.plan.peakMs > 0 && Math.abs(h.t0 - (at - h.plan.peakMs)) < 1e-6, `impact life: blowAt starts the impact ${h.plan.peakMs} ms before the blow`); h.stop(); }
+  /* FIN-ENGINE (FXIS-E3): keep a rectangle readable: every drawing and the scene's change get a hole there, following it */
+  await E.tick(1500);
+  { const box = { x: 700, y: 400, w: 200, h: 80 };
+    h = I.play({ kind: "crit", magnitude: 2, seed: 22, subject: { x: 800, y: 440 }, keep: box, keepPad: 4 });
+    let holes = 0, backHoles = 0, frames = 0, follow = false;
+    for ( let t = 0; t < h.plan.ms + 60 && h.alive; t += 16 ) {
+      await E.tick(16);
+      const f = h.plan.frames[h.idx]; if ( !f?.cv ) continue; frames++;
+      const cp = String(f.cv.style.clipPath ?? "");
+      if ( /evenodd/.test(cp) && /M(696|716).0 396.0 H(904|924).0 V484.0 H(696|716).0 Z/.test(cp) ) holes++;
+      if ( h.back.style.display !== "none" && /evenodd/.test(String(h.back.style.clipPath)) && /M(696|716).0 396.0/.test(String(h.back.style.clipPath)) ) backHoles++;
+      else if ( h.back.style.display !== "none" ) backHoles -= 100;
+      if ( t > 100 && !follow ) { box.x = 720; await E.tick(16); follow = String(h.plan.frames[h.idx]?.cv?.style.clipPath ?? "").includes("M716.0 396.0"); }
+    }
+    ok(frames > 3 && holes >= frames - 2, `impact life: keep cuts the box out of every drawing (${holes}/${frames})`);
+    ok(backHoles >= 0, "impact life: keep cuts the box out of the scene's change too");
+    ok(follow, "impact life: the kept box is followed when it moves");
+    ok(kids() === 0 || h.alive, "impact life: keep leaves nothing");
+    const g = I.play({ kind: "hit", magnitude: 1, seed: 23 }); await E.tick(60);
+    ok(!String(g.plan.frames[g.idx]?.cv?.style.clipPath ?? "").includes("evenodd"), "impact life: no keep, no hole"); g.stop(); }
 
   /* scene change */
   h = I.play({ kind: "hit", magnitude: 1.9, seed: 12 }); await E.tick(30); I.stopAll();

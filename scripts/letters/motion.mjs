@@ -272,6 +272,12 @@ export function exitKeys(m) {
   }
 }
 export const keysEnd = (keys) => keys[keys.length - 1][0];
+/* FIN-ENGINE (FXIS-E1 / FXIT-E3): the CONTACT of an entrance, the key where the sound hits: the squash of a slam, the landing of a drop,
+   the biggest pose of a pop or a burst, the arrival of a fly-by, the real start after a false one, the end of a fade. An impact frame
+   a caller plays on a word belongs to this instant (plan.contactMs = this key's time after tempo and the accent tick). */
+const CONTACT = { slam: 1, pop: 1, burstIn: 2, swell: 1, drop: 1, dropSlow: 1, squash: 1, grow: 1, roarIn: 2, rise: 1, ignite: 2, zip: 1, drag: 1,
+  stretch: 1, crackIn: 1, falseStart: 5, squeeze: 1, sputterIn: 1, fade: 1, choreo: 0 };
+export const contactKey = (m, keys) => Math.max(0, Math.min(keys.length - 1, CONTACT[m.in] ?? 1));
 function sampleKeys(keys, t) {
   if ( t <= keys[0][0] ) return { ...REST, ...keys[0][1] };
   for ( let i = 1; i < keys.length; i++ ) {

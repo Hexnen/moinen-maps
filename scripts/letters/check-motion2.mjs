@@ -217,6 +217,42 @@ export async function run(ok, { bank, fontsApi }) {
     for ( const t0 of [0, 17, 1003.3, 5123.9] ) for ( let a = 0; a < 2000; a += 7 ) { const g = gridAge(t0, a, 2 * TICK); if ( g > a + 1e-6 || Math.abs(((t0 + g) / (2 * TICK)) - Math.round((t0 + g) / (2 * TICK))) > 1e-6 ) off++; }
     ok(off === 0, `motion2 grid: ${off} sampled ages map off the page clock's shared grid`);
   }
+  /* FIN-ENGINE (FXIS-E1 / FXIT-E3, FXIS-E2, FXIS-E4): the word's official contact instant, flash: false, reduced lands on the same contact */
+  {
+    const bad = [], badF = [], badR = [], badRA = [], badPose = [];
+    for ( const { id, w, po } of words ) for ( const mode of MOTION_MODES ) {
+      const q = inv(w.text, { ...po, seed: `ct${id}` }, mode), m = q.motion, E = entMs(q);
+      if ( !(Number.isFinite(q.contactMs) && q.contactMs >= 0 && q.contactMs <= E + 1e-6) ) { bad.push(`${id}/${mode} ${q.contactMs} of ${E}`); continue; }
+      /* what the contact IS: a slam squashes, a drop lands, a pop / burst is at its biggest, a fly-by has arrived */
+      if ( m.in !== "choreo" ) {
+        const P = (t) => trackPose(m, t, E, q.holdMs, null, {}, t), c = P(q.contactMs);
+        let mx = 0; for ( let t = 0; t <= E; t += 4 ) mx = Math.max(mx, P(t).s);
+        if ( m.in === "slam" && !(c.sy < 1 && c.sx > 1) ) badPose.push(`${id} slam not squashed at contact`);
+        if ( m.in === "drop" && !(Math.abs(c.y) < 0.05 && c.sy < 0.9) ) badPose.push(`${id} drop not landed at contact (y ${c.y.toFixed(2)})`);
+        if ( ["pop", "burstIn"].includes(m.in) && !(c.s >= mx - 1e-6) ) badPose.push(`${id} ${m.in} not biggest at contact (${c.s.toFixed(2)} < ${mx.toFixed(2)})`);
+        if ( m.in === "zip" && !(Math.abs(c.x) < 0.2) ) badPose.push(`${id} zip not arrived at contact`);
+      }
+      /* flash: false: no accent picture, the contact one tick earlier when there was one */
+      const f = inv(w.text, { ...po, seed: `ct${id}`, flash: false }, mode), had = q.timeline.ent.some((x) => x.impact);
+      if ( f.timeline.ent.some((x) => x.impact) || f.motion.flash || Math.abs(f.contactMs - (q.contactMs - (had ? TICK : 0))) > 0.02 ) badF.push(`${id}/${mode} ${q.contactMs}->${f.contactMs}`);
+      /* reduced: the same contact as the full seat (with and without the accent), the word invisible before its fade and whole at contact */
+      for ( const [full, o] of [[q, {}], [f, { flash: false }]] ) {
+        const r = inv(w.text, { ...po, seed: `ct${id}`, reduced: true, ...o }, mode), rm = r.motion;
+        if ( Math.abs(r.contactMs - full.contactMs) > 1e-6 ) { badR.push(`${id}/${mode}${o.flash === false ? "/F" : ""} ${full.contactMs} vs reduced ${r.contactMs}`); continue; }
+        const RE = entMs(r), a = (t) => trackPose(rm, t, RE, r.holdMs, null, {}, t).a;
+        if ( !(a(r.contactMs) > 0.999 && (r.contactMs <= 150 || a(r.contactMs - 150) < 1e-6) && rm.in === "fade") ) badRA.push(`${id}/${mode}`);
+      }
+    }
+    ok(!bad.length, `fin contact: plan.contactMs missing or outside the entrance: ${bad.slice(0, 6).join(", ")}`);
+    ok(!badPose.length, `fin contact: the contact key is not the hit: ${badPose.slice(0, 6).join(", ")}`);
+    ok(!badF.length, `fin flash:false: accent kept or contact not moved by its tick: ${badF.slice(0, 6).join(", ")}`);
+    ok(!badR.length, `fin reduced: a reduced word's contact differs from the full seat's: ${badR.slice(0, 6).join(", ")}`);
+    ok(!badRA.length, `fin reduced: the fade does not end on the contact (invisible before, whole at it): ${badRA.slice(0, 6).join(", ")}`);
+    /* the legacy style: the first picture with the squash's burst (callers' old guess), flash: false keeps the timing */
+    const lg = plan("BLAM!", { mood: "impact", seed: 11, look: { style: "expressive" }, in: "slam" }), lgF = plan("BLAM!", { mood: "impact", seed: 11, look: { style: "expressive" }, in: "slam", flash: false });
+    let at = 0; for ( const x of lg.timeline.ent ) { if ( x.fx?.some((g) => g.k === "burst") ) break; at += x.ticks * TICK; }
+    ok(Math.abs(lg.contactMs - at) < 0.01 && lgF.contactMs === lg.contactMs && !lgF.timeline.ent.some((x) => x.impact) && entMs(lgF) === entMs(lg), `fin contact legacy: ${lg.contactMs} (burst picture at ${at.toFixed(1)}), flash:false ${lgF.contactMs}`);
+  }
   /* the legacy styles stay on their own timeline (the freeze itself is check-look2's P17 and the fingerprint) */
   {
     const c = plan("KRAK!", { mood: "crack", seed: 4, look: { style: "comic" } }), e = plan("KRAK!", { mood: "crack", seed: 4, look: { style: "expressive" } });
@@ -268,6 +304,25 @@ async function engineChecks() {
       if ( mode === "smooth" ) ok(frames > 10 && changes >= Math.min(frames, Math.floor(h.entMs / (1000 / 60))) - 1, `motion2 engine smooth: the scale changed on ${changes} of ${frames} frames (every entrance frame)`);
       else ok(changes > 2 && offGrid === 0, `motion2 engine stepped: ${offGrid} of ${changes} drawn changes off the shared grid`);
       if ( mode === "stepped" ) ok(Number.isFinite(h.t0) && Math.abs(h.t0 / (2 * TICK) - Math.round(h.t0 / (2 * TICK))) < 1e-6, `motion2 engine stepped: the word starts on the grid (t0 ${h.t0})`);
+    }
+    E.restoreWarn();
+  });
+
+  /* FIN-ENGINE: L.contactAt / h.contactAt: smooth = start + contactMs, stepped = the next 24 Hz grid instant; the squash shows there */
+  await block(async () => {
+    const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+    for ( const mode of ["smooth", "stepped"] ) for ( const flash of [undefined, false] ) {
+      const st = E.now() + 200.3;
+      const h = L.play("BLAM!", { kind: "punch", seed: `ca${mode}`, magnitude: 1.2, space: "world", at: { x: 2000, y: 1500 }, startAt: st, flash, look: { style: "invincible", motion: mode } });
+      const c = L.contactAt(h), want = st + h.plan.contactMs;
+      if ( mode === "smooth" ) ok(Math.abs(c - want) < 1e-6 && h.contactAt === c, `fin contactAt smooth: ${c} = start + ${h.plan.contactMs}`);
+      else ok(c >= want - 1e-6 && c < want + TICK && Math.abs(c / TICK - Math.round(c / TICK)) < 1e-6 && h.contactAt === c, `fin contactAt stepped: ${c} on the grid after start + ${h.plan.contactMs}`);
+      ok(L.contactAt(h.plan, 1000) >= 1000 + h.plan.contactMs - 1e-6 && L.contactAt({}) === null && L.contactAt(h.plan) === null, "fin contactAt: a plan with a start; nothing without one");
+      /* the squash (lowest sy/sx of the sprite) shows on the first frame at or after contactAt */
+      let best = Infinity, bestT = null;
+      for ( let t = 0; t < 900 && h.alive; t += 1000 / 60 ) { await E.tick(1000 / 60, 1000 / 60); if ( h.sprite && h.shown && E.now() >= st ) { const q = h.sprite.scale.y / h.sprite.scale.x; if ( q < best - 1e-9 ) { best = q; bestT = E.now(); } } }
+      ok(bestT != null && bestT >= c - 1e-6 && bestT < c + 1000 / 60 + 1e-6, `fin contact on screen (${mode}${flash === false ? ", flash:false" : ""}): squash at ${bestT?.toFixed(1)}, contactAt ${c.toFixed(1)}`);
+      h.stop({ quick: true }); await E.tick(50);
     }
     E.restoreWarn();
   });

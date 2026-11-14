@@ -8,7 +8,7 @@
    ink (stars, lines, silhouettes, halftone, splashes) is painted ahead of time on 2D canvases, one per drawing, and a drawing change
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
-import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT } from "./plan.mjs";
+import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX } from "./plan.mjs";
 import { paintFrame, backClip } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
@@ -99,7 +99,8 @@ export function createImpact(L, tools = null) {
       } catch {}
     }
     const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: prefs().photosafe === false,
-      local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, Math.min(W, H) * 0.2)) },
+      /* the gentle panel: round the subject, sized from it (FIN-ENGINE FXIT-E2: a far-zoom token gets a panel of a few token widths) */
+      local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, R > 0 ? Math.min(Math.min(W, H) * 0.2, Math.max(R * 6, Math.min(W, H) * 0.06)) : Math.min(W, H) * 0.2)) },
       chromaBack: chromaOk !== false,
       /* pictures are painted once and shown once: a software canvas keeps the whole cost inside paint() (a GPU canvas defers the
          tessellation of thousands of halftone dots to the frame that first shows it: measured as a stall of several hundred ms) */
@@ -162,6 +163,56 @@ export function createImpact(L, tools = null) {
     else if ( !on && stopHeld ) { stopHeld = false; try { tk?.start(); } catch {} }
   }
 
+  /* ---------- FIN-ENGINE (FXIS-E3): keep a rectangle readable under the impact ----------
+     spec.keep = a rectangle { x, y, w, h } (client px; scene units with space: "world"), an HTML element, a LETR word's handle, or a list of
+     them. Every drawing and the scene's change get a hole there (clip-path, even-odd), re-measured on every frame, so a word that moves
+     (its entrance, the frame punch) stays readable through every drawing. spec.keepPad = the margin round it (px, default 6). */
+  function boxOf(a, spec) {
+    try {
+      if ( a && (a.box || a.sprite) && a.finished ) {   // a LETR word
+        if ( !a.alive || !a.shown ) return null;
+        if ( a.sprite && !a.sprite.destroyed ) {
+          if ( !a.sprite.visible ) return null;
+          const b = a.sprite.getBounds(), v = canvas.app.view, r = v.getBoundingClientRect(), kx = r.width / (v.clientWidth || r.width || 1), ky = r.height / (v.clientHeight || r.height || 1);
+          return { x0: r.left + b.x * kx, y0: r.top + b.y * ky, x1: r.left + (b.x + b.width) * kx, y1: r.top + (b.y + b.height) * ky };
+        }
+        const el = a.box?.firstElementChild ?? a.box, r = el?.getBoundingClientRect?.();
+        return r ? { x0: r.left, y0: r.top, x1: r.right ?? r.left + r.width, y1: r.bottom ?? r.top + r.height } : null;
+      }
+      if ( a && typeof a.getBoundingClientRect === "function" ) { const r = a.getBoundingClientRect(); return { x0: r.left, y0: r.top, x1: r.left + r.width, y1: r.top + r.height }; }
+      if ( a && Number.isFinite(a.x) && Number.isFinite(a.y) ) {
+        const w = Number.isFinite(a.w) ? a.w : 0, h = Number.isFinite(a.h) ? a.h : 0;
+        if ( spec.space === "world" && globalThis.canvas?.ready ) { const p = toClient({ x: a.x, y: a.y }), q = toClient({ x: a.x + w, y: a.y + h }); return { x0: Math.min(p.x, q.x), y0: Math.min(p.y, q.y), x1: Math.max(p.x, q.x), y1: Math.max(p.y, q.y) }; }
+        return { x0: a.x, y0: a.y, x1: a.x + w, y1: a.y + h };
+      }
+    } catch {}
+    return null;
+  }
+  function keepBoxes(spec) {
+    if ( !spec.keep ) return null;
+    const pad = Number.isFinite(spec.keepPad) ? Math.max(0, spec.keepPad) : 6, out = [];
+    for ( const a of Array.isArray(spec.keep) ? spec.keep : [spec.keep] ) { const b = boxOf(a, spec); if ( b && b.x1 > b.x0 && b.y1 > b.y0 ) out.push([b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad]); }
+    return out;
+  }
+  const n1 = (v) => v.toFixed(1);
+  /* the even-odd path of a shape with the boxes cut out (pts = a polygon in client px, null = the whole view) */
+  function holePath(pts, boxes, W, H) {
+    let d = pts ? `M${n1(pts[0])} ${n1(pts[1])}` + Array.from({ length: pts.length / 2 - 1 }, (_, k) => ` L${n1(pts[k * 2 + 2])} ${n1(pts[k * 2 + 3])}`).join("") + " Z" : `M0 0 H${n1(W)} V${n1(H)} H0 Z`;
+    for ( const [x0, y0, x1, y1] of boxes ) d += ` M${n1(x0)} ${n1(y0)} H${n1(x1)} V${n1(y1)} H${n1(x0)} Z`;
+    return `path(evenodd, "${d}")`;
+  }
+  function applyKeep(h) {
+    const f = h.plan.frames[h.idx];
+    if ( !f?.cv || !h.spec.keep ) return;
+    const boxes = keepBoxes(h.spec) ?? [];
+    const key = boxes.map((b) => b.map(n1).join(",")).join(";") + "|" + h.idx;
+    if ( key === h.keepKey ) return;
+    h.keepKey = key;
+    f.cv.style.clipPath = boxes.length ? holePath(null, boxes, h.env.W, h.env.H) : "";
+    if ( h.back.style.display !== "none" ) h.back.style.clipPath = boxes.length ? holePath(f.clipPts, boxes, h.env.W, h.env.H) : (f.clip || "none");
+    h.kept = boxes.length;
+  }
+
   /* ---------- one impact ---------- */
   function paint(h, i) {
     const f = h.plan.frames[i];
@@ -176,6 +227,7 @@ export function createImpact(L, tools = null) {
     Object.assign(c.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "none" });
     f.cv = c;
     const clip = backClip(e, f);
+    f.clipPts = clip;
     f.clip = clip ? `polygon(${Array.from({ length: clip.length / 2 }, (_, k) => `${clip[k * 2].toFixed(1)}px ${clip[k * 2 + 1].toFixed(1)}px`).join(",")})` : "";
     h.wrap?.appendChild(c);
     const ms = now() - t0;
@@ -199,6 +251,7 @@ export function createImpact(L, tools = null) {
     if ( back ) { b.backdropFilter = back; b.webkitBackdropFilter = back; b.clipPath = f.clip || "none"; b.display = "block"; }
     else b.display = "none";
     setStop(!!f.stop);
+    if ( h.spec.keep ) { h.keepKey = null; applyKeep(h); }
     const ms = now() - t0; if ( ms > stats.showMax ) stats.showMax = ms;
     if ( !h.isReady ) { h.isReady = true; h._ready(true); }
   }
@@ -234,6 +287,7 @@ export function createImpact(L, tools = null) {
       let a = 0; for ( let k = 0; k < i; k++ ) a += h.plan.frames[k].ticks * TICK;
       const p = punchAt(h.plan, i, Math.floor((el - a) / TICK));
       if ( p || h.punched ) setPunch(h, p);
+      if ( h.spec.keep ) applyKeep(h);
       if ( h.plan.frames[i + 1] && h.plan.frames[i + 1].cv === undefined ) paint(h, i + 1);
     }
     h.raf = requestAnimationFrame(() => loop(h));
@@ -247,9 +301,10 @@ export function createImpact(L, tools = null) {
     const P = prefs();
     if ( modeFor(P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle }) === "off" ) return ended(null, "off");
     const t = now();
-    let startAt = Number.isFinite(spec.startAt) ? spec.startAt : null;
-    if ( startAt != null && startAt > t + 60000 ) { console.warn("LETR | impact startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = null; }
     const plan = planImpact(spec);
+    /* FIN-ENGINE: blowAt = the instant of the blow itself (e.g. L.contactAt of the word it belongs to): the impact starts its lead-in earlier */
+    let startAt = Number.isFinite(spec.startAt) ? spec.startAt : Number.isFinite(spec.blowAt) ? spec.blowAt - plan.peakMs : null;
+    if ( startAt != null && startAt > t + 60000 ) { console.warn("LETR | impact startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = null; }
     if ( startAt != null && t > startAt + plan.ms ) return ended(plan, "late");
     const sub = armed && !over.subject ? armed.sub : subjectOf(spec);
     if ( sub.hidden ) return ended(plan, "hidden");
@@ -304,7 +359,7 @@ export function createImpact(L, tools = null) {
     play, prepare, plan: planFor, show: show1, stopAll, pick, mode, setMode,
     kinds: KIND_IDS.map((id) => ({ id, pl: KINDS[id].pl, en: KINDS[id].en, tone: KINDS[id].tone })),
     frames: FRAME_IDS.map((id) => ({ id, pl: FRAMES[id].pl, en: FRAMES[id].en, full: FRAMES[id].full })),
-    tones: Object.keys(TONES), limits: LIMITS, steps: STEP_AT, stats,
+    tones: Object.keys(TONES), limits: LIMITS, steps: STEP_AT, series: { step: SERIES_STEP, max: SERIES_MAX }, stats,
     get busy() { return !!cur?.alive; },
     /* the chromatic split needs a backdrop filter that takes an SVG filter: false turns the scene's split off (the ink still splits) */
     set chroma(v) { chromaOk = v; }, get chroma() { return chromaOk; },
