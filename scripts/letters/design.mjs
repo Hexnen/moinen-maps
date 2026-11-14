@@ -26,8 +26,21 @@ export const FONTS = {
   patrick:  { file: "fonts/patrickhand/PatrickHand-Regular.ttf", weight: 0.25, sharp: 0.05, track: 0.02, slant: 0.06 },
   /* LOOK: the squared, engineered capitals of the Invincible book's lettering (style "invincible"; no mood picks them otherwise) */
   squada:   { file: "fonts/squadaone/SquadaOne-Regular.ttf", weight: 0.8, sharp: 0.9, track: 0.01, slant: 0, recut: "MN" },   // its M/N look lower case: rebuilt (fontbank recut)
-  michroma: { file: "fonts/michroma/Michroma-Regular.ttf", weight: 0.6, sharp: 0.6, track: -0.02, slant: 0 }
+  michroma: { file: "fonts/michroma/Michroma-Regular.ttf", weight: 0.6, sharp: 0.6, track: -0.02, slant: 0 },
+  /* FONTSEL: League Gothic (the League of Moveable Type; static Regular, overlap-free outlines), the invincible style's default face */
+  league:   { file: "fonts/leaguegothic/LeagueGothic-Regular.ttf", weight: 0.65, sharp: 0.85, track: 0.02, slant: 0.12 }
 };
+/* FONTSEL (the owner, 2026-11-14: «Niech będą do wyboru ten teraz i jako default Gothic»): the invincible style letters in one of
+   two faces, League Gothic (default) or Anton; the GM picks it for the table (world setting `face`, L.invFace), a call's look.face
+   wins. Each face carries its OWN tuning (INV_TUNE): the pipeline (keyline, kerning, rings, prefix, column) is the same, the
+   numbers follow the face's shapes. */
+export const INV_FACES = ["league", "anton"];
+export const DEFAULT_FACE = "league";
+export const INV_TUNE = {
+  anton: { gap: { short: 0.04, sustained: 0.06, other: 0.05 }, prefix: [0.32, 0.06], inkW: 0.016, rimW: 0.05, bold: 0 },
+  league: { gap: { short: 0.04, sustained: 0.06, other: 0.05 }, prefix: [0.32, 0.06], inkW: 0.016, rimW: 0.05, bold: 0 }
+};
+export const invFaceOf = (f) => (INV_FACES.includes(f) ? f : DEFAULT_FACE);
 /* a font without a glyph falls back along this chain, letter by letter (Polish letters are synthesised first where possible) */
 export const FALLBACK = ["bangers", "anton"];
 
@@ -333,13 +346,14 @@ export function fitSound(hand, T, sound, avoid = null) {
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   return hand;
 }
-export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(mood, sound), character = null) {
+export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(mood, sound), character = null, face = DEFAULT_FACE) {
   if ( style !== "invincible" ) return hand;
   const ch = character ?? characterFor(mood, sound);
   const R3 = rng((seed ^ 0x1bad5eed) >>> 0);
   /* LOOK2 (SPEC-LOOK P1): ONE tall narrow capital face for the whole style (Anton); the sound is said by size, colour, the duplicate,
      spacing and the line, never by swapping to a wide or rounded face (Michroma and Squada One only on look.font) */
-  hand.font = "anton";
+  hand.font = invFaceOf(face);
+  const tune = INV_TUNE[hand.font];
   /* LOOK2 (P11): a flat saturated face with one dark duplicate colour, from the sound's character (no random draw) */
   const fam = invPalette(mood, ch, T);
   const pal = INV[fam];
@@ -351,10 +365,10 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   hand.tex = "none"; hand.outline = "ink"; hand.out2W = 0; hand.inflate = 0;
   /* LOOK2 (P2, P3): one thin keyline round the whole word (paint.mjs "union"): outside the word's outline and as a hairline inside
      each letter where another letter overlaps it; never stroked across a neighbour */
-  hand.keyline = "union"; hand.inkW = 0.016; hand.join = "line";
+  hand.keyline = "union"; hand.inkW = tune.inkW; hand.join = "line";
   /* LOOK2 (P5): flat faces always; (P6) an open letter for high, slight and airy sounds: white face, a rim in the word's colour */
   hand.fill = T.light || (ch.material === "air" && !T.heavy && sound.loud < 0.75) ? "hollow" : "flat";
-  hand.hollowPaper = "#ffffff"; hand.rimW = 0.05;
+  hand.hollowPaper = "#ffffff"; hand.rimW = tune.rimW;
   /* LOOK2 (P4): ONE flat copy of the letters behind them (the duplicate), down-right; a deep swept block only for heavy sounds,
      straight down, flat (no gradient, no soft shadow); a high sound's duplicate is thrown up */
   hand.block = T.heavy ? "heavy" : "dup";
@@ -366,14 +380,14 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   /* LOOK2 (P18): spacing is optical, pair by pair (shape.mjs kernOptical): the advance-based track is only the first guess;
      short = tight, sustained = a little looser (the sound has room) */
   hand.track = 0;
-  hand.kern = { gap: T.short ? 0.04 : T.sustained ? 0.06 : 0.05 };
+  hand.kern = { gap: T.short ? tune.gap.short : T.sustained ? tune.gap.sustained : tune.gap.other };
   hand.stack = "stack"; hand.order = "left";
   hand.tiltKind = "calm"; hand.tilt = 0; hand.bob = 0; hand.upright = true;
   /* loud = a big contrast between the body and its lead-in */
   hand.contrast = 1.2 + 0.6 * sound.loud;
   /* LOOK2 (P7): every hyphen lead-in is a small prefix (about a third of the body), set on the body's top line; a loud body gets an
      open (hollow) prefix against its solid face */
-  hand.prefix = 0.32 + 0.06 * Math.min(1, sound.loud);
+  hand.prefix = tune.prefix[0] + tune.prefix[1] * Math.min(1, sound.loud);
   hand.hollowPre = hand.fill !== "hollow" && sound.loud >= 0.75;
   /* LOOK2 (P8): a straight baseline: rising = grows to its end, fading or a fizzle = shrinks away, everything else flat */
   hand.env = T.rising ? "swell" : T.fading || T.sputter ? "shrink" : "flat";
@@ -1168,7 +1182,7 @@ export function makePlan(text, opts, fonts, memory) {
   /* LOOK2 (P17): "expressive" IS the comic hand (frozen legacy look): same plan, byte for byte */
   const lstyle = STYLES.includes(opts.look?.style) ? (opts.look.style === "expressive" ? "comic" : opts.look.style) : "comic";
   const character = characterFor(mood, sound, opts.character), traits = traitsOf(mood, sound, character);
-  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), traits, sound, avoid) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed, traits, character);
+  const chosen = styleHand(lstyle === "comic" ? fitSound(chooseHand(mood, sound, R, avoid, R2), traits, sound, avoid) : chooseHand(mood, sound, R, avoid, R2), lstyle, mood, sound, word, seed, traits, character, opts.look?.face);
   const hand = opts.hand && typeof opts.hand === "object" ? { ...chosen, ...JSON.parse(JSON.stringify(opts.hand)) }
     : typeof opts.hand === "string" ? handFromId(opts.hand, chosen) : chosen;
   if ( Array.isArray(opts.colors) && opts.colors.length ) {

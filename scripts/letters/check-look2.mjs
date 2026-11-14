@@ -1,7 +1,7 @@
 // LOOK2: node checks of the Invincible hand after SPEC-LOOK P1-P18 (the face, one keyline round the word, the duplicate, flat faces,
 // prefix, sizes and baseline, the vertical column, interlocked rings, colours, optical spacing) and of the frozen legacy look
 // "expressive". Called from check.mjs with its counter and the loaded font bank.
-import { makePlan, STYLES, NUMBER_RE, TUCK, invPrefix, INV_FLOOR, monotoneSizes } from "./design.mjs";
+import { makePlan, STYLES, NUMBER_RE, TUCK, invPrefix, INV_FLOOR, monotoneSizes, DEFAULT_FACE } from "./design.mjs";
 import { createVocab, KIND_IDS, KINDS } from "./words.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter, occlusionReport, baseGeometry, pictureGeometry, placedShape, pairGaps, ovalRing, KERN } from "./shape.mjs";
@@ -35,10 +35,12 @@ function recorder() {
   return { ops, ctx, make: (w, h) => ({ width: w, height: h, getContext: () => ctx }) };
 }
 
-export function checkLook2(ok, bank) {
+/* FONTSEL: run once per invincible face (check.mjs loops INV_FACES); the face-free parts (the expressive freeze) only on `first` */
+export function checkLook2(ok0, bank, face = DEFAULT_FACE, first = true) {
+  const ok = (c, m) => ok0(c, `[${face}] ${m}`);
   const fontsApi = { adv: (f, c) => bank.adv(f, c) };
   const plan = (t, o = {}) => makePlan(t, o, fontsApi, []);
-  const inv = (t, o = {}) => plan(t, { ...o, look: { style: "invincible", ...(o.look ?? {}) } });
+  const inv = (t, o = {}) => plan(t, { ...o, look: { style: "invincible", face, ...(o.look ?? {}) } });
   const V = createVocab();
   const vocab = [];
   for ( const id of KIND_IDS ) for ( const loud of [0.35, 0.7, 0.95] ) for ( const lang of ["en", "pl"] ) {
@@ -50,7 +52,7 @@ export function checkLook2(ok, bank) {
   const ink = (c) => /[\p{L}\p{N}]/u.test(c);
 
   /* P17: "expressive" is a style and draws exactly what "comic" draws (the legacy look, frozen) */
-  {
+  if ( first ) {
     ok(STYLES.includes("expressive"), "expressive: a named style");
     let same = 0, all = 0;
     for ( const t of ["KA-BOOM!", "KRAK!", "WHOOOOM", "BZZZT"] ) for ( const m of ["boom", "crack", "whoosh", "zap", "splash"] ) {
@@ -70,7 +72,7 @@ export function checkLook2(ok, bank) {
   {
     const fonts = new Set(), widths = [];
     for ( const v of vocab ) { const p = v.p(); fonts.add(p.hand.font); p.layout.letters.forEach((l, i) => { if ( ink(p.chars[i]) && !l.ring && !/[MW]/.test(p.chars[i]) ) widths.push(l.w / l.s); }); }
-    ok(fonts.size === 1 && fonts.has("anton"), `face: the Invincible hand letters in one face (${[...fonts]})`);
+    ok(fonts.size === 1 && fonts.has(face), `face: the Invincible hand letters in one face (${[...fonts]})`);
     const mean = widths.reduce((a, b) => a + b, 0) / widths.length;
     ok(mean >= 0.45 && mean <= 0.6, `face: mean letter advance ${mean.toFixed(3)} cap (0.45-0.6)`);
     ok(inv("KRAK", { mood: "crack", seed: 1, look: { font: "michroma" } }).hand.font === "michroma", "face: look.font still wins");
@@ -263,7 +265,7 @@ export function checkLook2(ok, bank) {
 
   /* P10: interlocked O: the face's own O widened (same stroke), one size, crossing with air on both sides; no copy in the counters */
   {
-    const O = bank.glyph("anton", "O"), R = ovalRing("anton", bank), ob = bbox(O.contours), rb = bbox(R.contours);
+    const O = bank.glyph(face, "O"), R = ovalRing(face, bank), ob = bbox(O.contours), rb = bbox(R.contours);
     ok(rb.y0 === ob.y0 && rb.y1 === ob.y1 && rb.x1 - rb.x0 >= 3 * R.stroke + 2 * R.gap - 1e-9, `rings: the face's O widened to hold a stroke (${(rb.x1 - rb.x0).toFixed(3)} >= ${(3 * R.stroke + 2 * R.gap).toFixed(3)})`);
     ok(R.link > R.stroke && R.link < (rb.x1 - rb.x0) - 2 * R.stroke + 1e-9, "rings: the link leaves air on both sides of each crossing stroke");
     for ( const [t, m] of [["WHOOM", "whoosh"], ["KA-THOOM!", "boom"], ["BOOM!", "boom"]] ) {   // LOOK3: a pair (four O never link)
@@ -307,7 +309,7 @@ export function checkLook2(ok, bank) {
         mean.push(g.rows.reduce((a, d) => a + (d == null ? open : Math.min(open, d)), 0) / g.rows.length / h);
         if ( Math.min(...live) < KERN.touch * h - 1e-6 ) { close++; if ( ex.length < 3 ) ex.push(`${p.word} ${ch[i - 1]}${ch[i]}`); }
         pairs++;
-        if ( bank.adv("anton", ch[i - 1]) && L[i].x - L[i - 1].x < L[i - 1].w + 1e-9 ) tighter++;
+        if ( bank.adv(face, ch[i - 1]) && L[i].x - L[i - 1].x < L[i - 1].w + 1e-9 ) tighter++;
       }
       if ( mean.length >= 2 ) { const m = mean.reduce((a, b) => a + b, 0) / mean.length, sd = Math.sqrt(mean.reduce((a, b) => a + (b - m) ** 2, 0) / mean.length); if ( sd > 0.03 ) { spread++; if ( ex.length < 5 ) ex.push(`${p.word} sd ${sd.toFixed(3)}`); } }
       void G;
@@ -316,7 +318,7 @@ export function checkLook2(ok, bank) {
     ok(close === 0, `spacing: ${close} pairs closer than a touch`);
     ok(tighter >= pairs * 0.9, `spacing: ${tighter} of ${pairs} pairs set tighter than their advance (the owner: too loose)`);
     /* open pairs tuck: A-V and T-A sit closer (advance distance) than H-N at the same size */
-    const d = (t) => { const p = inv(t, { mood: "impact", seed: 1, sound: { loud: 0.5, peak: 0.5 } }); settleCenter(p, bank); const L = p.layout.letters; return (L[1].x + L[1].w / 2 - (L[0].x + L[0].w / 2)) / L[0].s - (bank.adv("anton", t[0]) + bank.adv("anton", t[1])) / 2; };
+    const d = (t) => { const p = inv(t, { mood: "impact", seed: 1, sound: { loud: 0.5, peak: 0.5 } }); settleCenter(p, bank); const L = p.layout.letters; return (L[1].x + L[1].w / 2 - (L[0].x + L[0].w / 2)) / L[0].s - (bank.adv(face, t[0]) + bank.adv(face, t[1])) / 2; };
     ok(d("AV") < d("HN") && d("TA") < d("HN") && d("LT") < d("HN"), `spacing: open pairs tuck in (AV ${d("AV").toFixed(3)}, TA ${d("TA").toFixed(3)}, LT ${d("LT").toFixed(3)} vs HN ${d("HN").toFixed(3)})`);
   }
   /* P12, P13 (the vocabulary's side, read only here): "!!" only for the loudest words, under a quarter of all words over the tiers;

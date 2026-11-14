@@ -18,9 +18,14 @@
      movement     how the "invincible" style moves on every seat: smooth (default) | stepped (drawings on the shared 24 Hz grid,
                   translation and alpha smooth). One value for the table so every seat sees a hit on the same instant. The legacy
                   styles ("expressive" / "comic") keep their own frozen timeline; a call's look.motion beats it; reduced motion on a
-                  seat beats both (the reduced fade lands on the same contact). */
+                  seat beats both (the reduced fade lands on the same contact).
+     face         the invincible style's typeface on every seat (FONTSEL 1.9.7; the owner: League Gothic by default, Anton to
+                  choose): league | anton. One value for the table so every seat sees the same word shape (a word's width, its
+                  placement in view and the cut of its interlocked O follow the face). A call's look.face beats it; the legacy styles
+                  keep their own faces. */
 
 import { MOTION_MODES, DEFAULT_MOTION } from "./motion.mjs";
+import { INV_FACES, DEFAULT_FACE } from "./design.mjs";
 
 export const SETTINGS = {
   enabled:     { type: "bool", default: true },
@@ -33,7 +38,8 @@ export const SETTINGS = {
   announce:    { type: "bool", default: true },
   limitScreen: { type: "num", default: 16, min: 1, max: 32, step: 1 },
   limitWorld:  { type: "num", default: 48, min: 4, max: 96, step: 1 },
-  movement:    { type: "pick", default: DEFAULT_MOTION, choices: MOTION_MODES.slice(), scope: "world" }   // MODE: the GM's, for the table
+  movement:    { type: "pick", default: DEFAULT_MOTION, choices: MOTION_MODES.slice(), scope: "world" },   // MODE: the GM's, for the table
+  face:        { type: "pick", default: DEFAULT_FACE, choices: INV_FACES.slice(), scope: "world" }          // FONTSEL: the GM's, for the table
 };
 /* the settings a GM sets for the whole table (scope "world"); every other one is this computer's own */
 export const WORLD_KEYS = Object.keys(SETTINGS).filter((k) => SETTINGS[k].scope === "world");

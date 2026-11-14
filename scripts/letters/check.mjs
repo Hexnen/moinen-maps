@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FontBank } from "./fontbank.mjs";
-import { makePlan, FONTS, MOODS, MOOD_IDS, guessMood, soundOf, envelope, syllablesOf, TICK } from "./design.mjs";
+import { makePlan, FONTS, MOODS, MOOD_IDS, guessMood, soundOf, envelope, syllablesOf, TICK, INV_FACES } from "./design.mjs";
 import { paintPicture, MAX_SIDE } from "./paint.mjs";
 import { normals, jag } from "./geom.mjs";
 import { area } from "./font.mjs";
@@ -195,10 +195,11 @@ checkWords(ok, bank);
 /* 8d. the look layer (LOOK; checks in check-look.mjs) */
 checkLook(ok, bank);
 /* 8d2. LOOK2: the Invincible hand after SPEC-LOOK P1-P18 and the frozen legacy look "expressive" (check-look2.mjs) */
-checkLook2(ok, bank);
+/* FONTSEL: the invincible hand's checks run for each of its faces (League Gothic, the default, and Anton) */
+for ( const [k, face] of INV_FACES.entries() ) checkLook2(ok, bank, face, k === 0);
 /* 8d3. LOOK3: staggered interlocked O (two always, three rarely, four never), the first letter as tall as its neighbour, no hole before
    the last letter (check-look3.mjs; `node check-look3.mjs <other letters folder>` runs the same measurements on another engine) */
-await (await import("./check-look3.mjs")).run(ok, { bank, fontsApi });
+for ( const face of INV_FACES ) await (await import("./check-look3.mjs")).run(ok, { bank, fontsApi, face });
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */

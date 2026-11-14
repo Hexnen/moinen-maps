@@ -225,7 +225,8 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const pm = await import("./prefs.mjs");
     const d = SETTINGS.movement;
     ok(!!d && d.type === "pick" && d.default === "smooth" && DEFAULT_MOTION === "smooth" && d.choices.join() === MOTION_MODES.join(), "mode: setting movement = smooth | stepped, default smooth");
-    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: movement is the table's (world scope); every other setting stays this computer's");
+    /* FONTSEL 1.9.7: the table also holds the invincible face (world, the GM's): the pinned list of table keys grows by exactly it */
+    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement,face" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: movement is the table's (world scope); every other setting stays this computer's");
     ok(clean("movement", "bogus") === "smooth" && clean("movement", "stepped") === "stepped" && cleanAll({}).movement === "smooth", "mode: a stored value outside the choices falls back to smooth");
     ok("LETR.Settings.movement.ByGM" in STRINGS.en && "LETR.Settings.movement.ByGM" in STRINGS.pl && "LETR.Settings.Groups.Table" in STRINGS.pl, "mode: words for the player's read-only row and the table group");
     const T = await import("./tools.mjs");
@@ -249,6 +250,38 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const tsrc = fs.readFileSync(new URL("./tools.mjs", import.meta.url), "utf8"), usrc = fs.readFileSync(new URL("./ui.mjs", import.meta.url), "utf8");
     ok(/scope: scopeOf\(k\)/.test(tsrc) && /onChange: \(\) => readPrefs\(\)/.test(tsrc) && /L\.gridClock\?\.\(gridOffset\)/.test(tsrc), "mode: settings registered with their scope, re-read on change, stepped grid on the shared clock");
     ok(/game\.user\?\.isGM \) return group\(k\)/.test(usrc) && /letr-s-ro/.test(usrc), "mode: the window gives the GM the control and a player the GM's choice as text");
+  }
+
+  /* FONTSEL (1.9.7): the invincible style's face is ONE setting the GM sets for the table (the owner: League Gothic by default, Anton
+     to choose; the GM's like the motion type: every seat must see the same word shape); a player cannot write it; live without reload */
+  {
+    const D = await import("./design.mjs");
+    const d = SETTINGS.face;
+    ok(!!d && d.type === "pick" && d.default === "league" && D.DEFAULT_FACE === "league" && d.choices.join() === "league,anton" && D.INV_FACES.join() === "league,anton", "face: setting face = league | anton, default league");
+    ok(d?.scope === "world", "face: the table's setting (world scope, the GM's)");
+    ok(clean("face", "bogus") === "league" && clean("face", "anton") === "anton" && cleanAll({}).face === "league", "face: a stored value outside the choices falls back to League Gothic");
+    ok(["Name", "Hint", "league", "anton", "ByGM"].every((k) => `LETR.Settings.face.${k}` in STRINGS.en && `LETR.Settings.face.${k}` in STRINGS.pl), "face: the setting's words in both languages");
+    const T = await import("./tools.mjs");
+    const faces = []; const fakeL = { limits: {}, motionMode: () => {}, invFace: (f) => { if ( f ) faces.push(f); return f; } };
+    T.applyPrefs(fakeL, cleanAll({ face: "anton" }));
+    ok(faces.join() === "anton", `face: applyPrefs hands the table's face to the engine (${faces.join()})`);
+    const saved = globalThis.game, store = new Map(), sets = [];
+    const fakeGame = (isGM) => ({ user: { isGM }, settings: { get: (ns, k) => (store.has(k) ? store.get(k) : DEFAULTS[k]), set: async (ns, k, v) => { sets.push(k); store.set(k, v); } } });
+    const keepEngine = T.state.engine;
+    try {
+      T.state.engine = null;
+      globalThis.game = fakeGame(false);
+      await T.setPrefs({ face: "anton", scale: 1.25 });
+      ok(!sets.includes("face") && sets.includes("scale"), `face: a player's save leaves the table's face alone (wrote ${sets.join(",")})`);
+      globalThis.game = fakeGame(true); sets.length = 0;
+      await T.setPrefs({ face: "anton" });
+      ok(sets.includes("face") && T.state.prefs.face === "anton", "face: the GM's save writes it and this client reads it back");
+    } finally { globalThis.game = saved; T.state.prefs = { ...DEFAULTS }; T.state.engine = keepEngine; }
+    /* a plan follows the face; the legacy styles never take it */
+    const fa = { adv: (f, c) => bank.adv(f, c) };
+    const pl = (o) => D.makePlan("KA-BOOM!", { mood: "boom", seed: 3, ...o }, fa, []);
+    ok(pl({ look: { style: "invincible" } }).hand.font === "league" && pl({ look: { style: "invincible", face: "anton" } }).hand.font === "anton" && pl({ look: { style: "invincible", face: "bogus" } }).hand.font === "league", "face: an invincible plan letters in the face asked for, League Gothic otherwise");
+    ok(pl({ look: { style: "expressive", face: "league" } }).hand.font === pl({ look: { style: "expressive" } }).hand.font && pl({ look: { style: "expressive", face: "league" } }).hand.font !== "league", "face: the legacy style ignores look.face");
   }
 
   /* the engine's tool hooks are in place (source pins: the filters must run in play, start and still) */

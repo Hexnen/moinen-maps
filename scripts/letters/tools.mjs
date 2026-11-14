@@ -74,13 +74,14 @@ export function install(L, base) {
   return L;
 }
 function applyLimits() { applyPrefs(state.engine, state.prefs); }
-/* the preferences the engine holds itself: word limits, and (MODE) the table's motion type for the invincible style. Read on every
+/* the preferences the engine holds itself: word limits, and (MODE) the table's motion type and (FONTSEL) face for the invincible style. Read on every
    change of a setting (Foundry's onChange on each client), so a GM's switch reaches every seat's next word without a reload; words
    already playing keep the motion they started with. */
 export function applyPrefs(L, prefs) {
   if ( !L ) return;
   L.limits.screen = prefs.limitScreen; L.limits.world = prefs.limitWorld;
   if ( prefs.movement && typeof L.motionMode === "function" ) L.motionMode(prefs.movement);
+  if ( prefs.face && typeof L.invFace === "function" ) L.invFace(prefs.face);   // FONTSEL: the table's face, live on every seat
 }
 
 /* the plan this client would show for a call (designer preview): style, preferences and filters, without touching the flash budget */

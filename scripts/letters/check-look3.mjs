@@ -8,14 +8,15 @@
 // (the 1.9.1 baseline: scratchpad tooling), so each check is shown to fail without its fix.
 import { pathToFileURL } from "node:url";
 
-export async function run(ok, { bank, fontsApi, dir = null, verbose = !!process.env.LETR_VERBOSE }) {
+export async function run(ok0, { bank, fontsApi, dir = null, verbose = !!process.env.LETR_VERBOSE, face = null }) {
+  const ok = face ? (c, m) => ok0(c, `[${face}] ${m}`) : ok0;   // FONTSEL: once per invincible face (null = the engine's default face)
   const at = (f) => (dir ? new URL(f, dir).href : new URL(`./${f}`, import.meta.url).href);
   const D = await import(at("design.mjs")), S = await import(at("shape.mjs")), G = await import(at("geom.mjs")), W = await import(at("words.mjs"));
   const P = await import(at("paint.mjs"));
   const { makePlan } = D, { settleCenter, pictureGeometry, kernOptical } = S, { bbox } = G;
   const LINK = D.LINK ?? { rise: 0.07, three: 0.2, most: 3 };
   const say = (...a) => { if ( verbose ) console.log("  look3:", ...a); };
-  const inv = (t, o = {}) => makePlan(t, { ...o, look: { style: "invincible", ...(o.look ?? {}) } }, fontsApi, []);
+  const inv = (t, o = {}) => makePlan(t, { ...o, look: { style: "invincible", ...(face ? { face } : {}), ...(o.look ?? {}) } }, fontsApi, []);
   const ink = (c) => /[\p{L}\p{N}]/u.test(c);
   const V = W.createVocab();
   const vocab = [];

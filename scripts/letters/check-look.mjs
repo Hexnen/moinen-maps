@@ -1,6 +1,6 @@
 // LOOK: node checks of the look layer (lines, backdrops, bolder deformation, fills and treatments, legibility, accent, styles,
 // interlocked rings), called from check.mjs with its counter and the loaded font bank.
-import { makePlan, FONTS, MOOD_IDS, BACKDROPS, FILLS, TEXTURES, STYLES, accentOf, NUMBER_RE, traitsOf } from "./design.mjs";
+import { makePlan, FONTS, MOOD_IDS, BACKDROPS, FILLS, TEXTURES, STYLES, accentOf, NUMBER_RE, traitsOf, DEFAULT_FACE } from "./design.mjs";
 import { createVocab, KIND_IDS, KINDS } from "./words.mjs";
 import { paintPicture } from "./paint.mjs";
 import { treatLetter, settleCenter, occlusionReport, baseGeometry, pictureGeometry } from "./shape.mjs";
@@ -30,7 +30,7 @@ export function checkLook(ok, bank) {
     /* an S drawn as the font's own $ is caught */
     for ( const f of Object.keys(FONTS) ) { const d = bank.raw(f, "$"); if ( !d ) continue; const r$ = rd.read(f, "S", d.contours); ok(!r$.ok, `reader: ${f} $ is not accepted as S (${r$.as})`); }
     void jag; void rng;
-    for ( const [f, ch, base] of [["anton", "Ł", "L"], ["bangers", "Ę", "E"], ["titan", "Ż", "Z"]] ) {
+    for ( const [f, ch, base] of [["anton", "Ł", "L"], ["league", "Ł", "L"], ["bangers", "Ę", "E"], ["titan", "Ż", "Z"]] ) {
       const L = bank.glyph(f, base).contours;
       const r = rd.read(f, ch, L);
       ok(!r.ok && r.mark < 0.5, `reader: ${ch} without its mark is caught in ${f} (mark ${r.mark?.toFixed(2)})`);
@@ -144,7 +144,7 @@ export function checkLook(ok, bank) {
     ok(STYLES.includes("comic") && STYLES.includes("invincible"), "styles: comic and invincible");
     for ( const m of MOOD_IDS ) {
       const p = plan("KA-BOOM!", { mood: m, seed: `s${m}`, look: { style: "invincible" } }), H = p.hand;
-      ok(H.font === "anton" && ["plain", "jag", "flame", "drip", "rough"].includes(H.treat) && H.tex === "none" && H.outline === "ink" && H.depth >= 0.07 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
+      ok(H.font === DEFAULT_FACE && ["plain", "jag", "flame", "drip", "rough"].includes(H.treat) && H.tex === "none" && H.outline === "ink" && H.depth >= 0.07 && H.colorFam === "inv", `style invincible ${m}: ${H.id} depth ${H.depth}`);
       ok(p.layout.letters.every((l) => Math.abs(l.rot) < 0.035 || l.ring), `style invincible ${m}: upright`);
     }
     const c = plan("KA-BOOM!", { mood: "boom", seed: 1 }), c2 = plan("KA-BOOM!", { mood: "boom", seed: 1, look: { style: "comic" } });
@@ -177,8 +177,8 @@ export function checkLook(ok, bank) {
       if ( style === "invincible" ) looks.add(`${KINDS[id].group}|${H.font}|${H.treat}|${H.env}|${H.fill}|${Math.sign(H.depthAng)}|${H.invPal}`);
       /* LOOK2 (SPEC-LOOK P1, P11): the Invincible hand letters every sound in ONE narrow face (the sound is said by colour, the open
          letter, the duplicate, size and spacing); its colours come from the character table (design.mjs invPalette) */
-      if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style !== "invincible" || (H.font === "anton" && ["flat", "hollow"].includes(H.fill))), `${tag}: a hard sound gets a round or soft face`);
-      if ( T.soft ) ok(H.treat !== "jag" && (style !== "invincible" ? !["blackops", "anton"].includes(H.font) : H.font === "anton" && H.treat === "plain"), `${tag}: a soft sound gets spikes or a hard face`);
+      if ( T.hard ) ok(H.treat !== "bubble" && !ROUND.includes(H.font) && (style !== "invincible" || (H.font === DEFAULT_FACE && ["flat", "hollow"].includes(H.fill))), `${tag}: a hard sound gets a round or soft face`);
+      if ( T.soft ) ok(H.treat !== "jag" && (style !== "invincible" ? !["blackops", "anton"].includes(H.font) : H.font === DEFAULT_FACE && H.treat === "plain"), `${tag}: a soft sound gets spikes or a hard face`);
       if ( T.warm ) ok((style !== "invincible" ? ["hot", "ember", "gold", "rust", "blood"].includes(H.colorFam) : ["yellow", "orange"].includes(H.invPal) || (T.wet && H.invPal === "blue")), `${tag}: a warm sound not in fire colours (advm 10)`);
       if ( T.warm || T.earthy ) ok(H.fill !== "multi" || H.multi !== "sweep", `${tag}: a hue sweep on fire or rock (advm 10)`);
       if ( T.earthy ) ok(!["ice", "air", "mint", "water", "toxic", "volt", "plasma", "pop", "soft"].includes(H.colorFam) && !["cyan", "air", "violet", "green"].includes(H.invPal) && (H.invPal !== "blue" || T.wet) || T.metallic, `${tag}: rock or timber in ice or neon (advm 10)`);

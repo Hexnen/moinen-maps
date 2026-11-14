@@ -1,6 +1,6 @@
 /* LETR engine: fonts, the picture scheduler, the two players (screen = HTML layer over the interface, world = PIXI on the canvas)
    and the public API (see README.md). Works without Foundry for the screen space (gallery page, node-free browser tests). */
-import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf, STYLES } from "./design.mjs";
+import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf, STYLES, INV_FACES, DEFAULT_FACE } from "./design.mjs";
 import { FontBank } from "./fontbank.mjs";
 import { paintPicture } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
@@ -102,7 +102,12 @@ export function createEngine(base) {
   /* MOTION2: how the invincible style moves on this client: "smooth" (default) or "stepped" (A/B for the owner, MOTION2-1); a call's
      look.motion wins */
   let defMotion = DEFAULT_MOTION;
-  const withMotion = (o) => (o.look.style === "invincible" && !MOTION_MODES.includes(o.look.motion) ? { ...o, look: { ...o.look, motion: defMotion } } : o);
+  /* FONTSEL (1.9.7): the invincible style's face on this client (the table's setting `face`, set by the GM); a call's look.face wins.
+     A face whose file did not load falls back to the other one (the plan never names a face the bank cannot draw) */
+  let defFace = DEFAULT_FACE;
+  const faceOk = (f) => (bank.has(f) ? f : INV_FACES.find((x) => bank.has(x)) ?? f);
+  const withFace = (o) => (o.look.style === "invincible" ? { ...o, look: { ...o.look, face: faceOk(INV_FACES.includes(o.look.face) ? o.look.face : defFace) } } : o);
+  const withMotion = (o0) => { const o = withFace(o0); return o.look.style === "invincible" && !MOTION_MODES.includes(o.look.motion) ? { ...o, look: { ...o.look, motion: defMotion } } : o; };
   const mk = (t, o, f, m) => {
     if ( o?.look?.style ) return makePlan(t, withMotion(o), f, m);
     const ls = typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook;   // TOOL's built-in style names too
@@ -110,6 +115,7 @@ export function createEngine(base) {
   };
   const lookStyle = (name) => { if ( STYLES.includes(name) ) defLook = name; return defLook; };
   const motionMode = (name) => { if ( MOTION_MODES.includes(name) ) defMotion = name; return defMotion; };
+  const invFace = (name) => { if ( INV_FACES.includes(name) ) defFace = name; return defFace; };
   /* MODE (1.9.2): the stepped grid's clock. Without it the grid sits on this page's performance.now(), whose origin differs on every
      seat, so a stepped word's drawings (and its contact, L.contactAt) fell 0..41.7 ms apart between seats that share a start. The
      tools hand in `() => sharedNow - performance.now()` (the world's shared clock): every seat then draws on the SAME instants.
@@ -1327,7 +1333,7 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, contactAt, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(), gridClock,
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, contactAt, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(), invFace, invFaces: INV_FACES.slice(), gridClock,
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow, chain,
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */
