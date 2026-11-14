@@ -34,7 +34,8 @@ ok(plWords.join(" ") !== Object.keys(C.VOICES).flatMap((v) => Array.from({ lengt
 ok(C.langOf("auto", "pl") === "pl" && C.langOf("auto", "en") === "en" && C.langOf("en", "pl") === "en", "word set follows the setting / the game language");
 
 /* B. voices and loudness */
-ok(C.destrVoice("blast", 0) === "boom" && C.destrVoice("collapse", 0) === "crash" && C.destrVoice("cracks", 0) === "crack", "type voices");
+// (EFFECTS1, owner's answer 3: a blast without fire is the dry blast KROOM, a cave-in BTHOOM; BOOM only with fire)
+ok(C.destrVoice("blast", 0) === "blast" && C.destrVoice("blast", 1) === "boom" && C.destrVoice("collapse", 0) === "cavein" && C.destrVoice("cracks", 0) === "crack", "type voices");
 ok(C.destrVoice("blast", "lightning") === "thunder" && C.destrVoice("cracks", "lightning") === "zap" && C.destrVoice("cracks", "acid") === "acid" && C.destrVoice("gash", 0) === "slash", "causes colour the voice");
 ok(C.destrVoice("blast", 0, true) === "gun", "a gun's pocks rattle");
 ok(C.destrVoice("flood", 0) === "splash" && C.destrVoice("scorch", 0) === "scorch", "flood splashes, scorch burns");
@@ -163,7 +164,7 @@ for ( const l of ["en", "pl"] ) {
 const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
 ok(/LAYER_IDS = \["ground", "tokens", "weather", "overlay", "top"\]/.test(sfx) && sfx.includes('register(MODULE_ID, "sfxLayer"') && /\.\.\.layerOpts\(\)/.test(sfx), "the display layer is a setting over the engine's world layers, passed with every word");
 ok(sfx.includes("area: w.area, magnitude: w.magnitude") && !/\bsize: w\.size\b/.test(sfx), "words pass their area and magnitude (the engine's size model), not a fixed size");
-ok(/L\.word\(w\.kind, o\)/.test(sfx) && /\.\.\.\(w\.word\?\.play \?\? \{\}\)/.test(sfx), "the engine's vocabulary writes each word, and its play options (mood, sound, accent, character) go with it");
+ok(/L\.word\(kind, \{ \.\.\.o, \.\.\.wo \}\)/.test(sfx) && /C\.wordOpts\(/.test(sfx) && /\.\.\.\(w\.word\?\.play \?\? \{\}\)/.test(sfx), "the engine's vocabulary writes each word, and its play options (mood, sound, accent, character) go with it");
 ok(sfx.includes('space: "world"') && sfx.includes("reduced: red"), "words are world-space and follow the module's reduced-motion rule");
 ok(!/from "[^"]*letters\/(?!index\.mjs)/.test(sfx) && sfx.includes('from "../letters/index.mjs"'), "the engine is used through its index only");
 

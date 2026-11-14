@@ -258,8 +258,11 @@ group("ORDER", () => {
 /* MAT (owner): the ground / what breaks changes the sound */
 group("MAT", () => {
   ok(C.matOf(-1) === "auto" && C.matOf(7) === "metal" && C.matOf(2) === "stone" && C.matOf(6) === "water", "MAT the layer's material index -> its name");
-  ok(C.kindOf("debris", KINDS, "metal") === "clang" && C.kindOf("debris", KINDS, "water") === "splash" && C.kindOf("debris", KINDS, "auto") === "crumble", "MAT metal clangs, water splashes, the rest crumbles");
-  ok(C.kindOf("gunhit", KINDS, "stone") === "ricochet" && C.kindOf("gunhit", KINDS, "earth") === "thud" && C.kindOf("gunhit", KINDS, "metal") === "clang", "MAT a round whines off stone, thuds into soil, clangs on metal");
+  // (EFFECTS1: engine 1.7.1 KINDS1 letters debris and impacts BY MATERIAL - the kind stays, the material goes with the word)
+  ok(C.kindOf("debris", KINDS, "metal") === "debris" && C.wordOpts({ voice: "debris", kind: "debris", loud: 0.6, emat: C.engineMatOf("debris", "metal") }).material === "metal"
+    && C.wordOpts({ voice: "debris", kind: "debris", loud: 0.6, emat: C.engineMatOf("debris", "water") }).material === "water", "MAT debris lands by material: metal, water, the rest earth");
+  ok(C.kindOf("gunhit", KINDS, "stone") === "impact" && ["stone", "earth", "metal"].every((m) => C.wordOpts({ voice: "gunhit", kind: "impact", loud: 0.4, emat: C.engineMatOf("gunhit", m) }).material === m)
+    && C.wordOpts({ voice: "gunhit", kind: "impact", loud: 0.4, emat: C.engineMatOf("gunhit", "sand") }).material === "earth", "MAT a round strikes stone, soil (sand, grass, snow), metal: the engine's impact by material");
   ok(C.kindOf("crash", KINDS, "metal") === "crash" && C.kindOf("boom", KINDS, "water") === "boom", "MAT a building's crash and a bomb's boom stay themselves");
   const e = C.entryEvent(area({ type: "cracks", mat: 7 }), { x: 0, y: 0 }, 1, 0, { key: "m", sid: "m" });
   const w = C.planCluster(C.cluster([e], G)[0], { grid: G, known: KINDS })[0];
@@ -272,7 +275,8 @@ group("SHOT", () => {
   const fl = (L) => Math.min(400, Math.max(25, (L / G) / 160 * 1000));
   const me = C.muzzleEvent(it, { t0: 10000, grid: G, muzzleOf: (a, h, g) => { const d = Math.hypot(h[0], h[1]), ux = h[0] / d, uy = h[1] / d, off = 0.85 * 50;
     return { x: ux * off, y: uy * off, L: d - off }; }, flight: fl, key: "m1", sid: "m1" });
-  ok(me.voice === "muzzle" && Math.abs(me.x - 42.5) < 1e-9 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds at the barrel, when the first round leaves (hit time minus flight)");
+  // (EFFECTS1: beside the barrel, pushed clear of the shooter token - live the syllables touched its top)
+  ok(me.voice === "muzzle" && Math.abs(Math.hypot(me.x, me.y) - (50 + 100 * C.MUZZLE_CLEAR)) < 1 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds beside the barrel, clear of the shooter, when the first round leaves (hit time minus flight)");
   ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180)) < 0.05 && Math.sin(me.dir * Math.PI / 180) < 0, "SHOT a syllable per round; the report flies off square to the aim, screen-up (not back over the shooter, not onto the impacts)");
   const w = C.planCluster(C.cluster([me], G)[0], { grid: G, known: KINDS })[0];
   // (engine 1.7.0 WORD2 has the guns' own kinds - pistol, rifle, gunfire, minigun - in place of one "gunshot": the firing's rounds pick one)
@@ -285,7 +289,7 @@ group("SHOT", () => {
   const walk = [{ x: 1600, y: 0, ms: 0 }, { x: 1600, y: 100, ms: 100 }];
   const hit = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, shot: true, key: "g", sid: "g" });
   const free = C.entryEvent(area({ type: "cracks", mat: 2 }), { x: 0, y: 0 }, 1, 0, { gun: walk, key: "g2", sid: "g2" });
-  ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "ricochet" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
+  ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "impact" && hit.mat === "stone" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
   ok(!C.isEcho(C.cluster([me], G)[0], [{ x: me.x + 300, y: me.y, reach: 2000, t: me.t + 20, prio: 7, voice: "gunhit" }], G), "SHOT the report is never swallowed as an echo of its impacts (live: it was)");
   ok(C.planCluster(C.cluster([free], G)[0], { grid: G, known: KINDS })[0].kind === C.kindOf("gun", KINDS, null, C.gunKinds(walk)), "SHOT a gun with no shooter rattles in the gun kind of its own walk");
   ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /dir: Number\.isFinite\(w\.stream\.dir\)/.test(sfx),

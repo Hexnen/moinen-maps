@@ -25,6 +25,9 @@ import * as Fire from "../fire/fire.mjs";
 import { pathTimes } from "../destruction/entry-clock.mjs";
 import { causeLook } from "../destruction/cause-fx.mjs";
 import * as A from "../presets/accents-core.mjs";
+import * as PG from "./sfx-page.mjs";
+import * as MC from "../presets/meteor-core.mjs";
+import { fallAt as landingFallAt } from "../presets/landing-fx.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
@@ -47,6 +50,11 @@ let lastPlaced = [];          // the last words placed here (for checks: text, r
 let recent = [];               // main words played lately (an echo of one is not lettered again)
 let shooters = [];             // gun firings from a token here: { pts (where its rounds land, scene px), t1 (perf ms) }
 let uiCache = { t: -1e9, rects: [] };
+// EFFECTS1: preset firings told as one page each (sfx-page.mjs): fid -> { rec, pg, ground }; what their strokes letter by
+// themselves is silent (owned): the page speaks for them
+const pages = new Map();
+let owned = { d: new Set(), f: new Set(), catch: new Set(), out: new Map() };
+let firingsSeen = null;        // the scene flag's firing records object last scanned
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
 /* ---------------------------------------------------------------- settings */
@@ -111,6 +119,7 @@ function cancelObj(obj) {
 /** An event at performance-clock time `t` (sfx-core EVENT): scheduled, gathered with its moment's other events, then played. */
 export function add(e) {
   if ( mode() === "off" || !canvas?.ready ) return;
+  if ( isOwned(e) ) { stats.owned = (stats.owned ?? 0) + 1; return; }
   if ( seenEvent.has(e.key) ) return;
   seenEvent.add(e.key);
   if ( seenEvent.size > 4000 ) { const it = seenEvent.values(); for ( let i = 0; i < 1000; i++ ) seenEvent.delete(it.next().value); }
@@ -124,10 +133,11 @@ export function add(e) {
   }
   const due = C.dueAt(e) - performance.now();
   if ( e.t - performance.now() > MAX_AHEAD ) return;
-  if ( due > 30 ) { later(e.key, due, () => queue(e), { obj: e.obj, voice: e.voice }); return; }
+  if ( due > 30 ) { later(e.key, due, () => queue(e), { obj: e.obj, voice: e.voice, ev: e }); return; }
   queue(e);
 }
 function queue(e) {
+  if ( isOwned(e) ) { stats.owned = (stats.owned ?? 0) + 1; return; }
   pending.push(e);
   engine();
   if ( !gatherTimer ) gatherTimer = setTimeout(flush, Math.max(0, Math.min(C.GATHER_MS, C.dueAt(e) + C.GATHER_MS - performance.now())));
@@ -151,6 +161,9 @@ function onFireShown(ids) {
 /** Destruction: a damage area enters (display.enter: any path, played, faded or off screen). */
 function onEntry(d, g, opts, start) {
   const I = g?.info; if ( !I?.rect || !d?.origin ) return;
+  scanFirings();
+  // (a damage area of a preset firing told as a page: silent - its ground tells the page what the debris lands on)
+  if ( g.objId && owned.d.has(g.objId) ) { for ( const p of pages.values() ) if ( p.pg.owned.d.has(g.objId) && !p.ground ) p.ground = C.matOf(I.mat); return; }
   const k = `${g.hash}|${Math.round(start / 100)}`;
   if ( seenEntry.has(k) ) return;
   const pn = performance.now();
@@ -184,20 +197,174 @@ function hasShooter(walk, now) {
     it leaves (hit time minus flight, presets/accents-core.mjs), and its rounds' pocks letter the IMPACT instead of the rattle. */
 function onFiring(rec) {
   if ( mode() === "off" || !canvas?.ready || !rec ) return;
+  planPage(rec);
   const G = grid(), flight = (L) => Math.min(A.BULLET_MAX, Math.max(A.BULLET_MIN, (L / G) / A.BULLET_SQ * 1000));
   const t0 = toPerf(Number(rec.t0) || sharedNow());
+  let reported = false;
   (rec.pending?.accent ?? []).forEach((it, i) => {
     if ( it?.kind !== "muzzle" || !Array.isArray(it.from) || !it.hits?.length ) return;
     const last = Math.max(...it.hits.map((h) => h[2] || 0));
     shooters.push({ pts: it.hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000 });
+    reported = true;
     const e = C.muzzleEvent(it, { t0, grid: G, muzzleOf: A.muzzleOf, flight, key: `m|${rec.id}|${i}`, sid: `m|${rec.id}|${i}` });
-    if ( e ) add(e);
+    if ( !e ) return;
+    // (owner's answer 4: a shooter this client cannot see - hidden, out of vision, under the fog - is heard, but generally on the
+    // screen, never at its place)
+    if ( !shooterSeen(it.from, it.fr) ) { screenReport(e.path, e.t0, e.kp, `m|${rec.id}|${i}`); return; }
+    add(e);
   });
+  // owner's answer 2: a gun with no source token on the map is still heard - its report shown generally on the screen, its impacts
+  // at the hits (the pocks then letter the impact by material, not a rattle drawn at the hits)
+  const hits = rec.walk?.hits ?? [];
+  if ( !reported && hits.length && !(rec.pending?.burst?.length) ) {
+    const last = Math.max(...hits.map((h) => h[2] || 0)), first = Math.min(...hits.map((h) => h[2] || 0));
+    shooters.push({ pts: hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000 });
+    const walk = hits.map((h) => ({ x: h[0], y: h[1], ms: Math.max(0, (h[2] || 0) - first) })).sort((a, b) => a.ms - b.ms);
+    screenReport(walk, t0 + first - 120, C.gunKinds(walk), `m|${rec.id}|off`);
+  }
+}
+
+/* ---------------------------------------------------------------- preset firings as pages (EFFECTS1) */
+
+/** Is an event a part of a firing told as a page (its burst / dust stroke, a fire's catch, a fire's arranged hiss)? */
+function isOwned(e) {
+  const o = e.obj; if ( !o ) return false;
+  if ( /\|(burst|dust|shock|debris\d)$/.test(e.key ?? "") && owned.f.has(o) ) return true;
+  if ( e.voice === "fire" && owned.catch.has(o) ) return true;
+  if ( e.voice === "out" && owned.out.has(o) && String(e.key ?? "").endsWith(`|out|${owned.out.get(o)}`) ) return true;
+  return false;
+}
+/** Every firing record of the scene gets its page (a late joiner, a reload, the record before its hook). */
+function scanFirings() {
+  const F = canvas?.scene?.flags?.[MODULE_ID]?.presetFirings;
+  if ( !F || F === firingsSeen ) return;
+  firingsSeen = F;
+  for ( const rec of Object.values(F) ) if ( rec?.id && !pages.has(rec.id) ) planPage(rec);
+}
+/** The page of a firing: planned once its fire-layer strokes are here (they come in the same scene update, maybe a moment later). */
+function planPage(rec, tries = 0) {
+  if ( !rec?.id || pages.has(rec.id) ) return;
+  const all = Fire.allStrokes?.() ?? new Map();
+  const missing = (rec.f ?? []).some((e) => !all.has(e.id));
+  if ( missing && tries < 12 ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) planPage(rec, tries + 1); }, 80); return; }
+  let pg;
+  try { pg = PG.firingPage(rec, { grid: grid(), strokes: all, wayOf: MC.wayOf, headAt: MC.headAt, fallAt: landingFallAt, lift: 0.5 }); }
+  catch ( err ) { console.warn(`${MODULE_ID} | sfx: a firing's page failed`, err); return; }
+  const p = { rec, pg, ground: null };
+  pages.set(rec.id, p);
+  for ( const id of pg.owned.d ) owned.d.add(id);
+  for ( const id of pg.owned.f ) owned.f.add(id);
+  for ( const id of pg.owned.catch ) owned.catch.add(id);
+  for ( const [id, o] of pg.owned.out ) owned.out.set(id, o);
+  // (what the fire layer already queued for these strokes before the page came: dropped)
+  pending = pending.filter((e) => !isOwned(e));
+  for ( const [k, s] of sched ) if ( s.ev && isOwned(s.ev) ) { clearTimeout(s.id); sched.delete(k); }
+  if ( mode() === "off" ) return;
+  for ( const w of pg.words ) {
+    const t = toPerf(w.t), lead = 140;
+    if ( t + Math.max(C.LATE_MS, (w.ms ?? 0) * 0.6) < performance.now() ) continue;      // (a late joiner: its moment is over)
+    later(`pg|${rec.id}|${w.key}`, t - lead - performance.now(), () => pageWord(p, w, t));
+  }
+}
+/** One word of a page, at its moment: written (its ground resolved now), placed on this client's screen, played. */
+function pageWord(p, w, t, waited = 0) {
+  if ( mode() === "off" || !canvas?.ready ) return;
+  if ( !L ) { engine(); return; }
+  if ( mode() === "big" && w.role !== "main" ) return;
+  // a catch waits for its flames to show here
+  if ( w.gate && !shownAt.has(w.gate) ) {
+    if ( waited < C.GATE_MAX_MS ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) pageWord(p, w, Math.max(t, performance.now() + 120), waited + 150); }, 150); }
+    return;
+  }
+  const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
+  if ( w.role !== "main" && alive.size >= caps.alive ) { stats.dropped++; return; }
+  const G = grid(), lg = lang(), sd = `${canvas.scene?.id ?? ""}|${w.seed}`;
+  const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
+  if ( wo.material == null ) delete wo.material;
+  let word;
+  try { word = L.word(w.kind, { ...wo, seed: sd, lang: lg }); } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
+  if ( !word?.text ) return;
+  const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
+  const r = w.r ?? G * 0.4;
+  const spec = { role, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t, ms: w.ms ?? 700, seed: sd,
+    magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
+    cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
+    ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
+  measure(spec);
+  // (owner's answer 4: a sound whose source this player cannot see - under the fog, out of vision - is shown generally on the
+  // screen, never at the hidden place)
+  if ( !hereVisible(w.x, w.y) ) { playScreen(spec); return; }
+  const placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  for ( const q of placed ) { play(q); lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box }); }
+  if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
+}
+/** Can this client see the scene point (x, y)? The GM always; a player under the fog of war or out of vision does not. */
+function hereVisible(x, y) {
+  if ( game.user?.isGM || !canvas?.visibility?.tokenVision ) return true;
+  try { return !!canvas.visibility.testVisibility({ x, y }, { tolerance: grid() * 0.5 }); } catch { return true; }
+}
+/** A spot on this client's screen free of its panels (client px) for a word `bw` x `bh` client px, the upper middle first: an
+    unlocated sound (its source hidden or unknown) is shown there. */
+function screenSpot(bw, bh, key = "") {
+  uiBoxes();
+  const ui = uiCache.rects ?? [], W = innerWidth, H = innerHeight;
+  const F = [[0.5, 0.2], [0.36, 0.24], [0.64, 0.24], [0.5, 0.32], [0.28, 0.4], [0.72, 0.4], [0.5, 0.7]];
+  const k = Math.floor(C.h01(key) * 3), order = [...F.slice(k), ...F.slice(0, k)];
+  let best = null;
+  for ( const [fx, fy] of order ) {
+    const x = fx * W, y = fy * H, b = { x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 };
+    const hit = ui.reduce((s, u) => s + Math.max(0, Math.min(b.x1, u.x1) - Math.max(b.x0, u.x0)) * Math.max(0, Math.min(b.y1, u.y1) - Math.max(b.y0, u.y0)), 0);
+    if ( !best || hit < best.hit ) best = { x, y, hit };
+    if ( !hit ) break;
+  }
+  return { x: best.x, y: best.y };
+}
+/** Play a word unlocated (EFFECTS1, owner's answers 2 and 4; engine request KINDS1-1 for a real "screen" placement): in screen space
+    over the map (under the bars), not riding, not pointing at anything. */
+function playScreen(spec) {
+  const zoom = canvas.stage?.scale?.x || 1;
+  const at = screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
+  const o = optsOf(spec);
+  delete o.path; delete o.from; delete o.area;
+  Object.assign(o, { space: "screen", layer: "hud", at });
+  const g0 = gen, go = () => {
+    if ( g0 !== gen || !L || mode() === "off" ) return;
+    if ( C.tooLate(spec, performance.now()) ) { stats.late++; return; }
+    try { const h = L.play(spec.text, o); if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; } } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); }
+  };
+  const wait = spec.t - performance.now();
+  if ( wait > 4 ) later(`ws|${spec.seed}|${spec.t}`, wait, go); else go();
+  lastPlaced.push({ text: spec.text, role: spec.role, voice: spec.voice, screen: at });
+}
+
+/** Is the shooter at scene point `from` (radius `fr`) visible to this client? A token there that this client cannot see: no. */
+function shooterSeen(from, fr) {
+  if ( game.user?.isGM ) return true;
+  const G = grid(), t = (canvas.tokens?.placeables ?? []).find((q) => q.center && Math.hypot(q.center.x - from[0], q.center.y - from[1]) < (fr ?? G * 0.5) + G * 0.3);
+  if ( t ) return !!t.visible && !t.document?.hidden;
+  return hereVisible(from[0], from[1]);
+}
+/** A gun's REPORT shown unlocated (no source token, or a source this client cannot see): the engine's stream of its gun kind in
+    screen space at a free spot of this client's screen, one syllable per round as it leaves (`walk` ms from `t0`, perf clock). */
+function screenReport(walk, t0, kinds, key) {
+  if ( mode() !== "all" || !walk?.length ) return;
+  const go = () => {
+    if ( !L ) return;
+    const kind = C.kindOf("muzzle", known, null, kinds), at = screenSpot(innerWidth * 0.22, innerHeight * 0.1, key);
+    try {
+      L.stream({ kind, lang: lang(), space: "screen", layer: "hud", at: () => at, dir: -90, beats: C.streamBeats(walk), startAt: t0, magnitude: 0.6,
+        seed: `${canvas.scene?.id ?? ""}|${key}`, loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion() });
+      stats.unlocated = (stats.unlocated ?? 0) + 1;
+    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a report did not play`, err); }
+    lastPlaced.push({ text: kind, role: "main", voice: "muzzle", screen: at });
+  };
+  later(`rep|${key}`, t0 - performance.now() - 30, go);
 }
 
 /** Fire: the layer's strokes changed (or the scene opened): the events of what is new or changed. */
 function onFire(first = false) {
   if ( !canvas?.scene ) return;
+  scanFirings();
   const now = sharedNow(), all = Fire.allStrokes?.() ?? new Map(), seen = new Map();
   const on = mode() !== "off" && Fire.shownHere?.();
   const geo = Fire.geo(), P = Fire.params0(), G = grid();
@@ -374,7 +541,9 @@ function write(w, taken) {
   if ( w.stream ) return;
   try {
     const o = { seed: w.seed, lang: lang(), loud: w.textLoud ?? w.loud, duration: w.ms, avoid: taken.slice() };
-    const word = L.word(w.kind, o);
+    // (engine 1.7.1 vocabulary: what was hit, the size of the pieces, the fire's stage; a cave-in's own spelling)
+    const { kind = w.kind, ...wo } = C.wordOpts({ voice: w.voice, kind: w.kind, loud: o.loud, emat: w.emat, mat: w.mat, lang: o.lang, level: w.level });
+    const word = L.word(kind, { ...o, ...wo });
     if ( !word?.text ) return;
     w.word = word; w.text = word.text; w.chars = [...word.text].length;
     taken.push(word.text, word.template);
@@ -446,7 +615,8 @@ function playStream(w) {
     const a = W[i - 1], b = W[i] ?? a, f = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1;
     return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
   };
-  return L.stream({ kind: w.kind, lang: lang(), space: "world", at, dir: Number.isFinite(w.stream.dir) ? w.stream.dir : -90, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
+  const { material } = C.wordOpts({ voice: w.voice, kind: w.kind, loud: w.loud, emat: w.emat, mat: w.mat, lang: lang() });
+  return L.stream({ kind: w.kind, ...(material ? { material } : {}), lang: lang(), space: "world", at, dir: Number.isFinite(w.stream.dir) ? w.stream.dir : -90, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
     ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...layerOpts() });
 }
 
@@ -457,6 +627,7 @@ function teardown(full = true) {
   clearTimeout(gatherTimer); gatherTimer = 0; pending = [];
   for ( const s of sched.values() ) clearTimeout(s.id);
   sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = []; shooters = [];
+  pages.clear(); owned = { d: new Set(), f: new Set(), catch: new Set(), out: new Map() }; firingsSeen = null;
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
   burns.clear();
@@ -480,7 +651,10 @@ function refresh() {
 
 export const sfxApi = {
   /** How it stands: events seen, clusters, words played / dropped / late / stale, planning ms, interface ms, burning sounds, words alive. */
-  status: () => ({ mode: mode(), lang: lang(), engine: L?.version ?? null, alive: alive.size, waiting: sched.size, gated: gated.size, ...stats }),
+  status: () => ({ mode: mode(), lang: lang(), engine: L?.version ?? null, alive: alive.size, waiting: sched.size, gated: gated.size, pages: pages.size, ...stats }),
+  /** The pages of the scene's preset firings (EFFECTS1): their words (role, kind, moment, rank) and what they keep silent. */
+  pages: () => [...pages.values()].map((p) => ({ fid: p.rec.id, preset: p.rec.preset, main: p.pg.main, ground: p.ground, words: p.pg.words.map((w) => ({ key: w.key, role: w.role, kind: w.kind, t: w.t, rank: w.rank })),
+    owned: { d: p.pg.owned.d.size, f: p.pg.owned.f.size, catch: p.pg.owned.catch.size, out: p.pg.owned.out.size } })),
   /** Plan (no play) the words of events [{ voice, x, y, r, t?, key? }] here and now: for checks and the docs. */
   plan: (events) => C.cluster(events.map((e, i) => ({ key: `p${i}`, t: performance.now(), ...e })), grid())
     .flatMap((g) => C.planCluster(g, { grid: grid(), sec: (C.CAPS[perfMode()] ?? C.CAPS.high).sec, seed: canvas.scene?.id ?? "", known })),

@@ -53,13 +53,16 @@ export const sidOf = (e) => e.sid ?? e.key;
 export const VOICES = {
   boom:    { kinds: ["boom"], prio: 10, w: 1.3, ms: 900, area: 1, cover: 0.35, stage: { in: "slam", push: true, glow: "auto" } },
   thunder: { kinds: ["thunder", "zap"], prio: 9, w: 1.15, ms: 900, area: 1, cover: 0.3, stage: { in: "slam", glow: "auto" } },
+  // (owner's answer 3: a blast without fire is KROOM / KRUUM - the engine's dry blast - never BOOM; a cave-in is BTHOOM: wordOpts)
+  blast:   { kinds: ["concussion", "boom"], prio: 10, w: 1.2, ms: 800, area: 1, cover: 0.35, stage: { in: "slam", push: true } },
+  cavein:  { kinds: ["crash"], prio: 9, w: 1.2, ms: 1500, area: 1, cover: 0.15, stage: { in: "drop", holdKind: "rattle", out: "fall", push: true, on: 3 } },
   crash:   { kinds: ["crash"], prio: 9, w: 1.2, ms: 1500, area: 1, cover: 0.15, stage: { in: "drop", holdKind: "rattle", out: "shards", push: true, on: 3 } },
   zap:     { kinds: ["zap"], prio: 8, w: 0.85, ms: 350, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   thud:    { kinds: ["thud", "punch"], prio: 7, w: 0.8, ms: 150, area: 0.8, cover: 0.2, stage: { in: "slam" } },
   gun:     { kinds: ["gunfire"], prio: 7, w: 0.75, ms: 600, area: 0.6, cover: 0.3, stream: true },
   // (a gun fired by a token on the map: its REPORT at the muzzle, and where its rounds land the IMPACT, by what they hit)
   muzzle:  { kinds: ["gunfire", "pistol"], prio: 7, w: 0.7, ms: 600, area: 0.5, cover: 0.3, stream: true },
-  gunhit:  { kinds: ["ricochet", "thud"], prio: 7, w: 0.65, ms: 600, area: 0.5, cover: 0.3, stream: true },
+  gunhit:  { kinds: ["impact", "ricochet", "thud"], prio: 7, w: 0.65, ms: 600, area: 0.5, cover: 0.3, stream: true },
   fire:    { kinds: ["fire"], prio: 6, w: 0.8, ms: 1600, area: 0.8, cover: 0.25, stage: { in: "rise", glow: "auto" } },
   flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
   scorch:  { kinds: ["fire", "crackle"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
@@ -74,8 +77,8 @@ export const VOICES = {
   out:     { kinds: ["fizzle", "hiss"], prio: 3, w: 0.4, ms: 3500, area: 0.4, cover: 0.4, stage: { in: "pop", holdKind: "boil", out: "dissolve", on: 3 }, drift: true },
   scrape:  { kinds: ["scrape"], prio: 3, w: 0.7, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
   engine:  { kinds: ["engine"], prio: 3, w: 0.75, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
-  whump:   { kinds: ["whump"], prio: 2, w: 0.85, ms: 600, area: 0.7, cover: 0.4, stage: { in: "grow", push: { force: 1.2 } } },
-  debris:  { kinds: ["crumble", "rumble"], prio: 1, w: 0.55, ms: 800, area: 0.5, cover: 0.25, stage: { in: "pop", out: "fall" } },
+  whump:   { kinds: ["shockwave", "whump"], prio: 2, w: 0.85, ms: 600, area: 0.7, cover: 0.4, stage: { in: "grow", push: { force: 1.2 } } },
+  debris:  { kinds: ["debris", "crumble", "rumble"], prio: 1, w: 0.55, ms: 800, area: 0.5, cover: 0.25, stage: { in: "pop", out: "fall" } },
   creak:   { kinds: ["creak", "crack"], prio: 0, w: 0.5, ms: 250, area: 0.5, cover: 0.1, stage: { in: "pop", holdKind: "shake", out: "shards", on: 1 } }
 };
 /** The sound kind of a voice: the first of its kinds the engine knows (`known`: a Set / array of the engine's kind ids, or null). */
@@ -96,8 +99,8 @@ export function gunKinds(walk) {
 }
 /** The engine's own MATERIALS (words.mjs: what makes the sound; its look follows it - rock and timber in stone and bone colours, not ice
     or neon) for a map material, for the voices where the thing HIT makes the sound; null: the kind's own. */
-export const ENGINE_MAT = { stone: "stone", earth: "stone", sand: "stone", wood: "wood", metal: "metal", water: "water" };
-const MAT_VOICES = new Set(["crack", "debris", "thud", "slash", "gunhit", "crash", "creak", "rumble", "decay", "gun"]);
+export const ENGINE_MAT = { stone: "stone", earth: "earth", grass: "earth", sand: "earth", snow: "earth", wood: "wood", metal: "metal", water: "water" };
+const MAT_VOICES = new Set(["crack", "debris", "thud", "slash", "gunhit", "crash", "cavein", "creak", "rumble", "decay", "gun"]);
 export const engineMatOf = (voice, mat) => (MAT_VOICES.has(voice) ? ENGINE_MAT[mat] ?? null : null);
 /** The destruction layer's ground / thing materials (destruction/model.mjs MATERIALS; an area's info.mat is the index minus one). */
 export const MATS = ["auto", "grass", "earth", "stone", "wood", "sand", "snow", "water", "metal"];
@@ -105,15 +108,28 @@ export const matOf = (i) => MATS[(Number.isInteger(i) ? i : -1) + 1] ?? "auto";
 /** What breaks, or what the rounds hit, changes the sound (these kinds first, then the voice's own): metal clangs, water splashes,
     wood snaps, a round whines off stone (ricochet) and is swallowed by soft ground (thud). A building's crash and a bomb's boom stay. */
 export const MAT_KINDS = {
-  metal: { crack: ["clang", "crack"], thud: ["clang", "thud"], debris: ["clang", "crumble"], slash: ["clang", "slash"], gunhit: ["clang", "ricochet"] },
-  stone: { gunhit: ["ricochet", "crack"] },
-  wood: { debris: ["crack", "crumble"], crack: ["crack", "creak"], gunhit: ["crack", "thud"] },
-  water: { crack: ["splash"], thud: ["splash"], debris: ["splash"], gunhit: ["splash"], whump: ["splash", "whump"] },
-  snow: { debris: ["thud", "crumble"], gunhit: ["thud"] },
-  earth: { gunhit: ["thud"] },
-  grass: { gunhit: ["thud"] },
-  sand: { debris: ["crumble", "thud"], gunhit: ["thud"] }
+  // (EFFECTS1: the engine 1.7.1+ letters impacts and debris BY MATERIAL itself - impact / debris with `material`, wordOpts - so only the
+  // sounds whose kind changes with what breaks stay here: metal clangs, a crack in water splashes, a crack in wood creaks)
+  metal: { crack: ["clang", "crack"], thud: ["clang", "thud"], slash: ["clang", "slash"] },
+  wood: { crack: ["crack", "creak"] },
+  water: { crack: ["splash"], thud: ["splash"], whump: ["splash", "whump"] }
 };
+/** The vocabulary options of a word (engine 1.7.1 KINDS1: material, pieces, the fire ladder) for its voice: what was hit, how big the
+    pieces are, where the fire is in its life. `w` = { voice, kind, loud, emat, mat, lang, level }. -> word options (merged into L.word) */
+export function wordOpts(w) {
+  const o = {};
+  if ( w.kind === "impact" || w.kind === "debris" ) o.material = w.emat ?? ENGINE_MAT[w.mat] ?? "earth";
+  if ( w.kind === "debris" ) o.pieces = w.loud >= 0.5 ? "large" : w.loud >= 0.3 ? "medium" : "small";
+  if ( w.kind === "fire" ) {
+    if ( w.voice === "fire" ) o.stage = "ignite";
+    else if ( w.voice === "out" ) o.stage = "out";
+    else if ( w.voice === "flare" ) o.intensity = clamp(Math.round(((w.level ?? 2.5) * 5) / 3), 2, 5);
+  }
+  // (a cave-in: the owner's own spelling BTHOOM, a template of the engine's boom bank; Polish BDUUM is not in the vocabulary yet:
+  // REQUESTS EFFECTS1-1 - until then the crash words)
+  if ( w.voice === "cavein" && w.lang === "en" && w.loud >= 0.35 ) { o.kind = "boom"; o.template = "BTHOOM"; }
+  return o;
+}
 
 /** How big a sound is (0..1) from the size of what makes it, in grid squares (radius): ~0.25 sq -> 0.13, 1 sq -> 0.39, 5 sq -> 1. */
 export function magnitude(rGrid) { return clamp(Math.log1p(Math.max(0, rGrid)) / Math.log1p(5), 0.05, 1); }
@@ -129,7 +145,7 @@ export const engineArea = (r, voice, grid = 100) => Math.max(grid * 0.15, Math.m
 
 export const DESTR_TYPES = ["blast", "collapse", "scorch", "flood", "cracks", "gash"];
 export const DESTR_CAUSES = ["none", "fire", "acid", "lightning", "arcane", "impact", "claws", "water", "decay", "frost"];
-const TYPE_VOICE = { blast: "boom", collapse: "crash", scorch: "scorch", flood: "splash", cracks: "crack", gash: "slash" };
+const TYPE_VOICE = { blast: "blast", collapse: "cavein", scorch: "scorch", flood: "splash", cracks: "crack", gash: "slash" };
 /** how long each damage type's entry sounds (ms at the destruction's speed 1) */
 export const TYPE_MS = { blast: 900, collapse: 1500, scorch: 700, flood: 1200, cracks: 220, gash: 320 };
 /** palettes (light -> dark) only where the cause IS the colour of the sound (acid, arcane, frost); else the engine's look (LOOK) */
@@ -145,7 +161,7 @@ export function destrVoice(type, cause = 0, gun = false) {
     case "acid": return "acid";
     case "arcane": return "arcane";
     case "water": return "splash";
-    case "decay": return type === "collapse" ? "crash" : "decay";
+    case "decay": return type === "collapse" ? "cavein" : "decay";
     case "claws": return "slash";
     case "frost": return type === "blast" || type === "collapse" ? TYPE_VOICE[type] : "crack";
     case "impact": return type === "blast" ? "thud" : TYPE_VOICE[type] ?? "thud";
@@ -264,6 +280,7 @@ export function debrisLandings(st, n = 2) {
  * [[x, y, t, lane]...] ms after the firing's t0): one stream at the barrel, a syllable per round as it LEAVES (its hit time minus its
  * flight). `muzzleOf(it, h, grid)` -> {x, y, L} (presets/accents-core.mjs), `flight(L)` the round's flight over L px (ms). -> event | null
  */
+export const MUZZLE_CLEAR = 0.35;
 export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid }) {
   if ( !Array.isArray(it?.from) || !(it.hits?.length) ) return null;
   const shots = it.hits.map((h) => { const q = muzzleOf(it, h, grid); return { x: q.x, y: q.y, ms: h[2] - flight(q.L), hx: h[0], hy: h[1] }; }).sort((a, b) => a.ms - b.ms);
@@ -273,7 +290,18 @@ export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid
   const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y, al = Math.hypot(ax, ay) || 1;
   const [px, py] = -ax < 0 || (ax === 0 && ay > 0) ? [ay, -ax] : [-ay, ax];   // (the one of the two that points up the screen)
   const dir = Math.round((Math.atan2(py, px) * 180) / Math.PI);
-  const b = grid * 0.4, x = shots[0].x, y = shots[0].y;
+  // (EFFECTS1: live the syllables touched the top of the shooter's token - the barrel is AT its edge: they start beside the barrel,
+  // off the token by MUZZLE_CLEAR of a square on the screen-up side of the aim)
+  const pl = Math.hypot(px, py) || 1, fr = Number.isFinite(it.fr) ? it.fr : grid * 0.38;
+  const sx = (px / pl) * (fr * 0.6 + grid * MUZZLE_CLEAR), sy = (py / pl) * (fr * 0.6 + grid * MUZZLE_CLEAR);
+  const fx = it.from[0], fy = it.from[1], R = fr + grid * MUZZLE_CLEAR;
+  for ( const q of walk ) {
+    q.x += sx; q.y += sy;
+    // (never inside the token's circle plus the clearance: pushed out from its centre)
+    const d = Math.hypot(q.x - fx, q.y - fy);
+    if ( d < R ) { const k = R / Math.max(1e-6, d); q.x = fx + (q.x - fx) * k; q.y = fy + (q.y - fy) * k; }
+  }
+  const b = grid * 0.4, x = walk[0].x, y = walk[0].y;
   return { key, sid, obj: key, voice: "muzzle", kp: gunKinds(walk), x, y, r: grid * 0.45, t: t0 + s0, t0: t0 + s0, path: walk, dir, m: 0.45,
     ms: Math.max(300, walk.at(-1).ms + 300), box: { x0: x - b, y0: y - b, x1: x + b, y1: y + b } };
 }
@@ -336,7 +364,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
   // a level raised: the fire flares up (at the ramp's start)
   if ( prev && st.lt !== undefined && st.lt !== prev.lt && (st.lv ?? 2) > (st.l0 ?? prev.lv ?? 2) + 0.2 && inWin(st.lt) ) {
     const c = pathCentre(p);
-    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box });
+    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box, level: st.lv });
   }
   // put out (or a preset's fire whose out time comes): a quiet hiss at its middle, as long as its flames take to die
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
@@ -445,13 +473,13 @@ export function planCluster(g, o = {}) {
   const loud = clamp(0.2 + 0.8 * m, 0, 1);
   const centre = single ? { x: main.x, y: main.y } : { x: g.x, y: g.y };
   // a big cave-in: the ground cracks first (its anticipation, from tPre), then it comes down
-  if ( main.voice === "crash" && m >= 0.5 && !o.big ) {
+  if ( /^(crash|cavein)$/.test(main.voice) && m >= 0.5 && !o.big ) {
     const tPre = main.tPre ?? main.t - COLLAPSE_LEAD;
     words.push(spec("pre", "creak", clamp(0.25 + 0.3 * m, 0, 0.6), Math.max(150, main.t - tPre), { x: centre.x, y: g.box.y0 + (g.box.y1 - g.box.y0) * 0.25 }, tPre, seed + "|pre", null,
       h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
   const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp });
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp, level: main.level });
   // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
   if ( VOICES[main.voice]?.stream && main.path?.length ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t, ...(Number.isFinite(main.dir) ? { dir: main.dir } : {}) };
   // a thing that travels: its word rides its path
@@ -477,7 +505,7 @@ export function planCluster(g, o = {}) {
   }
   used.forEach((e, i) => {
     // a cave-in's satellites are its debris landing; a bomb's are its shock and debris: one size down from the main word
-    const v = main.voice === "crash" && e.voice === "crash" ? "debris" : e.voice === main.voice ? "debris" : e.voice;
+    const v = /^(crash|cavein)$/.test(main.voice) && /^(crash|cavein)$/.test(e.voice) ? "debris" : e.voice === main.voice ? "debris" : e.voice;
     const m2 = Math.min(m * 0.55, e.m ?? magnitude(e.r / grid));
     const dx = e.x - centre.x, dy = e.y - centre.y, d = Math.hypot(dx, dy) || 1;
     const at = { x: e.x + (dx / d) * e.r * 0.3, y: e.y + (dy / d) * e.r * 0.3 };
@@ -496,11 +524,11 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
   const V = VOICES[voice] ?? VOICES.crack, grid = o.grid || 100;
   const stage = { ...(V.stage ?? {}) };
   // a small crash is a thud (it slams in); satellites and pre words do not shove the main word
-  if ( voice === "crash" && loud < 0.45 ) stage.in = "slam";
+  if ( (voice === "crash" || voice === "cavein") && loud < 0.45 ) stage.in = "slam";
   if ( role !== "main" ) delete stage.push;
   return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null, extra.kp ?? null), mat: extra.mat ?? null, emat: engineMatOf(voice, extra.mat ?? null), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
     magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
-    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift };
+    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift, ...(Number.isFinite(extra.level) ? { level: extra.level } : {}) };
 }
 
 /** A gun's rattle: the beats (ms from its first round) of its stream's syllables - 3 to 8, spread evenly over its walk. */
@@ -539,6 +567,9 @@ const inter = (a, b) => area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0
 const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
 /** a word slightly overlaps the edge of its subject (the comic's sound word touches what makes it): share of the word height */
 export const TOUCH = 0.18;
+/** The sides of a page's MAIN word (EFFECTS1, SPEC-EFFECTS P1 b): beside its subject on `side` (-1 left, 1 right) at its height, never
+    above it (the cap rolls up, the fall came from there), then lower on that side, below, the other side. */
+export const besideOf = (side = 1) => [[side, -0.15], [side, 0.3], [side, -0.55], [0, 1], [-side, -0.15], [-side, 0.3], [side * 0.55, 1]];
 /** the penalties of a place: interface panel, token, other word, subject covered (beyond its voice's `cover`), outside the view,
     distance from where it sounds (in word sizes) */
 export const PEN = { ui: 8, tok: 4, word: 3, subject: 2.5, off: 2, dist: 0.18 };
@@ -568,7 +599,8 @@ export function place(words, ctx) {
     const cands = [];
     if ( S ) {
       const cx = (S.x0 + S.x1) / 2, cy = (S.y0 + S.y1) / 2, hw = (S.x1 - S.x0) / 2, hh = (S.y1 - S.y0) / 2;
-      for ( const [ox, oy] of AROUND ) cands.push([cx + ox * (hw + bw / 2 - TOUCH * bh), cy + oy * (hh + bh / 2 - TOUCH * bh)]);
+      // (a word may name its own sides in preference order: a bomb's main word upwind at crater height, never above - EFFECTS1)
+      for ( const [ox, oy] of w.around ?? AROUND ) cands.push([cx + ox * (hw + bw / 2 - TOUCH * bh), cy + oy * (hh + bh / 2 - TOUCH * bh)]);
     }
     cands.push([w.x, w.y], [w.x, w.y - bh * 0.8], [w.x + bw * 0.6, w.y - bh * 0.5], [w.x - bw * 0.6, w.y - bh * 0.5]);
     // just clear of a panel / token it would cover: above, beside, below it
