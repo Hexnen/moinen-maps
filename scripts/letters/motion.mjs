@@ -302,7 +302,8 @@ export function holdPose(m, t, H) {
     case "recoil": o.s = 1 + 0.07 * decay(t, 110) * Math.sin(TAU * t / 180); o.x = 0.05 * d * (1 - decay(t, 70)) * decay(t, 260); break;
     case "rattle": { const e = 0.06 * decay(t, 170); o.x = e * Math.sin(TAU * 8.5 * t / 1000 + ph); o.y = e * 0.7 * Math.sin(TAU * 6.5 * t / 1000 + ph * 2); o.r = e * 0.4 * Math.sin(TAU * 5 * t / 1000 + ph); break; }
     case "ring": { const e = decay(t, Math.max(200, H / 3)); o.x = 0.028 * e * Math.sin(TAU * 13 * t / 1000); o.sx = 1 - 0.015 * e; break; }
-    case "throb": { const e = decay(t, 230); o.s = 1 + 0.06 * e * Math.sin(TAU * t / 280); o.y = 0.014 * (1 - e) * Math.sin(TAU * t / 760 + ph); break; }
+    /* a boom: the throb falls off over ~400 ms, then a slow low shudder stays for the rumble (SPEC-MOTION table; ADVM 8: no static hold) */
+    case "throb": { const e = decay(t, 230), g = (1 - e) * (1 - 0.5 * u); o.s = 1 + 0.06 * e * Math.sin(TAU * t / 280) + 0.012 * g * Math.sin(TAU * t / 610 + ph); o.x = 0.02 * g * Math.sin(TAU * 5.5 * t / 1000 + ph); o.y = 0.014 * g * Math.sin(TAU * 4.1 * t / 1000 + 2 * ph) + 0.01 * (1 - e) * Math.sin(TAU * t / 760 + ph); break; }
     case "roll": { o.s = 1 + 0.05 * decay(t, 230) * Math.sin(TAU * t / 280); for ( const [f, a] of [[0.33, 0.6], [0.6, 0.38], [0.8, 0.22]] ) { const dt = t - f * H; if ( dt > 0 ) { const e = a * 0.05 * decay(dt, 130); o.x += e * Math.sin(TAU * dt / 95 + ph); o.y += e * 0.6 * Math.sin(TAU * dt / 120); } } break; }
     case "pass": o.x = 0.7 * d * u; o.s = 1 + 0.06 * Math.sin(Math.PI * u); break;
     case "sway": { const g = Math.sin(Math.PI * u); o.r = 0.05 * g * Math.sin(TAU * t / 1300 + ph) * d; o.x = 0.25 * d * u; o.sx = 1 + 0.03 * g; break; }

@@ -101,7 +101,9 @@ export async function run(ok, { bank, fontsApi }) {
   }
 
   /* ---------- 4. per-frame tracking of entrance and hold (60 fps smooth, ones in stepped; SPEC-MOTION 5.10, 6.3, 6.10) ---------- */
-  const track = (q) => ({ m: q.motion, ent: entMs(q), hold: q.holdMs, contact: !!q.timeline.ent[0] && (q.timeline.ent[0].impact || !!q.timeline.ent[0].smear) ? q.timeline.ent[0].ticks * TICK : 0 });
+  const track = (q) => ({ m: q.motion, ent: entMs(q), hold: q.holdMs, contact: leadContact(q) });
+  /* the leading contact pictures (an impact accent, a smear multiple): a step under them is bridged by the drawing */
+  function leadContact(q) { let ms = 0; for ( const x of q.timeline.ent ) { if ( !(x.impact || x.smear) ) break; ms += x.ticks * TICK; } return ms; }
   {
     const worst = [];
     let slamBig = 0, slamN = 0, popOk = 0, popN = 0;

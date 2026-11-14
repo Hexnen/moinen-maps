@@ -180,6 +180,13 @@ is drawn big. Screen words follow window resizes the same way.
 
 ## Motion: how the pictures move
 
+**1.9.0 MOTION2: the `invincible` style moves by its sound** (`motion.mjs`; everything below in this section is the frozen legacy
+timeline of `comic` / `expressive`). A sound-family table (18 families, a row per kind: entrance, hold envelope, exit by cut-off,
+hold length from the sound's duration, rate, moving letters, travel) gives each word a pose track; the word is painted once and the
+sprite / box is moved every display frame (`look.motion: "smooth"`, default) or its drawn channels step on one shared grid of the
+page clock (`"stepped"`; `L.motionMode(name)` sets the default). Pictures carry a `key`; same key = one painting. Rules and numbers:
+manual 11a; checks: `check-motion2.mjs`.
+
 ### What the sources say (digest, with sources)
 - **Stepped, not smooth.** Into the Spider-Verse is mostly animated on twos (each drawing held two frames of 24, about 12 a second),
   with holds stepping down to threes and longer where a pose should land; the team avoided motion that was "too splined"; the

@@ -1056,6 +1056,9 @@ function trackTimeline(n, m, R, o = {}) {
   const tempo = o.tempo || 1;
   const sc = (keys) => keys.map(([t, p, e]) => [t / tempo, p, e]);
   m.entKeys = sc(entranceKeys(m)); m.exitKeys = sc(exitKeys(m));
+  /* the impact accent covers the first tick: the entrance's contact pose starts when the word shows (else the slam's big contact is
+     spent under the accent and the word appears already settled: seen on the MOTION2 film) */
+  if ( m.flash && !o.reduced && m.in !== "choreo" ) { const d = TICK / tempo; m.entKeys = [[0, m.entKeys[0][1]], ...m.entKeys.map(([t, p, e]) => [t + d, p, e])]; }
   const ticks = (ms) => Math.max(1, Math.ceil(ms / TICK - 1e-6));
   const P = (t, key, extra = {}) => { const p = pic(n, t); p.key = key; p.boil = R.seed(); return Object.assign(p, extra); };
   const ent = [], hold = [], exit = [];
