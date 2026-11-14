@@ -546,6 +546,7 @@ the host module's settings tab opens the engine's own window; host = moinen-maps
 | `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
 | `movement` (WORLD, the GM's) | smooth / stepped | the invincible style's motion type on every seat (1.9.2 MODE); a player sees it as text |
+| `face` (WORLD, the GM's) | league / anton | the invincible style's face on every seat (1.9.7 FONTSEL, League Gothic by default); a player sees it as text |
 World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
 
 Authoring (any client, this session; `L.saveStyle` also stores a style in the world):
@@ -581,13 +582,15 @@ opens the designer window (also: the burst button in the token controls); `L.ope
 
 ## Look (contract v8, LOOK; v9, LOOK2 1.8.0): styles, sound -> look, lines, backdrops, accent, legibility
 **Styles.** Three whole hands, `L.lookStyles` = `["comic", "invincible", "expressive"]`.
-- `invincible` (the book's manner, rebuilt in LOOK2 after the owner's review): tall, tight, flat lettering. Anton for every word;
+- `invincible` (the book's manner, rebuilt in LOOK2 after the owner's review): tall, tight, flat lettering in ONE face for every word: League Gothic (default since 1.9.7) or Anton, the GM's table setting
+  `face` (`L.invFace`, a call's `look.face` wins), each face with its own tuning (`INV_TUNE`: gap, keyline, rim, lead-in, optical
+  sizes for small pictures, the minus, the column's mark);
   ONE ink keyline round the whole word (`hand.keyline: "union"`), each letter clipped to itself with a thin inner line where it meets
   a neighbour (no outline lies on a neighbour); a flat duplicate block down-right in one dark colour, or a straight-down solid block
   for heavy sounds; flat fills (no gradient, no soft shadow, no misregistration, no boil); hollow letters for light or airy sounds;
   11 flat palettes chosen from the sound (`invPalette`); upright letters, one size peak per word, neighbour ratio at least 0.85;
   the hyphen lead-in (KA-, RAKA-, KRA-KA-; not a rhythm like BIP-BIP-BIP, `invPrefix`) small, on the top line, tucked into the
-  body; no letter under 0.82 of the word's biggest (`INV_FLOOR`); doubled O as linked ovals made from Anton's own O;
+  body; no letter under 0.82 of the word's biggest (`INV_FLOOR`); doubled O as linked ovals made from the face's own O;
   letter spacing by pair (`kernOptical`, below). **It is the default when `game.system.id === "invincible"`.**
 - `comic` (the earlier mixed hand): the default elsewhere.
 - `expressive`: the look from before the Invincible pass, kept for the owner. It is the `comic` hand under its own name: the same
@@ -665,8 +668,9 @@ holds LOOK2's points (SPEC-LOOK P1-P18 as measured rules).
 - Reduced motion (OS setting or `reduced: true`): one entrance picture, no shake, a two-step halftone exit.
 
 ## Fonts
-Eleven SIL OFL 1.1 fonts (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet Paint,
-Squada One, Michroma; Anton is the Invincible style's face since 1.8.0): files,
+Twelve SIL OFL 1.1 fonts (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet Paint,
+Squada One, Michroma, League Gothic; the Invincible style letters in League Gothic (default) or Anton since 1.9.7, Anton alone
+since 1.8.0): files,
 holders, sources and sizes in ATTRIBUTION.md. Knewave has no Polish letters of its own: the engine builds Ą Ć Ę Ł Ń Ś Ź Ż in memory
 from its own outlines plus accents (its own Ó acute and period, a drawn Ł bar, the ogonek from a fallback font). Every font's
 Polish capitals were checked by rendering them (letr gallery stills), not only by the character map.

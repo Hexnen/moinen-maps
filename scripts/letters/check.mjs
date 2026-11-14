@@ -200,6 +200,8 @@ for ( const [k, face] of INV_FACES.entries() ) checkLook2(ok, bank, face, k === 
 /* 8d3. LOOK3: staggered interlocked O (two always, three rarely, four never), the first letter as tall as its neighbour, no hole before
    the last letter (check-look3.mjs; `node check-look3.mjs <other letters folder>` runs the same measurements on another engine) */
 for ( const face of INV_FACES ) await (await import("./check-look3.mjs")).run(ok, { bank, fontsApi, face });
+/* 8d4. FONTSEL: the invincible style's two faces, their tuning, optical sizes, the minus, the column's mark (check-fontsel.mjs) */
+await (await import("./check-fontsel.mjs")).run(ok, { bank, fontsApi });
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
@@ -229,6 +231,13 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-motion2.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
   for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
   ok(r.status === 0, `motion2 engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
+/* 12. FONTSEL on the fake browser: the table's face reaches the next word without a reload, GM and player alike (own process) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-fontsel.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `fontsel engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 console.log(`letters: ${n} checks, ${failed} failed`);

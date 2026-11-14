@@ -164,3 +164,36 @@ export function strokeQuads(lines, w) {
   }
   return out;
 }
+
+/* FONTSEL: a glyph made bolder by d (its own units) on every side: each contour moved along its mitred normal, outer contours out,
+   counters in (the sign of the biggest contour tells which is which), the miter capped at 2d so sharp joins (A, V, W apexes) only
+   blunt a little. Point count and order kept, so later per-point warps still match. Small d only (a few percent of the stem). */
+export function bolden(cs, d) {
+  if ( !(d > 0) || !cs.length ) return cs;
+  let big = cs[0]; for ( const c of cs ) if ( Math.abs(area(c)) > Math.abs(area(big)) ) big = c;
+  const sg = Math.sign(area(big)) || 1;
+  return cs.map((c) => {
+    const n = c.length / 2; if ( n < 3 ) return c;
+    const a = area(c), own = Math.sign(a) || 1, k = (own === sg ? 1 : -1) * d * own;
+    /* edge normals (y-down plane): for an edge t, (ty, -tx) points out of a positive-area contour */
+    const en = new Float64Array(c.length);
+    for ( let i = 0; i < n; i++ ) {
+      const j = (i + 1) % n; let tx = c[2 * j] - c[2 * i], ty = c[2 * j + 1] - c[2 * i + 1]; const l = Math.hypot(tx, ty);
+      if ( l < 1e-9 ) { en[2 * i] = NaN; continue; }
+      tx /= l; ty /= l; en[2 * i] = ty; en[2 * i + 1] = -tx;
+    }
+    /* a zero-length edge borrows its neighbour's normal */
+    for ( let r = 0; r < 2; r++ ) for ( let i = 0; i < n; i++ ) if ( Number.isNaN(en[2 * i]) ) { const p = (i - 1 + n) % n; if ( !Number.isNaN(en[2 * p]) ) { en[2 * i] = en[2 * p]; en[2 * i + 1] = en[2 * p + 1]; } }
+    const o = new Array(c.length);
+    for ( let i = 0; i < n; i++ ) {
+      const p = (i - 1 + n) % n;
+      let ax = en[2 * p], ay = en[2 * p + 1], bx = en[2 * i], by = en[2 * i + 1];
+      if ( Number.isNaN(ax) ) { ax = bx; ay = by; } if ( Number.isNaN(bx) ) { bx = ax; by = ay; }
+      let mx = ax + bx, my = ay + by; const dot = 1 + ax * bx + ay * by;
+      if ( dot < 1e-6 ) { mx = ax; my = ay; } else { mx /= dot; my /= dot; }
+      const ml = Math.hypot(mx, my); if ( ml > 2 ) { mx *= 2 / ml; my *= 2 / ml; }
+      o[2 * i] = c[2 * i] + k * mx; o[2 * i + 1] = c[2 * i + 1] + k * my;
+    }
+    return o;
+  });
+}

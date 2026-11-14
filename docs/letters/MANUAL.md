@@ -46,6 +46,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | FIN-ENGINE (FXI-ENGINE merged onto MOTION2; `plan.contactMs` / `L.contactAt`, per-word `flash: false`, impact `blowAt` / `keep` / `series`, sizes from the subject, series scheduled ahead all play) | 1.9.1 | API-CONTRACT 1.9.1 | `tactics-zones-fin-engine` | pending merge (sections 4, 21a) |
 | MODE (the invincible motion type as the GM's table setting `movement`; stepped grid on the shared clock, `L.gridClock`) | 1.9.2 | API-CONTRACT 1.9.2 (v12) | `tactics-zones-mode` | pending merge (sections 11a, 15) |
 | LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.4 | API-CONTRACT 1.9.4 (v13) | `tactics-zones-look3` | pending merge (section 13) |
+| FONTSEL (the invincible style in two faces: League Gothic, the default, and Anton; the GM's table setting `face`; each face tuned for its own shapes; optical sizes for small pictures) | 1.9.7 | API-CONTRACT 1.9.7 (v14) | `tactics-zones-fontsel` | pending merge (sections 13, 14, 15) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -611,7 +612,26 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
   same drawing as `comic`. Proof: 336 fixed-seed fingerprints (plan JSON + every draw call) identical before and after LOOK2, and
   `check-look2.mjs` P17 compares the two styles on every run [V]. `comic` stays the general default and is unchanged.
 - `invincible` (LOOK2, SPEC-LOOK P1-P18; [V] by `check-look2.mjs` unless marked):
-  - **Face**: Anton for every word (tall, heavy, narrow; Polish letters present); `look.font` still wins (P1, P14).
+  - **Face** (FONTSEL 1.9.7, the owner: «Niech będą do wyboru ten teraz i jako default Gothic»): ONE tall narrow face for every
+    word, chosen for the table: **League Gothic** (default; the League of Moveable Type, static Regular) or **Anton** (the face of
+    LOOK2/LOOK3). The GM picks it in the settings window (world setting `face`, section 15); a script uses `L.invFace("league" |
+    "anton")`, `L.invFaces`; a call's `look: { face }` wins; `look.font` still wins over both (P1, P14). The legacy styles keep
+    their own faces. If a face's file fails to load the other one is used. [V] `check-fontsel.mjs`.
+  - **Each face is tuned for its own shapes** (`INV_TUNE` in design.mjs). Anton keeps LOOK2/LOOK3's numbers exactly (its plans
+    and drawings are unchanged: 3078 fingerprints of `comic`, `expressive` and `invincible` + `face: "anton"` equal to 1.9.6).
+    League Gothic's stem is 0.147 cap (Anton 0.193) and a word comes out about 0.8 as wide, so: optical gap 0.032 / 0.04 / 0.048
+    cap (short / other / sustained sound; Anton 0.04 / 0.05 / 0.06, the same gap-to-stem proportion), keyline `inkW` 0.014 (0.016),
+    an open letter's rim 0.04 (0.05), lead-in 0.36-0.42 of the body (0.32-0.38; still under P7's 0.42); a number's sign is the face's
+    minus U+2212 (its hyphen is a short dash beside a digit; the word stays "-7"); in the vertical column a "!" / "?" stands at the
+    optical gap from its letter (the advance boxes left League Gothic's "!" hanging away from a K). All [V] `check-fontsel.mjs`;
+    LOOK2's and LOOK3's checks run for BOTH faces.
+  - **Optical sizes** (League Gothic, `INV_TUNE.league.small`; `shape.mjs opticalSize`): a picture painted small gets what a
+    letterer gives small lettering. Below a stem of 6.5 px a letter's outline grows on every side (up to 0.02 cap: League Gothic at
+    24-36 px is then as heavy as Anton), and the letters move apart by what each PAIR lost at its closest row, so no gap closes; a
+    lead-in smaller than 14 px is drawn up to 1.5x bigger, grown from the end of its hyphen on the body's top line, so it stays
+    tucked. Above about 45 px the picture is exactly the plan (checked at 160 px). Only the drawing changes: the plan, its
+    letter sizes and every plan-level check stay as they are. [V] `check-fontsel.mjs` (stems at 18/24/30 px, gaps at 20 px, lead-in
+    height, top line and tuck at 14/20/26 px).
   - **One outline round the word** (owner): the word's union gets one ink keyline (`hand.keyline: "union"`); each letter is clipped
     to itself and gets only a thin inner ink line where it meets a neighbour, so no outline lies on a neighbouring letter (P2). Even
     weight, round joins, no boil (P3).
@@ -652,8 +672,9 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
   - **Colour**: 11 flat palettes chosen from the sound (`hand.invPal`: yellow, orange, red, white, steel, cyan, blue, air, green,
     violet, stone; `invPalette(mood, character, traits)`); no palette serves more than a quarter of the kinds (P11).
   - **Spacing by letter pair**: `kernOptical` measures each pair's gap row by row over their common height and sets the mean gap to
-    `hand.kern.gap` (0.04-0.06 of the cap); no row comes closer than `KERN.touch`; doubles (AA, RR) a little tighter; AV / TA / LT
-    end up tighter than HN; vertical layouts are skipped (P18).
+    `hand.kern.gap` (Anton 0.04-0.06 of the cap, League Gothic 0.032-0.048); no row comes closer than `KERN.touch`; doubles (AA, RR)
+    a little tighter; AV / TA / LT end up tighter than HN; vertical layouts are skipped except a row's mark in League Gothic (P18,
+    FONTSEL).
   - **Smear**: outline echoes only, no pale filled copies (P15).
   - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
@@ -678,9 +699,12 @@ tex counters capFont shadow prefix link arrange backdrop treat`. [R]
   pushed or opened until it reads (`legibility.mjs`, checks in `check-look.mjs`; LOOK2's in `check-look2.mjs`).
 - **Clean letters** (owner): no flame teeth, drips or ember specks by default; `look.treat: "flame" | "drip" | "jag" | "rough"` and
   `look.font: "wetpaint"` are explicit opt-ins.
-- **Fonts**: eleven SIL OFL 1.1 faces (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet
-  Paint, Squada One, Michroma); Polish capitals synthesised where a font lacks them. `L.registerFont` adds one (section 15). LOOK2
-  added no font: Anton was chosen from the bundled faces (nothing downloaded); the runners-up are in the owner's question list.
+- **Fonts**: twelve SIL OFL 1.1 faces (Bangers, Anton, Patrick Hand, Titan One, Bungee, Black Ops One, Sigmar, Knewave, Rubik Wet
+  Paint, Squada One, Michroma, League Gothic); Polish capitals synthesised where a font lacks them. `L.registerFont` adds one
+  (section 15). LOOK2 chose Anton from the bundled faces; FONTSEL (1.9.7) added League Gothic after the owner compared candidates
+  and allowed downloading free-licence fonts: the static Regular from the upstream repository (the variable Google Fonts file keeps
+  overlapping contours, which show as seams under the keyline; checked: no glyph of either face has crossing contours), sha256 and
+  source in `scripts/letters/ATTRIBUTION.md`.
 - **Palettes**: `L.palettes()` [V]; `palette: "<name>"` per call (same on every client); `colors` overrides.
 
 Not done in LOOK2: joining other doubles (EE, UU) like OO; smooth interpolated motion in the invincible style (P16, MOTION2).
@@ -713,6 +737,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-14 | The OO joins: the two letters are shifted apart vertically a little, the first one up, the second one down; a third O goes up again | - | done in `invincible` (LOOK3 1.9.3: `LINK.rise` 0.07 of the size each; `check-look3.mjs`) |
 | 2026-11-14 | Three O should interlock only rarely; four and more never | write the word as it sounds: the engine decides the join | done (LOOK3: three on 20 % of the seeds, four+ plain) |
 | 2026-11-14 | How rare a linked three is: «20 procent» | - | done (LOOK3 1.9.4: `LINK.three` 0.2; `check-look3.mjs` measures 1000 seeds) |
+| 2026-11-14 | The invincible style's face: two to choose from, the current one (Anton) and League Gothic; League Gothic the default («Niech będą do wyboru ten teraz i jako default Gothic») | nothing; a call may pin `look: { face }` | done (FONTSEL 1.9.7: `INV_FACES`, `DEFAULT_FACE`, own tuning per face). Who sets it was not said: provisionally the GM for the table like the motion type (world setting `face`; question FONTSEL-1) |
 | 2026-11-13 | Letter spacing in `invincible` is too loose and must depend on the letter pair | - | optical kerning by pair: done (LOOK2 P18, `kernOptical`) |
 | 2026-11-13 | Animation must fit the sound: a motion table from the sound, not random picks | - | MOTION2 (SPEC-MOTION) |
 | 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
@@ -750,11 +775,12 @@ window; `L.prefs` / `L.settings()` read them [V]):
 | `announce` | on / off | screen readers read each word (or `alt`) through one polite live region |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
 
-**Table setting** (1.9.2 MODE; scope WORLD, written by the GM, same on every seat; group "Table (GM)" / "Stół (MG)" in the window):
+**Table settings** (1.9.2 MODE, 1.9.7 FONTSEL; scope WORLD, written by the GM, same on every seat; group "Table (GM)" / "Stół (MG)" in the window):
 
 | key | values | effect |
 |---|---|---|
 | `movement` | smooth (default) / stepped | the invincible style's motion type ("Motion type" / "Rodzaj ruchu": "Smooth" / "Płynny", "Stepped" / "Skokowy"); the next word on every seat follows it without a reload (onChange -> `applyPrefs` -> `L.motionMode`), words already playing keep theirs; a player's window shows the GM's choice as text with "Set by the GM for the table", and a player's Save / Defaults never write it [V node] |
+| `face` | league (default) / anton | the invincible style's face (1.9.7 FONTSEL; "Typeface" / "Krój": "League Gothic", "Anton"); the same on every seat so every seat sees the same word shape (its width, where it fits in view, the cut of its O); the next word follows it without a reload (onChange -> `applyPrefs` -> `L.invFace`), words already playing keep theirs; a player sees the GM's choice as text and never writes it; a call's `look.face` wins; the legacy styles ignore it [V node: check-tools, check-fontsel --engine as GM and as a player] |
 
 World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.
 
@@ -917,6 +943,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `motionMode`, `motionModes`; play options `kind`, `look.motion`; `w.play.vocabMotion` | 1.9.0 MOTION2 | pending merge, section 11a [V node] |
+| `invFace`, `invFaces`; play option `look.face`; setting `face` | 1.9.7 FONTSEL | pending merge, sections 13, 15 [V node] |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
@@ -958,6 +985,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
 - 2026-11-14 (WORDS3, 1.9.5, `tactics-zones-words3`): thunder without BOOM / BUM, `FIRE_BLASTS` and the check that keeps BOOM / BUM
   in blasts with fire only (9a), the rulings (14), the prefix example.
+- 2026-11-14 (FONTSEL, 1.9.7, `tactics-zones-fontsel`): the invincible style in two faces, League Gothic (default) and Anton:
+  face, per-face tuning, optical sizes, minus, the column's mark (13), the owner's ruling (14), the table setting `face` (15), the
+  API index (20), the stage table.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

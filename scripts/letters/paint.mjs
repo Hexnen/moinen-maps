@@ -438,7 +438,7 @@ export function paintPicture(plan, bank, p, S, make) {
     const H0 = plan.hand, k = Math.max(0.38, S / 80), ink = Math.max(H0.inkW * k, Math.min(H0.inkW, 1.6 / Math.max(1, S)));
     plan = Object.create(plan, { hand: { value: { ...H0, inkW: ink, out2W: H0.out2W * k, inflate: H0.inflate * Math.max(0.6, k) } } });
   }
-  const geo = pictureGeometry(plan, bank, p);
+  const geo = pictureGeometry(plan, bank, p, S);   // FONTSEL: at its size (a face's optical sizes)
   const back = p.impact ? null : backdropOf(plan, p);
   const ext = extents(plan, geo, p, back);
   let w = (ext.x1 - ext.x0) * S, h = (ext.y1 - ext.y0) * S;

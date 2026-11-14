@@ -36,9 +36,20 @@ export const FONTS = {
    numbers follow the face's shapes. */
 export const INV_FACES = ["league", "anton"];
 export const DEFAULT_FACE = "league";
+/* INV_TUNE: per face. gap = the optical gap between letters (cap heights; short / sustained / other sounds); prefix = [share of the
+   body at loud 0, more at loud 1] (LOOK2 P7 keeps it <= 0.42); inkW = keyline, rimW = an open letter's rim (both cap heights);
+   `small` = optical sizes for small pictures (shape.mjs opticalSize, only when a picture is painted at a known size): below stemPx a
+   stem grows on both sides up to boldMax (cap heights; the letters move apart by what they grew, so the gaps stay), and a prefix is
+   drawn at least prePx tall (at most preMax of its planned size, grown from the point where it tucks under the body);
+   stem = the face's own stem (the I at mid height, cap heights); minus = a number's sign is the face's minus (U+2212), not its
+   hyphen; markKern = in the vertical column a "!" or "?" stands at the optical gap from its letter (not at the advance boxes).
+   Anton keeps the LOOK2/LOOK3 numbers exactly (its plans and drawings are unchanged: FONTSEL fingerprint). League Gothic (stem 0.147
+   against Anton's 0.193, letters about 0.8 as wide) is set by its own shapes: a gap in proportion to its lighter stem, a lighter
+   keyline and rim, a slightly larger lead-in, and at small sizes stems as heavy as Anton's and a lead-in that still reads. */
 export const INV_TUNE = {
-  anton: { gap: { short: 0.04, sustained: 0.06, other: 0.05 }, prefix: [0.32, 0.06], inkW: 0.016, rimW: 0.05, bold: 0 },
-  league: { gap: { short: 0.04, sustained: 0.06, other: 0.05 }, prefix: [0.32, 0.06], inkW: 0.016, rimW: 0.05, bold: 0 }
+  anton: { gap: { short: 0.04, sustained: 0.06, other: 0.05 }, prefix: [0.32, 0.06], inkW: 0.016, rimW: 0.05, stem: 0.193, small: null, minus: false, markKern: false },
+  league: { gap: { short: 0.032, sustained: 0.048, other: 0.04 }, prefix: [0.36, 0.06], inkW: 0.014, rimW: 0.04, stem: 0.147,
+    small: { stemPx: 6.5, boldMax: 0.02, prePx: 14, preMax: 1.5 }, minus: true, markKern: true }
 };
 export const invFaceOf = (f) => (INV_FACES.includes(f) ? f : DEFAULT_FACE);
 /* a font without a glyph falls back along this chain, letter by letter (Polish letters are synthesised first where possible) */
@@ -1203,7 +1214,9 @@ export function makePlan(text, opts, fonts, memory) {
   const chars = [...word];
   const capAt = hand.capFont ? chars.findIndex((c) => /[\p{L}\p{N}]/u.test(c)) : -1;
   const fontAt = (i) => (i === capAt ? hand.capFont : hand.font);
-  const widths = chars.map((ch, i) => (ch === " " ? 0.32 : ch === "\n" ? 0 : fonts.adv(fontAt(i), ch)));
+  /* FONTSEL: a face may letter a number's sign with its own minus (League Gothic's hyphen is a short dash, too slight beside a digit) */
+  const glyphAt = (i) => (hand.style === "invincible" && hand.number && INV_TUNE[hand.font]?.minus && chars[i] === "-" && /\d/u.test(chars[i + 1] ?? "") ? "\u2212" : chars[i]);
+  const widths = chars.map((ch, i) => (ch === " " ? 0.32 : ch === "\n" ? 0 : fonts.adv(fontAt(i), glyphAt(i))));
   /* a caller's sound with an explicit peak (0 = the attack, 1 = the end) places the accent there when no accent is given */
   const pk = Number.isFinite(opts.sound?.peak) ? Math.round(clamp01(opts.sound.peak) * (chars.length - 1)) : null;
   const accent = accentOf(chars, opts.accent ?? (pk != null ? { peak: [pk, pk] } : null));
@@ -1211,6 +1224,7 @@ export function makePlan(text, opts, fonts, memory) {
   const groups = opts.reduced ? null : groupsOf(chars, opts, syllablesOf);
   const lay = arrangeLines(layoutPlan(chars, widths, mood, sound, hand, R, R2, accent, letterScales(chars.length, groups)), chars, hand, sound, R2, opts.arrange ?? opts.look?.arrange ?? "auto");
   if ( capAt >= 0 ) lay.letters[capAt].font = hand.capFont;
+  for ( let i = 0; i < chars.length; i++ ) if ( glyphAt(i) !== chars[i] ) lay.letters[i].glyph = glyphAt(i);
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
   const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
   /* MOTION2: the vocabulary's own picks (L.sfx / L.word: vocabMotion) drive only the legacy style; the invincible style reads its table */

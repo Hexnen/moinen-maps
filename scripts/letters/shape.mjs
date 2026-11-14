@@ -1,6 +1,6 @@
 /* LETR: the outlines of one picture of a plan, in word units (cap height 1). Pure. */
-import { resample, jag, rough, boil, drips, flames, bbox, crackLines, strokeQuads } from "./geom.mjs";
-import { envelope, RING_W } from "./design.mjs";
+import { resample, jag, rough, boil, drips, flames, bbox, crackLines, strokeQuads, bolden } from "./geom.mjs";
+import { envelope, RING_W, INV_TUNE } from "./design.mjs";
 import { rng } from "./rng.mjs";
 import { area } from "./font.mjs";
 import { makeReader } from "./legibility.mjs";
@@ -112,8 +112,36 @@ export function pairGaps(a, b, rows = KERN.rows) {
   const ea = rowExtents(a, ys), eb = rowExtents(b, ys);
   return { rows: ys.map((y, k) => (Number.isFinite(ea.mx[k]) && Number.isFinite(eb.mn[k]) ? eb.mn[k] - ea.mx[k] : null)), y0, y1 };
 }
+/* FONTSEL: the optical offset of `me` (placed at 0) after `a`: the mean gap over the rows they share (at most `open` of air a row)
+   equals G, never closer than a touch */
+function opticalX(a, me, h, G) {
+  const g = pairGaps(a, me), live = g.rows.filter((d) => d != null);
+  if ( !live.length ) return bbox(a).x1 - bbox(me).x0 + G;
+  const need = Math.max(...live.map((d) => -d)), open = KERN.open * h;
+  const f = (x) => g.rows.reduce((acc, d) => acc + (d == null ? open : Math.min(open, d + x)), 0) / g.rows.length;
+  let lo = need - open, hi = need + open;
+  for ( let it = 0; it < 32; it++ ) { const m = (lo + hi) / 2; if ( f(m) < G ) lo = m; else hi = m; }
+  return Math.max((lo + hi) / 2, need + KERN.touch * h);
+}
+/* FONTSEL (INV_TUNE markKern): in the vertical column a row's "!" / "?" stands at the optical gap from its letter; the advance boxes
+   left League Gothic's mark hanging away from the last letter (its K and ! carry wide side bearings) */
+function kernColumnMarks(plan, bank) {
+  const H = plan.hand, lay = plan.layout, Ls = lay.letters, chars = plan.chars, base = baseGeometry(plan, bank);
+  for ( const ln of lay.lines ?? [] ) for ( let i = ln.from + 1; i <= ln.to; i++ ) {
+    if ( !/[!?]/u.test(chars[i]) || Ls[i].skip || !base[i].gl || !base[i - 1].gl || Ls[i - 1].skip ) continue;
+    const a = placedShape(plan, bank, i - 1, Ls[i - 1].x), me = placedShape(plan, bank, i, 0);
+    if ( !a || !me ) continue;
+    const h = Math.min(Ls[i - 1].s, Ls[i].s);
+    Ls[i].x = opticalX(a, me, h, H.kern.gap * h);
+  }
+}
 export function kernOptical(plan, bank) {
   const H = plan.hand, lay = plan.layout, Ls = lay.letters, chars = plan.chars;
+  if ( H.kern && lay.arrange === "vertical" && !lay._kerned && H.style === "invincible" && INV_TUNE[H.font]?.markKern ) {
+    Object.defineProperty(lay, "_kerned", { value: true, enumerable: false, configurable: true });
+    kernColumnMarks(plan, bank);
+    return;
+  }
   if ( !H.kern || lay.arrange === "vertical" || lay._kerned ) return;
   Object.defineProperty(lay, "_kerned", { value: true, enumerable: false, configurable: true });
   const base = baseGeometry(plan, bank), pre = lay.pre ?? 0;
@@ -166,7 +194,7 @@ export function baseGeometry(plan, bank) {
     if ( ch === " " || ch === "\n" || plan.layout.letters[i]?.skip ) return { gl: null, cs: [] };   // FXLE F12: a line break has no glyph (LOOK2: nor a hyphen a column drops)
     const font = plan.layout.letters[i]?.font ?? plan.hand.font;
     if ( plan.layout.letters[i]?.ring ) { const gl = plan.hand.style === "invincible" ? ovalRing(font, bank) : ringGlyph(font, bank); return { gl, cs: gl.contours, ring: true }; }
-    const gl = bank.glyph(font, ch);
+    const gl = bank.glyph(font, plan.layout.letters[i]?.glyph ?? ch);   // FONTSEL: a number's sign may be the face's minus
     return { gl, cs: treatReadable(gl, ch, font, plan.hand, plan.sound, plan.seed, i, bank) };
   });
   Object.defineProperty(plan, "_base", { value: base, enumerable: false, configurable: true });
@@ -298,11 +326,76 @@ function altGlyph(plan, bank, i, ch) {
 }
 
 /* outlines of picture p: [{ i, cs: [contours], visible }], in word units, word centre at (0,0) of the HOLD layout */
-export function pictureGeometry(plan, bank, p) {
+/* FONTSEL: optical sizes of a face for one picture painted at S px per cap height (INV_TUNE[face].small): per letter the extra
+   weight `e` (cap heights of the letter, each side) and its bolder outline; a small prefix's scale and the point it grows from (the
+   right end of its hyphen, where it tucks under the body, on the body's top line); and the shift that keeps every pair as close as
+   planned, no closer: each letter moves by what the PAIR lost at its closest row (a diagonal's mitred edge, a K's arm, included),
+   along the line, or down the column for its rows. Null when nothing changes (a big picture, a face without optical sizes, no
+   size given, no font bank). */
+export function opticalSize(plan, S, gs = 1, bank = null) {
+  const H = plan.hand, tune = H.style === "invincible" ? INV_TUNE[H.font] : null, sm = tune?.small;
+  if ( !sm || !(S > 0) || !bank ) return null;
+  const Ls = plan.layout.letters, n = Ls.length, pre = plan.layout.pre ?? 0, px = S * gs;
+  const base = baseGeometry(plan, bank);
+  let pf = 1, ax = 0, ay = 0;
+  if ( pre > 0 && pre < n ) {
+    pf = Math.max(1, Math.min(sm.preMax, sm.prePx / Math.max(1e-6, px * Ls[0].s)));
+    const hy = base[pre - 1]?.gl ? placedShape(plan, bank, pre - 1, Ls[pre - 1].x) : null;
+    ax = hy ? bbox(hy).x1 : Ls[pre - 1].x + Ls[pre - 1].w; ay = -0.5 + Ls[0].dy - 0.5 * Ls[0].s;
+  }
+  const kOf = (i) => (i < pre ? pf : 1);
+  const e = Ls.map((L, i) => {
+    const s = L.s * kOf(i), stem = tune.stem * s * px;
+    return stem >= sm.stemPx ? 0 : Math.min(sm.boldMax, (sm.stemPx - stem) / 2 / (s * px));
+  });
+  if ( pf === 1 && e.every((v) => v === 0) ) return null;
+  const bold = base.map((b, i) => (b?.cs?.length && e[i] > 0 ? bolden(b.cs, e[i]) : null));
+  /* letter i's outline in the line (prefix grown from its anchor), as the pictures place it at rest */
+  const place = (i, cs) => {
+    const L = Ls[i], gl = base[i].gl, k = kOf(i), s = L.s * k, c = Math.cos(L.rot), sn = Math.sin(L.rot), px0 = gl.adv / 2, py = -0.5;
+    let tx = L.x + L.w / 2, ty = -0.5 + L.dy;
+    if ( k !== 1 ) { tx = ax + (tx - ax) * k; ty = ay + (ty - ay) * k; }
+    return mapCs(cs, (X, Y) => [(X - px0) * s * c - (Y - py) * s * sn + tx, (X - px0) * s * sn + (Y - py) * s * c + ty]);
+  };
+  const live = (i) => !!base[i]?.gl && !Ls[i].skip && plan.chars[i] !== " " && plan.chars[i] !== "\n";
+  /* how much closer a pair came at its closest shared row (word units, >= 0) */
+  const lost = (a, b) => {
+    const g0 = pairGaps(place(a, base[a].cs), place(b, base[b].cs)).rows.filter((d) => d != null);
+    const g1 = pairGaps(place(a, bold[a] ?? base[a].cs), place(b, bold[b] ?? base[b].cs)).rows.filter((d) => d != null);
+    return g0.length && g1.length ? Math.max(0, Math.min(...g0) - Math.min(...g1)) : 0;
+  };
+  const lines = plan.layout.lines ?? [{ from: 0, to: n - 1 }];
+  const shift = new Array(n).fill(0), row = new Array(n).fill(0);
+  if ( plan.layout.arrange === "vertical" ) {
+    /* the column: each row moves down by what its letters grew on top and the row above grew below; a mark keeps its gap too */
+    const grows = (i) => { if ( !bold[i] ) return [0, 0]; const b0 = bbox(base[i].cs), b1 = bbox(bold[i]); return [Math.max(0, b0.y0 - b1.y0) * Ls[i].s, Math.max(0, b1.y1 - b0.y1) * Ls[i].s]; };
+    let cum = 0, prevB = null;
+    for ( const ln of lines ) {
+      let top = 0, bot = 0; for ( let i = ln.from; i <= ln.to; i++ ) if ( live(i) ) { const [t, b] = grows(i); top = Math.max(top, t); bot = Math.max(bot, b); }
+      if ( prevB != null ) cum += prevB + top;
+      for ( let i = ln.from; i <= ln.to; i++ ) row[i] = cum;
+      prevB = bot;
+      for ( let i = ln.from + 1; i <= ln.to; i++ ) shift[i] = shift[i - 1] + (live(i) && live(i - 1) ? lost(i - 1, i) : 0);
+    }
+    for ( let i = 0; i < n; i++ ) row[i] -= cum / 2;
+  } else for ( const ln of lines ) {
+    let cum = 0, prev = -1;
+    for ( let i = ln.from; i <= ln.to; i++ ) {
+      if ( !live(i) ) { shift[i] = cum; continue; }
+      if ( prev >= 0 && !plan.chars.slice(prev + 1, i).some((c) => c === " " || c === "\n") ) cum += lost(prev, i);
+      shift[i] = cum; prev = i;
+    }
+    for ( let i = ln.from; i <= ln.to; i++ ) shift[i] -= cum / 2;
+  }
+  return { e, bold, shift, row, pf, pre, ax, ay };
+}
+
+export function pictureGeometry(plan, bank, p, S = 0) {
   const base = baseGeometry(plan, bank);
   const { letters, E, W } = plan.layout;
   const env = envelope(E);
   const g = p.g;
+  const os = opticalSize(plan, S, g.s ?? 1, bank);
   const splitAt = letters.findIndex((l) => l.splitSide);
   const splitPx = splitAt > 0 ? letters[splitAt].x : 0;
   const cg = Math.cos(g.r), sg = Math.sin(g.r);
@@ -316,10 +409,16 @@ export function pictureGeometry(plan, bank, p) {
     if ( A.ch && A.ch !== plan.chars[i] && !alt ) continue;
     const gl = alt ? alt.gl : base[i].gl;
     /* LOOK: a redrawn letter is re-treated only as far as it still reads; a true ring is never re-treated */
-    const cs0 = p.reseed && (alt || !base[i].ring) ? treatReadable(gl, alt ? A.ch : plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : (alt ? alt.cs : base[i].cs);
+    let cs0 = p.reseed && (alt || !base[i].ring) ? treatReadable(gl, alt ? A.ch : plan.chars[i], L.font ?? plan.hand.font, plan.hand, plan.sound, p.boil, i, bank) : (alt ? alt.cs : base[i].cs);
     const adv = gl.adv, px = adv / 2, py = -0.5;
-    const s = L.s * A.s, sx = s * A.sx, sy = s * A.sy, rot = L.rot + A.r, c = Math.cos(rot), sn = Math.sin(rot);
-    const tx = L.x + L.w / 2 + A.x, ty = -0.5 + L.dy + A.y;
+    let s = L.s * A.s, tx = L.x + L.w / 2 + A.x, ty = -0.5 + L.dy + A.y;
+    if ( os ) {
+      /* FONTSEL: a small lead-in grows from its tuck; a thin stem gets weight; the letters part by what they grew */
+      if ( i < os.pre && os.pf > 1 ) { s *= os.pf; tx = os.ax + (tx - os.ax) * os.pf; ty = os.ay + (ty - os.ay) * os.pf; }
+      if ( os.e[i] > 0 ) cs0 = cs0 === base[i].cs && os.bold[i] ? os.bold[i] : bolden(cs0, os.e[i]);
+      tx += os.shift[i]; ty += os.row[i];
+    }
+    const sx = s * A.sx, sy = s * A.sy, rot = L.rot + A.r, c = Math.cos(rot), sn = Math.sin(rot);
     const cs = cs0.map((c0) => {
       const o = new Array(c0.length);
       for ( let k = 0; k < c0.length; k += 2 ) {
