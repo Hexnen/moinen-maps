@@ -24,7 +24,7 @@ one section of `check.mjs` (8f).
 
 `I.play(spec)` returns a handle at once: `{ id, plan, mode, alive, ready (Promise<boolean>: the first drawing is up), finished
 (Promise<why>), stop() }`. `why` is `"done"`, `"stopped"`, `"replaced"` (a stronger impact took over), `"busy"` (a stronger or equal
-one was playing: this one was not shown), `"hidden"` (its token is not visible to this user), `"late"` (its shared time was already
+one plays, or is scheduled, at an overlapping time: this one was not shown; impacts scheduled APART all play, 1.9.1), `"hidden"` (its token is not visible to this user), `"late"` (its shared time was already
 over), `"off"` (switched off on this client).
 
 | option | meaning |
@@ -35,6 +35,9 @@ over), `"off"` (switched off on this client).
 | `dir` / `from` | where the blow travels: `dir` in degrees (0 right, 90 down), or `from` = the attacker (token or point): the direction is then worked out on each client's own screen. A `from` token this user cannot see gives NO direction there (it would tell where it stands; 1.8.2): the impact is radial on that client (`vision: "none"` overrides, as for `subject`). Without either the impact is radial |
 | `seed` | any string or number all clients share: same seed, same drawings |
 | `startAt` | this page's `performance.now()` time of the instant of the hit (the LETR convention; an effect's shared time converts to it). Every drawing change then falls on the same instant on every seat; a client that is late joins at the drawing that is up, one that is too late shows nothing. Without it the impact starts when its first drawing is painted (next frame) |
+| `blowAt` | (1.9.1) the instant of the BLOW itself, same clock as `startAt`: the impact starts `plan.peakMs` earlier so its strongest drawing lands on that instant. With a lettered word: `blowAt: L.contactAt(wordHandle)` (the word's contact pose: a slam's squash, a drop's landing). `startAt` wins when both are given |
+| `keep` | (1.9.1) something that must stay readable under the impact: a LETR word handle, an element, a rectangle `{ x, y, w, h }` (screen px, or scene units with `space: "world"`), or an array of them. Every drawing and the scene's own change get a hole there (plus `keepPad`, default 6 px), followed every frame while it moves. The word on the `screen` layer needs none: it is above anyway |
+| `series` | (1.9.1) the blow's place in a series (0, 1, 2, ...): each later blow is drawn `I.series.step` (0.15) magnitude stronger, at most `I.series.max` (4) steps; the guard is unchanged |
 | `over` | `"scene"` (default: over the map, under bars and windows, z 4) or `"ui"` (over every window, one under the lettering's `screen` layer, so a word on that layer stays on top); `z` or `parent` (an element) override |
 | `tone` / `colors` | accent pair: `hero fire blood volt toxic void dust`, or `colors: [accent, second]` (a power's own colours). Ink and paper are fixed |
 | `frames` | your own sequence instead of the kind's: `["shadow", { type: "slam", ticks: 2, punch: 1, stop: false }, "dots"]` (the limits still apply) |
@@ -46,7 +49,16 @@ over), `"off"` (switched off on this client).
 Other calls: `I.prepare(spec)` paints everything ahead and returns `{ play({ startAt }) }` (use it when you know the blow is coming:
 a roll being resolved, a projectile in flight); `I.plan(spec)` = the plan this client would show, without spending flash budget;
 `I.pick(event)`; `I.show(type, spec)` holds ONE frame type up to 2 s (gallery, design); `I.gallery(opts)`; `I.stopAll()`;
-`I.kinds`, `I.frames`, `I.tones`, `I.limits`, `I.steps`, `I.stats`, `I.busy`, `I.mode()`, `I.setMode("full" | "local" | "off")`.
+`I.kinds`, `I.frames`, `I.tones`, `I.limits`, `I.steps`, `I.series`, `I.stats`, `I.busy`, `I.mode()`, `I.setMode("full" | "local" | "off")`.
+`plan.peakMs` (1.9.1): ms from the impact's start to its strongest drawing.
+
+Sizes (1.9.1): the star, the gentle panel and the cracks are sized from the subject as it is ON SCREEN (its picture's radius), with a
+floor of 3 % of the view so a far-zoomed token still gets a legible mark; before, a small token far out got the view-sized floor.
+
+A series planned ahead (1.9.1): call every blow at once, each with its own `startAt`/`blowAt`; they all play when their windows do not
+overlap. Painting ahead is shared out over the display frames (at most two drawings or 6 ms per frame over every waiting impact) and a
+token picture's figure (cut-out, tints) is worked out once and shared by every impact on it: five blows called at once used to give a
+50-100 ms frame, now none over 18.5 ms (lane, 1600x900).
 
 `I.pick(e)` -> `{ kind, magnitude }` from an event in the caller's terms: `{ type: "damage", share (0..1 of the track lost), crit,
 fatal, cut, energy }`, `{ type: "roll", crit }`, `{ type: "blast" | "landing", area (grid squares) }`, `{ type: "word", magnitude }`.
@@ -125,10 +137,14 @@ Full-screen flashes and inversions can harm photosensitive viewers. The engine's
 | off | `enabled` off (the lettering's master switch) or `impact: off`: nothing is created | `modeFor` |
 | frame shove | at most 2.2 % of the viewport, and never past the zoom that covers it | `punchAt` |
 | chromatic split | plates at most 1.2 % of the viewport's short side apart | `index.mjs` |
-| one at a time | a second impact while one plays is shown only when it is stronger (it then replaces the first) | `play` |
+| one at a time | an impact whose time window overlaps one that plays or is scheduled is shown only when it is stronger than every one it overlaps (it then replaces them); windows apart all play (1.9.1: before, a series called at once kept only its last, strongest blow) | `play` |
+| a kept rect (`keep`) | cut out of every drawing AND of the scene's change, so a word or panel there is never flashed or inverted | `applyKeep` |
 | never outlasts itself | watchdog timer = the plan's length + 300 ms; scene change stops it | `play` |
 
 The timing never differs between clients: a guarded or gentle client shows other drawings for the same ticks.
+Verified on film (1.9.1, 2026-11-14): the five-blow ladder on a dark (darkness 0.9), a mid-grey (darkness 0) and a bright (white
+veil 0.92) scene gave at most 3 whole-picture transitions (>= 25 % of the view by >= 0.1 relative luminance, darker side < 0.8) in any
+second = 1.5 flashes, under WCAG's 3; reduced motion gave 1 transition in 12 s.
 With the guard switched off by the user (`photosafe` off) the full sequences play: up to 3 full-field frames in about 250 ms and a
 red field are then possible. That is the user's own choice on their own client; no caller option turns the guard off.
 
@@ -160,9 +176,16 @@ Measured 2026-11-13 on the test machine (GTX 1080 class, 1600x900, one GM seat, 
 | `I.prepare` of the strongest critical | 15.7 ms once, then 0 ms of painting while it plays |
 | left behind | 0 elements, 0 canvases, `#board` style empty, ticker running |
 
-1.8.2 (FXI-ENGINE) was not re-measured live: the new painters (`smear` with 14 swept copies, `ring`, `fade`, the figure cut-out of
-a round portrait, cached once per token picture at 256 px) were only rendered offline. Re-measure with `I.stats` on a lane before
-relying on the numbers above for them.
+Re-measured 2026-11-14 (1.9.1, lane 5, headless seat on the RTX 3070 Ti, 1600x900, film clock OFF, rAF gaps over 10 s, a five-blow
+ladder scratch -> hit -> heavy -> knock-down -> critical called at once, zoom 0.5, rain on):
+
+| what | number |
+|---|---|
+| idle scene | max 18 ms |
+| the ladder, impacts only | p50 16.6, p99 18.1, max 18.5 ms; no frame over 25 ms (before the shared paint-ahead budget: one 50-103 ms frame when the five were called) |
+| the ladder, words only | max 62 ms once (about 0.35 s before the first word: five words planned and painted together, the WORD side), then 33-35 ms at the knock-down and critical words |
+| words and impacts | max 62 ms (the word frame above), 35 and 33 ms at the two loudest words; impacts add nothing measurable |
+| one critical scheduled 1.5 s ahead | paint 22-23 ms in total, spread; no frame over 25 ms |
 
 ## Integration recipes
 
@@ -176,6 +199,9 @@ relying on the numbers above for them.
 - **Map destruction.** Blast instant: `I.play({ kind: "blast", ...I.pick({ type: "blast", area: radiusInSquares }), subject: { x, y },
   space: "world", area: radiusPx, seed: firing.id, startAt: performance.now() + (plan.t0 - sharedNow()) })`. Meteor / landing: `kind:
   "landing"`, `dir` = the fall's direction on the map (90 = straight down the screen). Fire and debris phases get none.
+- **A word and its blow (1.9.1).** `const h = L.sfx("punch", { ..., startAt, flash: false }); I.play({ kind, magnitude, subject: token,
+  from, seed, blowAt: L.contactAt(h), keep: h })`: the impact's strongest drawing lands on the word's contact, the word keeps its contact
+  pose readable (`flash: false` drops the word's own white flash accent; the impact is the flash), and the word stays legible.
 - **A lettered word.** `const h = L.sfx("boom", { ... }); I.play({ kind: "word", magnitude, subject: h, over: "ui", seed, startAt })`
   (after `await h.ready` when the word's picture should be the silhouette). A world-space word is itself inverted by a slam under it,
   like everything in the scene.

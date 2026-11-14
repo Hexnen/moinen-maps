@@ -43,6 +43,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | IMPACT (impact frames, `L.impact`, folder `scripts/letters/impact/`) | 1.7.2 (in 1.8.1) | - | `tactics-zones` | stable (fixes below) |
 | FXI-ENGINE (impact frames: guard counts every scene change, six strengths, red-safe, `gentle`, settings row, drawings) | 1.8.2 | API-CONTRACT 1.8.2 | `tactics-zones-fxi-engine` | pending merge |
 | MOTION2 | 1.9.0 | `tactics-zones-motion2` | - | pending merge (section 11a) |
+| FIN-ENGINE (FXI-ENGINE merged onto MOTION2; `plan.contactMs` / `L.contactAt`, per-word `flash: false`, impact `blowAt` / `keep` / `series`, sizes from the subject, series scheduled ahead all play) | 1.9.1 | API-CONTRACT 1.9.1 | `tactics-zones-fin-engine` | pending merge (sections 4, 21a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -158,11 +159,13 @@ characters [V]; a character no font has is drawn as "?" with one warning [R].
 | which motion | `in`, `holdKind`, `out` (names: `L.motionNames()`), `reduced`, `pixel` (world only: pixel-art lettering) |
 | which look | `seed`, `avoid` (hand ids to differ from), `hand` (pin a hand: `h.hand` string or a partial hand object), `colors`, `palette`, `font`, `style`, `look`, `arrange`, `backdrop` (section 13) |
 | tools | `alt` (screen-reader text), `force` (play even when the master switch is off; tools only) |
+| impact pairing (1.9.1) | `flash: false` drops this word's own flash accent (the invincible style's white flash drawing; legacy: its impact pictures turn plain, timing unchanged): use it when an impact frame is the flash |
 
 **Handle.** `id`, `hand` (string, set at once unless `delay`), `plan` (set at once unless `delay`) [V], `ready` (Promise: `true` when
 the first picture is on screen, `false` when the word ended without showing) [V], `finished` (Promise: `"done"`, `"stopped"` or
 `"evicted"`; always settles) [V], `alive`, `stop({ quick })` (quick false: play the exit now; true: remove at once) [V],
-`moveTo(at)`. Words from the vocabulary also carry `h.word` [V]; from the network `h.netId`; with the master switch off `h.off` [C].
+`moveTo(at)`, `contactAt` (1.9.1: this page's instant of the word's contact pose, or null; also `L.contactAt(h | plan, startAt?)`;
+`plan.contactMs` = ms from the word's start, on the TICK grid in stepped motion) [V]. Words from the vocabulary also carry `h.word` [V]; from the network `h.netId`; with the master switch off `h.off` [C].
 
 **Lifecycle you can rely on** [V unless marked]
 - The word is planned inside `play`; its geometry and first picture come in the next animation frame(s) within a per-frame budget
@@ -822,6 +825,11 @@ Status: stable list; edit as items close.
 - Impact frames: no networking of their own (the caller's event carries the call); the hit-stop holds the whole canvas ticker (every
   animation on the canvas, also other modules'); only the photosensitivity measures named in section 21a are enforced (a star or ring
   of at most a sixth / a quarter of the picture appearing for a tick is not counted as a flash).
+- Frame time (FIN-ENGINE, lane 5, film clock off, 2026-11-14): five invincible words planned in one call (each with its own
+  `startAt`, 1.7 s apart) gave one 62 ms frame about 0.35 s before the first word and 33-35 ms frames at the two loudest words; the
+  impacts of the same ladder alone stay under 18.5 ms. Word side, not fixed (FINE-6).
+- `plan.contactMs` of the legacy styles under reduced motion is the legacy reduced entrance's own (frozen look): a reduced legacy
+  seat's contact is not aligned with a full one (FINE-3).
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -854,7 +862,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `motionMode`, `motionModes`; play options `kind`, `look.motion`; `w.play.vocabMotion` | 1.9.0 MOTION2 | pending merge, section 11a [V node] |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
-| `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2 |
+| `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
+| `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -880,11 +889,14 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-14 (MOTION2, 1.9.0, `tactics-zones-motion2`): section 11 limited to the frozen legacy styles; new 11a (invincible motion
   from the sound table, one painting moved per frame, smooth / stepped switch, rules the checks hold, streams and sustain, what is
   not done); size-drift repaints (18); stage table, 19, API index.
+- 2026-11-14 (FIN-ENGINE, 1.9.1, `tactics-zones-fin-engine`): FXI-ENGINE merged onto MOTION2; section 4 (contact instant, `flash:
+  false`), 21a (word + blow recipe, `blowAt`, `keep`, `series`, sizes, series scheduled ahead, cost, film-verified guard), stage
+  table, API index, lessons (18).
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
 
 ## 21a. Impact frames: `L.impact`
-Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 `pending merge` (`tactics-zones-fxi-engine`). The reference is
+Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
 `scripts/letters/impact/README.md`; this section is the short guide. `[V]` = node (`check-impact.mjs`), `[V live]` = lane 5.
 
 **What it is.** The few drawings of full force at the instant of a hit, 2 to 12 ticks long (83 to 500 ms): the scene slammed to its
@@ -914,6 +926,17 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   overrule the OS switch (1.8.2).
 - `I.prepare(spec).play({ startAt })` paints ahead; `I.plan(spec)` previews; `I.show(type)` holds one frame type; `I.gallery()`.
 - The handle: `{ plan, mode, ready, finished, stop() }`; `finished` resolves `done | stopped | replaced | busy | hidden | late | off`.
+- (1.9.1) `blowAt`: the instant of the blow itself; the impact starts `plan.peakMs` earlier so its strongest drawing lands there.
+  `keep`: a word handle, element or rectangle (or an array) cut out of every drawing and of the scene's change, followed while it
+  moves. `series: n`: the n-th blow of a series is drawn 0.15 magnitude stronger per step (at most 4 steps; `I.series`). Star,
+  panel and cracks are sized from the subject's size ON SCREEN, floor 3 % of the view. `[V node, V live]`
+- (1.9.1) A word and its blow: `const h = L.sfx("punch", { ..., startAt, flash: false }); I.play({ kind, magnitude, subject: token,
+  from, seed, blowAt: L.contactAt(h), keep: h })`. `L.contactAt(h)` = the instant the word reaches its contact pose (a slam's squash,
+  a drop's landing, a burst's biggest drawing); in stepped motion it is on the drawing grid; a reduced-motion seat's word fades in to
+  end on the SAME instant, so every seat gets the same `blowAt` from the same `startAt`. Legacy styles (`comic`, `expressive`): the
+  burst picture; their reduced motion is not aligned (frozen). `[V node, V live]`
+- (1.9.1) A series planned ahead: call every blow at once with its own time; windows apart all play (before: only the last, strongest
+  one did); overlapping windows keep the old rule (stronger replaces, weaker is `busy`).
 
 **Frame types** (18): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`. Full-field:
 `slam shadow glare swap window` and `tear` (half the frame inverted). `ink` and `shatter` change the scene only inside a jagged panel
@@ -930,12 +953,15 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
 - reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
   `enabled` off or `impact = off`: nothing.
 - an impact is at most 12 ticks, one drawing 4 ticks, hit-stop 4 ticks; a watchdog timer removes it even when the frame loop died.
-- one impact at a time; a second one is shown only when stronger.
+- one impact at a time: an impact whose time window overlaps one playing or scheduled is shown only when stronger than all of them.
+- Film check (1.9.1): the five-blow ladder on dark, mid-grey and bright scenes gave at most 1.5 whole-picture flashes in any second
+  (WCAG limit 3); reduced motion 0.5. `[V live]`
 - The user can switch the guard off on their own client (`photosafe`); no caller option can.
 
 **Cost.** IMPACT measured live 2026-11-13 (1600x900, GM seat): no animation frame over 25 ms through any frame type or whole impact;
-one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.8.2 numbers: the impact
-README "Cost".
+one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.9.1 (film clock off):
+a five-blow ladder of impacts called at once, max frame 18.5 ms (painting ahead is shared out per frame); the same ladder's five
+WORDS give one 62 ms frame when planned together (open, section 18). Numbers: the impact README "Cost".
 
 **For callers (lessons).**
 - A map preset: `plan.t0` of `presets.fire` is the instant of the hit; convert with `performance.now() + (t0 - sharedNow())`.
