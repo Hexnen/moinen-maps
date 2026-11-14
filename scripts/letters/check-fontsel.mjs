@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { makePlan, INV_FACES, DEFAULT_FACE, INV_TUNE, FONTS } from "./design.mjs";
-import { settleCenter, pictureGeometry, opticalSize, pairGaps, placedShape, KERN } from "./shape.mjs";
+import { settleCenter, pictureGeometry, opticalSize, pairGaps, placedShape, KERN, markGap, markPairs, isMark } from "./shape.mjs";
 import { bbox } from "./geom.mjs";
 import { area } from "./font.mjs";
 
@@ -90,7 +90,13 @@ export async function run(ok, { bank, fontsApi }) {
       const big = pictureGeometry(p, bank, hold(p), 160), none = pictureGeometry(p, bank, hold(p));
       ok(JSON.stringify(big) === JSON.stringify(none), `fontsel: ${t} at 160 px is drawn exactly as planned`);
       const pa = inv(t, { mood: m, seed: 3, look: { face: "anton" } }); settleCenter(pa, bank);
-      ok(opticalSize(pa, 18) === null && JSON.stringify(pictureGeometry(pa, bank, hold(pa), 18)) === JSON.stringify(pictureGeometry(pa, bank, hold(pa))), `fontsel: Anton's ${t} is not changed by size`);
+      /* KERNEX (1.9.8): Anton has no optical sizes of its own; at a small picture only a mark moves away from its letter (whole, along the
+         line: at least MARK.px pixels clear, else its dot fuses with the letter's foot), every other letter is drawn exactly as planned */
+      const a18 = pictureGeometry(pa, bank, hold(pa), 18), a0 = pictureGeometry(pa, bank, hold(pa));
+      const tr = Math.tan(pa.layout.E.rot ?? 0);   // the mark slides along the word's line (the word may lean a little)
+      const same = a0.every((l, k) => isMark(pa.chars[l.i]) ? (() => { const b0 = bbox(l.cs), b1 = bbox(a18[k].cs), dx = b1.x0 - b0.x0;
+        return Math.abs((b1.x1 - b1.x0) - (b0.x1 - b0.x0)) < 1e-9 && Math.abs((b1.y1 - b1.y0) - (b0.y1 - b0.y0)) < 1e-9 && Math.abs(b1.y0 - b0.y0 - dx * tr) < 1e-6 * (1 + Math.abs(dx)); })() : JSON.stringify(l) === JSON.stringify(a18[k]));
+      ok(opticalSize(pa, 18) === null && same, `fontsel: Anton's ${t} is not changed by size (but its mark may stand clear)`);
     }
     /* the gaps stay: at 20 px every pair's closest row is no closer than at full size (the letters moved apart by what they grew) */
     {
@@ -145,7 +151,13 @@ export async function run(ok, { bank, fontsApi }) {
       /* the optical gap, or (an open letter: the K's arm) as close as a touch; always closer than the advance boxes put it */
       const at = Math.abs(mean - p.hand.kern.gap * h) < 0.01 * h || Math.abs(Math.min(...live) - KERN.touch * h) < 1e-3 * h;
       const adv = L[i - 1].x + L[i - 1].w + 0.02 * L[i - 1].s;
-      ok(at && Math.min(...live) >= KERN.touch * h - 1e-6 && L[i].x < adv - 0.02 * h, `fontsel: column ${t}: the mark at the optical gap (${(mean / h).toFixed(3)} vs ${p.hand.kern.gap}, closest ${(Math.min(...live) / h).toFixed(3)}; x ${L[i].x.toFixed(3)} < ${adv.toFixed(3)})`);
+      /* KERNEX (1.9.8): or the mark stands exactly at the hand's gap from the nearest letter (beside it or the tucked row above:
+         settleMarks moved it only as far as that rule asks) */
+      const hold0 = { ...p.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, boil: 0, reseed: false };
+      const geo = new Map(pictureGeometry(p, bank, hold0).map((x) => [x.i, x.cs]));
+      const kx = Math.min(...markPairs(p).filter(([j, m]) => m === i).map(([j, m, side]) => markGap(p, bank, geo, j, m, side) / L[j].s));
+      const atKx = Math.abs(kx - p.hand.kern.gap) < 0.003;
+      ok((at || atKx) && Math.min(...live) >= KERN.touch * h - 1e-6 && L[i].x < adv - 0.02 * h, `fontsel: column ${t}: the mark at the optical gap (${(mean / h).toFixed(3)} vs ${p.hand.kern.gap}, closest ${(Math.min(...live) / h).toFixed(3)}; x ${L[i].x.toFixed(3)} < ${adv.toFixed(3)}; KERNEX clearance ${kx.toFixed(3)})`);
     }
     const pa = inv("KRAK!", { mood: "impact", seed: 7, arrange: "vertical", look: { face: "anton" } }), L = pa.layout.letters, i = pa.chars.indexOf("!");
     settleCenter(pa, bank);

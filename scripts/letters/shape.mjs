@@ -317,6 +317,96 @@ export function settleOcclusion(plan, bank) {
   return [...state.values()].sort((a, b) => a.i - b.i);
 }
 
+/* KERNEX (1.9.8): punctuation never reads as a diacritic of a letter. In Polish a mark at a letter changes the letter (E + a dot fused
+   under its foot = Ę, L + a hyphen into its stem = Ł, a dot over a Z = Ż). The optical spacing (kernOptical) sets a mark like a letter:
+   it counts the mark's empty rows (between the bar and the dot of "!") and the letter's open counters as air, so the mark slides in
+   until its closest row touches (KERN.touch even overlaps), and the union keyline then makes the touching mark part of the letter:
+   "ZBURZENIE!" read "ZBURZENIĘ!". The rule, measured on the hold picture in each letter's own frame (lean and envelope included):
+   beside the letter (rows within its height, `band` either side) a mark keeps at least the hand's own gap from the letter's ink row
+   by row (it may still tuck into an open side: V. T! L!); above or below the letter (up to `dz` cap heights away) it keeps that gap
+   from the letter's whole width (nothing hangs under a foot or sits over a top). A mark that comes closer is moved away along the
+   line (with everything after it), never the other way: the setting stays as tight as the rule allows. Marks = ! ? . , : ; and the
+   hyphen / minus; the tucked lead-in's hyphen under the first body letter (the owner's prefix, LOOK2 P7) and mark-to-mark pairs ("!!")
+   keep their setting. The invincible style only (the legacy styles are frozen). Deterministic, pure. */
+export const MARK = { re: /[!?.,:;\-−…]/u, rows: 48, band: 0.03, dz: 0.3, rounds: 6, px: 1.5 };
+export const isMark = (ch) => MARK.re.test(ch ?? "");
+const isInk = (ch) => /[\p{L}\p{N}]/u.test(ch ?? "");
+/* the clearance between mark m and letter j in the hold picture: the smallest gap (word units) on the mark's `side` of the letter
+   (+1: the mark stands right of it, -1: left), over the rows the rule constrains; Infinity when no row is constrained */
+export function markGap(plan, bank, geo, j, m, side) {
+  const Ls = plan.layout.letters, h = Ls[j].s, lean = leanOf(plan, Ls[j]), c = Math.cos(-lean), s = Math.sin(-lean);
+  const turn = (cs) => mapCs(cs, (x, y) => [x * c - y * s, x * s + y * c]);
+  const A = turn(geo.get(j)), M = turn(geo.get(m)), ba = bbox(A), bm = bbox(M), band = MARK.band * h, dz = MARK.dz * h;
+  /* rows: an even comb plus every corner height of either outline (the closest point of two polygons lies on a corner's row), just
+     inside each corner so a horizontal edge counts */
+  const ys = []; for ( let k = 0; k < MARK.rows; k++ ) ys.push(bm.y0 + (bm.y1 - bm.y0) * (k + 0.5) / MARK.rows);
+  for ( const cs of [M, A] ) for ( const c of cs ) for ( let k = 1; k < c.length; k += 2 ) for ( const y of [c[k] - 1e-7, c[k] + 1e-7] ) if ( y > bm.y0 && y < bm.y1 ) ys.push(y);
+  const em = rowExtents(M, ys);
+  const inside = ys.map((y) => Math.max(ba.y0 + 1e-6, Math.min(ba.y1 - 1e-6, y)));
+  const ea = rowExtents(A, inside);
+  let min = Infinity;
+  for ( let k = 0; k < ys.length; k++ ) {
+    if ( !Number.isFinite(em.mn[k]) ) continue;
+    const out = Math.max(0, ba.y0 - ys[k], ys[k] - ba.y1);
+    if ( out >= dz ) continue;
+    let edge;
+    if ( out <= band ) { if ( !Number.isFinite(ea.mn[k]) ) continue; edge = side > 0 ? ea.mx[k] : ea.mn[k]; }
+    else edge = side > 0 ? ba.x1 : ba.x0;
+    const g = side > 0 ? em.mn[k] - edge : edge - em.mx[k];
+    if ( g < min ) min = g;
+  }
+  return min;
+}
+const holdGeo = (plan, bank) => new Map(pictureGeometry(plan, bank, { ...plan.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, boil: 0, reseed: false }).map((l) => [l.i, l.cs]));
+/* the pairs the rule holds: [letter, mark, side, index that moves] */
+export function markPairs(plan) {
+  const Ls = plan.layout.letters, chars = plan.chars, n = chars.length, pre = plan.layout.pre ?? 0, out = [];
+  const live = (i) => i >= 0 && i < n && !Ls[i].skip && chars[i] !== " " && chars[i] !== "\n";
+  const vertical = plan.layout.arrange === "vertical";
+  const lines = plan.layout.lines ?? [{ from: 0, to: n - 1 }];
+  for ( let m = 0; m < n; m++ ) {
+    if ( !isMark(chars[m]) || !live(m) ) continue;
+    if ( vertical ) { for ( let j = 0; j < n; j++ ) if ( live(j) && isInk(chars[j]) ) out.push([j, m, 1, m]); continue; }
+    const ln = lines.find((l) => m >= l.from && m <= l.to) ?? lines[0];
+    for ( let j = ln.from; j <= ln.to; j++ ) {
+      if ( !live(j) || !isInk(chars[j]) ) continue;
+      if ( chars.slice(Math.min(j, m) + 1, Math.max(j, m)).some((ch) => ch === " " || ch === "\n") ) continue;   // another word
+      if ( pre && m === pre - 1 && j === pre ) continue;   // the tucked lead-in (LOOK2 P7): its hyphen hides under the first body letter
+      out.push(j < m ? [j, m, 1, m] : [j, m, -1, j]);
+    }
+  }
+  return out;
+}
+export function settleMarks(plan, bank) {
+  const H = plan.hand, Ls = plan.layout.letters;
+  if ( H.style !== "invincible" ) return 0;
+  const pairs = markPairs(plan);
+  if ( !pairs.length ) return 0;
+  const lines = plan.layout.lines ?? [{ from: 0, to: Ls.length - 1 }], vertical = plan.layout.arrange === "vertical";
+  const gapOf = (j) => (H.kern?.gap ?? INV_TUNE[H.font]?.gap?.other ?? 0.05) * Ls[j].s;
+  let moved = 0;
+  for ( let round = 0; round < MARK.rounds; round++ ) {
+    /* measure every pair on one picture, then move each moving letter by its pair's largest shortfall (pairs of one mark share it) */
+    const geo = holdGeo(plan, bank), need = new Map();
+    for ( const [j, m, side, mv] of pairs ) {
+      if ( !geo.has(j) || !geo.has(m) ) continue;
+      const d = gapOf(j) - markGap(plan, bank, geo, j, m, side);
+      if ( d > 1e-5 ) need.set(mv, Math.max(need.get(mv) ?? 0, d));
+    }
+    if ( !need.size ) break;
+    for ( const [mv, d] of [...need].sort((a, b) => a[0] - b[0]) ) {
+      const ln = lines.find((l) => mv >= l.from && mv <= l.to) ?? lines[0];
+      const to = vertical ? mv : ln.to;   // a column moves the mark alone (it hangs right of the axis)
+      for ( let k = mv; k <= to; k++ ) Ls[k].x += d;
+      moved += d;
+    }
+    const W = Math.max(0.3, ...Ls.map((l) => l.x + l.w));
+    if ( W > plan.layout.W ) { plan.layout.W = W; plan.layout.E.W = W; }
+    plan._env = null;
+  }
+  return moved;
+}
+
 function altGlyph(plan, bank, i, ch) {
   if ( ch === " " ) return null;
   if ( !plan._alt ) Object.defineProperty(plan, "_alt", { value: new Map(), enumerable: false, configurable: true });
@@ -333,6 +423,54 @@ function altGlyph(plan, bank, i, ch) {
    along the line, or down the column for its rows. Null when nothing changes (a big picture, a face without optical sizes, no
    size given, no font bank). */
 export function opticalSize(plan, S, gs = 1, bank = null) {
+  const os = faceOpticalSize(plan, S, gs, bank);
+  return plan.hand.style === "invincible" && S > 0 && bank ? markMinPx(plan, S * gs, bank, os) : os;
+}
+/* KERNEX: at a small picture the mark's gap (settleMarks: the hand's gap, in cap heights) can shrink under a pixel and the antialiased
+   edges join the mark to its letter again (a 26 px "E!" fused its dot to the foot). Below MARK.px pixels at the closest shared row the
+   mark moves away by the shortfall, in this picture only (the plan and its checks are unchanged). */
+/* the smallest gap between a (left) and b (right) over the rows both have ink in, exact for outlines (a comb plus every corner row) */
+function closestRow(a, b) {
+  const ba = bbox(a), bb = bbox(b), y0 = Math.max(ba.y0, bb.y0), y1 = Math.min(ba.y1, bb.y1);
+  if ( y1 - y0 < 1e-6 ) return Infinity;
+  const ys = []; for ( let k = 0; k < KERN.rows; k++ ) ys.push(y0 + (y1 - y0) * (k + 0.5) / KERN.rows);
+  for ( const cs of [a, b] ) for ( const c of cs ) for ( let k = 1; k < c.length; k += 2 ) for ( const y of [c[k] - 1e-7, c[k] + 1e-7] ) if ( y > y0 && y < y1 ) ys.push(y);
+  const ea = rowExtents(a, ys), eb = rowExtents(b, ys);
+  let min = Infinity;
+  for ( let k = 0; k < ys.length; k++ ) if ( Number.isFinite(ea.mx[k]) && Number.isFinite(eb.mn[k]) ) min = Math.min(min, eb.mn[k] - ea.mx[k]);
+  return min;
+}
+function markMinPx(plan, px, bank, os) {
+  const Ls = plan.layout.letters, n = Ls.length, base = baseGeometry(plan, bank), vertical = plan.layout.arrange === "vertical";
+  const pairs = markPairs(plan).filter(([j, m]) => base[j]?.gl && base[m]?.gl);
+  if ( !pairs.length ) return os;
+  const lines = plan.layout.lines ?? [{ from: 0, to: n - 1 }];
+  const add = new Array(n).fill(0);
+  const shape = (i) => {
+    const L = Ls[i], gl = base[i].gl, cs = os?.bold?.[i] ?? base[i].cs, s = L.s * (i < (os?.pre ?? 0) ? os?.pf ?? 1 : 1), c = Math.cos(L.rot), sn = Math.sin(L.rot);
+    let tx = L.x + L.w / 2 + (os?.shift?.[i] ?? 0) + add[i], ty = -0.5 + L.dy;
+    return mapCs(cs, (X, Y) => [(X - gl.adv / 2) * s * c - (Y + 0.5) * s * sn + tx, (X - gl.adv / 2) * s * sn + (Y + 0.5) * s * c + ty]);
+  };
+  let any = false;
+  /* the MARK moves (out of the word: a trailing one to the right with what follows it, a leading one to the left with what precedes
+     it), so every letter stays where its plan put it */
+  for ( const [j, m, side] of pairs.sort((a, b) => (a[2] - b[2]) || (a[2] > 0 ? a[1] - b[1] : b[1] - a[1])) ) {
+    const [l, r] = side > 0 ? [j, m] : [m, j];
+    const g = closestRow(shape(l), shape(r));
+    if ( !Number.isFinite(g) ) continue;
+    const d = MARK.px / px - g;
+    if ( !(d > 1e-6) ) continue;
+    const ln = lines.find((q) => m >= q.from && m <= q.to) ?? lines[0];
+    if ( vertical ) add[m] += d;
+    else if ( side > 0 ) for ( let k = m; k <= ln.to; k++ ) add[k] += d;
+    else for ( let k = ln.from; k <= m; k++ ) add[k] -= d;
+    any = true;
+  }
+  if ( !any ) return os;
+  const o = os ?? { e: new Array(n).fill(0), bold: new Array(n).fill(null), shift: new Array(n).fill(0), row: new Array(n).fill(0), pf: 1, pre: plan.layout.pre ?? 0, ax: 0, ay: 0 };
+  return { ...o, shift: o.shift.map((v, i) => v + add[i]) };
+}
+function faceOpticalSize(plan, S, gs = 1, bank = null) {
   const H = plan.hand, tune = H.style === "invincible" ? INV_TUNE[H.font] : null, sm = tune?.small;
   if ( !sm || !(S > 0) || !bank ) return null;
   const Ls = plan.layout.letters, n = Ls.length, pre = plan.layout.pre ?? 0, px = S * gs;
@@ -443,6 +581,7 @@ export function settleCenter(plan, bank) {
   Object.defineProperty(plan, "_center", { value: [0, 0], enumerable: false, configurable: true, writable: true });
   if ( plan.hand.kern ) kernOptical(plan, bank);   // LOOK2 (P18): pair-aware spacing before the reader checks the word
   if ( plan.hand.legible !== false ) settleOcclusion(plan, bank);
+  settleMarks(plan, bank);   // KERNEX: no mark reads as a letter's diacritic (invincible style only)
   const p0 = { ...plan.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, boil: 0, reseed: false };
   const geo = pictureGeometry(plan, bank, p0);
   const b = bbox(geo.flatMap((l) => l.cs));

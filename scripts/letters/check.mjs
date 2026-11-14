@@ -202,6 +202,9 @@ for ( const [k, face] of INV_FACES.entries() ) checkLook2(ok, bank, face, k === 
 for ( const face of INV_FACES ) await (await import("./check-look3.mjs")).run(ok, { bank, fontsApi, face });
 /* 8d4. FONTSEL: the invincible style's two faces, their tuning, optical sizes, the minus, the column's mark (check-fontsel.mjs) */
 await (await import("./check-fontsel.mjs")).run(ok, { bank, fontsApi });
+/* 8d5. KERNEX: punctuation never reads as a diacritic of its neighbour: every letter x ! !! ? - in both faces, line and column, plan,
+   110 px and 26 px (check-marks.mjs; `node check-marks.mjs <other letters folder>` runs it on another engine: 1.9.7 fails) */
+await (await import("./check-marks.mjs")).run(ok, { bank, fontsApi });
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
