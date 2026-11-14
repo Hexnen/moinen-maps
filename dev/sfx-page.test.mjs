@@ -147,7 +147,7 @@ group("WIRE", () => {
 // showed the same text); written in the page's order on every client
 group("UNREPEATED", () => {
   const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
-  ok(/PG\.unrepeated\(/.test(s) && s.indexOf("PG.unrepeated(") < s.indexOf("PG.pickSpot("), "sfx.mjs writes each page word unrepeated, before its spot is picked");
+  ok(/PG\.unrepeated\(/.test(s) && s.indexOf("PG.unrepeated(") < s.search(/PG\.pickSpots?\(/), "sfx.mjs writes each page word unrepeated, before its spot is picked");
   for ( const id of ["meteor", "bomb"] ) {
     const { pg } = page(id, {}, GEST.point);
     let bad = 0, ex = "";

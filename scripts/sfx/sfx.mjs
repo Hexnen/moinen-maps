@@ -403,10 +403,12 @@ function pageWord(p, w, t, waited = 0) {
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
     p.texts.add(word.text); p.wt.set(w.key, word);
   }
+  let alts = [];
   if ( w.cands ) {
     p.used ??= new Set();
-    const s = PG.pickSpot(w, view(), p.used, Number(p.rec.t0));
+    const ss = PG.pickSpots(w, view(), p.used, Number(p.rec.t0), 6), s = ss[0];
     if ( !s ) { stats.dropped++; return; }
+    alts = ss.slice(1);
     p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
     w = { ...w, x: s.x, y: s.y, ...(s.gate ? { gate: s.gate } : {}) };
   }
@@ -426,6 +428,11 @@ function pageWord(p, w, t, waited = 0) {
     if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220;
     // (a ride that hands over to the next one - the meteor's far whine to its roar - leaves when its own way ends)
     if ( p.pg.words.some((q) => q !== w && q.role === "pre" && q.ride && q.t > w.t) ) spec.stopAt = Math.min(spec.stopAt ?? Infinity, t + (w.ms ?? 0) + 60);
+  } else if ( w.role === "pre" ) {
+    // (EFFECTS2: a standing PRE word - the meteor's rumble - yields when the main word lands: live it stood under the blast for a second
+    // and a half and crowded the wave and the first debris)
+    const mw = p.pg.words.find((q) => q.role === "main");
+    if ( mw ) spec.stopAt = toPerf(mw.t) + 40;
   }
   // the wave rides out the free way on this screen: away from the main word as placed here, off the panels, inside the view
   if ( w.wave ) {
@@ -440,7 +447,15 @@ function pageWord(p, w, t, waited = 0) {
   // screen, never at the hidden place)
   if ( w.screen ) { playScreen(spec, w.screen); return; }
   if ( !hereVisible(w.at?.x ?? w.x, w.at?.y ?? w.y) ) { playScreen(spec); return; }
-  const placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  let placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  // (a debris / catch word covered by the story's bigger words still on screen takes the next landing in view instead of being dropped)
+  for ( const s of alts ) {
+    if ( placed.length ) break;
+    const r2 = w.r ?? G * 0.4;
+    const s2 = { ...spec, x: s.x, y: s.y, subject: { x0: s.x - r2, y0: s.y - r2, x1: s.x + r2, y1: s.y + r2 } };
+    placed = C.place([s2], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+    if ( placed.length ) p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+  }
   if ( !placed.length ) {
     stats.dropped++;
     // (why: the penalties of its least bad place, for checks)

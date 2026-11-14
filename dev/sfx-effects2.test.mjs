@@ -152,6 +152,18 @@ group("WIRE", () => {
   ok(/EV\.rankSize\(w\.rank/.test(sfx) && /ceilK: 1/.test(sfx), "ranked words get their size and no second ceiling");
   ok(/!g\.main\.det && C\.isEcho/.test(sfx), "a Detonate's composed words are not swallowed as echoes");
   ok(/C\.brushFalls\(ev,/.test(sfx), "a brush area's debris falls are added after it");
+  // (live, meteor film 1: four debris words dropped under the main word and the wave; the rumble stood under the blast)
+  ok(/PG\.pickSpots\(w, view\(\)/.test(sfx) && /for \( const s of alts \)/.test(sfx), "a covered debris word tries the next landing in view");
+  ok(/else if \( w\.role === "pre" \) \{[\s\S]{0,400}spec\.stopAt = toPerf\(mw\.t\) \+ 40/.test(sfx), "a standing pre word yields when the main word lands");
+});
+
+group("SPOTS", () => {
+  const v = { x0: 0, y0: 0, x1: 1000, y1: 1000 };
+  const w = { x: 500, y: 500, t: 1400, cands: [{ x: 100, y: 100, ms: 300 }, { x: 900, y: 900, ms: 420 }, { x: 5000, y: 0, ms: 400 }, { x: 500, y: 500, ms: 400 }] };
+  const s = P.pickSpots(w, v, new Set(), 1000, 6);
+  ok(s.length === 3 && s[0].x === 500 && s[1].x === 900 && s[2].x === 100, "own spot first, then landings in view nearest in time, no repeats, none out of view");
+  ok(P.pickSpot(w, v, new Set(["500,500"]), 1000).x === 900, "a used spot is skipped");
+  ok(P.pickSpots(w, v, new Set(), 1000, 2).length === 2, "at most n");
 });
 
 if ( failed.length ) { console.log(failed.join("\n")); console.log(`sfx-effects2: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }

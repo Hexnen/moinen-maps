@@ -270,6 +270,25 @@ from the films:
   the screen (`space: "screen"`, layer `hud`), never at the hidden place.
 - A gun's report: start its syllables outside the shooter's token circle plus about a third of a square, screen-up of the barrel.
 
+**More stories, and sizes by rank (EFFECTS2, the map, 2026-11-14).**
+- Size a story's words by RANK as a share of the view height (R1 4 %, R2 5.5 %, R3 7.5 %, R4 11 %, R5 15.5 %; pass `size` in scene px =
+  share x view height / zoom, and `ceilK: 1` so the engine's ceiling share does not cut the hierarchy again). With magnitude alone the
+  small words of a wide event (a meteor seen at the zoom its ring needs) sat on the legible floor and the story could not be read.
+- A word that must GROW along a ride (the meteor's descent) cannot (REQUESTS EFFECTS1-3): hand over from a small word to a bigger
+  one (a thin high whine far up, then the deep roar of the last rush); the first leaves when its own way ends.
+- A plough (a carried token shoving others) is three different words that build: a short knock at the first contact, a long scrape
+  riding beside the head of the pile, louder the more it pushes, then the biggest word where the pile stops. Never on the pile:
+  the screen-up side of its way.
+- Lightning: steady weather is silent; a far flash rumbles small at the screen edge on its side 1.2-2 s after the light (every
+  second one, counted from the storm's switch-on so every client counts the same), a mid one louder 0.5-1 s after, a close strike
+  thunders beside its foot on the stroke. Read the flashes from the storm the client SHOWS (who: gm = players get none).
+- Detonate: hear it whole (one call before the areas go off), group the areas into explosions (one stroke, or strokes that touch,
+  are one), letter the biggest few, largest first, 120 ms apart, and keep each area's own entry silent; mark the composed events so
+  an echo filter does not swallow the second and third.
+- A cause never replaces the ground's big sound: a burning, clawed or acid cave-in still comes down as a cave-in; the cause colours
+  the smaller damage. A big brush blast or cave-in drops debris words after it, by the ground's material (the engine's `debris`
+  rows: rock on stone, timber on wood, plinks in water), as phases of the same stroke.
+
 **Changing one trait of a vocabulary word.** `L.sfx(kind, { character: { material: "wood" } })` replaces the word's whole
 `character`, and the gaps are then filled from the mood's defaults, not the kind's [C]. To change one trait, take the word and merge:
 `const w = L.word("crash", o); L.play(w.text, { ...w.play, character: { ...w.play.character, material: "wood" }, ...placement })`.

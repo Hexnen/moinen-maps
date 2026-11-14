@@ -308,11 +308,19 @@ export function waveRide(at, r0, reach, rim, { avoid = [], ui = [], v = null, wb
  * fire) in view nearest to its moment and not used yet by the page (`used`: a Set of "x,y"); null when none is in view. -> { x, y, ms,
  * gate? } */
 export function pickSpot(w, v, used = new Set(), T0 = 0) {
+  return pickSpots(w, v, used, T0, 1)[0] ?? null;
+}
+/** The spots a FALL / CATCH word may take on this client, best first (its own, then the candidates in view nearest to its moment),
+    at most `n`, distinct: when the first is covered by the story's bigger words still on screen the next is tried (EFFECTS2: live, four
+    of the meteor's debris words were dropped under the main word and the wave). */
+export function pickSpots(w, v, used = new Set(), T0 = 0, n = 6) {
   const inV = (q) => !v || (q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
   const k = (q) => `${Math.round(q.x)},${Math.round(q.y)}`;
-  if ( inV(w) && !used.has(k(w)) ) return { x: w.x, y: w.y, ms: w.t - T0, gate: w.gate };
-  const c = (w.cands ?? []).filter((q) => inV(q) && !used.has(k(q))).sort((a, b) => Math.abs(a.ms - (w.t - T0)) - Math.abs(b.ms - (w.t - T0)))[0];
-  return c ?? null;
+  const out = [], seen = new Set(used);
+  if ( inV(w) && !seen.has(k(w)) ) { out.push({ x: w.x, y: w.y, ms: w.t - T0, gate: w.gate }); seen.add(k(w)); }
+  const c = (w.cands ?? []).filter((q) => inV(q)).sort((a, b) => Math.abs(a.ms - (w.t - T0)) - Math.abs(b.ms - (w.t - T0)));
+  for ( const q of c ) { if ( out.length >= n ) break; if ( seen.has(k(q)) ) continue; seen.add(k(q)); out.push(q); }
+  return out;
 }
 
 /** The engine magnitude of a page word: its rank at the firing's size, a FALL / OUT a notch smaller each (shrink). */
