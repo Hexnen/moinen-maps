@@ -271,6 +271,43 @@ from the films:
   the screen (`space: "screen"`, layer `hud`), never at the hidden place.
 - A gun's report: start its syllables outside the shooter's token circle plus about a third of a square, screen-up of the barrel.
 
+**More stories, and sizes by rank (EFFECTS2, the map, 2026-11-14).**
+- Size a story's words by RANK as a share of the view height (R1 4 %, R2 5.5 %, R3 7.5 %, R4 11 %, R5 15.5 %; pass `size` in scene px =
+  share x view height / zoom, and `ceilK: 1` so the engine's ceiling share does not cut the hierarchy again). With magnitude alone the
+  small words of a wide event (a meteor seen at the zoom its ring needs) sat on the legible floor and the story could not be read.
+- A word that must GROW along a ride (the meteor's descent) cannot (REQUESTS EFFECTS1-3): hand over from a small word to a bigger
+  one (a thin high whine far up, then the deep roar of the last rush); the first leaves when its own way ends.
+- A plough (a carried token shoving others) is three different words that build: a short knock at the first contact, a long scrape
+  riding beside the head of the pile, louder the more it pushes, then the biggest word where the pile stops. Never on the pile:
+  the screen-up side of its way.
+- Lightning: steady weather is silent; a far flash rumbles small at the screen edge on its side 1.2-2 s after the light (every
+  second one, counted from the storm's switch-on so every client counts the same), a mid one louder 0.5-1 s after, a close strike
+  thunders beside its foot on the stroke. Read the flashes from the storm the client SHOWS (who: gm = players get none).
+- Detonate: hear it whole (one call before the areas go off), group the areas into explosions (one stroke, or strokes that touch,
+  are one), letter the biggest few, largest first, 120 ms apart, and keep each area's own entry silent; mark the composed events so
+  an echo filter does not swallow the second and third.
+- A cause never replaces the ground's big sound: a burning, clawed or acid cave-in still comes down as a cave-in; the cause colours
+  the smaller damage. A big brush blast or cave-in drops debris words after it, by the ground's material (the engine's `debris`
+  rows: rock on stone, timber on wood, plinks in water), as phases of the same stroke.
+
+**What the live films of EFFECTS2 taught (lane 5, 60 fps, GM and Test Gracz 1, 2026-11-14).**
+- Bigger, readable story words take room: at a close zoom the meteor's main word and wave covered every landing, and four debris
+  words were dropped. A debris / catch word now tries the next landings in view, then waits up to a second for room
+  (`FALL_WAIT_MS`); the debris keeps coming down, so a late word still tells it.
+- A standing PRE word (the rumble) must yield when the main word lands, or it stands under the blast and crowds the wave.
+- Every ride that comes from beyond the screen (meteor whine, hero's fall, rocket without a shooter) or goes past it (the plough's
+  grind) is clamped into the view with room for the word: it enters at the edge, whole.
+- Detonate: entry areas have a generous r (about twice the painted radius) and an even bigger box; comparing boxes chained five
+  separate explosions into one word. Compare centres against about half the two r plus a square.
+- Words placed but not started yet (a cluster flushed ahead of its moment) are not in `alive`: keep their boxes until they start,
+  or the next cluster is placed over them. A cave-in word sinks as it holds: its box must reach half its height lower.
+- A storm strikes anywhere on the scene: a close strike off the view is still the big word, at the edge toward it; a word at a
+  fixed screen spot is clamped so it is whole (a rank-5 word at 16 % of the height stood half off the top).
+- Find a shooter as the NEAREST token at its muzzle, not the first in the list: a visible token beside a hidden turret was taken
+  for it and the turret's launch word was drawn at the hidden turret on the player's screen.
+- Frame time (GM, meteor then bomb 2 s later, chs 60 Hz): lettering on mean 16.82-16.84 ms, 2-3 frames over 33 ms (max 50-67 ms)
+  at the impacts; off mean 16.67 ms, none over 33 ms.
+
 **Changing one trait of a vocabulary word.** `L.sfx(kind, { character: { material: "wood" } })` replaces the word's whole
 `character`, and the gaps are then filled from the mood's defaults, not the kind's [C]. To change one trait, take the word and merge:
 `const w = L.word("crash", o); L.play(w.text, { ...w.play, character: { ...w.play.character, material: "wood" }, ...placement })`.
