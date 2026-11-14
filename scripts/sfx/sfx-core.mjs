@@ -65,7 +65,8 @@ export const VOICES = {
   gunhit:  { kinds: ["impact", "ricochet", "thud"], prio: 7, w: 0.65, ms: 600, area: 0.5, cover: 0.3, stream: true },
   fire:    { kinds: ["fire"], prio: 6, w: 0.8, ms: 1600, area: 0.8, cover: 0.25, stage: { in: "rise", glow: "auto" } },
   flare:   { kinds: ["fire"], prio: 6, w: 0.95, ms: 1300, area: 0.9, cover: 0.25, stage: { in: "grow", glow: "auto" } },
-  scorch:  { kinds: ["fire", "crackle"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
+  // (EFFECTS2: a scorch mark is the heat taken in and spreading - FSSHHH, the S run its spread - not a blaze's FWOOOM: SPEC-EFFECTS D3)
+  scorch:  { kinds: ["hiss", "fire"], prio: 6, w: 0.7, ms: 700, area: 0.8, cover: 0.2, stage: { in: "rise", glow: "auto" } },
   splash:  { kinds: ["splash"], prio: 6, w: 0.75, ms: 700, area: 0.8, cover: 0.2, stage: {} },
   arcane:  { kinds: ["powerup", "psychic"], prio: 6, w: 0.75, ms: 1100, area: 0.8, cover: 0.3, stage: { glow: "auto" } },
   slash:   { kinds: ["slash"], prio: 5, w: 0.7, ms: 300, area: 0.7, cover: 0.15, stage: { in: "zip", out: "shards" } },
@@ -156,18 +157,38 @@ export const CAUSE_COLORS = {
 export function destrVoice(type, cause = 0, gun = false) {
   if ( gun ) return "gun";
   const c = typeof cause === "number" ? DESTR_CAUSES[cause] ?? "none" : cause;
+  // (EFFECTS2, SPEC-EFFECTS 3.2: a cause never replaces the ground's own big sound - a cave-in burning, eaten by acid or torn by claws
+  // still comes down as a cave-in; the cause colours the smaller damage)
+  const big = type === "blast" || type === "collapse";
   switch ( c ) {
-    case "lightning": return type === "blast" || type === "collapse" ? "thunder" : "zap";
-    case "acid": return "acid";
+    case "lightning": return big ? "thunder" : "zap";
+    case "acid": return big ? TYPE_VOICE[type] : "acid";
     case "arcane": return "arcane";
     case "water": return "splash";
     case "decay": return type === "collapse" ? "cavein" : "decay";
-    case "claws": return "slash";
-    case "frost": return type === "blast" || type === "collapse" ? TYPE_VOICE[type] : "crack";
+    case "claws": return big ? TYPE_VOICE[type] : "slash";
+    case "frost": return big ? TYPE_VOICE[type] : "crack";
     case "impact": return type === "blast" ? "thud" : TYPE_VOICE[type] ?? "thud";
-    case "fire": return type === "blast" ? "boom" : "scorch";
+    case "fire": return type === "blast" ? "boom" : type === "collapse" ? "cavein" : type === "flood" ? "splash" : type === "scorch" ? "scorch" : TYPE_VOICE[type] ?? "scorch";
     default: return TYPE_VOICE[type] ?? "crack";
   }
+}
+/**
+ * The DEBRIS coming down after a brush blast or cave-in (EFFECTS2, SPEC-EFFECTS D1 / D2: owner «the ground changes the sound»): big
+ * areas only (a radius of a square or more), one landing, two from 2.5 squares, the second smaller; by the ground's material (the
+ * engine's debris rows: rock on stone, timber on wood, plunks in water). `e` the area's event (entryEvent), `k` the entry clock factor.
+ * -> [event] (phases of the same stroke: never an echo of its own blast)
+ */
+export function brushFalls(e, grid = 100, k = 1) {
+  if ( !e || e.path || !/^(blast|boom|thud|cavein|concussion)$/.test(e.voice) || !(e.r >= grid) ) return [];
+  const n = e.r >= 2.5 * grid ? 2 : 1, out = [];
+  const t0 = e.voice === "cavein" ? 900 : 450, dt = e.voice === "cavein" ? 420 : 330;
+  for ( let i = 0; i < n; i++ ) {
+    const a = Math.PI * (0.2 + 0.6 * h01(`${sidOf(e)}|fall${i}`)) + (i ? Math.PI * 0.85 : 0);
+    out.push({ key: `${e.key}|fall${i}`, sid: `${sidOf(e)}|fall${i}`, obj: e.obj, voice: "debris", phase: true, mat: e.mat,
+      x: e.x + Math.cos(a) * e.r * 0.9, y: e.y + Math.sin(a) * e.r * 0.75, r: e.r * (i ? 0.25 : 0.35), t: e.t + (t0 + dt * i) * k, m: i ? 0.25 : 0.42, ms: 700 });
+  }
+  return out;
 }
 export const causeColors = (cause) => CAUSE_COLORS[typeof cause === "number" ? DESTR_CAUSES[cause] : cause] ?? null;
 

@@ -9,6 +9,7 @@ import { rng, hash } from "./rng.mjs";
 import { characterOf } from "./words.mjs";
 import { onOf, retime } from "./move.mjs";
 import { groupsOf, letterScales, choreoEntrance, countFrames } from "./choreo.mjs";
+import { motionOf, entranceKeys, exitKeys, keysEnd, letterDrawings } from "./motion.mjs";
 
 export const TICK = 1000 / 24;
 
@@ -1046,6 +1047,49 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
   return { ent, hold, exit, kinds: { in: ein, hold: ehold, out: eout }, tech };
 }
 
+/* ---------- MOTION2: the invincible style's timeline (motion.mjs) ----------
+   Few pictures, each with a `key`: pictures that look the same share one painting (the engine paints a key once and moves the sprite);
+   the motion itself is plan.motion, a pose per display frame. ent: [impact accent (1 tick)] [smear (stepped slam)] the word (whole;
+   a break: whole, then cracked); hold: the hold picture, then (stepped) the drawings of the letters that move; exit: the word under the
+   exit's pose, or the drawn pieces of a shards / crumble exit. */
+function trackTimeline(n, m, R, o = {}) {
+  const tempo = o.tempo || 1;
+  const sc = (keys) => keys.map(([t, p, e]) => [t / tempo, p, e]);
+  m.entKeys = sc(entranceKeys(m)); m.exitKeys = sc(exitKeys(m));
+  /* the impact accent covers the first tick: the entrance's contact pose starts when the word shows (else the slam's big contact is
+     spent under the accent and the word appears already settled: seen on the MOTION2 film) */
+  if ( m.flash && !o.reduced && m.in !== "choreo" ) { const d = TICK / tempo; m.entKeys = [[0, m.entKeys[0][1]], ...m.entKeys.map(([t, p, e]) => [t + d, p, e])]; }
+  const ticks = (ms) => Math.max(1, Math.ceil(ms / TICK - 1e-6));
+  const P = (t, key, extra = {}) => { const p = pic(n, t); p.key = key; p.boil = R.seed(); return Object.assign(p, extra); };
+  const ent = [], hold = [], exit = [];
+  const entT = ticks(keysEnd(m.entKeys));
+  let used = 0;
+  if ( m.in !== "choreo" ) {
+    if ( m.flash && !o.reduced ) { ent.push(P(1, "impact", { impact: true })); used++; }
+    if ( m.mode === "stepped" && (m.in === "slam" || m.in === "burstIn") && !o.reduced ) { ent.push(P(1, "smear", { smear: { dx: 0, dy: 0, zoom: 0.3, n: 3 } })); used++; }
+    if ( m.in === "crackIn" ) { const k = Math.max(1, ticks(55 / tempo) - used); ent.push(P(k, "base")); used += k; }
+    const rest = Math.max(entT - used, ent.length ? 0 : 1);
+    if ( rest > 0 ) ent.push(P(rest, m.in === "crackIn" ? "crack" : "base", m.in === "crackIn" ? { shards: { t: 0, seed: m.shardSeed ??= R.seed(), from: o.from ?? null } } : {}));
+  }
+  const cracked = m.family === "break" && m.out === "shards" && m.in === "crackIn";
+  hold.push(cracked ? P(2, "crack", { shards: { t: 0, seed: m.shardSeed, from: o.from ?? null } }) : P(2, "base"));
+  letterDrawings(m, n).forEach((letters, k) => { const p = P(m.rate, `L${k}`); p.letters = letters; hold.push(p); });
+  if ( m.out === "shards" && !o.reduced ) {
+    const sd = m.shardSeed ??= R.seed(); let tt = 0;
+    for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / tempo; const p = P(2, `x${j}`, { shards: { t: tt, seed: sd, from: o.from ?? null, last: j === 5 } }); p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
+  } else if ( m.out === "crumble" && !o.reduced ) {
+    /* letters drop off one after another, from the right, eroding the word from its bottom */
+    const steps = 6;
+    for ( let s = 0; s < steps; s++ ) {
+      const p = P(2, `x${s}`);
+      p.letters = p.letters.map((l, i) => { const t = s - (n - 1 - i) * (4 / Math.max(1, n)); return t <= 0 ? l : { ...l, y: 0.22 * t * t, r: (i % 2 ? 1 : -1) * 0.12 * t, sy: Math.max(0.5, 1 - 0.08 * t) }; });
+      p.dissolve = s >= steps - 2 ? (s === steps - 2 ? 0.35 : 0.7) : 0;
+      exit.push(p);
+    }
+  } else exit.push(P(ticks(keysEnd(m.exitKeys)), "base"));
+  return { ent, hold, exit, kinds: { in: m.in, hold: m.hold, out: m.out }, tech: { flash: !!m.flash, smear: ent.some((p) => p.smear), antic: false, follow: false, misreg: 0, heavy: m.rate === 3 }, track: true };
+}
+
 /* ---------- the whole plan ---------- */
 export function makePlan(text, opts, fonts, memory) {
   const raw = String(text ?? "").normalize("NFC");
@@ -1094,16 +1138,24 @@ export function makePlan(text, opts, fonts, memory) {
   if ( capAt >= 0 ) lay.letters[capAt].font = hand.capFont;
   const dir = opts.dir ?? (R.chance(0.75) ? 1 : -1);
   const fromDeg = Number.isFinite(opts.from) ? opts.from : null;
-  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in, out: opts.out, holdKind: opts.holdKind, from: fromDeg, pixelArt: !!opts.pixel, magnitude: opts.magnitude };
-  const tl = buildTimeline(chars.length, mood, sound, hand, R, topts);
-  const holdMs = Math.max(0, (opts.hold ?? MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long)) / (opts.tempo || 1));
+  /* MOTION2: the vocabulary's own picks (L.sfx / L.word: vocabMotion) drive only the legacy style; the invincible style reads its table */
+  const vm = hand.style === "invincible" ? {} : (opts.vocabMotion ?? {});
+  const topts = { reduced: opts.reduced, tempo: opts.tempo, dir, in: opts.in ?? vm.in, out: opts.out ?? vm.out, holdKind: opts.holdKind ?? vm.holdKind, from: fromDeg, pixelArt: !!opts.pixel, magnitude: opts.magnitude };
+  /* MOTION2: the invincible style moves by the sound's motion table (motion.mjs); the legacy style keeps its frozen timeline */
+  const track = hand.style === "invincible";
+  const choreoOn = !!groups || (!opts.reduced && !!opts.countIn);
+  const motion = track ? motionOf({ kind: opts.kind, mood: MOODS[mood]?.base ?? mood, sound, character, chars, accent, dir, seed, reduced: opts.reduced, syllable: !!opts._stream,
+    mode: opts.look?.motion, pin: { in: opts.in, holdKind: opts.holdKind, out: opts.out } }) : null;
+  if ( motion && choreoOn ) { motion.in = "choreo"; motion.flash = false; }
+  const tl = track ? trackTimeline(chars.length, motion, R, topts) : buildTimeline(chars.length, mood, sound, hand, R, topts);
+  const holdMs = Math.max(0, (opts.hold ?? (track ? motion.holdMs : MOODS[mood].hold_ms * (0.85 + 0.4 * sound.long))) / (opts.tempo || 1));
   /* frame rate (move.mjs): ones / twos / threes for this word; motion of a travelling word steps on the same grid */
   const on = opts.reduced ? 0 : onOf(opts);
   const Rm = rng((seed ^ 0x68e31da4) >>> 0), seed2 = () => Rm.seed();   // MOVE's generator (named apart from LOOK's R2)
-  if ( on ) retime(tl, on, seed2);
+  if ( on && !track ) retime(tl, on, seed2);   // MOTION2: a track word's grid is `on` ticks (the engine), its pictures stay few
   const mk = (ticks) => { const p = pic(chars.length, ticks); p.misreg = tl.tech.misreg; p.boil = seed2(); return p; };
   if ( groups ) {
-    tl.ent = choreoEntrance(groups, lay, seed, (n, Rg, kind) => buildTimeline(n, mood, sound, hand, Rg, { ...topts, in: kind ?? opts.in ?? tl.kinds.in }), mk, { on });
+    tl.ent = choreoEntrance(groups, lay, seed, (n, Rg, kind) => buildTimeline(n, mood, sound, hand, Rg, { ...topts, in: kind ?? opts.in ?? (track ? "pop" : tl.kinds.in) }), mk, { on });
     tl.kinds.choreo = groups[0].type ? "typeOn" : "parts";
   }
   const counted = !opts.reduced && opts.countIn ? countFrames(chars, opts, seed, mk, on || 2) : null;
@@ -1121,6 +1173,7 @@ export function makePlan(text, opts, fonts, memory) {
   const plan = { v: 1, word, chars, mood, sound, seed, hand, layout: lay, timeline: tl, holdMs, dir, loud: sound.loud, accent, character, traits,
     sizeK: (0.62 + 0.7 * sound.loud) * blockK };
   if ( on && on !== 2 ) plan.on = on;   // twos = the default timing (no change to the plan)
+  if ( motion ) plan.motion = motion;
   if ( groups ) plan.groups = groups.map((g) => ({ from: g.from, to: g.to, at: g.at, scale: g.scale, body: !!g.body }));
   if ( opts.hollow ) plan.hollow = true;
   return plan;

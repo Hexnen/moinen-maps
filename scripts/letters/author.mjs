@@ -46,6 +46,7 @@ export function registerMood(id, def = {}) {
   if ( Number.isFinite(def.hold_ms ?? def.holdMs) ) m.hold_ms = Math.max(100, Math.min(10000, def.hold_ms ?? def.holdMs));
   if ( def.fx && typeof def.fx === "object" ) m.fx = { ...def.fx };
   m.custom = true;
+  m.base = def.extends ? (MOODS[def.extends].base ?? def.extends) : "impact";   // MOTION2: a registered mood moves like the built-in mood it extends
   MOODS[id] = m;
   if ( !MOOD_IDS.includes(id) ) MOOD_IDS.push(id);
   return id;

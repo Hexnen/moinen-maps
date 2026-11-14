@@ -272,6 +272,8 @@ const carryHooks = {
     if ( m?.key === key ) return m.path;
     const path = frontPath(o.tk, geo); frontMemo.set(o.tk, { key, path }); return path;
   },
+  /** EFFECTS2 (the comic sound effects): a carry that ploughs tokens - its record and the geometry - or null. */
+  ploughOf: (id) => { const o = carryOf(id); return o?.tk.hit?.length ? { tk: o.tk, geo: carryGeo() } : null; },
   enter: (g, start, k) => { const o = carryOf(g.objId); if ( o && (cineNow === o.id || !Cine.isPending(o.id)) ) Carry.play({ objId: o.id, tk: o.tk, start, k, delay: 40 * k, geo: carryGeo(), real: realCarry === o.id, live: () => !!display?.order?.some((q) => q.objId === o.id && q.anim) }); }
 };
 

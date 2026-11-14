@@ -14,6 +14,11 @@ const clamp01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5);
 /* the treatments of one phrase (README); ambient uses only the quiet ones */
 const LIVE = ["breath", "stretch", "split", "shed", "accent", "echo"];
 const QUIET = ["breath", "stretch", "shed"];
+/* MOTION2 (SPEC-MOTION 5.9): in the invincible style the phrases follow the sound's flow style (words.mjs FLOW), not one pool for every
+   kind: a steady sound never accents or slams, a cycle is always split on its beat, a crackle pops; each phrase moves by the kind's own
+   row of the motion table (motion.mjs) instead of random entrances, holds and exits */
+export const TREAT_BY_FLOW = { steady: ["breath", "stretch"], drone: ["breath", "stretch", "echo"], crackle: ["breath", "shed", "accent", "split"],
+  gust: ["breath", "stretch", "shed"], cycle: ["split"], mix: LIVE };
 
 /* E: { play, now, streams, vocab(), pointOf(space, at), inView(space, p, pad), syllablesOf } from the engine */
 export function makeSustain(E) {
@@ -30,6 +35,7 @@ export function makeSustain(E) {
     const handles = [], timers = new Set(), history = [];
     let cur = null, alive = true, k = 0, hand = null, last = null, lastKind = null, done, phrases = 0;
     const t0 = E.now();
+    const inv = E.styleOf?.(o) === "invincible";
     const finished = new Promise((r) => (done = r));
     const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if ( alive ) fn(); }, Math.max(0, ms)); timers.add(id); };
     const track = (h) => {
@@ -97,8 +103,13 @@ export function makeSustain(E) {
       }
       k++; phrases++;
       /* the treatment: seeded, never the same twice in a row; loud live sounds may accent, quiet ones never */
-      const pool = (ambient ? QUIET : LIVE).filter((t) => t !== lastKind && !(t === "accent" && L < 0.45) && !(reduced && (t === "shed" || t === "echo" || t === "split")));
-      const kind = i === 0 ? "breath" : (o.treatments ? R.pick(o.treatments.filter((t) => t !== lastKind)) ?? "breath" : R.pick(pool));
+      const fstyle = inv ? (flowOf() || null)?.style ?? null : null;
+      const allowed = inv && fstyle && TREAT_BY_FLOW[fstyle] ? TREAT_BY_FLOW[fstyle] : null;
+      const pool0 = ambient ? QUIET.filter((t) => !allowed || allowed.includes(t) || t === "breath") : (allowed ?? LIVE);
+      const okT = (t) => !(t === "accent" && L < 0.45) && !(reduced && (t === "shed" || t === "echo" || t === "split"));
+      let pool = pool0.filter((t) => t !== lastKind && okT(t));
+      if ( !pool.length && allowed ) pool = pool0.filter(okT);   // a cycle repeats its split
+      const kind = i === 0 ? (allowed?.length === 1 && !reduced ? allowed[0] : "breath") : (o.treatments ? R.pick(o.treatments.filter((t) => t !== lastKind)) ?? "breath" : (R.pick(pool) ?? "breath"));
       lastKind = kind;
       const w = textAt(i, L, kind === "stretch" ? 1 + Math.round(2 * L) : 0);
       const side = i % 2 ? 1 : -1, u = U();
@@ -111,26 +122,29 @@ export function makeSustain(E) {
       const segMs = Number.isFinite(w.ms) && w.ms > 0 ? Math.max(500, Math.min(4000, w.ms)) : null;   // WORD's "current for" time
       const life = ambient ? R.f(1500, 2400) : segMs ? Math.round(segMs * 1.35) : Math.round((1300 + 1100 * (1 - L)) * R.f(0.85, 1.15));
       const base = { ...common(), ...(tr ?? { at: near(dx, dy) }), seed: `${seed}:${i}`, mood: w.mood ?? o.mood ?? w.kmood, hold: life, rotation: side * R.f(1, 6), accent: w.accent };
+      if ( inv ) base.kind = o.kind;
+      /* MOTION2: invincible phrases keep the kind's motion; only an accent is pinned (a slam) */
+      const P = (txt, q) => E.play(txt, inv && kind !== "accent" ? { ...q, in: i === 0 && o.in ? o.in : undefined, holdKind: o.holdKind, out: undefined } : q);
       let h = null;
       switch ( kind ) {
         case "breath":
-          h = E.play(w.text, { ...base, magnitude: magOf(L), in: i === 0 ? (o.in ?? (ambient ? "rise" : "grow")) : R.pick(["pop", "rise", "grow"]), holdKind: o.holdKind ?? R.pick(["boil", "wobble", "throb"]), out: R.pick(["dissolve", "rise"]), tempo: ambient ? 0.7 : 1, hollow: ambient ? (o.hollow ?? true) : o.hollow });
+          h = P(w.text, { ...base, magnitude: magOf(L), in: i === 0 ? (o.in ?? (ambient ? "rise" : "grow")) : R.pick(["pop", "rise", "grow"]), holdKind: o.holdKind ?? R.pick(["boil", "wobble", "throb"]), out: R.pick(["dissolve", "rise"]), tempo: ambient ? 0.7 : 1, hollow: ambient ? (o.hollow ?? true) : o.hollow });
           break;
         case "stretch":
-          h = E.play(w.text, { ...base, magnitude: magOf(L, 1.1), in: "grow", holdKind: "throb", out: ambient ? "dissolve" : R.pick(["dissolve", "shrink"]), tempo: ambient ? 0.7 : 0.9, hollow: ambient ? (o.hollow ?? true) : o.hollow });
+          h = P(w.text, { ...base, magnitude: magOf(L, 1.1), in: "grow", holdKind: "throb", out: ambient ? "dissolve" : R.pick(["dissolve", "shrink"]), tempo: ambient ? 0.7 : 0.9, hollow: ambient ? (o.hollow ?? true) : o.hollow });
           break;
         case "split":
-          h = E.play(w.text, { ...base, magnitude: magOf(L), parts: "syllables", beat: Math.round(130 + 120 * (1 - L)), holdKind: "boil", out: "dissolve" });
+          h = P(w.text, { ...base, magnitude: magOf(L), parts: "syllables", beat: Math.round(130 + 120 * (1 - L)), holdKind: "boil", out: "dissolve" });
           break;
         case "accent":
           h = E.play(w.text, { ...base, magnitude: magOf(L, 1.45), in: "slam", holdKind: "shake", out: R.pick(["burst", "pop"]), hold: Math.round(life * 0.7) });
           break;
         case "echo":
-          h = E.play(w.text, { ...base, magnitude: magOf(L), in: "pop", holdKind: "boil", out: "dissolve", echo: { n: 2, dir: (drift * 180) / Math.PI, every: 160 } });
+          h = P(w.text, { ...base, magnitude: magOf(L), in: "pop", holdKind: "boil", out: "dissolve", echo: { n: 2, dir: (drift * 180) / Math.PI, every: 160 } });
           break;
         case "shed": {
           /* the word stays small and fragments of it come off and drift away (steam off a pipe, sparks off a fire) */
-          h = E.play(w.text, { ...base, magnitude: magOf(L, 0.85), in: "pop", holdKind: "boil", out: "dissolve", tempo: ambient ? 0.7 : 1, hollow: ambient ? (o.hollow ?? true) : o.hollow });
+          h = P(w.text, { ...base, magnitude: magOf(L, 0.85), in: "pop", holdKind: "boil", out: "dissolve", tempo: ambient ? 0.7 : 1, hollow: ambient ? (o.hollow ?? true) : o.hollow });
           const syl = E.syllablesOf(w.text), n = ambient ? 1 : 1 + Math.round(2 * L);
           for ( let j = 0; j < n; j++ ) later(() => shed(syl[Math.min(syl.length - 1, j % syl.length)] ?? w.text, dx, dy, j, L), life * (0.2 + 0.22 * j));
           break;

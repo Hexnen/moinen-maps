@@ -1371,6 +1371,8 @@ export class DestructionDisplay {
    * up a few frames late catches up: its first ~70-200 ms show nothing anyway). `CONFIG.moinenMaps.enterAtOnce = true`: all at once.
    */
   detonate(start) {
+    // EFFECTS2: the comic sound effects hear the whole Detonate at once (one composition), not area by area
+    sfxBus.detonate?.(this, start);
     if ( globalThis.CONFIG?.moinenMaps?.enterAtOnce ) { for ( const g of this.order ) this.enter(g, { start, ...(this.entryOptsFor?.(g) ?? {}) }); return; }
     const vw = this.view(), on = (g) => { const r = g.info.rect; return !(r.x0 > vw.x1 || r.y0 > vw.y1 || r.x1 < vw.x0 || r.y1 < vw.y0); };
     const list = this.order.map((g, i) => ({ g, i, on: on(g) })).sort((a, b) => (b.on - a.on) || (a.i - b.i));

@@ -43,7 +43,9 @@ export function checkLook2(ok, bank) {
   const vocab = [];
   for ( const id of KIND_IDS ) for ( const loud of [0.35, 0.7, 0.95] ) for ( const lang of ["en", "pl"] ) {
     const w = V.word(id, { lang, loud, seed: `lk2${id}${loud}` });
-    if ( !NUMBER_RE.test(w.text) ) vocab.push({ id, w, p: () => inv(w.text, { ...w.play, seed: `lk2${id}${loud}${lang}` }) });
+    if ( !NUMBER_RE.test(w.text) ) vocab.push({ id, w, p: () => inv(w.text, { ...w.play, seed: `lk2${id}${loud}${lang}` }),
+      /* MOTION2: smear echoes are drawings of the stepped mode only (the smooth mode moves one picture) */
+      ps: () => inv(w.text, { ...w.play, seed: `lk2${id}${loud}${lang}`, look: { motion: "stepped" } }) });
   }
   const ink = (c) => /[\p{L}\p{N}]/u.test(c);
 
@@ -103,7 +105,8 @@ export function checkLook2(ok, bank) {
     ok(rimFirst === pics, `keyline: the word's keyline comes first in ${rimFirst}/${pics} pictures`);
     ok(thick === 0, `keyline: ${thick} letter lines with mitred (spiky) joins`);
     /* no boil: two hold drawings in the same pose have the same outline */
-    const p = inv("KRAK!", { mood: "crack", seed: 5 }); settleCenter(p, bank);
+    /* MOTION2: the smooth mode has one hold picture; stepped mode redraws the hold (letters that move): compare two of its drawings at rest */
+    const p = inv("KRAK!", { mood: "crack", seed: 5, holdKind: "shake", look: { motion: "stepped" } }); settleCenter(p, bank);
     const a = pictureGeometry(p, bank, { ...p.timeline.hold[0], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, letters: p.timeline.hold[0].letters.map((l) => ({ ...l, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 })) });
     const b = pictureGeometry(p, bank, { ...p.timeline.hold[1], g: { x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 }, letters: p.timeline.hold[1].letters.map((l) => ({ ...l, x: 0, y: 0, r: 0, s: 1, sx: 1, sy: 1 })) });
     ok(JSON.stringify(a) === JSON.stringify(b), "keyline: no line boil in the Invincible hand (the stems stay straight)");
@@ -119,11 +122,11 @@ export function checkLook2(ok, bank) {
       if ( H.shadow ) soft++;
       if ( new Set(H.pal.fill).size !== 1 ) grad++;
       for ( const q of [...p.timeline.ent, ...p.timeline.hold, ...p.timeline.exit] ) if ( q.misreg ) misreg++;
-      const sm = p.timeline.ent.find((q) => q.smear);
+      const pst = v.ps(), sm = pst.timeline.ent.find((q) => q.smear);
       if ( sm && smears < 12 ) {
-        smears++; settleCenter(p, bank);
-        const r = recorder(); paintPicture(p, bank, sm, 80, r.make);
-        const r0 = recorder(); paintPicture(p, bank, { ...sm, smear: null }, 80, r0.make);
+        smears++; settleCenter(pst, bank);
+        const r = recorder(); paintPicture(pst, bank, sm, 80, r.make);
+        const r0 = recorder(); paintPicture(pst, bank, { ...sm, smear: null }, 80, r0.make);
         smearFills += r.ops.filter((x) => x.op === "fill").length - r0.ops.filter((x) => x.op === "fill").length;
         if ( r.ops.some((x) => x.op === "gradient") ) grad++;
       }

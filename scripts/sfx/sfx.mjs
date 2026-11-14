@@ -28,6 +28,9 @@ import * as A from "../presets/accents-core.mjs";
 import * as PG from "./sfx-page.mjs";
 import * as MC from "../presets/meteor-core.mjs";
 import { fallAt as landingFallAt } from "../presets/landing-fx.mjs";
+import * as EV from "./sfx-events.mjs";
+import { buildTimeline } from "../tokens/carry-core.mjs";
+import { hitsOf } from "../tokens/plough-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
@@ -58,6 +61,14 @@ let uiCache = { t: -1e9, rects: [] };
 const pages = new Map();
 let owned = { d: new Set(), f: new Set(), catch: new Set(), out: new Map() };
 let firingsSeen = null;        // the scene flag's firing records object last scanned
+// EFFECTS2: a Detonate going off (its shared start: its areas' own entries are silent, its composition speaks), ploughs lettered here,
+// the rain's lightning (flashes lettered here, the far ones counted from the storm's switch-on)
+let detonating = null;         // { start, until } (performance clock)
+const ploughs = new Set();     // stroke id|start of the ploughs lettered here
+let soon = [];                  // boxes of words placed, not started yet ({ box, until })
+let stormTimer = 0;
+const flashSeen = new Set();
+let farCount = { key: "", k: 0, n: 0, list: new Map() };
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
 /* ---------------------------------------------------------------- settings */
@@ -165,6 +176,10 @@ function onFireShown(ids) {
 function onEntry(d, g, opts, start) {
   const I = g?.info; if ( !I?.rect || !d?.origin ) return;
   scanFirings();
+  // (a Detonate's areas: its composition letters them, once - EFFECTS2)
+  if ( detonating && Math.abs(start - detonating.start) < 60 && performance.now() < detonating.until ) { stats.detOwned = (stats.detOwned ?? 0) + 1; return; }
+  // (a Superhero plough: its own story - bite, grind, stop - instead of the stroke's word riding the front; EFFECTS2)
+  if ( g.objId && onPlough(d, g, start) ) return;
   // (a damage area of a preset firing told as a page: silent - its ground tells the page what the debris lands on)
   if ( g.objId && owned.d.has(g.objId) ) { for ( const p of pages.values() ) if ( p.pg.owned.d.has(g.objId) && !p.ground ) p.ground = C.matOf(I.mat); return; }
   const k = `${g.hash}|${Math.round(start / 100)}`;
@@ -186,8 +201,11 @@ function onEntry(d, g, opts, start) {
   }
   // (rounds fired by a token: its report sounds at the muzzle (onFiring); here, where they land, the impact on what they hit)
   const shot = !!walk && hasShooter(walk, pn);
-  add(C.entryEvent(I, o, ap, start, { speed, gun: walk, ride, shot, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
-    from: p0 ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null }));
+  const ev = C.entryEvent(I, o, ap, start, { speed, gun: walk, ride, shot, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
+    from: p0 ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null });
+  add(ev);
+  // (EFFECTS2: a big blast or cave-in throws debris that lands after it, by the ground's material)
+  for ( const f of C.brushFalls(ev, grid(), k2 * (causeLook(I.cause)?.slow ?? 1)) ) add(f);
 }
 
 /** A gun's pocks are a shooter's rounds (a firing from a token here, lately): its first hit lands on one of the shooter's hits. */
@@ -225,6 +243,96 @@ function onFiring(rec) {
     const walk = hits.map((h) => ({ x: h[0], y: h[1], ms: Math.max(0, (h[2] || 0) - first) })).sort((a, b) => a.ms - b.ms);
     screenReport(walk, t0 + first - 120, C.gunKinds(walk), `m|${rec.id}|off`);
   }
+}
+
+/* ---------------------------------------------------------------- EFFECTS2: plough, Detonate, lightning */
+
+/** A story that is not a preset firing (a plough, a flash): a page of its own words, played like a firing's (pageWord). */
+function storyPage(id, t0, words, ground = null) {
+  const p = { rec: { id, t0, size: 1 }, pg: { words }, ground };
+  for ( const w of words ) {
+    const t = toPerf(w.t), lead = 140;
+    if ( t + Math.max(C.LATE_MS, (w.ms ?? 0) * 0.6) < performance.now() ) continue;
+    later(`st|${id}|${w.key ?? w.role}`, t - lead - performance.now(), () => pageWord(p, w, t));
+  }
+  return p;
+}
+/** A Superhero plough entering (a carry stroke with pushed tokens: display.carry.ploughOf): its story, once per run. -> handled? */
+function onPlough(d, g, start) {
+  const pl = d.carry?.ploughOf?.(g.objId);
+  if ( !pl ) return false;
+  const key = `${g.objId}|${Math.round(start / 200)}`;
+  if ( ploughs.has(key) ) return true;
+  ploughs.add(key); if ( ploughs.size > 200 ) ploughs.delete(ploughs.values().next().value);
+  if ( mode() === "off" ) return true;
+  try {
+    const k = (1 / (d.look?.speed || 1)) * (causeLook(g.info.cause)?.slow ?? 1);
+    const tl = buildTimeline(pl.tk, { ...pl.geo, k }), hits = hitsOf(pl.tk);
+    const fp = d.carry?.frontOf?.(g.objId), o = d.origin, ap = d.ap || 1, T = pl.tk.p?.[pl.tk.p.length - 1] || 0;
+    // (the head's path: art px, ms of the stored run -> scene px, ms of this run)
+    const front = Array.isArray(fp) && tl ? fp.map((q) => [o.x + q[0] * ap, o.y + q[1] * ap, T > 0 ? (q[2] / T) * tl.D : 0]) : null;
+    const sh = sharedNow() + (start - performance.now());
+    const words = EV.ploughPage({ hits, front, D: tl?.D ?? 0, k, start: sh, delay: 40 * k, grid: grid(), seed: `plough|${g.objId}` })
+      .map((w) => ({ ...w, role: w.role === "stop" ? "main" : w.role === "bite" ? "pre" : "sec", story: w.role }));
+    if ( words.length ) storyPage(`plough|${g.objId}|${Math.round(sh)}`, sh, words, C.matOf(g.info.mat));
+    stats.ploughs = (stats.ploughs ?? 0) + 1;
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a plough's words failed`, err); }
+  return true;
+}
+/** A Detonate (display.detonate, through the bus): every area goes off again from `start` - one composed set of words. */
+function onDetonate(d, start) {
+  if ( mode() === "off" || !canvas?.ready || !d?.order?.length ) return;
+  scanFirings();
+  detonating = { start, until: performance.now() + Math.max(0, start - performance.now()) + 6000 };
+  const evs = [];
+  for ( const g of d.order ) {
+    const I = g?.info; if ( !I?.rect || !d.origin ) continue;
+    // (a preset firing's area goes off as its firing's main sound: one explosion)
+    const ownedBy = g.objId ? [...pages.values()].find((p) => p.pg.owned.d.has(g.objId)) : null;
+    const e = C.entryEvent(I, d.origin, d.ap || 1, start, { speed: d.look?.speed || 1, key: `det|${g.hash}|${Math.round(start)}`, sid: `det|${g.hash}`, objId: g.objId ? `d${ownedBy ? ownedBy.rec.id : g.objId}` : null });
+    if ( ownedBy?.pg.main ) e.voice = { boom: "boom", grenade: "boom", thud: "thud", thunder: "thunder", shockwave: "whump" }[ownedBy.pg.main] ?? e.voice;
+    evs.push(e);
+  }
+  const comp = EV.detonateComposition(evs, { grid: grid(), max: EV.DETONATE_MAX[perfMode()] ?? 3, prio: (v) => C.VOICES[v]?.prio ?? 0 });
+  stats.detonates = (stats.detonates ?? 0) + 1;
+  for ( const e of comp ) add(e);
+}
+/** The rain's lightning shown here (weather api.stormDisplay: only while this client shows the storm): its flashes ahead, lettered. */
+function pollStorm() {
+  clearTimeout(stormTimer); stormTimer = 0;
+  const g0 = gen;
+  const again = (ms) => { stormTimer = setTimeout(() => { if ( g0 === gen ) pollStorm(); }, ms); };
+  if ( mode() === "off" || !canvas?.ready ) return again(2000);
+  const W = moduleApi.weather, storm = W?.stormDisplay?.();
+  if ( !storm || !L ) return again(1000);
+  const now = sharedNow(), rect = canvas.dimensions?.sceneRect ?? canvas.dimensions?.rect, G = grid();
+  for ( const ev of storm.all?.() ?? [] ) {
+    const id = `${ev.k}|${ev.t}|${ev.kind}`;
+    if ( flashSeen.has(id) || ev.t + 2500 < now || ev.t - now > 3000 ) continue;
+    flashSeen.add(id); if ( flashSeen.size > 600 ) flashSeen.delete(flashSeen.values().next().value);
+    if ( ev.kind === "far" && !EV.farLettered(ev, (k) => farBefore(storm, k)) ) continue;
+    if ( mode() === "big" && ev.kind !== "close" ) continue;
+    const place = W.stormModel?.placeOf?.(ev, rect, G);
+    if ( !place ) continue;
+    const w = EV.flashWord(ev, place, view(), canvas.scene?.id ?? "");
+    if ( !w ) continue;
+    const r = G * 0.5;
+    storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }]);
+    stats.flashes = (stats.flashes ?? 0) + 1;
+  }
+  again(700);
+}
+/** How many far flashes the storm made before slot `k` since it was switched on (counted once, then kept up: the same on every client). */
+function farBefore(storm, k) {
+  const S = storm.S, SM = moduleApi.weather?.stormModel; if ( !S || !SM?.flashOf ) return 1;
+  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}`;
+  if ( farCount.key !== key ) farCount = { key, k: Math.max(Math.floor(S.t / SM.SLOT), k - EV.FAR_SCAN), n: 0, list: new Map() };
+  if ( farCount.list.has(k) ) return farCount.list.get(k);
+  if ( k < farCount.k ) return C.hashStr(String(k)) & 1;
+  for ( ; farCount.k < k; farCount.k++ ) { const ev = SM.flashOf(S, storm.seed, farCount.k, storm.rainP); if ( ev?.kind === "far" ) { farCount.list.set(farCount.k, farCount.n); farCount.n++; } }
+  farCount.list.set(k, farCount.n);
+  if ( farCount.list.size > 2000 ) farCount.list.delete(farCount.list.keys().next().value);
+  return farCount.n;
 }
 
 /* ---------------------------------------------------------------- preset firings as pages (EFFECTS1) */
@@ -296,23 +404,43 @@ function pageWord(p, w, t, waited = 0) {
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
     p.texts.add(word.text); p.wt.set(w.key, word);
   }
+  let alts = [], spot0 = null;
+  const w0 = w;
   if ( w.cands ) {
     p.used ??= new Set();
-    const s = PG.pickSpot(w, view(), p.used, Number(p.rec.t0));
+    const ss = PG.pickSpots(w, view(), p.used, Number(p.rec.t0), 6), s = ss[0];
     if ( !s ) { stats.dropped++; return; }
-    p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+    alts = ss.slice(1);
+    p.used.add(spot0 = `${Math.round(s.x)},${Math.round(s.y)}`);
     w = { ...w, x: s.x, y: s.y, ...(s.gate ? { gate: s.gate } : {}) };
   }
   if ( !word?.text ) return;
   const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
   const r = w.r ?? G * 0.4;
   const spec = { role, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t, ms: w.ms ?? 700, seed: sd,
+    // (EFFECTS2: a story's words are sized by rank as a share of this client's view: readable at any zoom, a lower rank never bigger)
+    rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
     cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
   measure(spec);
+  // (a ride from beyond the screen's edge comes in AT the edge, whole; one going past it - the plough's grind - stops at it)
+  if ( w.ride && spec.path ) {
+    spec.path = PG.rideInView(spec.path, view(), spec.bw ?? 0, spec.bh ?? 0);
+    if ( spec.path[0] ) { spec.x = spec.path[0].x; spec.y = spec.path[0].y; }
+  }
   // a travelling PRE word leaves (its exit, about a fifth of a second) so it is gone PRE_GAP before the main word's frame
-  if ( w.role === "pre" && w.ride ) { const mw = p.pg.words.find((q) => q.role === "main"); if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220; }
+  if ( w.role === "pre" && w.ride ) {
+    const mw = p.pg.words.find((q) => q.role === "main");
+    if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220;
+    // (a ride that hands over to the next one - the meteor's far whine to its roar - leaves when its own way ends)
+    if ( p.pg.words.some((q) => q !== w && q.role === "pre" && q.ride && q.t > w.t) ) spec.stopAt = Math.min(spec.stopAt ?? Infinity, t + (w.ms ?? 0) + 60);
+  } else if ( w.role === "pre" ) {
+    // (EFFECTS2: a standing PRE word - the meteor's rumble - yields when the main word lands: live it stood under the blast for a second
+    // and a half and crowded the wave and the first debris)
+    const mw = p.pg.words.find((q) => q.role === "main");
+    if ( mw ) spec.stopAt = toPerf(mw.t) + 40;
+  }
   // the wave rides out the free way on this screen: away from the main word as placed here, off the panels, inside the view
   if ( w.wave ) {
     const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)],
@@ -324,8 +452,27 @@ function pageWord(p, w, t, waited = 0) {
   }
   // (owner's answer 4: a sound whose source this player cannot see - under the fog, out of vision - is shown generally on the
   // screen, never at the hidden place)
-  if ( !hereVisible(w.x, w.y) ) { playScreen(spec); return; }
-  const placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  if ( w.screen ) { playScreen(spec, w.screen); return; }
+  if ( !hereVisible(w.at?.x ?? w.x, w.at?.y ?? w.y) ) { playScreen(spec); return; }
+  // (a word at its shooter - a rocket's launch at the tube - whose shooter this client cannot see (a hidden token) is unlocated too, even
+  // where the ground is in view: it must not point at the hidden token)
+  if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(spec); return; }
+  let placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  // (a debris / catch word covered by the story's bigger words still on screen takes the next landing in view instead of being dropped)
+  for ( const s of alts ) {
+    if ( placed.length ) break;
+    const r2 = w.r ?? G * 0.4;
+    const s2 = { ...spec, x: s.x, y: s.y, subject: { x0: s.x - r2, y0: s.y - r2, x1: s.x + r2, y1: s.y + r2 } };
+    placed = C.place([s2], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+    if ( placed.length ) p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+  }
+  // (still covered - a meteor's main word and wave fill the crater's surroundings at a close zoom: live, four debris words dropped) -
+  // it waits a moment for the bigger words to clear and tries again: the debris keeps coming down, the story still resolves
+  if ( !placed.length && w0.cands && waited < PG.FALL_WAIT_MS ) {
+    p.used.delete(spot0);
+    const g0 = gen; setTimeout(() => { if ( g0 === gen ) pageWord(p, w0, performance.now() + 60, waited + 250); }, 250);
+    return;
+  }
   if ( !placed.length ) {
     stats.dropped++;
     // (why: the penalties of its least bad place, for checks)
@@ -359,12 +506,16 @@ function screenSpot(bw, bh, key = "") {
 }
 /** Play a word unlocated (EFFECTS1, owner's answers 2 and 4; engine request KINDS1-1 for a real "screen" placement): in screen space
     over the map (under the bars), not riding, not pointing at anything. */
-function playScreen(spec) {
+function playScreen(spec, fixed = null) {
   const zoom = canvas.stage?.scale?.x || 1;
-  const at = screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
+  // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
+  const fw = (spec.bw ?? 200) * zoom * 0.5 + 16, fh = (spec.bh ?? 80) * zoom * 0.75 + 16;
+  const at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
   const o = optsOf(spec);
   delete o.path; delete o.from; delete o.area;
   Object.assign(o, { space: "screen", layer: "hud", at });
+  // (a ranked word on the screen: its share of the screen height in CSS px)
+  if ( Number.isFinite(spec.rank) ) Object.assign(o, { size: EV.rankSize(spec.rank, innerHeight, spec.shrink ?? 1), fit: "screen" });
   const g0 = gen, go = () => {
     if ( g0 !== gen || !L || mode() === "off" ) return;
     if ( C.tooLate(spec, performance.now()) ) { stats.late++; return; }
@@ -378,7 +529,10 @@ function playScreen(spec) {
 /** Is the shooter at scene point `from` (radius `fr`) visible to this client? A token there that this client cannot see: no. */
 function shooterSeen(from, fr) {
   if ( game.user?.isGM ) return true;
-  const G = grid(), t = (canvas.tokens?.placeables ?? []).find((q) => q.center && Math.hypot(q.center.x - from[0], q.center.y - from[1]) < (fr ?? G * 0.5) + G * 0.3);
+  // (the NEAREST token there is the shooter: live, a visible token standing next to a hidden turret was taken for it - the first in the
+  // list within reach - and the turret's launch word was drawn at the hidden turret)
+  const G = grid(), d = (q) => Math.hypot(q.center.x - from[0], q.center.y - from[1]);
+  const t = (canvas.tokens?.placeables ?? []).filter((q) => q.center && d(q) < (fr ?? G * 0.5) + G * 0.3).sort((a, b) => d(a) - d(b))[0];
   if ( t ) return !!t.visible && !t.document?.hidden;
   return hereVisible(from[0], from[1]);
 }
@@ -558,9 +712,13 @@ function flush() {
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
   recent = recent.filter((r) => now - r.t < Math.max(C.ECHO_MS, C.OUT_GAP_MS));
+  // (words placed but not started yet - a flush ahead of their moment - count as on screen: `alive` holds a word only once it plays, and
+  // live a Detonate's second word, flushed while the first still waited for its moment, was drawn over it)
+  soon = soon.filter((q) => q.until > now);
+  const thisFlush = soon.map((q) => q.box);
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
-    if ( C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
+    if ( !g.main.det && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
     const specs = C.planCluster(g, { grid: G, sec: caps.sec, seed, big, known });
     for ( const w of specs ) if ( w.role === "main" ) w.obj = g.main.obj;
     // the engine writes each word (its vocabulary: the kind, how loud, how long; seeded, the same on every client); the words of one
@@ -568,7 +726,13 @@ function flush() {
     const taken = [];
     for ( const w of specs ) { write(w, taken); measure(w); }
     const room = caps.alive - alive.size;
-    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...alive].map((a) => a.box) }), room);
+    // (the words of this flush's earlier clusters count as on screen: they start a beat later, so `alive` does not hold them yet - live,
+    // a Detonate's second word was drawn over its first)
+    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...[...alive].map((a) => a.box), ...thisFlush] }), room);
+    for ( const w of placed ) if ( w.box ) {
+      const b = w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
+      thisFlush.push(b); soon.push({ box: b, until: (w.t ?? now) + 60 });
+    }
     stats.dropped += specs.length - placed.length;
     for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
@@ -596,6 +760,8 @@ function optsOf(w) {
   const st = w.stage ?? {};
   const o = { ...(w.word?.play ?? {}), space: "world", at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed, rotation: w.rotation, reduced: red,
     ceilK: C.CEIL_K[w.role] ?? C.CEIL_K.sec,
+    // (a story's word sized by its rank: the rank is the hierarchy, the engine's ceiling share does not cut it again)
+    ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, innerHeight / (canvas.stage?.scale?.x || 1), w.shrink ?? 1), ceilK: 1 } : {}),
     ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
   // what was hit makes the sound: its material (the engine's look follows it: rock and timber in stone colours, metal in steel); the
@@ -640,7 +806,10 @@ function play(w) {
     stats.words++;
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
-    const rec = { box: w.box, h, obj: w.obj, voice: w.voice };
+    // (EFFECTS2: a cave-in's word sinks as it holds - live, the debris word after it was placed just under its box and drawn inside its
+    // letters - so what it covers here reaches half its height lower; REQUESTS EFFECTS2-4)
+    const bx = w.box && w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
+    const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
   };
@@ -671,6 +840,7 @@ function teardown(full = true) {
   for ( const s of sched.values() ) clearTimeout(s.id);
   sched.clear(); gated.clear(); if ( full ) shownAt.clear(); alive.clear(); seenEntry.clear(); fireSeen = new Map(); recent = []; shooters = [];
   pages.clear(); owned = { d: new Set(), f: new Set(), catch: new Set(), out: new Map() }; firingsSeen = null;
+  detonating = null; ploughs.clear(); soon = []; flashSeen.clear(); clearTimeout(stormTimer); stormTimer = 0;
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
   burns.clear();
@@ -679,6 +849,7 @@ function teardown(full = true) {
 function refresh() {
   sfxBus.entry = mode() === "off" ? null : onEntry;
   sfxBus.fireShown = mode() === "off" ? null : onFireShown;
+  sfxBus.detonate = mode() === "off" ? null : onDetonate;
   if ( mode() === "off" ) {
     for ( const s of sched.values() ) clearTimeout(s.id);
     sched.clear(); gated.clear(); pending = [];
@@ -689,6 +860,7 @@ function refresh() {
     // the engine (and its fonts) loaded once the scene is up, off the load path: the first crash of a session is lettered on time
     if ( !L ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) engine(); }, 2500); }
     else scheduleBurn(0);
+    if ( !stormTimer ) pollStorm();
   }
 }
 

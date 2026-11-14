@@ -257,7 +257,8 @@ export function checkLook(ok, bank) {
   {
     const rec = () => { const fills = [], st = []; fills.strokes = []; const t = { globalAlpha: 1 }; const ctx = new Proxy(t, { get: (o, k) => (k in o ? o[k] : (k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} }) : (k === "getImageData" ? () => ({ data: new Uint8ClampedArray(4) }) : k === "fill" ? () => fills.push({ style: o.fillStyle, a: o.globalAlpha }) : k === "stroke" ? () => fills.strokes.push({ style: o.strokeStyle, a: o.globalAlpha }) : k === "save" ? () => st.push([o.globalAlpha, o.fillStyle]) : k === "restore" ? () => { const v = st.pop(); if ( v ) [o.globalAlpha, o.fillStyle] = v; } : () => {}))), set: (o, k, v) => ((o[k] = v), true) }); return { fills, make: (w, h) => ({ width: w, height: h, getContext: () => ctx }) }; };
     const smearOf = (look) => { for ( let s = 0; s < 40; s++ ) { const p = plan("BRZDĘK-DZYYŃ!!", { mood: "crack", seed: `sm${s}`, in: "slam", magnitude: 1, look }); const q = p.timeline.ent.find((x) => x.smear); if ( q ) return { p, q }; } return null; };
-    const inv = smearOf({ style: "invincible" }), com = smearOf({ style: "comic" });
+    /* MOTION2: the invincible smear multiple is a drawing of the stepped mode (the smooth mode moves the one picture instead) */
+    const inv = smearOf({ style: "invincible", motion: "stepped" }), com = smearOf({ style: "comic" });
     ok(!!inv && !!com, "smear: a slam smear frame exists in both styles");
     if ( inv ) {
       const r = rec(); const pic = paintPicture(inv.p, bank, inv.q, 80, r.make);
