@@ -249,6 +249,27 @@ setting of your module, or the GM's language sent with the event). English is fi
 - 1.7.0 has the guns' own kinds (`pistol`, `rifle`, `gunfire`, `minigun`, `shotgun`, ...) and `grenade` / `rocket`; there is no
   `gunshot`. Pick from the event (the map picks the gun by the rate of its rounds).
 
+**An event told as a page (EFFECTS1, the map's presets, 2026-11-14).** One event (a bomb, a meteor, a rocket) is planned ONCE, by a
+pure function from data every client shares, as a page of roles: `pre` (the fall, the flight, the charge), `main` (one word, once:
+"one explosion = one word"), `wave`, `fall` (debris landing), `catch` (the fire taking), `out` (the hisses of dying fires). Lessons
+from the films:
+- The page OWNS its parts: the destruction entries, the burst and dust strokes and the fires it lit must not ALSO be lettered by
+  the general per-stroke path, or the bomb says BOOM twice and every fire hisses on its own.
+- Write each word before this screen picks its spot, in page order, and never repeat a word of the same page (try the next seed):
+  without it four meteor pages in five repeated a debris word. Then every client writes the same words even when one screen drops
+  some of them.
+- A spot chosen from the data (the farthest debris landing) is often off screen at a close zoom: give the planner several
+  candidate spots and let each client take the first one in its view, else the debris words are silently dropped.
+- A word riding a path (a bomb's whistle, a rocket's flight) must be gone before the main word's flash frame: stop it about a fifth of
+  a second before (`h.stop()` at a timer).
+- A wave word on a fixed angle rode under the interface panels and through the main word: choose its direction per screen (away
+  from the main word as placed there, off the panels, inside the view, screen-up preferred).
+- A fire's lasting word with the sustain's `echo` treatment sat stacked on itself (FOOOFF three times): pass `treatments` without
+  `echo` until the engine places echoes clear (REQUESTS EFFECTS1-6).
+- An unlocated sound (a gun with no shooter on the map, a shooter or a page word this player cannot see) goes to a free spot on
+  the screen (`space: "screen"`, layer `hud`), never at the hidden place.
+- A gun's report: start its syllables outside the shooter's token circle plus about a third of a square, screen-up of the barrel.
+
 **Changing one trait of a vocabulary word.** `L.sfx(kind, { character: { material: "wood" } })` replaces the word's whole
 `character`, and the gaps are then filled from the mood's defaults, not the kind's [C]. To change one trait, take the word and merge:
 `const w = L.word("crash", o); L.play(w.text, { ...w.play, character: { ...w.play.character, material: "wood" }, ...placement })`.
@@ -706,6 +727,11 @@ Status: stable list; edit as items close.
   set, against the no-diacritics ruling; WORD2 inverts that check.
 - `L.net` sends only its known option keys: MOVE's `path`, `orbit`, `orient` and choreography options, and `L.sustain`, do not travel
   over the network [R: from a merge-plan read of `net.mjs` `OP_KEYS`, not run].
+- Frame time (EFFECTS1, lane 5, 60 Hz headless, 2026-11-14): a meteor plus a bomb with their fires gave one or two ~50 ms frames
+  with lettering on at the meteor's main word, none with lettering off (mean 16.8 vs 16.7 ms). A big word's first draw on the
+  impact frame is the likely cost; no `L.prepare` for words yet (REQUESTS EFFECTS1-8).
+- No falling-pitch kind (a whistle), no size growth along a path ride, no Polish cave-in (BDUUM), no thunder restrike grammar
+  (REQUESTS EFFECTS1-1..5).
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -754,5 +780,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   tails, chains, `L.chain`), kind count 94 in 13 groups, API index row.
 - 2026-11-14: LOOK2 (1.8.0, `tactics-zones-look2`): section 13 rewritten for the rebuilt `invincible` style and the frozen
   `expressive`; rulings on outline, expressive, OO and pair spacing marked done (section 14); stage table, section 19, API index.
+- 2026-11-14: EFFECTS1 (map effects as a page per event, `tactics-zones-effects1`): section 5 "An event told as a page" (owned
+  parts, unrepeated words, candidate spots, path words stopped before the flash, wave direction per screen, no sustain echo,
+  unlocated sounds, muzzle clearance); section 18 frame time and the missing kinds.
 - 2026-11-14 (FXLM2): section 5 - phases vs a caller's echo filter, `keepInView: false` for off-screen sustains, the 1.7.0 gun /
   grenade / rocket kinds (no `gunshot`).

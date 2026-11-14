@@ -136,6 +136,38 @@ group("WIRE", () => {
   const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
   ok(/firingPage\(/.test(s), "sfx.mjs plans firing pages");
   ok(/owned/.test(s), "sfx.mjs keeps owned strokes silent");
+  // a fire's lasting word never overlaps its own echo (leftover): no "echo" treatment on the burn sustain
+  const bt = /const BURN_TREATMENTS = \[([^\]]*)\]/.exec(s);
+  ok(bt && !/echo/.test(bt[1]) && /treatments: BURN_TREATMENTS/.test(s), "burn sustain: no echo treatment");
+  // a PRE ride leaves before the main word; the wave rides the free way, upright
+  ok(/spec\.stopAt = toPerf\(mw\.t\) - PG\.PRE_GAP/.test(s), "pre ride stops before the main word");
+  ok(/PG\.waveRide\(/.test(s), "the wave rides the free way");
+});
+// UNREPEATED: a page never says the same word twice (leftover: two debris words of one bomb, and the meteor's first two ejecta,
+// showed the same text); written in the page's order on every client
+group("UNREPEATED", () => {
+  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+  ok(/PG\.unrepeated\(/.test(s) && s.indexOf("PG.unrepeated(") < s.indexOf("PG.pickSpot("), "sfx.mjs writes each page word unrepeated, before its spot is picked");
+  for ( const id of ["meteor", "bomb"] ) {
+    const { pg } = page(id, {}, GEST.point);
+    let bad = 0, ex = "";
+    for ( let i = 0; i < 12; i++ ) {      // (12 scenes: without the reword about four pages in five repeat a debris word)
+      const used = new Set(), texts = [];
+      for ( const w of pg.words ) { const wd = P.unrepeated((sd) => V.word(w.kind, { ...w.wo, material: P.materialFor(w.wo, "earth") ?? undefined, seed: sd, lang: "en" }), `S${i}|${w.seed}`, used); used.add(wd.text); texts.push(wd.text); }
+      if ( new Set(texts).size !== texts.length ) { bad++; ex = texts.join(" "); }
+    }
+    ok(bad === 0, `${id}: no page word repeats (${bad} pages repeat) ${ex}`);
+  }
+});
+// WAVE: the wave's ride avoids the main word and the panels and stays in view
+group("WAVERIDE", () => {
+  const at = { x: 500, y: 500 }, v = { x0: 0, y0: 0, x1: 1000, y1: 1000 };
+  const main = { x0: 300, y0: 250, x1: 700, y1: 420 }, ui = [{ x0: 0, y0: 700, x1: 1000, y1: 1000 }];
+  const wr = P.waveRide(at, 60, 380, 900, { avoid: [main], ui, v, wb: { w: 200, h: 80 } });
+  const end = wr.ride[wr.ride.length - 1];
+  const inBox = (b, p) => p.x > b.x0 && p.x < b.x1 && p.y > b.y0 && p.y < b.y1;
+  ok(!inBox(main, end) && !inBox(ui[0], end) && inBox(v, end), "wave ends clear of main word and panel: " + Math.round(end.x) + "," + Math.round(end.y));
+  ok(wr.ride.every((q, i) => i === 0 || q.ms > wr.ride[i - 1].ms), "the ride runs forward in time");
 });
 
 // MUZZLE: the report's syllables start clear of the shooter's token (FXLM2 leftover: they touched its top)
@@ -164,6 +196,21 @@ group("UNLOCATED", () => {
   ok(/!reported && hits\.length/.test(s), "no shooter: the report is shown on screen");
   ok(/!shooterSeen\(it\.from, it\.fr\)/.test(s), "hidden shooter: on screen, not at its place");
   ok(/if \( !hereVisible\(w\.x, w\.y\) \) \{ playScreen\(spec\)/.test(s), "page words under a player's fog: on screen");
+});
+// INVIEW: a debris word or the catch letters a landing / a fire this client can see (live at a close zoom every chosen landing was off
+// the screen and the debris words were all dropped)
+group("INVIEW", () => {
+  const { pg, rec } = page("bomb");
+  const f = roles(pg, "fall")[0], c = roles(pg, "catch")[0];
+  ok(f.cands?.length >= 6 && c.cands?.length >= 6, "falls and the catch carry every landing / fire");
+  const v = { x0: rec.at[0] - 60, y0: rec.at[1] - 60, x1: rec.at[0] + 60, y1: rec.at[1] + 60 };
+  const near = f.cands.filter((q) => q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
+  const s = P.pickSpot(f, v, new Set(), rec.t0);
+  ok(near.length ? s && s.x >= v.x0 && s.x <= v.x1 : s === null, "a landing in view (or none)");
+  const big = { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 }, used = new Set();
+  const a = P.pickSpot(f, big, used, rec.t0); used.add(`${Math.round(a.x)},${Math.round(a.y)}`);
+  const b = P.pickSpot(roles(pg, "fall")[1], big, used, rec.t0);
+  ok(a.x === f.x && (b.x !== a.x || b.y !== a.y), "own spot first, never one spot twice");
 });
 if ( process.env.DBG ) { const { pg } = page(process.env.DBG); for ( const w of pg.words ) console.log(w.role, w.key, w.kind, JSON.stringify(w.wo), Math.round(w.t - pg.words.find((q) => q.role === "main").t), w.rank, P.pageMag(w), word(w).text, word(w, "pl").text); }
 if ( failed.length ) { console.log(failed.join("\n")); console.log(`sfx-page: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }

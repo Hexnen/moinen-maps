@@ -31,8 +31,11 @@ import { fallAt as landingFallAt } from "../presets/landing-fx.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
-const UI_MS = 400;
-const DRIFT = [0.15, 0.9];      // steam's way up off what was put out (grid squares: sideways, up)             // the interface rectangles are measured at most this often
+const UI_MS = 400;             // the interface rectangles are measured at most this often
+const DRIFT = [0.15, 0.9];     // steam's way up off what was put out (grid squares: sideways, up)
+// a live fire's lasting word: the engine's sustain treatments WITHOUT "echo" (EFFECTS1, live: the echo copies sat stacked on
+// the word itself, FOOOFF three times over one fire)
+const BURN_TREATMENTS = ["breath", "stretch", "split", "shed", "accent"];
 
 let L = null, loading = null, gen = 0;      // gen: the scene's generation (a scene change makes every waiting callback stale)
 let known = null;              // the engine's sound kinds
@@ -278,11 +281,28 @@ function pageWord(p, w, t, waited = 0) {
   }
   const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
   if ( w.role !== "main" && alive.size >= caps.alive ) { stats.dropped++; return; }
+  // a landing or a fire this client can see (its own, else the nearest in time in view): the debris and the catch are lettered where
+  // this screen shows them
   const G = grid(), lg = lang(), sd = `${canvas.scene?.id ?? ""}|${w.seed}`;
   const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
   if ( wo.material == null ) delete wo.material;
-  let word;
-  try { word = L.word(w.kind, { ...wo, seed: sd, lang: lg }); } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
+  // the word is written BEFORE this screen picks its spot (so every client writes the same words in the same order, whatever it
+  // drops), and never repeats a word of its own page: one bomb's debris words were seen saying the same thing twice (EFFECTS1)
+  p.texts ??= new Set(); p.wt ??= new Map();
+  let word = p.wt.get(w.key);
+  if ( !word ) {
+    try {
+      word = PG.unrepeated((s) => L.word(w.kind, { ...wo, seed: s, lang: lg }), sd, p.texts);
+    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
+    p.texts.add(word.text); p.wt.set(w.key, word);
+  }
+  if ( w.cands ) {
+    p.used ??= new Set();
+    const s = PG.pickSpot(w, view(), p.used, Number(p.rec.t0));
+    if ( !s ) { stats.dropped++; return; }
+    p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+    w = { ...w, x: s.x, y: s.y, ...(s.gate ? { gate: s.gate } : {}) };
+  }
   if ( !word?.text ) return;
   const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
   const r = w.r ?? G * 0.4;
@@ -291,10 +311,28 @@ function pageWord(p, w, t, waited = 0) {
     cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
   measure(spec);
+  // a travelling PRE word leaves (its exit, about a fifth of a second) so it is gone PRE_GAP before the main word's frame
+  if ( w.role === "pre" && w.ride ) { const mw = p.pg.words.find((q) => q.role === "main"); if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220; }
+  // the wave rides out the free way on this screen: away from the main word as placed here, off the panels, inside the view
+  if ( w.wave ) {
+    const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)],
+      ui: uiBoxes(), v, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
+    spec.path = wr.ride; spec.x = wr.ride[0].x; spec.y = wr.ride[0].y;
+    // (a pressure front: the word travels upright - leaning along a downward way it read as a fallen column - and is gone soon after
+    // the front breaks up, live it stood at the reach for two seconds and took the debris words' places)
+    spec.orient = "none"; spec.stopAt = t + w.wave.rim + 180;
+  }
   // (owner's answer 4: a sound whose source this player cannot see - under the fog, out of vision - is shown generally on the
   // screen, never at the hidden place)
   if ( !hereVisible(w.x, w.y) ) { playScreen(spec); return; }
   const placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  if ( !placed.length ) {
+    stats.dropped++;
+    // (why: the penalties of its least bad place, for checks)
+    const why = C.place([{ ...spec, role: "main" }], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) })[0]?.pen;
+    lastPlaced.push({ text: spec.text, role: spec.role, key: w.key, dropped: true, why: why && { ui: +why.pui.toFixed(2), tok: +why.tok.toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } });
+  }
+  if ( w.role === "main" && placed[0] ) p.mainBox = placed[0].box;
   for ( const q of placed ) { play(q); lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box }); }
   if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
 }
@@ -458,6 +496,9 @@ function startBurn(p, live) {
           return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
         level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size: burnSize(p, live),
         ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts(),
+        // (EFFECTS1, FXLM2 leftover: the engine's "echo" treatment trails two copies of a phrase beside it - over a fire they sat on
+        // the phrase itself and on the next one; a burning fire's phrases breathe, stretch, split, shed and flare, without the echo)
+        ...(live ? { treatments: BURN_TREATMENTS } : {}),
         // (engine 1.7.0 pulls world words into the view by default: a fire burning off this screen must not letter at its edge; the
         // spots on screen are kept in view and off the panels by burnOffsets)
         keepInView: false });
@@ -565,7 +606,7 @@ function optsOf(w) {
   // steam drifts up off what was put out
   if ( w.drift && !red ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
   // a thing that travels: its word rides along with it
-  if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
+  if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
   return o;
 }
 /** The word's box (scene px) as the engine will draw its hold picture now (its size model + its layout): placement keeps it free. */
@@ -597,6 +638,8 @@ function play(w) {
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;
+    // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
+    if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
     const rec = { box: w.box, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));

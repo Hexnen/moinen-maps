@@ -34,6 +34,18 @@ export const OUT_MAX = 4;
 export const OUT_GAP = 2600;
 /** debris words of one page are at least this far apart (ms): the story steps down, never two landings in one beat */
 export const FALL_GAP = 300;
+/** how many seeds a page word tries before it gives up avoiding a word its page already said */
+export const REWORD = 8;
+/**
+ * A word its page has not said yet: `write(seed)` -> { text } (the engine's L.word with the word's options), tried on `seed`, then
+ * `seed|1`, `seed|2` ... until its text is not in `used` (the texts already written for this page). Pure; the same on every client
+ * as long as the page's words are written in the same order. -> the word (the last try when every try repeats).
+ */
+export function unrepeated(write, seed, used, n = REWORD) {
+  let word = null;
+  for ( let k = 0; k < n; k++ ) { word = write(k ? `${seed}|${k}` : seed); if ( !used.has(word?.text) ) break; }
+  return word;
+}
 
 /** The material word of the destruction layer's ground (sfx-core MATS) -> the engine's material (words.mjs MATERIALS). */
 export const GROUND_MAT = { grass: "earth", earth: "earth", sand: "earth", snow: "earth", stone: "stone", wood: "wood", metal: "metal", water: "water", auto: "earth" };
@@ -164,8 +176,8 @@ export function firingPage(rec, ctx = {}) {
     const reach = shock ? shock.r ?? 2 * sq : (Number(ring?.reach) || 2.6) * sq, rim = shock ? 2.2 * SHOCK_TAU[waveLv] * 1000 : 560;
     const r0 = Math.max(grid * 0.5, main.r * 0.85), a = Math.PI * (side < 0 ? -0.18 : -0.82);   // (opposite the MAIN word, a little up)
     const ux = Math.cos(a), uy = Math.sin(a), t = (Number(shock?.q) || T0) + 60;
-    W({ key: "wave", role: "wave", kind: "shockwave", wo: { loud: 0.45 + 0.12 * waveLv + (meteor ? 0.15 : 0), long: clamp(rim / 900, 0.35, 1) }, t, x: at.x + ux * r0, y: at.y + uy * r0,
-      r: reach * 0.3, rank: meteor ? 3 : main.rank >= 4 ? 3 : 2, ms: Math.round(rim),
+    W({ key: "wave", role: "wave", kind: "shockwave", wo: { loud: 0.45 + 0.12 * waveLv + (meteor ? 0.15 : 0), long: clamp(rim / 1600, 0.3, meteor ? 0.65 : 0.5) }, t, x: at.x + ux * r0, y: at.y + uy * r0,
+      r: reach * 0.3, rank: meteor ? 3 : 2, ms: Math.round(rim), wave: { at: { x: at.x, y: at.y }, r0, reach, rim },
       ride: [{ x: at.x + ux * r0, y: at.y + uy * r0, ms: 0 }, { x: at.x + ux * reach * 0.75, y: at.y + uy * reach * 0.75, ms: Math.round(rim * 0.6) }, { x: at.x + ux * reach, y: at.y + uy * reach, ms: Math.round(rim) }],
       stage: { in: "grow", out: "dissolve" } });
   }
@@ -173,6 +185,11 @@ export function firingPage(rec, ctx = {}) {
   /* ---- FALL: debris coming down after the blast, big pieces first, then smaller (the story resolves): the farthest landings */
   const PIECES = ["large", "medium", "small"];
   const falls = [];
+  // (every landing of the firing: a client whose view does not hold the chosen spot letters the landing nearest in time that it
+  // can see - live at a close zoom the farthest chunks all landed off the screen and the debris words were dropped: pickSpot)
+  const landCands = [];
+  if ( meteor && Array.isArray(meteor.rocks) ) for ( const r of meteor.rocks ) if ( Number.isFinite(r[2]) ) landCands.push({ x: r[0], y: r[1], ms: r[2] });
+  if ( burst?.db ) for ( let i = 0; i + 2 < burst.db.length; i += 3 ) if ( Number.isFinite(burst.db[i + 2]) ) landCands.push({ x: (burst.p?.[0] ?? at.x) + burst.db[i], y: (burst.p?.[1] ?? at.y) + burst.db[i + 1], ms: burst.db[i + 2] });
   if ( meteor && Array.isArray(meteor.rocks) && meteor.rocks.length ) {
     // the meteor's ejecta: rocks land one by one; five lettered (first, last, three between), from big to small
     const R = meteor.rocks.map((r) => ({ x: r[0], y: r[1], ms: r[2] })).filter((r) => Number.isFinite(r.ms)).sort((a, b) => a.ms - b.ms);
@@ -197,7 +214,7 @@ export function firingPage(rec, ctx = {}) {
   let tPrev = -Infinity;
   falls.forEach((q, i) => W({ key: `fall${i}`, role: "fall", kind: q.kind, wo: { pieces: q.pieces, material: "@ground", loud: clamp(0.5 - 0.08 * i, 0.2, 0.5) },
     t: (tPrev = main.t + Math.max(380 + 160 * i, q.ms, tPrev - main.t + FALL_GAP)), x: q.x, y: q.y, r: grid * (q.pieces === "large" ? 0.5 : q.pieces === "medium" ? 0.38 : 0.28),
-    rank: q.pieces === "small" ? 1 : 2, shrink: Math.pow(0.88, i), ms: 700, stage: { in: "pop", out: "fall" } }));
+    rank: q.pieces === "small" ? 1 : 2, shrink: 0.85 * Math.pow(0.88, i), ms: 700, stage: { in: "pop", out: "fall" }, cands: landCands }));
   if ( land ) {
     // the landing's cracks: ONE word for all the rays, riding out along one of them (the R run = the ray's time)
     const a = Math.PI * (side < 0 ? 0.25 : 0.75), ux = Math.cos(a), uy = Math.sin(a), r0 = main.r * 0.8, r1 = main.r * 2.6;
@@ -217,7 +234,8 @@ export function firingPage(rec, ctx = {}) {
   if ( first ) {
     const lv = first.lv ?? 1, p = first.p ?? [at.x, at.y];
     W({ key: "catch", role: "catch", kind: "fire", wo: { stage: "ignite", loud: clamp(0.25 + 0.15 * lv, 0.3, 0.6) }, t: Number(first.q), gate: first.id, x: p[0], y: p[1],
-      r: first.r ?? grid * 0.3, rank: lv >= 2 ? 2 : 1, ms: 900, stage: { in: "rise" } });
+      r: first.r ?? grid * 0.3, rank: lv >= 2 ? 2 : 1, ms: 900, stage: { in: "rise" },
+      cands: burning.map((s) => ({ x: s.p?.[0] ?? at.x, y: s.p?.[1] ?? at.y, ms: Number(s.q) - T0, gate: s.id })).sort((a, b) => a.ms - b.ms) });
   }
   arrangeOuts(burning, { seed, grid }).forEach((h, i) => { out.owned.out.set(h.id, h.o); W({ ...h, key: `out${i}` }); });
   // every fire of the firing whose out the page knows: its own hiss is replaced (the arrangement speaks for all of them)
@@ -253,6 +271,43 @@ export function arrangeOuts(fires, { seed = "", grid = 100 } = {}) {
   });
 }
 function centre(p) { let x = 0, y = 0, n = 0; for ( let i = 0; i + 1 < p.length; i += 2 ) { x += p[i]; y += p[i + 1]; n++; } return n ? { x: x / n, y: y / n } : { x: 0, y: 0 }; }
+
+/**
+ * The way a WAVE word rides out on THIS client's screen (EFFECTS1, live: a fixed angle sent it under the combat panel and through the
+ * main word): from the fireball's rim (`r0`) to the wave's reach (`reach`, scene px) along the free direction - away from the boxes
+ * `avoid` (the main word as placed here, other words up), off the interface panels `ui`, inside the view `v`; screen-up preferred (a
+ * pressure wave read rising off the blast). `wb` = { w, h } the word's box (scene px). -> { a, ride: [{x, y, ms}] }
+ */
+export function waveRide(at, r0, reach, rim, { avoid = [], ui = [], v = null, wb = { w: 300, h: 100 } } = {}) {
+  const box = (x, y) => ({ x0: x - wb.w / 2, y0: y - wb.h / 2, x1: x + wb.w / 2, y1: y + wb.h / 2 });
+  const ov = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+  const A = wb.w * wb.h || 1;
+  let best = null;
+  for ( let k = 0; k < 16; k++ ) {
+    const a = (k / 16) * Math.PI * 2, ux = Math.cos(a), uy = Math.sin(a);
+    let pen = uy > 0.2 ? 0.25 : 0;                                       // (screen-up preferred)
+    for ( const f of [0.35, 0.7, 1] ) {
+      const d = r0 + (reach - r0) * f, b = box(at.x + ux * d, at.y + uy * d);
+      pen += (avoid.reduce((s, q) => s + ov(b, q), 0) * 3 + ui.reduce((s, q) => s + ov(b, q), 0) * 4) / A;
+      if ( v ) pen += (1 - ov(b, v) / A) * 2;
+    }
+    if ( !best || pen < best.pen - 1e-9 ) best = { a, ux, uy, pen };
+  }
+  const p = (f, ms) => ({ x: at.x + best.ux * (r0 + (reach - r0) * f), y: at.y + best.uy * (r0 + (reach - r0) * f), ms });
+  return { a: best.a, pen: best.pen, ride: [p(0, 0), p(0.75, Math.round(rim * 0.6)), p(1, Math.round(rim))] };
+}
+
+/**
+ * The spot a FALL / CATCH word letters on THIS client (pure): its own when it is in the view `v`, else the candidate (a landing, a
+ * fire) in view nearest to its moment and not used yet by the page (`used`: a Set of "x,y"); null when none is in view. -> { x, y, ms,
+ * gate? } */
+export function pickSpot(w, v, used = new Set(), T0 = 0) {
+  const inV = (q) => !v || (q.x >= v.x0 && q.x <= v.x1 && q.y >= v.y0 && q.y <= v.y1);
+  const k = (q) => `${Math.round(q.x)},${Math.round(q.y)}`;
+  if ( inV(w) && !used.has(k(w)) ) return { x: w.x, y: w.y, ms: w.t - T0, gate: w.gate };
+  const c = (w.cands ?? []).filter((q) => inV(q) && !used.has(k(q))).sort((a, b) => Math.abs(a.ms - (w.t - T0)) - Math.abs(b.ms - (w.t - T0)))[0];
+  return c ?? null;
+}
 
 /** The engine magnitude of a page word: its rank at the firing's size, a FALL / OUT a notch smaller each (shrink). */
 export const pageMag = (w, size = 1) => Math.round(clamp(RANK_MAG[clamp(w.rank | 0, 1, 5)] * Math.sqrt(clamp(size, 0.5, 2)) * (w.shrink ?? 1), 0.1, 2) * 100) / 100;
