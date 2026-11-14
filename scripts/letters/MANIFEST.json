@@ -2,7 +2,7 @@
  "note": "LETR engine: identical in moinen-maps (canonical) and invincible-plus-ultra (vendored). Edit the canonical copy, then run sync.mjs.",
  "files": {
   "ATTRIBUTION.md": "24079fe027e38fa8",
-  "README.md": "42cff3621500e2ab",
+  "README.md": "d13af2c29a6b1376",
   "author.mjs": "593b5c010e26c704",
   "check-life.mjs": "25b5aa5a8f42e685",
   "check-look.mjs": "02684dc74b57d782",
@@ -10,11 +10,11 @@
   "check-motion2.mjs": "8cde3f0f644b5ca0",
   "check-move.mjs": "280af0b1629e34d8",
   "check-tools.mjs": "42b4df353fcf374c",
-  "check-words.mjs": "298e4f18a7d3c84e",
+  "check-words.mjs": "79849d21037cff0d",
   "check.mjs": "a2ea9ebbf9772c52",
   "choreo.mjs": "8df27d98a5c1c0ef",
   "design.mjs": "9640d8c9dc1cf469",
-  "engine.mjs": "3767443228f2d573",
+  "engine.mjs": "7ac7c84302ee8931",
   "font.mjs": "4875afb1574b540a",
   "fontbank.mjs": "74d1244e9e695925",
   "fonts/anton/Anton-Regular.ttf": "a4ba3a92350ebb03",
@@ -59,7 +59,7 @@
   "shape.mjs": "1d73fdff8d6d8676",
   "shards.mjs": "6eb13472ea1f4980",
   "size.mjs": "5ea9ba0712160e43",
-  "stamp.mjs": "1227fe9e8ca3ef2b",
+  "stamp.mjs": "ace20d87b4b00a71",
   "strings.mjs": "5a15ce0818443a1d",
   "sustain.mjs": "9b4586d62c2ae9a1",
   "sync.mjs": "0aaf5650bacd97ee",
@@ -67,7 +67,7 @@
   "tools.css": "6b3e4e8a0fd7a4d5",
   "tools.mjs": "d72e40b7ef1f0c16",
   "ui.mjs": "3258070f81fe1648",
-  "words-reviewed.mjs": "6f1cf828351acd93",
-  "words.mjs": "a30a3ed819097280"
+  "words-reviewed.mjs": "265729a2bad91abf",
+  "words.mjs": "bbab39fecfce851c"
  }
 }

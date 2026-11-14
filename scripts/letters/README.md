@@ -364,7 +364,7 @@ against the rules, so nothing slips in unreviewed.
 
 #### Prefixes: the sound's own lead-in (the owner: "Tra ta przed bombą?")
 A prefix is what is heard just before the main sound and belongs to it: the detonator's crack before the boom (KA-BUM,
-KA-THOOM), the surface tearing before a collapse (KRA-KROOSH), the lightning's double crack before the thunder (KRA-KA-BOOM).
+KA-THOOM), the surface tearing before a collapse (KRA-KROOSH), the lightning's double crack before the thunder (KRA-KA-GRRAWOOM; BOOM / BUM only for a blast with fire: `FIRE_BLASTS`, WORDS3).
 It is never another sound's signature (no gun rattle TRA-TA- before a blast). `PREFIXES` in words.mjs lists each prefix with its
 reason and the only kinds it may lead; every bank word with a lead-in and every kind's prefix must be on it, and a prefix is dropped
 when the final text would be a dictionary word. pl and en alike: KA- (punch, smash, clang, boom, crack, crash, thud, mech, blaster,

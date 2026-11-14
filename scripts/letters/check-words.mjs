@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import { createVocab, KINDS, KIND_IDS, BANK, expand, stretchText, formatNumber, formatRange, clean, renderable, langOf, MAX_LEN, MAX_RUN,
   naming, NAMING, DICT, ICONIC, VOICE, ALLOW, SHARED, shareKey, refusal, sayable, DIACRITICS, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND,
-  GROUPS, MATS, materialOf, MAT_CHAR, piecesOf, intensityOf, FIRE_STAGES, VARIANTS, VARY, VARIANT_META, TAILS, CHAINS, ROLES, PLACES } from "./words.mjs";
+  GROUPS, MATS, materialOf, MAT_CHAR, piecesOf, intensityOf, FIRE_STAGES, VARIANTS, VARY, VARIANT_META, TAILS, CHAINS, ROLES, PLACES, FIRE_BLASTS } from "./words.mjs";
 import { REVIEWED } from "./words-reviewed.mjs";
 import { FONTS, FALLBACK, MOOD_IDS, makePlan } from "./design.mjs";
 
@@ -468,6 +468,54 @@ export function checkWords(ok, bank) {
     ok(KIND_IDS.filter((id) => KINDS[id].perc).every((id) => KINDS[id].stretchHold.length === 0) && ["click", "pistol", "rifle", "hammer", "gunfire"].every((id) => KINDS[id].perc), "words: percussive kinds have no lasting letter");
   }
   checkKinds1(ok, bank, missing, eng);
+  checkWords3(ok);
+}
+
+/* 21. WORDS3 (2026-11-14): BOOM / BUM only for a blast WITH fire (the owner; thunder: «zmienić»). Every kind outside FIRE_BLASTS, in
+       both languages: its bank words, stream syllables, variant rows, lead-ins and every word and flow segment the vocabulary makes
+       (all tiers, stretches, "!", prefixes, materials, seeds) contain no BOOM / BUM in any spelling (hyphens and marks dropped, doubled
+       letters collapsed: KA-BOOOM, KRA-KA-BUUUM, BU-UM all count). Thunder still reads as thunder and builds with loudness, and does
+       not borrow the other events' fixed words (landing THOOM / DUUM, cave-in BTHOOM / BDUUM, fireless blast KROOM / KRUUM). */
+function checkWords3(ok) {
+  const V = createVocab(), LANGS = ["pl", "en"];
+  const key = (w) => clean(w).replace(/[^\p{L}]/gu, "").replace(/(\p{L})\1+/gu, "$1");
+  const boomish = (w) => /BOM|BUM/.test(key(w));
+  ok(["BOOM", "KA-BOOOM!", "KRA-KA-BUUUM!!", "BU-UM", "BUM"].every(boomish) && !["BA-DUM", "BU-DUM", "KRAKOOM", "KRABWOOMM", "BDUUM", "BTHOOM", "BRAWOOM"].some(boomish), "words3: the BOOM / BUM test catches every spelling and only those");
+  ok(FIRE_BLASTS.length && FIRE_BLASTS.every((id) => KINDS[id]) && FIRE_BLASTS.includes("boom") && !FIRE_BLASTS.includes("thunder") && !FIRE_BLASTS.includes("concussion"), "words3: the fire blasts are named kinds (boom), thunder and the fireless blast are not");
+  ok(LANGS.every((lang) => Object.values(BANK[lang].boom).flat().some(boomish)), "words3: the fire blast still letters BOOM / BUM");
+  const bad = new Set(); let n = 0;
+  const see = (tag, w) => { n++; if ( w && boomish(w) ) bad.add(`${tag} ${w}`); };
+  for ( const lang of LANGS ) {
+    for ( const [pre, { kinds }] of Object.entries(PREFIXES[lang]) ) if ( kinds.some((id) => !FIRE_BLASTS.includes(id)) ) see(`${lang} prefix`, pre);
+    for ( const [table, rows] of Object.entries(VARIANTS[lang]) ) if ( VARY[table].some((id) => !FIRE_BLASTS.includes(id)) )
+      for ( const [row, b] of Object.entries(rows) ) if ( typeof b !== "string" ) for ( const w of Object.values(b).flat() ) see(`${lang} ${table}.${row}`, w);
+    for ( const id of KIND_IDS ) {
+      if ( FIRE_BLASTS.includes(id) ) continue;
+      for ( const w of Object.values(BANK[lang][id]).flat() ) see(`${lang}/${id} bank`, w);
+      const mats = KINDS[id].vary && KINDS[id].vary !== "fire" ? [undefined, ...MATS] : [undefined];
+      for ( const material of mats ) for ( const loud of [0, 0.3, 0.6, 0.9, 1.2, 2] ) for ( const long of [0, 0.5, 1] ) for ( const prefix of [false, true] ) for ( let seed = 1; seed <= 4; seed++ )
+        see(`${lang}/${id}@${loud}/${long}${material ? "/" + material : ""}`, V.word(id, { lang, loud, long, prefix, seed, material }).text);
+      let f = null; try { f = V.flow(id, { lang, seed: 1, loud: 1 }); } catch {}
+      if ( f ) for ( const x of [f.onset, ...Array.from({ length: 12 }, (_, i) => f.at(i)), f.tail] ) see(`${lang}/${id} flow`, x?.text);
+    }
+  }
+  ok(n > 20000, `words3: only ${n} words looked at`);
+  ok(bad.size === 0, `words3: BOOM / BUM outside a blast with fire: ${bad.size}: ${[...bad].slice(0, 8).join("; ")}`);
+  /* thunder: its own words, built up by loudness */
+  const SIGS = { THOM: "the hero landing", BTHOM: "the cave-in", BDUM: "the cave-in", KROM: "the fireless blast", KRUM: "the fireless blast" };
+  for ( const lang of LANGS ) {
+    const all = [];
+    for ( const loud of [0, 0.3, 0.6, 0.9, 1.2, 2] ) for ( const long of [0, 0.5, 1] ) for ( const prefix of [false, true] ) for ( let seed = 1; seed <= 6; seed++ ) all.push(V.word("thunder", { lang, loud, long, prefix, seed }).text);
+    const own = all.concat(Object.values(BANK[lang].thunder).flat(), Object.values(BANK[lang].storm).flat());
+    const sig = own.filter((w) => Object.keys(SIGS).some((s) => key(w).includes(s)) || (lang === "pl" && /DUM/.test(key(w))));
+    ok(sig.length === 0, `words3: ${lang} thunder / storm borrow no other event's fixed word: ${sig.slice(0, 4).join(" ")}`);
+    const at = (loud) => V.word("thunder", { lang, loud, seed: 3 });
+    const q = at(0.1), m = at(0.5), l = at(1), top = V.word("thunder", { lang, loud: 2, prefix: true, seed: 3 });
+    ok(q.tier === "s" && m.tier === "m" && l.tier === "l" && q.bangs <= m.bangs && m.bangs <= l.bangs && key(q.text).length < key(m.text).length && key(m.text).length < key(l.text).length,
+      `words3: ${lang} thunder builds with loudness (${q.text} -> ${m.text} -> ${l.text})`);
+    ok(/^KRA-KA-/.test(top.text) && /R/.test(key(q.text)) && /M/.test(key(q.text)) && Object.values(BANK[lang].thunder).flat().every((w) => /KR|GR|BR/.test(w) && /M+$/.test(w)),
+      `words3: ${lang} thunder reads as thunder: the lightning's crack (KR / KRA-KA-) and a low rolling R...M (${top.text})`);
+  }
 }
 
 /* 20. KINDS1 (2026-11-13, SPEC-KINDS items 1-6 + whizz, casings, dry fire, grenade): material as a call-time option, impact and debris
