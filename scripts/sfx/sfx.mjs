@@ -505,7 +505,9 @@ function screenSpot(bw, bh, key = "") {
     over the map (under the bars), not riding, not pointing at anything. */
 function playScreen(spec, fixed = null) {
   const zoom = canvas.stage?.scale?.x || 1;
-  const at = fixed ? { x: fixed.fx * innerWidth, y: fixed.fy * innerHeight } : screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
+  // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
+  const fw = (spec.bw ?? 200) * zoom * 0.5 + 16, fh = (spec.bh ?? 80) * zoom * 0.75 + 16;
+  const at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
   const o = optsOf(spec);
   delete o.path; delete o.from; delete o.area;
   Object.assign(o, { space: "screen", layer: "hud", at });
