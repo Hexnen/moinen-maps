@@ -688,6 +688,9 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     tuck). In small pictures a mark stands at least `MARK.px` (1.5 px) clear where it shares rows with its letter (the mark slides
     out, the letters stay; 1.9.7 at 26 px: fused, down to -1 px). Kept as they were: the tucked lead-in's hyphen under the first
     body letter (P7, the owner's prefix) and mark-to-mark pairs ("!!", "?!"). The legacy styles do not run it (frozen).
+    Anton's frozen fingerprint changes on purpose (the owner wanted the defect gone in both faces): 624 of 1026 `invincible` +
+    `face: "anton"` fingerprints differ, every one a word with a mark (none of the words without one); `comic` / `expressive`: 0 of
+    2052 differ. 1.9.7 fails `check-marks.mjs` (22 of 26 checks).
   - **Smear**: outline echoes only, no pale filled copies (P15).
   - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
