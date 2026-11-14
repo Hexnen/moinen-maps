@@ -164,7 +164,7 @@ group("RIDEVIEW", () => {
   ok(r[0].y >= 45 && r[0].x === 500 && r[0].ms === 0, "a ride from above the screen starts at its top edge, whole");
   ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
   ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
-  ok(/PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "pre rides are kept in view where they play");
+  ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "every story ride (pre, the plough's grind) is kept in view where it plays");
   ok(/w\.voice === "cavein" \? \{ \.\.\.w\.box, y1: w\.box\.y1 \+ \(w\.box\.y1 - w\.box\.y0\) \* 0\.5 \}/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");
 });
 

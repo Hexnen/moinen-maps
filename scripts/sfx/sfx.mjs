@@ -423,11 +423,13 @@ function pageWord(p, w, t, waited = 0) {
     cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
   measure(spec);
+  // (a ride from beyond the screen's edge comes in AT the edge, whole; one going past it - the plough's grind - stops at it)
+  if ( w.ride && spec.path ) {
+    spec.path = PG.rideInView(spec.path, view(), spec.bw ?? 0, spec.bh ?? 0);
+    if ( spec.path[0] ) { spec.x = spec.path[0].x; spec.y = spec.path[0].y; }
+  }
   // a travelling PRE word leaves (its exit, about a fifth of a second) so it is gone PRE_GAP before the main word's frame
   if ( w.role === "pre" && w.ride ) {
-    // (a ride from beyond the screen's edge comes in AT the edge, whole)
-    spec.path = PG.rideInView(spec.path, view(), spec.bw ?? 0, spec.bh ?? 0);
-    if ( spec.path?.[0] ) { spec.x = spec.path[0].x; spec.y = spec.path[0].y; }
     const mw = p.pg.words.find((q) => q.role === "main");
     if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220;
     // (a ride that hands over to the next one - the meteor's far whine to its roar - leaves when its own way ends)
